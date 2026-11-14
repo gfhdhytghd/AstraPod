@@ -9,7 +9,7 @@
 static int remote_button;
 static unsigned long pressed_at;
 static unsigned long menu_until;
-static bool bridge_seen;
+static bool bridge_seen, bridge_full;
 static unsigned long bridge_at;
 static void (*volume_handler)(int, bool, unsigned long);
 
@@ -26,18 +26,22 @@ bool button_usb_remote_bridge_fresh(unsigned long now)
     return bridge_seen && now - bridge_at < USB_REMOTE_BRIDGE_TIMEOUT;
 }
 
+bool button_usb_remote_keys_fresh(unsigned long now)
+{
+    return bridge_full && button_usb_remote_bridge_fresh(now);
+}
 bool button_usb_remote_request(const struct usb_ctrlrequest *req)
 {
     if (req->bRequestType != 0x40 ||
         req->bRequest != USB_REMOTE_KEY_REQUEST ||
         req->wValue < USB_REMOTE_KEY_MENU ||
-        req->wValue > USB_REMOTE_KEY_HEARTBEAT ||
+        req->wValue > USB_REMOTE_KEY_PLAY ||
         req->wLength != 0)
         return false;
     bool volume = req->wValue == USB_REMOTE_KEY_VOL_UP ||
                   req->wValue == USB_REMOTE_KEY_VOL_DOWN;
     if (volume ? (req->wIndex != 1 && req->wIndex != 2) :
-        req->wValue == USB_REMOTE_KEY_HEARTBEAT ? req->wIndex != 1 :
+        req->wValue == USB_REMOTE_KEY_HEARTBEAT ? (req->wIndex != 1 && req->wIndex != 2) :
         req->wIndex > 1)
         return false;
 
@@ -47,6 +51,7 @@ bool button_usb_remote_request(const struct usb_ctrlrequest *req)
     if (req->wValue == USB_REMOTE_KEY_HEARTBEAT)
     {
         bridge_seen = true;
+        bridge_full = req->wIndex == 2;
         bridge_at = current_tick;
     }
     else if (volume)
@@ -57,8 +62,9 @@ bool button_usb_remote_request(const struct usb_ctrlrequest *req)
     }
     else
     {
-        int key = req->wValue == USB_REMOTE_KEY_MENU ? BUTTON_RC_MENU :
-                                                      BUTTON_RC_SELECT;
+        static const int keys[] = {0, BUTTON_RC_MENU, BUTTON_RC_SELECT,
+            0, 0, 0, BUTTON_RC_LEFT, BUTTON_RC_RIGHT, BUTTON_RC_PLAY};
+        int key = keys[req->wValue];
         if (req->wIndex)
         {
             if (remote_button != key) pressed_at = current_tick;

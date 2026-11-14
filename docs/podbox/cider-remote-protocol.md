@@ -703,3 +703,133 @@ belongs to the prior item. Such a window has no independently observable audio
 start in Pulse state. The clock fallback is an inference, not proof of a 250 ms
 end offset. FU28b live evidence separates these cases from observed stream
 starts; the report records the remaining acceptance gate.
+
+## FU30: native context, cover diagnostics and explicit library fill
+
+The Cider WPS uses the native menu widget and native strings/order for Shuffle,
+Repeat, Rating, Track Info, Go to Album, Go to Artist, Lyrics, Sleep Timer,
+Speed, Current Playlist (View, Playing Time), Theme options and More (View Album
+Art, Sound Settings -> Volume). Local file/playlist, bookmark, cue, chapter,
+Sound Mix, Spike, EQ and playback-settings operations are omitted. The timer is
+native; its external-source expiry callback queues the idempotent Cider pause.
+Track Info uses native field labels with Cider title/artist/album, disc/track,
+year, genre, duration and audio-quality data. Main-list rating/library status is
+read anew before an explicit mutation. Queue selection sends an absolute jump.
+
+Read-only paged routes `now/info`, `now/album`, `now/artist`, `now/lyrics`,
+`now/queue`, `now/time` use the existing `cq`/`CL` transport. The host obtains
+current attributes, quality and queue data through Cider's read-only RPCs.
+The installed Cider 4.0.0 `app.asar` and SPA RPC source expose these operations:
+
+- POST `/api/v2/library/now-playing/love`; DELETE `/api/v2/library/now-playing/rating`.
+- POST `/api/v2/library/now-playing/add`.
+- GET `/api/v2/playback/audio-quality` and `/api/v2/playback/rate`.
+- PATCH `/api/v2/playback/rate` with `rate` in 0.25..4.
+- GET `/api/v1/lyrics/:id` (plain text or TTML is normalized to paged lines).
+- GET `/api/v2/queue`, GET `/api/v2/queue/position`, POST `/api/v2/queue/jump`.
+- POST `/api/v2/playback/pause` (also used by sleep expiry).
+
+Firmware advertises `localdiag` in addition to FU27's six capabilities. The host
+must confirm `CF <generation> localdiag` before firmware sends the extensions
+below. Without confirmation firmware retains the eight-field `cr` and sends no
+`ld`, `lr` or `lf`. This preserves basic art transport with an older host.
+Separately, `CF <generation> localstore` starts store initialization even when
+Cider is the only playback source and the disk is asleep.
+
+Tab-separated records:
+
+- `cr gen request key tier offset priority distance store_miss`: optional ninth
+  field, 1 for a negative/missing local result, 0 when USB raced a pending local
+  lookup. An old eight-field request logs `store_miss=unknown`.
+- `lr gen request bytes`: complete payload consumed/CRC-checked by the device;
+  distinct from durable `la`. Host INFO logs request->ready, request->ACK and
+  ready->ACK wall times. Generation/request scope prevents cross-session ACKs.
+- `ld gen loaded entries bloom_hits bloom_false_positives sectors hits misses
+  writes idle_deferrals loads last_read_us max_read_us last_error`: best-effort,
+  at most once per five seconds, below visible traffic. Times are measured on
+  the device (USEC_TIMER on ipod6g), including lookup/read/CRC. Sector count
+  includes index loading, inventory and data reads. This is independent of the
+  optional Remote Log stream.
+- `lf gen enabled`: explicit full-library fill start/stop from Cider > Cover
+  cache or System > Debug > Cider cover store. This mode permits disk spin-up.
+  Idle offers are polled every 100 ms while enabled; default background offers
+  retain their four-second interval and already-active-disk policy.
+- `CB gen library_revision done total state`: host progress; state 0 checking,
+  1 incomplete, 2 complete, 3 cannot complete (missing album art or capacity).
+  Counts include M+XS+S for each distinct library art key. Completion requires
+  matching rendered CRCs in the device inventory or durable `la`, plus a
+  completed library scan. Merely offered/transmitted images never count.
+  Firmware rejects a different session/library revision; library invalidation
+  clears its completion state. Completion/error stops explicit fill.
+
+USB CAR1 and batched XS covers are dirty and wake the worker. Normal foreground
+covers flush after a one-second idle deferral even if the disk was asleep.
+Index creation and load run on the disk worker, never a button/statusbar path.
+The first foreground request can wait for bootstrap before issuing USB. A loaded
+store hit is looked up before USB; a complete-cache hit does not race USB.
+Store reads no longer write LRU sectors. Pack recency remains resident.
+Writes sync pack and index before a durable acknowledgement. Inventory status
+is throttled and follows pending ACKs, avoiding a re-list on every fill.
+
+Direction-aware M/S read-ahead is bounded by the 512 KiB arena, pinned L art,
+slot count, a two-frame floor and the measured worst read time. Nine visible M
+covers allow at most six additional M records without a pin. A stored M cover
+is not newly rendered from the XS fallback; native slide caches and host-only
+metadata paging remain limitations for the strict FU30 continuous-scroll gate.
+
+**The strict zero-placeholder/zero-missing gate is not met by this candidate.**
+`tools/tests/cider_scroll_bench.py --require-zero` replays 1,200 albums with the
+production store/cache, injected disk timings and 30 Hz frame deadlines. It
+passes the explicit flash model and fails the rotating-disk model. This is
+store-side simulation, not device timing or a renderer/device acceptance claim.
+An ordered per-tier strip and a local ordered album manifest are proposed in
+FU30-REPORT.md; no scroll speed cap is introduced by this change.
+
+WPS entry/reentry and session/availability changes seed the volume baseline.
+Only a volume/mute change during consecutive visible WPS updates stamps `%mv`.
+
+### FU31: independent session liveness and disconnected lists
+
+The combined firmware advertises eight capabilities:
+`cn18,neighbors,warm,play-ack,localstore,modes5,loading,localdiag-live`.
+`localdiag-live` replaces the FU30 `localdiag` token and enables both its
+unchanged diagnostic records and the following challenge. Keeping eight tokens
+lets older hosts accept the handshake and ignore the unknown combined token.
+New hosts still accept `localdiag` from older firmware without requiring a CH
+response. The wire-level probe works with both firmware versions.
+
+Host `CH\t<generation>\t<nonce>` has a fresh 16-character lowercase hexadecimal
+nonce. The resident Cider client validates the generation and syntax and sends
+`ch\t<generation>\t<nonce>` before art, page or control traffic. These records do
+not spend bulk credits. A host sends at most one challenge per second and holds
+only one pending challenge. Only its exact generation/nonce response clears the
+three-second deadline. CN writes, pages, credits, foreground PINGs and old ACKs
+cannot clear or postpone it. An idle browser therefore remains healthy without
+page/art/control requests. After a valid CH, the device also treats the host as
+disconnected if four seconds pass without another CH, resets the resident
+session and sends a fresh ci. A changed generation resets pages and challenge
+state; legacy hosts that never send CH keep their legacy timeout behavior.
+
+HerdRemote separately sends a wire PING every second, even with incoming
+traffic, and requires the same sequence and 16-byte random payload in PONG
+within three seconds. A new peer HELLO/OPEN or a repeated ci in a negotiated
+live session invalidates the old session immediately. Either deadline raises
+the daemon's normal reconnect condition: close the old tty, reset session
+state, rediscover and reopen (retry interval at most one second). This is a
+protocol deadline, not a bound on OS open/write delays or physical enumeration.
+The standalone podlink CLI retains its 5/15-second probe defaults and explicit
+ping replies remain available to the CLI.
+
+The browser shows `Cider not connected`, `Cider unavailable`, `Loading...`, or
+`Cider list unavailable` for disconnected, unavailable, pending or stale-empty
+results. `No File` is reserved for a confirmed zero-length, non-stale result.
+History and the query survive reconnect so pages can be requested again.
+
+FU31 storage target clarification: this user's 256 GB iPod uses flash storage.
+The required host replay is `cider_scroll_bench.py <output> --model flash-assumed
+--require-zero`. Its injected 0.15 ms sector latency and 12 MiB/s throughput are
+assumptions, not device measurements. FU30's HDD-model failure is historical
+characterization, not the target gate. A packed strip-file redesign is deferred.
+Zero placeholders/missing covers on the physical device remains an open gate;
+measure `read_us`/`max_read_us` and repeat all three views after installing and
+fully building the library store.

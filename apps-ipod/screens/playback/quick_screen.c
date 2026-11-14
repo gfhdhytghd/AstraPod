@@ -486,7 +486,7 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
 #endif
             menu_armed = true;
         if (button == ACTION_QS_TOP && !qs->items[QUICKSCREEN_TOP] &&
-            menu_armed)
+            menu_armed && (button_status() & BUTTON_MENU))
             break;
         if (gui_quickscreen_do_button(qs, button, &changed))
         {

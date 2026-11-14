@@ -113,12 +113,12 @@ int main(void)
     for(int id=0;id<65536;id++)
     {
         struct usb_ctrlrequest req={0x40,0x5b,id,1,0};
-        assert(button_usb_remote_request(&req)==(id>=1&&id<=5));
+        assert(button_usb_remote_request(&req)==(id>=1&&id<=8));
     }
-    for(int id=1;id<=5;id++)for(int state=0;state<=4;state++)
+    for(int id=1;id<=8;id++)for(int state=0;state<=4;state++)
     {
         struct usb_ctrlrequest req={0x40,0x5b,id,state,0};
-        bool valid=id<=2?state<=1:id<=4?(state==1||state==2):state==1;
+        bool valid=(id<=2||id>=6)?state<=1:(state==1||state==2);
         assert(button_usb_remote_request(&req)==valid);
     }
     /* Live rows distinguish the new ignore policy, not an arbitration wait. */

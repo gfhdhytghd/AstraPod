@@ -59,13 +59,13 @@ int main(void){
    assert(count(REMOTE_COVERS_BUTTON)==(gap<=20));
    assert(count(REMOTE_SWITCH_BUTTON)==(gap>20));
   }
-  /* Holds keep the old 300/600 ms threshold and never become triples. */
+  /* Holds keep the old existing 300/600 ms thresholds with native Play actions and never become triples. */
   reset();feed(mode,BUTTON_RC_PLAY,BUTTON_RC_PLAY,300);
   int threshold=mode==REMOTE_AGENTS?30:60;
   feed(mode,0,BUTTON_RC_PLAY,300+threshold);
   feed(mode,BUTTON_RC_PLAY|BUTTON_REL,0,400);
   assert(!count(REMOTE_COVERS_BUTTON)&&!count(REMOTE_SWITCH_BUTTON));
-  if(mode==REMOTE_OTHER||mode==REMOTE_COVERS||mode==REMOTE_ALBUM_LIST)assert(count(REMOTE_WPS_BUTTON)==1);
+  if(mode!=REMOTE_AGENTS)assert(count(BUTTON_PLAY)==1&&count(BUTTON_PLAY|BUTTON_REPEAT)==1&&count(BUTTON_PLAY|BUTTON_REL)==1);
   reset();tap(mode,ULONG_MAX-70,13);tap(mode,ULONG_MAX-47,13);tap(mode,ULONG_MAX-24,13);
   assert(count(REMOTE_COVERS_BUTTON)==1&&!count(REMOTE_SWITCH_BUTTON));
  }
@@ -104,6 +104,7 @@ static int agents_screen(void){return ++a_calls==1?AGENTS_SWITCH_COVERS:0;}
 static int album_covers_scrn(void*p){(void)p;calls++;return covers_result;}
 static bool button_get_sw_poweroff_state(void){return poweroff;}
 static void button_set_sw_poweroff_state(bool on){poweroff=on;}
+static int cider_scrn(void*p){(void)p;return GO_TO_WPS;}
 static int wpsscrn(void*p){(void)p;return GO_TO_PREVIOUS;}
 static void album_covers_cancel_resume(void) {}
 static int cover_tracks_scrn(void *p) {(void)p;return GO_TO_PREVIOUS;}

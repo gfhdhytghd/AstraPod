@@ -116,8 +116,7 @@ int main(void) {
         reset();feed(mode,BUTTON_RC_PLAY,BUTTON_RC_PLAY,300);
         feed(mode,0,BUTTON_RC_PLAY,359);assert(!count);
         feed(mode,0,BUTTON_RC_PLAY,360);
-        if(mode==REMOTE_OTHER)assert(count==1&&output[0]==REMOTE_WPS_BUTTON);
-        else assert(count==2&&output[0]==BUTTON_RC_PLAY&&output[1]==(BUTTON_RC_PLAY|BUTTON_REPEAT));
+        assert(count==2&&output[0]==BUTTON_PLAY&&output[1]==(BUTTON_PLAY|BUTTON_REPEAT));
         feed(mode,BUTTON_RC_PLAY|BUTTON_REL,0,380);
         for(int i=0;i<count;i++)assert(output[i]!=SWITCH);
     }
@@ -131,7 +130,10 @@ int main(void) {
         }
         feed(modes[c],0,0,previous+21);int switches=0;
         for(int i=0;i<count;i++)switches+=output[i]==SWITCH;
-        assert(switches==3&&count==(c==0?17:c==1?17:21));
+        /* Two captured 830 ms holds each have four reports beyond 600 ms.
+         * The timer fires before those reports. Native holds retain them:
+         * OTHER +12, WPS +8, Agents recording output unchanged. */
+        assert(switches==3&&count==(c==0?17:29));
     }
     /* An unpolled second hold can emit five queued WPS events at release. */
     reset();feed(REMOTE_WPS,BUTTON_RC_PLAY,BUTTON_RC_PLAY,100);
@@ -147,7 +149,7 @@ int main(void) {
     reset();feed(REMOTE_AGENTS,BUTTON_PLAY,BUTTON_PLAY,100);
     feed(REMOTE_AGENTS,BUTTON_PLAY|BUTTON_REPEAT,BUTTON_PLAY,115);
     feed(REMOTE_AGENTS,BUTTON_PLAY|BUTTON_REL,0,120);assert(count==3);
-    puts("captured Play timings: double/single/slow/200ms inclusive/300ms remote classification/600ms other hold/native isolation/wrap PASS");
+    puts("captured Play timings: double/single/slow/200ms inclusive/300ms remote classification/600ms native Play mapping/native isolation/wrap PASS");
 }
 '''
 (O/'config.h').write_text('')

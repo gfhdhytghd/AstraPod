@@ -593,6 +593,9 @@ static int button_read(int *data)
 
 #ifdef USB_REMOTE_KEY_ENABLED
     /* Use the dock remote's sampling, queue and repeat path. */
+    if (button_usb_remote_keys_fresh(current_tick))
+        btn &= ~(BUTTON_RC_MENU | BUTTON_RC_SELECT | BUTTON_RC_PLAY |
+                 BUTTON_RC_LEFT | BUTTON_RC_RIGHT);
     btn |= button_usb_remote_read();
 #endif
 

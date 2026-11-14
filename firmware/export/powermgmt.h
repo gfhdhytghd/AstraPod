@@ -162,6 +162,8 @@ void set_battery_capacity(int capacity); /* set local battery capacity value */
 int get_battery_capacity(void); /* get local battery capacity value */
 
 void set_sleeptimer_duration(int minutes);
+/* Optional external playback source; true means it consumed expiry. */
+void set_sleep_timer_callback(bool (*callback)(void));
 bool get_sleep_timer_active(void);
 int get_sleep_timer(void);
 int get_sleep_timer_duration(void);

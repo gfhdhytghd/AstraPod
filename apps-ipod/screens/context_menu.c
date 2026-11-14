@@ -41,6 +41,7 @@
 #include <stdbool.h>
 
 #include "debug.h"
+#include "screens/playback/cider.h"
 #include "lcd.h"
 #include "audio.h"
 #include "widgets/menu.h"
@@ -620,9 +621,9 @@ static int sleep_timer_run(void)
     bool placed = false;
     int count = 0, choice = 0;
 
-    if (get_sleep_timer() > 0 || audio_pausing_at_chapter_end())
+    if (get_sleep_timer() > 0 || (!cider_active() && audio_pausing_at_chapter_end()))
         sleep_minutes[count++] = 0;
-    if (spoken_speed_playing())
+    if (!cider_active() && spoken_speed_playing())
         sleep_minutes[count++] = SLEEP_CHAPTER;
 
     for (size_t i = 0; i < ARRAYLEN(lengths); i++)
@@ -658,6 +659,13 @@ static int sleep_timer_run(void)
     return ONPLAY_OK;
 }
 
+#ifdef HAVE_USB_PODLINK
+int cider_native_sleep_timer(void)
+{
+    return sleep_timer_run() == ONPLAY_MAINMENU;
+}
+#endif
+
 /* "Sleep Timer", or with one running, the time it has left or End of
  * Chapter. */
 static char *sleep_timer_name(int selected_item, void *data,
@@ -669,7 +677,7 @@ static char *sleep_timer_name(int selected_item, void *data,
     (void)selected_item;
     (void)data;
 
-    if (audio_pausing_at_chapter_end())
+    if (!cider_active() && audio_pausing_at_chapter_end())
     {
         snprintf(buffer, buffer_len, "%s (%s)", str(LANG_SLEEP_TIMER),
                  str(LANG_SLEEP_END_OF_CHAPTER));
@@ -682,6 +690,13 @@ static char *sleep_timer_name(int selected_item, void *data,
              format_sleeptimer(time, sizeof(time), (left + 59) / 60, NULL));
     return buffer;
 }
+
+#ifdef HAVE_USB_PODLINK
+char *cider_native_sleep_name(int item, void *data, char *buffer, size_t size)
+{
+    return sleep_timer_name(item, data, buffer, size);
+}
+#endif
 
 /* MENU_FUNC_CHECK_RETVAL, or MENU in the list stops at this row */
 MENUITEM_FUNCTION_DYNTEXT(sleep_timer_item, MENU_FUNC_CHECK_RETVAL,

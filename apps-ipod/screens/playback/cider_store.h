@@ -27,6 +27,13 @@ enum { CS_OK = 0, CS_DUP = 1, CS_MISS = -1, CS_ERR = -2, CS_BUSY = -3,
 #define CS_O_READ 1
 #define CS_O_WRITE 2                  /* read/write, create, never truncate */
 
+struct cider_store_stats {
+    uint32_t loaded, entries, bloom_hits, false_positives, sectors, hits, misses,
+             writes, deferrals, loads, read_us, max_read_us, build_done, build_total,
+             build_state, build_on;
+    int last_error;
+};
+
 struct cs_io
 {
     int (*open)(const char *path, int mode);

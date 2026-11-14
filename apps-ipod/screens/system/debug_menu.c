@@ -124,6 +124,9 @@
 #include "iap/remote_capture.h"
 #include "iap/agents_volume.h"
 #include "remote_log.h"
+#ifdef HAVE_USB_PODLINK
+#include "screens/playback/cider_controls.h"
+#endif
 
 
 #define SCREEN_MAX_CHARS (LCD_WIDTH / SYSFONT_WIDTH)
@@ -2121,6 +2124,9 @@ static const struct {
     /* Flipped by function; its state is shown after desc. */
     bool *toggle;
 } menuitems[] = {
+#ifdef HAVE_USB_PODLINK
+        { "Cider cover store", cider_store_debug_show, false, NULL },
+#endif
         { "Threads", dbg_os, false, NULL },
 #if defined(CPU_PP502x) || CONFIG_CPU == S5L8702
         { "Deadlock test", dbg_deadlock_test, false, NULL },

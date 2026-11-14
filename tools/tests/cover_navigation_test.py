@@ -50,6 +50,7 @@ int main(void){
 }
 '''
 (O/'config.h').write_text('')
+pre+='\nstatic long raw_remote_filter(long button){return button;}\n'
 (O/'raw.c').write_text(pre+c+fn(source,'raw_ui_cancel')+fn(source,'raw_ui_filter')+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R),'-I'+str(R/'apps-ipod'),str(O/'raw.c'),'-o',str(O/'raw')],check=True)
 subprocess.run([str(O/'raw')],check=True)

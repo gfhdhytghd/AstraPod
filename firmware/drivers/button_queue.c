@@ -202,12 +202,17 @@ void button_clear_pressed(void)
 
 #if defined(HAVE_USB_PODLINK) && !defined(BOOTLOADER)
 static long (*ui_filter)(long);
+static int (*ui_timeout)(int);
+void button_set_ui_timeout(int (*timeout)(int)) { ui_timeout = timeout; }
 void button_set_ui_filter(long (*filter)(long)) { ui_filter = filter; }
 #endif
 
 long button_get_w_tmo(int ticks)
 {
     struct queue_event ev;
+#if defined(HAVE_USB_PODLINK) && !defined(BOOTLOADER)
+    if (ui_timeout) ticks = ui_timeout(ticks);
+#endif
     button_queue_wait(&ev, ticks);
 
     if (ev.id == SYS_TIMEOUT)

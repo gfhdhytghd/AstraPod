@@ -139,6 +139,12 @@ struct menu_row_hiding {
     void (*hide)(const struct menu_item_ex *row);
 };
 void menu_set_row_hiding(const struct menu_row_hiding *hiding);
+/* An external source can present native setting rows without binding them to
+ * local settings. Return false to keep the ordinary menu presentation. */
+struct menu_row_presenter {
+    bool (*describe)(const struct menu_item_ex *, enum list_row_kind *, const char **);
+};
+const struct menu_row_presenter *menu_set_row_presenter(const struct menu_row_presenter *presenter);
 void do_setting_screen(const struct settings_list *setting, const char * title,
                         struct viewport parent[NB_SCREENS]);
 

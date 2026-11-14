@@ -587,6 +587,7 @@ static void restore_theme(void)
  * display the wps on entering or restoring */
 static void gwps_enter_wps(bool theme_enabled)
 {
+    cider_wps_enter();
     struct gui_wps *gwps;
     struct screen *display;
     if (theme_enabled)
@@ -930,10 +931,10 @@ static long wps_run(bool return_agents, bool menu_covers)
 
                 if (cider_active())
                 {
-                    /* Cider's shuffle and repeat; nothing of the local playlist */
+                    /* Native Now Playing rows bound to the Cider source. */
                     if (!cider_available()) break;
                     gwps_leave_wps(true);
-                    if (cider_context_show()) return GO_TO_ROOT;
+                    if (cider_context_show()) return cider_context_destination();
                     restore = true;
                     break;
                 }

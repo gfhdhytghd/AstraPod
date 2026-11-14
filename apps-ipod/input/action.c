@@ -59,6 +59,10 @@
 static struct agents_shortcut_state shortcut;
 static struct agents_cover_chord_state cover_chord;
 static bool ui_polling;
+#if defined(IPOD_ACCESSORY_PROTOCOL) && defined(HAVE_USB_PODLINK)
+static long raw_remote_filter(long button);
+static int raw_ui_timeout(int timeout);
+#endif
 static unsigned int ui_thread;
 static long raw_ui_cancel(void)
 {
@@ -100,7 +104,11 @@ static long raw_ui_filter(long button)
                            AGENTS_NAV_BACK : AGENTS_NAV_COVERS, false);
         return BUTTON_MENU;
     }
+#ifdef IPOD_ACCESSORY_PROTOCOL
+    return raw_remote_filter(button);
+#else
     return button;
+#endif
 }
 void agents_shortcut_init(void)
 {
@@ -110,6 +118,9 @@ void agents_shortcut_init(void)
     iap_volume_context(false);
 #endif
     button_set_ui_filter(raw_ui_filter);
+#ifdef IPOD_ACCESSORY_PROTOCOL
+    button_set_ui_timeout(raw_ui_timeout);
+#endif
 }
 static bool shortcut_talking;
 static unsigned long shortcut_talking_at;
@@ -372,6 +383,20 @@ static int remote_context(int context)
         get_current_activity() == ACTIVITY_DATABASEBROWSER) return REMOTE_ALBUM_LIST;
     return REMOTE_OTHER;
 }
+static int raw_ui_timeout(int timeout)
+{
+    if (thread_self() != ui_thread || ui_polling || remote_input_active) return timeout;
+    if (remote.queued) return TIMEOUT_NOBLOCK;
+    if (agents_remote_pending(&remote) && (timeout < 0 || timeout > HZ / 10))
+        return HZ / 10;
+    return timeout;
+}
+static long raw_remote_filter(long button)
+{
+    if (remote_input_active) return button;
+    return agents_remote_button(&remote, remote_context(CONTEXT_STD), button,
+                                button_status(), current_tick);
+}
 static int remote_poll(int timeout, int context)
 {
     (void)context;
@@ -457,8 +482,8 @@ static bool remote_volume_action(action_cur_t *cur)
     }
     if (cur->context == CONTEXT_AGENTS) return false;
     if (cur->context == CONTEXT_QUICKSCREEN)
-    {   /* what the wheel does there: the volume */
-        cur->action = up ? ACTION_QS_VOLUP : ACTION_QS_VOLDOWN;
+    {   /* Remote arrows select slots; only the wheel changes volume. */
+        cur->action = up ? ACTION_QS_TOP : ACTION_QS_DOWN;
         return true;
     }
     if (cur->context == CONTEXT_PLUGIN &&

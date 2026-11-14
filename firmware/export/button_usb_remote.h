@@ -13,6 +13,9 @@
 #define USB_REMOTE_KEY_VOL_UP 3
 #define USB_REMOTE_KEY_VOL_DOWN 4
 #define USB_REMOTE_KEY_HEARTBEAT 5
+#define USB_REMOTE_KEY_LEFT 6
+#define USB_REMOTE_KEY_RIGHT 7
+#define USB_REMOTE_KEY_PLAY 8
 #define USB_REMOTE_BRIDGE_TIMEOUT (3 * HZ)
 
 struct usb_ctrlrequest;
@@ -21,9 +24,12 @@ int button_usb_remote_read(void);
 void button_usb_remote_volume_handler(void (*handler)(int, bool,
                                                        unsigned long));
 bool button_usb_remote_bridge_fresh(unsigned long now);
+bool button_usb_remote_keys_fresh(unsigned long now);
 #else
 static inline void button_usb_remote_volume_handler(
     void (*handler)(int, bool, unsigned long)) { (void)handler; }
+static inline bool button_usb_remote_keys_fresh(unsigned long now)
+{ (void)now; return false; }
 static inline bool button_usb_remote_bridge_fresh(unsigned long now)
 { (void)now; return false; }
 #endif

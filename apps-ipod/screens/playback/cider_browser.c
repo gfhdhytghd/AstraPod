@@ -4,6 +4,7 @@
 #include "audio.h"
 #include "cider.h"
 #include "cider_library.h"
+#include "cider_controls.h"
 #include "input/action.h"
 #include "input/agents_shortcut.h"
 #include "widgets/list.h"
@@ -38,11 +39,13 @@ static struct cider_row selected_row;
 static struct cider_row root_rows[35];
 static int root_count;
 static bool empty_list;
+static const char *list_notice;
 static fb_data art_source[56 * 56], art_pixels[56 * 56];
 static struct bitmap row_bitmap;
 static struct cider_row callback_row;
 static char query[SEARCH_MAX_QUERY + 1];
 static int search_count = -1;
+static int ahead_previous, ahead_direction = 1;
 
 _Static_assert(sizeof history + sizeof root_rows + sizeof art_source +
                        sizeof art_pixels + sizeof selected_row +
@@ -85,7 +88,7 @@ static void root(void)
              str(cider_active() || audio_status() ? LANG_NOW_PLAYING
                                                   : LANG_RESUME_PLAYBACK));
     snprintf(r->route, sizeof r->route, "wps");
-    for (int n = 0; n < browser_db_root_row_count() && root_count < 35; n++)
+    for (int n = 0; n < browser_db_root_row_count() && root_count < 34; n++)
     {
         int index;
         const unsigned char *name;
@@ -100,9 +103,15 @@ static void root(void)
         escape(escaped, sizeof escaped, browser_db_root_row_key(index));
         snprintf(r->route, sizeof r->route, "root/%s", escaped);
     }
+    struct cider_row *cache_row = &root_rows[root_count++];
+    memset(cache_row, 0, sizeof *cache_row);
+    snprintf(cache_row->title, sizeof cache_row->title, "Cover cache");
+    snprintf(cache_row->route, sizeof cache_row->route, "cache");
+
 }
 static bool get_row(int i, struct cider_row *out)
 {
+    if (list_notice) return false;
     if (!depth)
     {
         if (!cider_available() || i < 0 || i >= root_count)
@@ -115,8 +124,8 @@ static bool get_row(int i, struct cider_row *out)
 static const char *name(int i, void *data, char *buf, size_t size)
 {
     (void)data;
-    if (empty_list)
-        return str(LANG_NO_FILES);
+    if (list_notice)
+        return !strcmp(list_notice, "No File") ? (const char *)str(LANG_NO_FILES) : list_notice;
     if (get_row(i, &callback_row))
         snprintf(buf, size, "%s", callback_row.title);
     else
@@ -250,6 +259,12 @@ static void enter(const struct cider_row *r)
         cider_pin_art(r->art);
     cider_page_open(history[depth].route);
 }
+int cider_browse_at(const struct cider_row *row)
+{
+    depth = 0;
+    enter(row);
+    return cider_browse();
+}
 int cider_browse_covers(bool home)
 {
     show_covers = true;
@@ -274,6 +289,7 @@ int cider_browse(void)
     gui_synclist_set_icon_callback(&list, icon);
     gui_synclist_set_row_callbacks(&list, kind, NULL, NULL);
     root();
+    ahead_previous = history[depth].selected;
     cider_warm_art(NULL, 0, "S");
     agents_nav_take(AGENTS_NAV_TRACKS);
     if (depth)
@@ -335,9 +351,9 @@ int cider_browse(void)
             play_pending = true;
             continue;
         }
-        bool albums = depth && (!strncmp(history[depth].route, "albums", 6) ||
+        bool albums = cider_available() && count > 0 && depth && (!strncmp(history[depth].route, "albums", 6) ||
                                 !strcmp(history[depth].route, "root/Album"));
-        bool header = depth && !strncmp(history[depth].route, "album/", 6);
+        bool header = cider_available() && count > 0 && depth && !strncmp(history[depth].route, "album/", 6);
         if (header && count >= 0)
             history[depth].header.tracks = count;
         /* The album's L cover stays resident while its track list is open. */
@@ -361,21 +377,40 @@ int cider_browse(void)
                  : depth && cider_page_stale() ? " *"
                                                : "");
         gui_synclist_set_title(&list, title, Icon_Audio);
-        empty_list = count == 0;
+        list_notice = cider_list_notice(cider_connected(), cider_available(), count,
+                                        depth && cider_page_stale());
+        empty_list = list_notice != NULL;
         gui_synclist_set_nb_items(&list, empty_list ? 1 : MAX(0, count));
         gui_synclist_select_item(&list, history[depth].selected);
         if (albums && count > 0)
         {
-            static char keys[7][65]; /* UI stack is tight */
-            const char *window[7]; unsigned int n = 0;
-            int first = MAX(0, history[depth].selected - 2);
+            static char keys[16][65]; /* UI stack is tight */
+            const char *window[16]; unsigned int n = 0;
+            int selected = history[depth].selected;
+            if (selected != ahead_previous)
+            {
+                ahead_direction = selected > ahead_previous ? 1 : -1;
+                ahead_previous = selected;
+            }
+            int first = MAX(0, selected - 2);
             for (int i = first; i < MIN(count, first + 7); i++)
                 if (cider_page_row(i, &callback_row))
                 {
                     snprintf(keys[n], sizeof keys[n], "%s", callback_row.art);
                     window[n] = keys[n]; n++;
                 }
-            cider_warm_art(window, n, "S");
+            unsigned int extra = cider_read_ahead_count(61, 7);
+            for (unsigned int j = 0; j < extra && n < ARRAYLEN(window); j++)
+            {
+                int i = ahead_direction > 0 ? first + 7 + j : first - 1 - j;
+                if (i >= 0 && i < count && cider_page_row(i, &callback_row))
+                {
+                    snprintf(keys[n], sizeof keys[n], "%s", callback_row.art);
+                    window[n] = keys[n]; n++;
+                }
+            }
+            cider_read_ahead(window, n, "S");
+            cider_warm_art(window, MIN(n, 7), "S");
         }
         gui_synclist_draw(&list);
         int action;
@@ -423,7 +458,12 @@ int cider_browse(void)
         else if (action == ACTION_STD_OK && !play_pending && cider_available() && !empty_list &&
                  get_row(history[depth].selected, &selected_row))
         {
-            if (!strcmp(selected_row.route, "wps"))
+            if (!strcmp(selected_row.route, "cache"))
+            {
+                if (cider_store_debug_show()) { result = GO_TO_ROOT; break; }
+                cider_page_open(history[depth].route);
+            }
+            else if (!strcmp(selected_row.route, "wps"))
             {
                 result = GO_TO_WPS;
                 break;

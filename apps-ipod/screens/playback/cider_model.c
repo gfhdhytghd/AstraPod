@@ -37,6 +37,35 @@ static bool number(const char *text, uint32_t *out)
     return true;
 }
 
+bool cider_live_parse(const void *data, unsigned int length, uint32_t generation,
+                      char nonce[17])
+{
+    char text[48], *tab;
+    uint32_t gen;
+    if (!generation || length < 21 || length >= sizeof text) return false;
+    memcpy(text, data, length); text[length] = 0;
+    if (memchr(text, 0, length) || memcmp(text, "CH\t", 3)) return false;
+    tab = strchr(text + 3, '\t');
+    if (!tab || strlen(tab + 1) != 16) return false;
+    *tab++ = 0;
+    if (!number(text + 3, &gen) || gen != generation) return false;
+    for (unsigned int i = 0; i < 16; i++)
+        if (!((tab[i] >= '0' && tab[i] <= '9') ||
+              (tab[i] >= 'a' && tab[i] <= 'f'))) return false;
+    memcpy(nonce, tab, 17);
+    return true;
+}
+
+const char *cider_list_notice(bool connected, bool available, int total, bool stale)
+{
+    if (!connected) return "Cider not connected";
+    if (!available) return "Cider unavailable";
+    if (total < 0) return "Loading...";
+    if (!total && stale) return "Cider list unavailable";
+    if (!total) return "No File";
+    return NULL;
+}
+
 /* Compare only song routes; decode one byte at a time on the tight UI stack. */
 bool cider_route_matches(const char *route, const char *id)
 {

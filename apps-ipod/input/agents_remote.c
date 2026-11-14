@@ -93,15 +93,17 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
             remote_log_event(REMOTE_LOG_HOLD, now, context, 0, NULL, 0);
             s->second = false;
             h->fired = true;
-            if (context == REMOTE_OTHER || context == REMOTE_COVERS ||
-                context == REMOTE_ALBUM_LIST)
-                emit(s, REMOTE_WPS_BUTTON);
-            else if (context == REMOTE_WPS)
+            /* The remote centre's hold is a native Play hold. Native
+             * keymaps own its meaning, including raw viewer contexts. */
+            if (context != REMOTE_AGENTS)
             {
-                emit(s, BUTTON_RC_PLAY);
-                emit(s, BUTTON_RC_PLAY | BUTTON_REPEAT);
+                emit(s, BUTTON_PLAY);
+                emit(s, BUTTON_PLAY | BUTTON_REPEAT);
             }
         }
+        if (h->fired && event && !release && (button & BUTTON_REPEAT) &&
+            context != REMOTE_AGENTS && !s->queued)
+            emit(s, BUTTON_PLAY | BUTTON_REPEAT);
         if (ended)
         {
             h->down = false;
@@ -129,8 +131,8 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
             {
                 if (context == REMOTE_AGENTS)
                     emit(s, BUTTON_PLAY | BUTTON_REL);
-                else if (context == REMOTE_WPS)
-                    emit(s, BUTTON_RC_PLAY | BUTTON_REL);
+                else
+                    emit(s, BUTTON_PLAY | BUTTON_REL);
             }
         }
     }
@@ -144,6 +146,23 @@ int agents_remote_button(struct agents_remote_state *s, int context,
                          int button, int held, unsigned long now)
 {
     if (s->queued) return take(s);
+    if ((button & BUTTON_REMOTE) == BUTTON_RC_SELECT)
+    {
+        struct agents_remote_hold *h = &s->hold[0];
+        if (button & BUTTON_REL)
+        {
+            emit(s, h->fired ? BUTTON_PLAY | BUTTON_REL : button);
+            h->fired = false;
+        }
+        else if (button & BUTTON_REPEAT)
+        {
+            if (!h->fired) emit(s, BUTTON_PLAY);
+            h->fired = true;
+            emit(s, BUTTON_PLAY | BUTTON_REPEAT);
+        }
+        else { h->fired = false; emit(s, button); }
+        return take(s);
+    }
     if (play_button(s, context, button, held, now)) return take(s);
     /* Menu/Select retain their native press/repeat/release meanings. Direction
      * keys retain their normal press/repeat/release meanings everywhere. */

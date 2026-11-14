@@ -17,6 +17,11 @@ struct cider_state
     char previous_art[65], next_art[65];
     char id[80], art[65], title[124], artist[124], album[124], composer[124], reason[96];
 };
+/* Strict session challenge, independent of status, art and page credits. */
+bool cider_live_parse(const void *data, unsigned int length, uint32_t generation,
+                      char nonce[17]);
+/* NULL means actual rows. Only confirmed, non-stale zero is an empty library. */
+const char *cider_list_notice(bool connected, bool available, int total, bool stale);
 bool cider_route_matches(const char *route, const char *id);
 #define CIDER_MODE_SHUFFLE 0   /* Cider shuffleMode: 0 off, 1 on */
 #define CIDER_MODE_REPEAT 1    /* Rockbox repeat_mode: 0 off, 1 all, 2 one, 3 shuffle, 4 A-B */

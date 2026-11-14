@@ -57,7 +57,7 @@ int main(void)
     expect("EP0 tick=32 MENU down");
     req.wValue=2; req.wIndex=0;
     assert(button_usb_remote_request(&req)); expect("SELECT up");
-    req.wValue=6; assert(!button_usb_remote_request(&req));
+    req.wValue=9; assert(!button_usb_remote_request(&req));
     assert(!remote_log_read(line, sizeof(line)));
     for (int c=REMOTE_OTHER; c<=REMOTE_COVERS; c++)
     {

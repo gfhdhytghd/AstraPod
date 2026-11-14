@@ -436,6 +436,13 @@ baseline=subprocess.check_output(['git','show','db11c0fb1e:apps-ipod/input/keyma
 candidate=(R/'apps-ipod/input/keymap_ipod.c').read_text()
 for name in re.findall(r'static const struct button_mapping (remote_button_context_\w+)\[\]',baseline):
     if name=='remote_button_context_agents': continue
+    if name=='remote_button_context_quickscreen':
+        # FU30 changes the required slot mapping; fu30_remote_test runs it.
+        quick=re.search(r'remote_button_context_quickscreen\[\].*?\n\};',candidate,re.S).group()
+        assert re.search(r'ACTION_QS_TOP,\s*BUTTON_RC_VOL_UP',quick)
+        assert re.search(r'ACTION_QS_DOWN,\s*BUTTON_RC_VOL_DOWN',quick)
+        assert re.search(r'ACTION_STD_CANCEL,\s*BUTTON_RC_MENU\|BUTTON_REL',quick)
+        continue
     if name=='remote_button_context_yesno':
         # Only change: remote Play confirms (was cancel), like the USB popup.
         yesno=re.search(r'remote_button_context_yesno\[\].*?\n\};',candidate,re.S).group()
@@ -443,7 +450,7 @@ for name in re.findall(r'static const struct button_mapping (remote_button_conte
         continue
     pattern=r'static const struct button_mapping '+name+r'\[\].*?\n};'
     assert re.search(pattern,baseline,re.S).group()==re.search(pattern,candidate,re.S).group(),name
-print('outside Agents: every pre-existing remote keymap array identical to db11c0fb1e PASS')
+print('outside Agents: remaining pre-existing remote keymap arrays identical to db11c0fb1e PASS')
 root=(R/'apps-ipod/root_menu.c').read_text()
 nav_h=(R/'apps-ipod/input/agents_shortcut.h').read_text()
 nav_c=(R/'apps-ipod/input/agents_shortcut.c').read_text()
@@ -475,6 +482,7 @@ static bool button_get_sw_poweroff_state(void) {return poweroff;}
 static void button_set_sw_poweroff_state(bool on) {poweroff=on;}
 static int album_covers_scrn(void *p) {(void)p;return GO_TO_PREVIOUS;}
 static int agents_screen(void) {a_calls++;return a_calls==1?agents_return:0;}
+static int cider_scrn(void *p) {(void)p;return GO_TO_WPS;}
 static int wpsscrn(void *p) {(void)p;w_calls++;was_agents=wps_return_agents;wps_return_agents=false;return GO_TO_AGENTS;}
 '''
 navtest='''
@@ -519,6 +527,9 @@ static bool cider_active(void){return false;}
 static int raw_ui_cancel(void) {return BUTTON_MENU;}
 #define CONTEXT_STD 0
 #define CONTEXT_PLUGIN 3
+#define CONTEXT_QUICKSCREEN 4
+#define ACTION_QS_TOP 1003
+#define ACTION_QS_DOWN 1004
 #define ACTION_STD_PREV 1001
 #define ACTION_STD_NEXT 1002
 #define ACTIVITY_DATABASEBROWSER 5

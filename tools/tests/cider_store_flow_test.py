@@ -60,6 +60,7 @@ static int t_fsize(const char*p){struct stat st;return stat(p,&st)==0?(int)st.st
 static void t_mkdir(const char*p){mkdir(p,0755);}
 static const struct cs_io tio={t_open,t_read,t_write,t_seek,t_sync,t_close,t_remove,t_fsize,t_mkdir,NULL};
 '''
+pre+='\nstatic struct cider_store_stats diag;\nstatic bool host_diag,build_on,build_changed,load_requested,sleep_pause_due,art_local_miss;\nstatic long diag_at,ls_at,dirty_at;\nstatic uint32_t art_ack_request;static unsigned int art_ack_bytes;\nstatic unsigned int clock_us(void){return (uint32_t)current_tick*10000u;}\n'
 post=r'''
 static char A[65],B[65],C[65];
 static unsigned char art[CIDER_ART_MAX];
@@ -123,7 +124,7 @@ int main(int argc,char**argv){(void)argc;mkdir(argv[1],0755);assert(chdir(argv[1
  list_cursor=0;store.loaded=false;list_req=true;list_ready=false;build_list();assert(!strncmp(list_page,"lv\t7\t0\t0\t0\n",11));store.loaded=true;
  /* 9. protocol records: ls once, listing page, acks, want; nothing without CF */
  host_store=false;assert(store_record(list_page,sizeof list_page)==0);host_store=true;
- snap_store();char out[512];assert(ls_due&&store_record(out,sizeof out)&&!strncmp(out,"ls\t7\t",5)&&!ls_due);
+ list_ready=false;nacks=0;ls_at=current_tick-5*HZ; snap_store();char out[512];assert(ls_due&&store_record(out,sizeof out)&&!strncmp(out,"ls\t7\t",5)&&!ls_due);
  list_ready=true;list_len=snprintf(list_page,sizeof list_page,"lv\t7\t0\t0\t0\n");assert(store_record(out,sizeof out)==list_len&&!list_ready);
  nacks=1;strcpy(acks[0].key,A);acks[0].tier=CS_M;acks[0].crc=4660;assert(store_record(out,sizeof out)&&!strcmp(out,"la\t7\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tM\t4660")&&!nacks);
  want_ready=true;noffers=1;assert(store_record(out,sizeof out)&&!strcmp(out,"lw\t7\t7")&&!want_ready);

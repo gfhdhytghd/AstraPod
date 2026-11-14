@@ -208,10 +208,22 @@ static const struct settings_list *menu_row_setting(int selected_item,
     return find_setting(menu->variable);
 }
 
+static const struct menu_row_presenter *row_presenter;
+const struct menu_row_presenter *menu_set_row_presenter(const struct menu_row_presenter *presenter)
+{
+    const struct menu_row_presenter *previous = row_presenter;
+    row_presenter = presenter;
+    return previous;
+}
+
 static enum list_row_kind menu_get_kind(int selected_item, void * data)
 {
     const struct menu_item_ex *menu = (const struct menu_item_ex *)data;
     const struct settings_list *setting;
+    enum list_row_kind kind;
+    const char *value;
+    if (row_presenter && row_presenter->describe(menu_row_item(selected_item, menu), &kind, &value))
+        return kind;
 
     if ((menu->flags&MENU_TYPE_MASK) == MT_RETURN_ID)
         return LIST_ROW_ACTION;
@@ -236,6 +248,10 @@ static enum list_row_kind menu_get_kind(int selected_item, void * data)
 static const char* menu_get_value(int selected_item, void * data,
                                   char *buffer, size_t buffer_len)
 {
+    enum list_row_kind kind;
+    const char *value;
+    if (row_presenter && row_presenter->describe(menu_row_item(selected_item, data), &kind, &value))
+        return value;
     const struct settings_list *setting =
         menu_row_setting(selected_item, (const struct menu_item_ex *)data);
 

@@ -1222,9 +1222,20 @@ void set_keypress_restarts_sleep_timer(bool enable)
 }
 
 #ifndef BOOTLOADER
+static bool (*sleep_timer_callback)(void);
+void set_sleep_timer_callback(bool (*callback)(void))
+{
+    sleep_timer_callback = callback;
+}
 static void handle_sleep_timer(void)
 {
     if (TIME_AFTER(current_tick, sleeptimer_endtick)) {
+        if (sleep_timer_callback && sleep_timer_callback())
+        {
+            set_sleep_timer(0);
+            backlight_off();
+            return;
+        }
         if (usb_inserted()
 #if CONFIG_CHARGING
             || charger_input_state != NO_CHARGER

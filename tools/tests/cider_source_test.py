@@ -13,6 +13,7 @@ def fn(name,text=None):
  e=m.end();d=1
  while d:d+=(text[e]=='{')-(text[e]=='}');e+=1
  return text[m.start():e]
+source=source.replace(fn('cider_wps_show_art',source),'')
 seek=fn('ffwd_rew',wps)
 actions=sorted(set(re.findall(r'\bACTION_[A-Z_0-9]+',source+seek)))
 pre=r'''
@@ -103,7 +104,8 @@ static bool bitmap_ready;
 static bool cider_copy_art(const char*k,const char*t,void*p,unsigned int n){(void)k;(void)t;if(!bitmap_ready)return false;memset(p,0x17,n);return true;}
 static void skin_request_full_update(int x){(void)x;}
 static void skin_albumart_art_opened(int x){assert(x==CIDER_ART_HANDLE);}
-static int get_current_activity(void){return ACTIVITY_WPS;}
+static int activity=ACTIVITY_WPS;
+static int get_current_activity(void){return activity;}
 static int playback_current_aa_hid(int slot){return slot+10;}
 static int bufgetdata(int h,int size,void*out){(void)h;(void)size;(void)out;return 0;}
 static bool buf_pin_handle(int h,bool p){(void)h;(void)p;return true;}
@@ -115,7 +117,16 @@ strcpy(state.title,"Cider song");strcpy(state.artist,"Artist");strcpy(state.albu
 state.available=state.have=true;state.generation=7;state.duration=100000;state.position=1000;state.rate=1000;state.volume=42;
 state.available=false;assert(!cider_play("play/library-songs/failed")&&!active&&!pauses&&!ncommands);state.available=true;
 local_playing=1;cider_play("play/library-songs/s1");assert(!active&&!pauses&&ncommands==1);assert(!cider_play_status());play_reply=1;assert(cider_play_status()==1);assert(active&&pauses==1&&ncommands==1);assert(cider_play_status()==1&&pauses==1);assert(strstr(commands[0],"native-play\tplay/library-songs/s1"));
-current_tick=100;bitmap_ready=true;cider_wps_update(&w);assert(!strcmp(w.id3->title,"Cider song")&&w.id3->elapsed==2000&&!w.paused);assert(wps_art_handle(0)==CIDER_ART_HANDLE);
+state.volume=37;global_status.last_volume_change=-999;
+current_tick=100;bitmap_ready=true;cider_wps_update(&w);assert(global_status.last_volume_change==-999);
+state.volume=38;current_tick=101;cider_wps_update(&w);assert(global_status.last_volume_change==101);
+/* Reentry, generation, availability, and hidden updates seed only. */
+current_tick=102;state.volume=55;cider_wps_enter();cider_wps_update(&w);assert(global_status.last_volume_change==101);
+current_tick=103;state.generation++;state.volume=56;cider_wps_update(&w);assert(global_status.last_volume_change==101);
+current_tick=104;state.available=false;cider_wps_update(&w);state.available=true;state.volume=57;cider_wps_update(&w);assert(global_status.last_volume_change==101);
+activity=0;state.volume=58;cider_wps_update(&w);activity=ACTIVITY_WPS;state.volume=59;cider_wps_update(&w);assert(global_status.last_volume_change==101);
+current_tick=105;state.muted=true;cider_wps_update(&w);assert(global_status.last_volume_change==105);
+state.muted=false;state.generation=7;state.volume=37;current_tick=100;cider_wps_update(&w);assert(!strcmp(w.id3->title,"Cider song")&&w.id3->elapsed==2000&&!w.paused);assert(wps_art_handle(0)==CIDER_ART_HANDLE);
 struct bitmap*b=NULL;assert(wps_art_bitmap(CIDER_ART_HANDLE,&b)&&b->width==240&&b->height==240);
 assert(cider_wps_action(ACTION_WPS_PLAY)&&strstr(commands[ncommands-1],"toggle"));
 assert(cider_wps_action(ACTION_WPS_VOLUP)&&strstr(commands[ncommands-1],"volume-step\t1"));

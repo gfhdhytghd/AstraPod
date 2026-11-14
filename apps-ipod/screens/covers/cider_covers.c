@@ -20,6 +20,7 @@ static int travel = 1;
 static bool flicking;
 static long moved_at;
 static unsigned int revision;
+static struct cider_row row_ahead;
 static fb_data surface[128 * 128], tiny[32 * 32];
 _Static_assert(sizeof surface + sizeof tiny + 64 < 36 * 1024,
                "Cider module RAM budget");
@@ -69,6 +70,9 @@ static bool art(int index, struct bitmap *bitmap)
     int dim = 128;
     if (!cider_copy_art(row.art, "M", surface, sizeof surface))
     {
+        /* A stored final tier must never be replaced with a blurred XS.
+         * read-ahead owns its disk request; keep the native slide pending. */
+        if (cider_art_local(row.art, "M")) return false;
         if (cider_copy_art(row.art, "XS", tiny, sizeof tiny))
             for (int x = 0; x < dim; x++)
                 for (int y = 0; y < dim; y++)
@@ -116,9 +120,30 @@ static void tick(void)
         visible_count++;
     }
     if (visible_count)
-        cider_warm_art(visible, MIN(visible_count, 7), fast ? "XS" : "M");
-    if (visible_count)
-        cider_retain_art(visible, visible_count, fast ? "XS" : "M");
+    {
+        cider_warm_art(visible, MIN(visible_count, 7), "M");
+        cider_retain_art(visible, visible_count, "M");
+    }
+    /* Six M records fit ahead of nine visible covers in the 512 KiB arena.
+     * The measured read bound sizes the window; the benchmark reports the
+     * throughput limit independently of this latency window. */
+    static char ahead_keys[16][65];
+    const char *ahead[16];
+    unsigned int nahead = 0;
+    for (unsigned int i = 0; i < visible_count; i++)
+    {
+        snprintf(ahead_keys[nahead], sizeof ahead_keys[0], "%s", visible[i]);
+        ahead[nahead] = ahead_keys[nahead]; nahead++;
+    }
+    unsigned int extra = cider_read_ahead_count(61, visible_count);
+    for (unsigned int i = 0; i < extra && nahead < ARRAYLEN(ahead); i++)
+    {
+        int at = center_index + travel * (5 + i);
+        if (at < 0 || at >= count() || !cider_page_row(at, &row_ahead)) continue;
+        snprintf(ahead_keys[nahead], sizeof ahead_keys[0], "%s", row_ahead.art);
+        ahead[nahead] = ahead_keys[nahead]; nahead++;
+    }
+    cider_read_ahead(ahead, nahead, "M");
     const char *xs[5];
     char keys[5][65];
     unsigned int missing = 0;
@@ -127,7 +152,7 @@ static void tick(void)
         struct cider_row row;
         if (window[i] >= count() || !cider_page_row(window[i], &row))
             continue;
-        if (fast)
+        if (fast && !cider_art_local(row.art, "M"))
         {
             if (missing < 5 && !cider_has_art(row.art, "XS"))
             {
@@ -172,7 +197,7 @@ static unsigned int version(int index)
         hash = (hash ^ (unsigned char)*p) * 16777619u;
     for (const char *p = row.art; *p; p++)
         hash = (hash ^ (unsigned char)*p) * 16777619u;
-    return (hash << 2) | (cider_has_art(row.art, "M")    ? 3
+    return (hash << 2) | (cider_has_art(row.art, "M") ? 3
                           : cider_has_art(row.art, "XS") ? 2
                                                          : 1);
 }

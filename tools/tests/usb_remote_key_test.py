@@ -62,6 +62,9 @@ preamble = r'''
 #define USB_REMOTE_KEY_VOL_UP 3
 #define USB_REMOTE_KEY_VOL_DOWN 4
 #define USB_REMOTE_KEY_HEARTBEAT 5
+#define USB_REMOTE_KEY_LEFT 6
+#define USB_REMOTE_KEY_RIGHT 7
+#define USB_REMOTE_KEY_PLAY 8
 #define USB_REMOTE_BRIDGE_TIMEOUT (3 * HZ)
 #define TIME_BEFORE(a,b) ((long)((unsigned long)(a)-(unsigned long)(b)) < 0)
 struct usb_ctrlrequest { uint8_t bRequestType, bRequest; uint16_t wValue, wIndex, wLength; };
@@ -71,7 +74,8 @@ static int lastdata, usb_state=CONFIGURED, response, used;
 static long posted[500];
 static int disable_irq_save(void) { return 0; }
 static void restore_irq(int level) { (void)level; }
-static int button_read_device(void) { return 0; }
+static int physical;
+static int button_read_device(void) { return physical; }
 static bool button_queue_try_post(long b,int data) { (void)data; posted[used++]=b; return true; }
 static void button_remote_post(void) {}
 static void check_audio_peripheral_state(void) {}
@@ -117,7 +121,7 @@ static void gesture(int context,unsigned long start,int id) {
 int main(void) {
     for(int type=0;type<256;type++) if(type!=0x40)
         request(type,1,1,0,USB_CONTROL_STALL);
-    for(int key=0;key<65536;key++) if(key<1||key>5)
+    for(int key=0;key<65536;key++) if(key<1||key>8)
         request(0x40,key,1,0,USB_CONTROL_STALL);
     request(0x40,1,2,0,USB_CONTROL_STALL);
     request(0x40,1,1,1,USB_CONTROL_STALL);
@@ -141,10 +145,25 @@ int main(void) {
     current_tick=600;request(0x40,1,1,0,USB_CONTROL_ACK);tick(601);tick(602);
     current_tick=699;request(0x40,1,1,0,USB_CONTROL_ACK);
     tick(700);assert(lastbtn);
-    current_tick=798;request(0x40,6,1,0,USB_CONTROL_STALL);
+    current_tick=798;request(0x40,9,1,0,USB_CONTROL_STALL);
     tick(798);assert(lastbtn);tick(799);tick(800);assert(!lastbtn);
     for(int c=REMOTE_OTHER;c<=REMOTE_WPS;c++)for(int id=1;id<=2;id++)
         gesture(c,1000+c*200+id*50,id);
+    for(int id=6;id<=8;id++) {
+        int expect=id==6?BUTTON_RC_LEFT:id==7?BUTTON_RC_RIGHT:BUTTON_RC_PLAY;
+        used=0;unsigned long base=3000+id*200;
+        current_tick=base;request(0x40,id,1,0,USB_CONTROL_ACK);
+        request(0x40,id,0,0,USB_CONTROL_ACK);
+        for(unsigned long t=base+1;t<=base+8;t++)tick(t);
+        assert(used==2&&posted[0]==expect&&posted[1]==(expect|BUTTON_REL));
+    }
+    current_tick=6000;request(0x40,5,1,0,USB_CONTROL_ACK);
+    assert(button_usb_remote_bridge_fresh(current_tick)&&!button_usb_remote_keys_fresh(current_tick));
+    physical=BUTTON_RC_PLAY;tick(6001);tick(6002);assert(lastbtn==BUTTON_RC_PLAY);
+    request(0x40,5,2,0,USB_CONTROL_ACK);assert(button_usb_remote_keys_fresh(current_tick));
+    tick(6003);tick(6004);assert(!lastbtn);
+    request(0x40,5,3,0,USB_CONTROL_STALL);physical=0;
+    puts("EP0 Left/Right/Play queue delivery and versioned full-key ownership PASS");
     puts("EP0 Menu/Select back-to-back press/release survives debounce in all contexts PASS");
     puts("Outside Agents/WPS remote Menu press/repeat/release unchanged PASS");
     puts("EP0 strict parsing + real button queue press/repeat/release + 1s safety/wrap PASS");

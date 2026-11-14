@@ -12,6 +12,7 @@ def fn(name):
 pre=r'''
 #include <assert.h>
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -30,6 +31,8 @@ static struct cider_cache cache;
 static struct cider_transfer transfer;
 static struct cider_store store;
 static bool disk_lookup,request_ready,disk_running=true,cancel_all,warm_ready,disk_active=true;
+static bool host_live,live_reply;static long live_at;static char live_nonce[17];
+static void reset(void){host_live=live_reply=false;state.generation=0;}
 static bool host_store,ls_due,want_ready,list_req,list_ready,pin_on;
 static uint32_t next_request,grant,granted,cancel_request,list_cursor;
 static unsigned int request_tries,ncommands,xs_count,list_len,nfills,noffers,nacks;
@@ -48,6 +51,8 @@ static bool library_pending;
 static unsigned int cider_library_next(char*r,unsigned int n,uint32_t g){if(!library_pending)return 0;library_pending=false;return snprintf(r,n,"cq\t%u\t99\thome\t0\t10",g);}
 static unsigned int art_revision;
 '''
+pre+='\nstatic struct cider_store_stats diag;\nstatic bool host_diag,build_on,build_changed,load_requested,sleep_pause_due,art_local_miss;\nstatic long diag_at,ls_at,dirty_at;\nstatic uint32_t art_ack_request;static unsigned int art_ack_bytes;\nstatic unsigned int clock_us(void){return (uint32_t)current_tick*10000u;}\n'
+pre += '\n#define MAX(a,b) ((a)>(b)?(a):(b))\n#define MIN(a,b) ((a)<(b)?(a):(b))\n'
 post=r'''
 static char out[2048],A[65],B[65],C[65];
 static void key(char*k,char c){memset(k,c,64);k[64]=0;}
@@ -122,7 +127,7 @@ int main(void){
  transfer.active=false;noffers=0;want_ready=false;settle_tick(current_tick+5*HZ);background_start();assert(want_ready);
  /* FU27: both capability sets, then controls ahead of store traffic. */
  state.generation=0;hello_at=current_tick-3*HZ;
- assert(next(out,sizeof out)&&!strcmp(out,"ci\t1\t131072\tcn18,neighbors,warm,play-ack,localstore,modes5,loading"));
+ assert(next(out,sizeof out)&&!strcmp(out,"ci\t1\t131072\tcn18,neighbors,warm,play-ack,localstore,modes5,loading,localdiag-live"));
  state.generation=7;pin_on=false;art_used_at=current_tick;noffers=0;
  ncommands=3;
  strcpy(commands[0],"cc\t7\t41\tnative-context\t2|album/a");
@@ -143,13 +148,20 @@ int main(void){
  assert(next(out,sizeof out)&&!strncmp(out,"cg\t",3));
  assert(next(out,sizeof out)&&!strncmp(out,"cr\t7\t44\t",8)&&strstr(out,"\t3\t0"));
  assert(next(out,sizeof out)&&!strncmp(out,"cw\t",3));
- assert(next(out,sizeof out)&&!strncmp(out,"ls\t",3));
  assert(next(out,sizeof out)&&!strncmp(out,"lv\t",3));
  assert(next(out,sizeof out)&&!strncmp(out,"la\t",3));
+ ls_at=current_tick-5*HZ;assert(next(out,sizeof out)&&!strncmp(out,"ls\t",3));
  assert(next(out,sizeof out)&&!strncmp(out,"lw\t",3));
- assert(!next(out,sizeof out));
+ diag_at=current_tick;assert(!next(out,sizeof out));
+ /* FU30 progress is scoped to both the USB session and library revision. */
+ state.library_generation=12;diag.build_state=0;
+ store_text((const unsigned char*)"CF\t7\tlocaldiag",strlen("CF\t7\tlocaldiag"));assert(host_diag);
+ store_text((const unsigned char*)"CB\t7\t12\t3\t3\t2",strlen("CB\t7\t12\t3\t3\t2"));assert(diag.build_state==2&&diag.build_done==3);
+ store_text((const unsigned char*)"CB\t7\t11\t0\t3\t1",strlen("CB\t7\t11\t0\t3\t1"));assert(diag.build_state==2);
+ store_text((const unsigned char*)"CB\t7\t12\t4\t3\t2",strlen("CB\t7\t12\t4\t3\t2"));assert(diag.build_done==3);
+ diag.max_read_us=50000;pin_on=false;assert(cider_read_ahead_count(61,9)==6);pin_on=true;assert(cider_read_ahead_count(61,9)==3);pin_on=false;
   puts("Production album pin + idle fill + store hold: pinned L survives scrolling, shared with Now Playing, visible covers preempt, fills gated PASS");}
 '''
-(O/'pin.c').write_text(pre+fn('valid_key')+fn('pin_apply')+fn('cider_unpin_art')+fn('cider_pin_art')+fn('tier_name')+fn('store_local')+fn('miss_note')+fn('fill_add')+fn('store_text')+fn('begin_transfer')+fn('background_start')+fn('hex8')+fn('store_record')+fn('next')+fn('cider_request_art')+post)
+(O/'pin.c').write_text(pre+fn('valid_key')+fn('pin_apply')+fn('cider_unpin_art')+fn('cider_pin_art')+fn('tier_name')+fn('store_local')+fn('miss_note')+fn('fill_add')+fn('store_text')+fn('begin_transfer')+fn('background_start')+fn('hex8')+fn('store_record')+fn('next')+fn('cider_request_art')+fn('cider_read_ahead_count')+post)
 cmd=['cc','-std=gnu11','-Wall','-Wextra','-Wno-unused-variable','-Wno-unused-function','-Wno-unused-parameter','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'pin.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),str(R/'apps-ipod/screens/playback/cider_store.c'),str(R/'firmware/usbstack/podlink_wire.c'),'-o',str(O/'pin')]
 subprocess.run(cmd,check=True);subprocess.run([str(O/'pin')],check=True)

@@ -7,6 +7,9 @@
 #define BUTTON_NONE 0
 #define BUTTON_RC_MENU 0x00200000
 #define BUTTON_RC_SELECT 0x00400000
+#define BUTTON_RC_LEFT 0x00040000
+#define BUTTON_RC_RIGHT 0x00020000
+#define BUTTON_RC_PLAY 0x00100000
 #include "../../firmware/drivers/button_usb_remote.c"
 #include "../../firmware/target/arm/s5l8702/ipod6g/power-6g.c"
 

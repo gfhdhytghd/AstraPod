@@ -110,6 +110,11 @@ struct queue_event {int id;intptr_t data;};
 static jmp_buf done;
 static int disk_queue,cider_mutex,locks,closed,acks,waits,dequeued;
 static long current_tick;
+#define CIDER_SLOTS 24
+static struct {struct {unsigned length;bool dirty;}slot[CIDER_SLOTS];}cache;
+static struct {unsigned deferrals,loads;int last_error;}diag;
+static bool load_requested,build_on;
+static long dirty_at;
 static bool list_req,list_ready,disk_lookup;
 static unsigned nfills;
 static unsigned char disk_data[8];

@@ -12,6 +12,7 @@ pre=r'''
 #include <stdio.h>
 #include <string.h>
 #include "screens/playback/cider_library.h"
+#include "screens/playback/cider_model.h"
 #define ARRAYLEN(x) (sizeof(x)/sizeof((x)[0]))
 #define HZ 100
 #define MAX(a,b) ((a)>(b)?(a):(b))
@@ -40,10 +41,14 @@ static bool cover_nav_origin_is(int s){return origin_agents&&s==GO_TO_AGENTS;}
 static bool fail_play;
 static int cider_play_status(void){return 1;}
 static void splash(int t,const char*s){(void)t;(void)s;}
+static bool cider_store_debug_show(void){return false;}
+static unsigned cider_read_ahead_count(unsigned s,unsigned v){(void)s;(void)v;return 6;}
+static void cider_read_ahead(const char*const*k,unsigned n,const char*t){(void)k;(void)n;(void)t;}
 static void cider_warm_art(const char*const*k,unsigned int n,const char*t){(void)k;(void)n;(void)t;}
 static bool available=true;static int live,max_live,plays,draws,step,mode;static uint32_t rng;
 static char route[380];
 static const char*str(int n){(void)n;return "Native";}
+static bool cider_connected(void){return available;}
 static bool cider_available(void){return available;}
 static bool cider_active(void){return false;}
 static int audio_status(void){return 1;}
@@ -93,7 +98,7 @@ if(step>128){*a=ACTION_REMOTE_WPS;return;}rng=rng*1664525+1013904223;l->selected
 post=r'''
 int cider_covers(void){if(mode==4)return CIDER_COVERS_REMOTE_RETURN;if(mode==1)return GO_TO_PREVIOUS;assert(live==1);live++;if(live>max_live)max_live=live;struct cider_row r={0};strcpy(r.route,"album/a0");strcpy(r.title,"Album 0");cider_browse_album(&r);live--;return GO_TO_PREVIOUS;}
 int main(void){
-mode=0;depth=0;assert(cider_browse()==GO_TO_WPS&&plays==1&&!live&&depth==1);assert(root_count==5);assert(!strcmp(root_rows[3].route,"root/Album")&&!strcmp(root_rows[4].route,"root/Genre"));
+mode=0;depth=0;assert(cider_browse()==GO_TO_WPS&&plays==1&&!live&&depth==1);assert(root_count==6);assert(!strcmp(root_rows[3].route,"root/Album")&&!strcmp(root_rows[4].route,"root/Genre"));
 mode=1;assert(cider_browse()==GO_TO_PREVIOUS&&!live&&depth==0);
 depth=1;strcpy(history[1].route,"random");assert(cider_browse()==GO_TO_WPS&&depth==0&&!live);assert(cider_browse()==GO_TO_PREVIOUS&&!live);
 fail_play=true;depth=1;strcpy(history[1].route,"album/a0");memset(history[1].art,'c',64);history[1].art[64]=0;pins=0;mode=3;step=0;int raced=plays;assert(cider_browse()==GO_TO_PREVIOUS&&plays==raced&&!live);assert(pins>0&&!pinned);fail_play=false;
@@ -105,6 +110,8 @@ mode=4;cider_browse_covers(false);assert(cider_browse()==GO_TO_PREVIOUS&&!cider_
 origin_agents=true;cider_browse_covers(false);assert(cider_browse()==GO_TO_AGENTS&&!cider_browse_remote_return());mode=1;cider_browse_covers(false);assert(cider_browse()==GO_TO_AGENTS);origin_agents=false;
 assert(max_live==2&&draws>2000);printf("Production Cider native list controller: hidden rows, empty/unavailable, album/track play, 2000 seeded sequences, max instances=%d PASS\n",max_live);}
 '''
-(O/'browser.c').write_text(pre+s+post)
+model=(R/'apps-ipod/screens/playback/cider_model.c').read_text()
+start=model.index('const char *cider_list_notice(');end=model.index('/* Compare only song routes;',start)
+(O/'browser.c').write_text(pre+model[start:end]+s+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-enum-conversion','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),str(O/'browser.c'),'-o',str(O/'browser')],check=True)
 subprocess.run([str(O/'browser')],check=True,timeout=30)

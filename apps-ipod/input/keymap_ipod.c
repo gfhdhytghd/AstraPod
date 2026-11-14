@@ -488,19 +488,20 @@ static const struct button_mapping remote_button_context_tree[]  = {
 }; /* remote_button_context_tree */
 
 static const struct button_mapping remote_button_context_quickscreen[]  = {
-    { ACTION_QS_TOP,        BUTTON_RC_MENU,                    BUTTON_NONE },
-    { ACTION_QS_TOP,        BUTTON_RC_MENU|BUTTON_REPEAT,      BUTTON_NONE },
+    { ACTION_NONE,          BUTTON_RC_MENU,                    BUTTON_NONE },
+    { ACTION_NONE,          BUTTON_RC_MENU|BUTTON_REPEAT,      BUTTON_NONE },
+    { ACTION_STD_CANCEL,    BUTTON_RC_MENU|BUTTON_REL,         BUTTON_RC_MENU },
     /* The remote's centre key has no down meaning: like Select, a tap leaves */
     { ACTION_STD_CANCEL,    BUTTON_RC_PLAY|BUTTON_REL,         BUTTON_RC_PLAY },
     { ACTION_QS_LEFT,       BUTTON_RC_LEFT,                    BUTTON_NONE },
-    { ACTION_QS_LEFT,       BUTTON_RC_LEFT|BUTTON_REPEAT,      BUTTON_NONE },
+    { ACTION_NONE,          BUTTON_RC_LEFT|BUTTON_REPEAT,      BUTTON_NONE },
     { ACTION_QS_RIGHT,      BUTTON_RC_RIGHT,                   BUTTON_NONE },
-    { ACTION_QS_RIGHT,      BUTTON_RC_RIGHT|BUTTON_REPEAT,     BUTTON_NONE },
+    { ACTION_NONE,          BUTTON_RC_RIGHT|BUTTON_REPEAT,     BUTTON_NONE },
     { ACTION_STD_CANCEL,    BUTTON_RC_SELECT|BUTTON_REL,       BUTTON_RC_SELECT },
-    { ACTION_QS_VOLDOWN,   BUTTON_RC_VOL_DOWN,                 BUTTON_NONE },
-    { ACTION_QS_VOLDOWN,   BUTTON_RC_VOL_DOWN|BUTTON_REPEAT,   BUTTON_NONE },
-    { ACTION_QS_VOLUP,     BUTTON_RC_VOL_UP,                   BUTTON_NONE },
-    { ACTION_QS_VOLUP,     BUTTON_RC_VOL_UP|BUTTON_REPEAT,     BUTTON_NONE },
+    { ACTION_QS_DOWN,   BUTTON_RC_VOL_DOWN,                 BUTTON_NONE },
+    { ACTION_QS_DOWN,   BUTTON_RC_VOL_DOWN|BUTTON_REPEAT,   BUTTON_NONE },
+    { ACTION_QS_TOP,     BUTTON_RC_VOL_UP,                   BUTTON_NONE },
+    { ACTION_QS_TOP,     BUTTON_RC_VOL_UP|BUTTON_REPEAT,     BUTTON_NONE },
 
     LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_STD)
 }; /* button_context_quickscreen */

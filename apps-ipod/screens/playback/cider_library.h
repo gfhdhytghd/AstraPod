@@ -30,6 +30,7 @@ unsigned int cider_library_next(char *out, unsigned int size,
 void cider_library_reset(void);
 void cider_library_invalidate(uint32_t generation);
 int cider_browse(void);
+int cider_browse_at(const struct cider_row *row);
 int cider_browse_covers(bool home);
 bool cider_browse_remote_return(void);
 #define CIDER_COVERS_REMOTE_RETURN (-1001)

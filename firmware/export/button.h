@@ -75,6 +75,7 @@ long button_get(bool block);
 long button_get_w_tmo(int ticks);
 #if defined(HAVE_USB_PODLINK) && !defined(BOOTLOADER)
 void button_set_ui_filter(long (*filter)(long));
+void button_set_ui_timeout(int (*timeout)(int));
 #endif
 intptr_t button_get_data(void);
 

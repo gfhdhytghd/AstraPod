@@ -3,8 +3,16 @@
 #define CIDER_H
 #include "config.h"
 #include "screens/playback/cider_model.h"
+#include "screens/playback/cider_store.h"
 #ifdef HAVE_USB_PODLINK
+void cider_store_stats(struct cider_store_stats *out);
+void cider_store_build(bool enable);
+bool cider_store_building(void);
+bool cider_art_local(const char *key, const char *tier);
+void cider_read_ahead(const char *const *keys, unsigned int count, const char *tier);
+unsigned int cider_read_ahead_count(unsigned int speed, unsigned int visible);
 void cider_init(void);
+bool cider_connected(void);
 bool cider_available(void);
 bool cider_active(void);
 void cider_snapshot(struct cider_state *state);
@@ -40,6 +48,7 @@ struct cider_row;
 bool cider_page_row(int index, struct cider_row *row);
 #else
 static inline bool cider_active(void) { return false; }
+static inline bool cider_connected(void) { return false; }
 static inline bool cider_available(void) { return false; }
 static inline void cider_snapshot(struct cider_state *s)
 { *s = (struct cider_state){0}; }

@@ -41,11 +41,17 @@ static fb_data surface[128*128],tiny[32*32];static int quality;
 static int visited[40],nvisited;
 static bool cider_page_row(int index,struct cider_row*r){if(nvisited<40)visited[nvisited++]=index;memset(r,0,sizeof*r);r->bg=0x123456;strcpy(r->art,"key");return index>=0;}
 static bool cider_copy_art(const char*k,const char*t,void*p,unsigned int n){(void)k;if((!strcmp(t,"M")&&quality!=3)||(!strcmp(t,"XS")&&quality<2))return false;uint16_t*out=p;for(unsigned int i=0;i<n/2;i++)out[i]=i;return true;}
+static bool local_store;
+static bool cider_art_local(const char*k,const char*t){(void)k;(void)t;return local_store;}
 static unsigned int key(int i){(void)i;return 0;}
 static unsigned int version(int i){(void)i;return quality;}
 '''
 tick_stubs=r'''
 #define HZ 100
+#define ARRAYLEN(a) (sizeof(a)/sizeof((a)[0]))
+static struct cider_row row_ahead;
+static unsigned cider_read_ahead_count(unsigned s,unsigned v){(void)s;(void)v;return 6;}
+static void cider_read_ahead(const char*const*k,unsigned n,const char*t){(void)k;assert(n<=15);assert(!strcmp(t,"M"));}
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define TIME_BEFORE(a,b) ((long)((a)-(b))<0)
 static long current_tick,moved_at;
@@ -105,8 +111,9 @@ for(int show=0;show<=4;show++){for(int year=0;year<3;year++){
  if(drawn){assert(strstr(text_lines[0],"Album"));if(year)assert(strstr(text_lines[0],"2020"));if(drawn==2)assert(!strcmp(text_lines[1],"Artist"));}
 }}
 quality=1;center_index=6;previous_center=5;current_tick=100;moved_at=0;nvisited=0;tick();assert(!flicking&&m_requests==1&&!xs_requests&&!strcmp(retained_tier,"M"));
-center_index=5;current_tick=110;nvisited=0;tick();assert(flicking&&xs_requests==1&&visited[0]==5&&visited[1]==4&&!strcmp(retained_tier,"XS"));
+center_index=5;current_tick=110;nvisited=0;tick();assert(flicking&&xs_requests==1&&visited[0]==5&&visited[1]==4&&!strcmp(retained_tier,"M"));
 current_tick=145;tick();assert(!flicking&&m_requests==2&&!strcmp(retained_tier,"M"));
+local_store=true;quality=2;struct bitmap pending;assert(!art(0,&pending));local_store=false;
 puts("Native carousel load/get_slide layout + real Cider M columns, XS transpose, bg placeholder PASS");}
 '''
 (O/'carousel.c').write_text(pre+function(art_provider,'art')+'\n'+function(carousel,'load_and_prepare_surface')+'\n'+function(carousel,'get_slide')+tick_stubs+function((R/'apps-ipod/screens/playback/cider_model.c').read_text(),'cider_window')+function(provider,'tick')+caption_stubs+function(carousel,'carousel_album_caption')+post)

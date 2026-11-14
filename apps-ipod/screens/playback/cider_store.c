@@ -557,6 +557,7 @@ static int append(struct cider_store *cs, const uint8_t key[32],
     cs->pack[p].size += need; cs->total += need;
     if (!off) { cs->pack[p].session0 = cs->session; cs->pack[p].seq0 = cs->seq; }
     int r = index_put(cs, le32(key), le32(key + 4), tier, c, p, off / CS_SECTOR);
+    if (r == CS_OK && cs->io->sync(cs->ifd) < 0) r = CS_ERR;
     return r == CS_OK ? CS_OK : CS_ERR;
 }
 
@@ -618,12 +619,8 @@ int cs_get(struct cider_store *cs, const uint8_t key[32], unsigned int tier,
         return CS_ERR;
     }
     unsigned int stamp = cs->session & 0xffff;
-    if (le16(e + 16) != stamp && find(cs, k0, k1, tier, &b, &i) == CS_OK)
-    {
-        st16(slot(cs->bucket, i) + 16, stamp);
-        if (bucket_write(cs, b) == CS_OK &&
-            (int16_t)(stamp - cs->pack[p].last) > 0) cs->pack[p].last = stamp;
-    }
+    /* Pack recency is resident. Reads never write the index or wake a flush. */
+    if ((int16_t)(stamp - cs->pack[p].last) > 0) cs->pack[p].last = stamp;
     *payload = buf + CS_REC_HEAD; *length = len;
     return CS_OK;
 }

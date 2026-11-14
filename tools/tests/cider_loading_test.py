@@ -178,14 +178,15 @@ pre=r'''
 static struct cider_state state;
 static volatile uint32_t status_word;
 static unsigned long current_tick;
-static bool connected=true;
+static bool connected=true,initialized=true,host_live;
+static long live_at;
 static bool podlink_host_connected(void){return connected;}
 '''
 header=(R/'apps-ipod/screens/playback/cider.h').read_text()
 status=re.search(r'struct cider_status \{[^}]+\};',header).group()
 post=r'''
 int main(void){struct cider_status s;
- state.available=true;state.loading=true;state.rate=1000;state.muted=true;
+ state.generation=7;state.available=true;state.loading=true;state.rate=1000;state.muted=true;
  state.volume=100;state.shuffle=1;state.repeat=4;state.received=10;current_tick=11;
  publish_status();cider_status(&s);assert(s.available&&s.loading&&s.muted&&s.rate==1000&&s.volume==100&&s.shuffle==1&&s.repeat==4);
  state.loading=false;publish_status();cider_status(&s);assert(!s.loading&&s.rate==1000);
@@ -194,6 +195,6 @@ int main(void){struct cider_status s;
  state.available=false;publish_status();current_tick=11;cider_status(&s);assert(!s.available&&!s.loading);
  puts("Production compact status: fields, loading transitions, disconnect, expiry; no lock symbol PASS");}
 '''
-(O/'status.c').write_text(pre+status+source_function('publish_status')+source_function('cider_status')+post)
+(O/'status.c').write_text(pre+status+source_function('publish_status')+source_function('cider_connected')+source_function('cider_status')+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),str(O/'status.c'),'-o',str(O/'status')],check=True)
 subprocess.run([str(O/'status')],check=True)

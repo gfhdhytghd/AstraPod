@@ -1,5 +1,7 @@
 /* Native WPS source data, no layout or input loop. GPL version 2+. */
 #include "config.h"
+#include "misc.h"
+#include "settings/settings.h"
 #include "cider.h"
 #include "cider_wps.h"
 #include "wps.h"
@@ -13,6 +15,8 @@
 #include "lcd.h"
 #include "settings/settings.h"
 #include "system/activity.h"
+#include "system/app_util.h"
+#include "usb.h"
 #include <string.h>
 #include <stdio.h>
 static struct mp3entry id3;
@@ -20,19 +24,32 @@ static struct cider_state source;
 static fb_data pixels[240 * 240];
 static struct bitmap bitmap;
 static char key[65];
-static bool have_art;
+static bool have_art, volume_baseline, volume_visible;
 
 _Static_assert(sizeof id3 + sizeof source + sizeof pixels + sizeof bitmap + sizeof key + 64 < 120 * 1024, "Cider module RAM budget");
 
+void cider_wps_enter(void)
+{
+    volume_baseline = volume_visible = false;
+}
 void cider_wps_update(struct wps_state *state)
 {
     if (!cider_active())
+    {
+        cider_wps_enter();
         return;
+    }
     int old_volume = source.volume;
-    bool old_mute = source.muted;
+    bool old_mute = source.muted, old_available = source.available;
+    uint32_t old_generation = source.generation;
     cider_snapshot(&source);
-    if (source.volume != old_volume || source.muted != old_mute)
+    bool visible = get_current_activity() == ACTIVITY_WPS;
+    if (volume_baseline && volume_visible && visible && old_available &&
+        source.available && old_generation == source.generation &&
+        (source.volume != old_volume || source.muted != old_mute))
         global_status.last_volume_change = current_tick;
+    volume_baseline = true;
+    volume_visible = visible;
     if (strcmp(key, source.art))
     {
         snprintf(key, sizeof key, "%s", source.art);
@@ -158,4 +175,29 @@ int cider_wps_volume(bool *muted)
     if (muted)
         *muted = s.muted;
     return s.volume;
+}
+
+/* Share the WPS L surface rather than allocating another 115 KiB image. */
+bool cider_wps_show_art(void)
+{
+    bool usb = false;
+    action_wait_for_release();
+    for (;;)
+    {
+        cider_snapshot(&source);
+        cider_request_art(source.art, "L");
+        if (cider_copy_art(source.art, "L", pixels, sizeof pixels))
+        {
+            lcd_set_viewport(NULL);
+            lcd_clear_display();
+            lcd_bitmap(pixels, (LCD_WIDTH - 240) / 2, (LCD_HEIGHT - 240) / 2, 240, 240);
+            lcd_update();
+        }
+        int action = get_action(CONTEXT_STD, HZ / 10);
+        if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU || action == ACTION_STD_OK) break;
+        if (default_event_handler(action) == SYS_USB_CONNECTED) { usb = true; break; }
+    }
+    /* The surface may now belong to another track; make the WPS rebind it. */
+    have_art = false;
+    return usb;
 }

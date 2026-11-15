@@ -1146,6 +1146,8 @@ static bool shortcut_screen_context(int context)
 static int route_screen_shortcut(int action, int context)
 {
 #ifdef HAVE_USB_PODLINK
+    if (action == ACTION_REMOTE_WPS || action == ACTION_AGENTS_REMOTE_COVERS)
+        cider_remote_source();
     bool covers = action == ACTION_AGENTS_COVERS ||
                   action == ACTION_AGENTS_REMOTE_COVERS;
     bool agents = action == ACTION_AGENTS_SWITCH ||

@@ -867,3 +867,14 @@ hit is a RAM hint, not an index read or a successful disk lookup. Disk/index
 access remains in the store worker. Page header numbers must be decimal uint32
 values, and offset plus row count cannot exceed total. These changes preserve
 the existing wire grammar.
+
+## FU37 page diagnostics
+
+Native-page failures now log generation, request, query kind, offset and a short
+reason at WARNING. The known Cider message `Network connection unavailable` is
+preserved; arbitrary server bodies and query values are not logged. Page-ready
+logs include query kind and stale state. The existing CL grammar and firmware
+behavior are unchanged. A stale empty answer can still show `Cider list
+unavailable`; this host-only diagnostic patch does not claim to restore Cider's
+cloud connectivity. Read-only catalog album/playlist track routes are accepted
+by the host path allow-list.

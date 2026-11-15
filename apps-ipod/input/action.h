@@ -358,6 +358,10 @@ struct button_mapping {
 int get_custom_action(int context,int timeout,
                       const struct button_mapping* (*get_context_map)(int));
 /* use if one of the standard CONTEXT_ mappings will work (ALL the core should be using this! */
+/* Scope MENU to one step back in Now Playing's control-menu subtree. */
+bool action_set_menu_back(bool enabled);
+bool action_menu_back(void);
+
 int get_action(int context, int timeout);
 
 /* call this if you need to check for ACTION_STD_CANCEL only (i.e user abort! */

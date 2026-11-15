@@ -5,6 +5,7 @@
 #include "cider.h"
 #include "cider_library.h"
 #include "cider_controls.h"
+#include "screens/covers/carousel.h"
 #include "input/action.h"
 #include "input/agents_shortcut.h"
 #include "widgets/list.h"
@@ -37,7 +38,7 @@ static bool album_pending, show_covers, covers_home, covers_agents, remote_retur
 static int cover_album_depth = -1;
 static struct cider_row selected_row;
 static struct cider_row root_rows[35];
-static int root_count;
+static int root_count, browse_floor;
 static bool empty_list;
 static const char *list_notice;
 static fb_data art_source[56 * 56], art_pixels[56 * 56];
@@ -263,7 +264,10 @@ int cider_browse_at(const struct cider_row *row)
 {
     depth = 0;
     enter(row);
-    return cider_browse();
+    browse_floor = action_menu_back() ? depth : 0;
+    int result = cider_browse();
+    browse_floor = 0;
+    return result;
 }
 int cider_browse_covers(bool home)
 {
@@ -440,7 +444,7 @@ int cider_browse(void)
         if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
         {
             play_pending = false;
-            if (!depth)
+            if (depth <= browse_floor)
                 break;
             if (depth == cover_album_depth)
             {
@@ -562,6 +566,7 @@ int cider_browse(void)
             break;
         }
     }
+    carousel_forget_resume();
     gui_synclist_scroll_stop(&list);
     cider_unpin_art();
     browser_set_showing_art(false);

@@ -93,7 +93,7 @@ int main(void) {
     assert(agents_remote_button(&st,REMOTE_OTHER,0,BUTTON_RC_PLAY,660)==BUTTON_PLAY);
     assert(agents_remote_button(&st,REMOTE_OTHER,0,BUTTON_RC_PLAY,661)==(BUTTON_PLAY|BUTTON_REPEAT));
     assert(agents_remote_button(&st,REMOTE_OTHER,BUTTON_RC_PLAY|BUTTON_REL,0,710)==(BUTTON_PLAY|BUTTON_REL));
-    assert(lookup(CONTEXT_WPS,BUTTON_RC_PLAY|BUTTON_REPEAT,BUTTON_RC_PLAY)==ACTION_WPS_STOP);
+    assert(lookup(CONTEXT_WPS,BUTTON_RC_PLAY|BUTTON_REPEAT,BUTTON_RC_PLAY)==ACTION_WPS_CONTEXT);
     struct agents_shortcut_state cs={0};bool fire=false;
     int b=agents_shortcut_button(&cs,BUTTON_SELECT,BUTTON_SELECT,false,&fire);
     assert(lookup(CONTEXT_AGENTS,b,0)==ACTION_NONE);

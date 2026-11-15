@@ -36,6 +36,8 @@ static struct cider_cache cache;
 static struct cider_transfer transfer;
 static bool initialized, active, disk_lookup, request_ready, disk_running;
 static volatile bool sleep_pause_due;
+static bool source_seen;
+static uint32_t source_generation;
 static volatile bool host_live;
 static bool live_reply;
 static volatile long live_at;
@@ -157,6 +159,7 @@ static void reset(void)
     nfills = noffers = nacks = 0; hold_until = 0;
     hello_at = current_tick - 2 * HZ;
     mutex_unlock(&cider_mutex);
+    button_queue_post(BUTTON_REDRAW, 0);
 }
 
 static bool receive(const struct podlink_message *m)
@@ -286,9 +289,12 @@ static bool receive(const struct podlink_message *m)
         uint32_t previous = state.generation;
         uint32_t library = state.library_generation;
         bool available = state.available;
+        bool had_state = state.have;
         bool was_loading = state.loading;
         uint32_t position = cider_position(&state,current_tick,HZ);
         cider_state_apply(&state, m->data, m->length, current_tick);
+        if (available != state.available || had_state != state.have)
+            button_queue_post(BUTTON_REDRAW, 0);
         if (was_loading != state.loading)
             cider_log("CIDER loading received tick=%ld loading=%d seq=%lu", current_tick,
                       state.loading, (unsigned long)state.seq);
@@ -1013,9 +1019,27 @@ bool cider_available(void)
            (unsigned long)current_tick - state.received < 30 * HZ &&
            cider_connected();
 }
-/* Render the pending selection immediately; local audio is still handed
- * over only by cider_play_status() after a successful selection ACK. */
+/* Preview pending selections immediately. Availability selects the system
+ * source; selection ACKs finish the requested track handoff. */
 bool cider_active(void) { return active || (play_request && play_reply >= 0); }
+bool cider_play_pending(void) { return play_request != 0; }
+void cider_source_poll(void)
+{
+    bool online = cider_available();
+    if (online == source_seen && (!online || source_generation == state.generation)) return;
+    source_seen = online;
+    source_generation = online ? state.generation : 0;
+    /* One Now Playing source. Never resume local audio on an unplug. */
+    int local = audio_status();
+    if ((local & AUDIO_STATUS_PLAY) && !(local & AUDIO_STATUS_PAUSE)) audio_pause();
+    active = online;
+}
+void cider_remote_source(void)
+{
+    bool use_cider = cider_available();
+    if (use_cider && (audio_status() & AUDIO_STATUS_PLAY)) audio_pause();
+    active = use_cider;
+}
 void cider_snapshot(struct cider_state *out)
 {
     mutex_lock(&cider_mutex);
@@ -1045,7 +1069,8 @@ void cider_status(struct cider_status *out)
 /* Queue one control; the request id, or 0 when nothing was queued. */
 static uint32_t queue_control(const char *command, int value)
 {
-    if (!state.available || ncommands >= ARRAYLEN(commands)) return 0;
+    if (!state.generation || ncommands >= ARRAYLEN(commands) ||
+        (!state.available && strcmp(command, "next") && strcmp(command, "previous"))) return 0;
     snprintf(commands[ncommands++], sizeof commands[0],
              "cc\t%lu\t%lu\t%s\t%d", (unsigned long)state.generation,
              (unsigned long)++next_request, command, value);

@@ -22,6 +22,9 @@ api=h[h.index('enum agents_nav_screen'):h.rfind('#endif')]
 nav=c[c.index('static bool cover_journey'):c.index('int agents_shortcut_button(')]
 pre=r'''
 #include <assert.h>
+static void __attribute__((unused)) cider_remote_source(void){}
+static void __attribute__((unused)) cider_source_poll(void){}
+static int __attribute__((unused)) cider_wps_poll(void){return 1;}
 #include <stdbool.h>
 static bool cider_active(void){return false;}
 static struct {bool paused;} test_wps_state, *state=&test_wps_state;

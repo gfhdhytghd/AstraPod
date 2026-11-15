@@ -62,6 +62,9 @@ struct gui_quickscreen
     bool cider;          /* Left/Right are Cider's shuffle/repeat, not settings */
 };
 
+static bool cider_quickscreen;
+bool quick_screen_cider_active(void) { return cider_quickscreen; }
+
 /* Cider mode shown in a slot of a Cider quick screen */
 static int cider_slot_mode(enum quickscreen_item i)
 {
@@ -343,6 +346,7 @@ static void quickscreen_cleanup(void *param)
 {
     struct gui_quickscreen *qs = (struct gui_quickscreen *)param;
 
+    cider_quickscreen = false;
     remove_event_ex(GUI_EVENT_NEED_UI_UPDATE, quickscreen_draw_cb, qs);
 
     FOR_NB_SCREENS(i)
@@ -437,11 +441,6 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
      *  - an action taken while pressing the enter button,
      *    then release the enter button*/
     bool can_quit = false;
-    /* MENU leaves a screen whose top slot is empty. It is armed only once MENU
-     * has been seen up, so the long press that opened this screen (its
-     * repeats and release) cannot close it again. */
-    bool menu_armed = false;
-
     qs->button_enter = button_enter;
     qs->result = QUICKSCREEN_OK;
 
@@ -479,15 +478,6 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
             *usb = true;
             return qs->result | QUICKSCREEN_IN_USB;
         }
-#ifdef BUTTON_RC_MENU
-        if (!(button_status() & (BUTTON_MENU | BUTTON_RC_MENU)))
-#else
-        if (!(button_status() & BUTTON_MENU))
-#endif
-            menu_armed = true;
-        if (button == ACTION_QS_TOP && !qs->items[QUICKSCREEN_TOP] &&
-            menu_armed && (button_status() & BUTTON_MENU))
-            break;
         if (gui_quickscreen_do_button(qs, button, &changed))
         {
             qs->result |= QUICKSCREEN_CHANGED;
@@ -592,6 +582,7 @@ int quick_screen_cider(int button_enter)
     bool usb = false;
 
     qs.cider = true;
+    cider_quickscreen = true;
     qs.volume_item = QUICKSCREEN_ITEM_COUNT;
     for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
         qs.items[i] = NULL;

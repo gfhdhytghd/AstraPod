@@ -1553,6 +1553,27 @@ static int go_to_callback(int action,
                           const struct menu_item_ex *this_item,
                           struct gui_synclist *this_list);
 
+/* Keep the selected album/artist browse on the caller's stack, so MENU
+ * returns to the same control-menu row rather than a root-menu handoff. */
+static int browse_from_controls(void)
+{
+    if (!action_menu_back())
+    {
+        context_menu_result = ONPLAY_GO_TO_LIBRARY;
+        return 0;
+    }
+    struct browse_context browse = {.dirfilter = SHOW_ID3DB,
+        .flags = BROWSE_DIRFILTER, .root = "/"};
+    struct browser_context *context = browser_get_context();
+    context->dirlevel = context->currtable = 0;
+    browser_db_clear_shortcut_base();
+    push_current_activity(ACTIVITY_DATABASEBROWSER);
+    int result = rockbox_browse(&browse);
+    pop_current_activity();
+    if (result == GO_TO_ROOT) context_menu_result = ONPLAY_MAINMENU;
+    return 0;
+}
+
 /* Both leave for the database browser, opened on the album or the album
  * artist, as a cover chosen in Album Covers does */
 static int go_to_album(void)
@@ -1567,8 +1588,7 @@ static int go_to_album(void)
 
     browser_db_enter_artist_album_tracks_on_next_load(album.album_seek,
                                                       album.artist_seek, name);
-    context_menu_result = ONPLAY_GO_TO_LIBRARY;
-    return 0;
+    return browse_from_controls();
 }
 
 static int go_to_artist(void)
@@ -1583,8 +1603,7 @@ static int go_to_artist(void)
         name[0] = '\0';
 
     browser_db_enter_artist_albums_on_next_load(album.artist_seek, name);
-    context_menu_result = ONPLAY_GO_TO_LIBRARY;
-    return 0;
+    return browse_from_controls();
 }
 
 /* Spoken word kept apart has a menu of its own, which a Go to opens in place
@@ -3489,7 +3508,9 @@ int context_menu_show(char* file, int attr, int from_context, bool hotkey, int c
     else
         menu = &browser_context_menu;
     hiding_begin();
+    bool previous_back = action_set_menu_back(from_context == CONTEXT_WPS || action_menu_back());
     menu_selection = do_menu(menu, NULL, NULL, false);
+    action_set_menu_back(previous_back);
     hiding_end();
 
     if (get_current_activity() == ACTIVITY_CONTEXTMENU) /* Activity may have been      */

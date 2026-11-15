@@ -806,7 +806,8 @@ static long wps_run(bool return_agents, bool menu_covers)
             if (show_album_covers(&go_to, &menu_covers)) return go_to;
             restore = true;
         }
-        if (cider_active()) cider_wps_update(state);
+        if (!cider_wps_poll()) return GO_TO_PREVIOUS;
+        cider_wps_update(state);
         bool audio_paused = cider_active() ? state->paused :
                             (audio_status() & AUDIO_STATUS_PAUSE) != 0;
         /* did someone else (i.e power thread) change audio pause mode? */
@@ -1168,6 +1169,7 @@ static long wps_run(bool return_agents, bool menu_covers)
             case ACTION_AGENTS_REMOTE_COVERS:
 #endif
                 {
+                    if (button == ACTION_AGENTS_REMOTE_COVERS) cider_remote_source();
                     long go_to;
                     theme_enabled = false;
                     if (show_album_covers(&go_to, &menu_covers))

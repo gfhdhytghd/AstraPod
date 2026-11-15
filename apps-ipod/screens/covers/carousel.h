@@ -205,4 +205,5 @@ void carousel_refresh(void);
 void carousel_drop_slides(void);
 void carousel_provider_changed(void);
 
+void carousel_forget_resume(void);
 #endif /* _CAROUSEL_H_ */

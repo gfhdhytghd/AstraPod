@@ -101,6 +101,7 @@ assert 'lcd_' not in function(provider,'text')
 assert 'carousel_album_caption(' in function((R/'apps-ipod/screens/covers/album_covers.c').read_text(),'draw_album_text')
 post=r''' 
 int main(void){model_data.art_key=key;model_data.read_art=art;model_data.art_version=version;
+assert(!load_and_prepare_surface(0,-1,0));assert(!load_and_prepare_surface(0,100,0));
 for(int q=1;q<=3;q++){quality=q;assert(load_and_prepare_surface(0,q,0));int h=pf_sldcache.cache[q].hid;struct dim*d=get_slide(h);assert(d->width==128&&d->height==d->width);uint16_t*p=(uint16_t*)(d+1);
 if(q==3){assert(p[129]==129&&sizes[h]==sizeof(int)+sizeof(struct dim)+32768);}else if(q==2){assert(p[128*4+8]==2*32+1);}else assert(p[0]==LCD_RGBPACK(0x12,0x34,0x56));assert(pf_sldcache.cache[q].version==(unsigned)q);}
 for(int i=1;i<=allocated;i++){free(handles[i]);}

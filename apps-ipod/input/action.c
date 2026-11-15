@@ -85,7 +85,9 @@ static int raw_volume_button(int button)
 static long raw_ui_filter(long button)
 {
     /* Audio/decoder threads also read buttons; they must never write RTC. */
-    if (thread_self() != ui_thread || ui_polling) return button;
+    if (thread_self() != ui_thread) return button;
+    cider_source_poll();
+    if (ui_polling) return button;
     podlink_time_sync();
     if (button & SYS_EVENT) return button;
     cider_play_status();
@@ -378,6 +380,7 @@ static int remote_context(int context)
 {
     if (context == CONTEXT_AGENTS) return REMOTE_AGENTS;
     if (context == CONTEXT_WPS) return REMOTE_WPS;
+    if (context == CONTEXT_QUICKSCREEN) return REMOTE_QUICKSCREEN;
     if (get_current_activity() == ACTIVITY_ALBUMCOVERS) return REMOTE_COVERS;
     if (agents_nav_has(AGENTS_NAV_TRACKS) &&
         get_current_activity() == ACTIVITY_DATABASEBROWSER) return REMOTE_ALBUM_LIST;
@@ -1170,6 +1173,19 @@ static int route_screen_shortcut(int action, int context)
 #endif
 }
 
+static bool menu_back;
+bool action_set_menu_back(bool enabled)
+{
+    bool previous = menu_back;
+    menu_back = enabled;
+    return previous;
+}
+bool action_menu_back(void) { return menu_back; }
+static int menu_back_action(int action)
+{
+    return menu_back && action == ACTION_STD_MENU ? ACTION_STD_CANCEL : action;
+}
+
 int get_action(int context, int timeout)
 {
 #ifdef HAVE_USB_PODLINK
@@ -1195,7 +1211,7 @@ int get_action(int context, int timeout)
     }
 #endif
     action = route_screen_shortcut(action, context);
-    return action;
+    return menu_back_action(action);
 }
 
 int action_set_keymap(struct button_mapping* core_keymap, int count)
@@ -1309,7 +1325,7 @@ int get_custom_action(int context,int timeout,
     }
 #endif
     action = route_screen_shortcut(action, context);
-    return action;
+    return menu_back_action(action);
 }
 
 intptr_t get_action_data(void)

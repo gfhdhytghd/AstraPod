@@ -833,3 +833,13 @@ characterization, not the target gate. A packed strip-file redesign is deferred.
 Zero placeholders/missing covers on the physical device remains an open gate;
 measure `read_us`/`max_read_us` and repeat all three views after installing and
 fully building the library store.
+
+## FU32 source and control ownership
+
+Availability on the connected Cider generation selects the system WPS source
+on the UI thread and pauses local audio. CA=0, session loss or unplug returns
+to local paused audio without an automatic resume. The host retains FU31b's
+failed-poll hysteresis. The WPS consumes pending native-play ACKs even when
+its originating browser has returned. Received controls are logged before
+availability or generation rejection. Collection queue verification and paged
+recovery do not change the wire grammar.

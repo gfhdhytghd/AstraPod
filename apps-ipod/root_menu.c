@@ -680,6 +680,7 @@ static int wpsscrn(void* param)
     bool return_agents = wps_return_agents;
     wps_return_agents = false;
     bool menu_covers = wps_menu_covers;
+    if (menu_covers) cider_remote_source();
     wps_menu_covers = false;
     int audstatus = audio_status();
     (void)param;
@@ -1040,6 +1041,7 @@ static int agents_scrn(void *param)
     int ret;
     while ((ret = agents_screen()) == AGENTS_SWITCH_COVERS)
     {
+        cider_remote_source();
         cover_nav_begin(GO_TO_AGENTS);
         int destination = album_covers_scrn(NULL);
         if (destination != GO_TO_PREVIOUS && destination != GO_TO_AGENTS) return destination;
@@ -1094,6 +1096,7 @@ void root_menu_agents_shortcut(void)
 
 void root_menu_wps_shortcut(void)
 {
+    cider_remote_source();
     if (agents_nav_pending() == AGENTS_NAV_NONE)
         agents_nav_request(AGENTS_NAV_WPS, false);
     wps_return_agents = wps_menu_covers = false;
@@ -1102,6 +1105,7 @@ void root_menu_wps_shortcut(void)
 
 void root_menu_cover_shortcut(void)
 {
+    cider_remote_source();
     if (agents_nav_pending() == AGENTS_NAV_NONE)
         agents_nav_request(agents_nav_has(AGENTS_NAV_COVERS) ?
                            AGENTS_NAV_BACK : AGENTS_NAV_COVERS, false);

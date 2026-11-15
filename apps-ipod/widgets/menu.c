@@ -1001,7 +1001,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
 
             /* A context menu's submenu goes back to the menu it was opened
              * from; only the menu itself closes */
-            if ((menu->flags & MENU_EXITAFTERTHISMENU) && stack_top == 0)
+            if ((menu->flags & MENU_EXITAFTERTHISMENU) && !action_menu_back() && stack_top == 0)
                 done = true;
             else if ((menu->flags&MENU_TYPE_MASK) == MT_MENU)
                 exiting_menu = true;
@@ -1011,7 +1011,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                 stack_top--;
                 menu = mstack[stack_top].menu;
                 int msel = mstack[stack_top].selected;
-                if (!exiting_menu && (menu->flags&MENU_EXITAFTERTHISMENU))
+                if (!exiting_menu && (menu->flags&MENU_EXITAFTERTHISMENU) && !action_menu_back())
                     done = true;
                 else
                     init_menu_lists(menu, &lists, msel, false, vps, buf, sizeof buf);
@@ -1062,6 +1062,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                 case MT_FUNCTION_CALL:
                 {
                     int return_value;
+                    int parent_activity = get_current_activity();
                     if (type == MT_FUNCTION_CALL_W_PARAM)
                     {
                         return_value = temp->function_param->function_w_param(
@@ -1071,7 +1072,11 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                     {
                         return_value = temp->function->function();
                     }
-                    if (!(menu->flags&MENU_EXITAFTERTHISMENU) ||
+                    /* Some native pages pop the context activity because
+                     * their original caller always exited after the action. */
+                    if (action_menu_back() && get_current_activity() != parent_activity)
+                        push_current_activity(parent_activity);
+                    if (action_menu_back() || !(menu->flags&MENU_EXITAFTERTHISMENU) ||
                             (temp->flags&MENU_EXITAFTERTHISMENU))
                     {
                         /* Reload menu but don't run the calback again FS#8117 */
@@ -1131,7 +1136,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                 init_menu_lists(menu, &lists,selected, true, vps, buf, sizeof buf);
             /* callback was changed, so reload the menu's callback */
             get_menu_callback(menu, &menu_callback);
-            if ((menu->flags&MENU_EXITAFTERTHISMENU) &&
+            if ((menu->flags&MENU_EXITAFTERTHISMENU) && !action_menu_back() &&
                 !(temp->flags&MENU_EXITAFTERTHISMENU))
             {
                 done = true;

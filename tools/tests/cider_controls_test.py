@@ -62,6 +62,7 @@ static bool cider_wps_show_art(void){return false;}
 static int get_action(int c,int t){(void)c;current_tick+=t;return 0;}
 static int default_event_handler(int a){(void)a;return 0;}
 static void splash(int t,const char*s){(void)t;(void)s;}
+static bool menu_back;static bool action_set_menu_back(bool on){bool old=menu_back;menu_back=on;return old;}
 static void action_wait_for_release(void){}
 static void push_current_activity(int a){(void)a;pushes++;}
 static void pop_current_activity(void){pops++;}

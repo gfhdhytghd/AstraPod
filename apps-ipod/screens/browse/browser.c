@@ -1738,7 +1738,7 @@ static int dirbrowse(void)
                     if (oldbutton == ACTION_TREE_PGLEFT)
                         break;
                     else
-                        return exit_to_new_screen(GO_TO_ROOT);
+                        return exit_to_new_screen(action_menu_back() ? GO_TO_PREVIOUS : GO_TO_ROOT);
                 }
 
                 if (id3db)

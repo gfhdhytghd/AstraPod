@@ -436,6 +436,11 @@ baseline=subprocess.check_output(['git','show','db11c0fb1e:apps-ipod/input/keyma
 candidate=(R/'apps-ipod/input/keymap_ipod.c').read_text()
 for name in re.findall(r'static const struct button_mapping (remote_button_context_\w+)\[\]',baseline):
     if name=='remote_button_context_agents': continue
+    if name=='remote_button_context_wps':
+        old=re.search(r'static const struct button_mapping '+name+r'\[\].*?\n};',baseline,re.S).group()
+        new=re.search(r'static const struct button_mapping '+name+r'\[\].*?\n};',candidate,re.S).group()
+        assert re.sub(r'ACTION_WPS_CONTEXT,\s*(BUTTON_RC_PLAY\|BUTTON_REPEAT)',r'ACTION_WPS_STOP,      \1',new)==old
+        continue
     if name=='remote_button_context_quickscreen':
         # FU30 changes the required slot mapping; fu30_remote_test runs it.
         quick=re.search(r'remote_button_context_quickscreen\[\].*?\n\};',candidate,re.S).group()
@@ -462,6 +467,7 @@ navpre='''
 #define GO_TO_WPS 3
 #define GO_TO_CIDER 89
 static bool __attribute__((unused)) cider_available(void){return false;}
+static void __attribute__((unused)) cider_remote_source(void){}
 static int __attribute__((unused)) cider_browse(void){return GO_TO_WPS;}
 #define GO_TO_ALBUM_COVERS 14
 #define GO_TO_PREVIOUS_MUSIC 4

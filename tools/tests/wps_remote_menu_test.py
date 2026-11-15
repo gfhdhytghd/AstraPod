@@ -8,6 +8,9 @@ a=wps.index('            case ACTION_WPS_MENU:');b=wps.index('            case A
 menu=wps[a:b]
 pre=r'''
 #include <assert.h>
+static void __attribute__((unused)) cider_remote_source(void){}
+static void __attribute__((unused)) cider_source_poll(void){}
+static int __attribute__((unused)) cider_wps_poll(void){return 1;}
 #include <stdbool.h>
 static bool cider_active(void){return false;}
 static int cider_browse_covers(bool home){(void)home;return 999;}
@@ -65,6 +68,9 @@ root=(R/'apps-ipod/root_menu.c').read_text()
 albums=(R/'apps-ipod/screens/covers/album_covers.c').read_text()
 nav=r'''
 #include <assert.h>
+static void __attribute__((unused)) cider_remote_source(void){}
+static void __attribute__((unused)) cider_source_poll(void){}
+static int __attribute__((unused)) cider_wps_poll(void){return 1;}
 #include <stdbool.h>
 #include <stdio.h>
 #include <stddef.h>

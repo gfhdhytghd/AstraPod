@@ -15,6 +15,9 @@ void cider_init(void);
 bool cider_connected(void);
 bool cider_available(void);
 bool cider_active(void);
+bool cider_play_pending(void);
+void cider_remote_source(void);
+void cider_source_poll(void);
 void cider_snapshot(struct cider_state *state);
 /* Small transport state for callers on tight stacks (UI, skin, status). */
 struct cider_status { bool available, muted, loading; int rate, volume, shuffle, repeat; };
@@ -47,6 +50,9 @@ bool cider_page_stale(void);
 struct cider_row;
 bool cider_page_row(int index, struct cider_row *row);
 #else
+static inline bool cider_play_pending(void) { return false; }
+static inline void cider_remote_source(void) {}
+static inline void cider_source_poll(void) {}
 static inline bool cider_active(void) { return false; }
 static inline bool cider_connected(void) { return false; }
 static inline bool cider_available(void) { return false; }

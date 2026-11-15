@@ -31,6 +31,8 @@ static struct cider_cache cache;
 static int cider_mutex;static unsigned long current_tick;
 static unsigned int granted,grant,cancel_request,ncommands,art_revision;
 #define HZ 100
+#define BUTTON_REDRAW 1
+static void button_queue_post(int b,int d){(void)b;(void)d;}
 static void cider_library_reset(void){}
 static void cider_library_invalidate(uint32_t n){(void)n;}
 static bool cider_library_receive(const void*d,unsigned int n,uint32_t g,uint32_t l){(void)d;(void)n;(void)g;(void)l;return true;}

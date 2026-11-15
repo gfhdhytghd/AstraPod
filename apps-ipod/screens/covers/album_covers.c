@@ -929,6 +929,7 @@ static int album_on_context(int index)
 
 void album_covers_cancel_resume(void)
 {
+    carousel_forget_resume();
     pf_resume_last_album = false;
     tracks_album_valid = false;
 }

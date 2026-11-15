@@ -32,6 +32,7 @@
 #include "draw/text_wrap.h"
 #include <stdio.h>
 #include "screens/playback/cider.h"
+#include "screens/playback/cider_controls.h"
 #include "screens/playback/cider_wps.h"
 #include "string-extra.h"
 #include <stdlib.h>
@@ -1367,6 +1368,13 @@ static const char* get_qs_token_value(struct wps_token *token, char *buf, int bu
 
         default:
             return NULL;
+    }
+    /* The themed quick screen must read the source edited by its loop. */
+    if (quick_screen_cider_active())
+    {
+        if (item != QUICKSCREEN_LEFT && item != QUICKSCREEN_RIGHT) return "";
+        int mode = item == QUICKSCREEN_LEFT ? CIDER_MODE_SHUFFLE : CIDER_MODE_REPEAT;
+        return data_token ? cider_mode_label(mode, cider_mode_get(mode)) : cider_mode_title(mode);
     }
     const struct settings_list *qs_setting = global_settings.qs_items[item];
 

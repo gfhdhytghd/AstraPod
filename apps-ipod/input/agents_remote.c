@@ -146,6 +146,12 @@ int agents_remote_button(struct agents_remote_state *s, int context,
                          int button, int held, unsigned long now)
 {
     if (s->queued) return take(s);
+    /* Quick screen centre is Select, including a hold; no tap gesture may
+     * navigate to another screen or turn into the physical BOTTOM key. */
+    if (context == REMOTE_QUICKSCREEN &&
+        ((button & BUTTON_REMOTE) == BUTTON_RC_PLAY ||
+         (button & BUTTON_REMOTE) == BUTTON_RC_SELECT))
+        return BUTTON_RC_SELECT | (button & (BUTTON_REL | BUTTON_REPEAT));
     if ((button & BUTTON_REMOTE) == BUTTON_RC_SELECT)
     {
         struct agents_remote_hold *h = &s->hold[0];

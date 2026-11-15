@@ -611,6 +611,46 @@ static void free_all_slide_prio(int prio);
  * (album_covers / artist_portraits) before init() runs. */
 static const struct carousel_model *model = NULL;
 
+/* Exact app-buffer snapshot across a track-list visit, off the UI stack. */
+static int resume_handle;
+static void *owned_buffer, *resume_placeholder;
+static size_t owned_bytes;
+static const struct carousel_model *resume_model;
+static struct db_summary_t resume_index;
+void carousel_forget_resume(void)
+{
+    if (resume_handle > 0) core_free(resume_handle);
+    resume_handle = 0;
+    resume_model = NULL;
+}
+static bool carousel_save_resume(void)
+{
+    carousel_forget_resume();
+    if (thread_is_running || !owned_buffer || !owned_bytes) return false;
+    int handle = core_alloc(owned_bytes);
+    if (handle <= 0) return false;
+    memcpy(core_get_data(handle), owned_buffer, owned_bytes);
+    resume_handle = handle;
+    resume_model = model;
+    resume_index = carousel_idx;
+    resume_placeholder = pf_placeholder_buf;
+    return true;
+}
+static bool carousel_restore_resume(void *buffer, size_t bytes)
+{
+    if (resume_handle <= 0) return false;
+    if (resume_model != model || owned_buffer != buffer || owned_bytes != bytes)
+    {
+        carousel_forget_resume();
+        return false;
+    }
+    memcpy(buffer, core_get_data(resume_handle), bytes);
+    carousel_idx = resume_index;
+    pf_placeholder_buf = resume_placeholder;
+    carousel_forget_resume();
+    return true;
+}
+
 static inline void buf_ctx_lock(void)
 {
     mutex_lock(&buf_ctx_mutex);
@@ -1328,6 +1368,7 @@ static void end_pf_thread(void)
  */
 static bool create_pf_thread(void)
 {
+    if (thread_is_running) return true;
     /* put the thread's queue in the bcast list */
     queue_init(&thread_q, true);
     if ((thread_id = create_thread(
@@ -1495,6 +1536,7 @@ static void initialize_slide_cache(void)
 */
 static inline int lla_pop_item (int *head, int i)
 {
+    if ((unsigned)i >= SLIDE_CACHE_SIZE) return -1;
     int prev = pf_sldcache.cache[i].prev;
     int next = pf_sldcache.cache[i].next;
     if (i == next)
@@ -1527,6 +1569,7 @@ static inline int lla_pop_head (int *head)
 */
 static inline void lla_insert (int i, int p)
 {
+    if ((unsigned)i >= SLIDE_CACHE_SIZE || (unsigned)p >= SLIDE_CACHE_SIZE) return;
     int next = p;
     int prev = pf_sldcache.cache[next].prev;
     pf_sldcache.cache[next].prev = i;
@@ -1541,6 +1584,7 @@ static inline void lla_insert (int i, int p)
 */
 static inline void lla_insert_tail (int *head, int i)
 {
+    if ((unsigned)i >= SLIDE_CACHE_SIZE) return;
     if (*head == -1)
     {
         *head = i;
@@ -1555,6 +1599,7 @@ static inline void lla_insert_tail (int *head, int i)
 */
 static inline void lla_insert_after(int i, int p)
 {
+    if ((unsigned)i >= SLIDE_CACHE_SIZE || (unsigned)p >= SLIDE_CACHE_SIZE) return;
     p = pf_sldcache.cache[p].next;
     lla_insert(i, p);
 }
@@ -1566,6 +1611,7 @@ static inline void lla_insert_after(int i, int p)
 */
 static inline void lla_insert_before(int *head, int i, int p)
 {
+    if ((unsigned)i >= SLIDE_CACHE_SIZE || (unsigned)p >= SLIDE_CACHE_SIZE) return;
     lla_insert(i, p);
     if (*head == p)
         *head = i;
@@ -1578,6 +1624,7 @@ static inline void lla_insert_before(int *head, int i, int p)
 */
 static inline void free_slide(int i)
 {
+    if ((unsigned)i >= SLIDE_CACHE_SIZE) return;
     if (pf_sldcache.cache[i].hid != empty_slide_hid)
         buflib_free(&buf_ctx, pf_sldcache.cache[i].hid);
     pf_sldcache.cache[i].index = -1;
@@ -1903,6 +1950,7 @@ static inline bool load_and_prepare_surface(const int slide_index,
                                             const int cache_index,
                                             const int prio)
 {
+    if ((unsigned)cache_index >= SLIDE_CACHE_SIZE || slide_index < 0) return false;
     int hid = -1;
     bool got_shared = false;
 
@@ -3041,6 +3089,7 @@ static bool slide_covers(struct slide_data *near, struct slide_data *far,
 
 void set_current_slide(const int slide_index)
 {
+    buf_ctx_lock();
     int old_center_index = center_index;
     step = 0;
     pf_random_spinning = false;
@@ -3053,6 +3102,7 @@ void set_current_slide(const int slide_index)
     target = center_index;
     slide_frame = center_index << 16;
     reset_slides();
+    buf_ctx_unlock();
 }
 
 static void return_to_idle_state(void)
@@ -3807,6 +3857,8 @@ static void update_scroll_animation(void)
 
 static void cleanup(void)
 {
+    /* Join before theme callbacks, provider changes or scratch release. */
+    end_pf_thread();
     wants_to_quit = true;
 
     /* Give the theme back. Whatever comes next draws itself, so no forced
@@ -3823,8 +3875,6 @@ static void cleanup(void)
         cpu_boost(false);
         pf_boosted = false;
     }
-    end_pf_thread();
-
     /* Turn on backlight timeout (revert to settings) -- inlined equivalent
      * of apps/plugins/lib/helper.c's backlight_use_settings(), which isn't
      * linkable from core code. */
@@ -4005,6 +4055,19 @@ static bool init(void)
      * stops playback -- and with it the dynamic colours, which need a
      * current track. */
     buf = app_claim_buffer(&buf_size, "album covers");
+    /* restore checks the previous base/size before recording this claim */
+    bool restored = carousel_restore_resume(buf, buf_size);
+    owned_buffer = buf; owned_bytes = buf_size;
+    if (restored)
+    {
+        lcd_setfont(screens[SCREEN_MAIN].getuifont());
+        init_scroll_lines();
+        buffer = LCD_BUF + (pf_vp_y + pf_draw_y_shift) * BUFFER_WIDTH;
+        pf_state = pf_idle; step = 0; fade = 256;
+        recalc_offsets(); reset_slides();
+        lcd_set_drawmode(DRMODE_FG);
+        return create_pf_thread();
+    }
 
     /* No failure to check for: the region is a static array, so the call either
      * returns it or panics because someone else is holding it. */
@@ -4398,6 +4461,7 @@ static int album_covers_loop(void)
          * screen closes, as it would refuse to open. */
         if (!model->external && !db_summary_current(&carousel_idx))
         {
+            end_pf_thread();
             if (!check_database())
             {
                 splash(HZ, tagcache_ram_failed()
@@ -4551,6 +4615,7 @@ static int album_covers_loop(void)
              * has changed since it was last flushed. */
             int art_y = 0, art_h = 0;
             bool joined;
+            buf_ctx_lock();
 
             art_owed = false;
             caption_owed = false;
@@ -4639,6 +4704,8 @@ static int album_covers_loop(void)
             t_flush = USEC_TIMER;
 #endif
 
+            buf_ctx_unlock();
+
             /* Copy offscreen buffer to LCD and give time to other threads.
              * Everything below pf_vp_y is this screen's own; the rows above it
              * only need sending when the status bar redrew into them. Full
@@ -4717,7 +4784,9 @@ static int album_covers_loop(void)
              * a CAROUSEL_MENU_* sentinel to stay. */
             if (!model->on_menu)
                 break;
+            end_pf_thread();
             ret = model->on_menu();
+            if (ret < 0 && !create_pf_thread()) return GO_TO_PREVIOUS;
             if (ret >= 0)
                 return ret;   /* a GO_TO_* screen code */
             /* Handled in place -- restore the carousel's own status bar/viewport
@@ -4743,10 +4812,14 @@ static int album_covers_loop(void)
             break;
 
         case PF_SORTING_NEXT:
+            end_pf_thread();
             model->sort_next();
+            if (!create_pf_thread()) return GO_TO_PREVIOUS;
             break;
         case PF_SORTING_PREV:
+            end_pf_thread();
             model->sort_prev();
+            if (!create_pf_thread()) return GO_TO_PREVIOUS;
             break;
         case PF_RANDOM:
             show_random_slide();
@@ -4777,6 +4850,8 @@ static int album_covers_loop(void)
             if (pf_state == pf_scrolling)
                 set_current_slide(target);
             action_wait_for_release();
+            end_pf_thread();
+            carousel_forget_resume();
             return model->on_context(center_index);
 
         case PF_TRACKLIST:
@@ -4786,7 +4861,18 @@ static int album_covers_loop(void)
              * center_index is the one they picked, then let the model drill in. */
             if (pf_state == pf_scrolling)
                 set_current_slide(target);
-            return model->enter(center_index);
+            end_pf_thread();
+            if (!carousel_save_resume())
+            {
+                splash(HZ, "Not enough memory to keep covers");
+                if (!create_pf_thread()) return GO_TO_PREVIOUS;
+                break;
+            }
+            int destination = model->enter(center_index);
+            if (destination != GO_TO_ALBUM_COVERS_TRACKS &&
+                !(model->external && destination == GO_TO_PREVIOUS))
+                carousel_forget_resume();
+            return destination;
         }
         default:
             if (default_event_handler(button) == SYS_USB_CONNECTED)
@@ -4821,6 +4907,8 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
 {
     int ret;
 
+    end_pf_thread();
+    if (resume_model && resume_model != m) carousel_forget_resume();
     model = m;
 
     /* Self-managed (rather than left to root_menu.c's load_screen(), which

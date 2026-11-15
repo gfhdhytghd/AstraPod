@@ -50,6 +50,8 @@ static char route[380];
 static const char*str(int n){(void)n;return "Native";}
 static bool cider_connected(void){return available;}
 static bool cider_available(void){return available;}
+static bool menu_back;static bool action_menu_back(void){return menu_back;}
+static void carousel_forget_resume(void){}
 static bool cider_active(void){return false;}
 static int audio_status(void){return 1;}
 static bool agents_nav_enter(int n){(void)n;assert(live==0);live++;return true;}
@@ -108,6 +110,7 @@ depth=0;mode=4;cider_browse_covers(true);assert(cider_browse()==GO_TO_WPS&&cider
 mode=1;cider_browse_covers(true);assert(cider_browse()==GO_TO_ROOT&&!cider_browse_remote_return());
 mode=4;cider_browse_covers(false);assert(cider_browse()==GO_TO_PREVIOUS&&!cider_browse_remote_return());
 origin_agents=true;cider_browse_covers(false);assert(cider_browse()==GO_TO_AGENTS&&!cider_browse_remote_return());mode=1;cider_browse_covers(false);assert(cider_browse()==GO_TO_AGENTS);origin_agents=false;
+mode=1;step=0;menu_back=true;struct cider_row entry={0};strcpy(entry.route,"album/context");assert(cider_browse_at(&entry)==GO_TO_PREVIOUS&&step==1);menu_back=false;
 assert(max_live==2&&draws>2000);printf("Production Cider native list controller: hidden rows, empty/unavailable, album/track play, 2000 seeded sequences, max instances=%d PASS\n",max_live);}
 '''
 model=(R/'apps-ipod/screens/playback/cider_model.c').read_text()

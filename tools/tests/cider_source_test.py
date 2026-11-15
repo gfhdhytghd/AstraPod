@@ -51,6 +51,7 @@ pre=r'''
 #define WPS 1
 #define ACTIVITY_WPS 1
 #define AUDIO_STATUS_PLAY 1
+#define AUDIO_STATUS_PAUSE 2
 #define SKIN_REFRESH_ALL 0xffff
 struct mp3entry {char *title,*artist,*albumartist,*album,*composer;unsigned long length,elapsed;char path[260];};
 struct wps_state {struct mp3entry *id3,*nid3;int ff_rewind_count;bool paused;};
@@ -62,6 +63,11 @@ static bool active;
 static struct cider_state incoming;
 static struct {int ff_rewind_accel,ff_rewind_min_step;bool talk_menu;}global_settings={0,2,false};
 static struct wps_state testing_wps;
+static struct mp3entry local_id3;
+static struct mp3entry*audio_current_track(void){return &local_id3;}
+static struct mp3entry*audio_next_track(void){return NULL;}
+static void splash(int n,const char*s){(void)n;(void)s;}
+static bool cider_connected(void){return true;}
 static struct wps_state*get_wps_state(void){return &testing_wps;}
 static int seek_actions;
 static int get_action(int c,int t);
@@ -98,7 +104,7 @@ static void cider_status(struct cider_status*o){o->available=state.available;o->
 static int local_starts;
 static int audio_status(void){return local_playing;}
 static void audio_queue_send(int q,intptr_t data){(void)q;(void)data;assert(!active);local_starts++;}
-static void audio_pause(void){pauses++;local_playing=0;}
+static void audio_pause(void){pauses++;local_playing=AUDIO_STATUS_PLAY|AUDIO_STATUS_PAUSE;}
 static void cider_request_art(const char*k,const char*t){(void)k;(void)t;request_calls++;}
 static bool bitmap_ready;
 static bool cider_copy_art(const char*k,const char*t,void*p,unsigned int n){(void)k;(void)t;if(!bitmap_ready)return false;memset(p,0x17,n);return true;}
@@ -131,6 +137,9 @@ struct bitmap*b=NULL;assert(wps_art_bitmap(CIDER_ART_HANDLE,&b)&&b->width==240&&
 assert(cider_wps_action(ACTION_WPS_PLAY)&&strstr(commands[ncommands-1],"toggle"));
 assert(cider_wps_action(ACTION_WPS_VOLUP)&&strstr(commands[ncommands-1],"volume-step\t1"));
 unsigned int before=ncommands;state.available=false;cider_wps_update(&w);assert(w.paused&&!strcmp(w.id3->title,"Cider song"));assert(cider_wps_action(ACTION_WPS_PLAY)&&ncommands==before&&active);
+state.available=false;before=ncommands;
+assert(cider_wps_action(ACTION_WPS_SKIPNEXT)&&ncommands==before+1&&strstr(commands[ncommands-1],"\tnext\t"));
+before=ncommands;assert(cider_wps_action(ACTION_WPS_SKIPPREV)&&ncommands==before+1&&strstr(commands[ncommands-1],"\tprevious\t"));
 state.available=true;cider_wps_update(&w);assert(active&&!w.paused);
 cider_local_play();assert(!active&&strstr(commands[ncommands-1],"source-local"));before=ncommands;cider_local_play();assert(ncommands==before);assert(wps_art_handle(2)==12);
 assert(!cider_wps_action(ACTION_WPS_PLAY));
@@ -216,10 +225,29 @@ assert(!cider_play_status()&&!active);play_reply=-1;assert(cider_play_status()==
 assert(cider_route_matches("play/library-songs/same%2Eid","same.id"));
 assert(!cider_route_matches("play/library-albums/same.id","same.id"));
 assert(!cider_route_matches("play/songs/same%","same.id"));
+assert(!cider_route_matches("play/songs/other",""));
+assert(!cider_route_matches("play/songs/same.id2","same.id"));
+assert(!cider_route_matches("play/songs/same.id","alias"));
+assert(!cider_route_matches("play/songs/a%00b","a"));
+play_request=0;play_reply=0;ncommands=0;state.id[0]=0;state.loading=false;
+assert(cider_play("play/library-songs/other")&&ncommands==1&&strstr(commands[0],"native-play"));
+/* Immediate WPS ACK commit allows the next different list selection. */
+play_reply=1;assert(cider_wps_poll()&&!play_request&&active);ncommands=0;
+assert(cider_play("play/library-songs/another")&&ncommands==1);play_reply=1;assert(cider_wps_poll()&&!play_request);
+/* Plug while visible / elsewhere; unplug returns the original local WPS paused. */
+for(int visible=0;visible<2;visible++){
+ active=false;source_seen=false;source_generation=0;state.available=false;local_playing=AUDIO_STATUS_PLAY;activity=visible?ACTIVITY_WPS:0;
+ cider_source_poll();assert(!active);int old=pauses;
+ state.available=true;state.generation++;cider_source_poll();assert(active&&pauses==old+1&&(local_playing&AUDIO_STATUS_PAUSE));
+ activity=ACTIVITY_WPS;cider_wps_update(&w);assert(w.id3!=&local_id3);
+ state.available=false;cider_source_poll();cider_wps_update(&w);assert(!active&&w.id3==&local_id3&&w.paused);
+ cider_remote_source();assert(!active);state.available=true;cider_remote_source();assert(active);state.available=false;cider_remote_source();assert(!active);
+}
+puts("FU32 WPS ACK clears pending; source handover on WPS/elsewhere, local pause and unplug restore PASS");
 puts("Production same-song/resume, pending WPS preview, ACK ownership, route decoding PASS");
 puts("Production Local/Cider, disconnect/reconnect, native WPS bitmap/actions PASS");}
 '''
-(O/'source.c').write_text(pre+'\nstatic volatile uint32_t status_word;\n'+fn('publish_status')+'\nenum {'+','.join(actions)+'};\n'+fn('cider_active')+'\n'+fn('queue_control')+'\n'+fn('cider_control')+'\n'+fn('cider_mode_get')+'\n'+fn('cider_mode_set')+'\n'+fn('play_route')+'\n'+fn('cider_play')+'\n'+fn('cider_play_in')+'\n'+fn('cider_play_status')+'\n'+fn('cider_local_play')+'\n'+fn('cider_retain_art')+'\n'+fn('cider_prefetch_art')+'\n'+fn('audio_play',playback)+'\n'+fn('audio_resume',playback)+'\n'+source+'\n'+seek+'\nstatic int get_action(int c,int t){(void)c;(void)t;return seek_actions++ ? ACTION_WPS_STOPSEEK : ACTION_WPS_SEEKFWD;}\n'+post)
+(O/'source.c').write_text(pre+'\nstatic volatile uint32_t status_word;\n'+fn('publish_status')+'\nenum {'+','.join(actions)+'};\n'+fn('cider_active')+fn('cider_play_pending')+'\nstatic bool source_seen;static uint32_t source_generation;\n'+fn('cider_source_poll')+fn('cider_remote_source')+'\n'+fn('queue_control')+'\n'+fn('cider_control')+'\n'+fn('cider_mode_get')+'\n'+fn('cider_mode_set')+'\n'+fn('play_route')+'\n'+fn('cider_play')+'\n'+fn('cider_play_in')+'\n'+fn('cider_play_status')+'\n'+fn('cider_local_play')+'\n'+fn('cider_retain_art')+'\n'+fn('cider_prefetch_art')+'\n'+fn('audio_play',playback)+'\n'+fn('audio_resume',playback)+'\n'+source+'\n'+seek+'\nstatic int get_action(int c,int t){(void)c;(void)t;return seek_actions++ ? ACTION_WPS_STOPSEEK : ACTION_WPS_SEEKFWD;}\n'+post)
 (O/'config.h').write_text('#define HAVE_USB_PODLINK\n')
 cmd=['cc','-std=gnu11','-g','-Wall','-Wextra','-Wno-unused-variable','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'source.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),str(R/'firmware/usbstack/podlink_wire.c'),'-o',str(O/'source')]
 subprocess.run(cmd,check=True);subprocess.run([str(O/'source')],check=True)

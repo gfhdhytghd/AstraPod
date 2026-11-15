@@ -4,6 +4,7 @@
 #include "settings/settings.h"
 #include "cider.h"
 #include "cider_wps.h"
+#include "widgets/splash.h"
 #include "wps.h"
 #include "input/action.h"
 #include "metadata.h"
@@ -24,7 +25,7 @@ static struct cider_state source;
 static fb_data pixels[240 * 240];
 static struct bitmap bitmap;
 static char key[65];
-static bool have_art, volume_baseline, volume_visible;
+static bool have_art, volume_baseline, volume_visible, source_bound;
 
 _Static_assert(sizeof id3 + sizeof source + sizeof pixels + sizeof bitmap + sizeof key + 64 < 120 * 1024, "Cider module RAM budget");
 
@@ -36,9 +37,18 @@ void cider_wps_update(struct wps_state *state)
 {
     if (!cider_active())
     {
+        if (source_bound)
+        {
+            state->id3 = audio_current_track();
+            state->nid3 = audio_next_track();
+            state->paused = (audio_status() & AUDIO_STATUS_PAUSE) != 0;
+            source_bound = have_art = false;
+            skin_request_full_update(WPS);
+        }
         cider_wps_enter();
         return;
     }
+    source_bound = true;
     int old_volume = source.volume;
     bool old_mute = source.muted, old_available = source.available;
     uint32_t old_generation = source.generation;
@@ -90,10 +100,27 @@ void cider_wps_update(struct wps_state *state)
     state->nid3 = NULL;
     state->paused = !source.available || !source.rate;
 }
+bool cider_wps_poll(void)
+{
+    if (!cider_play_pending()) return true;
+    if (cider_play_status() < 0)
+    {
+        splash(HZ, "Cider play failed");
+        return !cider_connected() || cider_active();
+    }
+    return true;
+}
 bool cider_wps_action(int action)
 {
     if (!cider_active())
         return false;
+    /* Keep skip intent on the live session during a transient CA=0. The
+     * host logs and ACKs an explicit refusal rather than silently losing it. */
+    if (action == ACTION_WPS_SKIPNEXT || action == ACTION_WPS_SKIPPREV)
+    {
+        cider_control(action == ACTION_WPS_SKIPNEXT ? "next" : "previous", 0);
+        return true;
+    }
     if (cider_available())
         switch (action)
         {

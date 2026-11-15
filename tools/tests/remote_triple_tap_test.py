@@ -13,6 +13,9 @@ S=Path(sys.argv[2]).resolve() if len(sys.argv)>2 else R
 source=re.sub(r'^#include .*$', '',(S/'apps-ipod/input/agents_remote.c').read_text(),flags=re.M)
 pre=r'''
 #include <assert.h>
+static void __attribute__((unused)) cider_remote_source(void){}
+static void __attribute__((unused)) cider_source_poll(void){}
+static int __attribute__((unused)) cider_wps_poll(void){return 1;}
 #include <stdbool.h>
 #include <stdio.h>
 #include <limits.h>
@@ -84,6 +87,9 @@ nav_production=nav_h[nav_h.index('enum agents_nav_screen'):nav_h.rfind('#endif')
 wps=(R/'apps-ipod/screens/playback/wps.c').read_text();covers=(R/'apps-ipod/screens/covers/carousel.c').read_text()
 nav=r'''
 #include <assert.h>
+static void __attribute__((unused)) cider_remote_source(void){}
+static void __attribute__((unused)) cider_source_poll(void){}
+static int __attribute__((unused)) cider_wps_poll(void){return 1;}
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>

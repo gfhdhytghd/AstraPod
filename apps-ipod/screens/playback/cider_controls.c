@@ -257,9 +257,11 @@ bool cider_context_show(void)
     page_usb = false; requested_exit = GO_TO_ROOT;
     action_wait_for_release();
     push_current_activity(ACTIVITY_CONTEXTMENU);
+    bool previous_back = action_set_menu_back(true);
     const struct menu_row_presenter *previous = menu_set_row_presenter(&context_presenter);
     int result = do_menu(&cider_context_menu, NULL, NULL, false);
     menu_set_row_presenter(previous);
+    action_set_menu_back(previous_back);
     pop_current_activity();
     return result == 1 || result == GO_TO_ROOT || page_usb;
 }

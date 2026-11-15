@@ -77,7 +77,7 @@ int main(void){
   state=(struct agents_remote_state){0};used=0;feed(context,BUTTON_RC_SELECT,BUTTON_RC_SELECT,300);feed(context,BUTTON_RC_SELECT|BUTTON_REPEAT,BUTTON_RC_SELECT,330);feed(context,BUTTON_RC_SELECT|BUTTON_REL,0,350);
   assert(used==4&&out[0]==BUTTON_RC_SELECT&&out[1]==BUTTON_PLAY&&out[2]==(BUTTON_PLAY|BUTTON_REPEAT)&&out[3]==(BUTTON_PLAY|BUTTON_REL));
  }
- assert(lookup(button_context_wps,BUTTON_PLAY|BUTTON_REPEAT,BUTTON_PLAY)==ACTION_WPS_STOP);
+ assert(lookup(button_context_wps,BUTTON_PLAY|BUTTON_REPEAT,BUTTON_PLAY)==ACTION_WPS_CONTEXT);
  assert(lookup(button_context_standard,BUTTON_PLAY|BUTTON_REPEAT,BUTTON_PLAY)==ACTION_NONE);
  assert(lookup(button_context_agents,BUTTON_PLAY,0)==ACTION_AGENTS_TALK);assert(lookup(button_context_agents,BUTTON_PLAY|BUTTON_REL,0)==ACTION_AGENTS_TALK_END);
  puts("FU30 every key in local/Cider quickscreen, native menu and WPS; centre tap preserved; native Play hold in all 5 scopes PASS");
@@ -87,5 +87,5 @@ int main(void){
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(r),'-I'+str(o),str(o/'test.c'),'-o',str(o/'test')],check=True)
 subprocess.run([str(o/'test')],check=True)
 qs=(r/'apps-ipod/screens/playback/quick_screen.c').read_text()
-assert 'menu_armed && (button_status() & BUTTON_MENU)' in qs, 'an empty remote TOP must be a no-op'
+assert 'menu_armed' not in qs, 'physical MENU retains TOP even when empty'
 assert 'button_set_ui_timeout(raw_ui_timeout)' in (r/'apps-ipod/input/action.c').read_text()

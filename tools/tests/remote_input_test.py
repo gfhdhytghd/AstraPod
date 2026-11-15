@@ -373,7 +373,7 @@ pagepre='''
 #define ACTION_NONE 0
 #define VIEW_USAGE 1
 #define VIEW_DETAIL 2
-#define VIEW_CONFIRM 3
+#define VIEW_ALERT 3
 #define SCREEN_MAIN 0
 #define HR_USAGE_SVCS 4
 #define USE_BLOCK 50
@@ -402,8 +402,8 @@ int main(void){
  page_move(ACTION_LISTTREE_PGDOWN);assert(detail_scroll==7);
  page_move(ACTION_LISTTREE_PGDOWN);assert(detail_scroll==14);
  page_move(ACTION_LISTTREE_PGUP);assert(detail_scroll==7);
- view=VIEW_CONFIRM;int n=draws;page_move(ACTION_LISTTREE_PGDOWN);assert(draws==n);
- puts("Agents production page blocks: Usage/detail/confirm/page bounds PASS");
+ view=VIEW_ALERT;int n=draws;page_move(ACTION_LISTTREE_PGDOWN);assert(draws==n);
+ puts("Agents production page blocks: Usage/detail/alert/page bounds PASS");
 }
 '''
 (O/'timing.c').write_text(pre+pagepre+page+pagetest)

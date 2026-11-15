@@ -5,6 +5,7 @@
 #include "cider.h"
 #include "cider_library.h"
 #include "cider_controls.h"
+#include "quick_screen.h"
 #include "screens/covers/carousel.h"
 #include "input/action.h"
 #include "input/agents_shortcut.h"
@@ -440,6 +441,15 @@ int cider_browse(void)
         {
             agents_nav_take(nav);
             action = ACTION_STD_CANCEL;
+        }
+        if (action == ACTION_STD_QUICKSCREEN)
+        {
+            if (quick_screen_current(action, NULL) == QUICKSCREEN_IN_USB)
+            {
+                result = GO_TO_ROOT;
+                break;
+            }
+            continue;
         }
         if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
         {

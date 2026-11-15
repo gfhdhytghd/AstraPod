@@ -1,4 +1,4 @@
-"""FU29: real consent/UI/profile/storage decisions, with RAM USB/queue ports.
+"""FU34 silent Agents exits and FU29 fresh-plug storage decisions, RAM ports.
 
 Unlike the profile-only test, run the production exclusive-storage gate and
 ACK handler, and model the controller's disable/init/configure sequence.
@@ -180,12 +180,15 @@ static void select_case(bool ejected)
     assert(!exclusive_storage_requested); /* no implicit disk access */
     agents_usb_exit(AGENTS_SWITCH_WPS);drain();assert(prompts==1);
     agents_usb_exit(AGENTS_EXIT_MENU);drain();
-    assert(prompts==2&&usb_confirm_pending(usb_consent.epoch));
+    assert(prompts==1&&podlink_requested&&serial()=='2'&&!detaches);
+    /* Disk Mode remains reachable on a fresh USB connection. */
+    begin(USB_MODE_MASS_STORAGE,ejected);
+    assert(prompts==1&&usb_confirm_pending(usb_consent.epoch));
     press(BUTTON_SELECT);
     assert(usb_consent.state==USB_CONSENT_CONNECT);
     assert(serial()=='1'&&!podlink_requested&&detaches==1);
     host_configure();
-    printf("FU29 re-ask SELECT: prior eject=%d, broadcasts=%d, UI events=%d\n",ejected,broadcasts,ui_events);fflush(stdout);
+    printf("FU34 fresh-plug SELECT: prior eject=%d, broadcasts=%d, UI events=%d\n",ejected,broadcasts,ui_events);fflush(stdout);
     assert(broadcasts==1&&ui_events==1&&exclusive_storage_requested);
     assert(!handovers); /* late Cider ACK cannot suppress the USB screen */
     queue_post(&usb_queue,SYS_USB_CONNECTED_ACK,usb_broadcast_seqnum-1);drain();
@@ -203,17 +206,18 @@ int main(int argc,char**argv)
     select_case(false);
     if(argc>1)select_case(true);
     begin(USB_MODE_MASS_STORAGE,true);press(BUTTON_MENU);
-    agents_usb_exit(AGENTS_EXIT_MENU);drain();press(BUTTON_MENU);
+    agents_usb_exit(AGENTS_EXIT_MENU);drain();assert(prompts==1);
     assert(usb_disk_ejected&&!broadcasts&&podlink_requested&&serial()=='2'&&!detaches);
     begin(USB_MODE_MASS_STORAGE,false);press(BUTTON_MENU);
-    agents_usb_exit(AGENTS_EXIT_MENU);drain();
+    agents_usb_exit(AGENTS_EXIT_MENU);drain();assert(prompts==1);
+    begin(USB_MODE_MASS_STORAGE,false);
     usb_confirm_reply(usb_consent.epoch-1,true);drain();assert(!broadcasts&&!detaches);
     unplug_during_sleep=true;press(BUTTON_SELECT);assert(!broadcasts&&!cable);
-    puts("FU29 physical SELECT/MENU mapping, fresh/ejected re-ask, silent WPS, stale choice, unplug, all-ACK gate PASS");
+    puts("FU34 MENU/WPS silent exit; fresh/ejected USB plug SELECT/MENU, stale choice, unplug, all-ACK gate PASS");
 }
 '''.replace("@EVENTS@", events).replace("@ACK@", ack)
 parts = [api, profile, fn(usb, "usb_request_exclusive_storage"),
-         fn(usb, "usb_release_exclusive_storage"), fn(screen, "agents_usb_exit"),
+         fn(usb, "usb_release_exclusive_storage"), (fn(screen, "agents_usb_exit") if "static void agents_usb_exit(" in screen else "static void agents_usb_exit(int result){(void)result;}"),
          fn(ui, "confirm_action"), keymap]
 cfile = OUT / "after-agents.c"
 cfile.write_text(pre + "\n".join(parts) + post)

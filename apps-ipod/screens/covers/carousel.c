@@ -81,6 +81,7 @@
 #include "screens/browse/browser_db.h"
 #include "screens/playback/track_info.h"          /* browse_id3 */
 #include "audio.h"            /* audio_status, audio_current_track */
+#include "screens/playback/quick_screen.h"
 #include "lcd.h"
 #include "font.h"
 #include "draw/icon_bitmaps.h"
@@ -137,10 +138,10 @@ const struct button_mapping pf_context_album_scroll[] =
 
 const struct button_mapping pf_context_buttons[] =
 {
-    {PF_MENU,         BUTTON_MENU|BUTTON_REPEAT,  BUTTON_MENU},
+    {ACTION_STD_QUICKSCREEN, BUTTON_MENU|BUTTON_REPEAT, BUTTON_MENU},
     {PF_QUIT,         BUTTON_MENU|BUTTON_REL,     BUTTON_MENU},
 #ifdef IPOD_ACCESSORY_PROTOCOL
-    {PF_MENU,         BUTTON_RC_MENU|BUTTON_REPEAT, BUTTON_RC_MENU},
+    {ACTION_STD_QUICKSCREEN, BUTTON_RC_MENU|BUTTON_REPEAT, BUTTON_RC_MENU},
     {PF_QUIT,         BUTTON_RC_MENU|BUTTON_REL,    BUTTON_RC_MENU},
     /* Remote Left/Right flip one album; holding keeps flipping */
     {PF_PREV,         BUTTON_RC_LEFT,                BUTTON_NONE},
@@ -4777,6 +4778,20 @@ static int album_covers_loop(void)
              * firmware. Not the WPS: this is a main-menu screen in its own
              * right, reachable without anything playing. */
             return GO_TO_PREVIOUS;
+        case ACTION_STD_QUICKSCREEN:
+        case ACTION_WPS_QUICKSCREEN:
+            /* Leave the model, position and surfaces alive under the overlay.
+             * Join before the theme changes, as for the other modal screens. */
+            end_pf_thread();
+            ret = quick_screen_current(button, NULL);
+            if (ret == QUICKSCREEN_IN_USB) return GO_TO_ROOT;
+            if (!create_pf_thread()) return GO_TO_PREVIOUS;
+            sb_set_persistent_title(model_title(), Icon_NOICON, SCREEN_MAIN);
+            lcd_set_viewport(&pf_vp);
+            lcd_set_background(pf_bg_color);
+            lcd_set_foreground(pf_fg_color);
+            lcd_set_drawmode(DRMODE_FG);
+            break;
         case PF_MENU:
             /* The in-screen menu is model-specific: both models open the shared
              * Carousel settings menu but act on different settings afterwards.

@@ -73,6 +73,7 @@ prefix=pre+'''
 #define CONTEXT_WPS 2
 #define CONTEXT_PLUGIN 3
 #define CONTEXT_QUICKSCREEN 4
+#define ACTION_NONE 0
 #define ACTION_QS_TOP 601
 #define ACTION_QS_DOWN 602
 #define ACTION_QS_VOLUP 505

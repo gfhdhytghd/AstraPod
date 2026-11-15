@@ -117,7 +117,7 @@ reported+='\nstatic void notify(void){'+notify+'}\n'
 reported+='\nstatic void query(int type){IAP_TX_INIT(3,13);IAP_TX_PUT(type);switch(type){'+replies+'}}\n'
 screen=(S/'apps-ipod/screens/system/agents_screen.c').read_text()
 policy=function(screen,'update_volume_mode') if 'static void update_volume_mode' in screen else 'static void update_volume_mode(void){iap_agents_volume_enable(true);}'
-pre+='\nstatic int view,confirm_from;static bool volume_paging __attribute__((unused));\n#define VIEW_DETAIL 3\n#define VIEW_USAGE 4\n#define VIEW_CONFIRM 5\n'+policy
+pre+='\nstatic int view;static bool volume_paging __attribute__((unused));\n#define VIEW_DETAIL 3\n#define VIEW_USAGE 4\n'+policy
 trace=[]
 for line in (R/'tools/tests/fixtures/remote-volume/2026-11-13.txt').read_text().splitlines():
  m=re.search(r'tick=(\d+).*03 0E 04 00 ([0-9A-F]{2}) 01',line)
@@ -135,7 +135,7 @@ int main(int argc,char **argv) {
   assert(global_status.volume==12&&iap_agents_volume_take()==PAGE_UP);
   view=2;update_volume_mode();step(18);
   assert(iap_agents_volume_take()==PAGE_UP&&global_status.volume==12);
-  view=VIEW_CONFIRM;confirm_from=VIEW_USAGE;update_volume_mode();
+  view=VIEW_DETAIL;update_volume_mode();
   assert(iap_agents_volume_get(&v,&m));puts("Usage disconnected paging / return paging PASS");return 0;
  }
  int ups=0,downs=0;

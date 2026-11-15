@@ -55,7 +55,6 @@ pre = r'''
 #define OUTBOX 4
 #define TALK_REPLY (8*HZ)
 #define PODLINK_CONNECTED 1
-#define VIEW_CONFIRM 1
 #define ACTION_AGENTS_TALK 10
 #define ACTION_AGENTS_REMOTE_TALK 11
 #define ACTION_AGENTS_DISCARD 12
@@ -75,7 +74,7 @@ static int music;
 #define BUTTON_MULTIMEDIA_PLAYPAUSE 0x10000100
 static void __attribute__((unused)) default_event_handler(int b){assert(b==BUTTON_MULTIMEDIA_PLAYPAUSE);music++;}
 static bool native_play_pending;static unsigned long native_play_at __attribute__((unused));
-static int nout,view,ret,switches;static bool done;
+static int nout,ret,switches;static bool done;
 static unsigned int next_req=1;
 static struct {bool hello,result_new,result_ok;int voice;char result_req[8],result_text[64];}model;
 struct gui_synclist {int unused;};

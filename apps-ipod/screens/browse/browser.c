@@ -1770,7 +1770,7 @@ static int dirbrowse(void)
                     break;
                 else if (!enter_shortcuts_menu)
                 {
-                    int ret = quick_screen_quick(button);
+                    int ret = quick_screen_current(button, NULL);
                     if (ret == QUICKSCREEN_IN_USB)
                         reload_dir = true;
                     else if (ret == QUICKSCREEN_GOTO_SHORTCUTS_MENU)

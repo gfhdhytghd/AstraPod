@@ -23,7 +23,7 @@
  *   agents    one tab's agents, each with its last activity under it; the
  *             title names the tab. The focus follows the wheel (fp);
  *             SELECT opens the agent's detail; LEFT and RIGHT go to the tab
- *             before or after, focusing it (ft); MENU goes back to spaces
+ *             before or after, focusing it (ft)
  *   detail    the agent's work, as the computer reads it from the pane
  *             (det, D) and this file draws it: its name and state with the
  *             time in it, what it is on (the terminal title, scrolled when
@@ -33,16 +33,15 @@
  *             its last tool steps, which give way when the message needs
  *             the room. DETAIL-DESIGN.md (beside the task cards) is the
  *             page's specification. The keys type as in usage, once the
- *             pane is focused (fp); MENU goes back
- *   question  the question and its options; SELECT answers; MENU dismisses
- *   confirm   "Leave Agents?", from MENU in spaces or usage: SELECT leaves,
- *             MENU goes back; the other keys do nothing
+ *             pane is focused (fp)
+ *   question  the question and its options; SELECT answers
  *
  * A question pops up as it arrives, over whichever view is open, once Play
- * is up and its result in, and once the confirm view has closed; answering
+ * is up and its result in; answering
  * or dismissing it goes back there. A dismissed question does not pop up
  * again, but the alert row at the top of the spaces and agents views still
- * opens it. Only SELECT in the confirm view leaves Agents. Focus sent for
+ * opens it. A MENU tap in any view leaves Agents without a popup.
+ * Holding MENU opens the quick screen. Focus sent for
  * the wheel, a tab, a workspace or the detail says nothing when it works
  * and its reason in the band when it fails.
  *
@@ -102,9 +101,10 @@
 #include "herdremote_model.h"
 #include "detail_layout.h"
 #include "agents_screen.h"
+#include "screens/playback/quick_screen.h"
 
 enum view { VIEW_SPACES, VIEW_AGENTS, VIEW_DETAIL, VIEW_QUESTION, VIEW_USAGE,
-            VIEW_CONFIRM, VIEW_ALERT, VIEW_INPUT };
+            VIEW_ALERT, VIEW_INPUT };
 
 enum row_kind {
     ROW_STATUS,     /* connection trouble; not selectable */
@@ -166,8 +166,6 @@ static char question_pane[16];  /* the pane the question view answers */
 static enum view question_from; /* the view to go back to, on which row */
 static struct row question_from_row;
 static struct hr_popped popped; /* the questions that have popped up */
-static enum view confirm_from;  /* the view under the confirm, which row */
-static struct row confirm_from_row;
 
 static char outbox[OUTBOX][96];
 static int nout;
@@ -838,7 +836,7 @@ static void build_rows(struct gui_synclist *list)
 {
     char buf[48];
     nrows = 0;
-    if (view == VIEW_USAGE || view == VIEW_DETAIL || view == VIEW_CONFIRM ||
+    if (view == VIEW_USAGE || view == VIEW_DETAIL ||
         view == VIEW_ALERT || view == VIEW_INPUT)
         return;
     if (view != VIEW_QUESTION)
@@ -1115,8 +1113,7 @@ static const char *view_title(void)
         snprintf(title, sizeof title, "%s", q ? q->agent : "Question");
         return title;
     }
-    if (view == VIEW_USAGE || (view == VIEW_CONFIRM &&
-                               confirm_from == VIEW_USAGE))
+    if (view == VIEW_USAGE)
         return "Usage";
     return "Agents";
 }
@@ -1640,25 +1637,6 @@ static void draw_detail(struct gui_synclist *list)
         text_at(d, 0, y + row++ * USE_LINE, USE_DIM,
                 fit(line, sizeof line, line, vp->width));
     }
-    d->set_foreground(fg);
-    d->update_viewport();
-    d->set_viewport(NULL);
-}
-
-/* Draw the confirm view over the empty list: the question, and what the
- * two keys do */
-static void draw_confirm(struct gui_synclist *list)
-{
-    struct screen *d = &screens[SCREEN_MAIN];
-    struct viewport *vp = list->parent[SCREEN_MAIN];
-    const char *title = "Leave Agents?", *hint = "SELECT leave · MENU stay";
-    d->set_viewport(vp);
-    unsigned fg = vp->fg_pattern;
-    d->clear_viewport();
-    int y = (vp->height - 2 * USE_LINE - DET_GAP) / 2;
-    text_at(d, (vp->width - text_w(d, title)) / 2, y, USE_TEXT, title);
-    text_at(d, (vp->width - text_w(d, hint)) / 2, y + USE_LINE + DET_GAP,
-            USE_DIM, hint);
     d->set_foreground(fg);
     d->update_viewport();
     d->set_viewport(NULL);
@@ -2243,16 +2221,13 @@ static void settle_viewport(struct gui_synclist *list)
 static void update_volume_mode(void)
 {
 #ifdef IPOD_ACCESSORY_PROTOCOL
-    bool want = view != VIEW_USAGE &&
-                !(view == VIEW_CONFIRM && confirm_from == VIEW_USAGE);
+    bool want = view != VIEW_USAGE;
     if (want != volume_paging)
     {
         iap_agents_volume_enable(want);
         volume_paging = want;
     }
-    iap_agents_volume_host_keys(view == VIEW_DETAIL || view == VIEW_USAGE ||
-        (view == VIEW_CONFIRM &&
-         (confirm_from == VIEW_DETAIL || confirm_from == VIEW_USAGE)));
+    iap_agents_volume_host_keys(view == VIEW_DETAIL || view == VIEW_USAGE);
 #endif
 }
 
@@ -2281,8 +2256,6 @@ static void show_at(struct gui_synclist *list, int select, int top)
         draw_usage(list);
     else if (view == VIEW_DETAIL)
         draw_detail(list);
-    else if (view == VIEW_CONFIRM)
-        draw_confirm(list);
     else if (view == VIEW_ALERT || view == VIEW_INPUT || question_binary_page())
         draw_question_overlay();
 }
@@ -2379,12 +2352,11 @@ static void leave_question(struct gui_synclist *list)
 }
 
 /* A question that has not popped up yet does so now, the oldest first and
- * one at a time, unless Play is held or its result is still to come, or
- * the confirm view is open */
+ * one at a time, unless Play is held or its result is still to come */
 static void pop_question(struct gui_synclist *list)
 {
     if (view == VIEW_QUESTION || view == VIEW_ALERT || view == VIEW_INPUT ||
-        view == VIEW_CONFIRM || talk_held ||
+        talk_held ||
         talk_req[0])
         return;
     const struct hr_question *q = hr_model_next_popup(&model, &popped);
@@ -2490,27 +2462,6 @@ static void close_detail(struct gui_synclist *list)
     view = VIEW_AGENTS;
     reset_focus();
     show_row(list, &r);
-}
-
-/* MENU at the top level: ask before leaving, over the view it came from */
-static void open_confirm(struct gui_synclist *list)
-{
-    int sel = gui_synclist_get_sel_pos(list);
-    confirm_from = view;
-    confirm_from_row = sel >= 0 && sel < nrows ? rows[sel] : (struct row){0};
-    view = VIEW_CONFIRM;
-    reset_focus();
-    show(list, 0);
-}
-
-/* MENU in the confirm view: back to the view and row it came from */
-static void close_confirm(struct gui_synclist *list)
-{
-    view = confirm_from;
-    if (view == VIEW_USAGE)
-        show(list, 0);
-    else
-        show_row(list, &confirm_from_row);
 }
 
 /* Act on SELECT: enter the workspace, open the agent's detail or the
@@ -2776,6 +2727,66 @@ static void take_result(struct gui_synclist *list)
     show_same(list);
 }
 
+/* A question result can arrive while the quick screen covers its page.
+ * Keep that one result until the overlay closes; poll_link still drains
+ * subsequent list/detail/voice traffic without drawing over the overlay. */
+static struct
+{
+    bool ready, ok;
+    char req[8], text[124];
+} quickscreen_result;
+
+static void quickscreen_keep_result(void)
+{
+    if (model.result_new && pending_req[0] &&
+        !strcmp(model.result_req, pending_req))
+    {
+        quickscreen_result.ready = true;
+        quickscreen_result.ok = model.result_ok;
+        memcpy(quickscreen_result.req, model.result_req, sizeof model.result_req);
+        memcpy(quickscreen_result.text, model.result_text, sizeof model.result_text);
+        model.result_new = false;
+    }
+}
+
+static void agents_quickscreen_poll(void)
+{
+    quickscreen_keep_result();
+    poll_link();
+    quickscreen_keep_result();
+    pump_keys();
+}
+
+static int agents_quickscreen(struct gui_synclist *list, int action)
+{
+    native_play_pending = false;
+    finish_talk(true);
+    quickscreen_result.ready = false;
+    long entered = current_tick;
+#ifdef IPOD_ACCESSORY_PROTOCOL
+    /* The same remote arrows now edit QS slots, never host keys or paging. */
+    iap_agents_volume_enable(false);
+    iap_agents_volume_host_keys(false);
+    volume_paging = false;
+#endif
+    int ret = quick_screen_current(action, agents_quickscreen_poll);
+    update_volume_mode();
+    if (ret != QUICKSCREEN_IN_USB)
+    {
+        pending_until += current_tick - entered;
+        if (quickscreen_result.ready)
+        {
+            model.result_new = true;
+            model.result_ok = quickscreen_result.ok;
+            memcpy(model.result_req, quickscreen_result.req, sizeof model.result_req);
+            memcpy(model.result_text, quickscreen_result.text, sizeof model.result_text);
+            take_result(list);
+        }
+        show_same(list);
+    }
+    return ret;
+}
+
 static bool agents_play_down(void)
 {
     int mask = BUTTON_PLAY;
@@ -2785,13 +2796,17 @@ static bool agents_play_down(void)
     return (button_status() & mask) != 0;
 }
 
-static void agents_usb_exit(int result)
+static bool agents_menu_exit(int action)
 {
-#ifdef HAVE_USB_CONFIRM
-    if (result == AGENTS_EXIT_MENU) usb_confirm_reopen();
-#else
-    (void)result;
+    if (action != ACTION_STD_MENU && action != ACTION_STD_CANCEL)
+        return false;
+    int raw;
+    get_action_statuscode(&raw);
+    int menu = BUTTON_MENU;
+#ifdef IPOD_ACCESSORY_PROTOCOL
+    menu |= BUTTON_RC_MENU;
 #endif
+    return (raw & menu) != 0;
 }
 
 static int agents_run(void);
@@ -2940,8 +2955,6 @@ static int agents_run(void)
             redraw_at = current_tick + HZ;
             if (view == VIEW_DETAIL)
                 draw_detail(&list);
-            else if (view == VIEW_CONFIRM)
-                draw_confirm(&list);
             else
                 show_same(&list);
         }
@@ -2989,19 +3002,16 @@ static int agents_run(void)
                 draw_usage(&list);
             else if (view == VIEW_DETAIL)
                 draw_detail(&list);
-            else if (view == VIEW_CONFIRM)
-                draw_confirm(&list);
             else
                 show_same(&list);
         }
 
         int before = gui_synclist_get_sel_pos(&list);
         int before_top = list.start_item[SCREEN_MAIN];
-        if (view == VIEW_USAGE || view == VIEW_DETAIL || view == VIEW_CONFIRM ||
+        if (view == VIEW_USAGE || view == VIEW_DETAIL ||
             view == VIEW_ALERT || view == VIEW_INPUT || question_binary_page())
         {
-            /* No list to scroll: the wheel is the arrow keys, or in the
-             * confirm view nothing */
+            /* No list to scroll: the wheel is the arrow keys. */
             action = get_action(CONTEXT_AGENTS, ANIM_TICKS);
 #ifdef IPOD_ACCESSORY_PROTOCOL
             if (action == ACTION_STD_PREV || action == ACTION_STD_NEXT)
@@ -3015,7 +3025,7 @@ static int agents_run(void)
             }
 #endif
             int dir = 0;
-            if (view == VIEW_CONFIRM || view == VIEW_ALERT || view == VIEW_INPUT ||
+            if (view == VIEW_ALERT || view == VIEW_INPUT ||
                 question_binary_page())
                 ;
             else if (action == ACTION_STD_PREV ||
@@ -3099,6 +3109,24 @@ static int agents_run(void)
             }
             continue;
         }
+        /* Before question_action: alert and input pages consume every action. */
+        if (action == ACTION_STD_QUICKSCREEN || action == ACTION_WPS_QUICKSCREEN)
+        {
+            if (agents_quickscreen(&list, action) == QUICKSCREEN_IN_USB)
+            {
+                ret = 1;
+                done = true;
+            }
+            continue;
+        }
+        if (agents_menu_exit(action))
+        {
+            native_play_pending = false;
+            finish_talk(true);
+            ret = AGENTS_EXIT_MENU;
+            done = true;
+            continue;
+        }
         if (question_action(&list, action)) continue;
         switch (action)
         {
@@ -3110,12 +3138,7 @@ static int agents_run(void)
                 int button;
                 get_action_statuscode(&button);
                 bool right = button & BUTTON_RIGHT;
-                if (view == VIEW_CONFIRM)
-                {
-                    if (!right)
-                        done = true;
-                }
-                else if (view == VIEW_USAGE)
+                if (view == VIEW_USAGE)
                 {
                     if (right)
                         close_usage(&list);
@@ -3138,26 +3161,18 @@ static int agents_run(void)
             case ACTION_STD_CANCEL:
             case ACTION_STD_MENU:
             {
-                /* LEFT goes to usage, the tab before or Backspace; MENU
-                 * goes back a view, and from spaces and usage asks before
-                 * leaving Agents. LEFT acts on the press alone, but for
-                 * Backspace, which its repeats send too. */
+                /* MENU has already left above. LEFT goes to usage, the tab
+                 * before or Backspace; its repeats only repeat Backspace. */
                 int button;
                 int status = get_action_statuscode(&button);
                 bool left = action == ACTION_STD_CANCEL &&
                             (button & BUTTON_LEFT);
-                if (view == VIEW_CONFIRM)
-                {
-                    if (!left)
-                        close_confirm(&list);
-                    break;
-                }
                 if (view == VIEW_USAGE || view == VIEW_DETAIL)
                 {
                     if (left)
                         send_key("bs");
                     else if (view == VIEW_USAGE)
-                        open_confirm(&list);
+                        done = true;
                     else
                         close_detail(&list);
                     break;
@@ -3169,7 +3184,7 @@ static int agents_run(void)
                     if (left)
                         open_usage(&list);
                     else
-                        open_confirm(&list);
+                        done = true;
                 }
                 else if (view == VIEW_AGENTS)
                 {
@@ -3185,14 +3200,10 @@ static int agents_run(void)
             case ACTION_AGENTS_TALK:
                 native_play_pending = true;
                 native_play_at = current_tick;
-                if (view != VIEW_CONFIRM)
-                {
-                    start_talk(&list, false);
-                }
+                start_talk(&list, false);
                 break;
             case ACTION_AGENTS_REMOTE_TALK:
-                if (view != VIEW_CONFIRM)
-                    start_talk(&list, true);
+                start_talk(&list, true);
                 break;
             case ACTION_AGENTS_DISCARD:
                 finish_talk(true);
@@ -3255,11 +3266,6 @@ static int agents_run(void)
         flush_outbox();
         sleep(1);
     }
-    if (view == VIEW_CONFIRM)
-    {
-        view = confirm_from;
-        show_row(&list, &confirm_from_row);
-    }
     forget_keys();
     focus_want[0] = '\0';
     int selected = gui_synclist_get_sel_pos(&list);
@@ -3282,6 +3288,5 @@ static int agents_run(void)
     native_play_pending = false;
     FOR_NB_SCREENS(i)
         viewportmanager_theme_undo(i, false);
-    agents_usb_exit(ret);
     return ret;
 }

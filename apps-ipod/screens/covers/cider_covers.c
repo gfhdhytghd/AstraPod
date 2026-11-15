@@ -1,6 +1,7 @@
 /* Cider album provider for the native carousel. GPL version 2 or later. */
 #include "config.h"
 #include "carousel.h"
+#include "screens/playback/quick_screen.h"
 #include "screens/playback/cider.h"
 #include "screens/playback/cider_library.h"
 #include "settings/settings.h"
@@ -225,6 +226,9 @@ int cider_covers(void)
     while (cider_page_total() < 0 && TIME_BEFORE(current_tick, deadline))
     {
         int action = get_action(CONTEXT_STD, HZ / 10);
+        if (action == ACTION_STD_QUICKSCREEN &&
+            quick_screen_current(action, NULL) == QUICKSCREEN_IN_USB)
+            return GO_TO_ROOT;
         if (action == ACTION_STD_CANCEL ||
             agents_nav_pending() != AGENTS_NAV_NONE)
             return GO_TO_PREVIOUS;

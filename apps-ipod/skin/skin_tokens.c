@@ -1370,9 +1370,9 @@ static const char* get_qs_token_value(struct wps_token *token, char *buf, int bu
             return NULL;
     }
     /* The themed quick screen must read the source edited by its loop. */
-    if (quick_screen_cider_active())
+    if (quick_screen_cider_active() &&
+        (item == QUICKSCREEN_LEFT || item == QUICKSCREEN_RIGHT))
     {
-        if (item != QUICKSCREEN_LEFT && item != QUICKSCREEN_RIGHT) return "";
         int mode = item == QUICKSCREEN_LEFT ? CIDER_MODE_SHUFFLE : CIDER_MODE_REPEAT;
         return data_token ? cider_mode_label(mode, cider_mode_get(mode)) : cider_mode_title(mode);
     }

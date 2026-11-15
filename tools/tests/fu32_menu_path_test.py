@@ -61,7 +61,7 @@ pre=r'''
 #define MENU_ATTACHED_USB -3
 #define MAX_MENUS 8
 #define QUICKSCREEN_GOTO_SHORTCUTS_MENU 2
-static int quick_screen_quick(int action){(void)action;return 0;}
+static int quick_screen_current(int action,void(*poll)(void)){(void)action;(void)poll;return 0;}
 #define MENU_GET_COUNT(f) ((unsigned)(f)>>8)
 struct viewport{int x;};static struct viewport vp;
 struct gui_synclist{int selected_item,count,title_icon;const char*title;struct viewport*parent[1];};

@@ -60,6 +60,7 @@ struct gui_quickscreen
     int result;
     int volume_item;     /* slot showing Volume, or QUICKSCREEN_ITEM_COUNT */
     bool cider;          /* Left/Right are Cider's shuffle/repeat, not settings */
+    void (*poll)(void);  /* Keep a caller's foreground inbox flowing. No drawing. */
 };
 
 static bool cider_quickscreen;
@@ -71,10 +72,15 @@ static int cider_slot_mode(enum quickscreen_item i)
     return i == QUICKSCREEN_LEFT ? CIDER_MODE_SHUFFLE : CIDER_MODE_REPEAT;
 }
 
+static bool cider_slot(const struct gui_quickscreen *qs, enum quickscreen_item i)
+{
+    return qs->cider && (i == QUICKSCREEN_LEFT || i == QUICKSCREEN_RIGHT);
+}
+
 static const char *quickscreen_title(struct gui_quickscreen *qs,
                                      enum quickscreen_item i)
 {
-    return qs->cider ? cider_mode_title(cider_slot_mode(i))
+    return cider_slot(qs, i) ? cider_mode_title(cider_slot_mode(i))
                      : P2STR(ID2P(qs->items[i]->lang_id));
 }
 
@@ -216,7 +222,7 @@ static void quickscreen_draw_item(struct gui_quickscreen *qs,
     int temp;
 
     title = quickscreen_title(qs, i);
-    if (qs->cider)
+    if (cider_slot(qs, i))
         value = cider_mode_label(cider_slot_mode(i),
                                  cider_mode_get(cider_slot_mode(i)));
     else
@@ -372,7 +378,7 @@ static void talk_qs_option(struct gui_quickscreen *qs,
                            enum quickscreen_item item, bool enqueue)
 {
     const struct settings_list *opt = qs->items[item];
-    if (!global_settings.talk_menu || !opt || qs->cider)
+    if (!global_settings.talk_menu || !opt || cider_slot(qs, item))
         return;
 
     if (enqueue)
@@ -418,7 +424,7 @@ static bool gui_quickscreen_do_button(struct gui_quickscreen * qs, int button,
     if (qs->items[item] == NULL)
         return false;
 
-    if (qs->cider)
+    if (cider_slot(qs, item))
     {
         int mode = cider_slot_mode(item);
         cider_mode_set(mode, cider_mode_step(mode, cider_mode_get(mode),
@@ -468,6 +474,8 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
         talk_qs_option(qs, QUICKSCREEN_RIGHT, true);
 
     while (true) {
+        if (qs->poll)
+            qs->poll();
         button = get_action(CONTEXT_QUICKSCREEN, HZ/5);
         /* The USB screen runs inside the handler, so the quickscreen has to
          * take itself down first -- otherwise it is still the current
@@ -533,13 +541,15 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
     return qs->result;
 }
 
-int quick_screen_quick(int button_enter)
+static int quick_screen_run(int button_enter, bool cider, void (*poll)(void))
 {
     struct gui_quickscreen qs;
     int before[QUICKSCREEN_ITEM_COUNT];
     bool usb = false;
 
-    qs.cider = false;
+    qs.cider = cider;
+    qs.poll = poll;
+    cider_quickscreen = cider;
     qs.volume_item = QUICKSCREEN_ITEM_COUNT;
 
     for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
@@ -548,7 +558,7 @@ int quick_screen_quick(int button_enter)
 
         if (!is_setting_quickscreenable(qs.items[i]))
             qs.items[i] = NULL;
-        else if (qs.items[i])
+        else if (qs.items[i] && !cider_slot(&qs, i))
         {
             before[i] = option_value_as_int(qs.items[i]);
             if (qs.items[i]->lang_id == LANG_VOLUME)
@@ -556,16 +566,30 @@ int quick_screen_quick(int button_enter)
         }
     }
 
+    if (cider)
+    {
+        /* Only these two slots bind to Cider. TOP/BOTTOM keep the native
+         * settings, option steps, backlight callback and theme tokens. */
+        qs.items[QUICKSCREEN_LEFT] = find_setting(&global_settings.playlist_shuffle);
+        qs.items[QUICKSCREEN_RIGHT] = find_setting(&global_settings.repeat_mode);
+    }
+
     int ret = gui_syncquickscreen_run(&qs, button_enter, &usb);
     if (ret & QUICKSCREEN_CHANGED)
     {
+        bool local_changed = false;
         /* As option_screen() does: a theme setting moved here belongs in the
          * theme's overlay, or the next theme load discards it. Once per
          * setting at the end, not per press, since each mark is a write. */
         for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
-            if (qs.items[i] && option_value_as_int(qs.items[i]) != before[i])
+            if (qs.items[i] && !cider_slot(&qs, i) &&
+                option_value_as_int(qs.items[i]) != before[i])
+            {
                 settings_mark_user_tweak(qs.items[i]);
-        settings_save();
+                local_changed = true;
+            }
+        if (local_changed)
+            settings_save();
     }
     if (usb)
         return QUICKSCREEN_IN_USB;
@@ -573,25 +597,20 @@ int quick_screen_quick(int button_enter)
                                                    QUICKSCREEN_OK;
 }
 
-/* The same screen over Cider's shuffle (left) and repeat (right); top and
- * bottom stay empty, since nothing else in Cider has a quick-screen meaning.
- * Nothing here touches the local settings. */
+int quick_screen_quick(int button_enter)
+{
+    return quick_screen_run(button_enter, false, NULL);
+}
+
+/* Cider owns LEFT/RIGHT; the local TOP/BOTTOM settings remain editable. */
 int quick_screen_cider(int button_enter)
 {
-    struct gui_quickscreen qs;
-    bool usb = false;
+    return quick_screen_run(button_enter, true, NULL);
+}
 
-    qs.cider = true;
-    cider_quickscreen = true;
-    qs.volume_item = QUICKSCREEN_ITEM_COUNT;
-    for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
-        qs.items[i] = NULL;
-    /* Presence markers only; titles and values come from Cider. */
-    qs.items[QUICKSCREEN_LEFT] = find_setting(&global_settings.playlist_shuffle);
-    qs.items[QUICKSCREEN_RIGHT] = find_setting(&global_settings.repeat_mode);
-
-    gui_syncquickscreen_run(&qs, button_enter, &usb);
-    return usb ? QUICKSCREEN_IN_USB : QUICKSCREEN_OK;
+int quick_screen_current(int button_enter, void (*poll)(void))
+{
+    return quick_screen_run(button_enter, cider_active(), poll);
 }
 
 /* stuff to make the quickscreen configurable */

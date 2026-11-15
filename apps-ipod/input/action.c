@@ -486,7 +486,10 @@ static bool remote_volume_action(action_cur_t *cur)
     if (cur->context == CONTEXT_AGENTS) return false;
     if (cur->context == CONTEXT_QUICKSCREEN)
     {   /* Remote arrows select slots; only the wheel changes volume. */
-        cur->action = up ? ACTION_QS_TOP : ACTION_QS_DOWN;
+        /* Ordinary release is not another step. REL|REPEAT is the existing
+         * atomic per-report step from the host volume bridge. */
+        cur->action = (button & BUTTON_REL) && !(button & BUTTON_REPEAT) ?
+                      ACTION_NONE : up ? ACTION_QS_TOP : ACTION_QS_DOWN;
         return true;
     }
     if (cur->context == CONTEXT_PLUGIN &&

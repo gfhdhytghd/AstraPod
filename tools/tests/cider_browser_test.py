@@ -21,6 +21,8 @@ pre=r'''
 #define P2STR(s) ((const char*)(s))
 #define FORMAT_NATIVE 1
 #define SYS_USB_CONNECTED 0xffff
+#define QUICKSCREEN_IN_USB 1
+static int quick_screen_current(int action,void(*poll)(void)){(void)action;(void)poll;return 0;}
 '''
 tokens=sorted(set(tokens)|{'ACTION_STD_MENU'})
 pre+='enum {ACTION_NONE,'+','.join(tokens)+'};\n'

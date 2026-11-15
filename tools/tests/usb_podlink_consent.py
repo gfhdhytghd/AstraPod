@@ -22,6 +22,7 @@ def function(text,name):
   depth+=(text[end]=='{')-(text[end]=='}');end+=1
  return text[m.start():end]
 exit_hook=function(screen,'agents_usb_exit') if 'static void agents_usb_exit(' in screen else 'static void agents_usb_exit(int result){(void)result;}'
+assert 'usb_confirm_reopen' not in screen
 if 'static void agents_usb_exit(' in screen:
  assert re.search(r'viewportmanager_theme_undo\(i, false\);\s*agents_usb_exit\(ret\);\s*return ret;',screen)
  assert re.search(r'case ACTION_AGENTS_SWITCH:.*?ret = AGENTS_SWITCH_WPS;.*?done = true;',screen,re.S)
@@ -110,11 +111,12 @@ static char serial(void){unsigned int mask=0;for(int i=0;i<USB_NUM_DRIVERS;i++)i
 int main(void)
 {
 
- /* S1: confirmed MENU exit reopens consent without resetting resident USB. */
+ /* FU34: MENU exit is silent; the explicit consent API is tested separately. */
  begin(0);usb_confirm_configured(true,false,false);drain();
  usb_confirm_reply(usb_consent.epoch,false);drain();
  int old_prompts=prompts,old_attach=attached,old_detach=detached;
- agents_usb_exit(0);agents_usb_exit(0);drain();assert(prompts==old_prompts+1);
+ agents_usb_exit(0);agents_usb_exit(0);drain();assert(prompts==old_prompts);
+ usb_confirm_reopen();drain();assert(prompts==old_prompts+1);
  assert(usb_confirm_pending(usb_consent.epoch));
  struct dialog dialog={true};uint32_t answer=usb_consent.epoch;
  assert(confirm_action(&dialog,ACTION_STD_CANCEL,&answer)==DIALOG_ACCEPT);drain();
@@ -125,7 +127,8 @@ int main(void)
  assert(attached==old_attach&&detached==old_detach);
  old_prompts=prompts;agents_usb_exit(AGENTS_SWITCH_WPS);drain();
  agents_usb_exit(AGENTS_SWITCH_WPS);agents_usb_exit(3);agents_usb_exit(4);drain();assert(prompts==old_prompts);
- agents_usb_exit(0);drain();answer=usb_consent.epoch;
+ agents_usb_exit(0);drain();assert(prompts==old_prompts);
+ usb_confirm_reopen();drain();answer=usb_consent.epoch;
  assert(confirm_action(&dialog,ACTION_STD_OK,&answer)==DIALOG_ACCEPT);drain();
  assert(enabled[USB_DRIVER_MASS_STORAGE]&&!podlink_requested&&serial()=='1');
  begin(0);usb_confirm_configured(true,false,false);drain();
@@ -172,7 +175,7 @@ int main(void)
  usb_mode=USB_MODE_MASS_STORAGE;queue_post(&usb_queue,USB_PODLINK_OPEN,usb_mode);drain();
  assert(serial()=='2'&&!enabled[USB_DRIVER_MASS_STORAGE]);
  usb_confirm_configured(true,false,false);drain();assert(prompts==1);
- puts("S1: MENU re-prompt; duplicate/stale/unplug safety; WPS switch silent; popup MENU keeps resident 2AA; SELECT enters disk PASS");
+ puts("FU34: MENU/WPS exits silent; explicit consent duplicate/stale/unplug safety; popup MENU keeps resident 2AA; SELECT enters disk PASS");
  puts("resident USB: first consent/MENU/500 switches stable 2AA/no attach or detach/no second popup/disk exclusive/pure Charge/stale reply/unplug PASS");
 }
 """.replace('EVENTS',events+'\n'+mode_events).replace('CLIENTS',clients)

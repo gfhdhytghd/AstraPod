@@ -1,4 +1,4 @@
-"""FU32 real keymap worker, remote decoder, quickscreen loop and skin QS tokens."""
+"""FU32/FU34 production key worker, quickscreen, native steps and skin tokens."""
 from pathlib import Path
 import re,subprocess,sys
 R=Path(__file__).resolve().parents[2];O=Path(sys.argv[1]).resolve();O.mkdir(parents=True,exist_ok=True);S=Path(sys.argv[2]) if len(sys.argv)>2 else R
@@ -26,13 +26,14 @@ pre=r'''
 #include "firmware/target/arm/s5l8702/ipod6g/button-target.h"
 #include "apps-ipod/input/agents_remote.h"
 #define HZ 100
+#define MAX_PATH 260
 #define NB_SCREENS 1
 #define FOR_NB_SCREENS(i) for(int i=0;i<NB_SCREENS;i++)
 #define LAST_ITEM_IN_LIST {0,0,0}
 #define LAST_ITEM_IN_LIST__NEXTLIST(c) {0,0,0}
 #define has_flag(a,b) (((a)&(b))==(b))
 #define P2STR(p) ((const char*)(p))
-#define ID2P(n) ((const unsigned char*)((n)==1?"Shuffle":"Repeat"))
+#define ID2P(n) ((const unsigned char*)((n)==1?"Shuffle":(n)==2?"Repeat":"Brightness"))
 #define SYS_EVENT 0x80000000u
 #define BUTTON_MULTIMEDIA 0x10000000
 #define CONTEXT_STD 1
@@ -64,7 +65,31 @@ pre=r'''
 #define LANG_VOLUME 3
 struct viewport{int dummy;};
 enum screen_type{SCREEN_MAIN};enum quickscreen_item{dummy_item};
-struct settings_list {int lang_id;int*setting;};
+#define F_BOOL_SETTING 1
+#define F_INT_SETTING 2
+#define F_T_SOUND 4
+#define F_CHOICE_SETTING 8
+#define F_TABLE_SETTING 16
+#define F_ALLOW_ARBITRARY_VALS 32
+#define HASFLAG(s,f) (((s)->flags&(f))!=0)
+#define ACTION_REPEAT 128
+struct int_setting {int min,max,step;void(*option_callback)(int);};
+struct bool_setting {void(*option_callback)(bool);};
+struct choice_setting {int count;void(*option_callback)(int);};
+struct table_setting {int count;int*values;void(*option_callback)(int);};
+struct sound_setting {int setting;};
+struct settings_list {int lang_id;int*setting;int flags;const struct int_setting*int_setting;const struct bool_setting*bool_setting;const struct choice_setting*choice_setting;const struct table_setting*table_setting;const struct sound_setting*sound_setting;};
+static const struct settings_list*settings;
+static int raw_status,brightness,applied=-1,saves,tweaks;
+static int get_action_statuscode(int*b){(void)b;return raw_status;}
+static int sound_steps(int i){(void)i;assert(0);return 0;}
+static int sound_min(int i){(void)i;assert(0);return 0;}
+static int sound_max(int i){(void)i;assert(0);return 0;}
+static void sound_set(int i,int v){(void)i;(void)v;assert(0);}
+static void backlight_set_brightness(int v){applied=v;}
+static bool is_setting_quickscreenable(const struct settings_list*s){(void)s;return true;}
+static void settings_mark_user_tweak(const struct settings_list*s){assert(s);tweaks++;}
+static void settings_save(void){saves++;}
 static struct {bool talk_menu;int playlist_shuffle,repeat_mode;const struct settings_list*qs_items[4];}global_settings;
 static struct {int volume;}global_status;
 static int modes[2],cvol,localsteps;
@@ -79,18 +104,21 @@ static const char*cider_mode_title(int m){return m?"Repeat":"Shuffle";}
 static const char*cider_mode_label(int m,int v){static const char*repeat[]={"Off","All","One","Shuffle","A-B"};return m?repeat[v]:v?"On":"Off";}
 static void cider_control(const char*c,int v){assert(!strcmp(c,"volume-step"));cvol+=v;}
 static void adjust_volume(int n){localsteps+=n;}
-static void option_select_next_val(const struct settings_list*s,bool prev,bool apply){(void)apply;int n=s->lang_id==1?2:5;*s->setting=(*s->setting+(prev?n-1:1))%n;}
+PRODUCTION_OPTION_STEP
 static int option_value_as_int(const struct settings_list*s){return *s->setting;}
-static const char*option_get_valuestring(const struct settings_list*s,char*b,int n,int v){(void)b;(void)n;return cider_mode_label(s->lang_id==2,v);}
+static const char*option_get_valuestring(const struct settings_list*s,char*b,int n,int v){if(s->lang_id==4){snprintf(b,n,"%d",v);return b;}return cider_mode_label(s->lang_id==2,v);}
 static const struct settings_list *find_setting(const void*p){for(int i=0;i<4;i++)if(global_settings.qs_items[i]&&global_settings.qs_items[i]->setting==p)return global_settings.qs_items[i];return NULL;}
 struct button_mapping{int action_code,button_code,pre_button_code;};
 typedef struct{int button;}action_last_t;
 typedef struct{int button,context,action;bool is_prebutton;const struct button_mapping*items;}action_cur_t;
 struct wps_token{int type;};
 static void *set_viewport(void*p){(void)p;return NULL;}static void noop(void){}
-static struct {void*(*set_viewport)(void*);void(*scroll_stop)(void);}screens[1]={{set_viewport,noop}};
+static char fallback_lines[2][260];
+static void putline(int x,int y,const char*s){assert(x==0&&y>=0&&y<2);snprintf(fallback_lines[y],sizeof fallback_lines[y],"%s",s);}
+struct screen {void*(*set_viewport)(void*);void(*scroll_stop)(void);void(*puts_scroll)(int,int,const char*);};
+static struct screen screens[1]={{set_viewport,noop,putline}};
 static int step,limit,prev,draws,cleans,kind;
-struct event{int button,left,right,volume;};static struct event events[40];
+struct event{int button,left,right,volume,expected_brightness;};static struct event events[40];
 static struct agents_remote_state remote;
 static unsigned long current_tick;
 static void remote_log_event(int a,unsigned long b,int c,int d,const void*e,unsigned f){(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;}
@@ -108,6 +136,7 @@ pre+=re.sub(r'^#include .*\n','',(S/'apps-ipod/input/agents_remote.c').read_text
 pre+=fn(skin,'get_qs_token_value')
 pre+=r'''
 static void assert_values(void){char b[80];struct wps_token t={SKIN_TOKEN_LEFT_QUICKSETTING_VALUE};
+ if(global_settings.qs_items[0]&&global_settings.qs_items[0]->lang_id==4){struct wps_token top={SKIN_TOKEN_TOP_QUICKSETTING_VALUE};assert(!strcmp(get_qs_token_value(&top,b,sizeof b),({static char expected[40];snprintf(expected,sizeof expected,"%d",brightness);expected;})));}
  if(kind==0){const char*v=get_qs_token_value(&t,b,sizeof b);assert(!strcmp(v,cider_mode_label(0,modes[0])));t.type=SKIN_TOKEN_RIGHT_QUICKSETTING_VALUE;assert(!strcmp(get_qs_token_value(&t,b,sizeof b),cider_mode_label(1,modes[1])));}}
 static void quickscreen_setup_viewports(struct gui_quickscreen*q,int i){(void)q;(void)i;}
 static void gui_quickscreen_draw(struct gui_quickscreen*q,int i){(void)q;(void)i;draws++;assert_values();}
@@ -125,21 +154,30 @@ static void talk_qs_option(struct gui_quickscreen*q,int i,bool b){(void)q;(void)
 static void talk_settle(void){}static void talk_value_decimal(int a,int b,int c,bool d){(void)a;(void)b;(void)c;(void)d;}
 static int sound_val2phys(int a,int b){(void)a;return b;}static int sound_numdecimals(int a){(void)a;return 0;}
 static void sb_skin_force_next_update(void){}
-static void check_previous(void){if(!step)return;struct event*e=&events[step-1];assert(modes[0]==e->left&&modes[1]==e->right&&cvol==e->volume);}
+static void check_previous(void){if(!step)return;struct event*e=&events[step-1];assert(modes[0]==e->left&&modes[1]==e->right&&cvol==e->volume);if(e->expected_brightness)assert(brightness==e->expected_brightness&&applied==brightness);}
 static int get_action(int context,int timeout){(void)timeout;assert(context==CONTEXT_QUICKSCREEN);check_previous();assert(step<limit);
  int raw=events[step++].button;current_tick+=20;
- int key=agents_remote_button(&remote,remote_context(context),raw,raw&BUTTON_REL?0:raw,current_tick);
+ raw_status=raw&BUTTON_REPEAT?ACTION_REPEAT:0;int key=agents_remote_button(&remote,remote_context(context),raw,raw&BUTTON_REL?0:raw,current_tick);
  action_cur_t c={.button=key,.context=context};int result=ACTION_NONE;
  if(remote_volume_action(&c))result=c.action;
  else if(key){c.items=key&BUTTON_REMOTE?remote_button_context_quickscreen:button_context_quickscreen;action_last_t l={prev};int i=0;result=action_code_worker(&l,&c,&i);if(result==ACTION_UNKNOWN)result=ACTION_NONE;}
  prev=key;return result;}
 '''
-pre+=fn(q,'cider_slot_mode')+fn(q,'gui_quickscreen_do_button')+fn(q,'gui_syncquickscreen_run')+fn(q,'quick_screen_cider')
+pre=pre.replace('PRODUCTION_OPTION_STEP',fn((S/'apps-ipod/widgets/option_select.c').read_text() if (S/'apps-ipod/widgets/option_select.c').exists() else (R/'apps-ipod/widgets/option_select.c').read_text(),'option_select_next_val'))
+pre+=fn(q,'cider_slot_mode')
+if 'static bool cider_slot(' in q:pre+=fn(q,'cider_slot')
+pre+=fn(q,'quickscreen_title')+fn(q,'quickscreen_draw_item')+fn(q,'gui_quickscreen_do_button')+fn(q,'gui_syncquickscreen_run')
+if 'static int quick_screen_run(' in q:
+ pre+=fn(q,'quick_screen_run')+fn(q,'quick_screen_quick')+fn(q,'quick_screen_cider')+fn(q,'quick_screen_current')
+else:
+ pre+=fn(q,'quick_screen_quick')+fn(q,'quick_screen_cider')
+ pre+='static int quick_screen_current(int b,void(*p)(void)){(void)p;return cider_active()?quick_screen_cider(b):quick_screen_quick(b);}'
 post=r'''
 static void add(int key,int l,int r,int v){events[limit++]=(struct event){key,l,r,v};}
+static void addb(int key,int value){add(key,0,0,0);events[limit-1].expected_brightness=value;}
 static void reset(void){step=limit=prev=0;memset(modes,0,sizeof modes);remote=(struct agents_remote_state){0};cvol=0;}
 int main(void){
- struct settings_list left={1,&global_settings.playlist_shuffle},right={2,&global_settings.repeat_mode};global_settings.qs_items[1]=&left;global_settings.qs_items[2]=&right;
+ struct int_setting left_info={0,1,1,NULL},right_info={0,4,1,NULL};struct settings_list left={.lang_id=1,.setting=&global_settings.playlist_shuffle,.flags=F_INT_SETTING,.int_setting=&left_info},right={.lang_id=2,.setting=&global_settings.repeat_mode,.flags=F_INT_SETTING,.int_setting=&right_info};global_settings.qs_items[1]=&left;global_settings.qs_items[2]=&right;
  source_cider=true;kind=0;reset();
  add(BUTTON_LEFT,1,0,0);add(BUTTON_LEFT|BUTTON_REL,1,0,0);
  add(BUTTON_RIGHT,1,1,0);add(BUTTON_RIGHT|BUTTON_REL,1,1,0);
@@ -178,9 +216,52 @@ int main(void){
    assert(action_code_worker(&l,&c,&i)==(side?ACTION_WPS_SKIPNEXT:ACTION_WPS_SKIPPREV));}
  }
 
+
+ /* FU34: the same native brightness setting and option implementation serve
+  * TOP/BOTTOM in both sources. Each physical step and display is checked. */
+ struct int_setting bright_info={1,63,1,backlight_set_brightness};
+ struct settings_list bright={.lang_id=4,.setting=&brightness,.flags=F_INT_SETTING,.int_setting=&bright_info};
+ global_settings.qs_items[QUICKSCREEN_TOP]=global_settings.qs_items[QUICKSCREEN_BOTTOM]=&bright;
+ for(int src=0;src<2;src++)for(int keysource=0;keysource<2;keysource++)for(int exitkey=0;exitkey<3;exitkey++){
+  source_cider=src;kind=1;reset();brightness=32;applied=-1;saves=tweaks=0;
+  int up=keysource?BUTTON_RC_VOL_UP:BUTTON_MENU,down=keysource?BUTTON_RC_VOL_DOWN:BUTTON_PLAY;
+  addb(up,33);addb(up|BUTTON_REPEAT,34);addb(up|BUTTON_REL,34);
+  addb(down,33);addb(down|BUTTON_REL,33);
+  int done=exitkey==0?BUTTON_SELECT:exitkey==1?BUTTON_RC_MENU:BUTTON_RC_PLAY;
+  add(done,0,0,0);add(done|BUTTON_REL,0,0,0);
+  quick_screen_current(ACTION_STD_QUICKSCREEN,NULL);check_previous();
+  assert(step==limit&&brightness==33&&applied==33&&saves==1&&tweaks==2);
+  char b[40];struct wps_token t={SKIN_TOKEN_TOP_QUICKSETTING_NAME};
+  assert(!strcmp(get_qs_token_value(&t,b,sizeof b),"Brightness"));
+  t.type=SKIN_TOKEN_BOTTOM_QUICKSETTING_VALUE;assert(!strcmp(get_qs_token_value(&t,b,sizeof b),"33"));
+ }
+ for(int src=0;src<2;src++){
+  struct gui_quickscreen fallback={.cider=src};fallback.items[0]=fallback.items[3]=&bright;brightness=32;
+  quickscreen_draw_item(&fallback,&screens[0],QUICKSCREEN_TOP,false);
+  assert(!strcmp(fallback_lines[0],"Brightness")&&!strcmp(fallback_lines[1],"32"));
+  quickscreen_draw_item(&fallback,&screens[0],QUICKSCREEN_BOTTOM,true);
+  assert(!strcmp(fallback_lines[0],"Brightness: 32"));
+ }
+ for(int src=0;src<2;src++){
+  /* Limits match native repeated and non-repeated presses, step=1. */
+  source_cider=src;kind=1;reset();brightness=63;saves=tweaks=0;
+  add(BUTTON_MENU|BUTTON_REPEAT,0,0,0);add(BUTTON_MENU,0,0,0);
+  add(BUTTON_SELECT,0,0,0);add(BUTTON_SELECT|BUTTON_REL,0,0,0);
+  quick_screen_current(ACTION_STD_QUICKSCREEN,NULL);assert(brightness==1&&applied==1&&saves==1);
+  reset();brightness=1;
+  add(BUTTON_PLAY|BUTTON_REPEAT,0,0,0);add(BUTTON_PLAY,0,0,0);
+  add(BUTTON_RC_MENU,0,0,0);add(BUTTON_RC_MENU|BUTTON_REL,0,0,0);
+  quick_screen_current(ACTION_STD_QUICKSCREEN,NULL);assert(brightness==63&&applied==63);
+ }
+ source_cider=true;reset();brightness=32;saves=tweaks=0;kind=0;
+ add(BUTTON_LEFT,1,0,0);add(BUTTON_RIGHT,1,1,0);
+ add(BUTTON_RC_MENU,1,1,0);add(BUTTON_RC_MENU|BUTTON_REL,1,1,0);
+ quick_screen_current(ACTION_STD_QUICKSCREEN,NULL);assert(!saves&&!tweaks&&brightness==32);
+ puts("FU34 local/Cider brightness: body MENU/PLAY, remote Up/Down, native step/callback/limits/persistence, themed TOP/BOTTOM; remote Menu/Play and body Select exit PASS");
+
  puts("FU32 production key worker + quickscreen loop + themed Cider values: device/remote arrows, wheel, physical MENU TOP, remote MENU/centre exit, Play-hold context PASS");
 }
 '''
 (O/'test.c').write_text(pre+post);(O/'config.h').write_text('')
-subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R),str(O/'test.c'),'-o',str(O/'test')],check=True)
+subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-Wno-missing-field-initializers','-Wno-pointer-sign','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R),str(O/'test.c'),'-o',str(O/'test')],check=True)
 subprocess.run([str(O/'test')],check=True)

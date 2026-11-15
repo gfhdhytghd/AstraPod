@@ -40,7 +40,8 @@
  * is up and its result in; answering
  * or dismissing it goes back there. A dismissed question does not pop up
  * again, but the alert row at the top of the spaces and agents views still
- * opens it. A MENU tap in any view leaves Agents without a popup.
+ * opens it. A MENU tap in any view leaves Agents without a leave confirmation;
+ * after teardown, the USB Disk Mode consent is offered again.
  * Holding MENU opens the quick screen. Focus sent for
  * the wheel, a tab, a workspace or the detail says nothing when it works
  * and its reason in the band when it fails.
@@ -2809,6 +2810,15 @@ static bool agents_menu_exit(int action)
     return (raw & menu) != 0;
 }
 
+static void agents_usb_exit(int result)
+{
+#ifdef HAVE_USB_CONFIRM
+    if (result == AGENTS_EXIT_MENU) usb_confirm_reopen();
+#else
+    (void)result;
+#endif
+}
+
 static int agents_run(void);
 int agents_screen(void)
 {
@@ -3288,5 +3298,6 @@ static int agents_run(void)
     native_play_pending = false;
     FOR_NB_SCREENS(i)
         viewportmanager_theme_undo(i, false);
+    agents_usb_exit(ret);
     return ret;
 }

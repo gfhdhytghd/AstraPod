@@ -24,6 +24,7 @@ keymap=keymap[keymap.index('static const struct button_mapping'):]
 action=(S/'apps-ipod/input/action.c').read_text()
 carousel=(S/'apps-ipod/screens/covers/carousel.c').read_text()
 agents=(S/'apps-ipod/screens/system/agents_screen.c').read_text()
+assert 'open_confirm' not in agents and 'VIEW_CONFIRM' not in agents
 browser=(S/'apps-ipod/screens/browse/browser.c').read_text()
 cbrowser=(S/'apps-ipod/screens/playback/cider_browser.c').read_text()
 # Replace the fixture's six tables with all production context cascades.
@@ -58,6 +59,7 @@ base+='\n#define LAST_ACTION_PLACEHOLDER 5000\n'+carousel[start:end]+fn(carousel
 pre=r'''
 #include "apps-ipod/screens/system/herdremote_model.h"
 #define HAVE_USB_PODLINK
+#define HAVE_USB_CONFIRM
 #define AGENTS_EXIT_MENU 0
 #define SCREEN_MAIN 0
 #define GO_TO_ROOT 2001
@@ -70,6 +72,9 @@ pre=r'''
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define TIME_AFTER(a,b) ((long)((a)-(b))>0)
+static int consent_requests,theme_undos;
+static void viewportmanager_theme_undo(int screen,bool fullscreen){(void)screen;assert(!fullscreen);theme_undos++;}
+static void usb_confirm_reopen(void){assert(theme_undos>0);consent_requests++;}
 static int entry_keys[8],entry_count,entry_at,entry_context;
 static int entry_action(int context,int raw){
  current_tick+=20;last_raw=raw;raw_status=raw&BUTTON_REPEAT?ACTION_REPEAT:0;
@@ -138,6 +143,7 @@ static bool list_do_action(int ctx,int ticks,struct gui_synclist*l,int*a){(void)
 # The shared fixture uses a tiny viewport; these fields serve the input-only path.
 base=base.replace('struct viewport{int dummy;};','struct viewport{int height;};')
 pre+=re.search(r'enum view \{[^}]*\};',agents).group()+'\nstatic enum view view;static int input_top;\n'
+pre+=(fn(agents,'agents_usb_exit') if 'static void agents_usb_exit(' in agents else 'static void agents_usb_exit(int result){(void)result;}')
 pre+=fn(agents,'show_same')+fn(agents,'update_volume_mode')+fn(agents,'take_result')+fn(agents,'question_action')+fn(agents,'agents_menu_exit')
 a=agents.index('static struct\n{\n    bool ready, ok;')
 b=agents.index('static bool agents_play_down',a)
@@ -145,7 +151,8 @@ pre+=agents[a:b]
 # Keep production input and early dispatch, including the two input paths.
 a=agents.index('        int before = gui_synclist_get_sel_pos(&list);',agents.index('static int agents_run(void)\n{'))
 b=agents.index('        switch (action)',a)
-pre+='static bool expect_menu_exit;static void run_agents_entry(void){struct gui_synclist list={.selected_item=selected,.start_item={top_item}};int action,ret=0;bool done=false;while(entry_at<entry_count&&!done){\n'+agents[a:b]+'\n}\nassert(done==expect_menu_exit&&!ret);assert(list.selected_item==selected&&list.start_item[0]==top_item);}\n'
+cleanup=agents[agents.rindex('    FOR_NB_SCREENS(i)'):agents.rindex('    return ret;')]
+pre+='static bool expect_menu_exit;static void run_agents_entry(void){struct gui_synclist list={.selected_item=selected,.start_item={top_item}};int action,ret=0;bool done=false;while(entry_at<entry_count&&!done){\n'+agents[a:b]+'\n}\nassert(done==expect_menu_exit&&!ret);if(done){'+cleanup+'}assert(list.selected_item==selected&&list.start_item[0]==top_item);}\n'
 # Native grid browser's actual quickscreen case, with its display/filesystem
 # work represented by the caller's restore flag.
 case=browser[browser.index('            case ACTION_STD_QUICKSCREEN:'):browser.index('            case ACTION_TREE_HOTKEY:',browser.index('            case ACTION_STD_QUICKSCREEN:'))]
@@ -238,14 +245,14 @@ int main(void){
   view=v;source_cider=true;activity=ACTIVITY_AGENTS;
   prepare(CONTEXT_AGENTS,rk?BUTTON_RC_MENU:BUTTON_MENU,rk);
   entry_keys[1]=entry_keys[0]|BUTTON_REL;expect_menu_exit=true;
-  int before=cleans;model.hello=true;model.nws=2;
-  run_agents_entry();assert(!step&&cleans==before&&model.hello&&model.nws==2&&view==v);
+  int before=cleans,consent_before=consent_requests;model.hello=true;model.nws=2;
+  run_agents_entry();assert(consent_requests==consent_before+1);assert(!step&&cleans==before&&model.hello&&model.nws==2&&view==v);
   /* A pending answer/focus/voice request does not intercept MENU. */
   pending_answer=true;strcpy(pending_req,"pending");strcpy(focus_req,"focus");strcpy(talk_req,"voice");
   prepare(CONTEXT_AGENTS,rk?BUTTON_RC_MENU:BUTTON_MENU,rk);entry_keys[1]=entry_keys[0]|BUTTON_REL;
-  run_agents_entry();assert(!step&&!strcmp(pending_req,"pending")&&view==v);
+  run_agents_entry();assert(consent_requests==consent_before+2);assert(!step&&!strcmp(pending_req,"pending")&&view==v);
   pending_answer=false;pending_req[0]=focus_req[0]=talk_req[0]=0;
-  printf("Agents view=%d key=%s: short MENU -> direct previous-screen exit, no QS/popup/session reset PASS\n",v,rk?"remote":"body");
+  printf("Agents view=%d key=%s: short MENU -> direct previous-screen exit, no Leave confirm, one USB consent, no QS/session reset PASS\n",v,rk?"remote":"body");
  }
  last_raw=BUTTON_MENU|BUTTON_REL;assert(agents_menu_exit(ACTION_STD_CANCEL));
  last_raw=BUTTON_LEFT;assert(!agents_menu_exit(ACTION_STD_CANCEL));

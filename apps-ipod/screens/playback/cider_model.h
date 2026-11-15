@@ -46,6 +46,8 @@ struct cider_cache
     unsigned char data[CIDER_RAM_BYTES];
     struct cider_slot slot[CIDER_SLOTS];
     unsigned int bytes, clock;
+    struct { char key[65], tier[3]; uint32_t until; } failed[8];
+    unsigned int failed_next;
 };
 struct cider_transfer
 {
@@ -66,6 +68,10 @@ void cider_mode_ask(struct cider_modes *m, int mode, int value,
 bool cider_mode_failed(struct cider_modes *m, uint32_t request);
 uint32_t cider_position(const struct cider_state *s, uint32_t tick, int hz);
 int cider_cache_find(struct cider_cache *c, const char *key, const char *tier);
+bool cider_cache_backoff(struct cider_cache *c, const char *key, const char *tier,
+                         uint32_t tick);
+void cider_cache_fail(struct cider_cache *c, const char *key, const char *tier,
+                      uint32_t tick, unsigned int hz);
 bool cider_cache_put(struct cider_cache *c, const char *key, const char *tier,
                      const void *data, unsigned int length, bool dirty);
 /* Idle fills sort first for eviction; dropped once written to the store. */

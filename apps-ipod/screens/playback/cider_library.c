@@ -124,13 +124,22 @@ bool cider_library_receive(const void *data, unsigned int size,
     {
         if (!field(&p, end, number, sizeof number))
             return false;
-        char *tail;
-        v[i] = strtoul(number, &tail, 10);
-        if (!*number || *tail)
-            return false;
+        /* strtoul accepts signs and saturates on overflow. Wire indices
+         * must be unsigned decimal uint32 values on both host and ARM. */
+        uint32_t value = 0;
+        for (const char *q = number; *q; q++)
+        {
+            if (*q < '0' || *q > '9' ||
+                value > (UINT32_MAX - (unsigned)(*q - '0')) / 10)
+                return false;
+            value = value * 10 + *q - '0';
+        }
+        if (!*number) return false;
+        v[i] = value;
     }
     if (v[0] != generation || v[2] < library || v[6] > CIDER_PAGE_ROWS ||
-        v[3] > 1000000 || v[4] > 1000000)
+        v[3] > 1000000 || v[4] > 1000000 || v[5] > 1 ||
+        v[3] > v[4] || v[6] > v[4] - v[3])
         return false;
     int slot = -1;
     for (int i = 0; i < PAGE_SLOTS; i++)

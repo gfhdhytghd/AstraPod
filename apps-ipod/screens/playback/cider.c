@@ -134,6 +134,17 @@ static bool valid_key(const char *key)
     return true;
 }
 
+static void fail_art(void)
+{
+    if (xs_count)
+        for (unsigned int i = 0; i < xs_count && i < ARRAYLEN(xs_keys); i++)
+            cider_cache_fail(&cache, xs_keys[i], "XS", current_tick, HZ);
+    else
+        cider_cache_fail(&cache, transfer.key, transfer.tier, current_tick, HZ);
+    transfer.active = disk_lookup = request_ready = false;
+    xs_count = 0;
+}
+
 static void reset(void)
 {
     mutex_lock(&cider_mutex);
@@ -275,6 +286,7 @@ static bool receive(const struct podlink_message *m)
                 {
                     if (host_diag) { art_ack_request = transfer.request; art_ack_bytes = m->length; }
                     transfer.active = false;
+                    xs_count = 0;
                 }
             }
         }
@@ -323,6 +335,14 @@ static bool receive(const struct podlink_message *m)
         if (!state.loading) loading_request = 0;
         if (!memcmp(m->data, "CK\t", 3))
         {
+            if (transfer.active &&
+                cider_reply_status(m->data, m->length, state.generation,
+                                   transfer.request) < 0)
+            {
+                /* A failed art answer is terminal for this request. Keep
+                 * the placeholder; do not resend the rejected fill. */
+                fail_art();
+            }
             if (cider_reply_status(m->data, m->length, state.generation, loading_request) < 0)
             {
                 state.loading = false; loading_request = 0;
@@ -443,7 +463,7 @@ static unsigned int next(char *record, unsigned int size)
         else
         {
             cancel_request = transfer.request;
-            transfer.active = false;
+            fail_art();
         }
     }
     if (!n && warm_ready && state.generation)
@@ -607,6 +627,7 @@ static void store_text(const unsigned char *d, unsigned int n)
 
 static void begin_transfer(const char *key, const char *tier, bool fill)
 {
+    if (cider_cache_backoff(&cache, key, tier, current_tick)) return;
     if (transfer.active)
     {
         cancel_all |= cancel_request != 0;
@@ -1181,7 +1202,8 @@ void cider_request_xs(const char *const *keys, unsigned int count)
     { mutex_unlock(&cider_mutex); return; }
     xs_count = 0;
     for (unsigned int i = 0; i < count; i++)
-        if (cider_cache_find(&cache, keys[i], "XS") < 0)
+        if (cider_cache_find(&cache, keys[i], "XS") < 0 &&
+            !cider_cache_backoff(&cache, keys[i], "XS", current_tick))
         {
             if (store_local(keys[i], "XS")) fill_add(keys[i], "XS");
             else snprintf(xs_keys[xs_count++], sizeof xs_keys[0], "%s", keys[i]);
@@ -1357,6 +1379,7 @@ void cider_warm_art(const char *const *keys, unsigned int count,
     for (unsigned int i = 0; i < count; i++)
     {
         if (!valid_key(keys[i])) continue;
+        if (cider_cache_find(&cache, keys[i], tier) >= 0) continue;
         if (store_local(keys[i], tier)) { fill_add(keys[i], tier); continue; }
         n += snprintf(joined + n, sizeof joined - n, "%s%s", n ? "," : "", keys[i]);
     }
@@ -1405,7 +1428,7 @@ bool cider_store_building(void) { return build_on; }
 bool cider_art_local(const char *key, const char *tier)
 {
     mutex_lock(&cider_mutex);
-    bool local = store_local(key, tier);
+    bool local = cider_cache_find(&cache, key, tier) >= 0 || store_local(key, tier);
     mutex_unlock(&cider_mutex);
     return local;
 }
@@ -1415,7 +1438,8 @@ void cider_read_ahead(const char *const *keys, unsigned int count, const char *t
     /* Replace stale direction/window jobs on every frame, visible ones first. */
     nfills = 0;
     for (unsigned int i = 0; i < count && nfills < ARRAYLEN(fills); i++)
-        if (valid_key(keys[i]) && store_local(keys[i], tier)) fill_add(keys[i], tier);
+        if (valid_key(keys[i]) && cider_cache_find(&cache, keys[i], tier) < 0 &&
+            store_local(keys[i], tier)) fill_add(keys[i], tier);
     mutex_unlock(&cider_mutex);
 }
 unsigned int cider_read_ahead_count(unsigned int speed, unsigned int visible)

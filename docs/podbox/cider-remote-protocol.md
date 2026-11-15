@@ -843,3 +843,27 @@ failed-poll hysteresis. The WPS consumes pending native-play ACKs even when
 its originating browser has returned. Received controls are logged before
 availability or generation rejection. Collection queue verification and paged
 recovery do not change the wire grammar.
+
+## FU35 bounded artwork failures and Home shortcuts
+
+Home returns to its dispatcher when a deferred screen shortcut is pending.
+Ordinary Home Cancel retains its existing meaning. The dispatcher consumes the
+shortcut after menu teardown, so repeated Cancel polls cannot monopolize the
+cooperative scheduler.
+
+Retries of an in-flight `cr` or packed-XS `cb` with the same request and keys
+retain the host job token. Explicit cancellation, a changed request and session
+reset still invalidate old work. Failed artwork and request-cap rejection send
+`CK gen req 0 ...`; failed downloads log `art failed` with generation/request.
+The player ends the matching transfer on failure. Unanswered transfers send at
+most three requests, spaced three seconds apart, then cancel. Failed keys have
+a five-second cooldown in an eight-entry RAM cache; placeholders remain usable.
+Warm queue saturation defers excess jobs without terminating a worker. Art
+bucket lock acquisition has a two-second timeout. Foreground art retains
+priority over background fills; continuous foreground work can postpone fills.
+
+Resident covers bypass Bloom checks in warm/read-ahead/local queries. A Bloom
+hit is a RAM hint, not an index read or a successful disk lookup. Disk/index
+access remains in the store worker. Page header numbers must be decimal uint32
+values, and offset plus row count cannot exceed total. These changes preserve
+the existing wire grammar.

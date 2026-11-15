@@ -1358,6 +1358,7 @@ static bool root_menu_place_cider(void)
 #ifdef HAVE_USB_PODLINK
     unsigned count = MENU_GET_COUNT(root_menu_.flags), out = 0;
     struct menu_item_ex *ordered[MAX_MENU_ITEMS];
+    if (count > MAX_MENU_ITEMS) count = MAX_MENU_ITEMS;
     for (unsigned i = 0; i < count; i++)
         if (root_menu__[i] != &cider_item) ordered[out++] = root_menu__[i];
     if (cider_available() && out < MAX_MENU_ITEMS)

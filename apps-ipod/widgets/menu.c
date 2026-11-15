@@ -55,6 +55,9 @@
 #include "audio/sound_feedback.h"
 #include "system/shutdown.h"
 #include "input/action.h"
+#ifdef HAVE_USB_PODLINK
+#include "input/agents_shortcut.h"
+#endif
 #include "screens/settings/exported_settings.h"
 #include "string.h"
 #include "root_menu.h"
@@ -758,6 +761,17 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                                 list_do_action_timeout(&lists, HZ));
             /* HZ so the status bar redraws corectly */
 
+#ifdef HAVE_USB_PODLINK
+        /* Root CANCEL normally stays at Home. A deferred screen shortcut
+         * must instead return to root_menu's dispatcher, which consumes it.
+         * Otherwise get_action keeps returning CANCEL without a queue wait. */
+        if (menu == &root_menu_ && agents_nav_pending() != AGENTS_NAV_NONE)
+        {
+            ret = GO_TO_PREVIOUS;
+            done = true;
+            break;
+        }
+#endif
         /* query audio status to see if it changed */
         redraw_lists = query_audio_status(&old_audio_status);
 

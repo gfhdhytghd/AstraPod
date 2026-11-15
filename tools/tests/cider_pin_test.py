@@ -162,6 +162,6 @@ int main(void){
  diag.max_read_us=50000;pin_on=false;assert(cider_read_ahead_count(61,9)==6);pin_on=true;assert(cider_read_ahead_count(61,9)==3);pin_on=false;
   puts("Production album pin + idle fill + store hold: pinned L survives scrolling, shared with Now Playing, visible covers preempt, fills gated PASS");}
 '''
-(O/'pin.c').write_text(pre+fn('valid_key')+fn('pin_apply')+fn('cider_unpin_art')+fn('cider_pin_art')+fn('tier_name')+fn('store_local')+fn('miss_note')+fn('fill_add')+fn('store_text')+fn('begin_transfer')+fn('background_start')+fn('hex8')+fn('store_record')+fn('next')+fn('cider_request_art')+fn('cider_read_ahead_count')+post)
+(O/'pin.c').write_text(pre+fn('valid_key')+fn('pin_apply')+fn('cider_unpin_art')+fn('cider_pin_art')+fn('tier_name')+fn('store_local')+fn('miss_note')+fn('fill_add')+fn('store_text')+fn('begin_transfer')+fn('background_start')+fn('hex8')+fn('store_record')+fn('fail_art')+fn('next')+fn('cider_request_art')+fn('cider_read_ahead_count')+post)
 cmd=['cc','-std=gnu11','-Wall','-Wextra','-Wno-unused-variable','-Wno-unused-function','-Wno-unused-parameter','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'pin.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),str(R/'apps-ipod/screens/playback/cider_store.c'),str(R/'firmware/usbstack/podlink_wire.c'),'-o',str(O/'pin')]
 subprocess.run(cmd,check=True);subprocess.run([str(O/'pin')],check=True)

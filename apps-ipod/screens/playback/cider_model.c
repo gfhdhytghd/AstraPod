@@ -302,6 +302,26 @@ bool cider_cache_pin(struct cider_cache *c, const char *key, const char *tier)
     return found;
 }
 
+bool cider_cache_backoff(struct cider_cache *c, const char *key, const char *tier,
+                         uint32_t tick)
+{
+    for (unsigned int i = 0; i < 8; i++)
+        if (c->failed[i].until && (int32_t)(tick - c->failed[i].until) < 0 &&
+            !strcmp(c->failed[i].key, key) && !strcmp(c->failed[i].tier, tier))
+            return true;
+    return false;
+}
+
+void cider_cache_fail(struct cider_cache *c, const char *key, const char *tier,
+                      uint32_t tick, unsigned int hz)
+{
+    unsigned int i = c->failed_next++ % 8;
+    copy(c->failed[i].key, key, sizeof c->failed[i].key);
+    copy(c->failed[i].tier, tier, sizeof c->failed[i].tier);
+    c->failed[i].until = tick + 5 * hz;
+    if (!c->failed[i].until) c->failed[i].until = 1;
+}
+
 static void remove_slot(struct cider_cache *c, int index)
 {
     unsigned int offset = c->slot[index].offset;

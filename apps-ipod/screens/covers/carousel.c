@@ -1092,6 +1092,22 @@ bool carousel_caption_changed(int index, int variant)
     return true;
 }
 
+/* An external provider can fill the centre row without moving the selection
+ * or completing any artwork. Its slide version changes from missing to ready
+ * in that case. Rebuild both caption scroll lines as well as repainting them;
+ * their usual index/variant key still describes the placeholder. */
+static bool update_caption_version(unsigned int *seen)
+{
+    if (!model->art_version)
+        return false;
+    unsigned int next = model->art_version(center_index);
+    if (*seen == next)
+        return false;
+    *seen = next;
+    caption_valid = false;
+    return true;
+}
+
 const char *carousel_caption_fit(const char *str, char *buf, size_t size)
 {
     return global_settings.scrolling_enabled ? str
@@ -4351,6 +4367,7 @@ static int album_covers_loop(void)
      * time round the loop, and a reason to draw must survive until one draws. */
     bool art_owed = true;
     bool caption_owed = true;
+    unsigned int seen_caption_version = 0;
     bool full_flush_owed = false;
     /* The viewport as a whole has changed and every row of it has to be cleared
      * and sent, not just the rows the two halves above account for. True for
@@ -4550,6 +4567,8 @@ static int album_covers_loop(void)
 
         /* Runs every time round, not just on the frames that draw: it is what
          * notices that a caption is due to move. */
+        if (update_caption_version(&seen_caption_version))
+            caption_owed = true;
         if (update_scroll_lines())
             caption_owed = true;
 

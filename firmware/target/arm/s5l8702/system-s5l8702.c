@@ -223,27 +223,45 @@ static void vic_init(void)
  * interrupts off. The flag lives in .data: every loaded image (cold boot,
  * ROLO) brings it as 0; system_init arms it.
  *
- * A branch keeps the MMU on and names its caller in lr. A reset turns the
- * MMU off and writes no lr: the SVC bank then still holds crt0's boot
- * values, and the interrupted thread's sp/lr stay in the SYS bank. */
+ * A branch keeps the MMU on and names its caller in lr. A hardware reset
+ * turns the MMU off. An entry that writes no lr (reset-like restart, or a
+ * bad exception return) leaves crt0's boot values in the SVC bank: lr is
+ * then crt0_boot_lr. The interrupted thread's sp/lr stay in the SYS bank;
+ * the IRQ bank and the last IRQ frame show whether an IRQ return went to 0.
+ * system_reboot() leaves a note first, so a WDT reset that lands here (or
+ * never fires) is named too. */
 const char *thread_current_name(void);
-/* r0-r3, sp, lr, cpsr, SYS sp, SYS lr, cp15 c1, entry (0 low IRAM, 1 crt0) */
-uint32_t null_call_regs[11] USED_ATTR;
+extern const char crt0_boot_lr[], _irqstackend[];
+/* 0-3 r0-r3, 4 sp, 5 lr, 6 cpsr, 7 SYS sp, 8 SYS lr, 9 cp15 c1,
+ * 10 entry (0 low IRAM, 1 crt0), 11 IRQ sp, 12 IRQ lr, 13 IRQ spsr,
+ * 14 IRQ frame pc slot, 15 IRQ frame ip slot */
+uint32_t null_call_regs[16] USED_ATTR;
 uint32_t crt0_entry_armed __attribute__((section(".data"))) USED_ATTR = 0;
+#define REBOOT_NOTE 0x52424f54 /* "RBOT" */
+uint32_t reboot_note[2] USED_ATTR; /* magic, caller */
 
 static void NORETURN_ATTR USED_ATTR null_call_report(void)
 {
     const uint32_t *r = null_call_regs;
-    const char *what = r[10] ? "CRT0 entry" : !(r[9] & 1) ? "RESET" :
-                       "NULL call";
+    const char *what =
+        r[10] ? "CRT0 entry" :
+        reboot_note[0] == REBOOT_NOTE ? "REBOOT" :
+        !(r[9] & 1) ? "RESET" :
+        (r[6] & 0x1f) == 0x13 && r[5] == (uint32_t)crt0_boot_lr ? "RESTART" :
+        "NULL call";
     panicf("%s lr:%08lx sp:%08lx mode:%02lx thr:%.8s r:%lx,%lx,%lx,%lx "
-           "usp:%08lx ulr:%08lx rs:%lx",
+           "usp:%08lx ulr:%08lx rs:%lx cpsr:%02lx c1:%lx "
+           "isp:%lx ilr:%08lx ispsr:%02lx ifr:%lx,%lx rb:%lx",
            what, (unsigned long)r[5], (unsigned long)r[4],
            (unsigned long)(r[6] & 0x1f), thread_current_name(),
            (unsigned long)r[0], (unsigned long)r[1],
            (unsigned long)r[2], (unsigned long)r[3],
            (unsigned long)r[7], (unsigned long)r[8],
-           (unsigned long)(RSTSR & 7));
+           (unsigned long)RSTSR, (unsigned long)(r[6] & 0xff),
+           (unsigned long)r[9], (unsigned long)r[11], (unsigned long)r[12],
+           (unsigned long)(r[13] & 0xff), (unsigned long)r[14],
+           (unsigned long)r[15],
+           (unsigned long)(reboot_note[0] == REBOOT_NOTE ? reboot_note[1] : 0));
 }
 
 /* r12 = null_call_regs with r0-r3/sp/lr stored, r0 = entry kind. */
@@ -262,11 +280,26 @@ static void __attribute__((naked)) USED_ATTR null_call_save(void)
         "addne r1, r12, #28           \n"
         "stmneia r1, {sp, lr}^        \n" /* SYS/USR bank */
         "nop                          \n"
+        "mov   r1, #0xd2              \n" /* IRQ bank, masked */
+        "msr   cpsr_c, r1             \n"
+        "mov   r2, sp                 \n"
+        "mov   r3, lr                 \n"
+        "mrs   r1, spsr               \n"
+        "msr   cpsr_c, r0             \n"
+        "str   r2, [r12, #44]         \n"
+        "str   r3, [r12, #48]         \n"
+        "str   r1, [r12, #52]         \n"
+        "ldr   r1, =_irqstackend      \n" /* before anything uses the stack */
+        "ldr   r2, [r1, #-4]          \n"
+        "ldr   r3, [r1, #-8]          \n"
+        "str   r2, [r12, #56]         \n"
+        "str   r3, [r12, #60]         \n"
         "mrc   p15, 0, r0, c1, c0, 0  \n"
         "str   r0, [r12, #36]         \n"
         "tst   r0, #1                 \n" /* reset: MMU off, I/D off */
         "bleq  memory_init            \n" /* identity map; screen needs it */
-        "b     null_call_report       \n");
+        "b     null_call_report       \n"
+        ".ltorg                       \n");
 }
 
 void __attribute__((naked)) null_call_trap(void)
@@ -344,6 +377,10 @@ void system_init(void)
 
 void system_reboot(void)
 {
+#ifndef BOOTLOADER
+    reboot_note[1] = (uint32_t)__builtin_return_address(0);
+    reboot_note[0] = REBOOT_NOTE;
+#endif
     /* Reset the SoC */
     asm volatile("msr CPSR_c, #0xd3   \n"
                  "mov r0, #0x100000   \n");

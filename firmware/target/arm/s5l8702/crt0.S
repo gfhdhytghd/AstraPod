@@ -148,6 +148,8 @@ start_loc:
     mcr     p15, 0, r0, c1, c0, 0
 #else
     bl      memory_init
+    .global crt0_boot_lr
+crt0_boot_lr:               /* SVC lr from here on, until an exception */
 
     /* Copy interrupt vectors to iram */
     ldr     r2, =_intvectstart

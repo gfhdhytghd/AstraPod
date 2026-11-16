@@ -1022,6 +1022,14 @@ static void usb_disk_poll(void)
         }
     }
 }
+
+/* The raw body-MENU hold, the 3 s flush timeout and the detach/restore
+ * deadline are only live while the disk is handed to the host. Every state
+ * change that arms them runs on this thread, so the next loop pass sees it. */
+static bool usb_disk_needs_poll(void)
+{
+    return exclusive_storage_enabled || disk_exit_pending || disk_return_at;
+}
 #endif
 
 /*--- General driver code ---*/
@@ -1033,7 +1041,10 @@ static void NORETURN_ATTR usb_thread(void)
     {
 #ifdef HAVE_USB_PODLINK
         usb_disk_poll();
-        queue_wait_w_tmo(&usb_queue, &ev, MAX(1, HZ / 20));
+        if (usb_disk_needs_poll())
+            queue_wait_w_tmo(&usb_queue, &ev, MAX(1, HZ / 20));
+        else
+            queue_wait(&usb_queue, &ev); /* FU39: no periodic wake */
 #else
         queue_wait(&usb_queue, &ev);
 #endif

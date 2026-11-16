@@ -2831,13 +2831,13 @@ int agents_screen(void)
 static int agents_run(void)
 {
     struct gui_synclist list;
-    int action, ret = AGENTS_EXIT_MENU;
+    int action, ret = AGENTS_EXIT_OTHER;
     char buf[48];
 
     if (!podlink_open_agents(background_link))
     {
         splash(HZ * 3, "Unplug USB, then open Agents");
-        return 0;
+        return AGENTS_EXIT_OTHER;
     }
     bool resume = cache_valid && cache_generation == podlink_generation() &&
                   podlink_state() == PODLINK_CONNECTED;
@@ -3124,7 +3124,7 @@ static int agents_run(void)
         {
             if (agents_quickscreen(&list, action) == QUICKSCREEN_IN_USB)
             {
-                ret = 1;
+                ret = AGENTS_EXIT_OTHER;
                 done = true;
             }
             continue;
@@ -3175,8 +3175,12 @@ static int agents_run(void)
                  * before or Backspace; its repeats only repeat Backspace. */
                 int button;
                 int status = get_action_statuscode(&button);
+                int left_mask = BUTTON_LEFT;
+#ifdef IPOD_ACCESSORY_PROTOCOL
+                left_mask |= BUTTON_RC_LEFT;
+#endif
                 bool left = action == ACTION_STD_CANCEL &&
-                            (button & BUTTON_LEFT);
+                            (button & left_mask);
                 if (view == VIEW_USAGE || view == VIEW_DETAIL)
                 {
                     if (left)
@@ -3256,7 +3260,7 @@ static int agents_run(void)
             default:
                 if (default_event_handler(action) == SYS_USB_CONNECTED)
                 {
-                    ret = 1;
+                    ret = AGENTS_EXIT_OTHER;
                     done = true;
                 }
                 break;

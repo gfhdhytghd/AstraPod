@@ -4786,8 +4786,9 @@ static int album_covers_loop(void)
             return CAROUSEL_REMOTE_RETURN;
 #endif
         case PF_QUIT:
-            return agents_nav_has(AGENTS_NAV_WPS) || cover_nav_origin_is(GO_TO_WPS) ?
-                   GO_TO_ROOT : GO_TO_PREVIOUS;
+            /* The caller owns the parent: WPS resumes playback, while a
+             * browser/menu returns to the level that opened the covers. */
+            return GO_TO_PREVIOUS;
         case PF_WPS:
             return GO_TO_WPS;
         case PF_BACK:

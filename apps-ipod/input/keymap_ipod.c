@@ -383,6 +383,7 @@ static const struct button_mapping button_context_usb_hid_mode_mouse[] = {
  *****************************************************************************/
 
 static const struct button_mapping remote_button_context_agents[] = {
+    { ACTION_AGENTS_LEFT_REPEAT, BUTTON_RC_LEFT|BUTTON_REPEAT, BUTTON_NONE },
     { ACTION_AGENTS_REMOTE_TALK, BUTTON_RC_PLAY, BUTTON_NONE },
     { ACTION_AGENTS_DISCARD, BUTTON_RC_PLAY|BUTTON_REL|BUTTON_REPEAT,
       BUTTON_NONE },

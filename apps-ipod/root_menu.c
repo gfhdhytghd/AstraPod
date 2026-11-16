@@ -1390,45 +1390,18 @@ static struct menu_table menu_table[] = {
 #define MAX_MENU_ITEMS (sizeof(menu_table) / sizeof(struct menu_table))
 static struct menu_item_ex *root_menu__[MAX_MENU_ITEMS];
 
-/* Availability is transient; preserve the order of every other Home row. */
-static bool root_menu_place_cider(void)
+/* Availability only changes visibility. The saved order owns the row. */
+bool root_menu_refresh(void)
 {
 #ifdef HAVE_USB_PODLINK
-    unsigned count = MENU_GET_COUNT(root_menu_.flags), out = 0;
-    struct menu_item_ex *ordered[MAX_MENU_ITEMS];
-    if (count > MAX_MENU_ITEMS) count = MAX_MENU_ITEMS;
-    for (unsigned i = 0; i < count; i++)
-        if (root_menu__[i] != &cider_item) ordered[out++] = root_menu__[i];
-    if (cider_available() && out < MAX_MENU_ITEMS)
-    {
-        unsigned at = 0;
-        while (at < out)
-        {
-            const struct menu_item_ex *item = ordered[at++];
-            int visible = item == &shortcut_menu
-                ? shortcut_menu_callback(ACTION_REQUEST_MENUITEM, item, NULL)
-                : item_callback(ACTION_REQUEST_MENUITEM, item, NULL);
-            if (visible != ACTION_EXIT_MENUITEM) break;
-        }
-        memmove(ordered + at + 1, ordered + at,
-                (out - at) * sizeof ordered[0]);
-        ordered[at] = (struct menu_item_ex *)&cider_item;
-        out++;
-    }
-    bool changed = out != count ||
-        memcmp(root_menu__, ordered, out * sizeof ordered[0]);
-    memcpy(root_menu__, ordered, out * sizeof ordered[0]);
-    root_menu_.flags &= ~(MENU_COUNT_MASK << MENU_COUNT_SHIFT);
-    root_menu_.flags |= MENU_ITEM_COUNT(out);
+    static int previous = -1;
+    bool available = cider_available();
+    bool changed = previous != available;
+    previous = available;
     return changed;
 #else
     return false;
 #endif
-}
-
-bool root_menu_refresh(void)
-{
-    return root_menu_place_cider();
 }
 
 /* How many of root_menu__[] the menu shows. */
@@ -1740,7 +1713,6 @@ static void spoken_row(struct menu_item_ex *item,
     }
 
     root_menu_set_count(count);
-    root_menu_place_cider();
 }
 
 /* The Audiobooks row: the main menu's tagnavi row opening the audiobooks
@@ -1800,12 +1772,8 @@ struct menu_table *root_menu_get_options(int *nb_options)
     int i, n = 0;
 
     for (i = 0; i < root_menu_active_count(); i++)
-        if (
-#ifdef HAVE_USB_PODLINK
-            menu_table[i].item != &cider_item &&
-#endif
-            (i < tagnavi_start
-             || browser_db_get_main_menu_row(i - tagnavi_start, NULL)))
+        if (i < tagnavi_start
+            || browser_db_get_main_menu_row(i - tagnavi_start, NULL))
             shown[n++] = menu_table[i];
 
     *nb_options = n;
@@ -1909,7 +1877,6 @@ void root_menu_load_from_cfg(void* setting, char *value)
     }
     root_menu_.flags |= MENU_ITEM_COUNT(menu_item_count);
     root_menu_place_unlisted();
-    root_menu_place_cider();
     /* A .cfg loaded once tagnavi.config is parsed gets no first entry to
      * drop the slots it names that have no row. */
     if (browser_db_ready())
@@ -2091,7 +2058,6 @@ void root_menu_set_default(void* setting, void* defaultval)
     root_menu_.flags |= MENU_ITEM_COUNT(out);
     root_menu_apply_canonical_order();
     root_menu_place_unlisted();
-    root_menu_place_cider();
     audiobooks_row(global_settings.segregate_audiobooks, false);
     podcasts_row(global_settings.segregate_podcasts, false);
     *(bool*)setting = false;

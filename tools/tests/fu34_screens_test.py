@@ -60,7 +60,7 @@ pre=r'''
 #include "apps-ipod/screens/system/herdremote_model.h"
 #define HAVE_USB_PODLINK
 #define HAVE_USB_CONFIRM
-#define AGENTS_EXIT_MENU 0
+#include "apps-ipod/screens/system/agents_screen.h"
 #define SCREEN_MAIN 0
 #define GO_TO_ROOT 2001
 #define GO_TO_PREVIOUS 2002

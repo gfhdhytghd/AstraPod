@@ -360,7 +360,16 @@ int cider_browse(void)
             }
             else
             {
+                bool return_wps = cover_nav_origin_is(GO_TO_WPS);
                 close_covers(true);
+                if (return_wps)
+                {
+                    /* MENU closes this WPS cover visit just like a toggle;
+                     * do not leave it in the root dispatcher's history. */
+                    remote_return = true;
+                    result = GO_TO_WPS;
+                    break;
+                }
                 if (depth) cider_page_open(history[depth].route);
             }
         }
@@ -616,5 +625,9 @@ int cider_browse(void)
     browser_set_external_header(NULL, NULL);
     pop_current_activity();
     agents_nav_leave(AGENTS_NAV_TRACKS);
+    /* Child screens and QuickScreen stay inside this invocation. Once it
+     * leaves, a new entry starts at the root rather than a static child. */
+    depth = 0;
+    history[0].selected = 0;
     return result;
 }

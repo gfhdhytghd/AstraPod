@@ -266,14 +266,14 @@ static void test_cover_shortcut(void){
 '''
 main=r'''
 int main(void){
- /* FU20: remote double -> WPS -> triple -> Cover MENU must end at home. */
+ /* FU20: remote double -> WPS -> triple -> Cover MENU resumes WPS before the explicit exit. */
  fixed[0]=ACTION_AGENTS_REMOTE_SWITCH;fixed[1]=ACTION_AGENTS_REMOTE_COVERS;
  fixed[2]=ACTION_WPS_MENU;fixed[3]=EXIT_TEST;nfixed=4;atfixed=0;
  root_menu_agents_shortcut();
  assert(!owner&&!depth&&!agents_nav_active()&&!cover_nav_active());
  assert(exits[AGENTS_NAV_WPS]==1&&exits[AGENTS_NAV_COVERS]==1);
  /* WPS can be playing a journey whose original Cover origin was Agents.
-    A fresh triple/hotkey modal from that WPS still takes MENU to home. */
+    A fresh triple/hotkey modal from that WPS still returns MENU to WPS. */
  cover_nav_begin(GO_TO_AGENTS);
  fixed[0]=TRACKS_TEST;fixed[1]=PLAY_TEST;fixed[2]=ACTION_AGENTS_REMOTE_COVERS;
  fixed[3]=ACTION_WPS_MENU;fixed[4]=EXIT_TEST;nfixed=5;atfixed=0;

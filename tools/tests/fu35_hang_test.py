@@ -9,7 +9,7 @@ R=Path(__file__).resolve().parents[2]; O=Path(sys.argv[1]).resolve(); O.mkdir(pa
 ns=runpy.run_path(str(R/'tools/tests/fu32_menu_path_test.py'),run_name='fu35_adapters')
 fn=ns['fn']; pre=ns['pre']; loop=ns['loop']; controls=ns['controls']
 a=(R/'apps-ipod/input/action.c').read_text(); root=(R/'apps-ipod/root_menu.c').read_text()
-route=fn(a,'route_screen_shortcut'); place=fn(root,'root_menu_place_cider')
+route=fn(a,'route_screen_shortcut'); place=fn(root,'root_menu_refresh').replace('bool root_menu_refresh', 'static bool cider_refresh')
 pre=pre.replace('static const struct menu_item_ex root_menu_={0};','static struct menu_item_ex root_menu_;')
 pre=pre.replace('static bool root_menu_refresh(void){return false;}','static bool root_menu_refresh(void);')
 pre=pre.replace(fn(pre,'get_action'), '')
@@ -17,7 +17,7 @@ extra=set(re.findall(r'\b(?:ACTION_|GO_TO_|CONTEXT_|AGENTS_NAV_)\w+',route+loop+
 extra|={'AGENTS_NAV_COVERS','AGENTS_NAV_NONE','AGENTS_NAV_BACK','AGENTS_NAV_WPS','AGENTS_NAV_AGENTS','CONTEXT_AGENTS','CONTEXT_WPS'}
 extra-=set(ns['tokens'])
 pre=pre.replace('struct viewport{','enum agents_nav_screen {'+','.join(sorted(extra))+'};\nstruct viewport{',1)
-# Use the real root reorder, including its bounded memcmp, on each menu turn.
+# Use the real availability refresh, without changing the saved order, on each menu turn.
 pre+=r'''
 #define HAVE_USB_PODLINK
 #define BUTTON_REDRAW 0x20000000
@@ -48,7 +48,7 @@ static struct agents_remote_state remote_state;
 remote=re.sub(r'^#include .*$', '', (R/'apps-ipod/input/agents_remote.c').read_text(),flags=re.M)
 pre+=remote+place+route
 pre+=r'''
-static bool root_menu_refresh(void){assert(++refreshes<=1000);return root_menu_place_cider();}
+static bool root_menu_refresh(void){assert(++refreshes<=1000);return cider_refresh();}
 static int get_action_worker(action_last_t*l,action_cur_t*c){
  (void)l;(void)c;
  assert(++polls<=1000); /* old Home loop never blocks once pending is set */
@@ -82,7 +82,7 @@ int main(void){
   /* The root dispatcher consumes exactly this request after menu teardown. */
   pending=AGENTS_NAV_NONE;
  }
- puts("FU35 Home triple Play: gesture -> router -> production get_action/do_menu/root reorder; pending toggle+unanswered fill; <=6 polls PASS");
+ puts("FU35 Home triple Play: gesture -> router -> production get_action/do_menu/availability refresh; pending toggle+unanswered fill; <=6 polls PASS");
 }
 '''
 source=pre+fn((R/'apps-ipod/widgets/list.c').read_text(),'simplelist_show_list')+loop+controls+post

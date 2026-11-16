@@ -1,4 +1,4 @@
-# FU43: Cover Flow navigation and remote key ownership
+# Cover Flow navigation and remote key ownership (FU43/FU45)
 
 Triple Play on the Dock remote and the body SELECT+MENU chord are the same
 Cover Flow toggle. They close an enclosing overlay/viewer before opening the
@@ -7,10 +7,19 @@ when available (the FU32 source rule); otherwise the local album carousel opens.
 
 The next toggle in the carousel or its album track list returns to the cached
 Agents view or WPS when that was the origin. Other origins return to WPS. Normal
-MENU is separate: Cider covers returns to its parent Cider browser level, then
-MENU ascends that browser to Home. The cover visit owns and clears its album
+MENU is separate: covers opened from WPS return to WPS, for both local and
+Cider albums. Cider covers opened inside the browser return to that browser
+level; MENU then ascends the browser to Home. Other entries retain their menu
+parent. The cover visit owns and clears its album
 and parent depths. It never leaves a synthetic Covers node in root history.
 Artist Portraits uses the same shared-carousel toggle exit to WPS.
+
+Each fresh Cider browser entry starts at its root and first row. Child-page
+returns and QuickScreen keep the current selection within the same visit.
+The Home Cider row follows the saved root-menu order. Customize Main Menu can
+move or hide it. Availability only filters visibility; disconnect/reconnect
+does not rewrite the order or unhide the row. A default/reset order still
+places Cider after Music.
 
 QuickScreen still receives Play as Select immediately. A separate physical-tap
 observer recognizes the triple even if the first Select closes the overlay.

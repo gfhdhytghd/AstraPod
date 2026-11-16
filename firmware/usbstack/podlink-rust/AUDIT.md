@@ -128,6 +128,14 @@ ARM fixture executes linked Rust/FFI/snapshot instructions, samples SP, and
 fails on a NULL branch. Its scheduler, USB, logger and consumer are adapters;
 consumer-stack use and arbitrary scheduling are outside its bound. The
 existing ARM skin/storage/fatal/PMU checks cover their documented scenarios.
+`tools/tests/arm_podlink_link.py` checks that the prelinked Rust object
+exports only `podlink_*` and that libc/EABI helpers resolve to libfirmware,
+libarm_support or libgcc. The threaded liveness fixture
+(`tools/tests/podlink_liveness.c`) runs the real worker thread and CDC ring
+on pthreads with Rockbox mutex/semaphore/IRQ-mask semantics. It checks RX
+drain, CH answers, UI call latency, Agents bursts, Cider pushes, art-failure
+bursts, USB reconnect and host CLOSE. A USB-thread stall must make it fail.
+The worker stack has a checked guard; an overflow panics.
 
 These checks do not prove all possible schedules, safety of downstream C
 consumers, absence of arbitrary external memory corruption, physical USB

@@ -16,9 +16,17 @@ static bool initialized;
 static int client_state, session_state;
 static bool connected, host_running;
 static uint32_t serial_generation;
-static long service_stack[DEFAULT_STACK_SIZE * 2 / sizeof(long)];
+/* The stack grows down towards a checked guard, never into the mutex or the
+ * snapshots: an overflow is a panic, not a silently wedged lock. */
+#define GUARD_WORDS 16
+#define GUARD 0x504c4b47u
+static struct
+{
+    uint32_t guard[GUARD_WORDS];
+    long stack[DEFAULT_STACK_SIZE * 2 / sizeof(long)];
+} worker;
 /* Rust separately asserts its inbox+welcome+resident storage <= 51000. */
-_Static_assert(51000 + sizeof(service_stack) < 64 * 1024,
+_Static_assert(51000 + sizeof(worker) < 64 * 1024,
                "resident Rust PodLink RAM budget");
 _Static_assert(sizeof(struct podlink_message) == 16, "Rust message ABI");
 _Static_assert(sizeof(struct podlink_resident) == 12, "Rust registry ABI");
@@ -29,19 +37,22 @@ static void service_thread(void)
 {
     while (true) {
         podlink_rust_step();
+        for (int i = 0; i < GUARD_WORDS; i++)
+            if (worker.guard[i] != GUARD) panicf("PodLink stack overflow");
         sleep(MAX(1, HZ / 50));
     }
 }
 bool pfu_init(void)
 {
     if (initialized) return false; /* Boot/UI thread owns initialization. */
+    for (int i = 0; i < GUARD_WORDS; i++) worker.guard[i] = GUARD;
     mutex_init(&service_mutex);
     initialized = true;
     return true;
 }
 bool pfu_start(void)
 {
-    return create_thread(service_thread, service_stack, sizeof(service_stack), 0,
+    return create_thread(service_thread, worker.stack, sizeof(worker.stack), 0,
                          "podlink" IF_PRIO(, PRIORITY_BACKGROUND) IF_COP(, CPU)) != 0;
 }
 bool pfu_lock(void)

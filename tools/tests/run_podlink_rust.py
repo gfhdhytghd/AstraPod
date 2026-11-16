@@ -59,3 +59,18 @@ for name in ['podlink_firmware', 'podlink_wire', 'podlink_bench', 'podlink_resid
         assert raw == expected, (name, 'golden mismatch', next(
             (i for i, (x, y) in enumerate(zip(raw, expected)) if x != y), len(raw)))
         print(f'PASS C golden {name}: {len(raw)} identical bytes', flush=True)
+
+# Threaded liveness (FU49 round 2): real worker thread, real CDC ring, emulated
+# Rockbox mutex/semaphore/IRQ-mask semantics. ILP32 keeps the firmware ABI.
+live_lib = library('i686-unknown-linux-gnu')
+live = out / 'podlink_liveness'
+subprocess.run([os.environ.get('CC', 'cc'), '-m32', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+                '-g', '-fsanitize=address,undefined', '-fno-pie', '-no-pie',
+                '-Itools/tests/podlink_liveness_stubs', '-Itools/tests/podlink_stubs',
+                '-Ifirmware/export', '-Ifirmware/usbstack', 'tools/tests/podlink_liveness.c',
+                str(live_lib), '-lpthread', '-ldl', '-lm', '-o', str(live)], check=True)
+subprocess.run([str(live), os.environ.get('PODLINK_LIVENESS_SECONDS', '20')], check=True, timeout=120)
+control = subprocess.run([str(live), '12'], env=os.environ | {'LIVE_FAULT_USB_STALL': '3500'},
+                         capture_output=True, text=True, timeout=120)
+assert control.returncode == 1 and 'FAIL: host bytes always drained' in control.stdout, control.stdout
+print('PASS liveness negative control: a 3.5 s USB-thread stall is detected', flush=True)

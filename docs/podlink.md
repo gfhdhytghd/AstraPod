@@ -277,7 +277,11 @@ with `--locked --release --features firmware --target armv5te-none-eabi
 -Zbuild-std=core`. This tier-3 target requires building core from source;
 `rustup target add` alone is insufficient. Firmware uses ARM926EJ-S, EABI soft
 float, strict alignment, no_std, fixed buffers, no allocator and panic=abort.
-Never enable the `host-test` feature for firmware packaging.
+Never enable the `host-test` feature for firmware packaging. The Rust archive
+is prelinked into one relocatable object whose only global definitions are
+`podlink_*`. Otherwise the weak `memset`/`memmove`/`memcmp`/`strlen` and EABI
+helpers from `core`/`compiler_builtins` would replace the firmware's own for
+every caller. `tools/tests/arm_podlink_link.py` checks this on the linked ELF.
 
 The public C ABI and wire protocol are unchanged. Shared public headers remain
 for C callers and the platform/test adapters. Rust copies nullable callback
@@ -293,6 +297,7 @@ PYTHON=.venv-podlink/bin/python tools/tests/run_podlink.sh
 cargo +nightly-2026-02-03 test --manifest-path firmware/usbstack/podlink-rust/Cargo.toml
 python3 tools/tests/run_podlink_rust.py --build build
 python3 tools/tests/arm_podlink_rust.py --elf build/rockbox.elf
+python3 tools/tests/arm_podlink_link.py --elf build/rockbox.elf
 python3 tools/tests/podlink_ram.py --build build --baseline saved-c-baseline.elf
 ```
 

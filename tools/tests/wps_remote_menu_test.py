@@ -89,7 +89,7 @@ static int __attribute__((unused)) cider_browse(void){return GO_TO_WPS;}
 #define CAROUSEL_CONTEXT -21
 #define CAROUSEL_PLAY_ALBUM -20
 #define AUDIO_STATUS_PLAY 1
-static bool wps_return_agents,wps_menu_covers;
+static bool wps_return_agents,wps_menu_covers,cover_toggled_back;
 static int agent_result,covers_result,playing=1;
 static int agents_screen(void){return agent_result;}
 static int album_covers_scrn(void*p){(void)p;return GO_TO_PREVIOUS;}
@@ -119,8 +119,8 @@ int main(void){
  agent_result=0;assert(agents_scrn(NULL)==GO_TO_PREVIOUS&&!wps_menu_covers);
  bool flag=false,remote=true;long go=0;
  covers_result=GO_TO_PREVIOUS;assert(!show_album_covers(&go,&flag)&&!flag);
- covers_result=CAROUSEL_REMOTE_RETURN;assert(!show_album_covers(&go,&flag)&&flag);
- covers_result=GO_TO_PREVIOUS;assert(!show_album_covers(&go,&flag)&&flag);
+ covers_result=CAROUSEL_REMOTE_RETURN;assert(!show_album_covers(&go,&flag)&&!flag);
+ flag=true;covers_result=GO_TO_PREVIOUS;assert(!show_album_covers(&go,&flag)&&flag);
  /* An ordinary later WPS invocation starts unmarked; no static child flag. */
  flag=false;assert(!show_album_covers(&go,&flag)&&!flag);
  covers_result=CAROUSEL_REMOTE_RETURN;assert(album_covers(NULL)==GO_TO_PREVIOUS);
@@ -129,7 +129,7 @@ int main(void){
  covers_result=GO_TO_ALBUM_COVERS_TRACKS;assert(show_album_covers(&go,&flag)&&go==GO_TO_ALBUM_COVERS_TRACKS);
  covers_result=GO_TO_PREVIOUS;playing=0;assert(show_album_covers(&go,&flag)&&go==GO_TO_WPS);
  assert(false_leaves==7&&true_leaves==3);
- puts("production entry/child routes: remote double vs native chord; pending flag consumed; remote triple tags WPS; normal/native return does not; nested-safe output; old callers sanitized; audio/destination exits PASS");
+ puts("production entry/child routes: remote double vs native chord; pending flag consumed; both cover gestures preserve WPS return policy; nested-safe output; old callers sanitized; audio/destination exits PASS");
 }
 '''
 (O/'origins.c').write_text(nav)

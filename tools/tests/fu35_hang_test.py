@@ -33,6 +33,7 @@ static int agents_nav_pending(void){return pending;}
 static bool agents_nav_has(int n){(void)n;return false;}
 static void agents_nav_request(int n,bool remote){(void)remote;pending=n;}
 static bool shortcut_screen_context(int c){return c==CONTEXT_WPS||c==CONTEXT_AGENTS;}
+static enum agents_nav_screen agents_cover_toggle_target(void){return AGENTS_NAV_COVERS;}
 static void cider_remote_source(void){source_calls++;}
 static void root_menu_agents_shortcut(void){}
 static void root_menu_wps_shortcut(void){}

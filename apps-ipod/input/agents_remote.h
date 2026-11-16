@@ -22,6 +22,12 @@ struct agents_remote_state {
     bool tap_pending, second;
     unsigned long released;
     int play_context;
+    /* Triple observation survives a quickscreen closing on its first Select.
+     * Per-context tap/hold/double delivery below remains unchanged. */
+    unsigned long triple_pressed, triple_released;
+    unsigned int triple_taps;
+    int triple_context;
+    bool triple_down;
 };
 bool agents_remote_pending(const struct agents_remote_state *s);
 int agents_remote_button(struct agents_remote_state *s, int context,

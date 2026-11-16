@@ -482,7 +482,8 @@ static int __attribute__((unused)) cider_browse(void){return GO_TO_WPS;}
 #define AGENTS_SWITCH_COVERS 3
 #define AGENTS_SWITCH_REMOTE_WPS 4
 static int agents_return, a_calls, w_calls;
-static bool wps_return_agents,wps_menu_covers,was_agents;
+static bool wps_return_agents,wps_menu_covers,was_agents,cover_toggled_back;
+static int last_screen=GO_TO_ROOT;
 static bool poweroff=true;
 static void album_covers_cancel_resume(void) {}
 static int cover_tracks_scrn(void *p) {(void)p;return GO_TO_PREVIOUS;}

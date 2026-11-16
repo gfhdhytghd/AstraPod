@@ -18,24 +18,26 @@ pre=r'''
 #define AUDIO_STATUS_PLAY 1
 static bool active,online,paused;static int pending;
 static int target,local_calls,cider_calls;
-static bool wps_return_agents,wps_menu_covers;
+static bool wps_return_agents,wps_menu_covers,cover_toggled_back;
 static bool cider_available(void){return online;}static bool cider_active(void){return active;}
 static int audio_status(void){return paused?0:1;}static void audio_pause(void){paused=true;}
 static int agents_nav_pending(void){return pending;}
 static bool agents_nav_has(int n){(void)n;return false;}static void agents_nav_request(int n,bool b){(void)b;pending=n;}
 static void run_screen_shortcut(int s){target=s;}
+static enum agents_nav_screen agents_cover_toggle_target(void){return agents_nav_has(AGENTS_NAV_COVERS)?AGENTS_NAV_BACK:AGENTS_NAV_COVERS;}
+static int cider_scrn(void*p){(void)p;return GO_TO_CIDER;}
 static bool cover_nav_playing(void){return true;}static bool cover_nav_active(void){return false;}static void cover_nav_begin(int n){(void)n;}static int cover_nav_finish(void){return GO_TO_PREVIOUS;}
 static bool wait_for_album_tables(void){return true;}static void album_covers_cancel_resume(void){}
 static int album_covers_return(void*p,void*q){(void)p;(void)q;local_calls++;return GO_TO_PREVIOUS;}
 static int cider_browse_covers(bool b){(void)b;cider_calls++;return GO_TO_CIDER;}
 '''
-pre='enum agents_nav_screen {'+','.join(sorted(set(tokens)|{'GO_TO_CIDER'}))+'};\n'+pre
+pre='enum agents_nav_screen {'+','.join(sorted(set(tokens)|{'GO_TO_CIDER','AGENTS_NAV_COVERS','AGENTS_NAV_BACK'}))+'};\n'+pre
 pre+='\nstatic bool shortcut_screen_context(int context){return context==1;}static void root_menu_agents_shortcut(void){}\n'
 pre+=fn(c,'cider_remote_source')+functions+route
 post=r'''
 int main(void){for(int available=0;available<2;available++){
  online=available;active=!online;paused=false;pending=AGENTS_NAV_NONE;root_menu_wps_shortcut();assert(target==GO_TO_WPS&&active==online);assert(paused==(bool)available);
- active=!online;paused=false;root_menu_cover_shortcut();assert(target==GO_TO_ALBUM_COVERS&&active==online);
+ active=!online;paused=false;root_menu_cover_shortcut();assert(pending==AGENTS_NAV_COVERS);
  int before=local_calls;int next=cider_calls;int result=album_covers_scrn(NULL);
  assert(result==(online?GO_TO_CIDER:GO_TO_PREVIOUS));assert(local_calls==before+!online&&cider_calls==next+online);
  for(int context=0;context<2;context++){

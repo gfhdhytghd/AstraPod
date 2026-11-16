@@ -102,12 +102,17 @@ static long raw_ui_filter(long button)
     if (agents_nav_pending() != AGENTS_NAV_NONE) return raw_ui_cancel();
     if (fire)
     {
-        agents_nav_request(agents_nav_has(AGENTS_NAV_COVERS) ?
-                           AGENTS_NAV_BACK : AGENTS_NAV_COVERS, false);
+        agents_nav_request(agents_cover_toggle_target(), false);
         return BUTTON_MENU;
     }
 #ifdef IPOD_ACCESSORY_PROTOCOL
-    return raw_remote_filter(button);
+    button = raw_remote_filter(button);
+    if (button == REMOTE_COVERS_BUTTON)
+    {
+        agents_nav_request(agents_cover_toggle_target(), true);
+        return BUTTON_MENU;
+    }
+    return button;
 #else
     return button;
 #endif
@@ -449,8 +454,7 @@ int agents_shortcut_get_button(int timeout)
         true, &fire);
     if (fire || button == REMOTE_COVERS_BUTTON)
     {
-        agents_nav_request(agents_nav_has(AGENTS_NAV_COVERS) ?
-                           AGENTS_NAV_BACK : AGENTS_NAV_COVERS, !fire);
+        agents_nav_request(agents_cover_toggle_target(), !fire);
         return BUTTON_MENU;
     }
     button = agents_shortcut_button(&shortcut, button, button_status(),
@@ -464,6 +468,11 @@ int agents_shortcut_get_button(int timeout)
         button = agents_remote_button(&remote, context, button, button_status(),
                                        current_tick);
     if (remote_input_active) return button;
+    if (button == REMOTE_COVERS_BUTTON)
+    {
+        agents_nav_request(agents_cover_toggle_target(), true);
+        return BUTTON_MENU;
+    }
 #endif
     return remote_menu_button(raw_volume_button(button));
 }
@@ -1149,7 +1158,8 @@ static bool shortcut_screen_context(int context)
 static int route_screen_shortcut(int action, int context)
 {
 #ifdef HAVE_USB_PODLINK
-    if (action == ACTION_REMOTE_WPS || action == ACTION_AGENTS_REMOTE_COVERS)
+    if (action == ACTION_REMOTE_WPS || action == ACTION_AGENTS_REMOTE_COVERS ||
+        action == ACTION_AGENTS_COVERS)
         cider_remote_source();
     bool covers = action == ACTION_AGENTS_COVERS ||
                   action == ACTION_AGENTS_REMOTE_COVERS;
@@ -1162,7 +1172,7 @@ static int route_screen_shortcut(int action, int context)
     remote_input_active = false;
 #endif
     enum agents_nav_screen target = covers ?
-        (agents_nav_has(AGENTS_NAV_COVERS) ? AGENTS_NAV_BACK : AGENTS_NAV_COVERS) :
+        (agents_cover_toggle_target()) :
         agents ? AGENTS_NAV_AGENTS : AGENTS_NAV_WPS;
     agents_nav_request(target, action == ACTION_AGENTS_REMOTE_COVERS);
     if (covers) { /* The owner/modal unwinds to the root dispatcher. */ }

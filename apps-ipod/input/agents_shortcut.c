@@ -51,6 +51,14 @@ bool agents_nav_enter(enum agents_nav_screen screen)
 void agents_nav_leave(enum agents_nav_screen screen)
 { nav_live &= ~(1u << screen); }
 
+enum agents_nav_screen agents_cover_toggle_target(void)
+{
+    bool inside = agents_nav_has(AGENTS_NAV_COVERS) ||
+        (cover_nav_active() && !cover_nav_playing() &&
+         agents_nav_has(AGENTS_NAV_TRACKS));
+    return inside ? AGENTS_NAV_BACK : AGENTS_NAV_COVERS;
+}
+
 int agents_shortcut_button(struct agents_shortcut_state *s, int button,
                            int held, bool talking, bool *fire)
 {

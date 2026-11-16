@@ -4769,9 +4769,8 @@ static int album_covers_loop(void)
         if (nav == AGENTS_NAV_COVERS) agents_nav_take(nav);
         else if (nav == AGENTS_NAV_BACK)
         {
-            bool remote = agents_nav_remote();
             agents_nav_take(nav);
-            return remote ? CAROUSEL_REMOTE_RETURN : GO_TO_PREVIOUS;
+            return CAROUSEL_REMOTE_RETURN;
         }
         else if (nav == AGENTS_NAV_AGENTS) return GO_TO_AGENTS;
         else if (nav == AGENTS_NAV_WPS) return GO_TO_WPS;
@@ -4783,9 +4782,8 @@ static int album_covers_loop(void)
         case ACTION_REMOTE_WPS:
             return GO_TO_WPS;
         case ACTION_AGENTS_REMOTE_COVERS:
-            return CAROUSEL_REMOTE_RETURN;
         case ACTION_AGENTS_COVERS:
-            return GO_TO_PREVIOUS;
+            return CAROUSEL_REMOTE_RETURN;
 #endif
         case PF_QUIT:
             return agents_nav_has(AGENTS_NAV_WPS) || cover_nav_origin_is(GO_TO_WPS) ?
@@ -4926,9 +4924,8 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     enum agents_nav_screen nav = agents_nav_pending();
     if (nav == AGENTS_NAV_BACK)
     {
-        bool remote = agents_nav_remote();
         agents_nav_take(nav);
-        result = remote ? CAROUSEL_REMOTE_RETURN : GO_TO_PREVIOUS;
+        result = CAROUSEL_REMOTE_RETURN;
     }
     else if (nav == AGENTS_NAV_AGENTS) result = GO_TO_AGENTS;
     else if (nav == AGENTS_NAV_WPS) result = GO_TO_WPS;

@@ -62,8 +62,15 @@ bool button_usb_remote_request(const struct usb_ctrlrequest *req)
     }
     else
     {
-        static const int keys[] = {0, BUTTON_RC_MENU, BUTTON_RC_SELECT,
-            0, 0, 0, BUTTON_RC_LEFT, BUTTON_RC_RIGHT, BUTTON_RC_PLAY};
+        /* Accept old forwarders' wire IDs, but never inject a second copy
+         * of a Dock-owned transport key. This also covers non-overlapping
+         * PC/Dock reports: timestamp-window merging could replay a tap. */
+        if (req->wValue >= USB_REMOTE_KEY_LEFT)
+        {
+            restore_irq(level);
+            return true;
+        }
+        static const int keys[] = {0, BUTTON_RC_MENU, BUTTON_RC_SELECT};
         int key = keys[req->wValue];
         if (req->wIndex)
         {

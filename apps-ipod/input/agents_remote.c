@@ -142,12 +142,57 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
     return event;
 }
 
+/* QuickScreen must still receive Play as Select immediately, which can close
+ * the overlay on the first tap. Observe the physical triple independently of
+ * that context change so its third release always reaches Cover Flow. */
+static bool global_triple(struct agents_remote_state *s, int context,
+                          int button, int held, unsigned long now)
+{
+    if (s->triple_down && (button & BUTTON_REMOTE) != BUTTON_RC_PLAY &&
+        !(held & BUTTON_RC_PLAY))
+    {
+        /* A modal teardown may clear its queued release. The sampled up
+         * edge still belongs to this tap, even after QuickScreen closes. */
+        button = BUTTON_RC_PLAY | BUTTON_REL;
+    }
+    if (!s->triple_down && now - s->triple_released > REMOTE_TAP_WINDOW_TICKS)
+        s->triple_taps = 0;
+    if ((button & BUTTON_REMOTE) != BUTTON_RC_PLAY) return false;
+    if (!(button & (BUTTON_REL | BUTTON_REPEAT)))
+    {
+        if (!s->triple_down)
+        {
+            s->triple_pressed = now;
+            s->triple_context = context;
+            s->triple_down = true;
+        }
+    }
+    else if ((button & BUTTON_REL) && s->triple_down)
+    {
+        unsigned long hold = s->triple_context == REMOTE_AGENTS ?
+                             (3 * HZ + 9) / 10 : (3 * HZ + 4) / 5;
+        s->triple_down = false;
+        s->triple_released = now;
+        if (now - s->triple_pressed >= hold) s->triple_taps = 0;
+        else if (++s->triple_taps == 3)
+        {
+            s->triple_taps = s->taps = 0;
+            s->tap_pending = s->second = false;
+            s->hold[3].down = s->hold[3].fired = false;
+            remote_log_event(REMOTE_LOG_TRIPLE, now, context, 0, NULL, 0);
+            return true;
+        }
+    }
+    return false;
+}
+
 int agents_remote_button(struct agents_remote_state *s, int context,
                          int button, int held, unsigned long now)
 {
     if (s->queued) return take(s);
+    if (global_triple(s, context, button, held, now)) return REMOTE_COVERS_BUTTON;
     /* Quick screen centre is Select, including a hold; no tap gesture may
-     * navigate to another screen or turn into the physical BOTTOM key. */
+     * turn into the physical BOTTOM key. The global triple may leave it. */
     if (context == REMOTE_QUICKSCREEN &&
         ((button & BUTTON_REMOTE) == BUTTON_RC_PLAY ||
          (button & BUTTON_REMOTE) == BUTTON_RC_SELECT))

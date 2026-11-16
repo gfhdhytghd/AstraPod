@@ -80,7 +80,8 @@ static int cider_browse_covers(bool h){(void)h;return GO_TO_CIDER;}
 #define PLAY_TEST 53
 #define STAY 99
 static struct {int wps_menu_action;}global_settings;
-static bool wps_return_agents,wps_menu_covers,poweroff=true;
+static bool wps_return_agents,wps_menu_covers,cover_toggled_back,poweroff=true;
+static int last_screen=GO_TO_ROOT;
 static int owner,activity,depth,max_depth,enters[5],exits[5];
 static unsigned long events;
 static uint32_t rng=1;
@@ -256,6 +257,13 @@ if legacy:
 else:
  route=fn(action,'shortcut_screen_context')+fn(action,'route_screen_shortcut')
  root_funcs=''.join(fn(root,n) for n in ['album_covers_scrn','cover_tracks_scrn','agents_scrn','run_screen_shortcut','root_menu_agents_shortcut','root_menu_wps_shortcut','root_menu_cover_shortcut'])
+pump=r'''
+static void test_cover_shortcut(void){
+ root_menu_cover_shortcut();
+ if(!agents_nav_active()&&!app_buffer_is_claimed())run_screen_shortcut(GO_TO_ALBUM_COVERS);
+}
+#define root_menu_cover_shortcut() test_cover_shortcut()
+'''
 main=r'''
 int main(void){
  /* FU20: remote double -> WPS -> triple -> Cover MENU must end at home. */
@@ -319,7 +327,7 @@ int main(void){
  printf("production router/controller + stack/app-buffer model: 2000 long seeded sequences (512 generated actions each), %lu events, max live screen depth=%d, no duplicate screen/owner, panic path + album-list/WPS/origin history + child-owner cancellation PASS\n",events,max_depth);
 }
 '''
-(O/'nav.c').write_text(pre+api+nav+helpers+bodies+route+root_funcs+main)
+(O/'nav.c').write_text(pre+api+nav+helpers+bodies+route+root_funcs+pump+main)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie',str(O/'nav.c'),'-o',str(O/'nav')],check=True)
 subprocess.run([str(O/'nav')],check=True,timeout=30)
 

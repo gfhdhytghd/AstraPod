@@ -10,6 +10,7 @@
 #include <string.h>
 #include "string-extra.h"    /* strcasecmp */
 #include "config.h"
+#include "input/agents_shortcut.h"
 #include "system.h"          /* ALIGN_BUFFER */
 #include "settings/settings.h"        /* global_settings */
 #include "database/tagcache.h"   /* UNTAGGED */
@@ -364,5 +365,12 @@ int artist_portraits(const char *selected_file)
             break;
         }
     }
-    return ret == CAROUSEL_REMOTE_RETURN ? GO_TO_PREVIOUS : ret;
+    if (ret == CAROUSEL_REMOTE_RETURN)
+    {
+        /* The shared carousel gesture leaves this Cover Flow too. Defer
+         * until its buffer and any enclosing browser have unwound. */
+        agents_nav_request(AGENTS_NAV_BACK, false);
+        return GO_TO_PREVIOUS;
+    }
+    return ret;
 }

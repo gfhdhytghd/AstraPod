@@ -149,21 +149,21 @@ int main(void) {
     tick(798);assert(lastbtn);tick(799);tick(800);assert(!lastbtn);
     for(int c=REMOTE_OTHER;c<=REMOTE_WPS;c++)for(int id=1;id<=2;id++)
         gesture(c,1000+c*200+id*50,id);
+    /* Wire IDs 6/7/8 still ACK, but the Dock is their sole button source. */
     for(int id=6;id<=8;id++) {
-        int expect=id==6?BUTTON_RC_LEFT:id==7?BUTTON_RC_RIGHT:BUTTON_RC_PLAY;
         used=0;unsigned long base=3000+id*200;
         current_tick=base;request(0x40,id,1,0,USB_CONTROL_ACK);
         request(0x40,id,0,0,USB_CONTROL_ACK);
         for(unsigned long t=base+1;t<=base+8;t++)tick(t);
-        assert(used==2&&posted[0]==expect&&posted[1]==(expect|BUTTON_REL));
+        assert(!used);
     }
     current_tick=6000;request(0x40,5,1,0,USB_CONTROL_ACK);
     assert(button_usb_remote_bridge_fresh(current_tick)&&!button_usb_remote_keys_fresh(current_tick));
     physical=BUTTON_RC_PLAY;tick(6001);tick(6002);assert(lastbtn==BUTTON_RC_PLAY);
     request(0x40,5,2,0,USB_CONTROL_ACK);assert(button_usb_remote_keys_fresh(current_tick));
-    tick(6003);tick(6004);assert(!lastbtn);
+    tick(6003);tick(6004);assert(lastbtn==BUTTON_RC_PLAY);
     request(0x40,5,3,0,USB_CONTROL_STALL);physical=0;
-    puts("EP0 Left/Right/Play queue delivery and versioned full-key ownership PASS");
+    puts("EP0 legacy transport IDs ACK without injection; Dock Play survives both heartbeat profiles PASS");
     puts("EP0 Menu/Select back-to-back press/release survives debounce in all contexts PASS");
     puts("Outside Agents/WPS remote Menu press/repeat/release unchanged PASS");
     puts("EP0 strict parsing + real button queue press/repeat/release + 1s safety/wrap PASS");

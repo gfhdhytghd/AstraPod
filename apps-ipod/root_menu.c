@@ -87,6 +87,10 @@ static int next_screen = GO_TO_ROOT; /* holding info about the upcoming screen
                                         * which is the current screen for the
                                         * rest of the code after load_screen
                                         * is called */
+static bool cover_toggled_back;
+#ifdef HAVE_USB_PODLINK
+static int cider_scrn(void *param);
+#endif
 static int last_screen = GO_TO_ROOT; /* unfortunatly needed so we can resume
                                         or goto current track based on previous
                                         screen */
@@ -668,6 +672,13 @@ static int cover_tracks_scrn(void *param)
     if (cover_nav_active() && agents_nav_pending() == AGENTS_NAV_WPS)
         cover_nav_set_playing(true);
     agents_nav_leave(AGENTS_NAV_TRACKS);
+    if (cover_nav_active() && agents_nav_take(AGENTS_NAV_BACK))
+    {
+        int origin = cover_nav_finish();
+        album_covers_cancel_resume();
+        cover_toggled_back = true;
+        ret = origin == GO_TO_AGENTS ? GO_TO_AGENTS : GO_TO_WPS;
+    }
     return ret;
 }
 
@@ -750,6 +761,14 @@ static int wpsscrn(void* param)
         cover_nav_finish();
         album_covers_cancel_resume();
     }
+#ifdef HAVE_USB_PODLINK
+    /* Re-entering Cider covers unwinds WPS; retain its cached return policy. */
+    if (ret_val == GO_TO_CIDER && cover_nav_origin_is(GO_TO_WPS))
+    {
+        wps_return_agents = return_agents;
+        wps_menu_covers = menu_covers;
+    }
+#endif
     back_from_wps = ret_val == GO_TO_PREVIOUS;
     return ret_val;
 }
@@ -847,14 +866,26 @@ static int album_covers_scrn(void* param)
 {
     (void)param;
 #ifdef HAVE_USB_PODLINK
-    if (cider_active()) return cider_browse_covers(false);
+    cider_remote_source();
+    if (cider_active())
+    {
+        cider_browse_covers(false);
+        /* Cider is the container of this visit, not another history step. */
+        return cider_scrn(NULL);
+    }
 #endif
     if (!cover_nav_active()) cover_nav_begin(GO_TO_PREVIOUS);
-    int ret = wait_for_album_tables() ? album_covers_return(NULL, NULL) : GO_TO_PREVIOUS;
+    bool toggled = false;
+    int ret = wait_for_album_tables() ? album_covers_return(NULL, &toggled) : GO_TO_PREVIOUS;
     if (ret == GO_TO_PREVIOUS)
     {
         int origin = cover_nav_finish();
         album_covers_cancel_resume();
+        if (toggled)
+        {
+            cover_toggled_back = true;
+            return origin == GO_TO_AGENTS ? GO_TO_AGENTS : GO_TO_WPS;
+        }
         return origin;
     }
     if (ret != GO_TO_ALBUM_COVERS_TRACKS &&
@@ -1031,7 +1062,8 @@ static int cider_scrn(void *param)
 {
     (void)param;
     int result = cider_browse();
-    if (cider_browse_remote_return()) wps_menu_covers = true;
+    cover_toggled_back = cider_browse_remote_return();
+    if (!cover_toggled_back) wps_return_agents = wps_menu_covers = false;
     return result;
 }
 
@@ -1042,8 +1074,10 @@ static int agents_scrn(void *param)
     while ((ret = agents_screen()) == AGENTS_SWITCH_COVERS)
     {
         cider_remote_source();
+        if (cover_nav_active()) { cover_nav_finish(); album_covers_cancel_resume(); }
         cover_nav_begin(GO_TO_AGENTS);
         int destination = album_covers_scrn(NULL);
+        if (destination == GO_TO_AGENTS) cover_toggled_back = false;
         if (destination != GO_TO_PREVIOUS && destination != GO_TO_AGENTS) return destination;
         /* A triple inside the carousel resumes the cached Agents client. */
     }
@@ -1073,6 +1107,11 @@ static void run_screen_shortcut(int screen)
                   screen == GO_TO_CIDER ? cider_scrn(NULL) :
                   screen == GO_TO_ALBUM_COVERS_TRACKS ? cover_tracks_scrn((void *)GO_TO_ALBUM_COVERS_TRACKS) :
                   album_covers_scrn(NULL);
+        if (cover_toggled_back)
+        {
+            cover_toggled_back = false;
+            last_screen = GO_TO_ROOT;
+        }
         enum agents_nav_screen nav = agents_nav_pending();
         if (nav != AGENTS_NAV_NONE && nav != AGENTS_NAV_BACK)
             ret = nav == AGENTS_NAV_AGENTS ? GO_TO_AGENTS :
@@ -1105,12 +1144,11 @@ void root_menu_wps_shortcut(void)
 
 void root_menu_cover_shortcut(void)
 {
-    cider_remote_source();
-    if (agents_nav_pending() == AGENTS_NAV_NONE)
-        agents_nav_request(agents_nav_has(AGENTS_NAV_COVERS) ?
-                           AGENTS_NAV_BACK : AGENTS_NAV_COVERS, false);
-    run_screen_shortcut(GO_TO_ALBUM_COVERS);
+    /* Raw viewers may own the app buffer or be inside another screen.
+     * Preserve intent and let their MENU cancellation release it first. */
+    agents_nav_request(agents_cover_toggle_target(), false);
 }
+
 #endif
 
 static const struct root_items items[] = {
@@ -2166,10 +2204,15 @@ static inline int load_screen(int screen)
     if (screen == GO_TO_AGENTS) agents_nav_take(AGENTS_NAV_AGENTS);
     else if (screen == GO_TO_WPS) agents_nav_take(AGENTS_NAV_WPS);
     else if (screen == GO_TO_CIDER) agents_nav_take(AGENTS_NAV_TRACKS);
-    else if (screen == GO_TO_ALBUM_COVERS) agents_nav_take(AGENTS_NAV_COVERS);
+    else if (screen == GO_TO_ALBUM_COVERS)
+    {
+        cider_remote_source();
+        agents_nav_take(AGENTS_NAV_COVERS);
+    }
 #endif
     if (screen == GO_TO_ALBUM_COVERS) cover_nav_begin(old_previous);
-    else if (cover_nav_active() && screen != GO_TO_WPS && screen != GO_TO_ALBUM_COVERS_TRACKS)
+    else if (cover_nav_active() && screen != GO_TO_WPS &&
+             screen != GO_TO_CIDER && screen != GO_TO_ALBUM_COVERS_TRACKS)
     {
         cover_nav_finish();
         album_covers_cancel_resume();
@@ -2181,7 +2224,14 @@ static inline int load_screen(int screen)
     if (agents_nav_pending() != AGENTS_NAV_NONE && !app_buffer_is_claimed())
     {
         enum agents_nav_screen nav = agents_nav_pending();
-        if (nav == AGENTS_NAV_BACK) { agents_nav_take(nav); ret_val = GO_TO_PREVIOUS; }
+        if (nav == AGENTS_NAV_BACK)
+        {
+            agents_nav_take(nav);
+            int origin = cover_nav_active() ? cover_nav_finish() : GO_TO_WPS;
+            album_covers_cancel_resume();
+            cover_toggled_back = true;
+            ret_val = origin == GO_TO_AGENTS ? GO_TO_AGENTS : GO_TO_WPS;
+        }
         else ret_val = nav == AGENTS_NAV_AGENTS ? GO_TO_AGENTS :
                        nav == AGENTS_NAV_WPS ? GO_TO_WPS : GO_TO_ALBUM_COVERS;
     }
@@ -2201,9 +2251,12 @@ static inline int load_screen(int screen)
             pop_current_activity();
     }
 
-    last_screen = screen;
+    /* A completed toggle must not put Covers behind its return screen.
+     * Otherwise MENU on that screen re-enters the just-closed journey. */
+    last_screen = cover_toggled_back ? GO_TO_ROOT : screen;
     if (ret_val == GO_TO_PREVIOUS)
-        last_screen = old_previous;
+        last_screen = cover_toggled_back ? GO_TO_ROOT : old_previous;
+    cover_toggled_back = false;
     return ret_val;
 }
 
@@ -2394,9 +2447,18 @@ void root_menu(void)
     while (true)
     {
 #ifdef HAVE_USB_PODLINK
-        if (agents_nav_pending() == AGENTS_NAV_COVERS &&
-            !agents_nav_active() && !app_buffer_is_claimed())
-            next_screen = GO_TO_ALBUM_COVERS;
+        if (!agents_nav_active() && !app_buffer_is_claimed())
+        {
+            if (agents_nav_pending() == AGENTS_NAV_COVERS)
+                next_screen = GO_TO_ALBUM_COVERS;
+            else if (agents_nav_take(AGENTS_NAV_BACK))
+            {
+                int origin = cover_nav_active() ? cover_nav_finish() : GO_TO_WPS;
+                album_covers_cancel_resume();
+                next_screen = origin == GO_TO_AGENTS ? GO_TO_AGENTS : GO_TO_WPS;
+                last_screen = GO_TO_ROOT;
+            }
+        }
 #endif
         if (next_screen == GO_TO_ROOT && cover_nav_active())
         {

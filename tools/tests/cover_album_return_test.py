@@ -29,7 +29,7 @@ static int cider_browse_covers(bool home){(void)home;return 999;}
 #define ACTION_WPS_MENU 1
 #define WPS_MENU_PREVIOUS 1
 static struct {int wps_menu_action;}global_settings;
-static bool restore,theme_enabled,menu_covers,return_agents;
+static bool restore,theme_enabled,menu_covers,return_agents,cover_toggled_back;
 static int covers,cover_result,clears,prepared;
 static long tracks_album_seek=42,tracks_artist_seek=7;
 static char tracks_album_name[32]="Selected album";

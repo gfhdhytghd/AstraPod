@@ -38,7 +38,11 @@ static void browser_set_external_header(const struct browser_db_header*h,const s
 struct gui_synclist{int selected,count;};
 struct search_provider{const char*title;int activity;int(*scan)(const char*,void*);const char*(*row_text)(int,void*);bool(*refresh)(void*);};
 static struct {bool db_albumart;int db_art_row_height;}global_settings={true,46};
-static bool origin_agents;
+static bool origin_agents,journey;
+static bool cover_nav_active(void){return journey;}
+static void cover_nav_begin(int s){(void)s;journey=true;}
+static int cover_nav_finish(void){journey=false;return 0;}
+static void cider_remote_source(void){}
 static bool cover_nav_origin_is(int s){return origin_agents&&s==GO_TO_AGENTS;}
 static bool fail_play;
 static int cider_play_status(void){return 1;}
@@ -103,15 +107,15 @@ post=r'''
 int cider_covers(void){if(mode==4)return CIDER_COVERS_REMOTE_RETURN;if(mode==1)return GO_TO_PREVIOUS;assert(live==1);live++;if(live>max_live)max_live=live;struct cider_row r={0};strcpy(r.route,"album/a0");strcpy(r.title,"Album 0");cider_browse_album(&r);live--;return GO_TO_PREVIOUS;}
 int main(void){
 mode=0;depth=0;assert(cider_browse()==GO_TO_WPS&&plays==1&&!live&&depth==1);assert(root_count==6);assert(!strcmp(root_rows[3].route,"root/Album")&&!strcmp(root_rows[4].route,"root/Genre"));
-mode=1;assert(cider_browse()==GO_TO_PREVIOUS&&!live&&depth==0);
-depth=1;strcpy(history[1].route,"random");assert(cider_browse()==GO_TO_WPS&&depth==0&&!live);assert(cider_browse()==GO_TO_PREVIOUS&&!live);
-fail_play=true;depth=1;strcpy(history[1].route,"album/a0");memset(history[1].art,'c',64);history[1].art[64]=0;pins=0;mode=3;step=0;int raced=plays;assert(cider_browse()==GO_TO_PREVIOUS&&plays==raced&&!live);assert(pins>0&&!pinned);fail_play=false;
+mode=1;assert(cider_browse()==GO_TO_ROOT&&!live&&depth==0);
+depth=1;strcpy(history[1].route,"random");assert(cider_browse()==GO_TO_WPS&&depth==0&&!live);assert(cider_browse()==GO_TO_ROOT&&!live);
+fail_play=true;depth=1;strcpy(history[1].route,"album/a0");memset(history[1].art,'c',64);history[1].art[64]=0;pins=0;mode=3;step=0;int raced=plays;assert(cider_browse()==GO_TO_ROOT&&plays==raced&&!live);assert(pins>0&&!pinned);fail_play=false;
 available=false;mode=2;step=0;int before=plays;cider_browse();assert(plays==before&&!live&&empty_list);available=true;
 for(int i=1;i<=2000;i++){rng=i;step=0;mode=2;cider_browse();assert(!live);}
 depth=0;mode=4;cider_browse_covers(true);assert(cider_browse()==GO_TO_WPS&&cider_browse_remote_return()&&!cider_browse_remote_return());
 mode=1;cider_browse_covers(true);assert(cider_browse()==GO_TO_ROOT&&!cider_browse_remote_return());
-mode=4;cider_browse_covers(false);assert(cider_browse()==GO_TO_PREVIOUS&&!cider_browse_remote_return());
-origin_agents=true;cider_browse_covers(false);assert(cider_browse()==GO_TO_AGENTS&&!cider_browse_remote_return());mode=1;cider_browse_covers(false);assert(cider_browse()==GO_TO_AGENTS);origin_agents=false;
+mode=4;cider_browse_covers(false);assert(cider_browse()==GO_TO_WPS&&cider_browse_remote_return());
+origin_agents=true;cider_browse_covers(false);assert(cider_browse()==GO_TO_AGENTS&&cider_browse_remote_return());mode=1;cider_browse_covers(false);assert(cider_browse()==GO_TO_ROOT);origin_agents=false;
 mode=1;step=0;menu_back=true;struct cider_row entry={0};strcpy(entry.route,"album/context");assert(cider_browse_at(&entry)==GO_TO_PREVIOUS&&step==1);menu_back=false;
 assert(max_live==2&&draws>2000);printf("Production Cider native list controller: hidden rows, empty/unavailable, album/track play, 2000 seeded sequences, max instances=%d PASS\n",max_live);}
 '''

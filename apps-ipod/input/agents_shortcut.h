@@ -40,6 +40,8 @@ void cover_nav_set_playing(bool playing);
  * another screen after its cleanup. One bit per screen bounds live instances. */
 enum agents_nav_screen { AGENTS_NAV_NONE, AGENTS_NAV_AGENTS, AGENTS_NAV_WPS,
                          AGENTS_NAV_COVERS, AGENTS_NAV_TRACKS, AGENTS_NAV_BACK };
+/* Both Cover Flow gestures share this target, including an open album list. */
+enum agents_nav_screen agents_cover_toggle_target(void);
 void agents_nav_request(enum agents_nav_screen screen, bool remote);
 enum agents_nav_screen agents_nav_pending(void);
 bool agents_nav_remote(void);

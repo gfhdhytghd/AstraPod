@@ -104,7 +104,8 @@ static int __attribute__((unused)) cider_browse(void){return GO_TO_WPS;}
 #define GO_TO_ALBUM_COVERS 14
 #define GO_TO_AGENTS 11
 #define GO_TO_ROOT 12
-static bool wps_return_agents,wps_menu_covers,poweroff=true;
+static bool wps_return_agents,wps_menu_covers,cover_toggled_back,poweroff=true;
+static int last_screen=GO_TO_ROOT;
 static int a_calls,calls,covers_result=GO_TO_PREVIOUS;
 static int agents_screen(void){return ++a_calls==1?AGENTS_SWITCH_COVERS:0;}
 static int album_covers_scrn(void*p){(void)p;calls++;return covers_result;}
@@ -121,7 +122,7 @@ static int app_buffer_is_claimed(void){return 0;}
 nav='#include <stdbool.h>\n'+nav_production+nav
 nav+=function(root,'agents_scrn')+function(root,'run_screen_shortcut')+function(root,'root_menu_cover_shortcut')+r'''
 int main(void){assert(agents_scrn(NULL)==GO_TO_PREVIOUS);assert(a_calls==2&&calls==1);
- root_menu_cover_shortcut();assert(calls==2&&poweroff);
+ root_menu_cover_shortcut();assert(agents_nav_pending()==AGENTS_NAV_COVERS);run_screen_shortcut(GO_TO_ALBUM_COVERS);assert(calls==2&&poweroff);
  a_calls=0;covers_result=GO_TO_ROOT;assert(agents_scrn(NULL)==GO_TO_ROOT);
  puts("Agents triple closes then reopens cached client after Cover return; generic caller resumes; destinations propagate PASS");}
 '''
@@ -130,7 +131,7 @@ subprocess.run(cmd+[str(O/'nav.c'),'-o',str(O/'nav')],check=True);subprocess.run
 # WPS shares its pre-existing album modal helper; returning restores WPS,
 # not a new root destination, so the origin is its existing caller frame.
 assert re.search(r'case ACTION_WPS_STOP:\s*#ifdef HAVE_USB_PODLINK\s*case ACTION_AGENTS_COVERS:',wps)
-assert 'case ACTION_AGENTS_COVERS:\n            return GO_TO_PREVIOUS;' in covers
+assert 'case ACTION_AGENTS_REMOTE_COVERS:\n        case ACTION_AGENTS_COVERS:\n            return CAROUSEL_REMOTE_RETURN;' in covers
 assert 'case ACTION_AGENTS_SWITCH:\n                gwps_leave_wps(true);\n                return GO_TO_AGENTS;' in wps
 assert 'action == ACTION_AGENTS_COVERS' in (R/'apps-ipod/input/action.c').read_text()
 assert 'shortcut_screen_context(context)' in (R/'apps-ipod/input/action.c').read_text()

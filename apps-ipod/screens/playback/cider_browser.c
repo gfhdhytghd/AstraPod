@@ -35,8 +35,8 @@ static struct
     char art[65];
 } history[12];
 static int depth;
-static bool album_pending, show_covers, covers_home, covers_agents, remote_return;
-static int cover_album_depth = -1;
+static bool album_pending, show_covers, remote_return;
+static int cover_album_depth = -1, cover_parent_depth = -1;
 static struct cider_row selected_row;
 static struct cider_row root_rows[35];
 static int root_count, browse_floor;
@@ -272,11 +272,28 @@ int cider_browse_at(const struct cider_row *row)
 }
 int cider_browse_covers(bool home)
 {
+    if (!cover_nav_active()) cover_nav_begin(home ? GO_TO_WPS : GO_TO_PREVIOUS);
     show_covers = true;
-    covers_home = home;
-    covers_agents = cover_nav_origin_is(GO_TO_AGENTS);
     return GO_TO_CIDER;
 }
+/* One visit owns its album depth. A normal back returns to the browser level
+ * that opened it; a toggle leaves the visit, never a synthetic covers node. */
+static void close_covers(bool restore_parent)
+{
+    if (restore_parent && cover_parent_depth >= 0) depth = cover_parent_depth;
+    cover_parent_depth = cover_album_depth = -1;
+    show_covers = album_pending = false;
+    if (cover_nav_active()) cover_nav_finish();
+}
+static int toggle_covers(void)
+{
+    int destination = cover_nav_origin_is(GO_TO_AGENTS) ? GO_TO_AGENTS : GO_TO_WPS;
+    agents_nav_take(AGENTS_NAV_BACK);
+    close_covers(true);
+    remote_return = true; /* Both native and remote gestures use this result. */
+    return destination;
+}
+
 bool cider_browse_remote_return(void)
 {
     bool remote = remote_return;
@@ -288,6 +305,8 @@ int cider_browse(void)
 {
     if (!agents_nav_enter(AGENTS_NAV_TRACKS))
         return GO_TO_PREVIOUS;
+    if (!show_covers && cover_parent_depth < 0 && cover_nav_active())
+        cover_nav_finish();
     push_current_activity(ACTIVITY_DATABASEBROWSER);
     struct gui_synclist list;
     gui_synclist_init(&list, name, NULL, false, 1, NULL);
@@ -318,16 +337,14 @@ int cider_browse(void)
         {
             show_covers = false;
             gui_synclist_scroll_stop(&list);
+            if (!cover_nav_active()) cover_nav_begin(GO_TO_CIDER);
+            if (cover_parent_depth < 0) cover_parent_depth = depth;
             int ret = cider_covers();
-            if (ret == CIDER_COVERS_REMOTE_RETURN)
+            if (ret == CIDER_COVERS_REMOTE_RETURN ||
+                agents_nav_pending() == AGENTS_NAV_BACK)
             {
-                if (covers_home || covers_agents)
-                {
-                    remote_return = covers_home;
-                    result = covers_home ? GO_TO_WPS : GO_TO_AGENTS;
-                    break;
-                }
-                ret = GO_TO_PREVIOUS;
+                result = toggle_covers();
+                break;
             }
             if (album_pending)
             {
@@ -335,13 +352,17 @@ int cider_browse(void)
                 enter(&selected_row);
                 cover_album_depth = depth;
             }
-            else if (ret != GO_TO_PREVIOUS || covers_home || covers_agents)
+            else if (ret != GO_TO_PREVIOUS)
             {
-                result = ret != GO_TO_PREVIOUS ? ret :
-                         covers_home ? GO_TO_ROOT : GO_TO_AGENTS;
+                result = ret;
+                close_covers(false);
                 break;
             }
-            else if (depth) cider_page_open(history[depth].route);
+            else
+            {
+                close_covers(true);
+                if (depth) cider_page_open(history[depth].route);
+            }
         }
         int count = !cider_available() ? 0
                     : depth            ? cider_page_total()
@@ -434,11 +455,19 @@ int cider_browse(void)
         }
         if (nav == AGENTS_NAV_COVERS)
         {
-            result = GO_TO_ALBUM_COVERS;
-            break;
+            agents_nav_take(nav);
+            cider_remote_source();
+            if (!cider_available()) { result = GO_TO_ALBUM_COVERS; break; }
+            show_covers = true;
+            continue;
         }
         if (nav == AGENTS_NAV_BACK)
         {
+            if (cover_parent_depth >= 0)
+            {
+                result = toggle_covers();
+                break;
+            }
             agents_nav_take(nav);
             action = ACTION_STD_CANCEL;
         }
@@ -455,7 +484,11 @@ int cider_browse(void)
         {
             play_pending = false;
             if (depth <= browse_floor)
+            {
+                /* Cider's root is a Home child, not a history trampoline. */
+                result = browse_floor ? GO_TO_PREVIOUS : GO_TO_ROOT;
                 break;
+            }
             if (depth == cover_album_depth)
             {
                 cover_album_depth = -1;
@@ -485,7 +518,6 @@ int cider_browse(void)
             else if (!strcmp(selected_row.route, "covers"))
             {
                 show_covers = true;
-                covers_home = covers_agents = false;
             }
             else if (!strcmp(selected_row.route, "root/Search"))
             {
@@ -576,6 +608,7 @@ int cider_browse(void)
             break;
         }
     }
+    if (cover_parent_depth >= 0) close_covers(false);
     carousel_forget_resume();
     gui_synclist_scroll_stop(&list);
     cider_unpin_art();

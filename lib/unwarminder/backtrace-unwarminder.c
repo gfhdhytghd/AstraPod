@@ -41,12 +41,12 @@ static Boolean CliReadB(Int32 a, Int8  *v);
 /* Table of function pointers for passing to the unwinder */
 const UnwindCallbacks cliCallbacks =
     {
-        CliReport,
-        CliReadW,
-        CliReadH,
-        CliReadB
+        .report = CliReport,
+        .readW = CliReadW,
+        .readH = CliReadH,
+        .readB = CliReadB
 #if defined(UNW_DEBUG)
-       ,printf
+       ,.printf = printf
 #endif
     };
 
@@ -73,6 +73,8 @@ const UnwindCallbacks cliCallbacks =
  ***************************************************************************/
 static Boolean CliReport(void *data, Int32 address)
 {
+    if ((address & ~1u) == 0)
+        return FALSE;
     /* CliStack *s = (CliStack *)data; */
     unsigned *line = (unsigned *)data;
 

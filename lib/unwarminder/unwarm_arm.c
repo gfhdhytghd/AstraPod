@@ -92,6 +92,11 @@ UnwResult UnwStartArm(UnwState * const state)
     {
         Int32 instr;
 
+        if (!state->cb || !state->cb->readW)
+            return UNWIND_IREAD_W_FAIL;
+        if (state->regData[15].v == 0)
+            return UNWIND_RESET;
+
         /* Attempt to read the instruction */
         if(!state->cb->readW(state->regData[15].v, &instr))
         {

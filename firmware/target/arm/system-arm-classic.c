@@ -23,6 +23,7 @@
 #include "lcd.h"
 #include "font.h"
 #include "gcc_extensions.h"
+#include "panic.h"
 
 #include <get_sp.h>
 #include <backtrace.h>
@@ -133,8 +134,11 @@ void NORETURN_ATTR UIE(unsigned int pc, unsigned int num)
             saved_lr = user_context[1];
         }
     }
+    panic_screen_enter();
     /* An exception can interrupt a screen whose viewport lives on its stack. */
     lcd_set_viewport(NULL);
+#else
+    panic_screen_enter();
 #endif
 
 #if LCD_DEPTH > 1
@@ -211,6 +215,7 @@ void NORETURN_ATTR UIE(unsigned int pc, unsigned int num)
                       i + 2 < found ? text[i + 2] : 0);
     }
 #endif
+    lcd_update(); /* Keep the first exception visible if unwinding faults. */
 #ifdef HAVE_RB_BACKTRACE
     if (!triggered)
     {

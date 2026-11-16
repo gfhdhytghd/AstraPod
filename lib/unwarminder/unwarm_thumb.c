@@ -77,6 +77,11 @@ UnwResult UnwStartThumb(UnwState * const state)
     {
         Int16 instr;
 
+        if (!state->cb || !state->cb->readH)
+            return UNWIND_IREAD_H_FAIL;
+        if ((state->regData[15].v & ~1u) == 0)
+            return UNWIND_RESET;
+
         /* Attempt to read the instruction */
         if(!state->cb->readH(state->regData[15].v & (~0x1), &instr))
         {

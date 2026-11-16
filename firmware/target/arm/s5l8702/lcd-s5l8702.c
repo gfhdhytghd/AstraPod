@@ -429,7 +429,7 @@ void lcd_update_rect(int x, int y, int width, int height)
     fb_data* p = FBADDR(x,y);
     uint16_t* out = lcd_dblbuf[0];
     /* the lock's holder cannot run with interrupts off */
-    bool lock = irq_enabled();
+    bool lock = is_thread_context() && irq_enabled();
 
     if (lock)
         mutex_lock(&lcd_mutex);

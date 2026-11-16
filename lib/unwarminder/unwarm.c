@@ -117,6 +117,8 @@ void UnwInitState(UnwState * const       state,   /**< Pointer to structure to f
  */
 Boolean UnwReportRetAddr(UnwState * const state, Int32 addr)
 {
+    if ((addr & ~1u) == 0 || !state->cb || !state->cb->report)
+        return FALSE;
     /* Cast away const from reportData.
      *  The const is only to prevent the unw module modifying the data.
      */
@@ -169,7 +171,7 @@ Boolean UnwMemReadRegister(UnwState * const      state,
         return TRUE;
     }
     /* Not in the hash, so read from real memory */
-    else if(state->cb->readW(addr, &reg->v))
+    else if(state->cb && state->cb->readW && state->cb->readW(addr, &reg->v))
     {
         reg->o = REG_VAL_FROM_MEMORY;
         return TRUE;

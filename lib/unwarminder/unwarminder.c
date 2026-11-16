@@ -60,6 +60,11 @@ UnwResult UnwindStart(Int32                  pcValue,
 {
     UnwState state;
 
+    if (!cb || !cb->report || !cb->readW || !cb->readH || !cb->readB)
+        return UNWIND_FAILURE;
+    if ((pcValue & ~1u) == 0)
+        return UNWIND_RESET;
+
     /* Initialise the unwinding state */
     UnwInitState(&state, cb, data, pcValue, spValue);
 

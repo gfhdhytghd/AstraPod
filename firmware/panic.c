@@ -46,6 +46,26 @@ static char panic_buf[128];
 
 #define LINECHARS (LCD_WIDTH/SYSFONT_WIDTH) - 2
 
+static volatile bool panic_screen_active;
+
+void panic_screen_enter(void)
+{
+#if (CONFIG_PLATFORM & PLATFORM_NATIVE)
+#if defined(CPU_ARM_CLASSIC)
+    disable_interrupt(IRQ_FIQ_STATUS);
+#else
+    set_irq_level(DISABLE_INTERRUPTS);
+#endif
+#endif
+    if (panic_screen_active)
+    {
+        /* No formatting, drawing, unwinding, PMU or scheduler work here. */
+        system_exception_wait();
+        while (1);
+    }
+    panic_screen_active = true;
+}
+
 #if defined(CPU_ARM) && defined(HAVE_RB_BACKTRACE)
 void panicf_f( const char *fmt, ...) USED_ATTR;
 
@@ -83,14 +103,7 @@ void panicf( const char *fmt, ...)
 #endif
     va_list ap;
 
-#if (CONFIG_PLATFORM & PLATFORM_NATIVE)
-    /* Disable interrupts */
-#if defined(CPU_ARM_CLASSIC)
-    disable_interrupt(IRQ_FIQ_STATUS);
-#else
-    set_irq_level(DISABLE_INTERRUPTS);
-#endif
-#endif /* SIMULATOR */
+    panic_screen_enter();
 
     va_start( ap, fmt );
     vsnprintf( panic_buf, sizeof(panic_buf), fmt, ap );
@@ -112,12 +125,20 @@ void panicf( const char *fmt, ...)
         /* wrap panic line */
         int i, len = strlen(panic_buf);
         for (i=0; i<len; i+=LINECHARS) {
-            unsigned char c = panic_buf[i+LINECHARS];
-            panic_buf[i+LINECHARS] = 0;
+            int end = i + LINECHARS;
+            if (end > len) end = len;
+            unsigned char c = panic_buf[end];
+            panic_buf[end] = 0;
             lcd_puts(1, y++, (unsigned char *)panic_buf+i);
-            panic_buf[i+LINECHARS] = c;
+            panic_buf[end] = c;
         }
     }
+
+    /* Commit the first message before any fallible unwinder callbacks. */
+#ifdef CPU_ARM_CLASSIC
+    lcd_putsf(0, y++, "mode:%02lx", get_processor_mode());
+#endif
+    lcd_update();
 
 #if defined(HAVE_RB_BACKTRACE)
     rb_backtrace(pc, sp, &y);

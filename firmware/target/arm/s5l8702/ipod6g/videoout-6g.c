@@ -928,6 +928,11 @@ void videoout_mirror_rgb565(const void *source, int x, int y,
 {
     const uint16_t *src = source;
 
+    /* A fatal LCD flush must not apply deferred accessory policy: that path
+     * may read the PMU ADC, change CPU voltage, allocate or sleep. */
+    if (!is_thread_context() || !irq_enabled())
+        return;
+
     if (!videoout_active() || !svid_mirror_enabled || source == NULL ||
         !svid_layer_planar || x < 0 || y < 0 || width <= 0 || height <= 0 ||
         stride < width || x + width > LCD_WIDTH ||

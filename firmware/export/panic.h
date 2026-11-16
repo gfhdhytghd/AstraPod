@@ -26,4 +26,7 @@
 
 void panicf( const char *fmt, ... ) ATTRIBUTE_PRINTF(1, 2) NORETURN_ATTR;
 
+/* Fatal screens share one owner. Re-entry halts without replacing its text. */
+void panic_screen_enter(void);
+
 #endif /* __PANIC_H__ */

@@ -33,6 +33,7 @@
  *   - the public audio_* API, settings hooks, and startup
  ****************************************************************************/
 #include "config.h"
+#include "logfile.h"
 #ifdef HAVE_USB_PODLINK
 #include "screens/playback/cider.h"
 #endif
@@ -385,7 +386,6 @@ static bool codec_seeking = false;          /* Codec seeking ack expected? */
 static unsigned int position_key = 0;
 
 #define PLAYBACK_LOG_PATH LIB_PLAYBACK_LOG
-#define PLAYBACK_LOG_MAX_FILESZ_BYTES (511 << 10) /* 512k approx 1000-2500 tracks */
 #define PLAYBACK_LOG_MIN_ELAPSED_MS   (500) /* 500 milliseconds */
 #define PLAYBACK_LOG_BUFSZ (MAX_PATH * 10)
 static int playback_log_handle = 0; /* core_alloc handle for playback log buffer */
@@ -412,19 +412,14 @@ static int playback_log_buf_mode;
  * check for it reject the file without it. */
 static int open_playbacklog(int mode)
 {
-    const char *path = mode == PLAYBACK_LOG_LASTFM ? SCROBBLER_LOG_PATH
-                                                   : PLAYBACK_LOG_PATH;
-    int fd;
-
-    DEBUGF("Opening %s \n", path);
-    fd = open(path, O_WRONLY|O_CREAT|O_APPEND, 0666);
-    if (fd >= 0 && mode == PLAYBACK_LOG_LASTFM && lseek(fd, 0, SEEK_END) == 0)
-        fdprintf(fd,
-            "#AUDIOSCROBBLER/1.1\n#TZ/UNKNOWN\n"
-            "#CLIENT/Rockbox " TARGET_NAME SCROBBLER_TIMELESS "\n"
-            "#ARTIST\t#ALBUM\t#TITLE\t#TRACKNUM\t#LENGTH\t#RATING\t"
-            "#TIMESTAMP\t#MUSICBRAINZ_TRACKID\n");
-    return fd;
+    static const char header[] =
+        "#AUDIOSCROBBLER/1.1\n#TZ/UNKNOWN\n"
+        "#CLIENT/Rockbox " TARGET_NAME SCROBBLER_TIMELESS "\n"
+        "#ARTIST\t#ALBUM\t#TITLE\t#TRACKNUM\t#LENGTH\t#RATING\t"
+        "#TIMESTAMP\t#MUSICBRAINZ_TRACKID\n";
+    return mode == PLAYBACK_LOG_LASTFM ?
+        logfile_open_header(SCROBBLER_LOG_PATH, header) :
+        logfile_open(PLAYBACK_LOG_PATH);
 }
 
 /* Format one log line for the current mode. Returns snprintf's return value. */
@@ -1378,40 +1373,15 @@ void allocate_playback_log(void)
         }
     }
 
-    if (global_settings.playback_log == PLAYBACK_LOG_LASTFM)
+    fd = open_playbacklog(global_settings.playback_log);
+    if (fd >= 0)
     {
-        /* Audioscrobbler .log: entries are only ever appended (no rotation). */
-        fd = open_playbacklog(PLAYBACK_LOG_LASTFM);
-        if (fd >= 0)
-            close(fd);
-        return;
-    }
-
-    while (1)
-    {
-        DEBUGF("Opening %s \n", PLAYBACK_LOG_PATH);
-        fd = open(PLAYBACK_LOG_PATH, O_WRONLY|O_CREAT|O_APPEND, 0666);
-        if (fd >= 0)
+        if (global_settings.playback_log != PLAYBACK_LOG_LASTFM)
         {
-            /* check if the playback log is excessive */
-            if (lseek(fd, 0, SEEK_END) > PLAYBACK_LOG_MAX_FILESZ_BYTES)
-            {
-                close(fd);
-                create_numbered_filename(filename, LIB_USER_DIR, "playback_",
-                                         ".log", 4 IF_CNFN_NUM_(, NULL));
-                DEBUGF("Renaming %s => %s\n", PLAYBACK_LOG_PATH, filename);
-                if (rename(PLAYBACK_LOG_PATH, filename) < 0)
-                    break; /*failure*/
-                continue;
-            }
-            else
-            {
-                create_datetime_filename(filename, "", " Time ", "", false);
-                fdprintf(fd, "# Started Ver. %s %s\n", rbversion, filename);
-            }
-            close(fd);
+            create_datetime_filename(filename, "", " Time ", "", false);
+            logfile_printf(fd, "# Started Ver. %s %s\n", rbversion, filename);
         }
-        break;
+        logfile_close(fd);
     }
 }
 
@@ -1477,11 +1447,11 @@ static void write_playbacklog(struct mp3entry *id3)
          * it still for the duration; every _pinned get needs its matching
          * core_put_data_pinned() or the pool can never compact again. */
         buf = core_get_data_pinned(playback_log_handle);
-        write(fd, buf, used);
+        logfile_write(fd, buf, used);
         DEBUGF("%s Writing %lu bytes of buf:\n%s\n", __func__, used, buf);
         buf[0] = '\0';
         core_put_data_pinned(buf);
-        close(fd);
+        logfile_close(fd);
     }
     if (id3)
     {
@@ -1496,8 +1466,8 @@ static void write_playbacklog(struct mp3entry *id3)
         if (len > (int)sizeof(entry) - 1) /* snprintf returns untruncated len */
             len = sizeof(entry) - 1;
         if (len > 0)
-            write(fd, entry, len);
-        close(fd);
+            logfile_write(fd, entry, len);
+        logfile_close(fd);
     }
 }
 

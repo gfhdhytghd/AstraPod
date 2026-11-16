@@ -8,6 +8,7 @@
  * when ROCKBOX_HAS_LOGF is set.
  ****************************************************************************/
 #include "config.h"
+#include "logfile.h"
 
 #ifdef ROCKBOX_HAS_LOGF
 #include <file.h>
@@ -197,12 +198,7 @@ bool log_viewer_dump(void)
 
     logfenabled = false;
 
-    char fname[MAX_PATH];
-    struct tm *nowtm = get_time();
-    fd = open_pathfmt(fname, sizeof(fname), O_CREAT|O_WRONLY|O_TRUNC,
-             "%s/logf_%04d%02d%02d%02d%02d%02d.txt", ROCKBOX_DIR,
-             nowtm->tm_year + 1900, nowtm->tm_mon + 1, nowtm->tm_mday,
-             nowtm->tm_hour, nowtm->tm_min, nowtm->tm_sec);
+    fd = logfile_open(ROCKBOX_DIR "/logf.txt");
     if(-1 != fd) {
         int i;
 
@@ -213,16 +209,16 @@ bool log_viewer_dump(void)
 
         do {
             if(logfbuffer[i]=='\0')
-                fdprintf(fd, "\n");
+                logfile_printf(fd, "\n");
             else
-                fdprintf(fd, "%c", logfbuffer[i]);
+                logfile_printf(fd, "%c", logfbuffer[i]);
 
             i++;
             if(i >= MAX_LOGF_SIZE)
                 i = 0;
         } while(i != logfindex);
 
-        close(fd);
+        logfile_close(fd);
     }
 
     logfenabled = true;

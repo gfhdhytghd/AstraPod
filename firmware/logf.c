@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include "config.h"
+#include "logfile.h"
 #include "system.h"
 #include "font.h"
 #include "lcd.h"
@@ -367,12 +368,12 @@ static void flush_buffer(void)
     if(logdiskfindex < 1)
         return;
 
-    fd = open(HOME_DIR"/rockbox_log.txt", O_RDWR | O_CREAT | O_APPEND, 0666);
+    fd = logfile_open(HOME_DIR"/rockbox_log.txt");
     if (fd < 0)
         return;
 
-    write(fd, logdiskfbuffer, logdiskfindex);
-    close(fd);
+    logfile_write(fd, logdiskfbuffer, logdiskfindex);
+    logfile_close(fd);
 
     logdiskfindex = 0;
 }

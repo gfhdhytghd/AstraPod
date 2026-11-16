@@ -9,6 +9,7 @@
  * never returns.
  ****************************************************************************/
 #include "config.h"
+#include "logfile.h"
 #include "system.h"
 
 #include "version.h"
@@ -767,6 +768,7 @@ static void init(void)
     CHART(">init_battery_tables");
     init_battery_tables();
     CHART("<init_battery_tables");
+    logfile_init();
     init_library_files();
     debug_log_init();
 

@@ -18,6 +18,9 @@
  *
  ****************************************************************************/
 #include "storage.h"
+#ifndef BOOTLOADER
+#include "logfile.h"
+#endif
 #include "kernel.h"
 #include "ata_idle_notify.h"
 #include "usb.h"
@@ -69,6 +72,9 @@ static unsigned int num_drives;
 
 static struct event_queue storage_queue SHAREDBSS_ATTR;
 static unsigned int storage_thread_id = 0;
+#ifndef BOOTLOADER
+static struct queue_sender_list logfile_senders SHAREDBSS_ATTR;
+#endif
 
 static union {
 #if (CONFIG_STORAGE & STORAGE_ATA)
@@ -170,6 +176,12 @@ static void NORETURN_ATTR storage_thread(void)
 
         switch (ev.id)
         {
+#ifndef BOOTLOADER
+        case Q_STORAGE_LOGFILE:
+            logfile_storage_request((void *)ev.data, !usb_mode);
+            queue_reply(&storage_queue, 0);
+            break;
+#endif
         case SYS_TIMEOUT:;
             /* drivers hold their bit low when they want to
                sleep and keep it high otherwise */
@@ -272,6 +284,15 @@ void storage_post_event(long event, intptr_t data)
         queue_post(&storage_queue, event, data);
 }
 
+#ifndef BOOTLOADER
+bool storage_logfile_call(void *request)
+{
+    if (!storage_thread_id) return false;
+    queue_send(&storage_queue, Q_STORAGE_LOGFILE, (intptr_t)request);
+    return true;
+}
+#endif
+
 static inline void storage_thread_init(void)
 {
     if (storage_thread_id) {
@@ -284,6 +305,10 @@ static inline void storage_thread_init(void)
                                       0, &storage_thread_name[1]
                                       IF_PRIO(, PRIORITY_USER_INTERFACE)
                                       IF_COP(, CPU));
+#ifndef BOOTLOADER
+    if (storage_thread_id)
+        queue_enable_queue_send(&storage_queue, &logfile_senders, storage_thread_id);
+#endif
 }
 
 int storage_init(void)

@@ -278,6 +278,10 @@ uipre+='\n#define ACTION_NONE 0\n#define CONTEXT_STD 0\n'
 uipre+='''
 #include <unistd.h>
 #include <fcntl.h>
+/* UI/format fixture: disk quota/rotation is exercised by fu41_log_cap_test. */
+static int logfile_open(const char *path) {return open(path,O_WRONLY|O_CREAT|O_APPEND,0666);}
+static ssize_t logfile_write(int fd,const void *data,size_t size) {return write(fd,data,size);}
+static int logfile_close(int fd) {return close(fd);}
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define FONT_SYSFIXED 0
 #define FONT_UI 1

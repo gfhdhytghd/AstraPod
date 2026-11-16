@@ -55,6 +55,8 @@ static bool get_other_asap_metadata(int fd, struct mp3entry *id3)
     return true;
 }
 bool write_metadata_log = false;
+/* PodBox supplies the capped writer; other Rockbox applications keep theirs. */
+void (*metadata_log_write)(const char *, const char *);
 
 const struct afmt_entry audio_formats[AFMT_NUM_CODECS] =
 {
@@ -509,7 +511,9 @@ bool get_metadata_afmt(struct mp3entry* id3, int fd, const char* trackname, int 
     }
     /* have we successfully read the metadata from the file? */
 log_on_exit:
-    if (write_metadata_log)
+    if (write_metadata_log && metadata_log_write)
+        metadata_log_write(trackname, res_str);
+    else if (write_metadata_log)
     {
         logfd = open("/.rockbox/logs/metadata.log",
                      O_WRONLY | O_APPEND | O_CREAT, 0666);

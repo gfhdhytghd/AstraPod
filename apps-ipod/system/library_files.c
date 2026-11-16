@@ -26,6 +26,7 @@
 #include <stdarg.h>
 #include <errno.h>
 #include "config.h"
+#include "logfile.h"
 #include "kernel.h"
 #include "file.h"
 #include "dir.h"
@@ -88,15 +89,15 @@ void library_files_log(const char *fmt, ...)
 {
     char line[2 * MAX_PATH + 32];
     va_list ap;
-    int fd = open(LIB_UPGRADE_LOG, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    int fd = logfile_open(LIB_UPGRADE_LOG);
 
     if (fd < 0)
         return;
     va_start(ap, fmt);
     vsnprintf(line, sizeof(line), fmt, ap);
     va_end(ap);
-    fdprintf(fd, "[%8ld] %s\n", current_tick, line);
-    close(fd);
+    logfile_printf(fd, "[%8ld] %s\n", current_tick, line);
+    logfile_close(fd);
 }
 
 /* ------------------------------------------------------------------ *

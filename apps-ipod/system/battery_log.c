@@ -178,7 +178,7 @@ static void write_minutes(void)
         {
             const struct battery_sample *s = &ring[ring_tail];
 
-            fdprintf(fd, "%u,%u,%d,%d,%d,%d,%d,%u,%d,%d,%d,%u,%u,%u\n",
+            logfile_printf(fd, "%u,%u,%d,%d,%d,%d,%d,%u,%d,%d,%d,%u,%u,%u\n",
                      s->minute, s->mv, s->level, s->charging,
                      pct(s->playing), pct(s->paused), pct(s->boost), s->mhz,
                      pct(s->backlight), pct(s->lcd), pct(s->disk),
@@ -201,18 +201,18 @@ static void disk_idle_cb(unsigned short id, void *data)
  * file reads as a CSV on its own */
 void battery_log_state(int fd, const char *mark)
 {
-    fdprintf(fd, "%s storage %s, dynamic colors %d, theme %s\n", mark,
+    logfile_printf(fd, "%s storage %s, dynamic colors %d, theme %s\n", mark,
              storage_get_ssd_mode() ? "ssd" : "hdd",
              (int)global_settings.dynamic_colors, global_settings.wps_file);
 #if BATTERY_CAPACITY_INC > 0
-    fdprintf(fd, "%s capacity %d mAh\n", mark,
+    logfile_printf(fd, "%s capacity %d mAh\n", mark,
              global_settings.battery_capacity);
 #endif
-    fdprintf(fd, "%s backlight %d s, %d s plugged, brightness %d\n", mark,
+    logfile_printf(fd, "%s backlight %d s, %d s plugged, brightness %d\n", mark,
              global_settings.backlight_timeout,
              global_settings.backlight_timeout_plugged,
              global_settings.brightness);
-    fdprintf(fd, "minute,mV,level,charging,playing%%,paused%%,boost%%,"
+    logfile_printf(fd, "minute,mV,level,charging,playing%%,paused%%,boost%%,"
                  "MHz,backlight%%,lcd%%,disk%%,spinups,frames,"
                  "activity\n");
 }

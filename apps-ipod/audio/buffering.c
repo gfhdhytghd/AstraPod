@@ -32,6 +32,7 @@
  *   - handle queries, watermark settings, and the buffering thread itself
  ****************************************************************************/
 #include "config.h"
+#include "logfile.h"
 #include "system/library_files.h"
 #include <string.h>
 #include "system.h"
@@ -1850,13 +1851,12 @@ void INIT_ATTR buffering_init(void)
 static void drop_damaged_lists(void)
 {
     struct tm *tm = get_time();
-    int log = open(LIB_BUFFER_LOG,
-                   O_WRONLY | O_CREAT | O_APPEND, 0666);
+    int log = logfile_open(LIB_BUFFER_LOG);
 
     mutex_lock(&llist_mutex);
 
     if (log >= 0)
-        fdprintf(log, "%04d-%02d-%02d %02d:%02d:%02d %s\n"
+        logfile_printf(log, "%04d-%02d-%02d %02d:%02d:%02d %s\n"
                  "  %s walk, step %d: link %08lx from handle at %ld,"
                  " %d handles, buffer %lu\n",
                  tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
@@ -1878,7 +1878,7 @@ static void drop_damaged_lists(void)
                 break;
 
             if (!mru && log >= 0)
-                fdprintf(log, "  handle %d type %d at %lu size %lu"
+                logfile_printf(log, "  handle %d type %d at %lu size %lu"
                          " data %lu widx %lu file %ld-%ld of %ld %.64s\n",
                          h->id, (int)h->type,
                          (unsigned long)ringbuf_offset(h),
@@ -1896,7 +1896,7 @@ static void drop_damaged_lists(void)
     mutex_unlock(&llist_mutex);
 
     if (log >= 0)
-        close(log);
+        logfile_close(log);
 }
 
 void buffering_drop_damage(void)

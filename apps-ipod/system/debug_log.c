@@ -32,6 +32,7 @@
 #include "system/usb_log_file.h"
 #include "system/battery_log.h"
 #include "debug_log.h"
+#include "logfile.h"
 
 /* ---- the table ---------------------------------------------------------- */
 
@@ -39,22 +40,22 @@ static void tagcache_state(int fd, const char *m)
 {
     const struct tagcache_stat *st = tagcache_get_stat();
 
-    fdprintf(fd, "%s %d entries, %s, ramcache %s (%dKB), dircache %s\n", m,
+    logfile_printf(fd, "%s %d entries, %s, ramcache %s (%dKB), dircache %s\n", m,
              st->total_entries, st->ready ? "ready" : "not ready",
              st->ramcache ? "loaded" : "not loaded", st->ramcache_used / 1024,
              !global_settings.dircache ? "off"
              : dircache_is_ready() ? "built" : "not built");
-    fdprintf(fd, "%s scan at startup %d, after USB %d, audiobooks apart %d, "
+    logfile_printf(fd, "%s scan at startup %d, after USB %d, audiobooks apart %d, "
              "layout %d%s\n", m, (int)global_settings.tagcache_scan_on_startup,
              (int)global_settings.tagcache_scan_on_eject,
              (int)global_settings.segregate_audiobooks, LIBRARY_FORMAT,
              library_files_need_upgrade() ? ", format.dat older" : "");
-    fdprintf(fd, "%s scan paths %s\n", m, global_settings.tagcache_scan_paths);
+    logfile_printf(fd, "%s scan paths %s\n", m, global_settings.tagcache_scan_paths);
 }
 
 static void art_state(int fd, const char *m)
 {
-    fdprintf(fd, "%s album art %d, artist art %d, book art %d, author art %d, "
+    logfile_printf(fd, "%s album art %d, artist art %d, book art %d, author art %d, "
              "fast build %d, album source %d, car artwork %d\n", m,
              (int)global_settings.db_albumart,
              (int)global_settings.db_artistart,
@@ -68,7 +69,7 @@ static void art_state(int fd, const char *m)
 #if defined(HAVE_MIKEY_REMOTE) && !defined(SIMULATOR)
 static void mikey_state(int fd, const char *m)
 {
-    fdprintf(fd, "%s count centre clicks %d\n", m,
+    logfile_printf(fd, "%s count centre clicks %d\n", m,
              (int)global_settings.remote_track_skip);
 }
 #endif
@@ -136,7 +137,6 @@ static struct {
 } logs[DEBUG_LOG_COUNT];
 
 static bool ready;              /* debug_log_init() has run */
-static struct mutex rotate_lock; /* rotate_path, rotate_to */
 
 /* Minutes from switching on, by Switch Off After's index; 0 never */
 static const unsigned short expiry_minutes[] = { 60, 6*60, 24*60, 7*24*60, 0 };
@@ -186,10 +186,10 @@ static void write_header(int fd, enum debug_log_id id, const char *what)
     struct tm *tm = get_time();
     long up = current_tick / HZ;
 
-    fdprintf(fd, "%s %s log %s: %s %s\n", m, li->name, what, MODEL_NAME,
+    logfile_printf(fd, "%s %s log %s: %s %s\n", m, li->name, what, MODEL_NAME,
              rbversion);
     /* A 6G whose clock reset reads 2000-01-01, which passes for a date */
-    fdprintf(fd, "%s %04d-%02d-%02d %02d:%02d:%02d%s, tick %ld, up %ld:%02ld\n",
+    logfile_printf(fd, "%s %04d-%02d-%02d %02d:%02d:%02d%s, tick %ld, up %ld:%02ld\n",
              m, tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour,
              tm->tm_min, tm->tm_sec,
              tm->tm_year + 1900 < 2020 ? " (clock not set)" : "",
@@ -199,12 +199,12 @@ static void write_header(int fd, enum debug_log_id id, const char *what)
         int left = debug_log_minutes_left();
 
         if (left >= 0)
-            fdprintf(fd, "%s switches itself off in %d:%02d\n", m,
+            logfile_printf(fd, "%s switches itself off in %d:%02d\n", m,
                      left / 60, left % 60);
         else
-            fdprintf(fd, "%s does not switch itself off\n", m);
+            logfile_printf(fd, "%s does not switch itself off\n", m);
     }
-    fdprintf(fd, "%s battery %d%% %d mV, %s\n", m, battery_level(),
+    logfile_printf(fd, "%s battery %d%% %d mV, %s\n", m, battery_level(),
              battery_voltage(),
              charging_state() ? "charging"
              : charger_inserted() ? "on the charger" : "on battery");
@@ -223,30 +223,8 @@ static void old_path(enum debug_log_id id, int n, char *buf, size_t size)
 
 static int open_locked(enum debug_log_id id)
 {
-    int fd = open(log_info[id].path, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    int fd = logfile_open(log_info[id].path);
 
-    if (fd >= 0 && ffilesize(fd) >= DEBUG_LOG_CAP)
-    {
-        /* Static: the storage thread rotates too, from disk_idle_cb(), and
-         * its stack has no room for two paths beside the rename */
-        static char rotate_path[MAX_PATH], rotate_to[MAX_PATH];
-
-        close(fd);
-        mutex_lock(&rotate_lock);
-        old_path(id, DEBUG_LOG_KEEP, rotate_to, sizeof rotate_to);
-        remove(rotate_to);
-        for (int n = DEBUG_LOG_KEEP - 1; n > 0; n--)
-        {
-            old_path(id, n, rotate_path, sizeof rotate_path);
-            rename(rotate_path, rotate_to);
-            strcpy(rotate_to, rotate_path);
-        }
-        rename(log_info[id].path, rotate_to);
-        mutex_unlock(&rotate_lock);
-        fd = open(log_info[id].path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-        if (fd >= 0)
-            write_header(fd, id, "rotated");
-    }
     return fd;
 }
 
@@ -265,14 +243,14 @@ int debug_log_open(enum debug_log_id id)
 
 void debug_log_close(enum debug_log_id id, int fd)
 {
-    close(fd);
+    logfile_close(fd);
     mutex_unlock(&logs[id].lock);
 }
 
 void debug_log_lost(enum debug_log_id id, int fd, unsigned long n,
                     const char *why)
 {
-    fdprintf(fd, "%s %lu lines lost%s%s\n", log_info[id].mark, n,
+    logfile_printf(fd, "%s %lu lines lost%s%s\n", log_info[id].mark, n,
              why ? ": " : "", why ? why : "");
 }
 
@@ -289,7 +267,7 @@ static void flush_into(enum debug_log_id id, int fd)
     }
     if (logs[id].used)
     {
-        write(fd, log_info[id].held, logs[id].used);
+        logfile_write(fd, log_info[id].held, logs[id].used);
         logs[id].used = 0;
     }
 }
@@ -304,7 +282,7 @@ static void flush_locked(enum debug_log_id id)
     if (fd < 0)
         return;
     flush_into(id, fd);
-    close(fd);
+    logfile_close(fd);
 }
 
 static void flush_all(void)
@@ -354,7 +332,7 @@ static void write_through(enum debug_log_id id, const char *line, int len)
         return;
     if (log_info[id].held)
         flush_into(id, fd);
-    write(fd, line, len);
+    logfile_write(fd, line, len);
     debug_log_close(id, fd);
 }
 
@@ -459,7 +437,7 @@ void debug_log_apply(void)
             continue;
         if (log_info[id].held)
             flush_into(id, fd);
-        fdprintf(fd, "%s %s log switched off%s\n", log_info[id].mark,
+        logfile_printf(fd, "%s %s log switched off%s\n", log_info[id].mark,
                  log_info[id].name, off_reason);
         debug_log_close(id, fd);
     }
@@ -572,6 +550,15 @@ unsigned long debug_log_files_size(void)
     return total;
 }
 
+static void metadata_line(const char *path, const char *result)
+{
+    int fd=logfile_open(LIB_METADATA_LOG);
+    if (fd < 0) return;
+    logfile_write(fd,path,strlen(path));
+    logfile_write(fd,result,strlen(result));
+    logfile_close(fd);
+}
+
 void debug_log_init(void)
 {
     /* A log left on by a build that counted minutes instead */
@@ -592,10 +579,11 @@ void debug_log_init(void)
         mutex_init(&logs[id].lock);
         logs[id].on = debug_log_enabled(id);
     }
-    mutex_init(&rotate_lock);
     add_event(DISK_EVENT_SPINUP, disk_idle_cb);
     add_event(GUI_EVENT_ACTIONUPDATE, action_cb);
     timeout_register(&minute_tmo, minute_cb, 60*HZ, 0);
+    extern void (*metadata_log_write)(const char *, const char *);
+    metadata_log_write = metadata_line;
     ready = true;
     /* The other logs' owners write their own when they start */
     if (debug_log_enabled(DEBUG_LOG_PLAYBACK))

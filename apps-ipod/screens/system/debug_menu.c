@@ -1901,7 +1901,7 @@ static void mikey_dbg_write(void)
     {
         mikey_dbg_change(line, sizeof line,
                          &s->log[mikey_dbg.written % MIKEY_SCOPE_LOG]);
-        fdprintf(fd, "%s\n", line);
+        logfile_printf(fd, "%s\n", line);
     }
     debug_log_close(DEBUG_LOG_MIKEY, fd);
 }

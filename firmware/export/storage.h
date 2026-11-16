@@ -55,6 +55,9 @@ enum
     Q_STORAGE_SLEEP,
     Q_STORAGE_SLEEPNOW,
     Q_STORAGE_PRE_WAKE,
+#ifndef BOOTLOADER
+    Q_STORAGE_LOGFILE,
+#endif
 #ifdef STORAGE_CLOSE
     Q_STORAGE_CLOSE,
 #endif
@@ -123,6 +126,10 @@ struct storage_info
 int storage_init(void) STORAGE_INIT_ATTR;
 void storage_close(void);
 void storage_post_event(long event, intptr_t data);
+#ifndef BOOTLOADER
+/* Synchronous UI-only log job; false before storage is initialized. */
+bool storage_logfile_call(void *request);
+#endif
 
 #ifdef HAVE_HOSTFS
 #include "hostfs.h"

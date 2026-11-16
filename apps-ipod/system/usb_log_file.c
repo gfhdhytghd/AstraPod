@@ -825,7 +825,7 @@ void usb_log_file_write(void)
         if (!usb_log_read(seq, &e))
             continue;
         format_entry(&e, widen_us(e.us), line, sizeof line);
-        fdprintf(fd, "%s\n", line);
+        logfile_printf(fd, "%s\n", line);
     }
     usb_log_set_written(head);
     debug_log_close(DEBUG_LOG_USB, fd);
@@ -833,23 +833,23 @@ void usb_log_file_write(void)
 
 void usb_log_file_state(int fd, const char *mark)
 {
-    fdprintf(fd, "%s USB mode %d, USB HID %d", mark, global_settings.usb_mode,
+    logfile_printf(fd, "%s USB mode %d, USB HID %d", mark, global_settings.usb_mode,
              (int)global_settings.usb_hid);
 #ifdef USB_ENABLE_AUDIO
-    fdprintf(fd, ", USB Sound Card %d%s", global_settings.usb_audio,
+    logfile_printf(fd, ", USB Sound Card %d%s", global_settings.usb_audio,
              usb_audio_buffers_ready() ? "" : " (no buffers)");
 #endif
 #ifdef HAVE_USB_HOST_AUDIO
-    fdprintf(fd, ", USB DAC Output %d", global_settings.usb_dac_output);
+    logfile_printf(fd, ", USB DAC Output %d", global_settings.usb_dac_output);
 #endif
     /* What a dock or a car is offered */
-    fdprintf(fd, "\n%s Accessory Protocol %d", mark,
+    logfile_printf(fd, "\n%s Accessory Protocol %d", mark,
              (int)global_settings.iap_enabled);
 #ifdef USB_ENABLE_IAP
-    fdprintf(fd, ", Support iPhone Accessories %d, Identify As %d",
+    logfile_printf(fd, ", Support iPhone Accessories %d, Identify As %d",
              global_settings.iap2_mode, global_settings.iap_identity);
 #endif
-    fdprintf(fd, ", Accessory Artwork %d\n", global_settings.car_artwork);
+    logfile_printf(fd, ", Accessory Artwork %d\n", global_settings.car_artwork);
 }
 
 /* ---- the background writer ---------------------------------------------- */

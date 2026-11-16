@@ -33,11 +33,10 @@ enum debug_log_id {
     DEBUG_LOG_COUNT,
 };
 
-/* A file at this size is renamed to <name>.1.<ext>, each older copy moves up
- * one, the one past DEBUG_LOG_KEEP is deleted, and a new file starts with a
- * header. */
-#define DEBUG_LOG_CAP (256*1024)
-#define DEBUG_LOG_KEEP 4
+/* One half-window and one backup; total includes both files. */
+#include "logfile.h"
+#define DEBUG_LOG_CAP LOGFILE_PART_BYTES
+#define DEBUG_LOG_KEEP 1
 
 /* Append one tick-stamped line. Newline is added; do not pass one. When the
  * log is off a call costs a test and a return, so call sites can sit in hot

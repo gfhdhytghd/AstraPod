@@ -1,5 +1,6 @@
 /* Serial dock remote capture screen. Copyright (C) 2026. GPL version 2+. */
 #include "config.h"
+#include "logfile.h"
 #include <stdio.h>
 #include <string.h>
 #include "system.h"
@@ -81,7 +82,12 @@ static unsigned int command(void)
 static bool put_log(int fd, const char *text)
 {
     size_t len = strlen(text);
-    return write(fd, text, len) == (ssize_t)len;
+    (void)fd;
+    int out=logfile_open(ROCKBOX_DIR "/remote-log.txt");
+    if (out < 0) return false;
+    bool ok=logfile_write(out,text,len) == (ssize_t)len;
+    logfile_close(out);
+    return ok;
 }
 
 static bool log_frame(int fd)
@@ -169,7 +175,7 @@ bool dbg_remote_input(void)
                          v.direction, v.decision);
                 log_error = !put_log(fd, line);
             }
-            if (log_error) { close(fd); fd = -1; }
+            if (log_error) fd = -1;
         }
         lcd_clear_display();
         snprintf(line, sizeof(line), "Remote input frames %lu bad %lu %s",
@@ -228,11 +234,10 @@ bool dbg_remote_input(void)
         if (action == ACTION_STD_OK &&
             button == (BUTTON_SELECT | BUTTON_REL))
         {
-            if (fd >= 0) { close(fd); fd = -1; }
+            if (fd >= 0) fd = -1;
             else
             {
-                fd = open(ROCKBOX_DIR "/remote-log.txt",
-                          O_WRONLY | O_CREAT | O_APPEND, 0666);
+                fd = 0; /* enabled; each actual record opens/closes its log */
                 log_error = fd < 0;
                 cursor = counts(&bad) + 1;
                 volume_cursor = remote_volume_count() + 1;
@@ -244,7 +249,6 @@ bool dbg_remote_input(void)
             { usb = true; break; }
         }
     }
-    if (fd >= 0) close(fd);
     remote_input_active = false;
 #ifdef HAVE_USB_PODLINK
     iap_agents_volume_enable(false);

@@ -31,6 +31,9 @@ target/hosted/debug-hosted.c
 
 #endif
 system.c
+#ifndef BOOTLOADER
+logfile.c
+#endif
 usb.c
 #if defined(ROCKBOX_HAS_LOGF) || defined(ROCKBOX_HAS_LOGDISKF)
 logf.c

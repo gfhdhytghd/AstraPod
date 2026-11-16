@@ -44,6 +44,12 @@ void usb_confirm_configured(bool configured, bool accessory, bool probe_iap);
 bool usb_podlink_open(void);
 void usb_podlink_close(void);
 bool usb_podlink_active(void);
+/* Called only by the resident authenticated control handler. */
+void usb_podlink_disk(void);
+/* EP0 disk exit notification; USB thread owns all state transitions. */
+void usb_disk_status(unsigned char status[8]);
+bool usb_disk_flush_ack(uint32_t request);
+bool usb_disk_take_warning(void);
 #endif
 
 /** USB introduction
@@ -142,6 +148,7 @@ enum
     USB_NOTIFY_BUS_RESET,    /* Event */
     USB_PODLINK_CLOSE,       /* Restore normal descriptors in USB thread */
 #ifdef HAVE_USB_PODLINK
+    USB_DISK_ENTER,
     USB_PODLINK_OPEN,        /* Take a non-disk connection in USB thread */
 #endif
     USB_NOTIFY_CLASS_DRIVER, /* Event - notify_event() of specified class driver */

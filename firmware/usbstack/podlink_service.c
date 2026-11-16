@@ -29,6 +29,8 @@ static unsigned int log_length, log_epoch;
 static char time_record[PODLINK_TIME_RECORD];
 static unsigned long time_received_tick;
 static bool time_pending;
+static bool disk_hello_sent;
+static char disk_token[33];
 static const struct podlink_resident *resident;
 static char resident_record[512];
 static unsigned int resident_length;
@@ -45,6 +47,8 @@ static void invalidate(void)
     if (resident && resident->reset) resident->reset();
     ++generation;
     welcome_length = 0;
+    disk_hello_sent = false;
+    disk_token[0] = 0;
     time_pending = false;
     announced = 255;
     if (background_message && client != 1)
@@ -113,6 +117,33 @@ static void service_step(void)
         }
         if (!have) break;
         if (m.type == PODLINK_PONG) continue;
+        /* Session-scoped bearer authorization. The trusted USB host supplies
+         * 128 random bits after OPEN; never route these records to a screen. */
+        if (m.type == PODLINK_TEXT && m.length >= 3 &&
+            (!memcmp(m.data, "DA\t", 3) || !memcmp(m.data, "DK\t", 3)))
+        {
+            if (podlink_session_host_connected() && welcome_length >= 5 &&
+                !memcmp(welcome, "HR\t1\t", 5) &&
+                m.length == 37 && !memcmp(m.data + 3, "1\t", 2))
+            {
+                bool hex = true;
+                for (unsigned int i = 5; i < 37; i++)
+                    hex &= (m.data[i] >= '0' && m.data[i] <= '9') ||
+                           (m.data[i] >= 'a' && m.data[i] <= 'f');
+                if (hex && m.data[1] == 'A' && !disk_token[0])
+                {
+                    memcpy(disk_token, m.data + 5, 32);
+                    disk_token[32] = 0;
+                }
+                else if (hex && m.data[1] == 'K' && disk_token[0] &&
+                         !memcmp(disk_token, m.data + 5, 32))
+                {
+                    disk_token[0] = 0; /* One-shot; queue carries cable epoch. */
+                    usb_podlink_disk();
+                }
+            }
+            continue;
+        }
         if (m.type == PODLINK_CLOSE)
             invalidate();
         if (m.type == PODLINK_TEXT && m.length >= 3 &&
@@ -144,9 +175,14 @@ static void service_step(void)
                  * Memory pressure drops the picture, not the cable session. */
                 unsigned int saved_welcome = welcome_length;
                 bool saved_time = time_pending;
+                bool saved_disk_hello = disk_hello_sent;
+                char saved_disk_token[sizeof(disk_token)];
+                memcpy(saved_disk_token, disk_token, sizeof(disk_token));
                 invalidate();
                 /* Foreground overflow does not end the wire clock session. */
                 time_pending = saved_time;
+                disk_hello_sent = saved_disk_hello;
+                memcpy(disk_token, saved_disk_token, sizeof(disk_token));
                 welcome_length = saved_welcome;
                 struct podlink_message lost = {.type = PODLINK_CLOSE};
                 store_message(&lost);
@@ -162,6 +198,13 @@ static void service_step(void)
         }
         else if (background_message)
             background_message(&m);
+    }
+    if (started && !disk_hello_sent &&
+        podlink_session_state() == PODLINK_CONNECTED)
+    {
+        static const char hello[] = "DH\t1\tdisk-mode-v1";
+        if (podlink_session_send(PODLINK_TEXT, hello, sizeof(hello) - 1) == PODLINK_SENT)
+            disk_hello_sent = true;
     }
     if (started && podlink_session_state() == PODLINK_CONNECTED &&
         announced != client && podlink_session_max_message() >= 5)

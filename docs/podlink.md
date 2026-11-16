@@ -224,3 +224,28 @@ after resume, confirm the prior grant, battery animation and link recovery.
 Keep the normal storage volume unmounted for its suspend comparison.
 Do not infer physical charge current or link throughput from host-only tests.
 
+
+### Resident Disk Mode extension (`disk-mode-v1`)
+
+These TEXT records do not alter the six-byte wire OPEN/HELLO negotiation:
+
+| Direction | Record | Meaning |
+| --- | --- | --- |
+| Device to host | `DH\t1\tdisk-mode-v1` | Resident hello/capability for this OPEN |
+| Host to device | `DA\t1\t<32 lowercase hex>` | Install a session-scoped random bearer token after HR hello |
+| Host to device | `DK\t1\t<same token>` | One-shot consent to enter Disk Mode |
+
+The resident service intercepts authorization and disk records before any
+foreground/background consumer. Invalid length, token, version, disconnected
+session, pre-HR authorization and replayed requests have no effect. A transport
+revision invalidates the bearer token. This extension trusts physical USB
+possession; it does not add pairing or encryption.
+
+While configured, EP0 `0xc0/0x5c`, value/index 0 and length 8 reads
+`[version=1, exclusive_storage, exit_pending, warning, request_id_u32_le]`.
+Only body long-MENU creates an exit notification. EP0 `0x40/0x5c` with length 0
+acknowledges a completed host unmount, with `wValue=request_id & 65535` and
+`wIndex=request_id >> 16`. Stale, unsolicited, wrong-direction and malformed
+acknowledgements stall. The USB thread owns these states. It detaches before
+local remount on acknowledgement or after the three-second timeout. See
+`docs/podbox/herdremote-usage.md` for host installation and safety limits.

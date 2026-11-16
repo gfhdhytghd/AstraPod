@@ -214,6 +214,35 @@ static bool usb_hid = true;
 static bool usb_serial = false;
 #ifdef HAVE_USB_PODLINK
 static volatile bool podlink_requested;
+static long disk_menu_at, disk_exit_at, disk_return_at;
+static bool disk_menu_down, disk_exit_pending, disk_exit_warning;
+static uint32_t disk_exit_request;
+
+void usb_disk_status(unsigned char status[8])
+{
+    status[0] = 1;
+    status[1] = exclusive_storage_enabled;
+    status[2] = disk_exit_pending;
+    status[3] = disk_exit_warning;
+    for (int i = 0; i < 4; i++) status[4+i] = disk_exit_request >> (8*i);
+}
+
+bool usb_disk_flush_ack(uint32_t request)
+{
+    if (!disk_exit_pending || request != disk_exit_request) return false;
+    disk_exit_pending = false;
+    disk_return_at = current_tick + 1;
+    return true;
+}
+
+bool usb_disk_take_warning(void)
+{
+    int level = disable_irq_save();
+    bool warning = disk_exit_warning;
+    disk_exit_warning = false;
+    restore_irq(level);
+    return warning;
+}
 #endif
 #endif
 #ifdef USB_ENABLE_AUDIO
@@ -942,6 +971,59 @@ static void usb_dac_auto_step(void)
 }
 #endif
 
+#ifdef HAVE_USB_PODLINK
+/* Poll raw body bits, not the action queue: HID maps actions and remote MENU
+ * has a distinct BUTTON_RC_MENU bit. Storage and EP0 events keep running. */
+static void usb_disk_poll(void)
+{
+    if (usb_detect() != USB_INSERTED)
+    {
+        disk_menu_down = disk_exit_pending = false;
+        disk_return_at = 0;
+        return;
+    }
+    if (exclusive_storage_enabled && !disk_exit_pending && !disk_return_at)
+    {
+        bool down = (button_status() & BUTTON_MENU) != 0;
+        if (!down) disk_menu_down = false;
+        else if (!disk_menu_down)
+        {
+            disk_menu_down = true;
+            disk_menu_at = current_tick;
+        }
+        else if (!TIME_BEFORE(current_tick, disk_menu_at + HZ))
+        {
+            if (!++disk_exit_request) ++disk_exit_request;
+            disk_exit_pending = true;
+            disk_exit_at = current_tick + 3 * HZ;
+        }
+    }
+    if (disk_exit_pending && !TIME_BEFORE(current_tick, disk_exit_at))
+    {
+        disk_exit_pending = false;
+        disk_exit_warning = true;
+        disk_return_at = current_tick + 1;
+    }
+    if (disk_return_at && !TIME_BEFORE(current_tick, disk_return_at))
+    {
+        disk_return_at = 0;
+        disk_exit_pending = disk_menu_down = false;
+        /* Detach before local remount, even after an unanswered flush. */
+        usb_stack_enable(false);
+        usb_storage_ejected();
+        disk_return_at = 0; /* storage_ejected also schedules the host path */
+        sleep(HZ / 5);
+        if (usb_detect() == USB_INSERTED)
+        {
+            usb_consent_begin(&usb_consent, false, false);
+            usb_consent.state = USB_CONSENT_CHARGE;
+            usb_stack_enable(true);
+            usb_configure_drivers(USB_INSERTED);
+        }
+    }
+}
+#endif
+
 /*--- General driver code ---*/
 static void NORETURN_ATTR usb_thread(void)
 {
@@ -949,7 +1031,12 @@ static void NORETURN_ATTR usb_thread(void)
 
     while(1)
     {
+#ifdef HAVE_USB_PODLINK
+        usb_disk_poll();
+        queue_wait_w_tmo(&usb_queue, &ev, MAX(1, HZ / 20));
+#else
         queue_wait(&usb_queue, &ev);
+#endif
 
         reset_poweroff_timer(); /* Any USB event counts */
 
@@ -1051,6 +1138,24 @@ static void NORETURN_ATTR usb_thread(void)
 #endif
 
 #ifdef HAVE_USB_PODLINK
+        case USB_DISK_ENTER:
+            if ((uint32_t)ev.data != usb_consent.epoch ||
+                !podlink_requested || !usb_host_present ||
+                usb_detect() != USB_INSERTED ||
+                exclusive_storage_enabled || exclusive_storage_requested)
+                break;
+            timeout_cancel(&usb_confirm_tmo);
+            usb_consent.state = USB_CONSENT_CONNECT;
+            usb_disk_ejected = false; /* FU29: explicit consent supersedes eject */
+            podlink_requested = false;
+            usb_stack_enable(false);
+            sleep(HZ / 5);
+            if (usb_detect() == USB_INSERTED)
+            {
+                usb_stack_enable(true);
+                usb_configure_drivers(USB_INSERTED);
+            }
+            break;
         case USB_PODLINK_OPEN:
             /* Only an explicit USB Mode change posts this event. */
             if ((int)ev.data != usb_mode || usb_detect() != USB_INSERTED ||
@@ -1686,6 +1791,10 @@ void usb_release_exclusive_storage(void)
  * configured, so it keeps the current the host granted and goes on charging. */
 void usb_storage_ejected(void)
 {
+#ifdef HAVE_USB_PODLINK
+    if (exclusive_storage_requested)
+        disk_return_at = current_tick + HZ / 5; /* allow SCSI CSW to drain */
+#endif
     usb_disk_ejected = true;
     usb_release_exclusive_storage();
 #if defined(USB_ENABLE_STORAGE) && !defined(BOOTLOADER)
@@ -1755,6 +1864,11 @@ static void usb_podlink_mode_changed(int mode)
 {
     if (usb_thread_entry)
         queue_post(&usb_queue, USB_PODLINK_OPEN, mode);
+}
+
+void usb_podlink_disk(void)
+{
+    queue_post(&usb_queue, USB_DISK_ENTER, usb_consent.epoch);
 }
 
 bool usb_podlink_open(void)

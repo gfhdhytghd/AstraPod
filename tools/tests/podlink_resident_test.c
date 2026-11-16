@@ -15,6 +15,8 @@
 #undef podlink_poll
 #undef podlink_wait
 static void sleep(int ticks) { current_tick += ticks; }
+static int disk_requests;
+void usb_podlink_disk(void) { disk_requests++; }
 static int clock_wakes;
 void button_queue_post(long id, intptr_t data) { assert(id == 0x20000000 && !data); clock_wakes++; }
 #include "../../firmware/usbstack/podlink_service.c"
@@ -65,6 +67,33 @@ int main(void)
     work();
     insert();work();assert(!podlink_host_connected());
     handshake(PODLINK_MAX_MESSAGE,1);work();assert(podlink_host_connected());
+    /* Auth is session-bound and independent of the active screen. */
+    const char *auth = "DA\t1\t0123456789abcdef0123456789abcdef";
+    const char *disk = "DK\t1\t0123456789abcdef0123456789abcdef";
+    input_frame(PODLINK_TEXT,90,disk,strlen(disk));work();assert(!disk_requests);
+    input_frame(PODLINK_TEXT,91,"HR\t1\thost",9);work();
+    for (int screen=0;screen<5;screen++) {
+        if(screen==2)assert(podlink_open()); /* Cider */
+        if(screen==3)assert(podlink_open_agents(background));
+        input_frame(PODLINK_TEXT,92,auth,strlen(auth));work();
+        input_frame(PODLINK_TEXT,93,"DK\t1\tffffffffffffffffffffffffffffffff",37);work();
+        assert(disk_requests==screen);
+        input_frame(PODLINK_TEXT,94,disk,strlen(disk));work();
+        assert(disk_requests==screen+1);
+        input_frame(PODLINK_TEXT,95,disk,strlen(disk));work();
+        assert(disk_requests==screen+1);
+        podlink_close();
+    }
+    input_frame(PODLINK_TEXT,95,auth,strlen(auth));work();
+    assert(disk_token[0]);
+    /* Foreground inbox loss does not invalidate the authenticated wire. */
+    assert(podlink_open());
+    for(int i=0;i<20;i++){input_frame(PODLINK_TEXT,95,"ignored",7);work();}
+    assert(disk_token[0] && disk_hello_sent);
+    podlink_close();
+    invalidate();
+    assert(!disk_token[0]);
+    input_frame(PODLINK_TEXT,96,disk,strlen(disk));work();assert(disk_requests==5);
     /* The input callback must not try either mutex, even if the worker or
      * USB thread was interrupted while holding it. */
     mutex_lock(&service_mutex);mutex_lock(&serial_mtx);

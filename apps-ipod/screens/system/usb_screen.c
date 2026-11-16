@@ -232,5 +232,9 @@ void gui_usb_screen_run(bool early_usb, intptr_t seqnum)
     skin_inhibit_flush(false);
     skin_flush_dirty();
 
+#ifdef HAVE_USB_PODLINK
+    if (usb_disk_take_warning())
+        splash(2 * HZ, "Host flush unanswered: disk detached");
+#endif
     pop_current_activity();
 }

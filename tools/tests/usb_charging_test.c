@@ -1,3 +1,10 @@
+/* Disk control is outside this charging-only controller model. */
+#include <stdbool.h>
+#include <stdint.h>
+static uint32_t test_disk_ack;
+static bool test_disk_pending;
+void usb_disk_status(unsigned char status[8]) { for(int i=0;i<8;i++)status[i]=0; status[0]=1; status[2]=test_disk_pending; }
+bool usb_disk_flush_ack(uint32_t request) { test_disk_ack=request; return test_disk_pending && request==0x12345678; }
 /* Run the production USB core with RAM-backed controller/class drivers.
  * No device nodes, filesystem mounts or real USB calls. */
 #include <stdio.h>

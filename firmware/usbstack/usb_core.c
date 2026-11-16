@@ -1406,6 +1406,24 @@ static void request_handler_endpoint(struct usb_ctrlrequest* req, uint8_t* reqda
 /* Handling USB requests starts here */
 static void usb_core_control_request_handler(struct usb_ctrlrequest* req, uint8_t* reqdata, size_t reqdata_size)
 {
+#ifdef HAVE_USB_PODLINK
+    if (req->bRequest == 0x5c)
+    {
+        if (usb_state == CONFIGURED && req->bRequestType == 0xc0 &&
+            req->wValue == 0 && req->wIndex == 0 && req->wLength == 8)
+        {
+            usb_disk_status(reqdata);
+            usb_core_control_response(USB_CONTROL_ACK, reqdata, 8);
+        }
+        else if (usb_state == CONFIGURED && req->bRequestType == 0x40 &&
+                 req->wLength == 0 &&
+                 usb_disk_flush_ack((uint32_t)req->wValue | (uint32_t)req->wIndex << 16))
+            usb_core_control_response(USB_CONTROL_ACK, NULL, 0);
+        else
+            usb_core_control_response(USB_CONTROL_STALL, NULL, 0);
+        return;
+    }
+#endif
 #ifdef USB_REMOTE_KEY_ENABLED
     if (req->bRequest == USB_REMOTE_KEY_REQUEST)
     {

@@ -1,0 +1,22 @@
+[package]
+name = "podlink-rust"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[features]
+default = []
+firmware = []
+host-test = ["firmware"]
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+codegen-units = 1
+lto = true
+
+[profile.dev]
+panic = "abort"

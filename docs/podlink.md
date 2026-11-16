@@ -249,3 +249,49 @@ acknowledges a completed host unmount, with `wValue=request_id & 65535` and
 acknowledgements stall. The USB thread owns these states. It detaches before
 local remount on acknowledgement or after the three-second timeout. See
 `docs/podbox/herdremote-usage.md` for host installation and safety limits.
+
+## Experimental Rust firmware implementation
+
+The default remains the C implementation. On ipod6g only, configure the usual
+Rockbox `apps-ipod` build and opt in at make time:
+
+```sh
+rustup component add rust-src --toolchain nightly
+mkdir -p build-fu48
+cd build-fu48
+PATH=/home/wilf/.cache/pocket-stack/rockbox/bin:$PATH ../tools/configure --target=ipod6g --type=n --appsdir=apps-ipod
+PATH=/home/wilf/.cache/pocket-stack/rockbox/bin:$PATH make -j8 PODLINK_RUST=1
+```
+
+The make variable defaults to 0. To return an existing build directory to C,
+run make with `PODLINK_RUST=0` (or omit it). The firmware archive is rebuilt
+when switching either way. C builds need no Rust installation. Rust builds
+use `armv5te-none-eabi`, `-Zbuild-std=core`, ARM926EJ-S, soft float, no_std,
+no allocator and panic=abort. `PODLINK_RUST_TOOLCHAIN` can select a nightly;
+FU48 used rustc 1.95.0-nightly (f60a0f1bc 2026-02-02). Never enable the test-only
+`host-test` Cargo feature for firmware packaging.
+
+The public C ABI and protocol are unchanged. The Rust implementation copies
+nullable callback fields into typed Option entries under the service mutex;
+unregistration uses that same mutex. State and host-connected queries use
+IRQ-protected snapshots instead of taking that mutex. Time-record consumption
+also uses a separate IRQ-protected mailbox, so button polling never waits for
+the worker mutex. Read
+`firmware/usbstack/podlink-rust/AUDIT.md` for the FFI contracts, callback
+lifetimes, fixed-memory bounds and validation limits.
+
+Offline checks (put temporary files under your build directory):
+
+```sh
+cargo test --manifest-path firmware/usbstack/podlink-rust/Cargo.toml
+python3 tools/tests/run_podlink_rust.py --build build-fu48
+python3 tools/tests/arm_podlink_rust.py --elf build-fu48/rockbox.elf
+python3 tools/tests/podlink_ram.py --build build-fu48 --baseline build-fu48/c-baseline.elf
+```
+
+The differential runner requires a host C compiler and nightly Cargo.
+The ARM and RAM scripts require Unicorn and pyelftools. Existing host Python
+checks require pyserial and websockets. The baseline ELF and original C
+object files for the RAM comparison must come from a default C build of the
+same tree, saved before switching. These are offline checks; an experimental
+Rust package does not establish device or playback acceptance.

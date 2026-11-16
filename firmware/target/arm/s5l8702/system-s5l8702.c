@@ -216,21 +216,57 @@ static void vic_init(void)
 #ifndef BOOTLOADER
 /* Diagnostic: a call through NULL (or into the hole between the vectors and
  * IRAM code) lands in low IRAM. The real boot enters the DRAM copy at
- * 0x08000000, so address 0 and 0x44..0x5b are only reached by such a call.
- * Point them all at one literal that names the caller instead of silently
- * re-running crt0. */
+ * 0x08000000, so address 0 and 0x44..0x5b are only reached by such a call,
+ * or by a core reset that keeps IRAM. crt0 checks crt0_entry_armed before
+ * it touches anything, so a stray jump into the DRAM image (0x08000000,
+ * vector 0x3c or newstart2) reports too instead of re-running crt0 with
+ * interrupts off. The flag lives in .data: every loaded image (cold boot,
+ * ROLO) brings it as 0; system_init arms it.
+ *
+ * A branch keeps the MMU on and names its caller in lr. A reset turns the
+ * MMU off and writes no lr: the SVC bank then still holds crt0's boot
+ * values, and the interrupted thread's sp/lr stay in the SYS bank. */
 const char *thread_current_name(void);
-uint32_t null_call_regs[7] USED_ATTR; /* r0-r3, sp, lr, cpsr */
+/* r0-r3, sp, lr, cpsr, SYS sp, SYS lr, cp15 c1, entry (0 low IRAM, 1 crt0) */
+uint32_t null_call_regs[11] USED_ATTR;
+uint32_t crt0_entry_armed __attribute__((section(".data"))) USED_ATTR = 0;
 
 static void NORETURN_ATTR USED_ATTR null_call_report(void)
 {
     const uint32_t *r = null_call_regs;
-    panicf("NULL call lr:%08lx sp:%08lx mode:%02lx thr:%.16s "
-           "r0:%08lx r1:%08lx r2:%08lx r3:%08lx",
-           (unsigned long)r[5], (unsigned long)r[4],
+    const char *what = r[10] ? "CRT0 entry" : !(r[9] & 1) ? "RESET" :
+                       "NULL call";
+    panicf("%s lr:%08lx sp:%08lx mode:%02lx thr:%.8s r:%lx,%lx,%lx,%lx "
+           "usp:%08lx ulr:%08lx rs:%lx",
+           what, (unsigned long)r[5], (unsigned long)r[4],
            (unsigned long)(r[6] & 0x1f), thread_current_name(),
            (unsigned long)r[0], (unsigned long)r[1],
-           (unsigned long)r[2], (unsigned long)r[3]);
+           (unsigned long)r[2], (unsigned long)r[3],
+           (unsigned long)r[7], (unsigned long)r[8],
+           (unsigned long)(RSTSR & 7));
+}
+
+/* r12 = null_call_regs with r0-r3/sp/lr stored, r0 = entry kind. */
+static void __attribute__((naked)) USED_ATTR null_call_save(void)
+{
+    asm volatile(
+        "str   r0, [r12, #40]         \n"
+        "mrs   r0, cpsr               \n"
+        "str   r0, [r12, #24]         \n"
+        "and   r1, r0, #0x1f          \n"
+        "cmp   r1, #0x1f              \n" /* already in SYS: same bank */
+        "ldreq r1, [r12, #16]         \n"
+        "streq r1, [r12, #28]         \n"
+        "ldreq r1, [r12, #20]         \n"
+        "streq r1, [r12, #32]         \n"
+        "addne r1, r12, #28           \n"
+        "stmneia r1, {sp, lr}^        \n" /* SYS/USR bank */
+        "nop                          \n"
+        "mrc   p15, 0, r0, c1, c0, 0  \n"
+        "str   r0, [r12, #36]         \n"
+        "tst   r0, #1                 \n" /* reset: MMU off, I/D off */
+        "bleq  memory_init            \n" /* identity map; screen needs it */
+        "b     null_call_report       \n");
 }
 
 void __attribute__((naked)) null_call_trap(void)
@@ -238,9 +274,20 @@ void __attribute__((naked)) null_call_trap(void)
     asm volatile(
         "ldr   r12, =null_call_regs   \n"
         "stmia r12, {r0-r3, sp, lr}   \n"
-        "mrs   r0, cpsr               \n"
-        "str   r0, [r12, #24]         \n"
-        "b     null_call_report       \n"
+        "mov   r0, #0                 \n"
+        "b     null_call_save         \n"
+        ".ltorg                       \n");
+}
+
+/* Entered from crt0 by "ldr pc" (lr and r0-r3 untouched; r12 and flags
+ * were used for the check). */
+void __attribute__((naked)) crt0_reentry_trap(void)
+{
+    asm volatile(
+        "ldr   r12, =null_call_regs   \n"
+        "stmia r12, {r0-r3, sp, lr}   \n"
+        "mov   r0, #1                 \n"
+        "b     null_call_save         \n"
         ".ltorg                       \n");
 }
 
@@ -253,6 +300,7 @@ static void null_call_trap_install(void)
         low[a / 4] = a + 8 <= 0x5c ? 0xe59ff000 | (0x5c - (a + 8))
                                    : 0xe51ff000 | ((a + 8) - 0x5c);
     low[0x5c / 4] = (uint32_t)null_call_trap;
+    crt0_entry_armed = 1;
     commit_discard_idcache();
 }
 #endif

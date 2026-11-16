@@ -41,6 +41,13 @@ _newstart:
     ldr pc, =newstart2
     .section .init.text,"ax",%progbits
 newstart2:
+    /* A stray branch into the running image must not re-run crt0 with
+     * interrupts off. Only r12 and the flags may be used here; the report
+     * keeps r0-r3, sp, lr and the caller's mode. */
+    ldr     ip, =crt0_entry_armed
+    ldr     ip, [ip]
+    cmp     ip, #0
+    ldrne   pc, =crt0_reentry_trap
 #endif
     msr     cpsr_c, #0xd3 /* enter supervisor mode, disable IRQ/FIQ */
 

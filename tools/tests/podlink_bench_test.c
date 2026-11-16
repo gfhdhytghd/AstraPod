@@ -82,7 +82,7 @@ int button_get(bool block)
     else if (stage == 3)
     {
         assert(++turns < 100);
-        if (operation != ECHO || reply_type || count || tx_count || sent_size)
+        if (operation != ECHO || reply_type || podlink_rust_debug(1) || tx_count || sent_size)
             return 0;
         assert(offset == 2 * peer_limit);
         struct podlink_parser check = {0};

@@ -18,27 +18,15 @@ endif
 
 FIRMLIB_SRC += $(call preprocess, $(FIRMDIR)/asm/SOURCES)
 FIRMLIB_SRC += $(call preprocess, $(FIRMDIR)/SOURCES)
-# Experimental firmware implementation. C is the default and needs no Rust.
-PODLINK_RUST ?= 0
-ifeq ($(PODLINK_RUST),1)
-  ifneq ($(MODELNAME),ipod6g)
-    $(error PODLINK_RUST=1 is currently supported only for ipod6g)
-  endif
-  ifneq ($(APP_TYPE),)
-    $(error PODLINK_RUST=1 requires a native firmware build)
-  endif
-  ifneq ($(findstring -DBOOTLOADER,$(EXTRA_DEFINES)),)
-    $(error PODLINK_RUST=1 requires a normal firmware build)
-  endif
-  FIRMLIB_SRC := $(filter-out %/usbstack/podlink.c %/usbstack/podlink_wire.c %/usbstack/podlink_service.c,$(FIRMLIB_SRC))
-  FIRMLIB_SRC += $(FIRMDIR)/usbstack/podlink_rust_platform.c
+# PodLink exists only in native normal ipod6g firmware (SOURCES/config.h).
+# The C platform adapter is the single source-list signal for the Rust library.
+ifneq ($(filter %/usbstack/podlink_rust_platform.c,$(FIRMLIB_SRC)),)
   PODLINK_RUST_DIR := $(FIRMDIR)/usbstack/podlink-rust
   PODLINK_RUST_TARGET := $(BUILDDIR)/podlink-rust-target
   PODLINK_RUST_LIB := $(PODLINK_RUST_TARGET)/armv5te-none-eabi/release/libpodlink_rust.a
   CORE_LDOPTS += -L$(dir $(PODLINK_RUST_LIB))
-  PODLINK_RUST_TOOLCHAIN ?= nightly
-  $(PODLINK_RUST_LIB): $(wildcard $(PODLINK_RUST_DIR)/src/*.rs) $(PODLINK_RUST_DIR)/Cargo.toml $(PODLINK_RUST_DIR)/Cargo.lock
-	$(call PRINTS,RUST PodLink)RUSTFLAGS="-Ctarget-cpu=arm926ej-s -Cpanic=abort -Cforce-frame-pointers=yes" cargo +$(PODLINK_RUST_TOOLCHAIN) build --locked --manifest-path $(PODLINK_RUST_DIR)/Cargo.toml --target-dir $(PODLINK_RUST_TARGET) --release --features firmware --target armv5te-none-eabi -Zbuild-std=core
+  $(PODLINK_RUST_LIB): $(wildcard $(PODLINK_RUST_DIR)/src/*.rs) $(PODLINK_RUST_DIR)/Cargo.toml $(PODLINK_RUST_DIR)/Cargo.lock $(PODLINK_RUST_DIR)/rust-toolchain.toml
+	$(call PRINTS,RUST PodLink)cd $(PODLINK_RUST_DIR) && RUSTFLAGS="-Ctarget-cpu=arm926ej-s -Cpanic=abort -Cforce-frame-pointers=yes" cargo build --locked --target-dir $(PODLINK_RUST_TARGET) --release --features firmware --target armv5te-none-eabi -Zbuild-std=core
 endif
 FIRMLIB_OBJ := $(call c2obj, $(FIRMLIB_SRC))
 FIRMLIB_OBJ += $(BUILDDIR)/sysfont.o
@@ -60,14 +48,8 @@ else
 	MAXCHAR = 255
 endif
 
-# Invalidate the archive on either switch direction, even when older C objects
-# already exist. Never leave Rust platform members in a subsequent C build.
-PODLINK_MODE_STAMP := $(BUILDDIR)/.podlink-mode-$(PODLINK_RUST)
-$(PODLINK_MODE_STAMP):
-	$(SILENT)rm -f $(BUILDDIR)/.podlink-mode-0 $(BUILDDIR)/.podlink-mode-1
-	$(SILENT)touch $@
-
-$(FIRMLIB): $(FIRMLIB_OBJ) $(PODLINK_MODE_STAMP)
+# Also rebuild existing FU48 archives after removing the retired C members.
+$(FIRMLIB): $(FIRMLIB_OBJ) $(FIRMDIR)/firmware.make
 	$(SILENT)$(shell rm -f $@)
 	$(call PRINTS,AR $(@F))$(AR) rcs $@ $(FIRMLIB_OBJ) >/dev/null
 

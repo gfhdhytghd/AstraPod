@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure the actual ARM ELF and original Cider/PodLink object RAM domains."""
+"""Measure the actual ARM ELF, Cider modules and Rust PodLink RAM domains."""
 import argparse,json
 from pathlib import Path
 from elftools.elf.elffile import ELFFile
@@ -27,8 +27,7 @@ base=measure(a.baseline);rust=measure(b/'rockbox.elf')
 with (b/'rockbox.elf').open('rb') as f:
     syms=ELFFile(f).get_section_by_name('.symtab')
     rust_static=sum(s['st_size'] for s in syms.iter_symbols() if 'podlink_rust' in s.name and any(n in s.name for n in ['CTX','DELIVERY','CLOCK']))
-cobjs=[dict(module=n,**measure(b/'firmware/usbstack'/(n+'.o'))) for n in ['podlink','podlink_wire','podlink_service']]
-result=dict(cider_modules=rows,cider_static=footprint,cider_cap=1152*1024,cider_headroom=1152*1024-footprint,baseline=base,rust=rust,delta={k:rust[k]-base[k] for k in base},rust_context_delivery_clock=rust_static,c_podlink_objects=cobjs,platform=measure(b/'firmware/usbstack/podlink_rust_platform.o'))
+result=dict(cider_modules=rows,cider_static=footprint,cider_cap=1152*1024,cider_headroom=1152*1024-footprint,baseline=base,rust=rust,delta={k:rust[k]-base[k] for k in base},rust_context_delivery_clock=rust_static,platform=measure(b/'firmware/usbstack/podlink_rust_platform.o'))
 assert result['cider_headroom']>=0
 # Preserve the observed headroom even when charging all additional image bytes
 # to the Cider domain (which itself has no source changes).

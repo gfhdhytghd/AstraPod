@@ -1148,12 +1148,16 @@ void action_wait_for_release(void)
     button_clear_pressed();
 }
 
+
+#ifdef HAVE_USB_PODLINK
 static bool shortcut_screen_context(int context)
 {
     return context == CONTEXT_WPS || context == CONTEXT_AGENTS ||
         (context == CONTEXT_PLUGIN &&
          get_current_activity() == ACTIVITY_ALBUMCOVERS);
 }
+
+#endif
 
 static int route_screen_shortcut(int action, int context)
 {

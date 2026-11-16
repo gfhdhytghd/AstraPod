@@ -3,6 +3,7 @@
 All files live below the supplied output directory. An optional source root
 allows the same runtime assertions to run against the unmodified baseline.
 """
+from podlink_rust_build import wire_args
 from pathlib import Path
 import re
 import subprocess
@@ -162,7 +163,7 @@ subprocess.run(flags + ["-I" + str(SOURCE / "apps-ipod"),
                        "-I" + str(ROOT / "firmware/export"),
                        str(OUT / "store-usb.c"),
                        str(SOURCE / "apps-ipod/screens/playback/cider_store.c"),
-                       str(ROOT / "firmware/usbstack/podlink_wire.c"),
+                       *wire_args(),
                        "-o", str(OUT / "store-usb")], check=True)
 (OUT / "worker-usb.c").write_text(worker_ports + worker + worker_post)
 subprocess.run(flags + ["-Wno-unused-function", str(OUT / "worker-usb.c"),

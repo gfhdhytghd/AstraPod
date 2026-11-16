@@ -31,4 +31,4 @@ $(BUILDDIR)/$(BINARY): $$(OBJ) $$(CORE_LIBS)
 	@echo LD $(BINARY)
 	$(SILENT)$(HOSTCC) $(LDOPTS) -o $@ $(OBJ) \
 		-L$(BUILDDIR)/lib $(call a2lnk, $(CORE_LIBS)) \
-		$(LDOPTS) $(GLOBAL_LDOPTS)
+		$(LDOPTS) $(GLOBAL_LDOPTS) `$(SDLCONFIG) --libs`

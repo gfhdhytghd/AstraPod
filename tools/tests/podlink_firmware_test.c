@@ -1,9 +1,11 @@
+#include "podlink_trace.h"
 /* Actual serial/session sources with RAM-backed controller and clock. */
 #include "config.h"
 #include "kernel.h"
 #include <string.h>
 #include <stdio.h>
 #include "../../firmware/usbstack/usb_serial.c"
+#include "podlink_rust_host.h"
 #define podlink_open podlink_session_open
 #define podlink_state podlink_session_state
 #define podlink_max_message podlink_session_max_message
@@ -11,7 +13,7 @@
 #define podlink_close podlink_session_close
 #define podlink_poll podlink_session_poll
 #define podlink_wait podlink_session_wait
-#include "../../firmware/usbstack/podlink.c"
+
 
 long current_tick;
 bool test_thread_context = true;
@@ -71,6 +73,7 @@ int usb_drv_send_nonblocking(int ep, const void *data, int size)
     assert(size > 0 && size <= TRANSIT_BUFFER_SIZE);
     assert(((uintptr_t)data & 3) == 0);
     assert(output_size + size <= (int)sizeof(output));
+    trace(1,data,size);
     memcpy(output + output_size, data, size);
     output_size += size;
     sent_size = size;
@@ -151,6 +154,9 @@ static int poll_message(struct podlink_message *m)
     controller();
     int n = podlink_poll(m);
     controller();
+    unsigned snapshot[]={n,podlink_state(),podlink_max_message()};
+    trace(2,snapshot,sizeof snapshot);
+    if(n){unsigned meta[]={m->type,m->flags,m->seq,m->length};trace(3,meta,sizeof meta);trace(4,m->data,m->length);}
     return n;
 }
 static void clear_output(void)
@@ -231,7 +237,7 @@ static void test_reconfiguration(void)
     podlink_encode(partial, PODLINK_BINARY, 12, payload, sizeof(payload));
     input_bytes(partial, 32);
     poll_message(&m);
-    assert(parser.used == 32);
+    assert(podlink_rust_debug(0) == 32);
     /* Pending application TX and buffered input belong to the old stream. */
     assert(podlink_send(PODLINK_TEXT, "stale", 5) == PODLINK_SENT);
     assert(podlink_send(PODLINK_BINARY, payload, sizeof(payload)) ==
@@ -245,12 +251,12 @@ static void test_reconfiguration(void)
     assert(poll_message(&m) == 1 && m.type == PODLINK_CLOSE);
     assert(m.length == 2 && m.data[0] == (1006 & 255));
     assert(podlink_state() == PODLINK_WAIT_USB);
-    assert(count == 0 && input_pos == 0 && input_length == 0);
-    assert(parser.used == 0 && !ping_pending);
+    assert(podlink_rust_debug(1) == 0 && podlink_rust_debug(2) == 0 && podlink_rust_debug(3) == 0);
+    assert(podlink_rust_debug(0) == 0 && !podlink_rust_debug(4));
     for (int i = 0; i < 20; ++i)
         poll_message(&m);
     printf("After reconfiguration: state=%d parser.used=%u output_bytes=%d\n",
-           podlink_state(), parser.used, output_size);
+           podlink_state(), podlink_rust_debug(0), output_size);
     struct podlink_parser decoded = {0};
     int hellos = 0, opens = 0;
     for (int i = 0; i < output_size; ++i)
@@ -284,7 +290,7 @@ static void test_reconfiguration(void)
         poll_message(&m);
     assert(podlink_max_message() == 1);
     assert(podlink_send(PODLINK_TEXT, "xx", 2) == PODLINK_INVALID);
-    assert(count == 0);
+    assert(podlink_rust_debug(1) == 0);
     assert(podlink_send(PODLINK_TEXT, "x", 1) == PODLINK_SENT);
     for (int i = 0; i < 20; ++i)
         poll_message(&m);
@@ -296,6 +302,29 @@ static void test_reconfiguration(void)
     poll_message(&m);
     remove_usb();
     clear_output();
+}
+
+
+static unsigned fuzz_seed=0xf048;
+static unsigned fuzz_random(void) {fuzz_seed^=fuzz_seed<<13;fuzz_seed^=fuzz_seed>>17;fuzz_seed^=fuzz_seed<<5;return fuzz_seed;}
+static void fuzz_sessions(void) {
+ for(unsigned round=0;round<256;round++) {
+  clear_output();test_high_speed=round%2;assert(podlink_open());insert();
+  struct podlink_message m;poll_message(&m);handshake(round%2?4096:16384,round+1);
+  for(unsigned turn=0;turn<8;turn++) {
+   unsigned char frame[128],data[64];unsigned n=fuzz_random()%65;
+   for(unsigned j=0;j<n;j++)data[j]=(unsigned char)fuzz_random();
+   unsigned size=podlink_encode(frame,1+fuzz_random()%7,fuzz_random(),data,n);
+   if(turn%4==0)frame[12]=255,frame[13]=255;
+   if(turn%4==1)frame[size-1]^=128;
+   if(turn%4==2)frame[5]=1;
+   input_bytes(frame,size);
+   for(int j=0;j<12;j++)poll_message(&m);
+   if(turn%3==0)current_tick+=601;
+  }
+  podlink_close();current_tick+=101;poll_message(&m);remove_usb();
+ }
+ puts("PASS: 256 seeded randomized session streams at HS/FS");
 }
 
 int main(void)
@@ -469,8 +498,9 @@ int main(void)
     current_tick += 101;
     poll_message(&m);
     remove_usb();
-    printf("PASS: real C wire/session/serial: bounded queues, RX backpressure, "
+    printf("PASS: Rust wire/session + real C serial: bounded queues, RX backpressure, "
            "%u KiB integrity at HS/FS, negotiated limits, CRC recovery, ping, "
            "timeout, close, replug\n", PODLINK_MAX_MESSAGE / 1024);
+    fuzz_sessions();
     return 0;
 }

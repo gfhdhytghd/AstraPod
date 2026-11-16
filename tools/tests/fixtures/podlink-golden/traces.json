@@ -1,0 +1,26 @@
+{
+  "podlink_firmware": {
+    "bytes": 1013831,
+    "sha256": "bed85aaa47ee413870d93c16c7f31f2b6df53a1cead17423499e4c1cc3808db1"
+  },
+  "podlink_wire": {
+    "bytes": 11954,
+    "sha256": "aff992ad9e41f0fe357fa0d5472400e0d5e93db34d3cf828c84f732a779e7596"
+  },
+  "podlink_bench": {
+    "bytes": 82920,
+    "sha256": "7dfd936fe0d5ff17d05a2253463fedc342b68647bcf7fa045160bc8079f0784f"
+  },
+  "podlink_resident": {
+    "bytes": 772634,
+    "sha256": "3d2e98a9091f6950e98a5e1edf11b7405a9254309322cfcca8a07578765f0530"
+  },
+  "fu47_podlink_dispatch": {
+    "bytes": 494962,
+    "sha256": "96713c6e5ee7765b1e498ec04415892ba944eda20cf08cdaadacf8f7aa583423"
+  },
+  "podlink_rust_fuzz": {
+    "bytes": 360000,
+    "sha256": "9ca0e3bb0711bab2ea9d88024192ab062a7ff36f3f13738f07bbc4fb0118b294"
+  }
+}

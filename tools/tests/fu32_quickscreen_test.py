@@ -18,6 +18,7 @@ pre=r'''
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#define HAVE_USB_PODLINK
 #define IPOD_ACCESSORY_PROTOCOL
 #define BUTTON_NONE 0
 #define BUTTON_REL 0x02000000

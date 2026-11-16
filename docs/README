@@ -31,6 +31,17 @@ Build Your Own Rockbox
    $ which arm-elf-eabi-gcc
    $ which perl
 
+   Native normal ipod6g firmware also requires Rust PodLink. Install rustup,
+   then the exact FU48 toolchain pinned in the crate's rust-toolchain.toml:
+
+   $ rustup toolchain install nightly-2026-02-03 --profile minimal --component rust-src,rustfmt,clippy
+
+   Cargo builds the armv5te-none-eabi static library with -Zbuild-std=core.
+   rust-src is mandatory; a precompiled target component is insufficient.
+   Configure checks this requirement before generating the build files.
+   Bootloader, simulator, CheckWPS, database and Warble builds need no Rust.
+   See docs/podlink.md for the ABI, build flags and offline test requirements.
+
 4. In your build directory, run the 'tools/configure' script and enter what
    target you want to build for and if you want a debug version or not (and a
    few more questions). It'll prompt you. The debug version is for making a

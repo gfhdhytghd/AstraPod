@@ -1,4 +1,5 @@
 """Production resident Cider demux/credit/CRC/cache; no USB/UI/disk."""
+from podlink_rust_build import wire_args
 from pathlib import Path
 import re,subprocess,sys
 R=Path(__file__).resolve().parents[2];O=Path(sys.argv[1]).resolve();O.mkdir(parents=True,exist_ok=True)
@@ -87,4 +88,4 @@ ack="CK\t7\t500\t0\tFailed";message.data=(const unsigned char*)ack;message.lengt
 puts("Production resident receiver: legacy raw passthrough, state negotiation, whole-cover CRC/cache, exact credit refund, stale-generation drop PASS");}
 '''
 (O/'receive.c').write_text(pre+'\nstatic volatile uint32_t status_word;\n'+fn('publish_status')+fn('u32')+fn('fail_art')+fn('receive')+post)
-subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'receive.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),str(R/'firmware/usbstack/podlink_wire.c'),'-o',str(O/'receive')],check=True);subprocess.run([str(O/'receive')],check=True)
+subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'receive.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),*wire_args(),'-o',str(O/'receive')],check=True);subprocess.run([str(O/'receive')],check=True)

@@ -9,6 +9,8 @@ static inline void button_chord_begin(void)
 {
     button_agents_chord_latched = true;
 }
+#else
+static inline void button_chord_begin(void) {}
 #endif
 static inline bool button_chord_blocks_poweroff(int buttons)
 {

@@ -150,6 +150,9 @@ screens/system/about.c
 screens/system/art_health.c
 screens/system/art_check.c
 screens/system/bg_task_info.c
+#if defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))
+input/agents_shortcut.c
+#endif
 #ifdef HAVE_USB_PODLINK
 screens/system/podlink_screen.c
 screens/system/agents_screen.c
@@ -161,7 +164,6 @@ screens/playback/cider_browser.c
 screens/playback/cider_wps.c
 screens/playback/cider_controls.c
 screens/covers/cider_covers.c
-input/agents_shortcut.c
 screens/system/herdremote_model.c
 screens/system/detail_layout.c
 #endif

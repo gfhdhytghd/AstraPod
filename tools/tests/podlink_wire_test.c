@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "podlink.h"
+#include "podlink_trace.h"
 
 int main(void)
 {
@@ -33,6 +34,9 @@ int main(void)
                     unsigned int consumed;
                     int rc = podlink_decode_bytes(&parser, stream + pos + used,
                                                   chunk - used, &consumed, &m);
+                    unsigned snap[]={rc,consumed,parser.used,parser.consumed};
+                    trace(12,snap,sizeof snap);trace(13,parser.bytes,parser.used);
+                    if(rc==1){unsigned meta[]={m.type,m.flags,m.seq,m.length};trace(14,meta,sizeof meta);trace(15,m.data,m.length);}
                     used += consumed;
                     if (rc == 1)
                     {

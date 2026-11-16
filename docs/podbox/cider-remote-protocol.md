@@ -21,7 +21,7 @@ The player sends `ci<TAB>1<TAB>window`. The host selects a fresh nonzero 32-bit
 session generation and sends `CA`. The legacy inbox profile allows at most
 24 KiB outstanding. The resident profile advertises 128 KiB. **The larger
 profile bypasses the 16-frame/32-KiB foreground inbox entirely:**
-`podlink_service.c` calls the resident receiver before storing foreground
+Rust `podlink-rust/src/service.rs` calls the resident receiver before storing foreground
 messages. Known Cider state records and binary artwork go to that receiver.
 Unknown/legacy records retain their original route.
 

@@ -66,9 +66,11 @@ post=post.replace('setenv("TZ","UTC",1);','set_sleep_timer(600);setenv("TZ","UTC
 (O/'clock.c').write_text(pre+sleep+s+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie',str(O/'clock.c'),'-o',str(O/'clock')],check=True)
 subprocess.run([str(O/'clock')],check=True)
-a=(R/'apps-ipod/input/action.c').read_text();service=(R/'firmware/usbstack/podlink_service.c').read_text()
+a=(R/'apps-ipod/input/action.c').read_text();service=(R/'firmware/usbstack/podlink-rust/src/service.rs').read_text()
 assert 'set_time(' not in service and 'get_time(' not in service
-assert 'button_queue_post(BUTTON_REDRAW, 0)' in service
+assert 'p.store_time(data, p.tick() as u32)' in service
+assert 'pfu_redraw()' in (R/'firmware/usbstack/podlink-rust/src/ffi.rs').read_text()
+assert 'button_queue_post(BUTTON_REDRAW, 0)' in (R/'firmware/usbstack/podlink_rust_platform.c').read_text()
 assert a.count('podlink_time_sync();')==6
 assert 'rtc_tm = *tm;' in (R/'firmware/common/timefuncs.c').read_text()
 assert 'current_tick + seconds * HZ' in (R/'firmware/powermgmt.c').read_text()

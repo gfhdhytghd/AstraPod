@@ -1,6 +1,7 @@
 # PodLink Rust boundary audit
 
-This is an experimental replacement selected with `make PODLINK_RUST=1`.
+This is the only PodLink firmware implementation. Native normal ipod6g builds
+always link it; bootloaders and hosted tools disable PodLink.
 The default remains C. `wire.rs`, `session.rs`, `service.rs`, and `tests.rs`
 forbid unsafe code. Only `ffi.rs` permits it. The crate has no dependencies.
 The firmware feature is `no_std`, has no allocator, and aborts through the
@@ -109,17 +110,18 @@ All static transport RAM and whole-image growth are measured separately.
 
 ## Verification and limits
 
-`tools/tests/run_podlink_rust.py` runs the original C session, wire, BENCH and
-resident assertion streams against both implementations. It rewrites only
-private-state observations to host-test getters. It compares complete binary
+`tools/tests/run_podlink_rust.py` runs the original session, wire, BENCH and
+resident assertion streams through the Rust C ABI against frozen C goldens.
+Private-state observations use host-test getters. It compares complete binary
 traces of controller writes, returned messages, state and generation changes,
 and callback deliveries. It adds 256 seeded session streams and synthetic
 recorded-shape Cider/Agents/art/disk sequences. Those are not physical captures
 or acceptance of MusicKit/Cider playback. C fixtures use ASan/UBSan. Rust uses
 its ordinary bounds checks; it is not instrumented by C's sanitizer flags.
 
-The deterministic differential fuzz target compares both wire implementations
-in one process. The registry pthread fixture destroys a caller's transient
+The deterministic fuzz target regenerates 10,000 input streams and compares
+per-seed SHA256 digests with the retired C implementation. The digest covers
+encoding, consumption, buffered parser bytes and decoded messages. The registry pthread fixture destroys a caller's transient
 table, blocks a callback while unregister competes for the same mutex, checks
 NULL fields, and verifies no callback occurs after unregister returns. The
 ARM fixture executes linked Rust/FFI/snapshot instructions, samples SP, and

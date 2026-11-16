@@ -1,4 +1,5 @@
 """FU35 unanswered fill, negative caching and resident-cover lookup budget."""
+from podlink_rust_build import wire_args
 from pathlib import Path
 import runpy,subprocess,sys
 R=Path(__file__).resolve().parents[2];O=Path(sys.argv[1]).resolve();O.mkdir(parents=True,exist_ok=True)
@@ -39,7 +40,7 @@ extra=r'''
 '''
 s=s.replace('  puts("Production album pin',extra+'\n  puts("Production album pin')
 (O/'retry.c').write_text(s)
-cmd=['cc','-std=gnu11','-Wall','-Wextra','-Wno-unused-variable','-Wno-unused-function','-Wno-unused-parameter','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'retry.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),str(R/'apps-ipod/screens/playback/cider_store.c'),str(R/'firmware/usbstack/podlink_wire.c'),'-o',str(O/'retry')]
+cmd=['cc','-std=gnu11','-Wall','-Wextra','-Wno-unused-variable','-Wno-unused-function','-Wno-unused-parameter','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'retry.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),str(R/'apps-ipod/screens/playback/cider_store.c'),*wire_args(),'-o',str(O/'retry')]
 subprocess.run(cmd,check=True);subprocess.run([str(O/'retry')],check=True,timeout=10)
 # Counterfactual: remove only the resident-cover shortcuts, retaining all
 # other fixes. Repeated frames must then fail the Bloom budget assertion.

@@ -1,6 +1,7 @@
 """Production worker store flow against the real store on a host directory:
 USB-fetched covers are written, hits come back pinned, fills leave the arena,
 inventory pages and acks follow the protocol."""
+from podlink_rust_build import wire_args
 from pathlib import Path
 import re,subprocess,sys
 R=Path(__file__).resolve().parents[2];O=Path(sys.argv[1]).resolve();O.mkdir(parents=True,exist_ok=True)
@@ -132,5 +133,5 @@ int main(int argc,char**argv){(void)argc;mkdir(argv[1],0755);assert(chdir(argv[1
 '''
 body=''.join(fn(n) for n in ['pin_apply','tier_name','store_local','miss_note','hex8','store_record','snap_store','build_list','read_store','store_write_batch'])
 (O/'flow.c').write_text(pre+body+post)
-cmd=['cc','-std=gnu11','-Wall','-Wextra','-Wno-unused-variable','-Wno-unused-function','-Wno-unused-parameter','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'flow.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),str(R/'apps-ipod/screens/playback/cider_store.c'),str(R/'firmware/usbstack/podlink_wire.c'),'-o',str(O/'flow')]
+cmd=['cc','-std=gnu11','-Wall','-Wextra','-Wno-unused-variable','-Wno-unused-function','-Wno-unused-parameter','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'flow.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),str(R/'apps-ipod/screens/playback/cider_store.c'),*wire_args(),'-o',str(O/'flow')]
 subprocess.run(cmd,check=True);subprocess.run([str(O/'flow'),str(O/'scratch')],check=True)

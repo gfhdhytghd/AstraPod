@@ -3,6 +3,7 @@
 The disk/session boundary is modeled; this does not boot or emulate the UI,
 USB controller or scheduler. The existing USB/store test covers unload/reload.
 """
+from podlink_rust_build import wire_args
 from pathlib import Path
 import runpy
 import subprocess
@@ -91,6 +92,6 @@ cmd = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Wno-unused-variable',
        '-I' + str(R / 'apps-ipod'), '-I' + str(R / 'firmware/export'),
        str(O / 'resume.c'), str(R / 'apps-ipod/screens/playback/cider_model.c'),
        str(R / 'apps-ipod/screens/playback/cider_store.c'),
-       str(R / 'firmware/usbstack/podlink_wire.c'), '-o', str(O / 'resume')]
+       *wire_args(), '-o', str(O / 'resume')]
 subprocess.run(cmd, check=True)
 subprocess.run([str(O / 'resume')], check=True, timeout=10)

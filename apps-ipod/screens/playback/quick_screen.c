@@ -424,6 +424,7 @@ static bool gui_quickscreen_do_button(struct gui_quickscreen * qs, int button,
     if (qs->items[item] == NULL)
         return false;
 
+#ifdef HAVE_USB_PODLINK
     if (cider_slot(qs, item))
     {
         int mode = cider_slot_mode(item);
@@ -431,6 +432,7 @@ static bool gui_quickscreen_do_button(struct gui_quickscreen * qs, int button,
                                              previous));
     }
     else
+#endif
         option_select_next_val(qs->items[item], previous, true);
     talk_qs_option(qs, item, false);
     *item_out = item;

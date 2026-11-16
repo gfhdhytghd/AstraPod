@@ -247,7 +247,9 @@
 /* logf() over USB serial (http://www.rockbox.org/wiki/PortalPlayerUsb) */
 #ifndef BOOTLOADER
 #define USB_ENABLE_SERIAL
+#if !defined(SIMULATOR) && !defined(__PCTOOL__) && !defined(CHECKWPS) && !defined(APPLICATION)
 #define HAVE_USB_PODLINK
+#endif
 #endif
 #define HAVE_USBSTACK
 #define HAVE_USB_HID_MOUSE

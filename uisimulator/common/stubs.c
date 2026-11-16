@@ -251,3 +251,13 @@ void touchpad_enable_device(bool en)
     (void)en;
 }
 #endif
+
+/* The simulator has host files, not the native storage worker queue. */
+#ifndef BOOTLOADER
+bool storage_logfile_call(void *request)
+{
+    extern void logfile_storage_request(void *, bool);
+    logfile_storage_request(request, true);
+    return true;
+}
+#endif

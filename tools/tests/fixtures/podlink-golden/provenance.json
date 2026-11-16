@@ -1,0 +1,14 @@
+{
+  "revision": "16f4a56945",
+  "implementation_sha256": {
+    "firmware/usbstack/podlink.c": "0a5ba1d4630c17af8d9fd98b88a53a59d6dc24f196a3d7411d55a8012094d0a2",
+    "firmware/usbstack/podlink_service.c": "97ee2ee4d86617f5fbc513c65201f5d28bca9440b60988f8c0b15626d365de57",
+    "firmware/usbstack/podlink_wire.c": "ede6fbef27974b43499876597acf42685463ec4b6800f8e0e253da49d3a20a31"
+  },
+  "session_seed": "0xf048",
+  "session_rounds": 256,
+  "fuzz_initial_seed": "0x48f00d",
+  "fuzz_streams": 10000,
+  "trace_format": "little-endian u32 tag, u32 length, payload; no pointers/padding; gzip mtime=0",
+  "scope": "RAM-only synthetic protocol-shaped streams; not device captures"
+}

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """FU31 production challenge parser, disconnect labels and 4-second device expiry."""
+from podlink_rust_build import wire_args
 from pathlib import Path
 import re, subprocess,sys
 R=Path(__file__).resolve().parents[2];O=Path(sys.argv[1]).resolve();O.mkdir(parents=True,exist_ok=True)
@@ -42,7 +43,7 @@ int main(void){char nonce[17]="unchanged";
  puts("FU31 challenge validation, device deadline, legacy idle and disconnected/loading/failed/empty labels PASS");}
 '''
 (O/'session.c').write_text(code)
-subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'session.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),str(R/'firmware/usbstack/podlink_wire.c'),'-o',str(O/'session')],check=True)
+subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'session.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),*wire_args(),'-o',str(O/'session')],check=True)
 subprocess.run([str(O/'session')],check=True)
 # Scheduling and no-credit path in the real resident service.
 assert fn('next').index('else if (live_reply)') < fn('next').index('else if (host_diag && art_ack_request)')

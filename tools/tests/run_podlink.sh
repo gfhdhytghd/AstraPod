@@ -1,23 +1,6 @@
 #!/bin/sh
-# Offline protocol, serial and screen checks; no device access.
+# Offline Rust protocol, real C serial and screen checks; no device access.
 set -eu
 cd "$(dirname "$0")/../.."
-test_dir=$(mktemp -d)
-trap 'rm -rf "$test_dir"' EXIT HUP INT TERM
-cc=${CC:-cc}
-for test in podlink_firmware podlink_wire podlink_screen podlink_bench podlink_resident fu47_podlink_dispatch; do
-    case "$test" in
-        podlink_resident|fu47_podlink_dispatch) includes='-Itools/tests/podlink_stubs -Iapps-ipod/screens/system'
-           codec='firmware/usbstack/podlink_wire.c firmware/usbstack/remote_log.c apps-ipod/screens/system/herdremote_model.c' ;;
-        podlink_screen) includes='-Itools/tests/podlink_stubs'; codec='' ;;
-        *) includes='-Itools/tests/podlink_stubs'
-           codec='firmware/usbstack/podlink_wire.c' ;;
-    esac
-    "$cc" -std=gnu11 -Wall -Wextra -Werror -g \
-        -fsanitize=address,undefined -fno-pie -no-pie \
-        -ffunction-sections -fdata-sections -Wl,--gc-sections \
-        $includes -Ifirmware/export -Ifirmware/usbstack \
-        "tools/tests/${test}_test.c" $codec -o "$test_dir/$test"
-    "$test_dir/$test"
-done
+"${PYTHON:-python3}" tools/tests/run_podlink_rust.py --build "${PODLINK_TEST_BUILD:-build-fu49}"
 "${PYTHON:-python3}" -m unittest discover -s tools/tests -p test_podlink.py -v

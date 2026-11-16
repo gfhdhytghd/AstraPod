@@ -4482,6 +4482,26 @@ if [ "$bootloader_only" = "1" -a "$bootloader" != "1" ]; then
     exit 9
 fi
 
+# Rust PodLink is mandatory only for native normal ipod6g firmware.
+# Check before emitting Makefile/autoconf.h, including advanced native builds.
+if [ "$modelname" = "ipod6g" ] && [ "$bootloader" != "1" ] &&
+   [ "$simulator" != "yes" ] && [ -z "$app_type" ]; then
+  podlink_toolchain=nightly-2026-02-03
+  podlink_setup="rustup toolchain install $podlink_toolchain --profile minimal --component rust-src,rustfmt,clippy"
+  if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+    echo "ERROR: ipod6g requires Cargo and Rust $podlink_toolchain for PodLink." >&2
+    echo "Install rustup, then run: $podlink_setup" >&2
+    exit 10
+  fi
+  if ! cargo +$podlink_toolchain --version >/dev/null 2>&1 ||
+     ! podlink_sysroot=$(rustc +$podlink_toolchain --print sysroot 2>/dev/null) ||
+     [ ! -f "$podlink_sysroot/lib/rustlib/src/rust/library/core/Cargo.toml" ]; then
+    echo "ERROR: ipod6g PodLink requires $podlink_toolchain with rust-src (-Zbuild-std=core, armv5te-none-eabi)." >&2
+    echo "Run: $podlink_setup" >&2
+    exit 10
+  fi
+fi
+
 # if building a simulator for an hosted port, APPLICATION
 # define clashes with SIMULATOR define
 
@@ -4746,7 +4766,7 @@ if [ -n "$arch_version" ]; then
     Darch_version="#define ARCH_VERSION $arch_version"
 fi
 if [ -n "$arch_profile" ]; then
-    Darch_profile="#define ARCH_PROFILE $(echo ${arch}_PROFILE_${arch_profile} | tr [a-z] [A-Z])"
+    Darch_profile="#define ARCH_PROFILE $(echo ${arch}_PROFILE_${arch_profile} | tr '[:lower:]' '[:upper:]')"
 fi
 
 if test -n "$ccache"; then

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """FU28 host-executed production CN parser and spinner pixel/timing tests."""
+from podlink_rust_build import wire_args
 from pathlib import Path
 import subprocess,sys
 R=Path(__file__).resolve().parents[2];O=Path(sys.argv[1]) if len(sys.argv)>1 else R/'build-fu28/loading';O.mkdir(parents=True,exist_ok=True)
@@ -23,7 +24,7 @@ int main(void){struct cider_state s={0};char b[512];
  puts("CN loading parse, legacy restore, invalid transactional rejection PASS");}
 '''
 (O/'cn.c').write_text(code)
-cmd=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'cn.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),str(R/'firmware/usbstack/podlink_wire.c'),'-o',str(O/'cn')]
+cmd=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'cn.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),*wire_args(),'-o',str(O/'cn')]
 subprocess.run(cmd,check=True);subprocess.run([str(O/'cn')],check=True)
 
 # Compile the real pixel renderer against a clipped framebuffer recorder.

@@ -18,10 +18,10 @@
 #undef podlink_close
 #undef podlink_poll
 #undef podlink_wait
-static void sleep(int ticks) { current_tick += ticks; }
+
 void usb_podlink_disk(void) {}
 void button_queue_post(long id, intptr_t data) { (void)id; (void)data; }
-#include "../../firmware/usbstack/podlink_service.c"
+#include "podlink_rust_service.h"
 #include "herdremote_model.h"
 
 static struct hr_model cached;
@@ -57,6 +57,7 @@ static void work(void)
     for (int i = 0; i < 20; i++)
     {
         service_step(); controller(); current_tick++;
+        unsigned snap[]={podlink_state(),podlink_host_connected(),podlink_generation(),podlink_session_state(),podlink_session_revision()};trace(7,snap,sizeof snap);
         struct podlink_message m;
         while (cursor < output_size)
             if (podlink_decode(&peer, output[cursor++], &m) == 1 &&
@@ -97,7 +98,7 @@ int main(void)
             podlink_close();
         }
         cider_return(20); work();
-        /* Remote WPS: foreground client 2 with Cider traffic and overflow. */
+        /* Remote WPS: foreground podlink_rust_debug(10) 2 with Cider traffic and overflow. */
         if (round % 3 == 0)
         {
             assert(podlink_open());
@@ -116,5 +117,6 @@ int main(void)
     printf("FU47 dispatch: 200 rounds, receive=%d next=%d reset=%d background=%d; "
            "partial/NULL resident tables, Agents/Cider/WPS triggers, CLOSE, unplug PASS\n",
            receive_calls, next_calls, reset_calls, background_calls);
+    unsigned calls[]={receive_calls,next_calls,reset_calls,background_calls};trace(16,calls,sizeof calls);
     return 0;
 }

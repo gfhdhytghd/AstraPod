@@ -129,7 +129,11 @@ void panicf( const char *fmt, ...)
     lcd_update();
     DEBUGF("%s", panic_buf);
 
-#ifdef HAVE_ADJUSTABLE_CPU_FREQ
+    /* S5L voltage changes take the I2C mutex. The scheduler cannot release an
+     * existing owner after the IRQ mask above, even when this is a SYS panic.
+     * Keep the original fault on screen instead of deadlocking or panicking
+     * again in mutex_lock from an exception mode. */
+#if defined(HAVE_ADJUSTABLE_CPU_FREQ) && CONFIG_CPU != S5L8702 && CONFIG_CPU != S5L8720
     if (cpu_boost_lock())
     {
         set_cpu_frequency(0);

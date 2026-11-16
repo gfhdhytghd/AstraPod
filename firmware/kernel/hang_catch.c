@@ -235,7 +235,9 @@ static void NORETURN_ATTR hang_show(void)
     lcd_update();
 
     /* Waiting for a button, as a panic leaves it */
-#ifdef HAVE_ADJUSTABLE_CPU_FREQ
+    /* S5L frequency changes write the PMU through a blocking I2C mutex.
+     * No owner can run once interrupts are off for this fatal screen. */
+#if defined(HAVE_ADJUSTABLE_CPU_FREQ) && CONFIG_CPU != S5L8702 && CONFIG_CPU != S5L8720
     if (cpu_boost_lock())
     {
         set_cpu_frequency(0);

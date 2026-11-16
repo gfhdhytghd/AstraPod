@@ -21,11 +21,23 @@
 #include "config.h"
 #include "kernel.h"
 #include "thread.h"
+#include "system.h"
 
 #include "pmu-target.h"
 #include "adc-target.h"
 #include "i2c-s5l8702.h"
 #include "gpio-s5l8702.h"
+#include "panic.h"
+
+/* Keep the register and the immediate write caller for exception-mode writes.
+ * Do not let mutex_lock replace them with a generic panic.
+ * This deliberately does not turn synchronous reads/writes into queued I/O. */
+static void pmu_check_write(int address, int count, uintptr_t caller)
+{
+    if (!is_thread_context())
+        panicf("PMU write reg:%02x n:%d mode:%02lx caller:%08lx", address,
+               count, get_processor_mode(), (unsigned long)caller);
+}
 
 
 int pmu_read_multiple(int address, int count, unsigned char* buffer)
@@ -35,6 +47,7 @@ int pmu_read_multiple(int address, int count, unsigned char* buffer)
 
 int pmu_write_multiple(int address, int count, unsigned char* buffer)
 {
+    pmu_check_write(address, count, (uintptr_t)__builtin_return_address(0));
     return i2c_write(0, 0xe6, address, count, buffer);
 }
 
@@ -49,6 +62,7 @@ unsigned char pmu_read(int address)
 
 int pmu_write(int address, unsigned char val)
 {
+    pmu_check_write(address, 1, (uintptr_t)__builtin_return_address(0));
     return pmu_write_multiple(address, 1, &val);
 }
 

@@ -2,62 +2,6 @@
 from pathlib import Path
 import re,subprocess,sys
 R=Path(__file__).resolve().parents[2];O=Path(sys.argv[1]).resolve();O.mkdir(parents=True,exist_ok=True)
-S=Path(sys.argv[2]).resolve() if len(sys.argv)>2 else R
-wps=(S/'apps-ipod/screens/playback/wps.c').read_text()
-a=wps.index('            case ACTION_WPS_MENU:');b=wps.index('            case ACTION_WPS_QUICKSCREEN:',a)
-menu=wps[a:b]
-pre=r'''
-#include <assert.h>
-static void __attribute__((unused)) cider_remote_source(void){}
-static void __attribute__((unused)) cider_source_poll(void){}
-static int __attribute__((unused)) cider_wps_poll(void){return 1;}
-#include <stdbool.h>
-static bool cider_active(void){return false;}
-static int cider_browse_covers(bool home){(void)home;return 999;}
-static struct {bool paused;} test_wps_state, *state __attribute__((unused))=&test_wps_state;
-static void __attribute__((unused)) cider_wps_update(void*s){(void)s;}
-
-#include <stdio.h>
-#define GO_TO_AGENTS 1
-#define GO_TO_PREVIOUS 2
-#define GO_TO_ROOT 3
-#define GO_TO_ALBUM_COVERS_TRACKS 13
-static bool cover_nav_playing(void) {return false;}
-static bool album_covers_reopen_tracks(void) {return false;}
-#define ACTION_WPS_MENU 4
-#define WPS_MENU_PREVIOUS 5
-static struct {int wps_menu_action;}global_settings;
-static int covers,leaves;
-static bool remote_return,exit_covers;
-static bool restore __attribute__((unused)),theme_enabled __attribute__((unused));
-static void gwps_leave_wps(bool on){assert(on);leaves++;}
-static bool __attribute__((unused)) show_album_covers(long *go,bool *menu_covers){
- covers++;if(remote_return)*menu_covers=true;*go=GO_TO_ROOT;return exit_covers;
-}
-static int menu(bool return_agents,bool menu_covers){
- (void)menu_covers;restore=false;
- switch(ACTION_WPS_MENU){
-'''
-post=r'''
- }return restore?77:-1;
-}
-int main(void){
- global_settings.wps_menu_action=0;
- assert(menu(true,true)==77&&covers==1&&!leaves);
- assert(menu(false,true)==77&&covers==2&&!leaves);
- assert(menu(false,false)==GO_TO_ROOT&&leaves==1);
- assert(menu(true,false)==GO_TO_AGENTS&&leaves==2);
- global_settings.wps_menu_action=WPS_MENU_PREVIOUS;
- assert(menu(false,false)==GO_TO_PREVIOUS&&leaves==3);
- assert(menu(true,true)==77&&covers==3&&leaves==3);
- exit_covers=true;assert(menu(false,true)==GO_TO_ROOT&&covers==4);
- puts("WPS MENU: remote provenance -> modal Cover Flow/restore; other entries retain base exits; child destinations propagate PASS");
-}
-'''
-(O/'menu.c').write_text(pre+menu+post)
-subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie',str(O/'menu.c'),'-o',str(O/'menu')],check=True)
-subprocess.run([str(O/'menu')],check=True)
-
 def function(text,name):
  m=re.search(r'(?m)^(?:static[ \t]+)?(?:int|long|bool)[ \t*]+'+name+r'\([^;{}]*\)\s*\{',text);assert m,name
  end=m.end();depth=1
@@ -89,7 +33,8 @@ static int __attribute__((unused)) cider_browse(void){return GO_TO_WPS;}
 #define CAROUSEL_CONTEXT -21
 #define CAROUSEL_PLAY_ALBUM -20
 #define AUDIO_STATUS_PLAY 1
-static bool wps_return_agents,wps_menu_covers,cover_toggled_back;
+static bool wps_return_agents,wps_select_remote,cover_toggled_back;
+#define GO_TO_ALBUM_COVERS 14
 static int agent_result,covers_result,playing=1;
 static int agents_screen(void){return agent_result;}
 static int album_covers_scrn(void*p){(void)p;return GO_TO_PREVIOUS;}
@@ -97,6 +42,7 @@ static int audio_status(void){return playing;}
 static int false_leaves,true_leaves;
 static void gwps_leave_wps(bool on){if(on)true_leaves++;else false_leaves++;}
 static int album_model;
+static bool tracks_album_valid;
 static int carousel_run(int*m,const char*file){(void)m;(void)file;return covers_result;}
 static int carousel_cover_menu(void){return GO_TO_ROOT;}
 static void album_covers_cancel_resume(void){}
@@ -109,34 +55,33 @@ nav+=function(albums,'album_covers')+function(albums,'album_covers_return')
 nav+=function((R/'apps-ipod/screens/playback/wps.c').read_text(),'show_album_covers')
 nav+=function(root,'agents_scrn')
 a=root.index('    bool return_agents =',root.index('static int wpsscrn('));b=root.index('    int audstatus',a)
-nav+='\nstatic int consume(void){'+root[a:b]+'return return_agents*2+menu_covers;}\n'
+nav+='\nstatic int consume(void){bool select_remote=wps_select_remote;'+root[a:b]+'return return_agents*2+select_remote;}\n'
 nav+=r'''
 int main(void){
  agent_result=AGENTS_SWITCH_REMOTE_WPS;assert(agents_scrn(NULL)==GO_TO_WPS);
- assert(wps_return_agents&&wps_menu_covers);assert(consume()==3);assert(consume()==0);
+ assert(wps_return_agents&&wps_select_remote);assert(consume()==3);assert(consume()==0);
  agent_result=AGENTS_SWITCH_WPS;assert(agents_scrn(NULL)==GO_TO_WPS);
- assert(wps_return_agents&&!wps_menu_covers);assert(consume()==2);assert(consume()==0);
- agent_result=0;assert(agents_scrn(NULL)==GO_TO_PREVIOUS&&!wps_menu_covers);
- bool flag=false,remote=true;long go=0;
- covers_result=GO_TO_PREVIOUS;assert(!show_album_covers(&go,&flag)&&!flag);
- covers_result=CAROUSEL_REMOTE_RETURN;assert(!show_album_covers(&go,&flag)&&!flag);
- flag=true;covers_result=GO_TO_PREVIOUS;assert(!show_album_covers(&go,&flag)&&flag);
- /* An ordinary later WPS invocation starts unmarked; no static child flag. */
- flag=false;assert(!show_album_covers(&go,&flag)&&!flag);
- covers_result=CAROUSEL_REMOTE_RETURN;assert(album_covers(NULL)==GO_TO_PREVIOUS);
+ assert(wps_return_agents&&!wps_select_remote);assert(consume()==2);assert(consume()==0);
+ agent_result=0;assert(agents_scrn(NULL)==GO_TO_PREVIOUS&&!wps_select_remote);
+ bool remote=true;long go=0;
+ covers_result=GO_TO_PREVIOUS;
+ assert(show_album_covers(&go,false)&&go==GO_TO_PREVIOUS);
+ assert(show_album_covers(&go,true)&&go==GO_TO_AGENTS);
+ covers_result=CAROUSEL_REMOTE_RETURN;assert(!show_album_covers(&go,true));
+ assert(album_covers(NULL)==GO_TO_PREVIOUS);
  covers_result=GO_TO_PREVIOUS;assert(album_covers_return(NULL,&remote)==GO_TO_PREVIOUS&&!remote);
- covers_result=GO_TO_ROOT;assert(show_album_covers(&go,&flag)&&go==GO_TO_ROOT);
- covers_result=GO_TO_ALBUM_COVERS_TRACKS;assert(show_album_covers(&go,&flag)&&go==GO_TO_ALBUM_COVERS_TRACKS);
- covers_result=GO_TO_PREVIOUS;playing=0;assert(show_album_covers(&go,&flag)&&go==GO_TO_WPS);
- assert(false_leaves==7&&true_leaves==3);
- puts("production entry/child routes: remote double vs native chord; pending flag consumed; both cover gestures preserve WPS return policy; nested-safe output; old callers sanitized; audio/destination exits PASS");
+ covers_result=GO_TO_ROOT;assert(show_album_covers(&go,false)&&go==GO_TO_ROOT);
+ covers_result=GO_TO_ALBUM_COVERS_TRACKS;assert(show_album_covers(&go,false)&&go==GO_TO_ALBUM_COVERS_TRACKS);
+ covers_result=CAROUSEL_REMOTE_RETURN;playing=0;
+ assert(show_album_covers(&go,false)&&go==GO_TO_WPS);
+ puts("Agents source selection is consumed once; local MENU ascends; the toggle resumes WPS; child exits propagate PASS");
 }
 '''
 (O/'origins.c').write_text(nav)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie',str(O/'origins.c'),'-o',str(O/'origins')],check=True)
 subprocess.run([str(O/'origins')],check=True)
-assert root.count('gui_wps_show(return_agents, menu_covers)')==3
-assert root.index('wps_menu_covers = false',root.index('static int wpsscrn('))<root.index('usb_audio_get_active()',root.index('static int wpsscrn('))
+assert root.count('gui_wps_show(return_agents)')==3
+assert root.index('wps_select_remote = false',root.index('static int wpsscrn('))<root.index('usb_audio_get_active()',root.index('static int wpsscrn('))
 keys=(R/'apps-ipod/input/keymap_ipod.c').read_text()
 for button in ['BUTTON_MENU','BUTTON_RC_MENU']:
  assert re.search(r'ACTION_WPS_MENU,\s*'+button+r'\|BUTTON_REL',keys)
@@ -147,6 +92,6 @@ gui=(R/'apps-ipod/screens/playback/wps.c').read_text().split('long gui_wps_show(
 a=gui.index('            case ACTION_WPS_STOP:');b=gui.index('            /* Bound only',a)
 assert 'case ACTION_AGENTS_REMOTE_COVERS:' in gui[a:b]
 assert 'case ACTION_AGENTS_COVERS:' in gui[a:b]
-assert 'show_album_covers(&go_to, &menu_covers)' in gui[a:b]
+assert 'show_album_covers(&go_to, return_agents)' in gui[a:b]
 assert 'case ACTION_AGENTS_REMOTE_SWITCH:' in gui
 print('WPS cover/double actions belong to the real input switch (not just party filtering) PASS')

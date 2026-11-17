@@ -21,6 +21,7 @@ pre=r'''
 #define TIME_BEFORE(a,b) ((long)((a)-(b))<0)
 #define CONTEXT_STD 0
 #define ACTION_STD_CANCEL 1
+#define ACTION_STD_MENU 4
 #define ACTION_STD_QUICKSCREEN 2
 #define QUICKSCREEN_IN_USB 3
 #define GO_TO_ROOT -2

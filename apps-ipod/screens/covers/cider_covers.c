@@ -228,7 +228,7 @@ int cider_covers(void)
         if (action == ACTION_STD_QUICKSCREEN &&
             quick_screen_current(action, NULL) == QUICKSCREEN_IN_USB)
             return GO_TO_ROOT;
-        if (action == ACTION_STD_CANCEL ||
+        if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU ||
             agents_nav_pending() != AGENTS_NAV_NONE)
             return GO_TO_PREVIOUS;
     }

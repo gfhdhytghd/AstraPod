@@ -683,16 +683,17 @@ static int cover_tracks_scrn(void *param)
 }
 
 static bool wps_return_agents;
-static bool wps_menu_covers;
+static bool wps_select_remote;
+
+static int wps_back_to(int screen);
 
 static int wpsscrn(void* param)
 {
     int ret_val = GO_TO_PREVIOUS;
     bool return_agents = wps_return_agents;
     wps_return_agents = false;
-    bool menu_covers = wps_menu_covers;
-    if (menu_covers) cider_remote_source();
-    wps_menu_covers = false;
+    if (wps_select_remote) cider_remote_source();
+    wps_select_remote = false;
     int audstatus = audio_status();
     (void)param;
 
@@ -713,7 +714,7 @@ static int wpsscrn(void* param)
     if (audstatus || cider_active())
     {
         talk_shutup();
-        ret_val = gui_wps_show(return_agents, menu_covers);
+        ret_val = gui_wps_show(return_agents);
     }
     else if (global_status.resume_index != -1)
     {
@@ -727,7 +728,7 @@ static int wpsscrn(void* param)
                 global_status.resume_crc32,
                 global_status.resume_elapsed,
                 global_status.resume_offset);
-            ret_val = gui_wps_show(return_agents, menu_covers);
+            ret_val = gui_wps_show(return_agents);
         }
     }
     else if (!file_exists(PLAYLIST_CONTROL_FILE))
@@ -736,7 +737,7 @@ static int wpsscrn(void* param)
              playlist_resume() != -1)
     {
         playlist_start(0, 0, 0);
-        ret_val = gui_wps_show(return_agents, menu_covers);
+        ret_val = gui_wps_show(return_agents);
     }
 
     if (ret_val == GO_TO_PLAYLIST_VIEWER
@@ -755,19 +756,26 @@ static int wpsscrn(void* param)
     else
         pop_current_activity();
 
-    if (cover_nav_playing() && ret_val != GO_TO_ALBUM_COVERS_TRACKS &&
-        ret_val != GO_TO_WPS)
+    if ((ret_val == GO_TO_ALBUM_COVERS_TRACKS || ret_val == GO_TO_WPS) &&
+        cover_nav_origin_is(GO_TO_WPS))
+    {
+        cover_nav_finish();
+        cover_nav_begin(return_agents ? GO_TO_AGENTS : wps_back_to(last_screen));
+        cover_nav_set_playing(ret_val == GO_TO_WPS);
+    }
+    else if (ret_val == GO_TO_ALBUM_COVERS)
+        cover_nav_set_playing(false);
+    else if (cover_nav_playing() && ret_val != GO_TO_ALBUM_COVERS_TRACKS &&
+             ret_val != GO_TO_WPS && ret_val != GO_TO_CIDER)
     {
         cover_nav_finish();
         album_covers_cancel_resume();
     }
 #ifdef HAVE_USB_PODLINK
-    /* Re-entering Cider covers unwinds WPS; retain its cached return policy. */
+    /* The remote carousel unwinds WPS before it opens. Keep its Agents parent
+     * for either exit from this temporary cover visit. */
     if (ret_val == GO_TO_CIDER && cover_nav_origin_is(GO_TO_WPS))
-    {
         wps_return_agents = return_agents;
-        wps_menu_covers = menu_covers;
-    }
 #endif
     back_from_wps = ret_val == GO_TO_PREVIOUS;
     return ret_val;
@@ -871,7 +879,8 @@ static int album_covers_scrn(void* param)
     {
         cider_browse_covers(false);
         /* Cider is the container of this visit, not another history step. */
-        return cider_scrn(NULL);
+        int ret = cider_scrn(NULL);
+        return ret == last_screen ? GO_TO_PREVIOUS : ret;
     }
 #endif
     if (!cover_nav_active()) cover_nav_begin(GO_TO_PREVIOUS);
@@ -886,10 +895,13 @@ static int album_covers_scrn(void* param)
             cover_toggled_back = true;
             return origin == GO_TO_AGENTS ? GO_TO_AGENTS : GO_TO_WPS;
         }
+        if (origin == last_screen) return GO_TO_PREVIOUS;
+        cover_toggled_back = true;
         return origin;
     }
-    if (ret != GO_TO_ALBUM_COVERS_TRACKS &&
-        !(ret == GO_TO_WPS && cover_nav_playing()))
+    if (ret == GO_TO_WPS)
+        cover_nav_set_playing(true);
+    else if (ret != GO_TO_ALBUM_COVERS_TRACKS)
     {
         cover_nav_finish();
         album_covers_cancel_resume();
@@ -1061,9 +1073,27 @@ static int settings_scrn(void * param)
 static int cider_scrn(void *param)
 {
     (void)param;
+    bool from_wps = cover_nav_origin_is(GO_TO_WPS);
     int result = cider_browse();
     cover_toggled_back = cider_browse_remote_return();
-    if (!cover_toggled_back) wps_return_agents = wps_menu_covers = false;
+    if (from_wps)
+    {
+        cover_toggled_back = false;
+        if (result == GO_TO_PREVIOUS)
+        {
+            if (wps_return_agents) result = GO_TO_AGENTS;
+            else back_from_wps = true;
+        }
+        else if (result == GO_TO_WPS && cover_nav_playing())
+        {
+            cover_nav_finish();
+            cover_nav_begin(wps_return_agents ? GO_TO_AGENTS : wps_back_to(last_screen));
+            cover_nav_set_playing(true);
+            wps_return_agents = false;
+        }
+    }
+    if (result != GO_TO_WPS || (!from_wps && !cover_toggled_back))
+        wps_return_agents = false;
     return result;
 }
 
@@ -1082,7 +1112,7 @@ static int agents_scrn(void *param)
         /* A triple inside the carousel resumes the cached Agents client. */
     }
     wps_return_agents = ret == AGENTS_SWITCH_WPS || ret == AGENTS_SWITCH_REMOTE_WPS;
-    wps_menu_covers = ret == AGENTS_SWITCH_REMOTE_WPS;
+    wps_select_remote = ret == AGENTS_SWITCH_REMOTE_WPS;
     return wps_return_agents ?
            GO_TO_WPS : GO_TO_PREVIOUS;
 }
@@ -1122,7 +1152,8 @@ static void run_screen_shortcut(int screen)
         screen = ret;
     }
     if (cover_nav_active()) { cover_nav_finish(); album_covers_cancel_resume(); }
-    wps_return_agents = wps_menu_covers = false;
+    wps_return_agents = wps_select_remote = false;
+    back_from_wps = false;
     button_set_sw_poweroff_state(poweroff);
 }
 
@@ -1138,7 +1169,7 @@ void root_menu_wps_shortcut(void)
     cider_remote_source();
     if (agents_nav_pending() == AGENTS_NAV_NONE)
         agents_nav_request(AGENTS_NAV_WPS, false);
-    wps_return_agents = wps_menu_covers = false;
+    wps_return_agents = wps_select_remote = false;
     run_screen_shortcut(GO_TO_WPS);
 }
 
@@ -2152,7 +2183,8 @@ static inline int load_screen(int screen)
     enum current_activity activity = ACTIVITY_UNKNOWN;
     if (screen <= GO_TO_ROOT)
         return screen;
-    if (screen == old_previous)
+    bool wps_covers = screen == GO_TO_CIDER && cover_nav_origin_is(GO_TO_WPS);
+    if (screen == old_previous && !wps_covers)
         old_previous = GO_TO_ROOT;
     global_status.last_screen = screen;
     status_save(false);
@@ -2229,6 +2261,12 @@ static inline int load_screen(int screen)
     last_screen = cover_toggled_back ? GO_TO_ROOT : screen;
     if (ret_val == GO_TO_PREVIOUS)
         last_screen = cover_toggled_back ? GO_TO_ROOT : old_previous;
+    else if ((wps_covers && ret_val == GO_TO_WPS) ||
+             (screen == GO_TO_WPS && ret_val == GO_TO_CIDER &&
+              cover_nav_origin_is(GO_TO_WPS)))
+        last_screen = old_previous;
+    else if (ret_val == GO_TO_AGENTS && (screen == GO_TO_WPS || wps_covers))
+        last_screen = GO_TO_ROOT;
     cover_toggled_back = false;
     return ret_val;
 }

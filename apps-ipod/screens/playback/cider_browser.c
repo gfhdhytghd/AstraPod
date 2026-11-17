@@ -36,7 +36,7 @@ static struct
     char art[65];
 } history[12];
 static int depth;
-static bool album_pending, show_covers, remote_return;
+static bool album_pending, show_covers, remote_return, cover_suspended;
 static int cover_album_depth = -1, cover_parent_depth = -1;
 static struct cider_row selected_row;
 /* 3 fixed rows, the parsed tagnavi main rows (21 shipped) and Cover cache.
@@ -268,8 +268,18 @@ static void enter(const struct cider_row *r)
         cider_pin_art(r->art);
     cider_page_open(history[depth].route);
 }
+static void discard_suspended_covers(void)
+{
+    if (!cover_suspended) return;
+    cover_suspended = false;
+    cover_parent_depth = cover_album_depth = -1;
+    depth = 0;
+    history[0].selected = 0;
+}
+
 int cider_browse_at(const struct cider_row *row)
 {
+    discard_suspended_covers();
     depth = 0;
     enter(row);
     browse_floor = action_menu_back() ? depth : 0;
@@ -279,6 +289,7 @@ int cider_browse_at(const struct cider_row *row)
 }
 int cider_browse_covers(bool home)
 {
+    if (home || !cover_nav_playing()) discard_suspended_covers();
     if (!cover_nav_active()) cover_nav_begin(home ? GO_TO_WPS : GO_TO_PREVIOUS);
     show_covers = true;
     return GO_TO_CIDER;
@@ -312,8 +323,12 @@ int cider_browse(void)
 {
     if (!agents_nav_enter(AGENTS_NAV_TRACKS))
         return GO_TO_PREVIOUS;
+    if (!show_covers) discard_suspended_covers();
     if (!show_covers && cover_parent_depth < 0 && cover_nav_active())
         cover_nav_finish();
+    if (show_covers)
+        cover_nav_set_playing(false);
+    cover_suspended = false;
 #ifdef HAVE_CRUMBS
     crumb(CR_CIDER_IN, 0);
 #endif
@@ -366,19 +381,15 @@ int cider_browse(void)
             else if (ret != GO_TO_PREVIOUS)
             {
                 result = ret;
-                close_covers(false);
                 break;
             }
             else
             {
-                bool return_wps = cover_nav_origin_is(GO_TO_WPS);
+                int parent = cover_nav_finish();
                 close_covers(true);
-                if (return_wps)
+                if (parent != GO_TO_CIDER)
                 {
-                    /* MENU closes this WPS cover visit just like a toggle;
-                     * do not leave it in the root dispatcher's history. */
-                    remote_return = true;
-                    result = GO_TO_WPS;
+                    result = parent == GO_TO_WPS ? GO_TO_PREVIOUS : parent;
                     break;
                 }
                 if (depth) cider_page_open(history[depth].route);
@@ -628,7 +639,18 @@ int cider_browse(void)
             break;
         }
     }
-    if (cover_parent_depth >= 0) close_covers(false);
+    if (cover_parent_depth >= 0)
+    {
+        if (result == GO_TO_WPS)
+        {
+            depth = cover_parent_depth;
+            cover_album_depth = -1;
+            cover_nav_set_playing(true);
+            cover_suspended = true;
+        }
+        else
+            close_covers(false);
+    }
     carousel_forget_resume();
     gui_synclist_scroll_stop(&list);
     cider_unpin_art();
@@ -636,10 +658,12 @@ int cider_browse(void)
     browser_set_external_header(NULL, NULL);
     pop_current_activity();
     agents_nav_leave(AGENTS_NAV_TRACKS);
-    /* Child screens and QuickScreen stay inside this invocation. Once it
-     * leaves, a new entry starts at the root rather than a static child. */
-    depth = 0;
-    history[0].selected = 0;
+    /* Only a carousel that opened WPS keeps a resumable browser parent. */
+    if (!cover_suspended)
+    {
+        depth = 0;
+        history[0].selected = 0;
+    }
 #ifdef HAVE_CRUMBS
     crumb(CR_CIDER_OUT, (uint32_t)result);
 #endif

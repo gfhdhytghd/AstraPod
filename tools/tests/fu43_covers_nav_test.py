@@ -17,9 +17,11 @@ exec(compile(adapter.read_text().split("post=r'''")[0],str(adapter),'exec'),name
 pre=namespace['pre']
 for n in ['cover_nav_active','cover_nav_begin','cover_nav_finish','cover_nav_origin_is','agents_nav_enter','agents_nav_leave','agents_nav_take','agents_nav_pending','cider_active','cider_remote_source','audio_status','list_do_action','push_current_activity','pop_current_activity','cider_play','quick_screen_current']:
  pre=pre.replace(fn(pre,n),'')
+for n in ['cover_nav_playing','cover_nav_set_playing']:
+ if n in pre:pre=pre.replace(fn(pre,n),'')
 pre=re.sub(r'enum \{ACTION_NONE,.*?\};','',pre,flags=re.S)
 pre=re.sub(r'enum agents_nav_screen \{.*?\};','',pre,flags=re.S)
-root_functions='\n'.join(fn(root,n) for n in ['artist_portraits_scrn','wpsscrn','cover_tracks_scrn','album_covers_scrn','cider_scrn','agents_scrn','load_screen','wps_back_to'])
+root_functions='static int wps_back_to(int);\n'+'\n'.join(fn(root,n) for n in ['artist_portraits_scrn','wpsscrn','cover_tracks_scrn','album_covers_scrn','cider_scrn','agents_scrn','load_screen','wps_back_to'])
 route=fn(action,'shortcut_screen_context')+fn(action,'route_screen_shortcut')
 nav=read('input/agents_shortcut.c');nav=nav[nav.index('static bool cover_journey'):nav.index('int agents_shortcut_button(')]
 if 'agents_cover_toggle_target(' not in nav:nav+='\nenum agents_nav_screen agents_cover_toggle_target(void){return agents_nav_has(AGENTS_NAV_COVERS)?AGENTS_NAV_BACK:AGENTS_NAV_COVERS;}\n'
@@ -144,6 +146,9 @@ static void list_do_action(int context,int timeout,struct gui_synclist*l,int*a){
 list_fn=fn(setup,'list_do_action');setup=setup.replace(list_fn,'static void list_do_action(int,int,struct gui_synclist*,int*);')
 remote=re.sub(r'^#include .*$', '',(R/'apps-ipod/input/agents_remote.c').read_text(),flags=re.M)
 artist_function=fn((R/'apps-ipod/screens/covers/artist_portraits.c').read_text(),'artist_portraits') if not old else ''
+old_wps = 'bool menu_covers' in fn(wps, 'gui_wps_show')
+if not old_wps:
+ setup = setup.replace('wps_menu_covers','wps_select_remote').replace('gui_wps_show(bool,bool)','gui_wps_show(bool)')
 body=r'''
 static int artist_portraits(const char*);
 static int cover_event(int button){
@@ -208,10 +213,12 @@ static int carousel_run(const int*model,const char*file){
 struct root_item{int(*function)(void*);void*param;};
 static struct root_item items[GO_TO_CIDER+1];
 '''.replace('COVER_CASE',cover_case)
+if not old_wps:
+ body = body.replace('bool return_agents,bool menu_covers','bool return_agents').replace('&menu_covers','return_agents')
 root_functions=root_functions.replace('static inline int load_screen','static int load_screen')
 model=(R/'apps-ipod/screens/playback/cider_model.c').read_text();model=model[model.index('const char *cider_list_notice('):model.index('/* Compare only song routes;')]
 # GUI wrapper calls the actual WPS cover helper, which itself calls our adapter.
-prototype='static bool show_album_covers(long*,bool*);\n'
+prototype='static bool show_album_covers(long*,bool' + ('*' if old_wps else '') + ');\n'
 end=r'''
 static int next_screen;
 static void pending_dispatch(void){
@@ -255,7 +262,7 @@ int main(void){
 start=root.index('void root_menu(void)');a=root.index('#ifdef HAVE_USB_PODLINK',root.index('    while (true)',start));z=root.index('#endif',a)+len('#endif');pending=root[a:z]
 a=root.index('            case GO_TO_PREVIOUS:',start);z=root.index('            case GO_TO_PREVIOUS_BROWSER:',a);previous=root[a:z]
 end=end.replace('PENDING_DISPATCH',pending).replace('PREVIOUS_DISPATCH',previous)
-end=end.replace('RESET_EXTRA','cover_parent_depth=-1;' if not old else 'covers_home=covers_agents=false;')
+end=end.replace('RESET_EXTRA',('cover_parent_depth=-1;' + ('cover_suspended=false;' if 'cover_suspended' in cider else '')) if not old else 'covers_home=covers_agents=false;')
 if old:
  artist_function='static int artist_portraits(const char*p){(void)p;return GO_TO_PREVIOUS;}'
  cases='reset(1);script=1;stage=1;run(GO_TO_ALBUM_COVERS);assert(menus<=16);puts("baseline unexpectedly escaped");'
@@ -286,7 +293,7 @@ else:
  }
  for(int parent=0;parent<12;parent++)for(int album=0;album<2;album++){
   if(parent==11&&album){continue;}reset(1);use_quick=false;script=album?2:1;stage=1;depth=parent;
-  int saved=depth;cider_browse_covers(false);run(GO_TO_CIDER);
+  int saved=depth;cover_nav_begin(GO_TO_CIDER);cider_browse_covers(false);run(GO_TO_CIDER);
   assert(first_browser_depth==(album?saved+1:saved));assert(depth==0&&cover_album_depth==-1&&cover_parent_depth==-1);
   assert(covers_calls==1+album&&menus<24&&!agents_nav_active()&&!claimed&&!cover_nav_active());
  }

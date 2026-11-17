@@ -105,7 +105,7 @@ static int __attribute__((unused)) cider_browse(void){return GO_TO_WPS;}
 #define GO_TO_ALBUM_COVERS 14
 #define GO_TO_AGENTS 11
 #define GO_TO_ROOT 12
-static bool wps_return_agents,wps_menu_covers,cover_toggled_back,poweroff=true;
+static bool wps_return_agents,wps_select_remote,cover_toggled_back,back_from_wps,poweroff=true;
 static int last_screen=GO_TO_ROOT;
 static int a_calls,calls,covers_result=GO_TO_PREVIOUS;
 static int agents_screen(void){return ++a_calls==1?AGENTS_SWITCH_COVERS:0;}

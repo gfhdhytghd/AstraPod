@@ -29,6 +29,11 @@ static void cpu_boost(bool on) {
     if (on) { assert(clock_refs == 1); boost_gets++; clock_refs++; }
     else { assert(clock_refs == 2); boost_puts++; clock_refs--; }
 }
+enum { AGENTS_NAV_AGENTS, AGENTS_NAV_COVERS };
+static int nav_requests, nav_screen, nav_action;
+static bool nav_remote;
+static void agents_nav_request(int screen, bool remote)
+{ nav_requests++; nav_screen = screen; nav_remote = remote; }
 #define HZ 100
 #define LCD_WIDTH 320
 #define LCD_HEIGHT 240
@@ -231,7 +236,7 @@ static bool cider_page_row(int i,struct cider_row*r)
     return true;
 }
 static int get_action_statuscode(int*b){if(b)*b=remote_key?BUTTON_REMOTE:0;return 0;}
-static int default_event_handler(int a){assert(clock_refs==1);default_events++;return a;}
+static int default_event_handler(int a){assert(clock_refs==1&&claims==releases);default_events++;return a;}
 static int get_action(int c,int timeout);
 '''
 # Avoid libc sleep's POSIX signature in this host adapter.
@@ -303,10 +308,11 @@ static int get_action(int c,int timeout){
    memcpy(lv_frame(),panel,LV_FRAME);
    return ACTION_WPS_MENU;
  }
- if(plan==7) {
+ if(plan==7||plan==9) {
    assert(calls < 2);
    if(!calls++){assert(!lv.boost); return ACTION_WPS_VOLUP;}
-   assert(lv.boost&&lv.mode.manual);return SYS_USB_CONNECTED;
+   assert(lv.boost&&lv.mode.manual);
+   return plan==7 ? SYS_USB_CONNECTED : nav_action;
  }
  assert(c==CONTEXT_WPS&&timeout>0&&timeout<=50);current_tick+=timeout;calls++;assert(calls<50);
  if(plan==0){
@@ -474,6 +480,18 @@ int main(int argc,char**argv){assert(argc==2);assert(!chdir(argv[1]));
  arena_bytes=2*LV_FRAME+LCD_WIDTH*LCD_WIDTH*sizeof(fb_data)
             +LV_LAYOUTS*sizeof(struct lv_layout)+(LV_MASKS+1)*(sizeof(struct lv_mask)+320*26*sizeof(fb_data));
  assert(lyric_viewer()==GO_TO_PREVIOUS && clock_refs==1 && boost_gets==boost_puts);
+ const int nav_actions[] = {ACTION_AGENTS_SWITCH, ACTION_AGENTS_REMOTE_SWITCH,
+                            ACTION_AGENTS_COVERS, ACTION_AGENTS_REMOTE_COVERS};
+ for (int i=0;i<4;i++) {
+   plan=9;calls=0;nav_action=nav_actions[i];
+   int previous_claims=claims, previous_releases=releases;
+   assert(lyric_viewer()==GO_TO_PREVIOUS && !lv_state);
+   assert(nav_requests==i+1 && nav_screen==(i<2 ? AGENTS_NAV_AGENTS : AGENTS_NAV_COVERS));
+   assert(nav_remote==(bool)(i%2));
+   assert(clock_refs==1 && boost_gets==boost_puts);
+   assert(claims==previous_claims+1 && releases==previous_releases+1);
+ }
+ puts("PASS FU68 four navigation exits during active animation release boost and arena");
  puts("PASS FU65 incremental track layer, single-panel damage and small arena");
  puts("PASS FU65 boost ownership, idle, seek, track change, active USB exit and cue width reuse");
  puts("PASS production viewer: local/remote lyrics, art cache/cold/no art/late remote art, dirty idle, recorder and close log, track fade, arena and USB cleanup");

@@ -900,6 +900,17 @@ static void usb_dw_epstart(int epnum, enum usb_dw_epdir epdir,
     uint32_t packets = usb_dw_calc_packets(xfersize, maxpktsize);
     uint32_t eptsiz = PKTCNT(packets) | xfersize;
     uint32_t nak = CNAK;
+    /* EP0 OUT always receives into ep0_buffer, one packet per start, and
+     * the caller's buffer gets a copy on completion. A SETUP can arrive at
+     * any time (the host aborts and retries), and the core writes it to
+     * DOEPDMA: that must never be the caller's buffer, or NULL for a
+     * status stage. */
+    void* dma = buf;
+    if (epnum == 0 && epdir == USB_DW_EPDIR_OUT)
+    {
+        dma = &_ep0_buffer[0];
+        eptsiz |= STUPCNT(1);
+    }
 
     if (epdir == USB_DW_EPDIR_IN)
     {
@@ -917,6 +928,12 @@ static void usb_dw_epstart(int epnum, enum usb_dw_epdir epdir,
 #endif
 
     }
+    else if (dma != buf)
+    {
+#if !defined(USB_DW_ARCH_SLAVE) && defined(NO_UNCACHED_ADDR)
+        DISCARD_DCACHE_RANGE(&_ep0_buffer[0], 64);
+#endif
+    }
     else
     {
 #ifndef USB_DW_ARCH_SLAVE
@@ -926,9 +943,9 @@ static void usb_dw_epstart(int epnum, enum usb_dw_epdir epdir,
 
 #ifndef USB_DW_ARCH_SLAVE
 #ifdef HAVE_CRUMBS
-    usb_dw_check_dma(epnum, epdir, buf, xfersize);
+    usb_dw_check_dma(epnum, epdir, dma, xfersize);
 #endif
-    DWC_EPDMA(epnum, epdir) = USB_DW_PHYSADDR((uint32_t)buf);
+    DWC_EPDMA(epnum, epdir) = USB_DW_PHYSADDR((uint32_t)dma);
 #endif
     DWC_EPTSIZ(epnum, epdir) = eptsiz;
     if (((DWC_EPCTL(epnum, epdir) >> 18) & 0x3) == EPTYP_ISOCHRONOUS)
@@ -1059,9 +1076,11 @@ static void usb_dw_handle_xfer_complete(int epnum, enum usb_dw_epdir epdir)
 #if !defined(USB_DW_ARCH_SLAVE) && defined(NO_UNCACHED_ADDR) && defined(POST_DMA_FLUSH)
         DISCARD_DCACHE_RANGE(ep0_buffer, 64);
 #endif
-#ifdef USB_DW_ARCH_SLAVE
-        memcpy(dw_ep->addr, ep0_buffer, transferred);
-#endif
+        if(dw_ep->addr && transferred)
+        {
+            memcpy(dw_ep->addr, ep0_buffer, transferred);
+            dw_ep->addr = (uint32_t*)((uint8_t*)dw_ep->addr + transferred);
+        }
         usb_dw_ep0_recv();
     }
 
@@ -1071,7 +1090,8 @@ static void usb_dw_handle_xfer_complete(int epnum, enum usb_dw_epdir epdir)
     if(bytes_left == 0 && dw_ep->sizeleft > 0)
     {
 #ifndef USB_DW_ARCH_SLAVE
-        dw_ep->addr += (dw_ep->size >> 2); /* offset in words */
+        if(!is_ep0out)
+            dw_ep->addr += (dw_ep->size >> 2); /* offset in words */
 #endif
         usb_dw_epstart(epnum, epdir, dw_ep->addr, dw_ep->sizeleft);
         return;

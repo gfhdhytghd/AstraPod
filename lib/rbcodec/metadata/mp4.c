@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <inttypes.h>
+#include <limits.h>
 #include "platform.h"
 
 #include "errno.h"
@@ -48,6 +49,8 @@
 #define MP4_cnam FOURCC(0xa9, 'n', 'a', 'm')
 #define MP4_cwrt FOURCC(0xa9, 'w', 'r', 't')
 #define MP4_ccmt FOURCC(0xa9, 'c', 'm', 't')
+#define MP4_clyr FOURCC(0xa9, 'l', 'y', 'r')
+#define MP4_data FOURCC('d', 'a', 't', 'a')
 #define MP4_cday FOURCC(0xa9, 'd', 'a', 'y')
 #define MP4_covr FOURCC('c', 'o', 'v', 'r')
 #define MP4_disk FOURCC('d', 'i', 's', 'k')
@@ -80,6 +83,74 @@
 #define MP4_trkn FOURCC('t', 'r', 'k', 'n')
 #define MP4_udta FOURCC('u', 'd', 't', 'a')
 #define MP4_extra FOURCC('-', '-', '-', '-')
+
+/* Find a child within its parent, leaving the fd at the payload. */
+static bool find_mp4_child(int fd, off_t *end, uint32_t type)
+{
+    off_t pos = lseek(fd, 0, SEEK_CUR);
+    unsigned char header[8];
+
+    while (pos >= 0 && *end - pos >= 8)
+    {
+        if (read(fd, header, sizeof(header)) != sizeof(header))
+            return false;
+        uint32_t atom = get_long_be(header + 4);
+        uint64_t size = get_long_be(header);
+        unsigned int prefix = 8;
+        if (size == 1)
+        {
+            if (*end - pos < 16 || read(fd, header, 8) != 8)
+                return false;
+            size = ((uint64_t)get_long_be(header) << 32) | get_long_be(header + 4);
+            prefix = 16;
+        }
+        else if (size == 0)
+            size = *end - pos;
+        if (size < prefix || size > (uint64_t)(*end - pos))
+            return false;
+        pos += size;
+        if (atom == type)
+        {
+            *end = pos;
+            return true;
+        }
+        if (lseek(fd, pos, SEEK_SET) < 0)
+            return false;
+    }
+    return false;
+}
+
+long find_mp4_lyrics(int fd)
+{
+    off_t end = ffilesize(fd);
+    if (end < 8 || !find_mp4_child(fd, &end, MP4_moov))
+        return 0;
+
+    off_t start = lseek(fd, 0, SEEK_CUR);
+    off_t meta_end = end;
+    if (!find_mp4_child(fd, &meta_end, MP4_udta)
+        || !find_mp4_child(fd, &meta_end, MP4_meta))
+    {
+        meta_end = end;
+        if (start < 0 || lseek(fd, start, SEEK_SET) < 0
+            || !find_mp4_child(fd, &meta_end, MP4_meta))
+            return 0;
+    }
+
+    unsigned char data[8];
+    if (meta_end - lseek(fd, 0, SEEK_CUR) < 4
+        || lseek(fd, 4, SEEK_CUR) < 0 /* FullBox version and flags */
+        || !find_mp4_child(fd, &meta_end, MP4_ilst)
+        || !find_mp4_child(fd, &meta_end, MP4_clyr)
+        || !find_mp4_child(fd, &meta_end, MP4_data)
+        || meta_end - lseek(fd, 0, SEEK_CUR) < 8
+        || read(fd, data, sizeof(data)) != sizeof(data)
+        || get_long_be(data) != 1) /* UTF-8 */
+        return 0;
+
+    off_t pos = lseek(fd, 0, SEEK_CUR);
+    return pos < 0 ? 0 : MIN(meta_end - pos, (off_t)LONG_MAX);
+}
 
 /* Read the tag data from an MP4 file, storing up to buffer_size bytes in
  * buffer.

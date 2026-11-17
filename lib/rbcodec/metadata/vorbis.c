@@ -25,6 +25,7 @@
 #include "platform.h"
 #include "metadata.h"
 #include "metadata_common.h"
+#include "metadata_parsers.h"
 
 /* Define LOGF_ENABLE to enable logf output in this file */
 /*#define LOGF_ENABLE*/
@@ -288,6 +289,75 @@ bool ogg_file_init(struct ogg_file* file, int fd, int type, int remaining)
     }
     
     return true;
+}
+
+static int seek_flac_comments(int fd)
+{
+    unsigned char header[4];
+    off_t end = ffilesize(fd);
+    int id3_len = getid3v2len(fd);
+
+    if (end < 4 || lseek(fd, id3_len, SEEK_SET) < 0
+        || read(fd, header, 4) != 4 || memcmp(header, "fLaC", 4))
+        return 0;
+
+    do
+    {
+        if (read(fd, header, 4) != 4)
+            return 0;
+        int size = (header[1] << 16) | (header[2] << 8) | header[3];
+        off_t pos = lseek(fd, 0, SEEK_CUR);
+        if (pos < 0 || size > end - pos)
+            return 0;
+        if ((header[0] & 0x7f) == 4)
+            return size;
+        if (lseek(fd, size, SEEK_CUR) < 0)
+            return 0;
+    } while (!(header[0] & 0x80));
+    return 0;
+}
+
+long find_vorbis_lyrics(struct ogg_file *file, int fd, int type)
+{
+    int remaining = 0;
+    if (type == AFMT_FLAC)
+    {
+        remaining = seek_flac_comments(fd);
+        if (!remaining)
+            return 0;
+    }
+    else
+    {
+        unsigned char header[92];
+        if (get_ogg_format_and_move_to_comments(fd, header) != type)
+            return 0;
+    }
+
+    int32_t len, count;
+    if (!ogg_file_init(file, fd, type, remaining)
+        || !file_read_int32(file, &len) || len < 0
+        || ogg_file_read(file, NULL, len) != len
+        || !file_read_int32(file, &count))
+        return 0;
+
+    for (; count > 0; count--)
+    {
+        char key[sizeof("UNSYNCEDLYRICS=")];
+        if (!file_read_int32(file, &len) || len < 0
+            || (file->packet_ended && len > file->packet_remaining))
+            return 0;
+        long read_len = file_read_string(file, key, sizeof(key), '=',
+                                         MIN(len, (int)sizeof(key) - 1));
+        if (read_len < 0)
+            return 0;
+        len -= read_len;
+        if (len && ((!strcasecmp(key, "LYRICS") && read_len == 7)
+                    || (!strcasecmp(key, "UNSYNCEDLYRICS") && read_len == 15)))
+            return len;
+        if (ogg_file_read(file, NULL, len) != len)
+            return 0;
+    }
+    return 0;
 }
 
 #define B64_START_CHAR '+'

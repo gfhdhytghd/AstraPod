@@ -15,6 +15,15 @@ stay manual and show no Manual pill. Play/pause and skip use the playback
 source; local skip keeps the WPS skip-length, cuesheet, spoken-word and A/B
 policy. Seeking uses the WPS seek loop with a lyrics render callback.
 
+Local playback looks for timed sidecars (.lrc, .lrc8, .snc) beside the audio
+file and in its parent directories, then for .txt sidecars. With no sidecar,
+SELECT reads lyrics directly from the audio file. MP4 uses UTF-8 `©lyr`.
+FLAC and Ogg Vorbis use `LYRICS` or `UNSYNCEDLYRICS`. MP3 prefers a
+millisecond-timed ID3v2 `SYLT` frame, with `USLT` as a fallback.
+Text tags accept LRC, enhanced LRC and plain text. Source files open read-only.
+The document keeps the prefix that fits the existing 32 KiB allocation.
+ID3 frame staging uses up to one third of that allocation.
+
 Entry/exit: 220/180 ms, cubic ease out, a 24 px slide over a progressively
 dimmed live WPS snapshot. All scroll targets take 260 ms from the displayed
 position, including reversal, multi-line acceleration and idle return. Bitmap
@@ -52,3 +61,5 @@ executes the actual page/model against recording UI/source adapters, including
 75 remote rows across a page-cache miss and arena-denied cleanup. The actual
 SDL simulator is captured by `fu57_sim_evidence.py`; its PNG/GIF sequences and
 capture timestamps are saved in the task evidence directory.
+`lyrics_embedded_test.py` uses real audio containers to check embedded lyrics,
+sidecar priority, encoding, truncation, and source file integrity.

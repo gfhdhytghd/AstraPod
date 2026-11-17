@@ -28,6 +28,7 @@
 #endif
 
 #include "thread-internal.h"
+#include "hang_catch.h"
 #include "kernel.h"
 #include "cpu.h"
 #include "string.h"
@@ -1114,6 +1115,10 @@ void switch_thread(void)
 
     rtr_queue_make_first(&corep->rtr, thread);
     corep->running = thread;
+#ifdef HAVE_HANG_CATCH_FIQ
+    if (thread == hang_ui_thread)
+        hang_ui_ran = current_tick; /* the freeze watch's UI liveness */
+#endif
 
     RTR_UNLOCK(corep);
     enable_irq();

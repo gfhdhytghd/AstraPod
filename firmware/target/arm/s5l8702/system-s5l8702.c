@@ -28,6 +28,8 @@
 #include "gpio-s5l8702.h"
 #include "dma-s5l8702.h"
 #include "clocking-s5l8702.h"
+#include "hang_catch.h"
+#include "hang_watch.h"
 
 #define default_interrupt(name) \
   extern __attribute__((weak,alias("UIRQ"))) void name (void)
@@ -41,7 +43,9 @@ default_interrupt(INT_IRQ5);
 default_interrupt(INT_IRQ6);
 default_interrupt(INT_TIMERE);  /* IRQ7: 32-bit timers */
 default_interrupt(INT_TIMERF);
-default_interrupt(INT_TIMERG);
+#ifndef HAVE_HANG_CATCH_FIQ
+default_interrupt(INT_TIMERG);  /* else the freeze watch's, below */
+#endif
 default_interrupt(INT_TIMERH);
 default_interrupt(INT_TIMERA);  /* IRQ8: 16-bit timers */
 default_interrupt(INT_TIMERB);
@@ -193,6 +197,101 @@ void irq_handler(void)
 #endif
 }
 
+#ifdef HAVE_HANG_CATCH_FIQ
+/* Timer G, alone among the timers' interrupts, is the hang catcher's freeze
+ * watch (hang_catch.c). VIC line 7 carries all four 32-bit timers, so it is
+ * routed as the FIQ only while no other of them can interrupt: E is the
+ * free-running microsecond counter without interrupts, F is the generic
+ * user timer (no user in the ipod6g firmware), H is unused. Should one
+ * interrupt anyway, the line goes back to IRQ, its own handler runs, and
+ * timer G's IRQ returns the line to the FIQ once that timer is stopped. */
+#define TIMER32_LINE (1 << IRQ_TIMER32)
+
+static bool timer32_others_armed(void)
+{
+    return (((TECON >> 12) & 7) && (TECMD & 1)) ||
+           (((TFCON >> 12) & 7) && (TFCMD & 1)) ||
+           (((THCON >> 12) & 7) && (THCMD & 1));
+}
+
+static bool timer32_others_pending(void)
+{
+    uint32_t tstat = TSTAT;
+    return ((TECON >> 12) & 7 & (tstat >> 24)) ||
+           ((TFCON >> 12) & 7 & (tstat >> 16)) ||
+           ((THCON >> 12) & 7 & tstat);
+}
+
+static bool hang_fiq_running;
+
+void INT_TIMERG(void)
+{
+    TSTAT = 0x07 << 8;
+    int level = disable_interrupt_save(IRQ_FIQ_STATUS);
+    if (hang_fiq_running && !timer32_others_armed())
+        VIC0INTSELECT |= TIMER32_LINE;
+    restore_interrupt(level);
+}
+
+int USED_ATTR hang_fiq_timer(uint32_t pc, uint32_t spsr)
+{
+    if (timer32_others_pending())
+    {
+        VIC0INTSELECT &= ~TIMER32_LINE; /* theirs: let the IRQ take it */
+        return 0;
+    }
+    TSTAT = 0x07 << 8;
+    return hang_catch_fiq(pc, spsr);
+}
+
+/* r8-r12 are FIQ mode's own; r0-r3 and lr are what the C call can touch */
+void __attribute__((naked)) fiq_handler(void)
+{
+    asm volatile (
+        "sub     lr, lr, #4              \n"
+        "stmfd   sp!, {r0-r3, ip, lr}    \n"
+        "mov     r0, lr                  \n"
+        "mrs     r1, spsr                \n"
+        "bl      hang_fiq_timer          \n"
+        "cmp     r0, #0                  \n"
+        "ldmeqfd sp!, {r0-r3, ip, pc}^   \n"
+        "ldr     r0, =hang_fiq_stack_end \n"
+        "ldr     sp, [r0]                \n"
+        "b       hang_catch_fiq_show     \n"
+        ".ltorg                          \n"
+    );
+}
+
+/* 10 Hz from the 12 MHz ECLK, the same set-up as the user timer F */
+void hang_watch_fiq_start(void)
+{
+    int level = disable_interrupt_save(IRQ_FIQ_STATUS);
+    TGCMD = 0;
+    TGCON = (1 << 12) |         /* TG_INT0_EN */
+            (4 << 8) |          /* TG_CS = ECLK / 1 */
+            (1 << 6) |          /* select ECLK (12 MHz) */
+            (0 << 4);           /* interval mode */
+    TGPRE = 0;
+    TGDATA0 = TIMER_FREQ / HANG_WATCH_HZ;
+    TSTAT = 0x07 << 8;
+    TGCMD = (1 << 1) | (1 << 0); /* TG_CLR, TG_EN */
+    hang_fiq_running = true;
+    if (!timer32_others_armed())
+        VIC0INTSELECT |= TIMER32_LINE;
+    restore_interrupt(level);
+    enable_interrupt(FIQ_STATUS); /* crt0 left F set; nothing else uses it */
+}
+
+void hang_watch_fiq_stop(void)
+{
+    int level = disable_interrupt_save(IRQ_FIQ_STATUS);
+    hang_fiq_running = false;
+    VIC0INTSELECT &= ~TIMER32_LINE;
+    TGCMD = 0;
+    TSTAT = 0x07 << 8;
+    restore_interrupt(level);
+}
+#else
 void fiq_handler(void) __attribute__((interrupt ("FIQ"), naked, \
                                       weak, alias("fiq_dummy")));
 void fiq_dummy(void)
@@ -201,6 +300,7 @@ void fiq_dummy(void)
         "subs   pc, lr, #4   \r\n"
     );
 }
+#endif
 
 static void vic_init(void)
 {

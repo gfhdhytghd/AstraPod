@@ -297,6 +297,160 @@ static void hang_tick(void)
     *ret = (uint32_t)hang_show;
 }
 
+#ifdef HAVE_HANG_CATCH_FIQ
+#include "hang_watch.h"
+
+/* The freeze watch. The tick above needs IRQs; a timer FIQ does not, and
+ * it also sees a UI thread that is runnable yet never switched in. What it
+ * finds is drawn from the FIQ itself, on a stack of its own, as nothing
+ * else is going to run again. */
+void *hang_ui_thread;
+long hang_ui_ran;
+static bool fiq_armed;
+static struct hang_watch fiq_watch;
+static uint32_t fiq_stack[512] __attribute__((aligned(8)));
+uint32_t *const hang_fiq_stack_end = &fiq_stack[512];
+
+static struct
+{
+    int kind;
+    uint32_t pc, cpsr, sp, lr;          /* where the FIQ came in */
+    uint32_t isp, ilr, ispsr;           /* the IRQ bank: the last IRQ */
+    const struct thread_entry *running;
+    long tick, ui_ran;
+} freeze;
+
+/* A mode's banked sp and lr, read from the FIQ with both masks set. The
+ * values travel in r0/r1 because r8-r12 are banked in FIQ mode. */
+static void banked_regs(uint32_t mode, uint32_t *sp, uint32_t *lr)
+{
+    register uint32_t m asm("r0") = (mode == 0x10 ? 0x1f : mode) | 0xc0;
+    register uint32_t s asm("r1");
+    register uint32_t l asm("r2");
+    asm volatile ("mrs   r3, cpsr     \n"
+                  "msr   cpsr_c, r0   \n"
+                  "mov   r1, sp       \n"
+                  "mov   r2, lr       \n"
+                  "msr   cpsr_c, r3   \n"
+                  : "=r" (s), "=r" (l) : "r" (m) : "r3");
+    *sp = s;
+    *lr = l;
+}
+
+/* SYS mode has no SPSR, so only IRQ mode's is read */
+static uint32_t irq_spsr(void)
+{
+    register uint32_t p asm("r1");
+    asm volatile ("mrs   r3, cpsr     \n"
+                  "msr   cpsr_c, #0xd2 \n"
+                  "mrs   r1, spsr     \n"
+                  "msr   cpsr_c, r3   \n"
+                  : "=r" (p) : : "r3");
+    return p;
+}
+
+int hang_catch_fiq(uint32_t pc, uint32_t spsr)
+{
+    struct core_entry *corep = __core_id_entry(CURRENT_CORE);
+    const struct thread_entry *ui = hang_ui_thread;
+
+    if (!fiq_armed || freeze.kind || hang_thread)
+        return 0;
+    bool waiting = ui && !holds && ui->state == STATE_RUNNING &&
+                   corep->running != ui;
+    int kind = hang_watch_step(&fiq_watch, current_tick, HZ, waiting,
+                               hang_ui_ran);
+    if (kind == HANG_WATCH_NONE)
+        return 0;
+    freeze.kind = kind;
+    freeze.pc = pc;
+    freeze.cpsr = spsr;
+    freeze.running = corep->running;
+    freeze.tick = current_tick;
+    freeze.ui_ran = hang_ui_ran;
+    uint32_t mode = spsr & 0x1f;
+    if (mode == 0x11)           /* cannot happen: FIQs do not nest */
+        freeze.sp = freeze.lr = 0;
+    else
+        banked_regs(mode, &freeze.sp, &freeze.lr);
+    banked_regs(0x12, &freeze.isp, &freeze.ilr);
+    freeze.ispsr = irq_spsr();
+    return 1;
+}
+
+void hang_catch_fiq_show(void)
+{
+    extern const char _irqstackend[];
+    const struct thread_entry *t = freeze.running;
+    uint32_t mode = freeze.cpsr & 0x1f;
+    uint32_t top = (mode == 0x1f || mode == 0x10) && t
+                 ? (uint32_t)t->stack + t->stack_size
+                 : (uint32_t)_irqstackend;
+    uint32_t calls[8];
+    unsigned int y = 1;
+    int n = stack_scan(freeze.sp, top, calls, 8);
+    char name[8];
+
+    panic_screen_enter();
+    lcd_set_viewport(NULL);
+#if LCD_DEPTH > 1
+    lcd_set_backdrop(NULL);
+    lcd_set_drawinfo(DRMODE_SOLID, LCD_BLACK, LCD_WHITE);
+#endif
+    lcd_clear_display();
+    lcd_setfont(FONT_SYSFIXED);
+    lcd_puts(1, y++, "*FREEZE* (" RBVERSION ")");
+    name8(hang_ui_thread, name);
+    if (freeze.kind == HANG_WATCH_IRQS_OFF)
+        lcd_putsf(1, y++, "IRQs off %ds: tick %ld stopped",
+                  HANG_WATCH_IRQ_SECS, freeze.tick);
+    else
+        lcd_putsf(1, y++, "%s starved %lds (runnable)", name,
+                  (freeze.tick - freeze.ui_ran) / HZ);
+    name8(t, name);
+    lcd_putsf(1, y++, "pc:%08lx cpsr:%02lx thr:%s",
+              (unsigned long)freeze.pc, (unsigned long)(freeze.cpsr & 0xff),
+              name);
+    lcd_putsf(1, y++, "sp:%08lx lr:%08lx", (unsigned long)freeze.sp,
+              (unsigned long)freeze.lr);
+    lcd_putsf(1, y++, "irq sp:%08lx lr:%08lx spsr:%02lx",
+              (unsigned long)freeze.isp, (unsigned long)freeze.ilr,
+              (unsigned long)(freeze.ispsr & 0xff));
+    lcd_update();               /* the first lines stay if the rest faults */
+    for (int i = 0; i < n; i += 4)
+        lcd_putsf(1, y++, "%08lx %08lx %08lx %08lx",
+                  (unsigned long)calls[i],
+                  (unsigned long)(i + 1 < n ? calls[i + 1] : 0),
+                  (unsigned long)(i + 2 < n ? calls[i + 2] : 0),
+                  (unsigned long)(i + 3 < n ? calls[i + 3] : 0));
+    /* Each thread: state, where its switch saved lr, what it waits on (the
+     * wait queue, so the object around it) and who called the wait */
+    lcd_puts(1, y++, "thread  s pr lr       wq       caller");
+    for (unsigned i = 0; i < MAXTHREADS; i++)
+    {
+        const struct thread_entry *e = __thread_slot_entry(i);
+        if (e->state == STATE_KILLED)
+            continue;
+        name8(e, name);
+#ifdef HAVE_PRIORITY_SCHEDULING
+        int prio = e->priority;
+        uint32_t ra = (uint32_t)e->blk_ra;
+#else
+        int prio = 0;
+        uint32_t ra = 0;
+#endif
+        lcd_putsf(1, y++, "%-7.7s %c %2d %08lx %08lx %08lx", name,
+                  e == t ? '*' : state_letter(e->state), prio,
+                  (unsigned long)e->context.lr, (unsigned long)e->wqp,
+                  (unsigned long)ra);
+    }
+    lcd_update();
+    system_exception_wait();
+    system_reboot();
+    while (1);
+}
+#endif /* HAVE_HANG_CATCH_FIQ */
+
 void hang_catch_init(void)
 {
     int oldlevel = disable_irq_save();
@@ -310,10 +464,22 @@ void hang_catch_init(void)
     restore_irq(oldlevel);
     ui_thread = __core_id_entry(CURRENT_CORE)->running;
     tick_add_task(hang_tick);
+#ifdef HAVE_HANG_CATCH_FIQ
+    hang_ui_ran = current_tick;
+    hang_ui_thread = (void *)ui_thread;
+    fiq_watch.tick = current_tick;
+    fiq_watch.still = 0;
+    fiq_armed = true;
+    hang_watch_fiq_start();
+#endif
 }
 
 void hang_catch_stop(void)
 {
+#ifdef HAVE_HANG_CATCH_FIQ
+    fiq_armed = false;
+    hang_watch_fiq_stop();
+#endif
     tick_remove_task(hang_tick);
 }
 

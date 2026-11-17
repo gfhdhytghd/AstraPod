@@ -79,8 +79,8 @@ static int cider_browse_covers(bool h){(void)h;return GO_TO_CIDER;}
 #define TRACKS_TEST 52
 #define PLAY_TEST 53
 #define STAY 99
-static struct {int wps_menu_action;}global_settings;
-static bool wps_return_agents,wps_menu_covers,cover_toggled_back,poweroff=true;
+
+static bool wps_return_agents,wps_select_remote,cover_toggled_back,back_from_wps,poweroff=true;
 static int last_screen=GO_TO_ROOT;
 static int owner,activity,depth,max_depth,enters[5],exits[5];
 static unsigned long events;
@@ -134,13 +134,13 @@ a=current_agents.index('        enum agents_nav_screen nav =',current_agents.ind
 agent_pending=current_agents[a:b]
 a=current_wps.index('            case ACTION_AGENTS_REMOTE_SWITCH:');b=current_wps.index('            case ACTION_WPS_HOTKEY:',a)
 wps_double=current_wps[a:b].replace("#endif", "")
-gui=current_wps[current_wps.index('static long wps_run(bool return_agents, bool menu_covers)\n{'):]
+gui=current_wps[current_wps.index('static long wps_run(bool return_agents)\n{'):]
 a=gui.index('            case ACTION_WPS_MENU:');b=gui.index('            case ACTION_WPS_QUICKSCREEN:',a);wps_menu=gui[a:b]
 a=gui.index('            case ACTION_WPS_STOP:');b=gui.index('            /* Bound only',a);wps_cover=gui[a:b]
 a=gui.index('        enum agents_nav_screen nav =');b=gui.index('        bool audio_paused',a);wps_pending=gui[a:b]
 a=current_covers.index('        enum agents_nav_screen nav =',current_covers.index('static int album_covers_loop(void)'));b=current_covers.index('        case PF_WPS:',a)
 cover_cases=current_covers[a:b]+'        default: break;\n        }\n return STAY;\n'
-helpers=fn(current_wps,'show_album_covers')
+helpers=fn(current_wps,'show_album_covers')+fn(current_wps,'select_cover_source')
 bodies=r'''
 static void child_menu(void){
  int old_owner=owner;
@@ -165,7 +165,7 @@ AGENT_CASES
  }
  return ret;
 }
-static long wps_run(bool return_agents,bool menu_covers){
+static long wps_run(bool return_agents){
  bool restore=false,theme_enabled=true;
  while(1){
  WPS_PENDING
@@ -209,9 +209,9 @@ static int agents_screen(void){
 static int wpsscrn(void*p){
  (void)p;ENTER_W
  enter_model(AGENTS_NAV_WPS);int old=activity;activity=ACTIVITY_WPS;
- bool ret_agents=wps_return_agents,menu=wps_menu_covers;
- wps_return_agents=wps_menu_covers=false;
- int ret=wps_run(ret_agents,menu);activity=old;leave_model(AGENTS_NAV_WPS);
+ bool ret_agents=wps_return_agents;
+ wps_return_agents=wps_select_remote=false;
+ int ret=wps_run(ret_agents);activity=old;leave_model(AGENTS_NAV_WPS);
  LEAVE_W
  return ret;
 }
@@ -266,20 +266,19 @@ static void test_cover_shortcut(void){
 '''
 main=r'''
 int main(void){
- /* FU20: remote double -> WPS -> triple -> Cover MENU resumes WPS before the explicit exit. */
+ /* Remote double -> WPS -> triple -> Cover MENU returns to Agents. */
  fixed[0]=ACTION_AGENTS_REMOTE_SWITCH;fixed[1]=ACTION_AGENTS_REMOTE_COVERS;
  fixed[2]=ACTION_WPS_MENU;fixed[3]=EXIT_TEST;nfixed=4;atfixed=0;
  root_menu_agents_shortcut();
  assert(!owner&&!depth&&!agents_nav_active()&&!cover_nav_active());
  assert(exits[AGENTS_NAV_WPS]==1&&exits[AGENTS_NAV_COVERS]==1);
- /* WPS can be playing a journey whose original Cover origin was Agents.
-    A fresh triple/hotkey modal from that WPS still returns MENU to WPS. */
+ /* WPS -> toggle reopens the cover visit. MENU returns to its Agents parent. */
  cover_nav_begin(GO_TO_AGENTS);
  fixed[0]=TRACKS_TEST;fixed[1]=PLAY_TEST;fixed[2]=ACTION_AGENTS_REMOTE_COVERS;
  fixed[3]=ACTION_WPS_MENU;fixed[4]=EXIT_TEST;nfixed=5;atfixed=0;
  int agents_before=exits[AGENTS_NAV_AGENTS];root_menu_cover_shortcut();
  assert(!owner&&!depth&&!agents_nav_active()&&!cover_nav_active());
- assert(exits[AGENTS_NAV_AGENTS]==agents_before);
+ assert(exits[AGENTS_NAV_AGENTS]==agents_before+1);
  /* Exact reported panic path: Cover -> double -> Agents -> triple -> Cover. */
  fixed[0]=ACTION_AGENTS_REMOTE_SWITCH;fixed[1]=ACTION_AGENTS_REMOTE_COVERS;
  fixed[2]=EXIT_TEST;nfixed=3;atfixed=0;root_menu_cover_shortcut();

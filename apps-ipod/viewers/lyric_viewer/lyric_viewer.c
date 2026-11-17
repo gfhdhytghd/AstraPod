@@ -32,6 +32,7 @@
 #include "skin/skin_engine.h"
 #include "skin/skin_albumart_color.h"
 #include "input/action.h"
+#include "input/agents_shortcut.h"
 #include "system/activity.h"
 #include "system/shutdown.h"
 #include "system/app_buffer.h"
@@ -1162,6 +1163,14 @@ int lyric_viewer(void)
         switch (action)
         {
             case ACTION_WPS_BROWSE: case ACTION_WPS_LYRICS: case ACTION_WPS_MENU: goto done;
+#ifdef HAVE_USB_PODLINK
+            case ACTION_AGENTS_REMOTE_SWITCH: case ACTION_AGENTS_SWITCH:
+                agents_nav_request(AGENTS_NAV_AGENTS, action == ACTION_AGENTS_REMOTE_SWITCH);
+                goto done;
+            case ACTION_AGENTS_REMOTE_COVERS: case ACTION_AGENTS_COVERS:
+                agents_nav_request(AGENTS_NAV_COVERS, action == ACTION_AGENTS_REMOTE_COVERS);
+                goto done;
+#endif
             case ACTION_WPS_VOLUP: case ACTION_WPS_VOLDOWN:
                 if (lyrics_loaded())
                 {

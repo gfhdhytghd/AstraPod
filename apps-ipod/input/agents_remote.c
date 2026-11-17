@@ -74,7 +74,9 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
     }
     if (s->tap_pending && !s->second && now - s->released > window)
         play_taps(s, now);
-    if (!h->down && event && !release)
+    /* A sampled release can precede a queued repeat. Only a physical down
+     * edge may start the next tap or hold. */
+    if (!h->down && event && !(button & (BUTTON_REL | BUTTON_REPEAT)))
     {
         h->down = true;
         h->fired = false;
@@ -86,7 +88,7 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
     }
     if (h->down && (event || button == BUTTON_NONE))
     {
-        bool ended = release || !(held & BUTTON_RC_PLAY);
+        bool ended = release || (button == BUTTON_NONE && !(held & BUTTON_RC_PLAY));
         if (!h->fired && now - h->at >= threshold)
         {
             if (s->tap_pending) play_taps(s, now);
@@ -103,7 +105,8 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
             }
         }
         if (h->fired && event && !release && (button & BUTTON_REPEAT) &&
-            context != REMOTE_AGENTS && context != REMOTE_WPS && !s->queued)
+            context == s->play_context && context != REMOTE_AGENTS &&
+            context != REMOTE_WPS && !s->queued)
             emit(s, BUTTON_PLAY | BUTTON_REPEAT);
         if (ended)
         {

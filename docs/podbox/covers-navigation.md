@@ -6,12 +6,10 @@ carousel, so the app buffer is released before it is reused. Cider is preferred
 when available (the FU32 source rule); otherwise the local album carousel opens.
 
 The next toggle in the carousel or its album track list returns to the cached
-Agents view or WPS when that was the origin. Other origins return to WPS. Normal
-MENU is separate: covers opened from WPS return to WPS, for both local and
-Cider albums. Cider covers opened inside the browser return to that browser
-level; MENU then ascends the browser to Home. Other entries retain their menu
-parent. The cover visit owns and clears its album
-and parent depths. It never leaves a synthetic Covers node in root history.
+Agents view or WPS when that was the origin. Other origins return to WPS.
+MENU from Now Playing returns to its parent. A cover visit opened by the
+toggle from Now Playing uses Now Playing's parent for MENU. A cover visit
+opened from Home, Music, or a Cider browser level goes back to that screen.
 Artist Portraits uses the same shared-carousel toggle exit to WPS.
 
 Each fresh Cider browser entry starts at its root and first row. Child-page

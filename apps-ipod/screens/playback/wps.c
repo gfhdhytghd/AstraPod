@@ -707,10 +707,14 @@ static long do_party_mode(long action)
 
 /* Album covers over the WPS, entered with the theme off. True when the WPS
  * is to be left, for the screen in *go_to. */
-static bool show_album_covers(long *go_to, bool *menu_covers)
+static bool show_album_covers(long *go_to, bool return_agents)
 {
-    int ret;
-    (void)menu_covers; /* A toggle resumes the existing WPS policy unchanged. */
+    if (cover_nav_playing())
+    {
+        gwps_leave_wps(true);
+        *go_to = cider_active() ? cider_browse_covers(false) : GO_TO_ALBUM_COVERS;
+        return true;
+    }
 
     if (cider_active())
     {
@@ -720,24 +724,27 @@ static bool show_album_covers(long *go_to, bool *menu_covers)
         return true;
     }
     gwps_leave_wps(false);
-    bool was_music = cover_nav_playing();
     cover_nav_begin(GO_TO_WPS);
     bool remote_return;
-    ret = album_covers_return(NULL, &remote_return);
-    (void)remote_return;
-    if (ret == GO_TO_PREVIOUS && !was_music)
+    int ret = album_covers_return(NULL, &remote_return);
+    if (ret == GO_TO_PREVIOUS)
     {
         cover_nav_finish();
         album_covers_cancel_resume();
+        if (!remote_return)
+        {
+            gwps_leave_wps(true);
+            *go_to = return_agents ? GO_TO_AGENTS : GO_TO_PREVIOUS;
+            return true;
+        }
     }
-    else if (ret != GO_TO_PREVIOUS && ret != GO_TO_WPS &&
-             ret != GO_TO_ALBUM_COVERS_TRACKS)
+    else if (ret != GO_TO_WPS && ret != GO_TO_ALBUM_COVERS_TRACKS)
     {
         cover_nav_finish();
         album_covers_cancel_resume();
     }
     if (ret == GO_TO_ALBUM_COVERS_TRACKS || ret == GO_TO_ROOT ||
-        ret == GO_TO_AGENTS)
+        ret == GO_TO_AGENTS || ret == GO_TO_WPS)
         *go_to = ret;
     /* audio stopped in Album covers; return to WPS
        via wpsscrn() which handles playlist resume */
@@ -748,6 +755,17 @@ static bool show_album_covers(long *go_to, bool *menu_covers)
 
     gwps_leave_wps(true);
     return true;
+}
+
+static void select_cover_source(void)
+{
+    bool was_remote = cider_active();
+    cider_remote_source();
+    if (cover_nav_active() && (!cover_nav_playing() || was_remote != cider_active()))
+    {
+        cover_nav_finish();
+        album_covers_cancel_resume();
+    }
 }
 
 /* Where the context menu or a button's action leaves Now Playing for, from
@@ -805,16 +823,16 @@ static inline int action_wpsab_single(long button)
  * In either way, call gwps_leave_wps(true), in order to restore the correct
  * "main screen" backdrops and statusbars
  */
-static long wps_run(bool return_agents, bool menu_covers);
-long gui_wps_show(bool return_agents, bool menu_covers)
+static long wps_run(bool return_agents);
+long gui_wps_show(bool return_agents)
 {
     if (!agents_nav_enter(AGENTS_NAV_WPS)) return GO_TO_PREVIOUS;
-    long result = wps_run(return_agents, menu_covers);
+    long result = wps_run(return_agents);
     agents_nav_leave(AGENTS_NAV_WPS);
     return result;
 }
 
-static long wps_run(bool return_agents, bool menu_covers)
+static long wps_run(bool return_agents)
 {
     long button = 0;
     bool restore = true;
@@ -845,12 +863,10 @@ static long wps_run(bool return_agents, bool menu_covers)
         else if (nav == AGENTS_NAV_COVERS)
         {
             agents_nav_take(nav);
-            cider_remote_source();
-            if (cover_nav_active()) { cover_nav_finish(); album_covers_cancel_resume(); }
-            cover_nav_begin(GO_TO_WPS);
+            select_cover_source();
             long go_to;
             theme_enabled = false;
-            if (show_album_covers(&go_to, &menu_covers)) return go_to;
+            if (show_album_covers(&go_to, return_agents)) return go_to;
             restore = true;
         }
         if (!cider_wps_poll()) return GO_TO_PREVIOUS;
@@ -969,7 +985,7 @@ static long wps_run(bool return_agents, bool menu_covers)
                 if (act == HOTKEY_ALBUM_COVERS)
                 {
                     theme_enabled = false;
-                    if (show_album_covers(&go_to, &menu_covers)) return go_to;
+                    if (show_album_covers(&go_to, return_agents)) return go_to;
                     restore = true;
                     break;
                 }
@@ -1153,31 +1169,16 @@ static long wps_run(bool return_agents, bool menu_covers)
                 break;
             /* menu key functions */
             case ACTION_WPS_MENU:
+                gwps_leave_wps(true);
                 if (cider_active())
                 {
-                    gwps_leave_wps(true);
-                    if (menu_covers) return cider_browse_covers(true);
+                    if (cover_nav_playing()) return cider_browse_covers(false);
                     return return_agents ? GO_TO_AGENTS : GO_TO_PREVIOUS;
                 }
-                if (cover_nav_playing() && album_covers_reopen_tracks())
-                {
-                    gwps_leave_wps(true);
-                    return GO_TO_ALBUM_COVERS_TRACKS;
-                }
-                if (menu_covers)
-                {
-                    long go_to;
-                    theme_enabled = false;
-                    if (show_album_covers(&go_to, &menu_covers)) return go_to;
-                    restore = true;
-                    break;
-                }
-                gwps_leave_wps(true);
-                if (return_agents)
-                    return GO_TO_AGENTS;
-                return global_settings.wps_menu_action == WPS_MENU_PREVIOUS
-                       ? GO_TO_PREVIOUS : GO_TO_ROOT;
-                break;
+                if (cover_nav_playing())
+                    return album_covers_reopen_tracks() ? GO_TO_ALBUM_COVERS_TRACKS
+                                                        : GO_TO_ALBUM_COVERS;
+                return return_agents ? GO_TO_AGENTS : GO_TO_PREVIOUS;
 
 
             case ACTION_WPS_QUICKSCREEN:
@@ -1232,14 +1233,10 @@ static long wps_run(bool return_agents, bool menu_covers)
 #endif
                 {
                     if (button == ACTION_AGENTS_REMOTE_COVERS || button == ACTION_AGENTS_COVERS)
-                    {
-                        cider_remote_source();
-                        if (cover_nav_active()) { cover_nav_finish(); album_covers_cancel_resume(); }
-                        cover_nav_begin(GO_TO_WPS);
-                    }
+                        select_cover_source();
                     long go_to;
                     theme_enabled = false;
-                    if (show_album_covers(&go_to, &menu_covers))
+                    if (show_album_covers(&go_to, return_agents))
                         return go_to;
                     restore = true;
                 }

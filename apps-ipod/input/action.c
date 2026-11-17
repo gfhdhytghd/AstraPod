@@ -578,6 +578,10 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
                                         button_status(), current_tick);
     if (*button == REMOTE_LYRICS_BUTTON)
     {
+        /* The gesture consumes the physical release across both views. */
+        last->button = BUTTON_REL;
+        last->action = ACTION_NONE;
+        last->wait_for_release = false;
         *button = ACTION_WPS_LYRICS;
         return true;
     }

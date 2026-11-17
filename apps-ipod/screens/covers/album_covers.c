@@ -683,13 +683,13 @@ static int album_enter(int index)
     long album_seek = carousel_idx.album_index[index].seek;
 
     pf_cfg.last_album = index;
-    album_save_tracks(index);
 
     if (global_settings.album_covers_on_select == ON_SELECT_PLAY_ALBUM)
     {
         db_summary_play_album_on_exit(&carousel_idx.album_index[index]);
         return CAROUSEL_PLAY_ALBUM;
     }
+    album_save_tracks(index);
 
     /* The drill-in only. The token says "the track list on screen is this
      * album's, and backing out of it comes straight back here", which playing
@@ -971,10 +971,7 @@ int album_covers_return(const char *selected_file, bool *remote_return)
          * call this directly, and would not know what to do with a sentinel
          * escaping to them. The context menu is here for the same reason. */
         if (ret == CAROUSEL_PLAY_ALBUM)
-        {
             ret = db_summary_play_pending() > 0 ? GO_TO_WPS : GO_TO_PREVIOUS;
-            if (ret == GO_TO_WPS) cover_nav_set_playing(true);
-        }
         if (ret != CAROUSEL_CONTEXT)
             break;
 
@@ -982,11 +979,9 @@ int album_covers_return(const char *selected_file, bool *remote_return)
         if (ret != GO_TO_PREVIOUS)
         {
             /* Back from Go to Artist's albums comes back to this album */
-            if (ret == GO_TO_WPS)
-                cover_nav_set_playing(true);
-            else if (ret == GO_TO_ALBUM_COVERS_TRACKS)
+            if (ret == GO_TO_ALBUM_COVERS_TRACKS)
                 cover_nav_finish(); /* Go to Artist keeps its own browser jump. */
-            else
+            else if (ret != GO_TO_WPS)
                 album_covers_cancel_resume();
             break;
         }
@@ -997,6 +992,11 @@ int album_covers_return(const char *selected_file, bool *remote_return)
     {
         if (remote_return) *remote_return = true;
         ret = GO_TO_PREVIOUS;
+    }
+    if (ret == GO_TO_WPS)
+    {
+        tracks_album_valid = false;
+        cover_nav_set_playing(true);
     }
     return ret;
 }

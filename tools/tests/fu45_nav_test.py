@@ -88,14 +88,14 @@ int main(void){
  for(int i=0;i<=GO_TO_CIDER;i++)items[i]=(struct root_item){generic,(void*)(intptr_t)i};
  items[GO_TO_CIDER]=(struct root_item){cider_scrn,0};
  for(key_remote=0;key_remote<2;key_remote++){
-  /* WPS-local helper: ordinary MENU stays in WPS, without a root jump. */
-  fresh(0,0);long go=999;bool menu_covers=false;
-  assert(!show_album_covers(&go,&menu_covers));assert(go==999&&covers_calls==1);released();
-  /* Native/Cider WPS -> covers -> MENU returns WPS and clears cover history. */
+  /* A local cover peek returns through the WPS parent on MENU. */
+  fresh(0,0);long go=999;
+  assert(show_album_covers(&go,false)&&go==GO_TO_PREVIOUS&&covers_calls==1);released();
+  /* Native/Cider WPS -> covers -> MENU leaves the visit. */
   fresh(1,0);cider_browse_covers(true);
-  assert(load_screen(GO_TO_CIDER)==GO_TO_WPS&&last_screen==GO_TO_ROOT&&nav_step==0);released();
-  /* The track child goes back to the same cover visit before MENU -> WPS. */
-  fresh(1,3);cider_browse_covers(true);assert(load_screen(GO_TO_CIDER)==GO_TO_WPS);
+  assert(load_screen(GO_TO_CIDER)==GO_TO_PREVIOUS&&last_screen==GO_TO_ROOT&&nav_step==0);released();
+  /* The track child goes back to the same cover visit before MENU exits. */
+  fresh(1,3);cider_browse_covers(true);assert(load_screen(GO_TO_CIDER)==GO_TO_PREVIOUS);
   assert(covers_calls==2&&nav_step==1&&last_screen==GO_TO_ROOT);released();
   /* Other entry points retain their ordinary menu/browser parent. */
   fresh(0,0);cover_nav_begin(GO_TO_DBBROWSER);assert(album_covers_scrn(NULL)==GO_TO_DBBROWSER);released();

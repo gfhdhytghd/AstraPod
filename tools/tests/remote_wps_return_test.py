@@ -15,21 +15,18 @@ menu = wps[a:b]
 source = r'''
 #include <assert.h>
 #include <stdbool.h>
-static bool cider_active(void){return false;}
-static int cider_browse_covers(bool home){(void)home;return 999;}
+static bool remote, covers, tracks;
+static bool cider_active(void){return remote;}
+static int cider_browse_covers(bool home){assert(!home);return 999;}
 #include <stdio.h>
 #define GO_TO_AGENTS 1
 #define GO_TO_PREVIOUS 2
-#define GO_TO_ROOT 3
+#define GO_TO_ALBUM_COVERS 3
 #define GO_TO_ALBUM_COVERS_TRACKS 13
-static bool cover_nav_playing(void) {return false;}
-static bool album_covers_reopen_tracks(void) {return false;}
+static bool cover_nav_playing(void) {return covers;}
+static bool album_covers_reopen_tracks(void) {return tracks;}
 #define ACTION_WPS_MENU 4
-#define WPS_MENU_PREVIOUS 5
-static struct {int wps_menu_action;}global_settings;
 static void gwps_leave_wps(bool on){assert(on);}
-static bool menu_covers=false,theme_enabled,restore;
-static bool show_album_covers(long*go,bool*flag){(void)go;(void)flag;return false;}
 static int menu(bool return_agents) {
  (void)return_agents;
  switch(ACTION_WPS_MENU) {
@@ -38,11 +35,15 @@ static int menu(bool return_agents) {
  return -1;
 }
 int main(void) {
- global_settings.wps_menu_action=0;
- assert(menu(true)==GO_TO_AGENTS);assert(menu(false)==GO_TO_ROOT);
- global_settings.wps_menu_action=WPS_MENU_PREVIOUS;
- assert(menu(true)==GO_TO_AGENTS);assert(menu(false)==GO_TO_PREVIOUS);
- puts("WPS Menu: Agents provenance overrides menu setting; other entries unchanged PASS");
+ for (int source=0;source<2;source++) {
+  remote=source;
+  assert(menu(true)==GO_TO_AGENTS);assert(menu(false)==GO_TO_PREVIOUS);
+ }
+ remote=false;covers=true;
+ assert(menu(false)==GO_TO_ALBUM_COVERS);
+ tracks=true;assert(menu(false)==GO_TO_ALBUM_COVERS_TRACKS);
+ remote=true;assert(menu(false)==999);
+ puts("WPS MENU: Agents and ordinary parents, local covers/tracks, and remote covers PASS");
 }
 '''
 (O/'return.c').write_text(source)
@@ -53,5 +54,5 @@ subprocess.run([str(O/'return')],check=True)
 # The flag is consumed before any no-audio/USB-audio early return.
 wrapper = root[root.index('static int wpsscrn('):root.index('static int wpsscrn(')+1300]
 assert wrapper.index('wps_return_agents = false') < wrapper.index('usb_audio_get_active()')
-assert root.count('gui_wps_show(return_agents, menu_covers)') == 3
-assert 'gui_wps_show(bool return_agents, bool menu_covers)' in wps
+assert root.count('gui_wps_show(return_agents)') == 3
+assert 'gui_wps_show(bool return_agents)' in wps

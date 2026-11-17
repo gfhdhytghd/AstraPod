@@ -9,13 +9,14 @@ def fn(t,n):
  end=m.end();depth=1
  while depth:depth+=(t[end]=='{')-(t[end]=='}');end+=1
  return t[m.start():end]
-assert 'cover_nav_playing() && album_covers_reopen_tracks()' in wps,'baseline WPS skips the album list'
+assert 'album_covers_reopen_tracks() ? GO_TO_ALBUM_COVERS_TRACKS' in wps or 'cover_nav_playing() && album_covers_reopen_tracks()' in wps
 nav=(R/'apps-ipod/input/agents_shortcut.c').read_text();nav=nav[nav.index('static bool cover_journey'):nav.index('static unsigned int nav_live')]
 a=wps.index('            case ACTION_WPS_MENU:');b=wps.index('            case ACTION_WPS_QUICKSCREEN:',a);menu=wps[a:b]
 a=root.index('            if (cover_nav_active())',root.index('        case GO_TO_ALBUM_COVERS_TRACKS:',root.index('        case GO_TO_ALBUM_COVERS_TRACKS:')+1));b=root.index('            if (ret_val == GO_TO_ROOT)',a);listing=root[a:b]
 pre=r'''
 #include <assert.h>
 #include <stdbool.h>
+static int cider_browse_covers(bool);
 static bool cider_active(void){return false;}
 static int cider_browse_covers(bool home){(void)home;return 999;}
 #include <stdio.h>
@@ -28,8 +29,9 @@ static int cider_browse_covers(bool home){(void)home;return 999;}
 #define GO_TO_ALBUM_COVERS_TRACKS 13
 #define ACTION_WPS_MENU 1
 #define WPS_MENU_PREVIOUS 1
-static struct {int wps_menu_action;}global_settings;
-static bool restore,theme_enabled,menu_covers,return_agents,cover_toggled_back;
+static struct {int wps_menu_action;}global_settings __attribute__((unused));
+static int last_screen=GO_TO_ROOT;
+static bool restore __attribute__((unused)),theme_enabled __attribute__((unused)),menu_covers __attribute__((unused)),return_agents,cover_toggled_back;
 static int covers,cover_result,clears,prepared;
 static long tracks_album_seek=42,tracks_artist_seek=7;
 static char tracks_album_name[32]="Selected album";
@@ -38,7 +40,7 @@ static bool tracks_album_valid=true,pf_resume_last_album;
 static void browser_db_enter_artist_album_tracks_on_next_load(long a,long b,const char*c){assert(a==42&&b==7&&!strcmp(c,"Selected album"));prepared++;}
 static void album_covers_cancel_resume(void){clears++;}
 static void gwps_leave_wps(bool on){assert(on);}
-static bool show_album_covers(long*g,bool*f){(void)g;(void)f;covers++;return false;}
+static bool __attribute__((unused)) show_album_covers(long*g,bool*f){(void)g;(void)f;covers++;return false;}
 static bool wait_for_album_tables(void){return true;}
 static int album_covers_return(const char*p,bool*r){(void)p;(void)r;return cover_result;}
 '''
@@ -48,10 +50,10 @@ int main(void){
   cover_nav_begin(origin);cover_result=GO_TO_ALBUM_COVERS_TRACKS;
   assert(album_covers_scrn(NULL)==GO_TO_ALBUM_COVERS_TRACKS&&cover_nav_active());
   assert(list_result(GO_TO_WPS)==GO_TO_WPS&&cover_nav_playing());
-  menu_covers=true;int before=covers;assert(menu()==GO_TO_ALBUM_COVERS_TRACKS&&covers==before);
+  int before=covers;assert(menu()==GO_TO_ALBUM_COVERS_TRACKS&&covers==before);
   assert(pf_resume_last_album&&pf_resume_album_index==19);
   assert(list_result(GO_TO_ROOT)==GO_TO_ALBUM_COVERS&&!cover_nav_playing());
-  cover_result=GO_TO_PREVIOUS;assert(album_covers_scrn(NULL)==origin&&!cover_nav_active());
+  cover_result=GO_TO_PREVIOUS;assert(album_covers_scrn(NULL)==(origin==last_screen?GO_TO_PREVIOUS:origin)&&!cover_nav_active());
  }
  cover_nav_begin(GO_TO_AGENTS);cover_nav_set_playing(true);cover_result=GO_TO_WPS;
  assert(album_covers_scrn(NULL)==GO_TO_WPS&&cover_nav_playing());
@@ -71,7 +73,7 @@ post=post.replace('assert(!cover_nav_active()&&prepared==18);','''assert(!cover_
   assert(hotkey_album_covers()==77&&left_for==destinations[i]);
   if(i==1||i==3)assert(!cover_nav_active());else cover_nav_finish();
  }''')
-code+='\nstatic int menu(void){switch(ACTION_WPS_MENU){'+menu+'}return restore?99:0;}\n'
+code+='\nstatic int menu(void){switch(ACTION_WPS_MENU){'+menu+'}return 0;}\n'
 code+='static int list_result(int ret_val){switch(0){case 0:'+listing+'}return ret_val;}\n'+post
 (O/'return.c').write_text(code)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie',str(O/'return.c'),'-o',str(O/'return')],check=True)

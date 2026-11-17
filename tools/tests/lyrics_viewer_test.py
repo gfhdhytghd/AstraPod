@@ -20,6 +20,8 @@ h=(r/'apps-ipod/viewers/lyric_viewer/lyrics.h').read_text();h=re.sub(r'^#include
 tokens=sorted(set(re.findall(r'\bACTION_[A-Z_0-9]+',source)))
 adapter=r'''
 #define HAVE_USB_PODLINK
+enum { AGENTS_NAV_AGENTS, AGENTS_NAV_COVERS };
+static void agents_nav_request(int screen, bool remote) { (void)screen; (void)remote; }
 #define HZ 100
 #define LCD_WIDTH 320
 #define LCD_HEIGHT 240

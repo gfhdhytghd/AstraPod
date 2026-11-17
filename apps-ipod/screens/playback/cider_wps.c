@@ -67,7 +67,8 @@ void cider_wps_update(struct wps_state *state)
 
         skin_request_full_update(WPS);
     }
-    if (!have_art && get_current_activity() == ACTIVITY_WPS)
+    if (!have_art && (get_current_activity() == ACTIVITY_WPS ||
+                      get_current_activity() == ACTIVITY_LYRICS))
         cider_request_art(key, "L");
     if (!have_art && cider_copy_art(key, "L", pixels, sizeof pixels))
     {
@@ -133,8 +134,8 @@ bool cider_wps_action(int action)
             case ACTION_WPS_SKIPPREV:
                 cider_control("previous", 0);
                 break;
-            case ACTION_WPS_BROWSE:
-                /* A-B repeat: like Rockbox's single marker key, SELECT sets
+            case ACTION_WPS_HOTKEY:
+                /* A-B repeat: SELECT+PLAY sets
                  * A, then B, then clears; the host holds the markers. */
                 if (cider_mode_get(CIDER_MODE_REPEAT) == CIDER_REPEAT_AB)
                     cider_control("ab-mark",

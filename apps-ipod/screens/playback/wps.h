@@ -43,6 +43,10 @@ struct wps_state *get_wps_state(void);
 /* A remote's seek, shown on the progress bar without drawing from the
  * caller's thread. A NULL track clears it. Position in milliseconds. */
 void wps_set_seek_preview(struct mp3entry *id3, unsigned long position);
+void wps_lyrics_seek(int action, void (*draw)(void));
+void wps_lyrics_skip(int direction);
+/* Render without a panel flush for the lyrics exit cross-fade. */
+void wps_lyrics_backdrop(void);
 
 /* in milliseconds */
 #define DEFAULT_SKIP_THRESH          3000l

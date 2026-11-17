@@ -1,1333 +1,540 @@
-/***************************************************************************
- * GNU General Public License (version 2+)
- *
- * The synchronised-lyrics screen. Draws three lines of the playing track --
- * the one being sung, full strength, between the one before and the one after
- * at reduced opacity -- and follows the track's elapsed time.
- *
- * How it is built:
- *   - A plain core screen, entered as lyric_viewer() and returning a GO_TO_*
- *     code. Reached from the WPS hotkey and the WPS context menu.
- *   - It owns the whole screen with the theme disabled. That is not only about
- *     chrome: opacity here is colour interpolation toward the background
- *     (color_blend), which is exact over a solid fill and wrong over a
- *     backdrop image.
- *   - The document model is lyrics.c. This file asks it what line N says and
- *     which line belongs at time T; it never parses anything.
- *
- * Waking: the loop sleeps until the next line is due rather than polling, so
- * a screen with nothing happening on it costs nothing. The cap on that sleep
- * is what notices a track change or the music stopping.
- *
- * The screen opens whatever is going on and says what it is waiting for --
- * nothing playing, or a track with no lyrics -- rather than refusing to open.
- * Both of those turn into lyrics on their own, so there is nothing to report
- * as a failure and nowhere useful to send the user back to.
- *
- * Input is read in CONTEXT_WPS, so the transport keys are the ones already in
- * the fingers from the WPS: left/right skip, Play pauses, the wheel is volume.
- *
- * The screen, wrapping, the slide, word highlighting and the settings; no
- * track-info or elapsed header, which the WPS behind it already shows.
- * Settings are read live through the LV_* macros below rather than
- * cached, so holding Menu and changing one takes effect on the next draw;
- * only the few that move the layout need lv_apply_settings().
- *
- * Parts, in order:
- *   - which lines are worth showing (gaps are not), and how much is sung
- *   - screen setup, colours, backlight and the fade
- *   - word wrap, and drawing
- *   - the slide
- *   - following playback: waking, reloading, skipping
- *   - the lyric_viewer() entry point
- ****************************************************************************/
-
+/* Animated Now Playing lyrics. GPL version 2 or later.
+ * The unused plugin arena supplies glyph, snapshot and composition frames.
+ * No audio buffer is stolen. Without snapshot space we fade through the
+ * gradient. No document pointers survive a draw or a track reload. */
 #include <stdbool.h>
 #include <string.h>
-#include "string-extra.h"    /* strlcpy */
+#include <stdio.h>
 #include "config.h"
-#include "file.h"            /* MAX_PATH */
-#include "kernel.h"          /* HZ, sleep, SYS_USB_CONNECTED */
-#include "lang.h"            /* str(), LANG_* */
-#include <stdio.h>           /* snprintf */
-#include "font.h"            /* font_get/load/unload, font_getstringsize */
-#include "rbpaths.h"         /* FONT_DIR */
-#include "rbunicode.h"       /* utf8decode */
-#include "diacritic.h"       /* IS_DIACRITIC */
+#include "system.h"
+#include "string-extra.h"
+#include "file.h"
+#include "kernel.h"
+#include "font.h"
+#include "rbpaths.h"
+#include "rbunicode.h"
+#include "diacritic.h"
+#include "lcd.h"
+#include "button.h"
+#include "backlight.h"
+#include "audio.h"
+#include "metadata.h"
+#include "settings/settings.h"
+#include "draw/screen_access.h"
+#include "draw/viewport.h"
+#include "draw/color.h"
 #include "draw/text_wrap.h"
-#include "backlight.h"       /* backlight_set_timeout* */
-#include "audio.h"           /* audio_current_track/next/prev/pause */
-#include "metadata.h"        /* struct mp3entry */
-#include "settings/settings.h"    /* global_settings */
-#include "draw/screen_access.h"   /* screens[] */
-#include "draw/viewport.h"        /* viewportmanager_theme_enable/undo */
-#include "draw/color.h"           /* color_blend */
-#include "skin/skin_albumart_color.h"  /* dynamic_colors_resolve */
-#include "widgets/splash.h"
+#include "draw/bmp.h"
+#include "draw/round_rect.h"
+#include "skin/skin_engine.h"
+#include "skin/skin_albumart_color.h"
 #include "input/action.h"
 #include "system/activity.h"
-#include "system/volume.h"       /* adjust_volume */
-#include "system/shutdown.h"      /* default_event_handler */
-#include "root_menu.h"       /* GO_TO_*, MENU_ATTACHED_USB */
-#include "widgets/menu.h"         /* do_menu */
-#include "screens/settings/exported_settings.h"  /* lyric_viewer_menu */
-#include "screens/playback/wps.h"  /* wps_do_playpause, DEFAULT_SKIP_THRESH */
+#include "system/shutdown.h"
+#include "system/app_buffer.h"
+#include "root_menu.h"
+#include "screens/playback/wps.h"
+#include "screens/playback/cider.h"
+#include "screens/playback/cider_wps.h"
+#include "screens/playback/cider_library.h"
 #include "lyrics.h"
+#include "lyrics_motion.h"
 #include "lyric_viewer.h"
 
-/* Inset on each edge. Not a setting: it exists so text does not touch the
- * bezel, which is not a matter of taste. */
-#define LV_MARGIN           8
-
-/* lyric_colour_mode values, matching the text viewer's. */
-enum {
-    LV_COLOUR_THEME = 0,
-    LV_COLOUR_INVERTED,
-    LV_COLOUR_BOW,           /* black on white */
-    LV_COLOUR_WOB            /* white on black */
-};
-
-/* lyric_align values. */
-enum { LV_ALIGN_LEFT = 0, LV_ALIGN_CENTRE, LV_ALIGN_RIGHT };
-
-/* lyric_anim is an index into this, not a duration -- see settings_list.c. */
-static const short lv_anim_ms[] = { 0, 150, 300, 500 };
-
-/* Longest line drawn. Nothing 320 pixels wide comes near this; it only has to
- * be enough that ellipsising has something to cut. */
-#define LV_ROW_MAX          512
-
-/* Most rows the current line may wrap to. At a ~18px row on a 240px screen
- * eight rows plus both neighbours still fit, so the clipping path below is
- * close to unreachable in practice -- it exists so a pathological line cannot
- * push the next one off the screen. */
-#define LV_MAX_ROWS         8
-
-/* Most rows a neighbour may wrap to. They fade with distance, so beyond a few
- * rows there is nothing left to see. */
-#define LV_SIDE_ROWS        4
-
-/* Cap on how long the loop sleeps, so a track change or the music stopping is
- * noticed even in the middle of a long instrumental. */
-#define LV_POLL             (HZ / 2)
-
-/* How long the slide takes. It runs over [T - lv.anim_ms, T], so it finishes
- * exactly as the incoming line is due rather than starting then -- the
- * difference between the screen feeling ahead of the music or behind it. */
-#define LV_ANIM_MS          (lv.anim_ms)
-
-/* Light the words of the current line as they are sung, for the files that
- * carry <mm:ss.xx> word timing. Files without it are unaffected -- they parse
- * as one untimed word, which is sung from the line's own first instant. */
-#define LV_HIGHLIGHT        (global_settings.lyric_highlight)
-
-/* Percentages of the way from the background to the foreground colour. */
-#define LV_OPACITY_PREV     (global_settings.lyric_prev_opacity)
-#define LV_OPACITY_NEXT     (global_settings.lyric_next_opacity)
-
-/* lv.shown before anything has been drawn. Distinct from LYRICS_NONE, which
- * is the real state "the song has not reached the first line yet". */
-#define LV_INDEX_UNSET      (-2)
-
-/* The track's name, standing in as the current line until the first lyric is
- * due: the song has started but nobody is singing yet, and the title says
- * more than an empty screen does.
- *
- * It gets an index of its own so that wrapping, the fade and the slide treat
- * it as just another line -- it slides up to become "previous" when the first
- * lyric arrives, with no special case anywhere. The model knows nothing about
- * it, because it is not in the file; lv_line_text() is the only place the two
- * meet. */
-#define LV_TITLE_INDEX      (-3)
-
-/* What the screen is doing. Only LV_SHOWING draws lyrics; the rest say what
- * they are waiting for and keep looking, because every one of them can turn
- * into LV_SHOWING without the user doing anything. */
-enum lv_state
-{
-    LV_WAITING = 0,     /* nothing playing, or its metadata not filled in */
-    LV_NO_LYRICS,       /* this track has none */
-    LV_NO_MEMORY,       /* the working buffer could not be allocated */
-    LV_SHOWING
-};
-
-static struct
-{
-    struct viewport vp;
-    int font;
-    int row;                 /* one line of text, including spacing */
-    int gap;                 /* vertical space between the three lines */
-    int width;               /* vp width less the margins */
-    unsigned fg, bg;
-    int user_font;           /* font_load handle, -1 when using the UI font */
-    int anim_ms;             /* the slide, resolved from lyric_anim */
-    int shown;               /* the line currently drawn */
-    int sung;                /* bytes of it already sung -- see lv_sung() */
-    char track[MAX_PATH];    /* the track the loaded lyrics belong to */
-    enum lv_state state;
-    char name[MAX_PATH];     /* what to call the track in a message */
-    char font_error[MAX_PATH]; /* the font that would not load, if any */
+#define LV_PIXELS (LCD_WIDTH * LCD_HEIGHT)
+#define LV_FRAME (LV_PIXELS * sizeof(fb_data))
+#define LV_TICKS(ms) MAX(1, ((ms) * HZ + 999) / 1000)
+#define LV_ROWS 3
+#define LV_TEXT 800
+static struct {
+    struct viewport vp, mask_vp;
+    struct frame_buffer_t mask_fb;
+    fb_data *mask, *snapshot, *layer;
+    int fonts[3], small, large;
+    unsigned bg, bottom, fg, accent;
+    struct lyrics_motion scroll, pill;
+    struct lyrics_mode mode;
+    char track[MAX_PATH], title[MAX_PATH];
+    long elapsed, length;
+    uint32_t changed, remote_deadline, art_gen;
+    int remote_rows;
+    bool remote, pending, held, paused, track_fade, initial, snapshot_wps, claimed;
 } lv;
-
-/* What line `index` says: a lyric, or the track's name for the title slot. */
-static const char *lv_line_text(int index)
+static fb_data *lv_frame(void)
 {
-    if (index == LV_TITLE_INDEX)
-        return lv.name[0]? lv.name: NULL;
-    return lyrics_text(index);
+    lcd_set_viewport(NULL);
+    return FBADDR(0, 0);
 }
-
-/* True if a line has anything worth showing. A .lrc marks an instrumental gap
- * with a timestamp and no words; such a line exists to say when the line
- * before it stops, so drawing one would blank the middle of the screen and
- * push the upcoming words out of view. They are skipped everywhere below --
- * the model keeps them, because their timing is what bounds the line before. */
-static bool lv_has_words(int index)
+static void *lv_mask_address(int x, int y) { return lv.mask + y * LCD_WIDTH + x; }
+/* RGB565 interpolation, without per-pixel colour-space conversions. */
+static fb_data lv_mix(fb_data a, fb_data b, unsigned p)
 {
-    const char *t = lv_line_text(index);
-
-    if (!t)
-        return false;
-    while (*t && (unsigned char)*t <= ' ')
-        t++;
-    return *t != '\0';
+    return (((((a & 0xf800) * (256 - p) + (b & 0xf800) * p) >> 8) & 0xf800)
+          | ((((a & 0x07e0) * (256 - p) + (b & 0x07e0) * p) >> 8) & 0x07e0)
+          | ((((a & 0x001f) * (256 - p) + (b & 0x001f) * p) >> 8) & 0x001f));
 }
-
-/* The line to draw for raw index `index`: itself, or the most recent one with
- * words if it is a gap. Before the first lyric the title stands in. */
-static int lv_shown_index(int index)
+static unsigned lv_background(int y) { return color_blend(lv.bg, lv.bottom, y * 256 / LCD_HEIGHT); }
+static int lv_font(int slot)
 {
-    while (index >= 0 && !lv_has_words(index))
-        index--;
-    if (index >= 0)
-        return index;
-    return lv_has_words(LV_TITLE_INDEX)? LV_TITLE_INDEX: LYRICS_NONE;
+    return lv.fonts[slot] >= 0 ? lv.fonts[slot] : screens[SCREEN_MAIN].getuifont();
 }
-
-/* Nearest line with words strictly after (dir 1) or before (dir -1) `index`,
- * with the title sitting immediately before the first lyric. */
-static int lv_step(int index, int dir)
+static bool lv_art_colour(unsigned *dominant)
 {
-    int n = lyrics_count();
-    int i;
-
-    if (dir > 0)
+    int handle = wps_art_handle(0);
+    struct bitmap *bmp;
+    if (handle < 0 || !wps_art_pin(handle, true)) return false;
+    bool have = wps_art_bitmap(handle, &bmp) && bmp->width > 0 && bmp->height > 0;
+    if (have)
     {
-        for (i = (index == LV_TITLE_INDEX)? 0: index + 1; i < n; i++)
-            if (i >= 0 && lv_has_words(i))
-                return i;
-        return LYRICS_NONE;
+        /* Quantised modal colour, sampled before unpinning the movable art.
+         * Independent of the theme's dynamic-colour switch. */
+        unsigned short bins[64] = {0};
+        unsigned best = 0, winner = 0;
+        const fb_data *data = (const fb_data *)bmp->data;
+        for (int y = 0; y < 16; y++) for (int x = 0; x < 16; x++)
+        {
+            unsigned c = data[(y * bmp->height / 16) * bmp->width + x * bmp->width / 16];
+            int bin = ((c >> 10) & 0x30) | ((c >> 7) & 0x0c) | ((c >> 3) & 3);
+            if (++bins[bin] > best) { best = bins[bin]; winner = c; }
+        }
+        *dominant = winner;
     }
-
-    if (index == LV_TITLE_INDEX)
-        return LYRICS_NONE;         /* nothing before the title */
-
-    for (i = index - 1; i >= 0; i--)
-        if (lv_has_words(i))
-            return i;
-    return lv_has_words(LV_TITLE_INDEX)? LV_TITLE_INDEX: LYRICS_NONE;
+    wps_art_pin(handle, false);
+    return have;
 }
-
-/* How many bytes of line `index` have been sung by `elapsed`: the offset of
- * the first word that has not started yet.
- *
- * lyrics_word_text() hands back a *tail* of the line, so a word's offset is
- * what the line has left over once that tail is taken off. A word time of -1
- * means "starts with the line", which is what a file with no word timing
- * gives for its single word -- so such a line reads as wholly sung from its
- * first instant and needs no special case here. */
-static int lv_sung(int index, long elapsed)
+static void lv_colours(void)
 {
-    const char *text = lv_line_text(index);
-    int n = lyrics_word_count(index);
-    int w;
-
-    if (!text || !LV_HIGHLIGHT)
-        return text? (int)strlen(text): 0;
-
-    for (w = 0; w < n; w++)
+    unsigned dominant, vivid;
+    lv.bg = global_settings.bg_color; lv.fg = global_settings.fg_color;
+    if (global_settings.lyric_colour_mode == 1)
+    { lv.bg = global_settings.fg_color; lv.fg = global_settings.bg_color; }
+    if (global_settings.lyric_colour_mode == 2) { lv.bg = LCD_WHITE; lv.fg = LCD_BLACK; }
+    if (global_settings.lyric_colour_mode == 3) { lv.bg = LCD_BLACK; lv.fg = LCD_WHITE; }
+    lv.accent = dynamic_colors_resolve(global_settings.fg_color);
+    if (!global_settings.lyric_colour_mode && lv_art_colour(&dominant))
     {
-        long t = lyrics_word_time(index, w);
-        const char *tail;
-
-        if (t < 0)
-            t = lyrics_time(index);
-        if (t <= elapsed)
-            continue;
-
-        tail = lyrics_word_text(index, w);
-        return tail? (int)(strlen(text) - strlen(tail)): 0;
+        unsigned unused;
+        if (!dynamic_colors_roles(&unused, &vivid)) vivid = dominant;
+        lv.bg = color_blend(LCD_BLACK, dominant, 90);
+        lv.fg = LCD_WHITE; lv.accent = color_blend(vivid, LCD_WHITE, 80);
     }
-    return (int)strlen(text);
+    lv.bottom = color_blend(LCD_BLACK, lv.bg, 28);
 }
-
-/* When the next word of line `index` starts, or 0 if there is none to wait
- * for. Drives the wait, so the highlight moves on the word rather than
- * whenever something else happens to wake the screen. */
-static long lv_next_word(int index, long elapsed)
+static void lv_backlight(bool hold)
 {
-    int n = lyrics_word_count(index);
-    int w;
-
-    if (index == LYRICS_NONE || !LV_HIGHLIGHT)
-        return 0;
-
-    for (w = 0; w < n; w++)
-    {
-        long t = lyrics_word_time(index, w);
-        if (t >= 0 && t > elapsed)
-            return t;
-    }
-    return 0;
-}
-
-/* ---------------------------------------------------------------------------
- * Screen setup and the fade
- * ------------------------------------------------------------------------ */
-
-/* Re-read the theme colours through the dynamic-colour resolver, which swaps
- * in the palette taken from the album art when that feature is on and the
- * colour is one of the theme's own.
- *
- * Called when the lyrics are loaded and again on a track change -- i.e. when
- * the album art, and so the palette, can actually differ. Deliberately not on
- * every redraw: the resolver interpolates while a fade is running, and
- * re-resolving per frame would put that work inside the animation loop for a
- * change nobody asked to see mid-song. */
-static void lv_refresh_colours(void)
-{
-    unsigned fg = global_settings.fg_color;
-    unsigned bg = global_settings.bg_color;
-
-    switch (global_settings.lyric_colour_mode)
-    {
-        case LV_COLOUR_INVERTED:
-            fg = global_settings.bg_color;
-            bg = global_settings.fg_color;
-            break;
-        case LV_COLOUR_BOW:
-            fg = LCD_BLACK; bg = LCD_WHITE;
-            break;
-        case LV_COLOUR_WOB:
-            fg = LCD_WHITE; bg = LCD_BLACK;
-            break;
-        case LV_COLOUR_THEME:
-        default:
-            break;
-    }
-
-    /* Only the theme's own colours follow the album art -- an explicitly
-     * chosen black-on-white is a choice, not a default to be overridden.
-     * dynamic_colors_resolve() already only acts on colours that match the
-     * theme, so passing the fixed pairs through it would be a no-op; it is
-     * skipped to say so. */
-    if (global_settings.lyric_colour_mode == LV_COLOUR_THEME)
-    {
-        fg = dynamic_colors_resolve(fg);
-        bg = dynamic_colors_resolve(bg);
-    }
-
-    lv.fg = fg;
-    lv.bg = bg;
-    lv.vp.fg_pattern = fg;
-    lv.vp.bg_pattern = bg;
-}
-
-/* Load the font override if one is set, else fall back to the UI font.
- * Unload-then-load keeps re-applying the same file leak-free (font_load is
- * refcounted). Uses the resolved UI font id, never the FONT_UI sentinel --
- * see the long note on tv_apply_font() in the text viewer for why. */
-static void lv_apply_font(void)
-{
-    int fid = -1;
-
-    if (lv.user_font >= 0)
-    {
-        font_unload(lv.user_font);
-        lv.user_font = -1;
-    }
-
-    lv.font_error[0] = '\0';
-
-    if (global_settings.lyric_font_file[0])
-    {
-        char buf[MAX_PATH];
-        snprintf(buf, sizeof buf, FONT_DIR "/%s.fnt",
-                 global_settings.lyric_font_file);
-        fid = font_load(buf);
-        /* A font that will not load otherwise falls back to the UI font in
-         * silence, which reads as "the setting does nothing". font_load()
-         * fails for a missing file, a full font-slot table, or no buflib room
-         * -- and says which by not saying anything, so report the attempt. */
-        if (fid < 0)
-            strlcpy(lv.font_error, buf, sizeof lv.font_error);
-    }
-
-    lv.user_font = fid;
-    lv.font = (fid >= 0)? fid: screens[SCREEN_MAIN].getuifont();
-    lv.vp.font = lv.font;
-}
-
-/* (Re)read everything the settings control. Called on entry and again after
- * the menu, so a change takes effect without leaving the screen. */
-static void lv_apply_settings(void)
-{
-    unsigned int idx = global_settings.lyric_anim;
-
-    lv_apply_font();
-    lv_refresh_colours();
-
-    lv.anim_ms = (idx < ARRAYLEN(lv_anim_ms))? lv_anim_ms[idx]: 0;
-    lv.row = font_get(lv.font)->height + global_settings.lyric_line_spacing;
-    lv.gap = lv.row / 2;
-    if (lv.gap < 6)
-        lv.gap = 6;
-    lv.width = lv.vp.width - 2 * LV_MARGIN;
-}
-
-static void lv_setup_screen(void)
-{
-    /* Theme off hands back a full-screen viewport and stops the skin engine
-     * repainting the status bar over us between draws -- see the long comment
-     * on tv_setup_screen() in the text viewer, which hit exactly that. */
-    viewportmanager_theme_enable(SCREEN_MAIN, false, &lv.vp);
-    lv_apply_settings();
-}
-
-/* Keep the screen lit, and put the user's timeouts back afterwards. Matches
- * cr_backlight_ignore_timeout() in credits.c -- a timeout of 0 means "never",
- * and only a timeout that was actually running is overridden. What is held is
- * tracked rather than read off the setting, so turning the setting off in the
- * menu still gives the timeouts back. */
-static void lv_backlight_hold(bool hold)
-{
-    static bool held;
-
     hold = hold && global_settings.lyric_backlight;
-    if (hold == held)
-        return;
-    held = hold;
-
-    if (hold)
-    {
-        if (global_settings.backlight_timeout > 0)
-            backlight_set_timeout(0);
-        if (global_settings.backlight_timeout_plugged > 0)
-            backlight_set_timeout_plugged(0);
-    }
-    else
-    {
-        backlight_set_timeout(global_settings.backlight_timeout);
-        backlight_set_timeout_plugged(
-            global_settings.backlight_timeout_plugged);
-    }
+    if (hold == lv.held) return;
+    lv.held = hold;
+    backlight_set_timeout(hold && global_settings.backlight_timeout > 0 ? 0 : global_settings.backlight_timeout);
+    backlight_set_timeout_plugged(hold && global_settings.backlight_timeout_plugged > 0 ? 0 : global_settings.backlight_timeout_plugged);
 }
-
-/* Wipe the screen to our own background. The WPS leaves without restoring the
- * theme (HOTKEY_FLAG_NOSBS), so until this runs the screen still holds its
- * pixels. */
-static void lv_clear(void)
+static void lv_ellipsize(char *text, int font, int width)
 {
-    struct screen *d = &screens[SCREEN_MAIN];
-    struct viewport *last = d->set_viewport(&lv.vp);
-
-    d->clear_viewport();
-    d->update_viewport();
-    d->set_viewport(last);
-}
-
-/* `opacity` per cent of the way from the background to the foreground. There
- * is no alpha channel here: text is drawn in an interpolated colour, which is
- * exact against a solid background and stays consistent across the blended
- * edge of an antialiased glyph. */
-static unsigned lv_fade(int opacity)
-{
-    return color_blend(lv.bg, lv.fg, opacity * 256 / 100);
-}
-
-/* ---------------------------------------------------------------------------
- * Drawing
- * ------------------------------------------------------------------------ */
-
-/* Cut `line` down so that it plus "..." fits maxwidth, then append the "...".
- * Modelled on wt_ellipsize() in skin/skin_render.c. */
-static void lv_ellipsize(char *line, int size, struct font *pf, int maxwidth)
-{
-    const unsigned char *start = (const unsigned char *)line;
-    const unsigned char *p = start;
-    int ellw = 3 * font_get_width(pf, '.');
-    int width = 0;
-    int cut = 0;                            /* bytes that fit, plus the "..." */
-    ucschar_t ch;
-
+    struct font *pf = font_get(font);
+    const unsigned char *p = (const unsigned char *)text;
+    int w = 0, cut = 0, dots = font_get_width(pf, '.') * 3;
     while (*p)
     {
-        const unsigned char *prev = p;
-        p = utf8decode(p, &ch);
-        if (IS_DIACRITIC(ch))
-            continue;
-        if (width + font_get_width(pf, ch) + ellw > maxwidth)
-        {
-            p = prev;
-            break;
-        }
-        width += font_get_width(pf, ch);
-        cut = (int)(p - start);
+        ucschar_t ch;
+        const unsigned char *next = utf8decode(p, &ch);
+        if (!IS_DIACRITIC(ch)) w += font_get_width(pf, ch);
+        if (w + dots > width) break;
+        cut = next - (const unsigned char *)text; p = next;
     }
-    if (!*p)
-        return;                             /* the whole line fitted */
-
-    if (cut + 4 <= size)
-        strcpy(line + cut, "...");
-    else if (size >= 4)
-        strcpy(line + size - 4, "...");
+    if (*p) strcpy(text + cut, "...");
 }
-
-/* ---- word wrap -------------------------------------------------------- */
-
-/* One wrapped row: a span of the model's string, not a copy of it. */
-struct lv_row
+struct lv_row { const char *text; int length; };
+static int lv_wrap(const char *text, int font, struct lv_row rows[LV_ROWS])
 {
-    const char *start;
-    int len;
-};
-
-/* Break `text` into rows no wider than `maxwidth`, filling `rows`. Returns how
- * many were used, and sets *cut if the text ran past `max` rows. Breaks may
- * fall after punctuation as well as at spaces: CJK is written without spaces,
- * so with spaces alone a Japanese or Chinese lyric would only ever break at
- * the hard edge of the screen. */
-static int lv_wrap(const char *text, int maxwidth, struct lv_row *rows,
-                   int max, bool *cut_off)
-{
-    struct font *pf = font_get(lv.font);
     int n = 0;
-
-    *cut_off = false;
-    font_lock(lv.font, true);
-    do                                  /* "" is one empty row */
-    {
+    do {
         const char *end;
-
-        if (n == max)
-        {
-            *cut_off = true;
-            break;
-        }
-        rows[n].start = text;
-        text = text_wrap_next_punct(text, maxwidth, pf, &end);
-        rows[n].len = (int)(end - rows[n].start);
-        n++;
-    } while (*text);
-    font_lock(lv.font, false);
-
+        rows[n].text = text;
+        text = text_wrap_next_punct(text, LCD_WIDTH - 32, font_get(font), &end);
+        rows[n].length = end - rows[n].text; n++;
+    } while (*text && n < LV_ROWS);
     return n;
 }
-
-/* Copy a row into the scratch buffer, trimming the space a break left on its
- * end. `to_end` takes everything from the row's start to the end of the line
- * instead, which is what a truncated last row wants: ellipsising that gives
- * "...", where ellipsising the row alone would have nothing to cut. */
-static void lv_row_text(char *buf, size_t size, const struct lv_row *row,
-                        bool to_end)
+/* Draw into an independent mask, then alpha-composite both bitmap sizes.
+ * Their overlap cross-fades too; no glyph replacement at a size threshold. */
+static void lv_text(const char *text, int font, int x, int y, int opacity,
+                    int sung_width, int unsung, bool edges)
 {
-    const char *s = row->start;
-    size_t len = to_end? strlen(s): (size_t)row->len;
-
-    while (len && (s[len - 1] == ' ' || s[len - 1] == '\t'))
-        len--;
-    if (len > size - 1)
-        len = size - 1;
-    memcpy(buf, s, len);
-    buf[len] = '\0';
-}
-
-/* Where a row `w` wide starts, for the chosen alignment. */
-static int lv_x(int w)
-{
-    switch (global_settings.lyric_align)
+    int h = font_get(font)->height, top = MAX(0, y), bot = MIN(LCD_HEIGHT, y + h);
+    if (opacity <= 0 || bot <= top) return;
+    if (!lv.mask)
     {
-        case LV_ALIGN_LEFT:  return LV_MARGIN;
-        case LV_ALIGN_RIGHT: return LV_MARGIN + lv.width - w;
-        case LV_ALIGN_CENTRE:
-        default:             return LV_MARGIN + (lv.width - w) / 2;
+        lcd_set_viewport(&lv.vp); lcd_setfont(font); lcd_set_drawmode(DRMODE_FG);
+        lcd_set_foreground(color_blend(lv_background(MAX(0, y)), lv.fg, opacity));
+        lcd_putsxy(x, y, text); return;
     }
-}
-
-/* Draw a prepared string, aligned, with its top at `y`. */
-static void lv_draw_text(struct screen *d, const char *text, int y, int opacity)
-{
-    int w, h;
-
-    font_getstringsize((const unsigned char *)text, &w, &h, lv.font);
-    d->set_foreground(lv_fade(opacity));
-    d->putsxy(lv_x(w), y, (const unsigned char *)text);
-}
-
-/* The same, but with the first `cut` bytes drawn at `op_sung` and the rest at
- * `op_rest`. The row is still centred on its whole width, and the two pieces
- * are laid end to end -- the fonts here do not kern, so the halves measure the
- * same as the whole. */
-static void lv_draw_split(struct screen *d, const char *text, int cut,
-                          int y, int op_sung, int op_rest)
-{
-    static char head[LV_ROW_MAX];
-    int w, h, wsung = 0, x;
-
-    font_getstringsize((const unsigned char *)text, &w, &h, lv.font);
-    x = lv_x(w);
-
-    if (cut > 0)
+    memset(lv.mask + top * LCD_WIDTH, 0, (bot - top) * LCD_WIDTH * sizeof(fb_data));
+    lcd_set_viewport(&lv.mask_vp); lcd_setfont(font);
+    lcd_set_foreground(LCD_WHITE); lcd_set_drawmode(DRMODE_FG); lcd_putsxy(x, y, text);
+    fb_data *frame = lv_frame();
+    for (int r = top; r < bot; r++)
     {
-        if (cut > (int)sizeof head - 1)
-            cut = (int)sizeof head - 1;
-        memcpy(head, text, (size_t)cut);
-        head[cut] = '\0';
-        font_getstringsize((const unsigned char *)head, &wsung, &h, lv.font);
-        d->set_foreground(lv_fade(op_sung));
-        d->putsxy(x, y, (const unsigned char *)head);
-    }
-
-    if (text[cut])
-    {
-        d->set_foreground(lv_fade(op_rest));
-        d->putsxy(x + wsung, y, (const unsigned char *)text + cut);
-    }
-}
-
-/* The screen when there are no lyrics to draw: what it is waiting for, and
- * which track it is waiting about. Named rather than left blank, because
- * every one of these states can become lyrics without the user doing
- * anything, and a bare screen would not say that. */
-static void lv_draw_status(struct screen *d)
-{
-    static char buf[LV_ROW_MAX];
-    int y = (lv.vp.height - lv.row) / 2;
-    int msg = (lv.state == LV_WAITING)?   LANG_LYRICS_WAITING:
-              (lv.state == LV_NO_MEMORY)? LANG_OUT_OF_MEMORY:
-                                          LANG_LYRICS_NONE;
-
-    if (!lv.name[0])
-    {
-        lv_draw_text(d, (const char *)str(msg), y, 100);
-        return;
-    }
-
-    y -= (lv.row + lv.gap) / 2;
-    lv_draw_text(d, (const char *)str(msg), y, 100);
-
-    strlcpy(buf, lv.name, sizeof buf);
-    lv_ellipsize(buf, sizeof buf, font_get(lv.font), lv.width);
-    lv_draw_text(d, buf, y + lv.row + lv.gap, LV_OPACITY_NEXT);
-}
-
-/* Opacity for a neighbour row `d` rows away from the current block: the
- * nearest row gets the line's full share, and each row beyond it drops to two
- * fifths, so a wrapped neighbour fades away from the middle of the screen
- * rather than ending on a hard edge. */
-static int lv_falloff(int base, int d)
-{
-    while (--d > 0)
-        base = base * 2 / 5;
-    return base;
-}
-
-/* Opacity of row `r` of an `n`-row line sitting `rel` places from the middle:
- * 0 is the current line, -1 the one above it, +1 the one below. Further out
- * than that is off the layout and invisible -- which is what gives the
- * outgoing line something to fade to and the incoming line something to fade
- * from. For the line above, its *last* row is the one nearest the middle. */
-static int lv_row_opacity(int rel, int r, int n)
-{
-    if (rel == 0)
-        return 100;
-    if (rel == -1)
-        return lv_falloff(LV_OPACITY_PREV, n - r);
-    if (rel == 1)
-        return lv_falloff(LV_OPACITY_NEXT, r + 1);
-    return 0;
-}
-
-/* The same, split: what a row's sung and not-yet-sung halves are worth.
- *
- * Only the current line has halves -- a neighbour is not being sung, so both
- * of its values are the one opacity. This is what stops a word-timed line
- * arriving at full strength and being dimmed a moment later: unsung text is
- * the lighter colour *while the line moves in*, not after it lands. A file
- * with no word timing reports itself wholly sung, so nothing changes for it. */
-static void lv_row_ops(int rel, int r, int n, int *sung, int *rest)
-{
-    *sung = *rest = lv_row_opacity(rel, r, n);
-    if (rel == 0)
-        *rest = LV_OPACITY_NEXT;
-}
-
-/* Draw a neighbour line: wrapped like the current one, its rows fading with
- * distance and stopping at the screen edge. `dir` is -1 for the line above
- * (drawn upwards from `edge`) and +1 for the one below. */
-static void lv_draw_neighbour(struct screen *d, int index, int edge, int dir,
-                              int base)
-{
-    static struct lv_row rows[LV_SIDE_ROWS];
-    static char buf[LV_ROW_MAX];
-    bool cut_off;
-    int n, i;
-
-    if (index == LYRICS_NONE)
-        return;
-
-    n = lv_wrap(lv_line_text(index), lv.width, rows, LV_SIDE_ROWS, &cut_off);
-
-    for (i = 0; i < n; i++)
-    {
-        /* row nearest the current block is distance 1; for the line above,
-         * that is its *last* row */
-        int row = (dir < 0)? n - 1 - i: i;
-        int dist = i + 1;
-        int y = (dir < 0)? edge - dist * lv.row: edge + i * lv.row;
-        bool last = cut_off && row == n - 1;
-
-        if (y < LV_MARGIN || y + lv.row > lv.vp.height - LV_MARGIN)
-            break;                      /* off the screen; the rest would be */
-
-        lv_row_text(buf, sizeof buf, &rows[row], last);
-        if (last)
-            lv_ellipsize(buf, sizeof buf, font_get(lv.font), lv.width);
-        lv_draw_text(d, buf, y, lv_falloff(base, dist));
-    }
-}
-
-/* Where the top of the current block sits: centred, then shifted up only far
- * enough to keep the start of the next line on screen, then clamped. */
-static int lv_block_top(int nrows, bool next_present)
-{
-    int top = (lv.vp.height - nrows * lv.row) / 2;
-
-    if (next_present)
-    {
-        int over = (top + nrows * lv.row + lv.gap + lv.row)
-                 - (lv.vp.height - LV_MARGIN);
-        if (over > 0)
-            top -= over;
-    }
-    return (top < LV_MARGIN)? LV_MARGIN: top;
-}
-
-/* ---- the slide ---------------------------------------------------------
- *
- * A transition is the same four lines seen in two layouts: the one centred
- * before, and the one centred after. Every line's height is the same in both
- * -- the neighbours wrap just as the current line does -- so each line
- * simply moves from where it was to where it is going, and its rows fade
- * between the opacities the two layouts give them.
- *
- * Falling out of that: the line leaving the top has no place in the target
- * layout, so it keeps travelling upwards and fades to nothing; the line
- * arriving at the bottom has no place in the source, so it does the reverse.
- * Neither needs a special case.
- */
-
-enum { LV_SLOT_OUT = 0, LV_SLOT_FROM, LV_SLOT_TO, LV_SLOT_IN, LV_SLOTS };
-
-struct lv_slot
-{
-    int index;
-    struct lv_row rows[LV_MAX_ROWS];
-    int nrows;
-    bool cut_off;
-    int sung;                   /* bytes of the line already sung */
-    int y_src, y_dst;
-    int rel_src, rel_dst;       /* place in each layout; see lv_row_opacity */
-};
-
-static struct
-{
-    bool active;
-    long start, end;            /* ticks */
-    int band_top, band_bot;     /* what the last frame painted */
-    struct lv_slot slot[LV_SLOTS];
-} anim;
-
-static int lv_lerp(int a, int b, int p)
-{
-    return a + (b - a) * p / 256;
-}
-
-/* Wall clock, never a frame count: a slow frame then shortens the animation
- * instead of stretching it, which is what keeps it landing on the beat when
- * the codec is taking the CPU. Eased out, so it moves off smartly and
- * settles. */
-static int lv_anim_progress(void)
-{
-    long span = anim.end - anim.start;
-    long done;
-    int p;
-
-    if (span <= 0 || TIME_AFTER(current_tick, anim.end))
-        return 256;
-
-    done = current_tick - anim.start;
-    p = (done <= 0)? 0: (int)(done * 256 / span);
-    if (p > 256)
-        p = 256;
-    return 256 - ((256 - p) * (256 - p)) / 256;
-}
-
-/* Wrap the four lines and work out where each sits in both layouts. Done once
- * per transition: the text cannot change while it runs, and re-wrapping four
- * lines every frame is work the frame budget has not got. */
-static void lv_anim_build(int from, int to)
-{
-    struct lv_slot *s = anim.slot;
-    int idx[LV_SLOTS];
-    int top_src, top_dst;
-    int i;
-
-    idx[LV_SLOT_OUT]  = lv_step(from, -1);
-    idx[LV_SLOT_FROM] = from;
-    idx[LV_SLOT_TO]   = to;
-    idx[LV_SLOT_IN]   = lv_step(to, 1);
-
-    for (i = 0; i < LV_SLOTS; i++)
-    {
-        s[i].index = idx[i];
-        s[i].nrows = 0;
-        s[i].cut_off = false;
-        s[i].sung = 0;
-        if (idx[i] != LYRICS_NONE)
+        int a = opacity;
+        if (edges) a = a * lyrics_edge_opacity(r, LCD_HEIGHT) / 256;
+        for (int c = MAX(0, x); c < LCD_WIDTH - 16; c++)
         {
-            s[i].nrows = lv_wrap(lv_line_text(idx[i]), lv.width,
-                                 s[i].rows, LV_MAX_ROWS, &s[i].cut_off);
-            /* The slide finishes exactly as `to` falls due, so for its whole
-             * length the outgoing line is sung and the incoming one is not.
-             * Fixed here rather than re-read per frame. */
-            s[i].sung = (i <= LV_SLOT_FROM)?
-                        (int)strlen(lv_line_text(idx[i])): 0;
+            unsigned mask = lv.mask[r * LCD_WIDTH + c];
+            if (!mask) continue;
+            int alpha = a * ((mask >> 5) & 63) / 63;
+            if (sung_width >= 0 && c - x >= sung_width) alpha = alpha * unsung / 256;
+            fb_data *pixel = frame + r * LCD_WIDTH + c;
+            *pixel = lv_mix(*pixel, lv.fg, alpha);
         }
     }
-
-    /* source: `from` is the current line */
-    top_src = lv_block_top(s[LV_SLOT_FROM].nrows,
-                           s[LV_SLOT_TO].index != LYRICS_NONE);
-    s[LV_SLOT_FROM].y_src = top_src;
-    s[LV_SLOT_OUT].y_src  = top_src - lv.gap - s[LV_SLOT_OUT].nrows * lv.row;
-    s[LV_SLOT_TO].y_src   = top_src + s[LV_SLOT_FROM].nrows * lv.row + lv.gap;
-    s[LV_SLOT_IN].y_src   = s[LV_SLOT_TO].y_src
-                          + s[LV_SLOT_TO].nrows * lv.row + lv.gap;
-
-    /* target: `to` is */
-    top_dst = lv_block_top(s[LV_SLOT_TO].nrows,
-                           s[LV_SLOT_IN].index != LYRICS_NONE);
-    s[LV_SLOT_TO].y_dst   = top_dst;
-    s[LV_SLOT_FROM].y_dst = top_dst - lv.gap - s[LV_SLOT_FROM].nrows * lv.row;
-    s[LV_SLOT_OUT].y_dst  = s[LV_SLOT_FROM].y_dst
-                          - lv.gap - s[LV_SLOT_OUT].nrows * lv.row;
-    s[LV_SLOT_IN].y_dst   = top_dst + s[LV_SLOT_TO].nrows * lv.row + lv.gap;
-
-    s[LV_SLOT_OUT].rel_src  = -1;  s[LV_SLOT_OUT].rel_dst  = -2;
-    s[LV_SLOT_FROM].rel_src =  0;  s[LV_SLOT_FROM].rel_dst = -1;
-    s[LV_SLOT_TO].rel_src   =  1;  s[LV_SLOT_TO].rel_dst   =  0;
-    s[LV_SLOT_IN].rel_src   =  2;  s[LV_SLOT_IN].rel_dst   =  1;
 }
-
-/* One frame. Repaints and flushes only the band the lines occupy, full width:
- * lcd_update_rect writes one address to the panel when the width is the whole
- * screen and one per row otherwise, so a full-width strip is much the cheapest
- * partial update -- and a whole-screen flush is ~9.7ms of a ~11ms frame. */
-static void lv_anim_draw(int p)
+/* Smooth pixel boundary inside the active word. UTF-8 is never split. */
+static int lv_sung_width(int index, int font)
 {
-    struct screen *d = &screens[SCREEN_MAIN];
-    struct viewport *last = d->set_viewport(&lv.vp);
-    static char buf[LV_ROW_MAX];
-    int y[LV_SLOTS];
-    int top = lv.vp.height, bot = 0;
-    int i, r;
-
-    for (i = 0; i < LV_SLOTS; i++)
+    const char *text = lyrics_text(index);
+    if (!text || !lyrics_timed() || !global_settings.lyric_highlight) return -1;
+    int n = lyrics_word_count(index), width = 0;
+    for (int w = 0; w < n; w++)
     {
-        struct lv_slot *s = &anim.slot[i];
-
-        if (s->index == LYRICS_NONE || s->nrows == 0)
-            continue;
-        y[i] = lv_lerp(s->y_src, s->y_dst, p);
-        if (y[i] < top)
-            top = y[i];
-        if (y[i] + s->nrows * lv.row > bot)
-            bot = y[i] + s->nrows * lv.row;
-    }
-
-    /* repaint the union of this frame and the last, so what moved away is
-     * cleared as well as what moved in */
-    if (anim.band_top < top)
-        top = anim.band_top;
-    if (anim.band_bot > bot)
-        bot = anim.band_bot;
-    if (top < 0)
-        top = 0;
-    if (bot > lv.vp.height)
-        bot = lv.vp.height;
-    if (bot <= top)
-        goto out;
-
-    d->set_foreground(lv.bg);
-    d->fillrect(0, top, lv.vp.width, bot - top);
-
-    for (i = 0; i < LV_SLOTS; i++)
-    {
-        struct lv_slot *s = &anim.slot[i];
-
-        if (s->index == LYRICS_NONE)
-            continue;
-
-        for (r = 0; r < s->nrows; r++)
+        long start = lyrics_word_time(index, w);
+        if (start < 0) return -1;
+        const char *p = lyrics_word_text(index, w);
+        const char *end = w + 1 < n ? lyrics_word_text(index, w + 1) : text + strlen(text);
+        long stop = w + 1 < n ? lyrics_word_time(index, w + 1) : lyrics_end_time(index);
+        int part = 0;
+        while (p < end)
         {
-            int ry = y[i] + r * lv.row;
-            int s0, r0, s1, r1, op_sung, op_rest, cut;
-            bool clipped = s->cut_off && r == s->nrows - 1;
-
-            lv_row_ops(s->rel_src, r, s->nrows, &s0, &r0);
-            lv_row_ops(s->rel_dst, r, s->nrows, &s1, &r1);
-            op_sung = lv_lerp(s0, s1, p);
-            op_rest = lv_lerp(r0, r1, p);
-
-            if (op_sung <= 0 && op_rest <= 0)
-                continue;
-            if (ry < LV_MARGIN || ry + lv.row > lv.vp.height - LV_MARGIN)
-                continue;
-
-            lv_row_text(buf, sizeof buf, &s->rows[r], clipped);
-            if (clipped)
-                lv_ellipsize(buf, sizeof buf, font_get(lv.font), lv.width);
-
-            cut = s->sung - (int)(s->rows[r].start - lv_line_text(s->index));
-            if (op_sung == op_rest || cut >= (int)strlen(buf))
-                lv_draw_text(d, buf, ry, op_sung);
-            else
-                lv_draw_split(d, buf, cut < 0? 0: cut, ry, op_sung, op_rest);
+            ucschar_t ch;
+            p = (const char *)utf8decode((const unsigned char *)p, &ch);
+            if (!IS_DIACRITIC(ch)) part += font_get_width(font_get(font), ch);
+        }
+        width += lyrics_word_progress(lv.elapsed, start, stop, part);
+        if (lv.elapsed < stop) break;
+    }
+    return width;
+}
+static int lv_height(int i, int position)
+{
+    struct lv_row rows[LV_ROWS];
+    const char *text = lyrics_text(i);
+    if (!text) return lv.small + 12;
+    int small = lv_wrap(text, lv_font(1), rows) * lv.small;
+    int large = lv_wrap(text, lv_font(2), rows) * lv.large;
+    return lyrics_line_height(small, large, lyrics_focus_weight(i, position));
+}
+static void lv_line(int i, int center, int position)
+{
+    struct lv_row rows[LV_ROWS]; char text[LV_TEXT];
+    const char *line = lyrics_text(i);
+    if (!line) return;
+    int weight = lyrics_focus_weight(i, position), rel = i * 256 - position;
+    int nearest = (rel < 0 ? global_settings.lyric_prev_opacity : global_settings.lyric_next_opacity) * 256 / 100;
+    int opacity = lyrics_opacity(rel, nearest);
+    for (int size = 0; size < 2; size++)
+    {
+        int alpha = opacity * (size ? weight : 256 - weight) / 256;
+        if (!alpha) continue;
+        int font = lv_font(size + 1), h = size ? lv.large : lv.small;
+        int n = lv_wrap(line, font, rows), sung = lv_sung_width(i, font);
+        for (int r = 0; r < n; r++)
+        {
+            size_t length = MIN(rows[r].length, (int)sizeof(text) - 4);
+            if (r == n - 1 && rows[r].text[length])
+            { strlcpy(text, rows[r].text, sizeof text); lv_ellipsize(text, font, LCD_WIDTH - 32); }
+            else { memcpy(text, rows[r].text, length); text[length] = 0; }
+            int before = 0;
+            const unsigned char *prefix = (const unsigned char *)line;
+            while (prefix < (const unsigned char *)rows[r].text)
+            {
+                ucschar_t ch; prefix = utf8decode(prefix, &ch);
+                if (!IS_DIACRITIC(ch)) before += font_get_width(font_get(font), ch);
+            }
+            lv_text(text, font, 16, center - n * h / 2 + r * h, alpha,
+                    sung < 0 ? -1 : MAX(0, sung - before), 256 - weight * 102 / 256, true);
         }
     }
-
-    d->update_viewport_rect(0, top, lv.vp.width, bot - top);
-    anim.band_top = top;
-    anim.band_bot = bot;
-
-  out:
-    d->set_viewport(last);
 }
-
-/* Lay the three lines out and draw them.
- *
- * Every line wraps, including the neighbours, and neighbour rows fade with
- * their distance from the middle. That is not only how it looks: a line keeps
- * the same height whether it is previous, current or next, so the slide can
- * move it between those roles as a plain translation instead of re-flowing it
- * mid-move.
- *
- * The current block is centred, and shifts up only far enough to keep the
- * start of the next line on screen -- next is the one the reader is about to
- * want. Anything that still does not fit simply runs off the edge, by which
- * point the falloff has made it nearly invisible anyway. */
+static const char *lv_status(void)
+{
+    return lv.pending ? "Loading lyrics..." : !lv.track[0] ? "Nothing playing" : "No lyrics";
+}
 static void lv_draw(void)
 {
-    struct screen *d = &screens[SCREEN_MAIN];
-    struct viewport *last = d->set_viewport(&lv.vp);
-    static struct lv_row cur[LV_MAX_ROWS];
-    static char buf[LV_ROW_MAX];
-    int prev, next, nrows = 0, top, i;
-    bool cut_off = false;
-
-    d->clear_viewport();
-
-    if (lv.state != LV_SHOWING || !lyrics_loaded())
+    fb_data *frame = lv_frame();
+    for (int y = 0; y < LCD_HEIGHT; y++)
     {
-        lv_draw_status(d);
-        goto done;
+        fb_data color = lv_background(y);
+        for (int x = 0; x < LCD_WIDTH; x++) frame[y * LCD_WIDTH + x] = color;
     }
-
-    prev = lv_step(lv.shown, -1);
-    next = lv_step(lv.shown, 1);
-
-    /* Ask for the text rather than testing the index: lv.shown is
-     * LV_INDEX_UNSET until the first line is picked, and LV_TITLE_INDEX until
-     * the first lyric is due -- one of which draws and one of which does
-     * not. */
-    if (lv_line_text(lv.shown))
-        nrows = lv_wrap(lv_line_text(lv.shown), lv.width, cur, LV_MAX_ROWS,
-                        &cut_off);
-
-    top = lv_block_top(nrows, next != LYRICS_NONE);
-
-    /* a slide starting from here repaints only what it moves, so it has to
-     * know what this frame put on the screen */
-    anim.band_top = 0;
-    anim.band_bot = lv.vp.height;
-
-    lv_draw_neighbour(d, prev, top - lv.gap, -1, LV_OPACITY_PREV);
-
-    for (i = 0; i < nrows; i++)
+    int position = lyrics_motion_at(&lv.scroll, current_tick), base = position / 256;
+    int center = lyrics_line_y(LCD_HEIGHT * 42 / 100, position % 256,
+                               lv_height(base, position), lv_height(base + 1, position));
+    int count = lyrics_loaded() ? lyrics_count() : 0;
+    for (int i = base, y = center; i < count && y < LCD_HEIGHT + 100; i++)
     {
-        int y = top + i * lv.row;
-        bool clipped = cut_off && i == nrows - 1;
-        int cut;
-
-        if (y + lv.row > lv.vp.height - LV_MARGIN)
+        lv_line(i, y, position);
+        y += (lv_height(i, position) + lv_height(i + 1, position)) / 2;
+    }
+    for (int i = base - 1, y = center; i >= 0; i--)
+    {
+        y -= (lv_height(i, position) + lv_height(i + 1, position)) / 2;
+        if (y < -100) break;
+        lv_line(i, y, position);
+    }
+    if (!count) lv_text(lv_status(), lv_font(1), 16, LCD_HEIGHT * 42 / 100, 256, -1, 256, false);
+    char title[MAX_PATH]; strlcpy(title, lv.title, sizeof title);
+    int pill = lyrics_motion_at(&lv.pill, current_tick);
+    lv_ellipsize(title, lv_font(0), LCD_WIDTH - 32 - pill * 58 / 256);
+    lv_text(title, lv_font(0), 16, 10, 141, -1, 256, false);
+    if (pill)
+    {
+        lcd_set_viewport(&lv.vp);
+        lcd_set_foreground(color_blend(lv_background(10), lv.accent, pill / 4));
+        fill_round_rect(&screens[SCREEN_MAIN], LCD_WIDTH - 66, 7, 50, 20, 8);
+        lv_text("Manual", lv_font(0), LCD_WIDTH - 62, 10, pill, -1, 256, false);
+    }
+    lcd_set_viewport(&lv.vp); lcd_set_foreground(lv.accent);
+    int progress = lv.length > 0 ? (int)((int64_t)MIN(lv.elapsed, lv.length) * LCD_WIDTH / lv.length) : 0;
+    lcd_fillrect(0, LCD_HEIGHT - 2, progress, 2);
+}
+static void lv_present(int opacity, int shift, bool underlay)
+{
+    fb_data *frame = lv_frame();
+    if (lv.layer) memcpy(lv.layer, frame, LV_FRAME);
+    for (int y = LCD_HEIGHT - 1; y >= 0; y--)
+    {
+        unsigned bg = lv_background(y);
+        for (int x = 0; x < LCD_WIDTH; x++)
+        {
+            int at = y * LCD_WIDTH + x;
+            fb_data page = y >= shift ? (lv.layer ? lv.layer : frame)[at - shift * LCD_WIDTH] : bg;
+            fb_data back = underlay && lv.snapshot ? lv_mix(lv.snapshot[at], LCD_BLACK, opacity * 110 / 256) : bg;
+            frame[at] = lv_mix(back, page, opacity);
+        }
+    }
+    lcd_update();
+}
+static void lv_transition(bool opening)
+{
+    uint32_t start = current_tick; int duration = LV_TICKS(opening ? 220 : 180);
+    for (;;)
+    {
+        uint32_t frame_at = current_tick;
+        int age = (uint32_t)current_tick - start;
+        int p = lyrics_ease(MIN(256, age * 256 / duration));
+        int alpha = opening ? p : 256 - p;
+        if (!lv.snapshot)
+        {
+            /* Two animated halves through the background need no saved WPS.
+             * skin_update draws the live WPS without flushing the panel. */
+            int half = MIN(512, age * 512 / duration);
+            bool page = opening ? half >= 256 : half < 256;
+            int a = half < 256 ? 256 - lyrics_ease(half) : lyrics_ease(half - 256);
+            if (page) lv_draw(); else wps_lyrics_backdrop();
+            lv_present(a, page ? 24 * (256 - a) / 256 : 0, false);
+        }
+        else { lv_draw(); lv_present(alpha, 24 * (256 - alpha) / 256, lv.snapshot_wps); }
+        if (age >= duration) break;
+        sleep(MAX(1, HZ / 30 - (int)((uint32_t)current_tick - frame_at)));
+    }
+}
+static void lv_changed(void)
+{
+    if (!lv.initial)
+    {
+        if (!lv.snapshot)
+        {
+            uint32_t start = current_tick;
+            for (;;)
+            {
+                uint32_t frame_at = current_tick;
+                int age = (uint32_t)current_tick - start;
+                int p = lyrics_ease(MIN(256, age * 256 / LV_TICKS(100)));
+                lv_draw(); lv_present(256 - p, 0, false);
+                if (p == 256) break;
+                sleep(MAX(1, HZ / 30 - (int)((uint32_t)current_tick - frame_at)));
+            }
+        }
+        if (lv.snapshot) memcpy(lv.snapshot, lv_frame(), LV_FRAME);
+        lv.snapshot_wps = false; lv.changed = current_tick; lv.track_fade = true;
+    }
+}
+static void lv_focus(void)
+{
+    lyrics_retarget(&lv.scroll, lv.mode.focus * 256, current_tick, LV_TICKS(260));
+}
+static void lv_reload(struct mp3entry *id3, bool remote)
+{
+    lv_changed();
+    bool have_title = id3 && id3->title && id3->title[0];
+    /* Copy metadata before lyrics_load can compact the playback buffer. */
+    strlcpy(lv.track, id3 ? id3->path : "", sizeof lv.track);
+    const char *name = id3 ? strrchr(lv.track, '/') : NULL;
+    snprintf(lv.title, sizeof lv.title, "%s%s%s", id3 && id3->title ? id3->title : name ? name + 1 : "",
+             id3 && id3->artist ? " — " : "", id3 && id3->artist ? id3->artist : "");
+    lv.remote = remote; lv.pending = false; lv.remote_rows = 0;
+    lv.elapsed = id3 ? id3->elapsed : 0; lv.length = id3 ? id3->length : 0;
+    if (remote)
+    {
+#ifdef HAVE_USB_PODLINK
+        if (lyrics_begin_text() != LYRICS_OK) return;
+        char query[64];
+        snprintf(query, sizeof query, "now/lyrics?nonce=%lu", (unsigned long)current_tick);
+        cider_page_open(query); lv.pending = true; lv.remote_deadline = current_tick + 5 * HZ;
+#endif
+    }
+    else if (id3) lyrics_load(id3);
+    else lyrics_close();
+    if (!have_title && lyrics_title())
+        snprintf(lv.title, sizeof lv.title, "%s%s%s", lyrics_title(),
+                 lyrics_artist() ? " — " : "", lyrics_artist() ? lyrics_artist() : "");
+    lv.mode = (struct lyrics_mode){0};
+    if (lyrics_timed()) lv.mode.focus = MAX(0, lyrics_index_at(lv.elapsed));
+    lv.scroll = (struct lyrics_motion){.from = lv.mode.focus * 256, .to = lv.mode.focus * 256};
+    lv.pill = (struct lyrics_motion){0};
+    lv_colours(); lv_backlight(lyrics_loaded());
+    lv.art_gen = skin_albumart_gen();
+    lv.changed = current_tick;
+}
+static void lv_remote_page(void)
+{
+#ifdef HAVE_USB_PODLINK
+    if (!lv.remote || !lv.pending) return;
+    int count = cider_page_total();
+    if (count < 0 && TIME_BEFORE(current_tick, lv.remote_deadline)) return;
+    struct cider_row row;
+    while (lv.remote_rows < count)
+    {
+        if (!cider_page_row(lv.remote_rows, &row))
+        {
+            if (TIME_BEFORE(current_tick, lv.remote_deadline)) return;
             break;
-        /* a truncated last row runs to the end of the text, so ellipsising it
-         * shows that something was cut */
-        lv_row_text(buf, sizeof buf, &cur[i], clipped);
-        if (clipped)
-            lv_ellipsize(buf, sizeof buf, font_get(lv.font), lv.width);
-
-        /* where the sung/unsung boundary falls within this row -- it can land
-         * anywhere, including part way along a wrapped one */
-        cut = lv.sung - (int)(cur[i].start - lv_line_text(lv.shown));
-        if (cut >= (int)strlen(buf))
-            lv_draw_text(d, buf, y, 100);
-        else
-            lv_draw_split(d, buf, cut < 0? 0: cut, y, 100, LV_OPACITY_NEXT);
+        }
+        if (!lyrics_append_text(row.title)) break;
+        lv.remote_rows++; lv.remote_deadline = current_tick + 5 * HZ;
     }
-
-    lv_draw_neighbour(d, next, top + nrows * lv.row + lv.gap, 1,
-                      LV_OPACITY_NEXT);
-
-  done:
-
-    /* A whole-screen flush: this runs once per lyric line. The slide redraws
-     * per frame through lv_anim_draw(), which flushes only its band. */
-    d->update_viewport();
-    d->set_viewport(last);
+    lv_changed(); lyrics_finish_text(); lv.pending = false; lv_backlight(lyrics_loaded());
+#endif
 }
-
-/* ---------------------------------------------------------------------------
- * Following playback
- * ------------------------------------------------------------------------ */
-
-/* How long to sleep before the display could next need to change: until the
- * next line with words is due -- a gap starting changes nothing on screen --
- * less the slide, which has to be finished by then rather than starting then.
- * Capped so the track is still checked regularly. */
-static int lv_ticks_to_next(long elapsed)
+/* The WPS supplies identical seek acceleration/release and source dispatch. */
+static void lv_seek_draw(void)
 {
-    int next = lv_step(lv.shown, 1);
-    long due = (next != LYRICS_NONE)? lyrics_time(next) - LV_ANIM_MS: 0;
-    long word = lv_next_word(lv.shown, elapsed);
-    int ticks = LV_POLL;
-
-    /* whichever comes first: the slide starting, or the highlight moving on
-     * to the next word */
-    if (word > 0 && (next == LYRICS_NONE || word < due))
-    {
-        due = word;
-        next = lv.shown;            /* something to wait for either way */
-    }
-
-    if (next != LYRICS_NONE && due > elapsed)
-    {
-        /* round up, so waking lands on or after the boundary rather than a
-         * few milliseconds short of it and having to sleep again */
-        long ms = due - elapsed;
-        /* capped first: ms * HZ overflows a long for a line hours away */
-        ticks = (ms >= (long)LV_POLL * 1000 / HZ)? LV_POLL
-              : (int)((ms * HZ + 999) / 1000);
-    }
-
-    if (ticks < 1)
-        return 1;
-    return (ticks > LV_POLL)? LV_POLL: ticks;
+    struct wps_state *s = get_wps_state();
+    if (s->id3) lv.elapsed = s->id3->elapsed + s->ff_rewind_count;
+    if (lyrics_mode_follow(&lv.mode, lyrics_timed(), lyrics_index_at(lv.elapsed), current_tick, HZ)) lv_focus();
+    lv_draw(); lcd_update();
 }
-
-/* Move to a state, remembering what to call the track, and redraw if either
- * actually changed -- the loop calls this every time round. */
-static void lv_set_state(enum lv_state state, const struct mp3entry *id3)
+static void lv_transport(int action)
 {
-    char name[MAX_PATH];
-
-    /* Lit only while there are lyrics to read: a track without them lets the
-     * screen go dark on the user's own timeout. */
-    lv_backlight_hold(state == LV_SHOWING);
-
-    name[0] = '\0';
-    if (id3)
-    {
-        const char *slash;
-
-        if (id3->title && id3->title[0])
-            strlcpy(name, id3->title, sizeof name);
-        else if ((slash = strrchr(id3->path, '/')) != NULL)
-            strlcpy(name, slash + 1, sizeof name);
-    }
-
-    if (state == lv.state && !strcmp(name, lv.name))
-        return;
-
-    lv.state = state;
-    strlcpy(lv.name, name, sizeof lv.name);
-    lv_draw();
+    if (action == ACTION_WPS_SEEKFWD || action == ACTION_WPS_SEEKBACK)
+    { wps_lyrics_seek(action, lv_seek_draw); return; }
+    if (lv.remote)
+    { cider_control(action == ACTION_WPS_PLAY ? "toggle" : action == ACTION_WPS_SKIPNEXT ? "next" : "previous", 0); return; }
+    if (action == ACTION_WPS_PLAY) wps_do_playpause(false);
+    else wps_lyrics_skip(action == ACTION_WPS_SKIPNEXT ? 1 : -1);
 }
-
-/* Point the screen at a different track. Failing to find lyrics is not an
- * error: the screen stays up saying so, because the track after this one may
- * well have some. */
-static enum lyrics_result lv_load_track(const struct mp3entry *id3)
-{
-    strlcpy(lv.track, id3->path, sizeof lv.track);
-    lv.shown = LV_INDEX_UNSET;
-    lv.sung = 0;
-    /* A slide holds lv_row pointers *into the lyrics buffer*, and loading
-     * overwrites that buffer. Anything still running must stop before it
-     * does, or the next frame reads another track's text. */
-    anim.active = false;
-    /* new track, so possibly new album art and a new palette */
-    lv_refresh_colours();
-    return lyrics_load(id3);
-}
-
-/* Skip tracks the way the WPS does: forward goes to the next track, and back
- * restarts this one unless it has only just started, in which case it goes to
- * the previous. play_hop() in wps.c is the real thing but is static and reads
- * the WPS's own id3 pointer, which is not ours to trust once the WPS has been
- * left, so the rule is reproduced rather than borrowed. */
-static void lv_skip(int dir)
-{
-    struct mp3entry *id3 = audio_current_track();
-
-    if (global_settings.prevent_skip)
-        return;
-
-    if (dir > 0)
-        audio_next();
-    else if (id3 && id3->elapsed > DEFAULT_SKIP_THRESH)
-        audio_ff_rewind(0);
-    else
-        audio_prev();
-
-    sleep(HZ / 10);     /* let it land before elapsed is read again */
-}
-
-/* ---------------------------------------------------------------------------
- * Entry point
- * ------------------------------------------------------------------------ */
-
-/* Hold-Menu settings, the same menu as Library > Viewers > Lyrics Viewer.
- * The theme goes back on just for the menu's own chrome, then we take the
- * screen again and re-read whatever was changed -- font, colours and spacing
- * all move the layout, so the whole screen is redrawn rather than patched. */
-static int lv_menu(void)
-{
-    int sel = 0, ret;
-
-    /* Let go of the working buffer before the menu runs. It is 32 KiB and
-     * immovable, and the menu allocates -- a font picked in it calls
-     * font_load(), which wants a buflib block of its own. Nothing in the menu
-     * needs the lyrics, and clearing lv.track makes the loop reload them. */
-    lyrics_close();
-    lv.track[0] = '\0';
-    anim.active = false;        /* its rows pointed into that buffer */
-
-    viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
-    push_current_activity(ACTIVITY_CONTEXTMENU);
-    ret = do_menu(&lyric_viewer_menu, &sel, NULL, false);
-    pop_current_activity();
-    viewportmanager_theme_undo(SCREEN_MAIN, false);
-
-    if (ret == MENU_ATTACHED_USB)
-        return ret;
-    /* The theme-off level taken on entry is still in place, so only the
-     * settings are re-read: lv_setup_screen() here would take another level
-     * that nothing undoes. */
-    lv_apply_settings();
-    lv.state = LV_SHOWING;      /* so the reload's lv_set_state() redraws */
-    lv_clear();
-    if (lv.font_error[0])
-        splashf(HZ * 3, ID2P(LANG_FONT_LOAD_ERROR), lv.font_error);
-    return ret;
-}
-
 int lyric_viewer(void)
 {
-    struct mp3entry *id3;
-    int ret = GO_TO_PREVIOUS;
-
-    /* `anim` is static and outlives the screen. Leaving mid-slide would
-     * otherwise leave it armed, and the next visit would draw a frame from
-     * row pointers into the previous visit's freed lyrics buffer. */
-    anim.active = false;
-    lv.track[0] = '\0';
-    lv.user_font = -1;
-    lv.state = LV_SHOWING;   /* forces the first lv_set_state() to draw */
-
+    static const char *const fonts[] = { FONT_DIR "/12-noto-sans.fnt", FONT_DIR "/18-noto-sans.fnt", FONT_DIR "/26-noto-sans-medium.fnt" };
+    size_t bytes = 0; fb_data *arena = app_try_claim_buffer(&bytes, "lyrics");
+    memset(&lv, 0, sizeof lv); lv.initial = true;
+    lv.claimed = arena != NULL;
+    /* Hold the shared scratch arena until teardown; never alias its owner. */
+    if (arena && bytes >= LV_FRAME) { lv.mask = arena; arena += LV_PIXELS; bytes -= LV_FRAME; }
+    if (arena && bytes >= LV_FRAME) { lv.snapshot = arena; arena += LV_PIXELS; bytes -= LV_FRAME; }
+    if (arena && bytes >= LV_FRAME) lv.layer = arena;
+    if (lv.snapshot) { memcpy(lv.snapshot, lv_frame(), LV_FRAME); lv.snapshot_wps = true; }
+    skin_hold_scrolling(true);
+    bool old_inhibit = skin_flush_inhibited(); skin_inhibit_flush(true);
     push_current_activity(ACTIVITY_LYRICS);
-    lv_setup_screen();
-    lv_clear();
-    if (lv.font_error[0])
-        splashf(HZ * 3, ID2P(LANG_FONT_LOAD_ERROR), lv.font_error);
-
-    /* The screen opens whatever the state of things and says what it is
-     * waiting for, rather than refusing to open. Nothing here is an error
-     * worth throwing the user back to where they came from: a track with no
-     * lyrics is ordinary, and one whose metadata has not arrived yet becomes
-     * a track with lyrics a moment later. */
-    while (1)
+    viewportmanager_theme_enable(SCREEN_MAIN, false, &lv.vp);
+    for (int i = 0; i < 3; i++) lv.fonts[i] = font_load(fonts[i]);
+    lv.small = font_get(lv_font(1))->height; lv.large = font_get(lv_font(2))->height;
+    lv.mask_fb = (struct frame_buffer_t){.fb_ptr = lv.mask, .get_address_fn = lv_mask_address, .stride = LCD_WIDTH, .elems = LV_PIXELS};
+    lv.mask_vp = lv.vp; lv.mask_vp.buffer = &lv.mask_fb; lv.mask_vp.bg_pattern = LCD_BLACK;
+    struct mp3entry *first = cider_active() ? get_wps_state()->id3 : audio_current_track();
+    if (!cider_active() && !(audio_status() & AUDIO_STATUS_PLAY)) first = NULL;
+    lv_reload(first, cider_active()); lv_transition(true); lv.initial = false;
+    int result = GO_TO_PREVIOUS, event = 0;
+    for (;;)
     {
-        int action, index, timeout;
-
-        id3 = audio_current_track();
-
-        if (!id3 || !(audio_status() & AUDIO_STATUS_PLAY) || !id3->path[0])
+        uint32_t frame_at = current_tick;
+        struct wps_state *s = get_wps_state();
+        bool remote = cider_active();
+        struct mp3entry *id3 = remote ? s->id3 : audio_current_track();
+        if (!remote && !(audio_status() & AUDIO_STATUS_PLAY)) id3 = NULL;
+        if (!remote) s->id3 = id3;
+        if (remote != lv.remote || strcmp(id3 ? id3->path : "", lv.track))
         {
-            /* Nothing playing, or its metadata has not filled in yet. Note
-             * that no allocation happens on this path: the load only runs
-             * once there is a path to load for. */
-            lv_set_state(LV_WAITING, NULL);
-            lv.track[0] = '\0';
+            lv_reload(id3, remote);
+            id3 = remote ? get_wps_state()->id3 : audio_current_track();
         }
-        else if (strcmp(id3->path, lv.track) != 0)
+        if (id3) { lv.elapsed = id3->elapsed; lv.length = id3->length; }
+        lv.paused = remote ? s->paused : (audio_status() & AUDIO_STATUS_PAUSE) != 0;
+        lv_remote_page();
+        if (lv.art_gen != skin_albumart_gen())
         {
-            enum lyrics_result rc = lv_load_track(id3);
-
-            lv_set_state(rc == LYRICS_OK? LV_SHOWING:
-                         rc == LYRICS_NO_MEMORY? LV_NO_MEMORY:
-                                                 LV_NO_LYRICS, id3);
+            lv_changed(); lv_colours(); lv.art_gen = skin_albumart_gen();
         }
-
-        if (lv.state != LV_SHOWING)
+        bool was_manual = lv.mode.manual;
+        if (lyrics_mode_follow(&lv.mode, lyrics_timed(), lyrics_index_at(lv.elapsed), current_tick, HZ)) lv_focus();
+        if (was_manual != lv.mode.manual)
+            lyrics_retarget(&lv.pill, lv.mode.manual && lyrics_timed() ? 256 : 0, current_tick, LV_TICKS(180));
+        lv_draw();
+        if (lv.track_fade)
         {
-            /* gently: nothing to animate, so just look again shortly */
-            action = get_action(CONTEXT_WPS, LV_POLL);
-            goto handle;
-        }
-
-        /* Redraw on a change of the line *shown*, not of the raw index: a gap
-         * starting is a change of index that leaves the screen alone. */
-        index = lv_shown_index(lyrics_index_at(id3->elapsed));
-
-        if (anim.active)
-        {
-            int p = lv_anim_progress();
-
-            /* the song moving somewhere the slide was not heading -- a seek,
-             * or simply a slow frame overrunning it -- ends it early */
-            if (index != lv.shown && index != anim.slot[LV_SLOT_TO].index)
-                p = 256;
-
-            lv_anim_draw(p);
-            if (p >= 256)
+            int age = (uint32_t)current_tick - lv.changed;
+            int p = MIN(256, age * 256 / LV_TICKS(lv.snapshot ? 200 : 100));
+            fb_data *frame = lv_frame();
+            for (int y = 0; y < LCD_HEIGHT; y++) for (int x = 0; x < LCD_WIDTH; x++)
             {
-                anim.active = false;
-                lv.shown = anim.slot[LV_SLOT_TO].index;
-                lv.sung = lv_sung(lv.shown, id3->elapsed);
-                /* settle on the real layout, whole screen: the frames above
-                 * only repainted the band they moved within */
-                lv_draw();
-                /* if the song has already gone further, the next turn round
-                 * the loop slides or snaps to wherever it actually is */
+                int at = y * LCD_WIDTH + x;
+                frame[at] = lv_mix(lv.snapshot ? lv.snapshot[at] : lv_background(y), frame[at], p);
             }
+            lv.track_fade = p < 256;
         }
-        else if (index == lv.shown)
-        {
-            /* same line: the highlight may still have moved on a word */
-            int sung = (index == LYRICS_NONE)? 0: lv_sung(index, id3->elapsed);
-
-            if (sung != lv.sung)
-            {
-                lv.sung = sung;
-                lv_draw();
-            }
-        }
-        else
-        {
-            int upcoming = lv_step(lv.shown, 1);
-
-            /* Slide only for the ordinary case: one line forward, to the line
-             * the wait above was timed against. A seek, a track change or a
-             * jump of several lines snaps -- animating those would be a lie
-             * about where the song went. */
-            if (LV_ANIM_MS > 0 && lv.shown != LV_INDEX_UNSET
-                && index == upcoming && upcoming != LYRICS_NONE)
-            {
-                lv_anim_build(lv.shown, index);
-                anim.start = current_tick;
-                anim.end = current_tick + LV_ANIM_MS * HZ / 1000;
-                anim.active = true;
-                lv_anim_draw(lv_anim_progress());
-            }
-            else
-            {
-                lv.shown = index;
-                lv.sung = (index == LYRICS_NONE)?
-                          0: lv_sung(index, id3->elapsed);
-                lv_draw();
-            }
-        }
-
-        timeout = anim.active? 1: lv_ticks_to_next(id3->elapsed);
-        action = get_action(CONTEXT_WPS, timeout);
-
-      handle:
-        /* CONTEXT_WPS, so the transport keys are the ones muscle memory
-         * already has from the WPS: left/right skip, Play pauses, the wheel
-         * is volume. */
+        lcd_update();
+        bool animated = lv.track_fade || lyrics_moving(&lv.scroll, current_tick) || lyrics_moving(&lv.pill, current_tick);
+        int focus = lv.mode.focus;
+        bool words = lyrics_word_count(focus) > 0 && lyrics_word_time(focus, 0) >= 0 &&
+                     lv.elapsed < lyrics_end_time(focus) && global_settings.lyric_highlight;
+        int timeout = lyrics_idle_ticks(lv.elapsed, lyrics_time(focus + 1), lv.paused, animated, words,
+                                       &lv.mode, lyrics_timed(), current_tick, HZ);
+        if (!lv.paused) timeout = MIN(timeout, lyrics_progress_ticks(lv.elapsed, lv.length, LCD_WIDTH, HZ));
+        if (animated || (!lv.paused && words))
+            timeout = MAX(1, timeout - (int)((uint32_t)current_tick - frame_at));
+        int action = get_action(CONTEXT_WPS, timeout);
         switch (action)
         {
-            case ACTION_WPS_MENU:           /* Menu leaves the screen */
-            case ACTION_WPS_BROWSE:
-                goto done;
-
-            case ACTION_WPS_PLAY:
-                /* the real thing, so pause_rewind and the fade behave as they
-                 * do in the WPS */
-                wps_do_playpause(false);
-                break;
-
-            case ACTION_WPS_SKIPNEXT:
-                lv_skip(1);
-                break;
-
-            case ACTION_WPS_SKIPPREV:
-                lv_skip(-1);
-                break;
-
-            case ACTION_WPS_VOLUP:
-                adjust_volume(1);
-                break;
-
-            case ACTION_WPS_VOLDOWN:
-                adjust_volume(-1);
-                break;
-
-            case ACTION_WPS_QUICKSCREEN:    /* hold Menu: the settings */
-                if (lv_menu() == MENU_ATTACHED_USB)
+            case ACTION_WPS_BROWSE: case ACTION_WPS_MENU: goto done;
+            case ACTION_WPS_VOLUP: case ACTION_WPS_VOLDOWN:
+                if (lyrics_loaded())
                 {
-                    ret = GO_TO_ROOT;
-                    goto done;
+                    int direction = action == ACTION_WPS_VOLUP ? 1 : -1;
+                    int raw_button = 0;
+                    get_action_statuscode(&raw_button);
+                    if (raw_button & BUTTON_REMOTE)
+                    { direction = -direction; lv.mode.direction = 0; }
+                    lyrics_mode_scroll(&lv.mode, direction, lyrics_count(), current_tick, HZ);
+                    lv_focus(); lyrics_retarget(&lv.pill, lyrics_timed() ? 256 : 0, current_tick, LV_TICKS(180));
                 }
                 break;
-
-            case ACTION_NONE:               /* the sleep expired */
-                break;
-
-            default:
-                if (default_event_handler(action) == SYS_USB_CONNECTED)
-                {
-                    ret = GO_TO_ROOT;
-                    goto done;
-                }
-                break;
+            case ACTION_WPS_PLAY: case ACTION_WPS_SKIPNEXT: case ACTION_WPS_SKIPPREV:
+            case ACTION_WPS_SEEKFWD: case ACTION_WPS_SEEKBACK: lv_transport(action); break;
+            case ACTION_NONE: case ACTION_REDRAW: break;
+            default: if (IS_SYSEVENT(action)) { event = action; goto done; } break;
         }
     }
-
-  done:
-    /* The model's buffer is immovable, so it should not outlive the screen.
-     * It does sit through a USB connection: the USB screen runs inside
-     * default_event_handler(), before this. */
-    lyrics_close();
-    if (lv.user_font >= 0)
-    {
-        font_unload(lv.user_font);
-        lv.user_font = -1;
-    }
-    lv_backlight_hold(false);
-    viewportmanager_theme_undo(SCREEN_MAIN, false);
-    pop_current_activity();
-    return ret;
+done:
+    /* Render the current WPS without flushing, including a new title after
+     * skip/seek. Returning never reveals an obsolete entry-time snapshot. */
+    if (lv.snapshot)
+    { wps_lyrics_backdrop(); memcpy(lv.snapshot, lv_frame(), LV_FRAME); lv.snapshot_wps = true; }
+    lv_transition(false); lyrics_close();
+    for (int i = 0; i < 3; i++) if (lv.fonts[i] >= 0) font_unload(lv.fonts[i]);
+    lv_backlight(false); lcd_set_viewport(NULL);
+    viewportmanager_theme_undo(SCREEN_MAIN, false); pop_current_activity();
+    skin_hold_scrolling(false); skin_inhibit_flush(old_inhibit);
+    if (lv.claimed) app_release_buffer("lyrics");
+    if (event && default_event_handler(event) == SYS_USB_CONNECTED) result = GO_TO_ROOT;
+    return result;
 }

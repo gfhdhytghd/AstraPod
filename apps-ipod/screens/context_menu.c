@@ -238,11 +238,11 @@ static int view_lyrics(void)
 static int lyrics_run(void)
 {
     if (lyric_viewer() == GO_TO_ROOT)
-        context_menu_result = ONPLAY_MAINMENU;
-    return 0;
+        return GO_TO_ROOT;
+    return GO_TO_WPS;
 }
 
-MENUITEM_FUNCTION(lyrics_item, 0, ID2P(LANG_LYRICS),
+MENUITEM_FUNCTION(lyrics_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_LYRICS),
                   lyrics_run, NULL, Icon_NOICON);
 
 MENUITEM_FUNCTION(wps_view_cur_playlist_item, 0, ID2P(LANG_VIEW_DYNAMIC_PLAYLIST),

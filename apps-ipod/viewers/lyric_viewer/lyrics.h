@@ -9,9 +9,9 @@
  * Loads the timed lyrics belonging to a track and answers two questions:
  * what is line N, and which line should be on screen at time T.
  *
- * Only synchronised lyrics are handled -- every line carries a timestamp, so
- * there is no guessing at scroll speed and no unsynchronised source. Plain
- * .txt lyrics and ID3 USLT frames are therefore not read.
+ * Timed LRC/enhanced LRC/SNC/SYLT and untimed .txt/remote rows share this
+ * document. Untimed text preserves source order and never follows a clock.
+ * Embedded USLT and UTF-16 text files are not read.
  ****************************************************************************/
 
 #ifndef _LYRICS_H
@@ -45,6 +45,12 @@ enum lyrics_result lyrics_load(const struct mp3entry *id3);
 void lyrics_close(void);
 
 bool lyrics_loaded(void);
+bool lyrics_timed(void);
+/* Untimed sources use the same document and viewer. append_text splits LF
+ * rows and copies the input; no remote page pointers survive a callback. */
+enum lyrics_result lyrics_begin_text(void);
+bool lyrics_append_text(const char *text);
+bool lyrics_finish_text(void);
 
 /* The path lyrics were read from -- a lyrics file, or the audio file itself
  * for an embedded SYLT frame. Empty string when nothing is loaded. */

@@ -8,10 +8,8 @@
 #ifndef _LYRIC_VIEWER_H
 #define _LYRIC_VIEWER_H
 
-/* Show the lyrics of the playing track, returning a GO_TO_* code when the
- * user leaves. Needs something playing -- it synchronises to the track's
- * elapsed time -- and splashes rather than opening if there is nothing to
- * show. */
+/* One animated page for local timed/plain text and remote now/lyrics.
+ * SELECT or MENU returns; an empty playback source fades in a message. */
 int lyric_viewer(void);
 
 #endif /* _LYRIC_VIEWER_H */

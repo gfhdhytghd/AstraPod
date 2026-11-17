@@ -131,6 +131,7 @@ static unsigned cider_read_ahead_count(unsigned a,unsigned b){(void)a;(void)b;re
 static void splash(int n,const char*t){(void)n;(void)t;}static void action_wait_for_release(void){}
 static int get_action(int c,int t);static int do_menu(const struct menu_item_ex*,int*,struct viewport[NB_SCREENS],bool);
 static bool simplelist_show_list(struct simplelist_info*);
+static int lyric_viewer(void){struct gui_synclist lyrics={.title=str(LANG_LYRICS)};active_list=&lyrics;int action;do{action=get_action(0,1);}while(action==ACTION_NONE);assert(action==ACTION_STD_CANCEL);return 0;}
 static int view_text(const char*t,const char*v){(void)t;(void)v;int action;do{action=get_action(0,1);}while(action==ACTION_NONE);assert(action==ACTION_STD_CANCEL);return 0;}
 static bool cider_wps_show_art(void){int action;do{action=get_action(0,1);}while(action==ACTION_NONE);assert(action==ACTION_STD_CANCEL);return false;}
 int cider_browse_at(const struct cider_row*r){(void)r;int action;do{action=get_action(0,1);}while(action==ACTION_NONE);assert(action==ACTION_STD_CANCEL);return GO_TO_PREVIOUS;}
@@ -167,14 +168,14 @@ static void run(int target,int native_flags,bool remote_key){used=at=prev=0;mode
  else if(target==9){tap(select,LANG_CURRENT_PLAYLIST,0);tap(select,LANG_CURRENT_PLAYLIST,0);tap(back,LANG_CURRENT_PLAYLIST,0);tap(back,LANG_CURRENT_PLAYLIST,0);}
  else if(target==11){tap(select,LANG_MORE,0);tap(back,LANG_MORE,0);event(BUTTON_SCROLL_FWD,LANG_MORE,0);tap(select,LANG_MORE,1);tap(select,LANG_SOUND_SETTINGS,0);event(BUTTON_SCROLL_BACK,LANG_VOLUME,0);tap(back,LANG_VOLUME,0);tap(back,LANG_SOUND_SETTINGS,0);tap(back,LANG_MORE,1);}
  
- tap(back,LANG_NOW_PLAYING,target);
+ if(target!=6)tap(back,LANG_NOW_PLAYING,target);
  if(native_flags){struct menu_item_ex native=cider_context_menu;native.flags|=MENU_EXITAFTERTHISMENU;action_set_menu_back(true);int selected=0;do_menu(&native,&selected,NULL,false);action_set_menu_back(false);}
  else {assert(!cider_context_show());}
  assert(at==used&&!menu_back&&!presenter);
 }
 int main(void){for(unsigned i=0;i<ARRAYLEN(labels);i++)snprintf(labels[i],sizeof labels[i],"label-%u",i);
  for(int flags=0;flags<2;flags++)for(int remote=0;remote<2;remote++)for(int row=0;row<12;row++)run(row,flags,remote);
- puts("FU32 production action worker + do_menu + simplelist loops: device/remote MENU leaves each leaf to same menu row then WPS PASS");}
+ puts("FU32 production action worker + do_menu + simplelist loops: device/remote MENU returns each leaf; lyrics exits directly to WPS PASS");}
 '''
 (O/'config.h').write_text('')
 (O/'test.c').write_text(pre+fn(listing,'simplelist_show_list')+loop+controls+post)

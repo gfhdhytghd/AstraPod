@@ -17336,13 +17336,13 @@
   desc: in settings_menu
   user: core
   <source>
-    *: "Select Action"
+    *: "SELECT+PLAY Action"
   </source>
   <dest>
-    *: "Select Action"
+    *: "SELECT+PLAY Action"
   </dest>
   <voice>
-    *: "Select Action"
+    *: "SELECT+PLAY Action"
   </voice>
 </phrase>
 <phrase>

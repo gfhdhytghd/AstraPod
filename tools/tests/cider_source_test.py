@@ -15,7 +15,7 @@ def fn(name,text=None):
  while d:d+=(text[e]=='{')-(text[e]=='}');e+=1
  return text[m.start():e]
 source=source.replace(fn('cider_wps_show_art',source),'')
-seek=fn('ffwd_rew',wps)
+seek=fn('seek_loop',wps)+'\n'+fn('ffwd_rew',wps)
 actions=sorted(set(re.findall(r'\bACTION_[A-Z_0-9]+',source+seek)))
 pre=r'''
 #include <assert.h>
@@ -51,6 +51,7 @@ pre=r'''
 #define FORMAT_NATIVE 1
 #define WPS 1
 #define ACTIVITY_WPS 1
+#define ACTIVITY_LYRICS 99
 #define AUDIO_STATUS_PLAY 1
 #define AUDIO_STATUS_PAUSE 2
 #define SKIN_REFRESH_ALL 0xffff
@@ -189,9 +190,9 @@ assert(cider_mode_step(CIDER_MODE_SHUFFLE,1,false)==0&&cider_mode_step(CIDER_MOD
 for(int v=0;v<5;v++){assert(cider_mode_step(CIDER_MODE_REPEAT,v,false)==(v+1)%5&&cider_mode_step(CIDER_MODE_REPEAT,v,true)==(v+4)%5);}
 assert(cider_mode_step(CIDER_MODE_REPEAT,7,false)==1);
 /* A-B: SELECT marks only in A-B mode; elsewhere it stays swallowed */
-state.repeat=0;memset(&modes,0,sizeof modes);ncommands=0;assert(cider_wps_action(ACTION_WPS_BROWSE)&&!ncommands);
+state.repeat=0;memset(&modes,0,sizeof modes);ncommands=0;assert(cider_wps_action(ACTION_WPS_HOTKEY)&&!ncommands);
 state.repeat=CIDER_REPEAT_AB;state.position=5000;state.received=current_tick;state.rate=1000;cider_wps_update(&w);
-assert(cider_wps_action(ACTION_WPS_BROWSE)&&ncommands==1&&strstr(commands[0],"\tab-mark\t5000"));
+assert(cider_wps_action(ACTION_WPS_HOTKEY)&&ncommands==1&&strstr(commands[0],"\tab-mark\t5000"));
 active=false;
 }
 /* FU26c: a song played from a list carries that list ahead of native-play, in order */

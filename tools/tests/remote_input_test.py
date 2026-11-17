@@ -533,6 +533,7 @@ static bool cider_active(void){return false;}
 #define ACTION_REMOTE_WPS 401
 #define ACTIVITY_AGENTS 1
 #define ACTIVITY_WPS 2
+#define ACTIVITY_LYRICS 99
 #define ACTIVITY_ALBUMCOVERS 3
 #define TIMEOUT_NOBLOCK 0
 static int raw_ui_cancel(void) {return BUTTON_MENU;}

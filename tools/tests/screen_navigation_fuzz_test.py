@@ -132,7 +132,7 @@ a=current_agents.index('            case ACTION_AGENTS_REMOTE_COVERS:');b=curren
 agent_cases=current_agents[a:b]
 a=current_agents.index('        enum agents_nav_screen nav =',current_agents.index('static int agents_run(void)\n{'));b=current_agents.index('        bool changed',a)
 agent_pending=current_agents[a:b]
-a=current_wps.index('            case ACTION_AGENTS_REMOTE_SWITCH:');b=current_wps.index('            case ACTION_WPS_BROWSE:',a)
+a=current_wps.index('            case ACTION_AGENTS_REMOTE_SWITCH:');b=current_wps.index('            case ACTION_WPS_HOTKEY:',a)
 wps_double=current_wps[a:b].replace("#endif", "")
 gui=current_wps[current_wps.index('static long wps_run(bool return_agents, bool menu_covers)\n{'):]
 a=gui.index('            case ACTION_WPS_MENU:');b=gui.index('            case ACTION_WPS_QUICKSCREEN:',a);wps_menu=gui[a:b]

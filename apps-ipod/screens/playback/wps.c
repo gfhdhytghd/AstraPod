@@ -913,13 +913,18 @@ static long wps_run(bool return_agents, bool menu_covers)
 
         button = skin_wait_for_action(WPS, CONTEXT_WPS|ALLOW_SOFTLOCK, HZ/5);
 
+#ifdef HAVE_USB_PODLINK
+        if (button == ACTION_NONE && cider_active())
+            lyrics_remote_step();
+#endif
+
         /* Exit if audio has stopped playing. This happens e.g. at end of
            playlist or if using the sleep timer. */
         if (!cider_active() && !(audio_status() & AUDIO_STATUS_PLAY))
             exit = true;
         /* SELECT owns the one lyrics page on both playback sources. Keep
          * the WPS pixels until that page captures its animated underlay. */
-        if (button == ACTION_WPS_BROWSE)
+        if (button == ACTION_WPS_BROWSE || button == ACTION_WPS_LYRICS)
         {
             if (lyric_viewer() == GO_TO_ROOT)
             {

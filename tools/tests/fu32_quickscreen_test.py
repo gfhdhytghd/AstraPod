@@ -212,7 +212,7 @@ int main(void){
   const struct button_mapping*map=remote_key?remote_button_context_wps:button_context_wps;
   int play=remote_key?BUTTON_RC_PLAY:BUTTON_PLAY;
   action_last_t l={play};action_cur_t c={.button=play|BUTTON_REPEAT,.items=map};int i=0;
-  assert(action_code_worker(&l,&c,&i)==ACTION_WPS_CONTEXT);
+  assert(action_code_worker(&l,&c,&i)==(remote_key?ACTION_WPS_LYRICS:ACTION_WPS_CONTEXT));
   int keys[]={remote_key?BUTTON_RC_LEFT:BUTTON_LEFT,remote_key?BUTTON_RC_RIGHT:BUTTON_RIGHT};
   for(int side=0;side<2;side++){l.button=keys[side];c=(action_cur_t){.button=keys[side]|BUTTON_REL,.items=map};i=0;
    assert(action_code_worker(&l,&c,&i)==(side?ACTION_WPS_SKIPNEXT:ACTION_WPS_SKIPPREV));}

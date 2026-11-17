@@ -576,6 +576,11 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
     if (!remote_input_active)
         *button = agents_remote_button(&remote, context, *button,
                                         button_status(), current_tick);
+    if (*button == REMOTE_LYRICS_BUTTON)
+    {
+        *button = ACTION_WPS_LYRICS;
+        return true;
+    }
     if (*button == REMOTE_WPS_BUTTON)
     {
         *button = ACTION_REMOTE_WPS;

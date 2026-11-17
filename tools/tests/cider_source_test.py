@@ -60,6 +60,9 @@ struct wps_state {struct mp3entry *id3,*nid3;int ff_rewind_count;bool paused;};
 struct bitmap {int width,height,format;unsigned char *data;};
 typedef uint16_t fb_data;
 static long current_tick;
+static void lyrics_remote_cancel(void) {}
+static void lyrics_remote_track(const char *id,uint32_t gen,uint32_t lib,long duration)
+{(void)id;(void)gen;(void)lib;(void)duration;}
 static struct {long last_volume_change;} global_status;
 static bool active;
 static struct cider_state incoming;

@@ -438,12 +438,16 @@ subprocess.run([str(O/'poweroff')],check=True)
 # map and its dispatch case differ. The adapter is a no-op outside Agents.
 baseline=subprocess.check_output(['git','show','db11c0fb1e:apps-ipod/input/keymap_ipod.c'],cwd=R,text=True)
 candidate=(R/'apps-ipod/input/keymap_ipod.c').read_text()
+fu57 = subprocess.check_output(['git','show','7a752ab78f:apps-ipod/input/keymap_ipod.c'],cwd=R,text=True)
+wheel = r'static const struct button_mapping button_context_wps\[\].*?\n};'
+assert re.search(wheel, candidate, re.S).group() == re.search(wheel, fu57, re.S).group()
+
 for name in re.findall(r'static const struct button_mapping (remote_button_context_\w+)\[\]',baseline):
     if name=='remote_button_context_agents': continue
     if name=='remote_button_context_wps':
         old=re.search(r'static const struct button_mapping '+name+r'\[\].*?\n};',baseline,re.S).group()
         new=re.search(r'static const struct button_mapping '+name+r'\[\].*?\n};',candidate,re.S).group()
-        assert re.sub(r'ACTION_WPS_CONTEXT,\s*(BUTTON_RC_PLAY\|BUTTON_REPEAT)',r'ACTION_WPS_STOP,      \1',new)==old
+        assert re.sub(r'ACTION_WPS_LYRICS,\s*(BUTTON_RC_PLAY\|BUTTON_REPEAT), BUTTON_RC_PLAY',r'ACTION_WPS_STOP,      \1, BUTTON_NONE',new)==old
         continue
     if name=='remote_button_context_quickscreen':
         # FU30 changes the required slot mapping; fu30_remote_test runs it.
@@ -531,6 +535,7 @@ static bool cider_active(void){return false;}
 #define CONTEXT_AGENTS 1
 #define CONTEXT_WPS 2
 #define ACTION_REMOTE_WPS 401
+#define ACTION_WPS_LYRICS 405
 #define ACTIVITY_AGENTS 1
 #define ACTIVITY_WPS 2
 #define ACTIVITY_LYRICS 99

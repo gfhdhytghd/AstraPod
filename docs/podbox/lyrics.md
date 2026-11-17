@@ -1,6 +1,8 @@
 # Animated Now Playing lyrics (FU57)
 
-SELECT toggles the same lyrics page for local playback and Cider. MENU returns
+SELECT toggles the same lyrics page for local playback and Cider. Apple Remote
+Play/Pause hold also toggles it. A tap still pauses or resumes. The click-wheel
+Play hold still opens the WPS context menu. MENU returns
 to Now Playing too, including entry through a context menu. The previous local
 SELECT action, including the A/B marker key, is reachable with SELECT+PLAY.
 Cider A/B markers also use SELECT+PLAY. The local setting still stores its
@@ -14,6 +16,19 @@ Auto four seconds after the last scroll. Untimed .txt and Cider now/lyrics rows
 stay manual and show no Manual pill. Play/pause and skip use the playback
 source; local skip keeps the WPS skip-length, cuesheet, spoken-word and A/B
 policy. Seeking uses the WPS seek loop with a lyrics render callback.
+
+`Lyrics lead` defaults to +200 ms. It accepts −1000 to +1000 ms in 50 ms
+steps. The page adds it to the local or remote lyrics clock and clamps the
+result to the track. A negative value delays the lyrics. Line focus, words,
+and return to Auto use this clock. Playback and the progress bar use the
+original time. Offsets carried by the document still apply.
+
+The host converts lyrics for the current remote track in a worker and keeps
+one track of rows in memory. WPS requests them on track change. Idle WPS
+passes copy up to eight rows into the existing 32 KiB lyrics document. The
+lyrics page shows completed lines while later rows arrive. A track or backend
+change discards obsolete responses. The document stays warm across visits
+to the same remote track. The local source releases the remote document.
 
 Local playback looks for timed sidecars (.lrc, .lrc8, .snc) beside the audio
 file and in its parent directories, then for .txt sidecars. With no sidecar,
@@ -33,20 +48,38 @@ including CJK, already ship in the FU55 package; a missing font uses the UI
 font. Enhanced LRC word progress advances in pixels between word timestamps.
 
 The page claims the linker's shared 3 MiB app_buffer with the owner `lyrics`.
-It borrows three 153600-byte RGB565 frames (460800 bytes total): glyph mask,
-WPS/old-track snapshot, composition layer. It releases the claim before a USB
-handler or another screen runs. This grows neither the reserved app_buffer nor
-the audio buffer. The existing model retains its 32 KiB core allocation only
-while the page is open. When another screen owns app_buffer, the page runs
-without snapshots: entry/exit fade through the gradient in two halves, track
+It holds the WPS/old-track snapshot, the transition layer, the background and
+the wrapped-line and glyph caches in this arena. It releases the claim before
+a USB handler or another screen runs. Local lyrics use the 32 KiB
+core allocation while the page is open. When another screen owns
+app_buffer, entry/exit fade through the fallback colour in two halves, track
 changes fade out/in in two 100 ms halves, and glyphs use interpolated colours.
-It never overwrites the other owner's buffer or removes that owner's claim.
+
+The lyrics background uses the scrim theme's 320 px picture, shifted up by
+40 px, with radius 12 on the decimated cover. The page copies a compatible
+cached skin blur when available. On a miss it uses the same image filter
+pipeline and keeps the result for the current track. The remote source uses
+the WPS cover. Both paths add a dithered darkening pass and fade the top and
+bottom edges. The artwork uses white lyrics. The colour mode setting supplies
+the fallback when the cover or arena is unavailable.
 
 The frame deadline subtracts render time and targets 33 fps (three ticks at
-100 Hz). The idle wait wakes for the next lyric line, the next progress-bar
-pixel, the manual-return deadline or a 500 ms source check. Enhanced word
-highlighting animates at the frame cadence; paused/untimed idle text sleeps.
-Host/simulator cadence is not a hardware FPS guarantee.
+100 Hz). The page redraws and sends only changed bands when it is outside an
+entry, exit or track transition. Idle waits cover the next lyric line, word
+or progress-bar pixel, the manual-return deadline and a 500 ms source check.
+A poll with no visible changes draws nothing.
+
+`Debug > Lyrics perf` shows the last visit. Closing the page writes the
+same lines to `/.rockbox/lyrics-perf.txt`. Frame times cover rendering and
+LCD submission. The file reports sample counts and average, p95 and maximum
+times per phase and per animation. P95 is a histogram upper bound. Wait is
+time in the scheduler or input queue. The dropped count flags frames over the
+30 fps budget for render time or for a gap between consecutive animation
+frames. Entry latency starts at the dispatched WPS action and ends at the
+first visible frame submission. Blur max is the longest cold background build.
+Remote prefetch times start when WPS observes the track. A value of −1 marks
+an unfinished milestone. The recorder samples CPU frequency, boost and audio
+play state on submitted frames.
 
 Retained settings: colour mode, previous/next opacity, word highlighting,
 backlight hold. Removed from the menu: font override, line spacing, alignment

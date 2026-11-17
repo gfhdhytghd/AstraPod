@@ -1,10 +1,11 @@
 /* Animated Now Playing lyrics. GPL version 2 or later.
- * The unused plugin arena supplies glyph, snapshot and composition frames.
+ * The unused plugin arena supplies the cached picture, glyphs and transition snapshot.
  * No audio buffer is stolen. Without snapshot space we fade through the
- * gradient. No document pointers survive a draw or a track reload. */
+ * fallback colour. No document pointers survive a draw or a track reload. */
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include <limits.h>
 #include "config.h"
 #include "system.h"
 #include "string-extra.h"
@@ -25,6 +26,7 @@
 #include "draw/color.h"
 #include "draw/text_wrap.h"
 #include "draw/bmp.h"
+#include "draw/img_filter.h"
 #include "draw/round_rect.h"
 #include "skin/skin_engine.h"
 #include "skin/skin_albumart_color.h"
@@ -40,85 +42,313 @@
 #include "lyrics.h"
 #include "lyrics_motion.h"
 #include "lyric_viewer.h"
+#ifdef SIMULATOR
+#include <SDL_timer.h>
+#endif
 
 #define LV_PIXELS (LCD_WIDTH * LCD_HEIGHT)
 #define LV_FRAME (LV_PIXELS * sizeof(fb_data))
 #define LV_TICKS(ms) MAX(1, ((ms) * HZ + 999) / 1000)
 #define LV_ROWS 3
 #define LV_TEXT 800
-static struct {
+#define LV_LAYOUTS 24
+#define LV_MASKS 64
+#define LV_BODY_TOP 31
+#define LV_BODY_BOTTOM (LCD_HEIGHT - 6)
+#define LV_ART_OFFSET 40
+#define LV_FRAME_US (1000000 / 30)
+#if defined(IPOD_6G) && defined(__arm__)
+#define LV_PIXELS_ARM __attribute__((target("arm")))
+#else
+#define LV_PIXELS_ARM
+#endif
+
+struct lv_row { unsigned short start, length, before; };
+struct lv_layout {
+    int line;
+    unsigned char count[2];
+    struct lv_row rows[2][LV_ROWS];
+};
+struct lv_mask {
+    int key, width;
+};
+enum lv_phase { LV_RESTORE, LV_GLYPHS, LV_BLEND, LV_LCD, LV_WAIT, LV_PHASE_COUNT };
+enum lv_type { LV_STEADY, LV_ENTRY, LV_EXIT, LV_LINE, LV_MANUAL, LV_TRACK, LV_TYPE_COUNT };
+static const uint32_t perf_bounds[] = {
+    0, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 8000,
+    10000, 12000, 16000, 20000, 25000, 30000, 33000, 34000, 40000, 50000,
+    75000, 100000, 150000, 250000, 500000, 1000000
+};
+struct lv_stat {
+    uint64_t sum;
+    uint32_t count, maximum, buckets[ARRAYLEN(perf_bounds) + 1];
+};
+struct lv_perf {
+    struct lv_stat total, phase[LV_PHASE_COUNT], type[LV_TYPE_COUNT];
+    uint32_t dropped, first, build, cached, builds, gaps, gap_time;
+    unsigned cpu_low, cpu_high, boosted, audio, remote_audio;
+};
+struct lv_state {
     struct viewport vp, mask_vp;
     struct frame_buffer_t mask_fb;
-    fb_data *mask, *snapshot, *layer;
-    int fonts[3], small, large;
+    fb_data *snapshot, *layer, *background, *masks;
+    struct lv_layout *layouts;
+    struct lv_mask *glyphs;
+    int fonts[3], small, large, mask_pixels;
     unsigned bg, bottom, fg, accent;
     struct lyrics_motion scroll, pill;
     struct lyrics_mode mode;
     char track[MAX_PATH], title[MAX_PATH];
     long elapsed, length;
-    uint32_t changed, remote_deadline, remote_retry, art_gen;
-    int remote_rows;
+    uint32_t changed, remote_serial, art_gen;
+    uint32_t entry_at, present_at, phase_us[LV_WAIT];
+    unsigned phase_mask;
+    enum lv_type last_type;
+    struct lv_perf perf;
+    int art_handle;
+    int old_position, old_pill, old_progress, old_words;
     bool remote, pending, held, paused, track_fade, initial, snapshot_wps, claimed;
-} lv;
+    bool painted, art_ready, first_pending;
+};
+/* All users run synchronously on the UI thread. The page state is on its stack. */
+static struct lv_state *lv_state;
+#define lv (*lv_state)
+
+#define perf (lv.perf)
+
+#ifdef HAVE_USB_PODLINK
+/* The existing 32 KiB document is shared by WPS prefetch and Lyrics.
+ * Both run on the UI thread. Page transport stays in the resident worker. */
+static struct {
+    char id[80];
+    uint32_t generation, library, serial, nonce;
+    uint32_t at, deadline, retry, first_ms, complete_ms;
+    long duration;
+    int rows;
+    bool done, first_ready;
+} remote_doc;
+#endif
+
+static uint32_t lv_clock(void)
+{
+#ifdef SIMULATOR
+    uint64_t count = SDL_GetPerformanceCounter();
+    uint64_t freq = SDL_GetPerformanceFrequency();
+    return (count / freq) * 1000000 + (count % freq) * 1000000 / freq;
+#elif defined(USEC_TIMER)
+    return USEC_TIMER;
+#else
+    return (uint32_t)current_tick * (1000000 / HZ);
+#endif
+}
+
+static void lv_stat_add(struct lv_stat *stat, uint32_t us)
+{
+    unsigned lo = 0, hi = ARRAYLEN(perf_bounds);
+    while (lo < hi)
+    {
+        unsigned mid = (lo + hi) / 2;
+        if (us > perf_bounds[mid]) lo = mid + 1;
+        else hi = mid;
+    }
+    stat->buckets[lo]++;
+    stat->count++;
+    stat->sum += us;
+    stat->maximum = MAX(stat->maximum, us);
+}
+
+static unsigned long lv_p95(const struct lv_stat *stat)
+{
+    unsigned remaining = stat->count - stat->count / 20;
+    for (unsigned i = 0; i < ARRAYLEN(perf_bounds); i++)
+    {
+        if (stat->buckets[i] >= remaining)
+            return perf_bounds[i];
+        remaining -= stat->buckets[i];
+    }
+    return stat->maximum; /* p95 overflow bin: use the observed upper bound. */
+}
+
+static void lv_phase_end(enum lv_phase phase, uint32_t start)
+{
+    lv.phase_us[phase] += lv_clock() - start;
+    lv.phase_mask |= 1u << phase;
+}
+
+static void lv_record(uint32_t started, enum lv_type type, bool visible)
+{
+    uint32_t now = lv_clock(), elapsed = now - started;
+    lv_stat_add(&perf.total, elapsed);
+    lv_stat_add(&perf.type[type], elapsed);
+    for (unsigned i = 0; i < LV_WAIT; i++)
+    {
+        if (lv.phase_mask & (1u << i)) lv_stat_add(&perf.phase[i], lv.phase_us[i]);
+        lv.phase_us[i] = 0;
+    }
+    lv.phase_mask = 0;
+    bool late = elapsed > LV_FRAME_US;
+    if (type != LV_STEADY && lv.last_type == type)
+    {
+        uint32_t interval = now - lv.present_at;
+        perf.gaps++;
+        perf.gap_time += interval;
+        late |= interval > LV_FRAME_US;
+    }
+    perf.dropped += late;
+    lv.last_type = type;
+    lv.present_at = now;
+    if (lv.first_pending && visible)
+    {
+        perf.first = now - lv.entry_at;
+        lv.first_pending = false;
+    }
+#if defined(HAVE_ADJUSTABLE_CPU_FREQ) && !defined(SIMULATOR)
+    unsigned mhz = (FREQ + 500000) / 1000000;
+    if (!perf.cpu_low || mhz < perf.cpu_low) perf.cpu_low = mhz;
+    perf.cpu_high = MAX(perf.cpu_high, mhz);
+    perf.boosted += get_cpu_boost_counter() > 0;
+#endif
+    perf.audio += (audio_status() & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE)) == AUDIO_STATUS_PLAY;
+    perf.remote_audio += lv.remote && !lv.paused && lv.track[0];
+}
+
+static void lv_stat_save(int fd, const char *name, const struct lv_stat *stat)
+{
+    fdprintf(fd, "%s: %lu %lu/%lu/%lu\n", name, (unsigned long)stat->count,
+             stat->count ? (unsigned long)(stat->sum / stat->count) : 0UL,
+             lv_p95(stat), (unsigned long)stat->maximum);
+}
+
+static void lv_perf_save(void)
+{
+    int fd = open(LYRICS_PERF_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) return;
+    const struct lv_stat *all = &perf.total;
+    fdprintf(fd, "frames: %lu\navg/p95/max ms: %lu/%lu/%lu\n", (unsigned long)all->count,
+             all->count ? (unsigned long)((all->sum / all->count + 500) / 1000) : 0UL,
+             (lv_p95(all) + 999) / 1000, (unsigned long)((all->maximum + 999) / 1000));
+    fdprintf(fd, "dropped (30 fps): %lu\nSELECT to first ms: %lu\n",
+             (unsigned long)perf.dropped, (unsigned long)((perf.first + 999) / 1000));
+    fdprintf(fd, "blur max ms: %lu\nblur reuse/builds: %lu/%lu\n",
+             (unsigned long)((perf.build + 999) / 1000),
+             (unsigned long)perf.cached, (unsigned long)perf.builds);
+    fdprintf(fd, "animation fps: %lu\nCPU MHz (0 unknown): %u-%u\n",
+             perf.gap_time ? (unsigned long)((uint64_t)perf.gaps * 1000000 / perf.gap_time) : 0UL,
+             perf.cpu_low, perf.cpu_high);
+    fdprintf(fd, "boost/local audio/remote: %u/%u/%u\n", perf.boosted, perf.audio, perf.remote_audio);
+#ifdef HAVE_USB_PODLINK
+    if (lv.remote && lv.remote_serial == remote_doc.serial)
+        fdprintf(fd, "prefetch first/complete ms: %ld/%ld\n",
+                 remote_doc.first_ready ? (long)remote_doc.first_ms : -1L,
+                 remote_doc.complete_ms != UINT32_MAX ? (long)remote_doc.complete_ms : -1L);
+#endif
+    fdprintf(fd, "samples avg/p95/max us\n");
+    static const char *const phases[] = { "restore", "text/glyph", "blend", "LCD", "wait" };
+    static const char *const types[] = { "steady", "entry", "exit", "line change", "manual scroll", "track change" };
+    for (int i = 0; i < LV_PHASE_COUNT; i++) lv_stat_save(fd, phases[i], &perf.phase[i]);
+    for (int i = 0; i < LV_TYPE_COUNT; i++) lv_stat_save(fd, types[i], &perf.type[i]);
+    close(fd);
+}
+
+static void lv_flush(int x, int y, int w, int h)
+{
+    uint32_t start = lv_clock();
+    if (w == LCD_WIDTH && h == LCD_HEIGHT) lcd_update();
+    else lcd_update_rect(x, y, w, h);
+    lv_phase_end(LV_LCD, start);
+}
+
+static void lv_sleep_frame(uint32_t frame_at)
+{
+    uint32_t start = lv_clock();
+    /* sleep() rounds up to a tick boundary on target. */
+    sleep(MAX(0, HZ / 30 - 1 - (int)((uint32_t)current_tick - frame_at)));
+    lv_stat_add(&perf.phase[LV_WAIT], lv_clock() - start);
+}
+
 static fb_data *lv_frame(void)
 {
     lcd_set_viewport(NULL);
     return FBADDR(0, 0);
 }
-static void *lv_mask_address(int x, int y) { return lv.mask + y * LCD_WIDTH + x; }
-/* RGB565 interpolation, without per-pixel colour-space conversions. */
-static fb_data lv_mix(fb_data a, fb_data b, unsigned p)
+static void *lv_mask_address(int x, int y)
 {
-    return (((((a & 0xf800) * (256 - p) + (b & 0xf800) * p) >> 8) & 0xf800)
-          | ((((a & 0x07e0) * (256 - p) + (b & 0x07e0) * p) >> 8) & 0x07e0)
-          | ((((a & 0x001f) * (256 - p) + (b & 0x001f) * p) >> 8) & 0x001f));
+    return lv.mask_fb.fb_ptr + y * LCD_WIDTH + x;
 }
-static unsigned lv_background(int y) { return color_blend(lv.bg, lv.bottom, y * 256 / LCD_HEIGHT); }
+
+/* With 5-bit alpha the spaced RGB565 fields can blend in parallel. */
+static inline __attribute__((always_inline)) fb_data lv_mix(fb_data a, fb_data b, unsigned p)
+{
+    unsigned lo = ((a | ((uint32_t)a << 16)) & 0x07e0f81f);
+    unsigned hi = ((b | ((uint32_t)b << 16)) & 0x07e0f81f);
+    unsigned weight = (p + 4) >> 3;
+    unsigned mixed = ((lo * (32 - weight) + hi * weight) >> 5) & 0x07e0f81f;
+    return mixed | (mixed >> 16);
+}
+static unsigned lv_background(int y)
+{
+    return color_blend(lv.bg, lv.bottom, y * 256 / LCD_HEIGHT);
+}
 static int lv_font(int slot)
 {
     return lv.fonts[slot] >= 0 ? lv.fonts[slot] : screens[SCREEN_MAIN].getuifont();
 }
-static bool lv_art_colour(unsigned *dominant)
+
+static void lv_background_build(int handle)
 {
-    int handle = wps_art_handle(0);
-    struct bitmap *bmp;
-    if (handle < 0 || !wps_art_pin(handle, true)) return false;
-    bool have = wps_art_bitmap(handle, &bmp) && bmp->width > 0 && bmp->height > 0;
-    if (have)
-    {
-        /* Quantised modal colour, sampled before unpinning the movable art.
-         * Independent of the theme's dynamic-colour switch. */
-        unsigned short bins[64] = {0};
-        unsigned best = 0, winner = 0;
-        const fb_data *data = (const fb_data *)bmp->data;
-        for (int y = 0; y < 16; y++) for (int x = 0; x < 16; x++)
-        {
-            unsigned c = data[(y * bmp->height / 16) * bmp->width + x * bmp->width / 16];
-            int bin = ((c >> 10) & 0x30) | ((c >> 7) & 0x0c) | ((c >> 3) & 3);
-            if (++bins[bin] > best) { best = bins[bin]; winner = c; }
-        }
-        *dominant = winner;
-    }
-    wps_art_pin(handle, false);
-    return have;
-}
-static void lv_colours(void)
-{
-    unsigned dominant, vivid;
-    lv.bg = global_settings.bg_color; lv.fg = global_settings.fg_color;
+    lv.bg = global_settings.bg_color;
+    lv.fg = global_settings.fg_color;
     if (global_settings.lyric_colour_mode == 1)
     { lv.bg = global_settings.fg_color; lv.fg = global_settings.bg_color; }
     if (global_settings.lyric_colour_mode == 2) { lv.bg = LCD_WHITE; lv.fg = LCD_BLACK; }
     if (global_settings.lyric_colour_mode == 3) { lv.bg = LCD_BLACK; lv.fg = LCD_WHITE; }
     lv.accent = dynamic_colors_resolve(global_settings.fg_color);
-    if (!global_settings.lyric_colour_mode && lv_art_colour(&dominant))
-    {
-        unsigned unused;
-        if (!dynamic_colors_roles(&unused, &vivid)) vivid = dominant;
-        lv.bg = color_blend(LCD_BLACK, dominant, 90);
-        lv.fg = LCD_WHITE; lv.accent = color_blend(vivid, LCD_WHITE, 80);
-    }
     lv.bottom = color_blend(LCD_BLACK, lv.bg, 28);
+    lv.art_ready = false;
+    if (!lv.background || handle < 0) return;
+
+    uint32_t start = lv_clock();
+    struct img_filter filter;
+    img_filter_compile("blur12+scrim:ffffff+dither", IMG_CLASSES_ALL, &filter);
+    bool reused = skin_lyrics_copy_blur(lv.background, handle, &filter);
+    if (!reused)
+    {
+        struct bitmap *bmp;
+        if (!wps_art_pin(handle, true)) return;
+        if (wps_art_bitmap(handle, &bmp) && bmp->width > 0 && bmp->height > 0)
+        {
+            struct img_levels levels;
+            const fb_data *src = (const fb_data *)bmp->data;
+            img_filter_measure(src, bmp->width, bmp->height, &levels);
+            img_filter_adapt(&filter, &levels, filter.text_lum);
+            img_filter_render(lv.background, LCD_WIDTH, LCD_WIDTH, src,
+                              bmp->width, bmp->height, &filter);
+            memmove(lv.background, lv.background + LV_ART_OFFSET * LCD_WIDTH, LV_FRAME);
+            lv.art_ready = true;
+        }
+        wps_art_pin(handle, false);
+        if (!lv.art_ready) return;
+    }
+
+    /* Home's white-text scrim caps highlights. The page needs more room
+     * for ~60% unsung text, so apply the same extra darkening either way. */
+    img_filter_compile("darker45+dither", IMG_CLASSES_INPLACE, &filter);
+    img_filter_apply_banded(lv.background, LCD_WIDTH, LCD_HEIGHT, &filter);
+    for (int y = 0; y < LCD_HEIGHT; y++)
+    {
+        int edge = MIN(y, LCD_HEIGHT - 1 - y);
+        if (edge >= 32) continue;
+        fb_data *row = lv.background + y * LCD_WIDTH;
+        for (int x = 0; x < LCD_WIDTH; x++) row[x] = lv_mix(row[x], LCD_BLACK, (32 - edge) * 3);
+    }
+    lv.art_ready = true;
+    lv.fg = LCD_WHITE;
+    if (reused) perf.cached++;
+    else
+    {
+        perf.builds++;
+        perf.build = MAX(perf.build, lv_clock() - start);
+    }
 }
 static void lv_backlight(bool hold)
 {
@@ -143,55 +373,114 @@ static void lv_ellipsize(char *text, int font, int width)
     }
     if (*p) strcpy(text + cut, "...");
 }
-struct lv_row { const char *text; int length; };
-static int lv_wrap(const char *text, int font, struct lv_row rows[LV_ROWS])
+static int lv_width(const char *start, const char *end, struct font *font)
 {
-    int n = 0;
+    const unsigned char *p = (const unsigned char *)start;
+    int width = 0;
+    while (p < (const unsigned char *)end)
+    {
+        ucschar_t ch;
+        p = utf8decode(p, &ch);
+        if (!IS_DIACRITIC(ch)) width += font_get_width(font, ch);
+    }
+    return width;
+}
+
+static int lv_wrap(const char *line, int font, struct lv_row *rows)
+{
+    struct font *pf = font_get(font);
+    const char *text = line, *previous = line;
+    int n = 0, before = 0;
     do {
-        const char *end;
-        rows[n].text = text;
-        text = text_wrap_next_punct(text, LCD_WIDTH - 32, font_get(font), &end);
-        rows[n].length = end - rows[n].text; n++;
+        const char *start = text, *end;
+        text = text_wrap_next_punct(start, LCD_WIDTH - 32, pf, &end);
+        before += lv_width(previous, start, pf);
+        rows[n++] = (struct lv_row){start - line, end - start, before};
+        previous = start;
     } while (*text && n < LV_ROWS);
     return n;
 }
-/* Draw into an independent mask, then alpha-composite both bitmap sizes.
- * Their overlap cross-fades too; no glyph replacement at a size threshold. */
-static void lv_text(const char *text, int font, int x, int y, int opacity,
-                    int sung_width, int unsung, bool edges)
+
+static const struct lv_layout *lv_layout(int line, const char *text, struct lv_layout *tmp)
 {
-    int h = font_get(font)->height, top = MAX(0, y), bot = MIN(LCD_HEIGHT, y + h);
-    if (opacity <= 0 || bot <= top) return;
-    if (!lv.mask)
+    struct lv_layout *layout = lv.layouts ? &lv.layouts[line % LV_LAYOUTS] : tmp;
+    if (!lv.layouts || layout->line != line)
+    {
+        layout->line = line;
+        for (int size = 0; size < 2; size++)
+            layout->count[size] = lv_wrap(text, lv_font(size + 1), layout->rows[size]);
+    }
+    return layout;
+}
+
+/* Render a wrapped row once into a movable-on-screen RGB565 mask. */
+static LV_PIXELS_ARM void lv_text(const char *text, int key, int font, int x, int y, int opacity,
+                    int sung_width, int unsung, int top, int bottom, bool edges)
+{
+    int h = font_get(font)->height;
+    top = MAX(top, y); bottom = MIN(bottom, y + h);
+    if (opacity <= 0 || bottom <= top) return;
+    if (!lv.masks)
     {
         lcd_set_viewport(&lv.vp); lcd_setfont(font); lcd_set_drawmode(DRMODE_FG);
         lcd_set_foreground(color_blend(lv_background(MAX(0, y)), lv.fg, opacity));
-        lcd_putsxy(x, y, text); return;
+        lcd_putsxy(x, y, text);
+        return;
     }
-    memset(lv.mask + top * LCD_WIDTH, 0, (bot - top) * LCD_WIDTH * sizeof(fb_data));
-    lcd_set_viewport(&lv.mask_vp); lcd_setfont(font);
-    lcd_set_foreground(LCD_WHITE); lcd_set_drawmode(DRMODE_FG); lcd_putsxy(x, y, text);
-    fb_data *frame = lv_frame();
-    for (int r = top; r < bot; r++)
+    int slot = key < 0 ? LV_MASKS : key % LV_MASKS;
+    struct lv_mask *glyph = &lv.glyphs[slot];
+    fb_data *mask = lv.masks + slot * lv.mask_pixels;
+    if (key < 0 || glyph->key != key)
     {
-        int a = opacity;
-        if (edges) a = a * lyrics_edge_opacity(r, LCD_HEIGHT) / 256;
-        for (int c = MAX(0, x); c < LCD_WIDTH - 16; c++)
+        lv.mask_fb.fb_ptr = mask;
+        memset(mask, 0, h * LCD_WIDTH * sizeof(*mask));
+        lcd_set_viewport(&lv.mask_vp); lcd_setfont(font);
+        lcd_set_foreground(LCD_WHITE); lcd_set_drawmode(DRMODE_FG);
+        lcd_putsxy(0, 0, text);
+        glyph->key = key;
+        /* Scan once so compact rows don't pay for the unused right margin. */
+        int width = 0;
+        for (int r = 0; r < h; r++)
         {
-            unsigned mask = lv.mask[r * LCD_WIDTH + c];
-            if (!mask) continue;
-            int alpha = a * ((mask >> 5) & 63) / 63;
-            if (sung_width >= 0 && c - x >= sung_width) alpha = alpha * unsung / 256;
-            fb_data *pixel = frame + r * LCD_WIDTH + c;
-            *pixel = lv_mix(*pixel, lv.fg, alpha);
+            int c = LCD_WIDTH - 32;
+            while (c > width && !mask[r * LCD_WIDTH + c - 1]) c--;
+            width = c;
+        }
+        glyph->width = width;
+    }
+    fb_data *frame = lv_frame();
+    int width = MIN(glyph->width, LCD_WIDTH - 16 - x);
+    for (int r = top; r < bottom; r++)
+    {
+        int a = edges ? opacity * lyrics_edge_opacity(r, LCD_HEIGHT) / 256 : opacity;
+        int dim = a * unsung / 256;
+        const fb_data *ink = mask + (r - y) * LCD_WIDTH;
+        fb_data *pixel = frame + r * LCD_WIDTH + x;
+        for (int c = 0; c < width; c++)
+        {
+            unsigned green = (ink[c] >> 5) & 63;
+            if (!green) continue;
+            int alpha = sung_width >= 0 && c >= sung_width ? dim : a;
+            pixel[c] = lv_mix(pixel[c], lv.fg, alpha * (green + (green >> 5)) >> 6);
         }
     }
 }
-/* Smooth pixel boundary inside the active word. UTF-8 is never split. */
-static int lv_sung_width(int index, int font)
+
+/* Keep transport and progress on playback time. All lyrics consumers use
+ * the shifted and clamped clock, after any offset carried by the document. */
+static long lv_lyric_elapsed(void)
+{
+    int64_t time = (int64_t)lv.elapsed + global_settings.lyric_lead;
+    return MAX(0, MIN(time, lv.length > 0 ? lv.length : LONG_MAX));
+}
+
+/* Find the next word boundary or pixel; the page sleeps until then. */
+static int lv_word_width(int index, int font, long *next)
 {
     const char *text = lyrics_text(index);
     if (!text || !lyrics_timed() || !global_settings.lyric_highlight) return -1;
+    long elapsed = lv_lyric_elapsed();
+    struct font *pf = font_get(font);
     int n = lyrics_word_count(index), width = 0;
     for (int w = 0; w < n; w++)
     {
@@ -200,143 +489,261 @@ static int lv_sung_width(int index, int font)
         const char *p = lyrics_word_text(index, w);
         const char *end = w + 1 < n ? lyrics_word_text(index, w + 1) : text + strlen(text);
         long stop = w + 1 < n ? lyrics_word_time(index, w + 1) : lyrics_end_time(index);
-        int part = 0;
-        while (p < end)
+        int part = lv_width(p, end, pf);
+        int sung = lyrics_word_progress(elapsed, start, stop, part);
+        width += sung;
+        if (elapsed < stop)
         {
-            ucschar_t ch;
-            p = (const char *)utf8decode((const unsigned char *)p, &ch);
-            if (!IS_DIACRITIC(ch)) part += font_get_width(font_get(font), ch);
+            if (next)
+                *next = elapsed < start ? start : part > 0 ?
+                    start + ((int64_t)(sung + 1) * (stop - start) + part - 1) / part : stop;
+            break;
         }
-        width += lyrics_word_progress(lv.elapsed, start, stop, part);
-        if (lv.elapsed < stop) break;
     }
     return width;
 }
+static int lv_sung_width(int index, int font)
+{
+    return lv_word_width(index, font, NULL);
+}
+
 static int lv_height(int i, int position)
 {
-    struct lv_row rows[LV_ROWS];
+    struct lv_layout tmp;
     const char *text = lyrics_text(i);
     if (!text) return lv.small + 12;
-    int small = lv_wrap(text, lv_font(1), rows) * lv.small;
-    int large = lv_wrap(text, lv_font(2), rows) * lv.large;
-    return lyrics_line_height(small, large, lyrics_focus_weight(i, position));
+    const struct lv_layout *layout = lv_layout(i, text, &tmp);
+    return lyrics_line_height(layout->count[0] * lv.small, layout->count[1] * lv.large,
+                              lyrics_focus_weight(i, position));
 }
-static void lv_line(int i, int center, int position)
+
+static void lv_line(int i, int center, int position, int top, int bottom)
 {
-    struct lv_row rows[LV_ROWS]; char text[LV_TEXT];
+    struct lv_layout tmp;
     const char *line = lyrics_text(i);
     if (!line) return;
+    const struct lv_layout *layout = lv_layout(i, line, &tmp);
     int weight = lyrics_focus_weight(i, position), rel = i * 256 - position;
     int nearest = (rel < 0 ? global_settings.lyric_prev_opacity : global_settings.lyric_next_opacity) * 256 / 100;
     int opacity = lyrics_opacity(rel, nearest);
     for (int size = 0; size < 2; size++)
     {
         int alpha = opacity * (size ? weight : 256 - weight) / 256;
-        if (!alpha) continue;
-        int font = lv_font(size + 1), h = size ? lv.large : lv.small;
-        int n = lv_wrap(line, font, rows), sung = lv_sung_width(i, font);
-        for (int r = 0; r < n; r++)
+        int n = layout->count[size], h = size ? lv.large : lv.small;
+        int y = center - n * h / 2;
+        if (!alpha || y >= bottom || y + n * h <= top) continue;
+        int font = lv_font(size + 1), sung = weight ? lv_sung_width(i, font) : -1;
+        for (int r = 0; r < n; r++, y += h)
         {
-            size_t length = MIN(rows[r].length, (int)sizeof(text) - 4);
-            if (r == n - 1 && rows[r].text[length])
-            { strlcpy(text, rows[r].text, sizeof text); lv_ellipsize(text, font, LCD_WIDTH - 32); }
-            else { memcpy(text, rows[r].text, length); text[length] = 0; }
-            int before = 0;
-            const unsigned char *prefix = (const unsigned char *)line;
-            while (prefix < (const unsigned char *)rows[r].text)
+            if (y >= bottom || y + h <= top) continue;
+            const struct lv_row *row = &layout->rows[size][r];
+            int key = (i * 2 + size) * LV_ROWS + r;
+            char text[LV_TEXT];
+            const char *render = NULL;
+            if (!lv.masks || lv.glyphs[key % LV_MASKS].key != key)
             {
-                ucschar_t ch; prefix = utf8decode(prefix, &ch);
-                if (!IS_DIACRITIC(ch)) before += font_get_width(font_get(font), ch);
+                const char *start = line + row->start;
+                size_t length = MIN(row->length, sizeof(text) - 4);
+                while (length && ((unsigned char)start[length] & 0xc0) == 0x80) length--;
+                if (r == n - 1 && start[length] && row->length < sizeof(text) - 4)
+                { strlcpy(text, start, sizeof text); lv_ellipsize(text, font, LCD_WIDTH - 32); }
+                else { memcpy(text, start, length); text[length] = 0; }
+                render = text;
             }
-            lv_text(text, font, 16, center - n * h / 2 + r * h, alpha,
-                    sung < 0 ? -1 : MAX(0, sung - before), 256 - weight * 102 / 256, true);
+            lv_text(render, key, font, 16, y, alpha,
+                    sung < 0 ? -1 : MAX(0, sung - row->before), 256 - weight * 102 / 256, top, bottom, true);
         }
     }
 }
+
 static const char *lv_status(void)
 {
     return lv.pending ? "Loading lyrics..." : !lv.track[0] ? "Nothing playing" : "No lyrics";
 }
-static void lv_draw(void)
+static LV_PIXELS_ARM void lv_restore(int top, int bottom)
 {
-    fb_data *frame = lv_frame();
-    for (int y = 0; y < LCD_HEIGHT; y++)
+    uint32_t start = lv_clock();
+    fb_data *frame = lv_frame() + top * LCD_WIDTH;
+    if (lv.art_ready)
+        memcpy(frame, lv.background + top * LCD_WIDTH, (bottom - top) * LCD_WIDTH * sizeof(*frame));
+    else for (int y = top; y < bottom; y++)
     {
         fb_data color = lv_background(y);
-        for (int x = 0; x < LCD_WIDTH; x++) frame[y * LCD_WIDTH + x] = color;
+        for (int x = 0; x < LCD_WIDTH; x++) *frame++ = color;
     }
-    int position = lyrics_motion_at(&lv.scroll, current_tick), base = position / 256;
+    lv_phase_end(LV_RESTORE, start);
+}
+
+static void lv_body(int position, int top, int bottom)
+{
+    int base = position / 256;
     int center = lyrics_line_y(LCD_HEIGHT * 42 / 100, position % 256,
                                lv_height(base, position), lv_height(base + 1, position));
     int count = lyrics_loaded() ? lyrics_count() : 0;
-    for (int i = base, y = center; i < count && y < LCD_HEIGHT + 100; i++)
+    for (int i = base, y = center; i < count && y < bottom + 100; i++)
     {
-        lv_line(i, y, position);
+        lv_line(i, y, position, top, bottom);
         y += (lv_height(i, position) + lv_height(i + 1, position)) / 2;
     }
     for (int i = base - 1, y = center; i >= 0; i--)
     {
         y -= (lv_height(i, position) + lv_height(i + 1, position)) / 2;
-        if (y < -100) break;
-        lv_line(i, y, position);
+        if (y < top - 100) break;
+        lv_line(i, y, position, top, bottom);
     }
-    if (!count) lv_text(lv_status(), lv_font(1), 16, LCD_HEIGHT * 42 / 100, 256, -1, 256, false);
+    if (!count) lv_text(lv_status(), -1, lv_font(1), 16, LCD_HEIGHT * 42 / 100,
+                        256, -1, 256, top, bottom, false);
+}
+
+static void lv_header(int pill)
+{
     char title[MAX_PATH]; strlcpy(title, lv.title, sizeof title);
-    int pill = lyrics_motion_at(&lv.pill, current_tick);
     lv_ellipsize(title, lv_font(0), LCD_WIDTH - 32 - pill * 58 / 256);
-    lv_text(title, lv_font(0), 16, 10, 141, -1, 256, false);
+    lv_text(title, -1, lv_font(0), 16, 10, 141, -1, 256, 0, LV_BODY_TOP, false);
     if (pill)
     {
         lcd_set_viewport(&lv.vp);
-        lcd_set_foreground(color_blend(lv_background(10), lv.accent, pill / 4));
+        unsigned behind = lv.art_ready ? lv.background[10 * LCD_WIDTH + LCD_WIDTH - 50] : lv_background(10);
+        lcd_set_foreground(color_blend(behind, lv.accent, pill / 4));
         fill_round_rect(&screens[SCREEN_MAIN], LCD_WIDTH - 66, 7, 50, 20, 8);
-        lv_text("Manual", lv_font(0), LCD_WIDTH - 62, 10, pill, -1, 256, false);
+        lv_text("Manual", -1, lv_font(0), LCD_WIDTH - 62, 10, pill, -1, 256, 0, LV_BODY_TOP, false);
     }
-    lcd_set_viewport(&lv.vp); lcd_set_foreground(lv.accent);
-    int progress = lv.length > 0 ? (int)((int64_t)MIN(lv.elapsed, lv.length) * LCD_WIDTH / lv.length) : 0;
-    lcd_fillrect(0, LCD_HEIGHT - 2, progress, 2);
 }
-static void lv_present(int opacity, int shift, bool underlay)
+
+/* Skip all pixel work on idle source polls. During a stable karaoke line,
+ * invalidate only that line's rows, and send progress independently. */
+static bool lv_draw(bool force, bool flush)
 {
-    fb_data *frame = lv_frame();
-    if (lv.layer) memcpy(lv.layer, frame, LV_FRAME);
-    for (int y = LCD_HEIGHT - 1; y >= 0; y--)
+    int position = lyrics_motion_at(&lv.scroll, current_tick);
+    int pill = lyrics_motion_at(&lv.pill, current_tick);
+    int progress = lv.length > 0 ? (int)((int64_t)MAX(0, MIN(lv.elapsed, lv.length)) * LCD_WIDTH / lv.length) : 0;
+    int words = position % 256 == 0 ? lv_sung_width(position / 256, lv_font(2)) : -1;
+    bool full = force || !lv.painted;
+    bool header = full || pill != lv.old_pill;
+    bool body = full || position != lv.old_position;
+    bool bar = full || progress != lv.old_progress;
+    bool sung = words != lv.old_words;
+    if (!header && !body && !bar && !sung) return false;
+    int top = LV_BODY_TOP, bottom = LV_BODY_BOTTOM;
+    if (!body && sung && lv.masks)
     {
-        unsigned bg = lv_background(y);
-        for (int x = 0; x < LCD_WIDTH; x++)
+        int height = lv_height(position / 256, position) - 12;
+        int y = LCD_HEIGHT * 42 / 100 - height / 2;
+        top = MAX(top, y); bottom = MIN(bottom, y + height);
+    }
+    if (full) lv_restore(0, LCD_HEIGHT);
+    if (header)
+    {
+        if (!full) lv_restore(0, LV_BODY_TOP);
+        uint32_t start = lv_clock();
+        lv_header(pill);
+        lv_phase_end(LV_GLYPHS, start);
+        if (flush && !full) lv_flush(0, 0, LCD_WIDTH, LV_BODY_TOP);
+    }
+    if (body || sung)
+    {
+        if (!full) lv_restore(top, bottom);
+        uint32_t start = lv_clock();
+        lv_body(position, top, bottom);
+        lv_phase_end(LV_GLYPHS, start);
+        if (flush && !full) lv_flush(0, top, LCD_WIDTH, bottom - top);
+    }
+    if (bar)
+    {
+        if (!full && progress < lv.old_progress) lv_restore(LCD_HEIGHT - 2, LCD_HEIGHT);
+        lcd_set_viewport(&lv.vp); lcd_set_foreground(lv.accent);
+        int left = !full && progress > lv.old_progress ? lv.old_progress : 0;
+        lcd_fillrect(left, LCD_HEIGHT - 2, progress - left, 2);
+        if (flush && !full)
+            lv_flush(left, LCD_HEIGHT - 2, MAX(lv.old_progress, progress) - left, 2);
+    }
+    if (flush && full) lv_flush(0, 0, LCD_WIDTH, LCD_HEIGHT);
+    lv.old_position = position; lv.old_pill = pill;
+    lv.old_progress = progress; lv.old_words = words;
+    lv.painted = true;
+    return true;
+}
+
+static LV_PIXELS_ARM void lv_present(int opacity, int shift, bool underlay)
+{
+    uint32_t start = lv_clock();
+    if (!shift && opacity == 256)
+    {
+        if (lv.layer) memcpy(lv_frame(), lv.layer, LV_FRAME);
+    }
+    else if (!opacity && underlay && lv.snapshot)
+    {
+        memcpy(lv_frame(), lv.snapshot, LV_FRAME);
+    }
+    else
+    {
+        fb_data *frame = lv_frame();
+        for (int y = LCD_HEIGHT - 1; y >= 0; y--)
         {
-            int at = y * LCD_WIDTH + x;
-            fb_data page = y >= shift ? (lv.layer ? lv.layer : frame)[at - shift * LCD_WIDTH] : bg;
-            fb_data back = underlay && lv.snapshot ? lv_mix(lv.snapshot[at], LCD_BLACK, opacity * 110 / 256) : bg;
-            frame[at] = lv_mix(back, page, opacity);
+            unsigned bg = lv_background(y);
+            const fb_data *background = lv.art_ready ? lv.background + y * LCD_WIDTH : NULL;
+            const fb_data *page = (lv.layer ? lv.layer : frame) + MAX(0, y - shift) * LCD_WIDTH;
+            fb_data *row = frame + y * LCD_WIDTH;
+            const fb_data *back = underlay && lv.snapshot ? lv.snapshot + y * LCD_WIDTH : NULL;
+            for (int x = 0; x < LCD_WIDTH; x++)
+            {
+                fb_data base = background ? background[x] : bg;
+                fb_data behind = back ? lv_mix(back[x], LCD_BLACK, opacity * 110 / 256) : base;
+                row[x] = lv_mix(behind, y >= shift ? page[x] : base, opacity);
+            }
         }
     }
-    lcd_update();
+    lv_phase_end(LV_BLEND, start);
+    lv_flush(0, 0, LCD_WIDTH, LCD_HEIGHT);
 }
+
 static void lv_transition(bool opening)
 {
-    uint32_t start = current_tick; int duration = LV_TICKS(opening ? 220 : 180);
+    uint32_t start = current_tick;
+    int duration = LV_TICKS(opening ? 220 : 180);
+    lv.last_type = LV_STEADY;
     for (;;)
     {
-        uint32_t frame_at = current_tick;
+        uint32_t frame_at = current_tick, started = lv_clock();
         int age = (uint32_t)current_tick - start;
         int p = lyrics_ease(MIN(256, age * 256 / duration));
         int alpha = opening ? p : 256 - p;
+        bool visible = alpha > 0;
         if (!lv.snapshot)
         {
-            /* Two animated halves through the background need no saved WPS.
-             * skin_update draws the live WPS without flushing the panel. */
+            /* Without arena space, fade through the fallback colour. */
             int half = MIN(512, age * 512 / duration);
             bool page = opening ? half >= 256 : half < 256;
             int a = half < 256 ? 256 - lyrics_ease(half) : lyrics_ease(half - 256);
-            if (page) lv_draw(); else wps_lyrics_backdrop();
+            if (page) lv_draw(true, false); else wps_lyrics_backdrop();
             lv_present(a, page ? 24 * (256 - a) / 256 : 0, false);
+            visible = age > 0;
         }
-        else { lv_draw(); lv_present(alpha, 24 * (256 - alpha) / 256, lv.snapshot_wps); }
+        else
+        {
+            if (alpha && (!lv.layer || age == 0 || (opening && lv.first_pending) ||
+                (!opening && (lyrics_motion_at(&lv.scroll, frame_at) != lv.old_position ||
+                              lyrics_motion_at(&lv.pill, frame_at) != lv.old_pill))))
+            {
+                lv_draw(true, false);
+                if (lv.layer) memcpy(lv.layer, lv_frame(), LV_FRAME);
+            }
+            lv_present(alpha, 24 * (256 - alpha) / 256, lv.snapshot_wps);
+        }
+        lv_record(started, opening ? LV_ENTRY : LV_EXIT, visible);
         if (age >= duration) break;
-        sleep(MAX(1, HZ / 30 - (int)((uint32_t)current_tick - frame_at)));
+        lv_sleep_frame(frame_at);
     }
+    lv.last_type = LV_STEADY;
 }
+
+static void lv_invalidate_text(void)
+{
+    if (lv.layouts) memset(lv.layouts, 0xff, LV_LAYOUTS * sizeof(*lv.layouts));
+    if (lv.glyphs) memset(lv.glyphs, 0xff, (LV_MASKS + 1) * sizeof(*lv.glyphs));
+    lv.painted = false;
+}
+
 static void lv_changed(void)
 {
     if (!lv.initial)
@@ -349,9 +756,11 @@ static void lv_changed(void)
                 uint32_t frame_at = current_tick;
                 int age = (uint32_t)current_tick - start;
                 int p = lyrics_ease(MIN(256, age * 256 / LV_TICKS(100)));
-                lv_draw(); lv_present(256 - p, 0, false);
+                uint32_t started = lv_clock();
+                lv_draw(true, false); lv_present(256 - p, 0, false);
+                lv_record(started, LV_TRACK, false);
                 if (p == 256) break;
-                sleep(MAX(1, HZ / 30 - (int)((uint32_t)current_tick - frame_at)));
+                lv_sleep_frame(frame_at);
             }
         }
         if (lv.snapshot) memcpy(lv.snapshot, lv_frame(), LV_FRAME);
@@ -362,21 +771,121 @@ static void lv_focus(void)
 {
     lyrics_retarget(&lv.scroll, lv.mode.focus * 256, current_tick, LV_TICKS(260));
 }
-#ifdef HAVE_USB_PODLINK
-static void lv_remote_request(void)
+
+static LV_PIXELS_ARM void lv_blend_track(int opacity)
 {
-    static uint32_t nonce;
+    uint32_t start = lv_clock();
+    fb_data *frame = lv_frame();
+    for (int y = 0; y < LCD_HEIGHT; y++)
+    {
+        fb_data *row = frame + y * LCD_WIDTH;
+        const fb_data *back = lv.snapshot ? lv.snapshot + y * LCD_WIDTH : NULL;
+        unsigned base = lv_background(y);
+        for (int x = 0; x < LCD_WIDTH; x++)
+            row[x] = lv_mix(back ? back[x] : base, row[x], opacity);
+    }
+    lv_phase_end(LV_BLEND, start);
+    lv_flush(0, 0, LCD_WIDTH, LCD_HEIGHT);
+}
+#ifdef HAVE_USB_PODLINK
+static void remote_request(void)
+{
     char query[144];
-    /* Remote WPS paths are cider/<CN id> for both backends. */
-    const char *key = lv.track + sizeof("cider/") - 1;
-    if (strncmp(lv.track, "cider/", sizeof("cider/") - 1) || !*key)
-        return;
-    snprintf(query, sizeof query, "now/lyrics?nonce=%lu-%lu&lrc=1&track=%s",
-             (unsigned long)current_tick, (unsigned long)++nonce, key);
+    snprintf(query, sizeof query, "now/lyrics?nonce=%lu&lrc=1&track=%s",
+             (unsigned long)remote_doc.nonce, remote_doc.id);
     cider_page_open(query);
-    lv.pending = true;
+}
+
+void lyrics_remote_cancel(void)
+{
+    if (!remote_doc.id[0]) return;
+    remote_doc.id[0] = 0;
+    remote_doc.serial++;
+    lyrics_close();
+}
+
+void lyrics_remote_track(const char *id, uint32_t generation, uint32_t library, long duration)
+{
+    if (!*id)
+    {
+        lyrics_remote_cancel();
+        return;
+    }
+    if (generation == remote_doc.generation && library == remote_doc.library &&
+        !strcmp(id, remote_doc.id))
+        return;
+    strlcpy(remote_doc.id, id, sizeof remote_doc.id);
+    remote_doc.generation = generation; remote_doc.library = library;
+    remote_doc.serial++; remote_doc.nonce++;
+    remote_doc.rows = 0; remote_doc.retry = 0;
+    remote_doc.first_ready = false;
+    remote_doc.at = current_tick;
+    remote_doc.deadline = remote_doc.at + 5 * HZ;
+    remote_doc.duration = duration;
+    remote_doc.done = lyrics_begin_text() != LYRICS_OK;
+    remote_doc.complete_ms = UINT32_MAX;
+    if (!remote_doc.done) remote_request();
+}
+
+bool lyrics_remote_step(void)
+{
+    if (!remote_doc.id[0] || remote_doc.done) return false;
+    bool expired = !TIME_BEFORE(current_tick, remote_doc.deadline);
+    if (remote_doc.retry && !expired)
+    {
+        if (TIME_BEFORE(current_tick, remote_doc.retry)) return false;
+        remote_doc.retry = 0;
+        remote_doc.nonce++;
+    }
+    /* Reclaim the shared browser route if another screen had used it. */
+    remote_request();
+    int total = cider_page_total();
+    if (total < 0 && !expired) return false;
+    struct cider_row row;
+    bool appended = false, valid = true;
+    for (int i = 0; i < 8 && remote_doc.rows < total; i++)
+    {
+        if (!cider_page_row(remote_doc.rows, &row)) break;
+        if (!strcmp(row.id, "lyric-wait"))
+        {
+            if (!expired && remote_doc.rows == 0)
+            {
+                remote_doc.retry = current_tick + HZ / 4;
+                return false;
+            }
+            expired = true;
+            break;
+        }
+        if (!appended) lyrics_resume_remote();
+        appended = true;
+        bool more = !strcmp(row.id, "lrc1+");
+        bool timed = more || !strcmp(row.id, "lrc1");
+        if ((remote_doc.rows && timed != lyrics_timed()) ||
+            !(timed ? lyrics_append_lrc(row.title, more) : lyrics_append_text(row.title)))
+        {
+            valid = !timed && !lyrics_timed();
+            expired = true;
+            break;
+        }
+        remote_doc.rows++;
+        remote_doc.deadline = current_tick + 5 * HZ;
+    }
+    /* CN or the backend identity can change while rows are copied. */
+    if (!cider_lyrics_matches(remote_doc.id, remote_doc.generation, remote_doc.library))
+        return false;
+    if (!valid) lyrics_begin_text();
+    else if (appended && lyrics_publish_remote(remote_doc.duration) && !remote_doc.first_ready)
+    {
+        remote_doc.first_ready = true;
+        remote_doc.first_ms = (uint32_t)(current_tick - remote_doc.at) * (1000 / HZ);
+    }
+    remote_doc.done = expired || (total >= 0 && remote_doc.rows == total);
+    if (valid && total >= 0 && remote_doc.rows == total)
+        remote_doc.complete_ms = (uint32_t)(current_tick - remote_doc.at) * (1000 / HZ);
+    return appended || remote_doc.done;
 }
 #endif
+
 static void lv_reload(struct mp3entry *id3, bool remote)
 {
     lv_changed();
@@ -386,89 +895,48 @@ static void lv_reload(struct mp3entry *id3, bool remote)
     const char *name = id3 ? strrchr(lv.track, '/') : NULL;
     snprintf(lv.title, sizeof lv.title, "%s%s%s", id3 && id3->title ? id3->title : name ? name + 1 : "",
              id3 && id3->artist ? " — " : "", id3 && id3->artist ? id3->artist : "");
-    lv.remote = remote; lv.pending = false; lv.remote_rows = 0; lv.remote_retry = 0;
+    lv.remote = remote; lv.pending = false;
     lv.elapsed = id3 ? id3->elapsed : 0; lv.length = id3 ? id3->length : 0;
     if (remote)
     {
 #ifdef HAVE_USB_PODLINK
-        if (lyrics_begin_text() == LYRICS_OK)
-            lv_remote_request();
-        lv.remote_deadline = current_tick + 5 * HZ;
+        lyrics_remote_step();
+        lv.remote_serial = remote_doc.serial;
+        lv.pending = !lyrics_loaded() && !remote_doc.done && remote_doc.id[0];
 #endif
     }
-    else if (id3) lyrics_load(id3);
-    else lyrics_close();
+    else
+    {
+#ifdef HAVE_USB_PODLINK
+        lyrics_remote_cancel();
+#endif
+        if (id3) lyrics_load(id3);
+        else lyrics_close();
+    }
     if (!have_title && lyrics_title())
         snprintf(lv.title, sizeof lv.title, "%s%s%s", lyrics_title(),
                  lyrics_artist() ? " — " : "", lyrics_artist() ? lyrics_artist() : "");
     lv.mode = (struct lyrics_mode){0};
-    if (lyrics_timed()) lv.mode.focus = MAX(0, lyrics_index_at(lv.elapsed));
+    if (lyrics_timed()) lv.mode.focus = MAX(0, lyrics_index_at(lv_lyric_elapsed()));
     lv.scroll = (struct lyrics_motion){.from = lv.mode.focus * 256, .to = lv.mode.focus * 256};
     lv.pill = (struct lyrics_motion){0};
-    lv_colours(); lv_backlight(lyrics_loaded());
+    lv_invalidate_text();
+    lv.art_handle = lv.track[0] ? skin_lyrics_art() : -1;
     lv.art_gen = skin_albumart_gen();
+    lv_background_build(lv.art_handle);
+    lv_backlight(lyrics_loaded());
     lv.changed = current_tick;
 }
 static void lv_remote_page(void)
 {
 #ifdef HAVE_USB_PODLINK
-    if (!lv.remote || !lv.pending) return;
-    bool expired = !TIME_BEFORE(current_tick, lv.remote_deadline);
-    if (lv.remote_retry && !expired)
+    if (!lv.remote || !lyrics_remote_step()) return;
+    if (lv.pending)
     {
-        if (TIME_BEFORE(current_tick, lv.remote_retry)) return;
-        lv.remote_retry = 0;
-        lv_remote_request();
-        return;
+        lv_changed();
+        lv.pending = !lyrics_loaded() && !remote_doc.done;
     }
-    int count = cider_page_total();
-    if (count < 0 && !expired) return;
-    bool valid = true;
-    struct cider_row row;
-    while (lv.remote_rows < count)
-    {
-        if (!cider_page_row(lv.remote_rows, &row))
-        {
-            if (!expired) return;
-            break;
-        }
-        if (!strcmp(row.id, "lyric-wait"))
-        {
-            lyrics_begin_text();
-            lv.remote_rows = 0;
-            if (!expired)
-            {
-                lv.remote_retry = current_tick + HZ / 2;
-                return;
-            }
-            break;
-        }
-        bool more = !strcmp(row.id, "lrc1+");
-        bool timed = more || !strcmp(row.id, "lrc1");
-        valid = !lv.remote_rows || timed == lyrics_timed();
-        if (!valid || !(timed ? lyrics_append_lrc(row.title, more) : lyrics_append_text(row.title)))
-        {
-            valid = !timed && valid; /* Legacy text keeps the complete prefix. */
-            break;
-        }
-        lv.remote_rows++; lv.remote_deadline = current_tick + 5 * HZ;
-    }
-    /* A CN can arrive while the last page is being copied. */
-    const struct mp3entry *id3 = get_wps_state()->id3;
-    if (!cider_active() || !id3 || strcmp(id3->path, lv.track)) return;
-    lv_changed();
-    if (!valid || (lyrics_timed() &&
-        (lv.remote_rows != count || !lyrics_finish_lrc(lv.length))))
-        lyrics_begin_text();
-    else if (!lyrics_timed())
-        lyrics_finish_text();
-    if (lyrics_timed())
-    {
-        lv.mode.focus = MAX(0, lyrics_index_at(lv.elapsed));
-        lv.scroll = (struct lyrics_motion){.from = lv.mode.focus * 256,
-                                           .to = lv.mode.focus * 256};
-    }
-    lv.pending = false;
+    lv_invalidate_text();
     lv_backlight(lyrics_loaded());
 #endif
 }
@@ -479,8 +947,9 @@ static void lv_seek_draw(void)
     if (lv.remote && (!s->id3 || strcmp(s->id3->path, lv.track)))
         return;
     if (s->id3) lv.elapsed = s->id3->elapsed + s->ff_rewind_count;
-    if (lyrics_loaded() && lyrics_mode_follow(&lv.mode, lyrics_timed(), lyrics_index_at(lv.elapsed), current_tick, HZ)) lv_focus();
-    lv_draw(); lcd_update();
+    if (lyrics_loaded() && lyrics_mode_follow(&lv.mode, lyrics_timed(), lyrics_index_at(lv_lyric_elapsed()), current_tick, HZ)) lv_focus();
+    uint32_t started = lv_clock();
+    if (lv_draw(false, true)) lv_record(started, LV_STEADY, false);
 }
 static void lv_transport(int action)
 {
@@ -493,36 +962,65 @@ static void lv_transport(int action)
 }
 int lyric_viewer(void)
 {
+    uint32_t entry_at = lv_clock();
     static const char *const fonts[] = { FONT_DIR "/12-noto-sans.fnt", FONT_DIR "/18-noto-sans.fnt", FONT_DIR "/26-noto-sans-medium.fnt" };
+    struct lv_state state = {.initial = true, .entry_at = entry_at, .first_pending = true};
+    lv_state = &state;
     size_t bytes = 0; fb_data *arena = app_try_claim_buffer(&bytes, "lyrics");
-    memset(&lv, 0, sizeof lv); lv.initial = true;
     lv.claimed = arena != NULL;
-    /* Hold the shared scratch arena until teardown; never alias its owner. */
-    if (arena && bytes >= LV_FRAME) { lv.mask = arena; arena += LV_PIXELS; bytes -= LV_FRAME; }
-    if (arena && bytes >= LV_FRAME) { lv.snapshot = arena; arena += LV_PIXELS; bytes -= LV_FRAME; }
-    if (arena && bytes >= LV_FRAME) lv.layer = arena;
-    if (lv.snapshot) { memcpy(lv.snapshot, lv_frame(), LV_FRAME); lv.snapshot_wps = true; }
+    /* The page owns this arena until teardown. No audio-buffer allocation. */
+    if (arena && bytes >= 2 * LV_FRAME)
+    {
+        lv.snapshot = arena; lv.layer = arena + LV_PIXELS;
+        arena += 2 * LV_PIXELS; bytes -= 2 * LV_FRAME;
+        memcpy(lv.snapshot, lv_frame(), LV_FRAME); lv.snapshot_wps = true;
+    }
+    if (arena && bytes >= LCD_WIDTH * LCD_WIDTH * sizeof(*arena))
+    {
+        lv.background = arena;
+        arena += LCD_WIDTH * LCD_WIDTH;
+        bytes -= LCD_WIDTH * LCD_WIDTH * sizeof(*arena);
+    }
     skin_hold_scrolling(true);
     bool old_inhibit = skin_flush_inhibited(); skin_inhibit_flush(true);
     push_current_activity(ACTIVITY_LYRICS);
     viewportmanager_theme_enable(SCREEN_MAIN, false, &lv.vp);
     for (int i = 0; i < 3; i++) lv.fonts[i] = font_load(fonts[i]);
     lv.small = font_get(lv_font(1))->height; lv.large = font_get(lv_font(2))->height;
-    lv.mask_fb = (struct frame_buffer_t){.fb_ptr = lv.mask, .get_address_fn = lv_mask_address, .stride = LCD_WIDTH, .elems = LV_PIXELS};
-    lv.mask_vp = lv.vp; lv.mask_vp.buffer = &lv.mask_fb; lv.mask_vp.bg_pattern = LCD_BLACK;
-    struct mp3entry *first = cider_active() ? get_wps_state()->id3 : audio_current_track();
-    if (!cider_active() && !(audio_status() & AUDIO_STATUS_PLAY)) first = NULL;
-    lv_reload(first, cider_active()); lv_transition(true); lv.initial = false;
+    int mask_height = MAX(MAX(lv.small, lv.large), (int)font_get(lv_font(0))->height);
+    lv.mask_pixels = LCD_WIDTH * mask_height;
+    size_t layout_bytes = LV_LAYOUTS * sizeof(*lv.layouts);
+    size_t glyph_bytes = (LV_MASKS + 1) * sizeof(*lv.glyphs);
+    if (arena && bytes >= layout_bytes + glyph_bytes + (LV_MASKS + 1) * lv.mask_pixels * sizeof(*arena))
+    {
+        lv.layouts = (void *)arena;
+        lv.glyphs = (void *)((char *)arena + layout_bytes);
+        lv.masks = (void *)((char *)lv.glyphs + glyph_bytes);
+        lv.mask_fb = (struct frame_buffer_t){.get_address_fn = lv_mask_address, .stride = LCD_WIDTH, .elems = lv.mask_pixels};
+        lv.mask_vp = lv.vp; lv.mask_vp.buffer = &lv.mask_fb;
+        lv.mask_vp.width = LCD_WIDTH - 32; lv.mask_vp.height = mask_height;
+        lv.mask_vp.flags = 0; lv.mask_vp.bg_pattern = LCD_BLACK;
+    }
+    struct wps_state *remote_wps = cider_active() ? get_wps_state() : NULL;
+    unsigned status = audio_status();
+    struct mp3entry *first = remote_wps ? remote_wps->id3 :
+                             status & AUDIO_STATUS_PLAY ? audio_current_track() : NULL;
+    lv.paused = remote_wps ? remote_wps->paused : (status & AUDIO_STATUS_PAUSE) != 0;
+    lv_reload(first, remote_wps != NULL); lv_transition(true); lv.initial = false;
     int result = GO_TO_PREVIOUS, event = 0;
     for (;;)
     {
-        uint32_t frame_at = current_tick;
+        uint32_t frame_at = current_tick, started = lv_clock();
         struct wps_state *s = get_wps_state();
         bool remote = cider_active();
         struct mp3entry *id3 = remote ? s->id3 : audio_current_track();
         if (!remote && !(audio_status() & AUDIO_STATUS_PLAY)) id3 = NULL;
         if (!remote) s->id3 = id3;
-        if (remote != lv.remote || strcmp(id3 ? id3->path : "", lv.track))
+        if (remote != lv.remote || strcmp(id3 ? id3->path : "", lv.track)
+#ifdef HAVE_USB_PODLINK
+            || (remote && remote_doc.serial != lv.remote_serial)
+#endif
+           )
         {
             lv_reload(id3, remote);
             id3 = remote ? get_wps_state()->id3 : audio_current_track();
@@ -530,41 +1028,63 @@ int lyric_viewer(void)
         if (id3) { lv.elapsed = id3->elapsed; lv.length = id3->length; }
         lv.paused = remote ? s->paused : (audio_status() & AUDIO_STATUS_PAUSE) != 0;
         lv_remote_page();
-        if (lv.art_gen != skin_albumart_gen())
+        /* Local buffers may be reopened for the same cover during rebuffer.
+         * The page owns that picture until the track changes. A late cover
+         * and changes to the remote WPS surface can still replace it. */
+        if (lv.track[0] && lv.background && (lv.remote || !lv.art_ready))
         {
-            lv_changed(); lv_colours(); lv.art_gen = skin_albumart_gen();
+            int handle = skin_lyrics_art();
+            unsigned generation = skin_albumart_gen();
+            if (handle != lv.art_handle ||
+                (handle >= 0 && generation != lv.art_gen))
+            {
+                lv_changed();
+                lv_background_build(handle);
+                lv.art_handle = handle;
+                lv.changed = current_tick;
+                lv.painted = false;
+            }
+            lv.art_gen = generation;
         }
+        long lyric_at = lv_lyric_elapsed();
         bool was_manual = lv.mode.manual;
-        if (lyrics_loaded() && lyrics_mode_follow(&lv.mode, lyrics_timed(), lyrics_index_at(lv.elapsed), current_tick, HZ)) lv_focus();
+        if (lyrics_loaded() && lyrics_mode_follow(&lv.mode, lyrics_timed(), lyrics_index_at(lyric_at), current_tick, HZ)) lv_focus();
         if (was_manual != lv.mode.manual)
             lyrics_retarget(&lv.pill, lv.mode.manual && lyrics_timed() ? 256 : 0, current_tick, LV_TICKS(180));
-        lv_draw();
+        bool animated = lv.track_fade || lyrics_moving(&lv.scroll, current_tick) || lyrics_moving(&lv.pill, current_tick);
         if (lv.track_fade)
         {
             int age = (uint32_t)current_tick - lv.changed;
             int p = MIN(256, age * 256 / LV_TICKS(lv.snapshot ? 200 : 100));
-            fb_data *frame = lv_frame();
-            for (int y = 0; y < LCD_HEIGHT; y++) for (int x = 0; x < LCD_WIDTH; x++)
-            {
-                int at = y * LCD_WIDTH + x;
-                frame[at] = lv_mix(lv.snapshot ? lv.snapshot[at] : lv_background(y), frame[at], p);
-            }
+            lv_draw(true, p == 256);
+            if (p < 256) lv_blend_track(p);
             lv.track_fade = p < 256;
+            lv_record(started, LV_TRACK, false);
         }
-        lcd_update();
-        bool animated = lv.track_fade || lyrics_moving(&lv.scroll, current_tick) || lyrics_moving(&lv.pill, current_tick);
+        else if (lv_draw(false, true))
+            lv_record(started, animated ? (lv.mode.manual ? LV_MANUAL : LV_LINE) : LV_STEADY, false);
+        else if (!animated)
+            lv.last_type = LV_STEADY;
+
         int focus = lv.mode.focus;
-        bool words = lyrics_word_count(focus) > 0 && lyrics_word_time(focus, 0) >= 0 &&
-                     lv.elapsed < lyrics_end_time(focus) && global_settings.lyric_highlight;
-        int timeout = lyrics_idle_ticks(lv.elapsed, lyrics_time(focus + 1), lv.paused, animated, words,
+        int timeout = lyrics_idle_ticks(lyric_at, lyrics_time(focus + 1), lv.paused, animated, false,
                                        &lv.mode, lyrics_timed(), current_tick, HZ);
-        if (!lv.paused) timeout = MIN(timeout, lyrics_progress_ticks(lv.elapsed, lv.length, LCD_WIDTH, HZ));
-        if (animated || (!lv.paused && words))
+        if (!lv.paused && !animated)
+        {
+            long next = -1;
+            lv_word_width(focus, lv_font(2), &next);
+            if (next > lyric_at)
+                timeout = MIN(timeout, LV_TICKS(next - lyric_at));
+            timeout = MIN(timeout, lyrics_progress_ticks(lv.elapsed, lv.length, LCD_WIDTH, HZ));
+        }
+        if (animated)
             timeout = MAX(1, timeout - (int)((uint32_t)current_tick - frame_at));
+        uint32_t wait_at = lv_clock();
         int action = get_action(CONTEXT_WPS, timeout);
+        lv_stat_add(&perf.phase[LV_WAIT], lv_clock() - wait_at);
         switch (action)
         {
-            case ACTION_WPS_BROWSE: case ACTION_WPS_MENU: goto done;
+            case ACTION_WPS_BROWSE: case ACTION_WPS_LYRICS: case ACTION_WPS_MENU: goto done;
             case ACTION_WPS_VOLUP: case ACTION_WPS_VOLDOWN:
                 if (lyrics_loaded())
                 {
@@ -579,7 +1099,8 @@ int lyric_viewer(void)
                 break;
             case ACTION_WPS_PLAY: case ACTION_WPS_SKIPNEXT: case ACTION_WPS_SKIPPREV:
             case ACTION_WPS_SEEKFWD: case ACTION_WPS_SEEKBACK: lv_transport(action); break;
-            case ACTION_NONE: case ACTION_REDRAW: break;
+            case ACTION_REDRAW: lv.painted = false; break;
+            case ACTION_NONE: break;
             default: if (IS_SYSEVENT(action)) { event = action; goto done; } break;
         }
     }
@@ -588,12 +1109,15 @@ done:
      * skip/seek. Returning never reveals an obsolete entry-time snapshot. */
     if (lv.snapshot)
     { wps_lyrics_backdrop(); memcpy(lv.snapshot, lv_frame(), LV_FRAME); lv.snapshot_wps = true; }
-    lv_transition(false); lyrics_close();
+    lv_transition(false);
+    lv_perf_save();
+    if (!lv.remote) lyrics_close();
     for (int i = 0; i < 3; i++) if (lv.fonts[i] >= 0) font_unload(lv.fonts[i]);
     lv_backlight(false); lcd_set_viewport(NULL);
     viewportmanager_theme_undo(SCREEN_MAIN, false); pop_current_activity();
     skin_hold_scrolling(false); skin_inhibit_flush(old_inhibit);
     if (lv.claimed) app_release_buffer("lyrics");
+    lv_state = NULL;
     if (event && default_event_handler(event) == SYS_USB_CONNECTED) result = GO_TO_ROOT;
     return result;
 }

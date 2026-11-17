@@ -26,6 +26,7 @@
  * Returns the handle id of the buffered albumart for the given slot id
  **/
 int playback_current_aa_hid(int slot);
+int playback_track_aa_hid(int slot); /* Current user track, without the WPS hold */
 
 /*
  * Hands out an albumart slot for buffering albumart using the size

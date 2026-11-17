@@ -18,6 +18,7 @@
 #include "system/activity.h"
 #include "system/app_util.h"
 #include "usb.h"
+#include "viewers/lyric_viewer/lyric_viewer.h"
 #include <string.h>
 #include <stdio.h>
 static struct mp3entry id3;
@@ -39,6 +40,7 @@ void cider_wps_update(struct wps_state *state)
     {
         if (source_bound)
         {
+            lyrics_remote_cancel();
             state->id3 = audio_current_track();
             state->nid3 = audio_next_track();
             state->paused = (audio_status() & AUDIO_STATUS_PAUSE) != 0;
@@ -53,7 +55,11 @@ void cider_wps_update(struct wps_state *state)
     bool old_mute = source.muted, old_available = source.available;
     uint32_t old_generation = source.generation;
     cider_snapshot(&source);
-    bool visible = get_current_activity() == ACTIVITY_WPS;
+    int activity = get_current_activity();
+    bool visible = activity == ACTIVITY_WPS;
+    if (visible || activity == ACTIVITY_LYRICS)
+        lyrics_remote_track(source.available ? source.id : "", source.generation,
+                            source.library_generation, source.duration);
     if (volume_baseline && volume_visible && visible && old_available &&
         source.available && old_generation == source.generation &&
         (source.volume != old_volume || source.muted != old_mute))

@@ -4539,6 +4539,14 @@ void audio_flush_and_reload_tracks(void)
 
 /** Miscellaneous public interfaces **/
 
+int playback_track_aa_hid(int slot)
+{
+    struct track_info track;
+    if ((unsigned)slot < MAX_MULTIPLE_AA && track_list_user_current(skip_offset, &track))
+        return track.aa_hid[slot];
+    return ERR_HANDLE_NOT_FOUND;
+}
+
 /* Return which album art handle is current for the user in the given slot */
 int playback_current_aa_hid(int slot)
 {

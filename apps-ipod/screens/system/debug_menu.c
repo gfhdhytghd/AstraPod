@@ -53,6 +53,7 @@
 #include "settings/settings.h"
 #include "widgets/list.h"
 #include "dir.h"
+#include "file.h"
 #include "panic.h"
 #include "crumbs.h"
 #include "system/strutil.h"
@@ -61,6 +62,7 @@
 #include "screens/system/beat_debug.h"
 #include "screens/system/probe_debug.h"
 #include "games/spike/spike_tap.h"
+#include "viewers/lyric_viewer/lyric_viewer.h"
 #include "dircache.h"
 #include "draw/viewport.h"
 #include "database/tagcache.h"
@@ -2164,6 +2166,23 @@ static bool dbg_bootflash_dump(void) {
 #endif
 
 
+static bool dbg_lyrics_perf(void)
+{
+    struct simplelist_info info;
+    simplelist_info_init(&info, "Lyrics perf", 0, NULL);
+    int fd = open(LYRICS_PERF_PATH, O_RDONLY);
+    if (fd < 0)
+        simplelist_addline("%s", "Close Lyrics to record a visit.");
+    else
+    {
+        char buf[64];
+        while (read_line(fd, buf, sizeof(buf)) > 0) simplelist_addline("%s", buf);
+        close(fd);
+    }
+    info.scroll_all = true;
+    return simplelist_show_list(&info);
+}
+
 /** The menu **/
 /* Grouped, in this order: playback, library, display, accessories, hardware.
  * A saved shortcut names its screen by desc, so renaming one strands it. */
@@ -2177,6 +2196,7 @@ static const struct {
     /* Flipped by function; its state is shown after desc. */
     bool *toggle;
 } menuitems[] = {
+        { "Lyrics perf", dbg_lyrics_perf, false, NULL },
 #ifdef HAVE_USB_PODLINK
         { "Cider cover store", cider_store_debug_show, false, NULL },
 #endif

@@ -68,7 +68,8 @@ int main(void){
   feed(mode,0,BUTTON_RC_PLAY,300+threshold);
   feed(mode,BUTTON_RC_PLAY|BUTTON_REL,0,400);
   assert(!count(REMOTE_COVERS_BUTTON)&&!count(REMOTE_SWITCH_BUTTON));
-  if(mode!=REMOTE_AGENTS)assert(count(BUTTON_PLAY)==1&&count(BUTTON_PLAY|BUTTON_REPEAT)==1&&count(BUTTON_PLAY|BUTTON_REL)==1);
+  if(mode==REMOTE_WPS)assert(count(REMOTE_LYRICS_BUTTON)==1&&!count(BUTTON_PLAY));
+  else if(mode!=REMOTE_AGENTS)assert(count(BUTTON_PLAY)==1&&count(BUTTON_PLAY|BUTTON_REPEAT)==1&&count(BUTTON_PLAY|BUTTON_REL)==1);
   reset();tap(mode,ULONG_MAX-70,13);tap(mode,ULONG_MAX-47,13);tap(mode,ULONG_MAX-24,13);
   assert(count(REMOTE_COVERS_BUTTON)==1&&!count(REMOTE_SWITCH_BUTTON));
  }

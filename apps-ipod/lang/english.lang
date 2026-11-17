@@ -28111,3 +28111,18 @@
     *: "Sync time from computer"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_LYRICS_LEAD
+  desc: milliseconds added to the playback time used by the lyrics viewer
+  user: core
+  <source>
+    *: "Lyrics lead"
+  </source>
+  <dest>
+    *: "Lyrics lead"
+  </dest>
+  <voice>
+    *: "Lyrics lead"
+  </voice>
+</phrase>

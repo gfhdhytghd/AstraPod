@@ -93,16 +93,17 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
             remote_log_event(REMOTE_LOG_HOLD, now, context, 0, NULL, 0);
             s->second = false;
             h->fired = true;
-            /* The remote centre's hold is a native Play hold. Native
-             * keymaps own its meaning, including raw viewer contexts. */
-            if (context != REMOTE_AGENTS)
+            /* WPS and Lyrics share one gesture state across the transition. */
+            if (context == REMOTE_WPS)
+                emit(s, REMOTE_LYRICS_BUTTON);
+            else if (context != REMOTE_AGENTS)
             {
                 emit(s, BUTTON_PLAY);
                 emit(s, BUTTON_PLAY | BUTTON_REPEAT);
             }
         }
         if (h->fired && event && !release && (button & BUTTON_REPEAT) &&
-            context != REMOTE_AGENTS && !s->queued)
+            context != REMOTE_AGENTS && context != REMOTE_WPS && !s->queued)
             emit(s, BUTTON_PLAY | BUTTON_REPEAT);
         if (ended)
         {
@@ -127,13 +128,8 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
                     s->released = now;
                 }
             }
-            else if (context == s->play_context)
-            {
-                if (context == REMOTE_AGENTS)
-                    emit(s, BUTTON_PLAY | BUTTON_REL);
-                else
-                    emit(s, BUTTON_PLAY | BUTTON_REL);
-            }
+            else if (context == s->play_context && context != REMOTE_WPS)
+                emit(s, BUTTON_PLAY | BUTTON_REL);
         }
     }
     if (event && (button & BUTTON_MAIN))

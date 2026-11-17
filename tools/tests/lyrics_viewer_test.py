@@ -8,7 +8,7 @@ import ast,re,subprocess,sys
 r=Path(__file__).resolve().parents[2];o=Path(sys.argv[1]).resolve();o.mkdir(parents=True,exist_ok=True)
 ns=ast.parse((r/'tools/tests/lyrics_document_test.py').read_text())
 pre=next(ast.literal_eval(n.value) for n in ns.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='pre' for t in n.targets))
-pre=pre.replace('static struct {int default_codepage;} global_settings;', '''static struct {int default_codepage,lyric_colour_mode,backlight_timeout,backlight_timeout_plugged,lyric_prev_opacity,lyric_next_opacity;unsigned fg_color,bg_color;bool lyric_highlight,lyric_backlight,prevent_skip;} global_settings;''')
+pre=pre.replace('static struct {int default_codepage;} global_settings;', '''static struct {int default_codepage,lyric_colour_mode,backlight_timeout,backlight_timeout_plugged,lyric_prev_opacity,lyric_next_opacity,lyric_lead;unsigned fg_color,bg_color;bool lyric_highlight,lyric_backlight,prevent_skip;} global_settings;''')
 pre=pre.replace('length,id3v2len;', 'length,id3v2len,elapsed;')
 source=(r/'apps-ipod/viewers/lyric_viewer/lyric_viewer.c').read_text()
 source=re.sub(r'^#include ".*\n','',source,flags=re.M)
@@ -25,6 +25,10 @@ adapter=r'''
 #define DRMODE_FG 1
 #define BUTTON_REMOTE 0x8000
 #define FONT_DIR "fonts"
+#define ROCKBOX_DIR "."
+#include "lyric_viewer.h"
+#define fdprintf dprintf
+#define USEC_TIMER mock_usec()
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define TIME_BEFORE(a,b) ((int32_t)((uint32_t)(a)-(uint32_t)(b))<0)
@@ -42,13 +46,14 @@ adapter=r'''
 #define FBADDR(x,y) (screen_pixels+(y)*320+(x))
 typedef uint16_t fb_data;typedef unsigned ucschar_t;
 struct frame_buffer_t {fb_data *fb_ptr;void*(*get_address_fn)(int,int);int stride,elems;};
-struct viewport {struct frame_buffer_t *buffer;unsigned bg_pattern;int font,fg;};
+struct viewport {struct frame_buffer_t *buffer;unsigned bg_pattern;int font,fg,width,height,flags;};
 struct bitmap {int width,height;unsigned char *data;};
 struct screen {int(*getuifont)(void);};
 struct wps_state {struct mp3entry *id3,*nid3;int ff_rewind_count;bool paused;};
 struct cider_row {char id[80],title[124];};
-static uint32_t current_tick;
-static fb_data screen_pixels[320*240],app_area[320*240*3];
+static uint32_t current_tick, precise_extra;
+static uint32_t mock_usec(void){return current_tick*10000+precise_extra;}
+static fb_data screen_pixels[320*240],app_area[3*1024*1024/sizeof(fb_data)];
 static struct viewport default_vp,*vp=&default_vp;
 static struct mp3entry playing;
 static struct wps_state wps={.id3=&playing};
@@ -58,7 +63,7 @@ static bool remote_source,deny_arena,inhibited,remote_key,playing_audio=true,pag
 static bool timed_fixture, wait_row, change_during_copy;
 static struct cider_state remote_clock;
 static int remote_opens, paused_width;
-static int retarget_position;
+static int retarget_position, idle_updates, remote_actions, lead_boundary;
 static int ui_font(void){return 18;}static struct screen screens[]={{ui_font}};
 static struct font *font_get(int f){return f==12?&f12:f==26?&f26:&f18;}
 static int font_load(const char *path){loads++;return strstr(path,"12-")?12:strstr(path,"26-")?26:18;}
@@ -76,23 +81,59 @@ static void lcd_fillrect(int x,int y,int w,int h){for(int r=MAX(y,0);r<MIN(y+h,2
 static void lcd_putsxy(int x,int y,const char*p){int w,h;font_getstringsize((const unsigned char*)p,&w,&h,vp->font);lcd_fillrect(x,y,w,h);}
 static void fill_round_rect(struct screen*s,int x,int y,int w,int h,int radius){(void)s;(void)radius;lcd_fillrect(x,y,w,h);}
 static void lcd_update(void){updates++;}
-static void sleep(int n){assert(n>0);current_tick+=n;}
+static void lcd_update_rect(int x,int y,int w,int h){assert(x>=0&&y>=0&&w>0&&h>0&&x+w<=320&&y+h<=240);updates++;}
+static void sleep(int n){assert(n>=0);current_tick+=n+1;}
 static void *app_try_claim_buffer(size_t*n,const char*s){assert(!strcmp(s,"lyrics"));if(deny_arena)return NULL;*n=sizeof app_area;claims++;return app_area;}
 static void app_release_buffer(const char*s){assert(!strcmp(s,"lyrics"));releases++;}
 static void skin_hold_scrolling(bool h){holds+=h?1:-1;assert(holds>=0);}
 static bool skin_flush_inhibited(void){return inhibited;}
 static void skin_inhibit_flush(bool v){inhibited=v;}
-static unsigned skin_albumart_gen(void){return 0;}
+static unsigned art_generation;
+static unsigned skin_albumart_gen(void){return art_generation;}
 static void push_current_activity(int a){(void)a;activities++;}
 static void pop_current_activity(void){activities--;}
 static void viewportmanager_theme_enable(int s,bool b,struct viewport*v){(void)s;(void)b;*v=(struct viewport){0};}
 static void viewportmanager_theme_undo(int s,bool b){(void)s;(void)b;}
 static unsigned dynamic_colors_resolve(unsigned c){return c;}
 static bool dynamic_colors_roles(unsigned*a,unsigned*b){(void)a;(void)b;return false;}
-static bool art_present;static fb_data art_pixels[256];static struct bitmap art={16,16,(unsigned char*)art_pixels};
-static int wps_art_handle(int s){(void)s;return art_present?1:-1;}
-static bool wps_art_pin(int h,bool b){(void)h;(void)b;return art_present;}
-static bool wps_art_bitmap(int h,struct bitmap**b){(void)h;*b=&art;return art_present;}
+static bool art_present, cached_art;
+static int raw_art_reads, art_handle=1;
+static fb_data art_pixels[256];
+static struct bitmap art={16,16,(unsigned char*)art_pixels};
+static int skin_lyrics_art(void){return art_present?art_handle:-1;}
+static bool wps_art_pin(int h,bool b){(void)b;return art_present&&h==art_handle;}
+static bool wps_art_bitmap(int h,struct bitmap**b){raw_art_reads++;*b=&art;return art_present&&h==art_handle;}
+enum { IMG_CLASSES_ALL, IMG_CLASSES_INPLACE };
+struct img_filter { int text_lum; bool scrim; };
+struct img_levels { int unused; };
+static bool img_filter_compile(const char *spec,int allowed,struct img_filter *f)
+{
+    assert(!strcmp(spec,allowed==IMG_CLASSES_ALL?"blur12+scrim:ffffff+dither":"darker45+dither"));
+    *f=(struct img_filter){.text_lum=255,.scrim=allowed==IMG_CLASSES_ALL};return true;
+}
+static bool skin_lyrics_copy_blur(fb_data *dst,int handle,const struct img_filter *f)
+{
+    assert(handle==art_handle&&f->scrim);
+    if(!cached_art)return false;
+    for(int i=0;i<320*240;i++)dst[i]=art_pixels[0];
+    return true;
+}
+static void img_filter_measure(const fb_data *p,int w,int h,struct img_levels *levels)
+{assert(p==art_pixels&&w==16&&h==16);levels->unused=0;}
+static void img_filter_adapt(struct img_filter *f,const struct img_levels *levels,int avoid)
+{assert(f->scrim&&avoid==255&&!levels->unused);}
+static void img_filter_render(fb_data *dst,int w,int h,const fb_data *p,int sw,int sh,const struct img_filter *f)
+{
+    assert(f->scrim&&w==320&&h==320&&sw==16&&sh==16);
+    for(int i=0;i<w*h;i++)dst[i]= i<40*w ? 0 : p[0];
+    precise_extra+=4000;
+}
+static void img_filter_apply_banded(fb_data *dst,int w,int h,const struct img_filter *f)
+{
+    assert(w==320&&h==240&&!f->scrim);
+    for(int i=0;i<w*h;i++)dst[i]=color_blend(0,dst[i],141);
+    precise_extra+=1000;
+}
 static void backlight_set_timeout(int n){(void)n;}static void backlight_set_timeout_plugged(int n){(void)n;}
 static void remote_cn(const char *id, unsigned position, unsigned rate)
 {
@@ -110,7 +151,13 @@ static struct wps_state *get_wps_state(void)
         playing.length=remote_clock.duration;
         wps.paused=!remote_clock.rate;
     }
+    if (remote_source && !strncmp(playing.path,"cider/",6))
+        lyrics_remote_track(playing.path+6,9,0,playing.length);
     return &wps;
+}
+static bool cider_lyrics_matches(const char *id,uint32_t generation,uint32_t library)
+{
+    return generation==9&&!library&&!strcmp(id,timed_fixture?remote_clock.id:playing.path+6);
 }
 static bool cider_active(void){return remote_source;}
 static int audio_status(void){return playing_audio?AUDIO_STATUS_PLAY:0;}
@@ -122,7 +169,10 @@ static void wps_lyrics_seek(int a,void(*draw)(void)){(void)a;seeks++;wps.ff_rewi
 static void cider_control(const char*c,int v){assert(v==0);assert(!strcmp(c,"toggle")||!strcmp(c,"next")||!strcmp(c,"previous"));controls++;}
 static void cider_page_open(const char*q)
 {
+    static char previous[144];
     assert(strstr(q,"now/lyrics?nonce=")&&strstr(q,"&lrc=1&track="));
+    if(!strcmp(previous,q))return;
+    strcpy(previous,q);
     if (timed_fixture) assert(strstr(q,remote_clock.id));
     remote_at=0;
     page_missed=false;
@@ -168,9 +218,9 @@ static int default_event_handler(int a){default_events++;return a;}
 static int get_action(int c,int timeout);
 '''
 # Avoid libc sleep's POSIX signature in this host adapter.
-pre=pre.replace('#include <unistd.h>','#include <unistd.h>\n#define sleep ui_sleep')
+pre=pre.replace('#include <unistd.h>','#include <unistd.h>\n#include <limits.h>\n#define sleep ui_sleep')
 post=r'''
-static int get_action(int c,int timeout){assert(c==CONTEXT_WPS&&timeout>0&&timeout<=50);current_tick+=timeout;calls++;assert(calls<20);
+static int get_action(int c,int timeout){assert(c==CONTEXT_WPS&&timeout>0&&timeout<=50);current_tick+=timeout;calls++;assert(calls<50);
  if(plan==0){
   if(calls==1){assert(lv.mode.focus==0);return ACTION_WPS_VOLUP;}
   if(calls==2){assert(lv.mode.manual&&lv.mode.focus==1);retarget_position=lyrics_motion_at(&lv.scroll,current_tick);return ACTION_WPS_VOLUP;}
@@ -182,34 +232,77 @@ static int get_action(int c,int timeout){assert(c==CONTEXT_WPS&&timeout>0&&timeo
   assert(!lv.track_fade&&lv.mode.focus==0&&strstr(lv.title,"Second"));return ACTION_WPS_BROWSE;
  }
  if(plan==1){remote_key=true;
-  if(calls==1){assert(lv.pending&&!lyrics_loaded()&&remote_at==50);return ACTION_NONE;}
-  assert(lyrics_loaded()&&lyrics_count()==75&&!lyrics_timed());
-  if(calls==2)return ACTION_WPS_VOLDOWN;
-  if(calls==3){assert(lv.mode.manual&&lv.mode.focus==1);current_tick+=500;return ACTION_NONE;}
-  if(calls==4){assert(lv.mode.manual&&lv.mode.focus==1&&lv.pill.to==0);return ACTION_WPS_PLAY;}
-  if(calls==5)return ACTION_WPS_SKIPNEXT;
-  if(calls==6)return ACTION_WPS_SKIPPREV;
-  return ACTION_WPS_MENU;
+  if(calls==1){
+    assert(lyrics_loaded()&&!lv.pending&&lyrics_count()>=16&&lyrics_count()<75);
+    assert(perf.type[LV_ENTRY].count&&perf.phase[LV_GLYPHS].count);
+  }
+  if(lyrics_count()<75)return ACTION_NONE;
+  assert(lyrics_loaded()&&remote_doc.done&&!lyrics_timed());
+  switch(++remote_actions){
+   case 1:return ACTION_WPS_VOLDOWN;
+   case 2:assert(lv.mode.manual&&lv.mode.focus==1);return ACTION_WPS_PLAY;
+   case 3:return ACTION_WPS_SKIPNEXT;
+   case 4:return ACTION_WPS_SKIPPREV;
+   default:return ACTION_WPS_LYRICS;
+  }
  }
  if(plan==3){
-  if(calls==1){assert(lv.pending&&lv.remote_retry&&!lyrics_loaded());wait_row=false;current_tick+=50;return ACTION_NONE;}
-  if(calls==2){assert(lv.pending&&remote_at==0);return ACTION_NONE;}
-  if(calls==3){assert(lv.pending&&remote_at==1&&!lyrics_loaded());return ACTION_NONE;}
+  if(calls==1){assert(lv.pending&&remote_doc.retry&&!lyrics_loaded());wait_row=false;current_tick+=50;return ACTION_NONE;}
+  if(lv.pending)return ACTION_NONE;
   assert(lyrics_timed()&&lyrics_loaded()&&lyrics_count()==2&&!strcmp(lyrics_text(0),"星 光"));
-  if(calls==4){assert(!lv.paused&&lv.mode.focus==0);paused_width=lv_sung_width(0,26);current_tick+=20;return ACTION_NONE;}
-  if(calls==5){assert(lv_sung_width(0,26)>paused_width&&remote_clock.seq==1);remote_cn("one",850,0);return ACTION_NONE;}
-  if(calls==6){assert(lv.paused&&lv.elapsed==850);paused_width=lv_sung_width(0,26);current_tick+=120;return ACTION_NONE;}
-  if(calls==7){assert(lv.elapsed==850&&lv_sung_width(0,26)==paused_width);remote_cn("one",2150,0);return ACTION_NONE;}
-  if(calls==8){assert(lv.elapsed==2150&&lv.mode.focus==1&&lv.scroll.to==256);return ACTION_WPS_VOLDOWN;}
-  if(calls==9){assert(lv.mode.manual&&lv.mode.focus==0&&lv.pill.to==256);current_tick+=400;return ACTION_NONE;}
-  assert(!lv.mode.manual&&lv.mode.focus==1&&lv.pill.to==0);
-  return ACTION_WPS_MENU;
+  switch(++remote_actions){
+   case 1:assert(!lv.paused&&lv.mode.focus==0);paused_width=lv_sung_width(0,26);current_tick+=20;return ACTION_NONE;
+   case 2:assert(lv_sung_width(0,26)>=paused_width&&remote_clock.seq==1);
+     assert(!lv.art_ready&&!perf.builds);
+     art_present=true;art_handle=7;art_pixels[0]=0x07e0;art_generation++;
+     remote_cn("one",850,0);return ACTION_NONE;
+   case 3:assert(lv.paused&&lv.elapsed==850);paused_width=lv_sung_width(0,26);current_tick+=120;return ACTION_NONE;
+   case 4:assert(lv.elapsed==850&&lv_sung_width(0,26)==paused_width);
+     assert(lv.remote&&lv.art_ready&&perf.builds==1);
+     remote_cn("one",1799,0);return ACTION_NONE;
+   case 5:assert(lv.mode.focus==0);remote_cn("one",1800,0);return ACTION_NONE;
+   case 6:assert(lv.elapsed==1800&&lv.mode.focus==1&&lv.scroll.to==256);return ACTION_WPS_VOLDOWN;
+   case 7:assert(lv.mode.manual&&lv.mode.focus==0&&lv.pill.to==256);current_tick+=400;return ACTION_NONE;
+   default:assert(!lv.mode.manual&&lv.mode.focus==1&&lv.pill.to==0);return ACTION_WPS_LYRICS;
+  }
  }
  if(plan==4){
-  if(calls<3){assert(lv.pending&&!lyrics_loaded());return ACTION_NONE;}
-  assert(!lv.pending&&lv.track_fade&&lyrics_count()==1&&!strcmp(lv.track,"cider/two"));
-  assert(!strcmp(lyrics_text(0),"Current track only")&&lv.elapsed==0&&lv.mode.focus==0);
-  return ACTION_WPS_MENU;
+  if(strcmp(lv.track,"cider/two")){assert(!lyrics_loaded());return ACTION_NONE;}
+  assert(!lv.pending&&lyrics_count()==1&&!strcmp(lyrics_text(0),"Current track only"));
+  assert(lv.elapsed==0&&lv.mode.focus==0);return ACTION_WPS_LYRICS;
+ }
+ if(plan==6){
+   assert(lyrics_time(1)==4000&&lv.old_progress==(int)(playing.elapsed*320/playing.length));
+   if(calls==1){assert(lv.mode.focus==0);playing.elapsed=lead_boundary;return ACTION_NONE;}
+   if(calls==2){assert(lv.mode.focus==1&&lv_word_width(1,26,NULL)==0);playing.elapsed+=500;return ACTION_NONE;}
+   assert(lv_word_width(1,26,NULL)>0);
+   return ACTION_WPS_LYRICS;
+ }
+ if(plan==5){
+   if(calls==1){
+     assert(lv.art_ready&&perf.cached==1&&!perf.builds&&raw_art_reads==0);
+     assert(lv.background[120*320]==color_blend(0,0xffff,141));
+     assert(lv.background[0]<lv.background[120*320]);
+     idle_updates=updates;art_handle=4;art_generation++;
+     return ACTION_NONE;
+   }
+   if(calls==2){
+     assert(updates==idle_updates&&perf.cached==1&&!perf.builds);
+     cached_art=false;art_handle=2;art_pixels[0]=0x001f;art_generation++;
+     return ACTION_WPS_SKIPNEXT;
+   }
+   if(calls==3){
+     assert(lv.art_ready&&perf.builds==1&&perf.build==5000&&raw_art_reads==1&&lv.track_fade);
+     assert(lv.background[40*320]==color_blend(0,0x001f,141));
+     assert(!memcmp(lv_frame(),lv.snapshot,LV_FRAME));
+     current_tick+=25;return ACTION_NONE;
+   }
+   if(calls==4){
+     assert(lv.art_ready&&!lv.track_fade&&perf.builds==1&&raw_art_reads==1);
+     art_present=false;strcpy(strrchr(playing.path,'/')+1,"uncovered.wav");return ACTION_NONE;
+   }
+   assert(!lv.art_ready&&lv.track_fade&&perf.builds==1);
+   return ACTION_WPS_MENU;
  }
  assert(!lv.snapshot&&!lv.claimed&&!lyrics_loaded());return SYS_USB_CONNECTED;
 }
@@ -217,29 +310,67 @@ int main(int argc,char**argv){assert(argc==2);assert(!chdir(argv[1]));
  assert(lv_mix(0,65535,128)==0x7bef);
  assert(lv_mix(0,0xf800,128)==0x7800&&lv_mix(0,0x07e0,128)==0x03e0&&lv_mix(0,0x001f,128)==0x000f);
  art_present=true;for(int i=0;i<256;i++)art_pixels[i]=i<16?0x001f:0xf800;
- unsigned dominant;assert(lv_art_colour(&dominant)&&dominant==0xf800);art_present=false; /* no red/blue channel bleed */
+ art_present=false;
  assert(lv_mix(0x1234,0xabcd,0)==0x1234&&lv_mix(0x1234,0xabcd,256)==0xabcd);
  FILE*f=fopen("song.lrc","w");assert(f);fputs("[00:00.00]One\n[00:04.00]<00:04.00>Two <00:06.00>words\n[00:08.00]Three\n",f);fclose(f);
  f=fopen("other.txt","w");assert(f);fputs("New first line\nNew second line\n中文第三行",f);fclose(f);
  snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);playing.title="Title";playing.artist="Artist";playing.length=60000;
- global_settings.fg_color=65535;global_settings.lyric_highlight=true;global_settings.lyric_backlight=true;global_settings.lyric_prev_opacity=global_settings.lyric_next_opacity=55;
- wps_lyrics_backdrop();assert(lyric_viewer()==GO_TO_PREVIOUS);assert(pauses==1&&seeks==1&&skips==1&&lv.mode.focus==0);
+ global_settings.lyric_lead=200;global_settings.fg_color=65535;global_settings.lyric_highlight=true;global_settings.lyric_backlight=true;global_settings.lyric_prev_opacity=global_settings.lyric_next_opacity=55;
+ wps_lyrics_backdrop();assert(lyric_viewer()==GO_TO_PREVIOUS);assert(pauses==1&&seeks==1&&skips==1);
  assert(claims==1&&releases==1&&loads==3&&unloads==3&&!holds&&!activities&&!inhibited&&!lyrics_loaded());
  plan=1;calls=0;remote_source=true;playing.elapsed=0;strcpy(playing.path,"cider/song");
- assert(lyric_viewer()==GO_TO_PREVIOUS&&controls==3&&remote_at==75&&lv.mode.focus==1);
+ get_wps_state();current_tick+=3;assert(lyrics_remote_step());assert(lyrics_remote_step());
+ assert(lyrics_loaded()&&lyrics_count()==16&&remote_doc.first_ms==30&&!remote_doc.done);
+ assert(lyric_viewer()==GO_TO_PREVIOUS&&controls==3&&remote_at==75);
+ assert(lyrics_loaded()&&remote_doc.done&&remote_doc.complete_ms>=remote_doc.first_ms);
+ lyrics_remote_cancel();
  assert(claims==2&&releases==2&&loads==6&&unloads==6&&!holds&&!activities&&!inhibited);
  plan=2;calls=0;remote_source=false;playing_audio=false;wps.id3=NULL;deny_arena=true;
  assert(lyric_viewer()==GO_TO_ROOT&&default_events==1&&releases==2&&!holds&&!activities&&!inhibited);
- timed_fixture=true;remote_source=true;deny_arena=false;remote_key=false;wps.id3=&playing;
+ deny_arena=false;playing_audio=true;wps.id3=&playing;
+ plan=5;calls=0;art_present=cached_art=true;art_pixels[0]=0xffff;
+ snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);
+ assert(lyric_viewer()==GO_TO_PREVIOUS&&releases==3&&!lv_state);
+ FILE *metrics=fopen("lyrics-perf.txt","r");assert(metrics);
+ char report[2048];size_t len=fread(report,1,sizeof(report)-1,metrics);fclose(metrics);report[len]=0;
+ assert(strstr(report,"blur reuse/builds: 1/1\n")&&strstr(report,"blur max ms: 5\n"));
+ assert(strstr(report,"SELECT to first ms: 31\n")&&strstr(report,"animation fps: "));
+ assert(strstr(report,"restore: ")&&strstr(report,"text/glyph: ")&&strstr(report,"blend: ")&&strstr(report,"LCD: ")&&strstr(report,"wait: "));
+ assert(strstr(report,"entry: ")&&strstr(report,"exit: ")&&strstr(report,"track change: ")&&strstr(report,"CPU MHz"));
+ timed_fixture=true;remote_source=true;remote_key=false;
  const char ca[]="CA\t9\t1\tOK";
  assert(cider_state_apply(&remote_clock,ca,sizeof ca-1,current_tick));
  remote_cn("one",0,1000);
- plan=3;calls=0;wait_row=true;
+ plan=3;calls=0;remote_actions=0;wait_row=true;
  assert(lyric_viewer()==GO_TO_PREVIOUS&&remote_opens==3);
+ assert(lyrics_loaded()&&!strcmp(lyrics_text(1),"Second focus"));
+ lyrics_remote_cancel();
  remote_cn("one",2100,0);
  plan=4;calls=0;change_during_copy=true;
- assert(lyric_viewer()==GO_TO_PREVIOUS&&remote_opens==5&&releases==4);
- assert(updates>40);puts("PASS production viewer: local and 75-row legacy remote, LRC fragments and loading retry, interpolated words, pause, seek, Manual idle return, track race and cross-fade, arena and USB cleanup");
+ assert(lyric_viewer()==GO_TO_PREVIOUS&&remote_opens==5&&releases==5);
+ lyrics_remote_cancel();
+ remote_source=false;plan=6;art_present=false;
+ snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);
+ int leads[]={200,0,-200};
+ for(int i=0;i<3;i++){
+   calls=0;global_settings.lyric_lead=leads[i];lead_boundary=4000-leads[i];playing.elapsed=lead_boundary-1;
+   assert(lyric_viewer()==GO_TO_PREVIOUS);
+ }
+ assert(updates>40);
+ struct lv_state recorder={.entry_at=UINT32_MAX-1999,.first_pending=true};lv_state=&recorder;
+ lv.length=60000;lv.elapsed=100;assert(lv_lyric_elapsed()==0);
+ global_settings.lyric_lead=200;lv.elapsed=59999;assert(lv_lyric_elapsed()==60000);
+ current_tick=0;precise_extra=1000;
+ lv_phase_end(LV_RESTORE,500);lv_record(0,LV_STEADY,false);
+ for(int i=1;i<95;i++)lv_record(0,LV_STEADY,false);
+ for(int i=0;i<5;i++){precise_extra=41000;lv_record(0,LV_STEADY,true);}
+ assert(perf.total.count==100&&perf.dropped==5&&perf.total.maximum==41000&&perf.first==43000);
+ assert(lv_p95(&perf.total)==1000&&perf.phase[LV_RESTORE].sum==500);
+ precise_extra=42000;lv_record(41000,LV_ENTRY,true);
+ precise_extra=100000;lv_record(99000,LV_ENTRY,true);
+ assert(perf.gaps==1&&perf.gap_time==58000&&perf.dropped==6);
+ assert(perf.type[LV_ENTRY].count==2&&perf.type[LV_STEADY].count==100);
+ puts("PASS production viewer: local/remote lyrics, art cache/cold/no art/late remote art, dirty idle, recorder and close log, track fade, arena and USB cleanup");
 }
 '''
 p=o/'viewer.c';p.write_text(pre+h+doc+'\n#include "lyrics_motion.h"\n#include "cider_model.h"\nenum {'+','.join(tokens)+'};\n'+adapter+source+post)

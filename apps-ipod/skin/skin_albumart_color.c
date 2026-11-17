@@ -1212,6 +1212,61 @@ static int filtered_next;
  * matches. */
 static unsigned filter_gen = 1;
 
+static struct skin_albumart *lyrics_skin_blur(struct wps_data *data)
+{
+    struct skin_albumart *aa = skin_find_item("blurred", SKIN_FIND_ALBUMART, data);
+    return aa && aa->x == 0 && aa->y == -40 &&
+           aa->width == LCD_WIDTH && aa->height == LCD_WIDTH &&
+           aa->filter.blur_radius == 12 ? aa : NULL;
+}
+
+int skin_lyrics_art(void)
+{
+    if (cider_active())
+        return wps_art_handle(0);
+    int fallback = -1;
+    for (int skin = WPS; skin >= CUSTOM_STATUSBAR; skin--)
+    {
+        struct gui_wps *gwps = skin_get_loaded_gwps(skin, SCREEN_MAIN);
+        if (!gwps) continue;
+        struct wps_data *data = gwps->data;
+        struct skin_albumart *aa = lyrics_skin_blur(data);
+        int handle = aa ? playback_track_aa_hid(aa->slot) : -1;
+        if (handle >= 0)
+            return handle;
+        aa = skin_albumart_first(get_skin_buffer(data), data->albumart);
+        if (fallback < 0 && aa)
+            fallback = playback_track_aa_hid(aa->slot);
+    }
+    return fallback >= 0 ? fallback : playback_track_aa_hid(0);
+}
+
+bool skin_lyrics_copy_blur(fb_data *dst, int handle, const struct img_filter *filter)
+{
+    for (int skin = WPS; skin >= CUSTOM_STATUSBAR; skin--)
+    {
+        struct gui_wps *gwps = skin_get_loaded_gwps(skin, SCREEN_MAIN);
+        if (!gwps) continue;
+        unsigned generation = filter_gen;
+        struct skin_albumart *aa = lyrics_skin_blur(gwps->data);
+        if (aa && aa->filter_handle > 0 && aa->filtered_art == handle &&
+            aa->filtered_gen == generation && aa->filtered_width == LCD_WIDTH &&
+            aa->filtered_height >= LCD_HEIGHT + 40 &&
+            aa->filter.nsteps == filter->nsteps &&
+            aa->filter.text_lum == filter->text_lum &&
+            !memcmp(aa->filter.steps, filter->steps, filter->nsteps * sizeof(filter->steps[0])))
+        {
+            int buffer = aa->filter_handle;
+            core_pin(buffer);
+            memcpy(dst, (const fb_data *)core_get_data(buffer) + 40 * LCD_WIDTH,
+                   LCD_WIDTH * LCD_HEIGHT * sizeof(*dst));
+            core_unpin(buffer);
+            return generation == filter_gen;
+        }
+    }
+    return false;
+}
+
 unsigned skin_albumart_gen(void)
 {
     return filter_gen;

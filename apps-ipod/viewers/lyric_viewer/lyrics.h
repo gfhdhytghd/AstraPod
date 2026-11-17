@@ -52,6 +52,8 @@ bool lyrics_finish_text(void);
 /* A remote LRC line can span rows. A failed append invalidates the document. */
 bool lyrics_append_lrc(const char *text, bool more);
 bool lyrics_finish_lrc(long duration);
+void lyrics_resume_remote(void);
+bool lyrics_publish_remote(long duration);
 
 /* The path lyrics were read from -- a lyrics file, or the audio file itself
  * for embedded lyrics. Empty string when nothing is loaded. */

@@ -957,6 +957,7 @@ struct user_settings
     int lyric_align;              /* 0 left, 1 centre, 2 right */
     int lyric_prev_opacity;       /* per cent, the line above */
     int lyric_next_opacity;       /* per cent, the line below */
+    int lyric_lead;               /* milliseconds added to the lyrics clock */
     int lyric_anim;               /* 0 off, else the slide in ms */
     bool lyric_highlight;         /* light words as they are sung */
     bool lyric_backlight;         /* hold the backlight on */

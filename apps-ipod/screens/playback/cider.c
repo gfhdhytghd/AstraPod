@@ -1338,6 +1338,15 @@ void cider_page_open(const char *route)
     cider_library_open(route);
     mutex_unlock(&cider_mutex);
 }
+
+bool cider_lyrics_matches(const char *id, uint32_t generation, uint32_t library)
+{
+    mutex_lock(&cider_mutex);
+    bool same = active && state.available && state.generation == generation &&
+                state.library_generation == library && !strcmp(state.id, id);
+    mutex_unlock(&cider_mutex);
+    return same;
+}
 int cider_page_total(void)
 {
     mutex_lock(&cider_mutex);

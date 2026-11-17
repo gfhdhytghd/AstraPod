@@ -112,12 +112,15 @@ int main(void) {
     feed(REMOTE_AGENTS,0,BUTTON_RC_PLAY,169);assert(count==2);
     feed(REMOTE_AGENTS,BUTTON_RC_PLAY|BUTTON_REL,0,180);
     assert(count==3&&output[2]==(BUTTON_PLAY|BUTTON_REL));
-    for(int mode=REMOTE_OTHER;mode<=REMOTE_WPS;mode+=2) {
+    for(int mode=REMOTE_OTHER;mode<=REMOTE_WPS;mode=(mode==REMOTE_OTHER?REMOTE_WPS:REMOTE_WPS+1)) {
         reset();feed(mode,BUTTON_RC_PLAY,BUTTON_RC_PLAY,300);
         feed(mode,0,BUTTON_RC_PLAY,359);assert(!count);
         feed(mode,0,BUTTON_RC_PLAY,360);
-        assert(count==2&&output[0]==BUTTON_PLAY&&output[1]==(BUTTON_PLAY|BUTTON_REPEAT));
+        if(mode==REMOTE_WPS)assert(count==1&&output[0]==REMOTE_LYRICS_BUTTON);
+        else assert(count==2&&output[0]==BUTTON_PLAY&&output[1]==(BUTTON_PLAY|BUTTON_REPEAT));
+        feed(mode,BUTTON_RC_PLAY|BUTTON_REPEAT,BUTTON_RC_PLAY,370);
         feed(mode,BUTTON_RC_PLAY|BUTTON_REL,0,380);
+        if(mode==REMOTE_WPS)assert(count==1);
         for(int i=0;i<count;i++)assert(output[i]!=SWITCH);
     }
     /* Replay every frame and intervening timer tick from the new device log. */
@@ -133,13 +136,16 @@ int main(void) {
         /* Two captured 830 ms holds each have four reports beyond 600 ms.
          * The timer fires before those reports. Native holds retain them:
          * OTHER +12, WPS +8, Agents recording output unchanged. */
-        assert(switches==3&&count==(c==0?17:29));
+        int toggles=0;
+        for(int i=0;i<count;i++)toggles+=output[i]==REMOTE_LYRICS_BUTTON;
+        assert(switches==3&&toggles==(c==2?2:0));
+        assert(count==(c==0?17:c==1?29:17));
     }
-    /* An unpolled second hold can emit five queued WPS events at release. */
+    /* An unpolled second hold preserves the first tap and toggles once. */
     reset();feed(REMOTE_WPS,BUTTON_RC_PLAY,BUTTON_RC_PLAY,100);
     feed(REMOTE_WPS,BUTTON_RC_PLAY|BUTTON_REL,0,113);
     feed(REMOTE_WPS,BUTTON_RC_PLAY,BUTTON_RC_PLAY,123);
-    feed(REMOTE_WPS,BUTTON_RC_PLAY|BUTTON_REL,0,183);assert(count==5);
+    feed(REMOTE_WPS,BUTTON_RC_PLAY|BUTTON_REL,0,183);assert(count==3&&output[2]==REMOTE_LYRICS_BUTTON);
     reset();feed(REMOTE_OTHER,BUTTON_RC_PLAY,BUTTON_RC_PLAY,ULONG_MAX-30);
     feed(REMOTE_OTHER,BUTTON_RC_PLAY|BUTTON_REL,0,ULONG_MAX-10);
     feed(REMOTE_OTHER,BUTTON_RC_PLAY,BUTTON_RC_PLAY,9);

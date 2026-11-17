@@ -257,6 +257,11 @@ static char* get_skin_filename(char *buf, size_t buf_size,
     return buf;
 }
 
+struct gui_wps *skin_get_loaded_gwps(enum skinnable_screens skin, enum screen_type screen)
+{
+    return skins[skin][screen].data.wps_loaded ? &skins[skin][screen].gui_wps : NULL;
+}
+
 struct gui_wps *skin_get_gwps(enum skinnable_screens skin, enum screen_type screen)
 {
     if (skin == CUSTOM_STATUSBAR && !skins_initialised)

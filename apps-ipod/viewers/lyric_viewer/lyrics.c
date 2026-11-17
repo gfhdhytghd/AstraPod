@@ -1167,6 +1167,24 @@ bool lyrics_finish_lrc(long duration)
     return lyrics_finish_text();
 }
 
+void lyrics_resume_remote(void)
+{
+    if (lrc.index)
+        buf_end += (lrc.nline * sizeof(*lrc.index) + 3) & ~3;
+    lrc.index = NULL;
+    lrc.loaded = false;
+}
+
+bool lyrics_publish_remote(long duration)
+{
+    if (lyrics_timed())
+    {
+        lrc.length = duration;
+        sort_lines();
+    }
+    return lyrics_finish_text();
+}
+
 const char *lyrics_file(void)
 {
     return lrc.file;

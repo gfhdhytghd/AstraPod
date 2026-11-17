@@ -72,7 +72,8 @@ int main(void){
   assert(out[used-2]==(context==REMOTE_AGENTS||context==REMOTE_COVERS||context==REMOTE_ALBUM_LIST?BUTTON_SELECT:BUTTON_RC_PLAY));
   /* Every non-Agents centre hold enters the native Play keymaps, no jump shortcut. */
   state=(struct agents_remote_state){0};used=0;feed(context,BUTTON_RC_PLAY,BUTTON_RC_PLAY,200);feed(context,0,BUTTON_RC_PLAY,200+(context==REMOTE_AGENTS?30:60));feed(context,BUTTON_RC_PLAY|BUTTON_REL,0,280);
-  if(context!=REMOTE_AGENTS){assert(used==3&&out[0]==BUTTON_PLAY&&out[1]==(BUTTON_PLAY|BUTTON_REPEAT)&&out[2]==(BUTTON_PLAY|BUTTON_REL));}
+  if(context==REMOTE_WPS){assert(used==1&&out[0]==REMOTE_LYRICS_BUTTON);}
+  else if(context!=REMOTE_AGENTS){assert(used==3&&out[0]==BUTTON_PLAY&&out[1]==(BUTTON_PLAY|BUTTON_REPEAT)&&out[2]==(BUTTON_PLAY|BUTTON_REL));}
   else {assert(used==2&&out[0]==BUTTON_RC_PLAY&&out[1]==(BUTTON_PLAY|BUTTON_REL));}
   /* Explicit EP0 Select: native Play hold, short Select preserved. */
   state=(struct agents_remote_state){0};used=0;feed(context,BUTTON_RC_SELECT,BUTTON_RC_SELECT,300);feed(context,BUTTON_RC_SELECT|BUTTON_REPEAT,BUTTON_RC_SELECT,330);feed(context,BUTTON_RC_SELECT|BUTTON_REL,0,350);

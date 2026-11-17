@@ -179,7 +179,7 @@
                     unit, min, max, step, formatter, get_talk_id, cb)   \
             {flags|F_INT_SETTING|F_T_INT, &global_settings.var,         \
                 lang_id, INT(default), name,                            \
-                 {.int_setting = (struct int_setting[]){                \
+                 {.int_setting = (const struct int_setting[]){          \
                     {cb, unit, step, min, max, formatter, get_talk_id}}}}
 #define INT_SETTING_NOWRAP(flags, var, lang_id, default, name,             \
                     unit, min, max, step, formatter, get_talk_id, cb)      \
@@ -1899,6 +1899,8 @@ const struct settings_list settings[] = {
     INT_SETTING(0, lyric_next_opacity, LANG_LYRICS_NEXT_OPACITY, 55,
                 "lyric next opacity", UNIT_PERCENT, 0, 100, 5,
                 NULL, NULL, NULL),
+    INT_SETTING(0, lyric_lead, LANG_LYRICS_LEAD, 200,
+                "lyrics lead", UNIT_MS, -1000, 1000, 50, NULL, NULL, NULL),
     /* An index, not a duration -- CHOICE_SETTING stores the position in the
      * list. The viewer turns it into milliseconds, so the scale can be
      * retuned without invalidating a saved config. */

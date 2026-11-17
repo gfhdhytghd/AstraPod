@@ -39,6 +39,7 @@ int main(void){
   reset_at(base+1000,profile);pulse(context,BUTTON_RC_PLAY,base+1010,100);
   if(context==REMOTE_QUICKSCREEN)assert(count(BUTTON_RC_SELECT)&&!count(BUTTON_PLAY|BUTTON_REPEAT));
   else if(context==REMOTE_AGENTS)assert(count(BUTTON_RC_PLAY)&&count(BUTTON_PLAY|BUTTON_REL));
+  else if(context==REMOTE_WPS)assert(count(REMOTE_LYRICS_BUTTON)==1&&!count(BUTTON_RC_PLAY|BUTTON_REL)&&!count(BUTTON_PLAY|BUTTON_REL));
   else assert(count(BUTTON_PLAY|BUTTON_REPEAT)&&count(BUTTON_PLAY|BUTTON_REL));
   reset_at(base+2000,profile);
   for(int n=0;n<2;n++)pulse(context,BUTTON_RC_PLAY,base+2010+n*28,13);

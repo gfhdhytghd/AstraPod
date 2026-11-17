@@ -47,6 +47,7 @@ SRC += $(call preprocess, $(APPSDIR)/SOURCES)
 ifeq ($(MODELNAME):$(ARCH),ipod6g:arch_arm)
 $(APPSBUILDDIR)/viewers/lyric_viewer/lyrics.o \
 $(APPSBUILDDIR)/viewers/lyric_viewer/lyric_viewer.o \
+$(APPSBUILDDIR)/screens/playback/cider_controls.o \
 $(APPSBUILDDIR)/screens/playback/cider_browser.o \
 $(APPSBUILDDIR)/screens/system/debug_menu.o \
 $(RBCODEC_BLD)/metadata/mp4.o: CFLAGS += -mthumb -mthumb-interwork

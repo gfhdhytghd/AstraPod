@@ -52,7 +52,10 @@ static void tagcache_search_finish(struct tagcache_search *s) { (void)s; }
 static size_t aa_work_bytes(void) { return 100; }
 static size_t core_allocatable(void)
 { memory_checks++; if (supersede) { aa_offer.serial++; aa_offer.retries = 0; } return memory; }
-static int core_alloc(size_t size) { (void)size; return 1; }
+#define AUDIO_STATUS_PLAY 1
+static int play_status, allocations;
+static int audio_status(void) { return play_status; }
+static int core_alloc(size_t size) { (void)size; allocations++; return 1; }
 static void *core_get_data_pinned(int handle) { (void)handle; return NULL; }
 static void core_unpin(int h) { (void)h; }
 static void core_free(int h) { (void)h; }
@@ -83,7 +86,7 @@ static void queue_post(void *q, int id, int data) { (void)q; (void)id; (void)dat
 static void offer_frame(void)
 {
 ''' + loop[start:end] + '\n}\n'
-for name in ['aa_disk_asleep', 'aa_offer_poll', 'aa_offer_retry', 'aa_handle_offer', 'aa_track_change_cb']:
+for name in ['aa_pass_alloc', 'aa_disk_asleep', 'aa_offer_poll', 'aa_offer_retry', 'aa_handle_offer', 'aa_track_change_cb']:
     if name == 'aa_offer_retry' and 'static void aa_offer_retry(' not in (ROOT / 'apps-ipod/metadata/art_cache.c').read_text():
         continue
     code += function('apps-ipod/metadata/art_cache.c', name)
@@ -96,6 +99,16 @@ static void poll(void)
 }
 int main(void)
 {
+    /* A pass may borrow free scratch space during playback. It must defer
+     * either allocation if the only way to satisfy it would stop playback. */
+    memory = 100;
+    play_status = AUDIO_STATUS_PLAY;
+    assert(aa_pass_alloc(100) > 0 && allocations == 1);
+    assert(aa_pass_alloc(101) < 0 && allocations == 1);
+    play_status = 0;
+    assert(aa_pass_alloc(101) > 0 && allocations == 2);
+    memory = 0;
+    memory_checks = 0;
     strcpy(id3.path, "/song.mp3");
     id3.has_embedded_albumart = true;
     id3.albumart.size = 100;

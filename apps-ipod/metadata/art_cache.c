@@ -2837,6 +2837,15 @@ static void aa_tables_init(void *mem)
     memset(aa_stamps, 0, AA_TABLE_BYTES);
 }
 
+/* A library scan can wait for free memory. Reclaiming the playback buffer
+ * for scratch space would stop and restart the current track. */
+static int aa_pass_alloc(size_t size)
+{
+    if ((audio_status() & AUDIO_STATUS_PLAY) && core_allocatable() < size)
+        return -1;
+    return core_alloc(size);
+}
+
 static enum bg_result aa_run_pass(void)
 {
     struct tagcache_search tcs;
@@ -2850,6 +2859,17 @@ static enum bg_result aa_run_pass(void)
 
     aa_io_failed = false;
     worksz = aa_work_bytes();
+    wh = aa_pass_alloc(worksz);
+    if (wh <= 0)
+        return BG_INTERRUPTED; /* not enough free memory right now */
+
+    sh = aa_pass_alloc(AA_TABLE_BYTES);
+    if (sh <= 0)
+    {
+        core_free(wh);
+        return BG_INTERRUPTED;
+    }
+
     /* No marks to have covered: a trigger, a first pass, a format bump or the
      * old scheme. An upgrade only renames, so its pass reads no tags again. */
     aa_scheme_began = aa_format_current() ? aa_scheme_read() : AA_SCHEME;
@@ -2859,17 +2879,6 @@ static enum bg_result aa_run_pass(void)
                 || art_cache_task.done_marks.entries < 0;
     aa_reread_tags = art_cache_task.done_marks.entries < 0
                      && aa_scheme_began >= AA_SCHEME;
-    wh = core_alloc(worksz);
-    if (wh <= 0)
-        return BG_INTERRUPTED; /* not enough free memory right now */
-
-    sh = core_alloc(AA_TABLE_BYTES);
-    if (sh <= 0)
-    {
-        core_free(wh);
-        return BG_INTERRUPTED;
-    }
-
     workbuf = core_get_data_pinned(wh);
     aa_tables_init(core_get_data_pinned(sh));
 

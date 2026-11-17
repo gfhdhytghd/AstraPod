@@ -20,6 +20,15 @@ h=(r/'apps-ipod/viewers/lyric_viewer/lyrics.h').read_text();h=re.sub(r'^#include
 tokens=sorted(set(re.findall(r'\bACTION_[A-Z_0-9]+',source)))
 adapter=r'''
 #define HAVE_USB_PODLINK
+#define HAVE_ADJUSTABLE_CPU_FREQ
+/* An independent playback owner remains throughout these visits. */
+static int clock_refs = 1, boost_gets, boost_puts;
+#define FREQ (clock_refs ? 216000000 : 54000000)
+static int get_cpu_boost_counter(void) { return clock_refs; }
+static void cpu_boost(bool on) {
+    if (on) { assert(clock_refs == 1); boost_gets++; clock_refs++; }
+    else { assert(clock_refs == 2); boost_puts++; clock_refs--; }
+}
 #define HZ 100
 #define LCD_WIDTH 320
 #define LCD_HEIGHT 240
@@ -62,6 +71,8 @@ static struct mp3entry playing;
 static struct wps_state wps={.id3=&playing};
 static struct font {int height;} f12={12},f18={18},f26={26};
 static int calls,plan,loads,unloads,claims,releases,holds,activities,updates,pauses,seeks,skips,controls,remote_at,default_events;
+static size_t arena_bytes=sizeof app_area;
+static fb_data panel[320*240];
 static bool remote_source,deny_arena,inhibited,remote_key,playing_audio=true,page_missed;
 static bool timed_fixture, wait_row, change_during_copy;
 static struct cider_state remote_clock;
@@ -69,9 +80,10 @@ static int remote_opens, paused_width;
 static int retarget_position, idle_updates, remote_actions, lead_boundary;
 static int ui_font(void){return 18;}static struct screen screens[]={{ui_font}};
 static struct font *font_get(int f){return f==12?&f12:f==26?&f26:&f18;}
-static int font_load(const char *path){loads++;return strstr(path,"12-")?12:strstr(path,"26-")?26:18;}
+static int font_load(const char *path){assert(clock_refs==2);loads++;return strstr(path,"12-")?12:strstr(path,"26-")?26:18;}
 static void font_unload(int f){(void)f;unloads++;}
-static int font_get_width(struct font*f,unsigned ch){return ch>127?f->height:f->height/2;}
+static unsigned width_reads;
+static int font_get_width(struct font*f,unsigned ch){width_reads++;return ch>127?f->height:f->height/2;}
 static const unsigned char *utf8decode(const unsigned char*p,ucschar_t *ch){*ch=*p++;if(*ch>=0xc0){int n=*ch>=0xf0?3:*ch>=0xe0?2:1;while(n--)*ch=(*ch<<6)|(*p++&63);}return p;}
 static int font_getstringsize(const unsigned char*p,int*w,int*h,int f){*w=0;*h=f;while(*p){ucschar_t ch;p=utf8decode(p,&ch);*w+=font_get_width(font_get(f),ch);}return *w;}
 static const char *text_wrap_next_punct(const char *p,int width,struct font*f,const char **end){int n=0;const char*s=p;while(*p&&*p!='\n'){ucschar_t ch;const char*q=(const char*)utf8decode((const unsigned char*)p,&ch);n+=font_get_width(f,ch);if(n>width&&p>s)break;p=q;}*end=p;return *p=='\n'?p+1:p;}
@@ -83,11 +95,12 @@ static void lcd_set_foreground(unsigned c){vp->fg=c;}
 static void lcd_fillrect(int x,int y,int w,int h){for(int r=MAX(y,0);r<MIN(y+h,240);r++)for(int c=MAX(x,0);c<MIN(x+w,320);c++)(vp->buffer?vp->buffer->fb_ptr:screen_pixels)[r*320+c]=vp->fg;}
 static void lcd_putsxy(int x,int y,const char*p){int w,h;font_getstringsize((const unsigned char*)p,&w,&h,vp->font);lcd_fillrect(x,y,w,h);}
 static void fill_round_rect(struct screen*s,int x,int y,int w,int h,int radius){(void)s;(void)radius;lcd_fillrect(x,y,w,h);}
-static void lcd_update(void){updates++;}
-static void lcd_update_rect(int x,int y,int w,int h){assert(x>=0&&y>=0&&w>0&&h>0&&x+w<=320&&y+h<=240);updates++;}
-static void sleep(int n){assert(n>=0);current_tick+=n+1;}
-static void *app_try_claim_buffer(size_t*n,const char*s){assert(!strcmp(s,"lyrics"));if(deny_arena)return NULL;*n=sizeof app_area;claims++;return app_area;}
-static void app_release_buffer(const char*s){assert(!strcmp(s,"lyrics"));releases++;}
+static void lcd_update(void){updates++;memcpy(panel,screen_pixels,sizeof panel);}
+static void lcd_update_rect(int x,int y,int w,int h){assert(x>=0&&y>=0&&w>0&&h>0&&x+w<=320&&y+h<=240);updates++;
+ for(int j=y;j<y+h;j++)memcpy(panel+j*320+x,screen_pixels+j*320+x,w*sizeof(fb_data));}
+static void sleep(int n){assert(clock_refs==2&&n>=0);current_tick+=n+1;}
+static void *app_try_claim_buffer(size_t*n,const char*s){assert(!strcmp(s,"lyrics"));if(deny_arena)return NULL;*n=arena_bytes;claims++;return app_area;}
+static void app_release_buffer(const char*s){assert(clock_refs==1);assert(!strcmp(s,"lyrics"));releases++;}
 static void skin_hold_scrolling(bool h){holds+=h?1:-1;assert(holds>=0);}
 static bool skin_flush_inhibited(void){return inhibited;}
 static void skin_inhibit_flush(bool v){inhibited=v;}
@@ -218,13 +231,84 @@ static bool cider_page_row(int i,struct cider_row*r)
     return true;
 }
 static int get_action_statuscode(int*b){if(b)*b=remote_key?BUTTON_REMOTE:0;return 0;}
-static int default_event_handler(int a){default_events++;return a;}
+static int default_event_handler(int a){assert(clock_refs==1);default_events++;return a;}
 static int get_action(int c,int timeout);
 '''
 # Avoid libc sleep's POSIX signature in this host adapter.
 pre=pre.replace('#include <unistd.h>','#include <unistd.h>\n#include <limits.h>\n#define sleep ui_sleep')
 post=r'''
-static int get_action(int c,int timeout){assert(c==CONTEXT_WPS&&timeout>0&&timeout<=50);current_tick+=timeout;calls++;assert(calls<50);
+static uint32_t rng = 1;
+static unsigned pixel_rand(void)
+{
+    rng = rng * 1664525u + 1013904223u;
+    return rng >> 8;
+}
+static fb_data ref_mix(fb_data a, fb_data b, int p)
+{
+    unsigned w = (p + 4) >> 3;
+    return ((((a >> 11) * (32-w) + (b >> 11) * w) >> 5) << 11)
+         | (((((a >> 5 & 63) * (32-w) + (b >> 5 & 63) * w) >> 5)) << 5)
+         | (((a & 31) * (32-w) + (b & 31) * w) >> 5);
+}
+static void test_pixels(void)
+{
+    /* Cover worst expansion, blank, opaque, AA, clipping and karaoke splits. */
+    for(int t=0;t<2000;t++) {
+        fb_data mask[320], pixels[320], ref[320];
+        fb_data fg=pixel_rand();
+        int limit=t%3==0?288:pixel_rand()%289, sung=(int)(pixel_rand()%322)-1;
+        int a=pixel_rand()%257, dim=a*(pixel_rand()%257)/256;
+        for(int x=0;x<320;x++) {
+            unsigned green=t%4==0?63u*(x%2):t%4==1?63:t%4==2?0:pixel_rand()%64;
+            mask[x]=green<<5; pixels[x]=ref[x]=pixel_rand();
+            if(x<limit) ref[x]=ref_mix(ref[x],fg,
+                    (sung<0||x<sung?a:dim)*(green+(green>>5))>>6);
+        }
+        lv_encode_ink(mask);
+        lv_ink_row(mask,pixels,limit,sung,a,dim,lv_expand(fg));
+        assert(!memcmp(ref,pixels,sizeof ref));
+    }
+    struct lv_state state={0};
+    lv_state=&state;lv.snapshot=app_area;lv.layer=app_area+LV_PIXELS;
+    lv.background=lv.layer+LV_PIXELS;lv.art_ready=true;
+    for(int i=0;i<3*LV_PIXELS;i++)app_area[i]=pixel_rand();
+    for(int alpha=0;alpha<=256;alpha++) {
+        int shift=24*(256-alpha)/256;
+        lv_present(alpha,shift,true);
+        for(int i=0;i<LV_PIXELS;i++) {
+            int j=i-shift*LCD_WIDTH;
+            fb_data page=j<0?lv.background[i]:lv.layer[j];
+            fb_data dark=ref_mix(lv.snapshot[i],LCD_BLACK,alpha*110/256);
+            assert(screen_pixels[i]==ref_mix(dark,page,alpha));
+        }
+        lv_blend_track(alpha);
+        for(int i=0;i<LV_PIXELS;i++)
+            assert(screen_pixels[i]==ref_mix(lv.snapshot[i],lv.layer[i],alpha));
+    }
+    lv_state=NULL;
+    puts("PASS FU65 pixel reference: 2000 ink scanlines and all 257 transition weights");
+}
+static int get_action(int c,int timeout){
+ assert(!memcmp(panel,screen_pixels,sizeof panel));
+ assert(clock_refs == (lv.boost ? 2 : 1));
+ if(timeout>HZ/30)assert(!lv.boost);
+ if(plan==8) {
+   calls++;
+   if(calls==1){assert(lv.masks&&!lv.cues);return ACTION_WPS_SKIPNEXT;}
+   if(calls==2){assert(lv.track_fade);current_tick+=6;return ACTION_WPS_SEEKFWD;}
+   assert(calls==3&&lv.track_fade);
+   /* The destination after a mid-fade seek must match a fresh full redraw. */
+   lv_draw(true,LV_DRAW_ONLY);
+   assert(!memcmp(lv_frame(),lv.layer,LV_FRAME));
+   memcpy(lv_frame(),panel,LV_FRAME);
+   return ACTION_WPS_MENU;
+ }
+ if(plan==7) {
+   assert(calls < 2);
+   if(!calls++){assert(!lv.boost); return ACTION_WPS_VOLUP;}
+   assert(lv.boost&&lv.mode.manual);return SYS_USB_CONNECTED;
+ }
+ assert(c==CONTEXT_WPS&&timeout>0&&timeout<=50);current_tick+=timeout;calls++;assert(calls<50);
  if(plan==0){
   if(calls==1){assert(lv.mode.focus==0);return ACTION_WPS_VOLUP;}
   if(calls==2){assert(lv.mode.manual&&lv.mode.focus==1);retarget_position=lyrics_motion_at(&lv.scroll,current_tick);return ACTION_WPS_VOLUP;}
@@ -233,7 +317,7 @@ static int get_action(int c,int timeout){assert(c==CONTEXT_WPS&&timeout>0&&timeo
   if(calls==5)return ACTION_WPS_SEEKFWD;
   if(calls==6)return ACTION_WPS_SKIPNEXT;
   if(calls==7){assert(!lyrics_timed()&&lyrics_count()==3&&lv.track_fade);assert(!memcmp(lv_frame(),lv.snapshot,LV_FRAME));current_tick+=20;return ACTION_NONE;}
-  assert(!lv.track_fade&&lv.mode.focus==0&&strstr(lv.title,"Second"));return ACTION_WPS_BROWSE;
+  assert(!lv.track_fade&&!lv.boost&&lv.mode.focus==0&&strstr(lv.title,"Second"));return ACTION_WPS_BROWSE;
  }
  if(plan==1){remote_key=true;
   if(calls==1){
@@ -280,6 +364,8 @@ static int get_action(int c,int timeout){assert(c==CONTEXT_WPS&&timeout>0&&timeo
    if(calls==1){assert(lv.mode.focus==0);playing.elapsed=lead_boundary;return ACTION_NONE;}
    if(calls==2){assert(lv.mode.focus==1&&lv_word_width(1,26,NULL)==0);playing.elapsed+=500;return ACTION_NONE;}
    assert(lv_word_width(1,26,NULL)>0);
+   unsigned before=width_reads;
+   assert(lv_word_width(1,26,NULL)>0 && width_reads==before);
    return ACTION_WPS_LYRICS;
  }
  if(plan==5){
@@ -343,8 +429,9 @@ int main(int argc,char**argv){assert(argc==2);assert(!chdir(argv[1]));
  assert(!strncmp(report,"Session 4\nUptime (s): ",22)&&strstr(report,"Duration (ms): "));
  assert(strstr(report,"Source: Local\nTrack: Untimed\n"));
  assert(strstr(report,"blur reuse/builds: 1/1\n")&&strstr(report,"blur max ms: 5\n"));
- assert(strstr(report,"SELECT to first ms: 31\n")&&strstr(report,"animation fps: "));
+ assert(strstr(report,"SELECT to first ms: 1\n")&&strstr(report,"animation fps: "));
  assert(strstr(report,"restore: ")&&strstr(report,"text/glyph: ")&&strstr(report,"blend: ")&&strstr(report,"LCD: ")&&strstr(report,"wait: "));
+ assert(strstr(report,"animation boosted/frames: ")&&strstr(report,"LCD submits: ")&&strstr(report,"mask rasters: "));
  assert(strstr(report,"entry: ")&&strstr(report,"exit: ")&&strstr(report,"track change: ")&&strstr(report,"CPU MHz"));
  timed_fixture=true;remote_source=true;remote_key=false;
  const char ca[]="CA\t9\t1\tOK";
@@ -380,6 +467,15 @@ int main(int argc,char**argv){assert(argc==2);assert(!chdir(argv[1]));
  assert(perf.gaps==1&&perf.gap_time==58000&&perf.dropped==6);
  assert(perf.type[LV_ENTRY].count==2&&perf.type[LV_STEADY].count==100);
  test_perf_history();
+ test_pixels();
+ calls=0;plan=7;playing.elapsed=0;
+ assert(lyric_viewer()==GO_TO_ROOT && clock_refs==1 && boost_gets==boost_puts);
+ plan=8;calls=0;
+ arena_bytes=2*LV_FRAME+LCD_WIDTH*LCD_WIDTH*sizeof(fb_data)
+            +LV_LAYOUTS*sizeof(struct lv_layout)+(LV_MASKS+1)*(sizeof(struct lv_mask)+320*26*sizeof(fb_data));
+ assert(lyric_viewer()==GO_TO_PREVIOUS && clock_refs==1 && boost_gets==boost_puts);
+ puts("PASS FU65 incremental track layer, single-panel damage and small arena");
+ puts("PASS FU65 boost ownership, idle, seek, track change, active USB exit and cue width reuse");
  puts("PASS production viewer: local/remote lyrics, art cache/cold/no art/late remote art, dirty idle, recorder and close log, track fade, arena and USB cleanup");
 }
 '''

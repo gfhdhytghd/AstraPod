@@ -973,3 +973,36 @@ interpolates between CN anchors while playing and stays fixed while paused.
 The host publishes a fresh CN after a device seek and when a paused position
 changes. Timed remote lyrics share the local LRC parser, line focus, word
 highlight, Manual pill and four-second idle return.
+
+## FU63 Jellyfin metadata for Rufin
+
+The device reuses the existing `CF remote`, `CG`, `CL`, native play
+routes and artwork tiers. Cover Flow resolves its title from `CF remote`.
+The browser prefixes connection and availability notices with the same
+backend name. No protocol version or capability changes are required.
+
+When the selected Rufin source is Jellyfin, the host reads Jellyfin's
+HTTPS URL from the matching `sources.configured` entry in
+`~/.config/rufin/settings.json`. `JELLYFIN_URL` overrides that address.
+`JELLYFIN_API_KEY` overrides the user's mode-`0600` regular file at
+`~/.config/podbox-herdremote/jellyfin-token`. The server receives
+`Authorization: MediaBrowser Token="..."` on bounded, timed GET requests.
+The host verifies TLS certificates and refuses redirects. Rufin's encrypted
+credential is independent of this configuration.
+
+Jellyfin list requests use `StartIndex` and `Limit`. The host uses the
+existing CL year, artist subtitle, count and duration fields for album
+metadata. Disc and track numbers and runtimes are formatted into album
+track titles. The `Users/Me` response identifies a user token and enables
+favorites, likes/dislikes and numeric track ratings. Jellyfin app API keys
+support the library without user data. Primary images use maximum width and height of
+240, 128, 56 or 32 pixels for L, M, S and XS. The existing AAT cache stores
+the rendered tiers under keys derived from the source, item ID and image tag.
+
+The Rufin track URI contains the selected source ID and Jellyfin item ID.
+The existing short Rufin track hash stays the device song ID. Native play
+calls Rufin's queue API with the matching URI, anchored to the Rufin album
+page when the track was selected in an album. Playback, queue, Now Playing
+and lyrics continue through Rufin. If Jellyfin is unavailable, the host
+advances the library generation and resumes the Rufin-only library. The
+backend name remains Rufin for either library source.

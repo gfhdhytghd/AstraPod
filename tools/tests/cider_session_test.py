@@ -34,11 +34,11 @@ int main(void){char nonce[17]="unchanged";
  live_at=current_tick;assert(cider_connected());wire=false;assert(!cider_connected());
  wire=true;state.generation=0;assert(!cider_connected());state.generation=7;
  host_live=false;current_tick=10000;assert(cider_connected()); /* old host */
- assert(!strcmp(cider_list_notice(false,false,0,false),"Cider not connected"));
- assert(!strcmp(cider_list_notice(true,false,0,false),"Cider unavailable"));
+ assert(!strcmp(cider_list_notice(false,false,0,false),"%s not connected"));
+ assert(!strcmp(cider_list_notice(true,false,0,false),"%s unavailable"));
  assert(!strcmp(cider_list_notice(true,true,-1,false),"Loading..."));
- assert(!strcmp(cider_list_notice(true,true,0,true),"Cider list unavailable"));
- assert(!strcmp(cider_list_notice(true,true,0,false),"No File"));
+ assert(!strcmp(cider_list_notice(true,true,0,true),"%s list unavailable"));
+ assert(!strcmp(cider_list_notice(true,true,0,false),""));
  assert(!cider_list_notice(true,true,1200,false));
  puts("FU31 challenge validation, device deadline, legacy idle and disconnected/loading/failed/empty labels PASS");}
 '''

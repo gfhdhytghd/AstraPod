@@ -18,8 +18,12 @@ pre=r'''
 #include <string.h>
 #define FOR_NB_SCREENS(i) for(int i=0;i<1;i++)
 #define EV_EXIT 1
-struct carousel_model{int id;};struct db_summary_t{unsigned char*buf;size_t buf_sz;int marker;};
-static const struct carousel_model a={1},b={2},*model=&a,*resume_model;
+#define P2STR(p) ((const char *)(p))
+struct carousel_model { const char *title; bool external; };
+struct db_summary_t{unsigned char*buf;size_t buf_sz;int marker;};
+static const struct carousel_model a={"Album Covers",false},b={NULL,true},*model=&a,*resume_model;
+static const char *remote;
+static const char *cider_remote_name(void) { return remote; }
 static struct db_summary_t carousel_idx,resume_index;
 static int resume_handle,thread_id=1,thread_q,exits,joins,deletes,undos,releases;
 static bool thread_is_running,pf_theme_pushed,pf_boosted,wants_to_quit,fail_alloc;
@@ -40,6 +44,9 @@ static void app_release_buffer(const char*n){(void)n;assert(!thread_is_running);
 '''
 post=r'''
 int main(void){
+ remote="Rufin";model=&b;assert(!strcmp(model_title(),"Rufin"));
+ remote="Cider";assert(!strcmp(model_title(),"Cider"));
+ model=&a;assert(!strcmp(model_title(),"Album Covers"));
  thread_is_running=pf_theme_pushed=pf_boosted=true;cleanup();assert(exits==1&&joins==1&&deletes==1&&undos==1&&releases==1);
  /* Nine final-tier native surfaces in the exact app-buffer image. */
  owned_bytes=3u*1024*1024;owned_buffer=malloc(owned_bytes);assert(owned_buffer);
@@ -53,7 +60,7 @@ int main(void){
  model=&a;fail_alloc=true;assert(!carousel_save_resume()&&!resume_handle);free(owned_buffer);
  puts("FU32 stop/join before theme and app release; 3 MiB exact restore, 9 final-tier covers 0 black pixels, provider rejection, allocation failure PASS");}
 '''
-(O/'test.c').write_text(pre+fn('end_pf_thread')+fn('cleanup')+fn('carousel_forget_resume')+fn('carousel_save_resume')+fn('carousel_restore_resume')+post)
+(O/'test.c').write_text(pre+fn('model_title')+fn('end_pf_thread')+fn('cleanup')+fn('carousel_forget_resume')+fn('carousel_save_resume')+fn('carousel_restore_resume')+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie',str(O/'test.c'),'-o',str(O/'test')],check=True)
 subprocess.run([str(O/'test')],check=True)
 body=fn('carousel_body');assert body.index('end_pf_thread();')<body.index('model = m;')
@@ -61,6 +68,6 @@ loop=fn('album_covers_loop')
 for callback in ('model->enter(center_index)','model->on_context(center_index)','model->on_menu()','model->sort_next()','model->sort_prev()'):
  pos=loop.index(callback);assert 'end_pf_thread();' in loop[max(0,pos-650):pos]
 assert loop.index('buf_ctx_lock();',loop.index('int art_y ='))<loop.index('update_scroll_animation();')<loop.index('buf_ctx_unlock();',loop.index('int art_y ='))
-assert '.title = "Cider"' in (R/'apps-ipod/screens/covers/cider_covers.c').read_text()
+assert '.external = true' in (R/'apps-ipod/screens/covers/cider_covers.c').read_text()
 assert '.title = ID2P(LANG_ALBUM_COVERS)' in (R/'apps-ipod/screens/covers/album_covers.c').read_text() or 'LANG_ALBUM_COVERS' in (R/'apps-ipod/screens/covers/album_covers.c').read_text()
-print('Provider callbacks/join order, render lock and Cider/local title isolation PASS')
+print('Provider callbacks/join order, render lock and Rufin/Cider/local titles PASS')

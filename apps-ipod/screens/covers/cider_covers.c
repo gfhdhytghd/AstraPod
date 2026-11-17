@@ -213,7 +213,6 @@ static const struct carousel_model model = {
     .sort_next = noop,
     .sort_prev = noop,
     .set_initial = initial,
-    .title = "Cider",
     .external = true,
     .read_art = art,
     .art_version = version,

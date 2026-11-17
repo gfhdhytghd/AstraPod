@@ -22,6 +22,7 @@ struct cider_state
 bool cider_live_parse(const void *data, unsigned int length, uint32_t generation,
                       char nonce[17]);
 /* NULL means actual rows. Only confirmed, non-stale zero is an empty library. */
+/* A notice format takes the remote name. An empty format means no files. */
 const char *cider_list_notice(bool connected, bool available, int total, bool stale);
 bool cider_route_matches(const char *route, const char *id);
 unsigned char cider_remote_parse(const char *d, unsigned int n, uint32_t generation);

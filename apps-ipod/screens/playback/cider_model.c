@@ -66,6 +66,15 @@ const char *cider_list_notice(bool connected, bool available, int total, bool st
     return NULL;
 }
 
+/* FU56 "CF gen remote Name": the host's active music backend. 3 = Rufin,
+ * 2 = any other name (shown as Cider), 0 = not this record/generation. */
+unsigned char cider_remote_parse(const char *d, unsigned int n, uint32_t generation)
+{
+    char want[32];
+    int len = snprintf(want, sizeof want, "CF\t%lu\tremote\t", (unsigned long)generation);
+    if (len <= 0 || n <= (unsigned int)len || memcmp(d, want, len)) return 0;
+    return 2 | (n == (unsigned int)len + 5 && !memcmp(d + len, "Rufin", 5));
+}
 /* Compare only song routes; decode one byte at a time on the tight UI stack. */
 bool cider_route_matches(const char *route, const char *id)
 {
@@ -115,7 +124,7 @@ int cider_state_apply(struct cider_state *s, const void *data,
         if (strcmp(f[2], "0") && strcmp(f[2], "1")) return 0;
         if (gen != s->generation)
         {
-            s->seq = 0; s->have = false;
+            s->seq = 0; s->have = false; s->remote = 0;
             s->generation = gen;
         }
         s->available = f[2][0] == '1';

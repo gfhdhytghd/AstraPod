@@ -58,7 +58,7 @@ static int load_page(const char *route)
         if (default_event_handler(action) == SYS_USB_CONNECTED)
         { page_usb = true; return -1; }
     }
-    if (n < 0) splash(HZ, "Cider did not answer");
+    if (n < 0) splashf(HZ, "%s did not answer", cider_remote_name());
     return n;
 }
 static bool read_info(void)

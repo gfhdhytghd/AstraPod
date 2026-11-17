@@ -878,3 +878,59 @@ behavior are unchanged. A stale empty answer can still show `Cider list
 unavailable`; this host-only diagnostic patch does not claim to restore Cider's
 cloud connectivity. Read-only catalog album/playlist track routes are accepted
 by the host path allow-list.
+
+## FU56 Rufin backend and the backend name
+
+The same protocol now serves two host backends: Rufin (preferred) and Cider.
+The host selects one (`hrcider.Bridge._select_remote`); the device keeps one
+session. Setup, token and port rules are in `tools/herdremote/README.md`
+("Rufin Remote (FU56)"). Port note: Rufin's configured web-controller port is
+often taken by KDE Connect (1714-1764), and Rufin then binds the next free
+port; the host tries the configured port and port + 1, verifying each with a
+token-free `GET /` (Rufin's `rufin-csrf` meta tag) before sending anything else.
+
+Capability: firmware advertises `remote-name` **in place of `modes5`**, keeping
+the eight-token limit that older hosts enforce (a ninth token makes them refuse
+`ci`). `loading` already implies the 19/20-field CN that `cn18`+`modes5`
+selected, so the CN layout is unchanged for every FU28+ host.
+
+| Host -> player | Meaning |
+| --- | --- |
+| `CF gen remote Name` | Active backend's display name, after `CA` at `ci` and again on every switch. Firmware shows `Rufin` for `Rufin` and `Cider` for any other name |
+
+| Player -> host | Meaning |
+| --- | --- |
+| `cc gen req remote-home 0` | The remote Home row was entered (root of the remote browser). Sent only after `CF gen remote ...`; answered `CK gen req 1 OK` |
+
+Compatibility: old firmware never advertises `remote-name`, so it receives no
+`CF ... remote` and keeps its static "Cider" strings while the host may still
+drive Rufin. New firmware with an old host receives no `CF ... remote`, shows
+"Cider" and never sends `remote-home`. A new session generation (`CA` with a
+new gen) resets the name to Cider until the host names it again.
+
+Switching: Rufin is active whenever reachable and authenticated. Rufin failing
+(three failed polls, 401 that a re-read token does not cure, connection loss)
+switches to Cider immediately. Rufin returning while Cider is available and
+playing (rate > 0) is deferred until Cider stops/pauses or `remote-home`
+arrives. A switch does not drop availability (no `CA 0/1` blip, which would
+move the source to local); it changes the wire library generation (`CG`;
+`raw + epoch<<24`, epoch 0 = the unchanged Cider value), discards queued pages,
+refuses controls queued for the previous backend (`CK ... 0`), sends `CF ...
+remote` and publishes the new backend's `CN` on the next poll.
+
+Rufin mapping: CN `id` is `r` + 24 hex digits of SHA-256(track URI); song
+routes are `play/library-songs/<id>`, so the firmware's current-song check
+works unchanged. `art-id` is SHA-256 of `rufin:<album URI or track URI>`; the
+host fetches it from Rufin's `/api/artwork` (Bearer, loopback, 2 MiB bound,
+downscaled to 240 px) and renders the same tiers. Collection routes carry
+Rufin ids as URL-quoted JSON text (`album/12`, `playlist/%22x%22`), link pages
+as `album/t<hash>` / `list/t<hash>` (host-side page tokens). Unsupported
+routes return native empty lists; unsupported controls answer `CK ... 0`.
+
+Firmware strings: Home row "Rufin Remote"/"Cider Remote" (dynamic menu text),
+browser root title, skin playlist-name token and the three play/answer
+splashes use the name; debug and diagnostic strings stay "Cider". The name is
+one byte in `struct cider_state` (tail padding, size unchanged at 920 bytes)
+and bit 15 of the lock-free status word. RAM: the remote root list holds 33
+rows instead of 35 (3 fixed + 29 tagnavi + Cover cache; 21 tagnavi rows ship),
+which returns 1472 B and keeps the measured headroom above FU55's 3664 B.

@@ -100,7 +100,7 @@ static void publish_status(void)
     status_word = (state.available ? 1u : 0) | (state.muted ? 2u : 0) |
         (state.loading ? 4u : 0) | (state.rate ? 8u : 0) |
         ((unsigned)state.volume << 4) | ((unsigned)state.shuffle << 11) |
-        ((unsigned)state.repeat << 12);
+        ((unsigned)state.repeat << 12) | ((state.remote & 1u) << 15);
 }
 
 static void pin_apply(void);
@@ -295,7 +295,11 @@ static bool receive(const struct podlink_message *m)
                       !memcmp(m->data, "CO\t", 3) ||
                       !memcmp(m->data, "CQ\t", 3) || !memcmp(m->data, "CB\t", 3) ||
          !memcmp(m->data, "CH\t", 3)))
+    {
+        unsigned char remote = state.remote;
         store_text(m->data, m->length);
+        if (remote != state.remote) button_queue_post(BUTTON_REDRAW, 0); /* Home row label */
+    }
     else
     {
         uint32_t previous = state.generation;
@@ -381,7 +385,7 @@ static unsigned int next(char *record, unsigned int size)
     {
         if (TIME_AFTER(current_tick, hello_at + 2 * HZ))
         {
-            n = snprintf(record, size, "ci\t1\t%d\tcn18,neighbors,warm,play-ack,localstore,modes5,loading,localdiag-live", CIDER_CREDIT);
+            n = snprintf(record, size, "ci\t1\t%d\tcn18,neighbors,warm,play-ack,localstore,remote-name,loading,localdiag-live", CIDER_CREDIT);
             hello_at = current_tick;
         }
     }
@@ -599,6 +603,8 @@ static void store_text(const unsigned char *d, unsigned int n)
           if (disk_running) queue_post(&disk_queue, 1, 0); }
         len = snprintf(want, sizeof want, "CF\t%lu\tlocaldiag", (unsigned long)state.generation);
         if (len > 0 && n == (unsigned int)len && !memcmp(d, want, n)) host_diag = true;
+        unsigned char remote = cider_remote_parse((const char *)d, n, state.generation);
+        if (remote) state.remote = remote;
     }
     else if (d[1] == 'Q' && host_store)
     {
@@ -1087,6 +1093,11 @@ void cider_status(struct cider_status *out)
     out->shuffle = (bits >> 11) & 1;
     out->repeat = (bits >> 12) & 7;
 }
+/* The backend the host named (CF remote); read lock-free from the status word. */
+const char *cider_remote_name(void)
+{
+    return (status_word & (1u << 15)) ? "Rufin" : "Cider";
+}
 /* Queue one control; the request id, or 0 when nothing was queued. */
 static uint32_t queue_control(const char *command, int value)
 {
@@ -1096,6 +1107,13 @@ static uint32_t queue_control(const char *command, int value)
              "cc\t%lu\t%lu\t%s\t%d", (unsigned long)state.generation,
              (unsigned long)++next_request, command, value);
     return next_request;
+}
+/* Home row entry: a host that names its backend may switch to its first choice. */
+void cider_remote_home(void)
+{
+    mutex_lock(&cider_mutex);
+    if (state.remote & 2) queue_control("remote-home", 0);
+    mutex_unlock(&cider_mutex);
 }
 void cider_control(const char *command, int value)
 {

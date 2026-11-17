@@ -105,7 +105,7 @@ bool cider_wps_poll(void)
     if (!cider_play_pending()) return true;
     if (cider_play_status() < 0)
     {
-        splash(HZ, "Cider play failed");
+        splashf(HZ, "%s play failed", cider_remote_name());
         return !cider_connected() || cider_active();
     }
     return true;

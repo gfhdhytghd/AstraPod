@@ -39,7 +39,9 @@ static int depth;
 static bool album_pending, show_covers, remote_return;
 static int cover_album_depth = -1, cover_parent_depth = -1;
 static struct cider_row selected_row;
-static struct cider_row root_rows[35];
+/* 3 fixed rows, the parsed tagnavi main rows (21 shipped) and Cover cache.
+ * FU56: 35 -> 33 slots (29 tagnavi rows) returns 1472 B of RAM. */
+static struct cider_row root_rows[33];
 static int root_count, browse_floor;
 static bool empty_list;
 static const char *list_notice;
@@ -91,7 +93,7 @@ static void root(void)
              str(cider_active() || audio_status() ? LANG_NOW_PLAYING
                                                   : LANG_RESUME_PLAYBACK));
     snprintf(r->route, sizeof r->route, "wps");
-    for (int n = 0; n < browser_db_root_row_count() && root_count < 34; n++)
+    for (int n = 0; n < browser_db_root_row_count() && root_count < (int)ARRAYLEN(root_rows) - 1; n++)
     {
         int index;
         const unsigned char *name;
@@ -317,6 +319,7 @@ int cider_browse(void)
     gui_synclist_set_icon_callback(&list, icon);
     gui_synclist_set_row_callbacks(&list, kind, NULL, NULL);
     root();
+    if (!depth && !show_covers) cider_remote_home();
     ahead_previous = history[depth].selected;
     cider_warm_art(NULL, 0, "S");
     agents_nav_take(AGENTS_NAV_TRACKS);
@@ -334,7 +337,7 @@ int cider_browse(void)
             if (status < 0)
             {
                 play_pending = false;
-                splash(HZ, "Cider could not play the selected item");
+                splashf(HZ, "%s could not play the selected item", cider_remote_name());
             }
         }
         if (show_covers)
@@ -410,8 +413,8 @@ int cider_browse(void)
                                         ? global_settings.db_art_row_height
                                         : 0);
         char title[160];
-        snprintf(title, sizeof title, "%s%s",
-                 depth ? history[depth].title : "Cider Remote",
+        snprintf(title, sizeof title, depth ? "%s%s" : "%s Remote%s",
+                 depth ? history[depth].title : cider_remote_name(),
                  !cider_available()            ? " (unavailable)"
                  : depth && cider_page_stale() ? " *"
                                                : "");

@@ -11,7 +11,7 @@ def fn(s,n):
  while d:d+=(s[e]=='{')-(s[e]=='}');e+=1
  return s[m.start():e]
 assert 'root_menu_place_cider' not in s
-assert re.search(r'MENUITEM_RETURNVALUE\(cider_item,.*?item_callback, Icon_Playlist\)',s,re.S)
+assert re.search(r'MENUITEM_RETURNVALUE_DYNTEXT\(cider_item, GO_TO_CIDER, item_callback,.*?cider_item_name, NULL, NULL, Icon_Playlist\)',s,re.S)
 pre=r'''
 #include <assert.h>
 #include <stdbool.h>

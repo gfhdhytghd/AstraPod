@@ -15,6 +15,8 @@ void cider_init(void);
 bool cider_connected(void);
 bool cider_available(void);
 bool cider_active(void);
+const char *cider_remote_name(void);
+void cider_remote_home(void);
 bool cider_play_pending(void);
 void cider_remote_source(void);
 void cider_source_poll(void);
@@ -51,6 +53,7 @@ struct cider_row;
 bool cider_page_row(int index, struct cider_row *row);
 #else
 static inline bool cider_play_pending(void) { return false; }
+static inline const char *cider_remote_name(void) { return "Cider"; }
 static inline void cider_remote_source(void) {}
 static inline void cider_source_poll(void) {}
 static inline bool cider_active(void) { return false; }

@@ -16,6 +16,7 @@ struct cider_state
     uint32_t bg;
     char previous_art[65], next_art[65];
     char id[80], art[65], title[124], artist[124], album[124], composer[124], reason[96];
+    unsigned char remote; /* FU56 CF remote: bit 0 Rufin (else Cider), bit 1 host names it */
 };
 /* Strict session challenge, independent of status, art and page credits. */
 bool cider_live_parse(const void *data, unsigned int length, uint32_t generation,
@@ -23,6 +24,7 @@ bool cider_live_parse(const void *data, unsigned int length, uint32_t generation
 /* NULL means actual rows. Only confirmed, non-stale zero is an empty library. */
 const char *cider_list_notice(bool connected, bool available, int total, bool stale);
 bool cider_route_matches(const char *route, const char *id);
+unsigned char cider_remote_parse(const char *d, unsigned int n, uint32_t generation);
 #define CIDER_MODE_SHUFFLE 0   /* Cider shuffleMode: 0 off, 1 on */
 #define CIDER_MODE_REPEAT 1    /* Rockbox repeat_mode: 0 off, 1 all, 2 one, 3 shuffle, 4 A-B */
 #define CIDER_REPEAT_AB 4

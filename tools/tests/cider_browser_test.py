@@ -46,7 +46,10 @@ static void cider_remote_source(void){}
 static bool cover_nav_origin_is(int s){return (origin_agents&&s==GO_TO_AGENTS)||(origin_wps&&s==GO_TO_WPS);}
 static bool fail_play;
 static int cider_play_status(void){return 1;}
-static void splash(int t,const char*s){(void)t;(void)s;}
+static void splashf(int t,const char*f,...){(void)t;(void)f;}
+__attribute__((unused)) static void splash(int t,const char*s){(void)t;(void)s;}
+static const char*cider_remote_name(void){return "Cider";}
+static int remote_homes;static void cider_remote_home(void){remote_homes++;}
 static bool cider_store_debug_show(void){return false;}
 static unsigned cider_read_ahead_count(unsigned s,unsigned v){(void)s;(void)v;return 6;}
 static void cider_read_ahead(const char*const*k,unsigned n,const char*t){(void)k;(void)n;(void)t;}
@@ -106,7 +109,7 @@ if(step>128){*a=ACTION_REMOTE_WPS;return;}rng=rng*1664525+1013904223;l->selected
 post=r'''
 int cider_covers(void){if(mode==4)return CIDER_COVERS_REMOTE_RETURN;if(mode==1)return GO_TO_PREVIOUS;assert(live==1);live++;if(live>max_live)max_live=live;struct cider_row r={0};strcpy(r.route,"album/a0");strcpy(r.title,"Album 0");cider_browse_album(&r);live--;return GO_TO_PREVIOUS;}
 int main(void){
-mode=0;depth=0;assert(cider_browse()==GO_TO_WPS&&plays==1&&!live&&depth==0);assert(root_count==6);assert(!strcmp(root_rows[3].route,"root/Album")&&!strcmp(root_rows[4].route,"root/Genre"));
+mode=0;depth=0;assert(cider_browse()==GO_TO_WPS&&plays==1&&!live&&depth==0);assert(root_count==6&&remote_homes==1);assert(!strcmp(root_rows[3].route,"root/Album")&&!strcmp(root_rows[4].route,"root/Genre"));
 mode=1;assert(cider_browse()==GO_TO_ROOT&&!live&&depth==0);
 depth=1;strcpy(history[1].route,"random");assert(cider_browse()==GO_TO_WPS&&depth==0&&!live);assert(cider_browse()==GO_TO_ROOT&&!live);
 fail_play=true;depth=1;strcpy(history[1].route,"album/a0");memset(history[1].art,'c',64);history[1].art[64]=0;pins=0;mode=3;step=0;int raced=plays;assert(cider_browse()==GO_TO_ROOT&&plays==raced&&!live);assert(pins>0&&!pinned);fail_play=false;

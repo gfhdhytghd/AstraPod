@@ -1339,8 +1339,15 @@ MENUITEM_RETURNVALUE(system_menu_, ID2P(LANG_SYSTEM), GO_TO_SYSTEM_SCREEN,
                      NULL, Icon_System_menu);
 
 #ifdef HAVE_USB_PODLINK
-MENUITEM_RETURNVALUE(cider_item, "Cider Remote", GO_TO_CIDER,
-                     item_callback, Icon_Playlist);
+/* "Rufin Remote" or "Cider Remote": the backend the host names (FU56). */
+static char *cider_item_name(int selected, void *data, char *buf, size_t size)
+{
+    (void)selected; (void)data;
+    snprintf(buf, size, "%s Remote", cider_remote_name());
+    return buf;
+}
+MENUITEM_RETURNVALUE_DYNTEXT(cider_item, GO_TO_CIDER, item_callback,
+                             cider_item_name, NULL, NULL, Icon_Playlist);
 #endif
 struct menu_item_ex root_menu_;
 static struct menu_callback_with_desc root_menu_desc = {

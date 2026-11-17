@@ -128,7 +128,7 @@ static void cider_page_open(const char*q){snprintf(route,sizeof route,"%s",q);}s
 static bool cider_page_row(int n,struct cider_row*r){memset(r,0,sizeof*r);snprintf(r->id,sizeof r->id,"title");snprintf(r->title,sizeof r->title,"value");snprintf(r->route,sizeof r->route,"album/a");r->count=0;return n<12;}
 static void cider_store_stats(struct cider_store_stats*s){memset(s,0,sizeof*s);}static void cider_store_build(bool b){(void)b;}static bool cider_store_building(void){return false;}
 static unsigned cider_read_ahead_count(unsigned a,unsigned b){(void)a;(void)b;return 6;}static int cider_wps_volume(void*p){(void)p;return 37;}
-static void splash(int n,const char*t){(void)n;(void)t;}static void action_wait_for_release(void){}
+__attribute__((unused)) static void splash(int n,const char*t){(void)n;(void)t;}static void splashf(int n,const char*f,...){(void)n;(void)f;}static const char*cider_remote_name(void){return "Cider";}static void action_wait_for_release(void){}
 static int get_action(int c,int t);static int do_menu(const struct menu_item_ex*,int*,struct viewport[NB_SCREENS],bool);
 static bool simplelist_show_list(struct simplelist_info*);
 static int view_text(const char*t,const char*v){(void)t;(void)v;int action;do{action=get_action(0,1);}while(action==ACTION_NONE);assert(action==ACTION_STD_CANCEL);return 0;}

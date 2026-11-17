@@ -1839,7 +1839,7 @@ const char *get_token_value(struct gui_wps *gwps,
         case SKIN_TOKEN_LIST_NEEDS_SCROLLBAR:
             return skinlist_needs_scrollbar(gwps->display->screen_type) ? "s" : "";
         case SKIN_TOKEN_PLAYLIST_NAME:
-            return cider_active() ? "Cider" : playlist_name(NULL, buf, buf_size);
+            return cider_active() ? cider_remote_name() : playlist_name(NULL, buf, buf_size);
 
         case SKIN_TOKEN_PLAYLIST_POSITION:
             numeric_ret = cider_active() ? 1 : playlist_get_display_index()+offset;

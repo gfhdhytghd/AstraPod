@@ -67,7 +67,7 @@ static struct wps_state testing_wps;
 static struct mp3entry local_id3;
 static struct mp3entry*audio_current_track(void){return &local_id3;}
 static struct mp3entry*audio_next_track(void){return NULL;}
-static void splash(int n,const char*s){(void)n;(void)s;}
+__attribute__((unused)) static void splash(int n,const char*s){(void)n;(void)s;}static void splashf(int n,const char*f,...){(void)n;(void)f;}static const char*cider_remote_name(void){return "Cider";}
 static bool cider_connected(void){return true;}
 static struct wps_state*get_wps_state(void){return &testing_wps;}
 static int seek_actions;

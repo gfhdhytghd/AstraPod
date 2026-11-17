@@ -1723,6 +1723,30 @@ static void free_all_slide_prio(int prio)
 }
 
 
+/* Keep a two-column box-filtered level behind the native pixels in the
+ * movable surface. It is built once, after the user's artwork filters. */
+static size_t side_level_bytes(int width, int height)
+{
+    return ((width + 1) / 2) * height * sizeof(pix_t);
+}
+
+static void build_side_level(struct dim *bm)
+{
+    const int h = bm->height;
+    const pix_t *src = (pix_t *)(bm + 1);
+    pix_t *dst = (pix_t *)src + bm->width * h;
+    for (int x = 0; x < bm->width; x += 2)
+    {
+        const pix_t *left = src + x * h;
+        const pix_t *right = x + 1 < bm->width ? left + h : left;
+        for (int y = 0; y < h; y++)
+        {
+            unsigned int a = left[y], b = right[y];
+            *dst++ = (a & b) + (((a ^ b) & 0xf7de) >> 1);
+        }
+    }
+}
+
 /* Read a pfraw image into the slide cache; a buflib handle, or -1.
  *
  * Only the placeholder comes through here, and both callers assign the result
@@ -1754,7 +1778,8 @@ static int read_pfraw(char* filename, int prio)
     }
 
     int size =  sizeof(int) + sizeof(struct dim) +
-                sizeof( pix_t ) * bmph.width * bmph.height;
+                sizeof(pix_t) * bmph.width * bmph.height +
+                side_level_bytes(bmph.width, bmph.height);
 
     int hid;
     do {
@@ -1785,6 +1810,7 @@ static int read_pfraw(char* filename, int prio)
         return -1;
     }
 
+    build_side_level(bm);
     close( fh );
     return hid;
 }
@@ -1895,8 +1921,10 @@ static int read_aat(int fh, int prio)
     if (len > most)
         len = most;
 
+    /* At most half the native pixels, plus one padded column for odd widths. */
     do {
-        hid = buflib_alloc(&buf_ctx, sizeof(int) + PF_READ_SLACK + len);
+        hid = buflib_alloc(&buf_ctx, sizeof(int) + PF_READ_SLACK + len +
+                           (len - sizeof(hdr) + DISPLAY_HEIGHT * sizeof(pix_t)) / 2);
     } while (hid < 0 && free_slide_prio(prio));
 
     if (hid < 0)
@@ -1958,6 +1986,7 @@ static int read_aat(int fh, int prio)
      * -- it is the one filter that reads a pixel's position -- and a Bayer
      * grid turned on its side is still a Bayer grid. */
     img_filter_apply_banded(dst, h, w, carousel_filter());
+    build_side_level(bm);
 
     return hid;
 }
@@ -1979,7 +2008,8 @@ static inline bool load_and_prepare_surface(const int slide_index,
         if (model->read_art(slide_index, &bitmap))
         {
             size_t bytes = bitmap.width * bitmap.height * sizeof(pix_t);
-            hid = buflib_alloc(&buf_ctx, sizeof(int) + sizeof(struct dim) + bytes);
+            hid = buflib_alloc(&buf_ctx, sizeof(int) + sizeof(struct dim) + bytes +
+                               side_level_bytes(bitmap.width, bitmap.height));
             if (hid < 0) return false;
             char *block = buflib_get_data(&buf_ctx, hid);
             *(int *)block = sizeof(int);
@@ -1988,6 +2018,7 @@ static inline bool load_and_prepare_surface(const int slide_index,
             memcpy(dim + 1, bitmap.data, bytes);
             img_filter_apply_banded((pix_t *)(dim + 1), bitmap.height,
                                     bitmap.width, carousel_filter());
+            build_side_level(dim);
             got_shared = true;
         }
     }
@@ -2749,7 +2780,11 @@ static bool slide_x_range(struct slide_data *slide, int *x0, int *x1)
  * shares every one of them, comes to write to them; tiled, each line is fetched
  * once for all eight, and a pixel costs ~20% less on the 5G. */
 #define PF_TILE_W    8
+#ifdef CPU_PP
 #define PF_TILE_ROWS 32
+#else
+#define PF_TILE_ROWS LCD_HEIGHT
+#endif
 
 /* One column of a tile, from the middle row outward: upward or downward. */
 struct pf_col
@@ -2776,10 +2811,12 @@ static void NO_INLINE draw_run(struct pf_col *k, int n, int step)
 
     for (; n >= 4; n -= 4)
     {
-        *pixel = src[p >> PFREAL_SHIFT]; p += dp; pixel += step;
-        *pixel = src[p >> PFREAL_SHIFT]; p += dp; pixel += step;
-        *pixel = src[p >> PFREAL_SHIFT]; p += dp; pixel += step;
-        *pixel = src[p >> PFREAL_SHIFT]; p += dp; pixel += step;
+        pixel[0] = src[p >> PFREAL_SHIFT];
+        pixel[step] = src[(p + dp) >> PFREAL_SHIFT];
+        pixel[2 * step] = src[(p + 2u * dp) >> PFREAL_SHIFT];
+        pixel[3 * step] = src[(p + 3u * dp) >> PFREAL_SHIFT];
+        p += 4u * dp;
+        pixel += 4 * step;
     }
     while (n-- > 0)
     {
@@ -2848,13 +2885,58 @@ static int draw_tile_half(struct pf_col *cols, int ncols, int step,
 static void draw_tile(struct pf_col *up, struct pf_col *lo, int ncols,
                       const struct pf_fade *f)
 {
-    int px = draw_tile_half(up, ncols, -BUFFER_WIDTH, f)
-           + draw_tile_half(lo, ncols, BUFFER_WIDTH, f);
+    /* With a continuous source step the two halves form one run. Walk it
+     * from top to bottom, keeping the tiled framebuffer writes. */
+    int separate = 0;
+    for (int i = 0; i < ncols; ++i)
+    {
+        if (up[i].n && up[i].p != lo[i].p - lo[i].dp)
+        {
+            separate += draw_tile_half(up + i, 1, -BUFFER_WIDTH, f);
+            continue;
+        }
+        int upper = up[i].n;
+        lo[i].px -= upper * BUFFER_WIDTH;
+        lo[i].p -= upper * lo[i].dp;
+        lo[i].n += upper;
+    }
+    int px = separate + draw_tile_half(lo, ncols, BUFFER_WIDTH, f);
 #if PF_SHOW_STATS
     pf_px += px;
 #else
     (void)px;
 #endif
+}
+
+/* The split line is a pixel boundary. extent is the source distance from
+ * that line to the silhouette. Only the last pixel needs the framebuffer. */
+struct pf_extent { int rows; unsigned int coverage; };
+
+static inline struct pf_extent project_extent(int extent, int dy, unsigned int recip)
+{
+    int rows = div_by_recip(extent, dy, recip);
+    unsigned int rem = extent - rows * dy;
+    unsigned int fraction = ((uint64_t)rem * recip) >> 24;
+    return (struct pf_extent){rows, (fraction + 2) & 0x1fc};
+}
+
+static inline void cover_half(struct pf_col *col, struct pf_extent span,
+                              int limit, int step, pix_t edge,
+                              const struct pf_fade *fade)
+{
+    int full = span.rows;
+    col->n = MIN(full, limit);
+    if (full >= limit)
+        return;
+    unsigned int coverage = span.coverage;
+    if (!coverage)
+        return;
+    if (fade)
+        edge = fade_color(edge, fade->a, fade->rb, fade->g);
+    pix_t *pixel = col->px + full * step;
+    unsigned int bg = *pixel;
+    *pixel = fade_color(edge, coverage, (bg & 0xf81f) * (256 - coverage),
+                        (bg & 0x07e0) * (256 - coverage));
 }
 
 /* Draw only columns in [x_from, x_to). The projection's state is carried
@@ -2988,7 +3070,17 @@ static void render_slide_clipped(struct slide_data *slide, const int alpha,
         if (perspective)
             dy = div_cam_dist(CAM_DIST_R + zo + fmul(xs, sinr));
 
-        const pix_t *ptr = &src[column * sh];
+        PFreal next = xs + PFREAL_ONE;
+        if (perspective)
+        {
+            xsnum += xsnumi;
+            xsden += xsdeni;
+            next = fdiv(xsnum, xsden);
+        }
+        const pix_t *ptr = src + column * sh;
+        if (slide->angle && next - xs >= PFREAL_ONE + PFREAL_HALF)
+            ptr = src + (sw + column / 2) * sh;
+        xs = next;
         /* The rows each half draws: upward from the middle row while p stays
          * at or above plim, downward while it stays below plo. */
         int plim = MAX(0, p_start_upper - (half_height-1) * dy);
@@ -3000,13 +3092,26 @@ static void render_slide_clipped(struct slide_data *slide, const int alpha,
         u->p = p_start_upper;
         u->dp = -dy;
         u->px = LCDADDR(x, half_height - 1);
-        u->n = (p_start_upper >= plim)
-             ? div_by_recip(p_start_upper - plim, dy, recip) + 1 : 0;
         l->p = p_start_lower;
         l->dp = dy;
         l->px = LCDADDR(x, half_height);
-        l->n = (plo > p_start_lower)
-             ? div_by_recip(plo - p_start_lower + dy - 1, dy, recip) : 0;
+        if (slide->angle)
+        {
+            int split = MIN(p_start_lower, sh * PFREAL_ONE);
+            u->p = split - dy;
+            int below = sh * PFREAL_ONE - split;
+            struct pf_extent top = project_extent(split, dy, recip);
+            struct pf_extent bottom = split == below ? top : project_extent(below, dy, recip);
+            cover_half(u, top, half_height, -BUFFER_WIDTH, ptr[0], f);
+            cover_half(l, bottom, lower_half, BUFFER_WIDTH, ptr[sh - 1], f);
+        }
+        else
+        {
+            u->n = (p_start_upper >= plim)
+                 ? div_by_recip(p_start_upper - plim, dy, recip) + 1 : 0;
+            l->n = (plo > p_start_lower)
+                 ? div_by_recip(plo - p_start_lower + dy - 1, dy, recip) : 0;
+        }
 
         /* A tile ends where a cache line does, not after PF_TILE_W columns
          * counted from wherever the slide happens to start. */
@@ -3016,13 +3121,6 @@ static void render_slide_clipped(struct slide_data *slide, const int alpha,
             ncols = 0;
         }
 
-        if (perspective)
-        {
-            xsnum += xsnumi;
-            xsden += xsdeni;
-            xs = fdiv(xsnum, xsden);
-        } else
-            xs += PFREAL_ONE;
 
     }
     if (ncols > 0)
@@ -3071,39 +3169,30 @@ static int slide_dy_at(struct slide_data *slide, int x)
     return (CAM_DIST_R + zo + fmul(xs, sinr)) / CAM_DIST;
 }
 
-/* Whether `near`, drawn over `far`, really hides it across screen columns
- * [a, b]. Every drawn pixel is opaque -- fade_color() blends toward
- * pf_bg_color and never reads the framebuffer -- so what it hides is wasted
- * work rather than part of a blend.
- *
- * Both slides must share a vertical offset, which is what the height and cy
- * tests are: voff is worked out from those two alone, and without a shared one
- * the two are not even anchored to the same row.
- *
- * Given that, `near` is the taller of the two wherever its dy is the lower.
- * An untilted slide in the plane of the display -- the centre slide at rest --
- * takes that outright: its dy is exactly PFREAL_ONE and no slide's dy is ever
- * less, because zo grows with the tilt at the same rate the xs term can
- * subtract. Everything else is sampled: dy is a smooth function of the screen
- * column for both slides, so the two ends and the middle of the overlap settle
- * it. Getting this wrong leaves a stripe of whatever was in the framebuffer
- * before, which no later pass repairs, so tools/pfgeom checks the sampling
- * against a full every-column comparison rather than it being argued about. */
+/* An antialiased silhouette needs the underlying slide in its partial row.
+ * At the endpoints and midpoint reserve a whole row of separation on the
+ * shorter half, so both silhouettes lie inside the opaque interior. */
 static bool slide_covers(struct slide_data *near, struct slide_data *far,
                          int a, int b)
 {
     struct dim *n = surface(near), *f = surface(far);
-    int mid = a + (b - a) / 2;
-
-    if (b < a || !n || !f)
+    if (b < a || !n || !f || n->height != f->height || near->cy != far->cy)
         return false;
-    if (n->height != f->height || near->cy != far->cy)
+    int split = pf_half_height - slide_voff(n->height, near->cy);
+    int half = MIN(split, n->height - split);
+    if (!near->angle && !near->distance)
+        return slide_dy_at(far, a) >= PFREAL_ONE && slide_dy_at(far, b) >= PFREAL_ONE;
+    if (half <= 0)
         return false;
-    if (near->angle == 0 && near->distance == 0)
-        return true;
-    return slide_dy_at(near, a)   <= slide_dy_at(far, a)
-        && slide_dy_at(near, mid) <= slide_dy_at(far, mid)
-        && slide_dy_at(near, b)   <= slide_dy_at(far, b);
+    for (int i = 0; i < 3; i++)
+    {
+        int x = i == 0 ? a : (i == 1 ? (a + b) / 2 : b);
+        int nd = slide_dy_at(near, x), fd = slide_dy_at(far, x);
+        if (fd <= nd || (int64_t)half * PFREAL_ONE * (fd - nd) <
+                        (int64_t)nd * fd)
+            return false;
+    }
+    return true;
 }
 
 void set_current_slide(const int slide_index)
@@ -4151,7 +4240,9 @@ static bool init(void)
                                    * sizeof(pix_t), sizeof(long));
     /* The largest slide read_aat() will accept, and so what one costs the
      * cache below. */
-    size_t slide_max = (size_t)DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(pix_t);
+    size_t slide_max = (size_t)DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(pix_t)
+                     + side_level_bytes(DISPLAY_WIDTH + 1, DISPLAY_HEIGHT)
+                     + sizeof(int) + PF_READ_SLACK + sizeof(struct art_cache_header);
 
     ALIGN_BUFFER(carousel_idx.buf, carousel_idx.buf_sz, sizeof(long));
 

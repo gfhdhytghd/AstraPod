@@ -279,29 +279,31 @@ static int slide_dy_at(struct slide_data *slide, int x)
 
 /* the every-column version, which is what the sampled one is checked against */
 static int exhaustive;
+static int slide_voff(int sh, PFreal cy);
 
 static int slide_covers(struct slide_data *near, struct slide_data *far,
                         int a, int b)
 {
     struct dim n, f;
-    int mid = a + (b - a) / 2, x;
-
     n = *surface(near); f = *surface(far);
-
-    if (b < a)
+    if (b < a || n.height != f.height || near->cy != far->cy)
         return 0;
-    if (n.height != f.height || near->cy != far->cy)
-        return 0;
-    if (near->angle == 0 && near->distance == 0)
-        return 1;
-    if (exhaustive) {
-        for (x = a; x <= b; x++)
-            if (slide_dy_at(near, x) > slide_dy_at(far, x)) return 0;
-        return 1;
+    int split = pf_half_height - slide_voff(n.height, near->cy);
+    int half = MIN(split, n.height - split);
+    int points = exhaustive ? b - a + 1 : 3;
+    for (int i = 0; i < points; i++) {
+        int x = exhaustive ? a + i : (i == 0 ? a : (i == 1 ? (a+b)/2 : b));
+        int fd = slide_dy_at(far, x);
+        if (!near->angle && !near->distance) {
+            if (fd < PFREAL_ONE) return 0;
+        } else {
+            int nd = slide_dy_at(near, x);
+            if (half <= 0 || fd <= nd ||
+                (int64_t)half * PFREAL_ONE * (fd-nd) < (int64_t)nd*fd)
+                return 0;
+        }
     }
-    return slide_dy_at(near, a)   <= slide_dy_at(far, a)
-        && slide_dy_at(near, mid) <= slide_dy_at(far, mid)
-        && slide_dy_at(near, b)   <= slide_dy_at(far, b);
+    return 1;
 }
 
 static void cull_side(struct slide_data *side, const int *alpha,
@@ -514,6 +516,25 @@ static long render_slide_clipped(struct slide_data *slide, int x_from, int x_to)
         }
         if (perspective) dy = div_cam_dist(CAM_DIST_R + zo + fmul(xs, sinr));
 
+        if (slide->angle) {
+            int split = MIN(p_start_lower, sh * PFREAL_ONE);
+            for (int side = 0; side < 2; side++) {
+                int extent = side ? sh * PFREAL_ONE - split : split;
+                int full = extent / dy;
+                unsigned int recip = 0xffffffffu / dy;
+                int cover = (((uint64_t)(extent % dy) * recip >> 24) + 2) & 0x1fc;
+                int limit = side ? lower_half : half_height;
+                for (int k=0; k<limit && k<full+(cover>0); k++) {
+                    int y = side ? half_height+k : half_height-1-k;
+                    short *pixel = &fb_top[y*LCD_WIDTH+x];
+                    /* Keep a fingerprint of the background under a partial row. */
+                    *pixel = k==full && cover<256 ?
+                        (short)(1 + (((unsigned short)*pixel * 31u + fb_mark_id) % 32766)) :
+                        fb_mark_id;
+                    px++;
+                }
+            }
+        } else
         {
             int p = p_start_upper;
             int plim = MAX(0, p - (half_height - 1) * dy);

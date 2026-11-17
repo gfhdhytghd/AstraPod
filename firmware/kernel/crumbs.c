@@ -297,6 +297,21 @@ static uint32_t hivec[1024] __attribute__((aligned(4096)));
 #define HIGH_VECTORS 0xffff0000u
 static uint32_t low_sect;       /* L1[0] as memory_init set it */
 static uint32_t low_ref[VEC_WORDS];
+
+/* FU53: VA page 0 maps, read-only, the old low vector page (PA 0), which the
+ * high vectors leave unused. It is zeroed, so a NULL read returns 0 rather
+ * than a fault (FU51) or a vector word (upstream), and a store still aborts.
+ * ARMv5 has no execute-never: a call into the page runs its zero words, each
+ * "andeq r0, r0, r0", which changes nothing, up to the last two -- a jump to
+ * null_call_trap, which reports "NULL call" with the caller's lr intact. */
+#define LOW_WORDS 1024
+#define LOW_TRAP_INSN 0xe51ff004u       /* ldr pc, [pc, #-4]: the next word */
+extern void null_call_trap(void);
+static uint32_t low_word(unsigned i)
+{
+    return i == LOW_WORDS - 2 ? LOW_TRAP_INSN :
+           i == LOW_WORDS - 1 ? (uint32_t)null_call_trap : 0;
+}
 uint32_t crumbs_ro_end;         /* first writable byte (for the ARM check) */
 
 static void guard_tick(void)
@@ -306,7 +321,7 @@ static void guard_tick(void)
         return;
 
     /* The live vectors (high page, CPU view), and the old low page through
-     * its uncached alias: no CPU store reaches it any more (no access), so
+     * its uncached alias: no CPU store reaches it any more (read-only), so
      * a change there is a device DMA aimed at address 0. */
     const volatile uint32_t *vec = (const volatile uint32_t *)
         (crumbs_ro_end ? HIGH_VECTORS : 0x40000000u);
@@ -384,6 +399,19 @@ static void guard_tick(void)
 
     if (crumbs_ro_end)
     {
+        /* The rest of the zero page, a block per tick: what NULL reads see */
+        unsigned w = t % (LOW_WORDS * 4 / ICODE_BLOCK) * (ICODE_BLOCK / 4);
+        for (unsigned i = w; i < w + ICODE_BLOCK / 4; i++)
+            if (low[i] != low_word(i))
+            {
+                guard_on = false;
+                crumb(CR_VECTOR_BAD, i * 4 | 0x80000000u);
+                dma_text(guard_buf, sizeof guard_buf);
+                panicf("VECTOR PA0 +%02x %08lx->%08lx%s", i * 4,
+                       (unsigned long)low_word(i), (unsigned long)low[i],
+                       guard_buf);
+            }
+
         unsigned k = t % L2_BLOCKS;
         const uint32_t *l2 = (const uint32_t *)UNCACHED(l2tab) +
                              k * (ICODE_BLOCK / 4);
@@ -398,9 +426,10 @@ static void guard_tick(void)
 
 /* Two coarse tables in domain 1 (client); domain 0, every other section,
  * stays manager.
- * - VA 0-1 MiB (IRAM): page 0 no access (NULL reads, writes and calls
- *   abort with the culprit's pc), the IRAM code pages read-only (AP=00 with
- *   c1.R), the rest privileged read/write as before.
+ * - VA 0-1 MiB (IRAM): page 0 read-only and zeroed (see low_word(): NULL
+ *   reads return 0, NULL stores abort with the culprit's pc, NULL calls end
+ *   in null_call_trap), the IRAM code pages read-only (AP=00 with c1.R), the
+ *   rest privileged read/write as before.
  * - VA 0xffff0000: the vector page, read-only; c1.V makes it the live one.
  * crumbs_guard_off() undoes it for ROLO. */
 static void guard_mmu(void)
@@ -416,8 +445,7 @@ static void guard_mmu(void)
         (l1[0xfff] & 3) != 0)
         return;
     for (unsigned i = 0; i < 256; i++)
-        l2tab[0][i] = i == 0 ? 0 :
-                      (i << 12) | (sect & 0xc) |
+        l2tab[0][i] = (i << 12) | (sect & 0xc) |
                       (i * 4096 < ro_end ? 0x000 : 0x550) | 2;
     for (int i = 0; i < VEC_WORDS; i++)
         hivec[i] = vec_ref[i];
@@ -444,6 +472,15 @@ static void guard_mmu(void)
                   : : "r" (0));
     c1 |= 1u << 13;                             /* V: high vectors */
     asm volatile ("mcr p15, 0, %0, c1, c0, 0" : : "r" (c1));
+    /* The low vectors are dead from here: page 0 becomes the zero page,
+     * written while VA 0 is still the writable section */
+    volatile uint32_t *page0;
+    asm volatile ("mov %0, #0" : "=r" (page0)); /* not a C null pointer */
+    for (unsigned i = 0; i < LOW_WORDS; i++)
+        page0[i] = low_word(i);
+    for (int i = 0; i < VEC_WORDS; i++)
+        low_ref[i] = low_word(i);
+    commit_dcache_range((const void *)page0, LOW_WORDS * 4);
     l1[0] = (uint32_t)l2tab[0] | (1u << 5) | (1u << 4) | 1u;
     commit_dcache_range((const void *)l1, 4);
     asm volatile ("mcr p15, 0, %0, c8, c7, 0  \n"
@@ -468,6 +505,12 @@ void crumbs_guard_off(void)
     asm volatile ("mcr p15, 0, %0, c8, c7, 0  \n"
                   "mcr p15, 0, %0, c7, c10, 4 \n"
                   : : "r" (0));
+    volatile uint32_t *page0;                   /* the zero page held them */
+    asm volatile ("mov %0, #0" : "=r" (page0));
+    for (int i = 0; i < VEC_WORDS; i++)
+        page0[i] = low_ref[i] = vec_ref[i];
+    commit_dcache_range((const void *)page0, VEC_WORDS * 4);
+    asm volatile ("mcr p15, 0, %0, c7, c5, 0" : : "r" (0)); /* I-cache */
     uint32_t c1;
     asm volatile ("mrc p15, 0, %0, c1, c0, 0" : "=r" (c1));
     c1 &= ~(1u << 13);

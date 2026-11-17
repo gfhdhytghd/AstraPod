@@ -201,7 +201,7 @@ void NORETURN_ATTR UIE(unsigned int pc, unsigned int num)
         unsigned int found = 0, text[12];
         const unsigned int *word = (const unsigned int *)(saved_sp & ~3u);
         bool dram = saved_sp >= 0x08000000u && saved_sp < (uintptr_t)_end;
-#ifdef HAVE_CRUMBS     /* FU51: page 0 is no-access, IRAM stacks start above */
+#ifdef HAVE_CRUMBS     /* FU51: no stacks in page 0 */
         bool iram = saved_sp >= 0x1000u && saved_sp < 0x10000u;
 #else
         bool iram = saved_sp >= 0x60u && saved_sp < 0x10000u;

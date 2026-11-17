@@ -109,8 +109,8 @@ void crumbs_report(void);
 /* Before an intended power off, reboot or ROLO */
 void crumbs_clean(void);
 /* Tick-time integrity checks (vector page, IRAM code, banked registers,
- * page tables) and the MMU guard: high vectors, VA page 0 no-access, IRAM
- * code read-only. crumbs_guard_off() restores low vectors before ROLO. */
+ * page tables) and the MMU guard: high vectors, VA page 0 a read-only zero
+ * page, IRAM code read-only. crumbs_guard_off() restores low vectors before ROLO. */
 void crumbs_guard_init(void);
 void crumbs_guard_off(void);
 /* For the debug menu: the previous boot's ring as lines, and the self-tests */

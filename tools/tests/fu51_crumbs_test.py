@@ -108,9 +108,15 @@ assert '#define IRAM1_RING_ADDR 0x2203f800' in crumbs
 assert 'clockgate_enable(CLOCKGATE_SM1, true);' in body(crumbs, 'crumbs_boot')
 assert 'tick_add_task(guard_tick);' in body(crumbs, 'crumbs_guard_init')
 gm = body(crumbs, 'guard_mmu')
-assert 'c1 |= 1u << 13;' in gm and 'i == 0 ? 0 :' in gm
-assert 'c1 &= ~(1u << 13);' in body(crumbs, 'crumbs_guard_off')
-assert 'mov %0, #0' not in crumbs           # nothing reads VA 0 any more
+assert 'c1 |= 1u << 13;' in gm and 'i == 0 ? 0 :' not in gm
+# FU53: page 0 is written (zero page) only after c1.V, and before the remap
+assert gm.index('c1 |= 1u << 13;') < gm.index('page0[i] = low_word(i);') < \
+    gm.index('l1[0] = (uint32_t)l2tab[0]')
+off = body(crumbs, 'crumbs_guard_off')
+assert 'c1 &= ~(1u << 13);' in off
+assert off.index('l1[0] = low_sect;') < off.index('page0[i] = low_ref[i] = vec_ref[i];') < \
+    off.index('c1 &= ~(1u << 13);')
+assert crumbs.count('mov %0, #0') == 2      # those two only; nothing reads VA 0
 plat = src('firmware/usbstack/podlink_rust_platform.c')
 assert 'crumb(CR_RUST_PANIC' in body(plat, 'pfu_panic')
 assert 'CS_PL_LOCK' in body(plat, 'pfu_lock') and 'CS_PL_LOCK' in body(plat, 'pfu_unlock')

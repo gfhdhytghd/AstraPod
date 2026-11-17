@@ -71,9 +71,10 @@ SECTIONS
     }
 
     /* FU51: VA page 0 holds nothing after boot. The exception vectors move
-     * to the high page (0xffff0000) and page 0 becomes no-access, so a NULL
-     * (or near-NULL) read, write or call faults with the culprit's pc. IRAM
-     * code and data start at the next page. */
+     * to the high page (0xffff0000) and page 0 becomes a read-only zero page
+     * (FU53; no-access in FU51), so a NULL (or near-NULL) read returns 0 and
+     * a write or call faults with the culprit's pc. IRAM code and data start
+     * at the next page. */
     .iram 0x1000 :
     {
         _iramstart = .;

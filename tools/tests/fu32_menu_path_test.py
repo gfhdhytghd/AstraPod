@@ -113,6 +113,7 @@ static void gui_synclist_init(struct gui_synclist*l,list_get_name*f,void*d,bool 
 #define skinlist_set_cfg(...) ((void)0)
 static int audio_status(void){return 1;}static bool query_audio_status(int*p){(void)p;return false;}static bool root_menu_refresh(void){return false;}
 static int list_do_action_timeout(struct gui_synclist*l,int n){(void)l;return n;}
+static void gui_synclist_forget(struct gui_synclist*l){(void)l;}
 static int do_shortcut_menu(void*p){(void)p;return 0;}static bool list_stop_handler(void){return false;}
 static void do_setting_from_menu(const struct menu_item_ex*m,struct viewport*p){(void)m;(void)p;}
 static int default_event_handler(int a){(void)a;return 0;}static bool list_is_dirty(struct gui_synclist*l){(void)l;return false;}

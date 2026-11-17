@@ -671,7 +671,7 @@ void draw_progressbar(struct gui_wps *gwps, struct skin_viewport* skin_viewport,
 /* clears the area where the image was shown */
 void clear_image_pos(struct gui_wps *gwps, struct gui_img *img)
 {
-    if(!gwps)
+    if(!gwps || !img)    /* FU53: an unresolved %xd label */
         return;
     gwps->display->set_drawmode(DRMODE_SOLID|DRMODE_INVERSEVID);
     gwps->display->fillrect(img->x, img->y, img->bm.width, img->subimage_height);

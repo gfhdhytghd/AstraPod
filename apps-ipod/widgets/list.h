@@ -412,6 +412,10 @@ int skinlist_get_columns(enum screen_type screen, struct gui_synclist *list);
    may become due before the next get_action tmieout. This function
    adjusts the get_action timeout appropriately. */
 extern int list_do_action_timeout(struct gui_synclist *lists, int timeout);
+/* For a screen that may leave after list_do_action_timeout() without calling
+   gui_synclist_do_button(): drops the skin redraw callback's reference to
+   the list before the list goes out of scope. */
+extern void gui_synclist_forget(struct gui_synclist *lists);
 /* This one combines a get_action call (with timeout overridden by
    list_do_action_timeout) with the gui_synclist_do_button call, for
    convenience. */

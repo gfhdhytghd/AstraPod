@@ -398,6 +398,10 @@ void gui_synclist_layout(struct gui_synclist *gui_list)
 
 void gui_synclist_draw(struct gui_synclist *gui_list)
 {
+    /* Every initialised list has parents; NULL is a list that was never
+     * initialised or no longer exists. Drawing it reads and writes page 0. */
+    if (UNLIKELY(!gui_list->parent[SCREEN_MAIN]))
+        return;
     gui_synclist_layout(gui_list);
     FOR_NB_SCREENS(i)
     {
@@ -924,6 +928,21 @@ static void _lists_uiviewport_update_callback(unsigned short id,
          * full refresh, the list repaints correctly into the framebuffer, and
          * none of it reaches the LCD until a second keypress. */
         skin_flush_dirty();
+    }
+}
+
+/* A screen that leaves between list_do_action_timeout() and
+ * gui_synclist_do_button() must call this before its list goes out of scope:
+ * otherwise current_lists outlives it, and the next full status bar refresh
+ * draws a dead stack frame (FU53: a NULL parent read in
+ * skinlist_get_line_count at boot; FU51 3617 was the same callback). */
+void gui_synclist_forget(struct gui_synclist *lists)
+{
+    if (current_lists == lists)
+    {
+        current_lists = NULL;
+        remove_event_ex(GUI_EVENT_NEED_UI_UPDATE,
+                        _lists_uiviewport_update_callback, NULL);
     }
 }
 

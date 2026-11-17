@@ -1188,6 +1188,10 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         }
     }
 
+    /* The Agents shortcut leaves the loop after get_action() without
+     * gui_synclist_do_button(), and `lists` is about to go out of scope */
+    gui_synclist_forget(&lists);
+
     if (start_selected)
     {
         /* make sure the start_selected variable is set to

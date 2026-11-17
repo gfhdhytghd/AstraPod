@@ -28,7 +28,20 @@ struct bitmap{int width,height,format;unsigned char*data;};struct dim{int width,
 static int center_index,pf_cover_size_idx=-1,empty_slide_hid=99,buf_ctx,pf_slides_loaded;
 static struct {struct {int index,hid;unsigned int version;}cache[100];}pf_sldcache;
 static void*handles[20];static unsigned int sizes[20];static int allocated;
-static int buflib_alloc(int*c,unsigned int n){(void)c;assert(allocated<19);int h=++allocated;handles[h]=calloc(1,n);sizes[h]=n;return h;}
+static size_t remaining=3*(sizeof(int)+sizeof(struct dim)+32768+16384);
+static int evictable,evictions;
+static int buflib_alloc(int*c,unsigned int n){
+ (void)c;if(n>remaining)return -1;
+ remaining-=n;assert(allocated<19);int h=++allocated;handles[h]=calloc(1,n);sizes[h]=n;return h;
+}
+static bool free_slide_prio(int prio){
+ assert(prio==0);
+ if(!evictable)return false;
+ int h=pf_sldcache.cache[evictable].hid;
+ remaining+=sizes[h];free(handles[h]);handles[h]=NULL;
+ pf_sldcache.cache[evictable].hid=0;evictable=0;evictions++;
+ return true;
+}
 static void*buflib_get_data(int*c,int h){(void)c;assert(h>0&&h<=allocated);return handles[h];}
 static void art_cache_thumb_path(unsigned int h,int i,char*p,int n){(void)h;(void)i;(void)p;(void)n;assert(0);}
 static int open(const char*p,int f){(void)p;(void)f;assert(0);return -1;}
@@ -103,7 +116,18 @@ post=r'''
 int main(void){model_data.art_key=key;model_data.read_art=art;model_data.art_version=version;
 assert(!load_and_prepare_surface(0,-1,0));assert(!load_and_prepare_surface(0,100,0));
 for(int q=1;q<=3;q++){quality=q;assert(load_and_prepare_surface(0,q,0));int h=pf_sldcache.cache[q].hid;struct dim*d=get_slide(h);assert(d->width==128&&d->height==d->width);uint16_t*p=(uint16_t*)(d+1);
-if(q==3){assert(p[129]==129&&sizes[h]==sizeof(int)+sizeof(struct dim)+32768);}else if(q==2){assert(p[128*4+8]==2*32+1);}else assert(p[0]==LCD_RGBPACK(0x12,0x34,0x56));assert(pf_sldcache.cache[q].version==(unsigned)q);}
+if(q==3){assert(p[129]==129&&sizes[h]==sizeof(int)+sizeof(struct dim)+32768+16384);}else if(q==2){assert(p[128*4+8]==2*32+1);}else assert(p[0]==LCD_RGBPACK(0x12,0x34,0x56));assert(pf_sldcache.cache[q].version==(unsigned)q);}
+assert(!remaining&&!load_and_prepare_surface(0,4,0)&&!pf_sldcache.cache[4].hid);
+evictable=3;
+assert(load_and_prepare_surface(0,4,0)&&evictions==1&&!pf_sldcache.cache[3].hid);
+assert(pf_sldcache.cache[1].hid&&pf_sldcache.cache[2].hid);
+int relocated=pf_sldcache.cache[4].hid;
+void *moved=malloc(sizes[relocated]);assert(moved);
+memcpy(moved,handles[relocated],sizes[relocated]);
+free(handles[relocated]);handles[relocated]=moved;
+struct dim*d=get_slide(relocated);
+uint16_t*p=(uint16_t*)(d+1);
+assert(p[129]==129&&p[128*128]==64&&!remaining);
 for(int i=1;i<=allocated;i++){free(handles[i]);}
 for(int show=0;show<=4;show++){for(int year=0;year<3;year++){
  global_settings.album_covers_show_album_name=show;global_settings.album_covers_show_year=year;drawn=0;
@@ -117,5 +141,5 @@ current_tick=145;tick();assert(!flicking&&m_requests==2&&!strcmp(retained_tier,"
 local_store=true;quality=2;struct bitmap pending;assert(!art(0,&pending));local_store=false;
 puts("Native carousel load/get_slide layout + real Cider M columns, XS transpose, bg placeholder PASS");}
 '''
-(O/'carousel.c').write_text(pre+function(art_provider,'art')+'\n'+function(carousel,'load_and_prepare_surface')+'\n'+function(carousel,'get_slide')+tick_stubs+function((R/'apps-ipod/screens/playback/cider_model.c').read_text(),'cider_window')+function(provider,'tick')+caption_stubs+function(carousel,'carousel_album_caption')+post)
+(O/'carousel.c').write_text(pre+function(carousel,'side_level_bytes')+function(carousel,'build_side_level')+function(art_provider,'art')+'\n'+function(carousel,'load_and_prepare_surface')+'\n'+function(carousel,'get_slide')+tick_stubs+function((R/'apps-ipod/screens/playback/cider_model.c').read_text(),'cider_window')+function(provider,'tick')+caption_stubs+function(carousel,'carousel_album_caption')+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),str(O/'carousel.c'),'-o',str(O/'carousel')],check=True);subprocess.run([str(O/'carousel')],check=True)

@@ -1,7 +1,8 @@
 # Animated Now Playing lyrics (FU57)
 
-SELECT toggles the same lyrics page for local playback and Cider. Apple Remote
-Play/Pause hold also toggles it. A tap still pauses or resumes. The click-wheel
+SELECT opens the same lyrics page for local playback, Rufin and Cider.
+Holding the dock Apple Remote Play/Pause for 300 ms toggles the page in
+either direction. A dock tap pauses or resumes. The click-wheel
 Play hold still opens the WPS context menu. MENU returns
 to Now Playing too, including entry through a context menu. The previous local
 SELECT action, including the A/B marker key, is reachable with SELECT+PLAY.
@@ -12,10 +13,16 @@ label is `SELECT+PLAY Action`.
 The wheel follows list direction (clockwise advances); remote + goes to the
 previous line and - to the next line. Remote reports always move one line;
 fast wheel bursts accelerate to four lines per event. Timed lyrics return to
-Auto four seconds after the last scroll. Untimed .txt and Cider now/lyrics rows
-stay manual and show no Manual pill. Play/pause and skip use the playback
-source; local skip keeps the WPS skip-length, cuesheet, spoken-word and A/B
-policy. Seeking uses the WPS seek loop with a lyrics render callback.
+Auto four seconds after the last scroll. During that interval, SELECT seeks
+to a different focused line and returns to Auto. SELECT on the current line
+or in untimed lyrics returns to Now Playing. The seek accounts for the
+configured lead so the target line is current at the destination.
+
+The headphone inline remote keeps its Now Playing controls in Lyrics.
+The centre button toggles playback. With Remote Track Skip on, two or
+three centre clicks select next or previous. The volume buttons adjust
+volume. The dock remote's +/− keys continue to scroll lyrics. Click-wheel
+skip uses the WPS skip policy and held seek uses the WPS seek loop.
 
 `Lyrics lead` defaults to +200 ms. It accepts −1000 to +1000 ms in 50 ms
 steps. The page adds it to the local or remote lyrics clock and clamps the
@@ -39,12 +46,14 @@ Text tags accept LRC, enhanced LRC and plain text. Source files open read-only.
 The document keeps the prefix that fits the existing 32 KiB allocation.
 ID3 frame staging uses up to one third of that allocation.
 
-Entry/exit: 220/180 ms, cubic ease out, a 24 px slide over a progressively
-dimmed live WPS snapshot. All scroll targets take 260 ms from the displayed
+Entry submits a loading frame using the built-in font before opening fonts
+and lyrics or preparing cover art. Once ready, the lyrics slide in for
+220 ms. Exit slides back over the live WPS snapshot in 180 ms. All scroll
+targets take 260 ms from the displayed
 position, including reversal, multi-line acceleration and idle return. Bitmap
 18/26 px glyphs cross-fade through a separate mask while their line heights
-interpolate. Track changes cross-fade for 200 ms. The 12/18/26 Noto fonts,
-including CJK, already ship in the FU55 package; a missing font uses the UI
+interpolate. Track changes cross-fade for 200 ms. The 18/26 px Noto fonts,
+including CJK, ship in the package. A missing font uses the UI
 font. Enhanced LRC word progress advances in pixels between word timestamps.
 
 The page claims the linker's shared 3 MiB app_buffer with the owner `lyrics`.
@@ -52,8 +61,9 @@ It holds the WPS/old-track snapshot, the transition layer, the background and
 the wrapped-line and glyph caches in this arena. It releases the claim before
 a USB handler or another screen runs. Local lyrics use the 32 KiB
 core allocation while the page is open. When another screen owns
-app_buffer, entry/exit fade through the fallback colour in two halves, track
-changes fade out/in in two 100 ms halves, and glyphs use interpolated colours.
+app_buffer, the ready frame replaces the loading frame directly. Exit fades
+through the fallback colour in two halves, track changes fade out/in in two
+100 ms halves, and glyphs use interpolated colours.
 
 The lyrics background uses the scrim theme's 320 px picture, shifted up by
 40 px, with radius 12 on the decimated cover. The page copies a compatible
@@ -82,6 +92,8 @@ time in the scheduler or input queue. The dropped count flags frames over the
 30 fps budget for render time or for a gap between consecutive animation
 frames. Entry latency starts at the dispatched WPS action and ends at the
 first visible frame submission. Blur max is the longest cold background build.
+Entry setup excludes drawing the first frame. The recorder also reports
+individual entry times for font loading, the lyrics document and cover art.
 Remote prefetch times start when WPS observes the track. A value of −1 marks
 an unfinished milestone. The recorder samples CPU frequency, boost and audio
 play state on submitted frames.

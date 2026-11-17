@@ -7,6 +7,7 @@
 #include "widgets/splash.h"
 #include "wps.h"
 #include "input/action.h"
+#include "button.h"
 #include "metadata.h"
 #include "audio/playback.h"
 #include "audio/buffering.h"
@@ -121,6 +122,22 @@ bool cider_wps_action(int action)
 {
     if (!cider_active())
         return false;
+#ifdef HAVE_MULTIMEDIA_KEYS
+    /* These raw keys bypass action.c's WPS keymap. Keep them on the
+     * selected remote source, including when Lyrics uses this dispatcher. */
+    switch (action)
+    {
+        case BUTTON_MULTIMEDIA_PLAYPAUSE: action = ACTION_WPS_PLAY; break;
+        case BUTTON_MULTIMEDIA_NEXT: action = ACTION_WPS_SKIPNEXT; break;
+        case BUTTON_MULTIMEDIA_PREV: action = ACTION_WPS_SKIPPREV; break;
+        case BUTTON_MULTIMEDIA_VOLUME_UP:
+        case BUTTON_MULTIMEDIA_VOLUME_UP | BUTTON_REPEAT:
+            action = ACTION_WPS_VOLUP; break;
+        case BUTTON_MULTIMEDIA_VOLUME_DOWN:
+        case BUTTON_MULTIMEDIA_VOLUME_DOWN | BUTTON_REPEAT:
+            action = ACTION_WPS_VOLDOWN; break;
+    }
+#endif
     /* Keep skip intent on the live session during a transient CA=0. The
      * host logs and ACKs an explicit refusal rather than silently losing it. */
     if (action == ACTION_WPS_SKIPNEXT || action == ACTION_WPS_SKIPPREV)

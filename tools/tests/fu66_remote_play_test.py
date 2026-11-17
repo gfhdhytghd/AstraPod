@@ -16,8 +16,8 @@ context = action[action.index('static int remote_context('):action.index('static
 dispatch = action[action.index('    if (*button == REMOTE_LYRICS_BUTTON)'):
                   action.index('\n#endif', action.index('    if (*button == REMOTE_LYRICS_BUTTON)'))]
 viewer = (source / 'apps-ipod/viewers/lyric_viewer/lyric_viewer.c').read_text()
-viewer_actions = viewer[viewer.index('            case ACTION_WPS_BROWSE: case ACTION_WPS_LYRICS:'):
-                        viewer.index('            case ACTION_WPS_VOLUP: case ACTION_WPS_VOLDOWN:', viewer.index('            case ACTION_WPS_BROWSE: case ACTION_WPS_LYRICS:'))]
+viewer_start = viewer.index('case ACTION_WPS_LYRICS: case ACTION_WPS_MENU:')
+viewer_actions = viewer[viewer_start:viewer.index('            case ACTION_WPS_VOLUP:', viewer_start)]
 buttons = (inputs / 'keymap_ipod.c').read_text()
 wps_keymap = buttons.split('remote_button_context_wps[]', 1)[1].split('LAST_ITEM_IN_LIST', 1)[0]
 assert re.search(r'ACTION_WPS_PLAY,\s*BUTTON_RC_PLAY\|BUTTON_REL,\s*BUTTON_RC_PLAY', wps_keymap)
@@ -145,9 +145,10 @@ static void held_then_taps(bool triple)
 {
     fresh();
     sample(BUTTON_RC_PLAY, BUTTON_RC_PLAY, 300);
-    sample(BUTTON_RC_PLAY | BUTTON_REPEAT, BUTTON_RC_PLAY, 359);
+    unsigned long hold_at = mode == CONTEXT_WPS ? 330 : 360;
+    sample(BUTTON_RC_PLAY | BUTTON_REPEAT, BUTTON_RC_PLAY, hold_at - 1);
     assert(count == 0);
-    sample(0, BUTTON_RC_PLAY, 360);
+    sample(0, BUTTON_RC_PLAY, hold_at);
     if (mode == CONTEXT_WPS) {
         assert(count == 1 && events[0] == ACTION_WPS_LYRICS);
     } else {

@@ -17,6 +17,8 @@ def fn(name,text=None):
 source=source.replace(fn('cider_wps_show_art',source),'')
 seek=fn('seek_loop',wps)+'\n'+fn('ffwd_rew',wps)
 actions=sorted(set(re.findall(r'\bACTION_[A-Z_0-9]+',source+seek)))
+button_codes=(R/'firmware/export/button.h').read_text()
+button_codes='\n'.join(re.findall(r'^#define BUTTON_(?:MULTIMEDIA(?:_(?:PLAYPAUSE|NEXT|PREV|VOLUME_UP|VOLUME_DOWN))?|REPEAT)\s+[^\n]+',button_codes,re.M))
 pre=r'''
 #include <assert.h>
 #include <string.h>
@@ -26,6 +28,7 @@ pre=r'''
 #include "screens/playback/cider_model.h"
 #include "screens/playback/cider_wps.h"
 #define HAVE_USB_PODLINK
+#define HAVE_MULTIMEDIA_KEYS
 #define Q_AUDIO_PAUSE 1
 #define Q_AUDIO_PLAY 2
 #define HZ 100
@@ -248,11 +251,32 @@ for(int visible=0;visible<2;visible++){
  state.available=false;cider_source_poll();cider_wps_update(&w);assert(!active&&w.id3==&local_id3&&w.paused);
  cider_remote_source();assert(!active);state.available=true;cider_remote_source();assert(active);state.available=false;cider_remote_source();assert(!active);
 }
+/* Mikey's short, double and triple centre presses and volume repeats. */
+const int multimedia[]={
+    BUTTON_MULTIMEDIA_PLAYPAUSE, BUTTON_MULTIMEDIA_NEXT, BUTTON_MULTIMEDIA_PREV,
+    BUTTON_MULTIMEDIA_VOLUME_UP, BUTTON_MULTIMEDIA_VOLUME_UP | BUTTON_REPEAT,
+    BUTTON_MULTIMEDIA_VOLUME_DOWN, BUTTON_MULTIMEDIA_VOLUME_DOWN | BUTTON_REPEAT,
+};
+const char *commands_expected[]={
+    "toggle\t0", "next\t0", "previous\t0", "volume-step\t1", "volume-step\t1",
+    "volume-step\t-1", "volume-step\t-1",
+};
+for (int backend=0;backend<2;backend++) {
+    active=state.available=true;state.remote=2 | backend;
+    ncommands=0;
+    for (unsigned i=0;i<ARRAYLEN(multimedia);i++) {
+        assert(cider_wps_action(multimedia[i]) && ncommands==i+1);
+        assert(strstr(commands[i],commands_expected[i]));
+    }
+    active=false;
+    assert(!cider_wps_action(BUTTON_MULTIMEDIA_PLAYPAUSE));
+}
+puts("FU70 raw headset WPS dispatch to Cider and Rufin PASS");
 puts("FU32 WPS ACK clears pending; source handover on WPS/elsewhere, local pause and unplug restore PASS");
 puts("Production same-song/resume, pending WPS preview, ACK ownership, route decoding PASS");
 puts("Production Local/Cider, disconnect/reconnect, native WPS bitmap/actions PASS");}
 '''
-(O/'source.c').write_text(pre+'\nstatic volatile uint32_t status_word;\n'+fn('publish_status')+'\nenum {'+','.join(actions)+'};\n'+fn('cider_active')+fn('cider_play_pending')+'\nstatic bool source_seen;static uint32_t source_generation;\n'+fn('cider_source_poll')+fn('cider_remote_source')+'\n'+fn('queue_control')+'\n'+fn('cider_control')+'\n'+fn('cider_mode_get')+'\n'+fn('cider_mode_set')+'\n'+fn('play_route')+'\n'+fn('cider_play')+'\n'+fn('cider_play_in')+'\n'+fn('cider_play_status')+'\n'+fn('cider_local_play')+'\n'+fn('cider_retain_art')+'\n'+fn('cider_prefetch_art')+'\n'+fn('audio_play',playback)+'\n'+fn('audio_resume',playback)+'\n'+source+'\n'+seek+'\nstatic int get_action(int c,int t){(void)c;(void)t;return seek_actions++ ? ACTION_WPS_STOPSEEK : ACTION_WPS_SEEKFWD;}\n'+post)
+(O/'source.c').write_text(pre+'\n'+button_codes+'\nstatic volatile uint32_t status_word;\n'+fn('publish_status')+'\nenum {'+','.join(actions)+'};\n'+fn('cider_active')+fn('cider_play_pending')+'\nstatic bool source_seen;static uint32_t source_generation;\n'+fn('cider_source_poll')+fn('cider_remote_source')+'\n'+fn('queue_control')+'\n'+fn('cider_control')+'\n'+fn('cider_mode_get')+'\n'+fn('cider_mode_set')+'\n'+fn('play_route')+'\n'+fn('cider_play')+'\n'+fn('cider_play_in')+'\n'+fn('cider_play_status')+'\n'+fn('cider_local_play')+'\n'+fn('cider_retain_art')+'\n'+fn('cider_prefetch_art')+'\n'+fn('audio_play',playback)+'\n'+fn('audio_resume',playback)+'\n'+source+'\n'+seek+'\nstatic int get_action(int c,int t){(void)c;(void)t;return seek_actions++ ? ACTION_WPS_STOPSEEK : ACTION_WPS_SEEKFWD;}\n'+post)
 (O/'config.h').write_text('#define HAVE_USB_PODLINK\n')
 cmd=['cc','-std=gnu11','-g','-Wall','-Wextra','-Wno-unused-variable','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'source.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),*wire_args(),'-o',str(O/'source')]
 subprocess.run(cmd,check=True);subprocess.run([str(O/'source')],check=True)

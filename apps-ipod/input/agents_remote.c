@@ -57,6 +57,12 @@ static void play_taps(struct agents_remote_state *s, unsigned long now)
     else play_tap(s, now);
 }
 
+static unsigned long play_hold_ticks(int context)
+{
+    return context == REMOTE_AGENTS || context == REMOTE_WPS ?
+           (3 * HZ + 9) / 10 : (3 * HZ + 4) / 5;
+}
+
 static bool play_button(struct agents_remote_state *s, int context, int button,
                         int held, unsigned long now)
 {
@@ -64,8 +70,6 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
     bool event = (button & BUTTON_REMOTE) == BUTTON_RC_PLAY;
     bool release = event && (button & BUTTON_REL);
     unsigned long window = REMOTE_TAP_WINDOW_TICKS;
-    unsigned long threshold = context == REMOTE_AGENTS ? (3 * HZ + 9) / 10 :
-                                                       (3 * HZ + 4) / 5;
     if (context != s->play_context)
     {
         s->tap_pending = s->second = false;
@@ -89,7 +93,7 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
     if (h->down && (event || button == BUTTON_NONE))
     {
         bool ended = release || (button == BUTTON_NONE && !(held & BUTTON_RC_PLAY));
-        if (!h->fired && now - h->at >= threshold)
+        if (!h->fired && now - h->at >= play_hold_ticks(context))
         {
             if (s->tap_pending) play_taps(s, now);
             remote_log_event(REMOTE_LOG_HOLD, now, context, 0, NULL, 0);
@@ -168,8 +172,7 @@ static bool global_triple(struct agents_remote_state *s, int context,
     }
     else if ((button & BUTTON_REL) && s->triple_down)
     {
-        unsigned long hold = s->triple_context == REMOTE_AGENTS ?
-                             (3 * HZ + 9) / 10 : (3 * HZ + 4) / 5;
+        unsigned long hold = play_hold_ticks(s->triple_context);
         s->triple_down = false;
         s->triple_released = now;
         if (now - s->triple_pressed >= hold) s->triple_taps = 0;

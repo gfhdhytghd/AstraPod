@@ -62,9 +62,11 @@ int main(void){
    assert(count(REMOTE_COVERS_BUTTON)==(gap<=20));
    assert(count(REMOTE_SWITCH_BUTTON)==(gap>20));
   }
-  /* Holds keep the old existing 300/600 ms thresholds with native Play actions and never become triples. */
+  /* At the 300/600 ms boundary a hold stays out of the tap sequence. */
   reset();feed(mode,BUTTON_RC_PLAY,BUTTON_RC_PLAY,300);
-  int threshold=mode==REMOTE_AGENTS?30:60;
+  int threshold=mode==REMOTE_AGENTS||mode==REMOTE_WPS?30:60;
+  feed(mode,0,BUTTON_RC_PLAY,300+threshold-1);
+  assert(!count(REMOTE_LYRICS_BUTTON)&&!count(BUTTON_PLAY));
   feed(mode,0,BUTTON_RC_PLAY,300+threshold);
   feed(mode,BUTTON_RC_PLAY|BUTTON_REL,0,400);
   assert(!count(REMOTE_COVERS_BUTTON)&&!count(REMOTE_SWITCH_BUTTON));

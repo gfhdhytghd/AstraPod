@@ -77,8 +77,8 @@ int main(void) {
         assert(!count);feed(modes[c],0,0,captured[10].tick+21);
         assert(count==1&&output[0]==SWITCH);
         feed(modes[c],0,0,64860);assert(count==1);
-        /* New 130 ms taps in Agents; old 400 ms taps elsewhere, slow gaps. */
-        unsigned long first=c==0?153358:64879,length=c==0?13:40;
+        /* Old 400 ms taps elsewhere. WPS and Agents require shorter taps. */
+        unsigned long first=c==0?153358:64879,length=c==1?40:13;
         unsigned long gap=c==0?27:25,up=first+length,second=up+gap;
         reset();feed(modes[c],BUTTON_RC_PLAY,BUTTON_RC_PLAY,first);
         feed(modes[c],BUTTON_RC_PLAY|BUTTON_REL,0,up);
@@ -114,8 +114,9 @@ int main(void) {
     assert(count==3&&output[2]==(BUTTON_PLAY|BUTTON_REL));
     for(int mode=REMOTE_OTHER;mode<=REMOTE_WPS;mode=(mode==REMOTE_OTHER?REMOTE_WPS:REMOTE_WPS+1)) {
         reset();feed(mode,BUTTON_RC_PLAY,BUTTON_RC_PLAY,300);
-        feed(mode,0,BUTTON_RC_PLAY,359);assert(!count);
-        feed(mode,0,BUTTON_RC_PLAY,360);
+        unsigned long hold_at=mode==REMOTE_WPS?330:360;
+        feed(mode,0,BUTTON_RC_PLAY,hold_at-1);assert(!count);
+        feed(mode,0,BUTTON_RC_PLAY,hold_at);
         if(mode==REMOTE_WPS)assert(count==1&&output[0]==REMOTE_LYRICS_BUTTON);
         else assert(count==2&&output[0]==BUTTON_PLAY&&output[1]==(BUTTON_PLAY|BUTTON_REPEAT));
         feed(mode,BUTTON_RC_PLAY|BUTTON_REPEAT,BUTTON_RC_PLAY,370);
@@ -155,7 +156,7 @@ int main(void) {
     reset();feed(REMOTE_AGENTS,BUTTON_PLAY,BUTTON_PLAY,100);
     feed(REMOTE_AGENTS,BUTTON_PLAY|BUTTON_REPEAT,BUTTON_PLAY,115);
     feed(REMOTE_AGENTS,BUTTON_PLAY|BUTTON_REL,0,120);assert(count==3);
-    puts("captured Play timings: double/single/slow/200ms inclusive/300ms remote classification/600ms native Play mapping/native isolation/wrap PASS");
+    puts("captured Play timings: double/single/slow/200ms inclusive/300ms WPS and Agents/600ms other screens/native isolation/wrap PASS");
 }
 '''
 (O/'config.h').write_text('')

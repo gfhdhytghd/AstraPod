@@ -17,10 +17,13 @@ source=(r/'apps-ipod/viewers/lyric_viewer/lyric_viewer.c').read_text()
 source=re.sub(r'^#include ".*\n','',source,flags=re.M)
 doc=(r/'apps-ipod/viewers/lyric_viewer/lyrics.c').read_text();doc=re.sub(r'^#include ".*\n','',doc,flags=re.M)
 h=(r/'apps-ipod/viewers/lyric_viewer/lyrics.h').read_text();h=re.sub(r'^#include "metadata.h".*\n','',h,flags=re.M)
-tokens=sorted(set(re.findall(r'\bACTION_[A-Z_0-9]+',source)))
+tokens=sorted(set(re.findall(r'\bACTION_[A-Z_0-9]+',source+' ACTION_WPS_BROWSE')))
+button_codes=(r/'firmware/export/button.h').read_text()
+button_codes='\n'.join(re.findall(r'^#define BUTTON_(?:MULTIMEDIA(?:_(?:PLAYPAUSE|NEXT|PREV|VOLUME_UP|VOLUME_DOWN))?|REPEAT)\s+[^\n]+',button_codes,re.M))
 adapter=r'''
 #define HAVE_USB_PODLINK
 #define HAVE_ADJUSTABLE_CPU_FREQ
+#define HAVE_MULTIMEDIA_KEYS
 /* An independent playback owner remains throughout these visits. */
 static int clock_refs = 1, boost_gets, boost_puts;
 #define FREQ (clock_refs ? 216000000 : 54000000)
@@ -42,6 +45,7 @@ static void agents_nav_request(int screen, bool remote)
 #define DRMODE_FG 1
 #define BUTTON_REMOTE 0x8000
 #define FONT_DIR "fonts"
+#define FONT_SYSFIXED 12
 #define ROCKBOX_DIR "."
 #include "lyric_viewer.h"
 #define fdprintf dprintf
@@ -49,7 +53,7 @@ static void agents_nav_request(int screen, bool remote)
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define TIME_BEFORE(a,b) ((int32_t)((uint32_t)(a)-(uint32_t)(b))<0)
-#define IS_SYSEVENT(x) ((x)>=1000)
+#define IS_SYSEVENT(x) ((x)==SYS_USB_CONNECTED)
 #define SYS_USB_CONNECTED 1001
 #define CONTEXT_WPS 1
 #define SCREEN_MAIN 0
@@ -83,9 +87,20 @@ static bool timed_fixture, wait_row, change_during_copy;
 static struct cider_state remote_clock;
 static int remote_opens, paused_width;
 static int retarget_position, idle_updates, remote_actions, lead_boundary;
+static int multimedia_count, multimedia_last, line_seeks, title_draws, manual_draws;
+static long seek_target;
+static bool verify_early_frame, loading_drawn, loading_presented;
 static int ui_font(void){return 18;}static struct screen screens[]={{ui_font}};
 static struct font *font_get(int f){return f==12?&f12:f==26?&f26:&f18;}
-static int font_load(const char *path){assert(clock_refs==2);loads++;return strstr(path,"12-")?12:strstr(path,"26-")?26:18;}
+static int font_load(const char *path){
+    assert(clock_refs==2);
+    if (verify_early_frame && !loads) {
+        assert(loading_presented && "loading pixels must reach LCD before disk I/O");
+        precise_extra+=1000000;
+    }
+    loads++;
+    return strstr(path,"12-")?12:strstr(path,"26-")?26:18;
+}
 static void font_unload(int f){(void)f;unloads++;}
 static unsigned width_reads;
 static int font_get_width(struct font*f,unsigned ch){width_reads++;return ch>127?f->height:f->height/2;}
@@ -98,9 +113,14 @@ static void lcd_setfont(int f){vp->font=f;}
 static void lcd_set_drawmode(int m){(void)m;}
 static void lcd_set_foreground(unsigned c){vp->fg=c;}
 static void lcd_fillrect(int x,int y,int w,int h){for(int r=MAX(y,0);r<MIN(y+h,240);r++)for(int c=MAX(x,0);c<MIN(x+w,320);c++)(vp->buffer?vp->buffer->fb_ptr:screen_pixels)[r*320+c]=vp->fg;}
-static void lcd_putsxy(int x,int y,const char*p){int w,h;font_getstringsize((const unsigned char*)p,&w,&h,vp->font);lcd_fillrect(x,y,w,h);}
+static void lcd_putsxy(int x,int y,const char*p){
+    if (!strcmp(p,"Loading lyrics...")) loading_drawn=true;
+    if (strstr(p,"Title")) title_draws++;
+    if (!strcmp(p,"Manual")) manual_draws++;
+    int w,h;font_getstringsize((const unsigned char*)p,&w,&h,vp->font);lcd_fillrect(x,y,w,h);
+}
 static void fill_round_rect(struct screen*s,int x,int y,int w,int h,int radius){(void)s;(void)radius;lcd_fillrect(x,y,w,h);}
-static void lcd_update(void){updates++;memcpy(panel,screen_pixels,sizeof panel);}
+static void lcd_update(void){updates++;loading_presented|=loading_drawn;memcpy(panel,screen_pixels,sizeof panel);}
 static void lcd_update_rect(int x,int y,int w,int h){assert(x>=0&&y>=0&&w>0&&h>0&&x+w<=320&&y+h<=240);updates++;
  for(int j=y;j<y+h;j++)memcpy(panel+j*320+x,screen_pixels+j*320+x,w*sizeof(fb_data));}
 static void sleep(int n){assert(clock_refs==2&&n>=0);current_tick+=n+1;}
@@ -181,6 +201,7 @@ static bool cider_lyrics_matches(const char *id,uint32_t generation,uint32_t lib
     return generation==9&&!library&&!strcmp(id,timed_fixture?remote_clock.id:playing.path+6);
 }
 static bool cider_active(void){return remote_source;}
+static bool cider_available(void){return remote_source;}
 static const char *cider_remote_name(void){return "Rufin";}
 static int audio_status(void){return playing_audio?AUDIO_STATUS_PLAY:0;}
 static struct mp3entry *audio_current_track(void){return playing_audio?&playing:NULL;}
@@ -188,7 +209,13 @@ static void wps_lyrics_backdrop(void){for(int i=0;i<320*240;i++)screen_pixels[i]
 static void wps_do_playpause(bool b){(void)b;pauses++;wps.paused=!wps.paused;}
 static void wps_lyrics_skip(int d){skips++;assert(d==1);char*leaf=strrchr(playing.path,'/');assert(leaf);strcpy(leaf+1,"other.wav");playing.title="Second";playing.artist="Artist2";playing.elapsed=0;}
 static void wps_lyrics_seek(int a,void(*draw)(void)){(void)a;seeks++;wps.ff_rewind_count=500;draw();wps.ff_rewind_count=0;}
-static void cider_control(const char*c,int v){assert(v==0);assert(!strcmp(c,"toggle")||!strcmp(c,"next")||!strcmp(c,"previous"));controls++;}
+static void record_seek(long target){line_seeks++;seek_target=target;}
+static void audio_ff_rewind(long target){assert(!remote_source);record_seek(target);}
+static void cider_control(const char*c,int v){
+    assert(remote_source);
+    if (!strcmp(c,"seek")) record_seek(v);
+    else {assert(v==0);assert(!strcmp(c,"toggle")||!strcmp(c,"next")||!strcmp(c,"previous"));controls++;}
+}
 static void cider_page_open(const char*q)
 {
     static char previous[144];
@@ -236,7 +263,16 @@ static bool cider_page_row(int i,struct cider_row*r)
     return true;
 }
 static int get_action_statuscode(int*b){if(b)*b=remote_key?BUTTON_REMOTE:0;return 0;}
-static int default_event_handler(int a){assert(clock_refs==1&&claims==releases);default_events++;return a;}
+static void record_multimedia(int action) { assert(activities==1);multimedia_count++;multimedia_last=action; }
+static bool cider_wps_action(int action){
+    if (!remote_source) return false;
+    record_multimedia(action);return true;
+}
+static int default_event_handler(int a){
+    if (a & BUTTON_MULTIMEDIA) {assert(!remote_source);record_multimedia(a);}
+    else {assert(clock_refs==1&&claims==releases);default_events++;}
+    return a;
+}
 static int get_action(int c,int timeout);
 '''
 # Avoid libc sleep's POSIX signature in this host adapter.
@@ -293,6 +329,34 @@ static void test_pixels(void)
     lv_state=NULL;
     puts("PASS FU65 pixel reference: 2000 ink scanlines and all 257 transition weights");
 }
+static const int multimedia_keys[] = {
+    BUTTON_MULTIMEDIA_PLAYPAUSE, BUTTON_MULTIMEDIA_NEXT, BUTTON_MULTIMEDIA_PREV,
+    BUTTON_MULTIMEDIA_VOLUME_UP, BUTTON_MULTIMEDIA_VOLUME_UP | BUTTON_REPEAT,
+    BUTTON_MULTIMEDIA_VOLUME_DOWN, BUTTON_MULTIMEDIA_VOLUME_DOWN | BUTTON_REPEAT,
+};
+static int select_scenario(void)
+{
+    if (calls==1) return remote_key ? ACTION_WPS_VOLDOWN : ACTION_WPS_VOLUP;
+    if (calls==2) {
+        assert(lv.mode.manual && lv.mode.focus==1);
+        return ACTION_WPS_BROWSE;
+    }
+    long expected=(remote_source ? 2000 : 4000)-global_settings.lyric_lead;
+    assert(line_seeks==1 && seek_target==expected);
+    assert(!lv.mode.manual && lv.mode.focus==1);
+    if (calls==3) {
+        /* The old position is still visible on the transport clock. */
+        assert(lv.elapsed==0);
+        if (remote_source) remote_cn("one",seek_target,0);
+        else playing.elapsed=seek_target;
+        current_tick+=26;
+        return ACTION_NONE;
+    }
+    assert(lv.mode.focus==1 && lv_lyric_elapsed()==(remote_source ? 2000 : 4000));
+    assert(lv.scroll.to==256 && lyrics_motion_at(&lv.scroll,current_tick)==256);
+    assert(!title_draws&&!manual_draws);
+    return ACTION_WPS_BROWSE; /* SELECT exits again after auto-follow. */
+}
 static int get_action(int c,int timeout){
  assert(!memcmp(panel,screen_pixels,sizeof panel));
  assert(clock_refs == (lv.boost ? 2 : 1));
@@ -315,6 +379,20 @@ static int get_action(int c,int timeout){
    return plan==7 ? SYS_USB_CONNECTED : nav_action;
  }
  assert(c==CONTEXT_WPS&&timeout>0&&timeout<=50);current_tick+=timeout;calls++;assert(calls<50);
+ if(plan==10) {
+  if(calls>1)assert(multimedia_count==calls-1 && multimedia_last==multimedia_keys[calls-2]);
+  return (unsigned)calls<=ARRAYLEN(multimedia_keys) ? multimedia_keys[calls-1] : ACTION_WPS_MENU;
+ }
+ if(plan==11) return select_scenario();
+ if(plan==12) {
+  if(calls==1) return ACTION_WPS_VOLDOWN; /* Clamp focus to first line. */
+  assert(calls==2 && lv.mode.manual && lv.mode.focus==0);
+  return ACTION_WPS_BROWSE;
+ }
+ if(plan==13) {
+  assert(perf.first<60000 && perf.entry_prep_us>=1000000);
+  return ACTION_WPS_MENU;
+ }
  if(plan==0){
   if(calls==1){assert(lv.mode.focus==0);return ACTION_WPS_VOLUP;}
   if(calls==2){assert(lv.mode.manual&&lv.mode.focus==1);retarget_position=lyrics_motion_at(&lv.scroll,current_tick);return ACTION_WPS_VOLUP;}
@@ -323,7 +401,7 @@ static int get_action(int c,int timeout){
   if(calls==5)return ACTION_WPS_SEEKFWD;
   if(calls==6)return ACTION_WPS_SKIPNEXT;
   if(calls==7){assert(!lyrics_timed()&&lyrics_count()==3&&lv.track_fade);assert(!memcmp(lv_frame(),lv.snapshot,LV_FRAME));current_tick+=20;return ACTION_NONE;}
-  assert(!lv.track_fade&&!lv.boost&&lv.mode.focus==0&&strstr(lv.title,"Second"));return ACTION_WPS_BROWSE;
+  assert(!lv.track_fade&&!lv.boost&&lv.mode.focus==0&&!strcmp(lyrics_text(0),"New first line"));return ACTION_WPS_BROWSE;
  }
  if(plan==1){remote_key=true;
   if(calls==1){
@@ -356,8 +434,8 @@ static int get_action(int c,int timeout){
      remote_cn("one",1799,0);return ACTION_NONE;
    case 5:assert(lv.mode.focus==0);remote_cn("one",1800,0);return ACTION_NONE;
    case 6:assert(lv.elapsed==1800&&lv.mode.focus==1&&lv.scroll.to==256);return ACTION_WPS_VOLDOWN;
-   case 7:assert(lv.mode.manual&&lv.mode.focus==0&&lv.pill.to==256);current_tick+=400;return ACTION_NONE;
-   default:assert(!lv.mode.manual&&lv.mode.focus==1&&lv.pill.to==0);return ACTION_WPS_LYRICS;
+   case 7:assert(lv.mode.manual&&lv.mode.focus==0);current_tick+=400;return ACTION_NONE;
+   default:assert(!lv.mode.manual&&lv.mode.focus==1);return ACTION_WPS_LYRICS;
   }
  }
  if(plan==4){
@@ -402,7 +480,7 @@ static int get_action(int c,int timeout){
  }
  assert(!lv.snapshot&&!lv.claimed&&!lyrics_loaded());return SYS_USB_CONNECTED;
 }
-int main(int argc,char**argv){assert(argc==2);assert(!chdir(argv[1]));
+int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  assert(lv_mix(0,65535,128)==0x7bef);
  assert(lv_mix(0,0xf800,128)==0x7800&&lv_mix(0,0x07e0,128)==0x03e0&&lv_mix(0,0x001f,128)==0x000f);
  art_present=true;for(int i=0;i<256;i++)art_pixels[i]=i<16?0x001f:0xf800;
@@ -412,15 +490,65 @@ int main(int argc,char**argv){assert(argc==2);assert(!chdir(argv[1]));
  f=fopen("other.txt","w");assert(f);fputs("New first line\nNew second line\n中文第三行",f);fclose(f);
  snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);playing.title="Title";playing.artist="Artist";playing.length=60000;
  global_settings.lyric_lead=200;global_settings.fg_color=65535;global_settings.lyric_highlight=true;global_settings.lyric_backlight=true;global_settings.lyric_prev_opacity=global_settings.lyric_next_opacity=55;
+ if (!strcmp(argv[2],"headset")) {
+   plan=10;
+   for (int i=0;i<2;i++) {
+     remote_source=i;calls=multimedia_count=0;
+     if (remote_source) strcpy(playing.path,"cider/song");
+     assert(lyric_viewer()==GO_TO_PREVIOUS && multimedia_count==ARRAYLEN(multimedia_keys));
+     lyrics_remote_cancel();
+   }
+   puts("PASS FU70 headset: local and remote dispatch of seven Mikey events without exit");
+   return 0;
+ }
+ if (!strcmp(argv[2],"select")) {
+   plan=11;remote_source=timed_fixture=false;
+   int lead_settings[]={200,0,-200};
+   for (int i=0;i<3;i++) {
+     global_settings.lyric_lead=lead_settings[i];
+     calls=line_seeks=title_draws=manual_draws=0;playing.elapsed=0;
+     snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);
+     assert(lyric_viewer()==GO_TO_PREVIOUS && calls==4 && line_seeks==1);
+   }
+   global_settings.lyric_lead=200;
+   plan=12;
+   const char *names[]={"song.wav","other.wav"};
+   for (int i=0;i<2;i++) {
+     calls=line_seeks=0;playing.elapsed=0;
+     snprintf(playing.path,sizeof playing.path,"%s/%s",argv[1],names[i]);
+     assert(lyric_viewer()==GO_TO_PREVIOUS && calls==2 && line_seeks==0);
+   }
+   plan=11;remote_source=timed_fixture=remote_key=true;
+   const char ready[]="CA\t9\t1\tOK";
+   assert(cider_state_apply(&remote_clock,ready,sizeof ready-1,current_tick));
+   remote_cn("one",0,0);
+   get_wps_state();
+   assert(lyrics_remote_step());
+   assert(lyrics_remote_step());
+   calls=line_seeks=0;
+   assert(lyric_viewer()==GO_TO_PREVIOUS && calls==4 && line_seeks==1);
+   lyrics_remote_cancel();
+   puts("PASS FU70 SELECT: wheel/remote, local/remote clock, lead, same line, untimed and return");
+   return 0;
+ }
+ if (!strcmp(argv[2],"entry")) {
+   plan=13;remote_source=timed_fixture=remote_key=false;
+   verify_early_frame=true;calls=loads=0;loading_presented=loading_drawn=false;
+   snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);
+   assert(lyric_viewer()==GO_TO_PREVIOUS);
+   puts("PASS FU70 early frame reaches LCD before simulated 1s font load");
+   return 0;
+ }
+ if (!strcmp(argv[2],"all")) return 0;
  wps_lyrics_backdrop();assert(lyric_viewer()==GO_TO_PREVIOUS);assert(pauses==1&&seeks==1&&skips==1);
- assert(claims==1&&releases==1&&loads==3&&unloads==3&&!holds&&!activities&&!inhibited&&!lyrics_loaded());
+ assert(claims==1&&releases==1&&loads==2&&unloads==2&&!holds&&!activities&&!inhibited&&!lyrics_loaded());
  plan=1;calls=0;remote_source=true;playing.elapsed=0;strcpy(playing.path,"cider/song");
  get_wps_state();current_tick+=3;assert(lyrics_remote_step());assert(lyrics_remote_step());
  assert(lyrics_loaded()&&lyrics_count()==16&&remote_doc.first_ms==30&&!remote_doc.done);
  assert(lyric_viewer()==GO_TO_PREVIOUS&&controls==3&&remote_at==75);
  assert(lyrics_loaded()&&remote_doc.done&&remote_doc.complete_ms>=remote_doc.first_ms);
  lyrics_remote_cancel();
- assert(claims==2&&releases==2&&loads==6&&unloads==6&&!holds&&!activities&&!inhibited);
+ assert(claims==2&&releases==2&&loads==4&&unloads==4&&!holds&&!activities&&!inhibited);
  plan=2;calls=0;remote_source=false;playing_audio=false;wps.id3=NULL;deny_arena=true;
  assert(lyric_viewer()==GO_TO_ROOT&&default_events==1&&releases==2&&!holds&&!activities&&!inhibited);
  deny_arena=false;playing_audio=true;wps.id3=&playing;
@@ -597,7 +725,7 @@ static void test_perf_history(void)
     puts("PASS performance history: append, restart, partial tail, rotation, count and legacy visit");
 }
 '''
-p=o/'viewer.c';p.write_text(pre+h+doc+'\n#include "lyrics_motion.h"\n#include "cider_model.h"\nenum {'+','.join(tokens)+'};\n'+adapter+source+history_fixture+post)
+p=o/'viewer.c';p.write_text(pre+h+doc+'\n#include "lyrics_motion.h"\n#include "cider_model.h"\nenum {'+','.join(tokens)+'};\n'+button_codes+'\n'+adapter+source+history_fixture+post)
 playback=r/'apps-ipod/screens/playback'
 subprocess.run(['cc','-m32','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function',
                 '-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-ffunction-sections','-Wl,--gc-sections',
@@ -605,4 +733,7 @@ subprocess.run(['cc','-m32','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unuse
                 '-I'+str(next(r.glob('firmware/**/podlink.h')).parent),
                 str(p),str(r/'apps-ipod/viewers/lyric_viewer/lyrics_motion.c'),
                 str(playback/'cider_model.c'),'-o',str(o/'viewer')],check=True)
-subprocess.run([str(o/'viewer'),str(o)],check=True)
+for scenario in sys.argv[2:] or ['headset', 'select', 'entry', 'all']:
+    fixture = o / scenario
+    fixture.mkdir()
+    subprocess.run([str(o/'viewer'),str(fixture),scenario],check=True)

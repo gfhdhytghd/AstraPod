@@ -128,6 +128,9 @@ static struct
     bool loaded;
 } lrc;
 
+/* A remote LRC line can span multiple page rows. */
+static unsigned char remote_lrc_line[UTF8_LINE_SIZE];
+
 /* ---------------------------------------------------------------------------
  * The buffer and its two-ended allocator
  * ------------------------------------------------------------------------ */
@@ -1144,15 +1147,15 @@ bool lyrics_append_lrc(const char *text, bool more)
 {
     lrc.type = TYPE_LRC8;
     size_t size = strlen(text);
-    if (size >= sizeof utf8_line - lrc.remote_line_size)
+    if (size >= sizeof remote_lrc_line - lrc.remote_line_size)
         return false;
-    memcpy(utf8_line + lrc.remote_line_size, text, size + 1);
+    memcpy(remote_lrc_line + lrc.remote_line_size, text, size + 1);
     lrc.remote_line_size += size;
     if (more)
         return true;
     lrc.remote_line_size = 0;
     int lines = lrc.nline;
-    return parse_lrc_line((char *)utf8_line) && lrc.nline == lines + 1;
+    return parse_lrc_line((char *)remote_lrc_line) && lrc.nline == lines + 1;
 }
 
 bool lyrics_finish_lrc(long duration)

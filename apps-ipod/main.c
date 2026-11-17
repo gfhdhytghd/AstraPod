@@ -91,6 +91,7 @@
 #include "iap.h"
 #include "iap/iap-library.h"
 #include "system/usb_log_file.h"
+#include "crumbs.h"
 #include "system/battery_log.h"
 #include "system/debug_log.h"
 
@@ -598,9 +599,12 @@ static void init(void)
     int rc;
     bool mounted = false;
 
+    /* First: the previous boot's breadcrumbs, before anything writes */
+    crumbs_boot();
     system_init();
     core_allocator_init();
     kernel_init();
+    crumbs_guard_init();
 #if !defined(SIMULATOR) && !defined(APPLICATION)
     tick_add_task(main_stack_guard);
 #endif
@@ -756,6 +760,10 @@ static void init(void)
 #endif
         }
     }
+
+    /* LCD, keys and disk are up: show and keep what the last boot left if
+     * it did not shut down */
+    crumbs_report();
 
     pcm_init();
     dsp_init();

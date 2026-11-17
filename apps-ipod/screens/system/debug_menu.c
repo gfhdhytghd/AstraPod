@@ -54,6 +54,7 @@
 #include "widgets/list.h"
 #include "dir.h"
 #include "panic.h"
+#include "crumbs.h"
 #include "system/strutil.h"
 #include "widgets/splash.h"
 #include "screens/shortcuts.h"
@@ -207,6 +208,58 @@ static bool dbg_deadlock_test(void)
     semaphore_init(&never, 1, 0);
     semaphore_wait(&never, TIMEOUT_BLOCK);
     return false;
+}
+#endif
+
+#ifdef HAVE_CRUMBS
+/* FU51: whether each watchdog works on this hardware, without a computer.
+ * Each test says what must follow; if nothing does, hold MENU+SELECT, and
+ * the next boot shows the breadcrumbs (and this test among them). */
+static bool freeze_test(int kind, const char *expect)
+{
+    splash(HZ * 3, expect);
+    crumbs_freeze_test(kind);
+    return false;
+}
+
+static bool dbg_freeze_irq(void)
+{
+    return freeze_test(1, "IRQ handler spins: *FREEZE* in 3 s");
+}
+
+static bool dbg_freeze_masked(void)
+{
+    return freeze_test(2, "IRQs off, thread spins: *FREEZE* in 3 s");
+}
+
+static bool dbg_freeze_busy(void)
+{
+    return freeze_test(3, "Thread spins, IRQs on: *HANG* in 10 s");
+}
+
+static bool dbg_freeze_silent(void)
+{
+    return freeze_test(4, "IRQ+FIQ off: no screen. Reset; crumbs at boot");
+}
+
+static int crumbs_callback(int btn, struct gui_synclist *lists)
+{
+    static char lines[1 + 8 + 32][48];
+    (void)lists;
+    int n = crumbs_lines(lines, sizeof lines / sizeof lines[0]);
+    simplelist_reset_lines();
+    for (int i = 0; i < n; i++)
+        simplelist_addline("%s", lines[i]);
+    return btn;
+}
+
+static bool dbg_crumbs(void)
+{
+    struct simplelist_info info;
+    simplelist_info_init(&info, "Last boot crumbs", 0, NULL);
+    info.action_callback = crumbs_callback;
+    info.scroll_all = true;
+    return simplelist_show_list(&info);
 }
 #endif
 
@@ -2130,6 +2183,13 @@ static const struct {
         { "Threads", dbg_os, false, NULL },
 #if defined(CPU_PP502x) || CONFIG_CPU == S5L8702
         { "Deadlock test", dbg_deadlock_test, false, NULL },
+#endif
+#ifdef HAVE_CRUMBS
+        { "Last boot crumbs", dbg_crumbs, false, NULL },
+        { "Freeze test 1: IRQ spin", dbg_freeze_irq, false, NULL },
+        { "Freeze test 2: IRQs off", dbg_freeze_masked, false, NULL },
+        { "Freeze test 3: busy thread", dbg_freeze_busy, false, NULL },
+        { "Freeze test 4: all masked", dbg_freeze_silent, false, NULL },
 #endif
 #ifdef __linux__
         { "View CPU stats", dbg_cpuinfo, false, NULL },

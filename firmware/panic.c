@@ -23,6 +23,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include "panic.h"
+#include "crumbs.h"
 #include "lcd.h"
 #include "font.h"
 #include "debug.h"
@@ -103,6 +104,9 @@ void panicf( const char *fmt, ...)
 #endif
     va_list ap;
 
+    /* Before the masks: a panic inside a panic, which stays silent, still
+     * leaves this for the next boot */
+    crumb(CR_PANIC, (uint32_t)__builtin_return_address(0));
     panic_screen_enter();
 
     va_start( ap, fmt );
@@ -139,6 +143,7 @@ void panicf( const char *fmt, ...)
     lcd_putsf(0, y++, "mode:%02lx", get_processor_mode());
 #endif
     lcd_update();
+    crumb(CR_PANIC_DRAWN, 0);
 
 #if defined(HAVE_RB_BACKTRACE)
     rb_backtrace(pc, sp, &y);

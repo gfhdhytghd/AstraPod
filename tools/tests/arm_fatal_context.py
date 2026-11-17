@@ -34,7 +34,8 @@ STOP, TEXT, NESTED, STATE, CB, TOP = (0x10001000, 0x10002000, 0x10002200,
 def machine(mode):
     u = Uc(UC_ARCH_ARM, UC_MODE_ARM)
     for addr, size in [(0, 0x10000), (0x08000000, 0x4000000),
-                       (0x10000000, 0x20000)]:
+                       (0x10000000, 0x20000),
+                       (0x48000000, 0x4000000), (0x62000000, 0x40000)]:
         u.mem_map(addr, size)
     for addr, data in segments:
         u.mem_write(addr, data)

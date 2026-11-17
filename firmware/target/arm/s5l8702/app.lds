@@ -70,10 +70,17 @@ SECTIONS
         *(.eh_frame)
     }
 
-    .iram :
+    /* FU51: VA page 0 holds nothing after boot. The exception vectors move
+     * to the high page (0xffff0000) and page 0 becomes no-access, so a NULL
+     * (or near-NULL) read, write or call faults with the culprit's pc. IRAM
+     * code and data start at the next page. */
+    .iram 0x1000 :
     {
         _iramstart = .;
+        _icodestart = .;
         *(.icode*)
+        . = ALIGN(0x4);
+        _icodeend = .;
         *(.irodata*)
         *(.idata*)
         . = ALIGN(0x4);
@@ -93,20 +100,16 @@ SECTIONS
     .stack (NOLOAD) :
     {
        *(.stack)
-       stackbegin = .;
-       _stackbegin = .;
-       /* 12 KiB: the 8 KiB main stack overflowed into __thread_entries,
-        * which sit directly below it (FU24). The rest of IRAM was unused. */
-       . += 0x3000;
-       stackend = .;
-       _stackend = .;
        _irqstackbegin = .;
        . += 0x400;
        _irqstackend = .;
        _fiqstackbegin = .;
-       . += 0x400;
+       /* FIQ mode runs only the freeze watch's check (its screen has a
+        * stack of its own); 0x200 leaves IRAM for the FU51 crumbs */
+       . += 0x200;
        _fiqstackend = .;
     } > IRAM
+    ASSERT(_intvectend + 8 <= 0x60, "vectors and literals beyond the copied 0x60")
 
     .bss (NOLOAD) :
     {
@@ -116,6 +119,33 @@ SECTIONS
         . = ALIGN(0x4);
        _end = .;
     } > DRAM
+
+    /* The main (SYS) stack, out of IRAM since FU51 freed page 0 (crt0 fills
+     * it with 0xdeadbeef; it is not part of the zeroed .bss). 12 KiB: the
+     * 8 KiB stack overflowed into __thread_entries (FU24). */
+    .mainstack (NOLOAD) :
+    {
+       . = ALIGN(32);
+       stackbegin = .;
+       _stackbegin = .;
+       . += 0x3000;
+       stackend = .;
+       _stackend = .;
+    } > DRAM
+
+    /* FU51 breadcrumbs: neither crt0 (clears .bss only) nor the bootloader
+     * (loads the image at DRAM start, keeps its .bss from DRAM + 8 MiB)
+     * writes here, so it survives a hard reset if the DRAM does. */
+    .persist (NOLOAD) :
+    {
+        . = ALIGN(32);
+        _persiststart = .;
+        *(.persist*)
+        . = ALIGN(32);
+        _persistend = .;
+    } > DRAM
+    ASSERT(_persistend <= DRAMORIG + 0x800000, ".persist overlaps the bootloader's .bss")
+    ASSERT(_persiststart >= _edata, ".persist inside the loaded image")
 
     .audiobuf (NOLOAD) :
     {

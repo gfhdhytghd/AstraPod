@@ -35,6 +35,8 @@ def run(entry, mode):
     u.mem_map(0, 0x10000)
     u.mem_map(0x08000000, 0x4000000)
     u.mem_map(0x10000000, 0x20000)
+    u.mem_map(0x48000000, 0x4000000)  # FU51 crumb rings, uncached
+    u.mem_map(0x62000000, 0x40000)
     for addr, data in segments:
         u.mem_write(addr, data)
     u.reg_write(UC_ARM_REG_CPSR, mode | 0x40)  # IRQ initially enabled

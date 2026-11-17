@@ -10,6 +10,7 @@
 #include "system.h"
 #include "panic.h"
 #include "button.h"
+#include "crumbs.h"
 
 static struct mutex service_mutex;
 static bool initialized;
@@ -33,10 +34,15 @@ _Static_assert(sizeof(struct podlink_resident) == 12, "Rust registry ABI");
 _Static_assert(sizeof(struct podlink_parser) == PODLINK_FRAME_MAX + 8,
                "Rust parser ABI");
 extern void podlink_rust_step(void);
+static unsigned int worker_id;
 static void service_thread(void)
 {
+    uint32_t steps = 0;
+    crumb(CR_PL_WORKER_START, 0);
     while (true) {
+        crumb_status(CS_PL_WORKER, ++steps << 1 | 1);
         podlink_rust_step();
+        crumb_status(CS_PL_WORKER, steps << 1);
         for (int i = 0; i < GUARD_WORDS; i++)
             if (worker.guard[i] != GUARD) panicf("PodLink stack overflow");
         sleep(MAX(1, HZ / 50));
@@ -52,18 +58,35 @@ bool pfu_init(void)
 }
 bool pfu_start(void)
 {
-    return create_thread(service_thread, worker.stack, sizeof(worker.stack), 0,
-                         "podlink" IF_PRIO(, PRIORITY_BACKGROUND) IF_COP(, CPU)) != 0;
+    worker_id = create_thread(service_thread, worker.stack,
+                              sizeof(worker.stack), 0, "podlink"
+                              IF_PRIO(, PRIORITY_BACKGROUND) IF_COP(, CPU));
+    return worker_id != 0;
 }
 bool pfu_lock(void)
 {
     if (!initialized) return false;
+    /* Every PodLink call that takes the service lock passes here. The
+     * worker's own steps are counted in CS_PL_WORKER; a UI call is an entry
+     * (the Rust caller's address: a poll loop collapses into one). */
+    uint32_t caller = (uint32_t)__builtin_return_address(0);
+#ifdef HAVE_CRUMBS
+    if (thread_self() != worker_id)
+        crumb(CR_PL_API, caller);
+#endif
     mutex_lock(&service_mutex);
+    crumb_status(CS_PL_LOCK, caller);
     return true;
 }
-void pfu_unlock(void) { mutex_unlock(&service_mutex); }
+void pfu_unlock(void)
+{
+    crumb_status(CS_PL_LOCK, 0);
+    mutex_unlock(&service_mutex);
+}
 void pfu_snapshot(int state, int session, bool host, bool running, uint32_t generation)
 {
+    if (state != client_state || session != session_state)
+        crumb(CR_PL_STATE, (uint32_t)state << 8 | (uint32_t)session);
     int level = disable_irq_save();
     client_state = state; session_state = session;
     connected = host; host_running = running; serial_generation = generation;
@@ -95,7 +118,20 @@ int32_t pfu_tick(void) { return (int32_t)current_tick; }
 int32_t pfu_hz(void) { return HZ; }
 void pfu_wait(int ticks) { sleep(MIN(ticks, MAX(1, HZ / 50))); }
 void pfu_redraw(void) { button_queue_post(BUTTON_REDRAW, 0); }
-void pfu_panic(void) { panicf("Rust PodLink panic"); }
+void pfu_panic(void)
+{
+    crumb(CR_RUST_PANIC, (uint32_t)__builtin_return_address(0));
+    panicf("Rust PodLink panic");
+}
 
-int pfu_irq_save(void) { return disable_irq_save(); }
-void pfu_irq_restore(int level) { restore_irq(level); }
+int pfu_irq_save(void)
+{
+    int level = disable_irq_save();
+    crumb_status(CS_PL_IRQ, (uint32_t)__builtin_return_address(0) | 1);
+    return level;
+}
+void pfu_irq_restore(int level)
+{
+    crumb_status(CS_PL_IRQ, (uint32_t)__builtin_return_address(0) & ~1u);
+    restore_irq(level);
+}

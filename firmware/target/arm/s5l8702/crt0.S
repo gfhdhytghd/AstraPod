@@ -96,6 +96,7 @@ start_loc:
     mrc     p15, 0, r0, c1, c0, 0
     bic     r0, r0, #0x1000
     bic     r0, r0, #0x5
+    bic     r0, r0, #0x2000         /* low vectors (FU51 runs on high ones) */
     mcr     p15, 0, r0, c1, c0, 0   /* disable caches and protection unit */
 
 .cleancache:

@@ -46,6 +46,7 @@
 #include "button.h"
 #include "hang_catch.h"
 #include "panic.h"
+#include "crumbs.h"
 
 #define HANG_SECS   10
 /* Longer than the core check: the UI thread can wait this long on the
@@ -204,6 +205,7 @@ static void NORETURN_ATTR hang_show(void)
     int n = t ? stack_scan(hang_sp, (uint32_t)t->stack + t->stack_size,
                            calls, STACK_CALLS) : 0;
 
+    crumb(CR_HANG, hang_stuck ? 0 : hang_pc);
     if (hang_stuck)
         stuck_log();
     else
@@ -225,6 +227,7 @@ static void NORETURN_ATTR hang_show(void)
                   t && t->name ? t->name : "?", HANG_SECS);
         lcd_putsf(1, y++, "lr:%08lx", (unsigned long)hang_lr);
         lcd_update();
+        crumb(CR_HANG_DRAWN, 0);
         rb_backtrace(hang_pc, hang_sp, &y);
         lcd_puts(1, y++, "stack:");
         for (int i = 0; i < n; i += 4)
@@ -235,6 +238,7 @@ static void NORETURN_ATTR hang_show(void)
                       (unsigned long)(i + 3 < n ? calls[i + 3] : 0));
     }
     lcd_update();
+    crumb(CR_HANG_DRAWN, 1);
 
     /* Waiting for a button, as a panic leaves it */
     /* S5L frequency changes write the PMU through a blocking I2C mutex.
@@ -391,6 +395,7 @@ void hang_catch_fiq_show(void)
     int n = stack_scan(freeze.sp, top, calls, 8);
     char name[8];
 
+    crumb(CR_FREEZE, freeze.pc);
     panic_screen_enter();
     lcd_set_viewport(NULL);
 #if LCD_DEPTH > 1
@@ -417,6 +422,7 @@ void hang_catch_fiq_show(void)
               (unsigned long)freeze.isp, (unsigned long)freeze.ilr,
               (unsigned long)(freeze.ispsr & 0xff));
     lcd_update();               /* the first lines stay if the rest faults */
+    crumb(CR_FREEZE_DRAWN, freeze.kind);
     for (int i = 0; i < n; i += 4)
         lcd_putsf(1, y++, "%08lx %08lx %08lx %08lx",
                   (unsigned long)calls[i],
@@ -476,6 +482,7 @@ void hang_catch_init(void)
 
 void hang_catch_stop(void)
 {
+    crumbs_clean();             /* every intended power off and reboot */
 #ifdef HAVE_HANG_CATCH_FIQ
     fiq_armed = false;
     hang_watch_fiq_stop();

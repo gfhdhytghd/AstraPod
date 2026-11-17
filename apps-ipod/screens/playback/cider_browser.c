@@ -1,5 +1,6 @@
 /* Cider Remote through the native themed database list and search dialog.
  * Copyright (C) 2026. GNU General Public License version 2 or later. */
+#include "crumbs.h"
 #include "config.h"
 #include "audio.h"
 #include "cider.h"
@@ -307,6 +308,9 @@ int cider_browse(void)
         return GO_TO_PREVIOUS;
     if (!show_covers && cover_parent_depth < 0 && cover_nav_active())
         cover_nav_finish();
+#ifdef HAVE_CRUMBS
+    crumb(CR_CIDER_IN, 0);
+#endif
     push_current_activity(ACTIVITY_DATABASEBROWSER);
     struct gui_synclist list;
     gui_synclist_init(&list, name, NULL, false, 1, NULL);
@@ -629,5 +633,8 @@ int cider_browse(void)
      * leaves, a new entry starts at the root rather than a static child. */
     depth = 0;
     history[0].selected = 0;
+#ifdef HAVE_CRUMBS
+    crumb(CR_CIDER_OUT, (uint32_t)result);
+#endif
     return result;
 }

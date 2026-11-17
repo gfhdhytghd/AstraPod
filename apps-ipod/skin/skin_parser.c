@@ -168,6 +168,15 @@ void *skin_find_item(const char *label, enum skin_find_what what,
     void *ret = NULL;
     if (!databuf)
         databuf = skin_buffer;
+    /* Neither a loaded copy nor a parse in progress: the skin is unloaded
+     * (settings_apply_skins() frees every skin before reloading, or the
+     * buflib copy failed) and its offsets point nowhere. Against a NULL base
+     * SKINOFFSETTOPTR yields the raw offset, not NULL: the walk below would
+     * read low IRAM -- the vector page -- as skin elements, and the caller
+     * copy it out as a viewport (FU51: a list viewport whose buffer was the
+     * vector word 0xe59ff014). */
+    if (!databuf)
+        return NULL;
     switch (what)
     {
         case SKIN_FIND_UIVP:

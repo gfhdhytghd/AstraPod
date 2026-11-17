@@ -23,6 +23,7 @@
  *
  ****************************************************************************/
 #include "config.h"
+#include "crumbs.h"
 #include "cpu.h"
 #include "kernel.h"
 #include "thread.h"
@@ -1036,9 +1037,11 @@ static bool usb_disk_needs_poll(void)
 static void NORETURN_ATTR usb_thread(void)
 {
     struct queue_event ev;
+    uint32_t loops = 0;
 
     while(1)
     {
+        crumb_status(CS_USB_THREAD, ++loops << 8 | 1);
 #ifdef HAVE_USB_PODLINK
         usb_disk_poll();
         if (usb_disk_needs_poll())
@@ -1048,6 +1051,10 @@ static void NORETURN_ATTR usb_thread(void)
 #else
         queue_wait(&usb_queue, &ev);
 #endif
+
+        crumb_status(CS_USB_THREAD, loops << 8);
+        if (ev.id != SYS_TIMEOUT)
+            crumb(CR_USB_EVENT, (uint32_t)ev.id);
 
         reset_poweroff_timer(); /* Any USB event counts */
 

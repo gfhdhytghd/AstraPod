@@ -22,6 +22,7 @@
 #include "system.h"
 #include "pl080.h"
 #include "panic.h"
+#include "crumbs.h"
 
 /*
  * ARM PrimeCell PL080 Multiple Master DMA controller
@@ -281,6 +282,16 @@ void dmac_ch_unlock_int(struct dmac_ch *ch)
     restore_irq(flags);
 }
 
+#ifdef HAVE_CRUMBS
+static void NORETURN_ATTR dmac_bad_dst(struct dmac_ch *ch, void *dst,
+                                       size_t size)
+{
+    crumb(CR_DMA_BAD, (uint32_t)dst);
+    panicf("DMA ch%d dst %p +%u in core IRAM", ch->prio, dst,
+           (unsigned)size);
+}
+#endif
+
 /* 1D->2D DMA transfers:
  *
  *   srcaddr:  aaaaaaaaaaabbbbbbbbbbbccccccc
@@ -352,6 +363,16 @@ void ICODE_ATTR dmac_ch_queue_2d(
     unsigned int srcinc, dstinc;
     uint32_t control, llibuf_idx;
     struct dmac_lli volatile *lli, *next_lli;
+
+#ifdef HAVE_CRUMBS
+    crumb_status(CS_DMA_Q, (uint32_t)ch->prio << 24 | (size & 0xffffff));
+    crumb_status(CS_DMA_SRC, (uint32_t)srcaddr);
+    crumb_status(CS_DMA_DST, (uint32_t)dstaddr);
+    /* A memory destination in the core's IRAM (vectors, code, stacks) is a
+     * stray buffer; nothing in this firmware records there */
+    if ((uint32_t)dstaddr < 0xc000 && ch->cfg->dinc)
+        dmac_bad_dst(ch, dstaddr, size);
+#endif
 
     /* get and fill new task */
     tsk = CH_TSK_TOP(ch);
@@ -459,6 +480,7 @@ void ICODE_ATTR dmac_ch_queue_2d(
 void dmac_ch_stop(struct dmac_ch* ch)
 {
     PANIC_DEBUG_CHANNEL(ch);
+    crumb(CR_DMA_STOP, ch->prio);
 
     int flags = disable_irq_save();
     dmac_ch_abort(ch);

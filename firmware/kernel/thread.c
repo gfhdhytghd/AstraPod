@@ -29,6 +29,7 @@
 
 #include "thread-internal.h"
 #include "hang_catch.h"
+#include "crumbs.h"
 #include "kernel.h"
 #include "cpu.h"
 #include "string.h"
@@ -1119,6 +1120,8 @@ void switch_thread(void)
     if (thread == hang_ui_thread)
         hang_ui_ran = current_tick; /* the freeze watch's UI liveness */
 #endif
+    crumb_status(CS_THREAD, (uint32_t)THREAD_ID_SLOT(thread->id) << 24 |
+                            ((uint32_t)current_tick & 0xffffff));
 
     RTR_UNLOCK(corep);
     enable_irq();

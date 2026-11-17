@@ -37,6 +37,7 @@
 #include "dma-s5l8702.h"
 #include "lcd-s5l8702.h"
 #include "lcd-target.h"
+#include "crumbs.h"
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
 #include "videoout.h"
 #endif
@@ -430,6 +431,11 @@ void lcd_update_rect(int x, int y, int width, int height)
     uint16_t* out = lcd_dblbuf[0];
     /* the lock's holder cannot run with interrupts off */
     bool lock = is_thread_context() && irq_enabled();
+#ifdef HAVE_CRUMBS
+    static uint32_t lcd_count;
+    uint32_t count = ++lcd_count << 1;
+    crumb_status(CS_LCD, count | 1);
+#endif
 
     if (lock)
         mutex_lock(&lcd_mutex);
@@ -466,6 +472,9 @@ void lcd_update_rect(int x, int y, int width, int height)
     }
     if (lock)
         mutex_unlock(&lcd_mutex);
+#ifdef HAVE_CRUMBS
+    crumb_status(CS_LCD, count);
+#endif
 }
 
 /* Line write helper function for lcd_yuv_blit. Writes two lines of yuv420. */

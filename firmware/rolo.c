@@ -19,6 +19,7 @@
  ****************************************************************************/
 
 #include "config.h"
+#include "crumbs.h"
 #include "lcd.h"
 #ifdef HAVE_REMOTE_LCD
 #include "lcd-remote.h"
@@ -344,6 +345,8 @@ int rolo_load(const char* filename)
 #endif
 #endif /* CONFIG_CPU == IMX31L */
 
+    crumbs_clean();             /* an intended restart, not a crash */
+    crumbs_guard_off();         /* low vectors and VA 0 for the next image */
     rolo_restart(filebuf, ramstart, length);
 
     /* never reached */

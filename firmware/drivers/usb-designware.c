@@ -36,6 +36,7 @@
 #include "usb_ch9.h"
 #include "usb_core.h"
 #include "usb_log.h"
+#include "crumbs.h"
 
 /* Define LOGF_ENABLE to enable logf output in this file */
 /*#define LOGF_ENABLE*/
@@ -208,9 +209,30 @@ static void usb_dw_set_address(uint8_t address)
     DWC_DCFG = (DWC_DCFG & ~(0x7f0)) | DAD(address);
 }
 
+/* Register waits that the databook says end in a few PHY/AHB cycles. They
+ * run in the USB interrupt, where an endless one stops the tick and the
+ * whole player (FU51), so each gives up after about 5 ms, leaves a
+ * breadcrumb naming the stage, and lets the driver carry on. */
+#define USB_DW_WAIT_US 5000
+static bool usb_dw_wait_bits(volatile uint32_t *reg, uint32_t mask,
+                             uint32_t want, int stage)
+{
+    crumb_status(CS_USB_STAGE, stage);
+    for (int us = 0; (*reg & mask) != want; us++)
+    {
+        if (us >= USB_DW_WAIT_US)
+        {
+            crumb(CR_USB_TIMEOUT, stage << 24 | (*reg & 0xffffff));
+            return false;
+        }
+        udelay(1);
+    }
+    return true;
+}
+
 static void usb_dw_wait_for_ahb_idle(void)
 {
-    while (!(DWC_GRSTCTL & AHBIDL));
+    usb_dw_wait_bits(&DWC_GRSTCTL, AHBIDL, AHBIDL, USB_STAGE_AHB_IDLE);
 }
 
 #ifdef USB_DW_SHARED_FIFO
@@ -371,7 +393,7 @@ static void usb_dw_flush_fifo(uint32_t fflsh, int fnum)
     usb_dw_wait_for_ahb_idle();
 #endif
     DWC_GRSTCTL = TXFNUM(fnum) | fflsh;
-    while (DWC_GRSTCTL & fflsh);
+    usb_dw_wait_bits(&DWC_GRSTCTL, fflsh, 0, USB_STAGE_FIFO_FLUSH);
     udelay(1);  /* Wait 3 PHY cycles */
 }
 
@@ -396,6 +418,7 @@ static void usb_dw_disable_ep(int epnum, enum usb_dw_epdir epdir)
     if (DWC_EPCTL(epnum, epdir) & EPENA)
     {
         int tmo = 50;
+        crumb_status(CS_USB_STAGE, USB_STAGE_EP_DISABLE);
         DWC_EPCTL(epnum, epdir) |= EPDIS;
         while (DWC_EPCTL(epnum, epdir) & EPDIS)
         {
@@ -415,6 +438,7 @@ static void usb_dw_gonak_effective(bool enable)
 
         /* Wait for global IN NAK effective */
         int tmo = 50;
+        crumb_status(CS_USB_STAGE, USB_STAGE_GONAK);
         while (~DWC_GINTSTS & GOUTNAKEFF)
         {
             if (!tmo--) panicf("%s: failed!", __func__);
@@ -443,6 +467,7 @@ static void usb_dw_set_innak_effective(int epnum)
          * then INEPNE is never raised.
          */
         int tmo = 50;
+        crumb_status(CS_USB_STAGE, USB_STAGE_INNAK);
         DWC_DIEPCTL(epnum) |= SNAK;
         while ((DWC_DIEPCTL(epnum) & EPENA) && !(DWC_DIEPINT(epnum) & INEPNE))
         {
@@ -462,6 +487,7 @@ static void usb_dw_ginak_effective(bool enable)
 
         /* Wait for global IN NAK effective */
         int tmo = 50;
+        crumb_status(CS_USB_STAGE, USB_STAGE_GINAK);
         while (~DWC_GINTSTS & GINAKEFF)
         {
             if (!tmo--) panicf("%s: failed!", __func__);
@@ -832,6 +858,29 @@ void usb_drv_iso_in_retry(void)
     usb_dw_target_enable_irq();
 }
 
+#ifdef HAVE_CRUMBS
+/* The controller's DMA writes OUT data wherever DOEPDMA points, past the
+ * MMU. A buffer in the core IRAM (vectors, code) or in the page table at
+ * the end of DRAM would turn into a RESTART later; stop here instead. */
+static void usb_dw_check_dma(int epnum, enum usb_dw_epdir epdir, void *buf,
+                             uint32_t size)
+{
+    extern char _icodeend[];
+    uint32_t a = (uint32_t)buf;
+    crumb_status(epdir == USB_DW_EPDIR_OUT ? CS_USB_DMA_OUT : CS_USB_DMA_IN,
+                 a);
+    if (epdir != USB_DW_EPDIR_OUT)
+        return;
+    if (a < (uint32_t)_icodeend ||
+        (a + size > TTB_BASE_ADDR && a < DRAM_ORIG + DRAM_SIZE))
+    {
+        crumb(CR_USB_DMA_BAD, a);
+        panicf("USB OUT%d DMA to %08lx +%lu", epnum, (unsigned long)a,
+               (unsigned long)size);
+    }
+}
+#endif
+
 static void usb_dw_epstart(int epnum, enum usb_dw_epdir epdir,
                            void* buf, uint32_t size)
 {
@@ -876,6 +925,9 @@ static void usb_dw_epstart(int epnum, enum usb_dw_epdir epdir,
     }
 
 #ifndef USB_DW_ARCH_SLAVE
+#ifdef HAVE_CRUMBS
+    usb_dw_check_dma(epnum, epdir, buf, xfersize);
+#endif
     DWC_EPDMA(epnum, epdir) = USB_DW_PHYSADDR((uint32_t)buf);
 #endif
     DWC_EPTSIZ(epnum, epdir) = eptsiz;
@@ -1078,6 +1130,9 @@ static void usb_dw_handle_setup_received(void)
 #endif
     struct usb_ctrlrequest req;
     memcpy(&req, ep0_buffer, sizeof(struct usb_ctrlrequest));
+    crumb_status(CS_USB_STAGE, USB_STAGE_SETUP);
+    crumb(CR_USB_SETUP, req.bRequestType | (uint32_t)req.bRequest << 8 |
+                        (uint32_t)req.wLength << 16);
     /* Abort both old data/status directions before delivering the new SETUP.
      * Flush does not report completions, so notify the core explicitly once. */
     usb_dw_flush_endpoint(0, USB_DW_EPDIR_IN);
@@ -1117,6 +1172,7 @@ static int usb_dw_get_epmis(void)
 
 static void usb_dw_handle_token_mismatch(void)
 {
+    crumb_status(CS_USB_STAGE, USB_STAGE_EPMIS);
     usb_dw_ginak_effective(true);
     int epmis = usb_dw_get_epmis();
     if (epmis >= 0)
@@ -1226,6 +1282,8 @@ static void usb_dw_irq(void)
 {
     int ep;
     uint32_t gintsts = DWC_GINTSTS & DWC_GINTMSK;
+    crumb_status(CS_USB_GINTSTS, gintsts);
+    crumb_status(CS_USB_STAGE, USB_STAGE_ISR);
 
 #ifdef USB_DW_ARCH_SLAVE
     /* Handle one packet at a time, the IRQ will re-trigger if there's
@@ -1299,6 +1357,7 @@ static void usb_dw_irq(void)
     if (gintsts & USBRST)
     {
         DWC_GINTSTS = USBRST;
+        crumb(CR_USB_RESET, 0);
         usb_dw_set_address(0);
         usb_dw_reset_endpoints();
         address_status = false;
@@ -1323,8 +1382,10 @@ static void usb_dw_irq(void)
     if (gintsts & ENUMDNE)
     {
         DWC_GINTSTS = ENUMDNE;
+        crumb(CR_USB_ENUM, usb_drv_port_speed());
         usb_dw_ep0_recv();
     }
+    crumb_status(CS_USB_STAGE, USB_STAGE_NONE);
 }
 
 static void usb_dw_check_hw(void)

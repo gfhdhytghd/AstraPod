@@ -30,6 +30,7 @@
 #include "clocking-s5l8702.h"
 #include "hang_catch.h"
 #include "hang_watch.h"
+#include "crumbs.h"
 
 #define default_interrupt(name) \
   extern __attribute__((weak,alias("UIRQ"))) void name (void)
@@ -182,12 +183,30 @@ void irq_handler(void)
     (void)VIC1ADDRESS;
     uint32_t irqs0 = VIC0IRQSTATUS;
     uint32_t irqs1 = VIC1IRQSTATUS;
+#ifdef HAVE_CRUMBS
+    /* Persistent: the line being served, and how many have completed. A
+     * freeze inside a handler leaves in != out with that line's number. */
+    static uint32_t irq_count;
+    irq_count++;
+#define IRQ_CRUMB(i, out) crumb_status((out) ? CS_IRQ_OUT : CS_IRQ_IN, \
+                                       (uint32_t)(i) << 24 | (irq_count & 0xffffff))
+#else
+#define IRQ_CRUMB(i, out)
+#endif
     for (current_irq = 0; irqs0; current_irq++, irqs0 >>= 1)
         if (irqs0 & 1)
+        {
+            IRQ_CRUMB(current_irq, 0);
             irqvector[current_irq]();
+            IRQ_CRUMB(current_irq, 1);
+        }
     for (current_irq = 32; irqs1; current_irq++, irqs1 >>= 1)
         if (irqs1 & 1)
+        {
+            IRQ_CRUMB(current_irq, 0);
             irqvector[current_irq]();
+            IRQ_CRUMB(current_irq, 1);
+        }
     VIC0ADDRESS = NULL;
     VIC1ADDRESS = NULL;
 #ifdef NAKED
@@ -343,6 +362,7 @@ uint32_t reboot_note[2] USED_ATTR; /* magic, caller */
 static void NORETURN_ATTR USED_ATTR null_call_report(void)
 {
     const uint32_t *r = null_call_regs;
+    crumb(CR_RESTART, r[10] << 8 | (r[6] & 0x1f));
     const char *what =
         r[10] ? "CRT0 entry" :
         reboot_note[0] == REBOOT_NOTE ? "REBOOT" :
@@ -444,10 +464,11 @@ void system_init(void)
      * Bootloader seems to give a blank screen when IRAM1 is disabled
      * - FW 10/13/19
      */
-#ifndef BOOTLOADER
+#if !defined(BOOTLOADER) && !defined(HAVE_CRUMBS)
     /* disable IRAM1 (not used because it is slower than DRAM) */
     clockgate_enable(CLOCKGATE_SM1, false);
 #endif
+    /* With HAVE_CRUMBS IRAM1 stays clocked: its top holds a breadcrumb copy */
 
     clocking_init(clk_modes, 0);
 #ifndef BOOTLOADER

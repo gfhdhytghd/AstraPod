@@ -16,6 +16,7 @@ p.add_argument('--budget',type=int,default=2048)
 a=p.parse_args()
 u=Uc(UC_ARCH_ARM,UC_MODE_ARM);u.reg_write(UC_ARM_REG_CPSR,0xdf)
 u.mem_map(0,0x10000);u.mem_map(0x08000000,0x4000000);u.mem_map(0x10000000,0x200000)
+u.mem_map(0x48000000,0x4000000);u.mem_map(0x62000000,0x40000)  # FU51 crumb rings, uncached
 symbols={}
 with a.elf.open('rb') as f:
     e=ELFFile(f)

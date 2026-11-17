@@ -72,6 +72,7 @@
  * send that finds the link busy stays in the outbox for the next pass.
  ****************************************************************************/
 
+#include "crumbs.h"
 #include <stdio.h>
 #include <string.h>
 #include "config.h"
@@ -2609,6 +2610,9 @@ static bool poll_link(void)
     }
     if (connected != was_connected)
     {
+#ifdef HAVE_CRUMBS
+        crumb(CR_AGENTS_STEP, 0x10 | connected);
+#endif
         was_connected = connected;
         model.hello = false;
         model.voice = 0;
@@ -2653,6 +2657,9 @@ static bool poll_link(void)
         int before = model.nquestions;
         bool had = question_pane[0] && current_question();
         int type = hr_model_apply(&model, (const char *)m.data, m.length);
+#ifdef HAVE_CRUMBS
+        crumb(CR_AGENTS_STEP, 0x100 | (uint32_t)(type & 0xff));
+#endif
         if (!type)
             continue;
         last_message = current_tick;
@@ -2834,6 +2841,9 @@ static int agents_run(void)
     int action, ret = AGENTS_EXIT_OTHER;
     char buf[48];
 
+#ifdef HAVE_CRUMBS
+    crumb(CR_AGENTS_IN, 0);
+#endif
     if (!podlink_open_agents(background_link))
     {
         splash(HZ * 3, "Unplug USB, then open Agents");
@@ -2841,6 +2851,9 @@ static int agents_run(void)
     }
     bool resume = cache_valid && cache_generation == podlink_generation() &&
                   podlink_state() == PODLINK_CONNECTED;
+#ifdef HAVE_CRUMBS
+    crumb(CR_AGENTS_STEP, 1 | (uint32_t)resume << 8);
+#endif
     if (!resume)
     {
     hr_model_reset(&model);
@@ -3288,6 +3301,9 @@ static int agents_run(void)
     cache_top = list.start_item[SCREEN_MAIN];
     cache_valid = was_connected && model.hello && !nout;
     cache_generation = podlink_generation();
+#ifdef HAVE_CRUMBS
+    crumb(CR_AGENTS_STEP, 0xf0);
+#endif
     podlink_close();
     /* Play still held would power off at once: wait for its release */
     while (ret != AGENTS_SWITCH_WPS && ret != AGENTS_SWITCH_REMOTE_WPS &&
@@ -3300,6 +3316,9 @@ static int agents_run(void)
     volume_paging = false;
 #endif
     native_play_pending = false;
+#ifdef HAVE_CRUMBS
+    crumb(CR_AGENTS_OUT, (uint32_t)ret);
+#endif
     FOR_NB_SCREENS(i)
         viewportmanager_theme_undo(i, false);
     agents_usb_exit(ret);

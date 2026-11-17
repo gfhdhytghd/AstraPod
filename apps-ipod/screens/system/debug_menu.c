@@ -2171,14 +2171,27 @@ static bool dbg_lyrics_perf(void)
     struct simplelist_info info;
     simplelist_info_init(&info, "Lyrics perf", 0, NULL);
     int fd = open(LYRICS_PERF_PATH, O_RDONLY);
-    if (fd < 0)
+    int archive = open(LYRICS_PERF_ARCHIVE, O_RDONLY);
+    struct lyrics_perf_history current = lyrics_perf_scan(fd);
+    struct lyrics_perf_history older = lyrics_perf_scan(archive);
+    simplelist_addline("Sessions kept: %u", current.count + older.count);
+    if (current.count == 0)
+    {
+        if (fd >= 0) close(fd);
+        fd = archive;
+        archive = -1;
+        current = older;
+    }
+    if (archive >= 0) close(archive);
+    if (current.count == 0)
         simplelist_addline("%s", "Close Lyrics to record a visit.");
-    else
+    else if (lseek(fd, current.latest, SEEK_SET) == current.latest)
     {
         char buf[64];
-        while (read_line(fd, buf, sizeof(buf)) > 0) simplelist_addline("%s", buf);
-        close(fd);
+        while (read_line(fd, buf, sizeof(buf)) > 0 && *buf && strcmp(buf, LYRICS_PERF_END))
+            simplelist_addline("%s", buf);
     }
+    if (fd >= 0) close(fd);
     info.scroll_all = true;
     return simplelist_show_list(&info);
 }

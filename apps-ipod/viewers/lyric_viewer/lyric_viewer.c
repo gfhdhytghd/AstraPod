@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <limits.h>
 #include "config.h"
 #include "system.h"
@@ -34,6 +35,7 @@
 #include "system/activity.h"
 #include "system/shutdown.h"
 #include "system/app_buffer.h"
+#include "system/strutil.h"
 #include "root_menu.h"
 #include "screens/playback/wps.h"
 #include "screens/playback/cider.h"
@@ -101,7 +103,7 @@ struct lv_state {
     char track[MAX_PATH], title[MAX_PATH];
     long elapsed, length;
     uint32_t changed, remote_serial, art_gen;
-    uint32_t entry_at, present_at, phase_us[LV_WAIT];
+    uint32_t entry_at, entry_tick, present_at, phase_us[LV_WAIT];
     unsigned phase_mask;
     enum lv_type last_type;
     struct lv_perf perf;
@@ -219,10 +221,82 @@ static void lv_stat_save(int fd, const char *name, const struct lv_stat *stat)
              lv_p95(stat), (unsigned long)stat->maximum);
 }
 
-static void lv_perf_save(void)
+struct lyrics_perf_history lyrics_perf_scan(int fd)
 {
-    int fd = open(LYRICS_PERF_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    struct lyrics_perf_history history = { .latest = -1 };
+    off_t position = 0, block = -1;
+    uint32_t session = 0;
+    char line[64];
+    int bytes;
+    while (fd >= 0 && (bytes = read_line(fd, line, sizeof(line))) > 0)
+    {
+        if (position == 0 && !strncmp(line, "frames: ", 8))
+        {
+            /* The previous recorder saved one visit without a header. */
+            history = (struct lyrics_perf_history){ .latest = 0, .session = 1, .count = 1 };
+        }
+        if (!strncmp(line, LYRICS_PERF_HEADER, sizeof(LYRICS_PERF_HEADER) - 1))
+        {
+            session = strtoul(line + sizeof(LYRICS_PERF_HEADER) - 1, NULL, 10);
+            block = position;
+        }
+        else if (block >= 0 && session && bytes == (int)sizeof(LYRICS_PERF_END) &&
+                 !strcmp(line, LYRICS_PERF_END))
+        {
+            history.latest = block;
+            history.session = session;
+            history.count++;
+            block = -1;
+        }
+        position += bytes;
+    }
+    return history;
+}
+
+/* Leave room for a complete report, including maximum-width counters. */
+#define LV_PERF_RESERVE 1536
+static uint32_t lv_perf_session;
+
+static int lv_perf_open(void)
+{
+    if (!lv_perf_session)
+    {
+        int fd = open(LYRICS_PERF_PATH, O_RDONLY);
+        if (fd >= 0)
+        {
+            lv_perf_session = lyrics_perf_scan(fd).session;
+            close(fd);
+        }
+        if (!lv_perf_session && (fd = open(LYRICS_PERF_ARCHIVE, O_RDONLY)) >= 0)
+        {
+            lv_perf_session = lyrics_perf_scan(fd).session;
+            close(fd);
+        }
+    }
+
+    int fd = open(LYRICS_PERF_PATH, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    if (fd < 0) return fd;
+    off_t size = ffilesize(fd);
+    if (size >= 0 && size <= LYRICS_PERF_FILE_LIMIT - LV_PERF_RESERVE)
+        return fd;
+    if (size > LYRICS_PERF_FILE_LIMIT && ftruncate(fd, LYRICS_PERF_FILE_LIMIT) < 0)
+        size = -1;
+    if (close(fd) < 0 || size < 0 || rename(LYRICS_PERF_PATH, LYRICS_PERF_ARCHIVE) < 0)
+        return -1;
+    return open(LYRICS_PERF_PATH, O_WRONLY | O_CREAT | O_APPEND, 0666);
+}
+
+/* Keep the file I/O call frame out of the drawing loop. */
+static void __attribute__((noinline)) lv_perf_save(void)
+{
+    int fd = lv_perf_open();
     if (fd < 0) return;
+    fdprintf(fd, "\n" LYRICS_PERF_HEADER "%lu\nUptime (s): %lu\nSource: %s%s\n"
+             "Track: %s\nDuration (ms): %lu\n", (unsigned long)++lv_perf_session,
+             (unsigned long)(lv.entry_tick / HZ), lv.remote ? "Remote / " : "Local",
+             lv.remote ? cider_remote_name() : "",
+             lyrics_loaded() && lyrics_timed() ? "Timed" : "Untimed",
+             (unsigned long)((uint32_t)current_tick - lv.entry_tick) * (1000 / HZ));
     const struct lv_stat *all = &perf.total;
     fdprintf(fd, "frames: %lu\navg/p95/max ms: %lu/%lu/%lu\n", (unsigned long)all->count,
              all->count ? (unsigned long)((all->sum / all->count + 500) / 1000) : 0UL,
@@ -247,6 +321,7 @@ static void lv_perf_save(void)
     static const char *const types[] = { "steady", "entry", "exit", "line change", "manual scroll", "track change" };
     for (int i = 0; i < LV_PHASE_COUNT; i++) lv_stat_save(fd, phases[i], &perf.phase[i]);
     for (int i = 0; i < LV_TYPE_COUNT; i++) lv_stat_save(fd, types[i], &perf.type[i]);
+    fdprintf(fd, LYRICS_PERF_END "\n");
     close(fd);
 }
 
@@ -964,7 +1039,9 @@ int lyric_viewer(void)
 {
     uint32_t entry_at = lv_clock();
     static const char *const fonts[] = { FONT_DIR "/12-noto-sans.fnt", FONT_DIR "/18-noto-sans.fnt", FONT_DIR "/26-noto-sans-medium.fnt" };
-    struct lv_state state = {.initial = true, .entry_at = entry_at, .first_pending = true};
+    struct lv_state state = {
+        .initial = true, .entry_at = entry_at, .entry_tick = current_tick, .first_pending = true
+    };
     lv_state = &state;
     size_t bytes = 0; fb_data *arena = app_try_claim_buffer(&bytes, "lyrics");
     lv.claimed = arena != NULL;

@@ -10,6 +10,9 @@ ns=ast.parse((r/'tools/tests/lyrics_document_test.py').read_text())
 pre=next(ast.literal_eval(n.value) for n in ns.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='pre' for t in n.targets))
 pre=pre.replace('static struct {int default_codepage;} global_settings;', '''static struct {int default_codepage,lyric_colour_mode,backlight_timeout,backlight_timeout_plugged,lyric_prev_opacity,lyric_next_opacity,lyric_lead;unsigned fg_color,bg_color;bool lyric_highlight,lyric_backlight,prevent_skip;} global_settings;''')
 pre=pre.replace('length,id3v2len;', 'length,id3v2len,elapsed;')
+strutil=(r/'apps-ipod/system/strutil.c').read_text()
+read_line=re.search(r'^int read_line\(.*?^}',strutil,re.M|re.S).group()
+pre=re.sub(r'^static int read_line\([^\n]+\n', lambda _: '#include <errno.h>\n'+read_line+'\n', pre, flags=re.M)
 source=(r/'apps-ipod/viewers/lyric_viewer/lyric_viewer.c').read_text()
 source=re.sub(r'^#include ".*\n','',source,flags=re.M)
 doc=(r/'apps-ipod/viewers/lyric_viewer/lyrics.c').read_text();doc=re.sub(r'^#include ".*\n','',doc,flags=re.M)
@@ -160,6 +163,7 @@ static bool cider_lyrics_matches(const char *id,uint32_t generation,uint32_t lib
     return generation==9&&!library&&!strcmp(id,timed_fixture?remote_clock.id:playing.path+6);
 }
 static bool cider_active(void){return remote_source;}
+static const char *cider_remote_name(void){return "Rufin";}
 static int audio_status(void){return playing_audio?AUDIO_STATUS_PLAY:0;}
 static struct mp3entry *audio_current_track(void){return playing_audio?&playing:NULL;}
 static void wps_lyrics_backdrop(void){for(int i=0;i<320*240;i++)screen_pixels[i]=0x1234;}
@@ -332,7 +336,12 @@ int main(int argc,char**argv){assert(argc==2);assert(!chdir(argv[1]));
  snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);
  assert(lyric_viewer()==GO_TO_PREVIOUS&&releases==3&&!lv_state);
  FILE *metrics=fopen("lyrics-perf.txt","r");assert(metrics);
- char report[2048];size_t len=fread(report,1,sizeof(report)-1,metrics);fclose(metrics);report[len]=0;
+ char report[1024];struct lyrics_perf_history log=lyrics_perf_scan(fileno(metrics));
+ assert(log.count==4&&log.session==4&&log.latest>0);
+ assert(!fseek(metrics,log.latest,SEEK_SET));
+ size_t len=fread(report,1,sizeof(report)-1,metrics);fclose(metrics);report[len]=0;
+ assert(!strncmp(report,"Session 4\nUptime (s): ",22)&&strstr(report,"Duration (ms): "));
+ assert(strstr(report,"Source: Local\nTrack: Untimed\n"));
  assert(strstr(report,"blur reuse/builds: 1/1\n")&&strstr(report,"blur max ms: 5\n"));
  assert(strstr(report,"SELECT to first ms: 31\n")&&strstr(report,"animation fps: "));
  assert(strstr(report,"restore: ")&&strstr(report,"text/glyph: ")&&strstr(report,"blend: ")&&strstr(report,"LCD: ")&&strstr(report,"wait: "));
@@ -370,10 +379,111 @@ int main(int argc,char**argv){assert(argc==2);assert(!chdir(argv[1]));
  precise_extra=100000;lv_record(99000,LV_ENTRY,true);
  assert(perf.gaps==1&&perf.gap_time==58000&&perf.dropped==6);
  assert(perf.type[LV_ENTRY].count==2&&perf.type[LV_STEADY].count==100);
+ test_perf_history();
  puts("PASS production viewer: local/remote lyrics, art cache/cold/no art/late remote art, dirty idle, recorder and close log, track fade, arena and USB cleanup");
 }
 '''
-p=o/'viewer.c';p.write_text(pre+h+doc+'\n#include "lyrics_motion.h"\n#include "cider_model.h"\nenum {'+','.join(tokens)+'};\n'+adapter+source+post)
+debug_menu=(r/'apps-ipod/screens/system/debug_menu.c').read_text()
+debug_view=re.search(r'^static bool dbg_lyrics_perf\(void\).*?^}',debug_menu,re.M|re.S).group()
+history_fixture=r'''
+#include <stdarg.h>
+struct simplelist_info { bool scroll_all; };
+static char shown[1024];
+static void simplelist_info_init(struct simplelist_info *info, const char *title, int count, void *data)
+{
+    assert(!strcmp(title, "Lyrics perf") && !count && !data);
+    info->scroll_all = false;
+    shown[0] = 0;
+}
+static void simplelist_addline(const char *fmt, ...)
+{
+    size_t used = strlen(shown);
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(shown + used, sizeof shown - used, fmt, args);
+    va_end(args);
+    assert(n >= 0 && used + n + 1 < sizeof shown);
+    strcat(shown, "\n");
+}
+static bool simplelist_show_list(struct simplelist_info *info)
+{
+    assert(info->scroll_all);
+    return false;
+}
+''' + debug_view + r'''
+
+static struct lyrics_perf_history scan_path(const char *path)
+{
+    int fd = open(path, O_RDONLY);
+    struct lyrics_perf_history result = lyrics_perf_scan(fd);
+    if (fd >= 0) close(fd);
+    return result;
+}
+
+static void test_perf_history(void)
+{
+    assert(scan_path(LYRICS_PERF_PATH).count == 9);
+    assert(!dbg_lyrics_perf());
+    assert(strstr(shown, "Sessions kept: 9\nSession 9\n"));
+    assert(strstr(shown, "Source: Local\nTrack: Timed\n"));
+    assert(!strstr(shown, "Session 8") && !strstr(shown, LYRICS_PERF_END));
+
+    /* Recover numbering after reboot and ignore a partially written visit. */
+    int fd = open(LYRICS_PERF_PATH, O_WRONLY | O_APPEND);
+    assert(fd >= 0 && dprintf(fd, "\nSession 10\nUptime (s): 1") > 0 && !close(fd));
+    lv_perf_session = 0;
+    assert(!dbg_lyrics_perf() && strstr(shown, "Sessions kept: 9\nSession 9\n"));
+    lv.remote = true;
+    lv_perf_save();
+    assert(!dbg_lyrics_perf() && strstr(shown, "Sessions kept: 10\nSession 10\n"));
+    assert(strstr(shown, "Source: Remote / Rufin\n"));
+
+    /* Enough real appends to replace the archive repeatedly. */
+    uint32_t previous_archive = 0;
+    int rotations = 0;
+    struct stat current_size, archive_size;
+    for (uint32_t id = 11; id <= 250; id++)
+    {
+        lv_perf_save();
+        struct lyrics_perf_history current = scan_path(LYRICS_PERF_PATH);
+        struct lyrics_perf_history archive = scan_path(LYRICS_PERF_ARCHIVE);
+        assert(current.session == id);
+        assert(!stat(LYRICS_PERF_PATH, &current_size));
+        if (!stat(LYRICS_PERF_ARCHIVE, &archive_size))
+        {
+            assert(archive_size.st_size <= LYRICS_PERF_FILE_LIMIT);
+            if (archive.session != previous_archive)
+            {
+                assert(archive.session == id - 1 && current.count == 1);
+                previous_archive = archive.session;
+                rotations++;
+            }
+        }
+        assert(current_size.st_size <= LYRICS_PERF_FILE_LIMIT);
+    }
+    assert(rotations >= 2);
+    struct lyrics_perf_history archive = scan_path(LYRICS_PERF_ARCHIVE);
+    struct lyrics_perf_history current = scan_path(LYRICS_PERF_PATH);
+    assert(archive.count + current.count < 250);
+    assert(!dbg_lyrics_perf());
+    char expected[64];
+    snprintf(expected, sizeof expected, "Sessions kept: %u\nSession 250\n",
+             archive.count + current.count);
+    assert(strstr(shown, expected));
+
+    /* A legacy single-visit file remains readable and keeps its place. */
+    assert(!unlink(LYRICS_PERF_ARCHIVE));
+    FILE *legacy = fopen(LYRICS_PERF_PATH, "w");
+    assert(legacy && fputs("frames: 12\ntrack change: 0 0/0/0\n", legacy) >= 0);
+    assert(!fclose(legacy));
+    lv_perf_session = 0;
+    assert(!dbg_lyrics_perf() && strstr(shown, "Sessions kept: 1\nframes: 12\n"));
+    lv_perf_save();
+    assert(!dbg_lyrics_perf() && strstr(shown, "Sessions kept: 2\nSession 2\n"));
+    puts("PASS performance history: append, restart, partial tail, rotation, count and legacy visit");
+}
+'''
+p=o/'viewer.c';p.write_text(pre+h+doc+'\n#include "lyrics_motion.h"\n#include "cider_model.h"\nenum {'+','.join(tokens)+'};\n'+adapter+source+history_fixture+post)
 playback=r/'apps-ipod/screens/playback'
 subprocess.run(['cc','-m32','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function',
                 '-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-ffunction-sections','-Wl,--gc-sections',

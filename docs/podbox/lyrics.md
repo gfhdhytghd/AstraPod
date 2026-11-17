@@ -69,8 +69,13 @@ entry, exit or track transition. Idle waits cover the next lyric line, word
 or progress-bar pixel, the manual-return deadline and a 500 ms source check.
 A poll with no visible changes draws nothing.
 
-`Debug > Lyrics perf` shows the last visit. Closing the page writes the
-same lines to `/.rockbox/lyrics-perf.txt`. Frame times cover rendering and
+`Debug > Lyrics perf` shows the latest visit and the number of visits kept.
+Closing the page appends a session to `/.rockbox/lyrics-perf.txt`. The header
+records the session number, uptime at entry, source, timing mode and time
+spent on the page. Source and timing mode describe the track at exit.
+When the active file has little room for another session, it replaces
+`/.rockbox/lyrics-perf.1.txt`. The two files use at most 64 KiB together.
+Frame times cover rendering and
 LCD submission. The file reports sample counts and average, p95 and maximum
 times per phase and per animation. P95 is a histogram upper bound. Wait is
 time in the scheduler or input queue. The dropped count flags frames over the

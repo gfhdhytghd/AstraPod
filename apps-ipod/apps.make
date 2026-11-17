@@ -42,11 +42,12 @@ endif
 
 SRC += $(call preprocess, $(APPSDIR)/SOURCES)
 
-# Keep lyrics, diagnostics and MP4 metadata within the iPod 6G RAM budget.
+# Keep lyrics, diagnostics, remote lists and MP4 metadata within the iPod 6G RAM budget.
 # The lyrics pixel loops opt back into ARM mode.
 ifeq ($(MODELNAME):$(ARCH),ipod6g:arch_arm)
 $(APPSBUILDDIR)/viewers/lyric_viewer/lyrics.o \
 $(APPSBUILDDIR)/viewers/lyric_viewer/lyric_viewer.o \
+$(APPSBUILDDIR)/screens/playback/cider_browser.o \
 $(APPSBUILDDIR)/screens/system/debug_menu.o \
 $(RBCODEC_BLD)/metadata/mp4.o: CFLAGS += -mthumb -mthumb-interwork
 endif

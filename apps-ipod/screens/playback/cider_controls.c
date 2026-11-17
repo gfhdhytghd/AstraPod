@@ -17,6 +17,7 @@
 #include "lcd.h"
 #include "kernel.h"
 #include "usb.h"
+#include "viewers/lyric_viewer/lyric_viewer.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -170,7 +171,11 @@ static int rating(void)
     return 0;
 }
 static int track_info(void) { return show_page("now/info", LANG_TRACK_INFO, 1); }
-static int lyrics(void) { return show_page("now/lyrics", LANG_LYRICS, 0); }
+static int lyrics(void)
+{
+    if (lyric_viewer() == GO_TO_ROOT) { page_usb = true; return 1; }
+    return GO_TO_WPS; /* close the context menu as well */
+}
 static int queue_view(void) { return show_page("now/queue", LANG_CURRENT_PLAYLIST, 2); }
 static int queue_time(void) { return show_page("now/time", LANG_PLAYING_TIME, 3); }
 static int browse(void *data)

@@ -68,6 +68,7 @@ static void push_current_activity(int a){(void)a;pushes++;}
 static void pop_current_activity(void){pops++;}
 static int view_text(const char*t,const char*v){(void)t;(void)v;return 0;}
 int cider_native_sleep_timer(void){sleeps++;return 0;}
+int lyric_viewer(void){return 0;}
 char*cider_native_sleep_name(int i,void*d,char*b,size_t n){(void)i;(void)d;snprintf(b,n,"Sleep Timer");return b;}
 int cider_browse_at(const struct cider_row*r){assert(!strcmp(r->route,"album/a1"));browse_calls++;return 0;}
 static int do_menu(const struct menu_item_ex*m,void*a,void*b,bool c);

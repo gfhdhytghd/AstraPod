@@ -488,7 +488,7 @@ static bool remote_volume_action(action_cur_t *cur)
     bool up = key == BUTTON_RC_VOL_UP;
     if (cur->context == CONTEXT_WPS)
     {
-        if (!cider_active()) return false;
+        if (!cider_active() && get_current_activity() != ACTIVITY_LYRICS) return false;
         cur->action = up ? ACTION_WPS_VOLUP : ACTION_WPS_VOLDOWN;
         return true;
     }

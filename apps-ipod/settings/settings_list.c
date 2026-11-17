@@ -1893,7 +1893,7 @@ const struct settings_list settings[] = {
                    "left,centre,right", NULL, 3,
                    ID2P(LANG_LEFT), ID2P(LANG_LYRICS_CENTRE),
                    ID2P(LANG_RIGHT)),
-    INT_SETTING(0, lyric_prev_opacity, LANG_LYRICS_PREV_OPACITY, 30,
+    INT_SETTING(0, lyric_prev_opacity, LANG_LYRICS_PREV_OPACITY, 55,
                 "lyric previous opacity", UNIT_PERCENT, 0, 100, 5,
                 NULL, NULL, NULL),
     INT_SETTING(0, lyric_next_opacity, LANG_LYRICS_NEXT_OPACITY, 55,

@@ -34,6 +34,7 @@ pre=r'''
 #define LAST_ITEM_IN_LIST__NEXTLIST(c) {0,0,0}
 struct button_mapping {int action_code,button_code,prereq_button_code;};
 enum {CONTEXT_STD,CONTEXT_WPS,CONTEXT_QUICKSCREEN,CONTEXT_AGENTS,CONTEXT_LIST,CONTEXT_PLUGIN};
+#define ACTIVITY_LYRICS 99
 #define ACTIVITY_ALBUMCOVERS 2
 static bool cider;
 static bool cider_active(void){return cider;}

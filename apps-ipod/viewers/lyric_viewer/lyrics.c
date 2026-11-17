@@ -11,9 +11,9 @@
  * viewer asks what line N says and which line belongs at time T.
  *
  * Sources, in the order they are tried: a .lrc, .lrc8 or .snc file beside the
- * audio file or in any parent directory, then an ID3v2 SYLT frame inside the
- * file itself. Unsynchronised sources (plain .txt, ID3 USLT) are not read --
- * without timestamps there is nothing to synchronise to.
+ * audio file or in any parent directory, with .txt as an untimed fallback,
+ * then an ID3v2 SYLT frame inside the file itself. Remote text enters the
+ * same model through lyrics_begin/append/finish_text. USLT is not read.
  *
  * Memory: one immovable buffer holds everything. Line and word structs are
  * allocated downwards from its top, line text upwards from its bottom, and
@@ -69,6 +69,7 @@ enum lyrics_type
     TYPE_LRC8,      /* .lrc8, always UTF-8 */
     TYPE_SNC,
     TYPE_SYLT,      /* ID3v2 synchronised lyrics frame */
+    TYPE_TEXT,      /* plain UTF-8 text, local or remote */
 };
 
 struct lyrics_word
@@ -305,6 +306,7 @@ static const struct
     { ".lrc",  TYPE_LRC  },
     { ".lrc8", TYPE_LRC8 },
     { ".snc",  TYPE_SNC  },
+    { ".txt",  TYPE_TEXT },
 };
 
 static char path_buf[MAX_PATH];
@@ -578,6 +580,8 @@ static bool parse_snc_line(char *line)
     return true;
 }
 
+static bool parse_text_line(char *text) { return lyrics_append_text(text); }
+
 static void load_lyrics_file(void)
 {
     bool (*parse_line)(char *line);
@@ -596,6 +600,9 @@ static void load_lyrics_file(void)
             break;
         case TYPE_SNC:
             parse_line = parse_snc_line;
+            break;
+        case TYPE_TEXT:
+            parse_line = parse_text_line;
             break;
         default:
             return;
@@ -1068,7 +1075,8 @@ enum lyrics_result lyrics_load(const struct mp3entry *id3)
     else
         load_sylt();
 
-    sort_lines();
+    /* Text lines have equal timestamps and keep their input order. */
+    if (lrc.type != TYPE_TEXT) sort_lines();
     /* without the index nothing can be reached, so that counts as no lyrics */
     lrc.loaded = (lrc.nline > 0) && build_index();
 
@@ -1091,6 +1099,57 @@ void lyrics_close(void)
 
 bool lyrics_loaded(void)
 {
+    return lrc.loaded;
+}
+
+bool lyrics_timed(void) { return lrc.type != TYPE_TEXT; }
+
+enum lyrics_result lyrics_begin_text(void)
+{
+    if (lyrics_handle <= 0)
+    {
+        lyrics_handle = core_alloc_ex(LYRICS_BUFFER_SIZE, &buflib_ops_locked);
+        if (lyrics_handle <= 0) { lyrics_handle = 0; return LYRICS_NO_MEMORY; }
+        buffer = core_get_data(lyrics_handle);
+    }
+    reset_data();
+    lrc.type = TYPE_TEXT;
+    return LYRICS_OK;
+}
+
+bool lyrics_append_text(const char *text)
+{
+    while (*text)
+    {
+        const char *end = strchr(text, '\n');
+        size_t len = end ? (size_t)(end - text) : strlen(text);
+        if (len && text[len - 1] == '\r') len--;
+        /* Reserve the entire line before publishing it. */
+        if (len + 1 + sizeof(struct lyrics_line) + sizeof(struct lyrics_word)
+            + 8 > buf_free()) return false;
+        struct lyrics_line *line = alloc_buf(sizeof(*line));
+        line->time = 0;
+        struct lyrics_word *word = alloc_buf(sizeof(*word));
+        word->time = -1;
+        word->text = buffer + buf_used;
+        memcpy(word->text, text, len);
+        word->text[len] = 0;
+        buf_used += len + 1;
+        line->words = word;
+        line->nword = 1;
+        line->next = NULL;
+        *lrc.tail = line;
+        lrc.tail = &line->next;
+        lrc.nline++;
+        if (!end) break;
+        text = end + 1;
+    }
+    return true;
+}
+
+bool lyrics_finish_text(void)
+{
+    lrc.loaded = lrc.nline > 0 && build_index();
     return lrc.loaded;
 }
 

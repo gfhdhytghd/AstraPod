@@ -79,6 +79,7 @@
 #include "widgets/option_select.h"
 #include "playlist/viewer.h"
 #include "wps.h"
+#include "viewers/lyric_viewer/lyric_viewer.h"
 #include "cider.h"
 #include "cider_wps.h"
 #include "cider_controls.h"
@@ -188,7 +189,7 @@ void wps_do_action(enum wps_do_action_type action, bool updatewps)
 }
 
 
-static bool ffwd_rew(int button, bool seek_from_end)
+static bool seek_loop(int button, bool seek_from_end, void (*draw)(void))
 {
     unsigned int step = 0;     /* current ff/rewind step */
     unsigned int max_step = 0; /* maximum ff/rewind step */
@@ -282,7 +283,8 @@ static bool ffwd_rew(int button, bool seek_from_end)
                    displays corectly */
                 gstate->ff_rewind_count = ff_rewind_count;
 
-                FOR_NB_SCREENS(i)
+                if (draw) draw();
+                else FOR_NB_SCREENS(i)
                 {
                     skin_update(WPS, i,
                                 SKIN_REFRESH_PLAYER_PROGRESS |
@@ -322,6 +324,25 @@ static bool ffwd_rew(int button, bool seek_from_end)
     if (!usb && global_settings.talk_menu && get_wps_state()->id3)
         talk_value(get_wps_state()->id3->elapsed / 1000, UNIT_TIME, false);
     return usb;
+}
+
+static bool ffwd_rew(int button, bool seek_from_end)
+{
+    return seek_loop(button, seek_from_end, NULL);
+}
+
+void wps_lyrics_seek(int action, void (*draw)(void))
+{
+    seek_loop(action, false, draw);
+}
+
+void wps_lyrics_backdrop(void)
+{
+    push_current_activity(ACTIVITY_WPS);
+    struct wps_state *state = get_wps_state();
+    if (!cider_active()) state->id3 = audio_current_track();
+    skin_update(WPS, SCREEN_MAIN, SKIN_REFRESH_ALL);
+    pop_current_activity();
 }
 
 static void gwps_caption_backlight(struct wps_state *state)
@@ -539,6 +560,21 @@ static void play_hop(int direction)
     audio_ff_rewind(elapsed);
 }
 
+void wps_lyrics_skip(int direction)
+{
+    struct mp3entry *id3 = get_wps_state()->id3;
+    if (!id3) return;
+    if (direction > 0) sound_mix_skipped(id3->path, id3->elapsed);
+    if (ab_repeat_mode_enabled())
+    {
+        if ((direction < 0 && ab_after_A_marker(id3->elapsed)) ||
+            (direction > 0 && ab_before_A_marker(id3->elapsed)))
+        { ab_jump_to_A_marker(); return; }
+        if (direction > 0) return;
+    }
+    play_hop(direction);
+}
+
 /*
  * If the user is unable to see the wps, because the display is deactivated,
  * we suppress updates until the wps is activated again (the lcd driver will
@@ -740,7 +776,7 @@ static inline int action_wpsab_single(long button)
    defined as ACTION_WPSAB_SINGLE in their config files. */
 #ifdef ACTION_WPSAB_SINGLE
         static int wps_ab_state = 0;
-        if (button == ACTION_WPSAB_SINGLE && ab_repeat_mode_enabled())
+        if (button == ACTION_WPS_HOTKEY && ab_repeat_mode_enabled())
         {
             switch (wps_ab_state)
             {
@@ -881,6 +917,18 @@ static long wps_run(bool return_agents, bool menu_covers)
            playlist or if using the sleep timer. */
         if (!cider_active() && !(audio_status() & AUDIO_STATUS_PLAY))
             exit = true;
+        /* SELECT owns the one lyrics page on both playback sources. Keep
+         * the WPS pixels until that page captures its animated underlay. */
+        if (button == ACTION_WPS_BROWSE)
+        {
+            if (lyric_viewer() == GO_TO_ROOT)
+            {
+                gwps_leave_wps(true);
+                return GO_TO_ROOT;
+            }
+            restore = true;
+            continue;
+        }
         if (cider_wps_action(button))
         {
             update = true;
@@ -905,12 +953,10 @@ static long wps_run(bool return_agents, bool menu_covers)
                 gwps_leave_wps(true);
                 return GO_TO_AGENTS;
 #endif
-            case ACTION_WPS_BROWSE:
             case ACTION_WPS_HOTKEY:
             {
-                int act = HK_CTX_GET(0, button == ACTION_WPS_BROWSE
-                                        ? global_settings.wps_select_action
-                                        : global_settings.context_wps);
+                /* The previous SELECT action is now SELECT+PLAY. */
+                int act = HK_CTX_GET(0, global_settings.wps_select_action);
                 long go_to;
 
                 if (act == HOTKEY_OFF)

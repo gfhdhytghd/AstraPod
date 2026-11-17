@@ -78,6 +78,7 @@ prefix=pre+'''
 #define ACTION_QS_DOWN 602
 #define ACTION_QS_VOLUP 505
 #define ACTION_QS_VOLDOWN 506
+#define ACTIVITY_LYRICS 99
 #define ACTIVITY_ALBUMCOVERS 9
 #define ACTION_STD_PREV 501
 #define ACTION_STD_NEXT 502
@@ -106,6 +107,10 @@ int main(void){
  cider.button=BUTTON_RC_VOL_DOWN|BUTTON_REL|BUTTON_REPEAT;
  assert(remote_volume_action(&cider)&&cider.action==ACTION_WPS_VOLDOWN);
  test_cider_mode=false;
+ activity=ACTIVITY_LYRICS;
+ action_cur_t lyric={.button=UP,.context=CONTEXT_WPS};
+ assert(remote_volume_action(&lyric)&&lyric.action==ACTION_WPS_VOLUP);
+ lyric.button=DOWN;assert(remote_volume_action(&lyric)&&lyric.action==ACTION_WPS_VOLDOWN);
  puts("production action routing: all generic contexts list-only, WPS/Agents native arms, carousel previous/next PASS");
 }
 '''

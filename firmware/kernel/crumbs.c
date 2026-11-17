@@ -40,6 +40,16 @@
 #include "crumbs.h"
 #include "crumb_ring.h"
 
+/* The aligned tables in sections of their own, hivec then l2tab: in this
+ * file's .bss they page-aligned all of it and left about 4 KiB of holes
+ * (FU55). */
+#define TABLES_ATTR(n) __attribute__((section(".bss.crumbs_tables" #n)))
+/* Coarse tables: [0] VA 0-1 MiB (IRAM), [1] VA 0xfff00000-1 MiB (vectors) */
+static uint32_t l2tab[2][256] TABLES_ATTR(1) __attribute__((aligned(1024)));
+/* The exception vectors from FU51 on: a DRAM page seen read-only at
+ * 0xffff0000 (c1.V), a copy of what crt0 and system_init put at 0. */
+static uint32_t hivec[1024] TABLES_ATTR(0) __attribute__((aligned(4096)));
+
 #define UNCACHED(p) ((void *)((uintptr_t)(p) + 0x40000000))
 
 static struct crumb_ring dram_ring __attribute__((section(".persist"),
@@ -142,19 +152,22 @@ static int format_lines(char (*lines)[48], int max)
     return n;
 }
 
-int crumbs_lines(char (*lines)[48], int max)
-{
-    return format_lines(lines, max);
-}
-
 #define REPORT_LINES (1 + CRUMB_STATUS / 2 + 32)
 static char report[REPORT_LINES][48];
+static int report_n;
+
+/* The debug menu's view shares the boot report's buffer: same lines */
+int crumbs_lines(char (**lines)[48])
+{
+    *lines = report;
+    return format_lines(report, REPORT_LINES);
+}
 
 void crumbs_report(void)
 {
     if (!crumbs_prev.valid || crumbs_prev.clean)
         return;
-    int n = format_lines(report, REPORT_LINES);
+    int n = report_n = format_lines(report, REPORT_LINES);
 
     int fd = open(ROCKBOX_DIR "/crumbs-last.txt", O_WRONLY | O_CREAT | O_TRUNC,
                   0666);
@@ -166,9 +179,18 @@ void crumbs_report(void)
             fdprintf(fd, "%s\n", report[i]);
         close(fd);
     }
+}
 
-    /* Summary, status words, then the newest entries that fit. Any key goes
-     * on; USB monitoring has not started, so the queue holds keys only. */
+/* Once boot is done, so USB and the dock's iAP are already up and nothing
+ * waits on it (FU55). Summary, status words, then the newest entries that
+ * fit, until a key or any other event, which is returned for the caller to
+ * handle. */
+long crumbs_report_show(void)
+{
+    int n = report_n;
+    if (!n)
+        return BUTTON_NONE;
+    int font = lcd_getfont();
     lcd_set_viewport(NULL);
     lcd_setfont(FONT_SYSFIXED);
     lcd_clear_display();
@@ -183,9 +205,11 @@ void crumbs_report(void)
         lcd_puts(0, y++, (const unsigned char *)report[i]);
     lcd_update();
     button_clear_queue();
-    button_get_w_tmo(60 * HZ);
+    long ev = button_get_w_tmo(60 * HZ);
+    lcd_setfont(font);
     lcd_clear_display();
     lcd_update();
+    return ev;
 }
 
 /*** Self-tests of the two watchdogs, from the debug menu ***/
@@ -287,13 +311,8 @@ static void dma_text(char *buf, size_t size)
 }
 
 static char guard_buf[160];
-/* Coarse tables: [0] VA 0-1 MiB (IRAM), [1] VA 0xfff00000-1 MiB (vectors) */
-static uint32_t l2tab[2][256] __attribute__((aligned(1024)));
 #define L2_BLOCKS (sizeof l2tab / ICODE_BLOCK)
 static uint32_t l2_sum[L2_BLOCKS];
-/* The exception vectors from FU51 on: a DRAM page seen read-only at
- * 0xffff0000 (c1.V), a copy of what crt0 and system_init put at 0. */
-static uint32_t hivec[1024] __attribute__((aligned(4096)));
 #define HIGH_VECTORS 0xffff0000u
 static uint32_t low_sect;       /* L1[0] as memory_init set it */
 static uint32_t low_ref[VEC_WORDS];

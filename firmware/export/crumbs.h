@@ -103,9 +103,11 @@ static inline void crumb_status(enum crumb_status i, uint32_t v)
 
 /* Very first thing at boot: takes the previous boot's ring, starts this one */
 void crumbs_boot(void);
-/* Once the LCD, buttons and disk are up: shows and saves the previous ring
- * if that boot did not shut down cleanly */
+/* Once the disk is up: saves the previous ring if that boot did not shut
+ * down cleanly. After boot, with USB and iAP up: shows it until a key or
+ * another event (returned) */
 void crumbs_report(void);
+long crumbs_report_show(void);
 /* Before an intended power off, reboot or ROLO */
 void crumbs_clean(void);
 /* Tick-time integrity checks (vector page, IRAM code, banked registers,
@@ -114,13 +116,14 @@ void crumbs_clean(void);
 void crumbs_guard_init(void);
 void crumbs_guard_off(void);
 /* For the debug menu: the previous boot's ring as lines, and the self-tests */
-int crumbs_lines(char (*lines)[48], int max);
+int crumbs_lines(char (**lines)[48]);
 void crumbs_freeze_test(int kind);
 #else
 static inline void crumb(int id, uint32_t value) { (void)id; (void)value; }
 static inline void crumb_status(int i, uint32_t v) { (void)i; (void)v; }
 static inline void crumbs_boot(void) { }
 static inline void crumbs_report(void) { }
+static inline long crumbs_report_show(void) { return 0; }
 static inline void crumbs_clean(void) { }
 static inline void crumbs_guard_init(void) { }
 static inline void crumbs_guard_off(void) { }

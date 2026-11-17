@@ -2,8 +2,9 @@
 usb-designware.c EP0 path (epstart/transfer/ep0_recv/xfer_complete/
 setup_received/oepint and the FU51 OUT DMA guard) is compiled for a 32-bit
 host against the real register header, with a small DMA-mode controller
-model: the status stage, 8/100-byte data stages and a SETUP that arrives
-while the status stage is armed. FU52_DW_SOURCE overrides the source file
+model: the status stage, 8/100-byte data stages, a SETUP that arrives
+while the status stage is armed, and (FU55) SET_REPORT data stages of
+1..512 bytes with the spurious StatusRecvd after them and a SETUP mid stage. FU52_DW_SOURCE overrides the source file
 (used to show the old code fails); FU52_NO_GUARD=1 drops the FU51 guard.
 No device."""
 from pathlib import Path
@@ -174,8 +175,8 @@ static void setup_during_status(void)
 
 static void data_stage(uint32_t n, int offset)
 {
-    static uint8_t mem[256];
-    uint8_t data[200];
+    static uint8_t mem[600];
+    static uint8_t data[512];
     for (uint32_t i = 0; i < sizeof data; i++) data[i] = (uint8_t)(i * 7 + n);
     memset(mem, 0xee, sizeof mem);
     uint8_t *buf = mem + 16 + offset;
@@ -194,6 +195,55 @@ static void data_stage(uint32_t n, int offset)
     CHECK(memcmp(buf, data, n) == 0);
     for (uint8_t *p = mem; p < mem + sizeof mem; p++)
         if (p < buf || p >= buf + n) CHECK(*p == 0xee);
+}
+
+/* FU55: SET_REPORT data stages as an iAP accessory sends them (usb_iap.c
+ * hands usb_core's 256-byte usb_control_data to SET_REPORT; the driver is
+ * tested to 512): every length, single and multi-packet, wLength not a
+ * multiple of 64, unaligned buffers; then the controller's spurious
+ * StatusRecvd|XferCompl on the re-armed EP0 once the host moves to the
+ * status stage; then a SETUP in the middle of a data stage. */
+static void status_recvd(void)
+{
+    uint32_t t = DWC_DOEPTSIZ(0);
+    CHECK(DWC_DOEPCTL(0) & EPENA);               /* re-armed for SETUP */
+    CHECK(DWC_DOEPDMA(0) == EP0_PHYS && (t & 0x7ffff) == 64);
+    DWC_DOEPCTL(0) &= ~EPENA;
+    DWC_DOEPINT(0) = XFRC | STATUSRECVD;
+    usb_dw_oepint(0);
+    CHECK(DWC_DOEPCTL(0) & EPENA);               /* and again after it */
+    CHECK(DWC_DOEPDMA(0) == EP0_PHYS);
+}
+
+static void set_report_sweep(void)
+{
+    for (uint32_t n = 1; n <= 512; n++)
+        for (int off = 0; off < 2; off++)
+        {
+            int before = fails;
+            data_stage(n, off * 3);
+            int done = completions;
+            status_recvd();
+            CHECK(completions == done);          /* no second completion */
+            if (fails != before) { printf("  at n=%u off=%d\n", n, off * 3); return; }
+        }
+}
+
+static void setup_mid_data(void)
+{
+    static uint8_t buf[256];
+    uint8_t data[64];
+    memset(data, 0x5a, sizeof data);
+    completions = cancels = setups = 0;
+    arm_out(0, buf, 200);
+    host_out(data, 64);                          /* first packet of 200 */
+    CHECK(completions == 0 && usb_dw_get_ep(0, USB_DW_EPDIR_OUT)->busy);
+    struct usb_ctrlrequest r = { 0x21, 0x09, 0x0209, 2, 100 };   /* SET_REPORT */
+    host_setup(&r);
+    CHECK(cancels == 1 && setups == 1 && memcmp(&last_req, &r, 8) == 0);
+    CHECK(!usb_dw_get_ep(0, USB_DW_EPDIR_OUT)->busy && completions == 0);
+    CHECK(DWC_DOEPDMA(0) == EP0_PHYS && low_writes == 0);
+    data_stage(100, 1);                          /* the new request's data */
 }
 
 static void guard(void)
@@ -223,6 +273,9 @@ int main(void)
     data_stage(64, 0);
     data_stage(100, 0);
     data_stage(100, 1);
+    status_stage();
+    set_report_sweep();
+    setup_mid_data();
     status_stage();
     guard();
     printf("%s fails=%d low_writes=%d\n", fails ? "FAIL" : "PASS", fails, low_writes);

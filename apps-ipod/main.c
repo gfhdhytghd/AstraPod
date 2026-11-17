@@ -183,6 +183,10 @@ int main(void)
     iap_player_name_load();
 #endif
 
+    long crumbs_ev = crumbs_report_show();
+    if (crumbs_ev & SYS_EVENT)
+        default_event_handler(crumbs_ev);
+
     global_status.last_volume_change = 0;
     /* no calls INIT_ATTR functions after this point anymore!
      * see definition of INIT_ATTR in config.h */
@@ -761,8 +765,8 @@ static void init(void)
         }
     }
 
-    /* LCD, keys and disk are up: show and keep what the last boot left if
-     * it did not shut down */
+    /* Disk is up: keep what the last boot left if it did not shut down.
+     * Shown once boot is done, so it never holds up USB or the dock */
     crumbs_report();
 
     pcm_init();

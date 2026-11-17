@@ -225,6 +225,21 @@ void serial_setup(void)
     tick_add_task(serial_acc_tick);
 }
 
+/* Before ROLO. A reset leaves the port closed through the bootloader, and a
+ * seated dock takes the line coming back as the player starting: it
+ * identifies again. ROLO keeps the old image's open port until the new one's
+ * serial_setup(), then reopens it a tick later, so the dock never sees the
+ * player go and never identifies to the new image (FU55). Closed here and
+ * kept closed: the tick no longer reopens it. */
+void serial_accessory_release(void)
+{
+    tick_remove_task(serial_acc_tick);
+    int level = disable_irq_save();
+    acc_plugged = false;
+    uartc_close(ser_port.uartc);
+    restore_irq(level);
+}
+
 void serial_bitrate(int rate)
 {
     bitrate = rate;

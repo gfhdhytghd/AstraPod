@@ -244,9 +244,9 @@ static bool dbg_freeze_silent(void)
 
 static int crumbs_callback(int btn, struct gui_synclist *lists)
 {
-    static char lines[1 + 8 + 32][48];
+    char (*lines)[48];
     (void)lists;
-    int n = crumbs_lines(lines, sizeof lines / sizeof lines[0]);
+    int n = crumbs_lines(&lines);
     simplelist_reset_lines();
     for (int i = 0; i < n; i++)
         simplelist_addline("%s", lines[i]);

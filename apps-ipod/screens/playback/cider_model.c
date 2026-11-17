@@ -58,11 +58,11 @@ bool cider_live_parse(const void *data, unsigned int length, uint32_t generation
 
 const char *cider_list_notice(bool connected, bool available, int total, bool stale)
 {
-    if (!connected) return "Cider not connected";
-    if (!available) return "Cider unavailable";
+    if (!connected) return "%s not connected";
+    if (!available) return "%s unavailable";
     if (total < 0) return "Loading...";
-    if (!total && stale) return "Cider list unavailable";
-    if (!total) return "No File";
+    if (!total && stale) return "%s list unavailable";
+    if (!total) return "";
     return NULL;
 }
 

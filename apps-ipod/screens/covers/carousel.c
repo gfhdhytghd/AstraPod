@@ -96,6 +96,7 @@
 #include "skin/statusbar_skinned.h" /* sb_set_persistent_title */
 #include "album_covers.h"
 #include "carousel.h"     /* the shared engine: carousel_idx, the model */
+#include "screens/playback/cider.h"
 #include "speech/talk.h"
 
 /******************************* Globals ***********************************/
@@ -1117,7 +1118,8 @@ const char *carousel_caption_fit(const char *str, char *buf, size_t size)
 /* The model's title is a phrase, resolved each time it is shown. */
 static const char *model_title(void)
 {
-    return P2STR((unsigned char *)model->title);
+    return model->external ? cider_remote_name()
+                           : P2STR((unsigned char *)model->title);
 }
 
 void set_scroll_line(const char *str, enum pf_scroll_line_type type)

@@ -130,11 +130,15 @@ static const char *name(int i, void *data, char *buf, size_t size)
 {
     (void)data;
     if (list_notice)
-        return !strcmp(list_notice, "No File") ? (const char *)str(LANG_NO_FILES) : list_notice;
-    if (get_row(i, &callback_row))
-        snprintf(buf, size, "%s", callback_row.title);
-    else
-        snprintf(buf, size, "...");
+    {
+        if (!*list_notice)
+            return (const char *)str(LANG_NO_FILES);
+        snprintf(buf, size, list_notice, cider_remote_name());
+        return buf;
+    }
+    if (!get_row(i, &callback_row))
+        return "...";
+    snprintf(buf, size, "%s", callback_row.title);
     return buf;
 }
 static enum themable_icons icon(int i, void *data)

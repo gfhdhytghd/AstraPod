@@ -725,7 +725,7 @@ The installed Cider 4.0.0 `app.asar` and SPA RPC source expose these operations:
 - POST `/api/v2/library/now-playing/add`.
 - GET `/api/v2/playback/audio-quality` and `/api/v2/playback/rate`.
 - PATCH `/api/v2/playback/rate` with `rate` in 0.25..4.
-- GET `/api/v1/lyrics/:id` (plain text or TTML is normalized to paged lines).
+- GET `/api/v1/lyrics/:id` (plain text and TTML are supported).
 - GET `/api/v2/queue`, GET `/api/v2/queue/position`, POST `/api/v2/queue/jump`.
 - POST `/api/v2/playback/pause` (also used by sleep expiry).
 
@@ -934,3 +934,42 @@ one byte in `struct cider_state` (tail padding, size unchanged at 920 bytes)
 and bit 15 of the lock-free status word. RAM: the remote root list holds 33
 rows instead of 35 (3 fixed + 29 tagnavi + Cover cache; 21 tagnavi rows ship),
 which returns 1472 B and keeps the measured headroom above FU55's 3664 B.
+
+## FU59 remote timed lyrics
+
+The Lyrics viewer opts in per query with
+`now/lyrics?nonce=<unique>&lrc=1&track=<CN id>`. The native `cq` and `CL`
+record layouts and all eight `ci` capability tokens stay the same.
+Old firmware omits `lrc=1` and receives the original plain text rows. Old
+hosts ignore the extra query parameters and provide the same manual view
+to new firmware.
+
+For an opted-in query, row ID `lrc1` ends one UTF-8 enhanced-LRC line.
+`lrc1+` continues it in the next row, including across page boundaries.
+Each title contains at most 116 UTF-8 bytes and preserves spaces at fragment
+boundaries. Plain text responses use the original row IDs. `lyric-wait`
+discards any partial document and requests a retry with a new nonce while
+lyrics load or the requested track cannot be confirmed.
+
+The host freezes the converted rows for a nonce so page offsets refer to
+one document. It checks the requested track against playback before and
+after the lyrics request. Rufin's response must also match the playback
+media URI and run ID. The bridge discards replies from superseded page
+requests or backends. The viewer resets on a different WPS track and
+rechecks that identity before publishing a completed document. Older hosts
+do not provide backend-side track confirmation.
+
+Rufin uses `GET /api/lyrics`; positive `offset_millis` advances lyrics,
+and negative offsets delay them. Cider uses `GET /api/v1/lyrics/:id`; TTML
+`p` and inline `begin`/`end` media times become line and word stamps. Plain
+or untimed TTML keeps manual scrolling. Missing line starts are interpolated
+between known starts or the track bounds. Invalid or incomplete word ranges
+retain their line timing. The converter drops word stamps first if the
+32 KiB document or 767-byte line limit would be exceeded. If line LRC still
+exceeds a limit, it sends plain rows, which keep the complete prefix that fits.
+
+The viewer uses the elapsed time produced by the remote WPS, which
+interpolates between CN anchors while playing and stays fixed while paused.
+The host publishes a fresh CN after a device seek and when a paused position
+changes. Timed remote lyrics share the local LRC parser, line focus, word
+highlight, Manual pill and four-second idle return.

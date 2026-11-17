@@ -51,6 +51,9 @@ bool lyrics_timed(void);
 enum lyrics_result lyrics_begin_text(void);
 bool lyrics_append_text(const char *text);
 bool lyrics_finish_text(void);
+/* A remote LRC line can span rows. A failed append invalidates the document. */
+bool lyrics_append_lrc(const char *text, bool more);
+bool lyrics_finish_lrc(long duration);
 
 /* The path lyrics were read from -- a lyrics file, or the audio file itself
  * for an embedded SYLT frame. Empty string when nothing is loaded. */

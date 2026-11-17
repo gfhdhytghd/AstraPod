@@ -56,7 +56,7 @@ static struct {
     struct lyrics_mode mode;
     char track[MAX_PATH], title[MAX_PATH];
     long elapsed, length;
-    uint32_t changed, remote_deadline, art_gen;
+    uint32_t changed, remote_deadline, remote_retry, art_gen;
     int remote_rows;
     bool remote, pending, held, paused, track_fade, initial, snapshot_wps, claimed;
 } lv;
@@ -362,6 +362,21 @@ static void lv_focus(void)
 {
     lyrics_retarget(&lv.scroll, lv.mode.focus * 256, current_tick, LV_TICKS(260));
 }
+#ifdef HAVE_USB_PODLINK
+static void lv_remote_request(void)
+{
+    static uint32_t nonce;
+    char query[144];
+    /* Remote WPS paths are cider/<CN id> for both backends. */
+    const char *key = lv.track + sizeof("cider/") - 1;
+    if (strncmp(lv.track, "cider/", sizeof("cider/") - 1) || !*key)
+        return;
+    snprintf(query, sizeof query, "now/lyrics?nonce=%lu-%lu&lrc=1&track=%s",
+             (unsigned long)current_tick, (unsigned long)++nonce, key);
+    cider_page_open(query);
+    lv.pending = true;
+}
+#endif
 static void lv_reload(struct mp3entry *id3, bool remote)
 {
     lv_changed();
@@ -371,15 +386,14 @@ static void lv_reload(struct mp3entry *id3, bool remote)
     const char *name = id3 ? strrchr(lv.track, '/') : NULL;
     snprintf(lv.title, sizeof lv.title, "%s%s%s", id3 && id3->title ? id3->title : name ? name + 1 : "",
              id3 && id3->artist ? " — " : "", id3 && id3->artist ? id3->artist : "");
-    lv.remote = remote; lv.pending = false; lv.remote_rows = 0;
+    lv.remote = remote; lv.pending = false; lv.remote_rows = 0; lv.remote_retry = 0;
     lv.elapsed = id3 ? id3->elapsed : 0; lv.length = id3 ? id3->length : 0;
     if (remote)
     {
 #ifdef HAVE_USB_PODLINK
-        if (lyrics_begin_text() != LYRICS_OK) return;
-        char query[64];
-        snprintf(query, sizeof query, "now/lyrics?nonce=%lu", (unsigned long)current_tick);
-        cider_page_open(query); lv.pending = true; lv.remote_deadline = current_tick + 5 * HZ;
+        if (lyrics_begin_text() == LYRICS_OK)
+            lv_remote_request();
+        lv.remote_deadline = current_tick + 5 * HZ;
 #endif
     }
     else if (id3) lyrics_load(id3);
@@ -399,28 +413,73 @@ static void lv_remote_page(void)
 {
 #ifdef HAVE_USB_PODLINK
     if (!lv.remote || !lv.pending) return;
+    bool expired = !TIME_BEFORE(current_tick, lv.remote_deadline);
+    if (lv.remote_retry && !expired)
+    {
+        if (TIME_BEFORE(current_tick, lv.remote_retry)) return;
+        lv.remote_retry = 0;
+        lv_remote_request();
+        return;
+    }
     int count = cider_page_total();
-    if (count < 0 && TIME_BEFORE(current_tick, lv.remote_deadline)) return;
+    if (count < 0 && !expired) return;
+    bool valid = true;
     struct cider_row row;
     while (lv.remote_rows < count)
     {
         if (!cider_page_row(lv.remote_rows, &row))
         {
-            if (TIME_BEFORE(current_tick, lv.remote_deadline)) return;
+            if (!expired) return;
             break;
         }
-        if (!lyrics_append_text(row.title)) break;
+        if (!strcmp(row.id, "lyric-wait"))
+        {
+            lyrics_begin_text();
+            lv.remote_rows = 0;
+            if (!expired)
+            {
+                lv.remote_retry = current_tick + HZ / 2;
+                return;
+            }
+            break;
+        }
+        bool more = !strcmp(row.id, "lrc1+");
+        bool timed = more || !strcmp(row.id, "lrc1");
+        valid = !lv.remote_rows || timed == lyrics_timed();
+        if (!valid || !(timed ? lyrics_append_lrc(row.title, more) : lyrics_append_text(row.title)))
+        {
+            valid = !timed && valid; /* Legacy text keeps the complete prefix. */
+            break;
+        }
         lv.remote_rows++; lv.remote_deadline = current_tick + 5 * HZ;
     }
-    lv_changed(); lyrics_finish_text(); lv.pending = false; lv_backlight(lyrics_loaded());
+    /* A CN can arrive while the last page is being copied. */
+    const struct mp3entry *id3 = get_wps_state()->id3;
+    if (!cider_active() || !id3 || strcmp(id3->path, lv.track)) return;
+    lv_changed();
+    if (!valid || (lyrics_timed() &&
+        (lv.remote_rows != count || !lyrics_finish_lrc(lv.length))))
+        lyrics_begin_text();
+    else if (!lyrics_timed())
+        lyrics_finish_text();
+    if (lyrics_timed())
+    {
+        lv.mode.focus = MAX(0, lyrics_index_at(lv.elapsed));
+        lv.scroll = (struct lyrics_motion){.from = lv.mode.focus * 256,
+                                           .to = lv.mode.focus * 256};
+    }
+    lv.pending = false;
+    lv_backlight(lyrics_loaded());
 #endif
 }
 /* The WPS supplies identical seek acceleration/release and source dispatch. */
 static void lv_seek_draw(void)
 {
     struct wps_state *s = get_wps_state();
+    if (lv.remote && (!s->id3 || strcmp(s->id3->path, lv.track)))
+        return;
     if (s->id3) lv.elapsed = s->id3->elapsed + s->ff_rewind_count;
-    if (lyrics_mode_follow(&lv.mode, lyrics_timed(), lyrics_index_at(lv.elapsed), current_tick, HZ)) lv_focus();
+    if (lyrics_loaded() && lyrics_mode_follow(&lv.mode, lyrics_timed(), lyrics_index_at(lv.elapsed), current_tick, HZ)) lv_focus();
     lv_draw(); lcd_update();
 }
 static void lv_transport(int action)
@@ -476,7 +535,7 @@ int lyric_viewer(void)
             lv_changed(); lv_colours(); lv.art_gen = skin_albumart_gen();
         }
         bool was_manual = lv.mode.manual;
-        if (lyrics_mode_follow(&lv.mode, lyrics_timed(), lyrics_index_at(lv.elapsed), current_tick, HZ)) lv_focus();
+        if (lyrics_loaded() && lyrics_mode_follow(&lv.mode, lyrics_timed(), lyrics_index_at(lv.elapsed), current_tick, HZ)) lv_focus();
         if (was_manual != lv.mode.manual)
             lyrics_retarget(&lv.pill, lv.mode.manual && lyrics_timed() ? 256 : 0, current_tick, LV_TICKS(180));
         lv_draw();

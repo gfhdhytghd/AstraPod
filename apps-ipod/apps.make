@@ -42,6 +42,13 @@ endif
 
 SRC += $(call preprocess, $(APPSDIR)/SOURCES)
 
+# Keep the on-demand lyrics and MP4 metadata readers within the iPod 6G
+# firmware's RAM budget. Audio decoding and screen drawing stay in ARM mode.
+ifeq ($(MODELNAME):$(ARCH),ipod6g:arch_arm)
+$(APPSBUILDDIR)/viewers/lyric_viewer/lyrics.o \
+$(RBCODEC_BLD)/metadata/mp4.o: CFLAGS += -mthumb -mthumb-interwork
+endif
+
 # apps/features.txt is a file that (is preprocessed and) lists named features
 # based on defines in the config-*.h files. The named features will be passed
 # to genlang and thus (translated) phrases can be used based on those names.

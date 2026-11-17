@@ -10,10 +10,8 @@
  * a start time and optionally per-word times. No drawing and no input: a
  * viewer asks what line N says and which line belongs at time T.
  *
- * Sources, in the order they are tried: a .lrc, .lrc8 or .snc file beside the
- * audio file or in any parent directory, with .txt as an untimed fallback,
- * then an ID3v2 SYLT frame inside the file itself. Remote text enters the
- * same model through lyrics_begin/append/finish_text. USLT is not read.
+ * Sources: timed sidecars, plain text sidecars, then embedded lyrics.
+ * Remote text enters the same model through lyrics_begin/append/finish_text.
  *
  * Memory: one immovable buffer holds everything. Line and word structs are
  * allocated downwards from its top, line text upwards from its bottom, and
@@ -30,7 +28,7 @@
  *   - the document model: lines, words, sorting
  *   - finding a lyrics file
  *   - parsing .lrc and .snc
- *   - reading an ID3v2 SYLT frame
+ *   - reading embedded lyrics
  *   - loading, and the public accessors
  ****************************************************************************/
 
@@ -38,13 +36,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <limits.h>
 #include "config.h"
 #include "system.h"          /* ARRAYLEN */
 #include "string-extra.h"    /* strlcpy */
 #include "file.h"            /* MAX_PATH, open/read/close/lseek, file_exists */
 #include "rbunicode.h"       /* iso_decode_ex, utf16*decode, UTF_8 */
 #include "core_alloc.h"      /* core_alloc_ex, buflib_ops_locked */
-#include "metadata.h"        /* struct mp3entry, AFMT_*, ID3_VER_* */
+#include "metadata_common.h" /* metadata and on-demand tag readers */
 #include "settings/settings.h"       /* global_settings */
 #include "system/strutil.h"          /* read_line, fix_path_part */
 #include "lyrics.h"
@@ -56,11 +55,10 @@
  * a file needs more. */
 #define LYRICS_BUFFER_SIZE  0x8000      /* 32 kiB */
 
-/* A SYLT frame is read into the middle of the buffer and consumed as it is
- * parsed, so text growing up and structs growing down never reach it. A frame
- * longer than SYLT_MAX loses its tail. */
-#define SYLT_TOP    (LYRICS_BUFFER_SIZE * 2 / 3)
-#define SYLT_MAX    (LYRICS_BUFFER_SIZE / 3)
+/* An ID3 lyrics frame may require de-escaping. Stage a bounded prefix inside
+ * the document arena, and keep both document allocators below that prefix. */
+#define ID3_LYRICS_MAX   ((LYRICS_BUFFER_SIZE / 3) & ~3u)
+#define UTF8_LINE_SIZE   (MAX_LINE_LEN * 3 + 2)
 
 enum lyrics_type
 {
@@ -112,9 +110,7 @@ static struct
     char title[MAX_PATH];
     char artist[MAX_PATH];
     unsigned long length;
-    unsigned long id3v2len;
     unsigned int codectype;
-    unsigned char id3version;
 } track;
 
 static struct
@@ -131,12 +127,6 @@ static struct
     unsigned short remote_line_size;
     bool loaded;
 } lrc;
-
-/* Scratch for one line. parse_snc_line() needs the raw bytes as well as the
- * decoded ones, so both stay around for the length of a load. */
-static unsigned char raw_line[MAX_LINE_LEN];
-static unsigned char utf8_line[MAX_LINE_LEN * 3 + 2];
-static int line_encoding;
 
 /* ---------------------------------------------------------------------------
  * The buffer and its two-ended allocator
@@ -162,10 +152,10 @@ static unsigned char *bufadd(const unsigned char *str, bool join)
     size_t siz = strlen((const char *)str) + 1;
     unsigned char *pos;
 
+    if (siz > buf_free() + join)
+        return NULL;
     if (join)
         buf_used--;
-    if (siz > buf_free())
-        return NULL;
     pos = &buffer[buf_used];
     strcpy((char *)pos, (const char *)str);
     buf_used += siz;
@@ -287,6 +277,8 @@ static struct lyrics_line *get_line(int index)
  * would shift those words twice. */
 static long apply_offset(long time)
 {
+    if (lrc.offset > 0 && time > LONG_MAX - lrc.offset)
+        return LONG_MAX;
     time += lrc.offset;
     return (time < 0)? 0: time;
 }
@@ -310,14 +302,12 @@ static const struct
     { ".txt",  TYPE_TEXT },
 };
 
-static char path_buf[MAX_PATH];
-
-static bool find_lyrics_file(void)
+static bool find_lyrics_file(bool plain)
 {
-    char fname[MAX_PATH];
+    char path_buf[MAX_PATH], fname[MAX_PATH];
     char *names[3] = {NULL, NULL, NULL};
     char *p, *dir;
-    unsigned int t;
+    unsigned int t, timed = ARRAYLEN(lyrics_ext) - 1;
     int i, len;
 
     strlcpy(path_buf, track.path, sizeof(path_buf));
@@ -352,7 +342,7 @@ static bool find_lyrics_file(void)
         len = snprintf(lrc.file, MAX_PATH, "%s/", dir);
         if (len >= MAX_PATH)
             continue;
-        for (t = 0; t < ARRAYLEN(lyrics_ext); t++)
+        for (t = plain ? timed : 0; t < timed + plain; t++)
         {
             for (i = 0; names[i] != NULL; i++)
             {
@@ -377,9 +367,13 @@ static bool find_lyrics_file(void)
 
 static char *parse_int(char *ptr, int *val)
 {
-    *val = atoi(ptr);
+    *val = 0;
     while (isdigit((unsigned char)*ptr))
-        ptr++;
+    {
+        if (*val >= 1000)
+            break;
+        *val = *val * 10 + (*ptr++ - '0');
+    }
     return ptr;
 }
 
@@ -411,7 +405,7 @@ static long get_time_value(char *tag, bool read_id_tags)
         }
         if (!strncmp(tag, "offset:", 7))
         {
-            lrc.offset = atoi(&tag[7]);
+            lrc.offset = strtol(&tag[7], NULL, 10);
             return -1;
         }
     }
@@ -538,7 +532,7 @@ static bool parse_lrc_line(char *line)
 #define SNC_TAG_START "\xa2\xe2"
 #define SNC_TAG_END   "\xa2\xd0"
 
-static bool parse_snc_line(char *line)
+static bool parse_snc_line(char *line, unsigned char *raw_line, int line_encoding)
 {
     /* The tag is raw bytes that iso_decode_ex() may have rewritten, so it is
      * matched against raw_line rather than the decoded copy. */
@@ -569,7 +563,7 @@ static bool parse_snc_line(char *line)
         /* text after the tag is the first line of its lyric */
         end = iso_decode_ex(pos, (unsigned char *)line, line_encoding,
                             strlen((const char *)pos) + 1,
-                            sizeof(utf8_line) - 2);
+                            UTF8_LINE_SIZE - 2);
         *end = 0;
     }
     if (lrc.head)
@@ -581,33 +575,15 @@ static bool parse_snc_line(char *line)
     return true;
 }
 
-static bool parse_text_line(char *text) { return lyrics_append_text(text); }
-
 static void load_lyrics_file(void)
 {
-    bool (*parse_line)(char *line);
-    unsigned char header[3];
+    unsigned char header[3], raw_line[MAX_LINE_LEN], utf8_line[UTF8_LINE_SIZE];
+    int line_encoding = global_settings.default_codepage;
     unsigned char *end;
     int fd, got;
 
-    line_encoding = global_settings.default_codepage;
-    switch (lrc.type)
-    {
-        case TYPE_LRC8:
-            line_encoding = UTF_8;
-            /* fall through */
-        case TYPE_LRC:
-            parse_line = parse_lrc_line;
-            break;
-        case TYPE_SNC:
-            parse_line = parse_snc_line;
-            break;
-        case TYPE_TEXT:
-            parse_line = parse_text_line;
-            break;
-        default:
-            return;
-    }
+    if (lrc.type == TYPE_LRC8 || lrc.type == TYPE_TEXT)
+        line_encoding = UTF_8;
 
     fd = open(lrc.file, O_RDONLY);
     if (fd < 0)
@@ -629,401 +605,413 @@ static void load_lyrics_file(void)
     {
         end = iso_decode_ex(raw_line, utf8_line, line_encoding,
                             strlen((const char *)raw_line) + 1,
-                            sizeof(utf8_line) - 2);
+                            UTF8_LINE_SIZE - 2);
         *end = 0;
-        if (!parse_line((char *)utf8_line))
+        bool ok;
+        if (lrc.type == TYPE_SNC)
+            ok = parse_snc_line((char *)utf8_line, raw_line, line_encoding);
+        else if (lrc.type == TYPE_TEXT)
+            ok = lyrics_append_text((char *)utf8_line);
+        else
+            ok = parse_lrc_line((char *)utf8_line);
+        if (!ok)
             break;
     }
     close(fd);
 }
 
 /* ---------------------------------------------------------------------------
- * Reading an ID3v2 SYLT frame
+ * Reading embedded lyrics
  * ------------------------------------------------------------------------ */
 
-static unsigned long unsync(unsigned long b0, unsigned long b1,
-                            unsigned long b2, unsigned long b3)
+enum tag_encoding { TAG_LATIN1, TAG_UTF16_LE, TAG_UTF16_BE, TAG_UTF8 };
+
+static int tag_unit(const unsigned char *p, enum tag_encoding enc)
 {
-    return (((long)(b0 & 0x7F) << (3*7)) |
-            ((long)(b1 & 0x7F) << (2*7)) |
-            ((long)(b2 & 0x7F) << (1*7)) |
-            ((long)(b3 & 0x7F) << (0*7)));
+    if (enc == TAG_UTF16_LE)
+        return p[0] | (p[1] << 8);
+    if (enc == TAG_UTF16_BE)
+        return (p[0] << 8) | p[1];
+    return *p;
 }
 
-static unsigned long bytes2int(unsigned long b0, unsigned long b1,
-                               unsigned long b2, unsigned long b3)
+static int tag_unit_size(enum tag_encoding enc)
 {
-    return (((long)(b0 & 0xFF) << (3*8)) |
-            ((long)(b1 & 0xFF) << (2*8)) |
-            ((long)(b2 & 0xFF) << (1*8)) |
-            ((long)(b3 & 0xFF) << (0*8)));
+    return enc == TAG_UTF16_LE || enc == TAG_UTF16_BE ? 2 : 1;
 }
 
-/* Undo the 0xFF 0x00 escaping ID3 uses to keep tag data from looking like an
- * MPEG sync word. Rewrites in place and returns the shorter length. */
-static int unsynchronize(unsigned char *tag, int len, bool *ff_found)
+static int skip_bom(const unsigned char *p, int len, enum tag_encoding *enc)
 {
-    unsigned char *rp = tag, *wp = tag;
-    bool _ff_found = ff_found? *ff_found: false;
-    int i;
-
-    for (i = 0; i < len; i++)
+    if (*enc == TAG_UTF8)
+        return len >= 3 && !memcmp(p, "\xef\xbb\xbf", 3) ? 3 : 0;
+    if (len >= 2 && tag_unit_size(*enc) == 2)
     {
-        unsigned char c = *rp++;
-        *wp = c;
-        if (_ff_found)
+        int bom = tag_unit(p, TAG_UTF16_BE);
+        if (bom == 0xfffe || bom == 0xfeff)
         {
-            /* keep the byte only if it is not the inserted 0x00 */
-            if (c != 0)
-                wp++;
-            _ff_found = false;
+            *enc = bom == 0xfffe ? TAG_UTF16_LE : TAG_UTF16_BE;
+            return 2;
         }
+    }
+    return 0;
+}
+
+static void decode_tag_line(const unsigned char *line, int len,
+                            enum tag_encoding enc, bool shortened,
+                            unsigned char *text)
+{
+    int unit = tag_unit_size(enc);
+    if (len >= unit && tag_unit(line + len - unit, enc) == '\r')
+        len -= unit;
+
+    unsigned char *end = text;
+    if (unit == 2)
+    {
+        /* The firmware decoder expects a complete surrogate pair. */
+        for (int i = 0; i + 1 < len; i += 2)
+        {
+            unsigned int c = tag_unit(line + i, enc);
+            if (c >= 0xd800 && c <= 0xdbff && i + 3 < len)
+            {
+                unsigned int low = tag_unit(line + i + 2, enc);
+                if (low >= 0xdc00 && low <= 0xdfff)
+                {
+                    c = 0x10000 + ((c - 0xd800) << 10) + (low - 0xdc00);
+                    i += 2;
+                }
+            }
+            end = utf8encode(c >= 0xd800 && c <= 0xdfff ? 0xfffd : c, end);
+        }
+    }
+    else
+    {
+        if (enc == TAG_UTF8 && shortened)
+        {
+            /* Drop any last codepoint whose bytes did not fit. */
+            while (len > 0 && (line[len - 1] & 0xc0) == 0x80)
+                len--;
+            if (len > 0 && line[len - 1] >= 0xc0)
+                len--;
+        }
+        end = iso_decode_ex(line, text, enc == TAG_UTF8 ? UTF_8 : ISO_8859_1,
+                            len, UTF8_LINE_SIZE - 1);
+    }
+    *end = 0;
+}
+
+/* Native MP4 and Vorbis data stream in batches. ID3 supplies a memory view
+ * of the decoded frame. Both paths feed the existing document parsers. */
+static void read_tag_lines(struct ogg_file *file, const unsigned char *data,
+                           long size, enum tag_encoding enc, bool timed,
+                           bool clipped)
+{
+    unsigned char chunk[256], line[MAX_LINE_LEN], text[UTF8_LINE_SIZE];
+    int used = 0, unit = tag_unit_size(enc);
+    bool first = true, shortened = false;
+
+    clipped |= size > LYRICS_BUFFER_SIZE;
+    size = MIN(size, LYRICS_BUFFER_SIZE);
+    while (size >= unit)
+    {
+        int n = MIN(size, (long)sizeof(chunk));
+        const unsigned char *p = data;
+        if (data)
+            data += n;
         else
         {
-            if (c == 0xff)
-                _ff_found = true;
-            wp++;
+            n = ogg_file_read(file, chunk, n);
+            if (n <= 0)
+                break;
+            p = chunk;
+        }
+        size -= n;
+
+        if (first)
+        {
+            int bom = skip_bom(p, n, &enc);
+            p += bom;
+            n -= bom;
+            first = false;
+        }
+
+        for (; n >= unit; p += unit, n -= unit)
+        {
+            int c = tag_unit(p, enc);
+            if (!c)
+            {
+                size = 0;
+                break;
+            }
+            if (c == '\n')
+            {
+                decode_tag_line(line, used, enc, shortened, text);
+                if (!(timed ? parse_lrc_line((char *)text)
+                            : lyrics_append_text((char *)text)))
+                    return;
+                used = 0;
+                shortened = false;
+            }
+            else if (used + unit <= (int)sizeof(line))
+            {
+                memcpy(line + used, p, unit);
+                used += unit;
+            }
+            else
+                shortened = true;
         }
     }
-    if (ff_found)
-        *ff_found = _ff_found;
-    return wp - tag;
-}
-
-/* Read len bytes of unescaped data, reading more from the file as escaping
- * eats into what was read. */
-static int read_unsynched(int fd, void *buf, int len, bool *ff_found)
-{
-    int remaining = len;
-    unsigned char *wp = buf;
-
-    while (remaining)
+    if (used && !clipped)
     {
-        int rc = read(fd, wp, remaining);
-        if (rc <= 0)
-            return rc;
-
-        rc = unsynchronize(wp, rc, ff_found);
-        remaining -= rc;
-        wp += rc;
+        decode_tag_line(line, used, enc, shortened, text);
+        if (timed)
+            parse_lrc_line((char *)text);
+        else
+            lyrics_append_text((char *)text);
     }
-    return len;
 }
 
-/* Skip an escaped frame. It has to be read to be skipped, because its length
- * on disk is not its length in the tag -- but a frame can be far bigger than
- * our buffer (embedded cover art), so discard it a chunk at a time. */
-static bool skip_unsynched(int fd, long len, bool *ff_found)
+static void load_tag_text(struct ogg_file *file, const unsigned char *data,
+                          long size, enum tag_encoding enc, bool clipped)
 {
-    unsigned char scrap[64];
+    if (size <= 0)
+        return;
+    struct ogg_file origin;
+    off_t pos = 0;
+    if (file)
+    {
+        origin = *file;
+        pos = lseek(file->fd, 0, SEEK_CUR);
+    }
+    /* Bound the search for a timestamp even when a tag contains megabytes
+     * of untimed text. The line and word model then owns the arena limit. */
+    size_t end = buf_end; /* a staged ID3 frame occupies the arena tail */
+    lrc.type = TYPE_LRC8;
+    read_tag_lines(file, data, size, enc, true, clipped);
+    if (lrc.head && lrc.head->nword)
+        return;
 
+    if (file)
+    {
+        if (pos < 0 || lseek(file->fd, pos, SEEK_SET) < 0)
+            return;
+        *file = origin;
+    }
+    reset_data();
+    buf_end = end;
+    lrc.length = track.length;
+    lrc.type = TYPE_TEXT;
+    read_tag_lines(file, data, size, enc, false, clipped);
+}
+
+static uint32_t syncsafe(const unsigned char *p)
+{
+    return ((uint32_t)(p[0] & 0x7f) << 21) | ((p[1] & 0x7f) << 14)
+         | ((p[2] & 0x7f) << 7) | (p[3] & 0x7f);
+}
+
+static bool read_id3(int fd, void *out, int len, off_t end, bool *ff)
+{
+    char *p = out;
+    do
+    {
+        off_t pos = lseek(fd, 0, SEEK_CUR);
+        if (pos < 0 || len > end - pos || read(fd, p, len) != len)
+            return false;
+        int n = ff ? id3_unsynchronize(p, len, ff) : len;
+        p += n;
+        len -= n;
+    } while (len);
+    return true;
+}
+
+static bool skip_id3(int fd, int len, off_t end, bool *ff)
+{
+    if (!ff)
+    {
+        off_t pos = lseek(fd, 0, SEEK_CUR);
+        return pos >= 0 && len <= end - pos && lseek(fd, len, SEEK_CUR) >= 0;
+    }
+
+    unsigned char scrap[128];
     while (len > 0)
     {
-        int n = (len < (long)sizeof(scrap))? (int)len: (int)sizeof(scrap);
-        if (read_unsynched(fd, scrap, n, ff_found) != n)
+        int n = MIN(len, (int)sizeof(scrap));
+        if (!read_id3(fd, scrap, n, end, ff))
             return false;
         len -= n;
     }
     return true;
 }
 
-static unsigned char *utf8cpy(const unsigned char *src,
-                              unsigned char *dst, int count)
+/* Shared by SYLT/USLT, including their ID3v2.2 spellings. */
+static int read_id3_lyrics(int fd, bool timed, unsigned char *frame,
+                           bool *clipped)
 {
-    strlcpy((char *)dst, (const char *)src, count + 1);
-    return dst + strlen((char *)dst);
+    unsigned char b[10];
+    if (lseek(fd, 0, SEEK_SET) < 0 || read(fd, b, 10) != 10
+        || memcmp(b, "ID3", 3) || b[3] < 2 || b[3] > 4)
+        return 0;
+
+    int version = b[3], flags = b[5], header = version == 2 ? 6 : 10;
+    off_t end = 10 + syncsafe(b + 6);
+    if (end > ffilesize(fd) || (version == 2 && (flags & 0x40)))
+        return 0;
+    bool ff = false;
+    bool *global = version < 4 && (flags & 0x80) ? &ff : NULL;
+    if (flags & 0x40)
+    {
+        if (!read_id3(fd, b, 4, end, global))
+            return 0;
+        uint32_t n = version == 3 ? get_long_be(b) : syncsafe(b);
+        if (version == 4)
+            n -= 4;
+        if (n > (uint32_t)end || !skip_id3(fd, n, end, global))
+            return 0;
+    }
+
+    while (read_id3(fd, b, header, end, global) && b[0])
+    {
+        uint32_t len = version == 2 ? get_long_be(b + 2) & 0xffffff
+                     : version == 3 ? get_long_be(b + 4) : syncsafe(b + 4);
+        bool match = !memcmp(b, timed ? (version == 2 ? "SLT" : "SYLT")
+                                      : (version == 2 ? "ULT" : "USLT"),
+                             version == 2 ? 3 : 4);
+        int fmt = version == 2 ? 0 : b[9];
+        off_t pos = lseek(fd, 0, SEEK_CUR);
+        if (pos < 0 || end < pos || len > (uint32_t)(end - pos))
+            break;
+        if (!match || (fmt & (version == 4 ? 0x0c : 0xc0)))
+        {
+            if (!skip_id3(fd, len, end, global))
+                break;
+            continue;
+        }
+
+        int prefix = !!(fmt & (version == 4 ? 0x40 : 0x20));
+        if (version == 4 && (fmt & 1))
+            prefix += 4; /* data length indicator */
+        *clipped = len > ID3_LYRICS_MAX;
+        int n = MIN(len, ID3_LYRICS_MAX);
+        if (!read_id3(fd, frame, n, end, global))
+            break;
+        if (version == 4 && ((fmt & 2) || (flags & 0x80)))
+        {
+            ff = false;
+            n = id3_unsynchronize((char *)frame, n, &ff);
+        }
+        if (n <= prefix)
+            break;
+        if (prefix)
+        {
+            n -= prefix;
+            memmove(frame, frame + prefix, n);
+        }
+        return n;
+    }
+    return 0;
 }
 
-/* Walk the ID3v2 tag looking for SYLT, and turn what it holds into lines.
- * The unsynchronised (USLT) frame is deliberately ignored. */
-static void parse_sylt(int fd)
+static const unsigned char *tag_string_end(const unsigned char *p,
+                                           const unsigned char *end,
+                                           enum tag_encoding enc)
 {
-    unsigned char header[10], tmp[8];
-    unsigned char *tag, *p;
-    unsigned char *(*utf_decode)(const unsigned char *,
-                                 unsigned char *, int) = NULL;
-    unsigned char version, global_flags;
-    bool global_unsynch = false, global_ff_found = false, unsynch = false;
-    bool found = false;
-    long framelen = 0;
-    int minframesize, size, flags, rc, bytesread, encoding, chsiz;
+    int unit = tag_unit_size(enc);
+    for (; end - p >= unit; p += unit)
+        if (!tag_unit(p, enc))
+            return p;
+    return NULL;
+}
 
-    if (track.id3v2len < 10)
+static void load_id3_frame(int fd, bool timed)
+{
+    unsigned char *frame = buffer + LYRICS_BUFFER_SIZE - ID3_LYRICS_MAX;
+    bool clipped;
+    int len = read_id3_lyrics(fd, timed, frame, &clipped);
+    int head = timed ? 6 : 4;
+    if (len <= head || frame[0] > TAG_UTF8 || (timed && frame[4] != 2))
+        return; /* only millisecond timestamps */
+
+    enum tag_encoding enc = frame[0];
+    const unsigned char *p = frame + head, *end = frame + len;
+    int unit = tag_unit_size(enc);
+    p += skip_bom(p, end - p, &enc);
+    const unsigned char *stop = tag_string_end(p, end, enc);
+    if (!stop)
         return;
-    if (read(fd, header, 10) != 10)
+    p = stop + unit;
+    buf_end = frame - buffer;
+
+    if (!timed)
+    {
+        load_tag_text(NULL, p, end - p, enc, clipped);
         return;
-
-    size = track.id3v2len - 10;
-    version = track.id3version;
-    switch (version)
-    {
-        case ID3_VER_2_2:
-            minframesize = 8;
-            break;
-        case ID3_VER_2_3:
-        case ID3_VER_2_4:
-            minframesize = 12;
-            break;
-        default:
-            return;
     }
-
-    global_flags = header[5];
-
-    /* skip the extended header if there is one */
-    if (global_flags & 0x40)
+    lrc.type = TYPE_SYLT;
+    while (end - p >= unit + 4)
     {
-        if (version == ID3_VER_2_3)
-        {
-            if (read(fd, header, 10) != 10)
-                return;
-            /* 2.3's size excludes the size field itself, and is not escaped */
-            framelen = 4 + bytes2int(header[0], header[1],
-                                     header[2], header[3]);
-            lseek(fd, framelen - 10, SEEK_CUR);
-        }
-        if (version >= ID3_VER_2_4)
-        {
-            if (read(fd, header, 4) != 4)
-                return;
-            /* 2.4's size covers the whole header, and is escaped */
-            framelen = unsync(header[0], header[1], header[2], header[3]);
-            lseek(fd, framelen - 4, SEEK_CUR);
-        }
-    }
-
-    if (global_flags & 0x80)
-        global_unsynch = true;
-
-    while (size >= minframesize)
-    {
-        flags = 0;
-
-        if (version >= ID3_VER_2_3)
-        {
-            if (global_unsynch && version <= ID3_VER_2_3)
-                rc = read_unsynched(fd, header, 10, &global_ff_found);
-            else
-                rc = read(fd, header, 10);
-            if (rc != 10)
-                return;
-            size -= 10;
-
-            flags = bytes2int(0, 0, header[8], header[9]);
-            if (version >= ID3_VER_2_4)
-                framelen = unsync(header[4], header[5], header[6], header[7]);
-            else
-                framelen = bytes2int(header[4], header[5],
-                                     header[6], header[7]);
-        }
-        else
-        {
-            if (read(fd, header, 6) != 6)
-                return;
-            size -= 6;
-            framelen = bytes2int(0, header[3], header[4], header[5]);
-        }
-
-        /* A size outside the tag would seek back over this header, or out
-         * of the tag, and loop on it. */
-        if (framelen < 0 || framelen > size)
-            return;
-
-        if (framelen == 0)
-        {
-            /* all-zero header means padding: the frames are done */
-            if (header[0] == 0 && header[1] == 0 && header[2] == 0)
-                return;
-            continue;
-        }
-
-        unsynch = false;
-
-        if (flags)
-        {
-            if (flags & ((version >= ID3_VER_2_4)? 0x0040: 0x0020))
-            {
-                lseek(fd, 1, SEEK_CUR);     /* grouping identity */
-                framelen--;
-            }
-            if (flags & 0x000c)             /* compressed or encrypted */
-            {
-                size -= framelen;
-                lseek(fd, framelen, SEEK_CUR);
-                continue;
-            }
-            if (flags & 0x0002)
-                unsynch = true;
-            if (version >= ID3_VER_2_4 && (flags & 0x0001))
-            {
-                if (read(fd, tmp, 4) != 4)  /* data length indicator */
-                    return;
-                framelen -= 4;
-            }
-        }
-
-        if (framelen == 0)
-            continue;
-        if (framelen < 0)
-            return;
-
-        if (!memcmp(header, "SLT", 3) || !memcmp(header, "SYLT", 4))
-        {
-            found = true;
-            break;
-        }
-
-        if (global_unsynch && version <= ID3_VER_2_3)
-        {
-            if (!skip_unsynched(fd, framelen, &global_ff_found))
-                return;
-            size -= framelen;
-        }
-        else
-        {
-            size -= framelen;
-            if (lseek(fd, framelen, SEEK_CUR) == -1)
-                return;
-        }
-    }
-    if (!found)
-        return;
-
-    if (framelen >= SYLT_MAX)
-        framelen = SYLT_MAX - 1;
-    tag = buffer + SYLT_TOP - framelen - 1;
-    if (global_unsynch && version <= ID3_VER_2_3)
-        bytesread = read_unsynched(fd, tag, framelen, &global_ff_found);
-    else
-        bytesread = read(fd, tag, framelen);
-
-    if (bytesread != framelen)
-        return;
-    if (unsynch || (global_unsynch && version >= ID3_VER_2_4))
-        bytesread = unsynchronize(tag, bytesread, NULL);
-    tag[bytesread] = 0;
-
-    encoding = tag[0];
-    /* text encoding, language, timestamp format, content type */
-    p = tag + 6;
-
-    switch (encoding)
-    {
-        case 0x01:  /* UTF-16, with or without a BOM */
-        case 0x02:
-            if (!memcmp(p, "\xff\xfe", 2))
-                utf_decode = utf16LEdecode;
-            else if (!memcmp(p, "\xfe\xff", 2))
-                utf_decode = utf16BEdecode;
-            else
-                utf_decode = NULL;
-
-            encoding = NUM_CODEPAGES;
-            /* skip the content descriptor, terminated by a zero unit */
-            do {
-                size = p[0] | p[1];
-                p += 2;
-            } while (size && p < tag + bytesread);
-            chsiz = 2;
+        p += skip_bom(p, end - p, &enc);
+        if (end - p >= unit && tag_unit(p, enc) == '\n')
+            p += unit;
+        stop = tag_string_end(p, end, enc);
+        if (!stop || end - stop < unit + 4)
             break;
 
-        default:
-            utf_decode = utf8cpy;
-            encoding = (encoding == 0x03)? UTF_8:
-                       global_settings.default_codepage;
-            p += strlen((char *)p) + 1;
-            chsiz = 1;
-            break;
-    }
-
-    if (encoding == NUM_CODEPAGES)
-    {
-        if (!memcmp(p, "\xff\xfe", 2))
-        {
-            utf_decode = utf16LEdecode;
-            p += 2;
-        }
-        else if (!memcmp(p, "\xfe\xff", 2))
-        {
-            utf_decode = utf16BEdecode;
-            p += 2;
-        }
-        else if (!utf_decode)
-        {
-            /* No BOM, which the specification does not allow. Guess: a zero
-             * byte is far more likely to be the high half of a character. */
-            utf_decode = (p[1] == 0)? utf16LEdecode: utf16BEdecode;
-        }
-    }
-
-    bytesread -= p - tag;
-    tag = p;
-
-    /* Each entry is its text, then a four-byte timestamp. The frame data
-     * still to be read sits between the two ends of the allocator, so stop
-     * as soon as either end would reach it. */
-    while (bytesread > 0
-           && buffer + buf_used < tag
-           && tag + bytesread + SYLT_SLACK < buffer + buf_end)
-    {
-        struct lyrics_line *lyr = alloc_buf(sizeof(struct lyrics_line));
-        if (!lyr)
-            break;
-
-        if (encoding == NUM_CODEPAGES)
-        {
-            unsigned char *utf8 = utf8_line;
-            unsigned char *lim = utf8_line + sizeof(utf8_line) - 4;
-            p = tag;
-            do {
-                utf8 = utf_decode(p, utf8, 1);
-                p += 2;
-            } while (*(utf8 - 1) && utf8 < lim);
-            *utf8 = 0;
-        }
-        else
-        {
-            unsigned char *end;
-            size = strlen((char *)tag) + 1;
-            end = iso_decode_ex(tag, utf8_line, encoding, size,
-                                sizeof(utf8_line) - 2);
-            *end = 0;
-            p = tag + size;
-        }
-
-        lyr->time = bytes2int(p[0], p[1], p[2], p[3]);
+        unsigned char text[UTF8_LINE_SIZE];
+        int n = MIN(stop - p, MAX_LINE_LEN);
+        decode_tag_line(p, n, enc, n < stop - p, text);
+        p = stop + unit;
+        uint32_t time = get_long_be((void *)p);
         p += 4;
-        utf_decode(p, tmp, 1);
-        if (tmp[0] == 0x0a)     /* entries may be separated by a newline */
-            p += chsiz;
-
-        bytesread -= p - tag;
-        tag = p;
-        if (!add_line(lyr, utf8_line))
+        if (time > LONG_MAX)
             break;
-    }
-
-    if (lrc.head)
-    {
-        lrc.type = TYPE_SYLT;
-        strlcpy(lrc.file, track.path, sizeof(lrc.file));
+        struct lyrics_line *line = alloc_buf(sizeof(*line));
+        if (!line)
+            break;
+        line->time = time;
+        if (!add_line(line, text))
+            break;
     }
 }
 
-static void load_sylt(void)
+static void load_embedded(void)
 {
-    int fd;
-
-    if (track.codectype != AFMT_MPA_L1
-        && track.codectype != AFMT_MPA_L2
-        && track.codectype != AFMT_MPA_L3)
+    int type = track.codectype;
+    if (type != AFMT_MPA_L1 && type != AFMT_MPA_L2 && type != AFMT_MPA_L3
+        && type != AFMT_MP4_ALAC && type != AFMT_MP4_AAC
+        && type != AFMT_MP4_AAC_HE && type != AFMT_FLAC
+        && type != AFMT_OGG_VORBIS)
         return;
 
-    fd = open(track.path, O_RDONLY);
+    int fd = open(track.path, O_RDONLY);
     if (fd < 0)
         return;
-    parse_sylt(fd);
+    if (type == AFMT_MPA_L1 || type == AFMT_MPA_L2 || type == AFMT_MPA_L3)
+    {
+        load_id3_frame(fd, true);
+        if (!lrc.nline)
+        {
+            reset_data();
+            lrc.length = track.length;
+            load_id3_frame(fd, false);
+        }
+    }
+    else
+    {
+        struct ogg_file file;
+        long size;
+        if (type == AFMT_FLAC || type == AFMT_OGG_VORBIS)
+            size = find_vorbis_lyrics(&file, fd, type);
+        else
+        {
+            size = find_mp4_lyrics(fd);
+            file = (struct ogg_file){.fd = fd, .packet_remaining = size,
+                                     .packet_ended = true};
+        }
+        load_tag_text(&file, NULL, size, TAG_UTF8, false);
+    }
     close(fd);
+    if (lrc.nline)
+        strlcpy(lrc.file, track.path, sizeof(lrc.file));
 }
 
 /* ---------------------------------------------------------------------------
@@ -1050,9 +1038,7 @@ enum lyrics_result lyrics_load(const struct mp3entry *id3)
     if (id3->artist)
         strlcpy(track.artist, id3->artist, sizeof(track.artist));
     track.length     = id3->length;
-    track.id3v2len   = id3->id3v2len;
     track.codectype  = id3->codectype;
-    track.id3version = id3->id3version;
 
     /* The buffer is kept from one track to the next and freed only by
      * lyrics_close(): a 32 KiB allocation per track change can shrink the
@@ -1071,13 +1057,13 @@ enum lyrics_result lyrics_load(const struct mp3entry *id3)
     reset_data();
     lrc.length = track.length;
 
-    if (find_lyrics_file())
+    if (find_lyrics_file(false) || find_lyrics_file(true))
         load_lyrics_file();
     else
-        load_sylt();
+        load_embedded();
 
     /* Text lines have equal timestamps and keep their input order. */
-    if (lrc.type != TYPE_TEXT) sort_lines();
+    if (lyrics_timed()) sort_lines();
     /* without the index nothing can be reached, so that counts as no lyrics */
     lrc.loaded = (lrc.nline > 0) && build_index();
 

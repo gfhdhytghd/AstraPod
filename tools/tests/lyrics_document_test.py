@@ -17,6 +17,9 @@ pre=r'''
 #include <sys/stat.h>
 #define MAX_PATH 260
 #define ARRAYLEN(a) (sizeof(a)/sizeof((a)[0]))
+#ifndef MIN
+#define MIN(a,b) ((a)<(b)?(a):(b))
+#endif
 #define UTF_8 1
 #define ISO_8859_1 0
 #define NUM_CODEPAGES 2
@@ -26,7 +29,28 @@ pre=r'''
 #define AFMT_MPA_L1 1
 #define AFMT_MPA_L2 2
 #define AFMT_MPA_L3 3
+#define AFMT_MP4_ALAC 4
+#define AFMT_MP4_AAC 5
+#define AFMT_MP4_AAC_HE 6
+#define AFMT_FLAC 7
+#define AFMT_OGG_VORBIS 8
+#define AFMT_UNKNOWN 0
+#define AFMT_SPEEX 9
+#define AFMT_OPUS 10
 struct mp3entry {char path[MAX_PATH];const char *title,*artist;unsigned long length,id3v2len;unsigned int codectype;unsigned char id3version;};
+struct ogg_file {int fd;bool packet_ended;long packet_remaining;};
+
+static off_t ffilesize(int fd){struct stat st;return fstat(fd,&st)?-1:st.st_size;}
+static uint32_t get_long_be(const void *buf){
+    const unsigned char *p=buf;
+    return (uint32_t)p[0]<<24|(uint32_t)p[1]<<16|(uint32_t)p[2]<<8|p[3];
+}
+#ifndef LYRICS_EMBEDDED_FIXTURES
+static long find_mp4_lyrics(int fd){(void)fd;return 0;}
+static long find_vorbis_lyrics(struct ogg_file *file,int fd,int type){(void)file;(void)fd;(void)type;return 0;}
+static ssize_t ogg_file_read(struct ogg_file *file,void *buf,size_t count){return read(file->fd,buf,count);}
+static int id3_unsynchronize(char *tag,int len,bool *ff){(void)tag;(void)ff;return len;}
+#endif
 static struct {int default_codepage;} global_settings;
 static const int buflib_ops_locked;
 static unsigned char arena[32768] __attribute__((aligned(16)));
@@ -39,9 +63,21 @@ static void core_free(int h){assert(h==1);frees++;}
 static bool file_exists(const char *p){struct stat st;return !stat(p,&st);}
 static void fix_path_part(char *p,int start,int end){(void)p;(void)start;(void)end;}
 static int read_line(int fd,char *b,int size){int n=0;char c;while(read(fd,&c,1)==1){if(c=='\n')break;if(n<size-1)b[n++]=c;}b[n]=0;return n;}
-static unsigned char *iso_decode_ex(const unsigned char*s,unsigned char*d,int enc,int n,int cap){(void)enc;if(n>cap)n=cap;memcpy(d,s,n);return d+n;}
-static unsigned char *utf16LEdecode(const unsigned char*s,unsigned char*d,int n){while(n--){*d++=*s;s+=2;}return d;}
-static unsigned char *utf16BEdecode(const unsigned char*s,unsigned char*d,int n){while(n--){*d++=s[1];s+=2;}return d;}
+static unsigned char *utf8encode(unsigned long c, unsigned char *out){
+    if(c<0x80)*out++=c;
+    else if(c<0x800){*out++=0xc0|(c>>6);*out++=0x80|(c&63);}
+    else if(c<0x10000){*out++=0xe0|(c>>12);*out++=0x80|((c>>6)&63);*out++=0x80|(c&63);}
+    else{*out++=0xf0|(c>>18);*out++=0x80|((c>>12)&63);*out++=0x80|((c>>6)&63);*out++=0x80|(c&63);}
+    return out;
+}
+static unsigned char *iso_decode_ex(const unsigned char*s,unsigned char*d,int enc,int n,int cap){
+    unsigned char *limit=d+cap;
+    while(n-- && d<limit){
+        if(enc==ISO_8859_1 && *s>=128){if(limit-d<2)break;d=utf8encode(*s++,d);}
+        else *d++=*s++;
+    }
+    return d;
+}
 '''
 post=r'''
 static void writefile(const char *path,const char *text){FILE*f=fopen(path,"w");assert(f);fputs(text,f);fclose(f);}

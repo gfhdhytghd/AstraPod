@@ -10,6 +10,7 @@
 struct cider_state
 {
     uint32_t generation, seq, host_ms, duration, position, received;
+    uint32_t position_tick;
     uint32_t library_generation;
     bool available, have, muted, loading;
     int rate, volume, shuffle, repeat; /* repeat in Rockbox numbering */
@@ -17,6 +18,7 @@ struct cider_state
     char previous_art[65], next_art[65];
     char id[80], art[65], title[124], artist[124], album[124], composer[124], reason[96];
     unsigned char remote; /* FU56 CF remote: bit 0 Rufin (else Cider), bit 1 host names it */
+    int16_t clock_correction;
 };
 /* Strict session challenge, independent of status, art and page credits. */
 bool cider_live_parse(const void *data, unsigned int length, uint32_t generation,
@@ -60,7 +62,7 @@ struct cider_transfer
     bool active, fill; /* fill: host-offered store fill, idle priority */
 };
 int cider_state_apply(struct cider_state *s, const void *data,
-                      unsigned int length, uint32_t tick);
+                      unsigned int length, uint32_t tick, int hz);
 int cider_reply_status(const void *data, unsigned int length,
                        uint32_t generation, uint32_t request);
 int cider_mode_step(int mode, int value, bool previous);
@@ -70,6 +72,7 @@ void cider_mode_ask(struct cider_modes *m, int mode, int value,
                     uint32_t tick, uint32_t request);
 bool cider_mode_failed(struct cider_modes *m, uint32_t request);
 uint32_t cider_position(const struct cider_state *s, uint32_t tick, int hz);
+uint32_t cider_playback_position(const struct cider_state *s, uint32_t tick, int hz);
 int cider_cache_find(struct cider_cache *c, const char *key, const char *tier);
 bool cider_cache_backoff(struct cider_cache *c, const char *key, const char *tier,
                          uint32_t tick);

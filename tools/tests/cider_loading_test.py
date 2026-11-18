@@ -9,7 +9,7 @@ code=r'''
 #include <stdio.h>
 #include <string.h>
 #include "screens/playback/cider_model.h"
-static int apply(struct cider_state*s,const char*t){return cider_state_apply(s,t,strlen(t),100);}
+static int apply(struct cider_state*s,const char*t){return cider_state_apply(s,t,strlen(t),100, 100);}
 int main(void){struct cider_state s={0};char b[512];
  assert(apply(&s,"CA\t7\t1\t"));
  for(int i=0;i<2;i++){

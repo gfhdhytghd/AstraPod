@@ -118,7 +118,7 @@ void cider_wps_update(struct wps_state *state)
     id3.album = source.album;
     id3.composer = source.composer;
     id3.length = source.duration;
-    id3.elapsed = cider_position(&source, current_tick, HZ);
+    id3.elapsed = cider_playback_position(&source, current_tick, HZ);
     snprintf(id3.path, sizeof id3.path, "cider/%s", source.id);
     state->id3 = &id3;
     state->nid3 = NULL;

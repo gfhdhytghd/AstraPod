@@ -272,14 +272,14 @@ static void remote_cn(const char *id, unsigned position, unsigned rate)
     char record[192];
     int n=snprintf(record,sizeof record,"CN\t9\t%u\t1\t10000\t%u\t%u\t0\t0\t0\t%s\t-\t181818\tRemote\tArtist\tAlbum",
                    remote_clock.seq+1,position,rate,id);
-    assert(cider_state_apply(&remote_clock,record,n,current_tick));
+    assert(cider_state_apply(&remote_clock,record,n,current_tick, HZ));
 }
 static struct wps_state *get_wps_state(void)
 {
     if (remote_source && timed_fixture)
     {
         snprintf(playing.path,sizeof playing.path,"cider/%s",remote_clock.id);
-        playing.elapsed=cider_position(&remote_clock,current_tick,HZ);
+        playing.elapsed=cider_playback_position(&remote_clock,current_tick,HZ);
         playing.length=remote_clock.duration;
         wps.paused=!remote_clock.rate;
     }
@@ -473,6 +473,7 @@ static int select_scenario(void)
     return ACTION_WPS_BROWSE; /* SELECT exits again after auto-follow. */
 }
 static int get_action(int c,int timeout){
+ static long pause_position;
  assert(shared_scene || !memcmp(panel,screen_pixels,sizeof panel));
  assert(!entry_pinned);
  assert(clock_refs == (lv.boost ? 2 : 1));
@@ -587,9 +588,11 @@ static int get_action(int c,int timeout){
    case 2:assert(lv_sung_width(0,26)>=paused_width&&remote_clock.seq==1);
      assert(!lv.art_ready&&!perf.builds);
      art_present=true;art_handle=7;art_pixels[0]=0x07e0;art_generation++;
-     remote_cn("one",850,0);return ACTION_NONE;
-   case 3:assert(lv.paused&&lv.elapsed==850);paused_width=lv_sung_width(0,26);current_tick+=120;return ACTION_NONE;
-   case 4:assert(lv.elapsed==850&&lv_sung_width(0,26)==paused_width);
+     pause_position=cider_playback_position(&remote_clock,current_tick,HZ);
+     remote_cn("one",pause_position+150,0);return ACTION_NONE;
+   case 3:assert(lv.paused&&lv.elapsed==pause_position);
+     paused_width=lv_sung_width(0,26);current_tick+=120;return ACTION_NONE;
+   case 4:assert(lv.elapsed==pause_position&&lv_sung_width(0,26)==paused_width);
      assert(lv.remote&&lv.art_ready&&perf.builds==1);
      remote_cn("one",1799,0);return ACTION_NONE;
    case 5:assert(lv.mode.focus==0);remote_cn("one",1800,0);return ACTION_NONE;
@@ -703,7 +706,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
    }
    plan=11;remote_source=timed_fixture=remote_key=true;
    const char ready[]="CA\t9\t1\tOK";
-   assert(cider_state_apply(&remote_clock,ready,sizeof ready-1,current_tick));
+   assert(cider_state_apply(&remote_clock,ready,sizeof ready-1,current_tick, HZ));
    remote_cn("one",0,0);
    get_wps_state();
    assert(lyrics_remote_step());
@@ -769,7 +772,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  assert(strstr(report,"entry: ")&&!strstr(report,"exit: ")&&strstr(report,"track change: ")&&strstr(report,"CPU MHz"));
  timed_fixture=true;remote_source=true;remote_key=false;
  const char ca[]="CA\t9\t1\tOK";
- assert(cider_state_apply(&remote_clock,ca,sizeof ca-1,current_tick));
+ assert(cider_state_apply(&remote_clock,ca,sizeof ca-1,current_tick, HZ));
  remote_cn("one",0,1000);
  plan=3;calls=0;remote_actions=0;wait_row=true;
  assert(lyric_viewer()==GO_TO_PREVIOUS&&remote_opens==3);

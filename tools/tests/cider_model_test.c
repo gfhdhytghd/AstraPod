@@ -24,20 +24,63 @@ static void make_art(unsigned int dim, bool columns)
     memset(art,0,sizeof art);put32(art,8u<<16|0x5441);
     put32(art+4,dim<<16|dim);put32(art+8,columns);
 }
+
+static void clock_sample(struct cider_state *s, unsigned seq, unsigned tick,
+                         unsigned position, unsigned rate, const char *id)
+{
+    char record[160];
+    int length = snprintf(record, sizeof record,
+                          "CN\t7\t%u\t0\t100000\t%u\t%u\t0\t0\t0\t%s\t-\t000000\tSong\tArtist\tAlbum",
+                          seq, position, rate, id);
+    assert(cider_state_apply(s, record, length, tick, 100));
+}
+
+static void check_playback_clock(void)
+{
+    struct cider_state s = {0};
+    const char available[] = "CA\t7\t1\tOK";
+    assert(cider_state_apply(&s, available, sizeof available - 1, 100, 100));
+    clock_sample(&s, 1, 100, 1000, 1000, "one");
+    assert(cider_playback_position(&s, 200, 100) == 2000);
+    clock_sample(&s, 2, 200, 2500, 1000, "one"); /* +500 ms: slew */
+    assert(cider_playback_position(&s, 200, 100) == 2000);
+    assert(cider_playback_position(&s, 250, 100) == 2750);
+    assert(cider_playback_position(&s, 300, 100) == 3500);
+    clock_sample(&s, 3, 300, 3200, 1000, "one"); /* -300 ms: slew */
+    assert(cider_playback_position(&s, 300, 100) == 3500);
+    assert(cider_playback_position(&s, 350, 100) == 3850);
+    clock_sample(&s, 4, 350, 3800, 0, "one");
+    assert(cider_playback_position(&s, 500, 100) == 3850);
+    clock_sample(&s, 5, 500, 3800, 0, "one");
+    assert(cider_playback_position(&s, 600, 100) == 3850);
+    clock_sample(&s, 6, 600, 3900, 0, "one"); /* short paused seek */
+    assert(cider_playback_position(&s, 700, 100) == 3900);
+    clock_sample(&s, 7, 700, 3800, 1000, "one");
+    assert(cider_playback_position(&s, 700, 100) == 3900);
+    assert(cider_playback_position(&s, 800, 100) == 4800);
+    clock_sample(&s, 8, 800, 4299, 1000, "one"); /* -501 ms: snap */
+    assert(cider_playback_position(&s, 800, 100) == 4299);
+    clock_sample(&s, 9, 800, 4600, 1000, "two"); /* new song never slews */
+    assert(cider_playback_position(&s, 800, 100) == 4600);
+}
+
 int main(void)
 {
+    check_playback_clock();
     struct cider_state s={0};
     const char *available="CA\t7\t1\t";
-    assert(cider_state_apply(&s,available,strlen(available),100)==1);
+    assert(cider_state_apply(&s,available,strlen(available),100, 100)==1);
     const char *now="CN\t7\t1\t4000\t100000\t12000\t1000\t50\t0\t0\tsong\t-\t123456\tTitle\tArtist\tAlbum";
-    assert(cider_state_apply(&s,now,strlen(now),100)==1);
+    assert(cider_state_apply(&s,now,strlen(now),100, 100)==1);
     assert(cider_position(&s,250,100)==13500);
-    assert(!cider_state_apply(&s,now,strlen(now),250));
+    assert(cider_state_apply(&s,available,strlen(available),250, 100)==1);
+    assert(cider_position(&s,250,100)==13500); /* CA is not a position sample. */
+    assert(!cider_state_apply(&s,now,strlen(now),250, 100));
     s.rate=0;assert(cider_position(&s,1000,100)==12000);
-    s.rate=1000;s.received=UINT32_MAX-10;
+    s.rate=1000;s.position_tick=UINT32_MAX-10;
     assert(cider_position(&s,89,100)==13000);
     now="CN\t7\t2\t4000\t100000\t12000\t1000\t101\t0\t0\tsong\t-\t123456\tTitle\tArtist\tAlbum";
-    assert(!cider_state_apply(&s,now,strlen(now),100));
+    assert(!cider_state_apply(&s,now,strlen(now),100, 100));
     char key[65];memset(key,'a',64);key[64]=0;
     make_art(128,true);unsigned int total=12+128*128*2;
     transfer.active=true;transfer.generation=7;transfer.request=1;
@@ -91,18 +134,18 @@ int main(void)
         memset(key,'a',64);key[64]=0;
         strcpy(s.id,"song");s.have=true;
         snprintf(rec,sizeof rec,"CP\t7\tsong\t%s\t-",key);
-        assert(cider_state_apply(&s,rec,strlen(rec),300)==1);
+        assert(cider_state_apply(&s,rec,strlen(rec),300, 100)==1);
         assert(!strcmp(s.previous_art,key)&&!s.next_art[0]);
         /* overlong id, non-hex key, wrong generation and wrong song all refused */
         char longid[400];memset(longid,'9',sizeof longid-1);longid[sizeof longid-1]=0;
         snprintf(rec,sizeof rec,"CP\t7\t%s\t%s\t%s",longid,key,key);
-        assert(!cider_state_apply(&s,rec,strlen(rec),300));
+        assert(!cider_state_apply(&s,rec,strlen(rec),300, 100));
         snprintf(rec,sizeof rec,"CP\t7\tsong\tZZ%s\t-",key+2);
-        assert(!cider_state_apply(&s,rec,strlen(rec),300));
+        assert(!cider_state_apply(&s,rec,strlen(rec),300, 100));
         snprintf(rec,sizeof rec,"CP\t8\tsong\t-\t%s",key);
-        assert(!cider_state_apply(&s,rec,strlen(rec),300));
+        assert(!cider_state_apply(&s,rec,strlen(rec),300, 100));
         snprintf(rec,sizeof rec,"CP\t7\tother\t-\t%s",key);
-        assert(!cider_state_apply(&s,rec,strlen(rec),300));
+        assert(!cider_state_apply(&s,rec,strlen(rec),300, 100));
         assert(!strcmp(s.previous_art,key));
         const char *ok="CK\t7\t42\t1\tOK",*no="CK\t7\t42\t0\tFailed",*stale="CK\t6\t42\t1\tOK";
         assert(cider_reply_status(ok,strlen(ok),7,42)==1);
@@ -113,7 +156,7 @@ int main(void)
         assert(!cider_reply_status(big,strlen(big),7,42));
     }
     available="CA\t8\t0\tOffline";
-    assert(cider_state_apply(&s,available,strlen(available),200)==1);
+    assert(cider_state_apply(&s,available,strlen(available),200, 100)==1);
     assert(!s.have&&!s.available&&s.generation==8);
     assert(cider_cache_find(&cache,key,"M")>=0);
     printf("Cider production state/LRU/CRC/resume/generation/window PASS; cache=%zu transfer=%zu\n",sizeof cache,sizeof transfer);

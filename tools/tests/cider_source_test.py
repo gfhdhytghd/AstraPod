@@ -197,7 +197,7 @@ for(int v=0;v<5;v++){assert(cider_mode_step(CIDER_MODE_REPEAT,v,false)==(v+1)%5&
 assert(cider_mode_step(CIDER_MODE_REPEAT,7,false)==1);
 /* A-B: SELECT marks only in A-B mode; elsewhere it stays swallowed */
 state.repeat=0;memset(&modes,0,sizeof modes);ncommands=0;assert(cider_wps_action(ACTION_WPS_HOTKEY)&&!ncommands);
-state.repeat=CIDER_REPEAT_AB;state.position=5000;state.received=current_tick;state.rate=1000;cider_wps_update(&w);
+state.repeat=CIDER_REPEAT_AB;state.position=5000;state.received=state.position_tick=current_tick;state.rate=1000;cider_wps_update(&w);
 assert(cider_wps_action(ACTION_WPS_HOTKEY)&&ncommands==1&&strstr(commands[0],"\tab-mark\t5000"));
 active=false;
 }

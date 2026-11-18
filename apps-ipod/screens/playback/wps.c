@@ -947,6 +947,10 @@ static long wps_run(bool return_agents)
                 gwps_leave_wps(true);
                 return GO_TO_ROOT;
             }
+            /* The WPS never left, so its theme entry is still pushed and the
+             * page popped its own. Re-pushing here leaked one level per visit
+             * until USB or the next visit overflowed the stack (FU72). */
+            theme_enabled = false;
             restore = true;
             continue;
         }

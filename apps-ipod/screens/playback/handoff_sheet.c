@@ -28,6 +28,7 @@
 #include "ui/native_wps.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
+#include "ui/scene.h"
 #include "widgets/dialog.h"
 #include <stdio.h>
 #include <string.h>
@@ -62,10 +63,11 @@ struct retained_sheet;
 struct sheet_presentation {
     struct viewport vp, *outer;
     fb_data *fb, *back, *card;
-    int handle, offset;
+    int handle, offset, status_height;
+    const void *parent_page;
     unsigned open_frames, close_frames;
     unsigned open_trace;
-    bool inhibited, boosted, interrupted;
+    bool inhibited, boosted, interrupted, closing;
     struct retained_sheet *retained;
 };
 
@@ -475,20 +477,36 @@ static void draw_retained_card(struct sheet_presentation *p)
 static void present_sheet(struct sheet_presentation *p, int offset, bool repaint)
 {
     struct retained_sheet *s = p->retained;
+    int status = p->closing ? p->status_height : 0;
+    int body_offset = ui_scene_modal_body_offset(offset, status);
     /* Blend covered rows directly against the saved page in one pass.
      * The same eased position controls the slide, crossfade and dim. */
-    s->below.value[UI_CLIP_HEIGHT] = offset;
+    s->below.value[UI_CLIP_HEIGHT] = status + body_offset;
     int opacity = (LCD_HEIGHT - offset) * UI_FULL_OPACITY / LCD_HEIGHT;
     int dim = (LCD_HEIGHT - offset) * UI_FULL_OPACITY * SHEET_DIM_PERCENT
               / (LCD_HEIGHT * 100);
     ui_page_set(&s->base, &s->below, UI_BRIGHTNESS, UI_FULL_OPACITY - dim);
-    ui_page_set(&s->overlay, &s->image, UI_OFFSET_Y, offset);
+    ui_page_set(&s->overlay, &s->image, UI_OFFSET_Y, body_offset);
+    ui_page_set(&s->overlay, &s->image, UI_CLIP_Y, status);
     ui_page_set(&s->overlay, &s->image, UI_OPACITY, opacity);
     if (repaint)
         ui_page_invalidate(&s->overlay, (struct ui_rect){0, offset, LCD_WIDTH,
                                                        LCD_HEIGHT - offset});
     if (p->card)
-        ui_nav_draw(&s->nav);
+    {
+        if (status)
+        {
+            bool inhibited = ui_flush_inhibited();
+            ui_inhibit_flush(true);
+            ui_nav_draw(&s->nav);
+            memcpy(p->fb, p->back, status * LCD_WIDTH * sizeof(fb_data));
+            ui_mark_dirty_rect(SCREEN_MAIN, 0, 0, LCD_WIDTH, status);
+            ui_inhibit_flush(inhibited);
+            ui_flush_dirty();
+        }
+        else
+            ui_nav_draw(&s->nav);
+    }
 }
 
 static int progress_width(const struct handoff_sheet *view, int inner_width)
@@ -566,6 +584,8 @@ static void close_native_sheet(struct sheet_presentation *p)
         return;
     unsigned trace = ui_perf_begin("handoff-close");
     set_boost(p, true);
+    p->closing = true;
+    present_sheet(p, p->offset, false);
     struct ui_tween tween = {
         .start_clock = USEC_TIMER,
         .from = p->offset, .to = LCD_HEIGHT, .frames = p->close_frames,
@@ -594,6 +614,7 @@ static void close_native_sheet(struct sheet_presentation *p)
             yield();
     }
     ui_perf_end(trace);
+    ui_scene_modal_restored(p->parent_page);
 }
 
 static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
@@ -766,6 +787,8 @@ int handoff_sheet_run(struct handoff_sheet *view, int (*advance)(int))
         .open_frames = ui_theme_duration(OPEN_FRAMES),
         .close_frames = ui_theme_duration(CLOSE_FRAMES),
         .inhibited = ui_flush_inhibited(),
+        .status_height = sb_visible_height(),
+        .parent_page = ui_scene_modal_parent(),
     };
     p.handle = core_alloc_free_space(HANDOFF_FRAME_BYTES);
     bool cached_card = p.handle > 0;

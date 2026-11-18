@@ -94,6 +94,12 @@ enum pf_scroll_line_type {
 #define CAROUSEL_CONTEXT       (-21)
 /* Internal result; public carousel wrappers translate it to GO_TO_PREVIOUS. */
 #define CAROUSEL_REMOTE_RETURN (-22)
+#define CAROUSEL_PLAY_PENDING  (-23)
+
+#define CAROUSEL_TRACK_TEXT 160
+struct carousel_album_header {
+    char title[CAROUSEL_TRACK_TEXT], artist[CAROUSEL_TRACK_TEXT];
+};
 
 /* The seam between the generic coverflow engine and the data it shows. */
 struct carousel_model {
@@ -120,6 +126,13 @@ struct carousel_model {
     bool (*read_art)(int index, struct bitmap *bitmap); /* native columns */
     unsigned int (*art_version)(int index);
     void (*tick)(void);                                /* nonblocking provider */
+    bool (*panel_open)(int index, struct carousel_album_header *header);
+    void (*panel_close)(void);
+    int (*panel_count)(void);                          /* -1 while loading */
+    bool (*panel_row)(int index, char *title, size_t size);
+    int (*panel_play)(int index);                      /* screen or MENU_STAY */
+    int (*panel_play_status)(void);                    /* 0 pending, +1 success, -1 error */
+    bool (*remember)(int index);                       /* update resume state in RAM */
 };
 
 /* Engine-owned persistent config for the album carousel (cache version + resume
@@ -147,6 +160,8 @@ extern bool  pf_resume_last_album;
 /* Run the coverflow carousel over `m`. The thin public entry points
  * album_covers()/artist_portraits() wrap this, selecting the model. */
 int  carousel_run(const struct carousel_model *m, const char *selected_file);
+void carousel_prepare_transition(void);
+void carousel_cancel_transition(void);
 void set_current_slide(int index);
 void set_scroll_line(const char *str, enum pf_scroll_line_type type);
 /* 'str', or with Scrolling off, as much as fits the caption in the current
@@ -207,4 +222,9 @@ void carousel_drop_slides(void);
 void carousel_provider_changed(void);
 
 void carousel_forget_resume(void);
+bool carousel_wps_pending(void);
+void carousel_wps_begin(void);
+void carousel_wps_end(bool back);
+int carousel_wps_back(void);
+bool carousel_wps_returning(void);
 #endif /* _CAROUSEL_H_ */

@@ -14,6 +14,7 @@
 #include "widgets/splash.h"
 #include "lang.h"
 #include "kernel.h"
+#include "system/shutdown.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +24,7 @@ static bool flicking;
 static long moved_at;
 static unsigned int revision;
 static struct cider_row row_ahead;
+static struct cider_row panel_album;
 static fb_data *surface;
 _Static_assert(sizeof *surface == sizeof(uint16_t), "Remote RGB565 art");
 
@@ -54,14 +56,51 @@ static void initial(const char *file)
     moved_at = current_tick - HZ;
     flicking = false;
 }
-static int enter(int index)
+
+static bool remember(int index)
 {
     struct cider_row row;
     if (!cider_page_row(index, &row))
-        return GO_TO_PREVIOUS;
+        return false;
+    if (global_status.cover_remote_index == index &&
+        !strcmp(global_status.cover_remote_id, row.id))
+        return false;
+    global_status.cover_remote_index = index;
+    snprintf(global_status.cover_remote_id, sizeof(global_status.cover_remote_id), "%s", row.id);
+    return true;
+}
+static bool panel_open(int index, struct carousel_album_header *header)
+{
+    if (!cider_page_row(index, &panel_album))
+        return false;
     resume_index = index;
-    cider_browse_album(&row);
-    return GO_TO_PREVIOUS;
+    snprintf(header->title, sizeof(header->title), "%s", panel_album.title);
+    snprintf(header->artist, sizeof(header->artist), "%s", panel_album.subtitle);
+    cider_track_page_open(panel_album.route);
+    return true;
+}
+
+static void panel_close(void)
+{
+    cider_track_page_open("");
+}
+
+static bool panel_row(int index, char *title, size_t size)
+{
+    struct cider_row row;
+    if (!cider_track_page_row(index, &row))
+        return false;
+    snprintf(title, size, "%s", row.title);
+    return true;
+}
+
+static int panel_play(int index)
+{
+    struct cider_row row;
+    if (!cider_track_page_row(index, &row) || row.kind != CIDER_ROW_SONG)
+        return CAROUSEL_MENU_STAY;
+    return cider_play_in(row.route, panel_album.route, index)
+        ? CAROUSEL_PLAY_PENDING : CAROUSEL_MENU_STAY;
 }
 static bool art(int index, struct bitmap *bitmap)
 {
@@ -210,7 +249,6 @@ static const struct carousel_model model = {
     .build_index = build,
     .count = count,
     .art_key = key,
-    .enter = enter,
     .jump_prev = jump,
     .jump_next = jump,
     .draw_text = text,
@@ -221,30 +259,91 @@ static const struct carousel_model model = {
     .read_art = art,
     .art_version = version,
     .tick = tick,
+    .panel_open = panel_open,
+    .panel_close = panel_close,
+    .panel_count = cider_track_page_total,
+    .panel_row = panel_row,
+    .panel_play = panel_play,
+    .panel_play_status = cider_play_status,
+    .remember = remember,
 };
+
+static int wait_for_library(void)
+{
+    int action = get_action(CONTEXT_STD, HZ / 10);
+    if (action == ACTION_STD_QUICKSCREEN &&
+        quick_screen_current(action, NULL) == QUICKSCREEN_IN_USB)
+        return GO_TO_ROOT;
+    if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU ||
+        agents_nav_pending() != AGENTS_NAV_NONE)
+        return GO_TO_PREVIOUS;
+    if (default_event_handler(action) == SYS_USB_CONNECTED)
+        return GO_TO_ROOT;
+    return CAROUSEL_MENU_STAY;
+}
+
+/* Keep the parent on screen while fetching the saved album's page. A
+ * reordered library is searched one cached page at a time. */
+static int restore_album(void)
+{
+    int total = MIN(count(), 0x7fff);
+    resume_index = MAX(0, MIN(total - 1, global_status.cover_remote_index));
+    if (!global_status.cover_remote_id[0])
+        return CAROUSEL_MENU_STAY;
+    int first = resume_index / CIDER_PAGE_ROWS * CIDER_PAGE_ROWS;
+    for (int visited = 0; visited < total; visited++)
+    {
+        int index = (first + visited) % total;
+        struct cider_row row;
+        long deadline = current_tick + 5 * HZ;
+        while (!cider_page_row(index, &row))
+        {
+            if (!cider_available() || !TIME_BEFORE(current_tick, deadline))
+                return CAROUSEL_MENU_STAY;
+            int action = wait_for_library();
+            if (action != CAROUSEL_MENU_STAY)
+                return action;
+        }
+        if (!strcmp(global_status.cover_remote_id, row.id))
+        {
+            resume_index = index;
+            break;
+        }
+    }
+    return CAROUSEL_MENU_STAY;
+}
+
 int cider_covers(void)
 {
+    carousel_prepare_transition();
     cider_page_open("albums");
     long deadline = current_tick + 5 * HZ;
     while (cider_page_total() < 0 && TIME_BEFORE(current_tick, deadline))
     {
-        int action = get_action(CONTEXT_STD, HZ / 10);
-        if (action == ACTION_STD_QUICKSCREEN &&
-            quick_screen_current(action, NULL) == QUICKSCREEN_IN_USB)
-            return GO_TO_ROOT;
-        if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU ||
-            agents_nav_pending() != AGENTS_NAV_NONE)
-            return GO_TO_PREVIOUS;
+        int action = wait_for_library();
+        if (action != CAROUSEL_MENU_STAY)
+        {
+            carousel_cancel_transition();
+            return action;
+        }
     }
     if (cider_page_total() <= 0)
     {
+        carousel_cancel_transition();
         splash(HZ, ID2P(LANG_CAROUSEL_NO_ALBUMS));
         return GO_TO_PREVIOUS;
+    }
+    int restored = restore_album();
+    if (restored != CAROUSEL_MENU_STAY)
+    {
+        carousel_cancel_transition();
+        return restored;
     }
     int scratch = core_allocatable() >= CIDER_COVER_SCRATCH_BYTES
                 ? core_alloc(CIDER_COVER_SCRATCH_BYTES) : -1;
     if (scratch <= 0)
     {
+        carousel_cancel_transition();
         splash(HZ, ID2P(LANG_OUT_OF_MEMORY));
         return GO_TO_PREVIOUS;
     }

@@ -12,6 +12,7 @@ void sb_init(void) INIT_ATTR;
 void sb_update(enum screen_type screen, bool force);
 void sb_settle(enum screen_type screen);
 void sb_invalidate(void);
+int sb_visible_height(void);
 int sb_motion_timeout(int timeout);
 void sb_motion_presented(void);
 void sb_set_update_delay(int delay);

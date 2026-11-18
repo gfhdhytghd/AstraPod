@@ -14,6 +14,7 @@ def between(s, start, end):
     return s[s.index(start):s.index(end, s.index(start))]
 
 aa = 'static void build_side_level' in source
+album_flip = 'static int pf_neighbor_light' in source
 program = '''
 #include <assert.h>
 #include <stdbool.h>
@@ -32,6 +33,7 @@ static struct dim *surface(struct slide_data *slide) {
 }
 static pix_t buffer[320*240];
 static unsigned pf_bg_rb, pf_bg_g;
+static int pf_neighbor_light __attribute__((unused)) = 256;
 #define BUFFER_WIDTH 320
 #define NO_INLINE __attribute__((noinline))
 #define fabs fabsr
@@ -112,6 +114,8 @@ program += '''
     printf("us/frame checksum=%u\\n",checksum);
 }
 '''
+if album_flip:
+    program = program.replace('coverflow_render();', 'coverflow_render(true);')
 cfile = out / 'coverflow_pixels.c'
 cfile.write_text(program)
 binary = out / 'coverflow_pixels'

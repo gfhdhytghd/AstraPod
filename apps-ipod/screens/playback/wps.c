@@ -88,6 +88,7 @@
 #endif
 #include "cider_controls.h"
 #include "cider_library.h"
+#include "screens/covers/carousel.h"
 #include "database/sound_mix.h"
 #include "database/tagcache.h"
 #include "metadata.h"
@@ -628,7 +629,9 @@ static bool show_album_covers(long *go_to, bool return_agents)
     if (cover_nav_playing())
     {
         leave_playback();
-        *go_to = cider_active() ? cider_browse_covers(false) : GO_TO_ALBUM_COVERS;
+        int destination = carousel_wps_back();
+        *go_to = destination == GO_TO_ALBUM_COVERS ? destination :
+                 cider_active() ? cider_browse_covers(false) : GO_TO_ALBUM_COVERS;
         return true;
     }
 
@@ -743,8 +746,13 @@ long gui_wps_show(bool return_agents)
 {
     if (!agents_nav_enter(AGENTS_NAV_WPS)) return GO_TO_PREVIOUS;
     struct ui_scene lyrics_scene = {0};
+    bool cover_sheet = carousel_wps_pending();
+    if (cover_sheet)
+        carousel_wps_begin();
     long result = wps_run(return_agents, &lyrics_scene);
     ui_scene_cancel(&lyrics_scene);
+    if (cover_sheet)
+        carousel_wps_end(carousel_wps_returning());
     agents_nav_leave(AGENTS_NAV_WPS);
     return result;
 }
@@ -1071,7 +1079,17 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
                 break;
             /* menu key functions */
             case ACTION_WPS_MENU:
+            {
                 leave_playback();
+                int destination = carousel_wps_back();
+                if (destination != GO_TO_PREVIOUS)
+                {
+#ifdef HAVE_USB_PODLINK
+                    if (destination == GO_TO_CIDER)
+                        return cider_browse_covers(false);
+#endif
+                    return destination;
+                }
                 if (cider_active())
                 {
                     if (cover_nav_playing()) return cider_browse_covers(false);
@@ -1081,6 +1099,7 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
                     return album_covers_reopen_tracks() ? GO_TO_ALBUM_COVERS_TRACKS
                                                         : GO_TO_ALBUM_COVERS;
                 return return_agents ? GO_TO_AGENTS : GO_TO_PREVIOUS;
+            }
 
 
             case ACTION_WPS_QUICKSCREEN:

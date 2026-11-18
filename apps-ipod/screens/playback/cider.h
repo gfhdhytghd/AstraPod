@@ -53,11 +53,14 @@ bool cider_play(const char *route);
 /* Play a song of the list 'context' (a page route) at row 'index' */
 bool cider_play_in(const char *route, const char *context, int index);
 int cider_play_status(void);
+struct cider_row;
+void cider_track_page_open(const char *route);
+int cider_track_page_total(void);
+bool cider_track_page_row(int index, struct cider_row *row);
 void cider_local_play(void);
 void cider_page_open(const char *route);
 int cider_page_total(void);
 bool cider_page_stale(void);
-struct cider_row;
 bool cider_page_row(int index, struct cider_row *row);
 #else
 static inline bool cider_play_pending(void) { return false; }

@@ -462,6 +462,9 @@ struct system_status
     /* When a debug log was last switched on, in seconds since 1970, towards
        Switch Off After */
     int debug_log_since;
+    int cover_local_index, cover_remote_index;
+    uint32_t cover_album_hash, cover_artist_hash;
+    char cover_remote_id[80];
 };
 
 struct user_settings
@@ -678,7 +681,6 @@ struct user_settings
     int  album_covers_random_spin;  /* 0..2: covers a held PLAY passes */
     int  album_covers_transition_speed;
     int  album_covers_show_album_name;
-    int  album_covers_on_select;  /* ON_SELECT_*: browse the album, or play it */
     int  album_covers_sort_albums_by;
     int  album_covers_sort_artists_by; /* SORT_ARTISTS_*: portraits ordering */
     /* The carousel's own Sort Ignoring The/A/An */

@@ -30,6 +30,7 @@
 #include "config.h"
 #include "system.h"          /* ALIGN_BUFFER */
 #include "kernel.h"
+#include "core_alloc.h"
 #include "lang.h"
 #include "settings/settings.h"
 #include "database/tagcache.h"
@@ -344,16 +345,21 @@ int db_summary_read_order_table(struct db_summary_order *out, int max,
 /* One track, while the album is being put in order. Only the index id is kept,
  * not the path: a path is MAX_PATH and there is no reason to hold every one of
  * them when tagcache_retrieve() can fetch each again in the order wanted. */
-struct album_track {
-    int32_t idx_id;
-    int32_t key;
-};
-
 static int compare_album_tracks(const void *a_v, const void *b_v)
 {
-    const struct album_track *a = a_v;
-    const struct album_track *b = b_v;
-    return a->key - b->key;
+    const struct db_album_track *a = a_v;
+    const struct db_album_track *b = b_v;
+    if (a->key != b->key)
+        return a->key - b->key;
+    return a->id - b->id;
+}
+
+static struct db_album_track indexed_track(const struct tagcache_search *tcs)
+{
+    int disc = MAX(0, tagcache_get_numeric(tcs, tag_discnumber));
+    int track = MAX(0, tagcache_get_numeric(tcs, tag_tracknumber));
+    return (struct db_album_track){tcs->idx_id,
+                                  ((disc & 0x7fff) << 16) | (track & 0xffff)};
 }
 
 /* The album's tracks: its name and its artist. An album with no seek stands
@@ -364,6 +370,37 @@ static void filter_album(struct tagcache_search *tcs,
     if (album->seek >= 0)
         tagcache_search_add_filter(tcs, tag_album, album->seek);
     tagcache_search_add_filter(tcs, tag_albumartist, album->artist_seek);
+}
+
+int db_summary_album_track_ids(const struct album_data *album, int *count)
+{
+    struct tagcache_album entry;
+    int slot = tagcache_album_find(album->seek, album->artist_seek);
+    *count = 0;
+    if (slot < 0 || !tagcache_album_get(slot, &entry) || entry.tracks <= 0)
+        return 0;
+    int handle = core_alloc_free_space(entry.tracks * sizeof(struct db_album_track));
+    if (handle <= 0)
+        return -1;
+
+    struct tagcache_search tcs;
+    if (!tagcache_search(&tcs, tag_filename))
+    {
+        core_free(handle);
+        return -1;
+    }
+    filter_album(&tcs, album);
+    tagcache_search_set_range(&tcs, entry.first, entry.last);
+    struct db_album_track *tracks = core_get_data_pinned(handle);
+    char path[MAX_PATH];
+    int found = 0;
+    while (found < entry.tracks && tagcache_get_next(&tcs, path, sizeof(path)))
+        tracks[found++] = indexed_track(&tcs);
+    tagcache_search_finish(&tcs);
+    qsort(tracks, found, sizeof(*tracks), compare_album_tracks);
+    core_put_data_pinned(tracks);
+    *count = found;
+    return handle;
 }
 
 /* The search on the album's tracks, boosted, or false when the database
@@ -390,7 +427,7 @@ static int album_tracks_from(struct tagcache_search *tcs,
                              void *data)
 {
     char buf[MAX_PATH];
-    struct album_track *list;
+    struct db_album_track *list;
     size_t list_sz = 0;
     int cap, found = 0, added = 0;
     bool sorted;
@@ -408,8 +445,6 @@ static int album_tracks_from(struct tagcache_search *tcs,
 
     while (sorted && tagcache_get_next(tcs, buf, sizeof(buf)))
     {
-        int disc, track;
-
         if (found >= cap)
         {
             /* Nowhere to put the rest of the album, so it cannot be ordered
@@ -417,20 +452,7 @@ static int album_tracks_from(struct tagcache_search *tcs,
             sorted = false;
             break;
         }
-        disc  = tagcache_get_numeric(tcs, tag_discnumber);
-        track = tagcache_get_numeric(tcs, tag_tracknumber);
-        if (disc < 0)
-            disc = 0;
-        if (track < 0)
-            track = 0;
-        list[found].idx_id = tcs->idx_id;
-        /* Disc above track, so disc 2's track 1 follows disc 1's last. An
-         * untagged disc or track sorts as 0, which puts it first -- the same
-         * place the browser's format string puts it. Both are masked: these
-         * come from file tags, so a nonsense value must not shift into the
-         * sign bit and sort the track to the front. */
-        list[found].key = ((disc & 0x7fff) << 16) | (track & 0xffff);
-        found++;
+        list[found++] = indexed_track(tcs);
     }
 
     if (sorted)
@@ -438,7 +460,7 @@ static int album_tracks_from(struct tagcache_search *tcs,
         qsort(list, found, sizeof(*list), compare_album_tracks);
         for (int i = 0; i < found; i++)
         {
-            if (!tagcache_retrieve(tcs, list[i].idx_id, tag_filename,
+            if (!tagcache_retrieve(tcs, list[i].id, tag_filename,
                                    buf, sizeof(buf)))
                 continue;
             if (!sink(buf, data))
@@ -478,59 +500,93 @@ int db_summary_album_tracks(const struct album_data *album,
     return album_tracks_from(&tcs, album, sink, data);
 }
 
+struct play_album {
+    struct playlist_insert_context insert;
+    char start_path[MAX_PATH];
+    int added, start_index;
+};
+
 static bool insert_sink(const char *path, void *data)
 {
-    return playlist_insert_context_add(data, path) >= 0;
+    struct play_album *play = data;
+    if (playlist_insert_context_add(&play->insert, path) < 0)
+        return false;
+    if (!strcmp(path, play->start_path))
+        play->start_index = play->added;
+    play->added++;
+    return true;
 }
 
-int db_summary_play_album(const struct album_data *album)
+static int play_album_at(const struct album_data *album, int id)
 {
-    struct playlist_insert_context context;
+    struct play_album play = {.start_index = id < 0 ? 0 : -1};
     struct tagcache_search tcs;
     int added;
 
-    if (!warn_on_pl_erase())
-        return -1;
+    bool usb = false;
+    if (!warn_on_pl_erase_usb(&usb))
+        return usb ? DB_ALBUM_PLAY_USB : -1;
 
     /* The search first: refused while a commit runs, and the playlist is
      * not to be emptied for nothing. */
     if (!album_search(&tcs, album))
         return -1;
+    if (id >= 0 && !tagcache_retrieve(&tcs, id, tag_filename,
+                                      play.start_path, sizeof(play.start_path)))
+    {
+        tagcache_search_finish(&tcs);
+        cpu_boost(false);
+        return -1;
+    }
     if (playlist_create(NULL, NULL) < 0)
     {
         tagcache_search_finish(&tcs);
         cpu_boost(false);
         return -1;
     }
-    if (playlist_insert_context_create(NULL, &context, PLAYLIST_INSERT_LAST,
+    if (playlist_insert_context_create(NULL, &play.insert, PLAYLIST_INSERT_LAST,
                                        false, false) < 0)
     {
         /* create() keeps the playlist lock even when it fails; release()
          * is the only thing that gives it back. */
-        playlist_insert_context_release(&context);
+        playlist_insert_context_release(&play.insert);
         tagcache_search_finish(&tcs);
         cpu_boost(false);
         return -1;
     }
 
-    added = album_tracks_from(&tcs, album, insert_sink, &context);
-    playlist_insert_context_release(&context);
+    added = album_tracks_from(&tcs, album, insert_sink, &play);
+    playlist_insert_context_release(&play.insert);
 
-    if (added <= 0)
+    if (added <= 0 || play.start_index < 0)
         return -1;
 
-    playlist_start(0, 0, 0);
+    playlist_start(play.start_index, 0, 0);
     return added;
+}
+
+int db_summary_play_album(const struct album_data *album)
+{
+    return play_album_at(album, -1);
 }
 
 /* The album the carousel asked for, held across its teardown. */
 static struct album_data pending_play;
 static bool pending_play_armed;
+static int pending_track;
+static uint32_t pending_generation;
+
+void db_summary_play_track_on_exit(const struct album_data *album, int id)
+{
+    pending_play = *album;
+    pending_track = id;
+    pending_generation = tagcache_generation();
+    pending_play_armed = true;
+}
 
 void db_summary_play_album_on_exit(const struct album_data *album)
 {
-    pending_play = *album;
-    pending_play_armed = true;
+    db_summary_play_track_on_exit(album, -1);
 }
 
 int db_summary_play_pending(void)
@@ -538,5 +594,7 @@ int db_summary_play_pending(void)
     if (!pending_play_armed)
         return -1;
     pending_play_armed = false;
-    return db_summary_play_album(&pending_play);
+    if (pending_generation != tagcache_generation())
+        return -1;
+    return play_album_at(&pending_play, pending_track);
 }

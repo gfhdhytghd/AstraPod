@@ -1537,6 +1537,29 @@ bool cider_page_row(int index, struct cider_row *row)
     return have;
 }
 
+void cider_track_page_open(const char *route)
+{
+    mutex_lock(&cider_mutex);
+    cider_library_tracks_open(route);
+    mutex_unlock(&cider_mutex);
+}
+
+int cider_track_page_total(void)
+{
+    mutex_lock(&cider_mutex);
+    int total = cider_library_tracks_total();
+    mutex_unlock(&cider_mutex);
+    return total;
+}
+
+bool cider_track_page_row(int index, struct cider_row *row)
+{
+    mutex_lock(&cider_mutex);
+    bool have = cider_library_track_row(index, row);
+    mutex_unlock(&cider_mutex);
+    return have;
+}
+
 unsigned int cider_art_revision(void)
 {
     mutex_lock(&cider_mutex);

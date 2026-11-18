@@ -26,32 +26,36 @@
 #include "window-sdl.h"
 #endif
 
+#if LCD_DEPTH >= 8 && (LCD_PIXELFORMAT == RGB565) && \
+    (LCD_STRIDEFORMAT == HORIZONTAL_STRIDE) && \
+    !defined(HAVE_LCD_SPLIT) && !defined(HAVE_REMOTE_LCD)
+void sdl_blit_rgb565(SDL_Surface *surface, const void *pixels, SDL_Rect rect)
+{
+    SDL_Surface *lcd = SDL_CreateRGBSurfaceFrom((void *)pixels, LCD_FBWIDTH,
+                         LCD_FBHEIGHT, LCD_DEPTH, LCD_FBWIDTH * LCD_DEPTH / 8,
+                         0, 0, 0, 0);
+    if (!lcd)
+        return;
+    SDL_Rect dest = rect;
+    SDL_BlitSurface(lcd, &rect, surface, &dest);
+    SDL_FreeSurface(lcd);
+}
+#endif
+
 void sdl_update_rect(SDL_Surface *surface, int x_start, int y_start, int width,
                      int height, int max_x, int max_y,
                      unsigned long (*getpixel)(int, int))
 {
-    SDL_Rect dest;
 #if LCD_DEPTH >= 8 && (LCD_PIXELFORMAT == RGB565) && \
     (LCD_STRIDEFORMAT == HORIZONTAL_STRIDE) && \
     !defined(HAVE_LCD_SPLIT) && !defined(HAVE_REMOTE_LCD)
-    SDL_Rect src;
     (void)max_x;
     (void)max_y;
     (void)getpixel;
-    /* Update complete screen via one blit operation (fast) */
-    SDL_Surface *lcd = SDL_CreateRGBSurfaceFrom(FBADDR(0, 0), LCD_FBWIDTH,
-                                                LCD_FBHEIGHT, LCD_DEPTH,
-                                                LCD_FBWIDTH * LCD_DEPTH/8,
-                                                0, 0, 0, 0);
-    src.x = x_start;
-    src.y = y_start;
-    src.w = width;
-    src.h = height;
-
-    dest = src;
-    SDL_BlitSurface(lcd, &src, surface, &dest);
-    SDL_FreeSurface(lcd);
+    sdl_blit_rgb565(surface, FBADDR(0, 0),
+                    (SDL_Rect){x_start, y_start, width, height});
 #else
+    SDL_Rect dest;
     int x, y;
     int xmax, ymax;
     /* Very slow pixel-by-pixel drawing */

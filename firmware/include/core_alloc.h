@@ -30,6 +30,8 @@
  */
 void core_allocator_init(void) INIT_ATTR;
 int core_alloc(size_t size);
+/* Allocate from a presently free block. Never compact or shrink. */
+int core_alloc_free_space(size_t size);
 int core_alloc_ex(size_t size, struct buflib_callbacks *ops);
 int core_alloc_maximum(size_t *size, struct buflib_callbacks *ops);
 bool core_shrink(int handle, void* new_start, size_t new_size);

@@ -54,6 +54,18 @@ struct frame_buffer_t lcd_framebuffer_default =
     .elems          = (LCD_FBWIDTH*LCD_FBHEIGHT),
 };
 
+static volatile bool updates_held;
+
+void lcd_hold_updates(bool hold)
+{
+    updates_held = hold;
+}
+
+bool lcd_updates_held(void)
+{
+    return updates_held;
+}
+
 static struct viewport default_vp =
 {
     .x        = 0,

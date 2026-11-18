@@ -13,21 +13,121 @@ def region(text, start, end):
     a = text.index(start)
     return text[a:text.index(end, a)]
 
-program = geom[:geom.index('static struct dim slide_dim;')] + '''
+fixtures = geom[:geom.index('static struct dim slide_dim;')].replace(
+    'struct slide_data { int angle;', 'struct slide_data { int slide_index, angle;')
+program = fixtures + '''
 #include <stdbool.h>
 #include <assert.h>
+#include "ui/animation.h"
 #define HZ 100
-#define PF_FLAT_FLIP_MS 250
-#define TIME_AFTER(a,b) ((long)((b)-(a)) < 0)
-static long current_tick, pf_flat_last_input, flow_pose_tick;
+#define USEC_TIMER clock_counter
+#define TIMEOUT_NOBLOCK 0
+#define EV_WAKEUP 1
+#define BUTTON_SCROLL_FWD 2
+#define CAROUSEL_NOMINAL_FPS 30
+static uint32_t clock_counter, current_tick, pf_flat_last_input, flow_pose_clock;
+static unsigned flow_sampled_frame;
 static int pf_flat_interval=25, flow_mix;
-static bool flow_fast, pf_random_spinning, flat;
+static int flow_mix_frames;
+static bool flow_fast, pf_random_spinning, flat, pf_native_motion, pf_flat_snap;
+static uint32_t anim_clock;
+static unsigned anim_sampled_frame;
+static int anim_pose_step, anim_frac, anim_avg4_ms = 80, anim_owed_ms;
+static bool anim_started;
+static int center_index, target, slide_frame, pf_state, flow_landed_direction;
+static int number_of_slides = 10, thread_q;
+enum {pf_idle, pf_scrolling};
+static struct {
+    int album_covers_scroll_speed;
+    int album_covers_transition_speed;
+} global_settings = { 200, 325 };
 static bool flat_view(void) { return flat; }
-static int flat_ticks(int ms) { return ms * HZ / 1000; }
-''' + region(src, 'static void flat_note_scroll', 'static void coverflow_idle') + region(
+static void queue_post(int *q, int event, int data) {}
+static void keyclick_click(bool force, int button) {}
+static void flat_animate(int direction, PFreal frame) {}
+''' + region(src, '#define PF_FLAT_FLIP ', '/* The deal:') + region(
+    src, '#define PF_FLAT_SETTLE ', '/* Not theme-controlled:') + region(
+    src, 'static unsigned motion_rate', 'static void coverflow_idle') + region(
     geom, 'static void recalc_offsets', 'static void coverflow_animate') + region(
     src, 'static void coverflow_animate', 'static void flat_animate') + region(
     src, 'static int flow_brightness', 'static void coverflow_render(void)\n{') + '''
+static void reset_slides(void) { coverflow_idle(); }
+''' + region(src, 'static void start_animation', 'static bool random_was_recent') + region(
+    src, 'static int scroll_speed', 'static void cleanup') + region(
+    src, 'static int native_frame_wait', 'static int album_covers_loop(void)\n{') + '''
+static void seed(uint32_t clock)
+{
+    center_slide.slide_index = center_index = target = 3;
+    slide_frame = 3 << 16;
+    step = 0;
+    pf_state = pf_idle;
+    flow_mix = 0;
+    clock_counter = clock;
+    pf_flat_interval = PF_FLAT_FLIP;
+    pf_flat_last_input = clock - ui_frame_clock(PF_FLAT_FLIP);
+    reset_slides();
+}
+
+static void draw_at(uint32_t clock, unsigned frame)
+{
+    clock_counter = clock + ui_frame_clock(frame);
+    update_scroll_animation();
+}
+
+static void check_timeline(uint32_t epoch)
+{
+    seed(epoch);
+    show_next_slide();
+    for (unsigned f = 1; f <= 7; f++)
+        draw_at(epoch, f);
+    int on_time = slide_frame;
+    int on_time_index = center_index;
+    seed(epoch);
+    show_next_slide();
+    draw_at(epoch, 7);
+    assert(slide_frame == on_time && center_index == on_time_index);
+    draw_at(epoch, 90);
+    assert(step == 0 && pf_state == pf_idle);
+    assert(center_index == 4 && slide_frame == (4 << 16));
+
+    seed(epoch);
+    show_next_slide();
+    draw_at(epoch, 3);
+    int forward = slide_frame;
+    int angle = center_slide.angle;
+    assert(forward > (3 << 16) && forward < (4 << 16));
+    uint32_t reverse_clock = clock_counter;
+    show_previous_slide();
+    draw_at(reverse_clock, 0);
+    assert(slide_frame == forward && center_slide.angle == angle && center_index == 3);
+    draw_at(reverse_clock, 1);
+    assert(slide_frame < forward && center_index == 3);
+    draw_at(reverse_clock, 30);
+    assert(center_index == 3 && slide_frame == (3 << 16) && pf_state == pf_idle);
+}
+
+static void begin_flat_deal(uint32_t epoch)
+{
+    seed(epoch);
+    pf_flat_last_input = epoch;
+    pf_flat_interval = 2;
+    target = 6;
+    start_animation();
+    assert(pf_flat_snap);
+}
+
+static void check_flat_deal_timeline(uint32_t epoch)
+{
+    begin_flat_deal(epoch);
+    for (unsigned f = 1; f <= 5; f++)
+        draw_at(epoch, f);
+    int position = slide_frame;
+    assert(!pf_flat_snap && center_index == 5);
+    begin_flat_deal(epoch);
+    draw_at(epoch, 5);
+    assert(!pf_flat_snap && slide_frame == position);
+}
+
 int main(void)
 {
     for(int alpha=0;alpha<=256;alpha++) {
@@ -75,11 +175,46 @@ int main(void)
         current_tick+=2; flow_note_wheel(true); flow_update_mix();
     }
     assert(!flow_fast && !flow_mix);
+    pf_native_motion = true;
+    flat = false;
+    uint32_t epoch = UINT32_MAX - ui_frame_clock(10);
+    pf_flat_last_input = flow_pose_clock = epoch;
+    pf_flat_interval = PF_FLAT_FLIP;
+    for (unsigned frame = 1; frame <= 12; frame++)
+    {
+        clock_counter = epoch + ui_frame_clock(frame);
+        flow_note_wheel(true);
+        flow_update_mix();
+    }
+    assert(flow_fast && flow_mix == PFREAL_ONE);
+    uint32_t release = pf_flat_last_input + ui_frame_clock(PF_FLOW_SLOW);
+    clock_counter = release;
+    flow_update_mix();
+    assert(flow_fast && flow_mix == PFREAL_ONE);
+    for (unsigned f = 1; f <= PF_FLOW_RAMP; f++)
+    {
+        clock_counter = release + ui_frame_clock(f);
+        flow_update_mix();
+        assert(!flow_fast && flow_mix == (PF_FLOW_RAMP - f) * PFREAL_ONE / PF_FLOW_RAMP);
+    }
+    for (int layout = 0; layout < 2; layout++)
+    {
+        flat = !!layout;
+        check_timeline(epoch);
+    }
+    check_flat_deal_timeline(epoch);
+    clock_counter = epoch + ui_frame_clock(12);
+    assert(native_frame_wait(epoch, 12) > TIMEOUT_NOBLOCK);
+    assert(native_frame_wait(epoch, 11) == TIMEOUT_NOBLOCK);
+    clock_counter = epoch + ui_frame_clock(30);
+    assert(native_frame_wait(epoch, 12) == TIMEOUT_NOBLOCK);
     puts("PASS slow, fast, reverse, release, blocked boundary and flat layout");
+    puts("PASS 60 Hz deadlines, late samples, timer wrap, and in-gap reversal");
 }
 '''
 c = out / 'pose.c'
 c.write_text(program)
 binary = out / 'pose'
-subprocess.run(['cc', '-O2', '-fwrapv', c, '-o', binary], check=True)
+subprocess.run(['cc', '-O2', '-fwrapv', '-I', root / 'apps-ipod', c,
+                root / 'apps-ipod/ui/animation.c', '-o', binary], check=True)
 subprocess.run([binary], check=True)

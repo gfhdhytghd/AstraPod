@@ -76,6 +76,7 @@
 
 /* gui api */
 #include "list.h"
+#include "ui/scene.h"
 
 #define MAX_MENUS 8
 /* used to allow for dynamic menus */
@@ -694,10 +695,36 @@ void do_setting_from_menu_standalone(const struct menu_item_ex *item,
     cb(ACTION_EXIT_MENUITEM, item, NULL);
 }
 
+static struct {
+    struct ui_scene *scene;
+    const struct menu_item_ex *menu, *peer;
+} next_scene;
+
+void menu_link_scene(struct ui_scene *scene, const struct menu_item_ex *menu,
+                     const struct menu_item_ex *peer)
+{
+    next_scene.scene = scene;
+    next_scene.menu = menu;
+    next_scene.peer = peer;
+}
+
 /* display a menu */
 int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             struct viewport parent[NB_SCREENS], bool hide_theme)
 {
+    bool animate = !parent && !hide_theme && get_current_activity() != ACTIVITY_PLUGIN;
+    struct ui_scene local_scene = {0};
+    struct ui_scene *scene = &local_scene;
+    const struct menu_item_ex *peer = NULL;
+    if (animate && next_scene.scene && next_scene.menu == start_menu)
+    {
+        scene = next_scene.scene;
+        peer = next_scene.peer;
+    }
+    next_scene.scene = NULL;
+    if (!peer)
+        ui_scene_interrupt();
+    bool scene_handoff = false;
     int selected = start_selected? *start_selected : 0;
     int ret = 0;
     int action;
@@ -746,6 +773,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
     get_menu_callback(menu, &menu_callback);
 
     gui_synclist_draw_settled(&lists);
+    ui_scene_start(scene);
     gui_synclist_speak_item(&lists);
 
     while (!done)
@@ -759,7 +787,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         }
         else
             action = get_action(CONTEXT_MAINMENU|ALLOW_SOFTLOCK,
-                                list_do_action_timeout(&lists, HZ));
+                                ui_scene_timeout(scene, list_do_action_timeout(&lists, HZ)));
             /* HZ so the status bar redraws corectly */
 
 #ifdef HAVE_WHEEL_WPS_CHORD
@@ -804,8 +832,18 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             action = new_action;
 
         if (LIKELY(gui_synclist_do_button(&lists, &action)))
+        {
+            ui_scene_update(scene, true);
             continue;
-        else if (action == ACTION_STD_QUICKSCREEN)
+        }
+
+        /* Only stack movement and normal list updates share the snapshots.
+         * Other actions can hand the LCD to an unrelated screen. */
+        bool top_settings = peer == &root_menu_ && stack_top == 0;
+        if (action != ACTION_NONE && action != ACTION_STD_OK && action != ACTION_STD_CANCEL &&
+            !(top_settings && action == ACTION_STD_MENU))
+            ui_scene_cancel(scene);
+        if (action == ACTION_STD_QUICKSCREEN)
         {
             if (global_settings.shortcuts_replaces_qs ||
                 quick_screen_current(action, NULL) == QUICKSCREEN_GOTO_SHORTCUTS_MENU)
@@ -999,13 +1037,26 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         else if (action == ACTION_STD_MENU)
         {
             if (menu != &root_menu_)
+            {
                 ret = GO_TO_ROOT;
+                if (top_settings)
+                    scene_handoff = ui_scene_capture(scene, menu, peer, false);
+            }
             else
                 ret = GO_TO_PREVIOUS;
             done = true;
         }
         else if (action == ACTION_STD_CANCEL)
         {
+            if (top_settings)
+            {
+                scene_handoff = ui_scene_capture(scene, menu, peer, false);
+                if (!scene_handoff)
+                    ui_scene_cancel(scene);
+            }
+            else if (!(animate && stack_top > 0 &&
+                       ui_scene_capture(scene, menu, mstack[stack_top - 1].menu, false)))
+                ui_scene_cancel(scene);
             /* might be leaving list, so stop scrolling */
             gui_synclist_scroll_stop(&lists);
 
@@ -1049,18 +1100,35 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             int type = (menu->flags&MENU_TYPE_MASK);
             selected = get_menu_selection(gui_synclist_get_sel_pos(&lists), menu);
             if (type == MT_MENU)
+            {
+                if (!current_subitems_count)
+                {
+                    ui_scene_cancel(scene);
+                    continue;
+                }
                 temp = menu->submenus[selected];
+            }
             else if (!in_stringlist)
                 type = -1;
 
+            bool to_settings = false;
             if (!in_stringlist && temp)
             {
                 type = (temp->flags&MENU_TYPE_MASK);
+                to_settings = peer && menu == &root_menu_ && type == MT_RETURN_VALUE &&
+                              temp->value == GO_TO_MAINMENU;
                 get_menu_callback(temp, &menu_callback);
+                if (type != MT_MENU && type != MT_RETURN_ID && !to_settings)
+                    ui_scene_cancel(scene);
                 action = menu_callback(ACTION_ENTER_MENUITEM, temp, &lists);
                 if (action == ACTION_EXIT_MENUITEM)
                     break;
             }
+            if (!to_settings && !(animate && stack_top < MAX_MENUS && temp &&
+                (type == MT_MENU || (type == MT_RETURN_ID && !in_stringlist)) &&
+                ui_scene_capture(scene, menu, temp, true)))
+                ui_scene_cancel(scene);
+
             switch (type)
             {
                 case MT_MENU:
@@ -1135,6 +1203,8 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                     break;
                 case MT_RETURN_VALUE:
                     ret = temp->value;
+                    if (to_settings)
+                        scene_handoff = ui_scene_capture(scene, menu, peer, true);
                     done = true;
                     break;
 
@@ -1180,14 +1250,25 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         if (redraw_lists && !done)
         {
             if (menu_callback(ACTION_REDRAW, menu, &lists) != ACTION_REDRAW)
+            {
+                ui_scene_cancel(scene);
                 continue;
+            }
 
 
             gui_synclist_set_title(&lists, lists.title, lists.title_icon);
             gui_synclist_draw_settled(&lists);
+            if (scene->capturing)
+                ui_scene_start(scene);
+            else
+                ui_scene_update(scene, true);
             gui_synclist_speak_item(&lists);
         }
+        else if (!scene_handoff)
+            ui_scene_update(scene, false);
     }
+    if (!scene_handoff)
+        ui_scene_cancel(scene);
 
     /* The Agents shortcut leaves the loop after get_action() without
      * gui_synclist_do_button(), and `lists` is about to go out of scope */

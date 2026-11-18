@@ -69,6 +69,10 @@ bool button_queue_try_post(long button, int data);
 int button_queue_count(void);
 bool button_queue_empty(void);
 bool button_queue_full(void);
+#if (defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))) && !defined(BOOTLOADER)
+/* Wait for input without taking it away from the screen that owns it. */
+bool button_queue_wait_pending(int ticks);
+#endif
 void button_clear_queue(void);
 void button_clear_pressed(void);
 long button_get(bool block);

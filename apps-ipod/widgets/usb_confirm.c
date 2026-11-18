@@ -6,6 +6,7 @@
 #include "widgets/usb_confirm.h"
 #include "widgets/dialog.h"
 #include "input/action.h"
+#include "settings/settings.h"
 #include "system/shutdown.h"
 #include "screens/playback/wps.h"
 #include "screens/playback/handoff.h"
@@ -13,6 +14,9 @@
 #include "lang.h"
 #include "audio.h"
 #include "backlight.h"
+#ifdef HAVE_USB_PODLINK
+#include "screens/playback/handoff_sheet.h"
+#endif
 
 static const char *const lines[] = {
     "Computer connected",
@@ -146,11 +150,21 @@ void gui_usb_confirm_run(uint32_t epoch)
     if (!usb_confirm_pending(epoch))
         return;
     if (handoff_prompt_wps(epoch)) return;
+    dialog_interrupt_transition();
+#ifdef HAVE_USB_PODLINK
+    handoff_sheet_interrupt();
+#endif
     backlight_on();
     struct dialog d;
     dialog_init(&d, CONTEXT_STD, NULL, NULL, &cb, &epoch);
+    d.slide = DIALOG_SLIDE_EVENT;
     d.keymap = confirm_keymap;
     dialog_run(&d, HZ / 10);
-    action_wait_for_release();
+#ifdef IPOD_6G
+    if (global_settings.animations)
+        action_wait_for_release_preserve_queue();
+    else
+#endif
+        action_wait_for_release();
 }
 #endif

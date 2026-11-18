@@ -8,8 +8,10 @@ import ast,re,subprocess,sys
 r=Path(__file__).resolve().parents[2];o=Path(sys.argv[1]).resolve();o.mkdir(parents=True,exist_ok=True)
 ns=ast.parse((r/'tools/tests/lyrics_document_test.py').read_text())
 pre=next(ast.literal_eval(n.value) for n in ns.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='pre' for t in n.targets))
-pre=pre.replace('static struct {int default_codepage;} global_settings;', '''static struct {int default_codepage,lyric_colour_mode,backlight_timeout,backlight_timeout_plugged,lyric_prev_opacity,lyric_next_opacity,lyric_lead;unsigned fg_color,bg_color;bool lyric_highlight,lyric_backlight,prevent_skip;} global_settings;''')
+pre=pre.replace('static struct {int default_codepage;} global_settings;', '''static struct {int default_codepage,lyric_colour_mode,backlight_timeout,backlight_timeout_plugged,lyric_prev_opacity,lyric_next_opacity,lyric_lead;unsigned fg_color,bg_color;bool lyric_highlight,lyric_backlight,prevent_skip,animations;} global_settings;''')
 pre=pre.replace('length,id3v2len;', 'length,id3v2len,elapsed;')
+pre=pre.replace('static void core_free(int h){assert(h==1);frees++;}',
+                'static int core_free(int handle);')
 strutil=(r/'apps-ipod/system/strutil.c').read_text()
 read_line=re.search(r'^int read_line\(.*?^}',strutil,re.M|re.S).group()
 pre=re.sub(r'^static int read_line\([^\n]+\n', lambda _: '#include <errno.h>\n'+read_line+'\n', pre, flags=re.M)
@@ -50,8 +52,10 @@ static void agents_nav_request(int screen, bool remote)
 #define FONT_SYSFIXED 12
 #define ROCKBOX_DIR "."
 #include "lyric_viewer.h"
+#include "ui/animation.h"
 #define fdprintf dprintf
 #define USEC_TIMER mock_usec()
+#define TIMEOUT_NOBLOCK 0
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define TIME_BEFORE(a,b) ((int32_t)((uint32_t)(a)-(uint32_t)(b))<0)
@@ -84,6 +88,40 @@ static struct font {int height;} f12={12},f18={18},f26={26};
 static int calls,plan,loads,unloads,claims,releases,holds,activities,updates,pauses,seeks,skips,controls,remote_at,default_events;
 static size_t arena_bytes=sizeof app_area;
 static fb_data panel[320*240];
+static fb_data entry_core[2*320*240];
+static bool deny_entry_core, entry_allocated, entry_pinned;
+static int entry_allocs, entry_frees;
+static int core_alloc_free_space(size_t size)
+{
+    assert(size==sizeof entry_core && !entry_allocated);
+    if (deny_entry_core) return -1;
+    entry_allocated=true;
+    entry_allocs++;
+    return 2;
+}
+static void *core_get_data_pinned(int handle)
+{
+    assert(handle==2 && entry_allocated && !entry_pinned);
+    entry_pinned=true;
+    return entry_core;
+}
+static void core_put_data_pinned(void *data)
+{
+    assert(data==entry_core && entry_pinned);
+    entry_pinned=false;
+}
+static int core_free(int handle)
+{
+    if (handle==1)
+    {
+        frees++;
+        return 0;
+    }
+    assert(handle==2 && entry_allocated && !entry_pinned);
+    entry_allocated=false;
+    entry_frees++;
+    return 0;
+}
 static bool remote_source,deny_arena,inhibited,remote_key,playing_audio=true,page_missed;
 static bool timed_fixture, wait_row, change_during_copy;
 static struct cider_state remote_clock;
@@ -324,7 +362,7 @@ static void test_pixels(void)
     for(int i=0;i<3*LV_PIXELS;i++)app_area[i]=pixel_rand();
     for(int alpha=0;alpha<=256;alpha++) {
         int shift=24*(256-alpha)/256;
-        lv_present(alpha,shift,true);
+        lv_present(alpha,shift,lv.layer,lv.snapshot);
         for(int i=0;i<LV_PIXELS;i++) {
             int j=i-shift*LCD_WIDTH;
             fb_data page=j<0?lv.background[i]:lv.layer[j];
@@ -386,8 +424,51 @@ static int select_scenario(void)
 }
 static int get_action(int c,int timeout){
  assert(!memcmp(panel,screen_pixels,sizeof panel));
+ assert(!entry_pinned);
  assert(clock_refs == (lv.boost ? 2 : 1));
  if(timeout>HZ/30)assert(!lv.boost);
+ if(plan==15 || plan==16) {
+   const unsigned skipped=ANIM_F(15), midway=ANIM_F(5);
+   switch(++calls) {
+    case 1:
+      assert(lv.entry_handle && lv.entry_frame==0 && timeout==1 && updates==1);
+      return plan==16 ? SYS_USB_CONNECTED : ACTION_WPS_VOLUP;
+    case 2:
+      assert(lv.entry_handle && lv.entry_frame==0 && timeout==1 && updates==1);
+      assert(lv.mode.manual && lv.mode.focus==1);
+      precise_extra+=ui_frame_clock(midway);
+      return ACTION_NONE;
+    case 3:
+      assert(lv.entry_handle && lv.entry_frame==(int)midway && timeout==1 && updates==2);
+      assert(lv.old_position>0 && lv.old_position<256);
+      precise_extra+=ui_frame_clock(skipped)-ui_frame_clock(midway);
+      return ACTION_NONE;
+    default:
+      assert(calls==4 && !lv.entry_handle && lv.entry_frame==(int)skipped && updates==3);
+      return ACTION_WPS_MENU;
+   }
+ }
+ if(plan==14) {
+   assert(lv.scroll.frame_clock);
+   switch(++calls) {
+    case 1: return ACTION_WPS_VOLUP;
+    case 2:
+      assert(lv.mode.manual && lv.mode.focus==1 && lv.scroll.duration==ANIM_F(16));
+      assert(timeout==1 && lv.old_position==0);
+      precise_extra+=ui_frame_clock(ANIM_F(5));
+      retarget_position=lyrics_motion_at(&lv.scroll,lv_line_clock());
+      assert(retarget_position>0 && retarget_position<256);
+      return ACTION_WPS_VOLDOWN;
+    case 3:
+      assert(lv.mode.focus==0 && lv.scroll.from==retarget_position);
+      assert(lv.old_position==retarget_position && timeout==1);
+      precise_extra+=ui_frame_clock(ANIM_F(24));
+      return ACTION_NONE;
+    default:
+      assert(calls==4 && lv.old_position==0 && !lv.boost);
+      return SYS_USB_CONNECTED;
+   }
+ }
  if(plan==8) {
    calls++;
    if(calls==1){assert(lv.masks&&!lv.cues);return ACTION_WPS_SKIPNEXT;}
@@ -520,6 +601,24 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  f=fopen("other.txt","w");assert(f);fputs("New first line\nNew second line\n中文第三行",f);fclose(f);
  snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);playing.title="Title";playing.artist="Artist";playing.length=60000;
  global_settings.lyric_lead=200;global_settings.fg_color=65535;global_settings.lyric_highlight=true;global_settings.lyric_backlight=true;global_settings.lyric_prev_opacity=global_settings.lyric_next_opacity=55;
+ if (!strcmp(argv[2],"frames")) {
+   plan=14;global_settings.animations=deny_entry_core=true;
+   assert(lyric_viewer()==GO_TO_ROOT && calls==4);
+   plan=7;calls=0;
+   assert(lyric_viewer()==GO_TO_ROOT && calls==2);
+   assert(clock_refs==1 && boost_gets==boost_puts && releases==2 && default_events==2);
+   puts("PASS opt-in 16 f line motion, immediate retarget, elapsed-time skip and active USB exit");
+   return 0;
+ }
+ if (!strcmp(argv[2],"entry-frames")) {
+   plan=15;global_settings.animations=true;
+   assert(lyric_viewer()==GO_TO_PREVIOUS && calls==4 && entry_allocs==1 && entry_frees==1);
+   plan=16;calls=updates=0;precise_extra=0;
+   assert(lyric_viewer()==GO_TO_ROOT && calls==1 && entry_allocs==2 && entry_frees==2);
+   assert(clock_refs==1 && boost_gets==boost_puts && releases==2 && default_events==1);
+   puts("PASS opt-in 13 f WPS entry, input and USB on frame zero, late sampling and buffer lifetime");
+   return 0;
+ }
  if (!strcmp(argv[2],"headset")) {
    plan=10;
    for (int i=0;i<2;i++) {
@@ -774,11 +873,11 @@ p=o/'viewer.c';p.write_text(pre+h+doc+'\n#include "lyrics_motion.h"\n#include "c
 playback=r/'apps-ipod/screens/playback'
 subprocess.run(['cc','-m32','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function',
                 '-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-ffunction-sections','-Wl,--gc-sections',
-                '-I'+str(r/'apps-ipod/viewers/lyric_viewer'),'-I'+str(playback),
+                '-I'+str(r/'apps-ipod'),'-I'+str(r/'apps-ipod/viewers/lyric_viewer'),'-I'+str(playback),
                 '-I'+str(next(r.glob('firmware/**/podlink.h')).parent),
-                str(p),str(r/'apps-ipod/viewers/lyric_viewer/lyrics_motion.c'),
+                str(p),str(r/'apps-ipod/viewers/lyric_viewer/lyrics_motion.c'),str(r/'apps-ipod/ui/animation.c'),
                 str(playback/'cider_model.c'),'-o',str(o/'viewer')],check=True)
-for scenario in sys.argv[2:] or ['headset', 'select', 'entry', 'background', 'all']:
+for scenario in sys.argv[2:] or ['headset', 'select', 'entry', 'background', 'frames', 'entry-frames', 'all']:
     fixture = o / scenario
     fixture.mkdir()
     subprocess.run([str(o/'viewer'),str(fixture),scenario],check=True)

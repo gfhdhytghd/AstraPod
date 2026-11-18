@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <limits.h>
 #include "config.h"
+#include "core_alloc.h"
 #include "system.h"
 #include "string-extra.h"
 #include "file.h"
@@ -43,6 +44,7 @@
 #include "screens/playback/cider.h"
 #include "screens/playback/cider_wps.h"
 #include "screens/playback/cider_library.h"
+#include "ui/animation.h"
 #include "lyrics.h"
 #include "lyrics_motion.h"
 #include "lyric_viewer.h"
@@ -53,6 +55,9 @@
 #define LV_PIXELS (LCD_WIDTH * LCD_HEIGHT)
 #define LV_FRAME (LV_PIXELS * sizeof(fb_data))
 #define LV_TICKS(ms) MAX(1, ((ms) * HZ + 999) / 1000)
+#define LV_LINE_FRAMES ANIM_F(16)
+#define LV_ENTRY_FRAMES ANIM_F(13)
+#define LV_ENTRY_SHIFT 24
 #define LV_ROWS 3
 #define LV_TEXT 800
 #define LV_LAYOUTS 24
@@ -118,6 +123,8 @@ struct lv_state {
     struct lv_perf perf;
     int art_handle;
     int old_position, old_progress, old_words;
+    int entry_handle, entry_frame;
+    uint32_t entry_clock;
     bool remote, pending, held, paused, track_fade, initial, claimed;
     bool painted, art_ready, first_pending, boost, seek_pending, seek_consumed, seek_running;
     struct lv_cues *cues;
@@ -753,13 +760,18 @@ static void lv_body(int position, int top, int bottom)
                         256, -1, 256, top, bottom, false);
 }
 
-enum lv_output { LV_DRAW_ONLY, LV_UPDATE, LV_CACHE_TRACK };
+enum lv_output { LV_DRAW_ONLY, LV_UPDATE };
+
+static uint32_t lv_line_clock(void)
+{
+    return lv.scroll.frame_clock ? lv_clock() : current_tick;
+}
 
 /* Skip all pixel work on idle source polls. During a stable karaoke line,
  * invalidate only that line's rows, and send progress independently. */
-static bool lv_draw(bool force, enum lv_output output)
+static bool lv_draw_layer(bool force, enum lv_output output, fb_data *layer)
 {
-    int position = lyrics_motion_at(&lv.scroll, current_tick);
+    int position = lyrics_motion_at(&lv.scroll, lv_line_clock());
     int progress = lv.length > 0 ? (int)((int64_t)MAX(0, MIN(lv.elapsed, lv.length)) * LCD_WIDTH / lv.length) : 0;
     int words = position % 256 == 0 ? lv_sung_width(position / 256, lv_font(1)) : -1;
     bool full = force || !lv.painted;
@@ -776,7 +788,7 @@ static bool lv_draw(bool force, enum lv_output output)
     }
     /* A previous crossfade left blended pixels on the display. Incremental
      * updates must start from the clean destination of the previous frame. */
-    if (output == LV_CACHE_TRACK && !full) memcpy(lv_frame(), lv.layer, LV_FRAME);
+    if (layer && !full) memcpy(lv_frame(), layer, LV_FRAME);
     bool flush = output == LV_UPDATE;
     if (full) lv_restore(0, LCD_HEIGHT);
     if (body || sung)
@@ -802,23 +814,29 @@ static bool lv_draw(bool force, enum lv_output output)
         int first = full ? 0 : top;
         lv_flush(0, first, LCD_WIDTH, (bar ? LCD_HEIGHT : bottom) - first);
     }
-    if (output == LV_CACHE_TRACK) memcpy(lv.layer, lv_frame(), LV_FRAME);
+    if (layer) memcpy(layer, lv_frame(), LV_FRAME);
     lv.old_position = position;
     lv.old_progress = progress; lv.old_words = words;
     lv.painted = true;
     return true;
 }
 
-static LV_PIXELS_ARM void lv_present(int opacity, int shift, bool underlay)
+static bool lv_draw(bool force, enum lv_output output)
+{
+    return lv_draw_layer(force, output, NULL);
+}
+
+static LV_PIXELS_ARM void lv_present(int opacity, int shift, const fb_data *layer,
+                                    const fb_data *snapshot)
 {
     uint32_t start = lv_clock();
     if (!shift && opacity == 256)
     {
-        if (lv.layer) memcpy(lv_frame(), lv.layer, LV_FRAME);
+        if (layer) memcpy(lv_frame(), layer, LV_FRAME);
     }
-    else if (!opacity && underlay && lv.snapshot)
+    else if (!opacity && snapshot)
     {
-        memcpy(lv_frame(), lv.snapshot, LV_FRAME);
+        memcpy(lv_frame(), snapshot, LV_FRAME);
     }
     else
     {
@@ -827,9 +845,9 @@ static LV_PIXELS_ARM void lv_present(int opacity, int shift, bool underlay)
         {
             unsigned bg = lv_background(y);
             const fb_data *background = lv.art_ready ? lv.background + y * LCD_WIDTH : NULL;
-            const fb_data *page = (lv.layer ? lv.layer : frame) + MAX(0, y - shift) * LCD_WIDTH;
+            const fb_data *page = (layer ? layer : frame) + MAX(0, y - shift) * LCD_WIDTH;
             fb_data *row = frame + y * LCD_WIDTH;
-            const fb_data *back = underlay && lv.snapshot ? lv.snapshot + y * LCD_WIDTH : NULL;
+            const fb_data *back = snapshot ? snapshot + y * LCD_WIDTH : NULL;
             const fb_data *source = y >= shift ? page : background;
             if (back && source)
             {
@@ -853,10 +871,10 @@ static LV_PIXELS_ARM void lv_present(int opacity, int shift, bool underlay)
     lv_flush(0, 0, LCD_WIDTH, LCD_HEIGHT);
 }
 
-static void lv_enter(void)
+static void lv_enter_legacy(void)
 {
     uint32_t start = current_tick;
-    int duration = LV_TICKS(220);
+    int duration = (LV_ENTRY_FRAMES * HZ + UI_ANIM_FPS - 1) / UI_ANIM_FPS;
     bool redraw = true;
     lv.last_type = LV_STEADY;
     for (;;)
@@ -871,12 +889,57 @@ static void lv_enter(void)
             if (lv.layer) memcpy(lv.layer, lv_frame(), LV_FRAME);
             redraw = false;
         }
-        lv_present(alpha, 24 * (256 - alpha) / 256, true);
+        lv_present(alpha, LV_ENTRY_SHIFT * (256 - alpha) / 256, lv.layer, lv.snapshot);
         lv_record(started, LV_ENTRY, alpha > 0);
         if (age >= duration) break;
         lv_sleep_frame(frame_at);
     }
     lv.last_type = LV_STEADY;
+}
+
+static bool lv_entry_begin(void)
+{
+    int handle = core_alloc_free_space(2 * LV_FRAME);
+    if (handle <= 0)
+        return false;
+    fb_data *snapshot = core_get_data_pinned(handle);
+    memcpy(snapshot, lv_frame(), LV_FRAME);
+    core_put_data_pinned(snapshot);
+    lv.entry_handle = handle;
+    lv.entry_frame = 0;
+    lv.entry_clock = lv_clock();
+    return true;
+}
+
+static void lv_entry_cancel(void)
+{
+    if (!lv.entry_handle)
+        return;
+    lv.entry_handle = core_free(lv.entry_handle);
+    lv.painted = false;
+}
+
+static void lv_entry_frame(uint32_t started)
+{
+    int frame = ui_clock_frame((uint32_t)lv_clock() - lv.entry_clock);
+    /* The early background is already the first pose. */
+    if (!frame || (frame == lv.entry_frame && lv.painted))
+        return;
+
+    struct ui_tween tween = { .to = 256, .frames = LV_ENTRY_FRAMES };
+    int alpha = ui_tween_sample(&tween, frame);
+    fb_data *snapshot = core_get_data_pinned(lv.entry_handle);
+    fb_data *layer = snapshot + LV_PIXELS;
+    lv_draw_layer(false, LV_DRAW_ONLY, layer);
+    lv_present(alpha, LV_ENTRY_SHIFT * (256 - alpha) / 256, layer, snapshot);
+    core_put_data_pinned(snapshot);
+    lv_record(started, LV_ENTRY, false);
+    lv.entry_frame = frame;
+    if (frame >= LV_ENTRY_FRAMES)
+    {
+        lv.entry_handle = core_free(lv.entry_handle);
+        lv.last_type = LV_STEADY;
+    }
 }
 
 static void lv_invalidate_text(void)
@@ -892,7 +955,9 @@ static void lv_changed(void)
     lv_boost(true);
     if (!lv.initial)
     {
-        if (!lv.snapshot)
+        bool entering = lv.entry_handle > 0;
+        lv_entry_cancel();
+        if (!lv.snapshot && !entering)
         {
             uint32_t start = current_tick;
             for (;;)
@@ -901,7 +966,7 @@ static void lv_changed(void)
                 int age = (uint32_t)current_tick - start;
                 int p = lyrics_ease(MIN(256, age * 256 / LV_TICKS(100)));
                 uint32_t started = lv_clock();
-                lv_draw(true, LV_DRAW_ONLY); lv_present(256 - p, 0, false);
+                lv_draw(true, LV_DRAW_ONLY); lv_present(256 - p, 0, lv.layer, NULL);
                 lv_record(started, LV_TRACK, false);
                 if (p == 256) break;
                 lv_sleep_frame(frame_at);
@@ -913,7 +978,17 @@ static void lv_changed(void)
 }
 static void lv_focus(void)
 {
-    lyrics_retarget(&lv.scroll, lv.mode.focus * 256, current_tick, LV_TICKS(260));
+    /* Keep the existing tick schedule with the native UI option off. */
+    unsigned duration = lv.scroll.frame_clock ? LV_LINE_FRAMES : LV_LINE_FRAMES * HZ / UI_ANIM_FPS;
+    lyrics_retarget(&lv.scroll, lv.mode.focus * 256, lv_line_clock(), duration);
+}
+
+static void lv_focus_settled(void)
+{
+    int position = lv.mode.focus * 256;
+    lv.scroll = (struct lyrics_motion){
+        .from = position, .to = position, .frame_clock = global_settings.animations,
+    };
 }
 
 static LV_PIXELS_ARM void lv_blend_track(int opacity)
@@ -1067,7 +1142,7 @@ static void lv_reload(struct mp3entry *id3, bool remote)
     lv.seek_pending = false;
     lv.mode = (struct lyrics_mode){0};
     if (lyrics_timed()) lv.mode.focus = MAX(0, lyrics_index_at(lv_lyric_elapsed()));
-    lv.scroll = (struct lyrics_motion){.from = lv.mode.focus * 256, .to = lv.mode.focus * 256};
+    lv_focus_settled();
     lv_invalidate_text();
     lv.art_handle = lv.track[0] ? skin_lyrics_art() : -1;
     lv.art_gen = skin_albumart_gen();
@@ -1083,7 +1158,8 @@ static void lv_remote_page(void)
     if (!lv.remote || !lyrics_remote_step()) return;
     if (lv.pending)
     {
-        lv_changed();
+        if (!lv.entry_handle)
+            lv_changed();
         lv.pending = !lyrics_loaded() && !remote_doc.done;
     }
     lv_invalidate_text();
@@ -1096,7 +1172,7 @@ static void lv_track_frame(uint32_t started)
     int p = MIN(256, age * 256 / LV_TICKS(lv.snapshot ? 200 : 100));
     if (lv.layer)
     {
-        lv_draw(false, LV_CACHE_TRACK);
+        lv_draw_layer(false, LV_DRAW_ONLY, lv.layer);
         lv_blend_track(p);
     }
     else
@@ -1130,6 +1206,7 @@ static void lv_transport(int action)
     if (action != ACTION_WPS_PLAY) lv.seek_pending = false;
     if (action == ACTION_WPS_SEEKFWD || action == ACTION_WPS_SEEKBACK)
     {
+        lv_entry_cancel();
         lv_boost(false);
         wps_lyrics_seek(action, lv_seek_draw);
         return;
@@ -1218,10 +1295,10 @@ static bool lv_select_seek(uint32_t pressed)
 
     lv.mode.manual = false;
     lv.mode.direction = 0;
-    int position = lv.mode.focus * 256;
-    lv.scroll = (struct lyrics_motion){ .from = position, .to = position };
+    lv_focus_settled();
     lv.elapsed = target;
     lv.track_fade = false;
+    lv_entry_cancel();
     lv_boost(true);
     lv_draw(true, LV_UPDATE);
     perf.seek_frame_us = lv_clock() - pressed;
@@ -1300,8 +1377,9 @@ int lyric_viewer(void)
     lv.paused = remote_wps ? remote_wps->paused : (status & AUDIO_STATUS_PAUSE) != 0;
     lv_reload(first, remote_wps != NULL);
     perf.entry_prep_us = (frame_at - entry_at) + (lv_clock() - setup_resume_at);
-    if (lv.snapshot) lv_enter();
-    else
+    if (!global_settings.animations && lv.snapshot)
+        lv_enter_legacy();
+    else if (!global_settings.animations || !lv_entry_begin())
     {
         uint32_t started = lv_clock();
         lv_draw(true, LV_UPDATE);
@@ -1339,7 +1417,8 @@ int lyric_viewer(void)
             if (handle != lv.art_handle ||
                 (handle >= 0 && generation != lv.art_gen))
             {
-                lv_changed();
+                if (!lv.entry_handle)
+                    lv_changed();
                 lv_background_build(handle);
                 lv.art_handle = handle;
                 lv.changed = current_tick;
@@ -1351,16 +1430,20 @@ int lyric_viewer(void)
         int sung = lyrics_index_at(lyric_at);
         if ((!lv.seek_pending || perf.seek_clock_us >= 0) && lyrics_loaded() &&
             lyrics_mode_follow(&lv.mode, lyrics_timed(), sung, current_tick, HZ)) lv_focus();
-        bool animated = lv.track_fade || lyrics_moving(&lv.scroll, current_tick);
+        bool line_moving = lyrics_moving(&lv.scroll, lv_line_clock());
+        bool animated = lv.entry_handle || lv.track_fade || line_moving;
         if (animated) lv_boost(true);
-        if (lv.track_fade)
+        if (lv.entry_handle)
+            lv_entry_frame(started);
+        else if (lv.track_fade)
             lv_track_frame(started);
         else if (lv_draw(false, LV_UPDATE))
             lv_record(started, animated ? (lv.mode.manual ? LV_MANUAL : LV_LINE) : LV_STEADY, false);
         else if (!animated)
             lv.last_type = LV_STEADY;
 
-        if (lv.boost && !lv.track_fade && !lyrics_moving(&lv.scroll, current_tick))
+        if (lv.boost && !lv.entry_handle && !lv.track_fade &&
+            !lyrics_moving(&lv.scroll, lv_line_clock()))
             lv_boost(false);
         int focus = lv.mode.focus;
         int timeout = lyrics_idle_ticks(lyric_at, lyrics_time(focus + 1), lv.paused, animated, false,
@@ -1377,6 +1460,22 @@ int lyric_viewer(void)
         }
         if (animated)
             timeout = MAX(1, timeout - (int)((uint32_t)current_tick - frame_at));
+        if (lv.entry_handle)
+        {
+            uint32_t elapsed = (uint32_t)lv_clock() - lv.entry_clock;
+            int next_frame = ui_clock_frame(elapsed) != (unsigned)lv.entry_frame
+                ? TIMEOUT_NOBLOCK : ui_clock_timeout(elapsed, LV_ENTRY_FRAMES, HZ);
+            timeout = MIN(timeout, next_frame);
+        }
+        else if (line_moving && lv.scroll.frame_clock)
+        {
+            uint32_t now = lv_line_clock();
+            int next_frame = ui_clock_timeout(now - lv.scroll.at, lv.scroll.duration, HZ);
+            /* Service input immediately if drawing ran into the next pose. */
+            if (lyrics_motion_at(&lv.scroll, now) != lv.old_position)
+                next_frame = TIMEOUT_NOBLOCK;
+            timeout = MIN(timeout, next_frame);
+        }
         uint32_t wait_at = lv_clock();
         int action = get_action(CONTEXT_WPS, timeout);
         uint32_t pressed = lv_clock();
@@ -1455,6 +1554,7 @@ int lyric_viewer(void)
 done:
     /* Keep the panel on the last lyrics frame until the caller has restored
      * its theme and rendered the complete destination, including the SBS. */
+    lv_entry_cancel();
     lv_boost(false);
     lv_perf_save();
     if (!lv.remote) lyrics_close();

@@ -117,6 +117,8 @@ widgets/list_render.c
 widgets/list_skinned.c
 widgets/list_select.c
 widgets/menu.c
+ui/animation.c
+ui/scene.c
 widgets/option_select.c
 widgets/rating_dialog.c
 audio/peak_meter.c

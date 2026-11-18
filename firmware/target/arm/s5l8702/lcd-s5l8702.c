@@ -423,6 +423,9 @@ static void displaylcd_wait_dma(void)
 void lcd_update_rect(int, int, int, int) ICODE_ATTR;
 void lcd_update_rect(int x, int y, int width, int height)
 {
+    if (lcd_updates_held() && is_thread_context() && irq_enabled())
+        return;
+
     int pixels = width * height;
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
     int original_height = height;
@@ -475,6 +478,28 @@ void lcd_update_rect(int x, int y, int width, int height)
 #ifdef HAVE_CRUMBS
     crumb_status(CS_LCD, count);
 #endif
+}
+
+bool lcd_present_scene(const fb_data *pixels)
+{
+    if (!lcd_ispowered || lcd_mutex.blocker.thread ||
+        dmac_ch_running(&lcd_dma_ch))
+        return false;
+
+    mutex_lock(&lcd_mutex);
+    bool ready = lcd_ispowered && !dmac_ch_running(&lcd_dma_ch);
+    if (ready)
+    {
+        displaylcd_setup(0, 0, LCD_WIDTH, LCD_HEIGHT);
+        memcpy(lcd_dblbuf[0], pixels, FRAMEBUFFER_SIZE);
+#if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
+        videoout_mirror_rgb565(lcd_dblbuf[0], 0, 0, LCD_WIDTH, LCD_HEIGHT,
+                             LCD_WIDTH);
+#endif
+        displaylcd_dma(LCD_WIDTH * LCD_HEIGHT);
+    }
+    mutex_unlock(&lcd_mutex);
+    return ready;
 }
 
 /* Line write helper function for lcd_yuv_blit. Writes two lines of yuv420. */

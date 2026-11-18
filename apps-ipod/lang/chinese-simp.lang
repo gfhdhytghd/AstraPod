@@ -28171,3 +28171,18 @@
     *: none
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_UI_ANIMATIONS
+  desc: Global screen transitions setting
+  user: core
+  <source>
+    *: "Animations"
+  </source>
+  <dest>
+    *: "动画"
+  </dest>
+  <voice>
+    *: "动画"
+  </voice>
+</phrase>

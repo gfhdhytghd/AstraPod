@@ -132,6 +132,10 @@ void lcd_update(void)
 
 void lcd_update_rect(int x_start, int y_start, int width, int height)
 {
+#if LCD_DEPTH == 16 && (defined(IPOD_6G) || defined(IPOD_VIDEO))
+    if (lcd_updates_held())
+        return;
+#endif
 #ifdef HAVE_LCD_FLIP
     if (sim_lcd_flipped)
     {
@@ -161,6 +165,17 @@ void lcd_update_rect(int x_start, int y_start, int width, int height)
                    height + LCD_SPLIT_LINES, SIM_LCD_WIDTH, SIM_LCD_HEIGHT,
                    background ? UI_LCD_POSX : 0, background? UI_LCD_POSY : 0);
 }
+
+#if LCD_DEPTH == 16 && (defined(IPOD_6G) || defined(IPOD_VIDEO))
+bool lcd_present_scene(const fb_data *pixels)
+{
+    sdl_blit_rgb565(lcd_surface, pixels, (SDL_Rect){0, 0, LCD_WIDTH, LCD_HEIGHT});
+    sdl_gui_update(lcd_surface, 0, 0, LCD_WIDTH, LCD_HEIGHT,
+                   SIM_LCD_WIDTH, SIM_LCD_HEIGHT,
+                   background ? UI_LCD_POSX : 0, background ? UI_LCD_POSY : 0);
+    return true;
+}
+#endif
 
 #if defined(HAVE_BACKLIGHT) && (SDL_MAJOR_VERSION > 1)
 void sim_backlight(int value)

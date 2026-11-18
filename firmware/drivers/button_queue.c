@@ -182,6 +182,14 @@ bool button_queue_full(void)
     return queue_full(&button_queue);
 }
 
+#if (defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))) && !defined(BOOTLOADER)
+bool button_queue_wait_pending(int ticks)
+{
+    queue_wait_w_tmo(&button_queue, NULL, ticks);
+    return !queue_empty(&button_queue);
+}
+#endif
+
 void button_clear_queue(void)
 {
     queue_clear(&button_queue);

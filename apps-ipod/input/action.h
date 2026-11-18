@@ -408,6 +408,8 @@ long get_action_tick(void);
 * from normal button events.
 */
 void action_wait_for_release(void);
+/* Apply the release gate without discarding input already in the queue. */
+void action_wait_for_release_preserve_queue(void);
 #ifdef HAVE_USB_PODLINK
 void action_handoff_enter(void);
 #endif

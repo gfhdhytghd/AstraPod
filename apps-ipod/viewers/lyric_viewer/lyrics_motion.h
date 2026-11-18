@@ -4,14 +4,19 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Positions and opacities use 8 fractional bits. Time is monotonic ticks;
- * unsigned subtraction deliberately handles tick wrap. */
-struct lyrics_motion { int from, to; uint32_t at, duration; };
+/* Positions and opacities use 8 fractional bits. The legacy path uses kernel
+ * ticks. With frame_clock set, at and now are USEC_TIMER readings and duration
+ * is in animation frames. Unsigned subtraction handles clock wrap. */
+struct lyrics_motion {
+    int from, to;
+    uint32_t at, duration;
+    bool frame_clock;
+};
 struct lyrics_mode { bool manual; int focus, direction, burst; uint32_t input; };
 int lyrics_ease(int phase);
 int lyrics_lerp(int from, int to, int phase);
 int lyrics_motion_at(const struct lyrics_motion *m, uint32_t now);
-void lyrics_retarget(struct lyrics_motion *m, int to, uint32_t now, int duration);
+void lyrics_retarget(struct lyrics_motion *m, int to, uint32_t now, unsigned duration);
 bool lyrics_moving(const struct lyrics_motion *m, uint32_t now);
 int lyrics_focus_weight(int line, int position);
 int lyrics_opacity(int distance, int nearest);

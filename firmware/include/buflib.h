@@ -186,6 +186,9 @@ bool buflib_context_relocate(struct buflib_context *ctx, void *buf);
  */
 int buflib_alloc(struct buflib_context *ctx, size_t size);
 
+/* Allocate without compacting or running callbacks. A full heap returns an error. */
+int buflib_alloc_free_space(struct buflib_context *ctx, size_t size);
+
 /**
  * \brief Allocate memory from buflib with custom buffer ops
  * \param ctx       Context to allocate from

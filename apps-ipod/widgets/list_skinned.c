@@ -11,6 +11,7 @@
  ****************************************************************************/
 
 #include "config.h"
+#include <limits.h>
 #include "system.h"
 #include "lcd.h"
 #include "font.h"
@@ -33,6 +34,13 @@
 #include "skin/skin_display.h"
 #include "skin/skin_albumart_color.h"
 #include "system/appevents.h"
+#include "system/activity.h"
+#include "core_alloc.h"
+#include "ui/animation.h"
+
+#define LIST_SCROLL_FRAMES ANIM_F(6)
+#define LIST_SCROLL_FAST_FRAMES ANIM_F(3)
+#define SCRIM_TEXT_PITCH 30
 
 static struct listitem_viewport_cfg *listcfg[NB_SCREENS] = {NULL};
 static struct gui_synclist *current_list;
@@ -74,6 +82,49 @@ static int current_row;
 static int current_column;
 static bool needs_scrollbar[NB_SCREENS];
 
+/* One presentation per physical LCD. The list generation is a key, so even
+ * callers that tear down a stack list without an exit callback cannot leave
+ * an expired pointer or a buffer allocation behind. */
+static struct list_scroll {
+    unsigned generation;
+    struct ui_tween content, marker;
+    int start, selected, items, pitch;
+    unsigned last_frame;
+} scroll;
+
+static bool scroll_active(const struct gui_synclist *list)
+{
+    return scroll.generation != 0 && scroll.generation == list->generation;
+}
+
+bool skinlist_scroll_cancel(const struct gui_synclist *list)
+{
+    if (!scroll_active(list))
+        return false;
+    scroll.generation = 0;
+    return true;
+}
+
+bool skinlist_scroll_due(const struct gui_synclist *list)
+{
+    return scroll_active(list) &&
+           scroll.last_frame != ui_clock_frame((uint32_t)USEC_TIMER -
+                                               scroll.content.start_clock);
+}
+
+int skinlist_scroll_timeout(const struct gui_synclist *list, int timeout)
+{
+    if (scroll_active(list))
+    {
+        uint32_t elapsed = (uint32_t)USEC_TIMER - scroll.content.start_clock;
+        int wait = scroll.last_frame != ui_clock_frame(elapsed) ?
+                   TIMEOUT_NOBLOCK : ui_clock_timeout(elapsed, scroll.content.frames, HZ);
+        if (timeout == TIMEOUT_BLOCK || wait < timeout)
+            return wait;
+    }
+    return timeout;
+}
+
 void skinlist_set_cfg(enum screen_type screen,
                       struct listitem_viewport_cfg *cfg)
 {
@@ -82,6 +133,8 @@ void skinlist_set_cfg(enum screen_type screen,
         if (listcfg[screen])
             skinlist_stop_selected_scroll(screen);
         listcfg[screen] = cfg;
+        if (screen == SCREEN_MAIN)
+            scroll.generation = 0;
         /* the old list's scrollbar must go with it */
         needs_scrollbar[screen] = false;
         current_list = NULL;
@@ -95,6 +148,75 @@ static bool skinlist_is_configured(enum screen_type screen,
 {
     return (listcfg[screen] != NULL) &&
             (!list || (list && list->selected_size == 1));
+}
+
+/* Scrim declares separate selection-marker viewports and uniform 30 px
+ * text rows. Start with that layout, keeping the other layouts' painters. */
+static bool scroll_supported(const struct gui_synclist *list)
+{
+    struct viewport *vp = list->parent[SCREEN_MAIN];
+    struct listitem_viewport_cfg *cfg = listcfg[SCREEN_MAIN];
+    return global_settings.animations && lcd_active() && !lcd_updates_held() &&
+           viewportmanager_theme_enabled(SCREEN_MAIN) &&
+           get_current_activity() != ACTIVITY_PLUGIN &&
+           strcmp((const char *)global_settings.sbs_file, "scrim") == 0 &&
+           list->selected_size == 1 && !list->scroll_paginated &&
+           !list->callback_get_item_albumart && !list->callback_draw_status &&
+           vp && cfg && !cfg->tile && cfg->height == SCRIM_TEXT_PITCH &&
+           (!list->line_height_override || list->line_height_override == SCRIM_TEXT_PITCH) &&
+           /* The short Scrim viewports have their own header or notes. */
+           vp->height >= 6 * SCRIM_TEXT_PITCH &&
+           vp->x >= 0 && vp->y >= cfg->height && vp->width == cfg->width &&
+           vp->x + vp->width <= LCD_WIDTH && vp->y + vp->height <= LCD_HEIGHT &&
+           (!vp->buffer || vp->buffer == &lcd_framebuffer_default);
+}
+
+bool skinlist_scroll_retarget(struct gui_synclist *list, int old_start,
+                              int old_selection, bool fast)
+{
+    if (!scroll_supported(list))
+    {
+        skinlist_scroll_cancel(list);
+        return false;
+    }
+    int start = list->start_item[SCREEN_MAIN];
+    int selected = list->selected_item;
+    if (old_start == start && old_selection == selected)
+        return scroll_active(list);
+
+    int height = listcfg[SCREEN_MAIN]->height;
+    int target_y = (selected - start) * height;
+    int old_marker = (old_selection - old_start) * height;
+    int jump = start - old_start;
+    uint32_t now = USEC_TIMER;
+    int old_offset = 0;
+    if (!scroll_active(list))
+        skinlist_stop_selected_scroll(SCREEN_MAIN);
+    if (scroll_active(list) && scroll.start == old_start &&
+        scroll.selected == old_selection && scroll.items == list->nb_items)
+    {
+        unsigned frame = ui_clock_frame(now - scroll.content.start_clock);
+        old_offset = ui_tween_sample(&scroll.content, frame);
+        old_marker = ui_tween_sample(&scroll.marker, frame);
+        fast = fast || frame < scroll.content.frames;
+    }
+
+    /* The logical input has already landed. A large jump skips to the nearby
+     * rows, and persistent input never leaves more than one row of catch-up. */
+    bool skip = jump < -1 || jump > 1 || selected < old_selection - 1 ||
+                selected > old_selection + 1;
+    int content = skip ? 0 : MIN(MAX(old_offset - jump * height, -height), height);
+    int marker = MIN(MAX(old_marker, target_y - height), target_y + height);
+    unsigned duration = skip ? 0 : fast ? LIST_SCROLL_FAST_FRAMES : LIST_SCROLL_FRAMES;
+    scroll = (struct list_scroll){
+        .generation = list->generation,
+        .content = { .start_clock = now, .from = content, .frames = duration },
+        .marker = { .start_clock = now, .from = marker, .to = target_y,
+                   .frames = duration },
+        .start = start, .selected = selected, .items = list->nb_items,
+        .pitch = height, .last_frame = UINT_MAX
+    };
+    return true;
 }
 static int current_drawing_line;
 static int offset_to_item(int offset, bool wrap)
@@ -350,6 +472,7 @@ int skinlist_get_line_count(enum screen_type screen, struct gui_synclist *list)
 
 static int current_item;
 static int current_nbitems;
+static int scrollbar_unit = 1;
 bool skinlist_needs_scrollbar(enum screen_type screen)
 {
     return needs_scrollbar[screen];
@@ -367,7 +490,7 @@ void skinlist_get_scrollbar(int* nb_item, int* first_shown, int* last_shown)
     {
         *nb_item = current_item;
         *first_shown = 0;
-        *last_shown = current_nbitems - 1; /* an index, not a count */
+        *last_shown = (current_nbitems - 1) * scrollbar_unit;
     }
 }
 
@@ -431,7 +554,7 @@ bool skinlist_draw(struct screen *display, struct gui_synclist *list)
     const int screen = display->screen_type;
     struct viewport *parent = (list->parent[screen]);
     char* label = NULL;
-    const int list_start_item = list->start_item[screen];
+    int list_start_item = list->start_item[screen];
     struct gui_wps wps;
     /* A draw that falls back to the core renderer leaves no %Ls behind */
     if (screen == SCREEN_MAIN)
@@ -490,6 +613,7 @@ bool skinlist_draw(struct screen *display, struct gui_synclist *list)
     display->clear_viewport();
     current_item = list->selected_item;
     current_nbitems = list->nb_items;
+    scrollbar_unit = 1;
     needs_scrollbar[screen] = list->nb_items > display_lines;
 
     const int row_height = list_item_height(list, screen);  /* uniform */
@@ -503,8 +627,74 @@ bool skinlist_draw(struct screen *display, struct gui_synclist *list)
     if (row_height > listcfg[screen]->height && list->nb_items > 0)
         row_top = (parent->height % row_height) / 2;
 
+    bool animate = screen == SCREEN_MAIN && scroll_active(list);
+    struct skin_var *shape = NULL;
+    int marker_y = 0;
+    int guard = 0;
+    fb_data *saved_top = NULL;
+    int saved_rows = 0;
+    if (animate)
+    {
+        unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER - scroll.content.start_clock);
+        int offset = ui_tween_sample(&scroll.content, frame);
+        /* A viewport cannot clip against a separate parent rectangle. Keep
+         * the rows above the list that a partial first row draws through, then
+         * restore them before presenting the viewport. */
+        int partial = (offset % row_height + row_height) % row_height;
+        shape = skin_find_item("shape", SKIN_VARIABLE, wps.data);
+        if (frame >= scroll.content.frames || !scroll_supported(list) || !shape ||
+            strcmp(label, "Rows") != 0 || row_height != scroll.pitch ||
+            list_start_item != scroll.start || list->selected_item != scroll.selected ||
+            list->nb_items != scroll.items)
+            animate = false;
+        else if (offset)
+        {
+            /* Verify space on the first scroll frame too, when the pixel
+             * offset can be a full row and nothing crosses the top yet. */
+            guard = core_alloc_free_space((row_height - 1) * parent->width *
+                                          sizeof(fb_data));
+            animate = guard > 0;
+        }
+
+        if (animate)
+        {
+            skin_hold_scrolling(true);
+            scroll.last_frame = frame;
+            list_start_item += (offset - partial) / row_height;
+            row_top -= partial;
+            marker_y = ui_tween_sample(&scroll.marker, frame);
+            if (partial)
+            {
+                lcd_hold_updates(true);
+                saved_top = core_get_data_pinned(guard);
+                saved_rows = partial;
+                for (int i = 0; i < saved_rows; i++)
+                    memcpy(saved_top + i * parent->width,
+                           FBADDRBUF(parent->buffer, parent->x, parent->y - saved_rows + i),
+                           parent->width * sizeof(fb_data));
+            }
+            if (list->nb_items <= INT_MAX / row_height)
+            {
+                scrollbar_unit = row_height;
+                int sampled_item = scroll.start * row_height + marker_y + offset;
+                current_item = MIN(MAX(sampled_item, 0),
+                                   (list->nb_items - 1) * row_height);
+            }
+        }
+        else
+            skinlist_scroll_cancel(list);
+    }
+
+    /* Save the selected bar's viewport while the row sets its shape. Draw
+     * that same skin primitive at its sampled y after all rows are painted. */
+    struct skin_element *marker_line = NULL;
+    struct skin_viewport marker_vp;
+    int marker_shape = 0;
+    int marker_row = 0;
+    int paint_lines = animate ? (parent->height - row_top + row_height - 1) /
+                               row_height : display_lines;
     drawing_rows = true;
-    for (cur_line = 0; cur_line < display_lines; cur_line++)
+    for (cur_line = 0; cur_line < paint_lines; cur_line++)
     {
         struct skin_element* viewport;
         struct skin_viewport* skin_viewport = NULL;
@@ -529,6 +719,22 @@ bool skinlist_draw(struct screen *display, struct gui_synclist *list)
                 (skin_viewport->label && strcmp(label, viewport_label))
                 )
                 continue;
+            if (animate && skin_viewport->vp.width == 3 &&
+                skin_viewport->vp.height == row_height && !skin_viewport->vp.y &&
+                (skin_viewport->vp.x == 2 || skin_viewport->vp.x == 36))
+            {
+                int marker_x = shape->value == 3 ? 2 : 36;
+                if (is_selected && skin_viewport->vp.x == marker_x)
+                {
+                    OFFSETTYPE(struct skin_element*) *children =
+                        SKINOFFSETTOPTR(get_skin_buffer(wps.data), viewport->children);
+                    marker_line = SKINOFFSETTOPTR(get_skin_buffer(wps.data), children[0]);
+                    marker_vp = *skin_viewport;
+                    marker_shape = shape->value;
+                    marker_row = cur_line;
+                }
+                continue;
+            }
             if (is_selected)
             {
                 struct skin_viewport *sel = &selected_vps[screen][sel_slot];
@@ -629,6 +835,40 @@ bool skinlist_draw(struct screen *display, struct gui_synclist *list)
         row_top += row_height;
     }
     drawing_rows = false;
+    if (marker_line)
+    {
+        int previous_shape = shape->value;
+        shape->value = marker_shape;
+        is_selected = true;
+        current_drawing_line = list->selected_item;
+        current_row = marker_row;
+        current_column = 1;
+        marker_vp.vp.x += parent->x;
+        marker_vp.vp.y += parent->y + marker_y;
+        marker_vp.vp.height = MIN(row_height, parent->height - marker_y);
+        marker_vp.vp.fg_pattern = dynamic_colors_resolve(marker_vp.dc_orig_fg);
+        marker_vp.vp.bg_pattern = dynamic_colors_resolve(marker_vp.dc_orig_bg);
+        if (marker_vp.vp.height > 0)
+        {
+            display->set_viewport(&marker_vp.vp);
+            skin_render_viewport(marker_line, &wps, &marker_vp, SKIN_REFRESH_ALL);
+            display->scroll_stop_viewport(&marker_vp.vp);
+            display->set_viewport(parent);
+        }
+        shape->value = previous_shape;
+    }
+    if (saved_top)
+    {
+        for (int i = 0; i < saved_rows; i++)
+            memcpy(FBADDRBUF(parent->buffer, parent->x, parent->y - saved_rows + i),
+                   saved_top + i * parent->width, parent->width * sizeof(fb_data));
+        core_put_data_pinned(saved_top);
+        lcd_hold_updates(false);
+    }
+    if (guard > 0)
+        core_free(guard);
+    if (animate)
+        skin_hold_scrolling(false);
     current_column = -1;
     current_row = -1;
     parent->fg_pattern = dc_saved_fg;

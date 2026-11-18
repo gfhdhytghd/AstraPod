@@ -43,6 +43,7 @@
 #include "button.h"
 #include "button_chord.h"
 #include "action.h"
+#include "ui/scene.h"
 #ifdef HAVE_WHEEL_WPS_CHORD
 #include "input/agents_shortcut.h"
 #include "system/activity.h"
@@ -207,6 +208,7 @@ static struct agents_remote_state remote;
 #include "system/shutdown.h"
 #include "skin/skin_engine.h" /* skin_inhibit_flush */
 #include "usb.h"
+#include "widgets/dialog.h"
 #include "widgets/usb_confirm.h"
 
 
@@ -1224,6 +1226,12 @@ void action_wait_for_release(void)
     button_clear_pressed();
 }
 
+void action_wait_for_release_preserve_queue(void)
+{
+    if (!(action_last.button & BUTTON_REL))
+        action_last.wait_for_release = true;
+}
+
 
 #ifdef HAVE_USB_PODLINK
 void action_handoff_enter(void)
@@ -1251,6 +1259,11 @@ static int step_handoff(int action)
 #ifdef HAVE_USB_PODLINK
     if (thread_self() == ui_thread)
     {
+        if (handoff_pending())
+        {
+            ui_scene_interrupt();
+            dialog_interrupt_transition();
+        }
         int result = handoff_step();
         if (result == 2)
             return get_current_activity() == ACTIVITY_WPS ? ACTION_REDRAW : ACTION_REMOTE_WPS;
@@ -1300,6 +1313,18 @@ static int route_screen_shortcut(int action, int context)
 #endif
 }
 
+static void scene_takeover(int action)
+{
+    if (IS_SYSEVENT(action) || action == ACTION_REMOTE_WPS ||
+        action == ACTION_AGENTS_REMOTE_COVERS || action == ACTION_AGENTS_COVERS ||
+        action == ACTION_AGENTS_SWITCH || action == ACTION_AGENTS_REMOTE_SWITCH)
+        ui_scene_interrupt();
+    if (action == SYS_USB_CONNECTED || action == SYS_USB_DISCONNECTED ||
+        action == SYS_ACCESSORY_CONNECTED || action == SYS_POWEROFF ||
+        action == SYS_REBOOT)
+        dialog_interrupt_transition();
+}
+
 static bool menu_back;
 bool action_set_menu_back(bool enabled)
 {
@@ -1329,6 +1354,7 @@ int get_action(int context, int timeout)
 
 
     action = do_backlight(&action_last, &current, action);
+    scene_takeover(action);
 
 #ifdef HAVE_USB_CONFIRM
     if (action == SYS_USB_CONFIRM)
@@ -1443,6 +1469,7 @@ int get_custom_action(int context,int timeout,
     int action = get_action_worker(&action_last, &current);
 
     action = do_backlight(&action_last, &current, action);
+    scene_takeover(action);
 
 #ifdef HAVE_USB_CONFIRM
     if (action == SYS_USB_CONFIRM)

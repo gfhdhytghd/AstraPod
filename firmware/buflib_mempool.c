@@ -566,9 +566,9 @@ buflib_alloc(struct buflib_context *ctx, size_t size)
  * Buffers are only shrinkable when a shrink callback is given.
  */
 
-int
-buflib_alloc_ex(struct buflib_context *ctx, size_t size,
-                struct buflib_callbacks *ops)
+static int
+alloc_block(struct buflib_context *ctx, size_t size,
+            struct buflib_callbacks *ops, bool recover)
 {
     union buflib_data *handle, *block;
     bool last;
@@ -581,6 +581,8 @@ handle_alloc:
     handle = handle_alloc(ctx);
     if (!handle)
     {
+        if (!recover)
+            return -1;
         /* If allocation has failed, and compaction has succeded, it may be
          * possible to get a handle by trying again.
          */
@@ -644,7 +646,7 @@ buffer_alloc:
         /* Try compacting if allocation failed */
         unsigned hint = BUFLIB_SHRINK_POS_FRONT |
                     ((size*sizeof(union buflib_data))&BUFLIB_SHRINK_SIZE_MASK);
-        if (buflib_compact_and_shrink(ctx, hint))
+        if (recover && buflib_compact_and_shrink(ctx, hint))
         {
             goto buffer_alloc;
         } else {
@@ -675,6 +677,17 @@ buffer_alloc:
         block->val = size - block_len;
     /* Return the handle index as a positive integer. */
     return ctx->handle_table - handle;
+}
+
+int buflib_alloc_ex(struct buflib_context *ctx, size_t size,
+                    struct buflib_callbacks *ops)
+{
+    return alloc_block(ctx, size, ops, true);
+}
+
+int buflib_alloc_free_space(struct buflib_context *ctx, size_t size)
+{
+    return alloc_block(ctx, size, NULL, false);
 }
 
 static union buflib_data*

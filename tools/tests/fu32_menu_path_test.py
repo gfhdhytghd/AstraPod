@@ -177,6 +177,25 @@ int main(void){for(unsigned i=0;i<ARRAYLEN(labels);i++)snprintf(labels[i],sizeof
  for(int flags=0;flags<2;flags++)for(int remote=0;remote<2;remote++)for(int row=0;row<12;row++)run(row,flags,remote);
  puts("FU32 production action worker + do_menu + simplelist loops: device/remote MENU returns each leaf; lyrics exits directly to WPS PASS");}
 '''
+if 'ui_scene_capture(' in loop:
+    # This fixture exercises legacy actions with the animation option off.
+    # SDL capture tests exercise the actual scene compositor.
+    pre += r'''
+#include "ui/scene.h"
+void ui_scene_interrupt(void) {}
+void ui_scene_cancel(struct ui_scene *scene) { assert(!scene->handle); }
+void ui_scene_start(struct ui_scene *scene) { assert(!scene->capturing); }
+void ui_scene_update(struct ui_scene *scene, bool target_changed)
+{ (void)target_changed; assert(!scene->handle); }
+int ui_scene_timeout(const struct ui_scene *scene, int timeout)
+{ assert(!scene->handle); return timeout; }
+bool ui_scene_capture(struct ui_scene *scene, const void *from,
+                      const void *to, bool push)
+{ (void)from; (void)to; (void)push; assert(!scene->handle); return false; }
+'''
+if 'next_scene.scene' in loop:
+    end = menu.index('void menu_link_scene(')
+    pre += menu[menu.rindex('static struct {', 0, end):end]
 (O/'config.h').write_text('')
 (O/'test.c').write_text(pre+fn(listing,'simplelist_show_list')+loop+controls+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-Wno-unused-parameter','-Wno-unused-but-set-variable','-Wno-pointer-sign','-Wno-enum-conversion','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R),'-I'+str(R/'apps-ipod'),str(O/'test.c'),'-o',str(O/'test')],check=True)

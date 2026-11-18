@@ -28,6 +28,7 @@
 extern SDL_Surface *gui_surface;
 #endif
 
+void sdl_blit_rgb565(SDL_Surface *surface, const void *pixels, SDL_Rect rect);
 void sdl_update_rect(SDL_Surface *surface, int x_start, int y_start, int width,
                      int height, int max_x, int max_y,
                      unsigned long (*getpixel)(int, int));

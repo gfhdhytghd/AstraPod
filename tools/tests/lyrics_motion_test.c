@@ -3,6 +3,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include "lyrics_motion.h"
+#include "ui/animation.h"
 int main(void)
 {
     assert(lyrics_ease(-1) == 0 && lyrics_ease(0) == 0);
@@ -24,6 +25,18 @@ int main(void)
     lyrics_retarget(&m, 256, UINT32_MAX - 10, 26);
     assert(lyrics_motion_at(&m, 2) == 224); /* monotonic clock wrap */
     assert(lyrics_motion_at(&m, 15) == 256);
+    m = (struct lyrics_motion){.frame_clock = true};
+    uint32_t start = UINT32_MAX - 5000;
+    uint32_t midpoint = start + ui_frame_clock(ANIM_F(8));
+    uint32_t end = start + ui_frame_clock(ANIM_F(16));
+    lyrics_retarget(&m, 256, start, ANIM_F(16));
+    assert(lyrics_motion_at(&m, start) == 0);
+    assert(lyrics_motion_at(&m, midpoint) == 224);
+    assert(lyrics_moving(&m, end - 1) && !lyrics_moving(&m, end));
+    assert(lyrics_motion_at(&m, end) == 256);
+    lyrics_retarget(&m, -768, midpoint, ANIM_F(16));
+    assert(lyrics_motion_at(&m, midpoint) == 224);
+    assert(lyrics_motion_at(&m, midpoint + ui_frame_clock(ANIM_F(24))) == -768);
     assert(lyrics_focus_weight(3, 3*256) == 256);
     assert(lyrics_focus_weight(3, 3*256+128) == 128);
     assert(lyrics_focus_weight(4, 3*256+128) == 128);

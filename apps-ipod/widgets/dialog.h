@@ -231,6 +231,12 @@ enum dialog_disposition
                             * has stashed specifics in its own `data`      */
 };
 
+enum dialog_slide {
+    DIALOG_SLIDE_NONE,
+    DIALOG_SLIDE_PAGE,   /* generic confirmation over the invoking page */
+    DIALOG_SLIDE_EVENT,  /* consent from inside the action dispatcher */
+};
+
 struct dialog_callbacks
 {
     /* Fill `box` with the desired frame geometry (screen-relative x/y/w/h) for
@@ -282,6 +288,8 @@ struct dialog
     int   poll_ticks;
 
     /* --- optional, set after dialog_init() --- */
+    /* Allow the global Animations setting to slide this measured box. */
+    enum dialog_slide slide;
     /* Drawn into `fb`, fb_w by fb_h, over whatever it holds, and shown by
      * present() after each repaint, instead of on the screen: for a page
      * the text viewer has turned sideways. NULL draws on the screen. */
@@ -305,5 +313,7 @@ void dialog_init(struct dialog *d, int context, const char *title,
  * none), and dispatch it to on_action. Undo the theme on exit. Returns the
  * final dialog_disposition. */
 int dialog_run(struct dialog *d, int poll_ticks);
+/* Restore the underlying page before a higher-priority screen is opened. */
+void dialog_interrupt_transition(void);
 
 #endif /* _GUI_DIALOG_H_ */

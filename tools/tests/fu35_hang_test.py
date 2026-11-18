@@ -87,6 +87,9 @@ int main(void){
  puts("FU35 Home triple Play: gesture -> router -> production get_action/do_menu/availability refresh; pending toggle+unanswered fill; <=6 polls PASS");
 }
 '''
+if 'scene_takeover(action);' in a:
+    # The Home gesture fixture runs with the animation option off.
+    pre = 'static void scene_takeover(int action) { (void)action; }\n' + pre
 source=pre+fn((R/'apps-ipod/widgets/list.c').read_text(),'simplelist_show_list')+loop+controls+post
 (O/'home.c').write_text(source)
 cmd=['cc','-std=gnu11','-Wno-enum-conversion','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R),'-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export')]

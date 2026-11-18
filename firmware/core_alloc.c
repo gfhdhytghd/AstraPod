@@ -87,6 +87,11 @@ int core_alloc(size_t size)
     return buflib_alloc_ex(&core_ctx, size, NULL);
 }
 
+int core_alloc_free_space(size_t size)
+{
+    return buflib_alloc_free_space(&core_ctx, size);
+}
+
 int core_alloc_ex(size_t size, struct buflib_callbacks *ops)
 {
     return buflib_alloc_ex(&core_ctx, size, ops);

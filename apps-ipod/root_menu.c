@@ -20,6 +20,7 @@
 #include "system/app_buffer.h"
 #include "system/appevents.h"
 #include "widgets/menu.h"
+#include "ui/scene.h"
 #include "root_menu.h"
 #include "screens/playback/cider.h"
 #ifdef HAVE_USB_PODLINK
@@ -2447,6 +2448,7 @@ void root_menu(void)
 #endif
     int previous_browser = browser_default();
     int selected = 0;
+    struct ui_scene menu_scene = {0};
 
     /* A failed tagnavi.config parse reports no rows at all, and the fixup
      * would drop every database slot from the saved order for good. */
@@ -2518,6 +2520,8 @@ void root_menu(void)
                  * button to be handled by HOST instead of rockbox */
                 ignore_back_button_stub(true);
 
+                if (global_settings.animations)
+                    menu_link_scene(&menu_scene, &root_menu_, &main_menu_);
                 next_screen = do_menu(&root_menu_, &selected, NULL, false);
 
                 ignore_back_button_stub(false);
@@ -2584,7 +2588,13 @@ void root_menu(void)
         } /* switch() */
         continue;
 load_next_screen: /* load_screen is inlined */
+        if (global_settings.animations && next_screen == GO_TO_MAINMENU)
+            menu_link_scene(&menu_scene, &main_menu_, &root_menu_);
+        else
+            ui_scene_cancel(&menu_scene);
         next_screen = load_screen(next_screen);
+        if (next_screen != GO_TO_ROOT && next_screen != GO_TO_MAINMENU)
+            ui_scene_cancel(&menu_scene);
         came_back = false;
     }
 

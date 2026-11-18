@@ -10,8 +10,9 @@ drew current_lists.
 Checks, on the production sources:
  1. list.c's callback, gui_synclist_forget() and gui_synclist_draw()'s guard,
     compiled with ASan against recording stubs: arm -> forget -> event fires
-    draws nothing and the event is removed; forgetting another list keeps
-    the armed one; a list with no parent is not drawn.
+    draws nothing and the event is removed. Forgetting another list keeps
+    the armed one and its scroll generation. A list with no parent is not
+    drawn. Reusing a list's address leaves the old scroll inactive.
  2. Every caller of list_do_action_timeout() either calls
     gui_synclist_do_button() right after its get_action(), or calls
     gui_synclist_forget() on the same list before returning; do_menu forgets
@@ -24,6 +25,7 @@ import re, subprocess, sys
 R = Path(__file__).resolve().parents[2]
 O = Path(sys.argv[1]).resolve(); O.mkdir(parents=True, exist_ok=True)
 L = (R / 'apps-ipod/widgets/list.c').read_text()
+S = (R / 'apps-ipod/widgets/list_skinned.c').read_text()
 
 
 def fn(s, name):
@@ -40,6 +42,8 @@ def fn(s, name):
 cb = fn(L, '_lists_uiviewport_update_callback')
 forget = fn(L, 'gui_synclist_forget')
 draw = fn(L, 'gui_synclist_draw')
+scroll_active = fn(S, 'scroll_active')
+scroll_cancel = fn(S, 'skinlist_scroll_cancel')
 harness = r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -52,7 +56,12 @@ harness = r'''
 #define GUI_EVENT_NEED_UI_UPDATE 7
 struct viewport { int x, y, width, height; };
 struct screen { int screen_type; } screens[1];
-struct gui_synclist { int nb_items; struct viewport *parent[NB_SCREENS]; };
+struct gui_synclist {
+    int nb_items;
+    struct viewport *parent[NB_SCREENS];
+    unsigned generation;
+};
+static struct { unsigned generation; } scroll;
 static struct gui_synclist *current_lists;
 typedef void handler_t(unsigned short, void *, void *);
 static handler_t *armed; static int removed, drawn, laid_out, flushed;
@@ -66,6 +75,8 @@ static bool skinlist_draw(struct screen *d, struct gui_synclist *l)
 static void list_draw(struct screen *d, struct gui_synclist *l) { (void)d; (void)l; assert(0); }
 void gui_synclist_draw(struct gui_synclist *gui_list);
 @CB@
+@SCROLL_ACTIVE@
+@SCROLL_CANCEL@
 @FORGET@
 @DRAW@
 static void arm(struct gui_synclist *l)   /* what list_do_action_timeout does */
@@ -75,14 +86,22 @@ static void fire(void)
 int main(void)
 {
     struct viewport vp = { 0, 0, 10, 99 };
-    struct gui_synclist a = { 3, { &vp } }, b = { 2, { &vp } }, z = { 0, { NULL } };
+    struct gui_synclist a = { 3, { &vp }, 1 };
+    struct gui_synclist b = { 2, { &vp }, 2 };
+    struct gui_synclist z = { 0, { NULL }, 3 };
     arm(&a); fire();
     assert(drawn == 1 && last_drawn == &a && flushed == 1);  /* the live list */
+    scroll.generation = a.generation;
     arm(&a); gui_synclist_forget(&b);                 /* another list: kept */
     assert(armed && current_lists == &a && removed == 0);
+    assert(scroll_active(&a) && !scroll_active(&b));
     gui_synclist_forget(&a);                          /* screen leaves */
     assert(!armed && current_lists == NULL && removed == 1);
+    assert(scroll.generation == 0);
     fire(); assert(drawn == 1);                       /* nothing drawn */
+    scroll.generation = a.generation;
+    a.generation = 4;                                /* same address, new list */
+    assert(!scroll_active(&a) && !skinlist_scroll_cancel(&a));
     arm(&a); current_lists = NULL; armed = _lists_uiviewport_update_callback;
     fire(); assert(drawn == 1 && flushed == 1);       /* cleared: no draw */
     gui_synclist_draw(&z); assert(drawn == 1 && laid_out == 1);  /* no parent */
@@ -90,7 +109,8 @@ int main(void)
     puts("behaviour ok");
     return 0;
 }
-'''.replace('@CB@', cb).replace('@FORGET@', forget).replace('@DRAW@', draw)
+'''.replace('@CB@', cb).replace('@FORGET@', forget).replace('@DRAW@', draw).replace(
+    '@SCROLL_ACTIVE@', scroll_active).replace('@SCROLL_CANCEL@', scroll_cancel)
 c = O / 'fu53_list.c'; c.write_text(harness)
 exe = O / 'fu53_list'
 subprocess.run(['gcc', '-std=gnu11', '-Wall', '-Werror', '-Wno-unused-function',

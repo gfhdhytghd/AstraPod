@@ -1085,6 +1085,7 @@ struct user_settings
        track. */
     int spike_caption;  /* 0 off, 1 title, 2 title and artist */
     bool spike_caption_scroll;  /* ...and whether it travels or is cropped */
+    bool animations;
 };
 
 /* global settings */

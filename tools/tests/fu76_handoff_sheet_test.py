@@ -34,6 +34,13 @@ filter_release = action_source.split('    if (last->wait_for_release)\n', 1)[1].
     '    else if', 1)[0].split('   /*', 1)[0]
 live_entry = 'void action_handoff_enter(void)' in action_source
 draw = (ROOT / 'apps-ipod/screens/playback/handoff_sheet.c').read_text()
+native_entry = 'static void close_native_sheet(' in draw
+animation = ''
+if native_entry:
+    animation = (ROOT / 'apps-ipod/ui/animation.h').read_text()
+    animation += (ROOT / 'apps-ipod/ui/animation.c').read_text().replace('#include "animation.h"', '')
+    animation += function((ROOT / 'firmware/drivers/button_queue.c').read_text(),
+                          'button_queue_wait_pending')
 draw = re.sub(r'^#(?:include|if|endif).*$', '', draw, flags=re.M)
 dialog = (ROOT / 'apps-ipod/widgets/dialog.c').read_text()
 theme = (ROOT / 'apps-ipod/draw/viewport.c').read_text()
@@ -50,6 +57,7 @@ ports = r'''
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -75,6 +83,11 @@ ports = r'''
 #define TIMEOUT_BLOCK -1
 #define CUSTOM_STATUSBAR 0
 #define SYS_USB_CONFIRM 1000
+#define SYS_USB_CONNECTED 1001
+#define SYS_ACCESSORY_CONNECTED 1002
+#define SYS_USB_DISCONNECTED 1003
+#define SYS_POWEROFF 1004
+#define SYS_REBOOT 1005
 #define IS_SYSEVENT(a) ((a) >= SYS_USB_CONFIRM)
 #define TEXT_FIT_BUF 256
 #define FONT_DIR "/fonts"
@@ -86,7 +99,8 @@ ports = r'''
 #define FRAMEBUFFER_SIZE sizeof pixels
 #define HANDOFF_FRAME_BYTES (2 * FRAMEBUFFER_SIZE)
 enum { ACTION_NONE, ACTION_STD_MENU, ACTION_STD_OK, ACTION_STD_CANCEL,
-       ACTION_STD_PREV, ACTION_STD_PREVREPEAT, ACTION_STD_NEXT, ACTION_STD_NEXTREPEAT };
+       ACTION_STD_PREV, ACTION_STD_PREVREPEAT, ACTION_STD_NEXT, ACTION_STD_NEXTREPEAT,
+       ACTION_REDRAW };
 enum { LANG_HANDOFF_TITLE, LANG_HANDOFF_FAILED, LANG_HANDOFF_ACCEPT, LANG_HANDOFF_LEAVE,
        LANG_HANDOFF_PREPARING, LANG_HANDOFF_NOT_FOUND };
 static const char *strings[] = { "接力到电脑", "接力失败", "接力", "留在 iPod", "正在接力…",
@@ -111,13 +125,19 @@ struct font { int height; };
 struct button_mapping {};
 enum screen_type { SCREEN_MAIN };
 static long current_tick;
+static struct { bool animations; } global_settings;
+static intptr_t queued;
+static bool system_took_over, interrupted;
+static unsigned queue_waits, boost_count;
+static int legacy_allocs, native_allocs, dock_events;
+#define USEC_TIMER ((uint32_t)(current_tick * (ui_frame_clock(UI_ANIM_FPS) / HZ)))
 static struct viewport base = {0, 0, LCD_WIDTH, LCD_HEIGHT, 1, NULL}, *active = &base;
 static int glyph_mode, foreground, font_id, shown, raw_button, action_index, scenario;
 static bool inhibited, showing_art;
 static int hold, last_answer, phase_changes;
 static bool exiting, fail_alloc;
 static int last_offset, in_frames, out_frames, early_input, reads, draws, closes;
-static long animation_start, exit_start;
+static long animation_start, open_tick, exit_start;
 static struct { bool wait_for_release; int button; } action_last;
 static unsigned char pixels[LCD_HEIGHT][LCD_WIDTH];
 static unsigned char original[LCD_HEIGHT][LCD_WIDTH];
@@ -205,6 +225,7 @@ static void lcd_update_rect(int x, int y, int w, int h)
     else
     {
         assert(offset <= last_offset);
+        if (!offset && last_offset) open_tick = current_tick;
         ++in_frames;
     }
     last_offset = offset;
@@ -242,7 +263,22 @@ static void sleep(int n)
 #endif
 }
 static void get_action_statuscode(int *button) { *button = raw_button; }
-static void default_event_handler(int action) { (void)action; }
+static void default_event_handler(int action)
+{
+    if (action == SYS_USB_CONNECTED)
+    {
+        assert(active == &base && !hold && !boost_count && closes == 1);
+        assert(!memcmp(panel, original, sizeof panel));
+        system_took_over = true;
+        memset(pixels, 45, sizeof pixels);
+        memset(panel, 45, sizeof panel);
+    }
+    if (action == SYS_ACCESSORY_CONNECTED)
+    {
+        assert(last_offset == 0 && hold && !boost_count && closes == 0);
+        ++dock_events;
+    }
+}
 static bool skin_flush_inhibited(void) { return inhibited; }
 static void skin_inhibit_flush(bool state) { inhibited = state; }
 static bool skin_hold_scrolling(bool state) { hold += state ? 1 : -1; return !hold; }
@@ -251,13 +287,27 @@ static void sb_skin_force_next_update(void) {}
 static void button_clear_pressed(void) {}
 void action_wait_for_release(void);
 static size_t core_allocatable(void) { return fail_alloc ? 0 : sizeof frames; }
-static int core_alloc(size_t n) { assert(n == sizeof frames); return 1; }
+static int core_alloc(size_t n) { assert(n == sizeof frames); ++legacy_allocs; return 1; }
+static int core_alloc_free_space(size_t n)
+{
+    assert(n == sizeof frames);
+    ++native_allocs;
+    return fail_alloc ? -1 : 1;
+}
 static void *core_get_data(int handle) { assert(handle == 1); return frames; }
 static void core_pin(int handle) { assert(handle == 1); }
 static void core_unpin(int handle) { assert(handle == 1); }
 static void core_free(int handle) { assert(handle == 1); closes++; }
 static void backlight_on(void) {}
-static void cpu_boost(bool enabled) { (void)enabled; }
+static void cpu_boost(bool enabled)
+{
+    if (enabled) ++boost_count;
+    else
+    {
+        assert(boost_count);
+        --boost_count;
+    }
+}
 static bool is_backlight_on(bool wait) { (void)wait; return true; }
 static bool dynamic_colors_needs_repaint(void) { return false; }
 static struct viewport *set_viewport(struct viewport *vp)
@@ -301,6 +351,26 @@ static void dialog_frame_box(struct screen *s, struct viewport *box,
 { (void)s;(void)box;(void)style;(void)content; assert(!"sheet must bypass framed dialog"); }
 static int standard_select(void);
 
+#ifdef NATIVE_SHEET
+void handoff_sheet_interrupt(void);
+struct event_queue {};
+struct queue_event {};
+static struct event_queue button_queue;
+static void queue_wait_w_tmo(struct event_queue *queue, struct queue_event *event, int ticks)
+{
+    assert(queue == &button_queue && event == NULL && ticks > 0);
+    ++queue_waits;
+    if (scenario == 10 && !queued) queued = SYS_USB_CONNECTED;
+    if (scenario == 12 && !queued) queued = BUTTON_RIGHT;
+    if (!queued) current_tick += ticks;
+}
+static bool queue_empty(const struct event_queue *queue)
+{
+    assert(queue == &button_queue);
+    return !queued;
+}
+#endif
+
 static int get_action(int context, int ticks)
 {
     assert(context == CONTEXT_STD && ticks > 0 && inhibited && hold == 1);
@@ -323,6 +393,28 @@ static int get_action(int context, int ticks)
         return shown == 1 ? ACTION_STD_MENU : ACTION_NONE;
     if (scenario == 8)
         return ACTION_STD_MENU;
+#ifdef NATIVE_SHEET
+    if (scenario == 9 || scenario == 11)
+    {
+        assert(last_offset > 0 && last_offset < LCD_HEIGHT);
+        exiting = true;
+        interrupted = true;
+        if (scenario == 11)
+            return SYS_USB_CONNECTED;
+        /* Model the action wrapper tearing down the UI before a nested dialog. */
+        handoff_sheet_interrupt();
+        default_event_handler(SYS_USB_CONNECTED);
+        return ACTION_REDRAW;
+    }
+    if (scenario == 10 || scenario == 12)
+        return last_offset == 0 ? ACTION_STD_MENU : ACTION_NONE;
+    if (scenario == 13 && !dock_events)
+    {
+        assert(last_offset > 0 && last_offset < LCD_HEIGHT);
+        return SYS_ACCESSORY_CONNECTED;
+    }
+    if (scenario == 13) return ACTION_STD_MENU;
+#endif
     if (scenario == 1)
     {
         if (action_index++ == 0) {raw_button=BUTTON_RIGHT; return ACTION_STD_OK;}
@@ -359,7 +451,6 @@ RELEASE_FILTER
     }
     return result;
 }
-#define SYS_ACCESSORY_CONNECTED 1002
 #define LANG_ACCESSORY_CONNECTED 17
 #define ID2P(id) (id)
 static void splash(int ticks, int id) { assert(id == 17); sleep(ticks); }
@@ -452,6 +543,59 @@ int main(int argc, char **argv)
 #endif
         if (i >= 56) break;
     }
+#ifdef NATIVE_SHEET
+    global_settings.animations = true;
+    legacy_allocs = native_allocs = 0;
+    for (scenario = 5; scenario <= 13; ++scenario)
+    {
+        struct handoff_sheet view = { .title = "Synthetic music", .target = "Rufin" };
+        fail_alloc = scenario == 8;
+        showing_art = scenario % 2 == 0;
+        action_index = phase_changes = shown = reads = early_input = 0;
+        in_frames = out_frames = draws = closes = queue_waits = 0;
+        last_offset = LCD_HEIGHT;
+        exiting = system_took_over = interrupted = false;
+        queued = 0;
+        memset(original, 23, sizeof original);
+        memset(original[0], 77, LCD_WIDTH);
+        memcpy(pixels, original, sizeof pixels);
+        memcpy(panel, original, sizeof panel);
+        animation_start = current_tick;
+        int result = handoff_sheet_run(&view, advance_test);
+        int expected = scenario == 5 ? DIALOG_ACCEPT :
+                       scenario == 9 || scenario == 11 ? DIALOG_ABORT : DIALOG_CANCEL;
+        assert(result == expected && shown && phase_changes);
+        assert(active == &base && !hold && !boost_count && !live_fonts);
+        assert(closes == !fail_alloc);
+        if (scenario == 6)
+        {
+            assert(in_frames >= 8 && out_frames >= 6);
+            assert(ui_clock_frame((open_tick - animation_start) *
+                                  (ui_frame_clock(UI_ANIM_FPS) / HZ)) == OPEN_FRAMES);
+            assert(ui_clock_frame((current_tick - exit_start) *
+                                  (ui_frame_clock(UI_ANIM_FPS) / HZ)) == CLOSE_FRAMES);
+        }
+        if (scenario == 5) assert(early_input == 1);
+        if (scenario == 9 || scenario == 11)
+        {
+            assert(interrupted && system_took_over && queue_waits == 0);
+            assert(panel[0][0] == 45 && pixels[0][0] == 45);
+            assert(last_answer == DIALOG_CONTINUE);
+        }
+        else if (!fail_alloc)
+            assert(!memcmp(panel, original, sizeof panel));
+        if (scenario == 10 || scenario == 12)
+        {
+            assert(queue_waits == 1 && current_tick == exit_start);
+            assert(queued == (scenario == 10 ? SYS_USB_CONNECTED : BUTTON_RIGHT));
+            assert(!action_last.wait_for_release);
+        }
+        if (scenario == 13)
+            assert(dock_events == 1 && last_answer == DIALOG_CANCEL);
+    }
+    assert(legacy_allocs == 0 && native_allocs == 9);
+    puts("Native sheet: frame clock, first input, reversal, free-only fallback, USB takeover, and non-consuming close");
+#endif
     viewportmanager_theme_undo(SCREEN_MAIN, false);
 #ifdef LIVE_ENTRY
     for (int t = 0; t <= ENTER_TICKS; ++t)
@@ -474,7 +618,9 @@ c = OUT / 'sheet.c'
 buttons = function(action_source, 'action_wait_for_release')
 if live_entry:
     buttons += function(action_source, 'action_handoff_enter')
-c.write_text(('#define LIVE_ENTRY\n' if live_entry else '') + ports + types + sheet + theme_depth + '\n' + theme_struct + r''';
+c.write_text(('#define LIVE_ENTRY\n' if live_entry else '') +
+             ('#define NATIVE_SHEET\n' if native_entry else '') +
+             ports + animation + types + sheet + theme_depth + '\n' + theme_struct + r''';
 static int theme_stack_top[NB_SCREENS];
 static struct viewport_stack_item theme_stack[NB_SCREENS][VPSTACK_DEPTH];
 ''' + '\n'.join(function(theme, name) for name in theme_functions) +

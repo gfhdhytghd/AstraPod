@@ -518,6 +518,14 @@ typedef void lcd_blockfunc_type(fb_data *address, unsigned mask, unsigned bits);
 #endif
 
 extern struct viewport* lcd_current_viewport;
+#if LCD_DEPTH == 16
+extern struct frame_buffer_t lcd_framebuffer_default;
+/* Hold normal iPod LCD submissions while a scene paints its endpoint. */
+void lcd_hold_updates(bool hold);
+bool lcd_updates_held(void);
+/* Submit a full RGB565 scene. The caller owns the buffer until return. */
+bool lcd_present_scene(const fb_data *pixels);
+#endif
 
 #define FB_CURRENTVP_BUFFER (lcd_current_viewport->buffer)
 #define FBADDRBUF(buffer,x,y) ((fb_data*) buffer->get_address_fn(x,y))

@@ -57,11 +57,6 @@
 #include "database/tagcache.h"
 #include "metadata/art_cache.h"
 
-/* The minimum number of pending button events in queue before starting
- * to limit list drawing interval.
- */
-#define FRAMEDROP_TRIGGER 6
-
 void list_draw(struct screen *display, struct gui_synclist *list);
 
 static long last_dirty_tick;
@@ -388,6 +383,7 @@ void gui_synclist_layout(struct gui_synclist *gui_list)
 {
     if (list_is_dirty(gui_list) || list_ui_viewport_moved(gui_list))
     {
+        skinlist_scroll_cancel(gui_list);
         list_init_viewports(gui_list);
         FOR_NB_SCREENS(i)
             list_init_item_height(gui_list, i);
@@ -938,12 +934,36 @@ static void _lists_uiviewport_update_callback(unsigned short id,
  * skinlist_get_line_count at boot; FU51 3617 was the same callback). */
 void gui_synclist_forget(struct gui_synclist *lists)
 {
+    skinlist_scroll_cancel(lists);
     if (current_lists == lists)
     {
         current_lists = NULL;
         remove_event_ex(GUI_EVENT_NEED_UI_UPDATE,
                         _lists_uiviewport_update_callback, NULL);
     }
+}
+
+static void list_move(struct gui_synclist *list, int offset, bool wrap)
+{
+#if defined(BUTTON_SCROLL_BACK) && defined(BUTTON_SCROLL_FWD)
+    int start = list->start_item[SCREEN_MAIN];
+    int selected = list->selected_item;
+    int button;
+    get_action_statuscode(&button);
+#endif
+
+    gui_list_select_at_offset(list, offset, wrap);
+#if defined(BUTTON_SCROLL_BACK) && defined(BUTTON_SCROLL_FWD)
+    if (button & (BUTTON_SCROLL_BACK | BUTTON_SCROLL_FWD))
+    {
+        bool queued = button_queue_count() > 1;
+        if (skinlist_scroll_retarget(list, start, selected, queued) && queued)
+            return;
+    }
+    else
+#endif
+        skinlist_scroll_cancel(list);
+    gui_synclist_draw(list);
 }
 
 bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
@@ -963,6 +983,13 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
     /* repeat actions block list wraparound */
     bool allow_wrap = lists->wraparound;
 
+    /* Handovers and non-wheel navigation must start from the settled frame. */
+    if (action != ACTION_NONE && action != ACTION_STD_PREV &&
+        action != ACTION_STD_NEXT && action != ACTION_STD_PREVREPEAT &&
+        action != ACTION_STD_NEXTREPEAT && skinlist_scroll_cancel(lists) &&
+        action != ACTION_REDRAW && !IS_SYSEVENT(action))
+        gui_synclist_draw(lists);
+
     switch (action)
     {
         case ACTION_REDRAW:
@@ -981,8 +1008,7 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
             /*Fallthrough*/
         case ACTION_STD_PREV:
 
-            gui_list_select_at_offset(lists, -next_item_modifier, allow_wrap);
-                gui_synclist_draw(lists);
+            list_move(lists, -next_item_modifier, allow_wrap);
             yield();
             *actionptr = ACTION_STD_PREV;
             return true;
@@ -991,8 +1017,7 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
             allow_wrap = false; /* Prevent list wraparound on repeating actions */
             /*Fallthrough*/
         case ACTION_STD_NEXT:
-            gui_list_select_at_offset(lists, next_item_modifier, allow_wrap);
-                gui_synclist_draw(lists);
+            list_move(lists, next_item_modifier, allow_wrap);
             yield();
             *actionptr = ACTION_STD_NEXT;
             return true;
@@ -1057,6 +1082,11 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
        && TIME_AFTER(current_tick, lists->scheduled_talk_tick))
         /* scheduled postponed item announcement is due */
         _gui_synclist_speak_item(lists, true);
+    if (action == ACTION_NONE && skinlist_scroll_due(lists))
+    {
+        gui_synclist_draw(lists);
+        return true;
+    }
     {
         static bool was_recolouring = false;
         bool dc_active = dynamic_colors_needs_repaint() || dynamic_colors_pending();
@@ -1112,7 +1142,7 @@ int list_do_action_timeout(struct gui_synclist *lists, int timeout)
         if(timeout > delay || timeout == TIMEOUT_BLOCK)
             timeout = delay;
     }
-    return timeout;
+    return skinlist_scroll_timeout(lists, timeout);
 }
 
 bool list_do_action(int context, int timeout,

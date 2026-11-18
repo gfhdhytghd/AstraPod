@@ -167,6 +167,11 @@ void do_setting_screen(const struct settings_list *setting, const char * title,
 int do_menu(const struct menu_item_ex *menu, int *start_selected,
             struct viewport parent[NB_SCREENS], bool hide_theme);
 
+struct ui_scene;
+/* Link the next top-level menu call to its peer across root dispatch. */
+void menu_link_scene(struct ui_scene *scene, const struct menu_item_ex *menu,
+                     const struct menu_item_ex *peer);
+
 /* In all the following macros the argument names are as follows:
     - name: The name for the variable (so it can be used in a MAKE_MENU()
     - str:  the string to display for this menu item. use ID2P() for LANG_* id's

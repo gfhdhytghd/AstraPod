@@ -22,6 +22,7 @@
 #include "core_alloc.h"
 #include "system/shutdown.h"
 #include "system.h"
+#include "ui/animation.h"
 #include "widgets/dialog.h"
 #include <stdio.h>
 #include <string.h>
@@ -30,9 +31,12 @@
 #define MARGIN 16
 #define BUTTON_HEIGHT 36
 #define BUTTON_GAP 8
-#define ENTER_TICKS (HZ / 5)
-#define EXIT_TICKS (16 * HZ / 100)
-#define FRAME_TICKS MAX(1, HZ / 33)
+#define OPEN_FRAMES ANIM_F(12)
+#define CLOSE_FRAMES ANIM_F(10)
+/* Retain the FU83 cadence and its rounding on the legacy path. */
+#define ENTER_TICKS ((int)(OPEN_FRAMES * HZ / UI_ANIM_FPS))
+#define EXIT_TICKS ((int)(CLOSE_FRAMES * HZ / UI_ANIM_FPS))
+#define FRAME_TICKS MAX(1, (int)(HZ * ANIM_F(2) / UI_ANIM_FPS))
 #define BUTTON_Y (LCD_HEIGHT - MARGIN - BUTTON_HEIGHT)
 #define BAR_Y (BUTTON_Y + BUTTON_HEIGHT + 5)
 
@@ -40,6 +44,16 @@ struct sheet_ui {
     bool leave;
     int small_font, button_font, large_font;
 };
+
+struct sheet_presentation {
+    struct viewport vp, *outer;
+    fb_data *fb, *back, *card;
+    int handle, offset;
+    bool inhibited, boosted, interrupted;
+};
+
+/* Only the UI thread enters a handoff sheet or interrupts it for a modal. */
+static struct sheet_presentation *native_sheet;
 
 static void center_text(int x, int y, int width, int height, int font,
                         unsigned color, const unsigned char *text)
@@ -230,95 +244,55 @@ static int draw_progress(const struct handoff_sheet *view, fb_data *card, int pa
     return width;
 }
 
-int handoff_sheet_run(struct handoff_sheet *view, int (*advance)(int))
+static void set_boost(struct sheet_presentation *p, bool boosted)
 {
-    struct sheet_ui ui = {
-        .small_font = font_load_ex(FONT_DIR "/12-noto-sans.fnt", 0, 48),
-        .button_font = font_load_ex(FONT_DIR "/18-noto-sans.fnt", 0, 48),
-        .large_font = font_load_ex(FONT_DIR "/26-noto-sans-medium.fnt", 0, 48),
-    };
-    int handle = core_allocatable() >= HANDOFF_FRAME_BYTES ?
-                 core_alloc(HANDOFF_FRAME_BYTES) : -1;
-    fb_data *back = NULL, *card = NULL;
-    if (handle > 0)
+    if (p->boosted != boosted)
     {
-        core_pin(handle);
-        back = core_get_data(handle);
-        card = back + LCD_WIDTH * LCD_HEIGHT;
+        cpu_boost(boosted);
+        p->boosted = boosted;
     }
-    struct viewport vp = {0};
-    viewport_set_fullscreen(&vp, SCREEN_MAIN);
-    struct viewport *outer = lcd_set_viewport(&vp);
-    fb_data *fb = FBADDR(0, 0);
-    if (back) memcpy(back, fb, FRAMEBUFFER_SIZE);
-    bool inhibited = skin_flush_inhibited();
-    skin_inhibit_flush(true);
-    screens[0].scroll_stop();
-    skin_hold_scrolling(true);
-    backlight_on();
-    action_handoff_enter();
+}
 
-    int result = DIALOG_CONTINUE;
-    int offset = card ? LCD_HEIGHT : 0;
+static void release_presentation(struct sheet_presentation *p)
+{
+    if (p->back)
+    {
+        memcpy(p->fb, p->back, FRAMEBUFFER_SIZE);
+        core_unpin(p->handle);
+        core_free(p->handle);
+    }
+    set_boost(p, false);
+    lcd_set_viewport(p->outer);
+    if (skin_hold_scrolling(false))
+    {
+        skin_request_full_update(CUSTOM_STATUSBAR);
+        sb_skin_force_next_update();
+    }
+    skin_inhibit_flush(p->inhibited);
+}
+
+void handoff_sheet_interrupt(void)
+{
+    struct sheet_presentation *p = native_sheet;
+    if (!p)
+        return;
+    native_sheet = NULL;
+    p->interrupted = true;
+    lcd_set_viewport(&p->vp);
+    if (p->card)
+        slide_frame(p->fb, p->back, p->card, p->offset, LCD_HEIGHT);
+    release_presentation(p);
+}
+
+static void close_legacy_sheet(struct sheet_presentation *p)
+{
+    if (!p->card)
+        return;
+    int from = p->offset;
+    set_boost(p, true);
     long start_tick = current_tick;
-    int painted = 0;
-    bool dirty = true, entering = true, boosted = true;
-    cpu_boost(true);
-    while (result == DIALOG_CONTINUE)
-    {
-        lcd_set_viewport(&vp);
-        if (dirty)
-        {
-            sheet_draw(view, &ui);
-            painted = 0;
-            if (card) memcpy(card, fb, FRAMEBUFFER_SIZE);
-            else lcd_update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT);
-        }
-        if (entering)
-        {
-            start_tick = current_tick;
-            entering = false;
-        }
-        long elapsed = current_tick - start_tick;
-        if (card)
-        {
-            int next = slide_offset(elapsed, LCD_HEIGHT, false);
-            if (dirty) memcpy(fb, back, next * LCD_WIDTH * sizeof(*fb));
-            if (offset != next || dirty) slide_frame(fb, back, card, offset, next);
-            offset = next;
-        }
-
-        int ticks = HZ / 10;
-        if (offset)
-        {
-            long spent = current_tick - start_tick - elapsed;
-            ticks = MAX(0, MIN(FRAME_TICKS, ENTER_TICKS - elapsed) - spent);
-        }
-        else
-        {
-            if (boosted)
-            {
-                cpu_boost(false);
-                boosted = false;
-            }
-            if (!view->reason) painted = draw_progress(view, card, painted);
-        }
-        bool leave = ui.leave, preparing = view->preparing;
-        const char *target = view->target;
-        int reason = view->reason;
-        int action = get_action(CONTEXT_STD, ticks);
-        result = advance(sheet_action(&ui, view, action));
-        dirty = leave != ui.leave || preparing != view->preparing ||
-                target != view->target || reason != view->reason;
-    }
-    int from = offset;
-    if (!boosted)
-    {
-        cpu_boost(true);
-    }
-    start_tick = current_tick;
     long frame_tick = 0;
-    while (card && offset < LCD_HEIGHT)
+    while (p->offset < LCD_HEIGHT)
     {
         long wake = MIN(frame_tick + FRAME_TICKS, EXIT_TICKS);
         long ticks = wake - (current_tick - start_tick);
@@ -326,27 +300,193 @@ int handoff_sheet_run(struct handoff_sheet *view, int (*advance)(int))
         if (ticks > 0) sleep(ticks - 1);
         frame_tick = current_tick - start_tick;
         int next = slide_offset(frame_tick, from, true);
-        if (offset != next) slide_frame(fb, back, card, offset, next);
-        offset = next;
+        if (p->offset != next)
+            slide_frame(p->fb, p->back, p->card, p->offset, next);
+        p->offset = next;
     }
-    if (card)
+}
+
+static void close_native_sheet(struct sheet_presentation *p)
+{
+    if (!p->card || p->offset == LCD_HEIGHT)
+        return;
+    set_boost(p, true);
+    struct ui_tween tween = {
+        .start_clock = USEC_TIMER,
+        .from = p->offset, .to = LCD_HEIGHT, .frames = CLOSE_FRAMES,
+        .ease_in = true,
+    };
+    while (p->offset < LCD_HEIGHT)
     {
-        memcpy(fb, back, FRAMEBUFFER_SIZE);
-        core_unpin(handle);
-        core_free(handle);
+        uint32_t elapsed = (uint32_t)USEC_TIMER - tween.start_clock;
+        int next = ui_tween_sample(&tween, ui_clock_frame(elapsed));
+        if (next != p->offset)
+        {
+            slide_frame(p->fb, p->back, p->card, p->offset, next);
+            p->offset = next;
+        }
+        int ticks = ui_clock_timeout(elapsed, tween.frames, HZ);
+        if (ticks && button_queue_wait_pending(ticks))
+        {
+            /* Finish immediately. The next owner will read the same event. */
+            slide_frame(p->fb, p->back, p->card, p->offset, LCD_HEIGHT);
+            p->offset = LCD_HEIGHT;
+        }
     }
-    cpu_boost(false);
-    lcd_set_viewport(outer);
-    if (skin_hold_scrolling(false))
+}
+
+static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
+                     struct sheet_presentation *p, int (*advance)(int), bool animate)
+{
+    struct ui_tween tween = { .from = LCD_HEIGHT, .frames = OPEN_FRAMES };
+    long start_tick = 0;
+    bool dirty = true, entering = true;
+    int painted = 0;
+    for (;;)
     {
-        skin_request_full_update(CUSTOM_STATUSBAR);
-        sb_skin_force_next_update();
+        lcd_set_viewport(&p->vp);
+        if (dirty)
+        {
+            sheet_draw(view, ui);
+            painted = 0;
+            if (p->card)
+                memcpy(p->card, p->fb, FRAMEBUFFER_SIZE);
+            else
+                lcd_update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT);
+        }
+        if (entering)
+        {
+            if (animate)
+                tween.start_clock = USEC_TIMER;
+            else
+                start_tick = current_tick;
+            entering = false;
+        }
+        int ticks = HZ / 10;
+        if (p->card && (p->offset || dirty))
+        {
+            uint32_t elapsed_clock = animate ? (uint32_t)USEC_TIMER - tween.start_clock : 0;
+            long elapsed_ticks = animate ? 0 : current_tick - start_tick;
+            int next = 0;
+            if (p->offset)
+            {
+                if (animate)
+                {
+                    unsigned frame = ui_clock_frame(elapsed_clock);
+                    next = ui_tween_sample(&tween, frame);
+                    /* Integer pixels can round to the endpoint early. */
+                    if (!next && frame < tween.frames)
+                        next = 1;
+                }
+                else
+                    next = slide_offset(elapsed_ticks, LCD_HEIGHT, false);
+            }
+            if (dirty)
+                memcpy(p->fb, p->back, next * LCD_WIDTH * sizeof(*p->fb));
+            if (p->offset != next || dirty)
+                slide_frame(p->fb, p->back, p->card, p->offset, next);
+            p->offset = next;
+            if (p->offset)
+            {
+                if (animate)
+                    ticks = ui_clock_timeout((uint32_t)USEC_TIMER - tween.start_clock,
+                                             tween.frames, HZ);
+                else
+                {
+                    long spent = current_tick - start_tick - elapsed_ticks;
+                    ticks = MAX(0, MIN(FRAME_TICKS, ENTER_TICKS - elapsed_ticks) - spent);
+                }
+            }
+        }
+        if (!p->offset)
+        {
+            set_boost(p, false);
+            if (!view->reason)
+                painted = draw_progress(view, p->card, painted);
+        }
+
+        bool leave = ui->leave, preparing = view->preparing;
+        const char *target = view->target;
+        int reason = view->reason;
+        int action = get_action(CONTEXT_STD, ticks);
+        if (animate && !p->interrupted &&
+            (action == SYS_USB_CONNECTED || action == SYS_USB_DISCONNECTED ||
+             action == SYS_POWEROFF || action == SYS_REBOOT))
+        {
+            handoff_sheet_interrupt();
+            default_event_handler(action);
+        }
+        if (p->interrupted)
+        {
+            /* The system modal took over the display, not the proposal.
+             * Let the protocol detect lost links and keep a live ticket. */
+            int result = advance(DIALOG_CONTINUE);
+            return result == DIALOG_CONTINUE ? DIALOG_ABORT : result;
+        }
+        if (animate && action == SYS_ACCESSORY_CONNECTED && p->offset)
+        {
+            /* Dock identification has no screen of its own. Hand it the
+             * settled display without dismissing the current proposal. */
+            slide_frame(p->fb, p->back, p->card, p->offset, 0);
+            p->offset = 0;
+            set_boost(p, false);
+        }
+        int result = advance(sheet_action(ui, view, action));
+        if (result != DIALOG_CONTINUE)
+        {
+            if (animate)
+                close_native_sheet(p);
+            else
+                close_legacy_sheet(p);
+            return result;
+        }
+        dirty = leave != ui->leave || preparing != view->preparing ||
+                target != view->target || reason != view->reason;
     }
-    skin_inhibit_flush(inhibited);
+}
+
+int handoff_sheet_run(struct handoff_sheet *view, int (*advance)(int))
+{
+    struct sheet_ui ui = {
+        .small_font = font_load_ex(FONT_DIR "/12-noto-sans.fnt", 0, 48),
+        .button_font = font_load_ex(FONT_DIR "/18-noto-sans.fnt", 0, 48),
+        .large_font = font_load_ex(FONT_DIR "/26-noto-sans-medium.fnt", 0, 48),
+    };
+    bool animate = global_settings.animations;
+    struct sheet_presentation p = { .inhibited = skin_flush_inhibited() };
+    p.handle = animate ? core_alloc_free_space(HANDOFF_FRAME_BYTES) :
+        core_allocatable() >= HANDOFF_FRAME_BYTES ? core_alloc(HANDOFF_FRAME_BYTES) : -1;
+    viewport_set_fullscreen(&p.vp, SCREEN_MAIN);
+    p.outer = lcd_set_viewport(&p.vp);
+    p.fb = FBADDR(0, 0);
+    if (p.handle > 0)
+    {
+        core_pin(p.handle);
+        p.back = core_get_data(p.handle);
+        p.card = p.back + LCD_WIDTH * LCD_HEIGHT;
+        p.offset = LCD_HEIGHT;
+        memcpy(p.back, p.fb, FRAMEBUFFER_SIZE);
+    }
+    skin_inhibit_flush(true);
+    screens[0].scroll_stop();
+    skin_hold_scrolling(true);
+    backlight_on();
+    action_handoff_enter();
+    set_boost(&p, true);
+
+    if (animate)
+        native_sheet = &p;
+    int result = run_sheet(view, &ui, &p, advance, animate);
+    native_sheet = NULL;
+    if (!p.interrupted)
+        release_presentation(&p);
     if (ui.large_font >= 0) font_unload(ui.large_font);
     if (ui.button_font >= 0) font_unload(ui.button_font);
     if (ui.small_font >= 0) font_unload(ui.small_font);
-    action_wait_for_release();
+    if (animate)
+        action_handoff_enter();
+    else
+        action_wait_for_release();
     return result;
 }
 

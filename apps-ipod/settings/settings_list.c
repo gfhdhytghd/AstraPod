@@ -2415,6 +2415,7 @@ const struct settings_list settings[] = {
                    ID2P(LANG_SPIKE_CAPTION_BOTH)),
     OFFON_SETTING(0, spike_caption_scroll, LANG_SPIKE_CAPTION_SCROLL, false,
                   "spike caption scroll", NULL),
+    OFFON_SETTING(0, animations, LANG_UI_ANIMATIONS, false, "animations", NULL),
 };
 
 const int nb_settings = sizeof(settings)/sizeof(*settings);

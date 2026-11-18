@@ -1,5 +1,6 @@
 /* GPL version 2 or later. No screen, playback or allocation dependencies. */
 #include "lyrics_motion.h"
+#include "ui/animation.h"
 
 int lyrics_lerp(int a, int b, int p) { return a + (b - a) * p / 256; }
 int lyrics_ease(int p)
@@ -11,15 +12,27 @@ int lyrics_ease(int p)
 }
 bool lyrics_moving(const struct lyrics_motion *m, uint32_t now)
 {
-    return m->from != m->to && now - m->at < m->duration;
+    if (m->from == m->to)
+        return false;
+    uint32_t elapsed = now - m->at;
+    return (m->frame_clock ? ui_clock_frame(elapsed) : elapsed) < m->duration;
 }
 int lyrics_motion_at(const struct lyrics_motion *m, uint32_t now)
 {
-    if (!lyrics_moving(m, now)) return m->to;
+    if (m->from == m->to)
+        return m->to;
+    uint32_t elapsed = now - m->at;
+    if (m->frame_clock)
+    {
+        struct ui_tween tween = {.from = m->from, .to = m->to, .frames = m->duration};
+        return ui_tween_sample(&tween, ui_clock_frame(elapsed));
+    }
+    if (elapsed >= m->duration)
+        return m->to;
     return lyrics_lerp(m->from, m->to,
-                      lyrics_ease((now - m->at) * 256 / m->duration));
+                      lyrics_ease(elapsed * 256 / m->duration));
 }
-void lyrics_retarget(struct lyrics_motion *m, int to, uint32_t now, int duration)
+void lyrics_retarget(struct lyrics_motion *m, int to, uint32_t now, unsigned duration)
 {
     m->from = lyrics_motion_at(m, now);
     m->to = to;

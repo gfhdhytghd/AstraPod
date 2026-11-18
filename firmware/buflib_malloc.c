@@ -118,6 +118,28 @@ int buflib_alloc_ex(struct buflib_context *ctx, size_t size,
     return get_handle_num(ctx, handle);
 }
 
+int buflib_alloc_free_space(struct buflib_context *ctx, size_t size)
+{
+    size_t free = ctx->bufsize;
+    for (size_t i = 0; i < ctx->num_allocs; ++i)
+    {
+        if (ctx->allocs[i].size > free)
+            return -2;
+        free -= ctx->allocs[i].size;
+    }
+
+    if (size > free)
+        return -2;
+
+    struct buflib_malloc_handle *handle = get_free_handle(ctx);
+    void *data = malloc(size);
+    if (!data)
+        return -2;
+
+    *handle = (struct buflib_malloc_handle){.data = data, .user = data, .size = size};
+    return get_handle_num(ctx, handle);
+}
+
 int buflib_alloc_maximum(struct buflib_context* ctx,
                          size_t *size, struct buflib_callbacks *ops)
 {

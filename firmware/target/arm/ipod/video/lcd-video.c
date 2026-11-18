@@ -457,7 +457,8 @@ static void update_rect(int x, int y, int width, int height,
     /* Prevent the tick from triggering BCM updates while we're writing. */
     lcd_block_tick();
 
-    addr = FBADDRBUF(fb, x, y);
+    addr = fb->get_address_fn ? FBADDRBUF(fb, x, y)
+                              : fb->fb_ptr + y * LCD_WIDTH + x;
     bcmaddr = BCMA_CMDPARAM + (LCD_WIDTH*2) * y + (x << 1);
 
     if (width == LCD_WIDTH)
@@ -527,6 +528,9 @@ static void port_unlock(bool locked)
  * the display and TV state. */
 void lcd_update_rect(int x, int y, int width, int height)
 {
+    if (lcd_updates_held() && is_thread_context() && irq_enabled())
+        return;
+
     bool locked;
 
 #ifdef HAVE_LCD_UPDATE_ASYNC
@@ -623,6 +627,27 @@ void lcd_update_finish(void)
     port_unlock(true);
 }
 #endif
+
+bool lcd_present_scene(const fb_data *pixels)
+{
+    if (lcd_port_held_elsewhere()
+#ifdef HAVE_LCD_SLEEP
+        || !lcd_state.display_on
+#endif
+#ifdef HAVE_LCD_UPDATE_ASYNC
+        || bg.on
+#endif
+       )
+        return false;
+
+    struct frame_buffer_t frame = lcd_framebuffer_default;
+    frame.fb_ptr = (fb_data *)pixels;
+    frame.get_address_fn = NULL;
+    bool locked = lcd_port_lock();
+    update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT, &frame, locked);
+    port_unlock(locked);
+    return true;
+}
 
 /* Line write helper function for lcd_yuv_blit. Writes two lines of yuv420. */
 extern void lcd_write_yuv420_lines(unsigned char const * const src[3],

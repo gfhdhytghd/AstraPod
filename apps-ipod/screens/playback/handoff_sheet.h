@@ -16,6 +16,8 @@ struct handoff_sheet {
 
 /* The callback advances the handoff and returns a dialog disposition. */
 int handoff_sheet_run(struct handoff_sheet *view, int (*advance)(int));
+/* The UI thread releases the native sheet before entering a system modal. */
+void handoff_sheet_interrupt(void);
 void handoff_present_remote(void);
 
 #endif

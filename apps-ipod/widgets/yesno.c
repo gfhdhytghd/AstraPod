@@ -400,6 +400,7 @@ static enum yesno_res yesno_run(int ticks, enum yesno_res tmo_default_res,
     c.defer_usb    = defer_usb;
 
     dialog_init(&d, CONTEXT_YESNOSCREEN, title, NULL, &cb, &c);
+    d.slide = DIALOG_SLIDE_PAGE;
     dialog_run(&d, HZ / 2); /* poll for statusbar and the timeout countdown */
     return c.result;
 }

@@ -26,6 +26,16 @@
 #include "skin/skin_albumart_color.h" /* dynamic_colors_* */
 #include "dialog.h"
 #include "button_chord.h"
+#if defined(IPOD_6G) && (defined(HAVE_USB_PODLINK) || defined(SIMULATOR))
+#define DIALOG_SLIDES
+#include "button.h"
+#include "core_alloc.h"
+#include "system.h"
+#include "thread.h"
+#include "ui/animation.h"
+#include "ui/scene.h"
+#include <string.h>
+#endif
 #ifdef HAVE_WHEEL_WPS_CHORD
 #include "input/agents_shortcut.h"
 #endif
@@ -653,13 +663,15 @@ void dialog_init(struct dialog *d, int context, const char *title,
     d->fb = NULL;
     d->present = NULL;
     d->keymap = NULL;
+    d->slide = DIALOG_SLIDE_NONE;
 }
 
 /* Frame + draw the dialog on one screen. The theme parent viewport supplies the
  * font and (unless the style overrides them) the colours; the interior is the
  * callback's job. Only the box region is flushed, so the rest of the screen is
  * left untouched. */
-static void dialog_draw_one(struct dialog *d, struct screen *s, int screen_nr)
+static void dialog_draw_one(struct dialog *d, struct screen *s, int screen_nr,
+                            struct viewport *bounds)
 {
     struct viewport parent = d->parent[screen_nr];  /* theme font/colours */
     struct viewport box, content;
@@ -692,6 +704,8 @@ static void dialog_draw_one(struct dialog *d, struct screen *s, int screen_nr)
         return;
     }
     d->cb->measure(d, s, &box, d->data);            /* final geometry */
+    if (bounds)
+        *bounds = box;
     s->set_viewport_ex(&box, VP_FLAG_VP_SET_CLEAN);
     dialog_frame_box(s, &box, &d->style, &content);
 
@@ -706,10 +720,161 @@ static void dialog_draw_one(struct dialog *d, struct screen *s, int screen_nr)
         d->present();
 }
 
+#ifdef DIALOG_SLIDES
+#define DIALOG_OPEN_FRAMES ANIM_F(12)
+#define DIALOG_CLOSE_FRAMES ANIM_F(10)
+#define DIALOG_PIXELS (LCD_WIDTH * LCD_HEIGHT)
+
+struct dialog_motion {
+    struct ui_tween tween; /* the box's top edge */
+    struct viewport box;
+    unsigned int thread;
+    int handle;
+    int shown;
+    bool entering;
+};
+
+static struct dialog_motion *motion_owner;
+
+/* The active viewport can belong to the invoking list or skin. Always
+ * restore the default framebuffer and present it through the default view. */
+static void dialog_restore_display(void)
+{
+    struct viewport *prev = lcd_set_viewport(NULL);
+    lcd_update();
+    lcd_set_viewport(prev);
+}
+
+void dialog_interrupt_transition(void)
+{
+    struct dialog_motion *m = motion_owner;
+    if (!m || m->thread != thread_self())
+        return;
+    fb_data *base = core_get_data_pinned(m->handle);
+    memcpy(lcd_framebuffer_default.fb_ptr, base, FRAMEBUFFER_SIZE);
+    core_put_data_pinned(base);
+    motion_owner = NULL;
+    m->handle = core_free(m->handle);
+    if (lcd_active())
+        dialog_restore_display();
+}
+
+static void dialog_begin_transition(struct dialog_motion *m, const struct dialog *d)
+{
+    if (d->slide == DIALOG_SLIDE_NONE || !global_settings.animations || !d->cb->measure ||
+        d->fb || motion_owner || !lcd_active())
+        return;
+
+    ui_scene_interrupt();
+    if (lcd_updates_held())
+        return;
+
+    m->handle = core_alloc_free_space(2 * FRAMEBUFFER_SIZE);
+    if (m->handle <= 0)
+        return;
+
+    fb_data *base = core_get_data_pinned(m->handle);
+    memcpy(base, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
+    core_put_data_pinned(base);
+    m->thread = thread_self();
+    m->shown = LCD_HEIGHT;
+    m->entering = true;
+    motion_owner = m;
+}
+
+/* Copy a clipped box as it moves down, leaving the page outside it intact.
+ * At rest, include the original theme's shadow, if any. */
+static void dialog_blit_rect(fb_data *out, const fb_data *layer,
+                             int x, int y, int w, int h, int offset)
+{
+    int x1 = MAX(0, x);
+    int x2 = MIN(LCD_WIDTH, x + w);
+    int y1 = MAX(0, y);
+    int y2 = MIN(LCD_HEIGHT - offset, y + h);
+    if (x1 >= x2)
+        return;
+    for (int row = y1; row < y2; ++row)
+        memcpy(out + (row + offset) * LCD_WIDTH + x1, layer + row * LCD_WIDTH + x1,
+               (x2 - x1) * sizeof(*out));
+}
+
+static void dialog_paint_layer(struct dialog_motion *m, struct dialog *d)
+{
+    /* The normal painter resolves all text, theme colours and geometry. */
+    if (m->entering)
+        lcd_hold_updates(true);
+    dialog_draw_one(d, &screens[SCREEN_MAIN], SCREEN_MAIN, &m->box);
+    if (m->entering)
+        lcd_hold_updates(false);
+
+    fb_data *surfaces = core_get_data_pinned(m->handle);
+    const struct viewport *box = &m->box;
+    int shadow = MAX(0, d->style.box_shadow_offset);
+    dialog_blit_rect(surfaces + DIALOG_PIXELS, lcd_framebuffer_default.fb_ptr,
+                     box->x, box->y, box->width + shadow, box->height + shadow, 0);
+    core_put_data_pinned(surfaces);
+}
+
+static bool dialog_show_transition(struct dialog_motion *m, int y, bool final)
+{
+    fb_data *out = lcd_framebuffer_default.fb_ptr;
+    fb_data *surfaces = core_get_data_pinned(m->handle);
+    const fb_data *layer = surfaces + DIALOG_PIXELS;
+    const struct viewport *box = &m->box;
+    if (final)
+        memcpy(out, layer, FRAMEBUFFER_SIZE);
+    else
+    {
+        memcpy(out, surfaces, FRAMEBUFFER_SIZE);
+        dialog_blit_rect(out, layer, box->x, box->y, box->width, box->height,
+                         MAX(0, y - box->y));
+    }
+    bool presented = lcd_present_scene(out);
+    if (presented)
+        m->shown = y;
+    core_put_data_pinned(surfaces);
+    return presented;
+}
+
+static void dialog_close_transition(struct dialog_motion *m)
+{
+    /* If accepted during entry, continue from the position on screen. */
+    m->tween = (struct ui_tween){
+        .start_clock = USEC_TIMER, .from = m->shown, .to = LCD_HEIGHT,
+        .frames = DIALOG_CLOSE_FRAMES, .ease_in = true,
+    };
+    while (lcd_active() && m->shown < LCD_HEIGHT)
+    {
+        unsigned elapsed = (uint32_t)USEC_TIMER - m->tween.start_clock;
+        int ticks = ui_clock_timeout(elapsed, m->tween.frames, HZ);
+        if (!ticks || button_queue_wait_pending(ticks))
+            break;
+        elapsed = (uint32_t)USEC_TIMER - m->tween.start_clock;
+        unsigned frame = ui_clock_frame(elapsed);
+        int y = ui_tween_sample(&m->tween, frame);
+        if (y == LCD_HEIGHT)
+            break;
+        if (y != m->shown)
+            dialog_show_transition(m, y, false);
+    }
+    dialog_interrupt_transition();
+}
+#else
+void dialog_interrupt_transition(void)
+{
+}
+#endif
+
 int dialog_run(struct dialog *d, int poll_ticks)
 {
     int disp = DIALOG_CONTINUE;
 
+#ifdef DIALOG_SLIDES
+    struct dialog_motion motion = {0};
+    dialog_begin_transition(&motion, d);
+    bool repaint = true;
+    bool animate_close = false;
+#endif
     d->poll_ticks = poll_ticks;
 
     skin_hold_scrolling(true);
@@ -720,8 +885,26 @@ int dialog_run(struct dialog *d, int poll_ticks)
         viewportmanager_theme_enable(i, true, &d->parent[i]);
     }
 
+#ifdef DIALOG_SLIDES
+    if (motion.handle > 0)
+    {
+        fb_data *surfaces = core_get_data_pinned(motion.handle);
+        /* The action dispatcher shows the consent's chrome. A direct
+         * confirmation presents only its box over the invoking page. */
+        const fb_data *settled = d->slide == DIALOG_SLIDE_EVENT ?
+            lcd_framebuffer_default.fb_ptr : surfaces;
+        memcpy(surfaces + DIALOG_PIXELS, settled, FRAMEBUFFER_SIZE);
+        core_put_data_pinned(surfaces);
+    }
+#endif
+
     /* eat any stray keypresses from before the dialog opened */
-    action_wait_for_release();
+#ifdef DIALOG_SLIDES
+    if (motion.handle > 0)
+        action_wait_for_release_preserve_queue();
+    else
+#endif
+        action_wait_for_release();
 
     while (disp == DIALOG_CONTINUE)
     {
@@ -730,7 +913,38 @@ int dialog_run(struct dialog *d, int poll_ticks)
          * box region -- its flush is inhibited, but we still have to repaint
          * over it, the same way the list and album-covers screens do. */
         FOR_NB_SCREENS(i)
-            dialog_draw_one(d, &screens[i], i);
+        {
+#ifdef DIALOG_SLIDES
+            if (i == SCREEN_MAIN && motion.handle > 0)
+            {
+                bool first = motion.tween.frames == 0;
+                if (first || repaint || !motion.entering)
+                    dialog_paint_layer(&motion, d);
+                if (first)
+                    motion.tween = (struct ui_tween){
+                        .start_clock = USEC_TIMER, .from = LCD_HEIGHT,
+                        .to = motion.box.y, .frames = DIALOG_OPEN_FRAMES,
+                    };
+                if (motion.entering)
+                {
+                    unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER -
+                                                    motion.tween.start_clock);
+                    int y = ui_tween_sample(&motion.tween, frame);
+                    bool final = frame >= motion.tween.frames;
+                    if (y != motion.shown || repaint || final)
+                    {
+                        bool sent = dialog_show_transition(&motion, y, final);
+                        if (final && sent)
+                            motion.entering = false;
+                    }
+                }
+                else
+                    motion.shown = motion.box.y;
+                continue;
+            }
+#endif
+            dialog_draw_one(d, &screens[i], i, NULL);
+        }
 
         /* sampled before get_action so a callback can ignore the keypress
          * that merely woke the screen (matches the old yes/no behaviour) */
@@ -745,6 +959,17 @@ int dialog_run(struct dialog *d, int poll_ticks)
         if (dynamic_colors_needs_repaint()
             && (ticks == TIMEOUT_BLOCK || ticks > HZ / 10))
             ticks = HZ / 10;
+#ifdef DIALOG_SLIDES
+        if (motion.handle > 0 && motion.entering)
+        {
+            int wait = ui_clock_timeout((uint32_t)USEC_TIMER - motion.tween.start_clock,
+                                        motion.tween.frames, HZ);
+            if (!wait)
+                wait = 1; /* if DMA was busy, retry the settled frame */
+            if (ticks == TIMEOUT_BLOCK || ticks > wait)
+                ticks = wait;
+        }
+#endif
 
         skin_inhibit_flush(true);
         int action = d->keymap ? get_custom_action(CONTEXT_PLUGIN, ticks,
@@ -760,7 +985,21 @@ int dialog_run(struct dialog *d, int poll_ticks)
         else
 #endif
             disp = d->cb->on_action(d, action, d->data);
+#ifdef DIALOG_SLIDES
+        repaint = action != ACTION_NONE || dynamic_colors_needs_repaint();
+        animate_close = disp != DIALOG_ABORT && action != ACTION_NONE;
+#endif
     }
+
+#ifdef DIALOG_SLIDES
+    if (motion.handle > 0)
+    {
+        if (animate_close)
+            dialog_close_transition(&motion);
+        else
+            dialog_interrupt_transition();
+    }
+#endif
 
     if (d->cb->on_close)
         d->cb->on_close(d, d->data);

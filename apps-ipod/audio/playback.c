@@ -33,6 +33,7 @@
  *   - the public audio_* API, settings hooks, and startup
  ****************************************************************************/
 #include "config.h"
+#include "ui/scene.h"
 #include "logfile.h"
 #ifdef HAVE_USB_PODLINK
 #include "screens/playback/cider.h"
@@ -1174,15 +1175,19 @@ static void audio_reset_buffer(void)
          * boot. The buffer ends this size either way; leaving the room now is
          * the difference between finding it free and taking it. */
         size_t reserve = bg_task_reserve_bytes();
+        size_t display_reserve = ui_scene_reserve_size();
 #ifdef HAVE_USB_PODLINK
         /* Remote Cover Flow borrows one cover while local playback is paused.
          * Leave room for it without invoking the playback shrink callback. */
         reserve += CIDER_COVER_SCRATCH_BYTES + BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t);
         /* Opening the handoff must not shrink the playing buffer. Include
          * room for the sheet fonts and the framebuffer allocation header. */
-        reserve += HANDOFF_FRAME_BYTES + HANDOFF_FONT_RESERVE +
-                   BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t);
+        size_t sheet_reserve = HANDOFF_FRAME_BYTES + HANDOFF_FONT_RESERVE +
+                               BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t);
+        display_reserve = MAX(display_reserve, sheet_reserve);
 #endif
+        /* The menu releases its snapshots before a handoff takes the display. */
+        reserve += display_reserve;
         size_t layout = pcmbuf_size_reqd() + scratch_mem_size()
                       + AUDIO_BUFFER_RESERVE;
 

@@ -502,6 +502,10 @@ static int number_of_slides;
 static long pf_flat_last_input;
 static int  pf_flat_interval;
 static bool pf_flat_snap;
+/* Wheel cadence controls the 3D pose independently of album progression. */
+static bool flow_fast;
+static int flow_mix, flow_landed_direction;
+static long flow_pose_tick;
 static bool pf_flat_moving;
 /* Whether the arriving cover has taken the top of the stack from the one it is
  * replacing. See flat_animate(). */
@@ -2387,6 +2391,58 @@ static void flat_note_scroll(void)
         pf_flat_interval = (pf_flat_interval + gap) / 2;
 }
 
+static void flow_note_wheel(bool can_move)
+{
+    flat_note_scroll();
+    if (flat_view() || !can_move)
+        return;
+    if (pf_flat_interval <= HZ * 65 / 1000)
+        flow_fast = true;
+    else if (pf_flat_interval >= HZ * 120 / 1000)
+        flow_fast = false;
+}
+
+/* Keep the last incoming cover tilted briefly between wheel events.
+ * The landing continues to repaint after the logical album has settled. */
+static void flow_update_mix(void)
+{
+    long now = current_tick;
+    if (flat_view() || pf_random_spinning ||
+        TIME_AFTER(now, pf_flat_last_input + HZ * 120 / 1000))
+        flow_fast = false;
+    int elapsed = MIN((unsigned long)(now - flow_pose_tick), (unsigned long)HZ);
+    flow_pose_tick = now;
+    int delta = elapsed * PFREAL_ONE / MAX(HZ * 12 / 100, 1);
+    flow_mix = flow_fast ? MIN(PFREAL_ONE, flow_mix + delta)
+                         : MAX(0, flow_mix - delta);
+}
+
+/* Pull both piles inward together. Inner slot spacing is chosen from the
+ * projected cover width so the pair meets near the middle at full tilt. */
+static PFreal flow_inner_slot(void)
+{
+    PFreal projected = fmul(DISPLAY_WIDTH * PFREAL_ONE, fcos(itilt));
+    return MAX(0, (projected - auto_slide_spacing) / 2);
+}
+
+static void flow_shift_piles(PFreal inner)
+{
+    PFreal shift = fmul(flow_mix, offsetX - inner - auto_slide_spacing);
+    for (int i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
+    {
+        left_slides[i].cx += shift;
+        right_slides[i].cx -= shift;
+    }
+}
+
+static void flow_tilt(struct slide_data *slide, int side, PFreal progress,
+                      PFreal normal_x, PFreal inner)
+{
+    PFreal slot = inner + fmul(auto_slide_spacing, progress);
+    slide->angle += side * fmul(itilt, fmul(flow_mix, PFREAL_ONE - progress));
+    slide->cx = normal_x + fmul(flow_mix, -side * slot - normal_x);
+}
+
 static void coverflow_idle(void)
 {
     center_slide.angle = 0;
@@ -3203,6 +3259,14 @@ void set_current_slide(const int slide_index)
     buf_ctx_lock();
     int old_center_index = center_index;
     step = 0;
+    flow_mix = 0;
+    flow_fast = false;
+    if (!flat_view())
+    {
+        pf_flat_interval = flat_ticks(PF_FLAT_FLIP_MS);
+        pf_flat_last_input = current_tick;
+    }
+    flow_pose_tick = current_tick;
     pf_random_spinning = false;
     center_index = fbound(0, slide_index, number_of_slides - 1);
     if (old_center_index != center_index)
@@ -3307,7 +3371,7 @@ static void update_scroll_animation(void);
 static void show_previous_slide(void)
 {
     pf_random_spinning = false;
-    flat_note_scroll();
+    flow_note_wheel(step || center_index > 0);
     if (step == 0) {
         if (center_index > 0) {
             target = center_index - 1;
@@ -3326,7 +3390,7 @@ static void show_previous_slide(void)
 static void show_next_slide(void)
 {
     pf_random_spinning = false;
-    flat_note_scroll();
+    flow_note_wheel(step || center_index + 1 < number_of_slides);
     if (step == 0) {
         if (center_index < number_of_slides - 1) {
             target = center_index + 1;
@@ -3743,6 +3807,15 @@ static void coverflow_animate(int s, int tick, int neg, PFreal ftick)
         left_slides[0].angle = (neg * itilt) >> 16;
         left_slides[0].cx = -fmul(offsetX, fneg);
     }
+    if (flow_mix)
+    {
+        struct slide_data *incoming = s > 0 ? &right_slides[0] : &left_slides[0];
+        PFreal normal_x = incoming->cx;
+        PFreal inner = flow_inner_slot();
+        flow_shift_piles(inner);
+        flow_tilt(&center_slide, s, ftick, center_slide.cx, inner);
+        flow_tilt(incoming, -s, PFREAL_ONE - ftick, normal_x, inner);
+    }
 }
 
 static void flat_animate(int s, PFreal ftick)
@@ -3943,6 +4016,7 @@ static void update_scroll_animation(void)
     fade = ((step < 0) ? neg : tick) / 256;
 
     if (center_index == target) {
+        flow_landed_direction = -step;
         reset_slides();
         pf_state = pf_idle;
         pf_random_spinning = false;
@@ -4527,7 +4601,7 @@ static int album_covers_loop(void)
         bool dark = !lcd_active();
         int timeout;
 
-        if (!dark && (pf_state == pf_scrolling || art_owed || caption_owed))
+        if (!dark && (pf_state == pf_scrolling || flow_mix || art_owed || caption_owed))
         {
             /* There is a frame coming, so wait out the rest of its interval
              * rather than going round again to find it still not due. Trap:
@@ -4668,7 +4742,7 @@ static int album_covers_loop(void)
         if (update_scroll_lines())
             caption_owed = true;
 
-        if (pf_state == pf_scrolling)
+        if (pf_state == pf_scrolling || flow_mix)
             art_owed = true;
 
         if (seen_slides_loaded != pf_slides_loaded)
@@ -4766,8 +4840,17 @@ static int album_covers_loop(void)
             {
                 int was = center_index;
 
+                bool landing = flow_mix != 0;
+                flow_update_mix();
                 if (pf_state == pf_scrolling)
                     update_scroll_animation();
+                if (pf_state == pf_idle && (flow_mix || landing) && !flat_view())
+                {
+                    coverflow_idle();
+                    PFreal inner = flow_inner_slot();
+                    flow_shift_piles(inner);
+                    flow_tilt(&center_slide, flow_landed_direction, 0, 0, inner);
+                }
                 /* The covers no longer wipe the caption on their way past, so
                  * the crossing that hands the middle to the next album is what
                  * says the caption is out of date. */

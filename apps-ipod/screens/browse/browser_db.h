@@ -142,7 +142,7 @@ bool browser_db_row_path(struct browser_context *c,
                          struct tagcache_search *tcs, int row,
                          char *buf, size_t size);
 
-/* What an album's track list shows above itself, for the skin's %LH. Strings
+/* What an album's track list shows above itself. Strings
  * are empty where the database names nothing; year and discs are 0. */
 struct browser_db_header {
     char name[128];

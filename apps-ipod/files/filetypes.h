@@ -76,12 +76,9 @@ long filetype_get_voiceclip(int attr);
    uses audio buffer for storage, so call early in init... */
 void filetype_init(void) INIT_ATTR;
 
-void read_viewer_theme_file(void);
-void read_color_theme_file(void);
 
 /* Return the attribute (FILE_ATTR_*) of the file */
 int filetype_get_attr(const char* file);
-int filetype_get_color(const char* name, int attr);
 int filetype_get_icon(int attr);
 
 /* returns true if the attr is supported */

@@ -87,7 +87,7 @@ prefix=pre+'''
 static bool test_cider_mode;
 static bool cider_active(void){return test_cider_mode;}
 static int __attribute__((unused)) disable_irq_save_unused;
-typedef struct {int button,context,action;} action_cur_t;
+typedef struct {int button,context,action,timeout;} action_cur_t;
 '''
 # Unused source-harness mocks are irrelevant to this pure action probe.
 prefix=prefix.replace('static ', 'static __attribute__((unused)) ')
@@ -124,6 +124,7 @@ worker_pre=prefix+'''
 #define GUI_EVENT_ACTIONUPDATE 1
 typedef struct {int unused;} action_last_t;
 static void send_event(int id,void*p){(void)id;(void)p;}
+static int sb_motion_timeout(int timeout){return timeout;}
 static bool action_poll_button(action_last_t*l,action_cur_t*c){(void)l;(void)c;return true;}
 static void update_screen_has_lock(action_last_t*l,action_cur_t*c){(void)l;(void)c;}
 static bool get_action_touchscreen(action_last_t*l,action_cur_t*c){(void)l;(void)c;return false;}

@@ -11,7 +11,23 @@ struct ui_album_palette;
 
 struct native_chrome_state {
     int8_t battery, hour, minute;
-    uint8_t charging, numeric, clock_24h, link, busy;
+    uint8_t charging, numeric, clock_24h, link, busy, volume_visible, volume_percent;
+    uint8_t playmode, dock;
+};
+
+enum native_chrome_glyph {
+    CHROME_PLAY, CHROME_PAUSE, CHROME_FORWARD, CHROME_BACKWARD,
+    CHROME_BATTERY_FIRST,
+    CHROME_BATTERY_LAST = CHROME_BATTERY_FIRST + 6,
+    CHROME_CHARGE_FIRST,
+    CHROME_CHARGE_LAST = CHROME_CHARGE_FIRST + 3,
+    CHROME_LINK_WAIT, CHROME_LINK_OPEN, CHROME_DOCK,
+    CHROME_GLYPH_COUNT,
+};
+
+struct native_chrome_indicators {
+    uint8_t ink[CHROME_GLYPH_COUNT]; /* 0 is invisible, 255 is full ink */
+    int8_t battery;                /* numeric percent, or -1 if unknown */
 };
 
 struct native_chrome {
@@ -29,13 +45,15 @@ void native_chrome_close(struct native_chrome *chrome);
 
 /* Refresh the retained status values and return whether the view changed. */
 bool native_chrome_poll(struct native_chrome *chrome);
-bool native_chrome_title_fits(const struct native_chrome *chrome, const char *title);
 bool native_chrome_volume_visible(void);
+void native_chrome_indicators(const struct native_chrome_state *state,
+                             struct native_chrome_indicators *out);
 
 /* Draw into the active framebuffer without flushing. A NULL palette uses the
  * static colour tokens. Bounds and clip are both in screen coordinates. */
 void native_chrome_draw(const struct native_chrome *chrome, const char *title,
                         const struct ui_view_frame *frame,
-                        const struct ui_album_palette *palette);
+                        const struct ui_album_palette *palette,
+                        const struct native_chrome_indicators *indicators);
 
 #endif

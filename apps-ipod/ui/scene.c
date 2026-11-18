@@ -1,27 +1,34 @@
 /* PodBox scene transitions. GPL version 2+. */
 #include "config.h"
+#include "button.h"
 #include "core_alloc.h"
 #include "kernel.h"
 #include "lcd.h"
 #include "system.h"
 #include "thread.h"
-#include "settings/settings.h"
-#include "scene.h"
+#include "frame.h"
+#include "native_theme_runtime.h"
+#include "perf.h"
 #include "retained.h"
+#include "scene.h"
 #include <string.h>
 
 #define PAGE_PIXELS (LCD_WIDTH * LCD_HEIGHT)
 #define SCENE_BYTES (3 * FRAMEBUFFER_SIZE)
-#define PUSH_FRAMES ANIM_F(12)
-#define POP_FRAMES ANIM_F(10)
+#define PUSH_FRAMES ANIM_F(18)
+#define POP_FRAMES ANIM_F(15)
+#define PARALLAX_PERCENT 30
+#define COVERED_BRIGHTNESS 179
+#define MODAL_UP_FRAMES ANIM_F(16)
+#define MODAL_DOWN_FRAMES ANIM_F(12)
+#define MODAL_DIM (UI_FULL_OPACITY * 35 / 100)
 
 static struct ui_scene *owner;
 static unsigned int owner_thread;
 
 size_t ui_scene_reserve_size(void)
 {
-    return global_settings.animations || ui_native_enabled() ?
-        SCENE_BYTES + BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t) : 0;
+    return SCENE_BYTES + BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t);
 }
 
 static fb_data *surface(fb_data *data, bool front)
@@ -45,25 +52,68 @@ static void compose(fb_data *data, int offset)
     const fb_data *front = surface(data, true);
     fb_data *out = data + 2 * PAGE_PIXELS;
 
+    int covered = LCD_WIDTH - offset;
+    int parallax = covered * PARALLAX_PERCENT / 100;
+    unsigned light = UI_FULL_OPACITY -
+                     (UI_FULL_OPACITY - COVERED_BRIGHTNESS) * covered / LCD_WIDTH;
+    back += parallax;
     for (int row = 0; row < LCD_HEIGHT; row++)
     {
-        memcpy(out, back, offset * sizeof(*out));
-        memcpy(out + offset, front, (LCD_WIDTH - offset) * sizeof(*out));
+        ui_blit_dim(out, back, offset, light);
+        memcpy(out + offset, front, covered * sizeof(*out));
         back += LCD_WIDTH;
         front += LCD_WIDTH;
         out += LCD_WIDTH;
     }
 }
 
-static void release_scene(struct ui_scene *scene)
+static void compose_modal(fb_data *data, int offset)
 {
-    if (!scene->handle)
+    const fb_data *back = surface(data, false);
+    const fb_data *front = surface(data, true);
+    fb_data *out = data + 2 * PAGE_PIXELS;
+    unsigned light = UI_FULL_OPACITY - MODAL_DIM * (LCD_HEIGHT - offset) / LCD_HEIGHT;
+    ui_blit_dim(out, back, offset * LCD_WIDTH, light);
+    memcpy(out + offset * LCD_WIDTH, front,
+           (LCD_HEIGHT - offset) * LCD_WIDTH * sizeof(*out));
+}
+
+static void complete_transition(struct ui_scene *scene)
+{
+    if (owner != scene)
         return;
     owner = NULL;
     lcd_hold_updates(false);
-    scene->handle = core_free(scene->handle);
     scene->capturing = false;
+    scene->automatic = false;
     cpu_boost(false);
+    ui_perf_end(scene->trace);
+    scene->trace = 0;
+}
+
+static void release_scene(struct ui_scene *scene)
+{
+    complete_transition(scene);
+    if (scene->handle > 0)
+        scene->handle = core_free(scene->handle);
+}
+
+static void own_transition(struct ui_scene *scene, const char *route)
+{
+    owner_thread = thread_self();
+    owner = scene;
+    scene->trace = ui_perf_begin(route);
+    lcd_hold_updates(true);
+    cpu_boost(true);
+}
+
+static bool present(const fb_data *pixels)
+{
+    uint32_t start = USEC_TIMER;
+    if (!lcd_present_scene(pixels))
+        return false;
+    ui_note_flush((uint32_t)USEC_TIMER - start);
+    return true;
 }
 
 void ui_scene_cancel(struct ui_scene *scene)
@@ -82,10 +132,58 @@ void ui_scene_interrupt(void)
         ui_scene_cancel(owner);
 }
 
-bool ui_scene_capture(struct ui_scene *scene, const void *from, const void *to,
-                      bool push)
+void ui_scene_fade_out(void)
 {
-    if (!global_settings.animations || !lcd_active() || (owner && owner != scene))
+    unsigned duration = ui_theme_duration(ANIM_F(12));
+    if (!duration || !lcd_active())
+        return;
+    ui_scene_interrupt();
+    int handle = core_alloc_free_space(FRAMEBUFFER_SIZE);
+    if (handle <= 0)
+        return;
+
+    fb_data *source = core_get_data_pinned(handle);
+    fb_data *framebuffer = lcd_framebuffer_default.fb_ptr;
+    memcpy(source, framebuffer, FRAMEBUFFER_SIZE);
+    cpu_boost(true);
+    lcd_hold_updates(true);
+    unsigned trace = ui_perf_begin("shutdown-fade");
+    struct ui_tween fade = { .start_clock = USEC_TIMER, .frames = duration,
+                            .from = UI_FULL_OPACITY, .to = 0 };
+    int last = -1;
+    while (lcd_active())
+    {
+        uint32_t elapsed = (uint32_t)USEC_TIMER - fade.start_clock;
+        unsigned frame = ui_clock_frame(elapsed);
+        int level = ui_tween_sample(&fade, frame);
+        if (level != last)
+        {
+            uint32_t start = USEC_TIMER;
+            ui_blit_dim(framebuffer, source, PAGE_PIXELS, level);
+            ui_note_render((uint32_t)USEC_TIMER - start);
+            if (present(framebuffer))
+                last = level;
+        }
+        if (!last || frame > duration + ANIM_F(2))
+            break;
+        int timeout = ui_clock_poll_timeout(elapsed, duration, HZ);
+        if (timeout > 0)
+            sleep(timeout);
+        else
+            yield();
+    }
+    lcd_hold_updates(false);
+    cpu_boost(false);
+    core_put_data_pinned(source);
+    core_free(handle);
+    ui_perf_end(trace);
+}
+
+static bool capture_scene(struct ui_scene *scene, const void *from, const void *to,
+                          bool push, const char *route)
+{
+    unsigned frames = ui_theme_duration(push ? PUSH_FRAMES : POP_FRAMES);
+    if (!frames || !lcd_active() || (owner && owner != scene))
         return false;
 
     uint32_t now = USEC_TIMER;
@@ -96,10 +194,7 @@ bool ui_scene_capture(struct ui_scene *scene, const void *from, const void *to,
         if (handle <= 0)
             return false;
         scene->handle = handle;
-        owner_thread = thread_self();
-        owner = scene;
-        lcd_hold_updates(true);
-        cpu_boost(true);
+        own_transition(scene, route);
     }
     int offset = push ? LCD_WIDTH : 0;
     if (active && from == (push ? scene->back_page : scene->front_page) &&
@@ -130,11 +225,129 @@ bool ui_scene_capture(struct ui_scene *scene, const void *from, const void *to,
     scene->target_front = push;
     scene->tween = (struct ui_tween){
         .from = offset, .to = push ? 0 : LCD_WIDTH,
-        .frames = push ? PUSH_FRAMES : POP_FRAMES, .ease_in = !push,
+        .frames = frames, .ease_in = !push,
     };
     scene->last_offset = -1;
     scene->capturing = true;
+    scene->automatic = false;
     return true;
+}
+
+bool ui_scene_capture(struct ui_scene *scene, const void *from, const void *to,
+                      bool push)
+{
+    return capture_scene(scene, from, to, push, push ? "push" : "pop");
+}
+
+void ui_scene_boot(struct ui_scene *scene)
+{
+    if (capture_scene(scene, scene, NULL, true, "boot"))
+        scene->automatic = true;
+}
+
+void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bool push)
+{
+    if (from != to && ui_scene_capture(scene, from, to, push))
+        scene->automatic = true;
+}
+
+static void open_panel(struct ui_scene *scene, bool vertical, const char *route)
+{
+    unsigned frames = ui_theme_duration(vertical ? MODAL_UP_FRAMES : PUSH_FRAMES);
+    if (!frames || !lcd_active())
+        return;
+
+    ui_scene_interrupt();
+    if (owner)
+        return;
+    scene->handle = core_alloc_free_space(SCENE_BYTES);
+    if (scene->handle <= 0)
+        return;
+
+    fb_data *data = core_get_data_pinned(scene->handle);
+    memcpy(surface(data, false), lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
+    core_put_data_pinned(data);
+    scene->modal = true;
+    scene->vertical = vertical;
+    scene->target_front = true;
+    scene->capturing = true;
+    scene->automatic = true;
+    scene->last_offset = -1;
+    scene->tween = (struct ui_tween){
+        .from = vertical ? LCD_HEIGHT : LCD_WIDTH, .to = 0, .frames = frames,
+    };
+    own_transition(scene, route);
+}
+
+void ui_scene_open_modal(struct ui_scene *scene, const char *route)
+{
+    open_panel(scene, true, route);
+}
+
+void ui_scene_open_page(struct ui_scene *scene, const char *route)
+{
+    open_panel(scene, false, route);
+}
+
+void ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *route)
+{
+    if (!scene->modal || scene->handle <= 0)
+        return;
+    unsigned duration = scene->vertical ? MODAL_DOWN_FRAMES : POP_FRAMES;
+    unsigned frames = animate ? ui_theme_duration(duration) : 0;
+    if (!frames || !lcd_active() || (owner && owner != scene))
+    {
+        release_scene(scene);
+        return;
+    }
+    uint32_t now = USEC_TIMER;
+    int offset = owner == scene
+        ? position(scene, ui_clock_frame(now - scene->tween.start_clock)) : 0;
+    complete_transition(scene);
+    own_transition(scene, route);
+
+    fb_data *data = core_get_data_pinned(scene->handle);
+    memcpy(surface(data, true), lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
+    memcpy(lcd_framebuffer_default.fb_ptr, surface(data, false), FRAMEBUFFER_SIZE);
+    core_put_data_pinned(data);
+    scene->target_front = false;
+    scene->last_offset = -1;
+    scene->tween = (struct ui_tween){
+        .start_clock = USEC_TIMER, .from = offset,
+        .to = scene->vertical ? LCD_HEIGHT : LCD_WIDTH, .frames = frames, .ease_in = true,
+    };
+    while (owner == scene)
+    {
+        ui_scene_update(scene, false);
+        if (owner != scene)
+            break;
+        int timeout = ui_scene_timeout(scene, TIMEOUT_BLOCK);
+#if defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))
+        if (button_queue_wait_pending(timeout))
+            break;
+#else
+        sleep(timeout);
+#endif
+    }
+    if (owner == scene)
+        ui_scene_cancel(scene);
+}
+
+bool ui_scene_automatic(void)
+{
+    return owner && owner->automatic && owner_thread == thread_self();
+}
+
+int ui_scene_poll(int timeout)
+{
+    if (!ui_scene_automatic())
+        return timeout;
+    struct ui_scene *scene = owner;
+    if (scene->capturing)
+        ui_scene_start(scene);
+    else
+        ui_scene_update(scene, false);
+    return ui_scene_timeout(scene, timeout);
 }
 
 void ui_scene_start(struct ui_scene *scene)
@@ -148,7 +361,7 @@ void ui_scene_start(struct ui_scene *scene)
 
 void ui_scene_update(struct ui_scene *scene, bool target_changed)
 {
-    if (!scene->handle || scene->capturing)
+    if (owner != scene || scene->capturing)
         return;
     if (!lcd_active())
     {
@@ -159,28 +372,38 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
     unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER - scene->tween.start_clock);
     if (frame >= scene->tween.frames || scene->tween.from == scene->tween.to)
     {
-        if (lcd_present_scene(lcd_framebuffer_default.fb_ptr))
-            release_scene(scene);
+        if (present(lcd_framebuffer_default.fb_ptr))
+        {
+            if (scene->modal && scene->target_front)
+                complete_transition(scene);
+            else
+                release_scene(scene);
+        }
         return;
     }
 
     int offset = position(scene, frame);
     if (offset == scene->last_offset && !target_changed)
         return;
-    scene->last_offset = offset;
 
+    uint32_t start = USEC_TIMER;
     fb_data *data = core_get_data_pinned(scene->handle);
     if (target_changed)
         memcpy(surface(data, scene->target_front), lcd_framebuffer_default.fb_ptr,
                FRAMEBUFFER_SIZE);
-    compose(data, offset);
-    lcd_present_scene(data + 2 * PAGE_PIXELS);
+    if (scene->vertical)
+        compose_modal(data, offset);
+    else
+        compose(data, offset);
+    ui_note_render((uint32_t)USEC_TIMER - start);
+    if (present(data + 2 * PAGE_PIXELS))
+        scene->last_offset = offset;
     core_put_data_pinned(data);
 }
 
 int ui_scene_timeout(const struct ui_scene *scene, int timeout)
 {
-    if (!scene->handle || scene->capturing || timeout == TIMEOUT_NOBLOCK)
+    if (owner != scene || scene->capturing || timeout == TIMEOUT_NOBLOCK)
         return timeout;
 
     uint32_t elapsed = (uint32_t)USEC_TIMER - scene->tween.start_clock;
@@ -190,6 +413,6 @@ int ui_scene_timeout(const struct ui_scene *scene, int timeout)
     if (position(scene, frame) != scene->last_offset)
         return TIMEOUT_NOBLOCK;
 
-    int ticks = ui_clock_timeout(elapsed, scene->tween.frames, HZ);
+    int ticks = ui_clock_poll_timeout(elapsed, scene->tween.frames, HZ);
     return timeout == TIMEOUT_BLOCK ? ticks : MIN(ticks, timeout);
 }

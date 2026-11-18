@@ -476,7 +476,7 @@ static const char *get_name(int n, void *data, char *buffer, size_t len)
         return names + rows[n];
     if (b < 0)
         return str(top_row[top_kinds[n]].lang_id);
-    return names + books[b].title;  /* how far through is %Lr's, for a gauge */
+    return names + books[b].title;
 }
 
 static unsigned int art_hash(int n, void *data)
@@ -487,11 +487,9 @@ static unsigned int art_hash(int n, void *data)
     return b < 0 ? 0 : art_cache_dir_hash(names + books[b].path);
 }
 
-static const struct bitmap *get_art(int n, void *data, struct dim *size,
-                                    const struct img_filter *filter,
-                                    uint32_t filter_hash)
+static const struct bitmap *get_art(int n, void *data, struct dim *size)
 {
-    return browser_art_row(n, data, art_hash, size, filter, filter_hash);
+    return browser_art_row(n, data, art_hash, size);
 }
 
 /* An author's photograph, keyed by their name */
@@ -505,16 +503,12 @@ static unsigned int author_art_hash(int n, void *data)
 }
 
 static const struct bitmap *get_author_art(int n, void *data,
-                                           struct dim *size,
-                                           const struct img_filter *filter,
-                                           uint32_t filter_hash)
+                                           struct dim *size)
 {
-    return browser_art_row(n, data, author_art_hash, size, filter,
-                           filter_hash);
+    return browser_art_row(n, data, author_art_hash, size);
 }
 
-/* %Lr: how far through a book, for a theme's gauge: a finished one is full,
- * one not started has none */
+/* A finished book gets a full indicator. An unread book has none. */
 static int get_range(int n, void *data)
 {
     int b = book_at(n);
@@ -765,8 +759,6 @@ static int show(char *path, size_t size, int *selection, int *list)
         else if (global_settings.db_ebookauthorart
                  && showing == SHOW_AUTHORS)
             info.get_albumart = get_author_art;
-        browser_set_showing_art(global_settings.db_ebookart
-                                || info.get_albumart != NULL);
         if (info.get_albumart)
             info.row_height = global_settings.db_art_row_height;
         info.action_callback = action_cb;
@@ -837,7 +829,6 @@ static int show(char *path, size_t size, int *selection, int *list)
     } while (marked_row >= 0);
 
     browser_albumart_invalidate();
-    browser_set_showing_art(false);
     return ret;
 }
 

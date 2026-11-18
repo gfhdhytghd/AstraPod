@@ -21,26 +21,15 @@ audiobook - all on the player.
 
 <img src="docs/podbox/images/ss_grid_art_colours.png" alt="Screenshot"/>
 
-The interface re-colours itself from the art of what is playing. PodBox ships with
-[Scrim](themes/scrim/README.md), a new theme built around it, with art filters, translucent
-panels and a spectrum visualiser. It comes in two variants with different Now Playing screens.
+The native interface takes its colours from album art. Scrim is the default;
+Light uses a solid background. **Settings → Appearance → Native theme**
+switches between them and any installed .podtheme files.
 
-- Dynamic colours from the album or artist art, applied to every colour the theme uses
-  - Theme dependent
-  - `Settings > Appearance > Interface Colours > Dynamic Colors`
-- Choose whether the album's lighter or darker colour becomes the background
-  - `Settings > Appearance > Interface Colours > Dynamic Colors Background`
-- Choose whether long text scrolls, or is cut short with "..."
-  - `Settings > Appearance > Scrolling > Enabled`, on by default
-- Your appearance changes are saved with the theme you made them in, so switch back to a theme
-  and your changes come with it, and a theme never picks up changes made in another
-  - Reset them with `Settings > Appearance > Forget My Changes`
+- Choose whether long text scrolls or is truncated under Appearance → Scrolling.
 - Choose what is on the main menu and in what order, including items promoted from the Music menu
   - `Settings > Appearance > Menus > Edit Main Menu`
 - Choose what is in the Music menu and all the context menus
   - `Settings > Appearance > Menus`
-- Change a theme's configuration on the player
-  - `Settings > Appearance > Theme Options`, when the theme offers them.
 - Show album art or artist art on the Now Playing screen
   - Theme dependent (the theme must show album art)
   - `Settings > Appearance > Now Playing Screen > Now Playing Artwork`
@@ -457,9 +446,6 @@ for the full list.
 - `Back` and `Menu` behave the same way in every menu
 - PodBox works as a DAC, soundcard, and can even pretend to be an iPhone to connect to modern cars -
   see [Connectivity](#connectivity)
-- New theme tags for richer graphics and easier theme building
-  - See [`custom-skin-tags.md`](docs/podbox/custom-skin-tags.md)
-
 ---
 
 # Installation
@@ -641,27 +627,11 @@ at least once, and run the tools from `.rockbox/tools/` in a command prompt:
    an hour rather than many on the player. Then turn the engine on with
    `Settings > Library > Playlist Engine > Enabled`.
 
-# Installing themes
+# Native themes
 
-Scrim, the theme PodBox ships with, gets the most out of it. Any Rockbox theme works, but without
-changes it will not show dynamic colours or art in lists.
-
-More [themes](themes/README.md) made for PodBox are a separate download, one zip each or all of
-them in `all-themes.zip`, from the
-[Themes release](https://github.com/anthonyfletcher/podbox/releases/tag/Themes):
-
-- [themify 2](themes/themify_2/README.md)
-- [obsede 2](themes/obsede_2/README.md)
-- [bony](themes/bony/README.md)
-- [iclassic square](themes/iclassic_square/README.md) - classic, dark and light
-- [jive](themes/jive/README.md)
-
-Unzip onto the root of the iPod, the same way you installed PodBox, then pick
-it under `Settings > Appearance > Load Theme`. Each zip carries the fonts its theme needs, so
-they can be installed in any order and on their own.
-
-**Update your themes whenever you update PodBox.** Themes are rebuilt for each release, and a
-theme made for new firmware can fail on old firmware.
+Save custom `.podtheme` files in `.rockbox/native-themes/` and select them
+under **Settings → Appearance → Native theme**. The [theme format](docs/podbox/native-theme-format.md)
+documents colours, art-based palettes, fonts, geometry and animation speed.
 
 ---
 
@@ -776,8 +746,7 @@ while.
 See [`technically-curious.md`](docs/podbox/technically-curious.md) for the history of PodBox and
 how to build your own version.
 
-Theme builders: see [`theme-guide.md`](docs/podbox/theme-guide.md) for guidance on creating
-themes for PodBox.
+See the [native theme format](docs/podbox/native-theme-format.md) for custom themes.
 
 # Credits and licence
 
@@ -830,19 +799,18 @@ Built on the work of:
 
 ### Fonts
 
-Each theme carries the full licence text of the fonts it ships, beside them in
-its own `.rockbox/fonts/`. The links below point at one copy of each.
+Font licences ship beside the fonts in `.rockbox/fonts/`.
 
 - Material Design Icons
   - Created by Google (https://fonts.google.com/icons)
   - Licensed under the Apache License Version 2.0 —
-    [full text](themes/scrim/.rockbox/fonts/LICENSE-Material-Design-Icons.txt)
+    [full text](apps-ipod/fonts/LICENSE-Material-Design-Icons.txt)
 - Noto Sans/Serif Font
   - Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
   - Noto Sans built from MicroNotoSans - a fork of Noto Sans by Evan Kenny aka [Dook](https://d00k.net/)
   - Copyright 2026 Micro Noto Sans Authors (https://github.com/D0-0K/MicroNotoSans)
   - Licensed under the SIL Open Font License, Version 1.1 —
-    [full text](themes/scrim/.rockbox/fonts/LICENSE-Noto.txt)
+    [full text](apps-ipod/fonts/LICENSE-Noto.txt)
 - Seven Fifteen Font
   - Copyright Douglas Vautour (https://burpyfresh.itch.io/seven-fifteen-font)
   - Bundled together with UnifontEX, a fork of GNU Unifont maintained by stgiga
@@ -851,18 +819,7 @@ its own `.rockbox/fonts/`. The links below point at one copy of each.
   - Seven Fifteen licensed under CC BY-SA 4.0; UnifontEX under the GNU General
     Public License version 2 or later with the GNU font embedding exception, or
     the SIL Open Font License version 1.1 —
-    [full text](themes/scrim/.rockbox/fonts/LICENSE-Seven-Fifteen.txt)
-- League Spartan Font
-  - Copyright 2020 The League Spartan Project Authors (https://github.com/theleagueof/league-spartan)
-  - Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari)
-  - Copyright 2026 Micro Noto Sans Authors (https://github.com/D0-0K/MicroNotoSans)
-  - Licensed under the SIL Open Font License, Version 1.1 —
-    [full text](themes/themify_2/.rockbox/fonts/LICENSE-LeagueSpartan.txt)
-- ProFont Font
-  - Copyright 2014 Andrew Welch, Carl R. Osterwald, Stephen C. Gilardi
-  - Licensed under the MIT License —
-    [full text](themes/bony/.rockbox/fonts/LICENSE-ProFont.txt)
-
+    [full text](apps-ipod/fonts/LICENSE-Seven-Fifteen.txt)
 ### Docks, receivers and remotes (iAP)
 
 Thank you to the following, whose code or findings the dock and remote support is built on.

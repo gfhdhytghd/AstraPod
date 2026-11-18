@@ -43,7 +43,6 @@
 #include "kernel.h"
 #include "files/filetypes.h"
 #include "settings/settings.h"
-#include "skin/skin_engine.h"
 #include "audio.h"
 #include "usb.h"
 #include "audio/play_status.h"
@@ -70,7 +69,6 @@
 #include "input/agents_shortcut.h"
 #include "screens/covers/album_covers.h"
 #include "speech/announce.h"
-#include "skin/backdrop.h"
 #include "quick_screen.h"
 #include "screens/shortcuts.h"
 #include "system/appevents.h"
@@ -80,6 +78,7 @@
 #include "playlist/viewer.h"
 #include "wps.h"
 #include "ui/native_wps.h"
+#include "ui/scene.h"
 #include "viewers/lyric_viewer/lyric_viewer.h"
 #include "cider.h"
 #include "cider_wps.h"
@@ -89,11 +88,9 @@
 #endif
 #include "cider_controls.h"
 #include "cider_library.h"
-#include "skin/statusbar_skinned.h"
 #include "database/sound_mix.h"
 #include "database/tagcache.h"
 #include "metadata.h"
-#include "skin/wps_internals.h"
 #include "speech/talk.h"
 #include "audio/spoken_speed.h"   /* spoken_word_track, the rewinds */
 
@@ -102,36 +99,11 @@
 #define MIN_FF_REWIND_STEP 500
 
 static struct wps_state wps_state;
-static bool native_theme_entry;
+static bool wps_fullscreen;
 
 /* initial setup of wps_data  */
 static void wps_state_init(void);
 static void track_info_callback(unsigned short id, void *param);
-
-#define WPS_DEFAULTCFG WPS_DIR "/rockbox_default.wps"
-#define DEFAULT_WPS(screen) (WPS_DEFAULTCFG)
-
-char* wps_default_skin(enum screen_type screen)
-{
-    static char *skin_buf[NB_SCREENS] = {
-            "%X(d)\n"
-            "%s%?it<%?in<%in. |>%it|%fn>\n"
-            "%s%?ia<%ia|%?d(2)<%d(2)|%(root%)>>\n"
-            "%s%?id<%id|%?d(1)<%d(1)|%(root%)>> %?iy<%(%iy%)|>\n\n"
-            "%al%pc/%pt%ar[%pp:%pe]\n"
-            "%fbkBit %?fv<avg|> %?iv<%(id3v%iv%)|%(no id3%)>\n"
-            "%pb\n%pm\n",
-        };
-    return skin_buf[screen];
-}
-
-static void update_non_static(void)
-{
-    if (native_wps_active())
-        return;
-    FOR_NB_SCREENS(i)
-        skin_update(WPS, i, SKIN_REFRESH_NON_STATIC);
-}
 
 void wps_do_action(enum wps_do_action_type action, bool updatewps)
 {
@@ -185,15 +157,8 @@ void wps_do_action(enum wps_do_action_type action, bool updatewps)
         book_resume_save();
     }
 
-    /* Bugfix only do a skin refresh if in one of the below screens */
-    enum current_activity act = get_current_activity();
-
-    bool refresh = (act == ACTIVITY_FM ||
-                    act == ACTIVITY_WPS ||
-                    act == ACTIVITY_RECORDING);
-
-    if (updatewps && refresh)
-        update_non_static();
+    if (updatewps)
+        native_wps_invalidate();
 }
 
 
@@ -291,13 +256,10 @@ static bool seek_loop(int button, bool seek_from_end, void (*draw)(void))
                    displays corectly */
                 gstate->ff_rewind_count = ff_rewind_count;
 
-                if (draw) draw();
-                else FOR_NB_SCREENS(i)
-                {
-                    skin_update(WPS, i,
-                                SKIN_REFRESH_PLAYER_PROGRESS |
-                                SKIN_REFRESH_DYNAMIC);
-                }
+                if (draw)
+                    draw();
+                else
+                    native_wps_render(gstate, true);
 
                 break;
 
@@ -312,6 +274,8 @@ static bool seek_loop(int button, bool seek_from_end, void (*draw)(void))
                 break;
 
             default:
+                if (button == ACTION_NONE && !draw && ff_rewind)
+                    native_wps_render(gstate, true);
                 if(default_event_handler(button) == SYS_USB_CONNECTED) {
                     play_status_set_ffmode(0);
                     usb = true;
@@ -321,7 +285,8 @@ static bool seek_loop(int button, bool seek_from_end, void (*draw)(void))
         }
         if (!exit)
         {
-            button = get_action(CONTEXT_WPS|ALLOW_SOFTLOCK,TIMEOUT_BLOCK);
+            int timeout = !draw && native_wps_animating() ? 1 : TIMEOUT_BLOCK;
+            button = get_action(CONTEXT_WPS|ALLOW_SOFTLOCK, timeout);
             if (button != ACTION_WPS_SEEKFWD
                 && button != ACTION_WPS_SEEKBACK
                 && button != 0 && !IS_SYSEVENT(button))
@@ -584,132 +549,43 @@ static void wps_lcd_activation_hook(unsigned short id, void *param)
     (void)id;
     (void)param;
     native_wps_invalidate();
-    skin_request_full_update(WPS);
     /* force timeout in wps main loop, so that the update is instantly */
     button_queue_post(BUTTON_NONE, 0);
 }
 
-static void gwps_leave_wps(bool theme_enabled)
+static void leave_playback(void)
 {
     cider_spectrum_wps(false);
     native_wps_close();
-    if (native_theme_entry)
+    if (wps_fullscreen)
     {
-        screens[SCREEN_MAIN].scroll_stop();
-        if (theme_enabled)
-        {
-            skin_backdrop_show(sb_get_backdrop(SCREEN_MAIN));
-            viewportmanager_theme_undo(SCREEN_MAIN, false);
-            native_theme_entry = false;
-        }
+        viewportmanager_theme_undo(SCREEN_MAIN, false);
+        wps_fullscreen = false;
     }
-    else FOR_NB_SCREENS(i)
-    {
-        struct gui_wps *gwps = skin_get_gwps(WPS, i);
-        gwps->display->scroll_stop();
-        if (theme_enabled)
-        {
-            skin_backdrop_show(sb_get_backdrop(i));
-            viewportmanager_theme_undo(i, skin_has_sbs(gwps));
-        }
-    }
-
-    /* Play safe and unregister the hook */
     remove_event(LCD_EVENT_ACTIVATION, wps_lcd_activation_hook);
-    /* unhandle statusbar update delay */
-    sb_skin_set_update_delay(DEFAULT_UPDATE_DELAY);
 }
 
-static void restore_theme(void)
+static void enter_playback(const struct wps_state *state)
 {
-    FOR_NB_SCREENS(i)
+    if (!wps_fullscreen)
     {
-        struct gui_wps *gwps = skin_get_gwps(WPS, i);
-        struct screen *display = gwps->display;
-        display->scroll_stop();
-        viewportmanager_theme_enable(i, skin_has_sbs(gwps), NULL);
-    }
-}
-
-/*
- * display the wps on entering or restoring */
-static void gwps_enter_wps(bool theme_enabled)
-{
-    cider_wps_enter();
-    struct gui_wps *gwps;
-    struct screen *display;
-    if (theme_enabled)
-    {
-        native_theme_entry = false;
-        restore_theme();
-    }
-    FOR_NB_SCREENS(i)
-    {
-        gwps = skin_get_gwps(WPS, i);
-        display = gwps->display;
-        display->scroll_stop();
-        sb_set_title_text(NULL, Icon_NOICON, i);
-        /* Update the values in the first (default) viewport - in case the user
-           has modified the statusbar or colour settings */
-        if (display->depth > 1)
-        {
-            struct skin_viewport *svp = skin_find_item(VP_DEFAULT_LABEL_STRING,
-                                                       SKIN_FIND_VP, gwps->data);
-            if (svp)
-            {
-                struct viewport *vp = &svp->vp;
-                vp->fg_pattern = display->get_foreground();
-                vp->bg_pattern = display->get_background();
-            }
-        }
-        /* make the backdrop actually take effect */
-        skin_backdrop_show(gwps->data->backdrop_id);
-        display->clear_display();
-        skin_update(WPS, i, SKIN_REFRESH_ALL);
-        skin_mark_dirty(i);
-    }
-    /* force statusbar/skin update since we just cleared the whole screen */
-    send_event(GUI_EVENT_ACTIONUPDATE, (void*)1);
-}
-
-static void enter_playback(const struct wps_state *state, bool theme_enabled)
-{
-    native_wps_close();
-    if (!native_wps_open(state))
-    {
-        skin_request_full_update(WPS);
-        skin_restart_input_timer();
-        gwps_enter_wps(theme_enabled);
-        return;
-    }
-
-    cider_wps_enter();
-    if (theme_enabled)
         viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
-    native_theme_entry = true;
-    screens[SCREEN_MAIN].scroll_stop();
-    skin_backdrop_show(-1);
-    native_wps_refresh(state);
-}
-
-static void playback_skin_fallback(void)
-{
-    native_wps_close();
-    skin_request_full_update(WPS);
-    skin_restart_input_timer();
-    gwps_enter_wps(false);
+        wps_fullscreen = true;
+    }
+    if (!native_wps_active())
+        native_wps_open(state);
+    native_wps_invalidate();
 }
 
 static long do_wps_exit(long action)
 {
     audio_pause();
-    update_non_static();
     book_resume_save();
     audio_stop();
 
     ab_reset_markers();
 
-    gwps_leave_wps(true);
+    leave_playback();
     (void)action;
     if (global_settings.browse_current)
         return GO_TO_PREVIOUS_BROWSER;
@@ -748,13 +624,13 @@ static long do_party_mode(long action)
     return action;
 }
 
-/* Album covers over the WPS, entered with the theme off. True when the WPS
+/* Album covers takes ownership of the display. True when the WPS
  * is to be left, for the screen in *go_to. */
 static bool show_album_covers(long *go_to, bool return_agents)
 {
     if (cover_nav_playing())
     {
-        gwps_leave_wps(true);
+        leave_playback();
         *go_to = cider_active() ? cider_browse_covers(false) : GO_TO_ALBUM_COVERS;
         return true;
     }
@@ -762,11 +638,11 @@ static bool show_album_covers(long *go_to, bool return_agents)
     if (cider_active())
     {
         cover_nav_begin(GO_TO_WPS);
-        gwps_leave_wps(true);
+        leave_playback();
         *go_to = cider_browse_covers(true);
         return true;
     }
-    gwps_leave_wps(false);
+    leave_playback();
     cover_nav_begin(GO_TO_WPS);
     bool remote_return;
     int ret = album_covers_return(NULL, &remote_return);
@@ -776,7 +652,7 @@ static bool show_album_covers(long *go_to, bool return_agents)
         album_covers_cancel_resume();
         if (!remote_return)
         {
-            gwps_leave_wps(true);
+            leave_playback();
             *go_to = return_agents ? GO_TO_AGENTS : GO_TO_PREVIOUS;
             return true;
         }
@@ -796,7 +672,7 @@ static bool show_album_covers(long *go_to, bool return_agents)
     else
         return false;
 
-    gwps_leave_wps(true);
+    leave_playback();
     return true;
 }
 
@@ -863,25 +739,24 @@ static inline int action_wpsab_single(long button)
  *      b)  return with a value evaluated by root_menu.c, in this case the wps
  *          is really left, and root_menu will handle the next screen
  *
- * In either way, call gwps_leave_wps(true), in order to restore the correct
- * "main screen" backdrops and statusbars
+ * Leave playback to restore the normal status-bar viewport.
  */
-static long wps_run(bool return_agents);
+static long wps_run(bool return_agents, struct ui_scene *lyrics_scene);
 long gui_wps_show(bool return_agents)
 {
     if (!agents_nav_enter(AGENTS_NAV_WPS)) return GO_TO_PREVIOUS;
-    long result = wps_run(return_agents);
+    struct ui_scene lyrics_scene = {0};
+    long result = wps_run(return_agents, &lyrics_scene);
+    ui_scene_cancel(&lyrics_scene);
     agents_nav_leave(AGENTS_NAV_WPS);
     return result;
 }
 
-static long wps_run(bool return_agents)
+static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
 {
     long button = 0;
     bool restore = true;
     bool exit = false;
-    bool update = false;
-    bool theme_enabled = true;
     long last_left = 0, last_right = 0;
     struct wps_state *state = get_wps_state();
 
@@ -894,7 +769,7 @@ static long wps_run(bool return_agents)
         if (nav == AGENTS_NAV_WPS) agents_nav_take(nav);
         else if (nav == AGENTS_NAV_AGENTS)
         {
-            gwps_leave_wps(true);
+            leave_playback();
             return GO_TO_AGENTS;
         }
         else if (nav == AGENTS_NAV_BACK)
@@ -908,14 +783,13 @@ static long wps_run(bool return_agents)
             agents_nav_take(nav);
             select_cover_source();
             long go_to;
-            theme_enabled = false;
             if (show_album_covers(&go_to, return_agents)) return go_to;
             restore = true;
         }
         if (!cider_wps_poll())
         {
-            if (native_theme_entry || native_wps_active())
-                gwps_leave_wps(true);
+            if (wps_fullscreen)
+                leave_playback();
             return GO_TO_PREVIOUS;
         }
         cider_wps_update(state);
@@ -932,49 +806,22 @@ static long wps_run(bool return_agents)
             }
         }
 
+        bool submit = true;
 #ifdef HAVE_USB_PODLINK
-        bool dissolve = handoff_take_dissolve();
-        if (dissolve) skin_inhibit_flush(true);
+        submit = !handoff_take_dissolve();
 #endif
         if (restore)
         {
             restore = false;
             add_event(LCD_EVENT_ACTIVATION, wps_lcd_activation_hook);
-        /* we remove the update delay since it's not very usable in the wps,
-         * e.g. during volume changing or ffwd/rewind */
-            sb_skin_set_update_delay(0);
-            update = true;
-            enter_playback(state, theme_enabled);
-            theme_enabled = true;
+            enter_playback(state);
         }
         else
-        {
             gwps_caption_backlight(state);
-
-            if (native_wps_active() && !native_wps_refresh(state))
-                playback_skin_fallback();
-            if (!native_wps_active()) FOR_NB_SCREENS(i)
-            {
-                /* currently, all remotes are readable without backlight
-                 * so still update those */
-                if (lcd_active() || (i != SCREEN_MAIN))
-                {
-                    bool full_update = skin_do_full_update(WPS, i);
-                    if (update || full_update)
-                    {
-                        skin_update(WPS, i, full_update ?
-                                     SKIN_REFRESH_ALL : SKIN_REFRESH_NON_STATIC);
-                    }
-                }
-            }
-            update = false;
-        }
+        native_wps_render(state, submit);
 #ifdef HAVE_USB_PODLINK
-        if (dissolve)
-        {
-            skin_inhibit_flush(false);
+        if (!submit)
             handoff_present_remote();
-        }
 #endif
 
         if (exit)
@@ -985,13 +832,9 @@ static long wps_run(bool return_agents)
         if (button && !IS_SYSEVENT(button) )
             storage_spin();
 
-        if (native_wps_active())
-        {
-            /* Poll PCM at the existing meter cadence while it is visible. */
-            button = get_action(CONTEXT_WPS|ALLOW_SOFTLOCK, lcd_active() ? 1 : HZ/5);
-        }
-        else
-            button = skin_wait_for_action(WPS, CONTEXT_WPS|ALLOW_SOFTLOCK, HZ/5);
+        /* Poll PCM while the display is visible. Each retained node damages
+         * only the region it actually changed. */
+        button = get_action(CONTEXT_WPS|ALLOW_SOFTLOCK, lcd_active() ? 1 : HZ/5);
 
 #ifdef HAVE_USB_PODLINK
         if (button == ACTION_NONE && cider_active())
@@ -1006,46 +849,41 @@ static long wps_run(bool return_agents)
          * the WPS pixels until that page captures its animated underlay. */
         if (button == ACTION_WPS_BROWSE || button == ACTION_WPS_LYRICS)
         {
+            static const char wps_page, lyrics_page;
+            /* A pending volume or seek value belongs to the playback page.
+             * Close its trace and view before handing over the same pixels. */
+            native_wps_close();
+            if (!lyrics_scene->handle)
+                ui_scene_interrupt();
+            ui_scene_enter(lyrics_scene, &wps_page, &lyrics_page, true);
             cider_spectrum_wps(false);
             if (lyric_viewer() == GO_TO_ROOT)
             {
-                gwps_leave_wps(true);
+                leave_playback();
                 return GO_TO_ROOT;
             }
-            /* The WPS never left, so its theme entry is still pushed and the
-             * page popped its own. Re-pushing here leaked one level per visit
-             * until USB or the next visit overflowed the stack (FU72). */
-            theme_enabled = false;
+            ui_scene_enter(lyrics_scene, &lyrics_page, &wps_page, false);
             restore = true;
             continue;
         }
         if (cider_wps_action(button))
-        {
-            update = true;
             continue;
-        }
         if (cider_active() && (button == ACTION_WPS_SEEKFWD ||
                               button == ACTION_WPS_SEEKBACK))
         {
             ffwd_rew(button, false);
-            update = true;
             continue;
         }
         button = do_party_mode(button); /* block select actions in party mode */
 
         button = action_wpsab_single(button); /* iPods/X5/M5 */
 
-        if (native_wps_active() && (button == ACTION_WPS_VOLUP ||
-            button == ACTION_WPS_VOLDOWN || button == ACTION_WPS_SEEKFWD ||
-            button == ACTION_WPS_SEEKBACK))
-            playback_skin_fallback();
-
         switch(button)
         {
 #ifdef HAVE_USB_PODLINK
             case ACTION_AGENTS_REMOTE_SWITCH:
             case ACTION_AGENTS_SWITCH:
-                gwps_leave_wps(true);
+                leave_playback();
                 return GO_TO_AGENTS;
 #endif
             case ACTION_WPS_HOTKEY:
@@ -1058,22 +896,14 @@ static long wps_run(bool return_agents)
                     break;
                 if (act == HOTKEY_ALBUM_COVERS)
                 {
-                    theme_enabled = false;
                     if (show_album_covers(&go_to, return_agents)) return go_to;
                     restore = true;
                     break;
                 }
-                /* A NOSBS action's screen owns the display and turns the
-                 * theme off itself, so leave without re-enabling it */
-                theme_enabled = !(get_hotkey(act)->flags & HOTKEY_FLAG_NOSBS);
-                gwps_leave_wps(theme_enabled);
-                if (context_go_to(context_menu_wps_hotkey(state->id3->path,
-                                                          act), &go_to))
-                {
-                    if (!theme_enabled)
-                        gwps_leave_wps(true);   /* returning to the SBS */
+                leave_playback();
+                if (state->id3 && context_go_to(context_menu_wps_hotkey(
+                        state->id3->path, act), &go_to))
                     return go_to;
-                }
                 restore = true;
             }
             break;
@@ -1086,12 +916,12 @@ static long wps_run(bool return_agents)
                 {
                     /* Native Now Playing rows bound to the Cider source. */
                     if (!cider_available()) break;
-                    gwps_leave_wps(true);
+                    leave_playback();
                     if (cider_context_show()) return cider_context_destination();
                     restore = true;
                     break;
                 }
-                gwps_leave_wps(true);
+                leave_playback();
                 if (context_go_to(context_menu_show(state->id3->path,
                                       FILE_ATTR_AUDIO, CONTEXT_WPS, false,
                                       ONPLAY_NO_CUSTOMACTION), &go_to))
@@ -1122,11 +952,6 @@ static long wps_run(bool return_agents)
                                                       global_status.volume),
                                        UNIT_DB, sound_numdecimals(SOUND_VOLUME),
                                        false);
-                FOR_NB_SCREENS(i)
-                {
-                    skin_update(WPS, i, SKIN_REFRESH_NON_STATIC);
-                }
-                update = false;
                 break;
             /* fast forward
                 OR next dir if this is straight after ACTION_WPS_SKIPNEXT */
@@ -1243,7 +1068,7 @@ static long wps_run(bool return_agents)
                 break;
             /* menu key functions */
             case ACTION_WPS_MENU:
-                gwps_leave_wps(true);
+                leave_playback();
                 if (cider_active())
                 {
                     if (cover_nav_playing()) return cider_browse_covers(false);
@@ -1260,13 +1085,13 @@ static long wps_run(bool return_agents)
                 if (cider_active())
                 {
                     if (!cider_available()) break;
-                    gwps_leave_wps(true);
+                    leave_playback();
                     if (quick_screen_cider(button) == QUICKSCREEN_IN_USB)
                         return GO_TO_ROOT;
                     restore = true;
                     break;
                 }
-                gwps_leave_wps(true);
+                leave_playback();
                 bool enter_shortcuts_menu = global_settings.shortcuts_replaces_qs;
                 if (!enter_shortcuts_menu)
                 {
@@ -1295,7 +1120,6 @@ static long wps_run(bool return_agents)
                 if (ab_repeat_mode_enabled())
                 {
                     ab_reset_markers();
-                    update = true;
                 }
                 break;
 
@@ -1309,7 +1133,6 @@ static long wps_run(bool return_agents)
                     if (button == ACTION_AGENTS_REMOTE_COVERS || button == ACTION_AGENTS_COVERS)
                         select_cover_source();
                     long go_to;
-                    theme_enabled = false;
                     if (show_album_covers(&go_to, return_agents))
                         return go_to;
                     restore = true;
@@ -1318,21 +1141,21 @@ static long wps_run(bool return_agents)
 
             /* Bound only by a keymap file of the user's own */
             case ACTION_WPS_LIST_BOOKMARKS:
-                gwps_leave_wps(true);
+                leave_playback();
                 if (book_shelf_playing_marks() == GO_TO_ROOT)
                     return GO_TO_ROOT;
                 restore = true;
                 break;
 
             case ACTION_WPS_CREATE_BOOKMARK:
-                gwps_leave_wps(true);
+                leave_playback();
                 book_shelf_create_mark();
                 restore = true;
                 break;
 
             case ACTION_WPS_ID3SCREEN:
             {
-                gwps_leave_wps(true);
+                leave_playback();
                 if (browse_id3(cider_active() ? state->id3 : audio_current_track(),
                         cider_active() ? 1 : playlist_get_display_index(),
                         cider_active() ? 1 : playlist_amount(), NULL, 1, NULL))
@@ -1344,16 +1167,11 @@ static long wps_run(bool return_agents)
               * it requests a full update here */
             case ACTION_REDRAW:
                 native_wps_invalidate();
-                skin_request_full_update(WPS);
-                skin_request_full_update(CUSTOM_STATUSBAR); /* if SBS is used */
                 break;
-            case ACTION_NONE: /* Timeout, do a partial update */
-                update = true;
-                if (!native_wps_active())
-                    ffwd_rew(button, false); /* hopefully fix the ffw/rwd bug */
+            case ACTION_NONE:
                 break;
             case ACTION_WPS_VIEW_PLAYLIST:
-                gwps_leave_wps(true);
+                leave_playback();
                 return GO_TO_PLAYLIST_VIEWER;
                 break;
             default:
@@ -1362,10 +1180,9 @@ static long wps_run(bool return_agents)
                     case SYS_USB_CONNECTED:
                     case SYS_CALL_INCOMING:
                     case BUTTON_MULTIMEDIA_STOP:
-                        gwps_leave_wps(true);
+                        leave_playback();
                         return GO_TO_ROOT;
                 }
-                update = true;
                 break;
         }
     }
@@ -1391,20 +1208,20 @@ struct wps_state *get_wps_state(void)
 /* From the USB and iAP threads, so it only asks for a redraw */
 void wps_set_seek_preview(struct mp3entry *id3, unsigned long position)
 {
-    struct wps_state *state = get_wps_state();
+    if (cider_active())
+        return;
     long offset = 0;
-
-    if (id3 && state->id3 == id3)
+    if (id3 && wps_state.id3 == id3)
         offset = (long)position - (long)id3->elapsed;
-    state->ff_rewind_count = offset;
-    skin_request_full_update(WPS);
+    wps_state.ff_rewind_count = offset;
+    native_wps_invalidate();
 }
 
 /* this is called from the playback thread so NO DRAWING! */
 static void track_info_callback(unsigned short id, void *param)
 {
     if (cider_active()) return;
-    struct wps_state *state = get_wps_state();
+    struct wps_state *state = &wps_state;
 
     if (id == PLAYBACK_EVENT_TRACK_CHANGE || id == PLAYBACK_EVENT_CUR_TRACK_READY)
     {
@@ -1421,7 +1238,7 @@ static void track_info_callback(unsigned short id, void *param)
     }
     if (id == PLAYBACK_EVENT_NEXTTRACKID3_AVAILABLE)
         state->nid3 = audio_next_track();
-    skin_request_full_update(WPS);
+    native_wps_invalidate();
 }
 
 static void wps_state_init(void)
@@ -1443,7 +1260,7 @@ static void wps_state_init(void)
         state->nid3 = NULL;
     }
     /* We'll be updating due to restore initialized with true */
-    skin_request_full_update(WPS);
+    native_wps_invalidate();
     /* add the WPS track event callbacks */
     add_event(PLAYBACK_EVENT_TRACK_CHANGE, track_info_callback);
     add_event(PLAYBACK_EVENT_NEXTTRACKID3_AVAILABLE, track_info_callback);

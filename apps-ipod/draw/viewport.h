@@ -27,7 +27,6 @@ int viewport_get_nb_lines(const struct viewport *vp);
 #define THEME_LISTS                 (BIT_N(3))
 #define THEME_ALL                   (~(0u))
 
-/* These are needed in checkwps */
 void viewport_set_defaults(struct viewport *vp,
                             const enum screen_type screen);
 void viewport_set_fullscreen(struct viewport *vp,
@@ -42,17 +41,13 @@ void viewportmanager_init(void) INIT_ATTR;
 
 void viewportmanager_theme_enable(enum screen_type screen, bool enable,
                                  struct viewport *viewport);
-/* Force will cause a redraw even if the theme was previously and
- * currently enabled (i,e the undo doing nothing).
- * Should almost always be set to false except coming out of fully skinned screens */
+/* Forces the native status bar to paint again on the next frame. */
 void viewportmanager_theme_undo(enum screen_type screen, bool force_redraw);
 
-/* True while the theme owns the screen, which is also what decides where a
- * default viewport's colours came from: the skin's UI viewport when set, the
- * global settings when not. */
+/* True while the page reserves room for the native status bar. */
 bool viewportmanager_theme_enabled(enum screen_type screen);
 
-/* call this when a theme changed */
+/* Notify views that the native theme or layout settings changed. */
 void viewportmanager_theme_changed(const int);
 
 void viewport_set_buffer(struct viewport *vp, struct frame_buffer_t *buffer,

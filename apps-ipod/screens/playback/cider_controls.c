@@ -15,6 +15,7 @@
 #include "system/app_util.h"
 #include "lang.h"
 #include "lcd.h"
+#include "ui/scene.h"
 #include "kernel.h"
 #include "usb.h"
 #include "viewers/lyric_viewer/lyric_viewer.h"
@@ -129,7 +130,11 @@ static int show_page(const char *route, int title, int mode)
     info.get_name = page_name;
     info.action_callback = page_action;
     if (mode == 2 && cider_page_row(0, &row)) info.selection = MAX(0, MIN(n - 1, row.count));
-    return simplelist_show_list(&info) || page_usb;
+    struct ui_scene page = {0};
+    ui_scene_open_page(&page, mode == 2 ? "remote-queue-push" : "remote-details-push");
+    bool usb = simplelist_show_list(&info) || page_usb;
+    ui_scene_close_modal(&page, !usb, mode == 2 ? "remote-queue-pop" : "remote-details-pop");
+    return usb;
 }
 static int mode_choose(void *data)
 {
@@ -140,7 +145,11 @@ static int mode_choose(void *data)
     info.selection = cider_mode_get(mode);
     extern const char *cider_mode_choice(int, void *, char *, size_t);
     info.get_name = cider_mode_choice;
-    if (simplelist_show_list(&info)) return 1;
+    struct ui_scene sheet = {0};
+    ui_scene_open_modal(&sheet, "playback-mode-up");
+    bool usb = simplelist_show_list(&info);
+    ui_scene_close_modal(&sheet, !usb, "playback-mode-down");
+    if (usb) return 1;
     if (info.selection >= 0) cider_mode_set(mode, info.selection);
     return 0;
 }
@@ -245,7 +254,7 @@ MAKE_MENU(cider_sound_menu, ID2P(LANG_SOUND_SETTINGS), NULL, Icon_Audio, &cider_
 MAKE_MENU(cider_more_menu, ID2P(LANG_MORE), NULL, Icon_NOICON, &cider_art_item, &cider_sound_menu);
 MAKE_MENU(cider_context_menu, ID2P(LANG_NOW_PLAYING), NULL, Icon_Audio,
     &cider_shuffle, &cider_repeat, &cider_rating_item, &cider_info_item, &cider_album_item, &cider_artist_item,
-    &cider_lyrics_item, &cider_sleep_item, &cider_speed_item, &cider_queue_menu, &theme_options_item, &cider_more_menu);
+    &cider_lyrics_item, &cider_sleep_item, &cider_speed_item, &cider_queue_menu, &cider_more_menu);
 static bool context_setting(const struct menu_item_ex *item, enum list_row_kind *kind, const char **value)
 {
     int mode;

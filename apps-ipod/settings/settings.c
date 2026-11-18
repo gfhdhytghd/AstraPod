@@ -66,7 +66,6 @@
 #include "draw/color.h"
 #include "system/strutil.h"
 #include "system/volume.h"
-#include "draw/icon_bitmaps.h"
 #include "font.h"
 #include "audio/peak_meter.h"
 #include "lang.h"
@@ -80,15 +79,11 @@
 #include "widgets/splash.h"
 #include "widgets/list.h"
 #include "settings_list.h"
-#include "files/filetypes.h"
 #include "widgets/option_select.h"
 #include "screens/playback/wps.h"
-#include "skin/skin_engine.h"
 #include "draw/viewport.h"
-#include "skin/statusbar_skinned.h"
 #include "bootchart.h"
 #include "scroll_engine.h"
-#include "widgets/dialog.h"
 #ifdef HAVE_COMPOSITE_VIDEO_OUT
 #include "videoout.h"
 #endif
@@ -107,7 +102,6 @@ static long lasttime = 0;
 #include "audio/playback.h"
 #include "screens/browse/browser.h"    /* browser_albumart_invalidate */
 #include "screens/covers/album_covers.h" /* the year sort carry-over */
-#include "metadata/book_resume.h"
 #include "metadata/art_cache.h"
 #include "system/debug_log.h"
 #include "pcm_sampr.h"
@@ -207,7 +201,6 @@ static bool settings_crc_changed(void)
 /** Reading from a config file **/
 
 static bool settings_write_config(const char* filename, int options);
-static void mark_theme_overlay(void);
 
 /* The carousel's Year Sort Order is now the descending half of its sort list.
  * A saved "descending" moves into that list and the old setting returns to its
@@ -283,8 +276,6 @@ void settings_load(void)
     /* After the CRC, so the next save writes the result out. */
     carry_year_sort_order();
     carry_carousel_articles();
-
-    mark_theme_overlay();
 }
 
 bool cfg_string_to_int(const struct settings_list *setting, int* out, const char* str)
@@ -367,16 +358,13 @@ bool copy_filename_setting(char *buf, size_t buflen, const char *input,
     return true;
 }
 
-bool string_to_cfg(const char *name, char* value, bool *theme_changed)
+bool string_to_cfg(const char *name, char *value)
 {
     const struct settings_list *setting = find_setting_by_cfgname(name);
     if (!setting)
         return false;
 
     uint32_t flags = setting->flags;
-
-    if (flags & F_THEMESETTING)
-        *theme_changed = true;
 
     switch (flags & F_T_MASK)
     {
@@ -481,340 +469,26 @@ bool string_to_cfg(const char *name, char* value, bool *theme_changed)
     return true;
 }
 
-/* True if the open config file names a font, which is what separates a whole
- * theme from a .cfg that only patches something.
- *
- * A theme gets the reset: every setting describing the look goes back to its
- * default before the file is read, so the theme cannot inherit the last one's
- * decisions. A patch must not, or "change my icons" -- themes/rockbox_default_
- * icons.cfg is two lines long -- would take the wps, the sbs, the font and
- * every colour with it.
- *
- * The font is the discriminator because a whole look has an opinion about its
- * text, and nothing else in a .cfg reliably separates the two. `font: -` counts:
- * it says "no font", which is a decision, and upstream's failsafe theme relies
- * on exactly that.
- *
- * Takes the caller's line buffer rather than another 640 bytes of stack, and
- * leaves the read position at wherever it stopped; the caller rewinds. */
-static bool config_is_theme(int fd, char *line, int line_size)
-{
-    while (read_line(fd, line, line_size) > 0)
-    {
-        char *name, *value;
-        const struct settings_list *setting;
-
-        if (!settings_parseline(line, &name, &value))
-            continue;
-
-        setting = find_setting_by_cfgname(name);
-        if (setting && setting->setting == global_settings.font_file)
-            return true;
-    }
-    return false;
-}
-
-/** Theme-local appearance overrides **/
-
-/* Every setting a theme load resets before reading the theme, and so also
- * every setting the overlay is allowed to carry.
- *
- * The union of the two flags, not either alone. F_THEMESETTING is the honest
- * description of "describes the look" and is what the wider reset is for -- a
- * theme that names no iconset should not inherit the last one's. But
- * dynamic_colors carries F_THEMERESET on its own, without F_THEMESETTING, so
- * testing the tidier flag alone would quietly stop it resetting. */
-#define F_THEME_RESET_MASK (F_THEMESETTING | F_THEMERESET)
-
-/* Which settings the user has changed by hand under the current theme. A
- * pointer list rather than a bit per setting because the count is tiny -- a
- * handful of deliberate choices, not a configuration -- and a list needs no
- * compile-time bound on nb_settings.
- *
- * Not persisted. The overlay file is the record: a theme load and
- * settings_load() both re-mark everything in it, so a reboot loses nothing and
- * no baseline has to be reconstructed. */
-#define MAX_TWEAKS 64
-static const struct settings_list *tweaked[MAX_TWEAKS];
-static int tweak_count;
-
-/* Where the current theme's overlay lives: beside the theme, named after it,
- * and deliberately *not* a .cfg.
- *
- * The theme browser lists every .cfg in this directory, so an overlay called
- * "scrim.user.cfg" appears in it as a theme named "scrim.user" -- loading
- * which would take the reset path, apply only the handful of settings the
- * overlay holds, and then record itself as the current theme, so the next
- * tweak would write "scrim.user.user.cfg". An extension the browser does
- * not recognise keeps the file paired with its theme and out of the list.
- *
- * The contents are an ordinary config file and are read as one. */
-static bool theme_overlay_path(char *buf, size_t bufsz)
-{
-    if (!global_settings.theme_file[0])
-        return false;
-    snprintf(buf, bufsz, THEME_DIR "/%s.usercfg",
-             global_settings.theme_file);
-    return true;
-}
-
-static bool is_tweaked(const struct settings_list *setting)
-{
-    for (int i = 0; i < tweak_count; i++)
-        if (tweaked[i] == setting)
-            return true;
-    return false;
-}
-
-/* Record without writing. Kept separate from the public call because reading
- * the overlay marks everything in it, and writing from there would truncate
- * the file being read. */
-static bool mark_tweak(const struct settings_list *setting)
-{
-    /* Only what a theme load would otherwise discard -- see settings.h. */
-    if (!setting || !(setting->flags & F_THEME_RESET_MASK))
-        return false;
-
-    if (is_tweaked(setting))
-        return true;
-
-    if (tweak_count >= MAX_TWEAKS)
-        return false;
-
-    tweaked[tweak_count++] = setting;
-    return true;
-}
-
-static void write_theme_overlay(void)
-{
-    char path[MAX_PATH];
-
-    if (theme_overlay_path(path, sizeof path))
-        settings_write_config(path, SETTINGS_SAVE_THEME_OVERLAY);
-}
-
-void settings_mark_user_tweak(const struct settings_list *setting)
-{
-    /* Rewritten whole on every tweak, including one already marked -- the
-     * value has changed even when the marking has not. That is a disk write
-     * per appearance change, made now: settings_save() only queues config.cfg
-     * for the next time the disk is idle. */
-    if (mark_tweak(setting))
-        write_theme_overlay();
-}
-
-/* A reset takes the setting out of the overlay too, or re-selecting the theme
- * would apply the value the user reset away from */
-static void unmark_tweak(const struct settings_list *setting)
-{
-    for (int i = 0; i < tweak_count; i++)
-    {
-        if (tweaked[i] == setting)
-        {
-            tweaked[i] = tweaked[--tweak_count];
-            write_theme_overlay();
-            return;
-        }
-    }
-}
-
-/* The theme name, from the path of the .cfg that described it. */
-static void set_theme_file(const char *file)
-{
-    const char *base = strrchr(file, '/');
-    char *dot;
-
-    base = base ? base + 1 : file;
-    strlcpy((char*)global_settings.theme_file, base,
-            sizeof global_settings.theme_file);
-
-    dot = strrchr((char*)global_settings.theme_file, '.');
-    if (dot)
-        *dot = '\0';
-}
-
-/* Parse an open config file into the settings. Shared by a theme's own .cfg
- * and by the overlay read straight after it, so both feed the same
- * theme_changed flag -- an override that names a skin still has to reach
- * settings_apply_skins().
- *
- * `mark` re-marks every setting the file names, which is how the overlay
- * survives a theme reload: the file is the record of what was tweaked. */
-static void read_config_lines(int fd, char *line, int line_size,
-                              bool *theme_changed, bool mark)
-{
-    while (read_line(fd, line, line_size) > 0)
-    {
-        char *name, *value;
-
-        if (!settings_parseline(line, &name, &value))
-            continue;
-
-        /* name was not a valid setting; the old "openplugin" config line is
-         * ignored now that the plugin system is gone */
-        string_to_cfg(name, value, theme_changed);
-
-        if (mark)
-            mark_tweak(find_setting_by_cfgname(name));
-    }
-}
-
-/* The overlay, read after the theme's own .cfg and before anything is applied.
- *
- * It cannot be a settings_load_config() call, whichever flag it is given.
- * With apply = true, the overlay names theme settings, so
- * config_is_theme() reports a theme and the F_THEMERESET loop runs
- * a second time -- wiping the theme just read. With apply = false, the apply
- * has already happened and nothing re-reads the backdrop, the colours or the
- * skins. It has to be a step inside the sequence, which is what this is. */
-static void load_theme_overlay(char *line, int line_size, bool *theme_changed)
-{
-    char path[MAX_PATH];
-    int fd;
-
-    if (!theme_overlay_path(path, sizeof path))
-        return;
-
-    fd = open_utf8(path, O_RDONLY);
-    if (fd < 0)
-        return;
-
-    read_config_lines(fd, line, line_size, theme_changed, true);
-    close(fd);
-}
-
-/* At boot, mark the overlay's names without applying its values: config.cfg
- * already holds them, and without the marks the first tweak would rewrite the
- * overlay with that one setting alone. */
-static void mark_theme_overlay(void)
-{
-    char path[MAX_PATH];
-    char line[SETTINGS_MAX_LINE];
-    char *name, *value;
-    int fd;
-
-    if (!theme_overlay_path(path, sizeof path))
-        return;
-
-    fd = open_utf8(path, O_RDONLY);
-    if (fd < 0)
-        return;
-
-    while (read_line(fd, line, sizeof line) > 0)
-    {
-        if (settings_parseline(line, &name, &value))
-            mark_tweak(find_setting_by_cfgname(name));
-    }
-    close(fd);
-}
-
-bool settings_forget_theme_tweaks(void)
-{
-    char path[MAX_PATH];
-
-    if (!theme_overlay_path(path, sizeof path) || !file_exists(path))
-        return false;
-
-    remove(path);
-    tweak_count = 0;
-
-    /* Reload the theme so the screen shows what its author shipped, rather
-     * than leaving the tweaks standing until the next theme change. */
-    snprintf(path, sizeof path, THEME_DIR "/%s.cfg",
-             global_settings.theme_file);
-    settings_load_config(path, true);
-
-    return true;
-}
-
-bool settings_load_config(const char* file, bool apply)
+bool settings_load_config(const char *file, bool apply)
 {
     logf("%s()\r\n", __func__);
-    int fd;
-    char line[SETTINGS_MAX_LINE];
-    bool theme_changed = false;
-    bool is_theme = false;
-
-    fd = open_utf8(file, O_RDONLY);
+    int fd = open_utf8(file, O_RDONLY);
     if (fd < 0)
         return false;
 
-    /* Only for a file the user chose to load, which is meant to describe a
-     * whole look and so must not leave the previous one's settings standing.
-     * The files read at startup are the opposite case -- config.cfg holds only
-     * what differs from the defaults, and the fixed settings file is a partial
-     * overlay on top of it, so resetting for those would discard the very
-     * values being restored.
-     *
-     * Restricted further to files that actually describe a look, which is not
-     * every .cfg the user can pick: an EQ preset is one too, and loading one
-     * must not quietly drop the current theme's backdrop and colours. A file
-     * that names a font counts as a look (see config_is_theme()), so scan for
-     * one first and rewind. */
-    if (apply)
+    char line[SETTINGS_MAX_LINE];
+    while (read_line(fd, line, sizeof(line)) > 0)
     {
-        is_theme = config_is_theme(fd, line, sizeof line);
-        lseek(fd, 0, SEEK_SET); /* the scan consumed the file either way */
-        if (is_theme)
-        {
-            for (int i = 0; i < nb_settings; i++)
-            {
-                if (settings[i].flags & F_THEME_RESET_MASK)
-                    reset_setting(&settings[i], settings[i].setting);
-            }
-
-            /* Clear the marks with the settings they belong to. Without this,
-             * the first tweak under the new theme rewrites its overlay with
-             * everything still marked from the last one. */
-            tweak_count = 0;
-
-            /* Before the file is read, so a tweak made during this load knows
-             * which theme it belongs to. Only a file in THEME_DIR becomes "the
-             * current theme": a saved settings .cfg names a font too, and its
-             * overlay and Forget Tweaks would point at a theme that is not
-             * there. Such a file can still name one with its own theme line.
-             * The browser hands over the path with its volume ("/<0>/...") on
-             * the player and without it in the simulator. */
-            const char *rel;
-            path_strip_volume(file, &rel, false);
-            if (!strncasecmp(rel, THEME_DIR "/", sizeof(THEME_DIR)))
-                set_theme_file(file);
-            else
-                global_settings.theme_file[0] = '\0';
-        }
+        char *name, *value;
+        if (settings_parseline(line, &name, &value))
+            string_to_cfg(name, value);
     }
-
-    read_config_lines(fd, line, sizeof line, &theme_changed, false);
     close(fd);
 
-    /* The user's own changes, on top of the theme and before anything is
-     * applied. */
-    if (is_theme)
-        load_theme_overlay(line, sizeof line, &theme_changed);
-
     if (apply)
     {
-        /* Stop before the loading, not after it. settings_apply_skins() stops
-         * playback too, but by then the fonts, the language, the iconset and
-         * the colour file have all been read, and each of those allocations
-         * makes buflib shrink the audio buffer -- which stops playback and
-         * queues a resume (see shrink_callback() in audio/playback.c). The
-         * theme change then costs a stop-and-rebuffer per allocation, every
-         * one of them competing with the theme's own reads for the disk.
-         *
-         * Stopping first leaves those allocations nothing to interrupt. The
-         * music stops either way; this only decides how long it takes.
-         * A book's place is written down first, as at every other stop. */
-        if (theme_changed)
-        {
-            book_resume_save();
-            audio_stop();
-        }
-
         settings_save();
         settings_apply(true);
-        if (theme_changed)
-            settings_apply_skins();
     }
     return true;
 }
@@ -1008,21 +682,12 @@ static bool settings_write_config(const char* filename, int options)
                 if (!(setting->flags & F_SOUNDSETTING))
                     continue;
                 break;
-            case SETTINGS_SAVE_THEME:
-                if (!(setting->flags & F_THEMESETTING))
-                    continue;
-                break;
             case SETTINGS_SAVE_EQPRESET:
                 if (!(setting->flags & F_EQSETTING))
                     continue;
                 break;
             case SETTINGS_SAVE_RESUMEINFO:
                 if (!(setting->flags & F_RESUMESETTING))
-                    continue;
-                break;
-            case SETTINGS_SAVE_THEME_OVERLAY:
-                /* Only what the user changed by hand under this theme. */
-                if (!is_tweaked(setting))
                     continue;
                 break;
             case SETTINGS_SAVE_ALL:
@@ -1147,10 +812,6 @@ bool settings_save_config_as(int options, char *filename, size_t len)
     const char *folder, *namebase;
     switch (options)
     {
-        case SETTINGS_SAVE_THEME:
-            folder = THEME_DIR;
-            namebase = "theme";
-            break;
         case SETTINGS_SAVE_EQPRESET:
             folder = EQS_DIR;
             namebase = "EQ";
@@ -1245,83 +906,6 @@ int font_get_ui_bold(void)
     return screens[SCREEN_MAIN].getuifont();
 }
 
-static int clamp_int(int v, int lo, int hi)
-{
-    if (v < lo)
-        return lo;
-    if (v > hi)
-        return hi;
-    return v;
-}
-
-/* Push the theme's dialog chrome into the shared default dialog style. The
- * metrics always apply; the colours depend on "dialog colours".
- *
- * Note what is stored for "auto": sentinels, not colours. The album-derived
- * colours change while the player runs and this function is called once, when
- * settings are applied -- so anything resolved here would be frozen at whatever
- * was playing then. dialog.c resolves the sentinels per draw instead.
- *
- * The loader clamps these to their settings' ranges, which lie inside the
- * bounds here; these only keep the frame's geometry sound whatever it is
- * handed. */
-static void settings_apply_dialog_style(void)
-{
-    struct dialog_style s;
-    dialog_style_default(&s);
-
-    s.box_border_width     = clamp_int(global_settings.dialog_box_border_width,
-                                       0, 16);
-    s.box_margin           = clamp_int(global_settings.dialog_box_margin,
-                                       0, LCD_WIDTH / 4);
-    s.button_border_width  = clamp_int(global_settings.dialog_btn_border_width,
-                                       0, 16);
-    s.button_border_radius = clamp_int(global_settings.dialog_btn_border_radius,
-                                       0, 64);
-    /* Shadow with the metrics, not with the palette below: it applies whatever
-     * dialog_colors says, so a theme need not turn the other nine on to set
-     * it. */
-    s.box_shadow_offset    = clamp_int(global_settings.dialog_box_shadow,
-                                       0, 32);
-    s.box_shadow_color     = global_settings.dialog_box_shadow_color;
-
-    if (global_settings.dialog_colors == DIALOG_COLORS_ON)
-    {
-        s.box_fg                       = global_settings.dialog_box_fg;
-        s.box_bg                       = global_settings.dialog_box_bg;
-        s.box_border_color             = global_settings.dialog_box_border;
-        s.button_fg                    = global_settings.dialog_btn_fg;
-        s.button_bg                    = global_settings.dialog_btn_bg;
-        s.button_border_color          = global_settings.dialog_btn_border;
-        s.button_fg_selected           = global_settings.dialog_btn_fg_sel;
-        s.button_bg_selected           = global_settings.dialog_btn_bg_sel;
-        s.button_border_color_selected = global_settings.dialog_btn_border_sel;
-    }
-    else if (global_settings.dialog_colors == DIALOG_COLORS_AUTO)
-    {
-        /* The album's own two colours, and one strong shape: the selected
-         * button, filled with the text colour. The box is a slightly lifted
-         * surface, and every outline a muted tint of the text, so nothing
-         * else competes with the selection. The lift is bounded in dialog.c
-         * so the text on it stays legible. A shadow colour left at its
-         * default black becomes the background's own shade, soft on a light
-         * album; a theme that names one keeps it. */
-        s.box_fg                       = DIALOG_COLOR_FG;
-        s.box_bg                       = DIALOG_COLOR_SURFACE;
-        s.box_border_color             = DIALOG_COLOR_TINT;
-        s.button_fg                    = DIALOG_COLOR_FG;
-        s.button_bg                    = DIALOG_COLOR_SURFACE;
-        s.button_border_color          = DIALOG_COLOR_TINT;
-        s.button_fg_selected           = DIALOG_COLOR_ON_ACCENT;
-        s.button_bg_selected           = DIALOG_COLOR_ACCENT;
-        s.button_border_color_selected = DIALOG_COLOR_ACCENT;
-        if (s.box_shadow_color == LCD_BLACK)
-            s.box_shadow_color         = DIALOG_COLOR_SHADE;
-    }
-
-    dialog_set_default_style(&s);
-}
-
 #ifdef HAVE_COMPOSITE_VIDEO_OUT
 /* TV Out's format, which the next Turn On uses and a running picture
  * switches to at once. The picture itself is never saved: it starts only
@@ -1352,6 +936,18 @@ void tv_standard_set(int standard)
 }
 #endif
 #endif /* HAVE_COMPOSITE_VIDEO_OUT */
+
+void settings_apply_display_colors(void)
+{
+    global_settings.fg_color = ui_theme_rgb565(UI_COLOR_FOREGROUND);
+    global_settings.bg_color = ui_theme_rgb565(UI_COLOR_BACKGROUND);
+    global_settings.lss_color = ui_theme_rgb565(UI_COLOR_SELECTION);
+    global_settings.lse_color = global_settings.lss_color;
+    global_settings.lst_color = ui_theme_rgb565(UI_COLOR_SELECTED_TEXT);
+    global_settings.list_separator_color = ui_theme_rgb565(UI_COLOR_SEPARATOR);
+    screens[SCREEN_MAIN].set_foreground(global_settings.fg_color);
+    screens[SCREEN_MAIN].set_background(global_settings.bg_color);
+}
 
 void settings_apply(bool read_disk)
 {
@@ -1395,7 +991,6 @@ void settings_apply(bool read_disk)
         global_settings.peak_meter_release, global_settings.peak_meter_hold,
         global_settings.peak_meter_clip_hold);
 
-    settings_apply_dialog_style();
     art_cache_settings_applied();
     /* Reset Settings runs no setting's callback */
     debug_log_apply();
@@ -1469,17 +1064,9 @@ void settings_apply(bool read_disk)
         talk_init(); /* use voice of same language */
         CHART("<talk_init");
 
-        /* load the icon set */
-        CHART(">icons_init");
-        icons_init();
-        CHART("<icons_init");
 
-        CHART(">read_color_theme_file");
-        read_color_theme_file();
-        CHART("<read_color_theme_file");
     }
-    screens[SCREEN_MAIN].set_foreground(global_settings.fg_color);
-    screens[SCREEN_MAIN].set_background(global_settings.bg_color);
+    settings_apply_display_colors();
 
     lcd_scroll_step(global_settings.scroll_step);
     lcd_bidir_scroll(global_settings.bidir_limit);
@@ -1543,7 +1130,6 @@ void settings_apply(bool read_disk)
     usb_set_dac_output(global_settings.usb_dac_output);
 #endif
 
-    /* already called with THEME_STATUSBAR in settings_apply_skins() */
     CHART(">viewportmanager_theme_changed");
     viewportmanager_theme_changed(THEME_UI_VIEWPORT|THEME_LANGUAGE|THEME_BUTTONBAR);
     CHART("<viewportmanager_theme_changed");
@@ -1584,8 +1170,6 @@ void reset_setting(const struct settings_list *setting, void *var)
 void reset_setting_by_user(const struct settings_list *setting)
 {
     uint32_t flags = setting->flags;
-
-    unmark_tweak(setting);
 
     if ((flags & F_BOOL_SETTING) == F_BOOL_SETTING)
     {
@@ -1861,11 +1445,9 @@ static char *debug_get_flags(uint32_t flags)
     strlcat(buf, "["#n"]", sizeof(buf));}
 
     SETTINGFLAGS(F_RESUMESETTING);
-    SETTINGFLAGS(F_THEMESETTING);
     SETTINGFLAGS(F_RECSETTING);
     SETTINGFLAGS(F_EQSETTING);
     SETTINGFLAGS(F_SOUNDSETTING);
-    SETTINGFLAGS(F_NEEDAPPLY);
     SETTINGFLAGS(F_CHOICE_SETTING);
     SETTINGFLAGS(F_CHOICETALKS);
     SETTINGFLAGS(F_TABLE_SETTING);

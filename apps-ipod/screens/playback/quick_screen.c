@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include "config.h"
 #include "system.h"
-#include "draw/icon_bitmaps.h"
+#include "core_alloc.h"
 #include "font.h"
 #include "kernel.h"
 #include "system/activity.h"
@@ -33,38 +33,55 @@
 #include "debug.h"
 #include "screens/shortcuts.h"
 #include "system/appevents.h"
-#include "skin/statusbar_skinned.h"  /* sb_skin_force_next_update */
-#include "skin/skin_display.h"        /* skin_mark_dirty */
+#include "metadata/album_palette.h"
+#include "ui/frame.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/scene.h"
+#include "ui/sheet.h"
+#include "ui/statusbar.h"
+#include <string.h>
+#ifdef HAVE_WHEEL_WPS_CHORD
+#include "input/agents_shortcut.h"
+#endif
 
- /* 2 lines for each of the three vertical sections (top/middle/bottom).
-  * With less space than that, the top and bottom each lose a line -- at
-  * exactly 5 they would otherwise overlap the middle one. */
-#define MIN_LINES (3*2)
-#define MAX_NEEDED_LINES 10
- /* pixels between the 2 center items minimum or between text and icons,
-  * and between text and parent boundaries */
-#define MARGIN 10
-#define CENTER_ICONAREA_SIZE (MARGIN+8*2)
+#define QUICK_PIXELS (LCD_WIDTH * LCD_HEIGHT)
 
-/* The viewports live here rather than on gui_syncquickscreen_run's stack so
- * that the redraw callback can paint from them directly. Deferring the redraw
- * to the main loop instead left the screen showing a stale frame until the
- * next pass, which is visible as a flicker. */
+struct gui_quickscreen;
+struct quickscreen_card {
+    struct ui_view view;
+    struct gui_quickscreen *qs;
+    enum quickscreen_item item;
+};
+
+struct quickscreen_page {
+    struct ui_theme theme;
+    struct ui_album_palette palette;
+    struct ui_nav nav;
+    struct ui_page page;
+    struct ui_view background;
+    struct ui_sheet sheet;
+    struct frame_buffer_t tile;
+    struct frame_buffer_t *paint_target;
+    fb_data *underneath;
+    int sheet_handle;
+    struct quickscreen_card cards[QUICKSCREEN_ITEM_COUNT];
+    unsigned palette_generation;
+    int title_font, body_font, fallback_font;
+    char saved_title[MAX_PATH];
+    enum themable_icons saved_icon;
+    bool has_saved_title;
+};
+
 struct gui_quickscreen
 {
     const struct settings_list *items[QUICKSCREEN_ITEM_COUNT];
-    struct viewport parent[NB_SCREENS];
-    struct viewport vps[NB_SCREENS][QUICKSCREEN_ITEM_COUNT];
-    struct viewport vp_icons[NB_SCREENS];
-    int button_enter;
+    struct quickscreen_page *view;
+    int view_handle;
     int result;
-    int volume_item;     /* slot showing Volume, or QUICKSCREEN_ITEM_COUNT */
-    bool cider;          /* Left/Right are Cider's shuffle/repeat, not settings */
-    void (*poll)(void);  /* Keep a caller's foreground inbox flowing. No drawing. */
+    int volume_item;
+    bool cider;
+    void (*poll)(void);  /* Keep a caller's foreground inbox flowing. */
 };
-
-static bool cider_quickscreen;
-bool quick_screen_cider_active(void) { return cider_quickscreen; }
 
 /* Cider mode shown in a slot of a Cider quick screen */
 static int cider_slot_mode(enum quickscreen_item i)
@@ -84,294 +101,255 @@ static const char *quickscreen_title(struct gui_quickscreen *qs,
                      : P2STR(ID2P(qs->items[i]->lang_id));
 }
 
-/* The layout below never gives a viewport a negative width or height, nor
- * places one outside the UI viewport: a theme may shrink that to a few pixels
- * to hide this screen, and clearing an out-of-bounds viewport can crash. The
- * icons viewport is the exception, and gui_quickscreen_draw() skips it when
- * it is too small to hold an arrow. */
-
-/* The icons fill the centre, between the four text viewports. */
-static void quickscreen_setup_icons(struct viewport *vp_icons,
-                                    struct viewport *vps)
+static const char *quickscreen_value(struct gui_quickscreen *qs,
+                                     enum quickscreen_item item,
+                                     char *buffer, size_t size)
 {
-    vp_icons->x = vps[QUICKSCREEN_LEFT].x + vps[QUICKSCREEN_LEFT].width;
-    vp_icons->y = vps[QUICKSCREEN_TOP].y + vps[QUICKSCREEN_TOP].height;
-
-    vp_icons->width = vps[QUICKSCREEN_RIGHT].x - vp_icons->x;
-    vp_icons->height = vps[QUICKSCREEN_BOTTOM].y - vp_icons->y;
-
-    /* shrink the icons vp by a few pixels if there is room so the arrows
-       aren't drawn right next to the text */
-    if (vp_icons->width > CENTER_ICONAREA_SIZE*2)
-    {
-        vp_icons->x += CENTER_ICONAREA_SIZE*2/6;
-        vp_icons->width -= CENTER_ICONAREA_SIZE*2/3;
-    }
-    if (vp_icons->height > CENTER_ICONAREA_SIZE*2)
-    {
-        vp_icons->y += CENTER_ICONAREA_SIZE*2/6;
-        vp_icons->height -= CENTER_ICONAREA_SIZE*2/3;
-    }
+    if (cider_slot(qs, item))
+        return cider_mode_label(cider_slot_mode(item),
+                                cider_mode_get(cider_slot_mode(item)));
+    const struct settings_list *setting = qs->items[item];
+    return option_get_valuestring(setting, buffer, size, option_value_as_int(setting));
 }
 
-/* y and height of the four text viewports, each a copy of the parent. */
-static void quickscreen_set_y_axis(struct viewport *left,
-                                   struct viewport *right,
-                                   struct viewport *top,
-                                   struct viewport *bottom)
+static unsigned quickscreen_color(const struct quickscreen_page *view, enum ui_color_role role)
 {
-    int parent_height = top->height;
-    /* nb_lines counts fully visible lines only, so a tiny UI viewport or a
-       large font reads as 0 */
-    int nb_lines = viewport_get_nb_lines(top) ?: 1;
-    int line_height = parent_height/nb_lines;
-
-    /* top and bottom use 2 lines each, if there is room */
-    top->height = line_height;
-    if (nb_lines >= MIN_LINES)
-        top->height *= 2;
-    bottom->height = top->height;
-    bottom->y += parent_height - bottom->height;
-
-    /* enough space vertically, so put a nice margin */
-    if (nb_lines >= MAX_NEEDED_LINES)
-    {
-        top->y += MARGIN;
-        bottom->y -= MARGIN;
-    }
-
-    /* left and right take 2 lines, centred; with one line they keep the
-       parent's whole height */
-    if (nb_lines >= 2)
-    {
-        left->height = right->height = 2*line_height;
-        right->y += parent_height/2 - line_height;
-        left->y = right->y;
-    }
+    uint32_t rgb = ui_theme_color(&view->theme, role, &view->palette);
+    return LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
 }
 
-/* x and width of the left and right text viewports, each a copy of the
- * parent; width is what the longer of their two names needs. */
-static void quickscreen_set_x_axis(struct viewport *left,
-                                   struct viewport *right, int width)
+static struct viewport quickscreen_viewport(const struct quickscreen_page *view,
+                                               const struct ui_rect *clip, int font)
 {
-    int parent_width = left->width;
-    int remaining_width = parent_width - width*2 - CENTER_ICONAREA_SIZE;
-
-    if (remaining_width < 0)
-    {
-        /* crop the text viewports, keeping room for the icons if it is
-           there, or for a margin if not */
-        width = parent_width;
-        if (width > CENTER_ICONAREA_SIZE)
-            width -= CENTER_ICONAREA_SIZE;
-        else if (width > MARGIN)
-            width -= MARGIN;
-
-        if (width >= 2)
-            width /= 2;
-    }
-    else if (remaining_width > MARGIN*4)
-    {
-        left->x += MARGIN;
-        right->x -= MARGIN;
-    }
-
-    right->x += parent_width - width;
-    right->width = left->width = width;
+    return (struct viewport){
+        .x = clip->x, .y = clip->y, .width = clip->width, .height = clip->height,
+        .font = font, .drawmode = DRMODE_FG, .flags = VP_DEFAULT_FLAGS,
+        .buffer = view->paint_target,
+    };
 }
 
-static void quickscreen_setup_viewports(struct gui_quickscreen *qs,
-                                        enum screen_type screen)
+static void quickscreen_paint_background(const struct ui_view *node,
+                                          const struct ui_view_frame *frame)
 {
-    struct viewport *parent = &qs->parent[screen];
-    struct viewport *vps = qs->vps[screen];
-    int width = 0;
-
-    qs->vp_icons[screen] = *parent;
-    for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; i++)
-    {
-        vps[i] = *parent;
-        vps[i].flags &= ~VP_FLAG_ALIGNMENT_MASK; /* left-aligned */
-
-        if (qs->items[i] && (i == QUICKSCREEN_LEFT || i == QUICKSCREEN_RIGHT))
-        {
-            const char *s = quickscreen_title(qs, i);
-            width = MAX(width, font_getstringsize(s, NULL, NULL, parent->font));
-        }
-    }
-    vps[QUICKSCREEN_RIGHT].flags  |= VP_FLAG_ALIGN_RIGHT;
-    vps[QUICKSCREEN_TOP].flags    |= VP_FLAG_ALIGN_CENTER;
-    vps[QUICKSCREEN_BOTTOM].flags |= VP_FLAG_ALIGN_CENTER;
-
-    /* top and bottom keep the parent's whole width */
-    quickscreen_set_x_axis(&vps[QUICKSCREEN_LEFT], &vps[QUICKSCREEN_RIGHT],
-                           width);
-    quickscreen_set_y_axis(&vps[QUICKSCREEN_LEFT], &vps[QUICKSCREEN_RIGHT],
-                           &vps[QUICKSCREEN_TOP], &vps[QUICKSCREEN_BOTTOM]);
-    quickscreen_setup_icons(&qs->vp_icons[screen], vps);
+    const struct quickscreen_page *view = node->data;
+    struct viewport vp = quickscreen_viewport(view, &frame->clip, view->fallback_font);
+    vp.fg_pattern = quickscreen_color(view, UI_COLOR_BACKGROUND);
+    struct viewport *previous = lcd_set_viewport(&vp);
+    lcd_fillrect(0, 0, vp.width, vp.height);
+    lcd_set_viewport(previous);
 }
 
-/* Draw one item into the viewport the caller has already set. */
-static void quickscreen_draw_item(struct gui_quickscreen *qs,
-                                  struct screen *display,
-                                  enum quickscreen_item i, bool single_line)
+/* The wheel uses the four physical directions. Paint their cues with two
+ * lines each so they do not depend on an icon font or a theme icon strip. */
+static void quickscreen_paint_arrow(enum quickscreen_item item, int x, int y, int size)
 {
-    char buf[MAX_PATH];
-    unsigned const char *title, *value;
-    int temp;
-
-    title = quickscreen_title(qs, i);
-    if (cider_slot(qs, i))
-        value = cider_mode_label(cider_slot_mode(i),
-                                 cider_mode_get(cider_slot_mode(i)));
-    else
-    {
-        temp = option_value_as_int(qs->items[i]);
-        value = option_get_valuestring(qs->items[i], buf, MAX_PATH, temp);
-    }
-
-    if (single_line)
-    {
-        char text[MAX_PATH];
-        snprintf(text, MAX_PATH, "%s: %s", title, value);
-        display->puts_scroll(0, 0, text);
-    }
-    else
-    {
-        display->puts_scroll(0, 0, title);
-        display->puts_scroll(0, 1, value);
-    }
+    int dx = (item == QUICKSCREEN_LEFT) ? -size : (item == QUICKSCREEN_RIGHT) ? size : 0;
+    int dy = (item == QUICKSCREEN_TOP) ? -size : (item == QUICKSCREEN_BOTTOM) ? size : 0;
+    lcd_drawline(x + dy, y + dx, x + dx, y + dy);
+    lcd_drawline(x - dy, y - dx, x + dx, y + dy);
 }
 
-/* Repaint just the viewports showing the setting that moved. The icons and the
- * other three items are unchanged, and on this hardware a whole-screen clear
- * for a one-line change is visible. Matched by setting rather than by index,
- * so a setting occupying two slots updates in both. */
-static void quickscreen_update(struct gui_quickscreen *qs,
-                               enum quickscreen_item selected)
+static void quickscreen_paint_card(const struct ui_view *node,
+                                    const struct ui_view_frame *frame)
 {
-    FOR_NB_SCREENS(screen)
-    {
-        struct screen *display = &screens[screen];
-        struct viewport *vps = qs->vps[screen];
+    struct quickscreen_card *card = node->data;
+    struct quickscreen_page *view = card->qs->view;
+    const struct ui_rect *box = &frame->bounds;
+    int title_font = view->title_font >= 0 ? view->title_font : view->fallback_font;
+    int body_font = view->body_font >= 0 ? view->body_font : view->fallback_font;
+    struct viewport vp = quickscreen_viewport(view, &frame->clip, title_font);
+    int x = box->x - vp.x, y = box->y - vp.y;
+    int padding = MIN(view->theme.metric[UI_METRIC_MODAL_PADDING], box->width / 4);
+    int title_height = font_get(title_font)->height;
+    int body_height = font_get(body_font)->height;
+    int text_top = MAX(0, (box->height - title_height - body_height) / 2);
+    int arrow_space = MIN(padding + body_height, box->width / 3);
+    char buffer[MAX_PATH];
 
-        /* Same stand-down as the full draw: the skin owns the screen. */
-        if (sb_skin_draws_quickscreen(screen))
-        {
-            sb_skin_force_next_update();
-            skin_mark_dirty(screen);
-            continue;
-        }
+    struct viewport *previous = lcd_set_viewport(&vp);
+    lcd_set_foreground(quickscreen_color(view, UI_COLOR_MODAL_BG));
+    lcd_fillrect(0, 0, vp.width, vp.height);
+    lcd_set_foreground(quickscreen_color(view, UI_COLOR_SEPARATOR));
+    lcd_drawrect(x, y, box->width, box->height);
+    lcd_set_foreground(quickscreen_color(view, UI_COLOR_ACCENT));
+    quickscreen_paint_arrow(card->item, x + box->width - arrow_space / 2,
+                            y + box->height / 2, MAX(2, MIN(arrow_space / 4, body_height / 4)));
+    lcd_set_viewport(previous);
 
-        for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; i++)
-        {
-            if (qs->items[i] != qs->items[selected])
-                continue;
-
-            struct viewport *last_vp = display->set_viewport(&vps[i]);
-            display->clear_viewport();
-            quickscreen_draw_item(qs, display, i,
-                                  viewport_get_nb_lines(&vps[i]) < 2);
-            display->set_viewport(last_vp);
-        }
-
-        skin_mark_dirty(screen);
-    }
-}
-
-static void gui_quickscreen_draw(struct gui_quickscreen *qs,
-                                 enum screen_type screen)
-{
-    int i;
-    struct screen *display = &screens[screen];
-    struct viewport *parent = &qs->parent[screen];
-    struct viewport *vps = qs->vps[screen];
-    struct viewport *vp_icons = &qs->vp_icons[screen];
-    struct viewport *last_vp;
-
-    /* A base skin carrying the quickscreen tags draws this screen itself, and
-     * this layout would land on top of it as a second, unstyled copy. Stand
-     * down, but still say the values moved -- nothing else tells the skin. */
-    if (sb_skin_draws_quickscreen(screen))
-    {
-        sb_skin_force_next_update();
-        skin_mark_dirty(screen);
+    struct ui_rect text = frame->clip;
+    int end = MIN(text.x + text.width, box->x + box->width - arrow_space);
+    text.x = MAX(text.x, box->x + padding);
+    text.width = end - text.x;
+    if (text.width <= 0)
         return;
-    }
 
-    last_vp = display->set_viewport(parent);
-    display->clear_viewport();
+    vp = quickscreen_viewport(view, &text, title_font);
+    previous = lcd_set_viewport(&vp);
+    int tx = box->x + padding - vp.x;
+    int ty = box->y + text_top - vp.y;
+    lcd_set_foreground(quickscreen_color(view, UI_COLOR_MODAL_FG));
+    lcd_putsxy(tx, ty, quickscreen_title(card->qs, card->item));
+    lcd_setfont(body_font);
+    lcd_set_foreground(quickscreen_color(view, UI_COLOR_MUTED));
+    lcd_putsxy(tx, ty + title_height, quickscreen_value(card->qs, card->item, buffer, sizeof(buffer)));
+    lcd_set_viewport(previous);
+}
 
-    for (i = 0; i < QUICKSCREEN_ITEM_COUNT; i++)
+static void quickscreen_layout(struct gui_quickscreen *qs, const struct viewport *vp)
+{
+    struct quickscreen_page *view = qs->view;
+    static const struct ui_view_ops background_ops = {.paint = quickscreen_paint_background};
+    static const struct ui_view_ops card_ops = {.paint = quickscreen_paint_card};
+    static const uint8_t slots[QUICKSCREEN_ITEM_COUNT] = {1, 0, 2, 3};
+
+    int margin = MIN(view->theme.metric[UI_METRIC_MODAL_EDGE_MARGIN], vp->width / 8);
+    int gap = MIN(MAX(4, margin * 2 / 3), vp->height / 8);
+    int width = MAX(1, (vp->width - 2 * margin - gap) / 2);
+    int height = MAX(1, MIN(view->theme.metric[UI_METRIC_ROW_HEIGHT] * 2 + margin,
+                            (vp->height - gap) / 2));
+    int x = (vp->width - (2 * width + gap)) / 2;
+    int y = (vp->height - (2 * height + gap)) / 2;
+
+    ui_view_init(&view->background, (struct ui_rect){vp->x, vp->y, vp->width, vp->height},
+                 &background_ops, view);
+    for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
     {
-        struct viewport *vp = &vps[i];
         if (!qs->items[i])
             continue;
-        display->set_viewport(vp);
-        quickscreen_draw_item(qs, display, i, viewport_get_nb_lines(vp) < 2);
-    }
-    /* draw the icons, if an arrow fits */
-    if (parent->width > CENTER_ICONAREA_SIZE && vp_icons->height >= 8)
-    {
-        display->set_viewport(vp_icons);
-
-        if (qs->items[QUICKSCREEN_TOP] != NULL)
-        {
-            display->mono_bitmap(bitmap_icons_7x8[Icon_UpArrow],
-                (vp_icons->width/2) - 3, 0, 7, 8);
-        }
-        if (qs->items[QUICKSCREEN_RIGHT] != NULL)
-        {
-            display->mono_bitmap(bitmap_icons_7x8[Icon_FastForward],
-                vp_icons->width - 7, (vp_icons->height/2) - 4, 7, 8);
-        }
-        if (qs->items[QUICKSCREEN_LEFT] != NULL)
-        {
-            display->mono_bitmap(bitmap_icons_7x8[Icon_FastBackward],
-                0, (vp_icons->height/2) - 4, 7, 8);
-        }
-        if (qs->items[QUICKSCREEN_BOTTOM] != NULL)
-        {
-            display->mono_bitmap(bitmap_icons_7x8[Icon_DownArrow],
-                (vp_icons->width/2) - 3, vp_icons->height - 8, 7, 8);
-        }
+        struct quickscreen_card *card = &view->cards[i];
+        card->qs = qs;
+        card->item = i;
+        ui_view_init(&card->view, (struct ui_rect){
+                     x + (slots[i] % 2) * (width + gap),
+                     y + (slots[i] / 2) * (height + gap), width, height},
+                     &card_ops, card);
+        ui_view_append(&view->background, &card->view);
     }
 
-    display->set_viewport(parent);
-    skin_mark_dirty(screen);
-    display->set_viewport(last_vp);
+    ui_page_init(&view->page, &view->background);
+    ui_nav_push(&view->nav, &view->page, UI_SHEET);
 }
 
-static void quickscreen_draw_cb(unsigned short id, void *data, void *userdata);
-
-/* Take the screen down: stop scrolling, drop the theme viewport, pop the
- * activity. Shared by the normal exit and the USB one, which has to run it
- * before the USB screen draws over us. */
-static void quickscreen_cleanup(void *param)
+static void quickscreen_present(struct quickscreen_page *view, bool changed)
 {
-    struct gui_quickscreen *qs = (struct gui_quickscreen *)param;
+    ui_sheet_paint(&view->sheet, view->underneath, view->tile.fb_ptr,
+                   (struct ui_rect){0, 0, LCD_WIDTH, LCD_HEIGHT}, changed);
+}
 
-    cider_quickscreen = false;
-    remove_event_ex(GUI_EVENT_NEED_UI_UPDATE, quickscreen_draw_cb, qs);
-
-    FOR_NB_SCREENS(i)
+static void quickscreen_copy_tile(struct quickscreen_page *view, struct ui_rect area)
+{
+    if (area.width <= 0 || area.height <= 0)
+        return;
+    fb_data *dst = lcd_framebuffer_default.fb_ptr + area.y * LCD_WIDTH + area.x;
+    const fb_data *src = view->tile.fb_ptr + area.y * LCD_WIDTH + area.x;
+    for (int y = 0; y < area.height; y++)
     {
-        for (int j = 0; j < QUICKSCREEN_ITEM_COUNT; j++)
-            screens[i].scroll_stop_viewport(&qs->vps[i][j]);
-        viewportmanager_theme_undo(i, true);
+        memcpy(dst, src, area.width * sizeof(*src));
+        dst += LCD_WIDTH;
+        src += LCD_WIDTH;
     }
+    ui_mark_dirty_rect(SCREEN_MAIN, area.x, area.y, area.width, area.height);
+    ui_flush_dirty();
+}
 
-    pop_current_activity();
+static void quickscreen_chrome(struct quickscreen_page *view)
+{
+    sb_settle(SCREEN_MAIN);
+    if (view->sheet_handle > 0)
+    {
+        int height = view->background.value[UI_Y];
+        memcpy(view->tile.fb_ptr, lcd_framebuffer_default.fb_ptr,
+               LCD_WIDTH * height * sizeof(fb_data));
+        if (view->sheet.active)
+            view->sheet.light = 0; /* Status rendering wrote to the canonical panel. */
+    }
+}
+
+static void quickscreen_update(struct gui_quickscreen *qs, enum quickscreen_item item)
+{
+    struct quickscreen_page *view = qs->view;
+    struct ui_view *background = &view->background;
+    album_palette_refresh();
+    unsigned generation = album_palette_generation();
+
+    if (generation != view->palette_generation || item == QUICKSCREEN_ITEM_COUNT)
+    {
+        album_palette_snapshot(&view->palette);
+        view->palette_generation = generation;
+        ui_page_invalidate(&view->page, (struct ui_rect){
+            background->value[UI_X], background->value[UI_Y],
+            background->value[UI_WIDTH], background->value[UI_HEIGHT]});
+    }
+    else
+    {
+        for (enum quickscreen_item i = QUICKSCREEN_TOP; i < QUICKSCREEN_ITEM_COUNT; ++i)
+        {
+            /* Repaint duplicate settings too. Remote shuffle and repeat
+             * retain separate values even if their local items match. */
+            if (!qs->items[i] || (i != item && (cider_slot(qs, i) || cider_slot(qs, item) ||
+                                              qs->items[i] != qs->items[item])))
+                continue;
+            const int *p = view->cards[i].view.value;
+            ui_page_invalidate(&view->page, (struct ui_rect){
+                background->value[UI_X] + p[UI_X], background->value[UI_Y] + p[UI_Y],
+                p[UI_WIDTH], p[UI_HEIGHT]});
+        }
+    }
+    if (view->sheet_handle > 0)
+    {
+        struct ui_rect damage = ui_page_paint(&view->page);
+        if (view->sheet.active)
+        {
+            quickscreen_present(view, damage.width > 0 && damage.height > 0);
+        }
+        else
+            quickscreen_copy_tile(view, damage);
+        return;
+    }
+    if (ui_flush_inhibited())
+    {
+        struct ui_rect damage = ui_page_paint(&view->page);
+        if (damage.width > 0 && damage.height > 0)
+            ui_mark_dirty_rect(SCREEN_MAIN, damage.x, damage.y, damage.width, damage.height);
+    }
+    else
+    {
+        ui_nav_draw(&view->nav);
+        ui_flush_dirty();
+    }
 }
 
 static void quickscreen_draw_cb(unsigned short id, void *data, void *userdata)
 {
     (void)id;
     (void)data;
+    quickscreen_update(userdata, QUICKSCREEN_ITEM_COUNT);
+}
 
-    FOR_NB_SCREENS(i)
-        gui_quickscreen_draw((struct gui_quickscreen *)userdata, i);
+/* The system handler runs USB in place. Release the view and restore the
+ * caller's chrome before it takes control of the display. */
+static void quickscreen_cleanup(void *param)
+{
+    struct gui_quickscreen *qs = param;
+    struct quickscreen_page *view = qs->view;
+    remove_event_ex(GUI_EVENT_NEED_UI_UPDATE, quickscreen_draw_cb, qs);
+
+    ui_nav_pop(&view->nav);
+    ui_sheet_cancel(&view->sheet);
+    if (view->sheet_handle > 0)
+    {
+        core_put_data_pinned(view->underneath);
+        core_free(view->sheet_handle);
+    }
+    sb_set_persistent_title(view->has_saved_title ? view->saved_title : NULL,
+                            view->saved_icon, SCREEN_MAIN);
+    viewportmanager_theme_undo(SCREEN_MAIN, true);
+    font_unload(view->title_font);
+    font_unload(view->body_font);
+    core_put_data_pinned(view);
+    qs->view_handle = core_free(qs->view_handle);
+
+    pop_current_activity();
 }
 
 static void talk_qs_option(struct gui_quickscreen *qs,
@@ -449,21 +427,54 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
      *  - an action taken while pressing the enter button,
      *    then release the enter button*/
     bool can_quit = false;
-    qs->button_enter = button_enter;
     qs->result = QUICKSCREEN_OK;
+    *usb = false;
+    qs->view_handle = core_alloc_free_space(sizeof(*qs->view));
+    if (qs->view_handle <= 0)
+        return QUICKSCREEN_OK;
+
+    struct quickscreen_page *view = core_get_data_pinned(qs->view_handle);
+    qs->view = view;
+    *view = (struct quickscreen_page){ .paint_target = &lcd_framebuffer_default };
+    ui_scene_interrupt();
+    if (global_settings.animations && lcd_active())
+        view->sheet_handle = core_alloc_free_space(2 * FRAMEBUFFER_SIZE);
+    if (view->sheet_handle > 0)
+    {
+        view->underneath = core_get_data_pinned(view->sheet_handle);
+        memcpy(view->underneath, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
+        fb_data *body = view->underneath + QUICK_PIXELS;
+        memcpy(body, view->underneath, FRAMEBUFFER_SIZE);
+        view->tile = (struct frame_buffer_t){ .fb_ptr = body, .stride = LCD_WIDTH, .elems = QUICK_PIXELS };
+        view->paint_target = &view->tile;
+    }
+    view->has_saved_title = sb_get_persistent_title(SCREEN_MAIN, view->saved_title,
+                                                   sizeof(view->saved_title), &view->saved_icon);
+    ui_theme_snapshot(&view->theme);
+    view->title_font = ui_theme_font_load(&view->theme, UI_FONT_TITLE, 48);
+    view->body_font = ui_theme_font_load(&view->theme, UI_FONT_BODY, 64);
 
     push_current_activity(ACTIVITY_QUICKSCREEN);
-
-    FOR_NB_SCREENS(i)
+    sb_set_persistent_title(str(LANG_QUICK_SETTINGS), Icon_NOICON, SCREEN_MAIN);
+    screens[SCREEN_MAIN].scroll_stop();
+    struct viewport content;
+    viewportmanager_theme_enable(SCREEN_MAIN, true, &content);
+    view->fallback_font = content.font;
+    quickscreen_layout(qs, &content);
+    quickscreen_chrome(view);
+    if (view->sheet_handle > 0)
     {
-        screens[i].set_viewport(NULL);
-        screens[i].scroll_stop();
-        viewportmanager_theme_enable(i, true, &qs->parent[i]);
-        quickscreen_setup_viewports(qs, i);
-        gui_quickscreen_draw(qs, i);
+        ui_sheet_begin(&view->sheet, true, "quick-settings");
+        if (view->sheet.active)
+        {
+            int top = view->background.value[UI_Y];
+            memcpy(lcd_framebuffer_default.fb_ptr, view->underneath, LCD_WIDTH * top * sizeof(fb_data));
+            ui_take_dirty(SCREEN_MAIN);
+            view->sheet.light = UI_FULL_OPACITY;
+        }
     }
+    quickscreen_update(qs, QUICKSCREEN_ITEM_COUNT);
     add_event_ex(GUI_EVENT_NEED_UI_UPDATE, false, quickscreen_draw_cb, qs);
-    *usb = false;
     /* Announce current selection on entering this screen. This is all
        queued up, but can be interrupted as soon as a setting is
        changed. */
@@ -478,16 +489,22 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
     while (true) {
         if (qs->poll)
             qs->poll();
-        button = get_action(CONTEXT_QUICKSCREEN, HZ/5);
+        /* Keep processing actions while the sheet is in flight. */
+        bool was_inhibited = ui_flush_inhibited();
+        if (view->sheet.active)
+            ui_inhibit_flush(true);
+        button = get_action(CONTEXT_QUICKSCREEN, ui_sheet_timeout(&view->sheet, HZ/5));
+        ui_inhibit_flush(was_inhibited);
         /* The USB screen runs inside the handler, so the quickscreen has to
          * take itself down first -- otherwise it is still the current
          * activity, with its theme viewport in place, underneath it. */
-        if (default_event_handler_ex(button, quickscreen_cleanup, qs)
-            == SYS_USB_CONNECTED)
+        if (button == SYS_USB_CONNECTED)
         {
+            default_event_handler_ex(button, quickscreen_cleanup, qs);
             *usb = true;
             return qs->result | QUICKSCREEN_IN_USB;
         }
+        default_event_handler(button);
         if (gui_quickscreen_do_button(qs, button, &changed))
         {
             qs->result |= QUICKSCREEN_CHANGED;
@@ -509,10 +526,7 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
                                    UNIT_DB, sound_numdecimals(SOUND_VOLUME),
                                    false);
 
-            /* The volume keys change a setting this screen may be displaying,
-             * and nothing else on this branch redraws it. Only worth the pass
-             * when Volume occupies a slot; a skin drawing its own quickscreen
-             * returns from the draw and is served by the force below. */
+            /* Volume changes repaint its card only when it is configured. */
             if (qs->volume_item < QUICKSCREEN_ITEM_COUNT)
                 quickscreen_update(qs, qs->volume_item);
         }
@@ -527,14 +541,35 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
         if (button == ACTION_STD_CANCEL)
             break;
 
-        /* A base skin may show a setting this screen just changed -- shuffle,
-         * repeat, a brightness slider. Bypass the status bar's update_delay so
-         * it agrees with the row the user is looking at. Only on a real press:
-         * get_action() above times out five times a second, and forcing on
-         * those would repaint the bar continuously for as long as the
-         * quickscreen is open. */
-        if (button != ACTION_NONE)
-            sb_skin_force_next_update();
+        if (view->sheet.active && ui_take_dirty(SCREEN_MAIN))
+            quickscreen_chrome(view);
+        if (button == ACTION_REDRAW || album_palette_needs_repaint())
+        {
+            quickscreen_chrome(view);
+            quickscreen_update(qs, QUICKSCREEN_ITEM_COUNT);
+        }
+        if (view->sheet.active)
+            quickscreen_present(view, false);
+    }
+    if (view->sheet_handle > 0)
+    {
+        bool takeover = IS_SYSEVENT(button);
+#ifdef HAVE_WHEEL_WPS_CHORD
+        takeover |= agents_nav_pending() != AGENTS_NAV_NONE;
+#endif
+        if (!takeover)
+        {
+            ui_sheet_begin(&view->sheet, false, "quick-settings");
+            do {
+                quickscreen_present(view, false);
+            } while (ui_sheet_wait(&view->sheet));
+            if (view->sheet.active)
+            {
+                memcpy(lcd_framebuffer_default.fb_ptr, view->underneath, FRAMEBUFFER_SIZE);
+                ui_mark_dirty(SCREEN_MAIN);
+                ui_flush_dirty();
+            }
+        }
     }
     /* Notify that we're exiting this screen */
     cond_talk_ids_fq(VOICE_OK);
@@ -551,7 +586,6 @@ static int quick_screen_run(int button_enter, bool cider, void (*poll)(void))
 
     qs.cider = cider;
     qs.poll = poll;
-    cider_quickscreen = cider;
     qs.volume_item = QUICKSCREEN_ITEM_COUNT;
 
     for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
@@ -570,8 +604,7 @@ static int quick_screen_run(int button_enter, bool cider, void (*poll)(void))
 
     if (cider)
     {
-        /* Only these two slots bind to Cider. TOP/BOTTOM keep the native
-         * settings, option steps, backlight callback and theme tokens. */
+        /* Only horizontal directions change Cider settings. */
         qs.items[QUICKSCREEN_LEFT] = find_setting(&global_settings.playlist_shuffle);
         qs.items[QUICKSCREEN_RIGHT] = find_setting(&global_settings.repeat_mode);
     }
@@ -580,14 +613,11 @@ static int quick_screen_run(int button_enter, bool cider, void (*poll)(void))
     if (ret & QUICKSCREEN_CHANGED)
     {
         bool local_changed = false;
-        /* As option_screen() does: a theme setting moved here belongs in the
-         * theme's overlay, or the next theme load discards it. Once per
-         * setting at the end, not per press, since each mark is a write. */
+        /* Save the native setting changes together on exit. */
         for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
             if (qs.items[i] && !cider_slot(&qs, i) &&
                 option_value_as_int(qs.items[i]) != before[i])
             {
-                settings_mark_user_tweak(qs.items[i]);
                 local_changed = true;
             }
         if (local_changed)

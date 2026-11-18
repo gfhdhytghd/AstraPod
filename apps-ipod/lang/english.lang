@@ -28294,3 +28294,18 @@
     *: "Animations"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_NATIVE_THEME
+  desc: Name of the native theme picker in Appearance settings
+  user: core
+  <source>
+    *: "Native theme"
+  </source>
+  <dest>
+    *: "Native theme"
+  </dest>
+  <voice>
+    *: "Native theme"
+  </voice>
+</phrase>

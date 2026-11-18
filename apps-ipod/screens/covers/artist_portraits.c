@@ -205,7 +205,7 @@ static void artist_draw_text(void)
     artist_name(center_index, name, sizeof(name));
     struct viewport *saved_vp = carousel_text_begin();
     lcd_set_foreground(pf_fg_color);
-    lcd_setfont(pf_bold_font);
+    lcd_setfont(carousel_caption_font(true));
     line = carousel_caption_fit(name, fit, sizeof(fit));
     /* Nothing but the slide decides this caption, hence the 0 variant. */
     if (carousel_caption_changed(center_index, 0))
@@ -221,7 +221,7 @@ static void artist_draw_text(void)
 
     txt_x = get_scroll_line_offset(PF_SCROLL_ALBUM);
     lcd_putsxy(txt_x, txt_y, line);
-    lcd_setfont(screens[SCREEN_MAIN].getuifont());
+    lcd_setfont(carousel_caption_font(false));
     carousel_text_end(saved_vp);
 }
 
@@ -347,6 +347,7 @@ static const struct carousel_model artist_model = {
     .speak       = artist_speak,
     .owns_cache_version = false,
     .title       = (const char *)ID2P(LANG_ARTIST_PORTRAITS),
+    .motion_trace = "artist-portraits",
 };
 
 int artist_portraits(const char *selected_file)

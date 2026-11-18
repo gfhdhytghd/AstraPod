@@ -9,10 +9,10 @@ ui = root / "apps-ipod/ui"
 
 stubs = {
     "config.h": "",
-    "system.h": "#define MAX(a,b) ((a)>(b)?(a):(b))\n#define MIN(a,b) ((a)<(b)?(a):(b))\n",
-    "settings/settings.h": """#include <stdbool.h>
-struct test_settings { bool native_ui; };
-extern struct test_settings global_settings;
+    "system.h": """#define MAX(a,b) ((a)>(b)?(a):(b))
+#define MIN(a,b) ((a)<(b)?(a):(b))
+extern unsigned test_usec_timer;
+#define USEC_TIMER (++test_usec_timer)
 """,
     "core_alloc.h": """#include <stddef.h>
 int core_alloc_free_space(size_t n);
@@ -20,7 +20,9 @@ int core_free(int handle);
 void *core_get_data_pinned(int handle);
 void core_put_data_pinned(const void *data);
 """,
-    "lcd.h": """#include <stdint.h>
+    "lcd.h": """#pragma once
+#include <stdbool.h>
+#include <stdint.h>
 #define LCD_WIDTH 12
 #define LCD_HEIGHT 10
 typedef uint16_t fb_data;
@@ -28,24 +30,44 @@ extern struct test_fb { fb_data *fb_ptr; } lcd_framebuffer_default;
 struct viewport;
 struct viewport *lcd_set_viewport(struct viewport *);
 void lcd_update_rect(int x, int y, int width, int height);
+bool lcd_updates_held(void);
+bool lcd_active(void);
+""",
+    "draw/screen_access.h": """#pragma once
+#include "lcd.h"
+enum screen_type { SCREEN_MAIN };
+#define NB_SCREENS 1
+#define FOR_NB_SCREENS(i) for (int i = 0; i < NB_SCREENS; ++i)
+struct screen {
+    int lcdwidth, lcdheight;
+    struct viewport *(*set_viewport)(struct viewport *);
+    void (*update_rect)(int, int, int, int);
+};
+extern struct screen screens[NB_SCREENS];
 """,
 }
 
 harness = r"""
 #include "retained.h"
+#include "frame.h"
 #include "lcd.h"
-#include "settings/settings.h"
 #include <assert.h>
 #include <stdio.h>
 
-struct test_settings global_settings;
 static fb_data pixels[LCD_WIDTH * LCD_HEIGHT], buffer[LCD_WIDTH * LCD_HEIGHT];
+struct screen screens[NB_SCREENS] = {
+    { LCD_WIDTH, LCD_HEIGHT, lcd_set_viewport, lcd_update_rect },
+};
 struct test_fb lcd_framebuffer_default = { pixels };
+unsigned test_usec_timer;
 static struct ui_rect updated;
 static int submissions, paints, pin_count, allocations;
 static bool allocator_ready = true;
+static bool hold_lcd;
 static unsigned duration_scale = 100;
 unsigned ui_theme_duration(unsigned frames) { return frames * duration_scale / 100; }
+void ui_perf_note_render(uint32_t elapsed) { (void)elapsed; }
+void ui_perf_note_submit(uint32_t elapsed) { (void)elapsed; }
 
 int core_alloc_free_space(size_t n)
 {
@@ -83,6 +105,8 @@ void lcd_update_rect(int x, int y, int width, int height)
     updated = (struct ui_rect){ x, y, width, height };
     ++submissions;
 }
+bool lcd_updates_held(void) { return hold_lcd; }
+bool lcd_active(void) { return true; }
 
 static void fill(const struct ui_view *v, const struct ui_view_frame *frame)
 {
@@ -122,9 +146,6 @@ static void assign_layout(struct ui_view *v, const struct ui_rect *parent)
 
 int main(void)
 {
-    assert(!ui_native_enabled());
-    global_settings.native_ui = true;
-    assert(ui_native_enabled());
     struct ui_view page_view, chip, overlay_view;
     struct ui_page page, overlay;
     struct ui_nav nav = {0};
@@ -199,6 +220,22 @@ int main(void)
     ui_nav_draw(&nav);
     assert(pixels[3 * LCD_WIDTH + 8] == background);
     assert(ui_nav_dispatch(&nav, 7));
+
+    unsigned count = ui_flush_count();
+    ui_inhibit_flush(true);
+    ui_mark_dirty_rect(SCREEN_MAIN, -1, 0, 4, 1);
+    ui_page_invalidate(&page, (struct ui_rect){1, 5, 3, 2});
+    ui_page_draw(&page);
+    assert(ui_flush_count() == count);
+    ui_inhibit_flush(false);
+    hold_lcd = true;
+    ui_flush_dirty();
+    assert(ui_flush_count() == count);
+    hold_lcd = false;
+    ui_flush_dirty();
+    assert(ui_flush_count() == count + 1 &&
+           updated.x == 0 && updated.y == 0 &&
+           updated.width == 4 && updated.height == 7);
     puts("PASS retained layout, focus, damage, retarget, layers and navigation");
 }
 """
@@ -214,6 +251,7 @@ with tempfile.TemporaryDirectory(prefix="podbox-retained-test-") as temp:
     subprocess.run(["cc", "-std=c11", "-Werror", "-Wall", "-Wextra",
                     "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
                     "-I", str(port), "-I", str(ui), str(port / "test.c"),
-                    str(ui / "retained.c"), str(ui / "animation.c"), "-o", str(binary)],
+                    str(ui / "retained.c"), str(ui / "frame.c"),
+                    str(ui / "animation.c"), "-o", str(binary)],
                    check=True)
     subprocess.run([str(binary)], check=True)

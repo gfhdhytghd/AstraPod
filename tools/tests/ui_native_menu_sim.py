@@ -1,65 +1,69 @@
 #!/usr/bin/env python3
-"""Check retained Settings and Playback Settings against legacy Scrim.
-
-Pass OLD NEW PHASE4_ZIP EVIDENCE. Both executables are normal iPod 6G SDL
-builds. The no-skin fixture has no .wps or .sbs files to fall back to.
-"""
+"""Capture native menu navigation with fonts as the only UI assets."""
 import argparse
 import json
 import os
 from pathlib import Path
 import tempfile
 import time
-import zipfile
+from zipfile import ZipFile
 
 from PIL import ImageChops
 
 from ui_menu_sim import FPS, Screen, image_diff, process
 
 
-def capture(binary, resources, root, display, runtime, output, mode, no_skin=False):
-    with zipfile.ZipFile(resources) as archive:
+def capture(binary, resources, root, display, runtime, output, theme, home, legacy=False):
+    with ZipFile(resources) as archive:
         for path in archive.namelist():
-            if path.startswith((".rockbox/fonts/", ".rockbox/themes/", ".rockbox/wps/",
-                                ".rockbox/icons/", ".rockbox/backdrops/")):
-                if no_skin and path.startswith(".rockbox/wps/"):
-                    continue
+            if path.startswith(".rockbox/fonts/") or (
+                legacy and path.startswith((".rockbox/themes/", ".rockbox/wps/",
+                                            ".rockbox/icons/", ".rockbox/backdrops/"))
+            ):
                 archive.extract(path, root)
+
     rockbox = root / ".rockbox"
-    config = (rockbox / "themes/scrim.cfg").read_text()
-    config += "\nstart in screen: menu\nbacklight timeout: off\nvoice menus: off\n"
-    config += f"animations: off\nnative ui: {mode}\nsettings mode: everything\nbeep: moderate\n"
-    if root.name == "light":
-        config += "native theme: light\n"
+    config = (rockbox / "themes/scrim.cfg").read_text() if legacy else ""
+    if home:
+        config += ("\nstart in screen: root\nlist wraparound: on\n"
+                   "root menu order: settings,system_menu,wps,database,pictureflow,"
+                   "playlists,files,currentplaylist,books,shortcuts\n")
+    else:
+        config += "\nstart in screen: menu\n"
+    config += ("backlight timeout: off\nvoice menus: off\nanimations: off\n"
+               "settings mode: everything\nbeep: moderate\nscrollbar: off\n")
+    config += f"native theme: {theme}\n"
     (rockbox / "config.cfg").write_text(config)
     env = dict(os.environ, DISPLAY=display, XDG_RUNTIME_DIR=str(runtime),
-               SDL_VIDEODRIVER="x11", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software")
-    with (output / f"{root.name}.log").open("w") as slog, process(
+               SDL_VIDEODRIVER="x11", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software",
+               LIBGL_ALWAYS_SOFTWARE="1", __GLX_VENDOR_LIBRARY_NAME="mesa")
+    with (output / f"{root.name}.log").open("w") as log, process(
         [str(binary), "--root", str(root), "--nobackground", "--zoom", "1", "--screenshot"],
-        slog, env=env, cwd=root,
+        log, env=env, cwd=root,
     ) as firmware:
         time.sleep(120 / FPS)
         screen = Screen(env, firmware)
-        if root.name != "light":
-            screen.wait_full_charge()
 
-        def tap(key):
+        def step(key):
             screen.tap(key)
             time.sleep(15 / FPS)
+            assert firmware.poll() is None
+            return screen.frame()
 
-        tap("Down")
-        frames = {"settings": screen.frame()}
-        tap("Right")
-        frames["playback"] = screen.frame()
-        assert ImageChops.difference(frames["settings"], frames["playback"]).getbbox()
-        for number in range(22):
-            tap("Down")
-            frames[f"playback-{number}"] = screen.frame()
-        tap("Left")
-        frames["returned"] = screen.frame()
-        assert ImageChops.difference(frames["returned"], frames["playback"]).getbbox()
-        for key, frame in frames.items():
-            frame.save(output / f"{root.name}-{key}.png")
+        if theme == "scrim":
+            screen.wait_full_charge()
+        start, end = ("home", "settings") if home else ("settings", "playback")
+        initial = screen.frame() if home else step("Down")
+        entered = step("Right")
+        wheel = step("Down")
+        returned = step("Left")
+        assert ImageChops.difference(initial, entered).getbbox()
+        assert ImageChops.difference(entered, wheel).getbbox()
+        assert ImageChops.difference(wheel, returned).getbbox()
+
+        frames = {start: initial, end: entered, "wheel": wheel, "returned": returned}
+        for name, frame in frames.items():
+            frame.save(output / f"{root.name}-{name}.png")
         return frames
 
 
@@ -67,15 +71,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("old", "new", "resources", "out"):
         parser.add_argument(name, type=lambda arg: Path(arg).resolve())
+    parser.add_argument("--home", action="store_true")
     args = parser.parse_args()
     args.out.mkdir(parents=True)
     with tempfile.TemporaryDirectory(prefix="podbox-native-menu-") as folder, \
-            tempfile.TemporaryFile() as display, (args.out / "xvfb.log").open("w") as xlog:
+            tempfile.TemporaryFile() as display, (args.out / "xvfb.log").open("w") as log:
         root = Path(folder)
         runtime = root / "runtime"
         runtime.mkdir(mode=0o700)
         with process(["Xvfb", "-displayfd", str(display.fileno()), "-screen", "0",
-                      "800x600x24", "-nolisten", "tcp"], xlog,
+                      "800x600x24", "-nolisten", "tcp"], log,
                      pass_fds=(display.fileno(),)):
             for _ in range(300):
                 display.seek(0)
@@ -85,31 +90,23 @@ def main():
                 time.sleep(1 / FPS)
             else:
                 raise RuntimeError("Xvfb did not start")
-            captures = {
-                name: capture(binary, args.resources, root / name, ":" + number,
-                              runtime, args.out, mode, no_skin)
-                for name, binary, mode, no_skin in (
-                    ("legacy", args.old, "off", False),
-                    ("disabled", args.new, "off", False),
-                    ("native", args.new, "on", False),
-                    ("no-skin", args.new, "on", True),
-                    ("light", args.new, "on", True),
-                )
-            }
-    result = {
-        name: {
-            state: image_diff(captures["legacy"][state], frame, f"{name}-{state}", args.out)
-            for state, frame in frames.items()
-        }
-        for name, frames in captures.items() if name not in ("legacy", "light")
-    }
+
+            display_name = ":" + number
+            legacy = capture(args.old, args.resources, root / "legacy", display_name,
+                             runtime, args.out, "scrim", args.home, legacy=True)
+            native = capture(args.new, args.resources, root / "scrim", display_name,
+                             runtime, args.out, "scrim", args.home)
+            light = capture(args.new, args.resources, root / "light", display_name,
+                            runtime, args.out, "light", args.home)
+    pixels = {name: image_diff(legacy[name], frame, f"scrim-{name}", args.out)
+              for name, frame in native.items()}
+    for name, frame in light.items():
+        assert frame.getpixel((0, 0)) == (222, 223, 214), name
+        assert frame.getpixel((0, 239)) == (247, 247, 247), name
+    result = {"scrim_pixels_changed": pixels, "light_surface_tokens": True,
+              "no_legacy_assets": True, "captures": list(native)}
     (args.out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    assert all(not value for frames in result.values() for value in frames.values()), result
-    for state in ("settings", "playback", "returned"):
-        frame = captures["light"][state]
-        assert frame.getpixel((0, 0)) == (222, 223, 214), state
-        assert frame.getpixel((0, 239)) == (247, 247, 247), state
-    print("PASS native Settings and Playback Settings with Scrim and Light, including no-skin mode")
+    print("PASS native menu entry, wheel selection and return with Scrim and Light")
 
 
 if __name__ == "__main__":

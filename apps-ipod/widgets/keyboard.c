@@ -18,6 +18,7 @@
 
 #include "draw/screen_access.h"
 #include "config.h"
+#include "core_alloc.h"
 #include "kernel.h"
 #include "system.h"
 #include "system/shutdown.h"
@@ -32,10 +33,6 @@
 #include "edit_line.h"
 #include "speech/talk.h"
 
-#define KBD_MARGIN 12        /* horizontal gap from the display edge to the box */
-#define KBD_BTN_GAP 10       /* gap between the Cancel and OK buttons */
-#define KBD_BTN_PAD_Y 5      /* vertical padding inside each button */
-
 struct kbd_edit {
     struct edit_line ed;
     bool on_buttons;     /* focus is on the Cancel/OK button row, not the input */
@@ -43,15 +40,7 @@ struct kbd_edit {
     bool dirty;          /* text changed since the editor opened */
 };
 
-/* Not reentrant (there is only ever one text-input screen at a time); kept
- * out of the stack so plugin callers with small stacks are safe. */
-static struct kbd_edit st;
-
-/* Box spans the physical display width minus a horizontal margin; height fits
- * the content (edit line + button row) and is centred on the display, matching
- * the yes/no dialog. box->x/y are absolute screen coordinates, so the geometry
- * must come from the display (lcdwidth/lcdheight), not from the theme viewport
- * (getwidth()/getheight()), which a themed SBS can inset - see yesno_measure(). */
+/* The dialog is centred in display coordinates. */
 static void kbd_measure(struct dialog *d, struct screen *display,
                         struct viewport *box, void *data)
 {
@@ -63,14 +52,14 @@ static void kbd_measure(struct dialog *d, struct screen *display,
 
     dialog_get_insets(&d->style, &in);
 
-    int bh = ch_h + 2 * KBD_BTN_PAD_Y;      /* button height */
+    int bh = ch_h + 2 * d->style.button_pad_y;      /* button height */
     int gap = ch_h / 2;                     /* gap between edit line and buttons */
     int box_h = ch_h + gap + bh + in.top + in.bottom;
     if (box_h > area_h)
         box_h = area_h;
 
-    box->x = KBD_MARGIN;
-    box->width = sw - 2 * KBD_MARGIN;
+    box->x = d->style.edge_margin;
+    box->width = sw - 2 * d->style.edge_margin;
     box->y = (area_h - box_h) / 2;
     box->height = box_h;
 }
@@ -80,11 +69,11 @@ static void kbd_draw(struct dialog *d, struct screen *display,
 {
     struct kbd_edit *s = data;
     int ch_h = display->getcharheight();
-    int bh = ch_h + 2 * KBD_BTN_PAD_Y;      /* button height */
+    int bh = ch_h + 2 * d->style.button_pad_y;      /* button height */
 
     /* --- edit line in a clipped sub-viewport so long text can scroll --- */
     struct viewport tvp = *content;
-    tvp.height = edit_line_height(display);
+    tvp.height = MIN(content->height, edit_line_height(display));
     display->set_viewport(&tvp);
     edit_line_draw(display, &s->ed, tvp.width);
 
@@ -93,13 +82,13 @@ static void kbd_draw(struct dialog *d, struct screen *display,
     display->set_drawmode(DRMODE_SOLID);
 
     int by = content->height - bh;
-    int bw = (content->width - KBD_BTN_GAP) / 2;
+    int bw = (content->width - d->style.button_gap) / 2;
     if (bw > 0)
     {
         dialog_draw_button(display, &d->style, 0, by, bw, bh,
                            str(LANG_DIAG_CANCEL),
                            s->on_buttons && !s->btn_ok);
-        dialog_draw_button(display, &d->style, bw + KBD_BTN_GAP, by, bw, bh,
+        dialog_draw_button(display, &d->style, bw + d->style.button_gap, by, bw, bh,
                            str(LANG_DIAG_OK),
                            s->on_buttons && s->btn_ok);
     }
@@ -113,9 +102,8 @@ static int kbd_confirm_cancel(struct kbd_edit *s)
 {
     if (s->dirty)
     {
-        static const unsigned char *lines[1];
-        lines[0] = (const unsigned char *)ID2P(LANG_KBD_DISCARD);
-        struct text_message message = { (const char **)lines, 1 };
+        const char *lines[] = {ID2P(LANG_KBD_DISCARD)};
+        struct text_message message = {lines, 1};
         if (gui_syncyesno_run(&message, NULL, NULL) != YESNO_YES)
         {
             s->on_buttons = false;   /* keep editing, back to the input */
@@ -208,18 +196,23 @@ int dialog_input(char* text, int buflen)
     };
     struct dialog d;
 
-    edit_line_init(&st.ed, text, buflen - 1);
-    st.on_buttons = false;   /* focus starts on the input line */
-    st.btn_ok = true;
-    st.dirty = false;
+    int handle = core_alloc_free_space(sizeof(struct kbd_edit));
+    if (handle <= 0)
+        return -1;
 
-    dialog_init(&d, CONTEXT_KEYBOARD, NULL, NULL, &cb, &st);
-    edit_line_speak(&st.ed);    /* what is there to edit */
-    if (dialog_run(&d, TIMEOUT_BLOCK) != DIALOG_ACCEPT)
-        return -1;           /* cancelled or USB */
+    struct kbd_edit *state = core_get_data_pinned(handle);
+    *state = (struct kbd_edit){.btn_ok = true};
+    edit_line_init(&state->ed, text, buflen - 1);
 
-    edit_line_get(&st.ed, text, buflen, true);
-    return 0;
+    dialog_init(&d, CONTEXT_KEYBOARD, NULL, NULL, &cb, state);
+    edit_line_speak(&state->ed);
+    bool accepted = dialog_run(&d, TIMEOUT_BLOCK) == DIALOG_ACCEPT;
+    if (accepted)
+        edit_line_get(&state->ed, text, buflen, true);
+
+    core_put_data_pinned(state);
+    core_free(handle);
+    return accepted ? 0 : -1;
 }
 
 /* Plugin-ABI wrapper: the loadable-layout `kbd` argument is ignored. */

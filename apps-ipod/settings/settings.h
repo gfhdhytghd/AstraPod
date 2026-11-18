@@ -17,7 +17,6 @@
 #include "inttypes.h"
 #include "config.h"
 #include "audiohw.h" /* for the AUDIOHW_* defines */
-#include "skin/statusbar.h" /* for the statusbar values */
 #include "screens/playback/quick_screen.h"
 #include "button.h"
 #include "audio.h"
@@ -85,18 +84,6 @@ enum {
     ALBUM_YEAR_OFF = 0,
     ALBUM_YEAR_BEFORE,          /* "2004 – Album" */
     ALBUM_YEAR_AFTER,           /* "Album – 2004" */
-};
-
-/* global_settings.dialog_colors -- what a modal dialog does about colour.
- *
- * OFF and ON are the two the setting has always had, in the order it wrote
- * them, so an existing .cfg keeps its meaning. AUTO is the default, so a theme
- * that says nothing about dialogs gets the derived scheme rather than the flat
- * one. */
-enum {
-    DIALOG_COLORS_OFF = 0,   /* every colour inherited from the theme        */
-    DIALOG_COLORS_ON = 1,    /* the nine colours named in the .cfg           */
-    DIALOG_COLORS_AUTO = 2,  /* derived from the theme's, or the album's     */
 };
 
 /* global_settings.settings_mode -- how much of the settings tree is shown.
@@ -188,15 +175,6 @@ enum {
     SINGLE_MODE_PLAYLIST,
 };
 
-/* dynamic_colors_background: which of the album's two colours is the
- * background -- as extracted, the lighter, or the darker. */
-enum
-{
-    DYNAMIC_BG_AUTO = 0,
-    DYNAMIC_BG_LIGHT,
-    DYNAMIC_BG_DARK
-};
-
 enum
 {
     BROWSER_DEFAULT_FILES = 0,
@@ -279,14 +257,11 @@ enum {
 /* Note: Any new filter modes need to be added before NUM_FILTER_MODES.
  *       Any new rockbox browse filter modes (accessible through the menu)
  *       must be added after NUM_FILTER_MODES. */
-/* Only the entries before NUM_FILTER_MODES reach disk: they are the values of
- * the "show files" setting. Everything after it is a compile-time argument to
- * browse_folder_info, so renumbering that half is free. SHOW_RWPS, SHOW_FMS,
- * SHOW_RFMS, SHOW_RSBS and SHOW_FMR were dropped from there -- the remote-LCD
- * and tuner browse modes, neither of which this fork has. */
+/* Only the entries before NUM_FILTER_MODES reach disk in "show files".
+ * The remaining entries are arguments to browse_folder_info. */
 enum { SHOW_ALL, SHOW_SUPPORTED, SHOW_MUSIC, SHOW_PLAYLIST, SHOW_ID3DB,
        NUM_FILTER_MODES,
-       SHOW_WPS, SHOW_SBS, SHOW_CFG,
+       SHOW_CFG,
        SHOW_LNG, SHOW_MOD, SHOW_FONT, SHOW_PLUGINS, SHOW_M3U};
 
 /* file and dir sort options */
@@ -368,11 +343,9 @@ int settings_save(void);
 enum {
     SETTINGS_SAVE_CHANGED = 0,
     SETTINGS_SAVE_ALL,
-    SETTINGS_SAVE_THEME,
     SETTINGS_SAVE_SOUND,
     SETTINGS_SAVE_EQPRESET,
     SETTINGS_SAVE_RESUMEINFO,
-    SETTINGS_SAVE_THEME_OVERLAY,
 };
 bool settings_save_config(int options);
 /* As above, leaving the path written in filename. False if the user
@@ -386,12 +359,8 @@ void reset_setting_by_user(const struct settings_list *setting);
 void settings_reset(void);
 void sound_settings_apply(void);
 
-/* call this after loading a .wps/.rwps or other skin files, so that the
- * skin buffer is reset properly
- */
-void settings_apply_skins(void);
-
 void settings_apply(bool read_disk);
+void settings_apply_display_colors(void);
 void settings_apply_pm_range(void);
 #ifdef HAVE_COMPOSITE_VIDEO_OUT
 void settings_apply_tv_out(void);
@@ -424,33 +393,10 @@ const struct settings_list* find_setting_by_cfgname(const char* name);
  * first boot, and every one of those reads as changed. */
 bool settings_is_changed(const struct settings_list *setting);
 
-/* --- Theme-local appearance overrides --- */
-
-/* Record that the user changed `setting` themselves, and write it to the
- * current theme's overlay.
- *
- * Loading a theme resets every F_THEMERESET setting before reading the theme's
- * own .cfg, which is right -- a theme naming no backdrop must not inherit the
- * last one's -- but it also destroys anything the user set by hand, including
- * on a reload of the same theme. The overlay is what survives that: it is read
- * straight after the theme's .cfg, so the user's choices land on top.
- *
- * Ignores anything without F_THEMERESET. Those are exactly the settings a
- * theme load would otherwise discard, and keeping the overlay to them stops it
- * becoming a second config.cfg with its own precedence rules.
- *
- * Call it from any path that writes an appearance setting *without* going
- * through option_screen() -- the colour pickers, Clear Backdrop. A missed one
- * is a tweak that silently fails to survive the next theme load. */
-void settings_mark_user_tweak(const struct settings_list *setting);
-
-/* Drop the current theme's overlay and reload the theme, so it looks the way
- * its author shipped it. Returns false if there was nothing to forget. */
-bool settings_forget_theme_tweaks(void);
 bool cfg_int_to_string(const struct settings_list *setting, int val, char* buf, int buf_len);
 bool cfg_string_to_int(const struct settings_list *setting, int* out, const char* str);
 void cfg_to_string(const struct settings_list *setting, char* buf, int buf_len);
-bool string_to_cfg(const char *name, char* value, bool *theme_changed);
+bool string_to_cfg(const char *name, char *value);
 
 bool copy_filename_setting(char *buf, size_t buflen, const char *input,
                            const struct filename_setting *fs);
@@ -607,13 +553,6 @@ struct user_settings
     int peak_meter_min; /* range minimum */
     int peak_meter_max; /* range maximum */
 
-    unsigned char wps_file[MAX_FILENAME+1];  /* last wps */
-    unsigned char sbs_file[MAX_FILENAME+1];  /* last statusbar skin */
-    /* The theme itself, as against the pieces above: the name of the last
-     * .cfg loaded that described a look. Nothing reads it as a setting -- it
-     * exists so an appearance tweak knows which theme's overlay to be written
-     * to. See settings_mark_user_tweak(). */
-    unsigned char theme_file[MAX_FILENAME+1];
     unsigned char lang_file[MAX_FILENAME+1]; /* last language */
     unsigned char playlist_catalog_dir[MAX_PATHNAME+1];
     int skip_length; /* skip length */
@@ -626,14 +565,13 @@ struct user_settings
     int max_files_in_playlist; /* Max entries in playlist */
     int volume_type;   /* how volume is displayed: 0=graphic, 1=percent */
     int battery_display; /* how battery is displayed: 0=graphic, 1=percent */
-    /* Which busy indicators a theme may show: %lh, %lb and %lw */
+    /* Activity indicators shown in native chrome. */
     bool show_disk_activity;
     bool show_background_tasks;
     bool show_working;
     bool show_icons;   /* 0=hide 1=show */
     bool show_debug_menu; /* show the Debug entry in the System menu */
     int settings_mode; /* SETTINGS_MODE_* enum values */
-    int statusbar;    /* STATUSBAR_* enum values */
 
     int scrollbar;    /* SCROLLBAR_* enum values */
     int scrollbar_width;
@@ -699,16 +637,12 @@ struct user_settings
     bool quiz_album;
     bool quiz_year;
 
-    unsigned char backdrop_file[MAX_PATHNAME+1];  /* backdrop bitmap file */
-
+    /* Display defaults derived from the active native theme. */
     int bg_color; /* background color native format */
     int fg_color; /* foreground color native format */
     int lss_color; /* background color for the selector or start color for the gradient */
     int lse_color; /* end color for the selector gradient */
     int lst_color; /* color of the text for the selector */
-    unsigned char colors_file[MAX_FILENAME+1];
-    bool dynamic_colors; /* auto-color from album art */
-    int  dynamic_colors_background; /* DYNAMIC_BG_*: which of the pair it is */
 
     /* Filters applied to cached artwork as the carousel and the database
      * browser read it, one slot each, run in order. A theme-wide property
@@ -716,29 +650,6 @@ struct user_settings
      * the browser's thumbnails come from one cache shared by every row. */
     int wps_art_source;  /* WPS_ART_*: album cover, artist portrait, or by
                             where the playlist came from */
-
-    /* Modal dialog chrome (widgets/dialog.h). Applied in settings_apply() via
-     * dialog_set_default_style(). The metrics always apply; what the colours do
-     * depends on dialog_colors, one of DIALOG_COLORS_*. */
-    int dialog_box_border_width;
-    int dialog_box_margin;
-    /* The drop shadow is chrome, not part of the dialog_colors palette: both
-     * of these apply whatever dialog_colors is set to, so a theme can style
-     * the shadow without having to take over all nine colours as well. */
-    int dialog_box_shadow;          /* offset in px; 0 == no shadow */
-    int dialog_box_shadow_color;
-    int dialog_btn_border_width;
-    int dialog_btn_border_radius;
-    int dialog_colors;
-    int dialog_box_fg;
-    int dialog_box_bg;
-    int dialog_box_border;
-    int dialog_btn_fg;
-    int dialog_btn_bg;
-    int dialog_btn_border;
-    int dialog_btn_fg_sel;      /* the selected button */
-    int dialog_btn_bg_sel;
-    int dialog_btn_border_sel;
 
     /* Corner radius of the progress bar drawn by draw/progress_bar.c. */
     int progress_bar_radius;
@@ -750,7 +661,6 @@ struct user_settings
     bool debug_log_artcache;   /* append art-cache progress to a file */
     int debug_log_expiry;      /* Switch Off After: 1 h, 6 h, 24 h, 7 d, never */
     bool debug_log_playback;   /* a line per track playback gives up on */
-    bool debug_log_skin;       /* a line per skin file a theme loads */
     bool debug_log_tasks;      /* background passes started and finished */
     int  album_covers_view_mode;  /* CAROUSEL_VIEW_*: tilted, or flat piles */
     /* Flat view only: how far the two piles are blended toward the background,
@@ -921,8 +831,6 @@ struct user_settings
     int  show_path_in_browser; /* 0=off, 1=current directory, 2=full path */
     bool offset_out_of_view;
     bool disable_mainmenu_scrolling;
-    unsigned char icon_file[MAX_FILENAME+1];
-    unsigned char viewers_icon_file[MAX_FILENAME+1];
     unsigned char font_file[MAX_FILENAME+1]; /* last font */
     /* Optional bold companion to font_file -- empty ("") means none is
      * configured, in which case anything that wants a bold look just
@@ -1024,8 +932,6 @@ struct user_settings
     bool debug_log_usb;         /* keep the USB log's file current */
 #endif
 
-    unsigned char ui_vp_config[64]; /* viewport string for the lists */
-
     struct compressor_settings compressor_settings;
 
     int sleeptimer_duration; /* In minutes; 0=off */
@@ -1086,7 +992,6 @@ struct user_settings
     int spike_caption;  /* 0 off, 1 title, 2 title and artist */
     bool spike_caption_scroll;  /* ...and whether it travels or is cropped */
     bool animations;
-    bool native_ui;
     char native_theme[32];
 };
 

@@ -921,7 +921,7 @@ bool folder_select(char * header_text, char* setting, int setting_len)
      * the glyph and the name; only the selected one becomes a shape, in
      * Dialog Colour Mode's selection colours. Same treatment as the database
      * search dialog. */
-    style = *dialog_get_default_style();
+    dialog_style_default(&style);
     style.box_margin = BOX_PAD;     /* the default 10 costs a row of height */
     style.button_border_width = 0;
     style.button_bg = DIALOG_COLOR_INHERIT;
@@ -933,6 +933,7 @@ bool folder_select(char * header_text, char* setting, int setting_len)
      * stays whether or not a theme uses it. */
     push_current_activity(ACTIVITY_FOLDERSELECT);
     dialog_init(&d, CONTEXT_LIST, header_text, &style, &cb, &s);
+    d.motion_route = "folders";
     folder_speak(&s);
     res = dialog_run(&d, POLL_IDLE);
     pop_current_activity();

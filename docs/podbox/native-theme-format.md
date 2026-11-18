@@ -4,7 +4,7 @@ The native interface uses design tokens for colour, font, geometry, backgrounds 
 
 ## Installing and choosing a theme
 
-Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Appearance → Native theme**. Selecting a theme turns on the native UI and applies the theme without restarting the device. The saved setting is `native theme: NAME`. The built-in names are `scrim` and `light`. The default is `scrim`.
+Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Appearance → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim` and `light`. The default is `scrim`.
 
 Place referenced `.fnt` assets in `.rockbox/fonts/` and use the RB12 font format. Firmware falls back to Scrim if a theme file is missing or malformed, or if it references an unsupported font. It records the failure in `.rockbox/native-theme.log`.
 
@@ -60,7 +60,7 @@ Use `font.<role>=<basename>` to reference a `.fnt` font. The basename can contai
 | `list`, `body`, `lyrics`, `status` | `18-noto-sans` |
 | `title` | `18-noto-sans-bold` |
 | `icon` | `24x24-icons` |
-| `wps_title`, `handoff_title` | `26-noto-sans-medium` |
+| `wps_title`, `handoff_title`, `lyrics_focus` | `26-noto-sans-medium` |
 | `wps_meta`, `handoff_caption` | `12-noto-sans` |
 
 ### Metrics
@@ -71,6 +71,7 @@ Set metrics with `metric.<name>=<unsigned decimal integer>`. Coordinates, offset
 | --- | --- |
 | List viewport | `list_x=10`, `list_y=46`, `list_bottom=10`, `row_height=30` |
 | List row | `list_icon_size=24`, `list_icon_margin=2`, `list_icon_gap=10`, `list_text_padding=12`, `list_text_height=20`, `list_right_padding=4`, `list_selection_width=3`, `list_selection_alpha=14`, `list_accessory_gap=9`, `list_tint_alpha=3` |
+| List art and detail | `list_art_size=44`, `list_art_row_height=48`, `list_art_top_gap=5`, `list_art_bottom_gap=3`, `list_header_height=68`, `list_header_bottom_gap=4`, `list_notes_height=62`, `list_aux_padding=3` |
 | Status bar | `status_height=35`, `status_pad_left=10`, `status_pad_right=7`, `status_icon_size=24`, `status_icon_gap=2`, `status_group_gap=9`, `status_clock_width=70`, `status_clock_numeric_width=118`, `status_link_gap=10`, `status_text_y=8`, `status_title_height=20`, `status_icon_y=5` |
 | Modal panel | `modal_padding=10`, `modal_edge_margin=12`, `modal_shadow_offset=4`, `modal_border_width=2`, `modal_button_gap=18`, `modal_button_pad_x=12`, `modal_button_pad_y=5` |
 | Cover | `cover_size=240` |
@@ -87,3 +88,28 @@ Set metrics with `metric.<name>=<unsigned decimal integer>`. Coordinates, offset
 `background.list`, `background.wps`, `background.lyrics` and `background.handoff` accept `solid`, `blurred_cover` or `cover_scrim`. Scrim uses `blurred_cover` for lists and lyrics and `cover_scrim` for Now Playing and handoff. Light uses `solid` throughout. Artwork-backed modes use the screen's fallback when cover art is unavailable.
 
 `motion_scale` is a whole percentage from 0 to 300. `100` keeps the default frame count, `50` halves it, and `0` disables motion. The animation setting also controls whether motion plays. Durations are measured in frames on the 60 Hz clock.
+
+## Native rendering and animation
+
+The native screen code owns the layout and draws to a canonical RGB565
+framebuffer. Retained views represent geometry, clip, opacity and brightness.
+A frame accumulates damage from changed views and submits the union to the LCD.
+Transitions own temporary RGB565 surfaces from `core_alloc` while the current
+page keeps its input loop. If a transition has insufficient free memory, the
+destination is drawn immediately.
+
+Page transitions update on the shared 60 Hz `USEC_TIMER` timeline. The standard
+push uses 18 f and the pop uses 15 f. The page behind moves by up to 30% of the
+screen width and reaches 70% brightness. Sheets use 16 f in and 12 f out with
+35% background dimming. Lists keep selection and scroll position separately and
+retarget over 8 f. The wheel can expose at most half a row beyond the viewport.
+When input stops, the list settles over 10 f with one row of context where
+available. Status icons and changing playback values use 8 f. Lyric line
+motion uses 16 f.
+
+Set `/.rockbox/ui-perf.enable` before starting the firmware to record frame
+timing. Each animation writes its samples and summary to
+`/.rockbox/ui-perf.txt` when it exits. The reported work combines renderer and
+synchronous LCD submission time. Submission intervals are recorded separately.
+They include scheduling and any skipped visual updates. The log measures
+submissions to the LCD driver. It cannot see the panel scanning out the pixels.

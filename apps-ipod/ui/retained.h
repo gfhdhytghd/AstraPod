@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "animation.h"
+#include "lcd.h"
 
 #define UI_FULL_OPACITY 256
 #define UI_NAV_DEPTH 8
@@ -82,7 +83,6 @@ struct ui_layer {
     size_t offset_pixels;
 };
 
-bool ui_native_enabled(void);
 /* Bounds are relative to the parent. Paint receives screen coordinates. */
 void ui_view_init(struct ui_view *, struct ui_rect bounds,
                   const struct ui_view_ops *, void *data);
@@ -115,5 +115,6 @@ bool ui_nav_dispatch(struct ui_nav *, int action);
 bool ui_layer_alloc(struct ui_layer *, int width, int height);
 void ui_layer_free(struct ui_layer *);
 void ui_layer_paint(const struct ui_view *, const struct ui_view_frame *);
+void ui_blit_dim(fb_data *dst, const fb_data *src, int pixels, unsigned brightness);
 
 #endif

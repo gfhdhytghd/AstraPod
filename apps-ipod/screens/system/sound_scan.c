@@ -64,6 +64,53 @@
 #include "input/action.h"
 #include "api/misc.h"
 #include "system/format_time.h"
+#include "ui/frame.h"
+#include "ui/scene.h"
+#include "ui/sheet.h"
+
+#define SCAN_PANEL_PIXELS (LCD_WIDTH * LCD_HEIGHT)
+
+struct scan_panel {
+    struct ui_sheet sheet;
+    struct ui_rect bounds;
+    int handle;
+};
+
+static void ss_open_panel(struct scan_panel *panel)
+{
+    panel->handle = core_alloc_free_space(2 * FRAMEBUFFER_SIZE);
+    if (panel->handle <= 0)
+        return;
+    ui_scene_interrupt();
+    fb_data *pixels = core_get_data_pinned(panel->handle);
+    memcpy(pixels, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
+    core_put_data_pinned(pixels);
+    panel->sheet.light = UI_FULL_OPACITY;
+}
+
+static void ss_close_panel(struct scan_panel *panel, bool animate)
+{
+    if (panel->handle <= 0)
+        return;
+    if (animate && panel->bounds.width > 0)
+    {
+        fb_data *pixels = core_get_data_pinned(panel->handle);
+        ui_sheet_begin(&panel->sheet, false, "sound-scan-progress");
+        do {
+            ui_sheet_paint(&panel->sheet, pixels, pixels + SCAN_PANEL_PIXELS,
+                           panel->bounds, false);
+        } while (ui_sheet_wait(&panel->sheet));
+        if (panel->sheet.light != UI_FULL_OPACITY || panel->sheet.previous.height > 0)
+        {
+            memcpy(lcd_framebuffer_default.fb_ptr, pixels, FRAMEBUFFER_SIZE);
+            ui_mark_dirty(SCREEN_MAIN);
+            ui_flush_dirty();
+        }
+        core_put_data_pinned(pixels);
+    }
+    ui_sheet_cancel(&panel->sheet);
+    panel->handle = core_free(panel->handle);
+}
 
 /* The window, from the specification: past the intro, and long enough for the
  * tempo envelope to fill and then hold.
@@ -169,21 +216,23 @@ static void ss_ask_depth(void)
 /* The running display: a framed box with the figures and one button.
  *
  * A box rather than the whole screen because that is what it is -- one modal
- * thing happening over the player, with one way out. Drawn with the shared
- * dialog frame so it follows the theme, but not through dialog_run(): the
- * loop here belongs to the scan, which spends ten seconds inside a codec at
- * a time and polls for input from in there. */
+ * thing happening over the player, with one way out. The scan owns its
+ * controller because it polls for input inside the decoder. */
 /* Four lines and a button, in that order: what it is doing, what it is doing
  * it to, how long that leaves, and the bar. The pause takes the same four so
  * the box does not resize when the charger comes out. */
-static void ss_draw(const char *paused)
+static void ss_draw(struct scan_panel *panel, const char *paused)
 {
     struct screen *lcd = &screens[SCREEN_MAIN];
-    struct dialog_style style = *dialog_get_default_style();
+    struct dialog_style style;
+    dialog_style_default(&style);
     struct viewport vp, content, *last_vp;
     char line[64];
     int fh, bh;
     int y, w, bar;
+    fb_data *pixels = NULL;
+    struct frame_buffer_t tile;
+    bool opening = panel->bounds.width <= 0;
 
     viewport_set_defaults(&vp, lcd->screen_type);
     last_vp = lcd->set_viewport(&vp);
@@ -197,6 +246,18 @@ static void ss_draw(const char *paused)
         vp.height = lcd->lcdheight;
     vp.x = (lcd->lcdwidth - vp.width) / 2;
     vp.y = (lcd->lcdheight - vp.height) / 2;
+
+    if (panel->handle > 0)
+    {
+        pixels = core_get_data_pinned(panel->handle);
+        panel->bounds = (struct ui_rect){vp.x, vp.y, vp.width, vp.height};
+        tile = (struct frame_buffer_t){ .fb_ptr = pixels + SCAN_PANEL_PIXELS,
+                                        .stride = vp.width,
+                                        .elems = (size_t)vp.width * vp.height };
+        vp.x = vp.y = 0;
+        vp.buffer = &tile;
+        lcd->set_viewport(&vp);
+    }
 
     dialog_frame_box(lcd, &vp, &style, &content);
     lcd->set_viewport(&content);
@@ -270,9 +331,23 @@ static void ss_draw(const char *paused)
                        content.height - bh, content.width / 2, bh,
                        "Stop", true);
 
-    lcd->set_viewport(&vp);
-    lcd->update_viewport();
     lcd->set_viewport(last_vp);
+    if (pixels)
+    {
+        if (opening)
+            ui_sheet_begin(&panel->sheet, true, "sound-scan-progress");
+        ui_sheet_paint(&panel->sheet, pixels, tile.fb_ptr, panel->bounds, true);
+        while (ui_sheet_wait(&panel->sheet))
+            ui_sheet_paint(&panel->sheet, pixels, tile.fb_ptr, panel->bounds, false);
+        if (panel->sheet.active)
+        {
+            ui_sheet_cancel(&panel->sheet);
+            ui_sheet_paint(&panel->sheet, pixels, tile.fb_ptr, panel->bounds, false);
+        }
+        core_put_data_pinned(pixels);
+    }
+    else
+        lcd->update_rect(vp.x, vp.y, vp.width, vp.height);
 }
 
 
@@ -415,7 +490,7 @@ static bool ss_measure(const char *path, uint32_t mtime, uint32_t genre_key,
  * track it was in the middle of.
  *
  * False if the user stopped instead of plugging in. */
-static bool ss_wait_for_charger(void)
+static bool ss_wait_for_charger(struct scan_panel *panel)
 {
     if (!charger_inserted() && global_settings.talk_menu)
         talk_text("Connect the charger to continue", false);
@@ -423,7 +498,7 @@ static bool ss_wait_for_charger(void)
     {
         int button;
 
-        ss_draw("Connect the charger to continue");
+        ss_draw(panel, "Connect the charger to continue");
         reset_poweroff_timer();
 
         button = get_action(CONTEXT_STD, HZ / 2);
@@ -435,6 +510,8 @@ static bool ss_wait_for_charger(void)
             return false;
         }
 
+        if (button == SYS_USB_CONNECTED)
+            ss_close_panel(panel, false);
         if (default_event_handler(button) == SYS_USB_CONNECTED)
         {
             ss_stop = true;
@@ -533,26 +610,56 @@ static bool ss_gate(bool *fresh)
     return true;
 }
 
-/* The result, left up until a button: the run takes hours, so whoever reads
- * this is coming back to it, and a splash that times out is usually gone
- * before they look. */
+static void ss_result_measure(struct dialog *d, struct screen *screen,
+                              struct viewport *box, void *data)
+{
+    struct dialog_insets insets;
+    int width, height;
+    dialog_get_insets(&d->style, &insets);
+    screen->getstringsize(data, &width, &height);
+    box->width = MIN(screen->lcdwidth, width + insets.left + insets.right);
+    box->height = MIN(screen->lcdheight, height + insets.top + insets.bottom);
+    box->x = (screen->lcdwidth - box->width) / 2;
+    box->y = (screen->lcdheight - box->height) / 2;
+}
+
+static void ss_result_draw(struct dialog *d, struct screen *screen,
+                           struct viewport *content, void *data)
+{
+    (void)d;
+    content->flags |= VP_FLAG_ALIGN_CENTER;
+    screen->set_viewport(content);
+    screen->set_drawmode(DRMODE_FG);
+    screen->putsxy(0, 0, data);
+}
+
+static int ss_result_action(struct dialog *d, int button, void *data)
+{
+    (void)d;
+    (void)data;
+    if (IS_SYSEVENT(button))
+        return default_event_handler(button) == SYS_USB_CONNECTED
+               ? DIALOG_ABORT : DIALOG_CONTINUE;
+    return button == ACTION_NONE || button == ACTION_REDRAW
+           ? DIALOG_CONTINUE : DIALOG_ACCEPT;
+}
+
+/* Keep the result up until someone returns to the player and presses a key.
+ * A long run can finish while the player is unattended. */
 static void ss_result(const char *msg)
 {
-    int button;
-
+    static const struct dialog_callbacks callbacks = {
+        .measure = ss_result_measure,
+        .draw = ss_result_draw,
+        .on_action = ss_result_action,
+    };
+    struct dialog dialog;
+    dialog_init(&dialog, CONTEXT_STD, NULL, NULL, &callbacks, (void *)msg);
+    dialog.motion_route = "sound-scan-result";
     backlight_on();
-    splash(0, msg);
     if (global_settings.talk_menu)
         talk_string(msg, false);
-    action_wait_for_release();
-    do
-    {
-        button = get_action(CONTEXT_STD, TIMEOUT_BLOCK);
-        if (IS_SYSEVENT(button)
-            && default_event_handler(button) == SYS_USB_CONNECTED)
-            break;
-    }
-    while (button == ACTION_NONE || IS_SYSEVENT(button));
+    dialog_run(&dialog, TIMEOUT_BLOCK);
 }
 
 static void ss_run(bool fresh)
@@ -563,6 +670,7 @@ static void ss_run(bool fresh)
     int index_size;
     bool complete;
     int rc;
+    struct scan_panel panel = {0};
 
     audio_stop();
 
@@ -574,14 +682,6 @@ static void ss_run(bool fresh)
      * charges from a computer and never appears on it, with nothing on screen
      * to say why and a reboot the only way back. */
     usb_set_mode(USB_MODE_CHARGE);
-
-    /* Nothing else clears what the explanation dialog left behind: the run
-     * draws a box, and a box leaves whatever was around it. */
-    FOR_NB_SCREENS(rc)
-    {
-        screens[rc].clear_display();
-        screens[rc].update();
-    }
 
     ss_total = tagcache_get_stat()->total_entries;
 
@@ -635,18 +735,21 @@ static void ss_run(bool fresh)
      * yet know what this is cannot be expected to have plugged in for it. The
      * screen is already up, so the request has somewhere to live and the run
      * starts the moment the cable goes in. */
-    if (!ss_wait_for_charger())
+    ss_open_panel(&panel);
+    if (!ss_wait_for_charger(&panel))
     {
+        ss_close_panel(&panel, true);
         sound_index_close();
         core_free(ss_handle);
         usb_set_mode(global_settings.usb_mode);
         return;
     }
 
-    ss_draw(NULL);
+    ss_draw(&panel, NULL);
 
     if (!tagcache_search(&tcs, tag_filename))
     {
+        ss_close_panel(&panel, true);
         sound_index_close();
         core_free(ss_handle);
         usb_set_mode(global_settings.usb_mode);
@@ -697,7 +800,7 @@ static void ss_run(bool fresh)
                 if (ss_stop || !ss_unplugged)
                     break;
 
-                if (!ss_wait_for_charger())
+                if (!ss_wait_for_charger(&panel))
                     break;
             }
         }
@@ -707,7 +810,7 @@ static void ss_run(bool fresh)
 
         /* Once a track, not on a timer: at seconds a track there is nothing
          * to animate, and the backlight is off for most of the run anyway. */
-        ss_draw(NULL);
+        ss_draw(&panel, NULL);
     }
 
     tagcache_search_finish(&tcs);
@@ -737,6 +840,7 @@ static void ss_run(bool fresh)
      * carries on -- so there are two: the user stopped, or it finished. */
     if (ss_stop)
     {
+        ss_close_panel(&panel, !ss_event);
         sound_index_close();
         if (ss_event)
             default_event_handler(ss_event);
@@ -749,7 +853,7 @@ static void ss_run(bool fresh)
     /* Saving and calibrating take a while on a large index, and the box
      * would otherwise sit on the last track's name as if nothing moved. */
     strlcpy(ss_now, "Saving the results...", sizeof (ss_now));
-    ss_draw(NULL);
+    ss_draw(&panel, NULL);
 
     if (sound_index_finish(complete) == SOUND_OK)
     {
@@ -758,6 +862,7 @@ static void ss_run(bool fresh)
          * on, and a pass over the index it has just written is a second
          * against the hours behind it. */
         sound_cal_update();
+        ss_close_panel(&panel, true);
 
         snprintf(msg, sizeof (msg), "Done. %d measured, %d unreadable",
                  ss_done - ss_failed, ss_failed);
@@ -766,6 +871,7 @@ static void ss_run(bool fresh)
     else
     {
         sound_index_close();
+        ss_close_panel(&panel, true);
         ss_result("Could not write the index");
     }
 }

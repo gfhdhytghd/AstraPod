@@ -68,7 +68,6 @@
 #include "gui/yesno.h"
 #include "settings.h"
 #include "lang_enum.h"
-#include "gui/skin_engine/skin_engine.h"
 #endif
 
 #if defined(HIBY_R3PROII) || defined(HIBY_R1) || defined(HIDIZS_AP80MAX)

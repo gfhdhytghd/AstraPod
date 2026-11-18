@@ -130,7 +130,8 @@ def run(sim, resources, languages, locale, output, omit_font=False):
         # simulator's own strings with the exact packaged phase-4 fonts.
         (rbdir / "langs").mkdir()
         shutil.copyfile(languages / f"{locale}.lng", rbdir / f"langs/{locale}.lng")
-        config = (rbdir / "themes/scrim.cfg").read_text()
+        legacy_config = rbdir / "themes/scrim.cfg"
+        config = legacy_config.read_text() if legacy_config.is_file() else ""
         config += "\nbacklight timeout: off\nvoice menus: off\n"
         config += f"lang: /.rockbox/langs/{locale}.lng\n"
         (rbdir / "config.cfg").write_text(config)

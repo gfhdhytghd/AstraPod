@@ -25,8 +25,8 @@
 #include "lcd.h"
 #include "draw/viewport.h"
 #include "font.h"
-#include "settings/settings.h"          /* global_settings fg/bg */
-#include "skin/skin_albumart_color.h"    /* dynamic_colors_resolve */
+#include "metadata/album_palette.h"
+#include "ui/native_theme_runtime.h"
 #include "games/spike/spike_draw.h"
 #include "games/spike/spike_pose.h"
 #include "draw/screen_access.h"
@@ -246,7 +246,8 @@ static bool    full_flush = true;   /* the palette moved: send the lot once */
 /* The pair the whole screen is drawn in, kept because a viewport installed
  * afterwards comes up in FG_FALLBACK/BG_FALLBACK and has to be told. */
 static unsigned was_ink, was_paper;
-static bool     colors_known;
+static bool colors_known;
+static unsigned palette_generation, theme_generation;
 
 /* The complement of a colour, at the same lightness: subtract each channel
  * from the sum of the largest and smallest, which is a half turn of the hue
@@ -257,7 +258,7 @@ static bool     colors_known;
  * A grey has no hue to turn, and comes back as itself. The theme's selection
  * colour stands in there: a theme picks it to be seen against its own
  * background, which is exactly the job. */
-static unsigned spk_complement(unsigned c)
+static unsigned spk_complement(unsigned c, unsigned selection)
 {
     int r = RGB_UNPACK_RED(c), g = RGB_UNPACK_GREEN(c);
     int b = RGB_UNPACK_BLUE(c);
@@ -265,7 +266,7 @@ static unsigned spk_complement(unsigned c)
     int lo = r < g ? (r < b ? r : b) : (g < b ? g : b);
 
     if (hi - lo < 24)
-        return dynamic_colors_resolve(global_settings.lss_color);
+        return selection;
 
     return LCD_RGBPACK(hi + lo - r, hi + lo - g, hi + lo - b);
 }
@@ -1797,30 +1798,36 @@ static void spk_draw_hud(const struct spk_frame *f)
 
 /** The frame **/
 
-/* The field takes the theme's two colours, and takes them through the
- * dynamic-colour resolver -- so with the setting on it is the album's
- * palette and with it off it is the theme's, and neither case is special
- * here. Asked every frame because the palette moves with the track, and
- * extraction is a no-op until it does. */
-/* Work out the pair, and say nothing to the LCD about it: the caller decides
- * which viewport they land on, and a fresh viewport comes up in the
- * fallbacks whatever was set before it. */
+static unsigned spk_theme_color(const struct ui_theme *theme, enum ui_color_role role,
+                                const struct ui_album_palette *palette)
+{
+    uint32_t rgb = ui_theme_color(theme, role, palette);
+    return LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
+}
+
 static void spk_resolve_colors(void)
 {
-    unsigned ink, paper;
-
-    dynamic_colors_check_extraction(-1);
-    ink = dynamic_colors_resolve(global_settings.fg_color);
-    paper = dynamic_colors_resolve(global_settings.bg_color);
-
-    if (colors_known && ink == was_ink && paper == was_paper)
+    album_palette_refresh();
+    unsigned next_palette = album_palette_generation();
+    unsigned next_theme = ui_theme_generation();
+    if (colors_known && next_palette == palette_generation && next_theme == theme_generation)
         return;
 
+    struct ui_album_palette palette;
+    struct ui_theme theme;
+    album_palette_snapshot(&palette);
+    ui_theme_snapshot(&theme);
+    unsigned ink = spk_theme_color(&theme, UI_COLOR_FOREGROUND, &palette);
+    unsigned paper = spk_theme_color(&theme, UI_COLOR_BACKGROUND, &palette);
+    unsigned selection = spk_theme_color(&theme, UI_COLOR_SELECTION, &palette);
+
     colors_known = true;
+    palette_generation = next_palette;
+    theme_generation = next_theme;
     was_ink = ink;
     was_paper = paper;
     spk_ramp(aa_ink, paper, ink);
-    spk_ramp(aa_accent, paper, spk_complement(ink));
+    spk_ramp(aa_accent, paper, spk_complement(ink, selection));
 
     /* The whole panel is in these two colours, and the strips above and
      * below the field are only ever reached by a full clear -- so a palette

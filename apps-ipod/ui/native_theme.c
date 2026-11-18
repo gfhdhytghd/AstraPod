@@ -58,6 +58,7 @@ static const struct {
     [UI_FONT_WPS_META]  = { "wps_meta",  "12-noto-sans" },
     [UI_FONT_HANDOFF_CAPTION] = { "handoff_caption", "12-noto-sans" },
     [UI_FONT_HANDOFF_TITLE] = { "handoff_title", "26-noto-sans-medium" },
+    [UI_FONT_LYRICS_FOCUS] = { "lyrics_focus", "26-noto-sans-medium" },
 };
 
 static const struct {
@@ -122,6 +123,12 @@ static const struct {
     [UI_METRIC_WPS_METER_WIDTH]                = { "wps_meter_width",         80,  1, 320 },
     [UI_METRIC_WPS_METER_HEIGHT]               = { "wps_meter_height",        40,  1, 240 },
     [UI_METRIC_WPS_METER_PEAK_HEIGHT]          = { "wps_meter_peak_height",     2,  0, 40 },
+    [UI_METRIC_WPS_PANEL_TOP]                 = { "wps_panel_top",           77,  0, 239 },
+    [UI_METRIC_WPS_PANEL_ALPHA]               = { "wps_panel_alpha",         10,  0, 15 },
+    [UI_METRIC_WPS_VOLUME_X]                  = { "wps_volume_x",             40,  0, 319 },
+    [UI_METRIC_WPS_VOLUME_Y]                  = { "wps_volume_y",             15,  0, 239 },
+    [UI_METRIC_WPS_VOLUME_WIDTH]              = { "wps_volume_width",        240,  1, 320 },
+    [UI_METRIC_WPS_VOLUME_HEIGHT]             = { "wps_volume_height",         6,  1, 240 },
     [UI_METRIC_HANDOFF_MARGIN]                = { "handoff_margin",            16,  0, 48 },
     [UI_METRIC_HANDOFF_COVER_SIZE]            = { "handoff_cover_size",        96, 32, 160 },
     [UI_METRIC_HANDOFF_BUTTON_HEIGHT]        = { "handoff_button_height",      36, 12, 72 },
@@ -138,6 +145,14 @@ static const struct {
     [UI_METRIC_HANDOFF_ERROR_OFFSET]         = { "handoff_error_offset",         4,  0, 32 },
     [UI_METRIC_SPLASH_PROGRESS_GAP]          = { "splash_progress_gap",          4,  0, 48 },
     [UI_METRIC_SPLASH_PROGRESS_RADIUS]       = { "splash_progress_radius",       2,  0, 64 },
+    [UI_METRIC_LIST_ART_SIZE]                 = { "list_art_size",                44,  8, 72 },
+    [UI_METRIC_LIST_ART_ROW_HEIGHT]           = { "list_art_row_height",          48, 16, 96 },
+    [UI_METRIC_LIST_ART_TOP_GAP]              = { "list_art_top_gap",              5,  0, 20 },
+    [UI_METRIC_LIST_ART_BOTTOM_GAP]           = { "list_art_bottom_gap",           3,  0, 20 },
+    [UI_METRIC_LIST_HEADER_HEIGHT]            = { "list_header_height",          68,  0, 120 },
+    [UI_METRIC_LIST_HEADER_BOTTOM_GAP]        = { "list_header_bottom_gap",        4,  0, 20 },
+    [UI_METRIC_LIST_NOTES_HEIGHT]             = { "list_notes_height",           62,  0, 120 },
+    [UI_METRIC_LIST_AUX_PADDING]              = { "list_aux_padding",             3,  0, 20 },
 };
 
 static const struct {
@@ -416,6 +431,9 @@ static bool layout_fits(const uint16_t *m)
            m[UI_METRIC_WPS_METER_X] + m[UI_METRIC_WPS_METER_WIDTH] <= LCD_WIDTH &&
            m[UI_METRIC_WPS_METER_Y] + m[UI_METRIC_WPS_METER_HEIGHT] <= LCD_HEIGHT &&
            m[UI_METRIC_WPS_METER_PEAK_HEIGHT] <= m[UI_METRIC_WPS_METER_HEIGHT] &&
+           m[UI_METRIC_WPS_PANEL_TOP] < m[UI_METRIC_WPS_PROGRESS_Y] &&
+           m[UI_METRIC_WPS_VOLUME_X] + m[UI_METRIC_WPS_VOLUME_WIDTH] <= LCD_WIDTH &&
+           m[UI_METRIC_WPS_VOLUME_Y] + m[UI_METRIC_WPS_VOLUME_HEIGHT] <= m[UI_METRIC_STATUS_HEIGHT] &&
            m[UI_METRIC_HANDOFF_COVER_SIZE] + m[UI_METRIC_HANDOFF_METADATA_GAP]
                + 2u * m[UI_METRIC_HANDOFF_LINE_GAP] < handoff_button_y &&
            m[UI_METRIC_HANDOFF_PROGRESS_GAP] + m[UI_METRIC_HANDOFF_PROGRESS_HEIGHT]

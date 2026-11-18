@@ -24,7 +24,7 @@
 #include "system/appevents.h"
 #include "usb_screen.h"
 #include "draw/viewport.h"
-#include "skin/skin_engine.h"   /* skin_inhibit_flush, skin_flush_dirty */
+#include "ui/frame.h"   /* ui_inhibit_flush, ui_flush_dirty */
 #include "playlist/playlist.h"
 #include "system/activity.h"
 #include "system/shutdown.h"
@@ -212,7 +212,7 @@ void gui_usb_screen_run(bool early_usb, intptr_t seqnum)
      *
      * This holds off skin flushes only. playlist_resume() opens with its own
      * "Loading..." splash, which draws and flushes directly and still shows. */
-    skin_inhibit_flush(true);
+    ui_inhibit_flush(true);
 
     if(!early_usb)
     {
@@ -229,8 +229,8 @@ void gui_usb_screen_run(bool early_usb, intptr_t seqnum)
         viewportmanager_theme_undo(i, false);
     }
 
-    skin_inhibit_flush(false);
-    skin_flush_dirty();
+    ui_inhibit_flush(false);
+    ui_flush_dirty();
 
 #ifdef HAVE_USB_PODLINK
     if (usb_disk_take_warning())

@@ -8,7 +8,7 @@
  * GNU General Public License (version 2+)
  *
  * The playback engine: the track lifecycle from buffering through decode
- * to output, gapless handoff, seeking, and the album-art slots the skin
+ * to output, gapless handoff, seeking, and the album-art slots the UI
  * draws from. The largest file in audio/.
  *
  * Three threads meet here, and most of the complexity is keeping them apart.
@@ -90,7 +90,7 @@
 #include "metadata/art_cache.h"
 #include "metadata/art_name.h"
 #include "draw/image_load.h"       /* image_embedded_usable() */
-#include "skin/skin_albumart_color.h"   /* art loads invalidate the %Cl guard */
+#include "metadata/album_palette.h"
 
 #include "pcm_mixer.h"
 
@@ -199,11 +199,12 @@ struct audio_resume_info
 static struct mutex id3_mutex SHAREDBSS_ATTR; /* (A,O)*/
 
 /** For album art support **/
-/* USB iAP asks for album art too, so it needs a slot of its own. */
+/* Native playback shares one surface with the other pages.
+ * USB iAP can request dimensions of its own. */
 #if defined(USB_ENABLE_IAP)
-#define MAX_MULTIPLE_AA (SKINNABLE_SCREENS_COUNT + 1)
+#define MAX_MULTIPLE_AA 2
 #else
-#define MAX_MULTIPLE_AA SKINNABLE_SCREENS_COUNT
+#define MAX_MULTIPLE_AA 1
 #endif
 
 static int albumart_mode = -1;
@@ -2126,7 +2127,7 @@ static int load_album_art_from_path(char *path, struct bufopen_bitmap_data *user
                    user_data->dim->width, user_data->dim->height);
     int hid = bufopen(path, 0, TYPE_BITMAP, user_data);
     art_log_result(hid);
-    skin_albumart_art_opened(hid);
+    album_art_opened(hid);
     if (hid != ERR_BUFFER_FULL && (same_path || is_cacheable))
         last_folder_aa_hid[i] = hid;
     return hid;
@@ -2280,7 +2281,7 @@ static int audio_load_albumart(struct track_info *infop,
                                user_data.dim->width, user_data.dim->height);
                 hid = bufopen(track_id3->path, 0, TYPE_BITMAP, &user_data);
                 art_log_result(hid);
-                skin_albumart_art_opened(hid);
+                album_art_opened(hid);
                 if (hid != ERR_BUFFER_FULL && (same_album || is_cacheable))
                     last_embedded_aa_hid[i] = hid;
             }

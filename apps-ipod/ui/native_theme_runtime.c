@@ -4,12 +4,15 @@
 #include "dir.h"
 #include "file.h"
 #include "font.h"
+#include "lang.h"
 #include "logfile.h"
 #include "rbpaths.h"
 #include "root_menu.h"
+#include "draw/viewport.h"
+#include "lcd.h"
+#include "metadata/album_palette.h"
 #include "settings/settings.h"
 #include "widgets/list.h"
-#include "retained.h"
 #include "native_theme_runtime.h"
 #include <limits.h>
 #include <stdio.h>
@@ -128,13 +131,7 @@ static bool select_theme(const char *name)
 
 void ui_theme_apply_settings(void)
 {
-    if (ui_native_enabled())
-        select_theme(global_settings.native_theme);
-    else if (current_theme > 0)
-    {
-        current_theme = core_free(current_theme);
-        ++generation;
-    }
+    select_theme(global_settings.native_theme);
 }
 
 void ui_theme_snapshot(struct ui_theme *out)
@@ -152,6 +149,27 @@ void ui_theme_snapshot(struct ui_theme *out)
 unsigned ui_theme_generation(void)
 {
     return generation;
+}
+
+unsigned ui_theme_rgb565(enum ui_color_role role)
+{
+    struct ui_album_palette palette;
+    album_palette_snapshot(&palette);
+
+    uint32_t rgb;
+    if (current_theme > 0)
+    {
+        struct ui_theme *theme = core_get_data_pinned(current_theme);
+        rgb = ui_theme_color(theme, role, &palette);
+        core_put_data_pinned(theme);
+    }
+    else
+    {
+        struct ui_theme theme;
+        ui_theme_builtin(&theme, false);
+        rgb = ui_theme_color(&theme, role, &palette);
+    }
+    return LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
 }
 
 unsigned ui_theme_duration(unsigned frames)
@@ -225,7 +243,7 @@ int ui_theme_choose(void)
     count = files ? find_themes(files, count) : 0;
 
     struct simplelist_info info;
-    simplelist_info_init(&info, "Native theme", count + 2, files);
+    simplelist_info_init(&info, str(LANG_NATIVE_THEME), count + 2, files);
     info.get_name = theme_name;
     bool to_root = simplelist_show_list(&info);
     if (!to_root && info.selection >= 0)
@@ -233,9 +251,10 @@ int ui_theme_choose(void)
         const char *name = info.selection == 0 ? "scrim" : info.selection == 1 ?
                            "light" : files[info.selection - 2];
         bool applied = select_theme(name);
-        global_settings.native_ui = true;
         snprintf(global_settings.native_theme, sizeof(global_settings.native_theme),
                  "%s", applied ? name : "scrim");
+        settings_apply_display_colors();
+        viewportmanager_theme_changed(THEME_STATUSBAR | THEME_UI_VIEWPORT);
         settings_save();
     }
     if (files)

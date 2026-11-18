@@ -82,7 +82,6 @@ extern void screen_put_icon(struct screen * screen,
 extern void screen_put_icon_with_offset(struct screen * display, 
                        int x, int y, int off_x, int off_y,
                        enum themable_icons icon);
-void icons_init(void);
 
 
 int get_icon_width(enum screen_type screen_type);

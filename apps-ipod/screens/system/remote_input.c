@@ -17,7 +17,7 @@
 #include "system/app_util.h"
 #include "system/shutdown.h"
 #include "draw/viewport.h"
-#include "skin/skin_engine.h"
+#include "ui/frame.h"
 
 /* One static snapshot keeps the UI thread's stack independent of wire length. */
 static struct remote_frame frame;
@@ -126,8 +126,8 @@ bool dbg_remote_input(void)
     bool log_error = false, usb = false;
     char line[320], hex[40], names[160], decoded[160] = "(none)";
     const char *made = "ACTION_NONE";
-    bool inhibited = skin_flush_inhibited();
-    skin_inhibit_flush(true);
+    bool inhibited = ui_flush_inhibited();
+    ui_inhibit_flush(true);
     remote_input_active = true;
 #ifdef HAVE_USB_PODLINK
     iap_agents_volume_enable(true);
@@ -255,6 +255,6 @@ bool dbg_remote_input(void)
 #endif
     button_clear_queue();
     lcd_setfont(FONT_UI);
-    skin_inhibit_flush(inhibited);
+    ui_inhibit_flush(inhibited);
     return usb;
 }

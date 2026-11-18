@@ -1214,6 +1214,17 @@ void cider_snapshot(struct cider_state *out)
         out->available = false;
     mutex_unlock(&cider_mutex);
 }
+
+void cider_current_art(char key[65])
+{
+    mutex_lock(&cider_mutex);
+    if (cider_available())
+        memcpy(key, state.art, sizeof(state.art));
+    else
+        key[0] = '\0';
+    mutex_unlock(&cider_mutex);
+}
+
 void cider_loading_drawn(bool loading)
 {
     cider_log("CIDER loading drawn tick=%ld loading=%d seq=%lu", current_tick,
@@ -1329,7 +1340,12 @@ void cider_request_art(const char *key, const char *tier)
     if (!valid_key(key) || (strcmp(tier, "L") && strcmp(tier, "M") &&
         strcmp(tier, "S") && strcmp(tier, "XS") && strcmp(tier, "P"))) return;
     mutex_lock(&cider_mutex);
-    if ((strcmp(tier, "P") || host_palette) &&
+    /* A visible cover takes priority over its companion palette. Both are
+     * polled by WPS, so letting P replace L would restart them every redraw. */
+    bool palette = !strcmp(tier, "P");
+    bool cover_in_flight = transfer.active && !transfer.fill &&
+                           strcmp(transfer.tier, "P");
+    if ((!palette || (host_palette && !cover_in_flight)) &&
         cider_cache_find(&cache, key, tier) < 0 &&
         (!transfer.active || strcmp(transfer.key, key) ||
          strcmp(transfer.tier, tier) || transfer.fill))
@@ -1578,7 +1594,13 @@ void cider_retain_art(const char *const *keys, unsigned int count,
     bool keep = false;
     for (unsigned int i = 0; i < count; i++)
         if (!strcmp(keys[i],transfer.key)) keep = true;
-    if (transfer.active && (!keep || strcmp(tier,transfer.tier)))
+    /* The WPS's first L key is the playing album. Its P transfer
+     * belongs to the same view even though it has a different tier. */
+    bool keep_palette = count && !strcmp(tier, "L") &&
+                        !strcmp(transfer.tier, "P") &&
+                        !strcmp(keys[0], transfer.key);
+    if (transfer.active && !keep_palette &&
+        (!keep || strcmp(tier, transfer.tier)))
     {
         cancel_all |= cancel_request != 0;
         cancel_request = transfer.request;

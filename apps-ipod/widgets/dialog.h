@@ -5,28 +5,8 @@
  * helpers.
  ****************************************************************************/
 
-/* Modal box primitive shared by the popup / yes-no / text-input dialogs.
- *
- * Two entry points, deliberately separate:
- *
- *   dialog_frame_box() - pure drawing: fill + border a centred box and return
- *                        its content viewport. No theme, no input loop. Used by
- *                        the self-closing popup (was splash) and, internally,
- *                        by dialog_run().
- *
- *   dialog_run()       - the interactive path: theme enable/undo, the
- *                        skin-flush guard, and the get_action loop. Used by the
- *                        yes-no and text-input dialogs. The flush guard lives
- *                        inside the loop so no caller can forget it.
- *
- * Theming is by properties (struct dialog_style), not a render engine: colours,
- * border width/radius and fonts. Every colour defaults to
- * DIALOG_COLOR_INHERIT, i.e. "whatever the screen already has" - the theme's
- * colours, or an override a caller installed before drawing (the popup's
- * broken-theme fallback). So the default style reproduces the untheme
- * behaviour exactly, and a caller only names the fields it wants to change.
- */
-
+/* Native dialog styling and input. The box painter also serves splash and
+ * other transient widgets. */
 #ifndef _GUI_DIALOG_H_
 #define _GUI_DIALOG_H_
 
@@ -46,38 +26,6 @@ struct dialog;
  * (foreground for fg/border fields, background for bg fields). */
 #define DIALOG_COLOR_INHERIT ((unsigned)-1)
 
-/* Colours that resolve, also at draw time, to the theme's own foreground and
- * background -- album-derived while dynamic colours are running, so a dialog
- * follows the music the way the rest of the UI does. On a theme whose
- * background is the darker of its pair, the album's colours are its vivid one
- * at tone 85 for FG and its dominant one at tone 15 for BG.
- *
- * Not the same as INHERIT, which takes whatever the screen happens to carry:
- * inside a button that is the *box's* fill, so INHERIT there would give the box
- * background rather than the theme's. These are all absolute.
- *
- * SURFACE is the box's fill: the background, lifted a little toward the
- * foreground when the background is the darker of the two, so the box stands
- * off the screen where a shadow cannot show. The text keeps at least 7:1 on
- * it, or 85% of the pair's own contrast where the pair has less.
- *
- * TINT is SURFACE about a third of the way to the foreground: outlines that
- * mark a shape without competing with the selection.
- *
- * SHADE is the background halfway to black, for the shadow.
- *
- * ACCENT is the selection colour: the foreground, so the selection is in the
- * album's own colour, dimmed a little when the pair has no colour in it so a
- * white-on-black theme does not get a block of pure white. ON_ACCENT is the
- * text on it, which is SURFACE. */
-#define DIALOG_COLOR_FG        ((unsigned)-2)
-#define DIALOG_COLOR_BG        ((unsigned)-3)
-#define DIALOG_COLOR_ACCENT    ((unsigned)-4)
-#define DIALOG_COLOR_SURFACE   ((unsigned)-5)
-#define DIALOG_COLOR_ON_ACCENT ((unsigned)-6)
-#define DIALOG_COLOR_TINT      ((unsigned)-7)
-#define DIALOG_COLOR_SHADE     ((unsigned)-8)
-
 /* A font that resolves to the one the parent (theme) viewport already carries. */
 #define DIALOG_FONT_INHERIT  (-1)
 
@@ -92,13 +40,6 @@ struct dialog_style
     int      box_font;
     int      edge_margin;           /* minimum side margins for confirmations */
 
-    /* Solid drop shadow: an opaque copy of the box's rectangle offset down
-     * and right, drawn behind it, so what shows is an L along the right and
-     * bottom edges. No blur and no transparency -- the box is opaque, so only
-     * the offset part is ever visible. */
-    unsigned box_shadow_color;
-    int      box_shadow_offset;     /* px right and down; 0 == no shadow    */
-
     /* the button row (the yes/no and text-input dialogs share one renderer) */
     unsigned button_fg;
     unsigned button_bg;
@@ -112,16 +53,8 @@ struct dialog_style
     int      button_gap, button_pad_x, button_pad_y; /* confirmation layout */
 };
 
-/* Every colour DIALOG_COLOR_INHERIT (bar the shadow, which is DIALOG_COLOR_FG),
- * every font DIALOG_FONT_INHERIT, 1px square borders, 10px margin and a 4px
- * solid drop shadow: driven entirely by the theme. */
+/* Resolve the active native modal tokens. */
 void dialog_style_default(struct dialog_style *s);
-
-/* The style used by dialogs that pass NULL to dialog_init() and by the popup -
- * i.e. the one place to restyle every dialog at once. `s` is copied; NULL
- * restores dialog_style_default(). */
-void dialog_set_default_style(const struct dialog_style *s);
-const struct dialog_style *dialog_get_default_style(void);
 
 /* How much `style` takes out of the box on each side (the margin). Sizing code
  * (a measure() callback) uses this to convert a content size into a box size. */
@@ -212,24 +145,6 @@ struct dialog_text_line
     int len;
 };
 
-/* Neutral layout exported by dialogs with a retained overlay. All positions
- * are relative to the content area, after the frame's margin. */
-#define DIALOG_NATIVE_LINES 16
-#define DIALOG_NATIVE_BUTTONS 2
-struct dialog_native_button
-{
-    int x, y, width, height;
-    char label[24];
-    bool selected;
-};
-
-struct dialog_native_content
-{
-    struct dialog_text_line lines[DIALOG_NATIVE_LINES];
-    struct dialog_native_button buttons[DIALOG_NATIVE_BUTTONS];
-    int line_count, button_count;
-};
-
 /* Greedy word-wrap `text` into display lines no wider than `max_width` pixels
  * in `font`, writing up to `max_lines` slices into `out` (each pointing into
  * `text`). A line break in the text ends a line, so a blank line between
@@ -249,12 +164,6 @@ enum dialog_disposition
     DIALOG_CANCEL,         /* close: cancel / no outcome                   */
     DIALOG_ABORT,          /* close: system event (e.g. USB); the callback *
                             * has stashed specifics in its own `data`      */
-};
-
-enum dialog_slide {
-    DIALOG_SLIDE_NONE,
-    DIALOG_SLIDE_PAGE,   /* generic confirmation over the invoking page */
-    DIALOG_SLIDE_EVENT,  /* consent from inside the action dispatcher */
 };
 
 struct dialog_callbacks
@@ -285,12 +194,6 @@ struct dialog_callbacks
      * (e.g. the yes/no result message). */
     void (*on_close)(struct dialog *d, void *data);
 
-    /* Optional retained layout. Uses the same measured geometry, but exports
-     * text and button state without drawing. The content viewport is active
-     * so font metrics agree with the legacy renderer. */
-    void (*native_layout)(struct dialog *d, struct screen *s,
-                          const struct viewport *content,
-                          struct dialog_native_content *out, void *data);
 };
 
 struct dialog
@@ -304,6 +207,7 @@ struct dialog
 
     /* --- maintained by dialog_run(), readable by callbacks --- */
     struct viewport parent[NB_SCREENS]; /* theme-enabled parent per screen  */
+    bool  default_style;
     bool  backlight_on;         /* backlight state sampled before get_action */
 
     /* The get_action timeout for the NEXT pass, seeded from dialog_run()'s
@@ -315,8 +219,7 @@ struct dialog
     int   poll_ticks;
 
     /* --- optional, set after dialog_init() --- */
-    /* Allow the global Animations setting to slide this measured box. */
-    enum dialog_slide slide;
+    const char *motion_route; /* literal name in the frame-time trace */
     /* Drawn into `fb`, fb_w by fb_h, over whatever it holds, and shown by
      * present() after each repaint, instead of on the screen: for a page
      * the text viewer has turned sideways. NULL draws on the screen. */
@@ -329,21 +232,15 @@ struct dialog
 };
 
 /* Initialise a dialog. `title` and `style` may be NULL (NULL style == the
- * default style, see dialog_set_default_style()); `style` is copied. The struct
+ * active native theme); `style` is copied. The struct
  * is caller-allocated (typically on the stack); treat the fields as opaque. */
 void dialog_init(struct dialog *d, int context, const char *title,
                  const struct dialog_style *style,
                  const struct dialog_callbacks *cb, void *data);
 
-/* Enable the theme, then loop: repaint the box, inhibit the skin flush, get one
- * action (with `poll_ticks` timeout - HZ/2 for a countdown, TIMEOUT_BLOCK for
- * none), and dispatch it to on_action. Undo the theme on exit. Returns the
- * final dialog_disposition. */
+/* Present an interactive sheet. Polls its controller at poll_ticks,
+ * with additional compositor deadlines while its transition is active. */
 int dialog_run(struct dialog *d, int poll_ticks);
 /* Restore the underlying page before a higher-priority screen is opened. */
 void dialog_interrupt_transition(void);
-/* USB can interrupt a visible native confirmation. Preserve the nested
- * legacy appearance until both modal owners can share one retained stack. */
-bool dialog_prepare_usb(void);
-
 #endif /* _GUI_DIALOG_H_ */

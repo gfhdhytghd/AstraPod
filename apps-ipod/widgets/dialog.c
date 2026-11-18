@@ -4,10 +4,6 @@
  * dialog style defaults.
  ****************************************************************************/
 
-/* Modal box primitive: a framed box (dialog_frame_box) plus the interactive
- * theme + skin-flush-guard + get_action loop (dialog_run) shared by the
- * yes/no and text-input dialogs. */
-
 #include "config.h"
 #include "lcd.h"
 #include "font.h"
@@ -16,83 +12,66 @@
 #include "draw/viewport.h"
 #include "input/action.h"
 #include "backlight.h"
-#include "draw/icon.h"          /* Icon_NOICON */
-#include "draw/color.h"         /* color_blend, color_contrast, tone */
-#include "draw/round_rect.h"    /* fill_round_rect/draw_round_rect */
-#include "draw/text_wrap.h"
-#include "settings/settings.h"  /* theme fg/bg for the derived colours */
-#include "skin/statusbar_skinned.h"
-#include "skin/skin_engine.h" /* skin_inhibit_flush */
-#include "skin/skin_albumart_color.h" /* dynamic_colors_* */
-#include "dialog.h"
-#include "button_chord.h"
-#if defined(IPOD_6G) && (defined(HAVE_USB_PODLINK) || defined(SIMULATOR))
-#define DIALOG_SLIDES
 #include "button.h"
+#include "draw/icon.h"
+#include "draw/color.h"
+#include "draw/round_rect.h"
+#include "draw/text_wrap.h"
+#include "metadata/album_palette.h"
+#include "settings/settings.h"
+#include "dialog.h"
 #include "core_alloc.h"
 #include "system.h"
 #include "thread.h"
-#include "ui/animation.h"
-#include "ui/native_menu.h"
+#include "ui/frame.h"
 #include "ui/native_theme_runtime.h"
-#include "ui/retained.h"
+#include "ui/sheet.h"
 #include "ui/scene.h"
+#include "ui/statusbar.h"
 #include <string.h>
-#endif
 #ifdef HAVE_WHEEL_WPS_CHORD
 #include "input/agents_shortcut.h"
 #endif
 
-#define DIALOG_MARGIN 10   /* default content inset inside the box */
-#define DIALOG_SHADOW  4   /* default solid drop-shadow offset */
-
-/* ---------------------------------------------------------------------- *
- * Style                                                                  *
- * ---------------------------------------------------------------------- */
+static unsigned theme_color(const struct ui_theme *theme, enum ui_color_role role,
+                            const struct ui_album_palette *palette)
+{
+    uint32_t rgb = ui_theme_color(theme, role, palette);
+    return LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
+}
 
 void dialog_style_default(struct dialog_style *s)
 {
-    s->box_fg           = DIALOG_COLOR_INHERIT;
-    s->box_bg           = DIALOG_COLOR_INHERIT;
-    s->box_border_color = DIALOG_COLOR_INHERIT;
-    s->box_border_width  = 1;
-    s->box_margin        = DIALOG_MARGIN;
-    s->box_font          = DIALOG_FONT_INHERIT;
-    s->edge_margin       = 12;
-    s->box_shadow_color  = LCD_BLACK;
-    s->box_shadow_offset = DIALOG_SHADOW;
+    struct ui_theme theme;
+    struct ui_album_palette palette;
+    ui_theme_snapshot(&theme);
+    album_palette_snapshot(&palette);
+    const uint16_t *m = theme.metric;
 
-    s->button_fg                     = DIALOG_COLOR_INHERIT;
-    s->button_bg                     = DIALOG_COLOR_INHERIT;
-    s->button_border_color           = DIALOG_COLOR_INHERIT;
-    s->button_fg_selected            = DIALOG_COLOR_INHERIT;
-    s->button_bg_selected            = DIALOG_COLOR_INHERIT;
-    s->button_border_color_selected  = DIALOG_COLOR_INHERIT;
-    s->button_border_width           = 1;
-    s->button_border_radius          = 0;
-    s->button_font                   = DIALOG_FONT_INHERIT;
-    s->button_gap                    = 18;
-    s->button_pad_x                  = 12;
-    s->button_pad_y                  = 5;
-}
-
-static struct dialog_style default_style;
-static bool default_style_valid;
-
-void dialog_set_default_style(const struct dialog_style *s)
-{
-    if (s)
-        default_style = *s;
-    else
-        dialog_style_default(&default_style);
-    default_style_valid = true;
-}
-
-const struct dialog_style *dialog_get_default_style(void)
-{
-    if (!default_style_valid)
-        dialog_set_default_style(NULL);
-    return &default_style;
+    unsigned bg = theme_color(&theme, UI_COLOR_MODAL_BG, &palette);
+    unsigned fg = theme_color(&theme, UI_COLOR_MODAL_FG, &palette);
+    unsigned outline = theme_color(&theme, UI_COLOR_MODAL_BORDER, &palette);
+    unsigned accent = theme_color(&theme, UI_COLOR_MODAL_ACCENT, &palette);
+    *s = (struct dialog_style){
+        .box_fg = fg,
+        .box_bg = bg,
+        .box_border_color = outline,
+        .box_border_width = m[UI_METRIC_MODAL_BORDER_WIDTH],
+        .box_margin = m[UI_METRIC_MODAL_PADDING],
+        .box_font = DIALOG_FONT_INHERIT,
+        .edge_margin = m[UI_METRIC_MODAL_EDGE_MARGIN],
+        .button_fg = fg,
+        .button_bg = bg,
+        .button_border_color = outline,
+        .button_fg_selected = theme_color(&theme, UI_COLOR_MODAL_SELECTED_TEXT, &palette),
+        .button_bg_selected = accent,
+        .button_border_color_selected = accent,
+        .button_border_width = m[UI_METRIC_MODAL_BORDER_WIDTH],
+        .button_font = DIALOG_FONT_INHERIT,
+        .button_gap = m[UI_METRIC_MODAL_BUTTON_GAP],
+        .button_pad_x = m[UI_METRIC_MODAL_BUTTON_PAD_X],
+        .button_pad_y = m[UI_METRIC_MODAL_BUTTON_PAD_Y],
+    };
 }
 
 void dialog_get_insets(const struct dialog_style *style,
@@ -125,294 +104,28 @@ static void draw_box_border(struct screen *s, int w, int h, int bw)
     s->fillrect(w - bw, bw, bw, h - 2 * bw);         /* right  */
 }
 
-/* How far the box's fill is lifted from a dark background toward the text,
- * out of 256 (about 8%), and the contrast the text must keep on it: 7:1, or
- * 85% of the pair's own where the pair has less to give. */
-#define DIALOG_LIFT          20
-#define DIALOG_LIFT_FLOOR    700
-#define DIALOG_LIFT_SHARE    85
-
-/* Outlines are the fill this far toward the text, out of 256 (about 35%):
- * enough to mark the shape without competing with the selection. */
-#define DIALOG_TINT          90
-
-/* The shadow is the background this far toward black, out of 256. */
-#define DIALOG_SHADE         128
-
-/* A pair with no colour in it -- white on black -- dims the selected button
- * this far toward the fill, out of 256, so it is not a block of pure white:
- * white on black gives #d0d0d0. */
-#define DIALOG_GREY_DIM      47
-#define DIALOG_GREY_CHROMA   1311   /* 0.02 in color_chroma()'s units */
-
-/* An unusable theme pair. A dialog fills with the background, borders and
- * draws its text in the foreground, so a pair with no contrast between them
- * renders the whole box invisible rather than merely ugly.
- *
- * Tested where the pair is resolved rather than where it is drawn, so the
- * accent -- derived from both -- comes off the substitute too, and every
- * dialog inherits the guard instead of each one carrying its own.
- * Idempotent: the substitute below is not itself broken. */
-static bool theme_pair_broken(unsigned fg, unsigned bg)
-{
-    return (fg == bg) ||
-           (bg == 63422 && fg == 65535); /* iPod reFresh '22 themes */
-}
-
-/* The legible pair swapped in when the theme's is not: a gray box with a
- * black border and black text. */
-#define DIALOG_FALLBACK_FG  LCD_BLACK
-#define DIALOG_FALLBACK_BG  LCD_LIGHTGRAY
-
-/* The tones, CIELAB L*, a dark theme's dialog takes the album's colours to:
- * Scrim's own `dominant<15` and `vivid>85`, so the box matches the screen
- * behind it rather than standing out as the album's raw colour. */
-#define DIALOG_DARK_TONE     15
-#define DIALOG_LIGHT_TONE    85
-
-/* The theme's live foreground and background. With dynamic colours running,
- * a theme whose own background is the darker of its pair gets the album's
- * dominant colour taken dark and its vivid one taken light, whichever way
- * round the album's pair fell. Otherwise the theme's pair as resolved, which
- * dynamic_colors_resolve() maps by value to the album's.
- *
- * The toned pair is kept until the album's colours change: every colour of
- * every button comes through here, and each tone bound is a bisection over
- * OKLab costing thousands of cycles. Nothing here yields, so the cache needs
- * no lock. */
-static void dialog_theme_pair(unsigned *fg, unsigned *bg)
-{
-    static unsigned toned_dominant, toned_vivid, toned_fg, toned_bg;
-    static bool toned_valid;
-    unsigned black = LCD_RGBPACK(0, 0, 0);
-    unsigned dominant, vivid;
-
-    if (color_contrast(global_settings.bg_color, black) <
-            color_contrast(global_settings.fg_color, black) &&
-        dynamic_colors_roles(&dominant, &vivid))
-    {
-        if (!toned_valid || dominant != toned_dominant ||
-            vivid != toned_vivid)
-        {
-            toned_fg = color_tone_bound(vivid, DIALOG_LIGHT_TONE, 1);
-            toned_bg = color_tone_bound(dominant, DIALOG_DARK_TONE, -1);
-            toned_dominant = dominant;
-            toned_vivid = vivid;
-            toned_valid = true;
-        }
-        *fg = toned_fg;
-        *bg = toned_bg;
-        return;
-    }
-
-    *fg = dynamic_colors_resolve(global_settings.fg_color);
-    *bg = dynamic_colors_resolve(global_settings.bg_color);
-    if (theme_pair_broken(*fg, *bg))
-    {
-        *fg = DIALOG_FALLBACK_FG;
-        *bg = DIALOG_FALLBACK_BG;
-    }
-}
-
-static unsigned dialog_theme_fg(void)
-{
-    unsigned fg, bg;
-
-    dialog_theme_pair(&fg, &bg);
-    return fg;
-}
-
-static unsigned dialog_theme_bg(void)
-{
-    unsigned fg, bg;
-
-    dialog_theme_pair(&fg, &bg);
-    return bg;
-}
-
-/* The box's fill. A dark background is lifted toward the text so the box
- * reads as a surface over the screen, where no shadow can show; a light one
- * is left alone, and the shadow does that job. */
-static unsigned dialog_surface(void)
-{
-    unsigned fg, bg;
-    unsigned black = LCD_RGBPACK(0, 0, 0);
-    int floor;
-    int t;
-
-    dialog_theme_pair(&fg, &bg);
-    floor = color_contrast(fg, bg) * DIALOG_LIFT_SHARE / 100;
-    if (color_contrast(bg, black) >= color_contrast(fg, black))
-        return bg;
-    if (floor > DIALOG_LIFT_FLOOR)
-        floor = DIALOG_LIFT_FLOOR;
-    for (t = DIALOG_LIFT; t > 0; t -= 2)
-    {
-        unsigned s = color_blend(bg, fg, t);
-        if (color_contrast(fg, s) >= floor)
-            return s;
-    }
-    return bg;
-}
-
-/* The selected button's fill: the text colour, so the selection is the
- * album's own colour and its label, in the fill's, keeps the pair's contrast
- * less only the lift. */
-static unsigned dialog_accent(void)
-{
-    unsigned fg, bg;
-
-    dialog_theme_pair(&fg, &bg);
-    if (color_chroma(fg) < DIALOG_GREY_CHROMA &&
-        color_chroma(bg) < DIALOG_GREY_CHROMA)
-        return color_blend(fg, dialog_surface(), DIALOG_GREY_DIM);
-    return fg;
-}
-
-/* The absolute sentinels. Returns false for anything else, including INHERIT,
- * which is screen-relative and resolved by the callers below. */
-static bool resolve_derived(unsigned color, unsigned *out)
-{
-    switch (color)
-    {
-        case DIALOG_COLOR_FG:
-            *out = dialog_theme_fg();
-            return true;
-        case DIALOG_COLOR_BG:
-            *out = dialog_theme_bg();
-            return true;
-        case DIALOG_COLOR_SURFACE:
-        case DIALOG_COLOR_ON_ACCENT:
-            *out = dialog_surface();
-            return true;
-        case DIALOG_COLOR_TINT:
-            *out = color_blend(dialog_surface(), dialog_theme_fg(),
-                               DIALOG_TINT);
-            return true;
-        case DIALOG_COLOR_SHADE:
-            *out = color_blend(dialog_theme_bg(), LCD_BLACK, DIALOG_SHADE);
-            return true;
-        case DIALOG_COLOR_ACCENT:
-            *out = dialog_accent();
-            return true;
-    }
-    return false;
-}
-
-/* INHERIT takes the screen's own pair, which is the theme's whenever the box
- * has not already been framed -- so it needs the same guard as the derived
- * colours above. Inside a framed box the screen carries the resolved pair,
- * which the test then passes through unchanged. */
 static unsigned resolve_fg(struct screen *s, unsigned color)
 {
-    unsigned derived;
-
-    if (resolve_derived(color, &derived))
-        return derived;
-    if (color != DIALOG_COLOR_INHERIT)
-        return color;
-    return theme_pair_broken(s->get_foreground(), s->get_background())
-           ? DIALOG_FALLBACK_FG : s->get_foreground();
+    return color == DIALOG_COLOR_INHERIT ? s->get_foreground() : color;
 }
 
 static unsigned resolve_bg(struct screen *s, unsigned color)
 {
-    unsigned derived;
-
-    if (resolve_derived(color, &derived))
-        return derived;
-    if (color != DIALOG_COLOR_INHERIT)
-        return color;
-    return theme_pair_broken(s->get_foreground(), s->get_background())
-           ? DIALOG_FALLBACK_BG : s->get_background();
-}
-
-/* Flushes the part of the drop shadow that falls outside `box`: the strip down
- * its right edge and the one along its bottom. The caller flushes `box` and
- * nothing else, so without this the shadow would sit in the framebuffer and
- * never reach the display. The part *under* the box is deliberately not sent --
- * it is about to be overdrawn, and flushing it here would put a half-drawn box
- * on screen for a frame.
- *
- * lcd_update_rect() does not clip (it walks the framebuffer straight from
- * FBADDR(x, y)), so a box against the right or bottom edge would run off the
- * end. The strips are clamped here rather than trusting the driver.
- *
- * Call this only once the box itself has been drawn -- the same routine rounds
- * x down and width up to even, so a strip can overlap the box by a column, and
- * sending that column before it is drawn is what makes the edge flicker. */
-static void update_shadow_strips(struct screen *screen,
-                                 const struct viewport *box, int off)
-{
-    int sx = box->x + off;               /* shadow rect origin */
-    int sy = box->y + off;
-    int rx = box->x + box->width;        /* right strip starts here */
-    int by = box->y + box->height;       /* bottom strip starts here */
-    int x2 = sx + box->width;            /* shadow rect far edge */
-    int y2 = sy + box->height;
-
-    if (x2 > screen->lcdwidth)
-        x2 = screen->lcdwidth;
-    if (y2 > screen->lcdheight)
-        y2 = screen->lcdheight;
-
-    if (x2 > rx && y2 > sy)
-        screen->update_rect(rx, sy, x2 - rx, y2 - sy);
-    if (y2 > by && x2 > sx)
-        screen->update_rect(sx, by, x2 - sx, y2 - by);
+    return color == DIALOG_COLOR_INHERIT ? s->get_background() : color;
 }
 
 void dialog_frame_box(struct screen *screen, struct viewport *box,
                       const struct dialog_style *style,
                       struct viewport *content_out)
 {
-    /* box must already be the active viewport: set_viewport() reloads fg/bg
-     * from the viewport's stored patterns on colour targets, which would undo
-     * a caller's colour override (e.g. the popup's broken-theme fallback, which
-     * is what DIALOG_COLOR_INHERIT picks up here). */
-    int bw = style->box_border_width;
+    int bw = MIN(style->box_border_width, box->width / 2);
     struct dialog_insets in;
 
-    /* Fill an opaque box, then the border. On colour targets fill with a SOLID
-     * background colour via DRMODE_FG -- not DRMODE_INVERSEVID, which draws the
-     * "background" and, when the theme has a backdrop active, copies the
-     * backdrop image into the box (leaving it looking unfilled with unreadable
-     * text over it). */
     if (screen->depth > 1)
     {
         unsigned fg = resolve_fg(screen, style->box_fg);
         unsigned bg = resolve_bg(screen, style->box_bg);
         unsigned bc = resolve_fg(screen, style->box_border_color);
-        unsigned sc = resolve_fg(screen, style->box_shadow_color);
-
-        /* The shadow falls outside `box`, so it needs a viewport that reaches
-         * the rest of the screen. Every colour above is resolved BEFORE that
-         * switch: resolve_*() read the screen's current fg/bg, and for the
-         * popup those screen colours are the broken-theme override that
-         * DIALOG_COLOR_INHERIT is there to pick up -- set_viewport() reloads
-         * them from the viewport's own patterns and would lose it. */
-        if (style->box_shadow_offset > 0)
-        {
-            struct viewport full, *prev;
-            int off = style->box_shadow_offset;
-
-            /* Both fields before the call, not after: viewport_set_fullscreen()
-             * hands straight to lcd_init_viewport(), which reads
-             * vp->buffer->elems -- on an uninitialised stack viewport that is a
-             * garbage pointer and a data abort. Same order as
-             * viewport_set_defaults(). */
-            full.buffer = NULL;               /* use the default framebuffer */
-            full.flags  = VP_DEFAULT_FLAGS;
-            viewport_set_fullscreen(&full, screen->screen_type);
-            prev = screen->set_viewport(&full);
-            screen->set_drawmode(DRMODE_FG);
-            screen->set_foreground(sc);
-            screen->fillrect(box->x + off, box->y + off,
-                             box->width, box->height);
-            screen->set_drawmode(DRMODE_SOLID);
-            screen->set_viewport(prev);
-        }
-
         screen->set_drawmode(DRMODE_FG);
         screen->set_foreground(bg);          /* fill with the background colour */
         screen->fillrect(0, 0, box->width, box->height);
@@ -421,17 +134,6 @@ void dialog_frame_box(struct screen *screen, struct viewport *box,
         screen->set_foreground(fg);          /* interior draws in the box fg */
         screen->set_drawmode(DRMODE_SOLID);
 
-        /* Flushed here, after the box, and not next to the shadow fill above:
-         * lcd_update_rect() rounds x down and width up to even, so the right
-         * strip reaches up to a column into the box. Sent before the box was
-         * drawn, that column carried whatever the status-bar skin had left in
-         * the framebuffer during get_action, and the box's own flush then put
-         * the border back -- two different values pushed every pass, which
-         * reads as a flickering right edge. */
-        if (style->box_shadow_offset > 0)
-            update_shadow_strips(screen, box, style->box_shadow_offset);
-
-        /* so set_viewport(content) reloads the style's colours, not the theme's */
         box->fg_pattern = fg;
         box->bg_pattern = bg;
     }
@@ -661,756 +363,319 @@ void dialog_init(struct dialog *d, int context, const char *title,
                  const struct dialog_style *style,
                  const struct dialog_callbacks *cb, void *data)
 {
-    d->cb = cb;
-    d->data = data;
-    d->context = context;
-    d->title = title;
-    d->style = style ? *style : *dialog_get_default_style();
-    d->backlight_on = true;
-    d->fb = NULL;
-    d->present = NULL;
-    d->keymap = NULL;
-    d->slide = DIALOG_SLIDE_NONE;
-}
-
-/* Frame + draw the dialog on one screen. The theme parent viewport supplies the
- * font and (unless the style overrides them) the colours; the interior is the
- * callback's job. Only the box region is flushed, so the rest of the screen is
- * left untouched. */
-static void dialog_draw_one(struct dialog *d, struct screen *s, int screen_nr,
-                            struct viewport *bounds)
-{
-    struct viewport parent = d->parent[screen_nr];  /* theme font/colours */
-    struct viewport box, content;
-    struct viewport *outer;
-
-    if (d->style.box_font != DIALOG_FONT_INHERIT)
-        parent.font = d->style.box_font;
-    if (d->fb)
-    {
-        /* the shadow is drawn on the screen, outside the box's buffer */
-        d->style.box_shadow_offset = 0;
-        parent.buffer = d->fb;
-        parent.x = parent.y = 0;
-        parent.width = d->fb_w;
-        parent.height = d->fb_h;
-    }
-
-    /* measure() runs with the parent active, so its text metrics see the font
-     * the box will actually be drawn in */
-    outer = s->set_viewport(&parent);
-
-    box = parent;
-    if (!d->cb->measure)
-    {
-        viewport_set_fullscreen(&box, screen_nr);
-        s->set_viewport(&box);
-        d->cb->draw(d, s, &box, d->data);
-        s->update_viewport();
-        s->set_viewport(outer);
-        return;
-    }
-    d->cb->measure(d, s, &box, d->data);            /* final geometry */
-    if (bounds)
-        *bounds = box;
-    s->set_viewport_ex(&box, VP_FLAG_VP_SET_CLEAN);
-    dialog_frame_box(s, &box, &d->style, &content);
-
-    s->set_viewport_ex(&content, VP_FLAG_VP_SET_CLEAN);
-    d->cb->draw(d, s, &content, d->data);
-
-    s->set_viewport(&box);
-    if (!d->fb)
-        s->update_viewport();
-    s->set_viewport(outer);
-    if (d->fb)
-        d->present();
-}
-
-#ifdef DIALOG_SLIDES
-#define DIALOG_OPEN_FRAMES ANIM_F(12)
-#define DIALOG_CLOSE_FRAMES ANIM_F(10)
-#define DIALOG_PIXELS (LCD_WIDTH * LCD_HEIGHT)
-#define NATIVE_DIALOG_GLYPHS 64
-
-struct dialog_native_ui;
-
-struct dialog_motion {
-    struct ui_tween tween; /* the box's top edge */
-    struct viewport box;
-    unsigned int thread;
-    int handle;
-    int shown;
-    bool entering;
-    struct dialog_native_ui *native;
-};
-
-static struct dialog_motion *motion_owner;
-
-enum native_tile_id {
-    NATIVE_SHADOW, NATIVE_FRAME, NATIVE_MESSAGE, NATIVE_BUTTON_0,
-    NATIVE_BUTTON_1, NATIVE_TILE_COUNT
-};
-
-struct dialog_native_ui {
-    struct dialog *dialog;
-    struct ui_theme theme;
-    struct ui_nav nav;
-    struct ui_page base_page, overlay_page;
-    struct ui_view base, root, views[NATIVE_TILE_COUNT];
-    struct ui_layer backdrop, layers[NATIVE_TILE_COUNT];
-    int disposition, body_font;
-    bool attached;
-};
-
-static bool dialog_native_action(struct ui_view *view, int action)
-{
-    struct dialog_native_ui *ui = view->data;
-    struct dialog *d = ui->dialog;
-    ui->disposition = d->cb->on_action(d, action, d->data);
-    return true;
-}
-
-static void dialog_native_init(struct dialog_native_ui *ui, struct dialog *d,
-                                int handle)
-{
-    static const struct ui_view_ops action_ops = {.action = dialog_native_action};
-    static const struct ui_view_ops tile_ops = {.paint = ui_layer_paint};
-    const struct ui_rect screen = {0, 0, LCD_WIDTH, LCD_HEIGHT};
-
-    ui->dialog = d;
-    ui_theme_snapshot(&ui->theme);
-    ui->body_font = ui_theme_font_load(&ui->theme, UI_FONT_BODY, NATIVE_DIALOG_GLYPHS);
-    ui->backdrop = (struct ui_layer){
-        .handle = handle, .width = LCD_WIDTH, .height = LCD_HEIGHT,
-        .offset_pixels = d->slide == DIALOG_SLIDE_EVENT ? DIALOG_PIXELS : 0,
+    *d = (struct dialog){
+        .cb = cb,
+        .data = data,
+        .context = context,
+        .title = title,
+        .backlight_on = true,
+        .default_style = !style,
     };
-    ui_view_init(&ui->base, screen, &tile_ops, &ui->backdrop);
-    ui_view_init(&ui->root, screen, &action_ops, ui);
-    ui_page_init(&ui->base_page, &ui->base);
-    ui_page_init(&ui->overlay_page, &ui->root);
-    for (int i = 0; i < NATIVE_TILE_COUNT; ++i)
-    {
-        ui_view_init(&ui->views[i], (struct ui_rect){0}, &tile_ops, &ui->layers[i]);
-        ui_view_append(&ui->root, &ui->views[i]);
-    }
-    ui_nav_push(&ui->nav, &ui->base_page, UI_PAGE);
-    ui_nav_push(&ui->nav, &ui->overlay_page, UI_POPUP);
-    ui->attached = true;
+    if (style)
+        d->style = *style;
+    else
+        dialog_style_default(&d->style);
 }
 
-static void dialog_native_detach(struct dialog_native_ui *ui)
+/* Decoration, text and custom content use this painter both in a screen
+ * viewport and in a retained surface. Presentation belongs to the caller. */
+static void dialog_draw_content(struct dialog *d, struct screen *screen,
+                                struct viewport *box)
 {
-    ui_nav_pop(&ui->nav);
-    ui_nav_pop(&ui->nav);
-    ui->attached = false;
-    if (ui->body_font >= 0)
-        font_unload(ui->body_font);
+    struct viewport *previous = *screen->current_viewport;
+    screen->set_viewport_ex(box, VP_FLAG_VP_SET_CLEAN);
+    struct viewport content = *box;
+    if (d->cb->measure)
+        dialog_frame_box(screen, box, &d->style, &content);
+    screen->set_viewport_ex(&content, VP_FLAG_VP_SET_CLEAN);
+    d->cb->draw(d, screen, &content, d->data);
+    screen->set_viewport(previous);
 }
 
-static uint32_t dialog_rgb888(unsigned rgb565)
+static struct viewport dialog_measure(struct dialog *d)
 {
-    return (RGB_UNPACK_RED(rgb565) << 16) | (RGB_UNPACK_GREEN(rgb565) << 8) |
-            RGB_UNPACK_BLUE(rgb565);
-}
-
-static unsigned dialog_native_color(const struct ui_theme *theme,
-                                     enum ui_color_role role,
-                                     const struct ui_album_palette *palette)
-{
-    uint32_t color = ui_theme_color(theme, role, palette);
-    return LCD_RGBPACK(color >> 16, (color >> 8) & 255, color & 255);
-}
-
-static struct dialog_style dialog_native_style(const struct dialog_native_ui *ui)
-{
-    struct ui_album_palette palette = {0};
-    unsigned dominant, vivid;
-    if (dynamic_colors_roles(&dominant, &vivid))
-    {
-        palette.has_dominant = palette.has_vivid = true;
-        palette.dominant = dialog_rgb888(dominant);
-        palette.vivid = dialog_rgb888(vivid);
-    }
-    const struct ui_theme *theme = &ui->theme;
-    const uint16_t *metric = theme->metric;
-    unsigned bg = dialog_native_color(theme, UI_COLOR_MODAL_BG, &palette);
-    unsigned fg = dialog_native_color(theme, UI_COLOR_MODAL_FG, &palette);
-    unsigned border = dialog_native_color(theme, UI_COLOR_MODAL_BORDER, &palette);
-    unsigned accent = dialog_native_color(theme, UI_COLOR_MODAL_ACCENT, &palette);
-    unsigned selected_text = dialog_native_color(theme, UI_COLOR_MODAL_SELECTED_TEXT,
-                                                  &palette);
-    return (struct dialog_style){
-        .box_fg = fg, .box_bg = bg, .box_border_color = border,
-        .box_border_width = metric[UI_METRIC_MODAL_BORDER_WIDTH],
-        .box_margin = metric[UI_METRIC_MODAL_PADDING],
-        .box_font = ui->body_font >= 0 ? ui->body_font : DIALOG_FONT_INHERIT,
-        .edge_margin = metric[UI_METRIC_MODAL_EDGE_MARGIN],
-        .box_shadow_color = dialog_native_color(theme, UI_COLOR_MODAL_SHADOW, &palette),
-        .box_shadow_offset = metric[UI_METRIC_MODAL_SHADOW_OFFSET],
-        .button_fg = fg, .button_bg = bg, .button_border_color = border,
-        .button_fg_selected = selected_text,
-        .button_bg_selected = accent, .button_border_color_selected = accent,
-        .button_border_width = metric[UI_METRIC_MODAL_BORDER_WIDTH],
-        .button_font = DIALOG_FONT_INHERIT,
-        .button_gap = metric[UI_METRIC_MODAL_BUTTON_GAP],
-        .button_pad_x = metric[UI_METRIC_MODAL_BUTTON_PAD_X],
-        .button_pad_y = metric[UI_METRIC_MODAL_BUTTON_PAD_Y],
-    };
-}
-
-static struct ui_rect dialog_rect(const struct viewport *vp)
-{
-    return (struct ui_rect){vp->x, vp->y, vp->width, vp->height};
-}
-
-static void dialog_native_tile(struct dialog_native_ui *ui, int tile,
-                                struct ui_rect bounds, size_t offset,
-                                bool solid)
-{
-    struct ui_page *p = &ui->overlay_page;
-    struct ui_view *v = &ui->views[tile];
-    struct ui_layer *layer = &ui->layers[tile];
-    ui_page_set(p, v, UI_X, bounds.x);
-    ui_page_set(p, v, UI_Y, bounds.y);
-    ui_page_set(p, v, UI_WIDTH, bounds.width);
-    ui_page_set(p, v, UI_HEIGHT, bounds.height);
-    ui_page_invalidate(p, bounds);
-    *layer = (struct ui_layer){
-        .handle = ui->backdrop.handle, .offset_pixels = offset,
-        .width = solid ? 1 : bounds.width,
-        .height = solid ? 1 : bounds.height,
-    };
-}
-
-/* Draw into a packed opaque texture. All high-level modal paints pass through
- * the retained tree; the firmware's glyph and rectangle routines are shared
- * raster primitives. The compositor clips, scales and blends these textures. */
-static struct viewport dialog_tile_viewport(struct viewport style,
-                                             struct frame_buffer_t *buffer,
-                                             fb_data *pixels, int w, int h)
-{
-    *buffer = (struct frame_buffer_t){.fb_ptr = pixels, .stride = w, .elems = w * h};
-    style.buffer = buffer;
-    style.x = style.y = 0;
-    style.width = w;
-    style.height = h;
-    style.drawmode = DRMODE_FG;
-    return style;
-}
-
-static bool dialog_native_draw(struct dialog_native_ui *ui)
-{
-    struct dialog *d = ui->dialog;
-    struct screen *s = &screens[SCREEN_MAIN];
+    struct screen *screen = &screens[SCREEN_MAIN];
     struct viewport box = d->parent[SCREEN_MAIN];
-    if (2 * (d->style.edge_margin + d->style.box_margin) >= LCD_WIDTH ||
-        2 * d->style.box_margin >= LCD_HEIGHT)
-        return false;
+
     if (d->style.box_font != DIALOG_FONT_INHERIT)
         box.font = d->style.box_font;
-    struct viewport *prev = s->set_viewport(&box);
-    d->cb->measure(d, s, &box, d->data);
-    struct dialog_insets in;
-    dialog_get_insets(&d->style, &in);
-    struct viewport content = box;
-    content.x += in.left;
-    content.y += in.top;
-    content.width -= in.left + in.right;
-    content.height -= in.top + in.bottom;
-    if (box.x < 0 || box.y < 0 || box.width <= 0 || box.height <= 0 ||
-        box.width > LCD_WIDTH - box.x || box.height > LCD_HEIGHT - box.y ||
-        content.width <= 0 || content.height <= 0)
+    if (d->fb)
     {
-        s->set_viewport(prev);
-        return false;
+        box.buffer = d->fb;
+        box.x = box.y = 0;
+        box.width = d->fb_w;
+        box.height = d->fb_h;
     }
-
-    struct dialog_native_content model = {0};
-    int line_height = s->getcharheight();
-    s->set_viewport(&content);
-    d->cb->native_layout(d, s, &content, &model, d->data);
-    if (model.line_count < 0 || model.line_count > DIALOG_NATIVE_LINES ||
-        model.button_count < 0 || model.button_count > DIALOG_NATIVE_BUTTONS)
+    if (d->cb->measure)
     {
-        s->set_viewport(prev);
-        return false;
+        struct viewport *previous = screen->set_viewport(&box);
+        d->cb->measure(d, screen, &box, d->data);
+        screen->set_viewport(previous);
     }
-    int message_h = line_height * model.line_count;
-    size_t pixels = 1 + box.width * box.height + content.width * message_h;
-    bool valid = message_h <= content.height;
-    for (int i = 0; i < model.button_count; ++i)
-    {
-        const struct dialog_native_button *b = &model.buttons[i];
-        valid &= b->x >= 0 && b->y >= 0 && b->width > 0 && b->height > 0 &&
-                 b->width <= content.width - b->x && b->height <= content.height - b->y;
-        pixels += b->width * b->height;
-    }
-    if (!valid || pixels > DIALOG_PIXELS)
-    {
-        s->set_viewport(prev);
-        return false;
-    }
-
-    size_t offset = ui->backdrop.offset_pixels + DIALOG_PIXELS;
-    fb_data *base = core_get_data_pinned(ui->backdrop.handle);
-    struct ui_rect shadow = dialog_rect(&box);
-    if (d->style.box_shadow_offset > 0)
-    {
-        shadow.x += d->style.box_shadow_offset;
-        shadow.y += d->style.box_shadow_offset;
-        base[offset] = resolve_fg(s, d->style.box_shadow_color);
-    }
-    else
-        shadow.width = 0;
-    dialog_native_tile(ui, NATIVE_SHADOW, shadow, offset++, true);
-
-    struct frame_buffer_t buffer;
-    struct viewport tile = dialog_tile_viewport(box, &buffer, base + offset,
-                                                 box.width, box.height);
-    struct viewport framed_content;
-    struct dialog_style frame_style = d->style;
-    frame_style.box_shadow_offset = 0; /* shadow is a separate retained node */
-    s->set_viewport(&tile);
-    dialog_frame_box(s, &tile, &frame_style, &framed_content);
-    content.fg_pattern = framed_content.fg_pattern;
-    content.bg_pattern = framed_content.bg_pattern;
-    dialog_native_tile(ui, NATIVE_FRAME, dialog_rect(&box), offset, false);
-    offset += box.width * box.height;
-
-    struct ui_rect message = {content.x, content.y, content.width, message_h};
-    if (message_h > 0)
-    {
-        tile = dialog_tile_viewport(content, &buffer, base + offset,
-                                     message.width, message.height);
-        tile.flags |= VP_FLAG_ALIGN_CENTER;
-        s->set_viewport(&tile);
-        s->set_foreground(content.bg_pattern);
-        s->fillrect(0, 0, tile.width, tile.height);
-        s->set_foreground(content.fg_pattern);
-        for (int i = 0; i < model.line_count; ++i)
-            s->putsxyf(0, i * line_height, "%.*s",
-                        model.lines[i].len, model.lines[i].str);
-    }
-    dialog_native_tile(ui, NATIVE_MESSAGE, message, offset, false);
-    offset += message.width * message.height;
-
-    for (int i = 0; i < DIALOG_NATIVE_BUTTONS; ++i)
-    {
-        struct ui_rect bounds = {0};
-        if (i < model.button_count)
-        {
-            const struct dialog_native_button *b = &model.buttons[i];
-            bounds = (struct ui_rect){content.x + b->x, content.y + b->y,
-                                      b->width, b->height};
-            tile = dialog_tile_viewport(content, &buffer, base + offset,
-                                         b->width, b->height);
-            s->set_viewport(&tile);
-            s->set_foreground(content.bg_pattern);
-            s->fillrect(0, 0, tile.width, tile.height);
-            s->set_foreground(content.fg_pattern);
-            dialog_draw_button(s, &d->style, 0, 0, b->width, b->height,
-                               b->label, b->selected);
-        }
-        dialog_native_tile(ui, NATIVE_BUTTON_0 + i, bounds, offset, false);
-        offset += bounds.width * bounds.height;
-    }
-    s->set_viewport(prev);
-    core_put_data_pinned(base);
-    ui_nav_draw(&ui->nav);
-    return true;
+    return box;
 }
 
-static bool dialog_native_paint(struct dialog_native_ui *ui)
+#define PANEL_PIXELS (LCD_WIDTH * LCD_HEIGHT)
+
+struct dialog_view
 {
-    struct dialog *d = ui->dialog;
-    struct dialog_style legacy_style = d->style;
-    d->style = dialog_native_style(ui);
-    bool painted = dialog_native_draw(ui);
-    d->style = legacy_style;
-    return painted;
+    struct ui_sheet sheet;
+    struct ui_rect bounds;
+    struct dialog *dialog;
+    struct dialog_view *parent;
+    unsigned int thread;
+    int handle;
+    bool interrupted;
+    fb_data pixels[];
+};
+
+static struct dialog_view *active_dialog;
+
+static fb_data *dialog_output(const struct dialog *d)
+{
+    return d->fb ? d->fb->fb_ptr : lcd_framebuffer_default.fb_ptr;
 }
 
-static bool dialog_native_supported(const struct dialog *d)
+static void dialog_capture(struct dialog_view *view)
 {
-    if (d->slide == DIALOG_SLIDE_NONE || !d->cb->native_layout || !ui_native_enabled())
-        return false;
-
-    /* Scrim's album-derived dialog mixes legacy surface and accent formulas.
-     * Defer that variant until it has parity evidence on album states. */
-    unsigned dominant, vivid;
-    return strcmp(global_settings.native_theme, "scrim") ||
-           !dynamic_colors_roles(&dominant, &vivid);
+    memcpy(view->pixels, dialog_output(view->dialog), FRAMEBUFFER_SIZE);
+    view->interrupted = false;
+    view->sheet.light = UI_FULL_OPACITY;
 }
 
-/* The active viewport can belong to the invoking list or skin. Always
- * restore the default framebuffer and present it through the default view. */
-static void dialog_restore_display(void)
+static struct dialog_view *dialog_view_open(struct dialog *d)
 {
-    struct viewport *prev = lcd_set_viewport(NULL);
-    lcd_update();
-    lcd_set_viewport(prev);
-}
+    if (d->fb && (d->fb_w <= 0 || d->fb_h <= 0 || d->fb->stride != d->fb_w ||
+                  d->fb_w * d->fb_h != PANEL_PIXELS || !d->present))
+        return NULL;
+    int handle = core_alloc_free_space(sizeof(struct dialog_view) + 2 * FRAMEBUFFER_SIZE);
+    if (handle <= 0)
+        return NULL;
 
-static void dialog_release_transition(bool restore)
-{
-    struct dialog_motion *m = motion_owner;
-    if (!m || m->thread != thread_self())
-        return;
-    if (m->native)
-    {
-        dialog_native_detach(m->native);
-        m->native = NULL;
-    }
-    if (restore)
-    {
-        fb_data *base = core_get_data_pinned(m->handle);
-        memcpy(lcd_framebuffer_default.fb_ptr, base, FRAMEBUFFER_SIZE);
-        core_put_data_pinned(base);
-    }
-    motion_owner = NULL;
-    m->handle = core_free(m->handle);
-    if (restore && lcd_active())
-        dialog_restore_display();
-}
-
-void dialog_interrupt_transition(void)
-{
-    dialog_release_transition(true);
-}
-
-bool dialog_prepare_usb(void)
-{
-    bool nested = motion_owner && motion_owner->thread == thread_self() &&
-                  motion_owner->native;
-    dialog_release_transition(!nested);
-    return nested;
-}
-
-static void dialog_begin_transition(struct dialog_motion *m, const struct dialog *d,
-                                     bool native)
-{
-    if ((!native && (d->slide == DIALOG_SLIDE_NONE || !global_settings.animations)) ||
-        !d->cb->measure ||
-        d->fb || motion_owner || !lcd_active())
-        return;
-
-    ui_scene_interrupt();
-    if (lcd_updates_held())
-        return;
-
-    int surfaces = native && d->slide == DIALOG_SLIDE_EVENT ? 3 : 2;
-    m->handle = core_alloc_free_space(surfaces * FRAMEBUFFER_SIZE);
-    if (m->handle <= 0)
-        return;
-
-    fb_data *base = core_get_data_pinned(m->handle);
-    memcpy(base, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
-    core_put_data_pinned(base);
-    m->thread = thread_self();
-    m->shown = LCD_HEIGHT;
-    m->entering = !native;
-    motion_owner = m;
-}
-
-/* Copy a clipped box as it moves down, leaving the page outside it intact.
- * At rest, include the original theme's shadow, if any. */
-static void dialog_blit_rect(fb_data *out, const fb_data *layer,
-                             int x, int y, int w, int h, int offset)
-{
-    int x1 = MAX(0, x);
-    int x2 = MIN(LCD_WIDTH, x + w);
-    int y1 = MAX(0, y);
-    int y2 = MIN(LCD_HEIGHT - offset, y + h);
-    if (x1 >= x2)
-        return;
-    for (int row = y1; row < y2; ++row)
-        memcpy(out + (row + offset) * LCD_WIDTH + x1, layer + row * LCD_WIDTH + x1,
-               (x2 - x1) * sizeof(*out));
-}
-
-static void dialog_paint_layer(struct dialog_motion *m, struct dialog *d)
-{
-    /* The normal painter resolves all text, theme colours and geometry. */
-    if (m->entering)
-        lcd_hold_updates(true);
-    dialog_draw_one(d, &screens[SCREEN_MAIN], SCREEN_MAIN, &m->box);
-    if (m->entering)
-        lcd_hold_updates(false);
-
-    fb_data *surfaces = core_get_data_pinned(m->handle);
-    const struct viewport *box = &m->box;
-    int shadow = MAX(0, d->style.box_shadow_offset);
-    dialog_blit_rect(surfaces + DIALOG_PIXELS, lcd_framebuffer_default.fb_ptr,
-                     box->x, box->y, box->width + shadow, box->height + shadow, 0);
-    core_put_data_pinned(surfaces);
-}
-
-static bool dialog_show_transition(struct dialog_motion *m, int y, bool final)
-{
-    fb_data *out = lcd_framebuffer_default.fb_ptr;
-    fb_data *surfaces = core_get_data_pinned(m->handle);
-    const fb_data *layer = surfaces + DIALOG_PIXELS;
-    const struct viewport *box = &m->box;
-    if (final)
-        memcpy(out, layer, FRAMEBUFFER_SIZE);
-    else
-    {
-        memcpy(out, surfaces, FRAMEBUFFER_SIZE);
-        dialog_blit_rect(out, layer, box->x, box->y, box->width, box->height,
-                         MAX(0, y - box->y));
-    }
-    bool presented = lcd_present_scene(out);
-    if (presented)
-        m->shown = y;
-    core_put_data_pinned(surfaces);
-    return presented;
-}
-
-static void dialog_close_transition(struct dialog_motion *m)
-{
-    /* If accepted during entry, continue from the position on screen. */
-    m->tween = (struct ui_tween){
-        .start_clock = USEC_TIMER, .from = m->shown, .to = LCD_HEIGHT,
-        .frames = DIALOG_CLOSE_FRAMES, .ease_in = true,
+    struct dialog_view *view = core_get_data_pinned(handle);
+    *view = (struct dialog_view){
+        .handle = handle,
+        .dialog = d,
+        .parent = active_dialog,
+        .thread = thread_self(),
     };
-    while (lcd_active() && m->shown < LCD_HEIGHT)
-    {
-        unsigned elapsed = (uint32_t)USEC_TIMER - m->tween.start_clock;
-        int ticks = ui_clock_timeout(elapsed, m->tween.frames, HZ);
-        if (!ticks || button_queue_wait_pending(ticks))
-            break;
-        elapsed = (uint32_t)USEC_TIMER - m->tween.start_clock;
-        unsigned frame = ui_clock_frame(elapsed);
-        int y = ui_tween_sample(&m->tween, frame);
-        if (y == LCD_HEIGHT)
-            break;
-        if (y != m->shown)
-            dialog_show_transition(m, y, false);
-    }
-    dialog_interrupt_transition();
+    dialog_capture(view);
+    active_dialog = view;
+    return view;
 }
-#else
+
+static void dialog_view_restore(struct dialog_view *view)
+{
+    ui_sheet_cancel(&view->sheet);
+    if (!view->interrupted)
+    {
+        struct dialog *d = view->dialog;
+        memcpy(dialog_output(d), view->pixels, FRAMEBUFFER_SIZE);
+        if (d->fb)
+            d->present();
+        else
+        {
+            ui_mark_dirty(SCREEN_MAIN);
+            ui_flush_dirty();
+        }
+    }
+}
+
 void dialog_interrupt_transition(void)
 {
-}
-bool dialog_prepare_usb(void)
-{
-    return false;
-}
-#endif
-
-/* The legacy path does not reserve a retained tree on its stack. */
-struct dialog_native_ui;
-static int dialog_run_loop(struct dialog *d, int poll_ticks,
-                            struct dialog_native_ui *native)
-{
-    int disp = DIALOG_CONTINUE;
-
-#ifdef DIALOG_SLIDES
-    struct dialog_motion motion = {0};
-    dialog_begin_transition(&motion, d, native != NULL);
-    bool repaint = true;
-    bool animate_close = false;
-#else
-    (void)native;
-#endif
-    d->poll_ticks = poll_ticks;
-
-    skin_hold_scrolling(true);
-    FOR_NB_SCREENS(i)
+    if (active_dialog && active_dialog->thread == thread_self())
     {
-        screens[i].scroll_stop();
-        sb_set_persistent_title(d->title, Icon_NOICON, i);
-        viewportmanager_theme_enable(i, true, &d->parent[i]);
+        dialog_view_restore(active_dialog);
+        active_dialog->interrupted = true;
     }
+}
 
-#ifdef DIALOG_SLIDES
-    if (motion.handle > 0)
-    {
-        fb_data *surfaces = core_get_data_pinned(motion.handle);
-        /* The action dispatcher shows the consent's chrome. A direct
-         * confirmation presents only its box over the invoking page. */
-        const fb_data *settled = d->slide == DIALOG_SLIDE_EVENT ?
-            lcd_framebuffer_default.fb_ptr : surfaces;
-        memcpy(surfaces + DIALOG_PIXELS, settled, FRAMEBUFFER_SIZE);
-        /* Enabling the old theme for consent can clear the retained menu
-         * body. Keep its live rows beneath the event's temporary header. */
-        int status_height = d->slide == DIALOG_SLIDE_EVENT ?
-                            native_menu_status_height() : 0;
-        if (status_height > 0)
-        {
-            size_t header_pixels = status_height * LCD_WIDTH;
-            memcpy(surfaces + DIALOG_PIXELS + header_pixels,
-                   surfaces + header_pixels,
-                   FRAMEBUFFER_SIZE - header_pixels * sizeof(fb_data));
-        }
-        core_put_data_pinned(surfaces);
-        if (native)
-        {
-            dialog_native_init(native, d, motion.handle);
-            motion.native = native;
-        }
-    }
-#endif
-
-    /* eat any stray keypresses from before the dialog opened */
-#ifdef DIALOG_SLIDES
-    if (motion.handle > 0)
-        action_wait_for_release_preserve_queue();
+static void dialog_submit_direct(struct dialog *d, struct viewport *box)
+{
+    dialog_draw_content(d, &screens[SCREEN_MAIN], box);
+    if (d->fb)
+        d->present();
     else
-#endif
-        action_wait_for_release();
-
-    while (disp == DIALOG_CONTINUE)
     {
-        /* Repaint every pass. The status-bar skin renders into the framebuffer
-         * on GUI_EVENT_ACTIONUPDATE (fired inside get_action) and dirties the
-         * box region -- its flush is inhibited, but we still have to repaint
-         * over it, the same way the list and album-covers screens do. */
-        FOR_NB_SCREENS(i)
-        {
-#ifdef DIALOG_SLIDES
-            if (i == SCREEN_MAIN && native && native->attached)
-            {
-                if (motion.handle > 0 && dialog_native_paint(native))
-                    continue;
-                /* Unsupported geometry or a higher-priority screen may end
-                 * the retained overlay while the confirmation stays open. */
-                dialog_interrupt_transition();
-            }
-            if (i == SCREEN_MAIN && motion.handle > 0)
-            {
-                bool first = motion.tween.frames == 0;
-                if (first || repaint || !motion.entering)
-                    dialog_paint_layer(&motion, d);
-                if (first)
-                    motion.tween = (struct ui_tween){
-                        .start_clock = USEC_TIMER, .from = LCD_HEIGHT,
-                        .to = motion.box.y, .frames = DIALOG_OPEN_FRAMES,
-                    };
-                if (motion.entering)
-                {
-                    unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER -
-                                                    motion.tween.start_clock);
-                    int y = ui_tween_sample(&motion.tween, frame);
-                    bool final = frame >= motion.tween.frames;
-                    if (y != motion.shown || repaint || final)
-                    {
-                        bool sent = dialog_show_transition(&motion, y, final);
-                        if (final && sent)
-                            motion.entering = false;
-                    }
-                }
-                else
-                    motion.shown = motion.box.y;
-                continue;
-            }
-#endif
-            dialog_draw_one(d, &screens[i], i, NULL);
-        }
-
-        /* sampled before get_action so a callback can ignore the keypress
-         * that merely woke the screen (matches the old yes/no behaviour) */
-        d->backlight_on = is_backlight_on(false);
-
-        /* A dialog left open across a track change would otherwise hold the
-         * previous album's colours: the loop only comes round on input, and a
-         * caller waiting on TIMEOUT_BLOCK never does. Poll for as long as the
-         * palette is asking to be repainted, then go back to whatever the
-         * caller asked for. */
-        int ticks = d->poll_ticks;
-        if (dynamic_colors_needs_repaint()
-            && (ticks == TIMEOUT_BLOCK || ticks > HZ / 10))
-            ticks = HZ / 10;
-#ifdef DIALOG_SLIDES
-        if (motion.handle > 0 && motion.entering)
-        {
-            int wait = ui_clock_timeout((uint32_t)USEC_TIMER - motion.tween.start_clock,
-                                        motion.tween.frames, HZ);
-            if (!wait)
-                wait = 1; /* if DMA was busy, retry the settled frame */
-            if (ticks == TIMEOUT_BLOCK || ticks > wait)
-                ticks = wait;
-        }
-#endif
-
-        skin_inhibit_flush(true);
-        int action = d->keymap ? get_custom_action(CONTEXT_PLUGIN, ticks,
-                                                   d->keymap)
-                               : get_action(d->context, ticks);
-        skin_inhibit_flush(false);
-
-#ifdef HAVE_WHEEL_WPS_CHORD
-        /* Editors use KBD_ABORT for local focus changes and confirmations.
-         * A pending WPS jump leaves the dialog through its cancel cleanup. */
-        if (d->context == CONTEXT_KEYBOARD && agents_nav_pending() == AGENTS_NAV_WPS)
-            disp = DIALOG_CANCEL;
-        else
-#endif
-        {
-#ifdef DIALOG_SLIDES
-            if (native && native->attached && motion.handle > 0 &&
-                ui_nav_dispatch(&native->nav, action))
-                disp = native->disposition;
-            else
-#endif
-                disp = d->cb->on_action(d, action, d->data);
-        }
-#ifdef DIALOG_SLIDES
-        repaint = action != ACTION_NONE || dynamic_colors_needs_repaint();
-        animate_close = disp != DIALOG_ABORT && action != ACTION_NONE;
-#endif
+        ui_mark_dirty_rect(SCREEN_MAIN, box->x, box->y, box->width, box->height);
+        ui_flush_dirty();
     }
-
-#ifdef DIALOG_SLIDES
-    if (native && native->attached)
-        dialog_interrupt_transition();
-    if (motion.handle > 0)
-    {
-        if (animate_close)
-            dialog_close_transition(&motion);
-        else
-            dialog_interrupt_transition();
-    }
-#endif
-
-    if (d->cb->on_close)
-        d->cb->on_close(d, d->data);
-
-    FOR_NB_SCREENS(i)
-    {
-        screens[i].scroll_stop_viewport(&d->parent[i]);
-        sb_set_persistent_title(d->title, Icon_NOICON, i);
-        viewportmanager_theme_undo(i, false);
-    }
-
-    /* A held line was drawn static and only redraws when its text changes,
-     * so ask for every line again to hand them back to the scroller -- once
-     * no dialog this one sat on is still holding them. */
-    if (skin_hold_scrolling(false))
-    {
-        skin_request_full_update(CUSTOM_STATUSBAR);
-        sb_skin_force_next_update();
-    }
-
-    return disp;
 }
 
-#ifdef DIALOG_SLIDES
-static int __attribute__((noinline)) dialog_run_retained(struct dialog *d,
-                                                         int poll_ticks)
+static void dialog_view_draw(struct dialog_view *view, struct dialog *d, bool redraw)
 {
-    struct dialog_native_ui native = {0};
-    return dialog_run_loop(d, poll_ticks, &native);
+    if (view->interrupted)
+    {
+        dialog_capture(view);
+        redraw = true;
+    }
+    if (redraw)
+    {
+        uint32_t start = USEC_TIMER;
+        struct viewport box = dialog_measure(d);
+        if (box.width <= 0 || box.height <= 0 ||
+            box.width > (d->fb ? d->fb_w : LCD_WIDTH) ||
+            box.height > (d->fb ? d->fb_h : LCD_HEIGHT))
+        {
+            if (view->bounds.width > 0)
+                dialog_view_restore(view);
+            ui_sheet_cancel(&view->sheet);
+            view->bounds = (struct ui_rect){0};
+            return;
+        }
+
+        struct frame_buffer_t buffer = {
+            .fb_ptr = view->pixels + PANEL_PIXELS,
+            .stride = box.width,
+            .elems = (size_t)box.width * box.height,
+        };
+        view->bounds = (struct ui_rect){box.x, box.y, box.width, box.height};
+        box.x = box.y = 0;
+        box.buffer = &buffer;
+        dialog_draw_content(d, &screens[SCREEN_MAIN], &box);
+        ui_note_render((uint32_t)USEC_TIMER - start);
+    }
+    if (d->fb)
+        ui_sheet_paint_in(&view->sheet, view->pixels, view->pixels + PANEL_PIXELS,
+                          view->bounds, redraw, dialog_output(d), d->fb_w, d->fb_h, d->present);
+    else
+        ui_sheet_paint(&view->sheet, view->pixels, view->pixels + PANEL_PIXELS,
+                   view->bounds, redraw);
 }
-#endif
+
+static void dialog_view_dismiss(struct dialog_view *view, struct dialog *d)
+{
+    if (view->interrupted || view->bounds.width <= 0)
+        return;
+    ui_sheet_begin(&view->sheet, false, d->motion_route);
+    do {
+        dialog_view_draw(view, d, false);
+    } while (ui_sheet_wait(&view->sheet));
+    if (view->sheet.active)
+        dialog_view_restore(view);
+}
 
 int dialog_run(struct dialog *d, int poll_ticks)
 {
-#ifdef DIALOG_SLIDES
-    if (dialog_native_supported(d))
-        return dialog_run_retained(d, poll_ticks);
+    int disp = DIALOG_CONTINUE;
+    int font = -1;
+    bool outer_inhibit = ui_flush_inhibited();
+
+    ui_inhibit_flush(false);
+    ui_scene_interrupt();
+    ui_hold_scrolling(true);
+    screens[SCREEN_MAIN].scroll_stop();
+    viewport_set_defaults(&d->parent[SCREEN_MAIN], SCREEN_MAIN);
+    if (d->style.box_font == DIALOG_FONT_INHERIT)
+    {
+        struct ui_theme theme;
+        ui_theme_snapshot(&theme);
+        font = ui_theme_font_load(&theme, UI_FONT_BODY, 64);
+        if (font >= 0)
+            d->parent[SCREEN_MAIN].font = font;
+    }
+
+    char title[MAX_PATH];
+    enum themable_icons icon = Icon_NOICON;
+    bool has_title = sb_get_persistent_title(SCREEN_MAIN, title, sizeof(title), &icon);
+    if (d->title && !d->fb)
+    {
+        sb_set_persistent_title(d->title, Icon_NOICON, SCREEN_MAIN);
+        sb_settle(SCREEN_MAIN);
+    }
+    struct dialog_view *view = dialog_view_open(d);
+    d->poll_ticks = poll_ticks;
+    /* Wheel events have no release. A USB popup opened after turning the
+     * wheel must accept the next key instead of waiting for one. */
+    if (button_status() & ~(BUTTON_SCROLL_BACK | BUTTON_SCROLL_FWD))
+        action_wait_for_release_preserve_queue();
+
+    if (!d->motion_route)
+        d->motion_route = d->context == CONTEXT_KEYBOARD ? "keyboard" : "dialog";
+    if (view)
+        ui_sheet_begin(&view->sheet, true, d->motion_route);
+
+    bool redraw = true;
+    int ticks = d->poll_ticks;
+    while (disp == DIALOG_CONTINUE)
+    {
+        unsigned palette_before = album_palette_generation();
+        album_palette_refresh();
+        redraw |= palette_before != album_palette_generation();
+        if (redraw && d->default_style)
+            dialog_style_default(&d->style);
+        if (view)
+            dialog_view_draw(view, d, redraw);
+        else
+        {
+            struct viewport box = dialog_measure(d);
+            if (box.width > 0 && box.height > 0)
+                dialog_submit_direct(d, &box);
+        }
+
+        d->backlight_on = is_backlight_on(false);
+        if (album_palette_needs_repaint() && (ticks == TIMEOUT_BLOCK || ticks > HZ / 10))
+            ticks = HZ / 10;
+        int wake = view ? ui_sheet_timeout(&view->sheet, ticks) : ticks;
+        long before = current_tick;
+        bool was_inhibited = ui_flush_inhibited();
+        ui_inhibit_flush(true);
+        int action = d->keymap ? get_custom_action(CONTEXT_PLUGIN, wake, d->keymap)
+                               : get_action(d->context, wake);
+        ui_inhibit_flush(was_inhibited);
+
+        if (view && ui_take_dirty(SCREEN_MAIN))
+            view->sheet.light = 0;
+        /* The animation wakes just the compositor. Preserve the dialog's
+         * own poll frequency for timeouts, speech, and text scrolling. */
+        long elapsed = current_tick - before;
+        if (view && wake != ticks && action == ACTION_NONE && (ticks < 0 || elapsed < ticks))
+        {
+            if (ticks > 0)
+                ticks -= elapsed;
+            redraw = false;
+            continue;
+        }
+        redraw = true;
+
+#ifdef HAVE_WHEEL_WPS_CHORD
+        if (d->context == CONTEXT_KEYBOARD && agents_nav_pending() == AGENTS_NAV_WPS)
+        {
+            dialog_interrupt_transition();
+            disp = DIALOG_CANCEL;
+        }
+        else
 #endif
-    return dialog_run_loop(d, poll_ticks, NULL);
+            disp = d->cb->on_action(d, action, d->data);
+        ticks = d->poll_ticks;
+    }
+
+    if (view)
+    {
+        if (disp != DIALOG_ABORT)
+            dialog_view_dismiss(view, d);
+        else
+            dialog_view_restore(view);
+        ui_sheet_cancel(&view->sheet);
+        active_dialog = view->parent;
+        int handle = view->handle;
+        core_put_data_pinned(view);
+        core_free(handle);
+    }
+    if (d->title && !d->fb)
+    {
+        sb_set_persistent_title(has_title ? title : NULL, icon, SCREEN_MAIN);
+        if (disp != DIALOG_ABORT)
+        {
+            sb_settle(SCREEN_MAIN);
+            ui_flush_dirty();
+        }
+    }
+    if (d->cb->on_close)
+        d->cb->on_close(d, d->data);
+    font_unload(font);
+    if (ui_hold_scrolling(false))
+        sb_invalidate();
+    ui_inhibit_flush(outer_inhibit);
+    return disp;
 }

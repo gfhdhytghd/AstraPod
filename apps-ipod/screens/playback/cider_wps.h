@@ -9,6 +9,7 @@ struct mp3entry;
 struct wps_state;
 #define CIDER_ART_HANDLE 0x7ffffffe
 #ifdef HAVE_USB_PODLINK
+void cider_wps_alloc(void);
 void cider_wps_update(struct wps_state *state);
 void cider_wps_enter(void);
 bool cider_wps_action(int action);
@@ -24,6 +25,7 @@ bool cider_wps_show_art(void);
 #else
 static inline bool cider_wps_poll(void) { return true; }
 static inline uint32_t cider_wps_clock(long *sample) { *sample = 0; return 0; }
+static inline void cider_wps_alloc(void) {}
 #include "audio/playback.h"
 #include "audio/buffering.h"
 static inline void cider_wps_enter(void) {}

@@ -22,6 +22,7 @@
 #include "kernel.h"
 #include "button.h"
 #include "button_chord.h"
+#include <limits.h>
 #ifdef HAVE_SDL
 #include "SDL.h"
 #if SDL_MAJOR_VERSION > 1
@@ -185,8 +186,39 @@ bool button_queue_full(void)
 #if (defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))) && !defined(BOOTLOADER)
 bool button_queue_wait_pending(int ticks)
 {
-    queue_wait_w_tmo(&button_queue, NULL, ticks);
-    return !queue_empty(&button_queue);
+    const bool forever = ticks == TIMEOUT_BLOCK;
+    long deadline = current_tick + MAX(ticks, 0);
+    do {
+#ifdef HAVE_EXTENDED_MESSAGING_AND_NAME
+        /* A release from the gesture which closed the sheet still belongs
+         * to the action engine. Leave it queued, but look past it for a
+         * new key or a system takeover. The button masks are ordered. */
+        static const long actions[][2] = {
+            {LONG_MIN, -1},
+            {BUTTON_NONE + 1, BUTTON_REL - 1},
+            {BUTTON_REPEAT, BUTTON_REPEAT | (BUTTON_REL - 1)},
+            {BUTTON_TOUCHSCREEN, BUTTON_TOUCHSCREEN | (BUTTON_REL - 1)},
+            {BUTTON_TOUCHSCREEN | BUTTON_REPEAT,
+             BUTTON_TOUCHSCREEN | BUTTON_REPEAT | (BUTTON_REL - 1)},
+            {BUTTON_MULTIMEDIA, BUTTON_REDRAW - 1},
+        };
+        if (queue_peek_ex(&button_queue, NULL, ARRAYLEN(actions) - 1, actions))
+            return true;
+        queue_remove_from_head(&button_queue, BUTTON_NONE);
+        queue_remove_from_head(&button_queue, BUTTON_REDRAW);
+        if (ticks == TIMEOUT_NOBLOCK)
+            return false;
+        if (!queue_empty(&button_queue))
+            sleep(1); /* Queue waits wake immediately while a release is pending. */
+        else
+            queue_wait_w_tmo(&button_queue, NULL, ticks);
+#else
+        queue_wait_w_tmo(&button_queue, NULL, ticks);
+        return !queue_empty(&button_queue);
+#endif
+        if (!forever)
+            ticks = MAX(0, deadline - current_tick);
+    } while (true);
 }
 #endif
 

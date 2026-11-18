@@ -13,7 +13,6 @@
 
 #include <stdbool.h>
 #include "metadata.h"
-#include "skin/skin_engine.h"
 
 /* Where a cover named for its work is kept: "<Artist> - <Album>.jpg", or
  * "<Album>.jpg", the names fuzzy-matched as art_name.h matches them */
@@ -39,8 +38,6 @@ bool art_image_ext(const char *dot);
 /* Whether the image file at path exists and its decoder takes it, by its
  * headers; one that fails further in passes. */
 bool art_file_usable(const char *path);
-
-void get_albumart_size(struct bitmap *bmp);
 
 /* Where a track's cover comes from, by the Album Art setting's rules: the
  * preference (AA_PREFER_*) names the source tried first, and the others

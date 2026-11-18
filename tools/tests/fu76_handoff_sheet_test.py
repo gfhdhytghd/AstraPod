@@ -1,4 +1,4 @@
-"""Render the real sheet and exercise the real dialog and theme stack."""
+"""Render the native handoff sheet and exercise input and framebuffer ownership."""
 from pathlib import Path
 import re
 import subprocess
@@ -37,6 +37,17 @@ draw = (ROOT / 'apps-ipod/screens/playback/handoff_sheet.c').read_text()
 native_entry = 'static void close_native_sheet(' in draw
 retained_entry = 'static void retained_sheet_init(' in draw
 themed_entry = 'void load_native_style(' in draw
+dimmed_entry = 'SHEET_DIM_PERCENT' in draw
+if dimmed_entry:
+    presentation = '    if (p->card)\n        ui_nav_draw(&s->nav);'
+    assert draw.count(presentation) == 1
+    draw = draw.replace(presentation, '''    if (p->card)
+    {
+        frame_offset = offset;
+        frame_brightness = s->below.value[UI_BRIGHTNESS];
+        ui_nav_draw(&s->nav);
+        frame_offset = -1;
+    }''')
 animation = ''
 if native_entry:
     animation = (ROOT / 'apps-ipod/ui/animation.h').read_text()
@@ -63,22 +74,16 @@ static int ui_theme_font_load(const struct ui_theme *theme, enum ui_font_role ro
     snprintf(path, sizeof(path), FONT_DIR "/%s.fnt", theme->font[role]);
     return font_load_ex(path, 0, glyphs);
 }
+static bool album_palette_snapshot(struct ui_album_palette *palette)
+{
+    *palette = (struct ui_album_palette){0};
+    return false;
+}
 '''
 draw = re.sub(r'^#(?:include|if|endif).*$', '', draw, flags=re.M)
-dialog = (ROOT / 'apps-ipod/widgets/dialog.c').read_text()
-theme = (ROOT / 'apps-ipod/draw/viewport.c').read_text()
-types = header('apps-ipod/widgets/dialog.h', 'enum dialog_disposition')
-types = 'enum dialog_disposition' + types
+types = 'enum dialog_disposition' + header('apps-ipod/widgets/dialog.h', 'enum dialog_disposition')
 sheet = 'struct handoff_sheet' + header('apps-ipod/screens/playback/handoff_sheet.h',
                                         'struct handoff_sheet')
-theme_functions = ['viewportmanager_theme_enable', 'viewportmanager_theme_undo',
-                   'viewportmanager_theme_enabled']
-dialog_functions = ['dialog_init', 'dialog_draw_one']
-if 'static int dialog_run_loop(' in dialog:
-    dialog_functions.append('dialog_run_loop')
-dialog_functions.append('dialog_run')
-theme_struct = block(theme, r'^struct viewport_stack_item\s*\{')
-theme_depth = re.search(r'^#define VPSTACK_DEPTH \d+$', theme, re.M).group()
 ports = r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -161,7 +166,23 @@ static struct { bool animations, native_ui; } global_settings;
 static intptr_t queued;
 static bool system_took_over, interrupted;
 static unsigned queue_waits, boost_count;
-static int legacy_allocs, native_allocs, dock_events;
+static unsigned active_trace;
+static unsigned ui_perf_begin(const char *route)
+{
+    assert((!strcmp(route, "handoff-open") || !strcmp(route, "handoff-close")) &&
+           !active_trace);
+    return active_trace = 1;
+}
+static void ui_perf_end(unsigned token)
+{
+    if (token)
+    {
+        assert(token == active_trace);
+        active_trace = 0;
+    }
+}
+static void ui_note_render(uint32_t elapsed) { (void)elapsed; }
+static int native_allocs, dock_events;
 static int progress_updates, pins;
 #define USEC_TIMER ((uint32_t)(current_tick * (ui_frame_clock(UI_ANIM_FPS) / HZ)))
 static struct viewport base = {0, 0, LCD_WIDTH, LCD_HEIGHT, 1, NULL}, *active = &base;
@@ -175,6 +196,9 @@ static struct { bool wait_for_release; int button; } action_last;
 static unsigned char pixels[LCD_HEIGHT][LCD_WIDTH];
 static unsigned char original[LCD_HEIGHT][LCD_WIDTH];
 static unsigned char panel[LCD_HEIGHT][LCD_WIDTH];
+#ifdef DIMMED_SHEET
+static int frame_offset = -1, frame_brightness;
+#endif
 static unsigned char frames[2][LCD_HEIGHT][LCD_WIDTH];
 static struct frame_buffer_t lcd_framebuffer_default = { &pixels[0][0] };
 static fb_data *draw_address(int x, int y)
@@ -266,11 +290,29 @@ static void lcd_update_rect(int x, int y, int w, int h)
     }
     assert(x == 0 && y + h == LCD_HEIGHT && w == LCD_WIDTH);
     int offset = 0;
-    while (offset < LCD_HEIGHT && !memcmp(panel[offset], original[offset], LCD_WIDTH))
-        ++offset;
+#ifdef DIMMED_SHEET
+    if (frame_offset >= 0)
+    {
+        offset = frame_offset;
+        unsigned shade = 256 - (LCD_HEIGHT - offset) * 256 * 35 / (LCD_HEIGHT * 100);
+        assert(frame_brightness == (int)shade);
+        for (int row = 0; row < offset; ++row)
+        {
+            unsigned src = original[row][0];
+            unsigned blue = ((src & 31) * shade) >> 8;
+            unsigned green = (((src >> 5) & 63) * shade) >> 8;
+            assert(panel[row][0] == ((green << 5) | blue));
+        }
+    }
+    else
+#endif
+    {
+        while (offset < LCD_HEIGHT && !memcmp(panel[offset], original[offset], LCD_WIDTH))
+            ++offset;
+    }
     if (offset == LCD_HEIGHT && last_offset == LCD_HEIGHT && !exiting)
         return; /* Initial substrate presentation, before the card is visible. */
-    assert(y == MIN(offset, last_offset));
+    assert(y <= MIN(offset, last_offset));
     if (exiting)
     {
         assert(offset >= last_offset);
@@ -285,12 +327,15 @@ static void lcd_update_rect(int x, int y, int w, int h)
     last_offset = offset;
     ++shown;
 }
-static int skin_lyrics_art(void) {return showing_art ? 7 : -1;}
-static bool skin_handoff_draw_blur(int handle)
+static int album_art_current(void) {return showing_art ? 7 : -1;}
+static bool album_art_render_background(fb_data *pixels, int width, int height,
+                                        int handle, bool blur, unsigned foreground)
 {
+    (void)blur;
+    assert(width == LCD_WIDTH && height == LCD_HEIGHT && foreground == LCD_WHITE);
     ++draws;
     if (handle < 0) return false;
-    memset(FBADDR(0,0), 100, sizeof pixels);
+    memset(pixels, 100, width * height);
     return true;
 }
 static bool wps_art_pin(int handle, bool pin) { (void)pin; return handle == 7; }
@@ -339,18 +384,43 @@ static void default_event_handler(int action)
         ++dock_events;
     }
 }
-static bool skin_flush_inhibited(void) { return inhibited; }
-static void skin_inhibit_flush(bool state) { inhibited = state; }
-static bool skin_hold_scrolling(bool state) { hold += state ? 1 : -1; return !hold; }
-static void skin_request_full_update(int type) { (void)type; }
-static void sb_skin_force_next_update(void) {}
+static bool ui_flush_inhibited(void) { return inhibited; }
+static void ui_inhibit_flush(bool state) { inhibited = state; }
+static bool ui_hold_scrolling(bool state) { hold += state ? 1 : -1; return !hold; }
+static void sb_invalidate(void) {}
+static unsigned viewport_depth;
+static bool viewport_visible[2];
+static void viewportmanager_theme_enable(int screen, bool enabled, struct viewport *viewport)
+{
+    assert(!screen && viewport_depth < 2 && !viewport);
+    viewport_visible[viewport_depth++] = enabled;
+}
+static void viewportmanager_theme_undo(int screen, bool redraw)
+{
+    (void)redraw;
+    assert(!screen && viewport_depth);
+    viewport_depth--;
+}
+static int dirty_rect[4];
+static void ui_mark_dirty_rect(int screen, int x, int y, int w, int h)
+{
+    assert(!screen);
+    dirty_rect[0] = x; dirty_rect[1] = y; dirty_rect[2] = w; dirty_rect[3] = h;
+}
+static void ui_flush_dirty(void)
+{
+    if (inhibited || !dirty_rect[2])
+        return;
+    lcd_update_rect(dirty_rect[0], dirty_rect[1], dirty_rect[2], dirty_rect[3]);
+    dirty_rect[2] = 0;
+}
+static void lcd_update(void) { lcd_update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT); }
 static void button_clear_pressed(void) {}
 void action_wait_for_release(void);
 static size_t core_allocatable(void) { return fail_alloc ? 0 : sizeof frames; }
-static int core_alloc(size_t n) { assert(n == sizeof frames); ++legacy_allocs; return 1; }
 static int core_alloc_free_space(size_t n)
 {
-    assert(n == sizeof frames);
+    assert(n == sizeof frames || n == FRAMEBUFFER_SIZE);
     ++native_allocs;
     return fail_alloc ? -1 : 1;
 }
@@ -442,7 +512,8 @@ static bool queue_empty(const struct event_queue *queue)
 
 static int get_action(int context, int ticks)
 {
-    assert(context == CONTEXT_STD && ticks > 0 && inhibited && hold == 1);
+    assert(context == CONTEXT_STD && ticks > 0 && !inhibited && hold == 1);
+    assert(viewport_depth == 2 && !viewport_visible[1]);
     current_tick += ticks;
     raw_button=0;
     ++reads;
@@ -569,54 +640,12 @@ int main(int argc, char **argv)
         return 0;
     }
     viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
-    for (int i = 0; i < 58; ++i)
-    {
-        struct handoff_sheet view = { .title = "Synthetic music", .target = "Rufin" };
-        /* The first new key has no relation to the dock event on the owner. */
-        scenario = i == 0 ? 5 : i < 50 ? 0 : i - 49;
-        if (i >= 54) scenario = i + 2 - 50;
-        showing_art = (i % 2 == 0);
-        fail_alloc = scenario == 8;
-        if (scenario == 3) view.reason = LANG_HANDOFF_NOT_FOUND;
-        if (scenario == 4) view.preparing = true;
-        action_last.button = 0;
-        action_index = phase_changes = shown = reads = early_input = 0;
-        in_frames = out_frames = draws = closes = 0;
-        last_offset = LCD_HEIGHT;
-        exiting = false;
-        inhibited = (i % 2 == 0);
-        memset(original, 23, sizeof original);
-        memset(original[0], 77, LCD_WIDTH);
-        memcpy(pixels, original, sizeof pixels);
-        memcpy(panel, original, sizeof panel);
-        animation_start = current_tick;
-        int result = handoff_sheet_run(&view, advance_test);
-        if (scenario == 5) assert(result == DIALOG_ACCEPT && early_input == 1);
-        assert(result == (scenario == 3 || scenario == 4 ? DIALOG_ABORT :
-                         scenario == 2 || scenario == 5 ? DIALOG_ACCEPT : DIALOG_CANCEL));
-        assert(shown > 0 && phase_changes > 0);
-        assert(active == &base && theme_stack_top[0] == 1 && !hold && inhibited == (i%2==0));
-        assert(!live_fonts);
-#ifdef LIVE_ENTRY
-        if (!fail_alloc)
-        {
-            assert(closes == 1 && !memcmp(panel, original, sizeof panel));
-            assert(last_offset == LCD_HEIGHT && out_frames > 0);
-            assert(current_tick - exit_start == EXIT_TICKS);
-        }
-        if (scenario == 6)
-        {
-            assert(draws == 1 && in_frames >= 6 && out_frames >= 5);
-            assert(exit_start >= animation_start + ENTER_TICKS);
-            printf("Animated LCD updates: enter=%d exit=%d\n", in_frames, out_frames);
-        }
-        if (scenario == 8) assert(!closes);
-#endif
-        if (i >= 56) break;
-    }
 #ifdef NATIVE_SHEET
+#ifdef DIMMED_SHEET
+    assert(OPEN_FRAMES == 16 && CLOSE_FRAMES == 12);
+#endif
     global_settings.animations = true;
-    legacy_allocs = native_allocs = 0;
+    native_allocs = 0;
     for (scenario = 5; scenario <= 13; ++scenario)
     {
         struct handoff_sheet view = { .title = "Synthetic music", .target = "Rufin" };
@@ -664,11 +693,10 @@ int main(int argc, char **argv)
         if (scenario == 13)
             assert(dock_events == 1 && last_answer == DIALOG_CANCEL);
     }
-    assert(legacy_allocs == 0 && native_allocs == 9);
+    assert(native_allocs == 10);
     puts("Native sheet: frame clock, first input, reversal, free-only fallback, USB takeover, and non-consuming close");
 #endif
 #ifdef RETAINED_SHEET
-    global_settings.native_ui = true;
     for (int mode = 0; mode < 2; ++mode)
     {
         global_settings.animations = mode == 0;
@@ -698,6 +726,7 @@ int main(int argc, char **argv)
                            scenario == 9 || scenario == 11 ? DIALOG_ABORT : DIALOG_CANCEL;
             assert(result == expected && shown && phase_changes);
             assert(active == &base && !hold && !boost_count && !live_fonts && !pins);
+            assert(!active_trace);
             assert(closes == !fail_alloc);
             if (scenario == 9 || scenario == 11)
                 assert(system_took_over && panel[0][0] == 45);
@@ -710,19 +739,7 @@ int main(int argc, char **argv)
     puts("Retained handoff: motion, static mode, progress, fallback and USB takeover");
 #endif
     viewportmanager_theme_undo(SCREEN_MAIN, false);
-#ifdef LIVE_ENTRY
-    for (int t = 0; t <= ENTER_TICKS; ++t)
-        assert(slide_offset(t, LCD_HEIGHT, false) >= slide_offset(t + 1, LCD_HEIGHT, false));
-    for (int from = 0; from <= LCD_HEIGHT; ++from)
-    {
-        assert(slide_offset(0, from, true) == from);
-        assert(slide_offset(EXIT_TICKS, from, true) == LCD_HEIGHT);
-        for (int t = 0; t <= EXIT_TICKS; ++t)
-            assert(slide_offset(t, from, true) <= slide_offset(t + 1, from, true));
-    }
-    assert(slide_offset(ENTER_TICKS, LCD_HEIGHT, false) == 0);
-#endif
-    assert(theme_stack_top[0] == 0);
+    assert(viewport_depth == 0);
     assert_accessory_without_delay();
     puts("FU83: first visible SELECT, wheel, MENU, warmup, slide reversal, real background pixels, and no accessory delay");
 }
@@ -734,11 +751,8 @@ if live_entry:
 c.write_text(('#define LIVE_ENTRY\n' if live_entry else '') +
              ('#define NATIVE_SHEET\n' if native_entry else '') +
              ('#define RETAINED_SHEET\n' if retained_entry else '') +
-             ports + animation + types + sheet + theme_depth + '\n' + theme_struct + r''';
-static int theme_stack_top[NB_SCREENS];
-static struct viewport_stack_item theme_stack[NB_SCREENS][VPSTACK_DEPTH];
-''' + '\n'.join(function(theme, name) for name in theme_functions) +
-             '\n'.join(function(dialog, name) for name in dialog_functions) + buttons + adapter +
+             ('#define DIMMED_SHEET\n' if dimmed_entry else '') +
+             ports + animation + types + sheet + '\n' + buttons + adapter +
              theme_tokens + retained + draw + scenario)
 binary = OUT / 'sheet'
 subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-pointer-sign', '-Wno-unused-function', '-Wno-unused-variable',

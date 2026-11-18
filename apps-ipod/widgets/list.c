@@ -7,7 +7,7 @@
  *
  * The scrollable list widget: state, selection, scrolling, voicing, and
  * the standard input loop (list_do_action, simplelist_show_list).
- * Delegates painting to list_render.c or list_skinned.c.
+ * The retained list renderer paints the model's visible rows.
  *
  * The list never holds the items. Callers give it a count and a set of
  * callbacks -- get_name, get_icon, get_color, get_talk -- and it asks for one
@@ -29,6 +29,7 @@
  *   - simplelist_*: the convenience wrapper for a quick list screen
  ****************************************************************************/
 #include <stdarg.h>
+#include <stdio.h>
 #include "config.h"
 #include "lcd.h"
 #include "font.h"
@@ -41,7 +42,7 @@
 #include "input/action.h"
 #include "draw/screen_access.h"
 #include "list.h"
-#include "ui/native_menu.h"
+#include "list_render.h"
 #include "draw/scrollbar.h"
 #include "lang.h"
 #include "sound.h"
@@ -53,56 +54,15 @@
 #include "speech/speech.h"
 #include "draw/viewport.h"
 #include "system/appevents.h"
-#include "skin/statusbar_skinned.h"
-#include "skin/skin_albumart_color.h"
+#include "ui/frame.h"
+#include "ui/statusbar.h"
+#include "metadata/album_palette.h"
 #include "database/tagcache.h"
 #include "metadata/art_cache.h"
 
-void list_draw(struct screen *display, struct gui_synclist *list);
-
 static long last_dirty_tick;
 static struct viewport parent[NB_SCREENS];
-static struct gui_synclist *current_lists;
-static bool need_full_update = false;
-static unsigned last_generation;   /* the last gui_synclist.generation issued */
-
-bool list_need_full_update(void)
-{
-    bool ret = need_full_update;
-    need_full_update = false;
-    return ret;
-}
-
-void list_flush(struct screen *display, struct viewport *parent)
-{
-    struct skin_dirty_rect dr[SKIN_MAX_DIRTY_RECTS];
-    int nrects = skin_take_dirty_rects(display->screen_type, dr);
-
-    if (list_need_full_update())
-    {
-        display->set_viewport(NULL);
-        display->update();
-        sb_skin_force_next_update();
-    }
-    else
-    {
-        /* Whatever the skin repainted around the list, then the rows.
-         * Several small regions beat one whole screen: the skin usually
-         * owes a clock and a scrollbar, which together are a couple of
-         * thousand pixels against the display's seventy-odd. The viewport
-         * is put back before the rows so this leaves it where the plain
-         * update_viewport() always did. */
-        if (nrects > 0)
-        {
-            display->set_viewport(NULL);
-            for (int r = 0; r < nrects; r++)
-                display->update_rect(dr[r].x, dr[r].y, dr[r].w, dr[r].h);
-            display->set_viewport(parent);
-            sb_skin_force_next_update();
-        }
-        display->update_viewport();
-    }
-}
+static unsigned last_generation;
 
 static bool list_is_dirty(struct gui_synclist *list)
 {
@@ -119,23 +79,11 @@ static void list_force_reinit(unsigned short id, void *param)
 void list_init(void)
 {
     last_dirty_tick = current_tick;
+    list_render_init();
     add_event(GUI_EVENT_THEME_CHANGED, list_force_reinit);
 }
 
-/* Has the .sbs moved the UI viewport out from under us?
- *
- * A skin can switch %VI from inside a conditional, so the themed viewport can
- * change shape while a list is on screen. %VI is SKIN_REFRESH_STATIC and only
- * reaches us through list_init_viewports(), but the row config (%Lb) is
- * DYNAMIC and takes effect immediately -- so the skin can widen its rows while
- * our parent is still narrow. The rows then draw outside the parent, and since
- * skinlist_draw() clears only the parent, whatever lands beyond it is never
- * erased and accumulates as the selection moves.
- *
- * This is checked on the draw path rather than driven by an event, because the
- * event that would announce it (GUI_EVENT_NEED_UI_UPDATE) is only sent on a
- * full statusbar refresh, which does not happen for every skin state change.
- * Only lists on the shared themed parent follow the UI viewport. */
+/* Default lists follow the native status bar and the current theme. */
 static bool list_ui_viewport_moved(struct gui_synclist *list)
 {
     if (*list->parent != &parent[SCREEN_MAIN])
@@ -166,72 +114,14 @@ static void list_init_viewports(struct gui_synclist *list)
     list->dirty_tick = last_dirty_tick;
 }
 
-static int list_nb_lines(struct gui_synclist *list, enum screen_type screen)
-{
-    struct viewport *vp = list->parent[screen];
-    return vp->height / list->line_height[screen];
-}
-
-bool list_display_title(struct gui_synclist *list, enum screen_type screen)
-{
-    /* Deliberately the *uniform* line count: this asks "is the viewport tall
-     * enough to spare a row for a title", which is about text rows, not about
-     * however tall the items happen to be. */
-    return list->title != NULL &&
-        !sb_set_title_text(list->title, list->title_icon, screen) &&
-        list_nb_lines(list, screen) > 2;
-}
-
 int list_item_height(struct gui_synclist *list, enum screen_type screen)
 {
-    /* A height the skin named for art rows wins, then an explicit uniform
-     * override, then the skin's own row height (%Lb) for a skinned list -- NOT
-     * the font height, so an ordinary row keeps the pitch the theme drew its
-     * decoration for -- else the viewport font.
-     *
-     * The skin comes first so that declaring the height is the whole opt-in: a
-     * theme that says nothing goes on taking the override, which the browser
-     * fills from `database art row height`. */
-    int a = skinlist_art_row_height(screen, list);
-    if (a > 0)
-        return a;
-
-    if (list->line_height_override > 0)
-        return list->line_height_override;
-
-    int h = skinlist_row_height(screen, list);
-    if (h < 1)
-        h = list->line_height[screen];
-    return h;
+    return list_render_row_height(list, screen);
 }
 
-/* Pixels the items themselves get: the parent viewport, less the title row when
- * the list draws its own title. A skin-configured list draws items across the
- * whole parent (the SBS owns its title), so nothing is reserved there. */
-static int list_items_avail_height(struct gui_synclist *list,
-                                   enum screen_type screen)
+static int list_get_nb_lines(struct gui_synclist *list, enum screen_type screen)
 {
-    int h = list->parent[screen]->height;
-    if (skinlist_get_line_count(screen, list) < 0 &&
-        list_display_title(list, screen))
-    {
-        h -= list->line_height[screen];
-    }
-    return h;
-}
-
-int list_get_nb_lines(struct gui_synclist *list, enum screen_type screen)
-{
-    int native_lines = screen == SCREEN_MAIN ? native_menu_lines(list) : 0;
-    if (native_lines)
-        return native_lines;
-    int lines = skinlist_get_line_count(screen, list);
-    if (lines >= 0)
-        return lines;
-
-    /* Non-skinned list: uniform rows, so it's just how many fit. */
-    return list_items_avail_height(list, screen) /
-           list_item_height(list, screen);
+    return list_render_visible_rows(list, screen);
 }
 
 void list_init_item_height(struct gui_synclist *list, enum screen_type screen)
@@ -272,12 +162,9 @@ void gui_synclist_init(struct gui_synclist * gui_list,
     )
 {
     gui_list->callback_get_item_icon = NULL;
-    /* Every list starts without art. Left uninitialised this is stack garbage
-     * for the many screens whose synclist is a local, and a skin asking a row
-     * for its art then calls it as a function pointer. */
     gui_list->callback_get_item_albumart = NULL;
     gui_list->callback_get_item_name = callback_get_item_name;
-    gui_list->line_height_override = 0;   /* default skin/font row height */
+    gui_list->line_height_override = 0;
     gui_list->callback_speak_item = NULL;
     gui_list->callback_draw_item = NULL;
     gui_list->nb_items = 0;
@@ -292,17 +179,13 @@ void gui_synclist_init(struct gui_synclist * gui_list,
         else
             gui_list->parent[i] = &parent[i];
     }
+    gui_list->default_viewport = *gui_list->parent == &parent[SCREEN_MAIN];
     list_init_viewports(gui_list);
     FOR_NB_SCREENS(i)
         list_init_item_height(gui_list, i);
     gui_list->data = data;
     gui_list->scroll_all = scroll_all;
     gui_list->selected_size = selected_size;
-    /* the skinned list draws one item per row; a multi-row selection cannot
-     * be rendered from a stale cfg, so drop it */
-    if (selected_size != 1)
-        FOR_NB_SCREENS(i)
-            skinlist_set_cfg(i, NULL);
     gui_list->title = NULL;
     gui_list->title_icon = Icon_NOICON;
 
@@ -319,33 +202,9 @@ void gui_synclist_init(struct gui_synclist * gui_list,
     gui_list->callback_draw_status = NULL;
     gui_list->count_down = false;
     gui_list->unnumbered = false;
+    gui_list->show_notes = false;
+    gui_list->header = NULL;
     gui_list->generation = ++last_generation;
-}
-
-int gui_list_get_item_offset(struct gui_synclist * gui_list,
-                            int item_width,
-                            int text_pos,
-                            struct screen * display,
-                            struct viewport *vp)
-{
-    int item_offset = gui_list->offset_position[display->screen_type];
-
-    if (!global_settings.offset_out_of_view)
-    {
-        int view_width = (vp->width - text_pos);
-        /* if text is smaller than view */
-        if (item_width <= view_width)
-        {
-            item_offset = 0;
-        }
-        /* if text got out of view  */
-        else if (item_offset > item_width - view_width)
-        {
-            item_offset = item_width - view_width;
-        }
-    }
-
-    return item_offset;
 }
 
 /* When set, the list draw renders to the framebuffer but skips the LCD flush.
@@ -361,57 +220,33 @@ bool gui_synclist_flush_inhibited(void)
     return list_flush_inhibited;
 }
 
-/* The opening draw of a list screen, drawn twice.
- *
- * A skinned list's conditionals are shared state: on the first pass they still
- * hold whatever the previous screen left them at -- most visibly %?La, whose
- * album-layout viewports render the top row at the wrong height -- and only a
- * second pass sees what this screen set. Any keypress already produces that
- * second pass, which is why the wrong frame never survives interaction.
- *
- * The first pass is flush-inhibited, so it settles the conditionals without
- * ever reaching the panel. Only the opening draw needs this; redraws inside an
- * event loop already start from a settled state. */
 void gui_synclist_draw_settled(struct gui_synclist *lists)
 {
-    if (native_menu_draw(lists))
-        return;
-    gui_synclist_inhibit_flush(true);
-    gui_synclist_draw(lists);
-    gui_synclist_inhibit_flush(false);
+    list_render_settle(lists);
     gui_synclist_draw(lists);
 }
 
 /*
- * Force a full screen update.
+ * Refresh geometry when native viewport or theme metrics change.
  */
 void gui_synclist_layout(struct gui_synclist *gui_list)
 {
     if (list_is_dirty(gui_list) || list_ui_viewport_moved(gui_list))
     {
-        skinlist_scroll_cancel(gui_list);
+        list_render_forget(gui_list);
         list_init_viewports(gui_list);
         FOR_NB_SCREENS(i)
             list_init_item_height(gui_list, i);
         gui_synclist_select_item(gui_list, gui_list->selected_item);
-        need_full_update = true;
     }
 }
 
 void gui_synclist_draw(struct gui_synclist *gui_list)
 {
-    if (native_menu_draw(gui_list))
-        return;
-    /* Every initialised list has parents; NULL is a list that was never
-     * initialised or no longer exists. Drawing it reads and writes page 0. */
     if (UNLIKELY(!gui_list->parent[SCREEN_MAIN]))
         return;
     gui_synclist_layout(gui_list);
-    FOR_NB_SCREENS(i)
-    {
-        if (!skinlist_draw(&screens[i], gui_list))
-            list_draw(&screens[i], gui_list);
-    }
+    list_render_draw(gui_list);
 }
 
 /* sets up the list so the selection is shown correctly on the screen */
@@ -424,56 +259,6 @@ static void gui_list_put_selection_on_screen(struct gui_synclist * gui_list,
     int difference = gui_list->selected_item - gui_list->start_item[screen];
     const int scroll_limit_up   = (nb_lines < gui_list->selected_size+2 ? 0:1);
     const int scroll_limit_down = (scroll_limit_up+gui_list->selected_size);
-
-    /* A grid scrolls by a row. The arithmetic below counts items, which on a
-     * tiled list moves the top by one tile and shuffles every column sideways;
-     * nothing is mis-drawn, so it reads as the grid being restless rather than
-     * as a fault here. Working in rows and multiplying back keeps start_item a
-     * multiple of the column count by construction, at both ends.
-     *
-     * Deliberately no lookahead. The linear path keeps a row of context below
-     * the selection; with the two visible rows a cover grid actually has, that
-     * would mean the selection could never occupy the bottom row and the grid
-     * would scroll on every step through it. */
-    int cols = skinlist_get_columns(screen, gui_list);
-    if (cols > 1)
-    {
-        const int rows    = MAX(1, nb_lines / cols);
-        const int visible = rows * cols;
-        /* MAX() so an empty list does not lean on truncation toward zero. */
-        const int last    = MAX(1, gui_list->nb_items) - 1;
-        int start = gui_list->start_item[screen];
-        int delta = gui_list->selected_item - start;
-        int offset, full;
-
-        /* Whole rows, and the top row keeps whatever offset into the list it
-         * already had rather than being snapped to a multiple of the columns.
-         * A database level opens scrolled past its special rows; holding the
-         * offset leaves those in a part-row above the grid instead of giving
-         * them two cells of the first screen, and moving down from there
-         * costs nothing. Scrolling up to the very top is the one place the
-         * offset can change, because item 0 has to reach the top row to be
-         * seen at all. */
-        if (delta < 0)
-            start -= ((-delta + cols - 1) / cols) * cols;
-        else if (delta >= visible)
-            start += ((delta - visible) / cols + 1) * cols;
-        if (start < 0)
-            start = 0;
-
-        /* Keep the last screenful full rather than trailing off into empty
-         * rows -- in whole rows from wherever the top row sits, so the last
-         * screen keeps its columns and shows a part-filled final row rather
-         * than repeating tiles to fill itself. */
-        offset = start % cols;
-        full = last >= offset
-             ? offset + MAX(0, (last - offset) / cols + 1 - rows) * cols : 0;
-        if (start > full)
-            start = full;
-
-        gui_list->start_item[screen] = start;
-        return;
-    }
 
     if (gui_list->selected_size >= nb_lines)
     {
@@ -496,6 +281,12 @@ static void gui_list_put_selection_on_screen(struct gui_synclist * gui_list,
     {
         new_start_item = gui_list->selected_item + scroll_limit_down - nb_lines;
     }
+    if (gui_list->scroll_paginated && global_settings.animations &&
+        scroll_limit_up > 0)
+        new_start_item = MIN(MAX(new_start_item,
+                           gui_list->selected_item + scroll_limit_down - nb_lines),
+                           gui_list->selected_item - scroll_limit_up);
+
     if (new_start_item < 0)
         gui_list->start_item[screen] = 0;
     else if (new_start_item > bottom)
@@ -801,6 +592,16 @@ void gui_synclist_set_description_callback(struct gui_synclist * lists,
     lists->callback_get_item_description = callback;
 }
 
+void gui_synclist_set_header(struct gui_synclist *list, const struct list_header *header)
+{
+    list->header = header;
+}
+
+void gui_synclist_set_notes(struct gui_synclist *list, bool show)
+{
+    list->show_notes = show;
+}
+
 void gui_synclist_set_status_callback(struct gui_synclist * lists,
                                       list_draw_status callback)
 {
@@ -821,28 +622,6 @@ void gui_synclist_set_sel_color(struct gui_synclist * lists,
     }
     else
         list_init_viewports(lists);
-}
-
-static void gui_synclist_select_next_page(struct gui_synclist * lists,
-                                          enum screen_type screen,
-                                          bool allow_wrap)
-{
-    int nb_lines = list_get_nb_lines(lists, screen);
-    if (lists->selected_size > 1)
-        nb_lines = MAX(1, nb_lines/lists->selected_size);
-
-    gui_list_select_at_offset(lists, nb_lines, allow_wrap);
-}
-
-static void gui_synclist_select_previous_page(struct gui_synclist * lists,
-                                              enum screen_type screen,
-                                              bool allow_wrap)
-{
-    int nb_lines = list_get_nb_lines(lists, screen);
-    if (lists->selected_size > 1)
-        nb_lines = MAX(1, nb_lines/lists->selected_size);
-
-    gui_list_select_at_offset(lists, -nb_lines, allow_wrap);
 }
 
 /*
@@ -901,77 +680,39 @@ bool gui_synclist_keyclick_callback(int action, void* data)
     return action != ACTION_NONE && !IS_SYSEVENT(action);
 }
 
-/*
- * Magic to make sure the list gets updated correctly if the skin does
- * something naughty like a full screen update when we are in a button
- * loop.
- *
- * The GUI_EVENT_NEED_UI_UPDATE event is registered for in list_do_action_timeout()
- * as a oneshot and current_lists updated. later current_lists is set to NULL
- * in gui_synclist_do_button() effectively disabling the callback.
-*  This is done because if something is using the list UI they *must* be calling those
- * two functions in the correct order or the list wont work.
- */
-
-static void _lists_uiviewport_update_callback(unsigned short id,
-                                              void *data, void *userdata)
+void gui_synclist_forget(struct gui_synclist *list)
 {
-    (void)id;
-    (void)data;
-    (void)userdata;
-
-    if (current_lists)
-    {
-        gui_synclist_draw(current_lists);
-        /* Nothing else will put this on screen. GUI_EVENT_ACTIONUPDATE is sent
-         * from the top of get_action(), so this runs with list_do_action()'s
-         * flush inhibition already set and the thread about to block for input:
-         * viewportmanager_update() returns without flushing, and the next
-         * update is the next get_action(), which inhibits again. Waking from a
-         * dimmed backlight is the case that shows it -- the status bar does a
-         * full refresh, the list repaints correctly into the framebuffer, and
-         * none of it reaches the LCD until a second keypress. */
-        skin_flush_dirty();
-    }
+    list_render_forget(list);
 }
 
-/* A screen that leaves between list_do_action_timeout() and
- * gui_synclist_do_button() must call this before its list goes out of scope:
- * otherwise current_lists outlives it, and the next full status bar refresh
- * draws a dead stack frame (FU53: a NULL parent read in
- * skinlist_get_line_count at boot; FU51 3617 was the same callback). */
-void gui_synclist_forget(struct gui_synclist *lists)
-{
-    skinlist_scroll_cancel(lists);
-    if (current_lists == lists)
-    {
-        current_lists = NULL;
-        remove_event_ex(GUI_EVENT_NEED_UI_UPDATE,
-                        _lists_uiviewport_update_callback, NULL);
-    }
-}
-
-static void list_move(struct gui_synclist *list, int offset, bool wrap)
+static bool list_wheel_event(void)
 {
 #if defined(BUTTON_SCROLL_BACK) && defined(BUTTON_SCROLL_FWD)
-    int start = list->start_item[SCREEN_MAIN];
-    int selected = list->selected_item;
     int button;
     get_action_statuscode(&button);
+    return button & (BUTTON_SCROLL_BACK | BUTTON_SCROLL_FWD);
+#else
+    return false;
 #endif
+}
 
+static void list_move(struct gui_synclist *list, int offset, bool wrap,
+                      bool wheel)
+{
+    gui_synclist_layout(list);
+    int selection = list->selected_item;
+    int top = list->start_item[SCREEN_MAIN];
     gui_list_select_at_offset(list, offset, wrap);
-#if defined(BUTTON_SCROLL_BACK) && defined(BUTTON_SCROLL_FWD)
-    if (button & (BUTTON_SCROLL_BACK | BUTTON_SCROLL_FWD))
-    {
-        bool queued = button_queue_count() > 1;
-        if (skinlist_scroll_retarget(list, start, selected, queued) && queued)
-            return;
-    }
-    else
-#endif
-        skinlist_scroll_cancel(list);
+    list_render_retarget(list, selection, top, offset, wheel);
     gui_synclist_draw(list);
+}
+
+static void list_page(struct gui_synclist *list, int direction)
+{
+    int rows = list_get_nb_lines(list, SCREEN_MAIN);
+    if (list->selected_size > 1)
+        rows = MAX(1, rows / list->selected_size);
+    list_move(list, direction * rows, false, false);
 }
 
 bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
@@ -985,18 +726,8 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
     if (next_item_modifier < 1)
         next_item_modifier = 1;
 
-    /* Disable the skin redraw callback */
-    current_lists = NULL;
-
-    /* repeat actions block list wraparound */
+    /* Repeat actions block list wraparound. */
     bool allow_wrap = lists->wraparound;
-
-    /* Handovers and non-wheel navigation must start from the settled frame. */
-    if (action != ACTION_NONE && action != ACTION_STD_PREV &&
-        action != ACTION_STD_NEXT && action != ACTION_STD_PREVREPEAT &&
-        action != ACTION_STD_NEXTREPEAT && skinlist_scroll_cancel(lists) &&
-        action != ACTION_REDRAW && !IS_SYSEVENT(action))
-        gui_synclist_draw(lists);
 
     switch (action)
     {
@@ -1016,7 +747,7 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
             /*Fallthrough*/
         case ACTION_STD_PREV:
 
-            list_move(lists, -next_item_modifier, allow_wrap);
+            list_move(lists, -next_item_modifier, allow_wrap, list_wheel_event());
             yield();
             *actionptr = ACTION_STD_PREV;
             return true;
@@ -1025,7 +756,7 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
             allow_wrap = false; /* Prevent list wraparound on repeating actions */
             /*Fallthrough*/
         case ACTION_STD_NEXT:
-            list_move(lists, next_item_modifier, allow_wrap);
+            list_move(lists, next_item_modifier, allow_wrap, list_wheel_event());
             yield();
             *actionptr = ACTION_STD_NEXT;
             return true;
@@ -1068,9 +799,7 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
  * and main screen doesn't have the same number of lines */
         case ACTION_LISTTREE_PGUP:
         {
-            int screen = SCREEN_MAIN;
-            gui_synclist_select_previous_page(lists, screen, false);
-            gui_synclist_draw(lists);
+            list_page(lists, -1);
             yield();
             *actionptr = ACTION_STD_NEXT;
         }
@@ -1078,9 +807,7 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
 
         case ACTION_LISTTREE_PGDOWN:
         {
-            int screen = SCREEN_MAIN;
-            gui_synclist_select_next_page(lists, screen, false);
-            gui_synclist_draw(lists);
+            list_page(lists, 1);
             yield();
             *actionptr = ACTION_STD_PREV;
         }
@@ -1090,14 +817,14 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
        && TIME_AFTER(current_tick, lists->scheduled_talk_tick))
         /* scheduled postponed item announcement is due */
         _gui_synclist_speak_item(lists, true);
-    if (action == ACTION_NONE && skinlist_scroll_due(lists))
+    if (action == ACTION_NONE && list_render_motion_due(lists))
     {
         gui_synclist_draw(lists);
         return true;
     }
     {
         static bool was_recolouring = false;
-        bool dc_active = dynamic_colors_needs_repaint() || dynamic_colors_pending();
+        bool dc_active = album_palette_needs_repaint() || album_palette_pending();
         if (dc_active || was_recolouring)
         {
             was_recolouring = dc_active;
@@ -1115,33 +842,18 @@ int list_do_action_timeout(struct gui_synclist *lists, int timeout)
 /* Returns the lowest of timeout or the delay until a postponed
    scheduled announcement is due (if any). */
 {
-    if (dynamic_colors_needs_repaint() || dynamic_colors_pending())
+    if (album_palette_needs_repaint() || album_palette_pending())
     {
         int recolour_timeout = HZ / 20;
-        if (timeout > recolour_timeout)
+        if (timeout > recolour_timeout || timeout == TIMEOUT_BLOCK)
             timeout = recolour_timeout;
     }
-    /* While the themed status bar shows its animated "busy" spinner -- the
-     * database/thumbnail "Building.." indicator (%lb) or the generic "Working.."
-     * one (%lw) -- that animation only advances when the status bar is redrawn.
-     * An idle list would otherwise block on input and freeze it, so mirror the
-     * recolouring case above and cap the wait to the spinner's frame rate for
-     * as long as any such work is busy. */
+    if (sb_show_working() || (global_settings.show_background_tasks
+                            && (tagcache_is_busy() || art_cache_is_busy())))
     {
-        bool ui_busy = sb_show_working();
-        ui_busy = ui_busy || (global_settings.show_background_tasks
-                              && (tagcache_is_busy() || art_cache_is_busy()));
-        if (ui_busy)
-        {
-            int busy_timeout = HZ / 10;
-            if (timeout > busy_timeout || timeout == TIMEOUT_BLOCK)
-                timeout = busy_timeout;
-        }
-    }
-    if (!native_menu_active(lists))
-    {
-        add_event_ex(GUI_EVENT_NEED_UI_UPDATE, true, _lists_uiviewport_update_callback, NULL);
-        current_lists = lists;
+        int busy_timeout = HZ / 10;
+        if (timeout > busy_timeout || timeout == TIMEOUT_BLOCK)
+            timeout = busy_timeout;
     }
     if(lists->scheduled_talk_tick)
     {
@@ -1153,7 +865,7 @@ int list_do_action_timeout(struct gui_synclist *lists, int timeout)
         if(timeout > delay || timeout == TIMEOUT_BLOCK)
             timeout = delay;
     }
-    return skinlist_scroll_timeout(lists, timeout);
+    return list_render_timeout(lists, timeout);
 }
 
 bool list_do_action(int context, int timeout,
@@ -1164,15 +876,15 @@ bool list_do_action(int context, int timeout,
 {
     timeout = list_do_action_timeout(lists, timeout);
     keyclick_set_callback(gui_synclist_keyclick_callback, lists);
-    bool inhibited = skin_flush_inhibited();
-    skin_inhibit_flush(true);
+    bool inhibited = ui_flush_inhibited();
+    ui_inhibit_flush(true);
     *action = get_action(context, timeout);
-    skin_inhibit_flush(inhibited);
+    ui_inhibit_flush(inhibited);
     bool handled = gui_synclist_do_button(lists, action);
     /* ACTION_NONE need not redraw the list. The status bar still rendered
      * during get_action, and its dirty rectangles must reach the LCD. */
     if (!inhibited)
-        skin_flush_dirty();
+        ui_flush_dirty();
     return handled;
 }
 

@@ -80,9 +80,6 @@
 #include "power.h"
 #include "backlight.h"        /* backlight_set_timeout(_plugged) */
 #include "cpu.h"
-#include "skin/skin_engine.h"  /* skin_inhibit_flush */
-#include "skin/skin_albumart_color.h" /* dynamic_colors_resolve */
-#include "skin/statusbar_skinned.h" /* sb_set_persistent_title */
 #include "album_covers.h"
 #include "speech/talk.h"
 #include "carousel.h"     /* the shared engine: carousel_idx, the model */
@@ -93,20 +90,6 @@
 /* The engine's shared constants -- PFreal, the slide cache size and the
  * on-disk cache paths -- come from carousel.h. Only what is specific to the
  * album model is defined here. */
-
-/* Not theme-controlled: layout is fixed/proportional (see init()) and
- * colours come from the theme's normal fg/bg + the dynamic (album-art
- * derived) colour scheme, same as everywhere else -- or, for the background,
- * from Carousel Background's Custom colour, which the album never changes.
- *
- * It cannot be themed further while it draws the way it does. This screen
- * repaints its own pixels every frame, straight to the framebuffer, outside
- * the SBS's render cycle -- so anything routed through the skin engine at
- * runtime fights it: colours arrive inherited from ambient, SBS viewport
- * state is non-deterministic, skin_update()-rendered text races this
- * screen's own lcd_update(), and %Vd()'d content left "shown" by whatever
- * screen preceded this one bleeds through. Themeable layout means giving up
- * the per-frame raw redraw first. */
 
 /* Scratch id3 used to resolve the currently playing/selected track into an
  * album index (id3_get_index()) and to look up album art (retrieve_id3()).
@@ -601,7 +584,7 @@ struct bg_task album_covers_task =
  * not a separate panel -- overlaid near the top or bottom of that area, in
  * pf_fg_color, so the now-playing dynamic colour fade applies here as it does
  * everywhere else. Always center_index: there is no mid-scroll transition to
- * track. The album name uses pf_bold_font, a genuinely separate bold font file
+ * track. The album name uses the carousel’s title font
  * where the theme configured one (global_settings.bold_font_file, settings.h)
  * -- not a double-drawn faux bold, which does not look right. */
 static void draw_album_text(void)
@@ -721,10 +704,7 @@ int carousel_settings_menu(void)
 
     FOR_NB_SCREENS(i)
         viewportmanager_theme_enable(i, true, NULL);
-    /* do_menu() only auto-switches to a menu-styling activity for
-     * ACTIVITY_PLUGIN; the carousel runs as ACTIVITY_ALBUMCOVERS, which the
-     * theme's SBS likewise excludes from menu chrome -- switch it ourselves so
-     * the menu is themed the same as it is from Settings. */
+    /* The settings list observes context-menu input while covers are open. */
     push_current_activity(ACTIVITY_CONTEXTMENU);
     ret = do_menu(&album_covers_menu, &selected, NULL, false);
     pop_current_activity();

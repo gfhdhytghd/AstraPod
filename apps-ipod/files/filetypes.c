@@ -21,6 +21,7 @@
 #include "lang.h"
 #include "kernel.h"
 #include "system/app_util.h"
+#include "system.h"
 #include "draw/color.h"
 #include "system/strutil.h"
 #include "filetypes.h"
@@ -60,7 +61,6 @@ static const struct filetype_inbuilt inbuilt_filetypes[] = {
     { "m3u",  FILE_ATTR_M3U },
     { "m3u8", FILE_ATTR_M3U },
     { "cfg",  FILE_ATTR_CFG },
-    { "wps",  FILE_ATTR_WPS },
     { "log",  FILE_ATTR_LOG   },
     { "lng",  FILE_ATTR_LNG   },
     { "rock", FILE_ATTR_ROCK  },
@@ -69,7 +69,6 @@ static const struct filetype_inbuilt inbuilt_filetypes[] = {
     { "fnt",  FILE_ATTR_FONT  },
     { "kbd",  FILE_ATTR_KBD   },
     { "cue",  FILE_ATTR_CUE   },
-    { "sbs",  FILE_ATTR_SBS   },
 #ifdef BOOTFILE_EXT
     { BOOTFILE_EXT,  FILE_ATTR_MOD },
 #endif
@@ -117,7 +116,6 @@ static const struct fileattr_icon_voice inbuilt_attr_icons_voices[] = {
     { FILE_ATTR_AUDIO, Icon_Audio,     VOICE_EXT_MPA },
     { FILE_ATTR_M3U,   Icon_Playlist,  LANG_PLAYLIST },
     { FILE_ATTR_CFG,   Icon_Config,    VOICE_EXT_CFG },
-    { FILE_ATTR_WPS,   Icon_Wps,       VOICE_EXT_WPS },
     { FILE_ATTR_LNG,   Icon_Language,  LANG_LANGUAGE },
     { FILE_ATTR_ROCK,  Icon_Plugin,    VOICE_EXT_ROCK },
     { FILE_ATTR_LUA,   Icon_Plugin,    VOICE_EXT_ROCK },
@@ -125,7 +123,6 @@ static const struct fileattr_icon_voice inbuilt_attr_icons_voices[] = {
     { FILE_ATTR_FONT,  Icon_Font,      VOICE_EXT_FONT },
     { FILE_ATTR_KBD,   Icon_Keyboard,  VOICE_EXT_KBD },
     { FILE_ATTR_CUE,   Icon_Bookmark,  VOICE_EXT_CUESHEET },
-    { FILE_ATTR_SBS,   Icon_Wps,       VOICE_EXT_SBS },
 #if defined(BOOTFILE_EXT) || defined(BOOTFILE_EXT2)
     { FILE_ATTR_MOD,   Icon_Firmware,  VOICE_EXT_AJZ },
 #endif
@@ -142,7 +139,7 @@ static const struct fileattr_icon_voice inbuilt_attr_icons_voices[] = {
 
 static int filetype_inbuilt_index(int tree_attr)
 {
-    size_t count = ARRAY_SIZE(inbuilt_attr_icons_voices);
+    size_t count = ARRAYLEN(inbuilt_attr_icons_voices);
     /* try to find a inbuilt index for the extension, if known */
     tree_attr &= FILE_ATTR_MASK; /* file type */
 
@@ -182,19 +179,6 @@ struct file_type {
 
 static struct file_type filetypes[MAX_FILETYPES];
 
-static enum themable_icons custom_filetype_icons[MAX_FILETYPES];
-static bool custom_icons_loaded = false;
-
-static int custom_colors[MAX_FILETYPES];
-struct filetype_unknown {
-    enum themable_icons icon;
-    int color;
-};
-static struct filetype_unknown unknown_file = {
-    .icon = Icon_NOICON,
-    .color = -1,
-};
-
 static int filetype_count = 0;
 
 static int find_extension(const char* extension)
@@ -211,109 +195,6 @@ static int find_extension(const char* extension)
     return -1;
 }
 
-/* Colors file format is similar to icons:
- * ext:hex_color
- * load a colors file from a theme with:
- * filetype colours: filename.colours */
-void read_color_theme_file(void) {
-    char buffer[MAX_PATH];
-    int fd;
-    char *ext, *color;
-    int i;
-    for (i = 0; i < MAX_FILETYPES; i++) {
-        custom_colors[i] = -1;
-    }
-    unknown_file.color = -1;
-    if (!global_settings.colors_file[0] || global_settings.colors_file[0] == '-')
-        return;
-
-    fd = open_pathfmt(buffer, sizeof(buffer), O_RDONLY,
-                      THEME_DIR "/%s.colours", global_settings.colors_file);
-    if (fd < 0)
-        return;
-    while (read_line(fd, buffer, MAX_PATH) > 0)
-    {
-        if (!settings_parseline(buffer, &ext, &color))
-            continue;
-        if (!strcasecmp(ext, "folder"))
-        {
-            hex_to_rgb(color, &custom_colors[0]);
-            continue;
-        }
-        if (!strcmp(ext, "???"))
-        {
-            hex_to_rgb(color, &unknown_file.color);
-            continue;
-        }
-        i = find_extension(ext);
-        if (i >= 0)
-            hex_to_rgb(color, &custom_colors[i]);
-    }
-    close(fd);
-}
-
-static int parse_icon(const char *line, enum themable_icons *icon)
-{
-    int num = -1;
-    if (*line == '*')
-    {
-        num = atoi(line+1);
-        *icon = num;
-    }
-    else if (*line == '-')
-    {
-        *icon = Icon_NOICON;
-    }
-    else if (*line >= '0' && *line <= '9')
-    {
-        num = atoi(line);
-        *icon = Icon_Last_Themeable + num;
-    }
-    return num;
-}
-
-void read_viewer_theme_file(void)
-{
-    char buffer[MAX_PATH];
-    int fd;
-    char *ext, *icon;
-    int i;
-    enum themable_icons *icon_dest;
-    global_status.viewer_icon_count = 0;
-    custom_icons_loaded = false;
-    /*custom_filetype_icons[0] = Icon_Folder; filetypes[0] is folder icon.. */
-    for (i=0; i<filetype_count; i++)
-    {
-        custom_filetype_icons[i] = filetypes[i].icon;
-    }
-
-    fd = open_pathfmt(buffer, sizeof(buffer), O_RDONLY,
-                      ICON_DIR "/%s.icons", global_settings.viewers_icon_file);
-    if (fd < 0)
-        return;
-
-    while (read_line(fd, buffer, MAX_PATH) > 0)
-    {
-        if (!settings_parseline(buffer, &ext, &icon))
-            continue;
-        i = find_extension(ext);
-        if (i >= 0)
-            icon_dest = &custom_filetype_icons[i];
-        else if (!strcmp(ext, "???"))
-            icon_dest = &unknown_file.icon;
-        else
-            icon_dest = NULL;
-
-        if (icon_dest)
-        {
-            if (parse_icon(icon, icon_dest) > global_status.viewer_icon_count)
-                global_status.viewer_icon_count++;
-        }
-    }
-    close(fd);
-    custom_icons_loaded = true;
-}
-
 void filetype_init(void)
 {
     /* set the directory item first */
@@ -324,8 +205,6 @@ void filetype_init(void)
     filetype_count = 1;
 
     read_builtin_types_init();
-    read_viewer_theme_file();
-    read_color_theme_file();
 }
 
 static void fill_from_builtin(const char *ext, int tree_attr)
@@ -334,7 +213,7 @@ static void fill_from_builtin(const char *ext, int tree_attr)
         return;
 
     struct file_type *filetype = &filetypes[filetype_count];
-    filetype->icon = unknown_file.icon;
+    filetype->icon = Icon_NOICON;
     filetype->attr   = tree_attr>>8;
     filetype->extension = ext;
 
@@ -349,12 +228,12 @@ static void fill_from_builtin(const char *ext, int tree_attr)
 
 static void read_builtin_types_init(void)
 {
-    for(size_t i = 0; (i < ARRAY_SIZE(inbuilt_audio_filetypes)); i++)
+    for(size_t i = 0; (i < ARRAYLEN(inbuilt_audio_filetypes)); i++)
     {
         fill_from_builtin(inbuilt_audio_filetypes[i], FILE_ATTR_AUDIO);
     }
 
-    for(size_t i = 0; (i < ARRAY_SIZE(inbuilt_filetypes)); i++)
+    for(size_t i = 0; (i < ARRAYLEN(inbuilt_filetypes)); i++)
     {
         fill_from_builtin(inbuilt_filetypes[i].extension,
                           inbuilt_filetypes[i].tree_attr);
@@ -391,23 +270,11 @@ static int find_attr(int attr)
     return -1;
 }
 
-int filetype_get_color(const char * name, int attr)
-{
-    if ((attr & ATTR_DIRECTORY)==ATTR_DIRECTORY)
-        return custom_colors[0];
-    int i = file_find_extension(name);
-    if (i <= 0)
-        return unknown_file.color;
-    return custom_colors[i];
-}
-
 int filetype_get_icon(int attr)
 {
     int index = find_attr(attr);
     if (index < 0)
-        return unknown_file.icon;
-    if (custom_icons_loaded)
-        return custom_filetype_icons[index];
+        return Icon_NOICON;
     return filetypes[index].icon;
 }
 

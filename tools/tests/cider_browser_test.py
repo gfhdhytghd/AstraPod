@@ -10,6 +10,7 @@ pre=r'''
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "screens/playback/cider_library.h"
 #include "screens/playback/cider_model.h"
@@ -31,11 +32,44 @@ enum themable_icons {icon_dummy=1000};
 enum list_row_kind {LIST_ROW_PLAIN,LIST_ROW_TRACK,LIST_ROW_CONTAINER};
 enum agents_nav_screen {AGENTS_NAV_NONE,AGENTS_NAV_TRACKS,AGENTS_NAV_WPS,AGENTS_NAV_AGENTS,AGENTS_NAV_COVERS,AGENTS_NAV_BACK};
 typedef uint16_t fb_data;
-struct dim {int width,height;};struct img_filter{int dummy;};
+struct dim {int width,height;};
 struct bitmap{int width,height,format;unsigned char*data;};
 struct browser_db_header {char name[128],artist[128];int tracks,year;long length_ms;};
-static void browser_set_external_header(const struct browser_db_header*h,const struct bitmap*(*f)(struct dim*)){(void)h;(void)f;}
-struct gui_synclist{int selected,count;};
+struct list_header {
+    const char *title, *subtitle, *detail;
+    const struct bitmap *(*cover)(void *, struct dim *);
+    void *data;
+};
+struct gui_synclist{int selected,count;const struct list_header*header;};
+static void browser_album_details(const struct browser_db_header*h,char*detail,size_t n)
+{snprintf(detail,n,"%d tracks",h->tracks);}
+static void *view_storage;
+static bool view_pinned;
+static int core_alloc_free_space(size_t n)
+{
+    assert(!view_storage);
+    view_storage = calloc(1, n);
+    assert(view_storage);
+    return 1;
+}
+static void *core_get_data_pinned(int h)
+{
+    assert(h == 1 && view_storage && !view_pinned);
+    view_pinned = true;
+    return view_storage;
+}
+static void core_put_data_pinned(void *data)
+{
+    assert(data == view_storage && view_pinned);
+    view_pinned = false;
+}
+static int core_free(int h)
+{
+    assert(h == 1 && view_storage && !view_pinned);
+    free(view_storage);
+    view_storage = NULL;
+    return 0;
+}
 struct search_provider{const char*title;int activity;int(*scan)(const char*,void*);const char*(*row_text)(int,void*);bool(*refresh)(void*);};
 static struct {bool db_albumart;int db_art_row_height;}global_settings={true,46};
 static bool origin_agents,journey,origin_wps,cover_music;
@@ -60,6 +94,11 @@ static void cider_warm_art(const char*const*k,unsigned int n,const char*t){(void
 static bool available=true;static int live,max_live,plays,draws,step,mode;static uint32_t rng;
 static char route[380];
 static const char*str(int n){(void)n;return "Native";}
+static size_t test_strlcpy(char *out, const char *in, size_t n)
+{
+    return snprintf(out, n, "%s", in);
+}
+#define strlcpy test_strlcpy
 static bool cider_connected(void){return available;}
 static bool cider_available(void){return available;}
 static bool menu_back;static bool action_menu_back(void){return menu_back;}
@@ -73,10 +112,9 @@ static int agents_nav_pending(void){return AGENTS_NAV_NONE;}
 static void push_current_activity(int n){(void)n;}
 static void pop_current_activity(void){}
 static int browser_db_root_row_count(void){return 3;}
-static bool browser_db_get_root_row(int n,int*index,const unsigned char**name){static const char*names[]={"Album","Artist","Genre"};*index=n;*name=(const unsigned char*)names[n];return true;}
+static bool browser_db_get_root_row(int n,int*index,const unsigned char**name){static const char*names[]={"Album","Artist","Genre"};*index=n;if(name)*name=(const unsigned char*)names[n];return true;}
 static bool browser_db_root_row_is_hidden(int index){return index==1;}
 static const char*browser_db_root_row_key(int index){static const char*names[]={"Album","Artist","Genre"};return names[index];}
-static void browser_set_showing_art(bool b){(void)b;}
 static void cider_page_open(const char*p){snprintf(route,sizeof route,"%s",p);}
 static int cider_page_total(void){return 3;}
 static bool cider_page_stale(void){return false;}
@@ -98,7 +136,6 @@ static void cider_prefetch_art(const char*k,const char*t){(void)k;(void)t;}
 static bool cider_art_local(const char*k,const char*t){(void)k;(void)t;return false;}
 static bool cider_has_art(const char*k,const char*t){(void)k;(void)t;return false;}
 static void cider_request_xs(const char*const*k,unsigned int n){(void)k;(void)n;}
-static void img_filter_apply(void*p,int w,int h,const void*f){(void)p;(void)w;(void)h;(void)f;}
 static bool cider_play(const char*p){assert(available&&live==1&&strstr(p,"play/"));if(fail_play)return false;plays++;return true;}
 static char last_ctx[400];static int last_idx=-1;static bool cider_play_in(const char*p,const char*c,int i){snprintf(last_ctx,sizeof last_ctx,"%s",c);last_idx=i;return cider_play(p);}
 int cider_covers(void);
@@ -108,14 +145,26 @@ static int dialog_input(char*p,int n){snprintf(p,n,"text");return 0;}
 static void gui_synclist_init(struct gui_synclist*l,const char*(*n)(int,void*,char*,size_t),void*d,bool s,int c,void*v){(void)n;(void)d;(void)s;(void)c;(void)v;memset(l,0,sizeof*l);}
 static void gui_synclist_set_icon_callback(struct gui_synclist*l,enum themable_icons(*f)(int,void*)){(void)l;(void)f;}
 static void gui_synclist_set_row_callbacks(struct gui_synclist*l,enum list_row_kind(*f)(int,void*),void*a,void*b){(void)l;(void)f;(void)a;(void)b;}
-static void gui_synclist_set_albumart_callback(struct gui_synclist*l,const struct bitmap*(*f)(int,void*,struct dim*,const struct img_filter*,uint32_t)){(void)l;(void)f;}
+static void gui_synclist_set_albumart_callback(struct gui_synclist*l,const struct bitmap*(*f)(int,void*,struct dim*)){(void)l;(void)f;}
 static void gui_synclist_set_row_height(struct gui_synclist*l,int h){(void)l;(void)h;}
 static void gui_synclist_set_title(struct gui_synclist*l,const char*t,int i){(void)l;(void)t;(void)i;}
+static void gui_synclist_set_header(struct gui_synclist*l,const struct list_header*h){l->header=h;}
 static void gui_synclist_set_nb_items(struct gui_synclist*l,int n){l->count=n;}
 static void gui_synclist_select_item(struct gui_synclist*l,int i){l->selected=MAX(0,MIN(i,l->count-1));}
 static int gui_synclist_get_sel_pos(struct gui_synclist*l){return l->selected;}
-static void gui_synclist_draw(struct gui_synclist*l){(void)l;draws++;}
+static int header_draws;
+static void gui_synclist_draw(struct gui_synclist*l)
+{
+    draws++;
+    if (l->header)
+    {
+        assert(view_pinned && l->header->cover && l->header->data == view_storage);
+        assert(*l->header->detail);
+        header_draws++;
+    }
+}
 static void gui_synclist_scroll_stop(struct gui_synclist*l){(void)l;}
+static void gui_synclist_forget(struct gui_synclist*l){l->header=NULL;}
 static void list_do_action(int context,int timeout,struct gui_synclist*l,int*a){(void)context;(void)timeout;step++;
 if(mode==4){*a=ACTION_STD_MENU;return;}if(mode==3){*a=step==1?ACTION_STD_OK:ACTION_STD_CANCEL;return;}if(mode==0){*a=ACTION_STD_OK;return;}if(mode==1){*a=ACTION_STD_MENU;return;}
 if(step>128){*a=ACTION_REMOTE_WPS;return;}rng=rng*1664525+1013904223;l->selected=(rng>>16)%MAX(1,l->count);*a=(rng&3)==0?ACTION_STD_CANCEL:(rng&3)==1?ACTION_STD_OK:ACTION_NONE;}
@@ -124,11 +173,12 @@ post=r'''
 int cider_covers(void){if(mode==4)return CIDER_COVERS_REMOTE_RETURN;if(mode==1)return GO_TO_PREVIOUS;assert(live==1);live++;if(live>max_live)max_live=live;struct cider_row r={0};strcpy(r.route,"album/a0");strcpy(r.title,"Album 0");cider_browse_album(&r);live--;return GO_TO_PREVIOUS;}
 static void check_art_pixels(void)
 {
+    struct cider_browser_view view;
     for (int source = 32; source <= 56; source += 24) {
       fixture_art = source;
       for (int dim = 1; dim <= 56; dim++) {
         struct dim request = {dim, 60};
-        const struct bitmap *artwork = bitmap_for("key", &request, NULL);
+        const struct bitmap *artwork = bitmap_for(&view, "key", &request);
         assert(artwork && artwork->width == dim && artwork->height == dim);
         const fb_data *pixels = (const fb_data *)artwork->data;
         for (int y = 0; y < dim; y++)
@@ -141,7 +191,8 @@ static void check_art_pixels(void)
 }
 int main(void){
 check_art_pixels();
-mode=0;depth=0;assert(cider_browse()==GO_TO_WPS&&plays==1&&!live&&depth==0);assert(root_count==6&&remote_homes==1);assert(!strcmp(root_rows[3].route,"root/Album")&&!strcmp(root_rows[4].route,"root/Genre"));
+mode=0;depth=0;assert(cider_browse()==GO_TO_WPS&&plays==1&&!live&&depth==0);assert(root_count==6&&remote_homes==1);
+struct cider_row root_row;assert(get_root_row(3,&root_row)&&!strcmp(root_row.route,"root/Album"));assert(get_root_row(4,&root_row)&&!strcmp(root_row.route,"root/Genre"));
 mode=1;assert(cider_browse()==GO_TO_ROOT&&!live&&depth==0);
 depth=1;strcpy(history[1].route,"random");assert(cider_browse()==GO_TO_WPS&&depth==0&&!live);assert(cider_browse()==GO_TO_ROOT&&!live);
 fail_play=true;depth=1;strcpy(history[1].route,"album/a0");memset(history[1].art,'c',64);history[1].art[64]=0;pins=0;mode=3;step=0;int raced=plays;assert(cider_browse()==GO_TO_ROOT&&plays==raced&&!live);assert(pins>0&&!pinned);fail_play=false;
@@ -152,7 +203,7 @@ mode=1;cider_browse_covers(true);assert(cider_browse()==GO_TO_PREVIOUS&&!cider_b
 mode=4;cider_browse_covers(false);assert(cider_browse()==GO_TO_WPS&&cider_browse_remote_return());
 origin_agents=true;cider_browse_covers(false);assert(cider_browse()==GO_TO_AGENTS&&cider_browse_remote_return());mode=1;cider_browse_covers(false);assert(cider_browse()==GO_TO_AGENTS);origin_agents=false;
 mode=1;step=0;menu_back=true;struct cider_row entry={0};strcpy(entry.route,"album/context");assert(cider_browse_at(&entry)==GO_TO_PREVIOUS&&step==1);menu_back=false;
-assert(max_live==2&&draws>2000);printf("Production Cider native list controller: hidden rows, empty/unavailable, album/track play, 2000 seeded sequences, max instances=%d PASS\n",max_live);}
+assert(max_live==2&&draws>2000&&header_draws>0&&!view_storage);printf("Production Cider native list controller: hidden rows, album summary lifetime, empty/unavailable, album/track play, 2000 seeded sequences, max instances=%d PASS\n",max_live);}
 '''
 model=(R/'apps-ipod/screens/playback/cider_model.c').read_text()
 start=model.index('const char *cider_list_notice(');end=model.index('/* Compare only song routes;',start)

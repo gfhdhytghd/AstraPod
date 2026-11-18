@@ -25,7 +25,6 @@
 #include "widgets/mask_select.h"
 #include "widgets/splash.h"
 #include "draw/viewport.h"
-#include "skin/statusbar.h" /* statusbar_vals enum*/
 #include "rbunicode.h"
 
 static int selectivebacklight_callback(int action,

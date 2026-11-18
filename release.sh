@@ -1,21 +1,6 @@
 #!/bin/sh
-# Build the current commit on the build server and publish it as the rolling
-# `latest` release, plus the Windows simulator as `Simulator`, the extra
-# themes as `Themes`, the voice files as `Voices` and the bootloader installer
-# as `Bootloader`.
-#
-# There are no version tags. Every run replaces all five releases and moves
-# their tags to the commit that was built, so the release page always shows the
-# current build and nothing else.
-#
-# Five releases rather than one page of assets: the firmware zips unpack onto
-# a player, the simulator zips unpack onto a PC, the theme and voice zips are
-# optional extras and the bootloader is installed once from a PC, and a page
-# that offers them all side by side invites unpacking the wrong one.
-#
-# Only `latest` is marked Latest. GitHub features that release and the
-# repository's front page links to it, so the other four are created with
-# --latest=false: what a visitor is offered first has to be the firmware.
+# Build the current commit and publish firmware, simulator, voices and bootloader.
+# Only the firmware release is marked Latest.
 #
 # The build server is not recorded here -- see PODBOX_BUILD_SERVER below.
 #
@@ -68,22 +53,14 @@ REMOTE_ROOT=${PODBOX_BUILD_ROOT:-podbox-release}
 
 TARGETS="ipod6g ipodvideo"
 
-# The four releases, reused forever. Their tags are moved to each commit built.
+# The rolling releases. Their tags are moved to each commit built.
 RELEASE=latest
 SIM_RELEASE=Simulator
-THEMES_RELEASE=Themes
 VOICES_RELEASE=Voices
 BOOT_RELEASE=Bootloader
 
 # What build-bootloader.sh makes, under the name it is published as.
 BOOT_ASSET=podbox-bootloader.zip
-
-# The themes published as their own download. Scrim is not among them: it is
-# the theme the firmware ships with, and bundle-theme.sh puts it in the build.
-# Named rather than globbed, for the same reason bundle-theme.sh names its one
-# -- a `git merge rockbox/master` must not start publishing stock themes that
-# were never converted.
-EXTRA_THEMES="themify_2 obsede_2 bony iclassic_square jive"
 
 # Published asset names. The build directory's own name means nothing to
 # somebody choosing a download.
@@ -120,7 +97,6 @@ sim_asset_name() {
         ipodvideo) echo "simulator-ipodvideo-5g.zip" ;;
     esac
 }
-theme_asset_name() { echo "$1.zip"; }
 
 # A voice file is made for one build and will not load on the other player
 voices_asset_name() {
@@ -129,9 +105,6 @@ voices_asset_name() {
         ipodvideo) echo "voices-ipodvideo-5g.zip" ;;
     esac
 }
-
-# Every extra theme in one download, beside the single ones.
-ALL_THEMES_ASSET=all-themes.zip
 
 cd "$(dirname "$0")"
 
@@ -281,10 +254,9 @@ echo "  $(printf '%s\n' "$CHANGES" | wc -l | tr -d ' ') commits to list"
 UPGRADE_NOTES=docs/podbox/upgrade-notes.md
 NOTES=$(mktemp)
 SIM_NOTES=$(mktemp)
-THEMES_NOTES=$(mktemp)
 BOOT_NOTES=$(mktemp)
 VOICES_NOTES=$(mktemp)
-trap 'rm -f "$NOTES" "$SIM_NOTES" "$THEMES_NOTES" "$BOOT_NOTES" "$VOICES_NOTES"' EXIT
+trap 'rm -f "$NOTES" "$SIM_NOTES" "$BOOT_NOTES" "$VOICES_NOTES"' EXIT
 
 {
     printf 'Built from `%s` on `%s`.\n\n' "$(git rev-parse HEAD)" "$BRANCH"
@@ -297,11 +269,7 @@ trap 'rm -f "$NOTES" "$SIM_NOTES" "$THEMES_NOTES" "$BOOT_NOTES" "$VOICES_NOTES"'
     printf '`%s` or `%s` instead: the same\n' \
         "$(notools_asset_name ipod6g)" "$(notools_asset_name ipodvideo)"
     printf 'firmware without the Windows desktop tools in `.rockbox/tools/`.\n\n'
-    printf '**Update your themes too.** If you use any theme from the\n'
-    printf '[%s release](https://github.com/%s/releases/tag/%s), download it\n' \
-        "$THEMES_RELEASE" "$SLUG" "$THEMES_RELEASE"
-    printf 'again with this build: the themes there are made for this firmware.\n'
-    printf 'Scrim ships inside the firmware zip and needs nothing.\n\n'
+    printf 'Scrim and Light are built into the firmware.\n\n'
     # What an owner should know before updating, written by hand and emptied
     # once it has gone out
     if grep -q '[^[:space:]]' "$UPGRADE_NOTES" 2>/dev/null; then
@@ -323,30 +291,9 @@ trap 'rm -f "$NOTES" "$SIM_NOTES" "$THEMES_NOTES" "$BOOT_NOTES" "$VOICES_NOTES"'
     printf 'it: that directory is the player'"'"'s storage, and `simdisk\\.rockbox`\n'
     printf 'is this build. Drop music into `simdisk\\` and the database will\n'
     printf 'find it. SDL is linked statically, so there are no DLLs to install.\n\n'
-    printf 'Run it with `--debugwps` to trace skin parsing; F5 writes a\n'
-    printf 'screendump into `simdisk\\`.\n\n'
     printf '### %s\n\n' "$HEADING"
     printf '%s\n' "$CHANGES"
 } > "$SIM_NOTES"
-
-# The themes are files in the tree rather than something built, so these notes
-# carry no commit list: nothing here changes with most commits, and a changelog
-# of firmware work would only mislead somebody after a theme.
-{
-    printf 'Extra themes for PodBox, each modified to support dynamic colours\n'
-    printf 'and art in lists. Scrim is not here: it ships with the firmware.\n\n'
-    printf '| file | theme |\n| --- | --- |\n'
-    printf '| `%s` | every theme below, in one download |\n' "$ALL_THEMES_ASSET"
-    for theme in $EXTRA_THEMES; do
-        printf '| `%s` | [%s](https://github.com/%s/blob/%s/themes/%s/README.md) |\n' \
-            "$(theme_asset_name "$theme")" "$theme" "$SLUG" "$BRANCH" "$theme"
-    done
-    printf '\nUnzip onto the root of the player, so the `.rockbox` folder lands\n'
-    printf 'on top of the one already there, then pick it under\n'
-    printf 'Settings > Load Theme.\n\n'
-    printf 'Each zip carries the fonts its theme needs, so they can be\n'
-    printf 'installed in any order and on their own.\n'
-} > "$THEMES_NOTES"
 
 # The voices are made for this build, so the notes say which commit; no
 # commit list, since a voice changes only with the menus' words.
@@ -385,11 +332,10 @@ trap 'rm -f "$NOTES" "$SIM_NOTES" "$THEMES_NOTES" "$BOOT_NOTES" "$VOICES_NOTES"'
 
 cat <<PLAN
 
-  releases   $THEMES_RELEASE,${WITH_SIM:+ $SIM_RELEASE,}${WITH_VOICES:+ $VOICES_RELEASE,} $BOOT_RELEASE, then $RELEASE${DRAFT:+  (draft)}
+  releases   ${WITH_SIM:+$SIM_RELEASE, }${WITH_VOICES:+$VOICES_RELEASE, } $BOOT_RELEASE, then $RELEASE${DRAFT:+  (draft)}
   commit     $COMMIT on $BRANCH
   repo       $SLUG
   targets    $TARGETS${WITH_SIM:+  (firmware and Windows simulator)}
-  themes     $EXTRA_THEMES
   build in   $SERVER:$REMOTE_ROOT/$RELEASE
 
 release notes
@@ -404,11 +350,6 @@ if [ -n "$WITH_SIM" ]; then
     cat "$SIM_NOTES"
     echo
 fi
-
-echo "themes release notes"
-echo "--------------------"
-cat "$THEMES_NOTES"
-echo
 
 if [ -n "$WITH_VOICES" ]; then
     echo "voices release notes"
@@ -426,7 +367,7 @@ if [ -n "$DRY_RUN" ]; then
     echo "(--dry-run: will build and verify, then stop before publishing)"
 elif [ -z "$ASSUME_YES" ]; then
     printf 'Build this and replace the %s releases? [y/N] ' \
-        "$THEMES_RELEASE,${WITH_SIM:+ $SIM_RELEASE,}${WITH_VOICES:+ $VOICES_RELEASE,} $BOOT_RELEASE, $RELEASE"
+        "${WITH_SIM:+$SIM_RELEASE, }${WITH_VOICES:+$VOICES_RELEASE, } $BOOT_RELEASE, $RELEASE"
     read -r reply
     case "$reply" in
         y|Y|yes|YES) ;;
@@ -491,15 +432,6 @@ say "Building the bootloader installer"
 ssh "$SERVER" "cd '$REMOTE_DIR' && ./build-bootloader.sh"
 
 # ----------------------------------------------------------------- verify ---
-# A themeless zip installs happily and leaves the player looking broken, so each
-# entry below is a file only a bundle script writes -- one that silently did
-# nothing is caught. settings-help.txt matters most: without it every Explain
-# menu entry shows nothing and nothing else looks wrong. Scrim is named by its
-# .cfg, its .sbs and a bitmap, because a half-copied theme still passes a
-# .cfg-only check. A font licence is named too: those texts are how the OFL
-# notice reaches the player, and bundle-theme.sh only picks them up because it
-# copies the whole theme directory.
-
 say "Checking the zips"
 for target in $TARGETS; do
     zip=$REMOTE_DIR/build-hw-$target/rockbox.zip
@@ -508,8 +440,8 @@ for target in $TARGETS; do
         [ -f '$zip' ] || { echo 'missing: $zip' >&2; exit 1; }
         [ -s '$REMOTE_DIR/build-hw-$target/rockbox.map' ] ||
             { echo 'missing: $target rockbox.map' >&2; exit 1; }
-        for want in .rockbox/themes/scrim.cfg \
-                    .rockbox/wps/scrim.sbs .rockbox/wps/scrim/volband.bmp \
+        for want in .rockbox/default-config.cfg \
+                    .rockbox/fonts/18-noto-sans.fnt \
                     .rockbox/docs/settings-help.txt \
                     .rockbox/trim.config \
                     .rockbox/speech/cmudict.bin \
@@ -555,63 +487,6 @@ for target in $TARGETS; do
     "
 done
 
-# Packed from the extracted archive, like everything else here -- not zipped
-# from the dev tree, whose checkout is CRLF and would ship skins the player
-# reads with a stray carriage return on every line.
-#
-# Each theme's README goes in as .rockbox/docs, because the fonts it names
-# are licensed under the OFL and the notice has to travel with them. They no
-# longer travel in the firmware zip: that one carries Scrim's fonts only.
-say "Packing the themes"
-for theme in $EXTRA_THEMES; do
-    asset=$(theme_asset_name "$theme")
-    ssh "$SERVER" "
-        set -e
-        cd '$REMOTE_DIR'
-        [ -d 'themes/$theme/.rockbox' ] ||
-            { echo 'themes/$theme/.rockbox is missing' >&2; exit 1; }
-        out=\$(pwd)/'$asset'
-        stage=\$(mktemp -d)
-        trap 'rm -rf \"\$stage\"' EXIT
-        cp -R 'themes/$theme/.rockbox' \"\$stage/\"
-        mkdir -p \"\$stage/.rockbox/docs\"
-        cp 'themes/$theme/README.md' \"\$stage/.rockbox/docs/$theme.md\"
-        rm -f \"\$out\"
-        (cd \"\$stage\" && zip -qr \"\$out\" .rockbox)
-        for want in .rockbox/themes/$theme.cfg .rockbox/wps/$theme.sbs \
-                    .rockbox/wps/$theme.wps .rockbox/docs/$theme.md; do
-            unzip -l \"\$out\" | grep -q \"\$want\" ||
-                { echo \"$theme zip is missing \$want\" >&2; exit 1; }
-        done
-        unzip -l \"\$out\" | grep -q '\.rockbox/fonts/.*\.fnt' ||
-            { echo '$theme zip carries no fonts' >&2; exit 1; }
-        unzip -l \"\$out\" | grep -q '\.rockbox/fonts/LICENSE-' ||
-            { echo '$theme zip carries fonts with no licence' >&2; exit 1; }
-        printf '  %-14s ok  (%s)\n' '$theme' \"\$(du -h \"\$out\" | cut -f1)\"
-    "
-done
-
-# Unpacked from the single zips just made rather than staged again, so it
-# cannot differ from them. Fonts several themes share are the same file, and
-# land once.
-ssh "$SERVER" "
-    set -e
-    cd '$REMOTE_DIR'
-    out=\$(pwd)/'$ALL_THEMES_ASSET'
-    stage=\$(mktemp -d)
-    trap 'rm -rf \"\$stage\"' EXIT
-    for zip in $(for t in $EXTRA_THEMES; do printf '%s ' "$(theme_asset_name "$t")"; done); do
-        unzip -qo \"\$zip\" -d \"\$stage\"
-    done
-    rm -f \"\$out\"
-    (cd \"\$stage\" && zip -qr \"\$out\" .rockbox)
-    for theme in $EXTRA_THEMES; do
-        unzip -l \"\$out\" | grep -q \".rockbox/themes/\$theme.cfg\" ||
-            { echo \"$ALL_THEMES_ASSET is missing \$theme\" >&2; exit 1; }
-    done
-    printf '  %-14s ok  (%s)\n' 'all themes' \"\$(du -h \"\$out\" | cut -f1)\"
-"
-
 # The simulator ships as one file holding both halves: the exe, and the
 # simdisk/ beside it that build-sim.sh has already unpacked this build into.
 # Separating them would let somebody run last month's exe against this month's
@@ -623,8 +498,8 @@ for target in $SIM_TARGETS; do
         set -e
         cd '$REMOTE_DIR/build-sim-$target-win32'
         [ -f rockboxui.exe ] || { echo 'missing: $target rockboxui.exe' >&2; exit 1; }
-        [ -f simdisk/.rockbox/themes/scrim.cfg ] ||
-            { echo '$target simulator has no theme in simdisk' >&2; exit 1; }
+        [ -f simdisk/.rockbox/default-config.cfg ] ||
+            { echo '$target simulator is missing its default config' >&2; exit 1; }
         rm -f '../$asset'
         zip -qr '../$asset' rockboxui.exe simdisk
         printf '  %-14s ok  (%s)\n' '$target sim' \"\$(du -h '../$asset' | cut -f1)\"
@@ -647,11 +522,6 @@ for target in $SIM_TARGETS; do
     asset=$(sim_asset_name "$target")
     scp "$SERVER:$REMOTE_DIR/$asset" "dist/$asset"
 done
-for theme in $EXTRA_THEMES; do
-    asset=$(theme_asset_name "$theme")
-    scp "$SERVER:$REMOTE_DIR/$asset" "dist/$asset"
-done
-scp "$SERVER:$REMOTE_DIR/$ALL_THEMES_ASSET" "dist/$ALL_THEMES_ASSET"
 scp "$SERVER:$REMOTE_DIR/$BOOT_ASSET" "dist/$BOOT_ASSET"
 
 if [ -n "$DRY_RUN" ]; then
@@ -663,11 +533,11 @@ fi
 # ---------------------------------------------------------------- publish ---
 # Everything below this line is visible outside, and is deliberately last.
 #
-# The order is themes, then simulator, then bootloader, then firmware. Only
+# The order is simulator, voices, bootloader, then firmware. Only
 # the firmware is marked Latest, the release the repository's front page
 # offers; the others pass --latest=false, because GitHub otherwise moves the
 # badge to each release as it is created. A visitor must land on the build,
-# not on a theme, the simulator or the bootloader.
+# which is the firmware.
 #
 # A failure in the last step leaves fresh Themes, Simulator and Bootloader
 # releases beside a stale `latest`. Everything is built and verified before
@@ -693,29 +563,6 @@ SHA=$(git rev-parse HEAD)
 #
 # --target names the commit each new tag is created at, on GitHub. Nothing tags
 # locally: a rolling tag left in the dev checkout only goes stale.
-
-say "Replacing the $THEMES_RELEASE release"
-ssh "$SERVER" "gh release delete '$THEMES_RELEASE' --repo '$SLUG' --yes \
-    --cleanup-tag || true"
-ssh "$SERVER" "gh api --method DELETE --silent \
-    'repos/$SLUG/git/refs/tags/$THEMES_RELEASE' 2>/dev/null || true"
-
-scp -q "$THEMES_NOTES" "$SERVER:$REMOTE_DIR/themes-notes.md"
-# The zips were named in the packing step, so there is nothing to rename here
-# -- unlike the firmware, whose two builds both make rockbox.zip.
-ssh "$SERVER" "cd '$REMOTE_DIR' && \
-    gh release create '$THEMES_RELEASE' \
-    --repo '$SLUG' \
-    --target '$SHA' \
-    --title 'Extra themes' \
-    --notes-file themes-notes.md \
-    --latest=false \
-    $DRAFT \
-    $ALL_THEMES_ASSET \
-    $(for t in $EXTRA_THEMES; do printf '%s ' "$(theme_asset_name "$t")"; done)"
-
-say "Published $COMMIT as $THEMES_RELEASE"
-echo "  https://github.com/$SLUG/releases/tag/$THEMES_RELEASE"
 
 if [ -n "$SIM_TARGETS" ]; then
     say "Replacing the $SIM_RELEASE release"

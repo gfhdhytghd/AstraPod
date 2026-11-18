@@ -19,7 +19,7 @@
 #include "backlight.h"
 #include "powermgmt.h"
 #include "system/shutdown.h"
-#include "skin/skin_albumart_color.h" /* dynamic_colors_resolve */
+#include "ui/native_theme_runtime.h"
 #include "draw/text_wrap.h"
 #include "text_reel.h"
 
@@ -57,8 +57,8 @@ static void tr_backlight_use_settings(void)
  * at open would freeze part-way through. */
 static void tr_apply_colours(struct viewport *vp)
 {
-    vp->fg_pattern = dynamic_colors_resolve(global_settings.fg_color);
-    vp->bg_pattern = dynamic_colors_resolve(global_settings.bg_color);
+    vp->fg_pattern = ui_theme_rgb565(UI_COLOR_FOREGROUND);
+    vp->bg_pattern = ui_theme_rgb565(UI_COLOR_BACKGROUND);
 }
 
 /* Lines read aloud, at most: the credits run to hundreds of names */

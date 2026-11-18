@@ -106,16 +106,6 @@ gui/yesno.c
 #endif
 gui/viewport.c
 
-gui/skin_engine/skin_backdrops.c
-gui/skin_engine/skin_display.c
-gui/skin_engine/skin_engine.c
-gui/skin_engine/skin_parser.c
-gui/skin_engine/skin_render.c
-gui/skin_engine/skin_tokens.c
-#ifdef HAVE_TOUCHSCREEN
-gui/skin_engine/skin_touchsupport.c
-#endif
-
 #if (LCD_DEPTH > 1) || (defined(HAVE_REMOTE_LCD) && (LCD_REMOTE_DEPTH > 1))
 gui/backdrop.c
 #endif

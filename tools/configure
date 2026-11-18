@@ -435,7 +435,7 @@ simcc () {
  sdl=`findsdl $winbuild`
 
  # The unquoted backtick collapses to a bare [ -n ], which is always true, so
- # every simcc type demanded SDL. CheckWPS and warble link none of it.
+ # every simcc type demanded SDL. Warble links none of it.
  if echo "$app_type" | grep -q "sdl"; then
     if [ -z "$sdl" ]; then
         echo "configure didn't find ${sdl_config}, which indicates that you"
@@ -500,8 +500,6 @@ EOF
    echo "Simulator environment deemed $endian endian"
  elif [ "$app_type" = "sdl-app" ]; then
    echo "Application environment deemed $endian endian"
- elif [ "$app_type" = "checkwps" ]; then
-   echo "CheckWPS environment deemed $endian endian"
  fi
 
  # use wildcard here to make it work even if it was named *.exe like
@@ -1707,11 +1705,11 @@ if [ -z "$rootdir" ]; then
 fi
 
 apps="apps"
-# The application layer lives in "apps" unless --appsdir names another
+# PodBox uses "apps-ipod" unless --appsdir names another
 # directory. coreappsdir always points at it; appsdir is what the build type
-# actually compiles, and the bootloader/checkwps/database types repoint that
+# actually compiles, and the bootloader/database types repoint that
 # below while still needing coreappsdir for the core bitmaps and lang files.
-coreapps="${ARG_APPSDIR:-apps}"
+coreapps="${ARG_APPSDIR:-apps-ipod}"
 if test ! -d "$rootdir/$coreapps"; then
   echo "[ERROR] --appsdir: no such directory '$coreapps' in $rootdir"
   exit 1
@@ -4369,7 +4367,7 @@ elif [ "$bootloader_only" = "1" ]; then
   echo "Build (B)ootloader$gdbstub: (Defaults to B)"
   btype=`input`;
 else
-  echo "Build (N)ormal, (A)dvanced, (S)imulator, (B)ootloader, (C)heckWPS, (D)atabase tool, (W)arble codec tool$gdbstub: (Defaults to N)"
+  echo "Build (N)ormal, (A)dvanced, (S)imulator, (B)ootloader, (D)atabase tool, (W)arble codec tool$gdbstub: (Defaults to N)"
   btype=`input`;
 fi
 
@@ -4406,17 +4404,6 @@ fi
     [Aa]*)
       echo "Advanced build selected"
       whichadvanced $btype
-      ;;
-    [Cc])
-      uname=`uname`
-      simcc "checkwps"
-      toolset='';
-      GCCOPTS='';
-      LDOPTS='';
-      extradefines="$extradefines  -DDEBUG"
-      appsdir='$(ROOTDIR)/tools/checkwps';
-      output='checkwps.'${modelname};
-      echo "CheckWPS build selected"
       ;;
     [Dd])
       uname=`uname`
@@ -4537,8 +4524,7 @@ gccver=`$CC -dumpversion`;
 # figure out the binutil version too
 if [ $uname = "Darwin" ] && \
    [ "$app_type" = "sdl-sim" -o \
-     "$app_type" = "sdl-app" -o \
-     "$app_type" = "checkwps" ]; then
+     "$app_type" = "sdl-app" ]; then
  ldnum=0
 else
  ldnum=`$LD --version | sed -n '1p' | sed -e 's/.* \([0-9]*\)\.\([0-9]*\).*/\1\2/'`
@@ -4662,7 +4648,7 @@ HOSTAR=${HOSTAR:-${AR}}
 
 # This disables all arch-specific code paths (eg inline asm)
 # for builds that target the host system
-if [ "$app_type" = "sdl-sim" -o "$app_type" = "sdl-app" -o "$app_type" = "checkwps" ]; then
+if [ "$app_type" = "sdl-sim" -o "$app_type" = "sdl-app" ]; then
     arch="none"
 fi
 
@@ -4806,9 +4792,9 @@ if [ "$ARG_STACK_PROTECTOR" != "" ]; then
 fi
 
 # We generally want utf8proc.  Exceptions are:
-#   Bootloaders, checkwps, warble, <4MB RAM
+#   Bootloaders, warble, <4MB RAM
 #   and (temporarily) imx233
-if [ "$apps" = "bootloader" -o "$app_type" = "checkwps" -o "$app_type" = "warble" -o "$memory" -lt "4" ]; then
+if [ "$apps" = "bootloader" -o "$app_type" = "warble" -o "$memory" -lt "4" ]; then
     no_utf8proc=1
 fi
 

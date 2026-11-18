@@ -122,45 +122,24 @@ struct browser_context* browser_get_context(void);
 void browser_flush(void);
 void browser_restore(void);
 
-/* Throw away the cached row thumbnails, for a caller that has changed what a
- * row's art should look like: they are treated as they are read, so the ones
- * already cached keep the old treatment. Unlike the browser's, the carousel's
- * slide cache lives in a buffer released when its screen exits, so it has
- * nothing to invalidate -- it reads every slide again on the way in. */
+/* Throw away cached thumbnails before another list reuses their row keys. */
 void browser_albumart_invalidate(void);
-/* True while the on-screen browse level draws tall album/artist art rows. */
-bool browser_showing_art(void);
-/* Set by a list outside the browser that draws art rows the same way. */
-void browser_set_showing_art(bool on);
-/* True while the on-screen browse level is a list of podcast episodes. */
-bool browser_showing_episodes(void);
 /* Whether the list on screen offers Select... in a row's context menu */
 bool browser_select_offered(void);
 
-/* %LH: the header over the list on screen, by a field from
- * skin/custom_tokens.h. Every field is NULL while the browse on screen has
- * none. */
-const char *browser_header_text(int field, char *buf, size_t size);
-
 struct bitmap;
 struct dim;
-struct img_filter;
 /* A row's art key, 0 for none. */
 typedef unsigned int browser_art_hash_fn(int selected_item, void *data);
-/* A list_get_albumart for any list whose rows have an art key: the browser's
- * thumbnail cache, keyed by item. A list other than the browser's must call
+/* A thumbnail from the browser's cache, keyed by item. Other lists call
  * browser_albumart_invalidate() on the way in and out, or one list is drawn
  * with the other's covers. */
 const struct bitmap *browser_art_row(int selected_item, void *data,
                                      browser_art_hash_fn *get_hash,
-                                     struct dim *size,
-                                     const struct img_filter *filter,
-                                     uint32_t filter_hash);
-/* %LH(art): the header's cover at the size given, from the same cache */
-const struct bitmap *browser_header_art(struct dim *size);
+                                     struct dim *size);
 struct browser_db_header;
-void browser_set_external_header(const struct browser_db_header *header,
-                    const struct bitmap *(*art)(struct dim *size));
+void browser_album_details(const struct browser_db_header *album, char *buf,
+                           size_t size);
 
 bool bookmark_play(char* resume_file, int index, unsigned long elapsed,
                    unsigned long offset, int seed, char *filename);

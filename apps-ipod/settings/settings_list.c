@@ -59,7 +59,6 @@
 #include "audio/peak_meter.h"
 #include "screens/settings/eq_settings.h"
 #include "iap.h"
-#include "skin/statusbar.h"
 #include "screens/context_menu.h"
 #include "playlist/playlist.h"
 #include "screens/browse/browser.h"
@@ -209,9 +208,6 @@
             {.custom_setting = (struct custom_setting[]){               \
         {load_from_cfg, write_to_cfg, is_change, set_default}}}}
 
-#define VIEWPORT_SETTING(var,name)      \
-        TEXT_SETTING(F_THEMESETTING|F_NEEDAPPLY,var,name,"-", NULL, NULL)
-
 /* some sets of values which are used more than once, to save memory */
 static const char off[] = "off";
 static const char off_on[] = "off,on";
@@ -237,55 +233,11 @@ static const int backlight_fade[] = {0,100,200,300,500,1000,2000,3000,5000,10000
 
 static const char graphic_numeric[] = "graphic,numeric";
 
-/* Default theme settings: none of them.
- *
- * These are what a theme load resets to before reading the theme, so naming a
- * theme's files here would mean a theme that mentions no skin of its own came
- * up wearing the shipped theme's -- the same inherited-look fault the reset
- * exists to prevent, just from the binary instead of from whatever was loaded
- * last. The shipped look is named by themes/default-config.cfg, which is the
- * first-boot config, and by the theme's own .cfg.
- *
- * "-" is the established "none" value and is what upstream's failsafe theme
- * uses for its font. Reaching these at all means no config.cfg has been
- * applied -- a fresh flash, or a Reset Settings -- and the honest answer there
- * is a bare screen and the built-in font, not somebody's theme. */
-#define DEFAULT_WPSNAME  "-"
-#define DEFAULT_SBSNAME  "-"
-#define DEFAULT_FMS_NAME "cabbiev2"
-
-  #define DEFAULT_FONT_HEIGHT 15
-  #define DEFAULT_FONTNAME "-"
+#define DEFAULT_FONTNAME "18-noto-sans"
+#define DEFAULT_BOLD_FONTNAME "18-noto-sans-bold"
 #define DEFAULT_GLYPHS 250
 #define MIN_GLYPHS 50
 #define MAX_GLYPHS 65540
-
-#ifndef DEFAULT_FONTNAME
-/* ugly expansion needed */
-#define _EXPAND2(x) #x
-#define _EXPAND(x) _EXPAND2(x)
-#define DEFAULT_FONTNAME _EXPAND(DEFAULT_FONT_HEIGHT) "-Adobe-Helvetica"
-#endif
-
-    #define DEFAULT_ICONSET "tango_icons.16x16"
-    #define DEFAULT_VIEWERS_ICONSET "tango_icons_viewers.16x16"
-
-
-/* What a colours reset falls back to: a fixed set, not the shipped theme's --
- * those are named in themes/default-config.cfg. */
-#define DEFAULT_THEME_FOREGROUND LCD_RGBPACK(0xe1, 0xf0, 0xee)
-#define DEFAULT_THEME_BACKGROUND LCD_RGBPACK(0x00, 0x0c, 0x21)
-#define DEFAULT_THEME_SELECTOR_START LCD_RGBPACK(0xff, 0xeb, 0x9c)
-#define DEFAULT_THEME_SELECTOR_END LCD_RGBPACK(0xb5, 0x8e, 0x00)
-#define DEFAULT_THEME_SELECTOR_TEXT LCD_RGBPACK(0x00, 0x00, 0x00)
-#define DEFAULT_THEME_SEPARATOR  LCD_RGBPACK(0x80, 0x80, 0x80)
-
-/* No backdrop, so that a theme which says nothing about one gets the plain
- * background colour rather than whatever image the previous theme left behind.
- * Upstream defaults to cabbiev2.bmp; that file is not in this build's zip, so
- * naming it here would only ever resolve to a failed load anyway. */
-#define DEFAULT_BACKDROP    "-"
-
 
 #define DEFAULT_TAGCACHE_SCAN_PATHS "/"
 
@@ -948,34 +900,28 @@ const struct settings_list settings[] = {
                     getlang_time_unit_0_is_always, backlight_set_timeout_plugged,
                     23, timeout_sec_common),
     /* display */
-     CHOICE_SETTING(F_TEMPVAR|F_THEMESETTING, cursor_style, LANG_INVERT_CURSOR,
+     CHOICE_SETTING(F_TEMPVAR, cursor_style, LANG_INVERT_CURSOR,
                     3, "selector type",
                     "pointer,bar (inverse),bar (color),bar (gradient)", NULL, 4,
                     ID2P(LANG_INVERT_CURSOR_POINTER),
                     ID2P(LANG_INVERT_CURSOR_BAR),
                     ID2P(LANG_INVERT_CURSOR_COLOR),
                     ID2P(LANG_INVERT_CURSOR_GRADIENT)),
-    CHOICE_SETTING(F_THEMESETTING|F_TEMPVAR|F_NEEDAPPLY, statusbar,
-                  LANG_STATUS_BAR, STATUSBAR_TOP, "statusbar","off,top,bottom",
-                  NULL, 3, ID2P(LANG_OFF), ID2P(LANG_STATUSBAR_TOP),
-                  ID2P(LANG_STATUSBAR_BOTTOM)),
-    CHOICE_SETTING(F_THEMESETTING|F_TEMPVAR, scrollbar,
+    CHOICE_SETTING(F_TEMPVAR, scrollbar,
                   LANG_SCROLL_BAR, SCROLLBAR_DEFAULT, "scrollbar","off,left,right",
                   NULL, 3, ID2P(LANG_OFF), ID2P(LANG_LEFT), ID2P(LANG_RIGHT)),
-    INT_SETTING(F_THEMESETTING, scrollbar_width, LANG_SCROLLBAR_WIDTH, 6,
+    INT_SETTING(0, scrollbar_width, LANG_SCROLLBAR_WIDTH, 6,
                 "scrollbar width",UNIT_INT, 3, MAX(LCD_WIDTH/10,25), 1,
                 NULL, NULL, NULL),
-    TABLE_SETTING(F_THEMESETTING|F_ALLOW_ARBITRARY_VALS, list_separator_height, LANG_LIST_SEPARATOR,
+    TABLE_SETTING(F_ALLOW_ARBITRARY_VALS, list_separator_height, LANG_LIST_SEPARATOR,
                   0, "list separator height", "auto,off", UNIT_PIXEL,
                   list_pad_formatter, list_pad_getlang, NULL, 15,
                   -1,0,1,2,3,4,5,7,9,11,13,16,20,25,30),
-    {F_T_INT|F_RGB|F_THEMESETTING ,&global_settings.list_separator_color,-1,
-        INT(DEFAULT_THEME_SEPARATOR),"list separator color",UNUSED},
-    CHOICE_SETTING(F_THEMESETTING, volume_type, LANG_VOLUME_DISPLAY, 0,
+    CHOICE_SETTING(0, volume_type, LANG_VOLUME_DISPLAY, 0,
                    "volume display", graphic_numeric, NULL, 2,
                    ID2P(LANG_DISPLAY_GRAPHIC),
                    ID2P(LANG_DISPLAY_NUMERIC)),
-    CHOICE_SETTING(F_THEMESETTING, battery_display, LANG_BATTERY_DISPLAY, 0,
+    CHOICE_SETTING(0, battery_display, LANG_BATTERY_DISPLAY, 0,
                    "battery display", graphic_numeric, NULL, 2,
                    ID2P(LANG_DISPLAY_GRAPHIC), ID2P(LANG_DISPLAY_NUMERIC)),
     /* Disk activity is off by default: while music plays the disk is read
@@ -994,7 +940,7 @@ const struct settings_list settings[] = {
     CHOICE_SETTING(0, timeformat, LANG_TIMEFORMAT, 1,
         "time format", "24hour,12hour", NULL, 2,
         ID2P(LANG_24_HOUR_CLOCK), ID2P(LANG_12_HOUR_CLOCK)),
-    OFFON_SETTING(F_THEMESETTING,show_icons, LANG_SHOW_ICONS ,true,"show icons", NULL),
+    OFFON_SETTING(0,show_icons, LANG_SHOW_ICONS ,true,"show icons", NULL),
     OFFON_SETTING(0,show_debug_menu, LANG_SHOW_DEBUG_MENU, false,
                   "show debug menu", NULL),
     /* How much of the settings tree is shown. F_BANFROMQS because the
@@ -1152,24 +1098,24 @@ const struct settings_list settings[] = {
 #endif
     OFFON_SETTING(0, scrolling_enabled, LANG_SCROLLING_ENABLED, true,
                   "scrolling enabled", NULL),
-    INT_SETTING(F_THEMESETTING|F_PADTITLE, scroll_speed, LANG_SCROLL_SPEED, 9,"scroll speed",
+    INT_SETTING(F_PADTITLE, scroll_speed, LANG_SCROLL_SPEED, 9,"scroll speed",
                 UNIT_INT, 0, 17, 1, NULL, NULL, lcd_scroll_speed),
-    INT_SETTING(F_THEMESETTING|F_PADTITLE, scroll_box_speed,
+    INT_SETTING(F_PADTITLE, scroll_box_speed,
                 LANG_SCROLL_BOX_SPEED, 10, "vertical scroll speed",
                 UNIT_INT, 0, 17, 1, NULL, NULL, NULL),
-    INT_SETTING(F_THEMESETTING|F_TIME_SETTING | F_PADTITLE, scroll_delay, LANG_SCROLL_DELAY,
+    INT_SETTING(F_TIME_SETTING | F_PADTITLE, scroll_delay, LANG_SCROLL_DELAY,
                 1000, "scroll delay", UNIT_MS, 0, 3000, 100,
                 formatter_time_unit_0_is_off,
                 getlang_time_unit_0_is_off, lcd_scroll_delay),
-    INT_SETTING(F_THEMESETTING, bidir_limit, LANG_BIDIR_SCROLL, 50, "bidir limit",
+    INT_SETTING(0, bidir_limit, LANG_BIDIR_SCROLL, 50, "bidir limit",
                 UNIT_PERCENT, 0, 200, 25, NULL, NULL, lcd_bidir_scroll),
-    OFFON_SETTING(F_THEMESETTING, offset_out_of_view, LANG_SCREEN_SCROLL_VIEW,
+    OFFON_SETTING(0, offset_out_of_view, LANG_SCREEN_SCROLL_VIEW,
                   false, "Screen Scrolls Out Of View", NULL),
-    OFFON_SETTING(F_THEMESETTING, disable_mainmenu_scrolling, LANG_DISABLE_MAINMENU_SCROLLING,
+    OFFON_SETTING(0, disable_mainmenu_scrolling, LANG_DISABLE_MAINMENU_SCROLLING,
                   false, "Disable main menu scrolling", NULL),
-    INT_SETTING(F_THEMESETTING|F_PADTITLE, scroll_step, LANG_SCROLL_STEP, 6, "scroll step",
+    INT_SETTING(F_PADTITLE, scroll_step, LANG_SCROLL_STEP, 6, "scroll step",
                 UNIT_PIXEL, 1, LCD_WIDTH, 1, NULL, NULL, lcd_scroll_step),
-    INT_SETTING(F_THEMESETTING|F_PADTITLE, screen_scroll_step, LANG_SCREEN_SCROLL_STEP, 16,
+    INT_SETTING(F_PADTITLE, screen_scroll_step, LANG_SCREEN_SCROLL_STEP, 16,
                 "screen scroll step", UNIT_PIXEL, 1, LCD_WIDTH, 1, NULL, NULL, NULL),
     OFFON_SETTING(0,scroll_paginated,LANG_SCROLL_PAGINATED,
                   false,"scroll paginated",NULL),
@@ -1181,94 +1127,8 @@ const struct settings_list settings[] = {
                    "list order", "descending,ascending",
                    NULL, 2, ID2P(LANG_DESCENDING), ID2P(LANG_ASCENDING)),
 
-    {F_T_INT|F_RGB|F_THEMESETTING ,&global_settings.fg_color,-1,
-        INT(DEFAULT_THEME_FOREGROUND),"foreground color",UNUSED},
-    {F_T_INT|F_RGB|F_THEMESETTING ,&global_settings.bg_color,-1,
-        INT(DEFAULT_THEME_BACKGROUND),"background color",UNUSED},
-    {F_T_INT|F_RGB|F_THEMESETTING ,&global_settings.lss_color,-1,
-        INT(DEFAULT_THEME_SELECTOR_START),"line selector start color",UNUSED},
-    {F_T_INT|F_RGB|F_THEMESETTING ,&global_settings.lse_color,-1,
-        INT(DEFAULT_THEME_SELECTOR_END),"line selector end color",UNUSED},
-    {F_T_INT|F_RGB|F_THEMESETTING ,&global_settings.lst_color,-1,
-        INT(DEFAULT_THEME_SELECTOR_TEXT),"line selector text color",UNUSED},
-
-
-    /* Modal dialog chrome: the metrics and colours under Appearance ->
-     * Dialogs, or a theme .cfg names them all.
-     * The metric defaults are the chrome a theme gets for saying nothing, so
-     * they are the shipped look rather than dialog_style_default()'s bare
-     * 1px square borders.
-     *
-     * F_THEMERESET throughout is what makes "for saying nothing" true. Without
-     * it every value below is inherited, so a theme is handed the last theme's
-     * dialog chrome -- rounded buttons on a theme that never asked for them.
-     * It applies equally to a value set from the menu: the next theme load
-     * returns it to the default below. */
-    INT_SETTING(F_THEMESETTING|F_THEMERESET, dialog_box_border_width,
-        LANG_DIALOG_BOX_BORDER_WIDTH, 2, "dialog box border width",
-        UNIT_PIXEL, 0, 10, 1, NULL, NULL, NULL),
-    INT_SETTING(F_THEMESETTING|F_THEMERESET, dialog_box_margin,
-        LANG_DIALOG_BOX_MARGIN, 10, "dialog box margin",
-        UNIT_PIXEL, 0, 40, 1, NULL, NULL, NULL),
-    INT_SETTING(F_THEMESETTING|F_THEMERESET, dialog_box_shadow,
-        LANG_DIALOG_BOX_SHADOW, 4, "dialog box shadow",
-        UNIT_PIXEL, 0, 16, 1, NULL, NULL, NULL),
-    /* Unlike the nine below, not gated on dialog_colors. Black is also the
-       "not named" value: under dialog_colors auto it becomes a shade of the
-       background (settings_apply_dialog_style). */
-    {F_T_INT|F_RGB|F_THEMESETTING|F_THEMERESET,
-        &global_settings.dialog_box_shadow_color, LANG_DIALOG_BOX_SHADOW_COLOR,
-        INT(LCD_BLACK), "dialog box shadow colour", UNUSED},
-    INT_SETTING(F_THEMESETTING|F_THEMERESET, dialog_btn_border_width,
-        LANG_DIALOG_BTN_BORDER_WIDTH, 2, "dialog button border width",
-        UNIT_PIXEL, 0, 10, 1, NULL, NULL, NULL),
-    /* Square by default: a radius is a look, and a theme that says nothing
-     * should get the plain shape rather than this fork's. A theme that wants
-     * rounded buttons asks for one in its own .cfg. */
-    INT_SETTING(F_THEMESETTING|F_THEMERESET, dialog_btn_border_radius,
-        LANG_DIALOG_BTN_BORDER_RADIUS, 0, "dialog button border radius",
-        UNIT_PIXEL, 0, 20, 1, NULL, NULL, NULL),
-    /* off:  every dialog colour is inherited from the theme, flat.
-     * on:   the nine colours below are used instead.
-     * auto: derived from the theme's foreground and background, or from the
-     *       album's while dynamic colours are running (the default). */
-    CHOICE_SETTING(F_THEMESETTING|F_THEMERESET, dialog_colors,
-                   LANG_DIALOG_COLORS, DIALOG_COLORS_AUTO,
-                   "dialog colours", "off,on,auto", NULL, 3,
-                   ID2P(LANG_OFF), ID2P(LANG_ON), ID2P(LANG_AUTO)),
-    {F_T_INT|F_RGB|F_THEMESETTING|F_THEMERESET, &global_settings.dialog_box_fg,
-        -1, INT(DEFAULT_THEME_FOREGROUND), "dialog box foreground", UNUSED},
-    {F_T_INT|F_RGB|F_THEMESETTING|F_THEMERESET, &global_settings.dialog_box_bg,
-        -1, INT(DEFAULT_THEME_BACKGROUND), "dialog box background", UNUSED},
-    {F_T_INT|F_RGB|F_THEMESETTING|F_THEMERESET,
-        &global_settings.dialog_box_border, -1,
-        INT(DEFAULT_THEME_FOREGROUND), "dialog box border colour", UNUSED},
-    {F_T_INT|F_RGB|F_THEMESETTING|F_THEMERESET, &global_settings.dialog_btn_fg,
-        -1, INT(DEFAULT_THEME_FOREGROUND), "dialog button foreground", UNUSED},
-    {F_T_INT|F_RGB|F_THEMESETTING|F_THEMERESET, &global_settings.dialog_btn_bg,
-        -1, INT(DEFAULT_THEME_BACKGROUND), "dialog button background", UNUSED},
-    {F_T_INT|F_RGB|F_THEMESETTING|F_THEMERESET,
-        &global_settings.dialog_btn_border, -1,
-        INT(DEFAULT_THEME_FOREGROUND), "dialog button border colour", UNUSED},
-    /* the selected button defaults to the inverse-video look of the plain box */
-    {F_T_INT|F_RGB|F_THEMESETTING|F_THEMERESET,
-        &global_settings.dialog_btn_fg_sel, -1,
-        INT(DEFAULT_THEME_BACKGROUND), "dialog button foreground selected",
-        UNUSED},
-    {F_T_INT|F_RGB|F_THEMESETTING|F_THEMERESET,
-        &global_settings.dialog_btn_bg_sel, -1,
-        INT(DEFAULT_THEME_FOREGROUND), "dialog button background selected",
-        UNUSED},
-    {F_T_INT|F_RGB|F_THEMESETTING|F_THEMERESET,
-        &global_settings.dialog_btn_border_sel, -1,
-        INT(DEFAULT_THEME_FOREGROUND), "dialog button border colour selected",
-        UNUSED},
-
-    /* Progress bar chrome, config-file only for the same reason as the dialog
-     * metrics above, F_THEMERESET included. The border rounds to this and the
-     * fill to one less, so a radius of 1 is the smallest that rounds
-     * anything. */
-    {F_T_INT|F_THEMESETTING|F_THEMERESET, &global_settings.progress_bar_radius,
+    /* Progress bars use square or rounded corners. */
+    {F_T_INT, &global_settings.progress_bar_radius,
         -1, INT(2), "progress bar radius", UNUSED},
 
     /* more playback */
@@ -1342,11 +1202,11 @@ const struct settings_list settings[] = {
                    ID2P(LANG_OFF), ID2P(LANG_ON), ID2P(LANG_UNKNOWN_TYPES),
                    ID2P(LANG_EXT_ONLY_VIEW_ALL)),
     OFFON_SETTING(0,browse_current,LANG_FOLLOW,false,"follow playlist",NULL),
-    OFFON_SETTING(F_THEMESETTING,playlist_viewer_icons,LANG_SHOW_ICONS,true,
+    OFFON_SETTING(0,playlist_viewer_icons,LANG_SHOW_ICONS,true,
                   "playlist viewer icons",NULL),
-    OFFON_SETTING(F_THEMESETTING,playlist_viewer_indices,LANG_SHOW_INDICES,true,
+    OFFON_SETTING(0,playlist_viewer_indices,LANG_SHOW_INDICES,true,
                   "playlist viewer indices",NULL),
-    CHOICE_SETTING(F_THEMESETTING, playlist_viewer_track_display, LANG_TRACK_DISPLAY,
+    CHOICE_SETTING(0, playlist_viewer_track_display, LANG_TRACK_DISPLAY,
                    PLAYLIST_VIEWER_ENTRY_SHOW_ID3_TITLE,
                    "playlist viewer track display",
                    "track name,full path,title and album from tags,title from tags,"
@@ -1805,14 +1665,10 @@ const struct settings_list settings[] = {
                   LANG_SPOKEN_PAUSE_REWIND, -1, "spoken word rewind on pause",
                   "music,off", UNIT_SEC, formatter_spoken_rewind,
                   getlang_spoken_rewind, NULL, 17, spoken_pause_rewind_times),
-    TEXT_SETTING(F_THEMESETTING|F_NEEDAPPLY, font_file, "font",
+    TEXT_SETTING(0, font_file, "font",
                      DEFAULT_FONTNAME, FONT_DIR "/", ".fnt"),
-    /* No font of its own: unset means the regular UI font, so a theme naming
-     * only "font" gets a bold that matches it rather than the last theme's.
-     * F_THEMERESET is what makes that true -- without it the setting keeps the
-     * previous value and the fallback in font_get_ui_bold() never runs. */
-    TEXT_SETTING(F_THEMESETTING|F_THEMERESET, bold_font_file, "font bold",
-                     "-", FONT_DIR "/", ".fnt"),
+    TEXT_SETTING(0, bold_font_file, "font bold",
+                 DEFAULT_BOLD_FONTNAME, FONT_DIR "/", ".fnt"),
     INT_SETTING(0, glyphs_to_cache, LANG_GLYPHS, DEFAULT_GLYPHS,
                 "glyphs", UNIT_INT, MIN_GLYPHS, MAX_GLYPHS, 10,
                 NULL, NULL, NULL),
@@ -1912,19 +1768,7 @@ const struct settings_list settings[] = {
                   "lyric highlight", NULL),
     OFFON_SETTING(0, lyric_backlight, LANG_LYRICS_BACKLIGHT, true,
                   "lyric backlight", NULL),
-    TEXT_SETTING(F_THEMESETTING|F_NEEDAPPLY,wps_file, "wps",
-                     DEFAULT_WPSNAME, WPS_DIR "/", ".wps"),
-    TEXT_SETTING(F_THEMESETTING|F_NEEDAPPLY,sbs_file, "sbs",
-                     DEFAULT_SBSNAME, SBS_DIR "/", ".sbs"),
-    /* Deliberately neither F_THEMESETTING nor F_THEMERESET: this records
-     * *which* theme is loaded, so a theme .cfg must not be able to set it and
-     * loading one must not clear it before it can be written. */
-    TEXT_SETTING(0, theme_file, "theme", "", THEME_DIR "/", ".cfg"),
     TEXT_SETTING(0,lang_file,"lang","",LANG_DIR "/",".lng"),
-    /* F_THEMERESET: a theme that names no backdrop means it wants none, not
-     * the last theme's image showing through everything it draws. */
-    TEXT_SETTING(F_THEMESETTING|F_THEMERESET|F_NEEDAPPLY,backdrop_file,"backdrop",
-                     DEFAULT_BACKDROP, NULL, NULL),
     TEXT_SETTING(0,kbd_file,"kbd","-",ROCKBOX_DIR "/",".kbd"),
     CHOICE_SETTING(0, usb_charging, LANG_USB_CHARGING, TARGET_USB_CHARGING_DEFAULT, "usb charging",
                    "off,on,force", NULL, 3, ID2P(LANG_SET_BOOL_NO),
@@ -1966,28 +1810,6 @@ const struct settings_list settings[] = {
                    wps_context_menu_load_from_cfg, wps_context_menu_write_to_cfg,
                    wps_context_menu_is_changed, wps_context_menu_set_default),
 
-    /* Customizable icons */
-    TEXT_SETTING(F_THEMESETTING|F_NEEDAPPLY, icon_file, "iconset", DEFAULT_ICONSET,
-                     ICON_DIR "/", ".bmp"),
-    TEXT_SETTING(F_THEMESETTING|F_NEEDAPPLY, viewers_icon_file, "viewers iconset",
-                     DEFAULT_VIEWERS_ICONSET,
-                     ICON_DIR "/", ".bmp"),
-    TEXT_SETTING(F_THEMESETTING|F_NEEDAPPLY, colors_file, "filetype colours", "-",
-                     THEME_DIR "/", ".colours"),
-    /* Off unless a theme asks for it: it repaints in colours taken from the
-     * album art, which a skin not written for it has no reason to expect.
-     * F_THEMERESET so loading such a skin turns it back off. F_TEMPVAR on
-     * this and the next, so neither takes effect until it is chosen: live,
-     * each value scrolled past recolours the whole screen under the open
-     * option list, and a turn from light to dark leaves it drawn wrongly. */
-    OFFON_SETTING(F_THEMERESET|F_TEMPVAR, dynamic_colors,
-                  LANG_DYNAMIC_COLORS, false, "dynamic colors", NULL),
-    /* A light theme sets `light` so an album never turns it dark. */
-    CHOICE_SETTING(F_THEMERESET|F_TEMPVAR, dynamic_colors_background,
-                   LANG_DYNAMIC_COLORS_BACKGROUND, DYNAMIC_BG_AUTO,
-                   "dynamic colors background", "auto,light,dark", NULL, 3,
-                   ID2P(LANG_AUTO), ID2P(LANG_DYNAMIC_COLORS_LIGHT),
-                   ID2P(LANG_DYNAMIC_COLORS_DARK)),
     /* Re-buffers the artwork on change, so the now-playing screen switches
      * picture without waiting for the next track. Dynamic colours need no
      * part in this: they are extracted from whatever bitmap was buffered. */
@@ -1996,22 +1818,22 @@ const struct settings_list settings[] = {
                    "album,artist,auto", wps_art_source_callback, 3,
                    ID2P(LANG_WPS_ART_ALBUM), ID2P(LANG_WPS_ART_ARTIST),
                    ID2P(LANG_WPS_ART_AUTO)),
-    CHOICE_SETTING(F_THEMESETTING, album_covers_view_mode, LANG_CAROUSEL_VIEW_MODE,
+    CHOICE_SETTING(0, album_covers_view_mode, LANG_CAROUSEL_VIEW_MODE,
                   0, "album covers view mode", "3d,flat", NULL, 2,
                   ID2P(LANG_CAROUSEL_VIEW_3D), ID2P(LANG_CAROUSEL_VIEW_FLAT)),
-    INT_SETTING(F_THEMESETTING, album_covers_pile_fade, LANG_CAROUSEL_PILE_FADE, 0,
+    INT_SETTING(0, album_covers_pile_fade, LANG_CAROUSEL_PILE_FADE, 0,
                 "album covers pile fade", UNIT_PERCENT, 0, 100, 5,
                 NULL, NULL, NULL),
-    INT_SETTING(F_THEMESETTING, album_covers_pile_offset, LANG_CAROUSEL_PILE_OFFSET, 0,
+    INT_SETTING(0, album_covers_pile_offset, LANG_CAROUSEL_PILE_OFFSET, 0,
                 "album covers pile offset", UNIT_PIXEL, 0, 8, 1,
                 NULL, NULL, NULL),
-    INT_SETTING(F_THEMESETTING, album_covers_center_margin, LANG_CENTRE_MARGIN, 0,
+    INT_SETTING(0, album_covers_center_margin, LANG_CENTRE_MARGIN, 0,
                 "album covers center margin", UNIT_INT, 0, 80, 1,
                 NULL, NULL, NULL),
-    INT_SETTING(F_THEMESETTING, album_covers_slide_tuck, LANG_NUMBER_OF_SLIDES, 32,
+    INT_SETTING(0, album_covers_slide_tuck, LANG_NUMBER_OF_SLIDES, 32,
                 "album covers slide tuck", UNIT_INT, 0, 64, 1,
                 NULL, NULL, NULL),
-    OFFON_SETTING(F_THEMESETTING, album_covers_parallel_slides, LANG_SPACING, true,
+    OFFON_SETTING(0, album_covers_parallel_slides, LANG_SPACING, true,
                   "album covers parallel slides", NULL),
     /* Diagnostics: append what the two background workers are doing to
      * .rockbox/logs/tagcache.log and art.log. Both drive the same
@@ -2025,9 +1847,6 @@ const struct settings_list settings[] = {
     OFFON_SETTING(F_CB_ON_SELECT_ONLY|F_CB_ONLY_IF_CHANGED,
                   debug_log_playback, LANG_DEBUG_LOG_PLAYBACK, false,
                   "debug log playback", debug_log_callback),
-    OFFON_SETTING(F_CB_ON_SELECT_ONLY|F_CB_ONLY_IF_CHANGED,
-                  debug_log_skin, LANG_DEBUG_LOG_SKIN, false,
-                  "debug log theme", debug_log_callback),
     OFFON_SETTING(F_CB_ON_SELECT_ONLY|F_CB_ONLY_IF_CHANGED,
                   debug_log_tasks, LANG_DEBUG_LOG_TASKS, false,
                   "debug log tasks", debug_log_callback),
@@ -2048,7 +1867,7 @@ const struct settings_list settings[] = {
                 LANG_CAROUSEL_TRANSITION_SPEED, 325,
                 "album covers transition speed", UNIT_PERCENT, 100, 400, 25,
                 NULL, NULL, NULL),
-    CHOICE_SETTING(F_THEMESETTING, album_covers_show_album_name, LANG_SHOW_ALBUM_TITLE,
+    CHOICE_SETTING(0, album_covers_show_album_name, LANG_SHOW_ALBUM_TITLE,
                   4, "album covers show album name",
                   "hide,bottom,top,both top,both bottom", NULL, 5,
                   ID2P(LANG_HIDE_ALBUM_TITLE_NEW), ID2P(LANG_SHOW_AT_THE_BOTTOM_NEW),
@@ -2158,7 +1977,7 @@ const struct settings_list settings[] = {
                   0, "album covers year sort order", "ascending,descending",
                   NULL, 2, ID2P(LANG_ASCENDING), ID2P(LANG_DESCENDING)),
     /* As album show year: "on" is After. */
-    CHOICE_SETTING(F_THEMESETTING, album_covers_show_year,
+    CHOICE_SETTING(0, album_covers_show_year,
                    LANG_SHOW_YEAR_IN_ALBUM_TITLE, ALBUM_YEAR_OFF,
                    "album covers show year", "off,before,on", NULL, 3,
                    ID2P(LANG_SET_BOOL_NO), ID2P(LANG_YEAR_BEFORE_NAME),
@@ -2171,15 +1990,15 @@ const struct settings_list settings[] = {
                    ID2P(LANG_FILTER_COLOUR_DOWN), ID2P(LANG_FILTER_HUE), \
                    ID2P(LANG_FILTER_POSTERISE),  ID2P(LANG_DITHERING),   \
                    ID2P(LANG_FILTER_PIXELLATE)
-    CHOICE_SETTING(F_THEMESETTING|F_THEMERESET, album_covers_filter[0],
+    CHOICE_SETTING(0, album_covers_filter[0],
                    LANG_ARTWORK_FILTER_1, 0, "album covers filter 1",
                    CAROUSEL_FILTER_CFG_VALS, NULL,
                    CAROUSEL_FILTER_COUNT, CAROUSEL_FILTER_CHOICES),
-    CHOICE_SETTING(F_THEMESETTING|F_THEMERESET, album_covers_filter[1],
+    CHOICE_SETTING(0, album_covers_filter[1],
                    LANG_ARTWORK_FILTER_2, 0, "album covers filter 2",
                    CAROUSEL_FILTER_CFG_VALS, NULL,
                    CAROUSEL_FILTER_COUNT, CAROUSEL_FILTER_CHOICES),
-    CHOICE_SETTING(F_THEMESETTING|F_THEMERESET, album_covers_filter[2],
+    CHOICE_SETTING(0, album_covers_filter[2],
                    LANG_ARTWORK_FILTER_3, 0, "album covers filter 3",
                    CAROUSEL_FILTER_CFG_VALS, NULL,
                    CAROUSEL_FILTER_COUNT, CAROUSEL_FILTER_CHOICES),
@@ -2187,51 +2006,36 @@ const struct settings_list settings[] = {
      * and the three slots above are the screen's way of saying the same thing.
      * This is for a .cfg, where the fixed list is only in the way -- it takes
      * any chain the engine compiles, amounts and '+' included. */
-    TEXT_SETTING(F_THEMESETTING|F_THEMERESET, album_covers_filter_chain,
+    TEXT_SETTING(0, album_covers_filter_chain,
                  "album covers filter", "", NULL, NULL),
 #undef CAROUSEL_FILTER_CHOICES
-    /* Defaults for a theme that says nothing, not the shipped look. Few
-     * status bars span the full width, and one that does not sits over a
-     * screen that does as a gap rather than a bar.
-     *
-     * F_THEMERESET is what makes that true. Without it these keep the last
-     * theme's answer, so a theme saying nothing inherits a reserved status bar
-     * strip it never draws into, and the carousel runs with a gap along the
-     * top. */
-    CHOICE_SETTING(F_THEMESETTING|F_THEMERESET, album_covers_background,
+    CHOICE_SETTING(0, album_covers_background,
                   LANG_CAROUSEL_BACKGROUND,
                   1, "album covers background",
                   "foreground,background,custom", NULL, 3,
                   ID2P(LANG_FOREGROUND_COLOR), ID2P(LANG_BACKGROUND_COLOR),
                   ID2P(LANG_CAROUSEL_BG_CUSTOM)),
     /* Set by the Custom Colour row in album_covers_settings.c. */
-    {F_T_INT|F_RGB|F_THEMESETTING, &global_settings.album_covers_custom_color,
+    {F_T_INT|F_RGB, &global_settings.album_covers_custom_color,
         -1, INT(0), "album covers background color", UNUSED},
-    OFFON_SETTING(F_THEMESETTING|F_THEMERESET, album_covers_statusbar,
+    OFFON_SETTING(0, album_covers_statusbar,
                   LANG_STATUS_BAR,
                   false, "album covers statusbar", NULL),
-    /* A theme sets these, and Appearance > Interface Elements shows them.
-     * They make rows grow to the tall height to fit a cover, so a theme whose
-     * list config doesn't draw the %La cover gets tall rows with nothing in
-     * them, and must say off in its .cfg. Album, audiobook and book covers are
-     * on unless it does: nearly every one has a cover. Artist and author
-     * photographs are off unless asked for, as few have one. F_THEMERESET so
-     * a theme that says nothing gets the defaults rather than inheriting from
-     * the last theme loaded. */
-    OFFON_SETTING(F_THEMESETTING|F_THEMERESET, db_albumart, LANG_DB_ALBUM_ART,
+    /* Artwork shown beside library rows. */
+    OFFON_SETTING(0, db_albumart, LANG_DB_ALBUM_ART,
                   true, "database album art", NULL),
-    OFFON_SETTING(F_THEMESETTING|F_THEMERESET, db_artistart, LANG_DB_ARTIST_ART,
+    OFFON_SETTING(0, db_artistart, LANG_DB_ARTIST_ART,
                   false, "database artist art", NULL),
-    OFFON_SETTING(F_THEMESETTING|F_THEMERESET, db_bookart, LANG_DB_BOOK_ART,
+    OFFON_SETTING(0, db_bookart, LANG_DB_BOOK_ART,
                   true, "database audiobook art", NULL),
-    OFFON_SETTING(F_THEMESETTING|F_THEMERESET, db_authorart, LANG_DB_AUTHOR_ART,
+    OFFON_SETTING(0, db_authorart, LANG_DB_AUTHOR_ART,
                   false, "database author art", NULL),
-    OFFON_SETTING(F_THEMESETTING|F_THEMERESET, db_ebookart, LANG_DB_EBOOK_ART,
+    OFFON_SETTING(0, db_ebookart, LANG_DB_EBOOK_ART,
                   true, "database book art", NULL),
-    OFFON_SETTING(F_THEMESETTING|F_THEMERESET, db_ebookauthorart,
+    OFFON_SETTING(0, db_ebookauthorart,
                   LANG_DB_EBOOK_AUTHOR_ART, false, "database book author art",
                   NULL),
-    OFFON_SETTING(F_THEMESETTING|F_THEMERESET, db_podcastart,
+    OFFON_SETTING(0, db_podcastart,
                   LANG_DB_PODCAST_ART, true, "database podcast art", NULL),
     /* Auto, saved as "on": kept apart whenever the library holds any */
     BOOL_SETTING(F_BANFROMQS, segregate_audiobooks, LANG_SEGREGATE_AUDIOBOOKS,
@@ -2240,9 +2044,8 @@ const struct settings_list settings[] = {
     BOOL_SETTING(F_BANFROMQS, segregate_podcasts, LANG_SEGREGATE_PODCASTS,
                  true, "segregate podcasts", off_on, LANG_AUTO, LANG_OFF,
                  segregate_podcasts_callback),
-    /* 0 leaves the skin's own row height; the bounds stop a hand-edited .cfg
-     * giving a row taller than the screen. */
-    INT_SETTING(F_THEMESETTING, db_art_row_height, -1, 52,
+    /* 0 uses the native row height. */
+    INT_SETTING(0, db_art_row_height, -1, 52,
                 "database art row height", UNIT_PIXEL, 0, LCD_HEIGHT, 1,
                 NULL, NULL, NULL),
     OFFON_SETTING(0, art_cache_fast_build, LANG_ART_CACHE_FAST_BUILD, false,
@@ -2334,9 +2137,6 @@ const struct settings_list settings[] = {
 
 
 
-    /* Customizable list */
-    VIEWPORT_SETTING(ui_vp_config, "ui viewport"),
-
     CUSTOM_SETTING(0, context_wps,
                    LANG_HOTKEY_WPS, /* lang string here is never actually used */
                    &wps_context_menu_default, "context_wps",
@@ -2415,8 +2215,7 @@ const struct settings_list settings[] = {
                    ID2P(LANG_SPIKE_CAPTION_BOTH)),
     OFFON_SETTING(0, spike_caption_scroll, LANG_SPIKE_CAPTION_SCROLL, false,
                   "spike caption scroll", NULL),
-    OFFON_SETTING(0, animations, LANG_UI_ANIMATIONS, false, "animations", NULL),
-    OFFON_SETTING(F_BANFROMQS, native_ui, -1, false, "native ui", NULL),
+    OFFON_SETTING(0, animations, LANG_UI_ANIMATIONS, true, "animations", NULL),
     TEXT_SETTING(0, native_theme, "native theme", "scrim", NULL, NULL),
 };
 

@@ -79,9 +79,12 @@
 #include "draw/icon.h"
 #include "draw/viewport.h"
 #include "draw/progress_bar.h"
-#include "skin/skin_albumart_color.h"
-#include "skin/skin_engine.h"
-#include "skin/statusbar_skinned.h"
+#include "metadata/album_palette.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/perf.h"
+#include "ui/scene.h"
+#include "ui/native_wps.h"
+#include "ui/statusbar.h"
 #include "bootchart.h"
 #include "logdiskf.h"
 #include "bootdata.h"
@@ -108,9 +111,7 @@
 #define MAIN_NORETURN_ATTR NORETURN_ATTR
 
 #if (CONFIG_PLATFORM & PLATFORM_SDL)
-/* The simulator takes a command line -- --debugwps traces skin parsing,
- * --nobackground drops the player bezel, and there are a few more in
- * sys_handle_argv(). Without argv they are all silently unavailable. */
+/* SDL options include --nobackground to drop the player bezel. */
 #include "sim_tasks.h"
 #include "system-sdl.h"
 #define HAVE_ARGV_MAIN
@@ -140,6 +141,8 @@ int main(void)
     CHART(">init");
     init();
     CHART("<init");
+    struct ui_scene startup_scene = {0};
+    ui_scene_boot(&startup_scene);
     /* Hand the screen over to the UI in the colours it will use.
      *
      * The boot screen paints in its own palette and leaves it set --
@@ -152,9 +155,15 @@ int main(void)
      * resume point: seeding here is what lets the first screen appear already
      * carrying them, and the colours have to be resolved for the clear below
      * or the theme's background shows through until something repaints. */
-    dynamic_colors_seed_resume();
-    unsigned int boot_fg = dynamic_colors_resolve(global_settings.fg_color);
-    unsigned int boot_bg = dynamic_colors_resolve(global_settings.bg_color);
+    album_palette_seed_resume();
+    struct ui_theme theme;
+    struct ui_album_palette palette;
+    ui_theme_snapshot(&theme);
+    album_palette_snapshot(&palette);
+    uint32_t fg = ui_theme_color(&theme, UI_COLOR_FOREGROUND, &palette);
+    uint32_t bg = ui_theme_color(&theme, UI_COLOR_BACKGROUND, &palette);
+    unsigned int boot_fg = LCD_RGBPACK(fg >> 16, (fg >> 8) & 255, fg & 255);
+    unsigned int boot_bg = LCD_RGBPACK(bg >> 16, (bg >> 8) & 255, bg & 255);
     FOR_NB_SCREENS(i)
     {
         screens[i].set_foreground(boot_fg);
@@ -633,6 +642,8 @@ static void init(void)
     system_init();
     core_allocator_init();
     kernel_init();
+    album_palette_alloc();
+    native_wps_alloc();
     crumbs_guard_init();
 #if !defined(SIMULATOR) && !defined(APPLICATION)
     tick_add_task(main_stack_guard);
@@ -706,17 +717,8 @@ static void init(void)
 
     piezo_init();
 
-    /* Keep the order of this 3 (viewportmanager handles statusbars)
-     * Must be done before any code uses the multi-screen API */
-    CHART(">gui_syncstatusbar_init");
-    gui_syncstatusbar_init(&statusbars);
-    CHART("<gui_syncstatusbar_init");
-    CHART(">sb_skin_init");
-    sb_skin_init();
-    CHART("<sb_skin_init");
-    CHART(">gui_sync_wps_init");
-    gui_sync_skin_init();
-    CHART("<gui_sync_wps_init");
+    /* The viewport stack owns whether native status chrome is displayed. */
+    sb_init();
     CHART(">viewportmanager_init");
     viewportmanager_init();
     CHART("<viewportmanager_init");
@@ -798,6 +800,7 @@ static void init(void)
     dsp_init();
 
     boot_progress(BOOT_SETTINGS, 0, 0, BOOT_KEEP_CAPTION);
+    ui_perf_init();
     CHART(">settings_load");
     settings_load();
     CHART("<settings_load");
@@ -816,6 +819,7 @@ static void init(void)
     boot_progress(BOOT_THEME, 0, 0, BOOT_KEEP_CAPTION);
     CHART(">settings_apply(true)");
     settings_apply(true);
+    album_palette_init();
     CHART("<settings_apply(true)");
     /* Language is loaded and audio has not claimed the remaining core pool.
      * This uses the same bundled 12 px file as the HarmonyOS overlay. */
@@ -874,19 +878,14 @@ static void init(void)
     battery_log_init();
     accessory_supply_set(global_settings.accessory_supply);
     lineout_set(global_settings.lineout_active);
-    /* The last stage, and a slow one -- parsing the WPS and SBS, then loading
-     * their backdrops, bitmaps and fonts. It gets its own caption because the
-     * bar sits nearly full for the whole of it, and LANG_WAIT left over from
-     * audio_init() does not explain the pause. */
+    /* Paint the final caption before handing the panel to native chrome. */
     boot_progress(BOOT_SKINS, 0, 0, LANG_APPLYING_THEME);
     if (boot_caption_font != FONT_SYSFIXED)
     {
         font_unload(boot_caption_font);
         boot_caption_font = FONT_SYSFIXED;
     }
-    CHART("<settings_apply_skins");
-    settings_apply_skins();
-    CHART(">settings_apply_skins");
+    sb_invalidate();
     tagcache_boot_finished();
 #if defined(CPU_PP502x) || CONFIG_CPU == S5L8702
     hang_catch_init();

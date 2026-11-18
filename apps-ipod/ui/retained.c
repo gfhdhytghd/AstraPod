@@ -2,7 +2,7 @@
 #include "config.h"
 #include "core_alloc.h"
 #include "lcd.h"
-#include "settings/settings.h"
+#include "frame.h"
 #include "system.h"
 #include "retained.h"
 #include "native_theme_runtime.h"
@@ -65,11 +65,6 @@ static struct ui_view_frame view_frame(const struct ui_view *view)
 {
     struct ui_view_frame parent = view->parent ? view_frame(view->parent) : screen_frame();
     return resolve(view, &parent);
-}
-
-bool ui_native_enabled(void)
-{
-    return global_settings.native_ui;
 }
 
 void ui_view_init(struct ui_view *view, struct ui_rect bounds,
@@ -232,7 +227,9 @@ static void paint_view(const struct ui_view *view, const struct ui_view_frame *p
 static void paint_page(struct ui_page *page, struct ui_rect damage)
 {
     struct ui_view_frame root = screen_frame();
+    unsigned int start = USEC_TIMER;
     paint_view(page->root, &root, damage);
+    ui_note_render(USEC_TIMER - start);
     page->damage = (struct ui_rect){0};
 }
 
@@ -248,9 +245,8 @@ static void present(struct ui_rect damage)
 {
     if (!empty(damage))
     {
-        struct viewport *prev = lcd_set_viewport(NULL);
-        lcd_update_rect(damage.x, damage.y, damage.width, damage.height);
-        lcd_set_viewport(prev);
+        ui_mark_dirty_rect(SCREEN_MAIN, damage.x, damage.y, damage.width, damage.height);
+        ui_flush_dirty();
     }
 }
 
@@ -335,7 +331,14 @@ void ui_layer_free(struct ui_layer *layer)
         layer->handle = core_free(layer->handle);
 }
 
-static fb_data layer_pixel(fb_data src, fb_data dst, unsigned ink, unsigned light)
+#ifdef __thumb__
+#define UI_PIXELS_ARM __attribute__((target("arm")))
+#else
+#define UI_PIXELS_ARM
+#endif
+
+static UI_PIXELS_ARM fb_data layer_pixel(fb_data src, fb_data dst,
+                                         unsigned ink, unsigned light)
 {
     unsigned back = UI_FULL_OPACITY - ink;
     unsigned red = (((src >> 11) * light / UI_FULL_OPACITY) * ink +
@@ -347,19 +350,73 @@ static fb_data layer_pixel(fb_data src, fb_data dst, unsigned ink, unsigned ligh
     return (red << 11) | (green << 5) | blue;
 }
 
-#ifdef __thumb__
-__attribute__((target("arm")))
-#endif
-void ui_layer_paint(const struct ui_view *view, const struct ui_view_frame *frame)
+/* Red and blue occupy separate 16-bit lanes. Each weighted sum needs at most
+ * 13 bits, so an ARM word can blend both channels in one multiply pair. */
+static UI_PIXELS_ARM uint32_t red_blue(fb_data pixel)
+{
+    return ((uint32_t)(pixel & 0xf800) << 5) | (pixel & 31);
+}
+
+UI_PIXELS_ARM void ui_blit_dim(fb_data *dst, const fb_data *src, int pixels,
+                              unsigned brightness)
+{
+    if (brightness == UI_FULL_OPACITY)
+    {
+        memcpy(dst, src, pixels * sizeof(*dst));
+        return;
+    }
+    for (int x = 0; x < pixels; ++x)
+    {
+        fb_data pixel = src[x];
+        uint32_t rb = red_blue(pixel) * brightness >> 8;
+        unsigned green = ((pixel >> 5) & 63) * brightness >> 8;
+        dst[x] = ((rb >> 5) & 0xf800) | (green << 5) | (rb & 31);
+    }
+}
+
+static UI_PIXELS_ARM void blend_aligned(fb_data *dst, const fb_data *src, int count,
+                                        unsigned ink, unsigned light)
+{
+    if (ink == UI_FULL_OPACITY && light == UI_FULL_OPACITY)
+    {
+        memcpy(dst, src, count * sizeof(*dst));
+        return;
+    }
+    if (light != UI_FULL_OPACITY && ink != UI_FULL_OPACITY)
+    {
+        for (int x = 0; x < count; ++x)
+            dst[x] = layer_pixel(src[x], dst[x], ink, light);
+        return;
+    }
+
+    unsigned source_weight = MIN(ink, light);
+    unsigned under_weight = UI_FULL_OPACITY - ink;
+    for (int x = 0; x < count; ++x)
+    {
+        fb_data above = src[x], below = dst[x];
+        uint32_t rb = (red_blue(above) * source_weight +
+                       red_blue(below) * under_weight) >> 8;
+        unsigned green = ((((above >> 5) & 63) * source_weight) +
+                          (((below >> 5) & 63) * under_weight)) >> 8;
+        dst[x] = ((rb >> 5) & 0xf800) | (green << 5) | (rb & 31);
+    }
+}
+
+UI_PIXELS_ARM void ui_layer_paint(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     const struct ui_layer *layer = view->data;
-    if (layer->handle <= 0)
+    if (layer->handle <= 0 || empty(frame->clip))
         return;
     const struct ui_rect *bounds = &frame->bounds;
     const struct ui_rect *clip = &frame->clip;
     fb_data *data = core_get_data_pinned(layer->handle);
     const fb_data *pixels = data + layer->offset_pixels;
     bool exact = layer->width == bounds->width && layer->height == bounds->height;
+    int left = clip->x - bounds->x;
+    int sx_first = exact ? left : left * layer->width / bounds->width;
+    int phase_first = exact ? 0 : left * layer->width % bounds->width;
+    int step = exact ? 1 : layer->width / bounds->width;
+    int remainder = exact ? 0 : layer->width % bounds->width;
     for (int y = clip->y; y < clip->y + clip->height; ++y)
     {
         int sy = y - bounds->y;
@@ -367,12 +424,23 @@ void ui_layer_paint(const struct ui_view *view, const struct ui_view_frame *fram
             sy = sy * layer->height / bounds->height;
         fb_data *dst = lcd_framebuffer_default.fb_ptr + y * LCD_WIDTH + clip->x;
         const fb_data *row = pixels + sy * layer->width;
-        if (exact && frame->opacity == UI_FULL_OPACITY && frame->brightness == UI_FULL_OPACITY)
-            memcpy(dst, row + clip->x - bounds->x, clip->width * sizeof(*dst));
-        else for (int x = 0; x < clip->width; ++x)
+        if (exact)
+            blend_aligned(dst, row + left, clip->width, frame->opacity, frame->brightness);
+        else
         {
-            int sx = (clip->x + x - bounds->x) * layer->width / bounds->width;
-            dst[x] = layer_pixel(row[sx], dst[x], frame->opacity, frame->brightness);
+            int sx = sx_first;
+            int phase = phase_first;
+            for (int x = 0; x < clip->width; ++x)
+            {
+                dst[x] = layer_pixel(row[sx], dst[x], frame->opacity, frame->brightness);
+                sx += step;
+                phase += remainder;
+                if (phase >= bounds->width)
+                {
+                    phase -= bounds->width;
+                    ++sx;
+                }
+            }
         }
     }
     core_put_data_pinned(data);

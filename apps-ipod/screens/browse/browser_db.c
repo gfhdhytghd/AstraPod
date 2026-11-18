@@ -7189,7 +7189,7 @@ int browser_db_get_attr(struct browser_context* c)
 }
 
 /* Row 'id' if the page holding it is loaded, else NULL. Unlike
- * browser_db_get_entry() this never loads one: the skin asks of rows it is not
+ * browser_db_get_entry() this never loads one: the list asks of rows it is not
  * drawing, and a page load is a database search. */
 static struct tagentry *loaded_entry(struct browser_context *c, int id)
 {

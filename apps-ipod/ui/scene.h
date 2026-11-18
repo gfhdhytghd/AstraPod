@@ -10,7 +10,8 @@ struct ui_scene {
     const void *back_page, *front_page;
     struct ui_tween tween;
     int handle, last_offset;
-    bool target_front, capturing;
+    unsigned trace;
+    bool target_front, capturing, automatic, modal, vertical;
 };
 
 /* The UI thread owns a scene from capture through the end of its transition.
@@ -22,6 +23,16 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed);
 int ui_scene_timeout(const struct ui_scene *scene, int timeout);
 void ui_scene_cancel(struct ui_scene *scene);
 void ui_scene_interrupt(void);
+void ui_scene_fade_out(void);
+/* Root-level screens hand their first painted frame to the action pump. */
+void ui_scene_enter(struct ui_scene *, const void *from, const void *to, bool push);
+void ui_scene_boot(struct ui_scene *scene);
+/* A full-page picker retains its underlying page until dismissal. */
+void ui_scene_open_modal(struct ui_scene *scene, const char *route);
+void ui_scene_open_page(struct ui_scene *scene, const char *route);
+void ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *route);
+bool ui_scene_automatic(void);
+int ui_scene_poll(int timeout);
 /* Space to leave free when laying out a new playback buffer. */
 size_t ui_scene_reserve_size(void);
 

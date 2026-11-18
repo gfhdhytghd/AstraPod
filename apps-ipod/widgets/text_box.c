@@ -16,6 +16,7 @@
 #include <ctype.h>
 #include <string.h>
 #include "config.h"
+#include "core_alloc.h"
 #include "system.h"          /* MIN */
 #include "lcd.h"
 #include "font.h"
@@ -25,7 +26,9 @@
 #include "draw/screen_access.h"   /* screens[] */
 #include "draw/viewport.h"
 #include "draw/scrollbar.h"
-#include "skin/skin_albumart_color.h"  /* dynamic_colors_resolve */
+#include "metadata/album_palette.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/retained.h"
 #include "system/shutdown.h"
 #include "screens/playback/track_info.h"
 #include "text_box.h"         /* view_text prototype */
@@ -41,6 +44,10 @@
 #define TB_TITLE_PAD 4
 
 struct view_info {
+    struct ui_view view;
+    struct ui_nav nav;
+    struct ui_page page;
+    int handle;
     struct font* pf;
     int font;
     int title_font;     /* the theme's bold UI font */
@@ -163,41 +170,40 @@ static int init_view(struct view_info *info,
     return 0;
 }
 
-static void draw_text(struct view_info *info)
+static unsigned text_color(const struct ui_theme *theme, enum ui_color_role role,
+                           const struct ui_album_palette *palette)
 {
-#define OUTPUT_SIZE LCD_WIDTH+1
-    static char output[OUTPUT_SIZE];
+    uint32_t rgb = ui_theme_color(theme, role, palette);
+    return LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
+}
+
+static void paint_text(const struct ui_view *node, const struct ui_view_frame *frame)
+{
+    struct view_info *info = node->data;
+    char output[LCD_WIDTH + 1];
     const char *text, *ptr, *end;
     int max_show, line;
-    struct screen* display = &screens[SCREEN_MAIN];
+    struct screen *display = &screens[SCREEN_MAIN];
+    struct ui_theme theme;
+    struct ui_album_palette palette;
+    ui_theme_snapshot(&theme);
+    album_palette_snapshot(&palette);
+    unsigned fg = text_color(&theme, UI_COLOR_FOREGROUND, &palette);
+    unsigned bg = text_color(&theme, UI_COLOR_BACKGROUND, &palette);
 
-    /* The colours this page is painted in, taken fresh every draw.
-     *
-     * Trap: the settings hold the theme's own pair, and what is on screen is
-     * whatever the album art has made of them -- viewport_set_fullscreen()
-     * copies the settings straight through, so a view built from it paints
-     * itself in the static theme while the list it was opened from is
-     * dynamic. Resolving is a no-op when the feature is off or no palette has
-     * been extracted, so it is unconditional.
-     *
-     * Every draw rather than once in init_view(), because the album the
-     * palette comes from can change while the page is still up. */
-    unsigned fg = dynamic_colors_resolve(global_settings.fg_color);
-    unsigned bg = dynamic_colors_resolve(global_settings.bg_color);
-
-    /* The ground and the title, through a viewport of this screen's own.
-     * clear_display() and the NULL viewport are the *firmware's* default
-     * viewport, which carries neither pair and would leave the page a
-     * different colour from the text on it. */
     struct viewport all;
 
-    /* buffer and flags before the call, not after: viewport_set_fullscreen()
-     * hands straight to lcd_init_viewport(), which reads vp->buffer->elems --
-     * on an uninitialised stack viewport that is a garbage pointer and a data
-     * abort. Same order as viewport_set_defaults(). */
-    all.buffer = NULL;                  /* the default framebuffer */
-    all.flags  = VP_DEFAULT_FLAGS;
-    viewport_set_fullscreen(&all, SCREEN_MAIN);
+    struct viewport *previous = *display->current_viewport;
+    all = (struct viewport){
+        .x = frame->clip.x,
+        .y = frame->clip.y,
+        .width = frame->clip.width,
+        .height = frame->clip.height,
+        .flags = VP_DEFAULT_FLAGS,
+        .drawmode = DRMODE_SOLID,
+        .buffer = &lcd_framebuffer_default,
+        .font = info->title_font,
+    };
     all.fg_pattern = fg;
     all.bg_pattern = bg;
     display->set_viewport(&all);
@@ -210,9 +216,10 @@ static void draw_text(struct view_info *info)
 
         all.font = info->title_font;
         display->getstringsize(info->title, &w, &h);
-        x = MAX((all.width - w) / 2, TB_MARGIN);
-        display->putsxy(x, TB_TITLE_PAD, info->title);
-        display->hline(TB_MARGIN, all.width - 1 - TB_MARGIN, rule_y);
+        x = MAX((frame->bounds.width - w) / 2, TB_MARGIN);
+        display->putsxy(x - all.x, TB_TITLE_PAD - all.y, info->title);
+        display->hline(TB_MARGIN - all.x, frame->bounds.width - 1 - TB_MARGIN - all.x,
+                       rule_y - all.y);
     }
 
     info->vp.fg_pattern = fg;
@@ -228,7 +235,7 @@ static void draw_text(struct view_info *info)
     {
         int len;
         ptr = get_next_line(text, info, &end);
-        len = MIN(end - text, OUTPUT_SIZE - 1);
+        len = MIN(end - text, (int)sizeof(output) - 1);
         while(len > 0 && isspace(text[len-1]))
             len--;
         memcpy(output, text, len);
@@ -245,8 +252,14 @@ static void draw_text(struct view_info *info)
                 VERTICAL);
     }
 
-    display->set_viewport(NULL);
-    display->update();
+    display->set_viewport(previous);
+}
+
+static void draw_text(struct view_info *info)
+{
+    album_palette_refresh();
+    ui_page_invalidate(&info->page, (struct ui_rect){0, 0, LCD_WIDTH, LCD_HEIGHT});
+    ui_nav_draw(&info->nav);
 }
 
 static void scroll_up(struct view_info *info, int n)
@@ -287,13 +300,31 @@ static void scroll_to_bottom(struct view_info *info)
     draw_text(info);
 }
 
+static void text_view_close(void *data)
+{
+    struct view_info *info = data;
+    ui_nav_pop(&info->nav);
+    viewportmanager_theme_undo(SCREEN_MAIN, true);
+    int handle = info->handle;
+    core_put_data_pinned(info);
+    core_free(handle);
+}
+
 int view_text(const char *title, const char *text)
 {
-    struct view_info info;
-    int button;
+    static const struct ui_view_ops ops = {.paint = paint_text};
+    int handle = core_alloc_free_space(sizeof(struct view_info));
+    if (handle <= 0)
+        return 0;
 
-    init_view(&info, title, text);
-    draw_text(&info);
+    struct view_info *info = core_get_data_pinned(handle);
+    *info = (struct view_info){.handle = handle};
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
+    init_view(info, title, text);
+    ui_view_init(&info->view, (struct ui_rect){0, 0, LCD_WIDTH, LCD_HEIGHT}, &ops, info);
+    ui_page_init(&info->page, &info->view);
+    ui_nav_push(&info->nav, &info->page, UI_PAGE);
+    draw_text(info);
     if (global_settings.talk_menu)
     {
         if (title && P2ID((unsigned char *)title) >= 0)
@@ -303,46 +334,45 @@ int view_text(const char *title, const char *text)
         talk_text(text, true);
     }
 
-    /* wait for keypress */
-    while(1)
+    while (true)
     {
-        button = get_action(CONTEXT_LIST, TIMEOUT_BLOCK);
-        switch (button)
+        int action = get_action(CONTEXT_LIST, TIMEOUT_BLOCK);
+        switch (action)
         {
         case ACTION_STD_PREV:
         case ACTION_STD_PREVREPEAT:
-            scroll_up(&info, 1);
+            scroll_up(info, 1);
             break;
         case ACTION_STD_NEXT:
         case ACTION_STD_NEXTREPEAT:
-            scroll_down(&info, 1);
+            scroll_down(info, 1);
             break;
         case ACTION_LISTTREE_PGUP:
-            scroll_up(&info, info.display_lines);
+            scroll_up(info, info->display_lines);
             break;
         case ACTION_LISTTREE_PGDOWN:
-            scroll_down(&info, info.display_lines);
+            scroll_down(info, info->display_lines);
             break;
-        /* The two jumps are the two holds: MENU held for the top, SELECT held
-         * for the bottom. A MENU tap is left to mean what it means everywhere
-         * else. */
         case ACTION_STD_QUICKSCREEN:
-            scroll_to_top(&info);
+            scroll_to_top(info);
             break;
         case ACTION_STD_CONTEXT:
-            scroll_to_bottom(&info);
+            scroll_to_bottom(info);
+            break;
+        case ACTION_REDRAW:
+            draw_text(info);
             break;
         case ACTION_STD_MENU:
-            return 1;
         case ACTION_STD_OK:
         case ACTION_STD_CANCEL:
-            return 0;
+            text_view_close(info);
+            return action == ACTION_STD_MENU;
+        case SYS_USB_CONNECTED:
+            default_event_handler_ex(action, text_view_close, info);
+            return 1;
         default:
-            if (default_event_handler(button) == SYS_USB_CONNECTED)
-                return 1;
+            default_event_handler(action);
             break;
         }
-   }
-
-    return 0;
+    }
 }

@@ -56,6 +56,7 @@
 #include "app_util.h"
 #include "shutdown.h"
 #include "output_pause.h"
+#include "ui/scene.h"
 
 #ifdef BOOTFILE
 /* True once this cable session's "before" BOOTFILE mtime has been recorded. */
@@ -92,12 +93,6 @@ static bool clean_shutdown(enum shutdown_type sd_type,
 #endif
     {
         bool batt_safe = battery_level_safe();
-
-        FOR_NB_SCREENS(i)
-        {
-            screens[i].clear_display();
-            screens[i].update();
-        }
 
         if (batt_safe)
         {
@@ -173,6 +168,8 @@ static bool clean_shutdown(enum shutdown_type sd_type,
             voice_wait();
         }
 
+        if (batt_safe)
+            ui_scene_fade_out();
         shutdown_hw(sd_type);
     }
     return false;

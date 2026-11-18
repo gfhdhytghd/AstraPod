@@ -28186,3 +28186,18 @@
     *: "动画"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_NATIVE_THEME
+  desc: Name of the native theme picker in Appearance settings
+  user: core
+  <source>
+    *: "Native theme"
+  </source>
+  <dest>
+    *: "原生主题"
+  </dest>
+  <voice>
+    *: "原生主题"
+  </voice>
+</phrase>

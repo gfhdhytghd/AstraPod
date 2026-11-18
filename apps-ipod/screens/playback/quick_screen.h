@@ -37,7 +37,6 @@ extern int quick_screen_quick(int button_enter);
 extern int quick_screen_cider(int button_enter);
 /* Select by playback source. Optional foreground poll runs without drawing. */
 extern int quick_screen_current(int button_enter, void (*poll)(void));
-bool quick_screen_cider_active(void);
 bool is_setting_quickscreenable(const struct settings_list *setting);
 
 #endif /*_GUI_QUICK_SCREEN_H_*/

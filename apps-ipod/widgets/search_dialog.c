@@ -407,7 +407,7 @@ int search_dialog_run(const struct search_provider *p, void *ctx,
      * becomes a shape, in Dialog Colour Mode's selection colours. A property
      * of "a list of results in a box" rather than of any one provider, so it
      * is the default here. */
-    style = *dialog_get_default_style();
+    dialog_style_default(&style);
     style.box_margin = BOX_PAD;     /* the default 10 costs a row of height */
     style.button_border_width = 0;
     style.button_bg = DIALOG_COLOR_INHERIT;
@@ -415,6 +415,7 @@ int search_dialog_run(const struct search_provider *p, void *ctx,
 
     push_current_activity(p->activity);
     dialog_init(&d, CONTEXT_KEYBOARD, p->title, &style, &cb, &s);
+    d.motion_route = "search";
 
     int res = dialog_run(&d, POLL_IDLE);
 

@@ -49,8 +49,6 @@
 #include "browser_disk.h"
 #include "system/app_util.h"
 #include "system/activity.h"   /* ui_set_working -- the status-bar busy indicator */
-#include "skin/skin_engine.h"
-#include "skin/statusbar_skinned.h"
 #include "strnatcmp.h"
 #include "widgets/keyboard.h"
 
@@ -432,9 +430,7 @@ int browser_disk_load(struct browser_context* c, const char* tempdir)
         if ((!(dir_attr) && (CHK_FT(SHOW_PLAYLIST, FILE_ATTR_M3U) ||
             (CHK_FT(SHOW_MUSIC, FILE_ATTR_AUDIO) && file_attr != FILE_ATTR_M3U) ||
             (*c->dirfilter == SHOW_SUPPORTED && !filetype_supported(dptr->attr)))) ||
-            CHK_FT(SHOW_WPS,  FILE_ATTR_WPS)  ||
             CHK_FT(SHOW_FONT, FILE_ATTR_FONT) ||
-            CHK_FT(SHOW_SBS,  FILE_ATTR_SBS)  ||
             CHK_FT(SHOW_M3U, FILE_ATTR_M3U) ||
             CHK_FT(SHOW_CFG, FILE_ATTR_CFG) ||
             CHK_FT(SHOW_LNG, FILE_ATTR_LNG) ||
@@ -542,29 +538,11 @@ static void browser_disk_load_font(char *file)
     viewportmanager_theme_changed(THEME_UI_VIEWPORT);
 }
 
-static void browser_disk_apply_skin_file(char *buf, char *file)
-{
-    ui_set_working(true);
-    set_file(buf, file);
-    settings_apply_skins();
-}
-
-/* Repaint everything after a "... loaded" splash that followed a theme change.
- * The load redraws the screen and consumes the skins' full-update flag, then
- * the splash covers the middle of the display.
- *
- * Clearing the framebuffer is the part that cannot be skipped. Asking the skins
- * to redraw in full only repaints the viewports they define, and skin_render()
- * clears the screen itself only for the WPS -- so on a list screen the box
- * survives in whatever the theme's viewports do not cover, which for a skin
- * that insets its UI viewport is most of the box. The list and the statusbar
- * skin then draw over the cleared buffer before the next flush. */
+/* Clear the “… loaded” splash before the new list redraws. */
 static void browser_disk_repaint_after_splash(void)
 {
     FOR_NB_SCREENS(i)
         screens[i].clear_display();
-    skin_request_full_update(CUSTOM_STATUSBAR);
-    sb_skin_force_next_update();
 }
 
 static const char *strip_slash(const char *path, const char *def)
@@ -716,13 +694,6 @@ int browser_disk_enter(struct browser_context* c)
                 }
                 break;
             }
-            case FILE_ATTR_SBS:
-                browser_disk_apply_skin_file(buf, global_settings.sbs_file);
-                break;
-                /* wps config file */
-            case FILE_ATTR_WPS:
-                browser_disk_apply_skin_file(buf, global_settings.wps_file);
-                break;
             case FILE_ATTR_CFG:
                 ui_set_working(true);
                 if (!settings_load_config(buf,true))
@@ -743,7 +714,6 @@ int browser_disk_enter(struct browser_context* c)
                 set_file(buf, (char *)global_settings.lang_file);
                 talk_init(); /* use voice of same language */
                 viewportmanager_theme_changed(THEME_LANGUAGE);
-                settings_apply_skins();
                 splash(HZ, ID2P(LANG_LANGUAGE_LOADED));
                 browser_disk_repaint_after_splash();
                 break;

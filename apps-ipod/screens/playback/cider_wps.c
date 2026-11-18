@@ -1,6 +1,7 @@
 /* Native WPS source data, no layout or input loop. GPL version 2+. */
 #include "config.h"
 #include "misc.h"
+#include "draw/bmp.h"
 #include "settings/settings.h"
 #include "cider.h"
 #include "cider_wps.h"
@@ -11,11 +12,11 @@
 #include "metadata.h"
 #include "audio/playback.h"
 #include "audio/buffering.h"
-#include "skin/skin_albumart_color.h"
-#include "skin/skin_engine.h"
+#include "core_alloc.h"
+#include "metadata/album_palette.h"
+#include "ui/native_wps.h"
 #include "kernel.h"
 #include "lcd.h"
-#include "settings/settings.h"
 #include "system/activity.h"
 #include "system/app_util.h"
 #include "usb.h"
@@ -24,13 +25,29 @@
 #include <stdio.h>
 static struct mp3entry id3;
 static struct cider_state source;
-static fb_data pixels[240 * 240];
+#define COVER_EDGE 240
+#define COVER_BYTES ((size_t)COVER_EDGE * COVER_EDGE * sizeof(fb_data))
+
+static int art_buffer;
 static struct bitmap bitmap;
 static char key[65];
 static unsigned art_generation;
 static bool have_art, volume_baseline, volume_visible, source_bound;
 
-_Static_assert(sizeof id3 + sizeof source + sizeof pixels + sizeof bitmap + sizeof key + 64 < 120 * 1024, "Cider module RAM budget");
+void cider_wps_alloc(void)
+{
+    art_buffer = core_alloc_free_space(COVER_BYTES);
+}
+
+static bool load_art(const char *art_key)
+{
+    if (art_buffer <= 0 || !art_key[0])
+        return false;
+    fb_data *pixels = core_get_data_pinned(art_buffer);
+    bool copied = cider_copy_art(art_key, "L", pixels, COVER_BYTES);
+    core_put_data_pinned(pixels);
+    return copied;
+}
 
 void cider_wps_enter(void)
 {
@@ -47,7 +64,7 @@ void cider_wps_update(struct wps_state *state)
             state->nid3 = audio_next_track();
             state->paused = (audio_status() & AUDIO_STATUS_PAUSE) != 0;
             source_bound = have_art = false;
-            skin_request_full_update(WPS);
+            native_wps_invalidate();
         }
         cider_wps_enter();
         return;
@@ -74,20 +91,16 @@ void cider_wps_update(struct wps_state *state)
         ++art_generation;
         have_art = false;
 
-        skin_request_full_update(WPS);
+        native_wps_invalidate();
     }
-    if (!have_art && (get_current_activity() == ACTIVITY_WPS ||
-                      get_current_activity() == ACTIVITY_LYRICS))
+    if (!have_art && (visible || activity == ACTIVITY_LYRICS))
         cider_request_art(key, "L");
-    if (!have_art && cider_copy_art(key, "L", pixels, sizeof pixels))
+    if (!have_art && (visible || activity == ACTIVITY_LYRICS) && load_art(key))
     {
         have_art = true;
-        bitmap.width = bitmap.height = 240;
-        bitmap.format = FORMAT_NATIVE;
-        bitmap.data = (unsigned char *)pixels;
         ++art_generation;
-        skin_albumart_art_opened(CIDER_ART_HANDLE);
-        skin_request_full_update(WPS);
+        album_art_opened(CIDER_ART_HANDLE);
+        native_wps_invalidate();
     }
     if (have_art && get_current_activity() == ACTIVITY_WPS)
     {
@@ -211,9 +224,7 @@ unsigned cider_wps_art_generation(void)
 
 const char *cider_wps_art_key(void)
 {
-    int activity = get_current_activity();
-    return have_art && (activity == ACTIVITY_WPS || activity == ACTIVITY_LYRICS)
-           ? key : "";
+    return cider_active() ? key : "";
 }
 
 int wps_art_handle(int slot)
@@ -228,6 +239,9 @@ bool wps_art_bitmap(int handle, struct bitmap **out)
     {
         if (!have_art)
             return false;
+        bitmap.width = bitmap.height = COVER_EDGE;
+        bitmap.format = FORMAT_NATIVE;
+        bitmap.data = core_get_data(art_buffer);
         *out = &bitmap;
         return true;
     }
@@ -235,7 +249,17 @@ bool wps_art_bitmap(int handle, struct bitmap **out)
 }
 bool wps_art_pin(int handle, bool pin)
 {
-    return handle == CIDER_ART_HANDLE ? have_art : buf_pin_handle(handle, pin);
+    if (handle != CIDER_ART_HANDLE)
+        return buf_pin_handle(handle, pin);
+    if (pin)
+    {
+        if (!have_art)
+            return false;
+        core_pin(art_buffer);
+    }
+    else
+        core_unpin(art_buffer);
+    return true;
 }
 int cider_wps_volume(bool *muted)
 {
@@ -255,11 +279,14 @@ bool cider_wps_show_art(void)
     {
         cider_snapshot(&source);
         cider_request_art(source.art, "L");
-        if (cider_copy_art(source.art, "L", pixels, sizeof pixels))
+        if (load_art(source.art))
         {
+            fb_data *pixels = core_get_data_pinned(art_buffer);
             lcd_set_viewport(NULL);
             lcd_clear_display();
-            lcd_bitmap(pixels, (LCD_WIDTH - 240) / 2, (LCD_HEIGHT - 240) / 2, 240, 240);
+            lcd_bitmap(pixels, (LCD_WIDTH - COVER_EDGE) / 2, (LCD_HEIGHT - COVER_EDGE) / 2,
+                       COVER_EDGE, COVER_EDGE);
+            core_put_data_pinned(pixels);
             lcd_update();
         }
         int action = get_action(CONTEXT_STD, HZ / 10);

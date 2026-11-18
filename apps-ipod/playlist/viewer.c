@@ -1296,7 +1296,9 @@ enum playlist_viewer_result playlist_viewer_ex(const char* filename,
     int button;
     struct gui_synclist playlist_lists;
 
-    if (!open_playlist_viewer(filename, &playlist_lists, false, most_recent_selection))
+    bool opened = open_playlist_viewer(filename, &playlist_lists, false,
+                                       most_recent_selection);
+    if (!opened)
     {
         ret = PLAYLIST_VIEWER_CANCEL;
         goto exit;
@@ -1561,6 +1563,8 @@ enum playlist_viewer_result playlist_viewer_ex(const char* filename,
 
 exit:
     list_select_end();      /* the list it holds is on this stack */
+    if (opened)
+        gui_synclist_forget(&playlist_lists);
     pop_current_activity_without_refresh();
     talk_shutup();
     close_playlist_viewer();
@@ -1710,6 +1714,7 @@ bool search_playlist(void)
                 break;
         }
     }
+    gui_synclist_forget(&playlist_lists);
     talk_shutup();          /* the list's own announcements, not the count */
 
 exit:

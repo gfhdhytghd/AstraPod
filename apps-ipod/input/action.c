@@ -206,7 +206,8 @@ static struct agents_remote_state remote;
 #include "system/app_util.h"
 #include "audio/sound_feedback.h"
 #include "system/shutdown.h"
-#include "skin/skin_engine.h" /* skin_inhibit_flush */
+#include "ui/frame.h" /* ui_inhibit_flush */
+#include "ui/statusbar.h"
 #include "usb.h"
 #include "widgets/dialog.h"
 #include "widgets/usb_confirm.h"
@@ -1165,6 +1166,7 @@ static inline int do_backlight(action_last_t *last, action_cur_t *cur, int actio
 static int get_action_worker(action_last_t *last, action_cur_t *cur)
 {
     send_event(GUI_EVENT_ACTIONUPDATE, NULL);
+    cur->timeout = sb_motion_timeout(cur->timeout);
 
     /*if button = none/special; returns immediately*/
     if (action_poll_button(last, cur))
@@ -1206,10 +1208,10 @@ bool action_userabort(int timeout)
      * and flushes the status-bar skin over the splash -> flicker. Inhibit the
      * flush across the poll so the splash keeps the screen. A caller already
      * holding the inhibit keeps it afterwards. */
-    bool inhibited = skin_flush_inhibited();
-    skin_inhibit_flush(true);
+    bool inhibited = ui_flush_inhibited();
+    ui_inhibit_flush(true);
     int  action = get_custom_action(CONTEXT_STD, timeout, NULL);
-    skin_inhibit_flush(inhibited);
+    ui_inhibit_flush(inhibited);
     bool ret    = (action == ACTION_STD_CANCEL);
     if (!ret)
     {
@@ -1315,13 +1317,15 @@ static int route_screen_shortcut(int action, int context)
 
 static void scene_takeover(int action)
 {
-    if (IS_SYSEVENT(action) || action == ACTION_REMOTE_WPS ||
+    bool system_takeover = action == SYS_USB_CONFIRM || action == SYS_USB_CONNECTED ||
+        action == SYS_USB_DISCONNECTED || action == SYS_ACCESSORY_CONNECTED ||
+        action == SYS_HOTSWAP_INSERTED || action == SYS_HOTSWAP_EXTRACTED ||
+        action == SYS_POWEROFF || action == SYS_REBOOT;
+    if (system_takeover || action == ACTION_REMOTE_WPS ||
         action == ACTION_AGENTS_REMOTE_COVERS || action == ACTION_AGENTS_COVERS ||
         action == ACTION_AGENTS_SWITCH || action == ACTION_AGENTS_REMOTE_SWITCH)
         ui_scene_interrupt();
-    if (action == SYS_USB_CONNECTED || action == SYS_USB_DISCONNECTED ||
-        action == SYS_ACCESSORY_CONNECTED || action == SYS_POWEROFF ||
-        action == SYS_REBOOT)
+    if (system_takeover)
         dialog_interrupt_transition();
 }
 
@@ -1348,7 +1352,7 @@ int get_action(int context, int timeout)
         return ACTION_STD_CANCEL;
 #endif
     action_cur_t current;
-    init_act_cur(&current, context, timeout, NULL);
+    init_act_cur(&current, context, ui_scene_poll(timeout), NULL);
 
     int action = get_action_worker(&action_last, &current);
 
@@ -1464,7 +1468,7 @@ int get_custom_action(int context,int timeout,
         return ACTION_STD_CANCEL;
 #endif
     action_cur_t current;
-    init_act_cur(&current, context, timeout, get_context_map);
+    init_act_cur(&current, context, ui_scene_poll(timeout), get_context_map);
 
     int action = get_action_worker(&action_last, &current);
 

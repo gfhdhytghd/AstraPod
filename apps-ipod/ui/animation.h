@@ -21,6 +21,8 @@ uint32_t ui_frame_clock(unsigned frame);
 /* Kernel wait to the next frame, rounded down so a wait cannot skip a frame
  * merely by rounding up. Returns zero when the animation has ended. */
 int ui_clock_timeout(uint32_t elapsed, unsigned duration, unsigned ticks_per_second);
+/* A visual input loop polls during the final fraction of a kernel tick. */
+int ui_clock_poll_timeout(uint32_t elapsed, unsigned duration, unsigned ticks_per_second);
 int ui_tween_sample(const struct ui_tween *tween, unsigned frame);
 
 #endif

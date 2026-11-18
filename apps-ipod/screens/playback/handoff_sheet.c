@@ -16,26 +16,24 @@
 #include "metadata.h"
 #include "rbpaths.h"
 #include "settings/settings.h"
-#include "skin/skin_albumart_color.h"
-#include "skin/skin_engine.h"
-#include "skin/statusbar_skinned.h"
+#include "metadata/album_palette.h"
+#include "ui/frame.h"
+#include "ui/statusbar.h"
 #include "core_alloc.h"
 #include "system/shutdown.h"
 #include "system.h"
 #include "ui/animation.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/perf.h"
 #include "ui/retained.h"
 #include "widgets/dialog.h"
 #include <stdio.h>
 #include <string.h>
 
 #define NOTE_GRID 96
-#define OPEN_FRAMES ANIM_F(12)
-#define CLOSE_FRAMES ANIM_F(10)
-/* Retain the FU83 cadence and its rounding on the legacy path. */
-#define ENTER_TICKS ((int)(OPEN_FRAMES * HZ / UI_ANIM_FPS))
-#define EXIT_TICKS ((int)(CLOSE_FRAMES * HZ / UI_ANIM_FPS))
-#define FRAME_TICKS MAX(1, (int)(HZ * ANIM_F(2) / UI_ANIM_FPS))
+#define OPEN_FRAMES ANIM_F(16)
+#define CLOSE_FRAMES ANIM_F(12)
+#define SHEET_DIM_PERCENT 35
 
 struct sheet_ui {
     bool leave;
@@ -50,16 +48,6 @@ struct sheet_style {
     int scrim_alpha, cover_border_alpha, button_border_alpha, progress_alpha;
 };
 
-static const struct sheet_style legacy_style = {
-    .bg = LCD_BLACK, .fg = LCD_WHITE, .muted = LCD_RGBPACK(153, 153, 153),
-    .unselected_text = LCD_RGBPACK(204, 204, 204), .selected_text = LCD_BLACK,
-    .placeholder = LCD_RGBPACK(24, 24, 24), .background = UI_BG_COVER_SCRIM,
-    .margin = 16, .cover_size = 96, .button_height = 36, .button_gap = 8,
-    .metadata_gap = 12, .line_gap = 3, .progress_gap = 5, .progress_height = 2,
-    .error_offset = 4, .outline_width = 1, .scrim_alpha = 8,
-    .cover_border_alpha = 4, .button_border_alpha = 5, .progress_alpha = 4,
-};
-
 struct retained_sheet;
 
 struct sheet_presentation {
@@ -67,6 +55,7 @@ struct sheet_presentation {
     fb_data *fb, *back, *card;
     int handle, offset;
     unsigned open_frames, close_frames;
+    unsigned open_trace;
     bool inhibited, boosted, interrupted;
     struct retained_sheet *retained;
 };
@@ -184,12 +173,13 @@ static struct sheet_layout sheet_measure(const struct sheet_ui *ui, const struct
     };
 }
 
-static void sheet_background(const struct sheet_style *s, int handle)
+static void sheet_background(const struct sheet_style *s, int handle, fb_data *pixels)
 {
     lcd_set_drawmode(DRMODE_FG);
     lcd_set_foreground(s->bg);
-    /* The mixed-mode art provider paints the whole card blur. */
-    if (s->background == UI_BG_SOLID || !skin_handoff_draw_blur(handle))
+    if (s->background == UI_BG_SOLID ||
+        !album_art_render_background(pixels, LCD_WIDTH, LCD_HEIGHT, handle,
+                                     s->background == UI_BG_BLURRED_COVER, s->fg))
         lcd_fillrect(0, 0, LCD_WIDTH, LCD_HEIGHT);
     else if (s->background == UI_BG_COVER_SCRIM)
         lcd_blendrect(0, 0, LCD_WIDTH, LCD_HEIGHT, s->scrim_alpha);
@@ -244,17 +234,6 @@ static void sheet_controls(const struct handoff_sheet *view, const struct sheet_
                  str(LANG_HANDOFF_LEAVE));
 }
 
-static void sheet_draw(const struct handoff_sheet *view, const struct sheet_ui *ui,
-                       const struct sheet_layout *m)
-{
-    int handle = skin_lyrics_art();
-    const struct sheet_style *s = m->style;
-    sheet_background(s, handle);
-    art_square(s, handle, (LCD_WIDTH - s->cover_size) / 2, m->cover_y);
-    sheet_metadata(view, m, s->margin, m->text_y);
-    sheet_controls(view, ui, m, s->margin, m->button_y);
-}
-
 static int sheet_action(struct sheet_ui *ui, const struct handoff_sheet *view, int action)
 {
     if (IS_SYSEVENT(action) && action != SYS_USB_CONFIRM)
@@ -273,31 +252,6 @@ static int sheet_action(struct sheet_ui *ui, const struct handoff_sheet *view, i
         (action == ACTION_STD_CANCEL && button == BUTTON_LEFT))
         ui->leave = false;
     return DIALOG_CONTINUE;
-}
-
-static int slide_offset(unsigned long age, int from, bool exit)
-{
-    int duration = exit ? EXIT_TICKS : ENTER_TICKS;
-    int t = MIN(age, (unsigned long)duration);
-    if (exit) from = LCD_HEIGHT - from;
-    else t = duration - t;
-    int scale = duration * duration * duration;
-    int distance = (from * t * t * t + (exit ? 0 : scale - 1)) / scale;
-    return exit ? LCD_HEIGHT - from + distance : distance;
-}
-
-static void slide_frame(fb_data *fb, const fb_data *back, const fb_data *card,
-                        int previous, int offset)
-{
-    if (offset > previous)
-        memcpy(fb + previous * LCD_WIDTH, back + previous * LCD_WIDTH,
-               (offset - previous) * LCD_WIDTH * sizeof(*fb));
-    if (offset < LCD_HEIGHT)
-        memcpy(fb + offset * LCD_WIDTH, card,
-               (LCD_HEIGHT - offset) * LCD_WIDTH * sizeof(*fb));
-    int top = MIN(previous, offset);
-    if (top < LCD_HEIGHT)
-        lcd_update_rect(0, top, LCD_WIDTH, LCD_HEIGHT - top);
 }
 
 struct retained_sheet {
@@ -334,8 +288,7 @@ static void paint_background(const struct ui_view *v, const struct ui_view_frame
     struct retained_sheet *s = v->data;
     struct viewport vp;
     struct viewport *old = component_canvas(&vp, s, frame->clip);
-    /* The blur provider paints into this card cache before it can be moved. */
-    sheet_background(s->layout.style, s->art);
+    sheet_background(s->layout.style, s->art, s->card_buffer.fb_ptr);
     lcd_set_viewport(old);
 }
 
@@ -422,6 +375,7 @@ static void retained_sheet_init(struct retained_sheet *s, struct sheet_presentat
     s->base_pixels = (struct ui_layer){.handle = p->handle, .width = LCD_WIDTH,
                                        .height = LCD_HEIGHT};
     s->card_pixels = s->base_pixels;
+    s->card_pixels.handle = p->card ? p->handle : -1;
     s->card_pixels.offset_pixels = LCD_WIDTH * LCD_HEIGHT;
     ui_view_init(&s->below, sheet_bounds, &image_ops, &s->base_pixels);
     ui_page_init(&s->base, &s->below);
@@ -442,7 +396,7 @@ static void retained_sheet_init(struct retained_sheet *s, struct sheet_presentat
 static void draw_retained_card(struct sheet_presentation *p)
 {
     struct retained_sheet *s = p->retained;
-    s->art = skin_lyrics_art();
+    s->art = album_art_current();
     ui_page_invalidate(&s->card, sheet_bounds);
     ui_page_set(&s->overlay, &s->progress, UI_WIDTH, 0);
     if (p->card)
@@ -453,15 +407,14 @@ static void draw_retained_card(struct sheet_presentation *p)
 
 static void present_sheet(struct sheet_presentation *p, int offset, bool repaint)
 {
-    if (!p->retained)
-    {
-        slide_frame(p->fb, p->back, p->card, p->offset, offset);
-        return;
-    }
     struct retained_sheet *s = p->retained;
     /* The opaque card invalidates its old and new rectangles. The substrate
-     * clip follows that movement so covered rows are never composited. */
+     * clip follows that movement so covered rows are never composited.
+     * Derive brightness from the same eased position in both directions. */
     s->below.value[UI_CLIP_HEIGHT] = offset;
+    int dim = (LCD_HEIGHT - offset) * UI_FULL_OPACITY * SHEET_DIM_PERCENT
+                / (LCD_HEIGHT * 100);
+    ui_page_set(&s->base, &s->below, UI_BRIGHTNESS, UI_FULL_OPACITY - dim);
     ui_page_set(&s->overlay, &s->image, UI_OFFSET_Y, offset);
     if (repaint)
         ui_page_invalidate(&s->overlay, (struct ui_rect){0, offset, LCD_WIDTH,
@@ -482,7 +435,7 @@ static int draw_progress(const struct handoff_sheet *view, struct sheet_presenta
 {
     int width = progress_width(view, m->inner);
     if (width <= painted) return painted;
-    if (p->retained && p->card)
+    if (p->card)
     {
         struct retained_sheet *s = p->retained;
         ui_page_set(&s->overlay, &s->progress, UI_WIDTH, width);
@@ -492,12 +445,6 @@ static int draw_progress(const struct handoff_sheet *view, struct sheet_presenta
     const struct sheet_style *s = m->style;
     lcd_set_foreground(s->fg);
     lcd_fillrect(s->margin, m->bar_y, width, s->progress_height);
-    if (p->card)
-    {
-        for (int y = m->bar_y; y < m->bar_y + s->progress_height; ++y)
-            memcpy(p->card + y * LCD_WIDTH + s->margin, FBADDR(s->margin, y),
-                   width * sizeof(*p->card));
-    }
     lcd_update_rect(s->margin + painted, m->bar_y, width - painted, s->progress_height);
     return width;
 }
@@ -516,17 +463,18 @@ static void release_presentation(struct sheet_presentation *p)
     if (p->back)
     {
         memcpy(p->fb, p->back, FRAMEBUFFER_SIZE);
+        if (!p->card)
+            lcd_update();
         core_unpin(p->handle);
         core_free(p->handle);
     }
     set_boost(p, false);
     lcd_set_viewport(p->outer);
-    if (skin_hold_scrolling(false))
-    {
-        skin_request_full_update(CUSTOM_STATUSBAR);
-        sb_skin_force_next_update();
-    }
-    skin_inhibit_flush(p->inhibited);
+    ui_inhibit_flush(true);
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
+    if (ui_hold_scrolling(false))
+        sb_invalidate();
+    ui_inhibit_flush(p->inhibited);
 }
 
 void handoff_sheet_interrupt(void)
@@ -544,32 +492,11 @@ void handoff_sheet_interrupt(void)
     release_presentation(p);
 }
 
-static void close_legacy_sheet(struct sheet_presentation *p)
-{
-    if (!p->card)
-        return;
-    int from = p->offset;
-    set_boost(p, true);
-    long start_tick = current_tick;
-    long frame_tick = 0;
-    while (p->offset < LCD_HEIGHT)
-    {
-        long wake = MIN(frame_tick + FRAME_TICKS, EXIT_TICKS);
-        long ticks = wake - (current_tick - start_tick);
-        /* sleep(0) waits for the next tick. */
-        if (ticks > 0) sleep(ticks - 1);
-        frame_tick = current_tick - start_tick;
-        int next = slide_offset(frame_tick, from, true);
-        if (p->offset != next)
-            present_sheet(p, next, false);
-        p->offset = next;
-    }
-}
-
 static void close_native_sheet(struct sheet_presentation *p)
 {
     if (!p->card || p->offset == LCD_HEIGHT)
         return;
+    unsigned trace = ui_perf_begin("handoff-close");
     set_boost(p, true);
     struct ui_tween tween = {
         .start_clock = USEC_TIMER,
@@ -593,14 +520,14 @@ static void close_native_sheet(struct sheet_presentation *p)
             p->offset = LCD_HEIGHT;
         }
     }
+    ui_perf_end(trace);
 }
 
 static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
-                     struct sheet_presentation *p, int (*advance)(int), bool animate,
+                     struct sheet_presentation *p, int (*advance)(int),
                      const struct sheet_layout *layout)
 {
     struct ui_tween tween = { .from = LCD_HEIGHT, .frames = p->open_frames };
-    long start_tick = 0;
     bool dirty = true, entering = true;
     int painted = 0;
     for (;;)
@@ -609,63 +536,31 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
         if (dirty)
         {
             painted = 0;
-            if (p->retained)
-                draw_retained_card(p);
-            else
-            {
-                sheet_draw(view, ui, layout);
-                if (p->card)
-                    memcpy(p->card, p->fb, FRAMEBUFFER_SIZE);
-                else
-                    lcd_update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT);
-            }
+            draw_retained_card(p);
         }
         if (entering)
         {
-            if (animate)
-                tween.start_clock = USEC_TIMER;
-            else
-                start_tick = current_tick;
+            tween.start_clock = USEC_TIMER;
             entering = false;
         }
         int ticks = HZ / 10;
         if (p->card && (p->offset || dirty))
         {
-            uint32_t elapsed_clock = animate ? (uint32_t)USEC_TIMER - tween.start_clock : 0;
-            long elapsed_ticks = animate ? 0 : current_tick - start_tick;
-            int next = 0;
-            if (p->offset)
-            {
-                if (animate)
-                {
-                    unsigned frame = ui_clock_frame(elapsed_clock);
-                    next = ui_tween_sample(&tween, frame);
-                    /* Integer pixels can round to the endpoint early. */
-                    if (!next && frame < tween.frames)
-                        next = 1;
-                }
-                else
-                    next = slide_offset(elapsed_ticks, LCD_HEIGHT, false);
-            }
-            if (dirty && !p->retained)
-                memcpy(p->fb, p->back, next * LCD_WIDTH * sizeof(*p->fb));
+            unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER - tween.start_clock);
+            int next = p->offset ? ui_tween_sample(&tween, frame) : 0;
+            if (!next && p->offset && frame < tween.frames)
+                next = 1;
             if (p->offset != next || dirty)
                 present_sheet(p, next, dirty);
             p->offset = next;
-            if (p->offset)
-            {
-                if (animate)
-                    ticks = ui_clock_timeout((uint32_t)USEC_TIMER - tween.start_clock,
-                                             tween.frames, HZ);
-                else
-                {
-                    long spent = current_tick - start_tick - elapsed_ticks;
-                    ticks = MAX(0, MIN(FRAME_TICKS, ENTER_TICKS - elapsed_ticks) - spent);
-                }
-            }
+            if (next)
+                ticks = ui_clock_timeout((uint32_t)USEC_TIMER - tween.start_clock,
+                                         tween.frames, HZ);
         }
         if (!p->offset)
         {
+            ui_perf_end(p->open_trace);
+            p->open_trace = 0;
             set_boost(p, false);
             if (!view->reason)
                 painted = draw_progress(view, p, layout, painted);
@@ -675,7 +570,7 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
         const char *target = view->target;
         int reason = view->reason;
         int action = get_action(CONTEXT_STD, ticks);
-        if ((animate || p->retained) && !p->interrupted &&
+        if (!p->interrupted &&
             (action == SYS_USB_CONNECTED || action == SYS_USB_DISCONNECTED ||
              action == SYS_POWEROFF || action == SYS_REBOOT))
         {
@@ -689,7 +584,7 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
             int result = advance(DIALOG_CONTINUE);
             return result == DIALOG_CONTINUE ? DIALOG_ABORT : result;
         }
-        if (animate && action == SYS_ACCESSORY_CONNECTED && p->offset)
+        if (action == SYS_ACCESSORY_CONNECTED && p->offset)
         {
             /* Dock identification has no screen of its own. Hand it the
              * settled display without dismissing the current proposal. */
@@ -697,26 +592,16 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
             p->offset = 0;
             set_boost(p, false);
         }
-        int answer;
-        if (p->retained)
-        {
-            ui_nav_dispatch(&p->retained->nav, action);
-            answer = p->retained->disposition;
-        }
-        else
-            answer = sheet_action(ui, view, action);
-        int result = advance(answer);
+        ui_nav_dispatch(&p->retained->nav, action);
+        int result = advance(p->retained->disposition);
         if (result != DIALOG_CONTINUE)
         {
-            if (animate)
+            ui_perf_end(p->open_trace);
+            p->open_trace = 0;
+            if (p->close_frames)
                 close_native_sheet(p);
-            else if (p->retained)
-            {
-                if (p->card)
-                    present_sheet(p, LCD_HEIGHT, false);
-            }
-            else
-                close_legacy_sheet(p);
+            else if (p->card)
+                present_sheet(p, LCD_HEIGHT, false);
             return result;
         }
         dirty = leave != ui->leave || preparing != view->preparing ||
@@ -724,25 +609,21 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
     }
 }
 
-/* Keep the tree off the legacy call stack. */
 static NO_INLINE int run_retained_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
                                         struct sheet_presentation *p, int (*advance)(int),
-                                        bool animate, const struct sheet_layout *layout)
+                                        const struct sheet_layout *layout)
 {
     struct retained_sheet retained = {0};
     p->retained = &retained;
     retained_sheet_init(&retained, p, view, ui, layout);
-    int answer = run_sheet(view, ui, p, advance, animate, layout);
+    if (p->card && p->open_frames)
+        p->open_trace = ui_perf_begin("handoff-open");
+    int answer = run_sheet(view, ui, p, advance, layout);
+    ui_perf_end(p->open_trace);
     if (!p->interrupted)
         ui_nav_pop(&retained.nav);
     p->retained = NULL;
     return answer;
-}
-
-static uint32_t rgb888(unsigned color)
-{
-    return (RGB_UNPACK_RED(color) << 16) |
-           (RGB_UNPACK_GREEN(color) << 8) | RGB_UNPACK_BLUE(color);
 }
 
 static unsigned themed_color(const struct ui_theme *theme, const struct ui_album_palette *palette,
@@ -756,14 +637,8 @@ static NO_INLINE void load_native_style(struct sheet_style *s, struct sheet_ui *
 {
     struct ui_theme theme;
     ui_theme_snapshot(&theme);
-    unsigned dominant, vivid;
-    struct ui_album_palette palette = {0};
-    if (dynamic_colors_roles(&dominant, &vivid))
-    {
-        palette.dominant = rgb888(dominant);
-        palette.vivid = rgb888(vivid);
-        palette.has_dominant = palette.has_vivid = true;
-    }
+    struct ui_album_palette palette;
+    album_palette_snapshot(&palette);
     const uint16_t *m = theme.metric;
     *s = (struct sheet_style){
         .bg = themed_color(&theme, &palette, UI_COLOR_HANDOFF_BG),
@@ -795,26 +670,19 @@ static NO_INLINE void load_native_style(struct sheet_style *s, struct sheet_ui *
 
 int handoff_sheet_run(struct handoff_sheet *view, int (*advance)(int))
 {
-    bool retained = ui_native_enabled();
-    struct sheet_style native_style;
+    struct sheet_style style;
     struct sheet_ui ui = {0};
-    if (retained)
-        load_native_style(&native_style, &ui);
-    else
-    {
-        ui.small_font = font_load_ex(FONT_DIR "/12-noto-sans.fnt", 0, 48);
-        ui.button_font = font_load_ex(FONT_DIR "/18-noto-sans.fnt", 0, 48);
-        ui.large_font = font_load_ex(FONT_DIR "/26-noto-sans-medium.fnt", 0, 48);
-    }
-    struct sheet_layout layout = sheet_measure(&ui, retained ? &native_style : &legacy_style);
+    load_native_style(&style, &ui);
+    struct sheet_layout layout = sheet_measure(&ui, &style);
     struct sheet_presentation p = {
-        .open_frames = retained ? ui_theme_duration(OPEN_FRAMES) : OPEN_FRAMES,
-        .close_frames = retained ? ui_theme_duration(CLOSE_FRAMES) : CLOSE_FRAMES,
-        .inhibited = skin_flush_inhibited(),
+        .open_frames = ui_theme_duration(OPEN_FRAMES),
+        .close_frames = ui_theme_duration(CLOSE_FRAMES),
+        .inhibited = ui_flush_inhibited(),
     };
-    bool animate = global_settings.animations && p.open_frames && p.close_frames;
-    p.handle = (animate || retained) ? core_alloc_free_space(HANDOFF_FRAME_BYTES) :
-        core_allocatable() >= HANDOFF_FRAME_BYTES ? core_alloc(HANDOFF_FRAME_BYTES) : -1;
+    p.handle = core_alloc_free_space(HANDOFF_FRAME_BYTES);
+    bool cached_card = p.handle > 0;
+    if (!cached_card)
+        p.handle = core_alloc_free_space(FRAMEBUFFER_SIZE);
     viewport_set_fullscreen(&p.vp, SCREEN_MAIN);
     p.outer = lcd_set_viewport(&p.vp);
     p.fb = FBADDR(0, 0);
@@ -822,32 +690,32 @@ int handoff_sheet_run(struct handoff_sheet *view, int (*advance)(int))
     {
         core_pin(p.handle);
         p.back = core_get_data(p.handle);
-        p.card = p.back + LCD_WIDTH * LCD_HEIGHT;
-        if (animate || !retained)
-            p.offset = LCD_HEIGHT;
+        if (cached_card)
+        {
+            p.card = p.back + LCD_WIDTH * LCD_HEIGHT;
+            if (p.open_frames)
+                p.offset = LCD_HEIGHT;
+        }
         memcpy(p.back, p.fb, FRAMEBUFFER_SIZE);
     }
-    skin_inhibit_flush(true);
+    ui_inhibit_flush(true);
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
     screens[0].scroll_stop();
-    skin_hold_scrolling(true);
+    ui_hold_scrolling(true);
     backlight_on();
     action_handoff_enter();
+    ui_inhibit_flush(false);
     set_boost(&p, true);
 
-    if (animate || retained)
-        native_sheet = &p;
-    int result = retained ? run_retained_sheet(view, &ui, &p, advance, animate, &layout) :
-                            run_sheet(view, &ui, &p, advance, animate, &layout);
+    native_sheet = &p;
+    int result = run_retained_sheet(view, &ui, &p, advance, &layout);
     native_sheet = NULL;
     if (!p.interrupted)
         release_presentation(&p);
     if (ui.large_font >= 0) font_unload(ui.large_font);
     if (ui.button_font >= 0) font_unload(ui.button_font);
     if (ui.small_font >= 0) font_unload(ui.small_font);
-    if (animate || retained)
-        action_handoff_enter();
-    else
-        action_wait_for_release();
+    action_handoff_enter();
     return result;
 }
 

@@ -20,7 +20,7 @@
 #include "powermgmt.h"
 #include "ata_idle_notify.h"
 #include "settings/settings.h"
-#include "skin/skin_engine.h"
+#include "ui/frame.h"
 #include "system/activity.h"
 #include "system/debug_log.h"
 #include "battery_log.h"
@@ -60,7 +60,7 @@ static unsigned short minute;
 static void acc_reset(void)
 {
     memset(&acc, 0, sizeof acc);
-    acc.frames_at_start = skin_flush_count();
+    acc.frames_at_start = ui_flush_count();
 }
 
 /* ---- the ring ----------------------------------------------------------- */
@@ -97,7 +97,7 @@ static void close_minute(void)
         s->disk = acc.disk;
         s->mhz = acc.mhz_sum / SAMPLE_TICKS;
         s->spinups = acc.spinups;
-        s->frames = skin_flush_count() - acc.frames_at_start;
+        s->frames = ui_flush_count() - acc.frames_at_start;
         ring_head = next;
     }
 
@@ -201,9 +201,9 @@ static void disk_idle_cb(unsigned short id, void *data)
  * file reads as a CSV on its own */
 void battery_log_state(int fd, const char *mark)
 {
-    logfile_printf(fd, "%s storage %s, dynamic colors %d, theme %s\n", mark,
+    logfile_printf(fd, "%s storage %s, native theme %s\n", mark,
              storage_get_ssd_mode() ? "ssd" : "hdd",
-             (int)global_settings.dynamic_colors, global_settings.wps_file);
+             global_settings.native_theme);
 #if BATTERY_CAPACITY_INC > 0
     logfile_printf(fd, "%s capacity %d mAh\n", mark,
              global_settings.battery_capacity);

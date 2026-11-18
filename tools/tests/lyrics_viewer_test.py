@@ -8,7 +8,7 @@ import ast,re,subprocess,sys
 r=Path(__file__).resolve().parents[2];o=Path(sys.argv[1]).resolve();o.mkdir(parents=True,exist_ok=True)
 ns=ast.parse((r/'tools/tests/lyrics_document_test.py').read_text())
 pre=next(ast.literal_eval(n.value) for n in ns.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='pre' for t in n.targets))
-pre=pre.replace('static struct {int default_codepage;} global_settings;', '''static struct {int default_codepage,lyric_colour_mode,backlight_timeout,backlight_timeout_plugged,lyric_prev_opacity,lyric_next_opacity,lyric_lead;unsigned fg_color,bg_color;bool lyric_highlight,lyric_backlight,prevent_skip,animations;} global_settings;''')
+pre=pre.replace('static struct {int default_codepage;} global_settings;', '''static struct {int default_codepage,lyric_colour_mode,backlight_timeout,backlight_timeout_plugged,lyric_prev_opacity,lyric_next_opacity,lyric_lead;unsigned fg_color,bg_color;bool lyric_highlight,lyric_backlight,prevent_skip,animations,native_ui;} global_settings;''')
 pre=pre.replace('length,id3v2len;', 'length,id3v2len,elapsed;')
 pre=pre.replace('static void core_free(int h){assert(h==1);frees++;}',
                 'static int core_free(int handle);')
@@ -17,6 +17,8 @@ read_line=re.search(r'^int read_line\(.*?^}',strutil,re.M|re.S).group()
 pre=re.sub(r'^static int read_line\([^\n]+\n', lambda _: '#include <errno.h>\n'+read_line+'\n', pre, flags=re.M)
 source=(r/'apps-ipod/viewers/lyric_viewer/lyric_viewer.c').read_text()
 source=re.sub(r'^#include ".*\n','',source,flags=re.M)
+retained=(r/'apps-ipod/ui/retained.c').read_text()
+retained=re.sub(r'^#include ".*\n','',retained,flags=re.M)
 doc=(r/'apps-ipod/viewers/lyric_viewer/lyrics.c').read_text();doc=re.sub(r'^#include ".*\n','',doc,flags=re.M)
 h=(r/'apps-ipod/viewers/lyric_viewer/lyrics.h').read_text();h=re.sub(r'^#include "metadata.h".*\n','',h,flags=re.M)
 tokens=sorted(set(re.findall(r'\bACTION_[A-Z_0-9]+',source+' ACTION_WPS_BROWSE ACTION_UNKNOWN')))
@@ -26,6 +28,28 @@ adapter=r'''
 #define HAVE_USB_PODLINK
 #define HAVE_ADJUSTABLE_CPU_FREQ
 #define HAVE_MULTIMEDIA_KEYS
+static unsigned active_trace;
+static unsigned ui_perf_begin(const char *route)
+{
+    assert(!strncmp(route, "lyrics-", 7) && !active_trace);
+    return active_trace = 1;
+}
+static void ui_perf_end(unsigned token)
+{
+    if (token)
+    {
+        assert(token == active_trace);
+        active_trace = 0;
+    }
+}
+static void check_trace_closed(void)
+{
+    assert(!active_trace);
+}
+static void ui_note_render(uint32_t elapsed) { (void)elapsed; }
+static void ui_note_flush(uint32_t elapsed) { (void)elapsed; }
+static bool shared_scene;
+static bool ui_scene_automatic(void) { return shared_scene; }
 /* An independent playback owner remains throughout these visits. */
 static int clock_refs = 1, boost_gets, boost_puts;
 #define FREQ (clock_refs ? 216000000 : 54000000)
@@ -44,6 +68,7 @@ static void agents_nav_request(int screen, bool remote)
 #define LCD_HEIGHT 240
 #define LCD_WHITE 65535
 #define LCD_BLACK 0
+#define LCD_RGBPACK(r,g,b) ((((r)>>3)<<11)|(((g)>>2)<<5)|((b)>>3))
 #define DRMODE_FG 1
 #define BUTTON_REMOTE 0x8000
 #define BUTTON_SELECT 1
@@ -53,6 +78,7 @@ static void agents_nav_request(int screen, bool remote)
 #define ROCKBOX_DIR "."
 #include "lyric_viewer.h"
 #include "ui/animation.h"
+#include "ui/native_theme.h"
 #define fdprintf dprintf
 #define USEC_TIMER mock_usec()
 #define TIMEOUT_NOBLOCK 0
@@ -72,6 +98,7 @@ static void agents_nav_request(int screen, bool remote)
 #define IS_DIACRITIC(x) false
 #define FBADDR(x,y) (screen_pixels+(y)*320+(x))
 typedef uint16_t fb_data;typedef unsigned ucschar_t;
+RETAINED_TEST_HEADER
 struct frame_buffer_t {fb_data *fb_ptr;void*(*get_address_fn)(int,int);int stride,elems;};
 struct viewport {struct frame_buffer_t *buffer;unsigned bg_pattern;int font,fg,width,height,flags;};
 struct bitmap {int width,height;unsigned char *data;};
@@ -82,6 +109,7 @@ static uint32_t current_tick, precise_extra;
 static uint32_t mock_usec(void){return current_tick*10000+precise_extra;}
 static fb_data screen_pixels[320*240],app_area[3*1024*1024/sizeof(fb_data)];
 static struct viewport default_vp,*vp=&default_vp;
+static struct frame_buffer_t lcd_framebuffer_default={.fb_ptr=screen_pixels,.stride=320,.elems=320*240};
 static struct mp3entry playing;
 static struct wps_state wps={.id3=&playing};
 static struct font {int height;} f12={12},f18={18},f26={26};
@@ -150,7 +178,7 @@ static const unsigned char *utf8decode(const unsigned char*p,ucschar_t *ch){*ch=
 static int font_getstringsize(const unsigned char*p,int*w,int*h,int f){*w=0;*h=f;while(*p){ucschar_t ch;p=utf8decode(p,&ch);*w+=font_get_width(font_get(f),ch);}return *w;}
 static const char *text_wrap_next_punct(const char *p,int width,struct font*f,const char **end){int n=0;const char*s=p;while(*p&&*p!='\n'){ucschar_t ch;const char*q=(const char*)utf8decode((const unsigned char*)p,&ch);n+=font_get_width(f,ch);if(n>width&&p>s)break;p=q;}*end=p;return *p=='\n'?p+1:p;}
 static unsigned color_blend(unsigned a,unsigned b,int p){unsigned rb=(((a&0xf81f)*(256-p)+(b&0xf81f)*p)>>8)&0xf81f;return rb|((((a&0x7e0)*(256-p)+(b&0x7e0)*p)>>8)&0x7e0);}
-static void lcd_set_viewport(struct viewport*v){vp=v?v:&default_vp;}
+static struct viewport *lcd_set_viewport(struct viewport*v){struct viewport *old=vp;vp=v?v:&default_vp;return old;}
 static void lcd_setfont(int f){vp->font=f;}
 static void lcd_set_drawmode(int m){(void)m;}
 static void lcd_set_foreground(unsigned c){vp->fg=c;}
@@ -170,54 +198,71 @@ static void lcd_update_rect(int x,int y,int w,int h){assert(x>=0&&y>=0&&w>0&&h>0
 static void sleep(int n){assert(clock_refs==2&&n>=0);current_tick+=n+1;}
 static void *app_try_claim_buffer(size_t*n,const char*s){assert(!strcmp(s,"lyrics"));if(deny_arena)return NULL;*n=arena_bytes;claims++;return app_area;}
 static void app_release_buffer(const char*s){assert(clock_refs==1);assert(!strcmp(s,"lyrics"));releases++;}
-static void skin_hold_scrolling(bool h){holds+=h?1:-1;assert(holds>=0);}
-static bool skin_flush_inhibited(void){return inhibited;}
-static void skin_inhibit_flush(bool v){inhibited=v;}
+static bool ui_hold_scrolling(bool h){holds+=h?1:-1;assert(holds>=0);return !holds;}
+static bool ui_flush_inhibited(void){return inhibited;}
+static void ui_inhibit_flush(bool v){inhibited=v;}
+static int dirty_rect[4];
+static void ui_mark_dirty_rect(int screen,int x,int y,int w,int h)
+{
+    assert(!screen);
+    dirty_rect[0]=x;dirty_rect[1]=y;dirty_rect[2]=w;dirty_rect[3]=h;
+}
+static void ui_flush_dirty(void)
+{
+    if (inhibited || !dirty_rect[2])
+        return;
+    lcd_update_rect(dirty_rect[0],dirty_rect[1],dirty_rect[2],dirty_rect[3]);
+    dirty_rect[2]=0;
+}
 static unsigned art_generation;
-static unsigned skin_albumart_gen(void){return art_generation;}
+static unsigned album_art_generation(void){return art_generation;}
 static void push_current_activity(int a){(void)a;activities++;}
 static void pop_current_activity(void){activities--;}
 static void viewportmanager_theme_enable(int s,bool b,struct viewport*v){(void)s;(void)b;*v=(struct viewport){0};}
 static void viewportmanager_theme_undo(int s,bool b){(void)s;(void)b;}
-static unsigned dynamic_colors_resolve(unsigned c){return c;}
-static bool dynamic_colors_roles(unsigned*a,unsigned*b){(void)a;(void)b;return false;}
+static void ui_theme_snapshot(struct ui_theme *theme)
+{
+    memset(theme, 0, sizeof(*theme));
+    theme->background[UI_BG_LYRICS] = UI_BG_BLURRED_COVER;
+    theme->color[UI_COLOR_FOREGROUND] = theme->color[UI_COLOR_ACCENT] = 0xffffff;
+}
+uint32_t ui_theme_color(const struct ui_theme *theme, enum ui_color_role role,
+                        const struct ui_album_palette *palette)
+{
+    (void)palette;
+    return theme->color[role];
+}
+static unsigned ui_theme_duration(unsigned frames)
+{
+    return global_settings.animations ? frames : 0;
+}
+static int ui_theme_font_load(const struct ui_theme *theme, enum ui_font_role role, int glyphs)
+{
+    (void)theme;
+    (void)glyphs;
+    return font_load(role == UI_FONT_LYRICS_FOCUS ? "26-test" : "18-test");
+}
 static bool art_present, cached_art;
 static int raw_art_reads, art_handle=1;
 static fb_data art_pixels[256];
-static struct bitmap art={16,16,(unsigned char*)art_pixels};
-static int skin_lyrics_art(void){return art_present?art_handle:-1;}
-static bool wps_art_pin(int h,bool b){(void)b;return art_present&&h==art_handle;}
-static bool wps_art_bitmap(int h,struct bitmap**b){raw_art_reads++;*b=&art;return art_present&&h==art_handle;}
-enum { IMG_CLASSES_ALL, IMG_CLASSES_INPLACE };
-struct img_filter { int text_lum; bool scrim; };
-struct img_levels { int unused; };
-static bool img_filter_compile(const char *spec,int allowed,struct img_filter *f)
+static int album_art_current(void){return art_present?art_handle:-1;}
+static void album_palette_refresh(void){}
+static unsigned album_palette_generation(void){return 0;}
+static bool album_palette_snapshot(struct ui_album_palette *p){*p=(struct ui_album_palette){0};return false;}
+static bool album_art_render_background(fb_data *dst,int width,int height,int handle,
+                                        bool blur,unsigned foreground)
 {
-    assert(!strcmp(spec,allowed==IMG_CLASSES_ALL?"blur12+scrim:ffffff+dither":"darker45+dither"));
-    *f=(struct img_filter){.text_lum=255,.scrim=allowed==IMG_CLASSES_ALL};return true;
-}
-static bool skin_lyrics_copy_blur(fb_data *dst,int handle,const struct img_filter *f)
-{
-    assert(handle==art_handle&&f->scrim);
-    if(!cached_art)return false;
-    for(int i=0;i<320*240;i++)dst[i]=art_pixels[0];
+    assert(width==320 && height==240 && blur && foreground==LCD_WHITE);
+    if (!art_present || handle!=art_handle)
+        return false;
+    if (!cached_art)
+    {
+        raw_art_reads++;
+        precise_extra+=5000;
+    }
+    for (int i=0;i<width*height;i++)
+        dst[i]=color_blend(0,art_pixels[0],141);
     return true;
-}
-static void img_filter_measure(const fb_data *p,int w,int h,struct img_levels *levels)
-{assert(p==art_pixels&&w==16&&h==16);levels->unused=0;}
-static void img_filter_adapt(struct img_filter *f,const struct img_levels *levels,int avoid)
-{assert(f->scrim&&avoid==255&&!levels->unused);}
-static void img_filter_render(fb_data *dst,int w,int h,const fb_data *p,int sw,int sh,const struct img_filter *f)
-{
-    assert(f->scrim&&w==320&&h==320&&sw==16&&sh==16);
-    for(int i=0;i<w*h;i++)dst[i]= i<40*w ? 0 : p[0];
-    precise_extra+=4000;
-}
-static void img_filter_apply_banded(fb_data *dst,int w,int h,const struct img_filter *f)
-{
-    assert(w==320&&h==240&&!f->scrim);
-    for(int i=0;i<w*h;i++)dst[i]=color_blend(0,dst[i],141);
-    precise_extra+=1000;
 }
 static void backlight_set_timeout(int n){(void)n;}static void backlight_set_timeout_plugged(int n){(void)n;}
 static void remote_cn(const char *id, unsigned position, unsigned rate)
@@ -322,6 +367,9 @@ static int default_event_handler(int a){
 }
 static int get_action(int c,int timeout);
 '''
+retained_header=(r/'apps-ipod/ui/retained.h').read_text()
+retained_header=re.sub(r'^#include ".*\n','',retained_header,flags=re.M)
+adapter=adapter.replace('RETAINED_TEST_HEADER',retained_header)
 # Avoid libc sleep's POSIX signature in this host adapter.
 pre=pre.replace('#include <unistd.h>','#include <unistd.h>\n#include <limits.h>\n#define sleep ui_sleep')
 post=r'''
@@ -390,7 +438,7 @@ static int select_scenario(void)
     }
     if (calls==2) {
         assert(lv.mode.manual && lv.mode.focus==focus);
-        assert(lyrics_motion_at(&lv.scroll,current_tick)!=focus*256);
+        assert(lyrics_motion_at(&lv.scroll,lv_line_clock())!=focus*256);
         select_button=(remote_key || remote_source)?BUTTON_RC_SELECT:BUTTON_SELECT;
         return ACTION_UNKNOWN;
     }
@@ -418,7 +466,7 @@ static int select_scenario(void)
         return ACTION_NONE;
     }
     assert(lv_lyric_elapsed()==(backward_seek?200:remote_source?2000:4000));
-    assert(lyrics_motion_at(&lv.scroll,current_tick)==focus*256);
+    assert(lyrics_motion_at(&lv.scroll,lv_line_clock())==focus*256);
     assert(!title_draws&&!manual_draws);
     return ACTION_WPS_BROWSE; /* SELECT exits again after auto-follow. */
 }
@@ -503,7 +551,7 @@ static int get_action(int c,int timeout){
  }
  if(plan==0){
   if(calls==1){assert(lv.mode.focus==0);return ACTION_WPS_VOLUP;}
-  if(calls==2){assert(lv.mode.manual&&lv.mode.focus==1);retarget_position=lyrics_motion_at(&lv.scroll,current_tick);return ACTION_WPS_VOLUP;}
+  if(calls==2){assert(lv.mode.manual&&lv.mode.focus==1);retarget_position=lyrics_motion_at(&lv.scroll,lv_line_clock());return ACTION_WPS_VOLUP;}
   if(calls==3){assert(lv.scroll.from==retarget_position&&lv.mode.focus==2);current_tick+=400;playing.elapsed=9000;return ACTION_NONE;}
   if(calls==4){assert(!lv.mode.manual&&lv.mode.focus==2);return ACTION_WPS_PLAY;}
   if(calls==5)return ACTION_WPS_SEEKFWD;
@@ -564,7 +612,7 @@ static int get_action(int c,int timeout){
  }
  if(plan==5){
    if(calls==1){
-     assert(lv.art_ready&&perf.cached==1&&!perf.builds&&raw_art_reads==0);
+     assert(lv.art_ready&&perf.builds==1&&raw_art_reads==0);
      assert(lv.background[120*320]==color_blend(0,0xffff,141));
      for(int y=0;y<240;y++)
        assert(lv.background[y*320]==lv.background[120*320] && "cover edges must match its uniform center");
@@ -572,26 +620,27 @@ static int get_action(int c,int timeout){
      return ACTION_NONE;
    }
    if(calls==2){
-     assert(updates==idle_updates&&perf.cached==1&&!perf.builds);
+     assert(updates==idle_updates&&perf.builds==1);
      cached_art=false;art_handle=2;art_pixels[0]=0x001f;art_generation++;
      return ACTION_WPS_SKIPNEXT;
    }
    if(calls==3){
-     assert(lv.art_ready&&perf.builds==1&&perf.build==5000&&raw_art_reads==1&&lv.track_fade);
+     assert(lv.art_ready&&perf.builds==2&&perf.build==5000&&raw_art_reads==1&&lv.track_fade);
      for(int y=0;y<240;y++) assert(lv.background[y*320]==color_blend(0,0x001f,141));
      assert(!memcmp(lv_frame(),lv.snapshot,LV_FRAME));
      current_tick+=25;return ACTION_NONE;
    }
    if(calls==4){
-     assert(lv.art_ready&&!lv.track_fade&&perf.builds==1&&raw_art_reads==1);
+     assert(lv.art_ready&&!lv.track_fade&&perf.builds==2&&raw_art_reads==1);
      art_present=false;strcpy(strrchr(playing.path,'/')+1,"uncovered.wav");return ACTION_NONE;
    }
-   assert(!lv.art_ready&&lv.track_fade&&perf.builds==1);
+   assert(!lv.art_ready&&lv.track_fade&&perf.builds==2);
    return ACTION_WPS_MENU;
  }
  assert(!lv.snapshot&&!lv.claimed&&!lyrics_loaded());return SYS_USB_CONNECTED;
 }
 int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
+ assert(!atexit(check_trace_closed));
  assert(lv_mix(0,65535,128)==0x7bef);
  assert(lv_mix(0,0xf800,128)==0x7800&&lv_mix(0,0x07e0,128)==0x03e0&&lv_mix(0,0x001f,128)==0x000f);
  art_present=true;for(int i=0;i<256;i++)art_pixels[i]=i<16?0x001f:0xf800;
@@ -601,6 +650,8 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  f=fopen("other.txt","w");assert(f);fputs("New first line\nNew second line\n中文第三行",f);fclose(f);
  snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);playing.title="Title";playing.artist="Artist";playing.length=60000;
  global_settings.lyric_lead=200;global_settings.fg_color=65535;global_settings.lyric_highlight=true;global_settings.lyric_backlight=true;global_settings.lyric_prev_opacity=global_settings.lyric_next_opacity=55;
+ global_settings.animations=true;
+ deny_entry_core=true;
  if (!strcmp(argv[2],"frames")) {
    plan=14;global_settings.animations=deny_entry_core=true;
    assert(lyric_viewer()==GO_TO_ROOT && calls==4);
@@ -611,7 +662,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
    return 0;
  }
  if (!strcmp(argv[2],"entry-frames")) {
-   plan=15;global_settings.animations=true;
+   plan=15;deny_entry_core=false;
    assert(lyric_viewer()==GO_TO_PREVIOUS && calls==4 && entry_allocs==1 && entry_frees==1);
    plan=16;calls=updates=0;precise_extra=0;
    assert(lyric_viewer()==GO_TO_ROOT && calls==1 && entry_allocs==2 && entry_frees==2);
@@ -668,9 +719,12 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  if (!strcmp(argv[2],"entry")) {
    plan=13;remote_source=timed_fixture=remote_key=false;
    reject_loading=verify_early_frame=true;calls=loads=updates=0;
+   shared_scene=true;
+   deny_entry_core=false;
    snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);
    assert(lyric_viewer()==GO_TO_PREVIOUS);
-   puts("PASS FU71 blank early frame reaches LCD before simulated 1s font load");
+   assert(entry_allocs==0);
+   puts("PASS early frame before font load and no nested legacy transition");
    return 0;
  }
  if (!strcmp(argv[2],"background")) {
@@ -706,7 +760,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  size_t len=fread(report,1,sizeof(report)-1,metrics);fclose(metrics);report[len]=0;
  assert(!strncmp(report,"Session 4\nUptime (s): ",22)&&strstr(report,"Duration (ms): "));
  assert(strstr(report,"Source: Local\nTrack: Untimed\n"));
- assert(strstr(report,"blur reuse/builds: 1/1\n")&&strstr(report,"blur max ms: 5\n"));
+ assert(strstr(report,"art background renders: 2\n")&&strstr(report,"blur max ms: 5\n"));
  assert(strstr(report,"SELECT to first ms: 0\n")&&strstr(report,"animation fps: "));
  assert(strstr(report,"restore: ")&&strstr(report,"text/glyph: ")&&strstr(report,"blend: ")&&strstr(report,"LCD: ")&&strstr(report,"wait: "));
  assert(strstr(report,"animation boosted/frames: ")&&strstr(report,"LCD submits: ")&&strstr(report,"mask rasters: "));
@@ -749,7 +803,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  calls=0;plan=7;playing.elapsed=0;
  assert(lyric_viewer()==GO_TO_ROOT && clock_refs==1 && boost_gets==boost_puts);
  plan=8;calls=0;
- arena_bytes=2*LV_FRAME+LCD_WIDTH*LCD_WIDTH*sizeof(fb_data)
+ arena_bytes=3*LV_FRAME
             +LV_LAYOUTS*sizeof(struct lv_layout)+(LV_MASKS+1)*(sizeof(struct lv_mask)+320*26*sizeof(fb_data));
  assert(lyric_viewer()==GO_TO_PREVIOUS && clock_refs==1 && boost_gets==boost_puts);
  const int nav_actions[] = {ACTION_AGENTS_SWITCH, ACTION_AGENTS_REMOTE_SWITCH,
@@ -869,7 +923,7 @@ static void test_perf_history(void)
     puts("PASS performance history: append, restart, partial tail, rotation, count and legacy visit");
 }
 '''
-p=o/'viewer.c';p.write_text(pre+h+doc+'\n#include "lyrics_motion.h"\n#include "cider_model.h"\nenum {'+','.join(tokens)+'};\n'+button_codes+'\n'+adapter+source+history_fixture+post)
+p=o/'viewer.c';p.write_text(pre+h+doc+'\n#include "lyrics_motion.h"\n#include "cider_model.h"\nenum {'+','.join(tokens)+'};\n'+button_codes+'\n'+adapter+retained+source+history_fixture+post)
 playback=r/'apps-ipod/screens/playback'
 subprocess.run(['cc','-m32','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function',
                 '-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-ffunction-sections','-Wl,--gc-sections',

@@ -337,6 +337,7 @@ static int prose_run(const char *title, const char *body,
     p.sel    = accept_default ? 1 : 0;  /* once the buttons are reached */
 
     dialog_init(&d, CONTEXT_STD, title, NULL, &prose_cb, &p);
+    d.motion_route = fb ? "rotated-prose" : "prose";
     d.fb = fb;
     d.fb_w = fb_w;
     d.fb_h = fb_h;

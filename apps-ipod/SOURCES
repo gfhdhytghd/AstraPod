@@ -114,19 +114,19 @@ widgets/edit_line.c
 widgets/keyboard.c
 widgets/list.c
 widgets/list_render.c
-widgets/list_skinned.c
 widgets/list_select.c
 widgets/menu.c
 ui/animation.c
 #ifdef IPOD_6G
 ui/native_chrome.c
-ui/native_menu.c
 #endif
 ui/native_theme.c
 ui/native_theme_runtime.c
 ui/native_wps.c
+ui/perf.c
 ui/retained.c
 ui/scene.c
+ui/sheet.c
 widgets/option_select.c
 widgets/rating_dialog.c
 audio/peak_meter.c
@@ -296,7 +296,6 @@ screens/settings/sound_settings.c
 screens/settings/text_viewer_settings.c
 screens/settings/lyric_viewer_settings.c
 screens/settings/theme_settings.c
-screens/settings/theme_options_menu.c
 #ifdef HAVE_TAGCACHE
 screens/settings/album_covers_settings.c
 #endif
@@ -373,21 +372,10 @@ viewers/image_viewer/decoders/ppm.c
 viewers/image_viewer/decoders/ppm_decoder.c
 #endif
 
-skin/custom_tags.c
-skin/skin_backdrops.c
-skin/skin_display.c
-skin/skin_engine.c
-skin/skin_parser.c
-skin/skin_render.c
-skin/skin_tokens.c
-skin/statusbar.c
-skin/statusbar_skinned.c
-skin/theme_options.c
-#if (LCD_DEPTH > 1)
-skin/backdrop.c
-#endif
+ui/frame.c
+ui/statusbar.c
 #if defined(HAVE_LCD_COLOR) && defined(HAVE_ALBUMART)
-skin/skin_albumart_color.c
+metadata/album_palette.c
 #endif
 
 /* -- services --------------------------------------------------------- */

@@ -17,7 +17,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for key in ("simulator", "resources", "evidence"):
         parser.add_argument(key, type=lambda v: Path(v).resolve())
+    parser.add_argument("--locale", choices=("chinese-simp", "chinese-trad"))
+    parser.add_argument("--lang-dir", type=Path)
     args = parser.parse_args()
+    if args.locale and not args.lang_dir:
+        parser.error("--locale requires --lang-dir with simulator language files")
     args.evidence.mkdir(parents=True)
     with tempfile.TemporaryDirectory(prefix="native-theme-") as folder, \
             tempfile.TemporaryFile() as display, (args.evidence / "xvfb.log").open("w") as log:
@@ -26,14 +30,18 @@ def main():
         runtime.mkdir(mode=0o700)
         with ZipFile(args.resources) as z:
             for name in z.namelist():
-                if name.startswith((".rockbox/fonts/", ".rockbox/themes/", ".rockbox/wps/",
-                                    ".rockbox/icons/", ".rockbox/backdrops/")):
+                if name.startswith(".rockbox/fonts/"):
                     z.extract(name, root)
         rockbox = root / ".rockbox"
-        options = (rockbox / "themes/scrim.cfg").read_text()
+        options = ""
+        if args.locale:
+            name = args.locale + ".lng"
+            (rockbox / "langs").mkdir()
+            (rockbox / "langs" / name).write_bytes((args.lang_dir / name).read_bytes())
+            options += f"\nlang: {args.locale}\n"
         (rockbox / "config.cfg").write_text(options + "\nstart in screen: menu\n"
             "backlight timeout: off\nvoice menus: off\nlist wraparound: on\n"
-            "animations: off\nnative ui: on\nnative theme: scrim\n")
+            "animations: off\nnative theme: scrim\n")
         (rockbox / "native-themes").mkdir()
         path = rockbox / "native-themes/fixture.podtheme"
         with process(["Xvfb", "-displayfd", str(display.fileno()), "-screen", "0",
@@ -49,7 +57,8 @@ def main():
                 raise RuntimeError("Xvfb did not start")
             env = dict(os.environ, DISPLAY=":" + number, XDG_RUNTIME_DIR=str(runtime),
                        SDL_VIDEODRIVER="x11", SDL_AUDIODRIVER="dummy",
-                       SDL_RENDER_DRIVER="software")
+                       SDL_RENDER_DRIVER="software", LIBGL_ALWAYS_SOFTWARE="1",
+                       __GLX_VENDOR_LIBRARY_NAME="mesa")
             with (args.evidence / "firmware.log").open("w") as slog, process(
                 [str(args.simulator), "--root", str(root), "--nobackground",
                  "--zoom", "1", "--screenshot"], slog, env=env, cwd=root,
@@ -75,10 +84,8 @@ def main():
                         for _ in range(3):
                             click("Down")
                     click("Right")  # Appearance from Settings
-                    click("Up")
-                    click("Up")  # Native theme is before Forget Tweaks
                     snap(f"{counter}-appearance")
-                    click("Right")  # Native theme
+                    click("Right")  # Native theme is the first row
                     snap(f"{counter}-selector")
                     for _ in range(index):
                         click("Down")

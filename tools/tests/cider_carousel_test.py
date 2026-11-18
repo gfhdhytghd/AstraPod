@@ -95,10 +95,8 @@ caption_stubs=r'''
 #define PF_SCROLL_ARTIST 1
 struct viewport {int dummy;};struct pf_caption {int y1,y2;};
 static struct {int album_covers_show_album_name,album_covers_show_year;}global_settings;
-static int pf_fg_color,pf_bold_font;
-static int font(void){return 1;}
-static struct {int(*getuifont)(void);}screens[]={{font}};
-#define SCREEN_MAIN 0
+static int pf_fg_color;
+static int carousel_caption_font(bool bold){return bold ? 2 : 1;}
 static int drawn;static char text_lines[2][260];
 static struct viewport*carousel_text_begin(void){return NULL;}
 static void carousel_text_end(struct viewport*p){(void)p;}

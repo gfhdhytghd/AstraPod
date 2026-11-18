@@ -13,7 +13,6 @@
 
 #include "lcd.h"
 #include "scroll_engine.h"
-#include "skin/backdrop.h"
 #include "line.h"
 
 #define NB_SCREENS 1
@@ -105,11 +104,8 @@ struct screen
     void (*backlight_off)(void);
     bool (*is_backlight_on)(bool ignore_always_off);
     void (*backlight_set_timeout)(int index);
-    bool (*backdrop_load)(const char *filename, char* backdrop_buffer);
-    void (*backdrop_show)(char* backdrop_buffer);
     /* Foreground fill at `opacity` (0 draws nothing, LCD_BLEND_OPAQUE is
-     * opaque), blended with what is already there. Only useful drawn into the
-     * backdrop buffer -- see lcd_blendrect(). */
+     * opaque), blended with what is already in the RGB565 framebuffer. */
     void (*blendrect)(int x, int y, int width, int height, unsigned opacity);
     /* Foreground fill through a coverage mask -- the blitter the anti-aliased
      * font renderer draws glyphs with. `src` holds 4 bits per pixel, two to a

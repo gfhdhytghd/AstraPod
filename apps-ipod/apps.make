@@ -58,7 +58,6 @@ ifeq ($(MODELNAME):$(ARCH),ipod6g:arch_arm)
 $(APPSBUILDDIR)/screens/playback/handoff_sheet.o \
 $(APPSBUILDDIR)/screens/playback/wps.o \
 $(APPSBUILDDIR)/ui/native_chrome.o \
-$(APPSBUILDDIR)/ui/native_menu.o \
 $(APPSBUILDDIR)/ui/native_theme.o \
 $(APPSBUILDDIR)/ui/native_theme_runtime.o \
 $(APPSBUILDDIR)/ui/native_wps.o \

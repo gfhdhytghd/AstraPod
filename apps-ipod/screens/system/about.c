@@ -21,7 +21,7 @@
 #include "settings/settings.h"
 #include "system/shutdown.h"
 #include "speech/talk.h"
-#include "skin/skin_albumart_color.h" /* dynamic_colors_resolve */
+#include "ui/native_theme_runtime.h"
 #include "about_art.h"
 #include "about.h"
 
@@ -133,8 +133,8 @@ int about_screen(void)
     {
         /* Redrawn only when the colours move: they follow the album palette,
          * which fades between tracks. */
-        vp.fg_pattern = dynamic_colors_resolve(global_settings.fg_color);
-        vp.bg_pattern = dynamic_colors_resolve(global_settings.bg_color);
+        vp.fg_pattern = ui_theme_rgb565(UI_COLOR_FOREGROUND);
+        vp.bg_pattern = ui_theme_rgb565(UI_COLOR_BACKGROUND);
         if (!drawn || vp.fg_pattern != fg || vp.bg_pattern != bg)
         {
             drawn = true;

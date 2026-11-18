@@ -110,11 +110,7 @@ static int pick_custom_colour(void)
         return MENU_ATTACHED_USB;
 
     if (global_settings.album_covers_custom_color != old)
-    {
-        settings_mark_user_tweak(
-            find_setting(&global_settings.album_covers_custom_color));
         settings_save();
-    }
     return 0;
 }
 

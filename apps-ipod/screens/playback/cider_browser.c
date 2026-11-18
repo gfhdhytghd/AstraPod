@@ -19,13 +19,16 @@
 #include "screens/browse/browser_db.h"
 #include "system/activity.h"
 #include "settings/settings.h"
-#include "draw/img_filter.h"
+#include "ui/scene.h"
+#include "core_alloc.h"
+#include "draw/bmp.h"
 #include "speech/talk.h"
 #include "root_menu.h"
 #include "lang.h"
 #include "kernel.h"
 #include "misc.h"
 #include "usb.h"
+#include "string-extra.h"
 #include <stdio.h>
 #include <string.h>
 static struct
@@ -39,26 +42,24 @@ static int depth;
 static bool album_pending, show_covers, remote_return, cover_suspended;
 static int cover_album_depth = -1, cover_parent_depth = -1;
 static struct cider_row selected_row;
-/* 3 fixed rows, the parsed tagnavi main rows (21 shipped) and Cover cache.
- * FU56: 35 -> 33 slots (29 tagnavi rows) returns 1472 B of RAM. */
-static struct cider_row root_rows[33];
+enum { CIDER_ROOT_FIXED_ROWS = 3, CIDER_ROOT_LIBRARY_ROWS = 29 };
 static int root_count, browse_floor;
+static int root_ordinals[CIDER_ROOT_LIBRARY_ROWS];
 static bool empty_list;
 static const char *list_notice;
+
 enum { CIDER_LIST_ART_DIM = 56 };
-static fb_data art_pixels[CIDER_LIST_ART_DIM * CIDER_LIST_ART_DIM];
-static struct bitmap row_bitmap;
+struct cider_browser_view {
+    fb_data pixels[CIDER_LIST_ART_DIM * CIDER_LIST_ART_DIM];
+    struct bitmap cover;
+    struct list_header header;
+    char album_detail[80];
+};
+
 static struct cider_row callback_row;
 static char query[SEARCH_MAX_QUERY + 1];
 static int search_count = -1;
 static int ahead_previous, ahead_direction = 1;
-
-_Static_assert(sizeof history + sizeof root_rows + sizeof art_pixels +
-                       sizeof selected_row +
-                       sizeof callback_row + sizeof row_bitmap + sizeof query +
-                       128 <
-                   56 * 1024,
-               "Cider module RAM budget");
 
 static void escape(char *out, unsigned int size, const char *s)
 {
@@ -79,54 +80,64 @@ static void escape(char *out, unsigned int size, const char *s)
 }
 static void root(void)
 {
-    root_count = 0;
-    struct cider_row *r = &root_rows[root_count++];
-    memset(r, 0, sizeof *r);
-    snprintf(r->title, sizeof r->title, "%s", str(LANG_ALBUM_COVERS));
-    snprintf(r->route, sizeof r->route, "covers");
-    r = &root_rows[root_count++];
-    memset(r, 0, sizeof *r);
-    snprintf(r->title, sizeof r->title, "%s", str(LANG_PLAYLISTS));
-    snprintf(r->route, sizeof r->route, "playlists");
-    r = &root_rows[root_count++];
-    memset(r, 0, sizeof *r);
-    snprintf(r->title, sizeof r->title, "%s",
-             str(cider_active() || audio_status() ? LANG_NOW_PLAYING
-                                                  : LANG_RESUME_PLAYBACK));
-    snprintf(r->route, sizeof r->route, "wps");
-    for (int n = 0; n < browser_db_root_row_count() && root_count < (int)ARRAYLEN(root_rows) - 1; n++)
+    int library_rows = 0;
+    int total = browser_db_root_row_count();
+
+    for (int n = 0; n < total && library_rows < CIDER_ROOT_LIBRARY_ROWS; ++n)
     {
         int index;
-        const unsigned char *name;
-        if (!browser_db_get_root_row(n, &index, &name))
+        if (!browser_db_get_root_row(n, &index, NULL))
             break;
-        if (browser_db_root_row_is_hidden(index))
-            continue;
-        r = &root_rows[root_count++];
-        memset(r, 0, sizeof *r);
-        snprintf(r->title, sizeof r->title, "%s", P2STR(name));
-        char escaped[270];
-        escape(escaped, sizeof escaped, browser_db_root_row_key(index));
-        snprintf(r->route, sizeof r->route, "root/%s", escaped);
+        if (!browser_db_root_row_is_hidden(index))
+            root_ordinals[library_rows++] = n;
     }
-    struct cider_row *cache_row = &root_rows[root_count++];
-    memset(cache_row, 0, sizeof *cache_row);
-    snprintf(cache_row->title, sizeof cache_row->title, "Cover cache");
-    snprintf(cache_row->route, sizeof cache_row->route, "cache");
-
+    root_count = CIDER_ROOT_FIXED_ROWS + library_rows + 1;
 }
-static bool get_row(int i, struct cider_row *out)
+
+static bool get_root_row(int item, struct cider_row *out)
 {
-    if (list_notice) return false;
-    if (!depth)
+    static const int labels[] = {
+        LANG_ALBUM_COVERS, LANG_PLAYLISTS, LANG_RESUME_PLAYBACK,
+    };
+    static const char *const routes[] = { "covers", "playlists", "wps" };
+
+    memset(out, 0, sizeof(*out));
+    if (item < CIDER_ROOT_FIXED_ROWS)
     {
-        if (!cider_available() || i < 0 || i >= root_count)
-            return false;
-        *out = root_rows[i];
+        int title = item == 2 && (cider_active() || audio_status()) ?
+                    LANG_NOW_PLAYING : labels[item];
+        strlcpy(out->title, str(title), sizeof(out->title));
+        strlcpy(out->route, routes[item], sizeof(out->route));
         return true;
     }
+    if (item == root_count - 1)
+    {
+        strlcpy(out->title, str(LANG_ART_CACHE_MENU), sizeof(out->title));
+        strlcpy(out->route, "cache", sizeof(out->route));
+        return true;
+    }
+
+    int index;
+    const unsigned char *name;
+    int ordinal = root_ordinals[item - CIDER_ROOT_FIXED_ROWS];
+    if (!browser_db_get_root_row(ordinal, &index, &name))
+        return false;
+
+    strlcpy(out->title, P2STR(name), sizeof(out->title));
+    strlcpy(out->route, "root/", sizeof(out->route));
+    escape(out->route + 5, sizeof(out->route) - 5, browser_db_root_row_key(index));
+    return true;
+}
+
+static bool get_row(int i, struct cider_row *out)
+{
+    if (list_notice)
+        return false;
+    if (!depth)
+        return cider_available() && i >= 0 && i < root_count && get_root_row(i, out);
     return cider_page_row(i, out);
 }
+
 static const char *name(int i, void *data, char *buf, size_t size)
 {
     (void)data;
@@ -161,18 +172,19 @@ static enum list_row_kind kind(int i, void *data)
     return callback_row.kind == CIDER_ROW_SONG ? LIST_ROW_TRACK
                                                : LIST_ROW_CONTAINER;
 }
-static const struct bitmap *bitmap_for(const char *key, struct dim *size,
-                                       const struct img_filter *filter)
+static const struct bitmap *bitmap_for(struct cider_browser_view *view,
+                                       const char *key, struct dim *size)
 {
     int dim = MIN(CIDER_LIST_ART_DIM, MIN(size->width, size->height));
-    if (dim <= 0)
+    if (!view || dim <= 0)
         return NULL;
     int src = CIDER_LIST_ART_DIM;
-    if (!cider_copy_art(key, "S", art_pixels, sizeof art_pixels))
+    fb_data *pixels = view->pixels;
+    if (!cider_copy_art(key, "S", pixels, sizeof(view->pixels)))
     {
         cider_prefetch_art(key, "S");
         src = 32;
-        if (!cider_copy_art(key, "XS", art_pixels, src * src * sizeof(*art_pixels)))
+        if (!cider_copy_art(key, "XS", pixels, src * src * sizeof(*pixels)))
             return NULL;
     }
     /* Walk toward the end when shrinking and toward the start when expanding.
@@ -182,30 +194,33 @@ static const struct bitmap *bitmap_for(const char *key, struct dim *size,
     int end = step > 0 ? dim : -1;
     for (int y = first; y != end; y += step)
         for (int x = first; x != end; x += step)
-            art_pixels[y * dim + x] = art_pixels[y * src / dim * src + x * src / dim];
-    if (filter)
-        img_filter_apply(art_pixels, dim, dim, filter);
-    row_bitmap.width = row_bitmap.height = dim;
-    row_bitmap.format = FORMAT_NATIVE;
-    row_bitmap.data = (unsigned char *)art_pixels;
-    return &row_bitmap;
+            pixels[y * dim + x] = pixels[y * src / dim * src + x * src / dim];
+
+    view->cover.width = view->cover.height = dim;
+    view->cover.format = FORMAT_NATIVE;
+    view->cover.data = (unsigned char *)pixels;
+    return &view->cover;
 }
-static const struct bitmap *art(int i, void *data, struct dim *size,
-                                const struct img_filter *filter, uint32_t hash)
+
+static const struct bitmap *art(int i, void *data, struct dim *size)
 {
-    (void)data;
-    (void)hash;
     if (!get_row(i, &callback_row) || callback_row.kind != CIDER_ROW_ALBUM)
         return NULL;
-    return bitmap_for(callback_row.art, size, filter);
+    return bitmap_for(data, callback_row.art, size);
 }
-static const struct bitmap *header_art(struct dim *size)
+
+static const struct bitmap *header_art(void *data, struct dim *size)
 {
     const char *key = history[depth].art;
-    const struct bitmap *artwork = bitmap_for(key, size, NULL);
-    if (!artwork) cider_request_xs(&key, 1);
+    if (!*key)
+        return NULL;
+
+    const struct bitmap *artwork = bitmap_for(data, key, size);
+    if (!artwork)
+        cider_request_xs(&key, 1);
     return artwork;
 }
+
 static char search_route[380];
 static int search_index;
 static int search_scan(const char *text, void *ctx)
@@ -330,6 +345,15 @@ bool cider_browse_remote_return(void)
     return remote;
 }
 
+static void animate_depth(struct ui_scene *scene, int previous)
+{
+    if (previous == depth)
+        return;
+    if (!scene->handle)
+        ui_scene_interrupt();
+    ui_scene_capture(scene, &history[previous], &history[depth], depth > previous);
+}
+
 int cider_browse(void)
 {
     if (!agents_nav_enter(AGENTS_NAV_TRACKS))
@@ -344,8 +368,12 @@ int cider_browse(void)
     crumb(CR_CIDER_IN, 0);
 #endif
     push_current_activity(ACTIVITY_DATABASEBROWSER);
+    int view_handle = core_alloc_free_space(sizeof(struct cider_browser_view));
+    struct cider_browser_view *view =
+        view_handle > 0 ? core_get_data_pinned(view_handle) : NULL;
     struct gui_synclist list;
-    gui_synclist_init(&list, name, NULL, false, 1, NULL);
+    struct ui_scene scene = {0};
+    gui_synclist_init(&list, name, view, false, 1, NULL);
     gui_synclist_set_icon_callback(&list, icon);
     gui_synclist_set_row_callbacks(&list, kind, NULL, NULL);
     root();
@@ -373,6 +401,7 @@ int cider_browse(void)
         if (show_covers)
         {
             show_covers = false;
+            ui_scene_cancel(&scene);
             gui_synclist_scroll_stop(&list);
             if (!cover_nav_active()) cover_nav_begin(GO_TO_CIDER);
             if (cover_parent_depth < 0) cover_parent_depth = depth;
@@ -386,8 +415,10 @@ int cider_browse(void)
             if (album_pending)
             {
                 album_pending = false;
+                int previous = depth;
                 enter(&selected_row);
                 cover_album_depth = depth;
+                animate_depth(&scene, previous);
             }
             else if (ret != GO_TO_PREVIOUS)
             {
@@ -421,23 +452,35 @@ int cider_browse(void)
         }
         bool albums = cider_available() && count > 0 && depth && (!strncmp(history[depth].route, "albums", 6) ||
                                 !strcmp(history[depth].route, "root/Album"));
-        bool header = cider_available() && count > 0 && depth && !strncmp(history[depth].route, "album/", 6);
-        if (header && count >= 0)
-            history[depth].header.tracks = count;
-        /* The album's L cover stays resident while its track list is open. */
+        bool header = cider_available() && count > 0 && depth &&
+                      !strncmp(history[depth].route, "album/", 6);
         if (header && history[depth].art[0])
             cider_pin_art(history[depth].art);
         else
             cider_unpin_art();
-        browser_set_external_header(header ? &history[depth].header : NULL,
-                                    header ? header_art : NULL);
-        browser_set_showing_art(albums && global_settings.db_albumart);
-        gui_synclist_set_albumart_callback(
-            &list, albums && global_settings.db_albumart ? art : NULL);
+
+        if (header && view)
+        {
+            struct browser_db_header *album = &history[depth].header;
+            album->tracks = count;
+            browser_album_details(album, view->album_detail,
+                                  sizeof(view->album_detail));
+            view->header = (struct list_header) {
+                .title = album->name,
+                .subtitle = album->artist,
+                .detail = view->album_detail,
+                .cover = header_art,
+                .data = view,
+            };
+            gui_synclist_set_header(&list, &view->header);
+        }
+        else
+            gui_synclist_set_header(&list, NULL);
+
+        bool covers_visible = albums && global_settings.db_albumart && view;
+        gui_synclist_set_albumart_callback(&list, covers_visible ? art : NULL);
         gui_synclist_set_row_height(&list,
-                                    albums && global_settings.db_albumart
-                                        ? global_settings.db_art_row_height
-                                        : 0);
+                                    covers_visible ? global_settings.db_art_row_height : 0);
         char title[160];
         snprintf(title, sizeof title, depth ? "%s%s" : "%s Remote%s",
                  depth ? history[depth].title : cider_remote_name(),
@@ -486,9 +529,30 @@ int cider_browse(void)
                     previews[missing++] = window[i];
             if (missing) cider_request_xs(previews, missing);
         }
-        gui_synclist_draw(&list);
+        if (scene.capturing)
+        {
+            gui_synclist_draw_settled(&list);
+            ui_scene_start(&scene);
+        }
+        else
+        {
+            gui_synclist_draw(&list);
+            ui_scene_update(&scene, true);
+        }
         int action;
-        list_do_action(CONTEXT_ID3DB, HZ / 10, &list, &action);
+        long refresh_at = current_tick + HZ / 10;
+        do
+        {
+            /* Keep the library's normal refresh cadence. Scene frames
+             * don't need to repeat the row callbacks or art read-ahead. */
+            int timeout = MAX(0, refresh_at - current_tick);
+            bool redrew = list_do_action(CONTEXT_ID3DB,
+                                         ui_scene_timeout(&scene, timeout),
+                                         &list, &action);
+            ui_scene_update(&scene, redrew);
+        } while (action == ACTION_NONE && scene.handle > 0 &&
+                 TIME_BEFORE(current_tick, refresh_at));
+        int previous = depth;
         history[depth].selected = gui_synclist_get_sel_pos(&list);
         enum agents_nav_screen nav = agents_nav_pending();
         if (nav == AGENTS_NAV_AGENTS)
@@ -655,6 +719,8 @@ int cider_browse(void)
             result = GO_TO_ROOT;
             break;
         }
+        if (!show_covers)
+            animate_depth(&scene, previous);
     }
     if (cover_parent_depth >= 0)
     {
@@ -669,10 +735,15 @@ int cider_browse(void)
             close_covers(false);
     }
     carousel_forget_resume();
+    ui_scene_cancel(&scene);
     gui_synclist_scroll_stop(&list);
+    gui_synclist_forget(&list);
+    if (view)
+    {
+        core_put_data_pinned(view);
+        core_free(view_handle);
+    }
     cider_unpin_art();
-    browser_set_showing_art(false);
-    browser_set_external_header(NULL, NULL);
     pop_current_activity();
     agents_nav_leave(AGENTS_NAV_TRACKS);
     /* Only a carousel that opened WPS keeps a resumable browser parent. */

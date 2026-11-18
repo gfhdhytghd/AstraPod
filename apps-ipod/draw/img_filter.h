@@ -9,6 +9,7 @@
 #define _IMG_FILTER_H_
 
 #include <stdbool.h>
+#include <stddef.h>
 #include "config.h"
 #include "lcd.h"
 
@@ -144,8 +145,8 @@ struct img_filter
 
     /* The blur window the chain asked for, in pixels of the decimated picture
      * the blur runs on, not of the finished one. 0 when it named no blur.
-     * The finished picture is img_filter_source_divisor() times larger, so
-     * that is the factor between this and the softness on screen. */
+     * The finished picture is larger than this source, so the amount
+     * corresponds to a wider window on screen. */
     unsigned char blur_radius;
 
     /* Block edge for `pixellate`, in pixels. 0 when the chain named none. */
@@ -218,26 +219,12 @@ void img_filter_apply(fb_data *px, int w, int h, const struct img_filter *f);
 void img_filter_apply_banded(fb_data *px, int w, int h,
                              const struct img_filter *f);
 
-/* How much smaller than the finished picture the source may be, for a chain
- * that blurs: the blur throws that detail away in its first step, so asking
- * for a source this size costs nothing and saves everything downstream from
- * carrying the full-size one. 1 for any chain that does not blur.
- *
- * The smallest power of two that fits the decimated picture in the engine's
- * fixed working buffer, so the source keeps every pixel there is room for.
- * The blur amount does not enter into it. A caller sizing a source and the
- * render must both ask, and get the same answer for the same w and h. */
-int img_filter_source_divisor(const struct img_filter *f, int w, int h);
-
-/* Render a chain that resizes: source and destination may differ in size, and
- * the source is left alone. Every stage the chain uses is applied on the way
- * out, so a blurred chain is one pass over the destination however many
- * filters it names.
- *
- * Not the entry point for a chain that only rewrites pixels -- that is
- * img_filter_apply(), which needs no destination of its own. */
-void img_filter_render(fb_data *dst, int dw, int dh,
-                       const fb_data *src, int sw, int sh,
-                       const struct img_filter *f);
+/* Render into a linear destination, using a source region of sw by sh
+ * pixels with the supplied source stride. A blur needs separate scratch
+ * storage. count is the scratch capacity in pixels. Insufficient storage
+ * returns false without drawing. */
+bool img_filter_render(fb_data *dst, int dw, int dh,
+                       const fb_data *src, int sw, int sh, int stride,
+                       const struct img_filter *f, fb_data *scratch, size_t count);
 
 #endif /* _IMG_FILTER_H_ */

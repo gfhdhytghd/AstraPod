@@ -11,6 +11,8 @@
 
 #include <stdio.h>
 #include "config.h"
+#include "draw/viewport.h"
+#include "ui/statusbar.h"
 #include <lcd.h>
 #include "scroll_engine.h"
 #include <font.h>
@@ -22,7 +24,6 @@
 #include "backlight.h"
 #include "screen_access.h"
 #include "line.h"
-#include "skin/backdrop.h"
 #include "viewport.h"
 
 /* some helper functions to calculate metrics on the fly */
@@ -38,10 +39,9 @@ static int screen_helper_getcharheight(void)
 
 static int screen_helper_getnblines(void)
 {
-    int height=screens[0].lcdheight;
-    if(global_settings.statusbar != STATUSBAR_OFF)
-        height -= STATUSBAR_HEIGHT;
-    return height / screens[0].getcharheight();
+    struct viewport bounds;
+    viewport_set_defaults(&bounds, SCREEN_MAIN);
+    return bounds.height / screens[SCREEN_MAIN].getcharheight();
 }
 
 void screen_helper_setfont(int font)
@@ -169,8 +169,6 @@ struct screen screens[NB_SCREENS] =
         .backlight_off=&backlight_off,
         .is_backlight_on=&is_backlight_on,
         .backlight_set_timeout=&backlight_set_timeout,
-        .backdrop_load=&backdrop_load,
-        .backdrop_show=&backdrop_show,
         .blendrect = lcd_blendrect,
         .alpha_bitmap_part = lcd_alpha_bitmap_part,
         .alpha_bitmap_part_img = lcd_alpha_bitmap_part_img,

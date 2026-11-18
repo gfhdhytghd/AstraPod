@@ -18,8 +18,7 @@ extern const struct menu_item_ex
         playlist_settings,          /* playlist_menu.c  */
         viewer_settings_menu,       /* playlist_menu.c  */
         equalizer_menu,             /* eq_menu.c        */
-        theme_menu                  /* theme_menu.c     */
-        , album_covers_menu         /* album_covers_settings.c */
+        album_covers_menu         /* album_covers_settings.c */
         , art_cache_menu            /* album_covers_settings.c */
         , carousel_appearance_menu  /* album_covers_settings.c -- under
                                        Appearance */
@@ -34,9 +33,6 @@ extern const struct menu_item_ex
                                        Appearance */
         , music_appearance_menu     /* theme_settings.c -- under
                                        Library > Music */
-        , theme_options_item        /* theme_options_menu.c -- under
-                                       Appearance, and on Now Playing's
-                                       context menu */
         , scroll_settings_menu      /* display_settings.c -- shown under UI
                                        Settings, defined beside the other
                                        LCD scroll settings it configures */
@@ -64,12 +60,8 @@ struct browse_folder_info {
     const char* dir;
     int show_options;
 };
-int browse_folder(void *param); /* in theme_menu.c as it is mostly used there */
+int browse_folder(void *param); /* in theme_settings.c */
 int main_menu_config(void); /* in main_menu_config.c */
-/* Theme Options from a Now Playing button: says Unavailable, rather than
- * opening, while the theme has no options or one that reloads the theme.
- * Returns MENU_ATTACHED_USB to leave for the root. In theme_options_menu.c */
-int theme_options_from_wps(void);
 /* The main menu's own long press on 'item': whether it can be hidden (all
  * but Settings, the way back to this), hiding it, and the editor opened
  * carrying it for Move. The last returns as main_menu_config() does. */

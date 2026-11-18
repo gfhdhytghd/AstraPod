@@ -18,6 +18,7 @@
 #include "lang.h"
 #include "speech/talk.h"
 #include "settings/settings_list.h"
+#include "ui/scene.h"
 #include "sound.h"
 #include "list.h"
 #include "input/action.h"
@@ -506,6 +507,8 @@ bool option_screen(const struct settings_list *setting,
         temp_var = oldvalue = *(bool*)setting->setting?1:0;
     }
     else return false; /* only int/bools can go here */
+    struct ui_scene modal = {0};
+    ui_scene_open_modal(&modal, "picker-up");
     push_current_activity(ACTIVITY_OPTIONSELECT);
     gui_synclist_init(&lists, value_setting_get_name_cb,
                       (void*)setting, false, 1, parent);
@@ -529,6 +532,7 @@ bool option_screen(const struct settings_list *setting,
     /* The most-opened list in the firmware, and the one behind every setting
      * row, so it inherits whatever the menu left the conditionals at. */
     gui_synclist_draw_settled(&lists);
+    ui_scene_start(&modal);
     /* talk the item */
     gui_synclist_speak_item(&lists);
     while (!done)
@@ -539,7 +543,8 @@ bool option_screen(const struct settings_list *setting,
             lists.wraparound = false;
 
         /* HZ so the status bar redraws */
-        bool handled = list_do_action(CONTEXT_LIST, HZ, &lists, &action);
+        bool handled = list_do_action(CONTEXT_LIST, ui_scene_timeout(&modal, HZ), &lists, &action);
+        ui_scene_update(&modal, handled);
         if (handled
             && (action == ACTION_LIST_VOLUP || action == ACTION_LIST_VOLDOWN))
         {
@@ -605,6 +610,7 @@ bool option_screen(const struct settings_list *setting,
         }
         else if(default_event_handler(action) == SYS_USB_CONNECTED)
         {
+            ui_scene_close_modal(&modal, false, "picker-down");
             pop_current_activity();
             return true;
         }
@@ -615,24 +621,15 @@ bool option_screen(const struct settings_list *setting,
             if (!cb_on_changed || (*variable != oldvalue))
             {
                 function(*variable);
-                /* if the volume is changing we need to let the skins know */
+                /* Notify the Now Playing volume display. */
                 if (function == sound_get_fn(SOUND_VOLUME))
                     global_status.last_volume_change = current_tick;
             }
         }
 
     }
+    ui_scene_close_modal(&modal, true, "picker-down");
     pop_current_activity();
-
-    /* A value the user moved here is a tweak. If it describes the look, it
-     * belongs in the current theme's overlay so the next theme load does not
-     * silently discard it; the mark ignores everything else. Compared against
-     * the setting rather than `variable`, which for a temp-var setting is not
-     * where the committed value ends up. */
-    if (var_type == F_T_BOOL
-        ? (*(bool*)setting->setting ? 1 : 0) != oldvalue
-        : *(int*)setting->setting != oldvalue)
-        settings_mark_user_tweak(setting);
 
     return false;
 }

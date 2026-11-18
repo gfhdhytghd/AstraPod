@@ -21,20 +21,19 @@
 #include "draw/text_wrap.h"
 #include "draw/progress_bar.h"
 #include "font.h"
-#include "rbpaths.h"
-#include "skin/skin_albumart_color.h"
 #include "system/activity.h"
 #include "dialog.h"
 #include "core_alloc.h"
+#include "ui/frame.h"
 #include "ui/native_theme_runtime.h"
-#include "ui/retained.h"
+#include "button.h"
+#include "ui/scene.h"
+#include "ui/sheet.h"
 
 static long progress_next_tick, talked_tick, progress_last_call;
 
 #define MAXLINES  (LCD_HEIGHT/6)
 #define MAXBUFFER 512
-#define RECT_SPACING 10     /* inner padding between the box border and content */
-#define PROGRESS_SPACING 4  /* extra gap between the text and the progress bar */
 #define SPLASH_FONT_CACHE_GLYPHS 128
 
 struct splash_meter {
@@ -80,216 +79,88 @@ static void splash_draw_meter(struct screen *screen, const struct viewport *box,
 }
 
 #if LCD_DEPTH == 16 && LCD_STRIDEFORMAT == HORIZONTAL_STRIDE
-enum splash_part { SPLASH_SHADOW_RIGHT, SPLASH_SHADOW_BOTTOM,
-                   SPLASH_FRAME, SPLASH_TEXT, SPLASH_METER, SPLASH_PARTS };
-
-struct splash_part_view {
-    struct ui_rect rect;
-    struct ui_view view;
-    struct ui_layer layer;
-};
-
-static size_t splash_area(struct ui_rect rect)
-{
-    return rect.width > 0 && rect.height > 0 ? rect.width * rect.height : 0;
-}
-
-static uint32_t splash_rgb888(unsigned rgb565)
-{
-    return (RGB_UNPACK_RED(rgb565) << 16) | (RGB_UNPACK_GREEN(rgb565) << 8) |
-            RGB_UNPACK_BLUE(rgb565);
-}
-
-static unsigned splash_theme_color(const struct ui_theme *theme, enum ui_color_role role,
-                                   const struct ui_album_palette *palette)
-{
-    uint32_t rgb = ui_theme_color(theme, role, palette);
-    return LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
-}
-
-static bool splash_native_supported(struct screen *screen, const struct viewport *vp,
-                                    struct ui_album_palette *palette)
-{
-    if (!ui_native_enabled() || screen->screen_type != SCREEN_MAIN ||
-        !talk_on_ui_thread() || !lcd_active() || lcd_updates_held() ||
-        vp->buffer != &lcd_framebuffer_default)
-        return false;
-
-    unsigned dominant, vivid;
-    if (dynamic_colors_roles(&dominant, &vivid))
-    {
-        /* Scrim's album-derived dialog formulas retain their compatibility
-         * path until the new palette has parity evidence across album states. */
-        if (!strcmp(global_settings.native_theme, "scrim"))
-            return false;
-        palette->has_dominant = palette->has_vivid = true;
-        palette->dominant = splash_rgb888(dominant);
-        palette->vivid = splash_rgb888(vivid);
-    }
-    return true;
-}
-
-static int splash_native_style(struct splash_message *message, int font,
-                               const struct ui_album_palette *palette)
-{
-    struct ui_theme theme;
-    ui_theme_snapshot(&theme);
-    const uint16_t *metrics = theme.metric;
-    message->style = (struct dialog_style){
-        .box_fg = splash_theme_color(&theme, UI_COLOR_MODAL_FG, palette),
-        .box_bg = splash_theme_color(&theme, UI_COLOR_MODAL_BG, palette),
-        .box_border_color = splash_theme_color(&theme, UI_COLOR_MODAL_BORDER, palette),
-        .box_shadow_color = splash_theme_color(&theme, UI_COLOR_MODAL_SHADOW, palette),
-        .box_border_width = metrics[UI_METRIC_MODAL_BORDER_WIDTH],
-        .box_margin = metrics[UI_METRIC_MODAL_PADDING],
-        .box_shadow_offset = metrics[UI_METRIC_MODAL_SHADOW_OFFSET],
-    };
-    message->meter_gap = metrics[UI_METRIC_SPLASH_PROGRESS_GAP];
-    message->meter_radius = metrics[UI_METRIC_SPLASH_PROGRESS_RADIUS];
-
-    char path[sizeof(FONT_DIR "/.fnt") + UI_THEME_FONT_NAME_MAX];
-    snprintf(path, sizeof(path), FONT_DIR "/%s.fnt", theme.font[UI_FONT_BODY]);
-    if (font_filename_matches_loaded_id(font, path))
-        return -1;
-    return ui_theme_font_load(&theme, UI_FONT_BODY, SPLASH_FONT_CACHE_GLYPHS);
-}
-
-static void splash_capture_part(struct splash_part_view *part, fb_data *pixels,
-                                size_t *offset, int handle, const struct viewport *tile)
-{
-    if (!splash_area(part->rect))
-        return;
-    struct ui_rect r = part->rect;
-    part->layer = (struct ui_layer){handle, r.width, r.height, *offset};
-    for (int y = r.y; y < r.y + r.height; y++)
-    {
-        memcpy(pixels + *offset, pixels + y * tile->width + r.x,
-               r.width * sizeof(*pixels));
-        *offset += r.width;
-    }
-}
-
-/* Rasterize into a packed offscreen viewport, then let the retained views
- * compose the frame, shadow, label and meter over the current page. */
-static bool splash_present_native(struct screen *screen, struct viewport *box,
+static bool splash_present_native(struct screen *screen, const struct viewport *box,
                                   const struct splash_message *message,
                                   const struct splash_meter *meter,
                                   struct splash_wait *wait)
 {
-    if (box->width <= 0 || box->height <= 0 || box->x < 0 || box->y < 0 ||
-        box->x + box->width > LCD_WIDTH || box->y + box->height > LCD_HEIGHT)
+    if (box->width <= 0 || box->height <= 0 || box->width > LCD_WIDTH ||
+        box->height > LCD_HEIGHT)
         return false;
 
-    int x = box->x, y = box->y, w = box->width, h = box->height;
-    int shadow = MAX(0, message->style.box_shadow_offset);
-    int right = MIN(LCD_WIDTH, x + w + shadow);
-    int bottom = MIN(LCD_HEIGHT, y + h + shadow);
-    struct ui_rect damage = {x, y, right - x, bottom - y};
-    struct dialog_insets insets;
-    dialog_get_insets(&message->style, &insets);
-    int line_height = message->line_height;
-    int pad = message->style.box_margin;
-    int shadow_right = MAX(x + w, x + shadow);
-    int shadow_bottom = MAX(y + h, y + shadow);
-    struct splash_part_view parts[SPLASH_PARTS] = {
-        [SPLASH_SHADOW_RIGHT] = {.rect = {
-            shadow_right, y + shadow, right - shadow_right, bottom - y - shadow}},
-        [SPLASH_SHADOW_BOTTOM] = {.rect = {
-            x + shadow, shadow_bottom, w - shadow, bottom - shadow_bottom}},
-        [SPLASH_FRAME] = {.rect = {0, 0, w, h}},
-        [SPLASH_TEXT] = {.rect = {
-            insets.left, insets.top, w - insets.left - insets.right,
-            MIN(h - insets.top - insets.bottom, message->count * line_height)}},
-    };
-    if (meter)
-    {
-        int top = MAX(0, h - line_height - pad);
-        parts[SPLASH_METER].rect = (struct ui_rect){
-            pad, top, w - 2 * pad, h - pad - top};
-    }
+    if (!wait || wait->ticks <= 0 || ui_flush_inhibited())
+        return false;
 
-    size_t body_pixels = splash_area(parts[SPLASH_FRAME].rect);
-    /* The last pixel is shared by both solid shadow views. */
-    size_t pixels_needed = body_pixels * 2 + 1;
-    for (int i = SPLASH_TEXT; i < SPLASH_PARTS; i++)
-        pixels_needed += splash_area(parts[i].rect);
-    int handle = core_alloc_free_space(pixels_needed * sizeof(fb_data));
+    int w = box->width, h = box->height;
+    size_t body = (size_t)w * h;
+    int handle = core_alloc_free_space(FRAMEBUFFER_SIZE + body * sizeof(fb_data));
     if (handle <= 0)
         return false;
 
+    ui_scene_interrupt();
     fb_data *pixels = core_get_data_pinned(handle);
-    pixels[pixels_needed - 1] = message->style.box_shadow_color;
-    for (int i = SPLASH_SHADOW_RIGHT; i <= SPLASH_SHADOW_BOTTOM; i++)
-        if (splash_area(parts[i].rect))
-            parts[i].layer = (struct ui_layer){handle, 1, 1, pixels_needed - 1};
-
-    struct frame_buffer_t buffer = { .fb_ptr = pixels, .stride = w, .elems = body_pixels };
+    fb_data *tile_pixels = pixels + LCD_WIDTH * LCD_HEIGHT;
+    memcpy(pixels, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
+    struct frame_buffer_t buffer = {.fb_ptr = tile_pixels, .stride = w, .elems = body};
     struct viewport tile = *box;
     tile.x = tile.y = 0;
     tile.buffer = &buffer;
-    struct viewport *prev = screen->set_viewport(&tile);
-    struct dialog_style tile_style = message->style;
-    tile_style.box_shadow_offset = 0;
+    struct viewport *previous = screen->set_viewport(&tile);
     struct viewport content;
-    dialog_frame_box(screen, &tile, &tile_style, &content);
-    size_t offset = body_pixels;
-    splash_capture_part(&parts[SPLASH_FRAME], pixels, &offset, handle, &tile);
+    dialog_frame_box(screen, &tile, &message->style, &content);
     splash_draw_text(screen, &content, message);
-    splash_capture_part(&parts[SPLASH_TEXT], pixels, &offset, handle, &tile);
     if (meter)
-    {
         splash_draw_meter(screen, &tile, message, meter);
-        splash_capture_part(&parts[SPLASH_METER], pixels, &offset, handle, &tile);
-    }
-    screen->set_viewport(prev);
-    core_put_data_pinned(pixels);
+    screen->set_viewport(wait->previous);
 
-    static const struct ui_view_ops layer_ops = { .paint = ui_layer_paint };
-    struct ui_view root;
-    ui_view_init(&root, damage, NULL, NULL);
-    for (int i = 0; i < SPLASH_PARTS; i++)
+    struct ui_sheet sheet = { .light = UI_FULL_OPACITY };
+    struct ui_rect bounds = {box->x, box->y, w, h};
+    ui_sheet_begin(&sheet, true, "splash");
+    do {
+        ui_sheet_paint(&sheet, pixels, tile_pixels, bounds, false);
+    } while (ui_sheet_wait(&sheet));
+
+    bool interrupted = sheet.active;
+    if (!interrupted)
     {
-        if (!parts[i].layer.handle)
-            continue;
-        struct ui_rect rect = parts[i].rect;
-        if (i < SPLASH_FRAME)
-        {
-            rect.x -= damage.x;
-            rect.y -= damage.y;
-        }
-        ui_view_init(&parts[i].view, rect, &layer_ops, &parts[i].layer);
-        ui_view_append(&root, &parts[i].view);
-    }
-    struct ui_page page;
-    struct ui_nav nav = {0};
-    ui_page_init(&page, &root);
-    ui_nav_push(&nav, &page, UI_POPUP);
-    ui_nav_draw(&nav);
-    if (wait && wait->ticks)
-    {
-        screen->set_viewport(wait->previous);
+#if defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))
+        interrupted = button_queue_wait_pending(wait->ticks);
+#else
         sleep(wait->ticks);
-        wait->ticks = 0;
+#endif
     }
-    /* The caller still paints over the last frame. */
-    ui_nav_pop(&nav);
+    if (!interrupted)
+    {
+        ui_sheet_begin(&sheet, false, "splash");
+        do {
+            ui_sheet_paint(&sheet, pixels, tile_pixels, bounds, false);
+        } while (ui_sheet_wait(&sheet));
+        interrupted = sheet.active;
+    }
+    ui_sheet_cancel(&sheet);
+    if (interrupted)
+    {
+        memcpy(lcd_framebuffer_default.fb_ptr, pixels, FRAMEBUFFER_SIZE);
+        ui_mark_dirty(SCREEN_MAIN);
+        ui_flush_dirty();
+    }
+    wait->ticks = 0;
+    screen->set_viewport(previous);
+    core_put_data_pinned(pixels);
     core_free(handle);
     return true;
 }
 #endif
 
 /* The box is centred in an area area_w x area_h from vp's origin: the
- * physical display for a splash, the caller's viewport for splashf_in(),
- * which has no shadow, since the shadow is drawn to the screen itself */
+ * physical display for a splash or the caller's viewport for splashf_in(). */
 static bool splash_internal(struct screen *screen, const char *fmt, va_list ap,
                             struct viewport *vp, const struct splash_meter *meter,
-                            int area_w, int area_h, bool shadow,
+                            int area_w, int area_h, bool whole_screen,
                             struct splash_wait *wait)
 {
     static int max_width[NB_SCREENS];
-#if LCD_DEPTH == 16 && LCD_STRIDEFORMAT == HORIZONTAL_STRIDE
     static unsigned theme_generation;
-#endif
     static enum current_activity last_act = ACTIVITY_UNKNOWN;
     enum current_activity act = get_current_activity();
 
@@ -308,32 +179,26 @@ static bool splash_internal(struct screen *screen, const char *fmt, va_list ap,
     if (!*next)
         return false;
 
-    /* the popup is framed with the default dialog style, but keeps its own
-     * padding */
-    message.style = *dialog_get_default_style();
-    message.style.box_margin = RECT_SPACING;
-    message.meter_gap = PROGRESS_SPACING;
-    message.meter_radius = global_settings.progress_bar_radius;
-    if (!shadow)
-        message.style.box_shadow_offset = 0;
+    dialog_style_default(&message.style);
 
+    struct ui_theme theme;
+    ui_theme_snapshot(&theme);
+    message.meter_gap = theme.metric[UI_METRIC_SPLASH_PROGRESS_GAP];
+    message.meter_radius = theme.metric[UI_METRIC_SPLASH_PROGRESS_RADIUS];
     int *observed_width = &max_width[screen->screen_type];
     int old_font = vp->font;
     int body_font = -1;
-#if LCD_DEPTH == 16 && LCD_STRIDEFORMAT == HORIZONTAL_STRIDE
-    struct ui_album_palette palette = {0};
-    bool native = shadow && splash_native_supported(screen, vp, &palette);
-    if (native)
+    unsigned generation = ui_theme_generation();
+    if (theme_generation != generation)
     {
-        unsigned generation = ui_theme_generation();
-        if (theme_generation != generation)
-        {
-            *observed_width = 0;
-            theme_generation = generation;
-        }
-        body_font = splash_native_style(&message, old_font, &palette);
+        *observed_width = 0;
+        theme_generation = generation;
     }
-#endif
+    bool standalone = whole_screen && screen->screen_type == SCREEN_MAIN &&
+                      talk_on_ui_thread() && lcd_active() &&
+                      vp->buffer == &lcd_framebuffer_default;
+    if (standalone)
+        body_font = ui_theme_font_load(&theme, UI_FONT_BODY, SPLASH_FONT_CACHE_GLYPHS);
 
     int pad = message.style.box_margin;
     int fontnum = body_font >= 0 ? body_font : old_font;
@@ -389,11 +254,10 @@ static bool splash_internal(struct screen *screen, const char *fmt, va_list ap,
     int width = MIN(maxw + 2 * pad, vp->width);
     int height = MIN(y + 2 * pad, area_h);
 
-    /* Centre on the physical display, not within vp: a themed SBS can inset the
-     * UI viewport (e.g. %Vi(-,3,28,302,-,-)), which would leave the box visibly
-     * off-centre on screen. */
-    vp->x = (area_w - width) / 2;
-    vp->y = (area_h - height) / 2;
+    int x = (area_w - width) / 2;
+    int yy = (area_h - height) / 2;
+    vp->x = whole_screen ? x : vp->x + x;
+    vp->y = whole_screen ? yy : vp->y + yy;
     vp->width = width;
     vp->height = height;
 
@@ -409,7 +273,7 @@ static bool splash_internal(struct screen *screen, const char *fmt, va_list ap,
     }
     bool painted = false;
 #if LCD_DEPTH == 16 && LCD_STRIDEFORMAT == HORIZONTAL_STRIDE
-    if (native)
+    if (standalone)
         painted = splash_present_native(screen, vp, &message, meter, wait);
 #else
     (void)wait;
@@ -422,6 +286,11 @@ static bool splash_internal(struct screen *screen, const char *fmt, va_list ap,
         splash_draw_text(screen, &content, &message);
         if (meter)
             splash_draw_meter(screen, vp, &message, meter);
+        if (whole_screen)
+        {
+            screen->update_rect(vp->x, vp->y, vp->width, vp->height);
+            painted = true;
+        }
     }
     if (body_font >= 0)
     {

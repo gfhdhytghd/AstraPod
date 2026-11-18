@@ -70,27 +70,24 @@ APPSBUILDDIR = $(subst $(ROOTDIR),$(BUILDDIR),$(COREAPPSDIR))
 # compile rules
 include $(TOOLSDIR)/tools.make
 
-ifeq (,$(findstring checkwps,$(APP_TYPE)))
-  ifeq (,$(findstring database,$(APP_TYPE)))
-    ifeq (,$(findstring warble,$(APP_TYPE)))
-      include $(FIRMDIR)/firmware.make
-      include $(COREAPPSDIR)/bitmaps/bitmaps.make
-      ifeq (arch_arm,$(ARCH))
-          # some targets don't use the unwarminder because they have the glibc backtrace
-          ifeq (,$(filter sonynwz,$(APP_TYPE)))
-            include $(ROOTDIR)/lib/unwarminder/unwarminder.make
-          endif
-      endif
-      ifeq (arch_mips,$(ARCH))
-          # mips unwinder is only usable on native ports
-          ifeq (,$(APP_TYPE))
-            include $(ROOTDIR)/lib/mipsunwinder/mipsunwinder.make
-          endif
-      endif
-      ifeq (,$(findstring bootloader,$(APPSDIR)))
-        include $(ROOTDIR)/lib/skin_parser/skin_parser.make
-        include $(ROOTDIR)/lib/tlsf/libtlsf.make
-      endif
+ifeq (,$(findstring database,$(APP_TYPE)))
+  ifeq (,$(findstring warble,$(APP_TYPE)))
+    include $(FIRMDIR)/firmware.make
+    include $(COREAPPSDIR)/bitmaps/bitmaps.make
+    ifeq (arch_arm,$(ARCH))
+        # some targets don't use the unwarminder because they have the glibc backtrace
+        ifeq (,$(filter sonynwz,$(APP_TYPE)))
+          include $(ROOTDIR)/lib/unwarminder/unwarminder.make
+        endif
+    endif
+    ifeq (arch_mips,$(ARCH))
+        # mips unwinder is only usable on native ports
+        ifeq (,$(APP_TYPE))
+          include $(ROOTDIR)/lib/mipsunwinder/mipsunwinder.make
+        endif
+    endif
+    ifeq (,$(findstring bootloader,$(APPSDIR)))
+      include $(ROOTDIR)/lib/tlsf/libtlsf.make
     endif
   endif
 endif
@@ -107,9 +104,7 @@ ifeq (,$(NO_UTF8PROC))
   include $(ROOTDIR)/lib/utf8proc/utf8proc.make
 endif
 
-ifeq (,$(findstring checkwps,$(APP_TYPE)))
-  include $(ROOTDIR)/lib/fixedpoint/fixedpoint.make
-endif
+include $(ROOTDIR)/lib/fixedpoint/fixedpoint.make
 
 ifneq (,$(findstring bootloader,$(APPSDIR)))
   ifneq (,$(findstring sonynwz,$(APP_TYPE)))
@@ -125,9 +120,6 @@ ifneq (,$(findstring bootloader,$(APPSDIR)))
   else
     include $(APPSDIR)/bootloader.make
   endif
-else ifneq (,$(findstring checkwps,$(APP_TYPE)))
-  include $(APPSDIR)/checkwps.make
-  include $(ROOTDIR)/lib/skin_parser/skin_parser.make
 else ifneq (,$(findstring database,$(APP_TYPE)))
   include $(APPSDIR)/database.make
 else ifneq (,$(findstring warble,$(APP_TYPE)))

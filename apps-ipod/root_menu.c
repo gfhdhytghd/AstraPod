@@ -2441,6 +2441,15 @@ static int browser_default(void)
     }
 }
 
+static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push)
+{
+    if (from < GO_TO_ROOT || to < GO_TO_ROOT)
+        return;
+    /* Identity keys are used only for comparing endpoints. */
+    ui_scene_enter(scene, (const void *)(intptr_t)(from + 16),
+                    (const void *)(intptr_t)(to + 16), push);
+}
+
 void root_menu(void)
 {
 #ifdef HAVE_WHEEL_WPS_CHORD
@@ -2449,6 +2458,8 @@ void root_menu(void)
     int previous_browser = browser_default();
     int selected = 0;
     struct ui_scene menu_scene = {0};
+    struct ui_scene route_scene = {0};
+    int presented = GO_TO_PREVIOUS;
 
     /* A failed tagnavi.config parse reports no rows at all, and the fixup
      * would drop every database slot from the saved order for good. */
@@ -2520,9 +2531,14 @@ void root_menu(void)
                  * button to be handled by HOST instead of rockbox */
                 ignore_back_button_stub(true);
 
+                if (presented != GO_TO_MAINMENU)
+                    root_scene_enter(&route_scene, presented, GO_TO_ROOT, false);
                 if (global_settings.animations)
                     menu_link_scene(&menu_scene, &root_menu_, &main_menu_);
                 next_screen = do_menu(&root_menu_, &selected, NULL, false);
+                if (route_scene.capturing)
+                    ui_scene_cancel(&route_scene);
+                presented = GO_TO_ROOT;
 
                 ignore_back_button_stub(false);
                 came_back = false;
@@ -2588,11 +2604,18 @@ void root_menu(void)
         } /* switch() */
         continue;
 load_next_screen: /* load_screen is inlined */
-        if (global_settings.animations && next_screen == GO_TO_MAINMENU)
+        if (global_settings.animations && next_screen == GO_TO_MAINMENU &&
+            presented == GO_TO_ROOT && !ui_scene_automatic())
             menu_link_scene(&menu_scene, &main_menu_, &root_menu_);
         else
+        {
             ui_scene_cancel(&menu_scene);
+            root_scene_enter(&route_scene, presented, next_screen, !came_back);
+        }
+        presented = next_screen;
         next_screen = load_screen(next_screen);
+        if (route_scene.capturing)
+            ui_scene_cancel(&route_scene);
         if (next_screen != GO_TO_ROOT && next_screen != GO_TO_MAINMENU)
             ui_scene_cancel(&menu_scene);
         came_back = false;

@@ -44,7 +44,8 @@
 #include "system/shutdown.h"
 #include "draw/viewport.h"
 #include "draw/color.h"
-#include "skin/skin_albumart_color.h"
+#include "ui/native_theme_runtime.h"
+#include "metadata/album_palette.h"
 #include "widgets/list.h"
 #include "widgets/splash.h"
 #include "screens/playback/wps.h"
@@ -310,9 +311,9 @@ static struct
 
 static void load_colours(void)
 {
-    ed.fg = dynamic_colors_resolve(global_settings.fg_color);
-    ed.bg = dynamic_colors_resolve(global_settings.bg_color);
-    ed.accent = dynamic_colors_resolve(global_settings.lss_color);
+    ed.fg = ui_theme_rgb565(UI_COLOR_FOREGROUND);
+    ed.bg = ui_theme_rgb565(UI_COLOR_BACKGROUND);
+    ed.accent = ui_theme_rgb565(UI_COLOR_SELECTION);
     if (color_contrast(ed.accent, ed.bg) < 300)
         ed.accent = ed.fg;
     ed.dim = color_blend(ed.fg, ed.bg, 100);
@@ -1204,7 +1205,7 @@ int eq_editor_screen(void)
 
         if (action == ACTION_NONE)
         {
-            redraw = dynamic_colors_needs_repaint();
+            redraw = album_palette_needs_repaint();
             if (redraw)
                 load_colours();
             continue;

@@ -62,7 +62,7 @@ typedef fb_data pix_t;
  *   room meant for two, and neither has to be kept numerically in step with
  *   the other. */
 struct pf_caption {
-    int y1;   /* top of the first line, drawn in pf_bold_font */
+    int y1;   /* top of the first line, drawn in the title font */
     int y2;   /* top of the second line, drawn in the UI font */
 };
 
@@ -115,6 +115,7 @@ struct carousel_model {
     void (*speak)(int index); /* say a slide, once it comes to rest */
     bool owns_cache_version;                           /* honours pf_cfg.cache_version */
     const char *title;                                 /* status-bar title */
+    const char *motion_trace;                          /* optional frame-log route */
     bool external;                                    /* independent library */
     bool (*read_art)(int index, struct bitmap *bitmap); /* native columns */
     unsigned int (*art_version)(int index);
@@ -134,7 +135,7 @@ struct pf_config_t
 extern struct pf_config_t pf_cfg;  /* engine's persistent cache/resume config */
 extern struct db_summary_t carousel_idx;  /* this carousel's index buffer */
 extern int   center_index;         /* engine's current slide */
-extern int   pf_bold_font;         /* caption bold font (draw_text) */
+int carousel_caption_font(bool bold);
 extern pix_t pf_fg_color;          /* caption colour (draw_text) */
 /* Transient "resume to this slide on next open" signal, set by the album
  * model's enter() and consumed by its set_initial(). Album indices only --

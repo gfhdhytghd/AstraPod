@@ -705,15 +705,12 @@ static unsigned int shelf_art_hash(int n, void *data)
 }
 
 static const struct bitmap *shelf_get_albumart(int n, void *data,
-                                               struct dim *size,
-                                               const struct img_filter *filter,
-                                               uint32_t filter_hash)
+                                               struct dim *size)
 {
-    return browser_art_row(n, data, shelf_art_hash, size, filter,
-                           filter_hash);
+    return browser_art_row(n, data, shelf_art_hash, size);
 }
 
-/* %Lr: how far through a book, for a theme's gauge: a finished one is full */
+/* A finished book gets a full progress indicator. */
 static int shelf_get_range(int n, void *data)
 {
     int v = rows[n];
@@ -1524,7 +1521,6 @@ int book_shelf_run(void)
         /* Behind the setting that gives the browser's book list its covers.
          * The thumbnails are cached by row, and every round has new rows. */
         browser_albumart_invalidate();
-        browser_set_showing_art(global_settings.db_bookart);
         if (global_settings.db_bookart)
         {
             info.get_albumart = shelf_get_albumart;
@@ -1565,7 +1561,6 @@ int book_shelf_run(void)
 
     /* The browse this returns to keys the same cache by its own rows */
     browser_albumart_invalidate();
-    browser_set_showing_art(false);
     pop_current_activity();
     if (held)
         release();

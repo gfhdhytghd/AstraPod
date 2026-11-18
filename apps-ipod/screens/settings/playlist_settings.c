@@ -11,6 +11,8 @@
 #include <string.h>
 #include <stdio.h>
 #include "config.h"
+#include "ui/frame.h"
+#include "ui/statusbar.h"
 #include "lang.h"
 #include "kernel.h"
 #include "input/action.h"
@@ -104,8 +106,8 @@ static int playlist_view_(void)
 {
     playlist_viewer_ex(NULL, NULL);
     FOR_NB_SCREENS(i) /* Playlist Viewer defers skin updates when popping its activity */
-        skin_update(CUSTOM_STATUSBAR, i, SKIN_REFRESH_ALL);
-    skin_flush_dirty();
+        sb_update(i, true);
+    ui_flush_dirty();
     return 0;
 }
 MENUITEM_FUNCTION(create_playlist_item, 0, ID2P(LANG_CREATE_PLAYLIST),

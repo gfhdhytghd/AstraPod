@@ -22,7 +22,7 @@
  *   - the list callbacks: filename, colour, icon, album art, voice
  *   - album art slots for the browsing screen, and the store's move callback
  *   - init, cache locking, and the directory cache's move callback
- *   - update_dir(): reading a directory into the cache and configuring the list
+ *   - update_dir(panel): reading a directory into the cache and configuring the list
  *   - current-file and current-directory tracking, including getcwd wrapping
  *   - dirbrowse(): the browse loop and its actions
  *   - rockbox_browse(): the entry point other screens call
@@ -49,20 +49,17 @@
 #include "audio.h"
 #include "playlist/playlist.h"
 #include "widgets/menu.h"
-#include "skin/skin_engine.h"
-#include "skin/statusbar_skinned.h"
 #include "settings/settings.h"
 #include "debug.h"
 #include "storage.h"
 #include "rolo.h"
+#include "draw/bmp.h"
 #include "draw/icon_bitmaps.h"
 #include "lang.h"
 #include "widgets/keyboard.h"
 #include "screens/context_menu.h"
 #include "core_alloc.h"
-#include "draw/img_filter.h"   /* the row chain the skin hands down */
-#include "system/format_time.h"   /* %LH(length) */
-#include "skin/custom_tokens.h"   /* %LH's fields */
+#include "system/format_time.h"
 #include "metadata/art_cache.h"
 #include "power.h"
 #include "input/action.h"
@@ -93,6 +90,7 @@
 #include "screens/playback/quick_screen.h"
 #include "screens/shortcuts.h"
 #include "system/appevents.h"
+#include "ui/scene.h"
 
 #include "root_menu.h"
 
@@ -191,16 +189,6 @@ static const char* browser_get_filename(int selected_item, void *data,
     return(name);
 }
 
-static int browser_get_filecolor(int selected_item, void * data)
-{
-    if (*tc.dirfilter == SHOW_ID3DB)
-        return -1;
-    struct browser_context * local_tc=(struct browser_context *)data;
-    struct entry *entry = get_valid_entry(__func__, local_tc, selected_item);
-
-    return filetype_get_color(entry->name, entry->attr);
-}
-
 static enum themable_icons browser_get_fileicon(int selected_item, void * data)
 {
     struct browser_context * local_tc=(struct browser_context *)data;
@@ -213,14 +201,7 @@ static enum themable_icons browser_get_fileicon(int selected_item, void * data)
         struct entry *entry = get_valid_entry(__func__, local_tc, selected_item);
         int masked = entry->attr & FILE_ATTR_MASK;
 
-        /* The Search row is not a file type, so the registry filetype_get_icon
-         * consults has no entry for it and the row would draw blank. Which
-         * icon follows the browse, the same way the row's destination does:
-         * the catalogue searches playlists, everything else searches files.
-         *
-         * Only themes that draw their own icon column override this -- Scrim
-         * and Themify_2 test for the row by name in their .sbs and use a
-         * search glyph. The rest fall through to here. */
+        /* A Search row has no file type. Its icon follows its destination. */
         if (masked == FILE_ATTR_SEARCH)
             return (*local_tc->dirfilter == SHOW_M3U) ? Icon_Playlist
                                                       : Icon_Folder;
@@ -313,10 +294,10 @@ static bool browser_is_playing(int selected_item, void * data)
     return strcmp(path_key_strip(path), path_key_strip(id3->path)) == 0;
 }
 
-/* Album art for database album rows, drawn by the skin's %La tag.
+/* Album art for database album rows.
  *
  * Resolving one row can cost a tagcache search (browser_db_get_art_hash) plus a
- * file read, and the skin asks for every visible row on every redraw -- so a few
+ * file read, and the list asks for the visible rows on redraw -- so a few
  * decoded thumbnails are kept, keyed by list item, and thrown away whenever the
  * list reloads. A miss simply returns NULL: thumbnails are produced in the
  * background, so a row just has no cover until the cache catches up. */
@@ -334,19 +315,8 @@ static int browser_aa_size_idx = -1;   /* which art_sizes[] entry that is */
 static int browser_aa_victim;               /* round-robin replacement */
 static struct bitmap browser_aa_bm;         /* handed back; points into the store */
 
-/* browser_aa_bm.data is a raw address inside the store, and the skin engine
- * holds it across work that yields: %La stashes the bitmap while the line's
- * tags are evaluated and blits it only after write_line(), which draws the
- * row's text and reads any glyph it has not cached from disk. A core_alloc()
- * on the artwork or index thread during that yield compacts the pool, and an
- * ops-less allocation is one buflib moves without telling anyone -- so the
- * blit would read from where the store used to be.
- *
- * Moving it is fine; losing track of it is not. The store holds pixels and
- * nothing that points within itself, and the slot table is keyed by item
- * rather than by address, so the one pointer that has to follow the block is
- * this one. Pinning instead would work but leaves 64K immovable in the middle
- * of the pool for as long as the browser is up. */
+/* Keep the bitmap's pixel pointer in sync when a worker compacts the
+ * pool during a disk read. */
 static int browser_aa_move_callback(int handle, void *current, void *new)
 {
     (void)handle;
@@ -360,14 +330,9 @@ static struct buflib_callbacks browser_aa_ops = {
     .shrink_callback = NULL,
 };
 
-/* A slot holds one item drawn one way. The size and the treatment are part of
- * the key because a skin can ask for either per row config, and a slot loaded
- * under one must never be handed back for another. */
 static struct {
-    int      item;          /* -1 when empty */
-    int      dim;
-    int      w, h;          /* the thumbnail's own: a book cover is narrower */
-    uint32_t filter_hash;
+    int item;                 /* -1 when empty */
+    int w, h;                 /* a book cover can be narrower than its slot */
 } browser_aa_slot[TREE_AA_SLOTS];
 
 /* Items that resolved to no art hash, which stays true until the list
@@ -405,8 +370,7 @@ static size_t browser_aa_slot_bytes(void)
  * that fits inside it. The draw is 1:1 and the viewport only clips, so a
  * larger one would crop the cover rather than shrink it.
  *
- * Falls back to the smallest row size when nothing fits, which is what makes a
- * theme whose art viewport is tiny draw something rather than nothing. */
+ * Use the smallest row size when the viewport is narrower than the cache. */
 static int browser_aa_pick_size(int want)
 {
     int best = -1, best_dim = 0, smallest = -1, smallest_dim = 0;
@@ -459,8 +423,7 @@ static bool browser_aa_ready(int want)
  * stored by columns would otherwise load without complaint and draw mirrored.
  * A thumbnail fitted at its own shape, a book's cover, has one side at the
  * size and the other short of it. */
-static bool browser_aa_load(const char *path, int slot,
-                            const struct img_filter *filter)
+static bool browser_aa_load(const char *path, int slot)
 {
     struct art_cache_header hdr;
     /* Where the slot starts. It differs from what the thumbnail occupies
@@ -487,9 +450,6 @@ static bool browser_aa_load(const char *path, int slot,
 
         bytes = (size_t)hdr.width * hdr.height * FB_DATA_SZ;
         ok = read(fd, store + (size_t)slot * stride, bytes) == (ssize_t)bytes;
-        if (ok && filter)
-            img_filter_apply_banded((fb_data *)(store + (size_t)slot * stride),
-                                    hdr.width, hdr.height, filter);
         core_put_data_pinned(store);
         browser_aa_slot[slot].w = hdr.width;
         browser_aa_slot[slot].h = hdr.height;
@@ -501,9 +461,7 @@ static bool browser_aa_load(const char *path, int slot,
 
 const struct bitmap *browser_art_row(int selected_item, void *data,
                                      browser_art_hash_fn *get_hash,
-                                     struct dim *size,
-                                     const struct img_filter *filter,
-                                     uint32_t filter_hash)
+                                     struct dim *size)
 {
     char aat[MAX_PATH];
     unsigned int hash;
@@ -523,9 +481,7 @@ const struct bitmap *browser_art_row(int selected_item, void *data,
         return NULL;
 
     for (slot = 0; slot < TREE_AA_SLOTS; slot++)
-        if (browser_aa_slot[slot].item == selected_item &&
-            browser_aa_slot[slot].dim == browser_aa_dim &&
-            browser_aa_slot[slot].filter_hash == filter_hash)
+        if (browser_aa_slot[slot].item == selected_item)
             goto hit;
 
     for (slot = 0; slot < TREE_AA_NO_HASH; slot++)
@@ -555,11 +511,9 @@ const struct bitmap *browser_art_row(int selected_item, void *data,
     browser_aa_victim = (browser_aa_victim + 1) % TREE_AA_SLOTS;
     browser_aa_slot[slot].item = -1;    /* in case the load fails partway */
 
-    if (!browser_aa_load(aat, slot, filter))
+    if (!browser_aa_load(aat, slot))
         return NULL;
     browser_aa_slot[slot].item = selected_item;
-    browser_aa_slot[slot].dim = browser_aa_dim;
-    browser_aa_slot[slot].filter_hash = filter_hash;
 
 hit:
     browser_aa_bm.width  = browser_aa_slot[slot].w;
@@ -583,16 +537,13 @@ static unsigned int browser_row_art_hash(int selected_item, void *data)
 }
 
 static const struct bitmap *browser_get_albumart(int selected_item, void * data,
-                                              struct dim *size,
-                                              const struct img_filter *filter,
-                                              uint32_t filter_hash)
+                                              struct dim *size)
 {
-    struct browser_context *local_tc = (struct browser_context *)data;
+    struct browser_context *local_tc = data;
 
     if (selected_item < local_tc->special_entry_count)
         return NULL;
-    return browser_art_row(selected_item, data, browser_row_art_hash,
-                           size, filter, filter_hash);
+    return browser_art_row(selected_item, data, browser_row_art_hash, size);
 }
 
 
@@ -767,137 +718,46 @@ static int browser_get_file_position(char * filename)
     return(ret);
 }
 
-/* Whether the browse level currently on screen draws tall art rows (album or
- * artist art). Set by update_dir() before each redraw, so it is valid when the
- * themed status bar renders its chrome -- unlike the per-row %La, which needs a
- * drawn list row. The theme reads it (via %Ld, or %La outside a row) to drop
- * the left rounded corner that would otherwise clash with the square art.
- *
- * Cleared when the outermost browse returns, or it would still be true over the
- * settings list and the chrome would dress that as an art list. A nested browse
- * returning must not clear it: the browse underneath is still on screen and
- * will not necessarily redraw. */
-static bool db_showing_art;
+struct browser_album_panel {
+    struct browser_db_header album;
+    struct list_header view;
+    char detail[80];
+};
 
-bool browser_showing_art(void)
+void browser_album_details(const struct browser_db_header *album, char *buf,
+                           size_t size)
 {
-    return db_showing_art;
+    char duration[16] = "";
+    if (album->length_ms > 0)
+        format_time(duration, sizeof(duration), album->length_ms);
+
+    char year[16] = "";
+    if (album->year > 0)
+        snprintf(year, sizeof(year), "%d · ", album->year);
+
+    snprintf(buf, size, "%s%d %s%s%s", year, album->tracks, str(LANG_TRACKS),
+             duration[0] ? " · " : "", duration);
 }
 
-/* A skin can pick its UI viewport by %?Ld, and the status bar only renders
- * after the list has drawn -- so the list would open in the previous shape and
- * stay there until something redrew it. Settle the bar first, so the draw
- * that follows takes the viewport it chose. */
-void browser_set_showing_art(bool on)
+static unsigned int header_art_hash(int item, void *data)
 {
-    if (on != db_showing_art)
-    {
-        db_showing_art = on;
-        FOR_NB_SCREENS(i)
-            sb_skin_settle(i);
-    }
+    (void)item;
+    const struct browser_db_header *album = data;
+    return album->art_hash;
 }
 
-/* The same for a list of podcast episodes, whose skin can give the selected
- * one's notes a box below a shorter list (%LD) */
-static bool db_showing_episodes;
-
-bool browser_showing_episodes(void)
+static const struct bitmap *header_cover(void *data, struct dim *size)
 {
-    return db_showing_episodes;
-}
-
-static void browser_set_showing_episodes(bool on)
-{
-    if (on != db_showing_episodes)
-    {
-        db_showing_episodes = on;
-        FOR_NB_SCREENS(i)
-            sb_skin_settle(i);
-    }
-}
-
-/* And for an album's tracks, whose skin can draw the album over them (%LH) */
-static bool db_showing_header;
-static struct browser_db_header db_header;
-static const struct bitmap *(*external_header_art)(struct dim *size);
-
-static void browser_set_header(bool on)
-{
-    if (on != db_showing_header)
-    {
-        db_showing_header = on;
-        FOR_NB_SCREENS(i)
-            sb_skin_settle(i);
-    }
-}
-
-void browser_set_external_header(const struct browser_db_header *header,
-                    const struct bitmap *(*art)(struct dim *size))
-{
-    external_header_art = art;
-    if (header) db_header = *header;
-    browser_set_header(header != NULL);
-}
-
-const char *browser_header_text(int field, char *buf, size_t size)
-{
-    if (!db_showing_header)
-        return NULL;
-
-    switch (field)
-    {
-        case BROWSER_HEADER_KIND:
-            return "album";
-        case BROWSER_HEADER_NAME:
-            return db_header.name[0] ? db_header.name : NULL;
-        case BROWSER_HEADER_ARTIST:
-            return db_header.artist[0] ? db_header.artist : NULL;
-        case BROWSER_HEADER_YEAR:
-            if (db_header.year <= 0)
-                return NULL;
-            snprintf(buf, size, "%d", db_header.year);
-            return buf;
-        case BROWSER_HEADER_TRACKS:
-            snprintf(buf, size, "%d", db_header.tracks);
-            return buf;
-        case BROWSER_HEADER_LENGTH:
-            if (db_header.length_ms <= 0)
-                return NULL;
-            format_time(buf, size, db_header.length_ms);
-            return buf;
-        case BROWSER_HEADER_DISCS:
-            if (db_header.discs <= 1)
-                return NULL;
-            snprintf(buf, size, "%d", db_header.discs);
-            return buf;
-    }
-    return NULL;
-}
-
-static unsigned int header_art_hash(int selected_item, void *data)
-{
-    (void)selected_item;
-    (void)data;
-    return db_header.art_hash;
-}
-
-/* Keyed below -1, which no row is, and by album, so the cover cached for one
- * album is never drawn over another's tracks */
-const struct bitmap *browser_header_art(struct dim *size)
-{
-    if (db_showing_header && external_header_art) return external_header_art(size);
-    if (!db_showing_header || !db_header.art_hash)
-        return NULL;
-    return browser_art_row(-2 - db_header.album_row, NULL, header_art_hash,
-                           size, NULL, 0);
+    struct browser_db_header *album = data;
+    return album->art_hash ? browser_art_row(-2 - album->album_row, album,
+                                           header_art_hash, size) : NULL;
 }
 
 /*
  * Called when a new dir is loaded (for example when returning from other apps ...)
  * also completely redraws the tree
  */
-static int update_dir(void)
+static int update_dir(struct browser_album_panel *panel)
 {
     struct gui_synclist * const list = &browser_lists;
     int show_path_in_browser = global_settings.show_path_in_browser;
@@ -964,7 +824,18 @@ static int update_dir(void)
         }
     }
 
-    browser_set_header(id3db && browser_db_album_header(&tc, &db_header));
+    if (id3db && panel && browser_db_album_header(&tc, &panel->album))
+    {
+        browser_album_details(&panel->album, panel->detail, sizeof(panel->detail));
+        panel->view = (struct list_header) {
+            .title = panel->album.name,
+            .subtitle = panel->album.artist,
+            .detail = panel->detail,
+            .cover = header_cover,
+            .data = &panel->album,
+        };
+        gui_synclist_set_header(list, &panel->view);
+    }
 
     if (id3db)
     {
@@ -974,16 +845,6 @@ static int update_dir(void)
             title = browser_db_get_title(&tc);
             icon = filetype_get_icon(ATTR_DIRECTORY);
 
-            /* A skin without %LH still gets the year, in the title */
-            if (db_showing_header && db_header.year > 0
-                && !sb_skin_has_header(SCREEN_MAIN))
-            {
-                static char title_year[MAX_PATH];
-
-                snprintf(title_year, sizeof(title_year), "%s (%d)",
-                         P2STR((unsigned char *)title), db_header.year);
-                title = title_year;
-            }
         }
     }
     else
@@ -1075,16 +936,11 @@ static int update_dir(void)
             else if (artist)
                 tall_rows = global_settings.db_artistart;
         }
-        browser_set_showing_art(tall_rows);
-        /* With the notes box only where it has something to show: a list
-         * whose episodes have no notes keeps all its rows */
-        browser_set_showing_episodes(*tc.dirfilter == SHOW_ID3DB
-                                     && browser_db_shows_episodes(&tc)
-                                     && browser_db_episodes_have_notes(&tc));
+        gui_synclist_set_notes(list, id3db && browser_db_shows_episodes(&tc) &&
+                                           browser_db_episodes_have_notes(&tc));
         gui_synclist_set_albumart_callback(list,
                                     tall_rows ? browser_get_albumart : NULL);
-        /* Uniform tall rows so a cover fits (special rows included); 0 = the
-         * skin's default height. */
+        /* Give every row enough room for a cover, including special rows. */
         gui_synclist_set_row_height(list,
                                     tall_rows ? global_settings.db_art_row_height : 0);
     }
@@ -1092,7 +948,6 @@ static int update_dir(void)
      * so with "Voice menus" off they would still speak. */
     if (!id3db || global_settings.talk_menu)
         gui_synclist_set_voice_callback(list, &browser_voice_cb);
-    gui_synclist_set_color_callback(list, &browser_get_filecolor);
     if( tc.selected_item >= tc.filesindir)
         tc.selected_item=tc.filesindir-1;
 
@@ -1106,9 +961,8 @@ static int update_dir(void)
         int top_item = (*tc.dirfilter == SHOW_ID3DB)
                            ? browser_db_take_pending_top_item()
                            : browser_disk_take_pending_top_item();
-        /* Laid out first in the viewport the skin has just chosen (an
-         * album's header shortens the list), or the draw would lay it out
-         * again and put the row above the cursor back. */
+        /* Lay out the view first: an album header or notes reduce the
+         * available rows. */
         gui_synclist_layout(list);
         /* Only if the selection still fits on screen below it. The list
          * re-chooses its top row when the selection moves, not on a plain
@@ -1119,9 +973,6 @@ static int update_dir(void)
                  < top_item + gui_synclist_get_nb_lines(list, SCREEN_MAIN))
             gui_synclist_set_top_item(list, top_item);
     }
-    /* Settled, because moving between lists of different row heights (tall
-     * album-art rows <-> ordinary rows) is exactly what leaves the shared
-     * conditionals wrong for a frame. */
     gui_synclist_draw_settled(list);
     gui_synclist_speak_item(list);
     return tc.filesindir;
@@ -1581,7 +1432,7 @@ static int select_menu(void)
 }
 
 /* main loop, handles key events */
-static int dirbrowse(void)
+static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene)
 {
     int numentries=0;
     char buf[MAX_PATH];
@@ -1606,7 +1457,7 @@ static int dirbrowse(void)
     lastextra = -1;
 
     start_wps = false;
-    numentries = update_dir();
+    numentries = update_dir(panel);
     reload_dir = false;
     if (numentries == -1)
         return exit_to_new_screen(GO_TO_PREVIOUS);  /* currdir is not a directory */
@@ -1623,11 +1474,14 @@ static int dirbrowse(void)
         if (tc.dirlevel < 0)
             tc.dirlevel = 0; /* shouldnt be needed.. this code needs work! */
 
+        int previous_depth = tc.dirlevel;
         keyclick_set_callback(gui_synclist_keyclick_callback, &browser_lists);
+        int timeout = list_do_action_timeout(&browser_lists, HZ/2);
         button = get_action(list_select_context(CONTEXT_TREE)|ALLOW_SOFTLOCK,
-                            list_do_action_timeout(&browser_lists, HZ/2));
+                            ui_scene_timeout(scene, timeout));
         oldbutton = button;
-        gui_synclist_do_button(&browser_lists, &button);
+        bool redrew = gui_synclist_do_button(&browser_lists, &button);
+        ui_scene_update(scene, redrew);
         tc.selected_item = gui_synclist_get_sel_pos(&browser_lists);
 
         if (list_select_active() && select_unsafe())
@@ -1648,7 +1502,7 @@ static int dirbrowse(void)
                 }
                 if (!reload_dir)
                 {
-                    numentries = update_dir();
+                    numentries = update_dir(panel);
                     list_select_retitle();
                     continue;
                 }
@@ -1925,7 +1779,7 @@ static int dirbrowse(void)
                         break;
 
                     case ONPLAY_SELECT:
-                        numentries = update_dir();
+                        numentries = update_dir(panel);
                         list_select_begin(&browser_lists, tc.selected_item,
                                           row_selectable, &tc);
                         continue;
@@ -1991,20 +1845,37 @@ static int dirbrowse(void)
             return exit_to_new_screen(GO_TO_PREVIOUS);
 
         if (restore || reload_dir) {
+            /* Entries can return a screen or run an action in place. Only
+             * a folder or database level change replaces this list page. */
+            if ((button == ACTION_STD_OK || button == ACTION_STD_CANCEL) &&
+                previous_depth != tc.dirlevel)
+            {
+                if (!scene->handle)
+                    ui_scene_interrupt();
+                ui_scene_capture(scene, (const void *)(intptr_t)(previous_depth + 1),
+                                 (const void *)(intptr_t)(tc.dirlevel + 1),
+                                 button == ACTION_STD_OK);
+            }
             FOR_NB_SCREENS(i)
                 screens[i].scroll_stop();
             /* A reloaded list may not be the one the marks were made on */
             if (reload_dir)
                 list_select_end();
             /* restore display */
-            numentries = update_dir();
+            numentries = update_dir(panel);
             list_select_retitle();
             reload_dir = false;
             if (currdir[1] && (numentries < 0))
             {   /* not in root and reload failed */
+                ui_scene_cancel(scene);
+                previous_depth = 0; /* Recovery reloads the root in place. */
                 reload_root = true; /* try root */
                 goto check_rescan;
             }
+            if (scene->capturing)
+                ui_scene_start(scene);
+            else
+                ui_scene_update(scene, true);
         }
     }
     return exit_to_new_screen(GO_TO_ROOT);
@@ -2022,6 +1893,25 @@ int create_playlist(void)
 
 #define NUM_TC_BACKUP   3
 static struct browser_context backups[NUM_TC_BACKUP];
+static int dirbrowse(void)
+{
+    int handle = core_alloc_free_space(sizeof(struct browser_album_panel));
+    struct browser_album_panel *panel =
+        handle > 0 ? core_get_data_pinned(handle) : NULL;
+
+    struct ui_scene scene = {0};
+    int result = browse_loop(panel, &scene);
+    ui_scene_cancel(&scene);
+    gui_synclist_forget(&browser_lists);
+    if (panel)
+    {
+        gui_synclist_set_header(&browser_lists, NULL);
+        core_put_data_pinned(panel);
+        core_free(handle);
+    }
+    return result;
+}
+
 /* do not make backup if it is not recursive call */
 static int backup_count = -1;
 int rockbox_browse(struct browse_context *browse)
@@ -2106,12 +1996,6 @@ int rockbox_browse(struct browse_context *browse)
     backup_count--;
     if (backup_count >= 0)
         tc = backups[backup_count];
-    else
-    {
-        db_showing_art = false;    /* no browse left on screen */
-        db_showing_episodes = false;
-        db_showing_header = false;
-    }
     list_select_resume(selecting);
 
     return ret_val;

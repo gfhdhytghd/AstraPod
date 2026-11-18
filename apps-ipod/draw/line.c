@@ -25,7 +25,7 @@
 #include "debug.h"
 #include "viewport.h"
 #include "draw/text_shadow.h"
-#include "skin/skin_albumart_color.h"
+#include "ui/native_theme_runtime.h"
 #include "debug.h"
 #include "font.h"
 #include "rbunicode.h"
@@ -313,8 +313,7 @@ static void style_line(struct screen *display,
         int sep_height = MIN(line->separator_height, height);
         display->set_drawmode(DRMODE_FG);
         unsigned saved_sep_fg = display->get_foreground();
-        display->set_foreground(dynamic_colors_resolve(
-            global_settings.list_separator_color));
+        display->set_foreground(ui_theme_rgb565(UI_COLOR_SEPARATOR));
         display->fillrect(x, y + height - sep_height, width, sep_height);
         bar_height -= sep_height;
         display->set_foreground(saved_sep_fg);

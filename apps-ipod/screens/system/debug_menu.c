@@ -82,7 +82,7 @@
 
 
 #include "audio/peak_meter.h"
-#include "skin/skin_engine.h"
+#include "ui/frame.h"
 #include "log_viewer.h"
 #include "core_alloc.h"
 #include "audio/pcmbuf.h"
@@ -433,9 +433,9 @@ static void cpu_sample_take(struct cpu_sample *s)
     s->ticks = ticks;
     s->boost_ticks = boost_ticks;
     s->freq_sum = freq_sum;
-    s->flushes = skin_flush_count();
-    s->render_usec = skin_render_usec();
-    s->flush_usec = skin_flush_usec();
+    s->flushes = ui_flush_count();
+    s->render_usec = ui_render_usec();
+    s->flush_usec = ui_flush_usec();
 }
 
 static void buffering_addline_used(const char *name, long used, long size)
@@ -2243,7 +2243,6 @@ static const struct {
         { "Featured artists", dbg_featured, false, NULL },
         { "Metadata log", dbg_metadatalog, false, &write_metadata_log },
 
-        { "Skin memory", dbg_skin_engine, false, NULL },
         { "Screendump on USB", dbg_screendump, false,
           &do_screendump_instead_of_usb },
 

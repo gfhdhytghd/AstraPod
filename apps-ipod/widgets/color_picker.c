@@ -609,10 +609,11 @@ bool set_color(const char *title, unsigned *color, unsigned banned_color)
 
     /* The box owns its own margin: the default 10 on every side plus a title,
      * four rows, a swatch and a button row does not fit at a large font. */
-    style = *dialog_get_default_style();
+    dialog_style_default(&style);
     style.box_margin = CD_PAD;
 
     dialog_init(&d, CONTEXT_SETTINGS_COLOURCHOOSER, title, &style, &cb, &s);
+    d.motion_route = "colors";
     if (global_settings.talk_menu && title)
     {
         talk_string(title, false);

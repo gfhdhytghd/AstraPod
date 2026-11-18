@@ -28,7 +28,6 @@ enum debug_log_id {
     DEBUG_LOG_PLAYBACK,
     DEBUG_LOG_MIKEY,
     DEBUG_LOG_METADATA,
-    DEBUG_LOG_SKIN,
     DEBUG_LOG_TASKS,
     DEBUG_LOG_COUNT,
 };

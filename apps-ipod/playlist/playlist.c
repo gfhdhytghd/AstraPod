@@ -132,9 +132,6 @@
 #include "widgets/yesno.h"
 #include "dir.h"
 
-/* playlist elapsed percent, implemented in skin/skin_tokens.c */
-extern void wps_playlist_percent_prepare(void);
-
 #if 0 /* def ROCKBOX_HAS_LOGDISKF */
 #undef DEBUGF
 #undef ERRORF
@@ -4155,7 +4152,6 @@ void playlist_start(int start_index, unsigned long elapsed,
     struct playlist_info* playlist = &current_playlist;
 
     /* let %pX re-measure the playlist, if any skin asked for it */
-    wps_playlist_percent_prepare();
 
     playlist_write_lock(playlist);
 

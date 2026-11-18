@@ -71,23 +71,6 @@ static void confirm_draw(struct dialog *d, struct screen *s,
         s->putsxy(0, ARRAYLEN(lines) * s->getcharheight(), str(LANG_HANDOFF_USB));
 }
 
-static void confirm_native_layout(struct dialog *d, struct screen *s,
-                                  const struct viewport *content,
-                                  struct dialog_native_content *out, void *data)
-{
-    (void)d;
-    (void)s;
-    (void)content;
-    (void)data;
-    out->line_count = ARRAYLEN(lines);
-    for (unsigned i = 0; i < ARRAYLEN(lines); ++i)
-        out->lines[i] = (struct dialog_text_line){lines[i], strlen(lines[i])};
-    if (remote_choice())
-    {
-        const char *handoff = str(LANG_HANDOFF_USB);
-        out->lines[out->line_count++] = (struct dialog_text_line){handoff, strlen(handoff)};
-    }
-}
 
 static int confirm_action(struct dialog *d, int action, void *data)
 {
@@ -165,19 +148,17 @@ void gui_usb_confirm_run(uint32_t epoch)
         .measure = confirm_measure,
         .draw = confirm_draw,
         .on_action = confirm_action,
-        .native_layout = confirm_native_layout,
     };
     if (!usb_confirm_pending(epoch))
         return;
     if (handoff_prompt_wps(epoch)) return;
-    bool nested = dialog_prepare_usb();
 #ifdef HAVE_USB_PODLINK
     handoff_sheet_interrupt();
 #endif
     backlight_on();
     struct dialog d;
     dialog_init(&d, CONTEXT_STD, NULL, NULL, &cb, &epoch);
-    d.slide = nested ? DIALOG_SLIDE_NONE : DIALOG_SLIDE_EVENT;
+    d.motion_route = "usb";
     d.keymap = confirm_keymap;
     dialog_run(&d, HZ / 10);
 #ifdef IPOD_6G

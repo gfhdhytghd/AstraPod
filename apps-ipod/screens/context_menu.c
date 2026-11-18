@@ -45,6 +45,7 @@
 #include "lcd.h"
 #include "audio.h"
 #include "widgets/menu.h"
+#include "ui/scene.h"
 #include "lang.h"
 #include "playlist/playlist.h"
 #include "button.h"
@@ -91,7 +92,6 @@
 #include "database/tagcache.h"
 #include "database/db_spoken.h"
 #include "metadata/cuesheet.h"
-#include "skin/statusbar_skinned.h"
 #include "draw/viewport.h"
 #include "pathfuncs.h"
 #include "shortcuts.h"
@@ -205,10 +205,15 @@ static bool save_playlist(void)
 
 static int wps_view_cur_playlist(void)
 {
-    if (get_current_activity() == ACTIVITY_CONTEXTMENU)  /* get rid of parent activity */
-        pop_current_activity_without_refresh(); /* when called from ctxt menu */
+    struct ui_scene page = {0};
+    ui_scene_open_page(&page, "queue-push");
+    if (get_current_activity() == ACTIVITY_CONTEXTMENU)
+        pop_current_activity_without_refresh();
 
-    if (playlist_viewer() == PLAYLIST_VIEWER_GO_TO_LIBRARY)
+    enum playlist_viewer_result result = playlist_viewer();
+    ui_scene_close_modal(&page, result == PLAYLIST_VIEWER_OK ||
+                          result == PLAYLIST_VIEWER_CANCEL, "queue-pop");
+    if (result == PLAYLIST_VIEWER_GO_TO_LIBRARY)
         context_menu_result = ONPLAY_GO_TO_LIBRARY;
 
     return 0;
@@ -2151,34 +2156,6 @@ static void set_dir_helper(char* dirnamebuf, size_t bufsz)
 }
 
 
-static void show_updated_backdrop(void)
-{
-    skin_backdrop_load_setting();
-    viewportmanager_theme_changed(THEME_STATUSBAR);
-    skin_backdrop_show(sb_get_backdrop(SCREEN_MAIN));
-}
-
-static bool set_backdrop(void)
-{
-    char previous_backdrop[sizeof global_settings.backdrop_file];
-    strcpy(previous_backdrop, global_settings.backdrop_file);
-
-    path_append(global_settings.backdrop_file, selected_file.path,
-                PA_SEP_HARD, sizeof(global_settings.backdrop_file));
-
-    show_updated_backdrop();
-
-    if (!yesno_pop(ID2P(LANG_SET_AS_BACKDROP))) {
-        strcpy(global_settings.backdrop_file, previous_backdrop);
-        show_updated_backdrop();
-    }
-    else
-        settings_save();
-
-    return true;
-}
-MENUITEM_FUNCTION(set_backdrop_item, 0, ID2P(LANG_SET_AS_BACKDROP),
-                  set_backdrop, clipboard_callback, Icon_NOICON);
 static bool set_startdir(void)
 {
     set_dir_helper(global_settings.start_directory,
@@ -2263,17 +2240,7 @@ static int clipboard_callback(int action,
                 }
                 else if (this_item == &delete_file_item)
                     return action;
-                else if (this_item == &set_backdrop_item)
-                {
-                    char *suffix = strrchr(selected_file.path, '.');
-                    if (suffix)
-                    {
-                        if (strcasecmp(suffix, ".bmp") == 0)
-                        {
-                            return action;
-                        }
-                    }
-                }
+
             }
             return ACTION_EXIT_MENUITEM;
             break;
@@ -2444,7 +2411,7 @@ MAKE_ONPLAYMENU( manage_menu, ID2P(LANG_MANAGE),
            submenu_callback, Icon_NOICON,
            &rename_file_item, &clipboard_cut_item, &clipboard_copy_item,
            &delete_file_item, &delete_dir_item, &create_dir_item,
-           &set_backdrop_item, &set_as_dir_menu,
+           &set_as_dir_menu,
          );
 
 /* Now Playing's rarer rows */
@@ -2476,7 +2443,6 @@ MAKE_ONPLAYMENU_TITLED( wps_context_menu,
            &sound_mix_item,
            &spike_run_item,
            &wps_playlist_menu, &cat_playlist_menu,
-           &theme_options_item,
            &wps_more_menu,
          );
 
@@ -2630,13 +2596,6 @@ static int hotkey_album_covers(void)
     return ONPLAY_OK;
 }
 
-static int hotkey_theme_options(void)
-{
-    if (theme_options_from_wps() == MENU_ATTACHED_USB)
-        return ONPLAY_MAINMENU;
-    return ONPLAY_OK;
-}
-
 #define HOTKEY_FUNC(func, param) {{(void *)func}, param}
 
 /* HOTKEY_CONTEXT_MENU: rather than run one action, offer all of the ones
@@ -2755,12 +2714,6 @@ static const struct hotkey_assignment hotkey_items[] = {
       .return_code = ONPLAY_FUNC_RETURN,
       .flags = HOTKEY_FLAG_WPS,
       .icon = Icon_file_view_menu },
-    { .action = HOTKEY_THEME_OPTIONS,
-      .lang_id = LANG_THEME_OPTIONS,
-      .func = HOTKEY_FUNC(hotkey_theme_options, NULL),
-      .return_code = ONPLAY_FUNC_RETURN,
-      .flags = HOTKEY_FLAG_WPS,
-      .icon = Icon_NOICON },
     { .action = HOTKEY_CONTEXT_MENU,
       .lang_id = LANG_ONPLAY_MENU_TITLE,
       .func = HOTKEY_FUNC(hotkey_execute_menu, NULL),

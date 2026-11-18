@@ -91,9 +91,12 @@
 #include "power.h"
 #include "backlight.h"        /* backlight_set_timeout(_plugged) */
 #include "cpu.h"
-#include "skin/skin_engine.h"  /* skin_inhibit_flush */
-#include "skin/skin_albumart_color.h" /* dynamic_colors_resolve */
-#include "skin/statusbar_skinned.h" /* sb_set_persistent_title */
+#include "metadata/album_palette.h"
+#include "ui/frame.h"
+#include "ui/statusbar.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/perf.h"
+#include "ui/retained.h"
 #include "album_covers.h"
 #include "carousel.h"     /* the shared engine: carousel_idx, the model */
 #include "screens/playback/cider.h"
@@ -174,25 +177,32 @@ const struct button_mapping *pf_contexts[] =
 
 static pix_t pf_bg_color;     /* theme background, replaces G_BRIGHT(0) */
 pix_t pf_fg_color;     /* theme foreground, replaces G_BRIGHT(255) */
-static pix_t pf_lss_color;    /* selector start color for gradient */
-static pix_t pf_lse_color;    /* selector end color for gradient */
-static pix_t pf_lst_color;    /* selector text color */
 
 /* Pre-extracted RGB565 channel masks for fade_color() performance */
 static unsigned int pf_bg_rb;  /* pf_bg_color & 0xf81f */
 static unsigned int pf_bg_g;   /* pf_bg_color & 0x7e0 */
 
+static pix_t pf_color(const struct ui_theme *theme, const struct ui_album_palette *palette,
+                      enum ui_color_role role)
+{
+    uint32_t rgb = ui_theme_color(theme, role, palette);
+    return LCD_RGBPACK((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+}
+
 static void pf_update_dynamic_colors(void)
 {
+    struct ui_theme theme;
+    struct ui_album_palette palette;
+    ui_theme_snapshot(&theme);
+    album_palette_snapshot(&palette);
     /* The setting picks which of the theme's two colours fills the screen;
      * the captions always take the other. */
     bool bg_from_fg = global_settings.album_covers_background
                         == CAROUSEL_BG_FOREGROUND;
-    int fill = bg_from_fg ? global_settings.fg_color : global_settings.bg_color;
-    int text = bg_from_fg ? global_settings.bg_color : global_settings.fg_color;
-
-    pf_bg_color = (pix_t)dynamic_colors_resolve(fill);
-    pf_fg_color = (pix_t)dynamic_colors_resolve(text);
+    pix_t bg = pf_color(&theme, &palette, UI_COLOR_BACKGROUND);
+    pix_t fg = pf_color(&theme, &palette, UI_COLOR_FOREGROUND);
+    pf_bg_color = bg_from_fg ? fg : bg;
+    pf_fg_color = bg_from_fg ? bg : fg;
     if (global_settings.album_covers_background == CAROUSEL_BG_CUSTOM)
     {
         unsigned custom = global_settings.album_covers_custom_color;
@@ -203,9 +213,6 @@ static void pf_update_dynamic_colors(void)
         pf_fg_color = (pix_t)(color_contrast(white, custom) >=
                               color_contrast(black, custom) ? white : black);
     }
-    pf_lss_color = (pix_t)dynamic_colors_resolve(global_settings.lss_color);
-    pf_lse_color = (pix_t)dynamic_colors_resolve(global_settings.lse_color);
-    pf_lst_color = (pix_t)dynamic_colors_resolve(global_settings.lst_color);
     pf_bg_rb = pf_bg_color & 0xf81f;
     pf_bg_g  = pf_bg_color & 0x7e0;
 }
@@ -293,18 +300,8 @@ static void pf_update_dynamic_colors(void)
  * were scrolling at -- see flat_pace(). */
 #define PF_FLAT_SETTLE 3
 
-/* Not theme-controlled: layout is fixed/proportional (see init()) and
- * colours come from the theme's normal fg/bg + the dynamic (album-art
- * derived) colour scheme, same as everywhere else.
- *
- * It cannot be themed further while it draws the way it does. This screen
- * repaints its own pixels every frame, straight to the framebuffer, outside
- * the SBS's render cycle -- so anything routed through the skin engine at
- * runtime fights it: colours arrive inherited from ambient, SBS viewport
- * state is non-deterministic, skin_update()-rendered text races this
- * screen's own lcd_update(), and %Vd()'d content left "shown" by whatever
- * screen preceded this one bleeds through. Themeable layout means giving up
- * the per-frame raw redraw first. */
+/* The cover geometry is code-defined. Native theme tokens supply the
+ * foreground, background and caption fonts. */
 #define THREAD_STACK_SIZE DEFAULT_STACK_SIZE + 0x200
 
 /* Timing overlay, off. Set to 1 to draw a two-line readout over the covers:
@@ -422,14 +419,17 @@ static int pf_text_y, pf_text_h;
  * keeps its aspect ratio, so how tall a cover comes out is a property of the
  * album, not of the screen. */
 static int pf_slides_y0, pf_slides_y1;
-/* Album name font: global_settings.bold_font_file loaded via font_load(),
- * or the real UI font if none is configured. Provided by font_get_ui_bold()
- * (settings.c), which owns the font's lifecycle -- this screen must not unload
- * it. Set once in init(). */
-int pf_bold_font;
+static int pf_title_font = -1, pf_body_font = -1;
+
+int carousel_caption_font(bool bold)
+{
+    if (bold)
+        return pf_title_font >= 0 ? pf_title_font : font_get_ui_bold();
+    return pf_body_font >= 0 ? pf_body_font : screens[SCREEN_MAIN].getuifont();
+}
+
 static int pf_vp_y;             /* viewport y-offset (status bar height) */
 static struct viewport pf_vp;   /* PF rendering viewport (below status bar) */
-static struct frame_buffer_t pf_framebuffer; /* bypass backdrop in clear_viewport */
 static bool pf_show_statusbar;  /* this session's album_covers_statusbar */
 /* Theme state left pushed for cleanup() to pop. cleanup() also runs after a
  * failed init(), so it cannot assume there is one. */
@@ -539,14 +539,7 @@ static bool pf_random_spinning;
 
 static struct pf_slide_cache pf_sldcache;
 
-/* use long for aligning */
-struct pf_perf {
-    unsigned entry, first, frames, boosted, gaps, max_gap, over33, over50;
-    uint64_t gap_us, clear_us, slides_us, text_us, submit_us;
-    uint32_t histogram[52]; /* rounded up to milliseconds, 51 = overflow */
-};
 struct carousel_workspace {
-    struct pf_perf perf;
     unsigned long loader_stack[THREAD_STACK_SIZE / sizeof(long)];
 };
 
@@ -1474,13 +1467,13 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
     bool album_changed = carousel_caption_changed(
                              center_index, revision ^ global_settings.album_covers_show_year);
 
-    /* Switched to pf_bold_font (plain FONT_UI, a no-op, if no bold font is
+    /* Switched to carousel_caption_font(true) (plain FONT_UI, a no-op, if no bold font is
      * configured -- see its declaration) *before* set_scroll_line() below:
      * that measures the string's pixel width against whatever font is
      * currently active, to center/scroll it, so it has to see the album
      * name's *actual* rendering font, not FONT_UI, or a bold font with a
      * different average glyph width would end up mis-centered. */
-    lcd_setfont(pf_bold_font);
+    lcd_setfont(carousel_caption_font(true));
     album_line = carousel_caption_fit(album_and_year, album_fit,
                                       sizeof(album_fit));
     if (album_changed)
@@ -1499,9 +1492,9 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
             lcd_putsxy(albumtxt_x, albumtxt_y, album_line);
         /* Restored before the artist line: render_all_slides()/the FPS
          * overlay/etc all assume pf_vp's font is the real UI font, and the
-         * artist name itself is never bold. screens[SCREEN_MAIN].getuifont(),
-         * not the FONT_UI constant -- see init()'s comment on pf_bold_font. */
-        lcd_setfont(screens[SCREEN_MAIN].getuifont());
+         * artist name itself is never bold. carousel_caption_font(false),
+         * not the FONT_UI constant -- see init()'s comment on carousel_caption_font(true). */
+        lcd_setfont(carousel_caption_font(false));
 
         artist_line = carousel_caption_fit(artisttxt, artist_fit,
                                            sizeof(artist_fit));
@@ -1513,7 +1506,7 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
     else
     {
         lcd_putsxy(albumtxt_x, albumtxt_y, album_line);
-        lcd_setfont(screens[SCREEN_MAIN].getuifont());
+        lcd_setfont(carousel_caption_font(false));
     }
     carousel_text_end(saved_vp);
 }
@@ -2676,15 +2669,15 @@ static void recalc_offsets(void)
  * descent ~28%), so a descending album name still clears the line below. */
 static int caption_line2(void)
 {
-    return font_get(pf_bold_font)->ascent * 3 / 2;
+    return font_get(carousel_caption_font(true))->ascent * 3 / 2;
 }
 
 static int caption_block(bool two_lines)
 {
     if (!two_lines)
-        return (int)font_get(pf_bold_font)->height;
+        return (int)font_get(carousel_caption_font(true))->height;
     return caption_line2()
-         + (int)font_get(screens[SCREEN_MAIN].getuifont())->height;
+         + (int)font_get(carousel_caption_font(false))->height;
 }
 
 void carousel_caption_layout(bool two_lines, struct pf_caption *out)
@@ -3863,31 +3856,6 @@ static void cover_rows(int *y0, int *y1)
     pf_slides_y1 = hi;
 }
 
-/* Timings are wall time in microseconds. Only consecutive motion frames
- * contribute to cadence. Idle polls never read the clock for the recorder. */
-
-
-static void pf_perf_save(unsigned cleanup_us)
-{
-    int fd = creat(ROCKBOX_DIR "/coverflow-perf.txt", 0666);
-    if (fd < 0)
-        return;
-    unsigned p95 = 0, count = 0;
-    while (p95 < 51 && count + workspace->perf.histogram[p95] < workspace->perf.gaps - workspace->perf.gaps / 20)
-        count += workspace->perf.histogram[p95++];
-    uint32_t frames = MAX(workspace->perf.frames, 1u);
-    fdprintf(fd, "frames %u\nboosted_frames %u\nentry_us %u\ncleanup_us %u\n"
-             "motion_intervals %u\nfps_x100 %u\np95_ms_bucket %u\n"
-             "max_interval_us %u\nover_33ms %u\nover_50ms %u\n"
-             "mean_clear_slides_text_submit_us %u %u %u %u\n",
-             workspace->perf.frames, workspace->perf.boosted, workspace->perf.first, cleanup_us, workspace->perf.gaps,
-             (unsigned)(workspace->perf.gaps * 100000000ull / MAX(workspace->perf.gap_us, 1ull)),
-             p95, workspace->perf.max_gap, workspace->perf.over33, workspace->perf.over50,
-             (unsigned)(workspace->perf.clear_us / frames), (unsigned)(workspace->perf.slides_us / frames),
-             (unsigned)(workspace->perf.text_us / frames), (unsigned)(workspace->perf.submit_us / frames));
-    close(fd);
-}
-
 /* Clears `h` rows from `y` down the viewport and draws the covers into them.
  * The caller works out the band -- it also has to flush it, and on the frames
  * that carry a caption as well the two are decided together. */
@@ -3900,10 +3868,7 @@ static void render_all_slides(int y, int h)
 #if PF_SHOW_STATS
     t0 = USEC_TIMER;
 #endif
-    uint32_t start = USEC_TIMER;
     pf_clear_band(y, h);
-    uint32_t cleared = USEC_TIMER;
-    workspace->perf.clear_us += cleared - start;
 #if PF_SHOW_STATS
     pf_clear_us = USEC_TIMER - t0;
     pf_px = 0;
@@ -3918,7 +3883,6 @@ static void render_all_slides(int y, int h)
         flat_render();
     else
         coverflow_render();
-    workspace->perf.slides_us += (uint32_t)USEC_TIMER - cleared;
 #if PF_SHOW_STATS
     pf_slides_us = USEC_TIMER - t0;
 #endif
@@ -4244,11 +4208,13 @@ static void cleanup(void)
     backlight_set_timeout(global_settings.backlight_timeout);
     backlight_set_timeout_plugged(global_settings.backlight_timeout_plugged);
 
-    /* Nothing to free: carousel_idx.buf points into the shared app buffer (see
-     * init()), not a buflib handle. But that buffer was claimed for this
-     * screen's lifetime, so hand it back -- otherwise the next screen to want
-     * it panics. The bold album-name font is the shared font_get_ui_bold() --
-     * owned by settings.c, not unloaded here. */
+    if (pf_title_font >= 0)
+        font_unload(pf_title_font);
+    if (pf_body_font >= 0)
+        font_unload(pf_body_font);
+    pf_title_font = pf_body_font = -1;
+
+    /* The index borrows the shared app arena until the screen closes. */
     app_release_buffer("album covers");
 }
 
@@ -4291,49 +4257,23 @@ static bool init(void)
     config_set_defaults(&pf_cfg); /* must appear before pf_config_load */
     pf_config_load();
 
-    /* The theme is pushed for as long as this screen is up, either way, and
-     * cleanup() pops it. Hiding the status bar means pushing it off -- nothing
-     * less stops the SBS drawing into our area. Showing it means pushing it
-     * ON, and holding that: this screen is reachable from the WPS as well as
-     * from the menu (wps.c disables the theme and calls album_covers()
-     * directly), so the ambient state is not "enabled" whatever the caller.
-     * Reading the viewport under a temporary push and then restoring the
-     * ambient state left the bar missing on exactly that path.
-     *
-     * Trap: %Vi is whichever %VI the SBS last selected, so this is read before
-     * the SBS has seen the new activity -- a theme picking none for it leaves
-     * the previous screen's in force. */
     pf_show_statusbar = global_settings.album_covers_statusbar;
     pf_theme_pushed = true;
     FOR_NB_SCREENS(i)
         viewportmanager_theme_enable(i, pf_show_statusbar, NULL);
     viewport_set_defaults(&pf_vp, SCREEN_MAIN);
 
-    pf_vp.buffer = &pf_framebuffer;
+    pf_vp.buffer = &lcd_framebuffer_default;
     pf_vp.x = 0;
     pf_vp.width = LCD_WIDTH;
-    /* Down to the bottom edge, for the same reason x and width are overridden
-     * above: viewport_set_defaults() hands back the theme's %Vi, which is
-     * sized for a list, and this screen fills what it is given.
-     *
-     * Trap: %Vi is whichever %VI the SBS last selected, so a theme that picks
-     * none for this activity leaves the previous screen's in force and the
-     * height follows where you came from. LCD_HEIGHT - y is what the skin
-     * engine itself uses for a viewport with no height (parse_viewport()). */
     pf_vp.height = LCD_HEIGHT - pf_vp.y;
-
     pf_vp_y = pf_vp.y;
     pf_height = pf_vp.height;
 
-    /* Album-name font: the shared bold UI font. settings.c loads it once and
-     * owns its lifecycle (so we must not unload it), and it already falls back
-     * to the real configured UI font when the theme has no bold font -- so this
-     * can be used unconditionally. Using the shared id (not the FONT_UI
-     * constant) also sidesteps FONT_UI's fallback slot-search, which could
-     * otherwise resolve to some other theme font in a higher slot.
-     *
-     * Set before the caption strip below, which measures it. */
-    pf_bold_font = font_get_ui_bold();
+    struct ui_theme theme;
+    ui_theme_snapshot(&theme);
+    pf_title_font = ui_theme_font_load(&theme, UI_FONT_TITLE, 64);
+    pf_body_font = ui_theme_font_load(&theme, UI_FONT_BODY, 64);
 
     /* Reserve real, empty vertical space for draw_album_text()'s overlay,
      * rather than just biasing where the up/down split falls: since
@@ -4423,7 +4363,7 @@ static bool init(void)
     owned_buffer = buf; owned_bytes = buf_size;
     if (restored)
     {
-        lcd_setfont(screens[SCREEN_MAIN].getuifont());
+        lcd_setfont(carousel_caption_font(false));
         init_scroll_lines();
         buffer = LCD_BUF + (pf_vp_y + pf_draw_y_shift) * BUFFER_WIDTH;
         pf_state = pf_idle; step = 0; fade = 256;
@@ -4439,7 +4379,7 @@ static bool init(void)
     carousel_idx.buf = buf;
     carousel_idx.buf_sz = buf_size;
 
-    lcd_setfont(screens[SCREEN_MAIN].getuifont());
+    lcd_setfont(carousel_caption_font(false));
 
     if (!dir_exists(CACHE_PREFIX))
     {
@@ -4694,7 +4634,7 @@ static void pf_stats_draw(void)
     lcd_set_foreground(pf_fg_color);
     lcd_putsxy(2, y, pf_stats.line);
     lcd_putsxy(2, y + h, pf_stats.line2);
-    lcd_setfont(screens[SCREEN_MAIN].getuifont());
+    lcd_setfont(carousel_caption_font(false));
 }
 #endif /* PF_SHOW_STATS */
 
@@ -4710,11 +4650,68 @@ static int native_frame_wait(uint32_t clock, unsigned last_frame)
     return 1 + (left - 1) / (1000000u / HZ);
 }
 
-static int album_covers_loop(void)
+struct carousel_frame {
+    struct ui_page page;
+    struct ui_view root, slides, captions;
+    bool joined;
+};
+
+static void paint_slides(const struct ui_view *view, const struct ui_view_frame *frame)
+{
+    (void)view;
+    render_all_slides(frame->clip.y - pf_vp_y, frame->clip.height);
+}
+
+static void paint_caption(const struct ui_view *view, const struct ui_view_frame *frame)
+{
+    const struct carousel_frame *paint = view->data;
+    if (!paint->joined)
+    {
+        lcd_set_background(pf_bg_color);
+        pf_clear_band(frame->clip.y - pf_vp_y, frame->clip.height);
+    }
+#if !PF_SHOW_STATS
+    model->draw_text();
+#endif
+}
+
+static const struct ui_view_ops slide_ops = { .paint = paint_slides };
+static const struct ui_view_ops caption_ops = { .paint = paint_caption };
+
+static void carousel_frame_init(struct carousel_frame *paint)
+{
+    ui_view_init(&paint->root, (struct ui_rect){0, 0, LCD_WIDTH, LCD_HEIGHT},
+                 NULL, NULL);
+    ui_view_init(&paint->slides, (struct ui_rect){0, 0, LCD_WIDTH, 0}, &slide_ops, NULL);
+    ui_view_init(&paint->captions, (struct ui_rect){0, 0, LCD_WIDTH, 0}, &caption_ops, paint);
+    ui_view_append(&paint->root, &paint->slides);
+    ui_view_append(&paint->root, &paint->captions);
+    ui_page_init(&paint->page, &paint->root);
+}
+
+static void carousel_paint(struct carousel_frame *paint, bool art, bool caption,
+                           bool joined, int y, int height)
+{
+    paint->joined = joined;
+    paint->slides.value[UI_Y] = pf_vp_y + y;
+    paint->slides.value[UI_HEIGHT] = art ? height : 0;
+    paint->captions.value[UI_Y] = pf_vp_y + pf_text_y;
+    paint->captions.value[UI_HEIGHT] = caption ? pf_text_h : 0;
+    if (art)
+        ui_page_invalidate(&paint->page, (struct ui_rect){0, pf_vp_y + y, LCD_WIDTH, height});
+    if (caption)
+        ui_page_invalidate(&paint->page, (struct ui_rect){0, pf_vp_y + pf_text_y, LCD_WIDTH, pf_text_h});
+    ui_page_paint(&paint->page);
+}
+
+static int album_covers_loop(unsigned *trace)
 {
     int ret;
     int button;
     unsigned art_seen_generation = art_cache_generation();
+    unsigned palette_seen_generation = album_palette_generation();
+    struct carousel_frame paint;
+    carousel_frame_init(&paint);
     /* What the screen owes, split so that the two things that change on their
      * own account can be repaired on their own account. The covers are the
      * expensive half by a wide margin, and while a track plays most frames want
@@ -4729,10 +4726,9 @@ static int album_covers_loop(void)
     bool caption_owed = true;
     unsigned int seen_caption_version = 0;
     bool full_flush_owed = false;
-    int skin_top = LCD_HEIGHT, skin_end = 0;
-    int skin_left = LCD_WIDTH, skin_right = 0;
-    uint32_t previous_motion = 0;
-    bool consecutive = false;
+    int dirty_top = LCD_HEIGHT, dirty_end = 0;
+    int dirty_left = LCD_WIDTH, dirty_right = 0;
+    bool trace_attempted = false;
     /* The viewport as a whole has changed and every row of it has to be cleared
      * and sent, not just the rows the two halves above account for. True for
      * the first frame, for anything that drew over the screen and did not say
@@ -4767,13 +4763,6 @@ static int album_covers_loop(void)
             art_seen_generation = art_generation;
         }
 
-        /* Get input first. The SBS renders during get_custom_action() and
-         * writes into the framebuffer (including decorative viewports that
-         * overlap our area). Inhibit the SBS's lcd_update() so it doesn't
-         * push that content to the display -- our own lcd_update() after
-         * rendering will push both the SBS status bar and our content
-         * atomically, avoiding one-frame flicker of theme artifacts. */
-
         /* Idle-wake-rate backoff: how long to wait for a button before looking
          * around again. Waking finds nothing to draw most of the time (see the
          * frame test below) and costs almost nothing, so this only decides how
@@ -4790,7 +4779,7 @@ static int album_covers_loop(void)
                               || scroll_lines[PF_SCROLL_ARTIST].step;
         bool quiescent = pf_state != pf_scrolling
                       && !caption_scrolling
-                      && !dynamic_colors_needs_repaint()
+                      && !album_palette_needs_repaint()
                       && !(audio_status() & AUDIO_STATUS_PLAY);
         /* With the LCD asleep nothing is drawn or boosted: what is owed
          * stays owed, and the wake's full update shows it. */
@@ -4822,14 +4811,16 @@ static int album_covers_loop(void)
                 timeout = left > 0 ? (int)left : 0;
         }
 
-        skin_inhibit_flush(true);
+        bool inherited_inhibit = ui_flush_inhibited();
+        ui_inhibit_flush(true);
         button = get_custom_action(CONTEXT_PLUGIN, timeout, get_context_map);
-        skin_inhibit_flush(false);
+        ui_inhibit_flush(inherited_inhibit);
         /* A hold of Play from now on is the random spin */
         if (!(button_status() & BUTTON_PLAY))
             button_set_sw_poweroff_state(false);
 
         if (model->tick) model->tick();
+        album_palette_refresh();
         if (model->external)
         {
             int count = model->count();
@@ -4872,25 +4863,10 @@ static int album_covers_loop(void)
             full_flush_owed = true;
         }
 
-        /* What the status bar drew during that call, and where. Taking the
-         * rectangles takes responsibility for flushing them, which is this
-         * screen's job anyway -- the inhibit above stopped the skin engine from
-         * doing its own.
-         *
-         * A theme's status bar is normally confined to the strip above this
-         * screen's viewport, and then nothing it drew has anything to do with
-         * the covers: the rectangle goes straight to the display and no frame
-         * is owed at all. That is the whole point of asking where rather than
-         * whether -- answering "whether" costs seven full frames a second
-         * while a track plays, for a clock that moved.
-         *
-         * A theme is free to paint over the covers as well, though, and then
-         * the framebuffer no longer matches the display: the covers have to be
-         * drawn again, and the flush has to carry the rows above the viewport
-         * with them, so it becomes an ordinary full frame. */
+        /* Merge status damage with the next cover/caption submission. */
         {
-            struct skin_dirty_rect dirty[SKIN_MAX_DIRTY_RECTS];
-            int n = skin_take_dirty_rects(SCREEN_MAIN, dirty);
+            struct ui_dirty_rect dirty[UI_MAX_DIRTY_RECTS];
+            int n = ui_take_dirty_rects(SCREEN_MAIN, dirty);
             int i;
 
             for (i = 0; i < n; i++)
@@ -4907,10 +4883,10 @@ static int album_covers_loop(void)
                 }
                 else
                 {
-                    skin_left = MIN(skin_left, dirty[i].x);
-                    skin_right = MAX(skin_right, dirty[i].x + dirty[i].w);
-                    skin_top = MIN(skin_top, dirty[i].y);
-                    skin_end = MAX(skin_end, dirty[i].y + dirty[i].h);
+                    dirty_left = MIN(dirty_left, dirty[i].x);
+                    dirty_right = MAX(dirty_right, dirty[i].x + dirty[i].w);
+                    dirty_top = MIN(dirty_top, dirty[i].y);
+                    dirty_end = MAX(dirty_end, dirty[i].y + dirty[i].h);
                 }
             }
         }
@@ -4978,8 +4954,10 @@ static int album_covers_loop(void)
          * moves it as much as it moves the covers -- and the two colours do not
          * have to move together, so the caption cannot wait for a background
          * change to notice. */
-        if (dynamic_colors_needs_repaint())
+        unsigned palette_generation = album_palette_generation();
+        if (palette_generation != palette_seen_generation)
         {
+            palette_seen_generation = palette_generation;
             art_owed = true;
             caption_owed = true;
         }
@@ -5009,6 +4987,13 @@ static int album_covers_loop(void)
          * caption step or a slide arriving does not switch the clock each
          * time; an idle screen gives the boost back. */
         dark = !lcd_active();
+        bool motion = !dark && (pf_state == pf_scrolling || flow_mix);
+        if (!motion && trace_attempted)
+        {
+            ui_perf_end(*trace);
+            *trace = 0;
+            trace_attempted = false;
+        }
         if (!dark && (pf_state == pf_scrolling || art_owed || caption_owed
                       || caption_scrolling))
             boost_until = current_tick + HZ;
@@ -5027,20 +5012,12 @@ static int album_covers_loop(void)
             (button != ACTION_NONE || agents_nav_pending() != AGENTS_NAV_NONE);
         if (!dark && (art_owed || caption_owed) && frame_due && !dispatch_first)
         {
-            uint32_t frame_start = USEC_TIMER;
-            bool motion = pf_state == pf_scrolling || flow_mix;
-            if (consecutive && motion)
+            if (motion && !trace_attempted)
             {
-                uint32_t gap = frame_start - previous_motion;
-                workspace->perf.gaps++;
-                workspace->perf.gap_us += gap;
-                workspace->perf.max_gap = MAX(gap, workspace->perf.max_gap);
-                workspace->perf.over33 += gap > 33000;
-                workspace->perf.over50 += gap > 50000;
-                workspace->perf.histogram[gap > 50000 ? 51 : (gap + 999) / 1000]++;
+                *trace = ui_perf_begin(model->motion_trace ?: "cover-flow");
+                trace_attempted = true;
             }
-            consecutive = motion;
-            previous_motion = frame_start;
+            uint32_t frame_start = *trace ? USEC_TIMER : 0;
             bool drew_art = art_owed;
             bool drew_caption = caption_owed;
             /* The rows each half touches, and so the rows it has to clear
@@ -5061,13 +5038,6 @@ static int album_covers_loop(void)
             full_repaint_owed = true;
 #endif
 
-            /* SBS rendering in get_custom_action resets the viewport to
-             * default, and also leaves the global draw mode at whatever the
-             * skin's own text/menu elements last used (typically DRMODE_SOLID,
-             * an opaque background block) -- restore both, or
-             * draw_album_text()'s lcd_putsxy() below inherits that solid mode
-             * and paints an opaque block behind the album/artist text instead
-             * of drawing transparently over the coverflow's own background. */
             lcd_set_viewport(&pf_vp);
             lcd_set_drawmode(DRMODE_FG);
 
@@ -5127,24 +5097,7 @@ static int album_covers_loop(void)
                 drew_caption = (pf_text_h > 0);
             }
 
-            if (drew_art)
-                render_all_slides(art_y, art_h);
-            uint32_t text_start = USEC_TIMER;
-            if (drew_caption)
-            {
-                /* Wiping the caption's own rows disturbs nothing else: either
-                 * the covers stayed clear of them, or `joined` above has
-                 * already cleared the pair together and this is a no-op over
-                 * background the slides did not reach. */
-                if (!joined)
-                {
-                    lcd_set_background(pf_bg_color);
-                    pf_clear_band(pf_text_y, pf_text_h);
-                }
-#if !PF_SHOW_STATS   /* the overlay takes the caption's place */
-                model->draw_text();
-#endif
-            }
+            carousel_paint(&paint, drew_art, drew_caption, joined, art_y, art_h);
 #if PF_SHOW_STATS
             pf_stats_draw();
             t_flush = USEC_TIMER;
@@ -5157,35 +5110,37 @@ static int album_covers_loop(void)
              * only need sending when the status bar redrew into them. Full
              * width in every case, which is the single-burst path in both
              * targets' drivers -- a narrower rect goes line by line. */
-            uint32_t submitting = USEC_TIMER;
-            workspace->perf.text_us += submitting - text_start;
             if (drew_art)
             {
-                skin_top = MIN(skin_top, pf_vp_y + art_y);
-                skin_end = MAX(skin_end, pf_vp_y + art_y + art_h);
+                dirty_top = MIN(dirty_top, pf_vp_y + art_y);
+                dirty_end = MAX(dirty_end, pf_vp_y + art_y + art_h);
             }
             if (drew_caption && !joined && pf_text_h > 0)
             {
-                skin_top = MIN(skin_top, pf_vp_y + pf_text_y);
-                skin_end = MAX(skin_end, pf_vp_y + pf_text_y + pf_text_h);
+                dirty_top = MIN(dirty_top, pf_vp_y + pf_text_y);
+                dirty_end = MAX(dirty_end, pf_vp_y + pf_text_y + pf_text_h);
             }
             if (full_flush_owed)
             {
-                skin_top = 0;
-                skin_end = LCD_HEIGHT;
+                dirty_top = 0;
+                dirty_end = LCD_HEIGHT;
                 full_flush_owed = false;
             }
-            if (skin_end > skin_top)
-                lcd_update_rect(0, skin_top, LCD_WIDTH, skin_end - skin_top);
-            skin_top = LCD_HEIGHT;
-            skin_end = 0;
-            skin_left = LCD_WIDTH;
-            skin_right = 0;
-            uint32_t submitted = USEC_TIMER;
-            workspace->perf.submit_us += submitted - submitting;
-            if (!workspace->perf.frames++)
-                workspace->perf.first = submitted - workspace->perf.entry;
-            workspace->perf.boosted += pf_boosted;
+            if (dirty_end > dirty_top)
+            {
+                uint32_t submitting = *trace ? USEC_TIMER : 0;
+                lcd_update_rect(0, dirty_top, LCD_WIDTH, dirty_end - dirty_top);
+                if (*trace)
+                {
+                    uint32_t submitted = USEC_TIMER;
+                    ui_perf_note_render(submitting - frame_start);
+                    ui_perf_note_submit(submitted - submitting);
+                }
+            }
+            dirty_top = LCD_HEIGHT;
+            dirty_end = 0;
+            dirty_left = LCD_WIDTH;
+            dirty_right = 0;
             full_repaint_owed = false;
 #if PF_SHOW_STATS
             pf_stats_frame(t_start, t_flush - t_start, USEC_TIMER - t_flush);
@@ -5195,14 +5150,13 @@ static int album_covers_loop(void)
 
         else if (!art_owed && !caption_owed)
         {
-            consecutive = false;
-            if (!dark && skin_end > skin_top && !dispatch_first)
+            if (!dark && dirty_end > dirty_top && !dispatch_first)
             {
-                lcd_update_rect(skin_left, skin_top, skin_right - skin_left, skin_end - skin_top);
-                skin_left = LCD_WIDTH;
-                skin_right = 0;
-                skin_top = LCD_HEIGHT;
-                skin_end = 0;
+                lcd_update_rect(dirty_left, dirty_top, dirty_right - dirty_left, dirty_end - dirty_top);
+                dirty_left = LCD_WIDTH;
+                dirty_right = 0;
+                dirty_top = LCD_HEIGHT;
+                dirty_end = 0;
             }
         }
 
@@ -5255,6 +5209,9 @@ static int album_covers_loop(void)
         case ACTION_WPS_QUICKSCREEN:
             /* Leave the model, position and surfaces alive under the overlay.
              * Join before the theme changes, as for the other modal screens. */
+            ui_perf_end(*trace);
+            *trace = 0;
+            trace_attempted = false;
             end_pf_thread();
             ret = quick_screen_current(button, NULL);
             if (ret == QUICKSCREEN_IN_USB) return GO_TO_ROOT;
@@ -5272,6 +5229,9 @@ static int album_covers_loop(void)
              * a CAROUSEL_MENU_* sentinel to stay. */
             if (!model->on_menu)
                 break;
+            ui_perf_end(*trace);
+            *trace = 0;
+            trace_attempted = false;
             end_pf_thread();
             ret = model->on_menu();
             if (ret < 0 && !create_pf_thread()) return GO_TO_PREVIOUS;
@@ -5405,8 +5365,6 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
 {
     int ret;
 
-    memset(&workspace->perf, 0, sizeof(workspace->perf));
-    workspace->perf.entry = USEC_TIMER;
     end_pf_thread();
     if (resume_model && resume_model != m) carousel_forget_resume();
     model = m;
@@ -5415,8 +5373,7 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
      * only wraps the main-menu dispatch path) since this is also reachable
      * directly from apps/gui/wps.c (the "coverflow" WPS select-action and
      * the custom STOP-opens-coverflow behavior), bypassing that dispatcher
-     * entirely. This is what makes %cs report ACTIVITY_ALBUMCOVERS
-     * correctly regardless of which entry path was used. */
+     * entirely. Activity tracking covers both entry paths. */
     push_current_activity(ACTIVITY_ALBUMCOVERS);
 
     if (!model->external && !check_database())
@@ -5434,17 +5391,8 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
         return GO_TO_PREVIOUS;
     }
 
-    /* render_slide() writes pixels directly into lcd_fb, and pf_framebuffer
-     * (assigned to pf_vp.buffer in init()) needs the real frame_buffer_t
-     * contents -- both dropped silently during the plugin-to-core port,
-     * leaving every direct pixel write going to a NULL pointer (lcd_fb's
-     * BSS default) instead of the real framebuffer. Matches plugin_start()'s
-     * original setup exactly. */
-    {
-        struct viewport *vp_main = lcd_set_viewport(NULL);
-        lcd_fb = vp_main->buffer->fb_ptr;
-        pf_framebuffer = *vp_main->buffer;
-    }
+    lcd_set_viewport(NULL);
+    lcd_fb = lcd_framebuffer_default.fb_ptr;
 
     if (!init())
     {
@@ -5467,12 +5415,12 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
      * off. Held Play on the playing screen opens this, and that hold still
      * powers off, until Play is let go: see album_covers_loop(). */
     button_set_sw_poweroff_state(button_status() & BUTTON_PLAY);
-    ret = album_covers_loop();
+    unsigned trace = 0;
+    ret = album_covers_loop(&trace);
     button_set_sw_poweroff_state(true);
 
-    uint32_t cleanup_start = USEC_TIMER;
     cleanup();
-    pf_perf_save((uint32_t)USEC_TIMER - cleanup_start);
+    ui_perf_end(trace);
 
     /* CAROUSEL_PLAY_ALBUM belongs with these: album_covers() turns it into
      * GO_TO_WPS, so the screen underneath is about to be replaced either way

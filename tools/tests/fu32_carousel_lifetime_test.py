@@ -27,6 +27,7 @@ static const char *cider_remote_name(void) { return remote; }
 static struct db_summary_t carousel_idx,resume_index;
 static int resume_handle,thread_id=1,thread_q,exits,joins,deletes,undos,releases;
 static bool thread_is_running,pf_theme_pushed,pf_boosted,wants_to_quit,fail_alloc;
+static int pf_title_font=-1,pf_body_font=-1;
 static void *owned_buffer,*resume_placeholder,*pf_placeholder_buf;
 static size_t owned_bytes;
 static struct{int backlight_timeout,backlight_timeout_plugged;}global_settings;
@@ -40,6 +41,7 @@ static void queue_delete(int*q){(void)q;deletes++;}
 static void viewportmanager_theme_undo(int n,bool b){(void)n;(void)b;assert(!thread_is_running);undos++;}
 static void cpu_boost(bool b){(void)b;assert(!thread_is_running);}
 static void backlight_set_timeout(int n){(void)n;}static void backlight_set_timeout_plugged(int n){(void)n;}
+static void font_unload(int id){assert(id>=0&&!thread_is_running);}
 static void app_release_buffer(const char*n){(void)n;assert(!thread_is_running);releases++;}
 '''
 post=r'''

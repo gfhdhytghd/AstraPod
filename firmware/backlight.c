@@ -23,7 +23,7 @@
 #if !defined(BOOTLOADER)
 #include "settings.h"
 #include "action.h"
-#include "gui/skin_engine/skin_engine.h"
+#include "ui/statusbar.h"
 #endif
 #include <stdlib.h>
 #include "cpu.h"
@@ -919,7 +919,7 @@ void backlight_set_timeout_plugged(int value)
 void backlight_hold_changed(bool hold_button)
 {
 #ifndef BOOTLOADER
-    skin_request_update_locked(hold_button);
+    sb_invalidate();
 #endif
     if (!hold_button || (backlight_on_button_hold > 0))
     {

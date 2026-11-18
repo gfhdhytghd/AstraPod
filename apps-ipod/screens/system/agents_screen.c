@@ -93,7 +93,7 @@
 #include "draw/screen_access.h"
 #include "draw/text_wrap.h"
 #include "widgets/list.h"
-#include "skin/statusbar_skinned.h"
+#include "ui/statusbar.h"
 #include "widgets/splash.h"
 #include "widgets/dialog.h"
 #include "settings/settings.h"
@@ -2213,9 +2213,9 @@ static void settle_viewport(struct gui_synclist *list)
 {
     gui_synclist_inhibit_flush(true);
     gui_synclist_draw(list);
-    sb_skin_update(SCREEN_MAIN, true);
+    sb_update(SCREEN_MAIN, true);
     gui_synclist_draw(list);
-    sb_skin_update(SCREEN_MAIN, true);
+    sb_update(SCREEN_MAIN, true);
     gui_synclist_inhibit_flush(false);
     gui_synclist_layout(list);
 }
@@ -2991,7 +2991,7 @@ static int agents_run(void)
             if (is_backlight_on(true) && view == VIEW_DETAIL)
                 tick_task(&list);
             else if (is_backlight_on(true) && animating(&list))
-                skinlist_redraw_status(&screens[SCREEN_MAIN], &list);
+                gui_synclist_draw_status(&list);
         }
 
         /* A release the keymap did not see still ends the hold. A failure

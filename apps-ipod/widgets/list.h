@@ -16,12 +16,9 @@
 #include "input/action.h"
 #include "draw/icon.h"
 #include "draw/screen_access.h"
-#include "skin/skin_engine.h"
 #include "draw/line.h"
 
-/* Pointer-only here: a row's album-art chain is compiled in the skin buffer
- * and this header has no business in the filter engine. */
-struct img_filter;
+struct dim;
 
 #define SCROLLBAR_WIDTH global_settings.scrollbar_width
 
@@ -62,17 +59,8 @@ typedef enum themable_icons list_get_icon(int selected_item, void * data);
  *  Note: the returned pointer is only valid until the next call into the
  *        callback's backing cache, so it must be drawn immediately.
  */
-/*  - size : the row viewport, in. The callback picks the cached size it draws
- *           from; the draw is 1:1 and the viewport only clips, so nothing is
- *           scaled to fit and nothing may exceed what was asked for.
- *  - filter : the chain to treat the art with, or NULL. `filter_hash` names it
- *           for cache-keying, because the skin buffer the chain lives in is
- *           freed on reload and a stored pointer would dangle.
- */
-typedef const struct bitmap * list_get_albumart(int selected_item, void * data,
-                                                struct dim *size,
-                                                const struct img_filter *filter,
-                                                uint32_t filter_hash);
+typedef const struct bitmap *list_get_albumart(int selected_item, void *data,
+                                              struct dim *size);
 /*
  * Text callback
  *  - selected_item : an integer that tells the number of the item to display
@@ -135,9 +123,7 @@ typedef int list_speak_item(int selected_item, void * data);
 typedef int list_get_color(int selected_item, void * data);
 
 /*
- * Row kind callback, read by the skin's %Lk: what choosing the row does.
- * Themes compare these as numbers, so the values never change and a new kind
- * is appended.
+ * Row kind callback: describe what choosing the row does.
  */
 enum list_row_kind
 {
@@ -155,28 +141,28 @@ enum list_row_kind
     LIST_ROW_CUSTOM_MENU,       /* opens a menu from tagnavi_custom.config */
 };
 typedef enum list_row_kind list_get_kind(int selected_item, void * data);
-/* Range callback, read by %Lr: where a number setting's value sits in its
+/* Range callback: where a number setting's value sits in its
  * range, 0 to 100, or -1 on any other row. */
 typedef int list_get_range(int selected_item, void * data);
 
 /*
- * Playing callback, read by the skin's %LP: whether the row is what is
+ * Playing callback: whether the row is what is
  * playing now.
  */
 typedef bool list_is_playing(int selected_item, void * data);
 
-/*
- * Status callback, drawn where the skin's %Ls is: the row's own picture of
- * its state, into vp, which is already set. The skinned list calls it as
- * the row draws, after the skin's own drawing there, and again for each %Ls
- * on screen, on a cleared viewport, when the owner calls
- * skinlist_redraw_status(), so it can animate. Returns false for a row with
- * no status picture: its viewport is then left to the skin and never
- * cleared.
- */
-struct screen;
-typedef bool list_draw_status(int selected_item, void * data,
+/* The icon-sized status cell is already clipped and active for this callback. */
+typedef bool list_draw_status(int selected_item, void *data,
                               struct screen *display, struct viewport *vp);
+
+/* Optional summary above the rows. The list borrows these fields while it is
+ * shown. The artwork pointer is consumed before any other artwork request. */
+struct list_header
+{
+    const char *title, *subtitle, *detail;
+    const struct bitmap *(*cover)(void *data, struct dim *size);
+    void *data;
+};
 
 struct list_selection_color
 {
@@ -224,7 +210,7 @@ struct gui_synclist
 
     list_get_icon *callback_get_item_icon;
     list_get_albumart *callback_get_item_albumart;
-    /* Uniform row height override in pixels; 0 == use the skin/font height.
+    /* Uniform row height override in pixels; 0 uses the theme.
      * Lets a list (e.g. the database album list) ask for taller rows without a
      * per-item callback -- every row is this height. */
     int line_height_override;
@@ -244,21 +230,20 @@ struct gui_synclist
     struct list_selection_color *selection_color;
     struct viewport *parent[NB_SCREENS];
 
-    /* What the skin asks of a row beyond its text and icon. Each is optional;
-     * a list without one reads as plain, valueless and not playing. */
+    /* Optional row roles and annotations. */
     list_get_kind *callback_get_item_kind;
     list_get_name *callback_get_item_value;     /* a setting row's value */
     list_get_range *callback_get_item_range;    /* ...and where it sits */
     list_is_playing *callback_item_is_playing;
-    /* %LD: the selected row's description */
     list_get_name *callback_get_item_description;
-    /* %Ls: the row's status picture */
     list_draw_status *callback_draw_status;
-    /* %Lp counts from the last row up: a list sorted newest first, so the
-     * oldest is 1 however many are added. Its tracks run to the end. */
+    /* Number from the last row up when a list is sorted newest first. The
+     * oldest track stays numbered 1. */
     bool count_down;
-    /* %Lp is empty: an order that numbers nothing */
     bool unnumbered;
+    bool show_notes;
+    bool default_viewport;
+    const struct list_header *header;
 
     /* Changes whenever the items may have: init, the item count or the kind
      * callback. Unique across lists, so a reused struct gets a new one. */
@@ -279,43 +264,43 @@ extern void gui_synclist_init(
 extern void gui_synclist_set_nb_items(struct gui_synclist * lists, int nb_items);
 extern void gui_synclist_set_icon_callback(struct gui_synclist * lists, list_get_icon icon_callback);
 extern void gui_synclist_set_albumart_callback(struct gui_synclist * lists, list_get_albumart albumart_callback);
-/* Uniform row height in pixels; 0 restores the default skin/font height. */
+/* Uniform row height in pixels. A zero height uses the theme. */
 extern void gui_synclist_set_row_height(struct gui_synclist * lists, int height);
-/* The list's uniform row height (the override if set, else the skin/font height). */
+/* The row height after applying the list's optional override. */
 int list_item_height(struct gui_synclist *list, enum screen_type screen);
 extern void gui_synclist_set_voice_callback(struct gui_synclist * lists, list_speak_item voice_callback);
 extern void gui_synclist_set_viewport_defaults(struct viewport *vp, enum screen_type screen);
 extern void gui_synclist_set_color_callback(struct gui_synclist * lists, list_get_color color_callback);
 extern void gui_synclist_set_sel_color(struct gui_synclist * lists, struct list_selection_color *list_sel_color);
-/* The answers to %Lk, %Lv and %LP. Any may be NULL. */
+/* Optional row kind, displayed value, and playback state. */
 extern void gui_synclist_set_row_callbacks(struct gui_synclist * lists,
                                            list_get_kind kind_callback,
                                            list_get_name value_callback,
                                            list_is_playing playing_callback);
-/* The answer to %Lr. May be NULL. */
+/* Optional setting value as a percentage. */
 extern void gui_synclist_set_range_callback(struct gui_synclist * lists,
                                             list_get_range range_callback);
-/* Whether %Lp counts down, or is empty; see count_down and unnumbered */
+/* Track numbering policy for this list. */
 extern void gui_synclist_set_count_down(struct gui_synclist * lists,
                                         bool count_down);
 extern void gui_synclist_set_unnumbered(struct gui_synclist * lists,
                                         bool unnumbered);
-/* The answer to %LD. May be NULL. */
+/* Optional notes for the selected item. */
 extern void gui_synclist_set_description_callback(struct gui_synclist * lists,
                                                   list_get_name callback);
-/* What %Ls draws. May be NULL: %Ls then draws nothing. */
+/* Optional status cell for each visible row. */
 extern void gui_synclist_set_status_callback(struct gui_synclist * lists,
                                              list_draw_status callback);
+void gui_synclist_set_header(struct gui_synclist *list, const struct list_header *header);
+void gui_synclist_set_notes(struct gui_synclist *list, bool show);
+void gui_synclist_draw_status(struct gui_synclist *list);
 extern void gui_synclist_speak_item(struct gui_synclist * lists);
 extern int gui_synclist_get_nb_items(struct gui_synclist * lists);
 
 extern int  gui_synclist_get_sel_pos(struct gui_synclist * lists);
 
 extern void gui_synclist_draw(struct gui_synclist * lists);
-/* The opening draw of a list screen: draws twice so the shared skin
-   conditionals are settled, with the first pass never reaching the panel.
-   Use it wherever a list is first shown; plain gui_synclist_draw() for the
-   redraws after that. */
+/* Set up and draw the opening frame. */
 void gui_synclist_draw_settled(struct gui_synclist *lists);
 /* What a draw does first when the list or its UI viewport has changed: lay
  * out the rows and re-choose the top one. For a caller about to set the top
@@ -324,9 +309,6 @@ void gui_synclist_layout(struct gui_synclist *lists);
 /* Suppress the LCD flush of the next list draw(s) -- render only, no update. */
 void gui_synclist_inhibit_flush(bool inhibit);
 bool gui_synclist_flush_inhibited(void);
-extern bool list_need_full_update(void);
-/* Push a drawn list to the LCD, `parent` being the list's own viewport. */
-void list_flush(struct screen *display, struct viewport *parent);
 extern void gui_synclist_scroll_stop(struct gui_synclist *lists);
 extern void gui_synclist_select_item(struct gui_synclist * lists,
                                      int item_number);
@@ -353,73 +335,13 @@ extern bool gui_synclist_keyclick_callback(int action, void* data);
  * NOTE: *action may be changed regardless of return value
  */
 extern bool gui_synclist_do_button(struct gui_synclist * lists, int *action);
-struct listitem_viewport_cfg;
-
-bool skinlist_get_item(struct screen *display, struct gui_synclist *list, int x, int y, int *item);
-bool skinlist_draw(struct screen *display, struct gui_synclist *list);
-bool skinlist_scroll_retarget(struct gui_synclist *list, int old_start,
-                              int old_selection, bool fast);
-bool skinlist_scroll_cancel(const struct gui_synclist *list);
-bool skinlist_scroll_due(const struct gui_synclist *list);
-int skinlist_scroll_timeout(const struct gui_synclist *list, int timeout);
-bool skinlist_is_selected_item(void);
-void skinlist_set_cfg(enum screen_type screen,
-                      struct listitem_viewport_cfg *cfg);
-const char* skinlist_get_item_text(int offset, bool wrap, char* buf, size_t buf_size);
-int skinlist_get_item_number(void);
-int skinlist_get_item_row(void);
-int skinlist_get_item_column(void);
-enum themable_icons skinlist_get_item_icon(int offset, bool wrap);
-/* %Lk, %Lv and %LP: what the row's list says of it. */
-enum list_row_kind skinlist_get_item_kind(int offset, bool wrap);
-/* %Lm: 1 for a ticked row of a list that is selecting, 0 for one that could
- * be, -1 for any other */
-int skinlist_item_mark(int offset, bool wrap);
-const char* skinlist_get_item_value(int offset, bool wrap,
-                                    char* buf, size_t buf_size);
-bool skinlist_item_is_playing(int offset, bool wrap);
-/* %Lr: 0 to 100, or -1 on a row that is not a number setting. */
-int skinlist_get_item_range(int offset, bool wrap);
-/* %LD of the list on screen, or NULL */
-const char *skinlist_get_selected_description(char *buf, int buf_size);
-/* %Ls: the skin has drawn the viewport the current row's status goes in */
-void skinlist_draw_status(struct screen *display, struct viewport *vp);
-/* Draw every %Ls of list's last draw again, and update only those areas
- * of the LCD. Returns how many there were: 0 when the theme has no %Ls or
- * list is not the one on screen. */
-int skinlist_redraw_status(struct screen *display, struct gui_synclist *list);
-/* %Lp: the row's number among the list's tracks, from 1; -1 on any row that
- * is not a track. */
-int skinlist_get_item_position(int offset, bool wrap);
-const struct bitmap* skinlist_get_item_albumart(int offset, bool wrap,
-                                                struct dim *size,
-                                                const struct img_filter *filter,
-                                                uint32_t filter_hash);
-/* True when the current skinned row is one drawn taller than the list config's
- * pitch (an album-art row). Backs the %?La conditional. */
-bool skinlist_item_is_art_row(enum screen_type screen, int offset, bool wrap);
-bool skinlist_needs_scrollbar(enum screen_type screen);
-void skinlist_get_scrollbar(int* nb_item, int* first_shown, int* last_shown);
-int skinlist_get_line_count(enum screen_type screen, struct gui_synclist *list);
-/* The skin's own row pitch (%Lb) when a non-tiled skinned list is drawing
- * `list`; -1 otherwise, so the caller falls back to the font height. */
-int skinlist_row_height(enum screen_type screen, struct gui_synclist *list);
-/* The pitch %Lb asks for on a list that draws art (its 5th argument); 0 when
- * the skin declares none, which is what leaves the setting answering. */
-int skinlist_art_row_height(enum screen_type screen, struct gui_synclist *list);
-/* Columns in the skinned grid drawing `list`; 1 when it is not tiled, so a
- * caller can treat every list as a grid and only the tiled ones behave like
- * one. */
-int skinlist_get_columns(enum screen_type screen, struct gui_synclist *list);
-
 
 /* If the list has a pending postponed scheduled announcement, that
    may become due before the next get_action tmieout. This function
    adjusts the get_action timeout appropriately. */
 extern int list_do_action_timeout(struct gui_synclist *lists, int timeout);
 /* For a screen that may leave after list_do_action_timeout() without calling
-   gui_synclist_do_button(): drops the skin redraw callback's reference to
-   the list before the list goes out of scope. */
+   gui_synclist_do_button(): drops retained paint state for a closing list. */
 extern void gui_synclist_forget(struct gui_synclist *lists);
 /* This one combines a get_action call (with timeout overridden by
    list_do_action_timeout) with the gui_synclist_do_button call, for
@@ -462,10 +384,10 @@ struct simplelist_info {
     list_speak_item *get_talk; /* can be NULL to not speak */
     list_get_color *get_color;
     list_get_kind *get_kind; /* can be NULL; every row is then plain */
-    list_get_name *get_value; /* can be NULL; a setting row's value, for %Lv */
-    list_get_range *get_range; /* can be NULL; where it sits, for %Lr */
+    list_get_name *get_value; /* can be NULL; a setting row's value */
+    list_get_range *get_range; /* can be NULL; a setting row's percentage */
     list_get_albumart *get_albumart; /* can be NULL for no art */
-    int row_height; /* 0 for the skin's own */
+    int row_height; /* 0 uses the theme */
     struct list_selection_color *selection_color;
     void *callback_data; /* data for callbacks */
 };

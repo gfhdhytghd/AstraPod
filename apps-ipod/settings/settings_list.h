@@ -137,23 +137,14 @@ struct custom_setting {
 #define F_TIME_SETTING  0x10000 /* int,table format hh:mm:ss.mss auto ranged */
 #define F_HAS_CFGVALS   0x20000 /* uses setting union to carry cfg_vals */
 #define F_RESUMESETTING 0x40000 /* saved to a separate cfg file on shutdown */
-/* A config file loaded by the user describes a whole look, so a setting it
- * does not mention must not be inherited from whatever was loaded before it.
- * Settings marked this way are put back to their defaults before such a file
- * is read; anything the file does name then overwrites that. Only for
- * settings a theme has to opt into rather than opt out of -- ones that change
- * a list's layout, say, and so break a skin that was not written for them. */
-#define F_THEMERESET    0x80000
 /* these use the _isfunc_type type for the function */
 /* typedef int (*_isfunc_type)(void); */
 #define F_MIN_ISFUNC    0x100000 /* min(above) is function pointer to above type */
 #define F_MAX_ISFUNC    0x200000 /* max(above) is function pointer to above type */
 #define F_DEF_ISFUNC    0x400000 /* default_val is function pointer to above type */
-#define F_THEMESETTING  0x800000
 #define F_RECSETTING    0x1000000
 #define F_EQSETTING     0x2000000
 #define F_SOUNDSETTING  0x4000000
-#define F_NEEDAPPLY     0x8000000 /*F_THEMESETTING needs apply to effect setting change*/
 #define F_CB_ON_SELECT_ONLY 0x10000000 /* option_callback only called if selected */
 #define F_CB_ONLY_IF_CHANGED 0x20000000 /* option_callback only called if setting changed */
 

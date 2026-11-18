@@ -1390,11 +1390,7 @@ void img_filter_apply_banded(fb_data *px, int w, int h,
 #define BLUR_PASSES   2
 #define BLUR_MAX_DIV  16
 
-/* The decimated picture the blur works on. There is no allocator down here,
- * so this is a fixed static and a chain asking for less decimation than it
- * allows gets more.
- *
- * Square, at the screen's longer side over four, so a destination of any size
+/* Square, at the screen's longer side over four, so a destination of any size
  * up to the whole screen reaches a divisor of 4. Sizing it for a divisor of 8
  * instead saves 10 KB and costs the feature its point: a 240x240 panel is then
  * built from a 30x30 source whatever radius it asked for, which is a colour
@@ -1402,9 +1398,7 @@ void img_filter_apply_banded(fb_data *px, int w, int h,
 #define BLUR_MAX_W ((MAX(LCD_WIDTH, LCD_HEIGHT) + 3) / 4)
 #define BLUR_MAX_H BLUR_MAX_W
 
-static fb_data blur_buf[BLUR_MAX_W * BLUR_MAX_H];
-
-int img_filter_source_divisor(const struct img_filter *f, int w, int h)
+static int source_divisor(const struct img_filter *f, int w, int h)
 {
     int d = 1;
 
@@ -1431,7 +1425,7 @@ int img_filter_source_divisor(const struct img_filter *f, int w, int h)
  * can be any shape, so the count is not a power of two and a shift will not
  * divide it. It runs once over the source, once per picture. */
 static void decimate(fb_data *dst, int cw, int ch,
-                     const fb_data *src, int sw, int sh)
+                     const fb_data *src, int sw, int sh, int stride)
 {
     for (int oy = 0; oy < ch; oy++)
     {
@@ -1446,7 +1440,7 @@ static void decimate(fb_data *dst, int cw, int ch,
 
             for (int y = y0; y < y1 && y < sh; y++)
             {
-                const fb_data *row = src + (size_t)y * sw;
+                const fb_data *row = src + (size_t)y * stride;
 
                 for (int x = x0; x < x1 && x < sw; x++)
                 {
@@ -1616,31 +1610,32 @@ static void upscale(fb_data *dst, int dw, int dh, const fb_data *small,
     }
 }
 
-void img_filter_render(fb_data *dst, int dw, int dh,
-                       const fb_data *src, int sw, int sh,
-                       const struct img_filter *f)
+bool img_filter_render(fb_data *dst, int dw, int dh,
+                       const fb_data *src, int sw, int sh, int stride,
+                       const struct img_filter *f, fb_data *scratch, size_t count)
 {
     int div, cw, ch;
 
-    if (!dst || !src || !f || dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0)
-        return;
+    if (!dst || !src || !f || dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 ||
+        stride < sw)
+        return false;
 
-    div = img_filter_source_divisor(f, dw, dh);
+    div = source_divisor(f, dw, dh);
     cw = (dw + div - 1) / div;
     ch = (dh + div - 1) / div;
 
-    if (!(f->stages & IMG_CLASS_RESIZE)
-        || cw > BLUR_MAX_W || ch > BLUR_MAX_H)
+    if (!(f->stages & IMG_CLASS_RESIZE))
     {
-        /* No blur asked for, or a destination the working buffer cannot
-         * serve: scale straight into it and run the ordinary passes. */
-        decimate(dst, dw, dh, src, sw, sh);
+        decimate(dst, dw, dh, src, sw, sh, stride);
         img_filter_apply(dst, dw, dh, f);
-        return;
+        return true;
     }
+    if (!scratch || cw > BLUR_MAX_W || ch > BLUR_MAX_H ||
+        (size_t)cw * ch > count)
+        return false;
 
-    decimate(blur_buf, cw, ch, src, sw, sh);
-    box_blur(blur_buf, cw, ch, f->blur_radius);
+    decimate(scratch, cw, ch, src, sw, sh, stride);
+    box_blur(scratch, cw, ch, f->blur_radius);
 
     if (f->stages & IMG_CLASS_SPATIAL)
     {
@@ -1651,9 +1646,10 @@ void img_filter_render(fb_data *dst, int dw, int dh,
         struct img_filter resize_only = *f;
 
         resize_only.stages = IMG_CLASS_RESIZE;
-        upscale(dst, dw, dh, blur_buf, cw, ch, div, &resize_only);
+        upscale(dst, dw, dh, scratch, cw, ch, div, &resize_only);
         img_filter_apply(dst, dw, dh, f);
     }
     else
-        upscale(dst, dw, dh, blur_buf, cw, ch, div, f);
+        upscale(dst, dw, dh, scratch, cw, ch, div, f);
+    return true;
 }

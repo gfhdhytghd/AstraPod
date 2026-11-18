@@ -60,7 +60,7 @@ static void ui_perf_end(unsigned token) { traces_ended += token != 0; }
 static bool motion_enabled(void) { return true; }
 static unsigned motion_duration(const struct list_motion *motion)
 { assert(motion->visible); return 8; }
-static int ui_clock_timeout(uint32_t elapsed, unsigned duration, unsigned hz)
+static int ui_clock_poll_timeout(uint32_t elapsed, unsigned duration, unsigned hz)
 { assert(elapsed == 0 && duration == 9 && hz == HZ); return 1; }
 static void *core_get_data_pinned(int handle)
 { assert(handle == 1); return &state; }
@@ -97,11 +97,11 @@ int main(void)
     state.motion.visible = 6;
     state.motion.trace = 1;
     gui_synclist_forget(&b);
-    assert(motion_deadline(&a) == 1 && motion_deadline(&b) == TIMEOUT_BLOCK);
+    assert(motion_deadline(&a, true) == 1 && motion_deadline(&b, true) == TIMEOUT_BLOCK);
     assert(released == 0 && state.backdrop == 4);
 
     a.generation++;
-    assert(motion_deadline(&a) == TIMEOUT_BLOCK);
+    assert(motion_deadline(&a, true) == TIMEOUT_BLOCK);
     gui_synclist_forget(&a);
     assert(!state.owner && !state.has_marquee && state.art_handle == -1);
     assert(released == 1 && state.backdrop == 0);

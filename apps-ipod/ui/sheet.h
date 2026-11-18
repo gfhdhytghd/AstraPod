@@ -10,6 +10,7 @@ struct ui_sheet {
     struct ui_rect previous;
     unsigned trace;
     int light;
+    fb_data tint;
     bool active;
 };
 

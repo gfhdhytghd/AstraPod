@@ -67,7 +67,6 @@
 #define LV_MASKS 64
 #define LV_BODY_TOP 31
 #define LV_BODY_BOTTOM (LCD_HEIGHT - 6)
-#define LV_FRAME_US (1000000 / 30)
 #if defined(IPOD_6G) && defined(__arm__)
 #define LV_PIXELS_ARM __attribute__((target("arm")))
 #else
@@ -127,7 +126,7 @@ struct lv_state {
     struct lv_perf perf;
     int art_handle;
     int old_position, old_progress, old_words;
-    int entry_handle, entry_frame;
+    int entry_handle, entry_frame, track_frame;
     uint32_t entry_clock;
     unsigned entry_frames, track_frames;
     bool remote, pending, held, paused, track_fade, initial, claimed;
@@ -224,13 +223,14 @@ static void lv_record(uint32_t started, enum lv_type type, bool visible)
         lv.phase_us[i] = 0;
     }
     lv.phase_mask = 0;
-    bool late = elapsed > LV_FRAME_US;
+    uint32_t budget = ui_frame_clock(1);
+    bool late = elapsed > budget;
     if (type != LV_STEADY && lv.last_type == type)
     {
         uint32_t interval = now - lv.present_at;
         perf.gaps++;
         perf.gap_time += interval;
-        late |= interval > LV_FRAME_US;
+        late |= interval > budget;
     }
     perf.dropped += late;
     lv.last_type = type;
@@ -375,6 +375,8 @@ static void __attribute__((noinline)) lv_perf_save(void)
 
 static void lv_flush(int x, int y, int w, int h)
 {
+    if (lcd_updates_held() || !lcd_active())
+        return;
     uint32_t start = lv_clock();
     if (w == LCD_WIDTH && h == LCD_HEIGHT) lcd_update();
     else lcd_update_rect(x, y, w, h);
@@ -906,6 +908,7 @@ static LV_PIXELS_ARM void lv_present(int opacity, int shift, const fb_data *laye
             }
         }
     }
+    ui_note_render(lv_clock() - start);
     lv_phase_end(LV_BLEND, start);
     lv_flush(0, 0, LCD_WIDTH, LCD_HEIGHT);
 }
@@ -978,6 +981,7 @@ static void lv_changed(void)
     if (lv.track_frames)
         memcpy(lv.snapshot, lv_frame(), LV_FRAME);
     lv.track_clock = lv_clock();
+    lv.track_frame = -1;
     lv.track_fade = lv.track_frames > 0;
 }
 
@@ -1019,6 +1023,7 @@ static LV_PIXELS_ARM void lv_blend_track(int opacity)
             for (int x = 0; x < LCD_WIDTH; x++) row[x] = lv_mix(base, row[x], opacity);
         }
     }
+    ui_note_render(lv_clock() - start);
     lv_phase_end(LV_BLEND, start);
     lv_flush(0, 0, LCD_WIDTH, LCD_HEIGHT);
 }
@@ -1176,20 +1181,26 @@ static void lv_remote_page(void)
     lv_backlight(lyrics_loaded());
 #endif
 }
-static void lv_track_frame(uint32_t started)
+static void lv_track_frame(uint32_t started, bool force)
 {
     unsigned age = ui_clock_frame(lv_clock() - lv.track_clock);
+    bool same_pose = !force && (int)age == lv.track_frame;
     int p = MIN(256, age * 256 / lv.track_frames);
     if (lv.layer)
     {
-        lv_draw_layer(false, LV_DRAW_ONLY, lv.layer);
+        bool changed = lv_draw_layer(false, LV_DRAW_ONLY, lv.layer);
+        if (same_pose && !changed)
+            return;
         lv_blend_track(p);
     }
     else
     {
+        if (same_pose)
+            return;
         lv_draw(true, p == 256 ? LV_UPDATE : LV_DRAW_ONLY);
         if (p < 256) lv_blend_track(p);
     }
+    lv.track_frame = age;
     lv.track_fade = p < 256;
     lv_record(started, LV_TRACK, false);
 }
@@ -1206,7 +1217,7 @@ static void lv_seek_draw(void)
     if (lv.track_fade)
     {
         lv_boost(true);
-        lv_track_frame(started);
+        lv_track_frame(started, true);
         lv_boost(false);
     }
     else if (lv_draw(false, LV_UPDATE)) lv_record(started, LV_STEADY, false);
@@ -1461,7 +1472,7 @@ int lyric_viewer(void)
         if (lv.entry_handle)
             lv_entry_frame(started);
         else if (lv.track_fade)
-            lv_track_frame(started);
+            lv_track_frame(started, false);
         else if (lv_draw(false, LV_UPDATE))
             lv_record(started, animated ? (lv.mode.manual ? LV_MANUAL : LV_LINE) : LV_STEADY, false);
         else if (!animated)
@@ -1490,6 +1501,13 @@ int lyric_viewer(void)
             uint32_t elapsed = (uint32_t)lv_clock() - lv.entry_clock;
             int next_frame = ui_clock_frame(elapsed) != (unsigned)lv.entry_frame
                 ? TIMEOUT_NOBLOCK : ui_clock_timeout(elapsed, lv.entry_frames, HZ);
+            timeout = MIN(timeout, next_frame);
+        }
+        else if (lv.track_fade)
+        {
+            uint32_t elapsed = lv_clock() - lv.track_clock;
+            int next_frame = ui_clock_frame(elapsed) != (unsigned)lv.track_frame
+                ? TIMEOUT_NOBLOCK : ui_clock_poll_timeout(elapsed, lv.track_frames, HZ);
             timeout = MIN(timeout, next_frame);
         }
         else if (line_moving)

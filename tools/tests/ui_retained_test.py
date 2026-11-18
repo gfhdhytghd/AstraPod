@@ -236,6 +236,13 @@ int main(void)
     assert(ui_flush_count() == count + 1 &&
            updated.x == 0 && updated.y == 0 &&
            updated.width == 4 && updated.height == 7);
+    const fb_data tint_source[] = {0xf800, 0x07e0};
+    fb_data tinted[2];
+    ui_blit_tint(tinted, tint_source, 2, 128, 0x001f);
+    assert(tinted[0] == ((15 << 11) | 15));
+    assert(tinted[1] == ((31 << 5) | 15));
+    ui_blit_tint(tinted, tint_source, 2, UI_FULL_OPACITY, 0x001f);
+    assert(tinted[0] == tint_source[0] && tinted[1] == tint_source[1]);
     puts("PASS retained layout, focus, damage, retarget, layers and navigation");
 }
 """

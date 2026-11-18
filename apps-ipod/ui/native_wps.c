@@ -190,10 +190,38 @@ static void paint_label(const struct ui_view *view, const struct ui_view_frame *
     int y = frame->bounds.y - frame->clip.y;
     if (label->right)
         x += frame->bounds.width - label->width;
-    lcd_putsxy(x, y, (const unsigned char *)label->text);
-    if (label->scroll && label->width > frame->bounds.width)
-        lcd_putsxy(x + label->width + SCROLL_GAP, y,
-                   (const unsigned char *)label->text);
+    const unsigned char *text = (const unsigned char *)label->text;
+    bool overflow = label->scroll && label->width > frame->bounds.width;
+    if (overflow && !global_settings.scrolling_enabled)
+    {
+        static const unsigned char dots[] = "...";
+        int available = frame->bounds.width -
+                        font_getstringsize(dots, NULL, NULL, label->font);
+        if (available > 0)
+        {
+            int prefix_width;
+            int bytes = font_measurestring(text, label->length, available,
+                                           &prefix_width, NULL, label->font);
+            char prefix[MAX_PATH + 1];
+            size_t end = MIN((size_t)bytes, sizeof(prefix) - 1);
+            while (end && (text[end] & 0xc0) == 0x80)
+                --end;
+            memcpy(prefix, text, end);
+            prefix[end] = '\0';
+            lcd_putsxy(x, y, (const unsigned char *)prefix);
+            if (end != (size_t)bytes)
+                prefix_width = font_getstringsize((const unsigned char *)prefix,
+                                                  NULL, NULL, label->font);
+            x += prefix_width;
+        }
+        lcd_putsxy(x, y, dots);
+    }
+    else
+    {
+        lcd_putsxy(x, y, text);
+        if (overflow)
+            lcd_putsxy(x + label->width + SCROLL_GAP, y, text);
+    }
     lcd_set_viewport(previous);
 }
 
@@ -309,7 +337,7 @@ static void label_update(enum wps_view id, struct wps_label *label, const char *
         ui_page_invalidate(&wps->page, view_bounds(id));
     }
     struct ui_rect bounds = view_bounds(id);
-    if (label->scroll && label->width > bounds.width)
+    if (global_settings.scrolling_enabled && label->scroll && label->width > bounds.width)
     {
         unsigned frame = ui_clock_frame(now - label->scroll_started);
         unsigned distance = (unsigned)label->width + SCROLL_GAP;
@@ -320,6 +348,11 @@ static void label_update(enum wps_view id, struct wps_label *label, const char *
             label->offset = offset;
             ui_page_invalidate(&wps->page, bounds);
         }
+    }
+    else if (label->offset)
+    {
+        label->offset = 0;
+        ui_page_invalidate(&wps->page, bounds);
     }
 }
 

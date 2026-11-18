@@ -36,10 +36,12 @@ SECTIONS
         loadaddress = .;
         _loadaddress = .;
         . = ALIGN(0x200);
+        _textstart = .;
         *(.init.text)
         *(.text*)
         *(.glue_7)
         *(.glue_7t)
+        _textend = .;
         . = ALIGN(0x4);
     } > DRAM
 

@@ -51,6 +51,7 @@ struct list_motion {
     struct list_pose from, live, rest;
     uint32_t started;
     unsigned painted, trace;
+    unsigned glide_frames, spring_frames;
     int visible, count, span;
     struct ui_rect bounds;
     int pitch;
@@ -213,7 +214,7 @@ int list_render_visible_rows(const struct gui_synclist *list, enum screen_type s
 
 static bool motion_enabled(void)
 {
-    return global_settings.animations && !ui_scrolling_held();
+    return !ui_scrolling_held() && ui_theme_duration(GLIDE_F) != 0;
 }
 
 static int64_t fixed_row(int index)
@@ -235,7 +236,8 @@ static void motion_stop(struct list_motion *motion)
 
 static unsigned motion_duration(const struct list_motion *motion)
 {
-    return motion->live.top == motion->rest.top ? GLIDE_F : GLIDE_F + SPRING_F;
+    return motion->glide_frames +
+           (motion->live.top == motion->rest.top ? 0 : motion->spring_frames);
 }
 
 static bool motion_matches(const struct list_motion *motion, const struct list_geometry *g,
@@ -265,14 +267,15 @@ static int64_t limit_top(const struct list_motion *motion, struct list_pose pose
 static struct list_pose motion_sample(const struct list_motion *motion, unsigned frame)
 {
     struct list_pose pose = motion->live;
-    if (frame < GLIDE_F)
+    unsigned glide = motion->glide_frames;
+    if (frame < glide)
     {
-        pose.top = ease_out(motion->from.top, pose.top, frame, GLIDE_F);
-        pose.cursor = ease_out(motion->from.cursor, pose.cursor, frame, GLIDE_F);
+        pose.top = ease_out(motion->from.top, pose.top, frame, glide);
+        pose.cursor = ease_out(motion->from.cursor, pose.cursor, frame, glide);
     }
     else if (pose.top != motion->rest.top)
     {
-        pose.top = ease_out(pose.top, motion->rest.top, frame - GLIDE_F, SPRING_F);
+        pose.top = ease_out(pose.top, motion->rest.top, frame - glide, motion->spring_frames);
     }
     pose.top = limit_top(motion, pose);
     return pose;
@@ -291,7 +294,8 @@ void list_render_settle(const struct gui_synclist *list)
 void list_render_retarget(const struct gui_synclist *list, int selection, int top,
                           int offset, bool wheel)
 {
-    if (!motion_enabled() || renderer_handle <= 0 || !list->nb_items ||
+    unsigned glide = ui_theme_duration(GLIDE_F);
+    if (!glide || ui_scrolling_held() || renderer_handle <= 0 || !list->nb_items ||
         !list->parent[SCREEN_MAIN])
         return;
 
@@ -336,7 +340,7 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
                    (offset > 0 && rest.cursor < fixed_row(selection));
     bool physical_end = wheel && !wrapped && (position < 0 || position > last);
     bool fast = wheel && (offset < -1 || offset > 1 ||
-                         (continuing && motion->wheel && frame < GLIDE_F));
+                         (continuing && motion->wheel && frame < motion->glide_frames));
 
     if (physical_end)
     {
@@ -376,6 +380,7 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     *motion = (struct list_motion) {
         .from = from, .live = live, .rest = rest,
         .started = now, .painted = 0, .trace = trace,
+        .glide_frames = glide, .spring_frames = ui_theme_duration(SPRING_F),
         .visible = visible, .count = list->nb_items, .span = span,
         .bounds = g.rows, .pitch = g.pitch, .wheel = wheel,
     };
@@ -1001,7 +1006,19 @@ static void paint_notes(const struct ui_view *view, const struct ui_view_frame *
     struct ui_rect cell = frame->bounds;
     unsigned int fg = render->colors[UI_COLOR_FOREGROUND];
     unsigned int panel = render->colors[UI_COLOR_LIST_TINT];
-    fill(frame->clip, cell, panel);
+    int alpha = render->theme.metric[UI_METRIC_LIST_TINT_ALPHA];
+    if (alpha >= 15)
+        fill(frame->clip, cell, panel);
+    else if (alpha > 0)
+    {
+        struct viewport panel_vp;
+        if (set_clip(&panel_vp, frame->clip, cell, render->text_font, panel))
+        {
+            struct viewport *prior = lcd_set_viewport(&panel_vp);
+            lcd_blendrect(0, 0, panel_vp.width, panel_vp.height, alpha);
+            lcd_set_viewport(prior);
+        }
+    }
     cell.x += pad;
     cell.y += pad;
     cell.width -= 2 * pad;
@@ -1215,7 +1232,7 @@ void gui_synclist_scroll_stop(struct gui_synclist *list)
         screens[i].scroll_stop_viewport(list->parent[i]);
 }
 
-static int motion_deadline(const struct gui_synclist *list)
+static int motion_deadline(const struct gui_synclist *list, bool poll)
 {
     if (renderer_handle <= 0 || ui_scrolling_held())
         return TIMEOUT_BLOCK;
@@ -1229,8 +1246,10 @@ static int motion_deadline(const struct gui_synclist *list)
         if (motion->visible)
         {
             uint32_t elapsed = now - motion->started;
-            delay = !motion_enabled() || ui_clock_frame(elapsed) > motion->painted ?
-                    0 : ui_clock_timeout(elapsed, motion_duration(motion) + 1, HZ);
+            if (!motion_enabled() || ui_clock_frame(elapsed) > motion->painted)
+                delay = 0;
+            else if (poll)
+                delay = ui_clock_poll_timeout(elapsed, motion_duration(motion) + 1, HZ);
         }
         if (global_settings.scrolling_enabled && render->has_marquee)
         {
@@ -1248,12 +1267,12 @@ static int motion_deadline(const struct gui_synclist *list)
 
 bool list_render_motion_due(const struct gui_synclist *list)
 {
-    return motion_deadline(list) == 0;
+    return motion_deadline(list, false) == 0;
 }
 
 int list_render_timeout(const struct gui_synclist *list, int timeout)
 {
-    int delay = motion_deadline(list);
+    int delay = motion_deadline(list, true);
     if (delay != TIMEOUT_BLOCK && (timeout == TIMEOUT_BLOCK || timeout > delay))
         return delay;
     return timeout;

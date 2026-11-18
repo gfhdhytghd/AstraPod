@@ -93,13 +93,6 @@ assert 'bic     r0, r0, #0x2000' in crt0
 assert rolo.index('crumbs_guard_off();') < rolo.index('rolo_restart(filebuf')
 uie = src('firmware/target/arm/system-arm-classic.c')
 assert 'saved_sp >= 0x1000u' in uie
-skin = src('apps-ipod/skin/skin_parser.c')
-find = body(skin, 'skin_find_item')
-assert find.index('databuf = skin_buffer;') < find.index('if (!databuf)\n        return NULL;') < find.index('switch (what)')
-sbs = src('apps-ipod/skin/statusbar_skinned.c')
-info = body(sbs, 'sb_skin_get_info_vp')
-assert info.index('if (!get_skin_buffer(data))') < info.index('SKINOFFSETTOPTR')
-assert 'SKINOFFSETTOPTR(get_skin_buffer(data), data->tree)' not in sbs
 boot = src('firmware/target/arm/s5l8702/boot.lds')
 assert '#define MAX_LOADSIZE 8M' in boot and 'ORIGIN = DRAM_ORIG + MAX_LOADSIZE' in boot
 

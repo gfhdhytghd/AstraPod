@@ -446,6 +446,13 @@ static int step;
 static int target;
 static int fade;
 static bool pf_native_motion;
+static unsigned pf_motion_scale = UI_THEME_MOTION_ONE;
+
+static unsigned motion_frames(unsigned frames)
+{
+    return MAX(1u, (frames * pf_motion_scale + UI_THEME_MOTION_ONE / 2) /
+                    UI_THEME_MOTION_ONE);
+}
 /* Wall clock for the flip, see update_scroll_animation(). The scroll and
  * transition speed settings are calibrated as a per-frame step at this rate. */
 #define CAROUSEL_NOMINAL_FPS 30
@@ -2367,7 +2374,7 @@ static unsigned motion_elapsed(uint32_t now, uint32_t since)
  * the original tick rounding when using the original clock. */
 static int flat_duration(unsigned frames)
 {
-    unsigned period = frames * motion_rate() / UI_ANIM_FPS;
+    unsigned period = motion_frames(frames) * motion_rate() / UI_ANIM_FPS;
     return MAX(period * 200 / global_settings.album_covers_scroll_speed, 1u);
 }
 
@@ -2427,7 +2434,7 @@ static void flow_note_wheel(bool can_move)
     flat_note_scroll();
     if (flat_view() || !can_move)
         return;
-    if (pf_flat_interval <= (pf_native_motion ? PF_FLOW_FAST : HZ * 6 / 100))
+    if (pf_flat_interval <= (pf_native_motion ? (int)motion_frames(PF_FLOW_FAST) : HZ * 6 / 100))
     {
         if (pf_native_motion && !flow_fast && !flow_mix)
         {
@@ -2436,7 +2443,7 @@ static void flow_note_wheel(bool can_move)
         }
         flow_fast = true;
     }
-    else if (pf_flat_interval >= (pf_native_motion ? PF_FLOW_SLOW : HZ * 12 / 100))
+    else if (pf_flat_interval >= (pf_native_motion ? (int)motion_frames(PF_FLOW_SLOW) : HZ * 12 / 100))
         flow_fast = false;
 }
 
@@ -2444,29 +2451,32 @@ static void flow_note_wheel(bool can_move)
  * The landing continues to repaint after the logical album has settled. */
 static void flow_update_mix(void)
 {
+    if (!pf_motion_scale)
+        return;
     uint32_t now = motion_clock();
     bool allow_tilt = !flat_view() && !pf_random_spinning;
     if (!allow_tilt)
         flow_fast = false;
     if (pf_native_motion)
     {
-        uint32_t release = pf_flat_last_input + ui_frame_clock(PF_FLOW_SLOW);
+        int ramp = motion_frames(PF_FLOW_RAMP);
+        uint32_t release = pf_flat_last_input + ui_frame_clock(motion_frames(PF_FLOW_SLOW));
         if (flow_fast && (int32_t)(now - release) > 0)
         {
             /* A skipped render can span the hold and the release. Advance
              * each part on its own timeline so the tilt doesn't jump. */
             unsigned held = motion_elapsed(release, flow_pose_clock) - flow_sampled_frame;
-            flow_mix_frames = MIN(flow_mix_frames + held, PF_FLOW_RAMP);
+            flow_mix_frames = MIN(flow_mix_frames + held, (unsigned)ramp);
             flow_pose_clock = release;
             flow_sampled_frame = 0;
             flow_fast = false;
         }
         unsigned elapsed = motion_elapsed(now, flow_pose_clock);
-        int delta = MIN(elapsed - flow_sampled_frame, PF_FLOW_RAMP);
+        int delta = MIN(elapsed - flow_sampled_frame, (unsigned)ramp);
         flow_sampled_frame = elapsed;
         int frames = flow_mix_frames + (flow_fast ? delta : -delta);
-        flow_mix_frames = MIN(MAX(frames, 0), PF_FLOW_RAMP);
-        flow_mix = flow_mix_frames * PFREAL_ONE / PF_FLOW_RAMP;
+        flow_mix_frames = MIN(MAX(frames, 0), ramp);
+        flow_mix = flow_mix_frames * PFREAL_ONE / ramp;
         return;
     }
     if (motion_elapsed(now, pf_flat_last_input) > HZ * 12 / 100)
@@ -3341,8 +3351,10 @@ void set_current_slide(const int slide_index)
     flow_mix = 0;
     flow_mix_frames = 0;
     flow_fast = false;
-    bool clock_changed = pf_native_motion != global_settings.animations;
-    pf_native_motion = global_settings.animations;
+    unsigned scale = ui_theme_duration(UI_THEME_MOTION_ONE);
+    bool clock_changed = pf_motion_scale != scale || pf_native_motion != (scale > 0);
+    pf_motion_scale = scale;
+    pf_native_motion = scale > 0;
     if (clock_changed || !flat_view())
     {
         pf_flat_interval = flat_duration(PF_FLAT_FLIP);
@@ -3440,6 +3452,11 @@ void carousel_reload(int (*compare)(const void *, const void *))
  */
 static void start_animation(void)
 {
+    if (!pf_motion_scale)
+    {
+        set_current_slide(target);
+        return;
+    }
     step = (target < center_slide.slide_index) ? -1 : 1;
     pf_state = pf_scrolling;
     anim_clock = USEC_TIMER;
@@ -3559,7 +3576,7 @@ static void show_random_slide(void)
     pf_flat_last_input = motion_clock();
     pf_flat_interval = MAX(flat_duration(PF_FLAT_MIN) / PF_FLAT_SETTLE, 1);
     start_animation();
-    pf_random_spinning = true;
+    pf_random_spinning = pf_state == pf_scrolling;
 }
 
 /* A flat pile hides everything but its top card, so only four covers are ever
@@ -4023,8 +4040,9 @@ static int scroll_speed(int frame, uint32_t sample_clock)
 
     int ia = IANGLE_MAX * (fi - max / 2) / (max * 2);
     int accel = 16384 * (PFREAL_ONE + fsin(ia)) / PFREAL_ONE;
-    return 512 * global_settings.album_covers_transition_speed / 100
-         + accel * global_settings.album_covers_scroll_speed / 100;
+    int speed = 512 * global_settings.album_covers_transition_speed / 100
+              + accel * global_settings.album_covers_scroll_speed / 100;
+    return MAX(1, speed * UI_THEME_MOTION_ONE / (int)MAX(1u, pf_motion_scale));
 }
 
 /* The original path smooths long frame advances and carries time owed.

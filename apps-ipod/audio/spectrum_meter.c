@@ -134,7 +134,7 @@ long spectrum_goertzel_coeff(int freq_hz, int samplerate)
  * taken every 'stride' entries of 'samples'. The stride is what lets one
  * channel of an interleaved stereo buffer be filtered where it lies, with
  * no de-interleaving copy. */
-int ICODE_ATTR spectrum_goertzel_at(const int16_t *samples, int count,
+int spectrum_goertzel_at(const int16_t *samples, int count,
                                     int stride, long coeff_q29)
 {
     long q1 = 0, q2 = 0;

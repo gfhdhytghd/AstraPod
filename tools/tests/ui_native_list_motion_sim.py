@@ -107,20 +107,25 @@ def verify_end(samples, top):
             "thumb_shortened": True}
 
 
-def run(binary, resource, root, output, env, animations):
-    mode = "motion" if animations else "static"
+def run(binary, resource, root, output, env, animations, theme_motion_off=False):
+    mode = root.name
     root.mkdir()
     with ZipFile(resource) as archive:
         for path in archive.namelist():
             if path.startswith(".rockbox/fonts/"):
                 archive.extract(path, root)
     rockbox = root / ".rockbox"
+    if theme_motion_off:
+        themes = rockbox / "native-themes"
+        themes.mkdir()
+        (themes / "still.podtheme").write_text("podbox-theme=1\nmotion_scale=0\n")
+    theme = "still" if theme_motion_off else "scrim"
     (rockbox / "config.cfg").write_text(
         "start in screen: files\nshow files: supported\nlist wraparound: off\n"
         "backlight timeout: off\nvoice menus: off\nkeyclick: off\n"
         f"animations: {'on' if animations else 'off'}\n"
         "settings mode: everything\nbeep: off\nscrollbar: right\n"
-        "scrollbar width: 8\nnative theme: scrim\n")
+        f"scrollbar width: 8\nnative theme: {theme}\n")
     (rockbox / "ui-perf.enable").touch()
     for i in range(TRACK_COUNT):
         (root / f"Track {i + 1:02d}").mkdir()
@@ -139,7 +144,7 @@ def run(binary, resource, root, output, env, animations):
         frame.save(output / f"{mode}-initial.png")
         result = {}
         bottom = capture_spin(screen, output, f"{mode}-bottom-margin", 13, 5, marker)
-        if animations:
+        if animations and not theme_motion_off:
             result["bottom_margin"] = verify_margin(bottom, top=False)
             end = capture_spin(screen, output, "motion-bottom-end", 12, 5, marker)
             result["bottom_end"] = verify_end(end, top=False)
@@ -151,9 +156,10 @@ def run(binary, resource, root, output, env, animations):
             assert trace.read_text().count("route=list-glide") == 4
             shutil.copy2(trace, output / "motion-perf.txt")
         else:
-            assert all(end - start + 1 == PITCH for start, end in selection_samples(bottom))
-            assert not (rockbox / "ui-perf.txt").exists()
-            result["switch_off"] = True
+            assert all(end - start + 1 == PITCH for start, end in selection_samples(bottom)), mode
+            trace = rockbox / "ui-perf.txt"
+            assert not trace.is_file() or "route=list-glide" not in trace.read_text(), mode
+            result["theme_motion_off" if theme_motion_off else "switch_off"] = True
         assert firmware.poll() is None
         return result
 
@@ -187,7 +193,9 @@ def main():
                        SDL_RENDER_DRIVER="software", LIBGL_ALWAYS_SOFTWARE="1")
             motion = run(args.binary, args.resource, root / "motion", args.output, env, True)
             static = run(args.binary, args.resource, root / "static", args.output, env, False)
-    result = {"row_height_px": PITCH, **motion, **static}
+            theme_off = run(args.binary, args.resource, root / "theme-zero",
+                            args.output, env, True, theme_motion_off=True)
+    result = {"row_height_px": PITCH, **motion, **static, **theme_off}
     (args.output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print("PASS native list half-row edges, physical springs, scrollbar and switch")
 

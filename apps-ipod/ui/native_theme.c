@@ -78,7 +78,7 @@ static const struct {
     [UI_METRIC_LIST_SELECTION_WIDTH]           = { "list_selection_width",      3,  0, 16 },
     [UI_METRIC_LIST_SELECTION_ALPHA]           = { "list_selection_alpha",     14,  0, 15 },
     [UI_METRIC_LIST_ACCESSORY_GAP]             = { "list_accessory_gap",        9,  0, 40 },
-    [UI_METRIC_LIST_TINT_ALPHA]                = { "list_tint_alpha",           3,  0, 15 },
+    [UI_METRIC_LIST_TINT_ALPHA]                = { "list_tint_alpha",          15,  0, 15 },
     [UI_METRIC_STATUS_HEIGHT]                  = { "status_height",           35, 12, 72 },
     [UI_METRIC_STATUS_PAD_LEFT]                = { "status_pad_left",          10,  0, 40 },
     [UI_METRIC_STATUS_PAD_RIGHT]               = { "status_pad_right",          7,  0, 40 },

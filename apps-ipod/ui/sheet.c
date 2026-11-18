@@ -29,6 +29,7 @@ void ui_sheet_cancel(struct ui_sheet *sheet)
 void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route)
 {
     uint32_t now = USEC_TIMER;
+    sheet->tint = ui_theme_rgb565(UI_COLOR_DIM);
     int from = ui_tween_sample(&sheet->tween, ui_clock_frame(now - sheet->tween.start_clock));
     int to = open ? SHEET_PROGRESS : 0;
     ui_sheet_cancel(sheet);
@@ -52,7 +53,7 @@ int ui_sheet_timeout(const struct ui_sheet *sheet, int timeout)
 {
     if (!sheet->active || timeout == TIMEOUT_NOBLOCK)
         return timeout;
-    int next = ui_clock_timeout((uint32_t)USEC_TIMER - sheet->tween.start_clock,
+    int next = ui_clock_poll_timeout((uint32_t)USEC_TIMER - sheet->tween.start_clock,
                                 sheet->tween.frames, HZ);
     return timeout == TIMEOUT_BLOCK ? next : MIN(timeout, next);
 }
@@ -61,10 +62,14 @@ bool ui_sheet_wait(const struct ui_sheet *sheet)
 {
     if (!sheet->active || ui_flush_inhibited())
         return false;
+    int timeout = ui_sheet_timeout(sheet, TIMEOUT_BLOCK);
+    if (!timeout)
+        yield();
 #if defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))
-    return !button_queue_wait_pending(ui_sheet_timeout(sheet, TIMEOUT_BLOCK));
+    return !button_queue_wait_pending(timeout);
 #else
-    sleep(ui_sheet_timeout(sheet, TIMEOUT_BLOCK));
+    if (timeout > 0)
+        sleep(timeout);
     return true;
 #endif
 }
@@ -133,10 +138,11 @@ void ui_sheet_paint_in(struct ui_sheet *sheet, const fb_data *backdrop,
             memcpy(output + row + split, source, visible.width * sizeof(*source));
         }
         if (split > damage.x)
-            ui_blit_dim(output + row + damage.x, backdrop + row + damage.x,
-                        split - damage.x, light);
+            ui_blit_tint(output + row + damage.x, backdrop + row + damage.x,
+                         split - damage.x, light, sheet->tint);
         if (right > end)
-            ui_blit_dim(output + row + end, backdrop + row + end, right - end, light);
+            ui_blit_tint(output + row + end, backdrop + row + end, right - end, light,
+                         sheet->tint);
     }
     sheet->previous = visible;
     sheet->light = light;

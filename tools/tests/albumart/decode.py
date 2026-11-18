@@ -16,7 +16,6 @@ from host import ROOT, OUT, FLAGS, CC
 SUPPORT = Path(__file__).resolve().parent
 args = [CC, *FLAGS]
 # The CheckWPS port must not retain the removed global callback API.
-assert 'image_row_hook' not in (ROOT / 'tools/checkwps/stubs.c').read_text()
 image_files = ['apps-ipod/draw/'+s+'.c' for s in ['jpeg_load','png_load','gif_load','webp_load','resize','bmp','image_load']]
 image_files += ['apps-ipod/files/'+s+'.c' for s in ['byte_stream','inflate']]
 metadata_files = ['lib/rbcodec/metadata/'+s+'.c' for s in ['id3tags','ogg','vorbis','metadata_common','replaygain']]

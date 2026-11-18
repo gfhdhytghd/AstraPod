@@ -15,6 +15,7 @@
 
 #define PAGE_PIXELS (LCD_WIDTH * LCD_HEIGHT)
 #define SCENE_BYTES (3 * FRAMEBUFFER_SIZE)
+#define PANEL_WORKSPACE_BYTES (2 * FRAMEBUFFER_SIZE)
 #define PUSH_FRAMES ANIM_F(18)
 #define POP_FRAMES ANIM_F(15)
 #define PARALLAX_PERCENT 30
@@ -28,7 +29,8 @@ static unsigned int owner_thread;
 
 size_t ui_scene_reserve_size(void)
 {
-    return SCENE_BYTES + BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t);
+    /* One settled backdrop under a nested panel that is still moving. */
+    return 4 * FRAMEBUFFER_SIZE + 3 * (BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t));
 }
 
 static fb_data *surface(fb_data *data, bool front)
@@ -46,12 +48,9 @@ static int position(const struct ui_scene *scene, unsigned frame)
     return offset;
 }
 
-static void compose(fb_data *data, int offset)
+static void compose(fb_data *out, const fb_data *back, const fb_data *front,
+                    int offset)
 {
-    const fb_data *back = surface(data, false);
-    const fb_data *front = surface(data, true);
-    fb_data *out = data + 2 * PAGE_PIXELS;
-
     int covered = LCD_WIDTH - offset;
     int parallax = covered * PARALLAX_PERCENT / 100;
     unsigned light = UI_FULL_OPACITY -
@@ -67,13 +66,11 @@ static void compose(fb_data *data, int offset)
     }
 }
 
-static void compose_modal(fb_data *data, int offset)
+static void compose_modal(fb_data *out, const fb_data *back, const fb_data *front,
+                          int offset, fb_data tint)
 {
-    const fb_data *back = surface(data, false);
-    const fb_data *front = surface(data, true);
-    fb_data *out = data + 2 * PAGE_PIXELS;
     unsigned light = UI_FULL_OPACITY - MODAL_DIM * (LCD_HEIGHT - offset) / LCD_HEIGHT;
-    ui_blit_dim(out, back, offset * LCD_WIDTH, light);
+    ui_blit_tint(out, back, offset * LCD_WIDTH, light, tint);
     memcpy(out + offset * LCD_WIDTH, front,
            (LCD_HEIGHT - offset) * LCD_WIDTH * sizeof(*out));
 }
@@ -91,11 +88,19 @@ static void complete_transition(struct ui_scene *scene)
     scene->trace = 0;
 }
 
+static void settle_panel(struct ui_scene *scene)
+{
+    complete_transition(scene);
+    scene->handle = core_free(scene->handle);
+}
+
 static void release_scene(struct ui_scene *scene)
 {
     complete_transition(scene);
     if (scene->handle > 0)
         scene->handle = core_free(scene->handle);
+    if (scene->backdrop_handle > 0)
+        scene->backdrop_handle = core_free(scene->backdrop_handle);
 }
 
 static void own_transition(struct ui_scene *scene, const char *route)
@@ -118,7 +123,7 @@ static bool present(const fb_data *pixels)
 
 void ui_scene_cancel(struct ui_scene *scene)
 {
-    if (!scene->handle)
+    if (scene->handle <= 0 && scene->backdrop_handle <= 0)
         return;
     release_scene(scene);
     struct viewport *previous = lcd_set_viewport(NULL);
@@ -150,7 +155,7 @@ void ui_scene_fade_out(void)
     unsigned trace = ui_perf_begin("shutdown-fade");
     struct ui_tween fade = { .start_clock = USEC_TIMER, .frames = duration,
                             .from = UI_FULL_OPACITY, .to = 0 };
-    int last = -1;
+    int composed = -1, last = -1;
     while (lcd_active())
     {
         uint32_t elapsed = (uint32_t)USEC_TIMER - fade.start_clock;
@@ -158,9 +163,13 @@ void ui_scene_fade_out(void)
         int level = ui_tween_sample(&fade, frame);
         if (level != last)
         {
-            uint32_t start = USEC_TIMER;
-            ui_blit_dim(framebuffer, source, PAGE_PIXELS, level);
-            ui_note_render((uint32_t)USEC_TIMER - start);
+            if (level != composed)
+            {
+                uint32_t start = USEC_TIMER;
+                ui_blit_dim(framebuffer, source, PAGE_PIXELS, level);
+                ui_note_render((uint32_t)USEC_TIMER - start);
+                composed = level;
+            }
             if (present(framebuffer))
                 last = level;
         }
@@ -186,7 +195,6 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     if (!frames || !lcd_active() || (owner && owner != scene))
         return false;
 
-    uint32_t now = USEC_TIMER;
     bool active = scene->handle > 0;
     if (!active)
     {
@@ -197,10 +205,11 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
         own_transition(scene, route);
     }
     int offset = push ? LCD_WIDTH : 0;
-    if (active && from == (push ? scene->back_page : scene->front_page) &&
+    if (active && (!scene->capturing || push != scene->target_front) &&
+                  from == (push ? scene->back_page : scene->front_page) &&
                   to == (push ? scene->front_page : scene->back_page))
     {
-        offset = position(scene, ui_clock_frame(now - scene->tween.start_clock));
+        offset = scene->last_offset >= 0 ? scene->last_offset : scene->tween.from;
         /* The redirected destination is already painted. Start incremental
          * updates from that page's own pixels, including its status bar. */
         fb_data *data = core_get_data_pinned(scene->handle);
@@ -213,10 +222,17 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
         const fb_data *previous = lcd_framebuffer_default.fb_ptr;
         if (active)
         {
-            compose(data, position(scene, ui_clock_frame(now - scene->tween.start_clock)));
-            previous = data + 2 * PAGE_PIXELS;
+            previous = surface(data, !scene->target_front);
+            if (scene->last_offset >= 0)
+            {
+                compose(data + 2 * PAGE_PIXELS, surface(data, false), surface(data, true),
+                        scene->last_offset);
+                previous = data + 2 * PAGE_PIXELS;
+            }
         }
-        memcpy(surface(data, !push), previous, FRAMEBUFFER_SIZE);
+        fb_data *snapshot = surface(data, !push);
+        if (snapshot != previous)
+            memcpy(snapshot, previous, FRAMEBUFFER_SIZE);
         core_put_data_pinned(data);
         scene->back_page = push ? from : to;
         scene->front_page = push ? to : from;
@@ -227,7 +243,7 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
         .from = offset, .to = push ? 0 : LCD_WIDTH,
         .frames = frames, .ease_in = !push,
     };
-    scene->last_offset = -1;
+    scene->last_offset = scene->composed_offset = -1;
     scene->capturing = true;
     scene->automatic = false;
     return true;
@@ -257,22 +273,32 @@ static void open_panel(struct ui_scene *scene, bool vertical, const char *route)
     if (!frames || !lcd_active())
         return;
 
-    ui_scene_interrupt();
+    if (owner && owner != scene && owner_thread == thread_self() &&
+        owner->backdrop_handle > 0 && owner->target_front)
+        settle_panel(owner);
+    else
+        ui_scene_interrupt();
     if (owner)
         return;
-    scene->handle = core_alloc_free_space(SCENE_BYTES);
-    if (scene->handle <= 0)
+    scene->backdrop_handle = core_alloc_free_space(FRAMEBUFFER_SIZE);
+    if (scene->backdrop_handle <= 0)
         return;
+    scene->handle = core_alloc_free_space(PANEL_WORKSPACE_BYTES);
+    if (scene->handle <= 0)
+    {
+        release_scene(scene);
+        return;
+    }
 
-    fb_data *data = core_get_data_pinned(scene->handle);
-    memcpy(surface(data, false), lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
-    core_put_data_pinned(data);
-    scene->modal = true;
+    fb_data *backdrop = core_get_data_pinned(scene->backdrop_handle);
+    memcpy(backdrop, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
+    core_put_data_pinned(backdrop);
     scene->vertical = vertical;
+    scene->dim_color = vertical ? ui_theme_rgb565(UI_COLOR_DIM) : 0;
     scene->target_front = true;
     scene->capturing = true;
     scene->automatic = true;
-    scene->last_offset = -1;
+    scene->last_offset = scene->composed_offset = -1;
     scene->tween = (struct ui_tween){
         .from = vertical ? LCD_HEIGHT : LCD_WIDTH, .to = 0, .frames = frames,
     };
@@ -291,7 +317,7 @@ void ui_scene_open_page(struct ui_scene *scene, const char *route)
 
 void ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *route)
 {
-    if (!scene->modal || scene->handle <= 0)
+    if (scene->backdrop_handle <= 0)
         return;
     unsigned duration = scene->vertical ? MODAL_DOWN_FRAMES : POP_FRAMES;
     unsigned frames = animate ? ui_theme_duration(duration) : 0;
@@ -300,18 +326,27 @@ void ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
         release_scene(scene);
         return;
     }
-    uint32_t now = USEC_TIMER;
-    int offset = owner == scene
-        ? position(scene, ui_clock_frame(now - scene->tween.start_clock)) : 0;
+    bool was_opening = owner == scene;
+    int offset = was_opening
+        ? (scene->last_offset >= 0 ? scene->last_offset : scene->tween.from) : 0;
+    if (scene->handle <= 0)
+        scene->handle = core_alloc_free_space(PANEL_WORKSPACE_BYTES);
+    if (scene->handle <= 0)
+    {
+        release_scene(scene);
+        return;
+    }
     complete_transition(scene);
     own_transition(scene, route);
 
-    fb_data *data = core_get_data_pinned(scene->handle);
-    memcpy(surface(data, true), lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
-    memcpy(lcd_framebuffer_default.fb_ptr, surface(data, false), FRAMEBUFFER_SIZE);
-    core_put_data_pinned(data);
+    fb_data *front = core_get_data_pinned(scene->handle);
+    fb_data *backdrop = core_get_data_pinned(scene->backdrop_handle);
+    memcpy(front, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
+    memcpy(lcd_framebuffer_default.fb_ptr, backdrop, FRAMEBUFFER_SIZE);
+    core_put_data_pinned(backdrop);
+    core_put_data_pinned(front);
     scene->target_front = false;
-    scene->last_offset = -1;
+    scene->last_offset = scene->composed_offset = -1;
     scene->tween = (struct ui_tween){
         .start_clock = USEC_TIMER, .from = offset,
         .to = scene->vertical ? LCD_HEIGHT : LCD_WIDTH, .frames = frames, .ease_in = true,
@@ -374,8 +409,8 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
     {
         if (present(lcd_framebuffer_default.fb_ptr))
         {
-            if (scene->modal && scene->target_front)
-                complete_transition(scene);
+            if (scene->backdrop_handle > 0 && scene->target_front)
+                settle_panel(scene);
             else
                 release_scene(scene);
         }
@@ -386,19 +421,33 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
     if (offset == scene->last_offset && !target_changed)
         return;
 
-    uint32_t start = USEC_TIMER;
     fb_data *data = core_get_data_pinned(scene->handle);
-    if (target_changed)
-        memcpy(surface(data, scene->target_front), lcd_framebuffer_default.fb_ptr,
-               FRAMEBUFFER_SIZE);
-    if (scene->vertical)
-        compose_modal(data, offset);
-    else
-        compose(data, offset);
-    ui_note_render((uint32_t)USEC_TIMER - start);
-    if (present(data + 2 * PAGE_PIXELS))
-        scene->last_offset = offset;
+    bool panel = scene->backdrop_handle > 0;
+    fb_data *out = data + (panel ? PAGE_PIXELS : 2 * PAGE_PIXELS);
+    if (target_changed || scene->composed_offset != offset)
+    {
+        uint32_t start = USEC_TIMER;
+        fb_data *front = panel ? data : surface(data, true);
+        fb_data *back = panel ? core_get_data_pinned(scene->backdrop_handle)
+                              : surface(data, false);
+        if (target_changed && (!panel || scene->target_front))
+            memcpy(scene->target_front ? front : back, lcd_framebuffer_default.fb_ptr,
+                   FRAMEBUFFER_SIZE);
+        if (scene->vertical)
+            compose_modal(out, back, front, offset, scene->dim_color);
+        else
+            compose(out, back, front, offset);
+        if (panel)
+            core_put_data_pinned(back);
+        scene->composed_offset = offset;
+        ui_note_render((uint32_t)USEC_TIMER - start);
+    }
+    bool submitted = present(out);
     core_put_data_pinned(data);
+    if (submitted)
+        scene->last_offset = offset;
+    else
+        yield();
 }
 
 int ui_scene_timeout(const struct ui_scene *scene, int timeout)

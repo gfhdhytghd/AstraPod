@@ -100,11 +100,13 @@ def main():
                 before = snap("scrim")
                 light = choose(1, (247, 247, 247), first=True)
                 assert ImageChops.difference(before, light).getbbox()
+                retained_light = choose(0, (247, 247, 247))
+                assert ImageChops.difference(retained_light, light).getbbox() is None
                 path.write_text("podbox-theme=1\ncolor.background=204060\n")
-                custom = choose(2, (33, 65, 99))
+                custom = choose(1, (33, 65, 99))
                 assert ImageChops.difference(light, custom).getbbox()
                 path.write_text("podbox-theme=1\nmetric.row_height=99999\n")
-                scrim = choose(2, black)
+                scrim = choose(0, black)
                 assert ImageChops.difference(custom, scrim).getbbox()
                 assert "Native theme rejected, using Scrim (fixture)" in (
                     rockbox / "native-theme.log").read_text()

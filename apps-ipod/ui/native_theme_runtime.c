@@ -245,6 +245,19 @@ int ui_theme_choose(void)
     struct simplelist_info info;
     simplelist_info_init(&info, str(LANG_NATIVE_THEME), count + 2, files);
     info.get_name = theme_name;
+    if (current_theme > 0)
+    {
+        const char *selected = global_settings.native_theme;
+        if (!strcmp(selected, "light"))
+            info.selection = 1;
+        else
+            for (int i = 0; i < count; ++i)
+                if (!strcmp(files[i], selected))
+                {
+                    info.selection = i + 2;
+                    break;
+                }
+    }
     bool to_root = simplelist_show_list(&info);
     if (!to_root && info.selection >= 0)
     {

@@ -374,6 +374,27 @@ UI_PIXELS_ARM void ui_blit_dim(fb_data *dst, const fb_data *src, int pixels,
     }
 }
 
+UI_PIXELS_ARM void ui_blit_tint(fb_data *dst, const fb_data *src, int pixels,
+                               unsigned brightness, fb_data tint)
+{
+    if (!tint || brightness == UI_FULL_OPACITY)
+    {
+        ui_blit_dim(dst, src, pixels, brightness);
+        return;
+    }
+
+    unsigned ink = UI_FULL_OPACITY - brightness;
+    uint32_t rb_tint = red_blue(tint) * ink;
+    unsigned g_tint = ((tint >> 5) & 63) * ink;
+    for (int x = 0; x < pixels; ++x)
+    {
+        fb_data pixel = src[x];
+        uint32_t rb = (red_blue(pixel) * brightness + rb_tint) >> 8;
+        unsigned g = (((pixel >> 5) & 63) * brightness + g_tint) >> 8;
+        dst[x] = ((rb >> 5) & 0xf800) | (g << 5) | (rb & 31);
+    }
+}
+
 static UI_PIXELS_ARM void blend_aligned(fb_data *dst, const fb_data *src, int count,
                                         unsigned ink, unsigned light)
 {

@@ -73,11 +73,14 @@ def prepare(root, assets, codec, theme):
     codecs = rockbox / "codecs"
     codecs.mkdir()
     (codecs / "wav.codec").write_bytes(codec.read_bytes())
+    no_scroll = theme == "scrim-no-scroll"
+    selected_theme = "scrim" if no_scroll else theme
     (rockbox / "config.cfg").write_text(
         "start in screen: files\nshow files: music\n"
         "font: 18-noto-sans\nbacklight timeout: off\nvoice menus: off\n"
         "animations: off\nalbum art: prefer image file\n"
-        f"native theme: {theme}\n"
+        f"native theme: {selected_theme}\n"
+        f"scrolling enabled: {'off' if no_scroll else 'on'}\n"
     )
     if theme == "blur":
         themes = rockbox / "native-themes"
@@ -132,6 +135,11 @@ def capture(binary, root, env, out, theme):
 
         save("spectrum", wait(lambda frame: frame.crop((0, 201, 79, 235)).getbbox(),
                               "live spectrum"))
+        if theme == "scrim-no-scroll":
+            still = save("long-title", screen.frame())
+            time.sleep(104 / FPS)
+            assert not ImageChops.difference(still.crop(TITLE), screen.frame().crop(TITLE)).getbbox()
+            return {"long_title_still": True}
         scroll = save("scroll", wait(
             lambda frame: ImageChops.difference(wps.crop(TITLE), frame.crop(TITLE)).getbbox(),
             "long title scroll"))
@@ -194,7 +202,7 @@ def main():
                        SDL_VIDEODRIVER="x11", SDL_AUDIODRIVER="dummy",
                        SDL_RENDER_DRIVER="software", LIBGL_ALWAYS_SOFTWARE="1",
                        __GLX_VENDOR_LIBRARY_NAME="mesa")
-            for theme in ("scrim", "blur"):
+            for theme in ("scrim", "blur", "scrim-no-scroll"):
                 root = tmp / theme
                 prepare(root, args.resources, args.codec, theme)
                 result[theme] = capture(args.simulator, root, env, args.output, theme)

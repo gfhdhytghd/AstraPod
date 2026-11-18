@@ -116,5 +116,7 @@ bool ui_layer_alloc(struct ui_layer *, int width, int height);
 void ui_layer_free(struct ui_layer *);
 void ui_layer_paint(const struct ui_view *, const struct ui_view_frame *);
 void ui_blit_dim(fb_data *dst, const fb_data *src, int pixels, unsigned brightness);
+void ui_blit_tint(fb_data *dst, const fb_data *src, int pixels, unsigned brightness,
+                  fb_data tint);
 
 #endif

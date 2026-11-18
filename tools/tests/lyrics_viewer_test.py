@@ -49,6 +49,8 @@ static void check_trace_closed(void)
 static void ui_note_render(uint32_t elapsed) { (void)elapsed; }
 static void ui_note_flush(uint32_t elapsed) { (void)elapsed; }
 static bool shared_scene;
+static bool lcd_updates_held(void) { return shared_scene; }
+static bool lcd_active(void) { return true; }
 static bool ui_scene_automatic(void) { return shared_scene; }
 /* An independent playback owner remains throughout these visits. */
 static int clock_refs = 1, boost_gets, boost_puts;
@@ -165,7 +167,7 @@ static struct font *font_get(int f){return f==12?&f12:f==26?&f26:&f18;}
 static int font_load(const char *path){
     assert(clock_refs==2);
     if (verify_early_frame && !loads) {
-        assert(updates && "background must reach LCD before disk I/O");
+        assert((updates || shared_scene) && "background must reach LCD before disk I/O");
         precise_extra+=1000000;
     }
     loads++;
@@ -471,7 +473,7 @@ static int select_scenario(void)
     return ACTION_WPS_BROWSE; /* SELECT exits again after auto-follow. */
 }
 static int get_action(int c,int timeout){
- assert(!memcmp(panel,screen_pixels,sizeof panel));
+ assert(shared_scene || !memcmp(panel,screen_pixels,sizeof panel));
  assert(!entry_pinned);
  assert(clock_refs == (lv.boost ? 2 : 1));
  if(timeout>HZ/30)assert(!lv.boost);
@@ -556,7 +558,7 @@ static int get_action(int c,int timeout){
   if(calls==4){assert(!lv.mode.manual&&lv.mode.focus==2);return ACTION_WPS_PLAY;}
   if(calls==5)return ACTION_WPS_SEEKFWD;
   if(calls==6)return ACTION_WPS_SKIPNEXT;
-  if(calls==7){assert(!lyrics_timed()&&lyrics_count()==3&&lv.track_fade);assert(!memcmp(lv_frame(),lv.snapshot,LV_FRAME));current_tick+=20;return ACTION_NONE;}
+  if(calls==7){assert(!lyrics_timed()&&lyrics_count()==3&&lv.track_fade);assert(timeout<=1 && "track fade must schedule its next 60 Hz pose");assert(!memcmp(lv_frame(),lv.snapshot,LV_FRAME));current_tick+=20;return ACTION_NONE;}
   assert(!lv.track_fade&&!lv.boost&&lv.mode.focus==0&&!strcmp(lyrics_text(0),"New first line"));return ACTION_WPS_BROWSE;
  }
  if(plan==1){remote_key=true;

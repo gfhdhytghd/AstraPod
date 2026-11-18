@@ -117,9 +117,7 @@ widgets/list_render.c
 widgets/list_select.c
 widgets/menu.c
 ui/animation.c
-#ifdef IPOD_6G
 ui/native_chrome.c
-#endif
 ui/native_theme.c
 ui/native_theme_runtime.c
 ui/native_wps.c
@@ -162,9 +160,7 @@ screens/system/about.c
 screens/system/art_health.c
 screens/system/art_check.c
 screens/system/bg_task_info.c
-#if defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))
 input/agents_shortcut.c
-#endif
 #ifdef HAVE_USB_PODLINK
 screens/system/podlink_screen.c
 screens/system/agents_screen.c

@@ -9,9 +9,9 @@
 struct ui_scene {
     const void *back_page, *front_page;
     struct ui_tween tween;
-    int handle, last_offset;
-    unsigned trace;
-    bool target_front, capturing, automatic, modal, vertical;
+    int handle, backdrop_handle, composed_offset, last_offset;
+    unsigned trace, dim_color;
+    bool target_front, capturing, automatic, vertical;
 };
 
 /* The UI thread owns a scene from capture through the end of its transition.

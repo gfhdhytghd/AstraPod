@@ -260,8 +260,11 @@ endif
 LINKRAM := $(BUILDDIR)/ram.link
 ROMLDS := $(FIRMDIR)/rom.lds
 LINKROM := $(BUILDDIR)/rom.link
+ifeq ($(MANUFACTURER),ipod)
+RAMLDS_DEPS := $(FIRMDIR)/target/arm/pp/app-pp.lds
+endif
 
-$(LINKRAM): $(RAMLDS) $(CONFIGFILE)
+$(LINKRAM): $(RAMLDS) $(CONFIGFILE) $(RAMLDS_DEPS)
 	$(call PRINTS,PP $(@F))
 	$(call preprocess2file,$<,$@,)
 

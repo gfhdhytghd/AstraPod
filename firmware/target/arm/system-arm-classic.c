@@ -25,6 +25,7 @@
 #include "font.h"
 #include "gcc_extensions.h"
 #include "panic.h"
+#include "research.h"
 
 #include <get_sp.h>
 #include <backtrace.h>
@@ -40,12 +41,47 @@ static const char* const uiename[] = {
     "SWI"
 };
 
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+void NORETURN_ATTR USED_ATTR research_exception(unsigned int pc, unsigned int num,
+                                                const uint32_t *regs)
+{
+    struct research_fault fault = { .pc = pc, .regs = regs };
+    unsigned int here;
+    disable_interrupt(IRQ_FIQ_STATUS);
+    asm volatile("mrs %0, spsr\n\tmrs %1, cpsr"
+                 : "=r"(fault.cpsr), "=r"(here));
+    unsigned int bank = fault.cpsr & 0x1f;
+    if (bank == 0x10)
+        bank = 0x1f;
+    if (bank != (here & 0x1f) &&
+        (bank == 0x1f || bank == 0x13 || bank == 0x12))
+    {
+        asm volatile("msr cpsr_c, %3\n\tmov %0, sp\n\tmov %1, lr\n\tmsr cpsr_c, %2"
+                     : "=&r"(fault.sp), "=&r"(fault.lr)
+                     : "r"(here | 0xc0), "r"(bank | 0xc0));
+    }
+    if (num != 0)
+        asm volatile("mrc p15, 0, %0, c5, c0, 0" : "=r"(fault.fsr));
+    if (num == 2)
+        asm volatile("mrc p15, 0, %0, c6, c0, 0" : "=r"(fault.far));
+    else if (num == 1)
+        fault.far = pc;
+    research_capture(RESEARCH_UNDEFINED + num, &fault, NULL);
+}
+#define RESEARCH_EXCEPTION_SAVE "sub sp, sp, #56\n\tstmia sp, {r0-r12}\n\t"
+#define RESEARCH_EXCEPTION_CALL "mov r2, sp\n\tb research_exception\n\t"
+#else
+#define RESEARCH_EXCEPTION_SAVE ""
+#define RESEARCH_EXCEPTION_CALL "b UIE\n\t"
+#endif
+
 void __attribute__((weak,naked)) data_abort_handler(void)
 {
     asm volatile(
+        RESEARCH_EXCEPTION_SAVE
         "sub    r0, lr, #8  \n"
         "mov    r1, #2      \n"
-        "b      UIE         \n"
+        RESEARCH_EXCEPTION_CALL
         );
 }
 
@@ -70,23 +106,25 @@ void __attribute__((weak,naked)) reserved_handler(void)
 void __attribute__((weak,naked)) prefetch_abort_handler(void)
 {
     asm volatile(
+        RESEARCH_EXCEPTION_SAVE
         "sub    r0, lr, #4  \n"
         "mov    r1, #1      \n"
-        "b      UIE         \n"
+        RESEARCH_EXCEPTION_CALL
         );
 }
 
 void __attribute__((weak,naked)) undef_instr_handler(void)
 {
     asm volatile(
+        RESEARCH_EXCEPTION_SAVE
         "sub    r0, lr, #4    \n"
-#ifdef USE_THUMB
+#if defined(USE_THUMB) || defined(HAVE_RESEARCH_DIAGNOSTICS)
         "mrs    r1, spsr      \n"
         "tst    r1, #(1 << 5) \n" // T bit set ?
         "subne  r0, lr, #2    \n" // if yes, offset to THUMB instruction
 #endif
         "mov    r1, #0        \n"
-        "b      UIE           \n"
+        RESEARCH_EXCEPTION_CALL
         );
 }
 

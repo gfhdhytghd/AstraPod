@@ -41,6 +41,11 @@ void hang_catch_hold(bool hold);
 /* The scheduler notes each time the UI thread is switched in */
 extern void *hang_ui_thread;
 extern long hang_ui_ran;
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+extern void *hang_audio_thread;
+extern long hang_audio_ran;
+void hang_catch_watch_audio(unsigned int id);
+#endif
 /* From the FIQ, with the interrupted pc and cpsr: nonzero to stop and show
  * the evidence, which the caller does by entering hang_catch_fiq_show on
  * the stack hang_fiq_stack_end gives, never returning */

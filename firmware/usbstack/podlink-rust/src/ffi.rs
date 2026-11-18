@@ -86,6 +86,14 @@ extern "C" {
     fn pfu_hz() -> i32;
     fn pfu_wait(ticks: c_int);
     fn pfu_panic() -> !;
+    #[cfg(feature = "research")]
+    fn pfu_research_ping();
+    #[cfg(feature = "research")]
+    fn pfu_research_request(data: *const u8, len: usize);
+    #[cfg(feature = "research")]
+    fn pfu_research_reply(data: *mut *const u8, len: *mut usize) -> c_int;
+    #[cfg(feature = "research")]
+    fn pfu_research_sent();
     fn usb_podlink_open() -> bool;
     fn usb_podlink_close();
     fn usb_podlink_active() -> bool;
@@ -200,6 +208,33 @@ impl Ports for Adapter {
     }
     fn log_read(&mut self, out: &mut [u8]) -> usize {
         unsafe { remote_log_read(out.as_mut_ptr(), out.len() as c_uint) as usize }.min(out.len())
+    }
+    #[cfg(feature = "research")]
+    fn research_ping(&mut self) {
+        unsafe { pfu_research_ping() }
+    }
+    #[cfg(feature = "research")]
+    fn research_request(&mut self, data: &[u8]) {
+        unsafe { pfu_research_request(data.as_ptr(), data.len()) }
+    }
+    #[cfg(feature = "research")]
+    fn research_reply(&self) -> Option<(Kind, &[u8])> {
+        let mut data = core::ptr::null();
+        let mut len = 0;
+        // The C buffer stays untouched until pfu_research_sent.
+        let kind = match unsafe { pfu_research_reply(&mut data, &mut len) } {
+            1 => Kind::Text,
+            2 => Kind::Binary,
+            _ => return None,
+        };
+        if data.is_null() || len > crate::wire::MAX {
+            return None;
+        }
+        Some((kind, unsafe { core::slice::from_raw_parts(data, len) }))
+    }
+    #[cfg(feature = "research")]
+    fn research_sent(&mut self) {
+        unsafe { pfu_research_sent() }
     }
 }
 // Guard releases after the last exclusive borrow. Foreign callbacks must not

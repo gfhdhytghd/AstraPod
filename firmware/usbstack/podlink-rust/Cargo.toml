@@ -10,6 +10,7 @@ crate-type = ["staticlib", "rlib"]
 [features]
 default = []
 firmware = []
+research = []
 host-test = ["firmware"]
 
 [profile.release]

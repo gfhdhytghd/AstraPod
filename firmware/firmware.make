@@ -23,11 +23,16 @@ FIRMLIB_SRC += $(call preprocess, $(FIRMDIR)/SOURCES)
 ifneq ($(filter %/usbstack/podlink_rust_platform.c,$(FIRMLIB_SRC)),)
   PODLINK_RUST_DIR := $(FIRMDIR)/usbstack/podlink-rust
   PODLINK_RUST_TARGET := $(BUILDDIR)/podlink-rust-target
+  PODLINK_FEATURES := firmware
+  ifneq ($(filter -DPODBOX_RESEARCH,$(EXTRA_DEFINES)),)
+    PODLINK_RUST_TARGET := $(PODLINK_RUST_TARGET)-research
+    PODLINK_FEATURES := $(PODLINK_FEATURES),research
+  endif
   PODLINK_RUST_RAW := $(PODLINK_RUST_TARGET)/armv5te-none-eabi/release/libpodlink_rust.a
   PODLINK_RUST_LIB := $(PODLINK_RUST_TARGET)/libpodlink_fw.a
   CORE_LDOPTS += -L$(PODLINK_RUST_TARGET)
   $(PODLINK_RUST_RAW): $(wildcard $(PODLINK_RUST_DIR)/src/*.rs) $(PODLINK_RUST_DIR)/Cargo.toml $(PODLINK_RUST_DIR)/Cargo.lock $(PODLINK_RUST_DIR)/rust-toolchain.toml
-	$(call PRINTS,RUST PodLink)cd $(PODLINK_RUST_DIR) && RUSTFLAGS="-Ctarget-cpu=arm926ej-s -Cpanic=abort -Cforce-frame-pointers=yes" cargo build --locked --target-dir $(PODLINK_RUST_TARGET) --release --features firmware --target armv5te-none-eabi -Zbuild-std=core
+	$(call PRINTS,RUST PodLink)cd $(PODLINK_RUST_DIR) && RUSTFLAGS="-Ctarget-cpu=arm926ej-s -Cpanic=abort -Cforce-frame-pointers=yes" cargo build --locked --target-dir $(PODLINK_RUST_TARGET) --release --features "$(PODLINK_FEATURES)" --target armv5te-none-eabi -Zbuild-std=core
   # One relocatable object whose only global definitions are podlink_*.
   # Otherwise core/compiler_builtins' weak memset/memmove/memcmp/strlen and
   # libgcc helpers replace the firmware's own for every caller (FU49 round 2).
@@ -37,6 +42,8 @@ ifneq ($(filter %/usbstack/podlink_rust_platform.c,$(FIRMLIB_SRC)),)
 	$(SILENT)rm -f $@ && $(AR) rcs $@ $(@:.a=.o)
 endif
 FIRMLIB_OBJ := $(call c2obj, $(FIRMLIB_SRC))
+# FU88: the shell core is cold code; Thumb keeps the static RAM cap.
+$(BUILDDIR)/firmware/research_shell.o: CFLAGS += -mthumb -mthumb-interwork
 FIRMLIB_OBJ += $(BUILDDIR)/sysfont.o
 OTHER_SRC += $(FIRMLIB_SRC)
 

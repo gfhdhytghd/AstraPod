@@ -95,6 +95,7 @@
 #include "iap/iap-library.h"
 #include "system/usb_log_file.h"
 #include "crumbs.h"
+#include "research.h"
 #include "system/battery_log.h"
 #include "system/debug_log.h"
 
@@ -858,6 +859,9 @@ static void init(void)
         usb_audio_alloc_buffers();
 #endif
 
+#ifdef HAVE_RESEARCH_SHELL
+    research_shell_init();
+#endif
     boot_progress(BOOT_AUDIO, 0, 0, LANG_WAIT);
     CHART(">audio_init");
     audio_init();

@@ -32,10 +32,15 @@
 #include "font.h"
 #include "button.h"
 #include "file.h"
+#include "dir.h"
+#include "research.h"
+#include "research_shell.h"
+#include <stdio.h>
 #include "panic.h"
 #include "rbversion.h"
 #include "string-extra.h"
 #include "s5l87xx.h"
+#include "clocking-s5l8702.h"
 #include "usb-designware.h"
 #include "crumbs.h"
 #include "crumb_ring.h"
@@ -58,11 +63,21 @@ static struct crumb_ring dram_ring __attribute__((section(".persist"),
 _Static_assert(sizeof(struct crumb_ring) <= 2048, "crumb ring size");
 
 #define RING_A ((volatile struct crumb_ring *)UNCACHED(&dram_ring))
-#define RING_B ((volatile struct crumb_ring *)UNCACHED(IRAM1_RING_ADDR))
 volatile uint32_t *const crumb_status_a =
     ((volatile struct crumb_ring *)UNCACHED(&dram_ring))->status;
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+/* FU88: IRAM1 (0x22020000..0x2203ffff) is the sm1 program/X/Y SRAM and its
+ * parameter page. The research image keeps the DRAM copy only and never
+ * writes IRAM1, from any path (tools/tests/arm_fu88_crash.py checks it). */
+#define RING_B_ENABLED 0
+volatile uint32_t *const crumb_status_b =
+    ((volatile struct crumb_ring *)UNCACHED(&dram_ring))->status;
+#else
+#define RING_B_ENABLED 1
+#define RING_B ((volatile struct crumb_ring *)UNCACHED(IRAM1_RING_ADDR))
 volatile uint32_t *const crumb_status_b =
     ((volatile struct crumb_ring *)UNCACHED(IRAM1_RING_ADDR))->status;
+#endif
 
 static const char *const crumb_names[CR_COUNT] =
 {
@@ -82,6 +97,9 @@ static const char *const crumb_names[CR_COUNT] =
     [CR_ICODE_BAD] = "ICODE-BAD", [CR_BANK_BAD] = "BANK-BAD",
     [CR_SELFTEST] = "selftest", [CR_SCREEN] = "screen",
     [CR_TTB_BAD] = "TTB-BAD",
+    [CR_RESEARCH_FAULT] = "research",
+    [CR_RESEARCH_PING] = "rs-ping",
+    [CR_RESEARCH_MARK] = "rs-mark",
 };
 
 static const char *const status_names[CRUMB_STATUS] =
@@ -93,116 +111,305 @@ static const char *const status_names[CRUMB_STATUS] =
 
 /* The previous boot, taken before this one starts writing */
 static struct crumb_snapshot crumbs_prev;
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+static uint32_t research_boot;
+static bool capturing;
+
+#define RESEARCH_DIR ROCKBOX_DIR "/research"
+#define RESEARCH_MAGIC 0x46553838u
+#define RESEARCH_CRASH_SLOTS 16
+static struct research_record
+{
+    uint32_t magic, boot, kind, ticks, pc, sp, lr, cpsr, far, fsr;
+    uint32_t regs[13], calls[8];
+    unsigned int call_count;
+    uint8_t have_regs;
+    char thread[16], message[96], command[24];
+} crash_record __attribute__((section(".persist"), aligned(32)));
+
+#define CRASH ((volatile struct research_record *)UNCACHED(&crash_record))
+
+extern const char *thread_current_name(void);
+
+static void copy_short(volatile char *dest, const char *src, size_t capacity)
+{
+    size_t i = 0;
+    while (i + 1 < capacity && src[i])
+    {
+        unsigned char c = src[i];
+        dest[i] = c < 32 ? ' ' : c;
+        i++;
+    }
+    dest[i] = 0;
+}
+
+void research_capture(enum research_fault_kind kind,
+                      const struct research_fault *fault, const char *message)
+{
+    disable_interrupt(IRQ_FIQ_STATUS);
+    if (!capturing && research_boot && CRASH->magic != RESEARCH_MAGIC)
+    {
+        extern char _textstart[], _textend[], _icodestart[], _icodeend[];
+        extern const char _stackend[], _irqstackend[], _persistend[];
+        uint32_t sp = fault->sp & ~3u;
+        CRASH->kind = kind;
+        CRASH->boot = research_boot;
+        CRASH->ticks = current_tick;
+        CRASH->pc = fault->pc;
+        CRASH->sp = fault->sp;
+        CRASH->lr = fault->lr;
+        CRASH->cpsr = fault->cpsr;
+        CRASH->far = fault->far;
+        CRASH->fsr = fault->fsr;
+        CRASH->call_count = 0;
+        CRASH->have_regs = false;
+        CRASH->thread[0] = CRASH->message[0] = CRASH->command[0] = 0;
+        capturing = true;
+        CRASH->magic = RESEARCH_MAGIC;
+        rlog(CR_RESEARCH_FAULT, kind);
+
+        if (fault->regs)
+        {
+            for (unsigned int i = 0; i < ARRAYLEN(CRASH->regs); i++)
+                CRASH->regs[i] = fault->regs[i];
+            CRASH->have_regs = true;
+        }
+
+        copy_short(CRASH->thread, thread_current_name(), sizeof(CRASH->thread));
+        copy_short(CRASH->message, message ? message : "", sizeof(CRASH->message));
+        copy_short(CRASH->command, rs_last_command[0] ? rs_last_command : "-",
+                   sizeof(CRASH->command));
+
+        /* Bounds are checked before every word. A code-looking word is a
+         * candidate, even when the stack was corrupted or contains old frames. */
+        uintptr_t top = sp >= (uintptr_t)_textstart ? (uintptr_t)_stackend
+                                                  : (uintptr_t)_irqstackend;
+        bool mapped = (sp >= (uintptr_t)_textstart && sp < (uintptr_t)_persistend)
+                   || (sp >= (uintptr_t)_icodestart && sp < (uintptr_t)_irqstackend);
+        for (unsigned int i = 0; mapped && sp < top && i < 96; i++, sp += 4)
+        {
+            uint32_t word = *(const uint32_t *)(uintptr_t)sp;
+            uint32_t pc = word & ~1u;
+            if ((pc >= (uintptr_t)_textstart && pc < (uintptr_t)_textend)
+                || (pc >= (uintptr_t)_icodestart && pc < (uintptr_t)_icodeend))
+            {
+                unsigned int next = CRASH->call_count;
+                CRASH->calls[next] = word;
+                CRASH->call_count = next + 1;
+                if (next + 1 == ARRAYLEN(CRASH->calls))
+                    break;
+            }
+        }
+    }
+    /* Drain the ARM write buffer before asserting the watchdog reset. */
+    asm volatile("mcr p15, 0, %0, c7, c10, 4" : : "r"(0) : "memory");
+    system_reboot();
+    while (1);
+}
+
+void rlog(enum crumb_id id, uint32_t value)
+{
+    if (id == CR_RESEARCH_PING && !rs_last_command[0])
+        strcpy(rs_last_command, "ping");
+    crumb(id, value);
+}
+#endif
+
 static int crumbs_prev_copies;             /* 1: DRAM header valid, 2: IRAM1 */
 
 void crumb(enum crumb_id id, uint32_t value)
 {
     int level = disable_interrupt_save(IRQ_FIQ_STATUS);
     crumb_ring_put(RING_A, current_tick, id, value);
+#if RING_B_ENABLED
     crumb_ring_put(RING_B, current_tick, id, value);
+#endif
     restore_interrupt(level);
 }
 
 void crumbs_boot(void)
 {
+#if RING_B_ENABLED
     clockgate_enable(CLOCKGATE_SM1, true);  /* IRAM1 */
     crumbs_prev_copies = crumb_snapshot_take(RING_A, RING_B, &crumbs_prev);
+#else
+    /* The same ring twice: the snapshot reads the DRAM copy alone */
+    crumbs_prev_copies = crumb_snapshot_take(RING_A, RING_A, &crumbs_prev) & 1;
+#endif
     uint32_t boot = crumbs_prev.valid ? crumbs_prev.boot + 1 : 1;
     crumb_ring_start(RING_A, boot);
+#if RING_B_ENABLED
     crumb_ring_start(RING_B, boot);
+#endif
     crumb(CR_BOOT, boot);
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    research_boot = boot;
+#endif
 }
 
 void crumbs_clean(void)
 {
     RING_A->clean = CRUMB_CLEAN;
+#if RING_B_ENABLED
     RING_B->clean = CRUMB_CLEAN;
+#endif
 }
 
-static int format_lines(char (*lines)[48], int max)
+#define REPORT_HEAD (1 + CRUMB_STATUS / 2)
+
+bool crumbs_line(int line, char text[48])
 {
-    int n = 0;
-#define LINE(...) do { if (n < max) snprintf(lines[n++], 48, __VA_ARGS__); } while (0)
     if (!crumbs_prev.valid)
     {
-        LINE("no breadcrumbs (copies %d)", crumbs_prev_copies);
-        return n;
+        if (line)
+            return false;
+        snprintf(text, 48, "no breadcrumbs (copies %d)", crumbs_prev_copies);
     }
-    LINE("boot %lu %s copies:%s%s", (unsigned long)crumbs_prev.boot,
-         crumbs_prev.clean ? "clean" : "UNCLEAN",
-         crumbs_prev_copies & 1 ? " DRAM" : "", crumbs_prev_copies & 2 ? " IRAM1" : "");
-    for (int i = 0; i < CRUMB_STATUS; i += 2)
-        LINE("%-9.9s%08lx %-9.9s%08lx", status_names[i],
-             (unsigned long)crumbs_prev.status[i], status_names[i + 1],
-             (unsigned long)crumbs_prev.status[i + 1]);
-    for (int i = 0; i < crumbs_prev.n; i++)
+    else if (!line)
+        snprintf(text, 48, "boot %lu %s copies:%s%s", (unsigned long)crumbs_prev.boot,
+            crumbs_prev.clean ? "clean" : "UNCLEAN",
+            crumbs_prev_copies & 1 ? " DRAM" : "", crumbs_prev_copies & 2 ? " IRAM1" : "");
+    else if (line < REPORT_HEAD)
     {
+        int i = (line - 1) * 2;
+        snprintf(text, 48, "%-9.9s%08lx %-9.9s%08lx", status_names[i],
+                 (unsigned long)crumbs_prev.status[i], status_names[i + 1],
+                 (unsigned long)crumbs_prev.status[i + 1]);
+    }
+    else
+    {
+        int i = line - REPORT_HEAD;
+        if (i >= crumbs_prev.n)
+            return false;
         const struct crumb_entry *e = &crumbs_prev.e[i];
         unsigned id = e->id_rep >> 16, rep = e->id_rep & 0xffff;
-        const char *name = id < CR_COUNT && crumb_names[id] ?
-                           crumb_names[id] : "?";
-        if (rep)
-            LINE("%5lu %-11.11s %08lx x%u", (unsigned long)e->tick, name,
-                 (unsigned long)e->value, rep + 1);
-        else
-            LINE("%5lu %-11.11s %08lx", (unsigned long)e->tick, name,
-                 (unsigned long)e->value);
+        const char *name = id < CR_COUNT && crumb_names[id] ? crumb_names[id] : "?";
+        int n = snprintf(text, 48, "%5lu %-11.11s %08lx", (unsigned long)e->tick,
+                         name, (unsigned long)e->value);
+        if (rep && n < 48)
+            snprintf(text + n, 48 - n, " x%u", rep + 1);
     }
-#undef LINE
-    return n;
+    return true;
 }
 
-#define REPORT_LINES (1 + CRUMB_STATUS / 2 + 32)
-static char report[REPORT_LINES][48];
-static int report_n;
-
-/* The debug menu's view shares the boot report's buffer: same lines */
-int crumbs_lines(char (**lines)[48])
+static bool write_line(int fd, const char *line)
 {
-    *lines = report;
-    return format_lines(report, REPORT_LINES);
+    size_t n = strlen(line);
+    return write(fd, line, n) == (ssize_t)n && write(fd, "\n", 1) == 1;
 }
+
+static bool write_crumbs(int fd)
+{
+    char text[48];
+    for (int i = 0; crumbs_line(i, text); i++)
+        if (!write_line(fd, text))
+            return false;
+    return true;
+}
+
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+static bool write_crash(int fd)
+{
+    extern char _textstart[];
+    struct research_record record;
+    memcpy(&record, (const void *)CRASH, sizeof(record));
+    char text[212];
+    snprintf(text, sizeof(text),
+        "FU88 1 " RBVERSION " boot=%lu kind=%lu ticks=%lu hz=%d\n"
+        "pc=%08lx sp=%08lx lr=%08lx cpsr=%08lx far=%08lx fsr=%08lx text=%08lx",
+        (unsigned long)record.boot, (unsigned long)record.kind,
+        (unsigned long)record.ticks, HZ,
+        (unsigned long)record.pc, (unsigned long)record.sp, (unsigned long)record.lr,
+        (unsigned long)record.cpsr, (unsigned long)record.far, (unsigned long)record.fsr,
+        (unsigned long)_textstart);
+    if (!write_line(fd, text))
+        return false;
+    snprintf(text, sizeof(text), "thread=%.15s\nmessage=%.95s\ncommand=%.23s",
+             record.thread, record.message, record.command);
+    if (!write_line(fd, text))
+        return false;
+    if (record.have_regs)
+        for (unsigned int i = 0; i < ((record.cpsr & 0x1f) == 0x11 ? 8 : ARRAYLEN(record.regs)); i++)
+        {
+            snprintf(text, sizeof(text), "r%u=%08lx", i, (unsigned long)record.regs[i]);
+            if (!write_line(fd, text))
+                return false;
+        }
+    for (unsigned int i = 0; i < MIN(record.call_count, ARRAYLEN(record.calls)); i++)
+    {
+        snprintf(text, sizeof(text), "candidate=%08lx", (unsigned long)record.calls[i]);
+        if (!write_line(fd, text))
+            return false;
+    }
+    return !crumbs_prev.valid || record.boot != crumbs_prev.boot || write_crumbs(fd);
+}
+
+static bool research_save(const char *path, bool (*format)(int))
+{
+    const char *tmp = RESEARCH_DIR "/.pending";
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0)
+        return false;
+    bool saved = format(fd) && fsync(fd) == 0;
+    if (close(fd) != 0)
+        saved = false;
+    return saved && rename(tmp, path) == 0;
+}
+
+static void research_report(void)
+{
+    mkdir(RESEARCH_DIR);
+    if (CRASH->magic == RESEARCH_MAGIC)
+    {
+        char path[sizeof(RESEARCH_DIR "/crash-00.txt")];
+        snprintf(path, sizeof(path), RESEARCH_DIR "/crash-%lu.txt",
+                 (unsigned long)(CRASH->boot % RESEARCH_CRASH_SLOTS));
+        if (research_save(path, write_crash))
+            CRASH->magic = 0;
+    }
+    if (crumbs_prev.valid)
+        research_save(RESEARCH_DIR "/log.txt", write_crumbs);
+}
+#endif
 
 void crumbs_report(void)
 {
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    research_report();
+#endif
     if (!crumbs_prev.valid || crumbs_prev.clean)
         return;
-    int n = report_n = format_lines(report, REPORT_LINES);
-
     int fd = open(ROCKBOX_DIR "/crumbs-last.txt", O_WRONLY | O_CREAT | O_TRUNC,
                   0666);
     if (fd >= 0)
     {
         fdprintf(fd, "# PodBox breadcrumbs of the boot before %s\n",
                  RBVERSION);
-        for (int i = 0; i < n; i++)
-            fdprintf(fd, "%s\n", report[i]);
+        write_crumbs(fd);
         close(fd);
     }
 }
 
-/* Once boot is done, so USB and the dock's iAP are already up and nothing
- * waits on it (FU55). Summary, status words, then the newest entries that
- * fit, until a key or any other event, which is returned for the caller to
- * handle. */
 long crumbs_report_show(void)
 {
-    int n = report_n;
-    if (!n)
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    /* Recovery is unattended. The debug menu still shows the breadcrumbs. */
+    return BUTTON_NONE;
+#else
+    if (!crumbs_prev.valid || crumbs_prev.clean)
         return BUTTON_NONE;
     int font = lcd_getfont();
     lcd_set_viewport(NULL);
     lcd_setfont(FONT_SYSFIXED);
     lcd_clear_display();
-    int rows = LCD_HEIGHT / 8, y = 0, head = 1 + CRUMB_STATUS / 2;
+    char text[48];
+    int rows = LCD_HEIGHT / 8, y = 0;
     lcd_puts(0, y++, (const unsigned char *)"Last boot did not shut down:");
-    for (int i = 0; i < head && i < n; i++)
-        lcd_puts(0, y++, (const unsigned char *)report[i]);
-    int first = n - (rows - y);
-    if (first < head)
-        first = head;
-    for (int i = first; i < n && y < rows; i++)
-        lcd_puts(0, y++, (const unsigned char *)report[i]);
+    for (int i = 0; i < REPORT_HEAD && crumbs_line(i, text); i++)
+        lcd_puts(0, y++, (const unsigned char *)text);
+    int first = MAX(REPORT_HEAD, REPORT_HEAD + crumbs_prev.n - (rows - y));
+    for (int i = first; y < rows && crumbs_line(i, text); i++)
+        lcd_puts(0, y++, (const unsigned char *)text);
     lcd_update();
     button_clear_queue();
     long ev = button_get_w_tmo(60 * HZ);
@@ -210,6 +417,7 @@ long crumbs_report_show(void)
     lcd_clear_display();
     lcd_update();
     return ev;
+#endif
 }
 
 /*** Self-tests of the two watchdogs, from the debug menu ***/

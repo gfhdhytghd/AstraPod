@@ -1539,4 +1539,10 @@ Lyre prototype 1 */
 #define WANT_SWVOL_32
 #endif
 
+#if defined(PODBOX_RESEARCH) && defined(IPOD_6G) && !defined(BOOTLOADER) && \
+    (CONFIG_PLATFORM & PLATFORM_NATIVE)
+#define HAVE_RESEARCH_DIAGNOSTICS
+#define HAVE_RESEARCH_SHELL
+#endif
+
 #endif /* __CONFIG_H__ */

@@ -48,6 +48,9 @@ enum crumb_id
     CR_SELFTEST,        /* freeze self-test started; value: kind */
     CR_SCREEN,          /* root screen change; value: screen id */
     CR_TTB_BAD,         /* L1 page table changed; value: address */
+    CR_RESEARCH_FAULT,  /* value: enum research_fault_kind */
+    CR_RESEARCH_PING,
+    CR_RESEARCH_MARK,   /* research shell: value from the host, or init */
     CR_COUNT
 };
 
@@ -116,8 +119,11 @@ void crumbs_clean(void);
 void crumbs_guard_init(void);
 void crumbs_guard_off(void);
 /* For the debug menu: the previous boot's ring as lines, and the self-tests */
-int crumbs_lines(char (**lines)[48]);
+bool crumbs_line(int line, char text[48]);
 void crumbs_freeze_test(int kind);
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+void rlog(enum crumb_id id, uint32_t value);
+#endif
 #else
 static inline void crumb(int id, uint32_t value) { (void)id; (void)value; }
 static inline void crumb_status(int i, uint32_t v) { (void)i; (void)v; }

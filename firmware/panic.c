@@ -24,6 +24,7 @@
 #include <string.h>
 #include "panic.h"
 #include "crumbs.h"
+#include "research.h"
 #include "lcd.h"
 #include "font.h"
 #include "debug.h"
@@ -32,6 +33,9 @@
 #include "system.h"
 #include "logf.h"
 #include "rbversion.h"
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+#include "get_sp.h"
+#endif
 
 #ifdef HAVE_RB_BACKTRACE
 #include "gcc_extensions.h"
@@ -61,6 +65,9 @@ void panic_screen_enter(void)
     if (panic_screen_active)
     {
         /* No formatting, drawing, unwinding, PMU or scheduler work here. */
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+        system_reboot();
+#endif
         system_exception_wait();
         while (1);
     }
@@ -112,6 +119,18 @@ void panicf( const char *fmt, ...)
     va_start( ap, fmt );
     vsnprintf( panic_buf, sizeof(panic_buf), fmt, ap );
     va_end( ap );
+
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    struct research_fault fault = {
+        .pc = (uintptr_t)__builtin_return_address(0),
+        .sp = __get_sp(),
+    };
+    asm volatile("mrs %0, cpsr" : "=r"(fault.cpsr));
+#ifdef HAVE_RB_BACKTRACE
+    fault.sp = sp;
+#endif
+    research_capture(RESEARCH_PANIC, &fault, panic_buf);
+#endif
 
     lcd_set_viewport(NULL);
 

@@ -47,6 +47,11 @@
 #include "hang_catch.h"
 #include "panic.h"
 #include "crumbs.h"
+#include "research.h"
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+#include "file.h"
+static uint32_t hang_cpsr;
+#endif
 
 #define HANG_SECS   10
 /* Longer than the core check: the UI thread can wait this long on the
@@ -206,6 +211,12 @@ static void NORETURN_ATTR hang_show(void)
                            calls, STACK_CALLS) : 0;
 
     crumb(CR_HANG, hang_stuck ? 0 : hang_pc);
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    struct research_fault fault = {
+        .pc = hang_pc, .sp = hang_sp, .lr = hang_lr, .cpsr = hang_cpsr,
+    };
+    research_capture(RESEARCH_HANG, &fault, hang_stuck ? "UI blocked" : "Core held");
+#endif
     if (hang_stuck)
         stuck_log();
     else
@@ -292,6 +303,9 @@ static void hang_tick(void)
      * are banked away from IRQ mode's. */
     hang_thread = corep->running;
     hang_pc = *ret;
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    asm volatile("mrs %0, spsr" : "=r"(hang_cpsr));
+#endif
     asm volatile ("mrs r2, cpsr      \n"
                   "msr cpsr_c, #0xdf \n"
                   "mov %0, sp        \n"
@@ -312,6 +326,17 @@ void *hang_ui_thread;
 long hang_ui_ran;
 static bool fiq_armed;
 static struct hang_watch fiq_watch;
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+void *hang_audio_thread;
+long hang_audio_ran;
+static bool audio_waiting;
+static long audio_wait_since;
+
+void hang_catch_watch_audio(unsigned int id)
+{
+    hang_audio_thread = __thread_id_entry(id);
+}
+#endif
 static uint32_t fiq_stack[512] __attribute__((aligned(8)));
 uint32_t *const hang_fiq_stack_end = &fiq_stack[512];
 
@@ -364,6 +389,17 @@ int hang_catch_fiq(uint32_t pc, uint32_t spsr)
                    corep->running != ui;
     int kind = hang_watch_step(&fiq_watch, current_tick, HZ, waiting,
                                hang_ui_ran);
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    const struct thread_entry *audio = hang_audio_thread;
+    bool audio_wait = audio && !holds && audio->state == STATE_RUNNING &&
+                      corep->running != audio;
+    if (!audio_wait || !audio_waiting || TIME_AFTER(hang_audio_ran, audio_wait_since))
+        audio_wait_since = current_tick;
+    audio_waiting = audio_wait;
+    if (kind == HANG_WATCH_NONE && audio_wait &&
+        TIME_AFTER(current_tick, audio_wait_since + HANG_WATCH_UI_SECS * HZ))
+        kind = HANG_WATCH_AUDIO_STARVED;
+#endif
     if (kind == HANG_WATCH_NONE)
         return 0;
     freeze.kind = kind;
@@ -396,6 +432,14 @@ void hang_catch_fiq_show(void)
     char name[8];
 
     crumb(CR_FREEZE, freeze.pc);
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    struct research_fault fault = {
+        .pc = freeze.pc, .sp = freeze.sp, .lr = freeze.lr, .cpsr = freeze.cpsr,
+    };
+    const char *reason = freeze.kind == HANG_WATCH_IRQS_OFF ? "Tick stalled" :
+                         freeze.kind == HANG_WATCH_AUDIO_STARVED ? "Audio starved" : "UI starved";
+    research_capture(RESEARCH_FREEZE, &fault, reason);
+#endif
     panic_screen_enter();
     lcd_set_viewport(NULL);
 #if LCD_DEPTH > 1
@@ -459,6 +503,10 @@ void hang_catch_fiq_show(void)
 
 void hang_catch_init(void)
 {
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    if (file_exists(ROCKBOX_DIR "/research/watchdog.off"))
+        return;
+#endif
     int oldlevel = disable_irq_save();
 
     /* Outside an interrupt, IRQ mode's banked sp rests at its stack's top */

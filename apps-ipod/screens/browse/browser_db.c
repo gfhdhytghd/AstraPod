@@ -114,6 +114,8 @@ static bool under_artist_level(struct browser_context* c);
  * things retrieve_entries() works out that a reuse does not rebuild */
 static uint32_t loaded_entries_crc = 0;
 static int loaded_head_rows;
+static int loaded_album_order;
+static int album_order_loaded;
 static bool loaded_years_valid;
 static bool loaded_count_down;
 static bool loaded_unnumbered;
@@ -3245,6 +3247,7 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
      * leaves the list in name order rather than a wrong one. */
     int album_order = tag == tag_album ? album_sort_order(level)
                                        : DB_SORT_ALBUMS_NAME;
+    album_order_loaded = album_order;
     bool show_year = tag == tag_album
                      && global_settings.album_show_year != ALBUM_YEAR_OFF;
 
@@ -3591,7 +3594,7 @@ entry_skip_formatter:
                               current_entry_count - c->special_entry_count);
     }
 
-    if (show_year && order_tab != NULL)
+    if (order_tab != NULL)
     {
         struct tagentry *entries = get_entries(c);
         int16_t *years = album_years(c);
@@ -4866,6 +4869,7 @@ int browser_db_load(struct browser_context* c)
                     count = c->dirlength;
                     head_rows = loaded_head_rows;
                     album_years_valid = loaded_years_valid;
+                    album_order_loaded = loaded_album_order;
                     tracks_count_down = loaded_count_down;
                     tracks_unnumbered = loaded_unnumbered;
                     podcast_shows = loaded_podcast_shows;
@@ -6117,6 +6121,7 @@ static void remember_loaded(struct browser_context* c)
     loaded_entries_crc = browser_db_data_crc(c);
     loaded_head_rows = head_rows;
     loaded_years_valid = album_years_valid;
+    loaded_album_order = album_order_loaded;
     loaded_count_down = tracks_count_down;
     loaded_unnumbered = tracks_unnumbered;
     loaded_podcast_shows = podcast_shows;
@@ -6736,6 +6741,41 @@ static struct tagentry* browser_db_get_entry(struct browser_context *c, int id)
 
     entry = get_entries(c);
     return &entry[realid];
+}
+
+bool browser_db_index_key(struct browser_context *c, int id, char *buf, size_t size)
+{
+    int year_sort = album_order_loaded == DB_SORT_ALBUMS_YEAR ||
+                    album_order_loaded == DB_SORT_ALBUMS_YEAR_DESC ||
+                    album_order_loaded == DB_SORT_ALBUMS_ARTIST_YEAR ||
+                    album_order_loaded == DB_SORT_ALBUMS_ARTIST_YEAR_DESC;
+    struct browser_db_header header;
+    int realid, year, first;
+
+    if (!buf || !size)
+        return false;
+    buf[0] = '\0';
+    if (c->currtable == TABLE_ROOT)
+        return false;
+    if (browser_db_get_entry_kind(c, id) == LIST_ROW_TRACK &&
+        browser_db_album_header(c, &header))
+    {
+        first = 0;
+        while (first < id && browser_db_get_entry_kind(c, first) != LIST_ROW_TRACK)
+            first++;
+        snprintf(buf, size, "%d", id - first + 1);
+        return true;
+    }
+    if (!year_sort || !album_years_valid)
+        return false;
+    realid = id - current_offset;
+    if (realid < 0 || realid >= current_entry_count)
+        return false;
+    year = album_years(c)[realid];
+    if (year <= 0)
+        return false;
+    snprintf(buf, size, "%d", year);
+    return true;
 }
 
 char* browser_db_get_display_name(struct browser_context *c, int id,

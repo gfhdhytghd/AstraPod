@@ -6,10 +6,12 @@
 #include <string.h>
 #include "config.h"
 #include "core_alloc.h"
+#include <ctype.h>
 #include "font.h"
 #include "kernel.h"
 #include "lang.h"
 #include "lcd.h"
+#include "rbunicode.h"
 #include "scroll_engine.h"
 #include "settings/settings.h"
 #include "system.h"
@@ -41,6 +43,16 @@ enum {
     ROW_UNIT = 256,
     HALF_ROW = ROW_UNIT / 2,
     MAX_WHEEL_LAG = 3 * ROW_UNIT,
+    INDEX_MIN_ITEMS = 51,
+    INDEX_WINDOW_F = 10,
+    INDEX_TRIGGER = 2,
+    INDEX_IN_F = 6,
+    INDEX_HOLD_F = 20,
+    INDEX_OUT_F = 12,
+    INDEX_BOX = 72,
+    INDEX_PAD = 12,
+    INDEX_SAMPLES = 12,
+    INDEX_BLEND = 13,
 };
 
 struct list_pose {
@@ -58,13 +70,21 @@ struct list_motion {
     bool wheel;
 };
 
+struct list_index {
+    char key[16];
+    uint32_t started, sample_clock[INDEX_SAMPLES];
+    int sample_sel[INDEX_SAMPLES];
+    int samples, last_sel, opacity, scale;
+    unsigned phase, painted;
+};
+
 struct native_list {
     struct ui_theme theme;
     unsigned int colors[UI_COLOR_COUNT];
     unsigned theme_generation, palette_generation;
     bool colors_current;
     int text_font, title_font, icon_font;
-    struct ui_view root, title, header, rows, notes, art;
+    struct ui_view root, title, header, rows, notes, art, index_view;
     struct ui_page page;
     struct ui_layer backdrop;
     unsigned art_generation;
@@ -75,6 +95,7 @@ struct native_list {
     unsigned generation;
     int selection;
     struct list_motion motion;
+    struct list_index overlay;
     int row_shift, cursor_y;
     uint32_t marquee_started, marquee_frame;
     bool has_marquee;
@@ -92,6 +113,7 @@ void list_render_init(void)
     {
         struct native_list *render = core_get_data_pinned(renderer_handle);
         memset(render, 0, sizeof(*render));
+        render->overlay.last_sel = -1;
         render->text_font = render->title_font = render->icon_font = -1;
         render->theme_generation = (unsigned)-1;
         core_put_data_pinned(render);
@@ -682,32 +704,6 @@ static bool file_rows(enum current_activity activity)
            activity == ACTIVITY_FOLDERSELECT;
 }
 
-static bool numbered_row(const struct gui_synclist *list, enum current_activity activity,
-                         enum list_row_kind kind)
-{
-    return !list->unnumbered && (activity == ACTIVITY_PLAYLISTVIEWER ||
-           (activity == ACTIVITY_DATABASEBROWSER && kind == LIST_ROW_TRACK));
-}
-
-static int track_number(const struct gui_synclist *list, int item)
-{
-    if (list->count_down)
-        return list->nb_items - item;
-    if (!list->callback_get_item_kind)
-        return item + 1;
-    /* Database command rows always precede the track run. */
-    int first = 0, last = item;
-    while (first < last)
-    {
-        int mid = first + (last - first) / 2;
-        if (list->callback_get_item_kind(mid, list->data) == LIST_ROW_TRACK)
-            last = mid;
-        else
-            first = mid + 1;
-    }
-    return item - first + 1;
-}
-
 static void marker(struct native_list *render, struct ui_rect clip, struct ui_rect rect,
                    unsigned int fg)
 {
@@ -762,7 +758,6 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         list->callback_get_item_icon(item, list->data) : Icon_NOICON;
 
     bool files = file_rows(activity);
-    bool numbered = numbered_row(list, activity, kind);
     bool main_settings = activity == ACTIVITY_SETTINGS && equals_lang(list->title, LANG_SETTINGS);
     bool database = activity == ACTIVITY_DATABASEBROWSER;
     bool library_menu = database && (kind == LIST_ROW_MENU || kind == LIST_ROW_ACTION) &&
@@ -789,7 +784,7 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
                       !equals_lang(label, LANG_TAGNAVI_ALL_TRACKS_SORTED_BY_ALBUM);
     }
     int marked = list_select_row_state(list, item);
-    if (!numbered && !icon_column && !art && list->show_icons &&
+    if (!icon_column && !art && list->show_icons &&
         (kind == LIST_ROW_CONTAINER || kind == LIST_ROW_CUSTOM_MENU))
         icon_column = icon != Icon_NOICON;
 
@@ -798,7 +793,7 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         if (art)
             text_x += MIN(m[UI_METRIC_LIST_ART_SIZE], row.height) +
                       m[UI_METRIC_LIST_AUX_PADDING] + 1;
-        else if (numbered || icon_column || marked >= 0)
+        else if (icon_column || marked >= 0)
             text_x += icon_size + m[UI_METRIC_LIST_ICON_GAP];
         int x = text_x - m[UI_METRIC_LIST_TEXT_PADDING] + margin;
         marker(render, clip, row_cell(row, x, 0, m[UI_METRIC_LIST_SELECTION_WIDTH],
@@ -864,7 +859,7 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
                       row_icon(icon, kind, label, files, activity), false, 0, false);
         text_x += cover_size + m[UI_METRIC_LIST_AUX_PADDING] + 1;
     }
-    else if (numbered || icon_column || marked >= 0)
+    else if (icon_column || marked >= 0)
     {
         text_x += icon_size + m[UI_METRIC_LIST_ICON_GAP];
         if (render->icon_font >= 0)
@@ -880,16 +875,8 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
                 const char *at = strchr(agent_icons, value[1]);
                 glyph = at ? glyphs[at - agent_icons] : NULL;
             }
-            if (!numbered)
-                draw_text(render, clip, icon_cell, render->icon_font, fg,
-                          glyph, false, 0, false);
-        }
-        if (numbered)
-        {
-            char number[16];
-            snprintf(number, sizeof(number), "%d", track_number(list, item));
-            draw_text(render, clip, icon_cell, render->title_font, fg,
-                      number, false, 0, true);
+            draw_text(render, clip, icon_cell, render->icon_font, fg,
+                      glyph, false, 0, false);
         }
     }
 
@@ -1117,12 +1104,255 @@ static void paint_notes(const struct ui_view *view, const struct ui_view_frame *
     lcd_set_viewport(prior);
 }
 
+static void index_from_text(const char *text, char *out, size_t n)
+{
+    ucschar_t ch = 0;
+
+    out[0] = '\0';
+    if (!text || n < 2)
+        return;
+    while (*text == ' ')
+        text++;
+    utf8decode((const unsigned char *)text, &ch);
+    if (!ch)
+        return;
+    if (ch < 128)
+    {
+        if (islower((int)ch))
+            ch = (ucschar_t)toupper((int)ch);
+        out[0] = (ch >= 'A' && ch <= 'Z') ? (char)ch : '#';
+        out[1] = '\0';
+        return;
+    }
+    *utf8encode(ch, (unsigned char *)out) = '\0';
+}
+
+static void index_key(struct native_list *render, char *out, size_t n)
+{
+    struct gui_synclist *list = render->owner;
+    char name[MAX_PATH];
+    const unsigned char *label;
+    const char *text;
+
+    out[0] = '\0';
+    if (!list || list->selected_item < 0 || list->selected_item >= list->nb_items)
+        return;
+    if (list->callback_get_index_key)
+    {
+        const char *key = list->callback_get_index_key(list->selected_item,
+                              list->data, name, sizeof(name));
+        if (key && *key)
+        {
+            snprintf(out, n, "%s", key);
+            return;
+        }
+    }
+    if (!list->callback_get_item_name)
+        return;
+    label = (const unsigned char *)list->callback_get_item_name(
+        list->selected_item, list->data, name, sizeof(name));
+    text = label && P2ID(label) <= VOICEONLY_DELIMITER ?
+           (const char *)P2STR(label) : "";
+    index_from_text(text, out, n);
+}
+
+static void index_sample(struct list_index *index, int selection, uint32_t now)
+{
+    int i = 0;
+
+    while (i < index->samples &&
+           ui_clock_frame(now - index->sample_clock[i]) > INDEX_WINDOW_F)
+        i++;
+    if (i)
+    {
+        int keep = index->samples - i;
+        memmove(index->sample_clock, index->sample_clock + i,
+                (size_t)keep * sizeof(index->sample_clock[0]));
+        memmove(index->sample_sel, index->sample_sel + i,
+                (size_t)keep * sizeof(index->sample_sel[0]));
+        index->samples = keep;
+    }
+    if (index->samples == INDEX_SAMPLES)
+    {
+        memmove(index->sample_clock, index->sample_clock + 1,
+                (INDEX_SAMPLES - 1) * sizeof(index->sample_clock[0]));
+        memmove(index->sample_sel, index->sample_sel + 1,
+                (INDEX_SAMPLES - 1) * sizeof(index->sample_sel[0]));
+        index->samples = INDEX_SAMPLES - 1;
+    }
+    if (!index->samples || index->sample_sel[index->samples - 1] != selection ||
+        ui_clock_frame(now - index->sample_clock[index->samples - 1]) >= 1)
+    {
+        index->sample_clock[index->samples] = now;
+        index->sample_sel[index->samples] = selection;
+        index->samples++;
+    }
+}
+
+static int index_moved(const struct list_index *index, int selection)
+{
+    int moved = index->samples ? selection - index->sample_sel[0] : 0;
+    return moved < 0 ? -moved : moved;
+}
+
+static unsigned index_duration(const struct list_index *index)
+{
+    if (index->phase == 1)
+        return ui_theme_duration(INDEX_IN_F);
+    if (index->phase == 3)
+        return ui_theme_duration(INDEX_HOLD_F);
+    if (index->phase == 4)
+        return ui_theme_duration(INDEX_OUT_F);
+    return 0;
+}
+
+static void index_pose(struct list_index *index, unsigned frame, unsigned frames)
+{
+    if (index->phase == 1)
+    {
+        unsigned t = frames ? MIN(frame, frames) : 1;
+        unsigned d = frames ? frames : 1;
+        if (!frames)
+            t = d = 1;
+        if (!t)
+            t = 1;
+        index->opacity = UI_FULL_OPACITY * (int)t / (int)d;
+        index->scale = 90 + 10 * (int)t / (int)d;
+        if (frame >= frames)
+        {
+            index->phase = 2;
+            index->opacity = UI_FULL_OPACITY;
+            index->scale = 100;
+        }
+    }
+    else if (index->phase == 3)
+    {
+        index->opacity = UI_FULL_OPACITY;
+        index->scale = 100;
+        if (frame >= frames)
+        {
+            index->phase = 4;
+            index->started = USEC_TIMER;
+            index->painted = 0;
+        }
+    }
+    else if (index->phase == 4)
+    {
+        unsigned t = frames ? MIN(frame, frames) : 1;
+        unsigned d = frames ? frames : 1;
+        index->opacity = UI_FULL_OPACITY - UI_FULL_OPACITY * (int)t / (int)d;
+        index->scale = 100;
+        if (frame >= frames)
+        {
+            index->phase = 0;
+            index->opacity = 0;
+            index->samples = 0;
+        }
+    }
+    else
+    {
+        index->opacity = UI_FULL_OPACITY;
+        index->scale = 100;
+    }
+}
+
+static bool step_index(struct native_list *render)
+{
+    struct gui_synclist *list = render->owner;
+    struct list_index *index = &render->overlay;
+    uint32_t now = USEC_TIMER;
+    char key[16];
+    bool fast;
+    int jumped;
+
+    if (!list || list->nb_items < INDEX_MIN_ITEMS)
+    {
+        memset(index, 0, sizeof(*index));
+        index->last_sel = -1;
+        return false;
+    }
+
+    jumped = index->last_sel >= 0 ? list->selected_item - index->last_sel : 0;
+    if (jumped < 0)
+        jumped = -jumped;
+    index->last_sel = list->selected_item;
+    index_sample(index, list->selected_item, now);
+    fast = jumped >= INDEX_TRIGGER ||
+           index_moved(index, list->selected_item) >= INDEX_TRIGGER;
+    index_key(render, key, sizeof(key));
+    if (fast)
+    {
+        if (strcmp(index->key, key))
+            snprintf(index->key, sizeof(index->key), "%s", key);
+        if (index->phase == 0 || index->phase == 4)
+        {
+            index->phase = 1;
+            index->started = now;
+            index->painted = 0;
+        }
+        else if (index->phase == 3)
+            index->phase = 2;
+    }
+    else if (index->phase == 1 || index->phase == 2)
+    {
+        index->phase = 3;
+        index->started = now;
+        index->painted = 0;
+    }
+
+    if (!index->phase)
+        return false;
+    index_pose(index, ui_clock_frame(now - index->started), index_duration(index));
+    index->painted = ui_clock_frame(now - index->started);
+    return index->phase != 0;
+}
+
+static void paint_index(const struct ui_view *view, const struct ui_view_frame *frame)
+{
+    struct native_list *render = view->data;
+    const struct list_index *index = &render->overlay;
+    struct ui_rect area = frame->bounds;
+    int font, text_w = 0, text_h = 0, side, blend;
+    unsigned int panel, fg;
+
+    if (!index->phase || !index->key[0] || index->opacity <= 0)
+        return;
+    font = render->title_font >= 0 ? render->title_font : render->text_font;
+    if (font < 0)
+        return;
+    font_getstringsize((const unsigned char *)index->key, &text_w, &text_h, font);
+    side = MAX(INDEX_BOX, text_w + 2 * INDEX_PAD);
+    side = MAX(side, text_h + 2 * INDEX_PAD);
+    side = MAX(1, side * index->scale / 100);
+    area.x += MAX(0, (area.width - side) / 2);
+    area.y += MAX(0, (area.height - side) / 2);
+    area.width = side;
+    area.height = side;
+    panel = render->colors[UI_COLOR_MUTED];
+    fg = render->colors[UI_COLOR_FOREGROUND];
+    blend = INDEX_BLEND * index->opacity / UI_FULL_OPACITY;
+    if (blend > 0)
+    {
+        struct viewport vp;
+        if (set_clip(&vp, frame->clip, area, font, panel))
+        {
+            struct viewport *prior = lcd_set_viewport(&vp);
+            lcd_fillrect(0, 0, vp.width, vp.height);
+            if (blend < INDEX_BLEND)
+                lcd_blendrect(0, 0, vp.width, vp.height, INDEX_BLEND - blend);
+            lcd_set_viewport(prior);
+        }
+    }
+    draw_text(render, frame->clip, area, font, fg, index->key, false, 0, true);
+}
+
 static const struct ui_view_ops bg_ops = { .paint = paint_background };
 static const struct ui_view_ops layer_ops = { .paint = ui_layer_paint };
 static const struct ui_view_ops title_ops = { .paint = paint_title };
 static const struct ui_view_ops album_header_ops = { .paint = paint_album_header };
 static const struct ui_view_ops row_ops = { .paint = paint_rows };
 static const struct ui_view_ops note_ops = { .paint = paint_notes };
+static const struct ui_view_ops index_ops = { .paint = paint_index };
 
 static void add_view(struct native_list *render, struct ui_view *node,
                      struct ui_rect rect, const struct ui_view_ops *ops, void *data)
@@ -1200,7 +1430,11 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     if (status_only && !same_owner)
         goto done;
     if (!same_owner)
+    {
         motion_stop(&render->motion);
+        memset(&render->overlay, 0, sizeof(render->overlay));
+        render->overlay.last_sel = -1;
+    }
     if (render->motion.visible)
         status_only = false;
 
@@ -1243,6 +1477,8 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     bool motion_finished = update_row_pose(render, &g);
     ui_view_append(&render->root, &render->rows);
     add_view(render, &render->notes, g.notes, &note_ops, render);
+    if (step_index(render))
+        add_view(render, &render->index_view, g.rows, &index_ops, render);
     ui_page_init(&render->page, &render->root);
     render->page.focus = &render->rows;
     render->page.damage = g.background;
@@ -1301,6 +1537,8 @@ void list_render_forget(const struct gui_synclist *list)
         render->owner = NULL;
         render->has_marquee = false;
         motion_stop(&render->motion);
+        memset(&render->overlay, 0, sizeof(render->overlay));
+        render->overlay.last_sel = -1;
         render->art_handle = -1;
         ui_layer_free(&render->backdrop);
     }
@@ -1340,6 +1578,17 @@ static int motion_deadline(const struct gui_synclist *list, bool poll)
             int ticks = frame / frames != render->marquee_frame / frames ?
                         0 : (frames * HZ + UI_ANIM_FPS - 1) / UI_ANIM_FPS;
             if (delay == TIMEOUT_BLOCK || ticks < delay)
+                delay = ticks;
+        }
+        if (render->overlay.phase)
+        {
+            uint32_t elapsed = now - render->overlay.started;
+            unsigned frames = index_duration(&render->overlay);
+            unsigned frame = ui_clock_frame(elapsed);
+            int ticks = frame > render->overlay.painted ? 0 :
+                        frames ? ui_clock_poll_timeout(elapsed, frames + 1, HZ) :
+                        TIMEOUT_BLOCK;
+            if (ticks != TIMEOUT_BLOCK && (delay == TIMEOUT_BLOCK || ticks < delay))
                 delay = ticks;
         }
     }

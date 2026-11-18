@@ -846,20 +846,19 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
          * the WPS pixels until that page captures its animated underlay. */
         if (button == ACTION_WPS_BROWSE || button == ACTION_WPS_LYRICS)
         {
-            static const char wps_page, lyrics_page;
             /* A pending volume or seek value belongs to the playback page.
              * Close its trace and view before handing over the same pixels. */
             native_wps_close();
-            if (!lyrics_scene->handle)
-                ui_scene_interrupt();
-            ui_scene_enter(lyrics_scene, &wps_page, &lyrics_page, true);
+            ui_scene_interrupt();
+            ui_scene_open_modal(lyrics_scene, "lyrics-up");
             cider_spectrum_wps(false);
-            if (lyric_viewer() == GO_TO_ROOT)
+            int lyrics_ret = lyric_viewer();
+            ui_scene_close_modal(lyrics_scene, true, "lyrics-down");
+            if (lyrics_ret == GO_TO_ROOT)
             {
                 leave_playback();
                 return GO_TO_ROOT;
             }
-            ui_scene_enter(lyrics_scene, &lyrics_page, &wps_page, false);
             restore = true;
             continue;
         }

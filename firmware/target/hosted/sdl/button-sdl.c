@@ -120,7 +120,12 @@ static void touchscreen_event(int x, int y)
 #if defined(HAVE_SCROLLWHEEL) || ((defined(BUTTON_SCROLL_FWD) && defined(BUTTON_SCROLL_BACK)))
 static void scrollwheel_event(int x, int y)
 {
+    static uint32_t last;
+    uint32_t now = USEC_TIMER;
+    uint32_t dt = now - last;
+    unsigned velocity;
     int new_btn = 0;
+    last = now;
     if (y > 0)
         new_btn = BUTTON_SCROLL_BACK;
     else if (y < 0)
@@ -135,8 +140,11 @@ static void scrollwheel_event(int x, int y)
     buttonlight_on();
 #endif
     reset_poweroff_timer();
+    /* A notch within 50 ms is a spin: post velocity so list acceleration
+     * skips rows the way the player's wheel does. */
+    velocity = dt && dt < 50000 ? 400 : 80;
     if (new_btn)
-        button_queue_try_post(new_btn, 1<<24);
+        button_queue_try_post(new_btn, (1u << 31) | (1 << 24) | velocity);
 
     (void)x;
 }

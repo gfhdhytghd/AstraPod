@@ -102,6 +102,7 @@
 #include "screens/playback/cider.h"
 #include "speech/talk.h"
 #include "ui/animation.h"
+#include "ui/scene.h"
 
 /******************************* Globals ***********************************/
 static fb_data *lcd_fb;
@@ -430,7 +431,9 @@ int carousel_caption_font(bool bold)
 
 static int pf_vp_y;             /* viewport y-offset (status bar height) */
 static struct viewport pf_vp;   /* PF rendering viewport (below status bar) */
-static bool pf_show_statusbar;  /* this session's album_covers_statusbar */
+static bool pf_show_statusbar;  /* Cover Flow never shows the status bar */
+static struct ui_scene pf_scene;
+static bool pf_shown;
 /* Theme state left pushed for cleanup() to pop. cleanup() also runs after a
  * failed init(), so it cannot assume there is one. */
 static bool pf_theme_pushed;
@@ -4275,7 +4278,9 @@ static bool init(void)
     config_set_defaults(&pf_cfg); /* must appear before pf_config_load */
     pf_config_load();
 
-    pf_show_statusbar = global_settings.album_covers_statusbar;
+    memset(&pf_scene, 0, sizeof(pf_scene));
+    ui_scene_open_modal(&pf_scene, "covers-up");
+    pf_show_statusbar = false;
     pf_theme_pushed = true;
     FOR_NB_SCREENS(i)
         viewportmanager_theme_enable(i, pf_show_statusbar, NULL);
@@ -4283,10 +4288,11 @@ static bool init(void)
 
     pf_vp.buffer = &lcd_framebuffer_default;
     pf_vp.x = 0;
+    pf_vp.y = 0;
     pf_vp.width = LCD_WIDTH;
-    pf_vp.height = LCD_HEIGHT - pf_vp.y;
-    pf_vp_y = pf_vp.y;
-    pf_height = pf_vp.height;
+    pf_vp.height = LCD_HEIGHT;
+    pf_vp_y = 0;
+    pf_height = LCD_HEIGHT;
 
     struct ui_theme theme;
     ui_theme_snapshot(&theme);
@@ -4761,6 +4767,7 @@ static int album_covers_loop(unsigned *trace)
     long boost_until = current_tick + HZ;
     int spoken_index = -1;
     long speak_due = 0;         /* when the slide at rest is said; 0 none */
+    bool first_frame = true;
 
     while (true) {
         /* An artwork pass finished while the carousel was open. Slides loaded
@@ -4831,7 +4838,11 @@ static int album_covers_loop(unsigned *trace)
 
         bool inherited_inhibit = ui_flush_inhibited();
         ui_inhibit_flush(true);
-        button = get_custom_action(CONTEXT_PLUGIN, timeout, get_context_map);
+        if (first_frame)
+            button = ACTION_NONE;
+        else
+            button = get_custom_action(CONTEXT_PLUGIN, timeout, get_context_map);
+        first_frame = false;
         ui_inhibit_flush(inherited_inhibit);
         /* A hold of Play from now on is the random spin */
         if (!(button_status() & BUTTON_PLAY))
@@ -4869,7 +4880,8 @@ static int album_covers_loop(unsigned *trace)
             if (!carousel_reinit())
                 return GO_TO_PREVIOUS;
             model->set_initial(NULL);
-            sb_set_persistent_title(model_title(), Icon_NOICON, SCREEN_MAIN);
+            if (pf_show_statusbar)
+                sb_set_persistent_title(model_title(), Icon_NOICON, SCREEN_MAIN);
             lcd_set_viewport(&pf_vp);
             lcd_set_background(pf_bg_color);
             lcd_set_foreground(pf_fg_color);
@@ -5155,6 +5167,9 @@ static int album_covers_loop(unsigned *trace)
                     ui_perf_note_submit(submitted - submitting);
                 }
             }
+            if (pf_scene.capturing)
+                ui_scene_start(&pf_scene);
+            first_frame = false;
             dirty_top = LCD_HEIGHT;
             dirty_end = 0;
             dirty_left = LCD_WIDTH;
@@ -5234,7 +5249,8 @@ static int album_covers_loop(unsigned *trace)
             ret = quick_screen_current(button, NULL);
             if (ret == QUICKSCREEN_IN_USB) return GO_TO_ROOT;
             if (!create_pf_thread()) return GO_TO_PREVIOUS;
-            sb_set_persistent_title(model_title(), Icon_NOICON, SCREEN_MAIN);
+            if (pf_show_statusbar)
+                sb_set_persistent_title(model_title(), Icon_NOICON, SCREEN_MAIN);
             lcd_set_viewport(&pf_vp);
             lcd_set_background(pf_bg_color);
             lcd_set_foreground(pf_fg_color);
@@ -5257,7 +5273,8 @@ static int album_covers_loop(unsigned *trace)
                 return ret;   /* a GO_TO_* screen code */
             /* Handled in place -- restore the carousel's own status bar/viewport
              * after the menu overlay, and (on a rebuild) its colours. */
-            sb_set_persistent_title(model_title(), Icon_NOICON, SCREEN_MAIN);
+            if (pf_show_statusbar)
+                sb_set_persistent_title(model_title(), Icon_NOICON, SCREEN_MAIN);
             lcd_set_viewport(&pf_vp);
             if (ret == CAROUSEL_MENU_RELOADED)
             {
@@ -5361,7 +5378,12 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
         return GO_TO_PREVIOUS;
     }
     workspace = core_get_data_pinned(handle);
+    pf_shown = false;
     int result = carousel_body(m, selected_file);
+    if (pf_scene.backdrop_handle > 0)
+        ui_scene_close_modal(&pf_scene, pf_shown, "covers-down");
+    else
+        ui_scene_cancel(&pf_scene);
     end_pf_thread();
     workspace = NULL;
     core_unpin(handle);
@@ -5423,7 +5445,8 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
      * screen's title from the moment it opens rather than whatever the
      * previous screen left behind. The PF_MENU case in album_covers_loop()
      * re-sets it on the way back from the in-screen menu. */
-    sb_set_persistent_title(model_title(), Icon_NOICON, SCREEN_MAIN);
+    if (pf_show_statusbar)
+        sb_set_persistent_title(model_title(), Icon_NOICON, SCREEN_MAIN);
 
     /* Jump to selected_file's album if one was passed, otherwise the
      * currently-playing track's album, otherwise wherever was last viewed. */
@@ -5434,6 +5457,7 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
      * powers off, until Play is let go: see album_covers_loop(). */
     button_set_sw_poweroff_state(button_status() & BUTTON_PLAY);
     unsigned trace = 0;
+    pf_shown = true;
     ret = album_covers_loop(&trace);
     button_set_sw_poweroff_state(true);
 

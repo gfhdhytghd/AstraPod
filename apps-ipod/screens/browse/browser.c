@@ -267,6 +267,17 @@ static const char *browser_get_description(int selected_item, void *data,
     return NULL;
 }
 
+static const char *browser_get_index_key(int selected_item, void *data,
+                                         char *buf, size_t size)
+{
+    struct browser_context * local_tc=(struct browser_context *)data;
+
+    if (*local_tc->dirfilter == SHOW_ID3DB &&
+        browser_db_index_key(&tc, selected_item, buf, size))
+        return buf;
+    return NULL;
+}
+
 static bool browser_is_playing(int selected_item, void * data)
 {
     struct browser_context * local_tc=(struct browser_context *)data;
@@ -901,6 +912,7 @@ static int update_dir(struct browser_album_panel *panel)
     gui_synclist_set_count_down(list, id3db && browser_db_counts_down(&tc));
     gui_synclist_set_unnumbered(list, id3db && browser_db_unnumbered(&tc));
     gui_synclist_set_description_callback(list, browser_get_description);
+    gui_synclist_set_index_key_callback(list, browser_get_index_key);
     /* Art (cover callback + tall uniform rows) on album lists (album art) and
      * artist lists (artist art), each behind its own toggle -- so ordinary lists
      * and the whole off path never touch the art-resolution code.

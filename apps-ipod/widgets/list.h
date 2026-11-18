@@ -236,6 +236,7 @@ struct gui_synclist
     list_get_range *callback_get_item_range;    /* ...and where it sits */
     list_is_playing *callback_item_is_playing;
     list_get_name *callback_get_item_description;
+    list_get_name *callback_get_index_key;
     list_draw_status *callback_draw_status;
     /* Number from the last row up when a list is sorted newest first. The
      * oldest track stays numbered 1. */
@@ -288,6 +289,8 @@ extern void gui_synclist_set_unnumbered(struct gui_synclist * lists,
 /* Optional notes for the selected item. */
 extern void gui_synclist_set_description_callback(struct gui_synclist * lists,
                                                   list_get_name callback);
+extern void gui_synclist_set_index_key_callback(struct gui_synclist * lists,
+                                                list_get_name callback);
 /* Optional status cell for each visible row. */
 extern void gui_synclist_set_status_callback(struct gui_synclist * lists,
                                              list_draw_status callback);

@@ -86,6 +86,7 @@ int browser_db_take_pending_top_item(void);
 /* As browser_db_get_entry_name(), with what the row shows beside the name --
  * an album's year, under Show Year in Album Lists. For drawing only: the name
  * itself is what titles, keys and playlist names are made from. */
+bool browser_db_index_key(struct browser_context *c, int id, char *buf, size_t size);
 char* browser_db_get_display_name(struct browser_context *c, int id,
                                   char* buf, size_t bufsize);
 char* browser_db_get_entry_name(struct browser_context *c, int id,

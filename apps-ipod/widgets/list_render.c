@@ -3,6 +3,7 @@
 
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "config.h"
 #include "core_alloc.h"
@@ -11,6 +12,7 @@
 #include "kernel.h"
 #include "lang.h"
 #include "lcd.h"
+#include "rbpaths.h"
 #include "rbunicode.h"
 #include "scroll_engine.h"
 #include "settings/settings.h"
@@ -18,6 +20,7 @@
 #include "audio.h"
 #include "metadata.h"
 #include "draw/bmp.h"
+#include "draw/color.h"
 #include "draw/round_rect.h"
 #include "draw/scrollbar.h"
 #include "draw/text_wrap.h"
@@ -45,14 +48,14 @@ enum {
     MAX_WHEEL_LAG = 3 * ROW_UNIT,
     INDEX_MIN_ITEMS = 51,
     INDEX_WINDOW_F = 10,
-    INDEX_TRIGGER = 2,
-    INDEX_IN_F = 6,
+    INDEX_TRIGGER = 8,
     INDEX_HOLD_F = 20,
-    INDEX_OUT_F = 12,
-    INDEX_BOX = 72,
-    INDEX_PAD = 12,
+    INDEX_BOX = 96,
+    INDEX_INK_WIDTH = INDEX_BOX - 20,
+    INDEX_CAP_HEIGHT = 56,
     INDEX_SAMPLES = 12,
-    INDEX_BLEND = 13,
+    INDEX_SCRIM_RETAIN = 56,  /* 78% dim */
+    INDEX_BORDER_RETAIN = 225, /* 12% white */
 };
 
 struct list_pose {
@@ -72,10 +75,16 @@ struct list_motion {
 
 struct list_index {
     char key[16];
-    uint32_t started, sample_clock[INDEX_SAMPLES];
-    int sample_sel[INDEX_SAMPLES];
-    int samples, last_sel, opacity, scale;
-    unsigned phase, painted;
+    uint32_t deadline, samples_at[INDEX_SAMPLES];
+    int selections[INDEX_SAMPLES];
+    int samples, last_sel;
+    bool visible, fast;
+};
+
+struct index_glyph {
+    char key[16];
+    int width, height;
+    unsigned char mask[(INDEX_INK_WIDTH * INDEX_CAP_HEIGHT + 1) / 2];
 };
 
 struct native_list {
@@ -96,6 +105,10 @@ struct native_list {
     int selection;
     struct list_motion motion;
     struct list_index overlay;
+    int index_fonts[4];
+    bool index_fonts_loaded;
+    unsigned index_slot;
+    struct index_glyph index_cache[4];
     int row_shift, cursor_y;
     uint32_t marquee_started, marquee_frame;
     bool has_marquee;
@@ -129,6 +142,8 @@ static void refresh_tokens(struct native_list *render)
     ui_theme_snapshot(&render->theme);
     render->theme_generation = generation;
     render->colors_current = false;
+    for (unsigned i = 0; i < ARRAYLEN(render->index_cache); ++i)
+        render->index_cache[i].key[0] = '\0';
     font_unload(render->text_font);
     font_unload(render->title_font);
     font_unload(render->icon_font);
@@ -458,7 +473,7 @@ static void refresh_colors(struct native_list *render)
     album_palette_snapshot(&palette);
     static const enum ui_color_role list_colors[] = {
         UI_COLOR_BACKGROUND, UI_COLOR_FOREGROUND, UI_COLOR_MUTED, UI_COLOR_SELECTION,
-        UI_COLOR_SELECTED_TEXT, UI_COLOR_LIST_TINT,
+        UI_COLOR_SELECTED_TEXT, UI_COLOR_LIST_TINT, UI_COLOR_DIM,
     };
     for (unsigned i = 0; i < ARRAYLEN(list_colors); ++i)
     {
@@ -466,6 +481,7 @@ static void refresh_colors(struct native_list *render)
         uint32_t rgb = ui_theme_color(&render->theme, role, &palette);
         render->colors[role] = LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
     }
+    render->colors[UI_COLOR_DIM] = color_tone_bound(render->colors[UI_COLOR_DIM], 8, -1);
     render->palette_generation = generation;
     render->colors_current = true;
 }
@@ -1157,102 +1173,16 @@ static void index_key(struct native_list *render, char *out, size_t n)
 
 static void index_sample(struct list_index *index, int selection, uint32_t now)
 {
-    int i = 0;
-
-    while (i < index->samples &&
-           ui_clock_frame(now - index->sample_clock[i]) > INDEX_WINDOW_F)
-        i++;
-    if (i)
-    {
-        int keep = index->samples - i;
-        memmove(index->sample_clock, index->sample_clock + i,
-                (size_t)keep * sizeof(index->sample_clock[0]));
-        memmove(index->sample_sel, index->sample_sel + i,
-                (size_t)keep * sizeof(index->sample_sel[0]));
-        index->samples = keep;
-    }
     if (index->samples == INDEX_SAMPLES)
     {
-        memmove(index->sample_clock, index->sample_clock + 1,
-                (INDEX_SAMPLES - 1) * sizeof(index->sample_clock[0]));
-        memmove(index->sample_sel, index->sample_sel + 1,
-                (INDEX_SAMPLES - 1) * sizeof(index->sample_sel[0]));
-        index->samples = INDEX_SAMPLES - 1;
+        memmove(index->samples_at, index->samples_at + 1,
+                (INDEX_SAMPLES - 1) * sizeof(index->samples_at[0]));
+        memmove(index->selections, index->selections + 1,
+                (INDEX_SAMPLES - 1) * sizeof(index->selections[0]));
+        index->samples--;
     }
-    if (!index->samples || index->sample_sel[index->samples - 1] != selection ||
-        ui_clock_frame(now - index->sample_clock[index->samples - 1]) >= 1)
-    {
-        index->sample_clock[index->samples] = now;
-        index->sample_sel[index->samples] = selection;
-        index->samples++;
-    }
-}
-
-static int index_moved(const struct list_index *index, int selection)
-{
-    int moved = index->samples ? selection - index->sample_sel[0] : 0;
-    return moved < 0 ? -moved : moved;
-}
-
-static unsigned index_duration(const struct list_index *index)
-{
-    if (index->phase == 1)
-        return ui_theme_duration(INDEX_IN_F);
-    if (index->phase == 3)
-        return ui_theme_duration(INDEX_HOLD_F);
-    if (index->phase == 4)
-        return ui_theme_duration(INDEX_OUT_F);
-    return 0;
-}
-
-static void index_pose(struct list_index *index, unsigned frame, unsigned frames)
-{
-    if (index->phase == 1)
-    {
-        unsigned t = frames ? MIN(frame, frames) : 1;
-        unsigned d = frames ? frames : 1;
-        if (!frames)
-            t = d = 1;
-        if (!t)
-            t = 1;
-        index->opacity = UI_FULL_OPACITY * (int)t / (int)d;
-        index->scale = 90 + 10 * (int)t / (int)d;
-        if (frame >= frames)
-        {
-            index->phase = 2;
-            index->opacity = UI_FULL_OPACITY;
-            index->scale = 100;
-        }
-    }
-    else if (index->phase == 3)
-    {
-        index->opacity = UI_FULL_OPACITY;
-        index->scale = 100;
-        if (frame >= frames)
-        {
-            index->phase = 4;
-            index->started = USEC_TIMER;
-            index->painted = 0;
-        }
-    }
-    else if (index->phase == 4)
-    {
-        unsigned t = frames ? MIN(frame, frames) : 1;
-        unsigned d = frames ? frames : 1;
-        index->opacity = UI_FULL_OPACITY - UI_FULL_OPACITY * (int)t / (int)d;
-        index->scale = 100;
-        if (frame >= frames)
-        {
-            index->phase = 0;
-            index->opacity = 0;
-            index->samples = 0;
-        }
-    }
-    else
-    {
-        index->opacity = UI_FULL_OPACITY;
-        index->scale = 100;
-    }
+    index->samples_at[index->samples] = now;
+    index->selections[index->samples++] = selection;
 }
 
 static bool step_index(struct native_list *render)
@@ -1260,9 +1190,7 @@ static bool step_index(struct native_list *render)
     struct gui_synclist *list = render->owner;
     struct list_index *index = &render->overlay;
     uint32_t now = USEC_TIMER;
-    char key[16];
-    bool fast;
-    int jumped;
+    uint32_t window = ui_frame_clock(INDEX_WINDOW_F);
 
     if (!list || list->nb_items < INDEX_MIN_ITEMS)
     {
@@ -1271,78 +1199,251 @@ static bool step_index(struct native_list *render)
         return false;
     }
 
-    jumped = index->last_sel >= 0 ? list->selected_item - index->last_sel : 0;
-    if (jumped < 0)
-        jumped = -jumped;
-    index->last_sel = list->selected_item;
-    index_sample(index, list->selected_item, now);
-    fast = jumped >= INDEX_TRIGGER ||
-           index_moved(index, list->selected_item) >= INDEX_TRIGGER;
-    index_key(render, key, sizeof(key));
-    if (fast)
+    int selection = list->selected_item;
+    bool changed = selection != index->last_sel;
+    bool was_visible = index->visible;
+    /* A selection that just changed was still on screen at this sample. */
+    if (changed && index->last_sel >= 0)
+        index_sample(index, index->last_sel, now);
+    index->last_sel = selection;
+
+    for (int i = index->samples - 1; i >= 0; i--)
     {
-        if (strcmp(index->key, key))
-            snprintf(index->key, sizeof(index->key), "%s", key);
-        if (index->phase == 0 || index->phase == 4)
+        if (now - index->samples_at[i] >= window)
+            break;
+        if (abs(selection - index->selections[i]) >= INDEX_TRIGGER)
         {
-            index->phase = 1;
-            index->started = now;
-            index->painted = 0;
+            index->deadline = index->samples_at[i] + window;
+            index->fast = index->visible = true;
+            goto update_key;
         }
-        else if (index->phase == 3)
-            index->phase = 2;
     }
-    else if (index->phase == 1 || index->phase == 2)
+    if (index->fast)
     {
-        index->phase = 3;
-        index->started = now;
-        index->painted = 0;
+        if ((int32_t)(now - index->deadline) < 0)
+            index->deadline = now;
+        index->deadline += ui_frame_clock(INDEX_HOLD_F);
+        index->fast = false;
+    }
+    if ((int32_t)(now - index->deadline) >= 0)
+        index->visible = false;
+
+update_key:
+    if (index->visible && (changed || !was_visible))
+        index_key(render, index->key, sizeof(index->key));
+    return index->visible;
+}
+
+/* The Rockbox alpha bitmap packs inverted coverage low nibble first.
+ * Monochrome fonts use columns of eight vertical pixels. */
+static int index_coverage(const struct font *font, const unsigned char *bits,
+                          int width, int x, int y)
+{
+    if (font->depth)
+    {
+        int pixel = y * width + x;
+        return 15 - ((bits[pixel / 2] >> (4 * (pixel & 1))) & 15);
+    }
+    return bits[(y / 8) * width + x] & (1u << (y & 7)) ? 15 : 0;
+}
+
+static bool index_has_char(struct font *font, ucschar_t ch)
+{
+    if (ch < font->firstchar || ch - font->firstchar >= (unsigned)font->size)
+        return false;
+    int width = font_get_width(font, ch);
+    if (ch == (ucschar_t)font->defaultchar || width != font_get_width(font, font->defaultchar))
+        return true;
+
+    /* Large Unicode fonts can store their default glyph for holes. */
+    size_t bytes = font->depth ? (width * font->height + 1) / 2 :
+                   width * ((font->height + 7) / 8);
+    const unsigned char *fallback = font_get_bits(font, font->defaultchar);
+    const unsigned char *bits = font_get_bits(font, ch);
+    return memcmp(bits, fallback, bytes) != 0;
+}
+
+static int index_font(struct native_list *render, const ucschar_t *chars, int count)
+{
+    int fonts[] = {render->title_font, render->text_font, FONT_UI,
+                   render->index_fonts[0], render->index_fonts[1],
+                   render->index_fonts[2], render->index_fonts[3]};
+    int best = -1;
+    unsigned height = 0;
+    for (unsigned i = 0; i < ARRAYLEN(fonts); i++)
+    {
+        int id = fonts[i];
+        if (id < 0)
+            continue;
+        font_lock(id, true);
+        struct font *font = font_get(id);
+        if (font->height > height)
+        {
+            int n = 0;
+            while (n < count && index_has_char(font, chars[n]))
+                n++;
+            if (n == count)
+            {
+                height = font->height;
+                best = id;
+            }
+        }
+        font_lock(id, false);
+    }
+    return best;
+}
+
+static void scale_index_glyph(struct index_glyph *glyph, const unsigned char *ink,
+                              int stride, int width, int height)
+{
+    glyph->height = MAX(1, MIN(INDEX_CAP_HEIGHT, INDEX_INK_WIDTH * height / width));
+    glyph->width = MAX(1, MIN(INDEX_INK_WIDTH,
+                       (glyph->height * width + height / 2) / height));
+    memset(glyph->mask, 0, sizeof(glyph->mask));
+    /* Map pixel centres in 8.8 fixed point and bilinearly sample coverage. */
+    for (int y = 0; y < glyph->height; y++)
+    {
+        int sy = (2 * y + 1) * height * 128 / glyph->height - 128;
+        sy = MAX(0, MIN(sy, (height - 1) * 256));
+        const unsigned char *top = ink + (sy / 256) * stride;
+        const unsigned char *bottom = ink + MIN(sy / 256 + 1, height - 1) * stride;
+        int fy = sy % 256;
+        for (int x = 0; x < glyph->width; x++)
+        {
+            int sx = (2 * x + 1) * width * 128 / glyph->width - 128;
+            sx = MAX(0, MIN(sx, (width - 1) * 256));
+            int left = sx / 256, right = MIN(left + 1, width - 1);
+            int fx = sx % 256;
+            int a = top[left] * (256 - fx) + top[right] * fx;
+            int b = bottom[left] * (256 - fx) + bottom[right] * fx;
+            int alpha = 15 - ((a * (256 - fy) + b * fy + 32768) >> 16);
+            int pixel = y * glyph->width + x;
+            glyph->mask[pixel / 2] |= alpha << (4 * (pixel & 1));
+        }
+    }
+}
+
+static void raster_index_key(struct native_list *render, struct index_glyph *glyph)
+{
+    ucschar_t chars[sizeof(glyph->key) - 1];
+    const unsigned char *text = (const unsigned char *)glyph->key;
+    int count = 0;
+    while (*text && count < (int)ARRAYLEN(chars))
+        text = utf8decode(text, &chars[count++]);
+    int id = index_font(render, chars, count);
+    if (id < 0)
+        id = render->title_font >= 0 ? render->title_font : FONT_UI;
+
+    font_lock(id, true);
+    struct font *font = font_get(id);
+    int height = font->height, width = 0;
+    for (int i = 0; i < count; i++)
+        width += font_get_width(font, chars[i]);
+
+    int handle = width && height ? core_alloc_free_space((size_t)width * height) : -1;
+    if (handle > 0)
+    {
+        unsigned char *ink = core_get_data_pinned(handle);
+        int left = width, top = height, right = 0, bottom = 0;
+        int start = 0;
+        for (int i = 0; i < count; i++)
+        {
+            int w = font_get_width(font, chars[i]);
+            const unsigned char *bits = font_get_bits(font, chars[i]);
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int coverage = index_coverage(font, bits, w, x, y);
+                    ink[y * width + start + x] = coverage;
+                    if (coverage)
+                    {
+                        left = MIN(left, start + x);
+                        right = MAX(right, start + x + 1);
+                        top = MIN(top, y);
+                        bottom = MAX(bottom, y + 1);
+                    }
+                }
+            }
+            start += w;
+        }
+        if (right > left)
+            scale_index_glyph(glyph, ink + top * width + left, width,
+                              right - left, bottom - top);
+        core_put_data_pinned(ink);
+        core_free(handle);
+    }
+    font_lock(id, false);
+}
+
+static const struct index_glyph *index_glyph(struct native_list *render)
+{
+    const char *key = render->overlay.key;
+    for (unsigned i = 0; i < ARRAYLEN(render->index_cache); i++)
+        if (strcmp(render->index_cache[i].key, key) == 0)
+            return &render->index_cache[i];
+
+    if (!render->index_fonts_loaded)
+    {
+        /* Largest bundled text faces, including the dedicated figures face. */
+        static const char * const paths[] = {
+            FONT_DIR "/30-noto-serif-figures.fnt",
+            FONT_DIR "/28-noto-serif.fnt",
+            FONT_DIR "/26-noto-sans-medium.fnt",
+            FONT_DIR "/24-noto-serif.fnt",
+        };
+        for (unsigned i = 0; i < ARRAYLEN(paths); i++)
+            render->index_fonts[i] = font_load_ex(paths[i], 0, 8);
+        render->index_fonts_loaded = true;
     }
 
-    if (!index->phase)
-        return false;
-    index_pose(index, ui_clock_frame(now - index->started), index_duration(index));
-    index->painted = ui_clock_frame(now - index->started);
-    return index->phase != 0;
+    struct index_glyph *glyph = &render->index_cache[render->index_slot];
+    render->index_slot = (render->index_slot + 1) % ARRAYLEN(render->index_cache);
+    snprintf(glyph->key, sizeof(glyph->key), "%s", key);
+    glyph->width = glyph->height = 0;
+    raster_index_key(render, glyph);
+    return glyph;
 }
 
 static void paint_index(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     struct native_list *render = view->data;
-    const struct list_index *index = &render->overlay;
-    struct ui_rect area = frame->bounds;
-    int font, text_w = 0, text_h = 0, side, blend;
-    unsigned int panel, fg;
+    if (!render->overlay.key[0])
+        return;
 
-    if (!index->phase || !index->key[0] || index->opacity <= 0)
+    struct ui_rect area = frame->bounds;
+    area.x += (area.width - INDEX_BOX) / 2;
+    area.y += (area.height - INDEX_BOX) / 2;
+    area.width = area.height = INDEX_BOX;
+    struct viewport vp;
+    if (!set_clip(&vp, frame->clip, area, FONT_UI, LCD_WHITE))
         return;
-    font = render->title_font >= 0 ? render->title_font : render->text_font;
-    if (font < 0)
-        return;
-    font_getstringsize((const unsigned char *)index->key, &text_w, &text_h, font);
-    side = MAX(INDEX_BOX, text_w + 2 * INDEX_PAD);
-    side = MAX(side, text_h + 2 * INDEX_PAD);
-    side = MAX(1, side * index->scale / 100);
-    area.x += MAX(0, (area.width - side) / 2);
-    area.y += MAX(0, (area.height - side) / 2);
-    area.width = side;
-    area.height = side;
-    panel = render->colors[UI_COLOR_MUTED];
-    fg = render->colors[UI_COLOR_FOREGROUND];
-    blend = INDEX_BLEND * index->opacity / UI_FULL_OPACITY;
-    if (blend > 0)
+    const struct index_glyph *glyph = index_glyph(render);
+    unsigned dim = render->colors[UI_COLOR_DIM];
+    int right = vp.x + vp.width;
+    for (int y = vp.y; y < vp.y + vp.height; y++)
     {
-        struct viewport vp;
-        if (set_clip(&vp, frame->clip, area, font, panel))
+        fb_data *row = FBADDR(vp.x, y);
+        ui_blit_tint(row, row, vp.width, INDEX_SCRIM_RETAIN, dim);
+        if (y == area.y || y == area.y + INDEX_BOX - 1)
+            ui_blit_tint(row, row, vp.width, INDEX_BORDER_RETAIN, LCD_WHITE);
+        else
         {
-            struct viewport *prior = lcd_set_viewport(&vp);
-            lcd_fillrect(0, 0, vp.width, vp.height);
-            if (blend < INDEX_BLEND)
-                lcd_blendrect(0, 0, vp.width, vp.height, INDEX_BLEND - blend);
-            lcd_set_viewport(prior);
+            if (vp.x == area.x)
+                ui_blit_tint(row, row, 1, INDEX_BORDER_RETAIN, LCD_WHITE);
+            if (right == area.x + INDEX_BOX)
+                ui_blit_tint(row + vp.width - 1, row + vp.width - 1, 1, INDEX_BORDER_RETAIN, LCD_WHITE);
         }
     }
-    draw_text(render, frame->clip, area, font, fg, index->key, false, 0, true);
+    if (glyph->width > 0)
+    {
+        struct viewport *prior = lcd_set_viewport(&vp);
+        lcd_alpha_bitmap_part(glyph->mask, 0, 0, glyph->width,
+                              area.x - vp.x + (INDEX_BOX - glyph->width) / 2,
+                              area.y - vp.y + (INDEX_BOX - glyph->height) / 2,
+                              glyph->width, glyph->height);
+        lcd_set_viewport(prior);
+    }
 }
 
 static const struct ui_view_ops bg_ops = { .paint = paint_background };
@@ -1434,7 +1535,7 @@ static void draw_list(struct gui_synclist *list, bool status_only)
         memset(&render->overlay, 0, sizeof(render->overlay));
         render->overlay.last_sel = -1;
     }
-    if (render->motion.visible)
+    if (render->motion.visible || render->overlay.visible)
         status_only = false;
 
     refresh_tokens(render);
@@ -1477,7 +1578,7 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     ui_view_append(&render->root, &render->rows);
     add_view(render, &render->notes, g.notes, &note_ops, render);
     if (step_index(render))
-        add_view(render, &render->index_view, g.rows, &index_ops, render);
+        add_view(render, &render->index_view, g.background, &index_ops, render);
     ui_page_init(&render->page, &render->root);
     render->page.focus = &render->rows;
     render->page.damage = g.background;
@@ -1600,14 +1701,11 @@ static int motion_deadline(const struct gui_synclist *list, bool poll)
             if (delay == TIMEOUT_BLOCK || ticks < delay)
                 delay = ticks;
         }
-        if (render->overlay.phase)
+        if (render->overlay.visible)
         {
-            uint32_t elapsed = now - render->overlay.started;
-            unsigned frames = index_duration(&render->overlay);
-            unsigned frame = ui_clock_frame(elapsed);
-            int ticks = frame > render->overlay.painted ? 0 :
-                        frames ? ui_clock_poll_timeout(elapsed, frames + 1, HZ) :
-                        TIMEOUT_BLOCK;
+            int32_t remaining = render->overlay.deadline - now;
+            int ticks = remaining <= 0 ? 0 :
+                        poll ? (int64_t)remaining * HZ / 1000000 : TIMEOUT_BLOCK;
             if (ticks != TIMEOUT_BLOCK && (delay == TIMEOUT_BLOCK || ticks < delay))
                 delay = ticks;
         }

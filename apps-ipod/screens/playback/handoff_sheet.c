@@ -35,6 +35,7 @@
 #define NOTE_GRID 96
 #define OPEN_FRAMES ANIM_F(16)
 #define CLOSE_FRAMES ANIM_F(12)
+#define ACCEPT_HOLD_FRAMES ANIM_F(90)
 #define SHEET_DIM_PERCENT 35
 #define TEXT_CONTRAST 500
 #define CONTRAST_STEP 4
@@ -323,9 +324,21 @@ static void paint_background(const struct ui_view *v, const struct ui_view_frame
     native_wps_paint_background(&vp, s->background, style->bg);
     if (s->background > 0)
     {
+        /* Keep the WPS artwork across the whole sheet. Ramp its palette
+         * tint from clear to at most one third over the full height. */
+        unsigned tint = style->panel_alpha * UI_FULL_OPACITY / (15 * 3);
+        if (tint)
+        {
+            for (int row = vp.y; row < vp.y + vp.height; ++row)
+            {
+                unsigned ink = tint * row / (LCD_HEIGHT - 1);
+                if (!ink)
+                    continue;
+                fb_data *pixels = FBADDR(vp.x, row);
+                ui_blit_tint(pixels, pixels, vp.width, UI_FULL_OPACITY - ink, style->panel);
+            }
+        }
         int y = MAX(0, MIN(s->layout.text_y, s->layout.button_y - style->error_offset) - vp.y);
-        lcd_set_foreground(style->panel);
-        lcd_blendrect(0, y, vp.width, vp.height - y, style->panel_alpha);
         fit_sheet_ink(&s->ink, &vp, y, style->wps_fg);
     }
     lcd_set_viewport(old);
@@ -560,6 +573,37 @@ void handoff_sheet_interrupt(void)
     release_presentation(p);
 }
 
+static void sheet_takeover(struct sheet_presentation *p, int action)
+{
+    if (!p->interrupted &&
+        (action == SYS_USB_CONNECTED || action == SYS_USB_DISCONNECTED ||
+         action == SYS_POWEROFF || action == SYS_REBOOT))
+    {
+        handoff_sheet_interrupt();
+        default_event_handler(action);
+    }
+}
+
+/* The protocol has completed. Hold the final image while still letting
+ * system events take over the display. The close tween starts afterwards. */
+static void hold_accepted_sheet(struct sheet_presentation *p, uint32_t started)
+{
+    uint32_t duration = ui_frame_clock(ACCEPT_HOLD_FRAMES);
+    while (!p->interrupted)
+    {
+        uint32_t elapsed = (uint32_t)USEC_TIMER - started;
+        if (elapsed >= duration)
+            break;
+        int ticks = (uint64_t)(duration - elapsed) * HZ / 1000000u;
+        int action = get_action(CONTEXT_STD, ticks);
+        sheet_takeover(p, action);
+        if (!p->interrupted && IS_SYSEVENT(action) && action != SYS_USB_CONFIRM)
+            default_event_handler(action);
+        if (!ticks || action != ACTION_NONE)
+            yield();
+    }
+}
+
 static void close_native_sheet(struct sheet_presentation *p)
 {
     if (!p->card || p->offset == LCD_HEIGHT)
@@ -644,13 +688,7 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
         const char *target = view->target;
         int reason = view->reason;
         int action = get_action(CONTEXT_STD, ticks);
-        if (!p->interrupted &&
-            (action == SYS_USB_CONNECTED || action == SYS_USB_DISCONNECTED ||
-             action == SYS_POWEROFF || action == SYS_REBOOT))
-        {
-            handoff_sheet_interrupt();
-            default_event_handler(action);
-        }
+        sheet_takeover(p, action);
         if (p->interrupted)
         {
             /* The system modal took over the display, not the proposal.
@@ -681,6 +719,15 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
         {
             ui_perf_end(p->open_trace);
             p->open_trace = 0;
+            if (result == DIALOG_ACCEPT)
+            {
+                uint32_t accepted = USEC_TIMER;
+                if (!p->offset)
+                    draw_progress(view, p, layout, painted);
+                hold_accepted_sheet(p, accepted);
+            }
+            if (p->interrupted)
+                return result;
             if (p->close_frames)
                 close_native_sheet(p);
             else if (p->card)

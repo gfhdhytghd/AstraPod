@@ -37,7 +37,7 @@ static unsigned pf_bg_rb, pf_bg_g;
 #define fabs fabsr
 #define global_settings dummy
 static struct { int album_covers_parallel_slides; } dummy;
-static int extra_fade;
+static int extra_fade, flow_mix;
 ''' + between(geometry, 'static void recalc_offsets', 'static int slide_x_range') + between(
     source, 'struct pf_fade\n', '/**\n * Render a single slide') + between(
     source, 'static int slide_voff', '/* The rows a slide') + between(

@@ -2419,9 +2419,12 @@ static void flow_update_mix(void)
 
 /* Pull both piles inward together. Inner slot spacing is chosen from the
  * projected cover width so the pair meets near the middle at full tilt. */
+/* About twelve degrees of extra yaw on the two inner covers. */
+#define FLOW_INNER_TILT (12 * IANGLE_MAX / 360)
+
 static PFreal flow_inner_slot(void)
 {
-    PFreal projected = fmul(DISPLAY_WIDTH * PFREAL_ONE, fcos(itilt));
+    PFreal projected = fmul(DISPLAY_WIDTH * PFREAL_ONE, fcos(itilt + FLOW_INNER_TILT));
     return MAX(0, (projected - auto_slide_spacing) / 2);
 }
 
@@ -2440,6 +2443,7 @@ static void flow_tilt(struct slide_data *slide, int side, PFreal progress,
 {
     PFreal slot = inner + fmul(auto_slide_spacing, progress);
     slide->angle += side * fmul(itilt, fmul(flow_mix, PFREAL_ONE - progress));
+    slide->angle += side * fmul(FLOW_INNER_TILT, flow_mix);
     slide->cx = normal_x + fmul(flow_mix, -side * slot - normal_x);
 }
 
@@ -3613,6 +3617,11 @@ static void cull_side(struct slide_data *side, const int *alpha,
     }
 }
 
+static int flow_brightness(int alpha, int mix)
+{
+    return alpha + fmul(256 - alpha, mix);
+}
+
 static void coverflow_render(void)
 {
     const int nleft = ALBUM_COVERS_NUM_SLIDES;
@@ -3684,6 +3693,18 @@ static void coverflow_render(void)
 
         if (ALBUM_COVERS_NUM_SLIDES <= 2)   /* fading out center slide */
             center_alpha = (step > 0) ? 256 - fade / 2 : 128 + fade / 2;
+    }
+
+    if (flow_mix)
+    {
+        for (index = 0; index < nleft; index++)
+        {
+            if (index || !redraw_left_0)
+                left_alpha[index] = flow_brightness(left_alpha[index], flow_mix);
+            if (index || !redraw_right_0)
+                right_alpha[index] = flow_brightness(right_alpha[index], flow_mix);
+        }
+        center_alpha = flow_brightness(center_alpha, flow_mix);
     }
 
     cull_side(left_slides, left_alpha, center_alpha, left_to, false);
@@ -3813,6 +3834,14 @@ static void coverflow_animate(int s, int tick, int neg, PFreal ftick)
         PFreal normal_x = incoming->cx;
         PFreal inner = flow_inner_slot();
         flow_shift_piles(inner);
+        /* The next card in the departing pile crosses the outer transition. */
+        struct slide_data *outer = s > 0 ? &left_slides[0] : &right_slides[0];
+        outer->angle += s * fmul(fmul(FLOW_INNER_TILT, flow_mix), PFREAL_ONE - ftick);
+        if (ALBUM_COVERS_NUM_SLIDES > 1)
+        {
+            struct slide_data *following = s > 0 ? &right_slides[1] : &left_slides[1];
+            following->angle -= s * fmul(fmul(FLOW_INNER_TILT, flow_mix), ftick);
+        }
         flow_tilt(&center_slide, s, ftick, center_slide.cx, inner);
         flow_tilt(incoming, -s, PFREAL_ONE - ftick, normal_x, inner);
     }
@@ -4849,6 +4878,8 @@ static int album_covers_loop(void)
                     coverflow_idle();
                     PFreal inner = flow_inner_slot();
                     flow_shift_piles(inner);
+                    left_slides[0].angle += fmul(FLOW_INNER_TILT, flow_mix);
+                    right_slides[0].angle -= fmul(FLOW_INNER_TILT, flow_mix);
                     flow_tilt(&center_slide, flow_landed_direction, 0, 0, inner);
                 }
                 /* The covers no longer wipe the caption on their way past, so

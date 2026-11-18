@@ -26,9 +26,15 @@ static bool flat_view(void) { return flat; }
 static int flat_ticks(int ms) { return ms * HZ / 1000; }
 ''' + region(src, 'static void flat_note_scroll', 'static void coverflow_idle') + region(
     geom, 'static void recalc_offsets', 'static void coverflow_animate') + region(
-    src, 'static void coverflow_animate', 'static void flat_animate') + '''
+    src, 'static void coverflow_animate', 'static void flat_animate') + region(
+    src, 'static int flow_brightness', 'static void coverflow_render(void)\n{') + '''
 int main(void)
 {
+    for(int alpha=0;alpha<=256;alpha++) {
+        assert(flow_brightness(alpha,0)==alpha);
+        assert(flow_brightness(alpha,PFREAL_ONE)==256);
+        assert(flow_brightness(alpha,PFREAL_HALF)==(alpha+256)/2);
+    }
     recalc_offsets();
     coverflow_idle();
     for (int i=0; i<6; i++) {
@@ -43,8 +49,9 @@ int main(void)
         for (int tick=0; tick<65536; tick+=2048) {
             coverflow_animate(s,tick,65536-tick,tick>>6);
             struct slide_data *incoming=s>0 ? right_slides : left_slides;
-            assert(abs(center_slide.angle-s*itilt)<=1);
-            assert(abs(incoming->angle+s*itilt)<=1);
+            assert(abs(center_slide.angle-s*(itilt+FLOW_INNER_TILT))<=1);
+            assert(abs(incoming->angle+s*(itilt+FLOW_INNER_TILT))<=1);
+            assert(left_slides[2].angle==itilt && right_slides[2].angle==-itilt);
             assert(s*center_slide.cx<=0 && s*incoming->cx>=0);
         }
     }

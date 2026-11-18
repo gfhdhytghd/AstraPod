@@ -383,6 +383,8 @@ static struct
 static bool codec_skip_pending = false;
 static int  codec_skip_status;
 static bool codec_seeking = false;          /* Codec seeking ack expected? */
+static bool seek_now;
+static volatile unsigned int seek_serial;
 static unsigned int position_key = 0;
 
 #define PLAYBACK_LOG_PATH LIB_PLAYBACK_LOG
@@ -1635,6 +1637,7 @@ static bool halt_decoding_track(bool stop)
 
     codec_skip_pending = false;
     codec_seeking = false;
+    seek_now = false;
     /* whatever track change was pending is not happening now */
     pause_on_track_change = false;
 
@@ -1680,7 +1683,15 @@ static void audio_complete_codec_seek(void)
      * If seeking from seek mode, 'ff_rw_mode' is true. */
     if (codec_seeking)
     {
-        audio_ff_rewind_end();
+        if (seek_now)
+        {
+            seek_now = ff_rw_mode = false;
+            pcmbuf_seek_restart();
+            audio_pcmbuf_sync_position();
+            seek_serial++;
+        }
+        else
+            audio_ff_rewind_end();
         codec_seeking = false; /* set _after_ the call! */
     }
     /* else it's waiting and we must repond */
@@ -3732,7 +3743,7 @@ static void audio_on_pre_ff_rewind(void)
 
 /* Seek the playback of the current track to the specified time
    (Q_AUDIO_FF_REWIND) */
-static void audio_on_ff_rewind(long time)
+static void audio_on_ff_rewind(long time, bool immediate)
 {
     logf("%s(%ld)", __func__, time);
 
@@ -3765,7 +3776,8 @@ static void audio_on_ff_rewind(long time)
                              track_event_flags | TEF_REWIND, id3);
         }
 
-        id3->elapsed = time;
+        if (!immediate)
+            id3->elapsed = time;
         queue_reply(&audio_queue, 1);
 
         bool haltres = halt_decoding_track(pending == TRACK_SKIP_AUTO);
@@ -3827,6 +3839,7 @@ static void audio_on_ff_rewind(long time)
             ci_id3->offset = 0;
         }
 
+        seek_now = immediate;
         codec_seek(time);
         return;
         }
@@ -3973,9 +3986,10 @@ void audio_playback_handler(struct queue_event *ev)
             audio_on_pre_ff_rewind();
             break;
 
+        case Q_AUDIO_SEEK_NOW:
         case Q_AUDIO_FF_REWIND:
             LOGFQUEUE("playback < Q_AUDIO_FF_REWIND");
-            audio_on_ff_rewind(ev->data);
+            audio_on_ff_rewind(ev->data, ev->id == Q_AUDIO_SEEK_NOW);
             break;
 
         case Q_AUDIO_FLUSH:
@@ -4528,6 +4542,16 @@ void audio_ff_rewind(long time)
 {
     LOGFQUEUE("audio > audio Q_AUDIO_FF_REWIND");
     audio_queue_post(Q_AUDIO_FF_REWIND, time);
+}
+
+void audio_seek_now(long time)
+{
+    audio_queue_post(Q_AUDIO_SEEK_NOW, time);
+}
+
+unsigned int audio_seek_serial(void)
+{
+    return seek_serial;
 }
 
 /* Clear all but the currently playing track then rebuffer */

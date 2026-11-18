@@ -2,6 +2,7 @@
 #ifndef CIDER_WPS_H
 #define CIDER_WPS_H
 #include <stdbool.h>
+#include <stdint.h>
 #include "config.h"
 struct bitmap;
 struct mp3entry;
@@ -12,6 +13,7 @@ void cider_wps_update(struct wps_state *state);
 void cider_wps_enter(void);
 bool cider_wps_action(int action);
 bool cider_wps_poll(void);
+uint32_t cider_wps_clock(long *sample);
 int wps_art_handle(int slot);
 bool wps_art_bitmap(int handle, struct bitmap **bitmap);
 bool wps_art_pin(int handle, bool pin);
@@ -19,6 +21,7 @@ int cider_wps_volume(bool *muted);
 bool cider_wps_show_art(void);
 #else
 static inline bool cider_wps_poll(void) { return true; }
+static inline uint32_t cider_wps_clock(long *sample) { *sample = 0; return 0; }
 #include "audio/playback.h"
 #include "audio/buffering.h"
 static inline void cider_wps_enter(void) {}

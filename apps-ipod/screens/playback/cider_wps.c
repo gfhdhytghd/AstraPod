@@ -108,6 +108,12 @@ void cider_wps_update(struct wps_state *state)
     state->nid3 = NULL;
     state->paused = !source.available || !source.rate;
 }
+uint32_t cider_wps_clock(long *sample)
+{
+    *sample = source.position;
+    return source.seq;
+}
+
 bool cider_wps_poll(void)
 {
     if (!cider_play_pending()) return true;

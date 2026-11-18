@@ -24,6 +24,7 @@ size_t pcmbuf_init(void *bufend);
 /* Playback */
 void pcmbuf_play_start(void);
 void pcmbuf_play_stop(void);
+void pcmbuf_seek_restart(void);
 void pcmbuf_pause(bool pause);
 
 /* Track change */

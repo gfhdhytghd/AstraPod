@@ -24,10 +24,12 @@
 #include "logf.h"
 #include "settings/settings.h"
 #include "log_viewer.h"
-#include "input/action.h"
 #include "widgets/splash.h"
 #include "system/strutil.h"
 #include "system/shutdown.h"   /* default_event_handler */
+#include "draw/viewport.h"
+#include "ui/retained.h"
+#include "ui/scene.h"
 int compute_nb_lines(int w, struct font* font)
 {
     int i, nb_lines;
@@ -73,116 +75,97 @@ int compute_nb_lines(int w, struct font* font)
     return nb_lines;
 }
 
+struct log_view {
+    int line, font, line_height;
+};
+
+static void paint_log(const struct ui_view *view, const struct ui_view_frame *frame)
+{
+    const struct log_view *log = view->data;
+    struct viewport vp = {
+        .x = frame->bounds.x, .y = frame->bounds.y,
+        .width = frame->bounds.width, .height = frame->bounds.height,
+        .flags = VP_DEFAULT_FLAGS, .font = log->font,
+        .drawmode = DRMODE_SOLID, .buffer = &lcd_framebuffer_default,
+        .fg_pattern = LCD_BLACK, .bg_pattern = LCD_WHITE,
+    };
+    struct viewport *last = lcd_set_viewport(&vp);
+    lcd_clear_viewport();
+
+    if (logfindex != 0 || logfwrap)
+    {
+        int next = logfwrap ? logfindex : 0;
+        int line = 0, x = 0, y = 0;
+        struct font *font = font_get(log->font);
+
+        do
+        {
+            unsigned char byte = logfbuffer[next];
+            int width = byte ? font_get_width(font, byte) : 0;
+            if (!byte || x + width > vp.width)
+            {
+                if (line >= log->line)
+                    y += log->line_height;
+                line++;
+                x = 0;
+            }
+            if (byte && line >= log->line && y < vp.height)
+            {
+                unsigned char text[] = {byte, 0};
+                lcd_putsxy(x, y, text);
+            }
+            x += width;
+            if (++next == MAX_LOGF_SIZE)
+                next = 0;
+        } while (next != logfindex && y < vp.height);
+    }
+    lcd_set_viewport(last);
+}
+
+static const struct ui_view_ops log_ops = { .paint = paint_log };
+
 bool log_viewer_show(void)
 {
-    int action;
-    int w, h, i, index;
-    int fontnr;
-    int cur_x, cur_y, delta_y, delta_x;
-    struct font* font;
-    int user_index;/* user_index will be number of the first line to display (warning: line!=logf entry) */
-    char buf[2];
-    
-    fontnr = lcd_getfont();
-    font = font_get(fontnr);
-    
-    /* get the horizontal size of each line */
-    font_getstringsize("A", NULL, &delta_y, fontnr);
-    
-    buf[1] = '\0';
-    w = LCD_WIDTH;
-    h = LCD_HEIGHT;
-    /* start at the end of the log */
-    user_index = compute_nb_lines(w, font) - h/delta_y -1; /* if negative, will be set 0 to zero later */
+    const struct ui_rect bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+    struct log_view log = { .font = screens[SCREEN_MAIN].getuifont() };
+    struct ui_view view;
+    struct ui_page page;
+    struct ui_scene scene = {0};
+    bool to_root = false;
 
-    do {
-        lcd_clear_display();
-        
-        if(user_index < 0)
-            user_index = 0;
-        
-        if(logfwrap)
-            i = logfindex;
-        else
-            i = 0;
-        
-        index = 0;
-        cur_x = 0;
-        cur_y = 0;
-        
-        /* nothing to print ? */
-        if(logfindex == 0 && !logfwrap)
-            goto end_print;
-        
-        do {
-            if(logfbuffer[i] == '\0')
-            {
-                /* should be display a newline ? */
-                if(index >= user_index)
-                    cur_y += delta_y;
-                cur_x = 0;
-                index++;
-            }
-            else
-            {
-                /* does character fit on this line ? */
-                delta_x = font_get_width(font, logfbuffer[i]);
-                
-                if(cur_x + delta_x > w)
-                {
-                    /* should be display a newline ? */
-                    if(index >= user_index)
-                        cur_y += delta_y;
-                    cur_x = 0;
-                    index++;
-                }
-                
-                /* should we print character ? */
-                if(index >= user_index)
-                {
-                    buf[0] = logfbuffer[i];
-                    lcd_putsxy(cur_x, cur_y, buf);
-                }
-                
-                /* update pointer */
-                cur_x += delta_x;
-            }
-            
-            /* did we fill the screen ? */
-            if(cur_y > h)
-                break;
-            
-            i++;
-            if(i >= MAX_LOGF_SIZE)
-                i = 0;
-        } while(i != logfindex);
-        
-        end_print:
-        lcd_update();
-        
-        action = get_action(CONTEXT_STD, HZ);
-        switch( action )
+    font_getstringsize("A", NULL, &log.line_height, log.font);
+    log.line = compute_nb_lines(LCD_WIDTH, font_get(log.font))
+               - LCD_HEIGHT / log.line_height - 1;
+    ui_scene_open_page(&scene, "log-viewer-push");
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
+    ui_view_init(&view, bounds, &log_ops, &log);
+    ui_page_init(&page, &view);
+
+    while (true)
+    {
+        if (log.line < 0)
+            log.line = 0;
+        ui_page_invalidate(&page, bounds);
+        ui_page_draw(&page);
+
+        int action = get_action(CONTEXT_STD, HZ);
+        if (action == ACTION_STD_CANCEL)
+            break;
+        if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
+            log.line++;
+        else if (action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT)
+            log.line--;
+        else if (action == ACTION_STD_OK)
+            log.line = 0;
+        else if (default_event_handler(action) == SYS_USB_CONNECTED)
         {
-            case ACTION_STD_NEXT:
-            case ACTION_STD_NEXTREPEAT:
-                user_index++;
-                break;
-            case ACTION_STD_PREV:
-            case ACTION_STD_PREVREPEAT:
-                user_index--;
-                break;
-            case ACTION_STD_OK:
-                user_index = 0;
-                break;
-            default:
-                /* true takes the debug menu back to the root on USB. */
-                if (default_event_handler(action) == SYS_USB_CONNECTED)
-                    return true;
-                break;
+            to_root = true;
+            break;
         }
-    } while(action != ACTION_STD_CANCEL);
-
-    return false;
+    }
+    ui_scene_close_modal(&scene, !to_root, "log-viewer-pop");
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
+    return to_root;
 }
 
 bool log_viewer_dump(void)

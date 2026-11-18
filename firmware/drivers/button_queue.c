@@ -130,7 +130,26 @@ static inline void button_queue_wait(struct queue_event *evp, int timeout)
 
 void button_queue_post(long id, intptr_t data)
 {
+    int oldlevel = disable_irq_save();
+    if (queue_full(&button_queue))
+    {
+#if defined(HAVE_EXTENDED_MESSAGING_AND_NAME) && \
+    defined(BUTTON_SCROLL_FWD) && defined(BUTTON_SCROLL_BACK)
+        static const long wheel[][2] = {
+            { BUTTON_SCROLL_FWD, BUTTON_SCROLL_FWD },
+            { BUTTON_SCROLL_BACK, BUTTON_SCROLL_BACK },
+        };
+        queue_peek_ex(&button_queue, NULL,
+                      QPEEK_REMOVE_EVENTS | (ARRAYLEN(wheel) - 1), wheel);
+#endif
+        if (queue_full(&button_queue))
+        {
+            restore_irq(oldlevel);
+            return;
+        }
+    }
     queue_post(&button_queue, id, data);
+    restore_irq(oldlevel);
 }
 
 void button_queue_post_remove_head(long id, intptr_t data)
@@ -141,6 +160,7 @@ void button_queue_post_remove_head(long id, intptr_t data)
 
 bool button_queue_try_post(long button, int data)
 {
+    int oldlevel = disable_irq_save();
 #ifdef HAVE_TOUCHSCREEN
     /* one can swipe over the scren very quickly,
      * for this to work we want to forget about old presses and
@@ -159,13 +179,31 @@ bool button_queue_try_post(long button, int data)
         if (force_post)
             queue_remove_from_head(&button_queue, button);
         else
-            return false;
+            goto not_posted;
     }
 
+    if (queue_full(&button_queue))
+    {
+#if defined(HAVE_EXTENDED_MESSAGING_AND_NAME) && \
+    defined(BUTTON_SCROLL_FWD) && defined(BUTTON_SCROLL_BACK)
+        /* A burst of wheel ticks must not crowd out a key release. Drop
+         * one pending wheel tick without removing system events. */
+        static const long wheel[][2] = {
+            { BUTTON_SCROLL_FWD, BUTTON_SCROLL_FWD },
+            { BUTTON_SCROLL_BACK, BUTTON_SCROLL_BACK },
+        };
+        if (!queue_peek_ex(&button_queue, NULL,
+                           QPEEK_REMOVE_EVENTS | (ARRAYLEN(wheel) - 1), wheel))
+#endif
+            goto not_posted;
+    }
     queue_post(&button_queue, button, data);
-
-    /* on touchscreen we posted unconditionally */
+    restore_irq(oldlevel);
     return true;
+
+not_posted:
+    restore_irq(oldlevel);
+    return false;
 }
 
 int button_queue_count(void)

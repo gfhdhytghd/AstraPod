@@ -19,5 +19,14 @@
  ****************************************************************************/
 #ifndef PODLINK_SCREEN_H
 #define PODLINK_SCREEN_H
+#include "podlink.h"
+
+struct podlink_diagnostics {
+    enum podlink_connection state;
+    unsigned long received, sent, closes;
+};
+
 int podlink_screen(void);
+int podlink_screen_run(void (*draw)(const struct podlink_diagnostics *, void *),
+                       void *draw_data);
 #endif

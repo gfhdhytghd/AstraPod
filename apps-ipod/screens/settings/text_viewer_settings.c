@@ -158,8 +158,8 @@ static bool font_size_step(int step, char *out, size_t size)
     return best > 0;
 }
 
-/* Larger Text and Smaller Text close the menu, so the page shows the
- * result */
+/* Return to the page when the reader opened the menu. A settings change
+ * made from Home stays in Settings. */
 static int font_size_set(int step)
 {
     char name[MAX_FILENAME];
@@ -169,7 +169,7 @@ static int font_size_set(int step)
     strmemccpy((char *)global_settings.text_viewer_font_file, name,
                sizeof global_settings.text_viewer_font_file);
     settings_save();
-    return 1;
+    return text_viewer_is_open() ? GO_TO_PREVIOUS : 0;
 }
 
 static int text_viewer_larger(void)

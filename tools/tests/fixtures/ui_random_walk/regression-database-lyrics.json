@@ -1,0 +1,16 @@
+{
+  "seed": 0,
+  "home_rows": ["database", "files", "settings", "system_menu"],
+  "actions": [
+    ["select", 4, 30],
+    ["down", 0, 30],
+    ["select", 4, 30],
+    ["select", 4, 30],
+    ["down", 0, 30],
+    ["select", 4, 30],
+    ["back", 4, 30],
+    ["back", 4, 30],
+    ["back", 4, 30],
+    ["back", 4, 30]
+  ]
+}

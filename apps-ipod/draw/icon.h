@@ -53,6 +53,12 @@ enum themable_icons {
     Icon_EQ,
     Icon_Rockbox,
     Icon_Last_Themeable,
+
+    /* Native file-list glyphs outside the built-in bitmap strip. */
+    Icon_Document = Icon_Last_Themeable + 1,
+    Icon_Image,
+    Icon_Book,
+    Icon_Lyrics,
 };
 
 /*

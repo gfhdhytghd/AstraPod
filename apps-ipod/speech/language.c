@@ -118,9 +118,13 @@ int lang_load(const char *filename, const unsigned char *builtin,
 
 int lang_core_load(const char *filename)
 {
-    return lang_load(filename, core_language_builtin, language_strings,
-                     language_buffer, 0, MAX_LANGUAGE_SIZE,
-                     LANG_LAST_INDEX_IN_ARRAY);
+    int result = lang_load(filename, core_language_builtin, language_strings,
+                           language_buffer, 0, MAX_LANGUAGE_SIZE,
+                           LANG_LAST_INDEX_IN_ARRAY);
+    /* Older Chinese language files used the file filter's text for Music. */
+    if (result == 0 && !strcmp(str(LANG_MUSIC_BROWSER), "仅显示音乐文件"))
+        language_strings[LANG_MUSIC_BROWSER] = (unsigned char *)"音乐";
+    return result;
 }
 
 /* The unused tail of the language buffer. With no .lng loaded that is all of

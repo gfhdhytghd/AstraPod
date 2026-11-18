@@ -26,6 +26,9 @@
 #include "audio/beat_analyse.h"
 #include "audio/beat_track.h"
 #include "screens/system/beat_debug.h"
+#include "draw/viewport.h"
+#include "ui/retained.h"
+#include "ui/scene.h"
 
 /* Where now sits: the trace arrives from the right and is met here. */
 #define PLAYHEAD_X      48
@@ -180,8 +183,18 @@ static void draw_bar_count(const struct beat_track *beat,
     }
 }
 
-static void draw_screen(void)
+static void paint_screen(const struct ui_view *view,
+                         const struct ui_view_frame *frame)
 {
+    (void)view;
+    struct viewport vp = {
+        .x = frame->bounds.x, .y = frame->bounds.y,
+        .width = frame->bounds.width, .height = frame->bounds.height,
+        .flags = VP_DEFAULT_FLAGS, .font = FONT_SYSFIXED,
+        .drawmode = DRMODE_SOLID, .buffer = &lcd_framebuffer_default,
+        .fg_pattern = LCD_BLACK, .bg_pattern = LCD_WHITE,
+    };
+    struct viewport *last = lcd_set_viewport(&vp);
     struct beat_status st;
     struct beat_track beat;
     int th, top, height, i, y;
@@ -189,7 +202,7 @@ static void draw_screen(void)
     beat_analyse_status(&st);
     beat_track_get(&beat);
 
-    lcd_clear_display();
+    lcd_clear_viewport();
 
     th = font_get(FONT_SYSFIXED)->height;
 
@@ -230,15 +243,25 @@ static void draw_screen(void)
     for (y = top; y < LCD_HEIGHT; y += 4)
         lcd_vline(PLAYHEAD_X, y, y + 1);
 
-    lcd_update();
+    lcd_set_viewport(last);
 }
+
+static const struct ui_view_ops beat_ops = { .paint = paint_screen };
 
 bool beat_debug_screen(void)
 {
+    const struct ui_rect bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+    struct ui_view view;
+    struct ui_page page;
+    struct ui_scene scene = {0};
     bool to_root = false;
 
     beat_analyse_start();
-    lcd_setfont(FONT_SYSFIXED);
+    ui_scene_open_page(&scene, "beat-debug-push");
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
+    ui_view_init(&view, bounds, &beat_ops, NULL);
+    ui_page_init(&page, &view);
+    ui_page_draw(&page);
 
     while (1)
     {
@@ -263,11 +286,13 @@ bool beat_debug_screen(void)
         }
 
         beat_analyse_poll();
-        draw_screen();
+        ui_page_invalidate(&page, bounds);
+        ui_page_draw(&page);
     }
 
     beat_analyse_stop();
-    lcd_setfont(FONT_UI);
+    ui_scene_close_modal(&scene, !to_root, "beat-debug-pop");
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
 
     return to_root;
 }

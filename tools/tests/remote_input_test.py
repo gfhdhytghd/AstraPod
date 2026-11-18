@@ -291,12 +291,48 @@ static int calls, raw_button, highest, frames_drawn;
 static bool inhibited;
 static int disable_irq_save(void) {return 0;}
 static void restore_irq(int n) {(void)n;}
-static bool skin_flush_inhibited(void) {return inhibited;}
-static void skin_inhibit_flush(bool n) {inhibited=n;}
-static void lcd_set_viewport(void *p) {(void)p;}
-static void lcd_setfont(int n) {(void)n;}
-static void lcd_clear_display(void) {}
-static void lcd_update(void) {frames_drawn++;}
+#define LCD_WIDTH 320
+#define LCD_HEIGHT 240
+#define SCREEN_MAIN 0
+#define VP_DEFAULT_FLAGS 0
+#define DRMODE_SOLID 0
+enum { UI_COLOR_FOREGROUND, UI_COLOR_BACKGROUND };
+struct viewport {
+    int x,y,width,height,flags,font,drawmode,fg_pattern,bg_pattern;
+    const int *buffer;
+};
+static int lcd_framebuffer_default;
+static int ui_theme_rgb565(int color) {return color;}
+static struct viewport *lcd_set_viewport(struct viewport *p) {(void)p;return NULL;}
+static void lcd_clear_viewport(void) {}
+struct ui_rect {int x,y,width,height;};
+struct ui_view_frame {struct ui_rect bounds;};
+struct ui_view;
+struct ui_view_ops {
+    void (*paint)(const struct ui_view *, const struct ui_view_frame *);
+};
+struct ui_view {const struct ui_view_ops *ops;void *data;struct ui_rect bounds;};
+struct ui_page {struct ui_view *view;};
+struct ui_scene {int unused;};
+static void ui_view_init(struct ui_view *v,struct ui_rect r,
+                         const struct ui_view_ops *ops,void *data)
+{v->ops=ops;v->bounds=r;v->data=data;}
+static void ui_page_init(struct ui_page *p,struct ui_view *v) {p->view=v;}
+static void ui_page_invalidate(struct ui_page *p,struct ui_rect r)
+{assert(p->view->bounds.width==r.width&&p->view->bounds.height==r.height);}
+static void ui_page_draw(struct ui_page *p)
+{
+    struct ui_view_frame frame={p->view->bounds};
+    p->view->ops->paint(p->view,&frame);
+    frames_drawn++;
+}
+static void ui_scene_open_page(struct ui_scene *s,const char *route) {(void)s;(void)route;}
+static void ui_scene_close_modal(struct ui_scene *s,bool animate,const char *route)
+{(void)s;(void)animate;(void)route;}
+static void viewportmanager_theme_enable(int screen,bool theme,void *port)
+{(void)screen;(void)port;inhibited=!theme;}
+static void viewportmanager_theme_undo(int screen,bool redraw)
+{(void)screen;(void)redraw;inhibited=false;}
 static void lcd_puts(int x,int y,const char *s) {
     (void)x;if(y>highest)highest=y;
     if((y==2 || y==5) && (iap_remote_capture.pending.flags & REMOTE_TRUNC))

@@ -783,9 +783,13 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             start_action = ACTION_ENTER_MENUITEM;
         }
         else
+        {
+            /* HZ so the status bar redraws corectly */
             action = get_action(CONTEXT_MAINMENU|ALLOW_SOFTLOCK,
                                 ui_scene_timeout(&modal, ui_scene_timeout(scene, list_do_action_timeout(&lists, HZ))));
-            /* HZ so the status bar redraws corectly */
+        }
+        if (action == ACTION_NONE)
+            lcd_update();
 
 #ifdef HAVE_WHEEL_WPS_CHORD
         /* Root CANCEL normally stays at Home. A deferred screen shortcut
@@ -1273,6 +1277,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
     if (!scene_handoff)
         ui_scene_cancel(scene);
 
+    keyclick_set_callback(NULL, NULL);
     /* The Agents shortcut leaves the loop after get_action() without
      * gui_synclist_do_button(), and `lists` is about to go out of scope */
     gui_synclist_forget(&lists);

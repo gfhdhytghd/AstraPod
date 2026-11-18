@@ -216,6 +216,6 @@ void spk_draw_full_flush(void);
  *
  * 'shown' comes back filled in, because how many rows fit is a question
  * about the face the list is set in and the caller does the scrolling. */
-void spk_draw_summary(struct spk_summary *s, int phase, int move);
+void spk_paint_summary(struct spk_summary *s, int phase, int move);
 
 #endif /* SPIKE_DRAW_H */

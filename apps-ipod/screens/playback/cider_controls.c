@@ -183,7 +183,8 @@ static int track_info(void) { return show_page("now/info", LANG_TRACK_INFO, 1); 
 static int lyrics(void)
 {
     if (lyric_viewer() == GO_TO_ROOT) { page_usb = true; return 1; }
-    return GO_TO_WPS; /* close the context menu as well */
+    requested_exit = GO_TO_WPS;
+    return 1;
 }
 static int queue_view(void) { return show_page("now/queue", LANG_CURRENT_PLAYLIST, 2); }
 static int queue_time(void) { return show_page("now/time", LANG_PLAYING_TIME, 3); }

@@ -18,23 +18,10 @@ int battery_level(void)
 {
     return 50;
 }
-void lcd_clear_display(void)
+static void draw_diagnostics(const struct podlink_diagnostics *status, void *data)
 {
-}
-void lcd_puts(int x, int y, const char *s)
-{
-    (void)x;
-    (void)y;
-    (void)s;
-}
-void lcd_putsf(int x, int y, const char *fmt, ...)
-{
-    (void)x;
-    (void)y;
-    (void)fmt;
-}
-void lcd_update(void)
-{
+    (void)data;
+    assert(status->state == podlink_state());
 }
 void splash(int ticks, const char *s)
 {
@@ -131,7 +118,7 @@ int main(void)
         {
             current_tick = stage = turns = 0;
             observed = false;
-            podlink_screen();
+            podlink_screen_run(draw_diagnostics, NULL);
             assert(observed && podlink_state() == PODLINK_CLOSED && !lease);
             remove_usb();
             printf("PASS: BENCH RX %u, negotiated %u, %s\n",

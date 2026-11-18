@@ -530,41 +530,106 @@ static bool equals_lang(const char *text, int id)
 }
 
 static const char *row_icon(enum themable_icons icon, enum list_row_kind kind,
-                            const char *label, bool file_view)
+                            const char *label, bool file_view,
+                            enum current_activity activity)
 {
-    if (!file_view)
+    if (file_view)
     {
-        static const struct { int id; const char *glyph; } icons[] = {
-            { LANG_SEARCH, "®" }, { LANG_SOUND_SETTINGS, "Y" },
-            { LANG_PLAYBACK, "W" }, { LANG_LIBRARY, "v" },
-            { LANG_APPEARANCE, "Ê" }, { LANG_BATTERY_POWER, "Á" },
-            { LANG_SYSTEM, "Ò" }, { LANG_SETTINGS_MODE, "Í" },
-            { LANG_SETTINGS_CHANGED, "É" }, { LANG_NOW_PLAYING, "A" },
-            { LANG_RESUME_PLAYBACK, "C" }, { LANG_CONTINUE_READING, "A" },
-            { LANG_MUSIC_BROWSER, "c" }, { LANG_ALBUM_COVERS, "f" },
-            { LANG_ARTIST_PORTRAITS, "i" }, { LANG_CURRENT_PLAYLIST, "U" },
-            { LANG_PLAYLISTS, "ð" }, { LANG_PLAYBACK_REPORT, "z" },
-            { LANG_DIR_BROWSER, "¢" }, { LANG_SETTINGS, "Ç" },
-            { LANG_SHORTCUTS, "Ó" }, { LANG_RANDOM_ALBUM, "V" },
-            { LANG_SPUN, "µ" }, { LANG_DOCUMENTS, "w" }, { LANG_IMAGES, "x" },
-            { LANG_FEATURED_ARTISTS, "é" }, { LANG_AUDIOBOOKS, "ê" },
-            { LANG_PODCASTS, "Ď" }, { LANG_EBOOKS, "Č" },
-            { LANG_CUSTOM_MENU, "Ċ" },
-        };
-        for (unsigned i = 0; i < ARRAYLEN(icons); ++i)
-            if (equals_lang(label, icons[i].id))
-                return icons[i].glyph;
+        if (equals_lang(label, LANG_SEARCH)) return "®";
+        if (equals_lang(label, LANG_SORT_TYPE)) return "ª";
+        if (equals_lang(label, LANG_MOODS)) return "í";
+        if (equals_lang(label, LANG_JOURNEYS)) return "î";
+
+        switch (icon)
+        {
+            case Icon_Audio: return "¡";
+            case Icon_Playlist: return "¥";
+            case Icon_Folder: return "m";
+            case Icon_Font:
+            case Icon_Document: return "¦";
+            case Icon_Image: return "§";
+            case Icon_Book: return "Ę";
+            case Icon_Lyrics: return "ė";
+            default: return icon == Icon_NOICON ? NULL : "¨";
+        }
     }
+
     if (kind == LIST_ROW_CUSTOM || kind == LIST_ROW_CUSTOM_MENU)
         return kind == LIST_ROW_CUSTOM ? "ċ" : "Ċ";
+    if (activity == ACTIVITY_SYSTEMSCREEN)
+    {
+        if (!strcmp(label, "PodLink")) return "@";
+        if (!strcmp(label, "Agents")) return "^";
+    }
+    if (kind == LIST_ROW_COMMAND)
+    {
+        /* tagnavi group headings are tag values, not translated UI labels. */
+        static const struct { const char *name, *glyph; } groups[] = {
+            { "Album", "d" }, { "Single", "a" }, { "EP", "b" },
+            { "Compilation", "Ĉ" }, { "Mixtape", "Ĉ" },
+            { "Live Album", "Z" }, { "Soundtrack", "ĉ" },
+        };
+        for (unsigned i = 0; i < ARRAYLEN(groups); ++i)
+            if (!strcmp(label, groups[i].name))
+                return groups[i].glyph;
+    }
+
+    static const struct { int id; const char *glyph; } icons[] = {
+        { LANG_SEARCH, "®" }, { LANG_SOUND_SETTINGS, "Y" },
+        { LANG_PLAYBACK, "W" }, { LANG_LIBRARY, "v" },
+        { LANG_APPEARANCE, "Ê" }, { LANG_BATTERY_POWER, "Á" },
+        { LANG_SYSTEM, "Ò" }, { LANG_SETTINGS_MODE, "Í" },
+        { LANG_SETTINGS_CHANGED, "É" }, { LANG_NOW_PLAYING, "A" },
+        { LANG_RESUME_PLAYBACK, "C" }, { LANG_CONTINUE_READING, "A" },
+        { LANG_MUSIC_BROWSER, "c" }, { LANG_ALBUM_COVERS, "f" },
+        { LANG_ARTIST_PORTRAITS, "i" }, { LANG_CURRENT_PLAYLIST, "U" },
+        { LANG_PLAYLISTS, "ð" }, { LANG_PLAYBACK_REPORT, "z" },
+        { LANG_DIR_BROWSER, "¢" }, { LANG_SETTINGS, "Ç" },
+        { LANG_SHORTCUTS, "Ó" }, { LANG_RANDOM_ALBUM, "V" },
+        { LANG_SPUN, "µ" }, { LANG_PLAYBACK_HISTORY, "µ" },
+        { LANG_SHUFFLE_SONGS, "H" }, { LANG_DOCUMENTS, "w" },
+        { LANG_IMAGES, "x" }, { LANG_FEATURED_ARTISTS, "é" },
+        { LANG_AUDIOBOOKS, "ê" }, { LANG_PODCASTS, "Ď" },
+        { LANG_EBOOKS, "Č" }, { LANG_CUSTOM_MENU, "Ċ" },
+        { LANG_ABOUT, "»" }, { LANG_ROCKBOX_INFO, "ñ" },
+        { LANG_CREDITS, "ò" }, { LANG_BG_TASK_INFO, "ó" },
+        { LANG_LICENSE, "ô" }, { LANG_DEBUG, "õ" },
+        { LANG_TAGNAVI_ALL_TRACKS, "b" }, { LANG_TAGNAVI_RANDOM, "V" },
+        { LANG_TAGNAVI_SHUFFLE_ALBUMS, "H" }, { LANG_BOOK_RESUME, "T" },
+        { LANG_FEATURED_IN, "Z" }, { LANG_TAGNAVI_UNTAGGED, "¿" },
+        { LANG_TAGNAVI_ALL_TRACKS_SORTED_BY_ALBUM, "d" },
+        { LANG_PODCAST_ALL_EPISODES, "Ė" }, { LANG_PODCAST_PLAY_UNPLAYED, "A" },
+        { LANG_BOOKS_IN_PROGRESS, "ē" }, { LANG_BOOK_SHELF_ROW_PROGRESS, "ē" },
+        { LANG_BOOKS_NOT_STARTED, "đ" }, { LANG_BOOK_SHELF_ROW_NEW, "đ" },
+        { LANG_BOOKS_FINISHED, "Ē" }, { LANG_BOOK_SHELF_ROW_FINISHED, "Ē" },
+        { LANG_BOOK, "ë" }, { LANG_AUTHOR, "ì" }, { LANG_ID3_TITLE, "l" },
+        { LANG_ID3_ALBUM, "e" }, { LANG_ALBUMS, "e" }, { LANG_ID3_ARTIST, "g" },
+        { LANG_ARTISTS, "g" }, { LANG_ID3_ALBUMARTIST, "h" },
+        { LANG_ID3_ALBUMARTISTS, "h" }, { LANG_ID3_GENRE, "j" },
+        { LANG_ID3_YEAR, "¶" }, { LANG_ID3_COMPOSER, "k" },
+        { LANG_USER_RATING, "²" }, { LANG_RECENTLY_ADDED, "´" },
+        { LANG_SHOW_FIRST_LETTER, "«" }, { LANG_TRACKS_BY, "ª" },
+        { LANG_SEARCH_BY, "¯" }, { LANG_SAME_AS_CURRENT, "Ø" },
+        { LANG_BY_AUTHOR, "ì" }, { LANG_BY_SUBJECT, "l" },
+        { LANG_READING_STATS, "Ĕ" }, { LANG_LISTENING_STATS, "Ĕ" },
+        { LANG_BY_SERIES, "ģ" }, { LANG_PODCAST_BY_SHOW, "ď" },
+        { LANG_QUIZ, "ï" },
+    };
+    if (equals_lang(label, LANG_BY_TITLE))
+        return activity == ACTIVITY_BOOKSHELF ? "č" : "ë";
+    for (unsigned i = 0; i < ARRAYLEN(icons); ++i)
+        if (equals_lang(label, icons[i].id))
+            return icons[i].glyph;
+
     switch (icon)
     {
         case Icon_Folder: return "m";
-        case Icon_Audio: return file_view ? "¡" : "c";
+        case Icon_Audio: return "c";
         case Icon_Playlist: return "¥";
         case Icon_Font: return "¦";
         case Icon_Bookmark: return "Ó";
-        case Icon_file_view_menu: return file_view ? "¨" : "Þ";
+        case Icon_file_view_menu:
+        case Icon_Submenu: return "Þ";
         default: return icon == Icon_NOICON ? NULL : "¨";
     }
 }
@@ -699,13 +764,30 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     bool files = file_rows(activity);
     bool numbered = numbered_row(list, activity, kind);
     bool main_settings = activity == ACTIVITY_SETTINGS && equals_lang(list->title, LANG_SETTINGS);
+    bool database = activity == ACTIVITY_DATABASEBROWSER;
+    bool library_menu = database && (kind == LIST_ROW_MENU || kind == LIST_ROW_ACTION) &&
+        (equals_lang(list->title, LANG_MUSIC_BROWSER) || equals_lang(list->title, LANG_AUDIOBOOKS) ||
+         equals_lang(list->title, LANG_PODCASTS));
+    bool books_menu = activity == ACTIVITY_BOOKSHELF && equals_lang(list->title, LANG_EBOOKS);
     bool agents = activity == ACTIVITY_AGENTS && list->callback_draw_status;
     bool art = list->callback_get_item_albumart != NULL;
     int icon_size = m[UI_METRIC_LIST_ICON_SIZE];
     int margin = m[UI_METRIC_LIST_ICON_MARGIN];
     int text_x = m[UI_METRIC_LIST_TEXT_PADDING];
-    bool icon_column = list->show_icons && (files || main_settings || agents ||
-        activity == ACTIVITY_MAINMENU || activity == ACTIVITY_SYSTEMSCREEN);
+    bool icon_column = list->show_icons && (files || main_settings || activity == ACTIVITY_SYSTEMSCREEN ||
+        library_menu || books_menu || agents || activity == ACTIVITY_MAINMENU ||
+        (database && (kind == LIST_ROW_CUSTOM || kind == LIST_ROW_CUSTOM_MENU ||
+         equals_lang(list->title, LANG_CUSTOM_MENU))));
+    if (!icon_column && list->show_icons && database && kind == LIST_ROW_COMMAND)
+    {
+        char name[MAX_PATH];
+        const unsigned char *label_ptr = (const unsigned char *)
+            list->callback_get_item_name(item, list->data, name, sizeof(name));
+        const char *label = label_ptr && P2ID(label_ptr) <= VOICEONLY_DELIMITER
+                            ? P2STR(label_ptr) : "";
+        icon_column = !equals_lang(label, LANG_TAGNAVI_ALL_TRACKS) &&
+                      !equals_lang(label, LANG_TAGNAVI_ALL_TRACKS_SORTED_BY_ALBUM);
+    }
     int marked = list_select_row_state(list, item);
     if (!numbered && !icon_column && !art && list->show_icons &&
         (kind == LIST_ROW_CONTAINER || kind == LIST_ROW_CUSTOM_MENU))
@@ -779,7 +861,7 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         draw_bitmap(clip, tile, cover);
         if (!cover && render->icon_font >= 0)
             draw_text(render, clip, icon_cell, render->icon_font, fg,
-                      row_icon(icon, kind, label, files), false, 0, false);
+                      row_icon(icon, kind, label, files, activity), false, 0, false);
         text_x += cover_size + m[UI_METRIC_LIST_AUX_PADDING] + 1;
     }
     else if (numbered || icon_column || marked >= 0)
@@ -788,7 +870,7 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         if (render->icon_font >= 0)
         {
             const char *glyph = marked >= 0 ? (marked ? "×" : "Ö") :
-                                row_icon(icon, kind, label, files);
+                                row_icon(icon, kind, label, files, activity);
             if (now_playing_row && marked < 0)
                 glyph = audio_status() & AUDIO_STATUS_PAUSE ? "B" : "A";
             if (agents && value && value[1] && (value[0] == 'r' || value[0] == 'q'))

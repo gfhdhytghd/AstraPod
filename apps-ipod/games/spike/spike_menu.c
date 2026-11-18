@@ -3,10 +3,7 @@
  *
  * The game's own menu, on held Menu.
  *
- * Drawn by the player's menu code and not by the game's, so it is skinned
- * like every other menu and looks like the machine it is running on. The
- * field is drawn by hand because it is a field; a list of options is a
- * list, and the theme already knows how to draw one.
+ * The player's native menu renders the options. The game renders the field.
  *
  * The music stops while it is open, and it has to: a run left playing under
  * a menu is a run whose clock has moved past anything the field could be
@@ -37,8 +34,8 @@ static struct spk_menu *state;
 /** The best run **/
 
 /* Not a list, because a run is not a row: it is a score, four numbers about
- * how it was got, and the tracks it was played over. The game draws that
- * screen by hand for the same reason it draws the field by hand.
+ * how it was got, and the tracks it was played over. The summary occupies
+ * its own retained page with the game's typography and pose animation.
  *
  * So the display state goes back the way the game handed it over -- the
  * theme off, the backdrop gone, the fixed font -- and comes back again for

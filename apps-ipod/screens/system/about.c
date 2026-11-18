@@ -22,6 +22,9 @@
 #include "system/shutdown.h"
 #include "speech/talk.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/retained.h"
+#include "ui/scene.h"
+#include "widgets/menu.h"
 #include "about_art.h"
 #include "about.h"
 
@@ -86,39 +89,51 @@ static void ab_draw(struct screen *d, struct viewport *vp,
     for (int i = 0; i < count; i++)
         y += text_wrap_draw(d, text[i], AB_PAD, y, AB_TEXT_W, 'l') * line_h
              + line_h / 2;
-    d->update_viewport();
 }
+
+struct about_page {
+    const char *text[3];
+    unsigned fg, bg;
+};
+
+static void about_paint(const struct ui_view *view,
+                        const struct ui_view_frame *frame)
+{
+    const struct about_page *about = view->data;
+    struct screen *d = &screens[SCREEN_MAIN];
+    struct viewport vp = {
+        .x = frame->bounds.x, .y = frame->bounds.y,
+        .width = frame->bounds.width, .height = frame->bounds.height,
+        .flags = VP_DEFAULT_FLAGS, .font = d->getuifont(),
+        .drawmode = DRMODE_FG, .buffer = &lcd_framebuffer_default,
+        .fg_pattern = about->fg, .bg_pattern = about->bg,
+    };
+    struct viewport *last = d->set_viewport(&vp);
+    int line_h;
+
+    d->getstringsize((const unsigned char *)"A", NULL, &line_h);
+    ab_draw(d, &vp, about->text, ARRAYLEN(about->text), line_h);
+    d->set_viewport(last);
+}
+
+static const struct ui_view_ops about_ops = { .paint = about_paint };
 
 int about_screen(void)
 {
-    struct screen *d = &screens[SCREEN_MAIN];
-    struct viewport vp, saved, *last;
+    const struct ui_rect bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
     char version[64];
-    const char *text[3];
-    unsigned fg = 0, bg = 0;
+    struct about_page about = { .text = {ab_tagline, version, ab_licence} };
+    struct ui_view view;
+    struct ui_page page;
+    struct ui_scene scene = {0};
     bool drawn = false;
-    int line_h;
     int ret = 0;
 
     snprintf(version, sizeof(version), "%s %s", str(LANG_VERSION), rbversion);
-    text[0] = ab_tagline;
-    text[1] = version;
-    text[2] = ab_licence;
-
-    /* The whole screen, as the credits reel takes it: with the theme on, the
-     * status bar would repaint over the page. viewport_set_defaults() also
-     * sets buffer and flags, which viewport_set_fullscreen() leaves alone. */
-    viewportmanager_theme_enable(SCREEN_MAIN, false, &saved);
-    vp.buffer = NULL;
-    viewport_set_defaults(&vp, SCREEN_MAIN);
-    vp.x = 0;
-    vp.y = 0;
-    vp.width = LCD_WIDTH;
-    vp.height = LCD_HEIGHT;
-    vp.font = d->getuifont();
-    vp.drawmode = DRMODE_FG;
-    last = d->set_viewport(&vp);
-    d->getstringsize((const unsigned char *)"A", NULL, &line_h);
+    ui_view_init(&view, bounds, &about_ops, &about);
+    ui_page_init(&page, &view);
+    ui_scene_open_page(&scene, "about-push");
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
 
     if (global_settings.talk_menu)
     {
@@ -133,14 +148,15 @@ int about_screen(void)
     {
         /* Redrawn only when the colours move: they follow the album palette,
          * which fades between tracks. */
-        vp.fg_pattern = ui_theme_rgb565(UI_COLOR_FOREGROUND);
-        vp.bg_pattern = ui_theme_rgb565(UI_COLOR_BACKGROUND);
-        if (!drawn || vp.fg_pattern != fg || vp.bg_pattern != bg)
+        unsigned fg = ui_theme_rgb565(UI_COLOR_FOREGROUND);
+        unsigned bg = ui_theme_rgb565(UI_COLOR_BACKGROUND);
+        if (!drawn || about.fg != fg || about.bg != bg)
         {
             drawn = true;
-            fg = vp.fg_pattern;
-            bg = vp.bg_pattern;
-            ab_draw(d, &vp, text, 3, line_h);
+            about.fg = fg;
+            about.bg = bg;
+            ui_page_invalidate(&page, bounds);
+            ui_page_draw(&page);
         }
 
         int action = get_action(CONTEXT_STD, HZ / 10);
@@ -149,13 +165,13 @@ int about_screen(void)
             break;
         if (default_event_handler(action) == SYS_USB_CONNECTED)
         {
-            ret = SYS_USB_CONNECTED;
+            ret = MENU_ATTACHED_USB;
             break;
         }
     }
 
     talk_shutup();
-    d->set_viewport(last);
+    ui_scene_close_modal(&scene, ret != MENU_ATTACHED_USB, "about-pop");
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     return ret;
 }

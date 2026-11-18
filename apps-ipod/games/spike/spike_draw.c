@@ -2016,7 +2016,7 @@ static void spk_sum_track(int y, int th, int font, const char *name,
  * are the field's voice and belong to a screen that is moving. Nothing here
  * is a fixed row height as a result: the face is loaded at run time, so
  * every row is measured and stepped from the one above it. */
-void spk_draw_summary(struct spk_summary *s, int phase, int move)
+void spk_paint_summary(struct spk_summary *s, int phase, int move)
 {
     struct spk_pose p;
     char line[48];
@@ -2124,6 +2124,4 @@ void spk_draw_summary(struct spk_summary *s, int phase, int move)
                            SPK_SUM_BAR_W, rows * th,
                            s->rows < rows ? rows : s->rows,
                            s->first, s->first + rows, VERTICAL);
-
-    lcd_update();
 }

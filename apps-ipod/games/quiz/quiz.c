@@ -12,9 +12,8 @@
  * mid-song and stops partway, which would otherwise count a play, move the
  * resume point and reach the scrobbler log.
  *
- * The screen draws itself, as Spike does, with the theme off. A theme would
- * give the answer away -- the status bar names the track and the dynamic
- * colours are the cover's.
+ * The quiz page uses its own palette and hides the status bar so it does
+ * not disclose the current track or its cover colours.
  *
  * The clock that drains the points starts when the clip is heard, not when
  * the round starts: spinning the disk up and seeking into a track is not the
@@ -57,6 +56,7 @@
 #include "system/shutdown.h"          /* default_event_handler */
 #include "system/strutil.h"           /* read_line */
 #include "draw/viewport.h"
+#include "ui/retained.h"
 #include "widgets/splash.h"
 #include "widgets/yesno.h"
 #include "metadata/book_resume.h"
@@ -509,36 +509,57 @@ static void draw_paused(void)
     text_at(FONT_UI, tx, y + h / 2, COL_DIM, hint);
 }
 
-static void draw_all(const struct view *v)
+static const struct ui_rect quiz_bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+
+static void round_paint(const struct ui_view *view,
+                        const struct ui_view_frame *frame)
 {
-    lcd_set_background(COL_BACK);
-    lcd_clear_display();
-    draw_head(v);
-    draw_timer(v);
-    draw_rows(v);
-    if (v->mode == V_PAUSED)
-        draw_paused();
-    lcd_update();
+    const struct view *v = view->data;
+    struct viewport *previous = lcd_set_viewport(NULL);
+
+    /* The controller invalidates the entire page or one of these two
+     * non-overlapping bands. A timer tick need not repaint the answers. */
+    if (frame->clip.y == timer_y && frame->clip.height == timer_h)
+        draw_timer(v);
+    else if (frame->clip.y == rows_y && frame->clip.height == LCD_HEIGHT - rows_y)
+        draw_rows(v);
+    else
+    {
+        lcd_set_background(COL_BACK);
+        lcd_clear_display();
+        draw_head(v);
+        draw_timer(v);
+        draw_rows(v);
+        if (v->mode == V_PAUSED)
+            draw_paused();
+    }
+    lcd_set_viewport(previous);
 }
 
-static void update_timer(const struct view *v)
+static const struct ui_view_ops round_ops = { .paint = round_paint };
+
+static void draw_all(struct ui_page *page)
 {
-    draw_timer(v);
-    lcd_update_rect(0, timer_y, LCD_WIDTH, timer_h);
+    ui_page_invalidate(page, quiz_bounds);
+    ui_page_draw(page);
 }
 
-static void update_rows(const struct view *v)
+static void update_timer(struct ui_page *page)
 {
-    draw_rows(v);
-    lcd_update_rect(0, rows_y, LCD_WIDTH, LCD_HEIGHT - rows_y);
+    ui_page_invalidate(page, (struct ui_rect){0, timer_y, LCD_WIDTH, timer_h});
+    ui_page_draw(page);
+}
+
+static void update_rows(struct ui_page *page)
+{
+    ui_page_invalidate(page, (struct ui_rect){0, rows_y, LCD_WIDTH, LCD_HEIGHT - rows_y});
+    ui_page_draw(page);
 }
 
 /* The screen is the quiz's while a game runs. */
 static void screen_take(void)
 {
-    struct viewport vp;
-
-    viewportmanager_theme_enable(SCREEN_MAIN, false, &vp);
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
     lcd_set_backdrop(NULL);
     lcd_setfont(FONT_UI);
     layout();
@@ -566,15 +587,7 @@ static enum yesno_res ask(int lang_id)
 {
     const char *lines[] = { (const char *)ID2P(lang_id) };
     const struct text_message message = { lines, 1 };
-    enum yesno_res res;
-
-    viewportmanager_theme_undo(SCREEN_MAIN, true);
-    lcd_setfont(FONT_UI);
-    res = gui_syncyesno_run_defer_usb(&message);
-    FOR_NB_SCREENS(i)
-        screens[i].clear_viewport();
-    screen_take();
-    return res;
+    return gui_syncyesno_run_defer_usb(&message);
 }
 
 /* ------------------------------------------------------------------ *
@@ -661,6 +674,8 @@ static enum round_end play_round(int round, int *score)
         .r = r, .round = round, .score = *score, .points = ROUND_POINTS,
         .sel = 0, .picked = -1, .mode = V_LISTENING,
     };
+    struct ui_view root;
+    struct ui_page page;
     unsigned long from = clip_start(r->length);
     long round_tick = current_tick;
     long drain_tick = 0, pause_tick = 0;
@@ -668,7 +683,9 @@ static enum round_end play_round(int round, int *score)
     bool reading, cut = false;
 
     audio_stop();
-    draw_all(&v);
+    ui_view_init(&root, quiz_bounds, &round_ops, &v);
+    ui_page_init(&page, &root);
+    ui_page_draw(&page);
 
     /* The clip waits while the answers are read */
     reading = speak_round(r);
@@ -696,7 +713,7 @@ static enum round_end play_round(int round, int *score)
                 if (!paused && v.sel > 0)
                 {
                     v.sel--;
-                    update_rows(&v);
+                    update_rows(&page);
                     talk_settle();
                     if (global_settings.talk_menu)
                         speak_choice(r, v.sel, false);
@@ -708,7 +725,7 @@ static enum round_end play_round(int round, int *score)
                 if (!paused && v.sel < QUIZ_CHOICES - 1)
                 {
                     v.sel++;
-                    update_rows(&v);
+                    update_rows(&page);
                     talk_settle();
                     if (global_settings.talk_menu)
                         speak_choice(r, v.sel, false);
@@ -738,7 +755,7 @@ static enum round_end play_round(int round, int *score)
                     audio_resume();
                     v.mode = started ? V_PLAYING : V_LISTENING;
                 }
-                draw_all(&v);
+                draw_all(&page);
                 break;
 
             case ACTION_QUIZ_LEAVE:
@@ -764,7 +781,7 @@ static enum round_end play_round(int round, int *score)
                     round_tick += current_tick - pause_tick;
                     audio_resume();
                 }
-                draw_all(&v);
+                draw_all(&page);
                 break;
 
             case SYS_ANNOUNCE_TRACK:
@@ -797,7 +814,7 @@ static enum round_end play_round(int round, int *score)
             started = true;
             drain_tick = current_tick;
             v.mode = V_PLAYING;
-            update_timer(&v);
+            update_timer(&page);
         }
 
         if (started)
@@ -811,7 +828,7 @@ static enum round_end play_round(int round, int *score)
             if (now != v.points)
             {
                 v.points = now;
-                update_timer(&v);
+                update_timer(&page);
             }
             if (v.points == 0)
                 break;
@@ -826,7 +843,7 @@ static enum round_end play_round(int round, int *score)
     earned[round] = was_right[round] ? v.points : 0;
     *score += earned[round];
 
-    draw_all(&v);
+    draw_all(&page);
     speak_verdict(&v);
     sleep(REVEAL_TICKS);
     while (voice_is_playing())     /* the verdict before the next question */
@@ -868,9 +885,17 @@ static void text_centred(int font, int y, unsigned fg, const char *s)
     text_at(font, (LCD_WIDTH - text_w(font, s)) / 2, y, fg, s);
 }
 
-/* The score, each round's share of it, and the best. True to play again. */
-static bool show_result(int score, bool record)
+struct quiz_result {
+    int score;
+    bool record;
+};
+
+static void result_paint(const struct ui_view *view,
+                         const struct ui_view_frame *frame)
 {
+    (void)frame;
+    const struct quiz_result *result = view->data;
+    struct viewport *previous = lcd_set_viewport(NULL);
     char buf[32], out_of[32];
     int big = font_big >= 0 ? font_big : bold();
     int big_h = font_get(big)->height;
@@ -885,7 +910,7 @@ static bool show_result(int score, bool record)
     y += font_h + 6;
 
     /* The score and "of 1000" sit on one baseline. */
-    snprintf(buf, sizeof(buf), "%d", score);
+    snprintf(buf, sizeof(buf), "%d", result->score);
     snprintf(out_of, sizeof(out_of), str(LANG_QUIZ_OUT_OF),
              QUIZ_ROUNDS * ROUND_POINTS);
     w1 = text_w(big, buf);
@@ -925,7 +950,7 @@ static bool show_result(int score, bool record)
     }
     y += 10;
 
-    if (record)
+    if (result->record)
     {
         const char *label = str(LANG_QUIZ_NEW_BEST);
         int badge_h = ICON_SIZE + 4;
@@ -962,12 +987,28 @@ static bool show_result(int score, bool record)
     text_at(FONT_UI, x, y, COL_DIM, str(LANG_QUIZ_LEAVE_HINT));
     text_at(bold(), x - 6 - w1, y, COL_TEXT, str(LANG_QUIZ_KEY_MENU));
 
-    lcd_update();
+    lcd_set_viewport(previous);
+}
+
+static const struct ui_view_ops result_ops = { .paint = result_paint };
+
+/* The score, each round's share of it, and the best. True to play again. */
+static bool show_result(int score, bool record)
+{
+    struct quiz_result result = { .score = score, .record = record };
+    struct ui_view root;
+    struct ui_page page;
+    char buf[32];
+
+    ui_view_init(&root, quiz_bounds, &result_ops, &result);
+    ui_page_init(&page, &root);
+    ui_page_draw(&page);
 
     if (global_settings.talk_menu)
     {
         talk_number(score, false);
-        snprintf(buf, sizeof(buf), "%s.", out_of);
+        snprintf(buf, sizeof(buf), str(LANG_QUIZ_OUT_OF), QUIZ_ROUNDS * ROUND_POINTS);
+        strlcat(buf, ".", sizeof(buf));
         talk_text_part(buf);
         if (record)
             talk_id(LANG_QUIZ_NEW_BEST, true);

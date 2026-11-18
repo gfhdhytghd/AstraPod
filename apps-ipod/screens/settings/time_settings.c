@@ -25,6 +25,7 @@
 #include "speech/talk.h"
 #include "time.h"
 #include "draw/viewport.h"
+#include "ui/frame.h"
 #include "widgets/list.h"
 #include "screens/system/time_set.h"
 #include "font.h"
@@ -110,8 +111,9 @@ static void draw_timedate(struct viewport *vp, struct screen *display)
     display->puts(0, line++, t);
     display->puts(0, line, d);
 
-    display->update_viewport();
     display->set_viewport(last_vp);
+    ui_mark_dirty_rect(display->screen_type, vp->x, vp->y, vp->width, vp->height);
+    ui_flush_dirty();
 }
 
 

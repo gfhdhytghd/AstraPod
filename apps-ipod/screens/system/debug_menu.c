@@ -58,6 +58,10 @@
 #include "crumbs.h"
 #include "system/strutil.h"
 #include "widgets/splash.h"
+#include "widgets/yesno.h"
+#include "draw/viewport.h"
+#include "ui/retained.h"
+#include "ui/scene.h"
 #include "screens/shortcuts.h"
 #include "screens/system/beat_debug.h"
 #include "screens/system/probe_debug.h"
@@ -199,13 +203,25 @@ static int dbg_threads_action_callback(int action, struct gui_synclist *lists)
     return action;
 }
 
+#if defined(CPU_PP502x) || CONFIG_CPU == S5L8702 || defined(HAVE_CRUMBS)
+static enum yesno_res confirm_stall_test(const char *prompt)
+{
+    const char *lines[] = { ID2P(LANG_ARE_YOU_SURE), prompt };
+    const struct text_message message = { lines, ARRAYLEN(lines) };
+    return gui_syncyesno_run(&message, NULL, NULL);
+}
+#endif
+
 #if defined(CPU_PP502x) || CONFIG_CPU == S5L8702
 /* Blocks the UI thread for good, as a deadlock does: press a key and the
  * hang catcher's screen follows in twenty seconds */
 static bool dbg_deadlock_test(void)
 {
-    struct semaphore never;
+    enum yesno_res confirm = confirm_stall_test("Stop the player to test the hang detector?");
+    if (confirm != YESNO_YES)
+        return confirm == YESNO_USB;
 
+    struct semaphore never;
     splash(HZ * 3, "Press a key: the hang screen follows in 20 s");
     semaphore_init(&never, 1, 0);
     semaphore_wait(&never, TIMEOUT_BLOCK);
@@ -219,6 +235,10 @@ static bool dbg_deadlock_test(void)
  * the next boot shows the breadcrumbs (and this test among them). */
 static bool freeze_test(int kind, const char *expect)
 {
+    enum yesno_res confirm = confirm_stall_test("Freeze the player to test crash recovery?");
+    if (confirm != YESNO_YES)
+        return confirm == YESNO_USB;
+
     splash(HZ * 3, expect);
     crumbs_freeze_test(kind);
     return false;
@@ -657,217 +677,235 @@ static bool dbg_partitions(void)
 #define BAT_YSPACE    (LCD_HEIGHT - BAT_TSPACE)
 
 
-static bool view_battery(void)
+static void paint_battery(const struct ui_view *view,
+                          const struct ui_view_frame *frame)
 {
     extern struct battery_tables_t device_battery_tables; /* powermgmt.c */
-    unsigned short *power_history = device_battery_tables.history;
-    int view = 0;
+    const unsigned short *power_history = device_battery_tables.history;
     int i, x, y, z, y1, y2, grid, graph;
     unsigned short maxv, minv;
-    lcd_setfont(FONT_SYSFIXED);
+    struct viewport vp = {
+        .x = frame->bounds.x, .y = frame->bounds.y,
+        .width = frame->bounds.width, .height = frame->bounds.height,
+        .flags = VP_DEFAULT_FLAGS, .font = FONT_SYSFIXED,
+        .drawmode = DRMODE_SOLID, .buffer = &lcd_framebuffer_default,
+        .fg_pattern = LCD_BLACK, .bg_pattern = LCD_WHITE,
+    };
+    struct viewport *last = lcd_set_viewport(&vp);
+    lcd_clear_viewport();
+    switch (*(const int *)view->data) {
+        case 0: /* voltage history graph */
+            /* Find maximum and minimum voltage for scaling */
+            minv = power_history[0];
+            maxv = minv + 1;
+            for (i = 1; i < BAT_LAST_VAL && power_history[i]; i++) {
+                if (power_history[i] > maxv)
+                    maxv = power_history[i];
+                if (power_history[i] < minv)
+                    minv = power_history[i];
+            }
+            /* print header */
+            /* adjust grid scale */
+            if ((maxv - minv) > 50)
+                grid = 50;
+            else
+                grid = 5;
 
-    while(1)
-    {
-        lcd_clear_display();
-        switch (view) {
-            case 0: /* voltage history graph */
-                /* Find maximum and minimum voltage for scaling */
-                minv = power_history[0];
-                maxv = minv + 1;
-                for (i = 1; i < BAT_LAST_VAL && power_history[i]; i++) {
-                    if (power_history[i] > maxv)
-                        maxv = power_history[i];
-                    if (power_history[i] < minv)
-                        minv = power_history[i];
-                }
-                /* print header */
-                /* adjust grid scale */
-                if ((maxv - minv) > 50)
-                    grid = 50;
-                else
-                    grid = 5;
+            lcd_putsf(0, 0, "%s %d.%03dV", "Battery", power_history[0] / 1000,
+                     power_history[0] % 1000);
+            lcd_putsf(0, 1, "%d.%03d-%d.%03dV (%2dmV)",
+                      minv / 1000, minv % 1000, maxv / 1000, maxv % 1000,
+                      grid);
 
-                lcd_putsf(0, 0, "%s %d.%03dV", "Battery", power_history[0] / 1000,
-                         power_history[0] % 1000);
-                lcd_putsf(0, 1, "%d.%03d-%d.%03dV (%2dmV)",
-                          minv / 1000, minv % 1000, maxv / 1000, maxv % 1000,
-                          grid);
+            i = 1;
+            while ((y = (minv - (minv % grid)+i*grid)) < maxv)
+            {
+                graph = ((y-minv)*BAT_YSPACE)/(maxv-minv);
+                graph = LCD_HEIGHT-1 - graph;
 
-                i = 1;
-                while ((y = (minv - (minv % grid)+i*grid)) < maxv)
+                /* draw dotted horizontal grid line */
+                for (x=0; x<LCD_WIDTH;x=x+2)
+                    lcd_drawpixel(x,graph);
+
+                i++;
+            }
+
+            x = 0;
+            /* draw plot of power history
+             * skip empty entries
+             */
+            for (i = BAT_LAST_VAL - 1; i > 0; i--)
+            {
+                if (power_history[i] && power_history[i-1])
                 {
-                    graph = ((y-minv)*BAT_YSPACE)/(maxv-minv);
-                    graph = LCD_HEIGHT-1 - graph;
+                    y1 = (power_history[i] - minv) * BAT_YSPACE /
+                        (maxv - minv);
+                    y1 = MIN(MAX(LCD_HEIGHT-1 - y1, BAT_TSPACE),
+                             LCD_HEIGHT-1);
+                    y2 = (power_history[i-1] - minv) * BAT_YSPACE /
+                        (maxv - minv);
+                    y2 = MIN(MAX(LCD_HEIGHT-1 - y2, BAT_TSPACE),
+                             LCD_HEIGHT-1);
 
-                    /* draw dotted horizontal grid line */
-                    for (x=0; x<LCD_WIDTH;x=x+2)
-                        lcd_drawpixel(x,graph);
+                    lcd_set_drawmode(DRMODE_SOLID);
 
-                    i++;
+                    /* make line thicker */
+                    lcd_drawline(((x*LCD_WIDTH)/(BAT_LAST_VAL)),
+                                 y1,
+                                 (((x+1)*LCD_WIDTH)/(BAT_LAST_VAL)),
+                                 y2);
+                    lcd_drawline(((x*LCD_WIDTH)/(BAT_LAST_VAL))+1,
+                                 y1+1,
+                                 (((x+1)*LCD_WIDTH)/(BAT_LAST_VAL))+1,
+                                 y2+1);
+                    x++;
                 }
+            }
+            break;
 
-                x = 0;
-                /* draw plot of power history
-                 * skip empty entries
-                 */
-                for (i = BAT_LAST_VAL - 1; i > 0; i--)
-                {
-                    if (power_history[i] && power_history[i-1])
-                    {
-                        y1 = (power_history[i] - minv) * BAT_YSPACE /
-                            (maxv - minv);
-                        y1 = MIN(MAX(LCD_HEIGHT-1 - y1, BAT_TSPACE),
-                                 LCD_HEIGHT-1);
-                        y2 = (power_history[i-1] - minv) * BAT_YSPACE /
-                            (maxv - minv);
-                        y2 = MIN(MAX(LCD_HEIGHT-1 - y2, BAT_TSPACE),
-                                 LCD_HEIGHT-1);
-
-                        lcd_set_drawmode(DRMODE_SOLID);
-
-                        /* make line thicker */
-                        lcd_drawline(((x*LCD_WIDTH)/(BAT_LAST_VAL)),
-                                     y1,
-                                     (((x+1)*LCD_WIDTH)/(BAT_LAST_VAL)),
-                                     y2);
-                        lcd_drawline(((x*LCD_WIDTH)/(BAT_LAST_VAL))+1,
-                                     y1+1,
-                                     (((x+1)*LCD_WIDTH)/(BAT_LAST_VAL))+1,
-                                     y2+1);
-                        x++;
-                    }
-                }
-                break;
-
-            case 1: /* status: */
-                lcd_putsf(0, 0, "Pwr status: %s",
-                         charging_state() ? "charging" : "discharging");
-                battery_read_info(&y, &z);
-                if (y > 0)
-                    lcd_putsf(0, 1, "%s: %d.%03d V (%d %%)", "Battery", y / 1000, y % 1000, z);
-                else if (z > 0)
-                    lcd_putsf(0, 1, "%s: %d %%", "Battery", z);
+        case 1: /* status: */
+            lcd_putsf(0, 0, "Pwr status: %s",
+                     charging_state() ? "charging" : "discharging");
+            battery_read_info(&y, &z);
+            if (y > 0)
+                lcd_putsf(0, 1, "%s: %d.%03d V (%d %%)", "Battery", y / 1000, y % 1000, z);
+            else if (z > 0)
+                lcd_putsf(0, 1, "%s: %d %%", "Battery", z);
 #if defined IPOD_VIDEO
-                int usb_pwr  = (GPIOL_INPUT_VAL & 0x10)?true:false;
-                int ext_pwr  = (GPIOL_INPUT_VAL & 0x08)?false:true;
-                int dock     = (GPIOA_INPUT_VAL & 0x10)?true:false;
-                int charging = (GPIOB_INPUT_VAL & 0x01)?false:true;
-                int headphone= (GPIOA_INPUT_VAL & 0x80)?true:false;
+            int usb_pwr  = (GPIOL_INPUT_VAL & 0x10)?true:false;
+            int ext_pwr  = (GPIOL_INPUT_VAL & 0x08)?false:true;
+            int dock     = (GPIOA_INPUT_VAL & 0x10)?true:false;
+            int charging = (GPIOB_INPUT_VAL & 0x01)?false:true;
+            int headphone= (GPIOA_INPUT_VAL & 0x80)?true:false;
 
-                lcd_putsf(0, 3, "USB pwr:   %s",
-                            usb_pwr ? "present" : "absent");
-                lcd_putsf(0, 4, "EXT pwr:   %s",
-                            ext_pwr ? "present" : "absent");
-                lcd_putsf(0, 5, "%s:   %s", "Battery",
-                    charging ? "charging" : (usb_pwr||ext_pwr) ? "charged" : "discharging");
-                lcd_putsf(0, 6, "Dock mode: %s",
-                         dock    ? "enabled" : "disabled");
-                lcd_putsf(0, 7, "Headphone: %s",
-                         headphone ? "connected" : "disconnected");
+            lcd_putsf(0, 3, "USB pwr:   %s",
+                        usb_pwr ? "present" : "absent");
+            lcd_putsf(0, 4, "EXT pwr:   %s",
+                        ext_pwr ? "present" : "absent");
+            lcd_putsf(0, 5, "%s:   %s", "Battery",
+                charging ? "charging" : (usb_pwr||ext_pwr) ? "charged" : "discharging");
+            lcd_putsf(0, 6, "Dock mode: %s",
+                     dock    ? "enabled" : "disabled");
+            lcd_putsf(0, 7, "Headphone: %s",
+                     headphone ? "connected" : "disconnected");
 #ifdef IPOD_VIDEO
-                if(probed_ramsize == 64)
-                    x = (adc_read(ADC_4066_ISTAT) * 2400) / (1024 * 2);
-                else
+            if(probed_ramsize == 64)
+                x = (adc_read(ADC_4066_ISTAT) * 2400) / (1024 * 2);
+            else
 #endif
-                    x = (adc_read(ADC_4066_ISTAT) * 2400) / (1024 * 3);
-                lcd_putsf(0, 8, "Ibat: %d mA", x);
-                lcd_putsf(0, 9, "Vbat * Ibat: %d mW", x * y / 1000);
+                x = (adc_read(ADC_4066_ISTAT) * 2400) / (1024 * 3);
+            lcd_putsf(0, 8, "Ibat: %d mA", x);
+            lcd_putsf(0, 9, "Vbat * Ibat: %d mW", x * y / 1000);
 #else
-                lcd_putsf(0, 3, "Charger: %s",
-                         charger_inserted() ? "present" : "absent");
-                lcd_putsf(0, 4, "USB budget: %d mA",
-                          usb_charging_maxcurrent());
+            lcd_putsf(0, 3, "Charger: %s",
+                     charger_inserted() ? "present" : "absent");
+            lcd_putsf(0, 4, "USB budget: %d mA",
+                      usb_charging_maxcurrent());
 #if defined(IPOD_6G)
-                /* Read output latches as well as software policy: an input
-                 * left in SUSP cannot charge even if maxcurrent says 100. */
-                unsigned int gpio_b = PDAT(11), gpio_c = PDAT(12);
-                unsigned int input = power_thread_inputs;
-                lcd_putsf(0, 5, "Input: USB %d / dock %d",
-                          !!(input & POWER_INPUT_USB),
-                          !!(input & POWER_INPUT_MAIN_CHARGER));
-                lcd_putsf(0, 6, "Host grant: %d mA",
-                          usb_charging_current_grant());
-                lcd_putsf(0, 7, "Charge enabled: %d C1:%d C2:%d",
-                          !(gpio_c & 6), !!(gpio_c & 2), !!(gpio_c & 4));
-                lcd_putsf(0, 8, "USB setting: %s",
-                          usb_charging_get_mode() == USB_CHARGING_DISABLE ?
-                          "off" : usb_charging_get_mode() == USB_CHARGING_FORCE ?
-                          "force" : "on");
-                int input_limit = (gpio_b & 0x80) ? 0 :
-                    ((gpio_b & 0x40) ? 500 : 100) * ((gpio_c & 1) ? 2 : 1);
-                lcd_putsf(0, 9, "Input: %dmA C0:%d S:%d H:%d", input_limit,
-                          !!(gpio_c & 1), !!(gpio_b & 0x80), !!(gpio_b & 0x40));
-                lcd_putsf(0, 10, "Battery: %d mV", y);
-                lcd_putsf(0, 11, "USB state: %d (0=D 1=A 2=C)",
-                          usb_core_get_state());
-                lcd_putsf(0, 12, "Host: %d Stack: %d",
-                          usb_host_is_present(), usb_core_is_enabled());
-                struct usb_charge_guard_status guard;
-                usb_charging_guard_get_status(&guard);
-                lcd_putsf(0, 13, "Dropouts: %u/8 Triggers: %u",
-                          guard.dropouts, guard.triggers);
-                lcd_putsf(0, 14, "Backoff: %us Next: %us",
-                          guard.backoff_seconds, guard.next_backoff_seconds);
-                lcd_putsf(0, 15, "Last: %lds Cap: %dmA",
-                          guard.last_trigger_tick / HZ, guard.input_ceiling_ma);
+            /* Read output latches as well as software policy: an input
+             * left in SUSP cannot charge even if maxcurrent says 100. */
+            unsigned int gpio_b = PDAT(11), gpio_c = PDAT(12);
+            unsigned int input = power_thread_inputs;
+            lcd_putsf(0, 5, "Input: USB %d / dock %d",
+                      !!(input & POWER_INPUT_USB),
+                      !!(input & POWER_INPUT_MAIN_CHARGER));
+            lcd_putsf(0, 6, "Host grant: %d mA",
+                      usb_charging_current_grant());
+            lcd_putsf(0, 7, "Charge enabled: %d C1:%d C2:%d",
+                      !(gpio_c & 6), !!(gpio_c & 2), !!(gpio_c & 4));
+            lcd_putsf(0, 8, "USB setting: %s",
+                      usb_charging_get_mode() == USB_CHARGING_DISABLE ?
+                      "off" : usb_charging_get_mode() == USB_CHARGING_FORCE ?
+                      "force" : "on");
+            int input_limit = (gpio_b & 0x80) ? 0 :
+                ((gpio_b & 0x40) ? 500 : 100) * ((gpio_c & 1) ? 2 : 1);
+            lcd_putsf(0, 9, "Input: %dmA C0:%d S:%d H:%d", input_limit,
+                      !!(gpio_c & 1), !!(gpio_b & 0x80), !!(gpio_b & 0x40));
+            lcd_putsf(0, 10, "Battery: %d mV", y);
+            lcd_putsf(0, 11, "USB state: %d (0=D 1=A 2=C)",
+                      usb_core_get_state());
+            lcd_putsf(0, 12, "Host: %d Stack: %d",
+                      usb_host_is_present(), usb_core_is_enabled());
+            struct usb_charge_guard_status guard;
+            usb_charging_guard_get_status(&guard);
+            lcd_putsf(0, 13, "Dropouts: %u/8 Triggers: %u",
+                      guard.dropouts, guard.triggers);
+            lcd_putsf(0, 14, "Backoff: %us Next: %us",
+                      guard.backoff_seconds, guard.next_backoff_seconds);
+            lcd_putsf(0, 15, "Last: %lds Cap: %dmA",
+                      guard.last_trigger_tick / HZ, guard.input_ceiling_ma);
 #endif
 #endif /* target type */
-                break;
-            case 2: /* voltage deltas: */
-                lcd_puts(0, 0, "Voltage deltas:");
-                for (i = 0; i < POWER_HISTORY_LEN-1; i++) {
-                    y = power_history[i] - power_history[i+1];
-                    lcd_putsf(0, i+1, "-%d min: %c%d.%03d V", i,
-                             (y < 0) ? '-' : ' ', ((y < 0) ? y * -1 : y) / 1000,
-                             ((y < 0) ? y * -1 : y ) % 1000);
-                }
-                break;
+            break;
+        case 2: /* voltage deltas: */
+            lcd_puts(0, 0, "Voltage deltas:");
+            for (i = 0; i < POWER_HISTORY_LEN-1; i++) {
+                y = power_history[i] - power_history[i+1];
+                lcd_putsf(0, i+1, "-%d min: %c%d.%03d V", i,
+                         (y < 0) ? '-' : ' ', ((y < 0) ? y * -1 : y) / 1000,
+                         ((y < 0) ? y * -1 : y ) % 1000);
+            }
+            break;
 
-            case 3: /* remaining time estimation: */
+        case 3: /* remaining time estimation: */
 
-                lcd_putsf(0, 5, "Last PwrHist: %d.%03dV",
-                    power_history[0] / 1000,
-                    power_history[0] % 1000);
+            lcd_putsf(0, 5, "Last PwrHist: %d.%03dV",
+                power_history[0] / 1000,
+                power_history[0] % 1000);
 
-                lcd_putsf(0, 6, "%s level: %d%%", "Battery", battery_level());
+            lcd_putsf(0, 6, "%s level: %d%%", "Battery", battery_level());
 
-                int time_left = battery_time();
-                if (time_left >= 0)
-                    lcd_putsf(0, 7, "Est. remain: %d m", time_left);
-                else
-                    lcd_puts(0, 7, "Estimation n/a");
+            int time_left = battery_time();
+            if (time_left >= 0)
+                lcd_putsf(0, 7, "Est. remain: %d m", time_left);
+            else
+                lcd_puts(0, 7, "Estimation n/a");
 
 #if (CONFIG_BATTERY_MEASURE & CURRENT_MEASURE)
-                lcd_putsf(0, 8, "%s current: %d mA", "Battery", battery_current());
+            lcd_putsf(0, 8, "%s current: %d mA", "Battery", battery_current());
 #endif
-                break;
-        }
-
-        lcd_update();
-
-        switch(get_action(CONTEXT_STD,HZ/2))
-        {
-            case ACTION_STD_PREV:
-                if (view)
-                    view--;
-                break;
-
-            case ACTION_STD_NEXT:
-                if (view < 3)
-                    view++;
-                break;
-
-            case ACTION_STD_CANCEL:
-                lcd_setfont(FONT_UI);
-                return false;
-
-            case ACTION_STD_MENU:
-                lcd_setfont(FONT_UI);
-                return true;
-        }
+            break;
     }
-    lcd_setfont(FONT_UI);
-    return false;
+
+    lcd_set_viewport(last);
+}
+
+static const struct ui_view_ops battery_ops = { .paint = paint_battery };
+
+static bool view_battery(void)
+{
+    const struct ui_rect bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+    struct ui_view view;
+    struct ui_page page;
+    struct ui_scene scene = {0};
+    int tab = 0;
+    bool to_root = false;
+
+    ui_scene_open_page(&scene, "battery-debug-push");
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
+    ui_view_init(&view, bounds, &battery_ops, &tab);
+    ui_page_init(&page, &view);
+    while (true)
+    {
+        ui_page_invalidate(&page, bounds);
+        ui_page_draw(&page);
+
+        int action = get_action(CONTEXT_STD, HZ / 2);
+        if (action == ACTION_STD_CANCEL)
+            break;
+        if (action == ACTION_STD_MENU || default_event_handler(action) == SYS_USB_CONNECTED)
+        {
+            to_root = true;
+            break;
+        }
+        if (action == ACTION_STD_PREV && tab > 0)
+            tab--;
+        if (action == ACTION_STD_NEXT && tab < 3)
+            tab++;
+    }
+    ui_scene_close_modal(&scene, !to_root, "battery-debug-pop");
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
+    return to_root;
 }
 
 #endif /* (CONFIG_BATTERY_MEASURE != 0) && !SIMULATOR */
@@ -2095,7 +2133,8 @@ static bool dbg_syscfg(void) {
 
         switch (entry->tag) {
             case SYSCFG_TAG_SRNM:
-                simplelist_addline("Serial number (SrNm): %s", entry->data);
+                simplelist_addline("Serial number (SrNm): %.*s",
+                                   (int)sizeof(entry->data), entry->data);
                 break;
             case SYSCFG_TAG_FWID:
                 simplelist_addline("Firmware ID (FwId): %07lX", data32[1] & 0x0FFFFFFF);
@@ -2107,16 +2146,20 @@ static bool dbg_syscfg(void) {
                 simplelist_addline("Hardware version (HwVr): %06lX", data32[1]);
                 break;
             case SYSCFG_TAG_CODC:
-                simplelist_addline("Codec (Codc): %s", entry->data);
+                simplelist_addline("Codec (Codc): %.*s",
+                                   (int)sizeof(entry->data), entry->data);
                 break;
             case SYSCFG_TAG_SWVR:
-                simplelist_addline("Software version (SwVr): %s", entry->data);
+                simplelist_addline("Software version (SwVr): %.*s",
+                                   (int)sizeof(entry->data), entry->data);
                 break;
             case SYSCFG_TAG_MLBN:
-                simplelist_addline("Logic board serial number (MLBN): %s", entry->data);
+                simplelist_addline("Logic board serial number (MLBN): %.*s",
+                                   (int)sizeof(entry->data), entry->data);
                 break;
             case SYSCFG_TAG_MODN:
-                simplelist_addline("Model number (Mod#): %s", entry->data);
+                simplelist_addline("Model number (Mod#): %.*s",
+                                   (int)sizeof(entry->data), entry->data);
                 break;
             case SYSCFG_TAG_REGN:
                 simplelist_addline("Sales region (Regn): %08lX %08lX", data32[0], data32[1]);
@@ -2133,36 +2176,50 @@ static bool dbg_syscfg(void) {
     return simplelist_show_list(&info);
 }
 
-#define FLASH_PAGES (FLASH_SIZE >> 12)
-#define FLASH_PAGE_SIZE (FLASH_SIZE >> 8)
+#define FLASH_PAGE_SIZE 4096
 
-static bool dbg_bootflash_dump(void) {
+static bool dbg_bootflash_dump(void)
+{
+    int handle = core_alloc_free_space(FLASH_PAGE_SIZE);
+    if (handle <= 0)
+    {
+        splash(HZ * 3, ID2P(LANG_OUT_OF_MEMORY));
+        return false;
+    }
+
     splash(HZ, "Please wait...");
-
-    int fd;
-
-    fd = creat("/bootflash.bin", 0666);
-
+    int fd = creat("/bootflash.bin", 0666);
     if (fd < 0)
     {
+        core_free(handle);
         splash(HZ * 3, "Error opening file");
         return false;
     }
 
-    uint8_t page[FLASH_PAGE_SIZE];
+    uint8_t *page = core_get_data_pinned(handle);
+    bool complete = true;
     bootflash_init(SPI_PORT);
-
-    for (int i = 0; i < FLASH_PAGES; i++) {
-        bootflash_read(SPI_PORT, i << 12, FLASH_PAGE_SIZE, page);
-        write(fd, page, FLASH_PAGE_SIZE);
+    for (unsigned offset = 0; offset < FLASH_SIZE; offset += FLASH_PAGE_SIZE)
+    {
+        size_t size = MIN(FLASH_PAGE_SIZE, FLASH_SIZE - offset);
+        bootflash_read(SPI_PORT, offset, size, page);
+        if (write(fd, page, size) != (ssize_t)size)
+        {
+            complete = false;
+            break;
+        }
     }
-
     bootflash_close(SPI_PORT);
-    close(fd);
-    splash(HZ * 3, "Dump saved to /bootflash.bin");
+    core_put_data_pinned(page);
+    core_free(handle);
 
+    if (close(fd) < 0)
+        complete = false;
+    splash(HZ * 3, complete ? "Dump saved to /bootflash.bin"
+                            : "Error writing /bootflash.bin");
     return false;
 }
+
 #endif
 
 
@@ -2228,7 +2285,7 @@ static const struct {
         { "View CPU stats", dbg_cpuinfo, false, NULL },
 #endif
         { "Buffers and CPU", dbg_buffering_thread, false, NULL },
-        { "Beat analysis", beat_debug_screen, true, NULL },
+        { "Beat analysis", beat_debug_screen, false, NULL },
         { "Beat tap", spike_tap_screen, false, NULL },
         { "Sound probe", probe_debug_screen, false, NULL },
 #ifdef PM_DEBUG
@@ -2264,7 +2321,7 @@ static const struct {
 #endif
 
 #if (CONFIG_BATTERY_MEASURE != 0) && !defined(SIMULATOR)
-        { "Battery", view_battery, true, NULL },
+        { "Battery", view_battery, false, NULL },
 #endif
 #ifndef SIMULATOR   /* reads the wheel driver */
         { "Click wheel", dbg_scrollwheel, false, NULL },
@@ -2289,7 +2346,7 @@ static const struct {
         { "Dump boot flash", dbg_bootflash_dump, false, NULL },
 #endif
 #ifdef ROCKBOX_HAS_LOGF
-        { "Log file", log_viewer_show, true, NULL },
+        { "Log file", log_viewer_show, false, NULL },
         { "Dump log file", log_viewer_dump, false, NULL },
 #endif
 };

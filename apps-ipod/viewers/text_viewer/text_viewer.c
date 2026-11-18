@@ -70,6 +70,8 @@
 #include "rbunicode.h"          /* utf8decode, a mark's label */
 #include "metadata/book_resume.h"       /* book_resume_key */
 #include "widgets/yesno.h"
+#include "ui/frame.h"
+#include "ui/retained.h"
 
 /* Extracted text kept resident, and how much of it sits behind the current
  * page. The margin is the backward reach: at a typical few KiB per page it
@@ -133,6 +135,7 @@ struct tv_state
     int footer_font;         /* TV_FOOTER_FONT, or -1 to use tv.font */
     int line_height;
     struct viewport vp;
+    struct ui_page *page;
 };
 
 static struct tv_state tv;
@@ -978,30 +981,28 @@ static void tv_side_free(void)
 
 /* The page's (u, v) lands at (319 - v, u) with the top of the iPod to the
  * left, the right hand's way, and at (v, 239 - u) the left hand's. */
-static void tv_side_push(void)
+static void tv_side_compose(void)
 {
-    /* lcd_set_viewport() answers the viewport it replaces: the second call
-     * hands back the default one, whose buffer is the screen's. The update
-     * reads through the current viewport's buffer, so the default one is
-     * current for it. */
-    struct viewport *prev = lcd_set_viewport(NULL);
-    fb_data *dst = lcd_set_viewport(prev)->buffer->fb_ptr;
+    fb_data *dst = lcd_framebuffer_default.fb_ptr;
     const fb_data *src = tv_side_fb.fb_ptr;
     bool right = global_settings.text_viewer_orientation == TV_ORIENT_RIGHT;
-    int u, v;
 
-    for (v = 0; v < LCD_WIDTH; v++)
+    for (int v = 0; v < LCD_WIDTH; v++)
     {
         fb_data *d = right ? dst + (LCD_WIDTH - 1 - v)
                            : dst + (LCD_HEIGHT - 1) * LCD_WIDTH + v;
         int step = right ? LCD_WIDTH : -LCD_WIDTH;
 
-        for (u = 0; u < LCD_HEIGHT; u++, d += step)
+        for (int u = 0; u < LCD_HEIGHT; u++, d += step)
             *d = *src++;
     }
-    lcd_set_viewport(NULL);
-    lcd_update();
-    lcd_set_viewport(prev);
+}
+
+static void tv_side_push(void)
+{
+    tv_side_compose();
+    ui_mark_dirty(SCREEN_MAIN);
+    ui_flush_dirty();
 }
 
 /* A whole-screen viewport filled with the reading background. Used to wipe the
@@ -1141,8 +1142,13 @@ static void tv_draw_footer(void)
     tv.vp.font = tv.font;
 }
 
-static void tv_draw(void)
+static const struct ui_rect tv_bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+
+static void tv_paint(const struct ui_view *view, const struct ui_view_frame *frame)
 {
+    /* A text page is laid out as a unit for forward and backward navigation. */
+    (void)view;
+    (void)frame;
     struct screen *display = &screens[SCREEN_MAIN];
     struct viewport full, *last;
 
@@ -1157,12 +1163,17 @@ static void tv_draw(void)
     if (!tv_pic_page)
         tv_draw_footer();
 
-    display->set_viewport(&full);
     if (tv_side)
-        tv_side_push();
-    else
-        display->update_viewport();          /* push the whole screen */
+        tv_side_compose();
     display->set_viewport(last);
+}
+
+static const struct ui_view_ops tv_ops = { .paint = tv_paint };
+
+static void tv_draw(void)
+{
+    ui_page_invalidate(tv.page, tv_bounds);
+    ui_page_draw(tv.page);
 }
 
 /* How far past the page's end a reading may run to finish its sentence */
@@ -2763,6 +2774,11 @@ static const char *tv_toc_name(int item, void *data, char *buf, size_t len)
     return ((struct tv_toc *)data)->e[item].title;
 }
 
+bool text_viewer_is_open(void)
+{
+    return tv.src != NULL;
+}
+
 bool text_viewer_has_contents(void)
 {
     return tv.src && (tv.nparts > 1 || (!tv.nparts && tv_heads_seen));
@@ -3677,6 +3693,11 @@ int text_viewer(const char *file)
     tv_open_part = tv.part;
     tv_open_pos = tv.pos;
 
+    struct ui_view view;
+    struct ui_page page;
+    ui_view_init(&view, tv_bounds, &tv_ops, NULL);
+    ui_page_init(&page, &view);
+    tv.page = &page;
     tv_draw();
     tv_speak_page();
     tv_book_done = false;
@@ -3849,6 +3870,7 @@ int text_viewer(const char *file)
         backlight_on();
     reading_stats_end(tv_book_percent(), tv_at_book_end());
     tv_resume_save(file, tv.part, tv.pos, tv.file_size);
+    tv.page = NULL;
     tv_close();
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     pop_current_activity();

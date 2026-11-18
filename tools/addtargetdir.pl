@@ -13,11 +13,13 @@ use File::Basename;
 
 my $rbroot = $ARGV[0];
 my $builddir = $ARGV[1];
+my $depfile = $ARGV[2];
 undef $/;
 
 my $target;
 my $rootlen = length $rbroot;
 my $src;
+my %headers;
 
 # Split the input file on any runs of '\' and whitespace.
 for (split(/[\s\\]+/m, <STDIN>)) {
@@ -35,7 +37,18 @@ for (split(/[\s\\]+/m, <STDIN>)) {
         } elsif (!$1) {
             $src = "$builddir/$src";
         }
+        # Ignore generated headers: their rules consume this dependency
+        # scan, so making them prerequisites would create a cycle.
+        if (defined($depfile) && $src =~ /\.h$/ &&
+            index($src, "$rbroot/") == 0 && index($src, "$builddir/") != 0) {
+            $headers{$src} = 1;
+        }
         print " \\\n  $src";
     }
 }
 print "\n";
+for my $header (sort keys %headers) {
+    # A removed header should trigger a rescan of the included makefile.
+    # A source which still includes it will fail during compilation.
+    print "$depfile: $header\n$header:\n";
+}

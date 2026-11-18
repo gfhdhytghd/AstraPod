@@ -19,7 +19,8 @@
 # the shell. To safely pass a literal "#", it has to go in a variable.
 _hash_ = \#
 
-preprocess = $(shell $(CC) $(PPCFLAGS) $(2) -E -P -x c -include config.h $(1) | \
+DEP_SOURCE_LISTS :=
+preprocess = $(eval DEP_SOURCE_LISTS += $(strip $(1)))$(shell $(CC) $(PPCFLAGS) $(2) -E -P -x c -include config.h $(1) | \
 		grep -v "^$(_hash_)" | grep -v "^ *$$" | \
 		sed -e 's:^..*:$(dir $(1))&:')
 
@@ -57,12 +58,12 @@ else
 endif
 
 # calculate dependencies for a list of source files $(2) and output them to $(1)
-mkdepfile = $(SILENT)perl $(TOOLSDIR)/multigcc.pl $(CC) $(PPCFLAGS) $(OTHER_INC) -MG -MM -include config.h -- $(2) | \
+mkdepfile = $(SILENT)perl $(TOOLSDIR)/multigcc.pl $(CC) $(PPCFLAGS) $(OTHER_INC) -MG -MM -include config.h -- $(2) > $(1).raw && \
 	sed -e "s: lang.h: lang/lang.h:" \
 	-e 's:_asmdefs.o:_asmdefs.h:' \
-	-e "s: max_language_size.h: lang/max_language_size.h:" | \
-	$(TOOLSDIR)/addtargetdir.pl $(ROOTDIR) $(BUILDDIR) \
-	>> $(1)
+	-e "s: max_language_size.h: lang/max_language_size.h:" $(1).raw | \
+	$(TOOLSDIR)/addtargetdir.pl $(ROOTDIR) $(BUILDDIR) $(DEPFILE) \
+	>> $(1) && rm -f $(1).raw
 
 # function to create .bmp dependencies
 bmpdepfile = $(SILENT) \

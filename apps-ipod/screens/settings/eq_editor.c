@@ -3,12 +3,11 @@
  *
  * The equaliser editor: the whole screen given to the response curve, in
  * Simple mode (each band's gain) or Enhanced (frequency, gain, Q and type).
- * The lists it opens -- its menu and the presets -- are the theme's
- * skinned list.
+ * Its menu and presets use the native list renderer.
  *
  * Everything drawn comes from the theme: its colours, with the list
  * selection colour as the accent, the UI font and its bold, and for labels a
- * smaller size of the UI font's family if a skin has loaded one. Every height
+ * smaller size of the UI font's family when one is available. Every height
  * is derived from those fonts; a font too large to leave the curve room
  * sends the user to the band list instead.
  *
@@ -45,6 +44,8 @@
 #include "draw/viewport.h"
 #include "draw/color.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/retained.h"
+#include "ui/scene.h"
 #include "metadata/album_palette.h"
 #include "widgets/list.h"
 #include "widgets/splash.h"
@@ -827,11 +828,16 @@ static void draw_enhanced(void)
     }
 }
 
-static void draw(void)
+static void eq_paint(const struct ui_view *view, const struct ui_view_frame *frame)
 {
-    lcd_set_viewport(NULL);
-    lcd_set_backdrop(NULL);
-    lcd_set_drawmode(DRMODE_SOLID);
+    (void)view;
+    struct viewport vp = {
+        .x = frame->bounds.x, .y = frame->bounds.y,
+        .width = frame->bounds.width, .height = frame->bounds.height,
+        .flags = VP_DEFAULT_FLAGS, .font = FONT_UI,
+        .drawmode = DRMODE_SOLID, .buffer = &lcd_framebuffer_default,
+    };
+    struct viewport *last = lcd_set_viewport(&vp);
     lcd_set_foreground(ed.bg);
     lcd_fillrect(0, 0, LCD_WIDTH, LCD_HEIGHT);
     fill_columns();
@@ -839,9 +845,10 @@ static void draw(void)
         draw_enhanced();
     else
         draw_simple();
-    lcd_setfont(FONT_UI);
-    lcd_update();
+    lcd_set_viewport(last);
 }
+
+static const struct ui_view_ops eq_ops = { .paint = eq_paint };
 
 /** changing a band **/
 
@@ -1160,7 +1167,10 @@ static int confirm_exit(void)
 
 int eq_editor_screen(void)
 {
-    struct viewport vp;
+    const struct ui_rect bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+    struct ui_view view;
+    struct ui_page page;
+    struct ui_scene scene = {0};
     int ret = 0;
     bool redraw = true, dirty = false;
 
@@ -1179,7 +1189,10 @@ int eq_editor_screen(void)
     load_colours();
     rebuild_curve();
 
-    viewportmanager_theme_enable(SCREEN_MAIN, false, &vp);
+    ui_view_init(&view, bounds, &eq_ops, NULL);
+    ui_page_init(&page, &view);
+    ui_scene_open_page(&scene, "eq-push");
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
 #ifdef HAVE_ADJUSTABLE_CPU_FREQ
     cpu_boost(true);
 #endif
@@ -1196,7 +1209,8 @@ int eq_editor_screen(void)
         dirty |= redraw;
         if (dirty && button_queue_empty())
         {
-            draw();
+            ui_page_invalidate(&page, bounds);
+            ui_page_draw(&page);
             dirty = false;
         }
         redraw = true;
@@ -1304,7 +1318,7 @@ done:
 #ifdef HAVE_ADJUSTABLE_CPU_FREQ
     cpu_boost(false);
 #endif
-    lcd_setfont(FONT_UI);
+    ui_scene_close_modal(&scene, ret != MENU_ATTACHED_USB, "eq-pop");
     viewportmanager_theme_undo(SCREEN_MAIN, true);
     if (ed.changed && ret != MENU_ATTACHED_USB)
         settings_save();

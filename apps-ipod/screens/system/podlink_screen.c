@@ -24,7 +24,6 @@
 #include "kernel.h"
 #include "button.h"
 #include "input/agents_shortcut.h"
-#include "lcd.h"
 #include "powermgmt.h"
 #include "core_alloc.h"
 #include "version.h"
@@ -141,7 +140,8 @@ static void message(const struct podlink_message *m)
     reply_type = m->type;
 }
 
-int podlink_screen(void)
+int podlink_screen_run(void (*draw)(const struct podlink_diagnostics *, void *),
+                       void *draw_data)
 {
     if (!podlink_open())
     {
@@ -206,16 +206,8 @@ int podlink_screen(void)
             break;
         if (TIME_AFTER(current_tick, draw_at))
         {
-            static const char *const names[] = {
-                "Closed", "Waiting: plug USB in", "USB up / waiting OPEN",
-                "Open / messages", "Closing"};
-            lcd_clear_display();
-            lcd_puts(0, 0, "PodLink");
-            lcd_puts(0, 2, names[state]);
-            lcd_putsf(0, 4, "RX: %lu  TX: %lu", received, sent);
-            lcd_putsf(0, 5, "Close events: %lu", closes);
-            lcd_puts(0, 7, "MENU: close and exit");
-            lcd_update();
+            const struct podlink_diagnostics status = {state, received, sent, closes};
+            draw(&status, draw_data);
             draw_at = current_tick + HZ / 4;
         }
         int button = agents_shortcut_get_button(TIMEOUT_NOBLOCK);

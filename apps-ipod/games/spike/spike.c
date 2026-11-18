@@ -46,6 +46,8 @@
 #include "system/activity.h"
 #include "system/shutdown.h"  /* default_event_handler */
 #include "draw/viewport.h"    /* viewportmanager_theme_enable */
+#include "ui/retained.h"
+#include "ui/scene.h"
 #include "lang.h"
 #include "settings/settings.h"
 #include "widgets/splash.h"
@@ -1023,21 +1025,15 @@ static void spike_event(int button)
 /* Leaving costs a run, so it is asked rather than taken -- Menu is one
  * button away from the jump and a run is an evening's work.
  *
- * The dialog draws through the skin engine, so the game's display state is
- * handed back for it exactly as it is for the menu. */
+ * The native dialog uses the game frame as its backdrop. */
 static bool spike_confirm_exit(void)
 {
     static const char *lines[] = { ID2P(LANG_SPIKE_LEAVE) };
     static const struct text_message message = { lines, 1 };
-    struct viewport vp;
     enum yesno_res res;
 
     lcd_setfont(FONT_UI);
-    viewportmanager_theme_undo(SCREEN_MAIN, true);
-
     res = gui_syncyesno_run(&message, NULL, NULL);
-
-    viewportmanager_theme_enable(SCREEN_MAIN, false, &vp);
     lcd_set_backdrop(NULL);
     lcd_setfont(FONT_SYSFIXED);
     spk_draw_full_flush();
@@ -1224,6 +1220,23 @@ static bool spike_menu(int fps, int draw_ms, int flush_ms)
     return root;
 }
 
+struct spike_summary_view {
+    struct spk_summary *summary;
+    int phase, move;
+};
+
+static void spike_summary_paint(const struct ui_view *view,
+                                 const struct ui_view_frame *frame)
+{
+    (void)frame;
+    const struct spike_summary_view *run = view->data;
+    struct viewport *previous = lcd_set_viewport(NULL);
+    spk_paint_summary(run->summary, run->phase, run->move);
+    lcd_set_viewport(previous);
+}
+
+static const struct ui_view_ops spike_summary_ops = { .paint = spike_summary_paint };
+
 /* What a run came to, held until the player is done looking at it. Its own
  * loop, because it has nothing in common with the game's: no grid, no
  * clock, and one thing moving.
@@ -1233,12 +1246,21 @@ static bool spike_menu(int fps, int draw_ms, int flush_ms)
  * a frame before it knows how far one press moves. */
 static void spike_summary_screen(struct spk_summary *s)
 {
+    const struct ui_rect bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+    struct spike_summary_view run = { .summary = s };
+    struct ui_view view;
+    struct ui_page page;
+    struct ui_scene scene = {0};
+
     /* The routine is picked a move at a time rather than cycled, so two
      * looks at the same screen are not the same performance. It starts on
      * the forward somersault, which is the one that most plainly says the
      * body is pleased with itself. */
     long last_beat = current_tick / SPK_RESULT_BEAT;
-    int move = 0;
+
+    ui_view_init(&view, bounds, &spike_summary_ops, &run);
+    ui_page_init(&page, &view);
+    ui_scene_open_page(&scene, "spike-summary-push");
 
     s->first = 0;
     s->shown = 0;
@@ -1251,19 +1273,21 @@ static void spike_summary_screen(struct spk_summary *s)
     {
         long t = current_tick;
         long beat = t / SPK_RESULT_BEAT;
-        int phase = (int)((t % SPK_RESULT_BEAT) * SPK_PHASE
-                          / SPK_RESULT_BEAT);
+        run.phase = (int)((t % SPK_RESULT_BEAT) * SPK_PHASE / SPK_RESULT_BEAT);
         bool lit = is_backlight_on(false);
         int button;
 
         if (beat != last_beat)
         {
-            move = spk_pose_idle_next(move);
+            run.move = spk_pose_idle_next(run.move);
             last_beat = beat;
         }
 
         if (lit)
-            spk_draw_summary(s, phase, move);
+        {
+            ui_page_invalidate(&page, bounds);
+            ui_page_draw(&page);
+        }
 
         button = get_action(CONTEXT_SPIKE, lit ? HZ / 20 : HZ / 2);
 
@@ -1284,6 +1308,7 @@ static void spike_summary_screen(struct spk_summary *s)
         }
     }
 
+    ui_scene_close_modal(&scene, !spike_to_root, "spike-summary-pop");
     spike_backlight(true);      /* the record returns to the game's menu */
 }
 

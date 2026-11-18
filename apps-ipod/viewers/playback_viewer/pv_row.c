@@ -7,9 +7,8 @@
  * Parts: the artwork slots, which are the only thing held between frames; the
  * fonts; the section list; the composite, which is one frame; then the loop.
  *
- * This owns the screen outright -- no status bar, no themed viewport, no list
- * widget -- and it owns the working memory while it is up, because every name
- * a card shows is a pointer into the aggregate tables.
+ * The page uses the full display and keeps its working memory claimed while
+ * every card name is a pointer into the aggregate tables.
  ****************************************************************************/
 
 #include <stdio.h>
@@ -46,6 +45,8 @@
 #include "pv_play.h"
 #include "pv_row.h"
 #include "speech/talk.h"
+#include "ui/retained.h"
+#include "ui/scene.h"
 
 #ifdef HAVE_ALBUMART
 #include "metadata/art_cache.h"
@@ -684,23 +685,35 @@ static void draw_title(int year)
     if (sec_at < sec_n - 1)
         draw_arrow(LCD_WIDTH - ROW_X / 2 + 1, cy, +1,
                    LCD_RGBPACK(120, 120, 128));
-
-    lcd_update_rect(0, 0, LCD_WIDTH, ROW_Y);
 }
 
-/* The whole screen, from scratch. Whatever drew over it -- a menu, a splash,
- * a yes/no -- left the frame buffer as it found it, so the clear comes first
- * and the row is composited on top of a known ground. */
-static void repaint(int year)
-{
-    lcd_set_drawmode(DRMODE_SOLID);
-    lcd_set_foreground(band_bg);
-    lcd_fillrect(0, 0, LCD_WIDTH, LCD_HEIGHT);
-    lcd_update();
+static const struct ui_rect report_bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+static const struct ui_rect report_title = {0, 0, LCD_WIDTH, ROW_Y};
+static const struct ui_rect report_band = {0, ROW_Y, LCD_WIDTH, ROW_H};
 
-    draw_title(year);
-    composite();
-    lcd_update_rect(0, ROW_Y, LCD_WIDTH, ROW_H);
+/* The controller damages the full page, the title, or the card band. The
+ * card renderer fills its own gaps, so a wheel step never fills the screen. */
+static void paint_report(const struct ui_view *view, const struct ui_view_frame *frame)
+{
+    int bottom = frame->clip.y + frame->clip.height;
+    if (frame->clip.y < ROW_Y)
+        draw_title(*(const int *)view->data);
+    if (frame->clip.y < ROW_Y + ROW_H && bottom > ROW_Y)
+        composite();
+    if (bottom > ROW_Y + ROW_H)
+    {
+        lcd_set_drawmode(DRMODE_SOLID);
+        lcd_set_foreground(band_bg);
+        lcd_fillrect(0, ROW_Y + ROW_H, LCD_WIDTH, LCD_HEIGHT - ROW_Y - ROW_H);
+    }
+}
+
+static const struct ui_view_ops report_ops = { .paint = paint_report };
+
+static void repaint(struct ui_page *page, struct ui_rect damage)
+{
+    ui_page_invalidate(page, damage);
+    ui_page_draw(page);
 }
 
 /* --------------------------------------------------------------- the loop */
@@ -715,8 +728,7 @@ static void repaint(int year)
  * Spun opens on the clock's year and that is what the badges are scored
  * against.
  *
- * The theme comes back for the list and the screen is handed to our own
- * drawing again after, the way the deck's own menu does it. */
+ * The year picker opens over the current report. */
 /* MENU dismisses this list; it does not leave for the root menu.
  *
  * simplelist_show_list() reads MENU as "out to the root", which is right for
@@ -738,6 +750,7 @@ static int year_menu_action(int action, struct gui_synclist *lists)
 
 static int year_menu(int cur, bool *to_root, bool *reload)
 {
+    struct ui_scene sheet = {0};
     struct simplelist_info info;
     int lo = 0, hi = 0, y, n = 0, at = 0, pick;
     bool rebuild = false;
@@ -775,13 +788,14 @@ static int year_menu(int cur, bool *to_root, bool *reload)
     info.hide_theme = false;
     info.action_callback = year_menu_action;
 
-    viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
+    ui_scene_open_modal(&sheet, "playback-year-up");
     push_current_activity(ACTIVITY_CONTEXTMENU);
     if (simplelist_show_list(&info))
         *to_root = true;
     pick = info.selection;
+    ui_scene_close_modal(&sheet, !*to_root && pick != n + 1, "playback-year-down");
 
-    if (pick == n + 1)
+    if (!*to_root && pick == n + 1)
     {
         if (do_menu(&spun_menu, NULL, NULL, false) == MENU_ATTACHED_USB)
             *to_root = true;
@@ -797,13 +811,7 @@ static int year_menu(int cur, bool *to_root, bool *reload)
         rebuild = global_settings.spun_artwork != was_art;
     }
 
-    /* Trap: the activity and the theme are pushed above the block, so a
-     * return from inside it leaks one activity entry a visit -- on a stack of
-     * twelve that push_current_activity() does not bound. Every way out of
-     * here goes through these three lines; what the caller is told comes
-     * after them. */
     pop_current_activity();
-    viewportmanager_theme_undo(SCREEN_MAIN, false);
     lcd_set_viewport(NULL);
 
     if (rebuild)
@@ -942,7 +950,11 @@ static int row_session(bool *again)
     sections_build(&totals);
     row_load(&totals);
 
-    repaint(year);
+    struct ui_view view;
+    struct ui_page page;
+    ui_view_init(&view, report_bounds, &report_ops, &year);
+    ui_page_init(&page, &view);
+    repaint(&page, report_bounds);
     button_clear_queue();
     prev = USEC_TIMER;
 
@@ -973,8 +985,9 @@ static int row_session(bool *again)
              * read -- means the queue is polled rather than waited on. */
             bool busy = moving || art_want_at < art_want_n;
             long left = speak_due - current_tick;
-            int btn = agents_shortcut_get_button(busy ? TIMEOUT_NOBLOCK :
-                      speak_due ? (left > 0 ? left : 0) : TIMEOUT_BLOCK);
+            int timeout = busy ? TIMEOUT_NOBLOCK :
+                          speak_due ? (left > 0 ? left : 0) : TIMEOUT_BLOCK;
+            int btn = agents_shortcut_get_button(ui_scene_poll(timeout));
 #ifdef HAVE_USB_PODLINK
             if (btn == AGENTS_SHORTCUT_BUTTON ||
                 btn == REMOTE_WPS_BUTTON || btn == REMOTE_COVERS_BUTTON)
@@ -982,7 +995,7 @@ static int row_session(bool *again)
                 if (btn == REMOTE_WPS_BUTTON) root_menu_wps_shortcut();
                 else if (btn == REMOTE_COVERS_BUTTON) root_menu_cover_shortcut();
                 else root_menu_agents_shortcut();
-                repaint(year);
+                repaint(&page, report_bounds);
                 continue;
             }
 #endif
@@ -1088,12 +1101,12 @@ static int row_session(bool *again)
                      * are names rather than database ids, so this is an
                      * ordinary outcome, not a fault. */
                     splash(HZ * 2, ID2P(LANG_PV_NOT_IN_LIBRARY));
-                    repaint(year);
+                    repaint(&page, report_bounds);
                     break;
                 case -1:
                     /* Already spoken for: the database was busy, or the
                      * listener declined to lose the playlist they had. */
-                    repaint(year);
+                    repaint(&page, report_bounds);
                     break;
                 case -2:
                     ret = GO_TO_ROOT;   /* USB answered the prompt */
@@ -1159,7 +1172,7 @@ static int row_session(bool *again)
                         row_load(&totals);
                     }
 
-                    repaint(year);
+                    repaint(&page, report_bounds);
                 }
                 else if (btn & BUTTON_REL)
                 {
@@ -1201,7 +1214,7 @@ static int row_session(bool *again)
                     sec_focus[sec_list[sec_at]] = (short)row.focus;
                     sec_at += slide_dir;
                     row_load(&totals);
-                    draw_title(year);
+                    ui_page_invalidate(&page, report_title);
                     slide_phase = SLIDE_IN;
                     slide_t = 0;
                     band_shift = slide_dir * ROW_W;
@@ -1228,8 +1241,7 @@ static int row_session(bool *again)
             cpu_boost(true);
         }
 
-        composite();
-        lcd_update_rect(0, ROW_Y, LCD_WIDTH, ROW_H);
+        repaint(&page, report_band);
 
         /* Said where the row comes to rest, once it has stayed there for
          * TALK_SETTLE */

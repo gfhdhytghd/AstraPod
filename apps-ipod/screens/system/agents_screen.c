@@ -3299,6 +3299,7 @@ static int agents_run(void)
     cache_row = selected >= 0 && selected < nrows ? rows[selected] :
                                                    (struct row){0};
     cache_top = list.start_item[SCREEN_MAIN];
+    gui_synclist_scroll_stop(&list);
     cache_valid = was_connected && model.hello && !nout;
     cache_generation = podlink_generation();
 #ifdef HAVE_CRUMBS

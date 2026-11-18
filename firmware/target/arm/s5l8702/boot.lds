@@ -93,6 +93,11 @@ SECTIONS
      _fiqstackend = .;
   } > LOAD_AREA
 
+#if CONFIG_CPU == S5L8702
+  /* The firmware keeps the last panic and breadcrumbs across a reset. */
+  ASSERT(_fiqstackend <= 0x2203f600, "bootloader overlaps firmware crash records")
+#endif
+
   .bss (NOLOAD) : {
      _edata = .;
      *(.bss*);

@@ -408,19 +408,18 @@ static void change_album(int direction)
     action_wait_for_release();
 }
 
-static void prev_track(unsigned long skip_thresh)
+static void prev_track(const struct mp3entry *track, unsigned long skip_thresh)
 {
-    struct wps_state *state = get_wps_state();
-    if (state->id3->elapsed < skip_thresh)
+    if (track->elapsed < skip_thresh)
     {
         audio_prev();
         return;
     }
     else
     {
-        if (state->id3->cuesheet)
+        if (track->cuesheet)
         {
-            curr_cuesheet_skip(state->id3->cuesheet, -1, state->id3->elapsed);
+            curr_cuesheet_skip(track->cuesheet, -1, track->elapsed);
             return;
         }
 
@@ -429,13 +428,12 @@ static void prev_track(unsigned long skip_thresh)
     }
 }
 
-static void next_track(void)
+static void next_track(const struct mp3entry *track)
 {
-    struct wps_state *state = get_wps_state();
     /* take care of if we're playing a cuesheet */
-    if (state->id3->cuesheet)
+    if (track->cuesheet)
     {
-        if (curr_cuesheet_skip(state->id3->cuesheet, 1, state->id3->elapsed))
+        if (curr_cuesheet_skip(track->cuesheet, 1, track->elapsed))
         {
             /* if the result was false, then we really want
                to skip to the next track */
@@ -446,17 +444,16 @@ static void next_track(void)
     audio_next();
 }
 
-static void play_hop(int direction)
+static void play_hop(struct mp3entry *track, int direction)
 {
-    struct wps_state *state = get_wps_state();
-    struct cuesheet *cue = state->id3->cuesheet;
+    struct cuesheet *cue = track->cuesheet;
     int length = global_settings.spoken_skip_length != -2
-                 && spoken_word_track(state->id3)
+                 && spoken_word_track(track)
                  ? global_settings.spoken_skip_length
                  : global_settings.skip_length;
     long step = length*1000;
-    long elapsed = state->id3->elapsed;
-    long remaining = state->id3->length - elapsed;
+    long elapsed = track->elapsed;
+    long remaining = track->length - elapsed;
 
     /* if cuesheet is active, then we want the current tracks end instead of
      * the total end */
@@ -471,12 +468,12 @@ static void play_hop(int direction)
     {
         if (direction < 0)
         {
-            prev_track(DEFAULT_SKIP_THRESH);
+            prev_track(track, DEFAULT_SKIP_THRESH);
             return;
         }
         else if (remaining < DEFAULT_SKIP_THRESH*2)
         {
-            next_track();
+            next_track(track);
             return;
         }
         else
@@ -488,7 +485,7 @@ static void play_hop(int direction)
             (direction < 0 && elapsed < DEFAULT_SKIP_THRESH)))
     {   /* Do normal track skipping */
         if (direction > 0)
-            next_track();
+            next_track(track);
         else if (direction < 0)
         {
             if (step > 0 && global_settings.rewind_across_tracks && elapsed < DEFAULT_SKIP_THRESH && playlist_check(-1))
@@ -503,7 +500,7 @@ static void play_hop(int direction)
                 return;
             }
 
-            prev_track(DEFAULT_SKIP_THRESH);
+            prev_track(track, DEFAULT_SKIP_THRESH);
         }
         return;
     }
@@ -536,7 +533,7 @@ void wps_lyrics_skip(int direction)
         { ab_jump_to_A_marker(); return; }
         if (direction > 0) return;
     }
-    play_hop(direction);
+    play_hop(id3, direction);
 }
 
 /*
@@ -878,6 +875,7 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
 
         button = action_wpsab_single(button); /* iPods/X5/M5 */
 
+        struct mp3entry *track = state->id3;
         switch(button)
         {
 #ifdef HAVE_USB_PODLINK
@@ -900,9 +898,9 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
                     restore = true;
                     break;
                 }
+                if (!track) break;
                 leave_playback();
-                if (state->id3 && context_go_to(context_menu_wps_hotkey(
-                        state->id3->path, act), &go_to))
+                if (context_go_to(context_menu_wps_hotkey(track->path, act), &go_to))
                     return go_to;
                 restore = true;
             }
@@ -921,8 +919,9 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
                     restore = true;
                     break;
                 }
+                if (!track) break;
                 leave_playback();
-                if (context_go_to(context_menu_show(state->id3->path,
+                if (context_go_to(context_menu_show(track->path,
                                       FILE_ATTR_AUDIO, CONTEXT_WPS, false,
                                       ONPLAY_NO_CUSTOMACTION), &go_to))
                     return go_to;
@@ -956,9 +955,10 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
             /* fast forward
                 OR next dir if this is straight after ACTION_WPS_SKIPNEXT */
             case ACTION_WPS_SEEKFWD:
+                if (!track) break;
                 if (current_tick -last_right < HZ)
                 {
-                    if (state->id3->cuesheet && playlist_check(1))
+                    if (track->cuesheet && playlist_check(1))
                     {
                         audio_next();
                     }
@@ -974,9 +974,10 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
             /* fast rewind
                 OR prev dir if this is straight after ACTION_WPS_SKIPPREV,*/
             case ACTION_WPS_SEEKBACK:
+                if (!track) break;
                 if (current_tick - last_left < HZ)
                 {
-                    if (state->id3->cuesheet && playlist_check(-1))
+                    if (track->cuesheet && playlist_check(-1))
                     {
                         audio_prev();
                     }
@@ -985,7 +986,7 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
                         change_dir(-1);
                     }
                 } else if (global_settings.rewind_across_tracks
-                           && get_wps_state()->id3->elapsed < DEFAULT_SKIP_THRESH
+                           && track->elapsed < DEFAULT_SKIP_THRESH
                            && playlist_check(-1))
                 {
                     if (!audio_paused)
@@ -1002,49 +1003,50 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
 
                 /* prev / restart */
             case ACTION_WPS_SKIPPREV:
+                if (!track) break;
                 last_left = current_tick;
 
                 /* if we're in A/B repeat mode and the current position
                    is past the A marker, jump back to the A marker... */
-                if ( ab_repeat_mode_enabled() && ab_after_A_marker(state->id3->elapsed) )
+                if ( ab_repeat_mode_enabled() && ab_after_A_marker(track->elapsed) )
                 {
                     ab_jump_to_A_marker();
                     break;
                 }
                 else /* ...otherwise, do it normally */
-                    play_hop(-1);
+                    play_hop(track, -1);
                 break;
 
                 /* next
                    OR if skip length set, hop by predetermined amount. */
             case ACTION_WPS_SKIPNEXT:
+                if (!track) break;
                 last_right = current_tick;
 
                 /* Left this early into it, on a playlist the engine built:
                    whatever the numbers said, this one was not a match. */
-                if (state->id3 != NULL)
-                    sound_mix_skipped(state->id3->path,
-                                      state->id3->elapsed);
+                sound_mix_skipped(track->path, track->elapsed);
 
                 /* if we're in A/B repeat mode and the current position is
                    before the A marker, jump to the A marker... */
                 if ( ab_repeat_mode_enabled() )
                 {
-                    if ( ab_before_A_marker(state->id3->elapsed) )
+                    if ( ab_before_A_marker(track->elapsed) )
                     {
                         ab_jump_to_A_marker();
                         break;
                     }
                 }
                 else /* ...otherwise, do it normally */
-                    play_hop(1);
+                    play_hop(track, 1);
                 break;
                 /* next / prev directories */
                 /* and set A-B markers if in a-b mode */
             case ACTION_WPS_ABSETB_NEXTDIR:
                 if (ab_repeat_mode_enabled())
                 {
-                    ab_set_B_marker(state->id3->elapsed);
+                    if (!track) break;
+                    ab_set_B_marker(track->elapsed);
                     ab_jump_to_A_marker();
                 }
                 else
@@ -1054,7 +1056,9 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
                 break;
             case ACTION_WPS_ABSETA_PREVDIR:
                 if (ab_repeat_mode_enabled())
-                    ab_set_A_marker(state->id3->elapsed);
+                {
+                    if (track) ab_set_A_marker(track->elapsed);
+                }
                 else
                 {
                     change_dir(-1);
@@ -1155,8 +1159,10 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
 
             case ACTION_WPS_ID3SCREEN:
             {
+                struct mp3entry *info = cider_active() ? track : audio_current_track();
+                if (!info) break;
                 leave_playback();
-                if (browse_id3(cider_active() ? state->id3 : audio_current_track(),
+                if (browse_id3(info,
                         cider_active() ? 1 : playlist_get_display_index(),
                         cider_active() ? 1 : playlist_amount(), NULL, 1, NULL))
                     return GO_TO_ROOT;
@@ -1227,7 +1233,7 @@ static void track_info_callback(unsigned short id, void *param)
     {
         state->id3 = ((struct track_event *)param)->id3;
         state->ff_rewind_count = 0;
-        if (state->id3->cuesheet)
+        if (state->id3 && state->id3->cuesheet)
         {
             cue_find_current_track(state->id3->cuesheet, state->id3->elapsed);
         }

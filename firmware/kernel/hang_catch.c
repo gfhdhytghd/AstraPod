@@ -31,6 +31,7 @@
  * thread or a lock that has not come back, and the screen lists what every
  * thread was doing. */
 
+#include <stdio.h>
 #include "config.h"
 #include "system.h"
 #include "kernel.h"
@@ -150,9 +151,6 @@ static void stuck_log(void)
 
 static void stuck_draw(unsigned int *y)
 {
-    lcd_putsf(1, (*y)++, "%s blocked %ds, keys unread",
-              ui_thread && ui_thread->name ? ui_thread->name : "?",
-              STUCK_SECS);
     lcd_puts(1, (*y)++, "thread  s lr       calls");
     for (unsigned i = 0; i < MAXTHREADS; i++)
     {
@@ -211,6 +209,19 @@ static void NORETURN_ATTR hang_show(void)
     else
         hang_log(t, calls, n);
     panic_screen_enter();
+    char message[80];
+    if (hang_stuck)
+        snprintf(message, sizeof(message), "%s blocked %ds, keys unread",
+                 ui_thread && ui_thread->name ? ui_thread->name : "?", STUCK_SECS);
+    else
+        snprintf(message, sizeof(message), "%s held the core %ds",
+                 t && t->name ? t->name : "?", HANG_SECS);
+#ifdef HAVE_CRUMBS
+    crumbs_crash_record(message, &(struct crumb_crash_context) {
+        .kind = CRUMB_CRASH_HANG, .pc = hang_pc, .sp = hang_sp, .lr = hang_lr,
+        .status = get_processor_mode(),
+    });
+#endif
     lcd_set_viewport(NULL);
 #if LCD_DEPTH > 1
     lcd_set_backdrop(NULL);
@@ -219,12 +230,11 @@ static void NORETURN_ATTR hang_show(void)
     lcd_clear_display();
     lcd_setfont(FONT_SYSFIXED);
     lcd_puts(1, y++, "*HANG* (" RBVERSION ")");
+    lcd_puts(1, y++, message);
     if (hang_stuck)
         stuck_draw(&y);
     else
     {
-        lcd_putsf(1, y++, "%s held the core %ds",
-                  t && t->name ? t->name : "?", HANG_SECS);
         lcd_putsf(1, y++, "lr:%08lx", (unsigned long)hang_lr);
         lcd_update();
         crumb(CR_HANG_DRAWN, 0);
@@ -397,6 +407,20 @@ void hang_catch_fiq_show(void)
 
     crumb(CR_FREEZE, freeze.pc);
     panic_screen_enter();
+    char message[80];
+    name8(hang_ui_thread, name);
+    if (freeze.kind == HANG_WATCH_IRQS_OFF)
+        snprintf(message, sizeof(message), "IRQs off %ds: tick %ld stopped",
+                 HANG_WATCH_IRQ_SECS, freeze.tick);
+    else
+        snprintf(message, sizeof(message), "%s starved %lds (runnable)", name,
+                 (freeze.tick - freeze.ui_ran) / HZ);
+#ifdef HAVE_CRUMBS
+    crumbs_crash_record(message, &(struct crumb_crash_context) {
+        .kind = CRUMB_CRASH_FREEZE, .pc = freeze.pc, .sp = freeze.sp,
+        .lr = freeze.lr, .status = freeze.cpsr,
+    });
+#endif
     lcd_set_viewport(NULL);
 #if LCD_DEPTH > 1
     lcd_set_backdrop(NULL);
@@ -405,13 +429,7 @@ void hang_catch_fiq_show(void)
     lcd_clear_display();
     lcd_setfont(FONT_SYSFIXED);
     lcd_puts(1, y++, "*FREEZE* (" RBVERSION ")");
-    name8(hang_ui_thread, name);
-    if (freeze.kind == HANG_WATCH_IRQS_OFF)
-        lcd_putsf(1, y++, "IRQs off %ds: tick %ld stopped",
-                  HANG_WATCH_IRQ_SECS, freeze.tick);
-    else
-        lcd_putsf(1, y++, "%s starved %lds (runnable)", name,
-                  (freeze.tick - freeze.ui_ran) / HZ);
+    lcd_puts(1, y++, message);
     name8(t, name);
     lcd_putsf(1, y++, "pc:%08lx cpsr:%02lx thr:%s",
               (unsigned long)freeze.pc, (unsigned long)(freeze.cpsr & 0xff),

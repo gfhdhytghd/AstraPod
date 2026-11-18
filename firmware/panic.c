@@ -106,12 +106,26 @@ void panicf( const char *fmt, ...)
 
     /* Before the masks: a panic inside a panic, which stays silent, still
      * leaves this for the next boot */
-    crumb(CR_PANIC, (uint32_t)__builtin_return_address(0));
+    crumb(CR_PANIC, (uint32_t)(uintptr_t)__builtin_return_address(0));
     panic_screen_enter();
 
     va_start( ap, fmt );
     vsnprintf( panic_buf, sizeof(panic_buf), fmt, ap );
     va_end( ap );
+
+#ifdef SIMULATOR
+    DEBUGF("*PANIC* %s\n", panic_buf);
+#endif
+#ifdef HAVE_CRUMBS
+    crumbs_crash_record(panic_buf, &(struct crumb_crash_context) {
+        .kind = CRUMB_CRASH_PANIC,
+        .pc = (uintptr_t)__builtin_return_address(0),
+#ifdef HAVE_RB_BACKTRACE
+        .sp = (uint32_t)sp,
+#endif
+        .status = get_processor_mode(),
+    });
+#endif
 
     lcd_set_viewport(NULL);
 
@@ -153,7 +167,9 @@ void panicf( const char *fmt, ...)
 #endif
 
     lcd_update();
+#ifndef SIMULATOR
     DEBUGF("%s", panic_buf);
+#endif
 
     /* S5L voltage changes take the I2C mutex. The scheduler cannot release an
      * existing owner after the IRQ mask above, even when this is a SYS panic.

@@ -126,14 +126,11 @@ static const struct fileattr_icon_voice inbuilt_attr_icons_voices[] = {
 #if defined(BOOTFILE_EXT) || defined(BOOTFILE_EXT2)
     { FILE_ATTR_MOD,   Icon_Firmware,  VOICE_EXT_AJZ },
 #endif
-    /* Icon codes 1 and 2 of the theme's viewers iconset, which is where
-     * viewers.config used to point these. Themes shipping no viewers iconset
-     * fall back to Icon_Questionmark, as they always have. A book and a
-     * lyric file are 3 and 4, which an iconset without them draws as 1. */
-    { FILE_ATTR_TXT,   Icon_Last_Themeable + 1, -1 },
-    { FILE_ATTR_IMG,   Icon_Last_Themeable + 2, -1 },
-    { FILE_ATTR_BOOK,  Icon_Last_Themeable + 3, -1 },
-    { FILE_ATTR_LYRICS, Icon_Last_Themeable + 4, -1 },
+    /* Rendered by the native file list's icon font. */
+    { FILE_ATTR_TXT,   Icon_Document, -1 },
+    { FILE_ATTR_IMG,   Icon_Image, -1 },
+    { FILE_ATTR_BOOK,  Icon_Book, -1 },
+    { FILE_ATTR_LYRICS, Icon_Lyrics, -1 },
     { FILE_ATTR_GAME,  Icon_Plugin,    -1 },
 };
 

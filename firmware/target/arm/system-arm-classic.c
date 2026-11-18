@@ -136,6 +136,17 @@ void NORETURN_ATTR UIE(unsigned int pc, unsigned int num)
         }
     }
     panic_screen_enter();
+#ifdef HAVE_CRUMBS /* S5L8702 ARM926 fault registers */
+    struct crumb_crash_context crash = {
+        .kind = CRUMB_CRASH_EXCEPTION, .exception = num,
+        .pc = pc, .sp = saved_sp, .lr = saved_lr, .status = saved_status,
+    };
+    if (num == 1 || num == 2)
+        asm volatile("mrc p15, 0, %0, c5, c0, 0" : "=r"(crash.fault_status));
+    if (num == 2)
+        asm volatile("mrc p15, 0, %0, c6, c0, 0" : "=r"(crash.fault_address));
+    crumbs_crash_record(uiename[num], &crash);
+#endif
     /* An exception can interrupt a screen whose viewport lives on its stack. */
     lcd_set_viewport(NULL);
 #else

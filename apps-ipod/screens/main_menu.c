@@ -29,6 +29,7 @@
 #include "screens/browse/browser.h"
 #include "storage.h"
 #include "widgets/yesno.h"
+#include "ui/scene.h"
 #include "widgets/keyboard.h"
 #include "system/format_time.h"
 #include "speech/talk.h"
@@ -113,13 +114,16 @@ MAKE_MENU(manage_settings, ID2P(LANG_MANAGE_MENU), NULL, Icon_Config,
 
 static int show_credits(void)
 {
-    return credits_screen();
+    return credits_screen() == SYS_USB_CONNECTED ? MENU_ATTACHED_USB : 0;
 }
 
 static int show_license(void)
 {
-    return text_viewer(ROCKBOX_DIR "/docs/COPYING.txt") == GO_TO_ROOT
-           ? SYS_USB_CONNECTED : 0;
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "license-push");
+    int ret = text_viewer(ROCKBOX_DIR "/docs/COPYING.txt");
+    ui_scene_close_modal(&scene, ret == GO_TO_PREVIOUS, "license-pop");
+    return ret == GO_TO_ROOT ? MENU_ATTACHED_USB : 0;
 }
 
 #define SIZE_FMT "%s %s"
@@ -411,13 +415,13 @@ MENUITEM_FUNCTION(show_info_item, MENU_FUNC_CHECK_RETVAL,
                   show_info, NULL, Icon_NOICON);
 
 int time_screen(void* ignored);
-MENUITEM_FUNCTION(timedate_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_TIME_MENU),
-                  time_screen,  NULL, Icon_NOICON);
+MENUITEM_FUNCTION_W_PARAM(timedate_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_TIME_MENU),
+                          time_screen, NULL, NULL, Icon_NOICON);
 
-MENUITEM_FUNCTION(show_about_item, 0, ID2P(LANG_ABOUT),
+MENUITEM_FUNCTION(show_about_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_ABOUT),
                   about_screen, NULL, Icon_NOICON);
 
-MENUITEM_FUNCTION(show_credits_item, 0, ID2P(LANG_CREDITS),
+MENUITEM_FUNCTION(show_credits_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_CREDITS),
                   show_credits, NULL, Icon_NOICON);
 
 /* Hide the Debug entry unless the "Show Debug Menu" setting is on (default off:

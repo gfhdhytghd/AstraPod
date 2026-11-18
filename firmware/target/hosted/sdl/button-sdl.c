@@ -34,6 +34,9 @@
 #if SDL_MAJOR_VERSION > 1
 #include "window-sdl.h"
 #endif
+#ifdef SIMULATOR
+#include "button-script-sdl.h"
+#endif
 #include "sim_tasks.h"
 #include "buttonmap.h"
 #include "debug.h"
@@ -132,8 +135,8 @@ static void scrollwheel_event(int x, int y)
     buttonlight_on();
 #endif
     reset_poweroff_timer();
-    if (new_btn && !button_queue_full())
-        button_queue_post(new_btn, 1<<24);
+    if (new_btn)
+        button_queue_try_post(new_btn, 1<<24);
 
     (void)x;
 }
@@ -695,5 +698,6 @@ void button_init_device(void)
         sdl_focus_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
     if (!sdl_arrow_cursor)
         sdl_arrow_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+    button_script_sdl_start();
 #endif
 }

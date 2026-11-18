@@ -885,6 +885,10 @@ bool list_do_action(int context, int timeout,
      * during get_action, and its dirty rectangles must reach the LCD. */
     if (!inhibited)
         ui_flush_dirty();
+    /* A settled list does not dirty the LCD. Submit the last frame so a
+     * wait for input still refreshes the panel. */
+    if (*action == ACTION_NONE)
+        lcd_update();
     return handled;
 }
 
@@ -1073,6 +1077,7 @@ bool simplelist_show_list(struct simplelist_info *info)
     }
     talk_shutup();
 
+    keyclick_set_callback(NULL, NULL);
     gui_synclist_scroll_stop(&lists);
 
     if (info->selection_color)

@@ -36,6 +36,9 @@
 #include "window-sdl.h"
 #endif
 #include "button-sdl.h"
+#ifdef SIMULATOR
+#include "button-script-sdl.h"
+#endif
 #include "lcd-bitmap.h"
 #ifdef HAVE_REMOTE_LCD
 #include "lcd-remote-bitmap.h"
@@ -384,6 +387,17 @@ void sys_handle_argv(int argc, char *argv[])
                     printf("Root directory: %s\n", sim_root_dir);
                 }
             }
+#ifdef SIMULATOR
+            else if (!strcmp("--keys", argv[x]))
+            {
+                x++;
+                if (x < argc)
+                {
+                    button_script_sdl_set_path(argv[x]);
+                    printf("Key script: %s\n", argv[x]);
+                }
+            }
+#endif
             else if (!strcmp("--mapping", argv[x]))
             {
                     mapping = true;
@@ -419,6 +433,9 @@ void sys_handle_argv(int argc, char *argv[])
                 printf("  --alarm \t Simulate a wake-up on alarm\n");
                 printf("  --screenshot \t Fix the clock at Mon 2024-01-01 09:00 and the battery at 100%%\n");
                 printf("  --root [DIR]\t Set root directory\n");
+#ifdef SIMULATOR
+                printf("  --keys [FILE]\t Play a text key script (`-` = stdin)\n");
+#endif
                 printf("  --mapping \t Output coordinates and radius for mapping backgrounds\n");
                 printf("  --audiodev [NAME] \t Audio device name to use\n");
                 exit(0);

@@ -101,6 +101,18 @@ static inline void crumb_status(enum crumb_status i, uint32_t v)
     crumb_status_b[i] = v;
 }
 
+/* Crash context saved while the storage and scheduler may be unavailable. */
+enum crumb_crash_kind {
+    CRUMB_CRASH_PANIC = 1, CRUMB_CRASH_EXCEPTION,
+    CRUMB_CRASH_HANG, CRUMB_CRASH_FREEZE,
+};
+struct crumb_crash_context
+{
+    uint32_t kind, pc, sp, lr;
+    uint32_t exception, status, fault_status, fault_address;
+};
+void crumbs_crash_record(const char *message, const struct crumb_crash_context *context);
+
 /* Very first thing at boot: takes the previous boot's ring, starts this one */
 void crumbs_boot(void);
 /* Once the disk is up: saves the previous ring if that boot did not shut

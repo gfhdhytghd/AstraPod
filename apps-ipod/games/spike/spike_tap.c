@@ -46,6 +46,8 @@
 #include "input/action.h"
 #include "system/shutdown.h"  /* default_event_handler */
 #include "draw/viewport.h"    /* viewportmanager_theme_enable */
+#include "ui/retained.h"
+#include "ui/scene.h"
 #include "widgets/splash.h"
 #include "games/spike/spike_clock.h"
 #include "games/spike/spike_tap.h"
@@ -248,8 +250,12 @@ static void bt_plot(int period)
     }
 }
 
-static void bt_draw(bool pulse)
+static void bt_paint(const struct ui_view *view,
+                     const struct ui_view_frame *frame)
 {
+    (void)frame;
+    const bool pulse = *(const bool *)view->data;
+    struct viewport *previous = lcd_set_viewport(NULL);
     struct beat_track bt;
     char line[64];
     int mine = bt_period();
@@ -322,12 +328,17 @@ static void bt_draw(bool pulse)
         lcd_putsxy(2, BT_PLOT_Y + BT_PLOT_H + 20, (const unsigned char *)
                    "clustered -- phase above is how far off they lean");
 
-    lcd_update();
+    lcd_set_viewport(previous);
 }
+
+static const struct ui_view_ops bt_ops = { .paint = bt_paint };
 
 bool spike_tap_screen(void)
 {
-    struct viewport vp;
+    const struct ui_rect bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+    struct ui_view view;
+    struct ui_page page;
+    struct ui_scene scene = {0};
     long next_frame;
     unsigned long pulse_at = 0;
     bool pulse = false;
@@ -340,7 +351,10 @@ bool spike_tap_screen(void)
         return false;
     }
 
-    viewportmanager_theme_enable(SCREEN_MAIN, false, &vp);
+    ui_view_init(&view, bounds, &bt_ops, &pulse);
+    ui_page_init(&page, &view);
+    ui_scene_open_page(&scene, "beat-tap-push");
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
     lcd_set_backdrop(NULL);
     lcd_setfont(FONT_SYSFIXED);
     fg = lcd_get_foreground();
@@ -419,10 +433,12 @@ bool spike_tap_screen(void)
         else
             pulse = false;
 
-        bt_draw(pulse);
+        ui_page_invalidate(&page, bounds);
+        ui_page_draw(&page);
     }
 
     beat_analyse_stop();
+    ui_scene_close_modal(&scene, !usb, "beat-tap-pop");
     lcd_setfont(FONT_UI);
     lcd_set_foreground(fg);
     lcd_set_background(bg);

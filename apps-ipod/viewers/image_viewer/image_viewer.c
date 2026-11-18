@@ -66,6 +66,8 @@
 #include "widgets/menu.h"            /* do_menu, MENUITEM_STRINGLIST */
 #include "system/activity.h"
 #include "system/shutdown.h"
+#include "ui/retained.h"
+#include "ui/scene.h"
 #include "root_menu.h"       /* GO_TO_*, MENU_ATTACHED_USB */
 #include "screens/browse/browser.h"            /* browser_get_context/entries */
 #include "core_alloc.h"
@@ -147,12 +149,15 @@ static char **file_pt;
 
 /* progress update tick */
 static long next_progress_tick;
+static long progress_visible_tick;
 
 static const struct image_decoder *imgdec = NULL;
 static enum image_type image_type = IMAGE_UNKNOWN;
 
-/* our full-screen viewport, saved by viewportmanager_theme_enable() */
-static struct viewport iv_vp;
+static const struct ui_rect iv_bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+static struct ui_view iv_view;
+static struct ui_page iv_page;
+static bool iv_clear_frame;
 
 /* forward declarations */
 static int show_menu(void); /* MENU_ATTACHED_USB, IV_MENU_ZOOM, or 0 */
@@ -402,6 +407,12 @@ static const char *iv_filename(void)
     return name ? name + 1 : np_file;
 }
 
+static void iv_delay_progress(void)
+{
+    progress_visible_tick = current_tick + HZ / 4;
+    splash_progress_set_delay(HZ / 4);
+}
+
 /* callback updating a progress meter while image decoding.
  *
  * Draws the shared splash dialog with a progress bar over the current screen
@@ -423,7 +434,13 @@ void cb_progress(int current, int total)
      * Slideshows keep the screen clear. Each decode arms a delay first, so a
      * picture that arrives quickly never flashes a dialog up. */
     if (!iv_running_slideshow)
+    {
         splash_progress(current, total, "%s\n%s", str(LANG_WAIT), iv_filename());
+        /* Present the loading page on a slow decode even if the first
+         * picture has not reached the retained view yet. */
+        if (!TIME_BEFORE(now, progress_visible_tick))
+            ui_scene_poll(TIMEOUT_NOBLOCK);
+    }
 
     yield(); /* be nice to the other threads */
 }
@@ -545,12 +562,51 @@ static void pan_view_down(struct image_info *info)
     }
 }
 
-static void redraw_image(struct image_info *info)
+static void iv_paint(const struct ui_view *view, const struct ui_view_frame *frame)
 {
-    lcd_clear_display();
+    (void)frame;
+    struct image_info *info = view->data;
+    if (iv_clear_frame)
+        lcd_clear_display();
     imgdec->draw_image_rect(info, 0, 0,
                             info->width-info->x, info->height-info->y);
-    lcd_update();
+}
+
+static const struct ui_view_ops iv_view_ops = { .paint = iv_paint };
+
+static void iv_draw_image(struct image_info *info, bool clear)
+{
+    iv_view.data = info;
+    iv_clear_frame = clear;
+    ui_page_invalidate(&iv_page, iv_bounds);
+    ui_page_draw(&iv_page);
+}
+
+static void redraw_image(struct image_info *info)
+{
+    iv_draw_image(info, true);
+}
+
+/* Scene frames wake the raw-button wait, but must not advance a GIF or
+ * slideshow before the viewer's own deadline. */
+static int iv_get_button(int timeout)
+{
+    const long deadline = current_tick + timeout;
+    while (true)
+    {
+        int wait = ui_scene_poll(timeout);
+        int button = agents_shortcut_get_button(wait);
+        if (button != BUTTON_NONE || wait == timeout)
+            return button;
+        if (timeout > 0)
+        {
+            if (!TIME_BEFORE(current_tick, deadline))
+                return BUTTON_NONE;
+            timeout = deadline - current_tick;
+        }
+        if (wait == TIMEOUT_NOBLOCK)
+            yield();
+    }
 }
 
 /* Pan on or off, said briefly over the picture since nothing else on the
@@ -563,7 +619,7 @@ static void set_pan_mode(struct image_info *info, bool on)
 }
 
 /* interactively scroll around the image */
-static int scroll_bmp(struct image_info *info)
+static int scroll_bmp(struct image_info *info, struct ui_scene *scene)
 {
     static long ss_timeout = 0;
 
@@ -586,17 +642,17 @@ static int scroll_bmp(struct image_info *info)
                 /* animated content and delay between subsequent frames
                  * is shorter then slideshow delay
                  */
-                button = agents_shortcut_get_button(info->delay);
+                button = iv_get_button(info->delay);
             }
             else
-                button = agents_shortcut_get_button(iv_settings.ss_timeout * HZ);
+                button = iv_get_button(iv_settings.ss_timeout * HZ);
         }
         else
         {
             if (info->frames_count > 1 && info->delay)
-                button = agents_shortcut_get_button(info->delay);
+                button = iv_get_button(info->delay);
             else
-                button = agents_shortcut_get_button(TIMEOUT_BLOCK);
+                button = iv_get_button(HZ / 5);
         }
 
 #ifdef HAVE_USB_PODLINK
@@ -608,6 +664,7 @@ static int scroll_bmp(struct image_info *info)
             else root_menu_agents_shortcut();
             if (iv_usb_dropped) return PLUGIN_USB_CONNECTED;
             redraw_image(info);
+            ui_scene_update(scene, true);
             continue;
         }
 #endif
@@ -764,7 +821,12 @@ static int scroll_bmp(struct image_info *info)
         } /* switch */
 
         if (button != BUTTON_NONE)
+        {
+            ui_scene_update(scene, true);
             iv_lastbutton = button;
+        }
+        else
+            lcd_update();
     } /* while (true) */
 }
 
@@ -908,7 +970,7 @@ static void get_view(struct image_info *info, int *p_cx, int *p_cy)
 
 /* load, decode, display the image */
 static int load_and_show(char *filename, struct image_info *info,
-                         int offset, int filesize, int status)
+                         int offset, int filesize, int status, struct ui_scene *scene)
 {
     int cx, cy;
     ssize_t remaining;
@@ -938,7 +1000,7 @@ static int load_and_show(char *filename, struct image_info *info,
 
     /* Reading and parsing the file reports progress too -- on a large picture
      * over a spinning disk it is the part that is worth watching. */
-    splash_progress_set_delay(HZ/4);
+    iv_delay_progress();
 
     /* A tap of Menu cancels. Whatever else is queued is read here too, so a
      * system event goes to the handler rather than being lost; USB needs the
@@ -1027,7 +1089,7 @@ static int load_and_show(char *filename, struct image_info *info,
     {
         /* Hold the progress dialog back for 250ms, so an image that decodes
          * quickly never flashes one up. */
-        splash_progress_set_delay(HZ/4);
+        iv_delay_progress();
         status = imgdec->get_image(info, frame, ds); /* decode or fetch from cache */
         if (status == PLUGIN_OUTOFMEM && ds == DS_FIT)
         {
@@ -1067,11 +1129,11 @@ static int load_and_show(char *filename, struct image_info *info,
         /* Clear then draw in the same framebuffer pass so the transition from
          * the old image to the new one is a single update -- no visible black
          * flash. The clear also paints the black border for smaller images. */
-        if (frame == 0)
-            lcd_clear_display();
-        imgdec->draw_image_rect(info, 0, 0,
-                        info->width-info->x, info->height-info->y);
-        lcd_update();
+        iv_draw_image(info, frame == 0);
+        if (scene->capturing)
+            ui_scene_start(scene);
+        else
+            ui_scene_update(scene, true);
         shown = true;
 
         /* drawing is now finished, play around with scrolling
@@ -1079,7 +1141,7 @@ static int load_and_show(char *filename, struct image_info *info,
          */
         while (1)
         {
-            status = scroll_bmp(info);
+            status = scroll_bmp(info, scene);
             if (status == IV_RELOAD)
                 return status;          /* the buffer is gone */
 
@@ -1292,15 +1354,13 @@ static void iv_splash(void)
 
 static void iv_setup_screen(void)
 {
-    /* This screen owns the whole display. Disabling the theme drops the
-     * status-bar skin and its backdrop and hands back a full-screen viewport,
-     * matching the text viewer. */
-    viewportmanager_theme_enable(SCREEN_MAIN, false, &iv_vp);
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
+    lcd_set_viewport(NULL);
     lcd_set_backdrop(NULL);
     lcd_set_foreground(LCD_WHITE);
     lcd_set_background(LCD_BLACK);
-    lcd_clear_display();
-    lcd_update();
+    ui_view_init(&iv_view, iv_bounds, &iv_view_ops, NULL);
+    ui_page_init(&iv_page, &iv_view);
 }
 
 /** Core entry point **/
@@ -1340,6 +1400,7 @@ static bool iv_take_buffer(bool try_app)
 /* file == NULL requests the current track's album art. */
 int image_viewer(const char *file)
 {
+    struct ui_scene scene = {0};
     int condition;
     int offset = 0, filesize = 0, status;
     bool is_album_art = false;
@@ -1366,10 +1427,14 @@ int image_viewer(const char *file)
         }
     }
 
+    ui_scene_open_page(&scene, "image-viewer-push");
+    splashf(0, "%s", str(LANG_WAIT));
+
     /* A cover is small enough for the app buffer, and that keeps the music
      * playing. */
     if (!iv_take_buffer(is_album_art))
     {
+        ui_scene_cancel(&scene);
         splash(HZ * 2, "Out of memory");
         return GO_TO_PREVIOUS;
     }
@@ -1393,6 +1458,7 @@ int image_viewer(const char *file)
         iv_release_buffer();
         remove_event(SYS_EVENT_USB_INSERTED, iv_usb_inserted);
         browser_unlock_cache(browser_get_context());
+        ui_scene_cancel(&scene);
         splash(HZ * 2, "No supported files");
         return GO_TO_PREVIOUS;
     }
@@ -1404,11 +1470,13 @@ int image_viewer(const char *file)
 
     push_current_activity(ACTIVITY_IMAGEVIEWER);
     iv_setup_screen();
-    iv_splash();
+    if (!scene.capturing)
+        iv_splash();
 
     do
     {
-        condition = load_and_show(np_file, &image_info, offset, filesize, status);
+        condition = load_and_show(np_file, &image_info, offset, filesize, status,
+                                  &scene);
         if (condition == PLUGIN_OUTOFMEM && iv_app_buf)
         {
             /* Too large for the app buffer: again, in the heap. */
@@ -1459,6 +1527,9 @@ int image_viewer(const char *file)
     remove_event(SYS_EVENT_USB_INSERTED, iv_usb_inserted);
     iv_release_buffer();
     browser_unlock_cache(browser_get_context());
+
+    ui_scene_close_modal(&scene, condition != PLUGIN_USB_CONNECTED && !scene.capturing,
+                         "image-viewer-pop");
 
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     pop_current_activity();

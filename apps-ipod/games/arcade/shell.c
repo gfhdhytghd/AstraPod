@@ -44,6 +44,7 @@
 #include "system/activity.h"
 #include "system/shutdown.h"  /* default_event_handler */
 #include "draw/viewport.h"    /* viewportmanager_theme_enable */
+#include "ui/scene.h"
 #include "widgets/list.h"     /* simplelist */
 #include "widgets/splash.h"
 #include "root_menu.h"        /* GO_TO_* */
@@ -1041,8 +1042,13 @@ static void add_row(int kind, int item)
 
 bool shell_list(struct simplelist_info *info)
 {
+    struct ui_scene scene = {0};
+
+    ui_scene_open_page(&scene, "arcade-list-push");
     push_current_activity(ACTIVITY_CONTEXTMENU);
     bool to_root = simplelist_show_list(info);
+    ui_scene_close_modal(&scene, !to_root && info->selection < 0,
+                         "arcade-list-pop");
     if (get_current_activity() == ACTIVITY_CONTEXTMENU)
         pop_current_activity();
     return to_root;

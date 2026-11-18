@@ -16,6 +16,7 @@
  * Where the reader got to is remembered per document and restored on open, so
  * reopening a file resumes it with no help from the caller. */
 int text_viewer(const char *file);
+bool text_viewer_is_open(void);
 
 /* Whether a book with more than one chapter is open, for the reader's menu */
 bool text_viewer_has_contents(void);

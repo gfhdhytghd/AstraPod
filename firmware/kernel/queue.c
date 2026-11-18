@@ -421,11 +421,16 @@ void queue_post(struct event_queue *q, long id, intptr_t data)
     oldlevel = disable_irq_save();
     corelock_lock(&q->cl);
 
+    if ((q->write - q->read) >= QUEUE_LENGTH)
+    {
+        /* A burst of posters (the click wheel vs the UI thread on the
+         * simulator) must not abort. Drop the oldest event. */
+        queue_do_unblock_sender(q->send, q->read & QUEUE_LENGTH_MASK);
+        q->read++;
+    }
+
     wr = q->write++ & QUEUE_LENGTH_MASK;
     IF_PRIO( wake_dbg_ra = __builtin_return_address(0); wake_dbg_obj = q; )
-
-    KERNEL_ASSERT((q->write - q->read) <= QUEUE_LENGTH,
-                  "queue_post ovf q=%p", q);
 
     q->events[wr].id   = id;
     q->events[wr].data = data;

@@ -15,6 +15,7 @@
 #include "system.h"
 #include "option_select.h"
 #include "kernel.h"
+#include "audio/sound_feedback.h"
 #include "lang.h"
 #include "speech/talk.h"
 #include "settings/settings_list.h"
@@ -483,7 +484,7 @@ bool option_screen(const struct settings_list *setting,
                    bool use_temp_var, const unsigned char* option_title)
 {
     int action;
-    bool done = false;
+    bool done = false, usb = false;
     struct gui_synclist lists;
     int oldvalue, nb_items = 0, selected = 0, temp_var;
     int *variable;
@@ -610,9 +611,8 @@ bool option_screen(const struct settings_list *setting,
         }
         else if(default_event_handler(action) == SYS_USB_CONNECTED)
         {
-            ui_scene_close_modal(&modal, false, "picker-down");
-            pop_current_activity();
-            return true;
+            usb = true;
+            break;
         }
 
         /* callback */
@@ -628,10 +628,13 @@ bool option_screen(const struct settings_list *setting,
         }
 
     }
-    ui_scene_close_modal(&modal, true, "picker-down");
+    /* The list and its setting may both live on the caller's stack. */
+    keyclick_set_callback(NULL, NULL);
+    gui_synclist_scroll_stop(&lists);
+    ui_scene_close_modal(&modal, !usb, "picker-down");
     pop_current_activity();
 
-    return false;
+    return usb;
 }
 
 int get_setting_info_for_bar(const struct settings_list *setting, int offset, int *count, int *val)

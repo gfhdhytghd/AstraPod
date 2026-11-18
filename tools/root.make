@@ -206,8 +206,19 @@ $(RBINFO): $(BUILDDIR)/$(BINARY)
 	$(SILENT)echo Creating $(@F)
 	$(SILENT)$(TOOLSDIR)/mkinfo.pl $@
 
+ifneq ($(DEPFILE),)
+# The scan is also an included makefile. Refresh it before resolving the
+# build when an include graph, source list or configuration can have changed.
+DEP_SCAN_SOURCES := $(wildcard $(SRC) $(OTHER_SRC) $(ASMDEFS_SRC))
+$(DEPFILE): $(DEP_SCAN_SOURCES) $(sort $(DEP_SOURCE_LISTS)) \
+	$(filter-out $(DEPFILE),$(MAKEFILE_LIST)) $(BUILDDIR)/autoconf.h \
+	$(addprefix $(TOOLSDIR)/,multigcc.pl addtargetdir.pl)
+endif
+
+.PHONY: dep
 $(DEPFILE) dep:
 	$(call PRINTS,Generating dependencies)
+	$(SILENT)rm -f $(DEPFILE)_
 	$(call mkdepfile,$(DEPFILE)_,$(SRC))
 	$(call mkdepfile,$(DEPFILE)_,$(OTHER_SRC:%.lua=))
 	$(call mkdepfile,$(DEPFILE)_,$(ASMDEFS_SRC))

@@ -23,6 +23,10 @@
 #include "lcd-sdl.h"
 #include "misc.h"
 #include "panic.h"
+#ifdef SIMULATOR
+#include "button-script-sdl.h"
+extern SDL_Surface *lcd_surface;
+#endif
 
 extern SDL_Surface *lcd_surface;
 #ifdef HAVE_REMOTE_LCD
@@ -155,13 +159,16 @@ void sdl_window_render(void)
         if (gui_texture)
             SDL_DestroyTexture(gui_texture);
         rebuild_gui_texture();
+        return;
     }
-    else
-    {
-        SDL_RenderClear(sdlRenderer);
-        SDL_RenderCopy(sdlRenderer, gui_texture, NULL, NULL);
-        SDL_RenderPresent(sdlRenderer);
-    }
+
+    SDL_RenderClear(sdlRenderer);
+    SDL_RenderCopy(sdlRenderer, gui_texture, NULL, NULL);
+    SDL_RenderPresent(sdlRenderer);
+#ifdef SIMULATOR
+    if (lcd_surface && lcd_surface->pixels)
+        button_script_sdl_present(lcd_surface->pixels, lcd_surface->pitch);
+#endif
 }
 
 bool sdl_window_adjust(void)

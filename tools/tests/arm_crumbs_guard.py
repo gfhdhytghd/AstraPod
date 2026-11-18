@@ -400,6 +400,32 @@ assert newest_id(u, sym('dram_ring')) == ids['CR_BOOT']
 res['crumbs_boot'] = dict(previous_boot=boot_no, entries=n, first_seq=first_seq,
                           new_boot=42)
 
+# --- the native crash payload survives another crumbs_boot ------------
+if 'crumbs_crash_record' in syms:
+    context_addr, message_addr = STUB + 0x400, STUB + 0x440
+    message = b'Stack overflow in viewportmanager'
+    u.mem_write(message_addr, message + b'\0')
+    context = (1, 0x08123456, 0x08500000, 0, 0, 0x1f, 0, 0)
+    u.mem_write(context_addr, struct.pack('<8I', *context))
+    assert call(u, 'crumbs_crash_record', message_addr, context_addr) == RET
+    crash_addrs = (sym('dram_crash'), IRAM1_RING - 512)
+    slots = [bytes(u.mem_read(addr, 364)) for addr in crash_addrs]
+    assert slots[0] == slots[1]
+    check, magic, boot_no, *saved_context = struct.unpack_from('<11I', slots[0])
+    assert magic == 0x43525331 and boot_no == 42 and tuple(saved_context) == context
+    checksum = SALT
+    for byte in slots[0][4:]:
+        checksum = ((checksum ^ byte) * 0x01000193) & M
+    assert check == (checksum or 1)
+    assert slots[0][108:].split(b'\0', 1)[0] == message
+
+    assert call(u, 'crumbs_boot') == RET
+    assert rd(u, sym('dram_ring') + 8) == 43
+    assert [bytes(u.mem_read(addr, 364)) for addr in crash_addrs] == slots
+    res['native_crash'] = dict(message=message.decode(), copies=2,
+                               retained_from=42, new_boot=43,
+                               persist=[hex(addr) for addr in crash_addrs])
+
 out = a.out or a.elf.parent / 'arm_crumbs_guard.json'
 out.write_text(json.dumps(res, indent=2) + '\n')
 print(json.dumps(res, indent=2))

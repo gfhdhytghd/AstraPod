@@ -1407,10 +1407,10 @@
     *: "Music"
   </source>
   <dest>
-    *: "仅显示音乐文件"
+    *: "音乐"
   </dest>
   <voice>
-    *: "仅显示音乐文件"
+    *: "音乐"
   </voice>
 </phrase>
 <phrase>

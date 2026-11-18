@@ -174,6 +174,9 @@ static int get_file_pos(int newtime)
     int pos = -1;
     struct mp3entry *id3 = ci->id3;
 
+    if (!id3->length || !id3->filesize)
+        return -1;
+
     if (id3->vbr) {
         int curpos = ci->curpos - id3->first_frame_offset;
         long skipms_from_curpos = curpos > 0 ?  (long) (id3->elapsed - newtime) : - newtime;

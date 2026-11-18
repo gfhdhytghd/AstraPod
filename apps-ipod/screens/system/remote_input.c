@@ -17,7 +17,9 @@
 #include "system/app_util.h"
 #include "system/shutdown.h"
 #include "draw/viewport.h"
-#include "ui/frame.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/retained.h"
+#include "ui/scene.h"
 
 /* One static snapshot keeps the UI thread's stack independent of wire length. */
 static struct remote_frame frame;
@@ -117,6 +119,71 @@ static bool log_frame(int fd)
     return put_log(fd, line);
 }
 
+struct remote_panel {
+    unsigned long total, bad, lost;
+    char decoded[160];
+    const char *made;
+    bool logging, error;
+};
+
+static void paint_remote(const struct ui_view *view,
+                         const struct ui_view_frame *geometry)
+{
+    struct remote_panel *panel = view->data;
+    struct viewport vp = {
+        .x = geometry->bounds.x, .y = geometry->bounds.y,
+        .width = geometry->bounds.width, .height = geometry->bounds.height,
+        .flags = VP_DEFAULT_FLAGS, .font = FONT_SYSFIXED,
+        .drawmode = DRMODE_SOLID, .buffer = &lcd_framebuffer_default,
+        .fg_pattern = ui_theme_rgb565(UI_COLOR_FOREGROUND),
+        .bg_pattern = ui_theme_rgb565(UI_COLOR_BACKGROUND),
+    };
+    struct viewport *last = lcd_set_viewport(&vp);
+    char line[320], hex[40], names[160];
+
+    lcd_clear_viewport();
+    snprintf(line, sizeof(line), "Remote input frames %lu bad %lu %s",
+             panel->total, panel->bad, panel->logging ? "LOG" : panel->error ? "LOG ERROR" : "");
+    lcd_puts(0, 0, line);
+    remote_button_names(iap_remotebtn, names, sizeof(names));
+    snprintf(line, sizeof(line), "held: %s", names);
+    lcd_puts(0, 1, line);
+    if (snapshot(panel->total))
+    {
+        payload(hex, sizeof(hex), 8);
+        snprintf(line, sizeof(line), "last: L%X cmd %02X %s%s%s",
+                 frame.received ? frame.data[0] : 0, command(), hex,
+                 (frame.flags & REMOTE_BAD_MASK) ? " BAD" : "",
+                 (frame.flags & REMOTE_TRUNC) ? " TRUNC" : "");
+        lcd_puts(0, 2, line);
+        if ((frame.flags & REMOTE_BAD_MASK) || frame.received < 3 ||
+            frame.data[0] != 2 || frame.data[1] != 0)
+        {
+            snprintf(panel->decoded, sizeof(panel->decoded), "?");
+            panel->made = (frame.flags & REMOTE_BAD_MASK) ? "ACTION_NONE" : "?";
+        }
+    }
+    snprintf(line, sizeof(line), "-> RC_%s -> %s", panel->decoded, panel->made);
+    lcd_puts(0, 3, line);
+    snprintf(line, sizeof(line), "---- newest first ---- lost %lu", panel->lost);
+    lcd_puts(0, 4, line);
+    for (unsigned int i = 0; i < REMOTE_HISTORY && panel->total > i; i++)
+    {
+        if (!snapshot(panel->total - i)) continue;
+        remote_frame_names(&frame, names, sizeof(names));
+        payload(hex, sizeof(hex), 4);
+        snprintf(line, sizeof(line), "+%lu.%02lus L%X/%02X %s %s%s%s",
+                 frame.delta / HZ, frame.delta % HZ * 100 / HZ,
+                 frame.received ? frame.data[0] : 0, command(), hex,
+                 (frame.flags & REMOTE_BAD_MASK) ? "BAD " : "",
+                 (frame.flags & REMOTE_TRUNC) ? "TRUNC " : "", names);
+        lcd_puts(0, 5 + i, line);
+    }
+    lcd_set_viewport(last);
+}
+
+static const struct ui_view_ops remote_ops = { .paint = paint_remote };
+
 bool dbg_remote_input(void)
 {
     int fd = -1;
@@ -124,16 +191,21 @@ bool dbg_remote_input(void)
     unsigned long cursor = 0, lost = 0, bad, total;
     unsigned long volume_cursor = remote_volume_count() + 1;
     bool log_error = false, usb = false;
-    char line[320], hex[40], names[160], decoded[160] = "(none)";
-    const char *made = "ACTION_NONE";
-    bool inhibited = ui_flush_inhibited();
-    ui_inhibit_flush(true);
+    const struct ui_rect bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+    struct remote_panel panel = { .decoded = "(none)", .made = "ACTION_NONE" };
+    struct ui_view view;
+    struct ui_page page;
+    struct ui_scene scene = {0};
+    char line[320];
+
+    ui_scene_open_page(&scene, "remote-input-push");
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
+    ui_view_init(&view, bounds, &remote_ops, &panel);
+    ui_page_init(&page, &view);
     remote_input_active = true;
 #ifdef HAVE_USB_PODLINK
     iap_agents_volume_enable(true);
 #endif
-    lcd_set_viewport(NULL);
-    lcd_setfont(FONT_SYSFIXED);
     button_clear_queue();
     while (true)
     {
@@ -177,45 +249,13 @@ bool dbg_remote_input(void)
             }
             if (log_error) fd = -1;
         }
-        lcd_clear_display();
-        snprintf(line, sizeof(line), "Remote input frames %lu bad %lu %s",
-                 total, bad, fd >= 0 ? "LOG" : log_error ? "LOG ERROR" : "");
-        lcd_puts(0, 0, line);
-        remote_button_names(iap_remotebtn, names, sizeof(names));
-        snprintf(line, sizeof(line), "held: %s", names);
-        lcd_puts(0, 1, line);
-        if (snapshot(total))
-        {
-            payload(hex, sizeof(hex), 8);
-            snprintf(line, sizeof(line), "last: L%X cmd %02X %s%s%s",
-                     frame.received ? frame.data[0] : 0, command(), hex,
-                     (frame.flags & REMOTE_BAD_MASK) ? " BAD" : "",
-                     (frame.flags & REMOTE_TRUNC) ? " TRUNC" : "");
-            lcd_puts(0, 2, line);
-            if ((frame.flags & REMOTE_BAD_MASK) || frame.received < 3 ||
-                frame.data[0] != 2 || frame.data[1] != 0)
-            {
-                snprintf(decoded, sizeof(decoded), "?");
-                made = (frame.flags & REMOTE_BAD_MASK) ? "ACTION_NONE" : "?";
-            }
-        }
-        snprintf(line, sizeof(line), "-> RC_%s -> %s", decoded, made);
-        lcd_puts(0, 3, line);
-        snprintf(line, sizeof(line), "---- newest first ---- lost %lu", lost);
-        lcd_puts(0, 4, line);
-        for (unsigned int i = 0; i < REMOTE_HISTORY && total > i; i++)
-        {
-            if (!snapshot(total - i)) continue;
-            remote_frame_names(&frame, names, sizeof(names));
-            payload(hex, sizeof(hex), 4);
-            snprintf(line, sizeof(line), "+%lu.%02lus L%X/%02X %s %s%s%s",
-                     frame.delta / HZ, frame.delta % HZ * 100 / HZ,
-                     frame.received ? frame.data[0] : 0, command(), hex,
-                     (frame.flags & REMOTE_BAD_MASK) ? "BAD " : "",
-                     (frame.flags & REMOTE_TRUNC) ? "TRUNC " : "", names);
-            lcd_puts(0, 5 + i, line);
-        }
-        lcd_update();
+        panel.total = total;
+        panel.bad = bad;
+        panel.lost = lost;
+        panel.logging = fd >= 0;
+        panel.error = log_error;
+        ui_page_invalidate(&page, bounds);
+        ui_page_draw(&page);
         int action = get_action(CONTEXT_STD, MAX(1, HZ / 10));
         int button;
         get_action_statuscode(&button);
@@ -223,9 +263,9 @@ bool dbg_remote_input(void)
         {
             if (action != ACTION_NONE || get_action_tick() != observed_tick)
             {
-                remote_button_names(button & BUTTON_REMOTE, decoded,
-                                    sizeof(decoded));
-                made = action_name(action);
+                remote_button_names(button & BUTTON_REMOTE, panel.decoded,
+                                    sizeof(panel.decoded));
+                panel.made = action_name(action);
                 observed_tick = get_action_tick();
             }
             if (!(action & SYS_EVENT)) continue;
@@ -254,7 +294,7 @@ bool dbg_remote_input(void)
     iap_agents_volume_enable(false);
 #endif
     button_clear_queue();
-    lcd_setfont(FONT_UI);
-    ui_inhibit_flush(inhibited);
+    ui_scene_close_modal(&scene, !usb, "remote-input-pop");
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
     return usb;
 }

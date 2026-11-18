@@ -53,6 +53,7 @@ $cores=0;
 for (my $i=0;$i<scalar @files;$i += $slice)
 {
     my $pid = fork;
+    die "fork failed: $!" unless defined $pid;
     if ($pid)
     {
         # mother
@@ -64,16 +65,16 @@ for (my $i=0;$i<scalar @files;$i += $slice)
         my @list = @files[$i .. $i + $slice - 1];
 
         # run command
-        system("$command @list > $tempfile.$$");
-
-        exit;
+        exit(system("$command @list > $tempfile.$$") == 0 ? 0 : 1);
     }
 }
 
+my $failed = 0;
 for my $i (0 .. $cores - 1)
 {
     # wait for child to complete
     waitpid $pids[$i], 0;
+    $failed = 1 if $? != 0;
 
     # read & print result
     if (open F, "<$tempfile.$pids[$i]")
@@ -83,3 +84,4 @@ for my $i (0 .. $cores - 1)
         unlink "$tempfile.$pids[$i]";
     }
 }
+exit $failed;

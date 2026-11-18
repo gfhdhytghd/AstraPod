@@ -12,6 +12,9 @@
  *  - IRAM1, its top 2 KiB. The bootloader runs from IRAM1's start (about
  *    0x2203c600 at most today) and the ROM is not known to use the top. The
  *    firmware never used IRAM1 (its clock was gated off); it stays on now.
+ * Crash text uses a separate .persist record and the adjacent 512 bytes of
+ * IRAM1, below the ring. Both records include a checksum and a boot number.
+ * The bootloader link script protects the reserved tail of IRAM1.
  * Both are written through the uncached alias (+0x40000000), so nothing
  * waits in the D-cache when the reset comes.
  *
@@ -24,6 +27,7 @@
  * store there data-aborts and the abort screen names the storing pc; a DMA
  * write is seen by the checksums only.
  ****************************************************************************/
+#include <stdio.h>
 #include "config.h"
 #include "system.h"
 #include "kernel.h"
@@ -36,9 +40,11 @@
 #include "rbversion.h"
 #include "string-extra.h"
 #include "s5l87xx.h"
+#include "clocking-s5l8702.h"
 #include "usb-designware.h"
 #include "crumbs.h"
 #include "crumb_ring.h"
+#include "crumb_crash.h"
 
 /* The aligned tables in sections of their own, hivec then l2tab: in this
  * file's .bss they page-aligned all of it and left about 4 KiB of holes
@@ -57,6 +63,12 @@ static struct crumb_ring dram_ring __attribute__((section(".persist"),
 #define IRAM1_RING_ADDR 0x2203f800
 _Static_assert(sizeof(struct crumb_ring) <= 2048, "crumb ring size");
 
+static struct crumb_crash dram_crash __attribute__((section(".persist"), aligned(32)));
+#define IRAM1_CRASH_ADDR (IRAM1_RING_ADDR - 512)
+_Static_assert(sizeof(struct crumb_crash) <= 512, "crash record size");
+
+#define CRASH_A ((volatile struct crumb_crash *)UNCACHED(&dram_crash))
+#define CRASH_B ((volatile struct crumb_crash *)UNCACHED(IRAM1_CRASH_ADDR))
 #define RING_A ((volatile struct crumb_ring *)UNCACHED(&dram_ring))
 #define RING_B ((volatile struct crumb_ring *)UNCACHED(IRAM1_RING_ADDR))
 volatile uint32_t *const crumb_status_a =
@@ -103,9 +115,20 @@ void crumb(enum crumb_id id, uint32_t value)
     restore_interrupt(level);
 }
 
+static bool iram1_ready;
+
+void crumbs_crash_record(const char *message, const struct crumb_crash_context *context)
+{
+    uint32_t boot = crumb_ring_head_ok(RING_A) ? RING_A->boot : 0;
+    crumb_crash_store(CRASH_A, boot, RBVERSION, message, context);
+    if (iram1_ready)
+        crumb_crash_store(CRASH_B, boot, RBVERSION, message, context);
+}
+
 void crumbs_boot(void)
 {
     clockgate_enable(CLOCKGATE_SM1, true);  /* IRAM1 */
+    iram1_ready = true;
     crumbs_prev_copies = crumb_snapshot_take(RING_A, RING_B, &crumbs_prev);
     uint32_t boot = crumbs_prev.valid ? crumbs_prev.boot + 1 : 1;
     crumb_ring_start(RING_A, boot);
@@ -163,8 +186,57 @@ int crumbs_lines(char (**lines)[48])
     return format_lines(report, REPORT_LINES);
 }
 
+static void crash_report(void)
+{
+    const volatile struct crumb_crash *crash = crumb_crash_latest(CRASH_A, CRASH_B);
+    if (!crash)
+        return;
+
+    static const char path[] = ROCKBOX_DIR "/crash-native.txt";
+    static const char temp[] = ROCKBOX_DIR "/crash-native.tmp";
+    static const char *const kinds[] = {
+        [CRUMB_CRASH_PANIC] = "Panic",
+        [CRUMB_CRASH_EXCEPTION] = "ARM exception",
+        [CRUMB_CRASH_HANG] = "Hang",
+        [CRUMB_CRASH_FREEZE] = "Freeze",
+    };
+    struct crumb_crash_context context = crash->data.context;
+    char output[640];
+    int length = snprintf(output, sizeof(output),
+                          "PodBox native crash\nFirmware: %s\nBoot: %lu\n"
+                          "%s: %s\n"
+                          "pc: %08lx  sp: %08lx  lr: %08lx  status: %08lx\n"
+                          "exception: %lu  fsr: %08lx  far: %08lx\n",
+                          (const char *)crash->data.version,
+                          (unsigned long)crash->data.boot,
+                          kinds[context.kind],
+                          (const char *)crash->data.message,
+                          (unsigned long)context.pc, (unsigned long)context.sp,
+                          (unsigned long)context.lr, (unsigned long)context.status,
+                          (unsigned long)context.exception, (unsigned long)context.fault_status,
+                          (unsigned long)context.fault_address);
+    if (length <= 0 || (size_t)length >= sizeof(output))
+        return;
+
+    int fd = open(temp, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0)
+        return;
+    bool ok = write(fd, output, length) == length && fsync(fd) == 0;
+    if (close(fd) < 0)
+        ok = false;
+    /* Keep the previous file and the pending RAM copies on write failure. */
+    if (ok && rename(temp, path) == 0)
+    {
+        CRASH_A->check = 0;
+        CRASH_B->check = 0;
+    }
+    else
+        remove(temp);
+}
+
 void crumbs_report(void)
 {
+    crash_report();
     if (!crumbs_prev.valid || crumbs_prev.clean)
         return;
     int n = report_n = format_lines(report, REPORT_LINES);

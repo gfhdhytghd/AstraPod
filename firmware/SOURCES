@@ -78,6 +78,9 @@ common/devicedata.c
 
 #ifdef HAVE_SDL
 target/hosted/sdl/button-sdl.c
+#ifdef SIMULATOR
+target/hosted/sdl/button-script-sdl.c
+#endif
 target/hosted/sdl/kernel-sdl.c
 target/hosted/sdl/lcd-bitmap.c
 #ifdef HAVE_REMOTE_LCD

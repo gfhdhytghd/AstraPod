@@ -54,7 +54,7 @@ int pcmbuf_descs(void);
 /* Fading and channel volume control */
 #ifdef HAVE_USB_PODLINK
 void pcmbuf_handoff_fade(unsigned long start);
-unsigned long pcmbuf_handoff_fade_begin(void);
+unsigned long pcmbuf_handoff_at(void);
 void pcmbuf_handoff_cancel(void);
 void pcmbuf_handoff_hold(bool enable);
 bool pcmbuf_handoff_ended(void);

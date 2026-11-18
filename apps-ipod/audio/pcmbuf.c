@@ -134,7 +134,8 @@ static unsigned int fade_vol = MIX_AMP_UNITY;
 #ifdef HAVE_USB_PODLINK
 static bool handoff_hold, handoff_ended;
 static unsigned int handoff_gain = MIX_AMP_UNITY;
-static unsigned long handoff_start, handoff_begin;
+static unsigned long handoff_start;
+static volatile unsigned long handoff_at;
 static bool handoff_fading;
 #endif
 static enum
@@ -1458,12 +1459,23 @@ static void pcmbuf_update_volume(void)
 }
 
 #ifdef HAVE_USB_PODLINK
+static unsigned long handoff_position(unsigned long fallback)
+{
+    struct chunkdesc *desc = current_desc;
+    size_t bytes = mixer_channel_get_bytes_waiting(PCM_MIXER_CHAN_PLAYBACK);
+    unsigned int frequency = mixer_get_frequency();
+    if (desc && desc->pos_key && desc->size >= bytes && frequency)
+        return desc->elapsed + (desc->size - bytes) * 1000 / (frequency * PCMBUF_SAMPLE_SIZE);
+    return fallback;
+}
+
 /* The normal stop/pause fader and handoff envelope remain independent. */
 static void handoff_fade_tick(void)
 {
     if (TIME_BEFORE(current_tick, handoff_start)) return;
-    if (!handoff_begin) handoff_begin = current_tick;
     unsigned long age = current_tick - handoff_start;
+    /* This tick and the DMA callbacks are serialized on the target. */
+    if (!age) handoff_at = handoff_position(-1ul);
     handoff_gain = age < 3 * HZ ? MIX_AMP_UNITY * (3 * HZ - age) / (3 * HZ) : 0;
     pcmbuf_update_volume();
     if (!handoff_gain)
@@ -1476,14 +1488,14 @@ static void handoff_fade_tick(void)
 void pcmbuf_handoff_fade(unsigned long start)
 {
     handoff_start = start;
-    handoff_begin = 0;
+    handoff_at = -1ul;
     handoff_fading = true;
     tick_add_task(handoff_fade_tick);
 }
 
-unsigned long pcmbuf_handoff_fade_begin(void)
+unsigned long pcmbuf_handoff_at(void)
 {
-    return handoff_begin;
+    return handoff_at;
 }
 
 void pcmbuf_handoff_cancel(void)
@@ -1517,11 +1529,7 @@ unsigned long pcmbuf_handoff_position(unsigned long fallback)
 {
     /* Project the WPS PCM marker into the part of this chunk already mixed. */
     pcm_play_lock();
-    struct chunkdesc *desc = current_desc;
-    size_t bytes = mixer_channel_get_bytes_waiting(PCM_MIXER_CHAN_PLAYBACK);
-    unsigned int frequency = mixer_get_frequency();
-    if (desc && desc->pos_key && desc->size >= bytes && frequency)
-        fallback = desc->elapsed + (desc->size - bytes) * 1000 / (frequency * PCMBUF_SAMPLE_SIZE);
+    fallback = handoff_position(fallback);
     pcm_play_unlock();
     return fallback;
 }

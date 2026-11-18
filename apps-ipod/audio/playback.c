@@ -44,6 +44,10 @@
 #include "kernel.h"
 #include "panic.h"
 #include "core_alloc.h"
+#ifdef HAVE_USB_PODLINK
+#include "lcd.h"
+#include "screens/playback/handoff_sheet.h"
+#endif
 #include "sound.h"
 #include "codecs.h"
 #include "codec_thread.h"
@@ -1174,6 +1178,10 @@ static void audio_reset_buffer(void)
         /* Remote Cover Flow borrows one cover while local playback is paused.
          * Leave room for it without invoking the playback shrink callback. */
         reserve += CIDER_COVER_SCRATCH_BYTES + BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t);
+        /* Opening the handoff must not shrink the playing buffer. Include
+         * room for the sheet fonts and the framebuffer allocation header. */
+        reserve += HANDOFF_FRAME_BYTES + HANDOFF_FONT_RESERVE +
+                   BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t);
 #endif
         size_t layout = pcmbuf_size_reqd() + scratch_mem_size()
                       + AUDIO_BUFFER_RESERVE;

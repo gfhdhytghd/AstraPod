@@ -1071,8 +1071,8 @@ static void init_act_cur(action_cur_t *cur,
     cur->is_prebutton        = false;
     cur->items               = NULL;
 #ifdef HAVE_USB_PODLINK
-    if (handoff_pending() && (timeout < 0 || timeout > HZ / 50))
-        timeout = HZ / 50;
+    if (handoff_pending() && (timeout < 0 || timeout > HZ / 10))
+        timeout = HZ / 10;
 #endif
     cur->timeout             = timeout;
     cur->get_context_map = get_context_map;
@@ -1223,6 +1223,17 @@ void action_wait_for_release(void)
         action_last.wait_for_release = true;
     button_clear_pressed();
 }
+
+
+#ifdef HAVE_USB_PODLINK
+void action_handoff_enter(void)
+{
+    /* Disown the previous screen's button without discarding queued input.
+     * A bare release still has no matching press in the standard keymap. */
+    action_last.wait_for_release = false;
+    action_last.button = BUTTON_REL;
+}
+#endif
 
 
 #ifdef HAVE_WHEEL_WPS_CHORD

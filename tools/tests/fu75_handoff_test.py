@@ -62,7 +62,7 @@ static long current_tick = 100;
 static bool cable, active, online, config_wait;
 static int status, activity, stops, usb_replies, disk_choices, redraws, splashes;
 static int dialog_depth, prompts, answer, cancel_on_question, frame;
-static unsigned long sample, fade;
+static unsigned long sample, fade, captured;
 static bool pcm_hold, pcm_end;
 static char log_line[320];
 struct mutex { int used; };
@@ -85,7 +85,9 @@ static bool podlink_host_connected(void) {return cable;}
 static int usb_detect(void) {return cable ? USB_INSERTED : 0;}
 static bool usb_confirm_pending(uint32_t e) {return cable && config_wait && e==3;}
 static void usb_confirm_reply(uint32_t e,bool disk) {assert(usb_confirm_pending(e));config_wait=false;usb_replies++;disk_choices+=disk;}
+#ifdef TEST_BASELINE
 static void sleep(int ticks) {current_tick+=ticks;}
+#endif
 static uint32_t podlink_crc32(const unsigned char *d,unsigned int n)
 {uint32_t crc=17;for(unsigned i=0;i<n;++i)crc=crc*31+d[i];return crc;}
 static void mutex_init(struct mutex *m) {m->used=0;}
@@ -97,13 +99,19 @@ static void button_queue_post(int x, int y) {(void)x;(void)y;redraws++;}
 static void backlight_on(void) {}
 static void splashf(int ticks,const char *f,int s) {(void)ticks;(void)f;(void)s;splashes++;}
 #endif
+#ifndef TEST_REAL_PCM
 static void pcmbuf_handoff_cancel(void) {fade=0;}
 static void pcmbuf_handoff_hold(bool v) {pcm_hold=v;if (!v) pcm_end=false;}
 static bool pcmbuf_handoff_ended(void) {return pcm_end;}
-static void pcmbuf_handoff_fade(unsigned long t) {fade=t;}
+static void pcmbuf_handoff_fade(unsigned long t) {fade=t;captured=-1ul;}
+#ifdef TEST_BASELINE
 static unsigned long pcmbuf_handoff_fade_begin(void)
 {return fade <= (unsigned long)current_tick ? fade : 0;}
-static unsigned long pcmbuf_handoff_position(unsigned long p) {return sample ? sample : p;}
+#else
+static unsigned long pcmbuf_handoff_at(void) {return captured;}
+#endif
+static unsigned long pcmbuf_handoff_position(unsigned long p) {return sample ? sample : p == -1ul ? local.elapsed : p;}
+#endif
 #define O_WRONLY 1
 #define O_CREAT 2
 #define O_APPEND 4
@@ -222,12 +230,13 @@ static void offer(void)
 static void arm(void)
 {
     answer=ACTION_STD_OK;offer();assert(phase==PREPARE);
+    char msg[512];assert(handoff_next(msg,sizeof msg) && strstr(msg,"\ta\t"));
     host("ping\t2\t987654");
-    handoff_step();
-    char msg[512];assert(handoff_next(msg,sizeof msg));
+    assert(handoff_next(msg,sizeof msg));
     assert(strstr(msg,"\t987654\t2\t"));
     char go[100];snprintf(go,sizeof go,"go\t%lu\t-1000\t12\t-5\t180\t20",current_tick+30);
     host(go);
+    assert(handoff_next(msg,sizeof msg) && strstr(msg,"\tg\t"));
     handoff_step();
     assert(phase==ARMED&&fade==(unsigned long)current_tick+30);
 }
@@ -275,19 +284,19 @@ int main(void)
     assert(strstr(log_line,"unplug"));
     dock(true,ACTIVITY_WPS,AUDIO_STATUS_PLAY);
     open_wps();arm();
-    current_tick=fade;sample=22000;host("at\t22012");handoff_step();
+    current_tick=fade;captured=sample=22000;host("at\t22012");handoff_next((char[80]){0},80);handoff_step();
     current_tick=fade+300;host("end");
     assert(handoff_step()==2&&active&&stops==2&&!fade);
     assert(strstr(log_line,"position_error_ms=12")&&strstr(log_line,"accepted"));
 
     dock(true,ACTIVITY_WPS,AUDIO_STATUS_PLAY);
-    open_wps();arm();current_tick=fade;sample=22000;host("at\t22151");handoff_step();
-    assert(phase==ARMED&&verified&&playing()&&fade);
+    open_wps();arm();current_tick=fade;captured=sample=22000;host("at\t22151");handoff_next((char[80]){0},80);handoff_step();
+    assert(phase==ARMED&&transport==VERIFIED&&playing()&&fade);
     current_tick=fade+300;host("end");
     assert(handoff_step()==2&&active&&strstr(log_line,"position_error_ms=151"));
 
     dock(true,ACTIVITY_WPS,AUDIO_STATUS_PLAY);
-    open_wps();arm();current_tick=fade;sample=22000;host("at\t23001");handoff_step();
+    open_wps();arm();current_tick=fade;captured=sample=22000;host("at\t23001");handoff_next((char[80]){0},80);handoff_step();
     assert(phase==WAIT_END&&playing()&&!fade&&strstr(log_line,"alignment"));
 
     for (int i=0;i<50;i++)

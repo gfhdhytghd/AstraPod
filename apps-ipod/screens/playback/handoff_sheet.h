@@ -4,9 +4,11 @@
 
 #include <stdbool.h>
 
+#define HANDOFF_FRAME_BYTES (2 * FRAMEBUFFER_SIZE)
+#define HANDOFF_FONT_RESERVE (16 * 1024)
+
 struct handoff_sheet {
     const char *title, *target;
-    long accepted;
     unsigned long start;
     int reason;
     bool preparing, armed;

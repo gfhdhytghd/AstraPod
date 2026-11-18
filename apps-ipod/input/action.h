@@ -408,5 +408,8 @@ long get_action_tick(void);
 * from normal button events.
 */
 void action_wait_for_release(void);
+#ifdef HAVE_USB_PODLINK
+void action_handoff_enter(void);
+#endif
 
 #endif /* __ACTION_H__ */

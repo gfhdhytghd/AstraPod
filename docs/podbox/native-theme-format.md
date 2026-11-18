@@ -90,7 +90,14 @@ edges without shadows.
 
 ### Background and motion
 
-`background.list`, `background.wps`, `background.lyrics` and `background.handoff` accept `solid`, `blurred_cover` or `cover_scrim`. Scrim uses `blurred_cover` for lists and lyrics and `cover_scrim` for Now Playing and handoff. Light uses `solid` throughout. Artwork-backed modes use the screen's fallback when cover art is unavailable.
+`background.list`, `background.wps` and `background.lyrics` accept `solid`,
+`blurred_cover` or `cover_scrim`. Scrim uses `blurred_cover` for lists and
+lyrics. Its Now Playing mode is `cover_scrim`, which draws the sharp cover
+over the blurred background. Light uses `solid` throughout.
+
+Handoff inherits the Now Playing backdrop, its `wps_bg` fallback and its
+contrast tint. The parser still accepts `background.handoff`, `handoff_bg`
+and `handoff_scrim_alpha` in existing theme files.
 
 `motion_scale` is a whole percentage from 0 to 300. `100` keeps the default frame count, `50` halves it, and `0` disables motion. The animation setting also controls whether motion plays. Durations are measured in frames on the 60 Hz clock.
 

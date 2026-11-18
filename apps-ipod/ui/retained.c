@@ -410,15 +410,18 @@ static UI_PIXELS_ARM void blend_aligned(fb_data *dst, const fb_data *src, int co
         return;
     }
 
-    unsigned source_weight = MIN(ink, light);
-    unsigned under_weight = UI_FULL_OPACITY - ink;
-    for (int x = 0; x < count; ++x)
+    ui_blit_mix(dst, src, dst, count, MIN(ink, light), UI_FULL_OPACITY - ink);
+}
+
+UI_PIXELS_ARM void ui_blit_mix(fb_data *dst, const fb_data *above, const fb_data *below,
+                             int pixels, unsigned above_weight, unsigned below_weight)
+{
+    for (int x = 0; x < pixels; ++x)
     {
-        fb_data above = src[x], below = dst[x];
-        uint32_t rb = (red_blue(above) * source_weight +
-                       red_blue(below) * under_weight) >> 8;
-        unsigned green = ((((above >> 5) & 63) * source_weight) +
-                          (((below >> 5) & 63) * under_weight)) >> 8;
+        fb_data a = above[x], b = below[x];
+        uint32_t rb = (red_blue(a) * above_weight + red_blue(b) * below_weight) >> 8;
+        unsigned green = ((((a >> 5) & 63) * above_weight) +
+                          (((b >> 5) & 63) * below_weight)) >> 8;
         dst[x] = ((rb >> 5) & 0xf800) | (green << 5) | (rb & 31);
     }
 }

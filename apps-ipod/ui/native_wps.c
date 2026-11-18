@@ -76,14 +76,19 @@ struct native_wps {
     char index_text[16], remaining_text[24], transport_text[4];
     unsigned bg, fg, accent, panel, meter_fg, meter_peak;
     unsigned palette_generation, art_generation;
-    int art_handle, peak_height, volume_target;
+    int art_handle, background, peak_height, volume_target;
     int level[BANDS], peak[BANDS];
     long meter_due;
     unsigned motion_trace;
-    bool have_blur, volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
+    bool volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
 };
 
 static int wps_handle, blur_handle;
+static struct {
+    int art;
+    unsigned generation, foreground;
+    bool ready;
+} backdrop = { .art = -1 };
 static int art_slot = -1;
 static struct native_wps *wps;
 static volatile bool active, repaint;
@@ -100,6 +105,23 @@ void native_wps_alloc(void)
 int native_wps_art_slot(void)
 {
     return art_slot;
+}
+
+int native_wps_background(int art, unsigned generation, enum ui_bg_kind mode, unsigned fg)
+{
+    if (mode == UI_BG_SOLID || art < 0 || blur_handle <= 0)
+        return -1;
+
+    if (backdrop.art != art || backdrop.generation != generation || backdrop.foreground != fg)
+    {
+        backdrop.art = art;
+        backdrop.generation = generation;
+        backdrop.foreground = fg;
+        fb_data *pixels = core_get_data_pinned(blur_handle);
+        backdrop.ready = album_art_render_background(pixels, LCD_WIDTH, LCD_HEIGHT, art, true, fg);
+        core_put_data_pinned(pixels);
+    }
+    return backdrop.ready ? blur_handle : -1;
 }
 
 static struct viewport *paint_viewport(struct viewport *viewport,
@@ -121,24 +143,28 @@ static struct viewport *paint_viewport(struct viewport *viewport,
     return lcd_set_viewport(viewport);
 }
 
+void native_wps_paint_background(const struct viewport *vp, int background, unsigned bg)
+{
+    if (background > 0)
+    {
+        fb_data *pixels = core_get_data_pinned(background);
+        lcd_bitmap_part(pixels, vp->x, vp->y, LCD_WIDTH, 0, 0, vp->width, vp->height);
+        core_put_data_pinned(pixels);
+    }
+    else
+    {
+        lcd_set_foreground(bg);
+        lcd_fillrect(0, 0, vp->width, vp->height);
+    }
+}
+
 static void paint_background(const struct ui_view *view,
                              const struct ui_view_frame *frame)
 {
     (void)view;
     struct viewport viewport;
     struct viewport *previous = paint_viewport(&viewport, frame, FONT_SYSFIXED);
-    if (wps->have_blur)
-    {
-        fb_data *pixels = core_get_data_pinned(blur_handle);
-        lcd_bitmap_part(pixels, viewport.x, viewport.y, LCD_WIDTH, 0, 0,
-                        viewport.width, viewport.height);
-        core_put_data_pinned(pixels);
-    }
-    else
-    {
-        lcd_set_foreground(wps->bg);
-        lcd_fillrect(0, 0, viewport.width, viewport.height);
-    }
+    native_wps_paint_background(&viewport, wps->background, wps->bg);
     lcd_set_viewport(previous);
 }
 
@@ -521,15 +547,8 @@ static void refresh_art(void)
     {
         wps->art_generation = art_generation;
         wps->art_handle = handle;
-        wps->have_blur = false;
-        if (wps->theme.background[UI_BG_WPS] == UI_BG_BLURRED_COVER &&
-            handle >= 0 && blur_handle > 0)
-        {
-            fb_data *pixels = core_get_data_pinned(blur_handle);
-            wps->have_blur = album_art_render_background(pixels, LCD_WIDTH, LCD_HEIGHT,
-                                                         handle, true, wps->fg);
-            core_put_data_pinned(pixels);
-        }
+        wps->background = native_wps_background(handle, art_generation,
+                              wps->theme.background[UI_BG_WPS], wps->fg);
         ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
     }
 }

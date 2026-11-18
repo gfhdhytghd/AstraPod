@@ -997,11 +997,10 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
             int units = MIN(ROW_UNIT, INT_MAX / MAX(1, bar.height) / list->nb_items);
             units = MAX(1, units);
             int start = frame->scroll_offset * units - render->row_shift * units / pitch;
-            vp.bg_pattern = render->colors[UI_COLOR_BACKGROUND];
             struct viewport *prior = lcd_set_viewport(&vp);
             gui_scrollbar_draw(&screens[SCREEN_MAIN], bar.x - vp.x, bar.y - vp.y,
                               bar.width, bar.height, list->nb_items * units, start,
-                              start + visible * units, VERTICAL);
+                              start + visible * units, VERTICAL | FOREGROUND);
             lcd_set_viewport(prior);
         }
     }
@@ -1289,6 +1288,27 @@ void gui_synclist_draw_status(struct gui_synclist *list)
 {
     if (list->callback_draw_status)
         draw_list(list, true);
+}
+
+bool gui_synclist_paint_background(const struct gui_synclist *list,
+                                   const struct viewport *region)
+{
+    if (renderer_handle <= 0)
+        return false;
+    struct native_list *render = core_get_data_pinned(renderer_handle);
+    bool same_owner = motion_owner(render, list);
+    if (same_owner)
+    {
+        struct ui_view_frame frame = {
+            .bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT},
+            .clip = {region->x, region->y, region->width, region->height},
+            .opacity = UI_FULL_OPACITY,
+            .brightness = UI_FULL_OPACITY,
+        };
+        render->art.ops->paint(&render->art, &frame);
+    }
+    core_put_data_pinned(render);
+    return same_owner;
 }
 
 void list_render_forget(const struct gui_synclist *list)

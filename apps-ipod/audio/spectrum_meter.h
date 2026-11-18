@@ -26,6 +26,9 @@ extern const int spectrum_band_freq_hz[SPECTRUM_MAX_BANDS];
  * and hold their level in between. Everything falls toward silence when
  * there is too little audio for even a short window. */
 void spectrum_meter_peek(void);
+/* Channel-major snapshot of un-smoothed 0..100 levels, or NULL on timeout. */
+void spectrum_meter_remote(const unsigned char *levels);
+void spectrum_meter_reset(void);
 
 /* Returns a 0-100 smoothed level for bar 'bar' (0-based) out of 'nbars'
  * total bars, averaged across the two channels. 'nbars' is clamped to

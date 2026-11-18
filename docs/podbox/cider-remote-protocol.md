@@ -1006,3 +1006,36 @@ page when the track was selected in an album. Playback, queue, Now Playing
 and lyrics continue through Rufin. If Jellyfin is unavailable, the host
 advances the library generation and resumes the Rufin-only library. The
 backend name remains Rufin for either library source.
+
+## Remote WPS spectrum v1
+
+Firmware advertises `spectrum1` in `ci`. The host opts in with
+`CF<TAB>generation<TAB>spectrum1`. In the current firmware's eight-token
+advertisement, `loading` also implies the extended CN layout from `cn18`.
+
+Firmware sends `cs<TAB>generation<TAB>lease` while the spectrum viewport is
+visible in the remote WPS and the remote source is playing. The lease is a
+nonzero 16-bit decimal number that changes with each subscription. It renews
+about twice per second and expires at the host after 1.5 seconds. Lease zero
+cancels immediately. Pause, screen exit, LCD sleep and session reset stop the
+subscription. The host also checks its own current playback and connection.
+
+The host sends a PodLink binary message with this exact 26-byte payload:
+
+| Offset | Size | Value |
+| --- | --- | --- |
+| 0 | 4 | ASCII `CSP1` |
+| 4 | 4 | Cider generation, little endian |
+| 8 | 2 | Lease, little endian |
+| 10 | 16 | Levels 0–100. Eight left, then eight right, from bass to treble. |
+
+The band centers in Hz are 60, 150, 400, 1000, 2500, 4000, 7000 and 12000.
+The first two bands use 1024 samples. The other six use 256 samples. The host
+reads the default sink's stereo monitor at 48 kHz with `parec`. Signed monitor
+latency provides the sample time estimate. The sender accounts for half the
+PodLink keepalive RTT and the firmware input tick when choosing when to send.
+
+Spectrum frames use the idle link and have no application credit or retry.
+The host drops stale frames and yields to queued control, art and localstore
+records. Firmware keeps one snapshot and starts its normal bar and peak
+release when the snapshot reaches 120 ms of age.

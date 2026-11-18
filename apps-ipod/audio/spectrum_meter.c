@@ -61,11 +61,6 @@ static const short band_gain_q8[SPECTRUM_MAX_BANDS] =
     177, 280, 229, 362, 572, 724, 958, 1254
 };
 
-/* Smoothed 0-100 level per band, held apart for each channel (0 = left,
- * 1 = right). Both banks always run: a stereo display reads them apart,
- * and the mono one averages them. */
-static int spectrum_level[2][SPECTRUM_MAX_BANDS];
-
 /* One Goertzel coefficient per band, and the rate they were built for. */
 static long band_coeff[SPECTRUM_MAX_BANDS];
 static int  coeff_rate;
@@ -86,9 +81,14 @@ static int  coeff_rate;
 #define SPECTRUM_PEAK_ACCEL     1         /* Q4 added to the fall each tick */
 #define SPECTRUM_PEAK_FALL_MAX  16        /* Q4 a tick, about a level */
 
-static int spectrum_peak[2][SPECTRUM_MAX_BANDS];      /* Q4 level */
-static int spectrum_peak_hold[2][SPECTRUM_MAX_BANDS]; /* ticks left to hold */
-static int spectrum_peak_fall[2][SPECTRUM_MAX_BANDS]; /* Q4 a tick */
+/* Keep the two channels independent. A mono display averages them. */
+static struct band_state {
+    uint16_t peak;    /* Q4 level */
+    uint8_t level;    /* smoothed 0..100 */
+    uint8_t hold;     /* ticks left to hold */
+    uint8_t fall;     /* Q4 per tick */
+} bands[2][SPECTRUM_MAX_BANDS];
+_Static_assert(SPECTRUM_PEAK_HOLD <= UINT8_MAX, "spectrum peak hold range");
 
 /* Rough perceptual (log-like) compression range: ln(raw magnitude) below
  * SPECTRUM_LOG_MIN maps to level 0, above SPECTRUM_LOG_MAX maps to level
@@ -199,48 +199,57 @@ int spectrum_scale_to_level(int raw)
  * faster the longer it has been falling. */
 static void advance_band(int channel, int band, int level)
 {
-    int *peak = &spectrum_peak[channel][band];
+    struct band_state *b = &bands[channel][band];
     int shown_q4;
 
-    if (level > spectrum_level[channel][band])
-        spectrum_level[channel][band] = level; /* instant attack */
-    else if (spectrum_level[channel][band] > level)
+    if (level > b->level)
+        b->level = level; /* instant attack */
+    else if (b->level > level)
     {
         /* >> SPECTRUM_RELEASE_SHIFT truncates to 0 once the remaining
          * gap drops below 8, which would otherwise freeze the level a
          * few points short of the true (quieter) target forever.
          * Guarantee at least 1 unit of decay per update so it always
          * reaches the target. */
-        int decay = (spectrum_level[channel][band] - level)
+        int decay = (b->level - level)
                     >> SPECTRUM_RELEASE_SHIFT;
         if (decay < 1)
             decay = 1;
-        spectrum_level[channel][band] -= decay;
+        b->level -= decay;
     }
 
     /* The cap chases the level the bar is *drawn* at, not the raw target it
      * is heading for. During a release those differ, and measuring against
      * the target would let the cap sink inside the bar it marks. */
-    shown_q4 = spectrum_level[channel][band] << 4;
+    shown_q4 = b->level << 4;
 
-    if (shown_q4 >= *peak)
+    if (shown_q4 >= b->peak)
     {
-        *peak = shown_q4;
-        spectrum_peak_hold[channel][band] = SPECTRUM_PEAK_HOLD;
-        spectrum_peak_fall[channel][band] = 0;
+        b->peak = shown_q4;
+        b->hold = SPECTRUM_PEAK_HOLD;
+        b->fall = 0;
     }
-    else if (spectrum_peak_hold[channel][band] > 0)
-        spectrum_peak_hold[channel][band]--;
+    else if (b->hold > 0)
+        b->hold--;
     else
     {
-        int *fall = &spectrum_peak_fall[channel][band];
-
-        if (*fall < SPECTRUM_PEAK_FALL_MAX)
-            *fall += SPECTRUM_PEAK_ACCEL;
-        *peak -= *fall;
-        if (*peak < shown_q4)
-            *peak = shown_q4;
+        if (b->fall < SPECTRUM_PEAK_FALL_MAX)
+            b->fall += SPECTRUM_PEAK_ACCEL;
+        int next_peak = b->peak - b->fall;
+        b->peak = next_peak < shown_q4 ? shown_q4 : next_peak;
     }
+}
+
+void spectrum_meter_remote(const unsigned char *levels)
+{
+    for (int ch = 0; ch < 2; ch++)
+        for (int band = 0; band < SPECTRUM_MAX_BANDS; band++)
+            advance_band(ch, band, levels ? levels[ch * SPECTRUM_MAX_BANDS + band] : 0);
+}
+
+void spectrum_meter_reset(void)
+{
+    memset(bands, 0, sizeof bands);
 }
 
 void spectrum_meter_peek(void)
@@ -259,9 +268,7 @@ void spectrum_meter_peek(void)
          * height the final block left them, and stay there. Playback resuming
          * is caught on the next tick by the instant attack, so a lull that
          * turns out to be momentary costs a unit or two of height. */
-        for (channel = 0; channel < 2; channel++)
-            for (band = 0; band < SPECTRUM_MAX_BANDS; band++)
-                advance_band(channel, band, 0);
+        spectrum_meter_remote(NULL);
         return;
     }
 
@@ -347,7 +354,7 @@ int spectrum_meter_get_bar(int bar, int nbars)
     if (band < 0)
         return 0;
 
-    return (spectrum_level[0][band] + spectrum_level[1][band]) / 2;
+    return (bands[0][band].level + bands[1][band].level) / 2;
 }
 
 int spectrum_meter_get_bar_channel(int bar, int nbars, int channel)
@@ -357,7 +364,7 @@ int spectrum_meter_get_bar_channel(int bar, int nbars, int channel)
     if (band < 0 || channel < 0 || channel > 1)
         return 0;
 
-    return spectrum_level[channel][band];
+    return bands[channel][band].level;
 }
 
 int spectrum_meter_get_peak(int bar, int nbars)
@@ -368,7 +375,7 @@ int spectrum_meter_get_peak(int bar, int nbars)
         return 0;
 
     /* Two Q4 banks averaged and brought back to whole levels in one step. */
-    return (spectrum_peak[0][band] + spectrum_peak[1][band]) / 32;
+    return (bands[0][band].peak + bands[1][band].peak) / 32;
 }
 
 int spectrum_meter_get_peak_channel(int bar, int nbars, int channel)
@@ -378,5 +385,5 @@ int spectrum_meter_get_peak_channel(int bar, int nbars, int channel)
     if (band < 0 || channel < 0 || channel > 1)
         return 0;
 
-    return spectrum_peak[channel][band] >> 4;
+    return bands[channel][band].peak >> 4;
 }

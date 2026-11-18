@@ -1134,6 +1134,16 @@ int skin_wait_for_action(enum skinnable_screens skin, int context, int timeout)
     if (!lcd_active())
         pm = sb = tb = recolouring = pending = loading_tick = false;
 
+    bool remote_spectrum = skin == WPS && cider_active();
+    if (skin == WPS)
+    {
+        static bool previous_remote;
+        if (remote_spectrum != previous_remote)
+            spectrum_meter_reset();
+        previous_remote = remote_spectrum;
+        cider_spectrum_wps(sb && remote_spectrum);
+    }
+
     if (pm || sb || tb || recolouring || pending || loading_tick) {
         long next_pm_refresh = current_tick;
         long next_sb_refresh = current_tick;
@@ -1152,7 +1162,15 @@ int skin_wait_for_action(enum skinnable_screens skin, int context, int timeout)
             if (pm)
                 peak_meter_peek();
             if (sb)
-                spectrum_meter_peek();
+            {
+                if (remote_spectrum)
+                {
+                    unsigned char levels[2 * SPECTRUM_MAX_BANDS];
+                    spectrum_meter_remote(cider_spectrum_levels(levels) ? levels : NULL);
+                }
+                else
+                    spectrum_meter_peek();
+            }
             if (wait == TIMEOUT_NOBLOCK)
                 sleep(0);   /* Existing meter path: sleep to the next tick. */
 
@@ -1181,7 +1199,7 @@ int skin_wait_for_action(enum skinnable_screens skin, int context, int timeout)
                     if(skin_get_gwps(skin, i)->data->spectrum_enabled)
                         skin_update(skin, i, SKIN_REFRESH_SPECTRUM);
                 }
-                next_sb_refresh += HZ / SPECTRUM_FPS;
+                next_sb_refresh += HZ / (remote_spectrum ? 25 : SPECTRUM_FPS);
             }
             if (tb) {
                 FOR_NB_SCREENS(i)

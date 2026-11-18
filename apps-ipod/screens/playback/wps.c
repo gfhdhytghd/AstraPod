@@ -586,6 +586,7 @@ static void wps_lcd_activation_hook(unsigned short id, void *param)
 
 static void gwps_leave_wps(bool theme_enabled)
 {
+    cider_spectrum_wps(false);
     FOR_NB_SCREENS(i)
     {
         struct gui_wps *gwps = skin_get_gwps(WPS, i);
@@ -948,6 +949,7 @@ static long wps_run(bool return_agents)
          * the WPS pixels until that page captures its animated underlay. */
         if (button == ACTION_WPS_BROWSE || button == ACTION_WPS_LYRICS)
         {
+            cider_spectrum_wps(false);
             if (lyric_viewer() == GO_TO_ROOT)
             {
                 gwps_leave_wps(true);

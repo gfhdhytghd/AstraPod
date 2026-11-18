@@ -33,6 +33,8 @@ static struct cider_transfer transfer;
 static struct cider_store store;
 static bool disk_lookup,request_ready,disk_running=true,cancel_all,warm_ready,disk_active=true;
 static bool host_live,live_reply;static long live_at;static char live_nonce[17];
+static uint32_t spectrum_generation;
+static bool spectrum_subscribed,spectrum_fresh;
 static void reset(void){host_live=live_reply=false;state.generation=0;}
 static bool host_store,ls_due,want_ready,list_req,list_ready,pin_on;
 static uint32_t next_request,grant,granted,cancel_request,list_cursor;
@@ -128,7 +130,7 @@ int main(void){
  transfer.active=false;noffers=0;want_ready=false;settle_tick(current_tick+5*HZ);background_start();assert(want_ready);
  /* FU27: both capability sets, then controls ahead of store traffic. */
  state.generation=0;hello_at=current_tick-3*HZ;
- assert(next(out,sizeof out)&&!strcmp(out,"ci\t1\t131072\tcn18,neighbors,warm,play-ack,localstore,remote-name,loading,localdiag-live"));
+ assert(next(out,sizeof out)&&!strcmp(out,"ci\t1\t131072\tneighbors,warm,play-ack,localstore,remote-name,loading,localdiag-live,spectrum1"));
  state.generation=7;pin_on=false;art_used_at=current_tick;noffers=0;
  ncommands=3;
  strcpy(commands[0],"cc\t7\t41\tnative-context\t2|album/a");
@@ -157,6 +159,11 @@ int main(void){
  /* FU30 progress is scoped to both the USB session and library revision. */
  state.library_generation=12;diag.build_state=0;
  store_text((const unsigned char*)"CF\t7\tlocaldiag",strlen("CF\t7\tlocaldiag"));assert(host_diag);
+ spectrum_subscribed=spectrum_fresh=true;
+ store_text((const unsigned char*)"CF\t6\tspectrum1",strlen("CF\t6\tspectrum1"));
+ assert(!spectrum_generation&&spectrum_subscribed&&spectrum_fresh);
+ store_text((const unsigned char*)"CF\t7\tspectrum1",strlen("CF\t7\tspectrum1"));
+ assert(spectrum_generation==7&&!spectrum_subscribed&&!spectrum_fresh);
  store_text((const unsigned char*)"CB\t7\t12\t3\t3\t2",strlen("CB\t7\t12\t3\t3\t2"));assert(diag.build_state==2&&diag.build_done==3);
  store_text((const unsigned char*)"CB\t7\t11\t0\t3\t1",strlen("CB\t7\t11\t0\t3\t1"));assert(diag.build_state==2);
  store_text((const unsigned char*)"CB\t7\t12\t4\t3\t2",strlen("CB\t7\t12\t4\t3\t2"));assert(diag.build_done==3);

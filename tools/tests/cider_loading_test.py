@@ -118,6 +118,7 @@ pre=r'''
 #define BUTTON_NONE 0
 #define PEAK_METER_FPS 20
 #define SPECTRUM_FPS 25
+#define SPECTRUM_MAX_BANDS 8
 #define SKIN_REFRESH_LOADING 256
 #define SKIN_REFRESH_PEAK_METER 16
 #define SKIN_REFRESH_SPECTRUM 128
@@ -143,6 +144,10 @@ static void skin_update(int s,int i,unsigned r){(void)s;(void)i;assert(r==SKIN_R
  last_draw=current_tick;draws++;if(!skin_cider_loading()){restores++;assert(current_tick-changed_at<=2);}}
 static void skin_flush_dirty(void){flushes++;}
 static void peak_meter_peek(void){}static void spectrum_meter_peek(void){}
+static void spectrum_meter_reset(void){}
+static void spectrum_meter_remote(const unsigned char *levels){(void)levels;}
+static void cider_spectrum_wps(bool shown){(void)shown;}
+static bool cider_spectrum_levels(unsigned char *levels){(void)levels;return false;}
 static void sleep(int t){(void)t;current_tick++;}
 static int get_action(int c,int t){(void)c;assert(t>0);current_tick+=t;
  if(clear_at>=0&&current_tick>=clear_at&&visible){visible=false;changed_at=clear_at;}

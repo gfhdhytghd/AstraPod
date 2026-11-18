@@ -83,6 +83,7 @@ static int sb_get_backdrop(int i) { (void)i; return 0; }
 static void remove_event(int e, void *h) { (void)e; (void)h; }
 static void sb_skin_set_update_delay(int d) { (void)d; }
 static void wps_lcd_activation_hook(void) {}
+static void cider_spectrum_wps(bool visible) { (void)visible; }
 #define WPS 0
 @DEPTH@
 @ITEM@

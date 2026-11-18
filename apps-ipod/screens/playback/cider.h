@@ -25,6 +25,8 @@ bool cider_lyrics_matches(const char *id, uint32_t generation, uint32_t library)
 /* Small transport state for callers on tight stacks (UI, skin, status). */
 struct cider_status { bool available, muted, loading; int rate, volume, shuffle, repeat; };
 void cider_status(struct cider_status *status);
+void cider_spectrum_wps(bool visible);
+bool cider_spectrum_levels(unsigned char *levels);
 void cider_loading_drawn(bool loading);
 void cider_control(const char *command, int value);
 int cider_mode_get(int mode);
@@ -65,6 +67,9 @@ static inline void cider_snapshot(struct cider_state *s)
 struct cider_status { bool available, muted, loading; int rate, volume, shuffle, repeat; };
 static inline void cider_status(struct cider_status *s)
 { *s = (struct cider_status){0}; }
+static inline void cider_spectrum_wps(bool visible) { (void)visible; }
+static inline bool cider_spectrum_levels(unsigned char *levels)
+{ (void)levels; return false; }
 static inline void cider_loading_drawn(bool loading) { (void)loading; }
 static inline void cider_local_play(void) { }
 static inline void cider_control(const char *c, int v) { (void)c; (void)v; }

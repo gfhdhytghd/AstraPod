@@ -5,6 +5,9 @@
 #include "screens/playback/cider_library.h"
 #include "screens/playback/cider_store.h"
 #include "audio.h"
+#include "audio/spectrum_meter.h"
+#include "system/activity.h"
+#include "lcd.h"
 #include "powermgmt.h"
 #include "podlink.h"
 #include "kernel.h"
@@ -43,6 +46,12 @@ static volatile bool host_live;
 static bool live_reply;
 static volatile long live_at;
 static char live_nonce[17];
+static volatile bool spectrum_visible;
+static volatile uint32_t spectrum_generation;
+static bool spectrum_subscribed, spectrum_fresh;
+static uint16_t spectrum_id;
+static long spectrum_renew_at, spectrum_received;
+static unsigned char spectrum_frame[2 * SPECTRUM_MAX_BANDS];
 static struct cider_store_stats diag;
 static bool load_requested, build_on, build_changed;
 static long diag_at, ls_at, dirty_at;
@@ -386,7 +395,9 @@ static unsigned int next(char *record, unsigned int size)
     {
         if (TIME_AFTER(current_tick, hello_at + 2 * HZ))
         {
-            n = snprintf(record, size, "ci\t1\t%d\tcn18,neighbors,warm,play-ack,localstore,remote-name,loading,localdiag-live", CIDER_CREDIT);
+            /* 'loading' already implies the extended CN layout. Keep eight
+             * advertised tokens for hosts that enforce the old limit. */
+            n = snprintf(record, size, "ci\t1\t%d\tneighbors,warm,play-ack,localstore,remote-name,loading,localdiag-live,spectrum1", CIDER_CREDIT);
             hello_at = current_tick;
         }
     }
@@ -604,6 +615,12 @@ static void store_text(const unsigned char *d, unsigned int n)
           if (disk_running) queue_post(&disk_queue, 1, 0); }
         len = snprintf(want, sizeof want, "CF\t%lu\tlocaldiag", (unsigned long)state.generation);
         if (len > 0 && n == (unsigned int)len && !memcmp(d, want, n)) host_diag = true;
+        len = snprintf(want, sizeof want, "CF\t%lu\tspectrum1", (unsigned long)state.generation);
+        if (state.generation && n == (unsigned int)len && !memcmp(d, want, n))
+        {
+            spectrum_generation = state.generation;
+            spectrum_subscribed = spectrum_fresh = false;
+        }
         unsigned char remote = cider_remote_parse((const char *)d, n, state.generation);
         if (remote) state.remote = remote;
     }
@@ -1018,20 +1035,89 @@ static bool cider_sleep_pause(void)
     sleep_pause_due = true;
     return true;
 }
+static bool spectrum_wanted(void)
+{
+    return spectrum_visible && lcd_active() &&
+        get_current_activity() == ACTIVITY_WPS && cider_active() &&
+        state.available && state.have && state.rate;
+}
+
+/* Runs under the resident service mutex. No transport API calls here. */
+static bool spectrum_receive(const struct podlink_message *m)
+{
+    const unsigned char *data = m->data;
+    if (m->type != PODLINK_BINARY || m->length < 4 || memcmp(data, "CSP1", 4))
+        return false;
+    if (m->length != 10 + sizeof spectrum_frame) return true;
+    for (unsigned i = 0; i < sizeof spectrum_frame; i++)
+        if (data[10 + i] > 100) return true;
+    mutex_lock(&cider_mutex);
+    if (spectrum_subscribed && spectrum_generation == state.generation &&
+        u32(data + 4) == state.generation &&
+        (unsigned)(data[8] | (data[9] << 8)) == spectrum_id && spectrum_wanted())
+    {
+        memcpy(spectrum_frame, data + 10, sizeof spectrum_frame);
+        spectrum_received = current_tick;
+        spectrum_fresh = true;
+    }
+    mutex_unlock(&cider_mutex);
+    return true;
+}
+
+static unsigned int spectrum_next(char *record, unsigned int size)
+{
+    if (!state.generation || spectrum_generation != state.generation) return 0;
+    mutex_lock(&cider_mutex);
+    bool want = spectrum_wanted();
+    unsigned int n = 0;
+    if (want != spectrum_subscribed || (want && TIME_AFTER(current_tick, spectrum_renew_at)))
+    {
+        if (want != spectrum_subscribed)
+        {
+            spectrum_fresh = false;
+            if (want && !++spectrum_id) ++spectrum_id;
+            spectrum_subscribed = want;
+        }
+        spectrum_renew_at = current_tick + HZ / 2;
+        n = snprintf(record, size, "cs\t%lu\t%u", (unsigned long)state.generation,
+                     want ? spectrum_id : 0u);
+    }
+    mutex_unlock(&cider_mutex);
+    return n < size ? n : 0;
+}
+
+void cider_spectrum_wps(bool visible)
+{
+    spectrum_visible = visible;
+}
+
+bool cider_spectrum_levels(unsigned char *levels)
+{
+    if (!spectrum_generation || !cider_connected()) return false;
+    mutex_lock(&cider_mutex);
+    bool fresh = spectrum_generation == state.generation && spectrum_fresh &&
+        spectrum_wanted() && (unsigned long)(current_tick - spectrum_received) < HZ * 12 / 100;
+    if (fresh) memcpy(levels, spectrum_frame, sizeof spectrum_frame);
+    mutex_unlock(&cider_mutex);
+    return fresh;
+}
+
 static bool resident_receive(const struct podlink_message *m)
 {
-    return handoff_receive(m) || receive(m);
+    return handoff_receive(m) || spectrum_receive(m) || receive(m);
 }
 
 static unsigned int resident_next(char *record, unsigned int size)
 {
     unsigned int n = handoff_next(record, size);
-    return n ? n : next(record, size);
+    if (!n) n = next(record, size);
+    return n ? n : spectrum_next(record, size);
 }
 
 static void resident_reset(void)
 {
     handoff_reset();
+    spectrum_generation = 0;
     reset();
 }
 

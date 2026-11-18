@@ -6,6 +6,7 @@
 #include "backlight.h"
 #include "button.h"
 #include "cider_wps.h"
+#include "draw/color.h"
 #include "draw/line.h"
 #include "draw/screen_access.h"
 #include "draw/viewport.h"
@@ -24,6 +25,7 @@
 #include "system.h"
 #include "ui/animation.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/native_wps.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
 #include "widgets/dialog.h"
@@ -34,18 +36,25 @@
 #define OPEN_FRAMES ANIM_F(16)
 #define CLOSE_FRAMES ANIM_F(12)
 #define SHEET_DIM_PERCENT 35
+#define TEXT_CONTRAST 500
+#define CONTRAST_STEP 4
 
 struct sheet_ui {
     bool leave;
     int small_font, button_font, large_font;
 };
 
+struct sheet_ink {
+    unsigned fg, muted, unselected_text, selected_text;
+};
+
 struct sheet_style {
-    unsigned bg, fg, muted, unselected_text, selected_text, placeholder;
+    unsigned bg, wps_fg, panel, placeholder;
+    struct sheet_ink ink;
     enum ui_bg_kind background;
     int margin, cover_size, button_height, button_gap, metadata_gap, line_gap;
     int progress_gap, progress_height, error_offset, outline_width;
-    int scrim_alpha, cover_border_alpha, button_border_alpha, progress_alpha;
+    int panel_alpha, cover_border_alpha, button_border_alpha, progress_alpha;
 };
 
 struct retained_sheet;
@@ -90,7 +99,7 @@ static void cover_placeholder(const struct sheet_style *s, int x, int y, int siz
 {
     lcd_set_foreground(s->placeholder);
     lcd_fillrect(x, y, size, size);
-    lcd_set_foreground(s->muted);
+    lcd_set_foreground(s->ink.muted);
     /* The note glyph is authored on a 96 px grid and follows the cover size. */
     const int stem = MAX(1, 2 * size / NOTE_GRID);
     const int head_w = 10 * size / NOTE_GRID, head_h = 6 * size / NOTE_GRID;
@@ -131,20 +140,21 @@ static void art_square(const struct sheet_style *s, int handle, int x, int y)
     }
     if (!drawn)
         cover_placeholder(s, x, y, s->cover_size);
-    lcd_set_foreground(s->fg);
+    lcd_set_foreground(s->ink.fg);
     outline(x, y, s->cover_size, s->cover_size, s->outline_width, s->cover_border_alpha);
 }
 
-static void sheet_button(const struct sheet_style *s, int x, int y, int width, bool focus,
-                         int font, const unsigned char *text)
+static void sheet_button(const struct sheet_style *s, const struct sheet_ink *ink,
+                         int x, int y, int width, bool focus, int font,
+                         const unsigned char *text)
 {
-    lcd_set_foreground(s->fg);
+    lcd_set_foreground(ink->fg);
     if (focus)
         lcd_fillrect(x, y, width, s->button_height);
     else
         outline(x, y, width, s->button_height, s->outline_width, s->button_border_alpha);
     center_text(x, y, width, s->button_height, font,
-                focus ? s->selected_text : s->unselected_text, text);
+                focus ? ink->selected_text : ink->unselected_text, text);
 }
 
 struct sheet_layout {
@@ -173,27 +183,16 @@ static struct sheet_layout sheet_measure(const struct sheet_ui *ui, const struct
     };
 }
 
-static void sheet_background(const struct sheet_style *s, int handle, fb_data *pixels)
-{
-    lcd_set_drawmode(DRMODE_FG);
-    lcd_set_foreground(s->bg);
-    if (s->background == UI_BG_SOLID ||
-        !album_art_render_background(pixels, LCD_WIDTH, LCD_HEIGHT, handle,
-                                     s->background == UI_BG_BLURRED_COVER, s->fg))
-        lcd_fillrect(0, 0, LCD_WIDTH, LCD_HEIGHT);
-    else if (s->background == UI_BG_COVER_SCRIM)
-        lcd_blendrect(0, 0, LCD_WIDTH, LCD_HEIGHT, s->scrim_alpha);
-}
-
 static void sheet_metadata(const struct handoff_sheet *view,
-                           const struct sheet_layout *m, int x, int line)
+                           const struct sheet_layout *m, const struct sheet_ink *ink,
+                           int x, int line)
 {
     const struct sheet_style *s = m->style;
     const int inner = m->inner;
     char fitted[TEXT_FIT_BUF];
-    center_text(x, line, inner, m->small_h, m->small, s->muted, str(LANG_HANDOFF_TITLE));
+    center_text(x, line, inner, m->small_h, m->small, ink->muted, str(LANG_HANDOFF_TITLE));
     line += m->small_h + s->line_gap;
-    center_text(x, line, inner, m->large_h, m->large, s->fg,
+    center_text(x, line, inner, m->large_h, m->large, ink->fg,
                 text_fit(view->title, fitted, sizeof fitted, m->large, inner));
     line += m->large_h + s->line_gap;
     char subtitle[112];
@@ -201,36 +200,37 @@ static void sheet_metadata(const struct handoff_sheet *view,
     const char *artist = track && track->artist ? track->artist : "";
     snprintf(subtitle, sizeof subtitle, "%s%s%.96s", view->target,
              *view->target && *artist ? " · " : "", artist);
-    center_text(x, line, inner, m->small_h, m->small, s->muted,
+    center_text(x, line, inner, m->small_h, m->small, ink->muted,
                 text_fit(subtitle, fitted, sizeof fitted, m->small, inner));
 }
 
 static void sheet_controls(const struct handoff_sheet *view, const struct sheet_ui *ui,
-                           const struct sheet_layout *m, int x, int y)
+                           const struct sheet_layout *m, const struct sheet_ink *ink,
+                           int x, int y)
 {
     const struct sheet_style *s = m->style;
     const int inner = m->inner;
     if (view->reason)
     {
-        center_text(x, y - s->error_offset, inner, m->large_h, m->large, s->fg,
+        center_text(x, y - s->error_offset, inner, m->large_h, m->large, ink->fg,
                     str(LANG_HANDOFF_FAILED));
-        center_text(x, y + m->large_h, inner, m->small_h, m->small, s->muted,
+        center_text(x, y + m->large_h, inner, m->small_h, m->small, ink->muted,
                     str(view->reason));
         return;
     }
 
     if (view->preparing)
     {
-        center_text(x, y, inner, m->button_h, m->button, s->fg,
+        center_text(x, y, inner, m->button_h, m->button, ink->fg,
                     str(LANG_HANDOFF_PREPARING));
-        lcd_set_foreground(s->fg);
+        lcd_set_foreground(ink->fg);
         lcd_blendrect(x, y + s->button_height + s->progress_gap, inner,
                       s->progress_height, s->progress_alpha);
         return;
     }
     int width = (inner - s->button_gap) / 2;
-    sheet_button(s, x, y, width, !ui->leave, m->button, str(LANG_HANDOFF_ACCEPT));
-    sheet_button(s, x + width + s->button_gap, y, width, ui->leave, m->button,
+    sheet_button(s, ink, x, y, width, !ui->leave, m->button, str(LANG_HANDOFF_ACCEPT));
+    sheet_button(s, ink, x + width + s->button_gap, y, width, ui->leave, m->button,
                  str(LANG_HANDOFF_LEAVE));
 }
 
@@ -259,19 +259,21 @@ struct retained_sheet {
     struct ui_view below, image, input, progress;
     struct ui_page card, base, overlay;
     struct ui_nav nav;
-    struct ui_layer base_pixels, card_pixels;
+    struct ui_layer base_pixels;
     struct frame_buffer_t card_buffer;
+    const fb_data *back;
+    struct sheet_ink ink;
     struct sheet_layout layout;
     const struct handoff_sheet *model;
     struct sheet_ui *input_state;
-    int art, disposition;
+    int art, background, disposition;
 };
 
 static struct viewport *component_canvas(struct viewport *vp,
                                          struct retained_sheet *s,
                                          struct ui_rect clip)
 {
-    bool buffered = s && s->card_pixels.handle > 0;
+    bool buffered = s && s->back;
     *vp = (struct viewport){ .buffer = buffered ? &s->card_buffer : NULL };
     viewport_set_fullscreen(vp, SCREEN_MAIN);
     vp->x = clip.x;
@@ -283,12 +285,49 @@ static struct viewport *component_canvas(struct viewport *vp,
     return old;
 }
 
+static void fit_sheet_ink(struct sheet_ink *ink, const struct viewport *vp, int y,
+                          unsigned foreground)
+{
+    bool light_text = color_contrast(foreground, LCD_BLACK) >=
+                      color_contrast(foreground, LCD_WHITE);
+    unsigned against = light_text ? LCD_BLACK : LCD_WHITE;
+    int limit = color_contrast(against, LCD_BLACK);
+    /* Sample the tinted backdrop before painting any text or controls. */
+    for (int row = y; row < vp->height; row += CONTRAST_STEP)
+    {
+        const fb_data *pixels = FBADDR(vp->x, vp->y + row);
+        for (int x = 0; x < vp->width; x += CONTRAST_STEP)
+        {
+            unsigned pixel = pixels[x];
+            int level = color_contrast(pixel, LCD_BLACK);
+            if (light_text ? level > limit : level < limit)
+            {
+                limit = level;
+                against = pixel;
+            }
+        }
+    }
+    ink->fg = color_fit_contrast(ink->fg, against, TEXT_CONTRAST);
+    ink->muted = color_fit_contrast(ink->muted, against, TEXT_CONTRAST);
+    ink->unselected_text = color_fit_contrast(ink->unselected_text, against, TEXT_CONTRAST);
+    ink->selected_text = color_fit_contrast(ink->selected_text, ink->fg, TEXT_CONTRAST);
+}
+
 static void paint_background(const struct ui_view *v, const struct ui_view_frame *frame)
 {
     struct retained_sheet *s = v->data;
     struct viewport vp;
     struct viewport *old = component_canvas(&vp, s, frame->clip);
-    sheet_background(s->layout.style, s->art, s->card_buffer.fb_ptr);
+    const struct sheet_style *style = s->layout.style;
+    s->ink = style->ink;
+    native_wps_paint_background(&vp, s->background, style->bg);
+    if (s->background > 0)
+    {
+        int y = MAX(0, MIN(s->layout.text_y, s->layout.button_y - style->error_offset) - vp.y);
+        lcd_set_foreground(style->panel);
+        lcd_blendrect(0, y, vp.width, vp.height - y, style->panel_alpha);
+        fit_sheet_ink(&s->ink, &vp, y, style->wps_fg);
+    }
     lcd_set_viewport(old);
 }
 
@@ -306,7 +345,8 @@ static void paint_metadata(const struct ui_view *v, const struct ui_view_frame *
     struct retained_sheet *s = v->data;
     struct viewport vp;
     struct viewport *old = component_canvas(&vp, s, frame->clip);
-    sheet_metadata(s->model, &s->layout, s->layout.style->margin - vp.x, frame->bounds.y - vp.y);
+    sheet_metadata(s->model, &s->layout, &s->ink,
+                   s->layout.style->margin - vp.x, frame->bounds.y - vp.y);
     lcd_set_viewport(old);
 }
 
@@ -315,7 +355,7 @@ static void paint_controls(const struct ui_view *v, const struct ui_view_frame *
     struct retained_sheet *s = v->data;
     struct viewport vp;
     struct viewport *old = component_canvas(&vp, s, frame->clip);
-    sheet_controls(s->model, s->input_state, &s->layout,
+    sheet_controls(s->model, s->input_state, &s->layout, &s->ink,
                    s->layout.style->margin - vp.x, s->layout.button_y - vp.y);
     lcd_set_viewport(old);
 }
@@ -325,9 +365,32 @@ static void paint_progress(const struct ui_view *v, const struct ui_view_frame *
     const struct retained_sheet *s = v->data;
     struct viewport vp;
     struct viewport *old = component_canvas(&vp, NULL, frame->clip);
-    lcd_set_foreground(s->layout.style->fg);
+    lcd_set_foreground(s->ink.fg);
     lcd_fillrect(0, 0, vp.width, vp.height);
     lcd_set_viewport(old);
+}
+
+static void paint_sheet_image(const struct ui_view *v, const struct ui_view_frame *frame)
+{
+    const struct retained_sheet *s = v->data;
+    if (!s->back)
+        return;
+    const struct ui_rect *clip = &frame->clip;
+    int opacity = frame->opacity;
+    int brightness = s->below.value[UI_BRIGHTNESS];
+    unsigned under = ((UI_FULL_OPACITY - opacity) * brightness + UI_FULL_OPACITY / 2)
+                     / UI_FULL_OPACITY;
+    for (int y = clip->y; y < clip->y + clip->height; ++y)
+    {
+        int dst = y * LCD_WIDTH + clip->x;
+        int src = dst - frame->bounds.y * LCD_WIDTH;
+        fb_data *out = lcd_framebuffer_default.fb_ptr + dst;
+        const fb_data *card = s->card_buffer.fb_ptr + src;
+        if (opacity == UI_FULL_OPACITY)
+            memcpy(out, card, clip->width * sizeof(*out));
+        else
+            ui_blit_mix(out, card, s->back + dst, clip->width, opacity, under);
+    }
 }
 
 static bool route_controls(struct ui_view *v, int action)
@@ -344,6 +407,7 @@ static const struct ui_view_ops controls_ops = { .paint = paint_controls };
 static const struct ui_view_ops progress_ops = { .paint = paint_progress };
 static const struct ui_view_ops input_ops = { .action = route_controls };
 static const struct ui_view_ops image_ops = { .paint = ui_layer_paint };
+static const struct ui_view_ops sheet_image_ops = { .paint = paint_sheet_image };
 static const struct ui_rect sheet_bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
 
 static void retained_sheet_init(struct retained_sheet *s, struct sheet_presentation *p,
@@ -355,7 +419,10 @@ static void retained_sheet_init(struct retained_sheet *s, struct sheet_presentat
     s->layout = *m;
     s->card_buffer = lcd_framebuffer_default;
     if (p->card)
+    {
         s->card_buffer.fb_ptr = p->card;
+        s->back = p->back;
+    }
     const struct sheet_style *style = m->style;
     int cover_size = style->cover_size;
     int buttons_y = MIN(m->button_y - style->error_offset,
@@ -374,12 +441,9 @@ static void retained_sheet_init(struct retained_sheet *s, struct sheet_presentat
 
     s->base_pixels = (struct ui_layer){.handle = p->handle, .width = LCD_WIDTH,
                                        .height = LCD_HEIGHT};
-    s->card_pixels = s->base_pixels;
-    s->card_pixels.handle = p->card ? p->handle : -1;
-    s->card_pixels.offset_pixels = LCD_WIDTH * LCD_HEIGHT;
     ui_view_init(&s->below, sheet_bounds, &image_ops, &s->base_pixels);
     ui_page_init(&s->base, &s->below);
-    ui_view_init(&s->image, sheet_bounds, &image_ops, &s->card_pixels);
+    ui_view_init(&s->image, sheet_bounds, &sheet_image_ops, s);
     s->image.value[UI_OFFSET_Y] = p->offset;
     s->below.value[UI_CLIP_HEIGHT] = p->offset;
     ui_view_init(&s->input, buttons, &input_ops, s);
@@ -397,6 +461,9 @@ static void draw_retained_card(struct sheet_presentation *p)
 {
     struct retained_sheet *s = p->retained;
     s->art = album_art_current();
+    const struct sheet_style *style = s->layout.style;
+    s->background = native_wps_background(s->art, album_art_generation(),
+                                          style->background, style->wps_fg);
     ui_page_invalidate(&s->card, sheet_bounds);
     ui_page_set(&s->overlay, &s->progress, UI_WIDTH, 0);
     if (p->card)
@@ -408,14 +475,15 @@ static void draw_retained_card(struct sheet_presentation *p)
 static void present_sheet(struct sheet_presentation *p, int offset, bool repaint)
 {
     struct retained_sheet *s = p->retained;
-    /* The opaque card invalidates its old and new rectangles. The substrate
-     * clip follows that movement so covered rows are never composited.
-     * Derive brightness from the same eased position in both directions. */
+    /* Blend covered rows directly against the saved page in one pass.
+     * The same eased position controls the slide, crossfade and dim. */
     s->below.value[UI_CLIP_HEIGHT] = offset;
+    int opacity = (LCD_HEIGHT - offset) * UI_FULL_OPACITY / LCD_HEIGHT;
     int dim = (LCD_HEIGHT - offset) * UI_FULL_OPACITY * SHEET_DIM_PERCENT
-                / (LCD_HEIGHT * 100);
+              / (LCD_HEIGHT * 100);
     ui_page_set(&s->base, &s->below, UI_BRIGHTNESS, UI_FULL_OPACITY - dim);
     ui_page_set(&s->overlay, &s->image, UI_OFFSET_Y, offset);
+    ui_page_set(&s->overlay, &s->image, UI_OPACITY, opacity);
     if (repaint)
         ui_page_invalidate(&s->overlay, (struct ui_rect){0, offset, LCD_WIDTH,
                                                        LCD_HEIGHT - offset});
@@ -443,7 +511,7 @@ static int draw_progress(const struct handoff_sheet *view, struct sheet_presenta
         return width;
     }
     const struct sheet_style *s = m->style;
-    lcd_set_foreground(s->fg);
+    lcd_set_foreground(p->retained->ink.fg);
     lcd_fillrect(s->margin, m->bar_y, width, s->progress_height);
     lcd_update_rect(s->margin + painted, m->bar_y, width - painted, s->progress_height);
     return width;
@@ -512,13 +580,18 @@ static void close_native_sheet(struct sheet_presentation *p)
             present_sheet(p, next, false);
             p->offset = next;
         }
-        int ticks = ui_clock_timeout(elapsed, tween.frames, HZ);
-        if (ticks && button_queue_wait_pending(ticks))
+        if (p->offset == LCD_HEIGHT)
+            break;
+        int ticks = ui_clock_poll_timeout((uint32_t)USEC_TIMER - tween.start_clock,
+                                          tween.frames, HZ);
+        if (button_queue_wait_pending(ticks))
         {
             /* Finish immediately. The next owner will read the same event. */
             present_sheet(p, LCD_HEIGHT, false);
             p->offset = LCD_HEIGHT;
         }
+        else if (!ticks)
+            yield();
     }
     ui_perf_end(trace);
 }
@@ -530,6 +603,7 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
     struct ui_tween tween = { .from = LCD_HEIGHT, .frames = p->open_frames };
     bool dirty = true, entering = true;
     int painted = 0;
+    long last_idle_poll = current_tick - 1;
     for (;;)
     {
         lcd_set_viewport(&p->vp);
@@ -550,12 +624,12 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
             int next = p->offset ? ui_tween_sample(&tween, frame) : 0;
             if (!next && p->offset && frame < tween.frames)
                 next = 1;
-            if (p->offset != next || dirty)
+            if (p->offset != next || (dirty && next < LCD_HEIGHT))
                 present_sheet(p, next, dirty);
             p->offset = next;
             if (next)
-                ticks = ui_clock_timeout((uint32_t)USEC_TIMER - tween.start_clock,
-                                         tween.frames, HZ);
+                ticks = ui_clock_poll_timeout((uint32_t)USEC_TIMER - tween.start_clock,
+                                              tween.frames, HZ);
         }
         if (!p->offset)
         {
@@ -583,6 +657,15 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
              * Let the protocol detect lost links and keep a live ticket. */
             int result = advance(DIALOG_CONTINUE);
             return result == DIALOG_CONTINUE ? DIALOG_ABORT : result;
+        }
+        if (action == ACTION_NONE && !ticks)
+        {
+            if (last_idle_poll == current_tick)
+            {
+                yield();
+                continue;
+            }
+            last_idle_poll = current_tick;
         }
         if (action == SYS_ACCESSORY_CONNECTED && p->offset)
         {
@@ -638,16 +721,21 @@ static NO_INLINE void load_native_style(struct sheet_style *s, struct sheet_ui *
     struct ui_theme theme;
     ui_theme_snapshot(&theme);
     struct ui_album_palette palette;
+    album_palette_refresh();
     album_palette_snapshot(&palette);
     const uint16_t *m = theme.metric;
     *s = (struct sheet_style){
-        .bg = themed_color(&theme, &palette, UI_COLOR_HANDOFF_BG),
-        .fg = themed_color(&theme, &palette, UI_COLOR_HANDOFF_FG),
-        .muted = themed_color(&theme, &palette, UI_COLOR_HANDOFF_MUTED),
-        .unselected_text = themed_color(&theme, &palette, UI_COLOR_HANDOFF_UNSELECTED_TEXT),
-        .selected_text = themed_color(&theme, &palette, UI_COLOR_HANDOFF_SELECTED_TEXT),
+        .bg = themed_color(&theme, &palette, UI_COLOR_WPS_BG),
+        .wps_fg = themed_color(&theme, &palette, UI_COLOR_WPS_FG),
+        .panel = themed_color(&theme, &palette, UI_COLOR_WPS_PANEL),
+        .ink = {
+            .fg = themed_color(&theme, &palette, UI_COLOR_HANDOFF_FG),
+            .muted = themed_color(&theme, &palette, UI_COLOR_HANDOFF_MUTED),
+            .unselected_text = themed_color(&theme, &palette, UI_COLOR_HANDOFF_UNSELECTED_TEXT),
+            .selected_text = themed_color(&theme, &palette, UI_COLOR_HANDOFF_SELECTED_TEXT),
+        },
         .placeholder = themed_color(&theme, &palette, UI_COLOR_HANDOFF_COVER_PLACEHOLDER),
-        .background = theme.background[UI_BG_HANDOFF],
+        .background = theme.background[UI_BG_WPS],
         .margin = m[UI_METRIC_HANDOFF_MARGIN],
         .cover_size = m[UI_METRIC_HANDOFF_COVER_SIZE],
         .button_height = m[UI_METRIC_HANDOFF_BUTTON_HEIGHT],
@@ -658,7 +746,7 @@ static NO_INLINE void load_native_style(struct sheet_style *s, struct sheet_ui *
         .progress_height = m[UI_METRIC_HANDOFF_PROGRESS_HEIGHT],
         .error_offset = m[UI_METRIC_HANDOFF_ERROR_OFFSET],
         .outline_width = m[UI_METRIC_HANDOFF_OUTLINE_WIDTH],
-        .scrim_alpha = m[UI_METRIC_HANDOFF_SCRIM_ALPHA],
+        .panel_alpha = m[UI_METRIC_WPS_PANEL_ALPHA],
         .cover_border_alpha = m[UI_METRIC_HANDOFF_COVER_BORDER_ALPHA],
         .button_border_alpha = m[UI_METRIC_HANDOFF_BUTTON_BORDER_ALPHA],
         .progress_alpha = m[UI_METRIC_HANDOFF_PROGRESS_ALPHA],

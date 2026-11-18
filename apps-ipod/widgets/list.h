@@ -297,6 +297,9 @@ extern void gui_synclist_set_status_callback(struct gui_synclist * lists,
 void gui_synclist_set_header(struct gui_synclist *list, const struct list_header *header);
 void gui_synclist_set_notes(struct gui_synclist *list, bool show);
 void gui_synclist_draw_status(struct gui_synclist *list);
+/* Repaint a region of the main list's last backdrop without submitting it. */
+bool gui_synclist_paint_background(const struct gui_synclist *list,
+                                   const struct viewport *region);
 extern void gui_synclist_speak_item(struct gui_synclist * lists);
 extern int gui_synclist_get_nb_items(struct gui_synclist * lists);
 

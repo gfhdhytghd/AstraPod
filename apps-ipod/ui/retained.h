@@ -118,5 +118,8 @@ void ui_layer_paint(const struct ui_view *, const struct ui_view_frame *);
 void ui_blit_dim(fb_data *dst, const fb_data *src, int pixels, unsigned brightness);
 void ui_blit_tint(fb_data *dst, const fb_data *src, int pixels, unsigned brightness,
                   fb_data tint);
+/* RGB565 source weights are in [0, 256] and sum to at most 256. */
+void ui_blit_mix(fb_data *dst, const fb_data *above, const fb_data *below, int pixels,
+                 unsigned above_weight, unsigned below_weight);
 
 #endif

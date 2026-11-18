@@ -89,10 +89,13 @@
 #ifdef IPOD_ACCESSORY_PROTOCOL
 #include "iap/agents_volume.h"
 #endif
+#include "draw/color.h"
 #include "draw/viewport.h"
 #include "draw/screen_access.h"
 #include "draw/text_wrap.h"
 #include "widgets/list.h"
+#include "ui/frame.h"
+#include "ui/native_theme_runtime.h"
 #include "ui/statusbar.h"
 #include "widgets/splash.h"
 #include "widgets/dialog.h"
@@ -625,9 +628,8 @@ static unsigned dot_colour(enum dot dot)
     }
 }
 
-/* The %Ls callback. The halo is drawn solid, which blends it with the
- * backdrop itself and so also wipes the cell's last frame; the fill is
- * then blended over it. */
+/* The list restores the cell before both full and status-only draws. Blend
+ * the halo and fill into those pixels, including the selection highlight. */
 static bool draw_dot(int item, void *data, struct screen *display,
                      struct viewport *vp)
 {
@@ -655,14 +657,12 @@ static bool draw_dot(int item, void *data, struct screen *display,
         fill = dot_faded;
     }
     int ox = (vp->width - size) / 2, oy = (vp->height - size) / 2;
-    display->set_drawmode(DRMODE_SOLID);
+    display->set_drawmode(DRMODE_FG);
     display->set_foreground(DOT_HALO);
     display->alpha_bitmap_part(dot_masks[shape][1], 0, 0, size,
                                ox, oy, size, size);
-    display->set_drawmode(DRMODE_FG);
     display->set_foreground(dot_colour(dot));
     display->alpha_bitmap_part(fill, 0, 0, size, ox, oy, size, size);
-    display->set_drawmode(DRMODE_SOLID);
     return true;
 }
 
@@ -1120,8 +1120,7 @@ static const char *view_title(void)
     return "Agents";
 }
 
-/* The usage view's colours. The grey is Scrim's unselected row text, the
- * darkest that stays legible on a blue cover. */
+/* Fixed colours for the question and talk surfaces. */
 #define USE_TEXT    LCD_RGBPACK(255, 255, 255)
 #define USE_SOFT    LCD_RGBPACK(216, 216, 216)
 #define USE_DIM     LCD_RGBPACK(189, 189, 189)
@@ -1131,6 +1130,34 @@ static const char *view_title(void)
 #define USE_WEEK    (7 * 86400)
 #define USE_LINE    21      /* pixels from one text line to the next */
 #define USE_BLOCK   40      /* pixels a service takes */
+
+struct panel_ink {
+    unsigned text, muted, fill, warn;
+};
+
+static struct panel_ink list_panel_ink(void)
+{
+    unsigned bg = ui_theme_rgb565(UI_COLOR_BACKGROUND);
+    return (struct panel_ink){
+        .text = ui_theme_rgb565(UI_COLOR_FOREGROUND),
+        .muted = ui_theme_rgb565(UI_COLOR_MUTED),
+        .fill = ui_theme_rgb565(UI_COLOR_ACCENT),
+        .warn = color_fit_contrast(USE_WARN, bg, 450),
+    };
+}
+
+/* Refresh the empty list's backdrop and chrome before drawing the panel.
+ * Submit the base and panel together from the caller. */
+static struct viewport panel_viewport(struct gui_synclist *list)
+{
+    bool held = ui_flush_inhibited();
+    ui_inhibit_flush(true);
+    gui_synclist_draw(list);
+    ui_inhibit_flush(held);
+    struct viewport vp = *list->parent[SCREEN_MAIN];
+    vp.drawmode = DRMODE_FG;
+    return vp;
+}
 
 /* Seconds since the shown figures were sent */
 static int usage_age(void)
@@ -1206,9 +1233,47 @@ static void text_at(struct screen *d, int x, int y, unsigned colour,
     d->putsxy(x, y, (const unsigned char *)text);
 }
 
+/* The track is transparent. Fit its outline and fill against the most
+ * demanding part of the artwork under this bar, before either is painted. */
+static unsigned limit_background(int x, int y, int width, unsigned text)
+{
+    const struct viewport *vp = lcd_current_viewport;
+    const fb_data *row = FBADDR(vp->x + x, vp->y + y);
+    bool light_text = color_contrast(text, LCD_BLACK) >= color_contrast(text, LCD_WHITE);
+    unsigned worst = row[0];
+    int worst_light = color_contrast(worst, LCD_BLACK);
+    for (int i = 1; i < width; ++i)
+    {
+        unsigned pixel = row[i];
+        int light = color_contrast(pixel, LCD_BLACK);
+        if (light_text ? light > worst_light : light < worst_light)
+        {
+            worst = pixel;
+            worst_light = light;
+        }
+    }
+    return worst;
+}
+
+static unsigned limit_colour(unsigned colour, unsigned bg, unsigned text)
+{
+    /* Keep the bar on the same light/dark side as the text. Darkening a
+     * warning against a bright part of the cover can hide it elsewhere. */
+    int ground = color_contrast(bg, LCD_BLACK);
+    bool light_text = color_contrast(text, LCD_BLACK) > ground;
+    for (int mix = 0; mix < 256; mix += 32)
+    {
+        unsigned fitted = color_blend(colour, text, mix);
+        int ink = color_contrast(fitted, LCD_BLACK);
+        if (light_text ? ink * 100 >= ground * 350 : ground * 100 >= ink * 350)
+            return fitted;
+    }
+    return text;
+}
+
 /* One limit in a cell w wide: its label, a bar, and the used percent and
  * reset time at the cell's right. A bar with no room is left out. */
-static void draw_limit(struct screen *d, int x, int y, int w,
+static void draw_limit(struct screen *d, const struct panel_ink *ink, int x, int y, int w,
                        const char *label, int pct, int reset, int period,
                        bool dim)
 {
@@ -1218,15 +1283,20 @@ static void draw_limit(struct screen *d, int x, int y, int w,
     else
         snprintf(text, sizeof text, "%d%% %s", pct,
                  fmt_reset(r, sizeof r, reset));
-    unsigned colour = dim ? USE_DIM : USE_TEXT;
+    unsigned colour = dim ? ink->muted : ink->text;
     int lw = text_w(d, label), tw = text_w(d, text);
-    text_at(d, x, y, USE_DIM, label);
+    text_at(d, x, y, ink->muted, label);
     text_at(d, x + w - tw, y, colour, text);
     int bx = x + lw + 5, bw = w - lw - tw - 11;
     if (bw < 12)
         return;
     int by = y + 6, bh = 8;
-    d->set_foreground(dim ? USE_DIM : USE_SOFT);
+    int height = lcd_current_viewport->height;
+    if (by >= height || by + bh <= 0)
+        return;
+    int sample_y = MAX(0, MIN(by + bh / 2, height - 1));
+    unsigned bg = limit_background(bx, sample_y, bw, ink->text);
+    d->set_foreground(limit_colour(ink->muted, bg, ink->text));
     d->drawrect(bx, by, bw, bh);
     if (pct > 0)
     {
@@ -1234,9 +1304,10 @@ static void draw_limit(struct screen *d, int x, int y, int w,
          * period; the shown reset time is counted down like fmt_reset */
         int left = reset < 0 ? -1
                    : MAX(0, reset - (current_tick - usage_at) / HZ);
-        d->set_foreground(pct >= 95 ? USE_FULL :
-                          hr_usage_over_pace(pct, left, period) ? USE_PACE :
-                          dim ? USE_DIM : USE_TEXT);
+        unsigned fill = pct >= 95 ? USE_FULL :
+                        hr_usage_over_pace(pct, left, period) ? USE_PACE :
+                        dim ? ink->muted : ink->fill;
+        d->set_foreground(limit_colour(fill, bg, ink->text));
         d->fillrect(bx + 1, by + 1, MAX(1, (bw - 2) * pct / 100), bh - 2);
     }
 }
@@ -1244,7 +1315,7 @@ static void draw_limit(struct screen *d, int x, int y, int w,
 /* A service: its name, tokens and cost, then its limits. A service
  * with nothing to show, or whose figures could not be read, is greyed and
  * gives its note in place of the limits. */
-static void draw_service(struct screen *d, int y, int w,
+static void draw_service(struct screen *d, const struct panel_ink *ink, int y, int w,
                          const struct hr_service *s, bool stale)
 {
     static const char *const names[HR_USAGE_SVCS] =
@@ -1253,7 +1324,7 @@ static void draw_service(struct screen *d, int y, int w,
     bool grey = s->state == 'n' || s->state == 'e';
     bool dim = stale || grey;
     int i = s - model.usage.svc;
-    text_at(d, 0, y, dim ? USE_DIM : USE_TEXT,
+    text_at(d, 0, y, dim ? ink->muted : ink->text,
             names[i]);
     if (s->state == 'e' || (s->state == 'n' && s->tokens <= 0))
         snprintf(right, sizeof right, "—");
@@ -1261,12 +1332,12 @@ static void draw_service(struct screen *d, int y, int w,
         snprintf(right, sizeof right, "%s  %s",
                  fmt_tokens(t, sizeof t, s->tokens),
                  fmt_usd(c, sizeof c, s->usd_milli));
-    text_at(d, w - text_w(d, right), y, dim ? USE_DIM : USE_SOFT, right);
+    text_at(d, w - text_w(d, right), y, dim ? ink->muted : ink->text, right);
     y += USE_LINE - 2;
     if (grey)
     {
         char note[48];
-        text_at(d, 0, y, USE_DIM, fit(note, sizeof note,
+        text_at(d, 0, y, ink->muted, fit(note, sizeof note,
                 s->note[0] ? s->note : s->state == 'e' ? "Cannot read"
                                                        : "Not used", w));
         return;
@@ -1274,61 +1345,59 @@ static void draw_service(struct screen *d, int y, int w,
     /* A service with no 5h limit has one bar, the week's, the row wide */
     if (s->h5_pct < 0 && s->h5_reset < 0)
     {
-        draw_limit(d, 0, y, w, "Week", s->wk_pct, s->wk_reset,
+        draw_limit(d, ink, 0, y, w, "Week", s->wk_pct, s->wk_reset,
                    USE_WEEK, dim);
         return;
     }
     int half = (w - 12) / 2;
-    draw_limit(d, 0, y, half, "5h", s->h5_pct, s->h5_reset, 5 * 3600,
+    draw_limit(d, ink, 0, y, half, "5h", s->h5_pct, s->h5_reset, 5 * 3600,
                dim);
-    draw_limit(d, w - half, y, half, "wk", s->wk_pct, s->wk_reset, USE_WEEK,
+    draw_limit(d, ink, w - half, y, half, "wk", s->wk_pct, s->wk_reset, USE_WEEK,
                dim);
 }
 
-/* Draw the usage view over the empty list, which has cleared its area */
+/* Draw the usage figures and bar outlines directly over the list backdrop. */
 static void draw_usage(struct gui_synclist *list)
 {
     struct screen *d = &screens[SCREEN_MAIN];
-    struct viewport *vp = list->parent[SCREEN_MAIN];
+    struct viewport canvas = panel_viewport(list);
+    const struct viewport *vp = &canvas;
+    struct panel_ink ink = list_panel_ink();
     const struct hr_usage *u = &model.usage;
     char buf[48], t[16], c[16];
-    d->set_viewport(vp);
-    unsigned fg = vp->fg_pattern;
-    d->clear_viewport();
+    struct viewport *previous = d->set_viewport(&canvas);
     const char *t_trouble = trouble(buf, sizeof buf);
     if (!u->have)
     {
         const char *msg = t_trouble ? t_trouble : "Waiting for usage…";
         text_at(d, (vp->width - text_w(d, msg)) / 2,
-                (vp->height - USE_LINE) / 2, USE_DIM, msg);
+                (vp->height - USE_LINE) / 2, ink.muted, msg);
     }
     else
     {
         int age = usage_age();
         bool stale = t_trouble || !u->ok || age > 3 * USAGE_EVERY / HZ;
         for (int i = 0; i < HR_USAGE_SVCS; i++)
-            draw_service(d, i * USE_BLOCK - usage_scroll, vp->width,
+            draw_service(d, &ink, i * USE_BLOCK - usage_scroll, vp->width,
                          &u->svc[i], stale);
         int y = HR_USAGE_SVCS * USE_BLOCK - usage_scroll;
-        d->set_foreground(USE_DIM);
+        d->set_foreground(ink.muted);
         d->hline(0, vp->width - 1, y);
         y += 3;
         snprintf(buf, sizeof buf, "%s  %s", fmt_tokens(t, sizeof t, u->tokens),
                  fmt_usd(c, sizeof c, u->usd_milli));
-        text_at(d, 0, y, stale ? USE_DIM : USE_TEXT, "Total");
-        text_at(d, text_w(d, "Total") + 10, y, stale ? USE_DIM : USE_TEXT,
+        text_at(d, 0, y, stale ? ink.muted : ink.text, "Total");
+        text_at(d, text_w(d, "Total") + 10, y, stale ? ink.muted : ink.text,
                 buf);
         if (stale)
-            text_at(d, vp->width - text_w(d, "stale"), y, USE_WARN, "stale");
+            text_at(d, vp->width - text_w(d, "stale"), y, ink.warn, "stale");
     }
-    d->set_foreground(fg);
-    d->update_viewport();
-    d->set_viewport(NULL);
+    d->set_viewport(previous);
+    ui_flush_dirty();
 }
 
 /* The detail view's colours beyond the usage view's: the working line, and
  * the dot by the state */
-#define DET_ACCENT  LCD_RGBPACK(140, 220, 150)
 #define DET_GAP     4       /* pixels between the view's parts */
 #define DET_DOT     9       /* the dot's diameter */
 
@@ -1368,16 +1437,24 @@ static void draw_disc(struct screen *d, int x, int y, unsigned colour)
 
 /* Draw the task line at its scroll, in a strip of its own so the ticker can
  * draw it alone */
-static void draw_task(struct screen *d, struct viewport *vp)
+static void draw_task(struct gui_synclist *list, struct viewport *vp,
+                      unsigned colour, bool repaint)
 {
+    struct screen *d = &screens[SCREEN_MAIN];
     struct viewport strip = *vp;
     strip.y += task_y;
-    strip.height = USE_LINE;
-    d->set_viewport(&strip);
-    d->clear_viewport();
-    text_at(d, -task_x, 0, USE_DIM, task_text);
-    d->update_viewport();
-    d->set_viewport(vp);
+    strip.height = MIN(USE_LINE, vp->height - task_y);
+    strip.drawmode = DRMODE_FG;
+    if (strip.height <= 0 || (repaint && !gui_synclist_paint_background(list, &strip)))
+        return;
+    struct viewport *previous = d->set_viewport(&strip);
+    text_at(d, -task_x, 0, colour, task_text);
+    d->set_viewport(previous);
+    if (repaint)
+    {
+        ui_mark_dirty_rect(SCREEN_MAIN, strip.x, strip.y, strip.width, strip.height);
+        ui_flush_dirty();
+    }
 }
 
 /* A frame of the task line's scroll, while the detail view is open */
@@ -1403,8 +1480,7 @@ static void tick_task(struct gui_synclist *list)
             task_next = current_tick + TASK_REST;
         }
     }
-    draw_task(&screens[SCREEN_MAIN], vp);
-    screens[SCREEN_MAIN].set_viewport(NULL);
+    draw_task(list, vp, ui_theme_rgb565(UI_COLOR_FOREGROUND), true);
 }
 
 /* The input block: what is typed in the agent's input box, in a frame, up
@@ -1441,7 +1517,7 @@ static int input_lines(const char *text, int width, struct font *pf,
 }
 
 static int draw_input(struct screen *d, struct viewport *vp, int y,
-                      bool dim)
+                      unsigned text_colour, unsigned border_colour)
 {
     const struct hr_detail *det = &model.detail;
     struct font *pf = font_get(vp->font);
@@ -1454,7 +1530,7 @@ static int draw_input(struct screen *d, struct viewport *vp, int y,
     int nlines = input_lines(text, width, pf, cursor_at, &cursor_line);
     input_top = hr_input_window(cursor_line, nlines, INPUT_LINES, input_top);
     int shown = MIN(nlines - input_top, INPUT_LINES);
-    d->set_foreground(USE_DIM);
+    d->set_foreground(border_colour);
     d->drawrect(0, y, vp->width, shown * USE_LINE + 2 * INPUT_PAD);
     int ly = y + INPUT_PAD;
     const char *p = text;
@@ -1466,7 +1542,7 @@ static int draw_input(struct screen *d, struct viewport *vp, int y,
         {
             snprintf(line, sizeof line, "%.*s",
                      (int)MIN(end - p, (long)sizeof line - 1), p);
-            text_at(d, x0, ly, dim ? USE_DIM : USE_TEXT, line);
+            text_at(d, x0, ly, text_colour, line);
             if (i == cursor_line)
             {
                 /* The bar after the character before the cursor */
@@ -1474,7 +1550,7 @@ static int draw_input(struct screen *d, struct viewport *vp, int y,
                 snprintf(line, sizeof line, "%.*s",
                          (int)MIN(at - p, (long)sizeof line - 1), p);
                 int cx = x0 + (at > p ? text_w(d, line) : 0);
-                d->set_foreground(dim ? USE_DIM : USE_TEXT);
+                d->set_foreground(text_colour);
                 d->vline(MIN(cx, vp->width - 2), ly + 1, ly + h - 2);
             }
             ly += USE_LINE;
@@ -1503,12 +1579,12 @@ static int detail_glyph(const char *text, int *bytes, void *ctx)
 static void draw_detail(struct gui_synclist *list)
 {
     struct screen *d = &screens[SCREEN_MAIN];
-    struct viewport *vp = list->parent[SCREEN_MAIN];
+    struct viewport canvas = panel_viewport(list);
+    struct viewport *vp = &canvas;
+    struct panel_ink ink = list_panel_ink();
     const struct hr_detail *det = &model.detail;
     char buf[128], age[16], line[200];
-    d->set_viewport(vp);
-    unsigned fg = vp->fg_pattern;
-    d->clear_viewport();
+    struct viewport *previous = d->set_viewport(vp);
     const struct hr_agent *a = find_agent(detail_pane);
     if (a)
         detail_agent = *a;
@@ -1530,16 +1606,16 @@ static void draw_detail(struct gui_synclist *list)
     detail_shown_age = secs >= 0 ? secs / 60 : -1;
     int sw = text_w(d, buf);
     int h = font_get(vp->font)->height;
-    text_at(d, vp->width - sw, 0, state == 'b' ? USE_WARN : USE_SOFT, buf);
+    text_at(d, vp->width - sw, 0, state == 'b' ? ink.warn : ink.text, buf);
     draw_disc(d, vp->width - sw - DET_DOT - 5, (h - DET_DOT) / 2,
               state == 'b' ? DOT_RED : state == 'w' ? DOT_GREEN :
               state == 'd' ? DOT_TEAL : DOT_GREY);
     snprintf(buf, sizeof buf, "%s%s%s", a->name[0] ? a->name : "",
              a->name[0] ? " · " : "", a->kind);
-    text_at(d, 0, 0, USE_DIM,
+    text_at(d, 0, 0, ink.muted,
             fit(buf, sizeof buf, buf, vp->width - sw - DET_DOT - 13));
     int y = USE_LINE + 2;
-    d->set_foreground(USE_DIM);
+    d->set_foreground(ink.muted);
     d->hline(0, vp->width - 1, y);
     y += DET_GAP;
 
@@ -1551,10 +1627,9 @@ static void draw_detail(struct gui_synclist *list)
         const char *msg = t_trouble ? t_trouble :
                           have ? "Nothing in the pane" : "Waiting for the pane…";
         text_at(d, (vp->width - text_w(d, msg)) / 2,
-                y + (vp->height - y - USE_LINE) / 2, USE_DIM, msg);
-        d->set_foreground(fg);
-        d->update_viewport();
-        d->set_viewport(NULL);
+                y + (vp->height - y - USE_LINE) / 2, ink.muted, msg);
+        d->set_viewport(previous);
+        ui_flush_dirty();
         return;
     }
 
@@ -1570,18 +1645,18 @@ static void draw_detail(struct gui_synclist *list)
     if (task_text[0])
     {
         task_y = y;
-        draw_task(d, vp);
+        draw_task(list, vp, ink.text, false);
         y += USE_LINE;
     }
 
     /* What is typed, first: it is what the wheel's keys are editing */
     if (det->input[0])
-        y = draw_input(d, vp, y, t_trouble != NULL);
+        y = draw_input(d, vp, y, t_trouble ? ink.muted : ink.text, ink.muted);
 
     /* The working line, or the state */
     if (det->now[0])
     {
-        unsigned colour = DET_ACCENT;
+        unsigned colour = ink.text;
         const char *now = det->now;
         if (!strcmp(now, "done") || !strcmp(now, "idle"))
         {
@@ -1589,11 +1664,10 @@ static void draw_detail(struct gui_synclist *list)
                      secs >= 0 ? " · " : "",
                      secs >= 0 ? fmt_age(age, sizeof age, secs) : "");
             now = line;
-            colour = USE_SOFT;
         }
         else if (now[0] == '?')
-            colour = USE_WARN;
-        text_at(d, 0, y, t_trouble ? USE_DIM : colour,
+            colour = ink.warn;
+        text_at(d, 0, y, t_trouble ? ink.muted : colour,
                 fit(line, sizeof line, now, vp->width));
         y += USE_LINE;
     }
@@ -1623,7 +1697,7 @@ static void draw_detail(struct gui_synclist *list)
     int maximum = MAX(0, need - avail);
     detail_scroll = hr_detail_scroll(detail_scroll, detail_scroll_max, maximum);
     detail_scroll_max = maximum;
-    unsigned colour = t_trouble || fallback ? USE_DIM : USE_TEXT;
+    unsigned colour = t_trouble || fallback ? ink.muted : ink.text;
     for (int i = detail_scroll; i < need && i < detail_scroll + avail; i++)
     {
         int start = detail_layout.start[i], end = detail_layout.end[i];
@@ -1636,12 +1710,11 @@ static void draw_detail(struct gui_synclist *list)
     {
         if (!detail_layout.steps[i][0]) continue;
         snprintf(line, sizeof line, "› %s", detail_layout.steps[i]);
-        text_at(d, 0, y + row++ * USE_LINE, USE_DIM,
+        text_at(d, 0, y + row++ * USE_LINE, ink.muted,
                 fit(line, sizeof line, line, vp->width));
     }
-    d->set_foreground(fg);
-    d->update_viewport();
-    d->set_viewport(NULL);
+    d->set_viewport(previous);
+    ui_flush_dirty();
 }
 
 /* The question overlay is a view of Agents, never a nested screen. It is
@@ -1654,7 +1727,7 @@ static void draw_detail(struct gui_synclist *list)
 #define Q_BAR       26      /* the key band at the bottom */
 #define Q_HEAD      40      /* where the question starts */
 #define Q_AMBER     USE_WARN
-#define Q_YES       DET_ACCENT
+#define Q_YES       LCD_RGBPACK(140, 220, 150)
 #define Q_NO        USE_FULL
 #define Q_FAINT     LCD_RGBPACK(90, 90, 90)
 #define Q_BAND      LCD_RGBPACK(38, 38, 38)
@@ -1841,7 +1914,7 @@ static void draw_question_overlay(void)
             if (!model.detail.input[0])
                 text_at(d, INPUT_PAD + 1, y + INPUT_PAD, Q_FAINT,
                         "Hold PLAY and speak");
-            draw_input(d, &box, y, false);
+            draw_input(d, &box, y, USE_TEXT, USE_DIM);
             d->set_viewport(&full);
             d->set_drawmode(DRMODE_FG);
         }
@@ -2253,13 +2326,16 @@ static void show_at(struct gui_synclist *list, int select, int top)
     if (top < 0)
         top = view == VIEW_QUESTION ? select - lines + 1 : select - lines / 2;
     gui_synclist_set_top_item(list, top);
-    gui_synclist_draw(list);
     if (view == VIEW_USAGE)
         draw_usage(list);
     else if (view == VIEW_DETAIL)
         draw_detail(list);
-    else if (view == VIEW_ALERT || view == VIEW_INPUT || question_binary_page())
-        draw_question_overlay();
+    else
+    {
+        gui_synclist_draw(list);
+        if (view == VIEW_ALERT || view == VIEW_INPUT || question_binary_page())
+            draw_question_overlay();
+    }
 }
 
 static void show(struct gui_synclist *list, int select)

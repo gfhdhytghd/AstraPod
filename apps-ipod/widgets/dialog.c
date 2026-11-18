@@ -25,6 +25,10 @@
 #include "skin/skin_engine.h" /* skin_inhibit_flush */
 #include "skin/skin_albumart_color.h" /* dynamic_colors_* */
 #include "dialog.h"
+#include "button_chord.h"
+#ifdef HAVE_WHEEL_WPS_CHORD
+#include "input/agents_shortcut.h"
+#endif
 
 #define DIALOG_MARGIN 10   /* default content inset inside the box */
 #define DIALOG_SHADOW  4   /* default solid drop-shadow offset */
@@ -739,7 +743,14 @@ int dialog_run(struct dialog *d, int poll_ticks)
                                : get_action(d->context, ticks);
         skin_inhibit_flush(false);
 
-        disp = d->cb->on_action(d, action, d->data);
+#ifdef HAVE_WHEEL_WPS_CHORD
+        /* Editors use KBD_ABORT for local focus changes and confirmations.
+         * A pending WPS jump leaves the dialog through its cancel cleanup. */
+        if (d->context == CONTEXT_KEYBOARD && agents_nav_pending() == AGENTS_NAV_WPS)
+            disp = DIALOG_CANCEL;
+        else
+#endif
+            disp = d->cb->on_action(d, action, d->data);
     }
 
     if (d->cb->on_close)

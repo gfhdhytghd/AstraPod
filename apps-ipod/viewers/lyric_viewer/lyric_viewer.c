@@ -18,6 +18,7 @@
 #include "diacritic.h"
 #include "lcd.h"
 #include "button.h"
+#include "button_chord.h"
 #include "backlight.h"
 #include "audio.h"
 #include "metadata.h"
@@ -1408,7 +1409,13 @@ int lyric_viewer(void)
                     || button == BUTTON_RC_SELECT
 #endif
                    )
+                {
                     lv.seek_consumed = lv_select_seek(pressed);
+#ifdef HAVE_WHEEL_WPS_CHORD
+                    if (lv.seek_consumed && button == BUTTON_SELECT)
+                        agents_shortcut_commit_select();
+#endif
+                }
                 break;
             }
 #endif

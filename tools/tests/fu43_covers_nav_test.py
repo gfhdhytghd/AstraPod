@@ -34,6 +34,7 @@ extra=set(re.findall(r'\b(?:ACTION_|CONTEXT_|ACTIVITY_|LANG_|Icon_)[\w]+',cider+
 extra.update({'CONTEXT_STD','CONTEXT_QUICKSCREEN','ACTIVITY_MAINMENU','ACTIVITY_AGENTS'})
 extra.discard('ACTION_NONE')
 prefix='''#define HAVE_USB_PODLINK
+#define HAVE_WHEEL_WPS_CHORD
 #define IPOD_ACCESSORY_PROTOCOL
 #define REMOTE_LOG_DISABLE
 #include "firmware/target/arm/ipod/button-target.h"

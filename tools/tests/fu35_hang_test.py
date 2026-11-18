@@ -20,6 +20,7 @@ pre=pre.replace('struct viewport{','enum agents_nav_screen {'+','.join(sorted(ex
 # Use the real availability refresh, without changing the saved order, on each menu turn.
 pre+=r'''
 #define HAVE_USB_PODLINK
+#define HAVE_WHEEL_WPS_CHORD
 #define BUTTON_REDRAW 0x20000000
 #define MENU_COUNT_MASK 0xffff
 #define MENU_COUNT_SHIFT 8
@@ -91,7 +92,8 @@ cmd=['cc','-std=gnu11','-Wno-enum-conversion','-g','-fsanitize=address,undefined
 subprocess.run(cmd+[str(O/'home.c'),'-o',str(O/'home')],check=True)
 subprocess.run([str(O/'home')],check=True,timeout=10)
 # Counterfactual: remove only the fix from the same production loop.
-old=re.sub(r'#ifdef HAVE_USB_PODLINK\n        /\* Root CANCEL.*?#endif\n','',source,flags=re.S)
+old=re.sub(r'#ifdef (?:HAVE_USB_PODLINK|HAVE_WHEEL_WPS_CHORD)\n        /\* Root CANCEL.*?#endif\n',
+           '',source,flags=re.S)
 assert old!=source
 (O/'home-old.c').write_text(old)
 subprocess.run(cmd+[str(O/'home-old.c'),'-o',str(O/'home-old')],check=True)

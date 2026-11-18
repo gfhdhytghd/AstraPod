@@ -21,6 +21,7 @@
 #include "system.h"
 #include "kernel.h"
 #include "button.h"
+#include "button_chord.h"
 #ifdef HAVE_SDL
 #include "SDL.h"
 #if SDL_MAJOR_VERSION > 1
@@ -200,11 +201,13 @@ void button_clear_pressed(void)
     }
 }
 
-#if defined(HAVE_USB_PODLINK) && !defined(BOOTLOADER)
+#ifdef HAVE_WHEEL_WPS_CHORD
 static long (*ui_filter)(long);
+void button_set_ui_filter(long (*filter)(long)) { ui_filter = filter; }
+#endif
+#if defined(HAVE_USB_PODLINK) && !defined(BOOTLOADER)
 static int (*ui_timeout)(int);
 void button_set_ui_timeout(int (*timeout)(int)) { ui_timeout = timeout; }
-void button_set_ui_filter(long (*filter)(long)) { ui_filter = filter; }
 #endif
 
 long button_get_w_tmo(int ticks)
@@ -220,7 +223,7 @@ long button_get_w_tmo(int ticks)
     else
         button_data = ev.data;
 
-#if defined(HAVE_USB_PODLINK) && !defined(BOOTLOADER)
+#ifdef HAVE_WHEEL_WPS_CHORD
     if (ui_filter) return ui_filter(ev.id);
 #endif
     return ev.id;

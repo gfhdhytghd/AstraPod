@@ -41,35 +41,73 @@
 
 #include "system/appevents.h"
 #include "button.h"
+#include "button_chord.h"
 #include "action.h"
-#ifdef HAVE_USB_PODLINK
+#ifdef HAVE_WHEEL_WPS_CHORD
 #include "input/agents_shortcut.h"
-#ifdef HAVE_USB_PODLINK
-#include "screens/playback/cider.h"
-#endif
-#include "system/podlink_time.h"
+#include "system/activity.h"
 #include "thread.h"
+#include "kernel.h"
+static struct agents_shortcut_state shortcut;
+static bool ui_polling;
+static unsigned int ui_thread;
+
+void agents_shortcut_commit_select(void)
+{
+    shortcut.select_committed = true;
+}
+
+#ifdef HAVE_USB_PODLINK
+#include "podlink.h"
+#include "screens/playback/cider.h"
+#include "system/podlink_time.h"
 #include "input/remote_menu.h"
 #include "root_menu.h"
-#include "kernel.h"
 #ifdef IPOD_ACCESSORY_PROTOCOL
 #include "iap/agents_volume.h"
 #include "iap/remote_capture.h"
 #endif
-static struct agents_shortcut_state shortcut;
 static struct agents_cover_chord_state cover_chord;
-static bool ui_polling;
-#if defined(IPOD_ACCESSORY_PROTOCOL) && defined(HAVE_USB_PODLINK)
+#ifdef IPOD_ACCESSORY_PROTOCOL
 static long raw_remote_filter(long button);
 static int raw_ui_timeout(int timeout);
 #endif
-static unsigned int ui_thread;
+#endif
 static long raw_ui_cancel(void)
 {
     static bool release;
     release = !release;
     return BUTTON_MENU | (release ? 0 : BUTTON_REL);
 }
+
+/* The existing Agents gesture remains in the action path with a live host.
+ * With no host, raw viewers can request the same WPS transition. */
+static int wheel_shortcut_button(int button, bool talking, bool raw, int *action)
+{
+    *action = ACTION_NONE;
+    bool connected = false;
+#ifdef HAVE_USB_PODLINK
+    connected = podlink_host_connected();
+#endif
+    if (raw && connected && !shortcut.latched && !shortcut.ignored)
+        return button;
+    bool fire;
+    button = agents_shortcut_button(&shortcut, button, button_status(),
+                                    connected && talking, &fire);
+    if (fire)
+    {
+        if (connected)
+            *action = ACTION_AGENTS_SWITCH;
+        else
+        {
+            agents_nav_request(AGENTS_NAV_WPS, false);
+            *action = ACTION_TREE_WPS;
+        }
+    }
+    return button;
+}
+
+#ifdef HAVE_USB_PODLINK
 static int raw_volume_button(int button)
 {
     if (button & (SYS_EVENT | BUTTON_MULTIMEDIA | BUTTON_REDRAW)) return button;
@@ -82,14 +120,20 @@ static int raw_volume_button(int button)
 #endif
     return button;
 }
+#endif
 static long raw_ui_filter(long button)
 {
     /* Audio/decoder threads also read buttons; they must never write RTC. */
     if (thread_self() != ui_thread) return button;
+#ifdef HAVE_USB_PODLINK
     cider_source_poll();
+#endif
     if (ui_polling) return button;
+#ifdef HAVE_USB_PODLINK
     podlink_time_sync();
+#endif
     if (button & SYS_EVENT) return button;
+#ifdef HAVE_USB_PODLINK
     cider_play_status();
 #ifdef IPOD_ACCESSORY_PROTOCOL
     iap_volume_context(false);
@@ -99,12 +143,16 @@ static long raw_ui_filter(long button)
     if (button & SYS_EVENT) return button;
     bool fire;
     button = agents_cover_chord_button(&cover_chord, button, button_status(), true, &fire);
-    if (agents_nav_pending() != AGENTS_NAV_NONE) return raw_ui_cancel();
-    if (fire)
+    if (fire && agents_nav_pending() == AGENTS_NAV_NONE)
     {
         agents_nav_request(agents_cover_toggle_target(), false);
         return BUTTON_MENU;
     }
+#endif
+    int action;
+    if (shortcut.latched || agents_nav_pending() == AGENTS_NAV_NONE)
+        button = wheel_shortcut_button(button, false, true, &action);
+    if (agents_nav_pending() != AGENTS_NAV_NONE) return raw_ui_cancel();
 #ifdef IPOD_ACCESSORY_PROTOCOL
     button = raw_remote_filter(button);
     if (button == REMOTE_COVERS_BUTTON)
@@ -129,6 +177,9 @@ void agents_shortcut_init(void)
     button_set_ui_timeout(raw_ui_timeout);
 #endif
 }
+#endif
+
+#ifdef HAVE_USB_PODLINK
 static bool shortcut_talking;
 static unsigned long shortcut_talking_at;
 void agents_shortcut_talking(bool talking)
@@ -457,12 +508,14 @@ int agents_shortcut_get_button(int timeout)
         agents_nav_request(agents_cover_toggle_target(), !fire);
         return BUTTON_MENU;
     }
-    button = agents_shortcut_button(&shortcut, button, button_status(),
+    int action;
+    button = wheel_shortcut_button(button,
                                     shortcut_talking &&
                                     (unsigned long)current_tick -
                                     shortcut_talking_at > (3 * HZ + 19) / 20,
-                                    &fire);
-    if (fire) return AGENTS_SHORTCUT_BUTTON;
+                                    false, &action);
+    if (action == ACTION_TREE_WPS) return raw_ui_cancel();
+    if (action == ACTION_AGENTS_SWITCH) return AGENTS_SHORTCUT_BUTTON;
 #ifdef IPOD_ACCESSORY_PROTOCOL
     if (!remote_input_active)
         button = agents_remote_button(&remote, context, button, button_status(),
@@ -517,7 +570,7 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
 {
     bool ret = true;
     int *button = &cur->button;
-#ifdef HAVE_USB_PODLINK
+#ifdef HAVE_WHEEL_WPS_CHORD
     ui_polling = true;
 #endif
 
@@ -543,8 +596,9 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
 #else
     *button = button_get_w_tmo(cur->timeout);
 #endif
-#ifdef HAVE_USB_PODLINK
+#ifdef HAVE_WHEEL_WPS_CHORD
     ui_polling = false;
+#ifdef HAVE_USB_PODLINK
     podlink_time_sync();
     bool fire;
     *button = agents_cover_chord_button(&cover_chord, *button, button_status(),
@@ -557,17 +611,25 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
         *button = ACTION_AGENTS_COVERS;
         return true;
     }
-    *button = agents_shortcut_button(&shortcut, *button, button_status(),
-                                     shortcut_talking &&
-                                     (unsigned long)current_tick -
-                                     shortcut_talking_at > (3 * HZ + 19) / 20,
-                                     &fire);
-    if (fire)
+    bool talking = shortcut_talking &&
+        (unsigned long)current_tick - shortcut_talking_at > (3 * HZ + 19) / 20;
+#else
+    bool talking = false;
+#endif
+    int shortcut_action;
+    *button = wheel_shortcut_button(*button, talking, false, &shortcut_action);
+    if (shortcut_action != ACTION_NONE)
     {
         last->button = BUTTON_REL;
         last->action = ACTION_NONE;
         last->wait_for_release = false;
-        *button = ACTION_AGENTS_SWITCH;
+        *button = shortcut_action;
+        if (shortcut_action == ACTION_TREE_WPS)
+        {
+            /* Use the lyrics viewer's normal exit to its owning WPS. */
+            *button = get_current_activity() == ACTIVITY_LYRICS ?
+                      ACTION_WPS_MENU : ACTION_NONE;
+        }
         return true;
     }
 #endif
@@ -1158,7 +1220,7 @@ void action_wait_for_release(void)
 }
 
 
-#ifdef HAVE_USB_PODLINK
+#ifdef HAVE_WHEEL_WPS_CHORD
 static bool shortcut_screen_context(int context)
 {
     return context == CONTEXT_WPS || context == CONTEXT_AGENTS ||
@@ -1219,7 +1281,7 @@ int get_action(int context, int timeout)
 #ifdef HAVE_USB_PODLINK
     podlink_time_sync();
 #endif
-#ifdef HAVE_USB_PODLINK
+#ifdef HAVE_WHEEL_WPS_CHORD
     if (agents_nav_pending() != AGENTS_NAV_NONE && !shortcut_screen_context(context))
         return ACTION_STD_CANCEL;
 #endif
@@ -1334,7 +1396,7 @@ int get_custom_action(int context,int timeout,
 #ifdef HAVE_USB_PODLINK
     podlink_time_sync();
 #endif
-#ifdef HAVE_USB_PODLINK
+#ifdef HAVE_WHEEL_WPS_CHORD
     if (agents_nav_pending() != AGENTS_NAV_NONE && !shortcut_screen_context(context))
         return ACTION_STD_CANCEL;
 #endif

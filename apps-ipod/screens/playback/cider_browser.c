@@ -45,15 +45,16 @@ static struct cider_row root_rows[33];
 static int root_count, browse_floor;
 static bool empty_list;
 static const char *list_notice;
-static fb_data art_source[56 * 56], art_pixels[56 * 56];
+enum { CIDER_LIST_ART_DIM = 56 };
+static fb_data art_pixels[CIDER_LIST_ART_DIM * CIDER_LIST_ART_DIM];
 static struct bitmap row_bitmap;
 static struct cider_row callback_row;
 static char query[SEARCH_MAX_QUERY + 1];
 static int search_count = -1;
 static int ahead_previous, ahead_direction = 1;
 
-_Static_assert(sizeof history + sizeof root_rows + sizeof art_source +
-                       sizeof art_pixels + sizeof selected_row +
+_Static_assert(sizeof history + sizeof root_rows + sizeof art_pixels +
+                       sizeof selected_row +
                        sizeof callback_row + sizeof row_bitmap + sizeof query +
                        128 <
                    56 * 1024,
@@ -163,18 +164,21 @@ static enum list_row_kind kind(int i, void *data)
 static const struct bitmap *bitmap_for(const char *key, struct dim *size,
                                        const struct img_filter *filter)
 {
-    if (!cider_copy_art(key, "S", art_source, sizeof art_source))
+    if (!cider_copy_art(key, "S", art_pixels, sizeof art_pixels))
     {
         cider_prefetch_art(key, "S");
         return NULL;
     }
-    int dim = MIN(56, MIN(size->width, size->height));
+    int dim = MIN(CIDER_LIST_ART_DIM, MIN(size->width, size->height));
     if (dim <= 0)
         return NULL;
+    /* Downscale in place. For dim <= source width, each source index is at
+     * or above its destination, so forward writes preserve unread pixels. */
     for (int y = 0; y < dim; y++)
         for (int x = 0; x < dim; x++)
             art_pixels[y * dim + x] =
-                art_source[y * 56 / dim * 56 + x * 56 / dim];
+                art_pixels[y * CIDER_LIST_ART_DIM / dim * CIDER_LIST_ART_DIM +
+                           x * CIDER_LIST_ART_DIM / dim];
     if (filter)
         img_filter_apply(art_pixels, dim, dim, filter);
     row_bitmap.width = row_bitmap.height = dim;

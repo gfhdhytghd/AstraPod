@@ -47,12 +47,40 @@ int main(void){
  long a=raw_ui_filter(BUTTON_NONE),b=raw_ui_filter(BUTTON_NONE);
  assert(a!=b&&(a&BUTTON_MENU)&&(b&BUTTON_MENU));
  assert(raw_ui_filter(SYS_EVENT|1)==(SYS_EVENT|1));
+ #ifdef TEST_LOCAL_WPS
+ held=0;
+ raw_ui_filter(chord|BUTTON_REL);
+ assert(agents_nav_take(AGENTS_NAV_COVERS));
+ const int wps=BUTTON_SELECT|BUTTON_PLAY;
+ connected=true;held=wps;
+ assert(raw_ui_filter(wps)==wps&&agents_nav_pending()==AGENTS_NAV_NONE);
+ connected=false;
+ assert(raw_ui_filter(wps)&BUTTON_MENU);
+ assert(agents_nav_pending()==AGENTS_NAV_WPS);
+ held=0;
+ assert(raw_ui_filter(BUTTON_SELECT|BUTTON_REL)&BUTTON_MENU);
+ assert(raw_ui_filter(BUTTON_PLAY|BUTTON_REL)&BUTTON_MENU);
+ assert(!shortcut.latched&&agents_nav_take(AGENTS_NAV_WPS));
+ assert(raw_ui_filter(BUTTON_SELECT)==BUTTON_SELECT);
+ #endif
  puts("any-screen UI/raw SELECT+MENU: thread isolation, release suppression, repeat reuse, modal down/release cancellation PASS");
 }
 '''
 (O/'config.h').write_text('')
 pre+='\nstatic long raw_remote_filter(long button){return button;}\n'
-(O/'raw.c').write_text(pre+c+fn(source,'raw_ui_cancel')+fn(source,'raw_ui_filter')+post)
+wheel = ''
+if 'static int wheel_shortcut_button(' in source:
+ pre += '''
+#define TEST_LOCAL_WPS
+#define ACTION_NONE 0
+#define ACTION_AGENTS_SWITCH 401
+#define ACTION_TREE_WPS 402
+static struct agents_shortcut_state shortcut;
+static bool connected;
+static bool podlink_host_connected(void){return connected;}
+'''
+ wheel = fn(source,'wheel_shortcut_button')
+(O/'raw.c').write_text(pre+c+fn(source,'raw_ui_cancel')+wheel+fn(source,'raw_ui_filter')+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R),'-I'+str(R/'apps-ipod'),str(O/'raw.c'),'-o',str(O/'raw')],check=True)
 subprocess.run([str(O/'raw')],check=True)
 root=(S/'apps-ipod/root_menu.c').read_text();q=(S/'firmware/drivers/button_queue.c').read_text()

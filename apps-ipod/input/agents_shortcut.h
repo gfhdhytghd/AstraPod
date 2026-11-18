@@ -5,8 +5,11 @@
 #include "config.h"
 #include "input/agents_remote.h"
 #define AGENTS_SHORTCUT_BUTTON (BUTTON_REDRAW | BUTTON_SELECT | BUTTON_PLAY)
-#ifdef HAVE_USB_PODLINK
+#if defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))
 void agents_shortcut_init(void);
+void agents_shortcut_commit_select(void);
+#endif
+#ifdef HAVE_USB_PODLINK
 int agents_shortcut_get_button(int timeout);
 void root_menu_agents_shortcut(void);
 void root_menu_wps_shortcut(void);
@@ -15,7 +18,8 @@ void root_menu_cover_shortcut(void);
 #define agents_shortcut_get_button button_get_w_tmo
 #endif
 struct agents_shortcut_state {
-    bool latched, ignored, select_held;
+    bool latched, ignored, select_held, select_committed;
+    unsigned int remaining;
 };
 struct agents_cover_chord_state {
     bool latched;

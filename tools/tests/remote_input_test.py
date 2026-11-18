@@ -536,6 +536,8 @@ static bool cider_active(void){return false;}
 #define CONTEXT_WPS 2
 #define ACTION_REMOTE_WPS 401
 #define ACTION_WPS_LYRICS 405
+#define ACTION_WPS_MENU 406
+#define ACTION_TREE_WPS 407
 #define ACTIVITY_AGENTS 1
 #define ACTIVITY_WPS 2
 #define ACTIVITY_LYRICS 99
@@ -570,6 +572,7 @@ static long current_tick;
 static int queued_button, held_button, polls,waited;
 static int button_get_w_tmo(int t) {waited=t;polls++;return queued_button;}
 static int button_status(void) {return held_button;}
+static bool podlink_host_connected(void) {return true;}
 static bool has_flag(int a,int b) {return (a&b)==b;}
 typedef struct {int button,action,context;bool wait_for_release,repeated;intptr_t data;unsigned long tick;} action_last_t;
 typedef struct {int button,timeout,context,action;} action_cur_t;
@@ -665,6 +668,6 @@ int main(void) {
     puts("input polling hook: native-only chord/remote PLAY isolation/native SELECT timing PASS");
 }
 '''
-(O/'hook.c').write_text(pre+'\n#include "apps-ipod/input/agents_remote.h"\n'+hookpre+body('apps-ipod/input/remote_menu.h')+body('apps-ipod/input/agents_shortcut.c')+body('apps-ipod/input/agents_remote.c')+function(action_source,'remote_context')+function(action_source,'remote_volume_action')+function(action_source,'remote_poll')+function(action_source,'agents_shortcut_get_button')+function(action_source,'action_poll_button')+hooktest)
+(O/'hook.c').write_text(pre+'\n#include "apps-ipod/input/agents_remote.h"\n'+hookpre+body('apps-ipod/input/remote_menu.h')+body('apps-ipod/input/agents_shortcut.c')+body('apps-ipod/input/agents_remote.c')+function(action_source,'remote_context')+function(action_source,'remote_volume_action')+function(action_source,'remote_poll')+function(action_source,'wheel_shortcut_button')+function(action_source,'agents_shortcut_get_button')+function(action_source,'action_poll_button')+hooktest)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R),'-I'+str(R/'apps-ipod'),str(O/'hook.c'),'-o',str(O/'hook')],check=True)
 subprocess.run([str(O/'hook')],check=True)

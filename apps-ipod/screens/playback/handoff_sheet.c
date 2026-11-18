@@ -24,7 +24,7 @@
 
 #define ART_SIZE 96
 #define MARGIN 16
-#define BUTTON_HEIGHT 32
+#define BUTTON_HEIGHT 36
 #define BUTTON_GAP 8
 #define TRANSITION (12 * HZ / 100)
 
@@ -34,7 +34,7 @@ struct sheet_ui {
     bool leave;
     int focus_from;
     long focus_tick;
-    int small_font, large_font;
+    int small_font, button_font, large_font;
     char subtitle[112];
 };
 
@@ -126,8 +126,10 @@ static void sheet_draw(struct dialog *d, struct screen *s, struct viewport *vp, 
     struct sheet_ui *ui = data;
     const struct handoff_sheet *view = ui->view;
     const int small = ui->small_font >= 0 ? ui->small_font : s->getuifont();
+    const int button = ui->button_font >= 0 ? ui->button_font : small;
     const int large = ui->large_font >= 0 ? ui->large_font : font_get_ui_bold();
     const int small_h = font_get(small)->height, large_h = font_get(large)->height;
+    const int button_h = font_get(button)->height;
     const unsigned secondary = LCD_RGBPACK(153, 153, 153);
     const int bottom = LCD_HEIGHT - MARGIN - BUTTON_HEIGHT;
     const int inner = LCD_WIDTH - 2 * MARGIN;
@@ -165,17 +167,17 @@ static void sheet_draw(struct dialog *d, struct screen *s, struct viewport *vp, 
     {
         int focus = focus_weight(ui);
         int width = (inner - BUTTON_GAP) / 2;
-        sheet_button(MARGIN, bottom, width, 256 - focus, 256 - opacity, small,
+        sheet_button(MARGIN, bottom, width, 256 - focus, 256 - opacity, button,
                      str(LANG_HANDOFF_ACCEPT));
         sheet_button(MARGIN + width + BUTTON_GAP, bottom, width, focus, 256 - opacity,
-                     small, str(LANG_HANDOFF_LEAVE));
+                     button, str(LANG_HANDOFF_LEAVE));
     }
     if (opacity > 0)
     {
-        unsigned bg = *FBADDR(LCD_WIDTH / 2, bottom + small_h / 2);
-        center_text(MARGIN, bottom, inner, small_h, small,
+        unsigned bg = *FBADDR(LCD_WIDTH / 2, bottom + button_h / 2);
+        center_text(MARGIN, bottom, inner, button_h, button,
                     color_blend(bg, LCD_WHITE, opacity), str(LANG_HANDOFF_PREPARING));
-        int bar_y = bottom + small_h + 7;
+        int bar_y = bottom + button_h + 7;
         int age = view->armed && TIME_AFTER(current_tick, view->start) ?
             MIN(current_tick - view->start, 3 * HZ) : 0;
         lcd_set_foreground(LCD_WHITE);
@@ -229,6 +231,7 @@ int handoff_sheet_run(struct handoff_sheet *view, int (*advance)(int))
     struct sheet_ui ui = { .view = view, .advance = advance,
                            .focus_tick = current_tick - TRANSITION,
                            .small_font = font_load_ex(FONT_DIR "/12-noto-sans.fnt", 0, 48),
+                           .button_font = font_load_ex(FONT_DIR "/18-noto-sans.fnt", 0, 48),
                            .large_font = font_load_ex(FONT_DIR "/26-noto-sans-medium.fnt", 0, 48) };
     struct mp3entry *track = audio_current_track();
     const char *artist = track && track->artist ? track->artist : "";
@@ -241,6 +244,7 @@ int handoff_sheet_run(struct handoff_sheet *view, int (*advance)(int))
     int result = dialog_run(&dialog, HZ / 10);
     skin_inhibit_flush(inhibited);
     if (ui.large_font >= 0) font_unload(ui.large_font);
+    if (ui.button_font >= 0) font_unload(ui.button_font);
     if (ui.small_font >= 0) font_unload(ui.small_font);
     action_wait_for_release();
     return result;

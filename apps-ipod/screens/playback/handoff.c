@@ -23,7 +23,9 @@
 
 #define TRACK_FIELD 97
 #define FADE_TICKS (3 * HZ)
-#define START_TICKS (5 * HZ)
+#define MATCH_TICKS (5 * HZ)
+#define START_TICKS (8 * HZ)
+#define ALIGN_LIMIT_MS 1000
 #define LOG_PATH "/.rockbox/handoff-log.txt"
 
 enum phase { IDLE, MATCH, QUESTION, PREPARE, ARMED, WAIT_END, COMPLETE, IGNORE };
@@ -225,7 +227,7 @@ void handoff_begin(void)
     snprintf(outgoing, sizeof outgoing, "hf\t1\tq\t%lu\t%lu\t%s\t%s\t%s",
              ident, duration, title, artist, album);
     mutex_unlock(&wire);
-    deadline = current_tick + START_TICKS;
+    deadline = current_tick + MATCH_TICKS;
     ui_epoch = link_epoch;
     phase = MATCH;
     sheet.target = target();
@@ -329,7 +331,7 @@ static bool schedule(char *args)
     error = (int32_t)field[3];
     startup = field[4];
     uncertainty = field[5];
-    return error >= -50 && error <= 50 &&
+    return error >= -ALIGN_LIMIT_MS && error <= ALIGN_LIMIT_MS &&
            TIME_AFTER(start, current_tick + 2) && TIME_BEFORE(start, deadline);
 }
 
@@ -452,7 +454,7 @@ static int advance(void)
         if (!verified && position_at_start && host_position_at_start >= 0)
         {
             error = host_position_at_start - (long)position_at_start;
-            if (error < -50 || error > 50)
+            if (error < -ALIGN_LIMIT_MS || error > ALIGN_LIMIT_MS)
             {
                 fail("alignment", LANG_HANDOFF_HOST_FAILED);
                 return 1;

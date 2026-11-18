@@ -1110,7 +1110,7 @@ are tab-delimited, with an unsigned transaction ID scoped to the cable session.
 | Host → iPod | `ID go T_tick offset_ms rtt_ms error_ms startup_ms uncertainty_ms` | Propose the synchronized fade |
 | iPod → host | `g ID` | Acknowledge the proposed fade |
 | Host → iPod | `ID at position_ms` | Host playback position projected to T |
-| iPod → host | `v ID` | Confirm the PCM position is within 50 ms before the host becomes audible |
+| iPod → host | `v ID` | Confirm the PCM position is within 1,000 ms before the host becomes audible |
 | Host → iPod | `ID end`, `ID fail reason` | Host ramp complete, or abort |
 | iPod → host | `d ID` | Local playback stopped and remote playback selected |
 
@@ -1118,9 +1118,13 @@ Clock synchronization uses the minimum RTT of five exchanges. Device ticks
 are 10 ms. Offset is device time minus host time, encoded as unsigned 32-bit
 milliseconds and interpreted as signed by the iPod. The `p` reply contains
 five fields after the transaction ID, and echoes the host time before the
-sequence number. The fade spans three
-seconds. A cable loss invalidates the transaction and both endpoints restore
-their volume. The iPod appends timing, phase, and reason to
+sequence number. The host has eight seconds to prepare. It targets 50 ms and
+may seek twice more while muted. Residual errors over 50 ms through 300 ms are
+logged as `aligned=coarse`, and errors through 1,000 ms still permit the fade.
+The fade spans three seconds. A cable loss invalidates the transaction and
+both endpoints restore their volume. Rufin retains the original queue while
+preparing so an abort can restore the previous selection and playback state.
+The iPod appends timing, phase, and reason to
 `/.rockbox/handoff-log.txt`. HerdRemote logs match, sync, prepare, seek, go,
 fade, and done at INFO. Samples contain timing and position, with no track
 metadata or backend error bodies.

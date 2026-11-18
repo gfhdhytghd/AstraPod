@@ -282,6 +282,12 @@ int main(void)
 
     dock(true,ACTIVITY_WPS,AUDIO_STATUS_PLAY);
     open_wps();arm();current_tick=fade;sample=22000;host("at\t22151");handoff_step();
+    assert(phase==ARMED&&verified&&playing()&&fade);
+    current_tick=fade+300;host("end");
+    assert(handoff_step()==2&&active&&strstr(log_line,"position_error_ms=151"));
+
+    dock(true,ACTIVITY_WPS,AUDIO_STATUS_PLAY);
+    open_wps();arm();current_tick=fade;sample=22000;host("at\t23001");handoff_step();
     assert(phase==WAIT_END&&playing()&&!fade&&strstr(log_line,"alignment"));
 
     for (int i=0;i<50;i++)
@@ -290,7 +296,7 @@ int main(void)
         open_wps();cancel_on_question=1;offer();
         assert(phase==IDLE&&dialog_depth==0&&playing()&&!active);
     }
-    assert(prompts==55&&frame==110&&redraws>=55);
+    assert(prompts==56&&frame==112&&redraws>=56);
     puts("FU75: WPS and other-screen consent, old host, pause, EOF/skip, no match, fade, unplug and 50 dialog cycles");
 }
 '''

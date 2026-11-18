@@ -151,6 +151,11 @@ bool cider_wps_action(int action)
         cider_control(action == ACTION_WPS_SKIPNEXT ? "next" : "previous", 0);
         return true;
     }
+    if (action == ACTION_WPS_VOLUP || action == ACTION_WPS_VOLDOWN)
+    {
+        cider_control("volume-step", action == ACTION_WPS_VOLUP ? 1 : -1);
+        return true;
+    }
     if (cider_available())
         switch (action)
         {
@@ -170,20 +175,12 @@ bool cider_wps_action(int action)
                     cider_control("ab-mark",
                                   cider_position(&source, current_tick, HZ));
                 break;
-            case ACTION_WPS_VOLUP:
-                cider_control("volume-step", 1);
-                break;
-            case ACTION_WPS_VOLDOWN:
-                cider_control("volume-step", -1);
-                break;
         }
     switch (action)
     {
         case ACTION_WPS_PLAY:
         case ACTION_WPS_SKIPNEXT:
         case ACTION_WPS_SKIPPREV:
-        case ACTION_WPS_VOLUP:
-        case ACTION_WPS_VOLDOWN:
             return true;
         case ACTION_WPS_SEEKFWD:
         case ACTION_WPS_SEEKBACK:

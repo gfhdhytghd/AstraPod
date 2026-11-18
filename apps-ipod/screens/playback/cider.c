@@ -1123,7 +1123,8 @@ const char *cider_remote_name(void)
 static uint32_t queue_control(const char *command, int value)
 {
     if (!state.generation || ncommands >= ARRAYLEN(commands) ||
-        (!state.available && strcmp(command, "next") && strcmp(command, "previous"))) return 0;
+        (!state.available && strcmp(command, "next") && strcmp(command, "previous") &&
+         strcmp(command, "volume-step") && strcmp(command, "volume"))) return 0;
     snprintf(commands[ncommands++], sizeof commands[0],
              "cc\t%lu\t%lu\t%s\t%d", (unsigned long)state.generation,
              (unsigned long)++next_request, command, value);
@@ -1139,9 +1140,17 @@ void cider_remote_home(void)
 void cider_control(const char *command, int value)
 {
     mutex_lock(&cider_mutex);
-    if (!strcmp(command, "volume-step"))
-        state.volume = MAX(0, MIN(100, state.volume + value));
     uint32_t req = queue_control(command, value);
+    if (req && !strcmp(command, "volume-step"))
+    {
+        state.volume = MAX(0, MIN(100, state.volume + value));
+        state.muted = state.volume == 0;
+    }
+    else if (req && !strcmp(command, "volume") && value >= 0 && value <= 100)
+    {
+        state.volume = value;
+        state.muted = value == 0;
+    }
     if (req && (!strcmp(command, "next") || !strcmp(command, "previous") ||
                 !strcmp(command, "seek")))
     {

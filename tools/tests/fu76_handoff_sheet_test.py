@@ -104,11 +104,25 @@ static bool inhibited, showing_art;
 static int hold, last_answer, phase_changes;
 static unsigned char pixels[LCD_HEIGHT][LCD_WIDTH];
 #define FBADDR(x,y) (&pixels[y][x])
-static struct font fonts[] = {{0},{18},{22}};
+static struct font fonts[] = {{0},{12},{19},{27}};
+static unsigned live_fonts;
 static struct font *font_get(int i) { return &fonts[i]; }
-static int font_get_ui_bold(void) { return 2; }
-static int font_load_ex(const char *path, int size, int glyphs) { (void)path;(void)size;(void)glyphs;return -1; }
-static void font_unload(int id) { (void)id; }
+static int font_get_ui_bold(void) { return 3; }
+static int font_load_ex(const char *path, int size, int glyphs)
+{
+    assert(size == 0 && glyphs == 48);
+    int id = !strcmp(path, FONT_DIR "/12-noto-sans.fnt") ? 1 :
+             !strcmp(path, FONT_DIR "/18-noto-sans.fnt") ? 2 :
+             !strcmp(path, FONT_DIR "/26-noto-sans-medium.fnt") ? 3 : 0;
+    assert(id && !(live_fonts & (1u << id)));
+    live_fonts |= 1u << id;
+    return id;
+}
+static void font_unload(int id)
+{
+    assert(live_fonts & (1u << id));
+    live_fonts &= ~(1u << id);
+}
 static int ui_font(void) { return 1; }
 static void lcd_setfont(int i) { font_id = i; }
 static void lcd_set_drawmode(int mode) { glyph_mode = mode; }
@@ -128,9 +142,15 @@ static void lcd_putsxy(int x, int y, const unsigned char *text)
     lcd_getstringsize(text, &w, &h);
     assert(glyph_mode == DRMODE_FG && active->width == LCD_WIDTH);
     if (!strcmp((const char *)text, strings[LANG_HANDOFF_ACCEPT]))
-        assert(x == 16 + (140-w)/2 && y == 192 + (32-h)/2);
+        assert(font_id == 2 && x == 16 + (140-w)/2 && y == 188 + (36-h)/2);
     if (!strcmp((const char *)text, strings[LANG_HANDOFF_LEAVE]))
-        assert(x == 164 + (140-w)/2 && y == 192 + (32-h)/2);
+        assert(font_id == 2 && x == 164 + (140-w)/2 && y == 188 + (36-h)/2);
+    if (font_id == 2) assert(y >= 188 && y + h <= 216);
+    if (!strcmp((const char *)text, strings[LANG_HANDOFF_PREPARING]))
+        assert(font_id == 2 && y == 188);
+    if (!strcmp((const char *)text, strings[LANG_HANDOFF_FAILED]))
+        assert(font_id == 3 && y == 184);
+    assert(x >= 0 && x + w <= LCD_WIDTH && y >= 0 && y + h <= LCD_HEIGHT);
 }
 static void lcd_fillrect(int x, int y, int w, int h)
 {
@@ -196,16 +216,16 @@ static void flush(void)
 {
     assert(active->x == 0 && active->y == 0 && active->width == LCD_WIDTH &&
            active->height == LCD_HEIGHT);
-    if (shown == 0 && scenario != 3)
+    if (shown == 0 && scenario < 3)
     {
-        assert(pixels[192][16] == 255 && pixels[223][155] == 255);
-        assert(pixels[192][164] == (showing_art ? 115 : 85));
-        assert(pixels[215][170] < pixels[192][164]);
+        assert(pixels[188][16] == 255 && pixels[223][155] == 255);
+        assert(pixels[188][164] == (showing_art ? 115 : 85));
+        assert(pixels[215][170] < pixels[188][164]);
     }
     if (shown == 3 && scenario == 1)
     {
-        assert(pixels[192][164] == 255 && pixels[223][303] == 255);
-        assert(pixels[215][20] < pixels[192][16]);
+        assert(pixels[188][164] == 255 && pixels[223][303] == 255);
+        assert(pixels[215][20] < pixels[188][16]);
     }
     shown++;
 }
@@ -240,7 +260,7 @@ static int get_action(int context, int ticks)
         if (action_index == 2) {raw_button=BUTTON_LEFT; return ACTION_STD_CANCEL;}
         return ACTION_STD_OK;
     }
-    return scenario == 3 ? ACTION_NONE : ACTION_STD_MENU;
+    return scenario >= 3 ? ACTION_NONE : ACTION_STD_MENU;
 }
 static int get_custom_action(int c,int t,const struct button_mapping *(*map)(int))
 { (void)map; return get_action(c,t); }
@@ -250,28 +270,30 @@ static int advance_test(int answer)
 {
     last_answer = answer;
     phase_changes++;
-    return scenario == 3 ? DIALOG_ABORT : answer;
+    return scenario >= 3 ? DIALOG_ABORT : answer;
 }
 int main(void)
 {
     viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
-    for (int i = 0; i < 53; ++i)
+    for (int i = 0; i < 54; ++i)
     {
         struct handoff_sheet view = { .title = "Synthetic music", .target = "Rufin" };
         scenario = i < 50 ? 0 : i - 49;
         showing_art = (i % 2 == 0);
         if (scenario == 3) view.reason = LANG_HANDOFF_NOT_FOUND;
+        if (scenario == 4) { view.preparing = true; view.accepted = current_tick - HZ; }
         action_index = phase_changes = shown = 0;
         inhibited = (i % 2 == 0);
         int result = handoff_sheet_run(&view, advance_test);
-        assert(result == (scenario == 3 ? DIALOG_ABORT :
+        assert(result == (scenario >= 3 ? DIALOG_ABORT :
                          scenario == 2 ? DIALOG_ACCEPT : DIALOG_CANCEL));
         assert(shown > 0 && phase_changes > 0);
         assert(active == &base && theme_stack_top[0] == 1 && !hold && inhibited == (i%2==0));
+        assert(!live_fonts);
     }
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     assert(theme_stack_top[0] == 0);
-    puts("FU76: 53 real sheet/dialog/theme cycles. Square corners, centered CJK/Latin, transparent text, wheel/LEFT/RIGHT and MENU.");
+    puts("FU77: 54 sheet cycles with balanced font handles; both foci, preparing and failure, transparent square buttons.");
 }
 '''
 c = OUT / 'sheet.c'

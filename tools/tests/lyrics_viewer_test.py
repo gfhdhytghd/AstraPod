@@ -346,11 +346,14 @@ static const int multimedia_keys[] = {
 static int select_scenario(void)
 {
     int focus=backward_seek?0:1;
-    if (calls==1) return (remote_key!=backward_seek) ? ACTION_WPS_VOLDOWN : ACTION_WPS_VOLUP;
+    if (calls==1) {
+        if (remote_source) remote_key=false; /* Wheel still scrolls remote lyrics. */
+        return (remote_key!=backward_seek) ? ACTION_WPS_VOLDOWN : ACTION_WPS_VOLUP;
+    }
     if (calls==2) {
         assert(lv.mode.manual && lv.mode.focus==focus);
         assert(lyrics_motion_at(&lv.scroll,current_tick)!=focus*256);
-        select_button=remote_key?BUTTON_RC_SELECT:BUTTON_SELECT;
+        select_button=(remote_key || remote_source)?BUTTON_RC_SELECT:BUTTON_SELECT;
         return ACTION_UNKNOWN;
     }
     long expected=backward_seek?0:(remote_source ? 2000 : 4000)-global_settings.lyric_lead;
@@ -436,9 +439,11 @@ static int get_action(int c,int timeout){
   assert(lyrics_loaded()&&remote_doc.done&&!lyrics_timed());
   switch(++remote_actions){
    case 1:return ACTION_WPS_VOLDOWN;
-   case 2:assert(lv.mode.manual&&lv.mode.focus==1);return ACTION_WPS_PLAY;
-   case 3:return ACTION_WPS_SKIPNEXT;
-   case 4:return ACTION_WPS_SKIPPREV;
+   case 2:assert(!lv.mode.manual&&multimedia_last==ACTION_WPS_VOLDOWN);
+     remote_key=false;return ACTION_WPS_VOLUP;
+   case 3:assert(lv.mode.manual&&lv.mode.focus==1);return ACTION_WPS_PLAY;
+   case 4:return ACTION_WPS_SKIPNEXT;
+   case 5:return ACTION_WPS_SKIPPREV;
    default:return ACTION_WPS_LYRICS;
   }
  }
@@ -606,7 +611,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  assert(strstr(report,"SELECT to first ms: 0\n")&&strstr(report,"animation fps: "));
  assert(strstr(report,"restore: ")&&strstr(report,"text/glyph: ")&&strstr(report,"blend: ")&&strstr(report,"LCD: ")&&strstr(report,"wait: "));
  assert(strstr(report,"animation boosted/frames: ")&&strstr(report,"LCD submits: ")&&strstr(report,"mask rasters: "));
- assert(strstr(report,"entry: ")&&strstr(report,"exit: ")&&strstr(report,"track change: ")&&strstr(report,"CPU MHz"));
+ assert(strstr(report,"entry: ")&&!strstr(report,"exit: ")&&strstr(report,"track change: ")&&strstr(report,"CPU MHz"));
  timed_fixture=true;remote_source=true;remote_key=false;
  const char ca[]="CA\t9\t1\tOK";
  assert(cider_state_apply(&remote_clock,ca,sizeof ca-1,current_tick));

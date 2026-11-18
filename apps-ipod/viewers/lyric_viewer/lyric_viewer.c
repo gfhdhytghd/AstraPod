@@ -79,7 +79,7 @@ struct lv_mask {
     int key;
 };
 enum lv_phase { LV_RESTORE, LV_GLYPHS, LV_BLEND, LV_LCD, LV_WAIT, LV_PHASE_COUNT };
-enum lv_type { LV_STEADY, LV_ENTRY, LV_EXIT, LV_LINE, LV_MANUAL, LV_TRACK, LV_TYPE_COUNT };
+enum lv_type { LV_STEADY, LV_ENTRY, LV_LINE, LV_MANUAL, LV_TRACK, LV_TYPE_COUNT };
 static const uint32_t perf_bounds[] = {
     0, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 8000,
     10000, 12000, 16000, 20000, 25000, 30000, 33000, 34000, 40000, 50000,
@@ -355,7 +355,7 @@ static void __attribute__((noinline)) lv_perf_save(void)
              perf.boosted_animations, perf.animated_frames, perf.lcd_updates, perf.raster_rows);
     fdprintf(fd, "samples avg/p95/max us\n");
     static const char *const phases[] = { "restore", "text/glyph", "blend", "LCD", "wait" };
-    static const char *const types[] = { "steady", "entry", "exit", "line change", "manual scroll", "track change" };
+    static const char *const types[] = { "steady", "entry", "line change", "manual scroll", "track change" };
     for (int i = 0; i < LV_PHASE_COUNT; i++) lv_stat_save(fd, phases[i], &perf.phase[i]);
     for (int i = 0; i < LV_TYPE_COUNT; i++) lv_stat_save(fd, types[i], &perf.type[i]);
     fdprintf(fd, LYRICS_PERF_END "\n");
@@ -853,43 +853,26 @@ static LV_PIXELS_ARM void lv_present(int opacity, int shift, bool underlay)
     lv_flush(0, 0, LCD_WIDTH, LCD_HEIGHT);
 }
 
-static void lv_transition(bool opening)
+static void lv_enter(void)
 {
     uint32_t start = current_tick;
-    int duration = LV_TICKS(opening ? 220 : 180);
-    bool redraw = opening;
+    int duration = LV_TICKS(220);
+    bool redraw = true;
     lv.last_type = LV_STEADY;
     for (;;)
     {
         uint32_t frame_at = current_tick, started = lv_clock();
         int age = (uint32_t)current_tick - start;
         /* The loading frame is already on the panel. */
-        int sample = opening && lv.snapshot ? MAX(1, age) : age;
-        int p = lyrics_ease(MIN(256, sample * 256 / duration));
-        int alpha = opening ? p : 256 - p;
-        bool visible = alpha > 0;
-        if (!lv.snapshot)
+        int alpha = lyrics_ease(MIN(256, MAX(1, age) * 256 / duration));
+        if (alpha && (!lv.layer || redraw))
         {
-            /* Without arena space, fade through the fallback colour. */
-            int half = MIN(512, age * 512 / duration);
-            bool page = opening ? half >= 256 : half < 256;
-            int a = half < 256 ? 256 - lyrics_ease(half) : lyrics_ease(half - 256);
-            if (page) lv_draw(true, LV_DRAW_ONLY); else wps_lyrics_backdrop();
-            lv_present(a, page ? 24 * (256 - a) / 256 : 0, false);
-            visible = age > 0;
+            lv_draw(true, LV_DRAW_ONLY);
+            if (lv.layer) memcpy(lv.layer, lv_frame(), LV_FRAME);
+            redraw = false;
         }
-        else
-        {
-            if (alpha && (!lv.layer || redraw || age == 0 ||
-                (!opening && lyrics_motion_at(&lv.scroll, frame_at) != lv.old_position)))
-            {
-                lv_draw(true, LV_DRAW_ONLY);
-                if (lv.layer) memcpy(lv.layer, lv_frame(), LV_FRAME);
-                redraw = false;
-            }
-            lv_present(alpha, 24 * (256 - alpha) / 256, true);
-        }
-        lv_record(started, opening ? LV_ENTRY : LV_EXIT, visible);
+        lv_present(alpha, 24 * (256 - alpha) / 256, true);
+        lv_record(started, LV_ENTRY, alpha > 0);
         if (age >= duration) break;
         lv_sleep_frame(frame_at);
     }
@@ -1317,7 +1300,7 @@ int lyric_viewer(void)
     lv.paused = remote_wps ? remote_wps->paused : (status & AUDIO_STATUS_PAUSE) != 0;
     lv_reload(first, remote_wps != NULL);
     perf.entry_prep_us = (frame_at - entry_at) + (lv_clock() - setup_resume_at);
-    if (lv.snapshot) lv_transition(true);
+    if (lv.snapshot) lv_enter();
     else
     {
         uint32_t started = lv_clock();
@@ -1438,11 +1421,14 @@ int lyric_viewer(void)
                 goto done;
 #endif
             case ACTION_WPS_VOLUP: case ACTION_WPS_VOLDOWN:
+            {
+                int raw_button = 0;
+                get_action_statuscode(&raw_button);
+                if ((raw_button & BUTTON_REMOTE) && cider_wps_action(action))
+                    break;
                 if (lyrics_loaded())
                 {
                     int direction = action == ACTION_WPS_VOLUP ? 1 : -1;
-                    int raw_button = 0;
-                    get_action_statuscode(&raw_button);
                     if (raw_button & BUTTON_REMOTE)
                     { direction = -direction; lv.mode.direction = 0; }
                     lv.seek_pending = false;
@@ -1450,6 +1436,7 @@ int lyric_viewer(void)
                     lv_focus();
                 }
                 break;
+            }
             case ACTION_WPS_PLAY: case ACTION_WPS_SKIPNEXT: case ACTION_WPS_SKIPPREV:
             case ACTION_WPS_SEEKFWD: case ACTION_WPS_SEEKBACK: lv_transport(action); break;
 #ifdef HAVE_MULTIMEDIA_KEYS
@@ -1466,12 +1453,8 @@ int lyric_viewer(void)
         }
     }
 done:
-    lv_boost(true);
-    /* Render the current WPS without flushing, including a new title after
-     * skip/seek. Returning never reveals an obsolete entry-time snapshot. */
-    if (lv.snapshot)
-    { wps_lyrics_backdrop(); memcpy(lv.snapshot, lv_frame(), LV_FRAME); }
-    lv_transition(false);
+    /* Keep the panel on the last lyrics frame until the caller has restored
+     * its theme and rendered the complete destination, including the SBS. */
     lv_boost(false);
     lv_perf_save();
     if (!lv.remote) lyrics_close();

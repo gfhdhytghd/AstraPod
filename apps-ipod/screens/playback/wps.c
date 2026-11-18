@@ -340,15 +340,6 @@ void wps_lyrics_seek(int action, void (*draw)(void))
     seek_loop(action, false, draw);
 }
 
-void wps_lyrics_backdrop(void)
-{
-    push_current_activity(ACTIVITY_WPS);
-    struct wps_state *state = get_wps_state();
-    if (!cider_active()) state->id3 = audio_current_track();
-    skin_update(WPS, SCREEN_MAIN, SKIN_REFRESH_ALL);
-    pop_current_activity();
-}
-
 static void gwps_caption_backlight(struct wps_state *state)
 {
     if (state->id3)
@@ -655,7 +646,7 @@ static void gwps_enter_wps(bool theme_enabled)
         skin_backdrop_show(gwps->data->backdrop_id);
         display->clear_display();
         skin_update(WPS, i, SKIN_REFRESH_ALL);
-
+        skin_mark_dirty(i);
     }
     /* force statusbar/skin update since we just cleared the whole screen */
     send_event(GUI_EVENT_ACTIONUPDATE, (void*)1);

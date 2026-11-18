@@ -318,7 +318,26 @@ static const unsigned char boot_weight[BOOT_STAGE_COUNT] =
     [BOOT_SKINS]    = 2,
 };
 
-static const char *boot_caption;  /* NULL until a stage sets one */
+enum { BOOT_KEEP_CAPTION = -1 };
+static int boot_caption = BOOT_KEEP_CAPTION;
+static int boot_caption_font = FONT_SYSFIXED;
+
+/* The bundled caption font covers the Han glyphs in the boot messages. */
+static bool boot_font_covers(int id, const char *text) INIT_ATTR;
+static bool boot_font_covers(int id, const char *text)
+{
+    const struct font *font = font_get(id);
+    const unsigned char *next = (const unsigned char *)text;
+    while (*next)
+    {
+        ucschar_t codepoint;
+        next = utf8decode(next, &codepoint);
+        if (codepoint < font->firstchar ||
+            codepoint - font->firstchar >= (unsigned int)font->size)
+            return false;
+    }
+    return true;
+}
 
 /* A database commit is worth its own step count, so one commit step moves the
  * bar exactly one chunk. */
@@ -368,10 +387,7 @@ static void boot_viewport(struct viewport *vp)
     vp->buffer = NULL;                  /* the default framebuffer */
     vp->flags = VP_DEFAULT_FLAGS;
     viewport_set_fullscreen(vp, SCREEN_MAIN);
-    /* The built-in fixed-pitch font, not the theme's: it is compiled in, so it
-     * needs neither the disk nor settings_apply() and is there from the first
-     * paint. It is also small, which is what this caption wants -- it labels
-     * the bar rather than competing with it. */
+    /* Fixed-size captions and the first paints work before any disk font. */
     vp->font = FONT_SYSFIXED;
     vp->drawmode = DRMODE_FG;
     vp->fg_pattern = boot_palette()->fg;
@@ -392,11 +408,20 @@ static void boot_paint(int step, int total)
     boot_viewport(&vp);
     last_vp = screen->set_viewport(&vp);
 
-    if (boot_caption)
+    if (boot_caption != BOOT_KEEP_CAPTION)
     {
+        const char *text = str(boot_caption);
+        if (!boot_font_covers(FONT_SYSFIXED, text))
+        {
+            if (boot_caption_font != FONT_SYSFIXED &&
+                boot_font_covers(boot_caption_font, text))
+                vp.font = boot_caption_font;
+            else
+                text = lang_id_to_english(boot_caption);
+        }
         int tw, th;
-        screen->getstringsize(boot_caption, &tw, &th);
-        screen->putsxy((vp.width - tw) / 2, BOOT_CAPTION_Y, boot_caption);
+        screen->getstringsize(text, &tw, &th);
+        screen->putsxy((vp.width - tw) / 2, BOOT_CAPTION_Y, text);
     }
 
     vp.fg_pattern = pal->accent;
@@ -433,11 +458,11 @@ static void boot_paint_bar(int step, int total)
 }
 
 static void boot_progress(enum boot_stage stage, int num, int den,
-                          const char *caption) INIT_ATTR;
+                          int caption) INIT_ATTR;
 static void boot_progress(enum boot_stage stage, int num, int den,
-                          const char *caption)
+                          int caption)
 {
-    if (caption)
+    if (caption != BOOT_KEEP_CAPTION)
         boot_caption = caption;
 
     boot_paint(boot_step(stage, num, den),
@@ -467,9 +492,9 @@ static void init_library_files(void)
         library_files_init(NULL);
         return;
     }
-    boot_progress(BOOT_LIBRARY, 0, 0, str(LANG_LIBRARY_UPGRADE));
+    boot_progress(BOOT_LIBRARY, 0, 0, LANG_LIBRARY_UPGRADE);
     library_files_init(library_progress);
-    boot_caption = NULL;
+    boot_caption = BOOT_KEEP_CAPTION;
 }
 
 /* dircache_wait() blocks, which would leave the bar dead for the length of a
@@ -522,7 +547,7 @@ static int INIT_ATTR init_dircache(bool preinit)
         {
             if (result > 0)
             {
-                boot_progress(BOOT_DIRCACHE, 0, 0, str(LANG_SCANNING_DISK));
+                boot_progress(BOOT_DIRCACHE, 0, 0, LANG_SCANNING_DISK);
                 dircache_boot_wait();
                 backlight_on();
             }
@@ -545,7 +570,7 @@ static void init_tagcache(void)
 {
     bool committed = false;
 
-    boot_progress(BOOT_TAGCACHE, 0, 0, str(LANG_WAIT));
+    boot_progress(BOOT_TAGCACHE, 0, 0, LANG_WAIT);
 
     tagcache_init();
     file_index_init();
@@ -567,7 +592,7 @@ static void init_tagcache(void)
                 boot_progress_bar(BOOT_TAGCACHE, ret, max);
             else
                 boot_progress(BOOT_TAGCACHE, ret, max,
-                              str(LANG_TAGCACHE_INIT));
+                              LANG_TAGCACHE_INIT);
             committed = true;
         }
         sleep(HZ/4);
@@ -651,7 +676,7 @@ static void init(void)
      * but because language_strings[] is not filled in until lang_init() below.
      * The first caption goes up at the stage after that. */
     CHART(">show_boot_screen");
-    boot_progress(BOOT_STORAGE, 0, 0, NULL);
+    boot_progress(BOOT_STORAGE, 0, 0, BOOT_KEEP_CAPTION);
     CHART("<show_boot_screen");
     lang_init(core_language_builtin, language_strings,
               LANG_LAST_INDEX_IN_ARRAY);
@@ -714,7 +739,7 @@ static void init(void)
 
     if (!mounted)
     {
-        boot_progress(BOOT_MOUNT, 0, 0, NULL);
+        boot_progress(BOOT_MOUNT, 0, 0, BOOT_KEEP_CAPTION);
         CHART(">disk_mount_all");
         rc = disk_mount_all();
         CHART("<disk_mount_all");
@@ -772,7 +797,7 @@ static void init(void)
     pcm_init();
     dsp_init();
 
-    boot_progress(BOOT_SETTINGS, 0, 0, NULL);
+    boot_progress(BOOT_SETTINGS, 0, 0, BOOT_KEEP_CAPTION);
     CHART(">settings_load");
     settings_load();
     CHART("<settings_load");
@@ -788,11 +813,18 @@ static void init(void)
     init_dircache(true);
     CHART("<init_dircache(true)");
 
-    boot_progress(BOOT_THEME, 0, 0, NULL);
+    boot_progress(BOOT_THEME, 0, 0, BOOT_KEEP_CAPTION);
     CHART(">settings_apply(true)");
     settings_apply(true);
     CHART("<settings_apply(true)");
-    boot_progress(BOOT_DIRCACHE, 0, 0, NULL);
+    /* Language is loaded and audio has not claimed the remaining core pool.
+     * This uses the same bundled 12 px file as the HarmonyOS overlay. */
+    if (!boot_font_covers(FONT_SYSFIXED, str(LANG_SCANNING_DISK)) ||
+        !boot_font_covers(FONT_SYSFIXED, str(LANG_TAGCACHE_INIT)) ||
+        !boot_font_covers(FONT_SYSFIXED, str(LANG_WAIT)) ||
+        !boot_font_covers(FONT_SYSFIXED, str(LANG_APPLYING_THEME)))
+        boot_caption_font = font_load_ex(FONT_DIR "/12-noto-sans.fnt", 0, 48);
+    boot_progress(BOOT_DIRCACHE, 0, 0, BOOT_KEEP_CAPTION);
     CHART(">init_dircache(false)");
     init_dircache(false);
     CHART("<init_dircache(false)");
@@ -822,7 +854,7 @@ static void init(void)
         usb_audio_alloc_buffers();
 #endif
 
-    boot_progress(BOOT_AUDIO, 0, 0, str(LANG_WAIT));
+    boot_progress(BOOT_AUDIO, 0, 0, LANG_WAIT);
     CHART(">audio_init");
     audio_init();
     CHART("<audio_init");
@@ -846,7 +878,12 @@ static void init(void)
      * their backdrops, bitmaps and fonts. It gets its own caption because the
      * bar sits nearly full for the whole of it, and LANG_WAIT left over from
      * audio_init() does not explain the pause. */
-    boot_progress(BOOT_SKINS, 0, 0, str(LANG_APPLYING_THEME));
+    boot_progress(BOOT_SKINS, 0, 0, LANG_APPLYING_THEME);
+    if (boot_caption_font != FONT_SYSFIXED)
+    {
+        font_unload(boot_caption_font);
+        boot_caption_font = FONT_SYSFIXED;
+    }
     CHART("<settings_apply_skins");
     settings_apply_skins();
     CHART(">settings_apply_skins");

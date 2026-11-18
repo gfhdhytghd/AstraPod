@@ -35,6 +35,7 @@ int cider_mode_get(int mode);
 void cider_mode_set(int mode, int value);
 void cider_prefetch_art(const char *key, const char *tier);
 void cider_warm_art(const char *const *keys, unsigned int count, const char *tier);
+bool cider_palette_supported(void);
 void cider_request_art(const char *key, const char *tier);
 void cider_cancel_art(void);
 void cider_pin_art(const char *key);

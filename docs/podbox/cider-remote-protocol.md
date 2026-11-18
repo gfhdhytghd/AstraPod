@@ -1039,3 +1039,25 @@ Spectrum frames use the idle link and have no application credit or retry.
 The host drops stale frames and yields to queued control, art and localstore
 records. Firmware keeps one snapshot and starts its normal bar and peak
 release when the snapshot reaches 120 ms of age.
+
+### WPS palette thumbnail
+
+HerdRemote sends `CF\tGEN\tpalette1` when the native `cover-thumb` helper
+is executable. Older firmware ignores this record. Firmware with no such
+record retains the legacy WPS palette path. The device's `ci` capability
+list is unchanged for old hosts.
+
+The WPS requests a foreground `cr` for tier `P` with the current artwork key.
+The host returns a 128 × 128 row-major little-endian RGB565 AAT8 in ordinary
+`CAR1` chunks. The device keeps it in the existing transient art cache.
+It never offers or writes `P` to the on-device store. The WPS waits for the
+palette of the current key and can display or filter `L` while it waits.
+
+The helper uses the iPod 6G image decoder, its dither and the cache's cover
+crop. HerdRemote can request up to 512 px of input for Rufin and Jellyfin
+without changing the display artwork size. Cider uses its existing capped
+CDN input. A service can supply a different crop or encoding from an
+embedded cover. Palette parity requires equivalent source pixels.
+
+Build the host helper with `python3 tools/herdremote/build-cover-thumb.py OUTPUT_DIR`.
+Deploy the resulting executable `cover-thumb` alongside `hrcider.py`.

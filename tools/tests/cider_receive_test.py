@@ -20,6 +20,7 @@ static unsigned int play_request,loading_request;static struct cider_modes modes
 #include "podlink.h"
 #include "screens/playback/cider_store.h"
 static struct cider_store_stats diag;
+static bool host_palette;
 static bool host_diag=true,host_store,host_live,live_reply;
 static long live_at;static char live_nonce[17];
 static unsigned art_ack_request,art_ack_bytes;
@@ -52,14 +53,27 @@ static void store_text(const unsigned char*d,unsigned int n){(void)d;(void)n;sto
 post=r'''
 static unsigned char art[32780],packet[12288];
 static void put32(unsigned char*p,unsigned int v){for(int i=0;i<4;i++)p[i]=v>>(8*i);}
+static struct podlink_message send_art(const char *tier, unsigned req, unsigned layout)
+{
+struct podlink_message message;
+memset(&transfer,0,sizeof transfer);
+put32(art,8u<<16|0x5441);put32(art+4,128u<<16|128);put32(art+8,layout);
+transfer.active=true;transfer.generation=7;transfer.request=req;strcpy(transfer.tier,tier);memset(transfer.key,'a',64);transfer.key[64]=0;granted=CIDER_CREDIT;grant=0;
+for(unsigned int offset=0;offset<sizeof art;){unsigned int count=sizeof art-offset;if(count>12260)count=12260;memcpy(packet,"CAR1",4);put32(packet+4,7);put32(packet+8,req);put32(packet+12,offset);put32(packet+16,sizeof art);put32(packet+20,podlink_crc32(art,sizeof art));put32(packet+24,podlink_crc32(art+offset,count));memcpy(packet+28,art+offset,count);message=(struct podlink_message){.type=PODLINK_BINARY,.data=packet,.length=count+28};assert(receive(&message));assert(grant+granted==CIDER_CREDIT);offset+=count;}
+return message;
+}
 int main(void){
 memcpy(packet,"CAR1",4);put32(packet+4,99);struct podlink_message message={.type=PODLINK_BINARY,.data=packet,.length=29};assert(!receive(&message));
 const char*ca="CA\t7\t1\t";message=(struct podlink_message){.type=PODLINK_TEXT,.data=(const unsigned char*)ca,.length=strlen(ca)};assert(receive(&message)&&state.generation==7&&!host_diag);host_diag=true;
-put32(art,8u<<16|0x5441);put32(art+4,128u<<16|128);put32(art+8,1);
-transfer.active=true;transfer.generation=7;transfer.request=1;strcpy(transfer.tier,"M");memset(transfer.key,'a',64);transfer.key[64]=0;granted=CIDER_CREDIT;
-for(unsigned int offset=0;offset<sizeof art;){unsigned int count=sizeof art-offset;if(count>12260)count=12260;memcpy(packet,"CAR1",4);put32(packet+4,7);put32(packet+8,1);put32(packet+12,offset);put32(packet+16,sizeof art);put32(packet+20,podlink_crc32(art,sizeof art));put32(packet+24,podlink_crc32(art+offset,count));memcpy(packet+28,art+offset,count);message=(struct podlink_message){.type=PODLINK_BINARY,.data=packet,.length=count+28};assert(receive(&message));assert(grant+granted==CIDER_CREDIT);offset+=count;}
+message=send_art("M",1,1);
 assert(!transfer.active&&cider_cache_find(&cache,transfer.key,"M")>=0&&pin_calls>0);
 assert(art_ack_request==1&&art_ack_bytes==sizeof art&&cache.slot[0].dirty);
+long last_dirty=dirty_at;current_tick=20;
+message=send_art("P",2,0);
+int palette_slot=cider_cache_find(&cache,transfer.key,"P");
+assert(!transfer.active&&palette_slot>=0&&!cache.slot[palette_slot].dirty);
+assert(art_ack_request==2&&art_ack_bytes==sizeof art&&dirty_at==last_dirty);
+assert(!cider_art_valid(art,sizeof art,"M"));
 unsigned int prior=granted;put32(packet+4,8);assert(receive(&message)&&granted==prior);
 state.generation=0;put32(packet+4,7);assert(receive(&message));put32(packet+4,99);assert(!receive(&message));
 message=(struct podlink_message){.type=PODLINK_TEXT,.data=(const unsigned char*)"echo",.length=4};assert(!receive(&message));

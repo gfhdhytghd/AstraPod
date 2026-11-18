@@ -347,7 +347,8 @@ static void remove_slot(struct cider_cache *c, int index)
 bool cider_art_valid(const void *data, unsigned int length, const char *tier)
 {
     const unsigned char *p = data;
-    unsigned int dim = !strcmp(tier, "L") ? 240 : !strcmp(tier, "M") ?
+    unsigned int dim = !strcmp(tier, "L") ? 240 :
+                       (!strcmp(tier, "M") || !strcmp(tier, "P")) ?
                        128 : !strcmp(tier, "S") ? 56 :
                        !strcmp(tier, "XS") ? 32 : 0;
     return dim && length == 12 + dim * dim * 2 &&

@@ -31,6 +31,7 @@ static struct cider_state state;
 static struct cider_cache cache;
 static struct cider_transfer transfer;
 static struct cider_store store;
+static bool host_palette;
 static bool disk_lookup,request_ready,disk_running=true,cancel_all,warm_ready,disk_active=true;
 static bool host_live,live_reply;static long live_at;static char live_nonce[17];
 static uint32_t spectrum_generation;

@@ -921,8 +921,8 @@ static void extract_colors(const struct bitmap *bmp)
 #define PALETTE_MAX_DIM 128
 
 static fb_data palette_px[PALETTE_MAX_DIM * PALETTE_MAX_DIM];
-/* palette_px has two readers: the screen, and the prefetch on the audio
- * thread. Both read a file into it, which yields. */
+/* Shared by screen and local audio/background prefetch. Copying remote
+ * art or reading the local thumbnail can yield. */
 static struct mutex palette_lock;
 
 /* Palettes worked out ahead of their track, while the disk was already
@@ -1054,6 +1054,34 @@ static bool palette_from_folder(unsigned int hash, int dim)
     global_status.resume_art_hash = hash;
     return true;
 }
+
+#ifdef HAVE_USB_PODLINK
+/* P is the unfiltered 128px thumbnail. The WPS bitmap can already have
+ * been rewritten in place when a delayed palette transfer arrives. */
+static bool palette_from_remote(const char *key)
+{
+    struct found_palette out = {0};
+    bool got = false;
+
+    if (!cider_has_art(key, "P"))
+    {
+        cider_request_art(key, "P");
+        return false;
+    }
+
+    mutex_lock(&palette_lock);
+    struct bitmap bmp = {
+        .width = PALETTE_MAX_DIM, .height = PALETTE_MAX_DIM,
+        .format = FORMAT_NATIVE, .data = (unsigned char *)palette_px,
+    };
+    got = cider_copy_art(key, "P", bmp.data, sizeof palette_px) &&
+          compute_palette(&bmp, &out);
+    mutex_unlock(&palette_lock);
+    if (got)
+        apply_found(&out);
+    return got;
+}
+#endif
 
 /* The other source: whatever bitmap the skin buffered into its album-art slot.
  * Second choice, because it is the theme's picture at the theme's size rather
@@ -1669,14 +1697,22 @@ void dynamic_colors_save_theme(void)
 
 void dynamic_colors_check_extraction(int aa_slot)
 {
-    static bool remote;
+    bool remote = cider_active();
+#ifdef HAVE_USB_PODLINK
+    static bool was_remote, had_remote_palette;
     static unsigned int remote_gen;
-    if (remote != cider_active() || (remote && remote_gen != filter_gen))
+    unsigned generation = cider_wps_art_generation();
+    bool remote_palette = remote && cider_palette_supported();
+    if (remote != was_remote || remote_palette != had_remote_palette ||
+        (remote && remote_gen != generation))
     {
-        remote = cider_active(); remote_gen = filter_gen;
+        was_remote = remote;
+        had_remote_palette = remote_palette;
+        remote_gen = generation;
         needs_extraction = true;
         cache.track_change_tick = current_tick;
     }
+#endif
     /* Remember valid AA slots from skin_render calls so list_draw
      * can trigger extraction with aa_slot = -1 (use last known) */
     static int last_aa_slot = -1;
@@ -1722,10 +1758,30 @@ void dynamic_colors_check_extraction(int aa_slot)
         needs_extraction = false;
         return;
     }
+#ifdef HAVE_USB_PODLINK
+    if (remote_palette)
+    {
+        const char *key = cider_wps_art_key();
+        if (*key && palette_from_remote(key))
+        {
+            global_status.resume_art_hash = 0;
+            needs_extraction = false;
+        }
+        else if (current_tick - cache.track_change_tick > NO_ART_TIMEOUT)
+        {
+            if (cache.valid)
+                apply_colors(cache.theme_fg, cache.theme_bg, true);
+            if (!*key)
+                needs_extraction = false;
+        }
+        return;
+    }
+#endif
+
     /* The cache first. It needs no album-art slot, so this works on a theme
      * that declares no %Cl -- which is why there is no "give up without a
      * slot" test here any more. */
-    if (!cider_active() && palette_from_cache())
+    if (!remote && palette_from_cache())
     {
         needs_extraction = false;
         return;
@@ -2078,7 +2134,9 @@ bool dynamic_colors_screen_clear_needed(void)
 
 bool dynamic_colors_pending(void)
 {
-    return needs_extraction && global_settings.dynamic_colors;
+    /* Use the regular repaint cadence if the remote transfer is slow. */
+    return needs_extraction && global_settings.dynamic_colors &&
+           (!cider_active() || current_tick - cache.track_change_tick <= NO_ART_TIMEOUT);
 }
 
 bool dynamic_colors_roles(unsigned int *dominant, unsigned int *vivid)

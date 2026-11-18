@@ -14,6 +14,8 @@ void cider_wps_enter(void);
 bool cider_wps_action(int action);
 bool cider_wps_poll(void);
 uint32_t cider_wps_clock(long *sample);
+unsigned cider_wps_art_generation(void);
+const char *cider_wps_art_key(void);
 int wps_art_handle(int slot);
 bool wps_art_bitmap(int handle, struct bitmap **bitmap);
 bool wps_art_pin(int handle, bool pin);

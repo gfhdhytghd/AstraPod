@@ -27,6 +27,7 @@ static struct cider_state source;
 static fb_data pixels[240 * 240];
 static struct bitmap bitmap;
 static char key[65];
+static unsigned art_generation;
 static bool have_art, volume_baseline, volume_visible, source_bound;
 
 _Static_assert(sizeof id3 + sizeof source + sizeof pixels + sizeof bitmap + sizeof key + 64 < 120 * 1024, "Cider module RAM budget");
@@ -70,6 +71,7 @@ void cider_wps_update(struct wps_state *state)
     if (strcmp(key, source.art))
     {
         snprintf(key, sizeof key, "%s", source.art);
+        ++art_generation;
         have_art = false;
 
         skin_request_full_update(WPS);
@@ -83,6 +85,7 @@ void cider_wps_update(struct wps_state *state)
         bitmap.width = bitmap.height = 240;
         bitmap.format = FORMAT_NATIVE;
         bitmap.data = (unsigned char *)pixels;
+        ++art_generation;
         skin_albumart_art_opened(CIDER_ART_HANDLE);
         skin_request_full_update(WPS);
     }
@@ -201,6 +204,18 @@ bool cider_wps_action(int action)
             return true; /* local file/queue actions have no remote meaning */
     }
 }
+unsigned cider_wps_art_generation(void)
+{
+    return art_generation;
+}
+
+const char *cider_wps_art_key(void)
+{
+    int activity = get_current_activity();
+    return have_art && (activity == ACTIVITY_WPS || activity == ACTIVITY_LYRICS)
+           ? key : "";
+}
+
 int wps_art_handle(int slot)
 {
     if (cider_active())

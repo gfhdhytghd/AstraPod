@@ -6,6 +6,7 @@
 
 #ifndef _ART_SIZES_H_
 #define _ART_SIZES_H_
+#include <stdbool.h>
 
 /* How a source image is fitted into the square NxN thumbnail.
  *
@@ -105,5 +106,36 @@ static const struct art_size art_sizes[] =
 
 #define ART_CACHE_COVER_MAX_W \
     (ART_CACHE_MAX_DIM * ART_CACHE_COVER_MAX_ASPECT)
+
+/* Target size for an AA_FIT_COVER decode: scale so the SHORTER side lands on
+ * exactly `dim`, leaving the longer side >= dim to be cropped away. False if the
+ * staged image would not fit the work buffer (caller falls back to CONTAIN) or
+ * its dimensions are nonsense. */
+static inline bool aa_cover_dim(int sw, int sh, int dim, int *tw, int *th)
+{
+    if (sw <= 0 || sh <= 0)
+        return false;
+
+    if (sw <= sh)
+    {
+        *tw = dim;
+        *th = (sh * dim + sw / 2) / sw;     /* rounded; >= dim */
+    }
+    else
+    {
+        *th = dim;
+        *tw = (sw * dim + sh / 2) / sh;
+    }
+
+    /* rounding must never leave the short side under dim -- the crop below
+     * assumes both sides are at least dim */
+    if (*tw < dim)
+        *tw = dim;
+    if (*th < dim)
+        *th = dim;
+
+    return (long)*tw * *th <= ART_CACHE_COVER_MAX_PX &&
+           *tw <= ART_CACHE_COVER_MAX_W;
+}
 
 #endif /* _ART_SIZES_H_ */

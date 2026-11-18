@@ -113,8 +113,9 @@ static int disk_queue,cider_mutex,locks,closed,acks,waits,dequeued;
 static long current_tick;
 #define CIDER_SLOTS 24
 static struct {struct {unsigned length;bool dirty;}slot[CIDER_SLOTS];}cache;
-static struct {unsigned deferrals,loads;int last_error;}diag;
+static struct {unsigned deferrals,loads,build_state;int last_error;}diag;
 static bool load_requested,build_on;
+static struct {unsigned char remote;bool available;} state;
 static long dirty_at;
 static bool list_req,list_ready,disk_lookup;
 static unsigned nfills;

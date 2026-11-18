@@ -164,21 +164,25 @@ static enum list_row_kind kind(int i, void *data)
 static const struct bitmap *bitmap_for(const char *key, struct dim *size,
                                        const struct img_filter *filter)
 {
-    if (!cider_copy_art(key, "S", art_pixels, sizeof art_pixels))
-    {
-        cider_prefetch_art(key, "S");
-        return NULL;
-    }
     int dim = MIN(CIDER_LIST_ART_DIM, MIN(size->width, size->height));
     if (dim <= 0)
         return NULL;
-    /* Downscale in place. For dim <= source width, each source index is at
-     * or above its destination, so forward writes preserve unread pixels. */
-    for (int y = 0; y < dim; y++)
-        for (int x = 0; x < dim; x++)
-            art_pixels[y * dim + x] =
-                art_pixels[y * CIDER_LIST_ART_DIM / dim * CIDER_LIST_ART_DIM +
-                           x * CIDER_LIST_ART_DIM / dim];
+    int src = CIDER_LIST_ART_DIM;
+    if (!cider_copy_art(key, "S", art_pixels, sizeof art_pixels))
+    {
+        cider_prefetch_art(key, "S");
+        src = 32;
+        if (!cider_copy_art(key, "XS", art_pixels, src * src * sizeof(*art_pixels)))
+            return NULL;
+    }
+    /* Walk toward the end when shrinking and toward the start when expanding.
+     * In either direction, an index can overwrite only an already read pixel. */
+    int step = dim <= src ? 1 : -1;
+    int first = step > 0 ? 0 : dim - 1;
+    int end = step > 0 ? dim : -1;
+    for (int y = first; y != end; y += step)
+        for (int x = first; x != end; x += step)
+            art_pixels[y * dim + x] = art_pixels[y * src / dim * src + x * src / dim];
     if (filter)
         img_filter_apply(art_pixels, dim, dim, filter);
     row_bitmap.width = row_bitmap.height = dim;
@@ -197,7 +201,10 @@ static const struct bitmap *art(int i, void *data, struct dim *size,
 }
 static const struct bitmap *header_art(struct dim *size)
 {
-    return bitmap_for(history[depth].art, size, NULL);
+    const char *key = history[depth].art;
+    const struct bitmap *artwork = bitmap_for(key, size, NULL);
+    if (!artwork) cider_request_xs(&key, 1);
+    return artwork;
 }
 static char search_route[380];
 static int search_index;
@@ -472,6 +479,12 @@ int cider_browse(void)
             }
             cider_read_ahead(window, n, "S");
             cider_warm_art(window, MIN(n, 7), "S");
+            const char *previews[5];
+            unsigned int missing = 0;
+            for (unsigned int i = 0; i < n && missing < ARRAYLEN(previews); i++)
+                if (!cider_art_local(window[i], "S") && !cider_has_art(window[i], "XS"))
+                    previews[missing++] = window[i];
+            if (missing) cider_request_xs(previews, missing);
         }
         gui_synclist_draw(&list);
         int action;

@@ -1,6 +1,7 @@
 /* Cider album provider for the native carousel. GPL version 2 or later. */
 #include "config.h"
 #include "carousel.h"
+#include "core_alloc.h"
 #include "screens/playback/quick_screen.h"
 #include "screens/playback/cider.h"
 #include "screens/playback/cider_library.h"
@@ -22,9 +23,8 @@ static bool flicking;
 static long moved_at;
 static unsigned int revision;
 static struct cider_row row_ahead;
-static fb_data surface[128 * 128], tiny[32 * 32];
-_Static_assert(sizeof surface + sizeof tiny + 64 < 36 * 1024,
-               "Cider module RAM budget");
+static fb_data *surface;
+_Static_assert(sizeof *surface == sizeof(uint16_t), "Remote RGB565 art");
 
 static int build(void)
 {
@@ -68,16 +68,27 @@ static bool art(int index, struct bitmap *bitmap)
     struct cider_row row;
     if (!cider_page_row(index, &row))
         return false;
-    int dim = 128;
-    if (!cider_copy_art(row.art, "M", surface, sizeof surface))
+    int dim = CIDER_COVER_DIM;
+    if (!cider_copy_art(row.art, "M", surface, CIDER_COVER_SCRATCH_BYTES))
     {
         /* A stored final tier must never be replaced with a blurred XS.
          * read-ahead owns its disk request; keep the native slide pending. */
         if (cider_art_local(row.art, "M")) return false;
-        if (cider_copy_art(row.art, "XS", tiny, sizeof tiny))
-            for (int x = 0; x < dim; x++)
-                for (int y = 0; y < dim; y++)
-                    surface[x * dim + y] = tiny[(y / 4) * 32 + x / 4];
+        if (cider_copy_art(row.art, "XS", surface, 32 * 32 * sizeof(*surface)))
+        {
+            /* Convert rows to columns in place before expanding. In column
+             * order every source index is at or below its destination. */
+            for (int x = 1; x < 32; x++)
+                for (int y = 0; y < x; y++)
+                {
+                    fb_data pixel = surface[x * 32 + y];
+                    surface[x * 32 + y] = surface[y * 32 + x];
+                    surface[y * 32 + x] = pixel;
+                }
+            for (int x = dim - 1; x >= 0; x--)
+                for (int y = dim - 1; y >= 0; y--)
+                    surface[x * dim + y] = surface[(x / 4) * 32 + y / 4];
+        }
         else
         {
             fb_data color =
@@ -125,7 +136,7 @@ static void tick(void)
         cider_warm_art(visible, MIN(visible_count, 7), "M");
         cider_retain_art(visible, visible_count, "M");
     }
-    /* Six M records fit ahead of nine visible covers in the 512 KiB arena.
+    /* Six M records fit ahead of nine visible covers in the art arena.
      * The measured read bound sizes the window; the benchmark reports the
      * throughput limit independently of this latency window. */
     static char ahead_keys[16][65];
@@ -146,26 +157,19 @@ static void tick(void)
     }
     cider_read_ahead(ahead, nahead, "M");
     const char *xs[5];
-    char keys[5][65];
     unsigned int missing = 0;
-    for (int i = 0; i < n; i++)
+    bool full_requested = false;
+    for (unsigned int i = 0; i < nahead; i++)
     {
-        struct cider_row row;
-        if (window[i] >= count() || !cider_page_row(window[i], &row))
-            continue;
-        if (fast && !cider_art_local(row.art, "M"))
+        const char *art_key = ahead[i];
+        if (cider_has_art(art_key, "M")) continue;
+        if (missing < ARRAYLEN(xs) && !cider_art_local(art_key, "M") &&
+            !cider_has_art(art_key, "XS"))
+            xs[missing++] = art_key;
+        if (!full_requested && i < visible_count && (!fast || !i))
         {
-            if (missing < 5 && !cider_has_art(row.art, "XS"))
-            {
-                snprintf(keys[missing], sizeof keys[0], "%s", row.art);
-                xs[missing] = keys[missing];
-                missing++;
-            }
-        }
-        else if (!cider_has_art(row.art, "M"))
-        {
-            cider_prefetch_art(row.art, "M");
-            break;
+            cider_prefetch_art(art_key, "M");
+            full_requested = true;
         }
     }
     if (missing)
@@ -237,8 +241,21 @@ int cider_covers(void)
         splash(HZ, ID2P(LANG_CAROUSEL_NO_ALBUMS));
         return GO_TO_PREVIOUS;
     }
+    int scratch = core_allocatable() >= CIDER_COVER_SCRATCH_BYTES
+                ? core_alloc(CIDER_COVER_SCRATCH_BYTES) : -1;
+    if (scratch <= 0)
+    {
+        splash(HZ, ID2P(LANG_OUT_OF_MEMORY));
+        return GO_TO_PREVIOUS;
+    }
+    surface = core_get_data_pinned(scratch);
     revision = cider_art_revision();
+    /* carousel_run joins the loader before it returns. Until then the handle
+     * stays pinned across cache mutex waits and slide-buffer allocations. */
     int ret = carousel_run(&model, NULL);
+    surface = NULL;
+    core_unpin(scratch);
+    core_free(scratch);
     cider_cancel_art();
     return ret == CAROUSEL_REMOTE_RETURN ? CIDER_COVERS_REMOTE_RETURN : ret;
 }

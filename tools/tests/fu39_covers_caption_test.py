@@ -60,6 +60,7 @@ pre = r'''
 #define AGENTS_NAV_NONE 0
 #define CAROUSEL_REMOTE_RETURN -3
 #define LANG_CAROUSEL_NO_ALBUMS 0
+#define CIDER_COVER_SCRATCH_BYTES 32768u
 #define ID2P(n) "no albums"
 #define DRM default_draw_mode
 #define DRM_DEFAULT 0
@@ -74,6 +75,12 @@ static bool flicking,caption_valid;
 static long moved_at;
 long current_tick;
 static unsigned int revision,seen_caption_version;
+static void *surface;
+static size_t core_allocatable(void){return CIDER_COVER_SCRATCH_BYTES;}
+static int core_alloc(size_t n){assert(n==CIDER_COVER_SCRATCH_BYTES);return 1;}
+static void *core_get_data_pinned(int h){assert(h==1);return &revision;}
+static void core_unpin(int h){assert(h==1&&!surface);}
+static void core_free(int h){assert(h==1&&!surface);}
 static int caption_index,caption_variant,draws,scroll_builds;
 static bool caption_owed;
 static char drawn[2][260],scroll[2][260];

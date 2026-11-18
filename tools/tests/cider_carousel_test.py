@@ -20,6 +20,8 @@ typedef uint16_t pix_t;typedef uint16_t fb_data;
 struct bitmap{int width,height,format;unsigned char*data;};struct dim{int width,height;};
 #define FORMAT_NATIVE 1
 #define LCD_RGBPACK(r,g,b) (((r)&0xf8)<<8|((g)&0xfc)<<3|((b)>>3))
+#define CIDER_COVER_DIM 128
+#define CIDER_COVER_SCRATCH_BYTES (CIDER_COVER_DIM * CIDER_COVER_DIM * sizeof(uint16_t))
 #define SLIDE_CACHE_SIZE 100
 #define ALBUM_COVERS_NUM_SLIDES 4
 #define PF_SHOW_STATS 0
@@ -50,7 +52,7 @@ static int read_aat(int f,int p){(void)f;(void)p;assert(0);return -1;}
 static void img_filter_apply_banded(void*p,int h,int w,const void*f){(void)p;(void)h;(void)w;(void)f;}
 static const void*carousel_filter(void){return NULL;}
 static struct {unsigned int(*art_key)(int);bool(*read_art)(int,struct bitmap*);unsigned int(*art_version)(int);} model_data,*model=&model_data;
-static fb_data surface[128*128],tiny[32*32];static int quality;
+static fb_data scratch_pixels[128*128],*surface=scratch_pixels;static int quality;
 static int visited[40],nvisited;
 static bool cider_page_row(int index,struct cider_row*r){if(nvisited<40)visited[nvisited++]=index;memset(r,0,sizeof*r);r->bg=0x123456;strcpy(r->art,"key");return index>=0;}
 static bool cider_copy_art(const char*k,const char*t,void*p,unsigned int n){(void)k;if((!strcmp(t,"M")&&quality!=3)||(!strcmp(t,"XS")&&quality<2))return false;uint16_t*out=p;for(unsigned int i=0;i<n/2;i++)out[i]=i;return true;}
@@ -109,6 +111,33 @@ static void carousel_caption_layout(bool two,struct pf_caption*c){c->y1=0;c->y2=
 static int get_scroll_line_offset(int n){(void)n;return 0;}
 static void lcd_putsxy(int x,int y,const char*s){(void)x;(void)y;assert(drawn<2);snprintf(text_lines[drawn++],260,"%s",s);}
 '''
+lifetime_stubs=r'''
+enum { GO_TO_PREVIOUS, GO_TO_ROOT, CAROUSEL_REMOTE_RETURN,
+       ACTION_STD_QUICKSCREEN, ACTION_STD_CANCEL, ACTION_STD_MENU, CONTEXT_STD,
+       QUICKSCREEN_IN_USB, AGENTS_NAV_NONE };
+#define ID2P(x) #x
+static bool room=true,alloc_fails,pinned,allocated_scratch;
+static int opens,frees,failures,cancels,alloc_calls;
+static void cider_page_open(const char*r){assert(!strcmp(r,"albums"));}
+static int cider_page_total(void){return 5;}
+static int get_action(int c,int t){(void)c;(void)t;assert(0);return 0;}
+static int quick_screen_current(int a,void*p){(void)a;(void)p;assert(0);return 0;}
+static int agents_nav_pending(void){return AGENTS_NAV_NONE;}
+static void splash(int t,const char*s){(void)t;assert(!strcmp(s,"LANG_OUT_OF_MEMORY"));failures++;}
+static size_t core_allocatable(void){return room?sizeof scratch_pixels:0;}
+static int core_alloc(size_t bytes){
+ assert(bytes==32768&&!allocated_scratch&&!pinned);
+ alloc_calls++;if(alloc_fails)return -1;
+ allocated_scratch=true;return 7;
+}
+static void*core_get_data_pinned(int h){assert(h==7&&allocated_scratch&&!pinned);pinned=true;return scratch_pixels;}
+static int carousel_run(const void*m,const char*f){
+ (void)m;(void)f;assert(pinned&&surface==scratch_pixels);opens++;return CAROUSEL_REMOTE_RETURN;
+}
+static void core_unpin(int h){assert(h==7&&allocated_scratch&&pinned&&!surface);pinned=false;}
+static int core_free(int h){assert(h==7&&allocated_scratch&&!pinned&&!surface);allocated_scratch=false;frees++;return 0;}
+static void cider_cancel_art(void){assert(!allocated_scratch);cancels++;}
+'''
 assert 'carousel_album_caption(' in function(provider,'text')
 assert 'lcd_' not in function(provider,'text')
 assert 'carousel_album_caption(' in function((R/'apps-ipod/screens/covers/album_covers.c').read_text(),'draw_album_text')
@@ -116,7 +145,10 @@ post=r'''
 int main(void){model_data.art_key=key;model_data.read_art=art;model_data.art_version=version;
 assert(!load_and_prepare_surface(0,-1,0));assert(!load_and_prepare_surface(0,100,0));
 for(int q=1;q<=3;q++){quality=q;assert(load_and_prepare_surface(0,q,0));int h=pf_sldcache.cache[q].hid;struct dim*d=get_slide(h);assert(d->width==128&&d->height==d->width);uint16_t*p=(uint16_t*)(d+1);
-if(q==3){assert(p[129]==129&&sizes[h]==sizeof(int)+sizeof(struct dim)+32768+16384);}else if(q==2){assert(p[128*4+8]==2*32+1);}else assert(p[0]==LCD_RGBPACK(0x12,0x34,0x56));assert(pf_sldcache.cache[q].version==(unsigned)q);}
+if(q==3){assert(p[129]==129&&sizes[h]==sizeof(int)+sizeof(struct dim)+32768+16384);}
+else if(q==2){for(int x=0;x<128;x++)for(int y=0;y<128;y++)assert(p[x*128+y]==(y/4)*32+x/4);}
+else assert(p[0]==LCD_RGBPACK(0x12,0x34,0x56));
+assert(pf_sldcache.cache[q].version==(unsigned)q);}
 assert(!remaining&&!load_and_prepare_surface(0,4,0)&&!pf_sldcache.cache[4].hid);
 evictable=3;
 assert(load_and_prepare_surface(0,4,0)&&evictions==1&&!pf_sldcache.cache[3].hid);
@@ -135,11 +167,17 @@ for(int show=0;show<=4;show++){for(int year=0;year<3;year++){
  assert(drawn==(show==0?0:show==3||show==4?2:1));
  if(drawn){assert(strstr(text_lines[0],"Album"));if(year)assert(strstr(text_lines[0],"2020"));if(drawn==2)assert(!strcmp(text_lines[1],"Artist"));}
 }}
-quality=1;center_index=6;previous_center=5;current_tick=100;moved_at=0;nvisited=0;tick();assert(!flicking&&m_requests==1&&!xs_requests&&!strcmp(retained_tier,"M"));
-center_index=5;current_tick=110;nvisited=0;tick();assert(flicking&&xs_requests==1&&visited[0]==5&&visited[1]==4&&!strcmp(retained_tier,"M"));
-current_tick=145;tick();assert(!flicking&&m_requests==2&&!strcmp(retained_tier,"M"));
+quality=1;center_index=6;previous_center=5;current_tick=100;moved_at=0;nvisited=0;tick();assert(!flicking&&m_requests==1&&xs_requests==1&&!strcmp(retained_tier,"M"));
+center_index=5;current_tick=110;nvisited=0;tick();assert(flicking&&xs_requests==2&&visited[0]==5&&visited[1]==4&&!strcmp(retained_tier,"M"));
+current_tick=145;tick();assert(!flicking&&m_requests==3&&!strcmp(retained_tier,"M"));
 local_store=true;quality=2;struct bitmap pending;assert(!art(0,&pending));local_store=false;
+surface=NULL;
+for(int visit=0;visit<2;visit++)assert(cider_covers()==CIDER_COVERS_REMOTE_RETURN);
+assert(opens==2&&frees==2&&cancels==2&&!surface&&!allocated_scratch&&alloc_calls==2);
+room=false;assert(cider_covers()==GO_TO_PREVIOUS&&failures==1&&alloc_calls==2);
+room=true;alloc_fails=true;assert(cider_covers()==GO_TO_PREVIOUS&&failures==2&&alloc_calls==3);
+assert(opens==2&&frees==2&&!surface);
 puts("Native carousel load/get_slide layout + real Cider M columns, XS transpose, bg placeholder PASS");}
 '''
-(O/'carousel.c').write_text(pre+function(carousel,'side_level_bytes')+function(carousel,'build_side_level')+function(art_provider,'art')+'\n'+function(carousel,'load_and_prepare_surface')+'\n'+function(carousel,'get_slide')+tick_stubs+function((R/'apps-ipod/screens/playback/cider_model.c').read_text(),'cider_window')+function(provider,'tick')+caption_stubs+function(carousel,'carousel_album_caption')+post)
+(O/'carousel.c').write_text(pre+function(carousel,'side_level_bytes')+function(carousel,'build_side_level')+function(art_provider,'art')+'\n'+function(carousel,'load_and_prepare_surface')+'\n'+function(carousel,'get_slide')+tick_stubs+function((R/'apps-ipod/screens/playback/cider_model.c').read_text(),'cider_window')+function(provider,'tick')+caption_stubs+function(carousel,'carousel_album_caption')+lifetime_stubs+function(provider,'cider_covers')+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),str(O/'carousel.c'),'-o',str(O/'carousel')],check=True);subprocess.run([str(O/'carousel')],check=True)

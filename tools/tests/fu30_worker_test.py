@@ -31,6 +31,7 @@ struct queue_event {int id,data;};
 static struct cider_store store;
 static struct cider_cache cache;
 static struct cider_transfer transfer;
+static struct cider_state state;
 static struct {char key[65];unsigned char tier;} fills[8];
 static struct cider_store_stats diag;
 static bool disk_lookup,list_req,list_ready,load_requested,build_on;

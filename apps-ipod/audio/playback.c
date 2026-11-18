@@ -1170,6 +1170,11 @@ static void audio_reset_buffer(void)
          * boot. The buffer ends this size either way; leaving the room now is
          * the difference between finding it free and taking it. */
         size_t reserve = bg_task_reserve_bytes();
+#ifdef HAVE_USB_PODLINK
+        /* Remote Cover Flow borrows one cover while local playback is paused.
+         * Leave room for it without invoking the playback shrink callback. */
+        reserve += CIDER_COVER_SCRATCH_BYTES + BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t);
+#endif
         size_t layout = pcmbuf_size_reqd() + scratch_mem_size()
                       + AUDIO_BUFFER_RESERVE;
 

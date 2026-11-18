@@ -39,6 +39,9 @@ static void reset(void){host_live=live_reply=false;state.generation=0;}
 static bool host_store,ls_due,want_ready,list_req,list_ready,pin_on;
 static uint32_t next_request,grant,granted,cancel_request,list_cursor;
 static unsigned int request_tries,ncommands,xs_count,list_len,nfills,noffers,nacks;
+static uint32_t xs_request;
+static long xs_at;
+static bool xs_sent;
 static char commands[12][384],xs_keys[5][65],warm_keys[455],warm_tier[3],list_page[480],pin_key[65];
 static struct { char key[65]; unsigned char tier; } fills[8], offers[8];
 static struct { char key[65]; unsigned char tier; uint32_t crc; } acks[8];

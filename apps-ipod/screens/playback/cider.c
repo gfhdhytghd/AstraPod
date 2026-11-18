@@ -91,6 +91,9 @@ static struct { uint32_t epoch, count, digest, total; } snap;
 static struct cs_item list_items[16];
 static char xs_keys[5][65];
 static unsigned int xs_count;
+static uint32_t xs_request;
+static long xs_at;
+static bool xs_sent;
 static unsigned int ncommands, art_revision;
 static unsigned char disk_data[CS_REC_MAX] CACHEALIGN_ATTR;
 static long disk_stack[DEFAULT_STACK_SIZE * 6 / sizeof(long)];
@@ -146,12 +149,15 @@ static bool valid_key(const char *key)
 
 static void fail_art(void)
 {
-    if (xs_count)
-        for (unsigned int i = 0; i < xs_count && i < ARRAYLEN(xs_keys); i++)
-            cider_cache_fail(&cache, xs_keys[i], "XS", current_tick, HZ);
-    else
-        cider_cache_fail(&cache, transfer.key, transfer.tier, current_tick, HZ);
+    cider_cache_fail(&cache, transfer.key, transfer.tier, current_tick, HZ);
     transfer.active = disk_lookup = request_ready = false;
+}
+
+static void finish_xs(void)
+{
+    for (unsigned int i = 0; i < xs_count; i++)
+        if (cider_cache_find(&cache, xs_keys[i], "XS") < 0)
+            cider_cache_fail(&cache, xs_keys[i], "XS", current_tick, HZ);
     xs_count = 0;
 }
 
@@ -258,6 +264,8 @@ static bool receive(const struct podlink_message *m)
                                     transfer.data, transfer.total, true);
                     if (transfer.fill)
                         cider_cache_demote(&cache, transfer.key, transfer.tier);
+                    else
+                        button_queue_post(BUTTON_REDRAW, 0);
                     pin_apply();
                     cider_log("CIDER art done tick=%ld req=%lu bytes=%lu",
                                current_tick, (unsigned long)transfer.request,
@@ -269,11 +277,11 @@ static bool receive(const struct podlink_message *m)
                     request_ready = transfer.active;
                 }
             }
-            else if (binary && m->length >= 16 && transfer.active &&
-                     u32(m->data + 8) == transfer.request &&
-                     u32(m->data + 4) == state.generation)
+            else if (binary && m->length >= 16 && xs_count &&
+                     u32(m->data + 8) == xs_request)
             {
                 unsigned int count = u32(m->data + 12), pos = 16;
+                bool added = false;
                 for (unsigned int i = 0; i < count && count <= 5; i++)
                 {
                     char key[65];
@@ -285,18 +293,20 @@ static bool receive(const struct podlink_message *m)
                     pos += 40;
                     if (size > m->length - pos || size != 2060 ||
                         podlink_crc32(m->data + pos, size) != crc) break;
+                    added |= cider_cache_put(&cache, key, "XS", m->data + pos, size, true);
+                    pos += size;
+                }
+                if (added)
+                {
                     art_revision++;
-                    cider_cache_put(&cache, key, "XS", m->data + pos,
-                                    size, true);
                     dirty_at = current_tick;
                     if (disk_running) queue_post(&disk_queue, 1, 0);
-                    pos += size;
+                    button_queue_post(BUTTON_REDRAW, 0);
                 }
                 if (pos == m->length)
                 {
-                    if (host_diag) { art_ack_request = transfer.request; art_ack_bytes = m->length; }
-                    transfer.active = false;
-                    xs_count = 0;
+                    if (host_diag) { art_ack_request = xs_request; art_ack_bytes = m->length; }
+                    finish_xs();
                 }
             }
         }
@@ -342,6 +352,7 @@ static bool receive(const struct podlink_message *m)
             diag.build_state = 0;
             if (play_request) play_reply = -1;
             transfer.active = false; ncommands = 0;
+            xs_count = 0;
             memset(&modes, 0, sizeof modes);
             disk_lookup = request_ready = false;
             grant = granted = cancel_request = 0;
@@ -349,6 +360,9 @@ static bool receive(const struct podlink_message *m)
         if (!state.loading) loading_request = 0;
         if (!memcmp(m->data, "CK\t", 3))
         {
+            if (xs_count &&
+                cider_reply_status(m->data, m->length, state.generation, xs_request) < 0)
+                finish_xs();
             if (transfer.active &&
                 cider_reply_status(m->data, m->length, state.generation,
                                    transfer.request) < 0)
@@ -426,6 +440,7 @@ static unsigned int next(char *record, unsigned int size)
     }
     else if (cancel_request || cancel_all)
     {
+        if (cancel_all) xs_sent = false;
         n = snprintf(record, size, "cx\t%lu\t%lu",
                      (unsigned long)state.generation,
                      cancel_all ? 0ul : (unsigned long)cancel_request);
@@ -445,6 +460,15 @@ static unsigned int next(char *record, unsigned int size)
                    (unsigned long)granted);
         granted += grant; grant = 0;
     }
+    else if (xs_count && !xs_sent)
+    {
+        n = snprintf(record, size, "cb\t%lu\t%lu\t",
+                     (unsigned long)state.generation, (unsigned long)xs_request);
+        for (unsigned int i = 0; i < xs_count && n < size; i++)
+            n += snprintf(record + n, size - n, "%s%s", i ? "," : "", xs_keys[i]);
+        xs_sent = true;
+        xs_at = current_tick;
+    }
     else if (transfer.active &&
              !(disk_lookup && (diag.build_state == 2 || TIME_BEFORE(current_tick, hold_until))) &&
              (request_ready || (hold_until && disk_lookup) ||
@@ -452,23 +476,13 @@ static unsigned int next(char *record, unsigned int size)
     {
         if (request_tries++ < 3)
         {
-            if (xs_count)
-            {
-                n = snprintf(record, size, "cb\t%lu\t%lu\t",
-                             (unsigned long)state.generation,
-                             (unsigned long)transfer.request);
-                for (unsigned int i = 0; i < xs_count && n < size; i++)
-                    n += snprintf(record + n, size - n, "%s%s",
-                                  i ? "," : "", xs_keys[i]);
-            }
-            else
-                n = snprintf(record, size,
-                             "cr\t%lu\t%lu\t%s\t%s\t%lu\t%d\t0",
-                             (unsigned long)state.generation,
-                             (unsigned long)transfer.request, transfer.key,
-                             transfer.tier, (unsigned long)transfer.received,
-                             transfer.fill ? 4 : 3);
-            if (!xs_count && host_diag && n < size)
+            n = snprintf(record, size,
+                         "cr\t%lu\t%lu\t%s\t%s\t%lu\t%d\t0",
+                         (unsigned long)state.generation,
+                         (unsigned long)transfer.request, transfer.key,
+                         transfer.tier, (unsigned long)transfer.received,
+                         transfer.fill ? 4 : 3);
+            if (host_diag && n < size)
                 n += snprintf(record + n, size - n, "\t%d", art_local_miss ? 1 : 0);
             cider_log("CIDER request tick=%ld req=%lu off=%lu",
                        current_tick, (unsigned long)transfer.request,
@@ -622,7 +636,11 @@ static void store_text(const unsigned char *d, unsigned int n)
             spectrum_subscribed = spectrum_fresh = false;
         }
         unsigned char remote = cider_remote_parse((const char *)d, n, state.generation);
-        if (remote) state.remote = remote;
+        if (remote && remote != state.remote)
+        {
+            state.remote = remote;
+            noffers = 0;
+        }
     }
     else if (d[1] == 'Q' && host_store)
     {
@@ -657,7 +675,6 @@ static void begin_transfer(const char *key, const char *tier, bool fill)
         cancel_all |= cancel_request != 0;
         cancel_request = transfer.request;
     }
-    xs_count = 0;
     if (!fill) art_used_at = current_tick;
     memset(&transfer, 0, sizeof transfer);
     transfer.active = true; transfer.generation = state.generation;
@@ -696,8 +713,9 @@ static void background_start(void)
             return;
         }
     }
+    bool rufin_fill = state.remote == 3 && state.available && diag.build_state == 1;
     if (!host_store || !store.loaded || cs_busy(&store) ||
-        (!storage_disk_is_active() && !build_on) ||
+        (!storage_disk_is_active() && !build_on && !rufin_fill) ||
         (!build_on && TIME_BEFORE(current_tick, art_used_at + 3 * HZ)) ||
         store.total + CS_REC_MAX > store.cap) return;
     for (int i = 0; i < CIDER_SLOTS; i++)
@@ -712,7 +730,7 @@ static void background_start(void)
         if (cider_cache_find(&cache, key, tier_name(tier)) < 0)
             begin_transfer(key, tier_name(tier), true);
     }
-    else if (noffers < 2 && TIME_AFTER(current_tick, want_at + (build_on ? HZ / 10 : 4 * HZ)))
+    else if (TIME_AFTER(current_tick, want_at + (build_on || rufin_fill ? HZ / 2 : 4 * HZ)))
         want_ready = true;
 }
 
@@ -840,7 +858,7 @@ static bool read_store(const char *key, const char *tier, bool transfer_job,
     if (r < CS_MISS) diag.last_error = r;
     mutex_lock(&cider_mutex);
     bool ok = r == CS_OK && cider_cache_put(&cache, key, tier, payload, length, false);
-    if (ok) { diag.hits++; art_revision++; pin_apply(); }
+    if (ok) { diag.hits++; art_revision++; pin_apply(); button_queue_post(BUTTON_REDRAW, 0); }
     else { diag.misses++; diag.build_state = 1; miss_note(key, tier); }
     if (transfer_job && transfer.active && transfer.request == req && disk_lookup)
     {
@@ -971,7 +989,7 @@ static void disk_worker(void)
         /* Foreground USB covers must eventually reach disk even when Cider
          * is the only source (no local music to keep the disk spinning). */
         bool flush = dirty && TIME_AFTER(current_tick, dirty_at + HZ);
-        bool build = build_on;
+        bool build = build_on || (state.remote == 3 && state.available && diag.build_state == 1);
         load_requested = false;
         mutex_unlock(&cider_mutex);
         /* Load when the disk already spins, or when the user's browsing
@@ -1008,10 +1026,10 @@ static void disk_worker(void)
         if (disk_usb_pending()) continue;
         mutex_lock(&cider_mutex);
         bool busy = transfer.active || TIME_BEFORE(current_tick, art_used_at + HZ);
-        bool answer = list_req && !list_ready;
+        bool answer = list_req && !list_ready && (active || build || state.remote == 3);
         mutex_unlock(&cider_mutex);
         active = storage_disk_is_active();
-        if (answer && (active || build) && store.loaded) build_list();
+        if (answer && store.loaded) build_list();
         if (disk_usb_pending()) continue;
         more = false;
         if ((active || flush || build) && !busy && store.loaded)
@@ -1271,6 +1289,12 @@ void cider_mode_set(int mode, int value)
 void cider_cancel_art(void)
 {
     mutex_lock(&cider_mutex);
+    if (xs_count && xs_sent)
+    {
+        cancel_all |= cancel_request != 0;
+        cancel_request = xs_request;
+    }
+    xs_count = 0;
     if (transfer.active)
     {
         cancel_all |= cancel_request != 0;
@@ -1328,15 +1352,14 @@ bool cider_copy_art(const char *key, const char *tier, void *pixels,
 
 void cider_request_xs(const char *const *keys, unsigned int count)
 {
-    if (!count || count > 5) return;
-    for (unsigned int i = 0; i < count; i++)
-        if (!valid_key(keys[i])) return;
+    if (!count || count > ARRAYLEN(xs_keys)) return;
     mutex_lock(&cider_mutex);
-    if (transfer.active && !strcmp(transfer.tier,"XS"))
+    if (xs_count && xs_sent && TIME_AFTER(current_tick, xs_at + 3 * HZ))
+        finish_xs();
+    if (!state.generation || xs_count)
     { mutex_unlock(&cider_mutex); return; }
-    xs_count = 0;
     for (unsigned int i = 0; i < count; i++)
-        if (cider_cache_find(&cache, keys[i], "XS") < 0 &&
+        if (valid_key(keys[i]) && cider_cache_find(&cache, keys[i], "XS") < 0 &&
             !cider_cache_backoff(&cache, keys[i], "XS", current_tick))
         {
             if (store_local(keys[i], "XS")) fill_add(keys[i], "XS");
@@ -1344,18 +1367,9 @@ void cider_request_xs(const char *const *keys, unsigned int count)
         }
     if (xs_count)
     {
-        if (transfer.active)
-    {
-        cancel_all |= cancel_request != 0;
-        cancel_request = transfer.request;
-    }
-        memset(&transfer, 0, sizeof transfer);
-        transfer.active = true; transfer.generation = state.generation;
-        transfer.request = ++next_request;
-        snprintf(transfer.key, sizeof transfer.key, "%s", xs_keys[0]);
-        strcpy(transfer.tier, "XS");
-        disk_lookup = false; request_ready = true; request_tries = 0;
-        hold_until = 0; request_at = current_tick;
+        xs_request = ++next_request;
+        xs_sent = false;
+        art_used_at = current_tick;
         if (!granted) grant = CIDER_CREDIT;
     }
     mutex_unlock(&cider_mutex);
@@ -1504,7 +1518,7 @@ bool cider_has_art(const char *key, const char *tier)
 void cider_prefetch_art(const char *key, const char *tier)
 {
     mutex_lock(&cider_mutex);
-    bool busy = transfer.active;
+    bool busy = transfer.active && !transfer.fill;
     mutex_unlock(&cider_mutex);
     if (!busy) cider_request_art(key,tier);
 }

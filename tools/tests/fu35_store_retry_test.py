@@ -63,16 +63,16 @@ transfer.active=true;transfer.request=987;strcpy(transfer.key,"aaaaaaaaaaaaaaaaa
 ack="CK\t7\t986\t0\tArtwork unavailable";message.data=(const unsigned char*)ack;message.length=strlen(ack);assert(receive(&message)&&transfer.active);
 ack="CK\t7\t987\t0\tArtwork unavailable";message.data=(const unsigned char*)ack;message.length=strlen(ack);assert(receive(&message)&&!transfer.active&&!disk_lookup&&!request_ready);
 assert(cider_cache_backoff(&cache,transfer.key,transfer.tier,current_tick));
-transfer.active=true;transfer.request=988;xs_count=2;
+transfer.active=true;transfer.request=999;xs_request=988;xs_count=2;
 strcpy(xs_keys[0],transfer.key);memset(xs_keys[1],'b',64);xs_keys[1][64]=0;
-ack="CK\t7\t988\t0\tArtwork unavailable";message.data=(const unsigned char*)ack;message.length=strlen(ack);assert(receive(&message)&&!transfer.active&&!xs_count);
+ack="CK\t7\t988\t0\tArtwork unavailable";message.data=(const unsigned char*)ack;message.length=strlen(ack);assert(receive(&message)&&transfer.active&&!xs_count);
 assert(cider_cache_backoff(&cache,xs_keys[1],"XS",current_tick));
 /* Successful packed XS must also release the background-fill gate. */
-transfer.active=true;transfer.request=989;xs_count=1;
+xs_request=989;xs_count=1;memset(xs_keys[0],'c',64);xs_keys[0][64]=0;
 memset(art,0,2060);put32(art,8u<<16|0x5441);put32(art+4,32u<<16|32);
 memcpy(packet,"CXS1",4);put32(packet+4,7);put32(packet+8,989);put32(packet+12,1);
 memset(packet+16,0xcc,32);put32(packet+48,2060);put32(packet+52,podlink_crc32(art,2060));memcpy(packet+56,art,2060);
-message=(struct podlink_message){.type=PODLINK_BINARY,.data=packet,.length=2116};assert(receive(&message)&&!transfer.active&&!xs_count);
+message=(struct podlink_message){.type=PODLINK_BINARY,.data=packet,.length=2116};assert(receive(&message)&&transfer.active&&!xs_count);
 assert(cider_cache_find(&cache,"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","XS")>=0);
 
 '''

@@ -24,6 +24,7 @@ pre=r'''
 #include "screens/playback/cider_model.h"
 #include "screens/playback/cider_store.h"
 #define HZ 100
+#define BUTTON_REDRAW 1
 #define ARRAYLEN(a) ((int)(sizeof(a)/sizeof((a)[0])))
 #define TIME_AFTER(a,b) ((long)((a)-(b))>0)
 #define TIME_BEFORE(a,b) ((long)((a)-(b))<0)
@@ -50,6 +51,7 @@ static bool queue_empty(int*q){(void)q;return queue_idle;}
 static bool disk_usb_pending(void){return false;}
 static void yield(void){}
 static void queue_post(int*q,int n,int v){(void)q;(void)n;(void)v;posts++;}
+static void button_queue_post(int n,int v){(void)n;(void)v;}
 static int t_open(const char*p,int m){return open(p,m==CS_O_READ?O_RDONLY:O_RDWR|O_CREAT,0644);}
 static int t_read(int fd,void*b,unsigned n){return read(fd,b,n);}
 static int t_write(int fd,const void*b,unsigned n){return write(fd,b,n);}

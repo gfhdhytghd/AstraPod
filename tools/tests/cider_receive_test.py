@@ -39,6 +39,7 @@ static void cider_library_invalidate(uint32_t n){(void)n;}
 static bool cider_library_receive(const void*d,unsigned int n,uint32_t g,uint32_t l){(void)d;(void)n;(void)g;(void)l;return true;}
 static bool disk_lookup,request_ready;
 static unsigned int xs_count;
+static uint32_t xs_request;
 static char xs_keys[5][65];
 #define ARRAYLEN(a) (sizeof(a)/sizeof((a)[0]))
 static void mutex_lock(int*m){(void)m;}
@@ -87,5 +88,5 @@ ack="CK\t7\t499\t0\tFailed";message.data=(const unsigned char*)ack;message.lengt
 ack="CK\t7\t500\t0\tFailed";message.data=(const unsigned char*)ack;message.length=strlen(ack);assert(receive(&message)&&!state.loading&&!loading_request);
 puts("Production resident receiver: legacy raw passthrough, state negotiation, whole-cover CRC/cache, exact credit refund, stale-generation drop PASS");}
 '''
-(O/'receive.c').write_text(pre+'\nstatic volatile uint32_t status_word;\n'+fn('publish_status')+fn('u32')+fn('fail_art')+fn('receive')+post)
+(O/'receive.c').write_text(pre+'\nstatic volatile uint32_t status_word;\n'+fn('publish_status')+fn('u32')+fn('fail_art')+fn('finish_xs')+fn('receive')+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'receive.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),*wire_args(),'-o',str(O/'receive')],check=True);subprocess.run([str(O/'receive')],check=True)

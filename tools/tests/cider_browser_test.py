@@ -85,16 +85,19 @@ static void cider_cancel_art(void){}
 static int pins;static bool pinned;
 static void cider_pin_art(const char*k){assert(strlen(k)==64);pins++;pinned=true;}
 static void cider_unpin_art(void){pinned=false;}
-static bool fixture_art;
+static int fixture_art;
 static bool cider_copy_art(const char*k,const char*t,void*p,unsigned int n)
 {
-    (void)k; (void)t;
-    if (!fixture_art) return false;
-    assert(n == 56 * 56 * sizeof(fb_data));
-    for (unsigned i = 0; i < 56 * 56; i++) ((fb_data *)p)[i] = i;
+    (void)k;
+    if (!fixture_art || fixture_art != (!strcmp(t, "XS") ? 32 : 56)) return false;
+    assert(n == fixture_art * fixture_art * sizeof(fb_data));
+    for (unsigned i = 0; i < n / sizeof(fb_data); i++) ((fb_data *)p)[i] = i;
     return true;
 }
 static void cider_prefetch_art(const char*k,const char*t){(void)k;(void)t;}
+static bool cider_art_local(const char*k,const char*t){(void)k;(void)t;return false;}
+static bool cider_has_art(const char*k,const char*t){(void)k;(void)t;return false;}
+static void cider_request_xs(const char*const*k,unsigned int n){(void)k;(void)n;}
 static void img_filter_apply(void*p,int w,int h,const void*f){(void)p;(void)w;(void)h;(void)f;}
 static bool cider_play(const char*p){assert(available&&live==1&&strstr(p,"play/"));if(fail_play)return false;plays++;return true;}
 static char last_ctx[400];static int last_idx=-1;static bool cider_play_in(const char*p,const char*c,int i){snprintf(last_ctx,sizeof last_ctx,"%s",c);last_idx=i;return cider_play(p);}
@@ -121,15 +124,17 @@ post=r'''
 int cider_covers(void){if(mode==4)return CIDER_COVERS_REMOTE_RETURN;if(mode==1)return GO_TO_PREVIOUS;assert(live==1);live++;if(live>max_live)max_live=live;struct cider_row r={0};strcpy(r.route,"album/a0");strcpy(r.title,"Album 0");cider_browse_album(&r);live--;return GO_TO_PREVIOUS;}
 static void check_art_pixels(void)
 {
-    fixture_art = true;
-    for (int dim = 1; dim <= 56; dim++) {
+    for (int source = 32; source <= 56; source += 24) {
+      fixture_art = source;
+      for (int dim = 1; dim <= 56; dim++) {
         struct dim request = {dim, 60};
         const struct bitmap *artwork = bitmap_for("key", &request, NULL);
         assert(artwork && artwork->width == dim && artwork->height == dim);
         const fb_data *pixels = (const fb_data *)artwork->data;
         for (int y = 0; y < dim; y++)
             for (int x = 0; x < dim; x++)
-                assert(pixels[y * dim + x] == y * 56 / dim * 56 + x * 56 / dim);
+                assert(pixels[y * dim + x] == y * source / dim * source + x * source / dim);
+      }
     }
     fixture_art = false;
     puts("PASS Cider list art: pixel reference matches at all 56 output sizes");

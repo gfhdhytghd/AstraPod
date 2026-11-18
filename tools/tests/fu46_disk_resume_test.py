@@ -29,7 +29,7 @@ static void cider_library_invalidate(uint32_t g){(void)g;}
 static bool cider_library_receive(const void*d,unsigned n,uint32_t g,uint32_t l)
 {(void)d;(void)n;(void)g;(void)l;return false;}
 '''
-source += ''.join(fn(n) for n in ['publish_status', 'reset', 'u32', 'receive'])
+source += ''.join(fn(n) for n in ['publish_status', 'reset', 'u32', 'finish_xs', 'receive'])
 source += r'''
 static void text(const char*s){
  struct podlink_message m={.type=PODLINK_TEXT,.data=(const unsigned char*)s,.length=strlen(s)};

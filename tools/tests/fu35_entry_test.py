@@ -30,11 +30,19 @@ static int quick_screen_current(int a,void*p){(void)a;(void)p;quick_calls++;retu
 #define AGENTS_NAV_NONE 0
 #define GO_TO_PREVIOUS -1
 #define LANG_CAROUSEL_NO_ALBUMS "none"
+#define LANG_OUT_OF_MEMORY "out of memory"
+#define CIDER_COVER_SCRATCH_BYTES 32768u
 #define ID2P(x) (x)
 #define CAROUSEL_REMOTE_RETURN 2
 long current_tick;
 static int generation=7,mode,polls,first_tick,cancels,store_reads;
 static unsigned int revision;
+static void *surface;
+static size_t core_allocatable(void){return CIDER_COVER_SCRATCH_BYTES;}
+static int core_alloc(size_t n){assert(n==CIDER_COVER_SCRATCH_BYTES);return 1;}
+static void *core_get_data_pinned(int h){assert(h==1);return &revision;}
+static void core_unpin(int h){assert(h==1&&!surface);}
+static void core_free(int h){assert(h==1&&!surface);}
 static const int model;
 static struct cider_store store;
 static void cider_page_open(const char*q){cider_library_open(q);}

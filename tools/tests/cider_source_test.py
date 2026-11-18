@@ -157,7 +157,7 @@ ncommands=0;cider_play("play/library-songs/s4");play_reply=1;assert(cider_play_s
 assert(!ffwd_rew(ACTION_WPS_SEEKFWD,false));assert(testing_wps.id3->elapsed>old_position&&strstr(commands[ncommands-1],"seek"));
 transfer.active=true;transfer.request=77;transfer.received=4000;strcpy(transfer.key,"kept");strcpy(transfer.tier,"M");
 const char*visible[]={"near","kept"};cider_retain_art(visible,2,"M");assert(transfer.active&&transfer.request==77&&transfer.received==4000&&!cancel_request);
-request_calls=0;cider_prefetch_art("near","M");assert(!request_calls);cider_retain_art(visible,1,"M");assert(!transfer.active&&cancel_request==77);cider_prefetch_art("near","M");assert(request_calls==1);
+request_calls=0;cider_prefetch_art("near","M");assert(!request_calls);transfer.fill=true;cider_prefetch_art("near","M");assert(request_calls==1);transfer.fill=false;cider_retain_art(visible,1,"M");assert(!transfer.active&&cancel_request==77);cider_prefetch_art("near","M");assert(request_calls==2);
 cider_local_play();ncommands=0;local_playing=1;int old_pauses=pauses;
 assert(cider_play("play/library-songs/fail"));play_reply=-1;assert(cider_play_status()==-1&&!active&&local_playing&&pauses==old_pauses);
 assert(cider_play("play/library-songs/timeout"));current_tick+=601;assert(cider_play_status()==-1&&!active);

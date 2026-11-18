@@ -5,6 +5,8 @@
 #include "screens/playback/cider_model.h"
 #include "screens/playback/cider_store.h"
 #ifdef HAVE_USB_PODLINK
+#define CIDER_COVER_DIM 128
+#define CIDER_COVER_SCRATCH_BYTES (CIDER_COVER_DIM * CIDER_COVER_DIM * sizeof(uint16_t))
 void cider_store_stats(struct cider_store_stats *out);
 void cider_store_build(bool enable);
 bool cider_store_building(void);

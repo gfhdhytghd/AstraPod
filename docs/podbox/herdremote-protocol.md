@@ -1093,3 +1093,30 @@ link invalidates the session. MENU never sends Enter. Esc behavior belongs
 to the agent: Claude cancels/backtracks its editor; Codex cancels its current
 composer/editor (approval RIGHT's Esc denies without choosing custom input).
 Draft retention and exact screen after Esc require agent-version acceptance.
+
+## Continuity handoff v1
+
+HerdRemote sends `HF\t1` once per PodLink session. Only firmware that receives
+this capability can start a handoff. Messages below are PodLink TEXT. Fields
+are tab-delimited, with an unsigned transaction ID scoped to the cable session.
+
+| Direction | Fields after version | Purpose |
+| --- | --- | --- |
+| iPod → host (`hf`) | `q ID duration_ms title artist album` | Match the current track |
+| Host → iPod (`HF`) | `ID offer target matched` | Name the player and report whether the match is unique |
+| iPod → host | `a ID`, `x ID` | Accept, or cancel |
+| Host → iPod | `ID ping sequence host_ms` | Start a monotonic clock exchange |
+| iPod → host | `p ID host_ms sequence rx_tick tx_tick elapsed_ms` | Timestamp the exchange and sample PCM position |
+| Host → iPod | `ID go T_tick offset_ms rtt_ms error_ms startup_ms uncertainty_ms` | Propose the synchronized fade |
+| iPod → host | `g ID` | Acknowledge the proposed fade |
+| Host → iPod | `ID at position_ms` | Host playback position projected to T |
+| iPod → host | `v ID` | Confirm the PCM position is within 50 ms before the host becomes audible |
+| Host → iPod | `ID end`, `ID fail reason` | Host ramp complete, or abort |
+| iPod → host | `d ID` | Local playback stopped and remote playback selected |
+
+Clock synchronization uses the minimum RTT of five exchanges. Device ticks
+are 10 ms. Offset is device time minus host time, encoded as unsigned 32-bit
+milliseconds and interpreted as signed by the iPod. The fade spans three
+seconds. A cable loss invalidates the transaction and both endpoints restore
+their volume. The iPod appends timing and outcome to
+`/.rockbox/handoff-log.txt`.

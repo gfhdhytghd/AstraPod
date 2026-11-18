@@ -66,6 +66,7 @@ static int get_action_worker(action_last_t*l,action_cur_t*c){
 static action_last_t action_last;
 static void podlink_time_sync(void){}
 static void init_act_cur(action_cur_t*c,int ctx,int t,void*p){(void)c;(void)ctx;(void)t;(void)p;}
+static int step_handoff(int action){return action;}
 static int do_backlight(action_last_t*l,action_cur_t*c,int a){(void)l;(void)c;return a;}
 '''
 pre+=fn(a,'get_action')

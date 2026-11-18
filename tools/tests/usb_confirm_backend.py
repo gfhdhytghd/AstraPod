@@ -201,7 +201,7 @@ ui_ports = r'''
 #define SYS_EVENT (1u << 31)
 #define IPOD_ACCESSORY_PROTOCOL
 #define BUTTON_MULTIMEDIA (1u << 28)
-enum { ACTION_STD_OK = 1, ACTION_STD_CANCEL, ACTION_WPS_PLAY,
+enum { ACTION_STD_OK = 1, ACTION_STD_CANCEL, ACTION_WPS_PLAY, ACTION_STD_NEXT, BUTTON_RIGHT,
        DIALOG_ABORT, DIALOG_ACCEPT,
        DIALOG_CONTINUE, BUTTON_SELECT, BUTTON_MENU, BUTTON_PLAY,
        BUTTON_NONE, BUTTON_REL = 0x100, AUDIO_STATUS_PLAY = 0x200,
@@ -219,6 +219,10 @@ enum { ACTION_STD_OK = 1, ACTION_STD_CANCEL, ACTION_WPS_PLAY,
 #include "usb_confirm.h"
 #define LAST_ITEM_IN_LIST {0, 0, 0}
 struct button_mapping { int action, button, prerequisite; };
+static bool remote_choice(void) {return false;}
+static bool handoff_prompt_wps(uint32_t epoch) {(void)epoch;return false;}
+static void handoff_usb_dismissed(void) {}
+static void handoff_begin(void) {}
 struct dialog { bool backlight_on; };
 static bool cable = true, serial_iap;
 static struct usb_consent usb_consent = { USB_CONSENT_PROMPT, 42 };
@@ -262,7 +266,8 @@ int main(void)
     const struct button_mapping *keys = confirm_keymap(0);
     assert(keys[0].button == BUTTON_SELECT && keys[0].action == ACTION_STD_OK);
     assert(keys[1].button == BUTTON_MENU && keys[1].action == ACTION_STD_CANCEL);
-    assert(keys[2].button == (BUTTON_PLAY | BUTTON_REL));
+    assert(keys[2].button == BUTTON_RIGHT && keys[2].action == ACTION_STD_NEXT);
+    assert(keys[3].button == (BUTTON_PLAY | BUTTON_REL));
     assert(key_action(BUTTON_RC_MENU, BUTTON_NONE) == ACTION_STD_CANCEL);
     assert(key_action(BUTTON_RC_MENU | BUTTON_REL, BUTTON_RC_MENU) == 0);
     d.backlight_on = true;

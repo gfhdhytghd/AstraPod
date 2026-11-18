@@ -21,6 +21,7 @@
 #include "button_chord.h"
 #include "backlight.h"
 #include "audio.h"
+#include "audio/playback.h"
 #include "metadata.h"
 #include "settings/settings.h"
 #include "draw/screen_access.h"

@@ -131,6 +131,12 @@ static bool pcmbuf_sync_position = false;
 
 /* Fade effect */
 static unsigned int fade_vol = MIX_AMP_UNITY;
+#ifdef HAVE_USB_PODLINK
+static bool handoff_hold, handoff_ended;
+static unsigned int handoff_gain = MIX_AMP_UNITY;
+static unsigned long handoff_start, handoff_begin;
+static bool handoff_fading;
+#endif
 static enum
 {
     PCM_NOT_FADING = 0,
@@ -633,6 +639,13 @@ static void pcmbuf_monitor_track_change_ex(size_t index)
 
     /* Post now if buffer is no longer coming up */
     chunk_transidx = INVALID_BUF_INDEX;
+#ifdef HAVE_USB_PODLINK
+    if (handoff_hold)
+    {
+        handoff_ended = true;
+        return;
+    }
+#endif
     audio_pcmbuf_track_change(false);
 }
 
@@ -708,7 +721,11 @@ void pcmbuf_start_track_change(enum pcm_track_change_type type)
         start_audio_playback();
     }
     /* Determine whether this track change needs to crossfaded and how */
-    else if (crossfade_setting != CROSSFADE_ENABLE_OFF)
+    else if (crossfade_setting != CROSSFADE_ENABLE_OFF
+#ifdef HAVE_USB_PODLINK
+             && !handoff_hold
+#endif
+             )
     {
         if (crossfade_status == CROSSFADE_INACTIVE &&
             pcmbuf_unplayed_bytes() >= DATA_LEVEL(2) &&
@@ -790,6 +807,18 @@ static void pcmbuf_pcm_callback(const void **start, size_t *size)
         if (track_change)
         {
             chunk_transidx = INVALID_BUF_INDEX;
+#ifdef HAVE_USB_PODLINK
+            if (handoff_hold)
+            {
+                /* Park on the outgoing track. The UI will either stop it
+                 * without advancing or release this boundary on unplug. */
+                handoff_ended = true;
+                chunk_ridx = index_next(index);
+                current_desc = NULL;
+                *size = 0;
+                return;
+            }
+#endif
             audio_pcmbuf_track_change(true);
         }
 
@@ -839,6 +868,9 @@ void pcmbuf_play_start(void)
     logf("pcmbuf_play_start");
 
     if (mixer_channel_status(PCM_MIXER_CHAN_PLAYBACK) == CHANNEL_STOPPED &&
+#ifdef HAVE_USB_PODLINK
+        !handoff_ended &&
+#endif
         chunk_widx != chunk_ridx)
     {
         seek_restart = false;
@@ -871,6 +903,9 @@ void pcmbuf_play_stop(void)
 
     /* Reset buffer */
     init_buffer_state();
+#ifdef HAVE_USB_PODLINK
+    handoff_ended = false;
+#endif
 
     /* Revert to position updates by PCM */
     pcmbuf_sync_position = false;
@@ -1413,8 +1448,84 @@ static void pcmbuf_update_volume(void)
     if (soft_mode)
         vol >>= 2;
 
+#ifdef HAVE_USB_PODLINK
+    if (vol == MIX_AMP_UNITY)
+        vol = handoff_gain;
+    else if (handoff_gain != MIX_AMP_UNITY)
+        vol = (vol * handoff_gain) >> 16;
+#endif
     mixer_channel_set_amplitude(PCM_MIXER_CHAN_PLAYBACK, vol);
 }
+
+#ifdef HAVE_USB_PODLINK
+/* The normal stop/pause fader and handoff envelope remain independent. */
+static void handoff_fade_tick(void)
+{
+    if (TIME_BEFORE(current_tick, handoff_start)) return;
+    if (!handoff_begin) handoff_begin = current_tick;
+    unsigned long age = current_tick - handoff_start;
+    handoff_gain = age < 3 * HZ ? MIX_AMP_UNITY * (3 * HZ - age) / (3 * HZ) : 0;
+    pcmbuf_update_volume();
+    if (!handoff_gain)
+    {
+        tick_remove_task(handoff_fade_tick);
+        handoff_fading = false;
+    }
+}
+
+void pcmbuf_handoff_fade(unsigned long start)
+{
+    handoff_start = start;
+    handoff_begin = 0;
+    handoff_fading = true;
+    tick_add_task(handoff_fade_tick);
+}
+
+unsigned long pcmbuf_handoff_fade_begin(void)
+{
+    return handoff_begin;
+}
+
+void pcmbuf_handoff_cancel(void)
+{
+    if (handoff_fading) tick_remove_task(handoff_fade_tick);
+    handoff_fading = false;
+    handoff_gain = MIX_AMP_UNITY;
+    pcmbuf_update_volume();
+}
+
+bool pcmbuf_handoff_ended(void)
+{
+    return handoff_ended;
+}
+
+void pcmbuf_handoff_hold(bool enable)
+{
+    pcm_play_lock();
+    handoff_hold = enable;
+    bool release = !enable && handoff_ended;
+    if (release) handoff_ended = false;
+    pcm_play_unlock();
+    if (release)
+    {
+        audio_pcmbuf_track_change(false);
+        if (audio_pcmbuf_may_play()) pcmbuf_play_start();
+    }
+}
+
+unsigned long pcmbuf_handoff_position(unsigned long fallback)
+{
+    /* Project the WPS PCM marker into the part of this chunk already mixed. */
+    pcm_play_lock();
+    struct chunkdesc *desc = current_desc;
+    size_t bytes = mixer_channel_get_bytes_waiting(PCM_MIXER_CHAN_PLAYBACK);
+    unsigned int frequency = mixer_get_frequency();
+    if (desc && desc->pos_key && desc->size >= bytes && frequency)
+        fallback = desc->elapsed + (desc->size - bytes) * 1000 / (frequency * PCMBUF_SAMPLE_SIZE);
+    pcm_play_unlock();
+    return fallback;
+}
+#endif
 
 /* Tick that does the fade for the playback channel */
 static void pcmbuf_fade_tick(void)

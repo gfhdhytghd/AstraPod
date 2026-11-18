@@ -132,6 +132,7 @@ widgets/splash.c
 widgets/text_box.c
 widgets/yesno.c
 widgets/usb_confirm.c
+screens/playback/handoff.c
 #ifdef HAVE_TAGCACHE
 widgets/folder_select.c
 #endif

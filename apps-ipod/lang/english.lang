@@ -28126,3 +28126,122 @@
     *: "Lyrics lead"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_HANDOFF_TITLE
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Hand off to computer?"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "Hand off to computer?"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_BODY
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Continue on %s: %s"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "Continue on %s: %s"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_ACCEPT
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Hand off"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "Hand off"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_LEAVE
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Keep on iPod"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "Keep on iPod"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_NOT_FOUND
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Song not found on the computer"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "Song not found on the computer"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_FAILED
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Handoff failed"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "Handoff failed"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_USB
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "RIGHT   Remote control"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "RIGHT   Remote control"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>

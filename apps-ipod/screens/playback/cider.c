@@ -1,6 +1,7 @@
 /* Resident Cider receiver and bounded cache. Disk I/O stays on its worker. */
 #include "config.h"
 #include "screens/playback/cider.h"
+#include "screens/playback/handoff.h"
 #include "screens/playback/cider_library.h"
 #include "screens/playback/cider_store.h"
 #include "audio.h"
@@ -1017,12 +1018,30 @@ static bool cider_sleep_pause(void)
     sleep_pause_due = true;
     return true;
 }
+static bool resident_receive(const struct podlink_message *m)
+{
+    return handoff_receive(m) || receive(m);
+}
+
+static unsigned int resident_next(char *record, unsigned int size)
+{
+    unsigned int n = handoff_next(record, size);
+    return n ? n : next(record, size);
+}
+
+static void resident_reset(void)
+{
+    handoff_reset();
+    reset();
+}
+
 void cider_init(void)
 {
-    static const struct podlink_resident consumer = {receive, next, reset};
+    static const struct podlink_resident consumer = {resident_receive, resident_next, resident_reset};
     if (initialized) return;
     set_sleep_timer_callback(cider_sleep_pause);
     mutex_init(&cider_mutex);
+    handoff_init();
     queue_init(&disk_queue, true);
     cs_init(&store, &store_io, STORE_ROOT, CIDER_STORE_CAP);
     store.cancelled = disk_usb_pending;
@@ -1052,17 +1071,19 @@ bool cider_active(void) { return active || (play_request && play_reply >= 0); }
 bool cider_play_pending(void) { return play_request != 0; }
 void cider_source_poll(void)
 {
+    if (handoff_hold_source()) return;
     bool online = cider_available();
     if (online == source_seen && (!online || source_generation == state.generation)) return;
     source_seen = online;
     source_generation = online ? state.generation : 0;
     /* One Now Playing source. Never resume local audio on an unplug. */
     int local = audio_status();
-    if ((local & AUDIO_STATUS_PLAY) && !(local & AUDIO_STATUS_PAUSE)) audio_pause();
+    if (online && (local & AUDIO_STATUS_PLAY) && !(local & AUDIO_STATUS_PAUSE)) audio_pause();
     active = online;
 }
 void cider_remote_source(void)
 {
+    if (handoff_hold_source()) return;
     bool use_cider = cider_available();
     if (use_cider && (audio_status() & AUDIO_STATUS_PLAY)) audio_pause();
     active = use_cider;

@@ -19,6 +19,7 @@ pre=r'''
 static bool active,online,paused;static int pending;
 static int target,local_calls,cider_calls;
 static bool wps_return_agents,wps_select_remote,cover_toggled_back;
+static bool handoff_hold_source(void){return false;}
 static bool cider_available(void){return online;}static bool cider_active(void){return active;}
 static int audio_status(void){return paused?0:1;}static void audio_pause(void){paused=true;}
 static int agents_nav_pending(void){return pending;}

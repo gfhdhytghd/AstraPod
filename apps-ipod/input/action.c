@@ -60,6 +60,7 @@ void agents_shortcut_commit_select(void)
 #ifdef HAVE_USB_PODLINK
 #include "podlink.h"
 #include "screens/playback/cider.h"
+#include "screens/playback/handoff.h"
 #include "system/podlink_time.h"
 #include "input/remote_menu.h"
 #include "root_menu.h"
@@ -1069,6 +1070,10 @@ static void init_act_cur(action_cur_t *cur,
     cur->context             = context;
     cur->is_prebutton        = false;
     cur->items               = NULL;
+#ifdef HAVE_USB_PODLINK
+    if (handoff_pending() && (timeout < 0 || timeout > HZ / 50))
+        timeout = HZ / 50;
+#endif
     cur->timeout             = timeout;
     cur->get_context_map = get_context_map;
 }
@@ -1230,6 +1235,20 @@ static bool shortcut_screen_context(int context)
 
 #endif
 
+static int step_handoff(int action)
+{
+#ifdef HAVE_USB_PODLINK
+    if (thread_self() == ui_thread)
+    {
+        int result = handoff_step();
+        if (result == 2)
+            return get_current_activity() == ACTIVITY_WPS ? ACTION_REDRAW : ACTION_REMOTE_WPS;
+        if (result == 1) return ACTION_REDRAW;
+    }
+#endif
+    return action;
+}
+
 static int route_screen_shortcut(int action, int context)
 {
 #ifdef HAVE_USB_PODLINK
@@ -1300,7 +1319,7 @@ int get_action(int context, int timeout)
         return ACTION_REDRAW;
     }
 #endif
-    action = route_screen_shortcut(action, context);
+    action = route_screen_shortcut(step_handoff(action), context);
     return menu_back_action(action);
 }
 
@@ -1414,7 +1433,7 @@ int get_custom_action(int context,int timeout,
         return ACTION_REDRAW;
     }
 #endif
-    action = route_screen_shortcut(action, context);
+    action = route_screen_shortcut(step_handoff(action), context);
     return menu_back_action(action);
 }
 

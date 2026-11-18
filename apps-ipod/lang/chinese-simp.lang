@@ -28018,3 +28018,122 @@
     *: "上一画面"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_HANDOFF_TITLE
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Hand off to computer?"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "接力到电脑？"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_BODY
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Continue on %s: %s"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "在 %s 上继续播放《%s》"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_ACCEPT
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Hand off"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "接力"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_LEAVE
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Keep on iPod"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "留在 iPod"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_NOT_FOUND
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Song not found on the computer"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "电脑上找不到这首歌"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_FAILED
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "Handoff failed"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "接力失败"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_USB
+  desc: Continuity handoff
+  user: core
+  <source>
+    *: none
+    ipod6g: "RIGHT   Remote control"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "右键    连接遥控"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>

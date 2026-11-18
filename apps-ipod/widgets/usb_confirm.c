@@ -8,6 +8,9 @@
 #include "input/action.h"
 #include "system/shutdown.h"
 #include "screens/playback/wps.h"
+#include "screens/playback/handoff.h"
+#include "screens/playback/cider.h"
+#include "lang.h"
 #include "audio.h"
 #include "backlight.h"
 
@@ -16,6 +19,12 @@ static const char *const lines[] = {
     "SELECT  Connect",
     "MENU    Charge only",
 };
+
+static bool remote_choice(void)
+{
+    return handoff_capable() && !cider_active() &&
+           (audio_status() & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE)) == AUDIO_STATUS_PLAY;
+}
 
 static void confirm_measure(struct dialog *d, struct screen *s,
                             struct viewport *box, void *data)
@@ -30,8 +39,15 @@ static void confirm_measure(struct dialog *d, struct screen *s,
         s->getstringsize(lines[i], &w, NULL);
         width = MAX(width, w);
     }
+    bool remote = remote_choice();
+    if (remote)
+    {
+        int w;
+        s->getstringsize(str(LANG_HANDOFF_USB), &w, NULL);
+        width = MAX(width, w);
+    }
     box->width = MIN(width + in.left + in.right, s->lcdwidth - 24);
-    box->height = ARRAYLEN(lines) * s->getcharheight() + in.top + in.bottom;
+    box->height = (ARRAYLEN(lines) + remote) * s->getcharheight() + in.top + in.bottom;
     box->x = (s->lcdwidth - box->width) / 2;
     box->y = (s->lcdheight - box->height) / 2;
 }
@@ -46,6 +62,8 @@ static void confirm_draw(struct dialog *d, struct screen *s,
     s->set_drawmode(DRMODE_FG);
     for (unsigned i = 0; i < ARRAYLEN(lines); ++i)
         s->putsxy(0, i * s->getcharheight(), lines[i]);
+    if (remote_choice())
+        s->putsxy(0, ARRAYLEN(lines) * s->getcharheight(), str(LANG_HANDOFF_USB));
 }
 
 static int confirm_action(struct dialog *d, int action, void *data)
@@ -53,13 +71,21 @@ static int confirm_action(struct dialog *d, int action, void *data)
     uint32_t epoch = *(uint32_t *)data;
     if (!usb_confirm_pending(epoch))
         return DIALOG_ABORT;
+    if (remote_choice() && handoff_prompt_wps(epoch))
+        return DIALOG_ACCEPT;
     switch (action)
     {
         case ACTION_STD_OK:
         case ACTION_STD_CANCEL:
             if (!d->backlight_on)
                 break;
+            handoff_usb_dismissed();
             usb_confirm_reply(epoch, action == ACTION_STD_OK);
+            return DIALOG_ACCEPT;
+        case ACTION_STD_NEXT:
+            if (!d->backlight_on || !remote_choice()) break;
+            usb_confirm_reply(epoch, false);
+            handoff_begin();
             return DIALOG_ACCEPT;
         case ACTION_WPS_PLAY:
         case BUTTON_MULTIMEDIA_PLAYPAUSE:
@@ -85,6 +111,7 @@ static const struct button_mapping *confirm_keymap(int context)
     static const struct button_mapping keys[] = {
         { ACTION_STD_OK, BUTTON_SELECT, BUTTON_NONE },
         { ACTION_STD_CANCEL, BUTTON_MENU, BUTTON_NONE },
+        { ACTION_STD_NEXT, BUTTON_RIGHT, BUTTON_NONE },
         { ACTION_WPS_PLAY, BUTTON_PLAY | BUTTON_REL, BUTTON_PLAY },
 #ifdef IPOD_ACCESSORY_PROTOCOL
         { ACTION_STD_CANCEL, BUTTON_RC_MENU, BUTTON_NONE },
@@ -118,6 +145,7 @@ void gui_usb_confirm_run(uint32_t epoch)
     };
     if (!usb_confirm_pending(epoch))
         return;
+    if (handoff_prompt_wps(epoch)) return;
     backlight_on();
     struct dialog d;
     dialog_init(&d, CONTEXT_STD, NULL, NULL, &cb, &epoch);

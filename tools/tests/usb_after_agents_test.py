@@ -81,6 +81,10 @@ enum { USB_DRIVER_MASS_STORAGE, USB_DRIVER_SERIAL, USB_DRIVER_CHARGING_ONLY,
        USB_DRIVER_HID, USB_DRIVER_AUDIO, USB_DRIVER_IAP, USB_NUM_DRIVERS };
 enum { AGENTS_EXIT_MENU, AGENTS_SWITCH_WPS = 2 };
 enum { DIALOG_CONTINUE, DIALOG_ACCEPT, DIALOG_ABORT };
+static bool remote_choice(void) {return false;}
+static bool handoff_prompt_wps(uint32_t epoch) {(void)epoch;return false;}
+static void handoff_usb_dismissed(void) {}
+static void handoff_begin(void) {}
 struct dialog { bool backlight_on; };
 struct button_mapping {int action,button,pre;};
 struct event_queue {int unused;};

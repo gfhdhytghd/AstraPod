@@ -105,7 +105,7 @@ bool cider_route_matches(const char *route, const char *id)
 }
 
 int cider_state_apply(struct cider_state *s, const void *data,
-                      unsigned int length, uint32_t tick)
+                      unsigned int length, uint32_t tick, int hz)
 {
     char buf[1024], *f[20];
     if (length >= sizeof buf || memchr(data, 0, length)) return 0;
@@ -127,6 +127,7 @@ int cider_state_apply(struct cider_state *s, const void *data,
             s->seq = 0; s->have = false; s->remote = 0;
             s->generation = gen;
         }
+        if (!strcmp(f[2], "0")) s->clock_correction = 0;
         s->available = f[2][0] == '1';
         if (!s->available || !s->have) s->loading = false;
         copy(s->reason, f[3], sizeof s->reason);
@@ -172,6 +173,19 @@ int cider_state_apply(struct cider_state *s, const void *data,
     uint32_t repeat = values[7] == 1 ? 2 : values[7] == 2 ? 1 : 0;
     if (n >= 19 && (!number(f[18], &repeat) || repeat > 4)) return 0;
     if (n == 20 && strcmp(f[19], "0") && strcmp(f[19], "1")) return 0;
+
+    int correction = 0;
+    if (s->have && s->available && !strcmp(s->id, f[10]))
+    {
+        /* A changed position while paused is a seek. A small pause/resume
+         * error keeps the displayed position continuous. */
+        if (s->rate || values[4] || values[3] == s->position)
+        {
+            int error = (int)cider_playback_position(s, tick, hz) - (int)values[3];
+            if (error >= -500 && error <= 500) correction = error;
+        }
+    }
+    s->clock_correction = correction;
     s->loading = n == 20 && f[19][0] == '1';
     s->seq = values[0]; s->host_ms = values[1];
     s->duration = values[2]; s->position = values[3];
@@ -187,7 +201,8 @@ int cider_state_apply(struct cider_state *s, const void *data,
     copy(s->album, f[15], sizeof s->album);
     s->muted = n >= 18 && !strcmp(f[16], "1");
     if (n >= 18) copy(s->composer, f[17], sizeof s->composer);
-    s->received = tick; s->have = true;
+    s->received = s->position_tick = tick;
+    s->have = true;
     return 1;
 }
 
@@ -260,8 +275,26 @@ uint32_t cider_position(const struct cider_state *s, uint32_t tick, int hz)
 {
     uint64_t p = s->position;
     if (s->available && hz > 0)
-        p += (uint64_t)(uint32_t)(tick - s->received) * s->rate / hz;
+        p += (uint64_t)(uint32_t)(tick - s->position_tick) * s->rate / hz;
     return p > s->duration ? s->duration : p;
+}
+
+uint32_t cider_playback_position(const struct cider_state *s, uint32_t tick, int hz)
+{
+    int64_t position = s->position;
+    if (s->available && hz > 0)
+    {
+        uint32_t age = tick - s->position_tick;
+        position += (uint64_t)age * s->rate / hz;
+        /* Remove up to 500 ms of error over one second of playback.
+         * Leave the displayed position frozen while paused. */
+        if (!s->rate)
+            position += s->clock_correction;
+        else if (age < (uint32_t)hz)
+            position += s->clock_correction * (hz - (int)age) / hz;
+    }
+    if (position < 0) return 0;
+    return position > s->duration ? s->duration : position;
 }
 
 int cider_cache_find(struct cider_cache *c, const char *key, const char *tier)

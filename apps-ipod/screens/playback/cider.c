@@ -335,13 +335,17 @@ static bool receive(const struct podlink_message *m)
         bool had_state = state.have;
         bool was_loading = state.loading;
         uint32_t position = cider_position(&state,current_tick,HZ);
-        cider_state_apply(&state, m->data, m->length, current_tick);
+        cider_state_apply(&state, m->data, m->length, current_tick, HZ);
         if (available != state.available || had_state != state.have)
             button_queue_post(BUTTON_REDRAW, 0);
         if (was_loading != state.loading)
             cider_log("CIDER loading received tick=%ld loading=%d seq=%lu", current_tick,
                       state.loading, (unsigned long)state.seq);
-        if (available && !state.available) state.position = position;
+        if (available && !state.available)
+        {
+            state.position = position;
+            state.position_tick = current_tick;
+        }
         if (library != state.library_generation)
         {
             cider_library_invalidate(state.library_generation);

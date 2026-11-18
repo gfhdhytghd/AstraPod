@@ -61,11 +61,11 @@ int main(void)
     assert(p("CF\t4294967295\tremote\tRufin", 4294967295u) == 3);
     struct cider_state s; memset(&s, 0, sizeof s);
     const char ca[] = "CA\t7\t1\t";
-    assert(cider_state_apply(&s, ca, sizeof ca - 1, 1) == 1 && s.generation == 7);
+    assert(cider_state_apply(&s, ca, sizeof ca - 1, 1, 100) == 1 && s.generation == 7);
     s.remote = 3;
-    assert(cider_state_apply(&s, ca, sizeof ca - 1, 2) == 1 && s.remote == 3);   /* same session keeps it */
+    assert(cider_state_apply(&s, ca, sizeof ca - 1, 2, 100) == 1 && s.remote == 3);   /* same session keeps it */
     const char ca2[] = "CA\t8\t1\t";
-    assert(cider_state_apply(&s, ca2, sizeof ca2 - 1, 3) == 1 && s.remote == 0); /* new session: Cider */
+    assert(cider_state_apply(&s, ca2, sizeof ca2 - 1, 3, 100) == 1 && s.remote == 0); /* new session: Cider */
     printf("parse/reset PASS (struct cider_state %zu bytes)\n", sizeof s);
     return 0;
 }

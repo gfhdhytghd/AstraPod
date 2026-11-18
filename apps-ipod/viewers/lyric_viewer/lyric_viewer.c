@@ -616,6 +616,26 @@ static LV_PIXELS_ARM void lv_text(const char *text, int key, int font, int x, in
     }
 }
 
+struct lv_playback_sample {
+    long elapsed, position;
+    uint32_t sequence;
+};
+
+/* WPS supplies the interpolated remote time; local playback supplies codec
+ * time. Keep the raw position separately to acknowledge a requested seek. */
+static struct lv_playback_sample lv_playback_clock(const struct mp3entry *id3)
+{
+    struct lv_playback_sample sample = { .elapsed = id3 ? id3->elapsed : 0 };
+    if (lv.remote)
+        sample.sequence = cider_wps_clock(&sample.position);
+    else
+    {
+        sample.position = sample.elapsed;
+        sample.sequence = audio_seek_serial();
+    }
+    return sample;
+}
+
 /* Keep transport and progress on playback time. All lyrics consumers use
  * the shifted and clamped clock, after any offset carried by the document. */
 static long lv_lyric_elapsed(void)
@@ -1132,7 +1152,8 @@ static void lv_reload(struct mp3entry *id3, bool remote)
     /* Copy metadata before lyrics_load can compact the playback buffer. */
     strlcpy(lv.track, id3 ? id3->path : "", sizeof lv.track);
     lv.remote = remote; lv.pending = false;
-    lv.elapsed = id3 ? id3->elapsed : 0; lv.length = id3 ? id3->length : 0;
+    lv.elapsed = lv_playback_clock(id3).elapsed;
+    lv.length = id3 ? id3->length : 0;
     uint32_t document_at = lv.initial ? lv_clock() : 0;
     if (remote)
     {
@@ -1211,7 +1232,7 @@ static void lv_seek_draw(void)
     struct wps_state *s = get_wps_state();
     if (lv.remote && (!s->id3 || strcmp(s->id3->path, lv.track)))
         return;
-    if (s->id3) lv.elapsed = s->id3->elapsed + s->ff_rewind_count;
+    if (s->id3) lv.elapsed = lv_playback_clock(s->id3).elapsed + s->ff_rewind_count;
     if (lyrics_loaded() && lyrics_mode_follow(&lv.mode, lyrics_timed(), lyrics_index_at(lv_lyric_elapsed()), current_tick, HZ)) lv_focus();
     uint32_t started = lv_clock();
     if (lv.track_fade)
@@ -1240,8 +1261,9 @@ static void lv_transport(int action)
 
 /* Remote WPS extrapolates between CN records. Only a new sample can
  * confirm the seek, and it must be closer to the target than the old clock. */
-static long lv_seek_elapsed(long elapsed)
+static long lv_seek_elapsed(struct lv_playback_sample clock)
 {
+    long elapsed = clock.elapsed;
     if (!lv.seek_pending) return elapsed;
     uint32_t age = (uint32_t)current_tick - lv.seek_tick;
     if (perf.seek_clock_us < 0)
@@ -1249,15 +1271,13 @@ static long lv_seek_elapsed(long elapsed)
         bool arrived;
         if (lv.remote)
         {
-            long sample;
-            uint32_t seq = cider_wps_clock(&sample);
             long old = lv.seek_from + (lv.seek_running ? (long)age * (1000 / HZ) : 0);
-            arrived = seq != lv.seek_seq &&
-                sample >= lv.seek_target - 250 && sample <= lv.seek_target + 750 &&
-                labs(sample - lv.seek_target) < labs(sample - old);
+            arrived = clock.sequence != lv.seek_seq &&
+                clock.position >= lv.seek_target - 250 && clock.position <= lv.seek_target + 750 &&
+                labs(clock.position - lv.seek_target) < labs(clock.position - old);
         }
         else
-            arrived = audio_seek_serial() != lv.seek_seq &&
+            arrived = clock.sequence != lv.seek_seq &&
                 elapsed >= lv.seek_target - 250 && elapsed <= lv.seek_target + 750;
         if (!arrived)
         {
@@ -1292,7 +1312,8 @@ static bool lv_select_seek(uint32_t pressed)
     if (lv.remote && (!cider_available() || remote_doc.serial != lv.remote_serial))
         return false;
 #endif
-    lv.elapsed = id3->elapsed;
+    struct lv_playback_sample clock = lv_playback_clock(id3);
+    lv.elapsed = clock.elapsed;
     if (lv.mode.focus == lyrics_index_at(lv_lyric_elapsed()))
         return false;
 
@@ -1300,8 +1321,7 @@ static bool lv_select_seek(uint32_t pressed)
      * already includes the document offset. */
     int64_t time = (int64_t)lyrics_time(lv.mode.focus) - global_settings.lyric_lead;
     long target = MAX(0, MIN(time, lv.length > 0 ? lv.length : LONG_MAX));
-    long sample;
-    lv.seek_seq = lv.remote ? cider_wps_clock(&sample) : audio_seek_serial();
+    lv.seek_seq = clock.sequence;
     lv.seek_from = lv.elapsed;
     lv.seek_running = !lv.paused;
     lv.seek_at = pressed;
@@ -1432,7 +1452,11 @@ int lyric_viewer(void)
             lv_reload(id3, remote);
             id3 = remote ? get_wps_state()->id3 : audio_current_track();
         }
-        if (id3) { lv.elapsed = lv_seek_elapsed(id3->elapsed); lv.length = id3->length; }
+        if (id3)
+        {
+            lv.elapsed = lv_seek_elapsed(lv_playback_clock(id3));
+            lv.length = id3->length;
+        }
         lv.paused = remote ? s->paused : (audio_status() & AUDIO_STATUS_PAUSE) != 0;
         lv_remote_page();
         if (lv.track[0])

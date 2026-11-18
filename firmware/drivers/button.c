@@ -212,6 +212,9 @@ static bool filter_first_remote_keypress_enabled(int button, int data)
 
 static void button_tick(void)
 {
+#ifdef HAVE_WHEEL_WPS_CHORD
+    static unsigned int chord_wait;
+#endif
     static int count = 0;
     static int repeat_speed = REPEAT_INTERVAL_START;
 #ifdef HAVE_SW_POWEROFF
@@ -242,6 +245,22 @@ static void button_tick(void)
     diff = btn ^ lastbtn;
     if(diff && (btn & diff) == 0)
     {
+#ifdef HAVE_WHEEL_WPS_CHORD
+        /* A tap shorter than the chord window still needs its down event. */
+        if (chord_wait)
+        {
+            chord_wait = 0;
+            post = false;
+#ifdef HAVE_BACKLIGHT
+            skip_release = keypress_filter_fn(lastbtn, lastdata);
+            backlight_on();
+            buttonlight_on();
+#else
+            button_queue_try_post(lastbtn, lastdata);
+#endif
+            reset_poweroff_timer();
+        }
+#endif
 #ifdef HAVE_BACKLIGHT
 #ifdef HAVE_REMOTE_LCD
         if(diff & BUTTON_REMOTE)
@@ -266,6 +285,12 @@ static void button_tick(void)
             /* normal keypress */
             if ( btn != lastbtn )
             {
+#ifdef HAVE_WHEEL_WPS_CHORD
+                /* Give the other key 60 ms from the debounced first down.
+                 * A chord can otherwise commit an action on its first key. */
+                chord_wait = lastbtn == BUTTON_NONE &&
+                    (btn == BUTTON_SELECT || btn == BUTTON_PLAY) ? 1 + 6 * HZ / 100 : 0;
+#endif
                 post = true;
                 repeat = false;
                 repeat_speed = REPEAT_INTERVAL_START;
@@ -370,6 +395,10 @@ static void button_tick(void)
                     }
                 }
             }
+#ifdef HAVE_WHEEL_WPS_CHORD
+            if (chord_wait) --chord_wait;
+            if (!chord_wait)
+#endif
             if ( post )
             {
                 if (repeat)

@@ -39,6 +39,7 @@
 #include "file.h"
 #include "menu.h"
 #include "button.h"
+#include "button_chord.h"
 #include "kernel.h"
 #include "debug.h"
 #include "usb.h"
@@ -55,7 +56,7 @@
 #include "audio/sound_feedback.h"
 #include "system/shutdown.h"
 #include "input/action.h"
-#ifdef HAVE_USB_PODLINK
+#ifdef HAVE_WHEEL_WPS_CHORD
 #include "input/agents_shortcut.h"
 #endif
 #include "screens/settings/exported_settings.h"
@@ -761,13 +762,13 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                                 list_do_action_timeout(&lists, HZ));
             /* HZ so the status bar redraws corectly */
 
-#ifdef HAVE_USB_PODLINK
+#ifdef HAVE_WHEEL_WPS_CHORD
         /* Root CANCEL normally stays at Home. A deferred screen shortcut
          * must instead return to root_menu's dispatcher, which consumes it.
          * Otherwise get_action keeps returning CANCEL without a queue wait. */
         if (menu == &root_menu_ && agents_nav_pending() != AGENTS_NAV_NONE)
         {
-            ret = GO_TO_PREVIOUS;
+            ret = agents_nav_pending() == AGENTS_NAV_WPS ? GO_TO_WPS : GO_TO_PREVIOUS;
             done = true;
             break;
         }

@@ -83,6 +83,9 @@ static void default_event_handler(int b) {(void)b;}
 enum {PF_MENU=1,PF_QUIT,PF_SORTING_NEXT,PF_SORTING_PREV,PF_RANDOM,PF_PREV,PF_PREV_REPEAT,PF_NEXT,PF_NEXT_REPEAT};
 #define ACTION_NONE 100
 #define ACTION_STD_QUICKSCREEN 101
+#define ACTION_AGENTS_SWITCH 102
+#define ACTION_TREE_WPS 103
+static bool podlink_host_connected(void){return true;}
 struct button_mapping {int action,button,prerequisite;};
 #define CONTEXT_TREE 1
 #define LAST_ITEM_IN_LIST__NEXTLIST(x) {0,0,x}
@@ -91,6 +94,7 @@ source = pre + body('apps-ipod/input/remote_menu.h')
 source += body('firmware/export/button_chord.h')
 source += body('apps-ipod/input/agents_shortcut.c')
 source += body('apps-ipod/input/agents_remote.c')
+source += function(action, 'wheel_shortcut_button')
 source += function(action, 'agents_shortcut_get_button')
 source += function(arcade, 'menu_held_long') + function(arcade, 'buttons')
 source += function(image, 'iv_decode_row') + keys

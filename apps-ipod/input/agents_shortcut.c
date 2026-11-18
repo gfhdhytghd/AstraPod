@@ -68,14 +68,19 @@ int agents_shortcut_button(struct agents_shortcut_state *s, int button,
     if (button & (SYS_EVENT | BUTTON_MULTIMEDIA)) return button;
     if (button == BUTTON_REDRAW) return button;
     if (button & BUTTON_REMOTE) return button;
-    if (s->latched || s->ignored)
+    if (s->latched)
     {
-        bool blocked = (button & chord) != 0;
-        bool ignored = s->ignored;
-        if (!(held & chord)) s->latched = s->ignored = false;
-        if (ignored && (button & BUTTON_PLAY))
+        if (button & BUTTON_REL) s->remaining &= ~(button & chord);
+        else s->remaining |= button & chord;
+        if (!s->remaining && !(held & chord)) s->latched = false;
+        return (button & chord) ? BUTTON_NONE : button;
+    }
+    if (s->ignored)
+    {
+        if (!(held & chord)) s->ignored = false;
+        if (button & BUTTON_PLAY)
             return button & ~BUTTON_SELECT;
-        return blocked ? BUTTON_NONE : button;
+        return (button & chord) ? BUTTON_NONE : button;
     }
     int pressed = (button & BUTTON_REL) ? 0 : button & BUTTON_MAIN;
     if (!(held & BUTTON_SELECT) && !(pressed & BUTTON_SELECT))
@@ -90,6 +95,7 @@ int agents_shortcut_button(struct agents_shortcut_state *s, int button,
             return BUTTON_NONE;
         }
         s->latched = true;
+        s->remaining = chord;
         if (held & chord) button_chord_begin();
         *fire = true;
         return BUTTON_NONE;

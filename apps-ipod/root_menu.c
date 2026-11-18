@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include "string-extra.h"
 #include "config.h"
+#include "button_chord.h"
 #include "input/agents_shortcut.h"
 #include "system/app_buffer.h"
 #include "system/appevents.h"
@@ -2205,9 +2206,11 @@ static inline int load_screen(int screen)
     if (activity != ACTIVITY_UNKNOWN)
         push_current_activity(activity);
 
+#ifdef HAVE_WHEEL_WPS_CHORD
+    if (screen == GO_TO_WPS) agents_nav_take(AGENTS_NAV_WPS);
+#endif
 #ifdef HAVE_USB_PODLINK
     if (screen == GO_TO_AGENTS) agents_nav_take(AGENTS_NAV_AGENTS);
-    else if (screen == GO_TO_WPS) agents_nav_take(AGENTS_NAV_WPS);
     else if (screen == GO_TO_CIDER) agents_nav_take(AGENTS_NAV_TRACKS);
     else if (screen == GO_TO_ALBUM_COVERS)
     {
@@ -2223,13 +2226,15 @@ static inline int load_screen(int screen)
         album_covers_cancel_resume();
     }
     ret_val = items[screen].function(items[screen].param);
-#ifdef HAVE_USB_PODLINK
+#ifdef HAVE_WHEEL_WPS_CHORD
     /* A scratch-buffer owner has now unwound. Honor a deferred shortcut at
      * the dispatcher, never from inside that owner's input callback. */
     if (agents_nav_pending() != AGENTS_NAV_NONE && !app_buffer_is_claimed())
     {
         enum agents_nav_screen nav = agents_nav_pending();
-        if (nav == AGENTS_NAV_BACK)
+        if (nav == AGENTS_NAV_WPS) ret_val = GO_TO_WPS;
+#ifdef HAVE_USB_PODLINK
+        else if (nav == AGENTS_NAV_BACK)
         {
             agents_nav_take(nav);
             int origin = cover_nav_active() ? cover_nav_finish() : GO_TO_WPS;
@@ -2237,8 +2242,8 @@ static inline int load_screen(int screen)
             cover_toggled_back = true;
             ret_val = origin == GO_TO_AGENTS ? GO_TO_AGENTS : GO_TO_WPS;
         }
-        else ret_val = nav == AGENTS_NAV_AGENTS ? GO_TO_AGENTS :
-                       nav == AGENTS_NAV_WPS ? GO_TO_WPS : GO_TO_ALBUM_COVERS;
+        else ret_val = nav == AGENTS_NAV_AGENTS ? GO_TO_AGENTS : GO_TO_ALBUM_COVERS;
+#endif
     }
 #endif
 
@@ -2437,7 +2442,7 @@ static int browser_default(void)
 
 void root_menu(void)
 {
-#ifdef HAVE_USB_PODLINK
+#ifdef HAVE_WHEEL_WPS_CHORD
     agents_shortcut_init();
 #endif
     int previous_browser = browser_default();
@@ -2457,6 +2462,11 @@ void root_menu(void)
 
     while (true)
     {
+#ifdef HAVE_WHEEL_WPS_CHORD
+        if (agents_nav_pending() == AGENTS_NAV_WPS &&
+            !agents_nav_active() && !app_buffer_is_claimed())
+            next_screen = GO_TO_WPS;
+#endif
 #ifdef HAVE_USB_PODLINK
         if (!agents_nav_active() && !app_buffer_is_claimed())
         {

@@ -64,7 +64,6 @@ MENUITEM_SETTING(album_covers_scroll_speed, &global_settings.album_covers_scroll
 MENUITEM_SETTING(album_covers_random_spin, &global_settings.album_covers_random_spin, NULL);
 MENUITEM_SETTING(album_covers_transition_speed, &global_settings.album_covers_transition_speed, tilt_only_callback);
 MENUITEM_SETTING(album_covers_show_album_name, &global_settings.album_covers_show_album_name, NULL);
-MENUITEM_SETTING(album_covers_on_select, &global_settings.album_covers_on_select, NULL);
 /* Under Sort Same as Music the carousel's own three sort rows do nothing, so
  * they are hidden while it is on. */
 static int own_sort_callback(int action,
@@ -234,7 +233,6 @@ MAKE_MENU(carousel_appearance_link, ID2P(LANG_APPEARANCE), NULL, Icon_NOICON,
 
 MAKE_MENU(album_covers_menu, ID2P(LANG_CAROUSEL_SETTINGS), NULL, Icon_NOICON,
             &album_covers_sort_menu,
-            &album_covers_on_select,
             &album_covers_scroll_speed,
             &album_covers_random_spin,
             &carousel_appearance_link);

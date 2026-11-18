@@ -39,8 +39,8 @@ static struct
     char art[65];
 } history[12];
 static int depth;
-static bool album_pending, show_covers, remote_return, cover_suspended;
-static int cover_album_depth = -1, cover_parent_depth = -1;
+static bool show_covers, remote_return, cover_suspended;
+static int cover_parent_depth = -1;
 static struct cider_row selected_row;
 enum { CIDER_ROOT_FIXED_ROWS = 3, CIDER_ROOT_LIBRARY_ROWS = 29 };
 static int root_count, browse_floor;
@@ -263,11 +263,6 @@ static bool search(struct cider_row *out)
     search_index = result;
     return result >= 0 && cider_page_row(result, out);
 }
-void cider_browse_album(const struct cider_row *row)
-{
-    selected_row = *row;
-    album_pending = true;
-}
 static void enter(const struct cider_row *r)
 {
     if (depth + 1 >= (int)ARRAYLEN(history))
@@ -298,7 +293,7 @@ static void discard_suspended_covers(void)
 {
     if (!cover_suspended) return;
     cover_suspended = false;
-    cover_parent_depth = cover_album_depth = -1;
+    cover_parent_depth = -1;
     depth = 0;
     history[0].selected = 0;
 }
@@ -325,8 +320,8 @@ int cider_browse_covers(bool home)
 static void close_covers(bool restore_parent)
 {
     if (restore_parent && cover_parent_depth >= 0) depth = cover_parent_depth;
-    cover_parent_depth = cover_album_depth = -1;
-    show_covers = album_pending = false;
+    cover_parent_depth = -1;
+    show_covers = false;
     if (cover_nav_active()) cover_nav_finish();
 }
 static int toggle_covers(void)
@@ -367,7 +362,10 @@ int cider_browse(void)
 #ifdef HAVE_CRUMBS
     crumb(CR_CIDER_IN, 0);
 #endif
-    push_current_activity(ACTIVITY_DATABASEBROWSER);
+    if (show_covers)
+        push_activity_without_refresh(ACTIVITY_DATABASEBROWSER);
+    else
+        push_current_activity(ACTIVITY_DATABASEBROWSER);
     int view_handle = core_alloc_free_space(sizeof(struct cider_browser_view));
     struct cider_browser_view *view =
         view_handle > 0 ? core_get_data_pinned(view_handle) : NULL;
@@ -381,7 +379,7 @@ int cider_browse(void)
     ahead_previous = history[depth].selected;
     cider_warm_art(NULL, 0, "S");
     agents_nav_take(AGENTS_NAV_TRACKS);
-    if (depth)
+    if (depth && !show_covers)
         cider_page_open(history[depth].route);
     int result = GO_TO_PREVIOUS;
     remote_return = false;
@@ -412,15 +410,7 @@ int cider_browse(void)
                 result = toggle_covers();
                 break;
             }
-            if (album_pending)
-            {
-                album_pending = false;
-                int previous = depth;
-                enter(&selected_row);
-                cover_album_depth = depth;
-                animate_depth(&scene, previous);
-            }
-            else if (ret != GO_TO_PREVIOUS)
+            if (ret != GO_TO_PREVIOUS)
             {
                 result = ret;
                 break;
@@ -601,11 +591,6 @@ int cider_browse(void)
                 result = browse_floor ? GO_TO_PREVIOUS : GO_TO_ROOT;
                 break;
             }
-            if (depth == cover_album_depth)
-            {
-                cover_album_depth = -1;
-                show_covers = true;
-            }
             depth--;
             cider_page_open(history[depth].route);
         }
@@ -727,7 +712,6 @@ int cider_browse(void)
         if (result == GO_TO_WPS)
         {
             depth = cover_parent_depth;
-            cover_album_depth = -1;
             cover_nav_set_playing(true);
             cover_suspended = true;
         }

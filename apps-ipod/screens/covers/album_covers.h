@@ -25,12 +25,6 @@ enum carousel_view_mode_values {
     CAROUSEL_VIEW_FLAT
 };
 
-/* Values for global_settings.album_covers_on_select */
-enum on_album_select_values {
-    ON_SELECT_SHOW_TRACKS = 0,
-    ON_SELECT_PLAY_ALBUM
-};
-
 /* Values for global_settings.album_covers_sort_albums_by: the database
  * browser's DB_SORT_ALBUMS_* choices, in the same order. */
 enum sort_albums_by_values {

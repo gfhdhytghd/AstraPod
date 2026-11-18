@@ -23,6 +23,7 @@
 #include "ui/scene.h"
 #include "root_menu.h"
 #include "screens/playback/cider.h"
+#include "screens/covers/carousel.h"
 #ifdef HAVE_USB_PODLINK
 #include "screens/system/agents_screen.h"
 #include "screens/playback/cider_library.h"
@@ -708,10 +709,14 @@ static int wpsscrn(void* param)
     if (!cider_active() && usb_audio_get_active() && usb_audio_get_playing())
     {
         splash(HZ*2, ID2P(LANG_USB_DAC_ACTIVE));
+        carousel_wps_end(false);
         return GO_TO_PREVIOUS;
     }
 #endif
-    push_current_activity(ACTIVITY_WPS);
+    if (carousel_wps_pending())
+        push_activity_without_refresh(ACTIVITY_WPS);
+    else
+        push_current_activity(ACTIVITY_WPS);
 
     if (audstatus || cider_active())
     {
@@ -742,7 +747,11 @@ static int wpsscrn(void* param)
         ret_val = gui_wps_show(return_agents);
     }
 
-    if (ret_val == GO_TO_PLAYLIST_VIEWER
+    if (ret_val == GO_TO_PREVIOUS)
+        carousel_wps_end(false);
+
+    if (carousel_wps_returning()
+        || ret_val == GO_TO_PLAYLIST_VIEWER
         || ret_val == GO_TO_PLUGIN
         || ret_val == GO_TO_WPS
         || ret_val == GO_TO_PREVIOUS_MUSIC
@@ -887,7 +896,9 @@ static int album_covers_scrn(void* param)
 #endif
     if (!cover_nav_active()) cover_nav_begin(GO_TO_PREVIOUS);
     bool toggled = false;
+    carousel_prepare_transition();
     int ret = wait_for_album_tables() ? album_covers_return(NULL, &toggled) : GO_TO_PREVIOUS;
+    carousel_cancel_transition();
     if (ret == GO_TO_PREVIOUS)
     {
         int origin = cover_nav_finish();
@@ -2444,6 +2455,9 @@ static int browser_default(void)
 static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push)
 {
     if (from < GO_TO_ROOT || to < GO_TO_ROOT)
+        return;
+    if (carousel_wps_pending() &&
+        (to == GO_TO_WPS || carousel_wps_returning()))
         return;
     /* Identity keys are used only for comparing endpoints. */
     ui_scene_enter(scene, (const void *)(intptr_t)(from + 16),

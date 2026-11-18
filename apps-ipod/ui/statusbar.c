@@ -252,6 +252,17 @@ void sb_apply_viewport(struct viewport *vp, enum screen_type screen, bool chrome
     core_put_data_pinned(bar);
 }
 
+int sb_visible_height(void)
+{
+    if (status_handle <= 0 || !viewportmanager_theme_enabled(SCREEN_MAIN))
+        return 0;
+    struct statusbar *bar = core_get_data_pinned(status_handle);
+    refresh_theme(bar);
+    int height = bar->fonts_ready ? bar->theme.metric[UI_METRIC_STATUS_HEIGHT] : 0;
+    core_put_data_pinned(bar);
+    return height;
+}
+
 void sb_update(enum screen_type screen, bool force)
 {
     if (status_handle <= 0 || screen != SCREEN_MAIN)

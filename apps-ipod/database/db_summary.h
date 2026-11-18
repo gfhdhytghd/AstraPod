@@ -138,7 +138,16 @@ int db_summary_read_order_table(struct db_summary_order *out, int max,
  * returned and released the claim. */
 int  db_summary_play_album(const struct album_data *album);
 void db_summary_play_album_on_exit(const struct album_data *album);
+void db_summary_play_track_on_exit(const struct album_data *album, int id);
+#define DB_ALBUM_PLAY_USB (-2)
 int  db_summary_play_pending(void);
+
+struct db_album_track {
+    int32_t id, key;
+};
+
+/* Ordered tagcache index IDs. The caller owns the returned core handle. */
+int db_summary_album_track_ids(const struct album_data *album, int *count);
 
 /* Each of an album's tracks to 'sink', in the order db_summary_play_album()
  * plays them, until it returns false. An album with a seek of -1 stands for

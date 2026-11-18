@@ -23,6 +23,9 @@ void cider_library_open(const char *route);
 int cider_library_total(void);
 bool cider_library_stale(void);
 bool cider_library_row(int index, struct cider_row *row);
+void cider_library_tracks_open(const char *route);
+int cider_library_tracks_total(void);
+bool cider_library_track_row(int index, struct cider_row *row);
 bool cider_library_receive(const void *data, unsigned int size,
                            uint32_t generation, uint32_t library);
 unsigned int cider_library_next(char *out, unsigned int size,
@@ -35,5 +38,4 @@ int cider_browse_covers(bool home);
 bool cider_browse_remote_return(void);
 #define CIDER_COVERS_REMOTE_RETURN (-1001)
 int cider_covers(void);
-void cider_browse_album(const struct cider_row *row);
 #endif

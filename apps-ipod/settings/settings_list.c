@@ -835,6 +835,14 @@ const struct settings_list settings[] = {
     SYSTEM_STATUS(0, topruntime,      0,     "TRT"),
     SYSTEM_STATUS(0, last_screen,    -1,     "PVS"),
     SYSTEM_STATUS(0, debug_log_since, 0,     "DLS"),
+    SYSTEM_STATUS(0, cover_local_index, -1,  "CLI"),
+    SYSTEM_STATUS(0, cover_remote_index, -1, "CRI"),
+    SYSTEM_STATUS(0, cover_album_hash, 0,    "CLA"),
+    SYSTEM_STATUS(0, cover_artist_hash, 0,   "CLP"),
+    { F_RESUMESETTING | F_T_UCHARPTR, &global_status.cover_remote_id, -1,
+      CHARPTR(""), "CRA",
+      { .filename_setting = (struct filename_setting[]){
+          {NULL, NULL, sizeof(global_status.cover_remote_id)} } } },
 /* sound settings */
     CUSTOM_SETTING(F_NO_WRAP, volume_limit, LANG_VOLUME_LIMIT,
                   NULL, "volume limit",
@@ -1873,10 +1881,6 @@ const struct settings_list settings[] = {
                   ID2P(LANG_HIDE_ALBUM_TITLE_NEW), ID2P(LANG_SHOW_AT_THE_BOTTOM_NEW),
                   ID2P(LANG_SHOW_AT_THE_TOP_NEW), ID2P(LANG_SHOW_ALL_AT_THE_TOP),
                   ID2P(LANG_SHOW_ALL_AT_THE_BOTTOM)),
-    CHOICE_SETTING(0, album_covers_on_select, LANG_ON_ALBUM_SELECT,
-                  0, "album covers on select",
-                  "show tracks,play album", NULL, 2,
-                  ID2P(LANG_SHOW_TRACKS), ID2P(LANG_PLAY_ALBUM)),
     /* The same choices as database_sort_albums_by below, in the same order. */
     CHOICE_SETTING(0, album_covers_sort_albums_by, LANG_SORT_ALBUMS_BY,
                   3, "album covers sort albums by",

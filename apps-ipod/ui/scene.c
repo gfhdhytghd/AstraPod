@@ -11,6 +11,7 @@
 #include "perf.h"
 #include "retained.h"
 #include "scene.h"
+#include "statusbar.h"
 #include <string.h>
 
 #define PAGE_PIXELS (LCD_WIDTH * LCD_HEIGHT)
@@ -26,6 +27,7 @@
 
 static struct ui_scene *owner;
 static unsigned int owner_thread;
+static const void *root_page, *restored_page;
 
 size_t ui_scene_reserve_size(void)
 {
@@ -66,13 +68,27 @@ static void compose(fb_data *out, const fb_data *back, const fb_data *front,
     }
 }
 
+int ui_scene_modal_body_offset(int offset, int status_height)
+{
+    return offset * (LCD_HEIGHT - status_height) / LCD_HEIGHT;
+}
+
 static void compose_modal(fb_data *out, const fb_data *back, const fb_data *front,
-                          int offset, fb_data tint)
+                          int offset, int status_height, fb_data tint)
 {
     unsigned light = UI_FULL_OPACITY - MODAL_DIM * (LCD_HEIGHT - offset) / LCD_HEIGHT;
+    if (status_height)
+    {
+        int chrome = status_height * LCD_WIDTH;
+        memcpy(out, back, chrome * sizeof(*out));
+        out += chrome;
+        back += chrome;
+        front += chrome;
+        offset = ui_scene_modal_body_offset(offset, status_height);
+    }
     ui_blit_tint(out, back, offset * LCD_WIDTH, light, tint);
     memcpy(out + offset * LCD_WIDTH, front,
-           (LCD_HEIGHT - offset) * LCD_WIDTH * sizeof(*out));
+           (LCD_HEIGHT - status_height - offset) * LCD_WIDTH * sizeof(*out));
 }
 
 static void complete_transition(struct ui_scene *scene)
@@ -97,6 +113,7 @@ static void settle_panel(struct ui_scene *scene)
 static void release_scene(struct ui_scene *scene)
 {
     complete_transition(scene);
+    scene->root_entry = false;
     if (scene->handle > 0)
         scene->handle = core_free(scene->handle);
     if (scene->backdrop_handle > 0)
@@ -129,6 +146,11 @@ void ui_scene_cancel(struct ui_scene *scene)
     struct viewport *previous = lcd_set_viewport(NULL);
     lcd_update();
     lcd_set_viewport(previous);
+}
+
+void ui_scene_discard(struct ui_scene *scene)
+{
+    release_scene(scene);
 }
 
 void ui_scene_interrupt(void)
@@ -263,68 +285,110 @@ void ui_scene_boot(struct ui_scene *scene)
 
 void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bool push)
 {
+    const void *restored = restored_page;
+    restored_page = NULL;
+    root_page = to;
+    if (restored == to)
+        return;
     if (from != to && ui_scene_capture(scene, from, to, push))
+    {
+        scene->root_entry = true;
         scene->automatic = true;
+    }
 }
 
-static void open_panel(struct ui_scene *scene, bool vertical, const char *route)
+const void *ui_scene_modal_parent(void)
+{
+    if (owner && owner->root_entry && owner->capturing && owner_thread == thread_self())
+        return owner->target_front ? owner->back_page : owner->front_page;
+    return root_page;
+}
+
+void ui_scene_modal_restored(const void *page)
+{
+    restored_page = page;
+}
+
+static bool capture_panel(struct ui_scene *scene, bool vertical)
 {
     unsigned frames = ui_theme_duration(vertical ? MODAL_UP_FRAMES : PUSH_FRAMES);
     if (!frames || !lcd_active())
-        return;
+        return false;
 
+    const void *parent = vertical ? ui_scene_modal_parent() : NULL;
     if (owner && owner != scene && owner_thread == thread_self() &&
         owner->backdrop_handle > 0 && owner->target_front)
         settle_panel(owner);
     else
         ui_scene_interrupt();
     if (owner)
-        return;
+        return false;
     scene->backdrop_handle = core_alloc_free_space(FRAMEBUFFER_SIZE);
     if (scene->backdrop_handle <= 0)
+        return false;
+
+    fb_data *backdrop = core_get_data_pinned(scene->backdrop_handle);
+    memcpy(backdrop, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
+    core_put_data_pinned(backdrop);
+    scene->vertical = vertical;
+    scene->back_page = parent;
+    scene->status_height = vertical ? sb_visible_height() : 0;
+    scene->dim_color = vertical ? ui_theme_rgb565(UI_COLOR_DIM) : 0;
+    scene->target_front = true;
+    scene->last_offset = scene->composed_offset = -1;
+    scene->tween = (struct ui_tween){
+        .from = vertical ? LCD_HEIGHT : LCD_WIDTH, .to = 0, .frames = frames,
+    };
+    return true;
+}
+
+void ui_scene_show_modal(struct ui_scene *scene, const char *route)
+{
+    if (scene->backdrop_handle <= 0)
         return;
+    if (owner || !lcd_active())
+    {
+        release_scene(scene);
+        return;
+    }
     scene->handle = core_alloc_free_space(PANEL_WORKSPACE_BYTES);
     if (scene->handle <= 0)
     {
         release_scene(scene);
         return;
     }
-
-    fb_data *backdrop = core_get_data_pinned(scene->backdrop_handle);
-    memcpy(backdrop, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
-    core_put_data_pinned(backdrop);
-    scene->vertical = vertical;
-    scene->dim_color = vertical ? ui_theme_rgb565(UI_COLOR_DIM) : 0;
-    scene->target_front = true;
     scene->capturing = true;
     scene->automatic = true;
-    scene->last_offset = scene->composed_offset = -1;
-    scene->tween = (struct ui_tween){
-        .from = vertical ? LCD_HEIGHT : LCD_WIDTH, .to = 0, .frames = frames,
-    };
     own_transition(scene, route);
+}
+
+bool ui_scene_capture_modal(struct ui_scene *scene)
+{
+    return capture_panel(scene, true);
 }
 
 void ui_scene_open_modal(struct ui_scene *scene, const char *route)
 {
-    open_panel(scene, true, route);
+    if (ui_scene_capture_modal(scene))
+        ui_scene_show_modal(scene, route);
 }
 
 void ui_scene_open_page(struct ui_scene *scene, const char *route)
 {
-    open_panel(scene, false, route);
+    if (capture_panel(scene, false))
+        ui_scene_show_modal(scene, route);
 }
 
-void ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *route)
+bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *route)
 {
     if (scene->backdrop_handle <= 0)
-        return;
+        return false;
     unsigned duration = scene->vertical ? MODAL_DOWN_FRAMES : POP_FRAMES;
     unsigned frames = animate ? ui_theme_duration(duration) : 0;
     if (!frames || !lcd_active() || (owner && owner != scene))
     {
         release_scene(scene);
-        return;
+        return false;
     }
     bool was_opening = owner == scene;
     int offset = was_opening
@@ -334,7 +398,7 @@ void ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     if (scene->handle <= 0)
     {
         release_scene(scene);
-        return;
+        return false;
     }
     complete_transition(scene);
     own_transition(scene, route);
@@ -366,6 +430,9 @@ void ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     }
     if (owner == scene)
         ui_scene_cancel(scene);
+    if (scene->vertical)
+        ui_scene_modal_restored(scene->back_page);
+    return true;
 }
 
 bool ui_scene_automatic(void)
@@ -375,6 +442,9 @@ bool ui_scene_automatic(void)
 
 int ui_scene_poll(int timeout)
 {
+    /* A modal that returns inside its parent resumes this input pump. Its
+     * restored pixels have no bearing on a later root navigation. */
+    restored_page = NULL;
     if (!ui_scene_automatic())
         return timeout;
     struct ui_scene *scene = owner;
@@ -434,7 +504,9 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
             memcpy(scene->target_front ? front : back, lcd_framebuffer_default.fb_ptr,
                    FRAMEBUFFER_SIZE);
         if (scene->vertical)
-            compose_modal(out, back, front, offset, scene->dim_color);
+            compose_modal(out, back, front, offset,
+                          scene->target_front ? 0 : scene->status_height,
+                          scene->dim_color);
         else
             compose(out, back, front, offset);
         if (panel)

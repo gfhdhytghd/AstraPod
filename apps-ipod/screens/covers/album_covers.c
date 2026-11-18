@@ -58,6 +58,7 @@
 #include "system/app_util.h"
 #include "system/shutdown.h"
 #include "system/strutil.h"
+#include "system/hash.h"
 #include "screens/context_menu.h"           /* a cover's menu */
 #include "metadata/art_cache.h"   /* shared database-driven thumbnail cache */
 #include "metadata.h"         /* struct mp3entry, get_metadata */
@@ -114,7 +115,11 @@ enum pf_states {
 
 static int  album_count(void);
 static unsigned int album_art_key(int slide_index);
-static int  album_enter(int index);
+static bool album_panel_open(int index, struct carousel_album_header *header);
+static void album_panel_close(void);
+static int album_panel_count(void);
+static bool album_panel_row(int index, char *title, size_t size);
+static int album_panel_play(int index);
 static int  jmp_idx_prev(void);
 static int  jmp_idx_next(void);
 static void draw_album_text(void);
@@ -126,12 +131,18 @@ static int  album_on_context(int index);
 static void album_prepare(void);
 static int  album_build_index(void);
 static void album_speak(int index);
+static bool album_remember(int index);
 
 static const struct carousel_model album_model = {
     .build_index = album_build_index,
     .count       = album_count,
     .art_key     = album_art_key,
-    .enter       = album_enter,
+    .panel_open  = album_panel_open,
+    .panel_close = album_panel_close,
+    .panel_count = album_panel_count,
+    .panel_row   = album_panel_row,
+    .panel_play  = album_panel_play,
+    .remember    = album_remember,
     .jump_prev   = jmp_idx_prev,
     .jump_next   = jmp_idx_next,
     .draw_text   = draw_album_text,
@@ -468,6 +479,28 @@ static int album_count(void)
     return carousel_idx.album_ct;
 }
 
+static void album_identity(int index, uint32_t *album, uint32_t *artist)
+{
+    char title[TAGCACHE_BUFSZ];
+    *album = fnv1a_str(get_album_name(index, title, sizeof(title)));
+    *artist = fnv1a_str(get_album_artist(index, title, sizeof(title)));
+}
+
+static bool album_remember(int index)
+{
+    if (!db_summary_current(&carousel_idx))
+        return false;
+    uint32_t album, artist;
+    album_identity(index, &album, &artist);
+    if (global_status.cover_local_index == index &&
+        global_status.cover_album_hash == album && global_status.cover_artist_hash == artist)
+        return false;
+    global_status.cover_local_index = index;
+    global_status.cover_album_hash = album;
+    global_status.cover_artist_hash = artist;
+    return true;
+}
+
 static void set_initial_slide(const char* selected_file)
 {
     if (pf_resume_last_album)
@@ -477,15 +510,30 @@ static void set_initial_slide(const char* selected_file)
         return;
     }
 
-    if (selected_file)
-        set_current_slide(retrieve_id3(&id3, selected_file) ?
-                            id3_get_index(&id3) :
-                            pf_cfg.last_album);
-    else
-        set_current_slide(audio_status() ?
-                            id3_get_index(audio_current_track()) :
-                            pf_cfg.last_album);
-
+    if (selected_file && retrieve_id3(&id3, selected_file))
+    {
+        set_current_slide(id3_get_index(&id3));
+        return;
+    }
+    int saved = global_status.cover_local_index;
+    int index = MAX(0, MIN(saved < 0 ? pf_cfg.last_album : saved, album_count() - 1));
+    if (saved >= 0)
+    {
+        uint32_t album, artist;
+        album_identity(index, &album, &artist);
+        if (album != global_status.cover_album_hash || artist != global_status.cover_artist_hash)
+            for (int i = 0; i < album_count(); i++)
+            {
+                album_identity(i, &album, &artist);
+                if (album == global_status.cover_album_hash &&
+                    artist == global_status.cover_artist_hash)
+                {
+                    index = i;
+                    break;
+                }
+            }
+    }
+    set_current_slide(index);
 }
 
 static void reselect(long album_seek, long artist_seek)
@@ -625,15 +673,7 @@ static bool reinit(void)
     return false;
 }
 
-/* carousel_model.enter for the album model: either drill into the selected
- * album's track list or play it, per "On album select". Identifies the album by
- * its own tagcache seek, not by name -- browser_db.c and db_summary.c both
- * filter directly on this, so there's no name/sort matching involved (the
- * earlier, much more fragile design that this replaced).
- *
- * Playing does not happen here. It needs the app buffer to put the album in
- * order, and this screen is still holding a claim on it -- so the album is
- * recorded and album_covers() plays it once carousel_run() has returned. */
+/* The context menu's browser jump keeps its own resume state. */
 static long tracks_album_seek, tracks_artist_seek;
 static char tracks_album_name[TAGCACHE_BUFSZ];
 static int tracks_album_index;
@@ -660,34 +700,58 @@ static void album_save_tracks(int index)
     tracks_album_valid = true;
 }
 
-static int album_enter(int index)
+static int panel_album, panel_tracks, panel_count;
+
+static bool album_panel_open(int index, struct carousel_album_header *header)
 {
-    char album[TAGCACHE_BUFSZ];
-    long album_seek = carousel_idx.album_index[index].seek;
-
+    panel_album = index;
+    panel_count = -1;
     pf_cfg.last_album = index;
+    get_album_name(index, header->title, sizeof(header->title));
+    get_album_artist(index, header->artist, sizeof(header->artist));
+    return true;
+}
 
-    if (global_settings.album_covers_on_select == ON_SELECT_PLAY_ALBUM)
+static void album_panel_close(void)
+{
+    if (panel_tracks > 0)
+        panel_tracks = core_free(panel_tracks);
+}
+
+static int album_panel_count(void)
+{
+    if (panel_count == -1)
     {
-        db_summary_play_album_on_exit(&carousel_idx.album_index[index]);
-        return CAROUSEL_PLAY_ALBUM;
+        panel_tracks = db_summary_album_track_ids(&carousel_idx.album_index[panel_album],
+                                                  &panel_count);
+        if (panel_tracks < 0)
+            panel_count = -2;
     }
-    album_save_tracks(index);
+    return panel_count;
+}
 
-    /* The drill-in only. The token says "the track list on screen is this
-     * album's, and backing out of it comes straight back here", which playing
-     * does not: that leaves for the WPS with no track list to return from, and
-     * a token left armed there is honoured by whichever carousel open comes
-     * next -- landing on this album however long afterwards, and whatever is
-     * playing by then. album_covers_cancel_resume() covers the track list
-     * being left any other way. */
-    pf_resume_album_index = index;
-    pf_resume_last_album = true;
+static bool album_panel_row(int index, char *title, size_t size)
+{
+    if (panel_tracks <= 0 || index >= panel_count)
+        return false;
+    const struct db_album_track *tracks = core_get_data(panel_tracks);
+    int id = tracks[index].id;
+    struct tagcache_search search;
+    if (!tagcache_search(&search, tag_title))
+        return false;
+    bool ok = tagcache_retrieve(&search, id, tag_title, title, size);
+    tagcache_search_finish(&search);
+    return ok;
+}
 
-    browser_db_enter_artist_album_tracks_on_next_load(album_seek,
-        carousel_idx.album_index[index].artist_seek,
-        get_album_name(index, album, sizeof(album)));
-    return GO_TO_ALBUM_COVERS_TRACKS;
+static int album_panel_play(int index)
+{
+    if (panel_tracks <= 0 || index >= panel_count)
+        return CAROUSEL_MENU_STAY;
+    const struct db_album_track *tracks = core_get_data(panel_tracks);
+    int id = tracks[index].id;
+    db_summary_play_track_on_exit(&carousel_idx.album_index[panel_album], id);
+    return CAROUSEL_PLAY_ALBUM;
 }
 
 /* Open the shared Carousel settings menu (the same one under General Settings)
@@ -951,7 +1015,24 @@ int album_covers_return(const char *selected_file, bool *remote_return)
          * call this directly, and would not know what to do with a sentinel
          * escaping to them. The context menu is here for the same reason. */
         if (ret == CAROUSEL_PLAY_ALBUM)
-            ret = db_summary_play_pending() > 0 ? GO_TO_WPS : GO_TO_PREVIOUS;
+        {
+            int played = db_summary_play_pending();
+            if (played > 0)
+                ret = GO_TO_WPS;
+            else if (played == DB_ALBUM_PLAY_USB)
+            {
+                carousel_wps_end(false);
+                ret = GO_TO_ROOT;
+            }
+            else if (carousel_wps_pending())
+            {
+                carousel_wps_back();
+                selected_file = NULL;
+                continue;
+            }
+            else
+                ret = GO_TO_PREVIOUS;
+        }
         if (ret != CAROUSEL_CONTEXT)
             break;
 

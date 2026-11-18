@@ -93,6 +93,8 @@ struct lv_perf {
     unsigned cpu_low, cpu_high, boosted, audio, remote_audio;
     unsigned lcd_updates, raster_rows, animated_frames, boosted_animations, entry_prep_us;
     uint32_t entry_fonts_us, entry_document_us, entry_art_us;
+    long seek_issue_us, seek_frame_us, seek_clock_us;
+    bool seek_remote;
 };
 struct lv_state {
     struct viewport vp, mask_vp;
@@ -106,7 +108,8 @@ struct lv_state {
     struct lyrics_mode mode;
     char track[MAX_PATH];
     long elapsed, length;
-    uint32_t changed, remote_serial, art_gen, seek_at;
+    uint32_t changed, remote_serial, art_gen, seek_at, seek_tick, seek_seq;
+    long seek_target, seek_from;
     uint32_t entry_at, entry_tick, present_at, phase_us[LV_WAIT];
     unsigned phase_mask;
     enum lv_type last_type;
@@ -114,7 +117,7 @@ struct lv_state {
     int art_handle;
     int old_position, old_progress, old_words;
     bool remote, pending, held, paused, track_fade, initial, claimed;
-    bool painted, art_ready, first_pending, boost, seek_pending;
+    bool painted, art_ready, first_pending, boost, seek_pending, seek_consumed, seek_running;
     struct lv_cues *cues;
 };
 /* All users run synchronously on the UI thread. The page state is on its stack. */
@@ -325,6 +328,10 @@ static void __attribute__((noinline)) lv_perf_save(void)
              (lv_p95(all) + 999) / 1000, (unsigned long)((all->maximum + 999) / 1000));
     fdprintf(fd, "dropped (30 fps): %lu\nSELECT to first ms: %lu\n",
              (unsigned long)perf.dropped, (unsigned long)((perf.first + 999) / 1000));
+    if (perf.seek_frame_us >= 0)
+        fdprintf(fd, "SELECT seek %s (issue/frame/clock us): %ld/%ld/%ld\n",
+                 perf.seek_remote ? "remote" : "local",
+                 perf.seek_issue_us, perf.seek_frame_us, perf.seek_clock_us);
     fdprintf(fd, "blur max ms: %lu\nblur reuse/builds: %lu/%lu\n",
              (unsigned long)((perf.build + 999) / 1000),
              (unsigned long)perf.cached, (unsigned long)perf.builds);
@@ -438,13 +445,6 @@ static void lv_background_build(int handle)
      * for ~60% unsung text, so apply the same extra darkening either way. */
     img_filter_compile("darker45+dither", IMG_CLASSES_INPLACE, &filter);
     img_filter_apply_banded(lv.background, LCD_WIDTH, LCD_HEIGHT, &filter);
-    for (int y = 0; y < LCD_HEIGHT; y++)
-    {
-        int edge = MIN(y, LCD_HEIGHT - 1 - y);
-        if (edge >= 32) continue;
-        fb_data *row = lv.background + y * LCD_WIDTH;
-        for (int x = 0; x < LCD_WIDTH; x++) row[x] = lv_mix(row[x], LCD_BLACK, (32 - edge) * 3);
-    }
     lv.art_ready = true;
     lv.fg = LCD_WHITE;
     if (reused) perf.cached++;
@@ -714,7 +714,7 @@ static void lv_line(int i, int center, int position, int top, int bottom)
 
 static const char *lv_status(void)
 {
-    return lv.pending ? "Loading lyrics..." : !lv.track[0] ? "Nothing playing" : "No lyrics";
+    return lv.track[0] ? "No lyrics" : "Nothing playing";
 }
 static LV_PIXELS_ARM void lv_restore(int top, int bottom)
 {
@@ -747,7 +747,7 @@ static void lv_body(int position, int top, int bottom)
         if (y < top - 100) break;
         lv_line(i, y, position, top, bottom);
     }
-    if (!count) lv_text(lv_status(), -1, lv_font(0), 16, LCD_HEIGHT * 42 / 100,
+    if (!count && !lv.pending) lv_text(lv_status(), -1, lv_font(0), 16, LCD_HEIGHT * 42 / 100,
                         256, -1, 256, top, bottom, false);
 }
 
@@ -1155,7 +1155,46 @@ static void lv_transport(int action)
     else wps_lyrics_skip(action == ACTION_WPS_SKIPNEXT ? 1 : -1);
 }
 
-static bool lv_select_seek(void)
+/* Remote WPS extrapolates between CN records. Only a new sample can
+ * confirm the seek, and it must be closer to the target than the old clock. */
+static long lv_seek_elapsed(long elapsed)
+{
+    if (!lv.seek_pending) return elapsed;
+    uint32_t age = (uint32_t)current_tick - lv.seek_tick;
+    if (perf.seek_clock_us < 0)
+    {
+        bool arrived;
+        if (lv.remote)
+        {
+            long sample;
+            uint32_t seq = cider_wps_clock(&sample);
+            long old = lv.seek_from + (lv.seek_running ? (long)age * (1000 / HZ) : 0);
+            arrived = seq != lv.seek_seq &&
+                sample >= lv.seek_target - 250 && sample <= lv.seek_target + 750 &&
+                labs(sample - lv.seek_target) < labs(sample - old);
+        }
+        else
+            arrived = audio_seek_serial() != lv.seek_seq &&
+                elapsed >= lv.seek_target - 250 && elapsed <= lv.seek_target + 750;
+        if (!arrived)
+        {
+            if (age < 3 * HZ) return lv.seek_target;
+            lv.seek_pending = false;
+            return elapsed;
+        }
+        perf.seek_clock_us = lv_clock() - lv.seek_at;
+    }
+    /* A codec can quantize backward by one frame and the remote UI can
+     * lead its next sample. Hold the visual clock through that handoff. */
+    if (lv.remote && age < 3 * HZ &&
+        elapsed > lv.seek_target + (long)age * (1000 / HZ) + 750)
+        return lv.elapsed;
+    if (age >= 3 * HZ && elapsed >= lv.elapsed)
+        lv.seek_pending = false;
+    return MAX(elapsed, lv.elapsed);
+}
+
+static bool lv_select_seek(uint32_t pressed)
 {
     if (!lv.mode.manual || !lyrics_loaded() || !lyrics_timed() ||
         (uint32_t)(current_tick - lv.mode.input) >= 4 * HZ ||
@@ -1178,15 +1217,31 @@ static bool lv_select_seek(void)
      * already includes the document offset. */
     int64_t time = (int64_t)lyrics_time(lv.mode.focus) - global_settings.lyric_lead;
     long target = MAX(0, MIN(time, lv.length > 0 ? lv.length : LONG_MAX));
+    long sample;
+    lv.seek_seq = lv.remote ? cider_wps_clock(&sample) : audio_seek_serial();
+    lv.seek_from = lv.elapsed;
+    lv.seek_running = !lv.paused;
+    lv.seek_at = pressed;
+    lv.seek_tick = current_tick;
+    lv.seek_target = target;
+    lv.seek_pending = true;
+    perf.seek_remote = lv.remote;
+    perf.seek_clock_us = -1;
     if (lv.remote) cider_control("seek", MIN(target, INT_MAX));
-    else audio_ff_rewind(target);
+    else audio_seek_now(target);
+    perf.seek_issue_us = lv_clock() - pressed;
 
     lv.mode.manual = false;
     lv.mode.direction = 0;
-    /* Keep the current animation target until the transport clock catches
-     * up. A refused or interrupted seek must not freeze auto-follow. */
-    lv.seek_at = current_tick;
-    lv.seek_pending = true;
+    int position = lv.mode.focus * 256;
+    lv.scroll = (struct lyrics_motion){ .from = position, .to = position };
+    lv.elapsed = target;
+    lv.track_fade = false;
+    lv_boost(true);
+    lv_draw(true, LV_UPDATE);
+    perf.seek_frame_us = lv_clock() - pressed;
+    lv_record(pressed, LV_LINE, false);
+    lv_boost(false);
     return true;
 }
 
@@ -1194,8 +1249,6 @@ static void lv_first_frame(uint32_t started)
 {
     lv_background_build(-1);
     lv_restore(0, LCD_HEIGHT);
-    lv_text("Loading lyrics...", -1, FONT_SYSFIXED,
-            16, LCD_HEIGHT * 42 / 100, 256, -1, 256, LV_BODY_TOP, LV_BODY_BOTTOM, false);
     lv_flush(0, 0, LCD_WIDTH, LCD_HEIGHT);
     lv_record(started, LV_ENTRY, true);
 }
@@ -1208,6 +1261,7 @@ int lyric_viewer(void)
         .initial = true, .entry_at = entry_at, .entry_tick = current_tick, .first_pending = true
     };
     lv_state = &state;
+    perf.seek_frame_us = -1;
     lv_boost(true);
     size_t bytes = 0; fb_data *arena = app_try_claim_buffer(&bytes, "lyrics");
     lv.claimed = arena != NULL;
@@ -1287,7 +1341,7 @@ int lyric_viewer(void)
             lv_reload(id3, remote);
             id3 = remote ? get_wps_state()->id3 : audio_current_track();
         }
-        if (id3) { lv.elapsed = id3->elapsed; lv.length = id3->length; }
+        if (id3) { lv.elapsed = lv_seek_elapsed(id3->elapsed); lv.length = id3->length; }
         lv.paused = remote ? s->paused : (audio_status() & AUDIO_STATUS_PAUSE) != 0;
         lv_remote_page();
         /* Local buffers may be reopened for the same cover during rebuffer.
@@ -1310,10 +1364,7 @@ int lyric_viewer(void)
         }
         long lyric_at = lv_lyric_elapsed();
         int sung = lyrics_index_at(lyric_at);
-        if (lv.seek_pending && (sung == lv.mode.focus ||
-            (uint32_t)(current_tick - lv.seek_at) >= 3 * HZ))
-            lv.seek_pending = false;
-        if (!lv.seek_pending && lyrics_loaded() &&
+        if ((!lv.seek_pending || perf.seek_clock_us >= 0) && lyrics_loaded() &&
             lyrics_mode_follow(&lv.mode, lyrics_timed(), sung, current_tick, HZ)) lv_focus();
         bool animated = lv.track_fade || lyrics_moving(&lv.scroll, current_tick);
         if (animated) lv_boost(true);
@@ -1329,7 +1380,8 @@ int lyric_viewer(void)
         int focus = lv.mode.focus;
         int timeout = lyrics_idle_ticks(lyric_at, lyrics_time(focus + 1), lv.paused, animated, false,
                                        &lv.mode, lyrics_timed(), current_tick, HZ);
-        if (lv.seek_pending) timeout = MIN(timeout, HZ / 20);
+        if (lv.seek_pending && perf.seek_clock_us < 0)
+            timeout = MIN(timeout, MAX(1, lv.remote ? HZ / 20 : HZ / 50));
         if (!lv.paused && !animated)
         {
             long next = -1;
@@ -1342,11 +1394,31 @@ int lyric_viewer(void)
             timeout = MAX(1, timeout - (int)((uint32_t)current_tick - frame_at));
         uint32_t wait_at = lv_clock();
         int action = get_action(CONTEXT_WPS, timeout);
-        lv_stat_add(&perf.phase[LV_WAIT], lv_clock() - wait_at);
+        uint32_t pressed = lv_clock();
+        lv_stat_add(&perf.phase[LV_WAIT], pressed - wait_at);
         switch (action)
         {
+#ifdef BUTTON_SELECT
+            case ACTION_UNKNOWN:
+            {
+                int button = 0;
+                get_action_statuscode(&button);
+                if (button == BUTTON_SELECT
+#ifdef BUTTON_RC_SELECT
+                    || button == BUTTON_RC_SELECT
+#endif
+                   )
+                    lv.seek_consumed = lv_select_seek(pressed);
+                break;
+            }
+#endif
             case ACTION_WPS_BROWSE:
-                if (lv_select_seek()) break;
+                if (lv.seek_consumed)
+                {
+                    lv.seek_consumed = false;
+                    break;
+                }
+                if (lv_select_seek(pressed)) break;
                 goto done;
             case ACTION_WPS_LYRICS: case ACTION_WPS_MENU: goto done;
 #ifdef HAVE_USB_PODLINK

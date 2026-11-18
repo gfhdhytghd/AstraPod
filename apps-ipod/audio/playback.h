@@ -68,6 +68,9 @@ struct bufopen_bitmap_data {
 unsigned int audio_track_count(void);
 long audio_filebufused(void);
 void audio_pre_ff_rewind(void);
+/* Keep the old PCM running until the codec lands, then restart at the seek. */
+void audio_seek_now(long time);
+unsigned int audio_seek_serial(void);
 void audio_skip(int direction);
 /* Sleep Timer's End of Chapter: pause where the playing chapter ends, once */
 void audio_pause_at_chapter_end(bool on);

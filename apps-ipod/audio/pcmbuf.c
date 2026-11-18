@@ -123,6 +123,7 @@ static struct chunkdesc *current_desc;
 static size_t chunk_transidx;
 
 static size_t pcmbuf_watermark = 0;
+static bool seek_restart;
 
 static bool low_latency_mode = false;
 
@@ -498,8 +499,8 @@ void * pcmbuf_request_buffer(int *count)
         /* Boost CPU for pre-buffer */
         trigger_cpu_boost();
 
-        /* If pre-buffered to the watermark, start playback */
-        if (!pcmbuf_data_critical())
+        /* A seek needs only two committed chunks to get the decoder ahead. */
+        if (seek_restart ? remaining >= 2 * PCMBUF_CHUNK_SIZE : !pcmbuf_data_critical())
             start_audio_playback();
     }
 
@@ -840,6 +841,7 @@ void pcmbuf_play_start(void)
     if (mixer_channel_status(PCM_MIXER_CHAN_PLAYBACK) == CHANNEL_STOPPED &&
         chunk_widx != chunk_ridx)
     {
+        seek_restart = false;
         current_desc = NULL;
         static const struct mixer_play_cbs cbs = {
             .get_more = pcmbuf_pcm_callback,
@@ -872,6 +874,7 @@ void pcmbuf_play_stop(void)
 
     /* Revert to position updates by PCM */
     pcmbuf_sync_position = false;
+    seek_restart = false;
 
     /* Fader OFF */
     crossfade_cancel();
@@ -879,6 +882,12 @@ void pcmbuf_play_stop(void)
     /* Can unboost the codec thread here no matter who's calling,
      * pretend full pcm buffer to unboost */
     boost_codec_thread(10);
+}
+
+void pcmbuf_seek_restart(void)
+{
+    pcmbuf_play_stop();
+    seek_restart = true;
 }
 
 void pcmbuf_pause(bool pause)

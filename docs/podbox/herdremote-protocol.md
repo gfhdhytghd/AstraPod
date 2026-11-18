@@ -1116,7 +1116,11 @@ are tab-delimited, with an unsigned transaction ID scoped to the cable session.
 
 Clock synchronization uses the minimum RTT of five exchanges. Device ticks
 are 10 ms. Offset is device time minus host time, encoded as unsigned 32-bit
-milliseconds and interpreted as signed by the iPod. The fade spans three
+milliseconds and interpreted as signed by the iPod. The `p` reply contains
+five fields after the transaction ID, and echoes the host time before the
+sequence number. The fade spans three
 seconds. A cable loss invalidates the transaction and both endpoints restore
-their volume. The iPod appends timing and outcome to
-`/.rockbox/handoff-log.txt`.
+their volume. The iPod appends timing, phase, and reason to
+`/.rockbox/handoff-log.txt`. HerdRemote logs match, sync, prepare, seek, go,
+fade, and done at INFO. Samples contain timing and position, with no track
+metadata or backend error bodies.

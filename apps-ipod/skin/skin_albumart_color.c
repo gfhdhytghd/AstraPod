@@ -1241,31 +1241,54 @@ int skin_lyrics_art(void)
     return fallback >= 0 ? fallback : playback_track_aa_hid(0);
 }
 
-bool skin_lyrics_copy_blur(fb_data *dst, int handle, const struct img_filter *filter)
+static int cached_blur(int handle, const struct img_filter *filter)
 {
     for (int skin = WPS; skin >= CUSTOM_STATUSBAR; skin--)
     {
         struct gui_wps *gwps = skin_get_loaded_gwps(skin, SCREEN_MAIN);
         if (!gwps) continue;
-        unsigned generation = filter_gen;
         struct skin_albumart *aa = lyrics_skin_blur(gwps->data);
+        /* The SBS may be hidden on the WPS. Render into its existing blur
+         * buffer if the sheet is the first screen to need this cover. */
+        if (!filter && aa && aa->filter_handle > 0 &&
+            handle == playback_track_aa_hid(aa->slot))
+            skin_albumart_filter(aa->slot, aa);
         if (aa && aa->filter_handle > 0 && aa->filtered_art == handle &&
-            aa->filtered_gen == generation && aa->filtered_width == LCD_WIDTH &&
+            aa->filtered_gen == filter_gen && aa->filtered_width == LCD_WIDTH &&
             aa->filtered_height >= LCD_HEIGHT + 40 &&
-            aa->filter.nsteps == filter->nsteps &&
-            aa->filter.text_lum == filter->text_lum &&
-            !memcmp(aa->filter.steps, filter->steps, filter->nsteps * sizeof(filter->steps[0])))
-        {
-            int buffer = aa->filter_handle;
-            core_pin(buffer);
-            memcpy(dst, (const fb_data *)core_get_data(buffer) + 40 * LCD_WIDTH,
-                   LCD_WIDTH * LCD_HEIGHT * sizeof(*dst));
-            core_unpin(buffer);
-            return generation == filter_gen;
-        }
+            (!filter || (aa->filter.nsteps == filter->nsteps &&
+             aa->filter.text_lum == filter->text_lum &&
+             !memcmp(aa->filter.steps, filter->steps, filter->nsteps * sizeof(filter->steps[0])))))
+            return aa->filter_handle;
     }
-    return false;
+    return -1;
 }
+
+bool skin_lyrics_copy_blur(fb_data *dst, int handle, const struct img_filter *filter)
+{
+    unsigned generation = filter_gen;
+    int buffer = cached_blur(handle, filter);
+    if (buffer < 0) return false;
+    core_pin(buffer);
+    memcpy(dst, (const fb_data *)core_get_data(buffer) + 40 * LCD_WIDTH,
+           LCD_WIDTH * LCD_HEIGHT * sizeof(*dst));
+    core_unpin(buffer);
+    return generation == filter_gen;
+}
+
+#ifdef HAVE_USB_PODLINK
+bool skin_handoff_draw_blur(int handle)
+{
+    unsigned generation = filter_gen;
+    int buffer = cached_blur(handle, NULL);
+    if (buffer < 0) return false;
+    core_pin(buffer);
+    lcd_bitmap((const fb_data *)core_get_data(buffer) + 40 * LCD_WIDTH,
+               0, 0, LCD_WIDTH, LCD_HEIGHT);
+    core_unpin(buffer);
+    return generation == filter_gen;
+}
+#endif
 
 unsigned skin_albumart_gen(void)
 {

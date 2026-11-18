@@ -82,6 +82,10 @@
 #include "viewers/lyric_viewer/lyric_viewer.h"
 #include "cider.h"
 #include "cider_wps.h"
+#ifdef HAVE_USB_PODLINK
+#include "handoff.h"
+#include "handoff_sheet.h"
+#endif
 #include "cider_controls.h"
 #include "cider_library.h"
 #include "skin/statusbar_skinned.h"
@@ -884,6 +888,10 @@ static long wps_run(bool return_agents)
             }
         }
 
+#ifdef HAVE_USB_PODLINK
+        bool dissolve = handoff_take_dissolve();
+        if (dissolve) skin_inhibit_flush(true);
+#endif
         if (restore)
         {
             restore = false;
@@ -918,6 +926,13 @@ static long wps_run(bool return_agents)
             }
             update = false;
         }
+#ifdef HAVE_USB_PODLINK
+        if (dissolve)
+        {
+            skin_inhibit_flush(false);
+            handoff_present_remote();
+        }
+#endif
 
         if (exit)
         {

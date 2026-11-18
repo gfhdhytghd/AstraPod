@@ -3,7 +3,6 @@
 #ifdef HAVE_USB_PODLINK
 #include "audio.h"
 #include "audio/pcmbuf.h"
-#include "backlight.h"
 #include "button.h"
 #include "cider.h"
 #include "file.h"
@@ -16,7 +15,7 @@
 #include "system/shutdown.h"
 #include "usb.h"
 #include "widgets/dialog.h"
-#include "widgets/splash.h"
+#include "handoff_sheet.h"
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,7 +43,10 @@ static enum phase phase; /* UI thread only */
 static unsigned long ident, deadline, start, fade_begin, fade_end;
 static unsigned long rtt, startup, uncertainty, duration;
 static long offset, error;
-static bool rufin, remote_finished, verified, dialog_open;
+static bool rufin, remote_finished, verified, sheet_open, dissolve;
+static struct handoff_sheet sheet;
+static long failure_until;
+static unsigned int pings;
 static unsigned long position_at_start;
 static long host_position_at_start;
 static uint32_t path_crc;
@@ -151,15 +153,38 @@ static const char *target(void)
     return rufin ? "Rufin" : "Cider";
 }
 
+static const char *phase_name(void)
+{
+    switch (phase)
+    {
+        case MATCH: return "match";
+        case QUESTION: return "question";
+        case PREPARE: return pings == 5 ? "prepare" : "sync";
+        case ARMED: return verified ? "fade" : "go";
+        case WAIT_END: return "wait-end";
+        default: return "done";
+    }
+}
+
+static const char *timeout_reason(void)
+{
+    if (phase == MATCH) return "offer";
+    if (phase == PREPARE) return pings == 5 ? "schedule" : "ping";
+    if (!fade_begin) return "pcm-start";
+    if (!verified) return "position";
+    return remote_finished ? "remote-source" : "host-end";
+}
+
 static void record_outcome(const char *outcome)
 {
     int fd = open(LOG_PATH, O_WRONLY | O_CREAT | O_APPEND, 0666);
     if (fd < 0) return;
     fdprintf(fd, "v=1 id=%lu target=%s outcome=%s offset_ms=%ld rtt_ms=%lu "
               "T_tick=%lu position_error_ms=%ld startup_ms=%lu uncertainty_ms=%lu "
-              "fade_start_tick=%lu fade_end_tick=%lu\n",
+              "fade_start_tick=%lu fade_end_tick=%lu phase=%s reason=%s\n",
               ident, target(), outcome, offset, rtt, start, error, startup,
-              uncertainty, fade_begin, fade_end);
+              uncertainty, fade_begin, fade_end, phase_name(),
+              !strcmp(outcome, "timeout") ? timeout_reason() : outcome);
     close(fd);
 }
 
@@ -190,6 +215,8 @@ void handoff_begin(void)
     duration = track->length;
     offset = error = rtt = startup = start = uncertainty = fade_begin = fade_end = 0;
     remote_finished = rufin = verified = false;
+    pings = 0;
+    sheet = (struct handoff_sheet){ .title = title };
     position_at_start = 0;
     host_position_at_start = -1;
     mutex_lock(&wire);
@@ -201,6 +228,7 @@ void handoff_begin(void)
     deadline = current_tick + START_TICKS;
     ui_epoch = link_epoch;
     phase = MATCH;
+    sheet.target = target();
 }
 
 void handoff_usb_dismissed(void)
@@ -234,94 +262,20 @@ static bool same_track(void)
                          strlen(track->path)) == path_crc;
 }
 
-struct question {
-    char body[148];
-    bool leave;
-};
-
-static void measure_question(struct dialog *d, struct screen *s,
-                             struct viewport *box, void *data)
-{
-    (void)data;
-    struct dialog_insets in;
-    dialog_get_insets(&d->style, &in);
-    box->width = s->lcdwidth - 24;
-    box->height = 4 * s->getcharheight() + in.top + in.bottom + 8;
-    box->x = 12;
-    box->y = (s->lcdheight - box->height) / 2;
-}
-
-static void draw_question(struct dialog *d, struct screen *s,
-                          struct viewport *content, void *data)
-{
-    struct question *q = data;
-    s->set_viewport(content);
-    content->flags |= VP_FLAG_ALIGN_CENTER;
-    int h = s->getcharheight();
-    s->putsxy(0, 0, str(LANG_HANDOFF_TITLE));
-    /* The viewport clips long titles at its edges. */
-    s->putsxy(0, h, q->body);
-    int width = (content->width - 4) / 2;
-    int y = 2 * h + 4;
-    dialog_draw_button(s, &d->style, 0, y, width, 2 * h,
-                       str(LANG_HANDOFF_ACCEPT), !q->leave);
-    dialog_draw_button(s, &d->style, width + 4, y, width, 2 * h,
-                       str(LANG_HANDOFF_LEAVE), q->leave);
-}
-
-static int question_action(struct dialog *d, int action, void *data)
-{
-    struct question *q = data;
-    if (!handoff_capable() || !playing() || !same_track()) return DIALOG_ABORT;
-    if (!d->backlight_on) return DIALOG_CONTINUE;
-    switch (action)
-    {
-        case ACTION_STD_PREV: q->leave = false; break;
-        case ACTION_STD_NEXT: q->leave = true; break;
-        case ACTION_STD_OK: return q->leave ? DIALOG_CANCEL : DIALOG_ACCEPT;
-        case ACTION_STD_MENU:
-        case ACTION_STD_CANCEL: return DIALOG_CANCEL;
-        default:
-            if (IS_SYSEVENT(action) && action != SYS_USB_CONFIRM)
-                default_event_handler(action);
-            break;
-    }
-    return DIALOG_CONTINUE;
-}
-
-static int ask(void)
-{
-    static const struct dialog_callbacks callbacks = {
-        .measure = measure_question,
-        .draw = draw_question,
-        .on_action = question_action,
-    };
-    struct question q = { .leave = false };
-    snprintf(q.body, sizeof q.body, str(LANG_HANDOFF_BODY), target(), title);
-    struct dialog d;
-    dialog_init(&d, CONTEXT_STD, NULL, NULL, &callbacks, &q);
-    backlight_on();
-    dialog_open = true;
-    int result = dialog_run(&d, HZ / 10);
-    dialog_open = false;
-    action_wait_for_release();
-    button_queue_post(BUTTON_REDRAW, 0);
-    return result;
-}
-
 static void wait_end(const char *reason)
 {
     send_event_record('x');
     pcmbuf_handoff_cancel();
     pcmbuf_handoff_hold(true);
-    phase = WAIT_END;
     record_outcome(reason);
+    phase = WAIT_END;
 }
 
 static void fail(const char *reason, int message)
 {
     wait_end(reason);
-    splashf(HZ, "%s", str(message));
+    sheet.reason = message;
+    failure_until = current_tick + 2 * HZ;
 }
 
 static bool switch_remote(const char *outcome, bool stop)
@@ -331,7 +285,7 @@ static bool switch_remote(const char *outcome, bool stop)
     if (stop) audio_stop(); /* saves the current playlist resume point */
     pcmbuf_handoff_cancel();
     pcmbuf_handoff_hold(false);
-    phase = COMPLETE;
+    phase = COMPLETE; /* release the source guard before selecting remote */
     cider_remote_source();
     record_outcome(outcome);
     return true;
@@ -351,32 +305,36 @@ static enum reply take_reply(char *args, long *received)
     return reply;
 }
 
+static bool decimal(const char *text)
+{
+    const char *start = text;
+    while (*text >= '0' && *text <= '9') ++text;
+    return text != start && !*text;
+}
+
 static bool schedule(char *args)
 {
-    /* Strtol also handles the signed offset and signed position error. */
-    long field[6];
+    uint32_t field[6];
     for (unsigned int i = 0; i < ARRAYLEN(field); ++i)
     {
         char *end;
-        field[i] = (long)strtoul(args, &end, 10);
+        field[i] = strtoul(args, &end, 10);
         if (args == end || *end != (i + 1 == ARRAYLEN(field) ? '\0' : '\t'))
             return false;
         args = end + 1;
     }
     start = (unsigned long)field[0];
-    offset = field[1];
+    offset = (int32_t)field[1];
     rtt = field[2];
-    error = field[3];
+    error = (int32_t)field[3];
     startup = field[4];
     uncertainty = field[5];
     return error >= -50 && error <= 50 &&
            TIME_AFTER(start, current_tick + 2) && TIME_BEFORE(start, deadline);
 }
 
-/* 0 = ordinary input, 1 = redraw this screen, 2 = switch to remote WPS. */
-int handoff_step(void)
+static int advance(void)
 {
-    if (dialog_open) return 0;
     if (!handoff_capable() || ui_epoch != link_epoch)
     {
         if (handoff_pending())
@@ -385,13 +343,14 @@ int handoff_step(void)
             pcmbuf_handoff_hold(false);
             record_outcome(usb_detect() == USB_INSERTED ? "link-lost" : "unplug");
             phase = IDLE;
+            sheet.reason = 0;
             return 1;
         }
         if (ui_epoch != link_epoch || usb_detect() != USB_INSERTED) phase = IDLE;
         ui_epoch = link_epoch;
         return 0;
     }
-    if (!handoff_pending()) return 0;
+    if (!handoff_pending() || sheet.reason) return 0;
 
     if (phase == WAIT_END)
     {
@@ -425,59 +384,58 @@ int handoff_step(void)
     }
 
     char args[sizeof incoming.args];
-    long received;
+    long received = 0;
     enum reply reply = take_reply(args, &received);
-    if (reply == FAIL)
+    if (reply == FAIL && phase != QUESTION && args[0] && !strchr(args, '\t'))
     {
-        fail("host-failed", LANG_HANDOFF_FAILED);
+        if (!strcmp(args, "timeout"))
+            fail("timeout", LANG_HANDOFF_NO_RESPONSE);
+        else
+            fail("host-failed", LANG_HANDOFF_HOST_FAILED);
         return 1;
     }
     if (phase == MATCH && reply == OFFER)
     {
         rufin = !strncmp(args, "Rufin\t", 6);
-        const char *match = strchr(args, '\t');
-        if (!match || strcmp(match + 1, "1"))
-        {
+        if (!rufin && strncmp(args, "Cider\t", 6)) return 0;
+        sheet.target = target();
+        if (!strcmp(args + 6, "0"))
             fail("not-found", LANG_HANDOFF_NOT_FOUND);
-            return 1;
-        }
-        phase = QUESTION;
-        int answer = ask();
-        if (!handoff_capable() || answer == DIALOG_ABORT) return handoff_step();
-        if (answer != DIALOG_ACCEPT)
-            wait_end("declined");
-        else
-        {
-            phase = PREPARE;
-            deadline = current_tick + START_TICKS;
-            send_event_record('a');
-        }
+        else if (!strcmp(args + 6, "1"))
+            phase = QUESTION;
         return 1;
     }
     if (phase == PREPARE && reply == PING)
     {
-        char *separator = strchr(args, '\t');
-        if (separator)
+        if (args[0] >= '0' && args[0] <= '4' && args[1] == '\t' &&
+            decimal(args + 2))
         {
-            *separator++ = 0;
+            pings = args[0] - '0' + 1;
             unsigned long elapsed = pcmbuf_handoff_position(audio_current_track()->elapsed);
             mutex_lock(&wire);
-            snprintf(outgoing, sizeof outgoing, "hf\t1\tp\t%lu\t%s\t%s\t%lu\t%lu\t%lu",
-                     ident, separator, args, (unsigned long)received,
-                     (unsigned long)current_tick, elapsed);
+            snprintf(outgoing, sizeof outgoing, "hf\t1\tp\t%lu\t%s\t%c\t%lu\t%lu\t%lu",
+                     ident, args + 2, args[0], (unsigned long)(uint32_t)received,
+                     (unsigned long)(uint32_t)current_tick, elapsed);
             mutex_unlock(&wire);
         }
     }
-    if (phase == PREPARE && reply == GO && schedule(args))
+    if (phase == PREPARE && reply == GO)
     {
+        if (!schedule(args))
+        {
+            fail("invalid-go", LANG_HANDOFF_HOST_FAILED);
+            return 1;
+        }
         pcmbuf_handoff_fade(start);
         phase = ARMED;
         deadline = start + FADE_TICKS + HZ;
+        sheet.start = start;
+        sheet.armed = true;
         send_event_record('g');
     }
     if (phase == ARMED)
     {
-        if (reply == END) remote_finished = true;
+        if (reply == END && !args[0]) remote_finished = true;
         if (reply == AT)
         {
             char *end;
@@ -496,7 +454,7 @@ int handoff_step(void)
             error = host_position_at_start - (long)position_at_start;
             if (error < -50 || error > 50)
             {
-                fail("alignment", LANG_HANDOFF_FAILED);
+                fail("alignment", LANG_HANDOFF_HOST_FAILED);
                 return 1;
             }
             verified = true;
@@ -507,16 +465,69 @@ int handoff_step(void)
             fade_end = start + FADE_TICKS;
             if (remote_finished && verified && switch_remote("accepted", true))
             {
+                dissolve = sheet_open;
                 send_event_record('d');
                 return 2;
             }
         }
     }
-    if (TIME_AFTER(current_tick, deadline))
+    if (phase != QUESTION && TIME_AFTER(current_tick, deadline))
     {
-        fail("timeout", LANG_HANDOFF_FAILED);
+        fail("timeout", LANG_HANDOFF_NO_RESPONSE);
         return 1;
     }
     return 0;
+}
+
+static int sheet_step(int answer)
+{
+    if (advance() == 2) return DIALOG_ACCEPT;
+    if (sheet.reason)
+    {
+        if (TIME_BEFORE(current_tick, failure_until)) return DIALOG_CONTINUE;
+        sheet.reason = 0;
+        failure_until = 0;
+        return DIALOG_ABORT;
+    }
+    if (phase == QUESTION)
+    {
+        if (answer == DIALOG_CANCEL)
+        {
+            wait_end("declined");
+            return DIALOG_CANCEL;
+        }
+        if (answer == DIALOG_ACCEPT)
+        {
+            phase = PREPARE;
+            sheet.preparing = true;
+            sheet.accepted = current_tick;
+            deadline = current_tick + START_TICKS;
+            send_event_record('a');
+        }
+    }
+    return phase == QUESTION || phase == PREPARE || phase == ARMED ?
+        DIALOG_CONTINUE : DIALOG_ABORT;
+}
+
+/* 0 = ordinary input, 1 = redraw, 2 = remote WPS, 3 = local WPS. */
+int handoff_step(void)
+{
+    if (sheet_open) return 0;
+    int result = advance();
+    if (phase != QUESTION && !sheet.reason) return result;
+
+    sheet_open = true;
+    int answer = handoff_sheet_run(&sheet, sheet_step);
+    sheet_open = false;
+    if (answer == DIALOG_ACCEPT) return 2;
+    if (answer == DIALOG_ABORT && phase == WAIT_END) return 3;
+    return 1;
+}
+
+bool handoff_take_dissolve(void)
+{
+    bool pending = dissolve;
+    dissolve = false;
+    return pending;
 }
 #endif

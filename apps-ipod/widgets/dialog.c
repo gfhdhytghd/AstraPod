@@ -682,6 +682,15 @@ static void dialog_draw_one(struct dialog *d, struct screen *s, int screen_nr)
     outer = s->set_viewport(&parent);
 
     box = parent;
+    if (!d->cb->measure)
+    {
+        viewport_set_fullscreen(&box, screen_nr);
+        s->set_viewport(&box);
+        d->cb->draw(d, s, &box, d->data);
+        s->update_viewport();
+        s->set_viewport(outer);
+        return;
+    }
     d->cb->measure(d, s, &box, d->data);            /* final geometry */
     s->set_viewport_ex(&box, VP_FLAG_VP_SET_CLEAN);
     dialog_frame_box(s, &box, &d->style, &content);

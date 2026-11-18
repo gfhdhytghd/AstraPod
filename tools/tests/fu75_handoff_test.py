@@ -54,7 +54,8 @@ ports = r'''
 #define LANG_HANDOFF_BODY "%s: %s"
 #define LANG_HANDOFF_ACCEPT "Hand off"
 #define LANG_HANDOFF_LEAVE "Stay"
-enum { LANG_HANDOFF_FAILED, LANG_HANDOFF_NOT_FOUND };
+enum { LANG_HANDOFF_FAILED, LANG_HANDOFF_NOT_FOUND,
+       LANG_HANDOFF_NO_RESPONSE, LANG_HANDOFF_HOST_FAILED };
 enum { ACTION_STD_OK, ACTION_STD_CANCEL, ACTION_STD_MENU, ACTION_STD_PREV, ACTION_STD_NEXT,
        ACTION_WPS_PLAY, DIALOG_CONTINUE, DIALOG_ABORT, DIALOG_CANCEL, DIALOG_ACCEPT };
 static long current_tick = 100;
@@ -63,7 +64,7 @@ static int status, activity, stops, usb_replies, disk_choices, redraws, splashes
 static int dialog_depth, prompts, answer, cancel_on_question, frame;
 static unsigned long sample, fade;
 static bool pcm_hold, pcm_end;
-static char log_line[256];
+static char log_line[320];
 struct mutex { int used; };
 struct podlink_message { unsigned int type, length; const unsigned char *data; };
 struct mp3entry { unsigned long elapsed,length; const char *title,*artist,*album; char path[64]; };
@@ -74,7 +75,8 @@ static int audio_status(void) {return status;}
 static int get_current_activity(void) {return activity;}
 static bool cider_active(void) {return active;}
 static bool cider_available(void) {return online;}
-static void cider_remote_source(void) {active=online;}
+bool handoff_hold_source(void);
+static void cider_remote_source(void) {if (!handoff_hold_source()) active=online;}
 static void audio_stop(void) {status=0; stops++; pcm_end=false;}
 static void pause_action(bool x) {(void)x;status |= AUDIO_STATUS_PAUSE;}
 static void unpause_action(bool x) {(void)x;status &= ~AUDIO_STATUS_PAUSE;}
@@ -89,10 +91,12 @@ static uint32_t podlink_crc32(const unsigned char *d,unsigned int n)
 static void mutex_init(struct mutex *m) {m->used=0;}
 static void mutex_lock(struct mutex *m) {assert(!m->used++);}
 static void mutex_unlock(struct mutex *m) {assert(m->used--==1);}
+#ifndef TEST_FU76_SHEET
 static void action_wait_for_release(void) {}
 static void button_queue_post(int x, int y) {(void)x;(void)y;redraws++;}
 static void backlight_on(void) {}
 static void splashf(int ticks,const char *f,int s) {(void)ticks;(void)f;(void)s;splashes++;}
+#endif
 static void pcmbuf_handoff_cancel(void) {fade=0;}
 static void pcmbuf_handoff_hold(bool v) {pcm_hold=v;if (!v) pcm_end=false;}
 static bool pcmbuf_handoff_ended(void) {return pcm_end;}
@@ -114,6 +118,38 @@ struct screen {
    void (*putsxy)(int,int,const char *);
    void (*set_viewport)(struct viewport *);
 };
+#ifdef TEST_FU76_SHEET
+struct dialog { bool backlight_on; };
+struct handoff_sheet {
+    const char *title, *target;
+    long accepted;
+    unsigned long start;
+    int reason;
+    bool preparing, armed;
+};
+static int handoff_sheet_run(struct handoff_sheet *view, int (*advance)(int))
+{
+    int result;
+    assert(dialog_depth++ == 0);
+    if (view->reason)
+    {
+        ++splashes;
+        current_tick += 2 * HZ;
+        result = advance(DIALOG_CONTINUE);
+    }
+    else
+    {
+        ++prompts;
+        frame += 2;
+        redraws++;
+        current_tick += 10000; /* indefinite question dwell */
+        if (cancel_on_question) cable = false;
+        result = advance(answer == ACTION_STD_OK ? DIALOG_ACCEPT : DIALOG_CANCEL);
+    }
+    assert(--dialog_depth == 0);
+    return result;
+}
+#else
 struct dialog_insets { int top,bottom; };
 struct style {};
 struct dialog;
@@ -147,6 +183,7 @@ static int dialog_run(struct dialog *d,int ticks)
     assert(--dialog_depth==0);
     return result;
 }
+#endif
 '''
 
 body = re.sub(r'^#include .*$', '', HANDOFF.read_text(), flags=re.M)
@@ -258,7 +295,7 @@ int main(void)
 }
 '''
 test_c = OUT / 'handoff.c'
-test_c.write_text(ports + body + widget + scenario)
+test_c.write_text('#define TEST_FU76_SHEET\n' + ports + body + widget + scenario)
 binary = OUT / 'handoff'
 subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=address,undefined', '-fno-pie', '-no-pie',

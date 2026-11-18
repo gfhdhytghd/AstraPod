@@ -35,7 +35,7 @@
  * lever: a line taller than its font by the offset plus the radius keeps the
  * whole shadow inside its own row.
  *
- * Parts: the two buffers, then the glyph walk that fills the coverage, the
+ * Parts: the shared buffer, then the glyph walk that fills the coverage, the
  * blur passes, the expand to a full-resolution mask, and text_shadow_draw()
  * which drives them.
  *
@@ -58,14 +58,10 @@
 #define SHADOW_HALF_W      (LCD_WIDTH / 2)
 #define SHADOW_HALF_H      ((SHADOW_MAX_H + 1) / 2)
 
-/* Coverage, one byte to a 2x2 block of screen, holding the sum of the four
- * pixels in it -- so full coverage is four times a pixel's own. */
+/* Coverage uses one byte per 2x2 block. Expand it in the same buffer to
+ * two bytes per block for the blitter. */
 #define SHADOW_COV_FULL    (4 * LCD_BLEND_OPAQUE)
 
-static unsigned char shadow_cov[SHADOW_HALF_W * SHADOW_HALF_H];
-
-/* The same thing at screen resolution and packed two pixels to a byte, which
- * is what the blitter takes. */
 static unsigned char shadow_mask[SHADOW_HALF_W * SHADOW_MAX_H];
 
 /* ---------------------------------------------------------------------- *
@@ -106,7 +102,7 @@ static void glyph_to_mask(const struct font *pf, const unsigned char *bits,
 
     for (int py = 0; py < rows; py++)
     {
-        unsigned char *dst = &shadow_cov[((top + py) >> 1) * hw + (dst_x >> 1)];
+        unsigned char *dst = &shadow_mask[((top + py) >> 1) * hw + (dst_x >> 1)];
         size_t idx = (size_t)py * width + skip;
         int px = skip;
 
@@ -326,8 +322,7 @@ static void blur_columns(unsigned char *cov, int hw, int hh, int r)
  * row and the same byte again in the row below -- so the opacity, the
  * inversion and the horizontal doubling all fold into one 16-entry table and
  * the second row is a copy of the first. */
-static void expand_mask(const unsigned char *cov, int hw, int hh,
-                        unsigned char *mask, int mh, int opacity)
+static void expand_mask(unsigned char *mask, int hw, int hh, int mh, int opacity)
 {
     unsigned char pair[SHADOW_COV_FULL + 1];
 
@@ -339,13 +334,14 @@ static void expand_mask(const unsigned char *cov, int hw, int hh,
         pair[i] = a | (a << 4);
     }
 
-    for (int row = 0; row < hh; row++)
+    /* Write from the end so the next unread coverage row stays intact. */
+    for (int row = hh - 1; row >= 0; row--)
     {
-        const unsigned char *src = &cov[row * hw];
+        const unsigned char *src = &mask[row * hw];
         unsigned char *dst = &mask[2 * row * hw];
 
         for (int i = 0; i < hw; i++)
-            dst[i] = pair[src[i]];
+            dst[i] = pair[MIN(src[i], SHADOW_COV_FULL)];
 
         if (2 * row + 1 < mh)
             memcpy(dst + hw, dst, hw);
@@ -446,12 +442,12 @@ void text_shadow_draw(struct screen *display, int x, int y,
      * none: a blur the theme asked for has to soften something. */
     int hr = MAX(1, (blur + 1) / 2);
 
-    memset(shadow_cov, 0, (size_t)hw * hh);
+    memset(shadow_mask, 0, (size_t)hw * hh);
     mask_from_text(display, vp, text, x, text_skip_pixels, mx, hw, hh, blur);
 
-    blur_rows(shadow_cov, hw, hh, hr);
-    blur_columns(shadow_cov, hw, hh, hr);
-    expand_mask(shadow_cov, hw, hh, shadow_mask, mh, line->shadow_opacity);
+    blur_rows(shadow_mask, hw, hh, hr);
+    blur_columns(shadow_mask, hw, hh, hr);
+    expand_mask(shadow_mask, hw, hh, mh, line->shadow_opacity);
 
     int top, bottom;
     shadow_ink_rows(shadow_mask, hw, mh, &top, &bottom);

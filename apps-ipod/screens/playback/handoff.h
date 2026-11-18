@@ -19,6 +19,7 @@ void handoff_begin(void);
 void handoff_usb_dismissed(void);
 bool handoff_pending(void);
 int handoff_step(void);
+bool handoff_take_dissolve(void);
 #else
 static inline bool handoff_capable(void) { return false; }
 static inline bool handoff_hold_source(void) { return false; }

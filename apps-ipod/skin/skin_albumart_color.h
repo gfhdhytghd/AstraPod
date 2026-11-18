@@ -55,6 +55,10 @@ void skin_albumart_filter(int aa_slot, struct skin_albumart *aa);
 struct img_filter;
 int skin_lyrics_art(void);
 bool skin_lyrics_copy_blur(fb_data *dst, int handle, const struct img_filter *filter);
+#ifdef HAVE_USB_PODLINK
+/* Draw the matching cached blur into the active full-screen viewport. */
+bool skin_handoff_draw_blur(int handle);
+#endif
 
 /* Which run of buffered art the filter guards refer to. It moves whenever the
  * art changes, so `filtered_gen == skin_albumart_gen()` is the question "is

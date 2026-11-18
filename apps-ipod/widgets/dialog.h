@@ -235,7 +235,8 @@ struct dialog_callbacks
 {
     /* Fill `box` with the desired frame geometry (screen-relative x/y/w/h) for
      * `screen`. Called before each (re)draw with the theme-enabled parent
-     * viewport active, so its font is set and text metrics are valid here. */
+     * viewport active, so its font is set and text metrics are valid here.
+     * NULL gives draw() an unframed full-screen viewport. */
     void (*measure)(struct dialog *d, struct screen *s,
                     struct viewport *box, void *data);
 

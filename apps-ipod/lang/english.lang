@@ -28133,11 +28133,11 @@
   user: core
   <source>
     *: none
-    ipod6g: "Hand off to computer?"
+    ipod6g: "Hand off to computer"
   </source>
   <dest>
     *: none
-    ipod6g: "Hand off to computer?"
+    ipod6g: "Hand off to computer"
   </dest>
   <voice>
     *: none
@@ -28145,16 +28145,16 @@
 </phrase>
 
 <phrase>
-  id: LANG_HANDOFF_BODY
+  id: LANG_HANDOFF_PREPARING
   desc: Continuity handoff
   user: core
   <source>
     *: none
-    ipod6g: "Continue on %s: %s"
+    ipod6g: "Handing off…"
   </source>
   <dest>
     *: none
-    ipod6g: "Continue on %s: %s"
+    ipod6g: "Handing off…"
   </dest>
   <voice>
     *: none
@@ -28240,6 +28240,40 @@
   <dest>
     *: none
     ipod6g: "RIGHT   Remote control"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_NO_RESPONSE
+  desc: Continuity handoff failure reason
+  user: core
+  <source>
+    *: none
+    ipod6g: "The computer did not respond"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "The computer did not respond"
+  </dest>
+  <voice>
+    *: none
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_HANDOFF_HOST_FAILED
+  desc: Continuity handoff failure reason
+  user: core
+  <source>
+    *: none
+    ipod6g: "Could not start playback on the computer"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "Could not start playback on the computer"
   </dest>
   <voice>
     *: none

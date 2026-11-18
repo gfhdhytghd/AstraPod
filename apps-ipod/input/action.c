@@ -1243,6 +1243,13 @@ static int step_handoff(int action)
         int result = handoff_step();
         if (result == 2)
             return get_current_activity() == ACTIVITY_WPS ? ACTION_REDRAW : ACTION_REMOTE_WPS;
+        if (result == 3)
+        {
+            if (get_current_activity() == ACTIVITY_WPS) return ACTION_REDRAW;
+            agents_nav_request(AGENTS_NAV_WPS, false);
+            root_menu_wps_shortcut();
+            return agents_nav_pending() != AGENTS_NAV_NONE ? ACTION_STD_CANCEL : ACTION_REDRAW;
+        }
         if (result == 1) return ACTION_REDRAW;
     }
 #endif

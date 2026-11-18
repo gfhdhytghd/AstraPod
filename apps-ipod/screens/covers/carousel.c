@@ -530,7 +530,18 @@ static bool pf_random_spinning;
 static struct pf_slide_cache pf_sldcache;
 
 /* use long for aligning */
-unsigned long thread_stack[THREAD_STACK_SIZE / sizeof(long)];
+struct pf_perf {
+    unsigned entry, first, frames, boosted, gaps, max_gap, over33, over50;
+    uint64_t gap_us, clear_us, slides_us, text_us, submit_us;
+    uint32_t histogram[52]; /* rounded up to milliseconds, 51 = overflow */
+};
+struct carousel_workspace {
+    struct pf_perf perf;
+    unsigned long loader_stack[THREAD_STACK_SIZE / sizeof(long)];
+};
+
+/* The loader's stack address must survive yields and buflib compaction. */
+static struct carousel_workspace *workspace;
 /* queue (as array) for scheduling load_surface */
 
 static int empty_slide_hid;
@@ -1396,8 +1407,8 @@ static bool create_pf_thread(void)
     queue_init(&thread_q, true);
     if ((thread_id = create_thread(
                            thread,
-                           thread_stack,
-                           sizeof(thread_stack),
+                           workspace->loader_stack,
+                           sizeof(workspace->loader_stack),
                             0,
                            "Picture load thread"
                                IF_PRIO(, PRIORITY_BUFFERING)
@@ -2933,8 +2944,10 @@ static int draw_tile_half(struct pf_col *cols, int ncols, int step,
 
             if (n <= 0)
                 continue;
+#ifdef CPU_PP
             k->n -= n;
             more |= (k->n > 0);
+#endif
             total += n;
             if (f)
                 draw_run_faded(k, n, step, f);
@@ -3096,8 +3109,14 @@ static void render_slide_clipped(struct slide_data *slide, const int alpha,
      * Trap: writing along rows instead is ~20% slower than even the untiled
      * column walk: the column-major source is then read across its stride,
      * and the misses move from the stores onto the loads. */
+#ifdef CPU_PP
     struct pf_col tile_up[PF_TILE_W], tile_lo[PF_TILE_W];
     int ncols = 0;
+#else
+    /* A full column fits the 6G band. Emit it while the projection is hot. */
+    struct pf_col upper, lower;
+    struct pf_col *u = &upper, *l = &lower;
+#endif
 
 #define LCDADDR(x, y) (&buffer[(y)*BUFFER_WIDTH + (x)])
 
@@ -3149,7 +3168,9 @@ static void render_slide_clipped(struct slide_data *slide, const int alpha,
         int plim = MAX(0, p_start_upper - (half_height-1) * dy);
         int plo = MIN(sh * PFREAL_ONE, p_start_lower + lower_half * dy);
         unsigned int recip = 0xffffffffu / dy;
+#ifdef CPU_PP
         struct pf_col *u = &tile_up[ncols], *l = &tile_lo[ncols];
+#endif
 
         u->src = l->src = ptr;
         u->p = p_start_upper;
@@ -3176,6 +3197,7 @@ static void render_slide_clipped(struct slide_data *slide, const int alpha,
                  ? div_by_recip(plo - p_start_lower + dy - 1, dy, recip) : 0;
         }
 
+#ifdef CPU_PP
         /* A tile ends where a cache line does, not after PF_TILE_W columns
          * counted from wherever the slide happens to start. */
         if (++ncols == PF_TILE_W || (x & (PF_TILE_W - 1)) == PF_TILE_W - 1)
@@ -3183,11 +3205,14 @@ static void render_slide_clipped(struct slide_data *slide, const int alpha,
             draw_tile(tile_up, tile_lo, ncols, f);
             ncols = 0;
         }
-
-
+#else
+        draw_tile(u, l, 1, f);
+#endif
     }
+#ifdef CPU_PP
     if (ncols > 0)
         draw_tile(tile_up, tile_lo, ncols, f);
+#endif
 }
 
 static void render_slide(struct slide_data *slide, const int alpha)
@@ -3757,6 +3782,31 @@ static void cover_rows(int *y0, int *y1)
     pf_slides_y1 = hi;
 }
 
+/* Timings are wall time in microseconds. Only consecutive motion frames
+ * contribute to cadence. Idle polls never read the clock for the recorder. */
+
+
+static void pf_perf_save(unsigned cleanup_us)
+{
+    int fd = creat(ROCKBOX_DIR "/coverflow-perf.txt", 0666);
+    if (fd < 0)
+        return;
+    unsigned p95 = 0, count = 0;
+    while (p95 < 51 && count + workspace->perf.histogram[p95] < workspace->perf.gaps - workspace->perf.gaps / 20)
+        count += workspace->perf.histogram[p95++];
+    uint32_t frames = MAX(workspace->perf.frames, 1u);
+    fdprintf(fd, "frames %u\nboosted_frames %u\nentry_us %u\ncleanup_us %u\n"
+             "motion_intervals %u\nfps_x100 %u\np95_ms_bucket %u\n"
+             "max_interval_us %u\nover_33ms %u\nover_50ms %u\n"
+             "mean_clear_slides_text_submit_us %u %u %u %u\n",
+             workspace->perf.frames, workspace->perf.boosted, workspace->perf.first, cleanup_us, workspace->perf.gaps,
+             (unsigned)(workspace->perf.gaps * 100000000ull / MAX(workspace->perf.gap_us, 1ull)),
+             p95, workspace->perf.max_gap, workspace->perf.over33, workspace->perf.over50,
+             (unsigned)(workspace->perf.clear_us / frames), (unsigned)(workspace->perf.slides_us / frames),
+             (unsigned)(workspace->perf.text_us / frames), (unsigned)(workspace->perf.submit_us / frames));
+    close(fd);
+}
+
 /* Clears `h` rows from `y` down the viewport and draws the covers into them.
  * The caller works out the band -- it also has to flush it, and on the frames
  * that carry a caption as well the two are decided together. */
@@ -3769,7 +3819,10 @@ static void render_all_slides(int y, int h)
 #if PF_SHOW_STATS
     t0 = USEC_TIMER;
 #endif
+    uint32_t start = USEC_TIMER;
     pf_clear_band(y, h);
+    uint32_t cleared = USEC_TIMER;
+    workspace->perf.clear_us += cleared - start;
 #if PF_SHOW_STATS
     pf_clear_us = USEC_TIMER - t0;
     pf_px = 0;
@@ -3784,6 +3837,7 @@ static void render_all_slides(int y, int h)
         flat_render();
     else
         coverflow_render();
+    workspace->perf.slides_us += (uint32_t)USEC_TIMER - cleared;
 #if PF_SHOW_STATS
     pf_slides_us = USEC_TIMER - t0;
 #endif
@@ -4568,6 +4622,10 @@ static int album_covers_loop(void)
     bool caption_owed = true;
     unsigned int seen_caption_version = 0;
     bool full_flush_owed = false;
+    int skin_top = LCD_HEIGHT, skin_end = 0;
+    int skin_left = LCD_WIDTH, skin_right = 0;
+    uint32_t previous_motion = 0;
+    bool consecutive = false;
     /* The viewport as a whole has changed and every row of it has to be cleared
      * and sent, not just the rows the two halves above account for. True for
      * the first frame, for anything that drew over the screen and did not say
@@ -4737,8 +4795,12 @@ static int album_covers_loop(void)
                     full_flush_owed = true;
                 }
                 else
-                    lcd_update_rect(dirty[i].x, dirty[i].y,
-                                    dirty[i].w, dirty[i].h);
+                {
+                    skin_left = MIN(skin_left, dirty[i].x);
+                    skin_right = MAX(skin_right, dirty[i].x + dirty[i].w);
+                    skin_top = MIN(skin_top, dirty[i].y);
+                    skin_end = MAX(skin_end, dirty[i].y + dirty[i].h);
+                }
             }
         }
 
@@ -4827,6 +4889,20 @@ static int album_covers_loop(void)
         if (!dark && (art_owed || caption_owed)
             && current_tick - last_frame_tick >= PF_FRAME_TICKS)
         {
+            uint32_t frame_start = USEC_TIMER;
+            bool motion = pf_state == pf_scrolling || flow_mix;
+            if (consecutive && motion)
+            {
+                uint32_t gap = frame_start - previous_motion;
+                workspace->perf.gaps++;
+                workspace->perf.gap_us += gap;
+                workspace->perf.max_gap = MAX(gap, workspace->perf.max_gap);
+                workspace->perf.over33 += gap > 33000;
+                workspace->perf.over50 += gap > 50000;
+                workspace->perf.histogram[gap > 50000 ? 51 : (gap + 999) / 1000]++;
+            }
+            consecutive = motion;
+            previous_motion = frame_start;
             bool drew_art = art_owed;
             bool drew_caption = caption_owed;
             /* The rows each half touches, and so the rows it has to clear
@@ -4914,6 +4990,7 @@ static int album_covers_loop(void)
 
             if (drew_art)
                 render_all_slides(art_y, art_h);
+            uint32_t text_start = USEC_TIMER;
             if (drew_caption)
             {
                 /* Wiping the caption's own rows disturbs nothing else: either
@@ -4941,24 +5018,53 @@ static int album_covers_loop(void)
              * only need sending when the status bar redrew into them. Full
              * width in every case, which is the single-burst path in both
              * targets' drivers -- a narrower rect goes line by line. */
+            uint32_t submitting = USEC_TIMER;
+            workspace->perf.text_us += submitting - text_start;
+            if (drew_art)
+            {
+                skin_top = MIN(skin_top, pf_vp_y + art_y);
+                skin_end = MAX(skin_end, pf_vp_y + art_y + art_h);
+            }
+            if (drew_caption && !joined && pf_text_h > 0)
+            {
+                skin_top = MIN(skin_top, pf_vp_y + pf_text_y);
+                skin_end = MAX(skin_end, pf_vp_y + pf_text_y + pf_text_h);
+            }
             if (full_flush_owed)
             {
-                lcd_update();
+                skin_top = 0;
+                skin_end = LCD_HEIGHT;
                 full_flush_owed = false;
             }
-            else
-            {
-                if (drew_art)
-                    lcd_update_rect(0, pf_vp_y + art_y, LCD_WIDTH, art_h);
-                if (drew_caption && !joined)
-                    lcd_update_rect(0, pf_vp_y + pf_text_y,
-                                    LCD_WIDTH, pf_text_h);
-            }
+            if (skin_end > skin_top)
+                lcd_update_rect(0, skin_top, LCD_WIDTH, skin_end - skin_top);
+            skin_top = LCD_HEIGHT;
+            skin_end = 0;
+            skin_left = LCD_WIDTH;
+            skin_right = 0;
+            uint32_t submitted = USEC_TIMER;
+            workspace->perf.submit_us += submitted - submitting;
+            if (!workspace->perf.frames++)
+                workspace->perf.first = submitted - workspace->perf.entry;
+            workspace->perf.boosted += pf_boosted;
             full_repaint_owed = false;
 #if PF_SHOW_STATS
             pf_stats_frame(t_start, t_flush - t_start, USEC_TIMER - t_flush);
 #endif
             yield();
+        }
+
+        else if (!art_owed && !caption_owed)
+        {
+            consecutive = false;
+            if (!dark && skin_end > skin_top)
+            {
+                lcd_update_rect(skin_left, skin_top, skin_right - skin_left, skin_end - skin_top);
+                skin_left = LCD_WIDTH;
+                skin_right = 0;
+                skin_top = LCD_HEIGHT;
+                skin_end = 0;
+            }
         }
 
         /* Whatever the button below is about to change, the frame showing it
@@ -5131,7 +5237,18 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
 int carousel_run(const struct carousel_model *m, const char *selected_file)
 {
     if (!agents_nav_enter(AGENTS_NAV_COVERS)) return GO_TO_PREVIOUS;
+    int handle = core_alloc(sizeof(*workspace));
+    if (handle <= 0)
+    {
+        agents_nav_leave(AGENTS_NAV_COVERS);
+        return GO_TO_PREVIOUS;
+    }
+    workspace = core_get_data_pinned(handle);
     int result = carousel_body(m, selected_file);
+    end_pf_thread();
+    workspace = NULL;
+    core_unpin(handle);
+    core_free(handle);
     enum agents_nav_screen nav = agents_nav_pending();
     if (nav == AGENTS_NAV_BACK)
     {
@@ -5149,6 +5266,8 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
 {
     int ret;
 
+    memset(&workspace->perf, 0, sizeof(workspace->perf));
+    workspace->perf.entry = USEC_TIMER;
     end_pf_thread();
     if (resume_model && resume_model != m) carousel_forget_resume();
     model = m;
@@ -5212,7 +5331,9 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
     ret = album_covers_loop();
     button_set_sw_poweroff_state(true);
 
+    uint32_t cleanup_start = USEC_TIMER;
     cleanup();
+    pf_perf_save((uint32_t)USEC_TIMER - cleanup_start);
 
     /* CAROUSEL_PLAY_ALBUM belongs with these: album_covers() turns it into
      * GO_TO_WPS, so the screen underneath is about to be replaced either way

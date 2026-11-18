@@ -25,11 +25,7 @@
 /* Message box geometry: at most the display width minus a horizontal margin,
  * height fitted to the content and centred vertically. The inner padding
  * between the border and the contents is the style's box_margin. */
-#define YN_MARGIN 12   /* horizontal gap from the display edge to the box */
-#define YN_MAX_LINES 16 /* cap on wrapped message display lines */
-#define YN_BTN_PAD_X 12 /* horizontal padding inside each button */
-#define YN_BTN_PAD_Y 5  /* vertical padding inside each button */
-#define YN_BTN_GAP   18 /* gap between the two buttons */
+#define YN_MAX_LINES DIALOG_NATIVE_LINES /* cap on wrapped message lines */
 
 /* Per-run yes/no state, handed to the dialog callbacks via `data`. */
 struct yesno_ctx
@@ -114,32 +110,34 @@ static void yesno_button_labels(struct yesno_ctx *c, int secs,
 
 /* Widest button width for this dialog: sized to the initial countdown so the
  * button (and box) don't jitter as the seconds tick down. */
-static int yesno_button_width(struct yesno_ctx *c, struct screen *display)
+static int yesno_button_width(struct yesno_ctx *c, struct screen *display,
+                               const struct dialog_style *style)
 {
     char yes[24], no[24];
     int w_yes, w_no;
     yesno_button_labels(c, c->tmo_secs, yes, no, sizeof yes);
     display->getstringsize(yes, &w_yes, NULL);
     display->getstringsize(no,  &w_no,  NULL);
-    return MAX(w_yes, w_no) + YN_BTN_PAD_X * 2;
+    return MAX(w_yes, w_no) + style->button_pad_x * 2;
 }
 
 /* Draw the Yes/No buttons side by side along the bottom of the content area,
  * with the currently selected one highlighted. Coordinates are relative to the
  * content viewport. */
-static void yesno_draw_buttons(struct yesno_ctx *c, struct dialog *d,
-                               struct screen *display,
-                               struct viewport *content)
+static void yesno_layout_buttons(struct yesno_ctx *c, struct screen *display,
+                                 const struct viewport *content,
+                                 const struct dialog_style *style,
+                                 struct dialog_native_button buttons[2])
 {
-    char yes[24], no[24];
     int h;
 
-    yesno_button_labels(c, yesno_tmo_remaining(c), yes, no, sizeof yes);
-    display->getstringsize(yes, NULL, &h);
+    yesno_button_labels(c, yesno_tmo_remaining(c), buttons[0].label,
+                        buttons[1].label, sizeof buttons[0].label);
+    display->getstringsize(buttons[0].label, NULL, &h);
 
-    const int gap = YN_BTN_GAP;
-    int bw = yesno_button_width(c, display);   /* stable width */
-    int bh = h + YN_BTN_PAD_Y * 2;
+    const int gap = style->button_gap;
+    int bw = yesno_button_width(c, display, style);   /* stable width */
+    int bh = h + style->button_pad_y * 2;
     int x  = (content->width - (bw * 2 + gap)) / 2;
     if (x < 0)
         x = 0;
@@ -147,10 +145,39 @@ static void yesno_draw_buttons(struct yesno_ctx *c, struct dialog *d,
     if (y < 0)
         y = 0;
 
-    dialog_draw_button(display, &d->style, x, y, bw, bh, yes,
-                       c->selection == YESNO_YES);
-    dialog_draw_button(display, &d->style, x + bw + gap, y, bw, bh, no,
-                       c->selection == YESNO_NO);
+    buttons[0].x = x;
+    buttons[1].x = x + bw + gap;
+    buttons[0].y = buttons[1].y = y;
+    buttons[0].width = buttons[1].width = bw;
+    buttons[0].height = buttons[1].height = bh;
+    buttons[0].selected = c->selection == YESNO_YES;
+    buttons[1].selected = c->selection == YESNO_NO;
+}
+
+static void yesno_native_layout(struct dialog *d, struct screen *s,
+                                const struct viewport *content,
+                                struct dialog_native_content *out, void *data)
+{
+    struct yesno_ctx *c = data;
+    out->line_count = c->wrap_count;
+    for (int i = 0; i < c->wrap_count; ++i)
+        out->lines[i] = c->wrap[i];
+    out->button_count = 2;
+    yesno_layout_buttons(c, s, content, &d->style, out->buttons);
+}
+
+static void yesno_draw_buttons(struct yesno_ctx *c, struct dialog *d,
+                               struct screen *display,
+                               struct viewport *content)
+{
+    struct dialog_native_button buttons[2];
+    yesno_layout_buttons(c, display, content, &d->style, buttons);
+    for (int i = 0; i < 2; ++i)
+    {
+        const struct dialog_native_button *b = &buttons[i];
+        dialog_draw_button(display, &d->style, b->x, b->y, b->width,
+                           b->height, b->label, b->selected);
+    }
 }
 
 /* Draw a yes/no result message (shown briefly after a choice), into the
@@ -208,7 +235,8 @@ static void yesno_measure(struct dialog *d, struct screen *s,
 
     /* wrap to the widest the content may grow to, then size the box to the
      * actual content (widest wrapped line or the button row) and centre it. */
-    int max_content_w = sw - 2 * YN_MARGIN - in.left - in.right;
+    int box_max_w = sw - 2 * d->style.edge_margin;
+    int max_content_w = box_max_w - in.left - in.right;
     yesno_wrap_message(c, max_content_w, box->font);
 
     int text_w = 0;
@@ -220,13 +248,13 @@ static void yesno_measure(struct dialog *d, struct screen *s,
             text_w = w;
     }
 
-    int btn_row_w = yesno_button_width(c, s) * 2 + YN_BTN_GAP;
+    int btn_row_w = yesno_button_width(c, s, &d->style) * 2 + d->style.button_gap;
 
     int box_w = MAX(text_w, btn_row_w) + in.left + in.right;
-    if (box_w > sw - 2 * YN_MARGIN)
-        box_w = sw - 2 * YN_MARGIN;         /* clamp to the display */
+    if (box_w > box_max_w)
+        box_w = box_max_w;         /* clamp to the display */
 
-    int btn_h = ch + 2 * YN_BTN_PAD_Y;      /* button height (matches buttons) */
+    int btn_h = ch + 2 * d->style.button_pad_y;      /* button height (matches buttons) */
 
     /* Gap between the message and the buttons. The last text line reserves
      * descender space under its baseline that is usually empty, so subtract
@@ -380,6 +408,7 @@ static enum yesno_res yesno_run(int ticks, enum yesno_res tmo_default_res,
         .draw      = yesno_draw,
         .on_action = yesno_on_action,
         .on_close  = yesno_on_close,
+        .native_layout = yesno_native_layout,
     };
     struct yesno_ctx c;
     struct dialog d;

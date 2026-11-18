@@ -2416,6 +2416,8 @@ const struct settings_list settings[] = {
     OFFON_SETTING(0, spike_caption_scroll, LANG_SPIKE_CAPTION_SCROLL, false,
                   "spike caption scroll", NULL),
     OFFON_SETTING(0, animations, LANG_UI_ANIMATIONS, false, "animations", NULL),
+    OFFON_SETTING(F_BANFROMQS, native_ui, -1, false, "native ui", NULL),
+    TEXT_SETTING(0, native_theme, "native theme", "scrim", NULL, NULL),
 };
 
 const int nb_settings = sizeof(settings)/sizeof(*settings);

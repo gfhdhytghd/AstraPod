@@ -20,6 +20,7 @@
 #include "settings/settings.h"
 #include "rbpaths.h"
 #include "widgets/menu.h"
+#include "ui/native_theme_runtime.h"
 #include "dir.h"
 #include "screens/browse/browser.h"
 #include "widgets/list.h"
@@ -607,6 +608,8 @@ MAKE_MENU(menus_menu, ID2P(LANG_MENUS), NULL, Icon_NOICON,
    does rather than by the subsystem that implements it -- so the peak meter,
    the viewers and the root menu editor all sit here. */
 MENUITEM_SETTING(animations, &global_settings.animations, NULL);
+MENUITEM_FUNCTION(native_theme_item, MENU_FUNC_CHECK_RETVAL, "Native theme",
+                  ui_theme_choose, NULL, Icon_Config);
 
 MAKE_MENU(appearance_menu, ID2P(LANG_APPEARANCE),
             NULL, Icon_Wps,
@@ -624,6 +627,7 @@ MAKE_MENU(appearance_menu, ID2P(LANG_APPEARANCE),
             &peak_meter_menu,
             &menus_menu,
             &animations,
+            &native_theme_item,
             /* At the foot of Appearance rather than inside Theme Settings.
                What it forgets is every appearance setting the user has changed
                by hand, and those reach well past this screen -- the carousel's

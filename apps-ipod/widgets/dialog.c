@@ -33,6 +33,9 @@
 #include "system.h"
 #include "thread.h"
 #include "ui/animation.h"
+#include "ui/native_menu.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/retained.h"
 #include "ui/scene.h"
 #include <string.h>
 #endif
@@ -55,6 +58,7 @@ void dialog_style_default(struct dialog_style *s)
     s->box_border_width  = 1;
     s->box_margin        = DIALOG_MARGIN;
     s->box_font          = DIALOG_FONT_INHERIT;
+    s->edge_margin       = 12;
     s->box_shadow_color  = LCD_BLACK;
     s->box_shadow_offset = DIALOG_SHADOW;
 
@@ -67,6 +71,9 @@ void dialog_style_default(struct dialog_style *s)
     s->button_border_width           = 1;
     s->button_border_radius          = 0;
     s->button_font                   = DIALOG_FONT_INHERIT;
+    s->button_gap                    = 18;
+    s->button_pad_x                  = 12;
+    s->button_pad_y                  = 5;
 }
 
 static struct dialog_style default_style;
@@ -724,6 +731,9 @@ static void dialog_draw_one(struct dialog *d, struct screen *s, int screen_nr,
 #define DIALOG_OPEN_FRAMES ANIM_F(12)
 #define DIALOG_CLOSE_FRAMES ANIM_F(10)
 #define DIALOG_PIXELS (LCD_WIDTH * LCD_HEIGHT)
+#define NATIVE_DIALOG_GLYPHS 64
+
+struct dialog_native_ui;
 
 struct dialog_motion {
     struct ui_tween tween; /* the box's top edge */
@@ -732,9 +742,306 @@ struct dialog_motion {
     int handle;
     int shown;
     bool entering;
+    struct dialog_native_ui *native;
 };
 
 static struct dialog_motion *motion_owner;
+
+enum native_tile_id {
+    NATIVE_SHADOW, NATIVE_FRAME, NATIVE_MESSAGE, NATIVE_BUTTON_0,
+    NATIVE_BUTTON_1, NATIVE_TILE_COUNT
+};
+
+struct dialog_native_ui {
+    struct dialog *dialog;
+    struct ui_theme theme;
+    struct ui_nav nav;
+    struct ui_page base_page, overlay_page;
+    struct ui_view base, root, views[NATIVE_TILE_COUNT];
+    struct ui_layer backdrop, layers[NATIVE_TILE_COUNT];
+    int disposition, body_font;
+    bool attached;
+};
+
+static bool dialog_native_action(struct ui_view *view, int action)
+{
+    struct dialog_native_ui *ui = view->data;
+    struct dialog *d = ui->dialog;
+    ui->disposition = d->cb->on_action(d, action, d->data);
+    return true;
+}
+
+static void dialog_native_init(struct dialog_native_ui *ui, struct dialog *d,
+                                int handle)
+{
+    static const struct ui_view_ops action_ops = {.action = dialog_native_action};
+    static const struct ui_view_ops tile_ops = {.paint = ui_layer_paint};
+    const struct ui_rect screen = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+
+    ui->dialog = d;
+    ui_theme_snapshot(&ui->theme);
+    ui->body_font = ui_theme_font_load(&ui->theme, UI_FONT_BODY, NATIVE_DIALOG_GLYPHS);
+    ui->backdrop = (struct ui_layer){
+        .handle = handle, .width = LCD_WIDTH, .height = LCD_HEIGHT,
+        .offset_pixels = d->slide == DIALOG_SLIDE_EVENT ? DIALOG_PIXELS : 0,
+    };
+    ui_view_init(&ui->base, screen, &tile_ops, &ui->backdrop);
+    ui_view_init(&ui->root, screen, &action_ops, ui);
+    ui_page_init(&ui->base_page, &ui->base);
+    ui_page_init(&ui->overlay_page, &ui->root);
+    for (int i = 0; i < NATIVE_TILE_COUNT; ++i)
+    {
+        ui_view_init(&ui->views[i], (struct ui_rect){0}, &tile_ops, &ui->layers[i]);
+        ui_view_append(&ui->root, &ui->views[i]);
+    }
+    ui_nav_push(&ui->nav, &ui->base_page, UI_PAGE);
+    ui_nav_push(&ui->nav, &ui->overlay_page, UI_POPUP);
+    ui->attached = true;
+}
+
+static void dialog_native_detach(struct dialog_native_ui *ui)
+{
+    ui_nav_pop(&ui->nav);
+    ui_nav_pop(&ui->nav);
+    ui->attached = false;
+    if (ui->body_font >= 0)
+        font_unload(ui->body_font);
+}
+
+static uint32_t dialog_rgb888(unsigned rgb565)
+{
+    return (RGB_UNPACK_RED(rgb565) << 16) | (RGB_UNPACK_GREEN(rgb565) << 8) |
+            RGB_UNPACK_BLUE(rgb565);
+}
+
+static unsigned dialog_native_color(const struct ui_theme *theme,
+                                     enum ui_color_role role,
+                                     const struct ui_album_palette *palette)
+{
+    uint32_t color = ui_theme_color(theme, role, palette);
+    return LCD_RGBPACK(color >> 16, (color >> 8) & 255, color & 255);
+}
+
+static struct dialog_style dialog_native_style(const struct dialog_native_ui *ui)
+{
+    struct ui_album_palette palette = {0};
+    unsigned dominant, vivid;
+    if (dynamic_colors_roles(&dominant, &vivid))
+    {
+        palette.has_dominant = palette.has_vivid = true;
+        palette.dominant = dialog_rgb888(dominant);
+        palette.vivid = dialog_rgb888(vivid);
+    }
+    const struct ui_theme *theme = &ui->theme;
+    const uint16_t *metric = theme->metric;
+    unsigned bg = dialog_native_color(theme, UI_COLOR_MODAL_BG, &palette);
+    unsigned fg = dialog_native_color(theme, UI_COLOR_MODAL_FG, &palette);
+    unsigned border = dialog_native_color(theme, UI_COLOR_MODAL_BORDER, &palette);
+    unsigned accent = dialog_native_color(theme, UI_COLOR_MODAL_ACCENT, &palette);
+    unsigned selected_text = dialog_native_color(theme, UI_COLOR_MODAL_SELECTED_TEXT,
+                                                  &palette);
+    return (struct dialog_style){
+        .box_fg = fg, .box_bg = bg, .box_border_color = border,
+        .box_border_width = metric[UI_METRIC_MODAL_BORDER_WIDTH],
+        .box_margin = metric[UI_METRIC_MODAL_PADDING],
+        .box_font = ui->body_font >= 0 ? ui->body_font : DIALOG_FONT_INHERIT,
+        .edge_margin = metric[UI_METRIC_MODAL_EDGE_MARGIN],
+        .box_shadow_color = dialog_native_color(theme, UI_COLOR_MODAL_SHADOW, &palette),
+        .box_shadow_offset = metric[UI_METRIC_MODAL_SHADOW_OFFSET],
+        .button_fg = fg, .button_bg = bg, .button_border_color = border,
+        .button_fg_selected = selected_text,
+        .button_bg_selected = accent, .button_border_color_selected = accent,
+        .button_border_width = metric[UI_METRIC_MODAL_BORDER_WIDTH],
+        .button_font = DIALOG_FONT_INHERIT,
+        .button_gap = metric[UI_METRIC_MODAL_BUTTON_GAP],
+        .button_pad_x = metric[UI_METRIC_MODAL_BUTTON_PAD_X],
+        .button_pad_y = metric[UI_METRIC_MODAL_BUTTON_PAD_Y],
+    };
+}
+
+static struct ui_rect dialog_rect(const struct viewport *vp)
+{
+    return (struct ui_rect){vp->x, vp->y, vp->width, vp->height};
+}
+
+static void dialog_native_tile(struct dialog_native_ui *ui, int tile,
+                                struct ui_rect bounds, size_t offset,
+                                bool solid)
+{
+    struct ui_page *p = &ui->overlay_page;
+    struct ui_view *v = &ui->views[tile];
+    struct ui_layer *layer = &ui->layers[tile];
+    ui_page_set(p, v, UI_X, bounds.x);
+    ui_page_set(p, v, UI_Y, bounds.y);
+    ui_page_set(p, v, UI_WIDTH, bounds.width);
+    ui_page_set(p, v, UI_HEIGHT, bounds.height);
+    ui_page_invalidate(p, bounds);
+    *layer = (struct ui_layer){
+        .handle = ui->backdrop.handle, .offset_pixels = offset,
+        .width = solid ? 1 : bounds.width,
+        .height = solid ? 1 : bounds.height,
+    };
+}
+
+/* Draw into a packed opaque texture. All high-level modal paints pass through
+ * the retained tree; the firmware's glyph and rectangle routines are shared
+ * raster primitives. The compositor clips, scales and blends these textures. */
+static struct viewport dialog_tile_viewport(struct viewport style,
+                                             struct frame_buffer_t *buffer,
+                                             fb_data *pixels, int w, int h)
+{
+    *buffer = (struct frame_buffer_t){.fb_ptr = pixels, .stride = w, .elems = w * h};
+    style.buffer = buffer;
+    style.x = style.y = 0;
+    style.width = w;
+    style.height = h;
+    style.drawmode = DRMODE_FG;
+    return style;
+}
+
+static bool dialog_native_draw(struct dialog_native_ui *ui)
+{
+    struct dialog *d = ui->dialog;
+    struct screen *s = &screens[SCREEN_MAIN];
+    struct viewport box = d->parent[SCREEN_MAIN];
+    if (2 * (d->style.edge_margin + d->style.box_margin) >= LCD_WIDTH ||
+        2 * d->style.box_margin >= LCD_HEIGHT)
+        return false;
+    if (d->style.box_font != DIALOG_FONT_INHERIT)
+        box.font = d->style.box_font;
+    struct viewport *prev = s->set_viewport(&box);
+    d->cb->measure(d, s, &box, d->data);
+    struct dialog_insets in;
+    dialog_get_insets(&d->style, &in);
+    struct viewport content = box;
+    content.x += in.left;
+    content.y += in.top;
+    content.width -= in.left + in.right;
+    content.height -= in.top + in.bottom;
+    if (box.x < 0 || box.y < 0 || box.width <= 0 || box.height <= 0 ||
+        box.width > LCD_WIDTH - box.x || box.height > LCD_HEIGHT - box.y ||
+        content.width <= 0 || content.height <= 0)
+    {
+        s->set_viewport(prev);
+        return false;
+    }
+
+    struct dialog_native_content model = {0};
+    int line_height = s->getcharheight();
+    s->set_viewport(&content);
+    d->cb->native_layout(d, s, &content, &model, d->data);
+    if (model.line_count < 0 || model.line_count > DIALOG_NATIVE_LINES ||
+        model.button_count < 0 || model.button_count > DIALOG_NATIVE_BUTTONS)
+    {
+        s->set_viewport(prev);
+        return false;
+    }
+    int message_h = line_height * model.line_count;
+    size_t pixels = 1 + box.width * box.height + content.width * message_h;
+    bool valid = message_h <= content.height;
+    for (int i = 0; i < model.button_count; ++i)
+    {
+        const struct dialog_native_button *b = &model.buttons[i];
+        valid &= b->x >= 0 && b->y >= 0 && b->width > 0 && b->height > 0 &&
+                 b->width <= content.width - b->x && b->height <= content.height - b->y;
+        pixels += b->width * b->height;
+    }
+    if (!valid || pixels > DIALOG_PIXELS)
+    {
+        s->set_viewport(prev);
+        return false;
+    }
+
+    size_t offset = ui->backdrop.offset_pixels + DIALOG_PIXELS;
+    fb_data *base = core_get_data_pinned(ui->backdrop.handle);
+    struct ui_rect shadow = dialog_rect(&box);
+    if (d->style.box_shadow_offset > 0)
+    {
+        shadow.x += d->style.box_shadow_offset;
+        shadow.y += d->style.box_shadow_offset;
+        base[offset] = resolve_fg(s, d->style.box_shadow_color);
+    }
+    else
+        shadow.width = 0;
+    dialog_native_tile(ui, NATIVE_SHADOW, shadow, offset++, true);
+
+    struct frame_buffer_t buffer;
+    struct viewport tile = dialog_tile_viewport(box, &buffer, base + offset,
+                                                 box.width, box.height);
+    struct viewport framed_content;
+    struct dialog_style frame_style = d->style;
+    frame_style.box_shadow_offset = 0; /* shadow is a separate retained node */
+    s->set_viewport(&tile);
+    dialog_frame_box(s, &tile, &frame_style, &framed_content);
+    content.fg_pattern = framed_content.fg_pattern;
+    content.bg_pattern = framed_content.bg_pattern;
+    dialog_native_tile(ui, NATIVE_FRAME, dialog_rect(&box), offset, false);
+    offset += box.width * box.height;
+
+    struct ui_rect message = {content.x, content.y, content.width, message_h};
+    if (message_h > 0)
+    {
+        tile = dialog_tile_viewport(content, &buffer, base + offset,
+                                     message.width, message.height);
+        tile.flags |= VP_FLAG_ALIGN_CENTER;
+        s->set_viewport(&tile);
+        s->set_foreground(content.bg_pattern);
+        s->fillrect(0, 0, tile.width, tile.height);
+        s->set_foreground(content.fg_pattern);
+        for (int i = 0; i < model.line_count; ++i)
+            s->putsxyf(0, i * line_height, "%.*s",
+                        model.lines[i].len, model.lines[i].str);
+    }
+    dialog_native_tile(ui, NATIVE_MESSAGE, message, offset, false);
+    offset += message.width * message.height;
+
+    for (int i = 0; i < DIALOG_NATIVE_BUTTONS; ++i)
+    {
+        struct ui_rect bounds = {0};
+        if (i < model.button_count)
+        {
+            const struct dialog_native_button *b = &model.buttons[i];
+            bounds = (struct ui_rect){content.x + b->x, content.y + b->y,
+                                      b->width, b->height};
+            tile = dialog_tile_viewport(content, &buffer, base + offset,
+                                         b->width, b->height);
+            s->set_viewport(&tile);
+            s->set_foreground(content.bg_pattern);
+            s->fillrect(0, 0, tile.width, tile.height);
+            s->set_foreground(content.fg_pattern);
+            dialog_draw_button(s, &d->style, 0, 0, b->width, b->height,
+                               b->label, b->selected);
+        }
+        dialog_native_tile(ui, NATIVE_BUTTON_0 + i, bounds, offset, false);
+        offset += bounds.width * bounds.height;
+    }
+    s->set_viewport(prev);
+    core_put_data_pinned(base);
+    ui_nav_draw(&ui->nav);
+    return true;
+}
+
+static bool dialog_native_paint(struct dialog_native_ui *ui)
+{
+    struct dialog *d = ui->dialog;
+    struct dialog_style legacy_style = d->style;
+    d->style = dialog_native_style(ui);
+    bool painted = dialog_native_draw(ui);
+    d->style = legacy_style;
+    return painted;
+}
+
+static bool dialog_native_supported(const struct dialog *d)
+{
+    if (d->slide == DIALOG_SLIDE_NONE || !d->cb->native_layout || !ui_native_enabled())
+        return false;
+
+    /* Scrim's album-derived dialog mixes legacy surface and accent formulas.
+     * Defer that variant until it has parity evidence on album states. */
+    unsigned dominant, vivid;
+    return strcmp(global_settings.native_theme, "scrim") ||
+           !dynamic_colors_roles(&dominant, &vivid);
+}
 
 /* The active viewport can belong to the invoking list or skin. Always
  * restore the default framebuffer and present it through the default view. */
@@ -745,23 +1052,46 @@ static void dialog_restore_display(void)
     lcd_set_viewport(prev);
 }
 
-void dialog_interrupt_transition(void)
+static void dialog_release_transition(bool restore)
 {
     struct dialog_motion *m = motion_owner;
     if (!m || m->thread != thread_self())
         return;
-    fb_data *base = core_get_data_pinned(m->handle);
-    memcpy(lcd_framebuffer_default.fb_ptr, base, FRAMEBUFFER_SIZE);
-    core_put_data_pinned(base);
+    if (m->native)
+    {
+        dialog_native_detach(m->native);
+        m->native = NULL;
+    }
+    if (restore)
+    {
+        fb_data *base = core_get_data_pinned(m->handle);
+        memcpy(lcd_framebuffer_default.fb_ptr, base, FRAMEBUFFER_SIZE);
+        core_put_data_pinned(base);
+    }
     motion_owner = NULL;
     m->handle = core_free(m->handle);
-    if (lcd_active())
+    if (restore && lcd_active())
         dialog_restore_display();
 }
 
-static void dialog_begin_transition(struct dialog_motion *m, const struct dialog *d)
+void dialog_interrupt_transition(void)
 {
-    if (d->slide == DIALOG_SLIDE_NONE || !global_settings.animations || !d->cb->measure ||
+    dialog_release_transition(true);
+}
+
+bool dialog_prepare_usb(void)
+{
+    bool nested = motion_owner && motion_owner->thread == thread_self() &&
+                  motion_owner->native;
+    dialog_release_transition(!nested);
+    return nested;
+}
+
+static void dialog_begin_transition(struct dialog_motion *m, const struct dialog *d,
+                                     bool native)
+{
+    if ((!native && (d->slide == DIALOG_SLIDE_NONE || !global_settings.animations)) ||
+        !d->cb->measure ||
         d->fb || motion_owner || !lcd_active())
         return;
 
@@ -769,7 +1099,8 @@ static void dialog_begin_transition(struct dialog_motion *m, const struct dialog
     if (lcd_updates_held())
         return;
 
-    m->handle = core_alloc_free_space(2 * FRAMEBUFFER_SIZE);
+    int surfaces = native && d->slide == DIALOG_SLIDE_EVENT ? 3 : 2;
+    m->handle = core_alloc_free_space(surfaces * FRAMEBUFFER_SIZE);
     if (m->handle <= 0)
         return;
 
@@ -778,7 +1109,7 @@ static void dialog_begin_transition(struct dialog_motion *m, const struct dialog
     core_put_data_pinned(base);
     m->thread = thread_self();
     m->shown = LCD_HEIGHT;
-    m->entering = true;
+    m->entering = !native;
     motion_owner = m;
 }
 
@@ -863,17 +1194,26 @@ static void dialog_close_transition(struct dialog_motion *m)
 void dialog_interrupt_transition(void)
 {
 }
+bool dialog_prepare_usb(void)
+{
+    return false;
+}
 #endif
 
-int dialog_run(struct dialog *d, int poll_ticks)
+/* The legacy path does not reserve a retained tree on its stack. */
+struct dialog_native_ui;
+static int dialog_run_loop(struct dialog *d, int poll_ticks,
+                            struct dialog_native_ui *native)
 {
     int disp = DIALOG_CONTINUE;
 
 #ifdef DIALOG_SLIDES
     struct dialog_motion motion = {0};
-    dialog_begin_transition(&motion, d);
+    dialog_begin_transition(&motion, d, native != NULL);
     bool repaint = true;
     bool animate_close = false;
+#else
+    (void)native;
 #endif
     d->poll_ticks = poll_ticks;
 
@@ -894,7 +1234,23 @@ int dialog_run(struct dialog *d, int poll_ticks)
         const fb_data *settled = d->slide == DIALOG_SLIDE_EVENT ?
             lcd_framebuffer_default.fb_ptr : surfaces;
         memcpy(surfaces + DIALOG_PIXELS, settled, FRAMEBUFFER_SIZE);
+        /* Enabling the old theme for consent can clear the retained menu
+         * body. Keep its live rows beneath the event's temporary header. */
+        int status_height = d->slide == DIALOG_SLIDE_EVENT ?
+                            native_menu_status_height() : 0;
+        if (status_height > 0)
+        {
+            size_t header_pixels = status_height * LCD_WIDTH;
+            memcpy(surfaces + DIALOG_PIXELS + header_pixels,
+                   surfaces + header_pixels,
+                   FRAMEBUFFER_SIZE - header_pixels * sizeof(fb_data));
+        }
         core_put_data_pinned(surfaces);
+        if (native)
+        {
+            dialog_native_init(native, d, motion.handle);
+            motion.native = native;
+        }
     }
 #endif
 
@@ -915,6 +1271,14 @@ int dialog_run(struct dialog *d, int poll_ticks)
         FOR_NB_SCREENS(i)
         {
 #ifdef DIALOG_SLIDES
+            if (i == SCREEN_MAIN && native && native->attached)
+            {
+                if (motion.handle > 0 && dialog_native_paint(native))
+                    continue;
+                /* Unsupported geometry or a higher-priority screen may end
+                 * the retained overlay while the confirmation stays open. */
+                dialog_interrupt_transition();
+            }
             if (i == SCREEN_MAIN && motion.handle > 0)
             {
                 bool first = motion.tween.frames == 0;
@@ -984,7 +1348,15 @@ int dialog_run(struct dialog *d, int poll_ticks)
             disp = DIALOG_CANCEL;
         else
 #endif
-            disp = d->cb->on_action(d, action, d->data);
+        {
+#ifdef DIALOG_SLIDES
+            if (native && native->attached && motion.handle > 0 &&
+                ui_nav_dispatch(&native->nav, action))
+                disp = native->disposition;
+            else
+#endif
+                disp = d->cb->on_action(d, action, d->data);
+        }
 #ifdef DIALOG_SLIDES
         repaint = action != ACTION_NONE || dynamic_colors_needs_repaint();
         animate_close = disp != DIALOG_ABORT && action != ACTION_NONE;
@@ -992,6 +1364,8 @@ int dialog_run(struct dialog *d, int poll_ticks)
     }
 
 #ifdef DIALOG_SLIDES
+    if (native && native->attached)
+        dialog_interrupt_transition();
     if (motion.handle > 0)
     {
         if (animate_close)
@@ -1021,4 +1395,22 @@ int dialog_run(struct dialog *d, int poll_ticks)
     }
 
     return disp;
+}
+
+#ifdef DIALOG_SLIDES
+static int __attribute__((noinline)) dialog_run_retained(struct dialog *d,
+                                                         int poll_ticks)
+{
+    struct dialog_native_ui native = {0};
+    return dialog_run_loop(d, poll_ticks, &native);
+}
+#endif
+
+int dialog_run(struct dialog *d, int poll_ticks)
+{
+#ifdef DIALOG_SLIDES
+    if (dialog_native_supported(d))
+        return dialog_run_retained(d, poll_ticks);
+#endif
+    return dialog_run_loop(d, poll_ticks, NULL);
 }

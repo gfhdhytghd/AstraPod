@@ -1086,6 +1086,8 @@ struct user_settings
     int spike_caption;  /* 0 off, 1 title, 2 title and artist */
     bool spike_caption_scroll;  /* ...and whether it travels or is cropped */
     bool animations;
+    bool native_ui;
+    char native_theme[32];
 };
 
 /* global settings */

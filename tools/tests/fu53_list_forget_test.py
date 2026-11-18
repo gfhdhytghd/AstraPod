@@ -73,6 +73,7 @@ static void gui_synclist_layout(struct gui_synclist *l) { (void)l; laid_out++; }
 static bool skinlist_draw(struct screen *d, struct gui_synclist *l)
 { (void)d; assert(l->parent[0] && l->parent[0]->height == 99); drawn++; last_drawn = l; return true; }
 static void list_draw(struct screen *d, struct gui_synclist *l) { (void)d; (void)l; assert(0); }
+static bool native_menu_draw(struct gui_synclist *l) { (void)l; return false; }
 void gui_synclist_draw(struct gui_synclist *gui_list);
 @CB@
 @SCROLL_ACTIVE@

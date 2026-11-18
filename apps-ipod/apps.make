@@ -53,6 +53,23 @@ $(APPSBUILDDIR)/screens/system/debug_menu.o \
 $(RBCODEC_BLD)/metadata/mp4.o: CFLAGS += -mthumb -mthumb-interwork
 endif
 
+# Keep native page and theme code within the 6G static budget.
+ifeq ($(MODELNAME):$(ARCH),ipod6g:arch_arm)
+$(APPSBUILDDIR)/screens/playback/handoff_sheet.o \
+$(APPSBUILDDIR)/screens/playback/wps.o \
+$(APPSBUILDDIR)/ui/native_chrome.o \
+$(APPSBUILDDIR)/ui/native_menu.o \
+$(APPSBUILDDIR)/ui/native_theme.o \
+$(APPSBUILDDIR)/ui/native_theme_runtime.o \
+$(APPSBUILDDIR)/ui/native_wps.o \
+$(APPSBUILDDIR)/ui/retained.o \
+$(APPSBUILDDIR)/widgets/dialog.o \
+$(APPSBUILDDIR)/widgets/menu.o \
+$(APPSBUILDDIR)/widgets/splash.o \
+$(APPSBUILDDIR)/widgets/usb_confirm.o \
+$(APPSBUILDDIR)/widgets/yesno.o: CFLAGS += -mthumb -mthumb-interwork
+endif
+
 # apps/features.txt is a file that (is preprocessed and) lists named features
 # based on defines in the config-*.h files. The named features will be passed
 # to genlang and thus (translated) phrases can be used based on those names.

@@ -35,12 +35,35 @@ filter_release = action_source.split('    if (last->wait_for_release)\n', 1)[1].
 live_entry = 'void action_handoff_enter(void)' in action_source
 draw = (ROOT / 'apps-ipod/screens/playback/handoff_sheet.c').read_text()
 native_entry = 'static void close_native_sheet(' in draw
+retained_entry = 'static void retained_sheet_init(' in draw
+themed_entry = 'void load_native_style(' in draw
 animation = ''
 if native_entry:
     animation = (ROOT / 'apps-ipod/ui/animation.h').read_text()
     animation += (ROOT / 'apps-ipod/ui/animation.c').read_text().replace('#include "animation.h"', '')
     animation += function((ROOT / 'firmware/drivers/button_queue.c').read_text(),
                           'button_queue_wait_pending')
+retained = ''
+if retained_entry:
+    retained = (ROOT / 'apps-ipod/ui/retained.h').read_text()
+    retained += (ROOT / 'apps-ipod/ui/retained.c').read_text()
+    retained = re.sub(r'^#include [^<].*$', '', retained, flags=re.M)
+theme_tokens = ''
+if themed_entry:
+    theme_tokens = (ROOT / 'apps-ipod/ui/native_theme.h').read_text()
+    theme_tokens += (ROOT / 'apps-ipod/ui/native_theme.c').read_text()
+    theme_tokens = re.sub(r'^#include [^<].*$', '', theme_tokens, flags=re.M)
+    theme_tokens += r'''
+static void ui_theme_snapshot(struct ui_theme *theme) { ui_theme_builtin(theme, false); }
+static unsigned ui_theme_duration(unsigned frames)
+{ return global_settings.animations ? frames : 0; }
+static int ui_theme_font_load(const struct ui_theme *theme, enum ui_font_role role, int glyphs)
+{
+    char path[64];
+    snprintf(path, sizeof(path), FONT_DIR "/%s.fnt", theme->font[role]);
+    return font_load_ex(path, 0, glyphs);
+}
+'''
 draw = re.sub(r'^#(?:include|if|endif).*$', '', draw, flags=re.M)
 dialog = (ROOT / 'apps-ipod/widgets/dialog.c').read_text()
 theme = (ROOT / 'apps-ipod/draw/viewport.c').read_text()
@@ -50,7 +73,10 @@ sheet = 'struct handoff_sheet' + header('apps-ipod/screens/playback/handoff_shee
                                         'struct handoff_sheet')
 theme_functions = ['viewportmanager_theme_enable', 'viewportmanager_theme_undo',
                    'viewportmanager_theme_enabled']
-dialog_functions = ['dialog_init', 'dialog_draw_one', 'dialog_run']
+dialog_functions = ['dialog_init', 'dialog_draw_one']
+if 'static int dialog_run_loop(' in dialog:
+    dialog_functions.append('dialog_run_loop')
+dialog_functions.append('dialog_run')
 theme_struct = block(theme, r'^struct viewport_stack_item\s*\{')
 theme_depth = re.search(r'^#define VPSTACK_DEPTH \d+$', theme, re.M).group()
 ports = r'''
@@ -61,6 +87,8 @@ ports = r'''
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+struct dialog_native_content;
+struct dialog_native_ui;
 #define HZ 100
 #define LCD_WIDTH 320
 #define LCD_HEIGHT 240
@@ -68,6 +96,10 @@ ports = r'''
 #define LCD_BLACK 0
 #define LCD_WHITE 255
 #define LCD_RGBPACK(r,g,b) (r)
+#define RGB_UNPACK_RED(c) (c)
+#define RGB_UNPACK_GREEN(c) (c)
+#define RGB_UNPACK_BLUE(c) (c)
+#define NO_INLINE __attribute__((noinline))
 #define NB_SCREENS 1
 #define FOR_NB_SCREENS(i) for (int i = 0; i < NB_SCREENS; ++i)
 #define MIN(a,b) ((a)<(b)?(a):(b))
@@ -107,7 +139,7 @@ static const char *strings[] = { "接力到电脑", "接力失败", "接力", "�
                                  "电脑上找不到这首歌" };
 #define str(id) ((const unsigned char *)strings[id])
 typedef unsigned char fb_data;
-struct frame_buffer_t {};
+struct frame_buffer_t { fb_data *fb_ptr; };
 struct viewport { int x,y,width,height,font; struct frame_buffer_t *buffer; };
 struct screen {
     struct viewport *(*set_viewport)(struct viewport *);
@@ -125,11 +157,12 @@ struct font { int height; };
 struct button_mapping {};
 enum screen_type { SCREEN_MAIN };
 static long current_tick;
-static struct { bool animations; } global_settings;
+static struct { bool animations, native_ui; } global_settings;
 static intptr_t queued;
 static bool system_took_over, interrupted;
 static unsigned queue_waits, boost_count;
 static int legacy_allocs, native_allocs, dock_events;
+static int progress_updates, pins;
 #define USEC_TIMER ((uint32_t)(current_tick * (ui_frame_clock(UI_ANIM_FPS) / HZ)))
 static struct viewport base = {0, 0, LCD_WIDTH, LCD_HEIGHT, 1, NULL}, *active = &base;
 static int glyph_mode, foreground, font_id, shown, raw_button, action_index, scenario;
@@ -143,10 +176,16 @@ static unsigned char pixels[LCD_HEIGHT][LCD_WIDTH];
 static unsigned char original[LCD_HEIGHT][LCD_WIDTH];
 static unsigned char panel[LCD_HEIGHT][LCD_WIDTH];
 static unsigned char frames[2][LCD_HEIGHT][LCD_WIDTH];
-#define FBADDR(x,y) (&pixels[y][x])
-static struct font fonts[] = {{0},{12},{19},{27}};
+static struct frame_buffer_t lcd_framebuffer_default = { &pixels[0][0] };
+static fb_data *draw_address(int x, int y)
+{
+    struct frame_buffer_t *buffer = active->buffer ?: &lcd_framebuffer_default;
+    return buffer->fb_ptr + (y + active->y) * LCD_WIDTH + x + active->x;
+}
+#define FBADDR(x,y) draw_address(x,y)
+static struct font loaded_fonts[] = {{0},{12},{19},{27}};
 static unsigned live_fonts;
-static struct font *font_get(int i) { return &fonts[i]; }
+static struct font *font_get(int i) { return &loaded_fonts[i]; }
 static int font_get_ui_bold(void) { return 3; }
 static int font_load_ex(const char *path, int size, int glyphs)
 {
@@ -174,13 +213,15 @@ static void lcd_getstringsize(const unsigned char *text, int *w, int *h)
         if (*text < 128) width += 8;
         else if (*text >= 192) width += 16;
     *w = width;
-    *h = fonts[font_id].height;
+    *h = loaded_fonts[font_id].height;
 }
 static void lcd_putsxy(int x, int y, const unsigned char *text)
 {
     int w, h;
     lcd_getstringsize(text, &w, &h);
     assert(glyph_mode == DRMODE_FG && active->width == LCD_WIDTH);
+    x += active->x;
+    y += active->y;
     if (!strcmp((const char *)text, strings[LANG_HANDOFF_ACCEPT]))
         assert(font_id == 2 && x == 16 + (140-w)/2 && y == 188 + (36-h)/2);
     if (!strcmp((const char *)text, strings[LANG_HANDOFF_LEAVE]))
@@ -194,28 +235,41 @@ static void lcd_putsxy(int x, int y, const unsigned char *text)
 }
 static void lcd_fillrect(int x, int y, int w, int h)
 {
-    assert(x >= 0 && y >= 0 && x+w <= LCD_WIDTH && y+h <= LCD_HEIGHT);
-    for (int row = y; row < y+h; ++row) memset(&pixels[row][x], foreground, w);
+    assert(x >= 0 && y >= 0 && x+w <= active->width && y+h <= active->height);
+    for (int row = y; row < y+h; ++row) memset(FBADDR(x, row), foreground, w);
 }
 static void lcd_blendrect(int x, int y, int w, int h, unsigned p)
 {
-    assert(x >= 0 && y >= 0 && x+w <= LCD_WIDTH && y+h <= LCD_HEIGHT);
+    assert(x >= 0 && y >= 0 && x+w <= active->width && y+h <= active->height);
     assert(p <= LCD_BLEND_OPAQUE);
     for (int row = y; row < y+h; ++row)
         for (int col = x; col < x+w; ++col)
-            pixels[row][col] = (pixels[row][col]*(15-p) + foreground*p)/15;
+        {
+            fb_data *pixel = FBADDR(col, row);
+            *pixel = (*pixel*(15-p) + foreground*p)/15;
+        }
 }
 static void lcd_drawline(int x, int y, int a, int b)
 { (void)x;(void)y;(void)a;(void)b; }
 static void lcd_bitmap(const fb_data *data, int x, int y, int w, int h)
-{ assert(h==1); memcpy(&pixels[y][x], data, w); }
+{ assert(h==1); memcpy(FBADDR(x,y), data, w); }
 static void lcd_update_rect(int x, int y, int w, int h)
 {
-    assert(x == 0 && y >= 0 && y + h == LCD_HEIGHT && w == LCD_WIDTH && h > 0);
-    memcpy(panel[y], pixels[y], h * LCD_WIDTH);
+    assert(x >= 0 && y >= 0 && x + w <= LCD_WIDTH && y + h <= LCD_HEIGHT && w > 0 && h > 0);
+    for (int row = y; row < y+h; ++row)
+        memcpy(&panel[row][x], &pixels[row][x], w);
+    if (h == 2 && y == 229)
+    {
+        assert(scenario == 14 && !exiting && x >= 16 && x + w <= 304);
+        ++progress_updates;
+        return;
+    }
+    assert(x == 0 && y + h == LCD_HEIGHT && w == LCD_WIDTH);
     int offset = 0;
     while (offset < LCD_HEIGHT && !memcmp(panel[offset], original[offset], LCD_WIDTH))
         ++offset;
+    if (offset == LCD_HEIGHT && last_offset == LCD_HEIGHT && !exiting)
+        return; /* Initial substrate presentation, before the card is visible. */
     assert(y == MIN(offset, last_offset));
     if (exiting)
     {
@@ -236,7 +290,7 @@ static bool skin_handoff_draw_blur(int handle)
 {
     ++draws;
     if (handle < 0) return false;
-    memset(pixels, 100, sizeof pixels);
+    memset(FBADDR(0,0), 100, sizeof pixels);
     return true;
 }
 static bool wps_art_pin(int handle, bool pin) { (void)pin; return handle == 7; }
@@ -250,6 +304,12 @@ static bool wps_art_bitmap(int handle, struct bitmap **out)
 }
 static unsigned color_blend(unsigned a, unsigned b, int p)
 { return (a*(256-p)+b*p)/256; }
+static unsigned color_contrast(unsigned a, unsigned b)
+{ return a >= b ? a - b : b - a; }
+static unsigned color_tone_bound(unsigned c, int tone, int bound)
+{ (void)tone; (void)bound; return c; }
+static bool dynamic_colors_roles(unsigned *dominant, unsigned *vivid)
+{ (void)dominant; (void)vivid; return false; }
 static const char *text_fit(const char *t, char *b, size_t n, int font, int w)
 { (void)b;(void)n;(void)font;(void)w; return t; }
 static struct mp3entry *audio_current_track(void)
@@ -295,9 +355,13 @@ static int core_alloc_free_space(size_t n)
     return fail_alloc ? -1 : 1;
 }
 static void *core_get_data(int handle) { assert(handle == 1); return frames; }
-static void core_pin(int handle) { assert(handle == 1); }
-static void core_unpin(int handle) { assert(handle == 1); }
-static void core_free(int handle) { assert(handle == 1); closes++; }
+static void core_pin(int handle) { assert(handle == 1); ++pins; }
+static void core_unpin(int handle) { assert(handle == 1 && pins > 0); --pins; }
+static int core_free(int handle) { assert(handle == 1 && !pins); closes++; return 0; }
+static void *core_get_data_pinned(int handle)
+{ core_pin(handle); return core_get_data(handle); }
+static void core_put_data_pinned(const void *data)
+{ assert(data == frames); core_unpin(1); }
 static void backlight_on(void) {}
 static void cpu_boost(bool enabled)
 {
@@ -311,12 +375,17 @@ static void cpu_boost(bool enabled)
 static bool is_backlight_on(bool wait) { (void)wait; return true; }
 static bool dynamic_colors_needs_repaint(void) { return false; }
 static struct viewport *set_viewport(struct viewport *vp)
-{ struct viewport *old=active; active=vp; return old; }
+{ struct viewport *old=active; active=vp ?: &base; return old; }
 #define lcd_set_viewport set_viewport
 static struct viewport *set_viewport_ex(struct viewport *vp, int flags)
 { (void)flags; return set_viewport(vp); }
 static void viewport_set_fullscreen(struct viewport *vp, int screen)
-{ (void)screen; *vp=base; }
+{
+    (void)screen;
+    struct frame_buffer_t *buffer = vp->buffer;
+    *vp = base;
+    vp->buffer = buffer;
+}
 static void scroll_stop(void) {}
 static void scroll_stop_vp(struct viewport *vp) { (void)vp; }
 static void flush(void)
@@ -414,6 +483,8 @@ static int get_action(int context, int ticks)
         return SYS_ACCESSORY_CONNECTED;
     }
     if (scenario == 13) return ACTION_STD_MENU;
+    if (scenario == 14)
+        return progress_updates >= 3 ? ACTION_STD_MENU : ACTION_NONE;
 #endif
     if (scenario == 1)
     {
@@ -596,6 +667,48 @@ int main(int argc, char **argv)
     assert(legacy_allocs == 0 && native_allocs == 9);
     puts("Native sheet: frame clock, first input, reversal, free-only fallback, USB takeover, and non-consuming close");
 #endif
+#ifdef RETAINED_SHEET
+    global_settings.native_ui = true;
+    for (int mode = 0; mode < 2; ++mode)
+    {
+        global_settings.animations = mode == 0;
+        for (scenario = 5; scenario <= 14; ++scenario)
+        {
+            if (mode && scenario != 6 && scenario != 8 && scenario != 14) continue;
+            struct handoff_sheet view = { .title = "Synthetic music", .target = "Rufin" };
+            if (scenario == 14)
+            {
+                view.preparing = view.armed = true;
+                view.start = current_tick;
+            }
+            fail_alloc = scenario == 8;
+            showing_art = scenario % 2 == 0;
+            action_index = phase_changes = shown = reads = early_input = 0;
+            in_frames = out_frames = draws = closes = queue_waits = progress_updates = 0;
+            last_offset = LCD_HEIGHT;
+            exiting = system_took_over = interrupted = false;
+            dock_events = 0;
+            queued = 0;
+            memset(original, 23, sizeof original);
+            memset(original[0], 77, LCD_WIDTH);
+            memcpy(pixels, original, sizeof pixels);
+            memcpy(panel, original, sizeof panel);
+            int result = handoff_sheet_run(&view, advance_test);
+            int expected = scenario == 5 ? DIALOG_ACCEPT :
+                           scenario == 9 || scenario == 11 ? DIALOG_ABORT : DIALOG_CANCEL;
+            assert(result == expected && shown && phase_changes);
+            assert(active == &base && !hold && !boost_count && !live_fonts && !pins);
+            assert(closes == !fail_alloc);
+            if (scenario == 9 || scenario == 11)
+                assert(system_took_over && panel[0][0] == 45);
+            else if (!fail_alloc)
+                assert(!memcmp(panel, original, sizeof panel));
+            if (scenario == 14) assert(progress_updates >= 3);
+            if (mode && !fail_alloc) assert(in_frames == 1 && out_frames == 1);
+        }
+    }
+    puts("Retained handoff: motion, static mode, progress, fallback and USB takeover");
+#endif
     viewportmanager_theme_undo(SCREEN_MAIN, false);
 #ifdef LIVE_ENTRY
     for (int t = 0; t <= ENTER_TICKS; ++t)
@@ -620,11 +733,13 @@ if live_entry:
     buttons += function(action_source, 'action_handoff_enter')
 c.write_text(('#define LIVE_ENTRY\n' if live_entry else '') +
              ('#define NATIVE_SHEET\n' if native_entry else '') +
+             ('#define RETAINED_SHEET\n' if retained_entry else '') +
              ports + animation + types + sheet + theme_depth + '\n' + theme_struct + r''';
 static int theme_stack_top[NB_SCREENS];
 static struct viewport_stack_item theme_stack[NB_SCREENS][VPSTACK_DEPTH];
 ''' + '\n'.join(function(theme, name) for name in theme_functions) +
-             '\n'.join(function(dialog, name) for name in dialog_functions) + buttons + adapter + draw + scenario)
+             '\n'.join(function(dialog, name) for name in dialog_functions) + buttons + adapter +
+             theme_tokens + retained + draw + scenario)
 binary = OUT / 'sheet'
 subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-pointer-sign', '-Wno-unused-function', '-Wno-unused-variable',
                 '-fsanitize=address,undefined', '-fno-pie', '-no-pie', str(c),

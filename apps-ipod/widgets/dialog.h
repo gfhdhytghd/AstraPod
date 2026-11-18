@@ -90,6 +90,7 @@ struct dialog_style
     int      box_border_width;      /* 0 == borderless                      */
     int      box_margin;            /* content inset inside the box         */
     int      box_font;
+    int      edge_margin;           /* minimum side margins for confirmations */
 
     /* Solid drop shadow: an opaque copy of the box's rectangle offset down
      * and right, drawn behind it, so what shows is an L along the right and
@@ -108,6 +109,7 @@ struct dialog_style
     int      button_border_width;
     int      button_border_radius;
     int      button_font;
+    int      button_gap, button_pad_x, button_pad_y; /* confirmation layout */
 };
 
 /* Every colour DIALOG_COLOR_INHERIT (bar the shadow, which is DIALOG_COLOR_FG),
@@ -210,6 +212,24 @@ struct dialog_text_line
     int len;
 };
 
+/* Neutral layout exported by dialogs with a retained overlay. All positions
+ * are relative to the content area, after the frame's margin. */
+#define DIALOG_NATIVE_LINES 16
+#define DIALOG_NATIVE_BUTTONS 2
+struct dialog_native_button
+{
+    int x, y, width, height;
+    char label[24];
+    bool selected;
+};
+
+struct dialog_native_content
+{
+    struct dialog_text_line lines[DIALOG_NATIVE_LINES];
+    struct dialog_native_button buttons[DIALOG_NATIVE_BUTTONS];
+    int line_count, button_count;
+};
+
 /* Greedy word-wrap `text` into display lines no wider than `max_width` pixels
  * in `font`, writing up to `max_lines` slices into `out` (each pointing into
  * `text`). A line break in the text ends a line, so a blank line between
@@ -264,6 +284,13 @@ struct dialog_callbacks
      * is undone, so a closing message can be drawn in the same theme scope
      * (e.g. the yes/no result message). */
     void (*on_close)(struct dialog *d, void *data);
+
+    /* Optional retained layout. Uses the same measured geometry, but exports
+     * text and button state without drawing. The content viewport is active
+     * so font metrics agree with the legacy renderer. */
+    void (*native_layout)(struct dialog *d, struct screen *s,
+                          const struct viewport *content,
+                          struct dialog_native_content *out, void *data);
 };
 
 struct dialog
@@ -315,5 +342,8 @@ void dialog_init(struct dialog *d, int context, const char *title,
 int dialog_run(struct dialog *d, int poll_ticks);
 /* Restore the underlying page before a higher-priority screen is opened. */
 void dialog_interrupt_transition(void);
+/* USB can interrupt a visible native confirmation. Preserve the nested
+ * legacy appearance until both modal owners can share one retained stack. */
+bool dialog_prepare_usb(void);
 
 #endif /* _GUI_DIALOG_H_ */

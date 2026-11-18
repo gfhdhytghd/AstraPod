@@ -18,7 +18,14 @@ def main():
     for name in ("old", "new", "resources", "out"):
         parser.add_argument(name, type=lambda entry: Path(entry).resolve())
     parser.add_argument("--kind", choices=("usb", "yesno"), default="usb")
+    parser.add_argument("--retained", action="store_true",
+                        help="compare the retained overlay with motion disabled")
+    parser.add_argument("--theme", choices=("scrim", "light"), default="scrim")
+    parser.add_argument("--nested-usb", action="store_true",
+                        help="inject simulated USB consent while yes/no is open")
     args = parser.parse_args()
+    if args.nested_usb and not (args.retained and args.kind == "yesno" and args.theme == "scrim"):
+        parser.error("--nested-usb requires --retained --kind yesno --theme scrim")
     args.out.mkdir(parents=True, exist_ok=True)
     result = {"motion": {}, "pixel_diff": {}}
     states = {}
@@ -53,9 +60,12 @@ def main():
                             archive.extract(entry, root)
                 assets = root / ".rockbox"
                 config = (assets / "themes/scrim.cfg").read_text()
+                animations = "on" if name == "on" and not args.retained else "off"
+                native_ui = "on" if name == "on" and args.retained else "off"
                 (assets / "config.cfg").write_text(config + "\nstart in screen: menu\n"
                      "backlight timeout: off\nvoice menus: off\nusb mode: mass storage\n"
-                     f"animations: {'on' if name == 'on' else 'off'}\n")
+                     f"animations: {animations}\nnative ui: {native_ui}\n"
+                     f"native theme: {args.theme}\n")
 
                 with (args.out / f"{name}.log").open("w") as slog, process(
                     [str(binary), "--root", str(root), "--nobackground", "--zoom", "1",
@@ -63,10 +73,11 @@ def main():
                 ) as firmware:
                     time.sleep(120 / FPS)
                     screen = Screen(env, firmware)
-                    screen.wait_full_charge()
+                    if args.theme == "scrim":
+                        screen.wait_full_charge()
 
                     def capture(motion, edges):
-                        output = args.out / f"{motion}.gif" if name == "on" else None
+                        output = args.out / f"{motion}.gif" if animations == "on" else None
                         data = screen.sequence(edges, output)
                         if data:
                             frames, stamps = data
@@ -79,13 +90,34 @@ def main():
                         for key in ("Down", "Down", "Right", "Up", "Right"):
                             screen.tap(key)
                             time.sleep(24 / FPS)
+                        if args.theme == "light":
+                            screen.wait_full_charge()
                         open_key, close_key = "Right", "space"
                     else:
                         open_key, close_key = "u", "Escape"
+                        if args.retained:
+                            # Start with a settled interior selection so a
+                            # viewport refresh cannot recenter the first row.
+                            screen.tap("Down")
+                            time.sleep(24 / FPS)
                     page = screen.frame()
                     confirmation = capture("open", [(4, "keydown", open_key),
                                                     (7, "keyup", open_key)])
                     assert ImageChops.difference(page, confirmation).getbbox(), name
+                    if args.retained and args.kind == "yesno":
+                        screen.tap("Right")
+                        time.sleep(18 / FPS)
+                        alternate = screen.frame()
+                        assert ImageChops.difference(confirmation, alternate).getbbox(), name
+                    if args.nested_usb:
+                        usb = capture("usb_takeover", [(4, "keydown", "u"),
+                                                       (7, "keyup", "u")])
+                        assert ImageChops.difference(usb, alternate).getbbox(), name
+                        assert ImageChops.difference(usb, page).getbbox(), name
+                        resumed = capture("usb_return", [(4, "keydown", "Escape"),
+                                                          (26, "keyup", "Escape")])
+                        assert ImageChops.difference(resumed, usb).getbbox(), name
+                        assert ImageChops.difference(resumed, page).getbbox(), name
                     # Both close keys are accepted on press. Hold the key
                     # past the animation so its release cannot interrupt it.
                     capture("close", [(4, "keydown", close_key),
@@ -97,6 +129,10 @@ def main():
                     returned = screen.frame()
                     assert firmware.poll() is None
                     states[name] = dict(page=page, confirmation=confirmation, returned=returned)
+                    if args.retained and args.kind == "yesno":
+                        states[name]["no_selected"] = alternate
+                    if args.nested_usb:
+                        states[name].update(usb_takeover=usb, resumed=resumed)
                     for state, image in states[name].items():
                         image.save(args.out / f"{name}-{state}.png")
 
@@ -106,10 +142,19 @@ def main():
                     for state, image in states[mode].items()
                 }
     (args.out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    assert all(not pixels for mode in result["pixel_diff"].values()
-               for pixels in mode.values()), result["pixel_diff"]
-    assert all(step["frames"] >= 4 for step in result["motion"].values()), result["motion"]
-    print(f"PASS pixel-identical Scrim {args.kind} confirmation and two live dialog transitions")
+    if args.retained and args.theme == "light":
+        assert not any(result["pixel_diff"]["off"].values()), result["pixel_diff"]
+        on = result["pixel_diff"]["on"]
+        assert on["confirmation"] and not (on["page"] or on["returned"]), on
+        print(f"PASS Light theme restyles retained {args.kind} confirmation")
+        return
+    assert not any(pixels for mode in result["pixel_diff"].values()
+                   for pixels in mode.values()), result["pixel_diff"]
+    if args.retained:
+        print(f"PASS pixel-identical Scrim {args.kind} retained confirmation")
+    else:
+        assert all(step["frames"] >= 4 for step in result["motion"].values()), result["motion"]
+        print(f"PASS pixel-identical Scrim {args.kind} confirmation and two live dialog transitions")
 
 
 if __name__ == "__main__":

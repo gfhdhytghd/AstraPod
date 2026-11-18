@@ -147,6 +147,12 @@ pre+='\nstruct button_mapping{int action_code,button_code,pre_button_code;};type
 pre+=r'''
 struct event{int key,title,row;};static struct event events[256];static int used,at,prev;
 static bool gui_synclist_do_button(struct gui_synclist*l,int*a){if(*a==ACTION_STD_NEXT||*a==ACTION_STD_PREV){l->selected_item=MAX(0,MIN(l->count-1,l->selected_item+(*a==ACTION_STD_NEXT?1:-1)));active_list=l;return true;}return false;}
+static bool native_menu_begin(struct gui_synclist*l,const struct menu_item_ex*m,const char*t){(void)l;(void)m;(void)t;return false;}
+static bool native_menu_update(struct gui_synclist*l,const struct menu_item_ex*m,const char*t){return native_menu_begin(l,m,t);}
+static bool native_menu_button(struct gui_synclist*l,int*a){return gui_synclist_do_button(l,a);}
+static void native_menu_suspend(struct gui_synclist*l){(void)l;}
+static void native_menu_tick(const struct gui_synclist*l){(void)l;}
+static void native_menu_end(struct gui_synclist*l){(void)l;}
 static int get_action(int c,int t){(void)c;(void)t;assert(at<used);struct event*e=&events[at++];if(active_list->title!=str(e->title)||active_list->selected_item!=e->row){fprintf(stderr,"event %d key %x actual %s/%d expected %s/%d\n",at,e->key,active_list->title,active_list->selected_item,str(e->title),e->row);abort();}
  action_last_t l={prev};action_cur_t v={.button=e->key,.items=e->key&BUTTON_REMOTE?remote_button_context_standard:button_context_standard};int n=0;int a=action_code_worker(&l,&v,&n);prev=e->key;return menu_back_action(a==ACTION_UNKNOWN?ACTION_NONE:a);}
 static void list_do_action(int c,int t,struct gui_synclist*l,int*a){active_list=l;*a=get_action(c,t);gui_synclist_do_button(l,a);if(*a==ACTION_STD_NEXT||*a==ACTION_STD_PREV)*a=ACTION_NONE;}

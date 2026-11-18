@@ -1,0 +1,16 @@
+/* PodBox native theme loading and Settings UI. GPL version 2+. */
+#ifndef PODBOX_NATIVE_THEME_RUNTIME_H
+#define PODBOX_NATIVE_THEME_RUNTIME_H
+
+#include "native_theme.h"
+
+#define UI_THEME_NAME_MAX 32
+
+void ui_theme_snapshot(struct ui_theme *out);
+unsigned ui_theme_generation(void);
+unsigned ui_theme_duration(unsigned frames);
+int ui_theme_font_load(const struct ui_theme *, enum ui_font_role, int glyphs);
+void ui_theme_apply_settings(void);
+int ui_theme_choose(void);
+
+#endif

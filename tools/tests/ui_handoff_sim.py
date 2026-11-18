@@ -19,7 +19,7 @@ from zipfile import ZipFile
 from PIL import Image, ImageChops
 
 from fu77_lyrics_exit_sim import stop
-from fu83_handoff_sim import instrument as instrument_fu83
+from fu83_handoff_sim import edit, instrument as instrument_fu83
 
 FPS = 60
 SIZE = (320, 240)
@@ -126,6 +126,17 @@ void fu83_sim_sheet(void)
 
 def instrument(source):
     instrument_fu83(source)
+    sheet = "apps-ipod/screens/playback/handoff_sheet.c"
+    if "static void present_sheet(" in (source / sheet).read_text():
+        edit(source, sheet,
+             "    if (p->card)\n        ui_nav_draw(&s->nav);",
+             """    if (p->card)
+    {
+        ui_nav_draw(&s->nav);
+        extern void fu83_sim_frame(int, int);
+        if (p->offset != offset)
+            fu83_sim_frame(p->offset, offset);
+    }""")
     (source / "apps-ipod/sim/fu83_sheet.c").write_text(ADAPTER)
 
 
@@ -143,8 +154,19 @@ def run(build, resources, mode, out):
         (rb / "codecs").mkdir()
         (rb / "codecs/wav.codec").write_bytes((build / "lib/rbcodec/codecs/wav.codec").read_bytes())
         config = (rb / "themes/scrim.cfg").read_text()
+        theme = "handoff-test" if mode == "themed" else "scrim"
+        if mode == "themed":
+            themes = rb / "native-themes"
+            themes.mkdir()
+            (themes / "handoff-test.podtheme").write_text(
+                "podbox-theme = 1\nbackground.handoff = solid\n"
+                "color.handoff_bg = ff00ff\ncolor.handoff_fg = ff0000\n"
+                "font.handoff_caption = 18-noto-sans-bold\n"
+                "metric.handoff_margin = 24\nmetric.handoff_button_height = 32\n"
+                "metric.handoff_cover_size = 80\nmotion_scale = 50\n")
+        native = "on" if mode in ("on", "themed") else "off"
         (rb / "config.cfg").write_text(config + "\nbacklight timeout: off\n"
-                                       f"animations: {'on' if mode == 'on' else 'off'}\n")
+                                       f"animations: on\nnative ui: {native}\nnative theme: {theme}\n")
         with wave.open(str(root / "FU83.wav"), "wb") as tone:
             tone.setparams((1, 2, 22050, 0, "NONE", "not compressed"))
             tone.writeframes(bytes(22050 * 2 * 45))
@@ -204,9 +226,17 @@ def run(build, resources, mode, out):
         art = re.search(rf"HANDOFF ART {trial} ([01])", log).group(1) == "1"
         assert art, "Synthetic cover art did not reach the real handoff painter"
         if trial == 1:
-            read_image(out / f"{trial}-open.bmp").save(out / f"{trial}-open.png")
+            opened = read_image(out / f"{trial}-open.bmp")
+            opened.save(out / f"{trial}-open.png")
             if mode == "on":
                 assert opening_endpoint >= 12, opening_endpoint
+            if mode == "themed":
+                assert opening_endpoint >= 6 and close_elapsed >= 5, samples
+                # The full card and the selection fill use two different
+                # theme roles. The selected button starts at its themed margin.
+                assert opened.getpixel((0, 0)) == (255, 0, 255)
+                assert opened.getpixel((23, 184)) == (255, 0, 255)
+                assert opened.getpixel((24, 184)) == (255, 0, 0)
         metrics[trial] = {"cover_art": art,
                           "open_updates": len(open_frames), "close_updates": len(close_frames),
                           "opening_endpoint_f": opening_endpoint, "close_elapsed_f": close_elapsed,
@@ -228,10 +258,10 @@ if __name__ == "__main__":
         old, new, resources, out = map(lambda s: Path(s).resolve(), sys.argv[1:])
         out.mkdir(parents=True)
         result = {mode: run(build, resources, mode, out / mode)
-                  for mode, build in (("old", old), ("off", new), ("on", new))}
+                  for mode, build in (("old", old), ("off", new), ("on", new), ("themed", new))}
         baseline = read_image(out / "old/1-open.bmp")
         for mode in ("off", "on"):
             assert not ImageChops.difference(
                 baseline, read_image(out / mode / "1-open.bmp")).getbbox(), mode
         (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-        print("PASS identical open handoff and restored background, with a first-frame reversal")
+        print("PASS Scrim parity, substrate restore, themed layout, scaled motion and first-frame reversal")

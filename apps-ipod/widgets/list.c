@@ -41,6 +41,7 @@
 #include "input/action.h"
 #include "draw/screen_access.h"
 #include "list.h"
+#include "ui/native_menu.h"
 #include "draw/scrollbar.h"
 #include "lang.h"
 #include "sound.h"
@@ -221,6 +222,9 @@ static int list_items_avail_height(struct gui_synclist *list,
 
 int list_get_nb_lines(struct gui_synclist *list, enum screen_type screen)
 {
+    int native_lines = screen == SCREEN_MAIN ? native_menu_lines(list) : 0;
+    if (native_lines)
+        return native_lines;
     int lines = skinlist_get_line_count(screen, list);
     if (lines >= 0)
         return lines;
@@ -370,6 +374,8 @@ bool gui_synclist_flush_inhibited(void)
  * event loop already start from a settled state. */
 void gui_synclist_draw_settled(struct gui_synclist *lists)
 {
+    if (native_menu_draw(lists))
+        return;
     gui_synclist_inhibit_flush(true);
     gui_synclist_draw(lists);
     gui_synclist_inhibit_flush(false);
@@ -394,6 +400,8 @@ void gui_synclist_layout(struct gui_synclist *gui_list)
 
 void gui_synclist_draw(struct gui_synclist *gui_list)
 {
+    if (native_menu_draw(gui_list))
+        return;
     /* Every initialised list has parents; NULL is a list that was never
      * initialised or no longer exists. Drawing it reads and writes page 0. */
     if (UNLIKELY(!gui_list->parent[SCREEN_MAIN]))
@@ -1130,8 +1138,11 @@ int list_do_action_timeout(struct gui_synclist *lists, int timeout)
                 timeout = busy_timeout;
         }
     }
-    add_event_ex(GUI_EVENT_NEED_UI_UPDATE, true, _lists_uiviewport_update_callback, NULL);
-    current_lists = lists;
+    if (!native_menu_active(lists))
+    {
+        add_event_ex(GUI_EVENT_NEED_UI_UPDATE, true, _lists_uiviewport_update_callback, NULL);
+        current_lists = lists;
+    }
     if(lists->scheduled_talk_tick)
     {
         long delay = lists->scheduled_talk_tick -current_tick +1;

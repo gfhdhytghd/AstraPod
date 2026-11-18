@@ -77,6 +77,7 @@
 /* gui api */
 #include "list.h"
 #include "ui/scene.h"
+#include "ui/native_menu.h"
 
 #define MAX_MENUS 8
 /* used to allow for dynamic menus */
@@ -527,8 +528,9 @@ static int init_menu_lists(const struct menu_item_ex *menu,
 
     current_submenus_menu = (struct menu_item_ex *)menu;
 
-    gui_synclist_init(lists,get_menu_item_name,(void*)menu,false,1, parent);
     title = init_title(menu, &icon, buf, buf_sz);
+    native_menu_update(lists, menu, title);
+    gui_synclist_init(lists,get_menu_item_name,(void*)menu,false,1, parent);
     gui_synclist_set_title(lists, title, icon);
     gui_synclist_set_icon_callback(lists, global_settings.show_icons?menu_get_icon:NULL);
     gui_synclist_set_row_callbacks(lists, menu_get_kind, menu_get_value, NULL);
@@ -750,10 +752,11 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
 
 
     title = init_title(menu, &icon, buf, sizeof buf);
+    bool native = animate && native_menu_begin(&lists, menu, title);
     FOR_NB_SCREENS(i)
     {
         sb_set_persistent_title(title, icon, i);
-        viewportmanager_theme_enable(i, !hide_theme, NULL);
+        viewportmanager_theme_enable(i, !hide_theme && !native, NULL);
     }
     struct menu_data_t mstack[MAX_MENUS]; /* menu, selected */
     int stack_top = 0;
@@ -803,6 +806,8 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
 #endif
         /* query audio status to see if it changed */
         redraw_lists = query_audio_status(&old_audio_status);
+        bool renderer_changed = native_menu_update(&lists, menu, lists.title);
+        redraw_lists |= renderer_changed;
 
 
         if (menu == &root_menu_)
@@ -831,8 +836,10 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         else
             action = new_action;
 
-        if (LIKELY(gui_synclist_do_button(&lists, &action)))
+        if (LIKELY(native_menu_button(&lists, &action)))
         {
+            if (native_menu_update(&lists, menu, lists.title) || renderer_changed)
+                gui_synclist_draw_settled(&lists);
             ui_scene_update(scene, true);
             continue;
         }
@@ -845,6 +852,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             ui_scene_cancel(scene);
         if (action == ACTION_STD_QUICKSCREEN)
         {
+            native_menu_suspend(&lists);
             if (global_settings.shortcuts_replaces_qs ||
                 quick_screen_current(action, NULL) == QUICKSCREEN_GOTO_SHORTCUTS_MENU)
             {
@@ -875,6 +883,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         }
         else if (action == ACTION_STD_CONTEXT)
         {
+            native_menu_suspend(&lists);
             if (menu == &root_menu_)
             {
                 ret = GO_TO_ROOTITEM_CONTEXT;
@@ -1119,7 +1128,10 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                               temp->value == GO_TO_MAINMENU;
                 get_menu_callback(temp, &menu_callback);
                 if (type != MT_MENU && type != MT_RETURN_ID && !to_settings)
+                {
                     ui_scene_cancel(scene);
+                    native_menu_suspend(&lists);
+                }
                 action = menu_callback(ACTION_ENTER_MENUITEM, temp, &lists);
                 if (action == ACTION_EXIT_MENUITEM)
                     break;
@@ -1257,6 +1269,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
 
 
             gui_synclist_set_title(&lists, lists.title, lists.title_icon);
+            native_menu_update(&lists, menu, lists.title);
             gui_synclist_draw_settled(&lists);
             if (scene->capturing)
                 ui_scene_start(scene);
@@ -1265,7 +1278,10 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             gui_synclist_speak_item(&lists);
         }
         else if (!scene_handoff)
+        {
+            native_menu_tick(&lists);
             ui_scene_update(scene, false);
+        }
     }
     if (!scene_handoff)
         ui_scene_cancel(scene);
@@ -1273,6 +1289,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
     /* The Agents shortcut leaves the loop after get_action() without
      * gui_synclist_do_button(), and `lists` is about to go out of scope */
     gui_synclist_forget(&lists);
+    native_menu_end(&lists);
 
     if (start_selected)
     {

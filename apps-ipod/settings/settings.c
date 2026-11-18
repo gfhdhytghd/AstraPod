@@ -41,6 +41,7 @@
 #include "rbpaths.h"
 #include "kernel.h"
 #include "input/action.h"
+#include "ui/native_theme_runtime.h"
 #include "crc32.h"
 #include "sound.h"
 #include "settings.h"
@@ -1463,6 +1464,7 @@ void settings_apply(bool read_disk)
         /* Last, because loading a .lng points every string back at the
          * built-in one first. */
         lang_override_load();
+        ui_theme_apply_settings();
         CHART(">talk_init");
         talk_init(); /* use voice of same language */
         CHART("<talk_init");

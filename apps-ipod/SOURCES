@@ -118,6 +118,14 @@ widgets/list_skinned.c
 widgets/list_select.c
 widgets/menu.c
 ui/animation.c
+#ifdef IPOD_6G
+ui/native_chrome.c
+ui/native_menu.c
+#endif
+ui/native_theme.c
+ui/native_theme_runtime.c
+ui/native_wps.c
+ui/retained.c
 ui/scene.c
 widgets/option_select.c
 widgets/rating_dialog.c

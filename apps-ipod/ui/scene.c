@@ -7,6 +7,7 @@
 #include "thread.h"
 #include "settings/settings.h"
 #include "scene.h"
+#include "retained.h"
 #include <string.h>
 
 #define PAGE_PIXELS (LCD_WIDTH * LCD_HEIGHT)
@@ -19,7 +20,7 @@ static unsigned int owner_thread;
 
 size_t ui_scene_reserve_size(void)
 {
-    return global_settings.animations ?
+    return global_settings.animations || ui_native_enabled() ?
         SCENE_BYTES + BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t) : 0;
 }
 

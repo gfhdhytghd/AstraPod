@@ -1,6 +1,6 @@
 # PodLink
 
-PodLink connects a running PodBox application to a computer over USB CDC-ACM.
+PodLink connects a running Astra application to a computer over USB CDC-ACM.
 It uses RAM for messages. It does not use disk files or USB mass storage for
 communication. The default USB mode still provides mass storage. The simulator
 has no PodLink USB transport or PodLink menu entry.
@@ -26,7 +26,7 @@ python3 -m venv .venv-podlink
 ```
 
 The client finds a tty with VID `05ac` and PID `1261`. To select a port, pass
-`--port /dev/serial/by-id/<identified-PodBox-device>` before the subcommand.
+`--port /dev/serial/by-id/<identified-device>` before the subcommand.
 Check its USB manufacturer and serial before selecting it; ttyACM numbering
 alone does not identify a device. The OS user needs access to that tty. Each
 command opens and cleanly closes its own message session.

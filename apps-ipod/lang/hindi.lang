@@ -256,13 +256,13 @@
   desc: main menu title
   user: core
   <source>
-    *: "Rockbox"
+    *: "Astra"
   </source>
   <dest>
-    *: "रोकबोकस"
+    *: "Astra"
   </dest>
   <voice>
-    *: "रोकबोकस"
+    *: "Astra"
   </voice>
 </phrase>
 <phrase>

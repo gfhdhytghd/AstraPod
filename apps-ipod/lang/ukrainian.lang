@@ -284,13 +284,13 @@
   desc: main menu title
   user: core
   <source>
-    *: "Rockbox"
+    *: "Astra"
   </source>
   <dest>
-    *: "Рокбокс"
+    *: "Astra"
   </dest>
   <voice>
-    *: "Рокбокс"
+    *: "Astra"
   </voice>
 </phrase>
 <phrase>

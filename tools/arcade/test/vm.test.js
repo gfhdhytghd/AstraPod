@@ -161,7 +161,7 @@ test('mutated carts are refused or run, never crash or hang', () => {
         assert.equal(out.signal, null, 'mutant ' + i + ' hung or was killed');
         assert.ok(out.status === 0 || out.status === 1,
                   'mutant ' + i + ' crashed with status ' + out.status);
-        if (/damaged|newer PodBox|not a game/.test(out.stderr)) refused++;
+        if (/damaged|newer Astra|not a game/.test(out.stderr)) refused++;
         else ran++;
     }
     assert.ok(refused > 0 && ran > 0, 'refused ' + refused + ', ran ' + ran);

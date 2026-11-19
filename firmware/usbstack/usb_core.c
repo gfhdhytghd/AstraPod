@@ -157,11 +157,12 @@ static struct usb_qualifier_descriptor __attribute__((aligned(2)))
     .bNumConfigurations = NUM_CONFIGS
 };
 
+/* The existing PodLink host matches this manufacturer, VID/PID and serial. */
 static const struct usb_string_descriptor usb_string_iManufacturer =
 USB_STRING_INITIALIZER(u"PodBox");
 
 static const struct usb_string_descriptor usb_string_iProduct =
-USB_STRING_INITIALIZER(u"PodBox media player");
+USB_STRING_INITIALIZER(u"Astra media player");
 
 #ifdef USB_ENABLE_IAP
 /* An iPhone's name for its iAP configuration, given to the player's while

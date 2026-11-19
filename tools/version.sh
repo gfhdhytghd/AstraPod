@@ -7,7 +7,7 @@
 #                     \/            \/     \/    \/            \/
 #
 
-# Usage: version.sh [source-root]
+# Usage: version.sh [source-root] [core-apps-dir]
 
 # Prints the revision of the repository.
 #
@@ -41,7 +41,7 @@ gitversion() {
 if [ -n "$1" ]; then TOP=$1; else TOP=..; fi
 
 # setting VERSION var on commandline has precedence
-if [ -z $VERSION ]; then
+if [ -z "$VERSION" ]; then
     # If the VERSIONFILE exisits we use that
     VERSIONFILE=docs/VERSION
     if [ -r $TOP/$VERSIONFILE ]; then
@@ -56,5 +56,13 @@ else
 	VERSION=$VER-`date -d @$SOURCE_DATE_EPOCH -u +%y%m%d`
 fi
 fi
-echo $VERSION
+case "${2:-${COREAPPSDIR:-}}" in
+    apps-ipod|*/apps-ipod)
+        case "$VERSION" in
+            "Astra "*) ;;
+            *) VERSION="Astra $VERSION" ;;
+        esac
+        ;;
+esac
+printf '%s\n' "$VERSION"
 

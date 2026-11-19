@@ -76,7 +76,7 @@ endif
 # GNU make (at least) has a bug/feature that exported variable are not available
 # in the shell function (but are in recipe). Thus we need to explicitely pass
 # the VERSION environement variable
-SVNVERSION:=$(shell VERSION='$(VERSION)' $(TOOLSDIR)/version.sh $(ROOTDIR))
+SVNVERSION:=$(shell VERSION='$(VERSION)' $(TOOLSDIR)/version.sh "$(ROOTDIR)" "$(COREAPPSDIR)")
 OLDSVNVERSION:=$(shell grep 'RBVERSION' $(BUILDDIR)/rbversion.h 2>/dev/null|cut -d '"' -f 2 || echo "NOREVISION")
 
 CORE_LIBS:=$(PODLINK_RUST_LIB) $(FIRMLIB)
@@ -86,4 +86,4 @@ ifneq ($(SVNVERSION),$(OLDSVNVERSION))
 endif
 
 $(BUILDDIR)/rbversion.h:
-	$(call PRINTS,GEN $(@F))$(TOOLSDIR)/genversion.sh $(BUILDDIR) $(SVNVERSION)
+	$(call PRINTS,GEN $(@F))$(TOOLSDIR)/genversion.sh "$(BUILDDIR)" "$(SVNVERSION)"

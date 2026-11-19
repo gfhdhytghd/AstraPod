@@ -47,6 +47,7 @@
 #include "backlight.h"
 #include "audio/play_status.h"
 #include "screens/system/debug_menu.h"
+#include "screens/system/about.h"
 #include "font.h"
 #ifdef HAVE_PODBOX_FONT
 #include "font_pbf.h"
@@ -428,6 +429,7 @@ static void boot_paint(int step, int total)
 
     boot_viewport(&vp);
     last_vp = screen->set_viewport(&vp);
+    about_draw_boot_logo(screen, BOOT_BAR_Y - 12);
 
     if (boot_caption != BOOT_KEEP_CAPTION)
     {

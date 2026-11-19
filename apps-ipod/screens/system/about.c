@@ -38,6 +38,13 @@
 static const char ab_tagline[] = "Rockbox, reworked for the iPod.";
 static const char ab_licence[] = "GPL v2, no warranty.";
 
+void about_draw_boot_logo(struct screen *display, int bottom)
+{
+    display->alpha_bitmap_part(about_logo, 0, 0, ABOUT_LOGO_W,
+                              (display->lcdwidth - ABOUT_LOGO_W) / 2,
+                              bottom - ABOUT_LOGO_H, ABOUT_LOGO_W, ABOUT_LOGO_H);
+}
+
 static int ab_luma(unsigned c)
 {
     return RGB_UNPACK_RED(c) * 77 + RGB_UNPACK_GREEN(c) * 150

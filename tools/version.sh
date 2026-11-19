@@ -40,6 +40,17 @@ gitversion() {
 #
 if [ -n "$1" ]; then TOP=$1; else TOP=..; fi
 
+case "${2:-${COREAPPSDIR:-}}" in
+    apps-ipod|*/apps-ipod)
+        ASTRA_CHANNEL=Beta
+        ASTRA_VERSION=0.1.0
+        build_id=$(git -C "$TOP" rev-parse --verify --short=10 HEAD 2>/dev/null) ||
+            build_id=${VERSION:-unknown}
+        printf 'Astra %s %s (%s)\n' "$ASTRA_CHANNEL" "$ASTRA_VERSION" "$build_id"
+        exit 0
+        ;;
+esac
+
 # setting VERSION var on commandline has precedence
 if [ -z "$VERSION" ]; then
     # If the VERSIONFILE exisits we use that
@@ -56,13 +67,5 @@ else
 	VERSION=$VER-`date -d @$SOURCE_DATE_EPOCH -u +%y%m%d`
 fi
 fi
-case "${2:-${COREAPPSDIR:-}}" in
-    apps-ipod|*/apps-ipod)
-        case "$VERSION" in
-            "Astra "*) ;;
-            *) VERSION="Astra $VERSION" ;;
-        esac
-        ;;
-esac
 printf '%s\n' "$VERSION"
 

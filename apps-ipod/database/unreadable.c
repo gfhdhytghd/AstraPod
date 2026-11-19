@@ -53,9 +53,8 @@ static int count;
 static int list_fd = -1;        /* unreadable.txt.new, while a walk runs */
 static bool list_failed;        /* a line of it was not written whole */
 
-/* Which firmware made the file. The date is in rbversion, so every build
- * differs and each tries the refusals again once. The desktop tool has no
- * version, and marks its file as no firmware's. */
+/* Which firmware made the file. rbversion includes the build ID, so a new
+ * firmware retries the refusals once. The desktop tool has no version. */
 static int32_t firmware_mark(void)
 {
 #ifdef DBTOOL

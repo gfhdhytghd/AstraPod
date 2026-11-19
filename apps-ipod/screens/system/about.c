@@ -7,7 +7,6 @@
  * Parts: the QR code, the page, then the loop.
  ****************************************************************************/
 
-#include <stdio.h>
 #include "config.h"
 #include "kernel.h"
 #include "system.h"
@@ -128,15 +127,13 @@ static const struct ui_view_ops about_ops = { .paint = about_paint };
 int about_screen(void)
 {
     const struct ui_rect bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
-    char version[64];
-    struct about_page about = { .text = {ab_tagline, version, ab_licence} };
+    struct about_page about = { .text = {ab_tagline, rbversion, ab_licence} };
     struct ui_view view;
     struct ui_page page;
     struct ui_scene scene = {0};
     bool drawn = false;
     int ret = 0;
 
-    snprintf(version, sizeof(version), "%s %s", str(LANG_VERSION), rbversion);
     ui_view_init(&view, bounds, &about_ops, &about);
     ui_page_init(&page, &view);
     ui_scene_open_page(&scene, "about-push");

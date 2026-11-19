@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "config.h"
+#include "action.h"
+#include "button.h"
 #include "core_alloc.h"
 #include <ctype.h>
 #include "dir.h"
@@ -28,6 +30,7 @@
 #include "draw/text_wrap.h"
 #include "draw/viewport.h"
 #include "metadata/album_palette.h"
+#include "metadata/art_cache.h"
 #include "system/activity.h"
 #include "ui/frame.h"
 #include "ui/native_theme_runtime.h"
@@ -52,7 +55,6 @@ enum {
     INDEX_MIN_ITEMS = 51,
     INDEX_WINDOW_F = 10,
     INDEX_TRIGGER = 8,
-    INDEX_HOLD_F = 20,
     INDEX_SAMPLES = 12,
     INDEX_SCRIM_RETAIN = 56,  /* 78% dim */
     INDEX_BORDER_RETAIN = 225, /* 12% white */
@@ -75,10 +77,10 @@ struct list_motion {
 
 struct list_index {
     char key[16];
-    uint32_t deadline, samples_at[INDEX_SAMPLES];
+    uint32_t samples_at[INDEX_SAMPLES];
     int selections[INDEX_SAMPLES];
     int samples, last_sel;
-    bool visible, fast;
+    bool visible, swallow_menu;
 };
 
 struct native_list {
@@ -90,7 +92,7 @@ struct native_list {
     struct ui_view root, title, header, rows, notes, art, index_view;
     struct ui_page page;
     struct ui_layer backdrop;
-    unsigned art_generation;
+    unsigned art_generation, artist_generation;
     unsigned int art_text_color;
     int art_handle;
     int art_mode;
@@ -880,8 +882,11 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
             item, list->data, &size);
         struct ui_rect tile = row_cell(row, 0, (row.height - cover_size) / 2,
                                         cover_size, cover_size, rtl);
-        draw_bitmap(clip, tile, cover);
-        if (!cover && render->icon_font >= 0)
+        if (cover)
+            draw_bitmap(clip, tile, cover);
+        else if (list->callback_prefetch_art)
+            fill(clip, tile, LCD_RGBPACK(45, 45, 45));
+        if (!cover && !list->callback_prefetch_art && render->icon_font >= 0)
             draw_text(render, clip, icon_cell, render->icon_font, fg,
                       row_icon(icon, kind, label, files, activity), false, 0, false);
         text_x += cover_size + m[UI_METRIC_LIST_AUX_PADDING] + 1;
@@ -1155,19 +1160,27 @@ static void index_from_text(const char *text, char *out, size_t n)
     *utf8encode(ch, (unsigned char *)out) = '\0';
 }
 
-static void index_key(struct native_list *render, char *out, size_t n)
+static bool index_touched(void)
 {
-    struct gui_synclist *list = render->owner;
+#if defined(IPOD_6G) && !defined(SIMULATOR)
+    return wheel_status() >= 0;
+#else
+    return true;
+#endif
+}
+
+static void index_key(struct gui_synclist *list, int item, char *out, size_t n)
+{
     char name[MAX_PATH];
     const unsigned char *label;
     const char *text;
 
     out[0] = '\0';
-    if (!list || list->selected_item < 0 || list->selected_item >= list->nb_items)
+    if (!list || item < 0 || item >= list->nb_items)
         return;
     if (list->callback_get_index_key)
     {
-        const char *key = list->callback_get_index_key(list->selected_item,
+        const char *key = list->callback_get_index_key(item,
                               list->data, name, sizeof(name));
         if (key && *key)
         {
@@ -1178,7 +1191,7 @@ static void index_key(struct native_list *render, char *out, size_t n)
     if (!list->callback_get_item_name)
         return;
     label = (const unsigned char *)list->callback_get_item_name(
-        list->selected_item, list->data, name, sizeof(name));
+        item, list->data, name, sizeof(name));
     text = label && P2ID(label) <= VOICEONLY_DELIMITER ?
            (const char *)P2STR(label) : "";
     index_from_text(text, out, n);
@@ -1200,13 +1213,114 @@ static void index_sample(struct list_index *index, int selection, uint32_t now)
 
 static void index_release_fonts(struct native_list *render);
 
+static void index_close(struct native_list *render)
+{
+    struct list_index *index = &render->overlay;
+    index->visible = false;
+    index->samples = 0;
+    index->last_sel = render->owner->selected_item;
+    index_release_fonts(render);
+}
+
+static int index_first(struct gui_synclist *list, int item, const char *key)
+{
+    while (item > 0)
+    {
+        char prior[sizeof(((struct list_index *)0)->key)];
+        index_key(list, item - 1, prior, sizeof(prior));
+        if (strcmp(prior, key))
+            break;
+        item--;
+    }
+    return item;
+}
+
+static int index_step(struct gui_synclist *list, int item, int direction,
+                      const char *key, char *next)
+{
+    for (int i = item + direction; i >= 0 && i < list->nb_items; i += direction)
+    {
+        index_key(list, i, next, sizeof(((struct list_index *)0)->key));
+        if (*next && strcmp(key, next))
+            return direction > 0 ? i : index_first(list, i, next);
+    }
+    return item;
+}
+
+bool list_render_index_action(struct gui_synclist *list, int *action,
+                              bool wheel, int steps)
+{
+    if (renderer_handle <= 0)
+        return false;
+    struct native_list *render = core_get_data_pinned(renderer_handle);
+    struct list_index *index = &render->overlay;
+    bool handled = false, redraw = false;
+    if (!motion_owner(render, list))
+        goto done;
+
+    int button;
+    get_action_statuscode(&button);
+    bool menu = *action == ACTION_STD_MENU;
+#ifdef BUTTON_MENU
+    menu |= *action == ACTION_STD_CANCEL && (button & BUTTON_MENU);
+#endif
+    if (menu && (index->visible || index->swallow_menu))
+    {
+        index->swallow_menu = false;
+        index_close(render);
+        *action = ACTION_NONE;
+        handled = redraw = true;
+    }
+    else if (index->visible && *action == ACTION_STD_OK)
+    {
+        index_close(render);
+        redraw = true;
+    }
+    else if (index->visible && !index_touched())
+    {
+#ifdef BUTTON_MENU
+        index->swallow_menu = (button_status() & BUTTON_MENU) != 0;
+#endif
+        index_close(render);
+        redraw = true;
+    }
+    else if (index->visible && wheel)
+    {
+        int direction = 0;
+        if (*action == ACTION_STD_NEXT || *action == ACTION_STD_NEXTREPEAT)
+            direction = 1;
+        else if (*action == ACTION_STD_PREV || *action == ACTION_STD_PREVREPEAT)
+            direction = -1;
+        if (direction)
+        {
+            int item = list->selected_item;
+            for (int n = 0; n < steps; n++)
+            {
+                char next[sizeof(index->key)];
+                int candidate = index_step(list, item, direction, index->key, next);
+                if (candidate == item)
+                    break;
+                item = candidate;
+                strcpy(index->key, next);
+            }
+            motion_stop(&render->motion);
+            gui_synclist_select_item(list, item);
+            index->last_sel = item;
+            *action = direction > 0 ? ACTION_STD_NEXT : ACTION_STD_PREV;
+            handled = redraw = true;
+        }
+    }
+done:
+    core_put_data_pinned(render);
+    if (redraw)
+        gui_synclist_draw(list);
+    return handled;
+}
+
 static bool step_index(struct native_list *render)
 {
     struct gui_synclist *list = render->owner;
     struct list_index *index = &render->overlay;
-    uint32_t now = USEC_TIMER;
-    uint32_t window = ui_frame_clock(INDEX_WINDOW_F);
-
     if (!list || list->nb_items < INDEX_MIN_ITEMS)
     {
         index_release_fonts(render);
@@ -1215,41 +1329,47 @@ static bool step_index(struct native_list *render)
         return false;
     }
 
+    if (!index_touched())
+    {
+        if (index->visible)
+        {
+#ifdef BUTTON_MENU
+            index->swallow_menu = (button_status() & BUTTON_MENU) != 0;
+#endif
+            index_close(render);
+        }
+        else
+        {
+            index->samples = 0;
+            index->last_sel = list->selected_item;
+        }
+        return false;
+    }
+    if (index->visible)
+        return true;
+
+    uint32_t now = USEC_TIMER;
+    uint32_t window = ui_frame_clock(INDEX_WINDOW_F);
     int selection = list->selected_item;
-    bool changed = selection != index->last_sel;
-    bool was_visible = index->visible;
-    /* A selection that just changed was still on screen at this sample. */
-    if (changed && index->last_sel >= 0)
+    if (selection != index->last_sel && index->last_sel >= 0)
         index_sample(index, index->last_sel, now);
     index->last_sel = selection;
-
     for (int i = index->samples - 1; i >= 0; i--)
     {
         if (now - index->samples_at[i] >= window)
             break;
         if (abs(selection - index->selections[i]) >= INDEX_TRIGGER)
         {
-            index->deadline = index->samples_at[i] + window;
-            index->fast = index->visible = true;
-            goto update_key;
+            index_key(list, selection, index->key, sizeof(index->key));
+            if (*index->key)
+                gui_synclist_select_item(list, index_first(list, selection, index->key));
+            motion_stop(&render->motion);
+            index->last_sel = list->selected_item;
+            index->visible = true;
+            return true;
         }
     }
-    if (index->fast)
-    {
-        if ((int32_t)(now - index->deadline) < 0)
-            index->deadline = now;
-        index->deadline += ui_frame_clock(INDEX_HOLD_F);
-        index->fast = false;
-    }
-    if ((int32_t)(now - index->deadline) >= 0)
-        index->visible = false;
-
-update_key:
-    if (was_visible && !index->visible)
-        index_release_fonts(render);
-    if (index->visible && (changed || !was_visible))
-        index_key(render, index->key, sizeof(index->key));
-    return index->visible;
+    return false;
 }
 
 static void index_release_fonts(struct native_list *render)
@@ -1445,12 +1565,15 @@ static void prefetch_list_page(struct native_list *render, const struct list_geo
     struct gui_synclist *list = render->owner;
     int start = MAX(0, render->rows.value[UI_SCROLL_OFFSET]);
     int rows = g->rows.height / g->pitch + 1;
+    int dim = MIN(render->theme.metric[UI_METRIC_LIST_ART_SIZE], g->pitch);
     int font = render->text_font >= 0 ? render->text_font : list->parent[SCREEN_MAIN]->font;
     if (!list->callback_get_item_name || start == render->prefetched_top)
         return;
     render->prefetched_top = start;
     for (int i = start; i < MIN(list->nb_items, start + 2 * rows); i++)
     {
+        if (list->callback_prefetch_art)
+            list->callback_prefetch_art(i, list->data, dim);
         const unsigned char *label = (const unsigned char *)list->callback_get_item_name(
             i, list->data, render->scratch.row.name, sizeof(render->scratch.row.name));
         if (label && P2ID(label) <= VOICEONLY_DELIMITER)
@@ -1467,6 +1590,13 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     bool same_owner = motion_owner(render, list);
     if (status_only && !same_owner)
         goto done;
+    if (list->callback_prefetch_art)
+    {
+        unsigned generation = artist_tile_generation();
+        if (generation != render->artist_generation)
+            status_only = false;
+        render->artist_generation = generation;
+    }
     font_prefetch_begin();
     unsigned epoch = font_prefetch_epoch();
     if (render->font_epoch != epoch)
@@ -1482,7 +1612,9 @@ static void draw_list(struct gui_synclist *list, bool status_only)
         memset(&render->overlay, 0, sizeof(render->overlay));
         render->overlay.last_sel = -1;
     }
-    bool animate = render->motion.visible || render->overlay.visible;
+    bool animate = render->motion.visible;
+    if (render->overlay.visible && !index_touched())
+        status_only = false;
     if (animate)
     {
         status_only = false;
@@ -1508,6 +1640,7 @@ static void draw_list(struct gui_synclist *list, bool status_only)
         refresh_backdrop(render, list->default_viewport &&
                          viewportmanager_theme_enabled(SCREEN_MAIN) && !list->selection_color);
     }
+    bool show_index = step_index(render);
     struct list_geometry g = measure(list, SCREEN_MAIN, render->theme.metric);
     if (!status_only)
         ui_scene_push_rows(g.rows.y, g.pitch, MIN(g.rows.height / g.pitch,
@@ -1536,7 +1669,7 @@ static void draw_list(struct gui_synclist *list, bool status_only)
         prefetch_list_page(render, &g);
     ui_view_append(&render->root, &render->rows);
     add_view(render, &render->notes, g.notes, &note_ops, render);
-    if (step_index(render))
+    if (show_index)
         add_view(render, &render->index_view, g.background, &index_ops, render);
     ui_page_init(&render->page, &render->root);
     render->page.focus = &render->rows;
@@ -1651,6 +1784,9 @@ static int motion_deadline(const struct gui_synclist *list, bool poll)
             delay = 0;
         else if (poll && font_prefetch_busy())
             delay = 1;
+        if (list->callback_prefetch_art &&
+            render->artist_generation != artist_tile_generation())
+            delay = 0;
         const struct list_motion *motion = &render->motion;
         uint32_t now = USEC_TIMER;
         if (motion->visible)
@@ -1676,9 +1812,7 @@ static int motion_deadline(const struct gui_synclist *list, bool poll)
         }
         if (render->overlay.visible)
         {
-            int32_t remaining = render->overlay.deadline - now;
-            int ticks = remaining <= 0 ? 0 :
-                        poll ? (int64_t)remaining * HZ / 1000000 : TIMEOUT_BLOCK;
+            int ticks = !index_touched() ? 0 : poll ? 1 : TIMEOUT_BLOCK;
             if (ticks != TIMEOUT_BLOCK && (delay == TIMEOUT_BLOCK || ticks < delay))
                 delay = ticks;
         }

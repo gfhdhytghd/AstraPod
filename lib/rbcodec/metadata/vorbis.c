@@ -505,19 +505,24 @@ long read_vorbis_tags(int fd, struct mp3entry *id3,
             enum mp3_aa_type picture_format;
             unsigned picture_type = outlen >= 4 ? get_long_be(buf) : 0;
             if (parse_flac_album_art((unsigned char *)buf, outlen,
-                                     &picture_format, &picframe_pos)
-                && (!id3->has_embedded_albumart ||
-                    (picture_type == 3 && id3->albumart_picture_type != 3)))
+                                     &picture_format, &picframe_pos))
             {
-                //NOTE: This is not exact location due to padding in base64 (up to 3 chars)!!
-                // But it's OK with our jpeg decoder if we add or miss few bytes in jpeg header
-                const int picframe_pos_b64 = base64_encoded_size(picframe_pos + 4);
-
-                id3->has_embedded_albumart = true;
-                id3->albumart.type = picture_format | AA_FLAG_VORBIS_BASE64;
-                id3->albumart_picture_type = picture_type;
-                id3->albumart.pos = picframe_pos_b64 + before_block_pos;
-                id3->albumart.size = after_block_pos - id3->albumart.pos;
+                /* Base64 padding can shift the image header by a few bytes. */
+                off_t pos = base64_encoded_size(picframe_pos + 4) + before_block_pos;
+                struct mp3_albumart art = {
+                    .type = picture_format | AA_FLAG_VORBIS_BASE64,
+                    .pos = pos,
+                    .size = MAX(0, after_block_pos - pos),
+                };
+                if (!id3->artist_art.size && metadata_is_artist_picture(picture_type))
+                    id3->artist_art = art;
+                if (!id3->has_embedded_albumart ||
+                    (picture_type == 3 && id3->albumart_picture_type != 3))
+                {
+                    id3->has_embedded_albumart = true;
+                    id3->albumart = art;
+                    id3->albumart_picture_type = picture_type;
+                }
             }
             continue;
         }

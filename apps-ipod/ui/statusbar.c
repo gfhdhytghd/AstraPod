@@ -31,7 +31,7 @@
 #define INDICATOR_FRAMES ANIM_F(8)
 
 struct status_title {
-    char text[96];
+    char text[260];
     enum themable_icons icon;
     bool persistent;
     bool dirty;

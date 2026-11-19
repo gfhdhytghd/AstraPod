@@ -29,6 +29,8 @@
 #include "misc.h"
 #include "usb.h"
 #include "string-extra.h"
+#include "metadata/art_cache.h"
+#include "metadata/art_name.h"
 #include <stdio.h>
 #include <string.h>
 static struct
@@ -207,6 +209,30 @@ static const struct bitmap *art(int i, void *data, struct dim *size)
     if (!get_row(i, &callback_row) || callback_row.kind != CIDER_ROW_ALBUM)
         return NULL;
     return bitmap_for(data, callback_row.art, size);
+}
+
+static const struct bitmap *artist_art_at(int item, int dim, bool paint)
+{
+    if (!get_row(item, &callback_row) || callback_row.kind != CIDER_ROW_ARTIST ||
+        strlen(callback_row.art) < 2)
+        return NULL;
+    struct artist_tile_source source = {
+        .identity = art_name_hash(callback_row.title) ^ art_name_hash(cider_remote_name()),
+    };
+    strlcpy(source.remote, callback_row.art, sizeof(source.remote));
+    return artist_tile_request(&source, dim, paint);
+}
+
+static const struct bitmap *artist_art(int item, void *data, struct dim *size)
+{
+    (void)data;
+    return artist_art_at(item, MIN(size->width, size->height), true);
+}
+
+static void artist_prefetch(int item, void *data, int dim)
+{
+    (void)data;
+    artist_art_at(item, dim, false);
 }
 
 static const struct bitmap *header_art(void *data, struct dim *size)
@@ -467,23 +493,25 @@ int cider_browse(void)
         else
             gui_synclist_set_header(&list, NULL);
 
-        bool covers_visible = albums && global_settings.db_albumart && view;
-        gui_synclist_set_albumart_callback(&list, covers_visible ? art : NULL);
+        bool artists = depth && count > 0 && global_settings.db_artistart &&
+                       cider_page_row(0, &callback_row) && callback_row.kind == CIDER_ROW_ARTIST;
+        bool covers_visible = (albums && global_settings.db_albumart && view) || artists;
+        gui_synclist_set_albumart_callback(&list, artists ? artist_art : covers_visible ? art : NULL);
+        list.callback_prefetch_art = artists ? artist_prefetch : NULL;
         gui_synclist_set_row_height(&list,
                                     covers_visible ? global_settings.db_art_row_height : 0);
         char title[160];
-        snprintf(title, sizeof title, depth ? "%s%s" : "%s Remote%s",
-                 depth ? history[depth].title : cider_remote_name(),
-                 !cider_available()            ? " (unavailable)"
-                 : depth && cider_page_stale() ? " *"
-                                               : "");
+        if (depth)
+            strlcpy(title, history[depth].title, sizeof(title));
+        else
+            snprintf(title, sizeof(title), "%s Remote", cider_remote_name());
         gui_synclist_set_title(&list, title, Icon_Audio);
         list_notice = cider_list_notice(cider_connected(), cider_available(), count,
                                         depth && cider_page_stale());
         empty_list = list_notice != NULL;
         gui_synclist_set_nb_items(&list, empty_list ? 1 : MAX(0, count));
         gui_synclist_select_item(&list, history[depth].selected);
-        if (albums && count > 0)
+        if ((albums || artists) && count > 0)
         {
             static char keys[16][65]; /* UI stack is tight */
             const char *window[16]; unsigned int n = 0;

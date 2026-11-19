@@ -318,6 +318,7 @@ static int browser(void* param)
      * tagnavi row's slot, or ROW_SLOT_PODCASTS */
     enum { ROW_SLOT_PODCASTS = -2 };
     static int row_slot = -1, row_dirlevel, row_selection, row_table;
+    bool from_home = last_screen == GO_TO_ROOT && !came_back;
 
     switch ((intptr_t)param)
     {
@@ -334,7 +335,7 @@ static int browser(void* param)
             {
                 strcpy(folder, current_track_path);
             }
-            else if (!strcmp(last_folder, "/"))
+            else if (from_home || !strcmp(last_folder, "/"))
             {
                 strcpy(folder, global_settings.start_directory);
             }
@@ -349,8 +350,8 @@ static int browser(void* param)
                 return GO_TO_PREVIOUS;
             filter = SHOW_ID3DB;
             last_ft_dirlevel = tc->dirlevel;
-            tc->dirlevel = last_db_dirlevel;
-            tc->selected_item = last_db_selection;
+            tc->dirlevel = from_home ? 0 : last_db_dirlevel;
+            tc->selected_item = from_home && last_db_dirlevel ? 0 : last_db_selection;
             /* dirlevel and currtable have to agree, and this entry restores
              * only the first of them -- the table is whatever the last
              * database session left behind, which is not always a session
@@ -465,6 +466,8 @@ static int browser(void* param)
         .icon = Icon_NOICON,
         .root = folder,
     };
+    if ((intptr_t)param == GO_TO_FILEBROWSER || (intptr_t)param == GO_TO_DBBROWSER)
+        browse.flags |= BROWSE_HOME_LIBRARY;
 
     /* The Search row at the top of the file browser's root. Offered only when
      * the directory cache can answer it: the names it searches are the cache's

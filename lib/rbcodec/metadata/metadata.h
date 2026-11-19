@@ -212,6 +212,11 @@ enum mp3_aa_type {
     AA_FLAG_VORBIS_BASE64 = 1 << (AA_FLAGS_SHIFT + 1),
 };
 
+static inline bool metadata_is_artist_picture(unsigned type)
+{
+    return type == 7 || type == 8 || type == 10;
+}
+
 struct mp3_albumart {
     enum mp3_aa_type type;
     int size;
@@ -315,6 +320,7 @@ struct mp3entry {
 #ifdef HAVE_ALBUMART
     bool has_embedded_albumart;
     struct mp3_albumart albumart;
+    struct mp3_albumart artist_art; /* size is zero when absent */
     unsigned char albumart_picture_type;
 #endif
 

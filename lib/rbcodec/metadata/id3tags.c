@@ -1147,7 +1147,12 @@ retry_with_limit:
                         ? AA_FLAG_ID3_UNSYNC : AA_TYPE_UNKNOWN;
                     parsealbumart(entry, tag, bufferpos);
                     if (entry->has_embedded_albumart)
+                    {
                         entry->albumart.size += totframelen - bytesread;
+                        if (!entry->artist_art.size &&
+                            metadata_is_artist_picture(entry->albumart_picture_type))
+                            entry->artist_art = entry->albumart;
+                    }
                     if (had && (!entry->has_embedded_albumart ||
                         previous_type == 3 || entry->albumart_picture_type != 3))
                     {

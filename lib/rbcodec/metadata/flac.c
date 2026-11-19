@@ -157,15 +157,22 @@ bool get_flac_metadata(int fd, struct mp3entry* id3)
             {
                 unsigned picture_type = get_long_be(buf);
                 unsigned length = get_long_be(buf + picframe_pos);
-                if (length <= (unsigned)(i + bytes_read - picframe_pos - 4) &&
-                    (!id3->has_embedded_albumart ||
-                     (picture_type == 3 && id3->albumart_picture_type != 3)))
+                if (length <= (unsigned)(i + bytes_read - picframe_pos - 4))
                 {
-                    id3->has_embedded_albumart = true;
-                    id3->albumart.type = picture_format;
-                    id3->albumart.size = length;
-                    id3->albumart.pos = picture_pos + picframe_pos + 4;
-                    id3->albumart_picture_type = picture_type;
+                    struct mp3_albumart art = {
+                        .type = picture_format,
+                        .size = length,
+                        .pos = picture_pos + picframe_pos + 4,
+                    };
+                    if (!id3->artist_art.size && metadata_is_artist_picture(picture_type))
+                        id3->artist_art = art;
+                    if (!id3->has_embedded_albumart ||
+                        (picture_type == 3 && id3->albumart_picture_type != 3))
+                    {
+                        id3->has_embedded_albumart = true;
+                        id3->albumart = art;
+                        id3->albumart_picture_type = picture_type;
+                    }
                 }
             }
 

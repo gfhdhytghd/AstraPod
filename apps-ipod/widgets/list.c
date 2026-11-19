@@ -163,6 +163,7 @@ void gui_synclist_init(struct gui_synclist * gui_list,
 {
     gui_list->callback_get_item_icon = NULL;
     gui_list->callback_get_item_albumart = NULL;
+    gui_list->callback_prefetch_art = NULL;
     gui_list->callback_get_item_name = callback_get_item_name;
     gui_list->line_height_override = 0;
     gui_list->callback_speak_item = NULL;
@@ -732,7 +733,11 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
 
     /* A step count comes only with a wheel event. A button -- an accessory
      * remote's up and down -- carries none and moves one row. */
-    int next_item_modifier = button_apply_acceleration(get_action_data());
+    unsigned int data = get_action_data();
+    bool wheel = list_wheel_event();
+    if (list_render_index_action(lists, actionptr, wheel, MAX(1, (data >> 24) & 0x7f)))
+        return true;
+    int next_item_modifier = button_apply_acceleration(data);
     if (next_item_modifier < 1)
         next_item_modifier = 1;
 
@@ -757,7 +762,7 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
             /*Fallthrough*/
         case ACTION_STD_PREV:
 
-            list_move(lists, -next_item_modifier, allow_wrap, list_wheel_event());
+            list_move(lists, -next_item_modifier, allow_wrap, wheel);
             yield();
             *actionptr = ACTION_STD_PREV;
             return true;
@@ -766,7 +771,7 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
             allow_wrap = false; /* Prevent list wraparound on repeating actions */
             /*Fallthrough*/
         case ACTION_STD_NEXT:
-            list_move(lists, next_item_modifier, allow_wrap, list_wheel_event());
+            list_move(lists, next_item_modifier, allow_wrap, wheel);
             yield();
             *actionptr = ACTION_STD_NEXT;
             return true;

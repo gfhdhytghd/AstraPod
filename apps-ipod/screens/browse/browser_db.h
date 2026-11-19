@@ -116,6 +116,9 @@ bool browser_db_current_under_artist_level(void);
  * artist folder above it. A track-artist row takes the album artist of the
  * same name, from the RAM copy only. 0 for any other row, or one with no
  * folder. */
+struct artist_tile_source;
+bool browser_db_artist_tile(struct browser_context *c, int item,
+                            struct artist_tile_source *source);
 unsigned int browser_db_get_art_hash(struct browser_context* c, int item);
 int browser_db_get_icon(struct browser_context* c);
 /* %Lk and %LP for row 'id' of the level on screen. */

@@ -7101,6 +7101,22 @@ static unsigned int table_art_hash(struct browser_context* c,
     return 0;
 }
 
+bool browser_db_artist_tile(struct browser_context *c, int item,
+                            struct artist_tile_source *source)
+{
+    if (item < c->special_entry_count || !browser_db_is_artist_list(c))
+        return false;
+    struct tagentry *entry = browser_db_get_entry(c, item);
+    if (!entry)
+        return false;
+    *source = (struct artist_tile_source){
+        .identity = art_name_hash(P2STR((unsigned char *)entry->name)),
+        .tag = csi->tagorder[shown_level(c->currextra)],
+        .seek = entry->extraseek,
+    };
+    return source->identity != 0;
+}
+
 unsigned int browser_db_get_art_hash(struct browser_context* c, int item)
 {
     char dir[MAX_PATH];

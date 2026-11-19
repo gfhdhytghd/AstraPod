@@ -207,7 +207,11 @@ static inline int ipod_4g_button_read(void)
                         {
                             wheel_repeat            = wheel_keycode;
                             wheel_velocity          = 0;
+#ifdef IPOD_6G
+                            accumulated_wheel_delta = wheel_delta;
+#else
                             accumulated_wheel_delta = 0;
+#endif
                         }
                         /* on same direction REPEAT is assumed when new click is within timeout */
                         else if (TIME_BEFORE(usec, last_wheel_usec + WHEEL_REPEAT_TIMEOUT))
@@ -218,7 +222,11 @@ static inline int ipod_4g_button_read(void)
                         if (TIME_AFTER(usec, last_wheel_usec + WHEEL_FAST_OFF_TIMEOUT))
                         {
                             wheel_velocity          = 0;
+#ifdef IPOD_6G
+                            accumulated_wheel_delta = wheel_delta;
+#else
                             accumulated_wheel_delta = 0;
+#endif
                         }
 
 #ifdef HAVE_WHEEL_POSITION
@@ -232,10 +240,14 @@ static inline int ipod_4g_button_read(void)
 #ifdef HAVE_SCROLLWHEEL
                             /* use data-format for HAVE_SCROLLWHEEL */
                             /* always use acceleration mode (1<<31) */
-                            /* always set message post count to (1<<24) for iPod */
-                            /* this way the scrolling is always calculated from wheel_velocity */
-                            button_queue_post(wheel_keycode | repeat, 
-                                       (1<<31) | (1 << 24) | wheel_velocity);
+#ifdef IPOD_6G
+                            /* Expose the physical detents to index mode. */
+                            unsigned int steps = MAX(1u, MIN(127u, accumulated_wheel_delta));
+#else
+                            unsigned int steps = 1;
+#endif
+                            button_queue_post(wheel_keycode | repeat,
+                                       (1u<<31) | (steps << 24) | wheel_velocity);
                                        
 #else
                             button_queue_post(wheel_keycode | repeat, 

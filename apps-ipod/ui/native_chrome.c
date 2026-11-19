@@ -2,6 +2,7 @@
  * (CC BY-SA 3.0). GPL version 2+. */
 #include "config.h"
 #include "native_chrome.h"
+#include "draw/line.h"
 #include "native_theme_runtime.h"
 #include "retained.h"
 
@@ -390,23 +391,48 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
     int text_y = bounds.y + metric[UI_METRIC_STATUS_TEXT_Y];
     int icon_size = metric[UI_METRIC_STATUS_ICON_SIZE];
     int left_x = bounds.x + metric[UI_METRIC_STATUS_PAD_LEFT];
+    const char *title = title_text(left);
+    int title_width = 0;
+    if (!playback_modes)
+        font_getstringsize((const unsigned char *)title, &title_width, NULL,
+                           chrome->title_font);
+    const int gap = 8;
+    bool right_clock = !playback_modes &&
+        left_x + title_width + gap > bounds.x + layout.clock_x;
+    int clock_pen = bounds.x * 64 + clock_origin(bounds.width, advance);
+    if (right_clock)
+    {
+        layout.clock_width = clock_width;
+        layout.clock_x = bounds.width - metric[UI_METRIC_STATUS_PAD_RIGHT] - clock_width;
+        layout.title_width = MAX(0, bounds.x + layout.clock_x - gap - left_x);
+        clock_pen = (bounds.x + layout.clock_x) * 64;
+        char fitted[260];
+        title = text_fit(title, fitted, sizeof(fitted), chrome->title_font,
+                         layout.title_width);
+        draw_text(&damage, title, chrome->title_font, left_x, text_y,
+                  layout.title_width, metric[UI_METRIC_STATUS_TITLE_HEIGHT], false);
+    }
     if (playback_modes)
         draw_text(&damage, left, chrome->icon_font, left_x, icon_y,
                   layout.title_width, icon_size, false);
-    else
-        draw_text(&damage, title_text(left), chrome->title_font, left_x, text_y,
-                  layout.title_width, metric[UI_METRIC_STATUS_TITLE_HEIGHT], false);
-    if (state->busy < ARRAYLEN(busy_icons))
+    else if (!right_clock)
+        draw_text(&damage, title, chrome->title_font, left_x, text_y,
+                  layout.clock_x + bounds.x - left_x - gap,
+                  metric[UI_METRIC_STATUS_TITLE_HEIGHT], false);
+    if (!right_clock && left_x + title_width <= bounds.x + layout.busy_x &&
+        state->busy < ARRAYLEN(busy_icons))
         draw_text(&damage, busy_icons[state->busy], chrome->icon_font,
                   bounds.x + layout.busy_x, icon_y, icon_size, icon_size, false);
 
     struct ui_rect clock_clip = { bounds.x + layout.clock_x, text_y,
                                   layout.clock_width, icon_size };
-    draw_clock(&damage, clock, chrome->status_font, clock_clip,
-               bounds.x * 64 + clock_origin(bounds.width, advance));
-    draw_text(&damage, percent, chrome->status_font, bounds.x + layout.percent_x,
-              text_y, layout.percent_width, icon_size, false);
-    draw_indicators(chrome, &damage, indicators, layout, bounds.x, icon_y, icon_size,
-                    background, foreground);
+    draw_clock(&damage, clock, chrome->status_font, clock_clip, clock_pen);
+    if (!right_clock)
+    {
+        draw_text(&damage, percent, chrome->status_font, bounds.x + layout.percent_x,
+                  text_y, layout.percent_width, icon_size, false);
+        draw_indicators(chrome, &damage, indicators, layout, bounds.x, icon_y, icon_size,
+                        background, foreground);
+    }
     lcd_set_viewport(previous);
 }

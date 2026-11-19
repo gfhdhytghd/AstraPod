@@ -210,6 +210,7 @@ struct gui_synclist
 
     list_get_icon *callback_get_item_icon;
     list_get_albumart *callback_get_item_albumart;
+    void (*callback_prefetch_art)(int item, void *data, int dim);
     /* Uniform row height override in pixels; 0 uses the theme.
      * Lets a list (e.g. the database album list) ask for taller rows without a
      * per-item callback -- every row is this height. */

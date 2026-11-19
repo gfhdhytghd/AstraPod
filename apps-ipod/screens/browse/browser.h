@@ -33,6 +33,7 @@ struct entry {
 #define BROWSE_DIRFILTER        0x0080  /* override global_settings.dirfilter with browse_context.dirfilter */
 #define BROWSE_SELECTED         0x0100  /* this bit is set if user selected item */
 #define BROWSE_SEARCH_ROW       0x0200  /* a Search row at the top of the root */
+#define BROWSE_HOME_LIBRARY    0x0400  /* Home's Files or Music hierarchy */
 
 
 struct browser_context;

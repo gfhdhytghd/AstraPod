@@ -57,6 +57,19 @@ struct art_cache_header
  * image was replaced and deletes the thumbnails of one whose image is gone. */
 
 /* Start the background cache thread. Call once at startup, after tagcache. */
+/* Row tiles are prefetched by the shared artwork task. A returned bitmap
+ * is a whole, UI-owned copy, valid until the next artist tile is requested. */
+struct artist_tile_source
+{
+    unsigned identity;
+    int tag;
+    long seek;
+    char remote[65];
+};
+const struct bitmap *artist_tile_request(const struct artist_tile_source *source,
+                                         int dim, bool paint);
+unsigned artist_tile_generation(void);
+
 void art_cache_init(void);
 
 #ifdef DBTOOL

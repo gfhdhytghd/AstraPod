@@ -2029,7 +2029,7 @@ const struct settings_list settings[] = {
     OFFON_SETTING(0, db_albumart, LANG_DB_ALBUM_ART,
                   true, "database album art", NULL),
     OFFON_SETTING(0, db_artistart, LANG_DB_ARTIST_ART,
-                  false, "database artist art", NULL),
+                  true, "database artist art", NULL),
     OFFON_SETTING(0, db_bookart, LANG_DB_BOOK_ART,
                   true, "database audiobook art", NULL),
     OFFON_SETTING(0, db_authorart, LANG_DB_AUTHOR_ART,

@@ -547,6 +547,24 @@ static unsigned int browser_row_art_hash(int selected_item, void *data)
                                    selected_item);
 }
 
+static const struct bitmap *browser_artist_tile(int item, void *data,
+                                                int dim, bool paint)
+{
+    struct artist_tile_source source;
+    return browser_db_artist_tile(data, item, &source) ?
+           artist_tile_request(&source, dim, paint) : NULL;
+}
+
+static const struct bitmap *browser_get_artist(int item, void *data, struct dim *size)
+{
+    return browser_artist_tile(item, data, MIN(size->width, size->height), true);
+}
+
+static void browser_prefetch_artist(int item, void *data, int dim)
+{
+    browser_artist_tile(item, data, dim, false);
+}
+
 static const struct bitmap *browser_get_albumart(int selected_item, void * data,
                                               struct dim *size)
 {
@@ -848,7 +866,19 @@ static int update_dir(struct browser_album_panel *panel)
         gui_synclist_set_header(list, &panel->view);
     }
 
-    if (id3db)
+    if (tc.browse && (tc.browse->flags & BROWSE_HOME_LIBRARY))
+    {
+        if (id3db)
+            title = tc.dirlevel ? browser_db_get_title(&tc) : (char *)str(LANG_MUSIC_BROWSER);
+        else
+        {
+            char *leaf = strrchr(tc.currdir, '/');
+            title = !strcmp(tc.currdir, global_settings.start_directory) ||
+                    !leaf || !leaf[1] ? (char *)str(LANG_DIR_BROWSER) : leaf + 1;
+        }
+        icon = filetype_get_icon(ATTR_DIRECTORY);
+    }
+    else if (id3db)
     {
         if (show_path_in_browser == SHOW_PATH_FULL
             || show_path_in_browser == SHOW_PATH_CURRENT)
@@ -932,7 +962,7 @@ static int update_dir(struct browser_album_panel *panel)
      * book included, which is the other reason the level test governs: a track
      * list carries no art in any menu. */
     {
-        bool tall_rows = false;
+        bool tall_rows = false, artist_tiles = false;
         if (*tc.dirfilter == SHOW_ID3DB)
         {
             bool album = browser_db_is_album_list(&tc);
@@ -946,12 +976,14 @@ static int update_dir(struct browser_album_panel *panel)
             else if (album)
                 tall_rows = global_settings.db_albumart;
             else if (artist)
-                tall_rows = global_settings.db_artistart;
+                tall_rows = artist_tiles = global_settings.db_artistart;
         }
         gui_synclist_set_notes(list, id3db && browser_db_shows_episodes(&tc) &&
                                            browser_db_episodes_have_notes(&tc));
         gui_synclist_set_albumart_callback(list,
+                                    artist_tiles ? browser_get_artist :
                                     tall_rows ? browser_get_albumart : NULL);
+        list->callback_prefetch_art = artist_tiles ? browser_prefetch_artist : NULL;
         /* Give every row enough room for a cover, including special rows. */
         gui_synclist_set_row_height(list,
                                     tall_rows ? global_settings.db_art_row_height : 0);
@@ -1491,8 +1523,11 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
         int timeout = list_do_action_timeout(&browser_lists, HZ/2);
         button = get_action(list_select_context(CONTEXT_TREE)|ALLOW_SOFTLOCK,
                             ui_scene_timeout(scene, timeout));
+        bool home_library = tc.browse->flags & BROWSE_HOME_LIBRARY;
         oldbutton = button;
         bool redrew = gui_synclist_do_button(&browser_lists, &button);
+        if (home_library && button == ACTION_STD_MENU)
+            button = ACTION_STD_CANCEL;
         ui_scene_update(scene, redrew);
         if (button == ACTION_NONE)
             lcd_update();
@@ -1601,7 +1636,8 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
                  * was meant to skip. One press undoes one jump. */
                 if ((*tc.dirfilter == SHOW_ID3DB
                      && (tc.dirlevel == 0 || browser_db_back_exits(&tc))) ||
-                    ((*tc.dirfilter != SHOW_ID3DB && !strcmp(currdir,"/"))))
+                    (!id3db && (!strcmp(currdir, "/") ||
+                     (home_library && !strcmp(currdir, global_settings.start_directory)))))
                 {
                     if (oldbutton == ACTION_TREE_PGLEFT)
                         break;

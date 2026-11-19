@@ -691,6 +691,11 @@ int button_apply_acceleration(const unsigned int data)
 
     if ((data & (1 << 31)) != 0)
     {
+#if defined(IPOD_6G) && !defined(SIMULATOR)
+        /* Normal list motion is driven by velocity. Index mode reads the
+         * physical detent count straight from the event instead. */
+        delta = 1;
+#endif
         /* read driver's velocity from data */
         unsigned int v = data & 0xffffff;
 

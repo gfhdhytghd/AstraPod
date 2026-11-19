@@ -5,6 +5,8 @@
 #include "list.h"
 
 void list_render_init(void);
+bool list_render_index_action(struct gui_synclist *list, int *action,
+                              bool wheel, int steps);
 void list_render_draw(struct gui_synclist *list);
 void list_render_settle(const struct gui_synclist *list);
 void list_render_retarget(const struct gui_synclist *list, int selection, int top,

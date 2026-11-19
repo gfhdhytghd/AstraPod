@@ -26,6 +26,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdint.h>
+#include <limits.h>
 #include "config.h"
 #include "system/library_files.h"
 #include "database/libfile.h"
@@ -46,6 +47,7 @@
 #include "art_cache.h"
 #include "art_name.h"
 #include "art_sizes.h"
+#include "screens/playback/cider.h"
 #include "settings/settings.h"  /* global_settings.art_cache_* */
 #include "system/debug_log.h"
 #include "database/tagcache.h"
@@ -266,6 +268,7 @@ static volatile bool aa_offer_posted;
 /* Queue event id: Check a File's Art, for the file in aa_chk.path; unique
  * on the thread, for bg_task_queued() (iap-artwork.c has 2) */
 #define AA_EVENT_CHECK 3
+#define AA_EVENT_ARTIST 4
 
 enum { AA_CHECK_IDLE, AA_CHECK_POSTED, AA_CHECK_RUNNING, AA_CHECK_DONE };
 
@@ -3583,6 +3586,384 @@ static enum bg_result aa_task_run(void)
     return result;
 }
 
+#define ARTIST_TILE_ROOT ROCKBOX_DIR "/podbox"
+#define ARTIST_TILE_CACHE ARTIST_TILE_ROOT "/cache"
+#define ARTIST_TILE_DIR ARTIST_TILE_CACHE "/artist"
+enum { ARTIST_TILE_EDGE = 56, ARTIST_TILE_SLOTS = 16, ARTIST_TILE_PENDING = 24 };
+struct artist_tile
+{
+    struct artist_tile_source source;
+    unsigned stamp;
+    long retry;
+    int dim;
+    int commit;
+    bool ready;
+    fb_data pixels[ARTIST_TILE_EDGE * ARTIST_TILE_EDGE];
+};
+struct artist_tile_job
+{
+    struct artist_tile_source source;
+    int dim, commit;
+};
+
+static struct artist_tile artist_tiles[ARTIST_TILE_SLOTS];
+static struct artist_tile_job artist_pending[ARTIST_TILE_PENDING];
+static struct mutex artist_mutex;
+static unsigned artist_pending_count, artist_clock, artist_generation;
+static fb_data artist_work[ARTIST_TILE_EDGE * ARTIST_TILE_EDGE];
+static fb_data artist_paint[ARTIST_TILE_EDGE * ARTIST_TILE_EDGE];
+static struct bitmap artist_bitmap = {
+    .format = FORMAT_NATIVE, .data = (unsigned char *)artist_paint,
+};
+
+static bool artist_same(const struct artist_tile_source *a,
+                        const struct artist_tile_source *b)
+{
+    return a->identity == b->identity && a->tag == b->tag && a->seek == b->seek &&
+           !strcmp(a->remote, b->remote);
+}
+
+unsigned artist_tile_generation(void)
+{
+    mutex_lock(&artist_mutex);
+    unsigned generation = artist_generation;
+    mutex_unlock(&artist_mutex);
+    return generation;
+}
+
+const struct bitmap *artist_tile_request(const struct artist_tile_source *source,
+                                         int dim, bool paint)
+{
+    if (!source->identity || dim <= 0)
+        return NULL;
+    dim = MIN(dim, ARTIST_TILE_EDGE);
+    int commit = source->remote[0] ? 0 : tagcache_commit_id();
+    const struct bitmap *result = NULL;
+    mutex_lock(&artist_mutex);
+    for (int i = 0; i < ARTIST_TILE_SLOTS; ++i)
+    {
+        struct artist_tile *tile = &artist_tiles[i];
+        if (tile->dim != dim || tile->commit != commit ||
+            !artist_same(&tile->source, source))
+            continue;
+        tile->stamp = ++artist_clock;
+        if (tile->ready)
+        {
+            if (paint)
+            {
+                artist_bitmap.width = artist_bitmap.height = dim;
+                memcpy(artist_paint, tile->pixels, dim * dim * sizeof(fb_data));
+                result = &artist_bitmap;
+            }
+            goto done;
+        }
+        if (TIME_BEFORE(current_tick, tile->retry))
+            goto done;
+        break;
+    }
+    for (unsigned i = 0; i < artist_pending_count; ++i)
+    {
+        struct artist_tile_job *job = &artist_pending[i];
+        if (job->dim == dim && job->commit == commit && artist_same(&job->source, source))
+            goto done;
+    }
+    if (artist_pending_count < ARTIST_TILE_PENDING)
+    {
+        artist_pending[artist_pending_count++] = (struct artist_tile_job){ *source, dim, commit };
+        if (artist_pending_count == 1)
+            bg_task_post(&art_cache_task, AA_EVENT_ARTIST);
+    }
+done:
+    mutex_unlock(&artist_mutex);
+    return result;
+}
+
+static bool artist_folder(const char *track, const char *name, char *path)
+{
+    static const char *const files[] = { "artist.jpg", "artist.png", "folder.jpg" };
+    size_t len = strlen(track);
+    while (len > 1)
+    {
+        while (len && track[len - 1] != '/')
+            --len;
+        if (len <= 1)
+            break;
+        size_t end = --len;
+        while (len && track[len - 1] != '/')
+            --len;
+        if (strlen(name) != end - len || strncasecmp(track + len, name, end - len))
+            continue;
+        for (unsigned i = 0; i < ARRAYLEN(files); ++i)
+        {
+            int n = snprintf(path, MAX_PATH, "%.*s/%s", (int)end, track, files[i]);
+            if (n > 0 && n < MAX_PATH && file_exists(path))
+                return true;
+        }
+        /* A matched artist folder has no portrait. Try the next track. */
+        break;
+    }
+    return false;
+}
+
+static bool artist_locate(const struct artist_tile_job *job, struct aa_src *src,
+                          char *folder, char *embedded, char *first)
+{
+    struct tagcache_search search;
+    char track[MAX_PATH], name[MAX_PATH], album[MAX_PATH], first_album[MAX_PATH] = "";
+    long first_year = LONG_MAX;
+    bool have_embedded = false, have_folder = false;
+
+    if (!tagcache_seek_string(job->source.tag, job->source.seek, name, sizeof(name)) ||
+        !tagcache_search(&search, tag_filename))
+        return false;
+    if (tagcache_search_add_filter(&search, job->source.tag, job->source.seek))
+    {
+        while (!tagcache_is_busy() && tagcache_get_next(&search, track, sizeof(track)))
+        {
+            if (artist_folder(search.result, name, folder))
+            {
+                have_folder = true;
+                *src = (struct aa_src){ .path = folder, .emb_pos = -1 };
+                break;
+            }
+            if (!have_embedded &&
+                get_metadata_ex(&aa_id3, -1, search.result, METADATA_EXCLUDE_ID3_PATH) &&
+                aa_id3.artist_art.size && image_embedded_usable(aa_id3.artist_art.type))
+            {
+                strlcpy(embedded, search.result, MAX_PATH);
+                *src = (struct aa_src){
+                    .path = embedded, .emb_pos = aa_id3.artist_art.pos,
+                    .emb_size = aa_id3.artist_art.size, .emb_flags = aa_id3.artist_art.type,
+                };
+                have_embedded = true;
+            }
+            if (!have_embedded)
+            {
+                long year = tagcache_get_numeric(&search, tag_year);
+                if (year <= 0)
+                    year = LONG_MAX;
+                if (year <= first_year &&
+                    tagcache_retrieve(&search, search.idx_id, tag_album, album, sizeof(album)) &&
+                    (!*first || year < first_year || strcasecmp(album, first_album) < 0))
+                {
+                    strlcpy(first_album, album, sizeof(first_album));
+                    strlcpy(first, search.result, MAX_PATH);
+                    first_year = year;
+                }
+            }
+            yield();
+        }
+    }
+    tagcache_search_finish(&search);
+    return have_folder || have_embedded;
+}
+
+static unsigned artist_file_hash(const struct aa_src *src)
+{
+    unsigned hash = aa_hash(src->path);
+    const char *leaf = strrchr(src->path, '/');
+    if (!leaf)
+        return hash;
+    char folder[MAX_PATH];
+    size_t length = leaf - src->path;
+    if (length >= sizeof(folder))
+        return hash;
+    memcpy(folder, src->path, length);
+    folder[length] = 0;
+    DIR *dir = opendir(length ? folder : "/");
+    if (dir)
+    {
+        struct dirent *entry;
+        while ((entry = readdir(dir)))
+            if (!strcasecmp(entry->d_name, leaf + 1))
+            {
+                struct dirinfo info = dir_get_info(dir, entry);
+                hash ^= (unsigned)info.mtime * 16777619u ^ (unsigned)info.size;
+                break;
+            }
+        closedir(dir);
+    }
+    return hash ^ (unsigned)src->emb_pos ^ (unsigned)src->emb_size;
+}
+
+static bool artist_decode(const struct aa_src *source, int dim)
+{
+    size_t bytes = BM_SCALED_SIZE(ARTIST_TILE_EDGE * ART_CACHE_COVER_MAX_ASPECT,
+                                 ARTIST_TILE_EDGE, FORMAT_NATIVE, 0)
+                   + IMAGE_DECODE_OVERHEAD;
+    int handle = core_alloc(bytes);
+    if (handle <= 0)
+        return false;
+    void *scratch = core_get_data_pinned(handle);
+    struct bitmap bm;
+    int w = dim, h = dim;
+    bool ok = aa_read_source(source, &bm, FORMAT_NATIVE | FORMAT_RETURN_SIZE,
+                             dim, dim, scratch, bytes) > 0;
+    if (ok && !aa_cover_dim(bm.width, bm.height, dim, &w, &h))
+        w = h = dim;
+    ok = ok && aa_read_source(source, &bm, FORMAT_NATIVE | FORMAT_RESIZE | FORMAT_DITHER,
+                              w, h, scratch, bytes) > 0 &&
+              bm.width >= dim && bm.height >= dim;
+    if (ok)
+    {
+        aa_crop_center(scratch, bm.width, bm.height, dim);
+        memcpy(artist_work, scratch, dim * dim * sizeof(fb_data));
+    }
+    core_put_data_pinned(scratch);
+    core_free(handle);
+    return ok;
+}
+
+static bool artist_album_tile(const char *path, int dim)
+{
+    bool ok = false;
+    int preferred = -1;
+    for (unsigned i = 0; i < ART_CACHE_NUM_SIZES; ++i)
+        if (art_sizes[i].layout == AA_ROWS && art_sizes[i].dim >= dim &&
+            (preferred < 0 || art_sizes[i].dim < art_sizes[preferred].dim))
+            preferred = i;
+    unsigned key = art_cache_track_key(path);
+    if (preferred >= 0 && key)
+    {
+        char file[MAX_PATH];
+        art_cache_thumb_path(key, preferred, file, sizeof(file));
+        int fd = open(file, O_RDONLY);
+        if (fd >= 0)
+        {
+            struct bitmap bm = { .data = (unsigned char *)artist_work,
+                                 .width = dim, .height = dim, .format = FORMAT_NATIVE };
+            ok = art_cache_load_aat(fd, &bm, sizeof(artist_work), NULL) > 0;
+            close(fd);
+        }
+    }
+    return ok;
+}
+
+static bool artist_disk_read(const char *file, unsigned hash, size_t bytes)
+{
+    unsigned saved;
+    int fd = open(file, O_RDONLY);
+    if (fd < 0)
+        return false;
+    bool ok = read(fd, &saved, sizeof(saved)) == (ssize_t)sizeof(saved) &&
+              saved == hash && read(fd, artist_work, bytes) == (ssize_t)bytes;
+    close(fd);
+    return ok;
+}
+
+static void artist_disk_write(const char *file, unsigned hash, size_t bytes)
+{
+    static const char temp[] = ARTIST_TILE_DIR "/tile.new";
+    mkdir(ARTIST_TILE_ROOT);
+    mkdir(ARTIST_TILE_CACHE);
+    mkdir(ARTIST_TILE_DIR);
+    int fd = open(temp, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0)
+        return;
+    bool ok = write(fd, &hash, sizeof(hash)) == (ssize_t)sizeof(hash) &&
+              write(fd, artist_work, bytes) == (ssize_t)bytes;
+    if (close(fd) < 0 || !ok || rename(temp, file) < 0)
+        remove(temp);
+}
+
+static bool artist_build_tile(const struct artist_tile_job *job)
+{
+    char folder[MAX_PATH], embedded[MAX_PATH], first[MAX_PATH] = "";
+    char file[sizeof(ARTIST_TILE_DIR) + 32];
+    struct aa_src source = {0};
+    unsigned hash;
+    int dim = job->dim;
+    size_t bytes = dim * dim * sizeof(fb_data);
+    bool remote = job->source.remote[0] != 0;
+    bool portrait = !remote && artist_locate(job, &source, folder, embedded, first);
+    if (remote)
+        hash = aa_hash(job->source.remote);
+    else if (portrait)
+        hash = artist_file_hash(&source);
+    else if (*first)
+    {
+        /* Locate the actual album image as well as its cached rendition. */
+        source = (struct aa_src){ .path = first, .emb_pos = -1 };
+        if (aa_find_file(first))
+            source.path = aa_artpath;
+        else
+            aa_find_embedded(first, &source);
+        hash = artist_file_hash(&source) ^ art_cache_track_key(first);
+    }
+    else
+        return false;
+    snprintf(file, sizeof(file), ARTIST_TILE_DIR "/%c%08x-%d.tile",
+             remote ? 'r' : 'l', job->source.identity, dim);
+    if (artist_disk_read(file, hash, bytes))
+        return true;
+    bool ok;
+    if (remote)
+    {
+#ifdef HAVE_USB_PODLINK
+        ok = cider_copy_art(job->source.remote, "S", artist_work, sizeof(artist_work));
+        if (ok && dim != ARTIST_TILE_EDGE)
+            for (int y = 0; y < dim; ++y)
+                for (int x = 0; x < dim; ++x)
+                    artist_work[y * dim + x] =
+                        artist_work[y * ARTIST_TILE_EDGE / dim * ARTIST_TILE_EDGE +
+                                    x * ARTIST_TILE_EDGE / dim];
+        if (!ok)
+            cider_prefetch_art(job->source.remote, "S");
+#else
+        ok = false;
+#endif
+    }
+    else
+        ok = artist_decode(&source, dim) || (*first && artist_album_tile(first, dim));
+    if (ok)
+        artist_disk_write(file, hash, bytes);
+    return ok;
+}
+
+static void artist_tile_event(void)
+{
+    mutex_lock(&artist_mutex);
+    if (!artist_pending_count)
+    {
+        mutex_unlock(&artist_mutex);
+        return;
+    }
+    struct artist_tile_job job = artist_pending[0];
+    mutex_unlock(&artist_mutex);
+
+    bool ready = artist_build_tile(&job);
+    mutex_lock(&artist_mutex);
+    struct artist_tile *slot = &artist_tiles[0];
+    for (int i = 0; i < ARTIST_TILE_SLOTS; ++i)
+    {
+        struct artist_tile *tile = &artist_tiles[i];
+        if (tile->dim == job.dim && tile->commit == job.commit &&
+            artist_same(&tile->source, &job.source))
+        {
+            slot = tile;
+            break;
+        }
+        if (artist_clock - tile->stamp > artist_clock - slot->stamp)
+            slot = tile;
+    }
+    slot->source = job.source;
+    slot->commit = job.commit;
+    slot->dim = job.dim;
+    slot->ready = ready;
+    slot->stamp = ++artist_clock;
+    slot->retry = current_tick + (job.source.remote[0] ? HZ : 10 * HZ);
+    if (ready)
+    {
+        memcpy(slot->pixels, artist_work, job.dim * job.dim * sizeof(fb_data));
+        ++artist_generation;
+    }
+    --artist_pending_count;
+    memmove(artist_pending, artist_pending + 1, artist_pending_count * sizeof(*artist_pending));
+    if (artist_pending_count)
+        bg_task_post(&art_cache_task, AA_EVENT_ARTIST);
+    mutex_unlock(&artist_mutex);
+}
+
 /* bg_task.handle_event: everything on the queue that is ours rather than the
  * tick's -- the offer posted by the track-change hook, and a check. */
 static void aa_task_event(const struct queue_event *ev)
@@ -3591,6 +3972,8 @@ static void aa_task_event(const struct queue_event *ev)
         aa_handle_offer();
     else if (ev->id == AA_EVENT_CHECK)
         aa_run_check();
+    else if (ev->id == AA_EVENT_ARTIST)
+        artist_tile_event();
 }
 
 /* The scheme the stamp file's first record names, 0 for none: see AA_SCHEME */
@@ -3702,6 +4085,7 @@ void art_cache_init(void)
 {
     cache_busy = false;
     mutex_init(&aat_mutex);
+    mutex_init(&artist_mutex);
 
     /* A header per boot, so each run's lines start from a readable point --
      * and so the file exists from boot however the setting was set. Settings

@@ -44,7 +44,7 @@ FU85 阶段 0 建议方案 A。用户随后选择逐步迁移到方案 B，同�
 | 设置与接力的等待。[`general_settings.c:560`](../../apps-ipod/screens/settings/general_settings.c#L560)、[`handoff.c:242`](../../apps-ipod/screens/playback/handoff.c#L242) | USB DAC 设置等设备发现，每 6 f 唤醒。WPS 接力入口最多等待 60 f 协商，每 tick 检查一次。两处等待驱动协议检测和提示，保留各自的期限及取消条件。 |
 | 游戏、插件与输出边界。[`quiz.c:831`](../../apps-ipod/games/quiz/quiz.c#L831)、[`arcade/vm.c:1251`](../../apps-ipod/games/arcade/vm.c#L1251)、[`spike_clock.c`](../../apps-ipod/games/spike/spike_clock.c)、[`lcd-s5l8702.c:409`](../../firmware/target/arm/s5l8702/lcd-s5l8702.c#L409) | Quiz 有答案揭晓睡眠。Arcade 和 Spike 有自己的帧时钟。外部插件、动图、视频保留内容节拍。LCD 驱动等待是传输同步。跨过这些边界时结束 UI 动画并交还 LCD。 |
 
-调查用 `git grep` 与 `rg` 交叉查找 `current_tick`、`USEC_TIMER`、`sleep`、`get_action`、`lcd_update*`、插值、透明度、滚动、进度和忙状态。上述分类包括直接分派、线程级文字滚动、事件驱动刷新和非视觉等待。历史参考 [FU65 歌词](/home/wilf/data/PodJS/ipod/FU65-REPORT.md) · [FU82 Cover Flow 数据](/home/wilf/data/PodJS/ipod/evidence/fu82)。
+调查用 `git grep` 与 `rg` 交叉查找 `current_tick`、`USEC_TIMER`、`sleep`、`get_action`、`lcd_update*`、插值、透明度、滚动、进度和忙状态。上述分类包括直接分派、线程级文字滚动、事件驱动刷新和非视觉等待。历史参考 [FU65 歌词](../../../ipod/FU65-REPORT.md) · [FU82 Cover Flow 数据](../../../ipod/evidence/fu82)。
 
 ## ARM 和 SDL 基准
 
@@ -66,7 +66,7 @@ FU85 阶段 0 建议方案 A。用户随后选择逐步迁移到方案 B，同�
 | 单次列表可见区重绘，抑制提交 | — | — | 0.0070 / 0.0094 |
 | 单次列表可见区重绘，含提交 | — | 依视口与脏区 | 0.1937 / 0.1889 |
 
-16 bit 命令集的各项提交少 35 条指令。两套命令集的 DMA 载荷一致。`lcd_update` 是满屏矩形的薄包装。6G 的 `lcd_update_rect` 先等待上次 DMA，把显示缓冲区复制到驱动暂存区，再排队 DMA。满宽条带是一段连续复制。窄条带逐行复制，奇数 x 会影响对齐。横移两张图在 x=81 的 ARM 指令约为 x=80 的 2.9 倍。新合成器可以将滑动边界量化到偶数像素，先验证尾帧和视觉效果。条带损伤优先用满宽横条，是否用窄竖条由行复制、总线与命令预算共同决定。 [ARM 数值和像素校验](/home/wilf/data/PodJS/ipod/evidence/fu85/arm-display.json) · [SDL 数值](/home/wilf/data/PodJS/ipod/evidence/fu85/sdl-measurements.json)。
+16 bit 命令集的各项提交少 35 条指令。两套命令集的 DMA 载荷一致。`lcd_update` 是满屏矩形的薄包装。6G 的 `lcd_update_rect` 先等待上次 DMA，把显示缓冲区复制到驱动暂存区，再排队 DMA。满宽条带是一段连续复制。窄条带逐行复制，奇数 x 会影响对齐。横移两张图在 x=81 的 ARM 指令约为 x=80 的 2.9 倍。新合成器可以将滑动边界量化到偶数像素，先验证尾帧和视觉效果。条带损伤优先用满宽横条，是否用窄竖条由行复制、总线与命令预算共同决定。 [ARM 数值和像素校验](../../../ipod/evidence/fu85/arm-display.json) · [SDL 数值](../../../ipod/evidence/fu85/sdl-measurements.json)。
 
 ### iPod 6G 的条件帧率
 
@@ -80,7 +80,7 @@ FU85 阶段 0 建议方案 A。用户随后选择逐步迁移到方案 B，同�
 
 列表模型覆盖热缓存内的像素移动。边缘行栅格化、图像缺失、滚动条及额外脏矩形增加成本。SDL 实测的列表重绘仅用于确认实际光栅路径对比，不能乘频率比例换算成 ARM 时间。以最坏横移和 54 MHz 估算，30 fps 至少需要约 7.3 MiB/s 有效吞吐。216 MHz 下，60 fps 至少约 14.2 MiB/s。推导结果支持先验证 30 fps，并优先把小条带作为 60 fps 候选。即使计算预算够用，100 Hz 等待产生约 1.8/2.4 f 或 0.6/1.2 f 帧距。上一帧 DMA、扫描相位与撕裂、背光唤醒、缓存写回、DRAM 长尾、音频欠载、功耗和 USB/dock 并发必须用实机确认。
 
-一次性原型基于同一 FU79 源码，在 SDL 的实际 Settings → Playback Settings 菜单上捕获两张真实画面。复用菜单动作循环，按 tick 合成。日志记录绘制提交，GIF 记录可见变化。单次进入提交 8 帧，首末间隔 13.67 f。返回提交 7 帧，首末间隔 10.89 f。两组以提交间隔计算约 30.7 和 33.1 fps。进入与返回各捕获 6 次可见变化。反向请求在第二次入场开始约 6.03 f 后到达，约 0.028 f 后开始计算新的合成帧。原型在反向时重新捕获混合画面，用于验证输入能够重选目标。生产实现保留同一对快照及当前位移，以便沿同一边界反向。 [进入](/home/wilf/data/PodJS/ipod/evidence/fu85/push.gif) · [返回](/home/wilf/data/PodJS/ipod/evidence/fu85/pop.gif) · [反向](/home/wilf/data/PodJS/ipod/evidence/fu85/retarget.gif) · [时间记录](/home/wilf/data/PodJS/ipod/evidence/fu85/slides.tsv)。
+一次性原型基于同一 FU79 源码，在 SDL 的实际 Settings → Playback Settings 菜单上捕获两张真实画面。复用菜单动作循环，按 tick 合成。日志记录绘制提交，GIF 记录可见变化。单次进入提交 8 帧，首末间隔 13.67 f。返回提交 7 帧，首末间隔 10.89 f。两组以提交间隔计算约 30.7 和 33.1 fps。进入与返回各捕获 6 次可见变化。反向请求在第二次入场开始约 6.03 f 后到达，约 0.028 f 后开始计算新的合成帧。原型在反向时重新捕获混合画面，用于验证输入能够重选目标。生产实现保留同一对快照及当前位移，以便沿同一边界反向。 [进入](../../../ipod/evidence/fu85/push.gif) · [返回](../../../ipod/evidence/fu85/pop.gif) · [反向](../../../ipod/evidence/fu85/retarget.gif) · [时间记录](../../../ipod/evidence/fu85/slides.tsv)。
 
 ## 共享时钟、页面合成与所有权
 
@@ -117,7 +117,7 @@ void ui_scene_cancel(struct ui_scene *scene);
 - 320×240 RGB565 每张 153,600 B。两张 307,200 B，使用单句柄的 ARM 账面约 307,220 B，另计对齐与调度元数据。一个 320×160 条带为 102,400 B。两张 320×24 的行图合计 30,720 B。面板可以按实际高度申请前景及底下受影响区域。覆盖全屏的 FU83 面板使用两张全屏。
 - 菜单合成使用一张独立输出图。6G 的 `lcd_present_scene` 将该图复制到驱动自有的 `lcd_dblbuf` 后提交 DMA。忙时放弃中间帧，结束帧重试。接力面板输出到现有 framebuffer，用带损伤范围的 `lcd_update_rect` 提交。释放前检查驱动合约。未来若直接让 DMA 读取动画缓冲，必须保留 pin 至中断确认。像素表面和大工具表全部来自音频池 `core_alloc`。
 - 用句柄表示所有权。每次绘制用 `core_get_data_pinned` 取地址及配对 `core_put_data_pinned`。任何会等待、让出或触发分配的调用都按 buflib 的 pin 规则执行。常驻指针不得指向可移动的分配。使用 `core_alloc_free_space`，仅申请现有空闲块。取消先撤回回调、释放 pin，再 `core_free`。裸 `core_get_data` 只在已证明不会切线程的范围使用。 [core 初始化与分配](../../firmware/core_alloc.c#L60) · [buflib pin 合同](../../firmware/include/buflib.h#L253)。
-- 最终 FU79 ELF 的静态预算余量是 **32,160 B**。FU85 的独立 ARM 构建总分配 6,230,492 B。按同一上限 6,262,660 B 计算，余量为 32,168 B。两者是不同的 ELF，发布预算按交付基线和每阶段实际 map 复核。FU79 的封面暂存已从静态内存移至音频池，32,768 B 载荷加 20 B 块和句柄开销。 [交付 ELF 账目](/home/wilf/data/PodJS/ipod/FU79-REPORT.md)。
+- 最终 FU79 ELF 的静态预算余量是 **32,160 B**。FU85 的独立 ARM 构建总分配 6,230,492 B。按同一上限 6,262,660 B 计算，余量为 32,168 B。两者是不同的 ELF，发布预算按交付基线和每阶段实际 map 复核。FU79 的封面暂存已从静态内存移至音频池，32,768 B 载荷加 20 B 块和句柄开销。 [交付 ELF 账目](../../../ipod/FU79-REPORT.md)。
 - `audio_reset_buffer` 捕获近乎全部 core 池，基准已用 `core_shrink` 为后台任务及 FU79 封面留空。运行中额外收缩可使音频重缓冲。只从确实可用的连续空间申请。`core_allocatable` 会尝试移动和压紧，按当前连续可用空间估计容量。后续 `core_alloc` 在无槽位或找不到块时可以触发其他块的 shrink 回调。两个调用之间存在竞争。首期用 `core_alloc_free_space` 在一次调用中申请空闲块。失败时显示稳态图。打开动画后，下次正常重建音频池时为菜单和面板留出两者较大值。阶段 1 验证有无播放、音频池重建、内存不足、与 FU79 工作区同时活动。预留意味着从文件缓冲扣除可用容量，避免音频不能维持的永久默认配额。 [播放池分配](../../apps-ipod/audio/playback.c#L1150) · [buflib 申请](../../firmware/buflib_mempool.c#L570) · [buflib 可分配空间](../../firmware/buflib_mempool.c#L781)。
 - WPS/SBS、文字滚动及特殊页各自具有绘制入口。仅抑制 flush 会留下对同一 framebuffer 的写入。因此捕获和过渡必须同时定义绘制所有权，或者让后台页绘制到自己的位图。冻结渲染时继续计算皮肤失效和业务状态。释放时重做整页主题绘制，再重新启用跑马灯。固件驱动、panic、USB 接管和插件都可以撤销视觉所有权。屏幕休眠时终止运动，唤醒时立即绘逻辑目标。
 

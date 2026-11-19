@@ -17,5 +17,16 @@ void font_pbf_prefetch_suspend(bool suspend);
 /* The application queues one work item on its existing background thread. */
 void font_pbf_prefetch_init(void (*schedule)(void));
 void font_pbf_prefetch_work(void);
+void font_pbf_set_batch_trace(void (*trace)(unsigned, uint32_t, unsigned));
+
+/* Build and validate compact, sorted records for an independently held face.
+ * Build runs on the prefetch worker. Bind runs on the drawing thread. */
+#define FONT_PACK_CODES 768
+size_t font_pbf_pack_build(int id, const char *path, const ucschar_t *codes,
+                           unsigned count, unsigned char *out, size_t size,
+                           bool (*cancelled)(void));
+bool font_pbf_pack_valid(int id, const unsigned char *pack, size_t size);
+void font_pbf_pack_bind(int id, const unsigned char *primary, const unsigned char *adjacent);
+uint32_t font_pbf_pack_revision(int id);
 
 #endif

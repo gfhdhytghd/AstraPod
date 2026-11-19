@@ -96,7 +96,7 @@ enum pf_scroll_line_type {
 #define CAROUSEL_REMOTE_RETURN (-22)
 #define CAROUSEL_PLAY_PENDING  (-23)
 
-#define CAROUSEL_TRACK_TEXT 160
+#include "panel_cache.h"
 struct album_blur_source;
 
 struct carousel_album_header {
@@ -129,13 +129,10 @@ struct carousel_model {
     bool (*read_art)(int index, struct bitmap *bitmap); /* native columns */
     unsigned int (*art_version)(int index);
     void (*blur_source)(int index, struct album_blur_source *source);
-    bool (*legacy_panel_labels)(void);
     void (*tick)(void);                                /* nonblocking provider */
-    bool (*panel_open)(int index, struct carousel_album_header *header);
-    void (*panel_close)(void);
-    int (*panel_count)(void);                          /* -1 while loading */
-    bool (*panel_row)(int index, char *title, size_t size);
-    int (*panel_play)(int index);                      /* screen or MENU_STAY */
+    bool (*panel_request)(int index, struct panel_request *request);
+    int (*panel_play)(int index, int track, const struct panel_request *request,
+                      const struct panel_cache_row *row);
     int (*panel_play_status)(void);                    /* 0 pending, +1 success, -1 error */
     bool (*remember)(int index);                       /* update resume state in RAM */
 };

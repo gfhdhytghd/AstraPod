@@ -158,16 +158,16 @@ static void arabjoin(ucschar_t *stringprt, int length)
 }
 #endif /* !BOOTLOADER */
 
-ucschar_t *bidi_l2v(const unsigned char *str, int orientation)
+ucschar_t *bidi_l2v_buffer(const unsigned char *str, int orientation,
+                          ucschar_t *utf_buf, ucschar_t *bidi_buf, size_t capacity)
 {
-    static ucschar_t utf_buf[SCROLL_LINE_SIZE];
     ucschar_t *target, *tmp;
 #ifndef BOOTLOADER
-    static ucschar_t bidi_buf[SCROLL_LINE_SIZE];
     ucschar_t *heb_str; /* *broken_str */
     int block_start, block_end, block_type, block_length, i;
     int length = utf8length(str);
-    length=length>=SCROLL_LINE_SIZE?SCROLL_LINE_SIZE-1:length;
+    if (length >= (int)capacity)
+        length = capacity - 1;
 #endif
     /*
     long max_chars=0;
@@ -176,12 +176,13 @@ ucschar_t *bidi_l2v(const unsigned char *str, int orientation)
     tmp = str;
     */
     target = tmp = utf_buf;
-    while (*str && target < &utf_buf[SCROLL_LINE_SIZE-1])
+    while (*str && target < &utf_buf[capacity - 1])
         str = utf8decode(str, target++);
     *target = 0;
 
 #ifdef BOOTLOADER
     (void)orientation;
+    (void)bidi_buf;
     return utf_buf;
 
 #else /* !BOOTLOADER */
@@ -317,4 +318,16 @@ ucschar_t *bidi_l2v(const unsigned char *str, int orientation)
 #endif
     return heb_str;
 #endif /* !BOOTLOADER */
+}
+
+
+ucschar_t *bidi_l2v(const unsigned char *str, int orientation)
+{
+    static ucschar_t utf[SCROLL_LINE_SIZE];
+#ifndef BOOTLOADER
+    static ucschar_t visual[SCROLL_LINE_SIZE];
+    return bidi_l2v_buffer(str, orientation, utf, visual, SCROLL_LINE_SIZE);
+#else
+    return bidi_l2v_buffer(str, orientation, utf, NULL, SCROLL_LINE_SIZE);
+#endif
 }

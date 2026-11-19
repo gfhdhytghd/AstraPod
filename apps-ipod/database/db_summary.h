@@ -146,8 +146,14 @@ struct db_album_track {
     int32_t id, key;
 };
 
-/* Ordered tagcache index IDs. The caller owns the returned core handle. */
-int db_summary_album_track_ids(const struct album_data *album, int *count);
+struct db_panel_track {
+    struct db_album_track track;
+    uint64_t path_key;
+};
+
+/* Ordered IDs and stable playing keys. The caller owns the core handle. */
+int db_summary_album_panel_tracks(const struct album_data *album, int *count,
+                                  bool (*cancelled)(void));
 
 /* Each of an album's tracks to 'sink', in the order db_summary_play_album()
  * plays them, until it returns false. An album with a seek of -1 stands for

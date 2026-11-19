@@ -88,6 +88,7 @@ struct font_pbf {
     uint32_t index_offset, bitmap_offset, file_size;
     uint16_t anchors, rows, max_record;
     uint32_t page, serial;
+    const unsigned char *pack[2]; /* owner pins each pack until it detaches */
     uint32_t map_offset, hot_offset, cold_offset;
     uint16_t stride, hot_count, fixed_count, variable_count;
     int hot_slot;

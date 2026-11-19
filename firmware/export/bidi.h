@@ -47,5 +47,8 @@ static inline bool is_rtl_char(ucschar_t c)
 bool text_is_rtl(const unsigned char *str);
 
 ucschar_t *bidi_l2v(const unsigned char *str, int orientation);
+/* Same visual order with caller-owned buffers of capacity codepoints each. */
+ucschar_t *bidi_l2v_buffer(const unsigned char *str, int orientation,
+                          ucschar_t *utf, ucschar_t *visual, size_t capacity);
 
 #endif /* BIDI_H */

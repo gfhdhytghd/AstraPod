@@ -40,6 +40,7 @@
 #include "system/app_util.h"          /* warn_on_pl_erase */
 #include "playlist/playlist.h"
 #include "db_summary.h"
+#include "database/path_key.h"
 
 /* ---- what is left out, and reading names ------------------------------- */
 
@@ -372,14 +373,21 @@ static void filter_album(struct tagcache_search *tcs,
     tagcache_search_add_filter(tcs, tag_albumartist, album->artist_seek);
 }
 
-int db_summary_album_track_ids(const struct album_data *album, int *count)
+static int compare_panel_tracks(const void *left, const void *right)
+{
+    const struct db_panel_track *a = left, *b = right;
+    return compare_album_tracks(&a->track, &b->track);
+}
+
+int db_summary_album_panel_tracks(const struct album_data *album, int *count,
+                                  bool (*cancelled)(void))
 {
     struct tagcache_album entry;
     int slot = tagcache_album_find(album->seek, album->artist_seek);
     *count = 0;
     if (slot < 0 || !tagcache_album_get(slot, &entry) || entry.tracks <= 0)
         return 0;
-    int handle = core_alloc_free_space(entry.tracks * sizeof(struct db_album_track));
+    int handle = core_alloc_free_space(entry.tracks * sizeof(struct db_panel_track));
     if (handle <= 0)
         return -1;
 
@@ -391,13 +399,22 @@ int db_summary_album_track_ids(const struct album_data *album, int *count)
     }
     filter_album(&tcs, album);
     tagcache_search_set_range(&tcs, entry.first, entry.last);
-    struct db_album_track *tracks = core_get_data_pinned(handle);
+    struct db_panel_track *tracks = core_get_data_pinned(handle);
     char path[MAX_PATH];
     int found = 0;
-    while (found < entry.tracks && tagcache_get_next(&tcs, path, sizeof(path)))
-        tracks[found++] = indexed_track(&tcs);
+    while (found < entry.tracks && !cancelled() &&
+           tagcache_get_next(&tcs, path, sizeof(path)))
+    {
+        tracks[found++] = (struct db_panel_track){indexed_track(&tcs), path_key(path)};
+    }
     tagcache_search_finish(&tcs);
-    qsort(tracks, found, sizeof(*tracks), compare_album_tracks);
+    if (cancelled())
+    {
+        core_put_data_pinned(tracks);
+        core_free(handle);
+        return -1;
+    }
+    qsort(tracks, found, sizeof(*tracks), compare_panel_tracks);
     core_put_data_pinned(tracks);
     *count = found;
     return handle;

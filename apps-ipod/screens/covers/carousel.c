@@ -68,6 +68,7 @@
 #include "system/app_util.h"
 #include "system/shutdown.h"
 #include "system/strutil.h"
+#include "system/hash.h"
 #include "usb.h"                     /* SYS_USB_CONNECTED handling */
 #include "screens/context_menu.h"           /* context_menu_show_playlist_cat/menu */
 #include "metadata/albumart.h"         /* struct dim */
@@ -100,7 +101,9 @@
 #include "ui/perf.h"
 #include "ui/retained.h"
 #include "album_covers.h"
-#include "carousel.h"     /* the shared engine: carousel_idx, the model */
+#include "carousel.h"
+#include "panel_perf.h"
+#include "database/path_key.h"     /* the shared engine: carousel_idx, the model */
 #include "screens/playback/cider.h"
 #include "screens/playback/cider_library.h"
 #include "speech/talk.h"
@@ -447,12 +450,11 @@ static int pf_neighbor_light = 256;
 static struct {
     struct ui_scene sheet;
     const struct carousel_model *model;
-    struct carousel_album_header album;
     int index;
     bool panel_open, returning, restored_pixels;
 } wps_handover;
 
-static void close_album_panel(const struct carousel_model *owner);
+static void close_album_panel(void);
 
 void carousel_prepare_transition(void)
 {
@@ -517,7 +519,7 @@ void carousel_wps_end(bool back)
     if (wps_handover.model)
     {
         if (wps_handover.panel_open)
-            close_album_panel(wps_handover.model);
+            close_album_panel();
         ui_scene_discard(&wps_handover.sheet);
         ui_scene_discard(&pf_scene);
         wps_handover.model = NULL;
@@ -4874,38 +4876,41 @@ static int native_frame_wait(uint32_t clock, unsigned last_frame)
 struct panel_track {
     int index; /* One-based, so a zeroed slot is unused. */
     unsigned int duration;
-    bool ready, playing, glyphs_ready;
+    bool playing, glyphs_ready;
     char title[CAROUSEL_TRACK_TEXT];
     char fitted[CAROUSEL_TRACK_TEXT], time[16];
     int time_x;
 };
 
 static struct album_panel {
-    struct carousel_album_header header, original_header;
+    struct carousel_album_header header;
+    struct panel_request request;
+    const struct panel_cached *cached, *adjacent;
+    int cached_first, adjacent_first;
     struct panel_track rows[PANEL_CACHE];
     struct album_blur_source blur_source;
     unsigned blur_generation;
-    int selected, top, count;
-    int tracks, discs, disc_count;
-    int now_id;
-    char now_path[MAX_PATH];
+    int selected, top, count, disc_count;
     int album_font, title_font, small_font;
     int scroll_y, scroll_from;
     uint32_t scroll_clock;
     unsigned scroll_frames;
     int from, to, via, position;
     unsigned first, second, sampled, trace;
-    uint32_t clock;
+    uint32_t clock, opened;
+    unsigned painted_rows, painted_discs;
+    bool open_logged;
     long next_read;
     bool live, moving, dirty, missing, play_pending, play_failed, have_blur;
     char fitted_title[CAROUSEL_TRACK_TEXT], fitted_artist[CAROUSEL_TRACK_TEXT];
     char count_label[80];
     int dot_x, count_x;
     int digit_width;
-    bool tabular, initialized, header_ready, digits_ready, resuming;
+    bool tabular, header_ready, digits_ready, resuming;
 } panel;
 
 static void panel_layout_header(void);
+static void panel_layout_digits(void);
 static void panel_layout_track(struct panel_track *row);
 
 static struct album_blur_source panel_blur_source(int index)
@@ -4918,39 +4923,54 @@ static struct album_blur_source panel_blur_source(int index)
     return source;
 }
 
-static void close_album_panel(const struct carousel_model *owner)
+static void panel_drop_pages(void)
+{
+    panel_cache_bind(NULL, NULL);
+    panel_cache_release(panel.cached);
+    panel_cache_release(panel.adjacent);
+    panel.cached = panel.adjacent = NULL;
+    panel.cached_first = panel.adjacent_first = -1;
+}
+
+static void close_album_panel(void)
 {
     if (!panel.live)
         return;
-    owner->panel_close();
     ui_perf_end(panel.trace);
-    if (panel.tracks > 0)
-        core_free(panel.tracks);
-    if (panel.discs > 0)
-        core_free(panel.discs);
-    if (panel.album_font >= 0)
-        font_unload(panel.album_font);
-    if (panel.title_font >= 0)
-        font_unload(panel.title_font);
-    if (panel.small_font >= 0)
-        font_unload(panel.small_font);
+    panel_drop_pages();
     memset(&panel, 0, sizeof(panel));
+}
+
+static bool request_panel(int index, struct panel_request *request)
+{
+    memset(request, 0, sizeof(*request));
+    request->locale = fnv1a_str(global_settings.lang_file);
+    return model->panel_request(index, request);
 }
 
 static bool open_album_panel(int selected, int top)
 {
-    if (!model->panel_open || !model->panel_open(center_index, &panel.header))
+    if (!model->panel_request || !request_panel(center_index, &panel.request))
         return false;
-    panel.original_header = panel.header;
+    panel.opened = USEC_TIMER;
+    panel_perf_record(PP_SELECT, 0, center_index, model->external);
     panel.live = true;
     panel.count = -1;
-    panel.now_id = -1;
+    panel.cached_first = panel.adjacent_first = -1;
     panel.album_font = panel.title_font = panel.small_font = -1;
     panel.blur_source = panel_blur_source(center_index);
+    strlcpy(panel.header.title, panel.request.title, sizeof(panel.header.title));
+    strlcpy(panel.header.artist, panel.request.artist, sizeof(panel.header.artist));
     panel.selected = selected;
     panel.top = top;
     panel.scroll_y = top * PANEL_PITCH;
     panel.dirty = panel.missing = true;
+    const struct panel_cached *hit = panel_cache_acquire(&panel.request, 0);
+    if (hit)
+    {
+        panel_perf_record(PP_RAM, USEC_TIMER - panel.opened, center_index, model->external);
+        panel_cache_release(hit);
+    }
     return true;
 }
 
@@ -4989,31 +5009,20 @@ static void flip_to(bool open)
     panel.trace = panel.moving ? ui_perf_begin(open ? "cover-flip-open" : "cover-flip-close") : 0;
 }
 
-/* Use the local provider's ordered ID source for metadata. Keep its playback
- * callback and its original track indices, independent of visual disc rows. */
-static void panel_read_discs(void)
+static const struct panel_cached *panel_disc_data(void)
 {
-    struct db_album_track *tracks = core_get_data_pinned(panel.tracks);
-    int n = 0;
-    for (int i = 1; i < panel.count; i++)
-        n += (tracks[i].key >> 16) > MAX(1, tracks[i - 1].key >> 16);
-    if (n)
-        panel.discs = core_alloc_free_space(n * sizeof(int));
-    if (panel.discs > 0)
-    {
-        int *discs = core_get_data(panel.discs);
-        for (int i = 1; i < panel.count; i++)
-            if ((tracks[i].key >> 16) > MAX(1, tracks[i - 1].key >> 16))
-                discs[panel.disc_count++] = i;
-    }
-    core_put_data_pinned(tracks);
+    return panel.cached ? panel.cached : panel.adjacent;
+}
+
+static int panel_disc_track(int n)
+{
+    return panel_cache_disc(panel_disc_data(), n);
 }
 
 static void panel_follow_selection(bool animate)
 {
     int row = panel.selected;
-    const int *discs = panel.disc_count ? core_get_data(panel.discs) : NULL;
-    for (int i = 0; i < panel.disc_count && discs[i] <= panel.selected; i++)
+    for (int i = 0; i < panel.disc_count && panel_disc_track(i) <= panel.selected; i++)
         row++;
 
     int top = MIN(MAX(panel.top, row - (ALBUM_PANEL_ROWS - 2)), row - 1);
@@ -5036,127 +5045,10 @@ static void panel_follow_selection(bool animate)
         panel.scroll_y = top * PANEL_PITCH;
 }
 
-static void panel_local_playing(void)
-{
-    const struct mp3entry *id3 = audio_status() && !cider_active()
-                               ? audio_current_track() : NULL;
-    const char *path = id3 ? id3->path : "";
-    if (!strcmp(path, panel.now_path))
-        return;
-
-    strlcpy(panel.now_path, path, sizeof(panel.now_path));
-    panel.now_id = -1;
-    struct tagcache_search search;
-    if (*path && tagcache_find_index(&search, panel.now_path))
-    {
-        panel.now_id = search.idx_id;
-        tagcache_search_finish(&search);
-    }
-}
-
-/* Old providers and imported tags can carry the album-list label.
- * Require its exact disc/track syntax or a duration that matches the field.
- * Preserve the rest of the title, including ordinary numeric prefixes. */
-static void panel_clean_title(char *title, unsigned duration, int disc, int track,
-                              bool legacy_remote)
-{
-    if (!duration)
-        return;
-
-    unsigned seconds = duration / 1000;
-    char suffix[24];
-    snprintf(suffix, sizeof(suffix), " - %02u:%02u", seconds / 60, seconds % 60);
-    size_t len = strlen(title), tail = strlen(suffix);
-    if (len <= tail || strcmp(title + len - tail, suffix))
-        return;
-    char *period, *end;
-    const char *name = title;
-    if (*title >= '0' && *title <= '9')
-    {
-        long d = strtol(title, &period, 10);
-        if (*period == '.' && period[1] >= '0' && period[1] <= '9')
-        {
-            long t = strtol(period + 1, &end, 10);
-            if (d > 0 && t > 0 && end - period >= 3 && *end == ' ' &&
-                end + 1 < title + len - tail &&
-                (legacy_remote || (d == MAX(1, disc) && t == track)))
-                name = end + 1;
-        }
-    }
-    if (legacy_remote || name != title)
-    {
-        title[len - tail] = '\0';
-        memmove(title, name, strlen(name) + 1);
-    }
-}
-
-static void panel_clean_artist(void)
-{
-    char *final = strstr(panel.header.artist, " · ");
-    if (!final || panel.tracks <= 0 || panel.count <= 0)
-        return;
-    const struct db_album_track *tracks = core_get_data(panel.tracks);
-    int id = tracks[0].id;
-    struct tagcache_search search;
-    char genre[CAROUSEL_TRACK_TEXT] = "";
-    if (!tagcache_search(&search, tag_genre))
-        return;
-    bool got = tagcache_retrieve(&search, id, tag_genre, genre, sizeof(genre));
-    tagcache_search_finish(&search);
-    size_t length = strlen(panel.header.artist), genre_len = strlen(genre);
-    const size_t separator = sizeof(" · ") - 1;
-    if (got && genre_len && length > genre_len + separator)
-    {
-        char *suffix = panel.header.artist + length - genre_len - separator;
-        if (!strncmp(suffix, " · ", separator) && !strcmp(suffix + separator, genre))
-            *suffix = '\0';
-    }
-}
-
-static bool panel_track_read(int index, struct panel_track *row, const char *remote_id)
-{
-#ifdef HAVE_USB_PODLINK
-    if (model->external)
-    {
-        struct cider_row remote;
-        if (!cider_track_page_row(index, &remote))
-            return false;
-        strlcpy(row->title, remote.title, sizeof(row->title));
-        row->duration = remote.duration;
-        panel_clean_title(row->title, row->duration, 0, 0,
-                          model->legacy_panel_labels && model->legacy_panel_labels());
-        row->playing = *remote_id && (!strcmp(remote.id, remote_id) ||
-                                      cider_route_matches(remote.route, remote_id));
-        return true;
-    }
-#endif
-    (void)remote_id;
-    if (panel.tracks <= 0)
-        return model->panel_row(index, row->title, sizeof(row->title));
-
-    const struct db_album_track *tracks = core_get_data(panel.tracks);
-    int id = tracks[index].id;
-    int order = tracks[index].key;
-    row->playing = id == panel.now_id;
-    struct tagcache_search search;
-    if (!tagcache_search(&search, tag_title))
-        return false;
-    bool ready = tagcache_retrieve(&search, id, tag_title,
-                                   row->title, sizeof(row->title));
-    tagcache_search_finish(&search);
-    long length;
-    if (tagcache_entry_numeric(id, tag_length, &length) && length > 0)
-        row->duration = length;
-    if (ready)
-        panel_clean_title(row->title, row->duration, order >> 16, order & 0xffff, false);
-    return ready;
-}
-
 static int panel_first_track(int first_row, int *disc)
 {
-    const int *discs = panel.disc_count ? core_get_data(panel.discs) : NULL;
     int i = 0;
-    while (i < panel.disc_count && discs[i] + i < first_row)
+    while (i < panel.disc_count && panel_disc_track(i) + i < first_row)
         i++;
     *disc = i;
     return first_row - i;
@@ -5164,18 +5056,24 @@ static int panel_first_track(int first_row, int *disc)
 
 static bool panel_chinese(void);
 
-static void panel_disc_label(int track, char *label, size_t size)
+static void panel_disc_label(int disc, char *label, size_t size)
 {
-    const struct db_album_track *tracks = core_get_data(panel.tracks);
     const char *name = panel_chinese() ? "光盘" : (const char *)str(LANG_DISC);
-    snprintf(label, size, "%s %d", name, tracks[track].key >> 16);
+    snprintf(label, size, "%s %u", name, panel_cache_disc_number(panel_disc_data(), disc));
+}
+
+static const struct panel_cache_row *panel_source_row(int track)
+{
+    const struct panel_cache_row *source = panel_cache_row(panel.cached, track);
+    return source ? source : panel_cache_row(panel.adjacent, track);
 }
 
 static void panel_read_rows(void)
 {
     if (panel.count <= 0)
         return;
-
+    uint64_t playing_key = !model->external && audio_status() && !cider_active()
+                         ? panel_cache_playing_key() : 0;
     const char *remote_id = "";
 #ifdef HAVE_USB_PODLINK
     struct cider_state state;
@@ -5186,9 +5084,6 @@ static void panel_read_rows(void)
             remote_id = state.id;
     }
 #endif
-    if (!model->external)
-        panel_local_playing();
-
     int first = panel.scroll_y / PANEL_PITCH;
     int rows = 2 * ALBUM_PANEL_ROWS + (panel.scroll_y % PANEL_PITCH != 0);
     int small = panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED;
@@ -5197,100 +5092,182 @@ static void panel_read_rows(void)
     panel.missing = false;
     for (int i = 0; i < rows && track < panel.count; i++)
     {
-        const int *discs = panel.disc_count ? core_get_data(panel.discs) : NULL;
-        if (disc < panel.disc_count && discs[disc] == track)
+        if (disc < panel.disc_count && panel_disc_track(disc) == track)
         {
             char label[80];
-            panel_disc_label(track, label, sizeof(label));
+            panel_disc_label(disc, label, sizeof(label));
             font_prefetch_text(small, label);
-            font_prefetch_text(small, ".");
             disc++;
             continue;
         }
 
+        const struct panel_cache_row *source = panel_source_row(track);
         struct panel_track *row = &panel.rows[track % PANEL_CACHE];
-        if (row->ready && row->index == track + 1 && panel.tracks > 0)
+        if (!source)
+            panel.missing = true;
+        else
         {
-            const struct db_album_track *tracks = core_get_data(panel.tracks);
-            bool playing = tracks[track].id == panel.now_id;
+            if (row->index != track + 1)
+            {
+                memset(row, 0, sizeof(*row));
+                row->index = track + 1;
+                row->duration = source->duration;
+                strlcpy(row->title, source->title, sizeof(row->title));
+                panel.dirty = true;
+            }
+            bool playing = playing_key && source->playing_key == playing_key;
+#ifdef HAVE_USB_PODLINK
+            playing |= *remote_id && (!strcmp(source->remote_id, remote_id) ||
+                                      cider_route_matches(source->route, remote_id));
+#else
+            (void)remote_id;
+#endif
             if (playing != row->playing)
                 panel.dirty = true;
             row->playing = playing;
-        }
-        else
-        {
-            struct panel_track next = { .index = track + 1 };
-            next.ready = panel_track_read(track, &next, remote_id);
-            if (!next.ready)
+            if (!row->glyphs_ready)
             {
-                panel.missing = true;
-                if (row->ready && row->index == track + 1)
-                {
-                    track++;
-                    continue;
-                }
-                strlcpy(next.title, str(LANG_WAIT), sizeof(next.title));
+                panel_layout_track(row);
+                panel.dirty |= row->glyphs_ready;
             }
-            if (row->index != next.index || row->duration != next.duration ||
-                strcmp(row->title, next.title))
-            {
-                *row = next;
-                panel.dirty = true;
-            }
-            if (row->playing != next.playing)
-                panel.dirty = true;
-            row->ready = next.ready;
-            row->playing = next.playing;
         }
-        if (!row->glyphs_ready)
-        {
-            panel_layout_track(row);
-            panel.dirty |= row->glyphs_ready;
-        }
-        panel.missing |= !row->ready;
         track++;
     }
 }
 
+/* Request an adjacent shard before either page intersects its boundary. */
+static int panel_page_first(void)
+{
+    int disc;
+    int track = panel_first_track(panel.scroll_y / PANEL_PITCH, &disc);
+    return track / PANEL_PAGE_ROWS * PANEL_PAGE_ROWS;
+}
+
+static int panel_page_adjacent(int first)
+{
+    if (first < 0 || panel.count <= first + PANEL_PAGE_ROWS)
+        return -1;
+    int disc;
+    int track = panel_first_track(panel.scroll_y / PANEL_PITCH, &disc);
+    return first + PANEL_PAGE_ROWS - MAX(track, panel.selected) <= PANEL_CACHE + 1
+           ? first + PANEL_PAGE_ROWS : -1;
+}
+
+static bool panel_acquire_page(const struct panel_cached **data, int *slot_first, int first)
+{
+    if (*data && *slot_first == first)
+        return false;
+    const struct panel_cached *next = first < 0 ? NULL : panel_cache_acquire(&panel.request, first);
+    if (!next && (first >= 0 || !*data))
+        return false;
+    /* Neither old pack is used until the final pair has been bound. */
+    panel_cache_bind(NULL, NULL);
+    panel_cache_release(*data);
+    *data = next;
+    *slot_first = first;
+    return true;
+}
+
 static void panel_read_tracks(void)
 {
-    int count = panel.count;
-    if (model->external)
+    int first = panel_page_first(), nearby = panel_page_adjacent(first);
+    if (panel.adjacent && panel.adjacent_first == first)
     {
-        int remote_count = model->panel_count();
-        if (remote_count >= 0)
-            count = remote_count;
+        const struct panel_cached *old = panel.cached;
+        int old_first = panel.cached_first;
+        panel.cached = panel.adjacent;
+        panel.cached_first = first;
+        panel.adjacent = old;
+        panel.adjacent_first = old_first;
     }
-    else if (count == -1)
+    bool had_page = panel.cached || panel.adjacent;
+    bool changed = panel_acquire_page(&panel.cached, &panel.cached_first, first);
+    changed |= panel_acquire_page(&panel.adjacent, &panel.adjacent_first, nearby);
+    panel_cache_bind(panel.cached, panel.adjacent);
+    if (!panel.digits_ready && panel.small_font >= 0)
+        panel_layout_digits();
+
+    if (changed && panel.cached)
     {
-        panel.tracks = db_summary_album_track_ids(&carousel_idx.album_index[center_index],
-                                                 &count);
-        if (panel.tracks < 0)
-            count = model->panel_count();
-    }
-    if (!panel.initialized || count != panel.count)
-    {
-        panel.count = count;
-        if (!model->external)
-            panel_clean_artist();
-        panel_layout_header();
-        memset(panel.rows, 0, sizeof(panel.rows));
-        if (!model->external && panel.tracks > 0)
-            panel_read_discs();
-        panel.selected = MAX(0, MIN(count - 1, panel.selected));
-        panel_follow_selection(false);
+        bool update_header = panel.count != panel_cache_total(panel.cached) ||
+            strcmp(panel.header.artist, panel_cache_artist(panel.cached));
+        panel.count = panel_cache_total(panel.cached);
+        panel.disc_count = panel_cache_discs(panel.cached);
+        strlcpy(panel.header.artist, panel_cache_artist(panel.cached), sizeof(panel.header.artist));
+        if (update_header)
+            panel.header_ready = false;
+        if (!had_page)
+        {
+            panel.selected = MAX(0, MIN(panel.count - 1, panel.selected));
+            panel_follow_selection(false);
+        }
         panel.dirty = true;
     }
-    if (!panel.header_ready)
+    if (!panel.header_ready && panel.album_font >= 0 && panel.title_font >= 0)
     {
         panel_layout_header();
         panel.dirty |= panel.header_ready;
     }
-    panel.missing = count == -1;
-    panel_read_rows();
-    panel.next_read = current_tick + MAX(1, HZ / 20);
-    panel.initialized = true;
+    panel.missing = !panel.cached;
+    if (panel.title_font >= 0 && panel.small_font >= 0)
+        panel_read_rows();
+    panel.next_read = current_tick + MAX(1, HZ / 25);
 }
+
+/* Only snapshot RAM provider state here. Track lookups, disk reads and font
+ * prep are done by bgtask, with the centre at the head of its window. */
+static void panel_request_window(void)
+{
+    static struct panel_request window[PANEL_WINDOW];
+    unsigned count = 0;
+    if (panel.live)
+    {
+        struct panel_request *active = &window[0];
+        if (request_panel(center_index, active) && !panel_cache_same(active, &panel.request))
+        {
+            if (active->key != panel.request.key)
+            {
+                close_album_panel();
+                panel_cache_window(NULL, 0);
+                return;
+            }
+            panel_drop_pages();
+            panel.request = *active;
+            panel.count = -1;
+            panel.disc_count = 0;
+            panel.header_ready = false;
+            panel.missing = panel.dirty = true;
+            memset(panel.rows, 0, sizeof(panel.rows));
+            strlcpy(panel.header.title, active->title, sizeof(panel.header.title));
+            strlcpy(panel.header.artist, active->artist, sizeof(panel.header.artist));
+        }
+        *active = panel.request;
+        active->first = panel_page_first();
+        count = 1;
+        int adjacent = panel_page_adjacent(active->first);
+        if (adjacent >= 0)
+        {
+            window[count] = *active;
+            window[count++].first = adjacent;
+        }
+    }
+    else if (request_panel(center_index, &window[0]))
+        count = 1;
+
+    /* Keep neighbouring albums warm when the active panel is on its first
+     * page. Additional pages of the active album take the next slot first. */
+    if (count && window[0].first == 0)
+    {
+        if (center_index > 0 && count < PANEL_WINDOW &&
+            request_panel(center_index - 1, &window[count]))
+            count++;
+        if (center_index + 1 < number_of_slides && count < PANEL_WINDOW &&
+            request_panel(center_index + 1, &window[count]))
+            count++;
+    }
+    panel_cache_window(window, count);
+}
+
 
 static void panel_step_scroll(void)
 {
@@ -5312,18 +5289,6 @@ static void panel_step_scroll(void)
             panel_read_rows();
         panel.dirty = true;
     }
-}
-
-static void panel_load_fonts(void)
-{
-    /* Now Playing and Lyrics may load the same faces while the panel is
-     * suspended. Their glyphs must not replace the panel's two pages. */
-    panel.album_font = font_load_private(FONT_DIR "/18-noto-sans.pbf", 48);
-    /* Two pages of UTF-8 titles and the artist label. A distinct
-     * non-ASCII character takes at least two bytes in the source. */
-    int body_glyphs = (PANEL_CACHE + 1) * (CAROUSEL_TRACK_TEXT / 2) + 128;
-    panel.title_font = font_load_private(FONT_DIR "/14-noto-sans.pbf", body_glyphs);
-    panel.small_font = font_load_private(FONT_DIR "/12-noto-sans.pbf", 32);
 }
 
 static void panel_layout_digits(void)
@@ -5510,6 +5475,7 @@ static void panel_paint_rows(struct viewport *view)
     rows.y += PANEL_ROWS_Y;
     rows.height = ALBUM_PANEL_ROWS * PANEL_PITCH;
     lcd_set_viewport(&rows);
+    panel.painted_rows = panel.painted_discs = 0;
     if (panel.play_failed || panel.count <= 0)
     {
         const char *label = panel.play_failed ? str(LANG_PLAYLIST_ACCESS_ERROR) :
@@ -5523,16 +5489,17 @@ static void panel_paint_rows(struct viewport *view)
     {
         int disc;
         int track = panel_first_track(panel.scroll_y / PANEL_PITCH, &disc);
-        const int *discs = panel.disc_count ? core_get_data(panel.discs) : NULL;
         for (int y = -(panel.scroll_y % PANEL_PITCH);
              y < rows.height && track < panel.count; y += PANEL_PITCH)
         {
-            if (disc < panel.disc_count && discs[disc] == track)
+            if (disc < panel.disc_count && panel_disc_track(disc) == track)
             {
                 char label[80];
-                panel_disc_label(track, label, sizeof(label));
+                panel_disc_label(disc, label, sizeof(label));
                 lcd_setfont(small);
                 lcd_set_foreground(ALBUM_BLUR_DIM_TEXT);
+                if (font_prefetch_text(small, label))
+                    panel.painted_discs++;
                 panel_text(label, PANEL_LEFT, y + 14, right);
                 disc++;
                 continue;
@@ -5553,6 +5520,7 @@ static void panel_paint_rows(struct viewport *view)
             }
             if (ready)
             {
+                panel.painted_rows++;
                 if (row->playing)
                 {
                     lcd_set_foreground(selected ? selected_text : LCD_WHITE);
@@ -5679,10 +5647,25 @@ static void draw_album_flip(void)
     buf_ctx_lock();
     render_album_flip(panel.position, color);
     buf_ctx_unlock();
+    bool opened = false;
     if (panel.position == FLIP_OPEN)
+    {
+        uint32_t draw_start = USEC_TIMER;
         paint_album_panel();
+        panel_perf_record(PP_DRAW, USEC_TIMER - draw_start, panel.painted_rows, panel.have_blur);
+        int expected = MIN(panel.count, ALBUM_PANEL_ROWS);
+        if (!panel.open_logged && expected >= 0 && panel.header_ready &&
+            panel.painted_rows + panel.painted_discs >= (unsigned)expected)
+            opened = true;
+    }
     uint32_t submit = USEC_TIMER;
     lcd_update();
+    if (opened)
+    {
+        panel.open_logged = true;
+        panel_perf_record(PP_OPEN, USEC_TIMER - panel.opened, panel.painted_rows,
+                          panel.have_blur);
+    }
     if (pf_scene.capturing)
         ui_scene_start(&pf_scene);
     if (panel.trace)
@@ -5715,14 +5698,12 @@ static void step_album_flip(void)
             panel.blur_generation = blur_generation;
             panel.dirty = true;
         }
-        if (!panel.initialized)
-            panel_load_fonts();
-        if (!panel.digits_ready)
-            panel_layout_digits();
+        panel.album_font = panel_cache_font(PANEL_ALBUM);
+        panel.title_font = panel_cache_font(PANEL_BODY);
+        panel.small_font = panel_cache_font(PANEL_SMALL);
         if (panel.scroll_frames)
             panel_step_scroll();
-        if (!panel.resuming &&
-            (!panel.initialized || !TIME_BEFORE(current_tick, panel.next_read)))
+        if (!panel.resuming && !TIME_BEFORE(current_tick, panel.next_read))
             panel_read_tracks();
     }
     if (panel.dirty && lcd_active())
@@ -5736,7 +5717,7 @@ static void step_album_flip(void)
             panel.moving = false;
         }
         if (!panel.position && !panel.moving)
-            close_album_panel(model);
+            close_album_panel();
     }
 }
 
@@ -5773,12 +5754,10 @@ static int album_panel_action(int button)
         else if (panel.count > 0 && !panel.play_pending)
         {
             panel.play_failed = false;
-            if (!model->external && model->panel_count() <= panel.selected)
-            {
-                panel.play_failed = panel.dirty = true;
+            const struct panel_cache_row *row = panel_source_row(panel.selected);
+            if (!row)
                 break;
-            }
-            int ret = model->panel_play(panel.selected);
+            int ret = model->panel_play(center_index, panel.selected, &panel.request, row);
             if (ret != CAROUSEL_PLAY_PENDING)
                 return ret;
             panel.play_pending = true;
@@ -5934,7 +5913,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
     int remembered_index = -1;
     int blur_index = -1;
     unsigned blur_slide_revision = 0, blur_art_revision = 0, blur_theme_revision = 0;
-    bool first_frame = true;
+    bool first_frame = true, panel_waiting = false, panel_settled = false;
+    long request_panel_at = current_tick;
+    int requested_center = -1;
     long loader_retry = current_tick + HZ;
 
     while (true) {
@@ -6024,6 +6005,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 timeout = left > 0 ? (int)left : 0;
         }
 
+        if (panel_waiting)
+            timeout = timeout == TIMEOUT_BLOCK ? MAX(1, HZ / 25)
+                                               : MIN(timeout, MAX(1, HZ / 25));
         if (font_prefetch_busy())
             timeout = timeout == TIMEOUT_BLOCK ? 1 : MIN(timeout, 1);
         bool inherited_inhibit = ui_flush_inhibited();
@@ -6073,7 +6057,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         if (!model->external && !db_summary_current(&carousel_idx))
         {
             restored_pixels = false;
-            close_album_panel(model);
+            close_album_panel();
             end_pf_thread();
             if (!check_database())
             {
@@ -6117,7 +6101,27 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             remembered_index = center_index;
         }
 
-        if (model->panel_open && pf_state == pf_idle &&
+        if (model->panel_request)
+        {
+            if (pf_state == pf_idle && (requested_center != center_index ||
+                !panel_settled || !TIME_BEFORE(current_tick, request_panel_at)))
+            {
+                panel_request_window();
+                requested_center = center_index;
+                request_panel_at = current_tick + MAX(1, HZ / 25);
+                panel_settled = true;
+            }
+            else if (pf_state != pf_idle && panel_settled)
+            {
+                panel_cache_window(NULL, 0);
+                album_blur_request_window(NULL, 0);
+                blur_index = -1;
+                panel_settled = false;
+            }
+            panel_waiting = panel_cache_pump();
+        }
+
+        if (model->panel_request && pf_state == pf_idle &&
             (blur_index != center_index || blur_slide_revision != pf_slides_loaded ||
              blur_art_revision != art_cache_generation() ||
              blur_theme_revision != ui_theme_generation()))
@@ -6642,7 +6646,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         case PF_TRACKLIST:
         case PF_SELECT:
         {
-            if (model->panel_open)
+            if (model->panel_request)
             {
                 if (pf_state == pf_scrolling || flow_mix)
                 {
@@ -6705,6 +6709,8 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     workspace = core_get_data_pinned(handle);
     pf_shown = false;
     int result = carousel_body(m, selected_file);
+    panel_cache_window(NULL, 0);
+    album_blur_request_window(NULL, 0);
     carousel_cancel_transition();
     end_pf_thread();
     workspace = NULL;
@@ -6719,7 +6725,7 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     else if (nav == AGENTS_NAV_AGENTS) result = GO_TO_AGENTS;
     else if (nav == AGENTS_NAV_WPS) result = GO_TO_WPS;
     else if (nav == AGENTS_NAV_COVERS) agents_nav_take(nav);
-    if (m->panel_open && (result == GO_TO_WPS || result == CAROUSEL_PLAY_ALBUM))
+    if (m->panel_request && (result == GO_TO_WPS || result == CAROUSEL_PLAY_ALBUM))
     {
         wps_handover.model = m;
         wps_handover.returning = false;
@@ -6734,7 +6740,7 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
             panel.scroll_frames = 0;
         }
         else
-            close_album_panel(m);
+            close_album_panel();
         ui_scene_capture_modal(&wps_handover.sheet);
         /* The Cover Flow pixels are fullscreen. Its viewport stack has
          * already unwound to Home so that playback can take over. */
@@ -6742,7 +6748,7 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     }
     else
     {
-        close_album_panel(model);
+        close_album_panel();
         if (pf_scene.backdrop_handle > 0)
             ui_scene_close_modal(&pf_scene, pf_shown, "covers-down");
         else
@@ -6812,19 +6818,16 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
         set_current_slide(MIN(wps_handover.index, number_of_slides - 1));
         if (wps_handover.panel_open)
         {
-            /* Revalidate the album but keep the painted rows and font caches
-             * while the provider is republishing metadata. */
-            if (model->panel_open(center_index, &wps_handover.album) &&
-                !strcmp(wps_handover.album.title, panel.original_header.title) &&
-                !strcmp(wps_handover.album.artist, panel.original_header.artist))
+            static struct panel_request current;
+            if (request_panel(center_index, &current) && panel_cache_same(&panel.request, &current))
             {
                 panel.position = panel.to = FLIP_OPEN;
-                /* Paint retained data before the provider can change it. */
+                /* The panel's leased pages also survive time spent in Lyrics. */
                 panel.resuming = panel.dirty = true;
                 panel.next_read = current_tick;
             }
             else
-                close_album_panel(model);
+                close_album_panel();
         }
         ui_scene_discard(&wps_handover.sheet);
         wps_handover.model = NULL;

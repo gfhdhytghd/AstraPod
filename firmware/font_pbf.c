@@ -1,6 +1,7 @@
 /* Pixel-native PodBox bitmap font reader. GPL v2+. */
 #include "font_pbf.h"
 #include "file.h"
+#include "crc32.h"
 #include "core_alloc.h"
 #include "system.h"
 #include "diacritic.h"
@@ -314,10 +315,38 @@ static const unsigned char *variable_index(const struct font *font, uint32_t cp)
     return NULL;
 }
 
+/* The directory is followed by complete, native PBF cache records. */
+static const unsigned char *pack_glyph(const unsigned char *pack, ucschar_t cp)
+{
+    unsigned lo = 0, hi = u32(pack);
+    while (lo < hi)
+    {
+        unsigned mid = lo + (hi - lo) / 2;
+        const unsigned char *entry = pack + 4 + 8 * mid;
+        uint32_t code = u32(entry);
+        if (code == cp)
+            return pack + u32(entry + 4);
+        if (code < cp)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return NULL;
+}
+
 /* Four MRU-ordered ways per set. Cache payloads stay in the existing pool.
  * Each tag is verified because the backing LRU can reuse a slot. */
 static const unsigned char *cached_glyph(struct font *font, ucschar_t cp)
 {
+    for (unsigned i = 0; i < ARRAYLEN(font->pbf.pack); i++)
+    {
+        if (font->pbf.pack[i])
+        {
+            const unsigned char *record = pack_glyph(font->pbf.pack[i], cp);
+            if (record)
+                return record;
+        }
+    }
     const unsigned char *hot = hot_glyph(font, cp);
     if (hot)
         return hot;
@@ -510,6 +539,7 @@ struct pbf_record {
 
 struct pbf_request {
     struct font_pbf file;
+    unsigned height;
     char path[MAX_PATH];
     unsigned count;
     struct pbf_record glyphs[PREFETCH_GLYPHS];
@@ -532,6 +562,12 @@ static bool requested;
 static volatile bool suspended;
 static struct mutex batch_lock;
 static void (*schedule_prefetch)(void);
+static void (*batch_trace)(unsigned, uint32_t, unsigned);
+
+void font_pbf_set_batch_trace(void (*trace)(unsigned, uint32_t, unsigned))
+{
+    batch_trace = trace;
+}
 
 static int compare_codepoint(const void *a, const void *b)
 {
@@ -749,6 +785,7 @@ void font_pbf_prefetch_work(void)
     batch = BATCH_READING;
     mutex_unlock(&batch_lock);
 
+    uint32_t start = batch_trace ? USEC_TIMER : 0;
     unsigned count = 0;
     bool loaded_hot = false;
     int fd = open(job.path, O_RDONLY);
@@ -759,6 +796,8 @@ void font_pbf_prefetch_work(void)
         close(fd);
     }
 
+    if (batch_trace)
+        batch_trace(job.height, USEC_TIMER - start, count);
     mutex_lock(&batch_lock);
     batch_count = suspended ? 0 : count;
     batch_hot = !suspended && loaded_hot;
@@ -929,6 +968,147 @@ static bool resolve(const struct font *font, ucschar_t cp, struct pbf_record *r)
     return true;
 }
 
+/* The shared worker serializes this scratch with ordinary PBF batch reads. */
+static struct pbf_record pack_records[FONT_PACK_CODES];
+
+static void put_u32(unsigned char *out, uint32_t val)
+{
+    for (unsigned i = 0; i < 4; i++)
+        out[i] = val >> (8 * i);
+}
+
+uint32_t font_pbf_pack_revision(int id)
+{
+    if (id < 0)
+        return 0;
+    font_lock(id, true);
+    struct font *font = font_get(id);
+    uint32_t result = crc_32(font->buffer_start, resident_bytes(font), font->pbf.file_size);
+    result = crc_32(font->buffer_start + map_position(font), map_bytes(&font->pbf), result);
+    font_lock(id, false);
+    return result;
+}
+
+size_t font_pbf_pack_build(int id, const char *path, const ucschar_t *codes,
+                           unsigned count, unsigned char *out, size_t size,
+                           bool (*cancelled)(void))
+{
+    size_t used = 4 + 8 * count;
+    if (id < 0 || count > FONT_PACK_CODES || used > size)
+        return 0;
+    font_lock(id, true);
+    const struct font *font = font_get(id);
+    int fd = open(path, O_RDONLY);
+    if (fd < 0 || !font->pbf.stride)
+        goto fail;
+    uint32_t end = font->pbf.file_size;
+    if (ffilesize(fd) != (off_t)end)
+        goto fail;
+
+    put_u32(out, count);
+    for (unsigned i = 0; i < count; i++)
+    {
+        ucschar_t cp = codes[i] == 0xffff ? (ucschar_t)font->defaultchar : codes[i];
+        if (!resolve(font, cp, &pack_records[i]))
+            goto fail;
+        pack_records[i].data = i;
+        put_u32(out + 4 + 8 * i, codes[i]);
+    }
+    qsort(pack_records, count, sizeof(*pack_records), compare_offset);
+    uint32_t last = count ? pack_records[count - 1].offset : 0;
+    uint32_t limit = MIN(end, (last + font->pbf.max_record + 6 +
+                              BLOCK_BYTES - 1) & ~(BLOCK_BYTES - 1));
+    stream_length = 0;
+    for (unsigned i = 0; i < count; i++)
+    {
+        const struct pbf_record *r = &pack_records[i];
+        if (suspended || cancelled())
+            goto fail;
+        /* On a rotating disk, a short sequential skip is cheaper than a
+         * seek. Reposition only when the next record is beyond 128 KiB. */
+        if ((!i || (r->offset >= stream_cursor &&
+                    r->offset - stream_cursor >= 128 * 1024)) &&
+            !stream_open(fd, r->offset))
+            goto fail;
+
+        unsigned char prefix[6];
+        if (r->fixed)
+        {
+            if (!stream_at(fd, r->offset, prefix, sizeof(prefix), limit))
+                goto fail;
+        }
+        else
+            memcpy(prefix, r->header, sizeof(prefix));
+        unsigned bytes = u16(prefix) & 0x7fff;
+        if (bytes < 5 || bytes > font->pbf.max_record ||
+            size - used < sizeof(prefix) + bytes + ALPHA_PADDING)
+            goto fail;
+        put_u32(out + 8 + 8 * r->data, used);
+        memcpy(out + used, prefix, sizeof(prefix));
+        if (!stream_at(fd, r->offset + (r->fixed ? sizeof(prefix) : 0),
+                       out + used + sizeof(prefix), bytes, limit) ||
+            !valid_record(out + used + sizeof(prefix), bytes))
+            goto fail;
+        memset(out + used + sizeof(prefix) + bytes, 0xff, ALPHA_PADDING);
+        used += sizeof(prefix) + bytes + ALPHA_PADDING;
+    }
+    close(fd);
+    font_lock(id, false);
+    return used;
+
+fail:
+    if (fd >= 0)
+        close(fd);
+    font_lock(id, false);
+    return 0;
+}
+
+bool font_pbf_pack_valid(int id, const unsigned char *pack, size_t size)
+{
+    if (id < 0 || size < 4)
+        return false;
+    unsigned count = u32(pack);
+    if (count > FONT_PACK_CODES || 4 + 8 * count > size)
+        return false;
+    font_lock(id, true);
+    const struct font *font = font_get(id);
+    bool valid = true;
+    uint32_t previous = 0;
+    for (unsigned i = 0; i < count; i++)
+    {
+        const unsigned char *entry = pack + 4 + 8 * i;
+        uint32_t cp = u32(entry), offset = u32(entry + 4);
+        if ((i && cp <= previous) || cp > 0x10ffff ||
+            offset < 4 + 8 * count || offset > size - 4 ||
+            size - offset < 6 + ALPHA_PADDING)
+        {
+            valid = false;
+            break;
+        }
+        unsigned length = u16(pack + offset) & 0x7fff;
+        if (length < 5 || length > font->pbf.max_record ||
+            size - offset < 6 + length + ALPHA_PADDING ||
+            !valid_record(pack + offset + 6, length))
+        {
+            valid = false;
+            break;
+        }
+        previous = cp;
+    }
+    font_lock(id, false);
+    return valid;
+}
+
+void font_pbf_pack_bind(int id, const unsigned char *primary, const unsigned char *adjacent)
+{
+    if (id < 0)
+        return;
+    struct font *font = font_get(id);
+    font->pbf.pack[0] = primary;
+    font->pbf.pack[1] = adjacent;
+}
+
+
 bool font_pbf_prefetch(struct font *font, int id, const char *path,
                        const ucschar_t *text)
 {
@@ -963,6 +1143,7 @@ bool font_pbf_prefetch(struct font *font, int id, const char *path,
     if (request->file.serial != font->pbf.serial)
     {
         request->file = font->pbf;
+        request->height = font->height;
         strlcpy(request->path, path, sizeof(request->path));
         request->count = 0;
     }

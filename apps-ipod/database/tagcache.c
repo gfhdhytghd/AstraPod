@@ -3025,6 +3025,38 @@ int32_t tagcache_commit_id(void)
     return current_tcmh.commitid;
 }
 
+uint32_t tagcache_text_revision(void)
+{
+    DIR *dir = opendir(tc_stat.db_path);
+    if (!dir)
+        return 0;
+    /* Fold each tagged table separately so directory order cannot change the
+     * fingerprint. These tables are rewritten on a rebuild or text commit. */
+    static const int tags[] = { tag_album, tag_title, tag_albumartist };
+    char names[ARRAYLEN(tags)][32];
+    uint32_t found = 0, stamps[ARRAYLEN(tags)] = {0};
+    for (unsigned i = 0; i < ARRAYLEN(tags); i++)
+        snprintf(names[i], sizeof(names[i]), TAGCACHE_FILE_INDEX, tags[i]);
+    struct dirent *entry;
+    while ((entry = readdir(dir)))
+        for (unsigned i = 0; i < ARRAYLEN(tags); i++)
+            if (!strcmp(entry->d_name, names[i]))
+            {
+                struct dirinfo info = dir_get_info(dir, entry);
+                stamps[i] = (uint32_t)info.mtime;
+                stamps[i] = (stamps[i] ^ (uint32_t)info.size) * 16777619u;
+                found |= 1u << i;
+                break;
+            }
+    closedir(dir);
+    if (found != (1u << ARRAYLEN(tags)) - 1)
+        return 0;
+    uint32_t revision = 2166136261u;
+    for (unsigned i = 0; i < ARRAYLEN(stamps); i++)
+        revision = (revision ^ stamps[i]) * 16777619u;
+    return revision ? revision : 1;
+}
+
 /* The RAM copy's entry, if it is live. A deleted entry's string seeks hold a
  * CRC of the text rather than a position (see delete_entry()), so they must
  * not be followed. */

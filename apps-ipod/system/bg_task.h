@@ -143,6 +143,9 @@ void bg_task_init(struct bg_task *task);
 /* Start the thread every task shares. Once, after every bg_task_init(). */
 void bg_task_start(void);
 
+/* A pending Cover Flow panel request lets a long scan yield. */
+#define BG_EVENT_PANEL 0x1183
+
 /* Queue an event for the task's handle_event(), to run on the thread. One
  * that arrives during a USB session is thrown away unhandled. */
 void bg_task_post(struct bg_task *task, long id);

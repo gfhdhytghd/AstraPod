@@ -115,11 +115,9 @@ enum pf_states {
 
 static int  album_count(void);
 static unsigned int album_art_key(int slide_index);
-static bool album_panel_open(int index, struct carousel_album_header *header);
-static void album_panel_close(void);
-static int album_panel_count(void);
-static bool album_panel_row(int index, char *title, size_t size);
-static int album_panel_play(int index);
+static bool album_panel_request(int index, struct panel_request *request);
+static int album_panel_play(int index, int track, const struct panel_request *request,
+                            const struct panel_cache_row *row);
 static int  jmp_idx_prev(void);
 static int  jmp_idx_next(void);
 static void draw_album_text(void);
@@ -138,11 +136,8 @@ static const struct carousel_model album_model = {
     .build_index = album_build_index,
     .count       = album_count,
     .art_key     = album_art_key,
-    .panel_open  = album_panel_open,
-    .panel_close = album_panel_close,
-    .panel_count = album_panel_count,
-    .panel_row   = album_panel_row,
-    .panel_play  = album_panel_play,
+    .panel_request = album_panel_request,
+    .panel_play = album_panel_play,
     .remember    = album_remember,
     .jump_prev   = jmp_idx_prev,
     .jump_next   = jmp_idx_next,
@@ -709,59 +704,28 @@ static void album_save_tracks(int index)
     tracks_album_valid = true;
 }
 
-static int panel_album, panel_tracks, panel_count;
-
-static bool album_panel_open(int index, struct carousel_album_header *header)
+static bool album_panel_request(int index, struct panel_request *request)
 {
-    if (panel_tracks > 0)
-        panel_tracks = core_free(panel_tracks);
-    panel_album = index;
-    panel_count = -1;
-    pf_cfg.last_album = index;
-    get_album_name(index, header->title, sizeof(header->title));
-    get_album_artist(index, header->artist, sizeof(header->artist));
+    if (!db_summary_current(&carousel_idx) || index < 0 || index >= carousel_idx.album_ct)
+        return false;
+    request->album = carousel_idx.album_index[index];
+    request->revision = carousel_idx.commitid;
+    request->generation = carousel_idx.generation;
+    get_album_name(index, request->title, sizeof(request->title));
+    get_album_artist(index, request->artist, sizeof(request->artist));
+    request->key = panel_cache_identity("local", request->title, request->artist);
     return true;
 }
 
-static void album_panel_close(void)
+static int album_panel_play(int index, int track, const struct panel_request *request,
+                            const struct panel_cache_row *row)
 {
-    if (panel_tracks > 0)
-        panel_tracks = core_free(panel_tracks);
-}
-
-static int album_panel_count(void)
-{
-    if (panel_count == -1)
-    {
-        panel_tracks = db_summary_album_track_ids(&carousel_idx.album_index[panel_album],
-                                                  &panel_count);
-        if (panel_tracks < 0)
-            panel_count = -2;
-    }
-    return panel_count;
-}
-
-static bool album_panel_row(int index, char *title, size_t size)
-{
-    if (panel_tracks <= 0 || index >= panel_count)
-        return false;
-    const struct db_album_track *tracks = core_get_data(panel_tracks);
-    int id = tracks[index].id;
-    struct tagcache_search search;
-    if (!tagcache_search(&search, tag_title))
-        return false;
-    bool ok = tagcache_retrieve(&search, id, tag_title, title, size);
-    tagcache_search_finish(&search);
-    return ok;
-}
-
-static int album_panel_play(int index)
-{
-    if (panel_tracks <= 0 || index >= panel_count)
+    (void)track;
+    if (!db_summary_current(&carousel_idx) || carousel_idx.generation != request->generation ||
+        tagcache_find_key(row->playing_key) != row->id)
         return CAROUSEL_MENU_STAY;
-    const struct db_album_track *tracks = core_get_data(panel_tracks);
-    int id = tracks[index].id;
-    db_summary_play_track_on_exit(&carousel_idx.album_index[panel_album], id);
+    pf_cfg.last_album = index;
+    db_summary_play_track_on_exit(&request->album, row->id);
     return CAROUSEL_PLAY_ALBUM;
 }
 

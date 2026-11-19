@@ -1541,6 +1541,23 @@ bool cider_page_row(int index, struct cider_row *row)
     return have;
 }
 
+uint32_t cider_panel_revision(void)
+{
+    mutex_lock(&cider_mutex);
+    uint32_t revision = cider_connected() ? cider_library_revision() : 0;
+    mutex_unlock(&cider_mutex);
+    return revision;
+}
+
+bool cider_panel_album(int index, struct cider_row *row, uint32_t *revision)
+{
+    mutex_lock(&cider_mutex);
+    *revision = cider_library_revision();
+    bool have = *revision && cider_connected() && cider_library_row(index, row);
+    mutex_unlock(&cider_mutex);
+    return have;
+}
+
 void cider_track_page_open(const char *route)
 {
     mutex_lock(&cider_mutex);
@@ -1548,10 +1565,10 @@ void cider_track_page_open(const char *route)
     mutex_unlock(&cider_mutex);
 }
 
-int cider_track_page_total(void)
+int cider_track_page_total(bool *stale)
 {
     mutex_lock(&cider_mutex);
-    int total = cider_library_tracks_total();
+    int total = cider_library_tracks_total(stale);
     mutex_unlock(&cider_mutex);
     return total;
 }

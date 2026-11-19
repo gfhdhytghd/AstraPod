@@ -25,7 +25,6 @@ static bool flicking;
 static long moved_at;
 static unsigned int revision;
 static struct cider_row row_ahead;
-static struct cider_row panel_album;
 static fb_data *surface;
 _Static_assert(sizeof *surface == sizeof(uint16_t), "Remote RGB565 art");
 
@@ -70,12 +69,9 @@ static bool remember(int index)
     snprintf(global_status.cover_remote_id, sizeof(global_status.cover_remote_id), "%s", row.id);
     return true;
 }
-static bool plain_album_label;
-
-static bool legacy_panel_labels(void)
+static bool legacy_panel_labels(const char *route)
 {
-    const char *route = panel_album.route;
-    if (plain_album_label || strncmp(route, "album/t", 7) || strlen(route + 7) != 24)
+    if (strncmp(route, "album/t", 7) || strlen(route + 7) != 24)
         return false;
     for (const char *p = route + 7; *p; p++)
         if (!strchr("0123456789abcdef", *p))
@@ -83,34 +79,27 @@ static bool legacy_panel_labels(void)
     return true;
 }
 
-static bool panel_open(int index, struct carousel_album_header *header)
+static bool panel_request(int index, struct panel_request *request)
 {
-    if (!cider_page_row(index, &panel_album))
+    struct cider_row album;
+    if (!cider_panel_album(index, &album, &request->revision))
         return false;
-    resume_index = index;
-    snprintf(header->title, sizeof(header->title), "%s", panel_album.title);
-    snprintf(header->artist, sizeof(header->artist), "%s", panel_album.subtitle);
-    const char *plain = strstr(panel_album.route, "?format=panel");
-    plain_album_label = plain != NULL;
+    request->remote = true;
+    snprintf(request->title, sizeof(request->title), "%s", album.title);
+    snprintf(request->artist, sizeof(request->artist), "%s", album.subtitle);
+    char *plain = strstr(album.route, "?format=panel");
     if (plain)
-        panel_album.route[plain - panel_album.route] = '\0';
-    else if (legacy_panel_labels())
+        *plain = 0;
+    else if (legacy_panel_labels(album.route))
     {
-        char *genre = strstr(header->artist, " · ");
+        request->legacy_labels = true;
+        char *genre = strstr(request->artist, " · ");
         if (genre)
-            *genre = '\0';
+            *genre = 0;
     }
-    char route[sizeof(panel_album.route)];
-    if (snprintf(route, sizeof(route), "%s?format=panel", panel_album.route) < (int)sizeof(route))
-        cider_track_page_open(route);
-    else
-        cider_track_page_open(panel_album.route);
+    strlcpy(request->route, album.route, sizeof(request->route));
+    request->key = panel_cache_identity(cider_remote_name(), album.id, request->route);
     return true;
-}
-
-static void panel_close(void)
-{
-    cider_track_page_open("");
 }
 
 static void blur_source(int index, struct album_blur_source *source)
@@ -120,21 +109,14 @@ static void blur_source(int index, struct album_blur_source *source)
         strlcpy(source->remote, row.art, sizeof(source->remote));
 }
 
-static bool panel_row(int index, char *title, size_t size)
+static int panel_play(int index, int track, const struct panel_request *request,
+                      const struct panel_cache_row *row)
 {
-    struct cider_row row;
-    if (!cider_track_page_row(index, &row))
-        return false;
-    snprintf(title, size, "%s", row.title);
-    return true;
-}
-
-static int panel_play(int index)
-{
-    struct cider_row row;
-    if (!cider_track_page_row(index, &row) || row.kind != CIDER_ROW_SONG)
+    if (cider_panel_revision() != request->revision ||
+        strncmp(row->route, "play/", sizeof("play/") - 1))
         return CAROUSEL_MENU_STAY;
-    return cider_play_in(row.route, panel_album.route, index)
+    resume_index = index;
+    return cider_play_in(row->route, request->route, track)
         ? CAROUSEL_PLAY_PENDING : CAROUSEL_MENU_STAY;
 }
 static bool art(int index, struct bitmap *bitmap)
@@ -304,13 +286,9 @@ static const struct carousel_model model = {
     .external = true,
     .read_art = art,
     .art_version = version,
-    .tick = tick,
-    .panel_open = panel_open,
     .blur_source = blur_source,
-    .legacy_panel_labels = legacy_panel_labels,
-    .panel_close = panel_close,
-    .panel_count = cider_track_page_total,
-    .panel_row = panel_row,
+    .tick = tick,
+    .panel_request = panel_request,
     .panel_play = panel_play,
     .panel_play_status = cider_play_status,
     .remember = remember,

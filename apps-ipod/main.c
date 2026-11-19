@@ -84,6 +84,8 @@
 #include "draw/progress_bar.h"
 #include "metadata/album_palette.h"
 #include "metadata/album_blur.h"
+#include "screens/covers/panel_perf.h"
+#include "screens/covers/panel_cache.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/perf.h"
 #include "ui/scene.h"
@@ -653,6 +655,7 @@ static void init(void)
     kernel_init();
     album_palette_alloc();
     album_blur_alloc();
+    panel_cache_init();
     native_wps_alloc();
     crumbs_guard_init();
 #if !defined(SIMULATOR) && !defined(APPLICATION)
@@ -811,6 +814,7 @@ static void init(void)
 
     boot_progress(BOOT_SETTINGS, 0, 0, BOOT_KEEP_CAPTION);
     ui_perf_init();
+    panel_perf_init();
     CHART(">settings_load");
     settings_load();
     CHART("<settings_load");
@@ -831,6 +835,7 @@ static void init(void)
     settings_apply(true);
     album_palette_init();
     album_blur_init();
+    panel_cache_watch_playback();
     CHART("<settings_apply(true)");
     /* Language is loaded and audio has not claimed the remaining core pool.
      * This uses the same bundled 12 px file as the HarmonyOS overlay. */

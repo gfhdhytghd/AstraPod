@@ -22,9 +22,10 @@ enum
 void cider_library_open(const char *route);
 int cider_library_total(void);
 bool cider_library_stale(void);
+uint32_t cider_library_revision(void);
 bool cider_library_row(int index, struct cider_row *row);
 void cider_library_tracks_open(const char *route);
-int cider_library_tracks_total(void);
+int cider_library_tracks_total(bool *stale);
 bool cider_library_track_row(int index, struct cider_row *row);
 bool cider_library_receive(const void *data, unsigned int size,
                            uint32_t generation, uint32_t library);

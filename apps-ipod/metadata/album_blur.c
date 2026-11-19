@@ -23,6 +23,7 @@
 #include "strlcpy.h"
 #include "system.h"
 #include "system/bg_task.h"
+#include "screens/covers/panel_perf.h"
 #include "ui/native_theme_runtime.h"
 #include "usb.h"
 
@@ -58,7 +59,7 @@ static struct {
 
 static struct {
     struct album_blur_source source[ALBUM_BLUR_NEIGHBORS];
-    unsigned count;
+    unsigned count, next, revision;
 } window;
 static struct album_blur_source wps_source;
 static int wps_art = -1;
@@ -337,8 +338,18 @@ static unsigned panel_scrim(const fb_data *panel, const struct img_filter *wps)
     return alpha;
 }
 
+static bool window_stale(unsigned revision)
+{
+    if (!revision)
+        return false;
+    mutex_lock(&cache_lock);
+    bool stale = revision != window.revision;
+    mutex_unlock(&cache_lock);
+    return stale;
+}
+
 static unsigned prepare(const struct album_blur_source *source, int art,
-                        unsigned wps_lum)
+                        unsigned wps_lum, unsigned revision)
 {
     if ((!source->local && !source->remote[0]) || usb_host_wants_storage())
         return 0;
@@ -365,6 +376,8 @@ static unsigned prepare(const struct album_blur_source *source, int art,
 #endif
             width = height = local_pixels(source->local, scratch);
     }
+    if (window_stale(revision) || usb_host_wants_storage())
+        goto done;
     if (!width)
     {
         mutex_lock(&cache_lock);
@@ -388,6 +401,8 @@ static unsigned prepare(const struct album_blur_source *source, int art,
         DEBUGF("FU112_BLUR ram %08x %lu\n", hash, (unsigned long)(USEC_TIMER-start));
     if (slot < 0 || hit)
     {
+        if (hit)
+            panel_perf_record(PP_BLUR, USEC_TIMER - start, 2, hash);
         result = hit ? hash : 0;
         goto done;
     }
@@ -422,7 +437,8 @@ static unsigned prepare(const struct album_blur_source *source, int art,
         img_filter_adapt(&filter, &entry->cached.levels, wps_lum);
         entry->cached.panel_alpha = panel_scrim(entry->panel, &filter);
         entry->cached.wps_lum = wps_lum;
-        write_record(path, &entry->cached);
+        if (!window_stale(revision) && !usb_host_wants_storage())
+            write_record(path, &entry->cached);
     }
     unsigned scrim = entry->cached.panel_alpha;
     if (scrim)
@@ -430,9 +446,14 @@ static unsigned prepare(const struct album_blur_source *source, int art,
             entry->panel[i] = color_blend(entry->panel[i], LCD_BLACK, scrim);
     DEBUGF("FU112_BLUR %s %08x %lu %u\n", disk ? "disk" : "cold", hash,
            (unsigned long)(USEC_TIMER-start), scrim);
-    (void)start;
+    panel_perf_record(PP_BLUR, USEC_TIMER - start, disk, hash);
     core_put_data_pinned(cache);
     mutex_lock(&cache_lock);
+    if (revision && revision != window.revision)
+    {
+        mutex_unlock(&cache_lock);
+        goto done;
+    }
     slots[slot].source = *source;
     slots[slot].hash = hash;
     slots[slot].wps_lum = wps_lum;
@@ -454,13 +475,19 @@ static void blur_work(const struct queue_event *ev)
     unsigned wps_lum = wps_scrim_luminance();
     if (ev->id == BLUR_EVENT_WINDOW)
     {
-        struct album_blur_source sources[ALBUM_BLUR_NEIGHBORS];
         mutex_lock(&cache_lock);
-        unsigned count = window.count;
-        memcpy(sources, window.source, count * sizeof(*sources));
+        unsigned revision = window.revision;
+        if (window.next >= window.count)
+        {
+            mutex_unlock(&cache_lock);
+            return;
+        }
+        struct album_blur_source source = window.source[window.next++];
+        bool more = window.next < window.count;
         mutex_unlock(&cache_lock);
-        for (unsigned i = 0; i < count; i++)
-            prepare(&sources[i], -1, wps_lum);
+        prepare(&source, -1, wps_lum, revision);
+        if (more && !window_stale(revision) && !bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
+            bg_task_post(&blur_task, BLUR_EVENT_WINDOW);
         return;
     }
 
@@ -500,7 +527,7 @@ static void blur_work(const struct queue_event *ev)
                 source.local = art_cache_track_key(path);
         }
     }
-    unsigned hash = prepare(&source, art, wps_lum);
+    unsigned hash = prepare(&source, art, wps_lum, 0);
     if (generation != album_art_generation() || art != album_art_current())
         return;
     mutex_lock(&cache_lock);
@@ -555,9 +582,13 @@ void album_blur_request_window(const struct album_blur_source *sources, unsigned
         return;
     mutex_lock(&cache_lock);
     window.count = MIN(count, ALBUM_BLUR_NEIGHBORS);
-    memcpy(window.source, sources, window.count * sizeof(*sources));
+    window.next = 0;
+    if (++window.revision == 0)
+        ++window.revision;
+    if (window.count)
+        memcpy(window.source, sources, window.count * sizeof(*sources));
     mutex_unlock(&cache_lock);
-    if (!bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
+    if (count && !bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
         bg_task_post(&blur_task, BLUR_EVENT_WINDOW);
 }
 

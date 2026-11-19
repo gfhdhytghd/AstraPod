@@ -334,6 +334,9 @@ int  tagcache_path_slots(void);
 uint64_t tagcache_entry_key(int idx_id);
 /* Commits so far: it changes whenever the database does. */
 int32_t tagcache_commit_id(void);
+/* On-disk text tables, excluding the playback counters in the master file.
+ * Call from background work, since this opens the database directory. */
+uint32_t tagcache_text_revision(void);
 /* A string tag of a found entry. False for <Untagged>, and for tag_filename:
  * under Quick there are no paths in RAM, so a caller needing the path reads
  * it with tagcache_retrieve(), one seek. */

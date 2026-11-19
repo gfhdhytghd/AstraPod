@@ -250,11 +250,14 @@ bool bg_task_should_stop(const struct bg_task *task)
     if (usb_host_wants_storage())
         return true;
 
-    /* Count field is filters minus one. */
+    /* A scan must yield before a settled album can be prepared. */
+    if (queue_peek_ex(&bg_queue, NULL, 0, QPEEK_FILTER1(BG_EVENT_PANEL)))
+        return true;
 #ifdef HAVE_PODBOX_FONT
     if (queue_peek_ex(&bg_queue, NULL, 0, QPEEK_FILTER1(BG_EVENT_GLYPHS)))
         return true;
 #endif
+    /* Count field is filters minus one. */
     return queue_peek_ex(&bg_queue, NULL, 2, stop_events);
 }
 

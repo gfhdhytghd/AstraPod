@@ -153,6 +153,14 @@ static void lock_font_handle(int handle, bool lock)
         core_unpin(handle);
 }
 
+static bool font_ui_candidate(int handle)
+{
+    if (handle <= 0)
+        return false;
+    const struct buflib_alloc_data *data = core_get_data(handle);
+    return !data->private_cache;
+}
+
 static int font_resolve_id(int font_id)
 {
     bool is_ui = font_id == FONT_UI;
@@ -162,11 +170,11 @@ static int font_resolve_id(int font_id)
         return FONT_SYSFIXED;
 
     for (int id = font_id; id >= 0; --id)
-        if (buflib_allocations[id] > 0)
+        if (is_ui ? font_ui_candidate(buflib_allocations[id]) : buflib_allocations[id] > 0)
             return id;
     if (is_ui)
         for (int id = FONT_LASTUSERFONT; id > font_id; --id)
-            if (buflib_allocations[id] > 0)
+            if (font_ui_candidate(buflib_allocations[id]))
                 return id;
     return FONT_SYSFIXED;
 }
@@ -583,22 +591,23 @@ static int font_load_internal(const char *path, size_t buf_size, int glyphs, boo
         return font_id;
     }
 
-    int open_slot = -1;
-
+    /* A private, background loader and the foreground may both reach this
+     * slot scan. Reserve the ID before any allocations or file reads. */
+    int level = disable_irq_save();
     for (font_id = FONT_FIRSTUSERFONT; font_id < MAXFONTS; font_id++)
     {
-        if (buflib_allocations[ font_id ] < 0)
+        if (buflib_allocations[font_id] == -1)
         {
-            open_slot = font_id;
+            buflib_allocations[font_id] = -2;
             break;
         }
     }
-    if ( open_slot == -1 )
+    restore_irq(level);
+    if (font_id == MAXFONTS)
     {
         close(fd);
         return -1;
     }
-    font_id = open_slot;
     size_t path_bufsz = MAX(path_len + 1, 64); /* enough size for common case */
     /* allocate mem */
     int handle = core_alloc_ex(
@@ -607,7 +616,7 @@ static int font_load_internal(const char *path, size_t buf_size, int glyphs, boo
     if ( handle <= 0 )
     {
         close(fd);
-        return -1;
+        goto free_slot;
     }
     struct buflib_alloc_data *pdata;
 
@@ -641,7 +650,7 @@ static int font_load_internal(const char *path, size_t buf_size, int glyphs, boo
             close(fd);
             core_put_data_pinned(pdata);
             core_free(handle);
-            return -1;
+            goto free_slot;
         }
     }
     else
@@ -650,8 +659,10 @@ static int font_load_internal(const char *path, size_t buf_size, int glyphs, boo
     {
         if ( ! font_load_cached( pf, nwidth, noffset ) )
         {
-            core_free( handle );
-            return -1;
+            core_put_data_pinned(pdata);
+            core_free(handle);
+            close(fd);
+            goto free_slot;
         }
 
         /* trick to get a small cache for each file section   *
@@ -677,15 +688,20 @@ static int font_load_internal(const char *path, size_t buf_size, int glyphs, boo
 
         if ( ! font_load_in_memory( pf, nwidth, noffset ) )
         {
-            core_free( handle );
-            return -1;
+            core_put_data_pinned(pdata);
+            core_free(handle);
+            goto free_slot;
         }
     }
     buflib_allocations[font_id] = handle;
     //printf("%s -> [%d] -> %d\n", path, font_id, *handle);
     core_put_data_pinned(pdata);
     logf("%s id: [%d], %s", __func__, font_id, path);
-    return font_id; /* success!*/
+    return font_id;
+
+free_slot:
+    buflib_allocations[font_id] = -1;
+    return -1;
 }
 
 int font_load_ex(const char *path, size_t bufsize, int glyphs)

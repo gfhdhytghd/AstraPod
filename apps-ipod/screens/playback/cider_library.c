@@ -66,8 +66,14 @@ static void open_query(struct library_query *query, const char *route)
 void cider_library_open(const char *route) { open_query(&library_query, route); }
 void cider_library_tracks_open(const char *route) { open_query(&track_query, route); }
 int cider_library_total(void) { return library_query.total; }
-int cider_library_tracks_total(void) { return track_query.total; }
+int cider_library_tracks_total(bool *stale)
+{
+    if (stale)
+        *stale = track_query.stale;
+    return track_query.total;
+}
 bool cider_library_stale(void) { return library_query.stale; }
+uint32_t cider_library_revision(void) { return library_generation; }
 
 static bool query_row(struct library_query *query, int index, struct cider_row *row)
 {
@@ -84,7 +90,9 @@ static bool query_row(struct library_query *query, int index, struct cider_row *
                 query->wanted = pages[i].offset + pages[i].count;
             return true;
         }
-    query->wanted = tracks ? index / CIDER_PAGE_ROWS * CIDER_PAGE_ROWS : index;
+    /* The transport may truncate a CL frame before 50 rows. Ask for the
+     * missing index so a short page can never hide the rest of the album. */
+    query->wanted = index;
     return false;
 }
 

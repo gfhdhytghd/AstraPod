@@ -2474,7 +2474,8 @@ static int tab_index(void)
 
 static void open_usage(struct gui_synclist *list)
 {
-    pan(&spaces_page, &usage_page, 1);
+    /* Usage is the page to the left of the workspace list. */
+    pan(&spaces_page, &usage_page, -1);
     usage_scroll = 0;
     int sel = gui_synclist_get_sel_pos(list);
     usage_from = sel >= 0 && sel < nrows ? rows[sel] : (struct row){0};
@@ -2487,7 +2488,7 @@ static void open_usage(struct gui_synclist *list)
 /* Back to the spaces view, on the row the usage view was opened from */
 static void close_usage(struct gui_synclist *list)
 {
-    pan(&usage_page, &spaces_page, -1);
+    pan(&usage_page, &spaces_page, 1);
     view = VIEW_SPACES;
     key_runs.nruns = 0;
     show_row(list, &usage_from);

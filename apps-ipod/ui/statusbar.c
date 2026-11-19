@@ -18,6 +18,7 @@
 #include "metadata/art_cache.h"
 #include "native_chrome.h"
 #include "native_theme_runtime.h"
+#include "native_wps.h"
 #include "perf.h"
 #include "retained.h"
 #include "settings/settings.h"
@@ -254,7 +255,9 @@ void sb_apply_viewport(struct viewport *vp, enum screen_type screen, bool chrome
 
 int sb_visible_height(void)
 {
-    if (status_handle <= 0 || !viewportmanager_theme_enabled(SCREEN_MAIN))
+    if (!viewportmanager_theme_enabled(SCREEN_MAIN))
+        return native_wps_status_height();
+    if (status_handle <= 0)
         return 0;
     struct statusbar *bar = core_get_data_pinned(status_handle);
     refresh_theme(bar);
@@ -322,7 +325,7 @@ void sb_update(enum screen_type screen, bool force)
             album_palette_snapshot(&palette);
             struct viewport *old = lcd_set_viewport(NULL);
             unsigned int start = USEC_TIMER;
-            native_chrome_draw(&bar->chrome, title->text, &frame, &palette,
+            native_chrome_draw(&bar->chrome, title->text, false, &frame, &palette,
                                &bar->motion.visible);
             ui_note_render(USEC_TIMER - start);
             lcd_set_viewport(old);

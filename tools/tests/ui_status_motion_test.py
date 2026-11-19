@@ -23,10 +23,14 @@ program = """
 #include "audio/play_status.h"
 #include "animation.h"
 #include "native_chrome.h"
+#include "native_theme.h"
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 """
 program += section(bar, "struct indicator_motion {", "struct statusbar {")
 program += section(bar, "static int mix_indicator", "static void retire_trace")
 program += section(chrome, "void native_chrome_indicators(", "static unsigned int busy_state")
+program += section(chrome, "struct status_layout {", "static const char *title_text")
 program += """
 int main(void)
 {
@@ -40,8 +44,6 @@ int main(void)
     assert(!motion.fade.frames && motion.visible.battery == 20);
     state.playmode = STATUS_PLAY;
     state.battery = 80;
-    state.link = 1;
-    state.dock = true;
     native_chrome_indicators(&state, &active);
     assert(!advance_indicators(&motion, &active, start, 8));
     assert(motion.fade.frames == 8);
@@ -51,8 +53,7 @@ int main(void)
         assert(advance_indicators(&motion, &active, start + ui_frame_clock(frame), 8));
         unsigned ink = motion.visible.ink[CHROME_PLAY];
         assert(ink > previous && ink < UINT8_MAX);
-        assert(motion.visible.ink[CHROME_LINK_WAIT] == ink);
-        assert(motion.visible.ink[CHROME_DOCK] == ink);
+        assert(!motion.visible.ink[CHROME_PAUSE]);
         assert(motion.visible.battery > 20 && motion.visible.battery <= 80);
         previous = ink;
     }
@@ -74,15 +75,38 @@ int main(void)
 
     state.playmode = STATUS_STOP;
     state.battery = -1;
-    state.link = 0;
-    state.dock = false;
     native_chrome_indicators(&state, &idle);
     assert(advance_indicators(&motion, &idle, reverse, 0));
     assert(!motion.fade.frames && motion.visible.battery == -1);
     for (int glyph = 0; glyph < CHROME_GLYPH_COUNT; ++glyph)
         assert(!motion.visible.ink[glyph]);
 
-    puts("PASS 8 f status fade, battery interval, link/dock, timer wrap, reversal and off");
+    state.playmode = STATUS_PAUSE;
+    native_chrome_indicators(&state, &active);
+    assert(!active.ink[CHROME_PLAY] && active.ink[CHROME_PAUSE] == UINT8_MAX);
+    state.playmode = STATUS_FASTFORWARD;
+    native_chrome_indicators(&state, &active);
+    assert(active.ink[CHROME_PLAY] == UINT8_MAX && !active.ink[CHROME_PAUSE]);
+
+    const struct ui_theme theme = { .metric = {
+        [UI_METRIC_STATUS_PAD_LEFT] = 10, [UI_METRIC_STATUS_PAD_RIGHT] = 7,
+        [UI_METRIC_STATUS_ICON_SIZE] = 24, [UI_METRIC_STATUS_ICON_GAP] = 2,
+        [UI_METRIC_STATUS_GROUP_GAP] = 9,
+    }};
+    struct native_chrome chrome = { .theme = &theme };
+    struct status_layout bar = status_layout(&chrome, 320, 72, 0);
+    assert(bar.clock_x == 124 && bar.clock_width == 72);
+    assert(bar.battery_x == 289 && bar.play_x == 263 && !bar.percent_width);
+    assert(10 + bar.title_width < bar.busy_x && bar.busy_x + 24 < bar.clock_x);
+    bar = status_layout(&chrome, 320, 72, 40);
+    assert(bar.clock_x == 124 && bar.clock_width == 72);
+    assert(bar.play_x + 24 < bar.percent_x);
+    assert(bar.percent_width == 40 && bar.percent_x + 40 < bar.battery_x);
+    bar = status_layout(&chrome, 320, 200, 80);
+    assert(bar.clock_x * 2 + bar.clock_width == 320);
+    assert(bar.clock_x + bar.clock_width < bar.play_x);
+
+    puts("PASS status fade, play/pause/stop, timer wrap and centered safe layout");
 }
 """
 

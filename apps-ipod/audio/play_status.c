@@ -34,8 +34,9 @@ int current_playmode(void)
     {
         struct cider_status source;
         cider_status(&source);
-        return ff_mode ? ff_mode : source.available && source.rate ?
-               STATUS_PLAY : STATUS_PAUSE;
+        if (!source.available)
+            return STATUS_STOP;
+        return ff_mode ? ff_mode : source.rate ? STATUS_PLAY : STATUS_PAUSE;
     }
     int audio_stat = audio_status();
 

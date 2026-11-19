@@ -856,9 +856,9 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
         {
             /* A pending volume or seek value belongs to the playback page.
              * Close its trace and view before handing over the same pixels. */
-            native_wps_close();
             ui_scene_interrupt();
             ui_scene_open_modal(lyrics_scene, "lyrics-up");
+            native_wps_close();
             cider_spectrum_wps(false);
             int lyrics_ret = lyric_viewer();
             ui_scene_close_modal(lyrics_scene, true, "lyrics-down");

@@ -25,56 +25,18 @@
 #include "system/activity.h"
 #include "timefuncs.h"
 
-#ifdef HAVE_USB_PODLINK
-#include "podlink.h"
-#endif
-#ifdef IPOD_ACCESSORY_PROTOCOL
-#include "iap.h"
-#endif
-#if defined(USB_ENABLE_AUDIO) || defined(HAVE_HOST_USB_AUDIO)
-#include "usb.h"
-#endif
-
 #define BUSY_HIDDEN UINT8_MAX
 #define BUSY_TURN ANIM_F(58)
 #define VOLUME_HOLD ANIM_F(180)
 
-static const char *const indicator_icons[CHROME_DOCK] = {
-    "A", "B", "G", "F",
+static const char *const indicator_icons[CHROME_GLYPH_COUNT] = {
+    "A", "B",
     "1", "2", "3", "4", "5", "6", "7",
     "·", "¸", "¹", "º",
-    "_", "`",
 };
 static const char *const busy_icons[] = {
     "á", "â", "ã", "ä", "å", "æ", "ç", "è",
 };
-
-static unsigned int link_state(void)
-{
-#ifdef HAVE_USB_PODLINK
-    switch (podlink_state())
-    {
-        case PODLINK_CLOSED: return 0;
-        case PODLINK_CONNECTED: return 2;
-        default: return 1;
-    }
-#else
-    return 0;
-#endif
-}
-
-static bool dock_active(void)
-{
-#ifdef IPOD_ACCESSORY_PROTOCOL
-    if (iap_accessory_present())
-        return true;
-#endif
-#if defined(USB_ENABLE_AUDIO) || defined(HAVE_HOST_USB_AUDIO)
-    return usb_audio_get_active();
-#else
-    return false;
-#endif
-}
 
 void native_chrome_indicators(const struct native_chrome_state *state,
                              struct native_chrome_indicators *out)
@@ -82,10 +44,10 @@ void native_chrome_indicators(const struct native_chrome_state *state,
     *out = (struct native_chrome_indicators){ .battery = -1 };
     switch (state->playmode)
     {
-        case STATUS_PLAY: out->ink[CHROME_PLAY] = UINT8_MAX; break;
+        case STATUS_PLAY:
+        case STATUS_FASTFORWARD:
+        case STATUS_FASTBACKWARD: out->ink[CHROME_PLAY] = UINT8_MAX; break;
         case STATUS_PAUSE: out->ink[CHROME_PAUSE] = UINT8_MAX; break;
-        case STATUS_FASTFORWARD: out->ink[CHROME_FORWARD] = UINT8_MAX; break;
-        case STATUS_FASTBACKWARD: out->ink[CHROME_BACKWARD] = UINT8_MAX; break;
     }
     if (state->battery >= 0)
     {
@@ -97,10 +59,6 @@ void native_chrome_indicators(const struct native_chrome_state *state,
         if (state->numeric)
             out->battery = state->battery;
     }
-    if (state->link)
-        out->ink[state->link == 2 ? CHROME_LINK_OPEN : CHROME_LINK_WAIT] = UINT8_MAX;
-    if (state->dock)
-        out->ink[CHROME_DOCK] = UINT8_MAX;
 }
 
 static unsigned int busy_state(void)
@@ -128,9 +86,7 @@ bool native_chrome_poll(struct native_chrome *chrome)
         .charging = charge_state == CHARGING || charge_state == TOPOFF,
         .numeric = global_settings.battery_display != 0,
         .clock_24h = global_settings.timeformat == 0,
-        .link = link_state(),
         .playmode = current_playmode(),
-        .dock = dock_active(),
         .busy = busy_state(),
         .volume_visible = native_chrome_volume_visible(),
     };
@@ -189,42 +145,36 @@ bool native_chrome_volume_visible(void)
 }
 
 struct status_layout {
-    int battery_x, busy_x, clock_x, clock_width, link_x, dock_x, play_x, title_width;
+    int battery_x, percent_x, percent_width, play_x, busy_x;
+    int clock_x, clock_width, title_width;
 };
 
-static bool has_ink(const struct native_chrome_indicators *icons, int first, int last)
-{
-    for (int i = first; i <= last; ++i)
-        if (icons->ink[i])
-            return true;
-    return false;
-}
-
 static struct status_layout status_layout(const struct native_chrome *chrome, int width,
-                                          const struct native_chrome_indicators *icons)
+                                          int clock_width, int percent_width)
 {
     const uint16_t *metric = chrome->theme->metric;
     int icon_size = metric[UI_METRIC_STATUS_ICON_SIZE];
+    int gap = metric[UI_METRIC_STATUS_ICON_GAP];
+    int group_gap = metric[UI_METRIC_STATUS_GROUP_GAP];
+    int left = metric[UI_METRIC_STATUS_PAD_LEFT];
     int battery_x = width - metric[UI_METRIC_STATUS_PAD_RIGHT] - icon_size;
-    int busy_x = battery_x - metric[UI_METRIC_STATUS_ICON_GAP] - icon_size;
-    int clock_width = metric[chrome->state.numeric ? UI_METRIC_STATUS_CLOCK_NUMERIC_WIDTH
-                                                  : UI_METRIC_STATUS_CLOCK_WIDTH];
-    int clock_x = busy_x - metric[UI_METRIC_STATUS_GROUP_GAP] - clock_width;
-    int title_end = clock_x;
-    int link_x = title_end - metric[UI_METRIC_STATUS_LINK_GAP] - icon_size;
-    if (has_ink(icons, CHROME_LINK_WAIT, CHROME_LINK_OPEN))
-        title_end = link_x;
-    int dock_x = title_end - metric[UI_METRIC_STATUS_LINK_GAP] - icon_size;
-    if (icons->ink[CHROME_DOCK])
-        title_end = dock_x;
-    int play_x = title_end - metric[UI_METRIC_STATUS_LINK_GAP] - icon_size;
-    if (has_ink(icons, CHROME_PLAY, CHROME_BACKWARD))
-        title_end = play_x;
+    int play_x = battery_x - gap - icon_size;
+    /* Reserve a centered clock even with battery percentage enabled. */
+    int percent_limit = play_x - gap - group_gap - (width + clock_width + 1) / 2;
+    percent_width = MIN(percent_width, MAX(0, percent_limit));
+    int percent_x = battery_x - gap - percent_width;
+    if (percent_width)
+        play_x = percent_x - gap - icon_size;
+
+    int clock_inset = MAX(left + icon_size, width - play_x) + group_gap;
+    clock_width = MIN(clock_width, MAX(0, width - 2 * clock_inset));
+    int clock_x = (width - clock_width) / 2;
+    int busy_x = MAX(left, clock_x - group_gap - icon_size);
     return (struct status_layout) {
-        .battery_x = battery_x, .busy_x = busy_x,
-        .clock_x = clock_x, .clock_width = clock_width, .link_x = link_x,
-        .dock_x = dock_x, .play_x = play_x,
-        .title_width = title_end - metric[UI_METRIC_STATUS_PAD_LEFT],
+        .battery_x = battery_x, .percent_x = percent_x, .percent_width = percent_width,
+        .play_x = play_x, .busy_x = busy_x,
+        .clock_x = clock_x, .clock_width = clock_width,
+        .title_width = busy_x - gap - left,
     };
 }
 
@@ -308,22 +258,6 @@ static void draw_volume(const struct native_chrome *chrome, struct viewport *dam
                  bar_width * chrome->state.volume_percent / 100, bar_height);
 }
 
-static void draw_dock(struct viewport *damage, int x, int y, int size)
-{
-    struct viewport vp = *damage;
-    if (!clip_viewport(&vp, x, y, size, size))
-        return;
-    x += (size - size / 2) / 2 - vp.x;
-    y += size / 3 - vp.y;
-    int width = MAX(3, size / 2);
-    int height = MAX(1, size / 5);
-    lcd_set_viewport(&vp);
-    lcd_drawrect(x, y, width, height + 1);
-    lcd_vline(x + width / 4, y + height, y + height + MAX(1, size / 8));
-    lcd_vline(x + width * 3 / 4, y + height, y + height + MAX(1, size / 8));
-    lcd_set_viewport(damage);
-}
-
 static void draw_indicators(const struct native_chrome *chrome, struct viewport *damage,
                             const struct native_chrome_indicators *icons,
                             struct status_layout layout, int x, int y, int size,
@@ -337,21 +271,16 @@ static void draw_indicators(const struct native_chrome *chrome, struct viewport 
         int slide = (3 * (UINT8_MAX - ink) + 127) / UINT8_MAX;
         damage->fg_pattern = ink == UINT8_MAX ? foreground :
                              color_blend(background, foreground, ink);
-        if (i == CHROME_DOCK)
-            draw_dock(damage, x + layout.dock_x, y + slide, size);
-        else
-        {
-            bool battery = i >= CHROME_BATTERY_FIRST && i <= CHROME_CHARGE_LAST;
-            int cell = battery ? layout.battery_x :
-                       i >= CHROME_LINK_WAIT ? layout.link_x : layout.play_x;
-            draw_text(damage, indicator_icons[i], chrome->icon_font,
-                      x + cell, y + slide, size, size, battery);
-        }
+        bool battery = i >= CHROME_BATTERY_FIRST;
+        int cell = battery ? layout.battery_x : layout.play_x;
+        draw_text(damage, indicator_icons[i], chrome->icon_font,
+                  x + cell, y + slide, size, size, battery);
     }
     damage->fg_pattern = foreground;
 }
 
-void native_chrome_draw(const struct native_chrome *chrome, const char *title,
+void native_chrome_draw(const struct native_chrome *chrome, const char *left,
+                        bool playback_modes,
                         const struct ui_view_frame *frame,
                         const struct ui_album_palette *palette,
                         const struct native_chrome_indicators *indicators)
@@ -370,7 +299,7 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *title,
         return;
 
     lcd_set_viewport(&damage);
-    if (chrome->state.volume_visible)
+    if (!playback_modes && chrome->state.volume_visible)
     {
         draw_volume(chrome, &damage, bounds, palette);
         lcd_set_viewport(previous);
@@ -384,39 +313,48 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *title,
     damage.fg_pattern = foreground;
 
     const struct native_chrome_state *state = &chrome->state;
-    struct status_layout layout = status_layout(chrome, bounds.width, indicators);
+    char clock[16];
+    if (state->hour < 0)
+        strcpy(clock, ":");
+    else if (state->clock_24h)
+        snprintf(clock, sizeof(clock), "%02d:%02d", state->hour, state->minute);
+    else
+        snprintf(clock, sizeof(clock), "%d:%02d %s", (state->hour + 11) % 12 + 1,
+                 state->minute, state->hour < 12 ? "AM" : "PM");
+
+    char percent[8] = "";
+    int clock_width, percent_width = 0;
+    if (state->numeric)
+    {
+        if (indicators->battery < 0)
+            strcpy(percent, "?%");
+        else
+            snprintf(percent, sizeof(percent), "%d%%", indicators->battery);
+        font_getstringsize((const unsigned char *)percent, &percent_width, NULL,
+                           chrome->status_font);
+    }
+    font_getstringsize((const unsigned char *)clock, &clock_width, NULL, chrome->status_font);
+
+    struct status_layout layout = status_layout(chrome, bounds.width, clock_width, percent_width);
     int icon_y = bounds.y + metric[UI_METRIC_STATUS_ICON_Y];
     int text_y = bounds.y + metric[UI_METRIC_STATUS_TEXT_Y];
     int icon_size = metric[UI_METRIC_STATUS_ICON_SIZE];
-    draw_text(&damage, title_text(title), chrome->title_font,
-              bounds.x + metric[UI_METRIC_STATUS_PAD_LEFT], text_y,
-              layout.title_width, metric[UI_METRIC_STATUS_TITLE_HEIGHT], false);
-
-    draw_indicators(chrome, &damage, indicators, layout, bounds.x, icon_y, icon_size,
-                    background, foreground);
-
+    int left_x = bounds.x + metric[UI_METRIC_STATUS_PAD_LEFT];
+    if (playback_modes)
+        draw_text(&damage, left, chrome->icon_font, left_x, icon_y,
+                  layout.title_width, icon_size, false);
+    else
+        draw_text(&damage, title_text(left), chrome->title_font, left_x, text_y,
+                  layout.title_width, metric[UI_METRIC_STATUS_TITLE_HEIGHT], false);
     if (state->busy < ARRAYLEN(busy_icons))
         draw_text(&damage, busy_icons[state->busy], chrome->icon_font,
                   bounds.x + layout.busy_x, icon_y, icon_size, icon_size, false);
 
-    char clock[24];
-    if (state->hour < 0)
-        strcpy(clock, ": ");
-    else if (state->clock_24h)
-        snprintf(clock, sizeof(clock), "%02d:%02d", state->hour, state->minute);
-    else
-        snprintf(clock, sizeof(clock), "%2d:%02d %s", (state->hour + 11) % 12 + 1,
-                 state->minute, state->hour < 12 ? "AM" : "PM");
-
-    if (state->numeric)
-    {
-        size_t len = strlen(clock);
-        if (indicators->battery < 0)
-            snprintf(clock + len, sizeof(clock) - len, "  ?%%");
-        else
-            snprintf(clock + len, sizeof(clock) - len, "  %d%%", indicators->battery);
-    }
     draw_text(&damage, clock, chrome->status_font, bounds.x + layout.clock_x,
-              text_y, layout.clock_width, icon_size, true);
+              text_y, layout.clock_width, icon_size, false);
+    draw_text(&damage, percent, chrome->status_font, bounds.x + layout.percent_x,
+              text_y, layout.percent_width, icon_size, false);
+    draw_indicators(chrome, &damage, indicators, layout, bounds.x, icon_y, icon_size,
+                    background, foreground);
     lcd_set_viewport(previous);
 }

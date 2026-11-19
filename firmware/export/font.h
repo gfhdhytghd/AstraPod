@@ -152,6 +152,8 @@ void font_init(void) INIT_ATTR;
 bool font_filename_matches_loaded_id(int font_id, const char *filename);
 int font_load(const char *path);
 int font_load_ex(const char *path, size_t buffer_size, int glyphs);
+/* A screen with a back-stack entry can keep an independent glyph cache. */
+int font_load_private(const char *path, int glyphs);
 #ifndef BOOTLOADER
 unsigned font_file_height(const char *path);
 #endif

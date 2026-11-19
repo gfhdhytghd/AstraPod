@@ -531,9 +531,7 @@ static enum batch_state batch;
 static bool requested;
 static volatile bool suspended;
 static struct mutex batch_lock;
-static struct event_queue wake;
-static unsigned worker;
-static long worker_stack[DEFAULT_STACK_SIZE / sizeof(long) * 2];
+static void (*schedule_prefetch)(void);
 
 static int compare_codepoint(const void *a, const void *b)
 {
@@ -716,55 +714,56 @@ static unsigned read_batch(int fd, bool *loaded_hot)
     return copied;
 }
 
-static void font_worker(void)
+void font_pbf_prefetch_init(void (*schedule)(void))
 {
-    for (;;)
+    mutex_init(&batch_lock);
+    schedule_prefetch = schedule;
+}
+
+void font_pbf_prefetch_work(void)
+{
+    mutex_lock(&batch_lock);
+    if (suspended || batch != BATCH_EMPTY)
     {
-        struct queue_event ev;
-        queue_wait(&wake, &ev);
-        mutex_lock(&batch_lock);
-        if (suspended || batch != BATCH_EMPTY)
-        {
-            mutex_unlock(&batch_lock);
-            continue;
-        }
-        int id = -1;
-        for (int offset = 1; offset <= MAXFONTS; offset++)
-        {
-            int next = (job_font + offset) % MAXFONTS;
-            if (pending[next].count)
-            {
-                id = next;
-                break;
-            }
-        }
-        if (id < 0)
-        {
-            mutex_unlock(&batch_lock);
-            continue;
-        }
-        job_font = id;
-        job = pending[id];
-        pending[id].count = 0;
-        batch = BATCH_READING;
         mutex_unlock(&batch_lock);
-
-        unsigned count = 0;
-        bool loaded_hot = false;
-        int fd = open(job.path, O_RDONLY);
-        if (fd >= 0)
-        {
-            if (ffilesize(fd) == (off_t)job.file.file_size)
-                count = read_batch(fd, &loaded_hot);
-            close(fd);
-        }
-
-        mutex_lock(&batch_lock);
-        batch_count = suspended ? 0 : count;
-        batch_hot = !suspended && loaded_hot;
-        batch = BATCH_READY;
-        mutex_unlock(&batch_lock);
+        return;
     }
+    int id = -1;
+    for (int offset = 1; offset <= MAXFONTS; offset++)
+    {
+        int next = (job_font + offset) % MAXFONTS;
+        if (pending[next].count)
+        {
+            id = next;
+            break;
+        }
+    }
+    if (id < 0)
+    {
+        mutex_unlock(&batch_lock);
+        return;
+    }
+    job_font = id;
+    job = pending[id];
+    pending[id].count = 0;
+    batch = BATCH_READING;
+    mutex_unlock(&batch_lock);
+
+    unsigned count = 0;
+    bool loaded_hot = false;
+    int fd = open(job.path, O_RDONLY);
+    if (fd >= 0)
+    {
+        if (ffilesize(fd) == (off_t)job.file.file_size)
+            count = read_batch(fd, &loaded_hot);
+        close(fd);
+    }
+
+    mutex_lock(&batch_lock);
+    batch_count = suspended ? 0 : count;
+    batch_hot = !suspended && loaded_hot;
+    batch = BATCH_READY;
+    mutex_unlock(&batch_lock);
 }
 
 static void publish_record(struct font_cache_entry *entry, void *context)
@@ -776,15 +775,9 @@ static void publish_record(struct font_cache_entry *entry, void *context)
     memset(entry->bitmap + 6 + bytes, 0xff, ALPHA_PADDING);
 }
 
-static void wake_worker(void)
-{
-    if (queue_empty(&wake))
-        queue_post(&wake, 0, 0);
-}
-
 unsigned font_prefetch_epoch(void)
 {
-    if (!worker)
+    if (!schedule_prefetch)
         return epoch;
     mutex_lock(&batch_lock);
     if (batch != BATCH_READY)
@@ -826,13 +819,13 @@ unsigned font_prefetch_epoch(void)
     mutex_lock(&batch_lock);
     batch = BATCH_EMPTY;
     mutex_unlock(&batch_lock);
-    wake_worker();
+    schedule_prefetch();
     return epoch;
 }
 
 bool font_prefetch_busy(void)
 {
-    if (!worker || suspended)
+    if (!schedule_prefetch || suspended)
         return false;
     mutex_lock(&batch_lock);
     bool busy = batch != BATCH_EMPTY;
@@ -854,22 +847,22 @@ void font_prefetch_begin(void)
 
 bool font_prefetch_active(void)
 {
-    return scope_depth && scope_thread == thread_self();
+    return schedule_prefetch && scope_depth && scope_thread == thread_self();
 }
 
 void font_prefetch_end(void)
 {
-    if (--scope_depth == 0 && requested && worker)
+    if (--scope_depth == 0 && requested && schedule_prefetch)
     {
         requested = false;
-        wake_worker();
+        schedule_prefetch();
     }
 }
 
 void font_pbf_prefetch_suspend(bool suspend)
 {
     suspended = suspend;
-    if (!worker)
+    if (!schedule_prefetch)
         return;
     mutex_lock(&batch_lock);
     if (suspend)
@@ -888,7 +881,7 @@ void font_pbf_prefetch_suspend(bool suspend)
 void font_pbf_forget(struct font *font, int id)
 {
     int slot = font->pbf.hot_slot;
-    if (worker)
+    if (schedule_prefetch)
     {
         mutex_lock(&batch_lock);
         if (pending[id].file.serial == font->pbf.serial)
@@ -939,7 +932,9 @@ static bool resolve(const struct font *font, ucschar_t cp, struct pbf_record *r)
 bool font_pbf_prefetch(struct font *font, int id, const char *path,
                        const ucschar_t *text)
 {
-    if (!text)
+    /* With no background thread, the ordinary font renderer can still
+     * use its synchronous cache-fill path. */
+    if (!text || !schedule_prefetch)
         return true;
     bool ready = true;
     for (const ucschar_t *p = text; *p; p++)
@@ -949,20 +944,6 @@ bool font_pbf_prefetch(struct font *font, int id, const char *path,
     }
     if (ready || suspended || font->disabled)
         return ready;
-
-    if (!worker)
-    {
-        queue_init(&wake, false);
-        mutex_init(&batch_lock);
-        worker = create_thread(font_worker, worker_stack, sizeof(worker_stack), 0,
-                               "glyph read" IF_PRIO(, PRIORITY_BACKGROUND)
-                               IF_COP(, CPU));
-        if (!worker)
-        {
-            queue_delete(&wake);
-            return false;
-        }
-    }
 
     if (hot_memory && font->pbf.want_hot && !font->pbf.hot_slot && font->pbf.stride)
     {
@@ -1005,7 +986,7 @@ bool font_pbf_prefetch(struct font *font, int id, const char *path,
     if (!scope_depth && requested)
     {
         requested = false;
-        wake_worker();
+        schedule_prefetch();
     }
     return false;
 }

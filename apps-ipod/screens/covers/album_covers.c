@@ -713,6 +713,8 @@ static int panel_album, panel_tracks, panel_count;
 
 static bool album_panel_open(int index, struct carousel_album_header *header)
 {
+    if (panel_tracks > 0)
+        panel_tracks = core_free(panel_tracks);
     panel_album = index;
     panel_count = -1;
     pf_cfg.last_album = index;

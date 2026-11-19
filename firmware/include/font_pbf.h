@@ -14,5 +14,8 @@ bool font_pbf_prefetch(struct font *font, int id, const char *path,
                        const ucschar_t *text);
 void font_pbf_forget(struct font *font, int id);
 void font_pbf_prefetch_suspend(bool suspend);
+/* The application queues one work item on its existing background thread. */
+void font_pbf_prefetch_init(void (*schedule)(void));
+void font_pbf_prefetch_work(void);
 
 #endif

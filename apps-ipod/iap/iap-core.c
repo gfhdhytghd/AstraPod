@@ -104,6 +104,7 @@
 #define IAP_EV_ARTWORK      (5)     /* The next packet of album art */
 
 static bool iap_started = false;
+static long iap_retry_at;
 static bool iap_setupflag = false, iap_running = false;
 static bool iap_enabled = true;
 static volatile bool reset_pending;
@@ -706,10 +707,11 @@ static void iap_track_changed(unsigned short id, void *ignored)
 void iap_setup(const int ratenum)
 {
     iap_bitrate_set(ratenum);
+    int level = disable_irq_save();
     iap_remotebtn = BUTTON_NONE;
+    iap_retry_at = current_tick;
     iap_setupflag = true;
-    iap_started = false;
-    iap_running = false;
+    restore_irq(level);
 }
 
 /* Actually bring up the message queue, message handler thread and
@@ -717,12 +719,14 @@ void iap_setup(const int ratenum)
  *
  * NOTE: This is running in interrupt context
  */
-static void iap_start(void)
+static bool iap_start(void)
 {
     unsigned int tid;
 
     if (iap_started)
-        return;
+        return true;
+    if (TIME_BEFORE(current_tick, iap_retry_at))
+        return false;
 
     iap_reset_device(&device);
     queue_init(&iap_queue, true);
@@ -731,7 +735,11 @@ static void iap_start(void)
             IF_PRIO(, PRIORITY_SYSTEM)
             IF_COP(, CPU));
     if (!tid)
-        panicf("Could not create iap thread");
+    {
+        queue_delete(&iap_queue);
+        iap_retry_at = current_tick + HZ;
+        return false;
+    }
     timeout_register(&iap_task_tmo, iap_task, MS_TO_TICKS(100), (intptr_t)NULL);
     add_event(PLAYBACK_EVENT_TRACK_CHANGE, iap_track_changed);
 
@@ -740,6 +748,7 @@ static void iap_start(void)
      */
     queue_post(&iap_queue, IAP_EV_MALLOC, 0);
     iap_started = true;
+    return true;
 }
 
 static void iap_malloc(void)
@@ -1062,8 +1071,8 @@ bool iap_getc(IF_IAP_MP(int port,) const unsigned char x)
              * before the iAP thread has allocated it. */
             s->discard = !iap_running;
             s->drop_flags = 0;
-            if (!iap_running)
-                iap_start();
+            if (!iap_running && !iap_start())
+                return true;
             if (!s->discard)
                 iap_rxnext = iap_rxpayload;
             s->state = ST_SOF;

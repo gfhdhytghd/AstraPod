@@ -109,6 +109,7 @@ struct buflib_alloc_data {
     char *path; /* font path and filename (allocd at end of buffer) */
     size_t path_bufsz; /* size of path buffer */
     int refcount;        /* how many times has this font been loaded? */
+    unsigned int private_cache;
     unsigned char buffer[];
 };
 static int buflib_allocations[MAXFONTS];
@@ -372,7 +373,10 @@ static int find_font_index(const char* path)
 {
     for(int index = 0; index < MAXFONTS; index++)
     {
-        if(font_filename_matches_loaded_id(index, path))
+        if (buflib_allocations[index] <= 0)
+            continue;
+        struct buflib_alloc_data *data = core_get_data(buflib_allocations[index]);
+        if (!data->private_cache && !strcmp(data->path, path))
         {
             logf("%s Found id: [%d], %s", __func__, index, path);
             return index;
@@ -454,7 +458,7 @@ unsigned font_file_height(const char *path)
 }
 
 /* load a font with room for glyphs, limited to bufsize if not zero */
-int font_load_ex( const char *path, size_t buf_size, int glyphs )
+static int font_load_internal(const char *path, size_t buf_size, int glyphs, bool private_cache)
 {
 #ifdef HAVE_PODBOX_FONT
     size_t pbf_limit = buf_size;
@@ -531,7 +535,7 @@ int font_load_ex( const char *path, size_t buf_size, int glyphs )
 #endif
 
     /* check already loaded */
-    int font_id = find_font_index(path);
+    int font_id = private_cache ? FONT_SYSFIXED : find_font_index(path);
 
     if (font_id > FONT_SYSFIXED)
     {
@@ -609,6 +613,7 @@ int font_load_ex( const char *path, size_t buf_size, int glyphs )
 
     pdata = core_get_data_pinned(handle);
     pdata->refcount     = 1;
+    pdata->private_cache = private_cache;
     pdata->path = pdata->buffer + bufsize;
     pdata->path_bufsz = path_bufsz;
     /* save load path so we can recognize this font later */
@@ -681,6 +686,16 @@ int font_load_ex( const char *path, size_t buf_size, int glyphs )
     core_put_data_pinned(pdata);
     logf("%s id: [%d], %s", __func__, font_id, path);
     return font_id; /* success!*/
+}
+
+int font_load_ex(const char *path, size_t bufsize, int glyphs)
+{
+    return font_load_internal(path, bufsize, glyphs, false);
+}
+
+int font_load_private(const char *path, int glyphs)
+{
+    return font_load_internal(path, 0, glyphs, true);
 }
 
 int font_load(const char *path)

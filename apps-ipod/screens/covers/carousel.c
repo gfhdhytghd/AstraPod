@@ -448,9 +448,11 @@ static struct {
     struct ui_scene sheet;
     const struct carousel_model *model;
     struct carousel_album_header album;
-    int index, selected, top;
+    int index;
     bool panel_open, returning, restored_pixels;
 } wps_handover;
+
+static void close_album_panel(const struct carousel_model *owner);
 
 void carousel_prepare_transition(void)
 {
@@ -514,8 +516,8 @@ void carousel_wps_end(bool back)
     }
     if (wps_handover.model)
     {
-        if (wps_handover.model->external && wps_handover.panel_open)
-            wps_handover.model->panel_close();
+        if (wps_handover.panel_open)
+            close_album_panel(wps_handover.model);
         ui_scene_discard(&wps_handover.sheet);
         ui_scene_discard(&pf_scene);
         wps_handover.model = NULL;
@@ -1519,6 +1521,15 @@ static bool create_pf_thread(void)
 }
 
 
+static void wake_pf_thread(void)
+{
+    if (thread_is_running)
+    {
+        queue_remove_from_head(&thread_q, EV_WAKEUP);
+        queue_post(&thread_q, EV_WAKEUP, 0);
+    }
+}
+
 void carousel_album_caption(const char *albumtxt, const char *artisttxt,
                             int year, bool untagged, int revision)
 {
@@ -1827,14 +1838,12 @@ void carousel_drop_slides(void)
     buf_ctx_lock();
     free_all_slide_prio(-1);
     buf_ctx_unlock();
-    queue_remove_from_head(&thread_q, EV_WAKEUP);
-    queue_post(&thread_q, EV_WAKEUP, 0);
+    wake_pf_thread();
 }
 
 void carousel_provider_changed(void)
 {
-    queue_remove_from_head(&thread_q, EV_WAKEUP);
-    queue_post(&thread_q, EV_WAKEUP, 0);
+    wake_pf_thread();
 }
 
 static void free_all_slide_prio(int prio)
@@ -3544,8 +3553,7 @@ void set_current_slide(const int slide_index)
     center_index = fbound(0, slide_index, number_of_slides - 1);
     if (thread_is_running && old_center_index != center_index)
     {
-        queue_remove_from_head(&thread_q, EV_WAKEUP);
-        queue_post(&thread_q, EV_WAKEUP, 0);
+        wake_pf_thread();
     }
     target = center_index;
     slide_frame = center_index << 16;
@@ -3621,8 +3629,7 @@ void carousel_reload(int (*compare)(const void *, const void *))
     }
 
     initialize_slide_cache();
-    if (!create_pf_thread())
-        splash(HZ, ID2P(LANG_CAROUSEL_NO_START));
+    create_pf_thread();
 }
 
 /**
@@ -4331,7 +4338,7 @@ static void update_scroll_animation(void)
          * resting place and the choice costs nothing to make. */
         if (!native)
             pf_flat_snap = flat_pace(motion_clock()) < flat_duration(PF_FLAT_MIN);
-        queue_post(&thread_q, EV_WAKEUP, 0);
+        wake_pf_thread();
         if (pf_random_spinning)
             keyclick_click(true, BUTTON_SCROLL_FWD);
         if (!native)
@@ -4714,7 +4721,8 @@ bool carousel_reinit(void)
     if (!init())
         return false;
     set_current_slide(index);
-    return create_pf_thread();
+    create_pf_thread();
+    return true;
 }
 
 #if PF_SHOW_STATS
@@ -4873,7 +4881,7 @@ struct panel_track {
 };
 
 static struct album_panel {
-    struct carousel_album_header header;
+    struct carousel_album_header header, original_header;
     struct panel_track rows[PANEL_CACHE];
     struct album_blur_source blur_source;
     unsigned blur_generation;
@@ -4894,7 +4902,7 @@ static struct album_panel {
     char count_label[80];
     int dot_x, count_x;
     int digit_width;
-    bool tabular, initialized, header_ready, digits_ready;
+    bool tabular, initialized, header_ready, digits_ready, resuming;
 } panel;
 
 static void panel_layout_header(void);
@@ -4910,12 +4918,11 @@ static struct album_blur_source panel_blur_source(int index)
     return source;
 }
 
-static void close_album_panel(bool suspend)
+static void close_album_panel(const struct carousel_model *owner)
 {
     if (!panel.live)
         return;
-    if (!suspend || !model->external)
-        model->panel_close();
+    owner->panel_close();
     ui_perf_end(panel.trace);
     if (panel.tracks > 0)
         core_free(panel.tracks);
@@ -4934,6 +4941,7 @@ static bool open_album_panel(int selected, int top)
 {
     if (!model->panel_open || !model->panel_open(center_index, &panel.header))
         return false;
+    panel.original_header = panel.header;
     panel.live = true;
     panel.count = -1;
     panel.now_id = -1;
@@ -5214,7 +5222,15 @@ static void panel_read_rows(void)
             struct panel_track next = { .index = track + 1 };
             next.ready = panel_track_read(track, &next, remote_id);
             if (!next.ready)
+            {
+                panel.missing = true;
+                if (row->ready && row->index == track + 1)
+                {
+                    track++;
+                    continue;
+                }
                 strlcpy(next.title, str(LANG_WAIT), sizeof(next.title));
+            }
             if (row->index != next.index || row->duration != next.duration ||
                 strcmp(row->title, next.title))
             {
@@ -5240,7 +5256,11 @@ static void panel_read_tracks(void)
 {
     int count = panel.count;
     if (model->external)
-        count = model->panel_count();
+    {
+        int remote_count = model->panel_count();
+        if (remote_count >= 0)
+            count = remote_count;
+    }
     else if (count == -1)
     {
         panel.tracks = db_summary_album_track_ids(&carousel_idx.album_index[center_index],
@@ -5296,15 +5316,14 @@ static void panel_step_scroll(void)
 
 static void panel_load_fonts(void)
 {
-    /* The native theme loader resolves these same size names to PBF1 in FU108. */
-    static const struct ui_theme sizes = { .font = {
-        [UI_FONT_TITLE] = "18-noto-sans",
-        [UI_FONT_BODY] = "14-noto-sans",
-        [UI_FONT_WPS_META] = "12-noto-sans",
-    } };
-    panel.album_font = ui_theme_font_load(&sizes, UI_FONT_TITLE, 48);
-    panel.title_font = ui_theme_font_load(&sizes, UI_FONT_BODY, 96);
-    panel.small_font = ui_theme_font_load(&sizes, UI_FONT_WPS_META, 32);
+    /* Now Playing and Lyrics may load the same faces while the panel is
+     * suspended. Their glyphs must not replace the panel's two pages. */
+    panel.album_font = font_load_private(FONT_DIR "/18-noto-sans.pbf", 48);
+    /* Two pages of UTF-8 titles and the artist label. A distinct
+     * non-ASCII character takes at least two bytes in the source. */
+    int body_glyphs = (PANEL_CACHE + 1) * (CAROUSEL_TRACK_TEXT / 2) + 128;
+    panel.title_font = font_load_private(FONT_DIR "/14-noto-sans.pbf", body_glyphs);
+    panel.small_font = font_load_private(FONT_DIR "/12-noto-sans.pbf", 32);
 }
 
 static void panel_layout_digits(void)
@@ -5702,12 +5721,14 @@ static void step_album_flip(void)
             panel_layout_digits();
         if (panel.scroll_frames)
             panel_step_scroll();
-        if (!panel.initialized || !TIME_BEFORE(current_tick, panel.next_read))
+        if (!panel.resuming &&
+            (!panel.initialized || !TIME_BEFORE(current_tick, panel.next_read)))
             panel_read_tracks();
     }
     if (panel.dirty && lcd_active())
     {
         draw_album_flip();
+        panel.resuming = false;
         if (done)
         {
             ui_perf_end(panel.trace);
@@ -5715,7 +5736,7 @@ static void step_album_flip(void)
             panel.moving = false;
         }
         if (!panel.position && !panel.moving)
-            close_album_panel(false);
+            close_album_panel(model);
     }
 }
 
@@ -5914,8 +5935,15 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
     int blur_index = -1;
     unsigned blur_slide_revision = 0, blur_art_revision = 0, blur_theme_revision = 0;
     bool first_frame = true;
+    long loader_retry = current_tick + HZ;
 
     while (true) {
+        if (!thread_is_running && TIME_AFTER(current_tick, loader_retry) &&
+            !usb_host_wants_storage())
+        {
+            create_pf_thread();
+            loader_retry = current_tick + HZ;
+        }
         /* An artwork pass finished while the carousel was open. Slides loaded
          * while it ran may have got the placeholder because their thumbnail had
          * not been generated yet, so drop the cached surfaces and let the
@@ -5928,8 +5956,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             buf_ctx_lock();
             free_all_slide_prio(-1);
             buf_ctx_unlock();
-            queue_remove_from_head(&thread_q, EV_WAKEUP);
-            queue_post(&thread_q, EV_WAKEUP, 0);
+            wake_pf_thread();
             art_owed = true;   /* every slide on screen just went away */
             art_seen_generation = art_generation;
         }
@@ -6046,7 +6073,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         if (!model->external && !db_summary_current(&carousel_idx))
         {
             restored_pixels = false;
-            close_album_panel(false);
+            close_album_panel(model);
             end_pf_thread();
             if (!check_database())
             {
@@ -6077,7 +6104,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
          * carousel's released art cache fills again. Input can take over. */
         if (restored_pixels)
         {
-            if (!dark && button == ACTION_NONE && agents_nav_pending() == AGENTS_NAV_NONE &&
+            if (!panel.resuming && !dark && button == ACTION_NONE && agents_nav_pending() == AGENTS_NAV_NONE &&
                 ui_clock_frame((uint32_t)USEC_TIMER - frame_clock) < ANIM_F(15) &&
                 !restored_covers_ready())
                 continue;
@@ -6522,7 +6549,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             end_pf_thread();
             ret = quick_screen_current(button, NULL);
             if (ret == QUICKSCREEN_IN_USB) return GO_TO_ROOT;
-            if (!create_pf_thread()) return GO_TO_PREVIOUS;
+            create_pf_thread();
             if (pf_show_statusbar)
                 sb_set_persistent_title(model_title(), Icon_NOICON, SCREEN_MAIN);
             lcd_set_viewport(&pf_vp);
@@ -6542,7 +6569,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             trace_attempted = false;
             end_pf_thread();
             ret = model->on_menu();
-            if (ret < 0 && !create_pf_thread()) return GO_TO_PREVIOUS;
+            if (ret < 0)
+                create_pf_thread();
             if (ret >= 0)
                 return ret;   /* a GO_TO_* screen code */
             /* Handled in place -- restore the carousel's own status bar/viewport
@@ -6571,12 +6599,12 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         case PF_SORTING_NEXT:
             end_pf_thread();
             model->sort_next();
-            if (!create_pf_thread()) return GO_TO_PREVIOUS;
+            create_pf_thread();
             break;
         case PF_SORTING_PREV:
             end_pf_thread();
             model->sort_prev();
-            if (!create_pf_thread()) return GO_TO_PREVIOUS;
+            create_pf_thread();
             break;
         case PF_RANDOM:
             show_random_slide();
@@ -6636,7 +6664,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             if (!carousel_save_resume())
             {
                 splash(HZ, "Not enough memory to keep covers");
-                if (!create_pf_thread()) return GO_TO_PREVIOUS;
+                create_pf_thread();
                 break;
             }
             int destination = model->enter(center_index);
@@ -6661,6 +6689,8 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     if (!agents_nav_enter(AGENTS_NAV_COVERS))
     {
         carousel_cancel_transition();
+        if (wps_handover.returning)
+            carousel_wps_end(false);
         return GO_TO_PREVIOUS;
     }
     int handle = core_alloc(sizeof(*workspace));
@@ -6668,6 +6698,8 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     {
         carousel_cancel_transition();
         agents_nav_leave(AGENTS_NAV_COVERS);
+        if (wps_handover.returning)
+            carousel_wps_end(false);
         return GO_TO_PREVIOUS;
     }
     workspace = core_get_data_pinned(handle);
@@ -6694,10 +6726,15 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
         wps_handover.restored_pixels = false;
         wps_handover.index = center_index;
         wps_handover.panel_open = panel.live && panel.to != 0;
-        wps_handover.album = panel.header;
-        wps_handover.selected = panel.selected;
-        wps_handover.top = panel.top;
-        close_album_panel(wps_handover.panel_open);
+        if (wps_handover.panel_open)
+        {
+            ui_perf_end(panel.trace);
+            panel.trace = 0;
+            panel.moving = panel.play_pending = panel.play_failed = false;
+            panel.scroll_frames = 0;
+        }
+        else
+            close_album_panel(m);
         ui_scene_capture_modal(&wps_handover.sheet);
         /* The Cover Flow pixels are fullscreen. Its viewport stack has
          * already unwound to Home so that playback can take over. */
@@ -6705,7 +6742,7 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     }
     else
     {
-        close_album_panel(false);
+        close_album_panel(model);
         if (pf_scene.backdrop_handle > 0)
             ui_scene_close_modal(&pf_scene, pf_shown, "covers-down");
         else
@@ -6721,7 +6758,7 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
     int ret;
 
     end_pf_thread();
-    if (wps_handover.model && wps_handover.model != m)
+    if (wps_handover.model && (wps_handover.model != m || !wps_handover.returning))
         carousel_wps_end(false);
     if (resume_model && resume_model != m) carousel_forget_resume();
     model = m;
@@ -6773,26 +6810,27 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
     if (wps_handover.returning)
     {
         set_current_slide(MIN(wps_handover.index, number_of_slides - 1));
-        if (wps_handover.panel_open &&
-            open_album_panel(wps_handover.selected, wps_handover.top))
+        if (wps_handover.panel_open)
         {
-            if (!strcmp(wps_handover.album.title, panel.header.title) &&
-                !strcmp(wps_handover.album.artist, panel.header.artist))
+            /* Revalidate the album but keep the painted rows and font caches
+             * while the provider is republishing metadata. */
+            if (model->panel_open(center_index, &wps_handover.album) &&
+                !strcmp(wps_handover.album.title, panel.original_header.title) &&
+                !strcmp(wps_handover.album.artist, panel.original_header.artist))
+            {
                 panel.position = panel.to = FLIP_OPEN;
+                /* Paint retained data before the provider can change it. */
+                panel.resuming = panel.dirty = true;
+                panel.next_read = current_tick;
+            }
             else
-                close_album_panel(false);
+                close_album_panel(model);
         }
         ui_scene_discard(&wps_handover.sheet);
         wps_handover.model = NULL;
         wps_handover.returning = false;
     }
-    if (!create_pf_thread())
-    {
-        cleanup();
-        error_wait(str(LANG_CAROUSEL_NO_START));
-        pop_current_activity();
-        return GO_TO_PREVIOUS;
-    }
+    create_pf_thread();
 
     /* Play held is the random spin here, and held long enough it would power
      * off. Held Play on the playing screen opens this, and that hold still

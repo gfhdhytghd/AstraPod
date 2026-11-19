@@ -25,6 +25,10 @@
 #include "database/tagcache.h"
 #include "system/debug_log.h"
 #include "bg_task.h"
+#include "font.h"
+#ifdef HAVE_PODBOX_FONT
+#include "font_pbf.h"
+#endif
 
 /* How long a task sleeps between checks. This is all deferred work with
  * nobody waiting on it, so the tick is slow deliberately. */
@@ -62,6 +66,10 @@ static int bg_steps_count;
 static long bg_stack[BG_STACK_SIZE / sizeof(long)];
 static const char bg_thread_name[] = "bgtask";
 static struct event_queue bg_queue;
+static unsigned bg_thread_id;
+#ifdef HAVE_PODBOX_FONT
+#define BG_EVENT_GLYPHS 0x1182
+#endif
 
 /* ---------------------------------------------------------------------------
  * The marks
@@ -243,6 +251,10 @@ bool bg_task_should_stop(const struct bg_task *task)
         return true;
 
     /* Count field is filters minus one. */
+#ifdef HAVE_PODBOX_FONT
+    if (queue_peek_ex(&bg_queue, NULL, 0, QPEEK_FILTER1(BG_EVENT_GLYPHS)))
+        return true;
+#endif
     return queue_peek_ex(&bg_queue, NULL, 2, stop_events);
 }
 
@@ -477,6 +489,12 @@ static void bg_thread(void)
                     bg_steps[i]->request(false);
                 break;
 
+#ifdef HAVE_PODBOX_FONT
+            case BG_EVENT_GLYPHS:
+                font_pbf_prefetch_work();
+                break;
+#endif
+
             case SYS_TIMEOUT:
                 for (i = 0; i < bg_tasks_count; i++)
                     bg_task_tick(bg_tasks[i]);
@@ -497,24 +515,43 @@ static void bg_thread(void)
     }
 }
 
+#ifdef HAVE_PODBOX_FONT
+static void schedule_glyphs(void)
+{
+    if (!queue_peek_ex(&bg_queue, NULL, 0, QPEEK_FILTER1(BG_EVENT_GLYPHS)))
+        queue_post(&bg_queue, BG_EVENT_GLYPHS, 0);
+}
+#endif
+
 void bg_task_start(void)
 {
     queue_init(&bg_queue, true);
-    create_thread(bg_thread, bg_stack, sizeof(bg_stack), 0,
-                  bg_thread_name IF_PRIO(, PRIORITY_BACKGROUND)
-                  IF_COP(, CPU));
+    bg_thread_id = create_thread(bg_thread, bg_stack, sizeof(bg_stack), 0,
+                                 bg_thread_name IF_PRIO(, PRIORITY_BACKGROUND)
+                                 IF_COP(, CPU));
+    if (!bg_thread_id)
+    {
+        /* A USB broadcast must not count an acknowledgement from an
+         * optional worker that never started. */
+        queue_delete(&bg_queue);
+        return;
+    }
+#ifdef HAVE_PODBOX_FONT
+    font_pbf_prefetch_init(schedule_glyphs);
+#endif
 }
 
 void bg_task_post(struct bg_task *task, long id)
 {
-    queue_post(&bg_queue, id, (intptr_t)task);
+    if (bg_thread_id)
+        queue_post(&bg_queue, id, (intptr_t)task);
 }
 
 bool bg_task_queued(const struct bg_task *task, long id)
 {
     struct queue_event ev;
 
-    return queue_peek_ex(&bg_queue, &ev, 0, QPEEK_FILTER1(id))
+    return bg_thread_id && queue_peek_ex(&bg_queue, &ev, 0, QPEEK_FILTER1(id))
            && ev.data == (intptr_t)task;
 }
 

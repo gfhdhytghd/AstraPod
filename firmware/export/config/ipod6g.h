@@ -288,14 +288,9 @@
 #endif
 /* Inline earphone remote, decoded by the jack "Mikey" controller */
 #define HAVE_MIKEY_REMOTE
-/* One thread each for the iAP serial link and the remote's poller.
- * Short by one and create_thread() returns NULL, which neither caller
- * checks -- the feature is then simply absent. */
-#if defined(IPOD_ACCESSORY_PROTOCOL) && defined(HAVE_MIKEY_REMOTE)
-#define TARGET_EXTRA_THREADS 2
-#else
-#define TARGET_EXTRA_THREADS 1
-#endif
+/* Room for resident PodBox services and the overlap of serial iAP,
+ * directory rebuilds and Cover Flow. Stacks are supplied by each caller. */
+#define TARGET_EXTRA_THREADS 7
 #endif
 
 /* Define this if you can switch on/off the accessory power supply */

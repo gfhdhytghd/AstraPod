@@ -38,11 +38,35 @@ top bearings, unsigned 8-bit width and height, and a tightly packed
 row-major alpha mask. Each byte holds two pixels, low nibble first.
 Alpha 0 is opaque and 15 is transparent.
 
-The firmware keeps anchors, kerning rows, one index page and an LRU
-glyph cache in the existing core font allocation. A cache miss reads
-only the relevant page and record. Missing codepoints use the merged
-face's U+FFFD glyph. Native text does not load another face on a miss.
-Use the reserved icon fonts for icon tracks.
+An optional six-byte trailer starts with `INK1`. Its last two bytes give
+the maximum ink beyond the top and bottom of the logical line cell.
+Lyrics uses these bounds for its native raster, row spacing and repaint
+bands. The header's file length includes the trailer. Existing PBF1
+readers can still use the same index and bitmap records.
+
+An optional `FIX1` descriptor precedes `INK1`. It stores seven unsigned
+32-bit values: absolute directory, hot and cold offsets, cell stride, hot
+cell count, total cell count and variable record count. The directory starts
+with one 16-bit cell rank per codepoint in U+3400–U+9FFF, U+AC00–U+D7A3 and
+U+F900–U+FAFF. Rank 0xFFFF means no fixed cell. The remaining directory
+contains the sorted index entries for the variable records. A cell has the
+usual bitmap record with a six-byte prefix (size, advance and kerning classes)
+and transparent padding. The sorted PBF1 index still addresses every bitmap.
+
+The hot cells are contiguous in GB2312 level 1 order, followed by Big5 primary
+ideographs outside that set. ASCII, kana, punctuation and Hangul precede the
+remaining cold fixed cells. Every output face retains its own repertoire.
+Missing codepoints use that face's U+FFFD glyph.
+
+Native lyrics, lists and carousel pages resolve their visible and coming
+text from the resident directory before drawing. The worker sorts the records
+by disk offset, then reads forward from the first aligned 4 KiB block to the
+last required block. The screen thread publishes complete records and paints
+only ready text in a cache-only scope. A 16-set, four-way lookup uses the
+existing LRU pool for bitmap storage. The three lyric faces lease hot blocks
+from memory reserved before audio initialization. Longer lyric documents
+prioritize the initial viewport and request more glyphs as focus advances.
+Readers can still load older PBF1 files containing only the sorted index.
 
 ## Verification
 

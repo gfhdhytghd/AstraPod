@@ -1031,7 +1031,9 @@ void settings_apply(bool read_disk)
             {
                 if (ui_bold_font_id >= 0)
                     font_unload(ui_bold_font_id);
-                ui_bold_font_id = font_load(buf); /* <0 -> falls back to UI font */
+                /* The PBF directory can exceed the legacy font_load limit.
+                 * Give the shared face room for the glyphs of a full label. */
+                ui_bold_font_id = font_load_ex(buf, 0, global_settings.glyphs_to_cache);
             }
         }
         else if (ui_bold_font_id >= 0)

@@ -40,9 +40,10 @@ FACES = (
     "HarmonyOS Sans", "HarmonyOS Sans SC", "Noto Sans CJK SC", "Noto Sans",
     "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari", "Noto Sans Thai",
     "Noto Sans Symbols", "Noto Sans Symbols 2",
+    "HarmonyOS Sans TC", "Noto Serif CJK SC",
 )
 REPLACEMENT = 0xFFFD
-COVERAGE = "\u00ad‐‑‒–—―‘’‚“”„†‡•…‰′″‹›※、。・「」『』【】《》！（），．：；？～·￥✓✗←↑→↓▶⏸♫⌘␣□"
+COVERAGE = "\u00ad‐‑‒–—―‘’‚“”„†‡•‧…‰′″‹›※、。・「」『』【】《》！（），．：；？～·￥✓✗←↑→↓▶⏸♫♡⌘␣□"
 
 
 def fontconfig():
@@ -79,7 +80,7 @@ def lang_strings(lang_dir):
                 yield file.name, re.sub(r'\\(["\\])', r"\1", match[1])
 
 
-def required_codepoints(lang_dir):
+def required_codepoints(lang_dir, full=True):
     result = set(range(32, 127)) | set(range(0xA0, 0x180))
     result.update(map(ord, COVERAGE))
     result.add(REPLACEMENT)
@@ -93,6 +94,17 @@ def required_codepoints(lang_dir):
         result.update(map(ord, file.read_text(encoding="utf-8-sig")))
     # The firmware bidi path emits Arabic presentation forms.
     result.update(range(0xFE80, 0xFEFD))
+    if full:
+        result.update(range(0x202a, 0x202f))  # invisible directional formatting
+        ranges = (
+            (0x0370, 0x03e1), (0x03f0, 0x04ff),  # Greek and Cyrillic
+            (0x3000, 0x303f), (0x3040, 0x30ff), (0x3100, 0x312f),
+            (0x31a0, 0x31bb), (0x31f0, 0x31ff),  # Bopomofo and kana extensions
+            (0x3400, 0x4dbf), (0x4e00, 0x9fff), (0xac00, 0xd7a3),
+            (0xff00, 0xffef),
+        )
+        result.update(cp for start, end in ranges for cp in range(start, end + 1)
+                      if ud.category(chr(cp)) != "Cn")
     return result
 
 
@@ -101,7 +113,8 @@ def ideograph(cp):
 
 
 def cjk(cp):
-    return ideograph(cp) or 0x3040 <= cp <= 0x30FF or 0xAC00 <= cp <= 0xD7AF or 0x3100 <= cp <= 0x312F
+    return (ideograph(cp) or 0x3040 <= cp <= 0x312F or 0x31A0 <= cp <= 0x31FF or
+            0xAC00 <= cp <= 0xD7AF or 0xFF65 <= cp <= 0xFF9F)
 
 
 def punct(cp):
@@ -115,12 +128,15 @@ def invisible(cp):
 def resolve(fonts, required):
     sources = {}
     missing = []
+    tc = FACES.index("HarmonyOS Sans TC")
+    serif = FACES.index("Noto Serif CJK SC")
     for cp in sorted(required):
         if invisible(cp):
             sources[cp] = None
             continue
-        order = ((0, 1, 3, 2) if cp < 0x300 and not cjk(cp) else (1, 0, 2, 3))
-        source = next((i for i in (*order, *range(4, len(fonts))) if cp in fonts[i].cmap), None)
+        order = ((0, 1, 3, tc, 2, serif) if cp < 0x300 and not cjk(cp) else
+                 (1, 0, tc, 2, serif, 3))
+        source = next((i for i in (*order, *range(4, tc)) if cp in fonts[i].cmap), None)
         if source is None:
             missing.append(f"U+{cp:04X} {chr(cp)}")
         else:
@@ -258,6 +274,8 @@ def kern_candidates(font, codepoints):
 def winning_pairs(faces, mapping):
     choices = {}
     for i, face in enumerate(faces[:4]):
+        # CJK letters use integral cells. Only punctuation can kern a CJK
+        # pair; avoid expanding large ideograph classes against each other.
         for a, b in set(kern_candidates(face, mapping)):
             if not (cjk(a) or cjk(b)) and mapping[a] == mapping[b] == i:
                 choices[a, b] = i
@@ -279,6 +297,53 @@ def pack_alpha(pixels):
 ALPHA = tuple(15 - round(15 * (v / 255) ** GAMMA) for v in range(256))
 
 
+def cjk_alignment(faces):
+    # Match the optical centres of square ideographs from all supplements
+    # to HarmonyOS SC's baseline at the same pixel size.
+    def ink_center(face, cp):
+        (_, top, _, rows), _ = face.bitmap(cp, 0)
+        return 2 * top - rows
+
+    return {
+        i: round(median((ink_center(faces[1], cp) - ink_center(faces[i], cp)) / 2
+                        for cp in map(ord, "田日国目口中封肖师字") if cp in faces[i].cmap))
+        for i in (2, FACES.index("HarmonyOS Sans TC"), FACES.index("Noto Serif CJK SC"))
+    }
+
+
+def frequency_order(mapping):
+    def decoded(encoding, leads, trails, last):
+        for lead in leads:
+            for trail in trails:
+                if (lead, trail) <= last:
+                    yield ord(bytes((lead, trail)).decode(encoding))
+
+    gb = decoded("gb2312", range(0xb0, 0xd8), range(0xa1, 0xff), (0xd7, 0xf9))
+    big5 = decoded("big5", range(0xa4, 0xc7),
+                   (*range(0x40, 0x7f), *range(0xa1, 0xff)), (0xc6, 0x7e))
+    common = tuple(cp for cp in dict.fromkeys((*gb, *big5)) if cp in mapping)
+    common_set = set(common)
+    rest = [cp for cp in mapping if cp not in common_set and cp != REPLACEMENT]
+    rest.sort(key=lambda cp: not (cp < 0x80 or punct(cp) or 0x3040 <= cp <= 0x312f or
+                                 0x31a0 <= cp <= 0x31ff or 0xac00 <= cp <= 0xd7a3))
+    # A replacement is available even if the requested codepoint is absent.
+    return (REPLACEMENT, *common, *rest), len(common) + 1
+
+
+FIXED_RANGES = ((0x3400, 0x9fff), (0xac00, 0xd7a3), (0xf900, 0xfaff))
+FIXED_TRAILER = struct.Struct("<4s7I")
+BLOCK = 4096
+
+
+def fixed_ordinal(cp):
+    ordinal = 0
+    for first, last in FIXED_RANGES:
+        if first <= cp <= last:
+            return ordinal + cp - first
+        ordinal += last - first + 1
+    return None
+
+
 def compile_font(path, faces, mapping, pairs, size, weight):
     for face in faces:
         face.set_size(size, weight)
@@ -288,14 +353,7 @@ def compile_font(path, faces, mapping, pairs, size, weight):
     ascent, source_height = faces[1].metrics()
     height = size + (size >= 18)
     ascent = min(height, max(1, ascent - (source_height - height + 1) // 2))
-    # Give the CJK supplement the same optical centre as HarmonyOS, using
-    # ordinary square ideographs present in both faces at this ppem.
-    def ink_center(face, cp):
-        (_, top, _, rows), _ = face.bitmap(cp, 0)
-        return 2 * top - rows
-
-    cjk_shift = round(median((ink_center(faces[1], cp) - ink_center(faces[2], cp)) / 2
-                             for cp in map(ord, "田日国目口中封肖师字")))
+    cjk_shifts = cjk_alignment(faces)
 
     ordinal = {cp: i for i, cp in enumerate(mapping)}
     row = collections.defaultdict(dict)
@@ -333,10 +391,12 @@ def compile_font(path, faces, mapping, pairs, size, weight):
     offsets.append(len(entries) // PAIR.size)
     kern = struct.pack(f"<{len(offsets)}H", *offsets) + entries
 
-    records = bytearray()
-    index = bytearray()
+    glyphs = {}
     max_record = max_advance = 0
-    for cp, source in mapping.items():
+    ink_above = ink_below = 0
+    order, common_count = frequency_order(mapping)
+    for cp in order:
+        source = mapping[cp]
         if source is None:
             advance, record = 0, b"\x01\0\0\0\0"
         else:
@@ -346,28 +406,89 @@ def compile_font(path, faces, mapping, pairs, size, weight):
             record = bytearray([len(phases)])
             for phase in phases:
                 (x, y, w, h), bitmap = face.bitmap(cp, phase)
-                if source == 2 and cjk(cp):
-                    y += cjk_shift
+                if cjk(cp):
+                    y += cjk_shifts.get(source, 0)
+                if w and h:
+                    ink_above = max(ink_above, y - ascent)
+                    ink_below = max(ink_below, ascent - y + h - height)
                 record.extend(struct.pack("<bbBB", x, y, w, h))
                 record.extend(pack_alpha(bitmap))
         max_record = max(max_record, len(record))
         max_advance = max(max_advance, (advance + 63) // 64)
-        index.extend(INDEX.pack(cp, len(records), len(record), advance,
-                                left.get(cp, 0), right.get(cp, 0)))
-        records.extend(record)
+        glyphs[cp] = (record, advance, left.get(cp, 0), right.get(cp, 0))
 
     anchors = b"".join(struct.pack("<I", cp) for cp in list(mapping)[::PAGE])
     index_at = HEADER.size + len(anchors) + len(kern)
-    data_at = index_at + len(index)
+    data_at = index_at + INDEX.size * len(mapping)
+    fixed = {cp: fixed_ordinal(cp) for cp in order
+             if fixed_ordinal(cp) is not None and not left.get(cp) and not right.get(cp)}
+    hot = order[1:common_count]
+    if not all(cp in fixed for cp in hot):
+        raise ValueError("A common ideograph requires a variable cell")
+    cold = [cp for cp in order[common_count:] if cp in fixed]
+    cold.sort(key=lambda cp: not 0xac00 <= cp <= 0xd7a3)
+    slots = (*hot, *cold)
+    stride = (max(len(glyphs[cp][0]) for cp in slots) + 6 + 8 + 3) & ~3
+    ranks = [0xffff] * sum(last - first + 1 for first, last in FIXED_RANGES)
+    for rank, cp in enumerate(slots):
+        ranks[fixed[cp]] = rank
+
+    records = bytearray()
+    entries = {}
+
+    def align(tail=0):
+        records.extend(b"\0" * (-(data_at + len(records) + tail) % BLOCK))
+
+    def emit(cp, cell=False):
+        record, advance, row, col = glyphs[cp]
+        if cell:
+            records.extend(struct.pack("<HHBB", len(record), advance, row, col))
+        entries[cp] = INDEX.pack(cp, len(records), len(record), advance, row, col)
+        records.extend(record)
+        if cell:
+            records.extend(b"\xff" * (stride - 6 - len(record)))
+
+    align()
+    map_at = data_at + len(records)
+    records.extend(struct.pack(f"<{len(ranks)}H", *ranks))
+    variable = sorted(cp for cp in mapping if cp not in fixed)
+    variable_at = len(records)
+    records.extend(b"\0" * (INDEX.size * len(variable)))
+    emit(REPLACEMENT)
+    align()
+    hot_at = data_at + len(records)
+    for cp in hot:
+        emit(cp, cell=True)
+    common_bytes = len(hot) * stride
+    # Keep kana, punctuation and Hangul close to the front of the cold region.
+    for cp in order[common_count:]:
+        if cp not in fixed and (cp < 0x80 or punct(cp) or 0x3040 <= cp <= 0x31ff):
+            emit(cp)
+    align()
+    cold_at = data_at + len(records)
+    for cp in cold:
+        emit(cp, cell=True)
+    for cp in order[common_count:]:
+        if cp not in entries:
+            emit(cp)
+    records[variable_at:variable_at + INDEX.size * len(variable)] = b"".join(
+        entries[cp] for cp in variable)
+    trailer = FIXED_TRAILER.pack(b"FIX1", map_at, hot_at, cold_at, stride,
+                                 len(hot), len(slots), len(variable))
+    bounds = trailer + b"INK1" + bytes((ink_above, ink_below))
+    align(len(bounds))
+    index = b"".join(entries[cp] for cp in mapping)
     header = HEADER.pack(b"PBF1", height, ascent, max_advance, max_record,
                          len(anchors) // 4, ordinal[REPLACEMENT],
                          len(mapping), len(left_rows),
-                         index_at, data_at, data_at + len(records))
-    path.write_bytes(header + anchors + kern + index + records)
+                         index_at, data_at, data_at + len(records) + len(bounds))
+    path.write_bytes(header + anchors + kern + index + records + bounds)
     return {"size": size, "weight": weight, "height": height, "ascent": ascent,
-            "noto_cjk_shift": cjk_shift,
+            "noto_cjk_shift": cjk_shifts[2], "ink_above": ink_above, "ink_below": ink_below,
             "max_record": max_record, "pairs": pair_count,
-            "kern_bytes": len(kern), "bytes": path.stat().st_size}
+            "kern_bytes": len(kern), "bytes": path.stat().st_size,
+            "common_count": len(hot), "common_bytes": common_bytes,
+            "fixed_count": len(slots), "cell_bytes": stride, "map_bytes": len(ranks) * 2 + INDEX.size * len(variable)}
 
 
 def main():
@@ -389,6 +510,9 @@ def main():
                 fonts.append(face)
             mapping = resolve(fonts, required_codepoints(args.lang_dir))
             pairs = winning_pairs(fonts, mapping)
+            index_mapping = resolve(fonts, required_codepoints(args.lang_dir, full=False))
+            index_pairs = {pair: face for pair, face in pairs.items()
+                           if all(cp in index_mapping for cp in pair)}
             manifest = {
                 "glyphs": len(mapping), "gamma": GAMMA,
                 "faces": {f.name: {"index": f.index, "source_file": Path(f.path).name,
@@ -404,7 +528,10 @@ def main():
                     prev, info = generated[spec]
                     path.write_bytes(prev.read_bytes())
                 else:
-                    info = compile_font(path, fonts, mapping, pairs, *spec)
+                    if spec[0] == 56:
+                        info = compile_font(path, fonts, index_mapping, index_pairs, *spec)
+                    else:
+                        info = compile_font(path, fonts, mapping, pairs, *spec)
                     generated[spec] = path, info
                 manifest["fonts"][name] = info
                 print(name, info, flush=True)

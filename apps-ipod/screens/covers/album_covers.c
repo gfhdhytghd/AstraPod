@@ -123,6 +123,7 @@ static int album_panel_play(int index);
 static int  jmp_idx_prev(void);
 static int  jmp_idx_next(void);
 static void draw_album_text(void);
+static bool album_caption_at(int index, struct carousel_album_header *text);
 static void album_sort_next(void);
 static void album_sort_prev(void);
 static void set_initial_slide(const char *selected_file);
@@ -146,6 +147,7 @@ static const struct carousel_model album_model = {
     .jump_prev   = jmp_idx_prev,
     .jump_next   = jmp_idx_next,
     .draw_text   = draw_album_text,
+    .caption_at  = album_caption_at,
     .sort_next   = album_sort_next,
     .sort_prev   = album_sort_prev,
     .set_initial = set_initial_slide,
@@ -635,6 +637,13 @@ struct bg_task album_covers_task =
  * track. The album name uses the carousel’s title font
  * where the theme configured one (global_settings.bold_font_file, settings.h)
  * -- not a double-drawn faux bold, which does not look right. */
+static bool album_caption_at(int index, struct carousel_album_header *text)
+{
+    get_album_name(index, text->title, sizeof(text->title));
+    get_album_artist(index, text->artist, sizeof(text->artist));
+    return true;
+}
+
 static void draw_album_text(void)
 {
     char album[TAGCACHE_BUFSZ], artist[TAGCACHE_BUFSZ];

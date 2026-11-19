@@ -25,7 +25,7 @@ SAMPLES = [
 
 class BitmapFont:
     def __init__(self, file):
-        self.data = file.read_bytes()
+        self.data = file if isinstance(file, bytes) else file.read_bytes()
         (self.magic, self.height, self.ascent, self.max_width, self.max_record,
          anchors, self.replacement, self.count, self.rows, index, self.bitmaps,
          size) = compiler.HEADER.unpack_from(self.data)
@@ -38,6 +38,45 @@ class BitmapFont:
         assert len(self.index) == self.count
         assert list(self.index) == sorted(self.index)
         assert list(self.index)[self.replacement] == compiler.REPLACEMENT
+
+    def check_fixed_cells(self, manifest):
+        trailer_at = len(self.data) - 6 - compiler.FIXED_TRAILER.size
+        magic, directory, hot, cold, stride, common, count, variable = (
+            compiler.FIXED_TRAILER.unpack_from(self.data, trailer_at))
+        assert magic == b"FIX1" and stride == manifest["cell_bytes"]
+        assert not (len(self.data) | directory | hot | cold) % compiler.BLOCK
+        assert common * stride == manifest["common_bytes"]
+        order, end = compiler.frequency_order(self.index)
+        assert common == end - 1 and count == manifest["fixed_count"]
+
+        ordinal_count = sum(last - first + 1 for first, last in compiler.FIXED_RANGES)
+        ranks = struct.unpack_from(f"<{ordinal_count}H", self.data, directory)
+        variable_at = directory + 2 * ordinal_count
+        variable_end = variable_at + variable * compiler.INDEX.size
+        variable_index = {
+            cp: (offset, length, advance, left, right)
+            for cp, offset, length, advance, left, right in
+            compiler.INDEX.iter_unpack(self.data[variable_at:variable_end])
+        }
+        assert variable_end <= hot <= hot + common * stride <= cold
+        used_ranks = set()
+        for cp, (offset, length, advance, left, right) in self.index.items():
+            ordinal = compiler.fixed_ordinal(cp)
+            if ordinal is None or left or right:
+                assert variable_index.pop(cp) == (offset, length, advance, left, right)
+                continue
+            rank = ranks[ordinal]
+            assert rank < count and rank not in used_ranks
+            used_ranks.add(rank)
+            cell = hot + rank * stride if rank < common else cold + (rank - common) * stride
+            assert cell + stride <= trailer_at and length + 14 <= stride
+            assert self.bitmaps + offset == cell + 6
+            assert struct.unpack_from("<HHBB", self.data, cell) == (length, advance, left, right)
+            assert self.data[cell + 6] == 1
+            assert self.data[cell + 6 + length:cell + 14 + length] == b"\xff" * 8
+        assert not variable_index and used_ranks == set(range(count))
+        assert all(ranks[compiler.fixed_ordinal(cp)] == i
+                   for i, cp in enumerate(order[1:end]))
 
     def phases(self, cp):
         offset, size, _, _, _ = self.index[cp]
@@ -83,13 +122,17 @@ def check_compiler(first, second, lang):
             assert (first / path).read_bytes() == (second / path).read_bytes(), path
         for name, face_info in manifest["fonts"].items():
             bitmap = BitmapFont(first / (name + ".pbf"))
-            assert set(bitmap.index) == set(mapping)
             size, weight = face_info["size"], face_info["weight"]
+            required = (compiler.required_codepoints(lang, full=False)
+                        if size == 56 else mapping.keys())
+            assert set(bitmap.index) == set(required)
+            bitmap.check_fixed_cells(face_info)
             for face in fonts:
                 face.set_size(size, weight)
             assert (bitmap.height, bitmap.ascent) == (face_info["height"], face_info["ascent"])
-            shift = face_info["noto_cjk_shift"]
-            for cp, source in mapping.items():
+            shifts = compiler.cjk_alignment(fonts)
+            for cp in bitmap.index:
+                source = mapping[cp]
                 phases = list(bitmap.phases(cp))
                 if source is None:
                     assert phases == [((0, 0, 0, 0), b"")]
@@ -100,7 +143,7 @@ def check_compiler(first, second, lang):
                 if source >= 2 or cp in map(ord, "封肖师字目AVTo"):
                     for phase, ((x, y, w, h), alpha) in enumerate(phases):
                         (left, top, width, height), ink = face.bitmap(cp, phase * 16)
-                        y_shift = shift if source == 2 and compiler.cjk(cp) else 0
+                        y_shift = shifts.get(source, 0) if compiler.cjk(cp) else 0
                         assert (x, y, w, h) == (left, top + y_shift, width, height)
                         assert alpha == compiler.pack_alpha(ink)
             for a, b in ("AV", "WA", "To", "ク。", "ガ、"):
@@ -112,8 +155,9 @@ def check_compiler(first, second, lang):
                 assert ref and plain
                 assert bitmap.adjustment(*cp) == ref[-1] - plain[-1] != 0, (name, a, b)
     print(json.dumps({"fonts": len(manifest["fonts"]), "glyphs_per_font": len(mapping),
-                      "deterministic": True, "noto_glyphs": sum(i is not None and i >= 2
-                                                               for i in mapping.values())}))
+                      "deterministic": True, "noto_glyphs": sum(
+                          i is not None and fonts[i].name.startswith("Noto")
+                          for i in mapping.values())}))
 
 
 def instrument(source):

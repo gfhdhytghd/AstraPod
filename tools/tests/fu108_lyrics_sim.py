@@ -28,40 +28,79 @@ FIXTURE = """<tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
 <p begin="17s" end="18s">Five native row</p>
 </div></body></tt>"""
 
+GAP_FIXTURE = """<tt><body><div>
+<p begin="0s" end="1s">First</p>
+<p begin="2.5s" end="3.5s">Second</p>
+<p begin="6s" end="7.5s">Third</p>
+<p begin="9.5s" end="11s">Fourth</p>
+</div></body></tt>"""
+
 
 def instrument(source):
+    fu111 = Path(__file__).with_name("fixtures") / "fu111_lyrics_probe.c"
     viewer = source / "apps-ipod/viewers/lyric_viewer/lyric_viewer.c"
     shutil.copyfile(Path(__file__).with_name("fixtures") / "fu108_lyrics_probe.c",
                     viewer.with_name("fu108_lyrics_probe.c"))
     text = viewer.read_text()
+    padded = "layout->ink_above" in text
+    native_pad = "layout->ink_above" if padded else "0"
+    distance = "lv_distance(from, to, -1)" if padded else "lv_distance(from, to, -1, true, -1)"
+    prefetch = ""
+    if "font_prefetch_busy()" in text:
+        prefetch = (
+            "        for (unsigned i = 0; font_prefetch_busy() && i < 8 * HZ; ++i) {\n"
+            "            lv_draw(true, LV_DRAW_ONLY);\n"
+            "            sleep(1);\n"
+            "        }\n"
+            '        probe_expect(!font_prefetch_busy(), "glyph worker drained", 0);\n'
+        )
+    paint_end = "                align, vocal ? levels : NULL"
+    paint_end += ", layout->ink_above);" if padded else ");"
+    shutil.copyfile(fu111, viewer.with_name(fu111.name))
     replacements = {
         "static uint32_t lv_clock(void)\n{":
             "static uint32_t fu108_clock;\nstatic uint32_t lv_clock(void)\n{"
             "\n#ifdef SIMULATOR\n    if (fu108_clock) return fu108_clock;\n#endif",
         "static inline __attribute__((always_inline))\nvoid lv_ink_pixel":
             "#ifdef SIMULATOR\nstatic void probe_pixel(fb_data *, unsigned);\n"
-            "static void probe_row(int, int, bool, int, int, int);\n"
-            "static int probe_kind, probe_vocal;\n#endif\n"
+            "static void probe_row(int, int, bool, int, int, int, int);\n"
+            "static int probe_kind, probe_vocal;\n"
+            "static bool fu111_row;\nstatic uint8_t fu111_actual[LV_PIXELS];\n"
+            "static void fu111_begin(int, bool, int, const char *, int, int, int, int);\n"
+            "static void fu111_end(void);\n#endif\n"
             "static inline __attribute__((always_inline))\nvoid lv_ink_pixel",
         "    *dst = lv_pack((base << 5) + (fg - base) * w);":
             "    *dst = lv_pack((base << 5) + (fg - base) * w);\n"
-            "#ifdef SIMULATOR\n    probe_pixel(dst, coverage);\n#endif",
+            "#ifdef SIMULATOR\n    probe_pixel(dst, coverage);\n"
+            "    if (fu111_row) fu111_actual[dst - lv_frame()] = coverage;\n#endif",
         "        lv_text(render, key, layout->font, h, y, alpha, edge, dim, top, bottom,":
-            "#ifdef SIMULATOR\n        probe_row(i, r, background, layout->font, y, alpha);\n#endif\n"
+            f"#ifdef SIMULATOR\n        probe_row(i, r, background, layout->font, y, alpha, {native_pad});\n"
+            "        if (getenv(\"FU111_LYRICS_PROBE\")) {\n"
+            "            char reference[LV_TEXT];\n"
+            "            strlcpy(reference, line + row->start, MIN(sizeof(reference), row->length + 1u));\n"
+            f"            fu111_begin(i, background, layout->font, reference, y, alpha, align, {native_pad});\n"
+            "        }\n#endif\n"
             "        lv_text(render, key, layout->font, h, y, alpha, edge, dim, top, bottom,",
-        "                align, vocal ? levels : NULL);":
-            "                align, vocal ? levels : NULL);\n"
-            "#ifdef SIMULATOR\n        probe_kind = 0; probe_vocal = -1;\n#endif",
+        paint_end:
+            paint_end + "\n"
+            "#ifdef SIMULATOR\n        probe_kind = 0; probe_vocal = -1;\n        fu111_end();\n#endif",
         "    const int center_x = lv_text_x(36, global_settings.lyric_align) + 18;":
             "    const int center_x = lv_text_x(36, global_settings.lyric_align) + 18;\n"
             "#ifdef SIMULATOR\n    probe_kind = 1;\n#endif",
         "\n}\n\n/* Use the same moving neighbour poses":
             "\n#ifdef SIMULATOR\n    probe_kind = 0;\n#endif\n}\n\n/* Use the same moving neighbour poses",
         "\nint lyric_viewer(void)":
-            '\n#ifdef SIMULATOR\n#include "fu108_lyrics_probe.c"\n#endif\n\nint lyric_viewer(void)',
+            ('\n#ifdef SIMULATOR\n'
+             f'#define FU108_MANUAL_DISTANCE(from, to) {distance}\n'
+             '#include "fu108_lyrics_probe.c"\n#include "fu111_lyrics_probe.c"\n'
+             '#endif\n\nint lyric_viewer(void)'),
         "    unsigned trace = 0;\n    for (;;)":
             '    unsigned trace = 0;\n#ifdef SIMULATOR\n    const char *probe = getenv("FU108_LYRICS_PROBE");\n'
-            '    if (probe) { fu108_lyrics_probe(probe); goto done; }\n#endif\n    for (;;)',
+            '    if (probe) {\n' + prefetch +
+            '        const char *test = getenv("FU111_LYRICS_PROBE");\n'
+            '        if (test) fu111_probe(probe, test);\n'
+            '        else fu108_lyrics_probe(probe);\n'
+            '        goto done;\n    }\n#endif\n    for (;;)',
     }
     for before, after in replacements.items():
         assert text.count(before) == 1, before
@@ -86,7 +125,7 @@ def instrument(source):
     menu.write_text(text.replace(before, before + seed, 1))
 
 
-def run(build, resources, output):
+def run(build, resources, output, test=None):
     output.mkdir(parents=True)
     with tempfile.TemporaryDirectory(prefix="pbf-lyrics-") as temp, tempfile.TemporaryFile() as display:
         disk = Path(temp)
@@ -104,7 +143,19 @@ def run(build, resources, output):
         with wave.open(str(disk / "Fixture.wav"), "wb") as audio:
             audio.setparams((1, 2, 22050, 0, "NONE", "not compressed"))
             audio.writeframes(bytes(22050 * 2 * 30))
-        (disk / "Fixture.ttml").write_text(FIXTURE)
+        fixture = FIXTURE
+        if test:
+            fixture = FIXTURE.replace("MAIN VOICE", "gjpqy。封國目").replace(
+                "DUET VOICE", "gjpqy。驚臉重").replace(
+                "BACKGROUND ECHO", "gjpqy。個皿").replace(
+                "WHOLE ECHO", "gjpqy。妳渾").replace(
+                "After the gap", "gjpqy。謊國齒")
+            if test == "lead":
+                fixture = re.sub(r'(begin|end)="([\d.]+)s"',
+                                 lambda m: f'{m[1]}="{float(m[2]) + 5.5:g}s"', fixture)
+            elif test == "short":
+                fixture = GAP_FIXTURE
+        (disk / "Fixture.ttml").write_text(fixture)
         runtime = disk / "runtime"
         runtime.mkdir(mode=0o700)
         with (output / "xvfb.log").open("w") as xlog, (output / "sdl.log").open("w") as log, process(
@@ -123,6 +174,9 @@ def run(build, resources, output):
             env = dict(os.environ, DISPLAY=":" + number, SDL_VIDEODRIVER="x11", SDL_AUDIODRIVER="dummy",
                        SDL_RENDER_DRIVER="software", XDG_RUNTIME_DIR=str(runtime),
                        FU108_LYRICS_PROBE=str(output.resolve()))
+            if test:
+                env["FU111_LYRICS_PROBE"] = test
+            success = "FU111 PASS" if test else "FU108 PASS"
             with process(
                 [str(build / "rockboxui"), "--root", str(disk), "--nobackground", "--zoom", "1"],
                 log, env=env, cwd=disk,
@@ -131,7 +185,7 @@ def run(build, resources, output):
                 screen = Screen(env, player)
                 screen.tap("Return")
                 for _ in range(400):
-                    if "FU108 PASS" in (output / "sdl.log").read_text(errors="replace"):
+                    if success in (output / "sdl.log").read_text(errors="replace"):
                         break
                     assert player.poll() is None, "SDL assertion failed. See sdl.log."
                     time.sleep(.05)
@@ -139,10 +193,12 @@ def run(build, resources, output):
                     raise AssertionError("SDL never finished the lyric checks. See sdl.log.")
 
     log = (output / "sdl.log").read_text()
-    text = re.search(r"FU108 PASS (.*)", log).group(1)
+    text = re.search(re.escape(success) + r" (.*)", log).group(1)
     result = {key: int(value) for key, value in re.findall(r"(\w+)=(\d+)", text)}
-    for name in ("gap-dots", "manual-selected", "manual-crossfade", "main-bg-duet",
-                 "background-word-sweep", "vocals-dim"):
+    names = ([file.stem for file in output.glob("*.raw")] if test else
+             ["gap-dots", "manual-selected", "manual-crossfade", "main-bg-duet",
+              "background-word-sweep", "vocals-dim"])
+    for name in names:
         p = np.fromfile(output / (name + ".raw"), dtype="<u2").reshape(240, 320)
         rgb = [(p >> 11) * 255 // 31, (p >> 5 & 63) * 255 // 63, (p & 31) * 255 // 31]
         frame = Image.fromarray(np.stack(rgb, axis=-1).astype("uint8"))
@@ -161,9 +217,10 @@ def run(build, resources, output):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--instrument", type=Path)
+    parser.add_argument("--fu111", choices=("gap", "lead", "ink", "short", "photo", "photo-base"))
     parser.add_argument("paths", nargs="*", type=lambda p: Path(p).resolve())
     args = parser.parse_args()
     if args.instrument:
         instrument(args.instrument)
     else:
-        run(*args.paths)
+        run(*args.paths, test=args.fu111)

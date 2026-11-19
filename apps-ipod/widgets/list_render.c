@@ -97,9 +97,11 @@ struct native_list {
     struct gui_synclist *owner;
     unsigned generation;
     int selection;
+    unsigned font_epoch;
+    int prefetched_top;
     struct list_motion motion;
     struct list_index overlay;
-    int index_font, index_width;
+    int index_font, index_width, index_faces[2];
     char index_font_key[sizeof(((struct list_index *)0)->key)];
     /* Row and notes painters run serially while the renderer is pinned. */
     union {
@@ -127,6 +129,7 @@ void list_render_init(void)
         memset(render, 0, sizeof(*render));
         render->overlay.last_sel = -1;
         render->index_font = FONT_SYSFIXED;
+        render->index_faces[0] = render->index_faces[1] = -1;
         render->text_font = render->title_font = render->icon_font = -1;
         render->theme_generation = (unsigned)-1;
         core_put_data_pinned(render);
@@ -529,6 +532,8 @@ static void draw_text(struct native_list *render, struct ui_rect clip,
     struct viewport vp;
     if (!text || !*text || !set_clip(&vp, clip, cell, font, fg))
         return;
+    if (!font_prefetch_text(vp.font, text))
+        return;
     int width = font_getstringsize((const unsigned char *)text, NULL, NULL, vp.font);
     int x = cell.x - vp.x;
     int overflow = MAX(0, width - cell.width);
@@ -840,7 +845,8 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     int text_font = render->text_font >= 0 ? render->text_font : list->parent[SCREEN_MAIN]->font;
     if (list->callback_draw_item)
     {
-        draw_owner_row(list, clip, row, item, icon, selected, text_font, fg, bg, label);
+        if (font_prefetch_text(text_font, label))
+            draw_owner_row(list, clip, row, item, icon, selected, text_font, fg, bg, label);
         return;
     }
 
@@ -856,6 +862,12 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
             label = now_playing;
         }
     }
+
+    bool ready = font_prefetch_text(text_font, label);
+    if (agents && value && value[0] == 'r' && value[1] && value[2])
+        ready &= font_prefetch_text(text_font, value + 2);
+    if (!ready)
+        return;
 
     bool rtl = VP_IS_RTL(list->parent[SCREEN_MAIN]);
     int icon_y = (row.height - icon_size) / 2;
@@ -1083,6 +1095,9 @@ static void paint_notes(const struct ui_view *view, const struct ui_view_frame *
                           list->data, render->scratch.notes, sizeof(render->scratch.notes));
     if (!text || !*text)
         return;
+    if (!font_prefetch_text(render->text_font, text) ||
+        !font_prefetch_text(render->text_font, "."))
+        return;
 
     int pad = render->theme.metric[UI_METRIC_LIST_AUX_PADDING];
     struct ui_rect cell = frame->bounds;
@@ -1239,9 +1254,28 @@ update_key:
 
 static void index_release_fonts(struct native_list *render)
 {
-    font_unload(render->index_font);
+    for (unsigned i = 0; i < ARRAYLEN(render->index_faces); i++)
+    {
+        font_unload(render->index_faces[i]);
+        render->index_faces[i] = -1;
+    }
     render->index_font = FONT_SYSFIXED;
     render->index_font_key[0] = '\0';
+}
+
+static bool index_font_has_key(int id, const unsigned char *text)
+{
+    font_lock(id, true);
+    struct font *font = font_get(id);
+    bool covered = true;
+    while (*text && covered)
+    {
+        ucschar_t ch;
+        text = utf8decode(text, &ch);
+        covered = font_has_glyph(font, ch);
+    }
+    font_lock(id, false);
+    return covered;
 }
 
 static int index_find_font(struct native_list *render, const unsigned char *text,
@@ -1252,20 +1286,28 @@ static int index_find_font(struct native_list *render, const unsigned char *text
     };
     for (unsigned i = 0; i < ARRAYLEN(paths); i++)
     {
-        bool loaded = font_filename_matches_loaded_id(render->index_font, paths[i]);
-        int id = loaded ? render->index_font : font_load_ex(paths[i], 0, 8);
+        int id = render->index_faces[i];
+        if (id < 0)
+            id = render->index_faces[i] = font_load_ex(paths[i], 0, sizeof(render->overlay.key));
         if (id < 0)
             continue;
-        int width = font_getstringsize(text, NULL, NULL, id);
-        if (width <= max_width || i == ARRAYLEN(paths) - 1)
+        if (!font_prefetch_text(id, (const char *)text))
         {
-            render->index_width = width;
+            /* Retain the new face while its key is loading. The epoch
+             * invalidates the key, so readiness is checked again. */
+            render->index_width = 0;
             return id;
         }
-        if (!loaded)
-            font_unload(id);
+        if (index_font_has_key(id, text))
+        {
+            int width = font_getstringsize(text, NULL, NULL, id);
+            if (width <= max_width || i == ARRAYLEN(paths) - 1)
+            {
+                render->index_width = width;
+                return id;
+            }
+        }
     }
-    render->index_width = font_getstringsize(text, NULL, NULL, FONT_UI);
     return FONT_UI;
 }
 
@@ -1277,16 +1319,17 @@ static void paint_index(const struct ui_view *view, const struct ui_view_frame *
         return;
     if (strcmp(render->index_font_key, render->overlay.key))
     {
-        int id = index_find_font(render, text, frame->bounds.width / 2);
-        if (id != render->index_font)
-        {
-            font_unload(render->index_font);
-            render->index_font = id;
-        }
+        int id = render->index_font = index_find_font(render, text, frame->bounds.width / 2);
         strcpy(render->index_font_key, render->overlay.key);
+        if (id == FONT_UI)
+            render->index_width = font_getstringsize((const unsigned char *)"#", NULL, NULL, id);
     }
 
     int id = render->index_font;
+    if (!render->index_width)
+        return;
+    if (id == FONT_UI)
+        text = (const unsigned char *)"#";
     int width = render->index_width;
     int height = font_get(id)->height;
     struct ui_rect area = frame->bounds;
@@ -1397,6 +1440,24 @@ static bool update_row_pose(struct native_list *render, const struct list_geomet
     return finished;
 }
 
+static void prefetch_list_page(struct native_list *render, const struct list_geometry *g)
+{
+    struct gui_synclist *list = render->owner;
+    int start = MAX(0, render->rows.value[UI_SCROLL_OFFSET]);
+    int rows = g->rows.height / g->pitch + 1;
+    int font = render->text_font >= 0 ? render->text_font : list->parent[SCREEN_MAIN]->font;
+    if (!list->callback_get_item_name || start == render->prefetched_top)
+        return;
+    render->prefetched_top = start;
+    for (int i = start; i < MIN(list->nb_items, start + 2 * rows); i++)
+    {
+        const unsigned char *label = (const unsigned char *)list->callback_get_item_name(
+            i, list->data, render->scratch.row.name, sizeof(render->scratch.row.name));
+        if (label && P2ID(label) <= VOICEONLY_DELIMITER)
+            font_prefetch_text(font, P2STR(label));
+    }
+}
+
 static void draw_list(struct gui_synclist *list, bool status_only)
 {
     list_render_init();
@@ -1406,6 +1467,14 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     bool same_owner = motion_owner(render, list);
     if (status_only && !same_owner)
         goto done;
+    font_prefetch_begin();
+    unsigned epoch = font_prefetch_epoch();
+    if (render->font_epoch != epoch)
+    {
+        render->index_font_key[0] = '\0';
+        render->font_epoch = epoch;
+        status_only = false;
+    }
     if (!same_owner)
     {
         motion_stop(&render->motion);
@@ -1426,6 +1495,7 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     if (render->owner != list || render->generation != list->generation ||
         render->selection != list->selected_item)
     {
+        render->prefetched_top = -1;
         render->owner = list;
         render->generation = list->generation;
         render->selection = list->selected_item;
@@ -1462,6 +1532,8 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     add_view(render, &render->header, g.header, &album_header_ops, render);
     ui_view_init(&render->rows, g.rows, &row_ops, render);
     bool motion_finished = update_row_pose(render, &g);
+    if (!status_only)
+        prefetch_list_page(render, &g);
     ui_view_append(&render->root, &render->rows);
     add_view(render, &render->notes, g.notes, &note_ops, render);
     if (step_index(render))
@@ -1502,6 +1574,7 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     if (animate)
         cpu_boost(false);
 #endif
+    font_prefetch_end();
 
 done:
     core_put_data_pinned(render);
@@ -1574,6 +1647,10 @@ static int motion_deadline(const struct gui_synclist *list, bool poll)
     int delay = TIMEOUT_BLOCK;
     if (motion_owner(render, list))
     {
+        if (render->font_epoch != font_prefetch_epoch())
+            delay = 0;
+        else if (poll && font_prefetch_busy())
+            delay = 1;
         const struct list_motion *motion = &render->motion;
         uint32_t now = USEC_TIMER;
         if (motion->visible)
@@ -1582,7 +1659,11 @@ static int motion_deadline(const struct gui_synclist *list, bool poll)
             if (!motion_enabled() || ui_clock_frame(elapsed) > motion->painted)
                 delay = 0;
             else if (poll)
-                delay = ui_clock_poll_timeout(elapsed, motion_duration(motion) + 1, HZ);
+            {
+                int motion_delay = ui_clock_poll_timeout(elapsed, motion_duration(motion) + 1, HZ);
+                if (delay == TIMEOUT_BLOCK || motion_delay < delay)
+                    delay = motion_delay;
+            }
         }
         if (global_settings.scrolling_enabled && render->has_marquee)
         {

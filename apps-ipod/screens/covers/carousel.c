@@ -1550,6 +1550,18 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
     else
         snprintf(album_and_year, sizeof(album_and_year), "%s", albumtxt);
 
+    int bold = carousel_caption_font(true);
+    bool ready = font_prefetch_text(bold, album_and_year);
+    ready &= font_prefetch_text(bold, ".");
+    if (show_artist)
+    {
+        int regular = carousel_caption_font(false);
+        ready &= font_prefetch_text(regular, artisttxt);
+        ready &= font_prefetch_text(regular, ".");
+    }
+    if (!ready)
+        return;
+
     struct viewport *saved_vp = carousel_text_begin();
     lcd_set_foreground(pf_fg_color);
 
@@ -4848,13 +4860,13 @@ static int native_frame_wait(uint32_t clock, unsigned last_frame)
 #define PANEL_LEFT ALBUM_BLUR_TEXT_LEFT
 #define PANEL_HEADER_RIGHT ALBUM_BLUR_HEADER_RIGHT
 #define ALBUM_PANEL_ROWS ALBUM_BLUR_ROWS
-#define PANEL_CACHE (ALBUM_PANEL_ROWS + 1)
+#define PANEL_CACHE (2 * ALBUM_PANEL_ROWS + 1)
 #define PANEL_GRAY(v) LCD_RGBPACK(v, v, v)
 
 struct panel_track {
     int index; /* One-based, so a zeroed slot is unused. */
     unsigned int duration;
-    bool ready, playing;
+    bool ready, playing, glyphs_ready;
     char title[CAROUSEL_TRACK_TEXT];
     char fitted[CAROUSEL_TRACK_TEXT], time[16];
     int time_x;
@@ -4882,7 +4894,7 @@ static struct album_panel {
     char count_label[80];
     int dot_x, count_x;
     int digit_width;
-    bool tabular, initialized;
+    bool tabular, initialized, header_ready, digits_ready;
 } panel;
 
 static void panel_layout_header(void);
@@ -5142,6 +5154,15 @@ static int panel_first_track(int first_row, int *disc)
     return first_row - i;
 }
 
+static bool panel_chinese(void);
+
+static void panel_disc_label(int track, char *label, size_t size)
+{
+    const struct db_album_track *tracks = core_get_data(panel.tracks);
+    const char *name = panel_chinese() ? "光盘" : (const char *)str(LANG_DISC);
+    snprintf(label, size, "%s %d", name, tracks[track].key >> 16);
+}
+
 static void panel_read_rows(void)
 {
     if (panel.count <= 0)
@@ -5161,7 +5182,8 @@ static void panel_read_rows(void)
         panel_local_playing();
 
     int first = panel.scroll_y / PANEL_PITCH;
-    int rows = ALBUM_PANEL_ROWS + (panel.scroll_y % PANEL_PITCH != 0);
+    int rows = 2 * ALBUM_PANEL_ROWS + (panel.scroll_y % PANEL_PITCH != 0);
+    int small = panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED;
     int disc;
     int track = panel_first_track(first, &disc);
     panel.missing = false;
@@ -5170,6 +5192,10 @@ static void panel_read_rows(void)
         const int *discs = panel.disc_count ? core_get_data(panel.discs) : NULL;
         if (disc < panel.disc_count && discs[disc] == track)
         {
+            char label[80];
+            panel_disc_label(track, label, sizeof(label));
+            font_prefetch_text(small, label);
+            font_prefetch_text(small, ".");
             disc++;
             continue;
         }
@@ -5193,13 +5219,17 @@ static void panel_read_rows(void)
                 strcmp(row->title, next.title))
             {
                 *row = next;
-                panel_layout_track(row);
                 panel.dirty = true;
             }
             if (row->playing != next.playing)
                 panel.dirty = true;
             row->ready = next.ready;
             row->playing = next.playing;
+        }
+        if (!row->glyphs_ready)
+        {
+            panel_layout_track(row);
+            panel.dirty |= row->glyphs_ready;
         }
         panel.missing |= !row->ready;
         track++;
@@ -5230,6 +5260,11 @@ static void panel_read_tracks(void)
         panel.selected = MAX(0, MIN(count - 1, panel.selected));
         panel_follow_selection(false);
         panel.dirty = true;
+    }
+    if (!panel.header_ready)
+    {
+        panel_layout_header();
+        panel.dirty |= panel.header_ready;
     }
     panel.missing = count == -1;
     panel_read_rows();
@@ -5270,7 +5305,14 @@ static void panel_load_fonts(void)
     panel.album_font = ui_theme_font_load(&sizes, UI_FONT_TITLE, 48);
     panel.title_font = ui_theme_font_load(&sizes, UI_FONT_BODY, 96);
     panel.small_font = ui_theme_font_load(&sizes, UI_FONT_WPS_META, 32);
-    struct font *font = font_get(panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED);
+}
+
+static void panel_layout_digits(void)
+{
+    int small = panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED;
+    if (!font_prefetch_text(small, "0123456789:"))
+        return;
+    struct font *font = font_get(small);
     panel.digit_width = font_get_width(font, '0');
     panel.tabular = true;
     for (int ch = '1'; ch <= '9'; ch++)
@@ -5279,12 +5321,17 @@ static void panel_load_fonts(void)
         panel.tabular &= width == panel.digit_width;
         panel.digit_width = MAX(panel.digit_width, width);
     }
+    panel.digits_ready = true;
 }
 
 static void panel_text(const char *label, int x, int baseline, int right)
 {
     char fitted[CAROUSEL_TRACK_TEXT];
     int font = lcd_getfont();
+    bool ready = font_prefetch_text(font, label);
+    ready &= font_prefetch_text(font, ".");
+    if (!ready)
+        return;
     const char *text = text_fit(label, fitted, sizeof(fitted), font, right - x);
     lcd_putsxy(x, baseline - font_get(font)->ascent, text);
 }
@@ -5306,20 +5353,28 @@ static void panel_layout_header(void)
 {
     int title = panel.album_font >= 0 ? panel.album_font : FONT_SYSFIXED;
     int small = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
-    panel_fit(panel.header.title, panel.fitted_title, sizeof(panel.fitted_title),
-              title, PANEL_HEADER_RIGHT - PANEL_LEFT);
-
     panel.dot_x = 0;
     panel.count_x = PANEL_LEFT;
     panel.count_label[0] = 0;
-    int budget = PANEL_HEADER_RIGHT - PANEL_LEFT;
-    int spacing = font_getstringsize(panel_middot, NULL, NULL, small);
     if (panel.count >= 0)
     {
         const char *format = panel_chinese() ? "%d 首" : (const char *)str(LANG_N_TRACKS_TITLE);
         snprintf(panel.count_label, sizeof(panel.count_label), format, panel.count);
-        budget -= spacing + font_getstringsize(panel.count_label, NULL, NULL, small);
     }
+    bool ready = font_prefetch_text(title, panel.header.title);
+    ready &= font_prefetch_text(title, ".");
+    ready &= font_prefetch_text(small, panel.header.artist);
+    ready &= font_prefetch_text(small, panel.count_label);
+    ready &= font_prefetch_text(small, " ·.");
+    panel.header_ready = ready;
+    if (!ready)
+        return;
+    int budget = PANEL_HEADER_RIGHT - PANEL_LEFT;
+    panel_fit(panel.header.title, panel.fitted_title, sizeof(panel.fitted_title),
+              title, budget);
+    int spacing = font_getstringsize(panel_middot, NULL, NULL, small);
+    if (panel.count >= 0)
+        budget -= spacing + font_getstringsize(panel.count_label, NULL, NULL, small);
     panel.fitted_artist[0] = 0;
     if (budget >= 3 * font_get_width(font_get(small), '.'))
         panel_fit(panel.header.artist, panel.fitted_artist, sizeof(panel.fitted_artist),
@@ -5333,6 +5388,12 @@ static void panel_layout_header(void)
 
 static void panel_layout_track(struct panel_track *row)
 {
+    int title = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
+    bool ready = font_prefetch_text(title, row->title);
+    ready &= font_prefetch_text(title, ".");
+    row->glyphs_ready = ready && (!row->duration || panel.digits_ready);
+    if (!row->glyphs_ready)
+        return;
     int right = panel.count > ALBUM_PANEL_ROWS ? 206 : ALBUM_BLUR_ROWS_RIGHT;
     int end = right;
     if (row->duration)
@@ -5356,7 +5417,6 @@ static void panel_layout_track(struct panel_track *row)
         row->time_x = end;
         end -= 8;
     }
-    int title = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
     panel_fit(row->title, row->fitted, sizeof(row->fitted), title, end - PANEL_LEFT);
 }
 
@@ -5364,20 +5424,29 @@ static void panel_header(void)
 {
     int title = panel.album_font >= 0 ? panel.album_font : FONT_SYSFIXED;
     int meta = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
+    bool ready = panel.header_ready;
+    if (ready)
+    {
+        ready &= font_prefetch_text(title, panel.fitted_title);
+        ready &= font_prefetch_text(meta, panel.fitted_artist);
+        ready &= font_prefetch_text(meta, panel.count_label);
+        ready &= !panel.dot_x || font_prefetch_text(meta, panel_middot);
+    }
     int title_height = font_get(title)->height;
     int meta_height = font_get(meta)->height;
     int title_y = (PANEL_DIVIDER - title_height - meta_height - 3) / 2;
     int y = title_y + title_height + 3;
     lcd_set_foreground(LCD_WHITE);
     lcd_setfont(title);
-    lcd_putsxy(PANEL_LEFT, title_y, panel.fitted_title);
+    if (ready)
+        lcd_putsxy(PANEL_LEFT, title_y, panel.fitted_title);
     lcd_setfont(meta);
     lcd_set_foreground(PANEL_GRAY(0xb0));
-    if (*panel.fitted_artist)
+    if (ready && *panel.fitted_artist)
         lcd_putsxy(PANEL_LEFT, y, panel.fitted_artist);
-    if (panel.dot_x)
+    if (ready && panel.dot_x)
         lcd_putsxy(panel.dot_x, y, panel_middot);
-    if (*panel.count_label)
+    if (ready && *panel.count_label)
         lcd_putsxy(panel.count_x, y, panel.count_label);
     lcd_set_foreground(PANEL_GRAY(0x2e));
     lcd_hline(6, 213, PANEL_DIVIDER);
@@ -5441,11 +5510,8 @@ static void panel_paint_rows(struct viewport *view)
         {
             if (disc < panel.disc_count && discs[disc] == track)
             {
-                const struct db_album_track *tracks = core_get_data(panel.tracks);
                 char label[80];
-                const char *name = panel_chinese() ? "光盘" : (const char *)str(LANG_DISC);
-                int number = tracks[track].key >> 16;
-                snprintf(label, sizeof(label), "%s %d", name, number);
+                panel_disc_label(track, label, sizeof(label));
                 lcd_setfont(small);
                 lcd_set_foreground(ALBUM_BLUR_DIM_TEXT);
                 panel_text(label, PANEL_LEFT, y + 14, right);
@@ -5460,7 +5526,13 @@ static void panel_paint_rows(struct viewport *view)
                 lcd_set_foreground(selection);
                 lcd_fillrect(1, y, ALBUM_PANEL_WIDTH - 2, PANEL_PITCH);
             }
-            if (row->index == track + 1)
+            bool ready = row->index == track + 1 && row->glyphs_ready;
+            if (ready)
+            {
+                ready &= font_prefetch_text(title, row->fitted);
+                ready &= font_prefetch_text(small, row->time);
+            }
+            if (ready)
             {
                 if (row->playing)
                 {
@@ -5626,6 +5698,8 @@ static void step_album_flip(void)
         }
         if (!panel.initialized)
             panel_load_fonts();
+        if (!panel.digits_ready)
+            panel_layout_digits();
         if (panel.scroll_frames)
             panel_step_scroll();
         if (!panel.initialized || !TIME_BEFORE(current_tick, panel.next_read))
@@ -5663,7 +5737,7 @@ static int album_panel_action(int button)
                 panel.play_failed = false;
                 panel.dirty = true;
                 panel_follow_selection(true);
-                panel_read_rows();
+                panel.next_read = current_tick;
             }
         }
         break;
@@ -5735,6 +5809,25 @@ static void carousel_frame_init(struct carousel_frame *paint)
     ui_page_init(&paint->page, &paint->root);
 }
 
+static void prefetch_captions(void)
+{
+    if (!model->caption_at || global_settings.album_covers_show_album_name == ALBUM_NAME_HIDE)
+        return;
+    int title = carousel_caption_font(true), artist = carousel_caption_font(false);
+    font_prefetch_text(title, ".0123456789 –");
+    font_prefetch_text(artist, ".");
+    for (int i = 0; i <= 4 * ALBUM_COVERS_NUM_SLIDES; i++)
+    {
+        int index = center_index + (i % 2 ? (i + 1) / 2 : -i / 2);
+        struct carousel_album_header text;
+        if (index >= 0 && index < number_of_slides && model->caption_at(index, &text))
+        {
+            font_prefetch_text(title, text.title);
+            font_prefetch_text(artist, text.artist);
+        }
+    }
+}
+
 static void carousel_paint(struct carousel_frame *paint, bool art, bool caption,
                            bool joined, int y, int height)
 {
@@ -5747,7 +5840,11 @@ static void carousel_paint(struct carousel_frame *paint, bool art, bool caption,
         ui_page_invalidate(&paint->page, (struct ui_rect){0, pf_vp_y + y, LCD_WIDTH, height});
     if (caption)
         ui_page_invalidate(&paint->page, (struct ui_rect){0, pf_vp_y + pf_text_y, LCD_WIDTH, pf_text_h});
+    font_prefetch_begin();
+    if (caption && (!caption_valid || caption_index != center_index))
+        prefetch_captions();
     ui_page_paint(&paint->page);
+    font_prefetch_end();
 }
 
 static bool restored_covers_ready(void)
@@ -5793,6 +5890,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
     bool art_owed = true;
     bool caption_owed = true;
     unsigned int seen_caption_version = 0;
+    unsigned glyph_epoch = font_prefetch_epoch();
     bool full_flush_owed = false;
     int dirty_top = LCD_HEIGHT, dirty_end = 0;
     int dirty_left = LCD_WIDTH, dirty_right = 0;
@@ -5899,6 +5997,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 timeout = left > 0 ? (int)left : 0;
         }
 
+        if (font_prefetch_busy())
+            timeout = timeout == TIMEOUT_BLOCK ? 1 : MIN(timeout, 1);
         bool inherited_inhibit = ui_flush_inhibited();
         ui_inhibit_flush(true);
         if (first_frame)
@@ -5907,6 +6007,17 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             button = get_custom_action(CONTEXT_PLUGIN, timeout, get_context_map);
         first_frame = false;
         ui_inhibit_flush(inherited_inhibit);
+        unsigned epoch = font_prefetch_epoch();
+        if (epoch != glyph_epoch)
+        {
+            glyph_epoch = epoch;
+            caption_owed = true;
+            if (panel.live)
+            {
+                panel.next_read = current_tick;
+                panel.dirty = true;
+            }
+        }
         /* A hold of Play from now on is the random spin */
         if (!(button_status() & BUTTON_PLAY))
             button_set_sw_poweroff_state(false);
@@ -6059,7 +6170,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 panel.dirty = true;
             seen_slides_loaded = slides_loaded;
             art_owed = caption_owed = false;
+            font_prefetch_begin();
             step_album_flip();
+            font_prefetch_end();
             switch (button)
             {
             case PF_WPS:

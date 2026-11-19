@@ -2354,6 +2354,30 @@ long lyrics_end_time(int index)
     return (end > start)? end: start;
 }
 
+long lyrics_vocal_end_time(int index)
+{
+    const struct lyrics_line *line = get_line(index);
+    if (!line)
+        return -1;
+    if (lrc.type == TYPE_TTML)
+    {
+        const struct lyrics_ttml_line *voice = (const void *)line;
+        if (voice->background && voice->background->end > voice->end)
+            return voice->background->end;
+        return voice->end;
+    }
+    if ((lrc.type == TYPE_LRC || lrc.type == TYPE_LRC8) && line->nword > 1)
+    {
+        /* Enhanced LRC can close the last word with a trailing time tag. */
+        const struct lyrics_word *last = line->words;
+        const unsigned char *text = last->text;
+        while (*text == ' ' || *text == '\t') text++;
+        if (!*text && last->time > line->time)
+            return apply_offset(last->time);
+    }
+    return -1;
+}
+
 int lyrics_index_at(long time)
 {
     int lo = 0, hi = lrc.nline - 1, found = LYRICS_NONE;

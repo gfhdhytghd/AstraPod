@@ -48,6 +48,9 @@
 #include "audio/play_status.h"
 #include "screens/system/debug_menu.h"
 #include "font.h"
+#ifdef HAVE_PODBOX_FONT
+#include "font_pbf.h"
+#endif
 #include "speech/language.h"
 #include "screens/playback/wps.h"
 #include "playlist/playlist.h"
@@ -868,6 +871,9 @@ static void init(void)
 
     boot_progress(BOOT_AUDIO, 0, 0, LANG_WAIT);
     CHART(">audio_init");
+#ifdef HAVE_PODBOX_FONT
+    font_pbf_reserve_hot();
+#endif
     audio_init();
     CHART("<audio_init");
     talk_announce_voice_invalid(); /* notify user w/ voice prompt if voice file invalid */

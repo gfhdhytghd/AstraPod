@@ -255,6 +255,16 @@ static void tick(void)
         carousel_provider_changed();
     }
 }
+static bool caption_at(int index, struct carousel_album_header *text)
+{
+    struct cider_row row;
+    if (!cider_page_row(index, &row))
+        return false;
+    strlcpy(text->title, row.title, sizeof(text->title));
+    strlcpy(text->artist, row.subtitle, sizeof(text->artist));
+    return true;
+}
+
 static void text(void)
 {
     struct cider_row row;
@@ -287,6 +297,7 @@ static const struct carousel_model model = {
     .jump_prev = jump,
     .jump_next = jump,
     .draw_text = text,
+    .caption_at = caption_at,
     .sort_next = noop,
     .sort_prev = noop,
     .set_initial = initial,

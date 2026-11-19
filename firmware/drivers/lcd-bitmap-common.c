@@ -386,6 +386,10 @@ static void LCDFN(putsxyofs)(int x, int y, int ofs, const unsigned char *str)
 {
     ucschar_t *ucs;
     struct viewport *vp = LCDFN(current_viewport);
+#if defined(MAIN_LCD) && defined(HAVE_PODBOX_FONT)
+    if (font_prefetch_active() && !font_prefetch_text(vp->font, (const char *)str))
+        return;
+#endif
     font_lock(vp->font, true);
     struct font* pf = font_get(vp->font);
 

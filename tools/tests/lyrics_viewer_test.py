@@ -167,6 +167,12 @@ static int select_button, seek_updates, fast_seeks, no_lyrics_draws, nothing_pla
 static bool verify_early_frame, reject_loading, backward_seek;
 static int ui_font(void){return 18;}static struct screen screens[]={{ui_font}};
 static struct font *font_get(int f){return f==14?&f14:f==20?&f20:&f18;}
+static void font_prefetch_mark_hot(int id){(void)id;}
+static void font_prefetch_begin(void){}
+static void font_prefetch_end(void){}
+static unsigned font_prefetch_epoch(void){return 0;}
+static bool font_prefetch_busy(void){return false;}
+static bool font_prefetch_text(int f,const char*s){(void)f;(void)s;return true;}
 static int font_load(const char *path){
     assert(clock_refs==2);
     if (verify_early_frame && !loads) {
@@ -560,9 +566,9 @@ static int get_action(int c,int timeout){
     case 2:
       assert(lv.mode.manual && lv.mode.focus==1 && !lv.scroll_frames && !lv.focus_frames);
       assert(timeout==1 && lv.motion_frame==0 && !lv.stagger_frames);
-      assert(lv.wheel_offset == lv_distance(0, 1, -1, true, -1));
+      assert(lv.wheel_offset == lv_distance(0, 1, -1));
       precise_extra+=ui_frame_clock(ANIM_F(5));
-      retarget_position=lv_wheel_at(lv_clock()) - lv_distance(0, 1, -1, true, -1);
+      retarget_position=lv_wheel_at(lv_clock()) - lv_distance(0, 1, -1);
       assert(retarget_position < 0);
       return ACTION_WPS_VOLDOWN;
     case 3:
@@ -570,7 +576,7 @@ static int get_action(int c,int timeout){
       assert(lv.motion_frame==0 && timeout==1);
       return ACTION_WPS_VOLDOWN;
     case 4:
-      assert(lv.wheel.pull > 0 && lv.wheel.pull <= lv_height(0, 0) / 2);
+      assert(lv.wheel.pull > 0 && lv.wheel.pull <= lv_height(0) / 2);
       precise_extra+=ui_frame_clock(ANIM_F(40));
       return ACTION_NONE;
     default:

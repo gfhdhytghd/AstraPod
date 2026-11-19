@@ -112,6 +112,7 @@ struct carousel_model {
     int  (*jump_prev)(void);                           /* jump to prev section (letter/year) */
     int  (*jump_next)(void);                           /* jump to next section */
     void (*draw_text)(void);                           /* center-slide caption */
+    bool (*caption_at)(int index, struct carousel_album_header *text);
     void (*sort_next)(void);                           /* cycle sort order forward + resort */
     void (*sort_prev)(void);                           /* cycle sort order backward + resort */
     void (*set_initial)(const char *selected_file);    /* position on entry (resume/now-playing) */

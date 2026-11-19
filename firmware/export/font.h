@@ -82,10 +82,18 @@ enum {
 
 #if defined(HAVE_LCD_COLOR) && !defined(BOOTLOADER) && !defined(__PCTOOL__)
 #define HAVE_PODBOX_FONT
+#define PBF_CACHE_SETS 16
+#define PBF_CACHE_WAYS 4
 struct font_pbf {
     uint32_t index_offset, bitmap_offset, file_size;
     uint16_t anchors, rows, max_record;
-    uint32_t page;
+    uint32_t page, serial;
+    uint32_t map_offset, hot_offset, cold_offset;
+    uint16_t stride, hot_count, fixed_count, variable_count;
+    int hot_slot;
+    bool hot_ready, want_hot;
+    uint32_t ways[PBF_CACHE_SETS][PBF_CACHE_WAYS];
+    unsigned char ink_above, ink_below;
 };
 #endif
 
@@ -150,6 +158,26 @@ unsigned font_file_height(const char *path);
 void font_unload(int font_id);
 void font_unload_all(void);
 void font_lock(int font_id, bool lock);
+
+#ifdef HAVE_PODBOX_FONT
+/* Cache-only text scope for a UI frame. Text requests copy their input. */
+void font_prefetch_begin(void);
+void font_prefetch_end(void);
+bool font_prefetch_active(void);
+void font_prefetch_mark_hot(int font_id);
+bool font_prefetch_text(int font_id, const char *text);
+unsigned font_prefetch_epoch(void);
+bool font_prefetch_busy(void);
+#else
+static inline void font_prefetch_begin(void) {}
+static inline void font_prefetch_end(void) {}
+static inline bool font_prefetch_active(void) { return false; }
+static inline void font_prefetch_mark_hot(int id) { (void)id; }
+static inline bool font_prefetch_text(int id, const char *text)
+{ (void)id; (void)text; return true; }
+static inline unsigned font_prefetch_epoch(void) { return 0; }
+static inline bool font_prefetch_busy(void) { return false; }
+#endif
 
 /* Closes the file descriptor if the font file (if cached) but keeps
  * the cache intact, so font_get_{bits,width} still work. */

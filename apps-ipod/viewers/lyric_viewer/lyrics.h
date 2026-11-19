@@ -98,6 +98,8 @@ const char *lyrics_text(int index);
  * line ends with the track. */
 long lyrics_time(int index);
 long lyrics_end_time(int index);
+/* Explicit main or background end, or -1 when the document omits it. */
+long lyrics_vocal_end_time(int index);
 
 /* --- Access by time --- */
 

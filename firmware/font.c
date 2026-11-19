@@ -456,6 +456,9 @@ unsigned font_file_height(const char *path)
 /* load a font with room for glyphs, limited to bufsize if not zero */
 int font_load_ex( const char *path, size_t buf_size, int glyphs )
 {
+#ifdef HAVE_PODBOX_FONT
+    size_t pbf_limit = buf_size;
+#endif
     /* needed to handle the font properly after it's loaded */
     size_t path_len = strlen(path);
     if ( path_len >= MAX_PATH )
@@ -524,7 +527,7 @@ int font_load_ex( const char *path, size_t buf_size, int glyphs )
 
 #ifdef HAVE_PODBOX_FONT
     if (pixel_font)
-        bufsize = font_pbf_buffer_size(&f, buf_size, glyphs ? glyphs : GLYPHS_TO_CACHE);
+        bufsize = font_pbf_buffer_size(&f, pbf_limit, glyphs ? glyphs : GLYPHS_TO_CACHE);
 #endif
 
     /* check already loaded */
@@ -698,6 +701,10 @@ void font_unload(int font_id)
     if (pdata->refcount < 1)
     {
         logf("%s %s", __func__, pdata->path);
+#ifdef HAVE_PODBOX_FONT
+        if (pf->pbf.file_size)
+            font_pbf_forget(pf, font_id);
+#endif
         if (pf && pf->fd >= 0)
         {
 #ifdef HAVE_PODBOX_FONT
@@ -752,6 +759,9 @@ static void font_disable(int font_id)
 
 void font_disable_all(void)
 {
+#ifdef HAVE_PODBOX_FONT
+    font_pbf_prefetch_suspend(true);
+#endif
     for(int i = 0; i < MAXFONTS; i++)
         font_disable(i);
 }
@@ -778,6 +788,9 @@ void font_enable_all(void)
 {
     for(int i = 0; i < MAXFONTS; i++)
         font_enable(i);
+#ifdef HAVE_PODBOX_FONT
+    font_pbf_prefetch_suspend(false);
+#endif
 }
 
 
@@ -794,6 +807,29 @@ struct font* font_get(int font)
     struct buflib_alloc_data *alloc = core_get_data(buflib_allocations[font]);
     return &alloc->font;
 }
+
+#ifdef HAVE_PODBOX_FONT
+void font_prefetch_mark_hot(int id)
+{
+    if (id >= 0 && id < MAXFONTS && buflib_allocations[id] > 0)
+        font_get(id)->pbf.want_hot = true;
+}
+
+bool font_prefetch_text(int id, const char *text)
+{
+    if (!text || !*text)
+        return true;
+    id = font_resolve_id(id);
+    if (id < 0 || buflib_allocations[id] <= 0)
+        return true;
+    struct buflib_alloc_data *data = core_get_data_pinned(buflib_allocations[id]);
+    bool ready = !data->font.pbf.file_size ||
+        font_pbf_prefetch(&data->font, id, data->path,
+                          bidi_l2v((const unsigned char *)text, 1));
+    core_put_data_pinned(data);
+    return ready;
+}
+#endif
 
 /* When FONT_UI is supplied to font_get this font will be tried first if it is
  * not loaded then fall back to default of any loaded font wins */

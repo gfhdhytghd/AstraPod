@@ -192,6 +192,13 @@ static int artist_jump_prev(void)
 
 /* The artist name caption -- a single line, positioned like the album name line
  * (album covers' second, artist/year line has no artist-mode equivalent). */
+static bool artist_caption_at(int index, struct carousel_album_header *text)
+{
+    artist_name(index, text->title, sizeof(text->title));
+    text->artist[0] = '\0';
+    return true;
+}
+
 static void artist_draw_text(void)
 {
     struct pf_caption cap;
@@ -203,6 +210,10 @@ static void artist_draw_text(void)
         return;
 
     artist_name(center_index, name, sizeof(name));
+    bool ready = font_prefetch_text(carousel_caption_font(true), name);
+    ready &= font_prefetch_text(carousel_caption_font(true), ".");
+    if (!ready)
+        return;
     struct viewport *saved_vp = carousel_text_begin();
     lcd_set_foreground(pf_fg_color);
     lcd_setfont(carousel_caption_font(true));
@@ -339,6 +350,7 @@ static const struct carousel_model artist_model = {
     .jump_prev   = artist_jump_prev,
     .jump_next   = artist_jump_next,
     .draw_text   = artist_draw_text,
+    .caption_at  = artist_caption_at,
     .sort_next   = carousel_sort_noop,
     .sort_prev   = carousel_sort_noop,
     .set_initial = artist_set_initial,

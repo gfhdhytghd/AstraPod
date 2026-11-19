@@ -35,7 +35,7 @@ static void probe_pixel(fb_data *dst, unsigned coverage)
     }
 }
 
-static void probe_row(int line, int row, bool background, int font, int y, int alpha)
+static void probe_row(int line, int row, bool background, int font, int y, int alpha, int inset)
 {
     if (!fu108_clock)
         return;
@@ -43,7 +43,7 @@ static void probe_row(int line, int row, bool background, int font, int y, int a
     probe_vocal = line < 2 ? 2 * line + background : -1;
     if (!lv.mode.manual || background || row || !alpha)
         return;
-    int baseline = y + font_get(font)->ascent;
+    int baseline = y + inset + font_get(font)->ascent;
     if (probe_baseline[line] != INT_MIN)
         probe_expect(probe_baseline[line] == baseline, "native faces share a baseline", line);
     probe_baseline[line] = baseline;
@@ -191,7 +191,7 @@ static void fu108_lyrics_probe(const char *dir)
             lv_browse(f < 28 ? 1 : -1, fu108_clock);
         }
         probe_draw();
-        int shift = lv.wheel_offset - lv_distance(3, lv.mode.focus, -1, true, -1);
+        int shift = lv.wheel_offset - FU108_MANUAL_DISTANCE(3, lv.mode.focus);
         for (unsigned i = 0; i < PROBE_ROWS; ++i)
         {
             if (probe_baseline[i] == INT_MIN)

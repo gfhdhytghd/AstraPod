@@ -10,7 +10,7 @@ ns=ast.parse((r/'tools/tests/lyrics_document_test.py').read_text())
 pre=next(ast.literal_eval(n.value) for n in ns.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='pre' for t in n.targets))
 pre=pre.replace('static struct {int default_codepage;} global_settings;', '''static struct {int default_codepage,lyric_colour_mode,backlight_timeout,backlight_timeout_plugged,lyric_prev_opacity,lyric_next_opacity,lyric_lead,lyric_align;unsigned fg_color,bg_color;bool lyric_highlight,lyric_backlight,prevent_skip,animations,native_ui;} global_settings;''')
 pre=pre.replace('length,id3v2len;', 'length,id3v2len,elapsed;')
-pre=pre.replace('static void core_free(int h){assert(h==1);frees++;}',
+pre=pre.replace('static void core_free(int h){if(h==1)frees++;else core_free_extra(h);}',
                 'static int core_free(int handle);')
 strutil=(r/'apps-ipod/system/strutil.c').read_text()
 read_line=re.search(r'^int read_line\(.*?^}',strutil,re.M|re.S).group()
@@ -106,7 +106,7 @@ struct viewport {struct frame_buffer_t *buffer;unsigned bg_pattern;int font,fg,w
 struct bitmap {int width,height;unsigned char *data;};
 struct screen {int(*getuifont)(void);};
 struct wps_state {struct mp3entry *id3,*nid3;int ff_rewind_count;bool paused;};
-struct cider_row {char id[80],title[124];};
+struct cider_row {char id[80],title[124],subtitle[124];};
 static uint32_t current_tick, precise_extra;
 static uint32_t mock_usec(void){return current_tick*10000+precise_extra;}
 static fb_data screen_pixels[320*240],app_area[3*1024*1024/sizeof(fb_data)];
@@ -131,6 +131,7 @@ static int core_alloc_free_space(size_t size)
 }
 static void *core_get_data_pinned(int handle)
 {
+    if (handle > 2) { core_free_extra(handle); return 0; }
     assert(handle==2 && entry_allocated && !entry_pinned);
     entry_pinned=true;
     return entry_core;
@@ -147,6 +148,7 @@ static int core_free(int handle)
         frees++;
         return 0;
     }
+    if (handle > 2) { core_free_extra(handle); return 0; }
     assert(handle==2 && entry_allocated && !entry_pinned);
     entry_allocated=false;
     entry_frees++;
@@ -329,7 +331,7 @@ static void cider_control(const char*c,int v){
 static void cider_page_open(const char*q)
 {
     static char previous[144];
-    assert(strstr(q,"now/lyrics?nonce=")&&strstr(q,"&lrc=1&track="));
+    assert(strstr(q,"now/lyrics?nonce=")&&strstr(q,"&lrc=1&duet=1&track="));
     if(!strcmp(previous,q))return;
     strcpy(previous,q);
     if (timed_fixture) assert(strstr(q,remote_clock.id));
@@ -688,6 +690,18 @@ static int get_action(int c,int timeout){
 }
 int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  assert(!atexit(check_trace_closed));
+ {
+    struct lv_state clock = {0};
+    lv_state = &clock;
+    assert(lv_local_vocal_clock(1000, 1, 100000, false) == 1000);
+    assert(lv_local_vocal_clock(1000, 1, 120000, false) == 1020);
+    assert(lv_local_vocal_clock(1040, 1, 160000, false) == 1060);
+    long stalled = lv_local_vocal_clock(1040, 1, 280000, false);
+    assert(stalled == lv_local_vocal_clock(1040, 1, 320000, false));
+    assert(lv_local_vocal_clock(1040, 1, 330000, true) == 1040);
+    assert(lv_local_vocal_clock(2100, 2, 340000, false) == 2100);
+    lv_state = NULL;
+ }
  assert(lv_mix(0,65535,128)==0x7bef);
  assert(lv_mix(0,0xf800,128)==0x7800&&lv_mix(0,0x07e0,128)==0x03e0&&lv_mix(0,0x001f,128)==0x000f);
  art_present=true;for(int i=0;i<256;i++)art_pixels[i]=i<16?0x001f:0xf800;

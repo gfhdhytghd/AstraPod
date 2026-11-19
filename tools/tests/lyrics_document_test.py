@@ -56,9 +56,17 @@ static const int buflib_ops_locked;
 static unsigned char arena[32768] __attribute__((aligned(16)));
 static bool fail_alloc;
 static int allocs,frees;
-static int core_alloc_ex(size_t n,const void *ops){(void)ops;assert(n==sizeof arena);if(fail_alloc)return -1;allocs++;return 1;}
-static void *core_get_data(int h){assert(h==1);return arena;}
-static void core_free(int h){assert(h==1);frees++;}
+static void *extra[4];
+static int core_alloc_ex(size_t n,const void *ops){
+    (void)ops;
+    if(fail_alloc)return -1;
+    if(n==sizeof arena){allocs++;return 1;}
+    for(int i=0;i<4;i++)if(!extra[i]){extra[i]=calloc(1,n);assert(extra[i]);return i+3;}
+    abort();
+}
+static void *core_get_data(int h){if(h==1)return arena;assert(h>=3&&h<7&&extra[h-3]);return extra[h-3];}
+static void core_free_extra(int h){free(core_get_data(h));extra[h-3]=NULL;}
+static void core_free(int h){if(h==1)frees++;else core_free_extra(h);}
 
 static bool file_exists(const char *p){struct stat st;return !stat(p,&st);}
 static void fix_path_part(char *p,int start,int end){(void)p;(void)start;(void)end;}
@@ -98,6 +106,7 @@ int main(int argc,char**argv){assert(argc==2);assert(!chdir(argv[1]));
  for(int i=0;i<lines;i++)assert(strlen(lyrics_text(i))==124);
  struct mp3entry track={.length=60000};snprintf(track.path,sizeof track.path,"%s/song.wav",argv[1]);
  writefile("song.txt","Local plain text\n中文歌词\nLast");
+ unlink("song.ttml");
  unlink("song.lrc"); /* a previous run's timed fixture has higher priority */
  assert(lyrics_load(&track)==LYRICS_OK&&!lyrics_timed()&&lyrics_count()==3);
  assert(!strcmp(lyrics_text(0),"Local plain text")&&!strcmp(lyrics_text(1),"中文歌词"));
@@ -109,6 +118,39 @@ int main(int argc,char**argv){assert(argc==2);assert(!chdir(argv[1]));
  assert(lyrics_word_time(1,0)==2100&&lyrics_word_time(1,1)==3100);
  assert(!strcmp(lyrics_word_text(1,1),"words"));
  lyrics_close();assert(frees==1&&!lyrics_loaded()&&lyrics_count()==0);
+
+ writefile("song.ttml","<?xml version='1.0'?><tt xmlns:m='http://www.w3.org/ns/ttml#metadata'>"
+    "<head><metadata><m:agent xml:id='b' type='person'/><m:agent xml:id='a' type='person'/>"
+    "<m:agent xml:id='g' type='group'/></metadata></head><body><div m:agent='a'>"
+    "<p begin='00:00.800' end='2s'><span m:role='x-bg' m:agent='b'><span begin='0.4s' end='1.2s'>(echo)</span></span>"
+    "<span begin='0.8s' end='1s'>微&amp; </span><span begin='1s' end='2s'>light</span> </p></div>"
+    "<div><p begin='2s' m:agent='b'>Second</p><p begin='3s' m:agent='g'>Group</p>"
+    "<p begin='4s'><span begin='4s' end='4.5s' m:agent='b'>Right </span>"
+    "<span begin='4.5s' end='5s' m:agent='a'>Left&#33;</span></p></div></body></tt>");
+ assert(lyrics_load(&track)==LYRICS_OK&&lyrics_ttml()&&lyrics_count()==4);
+ assert(!strcmp(lyrics_text(0),"微& light")&&lyrics_time(0)==800);
+ struct lyrics_vocal first=lyrics_vocal_at(0,false),bg=lyrics_vocal_at(0,true);
+ assert(first.timed&&lyrics_agent_alignment(first.agent)==0);
+ assert(bg.text&&!strcmp(bg.text,"(echo)")&&bg.begin==400&&bg.end==1200);
+ assert(lyrics_agent_alignment(bg.agent)==2&&lyrics_agent_alignment(lyrics_vocal_at(1,false).agent)==2);
+ assert(lyrics_agent_alignment(lyrics_vocal_at(2,false).agent)==1);
+ assert(lyrics_agent_alignment(lyrics_vocal_at(3,false).agent)==1&&!strcmp(lyrics_text(3),"Right Left!"));
+ assert(lyrics_agent_alignment(lyrics_vocal_cue(3,false,0).agent)==2);
+ assert(lyrics_vocal_cue(3,false,1).begin==4500&&lyrics_vocal_cue(3,false,1).end==5000);
+ writefile("song.ttml","<tt><body><div><p begin='0ms' ttm:agent='a'>Solo</p></div></body></tt>");
+ assert(lyrics_load(&track)==LYRICS_OK&&lyrics_ttml()&&lyrics_agent_alignment(lyrics_vocal_at(0,false).agent)==-1);
+ writefile("song.ttml","<tt><body><p begin='0s'>Broken</div></body></tt>");
+ assert(lyrics_load(&track)==LYRICS_OK&&!lyrics_ttml()&&!strcmp(lyrics_text(0),"One"));
+ assert(lyrics_begin_text()==LYRICS_OK);
+ assert(lyrics_append_ttml("<p a='4' begin='1s'><span begin='1s' end='",true,2));
+ assert(lyrics_append_ttml("2s'>Duet</span></p>",false,2));
+ assert(lyrics_ttml_complete()&&lyrics_publish_remote(60000));
+ assert(lyrics_agent_alignment(lyrics_vocal_at(0,false).agent)==2&&!strcmp(lyrics_text(0),"Duet"));
+ lyrics_resume_remote();
+ assert(lyrics_append_ttml("<p a='3'",true,2)&&!lyrics_ttml_complete());
+ lyrics_close();
+ for(int i=0;i<4;i++)assert(!extra[i]);
+ puts("PASS local Apple TTML and fragmented remote TTML: voices, timing, escapes, fallback and cleanup");
  fail_alloc=true;assert(lyrics_begin_text()==LYRICS_NO_MEMORY);assert(lyrics_load(&track)==LYRICS_NO_MEMORY);
  assert(lyrics_load(NULL)==LYRICS_NO_TRACK);
  puts("PASS production text/enhanced LRC model: UTF-8, copy lifetime, 75 remote rows, bounds, buffer exhaustion, reuse/release, no-memory");

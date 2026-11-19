@@ -81,120 +81,8 @@ static FORCE_INLINE unsigned glyph_nibble(const unsigned char *bits, size_t idx)
     return LCD_BLEND_OPAQUE - ((idx & 1) ? (byte >> 4) : (byte & 0x0f));
 }
 
-/* One glyph's coverage into the mask, `skip` pixels in from its own left edge
- * and `dst_x` in from the mask's. A mask byte is a 2x2 block of screen, and
- * carries the sum of the four -- 0 to SHADOW_COV_FULL -- so that halving the
- * resolution lightens a thin stroke the way covering less of a pixel does,
- * rather than fattening it the way a maximum would.
- *
- * The sum is why this adds to what is there rather than storing: the four
- * arrive in two passes, one row apart. A combining mark drawn over the glyph
- * it follows adds a second time, which the clamp catches. */
-static void glyph_to_mask(const struct font *pf, const unsigned char *bits,
-                          int width, int skip, int dst_x,
-                          int hw, int hh, int top)
-{
-    int rows = MIN((int)pf->height, 2 * hh - top);
-    int last = MIN(width, skip + 2 * hw - dst_x);
-
-    if (dst_x < 0 || last <= skip)
-        return;
-
-    for (int py = 0; py < rows; py++)
-    {
-        unsigned char *dst = &shadow_mask[((top + py) >> 1) * hw + (dst_x >> 1)];
-        size_t idx = (size_t)py * width + skip;
-        int px = skip;
-
-        if (pf->depth)
-        {
-            const unsigned char *s = &bits[idx >> 1];
-
-            /* An odd mask column finishes the block the previous glyph
-             * started; after it the blocks line up with pixel pairs. */
-            if (dst_x & 1)
-            {
-                *dst = MIN(*dst + glyph_nibble(bits, idx), SHADOW_COV_FULL);
-                dst++;
-                idx++;
-                px++;
-                s = &bits[idx >> 1];
-            }
-
-            /* From here the nibble index steps by two, so which half of a
-             * byte a block starts in is settled for the whole row. Two loops
-             * rather than a test and a shift on every pixel. */
-            if (!(idx & 1))
-            {
-                for (; px + 1 < last; px += 2)
-                {
-                    unsigned byte = *s++;
-                    unsigned cov = 2 * LCD_BLEND_OPAQUE -
-                                   (byte & 0x0f) - (byte >> 4);
-
-                    *dst = MIN(*dst + cov, SHADOW_COV_FULL);
-                    dst++;
-                }
-            }
-            else
-            {
-                for (; px + 1 < last; px += 2)
-                {
-                    unsigned cov = 2 * LCD_BLEND_OPAQUE -
-                                   (s[0] >> 4) - (s[1] & 0x0f);
-
-                    s++;
-                    *dst = MIN(*dst + cov, SHADOW_COV_FULL);
-                    dst++;
-                }
-            }
-
-            if (px < last)
-            {
-                unsigned nibble = (idx & 1) ? (*s >> 4) : (*s & 0x0f);
-
-                *dst = MIN(*dst + LCD_BLEND_OPAQUE - nibble,
-                           SHADOW_COV_FULL);
-            }
-        }
-        else
-        {
-            /* 1bpp glyphs are columns of eight vertical pixels. */
-            const unsigned char *col = &bits[(py >> 3) * width + skip];
-            unsigned shift = py & 7;
-
-            if (dst_x & 1)
-            {
-                if ((*col++ >> shift) & 1)
-                    *dst = MIN(*dst + LCD_BLEND_OPAQUE, SHADOW_COV_FULL);
-                dst++;
-                px++;
-            }
-
-            for (; px + 1 < last; px += 2)
-            {
-                unsigned cov = (((col[0] >> shift) & 1) +
-                                ((col[1] >> shift) & 1)) * LCD_BLEND_OPAQUE;
-
-                col += 2;
-                *dst = MIN(*dst + cov, SHADOW_COV_FULL);
-                dst++;
-            }
-
-            if (px < last && ((*col >> shift) & 1))
-                *dst = MIN(*dst + LCD_BLEND_OPAQUE, SHADOW_COV_FULL);
-        }
-    }
-}
-
-/* The string's coverage, walked the way lcd_putsxyofs() walks it: the same
- * visual order, the same widths, the same left-to-right advance and the same
- * stop at the viewport's edge, so the shadow lands under the text rather than
- * beside it.
- *
- * Combining diacritics are the one divergence. The renderer centres a mark
- * over the glyph it follows and this leaves it at its own box, which can put
- * a stacked accent's shadow a pixel or two off. */
+/* Follow the LCD glyph origins and accumulate coverage in 2x2 cells
+ * before the blur pass. */
 static void mask_from_text(struct screen *display, struct viewport *vp,
                            const char *text, int x, int ofs,
                            int mx, int hw, int hh, int top)
@@ -223,23 +111,33 @@ static void mask_from_text(struct screen *display, struct viewport *vp,
     font_lock(vp->font, true);
     pf = font_get(vp->font);
 
+    struct font_run run = {0};
     for (ucs = bidi_l2v((const unsigned char *)text, 1); *ucs; ucs++)
     {
-        int width = font_get_width(pf, *ucs);
-
-        if (x >= vp->width)
+        struct font_glyph glyph;
+        font_run_next(pf, &run, *ucs, &glyph);
+        int left = glyph.x - ofs;
+        if (x + left >= vp->width && x + (run.pen >> 6) - ofs >= vp->width)
             break;
-
-        if (ofs > width)
-        {
-            ofs -= width;
+        if (!glyph.bits)
             continue;
+        int start_x = MAX(ofs ? MAX(0, -left) : 0, mx - x - left);
+        int stop_x = MIN(glyph.width, mx + 2 * hw - x - left);
+        int start_y = MAX(0, -top - glyph.y);
+        int stop_y = MIN(glyph.height, 2 * hh - top - glyph.y);
+        for (int py = start_y; py < stop_y; ++py)
+        {
+            unsigned char *row = shadow_mask + ((top + glyph.y + py) >> 1) * hw;
+            for (int px = start_x; px < stop_x; ++px)
+            {
+                int col = (x + left + px - mx) >> 1;
+                unsigned coverage = pf->depth
+                    ? glyph_nibble(glyph.bits, py * glyph.width + px)
+                    : ((glyph.bits[(py >> 3) * glyph.width + px] >> (py & 7)) & 1u)
+                      * LCD_BLEND_OPAQUE;
+                row[col] = MIN(row[col] + coverage, SHADOW_COV_FULL);
+            }
         }
-
-        glyph_to_mask(pf, font_get_bits(pf, *ucs), width, ofs, x - mx,
-                      hw, hh, top);
-        x += width - ofs;
-        ofs = 0;
     }
 
     font_lock(vp->font, false);

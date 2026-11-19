@@ -25,6 +25,9 @@ MARKER_X = 47
 THUMB_X = 305
 EMPTY_X = 314
 TRACK_COUNT = 20
+# SDL accelerates notches less than 50 ms apart. Keep each notch at one
+# row while still interrupting the 8-frame list glide.
+DETENT_FRAMES = 3.6
 
 
 def driver_delay(frames):
@@ -41,10 +44,10 @@ def content_span(frame, x, test):
 def capture_spin(screen, output, name, clicks, direction, marker):
     t0 = time.monotonic()
     command = ["xdotool", "click", "--repeat", str(clicks), "--delay",
-               str(driver_delay(0.9)), str(direction)]
+               str(driver_delay(DETENT_FRAMES)), str(direction)]
     clicker = subprocess.Popen(command, env=screen.env)
     frames, stamps = [screen.frame()], [0]
-    for sample in range(1, 2 * (clicks + 25)):
+    for sample in range(1, 2 * (int(clicks * DETENT_FRAMES) + 25)):
         target = t0 + sample / (2 * FPS)
         time.sleep(max(0, target - time.monotonic()))
         frame = screen.frame()

@@ -67,24 +67,24 @@ static bool theme_from_file(struct ui_theme *theme, const char *name)
     return ok;
 }
 
-static void theme_font_path(char *path, size_t size, const char *name)
+static void theme_font_path(char *path, size_t size, const char *name, int role)
 {
-    snprintf(path, size, FONT_DIR "/%s.fnt", name);
+    snprintf(path, size, FONT_DIR "/%s.%s", name, role == UI_FONT_ICON ? "fnt" : "pbf");
 }
 
 static bool theme_has_fonts(const struct ui_theme *theme)
 {
-    char path[sizeof(FONT_DIR "/.fnt") + UI_THEME_FONT_NAME_MAX];
+    char path[sizeof(FONT_DIR "/.pbf") + UI_THEME_FONT_NAME_MAX];
     for (int i = 0; i < UI_FONT_COUNT; ++i)
     {
-        theme_font_path(path, sizeof(path), theme->font[i]);
+        theme_font_path(path, sizeof(path), theme->font[i], i);
         int fd = open(path, O_RDONLY);
         if (fd < 0)
             return false;
         char magic[4];
         bool valid = ffilesize(fd) >= 36 &&
                      read(fd, magic, sizeof(magic)) == sizeof(magic) &&
-                     !memcmp(magic, "RB12", sizeof(magic));
+                     !memcmp(magic, i == UI_FONT_ICON ? "RB12" : "PBF1", sizeof(magic));
         close(fd);
         if (!valid)
             return false;
@@ -193,22 +193,22 @@ unsigned ui_theme_duration(unsigned frames)
 
 int ui_theme_font_load(const struct ui_theme *theme, enum ui_font_role role, int glyphs)
 {
-    char path[sizeof(FONT_DIR "/.fnt") + UI_THEME_FONT_NAME_MAX];
-    theme_font_path(path, sizeof(path), theme->font[role]);
+    char path[sizeof(FONT_DIR "/.pbf") + UI_THEME_FONT_NAME_MAX];
+    theme_font_path(path, sizeof(path), theme->font[role], role);
     return font_load_ex(path, 0, glyphs);
 }
 
 int ui_theme_current_font_load(enum ui_font_role role, int glyphs)
 {
-    char path[sizeof(FONT_DIR "/.fnt") + UI_THEME_FONT_NAME_MAX];
+    char path[sizeof(FONT_DIR "/.pbf") + UI_THEME_FONT_NAME_MAX];
     if (current_theme > 0)
     {
         struct ui_theme *theme = core_get_data_pinned(current_theme);
-        theme_font_path(path, sizeof(path), theme->font[role]);
+        theme_font_path(path, sizeof(path), theme->font[role], role);
         core_put_data_pinned(theme);
     }
     else
-        theme_font_path(path, sizeof(path), ui_theme_builtin_font(role));
+        theme_font_path(path, sizeof(path), ui_theme_builtin_font(role), role);
     return font_load_ex(path, 0, glyphs);
 }
 

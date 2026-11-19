@@ -1467,6 +1467,9 @@ int gen_c_source(struct font* pf, char *path)
             "  0,  /*   */\n"
             "  0,  /*   */\n"
             "  0,  /*   */\n"
+            "#ifdef HAVE_PODBOX_FONT\n"
+            "  {0}, /* PodBox font metadata */\n"
+            "#endif\n"
             "};\n"
           );
 

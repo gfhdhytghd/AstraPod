@@ -1565,13 +1565,10 @@ static int draw_input(struct screen *d, struct viewport *vp, int y,
     return y + shown * USE_LINE + 2 * INPUT_PAD + DET_GAP;
 }
 
-static int detail_glyph(const char *text, int *bytes, void *ctx)
+static int detail_measure(const char *text, int bytes, void *ctx)
 {
-    ucschar_t ch;
-    const unsigned char *start = (const unsigned char *)text;
-    const unsigned char *next = utf8decode(start, &ch);
-    *bytes = next - start;
-    return ch == '\n' || IS_DIACRITIC(ch) ? 0 : font_get_width(ctx, ch);
+    int font = *(const int *)ctx;
+    return font_getstringnsize(text, bytes, NULL, NULL, font);
 }
 
 /* Draw the detail view over the empty list. The agent's name and kind head
@@ -1680,14 +1677,11 @@ static void draw_detail(struct gui_synclist *list)
     /* Retain closed lines during streaming. A reader above the bottom
      * keeps the accepted message, steps and body geometry until returning. */
     bool frozen = detail_scroll < detail_scroll_max;
-    struct font *pf = font_get(vp->font);
     char identity[9] = "";
     if (!strcmp(a->kind, "codex") && strlen(model.detail_revision) == 16)
         snprintf(identity, sizeof identity, "%.8s", model.detail_revision);
-    font_lock(vp->font, true);
     detail_layout_update(&detail_layout, detail_pane, identity, det->say,
-                         det, vp->width, frozen, detail_glyph, pf);
-    font_lock(vp->font, false);
+                         det, vp->width, frozen, detail_measure, &vp->font);
     if (!frozen || !detail_body_avail)
     {
         detail_body_y = y;

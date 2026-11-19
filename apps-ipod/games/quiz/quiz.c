@@ -199,9 +199,9 @@ static void fonts_load(void)
     int glyphs = global_settings.glyphs_to_cache;
 
     font_icon  = font_load_ex(FONT_DIR "/24x24-icons.fnt", 0, glyphs);
-    font_big   = font_load_ex(FONT_DIR "/26-noto-sans-medium.fnt", 0, glyphs);
-    font_small = font_load_ex(FONT_DIR "/12-noto-sans.fnt", 0, glyphs);
-    font_bold  = font_load_ex(FONT_DIR "/18-noto-sans-bold.fnt", 0, glyphs);
+    font_big   = font_load_ex(FONT_DIR "/26-noto-sans-medium.pbf", 0, glyphs);
+    font_small = font_load_ex(FONT_DIR "/12-noto-sans.pbf", 0, glyphs);
+    font_bold  = font_load_ex(FONT_DIR "/18-noto-sans-bold.pbf", 0, glyphs);
 }
 
 static void fonts_unload(void)

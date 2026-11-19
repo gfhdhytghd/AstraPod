@@ -363,10 +363,10 @@ static int art_tint(unsigned key)
  * The badge face is ours -- apps-ipod/fonts/, shipped beside the binary --
  * for the reason the serif is: a face the core cannot do without must not
  * arrive inside a theme. Missing, the plates are simply empty. */
-#define FONT_TITLE_PATH ROCKBOX_DIR "/fonts/26-noto-sans-medium.fnt"
-#define FONT_NAME_PATH  ROCKBOX_DIR "/fonts/18-noto-sans-bold.fnt"
-#define FONT_BODY_PATH  ROCKBOX_DIR "/fonts/18-noto-sans.fnt"
-#define FONT_FIG_PATH   ROCKBOX_DIR "/fonts/30-noto-serif-figures.fnt"
+#define FONT_TITLE_PATH ROCKBOX_DIR "/fonts/26-noto-sans-medium.pbf"
+#define FONT_NAME_PATH  ROCKBOX_DIR "/fonts/18-noto-sans-bold.pbf"
+#define FONT_BODY_PATH  ROCKBOX_DIR "/fonts/18-noto-sans.pbf"
+#define FONT_FIG_PATH   ROCKBOX_DIR "/fonts/30-noto-serif-figures.pbf"
 #define FONT_ICON_PATH  ROCKBOX_DIR "/fonts/24-spun-badges.fnt"
 
 static int font_title = FONT_SYSFIXED;

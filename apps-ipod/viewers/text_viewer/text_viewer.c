@@ -101,7 +101,7 @@
 
 /* The footer's face, which every build ships (bundle-theme.sh). Without it
  * the footer is drawn in the page's font. */
-#define TV_FOOTER_FONT  FONT_DIR "/12-noto-sans.fnt"
+#define TV_FOOTER_FONT  FONT_DIR "/12-noto-sans.pbf"
 
 struct tv_state
 {
@@ -2511,7 +2511,7 @@ static void tv_apply_font(void)
     if (global_settings.text_viewer_font_file[0])
     {
         char buf[MAX_PATH];
-        snprintf(buf, sizeof buf, FONT_DIR "/%s.fnt",
+        snprintf(buf, sizeof buf, FONT_DIR "/%s.pbf",
                  global_settings.text_viewer_font_file);
         fid = font_load(buf);
     }

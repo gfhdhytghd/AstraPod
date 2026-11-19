@@ -66,7 +66,7 @@ static const struct filetype_inbuilt inbuilt_filetypes[] = {
     { "rock", FILE_ATTR_ROCK  },
     { "lua",  FILE_ATTR_LUA   },
     { "opx",  FILE_ATTR_OPX   },
-    { "fnt",  FILE_ATTR_FONT  },
+    { "pbf",  FILE_ATTR_FONT  },
     { "kbd",  FILE_ATTR_KBD   },
     { "cue",  FILE_ATTR_CUE   },
 #ifdef BOOTFILE_EXT

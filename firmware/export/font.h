@@ -80,6 +80,27 @@ enum {
 /* loadable font magic and version #*/
 #define VERSION "RB12"
 
+#if defined(HAVE_LCD_COLOR) && !defined(BOOTLOADER) && !defined(__PCTOOL__)
+#define HAVE_PODBOX_FONT
+struct font_pbf {
+    uint32_t index_offset, bitmap_offset, file_size;
+    uint16_t anchors, rows, max_record;
+    uint32_t page;
+};
+#endif
+
+struct font_run {
+    int pen, base_pen, base_advance;
+    unsigned char kern_row;
+};
+
+struct font_glyph {
+    int origin, x, y, width, height;
+    unsigned phase;
+    const unsigned char *bits;
+    bool missing;
+};
+
 /* builtin C-based proportional/fixed font structure */
 /* based on The Microwindows Project http://microwindows.org */
 struct font {
@@ -111,6 +132,9 @@ struct font {
     uint32_t file_width_offset;    /* offset to file width data    */
     uint32_t file_offset_offset;   /* offset to file offset data   */
     int long_offset;
+#ifdef HAVE_PODBOX_FONT
+    struct font_pbf pbf;
+#endif
 #endif
 
 };
@@ -140,6 +164,8 @@ void set_ui_font(int font); /* when FONT_UI is supplied this font will be tried 
 int font_measurestring(const unsigned char *str, size_t maxbytes, size_t maxwidth, int *w, int *h, int fontnum);
 int font_getstringnsize(const unsigned char *str, size_t maxbytes, int *w, int *h, int fontnumber);
 int font_getstringsize(const unsigned char *str, int *w, int *h, int fontnumber);
+int font_run_next(struct font *font, struct font_run *run, ucschar_t ch,
+                  struct font_glyph *out);
 int font_get_width(struct font* ft, ucschar_t ch);
 /* A missing entry in a proportional RB12 font aliases its default bitmap. */
 bool font_has_glyph(struct font *font, ucschar_t ch);

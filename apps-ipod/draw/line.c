@@ -406,10 +406,9 @@ void put_line(struct screen *display,
 const char *text_fit(const char *text, char *buf, size_t size,
                      int font, int maxwidth)
 {
-    struct font *pf = font_get(font);
     const unsigned char *p = (const unsigned char *)text;
-    int ellw = 3 * font_get_width(pf, '.');
-    int width = 0;
+    int ellw = font_getstringsize("...", NULL, NULL, font);
+    struct font_run run = {0};
     size_t fit = 0;     /* bytes that fit with the "..." after them */
     bool rtl = false;   /* the last letter kept reads right to left */
     ucschar_t ch;
@@ -417,13 +416,14 @@ const char *text_fit(const char *text, char *buf, size_t size,
     if (font_getstringsize(p, NULL, NULL, font) <= maxwidth)
         return text;
 
+    font_lock(font, true);
+    struct font *pf = font_get(font);
     while (*p)
     {
         const unsigned char *next = utf8decode(p, &ch);
         if (!IS_DIACRITIC(ch))
         {
-            width += font_get_width(pf, ch);
-            if (width + ellw > maxwidth)
+            if (font_run_next(pf, &run, ch, NULL) + ellw > maxwidth)
                 break;
         }
         if (is_rtl_char(ch))
@@ -433,6 +433,8 @@ const char *text_fit(const char *text, char *buf, size_t size,
         p = next;
         fit = p - (const unsigned char *)text;
     }
+
+    font_lock(font, false);
 
     /* never split a UTF-8 sequence */
     if (fit > size - 4)
@@ -446,13 +448,13 @@ const char *text_fit(const char *text, char *buf, size_t size,
      * left to right. */
     if (rtl)
     {
+        memmove(buf + 3, text, fit);
         memcpy(buf, "...", 3);
-        memcpy(buf + 3, text, fit);
         buf[fit + 3] = '\0';
     }
     else
     {
-        memcpy(buf, text, fit);
+        memmove(buf, text, fit);
         strcpy(buf + fit, "...");
     }
     return buf;

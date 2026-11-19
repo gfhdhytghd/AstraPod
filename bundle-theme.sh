@@ -16,7 +16,18 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/.rockbox/fonts"
 cp "$ROOT/apps-ipod/default-config.cfg" "$STAGE/.rockbox/"
-cp "$ROOT/apps-ipod/fonts/"*.fnt "$ROOT/apps-ipod/fonts/"LICENSE-*.txt "$STAGE/.rockbox/fonts/"
+FONTS="$STAGE/.rockbox/fonts"
+for name in 24x24-icons 24-spun-badges 24-seven-fifteen; do
+    cp "$ROOT/apps-ipod/fonts/$name.fnt" "$FONTS/"
+done
+cp "$ROOT/apps-ipod/fonts/"LICENSE-*.txt "$FONTS/"
+python3 "$ROOT/tools/fonts/compile.py" "$STAGE/generated"
+cp "$STAGE/generated/"*.pbf "$FONTS/"
+cat > "$FONTS/NOTICE-HarmonyOS-Sans.txt" <<'NOTICE'
+PodBox renders its bitmap text using HarmonyOS Sans and HarmonyOS Sans SC.
+HarmonyOS Sans is Copyright 2021-2024 Huawei Device Co., Ltd.
+Font terms: https://github.com/openharmony/global_system_resources/blob/master/LICENSE_Fonts
+NOTICE
 
 (cd "$STAGE" && zip -qr "$ZIP" .rockbox)
 # Buildzip may still find data for the upstream plugin loader.

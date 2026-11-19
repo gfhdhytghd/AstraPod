@@ -441,7 +441,7 @@ for target in $TARGETS; do
         [ -s '$REMOTE_DIR/build-hw-$target/rockbox.map' ] ||
             { echo 'missing: $target rockbox.map' >&2; exit 1; }
         for want in .rockbox/default-config.cfg \
-                    .rockbox/fonts/18-noto-sans.fnt \
+                    .rockbox/fonts/18-noto-sans.pbf \
                     .rockbox/docs/settings-help.txt \
                     .rockbox/trim.config \
                     .rockbox/speech/cmudict.bin \

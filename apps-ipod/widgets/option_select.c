@@ -623,7 +623,7 @@ bool option_screen(const struct settings_list *setting,
                 function(*variable);
                 /* Notify the Now Playing volume display. */
                 if (function == sound_get_fn(SOUND_VOLUME))
-                    global_status.last_volume_change = current_tick;
+                    volume_mark_changed();
             }
         }
 

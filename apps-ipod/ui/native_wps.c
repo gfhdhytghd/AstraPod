@@ -27,8 +27,8 @@
 #include "screens/playback/wps.h"
 #include "settings/settings.h"
 #include "system/format_time.h"
+#include "system/volume.h"
 
-#include "native_chrome.h"
 #include "native_theme_runtime.h"
 #include "native_wps.h"
 #include "perf.h"
@@ -38,7 +38,7 @@
 #define BANDS 8
 #define SCROLL_PAUSE ANIM_F(60)
 #define SCROLL_GAP 24
-#define VOLUME_HOLD (ANIM_F(180) * HZ / UI_ANIM_FPS)
+#define VOLUME_HOLD_FRAMES ANIM_F(80)
 #define VALUE_FRAMES ANIM_F(8)
 #define VOLUME_OPEN_FRAMES ANIM_F(16)
 #define VOLUME_CLOSE_FRAMES ANIM_F(12)
@@ -46,7 +46,7 @@
 enum wps_view {
     WPS_ROOT, WPS_COVER, WPS_PANEL, WPS_TITLE, WPS_ARTIST,
     WPS_PROGRESS, WPS_PROGRESS_FILL, WPS_INDEX, WPS_REMAINING, WPS_SPECTRUM,
-    WPS_STATUS, WPS_VOLUME, WPS_VOLUME_FILL, WPS_VIEW_COUNT,
+    WPS_VOLUME, WPS_VOLUME_FILL, WPS_VIEW_COUNT,
 };
 
 struct wps_label {
@@ -71,19 +71,18 @@ struct native_wps {
     struct ui_page page;
     struct ui_view view[WPS_VIEW_COUNT];
     struct ui_theme theme;
-    struct native_chrome chrome;
     struct wps_label title, artist, index, remaining;
     struct wps_progress progress;
     struct ui_track volume_width, volume_reveal;
     char title_text[MAX_PATH], artist_text[MAX_PATH];
-    char index_text[16], remaining_text[24], playback_modes[4];
+    char index_text[16], remaining_text[24];
     unsigned bg, fg, accent, panel, meter_fg, meter_peak;
     unsigned palette_generation, art_generation, blur_generation;
     int art_handle, background, peak_height, volume_target, volume_font;
     int level[BANDS], peak[BANDS];
     long meter_due;
     unsigned motion_trace;
-    bool status_ready, volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
+    bool volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
 };
 
 static int wps_handle, blur_handle;
@@ -324,18 +323,6 @@ static void paint_volume(const struct ui_view *view, const struct ui_view_frame 
     lcd_set_viewport(previous);
 }
 
-static void paint_status(const struct ui_view *view, const struct ui_view_frame *frame)
-{
-    (void)view;
-    struct ui_album_palette palette;
-    struct native_chrome_indicators icons;
-    album_palette_snapshot(&palette);
-    native_chrome_indicators(&wps->chrome.state, &icons);
-    struct viewport *previous = lcd_set_viewport(NULL);
-    native_chrome_draw(&wps->chrome, wps->playback_modes, true, frame, &palette, &icons);
-    lcd_set_viewport(previous);
-}
-
 static const struct ui_view_ops background_ops = { .paint = paint_background };
 static const struct ui_view_ops cover_ops = { .paint = paint_cover };
 static const struct ui_view_ops panel_ops = { .paint = paint_panel };
@@ -343,7 +330,6 @@ static const struct ui_view_ops label_ops = { .paint = paint_label };
 static const struct ui_view_ops progress_ops = { .paint = paint_progress };
 static const struct ui_view_ops progress_fill_ops = { .paint = paint_progress_fill };
 static const struct ui_view_ops meter_ops = { .paint = paint_meter };
-static const struct ui_view_ops status_ops = { .paint = paint_status };
 static const struct ui_view_ops volume_ops = { .paint = paint_volume };
 
 static struct ui_rect view_bounds(enum wps_view id)
@@ -458,31 +444,6 @@ static void refresh_progress(const struct wps_state *state, bool remote, uint32_
     progress->target = width;
 }
 
-static void refresh_status(const struct cider_status *source, bool remote)
-{
-    if (!wps->status_ready)
-        return;
-
-    char modes[sizeof(wps->playback_modes)];
-    int count = 0;
-    if (source->loading)
-        modes[count++] = 'V';
-    if (remote ? cider_mode_get(CIDER_MODE_SHUFFLE) : global_settings.playlist_shuffle)
-        modes[count++] = 'H';
-    if (remote ? cider_mode_get(CIDER_MODE_REPEAT) : global_settings.repeat_mode)
-        modes[count++] = 'J';
-    modes[count] = '\0';
-
-    bool changed = native_chrome_poll(&wps->chrome);
-    if (strcmp(wps->playback_modes, modes) != 0)
-    {
-        strcpy(wps->playback_modes, modes);
-        changed = true;
-    }
-    if (changed)
-        ui_page_invalidate(&wps->page, view_bounds(WPS_STATUS));
-}
-
 static void refresh_labels(const struct wps_state *state, bool remote, uint32_t now)
 {
     char buf[MAX_PATH];
@@ -584,8 +545,7 @@ static void refresh_art(void)
 
 static void refresh_volume(const struct cider_status *source, bool remote, uint32_t now)
 {
-    bool visible = global_status.last_volume_change &&
-        TIME_BEFORE(current_tick, global_status.last_volume_change + VOLUME_HOLD);
+    bool visible = volume_changed_within(now, ui_frame_clock(VOLUME_HOLD_FRAMES));
     int min = sound_min(SOUND_VOLUME);
     int max = sound_max(SOUND_VOLUME);
     int percent = remote ? source->volume :
@@ -643,7 +603,6 @@ static void setup_page(void)
                             m[UI_METRIC_WPS_DECK_WIDTH], m[UI_METRIC_WPS_DECK_HEIGHT] },
         [WPS_SPECTRUM] = { m[UI_METRIC_WPS_METER_X], m[UI_METRIC_WPS_METER_Y],
                             m[UI_METRIC_WPS_METER_WIDTH], m[UI_METRIC_WPS_METER_HEIGHT] },
-        [WPS_STATUS] = { 0, 0, LCD_WIDTH, wps->status_ready ? m[UI_METRIC_STATUS_HEIGHT] : 0 },
         [WPS_VOLUME] = { 0, 0, LCD_WIDTH, MAX(m[UI_METRIC_STATUS_HEIGHT],
             m[UI_METRIC_WPS_VOLUME_Y] + m[UI_METRIC_WPS_VOLUME_HEIGHT]) },
         [WPS_VOLUME_FILL] = { m[UI_METRIC_WPS_VOLUME_X], m[UI_METRIC_WPS_VOLUME_Y],
@@ -660,7 +619,6 @@ static void setup_page(void)
     ui_view_init(&wps->view[WPS_INDEX], bounds[WPS_INDEX], &label_ops, &wps->index);
     ui_view_init(&wps->view[WPS_REMAINING], bounds[WPS_REMAINING], &label_ops, &wps->remaining);
     ui_view_init(&wps->view[WPS_SPECTRUM], bounds[WPS_SPECTRUM], &meter_ops, NULL);
-    ui_view_init(&wps->view[WPS_STATUS], bounds[WPS_STATUS], &status_ops, NULL);
     ui_view_init(&wps->view[WPS_VOLUME], bounds[WPS_VOLUME], &volume_ops, NULL);
     ui_view_init(&wps->view[WPS_VOLUME_FILL], bounds[WPS_VOLUME_FILL], &progress_fill_ops, NULL);
     wps->view[WPS_VOLUME].value[UI_OFFSET_Y] = -bounds[WPS_VOLUME].height;
@@ -693,7 +651,6 @@ void native_wps_open(const struct wps_state *state)
               wps->index_text, sizeof(wps->index_text));
     label_set(&wps->remaining, wps->index.font, wps->remaining_text, sizeof(wps->remaining_text));
     wps->volume_font = ui_theme_font_load(&wps->theme, UI_FONT_ICON, 48);
-    wps->status_ready = native_chrome_open(&wps->chrome, &wps->theme);
 
     wps->remaining.right = true;
     wps->title.scroll = wps->artist.scroll = true;
@@ -706,11 +663,6 @@ void native_wps_open(const struct wps_state *state)
 bool native_wps_active(void)
 {
     return active;
-}
-
-int native_wps_status_height(void)
-{
-    return active && wps->status_ready ? wps->theme.metric[UI_METRIC_STATUS_HEIGHT] : 0;
 }
 
 bool native_wps_animating(void)
@@ -739,7 +691,6 @@ void native_wps_render(const struct wps_state *state, bool submit)
         cider_status(&source);
     refresh_art();
     uint32_t now = USEC_TIMER;
-    refresh_status(&source, remote);
     refresh_labels(state, remote, now);
     refresh_volume(&source, remote, now);
     if (wps->page.tracks && !wps->motion_tried)
@@ -790,8 +741,6 @@ void native_wps_close(void)
         font_unload(wps->index.font);
     if (wps->volume_font >= 0)
         font_unload(wps->volume_font);
-    if (wps->status_ready)
-        native_chrome_close(&wps->chrome);
     core_put_data_pinned(wps);
     wps = NULL;
 }

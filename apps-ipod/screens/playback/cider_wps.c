@@ -19,6 +19,7 @@
 #include "lcd.h"
 #include "system/activity.h"
 #include "system/app_util.h"
+#include "system/volume.h"
 #include "usb.h"
 #include "viewers/lyric_viewer/lyric_viewer.h"
 #include <string.h>
@@ -82,7 +83,7 @@ void cider_wps_update(struct wps_state *state)
     if (volume_baseline && volume_visible && visible && old_available &&
         source.available && old_generation == source.generation &&
         (source.volume != old_volume || source.muted != old_mute))
-        global_status.last_volume_change = current_tick;
+        volume_mark_changed();
     volume_baseline = true;
     volume_visible = visible;
     if (strcmp(key, source.art))

@@ -255,9 +255,8 @@ void sb_apply_viewport(struct viewport *vp, enum screen_type screen, bool chrome
 
 int sb_visible_height(void)
 {
-    if (!viewportmanager_theme_enabled(SCREEN_MAIN))
-        return native_wps_status_height();
-    if (status_handle <= 0)
+    if (native_wps_active() || !viewportmanager_theme_enabled(SCREEN_MAIN) ||
+        status_handle <= 0)
         return 0;
     struct statusbar *bar = core_get_data_pinned(status_handle);
     refresh_theme(bar);
@@ -272,7 +271,7 @@ void sb_update(enum screen_type screen, bool force)
         return;
 
     struct statusbar *bar = core_get_data_pinned(status_handle);
-    if (!lcd_active() || !viewportmanager_theme_enabled(screen))
+    if (!lcd_active() || native_wps_active() || !viewportmanager_theme_enabled(screen))
     {
         indicators_moving = false;
         bar->motion.ready = false;

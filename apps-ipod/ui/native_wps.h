@@ -15,7 +15,6 @@ int native_wps_background(int art, unsigned generation, enum ui_bg_kind mode, un
 void native_wps_paint_background(const struct viewport *vp, int background, unsigned bg);
 void native_wps_open(const struct wps_state *state);
 bool native_wps_active(void);
-int native_wps_status_height(void);
 bool native_wps_animating(void);
 void native_wps_render(const struct wps_state *state, bool submit);
 void native_wps_invalidate(void);

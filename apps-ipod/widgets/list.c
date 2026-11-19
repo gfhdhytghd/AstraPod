@@ -258,14 +258,17 @@ static void gui_list_put_selection_on_screen(struct gui_synclist * gui_list,
     int bottom = MAX(0, gui_list->nb_items - nb_lines);
     int new_start_item = gui_list->start_item[screen];
     int difference = gui_list->selected_item - gui_list->start_item[screen];
-    const int scroll_limit_up   = (nb_lines < gui_list->selected_size+2 ? 0:1);
+    /* Give a short viewport all its whole rows before moving its contents. */
+    bool edge_cursor = nb_lines <= 4;
+    bool page_scroll = gui_list->scroll_paginated && !edge_cursor;
+    const int scroll_limit_up   = edge_cursor || nb_lines < gui_list->selected_size + 2 ? 0 : 1;
     const int scroll_limit_down = (scroll_limit_up+gui_list->selected_size);
 
     if (gui_list->selected_size >= nb_lines)
     {
         new_start_item = gui_list->selected_item;
     }
-    else if (gui_list->scroll_paginated)
+    else if (page_scroll)
     {
         nb_lines -= nb_lines%gui_list->selected_size;
         if (difference < 0 || difference >= nb_lines)
@@ -282,7 +285,7 @@ static void gui_list_put_selection_on_screen(struct gui_synclist * gui_list,
     {
         new_start_item = gui_list->selected_item + scroll_limit_down - nb_lines;
     }
-    if (gui_list->scroll_paginated && global_settings.animations &&
+    if (page_scroll && global_settings.animations &&
         scroll_limit_up > 0)
         new_start_item = MIN(MAX(new_start_item,
                            gui_list->selected_item + scroll_limit_down - nb_lines),

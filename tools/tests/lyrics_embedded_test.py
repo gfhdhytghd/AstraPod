@@ -77,6 +77,51 @@ id3("timed.mp3", uslt + frame(b"SYLT", b"\x03eng\x02\x01description\0"
 id3("bad-sylt.mp3", frame(b"SYLT", b"\x03eng\x02\x01no terminator") + uslt)
 id3("bad-uslt.mp3", frame(b"USLT", b"\x03engno terminator"))
 
+# Put the second singer first in the declarations to verify appearance order.
+duet_head = (
+    '<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">'
+    '<head><metadata><ttm:agent xml:id="b" type="person"/><ttm:agent xml:id="a" type="person"/>'
+    '<ttm:agent xml:id="g" type="group"/></metadata></head><body>'
+)
+duet_lines = (
+    '<div ttm:agent="a"><p begin="1s" end="3s">'
+    '<span begin="1s" end="1.5s">星🎵 </span><span begin="1.5s" end="3s">rises</span>'
+    '<span ttm:role="x-bg" ttm:agent="b"><span begin="1.7s" end="2.5s">(echo)</span></span>'
+    '</p></div><div><p begin="3s" end="4s" ttm:agent="b">Evening</p>'
+    '<p begin="4s" end="5s" ttm:agent="g">Together</p>'
+    '<p begin="5s" end="6s"><span begin="5s" end="5.5s" ttm:agent="b">Right </span>'
+    '<span begin="5.5s" end="6s" ttm:agent="a">left</span></p></div>'
+)
+duet_xml = '\ufeff \r\n<?xml version="1.0"?>' + duet_head + duet_lines + '</body></tt>'
+# Delay the final singer until past both the ID3 staging limit and 32 KiB.
+large_xml = duet_head + duet_lines + '<!--' + 'x' * (40 * 1024) + '-->' + (
+    '<div><p begin="9s" end="10s" ttm:agent="b">Beyond the first 32 KiB</p></div></body></tt>'
+)
+# Include both a single oversized paragraph and an arena-filling track.
+overflow_xml = duet_head + duet_lines + '<div><p begin="8s">' + 'y' * (36 * 1024) + '</p>' + (
+    '<p begin="9s" end="10s" ttm:agent="b">Beyond the first 32 KiB</p></div></body></tt>'
+)
+capacity_xml = duet_head + duet_lines + '<div>' + ''.join(
+    f'<p begin="{n}s" end="{n + 1}s" ttm:agent="a">Line {n:04d} ' + 'z' * 80 + '</p>'
+    for n in range(10, 600)
+) + '</div></body></tt>'
+encode("duet.flac", "flac", "-metadata", f"LYRICS={duet_xml}")
+encode("duet.m4a", "aac", "-metadata", f"lyrics={duet_xml}", "-movflags", "+faststart")
+encode("duet-oversized.flac", "flac", "-metadata", f"UNSYNCEDLYRICS={large_xml}")
+encode("duet-saturation.m4a", "aac", "-metadata", f"lyrics={capacity_xml}")
+encode("duet-cross-page.ogg", "libvorbis", "-metadata", "comment=" + "c" * 64000,
+       "-metadata", f"LYRICS={large_xml}")
+id3("duet.mp3", frame(b"USLT", b"\x03engdescription\0" + duet_xml.encode()))
+id3("duet-utf16.mp3", frame(b"USLT", b"\x01eng" + utf16("Description\0")
+     + utf16(duet_xml.lstrip("\ufeff")), version=3), version=3)
+id3("duet-oversized.mp3", frame(b"USLT", b"\x03eng\0" + overflow_xml.encode()))
+sylt_bytes = duet_xml.encode()
+sylt_pieces = (sylt_bytes[:4], sylt_bytes[4:85], sylt_bytes[85:])
+id3("duet-sylt.mp3", frame(b"SYLT", b"\x03eng\x02\x01description\0" + b"".join(
+    piece + b"\0" + struct.pack(">I", i * 100)
+    for i, piece in enumerate(sylt_pieces)
+)))
+
 # Keep a valid audio stream but damage the inner data atom's declared length.
 bad = bytearray((out / "timed.m4a").read_bytes())
 at = bad.index(b"\xa9lyr") + 4
@@ -154,6 +199,39 @@ int main(int argc, char **argv)
     {
         CHECK(lyrics_load(&song) == LYRICS_OK);
         CHECK(lyrics_loaded() && !strcmp(lyrics_file(), song.path));
+#ifndef FU58_BASELINE
+        if (!strncmp(file, "duet", 4))
+        {
+            CHECK(lyrics_ttml() && lyrics_timed() && lyrics_count() >= 4);
+            CHECK(lyrics_time(0) == 1000 && lyrics_time(1) == 3000);
+            CHECK(!strcmp(lyrics_text(0), "星🎵 rises") && !strcmp(lyrics_text(1), "Evening"));
+            CHECK(lyrics_agent_alignment(lyrics_vocal_at(0, false).agent) == 0);
+            CHECK(lyrics_agent_alignment(lyrics_vocal_at(1, false).agent) == 2);
+            CHECK(lyrics_agent_alignment(lyrics_vocal_at(2, false).agent) == 1);
+            CHECK(lyrics_agent_alignment(lyrics_vocal_at(3, false).agent) == 1);
+            struct lyrics_vocal bg = lyrics_vocal_at(0, true);
+            CHECK(bg.text && !strcmp(bg.text, "(echo)") && bg.begin == 1700 && bg.end == 2500);
+            CHECK(lyrics_vocal_cue(0, false, 1).begin == 1500);
+            CHECK(lyrics_agent_alignment(lyrics_vocal_cue(3, false, 0).agent) == 2);
+            CHECK(lyrics_agent_alignment(lyrics_vocal_cue(3, false, 1).agent) == 0);
+            if (strstr(file, "oversized") || strstr(file, "cross-page"))
+            {
+                CHECK(lyrics_count() == 5 && lyrics_time(4) == 9000);
+                CHECK(!strcmp(lyrics_text(4), "Beyond the first 32 KiB"));
+            }
+            else if (strstr(file, "saturation"))
+            {
+                int last = lyrics_count() - 1;
+                CHECK(lyrics_count() > 100 && lyrics_count() < 594);
+                CHECK(!strncmp(lyrics_text(last), "Line ", 5) && strlen(lyrics_text(last)) == 90);
+                CHECK(lyrics_time(last) == (last + 6) * 1000L);
+            }
+            else CHECK(lyrics_count() == 4);
+            CHECK(allocs == 1 && !frees);
+            for (int i = 0; i < 4; i++) CHECK(!extra[i]);
+        }
+        else
+#endif
         if (!strcmp(file, "timed.mp3"))
         {
             CHECK(lyrics_timed() && lyrics_count() == 2);
@@ -196,14 +274,15 @@ int main(int argc, char **argv)
         }
     }
 
-    if (!strcmp(file, "timed.m4a"))
+    if (!strcmp(file, "timed.m4a") || !strcmp(file, "duet.m4a"))
     {
+        const char *stem = !strcmp(file, "duet.m4a") ? "duet" : "timed";
         char txt[MAX_PATH], lrc_path[MAX_PATH];
-        CHECK(snprintf(txt, sizeof txt, "%s/sub/timed.txt", argv[2]) < (int)sizeof txt);
-        CHECK(snprintf(lrc_path, sizeof lrc_path, "%s/timed.lrc", argv[2]) < (int)sizeof lrc_path);
+        CHECK(snprintf(txt, sizeof txt, "%s/sub/%s.txt", argv[2], stem) < (int)sizeof txt);
+        CHECK(snprintf(lrc_path, sizeof lrc_path, "%s/%s.lrc", argv[2], stem) < (int)sizeof lrc_path);
         CHECK(!mkdir("sub", 0700));
-        CHECK(snprintf(song.path, sizeof song.path, "%s/sub/timed.m4a", argv[2]) < (int)sizeof song.path);
-        CHECK(!rename("timed.m4a", "sub/timed.m4a"));
+        CHECK(snprintf(song.path, sizeof song.path, "%s/sub/%s", argv[2], file) < (int)sizeof song.path);
+        CHECK(!rename(file, song.path));
         sidecar(txt, "Plain sidecar wins\n");
         CHECK(lyrics_load(&song) == LYRICS_OK && !lyrics_timed());
         CHECK(!strcmp(lyrics_text(0), "Plain sidecar wins"));
@@ -211,7 +290,7 @@ int main(int argc, char **argv)
         CHECK(lyrics_load(&song) == LYRICS_OK && lyrics_timed());
         CHECK(!strcmp(lyrics_text(0), "Timed sidecar wins"));
         CHECK(!unlink(lrc_path) && !unlink(txt));
-        CHECK(!rename("sub/timed.m4a", "timed.m4a") && !rmdir("sub"));
+        CHECK(!rename(song.path, file) && !rmdir("sub"));
         CHECK(allocs == 1);
     }
 
@@ -231,6 +310,7 @@ def build(tree, name, old=False):
     legacy = ""
     if old:
         legacy = """
+#define FU58_BASELINE
 static unsigned char *utf16LEdecode(const unsigned char*s,unsigned char*d,int n){while(n--){*d++=*s;s+=2;}return d;}
 static unsigned char *utf16BEdecode(const unsigned char*s,unsigned char*d,int n){while(n--){*d++=s[1];s+=2;}return d;}
 """

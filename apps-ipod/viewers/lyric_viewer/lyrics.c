@@ -416,7 +416,9 @@ struct ttml_reader {
     struct ttml_agent agents[TTML_AGENTS];
     int count, voices;
     unsigned people, groups, others;
-    bool wire;
+    char *ids;
+    size_t ids_left;
+    bool wire, exhausted;
 };
 struct ttml_span { long begin, end; short agent; bool bg, timed; };
 
@@ -600,6 +602,14 @@ static struct ttml_agent *ttml_agent(struct ttml_reader *r, struct xml_slice id)
     for (int i = 0; i < r->count; i++)
         if (xml_same(id, r->agents[i].id)) return &r->agents[i];
     if (r->count == TTML_AGENTS) return NULL;
+    if (r->ids)
+    {
+        if (id.len > r->ids_left) return NULL;
+        memcpy(r->ids, id.p, id.len);
+        id.p = r->ids;
+        r->ids += id.len;
+        r->ids_left -= id.len;
+    }
     struct ttml_agent *a = &r->agents[r->count++];
     *a = (struct ttml_agent){.id = id, .kind = TTML_PERSON};
     return a;
@@ -691,7 +701,7 @@ static unsigned long xml_entity(struct xml_slice s)
     return !n || (n >= 0xd800 && n <= 0xdfff) ? 0xfffd : n;
 }
 
-static bool ttml_word(struct lyrics_ttml_line *line, struct xml_slice text,
+static bool ttml_word(struct ttml_reader *r, struct lyrics_ttml_line *line, struct xml_slice text,
                       struct ttml_span span, bool cdata)
 {
     struct lyrics_line *base = &line->base;
@@ -700,7 +710,7 @@ static bool ttml_word(struct lyrics_ttml_line *line, struct xml_slice text,
     struct lyrics_ttml_word *prior = (void *)base->words;
     bool new = !join || prior->base.time != span.begin ||
                prior->end != span.end || prior->agent != span.agent || prior->timed != span.timed;
-    if (buf_free() < sizeof(*prior) + 5) return false;
+    if (buf_free() < sizeof(*prior) + 5) goto full;
     if (join) buf_used--;
     unsigned char *dest = buffer + buf_used;
     size_t initial = buf_used;
@@ -726,7 +736,7 @@ static bool ttml_word(struct lyrics_ttml_line *line, struct xml_slice text,
                 continue;
             bytes[0] = ' ';
         }
-        if (buf_free() < sizeof(*prior) + (size_t)(end - bytes) + 1) return false;
+        if (buf_free() < sizeof(*prior) + (size_t)(end - bytes) + 1) goto full;
         memcpy(buffer + buf_used, bytes, end - bytes);
         buf_used += end - bytes;
     }
@@ -751,6 +761,9 @@ static bool ttml_word(struct lyrics_ttml_line *line, struct xml_slice text,
             break;
         }
     return true;
+full:
+    r->exhausted = true;
+    return false;
 }
 
 static void ttml_trim(struct lyrics_ttml_line *line)
@@ -789,7 +802,7 @@ static bool ttml_voice(struct ttml_reader *r, const char **p, struct ttml_span r
             if (xml_is(t.name, "br"))
             {
                 if (span.bg == background &&
-                    !ttml_word(line, (struct xml_slice){" ", 1}, span, false)) return false;
+                    !ttml_word(r, line, (struct xml_slice){" ", 1}, span, false)) return false;
             }
             if (!t.empty)
             {
@@ -799,7 +812,7 @@ static bool ttml_voice(struct ttml_reader *r, const char **p, struct ttml_span r
                 *has_bg |= spans[depth].bg;
             }
         }
-        else if (span.bg == background && !ttml_word(line, t.text, span, t.cdata))
+        else if (span.bg == background && !ttml_word(r, line, t.text, span, t.cdata))
             return false;
     }
     return false;
@@ -810,7 +823,11 @@ static bool ttml_paragraph(struct ttml_reader *r, const char **p, struct ttml_sp
     size_t used = buf_used, end = buf_end;
     const char *body = *p;
     struct lyrics_ttml_line *line = alloc_buf(sizeof(*line));
-    if (!line) return false;
+    if (!line)
+    {
+        r->exhausted = true;
+        return false;
+    }
     *line = (struct lyrics_ttml_line){.base.time = span.begin, .end = span.end, .agent = span.agent};
     bool bg = false;
     span.timed = false; /* Paragraph timing alone does not start a word sweep. */
@@ -825,7 +842,11 @@ static bool ttml_paragraph(struct ttml_reader *r, const char **p, struct ttml_sp
     if (bg)
     {
         struct lyrics_ttml_line *back = alloc_buf(sizeof(*back));
-        if (!back) goto fail;
+        if (!back)
+        {
+            r->exhausted = true;
+            goto fail;
+        }
         *back = (struct lyrics_ttml_line){.base.time = -1, .end = -1};
         size_t back_used = buf_used;
         if (!ttml_voice(r, &body, span, back, true, &bg)) goto fail;
@@ -849,46 +870,76 @@ fail:
     return false;
 }
 
+struct ttml_document {
+    struct ttml_reader reader;
+    struct xml_slice names[TTML_DEPTH];
+    short agents[TTML_DEPTH];
+    int depth;
+};
+
+#define TTML_SCOPE_NAME 40
+
+static bool ttml_document_tag(struct ttml_document *doc, const struct xml_token *t,
+                              char (*saved)[TTML_SCOPE_NAME])
+{
+    struct ttml_reader *r = &doc->reader;
+    int depth = doc->depth;
+    if (t->close)
+    {
+        if (!depth || !xml_same(doc->names[depth - 1], t->name)) return false;
+        doc->depth--;
+        return true;
+    }
+
+    if (!r->wire && xml_is(t->name, "agent"))
+    {
+        struct xml_slice id = xml_attr(t, "xml:id"), kind = xml_attr(t, "type");
+        struct ttml_agent *a = id.len ? ttml_agent(r, id) : NULL;
+        if (a)
+            a->kind = xml_is(kind, "group") ? TTML_GROUP :
+                      !kind.len || xml_is(kind, "person") ? TTML_PERSON : TTML_OTHER;
+    }
+    if (t->name.len && !t->empty)
+    {
+        if (depth + 1 == TTML_DEPTH) return false;
+        struct xml_slice name = t->name;
+        if (saved)
+        {
+            if (name.len > sizeof(*saved)) return false;
+            memcpy(saved[depth], name.p, name.len);
+            name.p = saved[depth];
+        }
+        doc->names[depth] = name;
+        doc->agents[depth + 1] = ttml_performer(r, t, doc->agents[depth]);
+        doc->depth++;
+    }
+    return true;
+}
+
+static struct ttml_span ttml_paragraph_span(struct ttml_document *doc,
+                                            const struct xml_token *t)
+{
+    struct ttml_span parent = {.begin = -1, .end = -1, .agent = doc->agents[doc->depth]};
+    return ttml_span(&doc->reader, t, parent);
+}
+
 static bool parse_ttml(const char *p, bool wire)
 {
-    struct ttml_reader r = {.wire = wire};
-    struct xml_slice names[TTML_DEPTH];
-    short agents[TTML_DEPTH] = {0};
-    int depth = 0;
+    struct ttml_document doc = {.reader.wire = wire};
     struct xml_token t;
     lrc.type = TYPE_TTML;
     while (xml_next(&p, &t))
     {
-        if (t.close)
+        if (!t.close && !t.empty && xml_is(t.name, "p"))
         {
-            if (!depth || !xml_same(names[--depth], t.name)) return false;
+            struct ttml_span span = ttml_paragraph_span(&doc, &t);
+            if (!ttml_paragraph(&doc.reader, &p, span)) return false;
         }
-        else if (xml_is(t.name, "p") && !t.empty)
-        {
-            struct ttml_span parent = {.begin = -1, .end = -1, .agent = agents[depth]};
-            if (!ttml_paragraph(&r, &p, ttml_span(&r, &t, parent))) return false;
-        }
-        else
-        {
-            if (!wire && xml_is(t.name, "agent"))
-            {
-                struct xml_slice id = xml_attr(&t, "xml:id"), kind = xml_attr(&t, "type");
-                struct ttml_agent *a = id.len ? ttml_agent(&r, id) : NULL;
-                if (a)
-                    a->kind = xml_is(kind, "group") ? TTML_GROUP :
-                              !kind.len || xml_is(kind, "person") ? TTML_PERSON : TTML_OTHER;
-            }
-            if (t.name.len && !t.empty)
-            {
-                if (depth + 1 == TTML_DEPTH) return false;
-                short agent = ttml_performer(&r, &t, agents[depth]);
-                names[depth++] = t.name;
-                agents[depth] = agent;
-            }
-        }
+        else if (!ttml_document_tag(&doc, &t, NULL))
+            return false;
     }
-    if (!wire) lrc.voices = r.voices;
-    return !*p && !depth;
+    if (!wire) lrc.voices = doc.reader.voices;
+    return !*p && !doc.depth;
 }
 
 static void ttml_expand(void)
@@ -1343,6 +1394,366 @@ static void read_tag_lines(struct ogg_file *file, const unsigned char *data,
     }
 }
 
+/* Read the tag as UTF-8 without buffering its whole value. SYLT supplies
+ * NUL-terminated strings separated by four-byte timestamps. TTML carries
+ * its own timing, so concatenate the strings and skip the frame timestamps. */
+struct tag_input {
+    ssize_t (*read)(void *, unsigned char *, size_t);
+    void *source;
+    long left;
+    enum tag_encoding enc;
+    unsigned char raw[256], utf8[4];
+    size_t raw_at, raw_count, utf8_at, utf8_count;
+    int pending_unit;
+    bool sylt, first_unit;
+};
+
+static int tag_input_byte(struct tag_input *in)
+{
+    if (in->raw_at == in->raw_count)
+    {
+        if (in->left <= 0) return -1;
+        ssize_t n = in->read(in->source, in->raw, MIN(in->left, (long)sizeof(in->raw)));
+        if (n <= 0)
+        {
+            in->left = 0;
+            return -1;
+        }
+        in->left -= n;
+        in->raw_at = 0;
+        in->raw_count = n;
+    }
+    return in->raw[in->raw_at++];
+}
+
+static int tag_input_unit(struct tag_input *in)
+{
+    if (in->pending_unit >= 0)
+    {
+        int unit = in->pending_unit;
+        in->pending_unit = -1;
+        return unit;
+    }
+    int first = tag_input_byte(in);
+    if (first < 0 || tag_unit_size(in->enc) == 1) return first;
+    int second = tag_input_byte(in);
+    if (second < 0) return -1;
+    return in->enc == TAG_UTF16_LE ? first | (second << 8) : (first << 8) | second;
+}
+
+static bool tag_skip_string(struct tag_input *in)
+{
+    /* The descriptor may establish the byte order for a following string
+     * without a BOM. An explicit BOM on the following string overrides it. */
+    int unit = tag_input_unit(in);
+    if (tag_unit_size(in->enc) == 2 && (unit == 0xfffe || unit == 0xfeff))
+    {
+        if (unit == 0xfffe)
+            in->enc = in->enc == TAG_UTF16_LE ? TAG_UTF16_BE : TAG_UTF16_LE;
+        unit = tag_input_unit(in);
+    }
+    while (unit > 0)
+        unit = tag_input_unit(in);
+    return unit == 0;
+}
+
+static int tag_input_utf8(struct tag_input *in)
+{
+    if (in->utf8_at < in->utf8_count)
+        return in->utf8[in->utf8_at++];
+
+    int c;
+    for (;;)
+    {
+        c = tag_input_unit(in);
+        if (c < 0) return -1;
+        if (!c)
+        {
+            if (!in->sylt) return -1;
+            for (int n = 0; n < 4; n++)
+                if (tag_input_byte(in) < 0) return -1;
+            in->first_unit = true;
+            continue;
+        }
+
+        bool first = in->first_unit;
+        in->first_unit = false;
+        if (first && tag_unit_size(in->enc) == 2 && (c == 0xfffe || c == 0xfeff))
+        {
+            if (c == 0xfffe)
+                in->enc = in->enc == TAG_UTF16_LE ? TAG_UTF16_BE : TAG_UTF16_LE;
+            continue;
+        }
+        break;
+    }
+
+    if (in->enc == TAG_UTF8) return c;
+    if (c >= 0xd800 && c <= 0xdbff)
+    {
+        int low = tag_input_unit(in);
+        if (low >= 0xdc00 && low <= 0xdfff)
+            c = 0x10000 + ((c - 0xd800) << 10) + low - 0xdc00;
+        else
+        {
+            in->pending_unit = low;
+            c = 0xfffd;
+        }
+    }
+    else if (c >= 0xdc00 && c <= 0xdfff)
+        c = 0xfffd;
+
+    in->utf8_count = utf8encode(c, in->utf8) - in->utf8;
+    in->utf8_at = 1;
+    return in->utf8[0];
+}
+
+struct xml_stream {
+    struct tag_input *input;
+    unsigned char prefix[5];
+    unsigned at, count;
+    int next;
+};
+
+static int xml_stream_get(struct xml_stream *s)
+{
+    return s->at < s->count ? s->prefix[s->at++] : tag_input_utf8(s->input);
+}
+
+static bool tag_is_ttml(struct xml_stream *s)
+{
+    int c;
+    for (;;)
+    {
+        c = tag_input_utf8(s->input);
+        if (c == 0xef)
+        {
+            if (tag_input_utf8(s->input) != 0xbb || tag_input_utf8(s->input) != 0xbf)
+                return false;
+        }
+        else if (c < 0 || !isspace(c))
+            break;
+    }
+    if (c != '<') return false;
+    s->prefix[0] = c;
+    c = tag_input_utf8(s->input);
+    if (c != '?' && c != 't') return false;
+    s->prefix[1] = c;
+    s->count = c == '?' ? 5 : 4;
+    for (unsigned i = 2; i < s->count; i++)
+    {
+        c = tag_input_utf8(s->input);
+        if (c < 0) return false;
+        s->prefix[i] = c;
+    }
+    return !memcmp(s->prefix, "<?xml", 5) ||
+           (!memcmp(s->prefix, "<tt", 3) && (c == '>' || c == '/' || isspace(c)));
+}
+
+/* Framing only. The existing XML reader still validates and interprets
+ * every structural tag and parses each paragraph with its two voices. */
+struct xml_chunk {
+    char *text;
+    size_t room, len;
+    bool clipped;
+};
+enum xml_piece { XML_EOF, XML_ERROR, XML_SKIP, XML_TEXT, XML_TAG };
+
+static void xml_stream_take(struct xml_stream *s, struct xml_chunk *chunk)
+{
+    if (chunk)
+    {
+        if (chunk->len + 1 < chunk->room)
+            chunk->text[chunk->len++] = s->next;
+        else
+            chunk->clipped = true;
+    }
+    s->next = xml_stream_get(s);
+}
+
+static bool xml_stream_literal(struct xml_stream *s, struct xml_chunk *chunk,
+                               const char *text)
+{
+    for (; *text; text++)
+    {
+        if (s->next != *text) return false;
+        xml_stream_take(s, chunk);
+    }
+    return true;
+}
+
+static bool xml_stream_until(struct xml_stream *s, struct xml_chunk *chunk,
+                             const char *terminator)
+{
+    unsigned long target = 0, mask = 0, tail = 0;
+    for (; *terminator; terminator++)
+    {
+        target = (target << 8) | (unsigned char)*terminator;
+        mask = (mask << 8) | 0xff;
+    }
+    while (s->next >= 0)
+    {
+        tail = ((tail << 8) | (unsigned)s->next) & mask;
+        xml_stream_take(s, chunk);
+        if (tail == target) return true;
+    }
+    return false;
+}
+
+static enum xml_piece xml_stream_piece(struct xml_stream *s, struct xml_chunk *chunk)
+{
+    enum xml_piece piece = XML_TEXT;
+    if (s->next < 0) return XML_EOF;
+    if (s->next != '<')
+    {
+        while (s->next >= 0 && s->next != '<')
+            xml_stream_take(s, chunk);
+    }
+    else
+    {
+        xml_stream_take(s, chunk);
+        if (s->next == '?')
+        {
+            xml_stream_take(s, NULL);
+            return xml_stream_until(s, NULL, "?>") ? XML_SKIP : XML_ERROR;
+        }
+        if (s->next == '!')
+        {
+            xml_stream_take(s, chunk);
+            if (s->next == '-')
+                return xml_stream_literal(s, NULL, "--") &&
+                       xml_stream_until(s, NULL, "-->") ? XML_SKIP : XML_ERROR;
+            if (!xml_stream_literal(s, chunk, "[CDATA[") ||
+                !xml_stream_until(s, chunk, "]]>")) return XML_ERROR;
+        }
+        else
+        {
+            piece = XML_TAG;
+            int quote = 0;
+            for (;;)
+            {
+                int c = s->next;
+                if (c < 0) return XML_ERROR;
+                xml_stream_take(s, chunk);
+                if (quote)
+                {
+                    if (c == quote) quote = 0;
+                }
+                else if (c == '>' || c == '<')
+                {
+                    if (c == '<') return XML_ERROR;
+                    break;
+                }
+                else if (c == '\'' || c == '"')
+                    quote = c;
+            }
+        }
+    }
+    chunk->text[chunk->len] = 0;
+    return piece;
+}
+
+#define TTML_TAG_ID_BYTES 2048
+#define TTML_TAG_SCRATCH (TTML_PACKET_MAX + TTML_TAG_ID_BYTES)
+
+static bool tag_ttml_paragraph(struct xml_stream *s, struct ttml_document *doc,
+                               struct ttml_span span, char *packet)
+{
+    size_t used = 0;
+    bool clipped = false;
+    for (;;)
+    {
+        /* Retain enough space to recognise the close tag. When the paragraph
+         * is too large, scan to its end and resume with the next paragraph. */
+        clipped |= TTML_PACKET_MAX - used < TTML_SCOPE_NAME + 4;
+        if (clipped) used = 0;
+        struct xml_chunk part = {packet + used, TTML_PACKET_MAX - used, 0, false};
+        enum xml_piece piece = xml_stream_piece(s, &part);
+        if (piece == XML_SKIP) continue;
+        if (piece == XML_ERROR || piece == XML_EOF) return false;
+
+        clipped |= part.clipped;
+        if (piece == XML_TAG && !part.clipped)
+        {
+            const char *p = part.text;
+            struct xml_token token;
+            if (!xml_next(&p, &token)) return false;
+            if (token.close && xml_is(token.name, "p"))
+            {
+                const char *body = packet;
+                return clipped || ttml_paragraph(&doc->reader, &body, span);
+            }
+        }
+        used += part.len;
+    }
+}
+
+/* Returns false only for a non-XML tag. A detected XML tag stays TTML even
+ * if malformed. Keep complete paragraphs when the document arena fills. */
+static bool load_tag_ttml(struct tag_input *input)
+{
+    struct xml_stream stream = {.input = input};
+    if (!tag_is_ttml(&stream)) return false;
+
+    size_t arena_end = buf_end;
+    buf_end -= TTML_TAG_SCRATCH;
+    char *packet = (char *)buffer + buf_end;
+    char scope_names[TTML_DEPTH][TTML_SCOPE_NAME];
+    struct ttml_document doc = {
+        .reader = {.ids = packet + TTML_PACKET_MAX, .ids_left = TTML_TAG_ID_BYTES},
+    };
+    bool root = false, valid = false;
+    stream.next = xml_stream_get(&stream);
+    lrc.type = TYPE_TTML;
+    for (;;)
+    {
+        struct xml_chunk part = {packet, TTML_PACKET_MAX, 0, false};
+        enum xml_piece piece = xml_stream_piece(&stream, &part);
+        if (piece == XML_EOF)
+        {
+            valid = root && !doc.depth;
+            break;
+        }
+        if (piece == XML_ERROR) break;
+        if (piece != XML_TAG) continue;
+
+        const char *p = packet;
+        struct xml_token token;
+        if (part.clipped || !xml_next(&p, &token)) break;
+        if (!root)
+        {
+            if (token.close || !xml_is(token.name, "tt")) break;
+            root = true;
+        }
+        if (!token.close && !token.empty && xml_is(token.name, "p"))
+        {
+            struct ttml_span span = ttml_paragraph_span(&doc, &token);
+            if (!tag_ttml_paragraph(&stream, &doc, span, packet))
+            {
+                valid = doc.reader.exhausted;
+                break;
+            }
+        }
+        else if (!ttml_document_tag(&doc, &token, scope_names))
+            break;
+    }
+    /* Model records end directly below the scratch region. Keep their
+     * addresses stable until build_index() uses the space reserved for it. */
+    if (!valid || !lrc.nline)
+    {
+        reset_data();
+        lrc.length = track.length;
+        buf_end = arena_end;
+    }
+    else
+        lrc.voices = doc.reader.voices;
+    return true;
+}
+
+static ssize_t tag_read_vorbis(void *source, unsigned char *out, size_t size)
+{
+    return ogg_file_read(source, out, size);
+}
+
 static void load_tag_text(struct ogg_file *file, const unsigned char *data,
                           long size, enum tag_encoding enc, bool clipped)
 {
@@ -1354,6 +1765,14 @@ static void load_tag_text(struct ogg_file *file, const unsigned char *data,
     {
         origin = *file;
         pos = lseek(file->fd, 0, SEEK_CUR);
+        if (pos < 0) return;
+        struct tag_input in = {
+            .read = tag_read_vorbis, .source = file, .left = size, .enc = enc,
+            .pending_unit = -1, .first_unit = true,
+        };
+        if (load_tag_ttml(&in)) return;
+        if (lseek(file->fd, pos, SEEK_SET) < 0) return;
+        *file = origin;
     }
     /* Bound the search for a timestamp even when a tag contains megabytes
      * of untimed text. The line and word model then owns the arena limit. */
@@ -1416,30 +1835,37 @@ static bool skip_id3(int fd, int len, off_t end, bool *ff)
     return true;
 }
 
+struct id3_lyrics {
+    int fd;
+    off_t start, end;
+    uint32_t remaining;
+    int prefix;
+    bool global_unsync, frame_unsync, ff;
+};
+
 /* Shared by SYLT/USLT, including their ID3v2.2 spellings. */
-static int read_id3_lyrics(int fd, bool timed, unsigned char *frame,
-                           bool *clipped)
+static bool find_id3_lyrics(int fd, bool timed, struct id3_lyrics *tag)
 {
     unsigned char b[10];
     if (lseek(fd, 0, SEEK_SET) < 0 || read(fd, b, 10) != 10
         || memcmp(b, "ID3", 3) || b[3] < 2 || b[3] > 4)
-        return 0;
+        return false;
 
     int version = b[3], flags = b[5], header = version == 2 ? 6 : 10;
     off_t end = 10 + syncsafe(b + 6);
     if (end > ffilesize(fd) || (version == 2 && (flags & 0x40)))
-        return 0;
+        return false;
     bool ff = false;
     bool *global = version < 4 && (flags & 0x80) ? &ff : NULL;
     if (flags & 0x40)
     {
         if (!read_id3(fd, b, 4, end, global))
-            return 0;
+            return false;
         uint32_t n = version == 3 ? get_long_be(b) : syncsafe(b);
         if (version == 4)
             n -= 4;
         if (n > (uint32_t)end || !skip_id3(fd, n, end, global))
-            return 0;
+            return false;
     }
 
     while (read_id3(fd, b, header, end, global) && b[0])
@@ -1463,25 +1889,71 @@ static int read_id3_lyrics(int fd, bool timed, unsigned char *frame,
         int prefix = !!(fmt & (version == 4 ? 0x40 : 0x20));
         if (version == 4 && (fmt & 1))
             prefix += 4; /* data length indicator */
-        *clipped = len > ID3_LYRICS_MAX;
-        int n = MIN(len, ID3_LYRICS_MAX);
-        if (!read_id3(fd, frame, n, end, global))
-            break;
-        if (version == 4 && ((fmt & 2) || (flags & 0x80)))
-        {
-            ff = false;
-            n = id3_unsynchronize((char *)frame, n, &ff);
-        }
-        if (n <= prefix)
-            break;
-        if (prefix)
-        {
-            n -= prefix;
-            memmove(frame, frame + prefix, n);
-        }
-        return n;
+        *tag = (struct id3_lyrics){
+            .fd = fd, .start = pos, .end = end, .remaining = len, .prefix = prefix,
+            .global_unsync = global != NULL,
+            .frame_unsync = version == 4 && ((fmt & 2) || (flags & 0x80)),
+            .ff = ff,
+        };
+        return true;
+    }
+    return false;
+}
+
+static ssize_t tag_read_id3(void *source, unsigned char *out, size_t size)
+{
+    struct id3_lyrics *tag = source;
+    while (tag->remaining)
+    {
+        int n = MIN(tag->remaining, size);
+        if (!read_id3(tag->fd, out, n, tag->end, tag->global_unsync ? &tag->ff : NULL))
+            return -1;
+        tag->remaining -= n;
+        if (tag->frame_unsync)
+            n = id3_unsynchronize((char *)out, n, &tag->ff);
+        if (n) return n;
     }
     return 0;
+}
+
+static bool load_id3_ttml(const struct id3_lyrics *tag, bool timed)
+{
+    struct id3_lyrics source = *tag;
+    struct tag_input in = {
+        .read = tag_read_id3, .source = &source, .left = tag->remaining,
+        .pending_unit = -1, .first_unit = true, .sylt = timed,
+    };
+    for (int i = 0; i < tag->prefix; i++)
+        if (tag_input_byte(&in) < 0) return false;
+
+    int enc = tag_input_byte(&in);
+    if (enc < 0 || enc > TAG_UTF8) return false;
+    in.enc = enc;
+    int header = timed ? 6 : 4;
+    for (int i = 1; i < header; i++)
+        if (tag_input_byte(&in) < 0) return false;
+    return tag_skip_string(&in) && load_tag_ttml(&in);
+}
+
+/* Retain the original bounded staging path for ordinary SYLT and USLT. */
+static int read_id3_lyrics(const struct id3_lyrics *tag, unsigned char *frame,
+                           bool *clipped)
+{
+    bool ff = tag->ff;
+    *clipped = tag->remaining > ID3_LYRICS_MAX;
+    int n = MIN(tag->remaining, ID3_LYRICS_MAX);
+    if (lseek(tag->fd, tag->start, SEEK_SET) < 0 ||
+        !read_id3(tag->fd, frame, n, tag->end, tag->global_unsync ? &ff : NULL))
+        return 0;
+    if (tag->frame_unsync)
+        n = id3_unsynchronize((char *)frame, n, &ff);
+    if (n <= tag->prefix) return 0;
+    if (tag->prefix)
+    {
+        n -= tag->prefix;
+        memmove(frame, frame + tag->prefix, n);
+    }
+    return n;
 }
 
 static const unsigned char *tag_string_end(const unsigned char *p,
@@ -1497,9 +1969,13 @@ static const unsigned char *tag_string_end(const unsigned char *p,
 
 static void load_id3_frame(int fd, bool timed)
 {
+    struct id3_lyrics tag;
+    if (!find_id3_lyrics(fd, timed, &tag) || load_id3_ttml(&tag, timed))
+        return;
+
     unsigned char *frame = buffer + LYRICS_BUFFER_SIZE - ID3_LYRICS_MAX;
     bool clipped;
-    int len = read_id3_lyrics(fd, timed, frame, &clipped);
+    int len = read_id3_lyrics(&tag, frame, &clipped);
     int head = timed ? 6 : 4;
     if (len <= head || frame[0] > TAG_UTF8 || (timed && frame[4] != 2))
         return; /* only millisecond timestamps */

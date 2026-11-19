@@ -1983,9 +1983,9 @@ void iap_player_name_load(void)
     strlcpy(player_name, name, sizeof(player_name));
     iap_utf8_cut(player_name);
 
-    /* Migrate the previous default while preserving a name set by the owner. */
+    /* Migrate the previous defaults while preserving a name set by the owner. */
     if (player_name[0] == '\0' || !strcmp(player_name, MODEL_NAME) ||
-        !strcmp(player_name, "PodBox"))
+        !strcmp(player_name, "PodBox") || !strcmp(player_name, "Astra"))
     {
         strlcpy(player_name, IAP_PLAYER_NAME_DEFAULT, sizeof(player_name));
         fd = open(PLAYER_NAME_FILE, O_CREAT|O_WRONLY|O_TRUNC, 0666);

@@ -143,6 +143,7 @@ enum infoscreenorder
     INFO_ROOT_DIR,
     INFO_VERSION_TITLE,
     INFO_VERSION,
+    INFO_BUILD_ID,
     INFO_DATE,
     INFO_TIME,
     INFO_RUNTIME,
@@ -189,10 +190,12 @@ static int info_speak_item(int selected_item, void * data)
 
     switch (selected_item)
     {
-        case INFO_VERSION: /* version */
+        case INFO_BUILD_ID:
+        case INFO_VERSION:
             talk_id(LANG_VERSION, false);
             talk_spell(rbversion, true);
-        case INFO_VERSION_TITLE:  /*fallthrough*/
+            break;
+        case INFO_VERSION_TITLE:
             break;
 
         case INFO_TIME:
@@ -347,7 +350,13 @@ static int info_action_callback(int action, struct gui_synclist *lists)
 /* INFO_VERSION_TITLE */
     simplelist_setline(str(LANG_VERSION));
 /* INFO_VERSION */
-    simplelist_setline(rbversion);
+    const char *build_id = strstr(rbversion, " (");
+    if (build_id)
+        simplelist_addline("%.*s", (int)(build_id - rbversion), rbversion);
+    else
+        simplelist_setline(rbversion);
+/* INFO_BUILD_ID */
+    simplelist_setline(build_id ? build_id + 1 : "");
 
     tm = get_time();
     if (valid_time(tm))

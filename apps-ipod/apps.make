@@ -106,4 +106,13 @@ $(BUILDDIR)/credits.raw credits.raw: $(DOCSDIR)/CREDITS $(APPSDIR)/plugins/credi
 
 $(APPSBUILDDIR)/credits.o: $(BUILDDIR)/credits.raw
 
+# The first boot splash draws before the disk fonts are available.
+CLEANOBJS += $(BUILDDIR)/about_art.h
+$(BUILDDIR)/about_art.h: $(TOOLSDIR)/gen_about_art.py
+	$(call PRINTS,GEN about_art.h)python3 $< "$(BUILDDIR)/about_art.h"
+
+# Dependency generation can see only the basename on a fresh build.
+about_art.h: $(BUILDDIR)/about_art.h
+$(APPSBUILDDIR)/screens/system/about.o: $(BUILDDIR)/about_art.h
+
 ASMDEFS_SRC += $(APPSDIR)/system/core_asmdefs.c

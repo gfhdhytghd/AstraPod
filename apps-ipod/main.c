@@ -429,7 +429,7 @@ static void boot_paint(int step, int total)
 
     boot_viewport(&vp);
     last_vp = screen->set_viewport(&vp);
-    about_draw_boot_logo(screen, BOOT_BAR_Y - 12);
+    about_draw_boot_logo(screen, &vp, BOOT_BAR_Y - 12);
 
     if (boot_caption != BOOT_KEEP_CAPTION)
     {

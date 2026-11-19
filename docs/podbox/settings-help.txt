@@ -2085,7 +2085,7 @@ thumbnails -- and how far along it is.
 The place to look when the disk is busy and nothing on screen says why.
 
 [action: About]
-The Astra logo, the version, and a QR code that opens the project's page on
+The AstraPod logo, the version, and a QR code that opens the project's page on
 a phone.
 
 [action: System Info]

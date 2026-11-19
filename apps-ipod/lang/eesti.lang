@@ -17,6 +17,20 @@
 # Estonian language file, translated by:
 # - Rene Allkivi
 <phrase>
+  id: LANG_ROCKBOX_TITLE
+  desc: main menu title
+  user: core
+  <source>
+    *: "AstraPod"
+  </source>
+  <dest>
+    *: "AstraPod"
+  </dest>
+  <voice>
+    *: "AstraPod"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_SET_BOOL_YES
   desc: bool true representation
   user: core

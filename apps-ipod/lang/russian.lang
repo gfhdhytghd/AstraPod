@@ -8112,13 +8112,13 @@
   desc: main menu title
   user: core
   <source>
-    *: "Astra"
+    *: "AstraPod"
   </source>
   <dest>
-    *: "Astra"
+    *: "AstraPod"
   </dest>
   <voice>
-    *: "Astra"
+    *: "AstraPod"
   </voice>
 </phrase>
 <phrase>

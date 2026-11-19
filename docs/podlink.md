@@ -1,6 +1,6 @@
 # PodLink
 
-PodLink connects a running Astra application to a computer over USB CDC-ACM.
+PodLink connects a running AstraPod application to a computer over USB CDC-ACM.
 It uses RAM for messages. It does not use disk files or USB mass storage for
 communication. The default USB mode still provides mass storage. The simulator
 has no PodLink USB transport or PodLink menu entry.

@@ -352,7 +352,7 @@ and produces the wrong firmware.
 | `spun_testlog.pl` | Synthesises playback logs, and the expected parse, for Spun. |
 | `speech/` | The speech synthesiser's host side. `gen_lexicon.py` writes `cmudict.bin` from the CMU Pronouncing Dictionary; `gen_phonemes.py` writes `apps-ipod/speech/synth_phonemes.c` from NV Speech Player's `data.py`; `synth_render.c` renders IPA to a WAV through the player's synthesiser, to compare with NV Speech Player; `text_render.c` renders text to words, IPA or a WAV, with `host/rbunicode.h` standing in for the firmware's; `piper_json.py` gives `voice.pl` the older Piper's JSON interface, for `build-voices.sh`. |
 | `herdremote/` | The computer side of **System > Agents**: shows herdr's agents on the player and answers their questions from it. Run by hand or as a user service; see its `README.md`. `tests/` runs it against a fake herdr and a fake player. |
-| `gen_about_art.py` | Writes `apps-ipod/screens/system/about_art.h`, the About page's logo mask and QR code, from `docs/podbox/images/logo/`. Run by hand; needs Pillow and `qrcode`. |
+| `gen_about_art.py` | Generates `about_art.h` in the build directory for the splash and About page. Uses Fontconfig, installed HarmonyOS Sans Medium, Pillow with libraqm, and `qrencode`. Can also emit a transparent 1:1 PNG with `--preview`. |
 
 ### CheckWPS
 

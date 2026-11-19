@@ -1,7 +1,7 @@
-Astra bootloader
+AstraPod bootloader
 =================
 
-With this bootloader the player starts Astra even when the hold switch is
+With this bootloader the player starts AstraPod even when the hold switch is
 on. To start Apple's firmware instead, hold Menu while the player starts.
 
 On an iPod Classic whose disk is larger than 128 GB, Apple's firmware is
@@ -10,7 +10,7 @@ started only if it can address the whole disk. If it cannot, the screen says
 the player starts, until the screen says "Executing OF", starts it anyway,
 at the risk of it writing to the wrong part of the disk.
 
-The bootloader is installed once. Updating Astra does not replace it.
+The bootloader is installed once. Updating AstraPod does not replace it.
 
 
 iPod Video 5G/5.5G

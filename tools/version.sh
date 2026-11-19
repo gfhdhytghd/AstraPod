@@ -46,7 +46,7 @@ case "${2:-${COREAPPSDIR:-}}" in
         ASTRA_VERSION=0.1.0
         build_id=$(git -C "$TOP" rev-parse --verify --short=10 HEAD 2>/dev/null) ||
             build_id=${VERSION:-unknown}
-        printf 'Astra %s %s (%s)\n' "$ASTRA_CHANNEL" "$ASTRA_VERSION" "$build_id"
+        printf 'AstraPod %s %s (%s)\n' "$ASTRA_CHANNEL" "$ASTRA_VERSION" "$build_id"
         exit 0
         ;;
 esac

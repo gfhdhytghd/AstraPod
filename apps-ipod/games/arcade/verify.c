@@ -106,7 +106,7 @@ static int effect(struct vm *vm, const uint8_t *p, int *pops, int *pushes)
     case OP_NCALL: {
         uint32_t slot = u16at(p + 1), argc = p[3];
         if (slot >= arcade_api_count || !arcade_impl[slot])
-            return vm_fail(vm, "This game needs a newer Astra", "", "");
+            return vm_fail(vm, "This game needs a newer AstraPod", "", "");
         const struct native_def *d = &arcade_api[slot];
         if (d->level > vm->music)
             return vm_fail(vm, "this game uses the music without "

@@ -60,7 +60,7 @@ of personal data - only one small file inside it is needed.
 
 ## 4. Send it in
 
-[Open an issue](https://github.com/anthonyfletcher/podbox/issues/new) with your
+[Open an issue](https://github.com/gfhdhytghd/AstraPod/issues/new) with your
 notes, and drag in a zip of `usb.log`, the `accessoryd-packets` file and any
 photos.
 

@@ -1,88 +1,154 @@
 #!/usr/bin/env python3
-"""Write apps-ipod/screens/system/about_art.h: the About page's logo and QR.
+"""Bake the native AstraPod logo and About QR bitmaps for the firmware."""
 
-usage: gen_about_art.py <logo.png> <about_art.h>
+import argparse
+from io import BytesIO
+from pathlib import Path
+import subprocess
 
-logo.png is docs/podbox/images/logo/astra-horizontal-white-1200.png; only
-its alpha is used, so the firmware can draw it in any colour. The QR code
-encodes URL. Needs Pillow and qrcode.
-"""
-import sys
-
-from PIL import Image
-
-URL = 'https://github.com/anthonyfletcher/podbox'
-LOGO_W = 200   # pixels on screen; kept even so mask rows pack to whole bytes
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 
-def logo_mask(path):
-    alpha = Image.open(path).convert('RGBA').getchannel('A')
-    alpha = alpha.crop(alpha.getbbox())
-    h = round(alpha.height * LOGO_W / alpha.width)
-    alpha = alpha.resize((LOGO_W, h), Image.BOX)
-    px = alpha.load()
-    out = []
-    for y in range(h):
-        for x in range(0, LOGO_W, 2):
-            # 0 opaque .. 15 transparent, first pixel in the low nibble
-            lo = 15 - round(px[x, y] * 15 / 255)
-            hi = 15 - round(px[x + 1, y] * 15 / 255)
-            out.append(lo | hi << 4)
-    return h, out
+URL = "https://github.com/gfhdhytghd/AstraPod"
+LOGO_W, LOGO_H = 200, 46
+MARK = 40
+RAY = 14
+STROKE = 2
+LABEL_GAP = 10
+BASELINE = 34
+CAP_HEIGHT = 22
+WHITE = (255, 255, 255)
+ACCENT = (0x8A, 0xB4, 0xFF)
 
 
-def qr_bits():
-    import qrcode
+def wordmark_font():
+    match = subprocess.check_output(
+        ["fc-match", "-f", "%{file}\n%{index}\n", "HarmonyOS Sans:style=Medium"],
+        text=True,
+    )
+    path, index = match.splitlines()
+    for size in range(CAP_HEIGHT, CAP_HEIGHT * 2):
+        font = ImageFont.truetype(path, size, index=int(index),
+                                  layout_engine=ImageFont.Layout.RAQM)
+        if font.getname() != ("HarmonyOS Sans", "Medium"):
+            raise SystemExit("The AstraPod logo requires HarmonyOS Sans Medium.")
+        _, top, _, bottom = font.getmask("H").getbbox()
+        if bottom - top == CAP_HEIGHT:
+            return font
+    raise SystemExit("No font size gives the required 22 px cap height.")
 
-    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,
-                       border=0)
-    qr.add_data(URL)
-    qr.make(fit=True)
-    m = qr.get_matrix()
-    out = []
-    for row in m:
-        for x in range(0, len(row), 8):
-            b = 0
-            for i, dark in enumerate(row[x:x + 8]):
-                if dark:
-                    b |= 0x80 >> i
-            out.append(b)
-    return len(m), out
+
+def mark_alpha():
+    # Pixel-edge coordinates keep opposing rays symmetric. The ray's width
+    # tapers from 6 px at the centre to 1 px at the tip.
+    samples = 8
+    high_res = Image.new("L", (MARK * samples, MARK * samples))
+    data = high_res.load()
+    for y in range(high_res.height):
+        dy = abs((y + 0.5) / samples - MARK / 2)
+        for x in range(high_res.width):
+            dx = abs((x + 0.5) / samples - MARK / 2)
+            distance = max(dx, dy)
+            if distance <= RAY and min(dx, dy) <= 3 - 2.5 * distance / RAY:
+                data[x, y] = 255
+    return high_res.resize((MARK, MARK), Image.Resampling.BOX)
+
+
+def logo_masks():
+    font = wordmark_font()
+    _, _, right, _ = font.getbbox("AstraPod", anchor="ls")
+    width = MARK + LABEL_GAP + right
+    if width > LOGO_W:
+        raise SystemExit("AstraPod logo exceeds its 200 px slot.")
+
+    y = (LOGO_H - MARK) // 2
+    white = Image.new("L", (LOGO_W, LOGO_H))
+    accent = Image.new("L", (LOGO_W, LOGO_H))
+    ImageDraw.Draw(white).rectangle((0, y, MARK - 1, y + MARK - 1),
+                                    outline=255, width=STROKE)
+    accent.paste(mark_alpha(), (0, y))
+
+    word_x = MARK + LABEL_GAP
+    # Keep kerning across the colour boundary as well as inside each run.
+    pod_x = word_x + font.getlength("AstraP") - font.getlength("P")
+    ImageDraw.Draw(white).text((word_x, BASELINE), "Astra", font=font, anchor="ls", fill=255)
+    ImageDraw.Draw(accent).text((pod_x, BASELINE), "Pod", font=font, anchor="ls", fill=255)
+
+    # Quantize once to the LCD's 16 alpha levels. Pack the inverse nibble
+    # values when emitting the header.
+    quantized = [(value + 8) // 17 * 17 for value in range(256)]
+    white, accent = white.point(quantized), accent.point(quantized)
+    # The advance includes side bearings. Centre the visible pixels.
+    _, _, ink_right, _ = ImageChops.lighter(white, accent).getbbox()
+    inset = (LOGO_W - ink_right) // 2
+    return ImageChops.offset(white, inset, 0), ImageChops.offset(accent, inset, 0)
+
+
+def qr_bitmap():
+    png = subprocess.check_output(
+        ["qrencode", "-s", "1", "-m", "0", "-l", "M", "-v", "3",
+         "--strict-version", "-o", "-", URL]
+    )
+    qr = Image.open(BytesIO(png)).convert("1")
+    if qr.size != (29, 29):
+        raise SystemExit("About QR must keep the existing 29-module dimensions.")
+    pixels = qr.load()
+    data = []
+    for y in range(qr.height):
+        for x in range(0, qr.width, 8):
+            bits = 0
+            for i in range(min(8, qr.width - x)):
+                if not pixels[x + i, y]:
+                    bits |= 0x80 >> i
+            data.append(bits)
+    return qr.width, data
 
 
 def c_bytes(data):
-    lines = []
-    for i in range(0, len(data), 12):
-        lines.append('    ' + ' '.join('0x%02x,' % b for b in data[i:i + 12]))
-    return '\n'.join(lines)
+    return "\n".join(
+        "    " + " ".join(f"0x{value:02x}," for value in data[i:i + 12])
+        for i in range(0, len(data), 12)
+    )
+
+
+def packed_alpha(mask):
+    pixels = [(15 - value // 17) for value in mask.tobytes()]
+    return [lo | hi << 4 for lo, hi in zip(pixels[::2], pixels[1::2])]
 
 
 def main():
-    logo_h, logo = logo_mask(sys.argv[1])
-    qr_n, qr = qr_bits()
-    with open(sys.argv[2], 'w', newline='\n') as f:
-        f.write(f'''/***************************************************************************
- * GNU General Public License (version 2+)
- *
- * Generated by tools/gen_about_art.py from the Astra logo. Do not edit;
- * change the generator or its input. Included by about.c only.
- ****************************************************************************/
-
-/* The logo as a 4bpp alpha mask, the format lcd_alpha_bitmap_part() takes */
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("header", type=Path)
+    parser.add_argument("--preview", type=Path, help="also write the transparent 1:1 PNG")
+    args = parser.parse_args()
+    white, accent = logo_masks()
+    qr_n, qr = qr_bitmap()
+    args.header.write_text(f"""/* Generated by tools/gen_about_art.py. Do not edit. */
 #define ABOUT_LOGO_W {LOGO_W}
-#define ABOUT_LOGO_H {logo_h}
-static const unsigned char about_logo[] = {{
-{c_bytes(logo)}
+#define ABOUT_LOGO_H {LOGO_H}
+#define ABOUT_LOGO_ACCENT LCD_RGBPACK({ACCENT[0]}, {ACCENT[1]}, {ACCENT[2]})
+
+/* Packed 4bpp inverse alpha. The first pixel is in the low nibble. */
+static const unsigned char about_logo_white[] = {{
+{c_bytes(packed_alpha(white))}
+}};
+static const unsigned char about_logo_accent[] = {{
+{c_bytes(packed_alpha(accent))}
 }};
 
-/* QR code for {URL}: one bit per module, set where dark, first module in
- * the high bit, each row padded to a whole byte */
+/* {URL}, one bit per module, MSB first, byte-padded rows. */
 #define ABOUT_QR_N {qr_n}
 static const unsigned char about_qr[] = {{
 {c_bytes(qr)}
 }};
-''')
+""", encoding="ascii")
+    if args.preview:
+        layer = Image.new("RGBA", white.size, WHITE)
+        layer.putalpha(white)
+        blue = Image.new("RGBA", accent.size, ACCENT)
+        blue.putalpha(accent)
+        Image.alpha_composite(layer, blue).save(args.preview)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

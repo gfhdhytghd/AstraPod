@@ -34,14 +34,27 @@
 #define AB_QR_SIZE ((ABOUT_QR_N + 2 * AB_QR_QUIET) * AB_QR_PX)
 #define AB_TEXT_W  (LCD_WIDTH - 2 * AB_PAD - AB_GAP - AB_QR_SIZE)
 
-static const char ab_tagline[] = "Rockbox, reworked for the iPod.";
+static const char ab_tagline[] =
+    "Rockbox specifically and deeply optimized for iPod Classic.";
 static const char ab_licence[] = "GPL v2, no warranty.";
 
-void about_draw_boot_logo(struct screen *display, int bottom)
+static void ab_draw_logo(struct screen *d, struct viewport *vp, int x, int y)
 {
-    display->alpha_bitmap_part(about_logo, 0, 0, ABOUT_LOGO_W,
-                              (display->lcdwidth - ABOUT_LOGO_W) / 2,
-                              bottom - ABOUT_LOGO_H, ABOUT_LOGO_W, ABOUT_LOGO_H);
+    unsigned fg = vp->fg_pattern;
+
+    vp->fg_pattern = LCD_WHITE;
+    d->alpha_bitmap_part(about_logo_white, 0, 0, ABOUT_LOGO_W,
+                         x, y, ABOUT_LOGO_W, ABOUT_LOGO_H);
+    vp->fg_pattern = ABOUT_LOGO_ACCENT;
+    d->alpha_bitmap_part(about_logo_accent, 0, 0, ABOUT_LOGO_W,
+                         x, y, ABOUT_LOGO_W, ABOUT_LOGO_H);
+    vp->fg_pattern = fg;
+}
+
+void about_draw_boot_logo(struct screen *display, struct viewport *vp, int bottom)
+{
+    ab_draw_logo(display, vp, (display->lcdwidth - ABOUT_LOGO_W) / 2,
+                 bottom - ABOUT_LOGO_H);
 }
 
 static int ab_luma(unsigned c)
@@ -86,8 +99,7 @@ static void ab_draw(struct screen *d, struct viewport *vp,
     top = 2 * gap + ABOUT_LOGO_H;
 
     d->clear_viewport();
-    d->alpha_bitmap_part(about_logo, 0, 0, ABOUT_LOGO_W, AB_PAD, gap,
-                         ABOUT_LOGO_W, ABOUT_LOGO_H);
+    ab_draw_logo(d, vp, AB_PAD, gap);
     ab_draw_qr(d, vp, LCD_WIDTH - AB_PAD - AB_QR_SIZE,
                top + (block - AB_QR_SIZE) / 2);
 

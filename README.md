@@ -1,8 +1,7 @@
-# Astra
+# AstraPod
+Rockbox specifically and deeply optimized for iPod Classic.
 
-<img src="docs/podbox/images/logo/astra-horizontal.svg" width="300" alt="Astra">
-
-Astra 是基于 Rockbox 的 iPod classic 固件。本页适用于第六代 iPod classic（S5L8702，构建目标 `ipod6g`）。安装前必须确认型号，并备份音乐和 `.rockbox`。
+本页适用于第六代 iPod classic（S5L8702，构建目标 `ipod6g`）。安装前必须确认型号，并备份音乐和 `.rockbox`。
 
 ## 已实现
 
@@ -89,15 +88,15 @@ Agents 中按住 Play 录音，松手结束。短按会丢弃短录音。主机�
 
 | 来源 | 按键 | 动作 |
 | --- | --- | --- |
-| Astra | Select + Menu | 开关 Cover Flow。远程来源可用时，优先打开远程相册。 |
-| Astra | Select + Play | 有 PodLink 主机时切换 Agents 和「正在播放」。无主机时跳到「正在播放」。录音或已开始的 Select 手势优先。 |
-| Astra | Hold 开关 | 锁定机身按钮和点击轮。关掉 Hold 后恢复输入。 |
-| Astra | 持续按住 Play | 在允许软件关机的页面关机。轮播和 Agents 会接管此手势。 |
+| AstraPod | Select + Menu | 开关 Cover Flow。远程来源可用时，优先打开远程相册。 |
+| AstraPod | Select + Play | 有 PodLink 主机时切换 Agents 和「正在播放」。无主机时跳到「正在播放」。录音或已开始的 Select 手势优先。 |
+| AstraPod | Hold 开关 | 锁定机身按钮和点击轮。关掉 Hold 后恢复输入。 |
+| AstraPod | 持续按住 Play | 在允许软件关机的页面关机。轮播和 Agents 会接管此手势。 |
 | 硬件 | 长按 Menu + Select | 强制重启。 |
 | 引导程序 | 重启后放开重启组合，再按住 Select + Play | 进入 Apple 磁盘模式。 |
 | 引导程序 | 启动时按住 Select + Left 或 Select + Right | 分别进入 Apple 诊断模式和 Rockbox 引导程序 USB 模式。 |
 | 引导程序 | 启动时按住 Menu | 尝试启动 Apple 固件。大于 128 GB 的盘必须检查 LBA48 兼容性。 |
-| 引导程序 | Hold 开启时启动 | 可选的项目引导程序仍启动 Astra。 |
+| 引导程序 | Hold 开启时启动 | 可选的项目引导程序仍启动 AstraPod。 |
 | 硬件 DFU | 按引导程序安装说明进入 | 用于恢复引导程序。DFU 中屏幕保持黑色。 |
 
 [引导程序安装和 DFU](tools/bootloader-installer/README.txt) · [引导程序按键源码](bootloader/ipod-s5l87xx.c)
@@ -119,9 +118,9 @@ Agents 中按住 Play 录音，松手结束。短按会丢弃短录音。主机�
 
 ### USB 磁盘模式、安装和更新
 
-1. 运行 Astra 后接数据线。出现 USB 询问时，按 **Select** 授权磁盘访问，或按 **Menu** 保持非磁盘连接。纯充电 USB 模式不启动 PodLink。手动磁盘模式见上表。
+1. 运行 AstraPod 后接数据线。出现 USB 询问时，按 **Select** 授权磁盘访问，或按 **Menu** 保持非磁盘连接。纯充电 USB 模式不启动 PodLink。手动磁盘模式见上表。
 2. **FU114 之前的固件不得带着 USB 线启动。** 必须先启动，再接线。
-3. 初次安装按 Rockbox 安装手册安装对应型号的引导程序。正式发行包中，Classic 使用 `rockbox-ipod6g.zip`。选择本机型号对应的 ZIP；同时更新已启用的额外主题。 [Rockbox 安装手册](https://www.rockbox.org/manual.shtml) · [发布包](https://github.com/anthonyfletcher/podbox/releases)
+3. 初次安装按 Rockbox 安装手册安装对应型号的引导程序。正式发行包中，Classic 使用 `rockbox-ipod6g.zip`。选择本机型号对应的 ZIP；同时更新已启用的额外主题。 [Rockbox 安装手册](https://www.rockbox.org/manual.shtml) · [发布包](https://github.com/gfhdhytghd/AstraPod/releases)
 4. 备份 `.rockbox` 和重要文件。把 ZIP 解压到磁盘根目录，用包中同名文件更新 `/.rockbox/rockbox.ipod` 及其他 `/.rockbox/` 资源。保留包外的设置、资料库和音乐。电脑弹出磁盘后再断线。
 
 开发包可以用报告中的 `fast_swap.py` 完整命令。参数依次为新 ZIP、ZIP SHA-256、基线 ZIP、旧固件 SHA-256 和新固件 SHA-256。工具核对基线，备份差异文件，写入并校验后弹出磁盘。有删除项的包用报告指定的 `fast_swap_rm.py`。
@@ -156,7 +155,7 @@ PodLink 是 USB CDC 串行消息链路。打开「系统 → PodLink」，接线
 
 ## Licence
 
-Rockbox, RockPod and additions by Astra are licensed under the [GNU General Public License v2.0](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html).
+Rockbox, RockPod and additions by AstraPod are licensed under the [GNU General Public License v2.0](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html).
 
 Imported code governed by a previous licence is listed in
 [`docs/LICENSES`](docs/LICENSES); the fonts and themes this fork adds are
@@ -309,4 +308,4 @@ layouts and behaviour to support the iAP2 development. Which fact came from wher
 
 ## English summary
 
-Astra is Rockbox-based firmware for the iPod classic 6G (S5L8702). It includes a native interface, Cover Flow with a prefetched album panel, timed lyrics, PBF1 fonts, and PodLink with optional HerdRemote control.
+Rockbox specifically and deeply optimized for iPod Classic.

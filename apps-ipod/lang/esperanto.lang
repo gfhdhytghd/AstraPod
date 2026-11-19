@@ -23,6 +23,20 @@
 # If updates or corrections are needed, message me.
 # Se vi trovas erarojn, sendu mesaĝon al mi.
 <phrase>
+  id: LANG_ROCKBOX_TITLE
+  desc: main menu title
+  user: core
+  <source>
+    *: "AstraPod"
+  </source>
+  <dest>
+    *: "AstraPod"
+  </dest>
+  <voice>
+    *: "AstraPod"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_SET_BOOL_YES
   desc: bool true representation
   user: core

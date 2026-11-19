@@ -162,7 +162,7 @@ static const struct usb_string_descriptor usb_string_iManufacturer =
 USB_STRING_INITIALIZER(u"PodBox");
 
 static const struct usb_string_descriptor usb_string_iProduct =
-USB_STRING_INITIALIZER(u"Astra media player");
+USB_STRING_INITIALIZER(u"AstraPod media player");
 
 #ifdef USB_ENABLE_IAP
 /* An iPhone's name for its iAP configuration, given to the player's while

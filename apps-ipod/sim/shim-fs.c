@@ -44,7 +44,7 @@ void storage_get_info(int drive, struct storage_info *info)
 
     memset(info, 0, sizeof (*info));
     info->sector_size = 512;
-    info->vendor   = "Astra";
+    info->vendor   = "AstraPod";
     info->product  = "simdisk";
     info->revision = "1.0";
 }

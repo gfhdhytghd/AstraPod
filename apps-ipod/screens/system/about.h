@@ -12,6 +12,7 @@
 int about_screen(void);
 
 struct screen;
-void about_draw_boot_logo(struct screen *display, int bottom);
+struct viewport;
+void about_draw_boot_logo(struct screen *display, struct viewport *vp, int bottom);
 
 #endif /* _ABOUT_H_ */

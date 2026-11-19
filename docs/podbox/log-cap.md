@@ -1,4 +1,4 @@
-# Astra log retention (FU41)
+# AstraPod log retention (FU41)
 
 Each log family has a **5 MiB (5,242,880 byte) total upper bound**, including
 current and backup. Each part is at most 2.5 MiB. Oldest data is discarded first.
@@ -15,7 +15,7 @@ Paths below are relative to `/.rockbox`, except `/.scrobbler.log`.
 | `logs/usb.log` / usb_log_file through debug_log | Same debug policy | Common cap, ring and existing flush schedule retained |
 | `logs/battery.csv` / battery_log through debug_log | Same debug policy | Common cap, minute ring and storage-idle flush retained |
 | `logs/mikey.log` / remote debug screen through debug_log | Same debug policy | Common cap, UI disk work relayed |
-| `logs/metadata.log` / metadata parser | Direct uncapped append; only headers used debug_log | Parser callback routes all Astra records through common cap |
+| `logs/metadata.log` / metadata parser | Direct uncapped append; only headers used debug_log | Parser callback routes all AstraPod records through common cap |
 | `user/playback.log` / audio playback | About 511 KiB at startup, unbounded numbered archives; no strict ongoing bound | Common cap, one `playback_0001.log` backup compatible with existing reader |
 | `/.scrobbler.log` / audio playback | Unbounded | Common cap; each current/backup part carries Audioscrobbler header |
 | `logs/buffer_damage.log` / buffering damage snapshot | Unbounded | Common cap on every snapshot line |
@@ -83,12 +83,12 @@ queue and received timestamps are retained.
 
 HerdRemote, usbkey and Cider host modules otherwise log to stdout/stderr;
 Cider plugin JavaScript uses its host console. They do not create another
-Astra-owned file log. Usage JSON/lock files and Cider artwork/index stores are
-data. Logs belonging to external agent applications are only read by Astra.
+AstraPod-owned file log. Usage JSON/lock files and Cider artwork/index stores are
+data. Logs belonging to external agent applications are only read by AstraPod.
 No `hrcider*.py` or `cider-plugin` source is changed by FU41.
 
 The shipped **user** services keep the shared journal. It is not a
-Astra-owned log file and FU41 does not claim a per-service 5 MiB journal quota.
+AstraPod-owned log file and FU41 does not claim a per-service 5 MiB journal quota.
 The installed `systemd.exec(5)` documents these options:
 
 - `LogRateLimitIntervalSec=` and `LogRateLimitBurst=` limit message rate, not

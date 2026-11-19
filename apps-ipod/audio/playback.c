@@ -2315,6 +2315,8 @@ static int audio_load_albumart(struct track_info *infop,
         }
         else if (hid == ERR_BITMAP_TOO_LARGE){
             logf("image is too large to fit in buffer (%s)", __func__);
+            /* This artwork cannot become ready on a later buffer pass. */
+            *aa_hid = ERR_UNSUPPORTED_TYPE;
             return ERR_BITMAP_TOO_LARGE;
         }
         else

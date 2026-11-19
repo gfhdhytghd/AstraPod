@@ -160,7 +160,7 @@ static const struct {
 static const struct {
     const char *key;
     enum ui_bg_kind scrim;
-} backgrounds[UI_BG_COUNT] = {
+} backgrounds[] = {
     [UI_BG_LIST]   = { "list",   UI_BG_BLURRED_COVER },
     [UI_BG_WPS]    = { "wps",    UI_BG_COVER_SCRIM },
     [UI_BG_LYRICS] = { "lyrics", UI_BG_BLURRED_COVER },
@@ -182,6 +182,7 @@ void ui_theme_builtin(struct ui_theme *theme, bool light)
         theme->metric[i] = metrics[i].value;
     for (size_t i = 0; i < ARRAY_COUNT(backgrounds); i++)
         theme->background[i] = light ? UI_BG_SOLID : backgrounds[i].scrim;
+    theme->background[UI_BG_STATUS] = UI_BG_COVER_TINT;
     theme->motion_scale = UI_THEME_MOTION_ONE;
 }
 
@@ -397,6 +398,18 @@ static bool parse_token(struct ui_theme *theme, struct seen_tokens *seen,
     }
     else if (same(key, "background"))
     {
+        if (same(role, "status"))
+        {
+            if (!first_token(&seen->background[UI_BG_STATUS]))
+                return false;
+            if (same(value, "cover_tint"))
+                theme->background[UI_BG_STATUS] = UI_BG_COVER_TINT;
+            else if (same(value, "solid"))
+                theme->background[UI_BG_STATUS] = UI_BG_SOLID;
+            else
+                return false;
+            return true;
+        }
         for (size_t i = 0; i < ARRAY_COUNT(backgrounds); i++)
             if (same(role, backgrounds[i].key))
                 return first_token(&seen->background[i]) && bg_kind(value, &theme->background[i]);
@@ -465,6 +478,7 @@ bool ui_theme_parse(struct ui_theme *theme, const char *data, size_t size)
     struct seen_tokens seen = {0};
     bool version = false;
     ui_theme_builtin(&parsed, false);
+    parsed.background[UI_BG_STATUS] = UI_BG_SOLID;
 
     while (size)
     {

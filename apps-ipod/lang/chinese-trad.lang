@@ -11286,3 +11286,18 @@
     *: "原生主題"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_STATUS_COVER_TINT
+  desc: Setting to let the status bar follow the current cover
+  user: core
+  <source>
+    *: "Status Bar Cover Tint"
+  </source>
+  <dest>
+    *: "狀態欄取色"
+  </dest>
+  <voice>
+    *: "狀態欄取色"
+  </voice>
+</phrase>

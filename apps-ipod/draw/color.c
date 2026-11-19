@@ -256,6 +256,49 @@ unsigned color_srgb_luminance(unsigned c)
             srgb_linear[RGB_UNPACK_BLUE(c)] * 4732u + 32768u) >> 16;
 }
 
+static unsigned srgb_from_linear(unsigned value)
+{
+    unsigned lo = 0, hi = 255;
+    while (hi - lo > 1)
+    {
+        unsigned mid = (lo + hi) / 2;
+        if (srgb_linear[mid] < value)
+            lo = mid;
+        else
+            hi = mid;
+    }
+    return value - srgb_linear[lo] < srgb_linear[hi] - value ? lo : hi;
+}
+
+unsigned color_srgb_mean(const fb_data *pixels, unsigned count)
+{
+    unsigned r = 0, g = 0, b = 0;
+    for (unsigned i = 0; i < count; i++)
+    {
+        unsigned pixel = pixels[i];
+        r += srgb_linear[RGB_UNPACK_RED(pixel)];
+        g += srgb_linear[RGB_UNPACK_GREEN(pixel)];
+        b += srgb_linear[RGB_UNPACK_BLUE(pixel)];
+    }
+    r = srgb_from_linear((r + count / 2) / count);
+    g = srgb_from_linear((g + count / 2) / count);
+    b = srgb_from_linear((b + count / 2) / count);
+    return LCD_RGBPACK(r, g, b);
+}
+
+unsigned color_srgb_readable_text(unsigned foreground, unsigned background)
+{
+    const unsigned offset = 3277; /* 0.05 in Q16 */
+    unsigned bg = color_srgb_luminance(background) + offset;
+    unsigned fg = color_srgb_luminance(foreground) + offset;
+    if (2 * MAX(fg, bg) >= 9 * MIN(fg, bg))
+        return foreground;
+
+    /* Compare white/background to background/black without division. */
+    return (uint64_t)(65535 + offset) * offset >= (uint64_t)bg * bg
+           ? LCD_WHITE : LCD_BLACK;
+}
+
 struct oklab { int32_t l, a, b; };
 
 static uint32_t isqrt32(uint32_t x)

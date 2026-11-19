@@ -20,6 +20,7 @@
 #include "rbpaths.h"
 #include "remote_log.h"
 #include "database/tagcache.h"
+#include "metadata/album_blur.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -151,6 +152,8 @@ static void fail_art(void)
 {
     cider_cache_fail(&cache, transfer.key, transfer.tier, current_tick, HZ);
     transfer.active = disk_lookup = request_ready = false;
+    if (!strcmp(transfer.key, state.art) && !strcmp(transfer.tier, "L"))
+        album_blur_request_wps();
 }
 
 static void finish_xs(void)
@@ -269,6 +272,8 @@ static bool receive(const struct podlink_message *m)
                     disk_lookup = false;
                     cider_cache_put(&cache, transfer.key, transfer.tier,
                                     transfer.data, transfer.total, persist);
+                    if (persist && !strcmp(transfer.key, state.art))
+                        album_blur_request_wps();
                     if (transfer.fill)
                         cider_cache_demote(&cache, transfer.key, transfer.tier);
                     else
@@ -300,7 +305,10 @@ static bool receive(const struct podlink_message *m)
                     pos += 40;
                     if (size > m->length - pos || size != 2060 ||
                         podlink_crc32(m->data + pos, size) != crc) break;
-                    added |= cider_cache_put(&cache, key, "XS", m->data + pos, size, true);
+                    bool cached = cider_cache_put(&cache, key, "XS", m->data + pos, size, true);
+                    added |= cached;
+                    if (cached && !strcmp(key, state.art))
+                        album_blur_request_wps();
                     pos += size;
                 }
                 if (added)
@@ -334,8 +342,13 @@ static bool receive(const struct podlink_message *m)
         bool available = state.available;
         bool had_state = state.have;
         bool was_loading = state.loading;
+        char previous_art[sizeof(state.art)];
+        memcpy(previous_art, state.art, sizeof(previous_art));
         uint32_t position = cider_position(&state,current_tick,HZ);
         cider_state_apply(&state, m->data, m->length, current_tick, HZ);
+        if (state.generation != previous || state.available != available ||
+            strcmp(previous_art, state.art))
+            album_blur_playing_changed();
         if (available != state.available || had_state != state.have)
             button_queue_post(BUTTON_REDRAW, 0);
         if (was_loading != state.loading)
@@ -875,7 +888,12 @@ static bool read_store(const char *key, const char *tier, bool transfer_job,
     if (r < CS_MISS) diag.last_error = r;
     mutex_lock(&cider_mutex);
     bool ok = r == CS_OK && cider_cache_put(&cache, key, tier, payload, length, false);
-    if (ok) { diag.hits++; art_revision++; pin_apply(); button_queue_post(BUTTON_REDRAW, 0); }
+    if (ok)
+    {
+        diag.hits++; art_revision++; pin_apply(); button_queue_post(BUTTON_REDRAW, 0);
+        if (!strcmp(key, state.art))
+            album_blur_request_wps();
+    }
     else { diag.misses++; diag.build_state = 1; miss_note(key, tier); }
     if (transfer_job && transfer.active && transfer.request == req && disk_lookup)
     {
@@ -1201,13 +1219,17 @@ void cider_source_poll(void)
     int local = audio_status();
     if (online && (local & AUDIO_STATUS_PLAY) && !(local & AUDIO_STATUS_PAUSE)) audio_pause();
     active = online;
+    album_blur_playing_changed();
 }
 void cider_remote_source(void)
 {
     if (handoff_hold_source()) return;
     bool use_cider = cider_available();
     if (use_cider && (audio_status() & AUDIO_STATUS_PLAY)) audio_pause();
+    bool changed = active != use_cider;
     active = use_cider;
+    if (changed)
+        album_blur_playing_changed();
 }
 void cider_snapshot(struct cider_state *out)
 {
@@ -1356,6 +1378,21 @@ void cider_request_art(const char *key, const char *tier)
         begin_transfer(key, tier, false);
     mutex_unlock(&cider_mutex);
 }
+
+bool cider_request_playing_art(const char *key)
+{
+    mutex_lock(&cider_mutex);
+    bool failed = false;
+    if (cider_available() && !strcmp(key, state.art))
+    {
+        failed = cider_cache_backoff(&cache, key, "L", current_tick);
+        if (!failed && (!transfer.active || transfer.fill) &&
+            cider_cache_find(&cache, key, "L") < 0)
+            begin_transfer(key, "L", false);
+    }
+    mutex_unlock(&cider_mutex);
+    return failed;
+}
 void cider_unpin_art(void)
 {
     mutex_lock(&cider_mutex);
@@ -1490,6 +1527,7 @@ int cider_play_status(void)
     {
         if (audio_status() & AUDIO_STATUS_PLAY) audio_pause();
         active = true;
+        album_blur_playing_changed();
     }
     return reply;
 }
@@ -1503,6 +1541,7 @@ void cider_local_play(void)
     if (!active && !pending) return;
     cider_control("source-local", 0);
     active = false;
+    album_blur_playing_changed();
 }
 void cider_page_open(const char *route)
 {

@@ -6,6 +6,9 @@
 #include "art_cache.h"
 #include "art_name.h"
 #include "audio.h"
+#include "audio/buffering.h"
+#include "audio/playback.h"
+#include "button.h"
 #include "system/appevents.h"
 #include "core_alloc.h"
 #include "crc32.h"
@@ -25,6 +28,7 @@
 #include "system/bg_task.h"
 #include "screens/covers/panel_perf.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/native_wps.h"
 #include "usb.h"
 
 #define BLUR_DIR ROCKBOX_DIR "/podbox/cache/blur"
@@ -37,6 +41,7 @@
 #define BLUR_EVENT_WINDOW 0x1181
 #define PANEL_ALPHA_MAX 224
 #define WCAG_OFFSET 3277u /* 0.05 in Q16 */
+#define STATUS_ART_GRACE HZ
 
 struct blur_record {
     uint32_t magic, cover_hash, checksum;
@@ -55,6 +60,8 @@ static struct {
     unsigned hash, recent, users;
     bool ready;
     uint8_t wps_lum;
+    uint8_t tint_rows;
+    unsigned tint;
 } slots[BLUR_SLOTS];
 
 static struct {
@@ -69,6 +76,12 @@ static unsigned use_clock;
 static volatile unsigned cache_generation;
 static struct mutex cache_lock;
 static struct bg_task blur_task;
+static volatile unsigned playing_revision;
+static volatile long playing_changed_at;
+static struct {
+    unsigned revision, height, color;
+    enum album_blur_tint_state state;
+} status_tint;
 
 static bool same_source(const struct album_blur_source *a,
                         const struct album_blur_source *b)
@@ -280,11 +293,9 @@ static unsigned wps_ink_luminance(unsigned fg)
             RGB_UNPACK_BLUE(fg) * 29) >> 8;
 }
 
-static unsigned wps_scrim_luminance(void)
+static unsigned wps_scrim_luminance(const struct ui_theme *theme)
 {
-    struct ui_theme theme;
-    ui_theme_snapshot(&theme);
-    if (theme.background[UI_BG_WPS] == UI_BG_SOLID)
+    if (theme->background[UI_BG_WPS] == UI_BG_SOLID)
         return 0;
     return wps_ink_luminance(ui_theme_rgb565(UI_COLOR_WPS_FG));
 }
@@ -349,10 +360,16 @@ static bool window_stale(unsigned revision)
 }
 
 static unsigned prepare(const struct album_blur_source *source, int art,
-                        unsigned wps_lum, unsigned revision)
+                        unsigned wps_lum, unsigned revision, bool *missing)
 {
-    if ((!source->local && !source->remote[0]) || usb_host_wants_storage())
+    if (usb_host_wants_storage())
         return 0;
+    if (!source->local && !source->remote[0])
+    {
+        if (missing)
+            *missing = true;
+        return 0;
+    }
     unsigned result = 0;
     uint32_t start = USEC_TIMER;
     fb_data *scratch = core_get_data_pinned(scratch_handle);
@@ -380,6 +397,8 @@ static unsigned prepare(const struct album_blur_source *source, int art,
         goto done;
     if (!width)
     {
+        if (missing)
+            *missing = true;
         mutex_lock(&cache_lock);
         int stale = find_slot(source);
         if (stale >= 0 && !source->remote[0])
@@ -458,6 +477,7 @@ static unsigned prepare(const struct album_blur_source *source, int art,
     slots[slot].hash = hash;
     slots[slot].wps_lum = wps_lum;
     slots[slot].recent = ++use_clock;
+    slots[slot].tint_rows = 0;
     slots[slot].ready = true;
     ++cache_generation;
     mutex_unlock(&cache_lock);
@@ -468,11 +488,58 @@ done:
     return result;
 }
 
+/* Only the shared worker writes the plane or its memoized status colour. */
+static bool cover_tint(const struct album_blur_source *source, unsigned hash,
+                       unsigned height, unsigned *tint)
+{
+    mutex_lock(&cache_lock);
+    int slot = find_slot(source);
+    bool valid = slot >= 0 && slots[slot].hash == hash;
+    mutex_unlock(&cache_lock);
+    if (!valid)
+        return false;
+
+    unsigned rows = (height * BLUR_H + LCD_HEIGHT - 1) / LCD_HEIGHT;
+    if (slots[slot].tint_rows != rows)
+    {
+        struct blur_pixels *cache = core_get_data_pinned(cache_handle);
+        slots[slot].tint = color_srgb_mean(cache[slot].cached.plane, rows * BLUR_W);
+        slots[slot].tint_rows = rows;
+        core_put_data_pinned(cache);
+    }
+    *tint = slots[slot].tint;
+    return true;
+}
+
+static void publish_status_tint(unsigned revision, unsigned generation,
+                                unsigned height, enum album_blur_tint_state state,
+                                unsigned tint)
+{
+    if (state == ALBUM_BLUR_WAITING)
+        return;
+    int level = disable_irq_save();
+    bool current = revision == playing_revision && generation == album_art_generation();
+    bool changed = status_tint.state != state || status_tint.color != tint ||
+                   status_tint.height != height || status_tint.revision != revision;
+    if (current && changed)
+    {
+        status_tint.state = state;
+        status_tint.color = tint;
+        status_tint.height = height;
+        status_tint.revision = revision;
+    }
+    restore_irq(level);
+    if (current && changed && lcd_active() && button_queue_empty())
+        button_queue_post(BUTTON_NONE, 0);
+}
+
 static void blur_work(const struct queue_event *ev)
 {
     if (usb_host_wants_storage())
         return;
-    unsigned wps_lum = wps_scrim_luminance();
+    struct ui_theme theme;
+    ui_theme_snapshot(&theme);
+    unsigned wps_lum = wps_scrim_luminance(&theme);
     if (ev->id == BLUR_EVENT_WINDOW)
     {
         mutex_lock(&cache_lock);
@@ -485,17 +552,30 @@ static void blur_work(const struct queue_event *ev)
         struct album_blur_source source = window.source[window.next++];
         bool more = window.next < window.count;
         mutex_unlock(&cache_lock);
-        prepare(&source, -1, wps_lum, revision);
+        prepare(&source, -1, wps_lum, revision, NULL);
         if (more && !window_stale(revision) && !bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
             bg_task_post(&blur_task, BLUR_EVENT_WINDOW);
         return;
     }
 
+    unsigned revision = playing_revision;
+    bool remote = cider_active();
     int art = album_art_current();
     unsigned generation = album_art_generation();
+    bool tint_enabled = global_settings.status_cover_tint &&
+                        theme.background[UI_BG_STATUS] == UI_BG_COVER_TINT;
+    int source_art = art;
+    int track_slot = !remote && tint_enabled ? native_wps_art_slot() : -1;
+    if (track_slot >= 0)
+    {
+        /* Album art for WPS can hold the old handle while this track buffers. */
+        source_art = playback_track_aa_hid(track_slot);
+        if (source_art < 0 && source_art != ERR_UNSUPPORTED_TYPE)
+            return;
+    }
     struct album_blur_source source = {0};
 #ifdef HAVE_USB_PODLINK
-    if (cider_active())
+    if (remote)
         cider_current_art(source.remote);
     else
 #endif
@@ -527,9 +607,26 @@ static void blur_work(const struct queue_event *ev)
                 source.local = art_cache_track_key(path);
         }
     }
-    unsigned hash = prepare(&source, art, wps_lum, 0);
-    if (generation != album_art_generation() || art != album_art_current())
+    /* A remote WPS bitmap may still belong to the previous cover key. */
+#ifdef HAVE_USB_PODLINK
+    if (remote && strcmp(source.remote, cider_wps_art_key()))
+        source_art = -1;
+#endif
+    bool missing = false;
+    unsigned hash = prepare(&source, source_art, wps_lum, 0, &missing);
+    if (generation != album_art_generation() || art != album_art_current() ||
+        revision != playing_revision || remote != cider_active() ||
+        (track_slot >= 0 && source_art != playback_track_aa_hid(track_slot)))
         return;
+#ifdef HAVE_USB_PODLINK
+    if (remote)
+    {
+        char key[sizeof(source.remote)];
+        cider_current_art(key);
+        if (strcmp(key, source.remote))
+            return;
+    }
+#endif
     mutex_lock(&cache_lock);
     if (wps_art != art || wps_generation != generation || wps_hash != hash ||
         !same_source(&wps_source, &source))
@@ -541,6 +638,46 @@ static void blur_work(const struct queue_event *ev)
         ++cache_generation;
     }
     mutex_unlock(&cache_lock);
+
+    if (!tint_enabled)
+        return;
+
+    unsigned height = theme.metric[UI_METRIC_STATUS_HEIGHT];
+    unsigned tint = 0;
+    enum album_blur_tint_state state = ALBUM_BLUR_WAITING;
+#ifdef HAVE_USB_PODLINK
+    /* The same remote image can arrive in several sizes during playback. */
+    static char tinted_key[sizeof(source.remote)];
+    static unsigned tinted_height, remote_tint;
+    if (source.remote[0] && !strcmp(source.remote, tinted_key) &&
+        height == tinted_height)
+    {
+        state = ALBUM_BLUR_TINT;
+        tint = remote_tint;
+    }
+    else if (source.remote[0])
+    {
+        if (hash && cover_tint(&source, hash, height, &tint))
+        {
+            state = ALBUM_BLUR_TINT;
+            strlcpy(tinted_key, source.remote, sizeof(tinted_key));
+            tinted_height = height;
+            remote_tint = tint;
+        }
+        else if (cider_request_playing_art(source.remote))
+            state = ALBUM_BLUR_NO_ART;
+    }
+    else
+#endif
+    {
+        if (hash && cover_tint(&source, hash, height, &tint))
+            state = ALBUM_BLUR_TINT;
+        else if (missing && (!remote ||
+                 TIME_AFTER(current_tick, playing_changed_at + STATUS_ART_GRACE)))
+            state = ALBUM_BLUR_NO_ART;
+    }
+
+    publish_status_tint(revision, generation, height, state, tint);
 }
 
 static struct bg_task blur_task = { .name = "album blur", .handle_event = blur_work };
@@ -557,7 +694,7 @@ static void track_changed(unsigned short id, void *data)
 {
     (void)id;
     (void)data;
-    album_blur_request_wps();
+    album_blur_playing_changed();
 }
 
 void album_blur_init(void)
@@ -574,6 +711,39 @@ void album_blur_request_wps(void)
 {
     if (cache_handle > 0 && !bg_task_queued(&blur_task, BLUR_EVENT_WPS))
         bg_task_post(&blur_task, BLUR_EVENT_WPS);
+}
+
+void album_blur_playing_changed(void)
+{
+    int level = disable_irq_save();
+    ++playing_revision;
+    playing_changed_at = current_tick;
+    restore_irq(level);
+    album_blur_request_wps();
+}
+
+enum album_blur_tint_state album_blur_status_tint(unsigned height, unsigned *color)
+{
+    if (cache_handle <= 0)
+        return ALBUM_BLUR_NO_ART;
+
+    int level = disable_irq_save();
+    enum album_blur_tint_state state = ALBUM_BLUR_WAITING;
+    if (status_tint.revision == playing_revision && status_tint.height == height)
+    {
+        state = status_tint.state;
+        *color = status_tint.color;
+    }
+    restore_irq(level);
+
+    /* A cover may still be buffering, or its cache slot may have been pinned. */
+    static long next_retry;
+    if (state == ALBUM_BLUR_WAITING && !TIME_BEFORE(current_tick, next_retry))
+    {
+        next_retry = current_tick + HZ / 4;
+        album_blur_request_wps();
+    }
+    return state;
 }
 
 void album_blur_request_window(const struct album_blur_source *sources, unsigned count)

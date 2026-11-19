@@ -937,6 +937,8 @@ const struct settings_list settings[] = {
      * bar repaint. */
     OFFON_SETTING(0, show_disk_activity, LANG_SHOW_DISK_ACTIVITY, false,
                   "show disk activity", NULL),
+    OFFON_SETTING(0, status_cover_tint, LANG_STATUS_COVER_TINT, true,
+                  "status bar cover tint", NULL),
     OFFON_SETTING(0, show_background_tasks, LANG_SHOW_BACKGROUND_TASKS, true,
                   "show background tasks", NULL),
     OFFON_SETTING(0, show_working, LANG_SHOW_WORKING, true,

@@ -5,15 +5,18 @@
 #include <string.h>
 
 #include "animation.h"
+#include "audio/play_status.h"
 #include "button.h"
 #include "core_alloc.h"
 #include "database/tagcache.h"
+#include "draw/color.h"
 #include "draw/viewport.h"
 #include "files/file_index.h"
 #include "frame.h"
 #include "kernel.h"
 #include "lcd.h"
 #include "led.h"
+#include "metadata/album_blur.h"
 #include "metadata/album_palette.h"
 #include "metadata/art_cache.h"
 #include "native_chrome.h"
@@ -49,6 +52,9 @@ struct statusbar {
     struct native_chrome chrome;
     struct indicator_motion motion;
     struct status_title title[NB_SCREENS];
+    struct native_chrome_colors colors;
+    unsigned tint, preferred;
+    bool adaptive, has_tint;
     unsigned generation, palette_generation;
     long next_update;
     bool fonts_ready, fonts_tried;
@@ -231,6 +237,43 @@ static unsigned int viewport_color(const struct ui_theme *theme, enum ui_color_r
     return LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
 }
 
+static bool refresh_status_colors(struct statusbar *bar)
+{
+    bool adaptive = global_settings.status_cover_tint &&
+                    bar->theme.background[UI_BG_STATUS] == UI_BG_COVER_TINT;
+    bool changed = bar->adaptive != adaptive;
+    bar->adaptive = adaptive;
+    if (!adaptive)
+    {
+        bar->has_tint = false;
+        return changed;
+    }
+
+    if (current_playmode() == STATUS_STOP)
+        bar->has_tint = false;
+    else
+    {
+        unsigned height = bar->theme.metric[UI_METRIC_STATUS_HEIGHT];
+        switch (album_blur_status_tint(height, &bar->tint))
+        {
+            case ALBUM_BLUR_TINT: bar->has_tint = true; break;
+            case ALBUM_BLUR_NO_ART: bar->has_tint = false; break;
+            case ALBUM_BLUR_WAITING: break;
+        }
+    }
+    unsigned background = bar->has_tint ? bar->tint :
+                          viewport_color(&bar->theme, UI_COLOR_STATUS_BG, NULL);
+    unsigned preferred = viewport_color(&bar->theme, UI_COLOR_STATUS_FG, NULL);
+    if (changed || bar->colors.background != background || bar->preferred != preferred)
+    {
+        unsigned foreground = color_srgb_readable_text(preferred, background);
+        changed |= bar->colors.background != background || bar->colors.foreground != foreground;
+        bar->colors = (struct native_chrome_colors){background, foreground};
+        bar->preferred = preferred;
+    }
+    return changed;
+}
+
 void sb_apply_viewport(struct viewport *vp, enum screen_type screen, bool chrome)
 {
     if (status_handle <= 0)
@@ -282,6 +325,7 @@ void sb_update(enum screen_type screen, bool force)
     struct status_title *title = &bar->title[screen];
     unsigned palette_generation = album_palette_generation();
     force |= invalidated || title->dirty || palette_generation != bar->palette_generation;
+    force |= refresh_status_colors(bar);
     bool poll = force || !TIME_BEFORE(current_tick, bar->next_update);
     if (!poll && !indicators_moving)
         goto done;
@@ -325,7 +369,7 @@ void sb_update(enum screen_type screen, bool force)
             struct viewport *old = lcd_set_viewport(NULL);
             unsigned int start = USEC_TIMER;
             native_chrome_draw(&bar->chrome, title->text, false, &frame, &palette,
-                               &bar->motion.visible);
+                               &bar->motion.visible, bar->adaptive ? &bar->colors : NULL);
             ui_note_render(USEC_TIMER - start);
             lcd_set_viewport(old);
             ui_mark_dirty_rect(screen, area.x, area.y, area.width, area.height);

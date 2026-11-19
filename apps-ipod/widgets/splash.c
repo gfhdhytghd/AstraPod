@@ -49,8 +49,7 @@ struct splash_message {
     struct dialog_style style;
     char text[MAXBUFFER];
     struct {
-        const char *str;
-        size_t len;
+        uint16_t offset, length;
     } lines[MAXLINES];
     int count, line_height, meter_gap, meter_radius;
 };
@@ -62,7 +61,8 @@ static void splash_draw_text(struct screen *screen, struct viewport *content,
     screen->set_drawmode(DRMODE_FG);
     for (int i = 0; i < message->count; i++)
         screen->putsxyf(0, i * message->line_height, "%.*s",
-                       message->lines[i].len, message->lines[i].str);
+                       (int)message->lines[i].length,
+                       message->text + message->lines[i].offset);
     screen->set_drawmode(DRMODE_SOLID);
     screen->set_viewport(prev);
 }
@@ -181,10 +181,8 @@ static bool splash_internal(struct screen *screen, const char *fmt, va_list ap,
 
     dialog_style_default(&message.style);
 
-    struct ui_theme theme;
-    ui_theme_snapshot(&theme);
-    message.meter_gap = theme.metric[UI_METRIC_SPLASH_PROGRESS_GAP];
-    message.meter_radius = theme.metric[UI_METRIC_SPLASH_PROGRESS_RADIUS];
+    message.meter_gap = ui_theme_metric(UI_METRIC_SPLASH_PROGRESS_GAP);
+    message.meter_radius = ui_theme_metric(UI_METRIC_SPLASH_PROGRESS_RADIUS);
     int *observed_width = &max_width[screen->screen_type];
     int old_font = vp->font;
     int body_font = -1;
@@ -198,7 +196,7 @@ static bool splash_internal(struct screen *screen, const char *fmt, va_list ap,
                       talk_on_ui_thread() && lcd_active() &&
                       vp->buffer == &lcd_framebuffer_default;
     if (standalone)
-        body_font = ui_theme_font_load(&theme, UI_FONT_BODY, SPLASH_FONT_CACHE_GLYPHS);
+        body_font = ui_theme_current_font_load(UI_FONT_BODY, SPLASH_FONT_CACHE_GLYPHS);
 
     int pad = message.style.box_margin;
     int fontnum = body_font >= 0 ? body_font : old_font;
@@ -234,11 +232,12 @@ static bool splash_internal(struct screen *screen, const char *fmt, va_list ap,
                 break;  /* screen full or out of lines */
             y += chr_h;
         }
-        message.lines[line].str = next;
+        const char *start = next;
         next = text_wrap_next(next, line_width, pf, &end);
-        message.lines[line].len = end - message.lines[line].str;
-        w = font_getstringnsize((const unsigned char *)message.lines[line].str,
-                                message.lines[line].len, NULL, NULL, fontnum);
+        message.lines[line].offset = start - message.text;
+        message.lines[line].length = end - start;
+        w = font_getstringnsize((const unsigned char *)start, end - start,
+                                NULL, NULL, fontnum);
         if (w > maxw)
             maxw = w;
         message.count++;

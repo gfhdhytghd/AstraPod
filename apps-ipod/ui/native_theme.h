@@ -110,11 +110,13 @@ struct ui_theme {
 };
 
 void ui_theme_builtin(struct ui_theme *theme, bool light);
+unsigned ui_theme_builtin_metric(enum ui_metric_role role);
+const char *ui_theme_builtin_font(enum ui_font_role role);
 
 /* Parse a complete file, using Scrim for absent tokens. Failure preserves theme. */
 bool ui_theme_parse(struct ui_theme *theme, const char *data, size_t size);
 
-/* Resolve palette roles in RGB888; all offsets/metrics are display pixels. */
+/* Resolve palette roles in RGB888. NULL uses the default Scrim theme. */
 uint32_t ui_theme_color(const struct ui_theme *theme, enum ui_color_role role,
                         const struct ui_album_palette *palette);
 

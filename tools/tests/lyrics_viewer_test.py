@@ -243,9 +243,8 @@ static unsigned ui_theme_duration(unsigned frames)
 {
     return global_settings.animations ? frames : 0;
 }
-static int ui_theme_font_load(const struct ui_theme *theme, enum ui_font_role role, int glyphs)
+static int ui_theme_current_font_load(enum ui_font_role role, int glyphs)
 {
-    (void)theme;
     (void)glyphs;
     return font_load(role == UI_FONT_LYRICS_FOCUS ? "26-test" : "18-test");
 }
@@ -406,37 +405,27 @@ static fb_data ref_mix(fb_data a, fb_data b, int p)
 }
 static void test_pixels(void)
 {
-    /* Wrapped rows share the selected edge and the block's scale origin. */
-    assert(lv_text_x(200,200,256,0) == 16 && lv_text_x(100,200,256,0) == 16);
-    assert(lv_text_x(200,200,256,2) + 200 == 304);
-    assert(lv_text_x(100,200,256,2) + 100 == 304);
-    assert(lv_text_x(100,200,256,1) == 110);
-    assert(lv_text_x(220,200,282,0) == 6 && lv_text_x(110,200,282,0) == 6);
-    assert(lv_text_x(220,200,282,2) + 220 == 314);
-    assert(lv_text_x(110,200,282,2) + 110 == 314);
-    /* Compare the feather and filtered strips with scalar pixel math. */
+    /* Wrapped rows share the selected edge at native pixel size. */
+    assert(lv_text_x(200,200,0) == 16 && lv_text_x(100,200,0) == 16);
+    assert(lv_text_x(200,200,2) + 200 == 304);
+    assert(lv_text_x(100,200,2) + 100 == 304);
+    assert(lv_text_x(100,200,1) == 110);
+    /* The sweep changes opacity without displacing any source sample. */
     for (int t = 0; t < 2000; t++) {
-        unsigned char upper[322] = {0}, lower[322] = {0};
+        unsigned char mask[320];
         fb_data pixels[320], ref[320], fg = pixel_rand();
         int width = t % 3 == 0 ? 288 : pixel_rand() % 289;
-        int step = t % 2 ? 256 : 232, fy = pixel_rand() % 16;
         int sweep = (int)(pixel_rand() % 322) - 1, alpha = pixel_rand() % 257;
         int dim = alpha * (pixel_rand() % 257) / 256;
         for (int x = 0; x < 320; x++) {
-            upper[x + 1] = t % 4 ? pixel_rand() % 65 : 64;
-            lower[x + 1] = t % 4 ? pixel_rand() % 65 : 0;
+            mask[x] = t % 4 ? pixel_rand() % 65 : 64;
             pixels[x] = ref[x] = pixel_rand();
         }
         for (int x = 0; x < width; x++) {
-            int q = (step - 256) / 2 + step * x;
-            int ix = (q >> 8) + 1, fx = (q >> 4) & 15;
-            unsigned ink = step == 256 ? upper[x + 1] :
-                ((upper[ix] * (16-fx) + upper[ix + 1] * fx) * (16-fy)
-                + (lower[ix] * (16-fx) + lower[ix + 1] * fx) * fy + 128) / 256;
             int light = sweep < 0 ? alpha : dim + (alpha - dim) * MAX(0, MIN(12, sweep - x)) / 12;
-            ref[x] = ref_mix(ref[x], fg, light * ink / 64);
+            ref[x] = ref_mix(ref[x], fg, light * mask[x] / 64);
         }
-        lv_ink_row(pixels, upper + 1, lower + 1, width, step, fy, alpha, sweep, dim, lv_expand(fg));
+        lv_ink_row(pixels, mask, width, alpha, sweep, dim, lv_expand(fg));
         assert(!memcmp(ref, pixels, sizeof ref));
     }
     struct lv_state state={0};

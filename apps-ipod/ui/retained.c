@@ -61,10 +61,39 @@ static struct ui_view_frame resolve(const struct ui_view *view,
     return frame;
 }
 
+static struct ui_view_frame frame_below(const struct ui_view *view,
+                                        const struct ui_view *stop)
+{
+    struct ui_view_frame frame = screen_frame();
+    /* Resolve root first to preserve clipping and per-level opacity rounding. */
+    while (stop != view)
+    {
+        const struct ui_view *node = view;
+        while (node->parent != stop)
+            node = node->parent;
+        frame = resolve(node, &frame);
+        stop = node;
+    }
+    return frame;
+}
+
 static struct ui_view_frame view_frame(const struct ui_view *view)
 {
-    struct ui_view_frame parent = view->parent ? view_frame(view->parent) : screen_frame();
-    return resolve(view, &parent);
+    return frame_below(view, NULL);
+}
+
+static struct ui_view *next_view(const struct ui_view *root,
+                                 const struct ui_view *view, bool descend)
+{
+    if (descend && view->first_child)
+        return view->first_child;
+    while (view != root)
+    {
+        if (view->next_sibling)
+            return view->next_sibling;
+        view = view->parent;
+    }
+    return NULL;
 }
 
 void ui_view_init(struct ui_view *view, struct ui_rect bounds,
@@ -98,19 +127,19 @@ void ui_page_invalidate(struct ui_page *page, struct ui_rect rect)
     page->damage = unite(page->damage, intersect(rect, screen));
 }
 
-static void layout(struct ui_view *view, struct ui_rect bounds)
-{
-    if (view->ops && view->ops->layout)
-        view->ops->layout(view, &bounds);
-    bounds = (struct ui_rect){0, 0, view->value[UI_WIDTH], view->value[UI_HEIGHT]};
-    for (struct ui_view *child = view->first_child; child; child = child->next_sibling)
-        layout(child, bounds);
-}
-
 void ui_page_layout(struct ui_page *page)
 {
     struct ui_rect before = view_frame(page->root).clip;
-    layout(page->root, screen);
+    for (struct ui_view *view = page->root; view; view = next_view(page->root, view, true))
+    {
+        if (view->ops && view->ops->layout)
+        {
+            const struct ui_view *parent = view->parent;
+            struct ui_rect bounds = view == page->root ? screen :
+                (struct ui_rect){0, 0, parent->value[UI_WIDTH], parent->value[UI_HEIGHT]};
+            view->ops->layout(view, &bounds);
+        }
+    }
     ui_page_invalidate(page, unite(before, view_frame(page->root).clip));
 }
 
@@ -182,14 +211,6 @@ void ui_page_cancel_tracks(struct ui_page *page)
     page->tracks = NULL;
 }
 
-static void step_view(struct ui_view *view, uint32_t clock)
-{
-    if (view->ops && view->ops->step)
-        view->ops->step(view, clock);
-    for (struct ui_view *child = view->first_child; child; child = child->next_sibling)
-        step_view(child, clock);
-}
-
 void ui_page_step(struct ui_page *page, uint32_t clock)
 {
     struct ui_track **link = &page->tracks;
@@ -203,32 +224,25 @@ void ui_page_step(struct ui_page *page, uint32_t clock)
         else
             link = &track->next;
     }
-    step_view(page->root, clock);
-}
-
-static void paint_view(const struct ui_view *view, const struct ui_view_frame *parent,
-                       struct ui_rect damage)
-{
-    struct ui_view_frame frame = resolve(view, parent);
-    struct ui_rect clipped = intersect(frame.clip, damage);
-    if (!frame.opacity || empty(clipped))
-        return;
-
-    if (view->ops && view->ops->paint)
-    {
-        struct ui_view_frame paint = frame;
-        paint.clip = clipped;
-        view->ops->paint(view, &paint);
-    }
-    for (const struct ui_view *child = view->first_child; child; child = child->next_sibling)
-        paint_view(child, &frame, damage);
+    for (struct ui_view *view = page->root; view; view = next_view(page->root, view, true))
+        if (view->ops && view->ops->step)
+            view->ops->step(view, clock);
 }
 
 static void paint_page(struct ui_page *page, struct ui_rect damage)
 {
-    struct ui_view_frame root = screen_frame();
     unsigned int start = USEC_TIMER;
-    paint_view(page->root, &root, damage);
+    const struct ui_view *root = page->root;
+    const struct ui_view *view = root;
+    while (view)
+    {
+        struct ui_view_frame frame = frame_below(view, root->parent);
+        frame.clip = intersect(frame.clip, damage);
+        bool visible = frame.opacity && !empty(frame.clip);
+        if (visible && view->ops && view->ops->paint)
+            view->ops->paint(view, &frame);
+        view = next_view(root, view, visible);
+    }
     ui_note_render(USEC_TIMER - start);
     page->damage = (struct ui_rect){0};
 }

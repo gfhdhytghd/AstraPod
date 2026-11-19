@@ -20,7 +20,7 @@
 #define SCENE_BYTES (3 * FRAMEBUFFER_SIZE)
 #define PANEL_WORKSPACE_BYTES (2 * FRAMEBUFFER_SIZE)
 #define PUSH_ROW_FRAMES ANIM_F(12)
-#define PUSH_ROW_DELAY ANIM_F(2)
+#define PUSH_ROW_DELAY_HALF 3
 #define PUSH_ROW_FADE ANIM_F(6)
 #define PUSH_ROW_OFFSET (LCD_WIDTH * 60 / 100)
 #define POP_FRAMES ANIM_F(15)
@@ -131,18 +131,19 @@ static void compose_pages(const struct ui_scene *scene, fb_data *out,
 }
 
 static void compose_push_band(fb_data *out, const fb_data *back, const fb_data *front,
-                              int lines, int age, int parallax, unsigned light,
+                              int lines, int age_half, int parallax, unsigned light,
                               fb_data blank)
 {
-    if (age >= PUSH_ROW_FRAMES)
+    if (age_half >= 2 * PUSH_ROW_FRAMES)
     {
         memcpy(out, front, lines * LCD_WIDTH * sizeof(*out));
         return;
     }
 
-    const struct ui_tween row = { .from = PUSH_ROW_OFFSET, .frames = PUSH_ROW_FRAMES };
-    int dx = MAX(2, ui_tween_sample(&row, MAX(0, age)) & ~1);
-    unsigned ink = MAX(0, age) * UI_FULL_OPACITY / PUSH_ROW_FADE;
+    const struct ui_tween row = { .from = PUSH_ROW_OFFSET, .frames = 2 * PUSH_ROW_FRAMES };
+    unsigned age = MAX(0, age_half);
+    int dx = MAX(2, ui_tween_sample(&row, age) & ~1);
+    unsigned ink = age * UI_FULL_OPACITY / (2 * PUSH_ROW_FADE);
     unsigned under = (UI_FULL_OPACITY - MIN(ink, UI_FULL_OPACITY)) * light / UI_FULL_OPACITY;
     int visible_back = LCD_WIDTH - parallax;
     for (int y = 0; y < lines; ++y)
@@ -171,9 +172,16 @@ static void compose_push_band(fb_data *out, const fb_data *back, const fb_data *
     }
 }
 
-static unsigned push_duration(const struct ui_scene *scene)
+static unsigned push_duration_half(const struct ui_scene *scene)
 {
-    return PUSH_ROW_FRAMES + PUSH_ROW_DELAY * MAX(0, scene->row_count - 1);
+    int delay = scene->target_front ? PUSH_ROW_DELAY_HALF : 4;
+    return 2 * PUSH_ROW_FRAMES + delay * MAX(0, scene->row_count - 1);
+}
+
+static void set_push_duration(struct ui_scene *scene)
+{
+    scene->push_half_frames = ui_theme_duration(push_duration_half(scene));
+    scene->tween.frames = (scene->push_half_frames + 1) / 2;
 }
 
 static void compose_push(const struct ui_scene *scene, fb_data *out,
@@ -187,7 +195,10 @@ static void compose_push(const struct ui_scene *scene, fb_data *out,
     fb_data bg = scene->dim_color, blank;
     ui_blit_dim(&blank, &bg, 1, light);
 
-    int frame_in_rows = frame * push_duration(scene) / scene->tween.frames;
+    int frame_in_rows = scene->target_front
+        ? 2 * frame * push_duration_half(scene) / scene->push_half_frames
+        : 2 * (frame * (push_duration_half(scene) / 2) / scene->tween.frames);
+    int delay = scene->target_front ? PUSH_ROW_DELAY_HALF : 4;
     int y = scene->push_top;
     memcpy(out, front, y * LCD_WIDTH * sizeof(*out));
     int row_y = MAX(y, scene->row_y);
@@ -197,7 +208,7 @@ static void compose_push(const struct ui_scene *scene, fb_data *out,
                   LCD_HEIGHT : MIN(LCD_HEIGHT, row_y + (i + 1) * scene->row_pitch);
         int age = frame_in_rows;
         if (i > 0 && i < scene->row_count)
-            age -= i * PUSH_ROW_DELAY;
+            age -= i * delay;
         if (end > y)
         {
             int start = y * LCD_WIDTH;
@@ -313,7 +324,7 @@ void ui_scene_push_rows(int y, int pitch, int count)
     /* A loading row can become a list while the incoming page is in flight. */
     if (!scene->capturing)
     {
-        scene->tween.frames = ui_theme_duration(push_duration(scene));
+        set_push_duration(scene);
         scene->rows_changed = true;
     }
 }
@@ -653,12 +664,10 @@ void ui_scene_start(struct ui_scene *scene)
         return;
     if (scene->staggered)
     {
-        struct ui_theme theme;
-        ui_theme_snapshot(&theme);
         scene->push_top = viewportmanager_theme_enabled(SCREEN_MAIN)
-                        ? theme.metric[UI_METRIC_STATUS_HEIGHT] : 0;
+                        ? ui_theme_metric(UI_METRIC_STATUS_HEIGHT) : 0;
         scene->dim_color = ui_theme_rgb565(UI_COLOR_BACKGROUND);
-        scene->tween.frames = ui_theme_duration(push_duration(scene));
+        set_push_duration(scene);
     }
     scene->capturing = false;
     scene->tween.start_clock = USEC_TIMER;

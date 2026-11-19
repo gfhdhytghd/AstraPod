@@ -77,8 +77,7 @@
 #define LV_POSES ((LV_BODY_BOTTOM - LV_BODY_TOP) / LV_LINE_PAD + 8)
 #define LV_ANCHOR (LCD_HEIGHT * 42 / 100)
 #define LV_STRIP_WIDTH (LCD_WIDTH - 32)
-#define LV_STRIP_STRIDE (LV_STRIP_WIDTH + 2)
-#define LV_ACTIVE_SCALE 282 /* 1.10 in Q8 */
+#define LV_STRIP_STRIDE LV_STRIP_WIDTH
 #define LV_DIM 154          /* 60% in Q8 */
 #define LV_SWEEP_EDGE 12
 #if defined(IPOD_6G) && defined(__arm__)
@@ -158,7 +157,7 @@ struct lv_state {
     bool remote, pending, held, paused, track_fade, initial, claimed, sample_valid;
     bool painted, art_ready, first_pending, boost, seek_pending, seek_consumed, seek_running;
 };
-/* All users run synchronously on the UI thread. The page state is on its stack. */
+/* The only active lyrics page owns this state on the UI thread. */
 static struct lv_state *lv_state;
 #define lv (*lv_state)
 
@@ -564,48 +563,29 @@ void lv_ink_pixel(fb_data *dst, unsigned coverage, unsigned opacity, uint32_t fg
     *dst = lv_pack((base << 5) + (fg - base) * w);
 }
 
-/* The strip has a transparent pixel at both ends. The padded samples also
- * cover the half pixel beyond the first and last texel during enlargement. */
-static inline __attribute__((always_inline))
-unsigned lv_filtered(const unsigned char *a, const unsigned char *b,
-                     int x, unsigned fx, unsigned fy)
-{
-    int a0 = a[x], a1 = a[x+1], b0 = b[x], b1 = b[x+1];
-    if (!(a0 | a1 | b0 | b1)) return 0;
-    int upper = (a0 << 4) + (a1 - a0) * (int)fx;
-    int lower = (b0 << 4) + (b1 - b0) * (int)fx;
-    return ((upper << 4) + (lower - upper) * (int)fy + 128) >> 8;
-}
-
 /* Only the 12 px feather needs a varying opacity. A whole scanline
  * outside the sweep uses one opacity and no per-pixel sweep math. */
-static LV_PIXELS_ARM void lv_ink_row(fb_data *dst, const unsigned char *a, const unsigned char *b,
-                                    int width, int step, unsigned fy, unsigned alpha,
-                                    int sweep, unsigned dim, uint32_t fg)
+static LV_PIXELS_ARM void lv_ink_row(fb_data *dst, const unsigned char *mask,
+                                    int width, unsigned alpha, int sweep,
+                                    unsigned dim, uint32_t fg)
 {
-    if (step == 256 && sweep < 0)
-    {
-        for (int x = 0; x < width; x++)
-            if (a[x]) lv_ink_pixel(dst + x, a[x], alpha, fg);
-        return;
-    }
     int lit = sweep < 0 ? width : MAX(0, MIN(width, sweep - LV_SWEEP_EDGE));
     int soft = sweep < 0 ? width : MAX(lit, MIN(width, sweep));
-    int x = 0, sample = (step - 256) / 2;
-    for (; x < lit; x++, sample += step)
+    int x = 0;
+    for (; x < lit; x++)
     {
-        unsigned ink = step == 256 ? a[x] : lv_filtered(a, b, sample >> 8, (sample >> 4) & 15, fy);
+        unsigned ink = mask[x];
         if (ink) lv_ink_pixel(dst + x, ink, alpha, fg);
     }
-    for (; x < soft; x++, sample += step)
+    for (; x < soft; x++)
     {
-        unsigned ink = step == 256 ? a[x] : lv_filtered(a, b, sample >> 8, (sample >> 4) & 15, fy);
+        unsigned ink = mask[x];
         if (ink) lv_ink_pixel(dst + x, ink,
                 dim + (alpha - dim) * (sweep - x) / LV_SWEEP_EDGE, fg);
     }
-    for (; x < width; x++, sample += step)
+    for (; x < width; x++)
     {
-        unsigned ink = step == 256 ? a[x] : lv_filtered(a, b, sample >> 8, (sample >> 4) & 15, fy);
+        unsigned ink = mask[x];
         if (ink) lv_ink_pixel(dst + x, ink, dim, fg);
     }
 }
@@ -627,11 +607,10 @@ static const unsigned char *lv_strip(int key, const char *text, int *width)
         for (int y = 0; y < lv.font_height; y++)
         {
             unsigned char *row = mask + y * LV_STRIP_STRIDE;
-            row[0] = row[w + 1] = 0;
             for (int x = 0; x < w; x++)
             {
                 unsigned green = (lv.raster[y * LCD_WIDTH + x] >> 5) & 63;
-                row[x + 1] = green + (green >> 5);
+                row[x] = green + (green >> 5);
             }
         }
         glyph->key = key;
@@ -639,23 +618,23 @@ static const unsigned char *lv_strip(int key, const char *text, int *width)
         perf.raster_rows++;
     }
     *width = glyph->width;
-    return mask + 1;
+    return mask;
 }
 
-static int lv_text_x(int width, int block_width, int scale, int align)
+static int lv_text_x(int width, int block_width, int align)
 {
-    int block = MIN(LCD_WIDTH, (block_width * scale + 128) >> 8);
+    int block = MIN(LCD_WIDTH, block_width);
     int margin = (LCD_WIDTH - LV_STRIP_WIDTH) / 2;
     int center = align == 0 ? margin + block_width / 2 :
                  align == 2 ? LCD_WIDTH - margin - (block_width + 1) / 2 : LCD_WIDTH / 2;
     return MAX(0, MIN(LCD_WIDTH - width, center - block / 2 + (block - width) * align / 2));
 }
 
-static LV_PIXELS_ARM void lv_text(const char *text, int key, int y, int height, int scale, int opacity,
+static LV_PIXELS_ARM void lv_text(const char *text, int key, int y, int opacity,
                     int sweep, int dim, int top, int bottom, int block_width, int align)
 {
     top = MAX(top, y);
-    bottom = MIN(bottom, y + height);
+    bottom = MIN(bottom, y + lv.font_height);
     if (opacity <= 0 || bottom <= top) return;
     if (!lv.masks)
     {
@@ -664,26 +643,20 @@ static LV_PIXELS_ARM void lv_text(const char *text, int key, int y, int height, 
         lcd_setfont(lv_font());
         lcd_set_drawmode(DRMODE_FG);
         lcd_set_foreground(color_blend(lv_background(MAX(0, y)), lv.fg, opacity));
-        lcd_putsxy(lv_text_x(MIN(width, LV_STRIP_WIDTH), block_width, 256, align), y, text);
+        lcd_putsxy(lv_text_x(MIN(width, LV_STRIP_WIDTH), block_width, align), y, text);
         return;
     }
     int width;
     const unsigned char *mask = lv_strip(key, text, &width);
     if (!width) return;
-    int out = MIN(LCD_WIDTH, (width * scale + 128) >> 8);
-    int step = (width << 8) / out;
-    int vstep = (lv.font_height << 8) / height;
-    fb_data *frame = lv_frame() + lv_text_x(out, block_width, scale, align);
+    fb_data *frame = lv_frame() + lv_text_x(width, block_width, align);
     uint32_t fg = lv_expand(lv.fg);
     for (int r = top; r < bottom; r++)
     {
         int a = key >= 0 ? opacity * lyrics_edge_opacity(r, LCD_HEIGHT) / 256 : opacity;
         if (!a) continue;
-        int sample = (r - y) * vstep + (vstep - 256) / 2;
-        unsigned fy = (sample >> 4) & 15;
-        const unsigned char *row = mask + MAX(0, sample >> 8) * LV_STRIP_STRIDE;
-        const unsigned char *next = mask + MIN(lv.font_height - 1, (sample >> 8) + 1) * LV_STRIP_STRIDE;
-        lv_ink_row(frame + r * LCD_WIDTH, row, next, out, step, fy, a, sweep, a * dim / 256, fg);
+        const unsigned char *row = mask + (r - y) * LV_STRIP_STRIDE;
+        lv_ink_row(frame + r * LCD_WIDTH, row, width, a, sweep, a * dim / 256, fg);
     }
 }
 
@@ -761,7 +734,7 @@ static int lv_height(int line)
     struct lv_layout tmp;
     const char *text = lyrics_text(line);
     int rows = text ? lv_layout(line, text, &tmp)->count : 1;
-    return (rows * lv.font_height * LV_ACTIVE_SCALE + 128) / 256 + LV_LINE_PAD;
+    return rows * lv.font_height + LV_LINE_PAD;
 }
 
 static int lv_distance_alpha(int index, int focus)
@@ -861,17 +834,15 @@ static void lv_line(int i, struct lv_pose pose, int top, int bottom)
 {
     const char *line = lyrics_text(i);
     if (!line || !pose.from_alpha) return;
-    int scale = lv.masks ? lyrics_lerp(256, LV_ACTIVE_SCALE, pose.from_focus) : 256;
     struct lv_layout tmp;
     const struct lv_layout *layout = lv_layout(i, line, &tmp);
     int n = layout->count, h = lv.font_height;
-    int y = pose.from_y - ((n * h * scale + 128) >> 8) / 2;
+    int y = pose.from_y - n * h / 2;
     int sweep = i == lv.pose_focus ? lv.sweep : -1;
     int dim = lyrics_lerp(256, LV_DIM, pose.from_focus);
-    for (int r = 0, offset = 0; r < n; r++)
+    for (int r = 0; r < n; r++, y += h)
     {
-        int end = ((r + 1) * h * scale + 128) >> 8;
-        if (y + offset < bottom && y + end > top)
+        if (y < bottom && y + h > top)
         {
             const struct lv_row *row = &layout->rows[r];
             int key = i * LV_ROWS + r;
@@ -887,11 +858,10 @@ static void lv_line(int i, struct lv_pose pose, int top, int bottom)
                 else { memcpy(text, start, length); text[length] = 0; }
                 render = text;
             }
-            int edge = sweep < 0 ? -1 : MAX(0, (sweep - row->before) * scale / 256);
-            lv_text(render, key, y + offset, end - offset, scale, pose.from_alpha,
+            int edge = sweep < 0 ? -1 : MAX(0, sweep - row->before);
+            lv_text(render, key, y, pose.from_alpha,
                     edge, dim, top, bottom, layout->block_width, global_settings.lyric_align);
         }
-        offset = end;
     }
 }
 
@@ -913,8 +883,7 @@ static void lv_dots(int center, int scale, int alpha, int top, int bottom)
     uint32_t fg = lv_expand(lv.fg);
     int radius = 4 * scale;
     int span = 36;
-    int width = (span * scale + 128) >> 8;
-    int x_center = lv_text_x(width, span, scale, global_settings.lyric_align) + width / 2;
+    int x_center = lv_text_x(span, span, global_settings.lyric_align) + span / 2;
     for (int i = -1; i <= 1; i++)
     {
         int x = x_center + i * 14 * scale / 256;
@@ -961,7 +930,7 @@ static void lv_body(int top, int bottom)
         lv_dots(LV_ANCHOR, lyrics_lerp(lv.gap_exit_scale, 0, p), 256 - p, top, bottom);
     }
     if (!lv.pose_count && !lv.pending)
-        lv_text(lv_status(), -1, LV_ANCHOR, lv.font_height, 256, 256, -1, 256, top, bottom, LV_STRIP_WIDTH, 1);
+        lv_text(lv_status(), -1, LV_ANCHOR, 256, -1, 256, top, bottom, LV_STRIP_WIDTH, 1);
 }
 
 static void lv_paint_backdrop(const struct ui_view *view, const struct ui_view_frame *frame)
@@ -1030,7 +999,7 @@ static bool lv_draw_layer(bool force, enum lv_output output, fb_data *layer)
         int height = lv_height(lv.pose_focus) - LV_LINE_PAD;
         int y = LV_ANCHOR - height / 2;
         top = MAX(top, y);
-        bottom = MIN(bottom, y + height);
+        bottom = MIN(bottom, y + lv.font_height);
     }
     if (layer && !full)
         memcpy(lv_frame(), layer, LV_FRAME);
@@ -1608,20 +1577,17 @@ static void lv_first_frame(uint32_t started)
     lv_record(started, LV_ENTRY, true);
 }
 
-static void __attribute__((noinline)) lv_load_fonts(void)
-{
-    struct ui_theme theme;
-    ui_theme_snapshot(&theme);
-    lv.font = ui_theme_font_load(&theme, UI_FONT_LYRICS, 64);
-}
-
 int lyric_viewer(void)
 {
+    static struct lv_state state;
+    if (lv_state)
+        return GO_TO_PREVIOUS;
     uint32_t entry_at = lv_clock();
-    struct lv_state state = {
-        .initial = true, .entry_at = entry_at, .entry_tick = current_tick, .first_pending = true
-    };
+    memset(&state, 0, sizeof(state));
     lv_state = &state;
+    lv.initial = lv.first_pending = true;
+    lv.entry_at = entry_at;
+    lv.entry_tick = current_tick;
     lv_page_init();
     perf.seek_frame_us = -1;
     lv_boost(true);
@@ -1649,7 +1615,7 @@ int lyric_viewer(void)
     if (lv.snapshot) memcpy(lv.snapshot, lv_frame(), LV_FRAME);
 
     uint32_t fonts_at = lv_clock();
-    lv_load_fonts();
+    lv.font = ui_theme_current_font_load(UI_FONT_LYRICS, 64);
     lv.font_height = font_get(lv_font())->height;
     perf.entry_fonts_us = lv_clock() - fonts_at;
     size_t raster_pixels = LCD_WIDTH * lv.font_height;

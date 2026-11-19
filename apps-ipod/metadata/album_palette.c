@@ -28,6 +28,7 @@
 #include "draw/img_filter.h"
 #include "ui/native_wps.h"
 #include "album_palette.h"
+#include "album_blur.h"
 
 #define PALETTE_MAX_DIM 128
 #define HISTOGRAM_BUCKETS 4096
@@ -1113,6 +1114,7 @@ void album_art_opened(int handle)
         int level = disable_irq_save();
         ++art_generation;
         restore_irq(level);
+        album_blur_request_wps();
     }
 }
 

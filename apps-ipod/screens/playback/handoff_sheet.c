@@ -18,6 +18,7 @@
 #include "rbpaths.h"
 #include "settings/settings.h"
 #include "metadata/album_palette.h"
+#include "metadata/album_blur.h"
 #include "ui/frame.h"
 #include "ui/statusbar.h"
 #include "core_alloc.h"
@@ -668,10 +669,17 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
     struct ui_tween tween = { .from = LCD_HEIGHT, .frames = p->open_frames };
     bool dirty = true, entering = true;
     int painted = 0;
+    unsigned blur_generation = album_blur_generation();
     long last_idle_poll = current_tick - 1;
     for (;;)
     {
         lcd_set_viewport(&p->vp);
+        unsigned current_blur = album_blur_generation();
+        if (current_blur != blur_generation)
+        {
+            blur_generation = current_blur;
+            dirty = true;
+        }
         if (dirty)
         {
             painted = 0;

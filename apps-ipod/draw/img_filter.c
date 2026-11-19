@@ -1072,23 +1072,31 @@ static void levels_dither_pass(fb_data *px, int w, int h,
  * Trap: this has to run on finished pixels, never on the blur's small copy --
  * there a field rounded to a whole level is a whole block of the upscale, and
  * a scale under one half turns a smooth gradient into visible steps. */
+static FORCE_INLINE unsigned cap_scale(unsigned p, const struct img_filter *f)
+{
+    uint32_t r8 = FIELD_TO_8(RGB_UNPACK_RED_LCD(p), LCD_MAX_RED);
+    uint32_t g8 = FIELD_TO_8(RGB_UNPACK_GREEN_LCD(p), LCD_MAX_GREEN);
+    uint32_t b8 = FIELD_TO_8(RGB_UNPACK_BLUE_LCD(p), LCD_MAX_BLUE);
+    uint32_t lum = (r8 * r8 * 13933 + g8 * g8 * 46871 + b8 * b8 * 4732) >> 16;
+
+    return (long)lum <= f->cap_knee ? 256 :
+           f->cap_scale[MIN(lum, (uint32_t)LUM_FULL) >> 8];
+}
+
+unsigned img_filter_scrim_scale(const struct img_filter *f, fb_data pixel)
+{
+    return f->stages & IMG_STAGE_CAP ? cap_scale(FB_UNPACK_SCALAR_LCD(pixel), f) : 256;
+}
+
 static FORCE_INLINE unsigned cap_pixel(unsigned p, const struct img_filter *f,
                                        unsigned rnd)
 {
-    unsigned r = RGB_UNPACK_RED_LCD(p);
-    unsigned g = RGB_UNPACK_GREEN_LCD(p);
-    unsigned b = RGB_UNPACK_BLUE_LCD(p);
-    uint32_t r8 = FIELD_TO_8(r, LCD_MAX_RED);
-    uint32_t g8 = FIELD_TO_8(g, LCD_MAX_GREEN);
-    uint32_t b8 = FIELD_TO_8(b, LCD_MAX_BLUE);
-    uint32_t lum = (r8 * r8 * 13933 + g8 * g8 * 46871 + b8 * b8 * 4732) >> 16;
-    unsigned s;
-
-    if ((long)lum <= f->cap_knee)
+    unsigned s = cap_scale(p, f);
+    if (s == 256)
         return p;
-    s = f->cap_scale[MIN(lum, (uint32_t)LUM_FULL) >> 8];
-    return LCD_RGBPACK_LCD((r * s + rnd) >> 8, (g * s + rnd) >> 8,
-                           (b * s + rnd) >> 8);
+    return LCD_RGBPACK_LCD((RGB_UNPACK_RED_LCD(p) * s + rnd) >> 8,
+                           (RGB_UNPACK_GREEN_LCD(p) * s + rnd) >> 8,
+                           (RGB_UNPACK_BLUE_LCD(p) * s + rnd) >> 8);
 }
 
 static void cap_pass(fb_data *px, int w, int h, const struct img_filter *f,
@@ -1610,33 +1618,27 @@ static void upscale(fb_data *dst, int dw, int dh, const fb_data *small,
     }
 }
 
-bool img_filter_render(fb_data *dst, int dw, int dh,
-                       const fb_data *src, int sw, int sh, int stride,
-                       const struct img_filter *f, fb_data *scratch, size_t count)
+bool img_filter_prepare_blur(fb_data *small, size_t count, int dw, int dh,
+                             const fb_data *src, int sw, int sh, int stride,
+                             const struct img_filter *f)
 {
-    int div, cw, ch;
-
-    if (!dst || !src || !f || dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 ||
-        stride < sw)
+    if (!small || !src || !f || dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 ||
+        stride < sw || !(f->stages & IMG_CLASS_RESIZE))
         return false;
-
-    div = source_divisor(f, dw, dh);
-    cw = (dw + div - 1) / div;
-    ch = (dh + div - 1) / div;
-
-    if (!(f->stages & IMG_CLASS_RESIZE))
-    {
-        decimate(dst, dw, dh, src, sw, sh, stride);
-        img_filter_apply(dst, dw, dh, f);
-        return true;
-    }
-    if (!scratch || cw > BLUR_MAX_W || ch > BLUR_MAX_H ||
-        (size_t)cw * ch > count)
+    int div = source_divisor(f, dw, dh);
+    int cw = (dw + div - 1) / div, ch = (dh + div - 1) / div;
+    if (cw > BLUR_MAX_W || ch > BLUR_MAX_H || (size_t)cw * ch > count)
         return false;
+    decimate(small, cw, ch, src, sw, sh, stride);
+    box_blur(small, cw, ch, f->blur_radius);
+    return true;
+}
 
-    decimate(scratch, cw, ch, src, sw, sh, stride);
-    box_blur(scratch, cw, ch, f->blur_radius);
-
+void img_filter_render_prepared(fb_data *dst, int dw, int dh, const fb_data *small,
+                                const struct img_filter *f)
+{
+    int div = source_divisor(f, dw, dh);
+    int cw = (dw + div - 1) / div, ch = (dh + div - 1) / div;
     if (f->stages & IMG_CLASS_SPATIAL)
     {
         /* Blocks want hard edges, so they cannot be part of a per-pixel
@@ -1646,10 +1648,27 @@ bool img_filter_render(fb_data *dst, int dw, int dh,
         struct img_filter resize_only = *f;
 
         resize_only.stages = IMG_CLASS_RESIZE;
-        upscale(dst, dw, dh, scratch, cw, ch, div, &resize_only);
+        upscale(dst, dw, dh, small, cw, ch, div, &resize_only);
         img_filter_apply(dst, dw, dh, f);
     }
     else
-        upscale(dst, dw, dh, scratch, cw, ch, div, f);
+        upscale(dst, dw, dh, small, cw, ch, div, f);
+}
+
+bool img_filter_render(fb_data *dst, int dw, int dh,
+                       const fb_data *src, int sw, int sh, int stride,
+                       const struct img_filter *f, fb_data *scratch, size_t count)
+{
+    if (!dst || !src || !f || dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 || stride < sw)
+        return false;
+    if (!(f->stages & IMG_CLASS_RESIZE))
+    {
+        decimate(dst, dw, dh, src, sw, sh, stride);
+        img_filter_apply(dst, dw, dh, f);
+        return true;
+    }
+    if (!img_filter_prepare_blur(scratch, count, dw, dh, src, sw, sh, stride, f))
+        return false;
+    img_filter_render_prepared(dst, dw, dh, scratch, f);
     return true;
 }

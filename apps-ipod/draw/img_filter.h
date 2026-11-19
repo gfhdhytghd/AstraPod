@@ -209,6 +209,9 @@ void img_filter_measure(const fb_data *px, int w, int h,
 void img_filter_adapt(struct img_filter *f, const struct img_levels *lv,
                       int avoid);
 
+/* Scrim multiplier at this native pixel after adaptation. 256 is no scrim. */
+unsigned img_filter_scrim_scale(const struct img_filter *f, fb_data pixel);
+
 /* Rewrite w*h native pixels in place. Stages run in canonical order --
  * spatial, colour, levels, dither -- whatever order the chain named them. */
 void img_filter_apply(fb_data *px, int w, int h, const struct img_filter *f);
@@ -223,6 +226,14 @@ void img_filter_apply_banded(fb_data *px, int w, int h,
  * pixels with the supplied source stride. A blur needs separate scratch
  * storage. count is the scratch capacity in pixels. Insufficient storage
  * returns false without drawing. */
+/* Prepare the low-resolution plane once, then upscale with the same output
+ * dimensions and blur chain. The second step never decimates or blurs. */
+bool img_filter_prepare_blur(fb_data *small, size_t count, int dw, int dh,
+                             const fb_data *src, int sw, int sh, int stride,
+                             const struct img_filter *f);
+void img_filter_render_prepared(fb_data *dst, int dw, int dh, const fb_data *small,
+                                const struct img_filter *f);
+
 bool img_filter_render(fb_data *dst, int dw, int dh,
                        const fb_data *src, int sw, int sh, int stride,
                        const struct img_filter *f, fb_data *scratch, size_t count);

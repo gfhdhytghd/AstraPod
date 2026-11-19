@@ -249,6 +249,13 @@ static const uint16_t srgb_linear[256] =
     62651, 63222, 63796, 64373, 64953, 65535,
 };
 
+unsigned color_srgb_luminance(unsigned c)
+{
+    return (srgb_linear[RGB_UNPACK_RED(c)] * 13933u +
+            srgb_linear[RGB_UNPACK_GREEN(c)] * 46871u +
+            srgb_linear[RGB_UNPACK_BLUE(c)] * 4732u + 32768u) >> 16;
+}
+
 struct oklab { int32_t l, a, b; };
 
 static uint32_t isqrt32(uint32_t x)

@@ -19,6 +19,7 @@
 #include "audio/play_status.h"
 #include "audio/spectrum_meter.h"
 #include "metadata/album_palette.h"
+#include "metadata/album_blur.h"
 #include "metadata/tag_trim.h"
 #include "playlist/playlist.h"
 #include "screens/playback/cider.h"
@@ -77,7 +78,7 @@ struct native_wps {
     char title_text[MAX_PATH], artist_text[MAX_PATH];
     char index_text[16], remaining_text[24], playback_modes[4];
     unsigned bg, fg, accent, panel, meter_fg, meter_peak;
-    unsigned palette_generation, art_generation;
+    unsigned palette_generation, art_generation, blur_generation;
     int art_handle, background, peak_height, volume_target, volume_font;
     int level[BANDS], peak[BANDS];
     long meter_due;
@@ -88,7 +89,7 @@ struct native_wps {
 static int wps_handle, blur_handle;
 static struct {
     int art;
-    unsigned generation, foreground;
+    unsigned generation, blur_generation, foreground;
     bool ready;
 } backdrop = { .art = -1 };
 static int art_slot = -1;
@@ -114,14 +115,19 @@ int native_wps_background(int art, unsigned generation, enum ui_bg_kind mode, un
     if (mode == UI_BG_SOLID || art < 0 || blur_handle <= 0)
         return -1;
 
-    if (backdrop.art != art || backdrop.generation != generation || backdrop.foreground != fg)
+    unsigned blur_generation = album_blur_generation();
+    if (backdrop.art != art || backdrop.generation != generation ||
+        backdrop.foreground != fg || backdrop.blur_generation != blur_generation)
     {
         backdrop.art = art;
         backdrop.generation = generation;
         backdrop.foreground = fg;
+        backdrop.blur_generation = blur_generation;
         fb_data *pixels = core_get_data_pinned(blur_handle);
-        backdrop.ready = album_art_render_background(pixels, LCD_WIDTH, LCD_HEIGHT, art, true, fg);
+        backdrop.ready = album_blur_render_wps(pixels, art, generation, fg);
         core_put_data_pinned(pixels);
+        if (!backdrop.ready)
+            album_blur_request_wps();
     }
     return backdrop.ready ? blur_handle : -1;
 }
@@ -563,9 +569,12 @@ static void refresh_art(void)
         wps->meter_fg = theme_color(UI_COLOR_WPS_METER, &palette);
         wps->meter_peak = theme_color(UI_COLOR_WPS_MUTED, &palette);
     }
-    if (wps->art_generation != art_generation || wps->art_handle != handle || colors_changed)
+    unsigned blur_generation = album_blur_generation();
+    if (wps->art_generation != art_generation || wps->art_handle != handle || colors_changed ||
+        wps->blur_generation != blur_generation)
     {
         wps->art_generation = art_generation;
+        wps->blur_generation = blur_generation;
         wps->art_handle = handle;
         wps->background = native_wps_background(handle, art_generation,
                               wps->theme.background[UI_BG_WPS], wps->fg);

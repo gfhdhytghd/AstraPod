@@ -97,6 +97,8 @@ enum pf_scroll_line_type {
 #define CAROUSEL_PLAY_PENDING  (-23)
 
 #define CAROUSEL_TRACK_TEXT 160
+struct album_blur_source;
+
 struct carousel_album_header {
     char title[CAROUSEL_TRACK_TEXT], artist[CAROUSEL_TRACK_TEXT];
 };
@@ -125,6 +127,8 @@ struct carousel_model {
     bool external;                                    /* independent library */
     bool (*read_art)(int index, struct bitmap *bitmap); /* native columns */
     unsigned int (*art_version)(int index);
+    void (*blur_source)(int index, struct album_blur_source *source);
+    bool (*legacy_panel_labels)(void);
     void (*tick)(void);                                /* nonblocking provider */
     bool (*panel_open)(int index, struct carousel_album_header *header);
     void (*panel_close)(void);

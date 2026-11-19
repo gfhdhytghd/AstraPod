@@ -1,4 +1,5 @@
 /* Cider album provider for the native carousel. GPL version 2 or later. */
+#include "metadata/album_blur.h"
 #include "config.h"
 #include "carousel.h"
 #include "core_alloc.h"
@@ -69,6 +70,19 @@ static bool remember(int index)
     snprintf(global_status.cover_remote_id, sizeof(global_status.cover_remote_id), "%s", row.id);
     return true;
 }
+static bool plain_album_label;
+
+static bool legacy_panel_labels(void)
+{
+    const char *route = panel_album.route;
+    if (plain_album_label || strncmp(route, "album/t", 7) || strlen(route + 7) != 24)
+        return false;
+    for (const char *p = route + 7; *p; p++)
+        if (!strchr("0123456789abcdef", *p))
+            return false;
+    return true;
+}
+
 static bool panel_open(int index, struct carousel_album_header *header)
 {
     if (!cider_page_row(index, &panel_album))
@@ -76,13 +90,34 @@ static bool panel_open(int index, struct carousel_album_header *header)
     resume_index = index;
     snprintf(header->title, sizeof(header->title), "%s", panel_album.title);
     snprintf(header->artist, sizeof(header->artist), "%s", panel_album.subtitle);
-    cider_track_page_open(panel_album.route);
+    const char *plain = strstr(panel_album.route, "?format=panel");
+    plain_album_label = plain != NULL;
+    if (plain)
+        panel_album.route[plain - panel_album.route] = '\0';
+    else if (legacy_panel_labels())
+    {
+        char *genre = strstr(header->artist, " · ");
+        if (genre)
+            *genre = '\0';
+    }
+    char route[sizeof(panel_album.route)];
+    if (snprintf(route, sizeof(route), "%s?format=panel", panel_album.route) < (int)sizeof(route))
+        cider_track_page_open(route);
+    else
+        cider_track_page_open(panel_album.route);
     return true;
 }
 
 static void panel_close(void)
 {
     cider_track_page_open("");
+}
+
+static void blur_source(int index, struct album_blur_source *source)
+{
+    struct cider_row row;
+    if (cider_page_row(index, &row) && strlen(row.art) == 64)
+        strlcpy(source->remote, row.art, sizeof(source->remote));
 }
 
 static bool panel_row(int index, char *title, size_t size)
@@ -260,6 +295,8 @@ static const struct carousel_model model = {
     .art_version = version,
     .tick = tick,
     .panel_open = panel_open,
+    .blur_source = blur_source,
+    .legacy_panel_labels = legacy_panel_labels,
     .panel_close = panel_close,
     .panel_count = cider_track_page_total,
     .panel_row = panel_row,
@@ -316,7 +353,7 @@ static int restore_album(void)
 int cider_covers(void)
 {
     carousel_prepare_transition();
-    cider_page_open("albums");
+    cider_page_open("albums?format=panel");
     long deadline = current_tick + 5 * HZ;
     while (cider_page_total() < 0 && TIME_BEFORE(current_tick, deadline))
     {

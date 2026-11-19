@@ -90,6 +90,10 @@ int color_chroma(unsigned c);
  * ones the album-art colours produce. */
 unsigned color_blend(unsigned c1, unsigned c2, int t);
 
+/* WCAG relative luminance of a native pixel on the sRGB transfer curve.
+ * The result is in 1/65536 units. */
+unsigned color_srgb_luminance(unsigned c);
+
 /* Where an accent sits from the background it belongs to, as a turn around the
  * colour wheel.
  *

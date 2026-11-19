@@ -93,6 +93,7 @@
 #include "backlight.h"        /* backlight_set_timeout(_plugged) */
 #include "cpu.h"
 #include "metadata/album_palette.h"
+#include "metadata/album_blur.h"
 #include "ui/frame.h"
 #include "ui/statusbar.h"
 #include "ui/native_theme_runtime.h"
@@ -4834,17 +4835,19 @@ static int native_frame_wait(uint32_t clock, unsigned last_frame)
     return 1 + (left - 1) / (1000000u / HZ);
 }
 
-#define ALBUM_PANEL_WIDTH 220
-#define ALBUM_PANEL_HEIGHT 170
-#define ALBUM_PANEL_ROWS 6
+#define ALBUM_PANEL_WIDTH ALBUM_BLUR_PANEL_W
+#define ALBUM_PANEL_HEIGHT ALBUM_BLUR_PANEL_H
 #define ALBUM_PANEL_X ((LCD_WIDTH - ALBUM_PANEL_WIDTH) / 2)
 #define ALBUM_PANEL_Y ((LCD_HEIGHT - ALBUM_PANEL_HEIGHT) / 2)
 #define FLIP_MID PFREAL_ONE
 #define FLIP_OPEN (2 * FLIP_MID)
 
-#define PANEL_THUMB 36
-#define PANEL_ROWS_Y 46
-#define PANEL_PITCH 20
+#define PANEL_DIVIDER ALBUM_BLUR_DIVIDER
+#define PANEL_ROWS_Y ALBUM_BLUR_ROWS_TOP
+#define PANEL_PITCH ALBUM_BLUR_ROW_PITCH
+#define PANEL_LEFT ALBUM_BLUR_TEXT_LEFT
+#define PANEL_HEADER_RIGHT ALBUM_BLUR_HEADER_RIGHT
+#define ALBUM_PANEL_ROWS ALBUM_BLUR_ROWS
 #define PANEL_CACHE (ALBUM_PANEL_ROWS + 1)
 #define PANEL_GRAY(v) LCD_RGBPACK(v, v, v)
 
@@ -4860,12 +4863,13 @@ struct panel_track {
 static struct album_panel {
     struct carousel_album_header header;
     struct panel_track rows[PANEL_CACHE];
-    fb_data thumb[PANEL_THUMB * PANEL_THUMB];
+    struct album_blur_source blur_source;
+    unsigned blur_generation;
     int selected, top, count;
     int tracks, discs, disc_count;
     int now_id;
     char now_path[MAX_PATH];
-    int title_font, small_font;
+    int album_font, title_font, small_font;
     int scroll_y, scroll_from;
     uint32_t scroll_clock;
     unsigned scroll_frames;
@@ -4873,7 +4877,7 @@ static struct album_panel {
     unsigned first, second, sampled, trace;
     uint32_t clock;
     long next_read;
-    bool live, moving, dirty, missing, play_pending, play_failed, have_thumb;
+    bool live, moving, dirty, missing, play_pending, play_failed, have_blur;
     char fitted_title[CAROUSEL_TRACK_TEXT], fitted_artist[CAROUSEL_TRACK_TEXT];
     char count_label[80];
     int dot_x, count_x;
@@ -4883,6 +4887,16 @@ static struct album_panel {
 
 static void panel_layout_header(void);
 static void panel_layout_track(struct panel_track *row);
+
+static struct album_blur_source panel_blur_source(int index)
+{
+    struct album_blur_source source = {0};
+    if (model->blur_source)
+        model->blur_source(index, &source);
+    else
+        source.local = model->art_key(index);
+    return source;
+}
 
 static void close_album_panel(bool suspend)
 {
@@ -4895,6 +4909,8 @@ static void close_album_panel(bool suspend)
         core_free(panel.tracks);
     if (panel.discs > 0)
         core_free(panel.discs);
+    if (panel.album_font >= 0)
+        font_unload(panel.album_font);
     if (panel.title_font >= 0)
         font_unload(panel.title_font);
     if (panel.small_font >= 0)
@@ -4909,7 +4925,8 @@ static bool open_album_panel(int selected, int top)
     panel.live = true;
     panel.count = -1;
     panel.now_id = -1;
-    panel.title_font = panel.small_font = -1;
+    panel.album_font = panel.title_font = panel.small_font = -1;
+    panel.blur_source = panel_blur_source(center_index);
     panel.selected = selected;
     panel.top = top;
     panel.scroll_y = top * PANEL_PITCH;
@@ -5017,6 +5034,65 @@ static void panel_local_playing(void)
     }
 }
 
+/* Old providers and imported tags can carry the album-list label.
+ * Require its exact disc/track syntax or a duration that matches the field.
+ * Preserve the rest of the title, including ordinary numeric prefixes. */
+static void panel_clean_title(char *title, unsigned duration, int disc, int track,
+                              bool legacy_remote)
+{
+    if (!duration)
+        return;
+
+    unsigned seconds = duration / 1000;
+    char suffix[24];
+    snprintf(suffix, sizeof(suffix), " - %02u:%02u", seconds / 60, seconds % 60);
+    size_t len = strlen(title), tail = strlen(suffix);
+    if (len <= tail || strcmp(title + len - tail, suffix))
+        return;
+    char *period, *end;
+    const char *name = title;
+    if (*title >= '0' && *title <= '9')
+    {
+        long d = strtol(title, &period, 10);
+        if (*period == '.' && period[1] >= '0' && period[1] <= '9')
+        {
+            long t = strtol(period + 1, &end, 10);
+            if (d > 0 && t > 0 && end - period >= 3 && *end == ' ' &&
+                end + 1 < title + len - tail &&
+                (legacy_remote || (d == MAX(1, disc) && t == track)))
+                name = end + 1;
+        }
+    }
+    if (legacy_remote || name != title)
+    {
+        title[len - tail] = '\0';
+        memmove(title, name, strlen(name) + 1);
+    }
+}
+
+static void panel_clean_artist(void)
+{
+    char *final = strstr(panel.header.artist, " · ");
+    if (!final || panel.tracks <= 0 || panel.count <= 0)
+        return;
+    const struct db_album_track *tracks = core_get_data(panel.tracks);
+    int id = tracks[0].id;
+    struct tagcache_search search;
+    char genre[CAROUSEL_TRACK_TEXT] = "";
+    if (!tagcache_search(&search, tag_genre))
+        return;
+    bool got = tagcache_retrieve(&search, id, tag_genre, genre, sizeof(genre));
+    tagcache_search_finish(&search);
+    size_t length = strlen(panel.header.artist), genre_len = strlen(genre);
+    const size_t separator = sizeof(" · ") - 1;
+    if (got && genre_len && length > genre_len + separator)
+    {
+        char *suffix = panel.header.artist + length - genre_len - separator;
+        if (!strncmp(suffix, " · ", separator) && !strcmp(suffix + separator, genre))
+            *suffix = '\0';
+    }
+}
+
 static bool panel_track_read(int index, struct panel_track *row, const char *remote_id)
 {
 #ifdef HAVE_USB_PODLINK
@@ -5027,6 +5103,8 @@ static bool panel_track_read(int index, struct panel_track *row, const char *rem
             return false;
         strlcpy(row->title, remote.title, sizeof(row->title));
         row->duration = remote.duration;
+        panel_clean_title(row->title, row->duration, 0, 0,
+                          model->legacy_panel_labels && model->legacy_panel_labels());
         row->playing = *remote_id && (!strcmp(remote.id, remote_id) ||
                                       cider_route_matches(remote.route, remote_id));
         return true;
@@ -5038,6 +5116,7 @@ static bool panel_track_read(int index, struct panel_track *row, const char *rem
 
     const struct db_album_track *tracks = core_get_data(panel.tracks);
     int id = tracks[index].id;
+    int order = tracks[index].key;
     row->playing = id == panel.now_id;
     struct tagcache_search search;
     if (!tagcache_search(&search, tag_title))
@@ -5048,6 +5127,8 @@ static bool panel_track_read(int index, struct panel_track *row, const char *rem
     long length;
     if (tagcache_entry_numeric(id, tag_length, &length) && length > 0)
         row->duration = length;
+    if (ready)
+        panel_clean_title(row->title, row->duration, order >> 16, order & 0xffff, false);
     return ready;
 }
 
@@ -5140,6 +5221,8 @@ static void panel_read_tracks(void)
     if (!panel.initialized || count != panel.count)
     {
         panel.count = count;
+        if (!model->external)
+            panel_clean_artist();
         panel_layout_header();
         memset(panel.rows, 0, sizeof(panel.rows));
         if (!model->external && panel.tracks > 0)
@@ -5180,11 +5263,13 @@ static void panel_load_fonts(void)
 {
     /* The native theme loader resolves these same size names to PBF1 in FU108. */
     static const struct ui_theme sizes = { .font = {
-        [UI_FONT_TITLE] = "14-noto-sans",
-        [UI_FONT_BODY] = "12-noto-sans",
+        [UI_FONT_TITLE] = "18-noto-sans",
+        [UI_FONT_BODY] = "14-noto-sans",
+        [UI_FONT_WPS_META] = "12-noto-sans",
     } };
-    panel.title_font = ui_theme_font_load(&sizes, UI_FONT_TITLE, 96);
-    panel.small_font = ui_theme_font_load(&sizes, UI_FONT_BODY, 48);
+    panel.album_font = ui_theme_font_load(&sizes, UI_FONT_TITLE, 48);
+    panel.title_font = ui_theme_font_load(&sizes, UI_FONT_BODY, 96);
+    panel.small_font = ui_theme_font_load(&sizes, UI_FONT_WPS_META, 32);
     struct font *font = font_get(panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED);
     panel.digit_width = font_get_width(font, '0');
     panel.tabular = true;
@@ -5194,32 +5279,6 @@ static void panel_load_fonts(void)
         panel.tabular &= width == panel.digit_width;
         panel.digit_width = MAX(panel.digit_width, width);
     }
-}
-
-static void panel_cache_thumb(void)
-{
-    if (panel.have_thumb)
-        return;
-
-    buf_ctx_lock();
-    const struct dim *cover = surface(&center_slide);
-    if (cover && cover != get_slide(empty_slide_hid) &&
-        cover->width > 0 && cover->height > 0)
-    {
-        const pix_t *src = (const pix_t *)(cover + 1);
-        int sy[PANEL_THUMB];
-        for (int y = 0; y < PANEL_THUMB; y++)
-            sy[y] = (2 * y + 1) * cover->height / (2 * PANEL_THUMB);
-        for (int x = 0; x < PANEL_THUMB; x++)
-        {
-            int sx = (2 * x + 1) * cover->width / (2 * PANEL_THUMB);
-            const pix_t *column = src + sx * cover->height;
-            for (int y = 0; y < PANEL_THUMB; y++)
-                panel.thumb[y * PANEL_THUMB + x] = column[sy[y]];
-        }
-        panel.have_thumb = true;
-    }
-    buf_ctx_unlock();
 }
 
 static void panel_text(const char *label, int x, int baseline, int right)
@@ -5245,15 +5304,15 @@ static void panel_fit(const char *label, char *fitted, size_t size, int font, in
 
 static void panel_layout_header(void)
 {
-    int title = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
-    int small = panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED;
+    int title = panel.album_font >= 0 ? panel.album_font : FONT_SYSFIXED;
+    int small = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
     panel_fit(panel.header.title, panel.fitted_title, sizeof(panel.fitted_title),
-              title, 212 - 50);
+              title, PANEL_HEADER_RIGHT - PANEL_LEFT);
 
     panel.dot_x = 0;
-    panel.count_x = 50;
+    panel.count_x = PANEL_LEFT;
     panel.count_label[0] = 0;
-    int budget = 212 - 50;
+    int budget = PANEL_HEADER_RIGHT - PANEL_LEFT;
     int spacing = font_getstringsize(panel_middot, NULL, NULL, small);
     if (panel.count >= 0)
     {
@@ -5267,14 +5326,14 @@ static void panel_layout_header(void)
                   small, budget);
     if (panel.count >= 0 && *panel.fitted_artist)
     {
-        panel.dot_x = 50 + font_getstringsize(panel.fitted_artist, NULL, NULL, small);
+        panel.dot_x = PANEL_LEFT + font_getstringsize(panel.fitted_artist, NULL, NULL, small);
         panel.count_x = panel.dot_x + spacing;
     }
 }
 
 static void panel_layout_track(struct panel_track *row)
 {
-    int right = panel.count > ALBUM_PANEL_ROWS ? 206 : 210;
+    int right = panel.count > ALBUM_PANEL_ROWS ? 206 : ALBUM_BLUR_ROWS_RIGHT;
     int end = right;
     if (row->duration)
     {
@@ -5298,36 +5357,30 @@ static void panel_layout_track(struct panel_track *row)
         end -= 8;
     }
     int title = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
-    panel_fit(row->title, row->fitted, sizeof(row->fitted), title, end - 16);
+    panel_fit(row->title, row->fitted, sizeof(row->fitted), title, end - PANEL_LEFT);
 }
 
 static void panel_header(void)
 {
-    panel_cache_thumb();
-    if (panel.have_thumb)
-        lcd_bitmap(panel.thumb, 6, 4, PANEL_THUMB, PANEL_THUMB);
-    else
-    {
-        lcd_set_foreground(PANEL_GRAY(0x2a));
-        lcd_fillrect(6, 4, PANEL_THUMB, PANEL_THUMB);
-    }
-
+    int title = panel.album_font >= 0 ? panel.album_font : FONT_SYSFIXED;
+    int meta = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
+    int title_height = font_get(title)->height;
+    int meta_height = font_get(meta)->height;
+    int title_y = (PANEL_DIVIDER - title_height - meta_height - 3) / 2;
+    int y = title_y + title_height + 3;
     lcd_set_foreground(LCD_WHITE);
-    lcd_setfont(panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED);
-    struct font *title = font_get(lcd_getfont());
-    int title_y = 16 - title->ascent;
-    int y = title_y + title->height + 3;
-    lcd_putsxy(50, title_y, panel.fitted_title);
-    lcd_setfont(panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED);
-    lcd_set_foreground(PANEL_GRAY(0x9a));
+    lcd_setfont(title);
+    lcd_putsxy(PANEL_LEFT, title_y, panel.fitted_title);
+    lcd_setfont(meta);
+    lcd_set_foreground(PANEL_GRAY(0xb0));
     if (*panel.fitted_artist)
-        lcd_putsxy(50, y, panel.fitted_artist);
+        lcd_putsxy(PANEL_LEFT, y, panel.fitted_artist);
     if (panel.dot_x)
         lcd_putsxy(panel.dot_x, y, panel_middot);
     if (*panel.count_label)
         lcd_putsxy(panel.count_x, y, panel.count_label);
     lcd_set_foreground(PANEL_GRAY(0x2e));
-    lcd_hline(6, 213, 44);
+    lcd_hline(6, 213, PANEL_DIVIDER);
 }
 
 static void panel_duration(const struct panel_track *row, int y)
@@ -5358,11 +5411,10 @@ static void panel_paint_rows(struct viewport *view)
     int title = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
     int title_ascent = font_get(title)->ascent;
     int small_ascent = font_get(small)->ascent;
-    pix_t selected_text = ui_theme_rgb565(UI_COLOR_SELECTED_TEXT);
-    /* The native list uses a marker and can have white for both tokens.
-     * For a full row fill, adjust only when the same colors would hide text. */
-    pix_t selection = color_fit_contrast(ui_theme_rgb565(UI_COLOR_SELECTION),
-                                        selected_text, 450);
+    pix_t selection = ui_theme_rgb565(UI_COLOR_SELECTION);
+    /* Native lists use a marker. A filled selection needs contrasting ink. */
+    pix_t selected_text = color_fit_contrast(ui_theme_rgb565(UI_COLOR_SELECTED_TEXT),
+                                            selection, 450);
     pix_t secondary = color_fit_contrast(ui_theme_rgb565(UI_COLOR_SELECTED_SECONDARY),
                                         selection, 450);
 
@@ -5377,7 +5429,7 @@ static void panel_paint_rows(struct viewport *view)
             panel.count == -2 ? str(LANG_TAGCACHE_BUSY) : str(LANG_NO_FILES);
         lcd_setfont(title);
         lcd_set_foreground(PANEL_GRAY(0xe6));
-        panel_text(label, 16, 14, right);
+        panel_text(label, PANEL_LEFT, 14, right);
     }
     else
     {
@@ -5395,8 +5447,8 @@ static void panel_paint_rows(struct viewport *view)
                 int number = tracks[track].key >> 16;
                 snprintf(label, sizeof(label), "%s %d", name, number);
                 lcd_setfont(small);
-                lcd_set_foreground(PANEL_GRAY(0x7a));
-                panel_text(label, 16, y + 14, right);
+                lcd_set_foreground(ALBUM_BLUR_DIM_TEXT);
+                panel_text(label, PANEL_LEFT, y + 14, right);
                 disc++;
                 continue;
             }
@@ -5412,19 +5464,19 @@ static void panel_paint_rows(struct viewport *view)
             {
                 if (row->playing)
                 {
-                    lcd_set_foreground(LCD_WHITE);
+                    lcd_set_foreground(selected ? selected_text : LCD_WHITE);
                     for (int i = 0; i < 7; i++)
-                        lcd_hline(5, 5 + MIN(i, 6 - i) * 5 / 3, y + 6 + i);
+                        lcd_hline(3, 3 + MIN(i, 6 - i) * 5 / 3, y + 6 + i);
                 }
                 if (row->duration)
                 {
                     lcd_setfont(small);
-                    lcd_set_foreground(selected ? secondary : PANEL_GRAY(0x8a));
+                    lcd_set_foreground(selected ? secondary : ALBUM_BLUR_DIM_TEXT);
                     panel_duration(row, y + 14 - small_ascent);
                 }
                 lcd_setfont(title);
                 lcd_set_foreground(selected ? selected_text : PANEL_GRAY(0xe6));
-                lcd_putsxy(16, y + 14 - title_ascent, row->fitted);
+                lcd_putsxy(PANEL_LEFT, y + 14 - title_ascent, row->fitted);
             }
             track++;
         }
@@ -5455,7 +5507,9 @@ static void NO_INLINE paint_album_panel(void)
     struct viewport *previous = lcd_set_viewport(&view);
     lcd_set_background(PANEL_GRAY(0x12));
     lcd_set_drawmode(DRMODE_SOLID);
-    lcd_clear_viewport();
+    panel.have_blur = album_blur_draw_panel(&panel.blur_source);
+    if (!panel.have_blur)
+        lcd_clear_viewport();
     lcd_set_foreground(PANEL_GRAY(0x3c));
     lcd_drawrect(0, 0, view.width, view.height);
 
@@ -5564,6 +5618,12 @@ static void step_album_flip(void)
     }
     if (panel.position == FLIP_OPEN && panel.to == FLIP_OPEN)
     {
+        unsigned blur_generation = album_blur_generation();
+        if (blur_generation != panel.blur_generation)
+        {
+            panel.blur_generation = blur_generation;
+            panel.dirty = true;
+        }
         if (!panel.initialized)
             panel_load_fonts();
         if (panel.scroll_frames)
@@ -5753,6 +5813,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
     long speak_due = 0;         /* when the slide at rest is said; 0 none */
     long provider_at = current_tick;
     int remembered_index = -1;
+    int blur_index = -1;
+    unsigned blur_slide_revision = 0, blur_art_revision = 0, blur_theme_revision = 0;
     bool first_frame = true;
 
     while (true) {
@@ -5915,6 +5977,27 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         {
             remember_current_cover();
             remembered_index = center_index;
+        }
+
+        if (model->panel_open && pf_state == pf_idle &&
+            (blur_index != center_index || blur_slide_revision != pf_slides_loaded ||
+             blur_art_revision != art_cache_generation() ||
+             blur_theme_revision != ui_theme_generation()))
+        {
+            blur_index = center_index;
+            blur_slide_revision = pf_slides_loaded;
+            blur_art_revision = art_cache_generation();
+            blur_theme_revision = ui_theme_generation();
+            struct album_blur_source sources[ALBUM_BLUR_NEIGHBORS] = {0};
+            int count = 0;
+            sources[count++] = panel_blur_source(center_index);
+            if (center_index > 0)
+                sources[count++] = panel_blur_source(center_index - 1);
+            if (center_index + 1 < number_of_slides)
+                sources[count++] = panel_blur_source(center_index + 1);
+            album_blur_request_window(sources, count);
+            if (panel.live)
+                panel.blur_source = sources[0];
         }
 
         /* Merge status damage with the next cover/caption submission. */

@@ -80,6 +80,7 @@
 #include "draw/viewport.h"
 #include "draw/progress_bar.h"
 #include "metadata/album_palette.h"
+#include "metadata/album_blur.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/perf.h"
 #include "ui/scene.h"
@@ -648,6 +649,7 @@ static void init(void)
     core_allocator_init();
     kernel_init();
     album_palette_alloc();
+    album_blur_alloc();
     native_wps_alloc();
     crumbs_guard_init();
 #if !defined(SIMULATOR) && !defined(APPLICATION)
@@ -825,6 +827,7 @@ static void init(void)
     CHART(">settings_apply(true)");
     settings_apply(true);
     album_palette_init();
+    album_blur_init();
     CHART("<settings_apply(true)");
     /* Language is loaded and audio has not claimed the remaining core pool.
      * This uses the same bundled 12 px file as the HarmonyOS overlay. */

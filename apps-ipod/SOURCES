@@ -373,6 +373,7 @@ ui/frame.c
 ui/statusbar.c
 #if defined(HAVE_LCD_COLOR) && defined(HAVE_ALBUMART)
 metadata/album_palette.c
+metadata/album_blur.c
 #endif
 
 /* -- services --------------------------------------------------------- */

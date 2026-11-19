@@ -19,6 +19,7 @@ static const struct {
     [UI_COLOR_MUTED]              = { "muted",              0xbdbdbd, 0x505050, {UI_PALETTE_VIVID, 85, 100} },
     [UI_COLOR_ACCENT]             = { "accent",             0xffffff, 0x12588e, {UI_PALETTE_VIVID, 60, 100} },
     [UI_COLOR_SELECTION]          = { "selection",          0xffffff, 0x12588e, {UI_PALETTE_VIVID, 60, 100} },
+    [UI_COLOR_SELECTED_SECONDARY] = { "selected_secondary", 0xd6d6d6, 0x505050, {0} },
     [UI_COLOR_SELECTED_TEXT]      = { "selected_text",      0xffffff, 0x181818, {0} },
     [UI_COLOR_SEPARATOR]          = { "separator",          0x333333, 0xc7c5bf, {0} },
     [UI_COLOR_DIM]                = { "dim",                0x000000, 0x000000, {0} },

@@ -224,10 +224,10 @@ static int load_header(struct vm *vm, const uint8_t *p, uint32_t n)
     if (n < 20)
         return bad(vm, "header");
     if (rd16(p) != 1)
-        return vm_fail(vm, "This game needs a newer PodBox", "", "");
+        return vm_fail(vm, "This game needs a newer Astra", "", "");
     vm->api = (uint16_t)rd16(p + 2);
     if (vm->api > ARCADE_API_VERSION)
-        return vm_fail(vm, "This game needs a newer PodBox", "", "");
+        return vm_fail(vm, "This game needs a newer Astra", "", "");
     vm->rate = p[4];
     vm->menu_button = p[5];
     vm->music = p[6];

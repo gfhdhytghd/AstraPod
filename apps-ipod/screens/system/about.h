@@ -11,4 +11,7 @@
  * Returns a menu return code (SYS_USB_CONNECTED if USB was attached, else 0). */
 int about_screen(void);
 
+struct screen;
+void about_draw_boot_logo(struct screen *display, int bottom);
+
 #endif /* _ABOUT_H_ */

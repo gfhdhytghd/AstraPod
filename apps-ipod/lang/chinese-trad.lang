@@ -8288,13 +8288,13 @@
   desc: main menu title
   user: core
   <source>
-    *: "Rockbox"
+    *: "Astra"
   </source>
   <dest>
-    *: "Rockbox"
+    *: "Astra"
   </dest>
   <voice>
-    *: "Rockbox"
+    *: "Astra"
   </voice>
 </phrase>
 <phrase>

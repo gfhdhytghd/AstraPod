@@ -182,7 +182,7 @@ static const char *title_text(const char *title)
 {
     if (!title)
         return "";
-    return strcmp(title, "Rockbox") == 0 ? "PodBox" : title;
+    return strcmp(title, "Rockbox") == 0 ? "Astra" : title;
 }
 
 /* The clock is generated as ASCII in left-to-right order. Keep the full

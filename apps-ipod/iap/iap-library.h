@@ -120,9 +120,9 @@ void iap_library_artwork_stop(void);
 void iap_library_artwork_prefetch(void);
 
 /* The name every iAP transport gives an accessory: the first line of
- * player_name.txt as load read it at boot, PodBox's written there when it has
+ * player_name.txt as load read it at boot, Astra's written there when it has
  * none of its own. */
-#define IAP_PLAYER_NAME_DEFAULT "PodBox"
+#define IAP_PLAYER_NAME_DEFAULT "Astra"
 void iap_player_name_load(void);
 void iap_player_name(char *buf, size_t size);
 

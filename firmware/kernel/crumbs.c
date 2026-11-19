@@ -203,7 +203,7 @@ static void crash_report(void)
     struct crumb_crash_context context = crash->data.context;
     char output[640];
     int length = snprintf(output, sizeof(output),
-                          "PodBox native crash\nFirmware: %s\nBoot: %lu\n"
+                          "Astra native crash\nFirmware: %s\nBoot: %lu\n"
                           "%s: %s\n"
                           "pc: %08lx  sp: %08lx  lr: %08lx  status: %08lx\n"
                           "exception: %lu  fsr: %08lx  far: %08lx\n",
@@ -245,7 +245,7 @@ void crumbs_report(void)
                   0666);
     if (fd >= 0)
     {
-        fdprintf(fd, "# PodBox breadcrumbs of the boot before %s\n",
+        fdprintf(fd, "# Astra breadcrumbs of the boot before %s\n",
                  RBVERSION);
         for (int i = 0; i < n; i++)
             fdprintf(fd, "%s\n", report[i]);

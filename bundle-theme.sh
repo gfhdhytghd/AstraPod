@@ -24,7 +24,7 @@ cp "$ROOT/apps-ipod/fonts/"LICENSE-*.txt "$FONTS/"
 python3 "$ROOT/tools/fonts/compile.py" "$STAGE/generated"
 cp "$STAGE/generated/"*.pbf "$FONTS/"
 cat > "$FONTS/NOTICE-HarmonyOS-Sans.txt" <<'NOTICE'
-PodBox renders its bitmap text using HarmonyOS Sans and HarmonyOS Sans SC.
+Astra renders its bitmap text using HarmonyOS Sans and HarmonyOS Sans SC.
 HarmonyOS Sans is Copyright 2021-2024 Huawei Device Co., Ltd.
 Font terms: https://github.com/openharmony/global_system_resources/blob/master/LICENSE_Fonts
 NOTICE

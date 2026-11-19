@@ -6339,13 +6339,13 @@
   desc: main menu title
   user: core
   <source>
-    *: "Rockbox"
+    *: "Astra"
   </source>
   <dest>
-    *: "روكبوكس"
+    *: "Astra"
   </dest>
   <voice>
-    *: "روكبوكس"
+    *: "Astra"
   </voice>
 </phrase>
 <phrase>

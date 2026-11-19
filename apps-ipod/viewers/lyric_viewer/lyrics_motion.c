@@ -2,6 +2,20 @@
 #include "lyrics_motion.h"
 #include "ui/animation.h"
 
+/* Samples of 1 - (1 + 8t)e^(-8t), normalized at t=1.
+ * The critical spring reaches its endpoint without overshoot. */
+int lyrics_spring(unsigned frame, unsigned duration)
+{
+    static const unsigned short damping[] = {
+        0, 16, 49, 87, 122, 153, 178, 198, 213, 225, 233,
+        240, 244, 248, 250, 252, 253, 254, 255, 255, 256
+    };
+    if (frame >= duration) return 256;
+    unsigned sample = frame * 20 * 256 / duration;
+    unsigned i = sample >> 8;
+    return lyrics_lerp(damping[i], damping[i + 1], sample & 255);
+}
+
 int lyrics_lerp(int a, int b, int p) { return a + (b - a) * p / 256; }
 int lyrics_ease(int p)
 {

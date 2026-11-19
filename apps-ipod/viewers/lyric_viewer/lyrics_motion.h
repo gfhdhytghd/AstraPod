@@ -13,6 +13,7 @@ struct lyrics_motion {
     bool frame_clock;
 };
 struct lyrics_mode { bool manual; int focus, direction, burst; uint32_t input; };
+int lyrics_spring(unsigned frame, unsigned duration);
 int lyrics_ease(int phase);
 int lyrics_lerp(int from, int to, int phase);
 int lyrics_motion_at(const struct lyrics_motion *m, uint32_t now);

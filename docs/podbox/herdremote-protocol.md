@@ -248,7 +248,7 @@ Focus does not change subscriptions, and subscriptions never focus.
 #### Typed detail — DETAIL READY 2 (Amendments 4/5)
 
 Change note for nav2-detail: DESIGN READY was received for
-`/home/wilf/data/PodJS/ipod/DETAIL-DESIGN.md`. That document, owned by
+`<workspace>/DETAIL-DESIGN.md`. That document, owned by
 nav2-detail (Claude), is authoritative for fields, limits, truncation and
 per-state content. This section replaces the Amendment 2 nine-field `D`.
 No new presentation choices are made here. `det` and wire version 1 remain

@@ -2239,3 +2239,7 @@ kernel/timeout.c
 usbstack/podlink_rust_platform.c
 usbstack/remote_log.c
 #endif
+#ifdef HAVE_RESEARCH_SHELL
+research_shell.c
+target/arm/s5l8702/research_port-s5l8702.c
+#endif

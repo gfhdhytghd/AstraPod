@@ -16,9 +16,8 @@ PROBE = r"""
 #include "crumb_crash.h"
 
 #define ROCKBOX_DIR "/.rockbox"
-static volatile struct crumb_crash dram, iram1;
-#define CRASH_A (&dram)
-#define CRASH_B (&iram1)
+static volatile struct crumb_crash dram;
+#define CRASH (&dram)
 
 enum failure { NONE, OPEN, PARTIAL_WRITE, SYNC, CLOSE, RENAME };
 static enum failure fail;
@@ -88,20 +87,23 @@ int main(void)
         .kind = CRUMB_CRASH_PANIC, .pc = 0x08001234, .sp = 0x08400000,
         .status = 0x1f,
     };
-    crumb_crash_store(CRASH_A, 10, "firmware-1", "Stack overflow in menu", &panic);
-    crumb_crash_store(CRASH_B, 10, "firmware-1", "Stack overflow in menu", &panic);
-    assert(crumb_crash_latest(CRASH_A, CRASH_B) == CRASH_A);
+    const struct crumb_crash_details details = { .command = "sm1 wait 50" };
+    crumb_crash_store(CRASH, 10, "firmware-1", "Stack overflow in menu", &panic, &details);
+    assert(crumb_crash_valid(CRASH));
+    assert(!strcmp((const char *)CRASH->data.details.command, "sm1 wait 50"));
 
-    /* Corrupted or interrupted DRAM write must leave the IRAM1 copy useful. */
-    CRASH_A->data.message[2] ^= 1;
-    assert(crumb_crash_latest(CRASH_A, CRASH_B) == CRASH_B);
-    CRASH_A->check = 0;
+    /* A corrupted or interrupted record must never replace the disk report. */
+    CRASH->data.details.command[0] ^= 1;
+    assert(!crumb_crash_valid(CRASH));
+    crash_report();
+    assert(!rename_calls && !strcmp(disk, "previous report"));
+    crumb_crash_store(CRASH, 10, "firmware-1", "Stack overflow in menu", &panic, &details);
 
     for (fail = OPEN; fail <= RENAME; fail++)
     {
         crash_report();
         assert(!disk_writes && !strcmp(disk, "previous report"));
-        assert(crumb_crash_valid(CRASH_B));
+        assert(crumb_crash_valid(CRASH));
     }
     assert(rename_calls == 1); /* only the complete, synced output reached rename */
 
@@ -111,7 +113,7 @@ int main(void)
     assert(strstr(disk, "Firmware: firmware-1\nBoot: 10\n"));
     assert(strstr(disk, "Panic: Stack overflow in menu\npc: 08001234"));
     assert(strstr(disk, "sp: 08400000"));
-    assert(!crumb_crash_latest(CRASH_A, CRASH_B));
+    assert(!crumb_crash_valid(CRASH));
     crash_report();
     assert(disk_writes == 1); /* no duplicate export on a later clean boot */
 
@@ -120,9 +122,7 @@ int main(void)
         .sp = 0x08400000, .lr = 0x08003456, .status = 0x6000001f,
         .fault_status = 5, .fault_address = 0x10,
     };
-    crumb_crash_store(CRASH_A, 11, "firmware-1", "old panic", &panic);
-    crumb_crash_store(CRASH_B, 12, "firmware-2", "Data abort", &abort);
-    assert(crumb_crash_latest(CRASH_A, CRASH_B) == CRASH_B);
+    crumb_crash_store(CRASH, 12, "firmware-2", "Data abort", &abort, &details);
     crash_report();
     assert(disk_writes == 2);
     assert(strstr(disk, "ARM exception: Data abort"));
@@ -132,20 +132,18 @@ int main(void)
     char long_text[500];
     memset(long_text, 'a', sizeof(long_text) - 1);
     long_text[sizeof(long_text) - 1] = '\0';
-    crumb_crash_store(CRASH_A, UINT32_MAX, long_text, long_text, &panic);
-    crumb_crash_store(CRASH_B, 0, "firmware-3", "wrapped boot", &panic);
-    assert(CRASH_A->data.version[62] == 'a' && CRASH_A->data.version[63] == '\0');
-    assert(CRASH_A->data.message[254] == 'a' && CRASH_A->data.message[255] == '\0');
-    assert(crumb_crash_valid(CRASH_A));
-    assert(crumb_crash_latest(CRASH_A, CRASH_B) == CRASH_B);
-    puts("PASS retained crash checksum, fallback, formatting, and retried boot export");
+    crumb_crash_store(CRASH, UINT32_MAX, long_text, long_text, &panic, &details);
+    assert(CRASH->data.version[62] == 'a' && CRASH->data.version[63] == '\0');
+    assert(CRASH->data.message[254] == 'a' && CRASH->data.message[255] == '\0');
+    assert(crumb_crash_valid(CRASH));
+    puts("PASS retained crash checksum, formatting, and retried boot export");
 }
 """
 
 
 def main():
     source = (ROOT / "firmware/kernel/crumbs.c").read_text()
-    start = source.index("static void crash_report(void)")
+    start = source.index("static bool write_native_crash(int fd)")
     end = source.index("void crumbs_report(void)", start)
     formatter = source[start:end]
     panic = (ROOT / "firmware/panic.c").read_text()

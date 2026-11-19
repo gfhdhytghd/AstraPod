@@ -33,6 +33,7 @@ enum hang_watch_kind
     HANG_WATCH_NONE = 0,
     HANG_WATCH_IRQS_OFF,
     HANG_WATCH_UI_STARVED,
+    HANG_WATCH_AUDIO_STARVED,
 };
 
 struct hang_watch

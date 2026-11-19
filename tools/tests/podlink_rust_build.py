@@ -8,16 +8,19 @@ ROOT = Path(__file__).resolve().parents[2]
 TOOLCHAIN = 'nightly-2026-02-03'
 
 
-def library(target=None):
+def library(target=None, research=False):
     build = Path(os.environ.get('PODLINK_TEST_BUILD', ROOT / 'build-fu49')).resolve()
     out = build / ('host-target' if target is None else target)
+    if research:
+        out = out.with_name(out.name + '-research')
     out.mkdir(parents=True, exist_ok=True)
     # Firmware script runners can build independent fixtures concurrently.
     with (out / 'build.lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         command = ['cargo', '+' + TOOLCHAIN, 'build', '--locked', '--manifest-path',
                    str(ROOT / 'firmware/usbstack/podlink-rust/Cargo.toml'),
-                   '--release', '--features', 'host-test', '--target-dir', str(out)]
+                   '--release', '--features', 'host-test,research' if research else 'host-test',
+                   '--target-dir', str(out)]
         if target:
             command += ['--target', target, '-Zbuild-std=core']
         subprocess.run(command, check=True)

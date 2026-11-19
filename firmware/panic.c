@@ -24,6 +24,7 @@
 #include <string.h>
 #include "panic.h"
 #include "crumbs.h"
+#include "research.h"
 #include "lcd.h"
 #include "font.h"
 #include "debug.h"
@@ -32,6 +33,9 @@
 #include "system.h"
 #include "logf.h"
 #include "rbversion.h"
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+#include "get_sp.h"
+#endif
 
 #ifdef HAVE_RB_BACKTRACE
 #include "gcc_extensions.h"
@@ -61,6 +65,9 @@ void panic_screen_enter(void)
     if (panic_screen_active)
     {
         /* No formatting, drawing, unwinding, PMU or scheduler work here. */
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+        system_reboot();
+#endif
         system_exception_wait();
         while (1);
     }
@@ -117,14 +124,19 @@ void panicf( const char *fmt, ...)
     DEBUGF("*PANIC* %s\n", panic_buf);
 #endif
 #ifdef HAVE_CRUMBS
-    crumbs_crash_record(panic_buf, &(struct crumb_crash_context) {
+    struct crumb_crash_context context = {
         .kind = CRUMB_CRASH_PANIC,
         .pc = (uintptr_t)__builtin_return_address(0),
-#ifdef HAVE_RB_BACKTRACE
-        .sp = (uint32_t)sp,
-#endif
         .status = get_processor_mode(),
-    });
+    };
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    context.sp = __get_sp();
+    asm volatile("mrs %0, cpsr" : "=r"(context.status));
+#endif
+#ifdef HAVE_RB_BACKTRACE
+    context.sp = (uint32_t)sp;
+#endif
+    crumbs_crash_record(panic_buf, &context);
 #endif
 
     lcd_set_viewport(NULL);

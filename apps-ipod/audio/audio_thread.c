@@ -12,6 +12,7 @@
 #include "config.h"
 #include "system.h"
 #include "kernel.h"
+#include "hang_catch.h"
 #include "logf.h"
 #include "usb.h"
 #include "pcm.h"
@@ -138,6 +139,10 @@ void INIT_ATTR audio_init(void)
                   sizeof(audio_stack), 0, audio_thread_name
                   IF_PRIO(, MIN(PRIORITY_BUFFERING, PRIORITY_USER_INTERFACE))
                   IF_COP(, CPU));
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    if (audio_thread_id)
+        hang_catch_watch_audio(audio_thread_id);
+#endif
 
     queue_enable_queue_send(&audio_queue, &audio_queue_sender_list,
                             audio_thread_id);

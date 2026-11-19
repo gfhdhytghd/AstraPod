@@ -1119,6 +1119,10 @@ void switch_thread(void)
 #ifdef HAVE_HANG_CATCH_FIQ
     if (thread == hang_ui_thread)
         hang_ui_ran = current_tick; /* the freeze watch's UI liveness */
+#ifdef HAVE_RESEARCH_DIAGNOSTICS
+    if (thread == hang_audio_thread)
+        hang_audio_ran = current_tick;
+#endif
 #endif
     crumb_status(CS_THREAD, (uint32_t)THREAD_ID_SLOT(thread->id) << 24 |
                             ((uint32_t)current_tick & 0xffffff));

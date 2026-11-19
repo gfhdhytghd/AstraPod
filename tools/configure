@@ -1570,6 +1570,7 @@ help() {
     --compiler-prefix Override compiler prefix (inherently dangerous)
     --appsdir=DIR     Build the application layer from DIR (a name relative to
                       the source root) instead of the default "apps"
+    --research        Compatibility option (diagnostics are always enabled on native iPod 6G)
     --help            Shows this message (must not be used with other options)
 
 EOF
@@ -1596,6 +1597,7 @@ ARG_ADDR_SAN=
 ARG_UBSAN=
 ARG_STACK_PROTECTOR=
 ARG_PLUGINS=
+ARG_RESEARCH=
 err=
 for arg in "$@"; do
 	case "$arg" in
@@ -1626,6 +1628,7 @@ for arg in "$@"; do
         --with-stack-protector) ARG_STACK_PROTECTOR=default;;
         --prefix=*)   ARG_PREFIX=`echo "$arg" | cut -d = -f 2`;;
         --compiler-prefix=*)   ARG_COMPILER_PREFIX=`echo "$arg" | cut -d = -f 2`;;
+        --research)   ARG_RESEARCH=1;;
 		--help)       help;;
 		*)            err=1; echo "[ERROR] Option '$arg' unsupported";;
 	esac
@@ -4447,6 +4450,13 @@ fi
       ;;
 
   esac
+  if [ "$ARG_RESEARCH" ]; then
+      if [ "$modelname" != ipod6g ] || [ "$btype" != N ] || [ "$coreapps" != apps-ipod ] || \
+         [ "$bootloader" = 1 ] || [ "$simulator" = yes ]; then
+          echo "--research requires --target=ipod6g --type=n --appsdir=apps-ipod"
+          exit 1
+      fi
+  fi
   # to be able running "make manual" from non-manual configuration
   case $modelname in
       iriverh1??)

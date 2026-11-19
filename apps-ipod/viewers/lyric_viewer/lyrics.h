@@ -52,6 +52,27 @@ bool lyrics_finish_text(void);
 /* A remote LRC line can span rows. A failed append invalidates the document. */
 bool lyrics_append_lrc(const char *text, bool more);
 bool lyrics_finish_lrc(long duration);
+bool lyrics_append_ttml(const char *text, bool more, int voices);
+bool lyrics_ttml_complete(void);
+bool lyrics_ttml(void);
+
+/* -1 uses the user's alignment. The remaining values match lyric_align. */
+int lyrics_agent_alignment(int agent);
+
+struct lyrics_vocal {
+    const char *text;
+    long begin, end;
+    int words, agent;
+    bool timed;
+};
+struct lyrics_cue {
+    const char *text;
+    long begin, end;
+    int agent;
+    bool timed;
+};
+struct lyrics_vocal lyrics_vocal_at(int index, bool background);
+struct lyrics_cue lyrics_vocal_cue(int index, bool background, int word);
 void lyrics_resume_remote(void);
 bool lyrics_publish_remote(long duration);
 

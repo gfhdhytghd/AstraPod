@@ -32,6 +32,12 @@ post=r'''
 int main(void){
  int chord=BUTTON_SELECT|BUTTON_MENU;
  caller=8;held=chord;assert(raw_ui_filter(chord)==chord&&!clock_pumps&&!agents_nav_active());
+#ifdef TEST_STAGGER_WHEEL
+ assert(raw_ui_filter(BUTTON_SCROLL_FWD)==BUTTON_SCROLL_FWD&&!push_snaps);
+ caller=7;ui_polling=true;
+ assert(raw_ui_filter(BUTTON_SCROLL_BACK)==BUTTON_SCROLL_BACK&&push_snaps==1);
+ assert(raw_ui_filter(SYS_EVENT|BUTTON_SCROLL_BACK)==(SYS_EVENT|BUTTON_SCROLL_BACK)&&push_snaps==1);
+#endif
  caller=7;ui_polling=true;assert(raw_ui_filter(chord)==chord&&!clock_pumps);ui_polling=false;
  for(int screen=0;screen<9;screen++){
   /* Root menu/browser/settings/playlist/chart/dialog/game/WPS/Agents all
@@ -80,7 +86,14 @@ static bool connected;
 static bool podlink_host_connected(void){return connected;}
 '''
  wheel = fn(source,'wheel_shortcut_button')
-(O/'raw.c').write_text(pre+c+fn(source,'raw_ui_cancel')+wheel+fn(source,'raw_ui_filter')+post)
+raw = fn(source,'raw_ui_filter')
+if 'ui_scene_snap_push();' in raw:
+ pre += '''
+#define TEST_STAGGER_WHEEL
+static int push_snaps;
+static void ui_scene_snap_push(void){push_snaps++;}
+'''
+(O/'raw.c').write_text(pre+c+fn(source,'raw_ui_cancel')+wheel+raw+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R),'-I'+str(R/'apps-ipod'),str(O/'raw.c'),'-o',str(O/'raw')],check=True)
 subprocess.run([str(O/'raw')],check=True)
 root=(S/'apps-ipod/root_menu.c').read_text();q=(S/'firmware/drivers/button_queue.c').read_text()

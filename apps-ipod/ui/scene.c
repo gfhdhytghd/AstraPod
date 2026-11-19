@@ -2,8 +2,10 @@
 #include "config.h"
 #include "button.h"
 #include "core_alloc.h"
+#include "draw/viewport.h"
 #include "kernel.h"
 #include "lcd.h"
+#include "memset16.h"
 #include "system.h"
 #include "thread.h"
 #include "frame.h"
@@ -17,8 +19,12 @@
 #define PAGE_PIXELS (LCD_WIDTH * LCD_HEIGHT)
 #define SCENE_BYTES (3 * FRAMEBUFFER_SIZE)
 #define PANEL_WORKSPACE_BYTES (2 * FRAMEBUFFER_SIZE)
-#define PUSH_FRAMES ANIM_F(18)
+#define PUSH_ROW_FRAMES ANIM_F(12)
+#define PUSH_ROW_DELAY ANIM_F(2)
+#define PUSH_ROW_FADE ANIM_F(6)
+#define PUSH_ROW_OFFSET (LCD_WIDTH * 60 / 100)
 #define POP_FRAMES ANIM_F(15)
+#define PAN_FRAMES ANIM_F(12)
 #define PARALLAX_PERCENT 30
 #define COVERED_BRIGHTNESS 179
 #define MODAL_UP_FRAMES ANIM_F(16)
@@ -43,10 +49,21 @@ static fb_data *surface(fb_data *data, bool front)
 static int position(const struct ui_scene *scene, unsigned frame)
 {
     const struct ui_tween *tween = &scene->tween;
-    int offset = ui_tween_sample(tween, frame) & ~1;
+    int offset;
+    if (scene->pan_top && frame < tween->frames)
+    {
+        /* Smoothstep: zero velocity at each end, equal travel in each half. */
+        int t = frame * 128 / tween->frames;
+        int weight = t * t * (384 - 2 * t);
+        offset = tween->from + (tween->to - tween->from) *
+                               weight / (128 * 128 * 128);
+    }
+    else
+        offset = ui_tween_sample(tween, frame);
+    offset &= ~1;
     /* Keep the last two-pixel strip until the endpoint is due. */
     if (frame < tween->frames && tween->from != tween->to && offset == tween->to)
-        offset += tween->to == 0 ? 2 : -2;
+        offset += tween->from > tween->to ? 2 : -2;
     return offset;
 }
 
@@ -91,6 +108,106 @@ static void compose_modal(fb_data *out, const fb_data *back, const fb_data *fron
            (LCD_HEIGHT - status_height - offset) * LCD_WIDTH * sizeof(*out));
 }
 
+static void compose_pages(const struct ui_scene *scene, fb_data *out,
+                          const fb_data *back, const fb_data *front, int offset)
+{
+    if (!scene->pan_top)
+    {
+        compose(out, back, front, offset);
+        return;
+    }
+
+    int chrome = scene->pan_top * LCD_WIDTH;
+    memcpy(out, lcd_framebuffer_default.fb_ptr, chrome * sizeof(*out));
+    int left = offset < 0 ? LCD_WIDTH + offset : offset;
+    const fb_data *a = offset < 0 ? front - offset : back + LCD_WIDTH - offset;
+    const fb_data *b = offset < 0 ? back : front;
+    for (int row = scene->pan_top; row < LCD_HEIGHT; row++)
+    {
+        int i = row * LCD_WIDTH;
+        memcpy(out + i, a + i, left * sizeof(*out));
+        memcpy(out + i + left, b + i, (LCD_WIDTH - left) * sizeof(*out));
+    }
+}
+
+static void compose_push_band(fb_data *out, const fb_data *back, const fb_data *front,
+                              int lines, int age, int parallax, unsigned light,
+                              fb_data blank)
+{
+    if (age >= PUSH_ROW_FRAMES)
+    {
+        memcpy(out, front, lines * LCD_WIDTH * sizeof(*out));
+        return;
+    }
+
+    const struct ui_tween row = { .from = PUSH_ROW_OFFSET, .frames = PUSH_ROW_FRAMES };
+    int dx = MAX(2, ui_tween_sample(&row, MAX(0, age)) & ~1);
+    unsigned ink = MAX(0, age) * UI_FULL_OPACITY / PUSH_ROW_FADE;
+    unsigned under = (UI_FULL_OPACITY - MIN(ink, UI_FULL_OPACITY)) * light / UI_FULL_OPACITY;
+    int visible_back = LCD_WIDTH - parallax;
+    for (int y = 0; y < lines; ++y)
+    {
+        if (!ink)
+        {
+            ui_blit_dim(out, back + parallax, visible_back, light);
+            memset16(out + visible_back, blank, parallax);
+        }
+        else
+        {
+            ui_blit_dim(out, back + parallax, dx, light);
+            if (ink >= UI_FULL_OPACITY)
+                memcpy(out + dx, front, (LCD_WIDTH - dx) * sizeof(*out));
+            else
+            {
+                ui_blit_mix(out + dx, front, back + parallax + dx,
+                            visible_back - dx, ink, under);
+                ui_blit_tint(out + visible_back, front + visible_back - dx,
+                             parallax, ink, blank);
+            }
+        }
+        out += LCD_WIDTH;
+        back += LCD_WIDTH;
+        front += LCD_WIDTH;
+    }
+}
+
+static unsigned push_duration(const struct ui_scene *scene)
+{
+    return PUSH_ROW_FRAMES + PUSH_ROW_DELAY * MAX(0, scene->row_count - 1);
+}
+
+static void compose_push(const struct ui_scene *scene, fb_data *out,
+                         const fb_data *back, const fb_data *front,
+                         unsigned frame, int offset)
+{
+    int covered = LCD_WIDTH - offset;
+    int parallax = covered * PARALLAX_PERCENT / 100;
+    unsigned light = UI_FULL_OPACITY -
+                    (UI_FULL_OPACITY - COVERED_BRIGHTNESS) * covered / LCD_WIDTH;
+    fb_data bg = scene->dim_color, blank;
+    ui_blit_dim(&blank, &bg, 1, light);
+
+    int frame_in_rows = frame * push_duration(scene) / scene->tween.frames;
+    int y = scene->push_top;
+    memcpy(out, front, y * LCD_WIDTH * sizeof(*out));
+    int row_y = MAX(y, scene->row_y);
+    for (int i = -1; i <= scene->row_count; ++i)
+    {
+        int end = i < 0 ? row_y : i == scene->row_count ?
+                  LCD_HEIGHT : MIN(LCD_HEIGHT, row_y + (i + 1) * scene->row_pitch);
+        int age = frame_in_rows;
+        if (i > 0 && i < scene->row_count)
+            age -= i * PUSH_ROW_DELAY;
+        if (end > y)
+        {
+            int start = y * LCD_WIDTH;
+            compose_push_band(out + start, back + start, front + start, end - y,
+                              age, parallax, light, blank);
+            y = end;
+        }
+    }
+}
+
 static void complete_transition(struct ui_scene *scene)
 {
     if (owner != scene)
@@ -99,6 +216,9 @@ static void complete_transition(struct ui_scene *scene)
     lcd_hold_updates(false);
     scene->capturing = false;
     scene->automatic = false;
+    scene->staggered = false;
+    scene->rows_changed = false;
+    scene->reuse_target = false;
     cpu_boost(false);
     ui_perf_end(scene->trace);
     scene->trace = 0;
@@ -159,6 +279,45 @@ void ui_scene_interrupt(void)
         ui_scene_cancel(owner);
 }
 
+void ui_scene_snap_push(void)
+{
+    if (!owner || !owner->staggered || thread_self() != owner_thread)
+        return;
+    if (owner->backdrop_handle > 0)
+    {
+        settle_panel(owner);
+        struct viewport *previous = lcd_set_viewport(NULL);
+        lcd_update();
+        lcd_set_viewport(previous);
+    }
+    else
+        ui_scene_cancel(owner);
+}
+
+void ui_scene_push_rows(int y, int pitch, int count)
+{
+    struct ui_scene *scene = owner;
+    if (!scene || !scene->staggered || thread_self() != owner_thread)
+        return;
+    y = MIN(MAX(y, 0), LCD_HEIGHT);
+    count = MAX(0, count);
+    if (scene->row_y == y && scene->row_pitch == pitch && scene->row_count == count)
+        return;
+    if (!scene->capturing &&
+        ui_clock_frame((uint32_t)USEC_TIMER - scene->tween.start_clock) >= scene->tween.frames)
+        return;
+
+    scene->row_y = y;
+    scene->row_pitch = pitch;
+    scene->row_count = count;
+    /* A loading row can become a list while the incoming page is in flight. */
+    if (!scene->capturing)
+    {
+        scene->tween.frames = ui_theme_duration(push_duration(scene));
+        scene->rows_changed = true;
+    }
+}
+
 void ui_scene_fade_out(void)
 {
     unsigned duration = ui_theme_duration(ANIM_F(12));
@@ -211,9 +370,12 @@ void ui_scene_fade_out(void)
 }
 
 static bool capture_scene(struct ui_scene *scene, const void *from, const void *to,
-                          bool push, const char *route)
+                          bool push, const char *route, int pan_top, int pan_dir)
 {
-    unsigned frames = ui_theme_duration(push ? PUSH_FRAMES : POP_FRAMES);
+    bool staggered = push && !pan_top;
+    unsigned frames = ui_theme_duration(pan_top ? PAN_FRAMES :
+                                        push ? PUSH_ROW_FRAMES : POP_FRAMES);
+    ui_scene_snap_push();
     if (!frames || !lcd_active() || (owner && owner != scene))
         return false;
 
@@ -227,11 +389,26 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
         own_transition(scene, route);
     }
     int offset = push ? LCD_WIDTH : 0;
-    if (active && (!scene->capturing || push != scene->target_front) &&
-                  from == (push ? scene->back_page : scene->front_page) &&
-                  to == (push ? scene->front_page : scene->back_page))
+    int end = push ? 0 : LCD_WIDTH;
+    bool reverse_pan = active && pan_top && pan_top == scene->pan_top &&
+        to == (scene->target_front ? scene->back_page : scene->front_page) &&
+        from == (scene->target_front ? scene->front_page : scene->back_page);
+    if (pan_top)
     {
-        offset = scene->last_offset >= 0 ? scene->last_offset : scene->tween.from;
+        offset = pan_dir * LCD_WIDTH;
+        if (reverse_pan)
+        {
+            push = !scene->target_front;
+            end = push ? 0 : -offset;
+        }
+    }
+    if (reverse_pan ||
+        (active && !staggered && !pan_top && !scene->pan_top &&
+         (!scene->capturing || push != scene->target_front) &&
+         from == (push ? scene->back_page : scene->front_page) &&
+         to == (push ? scene->front_page : scene->back_page)))
+    {
+        offset = scene->last_offset != -1 ? scene->last_offset : scene->tween.from;
         /* The redirected destination is already painted. Start incremental
          * updates from that page's own pixels, including its status bar. */
         fb_data *data = core_get_data_pinned(scene->handle);
@@ -245,10 +422,10 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
         if (active)
         {
             previous = surface(data, !scene->target_front);
-            if (scene->last_offset >= 0)
+            if (scene->last_offset != -1)
             {
-                compose(data + 2 * PAGE_PIXELS, surface(data, false), surface(data, true),
-                        scene->last_offset);
+                compose_pages(scene, data + 2 * PAGE_PIXELS, surface(data, false),
+                              surface(data, true), scene->last_offset);
                 previous = data + 2 * PAGE_PIXELS;
             }
         }
@@ -261,8 +438,12 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     }
 
     scene->target_front = push;
+    scene->pan_top = pan_top;
+    scene->staggered = staggered;
+    scene->reuse_target = reverse_pan;
+    scene->row_y = scene->row_count = 0;
     scene->tween = (struct ui_tween){
-        .from = offset, .to = push ? 0 : LCD_WIDTH,
+        .from = offset, .to = end,
         .frames = frames, .ease_in = !push,
     };
     scene->last_offset = scene->composed_offset = -1;
@@ -274,12 +455,18 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
 bool ui_scene_capture(struct ui_scene *scene, const void *from, const void *to,
                       bool push)
 {
-    return capture_scene(scene, from, to, push, push ? "push" : "pop");
+    return capture_scene(scene, from, to, push, push ? "push" : "pop", 0, 0);
+}
+
+bool ui_scene_capture_pan(struct ui_scene *scene, const void *from, const void *to,
+                          int direction, int top)
+{
+    return capture_scene(scene, from, to, true, "pan", top, direction);
 }
 
 void ui_scene_boot(struct ui_scene *scene)
 {
-    if (capture_scene(scene, scene, NULL, true, "boot"))
+    if (capture_scene(scene, scene, NULL, true, "boot", 0, 0))
         scene->automatic = true;
 }
 
@@ -311,7 +498,7 @@ void ui_scene_modal_restored(const void *page)
 
 static bool capture_panel(struct ui_scene *scene, bool vertical)
 {
-    unsigned frames = ui_theme_duration(vertical ? MODAL_UP_FRAMES : PUSH_FRAMES);
+    unsigned frames = ui_theme_duration(vertical ? MODAL_UP_FRAMES : PUSH_ROW_FRAMES);
     if (!frames || !lcd_active())
         return false;
 
@@ -331,6 +518,9 @@ static bool capture_panel(struct ui_scene *scene, bool vertical)
     memcpy(backdrop, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
     core_put_data_pinned(backdrop);
     scene->vertical = vertical;
+    scene->pan_top = 0;
+    scene->staggered = !vertical;
+    scene->row_y = scene->row_count = 0;
     scene->back_page = parent;
     scene->status_height = vertical ? sb_visible_height() : 0;
     scene->dim_color = vertical ? ui_theme_rgb565(UI_COLOR_DIM) : 0;
@@ -390,6 +580,8 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
         release_scene(scene);
         return false;
     }
+    if (owner == scene && scene->staggered)
+        ui_scene_snap_push();
     bool was_opening = owner == scene;
     int offset = was_opening
         ? (scene->last_offset >= 0 ? scene->last_offset : scene->tween.from) : 0;
@@ -459,9 +651,20 @@ void ui_scene_start(struct ui_scene *scene)
 {
     if (!scene->capturing)
         return;
+    if (scene->staggered)
+    {
+        struct ui_theme theme;
+        ui_theme_snapshot(&theme);
+        scene->push_top = viewportmanager_theme_enabled(SCREEN_MAIN)
+                        ? theme.metric[UI_METRIC_STATUS_HEIGHT] : 0;
+        scene->dim_color = ui_theme_rgb565(UI_COLOR_BACKGROUND);
+        scene->tween.frames = ui_theme_duration(push_duration(scene));
+    }
     scene->capturing = false;
     scene->tween.start_clock = USEC_TIMER;
-    ui_scene_update(scene, true);
+    /* The first frame of a reversed pan is the pose already on screen. */
+    ui_scene_update(scene, !scene->reuse_target);
+    scene->reuse_target = false;
 }
 
 void ui_scene_update(struct ui_scene *scene, bool target_changed)
@@ -474,6 +677,8 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
         return;
     }
 
+    target_changed |= scene->rows_changed;
+    scene->rows_changed = false;
     unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER - scene->tween.start_clock);
     if (frame >= scene->tween.frames || scene->tween.from == scene->tween.to)
     {
@@ -488,13 +693,14 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
     }
 
     int offset = position(scene, frame);
-    if (offset == scene->last_offset && !target_changed)
+    int pose = scene->staggered ? (int)frame : offset;
+    if (pose == scene->last_offset && !target_changed)
         return;
 
     fb_data *data = core_get_data_pinned(scene->handle);
     bool panel = scene->backdrop_handle > 0;
     fb_data *out = data + (panel ? PAGE_PIXELS : 2 * PAGE_PIXELS);
-    if (target_changed || scene->composed_offset != offset)
+    if (target_changed || scene->composed_offset != pose)
     {
         uint32_t start = USEC_TIMER;
         fb_data *front = panel ? data : surface(data, true);
@@ -507,17 +713,19 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
             compose_modal(out, back, front, offset,
                           scene->target_front ? 0 : scene->status_height,
                           scene->dim_color);
+        else if (scene->staggered)
+            compose_push(scene, out, back, front, frame, offset);
         else
-            compose(out, back, front, offset);
+            compose_pages(scene, out, back, front, offset);
         if (panel)
             core_put_data_pinned(back);
-        scene->composed_offset = offset;
+        scene->composed_offset = pose;
         ui_note_render((uint32_t)USEC_TIMER - start);
     }
     bool submitted = present(out);
     core_put_data_pinned(data);
     if (submitted)
-        scene->last_offset = offset;
+        scene->last_offset = pose;
     else
         yield();
 }
@@ -531,7 +739,7 @@ int ui_scene_timeout(const struct ui_scene *scene, int timeout)
     unsigned frame = ui_clock_frame(elapsed);
     if (frame >= scene->tween.frames || scene->tween.from == scene->tween.to)
         return 1;
-    if (position(scene, frame) != scene->last_offset)
+    if ((scene->staggered ? (int)frame : position(scene, frame)) != scene->last_offset)
         return TIMEOUT_NOBLOCK;
 
     int ticks = ui_clock_poll_timeout(elapsed, scene->tween.frames, HZ);

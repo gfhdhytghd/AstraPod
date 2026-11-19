@@ -40,8 +40,9 @@
  * is up and its result in; answering
  * or dismissing it goes back there. A dismissed question does not pop up
  * again, but the alert row at the top of the spaces and agents views still
- * opens it. A MENU tap in any view leaves Agents without a leave confirmation;
- * after teardown, the USB Disk Mode consent is offered again.
+ * opens it. MENU returns one page at a time. The first tab is the space's
+ * landing page. MENU on the workspace list leaves Agents and offers USB
+ * Disk Mode consent again after teardown.
  * Holding MENU opens the quick screen. Focus sent for
  * the wheel, a tab, a workspace or the detail says nothing when it works
  * and its reason in the band when it fails.
@@ -96,6 +97,7 @@
 #include "widgets/list.h"
 #include "ui/frame.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/scene.h"
 #include "ui/statusbar.h"
 #include "widgets/splash.h"
 #include "widgets/dialog.h"
@@ -146,6 +148,8 @@ static struct dialog_text_line text_rows[TEXT_ROWS];
 static char question_text[HR_MAX_LINES * 124 + HR_MAX_LINES];
 
 static enum view view;
+static struct ui_scene page_scene;
+static const char spaces_page, usage_page, detail_page, tab_page[HR_MAX_TABS];
 static char space_id[16];       /* the workspace the agents view shows */
 static char space_tab[16];      /* its tab; "" is the first */
 static char detail_pane[16];    /* the pane the detail view shows */
@@ -2386,6 +2390,7 @@ static void show_row(struct gui_synclist *list, const struct row *r)
  * row it was on */
 static void open_question(struct gui_synclist *list, const char *pane)
 {
+    ui_scene_cancel(&page_scene);
     int sel = gui_synclist_get_sel_pos(list);
     question_from = view;
     question_from_row = sel >= 0 && sel < nrows ? rows[sel] : (struct row){0};
@@ -2445,8 +2450,31 @@ static void pop_question(struct gui_synclist *list)
     open_question(list, q->pane);
 }
 
+static void pan(const void *from, const void *to, int direction)
+{
+    struct ui_theme theme;
+    ui_theme_snapshot(&theme);
+    if (ui_scene_automatic())
+        ui_scene_interrupt();
+    ui_scene_capture_pan(&page_scene, from, to, direction,
+                         theme.metric[UI_METRIC_STATUS_HEIGHT]);
+}
+
+static void slide(const void *from, const void *to, bool push)
+{
+    if (ui_scene_automatic())
+        ui_scene_interrupt();
+    ui_scene_capture(&page_scene, from, to, push);
+}
+
+static int tab_index(void)
+{
+    return MAX(0, hr_model_tab_index(&model, space_id, space_tab));
+}
+
 static void open_usage(struct gui_synclist *list)
 {
+    pan(&spaces_page, &usage_page, 1);
     usage_scroll = 0;
     int sel = gui_synclist_get_sel_pos(list);
     usage_from = sel >= 0 && sel < nrows ? rows[sel] : (struct row){0};
@@ -2459,6 +2487,7 @@ static void open_usage(struct gui_synclist *list)
 /* Back to the spaces view, on the row the usage view was opened from */
 static void close_usage(struct gui_synclist *list)
 {
+    pan(&usage_page, &spaces_page, -1);
     view = VIEW_SPACES;
     key_runs.nruns = 0;
     show_row(list, &usage_from);
@@ -2467,6 +2496,7 @@ static void close_usage(struct gui_synclist *list)
 /* Into a workspace: its first tab's agents, and the computer shows it */
 static void enter_space(struct gui_synclist *list, const char *ws)
 {
+    slide(&spaces_page, &tab_page[0], true);
     snprintf(space_id, sizeof space_id, "%s", ws);
     space_tab[0] = '\0';
     subscribe(space_id, space_tab);
@@ -2479,6 +2509,7 @@ static void enter_space(struct gui_synclist *list, const char *ws)
 /* Back to the spaces view, on the workspace's row */
 static void close_space(struct gui_synclist *list)
 {
+    slide(&tab_page[0], &spaces_page, false);
     struct row r = { .kind = ROW_SPACE };
     snprintf(r.id, sizeof r.id, "%s", space_id);
     view = VIEW_SPACES;
@@ -2491,13 +2522,10 @@ static void close_space(struct gui_synclist *list)
 /* LEFT or RIGHT in the agents view: the tab before or after, which the
  * computer shows at once; its agents come with the next A, and the
  * selection goes to the first of them */
-static void switch_tab(struct gui_synclist *list, int dir)
+static void select_tab(struct gui_synclist *list, int tab)
 {
     char args[40];
-    int i = hr_model_tab_index(&model, space_id, space_tab);
-    if (i < 0 || i + dir < 0 || i + dir >= model.ntabs)
-        return;
-    snprintf(space_tab, sizeof space_tab, "%s", model.tabs[i + dir].id);
+    snprintf(space_tab, sizeof space_tab, "%s", model.tabs[tab].id);
     snprintf(args, sizeof args, "%s\t%s", space_id, space_tab);
     queue_focus("ft", args, false);
     subscribe(space_id, space_tab);
@@ -2506,10 +2534,32 @@ static void switch_tab(struct gui_synclist *list, int dir)
     show(list, 0);
 }
 
+static void switch_tab(struct gui_synclist *list, int dir)
+{
+    int i = hr_model_tab_index(&model, space_id, space_tab);
+    if (i < 0 || i + dir < 0 || i + dir >= model.ntabs)
+        return;
+    pan(&tab_page[i], &tab_page[i + dir], dir);
+    select_tab(list, i + dir);
+}
+
+static void back_from_tab(struct gui_synclist *list)
+{
+    int i = tab_index();
+    if (i == 0)
+        close_space(list);
+    else
+    {
+        slide(&tab_page[i], &tab_page[0], false);
+        select_tab(list, 0);
+    }
+}
+
 /* Into an agent's detail: its pane's lines come with D, and its keys go
  * once the computer has shown the pane */
 static void open_detail(struct gui_synclist *list, const struct hr_agent *a)
 {
+    slide(&tab_page[tab_index()], &detail_page, true);
     detail_scroll = detail_scroll_max = 0;
     memset(&detail_layout, 0, sizeof detail_layout);
     detail_body_avail = 0;
@@ -2531,6 +2581,7 @@ static void open_detail(struct gui_synclist *list, const struct hr_agent *a)
 /* Back to the agents view, on the agent's row */
 static void close_detail(struct gui_synclist *list)
 {
+    slide(&detail_page, &tab_page[tab_index()], false);
     struct row r = { .kind = ROW_AGENT };
     snprintf(r.id, sizeof r.id, "%s", detail_pane);
     subscribe_detail("");
@@ -2843,6 +2894,7 @@ static void agents_quickscreen_poll(void)
 
 static int agents_quickscreen(struct gui_synclist *list, int action)
 {
+    ui_scene_cancel(&page_scene);
     native_play_pending = false;
     finish_talk(true);
     quickscreen_result.ready = false;
@@ -3107,11 +3159,20 @@ static int agents_run(void)
 
         int before = gui_synclist_get_sel_pos(&list);
         int before_top = list.start_item[SCREEN_MAIN];
+        if (page_scene.handle > 0)
+        {
+            bool dirty = ui_take_dirty(SCREEN_MAIN);
+            if (page_scene.capturing)
+                ui_scene_start(&page_scene);
+            else
+                ui_scene_update(&page_scene, dirty);
+        }
+        int timeout = ui_scene_timeout(&page_scene, ANIM_TICKS);
         if (view == VIEW_USAGE || view == VIEW_DETAIL ||
             view == VIEW_ALERT || view == VIEW_INPUT || question_binary_page())
         {
             /* No list to scroll: the wheel is the arrow keys. */
-            action = get_action(CONTEXT_AGENTS, ANIM_TICKS);
+            action = get_action(CONTEXT_AGENTS, timeout);
 #ifdef IPOD_ACCESSORY_PROTOCOL
             if (action == ACTION_STD_PREV || action == ACTION_STD_NEXT)
             {
@@ -3161,7 +3222,7 @@ static int agents_run(void)
             if (key)
                 send_key(key);
         }
-        else if (list_do_action(CONTEXT_AGENTS, ANIM_TICKS, &list, &action))
+        else if (list_do_action(CONTEXT_AGENTS, timeout, &list, &action))
         {
             int sel = gui_synclist_get_sel_pos(&list);
             int lines = gui_synclist_get_nb_lines(&list, SCREEN_MAIN);
@@ -3222,8 +3283,21 @@ static int agents_run(void)
         {
             native_play_pending = false;
             finish_talk(true);
-            ret = AGENTS_EXIT_MENU;
-            done = true;
+            if (view == VIEW_SPACES)
+            {
+                ret = AGENTS_EXIT_MENU;
+                done = true;
+            }
+            else if (view == VIEW_USAGE)
+                close_usage(&list);
+            else if (view == VIEW_AGENTS)
+                back_from_tab(&list);
+            else if (view == VIEW_DETAIL)
+                close_detail(&list);
+            else if (view == VIEW_INPUT)
+                close_input(false);
+            else
+                leave_question(&list);
             continue;
         }
         if (question_action(&list, action)) continue;
@@ -3236,7 +3310,11 @@ static int agents_run(void)
                  * one view or tab */
                 int button;
                 get_action_statuscode(&button);
-                bool right = button & BUTTON_RIGHT;
+                int right_mask = BUTTON_RIGHT;
+#ifdef IPOD_ACCESSORY_PROTOCOL
+                right_mask |= BUTTON_RC_RIGHT;
+#endif
+                bool right = button & right_mask;
                 if (view == VIEW_USAGE)
                 {
                     if (right)
@@ -3260,7 +3338,7 @@ static int agents_run(void)
             case ACTION_STD_CANCEL:
             case ACTION_STD_MENU:
             {
-                /* MENU has already left above. LEFT goes to usage, the tab
+                /* Physical MENU was handled above. LEFT goes to usage, the tab
                  * before or Backspace; its repeats only repeat Backspace. */
                 int button;
                 int status = get_action_statuscode(&button);
@@ -3275,7 +3353,7 @@ static int agents_run(void)
                     if (left)
                         send_key("bs");
                     else if (view == VIEW_USAGE)
-                        done = true;
+                        close_usage(&list);
                     else
                         close_detail(&list);
                     break;
@@ -3294,7 +3372,7 @@ static int agents_run(void)
                     if (left)
                         switch_tab(&list, -1);
                     else
-                        close_space(&list);
+                        back_from_tab(&list);
                 }
                 else if (!left)
                     leave_question(&list);
@@ -3356,6 +3434,7 @@ static int agents_run(void)
         }
     }
 
+    ui_scene_cancel(&page_scene);
     /* A hold ends with the screen */
     signal_usage_view(false, true);
     finish_talk(false);

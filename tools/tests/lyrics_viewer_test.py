@@ -8,7 +8,7 @@ import ast,re,subprocess,sys
 r=Path(__file__).resolve().parents[2];o=Path(sys.argv[1]).resolve();o.mkdir(parents=True,exist_ok=True)
 ns=ast.parse((r/'tools/tests/lyrics_document_test.py').read_text())
 pre=next(ast.literal_eval(n.value) for n in ns.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='pre' for t in n.targets))
-pre=pre.replace('static struct {int default_codepage;} global_settings;', '''static struct {int default_codepage,lyric_colour_mode,backlight_timeout,backlight_timeout_plugged,lyric_prev_opacity,lyric_next_opacity,lyric_lead;unsigned fg_color,bg_color;bool lyric_highlight,lyric_backlight,prevent_skip,animations,native_ui;} global_settings;''')
+pre=pre.replace('static struct {int default_codepage;} global_settings;', '''static struct {int default_codepage,lyric_colour_mode,backlight_timeout,backlight_timeout_plugged,lyric_prev_opacity,lyric_next_opacity,lyric_lead,lyric_align;unsigned fg_color,bg_color;bool lyric_highlight,lyric_backlight,prevent_skip,animations,native_ui;} global_settings;''')
 pre=pre.replace('length,id3v2len;', 'length,id3v2len,elapsed;')
 pre=pre.replace('static void core_free(int h){assert(h==1);frees++;}',
                 'static int core_free(int handle);')
@@ -194,6 +194,11 @@ static void lcd_putsxy(int x,int y,const char*p){
     int w,h;font_getstringsize((const unsigned char*)p,&w,&h,vp->font);lcd_fillrect(x,y,w,h);
 }
 static void fill_round_rect(struct screen*s,int x,int y,int w,int h,int radius){(void)s;(void)radius;lcd_fillrect(x,y,w,h);}
+static void memset16(void *ptr, int value, size_t count)
+{
+    fb_data *pixels = ptr;
+    for (size_t i = 0; i < count; i++) pixels[i] = value;
+}
 static void lcd_update(void){updates++;memcpy(panel,screen_pixels,sizeof panel);}
 static void lcd_update_rect(int x,int y,int w,int h){assert(x>=0&&y>=0&&w>0&&h>0&&x+w<=320&&y+h<=240);updates++;
  for(int j=y;j<y+h;j++)memcpy(panel+j*320+x,screen_pixels+j*320+x,w*sizeof(fb_data));}
@@ -300,7 +305,18 @@ static struct mp3entry *audio_current_track(void){return playing_audio?&playing:
 static void wps_lyrics_backdrop(void){for(int i=0;i<320*240;i++)screen_pixels[i]=0x1234;}
 static void wps_do_playpause(bool b){(void)b;pauses++;wps.paused=!wps.paused;}
 static void wps_lyrics_skip(int d){skips++;assert(d==1);char*leaf=strrchr(playing.path,'/');assert(leaf);strcpy(leaf+1,"other.wav");playing.title="Second";playing.artist="Artist2";playing.elapsed=0;}
-static void wps_lyrics_seek(int a,void(*draw)(void)){(void)a;seeks++;wps.ff_rewind_count=500;draw();wps.ff_rewind_count=0;}
+static void wps_lyrics_seek(int action, void (*draw)(void))
+{
+    (void)action;
+    seeks++;
+    wps.ff_rewind_count = 500;
+    draw();
+    if (plan == 8) {
+        playing.elapsed += wps.ff_rewind_count;
+        seek_serial++;
+    }
+    wps.ff_rewind_count = 0;
+}
 static void record_seek(long target){line_seeks++;seek_target=target;seek_updates=updates;}
 static void audio_ff_rewind(long target){assert(!remote_source);record_seek(target);}
 static void audio_seek_now(long target){assert(!remote_source);fast_seeks++;record_seek(target);}
@@ -390,21 +406,38 @@ static fb_data ref_mix(fb_data a, fb_data b, int p)
 }
 static void test_pixels(void)
 {
-    /* Cover worst expansion, blank, opaque, AA, clipping and karaoke splits. */
-    for(int t=0;t<2000;t++) {
-        fb_data mask[320], pixels[320], ref[320];
-        fb_data fg=pixel_rand();
-        int limit=t%3==0?288:pixel_rand()%289, sung=(int)(pixel_rand()%322)-1;
-        int a=pixel_rand()%257, dim=a*(pixel_rand()%257)/256;
-        for(int x=0;x<320;x++) {
-            unsigned green=t%4==0?63u*(x%2):t%4==1?63:t%4==2?0:pixel_rand()%64;
-            mask[x]=green<<5; pixels[x]=ref[x]=pixel_rand();
-            if(x<limit) ref[x]=ref_mix(ref[x],fg,
-                    (sung<0||x<sung?a:dim)*(green+(green>>5))>>6);
+    /* Wrapped rows share the selected edge and the block's scale origin. */
+    assert(lv_text_x(200,200,256,0) == 16 && lv_text_x(100,200,256,0) == 16);
+    assert(lv_text_x(200,200,256,2) + 200 == 304);
+    assert(lv_text_x(100,200,256,2) + 100 == 304);
+    assert(lv_text_x(100,200,256,1) == 110);
+    assert(lv_text_x(220,200,282,0) == 6 && lv_text_x(110,200,282,0) == 6);
+    assert(lv_text_x(220,200,282,2) + 220 == 314);
+    assert(lv_text_x(110,200,282,2) + 110 == 314);
+    /* Compare the feather and filtered strips with scalar pixel math. */
+    for (int t = 0; t < 2000; t++) {
+        unsigned char upper[322] = {0}, lower[322] = {0};
+        fb_data pixels[320], ref[320], fg = pixel_rand();
+        int width = t % 3 == 0 ? 288 : pixel_rand() % 289;
+        int step = t % 2 ? 256 : 232, fy = pixel_rand() % 16;
+        int sweep = (int)(pixel_rand() % 322) - 1, alpha = pixel_rand() % 257;
+        int dim = alpha * (pixel_rand() % 257) / 256;
+        for (int x = 0; x < 320; x++) {
+            upper[x + 1] = t % 4 ? pixel_rand() % 65 : 64;
+            lower[x + 1] = t % 4 ? pixel_rand() % 65 : 0;
+            pixels[x] = ref[x] = pixel_rand();
         }
-        lv_encode_ink(mask);
-        lv_ink_row(mask,pixels,limit,sung,a,dim,lv_expand(fg));
-        assert(!memcmp(ref,pixels,sizeof ref));
+        for (int x = 0; x < width; x++) {
+            int q = (step - 256) / 2 + step * x;
+            int ix = (q >> 8) + 1, fx = (q >> 4) & 15;
+            unsigned ink = step == 256 ? upper[x + 1] :
+                ((upper[ix] * (16-fx) + upper[ix + 1] * fx) * (16-fy)
+                + (lower[ix] * (16-fx) + lower[ix + 1] * fx) * fy + 128) / 256;
+            int light = sweep < 0 ? alpha : dim + (alpha - dim) * MAX(0, MIN(12, sweep - x)) / 12;
+            ref[x] = ref_mix(ref[x], fg, light * ink / 64);
+        }
+        lv_ink_row(pixels, upper + 1, lower + 1, width, step, fy, alpha, sweep, dim, lv_expand(fg));
+        assert(!memcmp(ref, pixels, sizeof ref));
     }
     struct lv_state state={0};
     lv_state=&state;lv.snapshot=app_area;lv.layer=app_area+LV_PIXELS;
@@ -424,13 +457,17 @@ static void test_pixels(void)
             assert(screen_pixels[i]==ref_mix(lv.snapshot[i],lv.layer[i],alpha));
     }
     lv_state=NULL;
-    puts("PASS FU65 pixel reference: 2000 ink scanlines and all 257 transition weights");
+    puts("PASS FU102 pixel reference: 2000 ink scanlines and all 257 transition weights");
 }
 static const int multimedia_keys[] = {
     BUTTON_MULTIMEDIA_PLAYPAUSE, BUTTON_MULTIMEDIA_NEXT, BUTTON_MULTIMEDIA_PREV,
     BUTTON_MULTIMEDIA_VOLUME_UP, BUTTON_MULTIMEDIA_VOLUME_UP | BUTTON_REPEAT,
     BUTTON_MULTIMEDIA_VOLUME_DOWN, BUTTON_MULTIMEDIA_VOLUME_DOWN | BUTTON_REPEAT,
 };
+static int pose_y(int index, uint32_t now)
+{
+    return lv_pose_at(index - lv.pose_first, lv_motion_age(now)).from_y;
+}
 static int select_scenario(void)
 {
     int focus=backward_seek?0:1;
@@ -440,16 +477,16 @@ static int select_scenario(void)
     }
     if (calls==2) {
         assert(lv.mode.manual && lv.mode.focus==focus);
-        assert(lyrics_motion_at(&lv.scroll,lv_line_clock())!=focus*256);
+        assert(pose_y(focus, lv_clock()) != LV_ANCHOR);
         select_button=(remote_key || remote_source)?BUTTON_RC_SELECT:BUTTON_SELECT;
         return ACTION_UNKNOWN;
     }
     long expected=backward_seek?0:(remote_source ? 2000 : 4000)-global_settings.lyric_lead;
     assert(line_seeks==1 && seek_target==expected);
     assert(!lv.mode.manual && lv.mode.focus==focus);
-    assert(lv.scroll.to==focus*256 && lv.old_position==focus*256);
+    assert(lv.pose_focus == focus && lv.motion_frames == 0);
     if (calls==3) {
-        assert(updates==seek_updates+1 && "SELECT press must submit exactly one target frame");
+        assert(updates >= seek_updates + 1 && lv.track_fade);
         assert(lv.elapsed==expected && playing.elapsed!=(unsigned long)expected);
         if (remote_source) remote_cn("one",backward_seek?2800:100,0);
         else playing.elapsed=seek_target; /* An unconfirmed local clock cannot win. */
@@ -457,7 +494,7 @@ static int select_scenario(void)
         return ACTION_WPS_BROWSE; /* Release must not exit or send another seek. */
     }
     if (calls==4) {
-        assert(lv.elapsed==expected && updates==seek_updates+1);
+        assert(lv.elapsed==expected && lv.track_fade);
         long landed=MAX(0,seek_target-100);
         if (remote_source) remote_cn("one",landed,0);
         else {playing.elapsed=landed;seek_serial++;}
@@ -468,7 +505,7 @@ static int select_scenario(void)
         return ACTION_NONE;
     }
     assert(lv_lyric_elapsed()==(backward_seek?200:remote_source?2000:4000));
-    assert(lyrics_motion_at(&lv.scroll,lv_line_clock())==focus*256);
+    assert(pose_y(focus, lv_clock()) == LV_ANCHOR);
     assert(!title_draws&&!manual_draws);
     return ACTION_WPS_BROWSE; /* SELECT exits again after auto-follow. */
 }
@@ -491,7 +528,7 @@ static int get_action(int c,int timeout){
       return ACTION_NONE;
     case 3:
       assert(lv.entry_handle && lv.entry_frame==(int)midway && timeout==1 && updates==2);
-      assert(lv.old_position>0 && lv.old_position<256);
+      assert(lv.motion_frame == midway && pose_y(1, lv_clock()) > LV_ANCHOR);
       precise_extra+=ui_frame_clock(skipped)-ui_frame_clock(midway);
       return ACTION_NONE;
     default:
@@ -500,29 +537,34 @@ static int get_action(int c,int timeout){
    }
  }
  if(plan==14) {
-   assert(lv.scroll.frame_clock);
    switch(++calls) {
     case 1: return ACTION_WPS_VOLUP;
     case 2:
-      assert(lv.mode.manual && lv.mode.focus==1 && lv.scroll.duration==ANIM_F(16));
-      assert(timeout==1 && lv.old_position==0);
+      assert(lv.mode.manual && lv.mode.focus==1 && lv.scroll_frames==ANIM_F(20));
+      assert(timeout==1 && lv.motion_frame==0 && lv.stagger_frames==ANIM_F(2));
+      for (int slot = 0; slot < lv.pose_count; slot++) {
+        unsigned delay = slot * ANIM_F(2);
+        assert(lv_pose_at(slot, delay).from_y == lv.poses[slot].from_y);
+        assert(lv_pose_at(slot, delay + 1).from_y < lv.poses[slot].from_y);
+        assert(lv_pose_at(slot, delay + ANIM_F(20)).from_y == lv.poses[slot].to_y);
+      }
       precise_extra+=ui_frame_clock(ANIM_F(5));
-      retarget_position=lyrics_motion_at(&lv.scroll,lv_line_clock());
-      assert(retarget_position>0 && retarget_position<256);
+      retarget_position=pose_y(0, lv_clock());
+      assert(retarget_position < LV_ANCHOR);
       return ACTION_WPS_VOLDOWN;
     case 3:
-      assert(lv.mode.focus==0 && lv.scroll.from==retarget_position);
-      assert(lv.old_position==retarget_position && timeout==1);
-      precise_extra+=ui_frame_clock(ANIM_F(24));
+      assert(lv.mode.focus==0 && pose_y(0, lv_clock())==retarget_position);
+      assert(lv.motion_frame==0 && timeout==1);
+      precise_extra+=ui_frame_clock(ANIM_F(40));
       return ACTION_NONE;
     default:
-      assert(calls==4 && lv.old_position==0 && !lv.boost);
+      assert(calls==4 && pose_y(0, lv_clock())==LV_ANCHOR && !lv.boost);
       return SYS_USB_CONNECTED;
    }
  }
  if(plan==8) {
    calls++;
-   if(calls==1){assert(lv.masks&&!lv.cues);return ACTION_WPS_SKIPNEXT;}
+   if(calls==1){assert(lv.masks && lv.raster);return ACTION_WPS_SKIPNEXT;}
    if(calls==2){assert(lv.track_fade);current_tick+=6;return ACTION_WPS_SEEKFWD;}
    assert(calls==3&&lv.track_fade);
    /* The destination after a mid-fade seek must match a fresh full redraw. */
@@ -537,7 +579,7 @@ static int get_action(int c,int timeout){
    assert(lv.boost&&lv.mode.manual);
    return plan==7 ? SYS_USB_CONNECTED : nav_action;
  }
- assert(c==CONTEXT_WPS&&timeout>0&&timeout<=50);current_tick+=timeout;calls++;assert(calls<50);
+ assert(c==CONTEXT_WPS&&timeout>=0&&timeout<=50);current_tick+=MAX(1, timeout);calls++;assert(calls<50);
  if(plan==10) {
   if(calls>1)assert(multimedia_count==calls-1 && multimedia_last==multimedia_keys[calls-2]);
   return (unsigned)calls<=ARRAYLEN(multimedia_keys) ? multimedia_keys[calls-1] : ACTION_WPS_MENU;
@@ -554,8 +596,8 @@ static int get_action(int c,int timeout){
  }
  if(plan==0){
   if(calls==1){assert(lv.mode.focus==0);return ACTION_WPS_VOLUP;}
-  if(calls==2){assert(lv.mode.manual&&lv.mode.focus==1);retarget_position=lyrics_motion_at(&lv.scroll,lv_line_clock());return ACTION_WPS_VOLUP;}
-  if(calls==3){assert(lv.scroll.from==retarget_position&&lv.mode.focus==2);current_tick+=400;playing.elapsed=9000;return ACTION_NONE;}
+  if(calls==2){assert(lv.mode.manual&&lv.mode.focus==1);retarget_position=pose_y(0, lv_clock());return ACTION_WPS_VOLUP;}
+  if(calls==3){assert(pose_y(0, lv_clock())==retarget_position && lv.mode.focus==2);current_tick+=400;playing.elapsed=9000;return ACTION_NONE;}
   if(calls==4){assert(!lv.mode.manual&&lv.mode.focus==2);return ACTION_WPS_PLAY;}
   if(calls==5)return ACTION_WPS_SEEKFWD;
   if(calls==6)return ACTION_WPS_SKIPNEXT;
@@ -584,19 +626,19 @@ static int get_action(int c,int timeout){
   if(lv.pending)return ACTION_NONE;
   assert(lyrics_timed()&&lyrics_loaded()&&lyrics_count()==2&&!strcmp(lyrics_text(0),"星 光"));
   switch(++remote_actions){
-   case 1:assert(!lv.paused&&lv.mode.focus==0);paused_width=lv_sung_width(0,26);current_tick+=20;return ACTION_NONE;
-   case 2:assert(lv_sung_width(0,26)>=paused_width&&remote_clock.seq==1);
+   case 1:assert(!lv.paused&&lv.mode.focus==0);paused_width=lv_sweep(0,lv_lyric_elapsed());current_tick+=20;return ACTION_NONE;
+   case 2:assert(lv_sweep(0,lv_lyric_elapsed())>=paused_width&&remote_clock.seq==1);
      assert(!lv.art_ready&&!perf.builds);
      art_present=true;art_handle=7;art_pixels[0]=0x07e0;art_generation++;
      pause_position=cider_playback_position(&remote_clock,current_tick,HZ);
      remote_cn("one",pause_position+150,0);return ACTION_NONE;
    case 3:assert(lv.paused&&lv.elapsed==pause_position);
-     paused_width=lv_sung_width(0,26);current_tick+=120;return ACTION_NONE;
-   case 4:assert(lv.elapsed==pause_position&&lv_sung_width(0,26)==paused_width);
+     paused_width=lv_sweep(0,lv_lyric_elapsed());current_tick+=120;return ACTION_NONE;
+   case 4:assert(lv.elapsed==pause_position&&lv_sweep(0,lv_lyric_elapsed())==paused_width);
      assert(lv.remote&&lv.art_ready&&perf.builds==1);
      remote_cn("one",1799,0);return ACTION_NONE;
    case 5:assert(lv.mode.focus==0);remote_cn("one",1800,0);return ACTION_NONE;
-   case 6:assert(lv.elapsed==1800&&lv.mode.focus==1&&lv.scroll.to==256);return ACTION_WPS_VOLDOWN;
+   case 6:assert(lv.elapsed==1800&&lv.mode.focus==1&&lv.pose_focus==1);return ACTION_WPS_VOLDOWN;
    case 7:assert(lv.mode.manual&&lv.mode.focus==0);current_tick+=400;return ACTION_NONE;
    default:assert(!lv.mode.manual&&lv.mode.focus==1);return ACTION_WPS_LYRICS;
   }
@@ -609,10 +651,10 @@ static int get_action(int c,int timeout){
  if(plan==6){
    assert(lyrics_time(1)==4000&&lv.old_progress==(int)(playing.elapsed*320/playing.length));
    if(calls==1){assert(lv.mode.focus==0);playing.elapsed=lead_boundary;return ACTION_NONE;}
-   if(calls==2){assert(lv.mode.focus==1&&lv_word_width(1,26,NULL)==0);playing.elapsed+=500;return ACTION_NONE;}
-   assert(lv_word_width(1,26,NULL)>0);
+   if(calls==2){assert(lv.mode.focus==1&&lv_sweep(1,lv_lyric_elapsed())==0);playing.elapsed+=500;return ACTION_NONE;}
+   assert(lv_sweep(1,lv_lyric_elapsed())>0);
    unsigned before=width_reads;
-   assert(lv_word_width(1,26,NULL)>0 && width_reads==before);
+   assert(lv_sweep(1,lv_lyric_elapsed())>0 && width_reads==before);
    return ACTION_WPS_LYRICS;
  }
  if(plan==5){
@@ -654,7 +696,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  FILE*f=fopen("song.lrc","w");assert(f);fputs("[00:00.00]One\n[00:04.00]<00:04.00>Two <00:06.00>words\n[00:08.00]Three\n",f);fclose(f);
  f=fopen("other.txt","w");assert(f);fputs("New first line\nNew second line\n中文第三行",f);fclose(f);
  snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);playing.title="Title";playing.artist="Artist";playing.length=60000;
- global_settings.lyric_lead=200;global_settings.fg_color=65535;global_settings.lyric_highlight=true;global_settings.lyric_backlight=true;global_settings.lyric_prev_opacity=global_settings.lyric_next_opacity=55;
+ global_settings.lyric_lead=200;global_settings.fg_color=65535;global_settings.lyric_highlight=true;global_settings.lyric_backlight=true;global_settings.lyric_prev_opacity=global_settings.lyric_next_opacity=60;
  global_settings.animations=true;
  deny_entry_core=true;
  if (!strcmp(argv[2],"frames")) {
@@ -663,7 +705,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
    plan=7;calls=0;
    assert(lyric_viewer()==GO_TO_ROOT && calls==2);
    assert(clock_refs==1 && boost_gets==boost_puts && releases==2 && default_events==2);
-   puts("PASS opt-in 16 f line motion, immediate retarget, elapsed-time skip and active USB exit");
+   puts("PASS 20 f staggered line motion, immediate retarget, elapsed-time skip and active USB exit");
    return 0;
  }
  if (!strcmp(argv[2],"entry-frames")) {
@@ -718,7 +760,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
    calls=line_seeks=0;
    assert(lyric_viewer()==GO_TO_PREVIOUS && calls==6 && line_seeks==1);
    lyrics_remote_cancel();
-   puts("PASS FU71 SELECT: wheel/dock press, same frame, local/remote stale clocks, both directions, lead and exit");
+   puts("PASS FU71 SELECT: wheel/dock press, cross-fade, local/remote stale clocks, both directions, lead and exit");
    return 0;
  }
  if (!strcmp(argv[2],"entry")) {
@@ -742,14 +784,14 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  if (strcmp(argv[2],"all")) return 1;
  reject_loading=true;
  wps_lyrics_backdrop();assert(lyric_viewer()==GO_TO_PREVIOUS);assert(pauses==1&&seeks==1&&skips==1);
- assert(claims==1&&releases==1&&loads==2&&unloads==2&&!holds&&!activities&&!inhibited&&!lyrics_loaded());
+ assert(claims==1&&releases==1&&loads==1&&unloads==1&&!holds&&!activities&&!inhibited&&!lyrics_loaded());
  plan=1;calls=0;remote_source=true;playing.elapsed=0;strcpy(playing.path,"cider/song");
  get_wps_state();current_tick+=3;assert(lyrics_remote_step());assert(lyrics_remote_step());
  assert(lyrics_loaded()&&lyrics_count()==16&&remote_doc.first_ms==30&&!remote_doc.done);
  assert(lyric_viewer()==GO_TO_PREVIOUS&&controls==3&&remote_at==75);
  assert(lyrics_loaded()&&remote_doc.done&&remote_doc.complete_ms>=remote_doc.first_ms);
  lyrics_remote_cancel();
- assert(claims==2&&releases==2&&loads==4&&unloads==4&&!holds&&!activities&&!inhibited);
+ assert(claims==2&&releases==2&&loads==2&&unloads==2&&!holds&&!activities&&!inhibited);
  plan=2;calls=0;remote_source=false;playing_audio=false;wps.id3=NULL;deny_arena=true;
  assert(lyric_viewer()==GO_TO_ROOT&&default_events==1&&releases==2&&!holds&&!activities&&!inhibited);
  assert(nothing_playing_draws);
@@ -808,8 +850,9 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  calls=0;plan=7;playing.elapsed=0;
  assert(lyric_viewer()==GO_TO_ROOT && clock_refs==1 && boost_gets==boost_puts);
  plan=8;calls=0;
- arena_bytes=3*LV_FRAME
-            +LV_LAYOUTS*sizeof(struct lv_layout)+(LV_MASKS+1)*(sizeof(struct lv_mask)+320*26*sizeof(fb_data));
+ arena_bytes = 3 * LV_FRAME + LV_LAYOUTS * sizeof(struct lv_layout)
+             + (LV_MASKS + 1) * (sizeof(struct lv_mask) + LV_STRIP_STRIDE * 18)
+             + LCD_WIDTH * 18 * sizeof(fb_data);
  assert(lyric_viewer()==GO_TO_PREVIOUS && clock_refs==1 && boost_gets==boost_puts);
  const int nav_actions[] = {ACTION_AGENTS_SWITCH, ACTION_AGENTS_REMOTE_SWITCH,
                             ACTION_AGENTS_COVERS, ACTION_AGENTS_REMOTE_COVERS};

@@ -179,7 +179,7 @@ struct lv_state {
     bool remote, pending, held, paused, track_fade, initial, claimed, sample_valid;
     bool painted, art_ready, first_pending, boost, seek_pending, seek_consumed, seek_running;
 };
-/* All users run synchronously on the UI thread. The page state is on its stack. */
+/* The only active lyrics page owns this state on the UI thread. */
 static struct lv_state *lv_state;
 #define lv (*lv_state)
 
@@ -2004,9 +2004,7 @@ static bool lv_font_header(const char *path, unsigned *height)
 
 static void __attribute__((noinline)) lv_load_fonts(void)
 {
-    struct ui_theme theme;
-    ui_theme_snapshot(&theme);
-    lv.font = ui_theme_font_load(&theme, UI_FONT_LYRICS, 64);
+    lv.font = ui_theme_current_font_load(UI_FONT_LYRICS, 64);
     lv.font_height = font_get(lv_font())->height;
     lv.raster_height = lv.font_height;
     lv.small_font = font_load_ex(FONT_DIR "/12-noto-sans.fnt", 0, 32);
@@ -2053,11 +2051,15 @@ static void __attribute__((noinline)) lv_load_fonts(void)
 
 int lyric_viewer(void)
 {
+    static struct lv_state state;
+    if (lv_state)
+        return GO_TO_PREVIOUS;
     uint32_t entry_at = lv_clock();
-    struct lv_state state = {
-        .initial = true, .entry_at = entry_at, .entry_tick = current_tick, .first_pending = true
-    };
+    memset(&state, 0, sizeof(state));
     lv_state = &state;
+    lv.initial = lv.first_pending = true;
+    lv.entry_at = entry_at;
+    lv.entry_tick = current_tick;
     lv_page_init();
     perf.seek_frame_us = -1;
     lv_boost(true);

@@ -413,6 +413,19 @@ static struct font* font_load_header(int fd, struct font *pheader,
     return pf;
 }
 
+unsigned font_file_height(const char *path)
+{
+    unsigned char header[8];
+    int fd = open(path, O_RDONLY | O_BINARY);
+    if (fd < 0)
+        return 0;
+    ssize_t bytes = read(fd, header, sizeof(header));
+    close(fd);
+    if (bytes != sizeof(header) || memcmp(header, VERSION, 4))
+        return 0;
+    return header[6] | (header[7] << 8);
+}
+
 /* load a font with room for glyphs, limited to bufsize if not zero */
 int font_load_ex( const char *path, size_t buf_size, int glyphs )
 {
@@ -1024,11 +1037,6 @@ static void glyph_cache_save(int font_id)
 }
 
 
-static int ucscharcmp(const void *a, const void *b)
-{
-    return ((int)(*(ucschar_t*)a - *(ucschar_t*)b));
-}
-
 static NO_INLINE void glyph_cache_load(const char *font_path, struct font *pf)
 {
 #define MAX_SORT 256
@@ -1036,8 +1044,6 @@ static NO_INLINE void glyph_cache_load(const char *font_path, struct font *pf)
         int i, size, fd;
         unsigned char tmp[sizeof(ucschar_t)];
         ucschar_t ch;
-        ucschar_t glyphs[MAX_SORT];
-        ucschar_t glyphs_lru_order[MAX_SORT];
         unsigned int glyph_file_skip=0, glyph_file_size=0;
 
         int sort_size = pf->cache._capacity;
@@ -1054,44 +1060,59 @@ static NO_INLINE void glyph_cache_load(const char *font_path, struct font *pf)
             /* Header */
             uint32_t hdr = 0;
             read(fd, &hdr, sizeof(hdr));
-            if (hdr != FC_HEADER_VAL)
-                goto latin;
-            /* only read what fits */
             glyph_file_size = ffilesize( fd );
-            if (glyph_file_size < sizeof(uint32_t))
+            if (hdr != FC_HEADER_VAL || glyph_file_size < sizeof(uint32_t))
+            {
+                close(fd);
                 goto latin;
+            }
+            /* only read what fits */
             glyph_file_size -= sizeof(uint32_t);
             if ( glyph_file_size > (int)sizeof(ucschar_t)*pf->cache._capacity ) {
                 glyph_file_skip = glyph_file_size - sizeof(ucschar_t)*pf->cache._capacity;
                 lseek( fd, glyph_file_skip + sizeof(uint32_t), SEEK_SET );
             }
-            while(1) {
+            int handle = core_alloc_free_space(2 * sort_size * sizeof(ucschar_t));
+            ucschar_t *glyphs = handle > 0 ? core_get_data_pinned(handle) : NULL;
+            ucschar_t *glyphs_lru_order = glyphs ? glyphs + sort_size : NULL;
+            do {
                 for ( size = 0;
-                      read( fd, tmp, sizeof(tmp) ) == sizeof(tmp) && size < sort_size;
+                      size < sort_size && read(fd, tmp, sizeof(tmp)) == sizeof(tmp);
                       size++ )
                 {
 #ifdef UNICODE32
-                    glyphs[size] = (tmp[0] << 24) | (tmp[1] << 16) | (tmp[2] << 8) | tmp[3];
+                    ch = (uint32_t)tmp[0] << 24 | (uint32_t)tmp[1] << 16 |
+                         (uint32_t)tmp[2] << 8 | tmp[3];
 #else
-                    glyphs[size] = (tmp[0] << 8) | tmp[1];
+                    ch = (tmp[0] << 8) | tmp[1];
 #endif
-                    glyphs_lru_order[size] = glyphs[size];
+                    if (glyphs)
+                    {
+                        /* Load in file order, then restore the saved LRU order. */
+                        glyphs_lru_order[size] = ch;
+                        i = size;
+                        while (i > 0 && glyphs[i - 1] > ch)
+                        {
+                            glyphs[i] = glyphs[i - 1];
+                            i--;
+                        }
+                        glyphs[i] = ch;
+                    }
+                    else
+                        font_get_bits(pf, ch);
                 }
-
-                /* sort glyphs array to make sector cache happy */
-                qsort((void *)glyphs, size, sizeof(ucschar_t),
-                      ucscharcmp );
-
-                /* load font bitmaps */
-                for( i = 0; i < size ; i++ )
-                    font_get_bits(pf, glyphs[i]);
-
-                /* redo to fix lru order */
-                for ( i = 0; i < size ; i++)
-                    font_get_bits(pf, glyphs_lru_order[i]);
-
-                if ( size < sort_size )
-                    break;
+                if (glyphs)
+                {
+                    for (i = 0; i < size; i++)
+                        font_get_bits(pf, glyphs[i]);
+                    for (i = 0; i < size; i++)
+                        font_get_bits(pf, glyphs_lru_order[i]);
+                }
+            } while (sort_size > 0 && size == sort_size);
+            if (glyphs)
+            {
+                core_put_data_pinned(glyphs);
+                core_free(handle);
             }
 
             close(fd);

@@ -124,6 +124,26 @@
 /*#define AUTOROCK*/ /* define this to check for "autostart.rock" on boot */
 
 static void init(void);
+static void paint_startup_background(void) INIT_ATTR __attribute__((noinline));
+static void paint_startup_background(void)
+{
+    struct ui_theme theme;
+    struct ui_album_palette palette;
+    ui_theme_snapshot(&theme);
+    album_palette_snapshot(&palette);
+    uint32_t fg = ui_theme_color(&theme, UI_COLOR_FOREGROUND, &palette);
+    uint32_t bg = ui_theme_color(&theme, UI_COLOR_BACKGROUND, &palette);
+    unsigned int boot_fg = LCD_RGBPACK(fg >> 16, (fg >> 8) & 255, fg & 255);
+    unsigned int boot_bg = LCD_RGBPACK(bg >> 16, (bg >> 8) & 255, bg & 255);
+    FOR_NB_SCREENS(i)
+    {
+        screens[i].set_foreground(boot_fg);
+        screens[i].set_background(boot_bg);
+        screens[i].clear_display();
+        screens[i].update();
+    }
+}
+
 /* main(), and various functions called by main() and init() may be
  * be INIT_ATTR. These functions must not be called after the final call
  * to root_menu() at the end of main()
@@ -141,7 +161,7 @@ int main(void)
     CHART(">init");
     init();
     CHART("<init");
-    struct ui_scene startup_scene = {0};
+    static struct ui_scene startup_scene;
     ui_scene_boot(&startup_scene);
     /* Hand the screen over to the UI in the colours it will use.
      *
@@ -156,21 +176,7 @@ int main(void)
      * carrying them, and the colours have to be resolved for the clear below
      * or the theme's background shows through until something repaints. */
     album_palette_seed_resume();
-    struct ui_theme theme;
-    struct ui_album_palette palette;
-    ui_theme_snapshot(&theme);
-    album_palette_snapshot(&palette);
-    uint32_t fg = ui_theme_color(&theme, UI_COLOR_FOREGROUND, &palette);
-    uint32_t bg = ui_theme_color(&theme, UI_COLOR_BACKGROUND, &palette);
-    unsigned int boot_fg = LCD_RGBPACK(fg >> 16, (fg >> 8) & 255, fg & 255);
-    unsigned int boot_bg = LCD_RGBPACK(bg >> 16, (bg >> 8) & 255, bg & 255);
-    FOR_NB_SCREENS(i)
-    {
-        screens[i].set_foreground(boot_fg);
-        screens[i].set_background(boot_bg);
-        screens[i].clear_display();
-        screens[i].update();
-    }
+    paint_startup_background();
     list_init();
     browser_init();
     /* Keep the order of this 3
@@ -616,9 +622,8 @@ static void init_tagcache(void)
 #include "errno.h"
 
 #if !defined(SIMULATOR) && !defined(APPLICATION)
-/* The main stack sits directly above __thread_entries in IRAM, so an
- * overflow silently corrupts other threads. crt0 fills it with 0xdeadbeef;
- * panic by name once usage reaches the bottom 2 KiB, before any damage. */
+/* crt0 fills the main stack with 0xdeadbeef. Check the watermark 2 KiB
+ * above its lower end before an overflow reaches adjacent memory. */
 static void main_stack_guard(void)
 {
     extern uintptr_t stackbegin[];

@@ -8,6 +8,7 @@
 #include "config.h"
 #include "core_alloc.h"
 #include <ctype.h>
+#include "dir.h"
 #include "font.h"
 #include "kernel.h"
 #include "lang.h"
@@ -16,6 +17,7 @@
 #include "rbunicode.h"
 #include "scroll_engine.h"
 #include "settings/settings.h"
+#include "strcasecmp.h"
 #include "system.h"
 #include "audio.h"
 #include "metadata.h"
@@ -51,9 +53,6 @@ enum {
     INDEX_WINDOW_F = 10,
     INDEX_TRIGGER = 8,
     INDEX_HOLD_F = 20,
-    INDEX_BOX = 96,
-    INDEX_INK_WIDTH = INDEX_BOX - 20,
-    INDEX_CAP_HEIGHT = 56,
     INDEX_SAMPLES = 12,
     INDEX_SCRIM_RETAIN = 56,  /* 78% dim */
     INDEX_BORDER_RETAIN = 225, /* 12% white */
@@ -82,10 +81,9 @@ struct list_index {
     bool visible, fast;
 };
 
-struct index_glyph {
-    char key[16];
-    int width, height;
-    unsigned char mask[(INDEX_INK_WIDTH * INDEX_CAP_HEIGHT + 1) / 2];
+struct index_face {
+    unsigned height;
+    char name[MAX_PATH - sizeof(FONT_DIR)];
 };
 
 struct native_list {
@@ -106,10 +104,15 @@ struct native_list {
     int selection;
     struct list_motion motion;
     struct list_index overlay;
-    int index_fonts[4];
-    bool index_fonts_loaded;
-    unsigned index_slot;
-    struct index_glyph index_cache[4];
+    int index_faces, index_face_count, index_font;
+    char index_font_key[sizeof(((struct list_index *)0)->key)];
+    /* Row and notes painters run serially while the renderer is pinned. */
+    union {
+        struct {
+            char name[MAX_PATH], value[96], playing[MAX_PATH];
+        } row;
+        char notes[2 * MAX_PATH];
+    } scratch;
     int row_shift, cursor_y;
     uint32_t marquee_started, marquee_frame;
     bool has_marquee;
@@ -128,6 +131,7 @@ void list_render_init(void)
         struct native_list *render = core_get_data_pinned(renderer_handle);
         memset(render, 0, sizeof(*render));
         render->overlay.last_sel = -1;
+        render->index_font = FONT_SYSFIXED;
         render->text_font = render->title_font = render->icon_font = -1;
         render->theme_generation = (unsigned)-1;
         core_put_data_pinned(render);
@@ -143,8 +147,6 @@ static void refresh_tokens(struct native_list *render)
     ui_theme_snapshot(&render->theme);
     render->theme_generation = generation;
     render->colors_current = false;
-    for (unsigned i = 0; i < ARRAYLEN(render->index_cache); ++i)
-        render->index_cache[i].key[0] = '\0';
     font_unload(render->text_font);
     font_unload(render->title_font);
     font_unload(render->icon_font);
@@ -792,9 +794,9 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
          equals_lang(list->title, LANG_CUSTOM_MENU))));
     if (!icon_column && list->show_icons && database && kind == LIST_ROW_COMMAND)
     {
-        char name[MAX_PATH];
+        char *name = render->scratch.row.name;
         const unsigned char *label_ptr = (const unsigned char *)
-            list->callback_get_item_name(item, list->data, name, sizeof(name));
+            list->callback_get_item_name(item, list->data, name, sizeof(render->scratch.row.name));
         const char *label = label_ptr && P2ID(label_ptr) <= VOICEONLY_DELIMITER
                             ? P2STR(label_ptr) : "";
         icon_column = !equals_lang(label, LANG_TAGNAVI_ALL_TRACKS) &&
@@ -819,14 +821,14 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         return;
     }
 
-    char name[MAX_PATH], value_buf[96], now_playing[MAX_PATH];
+    char *name = render->scratch.row.name;
     const unsigned char *label_ptr = (const unsigned char *)list->callback_get_item_name(
-        item, list->data, name, sizeof(name));
+        item, list->data, name, sizeof(render->scratch.row.name));
     const char *label = label_ptr && P2ID(label_ptr) <= VOICEONLY_DELIMITER ?
                         (const char *)P2STR(label_ptr) : "";
     const char *value = list->callback_get_item_value ?
-                        list->callback_get_item_value(item, list->data, value_buf,
-                                                      sizeof(value_buf)) : NULL;
+                        list->callback_get_item_value(item, list->data, render->scratch.row.value,
+                                                      sizeof(render->scratch.row.value)) : NULL;
     const char *aux = activity == ACTIVITY_MAINMENU ? NULL :
                       row_accessory(list, item, kind, label, value);
 
@@ -854,7 +856,8 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         const struct mp3entry *id3 = audio_current_track();
         if (id3 && id3->title && *id3->title)
         {
-            snprintf(now_playing, sizeof(now_playing), "%s: %s", label, id3->title);
+            char *now_playing = render->scratch.row.playing;
+            snprintf(now_playing, sizeof(render->scratch.row.playing), "%s: %s", label, id3->title);
             label = now_playing;
         }
     }
@@ -1081,9 +1084,8 @@ static void paint_notes(const struct ui_view *view, const struct ui_view_frame *
     struct gui_synclist *list = render->owner;
     if (!list->nb_items || !list->callback_get_item_description)
         return;
-    char buffer[2 * MAX_PATH];
     const char *text = list->callback_get_item_description(list->selected_item,
-                          list->data, buffer, sizeof(buffer));
+                          list->data, render->scratch.notes, sizeof(render->scratch.notes));
     if (!text || !*text)
         return;
 
@@ -1186,6 +1188,8 @@ static void index_sample(struct list_index *index, int selection, uint32_t now)
     index->selections[index->samples++] = selection;
 }
 
+static void index_release_fonts(struct native_list *render);
+
 static bool step_index(struct native_list *render)
 {
     struct gui_synclist *list = render->owner;
@@ -1195,6 +1199,7 @@ static bool step_index(struct native_list *render)
 
     if (!list || list->nb_items < INDEX_MIN_ITEMS)
     {
+        index_release_fonts(render);
         memset(index, 0, sizeof(*index));
         index->last_sel = -1;
         return false;
@@ -1230,22 +1235,11 @@ static bool step_index(struct native_list *render)
         index->visible = false;
 
 update_key:
+    if (was_visible && !index->visible)
+        index_release_fonts(render);
     if (index->visible && (changed || !was_visible))
         index_key(render, index->key, sizeof(index->key));
     return index->visible;
-}
-
-/* The Rockbox alpha bitmap packs inverted coverage low nibble first.
- * Monochrome fonts use columns of eight vertical pixels. */
-static int index_coverage(const struct font *font, const unsigned char *bits,
-                          int width, int x, int y)
-{
-    if (font->depth)
-    {
-        int pixel = y * width + x;
-        return 15 - ((bits[pixel / 2] >> (4 * (pixel & 1))) & 15);
-    }
-    return bits[(y / 8) * width + x] & (1u << (y & 7)) ? 15 : 0;
 }
 
 static bool index_has_char(struct font *font, ucschar_t ch)
@@ -1264,187 +1258,173 @@ static bool index_has_char(struct font *font, ucschar_t ch)
     return memcmp(bits, fallback, bytes) != 0;
 }
 
-static int index_font(struct native_list *render, const ucschar_t *chars, int count)
+static bool index_font_file(const char *name)
 {
-    int fonts[] = {render->title_font, render->text_font, FONT_UI,
-                   render->index_fonts[0], render->index_fonts[1],
-                   render->index_fonts[2], render->index_fonts[3]};
-    int best = -1;
-    unsigned height = 0;
-    for (unsigned i = 0; i < ARRAYLEN(fonts); i++)
+    size_t length = strlen(name);
+    return length > 4 && length < sizeof(((struct index_face *)0)->name) &&
+           !strcasecmp(name + length - 4, ".fnt");
+}
+
+static void index_read_faces(struct native_list *render)
+{
+    DIR *dir = opendir(FONT_DIR);
+    if (!dir)
+        return;
+    struct dirent *entry;
+    int capacity = 0;
+    while ((entry = readdir(dir)))
+        capacity += index_font_file(entry->d_name);
+    closedir(dir);
+    if (!capacity)
+        return;
+
+    dir = opendir(FONT_DIR);
+    if (!dir)
+        return;
+    render->index_faces = core_alloc_free_space(capacity * sizeof(struct index_face));
+    if (render->index_faces > 0)
     {
-        int id = fonts[i];
+        struct index_face *faces = core_get_data_pinned(render->index_faces);
+        int count = 0;
+        char path[MAX_PATH];
+        while (count < capacity && (entry = readdir(dir)))
+        {
+            if (!index_font_file(entry->d_name))
+                continue;
+            snprintf(path, sizeof(path), FONT_DIR "/%s", entry->d_name);
+            unsigned height = font_file_height(path);
+            if (!height)
+                continue;
+            int slot = count;
+            while (slot > 0 && faces[slot - 1].height < height)
+                slot--;
+            memmove(faces + slot + 1, faces + slot, (count - slot) * sizeof(*faces));
+            faces[slot].height = height;
+            strcpy(faces[slot].name, entry->d_name);
+            count++;
+        }
+        core_put_data_pinned(faces);
+        render->index_face_count = count;
+    }
+    closedir(dir);
+}
+
+static void index_release_fonts(struct native_list *render)
+{
+    font_unload(render->index_font);
+    render->index_font = FONT_SYSFIXED;
+    if (render->index_faces > 0)
+        core_free(render->index_faces);
+    render->index_faces = render->index_face_count = 0;
+    render->index_font_key[0] = '\0';
+}
+
+static int index_find_font(struct native_list *render, const ucschar_t *chars, int count)
+{
+    if (render->index_faces <= 0)
+        return FONT_SYSFIXED;
+
+    int best = FONT_SYSFIXED;
+    struct index_face *faces = core_get_data_pinned(render->index_faces);
+    char path[MAX_PATH];
+    for (int i = 0; i < render->index_face_count; i++)
+    {
+        snprintf(path, sizeof(path), FONT_DIR "/%s", faces[i].name);
+        bool loaded = font_filename_matches_loaded_id(render->index_font, path);
+        int id = loaded ? render->index_font : font_load_ex(path, 0, 8);
         if (id < 0)
             continue;
         font_lock(id, true);
         struct font *font = font_get(id);
-        if (font->height > height)
-        {
-            int n = 0;
-            while (n < count && index_has_char(font, chars[n]))
-                n++;
-            if (n == count)
-            {
-                height = font->height;
-                best = id;
-            }
-        }
+        int n = 0;
+        while (n < count && index_has_char(font, chars[n]))
+            n++;
         font_lock(id, false);
+        if (n == count)
+        {
+            best = id;
+            break;
+        }
+        if (!loaded)
+            font_unload(id);
     }
+    core_put_data_pinned(faces);
     return best;
-}
-
-static void scale_index_glyph(struct index_glyph *glyph, const unsigned char *ink,
-                              int stride, int width, int height)
-{
-    glyph->height = MAX(1, MIN(INDEX_CAP_HEIGHT, INDEX_INK_WIDTH * height / width));
-    glyph->width = MAX(1, MIN(INDEX_INK_WIDTH,
-                       (glyph->height * width + height / 2) / height));
-    memset(glyph->mask, 0, sizeof(glyph->mask));
-    /* Map pixel centres in 8.8 fixed point and bilinearly sample coverage. */
-    for (int y = 0; y < glyph->height; y++)
-    {
-        int sy = (2 * y + 1) * height * 128 / glyph->height - 128;
-        sy = MAX(0, MIN(sy, (height - 1) * 256));
-        const unsigned char *top = ink + (sy / 256) * stride;
-        const unsigned char *bottom = ink + MIN(sy / 256 + 1, height - 1) * stride;
-        int fy = sy % 256;
-        for (int x = 0; x < glyph->width; x++)
-        {
-            int sx = (2 * x + 1) * width * 128 / glyph->width - 128;
-            sx = MAX(0, MIN(sx, (width - 1) * 256));
-            int left = sx / 256, right = MIN(left + 1, width - 1);
-            int fx = sx % 256;
-            int a = top[left] * (256 - fx) + top[right] * fx;
-            int b = bottom[left] * (256 - fx) + bottom[right] * fx;
-            int alpha = 15 - ((a * (256 - fy) + b * fy + 32768) >> 16);
-            int pixel = y * glyph->width + x;
-            glyph->mask[pixel / 2] |= alpha << (4 * (pixel & 1));
-        }
-    }
-}
-
-static void raster_index_key(struct native_list *render, struct index_glyph *glyph)
-{
-    ucschar_t chars[sizeof(glyph->key) - 1];
-    const unsigned char *text = (const unsigned char *)glyph->key;
-    int count = 0;
-    while (*text && count < (int)ARRAYLEN(chars))
-        text = utf8decode(text, &chars[count++]);
-    int id = index_font(render, chars, count);
-    if (id < 0)
-        id = render->title_font >= 0 ? render->title_font : FONT_UI;
-
-    font_lock(id, true);
-    struct font *font = font_get(id);
-    int height = font->height, width = 0;
-    for (int i = 0; i < count; i++)
-        width += font_get_width(font, chars[i]);
-
-    int handle = width && height ? core_alloc_free_space((size_t)width * height) : -1;
-    if (handle > 0)
-    {
-        unsigned char *ink = core_get_data_pinned(handle);
-        int left = width, top = height, right = 0, bottom = 0;
-        int start = 0;
-        for (int i = 0; i < count; i++)
-        {
-            int w = font_get_width(font, chars[i]);
-            const unsigned char *bits = font_get_bits(font, chars[i]);
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < w; x++)
-                {
-                    int coverage = index_coverage(font, bits, w, x, y);
-                    ink[y * width + start + x] = coverage;
-                    if (coverage)
-                    {
-                        left = MIN(left, start + x);
-                        right = MAX(right, start + x + 1);
-                        top = MIN(top, y);
-                        bottom = MAX(bottom, y + 1);
-                    }
-                }
-            }
-            start += w;
-        }
-        if (right > left)
-            scale_index_glyph(glyph, ink + top * width + left, width,
-                              right - left, bottom - top);
-        core_put_data_pinned(ink);
-        core_free(handle);
-    }
-    font_lock(id, false);
-}
-
-static const struct index_glyph *index_glyph(struct native_list *render)
-{
-    const char *key = render->overlay.key;
-    for (unsigned i = 0; i < ARRAYLEN(render->index_cache); i++)
-        if (strcmp(render->index_cache[i].key, key) == 0)
-            return &render->index_cache[i];
-
-    if (!render->index_fonts_loaded)
-    {
-        /* Largest bundled text faces, including the dedicated figures face. */
-        static const char * const paths[] = {
-            FONT_DIR "/30-noto-serif-figures.fnt",
-            FONT_DIR "/28-noto-serif.fnt",
-            FONT_DIR "/26-noto-sans-medium.fnt",
-            FONT_DIR "/24-noto-serif.fnt",
-        };
-        for (unsigned i = 0; i < ARRAYLEN(paths); i++)
-            render->index_fonts[i] = font_load_ex(paths[i], 0, 8);
-        render->index_fonts_loaded = true;
-    }
-
-    struct index_glyph *glyph = &render->index_cache[render->index_slot];
-    render->index_slot = (render->index_slot + 1) % ARRAYLEN(render->index_cache);
-    snprintf(glyph->key, sizeof(glyph->key), "%s", key);
-    glyph->width = glyph->height = 0;
-    raster_index_key(render, glyph);
-    return glyph;
 }
 
 static void paint_index(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     struct native_list *render = view->data;
-    if (!render->overlay.key[0])
+    const unsigned char *text = (const unsigned char *)render->overlay.key;
+    if (!*text)
         return;
+    ucschar_t chars[sizeof(render->overlay.key) - 1];
+    int count = 0;
+    while (*text && count < (int)ARRAYLEN(chars))
+        text = utf8decode(text, &chars[count++]);
+
+    if (strcmp(render->index_font_key, render->overlay.key))
+    {
+        if (!render->index_font_key[0])
+            index_read_faces(render);
+        int id = index_find_font(render, chars, count);
+        if (id != render->index_font)
+        {
+            font_unload(render->index_font);
+            render->index_font = id;
+        }
+        strcpy(render->index_font_key, render->overlay.key);
+    }
+    int id = render->index_font;
+    font_lock(id, true);
+    struct font *font = font_get(id);
+    int width = 0;
+    for (int i = 0; i < count; i++)
+        width += font_get_width(font, chars[i]);
 
     struct ui_rect area = frame->bounds;
-    area.x += (area.width - INDEX_BOX) / 2;
-    area.y += (area.height - INDEX_BOX) / 2;
-    area.width = area.height = INDEX_BOX;
+    int height = font->height;
+    area.x += (area.width - 2 * width) / 2;
+    area.y += (area.height - 2 * height) / 2;
+    area.width = 2 * width;
+    area.height = 2 * height;
     struct viewport vp;
-    if (!set_clip(&vp, frame->clip, area, FONT_UI, LCD_WHITE))
-        return;
-    const struct index_glyph *glyph = index_glyph(render);
-    unsigned dim = render->colors[UI_COLOR_DIM];
-    int right = vp.x + vp.width;
-    for (int y = vp.y; y < vp.y + vp.height; y++)
+    if (set_clip(&vp, frame->clip, area, id, LCD_WHITE))
     {
-        fb_data *row = FBADDR(vp.x, y);
-        ui_blit_tint(row, row, vp.width, INDEX_SCRIM_RETAIN, dim);
-        if (y == area.y || y == area.y + INDEX_BOX - 1)
-            ui_blit_tint(row, row, vp.width, INDEX_BORDER_RETAIN, LCD_WHITE);
-        else
+        unsigned dim = render->colors[UI_COLOR_DIM];
+        int right = vp.x + vp.width;
+        for (int y = vp.y; y < vp.y + vp.height; y++)
         {
-            if (vp.x == area.x)
-                ui_blit_tint(row, row, 1, INDEX_BORDER_RETAIN, LCD_WHITE);
-            if (right == area.x + INDEX_BOX)
-                ui_blit_tint(row + vp.width - 1, row + vp.width - 1, 1, INDEX_BORDER_RETAIN, LCD_WHITE);
+            fb_data *row = FBADDR(vp.x, y);
+            ui_blit_tint(row, row, vp.width, INDEX_SCRIM_RETAIN, dim);
+            if (y == area.y || y == area.y + area.height - 1)
+                ui_blit_tint(row, row, vp.width, INDEX_BORDER_RETAIN, LCD_WHITE);
+            else
+            {
+                if (vp.x == area.x)
+                    ui_blit_tint(row, row, 1, INDEX_BORDER_RETAIN, LCD_WHITE);
+                if (right == area.x + area.width)
+                    ui_blit_tint(row + vp.width - 1, row + vp.width - 1, 1,
+                                 INDEX_BORDER_RETAIN, LCD_WHITE);
+            }
         }
-    }
-    if (glyph->width > 0)
-    {
+
         struct viewport *prior = lcd_set_viewport(&vp);
-        lcd_alpha_bitmap_part(glyph->mask, 0, 0, glyph->width,
-                              area.x - vp.x + (INDEX_BOX - glyph->width) / 2,
-                              area.y - vp.y + (INDEX_BOX - glyph->height) / 2,
-                              glyph->width, glyph->height);
+        int x = area.x - vp.x + width / 2;
+        int y = area.y - vp.y + height / 2;
+        for (int i = 0; i < count; i++)
+        {
+            int w = font_get_width(font, chars[i]);
+            const unsigned char *bits = font_get_bits(font, chars[i]);
+            if (font->depth)
+                lcd_alpha_bitmap_part(bits, 0, 0, w, x, y, w, height);
+            else
+                lcd_mono_bitmap_part(bits, 0, 0, w, x, y, w, height);
+            x += w;
+        }
         lcd_set_viewport(prior);
     }
+    font_lock(id, false);
 }
 
 static const struct ui_view_ops bg_ops = { .paint = paint_background };
@@ -1533,6 +1513,7 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     if (!same_owner)
     {
         motion_stop(&render->motion);
+        index_release_fonts(render);
         memset(&render->overlay, 0, sizeof(render->overlay));
         render->overlay.last_sel = -1;
     }
@@ -1662,6 +1643,7 @@ void list_render_forget(const struct gui_synclist *list)
         render->owner = NULL;
         render->has_marquee = false;
         motion_stop(&render->motion);
+        index_release_fonts(render);
         memset(&render->overlay, 0, sizeof(render->overlay));
         render->overlay.last_sel = -1;
         render->art_handle = -1;

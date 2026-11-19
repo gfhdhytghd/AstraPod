@@ -789,7 +789,6 @@ static NO_INLINE void load_native_style(struct sheet_style *s, struct sheet_ui *
     struct ui_theme theme;
     ui_theme_snapshot(&theme);
     struct ui_album_palette palette;
-    album_palette_refresh();
     album_palette_snapshot(&palette);
     const uint16_t *m = theme.metric;
     *s = (struct sheet_style){
@@ -828,6 +827,7 @@ int handoff_sheet_run(struct handoff_sheet *view, int (*advance)(int))
 {
     struct sheet_style style;
     struct sheet_ui ui = {0};
+    album_palette_refresh();
     load_native_style(&style, &ui);
     struct sheet_layout layout = sheet_measure(&ui, &style);
     struct sheet_presentation p = {

@@ -2483,46 +2483,75 @@ struct get_path_sub_data
     dc_serial_t serialhash;
 };
 
+static size_t path_entry_name_size(const struct dircache_entry *ce)
+{
+    if (!ce->tinyname)
+        return CE_NAMESIZE(ce->namelen);
+    size_t len = 0;
+    while (len < MAX_TINYNAME && ce->namebuf[len])
+        len++;
+    return len;
+}
+
 static ssize_t get_path_sub(int idx, struct get_path_sub_data *data)
 {
     if (idx == 0)
         return -1; /* entry is an orphan split from any root */
 
-    ssize_t len;
-    char *cename;
-
-    if (idx > 0)
+    /* Walk towards the root in hash order and measure before writing.
+     * Cache names are byte spans and need not end in NUL. */
+    size_t suffix = 0;
+    int root = idx;
+    while (root > 0)
     {
-        struct dircache_entry *ce = get_entry(idx);
-
+        const struct dircache_entry *ce = get_entry(root);
+        suffix += 1 + path_entry_name_size(ce);
         data->serialhash = dc_hash_serialnum(ce->serialnum, data->serialhash);
-
-        /* go all the way up then move back down from the root */
-        len = get_path_sub(ce->up, data) - 1;
-        if (len < 0)
-            return -2;
-
-        cename = alloca(DC_MAX_NAME + 1);
-        entry_name_copy(cename, ce);
+        root = ce->up;
     }
-    else /* idx < 0 */
-    {
-        len = 0;
-        cename = "";
+    if (!root)
+        return -2;
 
     #ifdef HAVE_MULTIVOLUME
-        /* prepend the volume specifier */
-        int volume = IF_MV_VOL(-idx - 1);
-        cename = alloca(VOL_MAX_LEN+1);
-        get_volume_name(volume, cename);
-    #endif /* HAVE_MULTIVOLUME */
+    char volume_prefix[VOL_MAX_LEN + 2] = { PATH_ROOTCHR };
+    #else
+    char volume_prefix[1] = { PATH_ROOTCHR };
+    #endif
+    size_t prefix = 1;
+    #ifdef HAVE_MULTIVOLUME
+    int volume = -root - 1;
+    if (volume != ROOT_VOLUME)
+        prefix += get_volume_name(volume, volume_prefix + 1);
+    #endif
+    data->serialhash = dc_hash_serialnum(get_idx_dcvolp(root)->serialnum,
+                                         data->serialhash);
 
-        data->serialhash = dc_hash_serialnum(get_idx_dcvolp(idx)->serialnum,
-                                             data->serialhash);
+    /* The first separator is already in a plain root prefix. */
+    if (suffix && prefix == 1)
+        prefix = 0;
+    size_t length = prefix + suffix;
+    if (!data->size)
+        return length;
+
+    size_t limit = MIN(length, data->size - 1);
+    data->buf[limit] = '\0';
+    memcpy(data->buf, volume_prefix, MIN(prefix, limit));
+    size_t end = length;
+    while (idx > 0)
+    {
+        const struct dircache_entry *ce = get_entry(idx);
+        const unsigned char *name = ce->tinyname ? ce->namebuf : get_name(ce->name);
+        size_t len = path_entry_name_size(ce);
+        size_t start = end - len - 1;
+        if (start < limit)
+        {
+            data->buf[start] = PATH_SEPCH;
+            memcpy(data->buf + start + 1, name, MIN(len, limit - start - 1));
+        }
+        end = start;
+        idx = ce->up;
     }
-
-    return len + path_append(data->buf + len, PA_SEP_HARD, cename,
-                             data->size > (size_t)len ? data->size - len : 0);
+    return length;
 }
 
 /**

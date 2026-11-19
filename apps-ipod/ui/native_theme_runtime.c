@@ -151,6 +151,16 @@ unsigned ui_theme_generation(void)
     return generation;
 }
 
+unsigned ui_theme_metric(enum ui_metric_role role)
+{
+    if (current_theme <= 0)
+        return ui_theme_builtin_metric(role);
+    struct ui_theme *theme = core_get_data_pinned(current_theme);
+    unsigned value = theme->metric[role];
+    core_put_data_pinned(theme);
+    return value;
+}
+
 unsigned ui_theme_rgb565(enum ui_color_role role)
 {
     struct ui_album_palette palette;
@@ -164,11 +174,7 @@ unsigned ui_theme_rgb565(enum ui_color_role role)
         core_put_data_pinned(theme);
     }
     else
-    {
-        struct ui_theme theme;
-        ui_theme_builtin(&theme, false);
-        rgb = ui_theme_color(&theme, role, &palette);
-    }
+        rgb = ui_theme_color(NULL, role, &palette);
     return LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
 }
 
@@ -189,6 +195,20 @@ int ui_theme_font_load(const struct ui_theme *theme, enum ui_font_role role, int
 {
     char path[sizeof(FONT_DIR "/.fnt") + UI_THEME_FONT_NAME_MAX];
     theme_font_path(path, sizeof(path), theme->font[role]);
+    return font_load_ex(path, 0, glyphs);
+}
+
+int ui_theme_current_font_load(enum ui_font_role role, int glyphs)
+{
+    char path[sizeof(FONT_DIR "/.fnt") + UI_THEME_FONT_NAME_MAX];
+    if (current_theme > 0)
+    {
+        struct ui_theme *theme = core_get_data_pinned(current_theme);
+        theme_font_path(path, sizeof(path), theme->font[role]);
+        core_put_data_pinned(theme);
+    }
+    else
+        theme_font_path(path, sizeof(path), ui_theme_builtin_font(role));
     return font_load_ex(path, 0, glyphs);
 }
 

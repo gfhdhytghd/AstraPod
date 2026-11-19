@@ -256,9 +256,8 @@ static unsigned ui_theme_duration(unsigned frames)
 {
     return global_settings.animations ? frames : 0;
 }
-static int ui_theme_font_load(const struct ui_theme *theme, enum ui_font_role role, int glyphs)
+static int ui_theme_current_font_load(enum ui_font_role role, int glyphs)
 {
-    (void)theme;
     (void)glyphs;
     return font_load(role == UI_FONT_LYRICS_FOCUS ? "26-test" : "18-test");
 }

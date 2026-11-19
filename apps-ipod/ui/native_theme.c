@@ -183,6 +183,16 @@ void ui_theme_builtin(struct ui_theme *theme, bool light)
     theme->motion_scale = UI_THEME_MOTION_ONE;
 }
 
+unsigned ui_theme_builtin_metric(enum ui_metric_role role)
+{
+    return metrics[role].value;
+}
+
+const char *ui_theme_builtin_font(enum ui_font_role role)
+{
+    return fonts[role].name;
+}
+
 /* The input is a sized span from the caller's file allocation. */
 struct span {
     const char *text;
@@ -547,9 +557,9 @@ uint32_t ui_theme_color(const struct ui_theme *theme, enum ui_color_role role,
         return 0;
 
     uint32_t rgb888;
-    struct ui_theme_dynamic rule = theme->dynamic[role];
+    struct ui_theme_dynamic rule = theme ? theme->dynamic[role] : colors[role].palette;
     if (!palette || !palette_color(palette, rule, &rgb888))
-        return theme->color[role];
+        return theme ? theme->color[role] : colors[role].scrim;
 
     unsigned original = pack_color(rgb888);
     unsigned bounded = original;

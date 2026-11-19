@@ -180,8 +180,14 @@ static pix_t pf_bg_color;     /* theme background, replaces G_BRIGHT(0) */
 pix_t pf_fg_color;     /* theme foreground, replaces G_BRIGHT(255) */
 
 /* Pre-extracted RGB565 channel masks for fade_color() performance */
-static unsigned int pf_bg_rb;  /* pf_bg_color & 0xf81f */
+static unsigned int pf_bg_rb;
 static unsigned int pf_bg_g;   /* pf_bg_color & 0x7e0 */
+
+static inline unsigned int fade_red_blue(pix_t pixel)
+{
+    /* Keep the red fraction out of the blue lane at arbitrary Q8 light. */
+    return ((pixel & 0xf800u) << 5) | (pixel & 0x1fu);
+}
 
 static pix_t pf_color(const struct ui_theme *theme, const struct ui_album_palette *palette,
                       enum ui_color_role role)
@@ -214,7 +220,7 @@ static void pf_update_dynamic_colors(void)
         pf_fg_color = (pix_t)(color_contrast(white, custom) >=
                               color_contrast(black, custom) ? white : black);
     }
-    pf_bg_rb = pf_bg_color & 0xf81f;
+    pf_bg_rb = fade_red_blue(pf_bg_color);
     pf_bg_g  = pf_bg_color & 0x7e0;
 }
 
@@ -2827,11 +2833,9 @@ static inline void fade_prepare(struct pf_fade *f, unsigned int a)
 static inline pix_t fade_color(pix_t c, unsigned int fa, unsigned int frb,
                                unsigned int fg)
 {
-    unsigned int result;
-
-    result  = ((c & 0xf81f) * fa + frb) & 0xf81f00;
-    result |= ((c & 0x7e0)  * fa + fg)  & 0x7e000;
-    return result >> 8;
+    unsigned int rb = (fade_red_blue(c) * fa + frb) >> 8;
+    unsigned int g = ((c & 0x7e0) * fa + fg) >> 8;
+    return ((rb >> 5) & 0xf800) | (g & 0x07e0) | (rb & 0x001f);
 }
 
 /**
@@ -3146,7 +3150,7 @@ static inline void cover_half(struct pf_col *col, struct pf_extent span,
         edge = fade_color(edge, fade->a, fade->rb, fade->g);
     pix_t *pixel = col->px + full * step;
     unsigned int bg = *pixel;
-    *pixel = fade_color(edge, coverage, (bg & 0xf81f) * (256 - coverage),
+    *pixel = fade_color(edge, coverage, fade_red_blue(bg) * (256 - coverage),
                         (bg & 0x07e0) * (256 - coverage));
 }
 

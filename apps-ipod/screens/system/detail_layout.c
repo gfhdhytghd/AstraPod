@@ -20,12 +20,11 @@ static void next_line(struct detail_layout *c)
     if (c->count == DETAIL_LAYOUT_LINES) drop_line(c);
     c->start[c->count] = c->end[c->count] = c->used;
     c->count++;
-    c->pixels = 0;
 }
 
 void detail_layout_update(struct detail_layout *c, const char *pane,
     const char *identity, const char *text, const struct hr_detail *detail,
-    int width, bool freeze, int (*glyph)(const char *, int *, void *), void *ctx)
+    int width, bool freeze, int (*measure)(const char *, int, void *), void *ctx)
 {
     if (freeze && c->count) return;
     bool same = !strcmp(c->pane, pane) && c->width == width &&
@@ -49,23 +48,28 @@ void detail_layout_update(struct detail_layout *c, const char *pane,
     const char *p = text + overlap;
     while (*p)
     {
-        int bytes = 1, pixels = glyph(p, &bytes, ctx);
+        int bytes = hr_utf8_offset(p, 1);
         if (!c->count) next_line(c);
         while (c->used + bytes >= DETAIL_LAYOUT_BYTES && c->count > 1)
             drop_line(c);
         /* A pathological single line still has a strict RAM bound. */
         if (c->used + bytes >= DETAIL_LAYOUT_BYTES) break;
-        if (*p != '\n' && c->pixels && c->pixels + pixels > width)
-            next_line(c);
+
+        int start = c->start[c->count - 1];
         memcpy(c->text + c->used, p, bytes);
+        c->text[c->used + bytes] = '\0';
+        if (*p != '\n' && c->used > start &&
+            measure(c->text + start, c->used + bytes - start, ctx) > width)
+        {
+            /* next_line may compact old lines, including the open line. */
+            c->text[c->used] = '\0';
+            next_line(c);
+            memcpy(c->text + c->used, p, bytes);
+        }
         c->used += bytes;
         c->text[c->used] = '\0';
         if (*p == '\n') next_line(c);
-        else
-        {
-            c->end[c->count - 1] = c->used;
-            c->pixels += pixels;
-        }
+        else c->end[c->count - 1] = c->used;
         p += bytes;
     }
     hr_copy(c->wire, text, sizeof c->wire);

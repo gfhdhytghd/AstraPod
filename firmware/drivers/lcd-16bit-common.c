@@ -485,6 +485,57 @@ void lcd_blendrect(int x, int y, int width, int height, unsigned opacity)
     while (dst <= dst_end);
 }
 
+#if defined(HAVE_PODBOX_FONT) && LCD_STRIDEFORMAT == HORIZONTAL_STRIDE && LCD_PIXELFORMAT == RGB565
+/* The usual text operation: paint one foreground colour into a horizontal
+ * framebuffer. Skip transparent pixel pairs and write fully opaque pixels
+ * without reading the destination. Match blend_two_colors exactly at edges. */
+static inline void alpha_fg_pixel(fb_data *dst, unsigned alpha, unsigned fg, unsigned spread)
+{
+    if (alpha == 0)
+        *dst = fg;
+    else if (alpha != ALPHA_MASK)
+    {
+        unsigned old = *dst;
+        unsigned expanded = (old | (old << 16)) & 0x07e0f81f;
+        unsigned weight = alpha + (alpha >> 3);
+        unsigned mixed = ((spread * 16 + (expanded - spread) * weight) >> 4) & 0x07e0f81f;
+        *dst = mixed | (mixed >> 16);
+    }
+}
+
+static void ICODE_ATTR lcd_alpha_foreground(const unsigned char *alpha, fb_data *dst,
+                                           int offset, int stride, int width, int height,
+                                           unsigned fg)
+{
+    unsigned spread = (fg | (fg << 16)) & 0x07e0f81f;
+    int row_step = ROW_INC;
+    for (int y = 0; y < height; ++y, dst += row_step, offset += stride)
+    {
+        const unsigned char *src = alpha + (offset >> 1);
+        fb_data *pixel = dst;
+        int remaining = width;
+        if (offset & 1)
+        {
+            alpha_fg_pixel(pixel++, *src++ >> 4, fg, spread);
+            --remaining;
+        }
+        while (remaining >= 2)
+        {
+            unsigned pair = *src++;
+            if (pair != 0xff)
+            {
+                alpha_fg_pixel(pixel, pair & 15, fg, spread);
+                alpha_fg_pixel(pixel + 1, pair >> 4, fg, spread);
+            }
+            pixel += 2;
+            remaining -= 2;
+        }
+        if (remaining)
+            alpha_fg_pixel(pixel, *src & 15, fg, spread);
+    }
+}
+#endif
+
 static void ICODE_ATTR lcd_alpha_bitmap_part_mix(
     const fb_data* image, const unsigned char *alpha,
     int src_x, int src_y,
@@ -505,6 +556,15 @@ static void ICODE_ATTR lcd_alpha_bitmap_part_mix(
 
     if (!clip_viewport_rect(vp, &x, &y, &width, &height, &src_x, &src_y))
         return;
+
+#if defined(HAVE_PODBOX_FONT) && LCD_STRIDEFORMAT == HORIZONTAL_STRIDE && LCD_PIXELFORMAT == RGB565
+    if (image == NULL && drmode == DRMODE_FG)
+    {
+        lcd_alpha_foreground(alpha, FBADDR(x, y), src_y * stride_alpha + src_x,
+                             stride_alpha, width, height, vp->fg_pattern);
+        return;
+    }
+#endif
 
     if (drmode & DRMODE_INVERSEVID)
     {

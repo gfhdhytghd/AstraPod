@@ -115,7 +115,7 @@ static struct viewport default_vp,*vp=&default_vp;
 static struct frame_buffer_t lcd_framebuffer_default={.fb_ptr=screen_pixels,.stride=320,.elems=320*240};
 static struct mp3entry playing;
 static struct wps_state wps={.id3=&playing};
-static struct font {int height;} f12={12},f18={18},f26={26};
+static struct font {int height; int ascent;} f14={14,12},f18={18,16},f20={20,18};
 static int calls,plan,loads,unloads,claims,releases,holds,activities,updates,pauses,seeks,skips,controls,remote_at,default_events;
 static size_t arena_bytes=sizeof app_area;
 static fb_data panel[320*240];
@@ -166,7 +166,7 @@ static unsigned seek_serial;
 static int select_button, seek_updates, fast_seeks, no_lyrics_draws, nothing_playing_draws;
 static bool verify_early_frame, reject_loading, backward_seek;
 static int ui_font(void){return 18;}static struct screen screens[]={{ui_font}};
-static struct font *font_get(int f){return f==12?&f12:f==26?&f26:&f18;}
+static struct font *font_get(int f){return f==14?&f14:f==20?&f20:&f18;}
 static int font_load(const char *path){
     assert(clock_refs==2);
     if (verify_early_frame && !loads) {
@@ -174,23 +174,36 @@ static int font_load(const char *path){
         precise_extra+=1000000;
     }
     loads++;
-    return strstr(path,"12-")?12:strstr(path,"26-")?26:18;
-}
-static int font_load_ex(const char *path, size_t buffer, int glyphs)
-{
-    (void)buffer; (void)glyphs;
-    return access(path, R_OK) == 0 ? font_load(path) : -1;
-}
-static bool font_has_glyph(struct font *font, unsigned ch)
-{
-    (void)font;
-    return ch < 0x10000;
+    return strstr(path,"14-")?14:strstr(path,"20-")?20:18;
 }
 static void font_unload(int f){(void)f;unloads++;}
 static unsigned width_reads;
 static int font_get_width(struct font*f,unsigned ch){width_reads++;return ch>127?f->height:f->height/2;}
 static const unsigned char *utf8decode(const unsigned char*p,ucschar_t *ch){*ch=*p++;if(*ch>=0xc0){int n=*ch>=0xf0?3:*ch>=0xe0?2:1;while(n--)*ch=(*ch<<6)|(*p++&63);}return p;}
-static int font_getstringsize(const unsigned char*p,int*w,int*h,int f){*w=0;*h=f;while(*p){ucschar_t ch;p=utf8decode(p,&ch);*w+=font_get_width(font_get(f),ch);}return *w;}
+static int font_getstringnsize(const unsigned char*p,size_t bytes,int*w,int*h,int f)
+{
+    const unsigned char *start = p;
+    int width = 0;
+    while (*p && (size_t)(p-start) < bytes) {
+        ucschar_t ch;
+        const unsigned char *next = utf8decode(p,&ch);
+        if ((size_t)(next-start) > bytes) break;
+        width += font_get_width(font_get(f),ch);
+        p = next;
+    }
+    if (w) *w = width;
+    if (h) *h = f;
+    return width;
+}
+static int font_getstringsize(const unsigned char*p,int*w,int*h,int f)
+{return font_getstringnsize(p,(size_t)-1,w,h,f);}
+static void font_lock(int font,bool lock){(void)font;(void)lock;}
+static const char *text_fit(const char *text, char *buf, size_t size, int font, int width)
+{
+    (void)font;(void)width;
+    snprintf(buf,size,"%s",text);
+    return buf;
+}
 static const char *text_wrap_next_punct(const char *p,int width,struct font*f,const char **end){int n=0;const char*s=p;while(*p&&*p!='\n'){ucschar_t ch;const char*q=(const char*)utf8decode((const unsigned char*)p,&ch);n+=font_get_width(f,ch);if(n>width&&p>s)break;p=q;}*end=p;return *p=='\n'?p+1:p;}
 static unsigned color_blend(unsigned a,unsigned b,int p){unsigned rb=(((a&0xf81f)*(256-p)+(b&0xf81f)*p)>>8)&0xf81f;return rb|((((a&0x7e0)*(256-p)+(b&0x7e0)*p)>>8)&0x7e0);}
 static struct viewport *lcd_set_viewport(struct viewport*v){struct viewport *old=vp;vp=v?v:&default_vp;return old;}
@@ -259,7 +272,8 @@ static unsigned ui_theme_duration(unsigned frames)
 static int ui_theme_current_font_load(enum ui_font_role role, int glyphs)
 {
     (void)glyphs;
-    return font_load(role == UI_FONT_LYRICS_FOCUS ? "26-test" : "18-test");
+    return font_load(role == UI_FONT_LYRICS_FOCUS ? "20-test" :
+                     role == UI_FONT_LYRICS_BACKGROUND ? "14-test" : "18-test");
 }
 static bool art_present, cached_art;
 static int raw_art_reads, art_handle=1;
@@ -546,9 +560,9 @@ static int get_action(int c,int timeout){
     case 2:
       assert(lv.mode.manual && lv.mode.focus==1 && !lv.scroll_frames && !lv.focus_frames);
       assert(timeout==1 && lv.motion_frame==0 && !lv.stagger_frames);
-      assert(lv.wheel_offset == lv_distance(0, 1, -1));
+      assert(lv.wheel_offset == lv_distance(0, 1, -1, true, -1));
       precise_extra+=ui_frame_clock(ANIM_F(5));
-      retarget_position=lv_wheel_at(lv_clock()) - lv_distance(0, 1, -1);
+      retarget_position=lv_wheel_at(lv_clock()) - lv_distance(0, 1, -1, true, -1);
       assert(retarget_position < 0);
       return ACTION_WPS_VOLDOWN;
     case 3:
@@ -799,14 +813,14 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  if (strcmp(argv[2],"all")) return 1;
  reject_loading=true;
  wps_lyrics_backdrop();assert(lyric_viewer()==GO_TO_PREVIOUS);assert(pauses==1&&seeks==1&&skips==1);
- assert(claims==1&&releases==1&&loads==1&&unloads==1&&!holds&&!activities&&!inhibited&&!lyrics_loaded());
+ assert(claims==1&&releases==1&&loads==3&&unloads==3&&!holds&&!activities&&!inhibited&&!lyrics_loaded());
  plan=1;calls=0;remote_source=true;playing.elapsed=0;strcpy(playing.path,"cider/song");
  get_wps_state();current_tick+=3;assert(lyrics_remote_step());assert(lyrics_remote_step());
  assert(lyrics_loaded()&&lyrics_count()==16&&remote_doc.first_ms==30&&!remote_doc.done);
  assert(lyric_viewer()==GO_TO_PREVIOUS&&controls==3&&remote_at==75);
  assert(lyrics_loaded()&&remote_doc.done&&remote_doc.complete_ms>=remote_doc.first_ms);
  lyrics_remote_cancel();
- assert(claims==2&&releases==2&&loads==2&&unloads==2&&!holds&&!activities&&!inhibited);
+ assert(claims==2&&releases==2&&loads==6&&unloads==6&&!holds&&!activities&&!inhibited);
  plan=2;calls=0;remote_source=false;playing_audio=false;wps.id3=NULL;deny_arena=true;
  assert(lyric_viewer()==GO_TO_ROOT&&default_events==1&&releases==2&&!holds&&!activities&&!inhibited);
  assert(nothing_playing_draws);
@@ -866,9 +880,8 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  assert(lyric_viewer()==GO_TO_ROOT && clock_refs==1 && boost_gets==boost_puts);
  plan=8;calls=0;
  arena_bytes = 3 * LV_FRAME + LV_LAYOUTS * sizeof(struct lv_layout)
-             + (LV_MASKS + 1) * (sizeof(struct lv_mask) + LV_STRIP_WIDTH * 18)
-             + LCD_WIDTH * 18 * sizeof(fb_data)
-             + (LV_FONT_CHOICES + 1) * LV_COVERAGE * sizeof(uint32_t);
+             + (LV_MASKS + 1) * (sizeof(struct lv_mask) + LV_STRIP_WIDTH * 20)
+             + LCD_WIDTH * 20 * sizeof(fb_data);
  assert(lyric_viewer()==GO_TO_PREVIOUS && clock_refs==1 && boost_gets==boost_puts);
  const int nav_actions[] = {ACTION_AGENTS_SWITCH, ACTION_AGENTS_REMOTE_SWITCH,
                             ACTION_AGENTS_COVERS, ACTION_AGENTS_REMOTE_COVERS};

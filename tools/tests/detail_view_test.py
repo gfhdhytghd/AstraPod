@@ -40,14 +40,23 @@ static const unsigned char *utf8decode(const unsigned char*p,ucschar_t*c){*c=*p;
 struct font {int height;};static struct font fixed={8};
 static struct font *font_get(int n){(void)n;return &fixed;}
 static int font_get_width(struct font*f,ucschar_t c){(void)f;return c?6:0;}
-static void font_lock(int n,bool b){(void)n;(void)b;}
+struct font_run {int width;};
+static int font_run_next(struct font*f,struct font_run*run,ucschar_t c,void*out)
+{(void)out;return run->width+=font_get_width(f,c);}
+static int font_getstringnsize(const char*s,int n,int*w,int*h,int font)
+{(void)s;(void)w;(void)h;(void)font;return n*6;}
+
 struct viewport {int font,width,height;unsigned fg_pattern;};
-struct screen {void (*set_viewport)(struct viewport*);void (*clear_viewport)(void);void (*set_foreground)(unsigned);void (*update_viewport)(void);void(*hline)(int,int,int);};
+struct screen {struct viewport *(*set_viewport)(struct viewport*);void (*clear_viewport)(void);void (*set_foreground)(unsigned);void (*update_viewport)(void);void(*hline)(int,int,int);};
 static char rows[180][200];
-static void setvp(struct viewport*v){(void)v;}static void clear(void){memset(rows,0,sizeof rows);}
+static struct viewport *setvp(struct viewport*v){(void)v;return NULL;}static void clear(void){memset(rows,0,sizeof rows);}
 static void fg(unsigned n){(void)n;}static void update(void){}static void hline(int a,int b,int c){(void)a;(void)b;(void)c;}
 static struct screen screens[]={{setvp,clear,fg,update,hline}};
 struct gui_synclist {struct viewport *parent[1];};
+struct panel_ink {unsigned text,muted,warn;};
+static struct panel_ink list_panel_ink(void){return (struct panel_ink){USE_TEXT,USE_DIM,USE_WARN};}
+static struct viewport panel_viewport(struct gui_synclist*l){return *l->parent[0];}
+static void ui_flush_dirty(void){}
 static struct hr_model model;static struct hr_agent detail_agent={.kind="codex",.name="test"};
 static struct detail_layout detail_layout;
 static int detail_body_y,detail_body_avail,detail_scroll,detail_scroll_max,detail_page_lines,detail_shown_age;
@@ -62,16 +71,16 @@ static int text_w(struct screen*d,const char*s){(void)d;return strlen(s)*6;}
 static void text_at(struct screen*d,int x,int y,unsigned c,const char*s){(void)d;(void)x;(void)c;assert(y>=0&&y<180);snprintf(rows[y],200,"%s",s);}
 static void draw_disc(struct screen*d,int x,int y,unsigned c){(void)d;(void)x;(void)y;(void)c;}
 static const char *fit(char*b,size_t n,const char*s,int w){(void)b;(void)n;(void)w;return s;}
-static void draw_task(struct screen*d,struct viewport*v){(void)d;(void)v;}
-static int draw_input(struct screen*d,struct viewport*v,int y,bool dim){(void)d;(void)v;(void)dim;return y;}
+static void draw_task(struct gui_synclist*l,struct viewport*v,unsigned c,bool d){(void)l;(void)v;(void)c;(void)d;}
+static int draw_input(struct screen*d,struct viewport*v,int y,unsigned c,unsigned b){(void)d;(void)v;(void)c;(void)b;return y;}
 '''
 wrap=(S/'apps-ipod/draw/text_wrap.c').read_text()
 code='\n'.join(function(wrap,n) for n in ['is_punct_break','wrap_next','text_wrap_next_punct'])
-for n in ['detail_steps','detail_glyph']:
+for n in ['detail_steps','detail_measure']:
  if re.search(r'\b'+n+r'\(',s):code+='\n'+function(s,n)
 code+='\n'+function(s,'draw_detail')
 post=r'''
-static int glyph(const char*p,int*n,void*ctx){(void)p;(void)ctx;*n=1;return 1;}
+static int glyph(const char*p,int n,void*ctx){(void)p;(void)ctx;return n;}
 int main(void){
  (void)detail_layout;(void)detail_body_y;(void)detail_body_avail;(void)glyph;
  struct viewport vp={.width=120,.height=88};struct gui_synclist list={.parent={&vp}};

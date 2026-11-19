@@ -42,7 +42,7 @@ static const char *wrap_next(const char *text, int width, struct font *pf,
     const unsigned char *cursor = start;
     const unsigned char *cut = NULL, *cut_next = NULL; /* the last break */
     const unsigned char *next;
-    int w = 0;
+    struct font_run run = {0};
     ucschar_t ch;
 
     for (;;)
@@ -67,8 +67,7 @@ static const char *wrap_next(const char *text, int width, struct font *pf,
             cut = prev;
             cut_next = cursor;
         }
-        w += font_get_width(pf, ch);
-        if (w > width)
+        if (font_run_next(pf, &run, ch, NULL) > width)
         {
             if (cut && cut > start)
             {

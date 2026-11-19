@@ -339,7 +339,7 @@ static int find_label_font(int ui_h)
         return -1;
     for (int h = ui_h * 3 / 4; h >= 10; h--)
     {
-        snprintf(path, sizeof path, FONT_DIR "/%d%s.fnt", h, family);
+        snprintf(path, sizeof path, FONT_DIR "/%d%s.pbf", h, family);
         for (int id = 0; id < MAXFONTS; id++)
             if (font_filename_matches_loaded_id(id, path))
                 return id;

@@ -411,6 +411,28 @@ static void LCDFN(putsxyofs)(int x, int y, int ofs, const unsigned char *str)
         }
     }
 
+#if defined(MAIN_LCD) && defined(HAVE_PODBOX_FONT)
+    if (pf->pbf.file_size)
+    {
+        struct font_run run = {0};
+        for (ucs = bidi_l2v(str, 1); ucs && *ucs; ++ucs)
+        {
+            struct font_glyph glyph;
+            font_run_next(pf, &run, *ucs, &glyph);
+            int left = glyph.x - ofs;
+            if (left + x >= vp->width && (run.pen >> 6) + x - ofs >= vp->width)
+                break;
+            int skip = ofs ? MAX(0, -left) : 0;
+            if (glyph.bits && glyph.width > skip && glyph.height)
+                lcd_alpha_bitmap_part(glyph.bits, skip, 0, glyph.width,
+                                      x + left + skip, y + glyph.y,
+                                      glyph.width - skip, glyph.height);
+        }
+        font_lock(vp->font, false);
+        return;
+    }
+#endif
+
     void (*bmp_part_fn)(const unsigned char *src, int src_x, int src_y,
                         int stride, int x, int y, int width, int height);
 #if defined(MAIN_LCD) && defined(HAVE_LCD_COLOR)

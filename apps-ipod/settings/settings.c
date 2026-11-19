@@ -345,6 +345,9 @@ bool copy_filename_setting(char *buf, size_t buflen, const char *input,
         {
             input_len -= len;
         }
+        else if (!strcmp(fs->suffix, ".pbf") && input_len >= 4 &&
+                 !strcasecmp(input + input_len - 4, ".fnt"))
+            input_len -= 4;
     }
 
     /* Make sure it fits the output buffer and repsects the setting's max_len.
@@ -1002,7 +1005,7 @@ void settings_apply(bool read_disk)
         if (global_settings.font_file[0]
             && global_settings.font_file[0] != '-') {
             int font_ui = screens[SCREEN_MAIN].getuifont();
-            snprintf(buf, sizeof buf, FONT_DIR "/%s.fnt",
+            snprintf(buf, sizeof buf, FONT_DIR "/%s.pbf",
                      global_settings.font_file);
             if (!font_filename_matches_loaded_id(font_ui, buf))
             {
@@ -1021,7 +1024,7 @@ void settings_apply(bool read_disk)
         if (global_settings.bold_font_file[0]
             && global_settings.bold_font_file[0] != '-')
         {
-            snprintf(buf, sizeof buf, FONT_DIR "/%s.fnt",
+            snprintf(buf, sizeof buf, FONT_DIR "/%s.pbf",
                      global_settings.bold_font_file);
             if (ui_bold_font_id < 0
                 || !font_filename_matches_loaded_id(ui_bold_font_id, buf))

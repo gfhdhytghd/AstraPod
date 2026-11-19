@@ -35,6 +35,10 @@
 #include "lcd.h"
 #include "string-extra.h"
 #include "font.h"
+#ifdef HAVE_PODBOX_FONT
+#include "font_pbf.h"
+#include "bidi.h"
+#endif
 #include "file.h"
 #include "core_alloc.h"
 #include "debug.h"
@@ -148,11 +152,28 @@ static void lock_font_handle(int handle, bool lock)
         core_unpin(handle);
 }
 
+static int font_resolve_id(int font_id)
+{
+    bool is_ui = font_id == FONT_UI;
+    if (is_ui)
+        font_id = ui_font;
+    if (font_id >= MAXFONTS)
+        return FONT_SYSFIXED;
+
+    for (int id = font_id; id >= 0; --id)
+        if (buflib_allocations[id] > 0)
+            return id;
+    if (is_ui)
+        for (int id = FONT_LASTUSERFONT; id > font_id; --id)
+            if (buflib_allocations[id] > 0)
+                return id;
+    return FONT_SYSFIXED;
+}
+
 void font_lock(int font_id, bool lock)
 {
-    if( font_id < 0 || font_id >= MAXFONTS )
-        return;
-    if( buflib_allocations[font_id] > 0 )
+    font_id = font_resolve_id(font_id);
+    if (font_id >= 0)
         lock_font_handle(buflib_allocations[font_id], lock);
 }
 
@@ -421,7 +442,13 @@ unsigned font_file_height(const char *path)
         return 0;
     ssize_t bytes = read(fd, header, sizeof(header));
     close(fd);
-    if (bytes != sizeof(header) || memcmp(header, VERSION, 4))
+    if (bytes != sizeof(header))
+        return 0;
+#ifdef HAVE_PODBOX_FONT
+    if (!memcmp(header, "PBF1", 4))
+        return header[4] | (header[5] << 8);
+#endif
+    if (memcmp(header, VERSION, 4))
         return 0;
     return header[6] | (header[7] << 8);
 }
@@ -450,14 +477,23 @@ int font_load_ex( const char *path, size_t buf_size, int glyphs )
     /* load font struct f with file header */
     int file_size = ffilesize( fd );
     struct font header;
-    struct font f;
+    struct font f = {0};
 
-    uint32_t nwidth, noffset;
-    if ( !font_load_header( fd, &header, &f, &nwidth, &noffset )
+    uint32_t nwidth = 0, noffset = 0;
+    bool pixel_font = false;
+#ifdef HAVE_PODBOX_FONT
+    pixel_font = path_len > 4 && !strcasecmp(path + path_len - 4, ".pbf");
+    if (pixel_font && !font_pbf_header(fd, &f))
+    {
+        close(fd);
+        return -1;
+    }
+#endif
+    if ( !pixel_font && (!font_load_header( fd, &header, &f, &nwidth, &noffset )
 #if LCD_DEPTH < 16
         || f.depth
 #endif
-    )
+    ))
     {
         close(fd);
         return -1;
@@ -486,6 +522,11 @@ int font_load_ex( const char *path, size_t buf_size, int glyphs )
     else
         bufsize = file_size;
 
+#ifdef HAVE_PODBOX_FONT
+    if (pixel_font)
+        bufsize = font_pbf_buffer_size(&f, buf_size, glyphs ? glyphs : GLYPHS_TO_CACHE);
+#endif
+
     /* check already loaded */
     int font_id = find_font_index(path);
 
@@ -493,7 +534,7 @@ int font_load_ex( const char *path, size_t buf_size, int glyphs )
     {
         /* already loaded, no need to reload */
         struct buflib_alloc_data *pd = core_get_data(buflib_allocations[font_id]);
-        if (pd->font.buffer_size < bufsize || pd->path_bufsz < path_len)
+        if (!pixel_font && (pd->font.buffer_size < bufsize || pd->path_bufsz < path_len))
         {
             int old_refcount, old_id;
             size_t old_bufsize = pd->font.buffer_size;
@@ -546,7 +587,10 @@ int font_load_ex( const char *path, size_t buf_size, int glyphs )
         }
     }
     if ( open_slot == -1 )
+    {
+        close(fd);
         return -1;
+    }
     font_id = open_slot;
     size_t path_bufsz = MAX(path_len + 1, 64); /* enough size for common case */
     /* allocate mem */
@@ -555,6 +599,7 @@ int font_load_ex( const char *path, size_t buf_size, int glyphs )
                      &buflibops );
     if ( handle <= 0 )
     {
+        close(fd);
         return -1;
     }
     struct buflib_alloc_data *pdata;
@@ -562,6 +607,7 @@ int font_load_ex( const char *path, size_t buf_size, int glyphs )
     pdata = core_get_data_pinned(handle);
     pdata->refcount     = 1;
     pdata->path = pdata->buffer + bufsize;
+    pdata->path_bufsz = path_bufsz;
     /* save load path so we can recognize this font later */
     memcpy(pdata->path, path, path_len+1);
 
@@ -579,6 +625,19 @@ int font_load_ex( const char *path, size_t buf_size, int glyphs )
     pf->buffer_size = bufsize;
     pf->buffer_end = pf->buffer_start + bufsize;
 
+#ifdef HAVE_PODBOX_FONT
+    if (pixel_font)
+    {
+        if (!font_pbf_open(pf))
+        {
+            close(fd);
+            core_put_data_pinned(pdata);
+            core_free(handle);
+            return -1;
+        }
+    }
+    else
+#endif
     if ( cached )
     {
         if ( ! font_load_cached( pf, nwidth, noffset ) )
@@ -641,7 +700,10 @@ void font_unload(int font_id)
         logf("%s %s", __func__, pdata->path);
         if (pf && pf->fd >= 0)
         {
-            glyph_cache_save(font_id);
+#ifdef HAVE_PODBOX_FONT
+            if (!pf->pbf.file_size)
+#endif
+                glyph_cache_save(font_id);
             close(pf->fd);
         }
         core_free(handle);
@@ -678,7 +740,10 @@ static void font_disable(int font_id)
     {
         /* save the cache, but it keep it in-RAM so that cache lookups
          * can still succeed on the same font */
-        glyph_cache_save(font_id);
+#ifdef HAVE_PODBOX_FONT
+        if (!pf->pbf.file_size)
+#endif
+            glyph_cache_save(font_id);
         close(pf->fd);
         pf->fd = -1;
         pf->disabled = true;
@@ -723,33 +788,11 @@ void font_enable_all(void)
  */
 struct font* font_get(int font)
 {
-    bool is_ui_font = (font == FONT_UI);
-    struct font* pf;
-    if (is_ui_font)
-        font = ui_font;
-    if (font <= FONT_SYSFIXED || font >= MAXFONTS)
+    font = font_resolve_id(font);
+    if (font < 0)
         return &sysfont;
-
-    while (1) {
-        if (buflib_allocations[font] > 0)
-        {
-            struct buflib_alloc_data *alloc = core_get_data(buflib_allocations[font]);
-            pf = &alloc->font;
-            if (pf && pf->height)
-                return pf;
-        }
-        if (--font < 0)
-        {
-            if (is_ui_font && ui_font != FONT_LASTUSERFONT)
-            {
-                /* The users preferred UI font couldn't be loaded */
-                ui_font = FONT_LASTUSERFONT;
-                font = ui_font; /* try from the top to find something loaded */
-            }
-            else
-                return &sysfont; /* Nothing else is available */
-        }
-    }
+    struct buflib_alloc_data *alloc = core_get_data(buflib_allocations[font]);
+    return &alloc->font;
 }
 
 /* When FONT_UI is supplied to font_get this font will be tried first if it is
@@ -862,6 +905,17 @@ static int32_t font_bitmap_offset(struct font *font, unsigned glyph)
 
 bool font_has_glyph(struct font *font, ucschar_t ch)
 {
+#ifdef HAVE_PODBOX_FONT
+    if (font->pbf.file_size)
+    {
+        struct font_run run = {0};
+        struct font_glyph glyph;
+        lock_font_handle(font->handle, true);
+        font_pbf_run(font, &run, ch, &glyph);
+        lock_font_handle(font->handle, false);
+        return !glyph.missing;
+    }
+#endif
     if (ch < font->firstchar || ch - font->firstchar >= (unsigned)font->size)
         return false;
     if (ch == (ucschar_t)font->defaultchar)
@@ -883,6 +937,13 @@ bool font_has_glyph(struct font *font, ucschar_t ch)
  */
 int font_get_width(struct font* pf, ucschar_t char_code)
 {
+#ifdef HAVE_PODBOX_FONT
+    if (pf->pbf.file_size)
+    {
+        struct font_run run = {0};
+        return font_pbf_run(pf, &run, char_code, NULL);
+    }
+#endif
     int width;
     struct font_cache_entry *e;
 
@@ -1186,32 +1247,66 @@ const unsigned char* font_get_bits(struct font* pf, ucschar_t char_code)
  * maxwidth = -1 ignores maxwidth
  * stringsize pixel width and height will be returned in *w and *h
  */
+int font_run_next(struct font *font, struct font_run *run, ucschar_t ch,
+                  struct font_glyph *out)
+{
+#ifdef HAVE_PODBOX_FONT
+    if (font->pbf.file_size)
+        return font_pbf_run(font, run, ch, out);
+#endif
+    int width = font_get_width(font, ch);
+    bool mark = IS_DIACRITIC(ch);
+    int origin = run->pen;
+    if (mark)
+        origin = run->base_pen + (run->base_advance - width * 64) / 2;
+    else
+    {
+        run->base_pen = origin;
+        run->base_advance = width * 64;
+        run->pen += width * 64;
+    }
+    if (out)
+        *out = (struct font_glyph){
+            .origin = origin, .x = (origin + 32) >> 6,
+            .width = width, .height = font->height,
+            .bits = font_get_bits(font, ch),
+        };
+    return (run->pen + 32) >> 6;
+}
+
 int font_measurestring(const unsigned char *str, size_t maxbytes, size_t maxwidth, int *w, int *h, int fontnum)
 {
     const unsigned char *start = str;
-    size_t bytes;
+    size_t bytes = 0;
+    font_lock(fontnum, true);
     struct font* pf = font_get(fontnum);
-    font_lock( fontnum, true );
-    ucschar_t ch;
+    struct font_run run = {0};
     size_t width = 0;
 
-    while (true)
+#ifdef HAVE_PODBOX_FONT
+    if (pf->pbf.file_size && maxbytes == (size_t)-1 && maxwidth == (size_t)-1)
     {
-        bytes = str - start;
-        str = utf8decode(str, &ch);
-        if (ch == 0 || bytes >= maxbytes)
-        {
+        const ucschar_t *visual = bidi_l2v(str, 1);
+        if (visual)
+            for (; *visual; ++visual)
+                width = font_pbf_run(pf, &run, *visual, NULL);
+        bytes = strlen(str);
+    }
+    else
+#endif
+    while (bytes < maxbytes && *str)
+    {
+        ucschar_t ch;
+        const unsigned char *next = utf8decode(str, &ch);
+        size_t next_bytes = next - start;
+        if (next_bytes > maxbytes)
             break;
-        }
-        if (IS_DIACRITIC(ch))
-            continue;
-        int fw = font_get_width(pf,ch);
-        width += fw;
-        if (width > maxwidth)
-        {
-            width -= fw;
+        int next_width = font_run_next(pf, &run, ch, NULL);
+        if ((size_t)next_width > maxwidth)
             break;
-        }
+        width = next_width;
+        str = next;
+        bytes = next_bytes;
     }
 
     if ( h )

@@ -81,11 +81,6 @@ struct list_index {
     bool visible, fast;
 };
 
-struct index_face {
-    unsigned height;
-    char name[MAX_PATH - sizeof(FONT_DIR)];
-};
-
 struct native_list {
     struct ui_theme theme;
     unsigned int colors[UI_COLOR_COUNT];
@@ -104,7 +99,7 @@ struct native_list {
     int selection;
     struct list_motion motion;
     struct list_index overlay;
-    int index_faces, index_face_count, index_font;
+    int index_font, index_width;
     char index_font_key[sizeof(((struct list_index *)0)->key)];
     /* Row and notes painters run serially while the renderer is pinned. */
     union {
@@ -1242,114 +1237,36 @@ update_key:
     return index->visible;
 }
 
-static bool index_has_char(struct font *font, ucschar_t ch)
-{
-    if (ch < font->firstchar || ch - font->firstchar >= (unsigned)font->size)
-        return false;
-    int width = font_get_width(font, ch);
-    if (ch == (ucschar_t)font->defaultchar || width != font_get_width(font, font->defaultchar))
-        return true;
-
-    /* Large Unicode fonts can store their default glyph for holes. */
-    size_t bytes = font->depth ? (width * font->height + 1) / 2 :
-                   width * ((font->height + 7) / 8);
-    const unsigned char *fallback = font_get_bits(font, font->defaultchar);
-    const unsigned char *bits = font_get_bits(font, ch);
-    return memcmp(bits, fallback, bytes) != 0;
-}
-
-static bool index_font_file(const char *name)
-{
-    size_t length = strlen(name);
-    return length > 4 && length < sizeof(((struct index_face *)0)->name) &&
-           !strcasecmp(name + length - 4, ".fnt");
-}
-
-static void index_read_faces(struct native_list *render)
-{
-    DIR *dir = opendir(FONT_DIR);
-    if (!dir)
-        return;
-    struct dirent *entry;
-    int capacity = 0;
-    while ((entry = readdir(dir)))
-        capacity += index_font_file(entry->d_name);
-    closedir(dir);
-    if (!capacity)
-        return;
-
-    dir = opendir(FONT_DIR);
-    if (!dir)
-        return;
-    render->index_faces = core_alloc_free_space(capacity * sizeof(struct index_face));
-    if (render->index_faces > 0)
-    {
-        struct index_face *faces = core_get_data_pinned(render->index_faces);
-        int count = 0;
-        char path[MAX_PATH];
-        while (count < capacity && (entry = readdir(dir)))
-        {
-            if (!index_font_file(entry->d_name))
-                continue;
-            snprintf(path, sizeof(path), FONT_DIR "/%s", entry->d_name);
-            unsigned height = font_file_height(path);
-            if (!height)
-                continue;
-            int slot = count;
-            while (slot > 0 && faces[slot - 1].height < height)
-                slot--;
-            memmove(faces + slot + 1, faces + slot, (count - slot) * sizeof(*faces));
-            faces[slot].height = height;
-            strcpy(faces[slot].name, entry->d_name);
-            count++;
-        }
-        core_put_data_pinned(faces);
-        render->index_face_count = count;
-    }
-    closedir(dir);
-}
-
 static void index_release_fonts(struct native_list *render)
 {
     font_unload(render->index_font);
     render->index_font = FONT_SYSFIXED;
-    if (render->index_faces > 0)
-        core_free(render->index_faces);
-    render->index_faces = render->index_face_count = 0;
     render->index_font_key[0] = '\0';
 }
 
-static int index_find_font(struct native_list *render, const ucschar_t *chars, int count)
+static int index_find_font(struct native_list *render, const unsigned char *text,
+                           int max_width)
 {
-    if (render->index_faces <= 0)
-        return FONT_SYSFIXED;
-
-    int best = FONT_SYSFIXED;
-    struct index_face *faces = core_get_data_pinned(render->index_faces);
-    char path[MAX_PATH];
-    for (int i = 0; i < render->index_face_count; i++)
+    static const char *const paths[] = {
+        FONT_DIR "/56-podbox-index.pbf", FONT_DIR "/30-noto-serif-figures.pbf",
+    };
+    for (unsigned i = 0; i < ARRAYLEN(paths); i++)
     {
-        snprintf(path, sizeof(path), FONT_DIR "/%s", faces[i].name);
-        bool loaded = font_filename_matches_loaded_id(render->index_font, path);
-        int id = loaded ? render->index_font : font_load_ex(path, 0, 8);
+        bool loaded = font_filename_matches_loaded_id(render->index_font, paths[i]);
+        int id = loaded ? render->index_font : font_load_ex(paths[i], 0, 8);
         if (id < 0)
             continue;
-        font_lock(id, true);
-        struct font *font = font_get(id);
-        int n = 0;
-        while (n < count && index_has_char(font, chars[n]))
-            n++;
-        font_lock(id, false);
-        if (n == count)
+        int width = font_getstringsize(text, NULL, NULL, id);
+        if (width <= max_width || i == ARRAYLEN(paths) - 1)
         {
-            best = id;
-            break;
+            render->index_width = width;
+            return id;
         }
         if (!loaded)
             font_unload(id);
     }
-    core_put_data_pinned(faces);
-    return best;
+    render->index_width = font_getstringsize(text, NULL, NULL, FONT_UI);
+    return FONT_UI;
 }
 
 static void paint_index(const struct ui_view *view, const struct ui_view_frame *frame)
@@ -1358,16 +1275,9 @@ static void paint_index(const struct ui_view *view, const struct ui_view_frame *
     const unsigned char *text = (const unsigned char *)render->overlay.key;
     if (!*text)
         return;
-    ucschar_t chars[sizeof(render->overlay.key) - 1];
-    int count = 0;
-    while (*text && count < (int)ARRAYLEN(chars))
-        text = utf8decode(text, &chars[count++]);
-
     if (strcmp(render->index_font_key, render->overlay.key))
     {
-        if (!render->index_font_key[0])
-            index_read_faces(render);
-        int id = index_find_font(render, chars, count);
+        int id = index_find_font(render, text, frame->bounds.width / 2);
         if (id != render->index_font)
         {
             font_unload(render->index_font);
@@ -1375,15 +1285,11 @@ static void paint_index(const struct ui_view *view, const struct ui_view_frame *
         }
         strcpy(render->index_font_key, render->overlay.key);
     }
-    int id = render->index_font;
-    font_lock(id, true);
-    struct font *font = font_get(id);
-    int width = 0;
-    for (int i = 0; i < count; i++)
-        width += font_get_width(font, chars[i]);
 
+    int id = render->index_font;
+    int width = render->index_width;
+    int height = font_get(id)->height;
     struct ui_rect area = frame->bounds;
-    int height = font->height;
     area.x += (area.width - 2 * width) / 2;
     area.y += (area.height - 2 * height) / 2;
     area.width = 2 * width;
@@ -1412,19 +1318,9 @@ static void paint_index(const struct ui_view *view, const struct ui_view_frame *
         struct viewport *prior = lcd_set_viewport(&vp);
         int x = area.x - vp.x + width / 2;
         int y = area.y - vp.y + height / 2;
-        for (int i = 0; i < count; i++)
-        {
-            int w = font_get_width(font, chars[i]);
-            const unsigned char *bits = font_get_bits(font, chars[i]);
-            if (font->depth)
-                lcd_alpha_bitmap_part(bits, 0, 0, w, x, y, w, height);
-            else
-                lcd_mono_bitmap_part(bits, 0, 0, w, x, y, w, height);
-            x += w;
-        }
+        lcd_putsxy(x, y, text);
         lcd_set_viewport(prior);
     }
-    font_lock(id, false);
 }
 
 static const struct ui_view_ops bg_ops = { .paint = paint_background };
@@ -1517,8 +1413,14 @@ static void draw_list(struct gui_synclist *list, bool status_only)
         memset(&render->overlay, 0, sizeof(render->overlay));
         render->overlay.last_sel = -1;
     }
-    if (render->motion.visible || render->overlay.visible)
+    bool animate = render->motion.visible || render->overlay.visible;
+    if (animate)
+    {
         status_only = false;
+#ifdef HAVE_ADJUSTABLE_CPU_FREQ
+        cpu_boost(true);
+#endif
+    }
 
     refresh_tokens(render);
     if (render->owner != list || render->generation != list->generation ||
@@ -1596,6 +1498,10 @@ static void draw_list(struct gui_synclist *list, bool status_only)
         ui_flush_dirty();
     if (motion_finished)
         motion_stop(&render->motion);
+#ifdef HAVE_ADJUSTABLE_CPU_FREQ
+    if (animate)
+        cpu_boost(false);
+#endif
 
 done:
     core_put_data_pinned(render);

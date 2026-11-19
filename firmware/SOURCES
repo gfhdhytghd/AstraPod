@@ -380,6 +380,9 @@ arabjoin.c
 bidi.c
 font_cache.c
 font.c
+#if defined(HAVE_LCD_COLOR) && !defined(BOOTLOADER)
+font_pbf.c
+#endif
 hangul.c
 lru.c
 #ifdef HAVE_SCREENDUMP

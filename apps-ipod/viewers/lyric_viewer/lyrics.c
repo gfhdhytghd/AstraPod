@@ -807,7 +807,23 @@ static bool ttml_voice(struct ttml_reader *r, const char **p, struct ttml_span r
             if (!t.empty)
             {
                 if (++depth == TTML_DEPTH) return false;
-                spans[depth] = ttml_span(r, &t, span);
+                struct ttml_span child = ttml_span(r, &t, span);
+                if (child.bg && !span.bg)
+                {
+                    /* The background container sets the voice's window.
+                     * Only its timed descendants start a word sweep. */
+                    child.timed = false;
+                    if (background)
+                    {
+                        long begin = ttml_time(xml_attr(&t, "begin"));
+                        if (begin >= 0 && (line->base.time < 0 || begin < line->base.time))
+                            line->base.time = begin;
+                        if (child.end > line->end &&
+                            (xml_attr(&t, "end").len || xml_attr(&t, "dur").len))
+                            line->end = child.end;
+                    }
+                }
+                spans[depth] = child;
                 names[depth] = t.name;
                 *has_bg |= spans[depth].bg;
             }

@@ -87,7 +87,7 @@ MENUITEM_SETTING(text_viewer_footer,
 MENUITEM_SETTING(text_viewer_read_aloud,
                  &global_settings.text_viewer_read_aloud, NULL);
 
-/* Pick a .fnt from the fonts folder, storing just its name in the setting;
+/* Pick a .pbf from the fonts folder, storing just its name in the setting;
  * unlike the theme's own font item this does not touch the global UI font. */
 static int text_viewer_font_pick(void)
 {
@@ -105,7 +105,7 @@ static int text_viewer_font_pick(void)
 
     if (global_settings.text_viewer_font_file[0])
     {
-        snprintf(name, sizeof name, "%s.fnt",
+        snprintf(name, sizeof name, "%s.pbf",
                  global_settings.text_viewer_font_file);
         browse.selected = name;
     }
@@ -143,7 +143,7 @@ static bool font_size_step(int step, char *out, size_t size)
         int n = atoi(de->d_name);
 
         if (n <= 0 || dash == NULL || len < 4
-            || strcasecmp(de->d_name + len - 4, ".fnt") != 0
+            || strcasecmp(de->d_name + len - 4, ".pbf") != 0
             || (size_t)(de->d_name + len - 4 - dash) != strlen(family)
             || strncasecmp(dash, family, strlen(family)) != 0)
             continue;

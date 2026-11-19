@@ -832,7 +832,7 @@ static void init(void)
         !boot_font_covers(FONT_SYSFIXED, str(LANG_TAGCACHE_INIT)) ||
         !boot_font_covers(FONT_SYSFIXED, str(LANG_WAIT)) ||
         !boot_font_covers(FONT_SYSFIXED, str(LANG_APPLYING_THEME)))
-        boot_caption_font = font_load_ex(FONT_DIR "/12-noto-sans.fnt", 0, 48);
+        boot_caption_font = font_load_ex(FONT_DIR "/12-noto-sans.pbf", 0, 48);
     boot_progress(BOOT_DIRCACHE, 0, 0, BOOT_KEEP_CAPTION);
     CHART(">init_dircache(false)");
     init_dircache(false);

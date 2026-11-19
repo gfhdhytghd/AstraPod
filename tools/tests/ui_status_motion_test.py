@@ -31,6 +31,7 @@ program += section(bar, "struct indicator_motion {", "struct statusbar {")
 program += section(bar, "static int mix_indicator", "static void retire_trace")
 program += section(chrome, "void native_chrome_indicators(", "static unsigned int busy_state")
 program += section(chrome, "struct status_layout {", "static const char *title_text")
+program += section(chrome, "static int clock_origin", "static bool clip_viewport")
 program += """
 int main(void)
 {
@@ -105,6 +106,9 @@ int main(void)
     bar = status_layout(&chrome, 320, 200, 80);
     assert(bar.clock_x * 2 + bar.clock_width == 320);
     assert(bar.clock_x + bar.clock_width < bar.play_x);
+    assert(2 * clock_origin(320, 4290) + 4290 == 320 * 64);
+    assert(2 * clock_origin(320, 4912) + 4912 == 320 * 64);
+    assert(2 * clock_origin(320, 4291) + 4291 == 320 * 64 + 1);
 
     puts("PASS status fade, play/pause/stop, timer wrap and centered safe layout");
 }

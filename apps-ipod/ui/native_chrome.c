@@ -185,6 +185,24 @@ static const char *title_text(const char *title)
     return strcmp(title, "Rockbox") == 0 ? "PodBox" : title;
 }
 
+/* The clock is generated as ASCII in left-to-right order. Keep the full
+ * PBF1 advance, including kerning, until after centering the pen. */
+static int clock_advance(const char *text, int font)
+{
+    struct font_run run = {0};
+    font_lock(font, true);
+    struct font *pf = font_get(font);
+    for (; *text; ++text)
+        font_run_next(pf, &run, (unsigned char)*text, NULL);
+    font_lock(font, false);
+    return run.pen;
+}
+
+static int clock_origin(int width, int advance)
+{
+    return (width * 64 - advance + 1) >> 1;
+}
+
 static bool clip_viewport(struct viewport *vp, int x, int y, int w, int h)
 {
     int left = MAX(vp->x, x);
@@ -219,6 +237,38 @@ static void draw_text(struct viewport *damage, const char *text, int font,
     vp.font = font;
     lcd_set_viewport(&vp);
     lcd_putsxy(x - vp.x, y - vp.y, (const unsigned char *)text);
+    lcd_set_viewport(damage);
+}
+
+static void draw_clock(struct viewport *damage, const char *text, int font,
+                       struct ui_rect clip, int origin)
+{
+    struct viewport vp = *damage;
+    if (!clip_viewport(&vp, clip.x, clip.y, clip.width, clip.height))
+        return;
+#ifdef HAVE_PODBOX_FONT
+    font_lock(font, true);
+    struct font *pf = font_get(font);
+    if (pf->pbf.file_size)
+    {
+        struct font_run run = { .pen = origin - vp.x * 64 };
+        lcd_set_viewport(&vp);
+        for (; *text; ++text)
+        {
+            struct font_glyph glyph;
+            font_run_next(pf, &run, (unsigned char)*text, &glyph);
+            if (glyph.bits && glyph.width && glyph.height)
+                lcd_alpha_bitmap_part(glyph.bits, 0, 0, glyph.width, glyph.x,
+                                      clip.y - vp.y + glyph.y, glyph.width, glyph.height);
+        }
+        lcd_set_viewport(damage);
+        font_lock(font, false);
+        return;
+    }
+    font_lock(font, false);
+#endif
+    int x = (origin + 32) >> 6;
+    draw_text(&vp, text, font, x, clip.y, clip.x + clip.width - x, clip.height, false);
     lcd_set_viewport(damage);
 }
 
@@ -323,7 +373,7 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
                  state->minute, state->hour < 12 ? "AM" : "PM");
 
     char percent[8] = "";
-    int clock_width, percent_width = 0;
+    int percent_width = 0;
     if (state->numeric)
     {
         if (indicators->battery < 0)
@@ -333,8 +383,8 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
         font_getstringsize((const unsigned char *)percent, &percent_width, NULL,
                            chrome->status_font);
     }
-    font_getstringsize((const unsigned char *)clock, &clock_width, NULL, chrome->status_font);
-
+    int advance = clock_advance(clock, chrome->status_font);
+    int clock_width = 2 * ((advance + 127) / 128);
     struct status_layout layout = status_layout(chrome, bounds.width, clock_width, percent_width);
     int icon_y = bounds.y + metric[UI_METRIC_STATUS_ICON_Y];
     int text_y = bounds.y + metric[UI_METRIC_STATUS_TEXT_Y];
@@ -350,8 +400,10 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
         draw_text(&damage, busy_icons[state->busy], chrome->icon_font,
                   bounds.x + layout.busy_x, icon_y, icon_size, icon_size, false);
 
-    draw_text(&damage, clock, chrome->status_font, bounds.x + layout.clock_x,
-              text_y, layout.clock_width, icon_size, false);
+    struct ui_rect clock_clip = { bounds.x + layout.clock_x, text_y,
+                                  layout.clock_width, icon_size };
+    draw_clock(&damage, clock, chrome->status_font, clock_clip,
+               bounds.x * 64 + clock_origin(bounds.width, advance));
     draw_text(&damage, percent, chrome->status_font, bounds.x + layout.percent_x,
               text_y, layout.percent_width, icon_size, false);
     draw_indicators(chrome, &damage, indicators, layout, bounds.x, icon_y, icon_size,

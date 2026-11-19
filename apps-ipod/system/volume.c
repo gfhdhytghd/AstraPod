@@ -29,6 +29,30 @@
 #endif
 #include "volume.h"
 
+static uint32_t volume_change_clock;
+
+void volume_mark_changed(void)
+{
+    int level = disable_irq_save();
+    volume_change_clock = USEC_TIMER;
+    global_status.last_volume_change = current_tick;
+    restore_irq(level);
+}
+
+bool volume_changed_within(uint32_t now, uint32_t window_us)
+{
+    int level = disable_irq_save();
+    uint32_t clock = volume_change_clock;
+    unsigned long tick = global_status.last_volume_change;
+    unsigned long age = (unsigned long)current_tick - tick;
+    restore_irq(level);
+
+    /* Qualify the microsecond clock with kernel ticks so an old event stays
+     * expired after USEC_TIMER wraps. A new event may follow the UI sample. */
+    return tick && age <= window_us / (1000000u / HZ) + 1 &&
+           (int32_t)(now - clock) < (int32_t)window_us;
+}
+
 /* check range, set volume and save settings */
 void setvol(void)
 {
@@ -47,7 +71,7 @@ void setvol(void)
     iap_volume_set();
 #endif
     iap_on_volume(volume);
-    global_status.last_volume_change = current_tick;
+    volume_mark_changed();
     status_save(false);
 }
 

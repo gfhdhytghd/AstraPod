@@ -12,6 +12,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 enum volume_adjust_mode
 {
@@ -25,6 +26,9 @@ enum volume_adjust_mode
 
 /* check range, set volume and save settings */
 void setvol(void);
+void volume_mark_changed(void);
+/* Compare with the UI clock. window_us is a short interval in microseconds. */
+bool volume_changed_within(uint32_t now, uint32_t window_us);
 void set_normalized_volume(int vol);
 int get_normalized_volume(void);
 void adjust_volume(int steps);

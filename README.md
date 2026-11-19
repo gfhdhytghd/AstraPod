@@ -16,6 +16,26 @@ Rockbox specifically and deeply optimized for iPod Classic.
 | PodLink 与稳定性 | PodLink 使用 USB CDC 串行链路。主线程栈和线程容量经过加固。字形与模糊任务共享后台线程。iAP 创建线程失败后可以重试。 |
 | sm1 DSP | 研发阶段。发行包的音频播放路径未启用 sm1 DSP。 |
 
+## 界面演示
+
+![Cover Flow 翻面](docs/media/coverflow-flip.gif)\
+在 Cover Flow 中滚动封面，翻面查看曲目，再合上面板。
+
+![同步歌词](docs/media/lyrics.gif)\
+歌词随播放逐词点亮，左右分列对唱，显示和声与间奏圆点。
+
+![列表进出](docs/media/list-push.gif)\
+从首页进入文件列表，列表行错峰滑入，按 MENU 返回首页。
+
+![快速索引](docs/media/index-mode.gif)\
+快速滚动打开字母索引，每拨一格跳到下一组，松开滚轮关闭索引。
+
+![正在播放](docs/media/now-playing.gif)\
+从 Cover Flow 选曲后过渡到全屏播放页，画面顶部没有状态栏。
+
+![Agents 与 Usage](docs/media/remote.gif)\
+用模拟的 HerdRemote 显示 Agents 工作区，并横向切换到 Usage 页面。
+
 ## 按键与点击轮
 
 **Select** 是中央键。**Menu、Play、Left、Right** 是点击轮上的按键。以下是默认按键。顺时针通常向下或向前，逆时针向上或向后。

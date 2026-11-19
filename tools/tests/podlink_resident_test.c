@@ -77,126 +77,6 @@ static bool dedicated_art(const struct podlink_message *m)
 }
 static void resident_reset(void) { resident_resets++; }
 
-#ifdef FU88_PROTOCOL_TEST
-#include "research_port_host.c"
-/* The newest reply to request id, decoded from the device's output */
-static unsigned char shell_reply[PODLINK_MAX_MESSAGE + 1];
-static unsigned int shell_reply_len, shell_reply_type;
-static bool shell(unsigned int type, const char *id, const char *line,
-                  const void *data, unsigned int n)
-{
-    static unsigned char req[PODLINK_MAX_MESSAGE];
-    static struct podlink_parser parser;
-    static unsigned int seq = 200;
-    unsigned int len = snprintf((char *)req, sizeof req, "RS\t1\t%s\t%s", id, line);
-    if (data)
-    {
-        req[len++] = '\n';
-        memcpy(req + len, data, n);
-        len += n;
-    }
-    clear_output();
-    input_frame(type, seq++, req, len);
-    work();
-    work();
-    char prefix[32];
-    unsigned int plen = snprintf(prefix, sizeof prefix, "RS\t1\t%s\t", id);
-    memset(&parser, 0, sizeof(parser));
-    shell_reply_len = 0;
-    struct podlink_message m;
-    for (int i = 0; i < output_size; i++)
-        if (podlink_decode(&parser, output[i], &m) == 1 &&
-            (m.type == PODLINK_TEXT || m.type == PODLINK_BINARY) &&
-            m.length >= plen && !memcmp(m.data, prefix, plen))
-        {
-            memcpy(shell_reply, m.data, m.length);
-            shell_reply[m.length] = 0;
-            shell_reply_len = m.length;
-            shell_reply_type = m.type;
-        }
-    return shell_reply_len != 0;
-}
-
-static void test_research_shell(void)
-{
-    fake_reset();
-    assert(podlink_open_agents(background));
-    int previous_updates = updates;
-    assert(shell(PODLINK_TEXT, "a1", "peek 4 0x38500c80", NULL, 0));
-    assert(shell_reply_type == PODLINK_TEXT);
-    assert(!strcmp((char *)shell_reply, "RS\t1\ta1\tOK\t004e7309"));
-    /* BINARY request with a payload, BINARY reply with the bytes back */
-    unsigned char blob[4096];
-    for (unsigned int i = 0; i < sizeof blob; i++)
-        blob[i] = (unsigned char)(i * 13 + 5);
-    assert(shell(PODLINK_BINARY, "a2", "load 0x09000000", blob, sizeof blob));
-    assert(!strcmp((char *)shell_reply, "RS\t1\ta2\tOK\tlen=4096"));
-    assert(shell(PODLINK_TEXT, "a3", "dump 0x09000000 4096", NULL, 0));
-    assert(shell_reply_type == PODLINK_BINARY);
-    const char head[] = "RS\t1\ta3\tOK\tlen=4096\n";
-    assert(shell_reply_len == sizeof head - 1 + sizeof blob);
-    assert(!memcmp(shell_reply, head, sizeof head - 1));
-    assert(!memcmp(shell_reply + sizeof head - 1, blob, sizeof blob));
-    /* Guard refusals travel back as ERR; NOR is never written */
-    assert(shell(PODLINK_TEXT, "a4", "poke 4 0x3c300000 1 --force", NULL, 0));
-    assert(!strcmp((char *)shell_reply, "RS\t1\ta4\tERR\tguard: refused (flash/bootloader path)"));
-    assert(spi_writes == 0);
-    /* An sm1 E1-style sequence in one request */
-    assert(shell(PODLINK_TEXT, "a5", "sm1 on; poke 4 0x38500984 0; sm1 wait 50; sm1 ack", NULL, 0));
-    assert(!strncmp((char *)shell_reply, "RS\t1\ta5\tOK\tpower=on", 19));
-    assert(strstr((char *)shell_reply, "hit us="));
-    /* Malformed ids get nothing; the shell's frames never reach the app */
-    assert(!shell(PODLINK_TEXT, "bad!", "ping", NULL, 0));
-    assert(updates == previous_updates);
-    struct podlink_message message;
-    while (podlink_poll(&message) == 1)
-        assert(message.length < 3 || memcmp(message.data, "RS\t", 3));
-    podlink_close();
-    puts("PASS FU88 research shell round trip: TEXT/BINARY requests, binary dump, guard, sm1 batch");
-}
-
-static unsigned int research_replies(void)
-{
-    static struct podlink_parser parser;
-    const char response[] = "RS\t1\tPONG\t0123456789abcdef";
-    unsigned int count = 0;
-    memset(&parser, 0, sizeof(parser));
-    struct podlink_message m;
-    for (int i = 0; i < output_size; i++)
-        if (podlink_decode(&parser, output[i], &m) == 1 && m.type == PODLINK_TEXT &&
-            m.length == sizeof(response) - 1 && !memcmp(m.data, response, m.length))
-            count++;
-    return count;
-}
-
-static void test_research_ping(void)
-{
-    const char request[] = "RS\t1\tPING\t0123456789abcdef";
-    const char *invalid[] = { "RS\t1\tPING\t0123456789abcdeg",
-        "RS\t1\tPING\t0123456789abcde", "RS\t2\tPING\t0123456789abcdef",
-        "RS\t1\tOTHER\t0123456789abcdef" };
-    assert(podlink_open_agents(background));
-    int previous_updates = updates;
-    unsigned int previous_replies = research_replies();
-    for (unsigned int i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
-    {
-        input_frame(PODLINK_TEXT, 80 + i, invalid[i], strlen(invalid[i]));
-        work();
-    }
-    assert(research_replies() == previous_replies);
-    assert(updates == previous_updates);
-    input_frame(PODLINK_TEXT, 84, request, sizeof(request) - 1);
-    work();
-    assert(research_replies() == previous_replies + 1);
-    struct podlink_message message;
-    while (podlink_poll(&message) == 1)
-        assert(message.length < 3 || memcmp(message.data, "RS\t", 3));
-    assert(updates == previous_updates);
-    podlink_close();
-    puts("PASS FU88 research PING round trip and command allowlist");
-}
-#endif
-
 int main(void)
 {
     assert(!podlink_host_connected());
@@ -205,11 +85,6 @@ int main(void)
     work();
     insert();work();assert(!podlink_host_connected());
     handshake(PODLINK_MAX_MESSAGE,1);work();assert(podlink_host_connected());
-#ifdef FU88_PROTOCOL_TEST
-    test_research_ping();
-    test_research_shell();
-    return 0;
-#endif
     /* Auth is session-bound and independent of the active screen. */
     const char *auth = "DA\t1\t0123456789abcdef0123456789abcdef";
     const char *disk = "DK\t1\t0123456789abcdef0123456789abcdef";

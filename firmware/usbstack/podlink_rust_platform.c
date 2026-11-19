@@ -115,9 +115,6 @@ bool pfu_host_connected(void)
     return result;
 }
 int32_t pfu_tick(void) { return (int32_t)current_tick; }
-#ifdef HAVE_RESEARCH_SHELL
-void pfu_research_ping(void) { rlog(CR_RESEARCH_PING, 0); }
-#endif
 int32_t pfu_hz(void) { return HZ; }
 void pfu_wait(int ticks) { sleep(MIN(ticks, MAX(1, HZ / 50))); }
 void pfu_redraw(void) { button_queue_post(BUTTON_REDRAW, 0); }

@@ -130,20 +130,9 @@ data_abort_handler:
     ldr     r1, =safe_read32_faulty_addr
     cmp     r0, r1
     beq     1f
-#ifdef HAVE_RESEARCH_DIAGNOSTICS
-    @ Fatal miss: save the original register values for the research record.
-    ldmfd   sp!, {r0-r1}
-    sub     sp, sp, #56
-    stmia   sp, {r0-r12}
-    sub     r0, lr, #8
-    mov     r1, #2
-    mov     r2, sp
-    b       research_exception
-#else
     @ otherwise just normally to UIE
     mov     r1, #2
     b       UIE
-#endif
 1:
     @ set was_aborted
     ldr     r1, =was_aborted

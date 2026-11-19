@@ -19,29 +19,6 @@ pub trait Ports: Transport {
     fn log_enabled(&self) -> bool;
     fn log_epoch(&self) -> u32;
     fn log_read(&mut self, out: &mut [u8]) -> usize;
-    #[cfg(feature = "research")]
-    fn research_ping(&mut self) {}
-    /// FU88 shell: hand over "RS\t1\t..." (TEXT or BINARY); it runs elsewhere.
-    #[cfg(feature = "research")]
-    fn research_request(&mut self, _data: &[u8]) {}
-    /// The shell's pending reply, if any.
-    #[cfg(feature = "research")]
-    fn research_reply(&self) -> Option<(Kind, &[u8])> {
-        None
-    }
-    #[cfg(feature = "research")]
-    fn research_sent(&mut self) {}
-}
-
-#[cfg(feature = "research")]
-fn research_ping(data: &[u8]) -> Option<[u8; 26]> {
-    let nonce = data.strip_prefix(b"RS\t1\tPING\t")?;
-    if nonce.len() != 16 || !nonce.iter().all(u8::is_ascii_hexdigit) {
-        return None;
-    }
-    let mut response = *b"RS\t1\tPONG\t0000000000000000";
-    response[10..].copy_from_slice(nonce);
-    Some(response)
 }
 struct Inbox {
     frames: [Meta; INBOX],
@@ -189,20 +166,6 @@ impl Service {
                 Some(m) => m,
                 None => break,
             };
-            #[cfg(feature = "research")]
-            if matches!(m.kind, Kind::Text | Kind::Binary)
-                && self.session.event[..m.len].starts_with(b"RS\t")
-            {
-                let data = &self.session.event[..m.len];
-                if let Some(response) = research_ping(data) {
-                    if self.session.send(Kind::Text, &response) == 1 {
-                        p.research_ping();
-                    }
-                } else if data.starts_with(b"RS\t1\t") {
-                    p.research_request(data);
-                }
-                continue;
-            }
             match m.kind {
                 Kind::Pong => continue,
                 Kind::Text => {
@@ -280,13 +243,6 @@ impl Service {
                     == 1
             {
                 self.announced = self.client;
-            }
-            #[cfg(feature = "research")]
-            if let Some((kind, data)) = p.research_reply() {
-                // Sent, or larger than the peer accepts: either way it is done.
-                if self.session.send(kind, data) != 0 {
-                    p.research_sent();
-                }
             }
             if self.record_len == 0 {
                 self.record_len =

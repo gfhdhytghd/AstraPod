@@ -4,8 +4,10 @@
  * Breadcrumb ring that outlives a hard reset (MENU+SELECT), apart from any
  * hardware so the host test runs this very code (tools/tests/crumb_ring_test.c).
  *
- * The firmware keeps the ring in DRAM that the bootloader and crt0 leave
- * alone. A header and each entry carry their own check words. An entry
+ * The firmware keeps two copies, in DRAM and in IRAM1, neither of which the
+ * bootloader or crt0 writes. Whether either survives the reset is not known
+ * for this SoC, so each copy proves itself: a header with a magic and its own
+ * check word, and every entry with a check word over all its fields. An entry
  * half written when the reset came fails its check and is left out.
  *
  * Entries: an id, a 32-bit value, the tick, a sequence number, and how many
@@ -175,7 +177,7 @@ static inline int crumb_snapshot_take(const volatile struct crumb_ring *a,
 {
     struct crumb_entry ea[32], eb[32];
     int max = (int)(sizeof s->e / sizeof s->e[0]);
-    bool oka = crumb_ring_head_ok(a), okb = b && crumb_ring_head_ok(b);
+    bool oka = crumb_ring_head_ok(a), okb = crumb_ring_head_ok(b);
     int na = oka ? crumb_ring_newest(a, ea, max) : 0;
     int nb = okb ? crumb_ring_newest(b, eb, max) : 0;
     const volatile struct crumb_ring *r = NULL;

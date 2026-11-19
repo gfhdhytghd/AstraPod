@@ -13,7 +13,7 @@ def fn(s,n):
  return s[m.start():e]
 run=fn(s,'agents_run')
 init=re.search(r'    int action, ret = [^;]+;',run).group()
-a=run.index('        /* Before question_action:');z=run.index('\n    /* A hold ends',a)
+a=run.index('        /* Before question_action:');z=run.index('\n    ui_scene_cancel(&page_scene);',a)
 dispatch=run[a:z].rstrip();assert dispatch.endswith('}');dispatch=dispatch[:-1]
 start=run[run.index('    if (!podlink_open_agents'):run.index('    bool resume')]
 views=re.search(r'enum view \{[^}]+\};',s).group()
@@ -46,7 +46,7 @@ struct gui_synclist{int dummy;};
 static enum view view;
 static struct hr_question q;
 static bool have_question,detail_ready,question_closing,talk_held,native_play_pending,done,quick_usb;
-static int raw,status,question_choice,backspaces,usage,tabs,closed_detail,closed_space,left_question,answers,enters,consents,finishes;
+static int raw,status,question_choice,backspaces,usage,tabs,closed_usage,closed_detail,closed_space,left_question,closed_input,answers,enters,consents,finishes;
 static unsigned long native_play_at,current_tick;
 static char pending_req[8],focus_req[8],talk_req[8];
 static int get_action_statuscode(int*b){if(b)*b=raw;return status;}
@@ -54,17 +54,17 @@ static const struct hr_question*current_question(void){return have_question?&q:N
 static void send_key(const char*k){if(!strcmp(k,"bs"))backspaces++;else assert(!strcmp(k,"enter"));}
 static void enter_answer(struct gui_synclist*l){(void)l;enters++;view=VIEW_QUESTION;}
 static void answer_number(int n){assert(n==q.yes);answers++;}
-static void close_input(bool submit){assert(!submit);}
+static void close_input(bool submit){assert(!submit);closed_input++;}
 static void leave_question(struct gui_synclist*l){(void)l;left_question++;}
 static void start_talk(struct gui_synclist*l,bool remote){(void)l;(void)remote;assert(0);}
 static void finish_talk(bool discard){assert(discard);finishes++;}
 static void finish_native_play(void){assert(0);}
 static int agents_quickscreen(struct gui_synclist*l,int a){(void)l;(void)a;return quick_usb?QUICKSCREEN_IN_USB:0;}
-static void close_usage(struct gui_synclist*l){(void)l;assert(0);}
+static void close_usage(struct gui_synclist*l){(void)l;closed_usage++;}
 static void close_detail(struct gui_synclist*l){(void)l;closed_detail++;}
 static void open_usage(struct gui_synclist*l){(void)l;usage++;view=VIEW_USAGE;}
 static void switch_tab(struct gui_synclist*l,int dir){(void)l;assert(dir==-1);tabs++;}
-static void close_space(struct gui_synclist*l){(void)l;closed_space++;}
+static void back_from_tab(struct gui_synclist*l){(void)l;closed_space++;}
 static void activate(struct gui_synclist*l){(void)l;assert(0);}
 static int default_event_handler(int a){return a==SYS_USB_CONNECTED?SYS_USB_CONNECTED:0;}
 static void usb_confirm_reopen(void){consents++;}
@@ -82,7 +82,7 @@ post=r'''
 struct result{int view,bs,usage,tabs,details,spaces,questions,answers,enters,choice;};
 static void reset(int v){
  view=v;have_question=detail_ready=true;question_closing=talk_held=native_play_pending=quick_usb=false;
- pending_req[0]=focus_req[0]=talk_req[0]=0;question_choice=backspaces=usage=tabs=closed_detail=closed_space=left_question=answers=enters=consents=finishes=0;
+ pending_req[0]=focus_req[0]=talk_req[0]=0;question_choice=backspaces=usage=tabs=closed_usage=closed_detail=closed_space=left_question=closed_input=answers=enters=consents=finishes=0;
  q=(struct hr_question){.yes=1,.no=2};
 }
 static struct result result(void){return(struct result){view,backspaces,usage,tabs,closed_detail,closed_space,left_question,answers,enters,question_choice};}
@@ -112,10 +112,17 @@ int main(void){
     reset(v);if(gate==0)pending_req[0]='x';if(gate==1)focus_req[0]='x';if(gate==2)detail_ready=false;if(gate==3){q.yes=q.no=0;have_question=false;}
     dispatch(lookup(left),left);assert(!done&&!consents);cases++;
    }
-   /* MENU alone retains the one-press exit, including busy questions. */
+   /* MENU leaves the root only. Child pages take their local back path. */
    reset(v);pending_req[0]=focus_req[0]='x';int menu=remote?BUTTON_RC_MENU:BUTTON_MENU;
-   assert(dispatch(lookup(menu|BUTTON_REL),menu|BUTTON_REL)==AGENTS_EXIT_MENU&&done&&consents==1&&finishes==1);
-   reset(v);assert(dispatch(ACTION_STD_CANCEL,menu|BUTTON_REL)==AGENTS_EXIT_MENU&&done&&consents==1);
+   bool root=v==VIEW_SPACES;
+   int exit_reason=root?AGENTS_EXIT_MENU:AGENTS_EXIT_OTHER;
+   assert(dispatch(lookup(menu|BUTTON_REL),menu|BUTTON_REL)==exit_reason);
+   assert(done==root&&consents==root&&finishes==1);
+   assert(closed_usage==(v==VIEW_USAGE)&&closed_detail==(v==VIEW_DETAIL));
+   assert(closed_space==(v==VIEW_AGENTS)&&closed_input==(v==VIEW_INPUT));
+   assert(left_question==(v==VIEW_ALERT||v==VIEW_QUESTION));
+   reset(v);
+   assert(dispatch(ACTION_STD_CANCEL,menu|BUTTON_REL)==exit_reason&&done==root&&consents==root);
   }
   views++;
   /* An untagged CANCEL is never a MENU consent, even when it exits. */

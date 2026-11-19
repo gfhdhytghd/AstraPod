@@ -127,6 +127,11 @@ static long raw_ui_filter(long button)
 {
     /* Audio/decoder threads also read buttons; they must never write RTC. */
     if (thread_self() != ui_thread) return button;
+#if defined(BUTTON_SCROLL_BACK) && defined(BUTTON_SCROLL_FWD)
+    if (!(button & (SYS_EVENT | BUTTON_MULTIMEDIA | BUTTON_REDRAW)) &&
+        (button & (BUTTON_SCROLL_BACK | BUTTON_SCROLL_FWD)))
+        ui_scene_snap_push();
+#endif
 #ifdef HAVE_USB_PODLINK
     cider_source_poll();
 #endif
@@ -1327,6 +1332,15 @@ static void scene_takeover(int action)
         ui_scene_interrupt();
     if (system_takeover)
         dialog_interrupt_transition();
+    bool scrolling = action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT ||
+        action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT ||
+        action == ACTION_LISTTREE_PGUP || action == ACTION_LISTTREE_PGDOWN;
+#if defined(BUTTON_SCROLL_BACK) && defined(BUTTON_SCROLL_FWD)
+    scrolling |= action != ACTION_NONE && !system_takeover &&
+                 (action_last.button & (BUTTON_SCROLL_BACK | BUTTON_SCROLL_FWD));
+#endif
+    if (scrolling)
+        ui_scene_snap_push();
 }
 
 static bool menu_back;

@@ -9,15 +9,22 @@
 struct ui_scene {
     const void *back_page, *front_page;
     struct ui_tween tween;
-    int handle, backdrop_handle, composed_offset, last_offset;
+    int handle, backdrop_handle, composed_offset, last_offset, pan_top;
+    int push_top, row_y, row_pitch, row_count;
     unsigned trace, dim_color;
-    bool target_front, capturing, automatic, vertical;
+    bool target_front, capturing, automatic, vertical, staggered, rows_changed, reuse_target;
 };
 
 /* The UI thread owns a scene from capture through the end of its transition.
  * The page painter continues to own the canonical framebuffer. */
 bool ui_scene_capture(struct ui_scene *scene, const void *from, const void *to,
                       bool push);
+/* Move adjacent pages together below the fixed chrome. */
+bool ui_scene_capture_pan(struct ui_scene *scene, const void *from, const void *to,
+                          int direction, int top);
+/* The incoming list reports the already-painted visible row bands. */
+void ui_scene_push_rows(int y, int pitch, int count);
+void ui_scene_snap_push(void);
 void ui_scene_start(struct ui_scene *scene);
 void ui_scene_update(struct ui_scene *scene, bool target_changed);
 int ui_scene_timeout(const struct ui_scene *scene, int timeout);

@@ -30,6 +30,7 @@
 #include "ui/retained.h"
 #include "ui/statusbar.h"
 #include "list_render.h"
+#include "ui/scene.h"
 #include "list_select.h"
 
 struct list_geometry {
@@ -1454,6 +1455,9 @@ static void draw_list(struct gui_synclist *list, bool status_only)
                          viewportmanager_theme_enabled(SCREEN_MAIN) && !list->selection_color);
     }
     struct list_geometry g = measure(list, SCREEN_MAIN, render->theme.metric);
+    if (!status_only)
+        ui_scene_push_rows(g.rows.y, g.pitch, MIN(g.rows.height / g.pitch,
+                           list->nb_items - MAX(0, list->start_item[SCREEN_MAIN])));
 
     ui_view_init(&render->root, (struct ui_rect){0, 0, LCD_WIDTH, LCD_HEIGHT}, NULL, NULL);
     /* Put the album layer behind the content and below the status bar. */

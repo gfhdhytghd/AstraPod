@@ -3351,18 +3351,17 @@ static void render_slide_clipped(struct slide_data *slide, const int alpha,
 }
 
 /* The same pinhole projection as the slide walk, with the pivot at the
- * centre of the card. Geometry and texture dimensions are independent so
- * the back can grow while its text stays in a single native-resolution map. */
+ * centre of the card. Only the artwork is texture mapped. The moving back
+ * is a solid surface, and its text is drawn separately at the flat pose. */
 static void render_flip_face(int angle, int width, int height,
-                             const pix_t *back, int back_width, int back_height,
-                             int center_y, int band)
+                             bool back, pix_t color, int center_y, int band)
 {
     if (angle <= -256 || angle >= 256 || width <= 0 || height <= 0 ||
         center_y <= 0 || center_y >= band)
         return;
 
-    const pix_t *src = back;
-    int sw = back_width, sh = back_height;
+    const pix_t *src = NULL;
+    int sw = width, sh = height;
     if (!back)
     {
         struct dim *bmp = surface(&center_slide);
@@ -3408,14 +3407,20 @@ static void render_flip_face(int angle, int width, int height,
         if ((unsigned)u >= (unsigned)(width * PFREAL_ONE))
             continue;
         const int col = fmul(u, u_scale) >> PFREAL_SHIFT;
-        const pix_t *column = src + col * sh;
+        const pix_t *column = back ? NULL : src + col * sh;
         dy = MAX(1, dy);
         unsigned int recip = 0xffffffffu / dy;
         struct pf_extent top = project_extent(split, dy, recip);
         struct pf_col upper = {column, LCDADDR(x, center_y - 1), 0, -dy, 0};
         struct pf_col lower = {column, LCDADDR(x, center_y), 0, dy, 0};
-        cover_half(&upper, top, center_y, -BUFFER_WIDTH, column[0], NULL);
-        cover_half(&lower, top, band - center_y, BUFFER_WIDTH, column[sh - 1], NULL);
+        cover_half(&upper, top, center_y, -BUFFER_WIDTH, back ? color : column[0], NULL);
+        cover_half(&lower, top, band - center_y, BUFFER_WIDTH, back ? color : column[sh - 1], NULL);
+        if (back)
+        {
+            for (int y = center_y - upper.n; y < center_y + lower.n; y++)
+                *LCDADDR(x, y) = color;
+            continue;
+        }
         /* Pixel centres sample half a destination step below the top edge. */
         cols[ncols++] = (struct pf_col){column, LCDADDR(x, center_y - upper.n),
             split - upper.n * dy + dy / 2, dy, upper.n + lower.n};
@@ -4834,12 +4839,12 @@ static int native_frame_wait(uint32_t clock, unsigned last_frame)
 static struct album_panel {
     struct carousel_album_header header;
     char titles[ALBUM_PANEL_ROWS][CAROUSEL_TRACK_TEXT];
-    int texture, selected, top, count;
+    int selected, top, count;
     int from, to, via, position;
     unsigned first, second, sampled, trace;
     uint32_t clock;
     long next_read;
-    bool live, moving, dirty, raster_dirty, missing, play_pending, play_failed;
+    bool live, moving, dirty, missing, play_pending, play_failed;
 } panel;
 
 static void close_album_panel(bool suspend)
@@ -4848,8 +4853,6 @@ static void close_album_panel(bool suspend)
         return;
     if (!suspend || !model->external)
         model->panel_close();
-    if (panel.texture > 0)
-        core_free(panel.texture);
     ui_perf_end(panel.trace);
     panel = (struct album_panel){0};
 }
@@ -4862,9 +4865,7 @@ static bool open_album_panel(int selected, int top)
     panel.count = -1;
     panel.selected = selected;
     panel.top = top;
-    panel.dirty = panel.raster_dirty = panel.missing = true;
-    panel.texture = core_alloc_free_space(ALBUM_PANEL_WIDTH * ALBUM_PANEL_HEIGHT *
-                                          sizeof(pix_t));
+    panel.dirty = panel.missing = true;
     return true;
 }
 
@@ -4894,8 +4895,6 @@ static void flip_to(bool open)
     unsigned second = ui_theme_duration(open ? ANIM_F(9) : ANIM_F(7));
     panel.first = (first * abs(panel.via - panel.from) + FLIP_MID - 1) / FLIP_MID;
     panel.second = (second * abs(panel.to - panel.via) + FLIP_MID - 1) / FLIP_MID;
-    if (panel.texture <= 0)
-        panel.first = panel.second = 0;
     panel.sampled = (unsigned)-1;
     panel.clock = USEC_TIMER;
     panel.moving = panel.first || panel.second;
@@ -4909,7 +4908,7 @@ static void panel_read_tracks(void)
 {
     int count = model->panel_count();
     if (count != panel.count)
-        panel.raster_dirty = true;
+        panel.dirty = true;
     panel.count = count;
     panel.missing = count == -1;
     if (count > 0)
@@ -4932,11 +4931,10 @@ static void panel_read_tracks(void)
         if (strcmp(panel.titles[i], title))
         {
             strlcpy(panel.titles[i], title, sizeof(panel.titles[i]));
-            panel.raster_dirty = true;
+            panel.dirty = true;
         }
     }
     panel.next_read = current_tick + MAX(1, HZ / 20);
-    panel.dirty |= panel.raster_dirty;
 }
 
 static void panel_text(const char *label, int y, int height)
@@ -5009,19 +5007,9 @@ static void paint_album_panel(void)
     lcd_set_viewport(previous);
 }
 
-static void NO_INLINE update_panel_texture(pix_t *texture)
-{
-    paint_album_panel();
-    const pix_t *src = LCD_BUF + ALBUM_PANEL_Y * LCD_WIDTH + ALBUM_PANEL_X;
-    for (int x = 0; x < ALBUM_PANEL_WIDTH; x++)
-        for (int y = 0; y < ALBUM_PANEL_HEIGHT; y++)
-            texture[x * ALBUM_PANEL_HEIGHT + y] = src[y * LCD_WIDTH + x];
-    panel.raster_dirty = false;
-}
-
 /* Draw the neighbours with the existing culling and span renderer.
- * The centre face is the only extra texture. */
-static void NO_INLINE render_album_flip(int position, const pix_t *texture)
+ * The artwork is the only transformed texture. */
+static void NO_INLINE render_album_flip(int position, pix_t color)
 {
     pf_clear_band(0, pf_height);
     if (!position)
@@ -5070,9 +5058,8 @@ static void NO_INLINE render_album_flip(int position, const pix_t *texture)
     }
     pix_t *saved = buffer;
     buffer = LCD_BUF;
-    if (!back || texture)
-        render_flip_face(angle, w, h, back ? texture : NULL,
-                         ALBUM_PANEL_WIDTH, ALBUM_PANEL_HEIGHT, cy, LCD_HEIGHT);
+    if (position != FLIP_OPEN)
+        render_flip_face(angle, w, h, back, color, cy, LCD_HEIGHT);
     buffer = saved;
 }
 
@@ -5085,19 +5072,12 @@ static void draw_album_flip(void)
     lcd_set_background(pf_bg_color);
     lcd_set_foreground(pf_fg_color);
     lcd_set_drawmode(DRMODE_FG);
-    pix_t *texture = panel.texture > 0 ? core_get_data_pinned(panel.texture) : NULL;
-    if (texture && panel.raster_dirty && panel.position > FLIP_MID)
-        update_panel_texture(texture);
+    pix_t color = ui_theme_rgb565(UI_COLOR_MODAL_BG);
     buf_ctx_lock();
-    render_album_flip(panel.position, texture);
+    render_album_flip(panel.position, color);
     buf_ctx_unlock();
-    if (texture)
-        core_put_data_pinned(texture);
-    else if (panel.position > FLIP_MID)
-    {
+    if (panel.position == FLIP_OPEN)
         paint_album_panel();
-        panel.raster_dirty = false;
-    }
     uint32_t submit = USEC_TIMER;
     lcd_update();
     if (pf_scene.capturing)
@@ -5157,7 +5137,7 @@ static int album_panel_action(int button)
             {
                 panel.selected = selected;
                 panel.play_failed = false;
-                panel.raster_dirty = true;
+                panel.dirty = true;
                 panel_read_tracks();
             }
         }
@@ -5177,7 +5157,7 @@ static int album_panel_action(int button)
             if (ret != CAROUSEL_PLAY_PENDING)
                 return ret;
             panel.play_pending = true;
-            panel.dirty = panel.raster_dirty = true;
+            panel.dirty = true;
         }
         break;
     default:
@@ -5505,7 +5485,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 {
                     panel.play_pending = false;
                     panel.play_failed = true;
-                    panel.dirty = panel.raster_dirty = true;
+                    panel.dirty = true;
                 }
             }
             if (!dark && (panel.moving || panel.dirty))

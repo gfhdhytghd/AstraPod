@@ -25,6 +25,7 @@ tokens=sorted(set(re.findall(r'\bACTION_[A-Z_0-9]+',source+' ACTION_WPS_BROWSE A
 button_codes=(r/'firmware/export/button.h').read_text()
 button_codes='\n'.join(re.findall(r'^#define BUTTON_(?:MULTIMEDIA(?:_(?:PLAYPAUSE|NEXT|PREV|VOLUME_UP|VOLUME_DOWN))?|REPEAT)\s+[^\n]+',button_codes,re.M))
 adapter=r'''
+#include <dirent.h>
 #define HAVE_USB_PODLINK
 #define HAVE_ADJUSTABLE_CPU_FREQ
 #define HAVE_MULTIMEDIA_KEYS
@@ -102,7 +103,7 @@ static void agents_nav_request(int screen, bool remote)
 typedef uint16_t fb_data;typedef unsigned ucschar_t;
 RETAINED_TEST_HEADER
 struct frame_buffer_t {fb_data *fb_ptr;void*(*get_address_fn)(int,int);int stride,elems;};
-struct viewport {struct frame_buffer_t *buffer;unsigned bg_pattern;int font,fg,width,height,flags;};
+struct viewport {struct frame_buffer_t *buffer;unsigned bg_pattern;int font,fg,width,height,flags,y;};
 struct bitmap {int width,height;unsigned char *data;};
 struct screen {int(*getuifont)(void);};
 struct wps_state {struct mp3entry *id3,*nid3;int ff_rewind_count;bool paused;};
@@ -174,6 +175,16 @@ static int font_load(const char *path){
     }
     loads++;
     return strstr(path,"12-")?12:strstr(path,"26-")?26:18;
+}
+static int font_load_ex(const char *path, size_t buffer, int glyphs)
+{
+    (void)buffer; (void)glyphs;
+    return access(path, R_OK) == 0 ? font_load(path) : -1;
+}
+static bool font_has_glyph(struct font *font, unsigned ch)
+{
+    (void)font;
+    return ch < 0x10000;
 }
 static void font_unload(int f){(void)f;unloads++;}
 static unsigned width_reads;
@@ -408,37 +419,27 @@ static fb_data ref_mix(fb_data a, fb_data b, int p)
 }
 static void test_pixels(void)
 {
-    /* Wrapped rows share the selected edge and the block's scale origin. */
-    assert(lv_text_x(200,200,256,0) == 16 && lv_text_x(100,200,256,0) == 16);
-    assert(lv_text_x(200,200,256,2) + 200 == 304);
-    assert(lv_text_x(100,200,256,2) + 100 == 304);
-    assert(lv_text_x(100,200,256,1) == 110);
-    assert(lv_text_x(220,200,282,0) == 6 && lv_text_x(110,200,282,0) == 6);
-    assert(lv_text_x(220,200,282,2) + 220 == 314);
-    assert(lv_text_x(110,200,282,2) + 110 == 314);
-    /* Compare the feather and filtered strips with scalar pixel math. */
+    /* Both native sizes share their selected edge. */
+    assert(lv_text_x(200,0) == 16 && lv_text_x(100,0) == 16);
+    assert(lv_text_x(200,2) + 200 == 304);
+    assert(lv_text_x(100,2) + 100 == 304);
+    assert(lv_text_x(100,1) == 110);
+    /* Compare native coverage and the sweep feather with scalar pixel math. */
     for (int t = 0; t < 2000; t++) {
-        unsigned char upper[322] = {0}, lower[322] = {0};
+        unsigned char row[320];
         fb_data pixels[320], ref[320], fg = pixel_rand();
         int width = t % 3 == 0 ? 288 : pixel_rand() % 289;
-        int step = t % 2 ? 256 : 232, fy = pixel_rand() % 16;
         int sweep = (int)(pixel_rand() % 322) - 1, alpha = pixel_rand() % 257;
         int dim = alpha * (pixel_rand() % 257) / 256;
         for (int x = 0; x < 320; x++) {
-            upper[x + 1] = t % 4 ? pixel_rand() % 65 : 64;
-            lower[x + 1] = t % 4 ? pixel_rand() % 65 : 0;
+            row[x] = pixel_rand() % 65;
             pixels[x] = ref[x] = pixel_rand();
         }
         for (int x = 0; x < width; x++) {
-            int q = (step - 256) / 2 + step * x;
-            int ix = (q >> 8) + 1, fx = (q >> 4) & 15;
-            unsigned ink = step == 256 ? upper[x + 1] :
-                ((upper[ix] * (16-fx) + upper[ix + 1] * fx) * (16-fy)
-                + (lower[ix] * (16-fx) + lower[ix + 1] * fx) * fy + 128) / 256;
             int light = sweep < 0 ? alpha : dim + (alpha - dim) * MAX(0, MIN(12, sweep - x)) / 12;
-            ref[x] = ref_mix(ref[x], fg, light * ink / 64);
+            ref[x] = ref_mix(ref[x], fg, light * row[x] / 64);
         }
-        lv_ink_row(pixels, upper + 1, lower + 1, width, step, fy, alpha, sweep, dim, lv_expand(fg));
+        lv_ink_row(pixels, row, width, alpha, sweep, dim, lv_expand(fg));
         assert(!memcmp(ref, pixels, sizeof ref));
     }
     struct lv_state state={0};
@@ -459,7 +460,7 @@ static void test_pixels(void)
             assert(screen_pixels[i]==ref_mix(lv.snapshot[i],lv.layer[i],alpha));
     }
     lv_state=NULL;
-    puts("PASS FU102 pixel reference: 2000 ink scanlines and all 257 transition weights");
+    puts("PASS FU107 native pixel reference: 2000 ink scanlines and all 257 transition weights");
 }
 static const int multimedia_keys[] = {
     BUTTON_MULTIMEDIA_PLAYPAUSE, BUTTON_MULTIMEDIA_NEXT, BUTTON_MULTIMEDIA_PREV,
@@ -479,16 +480,21 @@ static int select_scenario(void)
     }
     if (calls==2) {
         assert(lv.mode.manual && lv.mode.focus==focus);
-        assert(pose_y(focus, lv_clock()) != LV_ANCHOR);
+        memset(lv.layer,0xa5,LV_FRAME);
+        precise_extra += ui_frame_clock(ANIM_F(8));
         select_button=(remote_key || remote_source)?BUTTON_RC_SELECT:BUTTON_SELECT;
         return ACTION_UNKNOWN;
     }
     long expected=backward_seek?0:(remote_source ? 2000 : 4000)-global_settings.lyric_lead;
     assert(line_seeks==1 && seek_target==expected);
     assert(!lv.mode.manual && lv.mode.focus==focus);
-    assert(lv.pose_focus == focus && lv.motion_frames == 0);
+    assert(lv.pose_focus == focus && lv.motion_frames == ANIM_F(15));
+    for (int y = 0; y < 35; y++)
+        assert(panel[y * LCD_WIDTH] == lv_background(y));
+    for (int y = LV_BODY_BOTTOM; y < LCD_HEIGHT - 2; y++)
+        assert(panel[y * LCD_WIDTH] == lv_background(y));
     if (calls==3) {
-        assert(updates >= seek_updates + 1 && lv.track_fade);
+        assert(updates >= seek_updates + 1 && lv.returning && !lv.track_fade);
         assert(lv.elapsed==expected && playing.elapsed!=(unsigned long)expected);
         if (remote_source) remote_cn("one",backward_seek?2800:100,0);
         else playing.elapsed=seek_target; /* An unconfirmed local clock cannot win. */
@@ -496,7 +502,7 @@ static int select_scenario(void)
         return ACTION_WPS_BROWSE; /* Release must not exit or send another seek. */
     }
     if (calls==4) {
-        assert(lv.elapsed==expected && lv.track_fade);
+        assert(lv.elapsed==expected && lv.returning && !lv.track_fade);
         long landed=MAX(0,seek_target-100);
         if (remote_source) remote_cn("one",landed,0);
         else {playing.elapsed=landed;seek_serial++;}
@@ -507,7 +513,7 @@ static int select_scenario(void)
         return ACTION_NONE;
     }
     assert(lv_lyric_elapsed()==(backward_seek?200:remote_source?2000:4000));
-    assert(pose_y(focus, lv_clock()) == LV_ANCHOR);
+    assert(lv.pose_focus == focus);
     assert(!title_draws&&!manual_draws);
     return ACTION_WPS_BROWSE; /* SELECT exits again after auto-follow. */
 }
@@ -518,23 +524,20 @@ static int get_action(int c,int timeout){
  assert(clock_refs == (lv.boost ? 2 : 1));
  if(timeout>HZ/30)assert(!lv.boost);
  if(plan==15 || plan==16) {
-   const unsigned skipped=ANIM_F(15), midway=ANIM_F(5);
    switch(++calls) {
     case 1:
       assert(lv.entry_handle && lv.entry_frame==0 && timeout==1 && updates==1);
       return plan==16 ? SYS_USB_CONNECTED : ACTION_WPS_VOLUP;
     case 2:
-      assert(lv.entry_handle && lv.entry_frame==0 && timeout==1 && updates==1);
-      assert(lv.mode.manual && lv.mode.focus==1);
-      precise_extra+=ui_frame_clock(midway);
+      assert(!lv.entry_handle && lv.mode.manual && lv.mode.focus==1);
+      precise_extra+=ui_frame_clock(ANIM_F(5));
       return ACTION_NONE;
     case 3:
-      assert(lv.entry_handle && lv.entry_frame==(int)midway && timeout==1 && updates==2);
-      assert(lv.motion_frame == midway && pose_y(1, lv_clock()) > LV_ANCHOR);
-      precise_extra+=ui_frame_clock(skipped)-ui_frame_clock(midway);
+      assert(lv.motion_frame == ANIM_F(5) && lv.wheel_offset > 0);
+      precise_extra+=ui_frame_clock(ANIM_F(10));
       return ACTION_NONE;
     default:
-      assert(calls==4 && !lv.entry_handle && lv.entry_frame==(int)skipped && updates==3);
+      assert(calls==4 && !lv.entry_handle && lv.wheel_offset==0);
       return ACTION_WPS_MENU;
    }
  }
@@ -542,25 +545,23 @@ static int get_action(int c,int timeout){
    switch(++calls) {
     case 1: return ACTION_WPS_VOLUP;
     case 2:
-      assert(lv.mode.manual && lv.mode.focus==1 && lv.scroll_frames==ANIM_F(20));
-      assert(timeout==1 && lv.motion_frame==0 && lv.stagger_frames==ANIM_F(2));
-      for (int slot = 0; slot < lv.pose_count; slot++) {
-        unsigned delay = slot * ANIM_F(2);
-        assert(lv_pose_at(slot, delay).from_y == lv.poses[slot].from_y);
-        assert(lv_pose_at(slot, delay + 1).from_y < lv.poses[slot].from_y);
-        assert(lv_pose_at(slot, delay + ANIM_F(20)).from_y == lv.poses[slot].to_y);
-      }
+      assert(lv.mode.manual && lv.mode.focus==1 && !lv.scroll_frames && !lv.focus_frames);
+      assert(timeout==1 && lv.motion_frame==0 && !lv.stagger_frames);
+      assert(lv.wheel_offset == lv_distance(0, 1, -1));
       precise_extra+=ui_frame_clock(ANIM_F(5));
-      retarget_position=pose_y(0, lv_clock());
-      assert(retarget_position < LV_ANCHOR);
+      retarget_position=lv_wheel_at(lv_clock()) - lv_distance(0, 1, -1);
+      assert(retarget_position < 0);
       return ACTION_WPS_VOLDOWN;
     case 3:
-      assert(lv.mode.focus==0 && pose_y(0, lv_clock())==retarget_position);
+      assert(lv.mode.focus==0 && lv_wheel_at(lv_clock())==retarget_position);
       assert(lv.motion_frame==0 && timeout==1);
+      return ACTION_WPS_VOLDOWN;
+    case 4:
+      assert(lv.wheel.pull > 0 && lv.wheel.pull <= lv_height(0, 0) / 2);
       precise_extra+=ui_frame_clock(ANIM_F(40));
       return ACTION_NONE;
     default:
-      assert(calls==4 && pose_y(0, lv_clock())==LV_ANCHOR && !lv.boost);
+      assert(calls==5 && lv_wheel_at(lv_clock())==0 && !lv.boost);
       return SYS_USB_CONNECTED;
    }
  }
@@ -589,7 +590,8 @@ static int get_action(int c,int timeout){
  if(plan==11) return select_scenario();
  if(plan==12) {
   if(calls==1) return ACTION_WPS_VOLDOWN; /* Clamp focus to first line. */
-  assert(calls==2 && lv.mode.manual && lv.mode.focus==0);
+  if(calls==2) assert(lv.mode.manual && lv.mode.focus==0);
+  else assert(calls==3 && !lv.mode.manual);
   return ACTION_WPS_BROWSE;
  }
  if(plan==13) {
@@ -598,8 +600,8 @@ static int get_action(int c,int timeout){
  }
  if(plan==0){
   if(calls==1){assert(lv.mode.focus==0);return ACTION_WPS_VOLUP;}
-  if(calls==2){assert(lv.mode.manual&&lv.mode.focus==1);retarget_position=pose_y(0, lv_clock());return ACTION_WPS_VOLUP;}
-  if(calls==3){assert(pose_y(0, lv_clock())==retarget_position && lv.mode.focus==2);current_tick+=400;playing.elapsed=9000;return ACTION_NONE;}
+  if(calls==2){assert(lv.mode.manual&&lv.mode.focus==1);return ACTION_WPS_VOLUP;}
+  if(calls==3){assert(lv.mode.manual && lv.mode.focus==2 && lv.wheel.from>0);current_tick+=400;playing.elapsed=9000;return ACTION_NONE;}
   if(calls==4){assert(!lv.mode.manual&&lv.mode.focus==2);return ACTION_WPS_PLAY;}
   if(calls==5)return ACTION_WPS_SEEKFWD;
   if(calls==6)return ACTION_WPS_SKIPNEXT;
@@ -628,15 +630,15 @@ static int get_action(int c,int timeout){
   if(lv.pending)return ACTION_NONE;
   assert(lyrics_timed()&&lyrics_loaded()&&lyrics_count()==2&&!strcmp(lyrics_text(0),"星 光"));
   switch(++remote_actions){
-   case 1:assert(!lv.paused&&lv.mode.focus==0);paused_width=lv_sweep(0,lv_lyric_elapsed());current_tick+=20;return ACTION_NONE;
-   case 2:assert(lv_sweep(0,lv_lyric_elapsed())>=paused_width&&remote_clock.seq==1);
+   case 1:assert(!lv.paused&&lv.mode.focus==0);paused_width=lv_sweep(0,lv_lyric_elapsed(),true);current_tick+=20;return ACTION_NONE;
+   case 2:assert(lv_sweep(0,lv_lyric_elapsed(),true)>=paused_width&&remote_clock.seq==1);
      assert(!lv.art_ready&&!perf.builds);
      art_present=true;art_handle=7;art_pixels[0]=0x07e0;art_generation++;
      pause_position=cider_playback_position(&remote_clock,current_tick,HZ);
      remote_cn("one",pause_position+150,0);return ACTION_NONE;
    case 3:assert(lv.paused&&lv.elapsed==pause_position);
-     paused_width=lv_sweep(0,lv_lyric_elapsed());current_tick+=120;return ACTION_NONE;
-   case 4:assert(lv.elapsed==pause_position&&lv_sweep(0,lv_lyric_elapsed())==paused_width);
+     paused_width=lv_sweep(0,lv_lyric_elapsed(),true);current_tick+=120;return ACTION_NONE;
+   case 4:assert(lv.elapsed==pause_position&&lv_sweep(0,lv_lyric_elapsed(),true)==paused_width);
      assert(lv.remote&&lv.art_ready&&perf.builds==1);
      remote_cn("one",1799,0);return ACTION_NONE;
    case 5:assert(lv.mode.focus==0);remote_cn("one",1800,0);return ACTION_NONE;
@@ -653,10 +655,10 @@ static int get_action(int c,int timeout){
  if(plan==6){
    assert(lyrics_time(1)==4000&&lv.old_progress==(int)(playing.elapsed*320/playing.length));
    if(calls==1){assert(lv.mode.focus==0);playing.elapsed=lead_boundary;return ACTION_NONE;}
-   if(calls==2){assert(lv.mode.focus==1&&lv_sweep(1,lv_lyric_elapsed())==0);playing.elapsed+=500;return ACTION_NONE;}
-   assert(lv_sweep(1,lv_lyric_elapsed())>0);
+   if(calls==2){assert(lv.mode.focus==1&&lv_sweep(1,lv_lyric_elapsed(),true)==0);playing.elapsed+=500;return ACTION_NONE;}
+   assert(lv_sweep(1,lv_lyric_elapsed(),true)>0);
    unsigned before=width_reads;
-   assert(lv_sweep(1,lv_lyric_elapsed())>0 && width_reads==before);
+   assert(lv_sweep(1,lv_lyric_elapsed(),true)>0 && width_reads==before);
    return ACTION_WPS_LYRICS;
  }
  if(plan==5){
@@ -715,11 +717,11 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  deny_entry_core=true;
  if (!strcmp(argv[2],"frames")) {
    plan=14;global_settings.animations=deny_entry_core=true;
-   assert(lyric_viewer()==GO_TO_ROOT && calls==4);
+   assert(lyric_viewer()==GO_TO_ROOT && calls==5);
    plan=7;calls=0;
    assert(lyric_viewer()==GO_TO_ROOT && calls==2);
    assert(clock_refs==1 && boost_gets==boost_puts && releases==2 && default_events==2);
-   puts("PASS 20 f staggered line motion, immediate retarget, elapsed-time skip and active USB exit");
+   puts("PASS rigid native wheel motion, immediate retarget, elastic limits and active USB exit");
    return 0;
  }
  if (!strcmp(argv[2],"entry-frames")) {
@@ -728,7 +730,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
    plan=16;calls=updates=0;precise_extra=0;
    assert(lyric_viewer()==GO_TO_ROOT && calls==1 && entry_allocs==2 && entry_frees==2);
    assert(clock_refs==1 && boost_gets==boost_puts && releases==2 && default_events==1);
-   puts("PASS opt-in 13 f WPS entry, input and USB on frame zero, late sampling and buffer lifetime");
+   puts("PASS WPS entry cancellation, wheel capture on frame zero, USB and buffer lifetime");
    return 0;
  }
  if (!strcmp(argv[2],"headset")) {
@@ -758,7 +760,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
    for (int i=0;i<2;i++) {
      calls=line_seeks=0;playing.elapsed=0;
      snprintf(playing.path,sizeof playing.path,"%s/%s",argv[1],names[i]);
-     assert(lyric_viewer()==GO_TO_PREVIOUS && calls==2 && line_seeks==0);
+     assert(lyric_viewer()==GO_TO_PREVIOUS && calls==(i==0?3:2) && line_seeks==0);
    }
    plan=11;remote_source=timed_fixture=remote_key=true;
    const char ready[]="CA\t9\t1\tOK";
@@ -865,8 +867,9 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  assert(lyric_viewer()==GO_TO_ROOT && clock_refs==1 && boost_gets==boost_puts);
  plan=8;calls=0;
  arena_bytes = 3 * LV_FRAME + LV_LAYOUTS * sizeof(struct lv_layout)
-             + (LV_MASKS + 1) * (sizeof(struct lv_mask) + LV_STRIP_STRIDE * 18)
-             + LCD_WIDTH * 18 * sizeof(fb_data);
+             + (LV_MASKS + 1) * (sizeof(struct lv_mask) + LV_STRIP_WIDTH * 18)
+             + LCD_WIDTH * 18 * sizeof(fb_data)
+             + (LV_FONT_CHOICES + 1) * LV_COVERAGE * sizeof(uint32_t);
  assert(lyric_viewer()==GO_TO_PREVIOUS && clock_refs==1 && boost_gets==boost_puts);
  const int nav_actions[] = {ACTION_AGENTS_SWITCH, ACTION_AGENTS_REMOTE_SWITCH,
                             ACTION_AGENTS_COVERS, ACTION_AGENTS_REMOTE_COVERS};

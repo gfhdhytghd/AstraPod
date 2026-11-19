@@ -138,6 +138,8 @@ int font_measurestring(const unsigned char *str, size_t maxbytes, size_t maxwidt
 int font_getstringnsize(const unsigned char *str, size_t maxbytes, int *w, int *h, int fontnumber);
 int font_getstringsize(const unsigned char *str, int *w, int *h, int fontnumber);
 int font_get_width(struct font* ft, ucschar_t ch);
+/* A missing entry in a proportional RB12 font aliases its default bitmap. */
+bool font_has_glyph(struct font *font, ucschar_t ch);
 const unsigned char * font_get_bits(struct font* ft, ucschar_t ch);
 
 #endif

@@ -829,6 +829,42 @@ static void cache_create(struct font* pf)
     font_cache_create(&pf->cache, cache_buf, cache_size, bitmap_size);
 }
 
+static int32_t font_bitmap_offset(struct font *font, unsigned glyph)
+{
+    if (font->fd < 0 || font == &sysfont)
+    {
+        if (font->bits_size < MAX_FONTSIZE_FOR_16_BIT_OFFSETS)
+            return ((const uint16_t *)font->offset)[glyph];
+        return ((const int32_t *)font->offset)[glyph];
+    }
+    int fd = font->fd_offset >= 0 ? font->fd_offset : font->fd;
+    int size = font->long_offset ? 4 : 2;
+    unsigned char value[4] = {0};
+    if (lseek(fd, font->file_offset_offset + glyph * size, SEEK_SET) < 0 ||
+        read(fd, value, size) != size)
+        return -1;
+    return (uint32_t)value[0] | (uint32_t)value[1] << 8 |
+           (uint32_t)value[2] << 16 | (uint32_t)value[3] << 24;
+}
+
+bool font_has_glyph(struct font *font, ucschar_t ch)
+{
+    if (ch < font->firstchar || ch - font->firstchar >= (unsigned)font->size)
+        return false;
+    if (ch == (ucschar_t)font->defaultchar)
+        return true;
+    if (font->disabled)
+        return false;
+    bool cached = font->fd >= 0 && font != &sysfont;
+    if (cached ? !font->file_offset_offset : !font->offset)
+        return true;
+    lock_font_handle(font->handle, true);
+    int32_t offset = font_bitmap_offset(font, ch - font->firstchar);
+    int32_t fallback = font_bitmap_offset(font, font->defaultchar - font->firstchar);
+    lock_font_handle(font->handle, false);
+    return offset >= 0 && fallback >= 0 && offset != fallback;
+}
+
 /*
  * Returns width of character
  */

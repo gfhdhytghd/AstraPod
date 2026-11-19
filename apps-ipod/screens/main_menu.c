@@ -503,7 +503,7 @@ MENUITEM_FUNCTION(settings_changed_item, MENU_FUNC_CHECK_RETVAL,
                   ID2P(LANG_SETTINGS_CHANGED), settings_changed_item_fn,
                   NULL, Icon_NOICON);
 
-/* Six branches, cut by what a person is trying to do rather than by which
+/* Settings branches, cut by what a person is trying to do rather than by which
  * subsystem implements it.
  *
  * General Settings is gone. It had fourteen unrelated branches under one word,
@@ -522,6 +522,7 @@ MAKE_MENU(main_menu_, ID2P(LANG_SETTINGS), NULL,
         &sound_settings,
         &playback_settings,
         &library_menu,
+        &theme_menu,
         &appearance_menu,
         &power_menu,
         &system_menu,

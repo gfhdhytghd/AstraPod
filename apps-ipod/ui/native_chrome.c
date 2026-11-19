@@ -334,7 +334,8 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
                         bool playback_modes,
                         const struct ui_view_frame *frame,
                         const struct ui_album_palette *palette,
-                        const struct native_chrome_indicators *indicators)
+                        const struct native_chrome_indicators *indicators,
+                        const struct native_chrome_colors *colors)
 {
     const struct ui_theme *theme = chrome->theme;
     const uint16_t *metric = theme->metric;
@@ -357,8 +358,10 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
         return;
     }
 
-    unsigned background = status_color(theme, UI_COLOR_STATUS_BG, palette);
-    unsigned foreground = status_color(theme, UI_COLOR_STATUS_FG, palette);
+    unsigned background = colors ? colors->background :
+                          status_color(theme, UI_COLOR_STATUS_BG, palette);
+    unsigned foreground = colors ? colors->foreground :
+                          status_color(theme, UI_COLOR_STATUS_FG, palette);
     damage.fg_pattern = background;
     lcd_fillrect(0, 0, damage.width, damage.height);
     damage.fg_pattern = foreground;

@@ -29,6 +29,10 @@ struct native_chrome_indicators {
     int8_t battery;                /* numeric percent, or -1 if unknown */
 };
 
+struct native_chrome_colors {
+    unsigned background, foreground;
+};
+
 struct native_chrome {
     const struct ui_theme *theme;
     int status_font;
@@ -55,6 +59,7 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
                         bool playback_modes,
                         const struct ui_view_frame *frame,
                         const struct ui_album_palette *palette,
-                        const struct native_chrome_indicators *indicators);
+                        const struct native_chrome_indicators *indicators,
+                        const struct native_chrome_colors *colors);
 
 #endif

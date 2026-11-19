@@ -25,9 +25,13 @@ struct album_blur_source {
 void album_blur_alloc(void);
 void album_blur_init(void);
 void album_blur_request_wps(void);
+void album_blur_playing_changed(void);
 void album_blur_request_window(const struct album_blur_source *sources, unsigned count);
 unsigned album_blur_generation(void);
 bool album_blur_draw_panel(const struct album_blur_source *source);
 bool album_blur_render_wps(fb_data *out, int art, unsigned generation, unsigned fg);
+
+enum album_blur_tint_state { ALBUM_BLUR_WAITING, ALBUM_BLUR_NO_ART, ALBUM_BLUR_TINT };
+enum album_blur_tint_state album_blur_status_tint(unsigned height, unsigned *color);
 
 #endif

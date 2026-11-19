@@ -570,6 +570,7 @@ struct user_settings
     int battery_display; /* how battery is displayed: 0=graphic, 1=percent */
     /* Activity indicators shown in native chrome. */
     bool show_disk_activity;
+    bool status_cover_tint;
     bool show_background_tasks;
     bool show_working;
     bool show_icons;   /* 0=hide 1=show */

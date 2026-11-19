@@ -93,6 +93,8 @@ unsigned color_blend(unsigned c1, unsigned c2, int t);
 /* WCAG relative luminance of a native pixel on the sRGB transfer curve.
  * The result is in 1/65536 units. */
 unsigned color_srgb_luminance(unsigned c);
+unsigned color_srgb_mean(const fb_data *pixels, unsigned count);
+unsigned color_srgb_readable_text(unsigned foreground, unsigned background);
 
 /* Where an accent sits from the background it belongs to, as a turn around the
  * colour wheel.

@@ -25,6 +25,8 @@ void cider_source_poll(void);
 void cider_snapshot(struct cider_state *state);
 /* Snapshot the advertised artwork independently of the decoded WPS cover. */
 void cider_current_art(char key[65]);
+/* Schedule a missing current cover at idle. True means its request failed. */
+bool cider_request_playing_art(const char *key);
 bool cider_lyrics_matches(const char *id, uint32_t generation, uint32_t library);
 /* Small transport state for callers on tight stacks (UI, skin, status). */
 struct cider_status { bool available, muted, loading; int rate, volume, shuffle, repeat; };

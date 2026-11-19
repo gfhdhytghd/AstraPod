@@ -28309,3 +28309,18 @@
     *: "Native theme"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_STATUS_COVER_TINT
+  desc: Setting to let the status bar follow the current cover
+  user: core
+  <source>
+    *: "Status Bar Cover Tint"
+  </source>
+  <dest>
+    *: "Status Bar Cover Tint"
+  </dest>
+  <voice>
+    *: "Status Bar Cover Tint"
+  </voice>
+</phrase>

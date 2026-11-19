@@ -169,12 +169,15 @@ MAKE_MENU(menus_menu, ID2P(LANG_MENUS), NULL, Icon_NOICON,
    does rather than by the subsystem that implements it -- so the peak meter,
    the viewers and the root menu editor all sit here. */
 MENUITEM_SETTING(animations, &global_settings.animations, NULL);
+MENUITEM_SETTING(status_cover_tint, &global_settings.status_cover_tint, NULL);
 MENUITEM_FUNCTION(native_theme_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_NATIVE_THEME),
                   ui_theme_choose, NULL, Icon_Config);
 
+MAKE_MENU(theme_menu, ID2P(LANG_THEME_SETTINGS_MENU), NULL, Icon_Display_menu,
+            &native_theme_item, &status_cover_tint);
+
 MAKE_MENU(appearance_menu, ID2P(LANG_APPEARANCE),
             NULL, Icon_Wps,
-            &native_theme_item,
             &browse_fonts,
             &elements_menu,
             &wps_appearance_menu,

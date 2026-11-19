@@ -36,13 +36,14 @@ extern const struct menu_item_ex
         , scroll_settings_menu      /* display_settings.c -- shown under UI
                                        Settings, defined beside the other
                                        LCD scroll settings it configures */
-        /* The six top-level branches, and the pieces they share.
+        /* The top-level branches, and the pieces they share.
            general_settings.c builds Library, Battery & Power and System;
            theme_settings.c builds Appearance. */
         , library_menu              /* general_settings.c */
         , power_menu                /* general_settings.c */
         , system_menu               /* general_settings.c */
         , appearance_menu           /* theme_settings.c   */
+        , theme_menu                /* theme_settings.c   */
         , viewers_menu              /* general_settings.c -- listed under both
                                        Appearance and Library */
         , peak_meter_menu           /* display_settings.c -- under Appearance */

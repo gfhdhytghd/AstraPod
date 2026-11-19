@@ -68,11 +68,13 @@ static void check_builtins(void)
     assert(dark.background[UI_BG_LIST] == UI_BG_BLURRED_COVER);
     assert(dark.background[UI_BG_WPS] == UI_BG_COVER_SCRIM);
     assert(dark.background[UI_BG_HANDOFF] == UI_BG_COVER_SCRIM);
+    assert(dark.background[UI_BG_STATUS] == UI_BG_COVER_TINT);
     assert(dark.color[UI_COLOR_HANDOFF_MUTED] == 0x999999);
     assert(dark.metric[UI_METRIC_HANDOFF_COVER_SIZE] == 96);
     assert(dark.metric[UI_METRIC_SPLASH_PROGRESS_GAP] == 4);
     assert(light.background[UI_BG_LIST] == UI_BG_SOLID);
     assert(light.background[UI_BG_WPS] == UI_BG_SOLID);
+    assert(light.background[UI_BG_STATUS] == UI_BG_COVER_TINT);
     assert(light.color[UI_COLOR_BACKGROUND] != dark.color[UI_COLOR_BACKGROUND]);
     assert(light.color[UI_COLOR_FOREGROUND] != dark.color[UI_COLOR_FOREGROUND]);
     assert(dark.motion_scale == 100 && light.motion_scale == 100);
@@ -114,12 +116,23 @@ static void check_parser(void)
     assert(theme.background[UI_BG_LIST] == UI_BG_SOLID);
     assert(theme.background[UI_BG_WPS] == UI_BG_BLURRED_COVER);
     assert(theme.background[UI_BG_HANDOFF] == UI_BG_SOLID);
+    assert(theme.background[UI_BG_STATUS] == UI_BG_SOLID);
     assert(theme.motion_scale == 0);
+
+    static const char tint[] = VERSION "background.status=cover_tint";
+    assert(ui_theme_parse(&theme, tint, sizeof(tint) - 1));
+    assert(theme.background[UI_BG_STATUS] == UI_BG_COVER_TINT);
+    static const char solid[] = VERSION "background.status=solid";
+    assert(ui_theme_parse(&theme, solid, sizeof(solid) - 1));
+    assert(theme.background[UI_BG_STATUS] == UI_BG_SOLID);
 
     static const char *const invalid[] = {
         "", "# comment only\n", "color.foreground=abcdef", "podbox-theme=2\n",
         VERSION "podbox-theme=1", VERSION "fontsize", VERSION "font=abc",
         VERSION "color.unknown=000000", VERSION "color.background=fefef",
+        VERSION "background.status=blurred_cover",
+        VERSION "background.list=cover_tint",
+        VERSION "background.status=solid\nbackground.status=cover_tint",
         VERSION "color.background=G00000", VERSION "color.background=ff00ff#comment",
         VERSION "color.background=ff00ff\ncolor.background=ff00ff",
         VERSION "palette.accent=vivid", VERSION "palette.accent=unseen,0,100",

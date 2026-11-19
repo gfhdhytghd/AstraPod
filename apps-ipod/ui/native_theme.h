@@ -83,8 +83,10 @@ enum ui_metric_role {
     UI_METRIC_COUNT
 };
 
-enum ui_bg_role { UI_BG_LIST, UI_BG_WPS, UI_BG_LYRICS, UI_BG_HANDOFF, UI_BG_COUNT };
-enum ui_bg_kind { UI_BG_SOLID, UI_BG_BLURRED_COVER, UI_BG_COVER_SCRIM };
+enum ui_bg_role { UI_BG_LIST, UI_BG_WPS, UI_BG_LYRICS, UI_BG_HANDOFF,
+                  UI_BG_STATUS, UI_BG_COUNT };
+enum ui_bg_kind { UI_BG_SOLID, UI_BG_BLURRED_COVER, UI_BG_COVER_SCRIM,
+                  UI_BG_COVER_TINT };
 
 enum ui_palette_source {
     UI_PALETTE_NONE, UI_PALETTE_DOMINANT, UI_PALETTE_ACCENT, UI_PALETTE_VIVID

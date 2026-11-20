@@ -326,7 +326,7 @@ Use the desktop window to select files and see the final sample rates:
 python3 tools/podlink_gui.py
 ```
 
-The desktop window requires Python with Tkinter. Use the same Python
+The desktop window requires Python with PyGObject and GTK 4.10 or newer. Use the same Python
 environment for the window and the importer.
 
 Open **System > PodLink** on the iPod and run:

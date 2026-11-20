@@ -31,7 +31,7 @@
 #include "usb.h"
 
 #define PANEL_DIR ROCKBOX_DIR "/podbox/cache/panel"
-#define PANEL_MAGIC 0x314c4e50u /* PNL1 */
+#define PANEL_MAGIC 0x324c4e50u /* PNL2 */
 #define PANEL_SLOTS 4
 #define PANEL_BYTES (96 * 1024)
 #define PANEL_DISC_MARKS 256
@@ -548,8 +548,8 @@ static bool gather_text(ucschar_t *codes, unsigned *count, const char *str)
 
 static void build_packs(struct panel_cached *data)
 {
-    /* Only the header and the visible and next page need ink at the flip.
-     * Later rows use the normal asynchronous PBF cache when scrolled to. */
+    /* Warm the entire track page as it enters the panel cache. Keep the
+     * leading rows if the full body pack cannot fit in the slot. */
     static ucschar_t codes[FONT_PACK_CODES];
     struct panel_disk *d = &data->disk;
     d->bytes = slot_bytes(d);
@@ -559,7 +559,8 @@ static void build_packs(struct panel_cached *data)
     snprintf(count_label, sizeof(count_label), format, (int)d->total);
     for (unsigned face = 0; face < PANEL_FACES; face++)
     {
-        unsigned n = 0;
+        unsigned n = 0, leading = 0;
+        static ucschar_t leading_codes[FONT_PACK_CODES];
         gather_text(codes, &n, ".");
         if (face == PANEL_ALBUM)
             gather_text(codes, &n, work.title);
@@ -568,8 +569,16 @@ static void build_packs(struct panel_cached *data)
             gather_text(codes, &n, d->artist);
             gather_text(codes, &n, " ·");
             gather_text(codes, &n, count_label);
-            for (unsigned row = 0; row < d->count && row < PANEL_PACK_ROWS; row++)
-                gather_text(codes, &n, data->rows[row].title);
+            for (unsigned row = 0; row < d->count; row++)
+            {
+                if (row == PANEL_PACK_ROWS)
+                {
+                    leading = n;
+                    memcpy(leading_codes, codes, leading * sizeof(*codes));
+                }
+                if (!gather_text(codes, &n, data->rows[row].title))
+                    break;
+            }
         }
         else
         {
@@ -583,6 +592,11 @@ static void build_packs(struct panel_cached *data)
         d->length[face] = font_pbf_pack_build(fonts[face], faces[face], codes, n,
                                              scratch->bytes + d->bytes,
                                              PANEL_BYTES - d->bytes, cancelled);
+        if (!d->length[face] && leading && !cancelled())
+            d->length[face] = font_pbf_pack_build(fonts[face], faces[face],
+                                                leading_codes, leading,
+                                                scratch->bytes + d->bytes,
+                                                PANEL_BYTES - d->bytes, cancelled);
         d->bytes += d->length[face];
         panel_perf_record(PP_FONT, USEC_TIMER - start, sizes[face],
                           d->length[face] ? n : 0);

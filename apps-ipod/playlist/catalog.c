@@ -482,10 +482,9 @@ bool catalog_pick_new_playlist_name(char *pl_name, size_t buf_size,
     return do_save;
 }
 
-static int (*ctx_add_to_playlist)(const char* playlist, bool new_playlist);
 bool catalog_add_to_a_playlist(const char* sel, int sel_attr,
                                bool new_playlist, char *m3u8name,
-                               void (*add_to_pl_cb))
+                               int (*add_to_pl_cb)(const char *playlist, bool new_playlist))
 {
     int result;
     char playlist[MAX_PATH + 7]; /* room for /.m3u8\0*/
@@ -535,10 +534,7 @@ bool catalog_add_to_a_playlist(const char* sel, int sel_attr,
     }
 
     if (add_to_pl_cb != NULL)
-    {
-        ctx_add_to_playlist = add_to_pl_cb;
-        result = ctx_add_to_playlist(playlist, new_playlist);
-    }
+        result = add_to_pl_cb(playlist, new_playlist);
     else
         result = catalog_insert_into(playlist, new_playlist, sel, sel_attr);
 

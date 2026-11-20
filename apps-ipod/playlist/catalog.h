@@ -42,6 +42,6 @@ int catalog_insert_into(const char* playlist, bool new_playlist,
  */
 bool catalog_add_to_a_playlist(const char* sel, int sel_attr,
                                bool new_playlist, char* m3u8name,
-                               void (*add_to_pl_cb));
+                               int (*add_to_pl_cb)(const char *playlist, bool new_playlist));
 
 #endif

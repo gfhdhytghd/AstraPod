@@ -317,3 +317,55 @@ fixture also builds Rust core for `i686-unknown-linux-gnu` and needs multilib C
 libraries. RAM comparison uses a saved C baseline ELF; retired C objects are
 not required. Offline acceptance does not establish device, playback or live
 USB acceptance.
+
+## Import audio while connected over PodLink
+
+Use the desktop window to select files and see the final sample rates:
+
+```sh
+python3 tools/podlink_gui.py
+```
+
+The desktop window requires Python with Tkinter. Use the same Python
+environment for the window and the importer.
+
+Open **System > PodLink** on the iPod and run:
+
+```sh
+python3 tools/podlink.py import-media "/path/to/track.mp3" "/path/to/album-track.flac"
+```
+
+The command needs pyserial, ffprobe and exclusive access to the PodLink tty. If
+HerdRemote owns the tty, pause its service during the import and resume it
+after the command exits. The import does not use disk mode. It accepts MP3,
+FLAC and M4A files of up to 128 MiB per file. The folder `/Music/PodLink`
+must be within the Rockbox database scan roots.
+
+Before opening USB, the command probes each input. It sends audio at 48 kHz
+or below unchanged. For higher sample rates, FFmpeg converts multiples of
+44.1 kHz (such as 88.2 and 176.4 kHz) to 44.1 kHz. All other higher rates,
+including 92, 96 and 192 kHz, go to 48 kHz. Conversion uses temporary files,
+copies the tags and attached cover, and keeps FLAC and ALAC in their respective
+lossless codecs. AAC inputs that need conversion are encoded as AAC again.
+The result reports the source and uploaded sample rate for each track.
+
+The iPod stages each track in `/.rockbox/podlink-media/`. It checks the byte
+count and CRC before publishing the track under `/Music/PodLink/`, with a
+SHA-256 filename and the original file type. Audio tags and embedded covers
+travel with the file. Each track commits independently. Existing filenames
+are reported as conflicts. The command stops at the first error. On disconnect,
+the firmware discards the active partial file and queues a library update
+if the session stored any complete files. A retry checks for an existing
+destination before accepting another copy.
+
+The successful command queues a Rockbox tag database update. Its result shows
+which files the iPod stored and whether it acknowledged the update request.
+Indexing and artwork cache updates run in the background. The Apple firmware
+library is outside this import path.
+
+The text protocol uses `MS1 PUT <8 hex length> <8 hex CRC32> <filename>`,
+with `MS1 READY` as the response. Prefix each binary chunk with `MSD1` and
+wait for `MS1 ACK` before sending the next chunk. Send `MS1 END` to publish
+and wait for `MS1 STORED`.
+Once all tracks are stored, send `MS1 REFRESH` and wait for `MS1 QUEUED`.
+`MS1 STOP` aborts the active track and queues any pending database update.

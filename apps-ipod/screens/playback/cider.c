@@ -10,6 +10,7 @@
 #include "lcd.h"
 #include "powermgmt.h"
 #include "podlink.h"
+#include "screens/system/podlink_media.h"
 #include "kernel.h"
 #include "thread.h"
 #include "system.h"
@@ -990,6 +991,8 @@ static void disk_worker(void)
         queue_wait_w_tmo(&disk_queue, &ev, more ? HZ / 20 : HZ);
         if (ev.id == SYS_USB_CONNECTED)
         {
+            podlink_media_disconnect();
+            podlink_media_work();
             cs_unload(&store);            /* sync, close, forget the index */
             /* No UI/service mutex on the handover path. The service resets
              * the link on detach; clean up any late list after remount. */
@@ -1007,6 +1010,7 @@ static void disk_worker(void)
          * order. Pulling a later connect out of the queue could mistake an
          * older disconnect for the end of the new storage session. */
         if (disk_usb_pending()) continue;
+        podlink_media_work();
         if (tagcache_is_busy()) continue;
         bool active = storage_disk_is_active();
         char key[65], tier[3];
@@ -1157,18 +1161,26 @@ bool cider_spectrum_levels(unsigned char *levels)
 
 static bool resident_receive(const struct podlink_message *m)
 {
+    if (disk_running && podlink_media_enqueue(m))
+    {
+        queue_post(&disk_queue, 1, 0);
+        return true;
+    }
     return handoff_receive(m) || spectrum_receive(m) || receive(m);
 }
 
 static unsigned int resident_next(char *record, unsigned int size)
 {
-    unsigned int n = handoff_next(record, size);
+    unsigned int n = podlink_media_next(record, size);
+    if (!n) n = handoff_next(record, size);
     if (!n) n = next(record, size);
     return n ? n : spectrum_next(record, size);
 }
 
 static void resident_reset(void)
 {
+    podlink_media_disconnect();
+    if (disk_running) queue_post(&disk_queue, 1, 0);
     handoff_reset();
     spectrum_generation = 0;
     reset();
@@ -1181,6 +1193,7 @@ void cider_init(void)
     set_sleep_timer_callback(cider_sleep_pause);
     mutex_init(&cider_mutex);
     handoff_init();
+    podlink_media_init();
     queue_init(&disk_queue, true);
     cs_init(&store, &store_io, STORE_ROOT, CIDER_STORE_CAP);
     store.cancelled = disk_usb_pending;

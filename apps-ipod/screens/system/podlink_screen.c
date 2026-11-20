@@ -31,7 +31,6 @@
 #include "widgets/splash.h"
 #include "system/shutdown.h"
 #include "podlink_screen.h"
-#include "podlink_media.h"
 
 #define MAX_BENCH (16u * 1024u * 1024u)
 static unsigned char reply[PODLINK_MAX_MESSAGE];
@@ -54,7 +53,6 @@ static void message(const struct podlink_message *m)
 {
     if (m->type == PODLINK_CLOSE)
     {
-        podlink_media_reset();
         ++closes;
         operation = ECHO;
         reply_type = 0;
@@ -63,12 +61,6 @@ static void message(const struct podlink_message *m)
     if (m->type == PODLINK_PONG)
         return;
     received += m->length;
-    const char *media_reply = podlink_media_receive(m, operation == ECHO);
-    if (media_reply)
-    {
-        text(media_reply);
-        return;
-    }
     if (operation == UPLOAD && m->type == PODLINK_BINARY)
     {
         if (m->length > goal - offset)
@@ -221,7 +213,6 @@ int podlink_screen_run(void (*draw)(const struct podlink_diagnostics *, void *),
         int button = agents_shortcut_get_button(TIMEOUT_NOBLOCK);
         if (button == REMOTE_COVERS_BUTTON)
         {
-            podlink_media_reset();
             root_menu_cover_shortcut();
             draw_at = 0;
             continue;
@@ -230,7 +221,6 @@ int podlink_screen_run(void (*draw)(const struct podlink_diagnostics *, void *),
         if (button == REMOTE_WPS_BUTTON) shortcut = 2;
         if ((button == BUTTON_MENU || shortcut) && !exiting)
         {
-            podlink_media_reset();
             exiting = true;
             reply_type = 0;
             operation = ECHO;
@@ -238,7 +228,6 @@ int podlink_screen_run(void (*draw)(const struct podlink_diagnostics *, void *),
         }
         if (default_event_handler(button) == SYS_USB_CONNECTED)
         {
-            podlink_media_reset();
             podlink_close();
             return 1;
         }

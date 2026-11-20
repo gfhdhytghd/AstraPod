@@ -318,18 +318,57 @@ libraries. RAM comparison uses a saved C baseline ELF; retired C objects are
 not required. Offline acceptance does not establish device, playback or live
 USB acceptance.
 
-## Import audio while connected over PodLink
-
-Use the desktop window to select files and see the final sample rates:
+## Sync Jellyfin from the desktop
 
 ```sh
 python3 tools/podlink_gui.py
 ```
 
-The desktop window requires Python with PyGObject and GTK 4.10 or newer. Use the same Python
-environment for the window and the importer.
+The desktop window requires Python with PySide6 (preferred) or PyQt6 (Qt 6
+Widgets). It supports Follow System, Light and Dark themes, saving the UI theme
+preference in `desktop-ui.json` alongside `desktop.json` under
+`$XDG_CONFIG_HOME/podbox-herdremote` (or `~/.config/podbox-herdremote`).
+USB sync also uses pyserial, ffprobe and FFmpeg in the same environment.
+Connect the iPod using its PodLink USB mode. Current firmware answers sync
+requests in the background from any screen. The **System > PodLink** screen
+is for diagnostics. If HerdRemote owns the USB tty, pause it for the preview
+or sync operation and resume it afterwards.
 
-Open **System > PodLink** on the iPod and run:
+Connect the desktop window to Jellyfin over HTTPS. Sign in with a username
+and password, or select access-token mode. Passwords are cleared from the
+form when submitted and never written to settings. The returned user token
+stays in the current window session. The source can be all music visible to
+that user, one music library,
+or the audio items in one playlist. The computer keeps downloads only while
+preparing and transmitting each track. The iPod holds the selected set under
+`/Music/PodLink/Jellyfin/`. The database scan roots must include this folder.
+The playlist selection controls membership of the synchronized collection.
+
+Preview compares the selected Jellyfin tracks to the iPod's synchronized
+files for the server and user. It also checks existing songs in the Rockbox
+database. Matching requires normalized title, track artist and album,
+duration within 1.5 seconds, and matching disc and track numbers when both
+sides supply them. Ambiguous or incomplete metadata stays eligible for
+upload. Keep the Rockbox database up to date before previewing. The preview
+lists additions and matched originals by title and removals by device filename. An explicit confirmation is required to remove files. Apply
+uploads additions first. It checks the Jellyfin snapshot, USB serial number
+and owned files before deleting. A later preview reconciles any partial batch.
+Files in other folders and other Jellyfin account namespaces are excluded.
+The firmware queues a Rockbox database update after a changed batch and the
+artwork cache follows the database revision.
+
+The Connection Settings page saves Jellyfin, Cider, Rufin, herdr, voice and
+Usage options for the desktop and HerdRemote. Run the updated HerdRemote
+from the same checkout or refresh its installed copy to read these settings
+on its next start. Explicit service environment settings take priority.
+Player tokens entered in the GUI are saved separately in private files.
+Jellyfin user tokens entered on the sync page stay in the current window
+session. Existing HerdRemote Jellyfin credentials can also be used if they
+identify a user with download permission.
+
+## Import audio files from the command line
+
+Connect the iPod using its PodLink USB mode and run:
 
 ```sh
 python3 tools/podlink.py import-media "/path/to/track.mp3" "/path/to/album-track.flac"
@@ -369,3 +408,10 @@ wait for `MS1 ACK` before sending the next chunk. Send `MS1 END` to publish
 and wait for `MS1 STORED`.
 Once all tracks are stored, send `MS1 REFRESH` and wait for `MS1 QUEUED`.
 `MS1 STOP` aborts the active track and queues any pending database update.
+
+
+The Jellyfin sync protocol adds `MS2 LIST` / `MS2 NEXT` for regular files in
+the dedicated sync directory, `MS2 PUT` for staging a synchronized file and
+`MS2 DEL` for removing a validated filename from that directory. Upload
+chunks, checksum verification, final acknowledgements and refresh still use
+the existing media transfer protocol.

@@ -1,0 +1,34 @@
+{
+  "codec44": {
+    "source": "flac-native16/scaled/decode44.sm",
+    "sha256": "229c9525c099482d1d9bb5097f322bc8fde92d4bf1b81d4f7f129af624c15504"
+  },
+  "codec48": {
+    "source": "flac-native16/scaled/decode48.sm",
+    "sha256": "29d2d516ed2203ff69cd5781561283dc6cd2658ef976dfa46b2003611c0fc453"
+  },
+  "depth24-44": {
+    "source": "flac-native24-joint/decode44.sm",
+    "sha256": "f84ecd648a61d6dd3ed835d95defcd68da79a3f75e46f59123c984b8fd099da1"
+  },
+  "depth24-48": {
+    "source": "flac-native24-joint/decode48.sm",
+    "sha256": "1847fa81bee2a6164ef60f7b888e13ce0df6a6e2b45e1186af814af723793834"
+  },
+  "ahead96": {
+    "source": "flac96-stream/decode96.sm",
+    "sha256": "902ca662bec684280cf7c35c835520ae4c6ea43c7248a2debc18ba79c958c3f1"
+  },
+  "ahead192": {
+    "source": "flac192-polyphase/decoder.sm",
+    "sha256": "2db1b1b75b7239a3253392a1caaa46f3cade072086d2d9909c86866705c7f4f3"
+  },
+  "alac16": {
+    "source": "alac-sm1-native/native16.sm",
+    "sha256": "ddc505ac1bc56d749e500410d11818ee2789c34dfdd0432cad21eb7aa4d6979e"
+  },
+  "alac24": {
+    "source": "alac-sm1-native/native24-next.sm",
+    "sha256": "ec065ec9e69787e182f7abdae235e6242ca82832792f0656abdaf2f08abef60f"
+  }
+}

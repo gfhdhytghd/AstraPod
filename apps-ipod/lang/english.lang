@@ -28324,3 +28324,63 @@
     *: "Status Bar Cover Tint"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_HIRES_CONVERT_NOTICE
+  desc: High sample rate library conversion
+  user: core
+  <source>
+    *: "Skipped audio above 48 kHz. Convert to 48 or 44.1 kHz FLAC."
+  </source>
+  <dest>
+    *: "Skipped audio above 48 kHz. Convert to 48 or 44.1 kHz FLAC."
+  </dest>
+  <voice>
+    *: "Skipped audio above 48 kHz. Convert to 48 or 44.1 kHz FLAC."
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_CONVERT_LIBRARY_48
+  desc: High sample rate library conversion
+  user: core
+  <source>
+    *: "Convert library to 48 kHz FLAC"
+  </source>
+  <dest>
+    *: "Convert library to 48 kHz FLAC"
+  </dest>
+  <voice>
+    *: "Convert library to 48 kHz FLAC"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_LIBRARY_CONVERT_PROGRESS
+  desc: High sample rate library conversion
+  user: core
+  <source>
+    *: "Checked %d, converted %d. Menu to cancel. %s"
+  </source>
+  <dest>
+    *: "Checked %d, converted %d. Menu to cancel. %s"
+  </dest>
+  <voice>
+    *: "Checked %d, converted %d. Menu to cancel. %s"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_LIBRARY_CONVERT_RESULTS
+  desc: High sample rate library conversion
+  user: core
+  <source>
+    *: "Converted %d, already converted %d, unsupported %d, failed %d"
+  </source>
+  <dest>
+    *: "Converted %d, already converted %d, unsupported %d, failed %d"
+  </dest>
+  <voice>
+    *: "Converted %d, already converted %d, unsupported %d, failed %d"
+  </voice>
+</phrase>

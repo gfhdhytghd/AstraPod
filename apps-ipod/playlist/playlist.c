@@ -4123,6 +4123,19 @@ void playlist_skip_entry(struct playlist_info *playlist, int steps)
     playlist_write_unlock(playlist);
 }
 
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+/* The scanner stopped playback and published new playable files. Re-probe
+ * previously skipped entries on the next start, including missing files. */
+void playlist_retry_skipped(void)
+{
+    struct playlist_info *playlist = &current_playlist;
+    playlist_write_lock(playlist);
+    for (int i = 0; i < playlist->amount; i++)
+        playlist->indices[i] &= ~PLAYLIST_SKIPPED;
+    playlist_write_unlock(playlist);
+}
+#endif
+
 /* sort currently playing playlist */
 int playlist_sort(struct playlist_info* playlist, bool start_current)
 {

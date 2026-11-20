@@ -1,0 +1,377 @@
+predictive:
+    ; Type byte: fixed = 16..24 even, LPC = 64..126 even.
+    x18.and s12, s5, s14
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, invalid
+    ldi s4, #64
+    alu s12, s5, s4, #OP_SUB
+    ptst p3, s0, #LT12, #PTST
+    jmp #IF_NOT, #3, lpc_order
+    nop()
+    nop()
+    ldi s4, #16
+    alu s12, s5, s4, #OP_SUB
+    ptst p3, s0, #LT12, #PTST
+    jmp #3, #3, invalid
+    alu s3, s14, s12, #ASR
+    ldi s4, #4
+    alu s12, s4, s3, #OP_SUB
+    ptst p3, s0, #LT12, #PTST
+    jmp #3, #3, invalid
+    nop()
+    nop()
+    yst(ORDER)
+    ldi s3, #0
+    yst(COEFFBITS)
+    yst(LPCSHIFT)
+    jmp #ALWAYS, #0, warmup
+    nop()
+    nop()
+lpc_order:
+    alu s3, s14, s12, #ASR
+    alu s3, s3, s14, #OP_ADD
+    yst(ORDER)
+    yst(COEFFBITS)
+warmup:
+    aimm_o(3, AUDIO)
+    yld(s11, ORDER)
+    alu s12, s11, s0, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, parameters
+    nop()
+    nop()
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, warm_sample
+    nop()
+    nop()
+wide_warm_sample:
+    wide_raw()
+    wstore()
+    again(s11, wide_warm_sample)
+    jmp #ALWAYS, #0, parameters
+    nop()
+    nop()
+warm_sample:
+    raw_sample()
+    pks(1, A7, 0, s0, s0, 0)
+    again(s11, warm_sample)
+parameters:
+    yld(s12, COEFFBITS)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, residual
+    nop()
+    nop()
+    fetch(s4, 4)
+    ldi s2, #15
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, invalid
+    alu s4, s4, s14, #OP_ADD
+    nop()
+    fetch(s3, 5)
+    ldi s2, #16
+    alu s12, s3, s2, #OP_SUB
+    ptst p3, s0, #LT12, #PTST
+    jmp #IF_NOT, #3, invalid
+    alu s13, s13, s14, #OP_ADD  ; 4 + 5 bits
+    nop()
+    yst(LPCSHIFT)
+    yld(s11, ORDER)
+    aimm_o(4, COEFF)
+coeff:
+    signed_bits()
+    pks(1, A9, 0, s0, s0, 0)
+    again(s11, coeff)
+residual:
+    fetch(s3, 2)
+    ldi s2, #1
+    alu s12, s2, s3, #OP_SUB
+    ptst p3, s0, #LT12, #PTST
+    jmp #3, #3, invalid
+    ldi s2, #4
+    alu s3, s3, s2, #OP_ADD
+    yst(RICEWIDTH)
+    fetch(s4, 4)
+    ldi s2, #6
+    alu s13, s13, s2, #OP_ADD
+    yld(s3, FRAMESIZE)
+    alu s3, s4, s3, #ASR
+    yst(PARTSIZE)
+    yld(s11, ORDER)
+    alu s11, s3, s11, #OP_SUB
+    alu s12, s11, s0, #OP_ADD
+    ptst p3, s0, #LT12, #PTST
+    jmp #3, #3, invalid
+    alu s2, s0, s4, #OP_SUB
+    alu s3, s2, s14, #ASR
+    yst(PARTS)
+    yld(s3, ORDER)
+    yst(ACC)
+    yld(s3, FRAMESIZE)
+    ldi s4, #CHUNK
+    smin(s3, s4)
+    yst(TARGET)
+partition:
+    alu s3, s11, s0, #OP_ADD
+    yst(PART_LEFT)
+    yld(s4, RICEWIDTH)
+    flexible()
+    alu s3, s1, s0, #OP_ADD
+    yst(K_SAVE)
+    yld(s9, RICEWIDTH)
+    alu s2, s0, s9, #OP_SUB
+    alu s2, s2, s14, #ASR
+    alu s2, s2, s14, #OP_SUB
+    alu s12, s3, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, rice_partition
+    ldi s3, #0
+    nop()
+    fetch(s3, 5)
+    yst(K_SAVE)
+    ldi s2, #5
+    alu s13, s13, s2, #OP_ADD
+    ldi s3, #1
+rice_partition:
+    yst(ESC_MODE)
+subrun:
+    ; Fill a complete output chunk across entropy-partition boundaries.
+    ; Resolving history and publishing groups never depends on Rice partition size.
+    yld(s4, TARGET)
+    yld(s5, ACC)
+    alu s4, s4, s5, #OP_SUB
+    yld(s3, PART_LEFT)
+    smin(s3, s4)
+    alu s11, s3, s0, #OP_ADD
+    alu s3, s3, s5, #OP_ADD
+    yst(ACC)
+    yld(s3, PART_LEFT)
+    alu s3, s3, s11, #OP_SUB
+    yst(PART_LEFT)
+    ; A first Rice partition may consist entirely of predictor warmups.
+    ; Its parameter has been consumed and it contributes zero codewords.
+    alu s12, s11, s0, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, next_partition
+    nop()
+    nop()
+    yld(s4, K_SAVE)
+    yld(s12, ESC_MODE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, escaped_run
+    nop()
+    nop()
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, wide_rice
+    nop()
+    nop()
+.include "rice.sm"
+escaped_run:
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, wide_escape
+    nop()
+    nop()
+escape_sample:
+    ldi s2, #24
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #LT12, #PTST
+    jmp #IF_NOT, #3, narrow_raw_low
+    nop()
+    nop()
+    signed_bits()
+    jmp #ALWAYS, #0, narrow_escape_store
+    nop()
+    nop()
+narrow_raw_low:
+    flexible()
+narrow_escape_store:
+    pks(1, A7, 0, s0, s0, 0)
+    again(s11, escape_sample)
+next_partition:
+    ; Rice kernels finish one subrun here. Prediction consumes only its
+    ; bounded scratch arrays; the stream cursor stays at the next residual.
+    yld(s3, ACC)
+    yld(s4, TARGET)
+    alu s12, s3, s4, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, next_entropy_partition
+    nop()
+    nop()
+    yst(RUN_SIZE)
+    ldi s2, #3
+    alu s3, s3, s2, #OP_ADD
+    ldi s2, #2
+    alu s3, s2, s3, #ASR
+    yst(GROUPS)
+    yld(s3, TARGET)
+    yld(s4, SKIP)
+    alu s3, s3, s4, #OP_ADD
+    yst(BLOCK)
+    lde e6, #0x2d96
+    x17.sty e6, #5, #1
+    call(flush_chunk)
+    yld(s13, 0x2d96)
+    yld(s3, OFFSET)
+    yld(s4, RUN_SIZE)
+    alu s3, s3, s4, #OP_ADD
+    yst(OFFSET)
+    yld(s4, FRAMESIZE)
+    alu s12, s3, s4, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, channel_done
+    nop()
+    nop()
+    yld(s3, ORDER)
+    yst(SKIP)
+    ldi s3, #0
+    yst(ACC)
+    yld(s3, FRAMESIZE)
+    yld(s4, OFFSET)
+    alu s3, s3, s4, #OP_SUB
+    ldi s4, #CHUNK
+    smin(s3, s4)
+    yst(TARGET)
+    restore_history()
+    yld(s12, PART_LEFT)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, subrun
+    nop()
+    nop()
+next_entropy_partition:
+    yld(s3, PARTS)
+    alu s3, s3, s14, #OP_SUB
+    yst(PARTS)
+    yld(s11, PARTSIZE)
+    jmp #ALWAYS, #0, partition
+    nop()
+    nop()
+flush_chunk:
+    ; Fixed coefficients are in FLAC's most-recent-first order.
+    yld(s12, COEFFBITS)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, reconstruct
+    nop()
+    nop()
+    yld(s4, ORDER)
+    alu s12, s4, s0, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, no_prediction
+    ldi s2, #-2
+    alu s4, s2, s4, #ASR
+    ldi s2, #0x2daf
+    alu s4, s4, s2, #OP_ADD
+    x17.mve e9, s4
+    aimm_o(4, COEFF)
+    yld(s11, ORDER)
+load_fixed:
+    ldy s1, e9
+    ldi s2, #-8
+    alu s1, s2, s1, #ASR
+    ldi s2, #8
+    alu s1, s2, s1, #ASR
+    pks(1, A9, 0, s0, s0, 0)
+    x18.eagu e9, e9, #AGU_INC
+    again(s11, load_fixed)
+reconstruct:
+    lde e6, #0x2d96
+    x17.sty e6, #5, #1
+    ; Reverse coefficients so sample history and coefficients both run forward.
+    aimm_o(4, COEFF)
+    yld(s11, ORDER)
+    ldi s2, #0x200
+    alu s4, s2, s11, #OP_ADD
+    alu s4, s4, s14, #OP_SUB
+    amov(A7, s4)
+rev:
+    pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    ldi s2, #-3
+    alu s1, s2, s1, #ASR
+    pksf(1, A7, 0, s0, s0, 0, 3, R1)
+    again(s11, rev)
+    yld(s11, ORDER)
+    ldi s2, #AUDIO
+    alu s4, s11, s2, #OP_ADD
+    amov(A7, s4)
+    aimm_e(4, AUDIO)
+    yld(s2, BLOCK)
+    alu s11, s2, s11, #OP_SUB
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, wide_predict
+    nop()
+    nop()
+    yld(s10, LPCSHIFT)
+    ldi s2, #4
+    alu s10, s10, s2, #OP_ADD
+    ldi s2, #24
+    alu s8, s10, s2, #OP_SUB
+    ldi s9, #-1
+    alu s9, s8, s9, #ASR
+    alu s9, s0, s9, #OP_SUB
+    alu s9, s9, s14, #OP_SUB
+    yld(s6, ORDER)
+.include "taps.sm"
+predict_sample:
+    x03.agu A9, A8, #0, #0, A0
+    aimm_o(5, 0x200)
+    yld(s6, ORDER)
+    x03.tap0 s4, #9, s0, s2, s3
+    x03.tap s5, #11, s0, s2, s3
+tap:
+    x03.tap s4, #9, s5, s2, s3
+    x03.tap s5, #11, s0, s2, s3
+    again(s6, tap)
+    ; Low 24 bits of signed 48-bit accumulator >> (shift + 1).
+    alu s2, s8, s2, #ASR
+    alu s3, s10, s3, #ASR
+    ldi s5, #-1
+    alu s5, s8, s5, #ASR
+    alu s5, s0, s5, #OP_SUB
+    alu s5, s5, s14, #OP_SUB
+    x18.and s3, s5, s3
+    x18.or s3, s2, s3
+    x19.xrd s1, #7
+    alu s1, s1, s3, #OP_ADD
+    pks(1, A7, 0, s0, s0, 0)
+    x02.ainc #8, #8
+    again(s11, predict_sample)
+restored:
+    yld(s13, 0x2d96)
+    jmp #ALWAYS, #0, output_x
+    nop()
+    nop()
+no_prediction:
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, wide_zero
+    nop()
+    nop()
+output_x:
+    save_history()
+    yld(s4, WASTE)
+    alu s12, s4, s0, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, choose_output
+    alu s4, s0, s4, #OP_SUB
+    nop()
+    yld(s11, BLOCK)
+    aimm_o(4, AUDIO)
+    aimm_o(3, AUDIO)
+restore_waste:
+    pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    alu s1, s4, s1, #ASR
+    pks(1, A7, 0, s0, s0, 0)
+    again(s11, restore_waste)
+choose_output:
+    ldi s3, #0
+    jmp #ALWAYS, #0, pcm_entry
+    nop()
+    nop()
+
+.include "wide_rice.sm"
+.include "wide_escape.sm"
+.include "wide_predict.sm"
+.include "pcm.sm"

@@ -304,3 +304,7 @@
 
 /* Idle database/log callbacks include rename and dynamic path traversal. */
 #define ATA_THREAD_STACK_SIZE (DEFAULT_STACK_SIZE * 4)
+
+#if !defined(BOOTLOADER) && !defined(SIMULATOR)
+#define HAVE_IPOD_CRASH_RECOVERY
+#endif

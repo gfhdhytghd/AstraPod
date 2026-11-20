@@ -317,6 +317,12 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
             button_queue_post(BUTTON_REDRAW, 0);
             break;
 #endif
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+        case SYS_HIRES_SKIPPED:
+            splash(2 * HZ, ID2P(LANG_HIRES_CONVERT_NOTICE));
+            button_queue_post(BUTTON_REDRAW, 0);
+            break;
+#endif
         case SYS_BATTERY_UPDATE:
             if(global_settings.talk_battery_level)
             {

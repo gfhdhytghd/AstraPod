@@ -169,6 +169,12 @@ MENUITEM_SETTING(play_frequency, &global_settings.play_frequency, NULL);
 
 MENUITEM_SETTING(playback_log, &global_settings.playback_log, NULL);
 
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+#include "screens/settings/library_conversion.h"
+MENUITEM_FUNCTION(convert_library, 0, ID2P(LANG_CONVERT_LIBRARY_48),
+                  library_conversion_run, NULL, Icon_NOICON);
+#endif
+
 MAKE_MENU(playback_settings,ID2P(LANG_PLAYBACK),0,
           Icon_Playback_menu,
           &shuffle_item, &repeat_mode, &play_selected,
@@ -185,6 +191,9 @@ MAKE_MENU(playback_settings,ID2P(LANG_PLAYBACK),0,
          ,&skip_length, &spoken_skip_length, &spoken_speed, &prevent_skip
           ,&play_frequency
         ,&playback_log
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+          ,&convert_library
+#endif
           /* All three were under General Settings, which is where anything
              that was not obviously Sound or Theme ended up. They are playback
              behaviour: what the player does with a queue, and where it picks

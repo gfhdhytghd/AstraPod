@@ -1,0 +1,39 @@
+wide_escape:
+    ldi s2, #16
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #LT12, #PTST
+    jmp #3, #3, w_short_escape
+    nop()
+    nop()
+    alu s8, s4, s2, #OP_SUB
+    alu s12, s8, s0, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, w_short_escape
+    nop()
+    nop()
+w_long_escape:
+    alu s4, s8, s0, #OP_ADD
+    signed_bits()
+    alu s6, s1, s0, #OP_ADD
+    fetch(s1, 8)
+    ldi s2, #-8
+    alu s1, s2, s1, #ASR
+    fetch(s2, 8)
+    alu s1, s1, s2, #OP_ADD
+    wstore()
+    again(s11, w_long_escape)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+w_short_escape:
+    mask16(s9)
+w_short_word:
+    signed_bits()
+    ldi s2, #16
+    alu s6, s2, s1, #ASR
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, w_short_word)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()

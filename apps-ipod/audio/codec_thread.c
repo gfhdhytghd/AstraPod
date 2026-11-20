@@ -498,7 +498,15 @@ static void run_codec(void)
         buf_pin_handle(ci.audio_hid, true);
     }
 
-    status = codec_run_proc();
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+    extern int sm1_route_run(struct codec_api *);
+    if (codec_type == AFMT_FLAC) {
+        status = sm1_route_run(&ci);
+        if (status == 1) /* Host preflight declined before touching SM1 or ci.curpos. */
+            status = codec_run_proc();
+    } else
+#endif
+        status = codec_run_proc();
 
     if (!encoder)
     {
@@ -605,6 +613,10 @@ static void NORETURN_ATTR codec_thread(void)
 /* Initialize playback's codec interface */
 void INIT_ATTR codec_thread_init(void)
 {
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+    extern void sm1_convert_init(void);
+    sm1_convert_init();
+#endif
     /* Init API */
     ci.dsp              = dsp_get_config(CODEC_IDX_AUDIO);
     ci.codec_get_buffer = codec_get_buffer_callback;
@@ -620,6 +632,14 @@ void INIT_ATTR codec_thread_init(void)
     ci.get_command      = codec_get_command_callback;
     ci.loop_track       = codec_loop_track_callback;
     ci.strip_filesize = codec_strip_filesize_callback;
+#ifdef HAVE_SM1_ALAC_API
+    extern bool sm1_alac_begin(unsigned, unsigned, unsigned, unsigned, unsigned);
+    extern bool sm1_alac_frame(const unsigned char *, size_t, unsigned, int32_t *, int32_t *);
+    extern void sm1_alac_end(void);
+    ci.alac_begin = sm1_alac_begin;
+    ci.alac_frame = sm1_alac_frame;
+    ci.alac_end = sm1_alac_end;
+#endif
 
     /* Init threading */
     queue_init(&codec_queue, false);

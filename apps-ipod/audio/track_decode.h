@@ -23,6 +23,7 @@ struct track_pcm
 {
     unsigned int frequency;    /* The codec's own rate */
     int          stereo_mode;  /* enum dsp_stereo_modes */
+    bool         packed16;     /* Codec uses int16 rather than int32 storage */
     int          shift;        /* >> this brings a sample to int16 */
 };
 

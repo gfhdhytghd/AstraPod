@@ -1,0 +1,1506 @@
+wide_rice:
+    mask16(s9)
+    ldi s2, #0
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr0
+    nop()
+    nop()
+    ldi s2, #1
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr1
+    nop()
+    nop()
+    ldi s2, #2
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr2
+    nop()
+    nop()
+    ldi s2, #3
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr3
+    nop()
+    nop()
+    ldi s2, #4
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr4
+    nop()
+    nop()
+    ldi s2, #5
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr5
+    nop()
+    nop()
+    ldi s2, #6
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr6
+    nop()
+    nop()
+    ldi s2, #7
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr7
+    nop()
+    nop()
+    ldi s2, #8
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr8
+    nop()
+    nop()
+    ldi s2, #9
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr9
+    nop()
+    nop()
+    ldi s2, #10
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr10
+    nop()
+    nop()
+    ldi s2, #11
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr11
+    nop()
+    nop()
+    ldi s2, #12
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr12
+    nop()
+    nop()
+    ldi s2, #13
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr13
+    nop()
+    nop()
+    ldi s2, #14
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr14
+    nop()
+    nop()
+    ldi s2, #15
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr15
+    nop()
+    nop()
+    ldi s2, #16
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr16
+    nop()
+    nop()
+    ldi s2, #17
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr17
+    nop()
+    nop()
+    ldi s2, #18
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr18
+    nop()
+    nop()
+    ldi s2, #19
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr19
+    nop()
+    nop()
+    ldi s2, #20
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr20
+    nop()
+    nop()
+    ldi s2, #21
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr21
+    nop()
+    nop()
+    ldi s2, #22
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr22
+    nop()
+    nop()
+    ldi s2, #23
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr23
+    nop()
+    nop()
+    ldi s2, #24
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr24
+    nop()
+    nop()
+    ldi s2, #25
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr25
+    nop()
+    nop()
+    ldi s2, #26
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr26
+    nop()
+    nop()
+    ldi s2, #27
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr27
+    nop()
+    nop()
+    ldi s2, #28
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr28
+    nop()
+    nop()
+    ldi s2, #29
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr29
+    nop()
+    nop()
+    ldi s2, #30
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wr30
+    nop()
+    nop()
+    jmp #ALWAYS, #0, invalid
+    nop()
+    nop()
+wr0:
+ww0:
+    ldi s8, #-1
+wu0:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu0
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww0)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr1:
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #0
+    ldi s7, #16
+ww1:
+    ldi s8, #-1
+wu1:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu1
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 1)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww1)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr2:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #-1
+    ldi s7, #15
+ww2:
+    ldi s8, #-1
+wu2:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu2
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 2)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww2)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr3:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #-2
+    ldi s7, #14
+ww3:
+    ldi s8, #-1
+wu3:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu3
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 3)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww3)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr4:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #-3
+    ldi s7, #13
+ww4:
+    ldi s8, #-1
+wu4:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu4
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 4)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww4)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr5:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #-4
+    ldi s7, #12
+ww5:
+    ldi s8, #-1
+wu5:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu5
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 5)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww5)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr6:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #-5
+    ldi s7, #11
+ww6:
+    ldi s8, #-1
+wu6:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu6
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 6)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww6)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr7:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #-6
+    ldi s7, #10
+ww7:
+    ldi s8, #-1
+wu7:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu7
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 7)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww7)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr8:
+    ldi s5, #-7
+    ldi s7, #9
+ww8:
+    ldi s8, #-1
+wu8:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu8
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 8)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww8)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr9:
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #-8
+    ldi s7, #8
+ww9:
+    ldi s8, #-1
+wu9:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu9
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 9)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww9)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr10:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #-9
+    ldi s7, #7
+ww10:
+    ldi s8, #-1
+wu10:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu10
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 10)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww10)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr11:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #-10
+    ldi s7, #6
+ww11:
+    ldi s8, #-1
+wu11:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu11
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 11)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww11)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr12:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #-11
+    ldi s7, #5
+ww12:
+    ldi s8, #-1
+wu12:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu12
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 12)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww12)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr13:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    ldi s5, #-12
+    ldi s7, #4
+ww13:
+    ldi s8, #-1
+wu13:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu13
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    fetch(s2, 13)
+    ; The unfolded residual magnitude is q*2^(k-1) + floor(remainder/2).
+    ; Its two base-65536 limbs are available directly from the quotient.
+    x18.and s4, s2, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s2, s14, s2, #ASR
+    alu s1, s5, s8, #ASR
+    alu s1, s1, s2, #OP_ADD
+    alu s6, s7, s8, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww13)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr14:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww14:
+    ldi s8, #-1
+wu14:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu14
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #15
+    alu s5, s2, s1, #ASR
+    ldi s2, #-1
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 1)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww14)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr15:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww15:
+    ldi s8, #-1
+wu15:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu15
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #14
+    alu s5, s2, s1, #ASR
+    ldi s2, #-2
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 2)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww15)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr16:
+ww16:
+    ldi s8, #-1
+wu16:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu16
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #13
+    alu s5, s2, s1, #ASR
+    ldi s2, #-3
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 3)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww16)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr17:
+    alu s13, s13, s11, #OP_ADD
+ww17:
+    ldi s8, #-1
+wu17:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu17
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #12
+    alu s5, s2, s1, #ASR
+    ldi s2, #-4
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 4)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww17)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr18:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww18:
+    ldi s8, #-1
+wu18:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu18
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #11
+    alu s5, s2, s1, #ASR
+    ldi s2, #-5
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 5)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww18)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr19:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww19:
+    ldi s8, #-1
+wu19:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu19
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #10
+    alu s5, s2, s1, #ASR
+    ldi s2, #-6
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 6)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww19)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr20:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww20:
+    ldi s8, #-1
+wu20:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu20
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #9
+    alu s5, s2, s1, #ASR
+    ldi s2, #-7
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 7)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww20)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr21:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww21:
+    ldi s8, #-1
+wu21:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu21
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #8
+    alu s5, s2, s1, #ASR
+    ldi s2, #-8
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 8)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww21)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr22:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww22:
+    ldi s8, #-1
+wu22:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu22
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #7
+    alu s5, s2, s1, #ASR
+    ldi s2, #-9
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 9)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww22)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr23:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww23:
+    ldi s8, #-1
+wu23:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu23
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #6
+    alu s5, s2, s1, #ASR
+    ldi s2, #-10
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 10)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww23)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr24:
+ww24:
+    ldi s8, #-1
+wu24:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu24
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #5
+    alu s5, s2, s1, #ASR
+    ldi s2, #-11
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 11)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww24)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr25:
+    alu s13, s13, s11, #OP_ADD
+ww25:
+    ldi s8, #-1
+wu25:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu25
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #4
+    alu s5, s2, s1, #ASR
+    ldi s2, #-12
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 12)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww25)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr26:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww26:
+    ldi s8, #-1
+wu26:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu26
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww26)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr27:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww27:
+    ldi s8, #-1
+wu27:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu27
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #15
+    alu s5, s2, s1, #ASR
+    ldi s2, #-1
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 1)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww27)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr28:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww28:
+    ldi s8, #-1
+wu28:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu28
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #14
+    alu s5, s2, s1, #ASR
+    ldi s2, #-2
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 2)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww28)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr29:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww29:
+    ldi s8, #-1
+wu29:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu29
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #13
+    alu s5, s2, s1, #ASR
+    ldi s2, #-3
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 3)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww29)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()
+wr30:
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+    alu s13, s13, s11, #OP_ADD
+ww30:
+    ldi s8, #-1
+wu30:
+    fetch(s12, 1)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, wu30
+    alu s8, s8, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+    ldi s2, #16
+    alu s6, s2, s8, #ASR
+    x18.and s1, s8, s9
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #3
+    alu s5, s2, s1, #ASR
+    ldi s2, #-13
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 13)
+    alu s1, s1, s2, #OP_ADD
+    ldi s2, #12
+    alu s5, s2, s1, #ASR
+    ldi s2, #-4
+    alu s6, s2, s6, #ASR
+    alu s6, s6, s5, #OP_ADD
+    alu s1, s2, s1, #ASR
+    x18.and s1, s1, s9
+    fetch(s2, 4)
+    alu s1, s1, s2, #OP_ADD
+    x18.and s4, s1, s14
+    alu s4, s0, s4, #OP_SUB
+    alu s1, s14, s1, #ASR
+    x18.and s2, s6, s14
+    ldi s5, #-15
+    alu s2, s5, s2, #ASR
+    x18.or s1, s1, s2
+    alu s6, s14, s6, #ASR
+    pk(s0, A0, s0, s0, s0, 1, s1, s4, 0, 31)
+    pk(s0, A0, s0, s0, s0, 6, s6, s4, 0, 31)
+    x18.and s1, s1, s9
+    wstore()
+    again(s11, ww30)
+    jmp #ALWAYS, #0, next_partition
+    nop()
+    nop()

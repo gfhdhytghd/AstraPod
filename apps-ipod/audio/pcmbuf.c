@@ -552,8 +552,37 @@ void pcmbuf_write_complete(int count, unsigned long elapsed, off_t offset)
 
 
 /** Init **/
+unsigned sm1_ahead_target,sm1_ahead_pool,sm1_ahead_layout,sm1_ahead_file_min;
+bool sm1_ahead_fits;
+volatile bool sm1_ahead_gate;
+volatile long sm1_ahead_armed_tick,sm1_ahead_started_tick;
+volatile unsigned sm1_ahead_initial_bytes;
+void sm1_ahead_arm(unsigned target)
+{
+    sm1_ahead_target=target;sm1_ahead_fits=false;sm1_ahead_gate=true;
+    sm1_ahead_armed_tick=current_tick;sm1_ahead_started_tick=-1;sm1_ahead_initial_bytes=0;
+}
+void sm1_ahead_disarm(void)
+{
+    sm1_ahead_target=0;sm1_ahead_fits=false;sm1_ahead_gate=false;
+}
+void sm1_ahead_check_pool(size_t available,size_t other)
+{
+    sm1_ahead_pool=available;
+    sm1_ahead_file_min=8u*1024*1024;
+    /* Count the extra room needed for the producer's current and next frame
+     * and the ring's guard descriptor. Bound the entire PCM region. */
+    unsigned chunks=(sm1_ahead_target+PCMBUF_CHUNK_SIZE-1)/PCMBUF_CHUNK_SIZE+8;
+    sm1_ahead_layout=chunks*(PCMBUF_CHUNK_SIZE+sizeof(struct chunkdesc))+
+                     PCMBUF_GUARD_SIZE+MEM_ALIGN_SIZE;
+    sm1_ahead_fits=sm1_ahead_target && sm1_ahead_target<=32u*1024*1024 &&
+        other<=available && sm1_ahead_file_min<=available-other &&
+        sm1_ahead_layout<=available-other-sm1_ahead_file_min;
+}
 static unsigned int get_next_required_pcmbuf_chunks(void)
 {
+    if (sm1_ahead_target && sm1_ahead_fits)
+        return (sm1_ahead_target+PCMBUF_CHUNK_SIZE-1)/PCMBUF_CHUNK_SIZE+8;
     size_t size = MIN_BUFFER_SIZE;
 
     if (crossfade_enable_request != CROSSFADE_ENABLE_OFF)
@@ -793,6 +822,10 @@ void pcmbuf_start_track_change(enum pcm_track_change_type type)
 
 /** Playback **/
 
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+volatile bool sm1_monitor_pcm;
+volatile unsigned sm1_pcm_starts, sm1_pcm_empty, sm1_pcm_initial, sm1_pcm_low, sm1_pcm_peak;
+#endif
 /* PCM driver callback */
 static void pcmbuf_pcm_callback(const void **start, size_t *size)
 {
@@ -837,6 +870,18 @@ static void pcmbuf_pcm_callback(const void **start, size_t *size)
         }
     }
 
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+    if (sm1_monitor_pcm && !fade_out_complete) {
+        unsigned queued=pcmbuf_unplayed_bytes();
+        if (!desc) {
+            if (!sm1_pcm_starts) sm1_pcm_initial=queued;
+            ++sm1_pcm_starts;
+        }
+        if (queued<sm1_pcm_low) sm1_pcm_low=queued;
+        if (queued>sm1_pcm_peak) sm1_pcm_peak=queued;
+        if (desc && index==chunk_widx) ++sm1_pcm_empty;
+    }
+#endif
     /*- Process the new one -*/
     if (index != chunk_widx && !fade_out_complete)
     {
@@ -863,10 +908,30 @@ static void pcmbuf_sampr_callback(uint32_t sampr)
     dsp_configure(dsp, DSP_SET_OUT_FREQUENCY, sampr);
 }
 
+void sm1_ahead_release_tail(void)
+{
+    /* At true EOF the last partial PCM chunk becomes visible even when
+       the whole track is shorter than the normal startup watermark. */
+    commit_if_needed(COMMIT_ALL_DATA);
+    if (!sm1_ahead_target || !sm1_ahead_gate) {
+        start_audio_playback();
+        return;
+    }
+    sm1_ahead_gate=false;
+    sm1_ahead_initial_bytes=pcmbuf_unplayed_bytes();
+    sm1_ahead_started_tick=current_tick;
+    start_audio_playback();
+}
 /* Force playback */
 void pcmbuf_play_start(void)
 {
     logf("pcmbuf_play_start");
+    if (sm1_ahead_target && sm1_ahead_gate) {
+        unsigned fill=pcmbuf_unplayed_bytes();
+        if (fill<sm1_ahead_target) return;
+        sm1_ahead_initial_bytes=fill;sm1_ahead_started_tick=current_tick;
+        sm1_ahead_gate=false;
+    }
 
     if (mixer_channel_status(PCM_MIXER_CHAN_PLAYBACK) == CHANNEL_STOPPED &&
 #ifdef HAVE_USB_PODLINK

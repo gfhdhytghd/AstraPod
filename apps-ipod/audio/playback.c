@@ -33,6 +33,12 @@
  *   - the public audio_* API, settings hooks, and startup
  ****************************************************************************/
 #include "config.h"
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+#include "audio/sm1_convert.h"
+#include "screens/settings/library_conversion.h"
+#include "button.h"
+static bool reported_high_rate;
+#endif
 #include "ui/scene.h"
 #include "logfile.h"
 #ifdef HAVE_USB_PODLINK
@@ -1045,6 +1051,9 @@ bufpanic:
 /* Buffer must not move. */
 static int shrink_callback(int handle, unsigned hints, void* start, size_t old_size)
 {
+    extern unsigned sm1_ahead_target;
+    extern bool sm1_ahead_fits;
+    if (sm1_ahead_target && sm1_ahead_fits) return BUFLIB_CB_CANNOT_SHRINK;
     struct queue_event ev;
     static const long filter_list[][2] =
     {
@@ -1189,6 +1198,8 @@ static void audio_reset_buffer(void)
 #endif
         /* The menu releases its snapshots before a handoff takes the display. */
         reserve += display_reserve;
+        extern void sm1_ahead_check_pool(size_t,size_t);
+        sm1_ahead_check_pool(filebuflen,reserve+scratch_mem_size()+AUDIO_BUFFER_RESERVE);
         size_t layout = pcmbuf_size_reqd() + scratch_mem_size()
                       + AUDIO_BUFFER_RESERVE;
 
@@ -2454,6 +2465,9 @@ static int audio_load_track(void)
     /* Get track name from current playlist read position */
     int fd = -1;
     char path_buf[MAX_PATH + 1];
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+    char converted[MAX_PATH + 1];
+#endif
     const char *path;
 
     while (1)
@@ -2469,6 +2483,17 @@ static int audio_load_track(void)
          * whole probe: it answers "is this a playable entry?" more strictly
          * than an existence check, which matches directories too, and it costs
          * one directory walk instead of two. */
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+        if (sm1_converted_path(path, converted, sizeof(converted)))
+        {
+            fd = open(converted, O_RDONLY);
+            if (fd >= 0)
+            {
+                path = converted;
+                break;
+            }
+        }
+#endif
         fd = open(path, O_RDONLY);
         if (fd >= 0)
             break;
@@ -2561,6 +2586,23 @@ static int audio_load_track(void)
     return LOAD_TRACK_OK;
 }
 
+/* Audio-thread ownership; only change the actual ring after the old codec halts. */
+extern unsigned sm1_ahead_target;
+extern bool sm1_ahead_fits;
+extern void sm1_ahead_arm(unsigned);
+extern void sm1_ahead_disarm(void);
+static unsigned sm1_requested_bytes;
+static char sm1_reserved_path[MAX_PATH];
+static bool sm1_layout_pending;
+
+static void sm1_apply_layout(void)
+{
+    if (!sm1_layout_pending) return;
+    if (sm1_requested_bytes) sm1_ahead_arm(sm1_requested_bytes);
+    else sm1_ahead_disarm();
+    sm1_layout_pending=false;
+}
+
 static bool audio_auto_change_frequency(struct mp3entry *id3, bool play);
 
 /* Second part of the track loading: We now have the metadata available, so we
@@ -2603,6 +2645,18 @@ static int audio_finish_load_track(struct track_info *infop)
         goto audio_finish_load_track_exit;
     }
 
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+    if (track_id3->frequency > 48000)
+    {
+        if (!reported_high_rate)
+        {
+            button_queue_post(SYS_HIRES_SKIPPED, 0);
+            reported_high_rate = true;
+        }
+        trackstat = LOAD_TRACK_ERR_FINISH_FAILED;
+        goto audio_finish_load_track_exit;
+    }
+#endif
     struct track_info user_cur;
 
     track_list_user_current(0, &user_cur);
@@ -3361,6 +3415,14 @@ static void audio_start_playback(const struct audio_resume_info *resume_info,
         return;
     }
     /* A sound scan's codec is in the slot; loading over it crashes. */
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+    reported_high_rate = false;
+    if (library_conversion_running())
+    {
+        queue_reply(&audio_queue, 0);
+        return;
+    }
+#endif
     if (track_decode_busy())
     {
         queue_reply(&audio_queue, 0);
@@ -3405,6 +3467,7 @@ static void audio_start_playback(const struct audio_resume_info *resume_info,
         if ((flags & AUDIO_START_RESTART) || old_status == PLAY_PAUSED)
             pcmbuf_play_stop();
 
+        if (flags & AUDIO_START_NEWBUF) sm1_apply_layout();
         if (flags & AUDIO_START_RESTART)
         {
             /* Clear out some stuff to resume the current track where it
@@ -3561,6 +3624,13 @@ static void audio_stop_playback(bool allow_fade)
     play_status = PLAY_STOPPED;
     iap_on_play_status(play_status);
 
+    if (sm1_ahead_target || sm1_layout_pending) {
+        sm1_ahead_disarm();
+        sm1_requested_bytes=0;
+        sm1_reserved_path[0]='\0';
+        sm1_layout_pending=false;
+        buffer_state=AUDIOBUF_STATE_TRASHED;
+    }
     wipe_track_metadata(true);
     clear_last_folder_album_art();
     clear_last_embedded_album_art();
@@ -3982,7 +4052,12 @@ void audio_playback_handler(struct queue_event *ev)
             /* No fade for USB, nor for a forced stop -- data != 0 marks the
              * one nobody asked for (the buflib shrink callback), where a
              * caller is blocked waiting on us. */
+            /* Free an enlarged ring on an explicit STOP, after codec halt
+               and mixer stop. A shrink callback owns its own allocator path. */
+            bool free_sm1_ring = ev->id == Q_AUDIO_STOP && ev->data == 0 && sm1_ahead_target;
             audio_stop_playback(ev->id != SYS_USB_CONNECTED && ev->data == 0);
+            if (free_sm1_ring && audiobuf_handle > 0)
+                audiobuf_handle=core_free(audiobuf_handle);
             if (ev->data != 0)
                 queue_clear(&audio_queue);
             return; /* no more playback */
@@ -4794,6 +4869,24 @@ static bool audio_auto_change_frequency(struct mp3entry *id3, bool play)
     if (!valid_mp3entry(id3))
         return false;
     unsigned long guessed_frequency = global_settings.play_frequency == 0 ? audio_guess_frequency(id3) : 0;
+    unsigned reserve=0;
+    if (id3->codectype==AFMT_FLAC && (id3->frequency==96000 || id3->frequency==192000)) {
+        const struct pcm_sink_caps *caps=pcm_current_sink_caps();
+        for (size_t i=0;i<caps->num_samprs;++i) {
+            if (caps->samprs[i]!=SAMPR_48) continue;
+            guessed_frequency=SAMPR_48;
+            reserve=id3->frequency==96000 ? 28u*1024*1024 : 24u*1024*1024;
+            break;
+        }
+    }
+    bool layout_change=reserve!=sm1_ahead_target ||
+        (reserve && strcmp(id3->path,sm1_reserved_path));
+    if (layout_change && !play) return true;
+    if (layout_change) {
+        sm1_requested_bytes=reserve;
+        strlcpy(sm1_reserved_path,reserve?id3->path:"",sizeof(sm1_reserved_path));
+        sm1_layout_pending=true;
+    }
     if (guessed_frequency && mixer_get_frequency() != guessed_frequency)
     {
         if (!play)
@@ -4801,6 +4894,10 @@ static bool audio_auto_change_frequency(struct mp3entry *id3, bool play)
 
         voice_stop();
         mixer_set_frequency(guessed_frequency);
+        audio_queue_post(Q_AUDIO_REMAKE_AUDIO_BUFFER, 0);
+        return true;
+    }
+    if (layout_change) {
         audio_queue_post(Q_AUDIO_REMAKE_AUDIO_BUFFER, 0);
         return true;
     }

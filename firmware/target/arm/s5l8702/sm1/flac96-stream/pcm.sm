@@ -1,0 +1,274 @@
+.include "sections.sm"
+.const HIGH = 0x830
+.const HIST_L = 0x1840
+.const HIST_R = 0x1980
+.const FIR = 0x1ac0
+.const POS = 0x2e36
+; HIGH uses 4096 X words: high bytes from a consecutive pair of first-lane
+; samples. Their low words occupy the final Y output slot until consumption.
+.macro high_ptr() {
+    yld(s4, OFFSET)
+    alu s4, s14, s4, #ASR
+    ldi s2, #HIGH
+    alu s5, s2, s4, #OP_ADD
+    amov(A5, s5)
+}
+.macro zeros_if_odd() {
+    yld(s3, RUN_SIZE)
+    x18.and s12, s3, s14
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, done
+    nop()
+    nop()
+    yld(s4, BLOCK)
+    ldi s2, #AUDIO
+    alu s5, s2, s4, #OP_ADD
+    amov(A7, s5)
+    ldi s2, #WBASE-1
+    alu s5, s2, s4, #OP_ADD
+    x17.mve e13, s5
+    ldi s1, #0
+    ldi s6, #0
+    wstore()
+done:
+}
+pcm_entry:
+    zeros_if_odd()
+    high_ptr()
+    input_pos()
+    out_pos()
+    yld(s11, RUN_SIZE)
+    alu s11, s11, s14, #OP_ADD
+    alu s11, s14, s11, #ASR
+    yld(s12, SECOND)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, filter_chunk
+    nop()
+    nop()
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, save_side
+    nop()
+    nop()
+.macro src(D) {
+    pk(D, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+}
+.macro decode_side(D) {
+    src(D)
+    ldy s4, e13
+    x18.eagu e13, e13, #AGU_INC
+    alu D, D, D, #OP_ADD
+    alu D, D, s4, #OP_ADD
+}
+.macro store_first_pair(L) {
+    x17.styi e9, #1, #0, e9
+    x17.styi e9, #2, #0, e9
+    ldi s4, #16
+    alu s1, s4, s1, #ASR
+    alu s2, s4, s2, #ASR
+    ldi s4, #255
+    x18.and s2, s2, s4
+    ldi s4, #-8
+    alu s1, s4, s1, #ASR
+    x18.or s1, s1, s2
+    pks(1, A5, 0, s0, s0, 0)
+    again(s11, L)
+    ret()
+}
+save_normal:
+    src(s1)
+    src(s2)
+    store_first_pair(save_normal)
+save_side:
+    ; Store both halves exactly. Y already contains 16 bits per first-lane
+    ; sample; X has 24 bits per pair, with two spare bits for the parities.
+    src(s1)
+    src(s2)
+    x17.styi e9, #1, #0, e9
+    x17.styi e9, #2, #0, e9
+    ldi s4, #16
+    alu s1, s4, s1, #ASR
+    alu s2, s4, s2, #ASR
+    ldi s4, #255
+    x18.and s1, s1, s4
+    x18.and s2, s2, s4
+    ldi s4, #-8
+    alu s1, s4, s1, #ASR
+    x18.or s1, s1, s2
+    ldy s5, e13
+    x18.eagu e13, e13, #AGU_INC
+    ldy s6, e13
+    x18.eagu e13, e13, #AGU_INC
+    alu s5, s5, s5, #OP_ADD
+    alu s5, s5, s6, #OP_ADD
+    ldi s4, #-16
+    alu s5, s4, s5, #ASR
+    x18.or s1, s1, s5
+    pks(1, A5, 0, s0, s0, 0)
+    again(s11, save_side)
+    ret()
+; Four streaming X pointers write the real and duplicate chronological histories.
+.macro write_ptrs() {
+    yld(s4, POS)
+    ldi s2, #HIST_L
+    alu s5, s4, s2, #OP_ADD
+    amov(A3, s5)
+    ldi s2, #HIST_L+160
+    alu s5, s4, s2, #OP_ADD
+    amov(A7, s5)
+    ldi s2, #HIST_R
+    alu s5, s4, s2, #OP_ADD
+    amov(A11, s5)
+    ldi s2, #HIST_R+160
+    alu s5, s4, s2, #OP_ADD
+    amov(A13, s5)
+}
+filter_chunk:
+next_pair:
+    pk(s10, A5, s0, s0, s0, 0, s0, s0, 0, 0)
+    ldi s4, #16
+    alu s7, s4, s10, #ASR
+    ldi s4, #8
+    alu s3, s4, s10, #ASR
+    mask16(s8)
+    ldy s1, e9
+    x18.eagu e9, e9, #AGU_INC
+    ldy s2, e9
+    x18.eagu e9, e9, #AGU_INC
+    x18.and s1, s1, s8
+    x18.and s2, s2, s8
+    ldi s4, #-16
+    alu s3, s4, s3, #ASR
+    alu s10, s4, s10, #ASR
+    x18.or s1, s1, s3
+    x18.or s2, s2, s10
+    alu s8, s1, s0, #OP_ADD
+    alu s10, s2, s0, #OP_ADD
+    yld(s5, ASSIGN)
+    equals(1, filter_lr)
+    equals(8, filter_ls)
+    equals(9, filter_sr)
+    jmp #ALWAYS, #0, filter_ms
+    nop()
+    nop()
+filter_lr:
+    src(s5)
+    src(s6)
+    jmp #ALWAYS, #0, push_pair
+    nop()
+    nop()
+.macro right_from_left(L, H, B, D) {
+    x18.and s12, L, s14
+    alu s9, s14, s12, #OP_SUB
+    x18.and s9, s9, B
+    alu D, s14, L, #ASR
+    alu D, D, H, #OP_SUB
+    alu D, D, s9, #OP_SUB
+    pk(s0, A0, s0, s0, s0, 12, s12, B, 0, 31)
+    alu D, D, D, #OP_ADD
+    alu D, D, s12, #OP_ADD
+}
+.macro left_from_right(R, H, B, D) {
+    x18.and s12, R, s14
+    x18.and s9, s12, B
+    alu s4, s14, R, #ASR
+    alu s4, s4, H, #OP_ADD
+    alu s4, s4, s9, #OP_ADD
+    pk(s0, A0, s0, s0, s0, 12, s12, B, 0, 31)
+    alu D, s4, s4, #OP_ADD
+    alu D, D, s12, #OP_ADD
+}
+filter_ls:
+    src(s1)
+    src(s2)
+    ldy s3, e13
+    x18.eagu e13, e13, #AGU_INC
+    ldy s7, e13
+    x18.eagu e13, e13, #AGU_INC
+    right_from_left(s8, s1, s3, s5)
+    right_from_left(s10, s2, s7, s6)
+    jmp #ALWAYS, #0, push_pair
+    nop()
+    nop()
+filter_sr:
+    alu s3, s14, s7, #ASR
+    x18.and s3, s3, s14
+    x18.and s7, s7, s14
+    src(s5)
+    src(s6)
+    left_from_right(s5, s8, s3, s8)
+    left_from_right(s6, s10, s7, s10)
+    jmp #ALWAYS, #0, push_pair
+    nop()
+    nop()
+filter_ms:
+    src(s1)
+    src(s2)
+    ldy s3, e13
+    x18.eagu e13, e13, #AGU_INC
+    ldy s7, e13
+    x18.eagu e13, e13, #AGU_INC
+    alu s5, s8, s1, #OP_SUB
+    alu s6, s10, s2, #OP_SUB
+    left_from_right(s5, s1, s3, s8)
+    left_from_right(s6, s2, s7, s10)
+push_pair:
+    ; Store the right pair while filtering left. The signed input is divided
+    ; by four to accommodate the cascade's <3.54 full-scale L1 bound.
+    aimm_o(6, 0x1940+64)
+    pks(5, A13, 0, s0, s0, 0)
+    pks(6, A13, 0, s0, s0, 0)
+    ldi s4, #2
+    alu s1, s4, s8, #ASR
+    alu s2, s4, s10, #ASR
+    aimm_e(1, 0x1840)
+    aimm_o(1, 0x1840)
+    aimm_e(3, 0x1900)
+    pk(s5, A2, s0, s0, s0, 0, s0, s0, 0, 0)
+    pk(s6, A2, s0, s0, s0, 0, s0, s0, 0, 0)
+    pks(1, A3, 0, s0, s0, 0)
+    pks(2, A3, 0, s0, s0, 0)
+    section()
+    section()
+    section()
+    section()
+    section()
+    section()
+    aimm_o(6, 0x1940+66)
+    pks(2, A13, 0, s0, s0, 0)
+    aimm_e(2, 0x1940+64)
+    pk(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0)
+    pk(s2, A4, s0, s0, s0, 0, s0, s0, 0, 0)
+    ldi s4, #2
+    alu s1, s4, s1, #ASR
+    alu s2, s4, s2, #ASR
+    aimm_e(1, 0x1880)
+    aimm_o(1, 0x1880)
+    aimm_e(3, 0x1900)
+    pk(s5, A2, s0, s0, s0, 0, s0, s0, 0, 0)
+    pk(s6, A2, s0, s0, s0, 0, s0, s0, 0, 0)
+    pks(1, A3, 0, s0, s0, 0)
+    pks(2, A3, 0, s0, s0, 0)
+    section()
+    section()
+    section()
+    section()
+    section()
+    section()
+    pk(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0)
+    ldi s4, #32
+    alu s1, s1, s4, #OP_ADD
+    alu s2, s2, s4, #OP_ADD
+    ldi s4, #6
+    alu s1, s4, s1, #ASR
+    alu s2, s4, s2, #ASR
+    ldi s4, #32767
+    smin(s1, s4)
+    smin(s2, s4)
+    ldi s4, #-32768
+    smax(s1, s4)
+    smax(s2, s4)
+    x17.styi e7, #1, #0, e7
+    x17.styi e7, #2, #0, e7
+    again(s11, next_pair)
+    ret()

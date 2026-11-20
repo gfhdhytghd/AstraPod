@@ -1,0 +1,21 @@
+.const BLOCK = 0x2e10
+.const ASSIGN = 0x2e12
+.const SIDE = 0x2e13
+.const SECOND = 0x2e14
+.const BLOCKCODE = 0x2e17
+.const RATECODE = 0x2e18
+.const WASTE = 0x2e15
+.const WIDTH = 0x2e16
+
+.macro equals(V, L) {
+    ldi s2, #V
+    alu s12, s5, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, L
+    nop()
+    nop()
+}
+.macro raw_sample() {
+    yld(s4, WIDTH)
+    signed_bits()
+}

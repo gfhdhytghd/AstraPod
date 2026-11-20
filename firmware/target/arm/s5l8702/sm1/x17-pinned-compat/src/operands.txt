@@ -1,0 +1,1539 @@
+# x17 operand bit positions, per form.
+#
+# One line per operand.  Columns are tab-separated:
+#   form    name    kind    lo    hi    syll
+#
+# `lo`/`hi` are inclusive bit positions within the named syllable.  `syll`
+# is `head`, `s1`, `s2`, `s3`, ... - single-syllable forms always use
+# `head`.  Multi-syllable bundles have their syllable base values in
+# `subforms.txt`; operand rows here add on top.
+#
+# `kind`:
+#   s    scalar register, 4 bits               (s0..s15)
+#   e    element register, 4 bits              (e0..e15)
+#   R    R-file register, 4 bits               (R0..R15, R0 pinned to 0)
+#   p    predicate, N bits                     (form-specific width)
+#   imm  immediate, bit field                  (width = hi-lo+1)
+#   dest_ldi  ldi-style destination index     (5 bits, 16..31 = s(k-16))
+#   rel  branch offset, syllables from own q, signed    (label target or #raw)
+#   relu branch offset, syllables from own q, unsigned  (label target or #raw)
+#   rel4 branch offset, 4-syllable units, signed        (label target or #raw)
+#
+# A name starting `?` is optional: it must trail the form's other operands, and when
+# omitted its field stays 0.  Disassembly omits it while the field is 0.
+#
+# Sources: each `[lo:hi]` reference here is quoted from `src/isa.toml`'s ref
+# string for the form.  When the assembler's needs grow this table gets more
+# forms; when every form is covered we migrate the rows back into isa.toml
+# as structured operands and retire this file.
+
+# rli (1 syllable):
+# "R<head[30:27]> <- head[20:5] and s<head[24:21]> <- head[20:5]"
+rli	dest_R	R	27	30	head
+rli	dest_s	s	21	24	head
+rli	imm16	imm	5	20	head
+
+# ldi (1 syllable):
+# "[20:5] is a 16-bit immediate, [25:21] the register"
+ldi	dest	dest_ldi	21	25	head
+ldi	imm16	imm	5	20	head
+
+# jmp: 1-syllable control flow.
+# Grammar: jmp #<mode>, #<pred>, <label> | #<offset>
+# mode: 1=always, 2=if !p<pred>, 3=if p<pred>.  offset in syllables.
+jmp	mode	imm	21	25	head
+jmp	pred	imm	26	29	head
+jmp	offset	rel	5	20	head
+
+# br: 1-syllable branch when p<pred> set, offset is unsigned [25:11].
+# Grammar: br #<pred>, <label> | #<offset>
+br	pred	imm	26	29	head
+br	offset	relu	11	25	head
+
+# st.y (1 syllable):
+# "[20:5] is a 16-bit immediate; [31:29]=001 selects it."  The stored value
+# is the LANE's data register (implicit; not an encoded operand); sel bits
+# 21-22 pick V13 pre-store side effects (OPEN in the v0 assembler).
+st.y	addr	y_addr	5	20	head
+
+# alu (1 syllable):
+# "dest s<[18:15]>, a s<[14:11]>, b s<[29:26]> ([29] = 1 is the 011 'class':
+#  s8..s15), op [10:5] (table in emu.ALU05); [25:19] = 0 only"
+# b_s is a plain 4-bit scalar index: s0..s7 keep bit 29 = 0, s8..s15 set
+# it; the assembler just passes the 4-bit value through.
+alu	dest	s	15	18	head
+alu	a	s	11	14	head
+alu	b	s	26	29	head
+alu	op	imm	5	10	head
+
+# x17.imm (3 syllables): scalar immediate load.
+# "s<S1[10:7]> <- head[26:11]" (fact 134, own-x17imm).
+x17.imm	dest_s	s	7	10	s1
+x17.imm	imm16	imm	11	26	head
+
+# x12.agu (2 syllables): AGU fan-out to e, s, R at low5 0x12 S class 001.
+# Grammar: x12.agu <dest_e>, <x_e>, <y_R>, #<fn>, #<s_low>, #<s_hi>, <dest_R>
+# s_dest = 2*s_low + s_hi.
+x12.agu	dest_e	e	9	12	head
+x12.agu	x_e	e	5	8	head
+x12.agu	y_R	R	13	16	head
+x12.agu	fn	imm	17	20	head
+x12.agu	s_hi	imm	31	31	head
+x12.agu	s_low	imm	0	2	s1
+x12.agu	dest_R	R	21	24	s1
+
+# x12.agu29 (2 syllables): same as x12.agu with head[29] inert bit set.
+x12.agu29	dest_e	e	9	12	head
+x12.agu29	x_e	e	5	8	head
+x12.agu29	y_R	R	13	16	head
+x12.agu29	fn	imm	17	20	head
+x12.agu29	s_hi	imm	31	31	head
+x12.agu29	s_low	imm	0	2	s1
+x12.agu29	dest_R	R	21	24	s1
+
+# x13.st (2 syllables): sub 0 - s and X store.  Only the sub side is
+# modelled.
+# Grammar: x13.st <dest_s>, <a_s>
+x13.st	dest_s	s	15	18	head
+x13.st	a_s	s	19	22	head
+
+# x16.agu (3 syllables): AGU10 into s.
+# Grammar: x16.agu <dest_s>, <y_R>, #<x_e_low>, #<fn>, #<imm>
+x16.agu	dest_s	s	3	6	s2
+x16.agu	y_R	R	27	30	head
+x16.agu	x_e_low	imm	0	2	s2
+x16.agu	fn	imm	7	10	s1
+x16.agu	imm	imm	11	26	head
+x16.agu	x_e_hi	imm	31	31	s1
+
+# x15.alu (2 syllables): class-05 ALU word in head, mux=111 dual write.
+# Grammar: x15.alu <dest_s>, <a>, <b>, #<code>, #<m>, <dest_s2>
+# Only mux=111 modelled; base_S bakes it in.
+x15.alu	dest_s	s	15	18	head
+x15.alu	a	s	11	14	head
+x15.alu	b	s	26	29	head
+x15.alu	code	imm	5	10	head
+x15.alu	m	imm	23	25	head
+x15.alu	dest_s2	s	7	10	s1
+
+# x17.agu2 (3 syllables): AGU y+i broadcast to s and e.
+# Grammar: x17.agu2 <dest_s>, <dest_e_low>, <y_R>, #<fn>, #<imm>
+x17.agu2	dest_s	s	10	13	s2
+x17.agu2	dest_e_low	imm	0	2	s1
+x17.agu2	y_R	R	27	30	head
+x17.agu2	fn	imm	7	10	s1
+x17.agu2	imm	imm	11	26	head
+
+# x19.agu (4 syllables): AGU writes R and e in parallel.
+# Grammar: x19.agu <dest_R>, <dest_e>, <x_e>, <y_R>, #<fn>
+x19.agu	dest_R	R	7	10	s3
+x19.agu	dest_e	e	20	23	s1
+x19.agu	x_e	e	25	28	s3
+x19.agu	y_R	R	11	14	s3
+x19.agu	fn	imm	24	27	s1
+
+# x19.alu (4 syllables): shift-based ALU op into s.
+# Grammar: x19.alu <dest_s>, <a_s>, <b_s>, #<code>
+x19.alu	dest_s	s	24	27	s1
+x19.alu	a_s	s	18	21	s2
+x19.alu	b_s	s	16	19	s1
+x19.alu	code	imm	5	9	head
+x19.alum	dest_s	s	24	27	s1
+x19.alum	a_s	s	18	21	s2
+x19.alum	b_s	s	16	19	s1
+x19.alum	code	imm	5	9	head
+x19.alum	mode	imm	11	14	s1
+
+# x19.e (4 syllables): e-imm write + muxed s source.
+# Grammar: x19.e <dest_e>, #<imm>, <dest_s>, <e_src>, #<mux>
+x19.e	dest_e	e	20	23	s1
+x19.e	imm	imm	5	20	head
+x19.e	dest_s	s	21	24	head
+x19.e	e_src	e	4	7	s2
+x19.e	mux	imm	12	14	s1
+
+# x19.xrd (4 syllables): X-memory read into s.
+# Grammar: x19.xrd <dest_s>, #<src_a>
+x19.xrd	dest_s	s	21	24	head
+x19.xrd	src_a	a4	0	2	s1
+
+# x19.a3 (4 syllables): s and R loaded in parallel.
+# Grammar: x19.a3 <dest_s>, <dest_R>, <x_e>, #<agu3_fn>, #<agu10_fn>, #<i>
+x19.a3	dest_s	s	21	24	head
+x19.a3	dest_R	R	11	14	s1
+x19.a3	x_e	e	25	28	s3
+x19.a3	agu3_fn	imm	20	24	s3
+x19.a3	agu10_fn	imm	7	10	s1
+x19.a3	i	imm	0	14	s3
+
+# x19.a3st (4 syllables): Y store.
+# Grammar: x19.a3st #<src_lo>, #<src_hi>, <addr_e>
+x19.a3st	src_lo	imm	29	31	s1
+x19.a3st	src_hi	imm	0	0	s2
+x19.a3st	addr_e	e	25	28	s3
+
+# x19.aagu42 (4 syllables): A update with widened i via w2[31].
+# Grammar: x19.aagu42 <dest_A>, <src_A>, #<fn_op>, #<i_base>
+x19.aagu42	dest_A	A	3	7	s1
+x19.aagu42	src_A	A	15	19	s3
+x19.aagu42	fn_op	imm	20	24	s3
+x19.aagu42	i_base	imm	0	14	s3
+
+# x19.alu44 (4 syllables): same shape as x19.alu, class (0,4,4).
+# Grammar: x19.alu44 <dest_s>, <a_s>, <b_s>, #<code>
+x19.alu44	dest_s	s	24	27	s1
+x19.alu44	a_s	s	18	21	s2
+x19.alu44	b_s	s	16	19	s1
+x19.alu44	code	imm	5	9	head
+
+# x19.a43 (4 syllables): s <- AGU3[fn]((w3[14:0]<<1) | w2[31]).
+# Grammar: x19.a43 <dest_s>, #<agu3_fn>, #<i_base>
+x19.a43	dest_s	s	21	24	head
+x19.a43	agu3_fn	imm	20	24	s3
+x19.a43	i_base	imm	0	14	s3
+
+# x19.k00 (4 syllables): muxed s write.
+# Grammar: x19.k00 <dest_s>, <x_e>, <y_R>, #<mux>, #<fn>, #<imm>
+x19.k00	dest_s	s	21	24	head
+x19.k00	x_e	e	25	28	s3
+x19.k00	y_R	R	11	14	s3
+x19.k00	mux	imm	12	14	s1
+x19.k00	fn	imm	24	27	s1
+x19.k00	imm	imm	5	20	head
+
+# x19.kalu (4 syllables): ALU sub a - b into s via class (3,0,0) with mod 5.
+# Grammar: x19.kalu <dest_s>, <dest>, <a>, <b>
+x19.kalu	dest_s	s	21	24	head
+x19.kalu	dest	s	8	11	s1
+x19.kalu	a	s	4	7	s1
+x19.kalu	b	s	3	6	s3
+
+# x19.kabs (4 syllables): |b| into dest.
+# Grammar: x19.kabs <dest_s>, <dest>, <b>
+x19.kabs	dest_s	s	21	24	head
+x19.kabs	dest	s	8	11	s1
+x19.kabs	b	s	3	6	s3
+
+# x19.kimm (4 syllables): head-imm into dest.
+# Grammar: x19.kimm <dest_s>, #<imm>
+x19.kimm	dest_s	s	21	24	head
+x19.kimm	imm	imm	5	20	head
+
+# x19.kmux2 (4 syllables): AGU10 via mux 010.
+# Grammar: x19.kmux2 <dest_s>, <x_e>, <y_R>, #<fn>
+x19.kmux2	dest_s	s	21	24	head
+x19.kmux2	x_e	e	25	28	s3
+x19.kmux2	y_R	R	11	14	s3
+x19.kmux2	fn	imm	24	27	s1
+
+# x16.mul (3 syllables): truncated scalar multiply with 23-bit shift.
+# Grammar: x16.mul <dest_s>, <a>, <b>
+x16.mul	dest_s	s	10	13	s2
+x16.mul	a	s	1	4	s2
+x16.mul	b	s	5	8	s2
+x16.mul	op	imm	16	20	s2
+
+# x13.agu (2 syllables): e load + R AGU at low5 0x13 S class 001.
+# Grammar: x13.agu <dest_e>, #<imm>, <dest_R>, <x_e>, <y_R>, #<fn>
+x13.agu	dest_e	e	9	12	s1
+x13.agu	imm16	imm	5	20	head
+x13.agu	dest_R	R	25	28	s1
+x13.agu	x_e	e	21	24	s1
+x13.agu	y_R	R	13	16	s1
+x13.agu	fn	imm	17	20	s1
+
+# x02.mpy (6 syllables): rounded multiply with 23-bit shift.  The bundle's A
+# slot also runs: A1 <- A1 + 1 (own-x02mpy-a1).  Same for x02.x3.
+# Grammar: x02.mpy <dest_s>, <a_s>, <b_s>
+x02.mpy	dest_s	s	9	12	s2
+x02.mpy	a_s	s	1	4	s2
+x02.mpy	b_s	s	5	8	s2
+
+# x02.ainc (6 syllables): A-increment slot.  The bundle is a whole x02: its
+# template's multiply slot also runs, s2 <- round(s1 * s2 / 2^23).
+# Grammar: x02.ainc <dest_a>, <src_a>  (fn 0: never wraps, 963)
+x02.ainc	dest_a	imm	17	21	s2
+x02.ainc	src_a	imm	0	4	s3
+
+# x18.eagu (4 syllables): e update via AGU10.
+# Grammar: x18.eagu <dest_e>, <x_e>, #<fn>
+x18.eagu	dest_e	e	22	25	s1
+x18.eagu	x_e	e	25	28	s3
+x18.eagu	fn	imm	26	29	s1
+
+# x18.edec (4 syllables): e +/- 1.
+# Grammar: x18.edec <dest_e>, <src_e>, #<is_minus>
+x18.edec	dest_e	e	8	11	s2
+x18.edec	src_e	e	4	7	s2
+x18.edec	is_minus	imm	20	20	s2
+x18.edec	st_src	s	0	3	s2
+
+# x18.una (4 syllables): unary s op.
+# Grammar: x18.una <dest_s>, <src_s>, #<op>
+x18.una	dest_s	s	8	11	s1
+x18.una	src_s	s	2	5	s2
+x18.una	op	imm	15	17	s1
+x18.una	dest_r	R	7	10	s3
+x18.una	b_s	s	4	7	s1
+# x18.and (4 syllables): s <- s & s.
+# Grammar: x18.and <dest_s>, <a_s>, <b_s>
+x18.and	dest_s	s	8	11	s1
+x18.and	a_s	s	2	5	s2
+x18.and	b_s	s	4	7	s1
+
+# x18.xrd (4 syllables): X-memory read.
+# Grammar: x18.xrd <dest_s>, #<src_a>
+x18.xrd	dest_s	s	21	24	head
+x18.xrd	src_a	imm	17	21	s2
+
+# x18.rimm (4 syllables): e <- op(i, R).
+# Grammar: x18.rimm #<e_hi>, #<e_lo>, #<op>, #<imm>, <r_src>
+x18.rimm	e_hi	imm	0	0	s2
+x18.rimm	e_lo	imm	29	31	s1
+x18.rimm	op	imm	25	27	s2
+x18.rimm	imm	imm	8	23	s2
+x18.rimm	r_src	R	11	14	s3
+
+# x18.q23 (4 syllables): rounded multiply with mode select.
+# Grammar: x18.q23 <dest_s>, <a_s>, <b_s>, #<mode>
+x18.q23	dest_s	s	12	15	s2
+x18.q23	a_s	s	16	19	s2
+x18.q23	b_s	s	20	23	s2
+x18.q23	mode	imm	28	30	s2
+
+# x18.mpy (4 syllables): integer multiply with split low/high s destinations.
+# Grammar: x18.mpy <lo_dest>, <hi_dest>, <a_s>, <b_s>
+x18.mpy	lo_dest	s	24	27	s2
+x18.mpy	hi_dest	s	9	12	s2
+x18.mpy	a_s	s	1	4	s2
+x18.mpy	b_s	s	5	8	s2
+
+# x03.xrd (6 syllables): X-memory read at low5 0x03 w4 mode 5.
+# Grammar: x03.xrd <dest_s>, #<a_hi>, #<a_lo>
+# A address = (a_hi << 2) | a_lo.
+x03.xrd	dest_s	s	3	6	s4
+x03.xrd	a_hi	imm	0	2	s1
+x03.xrd	a_lo	imm	30	31	head
+
+# x03.yrd (6 syllables): Y read via the w4 slot.
+# Grammar: x03.yrd <dest_s>, <src_e>, #<mux>   (5 = D, 3 = lane[15:0], 4 = lane[16:1])
+x03.yrd	dest_s	s	3	6	s4
+x03.yrd	src_e	e	27	30	s3
+x03.yrd	mux	imm	11	13	s4
+x03.yrd	w5b30	imm	30	30	s5
+
+# x02.c6 (6 syllables): one X read, two destinations.
+# Grammar: x02.c6 <dest_s>, <dest2_s>, <src_A>
+x02.c6	dest_s	s	3	6	s4
+x02.c6	dest2_s	s	9	12	s2
+x02.c6	src_A	A	17	21	s4
+
+# x03.esrc (6 syllables): scalar e source through the w4 slot.
+# Grammar: x03.esrc <dest_s>, <src_e>
+x03.esrc	dest_s	s	3	6	s4
+x03.esrc	src_e	e	27	30	s3
+
+# x03.rslot (6 syllables): 0x02's R slot under a 0x03 head.
+# Grammar: x03.rslot <dest_R>, <y_R>, #<fn>, #<agu10>
+x03.rslot	dest_R	R	19	22	s3
+x03.rslot	y_R	R	22	25	s5
+x03.rslot	fn	imm	7	10	s1
+x03.rslot	agu10	imm	20	20	s5
+
+# x03.xst (6 syllables): X store of s<{w2[0], w1[31:29]}>.
+# Grammar: x03.xst #<src_lo>, #<src_hi>, #<a_hi>, #<a_lo>, #<en>
+x03.xst	src_lo	imm	29	31	s1
+x03.xst	src_hi	imm	0	0	s2
+x03.xst	a_hi	imm	0	2	s1
+x03.xst	a_lo	imm	30	31	head
+x03.xst	en	imm	18	19	s5
+
+# x03.xw2 (6 syllables): the w2 slot reads X:[A<{w1[2:0], head[31:30]}>].
+# Grammar: x03.xw2 <dest_s>
+x03.xw2	dest_s	s	9	12	s2
+
+# x03.agu (6 syllables): A-AGU write.
+# Grammar: x03.agu <dest_A>, <src_A>, #<i_hi>, #<i_lo>
+x03.agu	dest_A	A	10	14	s3
+x03.agu	src_A	A	0	4	s3
+x03.agu	i_hi	imm	17	31	s4
+x03.agu	i_lo	imm	0	0	s5
+x03.agu	acp_dest	A	17	21	s2
+
+# x04.agu (6 syllables): R-AGU10 write.
+# Grammar: x04.agu <dest_R>, <y_R>, #<fn>, #<imm>
+x04.agu	dest_R	R	19	22	s3
+x04.agu	y_R	R	27	30	head
+x04.agu	fn	imm	7	10	s1
+x04.agu	imm	imm	11	26	head
+
+# x03.alu (6 syllables): head is an ALU05 word.
+# Grammar: x03.alu <dest_s>, <a_s>, <b_s>, #<op>
+x03.alu	dest_s	s	15	18	head
+x03.alu	a_s	s	11	14	head
+x03.alu	b_s	s	26	29	head
+x03.alu	op	imm	5	10	head
+
+# x18.q23c (4 syllables): class 001 multiply-round variant.
+# Grammar: x18.q23c <dest_s>, <a_s>, <b_s>, #<mode>, #<shift_bit>
+x18.q23c	dest_s	s	12	15	s2
+x18.q23c	a_s	s	16	19	s2
+x18.q23c	b_s	s	20	23	s2
+x18.q23c	mode	imm	28	30	s2
+x18.q23c	shift_bit	imm	2	2	s3
+
+# x02.yrd (6 syllables): Y-read via the w4 slot.
+# Grammar: x02.yrd <dest_s>, <src_e>
+x02.yrd	dest_s	s	3	6	s4
+x02.yrd	src_e	e	27	30	s3
+x02.yrd	w3b31	imm	31	31	s3
+
+# x02.hdhi (6 syllables): x02.imm with head[31:27] (inert) set.
+# Grammar: x02.hdhi <dest_s>, #<imm>
+x02.hdhi	dest_s	s	3	6	s4
+x02.hdhi	imm	imm	11	26	head
+
+# x16.mul2 (3 syllables): class 001 multiply with split dest.
+# Grammar: x16.mul2 <dest_lo>, <dest_hi>, <a_s>, <b_s>, #<half>, #<round>
+x16.mul2	dest_lo	imm	30	31	s1
+x16.mul2	dest_hi	imm	0	1	s2
+x16.mul2	a_s	s	1	4	s1
+x16.mul2	b_s	s	26	29	s1
+x16.mul2	half	imm	0	0	s1
+x16.mul2	round	imm	30	30	head
+
+# x16.hd (3 syllables): head-ALU, b from s2.
+# Grammar: x16.hd <dest_s>, <a_s>, <b_s>, #<op>
+x16.hd	dest_s	s	15	18	head
+x16.hd	a_s	s	11	14	head
+x16.hd	b_s	s	25	28	s2
+x16.hd	op	imm	5	10	head
+x16.hd	m	imm	23	25	head
+x16.hd	sh	imm	19	22	head
+
+# x15.pt (2 syllables): LUT-driven p-to-s copy.
+# Grammar: x15.pt <dest_s>, <p_idx>, #<lut>
+x15.pt	dest_s	s	21	24	head
+x15.pt	p_idx	imm	3	6	s1
+x15.pt	lut	imm	8	10	s1
+
+# x18.br (4 syllables): predicate branch.
+# Grammar: x18.br #<pred>, #<off_lo>, #<off_hi>, #<w3 class>
+x18.br	pred	imm	28	31	s2
+x18.br	off_lo	imm	18	31	s1
+x18.br	off_hi	imm	0	0	s2
+x18.br	cls	imm	29	31	s3
+
+# x02.agu (6 syllables): R-AGU10 via w5-sourced y.
+# Grammar: x02.agu <dest_R>, <y_R>, #<fn>
+x02.agu	dest_R	R	19	22	s3
+x02.agu	y_R	R	22	25	s5
+x02.agu	fn	imm	7	10	s1
+x02.agu	cin	imm	27	27	s5
+
+# x02.esrc (6 syllables): w4 mode 010 reads scalar e.
+# Grammar: x02.esrc <dest_s>, <src_e>
+x02.esrc	dest_s	s	3	6	s4
+x02.esrc	src_e	e	27	30	s3
+
+# x02.asrc (6 syllables): w4 mode 010 + w5[29:28]=01 → A+1.
+# Grammar: x02.asrc <dest_s>, <src_A>
+x02.asrc	dest_s	s	3	6	s4
+x02.asrc	src_A	A	0	4	s3
+
+# x03.mpy (6 syllables): w2 slot multiply.
+# Grammar: x03.mpy <dest_s>, <a_s>, <b_s>
+x03.mpy	dest_s	s	9	12	s2
+x03.mpy	a_s	s	1	4	s2
+x03.mpy	b_s	s	5	8	s2
+x03.mpy	plo_s	s	7	10	s4
+x03.mpy	mode	imm	11	14	s1
+x03.mpy	sgn	imm	15	17	s1
+x03.mpy	x_src	imm	29	31	s1
+x03.mpy	w2cls	imm	29	31	s2
+
+# x02.x3 (6 syllables): third slot sub-shift.
+# Grammar: x02.x3 <dest_lo>, <dest_hi>, <a_s>, <b_s>, #<op>, #<shift>
+x02.x3	dest_lo	imm	0	1	s5
+x02.x3	dest_hi	imm	30	31	s4
+x02.x3	a_s	s	22	25	s4
+x02.x3	b_s	s	26	29	s4
+x02.x3	op	imm	6	8	s5
+x02.x3	shift	imm	2	5	s5
+x02.x3	mpy_dest	s	9	12	s2
+x02.x3	sgn	imm	15	17	s1
+x02.x3	plo	s	7	10	s4
+
+# x01.st (7 syllables): only the s3 <- e<src_e> copy is grammar-exposed.
+# Grammar: x01.st <src_e>
+x01.st	src_e	e	5	8	s4
+
+# x12.aset (2 syllables): A<2*n> <- R<...>.
+# Grammar: x12.aset #<n>, <src_R>
+x12.aset	n	imm	0	2	s1
+x12.aset	src_R	R	13	16	head
+
+# x02.xrd (6 syllables): X-memory read at low5 0x02 w4 mode 5.
+# Grammar: x02.xrd <dest_s>, <src_A>
+x02.xrd	dest_s	s	3	6	s4
+x02.xrd	src_A	A	17	21	s4
+
+# x02.imm (6 syllables): scalar immediate load at low5 0x02.
+# Grammar: x02.imm <dest_s>, #<imm>
+# dest_s lives in syllable 4 (0-indexed), bits [6:3]; imm at head[26:11].
+x02.imm	dest_s	s	3	6	s4
+x02.imm	imm16	imm	11	26	head
+
+# x18.imm (4 syllables): scalar immediate load at low5 0x18.
+# Grammar: x18.imm <dest_s>, #<imm16>, #<mux>
+x18.imm	dest_s	s	21	24	head
+x18.imm	imm16	imm	5	20	head
+x18.imm	mux	imm	12	14	s1
+
+# x19.imm (4 syllables): AGU with 16-bit immediate.
+# Grammar: x19.imm #<imm>
+x19.imm	imm	imm	15	30	s2
+
+# x19.mul (4 syllables): scalar multiply with dual R/e write.
+# Grammar: x19.mul <dest_e>, <dest_R>, #<op>, <a_src>, <b_src>
+x19.mul	dest_e	e	3	6	s1
+x19.mul	dest_R	R	7	10	s3
+x19.mul	op	imm	11	13	s1
+x19.mul	a_src	s	5	8	s2
+x19.mul	b_src	s	1	4	s2
+
+# lde (1 syllable): load element.  For now only the e-dest encoding
+# (k in 1..15 picks e<k>); k=0 maps to an A-reg write, still OPEN.
+lde	dest_e	e	26	29	head
+lde	imm16	imm	5	20	head
+
+# rop (1 syllable): R-op into an s and/or R.
+# Grammar: rop <dest_s>, <dest_R>, <x_e>, <y_R>, #<fn>
+# dest_s = 0 or dest_R = 0 means "no write" for that half.
+rop	dest_s	s	26	29	head
+rop	dest_R	R	22	25	head
+rop	x_e	e	5	8	head
+rop	y_R	R	13	16	head
+rop	fn	imm	17	20	head
+
+# bcc (2 syllables): Branch if p<pred> set.
+# Grammar: bcc #<pred>, <label> | #<quarter_offset>
+# quarter_offset in bundles of 4 syllables; signed 9-bit [8:0] of S1.
+bcc	pred	imm	15	18	s1
+bcc	quarter_offset	rel4	0	8	s1
+
+# ealu (2 syllables): X16_ALU 1-arg op into e.
+# Grammar: ealu <dest_e>, <src_s>, #<op_bit>, #<op>
+ealu	dest_e	e	3	6	s1
+ealu	src_s	s	18	21	s1
+ealu	op_bit	imm	11	11	s1
+ealu	op	imm	12	14	s1
+
+# agu10r (2 syllables): scalar imm + AGU into R.
+# Grammar: agu10r <dest_s>, #<imm>, <dest_R>, <x_e>, #<y_base>, #<fn_op>
+# y_base is a 2-bit field: the actual y register is R<4*y_base>.
+agu10r	dest_s	s	21	24	head
+agu10r	imm	imm	5	20	head
+agu10r	dest_R	R	21	24	s1
+agu10r	x_e	e	25	28	s1
+agu10r	y_base	imm	27	28	head
+agu10r	fn_op	imm	1	4	s1
+
+# ptst (1 syllable): predicate from scalar sign test.
+# Grammar: ptst <p_dest>, <a_s>, #<cond>, #<op>
+# p_dest uses p-reg syntax (we add `p` as an operand kind).
+ptst	p_dest	p	26	29	head
+ptst	a_s	s	11	14	head
+ptst	cond	imm	21	25	head
+ptst	op	imm	5	10	head
+
+# plog (1 syllable): predicate logic.
+# Grammar: plog <p_dest>, <p_a>, <p_b>, #<fn>, #<op>
+plog	p_dest	p	11	14	head
+plog	p_a	p	21	24	head
+plog	p_b	p	26	29	head
+plog	fn	imm	15	18	head
+plog	op	imm	5	10	head
+
+# ldy (1 syllable): Y-memory load into s (ldi numbering).
+# Grammar: ldy <dest_s>, <src_e>
+ldy	dest	dest_ldi	26	30	head
+ldy	src_e	e	5	8	head
+
+# dld (1 syllable): X and Y loads in one word (fact 524).
+# Grammar: dld <x_dest>, <x_A>, <y_dest>, <y_e>
+dld	x_dest	s	22	25	head
+dld	x_A	A	15	19	head
+dld	y_dest	s	26	29	head
+dld	y_e	e	5	8	head
+
+# ldy.r (1 syllable): ldy that also writes R (fact 523).
+# Grammar: ldy.r <dest_s>, <src_e>, <dest_R>
+ldy.r	dest	dest_ldi	26	30	head
+ldy.r	src_e	e	5	8	head
+ldy.r	dest_R	R	22	25	head
+
+# ptest (2 syllables): scalar from predicate function.
+# Grammar: ptest <dest_s>, <p_src>, #<fn>
+ptest	dest_s	s	21	24	head
+ptest	p_src	p	24	27	s1
+ptest	fn	imm	21	23	s1
+
+# psel (2 syllables): predicate-selected scalar add/choose.
+# Grammar: psel <dest_s>, <a_s>, <b_s>, <p_src>, #<pol>, #<op>
+psel	dest_s	s	8	11	s1
+psel	a_s	s	28	31	s1
+psel	b_s	s	4	7	s1
+psel	p_src	p	24	27	s1
+psel	pol	imm	21	21	s1
+psel	op	imm	16	18	s1
+
+# stx (1 syllable): X-memory store from s to A-indexed address.
+# Grammar: stx <dest_A>, <src_s>
+stx	dest_A	A	11	15	head
+stx	src_s	s	16	19	head
+
+# xld10 (2 syllables): X-memory load + scalar immediate.
+# Grammar: xld10 <dest_s_x>, #<a_low>, <dest_s2>, #<a_half>, #<imm16>
+xld10	dest_s2	s	21	24	head
+xld10	a_half	imm	30	31	head
+xld10	imm16	imm	5	20	head
+xld10	dest_s_x	s	7	10	s1
+xld10	a_low	imm	0	2	s1
+
+# yld10 (2 syllables): Y-memory load.
+# Grammar: yld10 <dest_s>, <src_e>
+yld10	dest_s	s	21	24	head
+yld10	src_e	e	25	28	s1
+
+# p010 (2 syllables): predicate from a condition code.
+# Grammar: p010 <p_dest>, #<cond>
+condset	p_dest	p	4	7	s1
+condset	cond	imm	8	11	s1
+condset	group	imm	25	28	head
+
+# pc14 <p_dest>, <a_s>, #<g>, #<c>, #<m>, <s_dest>, #<mux>, #<imm>  (mux S[28:27]: 0 loads !cond, 1/2 the imm)
+pc14	p_dest	p	4	7	s1
+pc14	a_s	s	19	22	s1
+pc14	g	imm	25	28	head
+pc14	c	imm	8	11	s1
+pc14	m	imm	12	14	s1
+pc14	s_dest	s	21	24	head
+pc14	mux	imm	27	28	s1
+pc14	imm	imm	5	20	head
+
+# yrm (2 syllables): scalar imm + e-to-R move.
+# Grammar: yrm <dest_s>, #<imm16>, <dest_R>, <src_e>
+yrm	dest_s	s	21	24	head
+yrm	imm16	imm	5	20	head
+yrm	dest_R	R	0	3	s1
+yrm	src_e	e	21	24	s1
+
+# ytst (2 syllables): predicate from Y-memory parity.
+# Grammar: ytst <p_dest>, <src_e>
+ytst	p_dest	p	11	14	s1
+ytst	src_e	e	21	24	s1
+
+# xst (2 syllables): X-memory store from an s register.
+# Grammar: xst #<a_half>, <src_s>, #<a_low>, <s_dest_inert>, #<imm16>
+# a_half picks head[31:30] (0..3), a_low picks S[2:0] (0..7).  The A
+# address is A<4*a_low + a_half>.  s_dest/imm16 are the "s<head[24:21]>
+# <- ..." side effect (OPEN today - baked as-measured on the gate).
+# NOTE: head[28:26] already baked (bit 24 is part of the s_dest field).
+xst	a_half	imm	30	31	head
+xst	s_dest	s	21	24	head
+xst	imm16	imm	5	20	head
+xst	a_low	imm	0	2	s1
+xst	src_s	s	4	7	s1
+
+# ld0e (2 syllables): zero into s, A-register load from head imm.
+# Grammar: ld0e <dest_s>, #<addr>, #<n>
+# n in 0..7; the A-register loaded is A<4*n + 1>.
+ld0e	dest_s	s	21	24	head
+ld0e	addr	imm	5	20	head
+ld0e	n	imm	1	3	s1
+
+# pair (2 syllables): low5 0x10 S class 011, loads e-reg with 16-bit imm.
+# Grammar: pair #<imm16>, <e_dest>
+# e_dest is S1[6:3] (fact 835).
+pair	imm16	imm	5	20	head
+pair	e_dest	e	3	6	s1
+
+# ldi2 (2 syllables): low5 0x10 scalar immediate load.
+# Grammar: ldi2 <dest_s>, #<imm16>
+ldi2	dest_s	s	21	24	head
+ldi2	imm16	imm	5	20	head
+
+# alu11 (2 syllables): ALU + AGU in parallel.
+# Grammar: alu11 <dest_s>, <a_s>, <b_s>, #<op>, <dest_R>, <dest_e>, <x_e>, <y_R>, #<fn_op>, #<tbl>
+alu11	dest_s	s	15	18	head
+alu11	a_s	s	11	14	head
+alu11	b_s	s	26	29	head
+alu11	op	imm	5	10	head
+alu11	dest_R	R	25	28	s1
+alu11	dest_e	e	9	12	s1
+alu11	x_e	e	21	24	s1
+alu11	y_R	R	13	16	s1
+alu11	fn_op	imm	17	20	s1
+alu11	tbl	imm	8	8	s1
+
+# x19.aagu (4 syllables): A-register AGU update.
+# Grammar: x19.aagu <dest_A>, <src_A>, #<fn_op>, #<imm>
+x19.aagu	dest_A	A	3	7	s1
+x19.aagu	src_A	A	15	19	s3
+x19.aagu	fn_op	imm	20	24	s3
+x19.aagu	imm	imm	0	14	s3
+
+# x19.ld (4 syllables): load + AGU + store VLIW.
+# Grammar: x19.ld <dest_s>, #<dest_e_half>, <y_src_e>, #<fn_op>
+x19.ld	dest_s	s	10	13	s2
+x19.ld	dest_e_half	imm	0	2	s1
+x19.ld	y_src_e	e	25	28	s3
+x19.ld	fn_op	imm	7	10	s1
+
+# x17.xld_a10 (3 syllables): X-memory load, A-offset = 2 pinned.
+# Grammar: x17.xld_a10 <dest_s>, #<a_half>
+x17.xld_a10	dest_s	s	10	13	s2
+x17.xld_a10	a_half	imm	0	1	s2
+
+# x17.xpm (3 syllables): X-memory load into scalar.
+# Grammar: x17.xpm <dest_s>, #<a_half>
+# a_half picks A-reg: a_idx = 8 * a_half + 4 (a_half in 0..3).
+x17.xpm	dest_s	s	10	13	s2
+x17.xpm	a_half	imm	0	1	s2
+
+# x17.rsub (3 syllables): b - a with immediate b.
+# Grammar: x17.rsub <dest_s>, <a_src>, #<imm_b>, #<op>, #<p>
+x17.rsub	dest_s	s	19	22	s1
+x17.rsub	a_src	s	25	28	s2
+x17.rsub	imm_b	imm	8	11	s1
+x17.rsub	op	imm	12	14	s1
+x17.rsub	p	imm	4	7	s1
+
+# x17.mve (3 syllables): move scalar + 1 into an element.
+# Grammar: x17.mve <dest_e>, <src_s>
+x17.mve	dest_e	e	16	19	s1
+x17.mve	src_s	s	25	28	s2
+
+# x17.alu05 (3 syllables): head carries an ALU05 word.
+# Grammar: x17.alu05 <dest>, <a>, <b>, #<op>
+x17.alu05	dest	s	15	18	head
+x17.alu05	a	s	11	14	head
+x17.alu05	b	s	25	28	s2
+x17.alu05	op	imm	5	10	head
+
+# x17.ld (3 syllables): scalar asr + Y-memory load.
+# Grammar: x17.ld <dest_s>, <src_s>, <dest_e_half>, <src_e_mem>, #<shift>
+# dest_e_half is 3 bits: the loaded Y value lands in e(2 * dest_e_half).
+x17.ld	dest_s	s	19	22	s1
+x17.ld	src_s	s	25	28	s2
+x17.ld	dest_e_half	imm	0	2	s1
+x17.ld	src_e_mem	e	15	18	s1
+x17.ld	shift	imm	23	26	s1
+x17.ldr	dest_R	R	11	14	s1
+x17.ldr	fn	imm	7	10	s1
+x17.ldr	y_R	R	27	30	head
+x17.ldr	imm	imm	11	26	head
+
+# x17.e (3 syllables): dual element write.
+# Grammar: x17.e <dest_e_a>, <dest_s>, <dest_e_b>, <src_e>, #<imm>
+x17.e	dest_e_a	e	8	11	s2
+x17.e	dest_s	s	21	24	head
+x17.e	dest_e_b	e	13	16	s1
+x17.e	src_e	e	16	19	s2
+x17.e	imm16	imm	5	20	head
+
+# x17.agu (3 syllables): address-generation op.
+# "dest R<S2[8:5]> <- AGU10[S1[27:24]](x = e<S1[8:5]>, y = R<S2[4:1]>)"
+# Grammar source order: dest, x, y, fn_op.
+x17.agu	dest	R	5	8	s2
+x17.agu	x	e	5	8	s1
+x17.agu	y	R	1	4	s2
+x17.agu	fn_op	imm	24	27	s1
+
+# x17.alu (3 syllables): ALU op across syllables.
+# "s<S1[27:24]> <- X17OP[head[10:7]](s<S2[28:25]>, s<S1[19:16]>, n = S1[23:20])"
+# Operand order in source: dest, a, b, op, n (dest-first, like the ALU form).
+x17.alu	dest	s	24	27	s1
+x17.alu	a	s	25	28	s2
+x17.alu	b	s	16	19	s1
+x17.alu	op	imm	7	10	head
+x17.alu	n	imm	20	23	s1
+
+# x19.aimm: x19.aimm <dest_R>, <dest_e>, <x_e>, <y_R>, #<fn>, #<imm>
+x19.aimm	dest_R	R	7	10	s3
+x19.aimm	dest_e	e	20	23	s1
+x19.aimm	x_e	e	25	28	s3
+x19.aimm	y_R	R	11	14	s3
+x19.aimm	fn	imm	24	27	s1
+x19.aimm	imm	imm	5	20	head
+
+# x19.aagu5: x19.aagu5 <dest_A>, <src_A>, #<fn>, #<i>
+x19.aagu5	dest_A	A	3	7	s1
+x19.aagu5	src_A	A	15	19	s3
+x19.aagu5	fn_op	imm	20	24	s3
+x19.aagu5	imm	imm	0	14	s3
+
+# x19.imm4: x19.imm4 #<dest_lo>, #<dest_hi>, <x_e>, #<fn>
+x19.imm4	dest_lo	imm	29	31	head
+x19.imm4	dest_hi	imm	0	0	s1
+x19.imm4	x_e	e	25	28	s3
+x19.imm4	fn	imm	1	4	s1
+
+# x19.ragua: x19.ragua <dest_R>, <src_A>
+x19.ragua	dest_R	R	7	10	s3
+x19.ragua	src_A	A	15	19	s3
+
+# x16.alu2 <dest_s>, <a_s>, <b_s>, #<op>, #<neg>
+x16.alu2	dest_s	s	8	11	s1
+x16.alu2	a_s	s	25	28	s2
+x16.alu2	b_s	s	4	7	s1
+x16.alu2	op	imm	16	18	s1
+x16.alu2	neg	imm	15	15	s1
+
+# x16.alux <dest_x>, <dest_s>, <a_s>, <b_s>, #<op>, #<neg>, #<xi>
+x16.alux	dest_x	s	21	24	head
+x16.alux	dest_s	s	8	11	s1
+x16.alux	a_s	s	25	28	s2
+x16.alux	b_s	s	4	7	s1
+x16.alux	op	imm	16	18	s1
+x16.alux	neg	imm	15	15	s1
+x16.alux	xi	imm	8	12	s2
+
+# x16.ld <dest_s>, #<xi>, #<mux>
+x16.ld	dest_s	s	21	24	head
+x16.ld	xi	imm	4	8	s2
+x16.ld	mux	imm	25	26	s1
+
+# x16.aset #<a_lo>, #<imm>
+x16.aset	a_lo	imm	0	2	s1
+x16.aset	imm	imm	5	20	head
+
+# x16.ldi <dest_s>, #<imm>
+x16.ldi	dest_s	s	21	24	head
+x16.ldi	imm	imm	5	20	head
+
+# x16.mux <dest_s>, <y_R>, #<x_lo>, #<x_hi>, #<fn>, #<imm>, #<mux>
+x16.mux	dest_s	s	3	6	s2
+x16.mux	y_R	R	27	30	head
+x16.mux	x_lo	imm	0	2	s2
+x16.mux	x_hi	imm	31	31	s1
+x16.mux	fn	imm	7	10	s1
+x16.mux	imm	imm	11	26	head
+x16.mux	mux	imm	28	30	s1
+
+# x16.xs <dest_s>, #<src>, <y_e>, #<imm>
+x16.xs	dest_s	s	21	24	head
+x16.xs	src	imm	12	14	s1
+x16.xs	y_e	e	21	24	s2
+x16.xs	imm	imm	5	20	head
+
+# x16.stx <src_s>, #<a>
+x16.stx	src_s	s	22	25	s1
+x16.stx	a	imm	4	8	s2
+
+# x16.st2 <x_src>, #<x_a>, <y_e>, <y_src>
+x16.st2	x_src	s	28	31	s1
+x16.st2	x_a	imm	8	12	s2
+x16.st2	y_e	e	21	24	s2
+x16.st2	y_src	s	0	3	s2
+
+# x16.agumul #<dest_lo>, #<dest_hi>, <a_s>, <b_s>
+x16.agumul	dest_lo	imm	30	31	s1
+x16.agumul	dest_hi	imm	0	1	s2
+x16.agumul	a_s	s	1	4	s1
+x16.agumul	b_s	s	2	5	s2
+
+# x16.agu2 <dest_s>, <x_e>, <y_R>, #<fn>, #<tab>, #<mux>
+x16.agu2	dest_s	s	9	12	s1
+x16.agu2	x_e	e	21	24	s2
+x16.agu2	y_R	R	18	21	s1
+x16.agu2	fn	imm	26	29	s1
+x16.agu2	tab	imm	8	8	s2
+x16.agu2	mux	imm	15	17	s1
+
+# x16.xld <dest_s>, #<xi>
+x16.xld	dest_s	s	28	31	s1
+x16.xld	xi	imm	4	8	s2
+
+# x16.ldb <dest_s>
+x16.ldb	dest_s	s	21	24	head
+
+# x18.pmov / x18.pnot <p_dest>, <p_src>; x18.pset / x18.pclr <p_dest>
+# x18.pfn <p_dest>, <p_src>, #<f>, #<code>, #<op>
+x18.pmov	p_dest	p	13	16	s2
+x18.pmov	p_src	p	14	17	s3
+x18.pnot	p_dest	p	13	16	s2
+x18.pnot	p_src	p	14	17	s3
+x18.pset	p_dest	p	13	16	s2
+x18.pclr	p_dest	p	13	16	s2
+x18.pfn	p_dest	p	13	16	s2
+x18.pfn	p_src	p	14	17	s3
+x18.pfn	f	imm	25	28	s3
+x18.pfn	code	imm	25	28	head
+x18.pfn	op	imm	15	17	s1
+
+# x18.pw <p>, <src_s>, #<cond>
+x18.pw	p	imm	14	17	s2
+x18.pw	src_s	s	2	5	s2
+x18.pw	cond	imm	25	28	head
+
+# x18.c2x <dest_s>, #<mux>, <x_e>, #<imm>
+x18.c2x	dest_s	s	21	24	head
+x18.c2x	mux	imm	12	14	s1
+x18.c2x	x_e	e	25	28	s3
+x18.c2x	imm	imm	5	20	head
+
+# x18.eagu2 <dest_e>, <x_e>, #<fn>, #<tab>
+x18.eagu2	dest_e	e	20	23	s1
+x18.eagu2	x_e	e	25	28	s3
+x18.eagu2	fn	imm	24	27	s1
+x18.eagu2	tab	imm	29	29	s1
+
+# x18.rag <dest_R>, <x_A>, <y_R>, #<fn>
+x18.rag	dest_R	R	7	10	s3
+x18.rag	x_A	A	15	19	s3
+x18.rag	y_R	R	11	14	s3
+x18.rag	fn	imm	20	24	s3
+
+# x18.rag101 <dest_s>, <dest_R>, <x_A>, <y_R>, #<fn>
+x18.rag101	dest_s	s	21	24	head
+x18.rag101	dest_R	R	7	10	s3
+x18.rag101	x_A	A	15	19	s3
+x18.rag101	y_R	R	11	14	s3
+x18.rag101	fn	imm	20	24	s3
+
+# x18.eagu0 <dest_e>, #<y_lo>, #<fn>
+x18.eagu0	dest_e	e	22	25	s1
+x18.eagu0	y_lo	imm	30	31	s1
+x18.eagu0	fn	imm	26	29	s1
+
+# x18.agu000 <dest_s>, #<fn>, #<y_lo>, #<tab>, <x_e>, #<st>, #<st2>, #<src_lo>, #<src_hi>
+x18.agu000	dest_s	s	21	24	head
+x18.agu000	fn	imm	26	29	s1
+x18.agu000	y_lo	imm	30	31	s1
+x18.agu000	tab	imm	15	15	s2
+x18.agu000	x_e	e	25	28	s3
+x18.agu000	st	imm	7	7	s2
+x18.agu000	st2	imm	16	16	s2
+x18.agu000	src_lo	imm	31	31	s2
+x18.agu000	src_hi	imm	0	2	s3
+
+# x18.e2nd <dest_e>, #<y_lo>, #<y_hi>
+x18.e2nd	dest_e	e	2	5	s2
+x18.e2nd	y_lo	imm	30	31	s1
+x18.e2nd	y_hi	imm	0	1	s2
+
+# x18.alu <dest_s>, <a_s>, <b_s>, #<code>, #<m>, #<sh>
+x18.alu	dest_s	s	8	11	s1
+x18.alu	a_s	s	4	7	s1
+x18.alu	b_s	s	3	6	s3
+x18.alu	code	imm	25	30	head
+x18.alu	m	imm	15	17	s1
+x18.alu	sh	imm	4	7	s2
+
+# x18.br101 #<p_lo>, #<p_hi>, #<off>, #<cc>, #<e_lo>
+x18.br101	p_lo	imm	31	31	s2
+x18.br101	p_hi	imm	0	2	s3
+x18.br101	off	imm	18	28	s1
+x18.br101	cc	imm	29	30	s2
+x18.br101	e_lo	imm	29	31	s1
+
+# x18.mac <hi_dest>, #<mode>, <a_s>, <b_s>, <x_hi>, <x_lo>, <lo_dest>
+x18.mac	hi_dest	s	0	3	s3
+x18.mac	mode	imm	4	6	s3
+x18.mac	a_s	s	24	27	s2
+x18.mac	b_s	s	28	31	s2
+x18.mac	x_hi	s	28	31	s1
+x18.mac	x_lo	s	0	3	s2
+x18.mac	lo_dest	s	12	15	s2
+x18.macf	hi_dest	s	0	3	s3
+x18.macf	mode	imm	4	6	s3
+x18.macf	a_s	s	24	27	s2
+x18.macf	b_s	s	28	31	s2
+x18.macf	x_hi	s	28	31	s1
+x18.macf	x_lo	s	0	3	s2
+x18.macf	lo_dest	s	12	15	s2
+
+# x18.sh111 <dest_s>, #<op>, <a_s>, <b_s>, #<sh>, #<right>, #<st>, <y_e>
+x18.sh111	dest_s	s	8	11	s1
+x18.sh111	op	imm	15	17	s1
+x18.sh111	a_s	s	16	19	s2
+x18.sh111	b_s	s	4	7	s1
+x18.sh111	sh	imm	11	14	s3
+x18.sh111	right	imm	27	27	head
+x18.sh111	st	imm	21	22	s2
+x18.sh111	y_e	e	25	28	s3
+
+# x18.rcl100 #<r_lo>, #<r_hi>, #<fn>, <x_e>, <y_R>, <st_src>
+x18.rcl100	r_lo	imm	31	31	s2
+x18.rcl100	r_hi	imm	0	2	s3
+x18.rcl100	fn	imm	7	10	s1
+x18.rcl100	x_e	e	25	28	s3
+x18.rcl100	y_R	R	23	26	s2
+x18.rcl100	st_src	s	0	3	s2
+
+# x18.mpy100 <dest_s>, <a_s>, <b_s>, #<mode>, <st_src>, <y_e>
+x18.mpy100	dest_s	s	13	16	s3
+x18.mpy100	a_s	s	17	20	s3
+x18.mpy100	b_s	s	21	24	s3
+x18.mpy100	mode	imm	11	13	s1
+x18.mpy100	st_src	s	0	3	s2
+x18.mpy100	y_e	e	25	28	s3
+
+# x18.sh100 <dest_s>, <src_s>, #<n>, #<right>
+x18.sh100	dest_s	s	24	27	s1
+x18.sh100	src_s	s	16	19	s2
+x18.sh100	n	imm	20	23	s1
+x18.sh100	right	imm	27	27	head
+
+# x18.yb100 <dest_s>, <y_e>
+x18.yb100	dest_s	s	21	24	head
+x18.yb100	y_e	e	25	28	s3
+
+# x18.rcl001 <dest_R>, <x_e>, <y_R>, #<fn10b>, #<fn3>, #<agu3>, <st_src>
+x18.rcl001	dest_R	R	7	10	s3
+x18.rcl001	x_e	e	25	28	s3
+x18.rcl001	y_R	R	11	14	s3
+x18.rcl001	fn10b	imm	28	31	s1
+x18.rcl001	fn3	imm	20	24	s3
+x18.rcl001	agu3	imm	30	30	head
+x18.rcl001	st_src	s	22	25	head
+
+# lde.hi <dest_e>, #<imm>   (lde with [31] = 1)
+lde.hi	dest_e	e	26	29	head
+lde.hi	imm16	imm	5	20	head
+
+# lde.arm <dest_e8..15>, #<imm>   (lde class 101; arms the halt deadline)
+lde.arm	dest_e	e8	26	28	head
+lde.arm	imm16	imm	5	20	head
+
+# lda <dest_A>, #<imm>   (lde with [29:26] = 0)
+lda	dest_A	A	21	25	head
+lda	imm16	imm	5	20	head
+
+# rop.c4 <dest_s>, <dest_R>, <x_e>, <y_R>, #<fn>   (rop at class 100)
+rop.c4	dest_s	s	26	29	head
+rop.c4	dest_R	R	22	25	head
+rop.c4	x_e	e	5	8	head
+rop.c4	y_R	R	13	16	head
+rop.c4	fn	imm	17	20	head
+
+# aset0b <dest_s>, <src_e>
+aset0b	dest_s	s	26	29	head
+aset0b	src_e	e	5	8	head
+
+# ragu0c <dest_R>, <x_A>, #<fn>
+ragu0c	dest_R	R	27	30	head
+ragu0c	x_A	A	12	16	head
+ragu0c	fn	imm	7	11	head
+
+# ld0e.a #<addr>, #<n>, #<op0>
+ld0e.a	addr	imm	5	20	head
+ld0e.a	n	imm	1	3	s1
+ld0e.a	op0	imm	0	0	s1
+
+# ste #<e_lo>, #<e_hi>, #<imm>
+ste	e_lo	imm	29	31	head
+ste	e_hi	imm	0	0	s1
+ste	imm	imm	5	20	head
+
+# rop.b21 <dest_s>, <dest_R>, <x_e>, <y_R>, #<fn>
+rop.b21	dest_s	s	26	29	head
+rop.b21	dest_R	R	22	25	head
+rop.b21	x_e	e	5	8	head
+rop.b21	y_R	R	13	16	head
+rop.b21	fn	imm	17	20	head
+
+# x04.ragu <dest_R>, <y_R>, #<fn>, #<imm>
+x04.ragu	dest_R	R	19	22	s3
+x04.ragu	y_R	R	27	30	head
+x04.ragu	fn	imm	7	10	s1
+x04.ragu	imm	imm	11	26	head
+
+# x04.yd <dest_R>, <dest_s>, <y_e>
+x04.yd	dest_R	R	19	22	s3
+x04.yd	dest_s	s	3	6	s4
+x04.yd	y_e	e	27	30	s3
+
+# x04.xst <x_A>, #<src_lo>, #<src_hi>
+x04.xst	x_A	A	17	21	s4
+x04.xst	src_lo	imm	29	31	s1
+x04.xst	src_hi	imm	0	0	s2
+
+# x10.alu <dest_R>, <b_s>, <a_s>, #<code>, #<m>, #<n>, #<w1_lo>
+x10.alu	dest_R	R	21	24	s1
+x10.alu	b_s	s	26	29	head
+x10.alu	a_s	s	11	14	head
+x10.alu	code	imm	5	10	head
+x10.alu	m	imm	23	25	head
+x10.alu	n	imm	19	22	head
+x10.alu	w1_lo	imm	0	20	s1
+
+# x17.end   (no operands)
+
+# x17.eagu <dest_s>, <x_e>, #<y_hi>, #<fn>
+x17.eagu	dest_s	s	21	24	head
+x17.eagu	x_e	e	4	7	s2
+x17.eagu	y_hi	imm	30	31	s1
+x17.eagu	fn	imm	25	28	s2
+
+# x17.sty <y_e>, #<src_lo>, #<src_hi>
+# x17.stys <y_e>, #<src_lo>, #<src_hi>, <inc_e>, <step_R>
+# x17.ms <ld_s>, #<imm>, <st_s>, <y_e>, #<ld_en>, #<e_lo>, #<e_hi>, <dest_R>, #<mux>
+x17.ms	ld_s	s	21	24	head
+x17.ms	imm	imm	5	20	head
+x17.ms	st_s	s	24	27	s1
+x17.ms	y_e	e	15	18	s1
+x17.ms	ld_en	imm	28	28	s1
+x17.ms	e_lo	imm	29	31	s1
+x17.ms	e_hi	imm	0	0	s2
+x17.ms	dest_R	R	5	8	s2
+x17.ms	mux	imm	1	3	s2
+
+x17.sty	y_e	e	15	18	s1
+x17.sty	src_lo	imm	29	31	s1
+x17.sty	src_hi	imm	0	0	s2
+x17.styi	y_e	e	15	18	s1
+x17.styi	src_lo	imm	29	31	s1
+x17.styi	src_hi	imm	0	0	s2
+x17.styi	inc_e	eh	0	2	s1
+x17.stys	y_e	e	15	18	s1
+x17.stys	src_lo	imm	29	31	s1
+x17.stys	src_hi	imm	0	0	s2
+x17.stys	inc_e	eh	0	2	s1
+x17.stys	step_R	R	27	30	head
+x17.styr	dest_R	R	11	14	s1
+x17.styr	src_s	s	25	28	s2
+x17.styr	shift	imm	23	26	s1
+x17.styr	y_e	e	15	18	s1
+x17.styr	op	imm	5	10	head
+
+# x17.yld <dest_s>, <y_e>
+x17.yld	dest_s	s	10	13	s2
+x17.yld	y_e	e	21	24	s2
+
+# x16.mac <hi_dest>, <lo_dest>, #<xhi_lo>, #<xhi_hi>, <x_lo>, <a_s>, <b_s>, #<mode>
+x16.mac	hi_dest	s	10	13	s2
+x16.mac	lo_dest	s	20	23	s1
+x16.mac	xhi_lo	imm	29	31	s1
+x16.mac	xhi_hi	imm	0	0	s2
+x16.mac	x_lo	s	24	27	s1
+x16.mac	a_s	s	1	4	s2
+x16.mac	b_s	s	5	8	s2
+x16.mac	mode	imm	14	15	s2
+
+# x03.acp <acp_A>, <src_A>, <y_e>, #<yd>
+x03.acp	acp_A	A	17	21	s2
+x03.acp	src_A	A	0	4	s3
+x03.acp	y_e	e	27	30	s3
+x03.acp	yd	imm	5	5	s5
+
+# x00.slots <s_dest>, #<src>, #<sub>, #<op>, <a_e>, <b_e>, <y_src>, <x_A>, <x_src>, #<yen>, #<xen>, <mac_dest>, #<w4hi>, #<w4x>
+x00.slots	s_dest	s	12	15	s6
+x00.slots	src	imm	1	3	s6
+x00.slots	sub	imm	23	24	s5
+x00.slots	op	imm	7	10	s1
+x00.slots	a_e	e	5	8	s4
+x00.slots	b_e	e	1	4	s4
+x00.slots	y_src	s	13	16	s4
+x00.slots	x_A	A	18	22	s2
+x00.slots	x_src	s	10	13	s2
+x00.slots	yen	imm	4	5	s5
+x00.slots	xen	imm	1	2	s5
+x00.slots	mac_dest	s	8	11	s6
+x00.slots	w4hi	imm	23	23	s4
+x00.slots	w4x	imm	17	17	s4
+
+# x01.slots <s_dest>, #<src>, #<sub>, #<op>, <a_e>, <b_e>, <y_src>, <x_A>, <x_src>, <mac_dest>, #<w4hi>, #<w4x>, #<yen>, #<xen>, #<old>, #<cls>
+x01.slots	s_dest	s	12	15	s6
+x01.slots	src	imm	1	3	s6
+x01.slots	sub	imm	23	24	s5
+x01.slots	op	imm	7	10	s1
+x01.slots	a_e	e	5	8	s4
+x01.slots	b_e	e	1	4	s4
+x01.slots	y_src	s	13	16	s4
+x01.slots	x_A	A	18	22	s2
+x01.slots	x_src	s	10	13	s2
+x01.slots	mac_dest	s	8	11	s6
+x01.slots	w4hi	imm	23	23	s4
+x01.slots	w4x	imm	17	17	s4
+x01.slots	yen	imm	12	13	s5
+x01.slots	xen	imm	9	10	s5
+x01.slots	old	imm	0	5	s5
+x01.slots	cls	imm	29	29	head
+
+# x00.alu <alu_dest>, <mac_dest>, <b_s>, #<sh>, #<code>
+x00.alu	alu_dest	s	4	7	s6
+x00.alu	mac_dest	s	8	11	s6
+x00.alu	b_s	s	2	5	s2
+x00.alu	sh	imm	6	9	s2
+x00.alu	code	imm	5	10	head
+
+# x00.mac <mpy_dest>, <mac_dest>, <a_s>, <b_s>, <x_s>, #<xl>, #<mode>
+x00.mac	mpy_dest	s	16	19	s6
+x00.mac	mac_dest	s	8	11	s6
+x00.mac	a_s	s	24	27	s6
+x00.mac	b_s	s	28	31	s6
+x00.mac	x_s	s	10	13	s2
+x00.mac	xl	imm	13	15	s4
+x00.mac	mode	imm	11	13	s1
+
+# x00.ctl #<target>, #<ctl>
+x00.ctl	target	imm	18	31	s1
+x00.ctl	ctl	imm	0	4	s3
+
+# x0e <head_s>, #<imm>, #<code>, <alu_dest>, <a_s>, <b_s>, #<m>, #<mux>, #<s18>
+x0e	head_s	s	21	24	head
+x0e	imm	imm	5	20	head
+x0e	code	imm	25	30	head
+x0e	alu_dest	s	8	11	s1
+x0e	a_s	s	4	7	s1
+x0e	b_s	s	28	31	s1
+x0e	m	imm	15	17	s1
+x0e	mux	imm	12	14	s1
+x0e	s18	imm	18	18	s1
+
+# rimm <dest_R>, #<imm>
+rimm	dest_R	R	11	14	s1
+rimm	imm	imm	5	20	head
+
+# stx0f #<a_lo>, #<a_hi>, <src_s>
+stx0f	a_lo	imm	30	31	head
+stx0f	a_hi	imm	0	2	s1
+stx0f	src_s	s	25	28	s1
+stx0f.e	a_lo	imm	30	31	head
+stx0f.e	a_hi	imm	0	2	s1
+stx0f.e	src_s	s	25	28	s1
+stx0f.e	dest_e	e	3	6	s1
+stx0f.e	imm	imm	5	20	head
+
+# ste.n #<e_lo>, #<imm>
+ste.n	e_lo	imm	29	31	head
+ste.n	imm	imm	5	20	head
+
+# ldi2.st <dest_s>, #<imm>, <y_e>, <y_src>, #<en>
+ldi2.st	dest_s	s	21	24	head
+ldi2.st	imm16	imm	5	20	head
+ldi2.st	y_e	e	25	28	s1
+ldi2.st	y_src	s	21	24	s1
+ldi2.st	en	imm	19	20	s1
+
+# stk <k_e>, <src_s>
+stk	k_e	e	5	8	head
+stk	src_s	s	22	25	head
+
+# yagu <x_e>, <y_R>, #<fn>, <s_dest>, <dest_R>, #<rd>, <head_s>
+yagu	x_e	e	21	24	s1
+yagu	y_R	R	13	16	s1
+yagu	fn	imm	17	20	s1
+yagu	s_dest	s	4	7	s1
+yagu	dest_R	R	0	3	s1
+yagu	rd	imm	30	30	head
+yagu	head_s	s	21	24	head
+
+# ypair <x_e>, #<cls>, #<m>, #<dest_k>
+ypair	x_e	e	5	8	head
+ypair	cls	imm	29	31	s1
+ypair	m	imm	27	28	s1
+ypair	dest_k	imm	0	2	s1
+
+# ystm <x_e>, <e_dest>, <y_R>, #<fn>, #<agu>, #<imm_lo>, <st_src>, #<st_en>, <dest_R>
+ystm	x_e	e	5	8	head
+ystm	e_dest	e	9	12	head
+ystm	y_R	R	13	16	head
+ystm	fn	imm	17	20	head
+ystm	agu	imm	26	26	head
+ystm	imm_lo	imm	28	31	head
+ystm	st_src	s	12	15	s1
+ystm	st_en	imm	16	17	s1
+ystm	dest_R	R	25	28	s1
+
+# tst #<hk>, #<sel>, #<slot>
+tst	hk	imm	26	29	head
+tst	sel	imm	21	25	head
+tst	slot	imm	25	28	s1
+
+# par <dest>, <src_e>, <x_A>, <x_src>
+par	dest	dest_ldi	26	30	head
+par	src_e	e	5	8	head
+par	x_A	A	11	15	head
+par	x_src	s	16	19	head
+
+# mul13 <dest_s>, <a_s>, #<b_lo>, #<b_hi>
+mul13	dest_s	s	11	14	s1
+mul13	a_s	s	3	6	s1
+mul13	b_lo	imm	0	2	s1
+mul13	b_hi	imm	31	31	head
+
+# st.wr #<addr>, <wr_e>, <wr_src>
+st.wr	addr	imm	5	20	head
+st.wr	wr_e	e	17	20	s1
+st.wr	wr_src	dest_ldi	21	25	s1
+
+# alu.m <dest>, <a>, <b>, #<op>, #<m>, #<n>
+alu.m	dest	s	15	18	head
+alu.m	a	s	11	14	head
+alu.m	b	s	26	29	head
+alu.m	op	imm	5	10	head
+alu.m	m	imm	23	25	head
+alu.m	n	imm	19	22	head
+
+# x16.b16 <head_s>, #<xa>, <st_src>, <y_e>
+x16.b16	head_s	s	21	24	head
+x16.b16	xa	imm	5	20	head
+x16.b16	st_src	s	28	31	s1
+x16.b16	y_e	e	21	24	s2
+
+# x16.agu100 <head_s>, #<imm>, <x_e>, #<fn>
+x16.agu100	head_s	s	21	24	head
+x16.agu100	imm	imm	5	20	head
+x16.agu100	x_e	e	15	18	s1
+x16.agu100	fn	imm	7	10	s1
+
+# x16.sh <head_s>, #<imm>, #<hsrc>, <dest_s>, #<n>, <b_s>
+x16.sh	head_s	s	21	24	head
+x16.sh	imm	imm	5	20	head
+x16.sh	hsrc	imm	12	14	s1
+x16.sh	dest_s	s	8	11	s1
+x16.sh	n	imm	20	23	s1
+x16.sh	b_s	s	25	28	s2
+
+# x02.mac <mpy_dest>, #<mode>, #<sgn>, <xrd_dest>, <x_A>
+x02.mac	mpy_dest	s	9	12	s2
+x02.mac	mode	imm	11	13	s1
+x02.mac	sgn	imm	15	17	s1
+x02.mac	xrd_dest	s	3	6	s4
+x02.mac	x_A	A	17	21	s4
+
+# x18.e2nd17 <dest_e>, #<y_lo>, #<y_hi>
+x18.e2nd17	dest_e	e	2	5	s2
+x18.e2nd17	y_lo	imm	30	31	s1
+x18.e2nd17	y_hi	imm	0	1	s2
+
+# ldi.q <dest>, #<imm>, #<q>
+ldi.q	dest	dest_ldi	21	25	head
+ldi.q	imm	imm	5	20	head
+ldi.q	q	imm	26	29	head
+
+# st.sel Y:<addr>, #<sel>
+st.sel	addr	y_addr	5	20	head
+st.sel	sel	imm	21	22	head
+
+# x17.stop <src>, <e>, #<cls>, #<wr>
+x17.stop	src	dest_ldi	24	28	s1
+x17.stop	ea	e	15	16	s1
+x17.stop	cls	imm	29	31	s2
+x17.stop	wr	imm	1	1	s2
+
+# x17.stopx <src>, <e>, #<head_junk>, #<s2_junk>
+x17.stopx	src	dest_ldi	24	28	s1
+x17.stopx	ea	e	15	16	s1
+x17.stopx	hj	imm	5	31	head
+x17.stopx	s2j	imm	0	28	s2
+
+# x03.rep p<pidx>
+x03.rep	pidx	p	14	17	s5
+
+# x19.mac <alu_d>, <alu_a>, <alu_b>, #<alu_op>, #<cls>, #<mode>, <dest_e>, <hi_s>, <x_s>, <y_s>,
+#         #<w2f>, <dest_A>, <dest_R>, #<fn>, <src_A>, <r_R>
+x19.mac	alu_d	s	15	18	head
+x19.mac	alu_a	s	11	14	head
+x19.mac	alu_b	s	26	29	head
+x19.mac	alu_op	imm	5	10	head
+x19.mac	cls	imm	29	31	s1
+x19.mac	mode	imm	11	17	s1
+x19.mac	dest_e	e	3	6	s1
+x19.mac	hi_s	s	9	12	s2
+x19.mac	x_s	s	5	8	s2
+x19.mac	y_s	s	1	4	s2
+x19.mac	w2f	imm	21	28	s2
+x19.mac	dest_A	A	17	20	s2
+x19.mac	dest_R	R	7	10	s3
+x19.mac	fn	imm	20	24	s3
+x19.mac	src_A	A	15	19	s3
+x19.mac	r_R	R	11	14	s3
+
+# pcond <p_dest>, <r_R>, <x_A>, #<cond>
+pcond	p_dest	p	21	24	head
+pcond	r_R	R	17	20	head
+pcond	x_A	A	12	16	head
+pcond	cond	imm	7	11	head
+
+# x03.jrc #<sense>, <pred>, <target>
+x03.jrc	sense	imm	29	31	s2
+x03.jrc	pred	p	14	17	s5
+x03.jrc	offset	rel	18	28	s1
+
+# x02.v <xrd_d>, <xrd_a>, <inc_d1>, <inc_d2>, <inc_s>, <mpy_d>, <mpy_a>, <mpy_b>, <plo>, #<sgn>,
+#       #<x3_dlo>, #<x3_dhi>, <x3_a>, <x3_b>, #<x3_op>, #<x3_sh>[, <add>]
+# add: A<w3[14:10]> <- the step + A<w3[9:5]> (962); A0 when left out.  k: as x02.aa's
+# (fn 6..11 only, 963), on vc/vs (x02.v's step is fn 0); mode 5 with fn 6..11 unmeasured.
+x02.v	xrd_d	s	3	6	s4
+x02.v	xrd_a	A	17	20	s4
+x02.v	inc_d1	A	17	21	s2
+x02.v	inc_d2	A	10	14	s3
+x02.v	inc_s	A	0	4	s3
+x02.v	mpy_d	s	9	12	s2
+x02.v	mpy_a	s	1	4	s2
+x02.v	mpy_b	s	5	8	s2
+x02.v	plo	s	7	10	s4
+x02.v	sgn	imm	15	17	s1
+x02.v	x3_dlo	imm	0	1	s5
+x02.v	x3_dhi	imm	30	31	s4
+x02.v	x3_a	s	22	25	s4
+x02.v	x3_b	s	26	29	s4
+x02.v	x3_op	imm	6	8	s5
+x02.v	x3_sh	imm	2	5	s5
+x02.v	?add	A	5	9	s3
+
+# x02.vc: x02.v's operands, then #<code>, #<fn>, <r>[, <add>[, #<k>]]: the A step agu_xr fn w2[26:22], r = R<w5[25:22]> (738)
+x02.vc	xrd_d	s	3	6	s4
+x02.vc	xrd_a	A	17	20	s4
+x02.vc	inc_d1	A	17	21	s2
+x02.vc	inc_d2	A	10	14	s3
+x02.vc	inc_s	A	0	4	s3
+x02.vc	mpy_d	s	9	12	s2
+x02.vc	mpy_a	s	1	4	s2
+x02.vc	mpy_b	s	5	8	s2
+x02.vc	plo	s	7	10	s4
+x02.vc	sgn	imm	15	17	s1
+x02.vc	x3_dlo	imm	0	1	s5
+x02.vc	x3_dhi	imm	30	31	s4
+x02.vc	x3_a	s	22	25	s4
+x02.vc	x3_b	s	26	29	s4
+x02.vc	x3_op	imm	6	8	s5
+x02.vc	x3_sh	imm	2	5	s5
+x02.vc	code	imm	5	10	head
+x02.vc	fn	imm	22	26	s2
+x02.vc	r	R	22	25	s5
+x02.vc	?add	A	5	9	s3
+x02.vc	?k	imm	15	18	s3
+
+# x02.vs: x02.v's operands, then #<st_lo>, #<st_hi>, #<fn>, <r>[, <add>[, #<k>]] (738)
+x02.vs	xrd_d	s	3	6	s4
+x02.vs	xrd_a	A	17	20	s4
+x02.vs	inc_d1	A	17	21	s2
+x02.vs	inc_d2	A	10	14	s3
+x02.vs	inc_s	A	0	4	s3
+x02.vs	mpy_d	s	9	12	s2
+x02.vs	mpy_a	s	1	4	s2
+x02.vs	mpy_b	s	5	8	s2
+x02.vs	plo	s	7	10	s4
+x02.vs	sgn	imm	15	17	s1
+x02.vs	x3_dlo	imm	0	1	s5
+x02.vs	x3_dhi	imm	30	31	s4
+x02.vs	x3_a	s	22	25	s4
+x02.vs	x3_b	s	26	29	s4
+x02.vs	x3_op	imm	6	8	s5
+x02.vs	x3_sh	imm	2	5	s5
+x02.vs	st_lo	imm	29	31	s1
+x02.vs	st_hi	imm	0	0	s2
+x02.vs	fn	imm	22	26	s2
+x02.vs	r	R	22	25	s5
+x02.vs	?add	A	5	9	s3
+x02.vs	?k	imm	15	18	s3
+
+# x02.aa <dest_A>, <x_A>, <r_R>, #<fn>, <dest2_A>, <add_A>[, #<k>]
+# k: the A sum wraps once by R<w3[18:15]> for fn 6..11 only (567, 963); a k with another fn is refused.
+x02.aa	dest_A	A	17	21	s2
+x02.aa	x_A	A	0	4	s3
+x02.aa	r_R	R	22	25	s5
+x02.aa	fn	imm	22	26	s2
+x02.aa	dest2_A	A	10	14	s3
+x02.aa	add_A	A	5	9	s3
+x02.aa	?k	imm	15	18	s3
+
+# ragu <dest_R>, <x_A>, <r_R>, #<fn>
+ragu	dest_R	R	27	30	head
+ragu	x_A	A	12	16	head
+ragu	r_R	R	17	20	head
+ragu	fn	imm	7	11	head
+x01.norm	dest	s	4	7	s6
+x01.norm	b	s	2	5	s2
+x01.selneg	dest	s	4	7	s6
+x01.selneg	b	s	2	5	s2
+x01.selneg	i	imm	6	9	s2
+x03.tap	sL	s	3	6	s4
+x03.tap	An	a4	0	2	s1
+x03.tap	sB	s	5	8	s2
+x03.tap	sHi	s	9	12	s2
+x03.tap	sLo	s	7	10	s4
+x03.tap	=sL	s	1	4	s2
+x03.tap	=An	A	17	21	s2
+x03.tap	=An	A	0	4	s3
+x03.tap	=sHi	imm	29	31	s1
+x03.tap	=sHi>>3	imm	0	0	s2
+x03.tap	=sLo	s	9	12	s5
+x03.tap0	sL	s	3	6	s4
+x03.tap0	An	a4	0	2	s1
+x03.tap0	sB	s	5	8	s2
+x03.tap0	sHi	s	9	12	s2
+x03.tap0	sLo	s	7	10	s4
+x03.tap0	=sL	s	1	4	s2
+x03.tap0	=An	A	17	21	s2
+x03.tap0	=An	A	0	4	s3
+x03.tap0	=sHi	imm	29	31	s1
+x03.tap0	=sHi>>3	imm	0	0	s2
+x03.tap0	=sLo	s	9	12	s5
+x18.ytap	sL	s	21	24	head
+x18.ytap	eN	e	25	28	s3
+x18.ytap	sB	s	28	31	s2
+x18.ytap	sHi	s	0	3	s3
+x18.ytap	sLo	s	12	15	s2
+x18.ytap	=sL	s	24	27	s2
+x18.ytap	=eN	e	20	23	s1
+x18.ytap	=sHi	s	28	31	s1
+x18.ytap	=sLo	s	0	3	s2
+x18.or	dest_s	s	8	11	s1
+x18.or	a_s	s	2	5	s2
+x18.or	b_s	s	4	7	s1
+x18.max	dest_s	s	8	11	s1
+x18.max	a_s	s	2	5	s2
+x18.max	b_s	s	4	7	s1
+x18.min	dest_s	s	8	11	s1
+x18.min	a_s	s	2	5	s2
+x18.min	b_s	s	4	7	s1
+
+# x03.tapa: x03.tap plus #<fn>, <r>: the A step agu_xr fn w2[26:22] (0 x+1, 1 x-1, 2 x+r, 3 x-r), r = R<w5[25:22]> (740)
+x03.tapa	sL	s	3	6	s4
+x03.tapa	An	a4	0	2	s1
+x03.tapa	sB	s	5	8	s2
+x03.tapa	sHi	s	9	12	s2
+x03.tapa	sLo	s	7	10	s4
+x03.tapa	=sL	s	1	4	s2
+x03.tapa	=An	A	17	21	s2
+x03.tapa	=An	A	0	4	s3
+x03.tapa	=sHi	imm	29	31	s1
+x03.tapa	=sHi>>3	imm	0	0	s2
+x03.tapa	=sLo	s	9	12	s5
+x03.tapa	fn	imm	22	26	s2
+x03.tapa	r	R	22	25	s5
+
+# x03.tap0a: x03.tap0 plus #<fn>, <r>: the A step agu_xr fn w2[26:22] (0 x+1, 1 x-1, 2 x+r, 3 x-r), r = R<w5[25:22]> (740)
+x03.tap0a	sL	s	3	6	s4
+x03.tap0a	An	a4	0	2	s1
+x03.tap0a	sB	s	5	8	s2
+x03.tap0a	sHi	s	9	12	s2
+x03.tap0a	sLo	s	7	10	s4
+x03.tap0a	=sL	s	1	4	s2
+x03.tap0a	=An	A	17	21	s2
+x03.tap0a	=An	A	0	4	s3
+x03.tap0a	=sHi	imm	29	31	s1
+x03.tap0a	=sHi>>3	imm	0	0	s2
+x03.tap0a	=sLo	s	9	12	s5
+x03.tap0a	fn	imm	22	26	s2
+x03.tap0a	r	R	22	25	s5
+
+# x03.repa: x03.rep plus #<fn>, <r>: the store pointer's agu_xr step (741)
+x03.repa	pidx	p	14	17	s5
+x03.repa	fn	imm	22	26	s2
+x03.repa	r	R	22	25	s5
+
+# x16.getb #<k>, #<n>: A<2k+1> <- the next n+1 stream bits (fact 783).
+x16.getb	k	imm	0	3	s1
+x16.getb	n	imm	4	7	s2
+
+# ld0e.sen #<addr>, #<n>: the stream enable (fact 783), A<4n+1> <- addr.
+ld0e.sen	addr	imm	5	20	head
+ld0e.sen	n	imm	1	3	s1

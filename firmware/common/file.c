@@ -221,6 +221,7 @@ static void handle_truncate(struct filestr_desc * const file, file_size_t size)
 }
 
 /* truncate the file to the specified length */
+extern uint64_t *fileobj_pcm_generation(const struct filestr_base *stream);
 static int ftruncate_internal(struct filestr_desc *file, file_size_t size,
                               bool write_now)
 {
@@ -228,6 +229,7 @@ static int ftruncate_internal(struct filestr_desc *file, file_size_t size,
 
     file_size_t cursize = *file->sizep;
     file_size_t truncsize = MIN(size, cursize);
+    if (truncsize<cursize) ++*fileobj_pcm_generation(&file->stream);
 
     uint16_t sector_size = fat_file_sector_size(IF_MV(file->stream.fatstr.fatfilep));
 
@@ -976,6 +978,7 @@ ssize_t rbfs_write(int fildes, const void *buf, size_t nbyte)
         FILE_ERROR(EBADF, -2);
     }
 
+    if (nbyte) ++*fileobj_pcm_generation(&file->stream);
     rc = readwrite(file, (void *)buf, nbyte, true);
     if (rc < 0)
         FILE_ERROR(ERRNO, rc * 10 - 3);
@@ -1197,6 +1200,15 @@ off_t rbfs_ffilesize(int fildes)
 file_error:
     RELEASE_FILESTR(READER, file);
     return rc;
+}
+
+bool rbfs_pcm_generation(int fd, uint64_t *value)
+{
+    struct filestr_desc *file=GET_FILESTR(READER,fd);
+    if (!file) return false;
+    *value=*fileobj_pcm_generation(&file->stream);
+    RELEASE_FILESTR(READER,file);
+    return true;
 }
 
 /* test if two file descriptors refer to the same file */

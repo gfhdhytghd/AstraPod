@@ -1,0 +1,17 @@
+.mode 0
+.pass init
+.ydata 0, 0,1,8192,0,16,0,0
+.ydata 0x2160,0
+x17.halt
+.pass decoder
+.param 0xfd80,7,4096,16,40,14,10
+.include "../sosumi-compat/dsp/lib/bits.sm"
+.include "../sosumi-compat/dsp/lib/rice.sm"
+.include "../sosumi-compat/dsp/lib/predictor.sm"
+.include "../sosumi-compat/dsp/lib/unmix.sm"
+.include "../sosumi-compat/dsp/lib/mem.sm"
+.include "../sosumi-compat/dsp/lib/ring.sm"
+.include "../sosumi-compat/dsp/lib/alac.sm"
+bits_init_at(ALAC_ON)
+alac_packet()
+x17.halt

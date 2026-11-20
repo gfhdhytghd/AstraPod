@@ -28216,3 +28216,63 @@
     *: "状态栏取色"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_HIRES_CONVERT_NOTICE
+  desc: High sample rate library conversion
+  user: core
+  <source>
+    *: "Skipped audio above 48 kHz. Convert to 48 or 44.1 kHz FLAC."
+  </source>
+  <dest>
+    *: "已跳过高于 48 kHz 的曲目。请转换为 48 或 44.1 kHz FLAC。"
+  </dest>
+  <voice>
+    *: "已跳过高于 48 kHz 的曲目。请转换为 48 或 44.1 kHz FLAC。"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_CONVERT_LIBRARY_48
+  desc: High sample rate library conversion
+  user: core
+  <source>
+    *: "Convert library to 48 kHz FLAC"
+  </source>
+  <dest>
+    *: "将曲库高采样率曲目转换为 48 kHz FLAC"
+  </dest>
+  <voice>
+    *: "将曲库高采样率曲目转换为 48 kHz FLAC"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_LIBRARY_CONVERT_PROGRESS
+  desc: High sample rate library conversion
+  user: core
+  <source>
+    *: "Checked %d, converted %d. Menu to cancel. %s"
+  </source>
+  <dest>
+    *: "已检查 %d 首，已转换 %d 首。按菜单键取消。%s"
+  </dest>
+  <voice>
+    *: "已检查 %d 首，已转换 %d 首。按菜单键取消。%s"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_LIBRARY_CONVERT_RESULTS
+  desc: High sample rate library conversion
+  user: core
+  <source>
+    *: "Converted %d, already converted %d, unsupported %d, failed %d"
+  </source>
+  <dest>
+    *: "已转换 %d 首，已有 %d 首，不支持 %d 首，失败 %d 首"
+  </dest>
+  <voice>
+    *: "已转换 %d 首，已有 %d 首，不支持 %d 首，失败 %d 首"
+  </voice>
+</phrase>

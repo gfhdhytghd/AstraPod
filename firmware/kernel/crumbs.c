@@ -74,7 +74,24 @@ _Static_assert(sizeof(struct crumb_crash) <= 512, "crash record size");
 volatile uint32_t *const crumb_status_a =
     ((volatile struct crumb_ring *)UNCACHED(&dram_ring))->status;
 volatile uint32_t *const crumb_status_b =
-    ((volatile struct crumb_ring *)UNCACHED(IRAM1_RING_ADDR))->status;
+    ((volatile struct crumb_ring *)UNCACHED(&dram_ring))->status;
+
+#ifdef HAVE_IPOD_CRASH_RECOVERY
+#include "sm1_recovery.h"
+static struct recovery_record recovery_saved __attribute__((section(".persist"), aligned(32)));
+#define REC_SAVED ((volatile struct recovery_record *)UNCACHED(&recovery_saved))
+static bool recovery_started;
+
+bool crumbs_recovery_disk(void)
+{
+    return recovery_started && REC_SAVED->phase == REC_DISK;
+}
+
+bool crumbs_recovery_hold(void)
+{
+    return recovery_started && REC_SAVED->phase == REC_HOLD;
+}
+#endif
 
 static const char *const crumb_names[CR_COUNT] =
 {
@@ -111,35 +128,39 @@ void crumb(enum crumb_id id, uint32_t value)
 {
     int level = disable_interrupt_save(IRQ_FIQ_STATUS);
     crumb_ring_put(RING_A, current_tick, id, value);
-    crumb_ring_put(RING_B, current_tick, id, value);
     restore_interrupt(level);
 }
-
-static bool iram1_ready;
 
 void crumbs_crash_record(const char *message, const struct crumb_crash_context *context)
 {
     uint32_t boot = crumb_ring_head_ok(RING_A) ? RING_A->boot : 0;
     crumb_crash_store(CRASH_A, boot, RBVERSION, message, context);
-    if (iram1_ready)
-        crumb_crash_store(CRASH_B, boot, RBVERSION, message, context);
+#ifdef HAVE_IPOD_CRASH_RECOVERY
+    /* No disk, scheduler, I2C or LCD from a fatal context. A recovery
+     * fault drops through to the original diagnostic screen and halt. */
+    if (recovery_started && recovery_fault(REC_SAVED, boot, (uint32_t)current_tick < 30u * HZ)) {
+        uint32_t zero = 0;
+        asm volatile("mcr p15, 0, %0, c7, c10, 4" : : "r"(zero) : "memory");
+        system_reboot();
+    }
+#endif
 }
 
 void crumbs_boot(void)
 {
-    clockgate_enable(CLOCKGATE_SM1, true);  /* IRAM1 */
-    iram1_ready = true;
-    crumbs_prev_copies = crumb_snapshot_take(RING_A, RING_B, &crumbs_prev);
+    crumbs_prev_copies = crumb_snapshot_take(RING_A, RING_A, &crumbs_prev);
     uint32_t boot = crumbs_prev.valid ? crumbs_prev.boot + 1 : 1;
+#ifdef HAVE_IPOD_CRASH_RECOVERY
+    recovery_boot(REC_SAVED, boot, crumbs_prev.valid && !crumbs_prev.clean);
+    recovery_started = true;
+#endif
     crumb_ring_start(RING_A, boot);
-    crumb_ring_start(RING_B, boot);
     crumb(CR_BOOT, boot);
 }
 
 void crumbs_clean(void)
 {
     RING_A->clean = CRUMB_CLEAN;
-    RING_B->clean = CRUMB_CLEAN;
 }
 
 static int format_lines(char (*lines)[48], int max)
@@ -188,7 +209,7 @@ int crumbs_lines(char (**lines)[48])
 
 static void crash_report(void)
 {
-    const volatile struct crumb_crash *crash = crumb_crash_latest(CRASH_A, CRASH_B);
+    const volatile struct crumb_crash *crash = crumb_crash_latest(CRASH_A, CRASH_A);
     if (!crash)
         return;
 
@@ -228,7 +249,6 @@ static void crash_report(void)
     if (ok && rename(temp, path) == 0)
     {
         CRASH_A->check = 0;
-        CRASH_B->check = 0;
     }
     else
         remove(temp);

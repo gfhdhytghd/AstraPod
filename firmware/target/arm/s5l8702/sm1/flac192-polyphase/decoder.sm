@@ -1,0 +1,259 @@
+; One validated FLAC fixed-block frame per DMA descriptor.
+.mode 0
+.pass init
+.ydata 0, 0, 1, 8192, 0, 16, 0, 0
+.ydata 0x2d80, 0
+.ydata 0x2db4, 1,0,0,0, 2,-1,0,0, 3,-3,1,0, 4,-6,4,-1
+.include "filter_data.sm"
+.include "fir_data.sm"
+x17.halt
+.pass decoder
+.param 0xfd80, 7, 4096, 0, 3
+.include "../sosumi-compat/dsp/lib/bitcore.sm"
+.include "../sosumi-compat/dsp/lib/stream.sm"
+.include "../sosumi-compat/dsp/lib/mem.sm"
+.include "../sosumi-compat/dsp/lib/ring.sm"
+
+.macro equal_byte(V) {
+    sbyte(s5)
+    ldi s4, #V
+    alu s12, s5, s4, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, invalid
+    nop()
+    nop()
+}
+
+; Collect one signed big-endian 24-bit sample.
+.macro sample24() {
+    sbyte(s1)
+    alu s1, s15, s1, #ASR
+    sbyte(s2)
+    alu s1, s1, s2, #OP_ADD
+    alu s1, s15, s1, #ASR
+    sbyte(s2)
+    alu s1, s1, s2, #OP_ADD
+}
+
+.include "bitread.sm"
+.include "joint.sm"
+.include "wide.sm"
+.include "chunk.sm"
+
+dsp_entry:
+    yld(s12, 5)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, invalid
+    nop()
+    nop()
+    stream_on_at(0x2d80)
+    ldi s14, #1
+    ldi s15, #-8
+.include "header.sm"
+crc8:
+    ldi s13, #0
+    rimm R1, #1
+    sbyte(s2)
+    ldi s3, #0
+    yst(SECOND)
+    yld(s5, ASSIGN)
+    equals(9, first_side)
+    ldi s3, #0
+    jmp #ALWAYS, #0, first_ready
+    nop()
+    nop()
+first_side:
+    ldi s3, #1
+first_ready:
+    yst(SIDE)
+    lde e7, #128
+    jmp #ALWAYS, #0, channel
+    nop()
+    nop()
+next_lane:
+    ldi s3, #1
+    yst(SECOND)
+    yld(s5, ASSIGN)
+    equals(8, second_side)
+    equals(10, second_side)
+    ldi s3, #0
+    jmp #ALWAYS, #0, second_ready
+    nop()
+    nop()
+second_side:
+    ldi s3, #1
+second_ready:
+    yst(SIDE)
+    lde e7, #129
+    jmp #ALWAYS, #0, channel
+    nop()
+    nop()
+frame_footer:
+    ldi s4, #7
+    alu s12, s0, s13, #OP_SUB
+    x18.and s12, s12, s4
+pad:
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, footer
+    nop()
+    nop()
+    x16.getb #7, #0
+    jmp #ALWAYS, #0, pad
+    alu s12, s12, s14, #OP_SUB
+    nop()
+footer:
+    sbyte(s2)                  ; Host checks CRC-16 before DMA.
+    sbyte(s2)
+    yld(s7, FRAMESIZE)
+    ldi s4, #3
+    alu s7, s7, s4, #OP_ADD
+    ldi s4, #2
+    alu s7, s4, s7, #ASR
+    alu s7, s7, s7, #OP_ADD
+    ring_publish1()
+invalid:
+    x17.halt
+    nop()
+    nop()
+
+channel:
+    sbyte(s5)
+    x18.and s12, s5, s14
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, got_width
+    ldi s3, #0
+    nop()
+    alu s5, s5, s14, #OP_SUB
+waste_bit:
+    fetch(s2, 1)
+    alu s12, s2, s0, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, waste_bit
+    alu s3, s3, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+got_width:
+    yst(WASTE)
+    ldi s2, #24
+    alu s2, s2, s3, #OP_SUB
+    yld(s3, SIDE)
+    alu s3, s3, s2, #OP_ADD
+    yst(WIDTH)
+    lde e13, #WBASE
+    ldi s3, #0
+    yst(OFFSET)
+    yst(SKIP)
+    equals(0, raw_start)
+    equals(2, raw_start)
+    jmp #ALWAYS, #0, predictive
+    nop()
+    nop()
+raw_start:
+    alu s3, s5, s0, #OP_ADD
+    yst(RAWTYPE)
+    ldi s3, #0
+    yst(ORDER)
+    yld(s12, RAWTYPE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, raw_chunk
+    nop()
+    nop()
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, raw_const_narrow
+    nop()
+    nop()
+    wide_raw()
+    jmp #ALWAYS, #0, raw_const_save
+    nop()
+    nop()
+raw_const_narrow:
+    raw_sample()
+    ldi s6, #0
+raw_const_save:
+    aimm_o(3, STATE_X)
+    pks(1, A7, 0, s0, s0, 0)
+    lde e13, #STATE_Y
+    x17.sty e13, #6, #0
+raw_chunk:
+    yld(s3, FRAMESIZE)
+    yld(s5, OFFSET)
+    alu s3, s3, s5, #OP_SUB
+    ldi s5, #CHUNK
+    smin(s3, s5)
+    yst(BLOCK)
+    yst(RUN_SIZE)
+    ldi s2, #3
+    alu s3, s3, s2, #OP_ADD
+    ldi s2, #2
+    alu s3, s2, s3, #ASR
+    yst(GROUPS)
+    aimm_o(3, AUDIO)
+    lde e13, #WBASE
+    yld(s11, BLOCK)
+    yld(s12, RAWTYPE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, raw_verbatim
+    nop()
+    nop()
+    aimm_o(4, STATE_X)
+    pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    yld(s6, STATE_Y)
+raw_repeat:
+    wstore()
+    again(s11, raw_repeat)
+    jmp #ALWAYS, #0, raw_emit
+    nop()
+    nop()
+raw_verbatim:
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, raw_narrow_loop
+    nop()
+    nop()
+raw_wide_loop:
+    wide_raw()
+    wstore()
+    again(s11, raw_wide_loop)
+    jmp #ALWAYS, #0, raw_emit
+    nop()
+    nop()
+raw_narrow_loop:
+    raw_sample()
+    pks(1, A7, 0, s0, s0, 0)
+    again(s11, raw_narrow_loop)
+raw_emit:
+    lde e6, #0x2d96
+    x17.sty e6, #5, #1
+    call(emit_raw)
+    yld(s13, 0x2d96)
+    yld(s3, OFFSET)
+    yld(s4, RUN_SIZE)
+    alu s3, s3, s4, #OP_ADD
+    yst(OFFSET)
+    yld(s4, FRAMESIZE)
+    alu s12, s3, s4, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, raw_chunk
+    nop()
+    nop()
+channel_done:
+    call(filter_tail)
+    yld(s13, 0x2d96)
+    yld(s12, SECOND)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, next_lane
+    ldi s15, #-8
+    nop()
+    jmp #ALWAYS, #0, frame_footer
+    nop()
+    nop()
+emit_raw:
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, wide_output
+    nop()
+    nop()
+    jmp #ALWAYS, #0, output_x
+    nop()
+    nop()
+.include "predictive.sm"

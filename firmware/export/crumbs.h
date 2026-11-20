@@ -115,6 +115,10 @@ void crumbs_crash_record(const char *message, const struct crumb_crash_context *
 
 /* Very first thing at boot: takes the previous boot's ring, starts this one */
 void crumbs_boot(void);
+#ifdef HAVE_IPOD_CRASH_RECOVERY
+bool crumbs_recovery_disk(void);
+bool crumbs_recovery_hold(void);
+#endif
 /* Once the disk is up: saves the previous ring if that boot did not shut
  * down cleanly. After boot, with USB and iAP up: shows it until a key or
  * another event (returned) */

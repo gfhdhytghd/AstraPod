@@ -976,6 +976,10 @@ static void usb_dac_auto_step(void)
  * has a distinct BUTTON_RC_MENU bit. Storage and EP0 events keep running. */
 static void usb_disk_poll(void)
 {
+#ifdef HAVE_IPOD_CRASH_RECOVERY
+    if (crumbs_recovery_disk())
+        return;
+#endif
     if (usb_detect() != USB_INSERTED)
     {
         disk_menu_down = disk_exit_pending = false;
@@ -1233,6 +1237,10 @@ static void NORETURN_ATTR usb_thread(void)
             usb_drive_only_now = usb_mode_drive_only() && !usb_power_only;
             usb_consent_begin(&usb_consent, usb_power_only, false);
             usb_confirm_has_config = false;
+#ifdef HAVE_IPOD_CRASH_RECOVERY
+            if (crumbs_recovery_disk())
+                usb_consent.state = USB_CONSENT_CONNECT;
+#endif
 #endif
 
 #ifndef BOOTLOADER
@@ -1809,7 +1817,11 @@ void usb_release_exclusive_storage(void)
 void usb_storage_ejected(void)
 {
 #ifdef HAVE_USB_PODLINK
-    if (exclusive_storage_requested)
+    if (exclusive_storage_requested
+#ifdef HAVE_IPOD_CRASH_RECOVERY
+        && !crumbs_recovery_disk()
+#endif
+       )
         disk_return_at = current_tick + HZ / 5; /* allow SCSI CSW to drain */
 #endif
     usb_disk_ejected = true;

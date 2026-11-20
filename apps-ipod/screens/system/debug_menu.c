@@ -2253,6 +2253,10 @@ static bool dbg_lyrics_perf(void)
     return simplelist_show_list(&info);
 }
 
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+#include "sm1_flac_driver.inc"
+#endif
+
 /** The menu **/
 /* Grouped, in this order: playback, library, display, accessories, hardware.
  * A saved shortcut names its screen by desc, so renaming one strands it. */

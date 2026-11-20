@@ -644,6 +644,67 @@ static void main_stack_guard(void)
 }
 #endif
 
+#ifdef HAVE_IPOD_CRASH_RECOVERY
+/* Recovery deliberately skips UI caches, codecs, themes and settings. */
+static void sm1_boot_recovery(void)
+{
+    lcd_setfont(FONT_SYSFIXED);
+    backlight_init();
+    lcd_clear_display();
+    if (crumbs_recovery_hold()) {
+        lcd_puts(0, 0, "Recovery stopped");
+        lcd_puts(0, 2, "Reset: Menu + Center");
+        lcd_puts(0, 3, "Then Center + Play");
+        lcd_update();
+        for (;;) sleep(HZ);
+    }
+    lcd_puts(0, 0, "Crash recovery: Disk Mode");
+    lcd_puts(0, 2, "Connect USB to repair");
+    lcd_update();
+    adc_init();
+    usb_init();
+    button_init();
+    powermgmt_init();
+    int rc = storage_init();
+    if (rc) {
+        lcd_putsf(0, 3, "Storage error: %d", rc);
+        lcd_puts(0, 4, "Reset: Menu + Center");
+        lcd_puts(0, 5, "Then Center + Play");
+        lcd_update();
+        for (;;) sleep(HZ);
+    }
+    if (disk_mount_all() > 0)
+        crumbs_report();
+    usb_set_mode(USB_MODE_DRIVE_ONLY);
+    usb_start_monitoring();
+    bool connected = false, finished = false;
+    for (;;) {
+        int event = button_get(true);
+        if (event == SYS_USB_CONNECTED) {
+            connected = true;
+            finished = false;
+            usb_acknowledge(SYS_USB_CONNECTED_ACK, button_get_data());
+        } else if (event == SYS_USB_DISCONNECTED && connected) {
+            connected = false;
+            finished = true;
+            if (!usb_storage_is_ejected()) {
+                lcd_puts(0, 3, "Press Center to restart");
+                lcd_update();
+            }
+        }
+        if (finished && (usb_storage_is_ejected() || event == (BUTTON_SELECT | BUTTON_REL))) {
+            /* A host eject is an explicit, completed recovery session. */
+            disk_unmount_all();
+#ifdef HAVE_STORAGE_FLUSH
+            storage_flush();
+#endif
+            crumbs_clean();
+            system_reboot();
+        }
+    }
+}
+#endif
+
 static void init(void) INIT_ATTR;
 static void init(void)
 {
@@ -655,6 +716,11 @@ static void init(void)
     system_init();
     core_allocator_init();
     kernel_init();
+#ifdef HAVE_IPOD_CRASH_RECOVERY
+    bool recovery = crumbs_recovery_disk() || crumbs_recovery_hold();
+    if (!recovery)
+    {
+#endif
     album_palette_alloc();
     album_blur_alloc();
     panel_cache_init();
@@ -662,6 +728,9 @@ static void init(void)
     crumbs_guard_init();
 #if !defined(SIMULATOR) && !defined(APPLICATION)
     tick_add_task(main_stack_guard);
+#endif
+#ifdef HAVE_IPOD_CRASH_RECOVERY
+    }
 #endif
 
 
@@ -691,6 +760,10 @@ static void init(void)
     FOR_NB_SCREENS(i)
         global_status.font_id[i] = FONT_SYSFIXED;
     font_init();
+#ifdef HAVE_IPOD_CRASH_RECOVERY
+    if (recovery)
+        sm1_boot_recovery();
+#endif
 
     settings_reset();
 

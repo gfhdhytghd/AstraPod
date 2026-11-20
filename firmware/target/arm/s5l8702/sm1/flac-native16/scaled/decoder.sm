@@ -1,0 +1,146 @@
+; One validated FLAC fixed-block frame per DMA descriptor.
+.mode 0
+.pass init
+.ydata 0, 0, 1, 9216, 0, 16, 0, 0
+.ydata 0x2d80, 0
+.ydata 0x2db4, 1,0,0,0, 2,-1,0,0, 3,-3,1,0, 4,-6,4,-1
+x17.halt
+.pass decoder
+.param 0xfd80, 7, 4608, 0, RATE_TAG
+.include "../../sosumi-compat/dsp/lib/bitcore.sm"
+.include "../../sosumi-compat/dsp/lib/stream.sm"
+.include "../../sosumi-compat/dsp/lib/mem.sm"
+.include "../../sosumi-compat/dsp/lib/ring.sm"
+
+.macro equal_byte(V) {
+    sbyte(s5)
+    ldi s4, #V
+    alu s12, s5, s4, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, invalid
+    nop()
+    nop()
+}
+
+.include "bitread.sm"
+.include "joint.sm"
+
+dsp_entry:
+    yld(s12, 5)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, invalid
+    nop()
+    nop()
+    stream_on_at(0x2d80)
+    ldi s14, #1
+    ldi s15, #-8
+.include "header.sm"
+crc8:
+    ldi s13, #0
+    rimm R1, #1
+    sbyte(s2)
+    ldi s3, #0
+    yst(SECOND)
+    yld(s5, ASSIGN)
+    equals(9, first_side)
+    ldi s3, #0
+    jmp #ALWAYS, #0, first_ready
+    nop()
+    nop()
+first_side:
+    ldi s3, #1
+first_ready:
+    yst(SIDE)
+    lde e7, #128
+    call(channel)
+    ldi s3, #1
+    yst(SECOND)
+    yld(s5, ASSIGN)
+    equals(8, second_side)
+    equals(10, second_side)
+    ldi s3, #0
+    jmp #ALWAYS, #0, second_ready
+    nop()
+    nop()
+second_side:
+    ldi s3, #1
+second_ready:
+    yst(SIDE)
+    lde e7, #129
+    call(channel)
+    ldi s4, #7
+    alu s12, s0, s13, #OP_SUB
+    x18.and s12, s12, s4
+pad:
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, footer
+    nop()
+    nop()
+    x16.getb #7, #0
+    jmp #ALWAYS, #0, pad
+    alu s12, s12, s14, #OP_SUB
+    nop()
+footer:
+    sbyte(s2)                  ; Host checks CRC-16 before DMA.
+    sbyte(s2)
+    yld(s7, BLOCK)
+    alu s7, s7, s7, #OP_ADD
+    ring_publish1()
+invalid:
+    x17.halt
+    nop()
+    nop()
+
+channel:
+    sbyte(s5)
+    x18.and s12, s5, s14
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, got_width
+    ldi s3, #0
+    nop()
+    alu s5, s5, s14, #OP_SUB
+waste_bit:
+    fetch(s2, 1)
+    alu s12, s2, s0, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, waste_bit
+    alu s3, s3, s14, #OP_ADD
+    alu s13, s13, s14, #OP_ADD
+got_width:
+    yst(WASTE)
+    ldi s2, #16
+    alu s2, s2, s3, #OP_SUB
+    yld(s3, SIDE)
+    alu s3, s3, s2, #OP_ADD
+    yst(WIDTH)
+    yld(s11, BLOCK)
+    alu s12, s5, s0, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, constant
+    ldi s4, #2
+    alu s12, s5, s4, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, predictive
+    nop()
+    nop()
+raw_array:
+    aimm_o(3, AUDIO)
+    yld(s11, BLOCK)
+raw_lane:
+    raw_sample()
+    pks(1, A7, 0, s0, s0, 0)
+    again(s11, raw_lane)
+    jmp #ALWAYS, #0, output_x
+    nop()
+    nop()
+constant:
+    raw_sample()
+    aimm_o(3, AUDIO)
+    yld(s11, BLOCK)
+constant_lane:
+    pks(1, A7, 0, s0, s0, 0)
+    again(s11, constant_lane)
+    jmp #ALWAYS, #0, output_x
+    nop()
+    nop()
+.include "predictive.sm"

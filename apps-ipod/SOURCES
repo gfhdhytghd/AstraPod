@@ -289,6 +289,9 @@ screens/settings/settings_changed.c
 screens/settings/spun_settings.c
 screens/settings/settings_help.c
 screens/settings/playback_settings.c
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+screens/settings/library_conversion.c
+#endif
 screens/settings/playlist_settings.c
 screens/settings/general_settings.c
 screens/settings/sound_settings.c

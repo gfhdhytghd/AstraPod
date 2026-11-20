@@ -79,7 +79,12 @@
  * when this happens please take the opportunity to sort in
  * any new functions "waiting" at the end of the list.
  */
+#if defined(IPOD_6G) && !defined(SIMULATOR)
+#define HAVE_SM1_ALAC_API
+#define CODEC_API_VERSION 51
+#else
 #define CODEC_API_VERSION 50
+#endif
 
 /* reasons for calling codec main entrypoint */
 enum codec_entry_call_reason {
@@ -224,6 +229,13 @@ struct codec_api {
     /* new stuff at the end, sort into place next time
        the API gets incompatible */
     void (*panicf)(const char *msg, ...);
+#ifdef HAVE_SM1_ALAC_API
+    bool (*alac_begin)(unsigned depth, unsigned channels, unsigned pb,
+                       unsigned kb, unsigned mb);
+    bool (*alac_frame)(const unsigned char *packet, size_t size, unsigned samples,
+                       int32_t *left, int32_t *right);
+    void (*alac_end)(void);
+#endif
 };
 
 /* codec header */

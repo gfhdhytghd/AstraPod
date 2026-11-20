@@ -1,0 +1,306 @@
+; Audited from x17 116d9e1 examples/lib/rice.sm, 2026-11-08 (docs/x17-import.md).
+; Twin: ref/dsp/alac/rice.zig; Apple ALAC ag_dec.c (Apache 2.0), adaptive Golomb-Rice.
+; ALAC's adaptive Golomb-Rice codeword: the twin of `get` in
+; ref/dsp/alac/rice.zig. Needs lib/bits.sm included first.
+;
+; One codeword (rice_hot_a .. rice_cold below): k (1..15) in s11 is the read width, m = 2^KM - 1 the multiplier.
+;   A prefix of 9 ones is an escape: the next W bits, raw (W in the Y slot ESC, <= 22).
+;   Otherwise, pre ones then a zero; hi = the next k - 1 bits; with base = pre * m,
+;   hi == 0 gives base, else base + 2 * hi + bit - 1.
+; The prefix is counted, not walked: the cache's avail bits shifted to the top of the word,
+; a leading one makes it negative and x01.norm counts the run (x17 handbook 10, norm of a run
+; of c ones is c - 1). The ones and the zero then leave the cache with one mask. A byte is
+; read only when every bit left is a one, so the reader never runs past the codeword.
+; hi and its bit are read as one k-bit v = 2 * hi + bit: v >= 2 gives base + v - 1, and v < 2
+; (hi == 0) gives base with v's bit handed back to the cache. base = (pre << KM) - pre.
+
+.const MAX_PREFIX = 9
+
+; One codeword in four pieces, n into s8: rice_hot_a, then the caller's label V and rice_hot_b,
+; then the caller's label D; rice_small at the caller's label S and rice_cold at its label C,
+; both out of line (after an unconditional jump). The common codeword (a zero first, v >= 2)
+; falls straight through hot_a and hot_b. Keeps s1..s3, s5, s7, s15 and KM. Uses s4, s6,
+; s12, s13 and getbits's.
+;
+; hot_a: z = the cache's avail bits at the top; z > 0 is a zero first with pre = 0 (base 0).
+; z < 0 (a one first) and z == 0 (an empty cache, or nothing but zeros left) go to C.
+.macro rice_hot_a(C) {
+        ldi s12, #-24
+        alu s12, s10, s12, #OP_ADD ; avail - 24
+        alu s12, s12, s9, #ASR  ; z: the avail bits at the top, wrapping (fact 774)
+        ptst p3, s0, #LE12, #PTST ; a one first, or z == 0
+        jmp #3, #3, C
+        alu s10, s10, s14, #OP_SUB ; (delay slot) a zero: it leaves (its bit is 0)
+        alu s4, s0, s0, #OP_ADD ; (delay slot) base = 0
+}
+
+; hot_b: v, k bits; v >= 2 gives base + v - 1 here, v < 2 goes to S with v << avail in s6.
+.macro rice_hot_b(S) {
+        getbits_s(s13)          ; v, k bits
+        alu s12, s13, s14, #OP_SUB
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; v < 2: hi == 0
+        jmp #3, #3, S
+        alu s8, s4, s13, #OP_ADD ; (delay slot) base + v
+        x19.alu s6, s13, s10, #SHIFT ; (delay slot) v << avail
+        alu s8, s8, s14, #OP_SUB ; base + v - 1
+}
+
+; v < 2 (hi == 0): base, v's bit handed back to the cache.
+.macro rice_small(D) {
+        alu s9, s9, s6, #OP_ADD ; v's bit back on top of the cache
+        jmp #ALWAYS, #0, D
+        alu s10, s10, s14, #OP_ADD ; (delay slot)
+        alu s8, s4, s0, #OP_ADD ; (delay slot) base
+}
+
+; The rest, entered from hot_a with z in s12, avail - 1 in s10, base 0 in s4.
+.macro rice_cold(KM, ESC, V, D) {
+        ptst p3, s0, #LT12, #PTST ; a one first (s12 is still z)
+        jmp #3, #3, ones        ; (ones undoes hot_a's step)
+        alu s8, s0, s0, #OP_ADD ; (delay slot) pre = 0
+        nop()                   ; (delay slot)
+        alu s12, s10, s14, #OP_ADD ; avail
+        ptst p3, s0, #EQ12, #PTST ; the cache is empty
+        jmp #IF_NOT, #3, V      ; else only zeros are left: the first has left, base 0
+        nop()                   ; (delay slot)
+        nop()                   ; (delay slot)
+        alu s10, s0, s0, #OP_ADD ; avail = 0 (hot_a's step undone)
+        refill()                ; the codeword's first bit is in the next byte
+        ldi s12, #-24
+pfx:    alu s12, s10, s12, #OP_ADD ; avail - 24
+        alu s12, s12, s9, #ASR  ; z
+        ptst p3, s0, #LT12, #PTST ; a one first
+        jmp #3, #3, ones
+        alu s10, s10, s14, #OP_SUB ; (delay slot) a zero: it leaves
+        x19.alu s4, s8, KM, #SHIFT ; (delay slot) pre << KM
+        jmp #ALWAYS, #0, V
+        alu s4, s4, s8, #OP_SUB ; (delay slot) base = pre * m
+        nop()                   ; (delay slot)
+        ; c >= 1 ones at the top: norm(z) = c - 1
+ones:   x01.norm s4, s12
+        alu s4, s4, s14, #OP_ADD ; c
+        alu s10, s10, s14, #OP_ADD ; avail again (the slot's step undone)
+        alu s8, s8, s4, #OP_ADD ; pre += c
+        ldi s12, #MAX_PREFIX
+        alu s12, s8, s12, #OP_SUB ; pre - 9
+        ptst p3, s0, #LT12, #PTST
+        jmp #IF_NOT, #3, esc    ; nine ones: the escape
+        alu s13, s10, s4, #OP_SUB ; (delay slot) avail - c
+        alu s6, s12, s0, #OP_ADD ; (delay slot) pre - 9
+        alu s12, s13, s14, #OP_SUB ; avail - c - 1
+        ptst p3, s0, #LT12, #PTST ; every bit left was a one
+        jmp #3, #3, more
+        alu s10, s12, s0, #OP_ADD ; (delay slot) the ones and the zero leave
+        x19.alu s12, s14, s12, #SHIFT ; (delay slot) 2^avail
+        alu s12, s12, s14, #OP_SUB
+        x18.and s9, s9, s12
+        jmp #ALWAYS, #0, V
+        x19.alu s4, s8, KM, #SHIFT ; (delay slot) pre << KM
+        alu s4, s4, s8, #OP_SUB ; (delay slot) base
+more:   alu s9, s0, s0, #OP_ADD ; the ones leave: the cache is empty
+        alu s10, s0, s0, #OP_ADD
+        refill()                ; the run goes on into the next byte
+        jmp #ALWAYS, #0, pfx
+        ldi s12, #-24           ; (delay slot)
+        nop()                   ; (delay slot)
+        ; the escape: 9 - (pre - c) of this pass's ones leave, then W raw bits, W <= 22:
+        ; above 15 in two reads, 8 then W - 8
+esc:    alu s10, s13, s6, #OP_ADD
+        x19.alu s12, s14, s10, #SHIFT
+        alu s12, s12, s14, #OP_SUB
+        x18.and s9, s9, s12
+        ldy s4, ESC
+        ldi s11, #15
+        alu s12, s11, s4, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; W > 15
+        jmp #IF_NOT, #3, esc1
+        alu s11, s4, s0, #OP_ADD ; (delay slot) k = W
+        nop()                   ; (delay slot)
+        ldi s11, #8
+        getbits_s(s8)           ; the top 8
+        ldi s11, #-8
+        alu s11, s4, s11, #OP_ADD ; W - 8, kept by getbits_s
+        getbits_s(s13)
+        x19.alu s8, s8, s11, #SHIFT ; top << (W - 8) < 2^23
+        jmp #ALWAYS, #0, D
+        alu s8, s8, s13, #OP_ADD ; (delay slot)
+        nop()                   ; (delay slot)
+esc1:   getbits_s(s8)
+        jmp #ALWAYS, #0, D
+        nop()
+        nop()
+}
+
+.macro rice_slots(base) {
+        ldi s5, #base - 1
+        x17.mve e1, s5
+        ldi s5, #base
+        x17.mve e12, s5
+        ldi s5, #base + 1
+        x17.mve e3, s5
+        ldi s5, #base + 2
+        x17.mve e4, s5
+        ldi s5, #base + 3
+        x17.mve e7, s5
+        ldi s5, #base + 4
+        x17.mve e8, s5
+        ldi s5, #base + 5
+        x17.mve e9, s5
+        ldi s5, #base + 6
+        x17.mve e10, s5
+}
+
+; dst = floor(x / 2^n) for x >= -2^22, n in 1..15 (ldi sign-extends 2^15). Uses s6.
+.macro floorshr(dst, x, n) {
+        ldi s6, #1 << (n - 1)
+        alu dst, x, s6, #OP_SUB
+        ldi s6, #-n
+        x19.alu dst, dst, s6, #SHIFT
+}
+
+; ---------------------------------------------------------------------------
+; rice_decompress: the adaptive loop, the twin of `rice.decompress`.
+;
+; rice_slots(base) points e registers at Y slots the caller fills first (every value fits
+; 16 bits): e12 Y:base+1 the initial mean mb (< 2^15), e4 Y:base+3 n, e7 Y:base+4 pb (<= 127),
+; e8 Y:base+5 kb (1..15), e9 Y:base+6 max_bits (<= 22), e10 Y:base+7 error (0), set to 1 when a
+; zero run overruns (the model's RunTooLong). e3 Y:base+2 is scratch: the zero run's escape
+; width, 16. e1 Y:base+0 is unused.
+;
+; The loop keeps its state in registers: s1 = q, s2 = r with mb = 2^9 q + r, r in [0, 2^9), so
+; floor(mb / 2^9) = q and floor(pb mb / 2^9) = pb q + floor(pb r / 2^9); s3 = kb, s5 = 22 - kb,
+; s7 = pb << 15, s15 = pb (16 again at the end); the bit reader's s9, s10, s14. Residuals go to
+; X:[A6], A6 + 1 each; R4 = A6 + n ends the lane. Products are x18.mpy's exact integer ones
+; (x17 reference.md x18.mpy: P mod 2^24, and the high half P >> 24, operands >= 0):
+; pb nd <= 127 * 2^16, pb q < 2^23, (pb << 15) r < 2^32. The mean's step
+; t = r + pb nd - pb q - floor(pb r / 2^9) stays inside +-2^23, so q' = q + floor(t / 2^9) and
+; r' = t mod 2^9 need no wide arithmetic.
+
+; One residual, zmode in ZMR (s0 or s14). In: s4 = q + 3. Leaves through B0 (s4 = q + 3 set),
+; ZR (mb < 128) or CL (n >= 2^16), or FIN with the lane full.
+.macro rice_body(ZMR, FIN, B0, ZR, CL) {
+        pcond p3, R4, A6, #30   ; samples left: A6 != R4
+        jmp #IF_NOT, #3, FIN
+        x01.norm s4, s4         ; (delay slot) k = min(lg(q + 3), kb), lg(y) = 22 - norm(y)
+        alu s4, s5, s4, #OP_SUB ; (delay slot) lg - kb
+        x01.selneg s4, s4, #0   ; min(lg - kb, 0)
+        alu s11, s3, s4, #OP_ADD ; k
+        rice_hot_a(cc)
+cv:     rice_hot_b(cs)
+cd:     alu s6, s8, ZMR, #OP_ADD ; nd = n + zmode
+        ; the residual floor((nd + 1) / 2), negated when nd is odd: f - b nd, f = floor(nd / 2),
+        ; b = nd & 1
+        x18.and s12, s6, s14
+        x18.mpy s12, s0, s12, s6 ; b nd
+        alu s13, s14, s6, #ASR  ; f (fact 774)
+        alu s13, s13, s12, #OP_SUB
+        pks(13, A6, 0, s0, s0, 0) ; stored, A6 + 1
+        ldi s12, #16
+        alu s12, s12, s8, #ASR  ; floor(n / 2^16)
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, CL     ; n >= 2^16: the mean clamps
+        x18.mpy s12, s0, s15, s6 ; (delay slot) pb nd
+        x18.mpy s13, s0, s15, s1 ; (delay slot) pb q
+        x18.mpy s0, s4, s7, s2  ; floor(pb r / 2^9)
+        alu s2, s2, s12, #OP_ADD
+        alu s2, s2, s13, #OP_SUB
+        alu s2, s2, s4, #OP_SUB ; t
+        ldi s12, #9
+        alu s12, s12, s2, #ASR  ; floor(t / 2^9)
+        alu s1, s1, s12, #OP_ADD ; q'
+        ldi s13, #-9
+        alu s13, s13, s12, #ASR
+        alu s2, s2, s13, #OP_SUB ; r'
+        ; a zero run follows when mb < 128: q == 0 and r < 128
+        ldi s12, #7
+        alu s12, s12, s2, #ASR
+        x18.or s12, s12, s1     ; plain 24-bit or (fact 952)
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, B0
+        ldi s4, #3              ; (delay slot)
+        alu s4, s1, s4, #OP_ADD ; (delay slot) q + 3
+        jmp #ALWAYS, #0, ZR
+        nop()
+        nop()
+cs:     rice_small(cd)
+cc:     rice_cold(s11, e9, cv, cd)
+}
+
+.macro rice_decompress(base, OUT) {
+        ldy s2, e12             ; mb
+        ldi s12, #9
+        alu s1, s12, s2, #ASR   ; q
+        ldi s12, #-9
+        alu s12, s12, s1, #ASR
+        alu s2, s2, s12, #OP_SUB ; r
+        ldy s3, e8              ; kb
+        ldi s5, #22
+        alu s5, s5, s3, #OP_SUB ; 22 - kb
+        ldy s15, e7             ; pb
+        ldi s7, #15
+        x19.alu s7, s15, s7, #SHIFT ; pb << 15
+        ldi s4, #16
+        x17.sty e3, #4, #0      ; the zero run's escape width
+        ldy s12, e4
+        rset_k(R4, s12, OUT)    ; R4 = OUT + n, A6's end
+        ldi s4, #3
+        alu s4, s1, s4, #OP_ADD ; q + 3
+b0:     rice_body(s0, fin, b0, zr, cl)
+        ; a zero run, mb = r < 128, while samples are left
+zr:     pcond p3, R4, A6, #30
+        jmp #IF_NOT, #3, fin
+        alu s4, s2, s2, #OP_ADD ; (delay slot)
+        alu s4, s4, s14, #OP_ADD ; (delay slot) 2 r + 1
+        ; kz = 8 - bitlen(r) + floor((r + 16) / 2^6), bitlen(r) = lg(2 r + 1) = 22 - norm
+        x01.norm s4, s4
+        ldi s12, #-14
+        alu s4, s4, s12, #OP_ADD
+        ldi s12, #16
+        alu s12, s2, s12, #OP_ADD
+        ldi s13, #6
+        alu s12, s13, s12, #ASR
+        alu s11, s4, s12, #OP_ADD ; kz, the read width
+        alu s4, s3, s11, #OP_SUB
+        x01.selneg s4, s4, #0
+        alu s1, s11, s4, #OP_ADD ; min(kz, kb), m's exponent (q is reset below)
+        rice_hot_a(zc)          ; run
+zv:     rice_hot_b(zs)
+zn:     alu s6, s8, s0, #OP_ADD
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST ; an empty run
+        jmp #3, #3, zd
+        ldi s13, #0             ; (delay slot)
+        nop()                   ; (delay slot)
+zl:     pcond p3, R4, A6, #30
+        jmp #IF_NOT, #3, over   ; a zero past the lane
+        alu s6, s6, s14, #OP_SUB ; (delay slot)
+        alu s12, s6, s0, #OP_ADD ; (delay slot)
+        ptst p3, s0, #EQ12, #PTST ; the last zero
+        jmp #IF_NOT, #3, zl
+        pks(13, A6, 0, s0, s0, 0) ; (delay slot) 0 stored, A6 + 1
+        nop()                   ; (delay slot)
+        ; mb = 0; zmode = 1 unless the run was 65535 or more
+zd:     alu s12, s8, s14, #OP_ADD
+        alu s1, s0, s0, #OP_ADD
+        alu s2, s0, s0, #OP_ADD
+        ldi s4, #16
+        alu s12, s4, s12, #ASR  ; floor((run + 1) / 2^16)
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, b1
+        ldi s4, #3              ; (delay slot) q + 3, q = 0
+        nop()                   ; (delay slot)
+        jmp #ALWAYS, #0, b0
+        nop()
+        nop()
+zs:     rice_small(zn)
+zc:     rice_cold(s1, e3, zv, zn)
+b1:     rice_body(s14, fin, b0, zr, cl)
+cl:     ldi s1, #127            ; mb = 0xFFFF
+        ldi s2, #511
+        jmp #ALWAYS, #0, b0
+        ldi s4, #130            ; (delay slot) q + 3
+        nop()                   ; (delay slot)
+over:   x17.sty e10, #6, #1     ; error = 1 (s14)
+fin:    ldi s15, #16
+}

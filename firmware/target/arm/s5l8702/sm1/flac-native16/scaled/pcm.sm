@@ -1,0 +1,66 @@
+; One Y word pair per output sample. Preserve both sides of the first channel's
+; signed 17-bit range. Second-channel reads finish before the pair is overwritten.
+    yld(s11, BLOCK)
+    aimm_o(4, AUDIO)
+    lde e7, #128
+    yld(s12, SECOND)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, second_pcm
+    ldi s4, #16
+    nop()
+first_pcm:
+    pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    alu s2, s4, s1, #ASR
+    x17.styi e7, #1, #0, e7
+    x17.styi e7, #2, #0, e7
+    again(s11, first_pcm)
+    ret()
+second_pcm:
+    lde e9, #128
+    ldi s4, #-16
+    alu s8, s4, s14, #ASR
+    alu s8, s8, s14, #OP_SUB
+    yld(s5, ASSIGN)
+    equals(1, lr_pcm)
+    equals(8, ls_pcm)
+    equals(9, sr_pcm)
+    jmp #ALWAYS, #0, ms_pcm
+    nop()
+    nop()
+.macro read_pair() {
+    ldy s1, e9
+    x18.eagu e9, e9, #AGU_INC
+    ldy s3, e9
+    x18.eagu e9, e9, #AGU_INC
+    ldi s4, #-16
+    alu s3, s4, s3, #ASR
+    x18.and s1, s1, s8
+    x18.or s1, s1, s3
+    pk(s2, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+}
+.macro write_pair(L) {
+    x17.styi e7, #1, #0, e7
+    x17.styi e7, #2, #0, e7
+    again(s11, L)
+    ret()
+}
+lr_pcm:
+    read_pair()
+    write_pair(lr_pcm)
+ls_pcm:
+    read_pair()
+    alu s2, s1, s2, #OP_SUB
+    write_pair(ls_pcm)
+sr_pcm:
+    read_pair()
+    alu s1, s1, s2, #OP_ADD
+    write_pair(sr_pcm)
+ms_pcm:
+    read_pair()
+    x18.and s3, s2, s14
+    alu s2, s14, s2, #ASR
+    alu s4, s1, s2, #OP_SUB
+    alu s1, s1, s2, #OP_ADD
+    alu s1, s1, s3, #OP_ADD
+    alu s2, s4, s0, #OP_ADD
+    write_pair(ms_pcm)

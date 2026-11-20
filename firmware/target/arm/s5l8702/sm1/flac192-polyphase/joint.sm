@@ -1,0 +1,48 @@
+.const BLOCK = 0x2e10
+.const GROUPS = 0x2e11
+.const ASSIGN = 0x2e12
+.const SIDE = 0x2e13
+.const SECOND = 0x2e14
+.const FIRST = 0x80
+.const WASTE = 0x2e15
+.const WIDTH = 0x2e16
+
+.macro equals(V, L) {
+    ldi s2, #V
+    alu s12, s5, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, L
+    nop()
+    nop()
+}
+.macro raw_sample() {
+    yld(s4, WIDTH)
+    ldi s2, #25
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, narrow
+    nop()
+    nop()
+    fetch(s9, 1)
+    sample24()
+    ; A side value outside signed 24-bit requests software fallback.
+    ldi s2, #23
+    alu s2, s2, s1, #ASR
+    alu s12, s9, s2, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, invalid
+    alu s13, s13, s14, #OP_ADD
+    nop()
+    jmp #ALWAYS, #0, done
+    nop()
+    nop()
+narrow:
+    signed_bits()
+done:
+}
+
+.const BLOCKCODE = 0x2e30
+.const RATECODE = 0x2e31
+.const RATE_CODE = 3
+.const RATE = 192000
+.const RATE_TEN = 19200

@@ -1,0 +1,5 @@
+.const RATE_CODE = 9
+.const RATE_TEN = 4410
+.const RATE = 44100
+.const RATE_TAG = 4
+.include "decoder.sm"

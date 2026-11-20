@@ -1,0 +1,541 @@
+; Audited from x17 116d9e1 examples/lib/predictor.sm, 2026-11-08 (docs/x17-import.md).
+; Twin: ref/dsp/alac/predictor.zig; Apple ALAC dp_dec.c (Apache 2.0), unpc_block.
+; ALAC's adaptive predictor: the twin of `unpredict` in ref/dsp/alac/predictor.zig.
+; Needs lib/bits.sm (constants, nop, s14 = 1) and lib/rice.sm (floorshr) first.
+;
+; Arrays are 24-bit X words walked upward through A registers:
+;   A2   residuals pc[0..n)           (read)
+;   A3   samples out[0..n)            (written)
+;   A10  coefficients, REVERSED: X:[A10 + i] = coefs[order - 1 - i], adapted in place, then
+;        zeros from i = order to 35
+; Walking the coefficients reversed lets every access ascend: the sum over k does not
+; care about order, and the adaptation visits k = order - 1 down to 0, i.e. i upward.
+; A4, A7, A8, A9, A11 are scratch. A1 is avoided: every x02 bundle runs its A slot, and the
+; multiply templates name A1 there, so each x02.mpy / x02.x3 also does A1 += 1 (own-x02mpy-a1).
+;
+; Y slots (pred_slots(base)), filled by the caller:
+;   e11 Y:base+0  n
+;   e12 Y:base+1  order (0..31)
+;   e13 Y:base+2  den_shift (0..15)
+;   e14 Y:base+3  24 - chan_bits (chan_bits 8..23, with den_shift + chan_bits <= 32, chan_bits
+;                 <= 18 + den_shift), sxcb's shift
+;   e15 Y:base+4  scratch: samples left
+;
+; Keeps the bit reader (e5, s9, s10) and s14, s15. Uses every other s register; unpredict
+; parks s9 and s10 at X:[A10 + 40], +41 (past the coefficients and their zeros up to +35; Y
+; is 16 bits, the cache is not), the adaptation's K at +42 (A12) and +44 (A5), the rounding's
+; counts at +45..+47 (A13). It also writes R4 (the out end), R5, R6, R7, R13, e6 and p3, and
+; leaves s15 = 16.
+; Left shifts by a runtime count that must wrap go through sxr first, so the 0x19 shift
+; (which saturates) never overflows.
+
+.macro pred_slots(base) {
+        ldi s5, #base - 1
+        x17.mve e11, s5
+        ldi s5, #base
+        x17.mve e12, s5
+        ldi s5, #base + 1
+        x17.mve e13, s5
+        ldi s5, #base + 2
+        x17.mve e14, s5
+        ldi s5, #base + 3
+        x17.mve e15, s5
+}
+
+; x = x sign-extended from its low k bits, k (8..24) in register `k` (left at k - 1).
+; Uses s12. q = rshr(x, k) = round(x / 2^k), half up; x - q * 2^k is then in
+; [-2^(k-1), 2^(k-1)) and congruent to x. q * 2^k goes in two halves of at most 2^22 each,
+; so the 0x19 shift never saturates (q reaches 2^(23-k)). k = 24 gives q = 0.
+.macro sxr(x, k) {
+        alu s12, s0, k, #OP_SUB ; -k
+        x19.alu s12, x, s12, #SHIFT ; q
+        alu k, k, s14, #OP_SUB  ; k - 1
+        x19.alu s12, s12, k, #SHIFT ; q * 2^(k-1)
+        alu x, x, s12, #OP_SUB
+        alu x, x, s12, #OP_SUB
+}
+
+; sxr with k from the Y slot `slot`. Uses s12, s13.
+.macro sxe(x, slot) {
+        ldy s13, slot
+        sxr(x, s13)
+}
+
+; x = x sign-extended from chan_bits: up by 24 - chan_bits (the pred_slots word), wrapping at
+; 24 bits, then back down, arithmetic (alu code 6, fact 774). Uses s12, s13.
+.macro sxcb(x) {
+        ldy s13, e14            ; 24 - chan_bits
+        alu s12, s0, s13, #OP_SUB
+        alu x, s12, x, #ASR
+        alu x, s13, x, #ASR
+}
+
+; dst = floor(v / 2^n), n (0..15) in a register: rshr(v - h, n), h = rshr(2^n - 1, 1).
+; v must leave room for the subtraction (|v| < 2^23 - 2^14). Uses s6.
+.macro floorn(dst, v, n) {
+        x19.alu s6, s14, n, #SHIFT ; 2^n
+        alu s6, s6, s14, #OP_SUB
+        alu dst, s0, s14, #OP_SUB ; -1 (dst is free until the end)
+        x19.alu s6, s6, dst, #SHIFT ; h
+        alu dst, v, s6, #OP_SUB
+        alu s6, s0, n, #OP_SUB
+        x19.alu dst, dst, s6, #SHIFT
+}
+
+; buf[j] = buf[j] + buf[j - 1] sign-extended from chan_bits, in place over X:[A2..A2+n)
+; (mode != 0, the twin of `predictor.integrate`). Reads the pred_slots n and chan_bits; leaves
+; A2 past the buffer. Uses s1, s3, s4, s6, s12, s13; counts in s1 (x02.ainc writes s2).
+.macro integrate() {
+        ldy s1, e11
+        alu s4, s1, s14, #OP_SUB
+        ptst p3, s0, #LT4, #PTST ; n == 0
+        jmp #3, #3, done
+        nop()
+        nop()
+        x19.xrd s4, #2          ; prev = buf[0]
+        x02.ainc #2, #2
+        alu s1, s1, s14, #OP_SUB
+next:   alu s12, s1, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, done
+        nop()
+        nop()
+        x19.xrd s3, #2
+        alu s3, s3, s4, #OP_ADD
+        sxcb(s3)
+        stx A2, s3
+        x02.ainc #2, #2
+        alu s4, s3, s0, #OP_ADD
+        alu s1, s1, s14, #OP_SUB
+        jmp #ALWAYS, #0, next
+        nop()
+        nop()
+done:
+}
+
+; The sample loop, unrolled per G = (order + 3) / 4 (pv1 .. pv8; unpredict picks one per lane).
+; Registers it keeps: s1 = -23 (sg's count), s6 = 256 (sgn's scale), s10 = ds, s11 = 24 - chan_bits,
+; s15 = chan_bits - 24, s14 = 1, s7 = top; A8 = top's pointer out[j - order - 1], A10 = the
+; reversed coefficients (2^8 c), A2 the residuals, A3 the output; R4 = the output's end,
+; R6 = A10 + order, R7 = M + 3 (M = 4 G).
+;
+; sum = sum_k c_k (out[j - 1 - k] - top) = sum_k c_k out[j - 1 - k] - top sum_k c_k, on x03.tap's
+; exact running sum {s2:s3} += 2 a b, 24 x 24 into 48 bits (x17 reference.md x03.tap, 672,
+; 701). A tap multiplies the value the bundle before loaded, then loads the next: the history
+; taps load out[] (s13) through A9 against a coefficient register (s5, s8, s9, s12); the
+; coefficient loads (A11) multiply the register's old coefficient by -top (s4) as they replace
+; it, so every c_k meets -top once. The loads before any coefficient multiply by s0; the
+; padding's zeros end the chain (the coefficients are zero from order to +35, alac.sm). The
+; last coefficient load steps A11 back by R7 to A10 (x03.tapa, x - R).
+.macro pred_head(FIN) {
+        pcond p3, R4, A3, #30   ; more: A3 != R4
+        jmp #IF_NOT, #3, FIN
+        x19.xrd s7, #8          ; (delay slot) top; FIN ignores s7 and A9
+        x03.agu A9, A8, #1, #0, A0 ; (delay slot) the history, out[j - order]
+        alu s4, s0, s7, #OP_SUB ; -top
+        x03.tap0 s13, #9, s0, s2, s3 ; {s2:s3} = 0 (mode 4, 702)
+        x03.tap s5, #11, s0, s2, s3
+        x03.tap s8, #11, s0, s2, s3
+}
+
+; four coefficients: the first group's s9, s12 hold no coefficient yet
+.macro tg_first() {
+        x03.tap s9, #11, s0, s2, s3
+        x03.tap s12, #11, s0, s2, s3
+        x03.tap s13, #9, s5, s2, s3
+        x03.tap s13, #9, s8, s2, s3
+        x03.tap s13, #9, s9, s2, s3
+        x03.tap s13, #9, s12, s2, s3
+        x03.tap s5, #11, s4, s2, s3
+        x03.tap s8, #11, s4, s2, s3
+}
+
+.macro tg_mid() {
+        x03.tap s9, #11, s4, s2, s3
+        x03.tap s12, #11, s4, s2, s3
+        x03.tap s13, #9, s5, s2, s3
+        x03.tap s13, #9, s8, s2, s3
+        x03.tap s13, #9, s9, s2, s3
+        x03.tap s13, #9, s12, s2, s3
+        x03.tap s5, #11, s4, s2, s3
+        x03.tap s8, #11, s4, s2, s3
+}
+
+.macro tg_end() {
+        x03.tap s9, #11, s4, s2, s3
+        x03.tapa s12, #11, s4, s2, s3, #3, R7 ; A11 - R7 = A10
+}
+
+; acc = 2 2^8 sum = hi 2^24 + lo (lo's 24 bits unsigned, L = lo read signed), the coefficients
+; being 2^8 c. ALAC's pred = floor((sum + 2^(ds-1)) / 2^ds) = rshr(acc, ds + 9), the shifter's
+; half-up right shift; with H = hi + [L < 0], that is H 2^(15-ds) + rshr(L, ds + 9), and only
+; its low chan_bits <= 23 bits count, so H 2^(15-ds) may wrap at 24 bits. The counts are the
+; window's: X:[A13] 23, +1 ds - 15, +2 -(ds + 9), read by x02 loads that step A13 and step it
+; back (x - R, R5 = 2). Packed x02 bundles (pk, pks: mem.sm) read before they write.
+;
+; Then the adaptation: i = 0 .. order - 1 (k = order - 1 - i), weight w = i + 1, one loop per
+; sign of res. With D = +-del0 both stop at D <= 0:
+;   res > 0: dd > 0: c -= 1, D -= w * floor(dd / 2^ds); dd < 0: c += 1, -dd instead
+;   res < 0: dd > 0: c += 1, D += w * floor(-dd / 2^ds); dd < 0: c -= 1, dd instead
+; m = rshr(|dd| + K, ds) is floor(|dd| / 2^ds) with K = -h (res > 0, X:[A12]) and
+; ceil(|dd| / 2^ds) with K = 2^ds - 1 - h (res < 0, X:[A5]), h = rshr(2^ds - 1, 1). Each
+; coefficient step is branch-free: c moves by 2^8 sgn(dd) (down for res > 0, up for res < 0)
+; and wraps at 24 bits, the reference's int16 store times 2^8; D -= w m. The loop ends at
+; D <= 0 or with A11 at R6. Packed x02 bundles (pk, mem.sm) carry the step: sg =
+; asrrs(dd << 23) is 0x7FFFFF, 0 or -0x800000, so the rnd product slot gives |dd| =
+; rnd(dd sg / 2^23) (exact while |dd| < 2^22) and 2^8 sgn(dd) = rnd(sg 2^8 / 2^23); m is
+; the code-7 slot's rshr by s10 = ds. The next step's out, sg, |dd| and dd run one step
+; ahead, in the back edge's delay slots.
+.macro pred_tail(SMP) {
+        pk(s12, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; 23
+        pk(s9, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; ds - 15
+        alu s13, s12, s3, #ASR  ; L >> 23: -1 when L < 0 (alu code 6, fact 774)
+        pkf(s12, A13, s0, s0, s0, 2, s2, s13, 5, 0, 3, R5) ; -(ds + 9), A13 back; H = hi + [L < 0]
+        alu s2, s9, s2, #ASR    ; H << (15 - ds), wrapping
+        x19.alu s3, s3, s12, #SHIFT ; rshr(L, ds + 9)
+        pk(s8, A2, s0, s0, s0, 3, s2, s3, 0, 0) ; res, A2 + 1; pred
+        alu s3, s3, s8, #OP_ADD
+        alu s3, s3, s7, #OP_ADD ; res + top + pred
+        alu s3, s15, s3, #ASR   ; up by 24 - chan_bits, wrapping
+        alu s3, s11, s3, #ASR   ; down: sign-extended from chan_bits
+        pks(3, A3, 12, s8, s14, 5) ; out[j], A3 + 1; res - 1
+        ptst p3, s0, #LT12, #PTST ; res <= 0
+        jmp #IF_NOT, #3, adp    ; res > 0
+        alu s4, s8, s0, #OP_ADD ; (delay slot) D = res
+        x03.agu A9, A8, #1, #0, A0 ; (delay slot) the history again
+        alu s12, s8, s0, #OP_ADD
+        ptst p3, s0, #LT12, #PTST ; res < 0
+        jmp #3, #3, adn
+        alu s4, s0, s8, #OP_SUB ; (delay slot) D = -res
+        x19.xrd s9, #5          ; (delay slot) K for res < 0
+        jmp #ALWAYS, #0, SMP    ; res == 0: no adaptation
+        x02.ainc #8, #8         ; (delay slot) advance
+        nop()                   ; (delay slot)
+adp:    x19.xrd s9, #12         ; K for res > 0
+        pk(s3, A9, s0, s0, s0, 5, s14, s0, 0, 0) ; out, A9 + 1; w = 1
+        x19.xrd s13, #11        ; c
+        alu s3, s7, s3, #OP_SUB ; dd = top - out
+        pk(s8, A9, s0, s0, s0, 12, s1, s3, 0, 7) ; next out, A9 + 1; sg = asrrs(dd << 23)
+        pk(s0, A0, s2, s3, s12, 3, s7, s8, 5, 0) ; |dd| = rnd(dd sg / 2^23) (exact, |dd| < 2^22); next dd
+pstep:  pk(s0, A0, s12, s12, s6, 2, s2, s9, 0, 0) ; 2^8 sgn(dd) = rnd(sg 2^8 / 2^23); |dd| + K
+        pk(s0, A0, s0, s0, s0, 8, s10, s2, 0, 7) ; m = rshr(|dd| + K, ds) (code 7, 730)
+        x18.mpy s2, s0, s5, s8  ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
+        alu s13, s13, s12, #OP_SUB ; c -= sgn(dd), wrapping at 24 bits
+        pks(13, A11, 4, s4, s2, 5) ; c stored, A11 + 1; D -= w m
+        ptst p3, s0, #LE4, #PTST ; D <= 0: stop
+        jmp #3, #3, adone
+        pkf(s13, A11, s0, s0, s0, 5, s5, s14, 0, 0, 2, R13) ; (delay slot) next c (R13 = 0); w += 1
+        pcond p3, R6, A11, #30  ; (delay slot) coefficients left: A11 != R6 (adone ignores p3)
+        jmp #3, #3, pstep
+        pk(s8, A9, s0, s0, s0, 12, s1, s3, 0, 7) ; (delay slot) next out, A9 + 1; next sg
+        pk(s0, A0, s2, s3, s12, 3, s7, s8, 5, 0) ; (delay slot) next |dd|; the dd after
+        jmp #ALWAYS, #0, adone
+        nop()
+        nop()
+adn:
+        pk(s3, A9, s0, s0, s0, 5, s14, s0, 0, 0) ; out, A9 + 1; w = 1
+        x19.xrd s13, #11        ; c
+        alu s3, s7, s3, #OP_SUB ; dd = top - out
+        pk(s8, A9, s0, s0, s0, 12, s1, s3, 0, 7) ; next out, A9 + 1; sg = asrrs(dd << 23)
+        pk(s0, A0, s2, s3, s12, 3, s7, s8, 5, 0) ; |dd| = rnd(dd sg / 2^23) (exact, |dd| < 2^22); next dd
+nstep:  pk(s0, A0, s12, s12, s6, 2, s2, s9, 0, 0) ; 2^8 sgn(dd) = rnd(sg 2^8 / 2^23); |dd| + K
+        pk(s0, A0, s0, s0, s0, 8, s10, s2, 0, 7) ; m = rshr(|dd| + K, ds) (code 7, 730)
+        x18.mpy s2, s0, s5, s8  ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
+        alu s13, s13, s12, #OP_ADD ; c += sgn(dd), wrapping at 24 bits
+        pks(13, A11, 4, s4, s2, 5) ; c stored, A11 + 1; D -= w m
+        ptst p3, s0, #LE4, #PTST ; D <= 0: stop
+        jmp #3, #3, adone
+        pkf(s13, A11, s0, s0, s0, 5, s5, s14, 0, 0, 2, R13) ; (delay slot) next c (R13 = 0); w += 1
+        pcond p3, R6, A11, #30  ; (delay slot) coefficients left: A11 != R6 (adone ignores p3)
+        jmp #3, #3, nstep
+        pk(s8, A9, s0, s0, s0, 12, s1, s3, 0, 7) ; (delay slot) next out, A9 + 1; next sg
+        pk(s0, A0, s2, s3, s12, 3, s7, s8, 5, 0) ; (delay slot) next |dd|; the dd after
+adone:  jmp #ALWAYS, #0, SMP
+        x02.ainc #8, #8         ; (delay slot) advance
+        x19.aagu A11, A10, #5, #0 ; (delay slot) the coefficients from the start
+}
+
+.macro pv1(FIN) {
+        ldi s13, #5
+        x17.mve e6, s13
+        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = M + 3 = 7
+smp:    pred_head(FIN)
+        tg_first()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv2(FIN) {
+        ldi s13, #9
+        x17.mve e6, s13
+        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = M + 3 = 11
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv3(FIN) {
+        ldi s13, #13
+        x17.mve e6, s13
+        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = M + 3 = 15
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv4(FIN) {
+        ldi s13, #17
+        x17.mve e6, s13
+        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = M + 3 = 19
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv5(FIN) {
+        ldi s13, #21
+        x17.mve e6, s13
+        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = M + 3 = 23
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv6(FIN) {
+        ldi s13, #25
+        x17.mve e6, s13
+        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = M + 3 = 27
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv7(FIN) {
+        ldi s13, #29
+        x17.mve e6, s13
+        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = M + 3 = 31
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv8(FIN) {
+        ldi s13, #33
+        x17.mve e6, s13
+        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = M + 3 = 35
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro unpredict(OUT, COEF) {
+        x03.agu A5, A10, #40, #0, A0 ; park the bit reader
+        stx A5, s9
+        x02.ainc #5, #5
+        stx A5, s10
+        ldy s7, e11
+        alu s12, s7, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; n == 0
+        jmp #3, #3, finish
+        x19.aagu A4, A3, #5, #0 ; (delay slot) A4 = out base
+        nop()
+        x19.xrd s1, #2          ; out[0] = pc[0]
+        x02.ainc #2, #2
+        stx A3, s1
+        x02.ainc #3, #3
+        alu s7, s7, s14, #OP_SUB ; left = n - 1
+        ldy s8, e12             ; warm-up count = order
+        ; out[j] = sx(pc[j] + out[j - 1]) for j = 1 .. min(order, n - 1)
+warm:   alu s12, s7, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; nothing left
+        jmp #3, #3, finish
+        nop()
+        nop()
+        ptst p3, s0, #LE8, #PTST ; warm-up done
+        jmp #3, #3, main
+        nop()
+        nop()
+        x19.xrd s3, #2
+        x02.ainc #2, #2
+        alu s1, s3, s1, #OP_ADD
+        sxcb(s1)
+        stx A3, s1
+        x02.ainc #3, #3
+        alu s7, s7, s14, #OP_SUB
+        alu s8, s8, s14, #OP_SUB
+        jmp #ALWAYS, #0, warm
+        nop()
+        nop()
+        ; order == 0 lands here with j = 1 and copies (the sum below is empty, so
+        ; out[j] = sx(pc[j] + top); handled apart to match the reference's plain copy)
+main:   x17.sty e15, #7, #0     ; left
+        ldy s8, e12
+        ptst p3, s0, #LE8, #PTST ; order == 0
+        jmp #IF_NOT, #3, window
+        nop()
+        nop()
+copy:   ldy s7, e15
+        alu s12, s7, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, finish
+        nop()
+        nop()
+        x19.xrd s1, #2
+        x02.ainc #2, #2
+        stx A3, s1
+        x02.ainc #3, #3
+        alu s7, s7, s14, #OP_SUB
+        x17.sty e15, #7, #0
+        jmp #ALWAYS, #0, copy
+        nop()
+        nop()
+window: x19.aagu A8, A4, #5, #0 ; top: out[j - order - 1]
+        x19.aagu A7, A4, #5, #0
+        x02.ainc #7, #7         ; history: out[j - order]
+        ; R4 = OUT + n = A3 + left: the sample loop runs while A3 != R4
+        ldy s12, e11
+        rset_k(R4, s12, OUT)
+        ; the adaptation's K for each sign of res, once: X:[A10 + 42], +44
+        x03.agu A12, A10, #42, #0, A0
+        x03.agu A5, A10, #44, #0, A0
+        ldy s2, e13
+        x19.alu s9, s14, s2, #SHIFT ; 2^ds
+        alu s10, s0, s2, #OP_SUB ; -ds
+        alu s9, s9, s14, #OP_SUB ; 2^ds - 1
+        alu s2, s0, s14, #OP_SUB
+        x19.alu s2, s9, s2, #SHIFT ; h
+        alu s9, s9, s2, #OP_SUB ; 2^ds - 1 - h: K for res < 0
+        stx A5, s9
+        alu s9, s0, s2, #OP_SUB ; -h: K for res > 0
+        stx A12, s9
+        ; the rounding's counts, X:[A10 + 45], +46, +47 through A13: 23, ds - 15, -(ds + 9);
+        ; and the sign extension's, s11 = 24 - chan_bits, s15 = chan_bits - 24, which the taps
+        ; and the adaptation leave alone
+        x03.agu A13, A10, #45, #0, A0
+        ldi s12, #23
+        stx A13, s12
+        x02.ainc #13, #13
+        ldi s12, #-15
+        alu s12, s12, s10, #OP_SUB ; ds - 15 (s10 = -ds)
+        stx A13, s12
+        x02.ainc #13, #13
+        ldi s12, #-9
+        alu s12, s12, s10, #OP_ADD ; -(ds + 9)
+        stx A13, s12
+        x03.agu A13, A10, #45, #0, A0
+        ldy s11, e14
+        alu s15, s0, s11, #OP_SUB
+        ; R5 = 2 (the rounding's step back), R6 = A10 + order (the adaptation's end)
+        ldi s13, #0
+        x17.mve e6, s13
+        x19.a3 s0, R5, e6, #25, #2, #0
+        ldy s12, e12
+        rset_k(R6, s12, COEF)   ; COEF + order
+        x19.aagu A11, A10, #5, #0
+        ldi s1, #-23            ; sg's shift count (x18.min / max select on sign, 951)
+        ldi s6, #256            ; sgn(dd)'s scale
+        alu s10, s0, s10, #OP_SUB ; ds, m's shift
+        rset_k(R13, s0, 0)      ; R13 = 0: the c load's step
+        ; G = (order + 3) / 4 groups of four taps: one unrolled sample loop per G
+        ldy s13, e12
+        ldi s12, #3
+        alu s13, s13, s12, #OP_ADD
+        ldi s12, #2
+        alu s13, s12, s13, #ASR ; G, 1..8
+        ldi s12, #-5
+        alu s12, s13, s12, #OP_ADD
+        ptst p3, s0, #LT12, #PTST ; G <= 4
+        jmp #3, #3, g14
+        ldi s12, #-7            ; (delay slot)
+        alu s12, s13, s12, #OP_ADD ; (delay slot)
+        ptst p3, s0, #LT12, #PTST ; G <= 6
+        jmp #3, #3, g56
+        ldi s12, #-8            ; (delay slot)
+        alu s12, s13, s12, #OP_ADD ; (delay slot)
+        ptst p3, s0, #LT12, #PTST ; G == 7
+        jmp #3, #3, v7
+        nop()
+        nop()
+        jmp #ALWAYS, #0, v8
+        nop()
+        nop()
+g56:    ldi s12, #-6
+        alu s12, s13, s12, #OP_ADD
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, v5
+        nop()
+        nop()
+        jmp #ALWAYS, #0, v6
+        nop()
+        nop()
+g14:    ldi s12, #-3
+        alu s12, s13, s12, #OP_ADD
+        ptst p3, s0, #LT12, #PTST ; G <= 2
+        jmp #3, #3, g12
+        ldi s12, #-4            ; (delay slot)
+        alu s12, s13, s12, #OP_ADD ; (delay slot)
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, v3
+        nop()
+        nop()
+        jmp #ALWAYS, #0, v4
+        nop()
+        nop()
+g12:    ldi s12, #-2
+        alu s12, s13, s12, #OP_ADD
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, v1
+        nop()
+        nop()
+        jmp #ALWAYS, #0, v2
+        nop()
+        nop()
+v1:     pv1(finish)
+v2:     pv2(finish)
+v3:     pv3(finish)
+v4:     pv4(finish)
+v5:     pv5(finish)
+v6:     pv6(finish)
+v7:     pv7(finish)
+v8:     pv8(finish)
+finish: ldi s15, #16
+        x03.agu A5, A10, #40, #0, A0 ; the bit reader back
+        x19.xrd s9, #5
+        x02.ainc #5, #5
+        x19.xrd s10, #5
+}

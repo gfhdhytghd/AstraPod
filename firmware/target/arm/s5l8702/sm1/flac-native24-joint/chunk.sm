@@ -1,0 +1,81 @@
+; Scratch addresses disjoint from output Y:0x80..0x207f and wide low bits.
+.const FRAMESIZE = 0x2e23
+.const SUB_LEFT = 0x2e24
+.const PART_LEFT = 0x2e25
+.const RUN_SIZE = 0x2e26
+.const SKIP = 0x2e27
+.const OFFSET = 0x2e28
+.const K_SAVE = 0x2e29
+.const ESC_MODE = 0x2e2a
+.const CHUNK = 1024
+.const STATE_X = 0x300
+.const STATE_Y = 0x2b00
+.const RAWTYPE = 0x2e2b
+
+; e7/e9 = output-ring pair at the current group offset, s11 = groups.
+.macro out_pos() {
+    yld(s5, OFFSET)
+    alu s5, s5, s5, #OP_ADD
+    ldi s4, #127
+    alu s5, s5, s4, #OP_ADD
+    x17.mve e7, s5
+    x17.mve e9, s5
+}
+; A9 = first sample to emit, e13 = its low-bit companion. Warm history
+; at the start of a noninitial chunk is excluded from produced PCM.
+.macro input_pos() {
+    yld(s4, SKIP)
+    ldi s2, #AUDIO
+    alu s5, s2, s4, #OP_ADD
+    amov(A9, s5)
+    ldi s2, #WBASE-1
+    alu s5, s2, s4, #OP_ADD
+    x17.mve e13, s5
+}
+; Store unscaled predictor history before the output stage restores wasted bits.
+.macro save_history() {
+    yld(s11, ORDER)
+    alu s12, s11, s0, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, done
+    nop()
+    nop()
+    yld(s4, BLOCK)
+    alu s4, s4, s11, #OP_SUB
+    ldi s2, #AUDIO
+    alu s5, s4, s2, #OP_ADD
+    amov(A9, s5)
+    ldi s2, #WBASE-1
+    alu s5, s4, s2, #OP_ADD
+    x17.mve e8, s5
+    aimm_o(3, STATE_X)
+    lde e12, #STATE_Y
+h:  pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    pks(1, A7, 0, s0, s0, 0)
+    ldy s1, e8
+    x18.eagu e8, e8, #AGU_INC
+    x17.styi e12, #1, #0, e12
+    again(s11, h)
+done:
+}
+.macro restore_history() {
+    aimm_o(4, STATE_X)
+    aimm_o(3, AUDIO)
+    lde e8, #STATE_Y
+    lde e13, #WBASE
+    yld(s11, ORDER)
+    alu s12, s11, s0, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, done
+    nop()
+    nop()
+h:  pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    pks(1, A7, 0, s0, s0, 0)
+    ldy s1, e8
+    x18.eagu e8, e8, #AGU_INC
+    x17.styi e13, #1, #0, e13
+    again(s11, h)
+done:
+}
+.const ACC = 0x2e31+1
+.const TARGET = 0x2e33

@@ -967,8 +967,27 @@ static bool read_mp4_container(int fd, struct mp3entry* id3,
     return rc;
 }
 
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+#include "sm1_fmp4.h"
+#endif
 bool get_mp4_metadata(int fd, struct mp3entry* id3)
 {
+#if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
+    struct sm4_info info;
+    off_t file_bytes = ffilesize(fd);
+    if (file_bytes > 0 && (uint64_t)file_bytes <= UINT32_MAX &&
+        sm4_identify(fd,file_bytes,&info)) {
+        id3->codectype=AFMT_FLAC;
+        id3->frequency=info.rate;
+        id3->samples=info.total;
+        id3->filesize=file_bytes;
+        id3->length=(uint64_t)info.total*1000/info.rate;
+        id3->bitrate=id3->length ? (uint64_t)file_bytes*8/id3->length : 0;
+        id3->vbr=true;
+        return id3->length>0;
+    }
+    lseek(fd,0,SEEK_SET);
+#endif
     id3->codectype = AFMT_UNKNOWN;
     id3->filesize = 0;
     errno = 0;

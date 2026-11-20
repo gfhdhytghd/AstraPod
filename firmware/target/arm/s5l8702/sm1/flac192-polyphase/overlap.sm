@@ -1,0 +1,486 @@
+.include "sections.sm"
+.const FPOS = 0x2e40
+.const GROUP = 0x2e41
+.const TAIL = 0x2e42
+.const LIVE = 0x2e43
+.const HACC = 0x2e50
+.const BACC = 0x2e53
+.const FIRSTACC = 0x2e56
+.const SIDEACC = 0x2e59
+.const LACC = 0x2e5c
+.const RACC = 0x2e5f
+.const CL = 0x2e62
+.const CR = 0x2e65
+.const CARRY = 0x2700
+.const FIR_HIGH = 0x500
+.const FH = 0x1560
+.const FB = 0x17e0
+.const FT = 0x1a60
+.macro frompos(A, BASE) {
+    ldi s4, #BASE
+    alu s5, s4, s3, #OP_ADD
+    amov(A, s5)
+}
+filter_input:
+    yld(s12, OFFSET)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, fi_ready
+    nop()
+    nop()
+    xzero(FH, 48)
+    xzero(FB, 48)
+    ldi s3, #0
+    yst(FPOS)
+    yst(GROUP)
+    yld(s3, FRAMESIZE)
+    ldi s4, #3
+    alu s3, s3, s4, #OP_ADD
+    ldi s4, #2
+    alu s3, s4, s3, #ASR
+    alu s3, s3, s3, #OP_ADD
+    yst(LIVE)
+fi_ready:
+    ldi s3, #0
+    yst(TAIL)
+    terminal_pad()
+    input_pos()
+    yld(s11, GROUPS)
+    alu s11, s11, s11, #OP_ADD
+    jmp #ALWAYS, #0, fir_group
+    nop()
+    nop()
+filter_tail:
+    ldi s3, #1
+    yst(TAIL)
+    ldi s11, #12
+fir_group:
+    yld(s3, FPOS)
+    amov_e(7, s3)
+    x03.agu A3, A14, #5472, #0, A0
+    x03.agu A7, A14, #5484, #0, A0
+    x03.agu A11, A14, #6112, #0, A0
+    x03.agu A13, A14, #6124, #0, A0
+    x03.agu A1, A14, #5496, #0, A0
+    x03.agu A5, A14, #5508, #0, A0
+    x03.agu A15, A14, #6136, #0, A0
+    x03.agu A4, A14, #6148, #0, A0
+    alu s3, s3, s14, #OP_ADD
+    ldi s4, #12
+    alu s12, s3, s4, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, sparse_pos
+    nop()
+    nop()
+    ldi s3, #0
+sparse_pos:
+    yst(FPOS)
+    yld(s12, TAIL)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, sparse_zero
+    nop()
+    nop()
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, sparse_normal
+    nop()
+    nop()
+sparse_side_data:
+    pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    ldy s2, e13
+    x18.eagu e13, e13, #AGU_INC
+    pks(1, A1, 0, s0, s0, 0)
+    pks(1, A5, 0, s0, s0, 0)
+    pks(2, A15, 0, s0, s0, 0)
+    pks(2, A4, 0, s0, s0, 0)
+    pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    ldy s2, e13
+    x18.eagu e13, e13, #AGU_INC
+    pks(1, A3, 0, s0, s0, 0)
+    pks(1, A7, 0, s0, s0, 0)
+    pks(2, A11, 0, s0, s0, 0)
+    pks(2, A13, 0, s0, s0, 0)
+    jmp #ALWAYS, #0, sparse_wide_dot
+    nop()
+    nop()
+sparse_normal:
+    pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    pks(1, A1, 0, s0, s0, 0)
+    pks(1, A5, 0, s0, s0, 0)
+    pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    pks(1, A3, 0, s0, s0, 0)
+    pks(1, A7, 0, s0, s0, 0)
+    jmp #ALWAYS, #0, sparse_narrow_dot
+    nop()
+    nop()
+sparse_zero:
+    ldi s1, #0
+    ldi s2, #0
+    pks(1, A1, 0, s0, s0, 0)
+    pks(1, A5, 0, s0, s0, 0)
+    pks(2, A15, 0, s0, s0, 0)
+    pks(2, A4, 0, s0, s0, 0)
+    pks(1, A3, 0, s0, s0, 0)
+    pks(1, A7, 0, s0, s0, 0)
+    pks(2, A11, 0, s0, s0, 0)
+    pks(2, A13, 0, s0, s0, 0)
+    jmp #ALWAYS, #0, sparse_wide_dot
+    nop()
+    nop()
+sparse_wide_dot:
+    x03.agu A2, A3, #0, #0, A0
+    aimm_e(3, FT)
+    x03.tap0 s1, #2, s0, s5, s6
+    x03.agu A4, A11, #0, #0, A0
+    x03.tap0 s2, #4, s0, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s2, #4, s4, s8, s9
+    x03.tap s4, #6, s0, s5, s6
+    alu s12, s4, s0, #OP_ADD
+    x03.agu A2, A1, #6, #0, A0
+    x19.xrd s1, #2
+    x03.tap s1, #2, s12, s5, s6
+    x03.agu A4, A15, #6, #0, A0
+    x19.xrd s2, #4
+    x03.tap s2, #4, s12, s8, s9
+    jmp #ALWAYS, #0, sparse_done
+    nop()
+    nop()
+sparse_narrow_dot:
+    x03.agu A2, A3, #0, #0, A0
+    aimm_e(3, FT)
+    x03.tap0 s1, #2, s0, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    x03.tap s1, #2, s4, s5, s6
+    x03.tap s4, #6, s0, s5, s6
+    alu s12, s4, s0, #OP_ADD
+    x03.agu A2, A1, #6, #0, A0
+    x19.xrd s1, #2
+    x03.tap s1, #2, s12, s5, s6
+    jmp #ALWAYS, #0, sparse_done
+    nop()
+    nop()
+sparse_done:
+.macro round_native(H,L, N, MASK, SHIFT, DST) {
+    ; Cut the low word at the rounding bit and combine with the signed high word.
+    ldi s4, #N
+    alu s1, s4, L, #ASR
+    ldi s4, #MASK
+    x18.and s1, s1, s4
+    alu s1, s1, s14, #OP_ADD
+    alu s1, s14, s1, #ASR
+    ldi s4, #SHIFT
+    alu s3, s4, H, #ASR
+    alu DST, s3, s1, #OP_ADD
+}
+    round_native(s5, s6, 22, 3, -1, s7)
+    aimm_o(1, 0x244)
+    pks(7, A3, 0, s0, s0, 0)
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, rounded_store
+    nop()
+    nop()
+    yld(s12, ASSIGN)
+    ldi s4, #10
+    alu s12, s12, s4, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, rounded_mid
+    nop()
+    nop()
+    ; D is even. Round (2D+E)/2^23 via (D+2*floor(E/4))/2^22.
+    ldi s4, #2
+    alu s1, s4, s9, #ASR
+    x03.tap s1, #4, s14, s5, s6
+    round_native(s5, s6, 21, 7, -2, s7)
+    jmp #ALWAYS, #0, rounded_store
+    nop()
+    nop()
+rounded_mid:
+    ; E is even; add exactly E to D in its native 48-bit accumulator.
+    alu s1, s14, s9, #ASR
+    x03.tap s1, #4, s14, s5, s6
+    round_native(s5, s6, 22, 3, -1, s7)
+rounded_store:
+    pks(7, A3, 0, s0, s0, 0)
+    mask16(s8)
+    yld(s12, SECOND)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, mix_second
+    nop()
+    nop()
+.macro get_round(D, SLOT) {
+    aimm_e(1, SLOT)
+    x19.xrd D, #2
+}
+.macro first_ptr() {
+    yld(s3, GROUP)
+    alu s4, s14, s3, #ASR
+    ldi s2, #FIR_HIGH
+    alu s5, s4, s2, #OP_ADD
+    amov(A7, s5)
+    yld(s12, TAIL)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, live_base
+    nop()
+    nop()
+    yld(s4, LIVE)
+    alu s3, s3, s4, #OP_SUB
+    ldi s4, #0x2b80-1
+    jmp #ALWAYS, #0, ready_base
+    nop()
+    nop()
+live_base:
+    ldi s4, #127
+ready_base:
+    alu s3, s3, s4, #OP_ADD
+    x17.mve e8, s3
+}
+    first_ptr()
+    get_round(s6, 0x245)
+    x17.styi e8, #6, #0, e8
+    ldi s4, #16
+    alu s6, s4, s6, #ASR
+    ldi s4, #255
+    x18.and s6, s6, s4
+    yld(s3, GROUP)
+    x18.and s12, s3, s14
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, first_hi_ready
+    nop()
+    nop()
+    x19.xrd s1, #7
+    ldi s4, #-8
+    alu s6, s4, s6, #ASR
+    x18.or s6, s1, s6
+first_hi_ready:
+    pks(6, A7, 0, s0, s0, 0)
+    jmp #ALWAYS, #0, group_done
+    nop()
+    nop()
+mix_second:
+    first_ptr()
+    x19.xrd s6, #7
+    yld(s3, GROUP)
+    x18.and s12, s3, s14
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, hi_ready
+    nop()
+    nop()
+    ldi s4, #8
+    alu s6, s4, s6, #ASR
+hi_ready:
+    ldi s4, #-16
+    alu s6, s4, s6, #ASR
+    ldy s1, e8
+    x18.and s1, s1, s8
+    x18.or s6, s6, s1
+    yld(s5, ASSIGN)
+    equals(1, independent_mix)
+    equals(8, leftside_mix)
+    equals(9, rightside_mix)
+    get_round(s2, 0x244)
+    alu s7, s6, s2, #OP_SUB
+    get_round(s2, 0x245)
+    alu s6, s6, s2, #OP_ADD
+    jmp #ALWAYS, #0, carry_and_emit
+    nop()
+    nop()
+independent_mix:
+    get_round(s7, 0x244)
+    jmp #ALWAYS, #0, carry_and_emit
+    nop()
+    nop()
+leftside_mix:
+    get_round(s2, 0x245)
+    alu s7, s6, s2, #OP_SUB
+    jmp #ALWAYS, #0, carry_and_emit
+    nop()
+    nop()
+rightside_mix:
+    get_round(s7, 0x244)
+    alu s6, s6, s7, #OP_ADD
+carry_and_emit:
+    yld(s3, GROUP)
+    ldi s4, #12
+    alu s12, s3, s4, #OP_SUB
+    ptst p3, s0, #LT12, #PTST
+    jmp #IF_NOT, #3, no_old
+    nop()
+    nop()
+.macro carry_ptr() {
+    ldi s4, #-2
+    alu s3, s4, s3, #ASR
+    ldi s4, #CARRY-1
+    alu s3, s3, s4, #OP_ADD
+    x17.mve e8, s3
+}
+.macro load_carry(D) {
+    ldy s1, e8
+    x18.eagu e8, e8, #AGU_INC
+    x18.and s1, s1, s8
+    ldy s3, e8
+    x18.eagu e8, e8, #AGU_INC
+    ldi s4, #-16
+    alu s3, s4, s3, #ASR
+    x18.or s1, s1, s3
+    alu D, D, s1, #OP_ADD
+}
+    carry_ptr()
+    load_carry(s6)
+    load_carry(s7)
+no_old:
+    yld(s12, TAIL)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, park_tail
+    nop()
+    nop()
+    yld(s3, GROUP)
+    x18.and s12, s3, s14
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, second_96
+    nop()
+    nop()
+    aimm_o(6, 0x19a0)
+    pks(6, A13, 0, s0, s0, 0)
+    pks(7, A13, 0, s0, s0, 0)
+    jmp #ALWAYS, #0, group_done
+    nop()
+    nop()
+second_96:
+    aimm_e(2, 0x19a0)
+    pk(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0)
+    pk(s5, A4, s0, s0, s0, 0, s0, s0, 0, 0)
+    alu s2, s6, s0, #OP_ADD
+    aimm_o(6, 0x1980)
+    pks(5, A13, 0, s0, s0, 0)
+    pks(7, A13, 0, s0, s0, 0)
+    aimm_e(1, 0x1840)
+    aimm_o(1, 0x1840)
+    aimm_e(3, 0x1900)
+    pk(s5, A2, s0, s0, s0, 0, s0, s0, 0, 0)
+    pk(s6, A2, s0, s0, s0, 0, s0, s0, 0, 0)
+    pks(1, A3, 0, s0, s0, 0)
+    pks(2, A3, 0, s0, s0, 0)
+    section()
+    section()
+    section()
+    section()
+    section()
+    section()
+    aimm_o(6, 0x1940+66)
+    pks(2, A13, 0, s0, s0, 0)
+    aimm_e(2, 0x1940+64)
+    pk(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0)
+    pk(s2, A4, s0, s0, s0, 0, s0, s0, 0, 0)
+    aimm_e(1, 0x1880)
+    aimm_o(1, 0x1880)
+    aimm_e(3, 0x1900)
+    pk(s5, A2, s0, s0, s0, 0, s0, s0, 0, 0)
+    pk(s6, A2, s0, s0, s0, 0, s0, s0, 0, 0)
+    pks(1, A3, 0, s0, s0, 0)
+    pks(2, A3, 0, s0, s0, 0)
+    section()
+    section()
+    section()
+    section()
+    section()
+    section()
+    pk(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0)
+    ldi s4, #32
+    alu s1, s1, s4, #OP_ADD
+    alu s2, s2, s4, #OP_ADD
+    ldi s4, #6
+    alu s1, s4, s1, #ASR
+    alu s2, s4, s2, #ASR
+    ldi s4, #32767
+    smin(s1, s4)
+    smin(s2, s4)
+    ldi s4, #-32768
+    smax(s1, s4)
+    smax(s2, s4)
+    yld(s3, GROUP)
+    ldi s4, #126
+    alu s3, s3, s4, #OP_ADD
+    x17.mve e8, s3
+    x17.styi e8, #1, #0, e8
+    x17.styi e8, #2, #0, e8
+    jmp #ALWAYS, #0, group_done
+    nop()
+    nop()
+park_tail:
+    yld(s3, GROUP)
+    yld(s4, LIVE)
+    alu s3, s3, s4, #OP_SUB
+    carry_ptr()
+.macro store_carry(D) {
+    x17.styi e8, #D, #0, e8
+}
+    x17.styi e8, #6, #0, e8
+    ldi s4, #16
+    alu s1, s4, s6, #ASR
+    x17.styi e8, #1, #0, e8
+    x17.styi e8, #7, #0, e8
+    alu s1, s4, s7, #ASR
+    x17.styi e8, #1, #0, e8
+group_done:
+    yld(s3, GROUP)
+    alu s3, s3, s14, #OP_ADD
+    yst(GROUP)
+    again(s11, fir_group)
+    ret()

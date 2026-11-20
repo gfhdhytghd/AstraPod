@@ -1,0 +1,933 @@
+# x17 sub-form table: multi-syllable bundles with a fixed base per syllable.
+#
+# One line per sub-form.  Whitespace-separated columns:
+#   name   syllables   base_head   base_s1   base_s2 [base_s3 ...]
+#
+# Each `base_*` is the all-operands-zero value of that syllable.  The
+# assembler OR's operand field contributions (listed in operands.txt with
+# a `syll` column) on top of the base.
+#
+# All x17.* sub-forms are 3 syllables (head + S1 + S2); the `.halt` case
+# has no operand fields, the others have at least one.  Sources: the ref
+# strings in isa.toml plus the silicon-measured byte patterns in
+# own probes (own-x17alu-shl, own-x17imm, own-x17ctl, ...).
+
+# x12.agu: 2-syllable low5 0x12 S class 001.  AGU output fans out to e, s,
+# R simultaneously (fact 231 / own-x12agu):
+#   V = AGU10[head[20:17]](x = e<head[8:5]>, y = R<head[16:13]>)
+#   e<head[12:9]> <- V
+#   s<2*S[2:0] + head[31]> <- V
+#   R<S[24:21]> <- V
+x12.agu    2   0x00000012   0x20000000
+
+# x12.agu29: same shape as x12.agu, head[29] set (inert).
+# fact 246 / own-x12agu29.
+x12.agu29  2   0x20000012   0x20000000
+
+# x13.st: 2-syllable low5 0x13 S class 101 (fact 226 / own-x13st).
+# ALU sub (code 0x10) side: s<head[18:15]> <- 0 - s<head[22:19]>.
+# The X-store side (A<head[30:26]> <- s<S[28:25]>) is not modelled.
+x13.st     2   0x14000213   0xB2000000
+
+# x16.agu: 3-syllable low5 0x16, S2 class 011 (fact 117 / own-x16agu).
+# s<S2[6:3]> <- AGU10[S1[10:7]](x=e<2*S2[2:0]>, y=R<head[30:27]>).  fn 6
+# (x+y) and fn 10 (y+imm) measured.
+x16.agu    3   0x00000016   0x10004000   0x60002000
+
+# x15.alu: 2-syllable low5 0x15 S class 101.  Head is a full class-05 ALU
+# word (fact 123 / own-x15alu):
+#   s<head[18:15]> <- ALU05[head[10:5]](s<head[14:11]>, s<head[29:26]>, m=head[25:23])
+# When S[24:22] = 111 the same result also lands on s<S[10:7]>.  Only
+# code 0x0E (add) is modelled; wider ops OPEN.
+x15.alu    2   0x00000015   0xA1E00000
+
+# x17.agu2: 3-syllable x17 S1 class 001 S2 class 000 (fact 136 /
+# own-x17agu2):
+#   v = AGU10[S1[10:7]](y = R<head[30:27]>, i = head[26:11])
+#   s<S2[13:10]> <- v, e<2*S1[2:0]> <- v
+x17.agu2   3   0x00000017   0x28001800   0x00000000
+
+# x19.agu: 4-syllable low5 0x19 class (0,0,0).  AGU writes R and e in
+# parallel (fact 143 / own-x19agu):
+#   v = AGU10[w1[27:24]](x = e<w3[28:25]>, y = R<w3[14:11]>)
+#   R<w3[10:7]> <- v, e<w1[23:20]> <- v
+x19.agu    4   0x00000019   0x10040000   0x02C40000   0x00000000
+
+# x19.alu: 4-syllable low5 0x19 class (0,0,4) (fact 147 / own-x19alu).  w1[23:20] = 6, the
+# always-write condition (fact 646): 0 writes only while p1 = 0.  w2[17:14] = 15: the
+# bundle sets p<w2[17:14]> (647), and 15 touches no predicate.
+#   s<w1[27:24]> <- OP[head[9:5]](a = s<w2[21:18]>, b = s<w1[19:16]>)
+# Codes (147, 699, 24 bits): 0/1/2/8/9/14/15/22/24/25/27/30 zero, 3/4/28/29 a+1,
+# 5/16-21/26 a, 6/7/10-13 b, 31 a+2, 23 sat24(a << b).
+x19.alu    4   0x00000419   0x00605808   0x0003C101   0x81E18008
+
+# x19.alum: x19alu with its w1[14:11] mode and w1[3:0] clear (fact 454): 8 ops on a + b,
+# 0xA ops on a, 9 writes nothing.
+x19.alum   4   0x00000019   0x00600000   0x8003C101   0x81E18008
+
+# x19.e: 4-syllable low5 0x19 class (2,0,0) (fact 148 / own-x19e):
+#   e<w1[23:20]> <- head[20:5]
+#   s<head[24:21]> <- source selected by w1[14:12] mux; mux 010 picks
+#   e<w2[7:4]>.  Other mux encodings OPEN.
+x19.e      4   0x00000019   0x42040000   0x01C20000   0x00000000
+
+# x19.xrd: 4-syllable low5 0x19 class (0,4,3) (fact 154 / own-x19xrd); read index
+# A<{w1[2:0], head[31:30]}> (fact 651). The bundle also writes A<head[29:25]> <-
+# AGU3[w3[24:20]](x = A<w3[19:15]>, i) (fact 654): the template keeps head[29:25] = 0.
+# X-memory read into s: s<head[24:21]> <- X:[A<k>].
+x19.xrd    4   0x00000019   0x08028002   0x80003000   0x61500554
+
+# x19.a3: 4-syllable low5 0x19 class (0,0,3) (fact 149 / own-x19a3).
+# Parallel s load from AGU3 and R load from AGU10.  Only AGU3 fn 25
+# (returns i) modelled.
+x19.a3     4   0x00000019   0x08008000   0x00002008   0x60000000
+
+# x19.a3st: w2[9] = w2[1] = 1, Y:[e<w3[28:25]>] <- s<{w2[0], w1[31:29]}>
+# (fact 257 / own-x19a3st).
+x19.a3st   4   0x00000019   0x08010008   0x00004202   0x60510000
+
+# x19.aagu42: 4-syllable low5 0x19 class (0,4,2) (fact 152 /
+# own-x19aagu42).  Same as x19.aagu with w2[31] set, which widens i:
+#   i = (w3[14:0] << 1) | w2[31]
+x19.aagu42 4   0x00000019   0x06000000   0x80000000   0x40000000
+
+# x19.alu44: 4-syllable low5 0x19 class (0,4,4) (fact 153 /
+# own-x19alu44).  Same op as x19.alu with w2[31] set.
+x19.alu44  4   0x00000419   0x00605808   0x8003C101   0x81E18008
+
+# x19.a43: 4-syllable low5 0x19 class (0,4,3), w1[17:15]=1 (AGU3 source).
+# s <- AGU3[25]((w3[14:0] << 1) | w2[31]).  fact 151 / own-x19a43.
+x19.a43    4   0x00000019   0x08008002   0x80000000   0x60058000
+
+# x19.k00: 4-syllable low5 0x19 class (3,0,0) (fact 235 / own-x19k00
+# and 240 / own-x19kimm).  Muxed s write; mux 001 = AGU10(x, y), mux 110 =
+# head imm.
+x19.k00    4   0x00000019   0x60040006   0x02D80000   0x00540000
+
+# x19.kalu: class (3,0,0) with w1[17:15]=5.  ALU sub (a - b) into s.
+# fact 238 / own-x19kalu.
+x19.kalu   4   0x00000019   0x66069000   0x02D80000   0x06543000
+
+# x19.kabs: class (3,0,0) with w1[17:15]=7 (|b|).
+# fact 238 / own-x19kabs.
+x19.kabs   4   0x00000019   0x66079000   0x02D80000   0x06543000
+
+# x19.kimm: class (3,0,0) with mux w1[14:12]=110 - head-imm load.
+# fact 240 / own-x19kimm.
+x19.kimm   4   0x00000019   0x66046006   0x02D80000   0x06543000
+
+# x19.kmux2: class (3,0,0) with mux w1[14:12]=010 (same AGU10 as mux 001).
+# fact 240 / own-x19kmux2.
+x19.kmux2  4   0x00000019   0x60042006   0x02D80000   0x00540000
+
+# x16.mul: 3-syllable low5 0x16 S2 class 110, S2[20:16] = 1 (truncate).
+# Scalar multiply with shift (fact 118 / own-x16mul):
+#   s<S2[13:10]> <- (s<S2[4:1]> * s<S2[8:5]>) >> 23 (truncated)
+# S2[20:16] = 5 variant (rounded) still OPEN.
+x16.mul    3   0x00000016   0x00040000   0xC0000000
+
+# x13.agu: 2-syllable low5 0x13 S class 001.  Scalar e load + R AGU
+# (fact 225 / own-x13agu):
+#   e<S[12:9]> <- head[20:5]
+#   R<S[28:25]> <- AGU10[S[20:17]](x = e<S[24:21]>, y = R<S[16:13]>)
+# S[8] = 1 required (baked).
+x13.agu    2   0x00000013   0x20000100
+
+# x02.mpy: 6-syllable VLIW at low5 0x02, w1 mode 4 (P) rounded multiply
+# (fact 156 / own-x02mpy):
+#   s<w2[12:9]> <- round(s<w2[4:1]> * s<w2[8:5]> / 2^23)
+x02.mpy    6   0x00000002   0x0000A000   0x00020000   0x00000001   0x00042800   0x00004200
+
+# x02.ainc: 6-syllable VLIW at low5 0x02 with the A-increment slot active
+# (w3[1] = 1).  A<w2[21:17]> <- A<w3[4:0]> + 1 (fact 157 /
+# own-x02ainc).  The template's w2 multiply slot points at s0 (w2[12:9] = 0), which drops the
+# write (954); with w2[12:9] = 2 it wrote s2 <- rnd(s1 * s2 >> 23) (953).
+x02.ainc   6   0x00000002   0x0000A000   0x00020042   0x00000002   0x00042800   0x00004200
+
+# x18.eagu: 4-syllable low5 0x18, w3 class 000 (fact 169 /
+# own-x18eagu).  Uses AGU10 to update e:
+#   e<w1[25:22]> <- AGU10[w1[29:26]](x = e<w3[28:25]>, y = 0)
+# Its A slot (956: A<2*w1[3:0]+h31> <- A8 + 1) is parked on A16, which nothing
+# reads (957); w1[3:0] = 4 would step A8.
+x18.eagu   4   0x00000018   0x00000008   0x0002AC00   0x00040000
+
+# x18.edec: 4-syllable low5 0x18 w3 class 100 (fact 172 /
+# own-x18edec).  e <- e +/- 1, sign picked by w2[20].
+x18.edec   4   0x00000018   0x00040180   0x89E00000   0x86000001
+
+# x18.una: 4-syllable low5 0x18 w3 class 011 (fact 168 /
+# own-x18una).  s <- op(s).  Measured: op 3 = +1, op 7 = abs.
+x18.una    4   0x1C000018   0x00000000   0x00004000   0x61D53805
+
+# x18.and: the x18.una bundle with code head[30:25] = 0x1D and op w1[17:15] = 3: LOGIC(a, b)
+# = a & b (fact 644).  s<w1[11:8]> <- s<w2[5:2]> & s<w1[7:4]>.  Class 011 also writes the result
+# to A<2 * w1[3:0] + head[31]> (fact 345): both templates keep w1[3:0] = 0, head[31] = 0.
+x18.and    4   0x3A000018   0x00018000   0x00004000   0x61D53805
+
+# x18.xrd: 4-syllable low5 0x18 w3 class 110, w1 mode 5 (fact 167 /
+# own-x18xrd).  X-memory read into s:
+#   s<head[24:21]> <- X:[A<w2[21:17]>]
+x18.xrd    4   0x00000018   0x00005000   0x00400000   0xC1400001
+
+# x18.rimm: 4-syllable low5 0x18 w3 class 101 (fact 171 /
+# own-x18rimm).  e load from immediate (op 0) or R + imm (op 2):
+#   e<{w2[0], w1[31:29]}> <- op[w2[27:25]](i = w2[23:8], R<w3[14:11]>)
+x18.rimm   4   0x00000018   0x00000000   0x30000008   0xA053C200
+
+# x18.q23: 4-syllable low5 0x18 w3 class 010 (fact 170 / own-x18q23).
+# Scalar multiply with mode in w2[30:28]:
+#   s<w2[15:12]> <- mode(round(s<w2[19:16]> * s<w2[23:20]> / 2^23))
+# Only mode 4 (P) measured; w3[0] = 1 rounds, 0 truncates (fact 684).
+x18.q23    4   0x00000018   0x20A40001   0x00000000   0x54510001
+
+# x18.mpy: 4-syllable low5 0x18 w3 class 110 with w2 non-zero (fact
+# 167 / own-x18mpy).  Integer multiply with split low/high dest:
+#   P = s<w2[4:1]> * s<w2[8:5]>
+#   s<w2[27:24]> <- P mod 2^24   (low, fact 663; 167 read [15:0])
+#   s<w2[12:9]>  <- P >> 24       (high)
+x18.mpy    4   0x00000018   0x00000000   0x00000000   0xC1500001
+
+# x03.xrd: 6-syllable VLIW at low5 0x03, w4 mode 5.  X-memory read with
+# A-index combining w1[2:0] (high 3 bits) and head[31:30] (low 2 bits):
+#   s<w4[6:3]> <- X:[A<{w1[2:0], head[31:30]}>]
+x03.xrd    6   0x00000003   0x00000000   0x0140E000   0x04002008   0x00046800   0x00140102
+
+# x03.yrd: x03.xrd with w5[21] = 1, a Y read at e<w3[30:27]>
+# (fact 190 / own-x03yrd).
+x03.yrd    6   0x00000003   0x00000002   0x0140E000   0x04002008   0x00044004   0x00340100
+
+# x02.c6: w4 slot X read, and w5[19] = 1 copies the same read into the
+# w2 slot's destination (fact 158, 161 / own-x02c6).
+x02.c6     6   0x00008002   0x00000000   0x00060000   0x00000000   0x00002800   0xC00C4200
+
+# x03.esrc: w4 mux 001 with w5[29:28] = 10, s <- e<w3[30:27]>
+# (fact 190 / own-x03esrc).
+x03.esrc   6   0x00000003   0x00000002   0x0140E000   0x04002008   0x00044804   0x20140102
+
+# x03.rslot: 0x02's R slot under a 0x03 head (fact 250, 252 /
+# own-x03rslot, own-x03ragu10).
+x03.rslot  6   0x10049803   0x00000000   0x00004000   0x08000000   0x00008000   0x04000000
+
+# x03.xst: w5[19:18] = 11 stores sx24 s<{w2[0], w1[31:29]}> at
+# X:[A<{w1[2:0], head[31:30]}>] (fact 255 / own-x03xst).
+x03.xst    6   0x00000003   0x00000000   0x00000000   0x00000000   0x00000000   0x00000000
+
+# x03.xw2: w5[6] makes the w2 slot read X (fact 192 / own-x03xw2).
+x03.xw2    6   0x00000003   0x00000002   0x0140E000   0x04002008   0x0004403C   0x00140142
+
+# x03.agu: 6-syllable VLIW at low5 0x03 with the A-AGU slot active
+# (fact 164 / own-x03agu).
+#   A<w3[14:10]> <- AGU[w2[26:22]](x = A<w3[4:0]>, i = {w5[0], w4[31:17]})
+# The mode-5 templates keep w4[2:0] = 0: with w3[31] = 0 that is the e counter's off state
+# (fact 349, e<2 * w4[2:0] + w3[31]> <- e<w3[26:23]> - 1).
+x03.agu    6   0x00000003   0x00000002   0x0140E000   0x04002400   0x00006838   0x00140102
+
+# x04.agu: 6-syllable low5 0x04 class 000 (fact 248 / own-x04agu).
+# R<w3[22:19]> <- AGU10B[w1[10:7]](y = R<head[30:27]>, i = head[26:11]).
+x04.agu    6   0x00000004   0x00000000   0x00004000   0x08000000   0x00008000   0x07000000
+
+# x03.alu: 6-syllable low5 0x03 where the head is a class-0 ALU05 word
+# (fact 251 / own-x03alu).  Dispatch by w4 mode 0.
+x03.alu    6   0x00000003   0x00000500   0x00004000   0x08080000   0x00008000   0x07000000
+
+# x18.q23c: low5 0x18 w3 class 001 (fact 173 / own-x18q23c).
+# Signed 24-bit multiply: the base's w3[0] = 1 rounds /2^23 (745, 746); #shift_bit 1 is w3[2:0] = 101,
+# /2^24.  w3[0] = 0 (truncating /2^23, or unsigned /2^24 with w3[2], 747) has no operand here.
+x18.q23c   4   0x00000018   0x04001000   0x40000000   0x21B03001
+
+# x02.yrd: 6-syllable low5 0x02 w4 mode 5 with w5[12]=1 (Y-read variant).
+# s<w4[6:3]> <- Y:[e<w3[30:27]>] (fact 186 / own-x02yrd).
+x02.yrd    6   0x00000002   0x0000A000   0x00020442   0x00000001   0x00042800   0x00001000
+
+# x02.hdhi: same as x02.imm but head[31:27] are set (inert bits).
+# fact 189 / own-x02hdhi.
+x02.hdhi   6   0xF8000002   0x0000A000   0x00020442   0x00000001   0x00040800   0x00004200
+
+# x16.mul2: 3-syllable low5 0x16 S2 class 001 (fact 121 / own-x16mul2).
+# s<4*S2[1:0] + S1[31:30]> <- (s_a * s_b [+ 2^22]) >> 23 [>> 1].
+x16.mul2   3   0x10000016   0x00000020   0x20000000
+
+# x16.hd: 3-syllable low5 0x16 S2 class 001 with ALU05 in the head.
+# fact 210 / own-x16hd.  head[25:5] is the ALU word; b comes from
+# s<S2[28:25]>.
+x16.hd     3   0x00000016   0x00000000   0x20000000
+
+# x15.pt: 2-syllable low5 0x15 S class 001 (fact 223 / own-x15pt).
+# s<head[24:21]> <- LUT[S[10:8]](p<S[6:3]>).  LUT 1 = p, LUT 0 = !p.
+x15.pt     2   0x00000015   0x20000000
+
+# x18.br: 4-syllable low5 0x18 w3 class 110 with w3[8] = 1 (branch flag).
+# Branch if p<w2[31:28]> by sext(w1[28:18]) bundles (fact 178).
+x18.br     4   0x00000018   0x00000000   0x00006000   0x00000100
+
+# x02.agu: 6-syllable low5 0x02 w4 mode 0 R-AGU slot (fact 249).
+# R<w3[22:19]> <- AGU10B[w1[10:7]](y = R<w5[25:22]>).
+x02.agu    6   0x10049802   0x00000000   0x00004000   0x08000000   0x00008000   0x04000000
+
+# x02.esrc: 6-syllable low5 0x02 w4 mode 010 (fact 187 / own-x02esrc).
+# s<w4[6:3]> <- e<w3[30:27]>.
+x02.esrc   6   0x00000002   0x0000A000   0x00020042   0x00000001   0x00041000   0x20004200
+
+# x02.asrc: 6-syllable low5 0x02 w4 mode 010 with w5[29:28]=01.
+# s<w4[6:3]> <- A<w3[4:0]> + 1 (fact 190 / own-x02asrc).
+x02.asrc   6   0x00000002   0x0000A000   0x00020042   0x00000000   0x00041000   0x10004200
+
+# x03.mpy: 6-syllable low5 0x03 with 0x02-style mpy in w2 slot.
+# fact 165 / own-x03mpy.  s<w2[12:9]> <- (s_a*s_b+2^22) >> 23.
+x03.mpy    6   0x00000003   0x000000C0   0x01400400   0x00003403   0x08000000   0x01D00100
+
+# x02.x3: third slot in x02 mode 5.  s<{w5[1:0], w4[31:30]}> <-
+# (op w5[8:6]) s_a, s_b shifted by w5[5:2].  op 5 = sub.
+# fact 182 / own-x02x3.
+x02.x3     6   0x00000002   0x00002000   0x00020042   0x00000001   0x00042800   0x00004200
+
+# x01.st: 7-syllable low5 0x01 with stores; this model only commits to
+# the scalar copy s3 <- e<w4[8:5]> (fact 243 / own-x01st).
+x01.st     7   0x00000001   0x00000108   0x000C1C00   0x00000000   0x000120A0   0x01003600   0x00003004
+
+# x12.aset: 2-syllable low5 0x12 S class 101 (fact 124 / own-aset12).
+# A<2*S[2:0]> <- R<head[16:13]>.
+x12.aset   2   0x02C00012   0xA0000000
+
+# x02.xrd: 6-syllable VLIW at low5 0x02 w4 mode 5.  X-memory read into s
+# (fact 155 / own-x02xrd):
+#   s<w4[6:3]> <- X:[A<w4[21:17]>]
+x02.xrd    6   0x00000002   0x0000A000   0x00020442   0x00000001   0x00002800   0x00004200
+
+# x02.imm: 6-syllable VLIW at low5 0x02 whose w4 slot selects "I" mode
+# (w4[13:11] = 001).  Scalar immediate load (fact 160 / own-x02imm):
+#   s<w4[6:3]> <- head[26:11]
+# All other measured enables baked into the per-syllable base values.
+x02.imm    6   0x00000002   0x0000A000   0x00020442   0x00000001   0x00040800   0x00004200
+
+# x18.imm: 4-syllable VLIW at low5 0x18, w3 class 110.  Scalar immediate
+# load (fact 175 / own-x18imm):
+#   s<head[24:21]> <- head[20:5]
+# A mux (w1[14:12]) picks the source; both measured cases (110, 001) land
+# on the head immediate.  w3 baked = 0xC1500001.
+x18.imm    4   0x00000018   0x00000000   0x00000000   0xC1500001
+
+# x19.imm: 4-syllable VLIW; AGU with a 16-bit immediate.  Class triple
+# (000, 000, 001).  Semantics from fact 146 / own-x19imm:
+#   e<{w1[0], head[31:29]}> <- AGU10[w1[4:1]](x = e<w3[28:25]>,
+#                                             y = R<head[28:25]>,
+#                                             i = w2[30:15])
+# For the measured gate, fn_op = 10 (y + i); head/w1/w3 bake everything
+# except the imm itself (16 bits at w2[30:15]).  dest = e3.
+x19.imm    4   0x60000019   0x00060614   0x00002000   0x21F20000
+
+# x19.mul: 4-syllable VLIW; scalar multiply with dual R/e write-back.
+# Class triple (000, 001, 110).  Semantics from fact 145 / own-x19mul
+# (op = 4): e<w1[6:3]>, R<w3[10:7]> <- low16(s<w2[8:5]> * s<w2[4:1]>).
+# w1[17] is "no doubling"; w1[15] and w2[24] are the measured enables.
+x19.mul    4   0x00000019   0x00028000   0x21000000   0xC0000000
+
+# bcc: 2-syllable low5 0x10 S class 000.  Branch if p<S[18:15]> set, to
+# q + 4 * sext(S[8:0]) after two delay slots (fact 111 / own-bcc-*).
+# S[14] = 1 wedges silicon (OPEN here).
+bcc        2   0x00000010   0x00000000
+
+# ealu: 2-syllable low5 0x10 S class 110.  Writes e from a 1-arg X16_ALU
+# operation (fact 132 / own-ealu):
+#   e<S[6:3]> <- X16_ALU[S[11]][S[14:12]](a = s<S[21:18]>)
+# Only op (S[11]=1, S[14:12]=5) = a+1 is modelled; others OPEN.
+ealu       2   0x00000010   0xC0000000
+
+# agu10r: 2-syllable bundle.  Scalar immediate load + AGU10 into an R reg.
+# Semantics from fact 131 / own-agu10r:
+#   s<head[24:21]> <- head[20:5]
+#   R<S[24:21]> <- AGU10[S[4:1]](x = e<S[28:25]>, y = R<4*head[28:27]>)
+# S[20] = 1 required (baked); S[18]/S[17] also measured enables.  S class
+# 101 (bits 31, 29 set).  own-agu10r = scalar imm + AGU out of an element.
+agu10r     2   0x00000010   0xA0160000
+
+# xld10: 2-syllable low5 0x10 S class 011 with S[7] = 1, X-memory load +
+# scalar immediate.  Semantics from fact 130 / own-xld10:
+#   s<S[10:7]> <- X:[A<4*S[2:0] + head[31:30]>]
+#   s<head[24:21]> <- head[20:5]
+# S[24] = 0, S[22] = 1 (baked).  Distinguished from `pair` (same class)
+# by S[7]=1 in the dispatcher.
+xld10      2   0x00000010   0x60640000
+
+# yld10: 2-syllable low5 0x10 S class 111, Y-memory load.
+# Semantics from fact 123 / own-yld10:
+#   s<head[24:21]> <- Y:[e<S[28:25]>]      (S[23:22] = 01, S[17:16] = 10)
+# S enables baked: bit 22, bit 17 (S[17:16]=10), bit 7.
+yld10      2   0x00000010   0xE0420080
+
+# p010: 2-syllable low5 0x14 S class 010.  Writes a predicate from a
+# condition code (fact 107 / own-p010-true):
+#   p<S[7:4]> <- cond<S[11:8]>(implicit input)
+# Cond 9 is a constant true in the measured context; others OPEN.
+# S[25] = 1 required (baked).
+condset    2   0x00000014   0x42000000
+
+# pc14: the same bundle with its operand and s write spelled (fact 107, 380, 381, 464):
+#   p<S[7:4]> <- cond(g = h[28:25], c = S[11:8]) of v = mode S[14:12] of s<S[22:19]>
+#   s<h[24:21]> <- mux S[28:27]: 00 !cond (478), 01/10 h[20:5], 11 refused.  S[3:0] = 8 is as measured
+#   (16E29474 42382CD8); what it does is OPEN.
+pc14       2   0x00000014   0x42000008
+
+# yrm: 2-syllable low5 0x14 S class 101.  Scalar immediate load plus a
+# move from e to R (fact 103 / own-yrm):
+#   s<head[24:21]> <- head[20:5]
+#   R<S[3:0]> <- e<S[24:21]>
+# S class 101 + S[28:27] = 10 (baked); S[24:9] non-operand bits also baked.
+yrm        2   0x00000014   0xB2000D00
+
+# ytst: 2-syllable low5 0x14 S class 000.  Writes a predicate from the
+# parity of a Y-memory read (fact 99 / own-ytst-even, own-ytst-odd):
+#   p<S[14:11]> <- (Y:[e<S[24:21]>] & 1) == 0
+# S[25] = 1 enables.
+ytst       2   0x00000014   0x02010000
+
+# xst: 2-syllable low5 0x14 S class 001, X-memory store from an s register.
+# Semantics from fact 106 / own-xst:
+#   X:[A<4*S[2:0] + head[31:30]>] <- s<S[7:4]>  (24-bit sign-extended)
+# S bits S[25], S[8], S[3] all = 1 are the measured enables.  Head[28:26]
+# and bits inside S not spelled out are baked from the measured mask.
+xst        2   0x00000014   0x32000108
+
+# ptest: 2-syllable low5 0x0E bundle, head[31:30] = 00.  Writes s from a
+# function of a predicate (fact 126 / own-ptest, own-ptest-0):
+#   s<head[25:21]> <- FN<S[23:21]>(p<S[27:24]>)
+#   FN: 0 = !p, 1 = p (others OPEN).  S[18] = 1 required.
+ptest      2   0x1C00000E   0x00040000
+
+# psel: 2-syllable low5 0x0E bundle, head[31:30] = 01.  Selects between
+# a scalar op result and b based on a predicate (own-psel, own-psel-0):
+#   s<head[25:21]> <- p<S[11:8]> ? OP<S[18:16]>(s<S[31:28]>, s<S[7:4]>)
+#                                : s<S[7:4]>
+# OP 4 = add (own-psel's measured case).  Head bits [27:26] baked
+# (measured enables).
+psel       2   0x4600000E   0x00000000
+
+# ld0e: 2-syllable low5 0x0E bundle, zero-read into s + A-register load.
+# Semantics from fact 53 / own-0e:
+#   s<head[24:21]> <- 0           (source "reads 0 in every run")
+#   A<4*n + 1> <- head[20:5]      (n = S[3:1]; S[18] = 1 required)
+# Head bits [31] and [28:26] baked (measured enable mask).
+ld0e       2   0x9C00000E   0x00040000
+
+# pair: 2-syllable low5 0x10 bundle with S class 011.  Loads an element
+# register with a 16-bit immediate (fact 60 / own-pair):
+#   e<S[4:3]> <- head[20:5]
+# Head bit 21 is baked (the measured enable) along with the low5 marker;
+# S1 base = 0x60448000 pins the class and the rest of the measured mask.
+pair       2   0x00200010   0x60448000
+
+# ldi2: 2-syllable low5 0x10 bundle with S class 001.  Loads an s register
+# with a 16-bit imm (fact 74 / own-ldi2):
+#   s<head[25:21]> <- head[20:5]     (S[18] = 1 required; baked into base)
+ldi2       2   0x00000010   0x20040000
+
+# alu11: 2-syllable bundle.  Head is an ALU05 word, S (class 001) packs
+# an AGU10 op in parallel.  Semantics from fact 129 / own-alu11 +
+# own-agu11.  Setting an operand to zero disables that half.
+#   Head side: s<head[18:15]> <- ALU05[head[10:5]](s<head[14:11]>,
+#                                                 s<head[29:26]>)
+#   S side (class 001): R<S[28:25]>, e<S[12:9]> <-
+#       (S[8] ? AGU10 : AGU10B)[S[20:17]](x = e<S[24:21]>,
+#                                         y = R<S[16:13]>)
+# S[29] = 1 required (else wedge); baked into base.
+alu11      2   0x00000011   0x20000000
+
+# x19.aagu: 4-syllable VLIW; updates one A register with a strided AGU op.
+# Class triple (w1[31:29], w2[31:29], w3[31:29]) = (000, 000, 010).
+# Semantics from fact 144 / own-x19aagu (fn_op = 2):
+#   A<w1[7:3]> <- AGUA[w3[24:20]](x = A<w3[19:15]>, i = w3[14:0])
+# For fn_op 2 the formula is x + 2*i.  w1[26] is the measured enable.
+x19.aagu   4   0x00000019   0x06000000   0x00000000   0x40000000
+
+# x19.ld: 4-syllable VLIW doing load + AGU + store together.  Class triple
+# (w1[31:29], w2[31:29], w3[31:29]) = (000, 000, 111).  Semantics from
+# fact 143 / own-x19ld:
+#   s<w2[13:10]> <- Y:[e<w3[28:25]>]
+#   e<2*w1[2:0] + head[31]> <- AGU10[w1[10:7]](x = e<src>, y = e<src>)
+# w1[3] = 1 is the measured enable; w3 bakes class 111 + the low 12 bits
+# measured on the gate.  The load sign-extends (705).  No store (707).  w1[20] and w1[5]
+# are not inert (793): they write an A and grow the e step, so the form leaves them clear.
+x19.ld     4   0x00000019   0x00000008   0x00000000   0xE0000403
+
+# x17.cont: control bundle that lets execution fall through.  S2 class 101
+# + S1[22:20] = 000.  Semantics from fact 133 / own-x17ctl:
+#   (no state change; the PC advances to the next bundle)
+# S1 base pins the class-001 + S1[28] + S1[15] enables as measured.
+x17.cont   3   0x00000017   0x31008000   0xA0000000
+
+# x17.halt: canonical stop bundle.  Head carries only the x17 opcode;
+# S1 = 0x31308000 is the standard "halt S1" (S1 class 001, S1[15]=1, ...);
+# S2 class 101 (bits [31:29] = 101).
+x17.halt   3   0x00000017   0x31308000   0xA0000000
+
+# x17.imm: scalar immediate load into s<S1[10:7]> from head[26:11].
+# S1 class 011 ([31:29]=011) + S2 class 111 ([31:29]=111); S1[14]=1 is the
+# "enable" bit documented in isa.toml (needed, else wedge).
+x17.imm    3   0x00000017   0x60004000   0xE0000000
+
+# x17.xld_a10: X-memory load with A-reg offset from S1 class bits.  S1
+# class 010 + S2 class 110, head[27] clear.  Semantics from fact
+# 141 / own-x17xld-a10:
+#   s<S2[13:10]> <- X:[A<8*S2[1:0] + S1[31:29]>]      (S1[17:15] = 101)
+# This sub-form pins S1 class = 010 (A-offset = 2); other offsets await
+# their own measurement.  S1 is baked whole into the base.
+x17.xld_a10 3   0x00000017   0x4346A500   0xC0204000
+
+# x17.xpm: X-memory load into a scalar, continuing bundle.  S1 class 100
+# + S2 class 110.  Semantics from fact 139 / own-x17xpm:
+#   s<S2[13:10]> <- X:[A<8*S2[1:0] + 4>]              (S1[17:15] = 101)
+# The A<S1[25:22]> write (secondary A-reg store) is OPEN today - S1 is
+# baked whole into the base, exposing only the load dest + a-half picker.
+x17.xpm    3   0x08000017   0x8346A500   0xC0204000
+
+# x17.rsub: reverse-subtract with immediate b, continuing bundle.  S1 class
+# 000 + S2 class 001.  Semantics from fact 140 / own-x17rsub (op = 5):
+#   s<S1[22:19]> <- (S1[11:8]) - s<S2[28:25]>      (24-bit wrap)
+# S1[25:23] = 001 selects the imm-b mode; S1[26] is the measured enable.  S1[14:12] op selector and S1[7:4] predicate slot are passed
+# through; today only op = 5 is modelled (b - a).
+x17.rsub   3   0x00000017   0x04800000   0x20000000
+
+# x17.mve: move scalar + 1 into an element, continuing bundle.  S1 class
+# 000 + S2 class 010.  Semantics from fact 142 / own-x17mve:
+#   e<S1[19:16]> <- s<S2[28:25]> + 1    (S1[9] enable)
+# Head bit 27 is the sub-form marker; head[10] clear.  S1 base bakes bits
+# 10, 9 (enable pair).  S2 base is the class-010 marker only.
+x17.mve    3   0x08000017   0x00000600   0x40000000
+
+# x17.alu05: head is an ALU05 word, continuing bundle.  S1 class 000 +
+# S2 class 110.  Semantics from fact 138 / own-x17alu05:
+#   s<head[18:15]> <- ALU05[head[10:5]](a = s<head[14:11]>, b = s<S2[28:25]>)
+# S1[13]=1 is the measured enable; S2 class 110 only.  Head base keeps the
+# low5=0x17 marker and lets dest/a/op OR on top.
+x17.alu05  3   0x00000017   0x00002000   0xC0000000
+
+# x17.ld: scalar asr + Y-memory load into element, continuing bundle.
+# S1 class 000 + S2 class 011.  Semantics from fact 137 / own-x17ld:
+#   s<S1[22:19]> <- s<S2[28:25]> asr S1[26:23]
+#   e<2*S1[2:0]> <- Y:[e<S1[18:15]>]
+# Head bits [6:5]=11 (op=3) baked into base = 0x77; S1 base = 0x08000000
+# (bit 27 enable); S2 base = 0x60001208 (class 011 + measured enables).
+x17.ld     3   0x00000077   0x08000000   0x60001208
+
+# x17.ldr: x17ld with S1[27] = 0 and S2[2] (fact 443, 460): R<S1[14:11]> <- AGU10[S1[10:7]]
+# (y = R<h[30:27]>, i = #h[26:11]); fn 10 = y + i is the measured row.
+x17.ldr    3   0x00000017   0x00000028   0x60000004
+
+# x17.e: dual element write in a continuing bundle.  S1 class 000 + S2
+# class 100.  Semantics from fact 135 / own-x17e:
+#   e<S2[11:8]>, s<head[24:21]> <- head[20:5]   (gated by S1[18])
+#   e<S1[16:13]> <- old e<S2[19:16]> - 1        (gated by S1[17])
+# Base S1 = 0x00060200 bakes both enables and S1[9]=1 measured on
+# own-x17e; base S2 = 0x80000000 (class 100 only).
+x17.e      3   0x00000017   0x00060200   0x80000000
+
+# x17.estop: x17e with S2[3:0] = 4 stops the program one bundle later (fact 448).
+x17.estop  3   0x00000017   0x00000000   0x80000004
+
+# x17.agu: address-generation op in a continuing bundle.  S1 class 001
+# (with S1[28] = 1) + S2 class 010.  Semantics from the Python ISA model:
+#   dest_R <- AGU10[fn_op](x = e<S1[8:5]>, y = R<S2[4:1]>)
+# Base S1 = 0x30000000 (class 001 + S1[28]=1); base S2 = 0x40000000
+# (class 010 only; S2[4:1] is the y operand, S2[8:5] is dest).
+x17.agu    3   0x00000017   0x30000000   0x40000000
+
+# x17.alu: ALU op in a continuing bundle.  S1 class 001 + S2 class 111:
+#   s<S1[27:24]> <- X17OP[head[10:7]](a = s<S2[28:25]>, b = s<S1[19:16]>, n = S1[23:20])
+# Base S1 = 0x30008000: class bits [31:29]=001 plus S1[28]=1, S1[15]=1 (the
+# enable marker).  Base S2 = 0xE0000000 (class 111 only; a goes into [28:25]).
+# Silicon-measured: own-x17alu-shl (op=0 shl, n=3) and own-x17alu-rsub
+# (op=4 b-a) both match this base.
+x17.alu    3   0x00000017   0x30008000   0xE0000000
+
+# x19.aimm: x19.agu with w2[24] = 1, e dest <- #head[20:5] (fact 270).
+x19.aimm   4   0x00000019   0x10040000   0x03C40000   0x00000000
+
+# x19.aagu5: x19.aagu with w1 class 101 (inert) (fact 271).
+x19.aagu5  4   0x093A5019   0xA4020000   0x00000007   0x40000000
+
+# x19.imm4: x19.imm with w2 class 100 (inert), fn 0 = x (fact 272).
+x19.imm4   4   0x00000019   0x08000A40   0x80002000   0x21E48007
+
+# x19.ragua: (0,4,0) R<w3[10:7]> <- AGUA fn 0 over A<w3[19:15]> (fact 278).
+x19.ragua  4   0x00000019   0x00040001   0x84000006   0x06000000
+
+# x16.alu2: S2 class 010, s<S1[11:8]> <- X16_ALU[S1[15]][S1[18:16]](a, b)
+# (fact 119 / own-x16alu2).
+x16.alu2   3   0x00000016   0x00000000   0x40000000
+
+# x16.alux: S2 class 111, the ALU plus s<head[24:21]> <- X:[A<xi>] with the
+# S2[13] latch (fact 116 / own-x16alu).
+x16.alux   3   0x00000016   0x00005000   0xE0082000
+
+# x16.ld: S1/S2 class 000, s<head[24:21]> <- X:[A<xi>], S2[3] latches
+# xi <- S2[8:4] (fact 115, 122 / own-x16ld, own-x16aset).
+x16.ld     3   0x00000016   0x00045000   0x00000008
+
+# x16.aset: head[31] = 1, S1[3] = 0: A<2*S1[2:0]+1> <- head[20:5]
+# (fact 122 / own-x16aset).
+x16.aset   3   0x80000016   0x00045000   0x00000000
+
+# x16.ldi: S1[26:25] = 11 with mux 110, s<head[24:21]> <- #head[20:5]
+# (fact 217 / own-x16ldi).
+x16.ldi    3   0x00000016   0x07046000   0x000000A8
+
+# x16.mux: x16.agu with the S1[30:28] source mux and S2[12:11] = 10 Y data
+# (fact 207 / own-x16mux, own-x16mux-b).
+x16.mux    3   0x00000016   0x00004000   0x60003000
+
+# x16.xs: S2 class 010 with x18's X slot into s<head[24:21]>
+# (fact 208 / own-x16xs, own-x16xs-imm).
+x16.xs     3   0x00000016   0x04040000   0x40001000
+
+# x16.stx: S2 class 001 X store, S2[3:2] = 11 (fact 209 / own-x16stx).
+x16.stx    3   0x00000016   0x00000020   0x2000000C
+
+# x16.st2: S1 class 011, S2 class 111, X and Y stores (fact 214).
+x16.st2    3   0x00000016   0x00040000   0xE0056000
+
+# x16.agumul: S1 class 100, S2 class 101 multiply (fact 212).
+x16.agumul 3   0x10000016   0x80002000   0xA0000000
+
+# x16.agu2: S1 class 000, S2 class 101 AGU (fact 120 / own-x16agu2).
+x16.agu2   3   0x00000016   0x00002000   0xA0000000
+
+# x16.xld: S1 class 011, S2 class 000, X load (fact 216).
+x16.xld    3   0x00000016   0x68000000   0x00000008
+
+# x16.ldb: x16.ldi with mux 011, X:[A<xi>][7:0] << 8 (fact 217).
+x16.ldb    3   0x00000316   0x07043000   0x000000A8
+
+# x18 class-110 p write on the pure base (fact 469-471, 476): the multiply dests
+# w2[27:24] and w2[12:9] are 0, so only p<w2[16:13]> <- fn<w3[28:25]>(p<w3[17:14]>) lands.
+# The aliases fix code 14, op 0 and one f each (and p5 as the unread source of pset/pclr);
+# they come first so disasm prints them.  x18.pfn spells any measured cell.
+x18.pmov   4   0x1C000018   0x00000000   0x00000022   0xC2100001
+x18.pnot   4   0x1C000018   0x00000000   0x00000022   0xC4100001
+x18.pset   4   0x1C000018   0x00000000   0x00000022   0xC0114001
+x18.pclr   4   0x1C000018   0x00000000   0x00000022   0xCC114001
+x18.pfn    4   0x00000018   0x00000000   0x00000022   0xC0100001
+
+# x18.pw: class 011 with w3[8] = w3[0] = 1, p<w2[17:14]> <- cond head[28:25]
+# of the slot result (fact 179 / own-x18pw-*).  w3[21] = 0 here, the measured side: in other
+# class-011 bundles (a product in the unary slot) w3[21] changes the p written (704), rule OPEN;
+# the emulator refuses those bundles on their other fields.
+x18.pw     4   0x00000018   0x00000000   0x00000000   0x60000101
+
+# x18.c2x: class 010 X slot (fact 176 / own-x18c2x).
+x18.c2x    4   0x00000018   0x20040001   0x00000000   0x40510001
+
+# x18.eagu2: class 010 e AGU, w1[29] = 1 picks AGU10 (fact 267).
+x18.eagu2  4   0x00000018   0x00040000   0x00000000   0x40000000
+
+# x18.rag: class 010 R slot, AGU3 over A and R (fact 194).  The template's e AGU also
+# steps e7 (w1[29] = 1, w1[23:20] = 7, source e7).
+x18.rag    4   0x9C0238B8   0xA2750102   0x00000400   0x4E000008
+
+# x18.rag101: class 101 R slot and the mux-001 X slot (fact 195).  The sum also lands in
+# A<2*w1[3:0] + head[31]> (955), parked on A17 (957); w1[3:0] = 2 would write A5.
+x18.rag101 4   0x80000018   0x00001008   0x60000000   0xA0000000
+
+# x18.eagu0: class 000 e AGU from the w2[15] = 0 table (fact 266).
+x18.eagu0  4   0x00000018   0x00000000   0x00020000   0x06000000
+
+# x18.agu000: class 000 e AGU into the X slot, with the Y store
+# (fact 205 / own-x18agu000, own-x18agu000b, own-x18st000).
+x18.agu000 4   0x1C029618   0x00010A42   0x40020000   0x00000000
+
+# x18.e2nd: class 000 second e slot, e<w2[5:2]> <- y - 1 (fact 177).
+x18.e2nd   4   0x00000018   0x00030040   0x00028040   0x00000000
+
+# x18.alu: class 101 ALU word slot (fact 237 / own-x18alu).
+x18.alu    4   0x00000018   0x00006000   0x20000000   0xA0244C80
+
+# x18.br101: class 101 branch, w2[30:29] = 00 jumps when p<{w3[2:0], w2[31]}>
+# (fact 201 / own-x18br101*).
+x18.br101  4   0x00000018   0x00000000   0x00000000   0xA0000000
+
+# x18.mac: class 111 40-bit MAC (fact 174, 203 / own-x18mac, acc111*).
+x18.mac    4   0x1C000018   0x02070007   0x00320000   0xE6070180
+
+# x18.macf: x18.mac with w3[8] = 0, no 2^23: hi = floor(acc / 2^24), so mode 5's (hi, lo)
+# chain exactly as a running sum (665, 668). Both forms also write A14 <- A14 + 1 (668; the
+# field is not yet known, and the emulator does not model it).
+x18.macf   4   0x1C000018   0x02070007   0x00320000   0xE6070080
+
+# x18.sh111: class 111 ALU slot with the shift, plus the Y store
+# (fact 202, 206 / own-x18shr111, shl111, alu111, st111).
+x18.sh111  4   0x00000018   0x42040007   0x21100005   0xE00701E3
+
+# x18.rcl100: class 100 R slot plus the Y store (fact 196).
+x18.rcl100 4   0x00000018   0x00040000   0x08700550   0x80000000
+
+# x18.mpy100: class 100 multiply slot plus the Y store (fact 197).
+x18.mpy100 4   0x80000018   0x00048304   0x39F00550   0x80000000
+
+# x18.sh100: class 100 shift slot (fact 198 / own-x18shr100, shl100).
+x18.sh100  4   0x00000018   0x00040300   0x22100030   0x88001900
+
+# x18.yb100: class 100 X slot, Y[7:0] << 8 (fact 204).
+x18.yb100  4   0x00000018   0x00042080   0x01300000   0x80620C01
+
+# x18.rcl001: class 001 R slot (AGU10B or, head[30] = 1, AGU3) plus the Y
+# store (fact 199 / own-x18rcl001, own-x18rag001).
+x18.rcl001 4   0x00000018   0x04080000   0x00000800   0x20000000
+
+# lde.hi: lde with [31] = 1 (fact 280 / own-x06lde6).
+lde.hi     1   0xC0000006
+
+# lde.arm: lde class 101 (h[31:29] = 101), e<h[29:26]> <- #h[20:5] with h[29] = 1, so e8..e15;
+# it also arms the halt deadline (fact 479; was read as a 1-word stop, 18/32).
+lde.arm    1   0xA0000006
+
+# lda: lde with [29:26] = 0 loads A<[25:21]> <- #[20:5] instead of an e (fact 51, 829).
+lda        1   0x40000006
+
+# rop.c4: rop at class 100, [21] inert (fact 285 / own-x07rop4).
+rop.c4     1   0x80200007
+
+# aset0b: 0x0B head[31:30] = 10, s<[29:26]> <- Y:[e] (fact 259, 324 / own-x0baset); [29] = 1 is
+# class 101 (s8..s15).  The template's [18:15] = 2 / [14:13] = 01 also writes A2 <- v (258).
+aset0b     1   0x8011200B
+
+# ragu0c: 0x0C [31] = 1, R <- agu_xr over A and R0 (fact 282, 378 / own-x0cragu).
+ragu0c     1   0x8000002C
+
+# ld0e.a: ld0e with no s dest and op[0] (fact 287 / own-x0eld7).
+ld0e.a     2   0x8000000E   0x00041000
+
+# ste: 0x0F head class 000 + class-001 second, e <- #imm (fact 279).
+ste        2   0x0000000F   0x20058000
+
+# rop.b21: rop with the inert [21] set
+# (fact 281 / own-x07rop12).
+rop.b21    1   0x40200007
+
+# x04.ragu: 0x04 R slot y-i over R<head[30:27]> (fact 293).
+x04.ragu   6   0x00000064   0x00000007   0x00000000   0x00000000   0x08062810   0x85424088
+
+# x04.yd: 0x04 Y read to R and s (fact 276, 290).
+x04.yd     6   0x10004004   0x00000582   0x00100000   0x00000000   0x00000801   0x32060000
+
+# x04.xst: 0x04 X store slot (fact 292 / own-x04xst).
+x04.xst    6   0x20002004   0x0018051B   0x18106000   0x83000008   0x00004005   0x01C00000
+
+# x10.alu: 0x10 head ALU word to R, class-100 second (fact 269, 283).
+x10.alu    2   0x00000010   0x80000000
+
+# x17.end: the tail's halt with S1 class 000 and S1[0] set (fact 133).
+x17.end    3   0x00000017   0x11308001   0xA0000000
+
+# x17.eagu: S1/S2 class 100, s <- AGU10 (fact 273 / own-x17eagu).
+x17.eagu   3   0x00027937   0x00060000   0x80000E0A
+
+# x17.ms: S2 class 101, four slots (fact 410-413): Y store, R and e immediates,
+# Y load through a mux (S1[28] enables it).
+x17.ms     3   0x00000017   0x00000000   0xA0000000
+
+# x17.ms.stop (was x17.mswedge): x17.ms with S1[22:20] = 010, via the generic `.stop` suffix
+# (isa.stopBase; fact 457, 465, 478).
+
+# x17.sty: S2 class 011 with S1 class != 0, Y store (fact 275). Also e<2*S1[2:0] + h[31]> <-
+# AGU10[S1[10:7]](x = e<k>) after the store (fact 658), with R mux 0; under mux 7 the value is
+# unknown. The template clears S1[2:0] and h[31] and sets S1[27]: S1[28:27] = 00 (with S1[5] = 0)
+# stops the engine after the store whenever p1 is set (fact 648).
+x17.sty    3   0x00000017   0x08000108   0x60003800
+
+# x17.styi: x17.sty plus the post-increment it carries anyway (fact 658): e<d> <- e<k> + 1
+# after the store, d = 2*S1[2:0] + h[31] (S1[10:7] = 2, AGU10 x + 1). `x17.styi e3, #3, #0, e3`
+# steps the store pointer and saves an x18.eagu.
+x17.styi   3   0x00000017   0x08000100   0x60003800
+
+# x17.stys: x17.sty stepping its pointer by an R stride (fact 773): e<d> <- e<k> + R<h[30:27]>
+# after the store (S1[10:7] = 6, AGU10 x + y, 16-bit wrap), the store at the old e<k>, d =
+# 2*S1[2:0] + h[31].  `x17.stys e3, #3, #0, e3, R2` stores s3 at e3, then e3 += R2.
+x17.stys   3   0x00000017   0x08000300   0x60003800
+
+# x17.styr: the x17sty row's R write, S2[3:1] = 1, S1[27] = 1, S2[12:11] = 10 (fact 439):
+# R<S1[14:11]> <- s<S2[28:25]> << S1[26:23] (X17LD_OP row 0, h[10:5] = 0).
+x17.styr   3   0x00000017   0xA8000000   0x60001202
+
+# x17.yld: S1/S2 class 000, s <- Y:[e] (fact 274 / own-x17yld).
+x17.yld    3   0x00000177   0x0E000000   0x1C1A8180
+
+# x16.mac: S1 class 001 / S2 class 110 40-bit MAC (fact 213).
+x16.mac    3   0x00000016   0x00040000   0xC0030000
+
+# x03.acp: second A dest, A<w2[21:17]> <- A<w3[4:0]> or (w5[5]) the Y read
+# (fact 193 / own-x03acp, own-x03ayd).  The template's read slot is live: w4[6:3] = 7 with
+# w5[21] = 1 also loads s7 <- Y:[e<y_e>] (190) and sets yd, whatever #yd says (748, silicon:
+# s7 and yd both took the Y word under #0 and #1).
+x03.acp    6   0x00000003   0x00000002   0x0140E000   0x04000000   0x00206838   0x00340100
+
+# x00.slots / x01.slots: the 7-word s slot and stores (fact 227, 234, 241, 243, 286).
+x00.slots  7   0x00000000   0x00000008   0x00000000   0x00000000   0x00000000   0x00000000   0x00000000
+x01.slots  7   0x00000001   0x00000008   0x00000000   0x00000000   0x00000000   0x00000000   0x00000000
+
+# x00.alu: the relocated ALU slot and an off MAC slot (fact 228).
+x00.alu    7   0x00000000   0x00000038   0x00180000   0x00000000   0x00000000   0x00000000   0x00000000
+
+# x00.mac: multiply and 40-bit accumulator slots (fact 229, 242).
+x00.mac    7   0x00000000   0x0000C028   0x00000000   0x00000000   0x00100000   0x06000000   0x00000000
+
+# x00.ctl: control, jr / ja with two delay slots (fact 230, 244).
+x00.ctl    7   0x00000000   0x00000000   0x00000000   0x00000000   0x00000000   0x00000000   0x00000000
+
+# x0e: low5 0x0E head[31] = 0, the class-05 ALU word plus the muxed head
+# write (fact 221 / own-psel-imm, own-psel-r, own-psel-sub).
+x0e        2   0x0000000E   0x00000000
+
+# rimm: low5 0x0F, S class 101, R <- #head[20:5] (fact 127).
+rimm       2   0x0000000F   0xA0000000
+
+# stx0f: low5 0x0F X store, A index 4*S[2:0] + head[31:30] (fact 127).
+stx0f      2   0x0000000F   0xA0500000
+
+# stx0f.e: the stx0f row with S[21] and its e write, e<S[6:3]> <- #head[20:5] (fact 437).
+stx0f.e    2   0x0000000F   0xA0700000
+
+# ste.n: ste with a bare class-001 second (fact 75 / own-st-e6).
+ste.n      2   0x0000000F   0x20000000
+
+# ldi2.st: the 0x10 ldi2 pair with its Y store slot (fact 89).
+ldi2.st    2   0x00000010   0x20000000
+
+# stk: low5 0x08 class 010, Y:[e<k>] <- s, op = 0x30 + k (fact 61, 101).
+stk        1   0x40000608
+
+# yagu: low5 0x14 class-100 second with S[25] (fact 100, 103).
+yagu       2   0x10000014   0x82000000
+
+# ypair: low5 0x14 class-11x second with S[25] (fact 105).
+ypair      2   0x10000014   0x02000000
+
+# ystm: low5 0x10 class-010 second (fact 109, 110).
+ystm       2   0x00000010   0x40140000
+
+# tst: low5 0x12, p<S[28:25]> <- f(head[29:26], head[25:21]) (fact 84, 85).
+tst        2   0x00000012   0x20080000
+
+# par: class-0A parallel move, X store and Y load (fact 76).
+par        1   0x0030020A
+
+# mul13: low5 0x13 S class 101 with S[19] (fact 128).
+mul13      2   0x00000013   0xA0280000
+
+# st.wr: st with a wr second, Y:[e<[20:17]>] <- reg[25:21] (fact 47, 59).
+st.wr      2   0x2000000F   0x20018000
+
+# alu.m: the class-05 ALU word with its m and # modifiers (fact 67).
+alu.m      1   0x40000005
+
+# x16.b16: Y load + X store through the xa latch (fact 90 / own-b16).
+x16.b16    3   0x80000016   0x00041008   0xE0067100
+
+# x16.agu100: S2 class 100 address-unit op (fact 92 / own-b16agu).
+x16.agu100 3   0x00000016   0x01000003   0x80000100
+
+# x16.sh: the shifter bundle (fact 91 / own-b16sh).
+x16.sh     3   0x06000016   0x00000000   0x00001000
+
+# x02.mac: the w2 multiply with its mode and the w4 X read (fact 161).
+x02.mac    6   0x00000002   0x00000000   0x00020042   0x00000001   0x00002800   0x00004200
+
+# x18.e2nd17: a class-000 bundle with w2[17] = 0, phase T (fact 180).
+x18.e2nd17 4   0x80800018   0x00028024   0x0000A940   0x00048100
+
+# ldi.q: ldi with its inert [29:26] spelt out (fact 87).
+ldi.q      1   0xC000000B
+
+# st.sel: st with sel [22:21] (fact 21-22 / own-st3-l*sel*).
+st.sel     1   0x2000000F
+
+# x17.stop: the stop with S2[1]'s write, Y:[e<S1[16:15]>] <- reg<S1[28:24]> (fact 32, 47).
+x17.stop   3   0x00000017   0x20300000   0x00000000
+
+# x17.stopx: the same with every inert head and S2 bit filled (own-all-x).
+x17.stopx  3   0x00000017   0x20300000   0xA0000000
+
+# x03.rep: counted loop, a jump to itself on p<w5[17:14]> with the e11 counter writing p3,
+# X store of s3 at A8 stepping each pass (fact 263, 675, 679, 680 / own-x03rep). Two delay
+# slots follow it and run on every pass.
+x03.rep    6   0x00000003   0x60000002   0x18106000   0x85800008   0x00004005   0x001C0000
+
+# x19.mac: the whole x19mac bundle, every field an operand so measured words assemble
+# exactly (fact 312, 384-386).  w1 class, w1[17:11] mode and w2[28:21] flags are
+# raw: cls 2 enables the head ALU; mode 0x14 = rounded >> 23 with doubled P (op 4).
+x19.mac    4   0x00000019   0x00000000   0x20000000   0xC0000000
+
+# pcond: the 0x0C [31] = 1 form with R dest 0 (fact 378): p <- test of R vs A.
+pcond      1   0x8000002C
+
+# x03.jrc: x03 w2[28] = 1, a conditional jr inside the bundle (fact 394): taken to
+# q + sext(w1[28:18]) on p<w5[17:14]>, sense w2[31:29] (101 set; 000/100 clear; 001 OPEN).
+x03.jrc    6   0x00000003   0x00000000   0x10000000   0x00000000   0x00000000   0x00000000
+
+# x02.v: the whole x02 mode-5 bundle, every slot an operand (fact 156-161, 182-185):
+# X read s<w4[6:3]> <- X:[A<w4[20:17]>]; A<w2[21:17]>, A<w3[14:10]> <- A<w3[4:0]> + 1;
+# multiply s<w2[12:9]> <- s<w2[4:1]> * s<w2[8:5]> (w1[17:15]), s<w4[10:7]> <- (2P)[15:0];
+# x3 s<{w5[1:0], w4[31:30]}> <- (s<w4[25:22]> op w5[8:6] s<w4[29:26]>) << w5[5:2].
+x02.v      6   0x00000002   0x00002000   0x00000000   0x00000000   0x00002800   0x00004200
+
+# x02.vc: x02.v with the third slot's head code h[10:5] as a trailing operand (549, 627, 628,
+# 730): 0-5 the adder (#x3_sh = n), 6 asr / 7 asrrs of b by a, x3_sh's top bit w5[5] negating a.
+x02.vc     6   0x00000002   0x00002000   0x00000000   0x00000000   0x00002800   0x00004200
+
+# x02.vs: x02.v with the X store on (w5[10:9] = 11, 513, 730): X:[old A<w4[21:17]>] <- sx24
+# s<{w2[0], w1[31:29]}> as #st_lo, #st_hi; A still steps, and the read slot yields xd, not memory.
+x02.vs     6   0x00000002   0x00002000   0x00000000   0x00000000   0x00002800   0x00004600
+
+# x02 A slot alone, mode 0 (fact 403): sum = agu_xr(fn w2[26:22], A<w3[4:0]>, R<w5[25:22]>);
+# A<w2[21:17]> <- sum; A<w3[14:10]> <- sum + A<w3[9:5]> (fn < 16).
+x02.aa     6   0x00000002   0x00000000   0x00000000   0x00000000   0x00000000   0x00000000
+
+# ragu: ragu0c with its R operand (fact 378): R <- agu_xr(fn, A, R).
+ragu       1   0x8000002C
+
+# x01.norm: the clean x01 norm word (fact 502, 666, 669): s<w6[7:4]> <- norm(s<w2[5:2]>), the
+# redundant sign bits at 24 bits (norm(0) = 24, norm(-1) = 23), xori code 0x1C with m = 5;
+# the R and e side writes cleared.
+x01.norm   7   0x28001381   0x00000580   0x280000C0   0x000280A0   0x00040002   0x28200900   0x00300000
+
+# x01.selneg: the same word with m = 7 (fact 502): s<w6[7:4]> <- b < 0 ? b : #w2[9:6].
+x01.selneg 7   0x28001381   0x00000580   0x28000000   0x000280A0   0x00040002   0x38200900   0x00300000
+
+# x03.tap: the one-bundle FIR tap (fact 670, 671, 672, 701), x03 mode 5 with w1[15] = 0:
+#   sL <- X:[An] (lands after the multiply reads sL), An <- An + 1 (A copy, fn w2[26:22] = 0),
+#   {sHi:sLo} <- {sHi:sLo} + 2 * sL * sB, a 48-bit exact running sum on 24-bit operands.
+# sL is both the load destination w4[6:3] and the multiplicand w2[4:1]; An is the X read
+# address and the A copy's destination and source; sHi and sLo are written and fed back.
+x03.tap    6   0x00000003   0x00006800   0x00000000   0x00000000   0x00002800   0x00040002
+
+# x03.tap0: x03.tap with mode 4 (fact 702): {sHi:sLo} <- 2 * sL * sB, the X registers ignored.
+# The first tap of a sum, with no zeroing; the load and the A step as in x03.tap.
+x03.tap0   6   0x00000003   0x00006000   0x00000000   0x00000000   0x00002800   0x00040002
+
+# x18.ytap: the Y-side one-bundle tap (fact 703), x18 class 111 mode 5 floor:
+#   sL <- Y:[eN] (lands after the multiply reads sL), eN <- eN + 1,
+#   {sHi:sLo} <- {sHi:sLo} + 2 * sL * sB, the 701 48-bit sum.
+# sL is the head slot (mux w1[14:12] = 5, w2[22:21] = 01) and the multiplicand w2[27:24]; eN the
+# Y address w3[28:25] and the e slot w1[23:20]; sHi/sLo written and fed back.  x18 MAC chains
+# of 3 or more wedged after the program's stores (701); runs of this tap did not.
+x18.ytap   4   0x1C000018   0x02075007   0x00320000   0xE00700D0
+
+# x18.or / x18.max / x18.min: the x18.and bundle (class 011) at 24 bits (fact 644, 708).
+#   x18.or:  code 0x1D, op 2: s<w1[11:8]> <- s<w2[5:2]> | s<w1[7:4]>
+#   x18.max: code 0x26, op 6: signed 24-bit max;  x18.min: code 0x26, op 2: signed min.
+# Class 011 also writes the result to A<2 * w1[3:0] + head[31]>; the templates keep both 0.
+x18.or     4   0x3A000018   0x00010000   0x00004000   0x61D53805
+x18.max    4   0x4C000018   0x00030000   0x00004000   0x61D53805
+x18.min    4   0x4C000018   0x00010000   0x00004000   0x61D53805
+
+# x03.tapa / x03.tap0a / x03.repa: x03.tap / x03.tap0 / x03.rep with the A step's agu_xr fn
+# w2[26:22] and R<w5[25:22]> as trailing operands (740, 741): 0 x + 1, 1 x - 1, 2 x + r, 3 x - r.
+x03.tapa   6   0x00000003   0x00006800   0x00000000   0x00000000   0x00002800   0x00040002
+x03.tap0a  6   0x00000003   0x00006000   0x00000000   0x00000000   0x00002800   0x00040002
+x03.repa   6   0x00000003   0x60000002   0x18106000   0x85800008   0x00004005   0x001C0000
+
+# x16.getb: the stream read (fact 783): A<2*S1[3:0]+1> <- the next S2[7:4]+1 stream bits,
+# MSB first; 0 before the ld0e.sen enable, and the program waits at it for bytes (784).
+x16.getb   3   0xC0000016   0x00040000   0xE0000000
+
+# ld0e.sen: ld0e whose ALU word (code 0x22, m 2, a = s12, b = s14) enables the stream when
+# s12 = 1 and s14 has bit 2 set, bits 1:0 clear (fact 783); A<4n+1> <- addr as ld0e.
+ld0e.sen   2   0xC400000E   0xE02500C0

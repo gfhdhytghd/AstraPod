@@ -247,6 +247,7 @@ static void cb_configure(int setting, intptr_t value)
 
     case DSP_SET_SAMPLE_DEPTH:
     {
+        fmt.packed16 = value <= NATIVE_DEPTH;
         int frac_bits = value <= NATIVE_DEPTH ? WORD_FRACBITS : (int)value;
         fmt.shift = frac_bits + 1 - NATIVE_DEPTH;
         break;
@@ -440,6 +441,7 @@ int track_decode_run(const char *path,
         stop_after_ms = (unsigned long)-1;   /* Asked for more than fits */
 
     fmt.frequency   = id3.frequency;
+    fmt.packed16    = true;
     fmt.stereo_mode = STEREO_NONINTERLEAVED;
     fmt.shift       = WORD_FRACBITS + 1 - NATIVE_DEPTH;
 
@@ -450,6 +452,12 @@ int track_decode_run(const char *path,
      * here configures one, and a codec that reached for it would otherwise
      * reach playback's. */
     dci = ci;
+#ifdef HAVE_SM1_ALAC_API
+    /* Only the settings converter opts an offline decode into SM1. */
+    extern bool library_conversion_running(void);
+    if (!library_conversion_running())
+        dci.alac_begin = NULL;
+#endif
     dci.dsp              = NULL;
     dci.id3              = &id3;
     dci.filesize         = file_len;

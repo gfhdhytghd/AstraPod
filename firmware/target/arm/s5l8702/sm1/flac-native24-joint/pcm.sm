@@ -1,0 +1,125 @@
+; The final sink is s16. Truncate each reconstructed signed 24-bit sample
+; by an arithmetic shift of 8. No temporal filtering for 44.1/48 kHz.
+pcm_entry:
+    input_pos()
+    out_pos()
+    yld(s11, RUN_SIZE)
+    yld(s12, SECOND)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, emit_second
+    nop()
+    nop()
+    yld(s12, SIDE)
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, store_side
+    nop()
+    nop()
+.macro park_first(L) {
+    ldi s4, #16
+    alu s2, s4, s1, #ASR
+    x17.styi e7, #1, #0, e7
+    x17.styi e7, #2, #0, e7
+    again(s11, L)
+    ret()
+}
+store_normal:
+    pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    park_first(store_normal)
+store_side:
+    ; Park H=floor(side/2) and its low bit in two Y words. The first
+    ; word is signed H>>8; the second holds (H&255)*2 + side parity.
+    pk(s1, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    ldy s3, e13
+    x18.eagu e13, e13, #AGU_INC
+    ldi s4, #8
+    alu s2, s4, s1, #ASR
+    x17.styi e7, #2, #0, e7
+    ldi s4, #255
+    x18.and s1, s1, s4
+    alu s1, s1, s1, #OP_ADD
+    alu s1, s1, s3, #OP_ADD
+    x17.styi e7, #1, #0, e7
+    again(s11, store_side)
+    ret()
+emit_second:
+    mask16(s8)
+    yld(s5, ASSIGN)
+    equals(1, lr_out)
+    equals(8, ls_out)
+    equals(9, sr_out)
+    jmp #ALWAYS, #0, ms_out
+    nop()
+    nop()
+.macro read_first() {
+    ldy s1, e9
+    x18.eagu e9, e9, #AGU_INC
+    ldy s2, e9
+    x18.eagu e9, e9, #AGU_INC
+    x18.and s1, s1, s8
+    ldi s4, #-16
+    alu s2, s4, s2, #ASR
+    x18.or s1, s1, s2
+    pk(s2, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+}
+.macro publish_pair(L) {
+    ldi s4, #8
+    alu s1, s4, s1, #ASR
+    alu s2, s4, s2, #ASR
+    x17.styi e7, #1, #0, e7
+    x17.styi e7, #2, #0, e7
+    again(s11, L)
+    ret()
+}
+lr_out:
+    read_first()
+    publish_pair(lr_out)
+ls_out:
+    read_first()
+    ldy s3, e13
+    x18.eagu e13, e13, #AGU_INC
+    ; Do not materialize a 25-bit side in a signed 24-bit scalar. The
+    ; right output has a bounded half and parity: floor((L-S)/2) =
+    ; floor(L/2) - floor(S/2) - (side_odd && !left_odd).
+    x18.and s4, s1, s14
+    alu s5, s14, s4, #OP_SUB
+    x18.and s5, s5, s3
+    alu s6, s14, s1, #ASR
+    alu s6, s6, s2, #OP_SUB
+    alu s6, s6, s5, #OP_SUB
+    pk(s0, A0, s0, s0, s0, 4, s4, s3, 0, 31)
+    alu s2, s6, s6, #OP_ADD
+    alu s2, s2, s4, #OP_ADD
+    publish_pair(ls_out)
+; R=s2, H=floor((L-R)/2)=s5, B=(L-R)&1=s3. Both 24-bit
+; published results remain representable during every arithmetic instruction.
+.macro rebuild_left() {
+    x18.and s4, s2, s14
+    x18.and s6, s3, s4
+    alu s1, s14, s2, #ASR
+    alu s1, s1, s5, #OP_ADD
+    alu s1, s1, s6, #OP_ADD
+    pk(s0, A0, s0, s0, s0, 4, s4, s3, 0, 31)
+    alu s1, s1, s1, #OP_ADD
+    alu s1, s1, s4, #OP_ADD
+}
+sr_out:
+    ldy s5, e9
+    x18.eagu e9, e9, #AGU_INC
+    ldy s3, e9
+    x18.eagu e9, e9, #AGU_INC
+    ldi s4, #-8
+    alu s5, s4, s5, #ASR
+    alu s4, s14, s3, #ASR
+    x18.or s5, s5, s4
+    x18.and s3, s3, s14
+    pk(s2, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+    rebuild_left()
+    publish_pair(sr_out)
+ms_out:
+    read_first()
+    ldy s3, e13
+    x18.eagu e13, e13, #AGU_INC
+    alu s5, s2, s0, #OP_ADD
+    alu s2, s1, s5, #OP_SUB
+    rebuild_left()
+    publish_pair(ms_out)

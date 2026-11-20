@@ -407,6 +407,14 @@ sub buildzip {
     open(IGNORE, ">$temp_dir/bookmark.ignore")  || die "can't open bookmark.ignore";
     close(IGNORE);
 
+    if ($modelname =~ /^"?ipod6g"?$/) {
+        glob_mkdir("$temp_dir/sm1");
+        for my $image (qw(codec44 codec48 depth24-44 depth24-48 ahead96 ahead192 alac16 alac24)) {
+            copy("$ROOT/firmware/target/arm/s5l8702/sm1/images/$image.x17i",
+                 "$temp_dir/sm1/$image.x17i") or die "copy SM1 image $image: $!";
+        }
+    }
+
     # the samsung ypr0 has a loader script that's needed in the zip
     if ($modelname =~ /samsungypr[01]/) {
         glob_copy("$ROOT/utils/ypr0tools/rockbox.sh", "$temp_dir/");

@@ -1,0 +1,19 @@
+.macro section() {
+    pk(s5, A2, s0, s0, s0, 3, s5, s0, 0, 0)
+    pk(s6, A2, s0, s0, s0, 4, s6, s0, 0, 0)
+    x03.tap0 s7, #6, s0, s8, s9
+    x03.tap s7, #6, s1, s8, s9
+    x03.tap s7, #6, s4, s8, s9
+    x03.tap s7, #6, s3, s8, s9
+    x03.tap s7, #6, s6, s8, s9
+    x03.tap s7, #6, s5, s8, s9
+    pks(8, A3, 10, s8, s0, 0)
+    x03.tap0 s7, #6, s0, s8, s9
+    x03.tap s7, #6, s2, s8, s9
+    x03.tap s7, #6, s1, s8, s9
+    x03.tap s7, #6, s4, s8, s9
+    x03.tap s7, #6, s10, s8, s9
+    x03.tap s7, #6, s6, s8, s9
+    pks(8, A3, 2, s8, s0, 0)
+    alu s1, s10, s0, #OP_ADD
+}

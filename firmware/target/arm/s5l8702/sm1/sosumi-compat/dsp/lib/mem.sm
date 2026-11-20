@@ -1,0 +1,161 @@
+; Audited from x17 8500815 examples/lib/mem.sm, 2026-11-08 (docs/x17-import.md).
+; No twin: register and Y plumbing only, ISA per the reference.md entries named below.
+; Y slots and A registers from scalar registers, shared by the codec libraries.
+;
+; Moves into A registers go s -> e (x17.mve, +1) -> R (x19.a3 AGU10 fn 2, +1) -> even A
+; (x12.aset) -> any A (x03.agu + 0): every step gated (reference.md `x17.mve`, `x19.a3`,
+; `x12.aset`, `x03.agu`). They use s13, e6, R7 and A14, and
+; x03.agu's X read slot loads s7 (from X:[A0]), so s7 does not survive them.
+
+; Subroutines (x17 reference.md `x00.ctl`; facts 888, 911, 926, 928): ctl 4 calls L, its field
+; L's distance from the arm's entry, which the program marks with the label dsp_entry; two
+; delay bundles run before the callee, and ctl 5 returns to the bundle after them, two more
+; bundles running in the callee first. One level only, never inside x03.rep or a jump's delay
+; window. The return address is not a register: the callee may use any.
+.macro call(L) {
+        x00.ctl #(L - dsp_entry), #4
+        nop()                   ; (delay slot)
+        nop()                   ; (delay slot)
+}
+
+.macro ret() {
+        x00.ctl #0, #5
+        nop()                   ; (delay slot)
+        nop()                   ; (delay slot)
+}
+
+; D = min(D, X), D = max(D, X), signed 24-bit: x18.min / x18.max select on a's sign only (min
+; keeps a < 0, max keeps a > 0, else b; fact 951), so through the difference: D - X, its
+; negative / positive part against s0, + X. |D - X| < 2^23; D and X distinct, X unchanged.
+.macro smin(D, X) {
+        alu D, D, X, #OP_SUB
+        x18.min D, D, s0
+        alu D, D, X, #OP_ADD
+}
+
+.macro smax(D, X) {
+        alu D, D, X, #OP_SUB
+        x18.max D, D, s0
+        alu D, D, X, #OP_ADD
+}
+
+; e6 = addr: one lde (reference.md `lde`, own-entry: k = 2, 3, 5..15 load e<k> <- #imm16).
+.macro yat(addr) {
+        lde e6, #addr
+}
+
+.macro yld(dst, addr) {
+        yat(addr)
+        ldy dst, e6
+}
+
+; Y:[addr] = s3.
+.macro yst(addr) {
+        yat(addr)
+        x17.sty e6, #3, #0
+}
+
+; A<an> = the value in `src` (not s13). Clobbers s7.
+.macro amov(an, src) {
+        ldi s13, #2
+        alu s13, src, s13, #OP_SUB
+        x17.mve e6, s13
+        x19.a3 s0, R7, e6, #25, #2, #0
+        x12.aset #7, R7
+        x03.agu an, A14, #0, #0, A0
+}
+
+.macro aimm(an, value) {
+        ldi s12, #value
+        amov(an, s12)
+}
+
+; A<2h> = value: rimm then x12.aset (reference.md `rimm`, own-rimm; `x12.aset`, own-aset12).
+; Uses R7.
+.macro aimm_e(h, value) {
+        rimm R7, #value
+        x12.aset #h, R7
+}
+
+; A<2h + 1> = value: one x16.aset (reference.md `x16.aset`, own-x16aset).
+.macro aimm_o(h, value) {
+        x16.aset #h, #value
+}
+
+; A<2h> = the value in `src` (not s13): amov without its last copy. Uses s13, e6, R7.
+.macro amov_e(h, src) {
+        ldi s13, #2
+        alu s13, src, s13, #OP_SUB
+        x17.mve e6, s13
+        x19.a3 s0, R7, e6, #25, #2, #0
+        x12.aset #h, R7
+}
+
+; R<RD> = K + the value in `src` (not s13), absolute: s -> e (x17.mve, +1) -> R (x19.a3 AGU10 fn
+; 2, +1), the form AAC's window and TNS bounds run on silicon. Uses s13, e6. Loop bounds take
+; this, not ragu's A - R (unproven on silicon: an ALAC lane's first pcond saw A == R).
+.macro rset_k(RD, src, K) {
+        ldi s13, #K - 2
+        alu s13, src, s13, #OP_ADD
+        x17.mve e6, s13
+        x19.a3 s0, RD, e6, #25, #2, #0
+}
+
+; Packed x02 bundles (x17 reference.md x02.vc, x02.vs; facts 156-161, 182-185, 513, 549, 627,
+; 628, 730, all measured together in one bundle). Every slot reads before any slot writes.
+;
+; pk(LD, LA, MD, MA, MB, XD, XA, XB, OP, CODE): LD <- X:[LA], LA + 1 (the read uses the old LA);
+;   MD <- rnd(MA * MB / 2^23); s<XD> <- the third slot: CODE 0 the adder, XA op XB (OP 0 a + b,
+;   5 a - b), CODE 7 asrrs(XB >> XA), rounded half up as x19 op 23 (730). LD = s0 with LA = A0
+;   is no load, MD = s0 no product, XD = 0 no third slot. XD is the register's number.
+.macro pk(LD, LA, MD, MA, MB, XD, XA, XB, OP, CODE) {
+        x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #CODE, #0, R0
+}
+
+; pkn: pk with the third slot's #n (CODE 4: (XA op XB + 2^(N-1)) >> N, the rounded shift, 730).
+.macro pkn(LD, LA, MD, MA, MB, XD, XA, XB, OP, CODE, N) {
+        x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #N, #CODE, #0, R0
+}
+
+; pks(SN, SA, XD, XA, XB, OP): X:[SA] <- s<SN>, SA + 1 (x02.vs: the store lands at the old SA,
+;   513, 730), beside the third slot's adder as pk's CODE 0. SN and XD are register numbers.
+;pkf / pksf: pk / pks with the A step's agu_xr fn and R (x02 A slot, facts 157, 403, 738):
+;   fn 0 x + 1, 1 x - 1, 2 x + R, 3 x - R.
+.macro pkf(LD, LA, MD, MA, MB, XD, XA, XB, OP, CODE, FN, R) {
+        x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #CODE, #FN, R
+}
+
+; ldw(LD, LA, X, R, D2, ADD, K): LD <- X:[LA]; X <- X + R wrapped by R<K>, D2 <- that + ADD
+;   (x02.vc fn 8, fact 964: the vc A slot wraps like x02.aa's, 963). The other slots write s0.
+; ldwx: ldw beside the third slot's adder, s<XD> <- XA op XB (pk's CODE 0).
+.macro ldw(LD, LA, X, R, D2, ADD, K) {
+        x02.vc LD, LA, X, D2, X, s0, s0, s0, s0, #1, #0, #0, s0, s0, #0, #0, #0, #8, R, ADD, #K
+}
+
+.macro ldwx(LD, LA, X, R, D2, ADD, K, XD, XA, XB, OP) {
+        x02.vc LD, LA, X, D2, X, s0, s0, s0, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #0, #8, R, ADD, #K
+}
+
+.macro pksf(SN, SA, XD, XA, XB, OP, FN, R) {
+        x02.vs s0, SA, SA, A0, SA, s0, s0, s0, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #(SN & 7), #(SN >> 3), #FN, R
+}
+
+.macro pks(SN, SA, XD, XA, XB, OP) {
+        x02.vs s0, SA, SA, A0, SA, s0, s0, s0, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #(SN & 7), #(SN >> 3), #0, R0
+}
+
+; X[B .. B + COUNT) = 0, COUNT even and >= 4: x03.rep's counted loop storing s3 at A8 (x17
+; reference.md x03.rep, facts 263, 675) over the first half, a pks at A9 in its delay slot over
+; the second. Uses s3, s12, e11, p3, A8, A9.
+.macro xzero(B, COUNT) {
+        aimm_e(4, B)
+        aimm_o(4, B + COUNT / 2)
+        ldi s3, #0
+        ldi s12, #COUNT / 2 - 2
+        x17.mve e11, s12        ; e11 = COUNT / 2 - 1
+        alu s12, s0, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; p3 = 1
+        x03.rep p3
+        pks(3, A9, 0, s0, s0, 0) ; (delay slot)
+        nop()                   ; (delay slot)
+}

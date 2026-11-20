@@ -56,6 +56,7 @@ int     rbfs_remove(const char *path);
 int     rbfs_rename(const char *old, const char *new);
 int     rbfs_modtime(const char *path, time_t modtime);
 off_t   rbfs_ffilesize(int fildes);
+bool    rbfs_pcm_generation(int fd, uint64_t *value);
 int     rbfs_fsamefile(int fildes1, int fildes2);
 int     rbfs_relate(const char *path1, const char *path2);
 bool    rbfs_file_exists(const char *path);

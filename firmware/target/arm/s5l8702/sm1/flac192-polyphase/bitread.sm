@@ -1,0 +1,67 @@
+; Input and X working lanes. s13 counts bits modulo eight across subframes.
+; s14 is one. e7 is the next stereo output word for the active channel.
+.const ORDER = 0x2d90
+.const LPCSHIFT = 0x2d91
+.const PARTS = 0x2d92
+.const PARTSIZE = 0x2d93
+.const RICEWIDTH = 0x2d94
+.const COEFFBITS = 0x2d95
+.const AUDIO = 0x340
+.const COEFF = 0x100
+
+.macro fetch(D, W) {
+    x16.getb #7, #(W-1)
+    x02.asrc D, A15
+    alu D, D, s14, #OP_SUB
+}
+
+; s1 = next s4 low-order bits, modulo 2^24. s4 is in 0..31.
+.macro piece(W) {
+    ldi s2, #W
+    x18.and s12, s2, s4
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, skip
+    nop()
+    nop()
+    ldi s2, #-W
+    alu s1, s2, s1, #ASR
+    fetch(s2, W)
+    alu s1, s1, s2, #OP_ADD
+skip:
+}
+.macro flexible() {
+    alu s13, s13, s4, #OP_ADD
+    ldi s1, #0
+    ldi s2, #16
+    x18.and s12, s2, s4
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, short
+    nop()
+    nop()
+    fetch(s1, 8)
+    ldi s2, #-8
+    alu s1, s2, s1, #ASR
+    fetch(s2, 8)
+    alu s1, s1, s2, #OP_ADD
+short:
+    piece(8)
+    piece(4)
+    piece(2)
+    piece(1)
+}
+.macro signed_bits() {
+    flexible()
+    ldi s2, #24
+    alu s2, s2, s4, #OP_SUB
+    alu s12, s0, s2, #OP_SUB
+    alu s1, s12, s1, #ASR
+    alu s1, s2, s1, #ASR
+}
+.macro again(R, L) {
+    alu R, R, s14, #OP_SUB
+    alu s12, R, s0, #OP_ADD
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, L
+    nop()
+    nop()
+}

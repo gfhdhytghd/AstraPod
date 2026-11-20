@@ -45,6 +45,7 @@ static struct fileobj_binding
     uint16_t                 flags;   /* F(D)(O)_* bits of this file/dir */
     uint16_t                 writers; /* number of writer streams */
     struct filestr_cache     cache;   /* write mode shared cache */
+    uint64_t                 pcm_generation;
     file_size_t              size;    /* size of this file */
     struct ll_head           list;    /* open streams for this file/dir */
 } fobindings[MAX_FILEOBJS];
@@ -369,6 +370,13 @@ void fileobj_fileop_sync(struct filestr_base *stream)
 }
 
 /* query for the pointer to the size storage for the file object */
+/* A read-only descriptor pins this binding. Writes through another descriptor
+   invalidate its verified PCM identity even if FAT mtime and length do not change. */
+uint64_t *fileobj_pcm_generation(const struct filestr_base *stream)
+{
+    return &((struct fileobj_binding *)stream->bindp)->pcm_generation;
+}
+
 file_size_t * fileobj_get_sizep(const struct filestr_base *stream)
 {
     if (!stream->bindp)

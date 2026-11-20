@@ -1,0 +1,124 @@
+; STREAMINFO supplies the selected image's rate and 16-bit depth. Validate
+; each frame's explicit values before entering any block-length-dependent loop.
+    equal_byte(255)
+    sbyte(s5)
+    equals(248, sync_ok)
+    equals(249, sync_ok)
+    jmp #ALWAYS, #0, invalid
+    nop()
+    nop()
+sync_ok:
+    sbyte(s5)
+    ldi s2, #4
+    alu s3, s2, s5, #ASR
+    yst(BLOCKCODE)
+    ldi s2, #15
+    x18.and s3, s5, s2
+    yst(RATECODE)
+    sbyte(s5)
+    x18.and s3, s5, s2
+    alu s6, s5, s0, #OP_ADD
+    alu s5, s3, s0, #OP_ADD
+    equals(0, depth_ok)
+    equals(12, depth_ok)
+    jmp #ALWAYS, #0, invalid
+    nop()
+    nop()
+depth_ok:
+    ldi s2, #4
+    alu s5, s2, s6, #ASR
+    equals(1, stereo_ok)
+    equals(8, stereo_ok)
+    equals(9, stereo_ok)
+    equals(10, stereo_ok)
+    jmp #ALWAYS, #0, invalid
+    nop()
+    nop()
+stereo_ok:
+    alu s3, s5, s0, #OP_ADD
+    yst(ASSIGN)
+    sbyte(s5)
+    ldi s4, #128
+    alu s12, s5, s4, #OP_SUB
+    ptst p3, s0, #LT12, #PTST
+    jmp #3, #3, after_index
+    nop()
+    nop()
+    ldi s4, #64
+number_extension:
+    x18.and s12, s4, s5
+    ptst p3, s0, #EQ12, #PTST
+    jmp #3, #3, after_index
+    nop()
+    nop()
+    sbyte(s2)
+    jmp #ALWAYS, #0, number_extension
+    alu s4, s14, s4, #ASR
+    nop()
+after_index:
+    yld(s5, BLOCKCODE)
+    equals(0, invalid)
+    equals(6, size8)
+    equals(7, size16)
+    ldi s3, #192
+    equals(1, size_done)
+    ; Codes 2..5 are 576 << (code - 2).
+    ldi s4, #6
+    alu s12, s5, s4, #OP_SUB
+    ptst p3, s0, #LT12, #PTST
+    jmp #IF_NOT, #3, power_size
+    ldi s4, #2
+    alu s4, s4, s5, #OP_SUB
+    ldi s3, #576
+    jmp #ALWAYS, #0, size_done
+    alu s3, s4, s3, #ASR
+    nop()
+power_size:
+    ; Codes 8..15 are 256 << (code - 8).
+    ldi s4, #8
+    alu s4, s4, s5, #OP_SUB
+    ldi s3, #256
+    jmp #ALWAYS, #0, size_done
+    alu s3, s4, s3, #ASR
+    nop()
+size16:
+    sbyte(s3)
+    alu s3, s15, s3, #ASR
+    sbyte(s2)
+    alu s3, s3, s2, #OP_ADD
+    jmp #ALWAYS, #0, size_done
+    alu s3, s3, s14, #OP_ADD
+    nop()
+size8:
+    sbyte(s3)
+    alu s3, s3, s14, #OP_ADD
+size_done:
+    ldi s4, #8192
+    alu s12, s4, s3, #OP_SUB
+    ptst p3, s0, #LT12, #PTST
+    jmp #3, #3, invalid
+    nop()
+    nop()
+    yst(FRAMESIZE)
+    yld(s5, RATECODE)
+    equals(0, crc8)
+    equals(RATE_CODE, crc8)
+    equals(12, rate_khz)
+    equals(13, rate_hz)
+    equals(14, rate_ten)
+    jmp #ALWAYS, #0, invalid
+    nop()
+    nop()
+rate_khz:
+    sbyte(s5)
+    equals(96, crc8)
+    jmp #ALWAYS, #0, invalid
+    nop()
+    nop()
+rate_hz:
+    jmp #ALWAYS, #0, invalid
+    nop()
+    nop()
+rate_ten:
+    equal_byte(RATE_TEN >> 8)
+    equal_byte(RATE_TEN & 255)

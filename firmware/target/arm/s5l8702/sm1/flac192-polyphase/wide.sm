@@ -1,0 +1,34 @@
+; For a reconstructed side sample X holds H=floor(x/2) and Y holds B=x&1.
+; While awaiting prediction, the same arrays hold residual low/high base-65536 limbs.
+.const WBASE = 0x2100
+.const WHIST = 0x2e22
+
+.macro wide_raw() {
+    yld(s4, WIDTH)
+    ldi s2, #25
+    alu s12, s4, s2, #OP_SUB
+    ptst p3, s0, #EQ12, #PTST
+    jmp #IF_NOT, #3, narrow
+    nop()
+    nop()
+    sample24()
+    fetch(s6, 1)
+    alu s13, s13, s14, #OP_ADD
+    jmp #ALWAYS, #0, done
+    nop()
+    nop()
+narrow:
+    signed_bits()
+    x18.and s6, s1, s14
+    alu s1, s14, s1, #ASR
+done:
+}
+.macro wstore() {
+    pks(1, A7, 0, s0, s0, 0)
+    x17.styi e13, #6, #0, e13
+}
+.macro mask16(D) {
+    ldi s2, #-16
+    alu D, s2, s14, #ASR
+    alu D, D, s14, #OP_SUB
+}

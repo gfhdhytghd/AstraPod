@@ -36,103 +36,37 @@ Rockbox specifically and deeply optimized for iPod Classic.
 ![Agents 与 Usage](docs/media/remote.gif)\
 用模拟的 HerdRemote 显示 Agents 工作区，并横向切换到 Usage 页面。
 
-## 按键与点击轮
+## 快捷键与组合键
 
-**Select** 是中央键。**Menu、Play、Left、Right** 是点击轮上的按键。以下是默认按键。顺时针通常向下或向前，逆时针向上或向后。
+仅列出不说明很难自行发现的组合键与快捷手势；完整按键说明见 [默认按键表](apps-ipod/input/keymap_ipod.c) 和 [SDL 按键映射](uisimulator/buttonmap/ipod.c)。
 
-### 首页和列表
-
-| 场景 | 按键 | 动作 |
-| --- | --- | --- |
-| 首页、标准列表 | 转动点击轮 | 移动光标。 |
-| 首页、标准列表 | Select 或 Right | 打开选中项。 |
-| 首页、标准列表 | Left 或短按 Menu | 返回上层。 |
-| 首页、标准列表 | 长按 Menu | 打开 QuickScreen。 |
-| 首页、标准列表 | 长按 Select | 打开选中项的上下文菜单。 |
-| 首页、支持播放跳转的列表 | 短按 Play | 进入「正在播放」。有续播记录时可以恢复播放。 |
-| 树形列表 | 长按 Left 或 Right | 启用左右键翻页时，向前或向后翻页。Left 的首次长按也可以返回根目录。 |
-| 至少 51 项的列表 | 10 个动画帧内快速移动至少 8 项 | 自动显示快速索引。停止快速移动后约 20 帧关闭。 |
-| 多选列表 | Select、按住 Select 转轮、Play、Menu | 勾选单行、连续勾选或反向取消、打开批量操作、退出。 |
-| 文本输入 | 转轮、Left 或 Right、Select、Play、Menu | 选字符、移动光标、插入、确认、取消。长按 Left 向左删除，长按 Right 向右删除，长按 Select 读出字符。 |
-| QuickScreen | Menu、Play、Left、Right | 调整上、下、左、右槽位。转轮调节音量，Select 退出。 |
-
-### Cover Flow、正在播放和歌词
+### 全局与恢复组合键
 
 | 场景 | 按键 | 动作 |
 | --- | --- | --- |
-| Cover Flow | 转轮 | 逐张浏览。底座遥控器的 Left 和 Right 也可以逐张浏览。 |
-| Cover Flow | Left 或 Right，支持长按重复 | 按当前排序跳到上一组或下一组。 |
-| Cover Flow | Select | 翻到曲目面板。艺人卡进入其相册列表。 |
-| Cover Flow | 长按 Select | 打开本地相册或艺人的上下文菜单，视页面支持而定。 |
-| Cover Flow | 短按 Play、长按 Play | 分别进入「正在播放」和随机转动封面。 |
-| Cover Flow | 短按 Menu、长按 Menu | 分别返回进入轮播的页面和打开 QuickScreen。 |
-| 翻面板 | 转轮、Select、短按 Menu | 分别选曲、播放选中曲目、翻回封面。 |
-| 翻面板 | 短按 Play、长按 Menu | 分别进入「正在播放」和打开 QuickScreen。 |
-| 正在播放 | 转轮、短按 Play | 分别调节音量和播放或暂停。 |
-| 正在播放 | 短按 Left 或 Right | 上一首或回到曲首，或切到下一首。 |
-| 正在播放 | 长按 Left 或 Right | 快退或快进。松手提交。 |
-| 正在播放 | Select、长按 Select 或长按 Play | Select 打开歌词。长按打开当前播放来源的上下文菜单。 |
-| 正在播放 | 短按 Menu、长按 Menu | 分别返回上一层（含翻面板）和打开 QuickScreen。 |
-| 歌词 | 转轮 | 手动浏览。停止约 4 秒后恢复跟唱。 |
-| 歌词 | Select | 手动浏览带时间的歌词时跳到选中行。其余情况退出歌词。 |
-| 歌词 | Menu、Play、短按或长按 Left／Right | 分别退出、播放或暂停、切曲或快退快进。 |
-| 歌词 | 底座遥控器音量键 | 本地模式浏览歌词。远程播放接管时调节远程音量。 |
-
-[默认按键表](apps-ipod/input/keymap_ipod.c) · [快速索引](apps-ipod/widgets/list_render.c) · [Cover Flow](apps-ipod/screens/covers/carousel.c) · [正在播放](apps-ipod/screens/playback/wps.c) · [歌词](apps-ipod/viewers/lyric_viewer/lyric_viewer.c)
-
-### Agents、Usage、遥控器和交接
-
-| 页面 | 点击轮 | Select | Left／Right | Menu |
-| --- | --- | --- | --- | --- |
-| Agents 工作区列表 | 选工作区 | 进入工作区 | 任一键打开 Usage | 确认退出 |
-| 工作区内 | 选代理 | 打开代理详情 | 上／下一个标签页 | 回工作区列表 |
-| Usage | 主机方向键，快转按词跳 | 主机 Enter | Left 发送 Backspace，支持长按。Right 回工作区列表。 | 确认退出 |
-| 代理详情 | 主机方向键，快转按词跳 | 主机 Enter | Left 发送 Backspace，支持长按。 | 回工作区 |
-| 问题 | 选选项 | 选择、勾选或提交 | — | 返回 |
-| 交接确认 | 选择继续或离开 | 确认选项 | 选择继续或离开 | 取消 |
-
-Agents 中按住 Play 录音，松手结束。短按会丢弃短录音。主机必须开启相应语音功能。长按 Menu 可以打开 QuickScreen。 [Agents 按键及语音](tools/herdremote/README.md)
-
-| 场景 | 按键 | 动作 |
-| --- | --- | --- |
-| 底座遥控器 | Play 单击 | 在播放页播放或暂停。在 Agents、Cover Flow 及其曲目列表相当于 Select。在 QuickScreen 中退出。 |
-| 底座遥控器 | Play 双击或三击 | 双击切换 Agents 和「正在播放」。三击打开或退出 Cover Flow。 |
-| 底座遥控器 | 长按 Play | 播放页打开歌词，歌词中返回。Agents 中按住说话。 |
-| 底座遥控器 | Left、Right、Menu、Select | 按当前页面导航。播放时长按 Left 或 Right 快退或快进。 |
-| 底座遥控器 | 音量键 | 播放时调音量。列表和轮播中滚动。Usage 可由主机转成编辑方向键。 |
-| Cider 资料库 | 转轮、Select 或 Right、Left 或 Menu、短按 Play | 分别选择、进入或播放、返回、打开「正在播放」。长按 Menu 打开 QuickScreen。 |
-
-[底座和主机的按键归属](docs/podbox/covers-navigation.md) · [Usage 遥控器](tools/herdremote/README.md)
-
-### 全局组合键、Hold 和恢复
-
-| 来源 | 按键 | 动作 |
-| --- | --- | --- |
-| AstraPod | Select + Menu | 开关 Cover Flow。远程来源可用时，优先打开远程相册。 |
-| AstraPod | Select + Play | 有 PodLink 主机时切换 Agents 和「正在播放」。无主机时跳到「正在播放」。录音或已开始的 Select 手势优先。 |
-| AstraPod | Hold 开关 | 锁定机身按钮和点击轮。关掉 Hold 后恢复输入。 |
-| AstraPod | 持续按住 Play | 在允许软件关机的页面关机。轮播和 Agents 会接管此手势。 |
-| 硬件 | 长按 Menu + Select | 强制重启。 |
-| 引导程序 | 重启后放开重启组合，再按住 Select + Play | 进入 Apple 磁盘模式。 |
-| 引导程序 | 启动时按住 Select + Left 或 Select + Right | 分别进入 Apple 诊断模式和 Rockbox 引导程序 USB 模式。 |
-| 引导程序 | 启动时按住 Menu | 尝试启动 Apple 固件。大于 128 GB 的盘必须检查 LBA48 兼容性。 |
-| 引导程序 | Hold 开启时启动 | 可选的项目引导程序仍启动 AstraPod。 |
-| 硬件 DFU | 按引导程序安装说明进入 | 用于恢复引导程序。DFU 中屏幕保持黑色。 |
+| 全局 | `Select + Menu` | 开关 Cover Flow（远程来源可用时优先打开远程相册）。 |
+| 全局 | `Select + Play` | 有 PodLink 主机时切换 Agents 和「正在播放」；无主机时跳到「正在播放」。 |
+| 硬件 | 长按 `Menu + Select` | 强制重启。 |
+| 引导程序 | 重启后按住 `Select + Play` | 进入 Apple 磁盘模式。 |
+| 引导程序 | 启动时按住 `Select + Left`／`Select + Right` | 分别进入 Apple 诊断模式和 Rockbox 引导程序 USB 模式。 |
+| 引导程序 | 启动时按住 `Menu` | 尝试启动 Apple 固件（大于 128 GB 的盘必须检查 LBA48 兼容性）。 |
 
 [引导程序安装和 DFU](tools/bootloader-installer/README.txt) · [引导程序按键源码](bootloader/ipod-s5l87xx.c)
 
-### SDL 模拟器键盘
+### 隐藏手势与底座遥控器
 
-| iPod 控件 | 电脑键盘 |
-| --- | --- |
-| 逆时针／顺时针转轮 | ↑／↓ 或小键盘 8／2 |
-| Left／Right | ←／→、小键盘 4／6 或 F7／F9 |
-| Select | Enter 或小键盘 5 |
-| Menu | Esc、Backspace、Insert 或小键盘小数点键 |
-| Play | 空格、小键盘 + 或 F8 |
-| Select + Play | F6 |
+| 场景 | 按键 | 动作 |
+| --- | --- | --- |
+| 常规页面 | 长按 `Menu`／长按 `Select` | 分别打开 QuickScreen 和上下文菜单。 |
+| 多选列表 | 按住 `Select` + 转轮／短按 `Play` | 连续勾选（反转取消）／打开批量操作菜单。 |
+| 文本输入 | 长按 `Left`／`Right` | 向左或向右删除字符。 |
+| Cover Flow | 长按 `Play` | 随机转动封面。 |
+| Agents | 按住 `Play` | 按住录音，松手结束（需主机开启语音功能）。 |
+| Usage／代理详情 | 滚轮（快转按词跳）／`Left`（可长按） | 发送主机方向键／发送 Backspace。 |
+| 底座遥控器 | `Play` 双击／三击 | 双击切换 Agents 和「正在播放」；三击开关 Cover Flow。 |
+| 底座遥控器 | 长按 `Play` | 播放页开关歌词；Agents 中按住说话。 |
 
-[SDL 按键映射](uisimulator/buttonmap/ipod.c)
+[底座和主机的按键归属](docs/podbox/covers-navigation.md) · [Agents 按键及语音](tools/herdremote/README.md)
 
 ## 连接电脑
 

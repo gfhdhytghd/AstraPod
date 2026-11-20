@@ -260,6 +260,11 @@ def record(name, binary, root, work):
     with Capture(binary, root, work, name, level="agents" if name == "remote" else None) as sim, raw.open("wb") as frames:
         sim.run(155)
         if name == "list-push":
+            # Warm the PBF glyph cache for the destination rows so the recorded
+            # push captures every row's staggered entrance instead of blank rows
+            # waiting on background glyph prefetch.
+            sim.run(75, tap("select"))
+            sim.run(95, tap("menu"))
             sim.run(246, tap("select", 36) + tap("menu", 147), frames)
         elif name == "index-mode":
             sim.run(46, tap("select"))

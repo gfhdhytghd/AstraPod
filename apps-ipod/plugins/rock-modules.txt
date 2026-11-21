@@ -18,6 +18,7 @@ demos/fireworks
 demos/logo
 demos/matrix
 demos/mosaique
+demos/oscilloscope
 demos/plasma
 demos/rocklife
 demos/snow

@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "plugins/rock_compat.h"
 #include "core_alloc.h"
 #include "font.h"
 #include "kernel.h"
@@ -672,6 +673,8 @@ bool native_wps_animating(void)
 
 void native_wps_render(const struct wps_state *state, bool submit)
 {
+    if (rock_ui_raw())
+        return;
     if (!active)
         return;
 

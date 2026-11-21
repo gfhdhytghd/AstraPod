@@ -24,6 +24,13 @@
 #include "file.h"
 #include "debug.h"
 #include "load_code.h"
+#include "lc-rock-checked.h"
+
+/* Make code written through the data cache executable. */
+void lc_commit_image(void)
+{
+    commit_discard_idcache();
+}
 
 /* load binary blob from disk to memory, returning a handle */
 void * lc_open(const char *filename, unsigned char *buf, size_t buf_size)
@@ -85,8 +92,7 @@ void * lc_open(const char *filename, unsigned char *buf, size_t buf_size)
         goto error;
     }
 
-    /* commit dcache and discard icache */
-    commit_discard_idcache();
+    lc_commit_image();
     /* return a pointer the header, reused by lc_get_header() */
     return hdr.load_addr;
 

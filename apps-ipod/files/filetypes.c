@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include "plugins/rock_compat.h"
 #include "rbpaths.h"  /* THEME_DIR, ICON_DIR */
 #include "string.h"
 
@@ -286,6 +287,11 @@ bool filetype_open_core_viewer(int attr, const char *file, int *rc)
 {
     switch (attr & FILE_ATTR_MASK)
     {
+#ifdef ASTRAPOD_ROCK_COMPAT
+        case FILE_ATTR_ROCK:
+            *rc = rock_open_from_browser(file);
+            return true;
+#endif
         case FILE_ATTR_TXT:
         case FILE_ATTR_BOOK:
         case FILE_ATTR_LYRICS:

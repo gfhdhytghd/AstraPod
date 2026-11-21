@@ -35,6 +35,7 @@
 #include <stdlib.h>
 
 #include "config.h"
+#include "plugins/rock_compat.h"
 #include "lang.h"
 
 #include "speech/language.h"
@@ -126,7 +127,7 @@ static int raw_volume_button(int button)
 static long raw_ui_filter(long button)
 {
     /* Audio/decoder threads also read buttons; they must never write RTC. */
-    if (thread_self() != ui_thread) return button;
+    if (thread_self() != ui_thread || rock_ui_raw()) return button;
 #if defined(BUTTON_SCROLL_BACK) && defined(BUTTON_SCROLL_FWD)
     if (!(button & (SYS_EVENT | BUTTON_MULTIMEDIA | BUTTON_REDRAW)) &&
         (button & (BUTTON_SCROLL_BACK | BUTTON_SCROLL_FWD)))
@@ -282,6 +283,16 @@ static action_last_t action_last =
     .bl_filter_tick = 0,
 
 }; /* action_last_t action_last */
+
+#ifdef ASTRAPOD_ROCK_COMPAT
+static action_last_t rock_action_last;
+
+void rock_action_reset(void)
+{
+    rock_action_last = (action_last_t){ .button = BUTTON_REL,
+                                      .context = CONTEXT_STD };
+}
+#endif
 
 /******************************************************************************
 ** INTERNAL ACTION FUNCTIONS **************************************************
@@ -453,6 +464,7 @@ static int remote_context(int context)
 }
 static int raw_ui_timeout(int timeout)
 {
+    if (rock_ui_raw()) return timeout;
     if (thread_self() != ui_thread || ui_polling || remote_input_active) return timeout;
     if (remote.queued) return TIMEOUT_NOBLOCK;
     if (agents_remote_pending(&remote) && (timeout < 0 || timeout > HZ / 10))
@@ -579,6 +591,13 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
 {
     bool ret = true;
     int *button = &cur->button;
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (last == &rock_action_last)
+    {
+        *button = button_get_w_tmo(cur->timeout);
+        goto classify_button;
+    }
+#endif
 #ifdef HAVE_WHEEL_WPS_CHORD
     ui_polling = true;
 #endif
@@ -679,6 +698,9 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
     }
 #endif
 
+#ifdef ASTRAPOD_ROCK_COMPAT
+classify_button:
+#endif
    /* ********************************************************
     * Can return button immediately, sys_event & multimedia
     * button presses don't use the action system, Data from
@@ -1240,7 +1262,7 @@ void action_wait_for_release_preserve_queue(void)
 }
 
 
-#ifdef HAVE_USB_PODLINK
+#if defined(HAVE_USB_PODLINK) || defined(ASTRAPOD_ROCK_COMPAT)
 void action_handoff_enter(void)
 {
     /* Disown the previous screen's button without discarding queued input.
@@ -1356,8 +1378,26 @@ static int menu_back_action(int action)
     return menu_back && action == ACTION_STD_MENU ? ACTION_STD_CANCEL : action;
 }
 
+#ifdef ASTRAPOD_ROCK_COMPAT
+static int get_rock_action(int context, int timeout,
+                           const struct button_mapping *(*map)(int))
+{
+    /* The plugin owns the click wheel, including native PLA prebuttons. */
+    action_cur_t current;
+    init_act_cur(&current, context, timeout, map);
+    current.timeout = timeout;
+    rock_action_last.backlight_mask = action_last.backlight_mask;
+    int action = get_action_worker(&rock_action_last, &current);
+    return do_backlight(&rock_action_last, &current, action);
+}
+#endif
+
 int get_action(int context, int timeout)
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (rock_ui_raw())
+        return get_rock_action(context, timeout, NULL);
+#endif
 #ifdef HAVE_USB_PODLINK
     podlink_time_sync();
 #endif
@@ -1474,6 +1514,10 @@ int action_set_keymap_handle(int handle, int count)
 int get_custom_action(int context,int timeout,
                       const struct button_mapping* (*get_context_map)(int))
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (rock_ui_raw())
+        return get_rock_action(context, timeout, get_context_map);
+#endif
 #ifdef HAVE_USB_PODLINK
     podlink_time_sync();
 #endif

@@ -4,21 +4,9 @@
  * Hands out the linker-reserved scratch buffer to whichever screen needs a
  * large temporary allocation, guarding against two owners at once.
  *
- * The plugin system has been removed from this fork. All that remains of it in
- * the core is the RAM region a plugin used to run in (pluginbuf, from the
- * linker script), which core screens borrow as scratch space instead. For the
- * current list of borrowers, grep for the two entry points below rather than
- * trusting a list here -- it grows.
- *
- * The rb-> API struct, the .rock loader and the rest of the plugin machinery
- * are all gone. The linker symbol and PLUGIN_BUFFER_SIZE keep their old names
- * because both live outside apps/.
- *
- * One buffer, one user. While the plugin system existed that held by
- * construction -- only one plugin ran at a time. It no longer does: several
- * core screens can be reached from one another, and some of them hold the
- * buffer for as long as their screen is up. Nothing copies out of it, so an
- * overlap silently aliases memory.
+ * The linker reserves pluginbuf for core scratch space and foreground
+ * plugins. The same exclusive lease covers the loaded code and the area
+ * available to its caller. The codec and playback pools are separate.
  *
  * Ownership is therefore tracked, but only for the holders that actually need
  * it. Long-lived holders claim and release around their screen's lifetime;

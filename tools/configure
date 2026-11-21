@@ -1572,6 +1572,7 @@ help() {
     --32-bit          Force a 32-bit simulator (use with --sdl-threads for duke3d)
     --prefix          Target installation directory
     --compiler-prefix Override compiler prefix (inherently dangerous)
+    --rock-compat    Build AstraPod source plugins for ipod6g
     --appsdir=DIR     Build the application layer from DIR (a name relative to
                       the source root) instead of the default "apps"
     --help            Shows this message (must not be used with other options)
@@ -1600,6 +1601,7 @@ ARG_ADDR_SAN=
 ARG_UBSAN=
 ARG_STACK_PROTECTOR=
 ARG_PLUGINS=
+ARG_ROCK_COMPAT=
 err=
 for arg in "$@"; do
 	case "$arg" in
@@ -1617,6 +1619,7 @@ for arg in "$@"; do
 		--ttsopts=*)  ARG_TTSOPTS=`echo "$arg" | cut -d = -f 2`;;
 		--type=*)     ARG_TYPE=`echo "$arg" | cut -d = -f 2`;;
 		--voice=*)    ARG_VOICE=`echo "$arg" | cut -d = -f 2`;;
+		--rock-compat) ARG_ROCK_COMPAT=1;;
 		--plugins=*)  ARG_PLUGINS=`echo "$arg" | cut -d = -f 2`;;
 		--thumb)      ARG_ARM_THUMB=1;;
 		--no-thumb)   ARG_ARM_THUMB=0;;
@@ -4929,6 +4932,16 @@ else
     # Build the default set of plugins
     selected_src="DEFAULT"
     selected_subdirs="DEFAULT"
+fi
+
+if [ "$ARG_ROCK_COMPAT" = 1 ]; then
+    if [ "$modelname" != ipod6g ] || [ "$coreapps" != apps-ipod ] ||
+       [ "$apps" != apps ] || [ "$plugins" != yes ]; then
+        echo "[ERROR] --rock-compat requires an AstraPod ipod6g firmware or simulator build"
+        exit 1
+    fi
+    extradefines="$extradefines -DASTRAPOD_ROCK_COMPAT"
+    cmdline="$cmdline --rock-compat"
 fi
 
 ### end of cmdline

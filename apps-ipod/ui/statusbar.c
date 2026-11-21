@@ -1,5 +1,6 @@
 /* Native status bar service. GPL version 2+. */
 #include "config.h"
+#include "plugins/rock_compat.h"
 #include "statusbar.h"
 
 #include <string.h>
@@ -144,7 +145,7 @@ void sb_motion_presented(void)
 
 int sb_motion_timeout(int timeout)
 {
-    if (!indicators_moving || !lcd_active() || ui_flush_inhibited() ||
+    if (rock_ui_raw() || !indicators_moving || !lcd_active() || ui_flush_inhibited() ||
         lcd_updates_held() || !viewportmanager_theme_enabled(SCREEN_MAIN))
         return timeout;
     int next = ui_clock_poll_timeout(USEC_TIMER - motion_start, motion_duration, HZ);
@@ -198,15 +199,24 @@ bool sb_set_persistent_title(const char *title, enum themable_icons icon,
     return set_title(title, icon, screen, title != NULL);
 }
 
-bool sb_get_persistent_title(enum screen_type screen, char *text, size_t size,
-                             enum themable_icons *icon)
+static bool read_title(enum screen_type screen, char *text, size_t size,
+                       enum themable_icons *icon, bool persistent_only)
 {
     if (status_handle <= 0)
+    {
+        if (!persistent_only)
+        {
+            strlcpy(text, "", size);
+            if (icon)
+                *icon = Icon_NOICON;
+        }
         return false;
+    }
+
     struct statusbar *bar = core_get_data_pinned(status_handle);
     const struct status_title *state = &bar->title[screen];
     bool persistent = state->persistent;
-    if (persistent)
+    if (persistent || !persistent_only)
     {
         strlcpy(text, state->text, size);
         if (icon)
@@ -214,6 +224,18 @@ bool sb_get_persistent_title(enum screen_type screen, char *text, size_t size,
     }
     core_put_data_pinned(bar);
     return persistent;
+}
+
+bool sb_get_persistent_title(enum screen_type screen, char *text, size_t size,
+                             enum themable_icons *icon)
+{
+    return read_title(screen, text, size, icon, true);
+}
+
+bool sb_get_title(enum screen_type screen, char *text, size_t size,
+                   enum themable_icons *icon)
+{
+    return read_title(screen, text, size, icon, false);
 }
 
 void sb_clear_transient_title(enum screen_type screen)
@@ -310,7 +332,7 @@ int sb_visible_height(void)
 
 void sb_update(enum screen_type screen, bool force)
 {
-    if (status_handle <= 0 || screen != SCREEN_MAIN)
+    if (rock_ui_raw() || status_handle <= 0 || screen != SCREEN_MAIN)
         return;
 
     struct statusbar *bar = core_get_data_pinned(status_handle);

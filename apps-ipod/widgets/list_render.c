@@ -37,6 +37,7 @@
 #include "ui/perf.h"
 #include "ui/retained.h"
 #include "ui/statusbar.h"
+#include "plugins/rock_compat.h"
 #include "list_render.h"
 #include "ui/scene.h"
 #include "list_select.h"
@@ -527,6 +528,11 @@ static unsigned marquee_shift(struct native_list *render, unsigned max_offset)
     return (max_offset - MIN(max_offset, (phase - delay) / frames * step));
 }
 
+static bool list_text_ready(int font, const char *text)
+{
+    return !font_prefetch_active() || font_prefetch_text(font, text);
+}
+
 static void draw_text(struct native_list *render, struct ui_rect clip,
                       struct ui_rect cell, int font, unsigned int fg,
                       const char *text, bool scroll, int offset, bool centered)
@@ -534,7 +540,7 @@ static void draw_text(struct native_list *render, struct ui_rect clip,
     struct viewport vp;
     if (!text || !*text || !set_clip(&vp, clip, cell, font, fg))
         return;
-    if (!font_prefetch_text(vp.font, text))
+    if (!list_text_ready(vp.font, text))
         return;
     int width = font_getstringsize((const unsigned char *)text, NULL, NULL, vp.font);
     int x = cell.x - vp.x;
@@ -847,7 +853,7 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     int text_font = render->text_font >= 0 ? render->text_font : list->parent[SCREEN_MAIN]->font;
     if (list->callback_draw_item)
     {
-        if (font_prefetch_text(text_font, label))
+        if (list_text_ready(text_font, label))
             draw_owner_row(list, clip, row, item, icon, selected, text_font, fg, bg, label);
         return;
     }
@@ -865,9 +871,9 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         }
     }
 
-    bool ready = font_prefetch_text(text_font, label);
+    bool ready = list_text_ready(text_font, label);
     if (agents && value && value[0] == 'r' && value[1] && value[2])
-        ready &= font_prefetch_text(text_font, value + 2);
+        ready &= list_text_ready(text_font, value + 2);
     if (!ready)
         return;
 
@@ -1100,8 +1106,8 @@ static void paint_notes(const struct ui_view *view, const struct ui_view_frame *
                           list->data, render->scratch.notes, sizeof(render->scratch.notes));
     if (!text || !*text)
         return;
-    if (!font_prefetch_text(render->text_font, text) ||
-        !font_prefetch_text(render->text_font, "."))
+    if (!list_text_ready(render->text_font, text) ||
+        !list_text_ready(render->text_font, "."))
         return;
 
     int pad = render->theme.metric[UI_METRIC_LIST_AUX_PADDING];
@@ -1411,7 +1417,7 @@ static int index_find_font(struct native_list *render, const unsigned char *text
             id = render->index_faces[i] = font_load_ex(paths[i], 0, sizeof(render->overlay.key));
         if (id < 0)
             continue;
-        if (!font_prefetch_text(id, (const char *)text))
+        if (!list_text_ready(id, (const char *)text))
         {
             /* Retain the new face while its key is loading. The epoch
              * invalidates the key, so readiness is checked again. */
@@ -1597,7 +1603,10 @@ static void draw_list(struct gui_synclist *list, bool status_only)
             status_only = false;
         render->artist_generation = generation;
     }
-    font_prefetch_begin();
+    /* SDK callers can block waiting for input immediately after a draw. */
+    bool prefetch = !rock_list_owns(list);
+    if (prefetch)
+        font_prefetch_begin();
     unsigned epoch = font_prefetch_epoch();
     if (render->font_epoch != epoch)
     {
@@ -1665,7 +1674,7 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     add_view(render, &render->header, g.header, &album_header_ops, render);
     ui_view_init(&render->rows, g.rows, &row_ops, render);
     bool motion_finished = update_row_pose(render, &g);
-    if (!status_only)
+    if (prefetch && !status_only)
         prefetch_list_page(render, &g);
     ui_view_append(&render->root, &render->rows);
     add_view(render, &render->notes, g.notes, &note_ops, render);
@@ -1707,7 +1716,8 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     if (animate)
         cpu_boost(false);
 #endif
-    font_prefetch_end();
+    if (prefetch)
+        font_prefetch_end();
 
 done:
     core_put_data_pinned(render);

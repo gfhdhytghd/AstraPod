@@ -3,21 +3,16 @@
  *
  * The scratch buffer, as a plain array.
  *
- * apps-ipod/system/app_buffer.c takes `pluginbuf` from the target linker
- * script. The name is the linker's, not this fork's -- there is no plugin
- * system here, and the region is scratch space core screens borrow.
- * A simulator has no linker script, so the symbol has to come from somewhere.
- * Upstream does the same thing at apps/plugin.c for hosted builds.
- *
- * Cover Flow, album-art scaling and the image viewer all reach this through
- * app_get_buffer() / app_claim_buffer(), so nothing worth simulating runs
- * without it.
+ * app_buffer.c uses pluginbuf for the same lease as the hardware. Hosted
+ * plugins load through SDL and use this array as scratch.
  ****************************************************************************/
 #include "config.h"
 
 #ifdef SIMULATOR
 
-unsigned char pluginbuf[PLUGIN_BUFFER_SIZE];
+#include <stdint.h>
+
+_Alignas(uintptr_t) unsigned char pluginbuf[PLUGIN_BUFFER_SIZE];
 
 /* Same story for the codec region (audio/codecs.c). CODEC_SIZE is 0 off
  * target, because a sim loads codecs as host shared objects and never copies

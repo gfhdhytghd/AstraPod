@@ -29,6 +29,9 @@ bool sb_set_persistent_title(const char *title, enum themable_icons icon,
                              enum screen_type screen);
 bool sb_get_persistent_title(enum screen_type screen, char *text, size_t size,
                              enum themable_icons *icon);
+/* Copy the current title and return whether it is persistent. */
+bool sb_get_title(enum screen_type screen, char *text, size_t size,
+                   enum themable_icons *icon);
 void sb_clear_transient_title(enum screen_type screen);
 
 /* Applies native list/content geometry and theme colours to a prepared

@@ -29,6 +29,7 @@ adapter=r'''
 #define HAVE_USB_PODLINK
 #define HAVE_ADJUSTABLE_CPU_FREQ
 #define HAVE_MULTIMEDIA_KEYS
+static bool rock_ui_raw(void) { return false; }
 static unsigned active_trace;
 static unsigned ui_perf_begin(const char *route)
 {

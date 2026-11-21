@@ -1,17 +1,5 @@
-/* *** DO NOT DELETE. DO NOT MOVE. THIS FILE IS STILL LIVE. ***
- *
- * Despite living in apps/plugins/ -- a directory that no longer contains a
- * plugin -- this linker script is what every .codec in the build links with:
- *
- *     lib/rbcodec/codecs/codecs.make:168
- *         CODEC_LDS := $(APPSDIR)/plugins/plugin.lds
- *
- * Codecs and plugins shared one script upstream. The plugins were removed from
- * this fork; the codecs were not. lib/ is outside the scope this fork's cleanup
- * is confined to, so this path cannot be changed from inside apps/.
- *
- * Removing or renaming it breaks codec linking at package time, not at compile
- * time. See plugins/README.md.
+/* Linker layout for AstraPod codecs and native plugins. GPL version 2+.
+ * lib/rbcodec/codecs/codecs.make uses this path for the codec layout.
  */
 
 /* Target headers hide their C declarations behind __ASSEMBLER__ and leave the
@@ -407,6 +395,10 @@ SECTIONS
     /* This is for ovl_offset.pl and is the highest address that must
        be loaded into the plugin buffer (past the end of last data in
        stored image). */
+#ifdef ASTRAPOD_ROCK
+    plugin_file_end = LOADADDR(.data) + SIZEOF(.data);
+#endif
+
     .pluginloadend loadendaddr :
     {
     	_plugin_load_end_addr = .;
@@ -429,4 +421,8 @@ ASSERT(LOADADDR(.ncbss) == ADDR(.ncbss) - NOCACHE_BASE,   ".ncbss has incorrect 
 ASSERT(LOADADDR(.ncbss) % CACHEALIGN_SIZE == 0,           ".ncbss incorrectly aligned");
 ASSERT(ADDR(.ncbss_vma) == LOADADDR(.ncbss),              ".ncbss_vma has wrong address");
 ASSERT(SIZEOF(.ncbss_vma) == SIZEOF(.ncbss),              ".ncbss_vma has wrong size");
+#endif
+
+#ifdef ASTRAPOD_ROCK
+ASSERT(SIZEOF(.iram) == 0 && SIZEOF(.ibss) == 0, "AstraPod plugins must stay in DRAM");
 #endif

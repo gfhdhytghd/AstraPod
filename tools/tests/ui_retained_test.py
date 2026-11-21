@@ -257,7 +257,8 @@ with tempfile.TemporaryDirectory(prefix="podbox-retained-test-") as temp:
     binary = port / "test"
     subprocess.run(["cc", "-std=c11", "-Werror", "-Wall", "-Wextra",
                     "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
-                    "-I", str(port), "-I", str(ui), str(port / "test.c"),
+                    "-I", str(port), "-I", str(ui), "-I", str(ui.parent),
+                    str(port / "test.c"),
                     str(ui / "retained.c"), str(ui / "frame.c"),
                     str(ui / "animation.c"), "-o", str(binary)],
                    check=True)

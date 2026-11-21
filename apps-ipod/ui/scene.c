@@ -1,5 +1,6 @@
 /* PodBox scene transitions. GPL version 2+. */
 #include "config.h"
+#include "plugins/rock_compat.h"
 #include "button.h"
 #include "core_alloc.h"
 #include "draw/viewport.h"
@@ -648,7 +649,7 @@ int ui_scene_poll(int timeout)
     /* A modal that returns inside its parent resumes this input pump. Its
      * restored pixels have no bearing on a later root navigation. */
     restored_page = NULL;
-    if (!ui_scene_automatic())
+    if (rock_ui_raw() || !ui_scene_automatic())
         return timeout;
     struct ui_scene *scene = owner;
     if (scene->capturing)

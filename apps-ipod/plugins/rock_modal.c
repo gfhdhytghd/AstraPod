@@ -1,0 +1,42 @@
+/* Modal widgets for foreground plugins. GNU GPL version 2 or later. */
+#include "plugins/rock_compat.h"
+#include "plugins/rock_widgets.h"
+
+struct rock_native_scope rock_modal_begin(void)
+{
+    rock_list_release(false);
+    rock_flush_settings();
+    return rock_display_native_begin();
+}
+
+void rock_modal_end(const struct rock_native_scope *scope)
+{
+    rock_list_release(false);
+    rock_display_native_end(scope, ROCK_RESUME_PRESENT);
+    if (!rock_usb_taken())
+        rock_begin_settings();
+}
+
+enum yesno_res rock_yesno(const struct text_message *message,
+                          const struct text_message *yes,
+                          const struct text_message *no)
+{
+    if (rock_usb_taken())
+        return YESNO_USB;
+
+    struct rock_native_scope scope = rock_modal_begin();
+    enum yesno_res result = gui_syncyesno_run(message, yes, no);
+    rock_modal_end(&scope);
+    return result;
+}
+
+int rock_kbd_input(char *buffer, int buflen, ucschar_t *kbd)
+{
+    if (rock_usb_taken() || buflen <= 0)
+        return -1;
+
+    struct rock_native_scope scope = rock_modal_begin();
+    int result = kbd_input(buffer, buflen, kbd);
+    rock_modal_end(&scope);
+    return result;
+}

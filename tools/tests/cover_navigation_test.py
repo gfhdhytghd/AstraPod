@@ -18,7 +18,8 @@ static void cider_source_poll(void){}
 static void iap_volume_context(bool wps){(void)wps;}
 static int iap_agents_volume_take(void){return 0;}
 static int raw_volume_button(int b){return b;}
-static bool ui_polling;
+static bool ui_polling, plugin_owns_display;
+static bool rock_ui_raw(void){return plugin_owns_display;}
 static unsigned int ui_thread=7,caller=7;
 static int held,clock_pumps;
 static struct agents_cover_chord_state cover_chord;
@@ -32,6 +33,9 @@ post=r'''
 int main(void){
  int chord=BUTTON_SELECT|BUTTON_MENU;
  caller=8;held=chord;assert(raw_ui_filter(chord)==chord&&!clock_pumps&&!agents_nav_active());
+ caller=7;plugin_owns_display=true;
+ assert(raw_ui_filter(chord)==chord&&!clock_pumps&&!agents_nav_active());
+ plugin_owns_display=false;caller=8;
 #ifdef TEST_STAGGER_WHEEL
  assert(raw_ui_filter(BUTTON_SCROLL_FWD)==BUTTON_SCROLL_FWD&&!push_snaps);
  caller=7;ui_polling=true;

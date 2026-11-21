@@ -1,5 +1,6 @@
 /* Framebuffer damage and submission for native UI. GPL version 2+. */
 #include "config.h"
+#include "plugins/rock_compat.h"
 #include "frame.h"
 #include "perf.h"
 #include "system.h"
@@ -83,7 +84,7 @@ unsigned int ui_flush_usec(void) { return flush_usec; }
 
 void ui_flush_dirty(void)
 {
-    if (flush_inhibited)
+    if (flush_inhibited || rock_ui_raw())
         return;
 
     FOR_NB_SCREENS(i)

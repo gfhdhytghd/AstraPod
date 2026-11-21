@@ -317,11 +317,22 @@ enum { AUTORESUME_NEXTTRACK_NEVER = 0, AUTORESUME_NEXTTRACK_ALWAYS,
 /* form a "virtual pointer" out of a language ID */
 #define ID2P(id) (VIRT_PTR + id)
 
-/* resolve a pointer which could be a virtualized ID or a literal */
-#define P2STR(p) (char *)((p>=VIRT_PTR && p<VIRT_PTR+VIRT_SIZE) ? str(p-VIRT_PTR) : p)
+#define NATIVE_P2ID(p) ((p>=VIRT_PTR && p<VIRT_PTR+VIRT_SIZE) ? p-VIRT_PTR : -1)
+#define NATIVE_P2STR(p) (char *)((p>=VIRT_PTR && p<VIRT_PTR+VIRT_SIZE) ? str(p-VIRT_PTR) : p)
 
-/* get the string ID from a virtual pointer, -1 if not virtual */
-#define P2ID(p) ((p>=VIRT_PTR && p<VIRT_PTR+VIRT_SIZE) ? p-VIRT_PTR : -1)
+#if defined(ASTRAPOD_ROCK_COMPAT) && !defined(PLUGIN)
+#include "plugins/rock_compat.h"
+/* Resolve plugin-only IDs to literals before native strings or voice lookup. */
+#define P2STR(p) __extension__ ({ \
+    const unsigned char *resolved_text = rock_widget_text(p); \
+    NATIVE_P2STR(resolved_text); })
+#define P2ID(p) __extension__ ({ \
+    const unsigned char *resolved_text = rock_widget_text(p); \
+    NATIVE_P2ID(resolved_text); })
+#else
+#define P2STR(p) NATIVE_P2STR(p)
+#define P2ID(p) NATIVE_P2ID(p)
+#endif
 
 /* !defined(HAVE_LCD_COLOR) implies HAVE_LCD_CONTRAST with default 40.
    Explicitly define HAVE_LCD_CONTRAST in config file for newer ports for

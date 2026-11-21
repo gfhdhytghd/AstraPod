@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include "string-extra.h"
 #include "config.h"
+#include "plugins/rock_compat.h"
 #include "system.h"
 #include "kernel.h"
 #include "file.h"
@@ -420,6 +421,7 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
             intptr_t seqnum = button_get_data();
             if (callback != NULL)
                 callback(parameter);
+            rock_usb_takeover();
             system_flush();
 #ifdef BOOTFILE
             /* Take the "before" mtime once per cable session. Windows

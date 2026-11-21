@@ -330,39 +330,21 @@ Each target has a config header at `firmware/export/config/<modelname>.h` defini
 
 Source file selection uses `SOURCES` files (not per-target Makefiles). These are preprocessed with the C preprocessor, using `#ifdef` conditionals based on target config defines. This is how a single build system handles all 80+ targets. Key SOURCES files: `firmware/SOURCES`, `apps-ipod/SOURCES`.
 
-### Plugins: removed
+### Plugins
 
-There is no plugin system. Upstream's dynamically loaded `.rock` files, the
-`plugin.h` API struct and `plugin_start()` are all gone; `ROCKS` is empty and
-`make rocks` builds nothing. What were plugins are now either core screens
-(text and image viewers, properties, playing time) or deleted outright. Fork
-features still go in the core, and there is no fork-specific plugin API.
+AstraPod builds selected upstream plugin sources from `apps/plugins/` with its
+own SDK. Native widgets use AstraPod's theme. Plugins that draw pixels directly
+own the LCD while running. Stock `.rock` files use a different ABI.
 
-The one plugin goal is source compatibility: upstream plugin sources from
-`apps/plugins/` build for AstraPod without hand edits -- through compat
-headers, generated mapping tables or mechanical conversion rules applied at
-build time -- and draw with AstraPod's widgets and theme. Binary
-compatibility with upstream `.rock` files is not a goal.
-`.specifications/rock-compat.md` is the design and its current state.
+`tools/configure --appsdir=apps-ipod --target=ipod6g --rock-compat` opts in.
+The ipod6g build scripts pass this flag and package the allowlist with
+`bundle-rocks.sh` after `bundle-theme.sh`. Use
+[the SDK guide](docs/podbox/rock-compat-sdk.md) to add a source to the allowlist.
+`.specifications/rock-compat.md` contains the phase plan.
 
-**Watch for stubs left behind by the removal.** A plugin-backed feature could
-survive as an entry point that compiles, is reachable from a menu and does
-nothing. The pitch screen was the last of these and is now gone entirely --
-screen, keymap context, `ACTION_PS_*` codes, activity and settings. Nothing in
-`apps-ipod/` can change pitch or speed any more, so **do not go looking for a
-pitch UI**: `HAVE_PITCHCONTROL` is still defined because it gates real DSP code
-in `lib/rbcodec`, and `global_status.resume_pitch`/`resume_speed` still exist
-because `firmware/sound.c` and `lib/rbcodec/dsp/tdspeed.c` write to them. The
-`%Sp`/`%Ss` skin tokens keep their renderers for the same class of reason --
-the tags are defined in `lib/skin_parser`, so dropping the renderer would leave
-a tag that parses cleanly and draws nothing.
-
-`apps-ipod/plugins/` still exists but holds only support files. Live ones:
-`plugin.lds` (the codec link, via `lib/rbcodec/codecs/codecs.make`),
-`credits.pl` (`apps.make`), `bitmaps/` and `plugins.make` (`tools/root.make`).
-`viewers.config`, `rockbox-fonts.config` and `CATEGORIES` are vestigial --
-`tools/buildzip.pl` reads its copies from a hardcoded `apps/plugins/`, never
-from here.
+Core viewers and games remain built into the application. `HAVE_PITCHCONTROL`
+gates DSP and skin tag support. The fork has no pitch screen, pitch actions
+or pitch UI settings.
 
 ### Codec System
 

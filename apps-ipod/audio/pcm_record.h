@@ -67,13 +67,18 @@
 /* I/O error has occurred */
 #define PCMREC_E_IO                     0x80200000
 
+/* recording buffer could not be allocated */
+#define PCMREC_E_ALLOC                  0x80400000
+
 /* all error flags */
-#define PCMREC_E_ALL                    0x803f0000
+#define PCMREC_E_ALL                    0x807f0000
 
 /* Functions called by audio_thread.c */
 void pcm_rec_error_clear(void);
 unsigned int pcm_rec_status(void);
 uint32_t pcm_rec_get_warnings(void);
+uint32_t pcm_rec_get_errors(void);
+uint32_t pcm_rec_get_dma_blocks(void);
 #ifdef HAVE_SPDIF_IN
 unsigned long pcm_rec_sample_rate(void);
 #endif

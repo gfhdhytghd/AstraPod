@@ -36,6 +36,7 @@
 #include "general.h"
 #include "audio/codec_thread.h"
 #include "audio.h"
+#include "audio/playback.h"
 #include "sound.h"
 #include "metadata.h"
 #include "system/appevents.h"
@@ -486,10 +487,13 @@ static void clear_warning_status(uint32_t w)
     pcm_rec_unlock();
 }
 
+static volatile uint32_t pcm_dma_blocks;
+
 /* Callback for when more data is ready - called by DMA ISR */
 static void pcm_rec_have_more(void **start, size_t *size)
 {
     size_t next_idx = pcm_widx;
+    pcm_dma_blocks++;
 
     if (!pcm_pause)
     {
@@ -947,6 +951,16 @@ unsigned int pcm_rec_status(void)
     return ret;
 }
 
+uint32_t pcm_rec_get_errors(void)
+{
+    return errors;
+}
+
+uint32_t pcm_rec_get_dma_blocks(void)
+{
+    return pcm_dma_blocks;
+}
+
 /* Return warnings that have occured since recording started */
 uint32_t pcm_rec_get_warnings(void)
 {
@@ -967,6 +981,9 @@ unsigned long pcm_rec_sample_rate(void)
 /* Initializes recording - call before calling any other recording function */
 void audio_init_recording(void)
 {
+    pcm_dma_blocks = 0;
+    /* A stopped player can still own its playback ring, even when idle. */
+    audio_release_buffer();
     LOGFQUEUE("audio >| pcmrec Q_AUDIO_INIT_RECORDING");
     audio_queue_send(Q_AUDIO_INIT_RECORDING, 1);
 }
@@ -1555,6 +1572,8 @@ static void on_recording_options(struct audio_recording_options *options)
     {
         enc_cb = codec_get_enc_callback();
 
+        if (!enc_cb)
+            raise_error_status(PCMREC_E_ENC_SETUP);
         if (!enc_cb || !configure_encoder_stream())
         {
             codec_unload();
@@ -1722,7 +1741,7 @@ void audio_recording_handler(struct queue_event *ev)
     LOGFQUEUE("record < Q_AUDIO_INIT_RECORDING");
     if (!on_init_recording())
     {
-        set_error_bits(PCMREC_E_LOAD_ENCODER);
+        set_error_bits(PCMREC_E_ALLOC);
         queue_reply(&audio_queue, 0);
         ev->id = Q_NULL;
         return;

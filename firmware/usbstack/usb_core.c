@@ -1466,6 +1466,17 @@ static void usb_core_control_request_handler(struct usb_ctrlrequest* req, uint8_
                                           SM1_TEST_RECORD_STATUS_SIZE);
                 return;
             }
+            if (req->wIndex == SM1_TEST_USB_INDEX &&
+                req->bRequestType == 0xc0 &&
+                req->wValue == SM1_TEST_RECORD_ERROR_VALUE &&
+                req->wLength == SM1_TEST_RECORD_ERROR_SIZE &&
+                reqdata_size >= SM1_TEST_RECORD_ERROR_SIZE)
+            {
+                sm1_test_record_error(reqdata);
+                usb_core_control_response(USB_CONTROL_ACK, reqdata,
+                                          SM1_TEST_RECORD_ERROR_SIZE);
+                return;
+            }
             unsigned command = 0;
             if (req->wIndex == SM1_TEST_USB_INDEX &&
                 req->wValue >= SM1_TEST_REBOOT &&

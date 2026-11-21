@@ -16,6 +16,7 @@ pre=r'''
 #include "screens/playback/cider_model.h"
 #define ARRAYLEN(x) (sizeof(x)/sizeof((x)[0]))
 #define HZ 100
+#define TIME_BEFORE(a,b) ((long)((a)-(b))<0)
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define SEARCH_MAX_QUERY 32
@@ -25,7 +26,7 @@ pre=r'''
 #define QUICKSCREEN_IN_USB 1
 static int quick_screen_current(int action,void(*poll)(void)){(void)action;(void)poll;return 0;}
 '''
-tokens=sorted(set(tokens)|{'ACTION_STD_MENU'})
+tokens=sorted((set(tokens)|{'ACTION_STD_MENU'})-{'ACTION_NONE'})
 pre+='enum {ACTION_NONE,'+','.join(tokens)+'};\n'
 pre+=r'''
 enum themable_icons {icon_dummy=1000};
@@ -40,7 +41,20 @@ struct list_header {
     const struct bitmap *(*cover)(void *, struct dim *);
     void *data;
 };
-struct gui_synclist{int selected,count;const struct list_header*header;};
+struct gui_synclist{int selected,count;const struct list_header*header;void (*callback_prefetch_art)(int,void*,int);};
+struct artist_tile_source { unsigned identity; char remote[65]; };
+static unsigned art_name_hash(const char *name){(void)name;return 1;}
+static const struct bitmap *artist_tile_request(const struct artist_tile_source *src,int dim,bool paint)
+{(void)src;(void)dim;(void)paint;assert(!"unexpected artist art");return NULL;}
+struct ui_scene { int handle; bool capturing; };
+static long current_tick;
+static void ui_scene_interrupt(void){}
+static void ui_scene_cancel(struct ui_scene *s){assert(!s->handle);}
+static void ui_scene_start(struct ui_scene *s){assert(!s->handle);}
+static void ui_scene_update(struct ui_scene *s,bool redraw){(void)redraw;assert(!s->handle);}
+static int ui_scene_timeout(struct ui_scene *s,int timeout){assert(!s->handle);return timeout;}
+static bool ui_scene_capture(struct ui_scene *s,const void *a,const void *b,bool push)
+{(void)a;(void)b;(void)push;assert(!s->handle);return false;}
 static void browser_album_details(const struct browser_db_header*h,char*detail,size_t n)
 {snprintf(detail,n,"%d tracks",h->tracks);}
 static void *view_storage;
@@ -71,7 +85,7 @@ static int core_free(int h)
     return 0;
 }
 struct search_provider{const char*title;int activity;int(*scan)(const char*,void*);const char*(*row_text)(int,void*);bool(*refresh)(void*);};
-static struct {bool db_albumart;int db_art_row_height;}global_settings={true,46};
+static struct {bool db_albumart;int db_art_row_height;bool db_artistart;}global_settings={true,46,false};
 static bool origin_agents,journey,origin_wps,cover_music;
 static int cover_origin;
 static bool cover_nav_active(void){return journey;}
@@ -110,6 +124,7 @@ static void agents_nav_leave(int n){(void)n;assert(live==1);live--;}
 static void agents_nav_take(int n){(void)n;}
 static int agents_nav_pending(void){return AGENTS_NAV_NONE;}
 static void push_current_activity(int n){(void)n;}
+static void push_activity_without_refresh(int n){push_current_activity(n);}
 static void pop_current_activity(void){}
 static int browser_db_root_row_count(void){return 3;}
 static bool browser_db_get_root_row(int n,int*index,const unsigned char**name){static const char*names[]={"Album","Artist","Genre"};*index=n;if(name)*name=(const unsigned char*)names[n];return true;}
@@ -163,14 +178,15 @@ static void gui_synclist_draw(struct gui_synclist*l)
         header_draws++;
     }
 }
+static void gui_synclist_draw_settled(struct gui_synclist *list){gui_synclist_draw(list);}
 static void gui_synclist_scroll_stop(struct gui_synclist*l){(void)l;}
 static void gui_synclist_forget(struct gui_synclist*l){l->header=NULL;}
-static void list_do_action(int context,int timeout,struct gui_synclist*l,int*a){(void)context;(void)timeout;step++;
-if(mode==4){*a=ACTION_STD_MENU;return;}if(mode==3){*a=step==1?ACTION_STD_OK:ACTION_STD_CANCEL;return;}if(mode==0){*a=ACTION_STD_OK;return;}if(mode==1){*a=ACTION_STD_MENU;return;}
-if(step>128){*a=ACTION_REMOTE_WPS;return;}rng=rng*1664525+1013904223;l->selected=(rng>>16)%MAX(1,l->count);*a=(rng&3)==0?ACTION_STD_CANCEL:(rng&3)==1?ACTION_STD_OK:ACTION_NONE;}
+static bool list_do_action(int context,int timeout,struct gui_synclist*l,int*a){(void)context;(void)timeout;step++;
+if(mode==4){*a=ACTION_STD_MENU;return false;}if(mode==3){*a=step==1?ACTION_STD_OK:ACTION_STD_CANCEL;return false;}if(mode==0){*a=ACTION_STD_OK;return false;}if(mode==1){*a=ACTION_STD_MENU;return false;}
+if(step>128){*a=ACTION_REMOTE_WPS;return false;}rng=rng*1664525+1013904223;l->selected=(rng>>16)%MAX(1,l->count);*a=(rng&3)==0?ACTION_STD_CANCEL:(rng&3)==1?ACTION_STD_OK:ACTION_NONE;return false;}
 '''
 post=r'''
-int cider_covers(void){if(mode==4)return CIDER_COVERS_REMOTE_RETURN;if(mode==1)return GO_TO_PREVIOUS;assert(live==1);live++;if(live>max_live)max_live=live;struct cider_row r={0};strcpy(r.route,"album/a0");strcpy(r.title,"Album 0");cider_browse_album(&r);live--;return GO_TO_PREVIOUS;}
+int cider_covers(void){if(mode==4)return CIDER_COVERS_REMOTE_RETURN;if(mode==1)return GO_TO_PREVIOUS;assert(live==1);live++;if(live>max_live)max_live=live;live--;return GO_TO_PREVIOUS;}
 static void check_art_pixels(void)
 {
     struct cider_browser_view view;
@@ -191,9 +207,13 @@ static void check_art_pixels(void)
 }
 int main(void){
 check_art_pixels();
-mode=0;depth=0;assert(cider_browse()==GO_TO_WPS&&plays==1&&!live&&depth==0);assert(root_count==6&&remote_homes==1);
+mode=0;depth=0;
+struct cider_row album={.kind=CIDER_ROW_ALBUM};strcpy(album.route,"album/a0");
+memset(album.art,'c',64);
+assert(cider_browse_at(&album)==GO_TO_WPS&&plays==1&&!live&&depth==0);
+assert(root_count==6&&remote_homes==0);
 struct cider_row root_row;assert(get_root_row(3,&root_row)&&!strcmp(root_row.route,"root/Album"));assert(get_root_row(4,&root_row)&&!strcmp(root_row.route,"root/Genre"));
-mode=1;assert(cider_browse()==GO_TO_ROOT&&!live&&depth==0);
+mode=1;assert(cider_browse()==GO_TO_ROOT&&!live&&depth==0&&remote_homes==1);
 depth=1;strcpy(history[1].route,"random");assert(cider_browse()==GO_TO_WPS&&depth==0&&!live);assert(cider_browse()==GO_TO_ROOT&&!live);
 fail_play=true;depth=1;strcpy(history[1].route,"album/a0");memset(history[1].art,'c',64);history[1].art[64]=0;pins=0;mode=3;step=0;int raced=plays;assert(cider_browse()==GO_TO_ROOT&&plays==raced&&!live);assert(pins>0&&!pinned);fail_play=false;
 available=false;mode=2;step=0;int before=plays;cider_browse();assert(plays==before&&!live&&empty_list);available=true;

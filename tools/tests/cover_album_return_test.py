@@ -15,6 +15,8 @@ a=wps.index('            case ACTION_WPS_MENU:');b=wps.index('            case A
 a=root.index('            if (cover_nav_active())',root.index('        case GO_TO_ALBUM_COVERS_TRACKS:',root.index('        case GO_TO_ALBUM_COVERS_TRACKS:')+1));b=root.index('            if (ret_val == GO_TO_ROOT)',a);listing=root[a:b]
 pre=r'''
 #include <assert.h>
+static void carousel_prepare_transition(void) {}
+static void carousel_cancel_transition(void) {}
 #include <stdbool.h>
 static int cider_browse_covers(bool);
 static bool cider_active(void){return false;}
@@ -39,7 +41,8 @@ static int tracks_album_index=19,pf_resume_album_index;
 static bool tracks_album_valid=true,pf_resume_last_album;
 static void browser_db_enter_artist_album_tracks_on_next_load(long a,long b,const char*c){assert(a==42&&b==7&&!strcmp(c,"Selected album"));prepared++;}
 static void album_covers_cancel_resume(void){clears++;}
-static void gwps_leave_wps(bool on){assert(on);}
+static void leave_playback(void){}
+static int carousel_wps_back(void){return GO_TO_PREVIOUS;}
 static bool __attribute__((unused)) show_album_covers(long*g,bool*f){(void)g;(void)f;covers++;return false;}
 static bool wait_for_album_tables(void){return true;}
 static int album_covers_return(const char*p,bool*r){(void)p;(void)r;return cover_result;}

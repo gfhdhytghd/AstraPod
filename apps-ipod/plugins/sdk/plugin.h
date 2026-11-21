@@ -7,6 +7,7 @@
 #endif
 
 #include "config.h"
+#include "plugins/rock_pitch.h"
 
 #ifdef PLUGIN
 /* The phase 1 arena is in DRAM. Codec IRAM remains available to playback. */
@@ -36,6 +37,11 @@
 #include "lcd.h"
 #include "font.h"
 #include "audio.h"
+#include "pcm_mixer.h"
+#include "pcm_waveform.h"
+#ifdef USB_ENABLE_AUDIO
+#include "usbstack/usb_audio.h"
+#endif
 #include "playback.h"
 #include "playlist.h"
 #include "action.h"
@@ -43,12 +49,16 @@
 #include "draw/viewport.h"
 #include "settings.h"
 #include "settings/settings_list.h"
+#include "speech/language.h"
 #include "speech/talk.h"
+#include "system/app_util.h"
+#include "system/format_time.h"
 #include "system/appevents.h"
 #include "system/shutdown.h"
 #include "system/strutil.h"
 #include "powermgmt.h"
 #include "timefuncs.h"
+#include "version.h"
 #include "lang_enum.h"
 #include "rbpaths.h"
 #include "ui/statusbar.h"
@@ -57,6 +67,7 @@
 #include "widgets/list.h"
 #include "widgets/yesno.h"
 #include "widgets/option_select.h"
+#include "widgets/splash.h"
 
 #if __has_include("rock_compat_tables.h")
 #include "rock_compat_tables.h"
@@ -71,6 +82,7 @@
 
 #define PLUGIN_MAGIC 0x41535452UL
 #define PLUGIN_API_VERSION 1
+#define ROCK_CLICK_TICK_HZ 500
 #define INTERNAL_PLUGIN_RETVAL_START 0x100
 enum plugin_status {
     PLUGIN_OK = 0,
@@ -89,11 +101,14 @@ enum plugin_status {
 #undef strncmp
 #undef open
 #undef creat
+#undef remove
 #undef close
 #undef read
 #undef write
 #undef lseek
 #undef ffilesize
+#undef remove
+#undef rename
 #undef file_exists
 #undef strrchr
 #undef strchr
@@ -134,11 +149,14 @@ enum plugin_status plugin__start(const void *parameter) NO_PROF_ATTR;
 #endif
 #undef str
 #define str(id) language_strings[(id)]
+#undef splash
 #define splash(ticks, msg) splashf((ticks), (msg))
 #undef DEBUGF
 #undef LDEBUGF
+#undef LOGF
 #define DEBUGF(...) do { } while (0)
 #define LDEBUGF(...) do { } while (0)
+#define LOGF(...) do { } while (0)
 
 #if (CONFIG_PLATFORM & PLATFORM_NATIVE)
 extern unsigned char plugin_start_addr[], plugin_end_addr[];

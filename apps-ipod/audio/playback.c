@@ -72,6 +72,7 @@ static bool reported_high_rate;
 #include "database/path_key.h"
 #include "ab_repeat.h"
 #include "pcm_mixer.h"
+#include "plugins/rock_compat.h"
 #include "pcmbuf.h"
 #include "audio_thread.h"
 #include "pcm_sink.h"
@@ -3619,6 +3620,8 @@ static void audio_start_playback(const struct audio_resume_info *resume_info,
         logf("%s(%lu, %lu): starting", __func__, resume.elapsed,
              resume.offset);
 
+        rock_playback_takeover();
+
         /* Set audio parameters */
 #if INPUT_SRC_CAPS != 0
         audio_set_input_source(AUDIO_SRC_PLAYBACK, SRCF_PLAYBACK);
@@ -4178,6 +4181,9 @@ void audio_playback_handler(struct queue_event *ev)
 
 #ifdef HAVE_RECORDING
         case Q_AUDIO_INIT_RECORDING:
+#ifdef HAVE_ROCK_PITCH_DMA
+        case Q_AUDIO_PREPARE_PITCH:
+#endif
             return;
 #endif
 #ifdef USB_ENABLE_AUDIO
@@ -4568,12 +4574,9 @@ bool audio_peek_buffered_track(struct mp3entry *id3, int offset)
     return retval;
 }
 
-/* Return the mp3entry for the currently playing track */
-struct mp3entry * audio_current_track(void)
+static struct mp3entry *current_track_locked(void)
 {
     struct mp3entry *id3;
-
-    id3_mutex_lock();
 
     if (skip_offset != 0)
     {
@@ -4588,9 +4591,34 @@ struct mp3entry * audio_current_track(void)
         audio_get_track_metadata(0, id3);
     }
 
-    id3_mutex_unlock();
-
     return id3;
+}
+
+/* Return the mp3entry for the currently playing track */
+struct mp3entry *audio_current_track(void)
+{
+    id3_mutex_lock();
+    struct mp3entry *id3 = current_track_locked();
+    id3_mutex_unlock();
+    return id3;
+}
+
+bool audio_current_track_snapshot(struct mp3entry *id3)
+{
+    id3_mutex_lock();
+    bool available = false;
+    if (play_status != PLAY_STOPPED)
+    {
+        const struct mp3entry *current = current_track_locked();
+        available = current->path[0] != '\0';
+        if (available)
+        {
+            copy_mp3entry(id3, current);
+            id3->cuesheet = NULL;
+        }
+    }
+    id3_mutex_unlock();
+    return available;
 }
 
 /* Obtains the mp3entry for the next track from the current */

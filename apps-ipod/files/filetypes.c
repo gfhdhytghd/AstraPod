@@ -106,6 +106,17 @@ static const struct filetype_inbuilt inbuilt_filetypes[] = {
     { "pbg",  FILE_ATTR_GAME },
 };
 
+#ifdef ASTRAPOD_ROCK_COMPAT
+static const struct {
+    const char *extension;
+    const char *module;
+} rock_viewers[] = {
+    { "cells", PLUGIN_DEMOS_DIR "/rocklife.rock" },
+    { "ch8", VIEWERS_DIR "/chip8.rock" },
+    { "ssg", PLUGIN_GAMES_DIR "/superdom.rock" },
+};
+#endif
+
 struct fileattr_icon_voice {
     int tree_attr;
     uint16_t icon;
@@ -133,6 +144,9 @@ static const struct fileattr_icon_voice inbuilt_attr_icons_voices[] = {
     { FILE_ATTR_BOOK,  Icon_Book, -1 },
     { FILE_ATTR_LYRICS, Icon_Lyrics, -1 },
     { FILE_ATTR_GAME,  Icon_Plugin,    -1 },
+#ifdef ASTRAPOD_ROCK_COMPAT
+    { FILE_ATTR_ROCK_VIEWER, Icon_Plugin, -1 },
+#endif
 };
 
 static int filetype_inbuilt_index(int tree_attr)
@@ -236,6 +250,12 @@ static void read_builtin_types_init(void)
         fill_from_builtin(inbuilt_filetypes[i].extension,
                           inbuilt_filetypes[i].tree_attr);
     }
+
+#ifdef ASTRAPOD_ROCK_COMPAT
+    /* Extension lookup returns the first match, so core types take priority. */
+    for (size_t i = 0; i < ARRAYLEN(rock_viewers); i++)
+        fill_from_builtin(rock_viewers[i].extension, FILE_ATTR_ROCK_VIEWER);
+#endif
 }
 
 static int file_find_extension(const char* file)
@@ -281,16 +301,31 @@ bool filetype_supported(int attr)
     return find_attr(attr) >= 0;
 }
 
-/* Viewers linked into the core rather than loaded as a .rock. The extension
- * that reaches each one is fixed by inbuilt_filetypes above. */
+/* Native file open dispatch, including the fixed compatibility viewers. */
 bool filetype_open_core_viewer(int attr, const char *file, int *rc)
 {
     switch (attr & FILE_ATTR_MASK)
     {
 #ifdef ASTRAPOD_ROCK_COMPAT
         case FILE_ATTR_ROCK:
-            *rc = rock_open_from_browser(file);
+            *rc = rock_open_from_browser(file, NULL);
             return true;
+        case FILE_ATTR_ROCK_VIEWER:
+        {
+            int index = file_find_extension(file);
+            if (index < 0 || filetypes[index].attr != (FILE_ATTR_ROCK_VIEWER >> 8))
+                return false;
+
+            for (size_t i = 0; i < ARRAYLEN(rock_viewers); i++)
+            {
+                if (!strcmp(filetypes[index].extension, rock_viewers[i].extension))
+                {
+                    *rc = rock_open_from_browser(rock_viewers[i].module, file);
+                    return true;
+                }
+            }
+            return false;
+        }
 #endif
         case FILE_ATTR_TXT:
         case FILE_ATTR_BOOK:

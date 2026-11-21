@@ -11,6 +11,8 @@
 #ifndef AUDIO_THREAD_H
 #define AUDIO_THREAD_H
 
+#include "plugins/rock_pitch.h"
+
 #ifdef HAVE_RECORDING
 #define AUDIO_HAVE_RECORDING
 #endif
@@ -70,6 +72,9 @@ enum
     Q_AUDIO_RECORD_PAUSE,
     Q_AUDIO_RECORD_RESUME,
     Q_AUDIO_RECORD_FLUSH,
+#endif
+#ifdef HAVE_ROCK_PITCH_DMA
+    Q_AUDIO_PREPARE_PITCH,
 #endif
     Q_AUDIO_SEEK_NOW,
 #ifdef USB_ENABLE_AUDIO

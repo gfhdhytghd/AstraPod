@@ -866,7 +866,8 @@ static int folder_on_action(struct dialog *d, int action, void *data)
     return DIALOG_CONTINUE;
 }
 
-bool folder_select(char * header_text, char* setting, int setting_len)
+bool folder_select_in_buffer(char *header_text, char *setting, int setting_len,
+                             void *scratch, size_t scratch_size)
 {
     static const struct dialog_callbacks cb = {
         .measure   = folder_measure,
@@ -876,26 +877,13 @@ bool folder_select(char * header_text, char* setting, int setting_len)
     struct folder_dlg s;
     struct dialog d;
     struct dialog_style style;
-    size_t buf_size;
     bool changed = false;
     int res;
 
-    /* Upstream took the plugin buffer here; this is the same region under the
-     * name it has since the plugin system went (system/app_buffer.h).
-     *
-     * Not core_alloc_maximum(): the audio buffer holds the whole of core, so a
-     * request from a screen shrinks it, and shrinking it stops playback and
-     * rebuffers the current track -- and this is the largest request there is.
-     * The block would also have to be pinned, since the tree built inside it
-     * points at itself by address and the list loop below yields; a pinned
-     * block is one buflib cannot compact across.
-     *
-     * Claimed rather than borrowed because it is held while the picker is on
-     * screen. Nothing reachable from here wants it: the action callback only
-     * expands, collapses and toggles rows, and opens no screen at all. */
-    buffer_front = app_claim_buffer(&buf_size, "folder select");
-    buffer_end = buffer_front + buf_size;
-    logf("folder_select %d bytes free", (int)(buffer_end - buffer_front));
+    if (!scratch || scratch_size < MAX_PATH)
+        return false;
+    buffer_front = scratch;
+    buffer_end = buffer_front + scratch_size;
     s.root = load_root();
 
     logf("folders in: %s", setting);
@@ -952,6 +940,20 @@ bool folder_select(char * header_text, char* setting, int setting_len)
         }
     }
 
-    app_release_buffer("folder select");
+    load_root();
+    buffer_front = buffer_end = NULL;
+    return changed;
+}
+
+bool folder_select(char *header_text, char *setting, int setting_len)
+{
+    /* The tree stores pointers across yields. Keep the scratch lease until
+     * the picker and its confirmation have both closed. */
+    static const char owner[] = "folder select";
+    size_t size;
+    void *scratch = app_claim_buffer(&size, owner);
+    bool changed = folder_select_in_buffer(header_text, setting, setting_len,
+                                           scratch, size);
+    app_release_buffer(owner);
     return changed;
 }

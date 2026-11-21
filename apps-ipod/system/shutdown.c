@@ -125,6 +125,8 @@ static bool clean_shutdown(enum shutdown_type sd_type,
                                 str(LANG_SHUTTINGDOWN));
         }
 
+        rock_media_shutdown();
+
         /* A USB dock is told now, while the saves below give the USB
          * thread time to send it */
         iap_on_power_off();

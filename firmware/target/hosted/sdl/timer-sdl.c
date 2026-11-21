@@ -25,6 +25,8 @@ static int timer_prio = -1;
 void (*global_timer_callback)(void);
 SDL_TimerID timerId;
 
+#include "timer-sdl-plugin-ticks.inc"
+
 Uint32 SDL_timer_callback(Uint32 interval, void *param){
     (void)param;
     global_timer_callback();
@@ -38,6 +40,10 @@ bool timer_register(int reg_prio, void (*unregister_callback)(void),
                     long cycles, void (*timer_callback)(void))
 {
     (void)unregister_callback;
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (ticks_id)
+        return false;
+#endif
     if (reg_prio <= timer_prio || cycles == 0)
         return false;
     timer_prio=reg_prio;
@@ -48,6 +54,10 @@ bool timer_register(int reg_prio, void (*unregister_callback)(void),
 
 bool timer_set_period(long cycles)
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (ticks_id)
+        return false;
+#endif
     SDL_RemoveTimer (timerId);
     timerId=SDL_AddTimer(cycles_to_miliseconds(cycles), SDL_timer_callback, 0);
     return true;
@@ -55,6 +65,10 @@ bool timer_set_period(long cycles)
 
 void timer_unregister(void)
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (ticks_id)
+        return;
+#endif
     SDL_RemoveTimer (timerId);
     timer_prio = -1;
 }

@@ -45,6 +45,9 @@
 #include "usb_log.h"
 #include "usb.h"
 #include "usb_audio.h"
+#ifdef ASTRAPOD_ROCK_COMPAT
+#include "plugins/rock_compat.h"
+#endif
 
 #define LOGF_ENABLE
 #include "logf.h"
@@ -1309,6 +1312,9 @@ static int usb_audio_init_connection(void)
     }
 
     usbaudio_active = true;
+#ifdef ASTRAPOD_ROCK_COMPAT
+    rock_playback_takeover();
+#endif
     usb_as_playback_intf_alt = 0;
     /* Windows' recovery from a bus reset restores the configuration and the
      * streaming alternate but never resends the rate, so the rate it last

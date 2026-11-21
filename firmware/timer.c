@@ -26,14 +26,21 @@
 #include "logf.h"
 
 static int timer_prio = -1;
+
 void SHAREDBSS_ATTR (*pfn_timer)(void) = NULL;      /* timer callback */
 void SHAREDBSS_ATTR (*pfn_unregister)(void) = NULL; /* unregister callback */
+
+#include "timer-plugin-ticks.inc"
 
 /* Register a user timer, called every <cycles> TIMER_FREQ cycles */
 bool timer_register(int reg_prio, void (*unregister_callback)(void),
                     long cycles, void (*timer_callback)(void)
                     IF_COP(, int core))
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (ticks_reserved)
+        return false;
+#endif
     if (reg_prio <= timer_prio || cycles == 0)
         return false;
 
@@ -50,6 +57,10 @@ bool timer_register(int reg_prio, void (*unregister_callback)(void),
 
 bool timer_set_period(long cycles)
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (ticks_reserved)
+        return false;
+#endif
     return timer_set(cycles, false);
 }
 
@@ -58,10 +69,13 @@ bool timer_set_period(long cycles)
 * overwritten by a lower priority timer using timer_register() */
 void timer_unregister(void)
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (ticks_reserved)
+        return;
+#endif
     timer_stop();
 
     pfn_timer = NULL;
     pfn_unregister = NULL;
     timer_prio = -1;
 }
-

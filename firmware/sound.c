@@ -304,7 +304,11 @@ static void set_prescaled_volume(void)
 #endif /* AUDIOHW_HAVE_LINEOUT */
 }
 
+#ifdef ASTRAPOD_ROCK_COMPAT
+static void set_volume(int value, bool persist)
+#else
 void sound_set_volume(int value)
+#endif
 {
     if (!audio_is_initialized)
         return;
@@ -320,12 +324,17 @@ void sound_set_volume(int value)
     if (value > global_settings.volume_limit)
         value = global_settings.volume_limit;
 
-    global_status.volume = value;
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (persist)
+#endif
+        global_status.volume = value;
 #endif
 
     sound_prescaler.volume = sound_value_to_cb(SOUND_VOLUME, value);
     set_prescaled_volume();
 }
+
+#include "sound-plugin-volume.inc"
 
 void sound_set_balance(int value)
 {

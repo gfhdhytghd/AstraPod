@@ -4,6 +4,7 @@
 #include "usb.h"
 #ifdef HAVE_USB_CONFIRM
 #include "widgets/usb_confirm.h"
+#include "plugins/rock_pitch.h"
 #include "widgets/dialog.h"
 #include "input/action.h"
 #include "settings/settings.h"
@@ -151,6 +152,7 @@ void gui_usb_confirm_run(uint32_t epoch)
     };
     if (!usb_confirm_pending(epoch))
         return;
+    rock_pitch_revoke();
     if (handoff_prompt_wps(epoch)) return;
 #ifdef HAVE_USB_PODLINK
     handoff_sheet_interrupt();

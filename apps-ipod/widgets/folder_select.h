@@ -12,10 +12,15 @@
 #define _FOLDER_SELECT_H_
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /* Show a folder tree under `header_text`; `setting` is a ':'-delimited list of
  * selected paths, loaded on entry and (after a "save changes?" prompt) written
  * back, up to `setting_len` bytes. Returns true if the setting was changed. */
 bool folder_select(char *header_text, char *setting, int setting_len);
+
+/* Run the picker with caller-owned, aligned scratch for the duration. */
+bool folder_select_in_buffer(char *header_text, char *setting, int setting_len,
+                             void *scratch, size_t scratch_size);
 
 #endif /* _FOLDER_SELECT_H_ */

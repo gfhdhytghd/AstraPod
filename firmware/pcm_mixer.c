@@ -26,6 +26,9 @@
 #include "pcm_mixer.h"
 #include "events.h"
 #include "pcm_sampr.h"
+#ifdef ASTRAPOD_ROCK_COMPAT
+#include "plugins/rock_pitch.h"
+#endif
 
 /* Channels use standard-style PCM callback interface but a latency of one
    frame by double-buffering is introduced in order to facilitate mixing and
@@ -71,6 +74,8 @@ static size_t next_size = 0;    /* Size of buffer to play next time */
 /* Descriptors for all available channels */
 static struct mixer_channel channels[PCM_MIXER_NUM_CHANNELS] IBSS_ATTR;
 
+#include "pcm_mixer-plugin-click.inc"
+
 /* Packed pointer array of all playing (active) channels in "channels" array */
 static struct mixer_channel * active_channels[PCM_MIXER_NUM_CHANNELS+1] IBSS_ATTR;
 
@@ -82,6 +87,8 @@ static unsigned int idle_counter = 0;
 #else
 #define SAMPR_NUM(sampr) (sampr)
 #endif
+
+#include "pcm_mixer-waveform.inc"
 
 static inline unsigned int max_idle_frames(void)
 {
@@ -147,6 +154,10 @@ static void channel_stopped(struct mixer_channel *chan)
     chan->size = 0;
     chan->start = NULL;
     chan->status = CHANNEL_STOPPED;
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (chan->play_cbs == &click_owner)
+        chan->play_cbs = NULL;
+#endif
 }
 
 /* Main PCM callback - sends the current prepared frame to play */
@@ -158,6 +169,10 @@ static void mixer_pcm_callback(const void **addr, size_t *size)
 
 static inline void chan_call_buffer_hook(struct mixer_channel *chan)
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (chan->play_cbs == &click_owner)
+        return;
+#endif
     if (UNLIKELY(chan->buf_cbs && chan->buf_cbs->next_buffer))
         chan->buf_cbs->next_buffer(chan->start, chan->size);
 }
@@ -231,7 +246,7 @@ fill_frame:
 
         if (LIKELY(!*chan_p))
         {
-            amp = chan->amplitude;
+            amp = channel_amplitude(chan);
             if (LIKELY(amp == chan->written_amp))
             {
                 write_samples(mixptr, chan->start, amp, mixsize);
@@ -249,7 +264,7 @@ fill_frame:
 
             /* Mix first two channels with each other as the downmix */
             src0 = chan->start;
-            amp0 = chan->amplitude;
+            amp0 = channel_amplitude(chan);
             chan->written_amp = amp0;
             chan->last_size = mixsize;
 
@@ -271,7 +286,7 @@ fill_frame:
                 src0 = mixptr;
                 amp0 = MIX_AMP_UNITY;
                 src1 = chan->start;
-                amp1 = chan->amplitude;
+                amp1 = channel_amplitude(chan);
             }
             amp = amp1;
         }
@@ -424,7 +439,7 @@ void mixer_channel_play_data(enum pcm_mixer_channel channel,
         chan->size = size;
         chan->last_size = 0;
         chan->play_cbs = cbs;
-        chan->written_amp = chan->amplitude; /* Nothing to go on from */
+        chan->written_amp = channel_amplitude(chan);
 
         mixer_activate_channel(chan);
         chan_call_buffer_hook(chan);
@@ -481,11 +496,19 @@ bool mixer_switch_sink_quiet(enum pcm_sink_ids sink)
     if(pcm_current_sink() == sink)
         return true;
 
-    if(!pcm_switch_sink(sink))
-        return false;
-
-    mixer_handle_sampr_change(SAMPR_NUM(pcm_get_frequency()));
-    return true;
+#ifdef HAVE_ROCK_PITCH_DMA
+    bool pitch_locked = rock_pitch_sink_lock();
+#endif
+    waveform_reconfigure_begin();
+    bool switched = pcm_switch_sink(sink);
+    if (switched)
+        mixer_handle_sampr_change(SAMPR_NUM(pcm_get_frequency()));
+    waveform_reconfigure_end();
+#ifdef HAVE_ROCK_PITCH_DMA
+    if (pitch_locked)
+        rock_pitch_sink_unlock();
+#endif
+    return switched;
 }
 
 #if defined(USB_ENABLE_IAP) || defined(HAVE_USB_HOST_AUDIO)
@@ -544,6 +567,13 @@ size_t mixer_channel_get_bytes_waiting(enum pcm_mixer_channel channel)
 const void * mixer_channel_get_buffer(enum pcm_mixer_channel channel, int *count)
 {
     struct mixer_channel *chan = &channels[channel];
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (chan->play_cbs == &click_owner)
+    {
+        *count = 0;
+        return NULL;
+    }
+#endif
     const void * buf = *(const void * volatile *)&chan->start;
     size_t size = *(size_t volatile *)&chan->size;
     const void * buf2 = *(const void * volatile *)&chan->start;
@@ -610,6 +640,7 @@ void mixer_set_frequency(unsigned int samplerate)
     if(pcm_get_frequency() == samplerate)
         return;
 
+    waveform_reconfigure_begin();
     pcm_play_stop();
     idle_counter = 0;
 
@@ -617,6 +648,7 @@ void mixer_set_frequency(unsigned int samplerate)
     mixer_handle_sampr_change(SAMPR_NUM(pcm_get_frequency()));
     if (pcm_is_initialized())
         pcm_apply_settings();
+    waveform_reconfigure_end();
 }
 
 /* Get output samplerate */

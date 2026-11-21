@@ -35,6 +35,9 @@ int sound_default(int setting);
 sound_set_type* sound_get_fn(int setting);
 
 void sound_set_volume(int value);
+#ifdef ASTRAPOD_ROCK_COMPAT
+void sound_set_transient_volume(int value);
+#endif
 void sound_set_balance(int value);
 void sound_set_bass(int value);
 void sound_set_treble(int value);

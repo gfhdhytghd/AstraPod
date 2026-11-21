@@ -53,11 +53,114 @@ Customize Main Menu. For a simulator fixture, add
 
 Keep upstream inputs under `apps/plugins/` intact. For a narrow source
 conversion, stage the copy in the build directory. Match the expected upstream
-text exactly and stop the build if it changes. `tools/rock-compat/stage-usb.py`
-stages USB event handling for `stopwatch`, `dice`, `flipit`, `jackpot` and
-`robotfindskitten`. Jackpot also accepts its normal quit action during a
-spin. The script initializes Dice's first menu selection and leaves room for
-the roll string's terminator.
+text exactly and stop the build if it changes. The `ROCK_STAGED` list in
+`apps-ipod/plugins/plugins.make` selects sources for these conversions.
+Include runtime data in the bundle when the corresponding module is enabled.
+For example, Snake 2 reads the unchanged `snake2.levels` next to its module.
+
+## Phase 2 games and demos
+
+The allowlist includes 2048, Amaze, Brickmania, Chopper, Maze, MazezaM,
+Minesweeper, Pong, Snake, Snake 2, Star and Xobox. It also includes Fire,
+Fireworks, Plasma and Starfield. The games and demos have separate allowlist
+commits and fit the same ARM and SDL build. Starfield uses read-only mixer
+peak queries. Fire and Plasma draw directly into the RGB565 framebuffer.
+
+The allowlist also includes Blackjack, Bubbles, Clix, Invadrox, Jewels, Pegbox,
+Rockblox, Solitaire, Spacerocks, Wormlet and Demystify. Their bitmap rules use
+upstream's target selections and bitmap formats. Menus and option pickers use
+the native theme. The games keep their upstream playfields and help screens.
+
+Codebuster uses native menus and option pickers. Its local settings save
+on normal exit. Super Domination uses the upstream board tiles and the native
+inventory list. Rocklife starts with a built-in pattern.
+
+VU Meter reads the firmware playback channel's peaks and the mixer output
+rate. The title identifies stopped and paused playback, with the meters at
+rest in either state. Select opens the native display options. Menu exits.
+The meter has no playback controls, volume controls, or USB audio input.
+
+## Native diagnostics
+
+`rb_info` presents its diagnostics through native lists. The build
+uses the configured target's action and context enums and button
+definitions. Raw button capture includes the repeat and release
+flags. Printcell data uses a row list and a column detail page.
+The adapter uses the native list voice slots for names and values.
+
+## File viewers
+
+Files can open `.cells` with Rocklife, `.ssg` with Super Domination and
+`.ch8` with CHIP-8. The loader passes the selected path to the module
+for that call. CHIP-8 reads an optional same-stem `.c8k` file to remap
+keys. The firmware routes these extensions through a fixed association
+table. See [the plugin guide](../../apps-ipod/plugins/README.md) for keys.
+
+## Oscilloscope
+
+In **Plugins > Demos**, open **Oscilloscope**. It starts in Peaks on
+the first launch. Press Select and choose **Graph mode** to switch
+between Peaks and Waveform. Both modes use the native options for
+draw style, orientation and volume. Use **Advance** and **Speed**
+in Peaks. Use **Time span** for a 2–10 ms window in Waveform. Press
+Menu from the graph to return.
+
+Waveform shows one trace for each stereo channel. A short PCM buffer
+can shorten the window. On pause, stop or unavailable playback
+samples, the graph shows two flat traces.
+
+The SDK supplies a foreground-only `waveform_read` call. Pass space
+for `PCM_WAVEFORM_FRAMES` stereo frames. The result is the number of
+complete interleaved 16-bit frames copied from the native playback
+channel. A zero result means no samples are available for this read.
+
+## Foreground Metronome
+
+Metronome stops music on entry. Hold Select to start or tap Select to
+set the tempo. Press Play/Pause to pause and Menu to return. Adjust the
+click volume with the wheel. The change applies to the current launch.
+If the timer is busy, Metronome stays paused and displays a retry message.
+
+The SDK exposes an exclusive 2 ms tick counter and click playback on the
+native playback channel. The firmware counts ticks and the module consumes
+them on the foreground thread. The module fits its samples to the active
+sink rate. It exits if the rate changes. USB takeover, accepted shutdown,
+and the native playback or recording start release the resources. The
+application browser starts Metronome without a tempo-map file.
+
+## Pitch Detector candidate
+
+Set `ROCK_PITCH_DETECTOR=1` for both the build and the bundle. The default
+allowlist excludes the tuner pending capture qualification on ipod6g.
+
+```sh
+ROCK_PITCH_DETECTOR=1 ./build-sim.sh
+ROCK_PITCH_DETECTOR=1 PATH=/home/wilf/.cache/pocket-stack/rockbox/bin:$PATH ./build-hw.sh ipod6g
+```
+
+Open **Plugins → Applications → pitch_detector**. On a player, select the
+analog source and gain in the native recording settings first. Use a passive
+dock line input or a supported headset microphone. The tuner analyzes the
+left channel at 22,050 Hz. It stops playback on launch. **Menu** opens
+**Tuner Settings** and releases capture while that menu is open. **Return to
+Tuner** starts a new capture. **Quit** returns to Applications. A USB consent
+prompt ends the tuner session, including when you choose **Charge Only**.
+SDL displays a fixed 445 Hz preview labelled **Preview - no audio capture**.
+
+The SDK stages a digest-checked copy of the upstream module. Its tuner
+slots request a foreground session, release capture, or copy one complete
+PCM block. Firmware owns the DMA buffers and callbacks. The reservation
+excludes the native recorder and USB Sound Card. A playback sink switch
+releases the reservation before switching.
+
+## Phase 3 playback metadata
+
+`playing_time` uses the native playlist inspection and list APIs. The SDK
+copies the current track's metadata under the playback lock. The copy
+excludes the cue sheet and remains valid until the next metadata snapshot.
+To parse another entry, pass its path and either `-1` or a file descriptor
+owned by the plugin. The build stages the upstream source with millisecond and byte
+precision for its average bitrate and playlist duration.
 
 ## SDK boundaries
 
@@ -90,8 +193,9 @@ the roll string's terminator.
   the native members and language IDs exercised by the enabled modules.
 
 See `apps-ipod/plugins/rock-modules.txt` for the installed applications, games
-and demos. Worker threads, timers, resident plugins, overlays, codec IRAM,
+and demos. Worker threads, timer callbacks, resident plugins, overlays, codec IRAM,
 audio-buffer leases and stock binary modules
-are outside the current SDK. Load modules built from trusted sources. Plugins
+are outside the current SDK. Cross-plugin dispatch is also outside this
+build. Load modules built from trusted sources. Plugins
 execute with firmware privileges, and the host dynamic loader can run module
 initializers before the SDK header check.

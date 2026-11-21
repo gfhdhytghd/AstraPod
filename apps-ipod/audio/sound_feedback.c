@@ -15,6 +15,7 @@
 #include "sound.h"
 #include "settings/settings.h"
 #include "input/action.h"
+#include "plugins/rock_pitch.h"
 #include "system/app_util.h"
 #include "piezo.h"
 #include "beep.h"
@@ -22,6 +23,9 @@
 
 void system_sound_play(enum system_sound sound)
 {
+    if (rock_pitch_suppresses_tones())
+        return;
+
     static const struct beep_params
     {
         int *setting;

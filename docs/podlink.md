@@ -453,6 +453,10 @@ with the requesting command's prefix.
 | `MS3 STREAM FILE <name>` | Opens a file and sends the first window after `MS3 FILE <size>` |
 | `MS3 STREAM ARTBIN <size> <path>` | Opens artwork and sends the first window after the normal `MS3 ARTBIN` reply |
 | `MS3 CREDIT` | Grants the next window of an open stream |
+| `MS3 PROFILE BASE\|FAST` | Clears timing counters and selects the IN submission mode |
+| `MS3 PROFILE` | Stops timing and returns counters |
+| `MS3 PROFILE CPU` | Stops timing and appends core idle time and the capture interval |
+| `MS3 STREAM SAMPLE <path>` | Opens a managed file for the same windowed download |
 | `MS3 STOP` | `MS3 STOPPED` closes the current MS3 operation |
 | `MS3 DETAIL <path>` | `MS3 DETAIL <size_bytes>\t<codec>\t<sample_rate_hz>\t<channels>\t<has_art>` |
 | `MS3 ART <size> <path>` | `MS3 ART <width> <height> <rows\|columns>`, `MS3 NOART`, or `MS3 PLACEHOLDER` |
@@ -564,6 +568,78 @@ slot, the CDC ring and its DMA buffer. A larger CDC DMA batch or a
 direct DMA buffer would need separate tests for short packets, cache
 coherency, backpressure and reconnect. Profile Linux tty reads before
 replacing CDC-ACM or adding another stream.
+
+### Profile a large download
+
+Choose an existing regular file under `/Music/` or
+`/iPod_Control/Music/` (up to 128 MiB), or a large allowlisted tagcache file. Use a file that is not changing.
+`MS3 STREAM SAMPLE <path>` replies `MS3 SAMPLE <size>`, then uses the
+same MSF1 offsets, credits and terminal CRC32 as FILE. SAMPLE is read-only.
+Tagcache mode keeps the firmware's normal revision checks.
+
+`MS3 PROFILE BASE` clears counters and selects the original 4 KiB IN
+submissions. `MS3 PROFILE FAST` selects two aligned 16 KiB buffers.
+Both return `MS3 PROFILE READY`. A mode change requires an idle IN queue
+and returns `MS3 ERR busy` otherwise. The producer copies straight into
+the second aligned DMA buffer while DMA owns the first. The USB thread
+submits the second immediately after completion. DesignWare still owns one active IN request at a time.
+USB reconfiguration restores BASE. Profiles stop counting at `MS3 PROFILE`,
+which leaves the selected mode in effect.
+
+The reply has eight fields after `MS3 PROFILE`. Each is
+`count,bytes,total_us,max_us`, in this order:
+
+1. File reads.
+2. File CRC32, including the shared pass over MSF1 data.
+3. Outgoing PLNK frame CRC32, including the MSF1 prefix and CRC combination.
+4. Media mailbox to Rust frame.
+5. Rust frame to CDC ring.
+6. Copy into the aligned DMA buffer. In FAST this is directly from the
+   Rust frame and the ring-copy counter stays zero.
+7. USB submission to completion callback.
+8. Completion callback to next submission. The byte count is zero.
+
+Counters time elapsed intervals and can include thread preemption. USB
+counters are measured at class callbacks and include control traffic.
+Gaps include periods with no data ready, such as waits for credits.
+Different stages can overlap, so their totals need not add to wall time.
+The host normalizes each counter by MiB (1,048,576 bytes). These counters
+measure elapsed time, including preemption and any storage wait. They
+do not attribute CPU time to individual threads. The `MS3 PROFILE CPU`
+reply appends `idle_us,wall_us`, measured at the ARM926's wait-for-interrupt
+instruction and over the whole capture. Older firmware supports the original
+eight-field reply. Frame and file checksum bytes are unchanged: the player
+scans MSF1 data with a slicing-by-four CRC32, then combines its raw remainder
+with the file history and the PLNK/MSF1 prefix.
+
+Run these commands from AstraPod-Desktop with the usual HerdRemote venv.
+Add its system packages to PYTHONPATH if required by the local install.
+The client borrows the tty, validates all bytes, and discards the payload.
+
+```sh
+export PYTHONPATH="$PWD:$PWD/herdremote:/usr/lib/python3.14/site-packages"
+~/.local/share/podbox-herdremote/venv/bin/python -m hrlibrary --mode base --mbit 26 '/iPod_Control/Music/F00/example.m4a'
+~/.local/share/podbox-herdremote/venv/bin/python -m hrlibrary --mode fast --mbit 26 '/iPod_Control/Music/F00/example.m4a'
+```
+
+Use a multi-MiB file for the 25 Mbit/s gate. The 26 Mbit/s credit pacing
+example leaves some room for control and final response latency. Pacing
+limits the average by waiting between existing eight-reply windows and
+does not change ordinary library downloads. Omit it for unpaced tests.
+
+Use `--tagcache database_idx.tcd` for an allowlisted basename. Alternate
+the modes on the same file and record cold and warm results separately.
+JSON also reports the number of tty reads, the largest read, and the host
+thread CPU time spent inside reads. A CPU-light receive path with a low
+tty read size is not evidence of a host-side throughput limit.
+
+For UI validation, enable the existing `/.rockbox/ui-perf.enable` marker
+before boot. Run the same list glide or cover-flow animation at idle and
+during a multi-second transfer. Compare skipped frames, work misses and
+frame intervals in `/.rockbox/ui-perf.txt`. The PodLink worker remains at
+`PRIORITY_BACKGROUND` and yields between service steps. A download step
+takes one resident binary reply of at most 16 KiB. Each USB-thread staging
+copy also has a 16 KiB limit.
 
 ### Track walk
 

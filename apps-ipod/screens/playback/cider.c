@@ -1184,10 +1184,11 @@ static unsigned int resident_next(char *record, unsigned int size)
     return n ? n : spectrum_next(record, size);
 }
 
-static unsigned int resident_next_binary(unsigned char *out, unsigned int size)
+static unsigned int resident_next_binary(unsigned char *out, unsigned int size,
+                                         uint32_t *raw)
 {
     bool refill = false;
-    unsigned int n = podlink_media_next_binary(out, size, &refill);
+    unsigned int n = podlink_media_next_binary(out, size, &refill, raw);
     if (refill) queue_post(&disk_queue, 1, 0);
     return n;
 }

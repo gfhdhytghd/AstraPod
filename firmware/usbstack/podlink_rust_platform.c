@@ -45,6 +45,8 @@ static void service_thread(void)
         crumb_status(CS_PL_WORKER, steps << 1);
         for (int i = 0; i < GUARD_WORDS; i++)
             if (worker.guard[i] != GUARD) panicf("PodLink stack overflow");
+        /* A latched wake may make the wait return without scheduling. */
+        yield();
         usb_serial_wait_activity(MAX(1, HZ / 50));
     }
 }

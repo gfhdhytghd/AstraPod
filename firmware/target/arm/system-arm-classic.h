@@ -241,8 +241,14 @@ static inline int disable_interrupt_save(int mask)
 || CONFIG_CPU == S3C2440 || CONFIG_CPU == S5L8701 || CONFIG_CPU == AS3525v2 \
 || CONFIG_CPU == S5L8702 || CONFIG_CPU == S5L8720
 /* Use the generic ARMv4/v5/v6 wait for IRQ */
+#if CONFIG_CPU == S5L8702 && defined(HAVE_USB_PODLINK)
+#include "podlink_profile.h"
+#endif
 static inline void core_sleep(void)
 {
+#if CONFIG_CPU == S5L8702 && defined(HAVE_USB_PODLINK)
+    uint32_t idle_start = podlink_profile_now();
+#endif
     asm volatile (
         "mcr p15, 0, %0, c7, c0, 4 \n" /* Wait for interrupt */
 #if CONFIG_CPU == IMX31L
@@ -250,6 +256,10 @@ static inline void core_sleep(void)
 #endif
         : : "r"(0)
     );
+#if CONFIG_CPU == S5L8702 && defined(HAVE_USB_PODLINK)
+    if (idle_start)
+        podlink_profile_idle(idle_start);
+#endif
     enable_irq();
 }
 #else

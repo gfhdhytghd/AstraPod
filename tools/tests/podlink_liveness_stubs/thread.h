@@ -7,4 +7,5 @@
 #define IF_COP(...)
 unsigned int create_thread(void (*function)(void), void *stack, size_t size,
                            unsigned flags, const char *name, int priority);
+void yield(void);
 #endif

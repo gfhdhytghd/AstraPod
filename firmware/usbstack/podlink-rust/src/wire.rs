@@ -63,10 +63,100 @@ const CRC: [u32; 256] = table();
 pub fn crc32(data: &[u8]) -> u32 {
     let mut c = !0u32;
     for b in data {
-        c = CRC[((c ^ *b as u32) & 255) as usize] ^ (c >> 8);
+        c = crc_byte(c, *b);
     }
     !c
 }
+fn crc_byte(crc: u32, byte: u8) -> u32 {
+    CRC[((crc ^ byte as u32) & 255) as usize] ^ (crc >> 8)
+}
+
+#[cfg(any(feature = "firmware", test))]
+mod bulk {
+    use super::{crc_byte, CRC};
+
+    const fn slice_table(previous: [u32; 256]) -> [u32; 256] {
+        let mut table = [0; 256];
+        let mut i = 0;
+        while i < 256 {
+            let c = previous[i];
+            table[i] = CRC[(c & 255) as usize] ^ (c >> 8);
+            i += 1;
+        }
+        table
+    }
+
+    static SLICE1: [u32; 256] = slice_table(CRC);
+    static SLICE2: [u32; 256] = slice_table(slice_table(CRC));
+    static SLICE3: [u32; 256] = slice_table(slice_table(slice_table(CRC)));
+
+    pub(crate) fn bulk_raw_crc(prefix: &[u8], words: &[u32], suffix: &[u8]) -> u32 {
+        let mut c = prefix.iter().fold(0, |c, &b| crc_byte(c, b));
+        for &word in words {
+            let v = c ^ u32::from_le(word);
+            c = SLICE3[(v & 255) as usize]
+                ^ SLICE2[((v >> 8) & 255) as usize]
+                ^ SLICE1[((v >> 16) & 255) as usize]
+                ^ CRC[(v >> 24) as usize];
+        }
+        suffix.iter().fold(c, |c, &b| crc_byte(c, b))
+    }
+}
+
+#[cfg(any(feature = "firmware", test))]
+pub(crate) use bulk::bulk_raw_crc;
+
+const fn apply(matrix: &[u32; 32], mut crc: u32) -> u32 {
+    let mut result = 0;
+    while crc != 0 {
+        let bit = crc.trailing_zeros();
+        result ^= matrix[bit as usize];
+        crc &= crc - 1;
+    }
+    result
+}
+
+const fn zero_powers() -> [[u32; 32]; 15] {
+    let mut powers = [[0; 32]; 15];
+    let mut bit = 0;
+    while bit < 32 {
+        let c = 1u32 << bit;
+        powers[0][bit] = CRC[(c & 255) as usize] ^ (c >> 8);
+        bit += 1;
+    }
+    let mut power = 1;
+    while power < powers.len() {
+        bit = 0;
+        while bit < 32 {
+            powers[power][bit] = apply(&powers[power - 1], powers[power - 1][bit]);
+            bit += 1;
+        }
+        power += 1;
+    }
+    powers
+}
+
+static ZERO_POWERS: [[u32; 32]; 15] = zero_powers();
+
+// Both callers cap len at MAX. CRC is linear in its raw (uncomplemented) state.
+pub(crate) fn append_raw(mut prefix: u32, chunk: u32, mut len: usize) -> u32 {
+    while len != 0 {
+        let power = len.trailing_zeros();
+        prefix = apply(&ZERO_POWERS[power as usize], prefix);
+        len &= len - 1;
+    }
+    prefix ^ chunk
+}
+
+pub(crate) fn frame_crc(checked: &[u8], raw_msf1_data: Option<u32>) -> u32 {
+    if let Some(raw) = raw_msf1_data {
+        // 12 checked PLNK header bytes and the 8 byte MSF1 prefix.
+        let (prefix, data) = checked.split_at(20);
+        return !append_raw(!crc32(prefix), raw, data.len());
+    }
+    crc32(checked)
+}
+
 pub fn get32(data: &[u8]) -> u32 {
     u32::from_le_bytes([data[0], data[1], data[2], data[3]])
 }
@@ -81,11 +171,25 @@ pub fn encode(dest: &mut [u8], kind: Kind, seq: u32, data: &[u8]) -> usize {
 
 /* The caller has filled the payload starting at byte 16. */
 pub(crate) fn finish_encode(dest: &mut [u8], kind: Kind, seq: u32, n: usize) -> usize {
+    finish_encode_with_crc(dest, kind, seq, n, None)
+}
+
+pub(crate) fn finish_encode_with_crc(
+    dest: &mut [u8],
+    kind: Kind,
+    seq: u32,
+    n: usize,
+    raw_msf1_data: Option<u32>,
+) -> usize {
     dest[..4].copy_from_slice(b"PLNK");
     dest[4..8].copy_from_slice(&[kind as u8, 0, 0, 0]);
     dest[8..12].copy_from_slice(&seq.to_le_bytes());
     dest[12..16].copy_from_slice(&(n as u32).to_le_bytes());
-    let c = crc32(&dest[4..16 + n]);
+    let checked = &dest[4..16 + n];
+    #[cfg(all(feature = "firmware", not(feature = "host-test")))]
+    let c = crate::ffi::profile_tx_crc(checked, raw_msf1_data);
+    #[cfg(not(all(feature = "firmware", not(feature = "host-test"))))]
+    let c = frame_crc(checked, raw_msf1_data);
     dest[16 + n..20 + n].copy_from_slice(&c.to_le_bytes());
     n + 20
 }

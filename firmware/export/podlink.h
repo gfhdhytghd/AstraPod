@@ -94,7 +94,10 @@ struct podlink_resident
     unsigned int (*next)(char *record, unsigned int size);
     void (*reset)(void);
     /* Optional. Called only with a reserved TX slot and negotiated space. */
-    unsigned int (*next_binary)(unsigned char *data, unsigned int size);
+    /* MSF1 callbacks also return the raw, zero-seeded CRC of the data
+     * following the 8-byte MSF1 prefix. */
+    unsigned int (*next_binary)(unsigned char *data, unsigned int size,
+                                uint32_t *raw);
 };
 void podlink_set_resident(const struct podlink_resident *consumer);
 
@@ -104,6 +107,8 @@ struct podlink_parser
     unsigned char bytes[PODLINK_FRAME_MAX];
     unsigned int used, consumed;
 };
+uint32_t podlink_bulk_crc(const unsigned char *data, unsigned int length,
+                          uint32_t previous, uint32_t *raw);
 uint32_t podlink_crc32(const unsigned char *data, unsigned int length);
 unsigned int podlink_encode(unsigned char *dest, unsigned int type,
                             uint32_t seq, const void *data,

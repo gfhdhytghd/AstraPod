@@ -22,6 +22,7 @@ pub struct Message {
 type Background = unsafe extern "C" fn(*const Message);
 type Receive = unsafe extern "C" fn(*const Message) -> bool;
 type Next = unsafe extern "C" fn(*mut u8, c_uint) -> c_uint;
+type NextBinary = unsafe extern "C" fn(*mut u8, c_uint, *mut u32) -> c_uint;
 type Reset = unsafe extern "C" fn();
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -29,7 +30,7 @@ pub struct Registry {
     receive: Option<Receive>,
     next: Option<Next>,
     reset: Option<Reset>,
-    next_binary: Option<Next>,
+    next_binary: Option<NextBinary>,
 }
 struct Adapter {
     registry: Registry,
@@ -185,10 +186,14 @@ impl Ports for Adapter {
             None => 0,
         }
     }
-    fn next_binary(&mut self, out: &mut [u8]) -> usize {
+    fn next_binary(&mut self, out: &mut [u8]) -> (usize, Option<u32>) {
         match self.registry.next_binary {
-            Some(f) => unsafe { f(out.as_mut_ptr(), out.len() as c_uint) as usize },
-            None => 0,
+            Some(f) => {
+                let mut raw = 0;
+                let n = unsafe { f(out.as_mut_ptr(), out.len() as c_uint, &mut raw) };
+                (n as usize, Some(raw))
+            }
+            None => (0, None),
         }
     }
     fn reset_consumer(&mut self) {
@@ -564,3 +569,37 @@ const _: () = {
     assert!(core::mem::size_of::<Registry>() == 16);
     assert!(core::mem::size_of::<Parser>() == FRAME + 8);
 };
+
+#[cfg(not(feature = "host-test"))]
+pub(crate) fn profile_tx_crc(data: &[u8], raw: Option<u32>) -> u32 {
+    unsafe extern "C" {
+        fn podlink_profile_now() -> u32;
+        fn podlink_profile_frame_crc(start: u32, bytes: u32);
+    }
+    let start = unsafe { podlink_profile_now() };
+    let crc = wire::frame_crc(data, raw);
+    if start != 0 {
+        unsafe { podlink_profile_frame_crc(start, data.len() as u32) };
+    }
+    crc
+}
+
+#[no_mangle]
+/// # Safety
+/// For 1..=MAX bytes, data must be readable and raw must point to a writable u32.
+pub unsafe extern "C" fn podlink_bulk_crc(
+    data: *const u8,
+    len: c_uint,
+    previous: u32,
+    raw: *mut u32,
+) -> u32 {
+    if data.is_null() || raw.is_null() || len == 0 || len as usize > MAX {
+        return previous;
+    }
+    let bytes = slice::from_raw_parts(data, len as usize);
+    // All bit patterns are valid in u32; align_to leaves unaligned ends as bytes.
+    let (prefix, words, suffix) = bytes.align_to::<u32>();
+    let chunk = wire::bulk_raw_crc(prefix, words, suffix);
+    raw.write(chunk);
+    wire::append_raw(previous, chunk, bytes.len())
+}

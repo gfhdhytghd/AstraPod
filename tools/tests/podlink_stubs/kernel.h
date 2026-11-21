@@ -44,3 +44,5 @@ static inline int semaphore_wait(struct semaphore *s, int ticks)
     return 0;
 }
 #endif
+
+#define TIMEOUT_BLOCK (-1)

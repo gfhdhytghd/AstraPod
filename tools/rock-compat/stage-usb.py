@@ -6,9 +6,9 @@ from pathlib import Path
 src, out = map(Path, sys.argv[1:])
 text = src.read_text()
 
-def replace(old, new):
+def replace(old, new, count=1):
     global text
-    if text.count(old) != 1:
+    if text.count(old) != count:
         raise SystemExit(f"{src}: refresh source conversion for {old!r}")
     text = text.replace(old, new)
 
@@ -90,6 +90,118 @@ elif src.stem == "robotfindskitten":
         "  display_text(ARRAYLEN(help_text), help_text, NULL, NULL, false);",
         "  if (display_text(ARRAYLEN(help_text), help_text, NULL, NULL, false))\n"
         "    exit(PLUGIN_USB_CONNECTED);",
+    )
+elif src.stem == "2048":
+    # The two menu loops must propagate USB even from nested native widgets.
+    replace(
+        "        switch(rb->do_menu(&menu, &sel, NULL, false))\n        {",
+        "        switch(rb->do_menu(&menu, &sel, NULL, false))\n        {\n"
+        "        case MENU_ATTACHED_USB:\n"
+        "            exit(PLUGIN_USB_CONNECTED);",
+        count=2,
+    )
+elif src.stem == "amaze":
+    replace('#include "lib/pluginlib_actions.h"',
+            '#include "lib/pluginlib_actions.h"\n#include "lib/pluginlib_exit.h"')
+    replace(
+        "                                        ARRAYLEN(plugin_contexts));",
+        "                                        ARRAYLEN(plugin_contexts));\n"
+        "        exit_on_usb(input);",
+    )
+    replace(
+        "                                    ARRAYLEN(plugin_contexts));\n\n",
+        "                                    ARRAYLEN(plugin_contexts));\n"
+        "        exit_on_usb(input);\n\n",
+        count=2,
+    )
+    replace(
+        "        switch(result)\n        {",
+        "        switch(result)\n        {\n"
+        "        case MENU_ATTACHED_USB:\n"
+        "            exit(PLUGIN_USB_CONNECTED);",
+    )
+elif src.stem == "chopper":
+    replace(
+        "        if (rb->button_get(false) == QUIT) {",
+        "        int event = rb->button_get(false);\n"
+        "        if (rb->default_event_handler(event) == SYS_USB_CONNECTED)\n"
+        "            return PLUGIN_USB_CONNECTED;\n"
+        "        if (event == QUIT) {",
+    )
+    replace(
+        "            ret = chopMenu(1);\n"
+        "            if (ret != -1)\n"
+        "                return PLUGIN_OK;",
+        "            ret = chopMenu(1);\n"
+        "            if (ret != -1)\n"
+        "                return ret;",
+    )
+    replace(
+        "                if (rb->default_event_handler(move_button) == SYS_USB_CONNECTED)\n"
+        "                    return PLUGIN_USB_CONNECTED;\n",
+        "",
+    )
+elif src.stem == "fireworks":
+    replace('#include "lib/pluginlib_actions.h"',
+            '#include "lib/pluginlib_actions.h"\n#include "lib/pluginlib_exit.h"')
+    replace(
+        "            case 8:\n                quit_plugin = true;",
+        "            case MENU_ATTACHED_USB:\n"
+        "                exit(PLUGIN_USB_CONNECTED);\n"
+        "            case 8:\n                quit_plugin = true;",
+    )
+    replace("        switch(button)\n", "        exit_on_usb(button);\n        switch(button)\n")
+elif src.stem == "highscore":
+    replace('#include "highscore.h"',
+            '#include "highscore.h"\n#include "pluginlib_exit.h"')
+    replace(
+        "    rb->button_get(true);",
+        "    int button;\n"
+        "    do\n"
+        "    {\n"
+        "        button = rb->button_get(true);\n"
+        "        exit_on_usb(button);\n"
+        "    } while (IS_SYSEVENT(button));",
+    )
+elif src.stem == "minesweeper":
+    replace('#include "lib/playback_control.h"',
+            '#include "lib/playback_control.h"\n#include "lib/pluginlib_exit.h"')
+    replace(
+        "    do\n        button = rb->button_get(true);\n"
+        "    while( ( button == BUTTON_NONE )",
+        "    do\n    {\n        button = rb->button_get(true);\n"
+        "        exit_on_usb(button);\n    }\n"
+        "    while( IS_SYSEVENT(button) || ( button == BUTTON_NONE )",
+    )
+elif src.stem == "pong":
+    replace(
+        "        if(rb->default_event_handler(key) == SYS_USB_CONNECTED)\n"
+        "            return -1; /* exit game because of USB */\n",
+        "",
+    )
+    replace(
+        "        key = rb->button_get_w_tmo(end - *rb->current_tick);",
+        "        key = rb->button_get_w_tmo(end - *rb->current_tick);\n"
+        "        if(rb->default_event_handler(key) == SYS_USB_CONNECTED)\n"
+        "            return -1; /* exit game because of USB */",
+    )
+elif src.stem == "snake2":
+    replace(
+        "        button=rb->button_get(true);",
+        "        button=rb->button_get(true);\n"
+        "        if (rb->default_event_handler(button) == SYS_USB_CONNECTED) {\n"
+        "            dead = 1;\n"
+        "            quit = 2;\n"
+        "            return;\n"
+        "        }",
+    )
+elif src.stem == "star":
+    replace("    int selection, level=1;", "    int selection = 0, level=1;")
+    replace(
+        "            case 4:\n                menu_quit = true;",
+        "            case MENU_ATTACHED_USB:\n"
+        "                return PLUGIN_USB_CONNECTED;\n"
+        "            case 4:\n                menu_quit = true;",
     )
 else:
     raise SystemExit(f"Unknown conversion: {src}")

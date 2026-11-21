@@ -44,6 +44,11 @@ int rock_creat(const char *path, mode_t mode)
     return rock_open(path, O_WRONLY | O_CREAT | O_TRUNC);
 }
 
+int rock_remove(const char *path)
+{
+    return rock_usb_taken() ? -1 : remove(path);
+}
+
 int rock_close(int fd)
 {
     int slot = file_slot(fd);

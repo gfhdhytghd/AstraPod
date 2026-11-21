@@ -38,6 +38,26 @@ static unsigned char *tail;
 static size_t tail_size;
 static bool usb_taken;
 static bool backlight_overridden;
+#ifdef HAVE_ADJUSTABLE_CPU_FREQ
+static bool plugin_boosted;
+
+#ifdef CPU_BOOST_LOGGING
+static void rock_cpu_boost(bool enabled, char *location, int line)
+#else
+static void rock_cpu_boost(bool enabled)
+#endif
+{
+    if (plugin_boosted == enabled || (enabled && usb_taken))
+        return;
+
+    plugin_boosted = enabled;
+#ifdef CPU_BOOST_LOGGING
+    cpu_boost_(enabled, location, line);
+#else
+    cpu_boost(enabled);
+#endif
+}
+#endif
 #ifdef HAVE_SW_POWEROFF
 static bool original_sw_poweroff;
 #endif
@@ -87,6 +107,11 @@ static void restore_backlight(void)
 static void restore_input_settings(void)
 {
     restore_backlight();
+#ifdef HAVE_ADJUSTABLE_CPU_FREQ
+    if (plugin_boosted)
+        cpu_boost(false);
+    plugin_boosted = false;
+#endif
 #ifdef HAVE_SW_POWEROFF
     button_set_sw_poweroff_state(original_sw_poweroff);
 #endif

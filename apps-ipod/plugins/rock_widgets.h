@@ -33,5 +33,6 @@ __typeof__(gui_synclist_scroll_stop) rock_list_stop;
 #undef ROCK_RAW_VOID
 #undef ROCK_RAW_VALUE
 __typeof__(lcd_putsxyf) rock_raw_lcd_putsxyf;
+__typeof__(lcd_putsf) rock_raw_lcd_putsf;
 
 #endif

@@ -36,6 +36,10 @@
 #include "lcd.h"
 #include "font.h"
 #include "audio.h"
+#include "pcm_mixer.h"
+#ifdef USB_ENABLE_AUDIO
+#include "usbstack/usb_audio.h"
+#endif
 #include "playback.h"
 #include "playlist.h"
 #include "action.h"
@@ -90,6 +94,7 @@ enum plugin_status {
 #undef strncmp
 #undef open
 #undef creat
+#undef remove
 #undef close
 #undef read
 #undef write
@@ -140,8 +145,10 @@ enum plugin_status plugin__start(const void *parameter) NO_PROF_ATTR;
 #define splash(ticks, msg) splashf((ticks), (msg))
 #undef DEBUGF
 #undef LDEBUGF
+#undef LOGF
 #define DEBUGF(...) do { } while (0)
 #define LDEBUGF(...) do { } while (0)
+#define LOGF(...) do { } while (0)
 
 #if (CONFIG_PLATFORM & PLATFORM_NATIVE)
 extern unsigned char plugin_start_addr[], plugin_end_addr[];

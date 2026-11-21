@@ -214,3 +214,14 @@ void rock_raw_lcd_putsxyf(int x, int y, const unsigned char *fmt, ...)
     va_end(ap);
     rock_raw_lcd_putsxy(x, y, buf);
 }
+
+void rock_raw_lcd_putsf(int x, int y, const unsigned char *fmt, ...)
+{
+    char buf[256];
+    va_list ap;
+
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    rock_raw_lcd_puts(x, y, buf);
+}

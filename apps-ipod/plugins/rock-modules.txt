@@ -1,10 +1,14 @@
 apps/calculator
 apps/chessclock
 apps/countdown_timer
+apps/dart_scorer
+apps/db_folder_select
 apps/lamp
 apps/periodic_table
+apps/resistor
 apps/stopwatch
 demos/bounce
+demos/credits
 demos/cube
 demos/logo
 demos/matrix

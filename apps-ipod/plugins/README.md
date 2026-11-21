@@ -28,7 +28,9 @@ make rocks ROCK_MODULES='apps/dart_scorer'
 ```
 
 These overrides select build outputs. Packaging uses `rock-modules.txt`.
-Install candidates into an isolated SDL disk for testing. Use the application
+The bundle includes the folder picker, credits, resistor, and dart scorer.
+Build Dict separately when you have its data files. Alarm Clock remains a
+validation build while its timed resume path is checked. Use the application
 and modules from the same build.
 
 | Upstream source | Candidate behavior or integration dependency |

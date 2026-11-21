@@ -296,6 +296,14 @@ static void bootfile_session_end(void)
 }
 #endif
 
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
+#include "sm1-test-control.h"
+
+volatile unsigned sm1_test_submitted;
+volatile unsigned sm1_test_completed;
+volatile unsigned sm1_test_dispatch_tick;
+#endif
+
 long default_event_handler_ex(long event, void (*callback)(void *), void *parameter)
 {
 #ifdef BOOTFILE
@@ -322,6 +330,39 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
             splash(2 * HZ, ID2P(LANG_HIRES_CONVERT_NOTICE));
             button_queue_post(BUTTON_REDRAW, 0);
             break;
+#endif
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
+        case SYS_SM1_TEST_CONTROL:
+        {
+            unsigned command = button_get_data();
+            sm1_test_dispatch_tick = current_tick;
+            if (command == SM1_TEST_REBOOT)
+            {
+                ++sm1_test_completed;
+                if (!clean_shutdown(SHUTDOWN_REBOOT, callback, parameter))
+                    return SYS_REBOOT;
+                break;
+            }
+            if (command >= SM1_TEST_DEBUG_BASE)
+                sm1_test_debug_run(command - SM1_TEST_DEBUG_BASE);
+            else if (command == SM1_TEST_PLAY && file_exists(SM1_TEST_TRACK))
+            {
+                audio_stop();
+                if (playlist_create(NULL, NULL) == 0 &&
+                    playlist_insert_track(NULL, SM1_TEST_TRACK, PLAYLIST_INSERT_LAST,
+                                          false, true) >= 0)
+                    playlist_start(0, 0, 0);
+            }
+            else if (command == SM1_TEST_SEEK && (audio_status() & AUDIO_STATUS_PLAY))
+            {
+                audio_pre_ff_rewind();
+                audio_ff_rewind(SM1_TEST_SEEK_MS);
+            }
+            else if (command == SM1_TEST_STOP)
+                audio_stop();
+            ++sm1_test_completed;
+            break;
+        }
 #endif
         case SYS_BATTERY_UPDATE:
             if(global_settings.talk_battery_level)

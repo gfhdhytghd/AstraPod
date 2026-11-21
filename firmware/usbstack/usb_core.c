@@ -31,6 +31,10 @@
 #include "usb_profile.h"
 #include "usb_class_driver.h"
 #include "usb_log.h"
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
+#include "button.h"
+#include "sm1-test-control.h"
+#endif
 #include "button_usb_remote.h"
 
 #if defined(USB_ENABLE_STORAGE)
@@ -1408,6 +1412,57 @@ static void request_handler_endpoint(struct usb_ctrlrequest* req, uint8_t* reqda
 static void usb_core_control_request_handler(struct usb_ctrlrequest* req, uint8_t* reqdata, size_t reqdata_size)
 {
 #ifdef HAVE_USB_PODLINK
+#if defined(IPOD_6G)
+    if (req->bRequest == SM1_TEST_USB_REQUEST && (req->wIndex == SM1_TEST_USB_INDEX ||
+         req->wIndex == SM1_TEST_DEBUG_INDEX))
+    {
+        if (usb_state == CONFIGURED && usb_podlink_active() && !usb_exclusive_storage())
+        {
+            if (req->wIndex == SM1_TEST_DEBUG_INDEX && req->bRequestType == 0xc0 &&
+                req->wLength == SM1_TEST_DEBUG_NAME_SIZE &&
+                reqdata_size >= SM1_TEST_DEBUG_NAME_SIZE)
+            {
+                const char *name = sm1_test_debug_name(req->wValue);
+                memset(reqdata, 0, SM1_TEST_DEBUG_NAME_SIZE);
+                if (name)
+                    memcpy(reqdata, name, MIN(strlen(name), SM1_TEST_DEBUG_NAME_SIZE - 1));
+                usb_core_control_response(USB_CONTROL_ACK, reqdata, SM1_TEST_DEBUG_NAME_SIZE);
+                return;
+            }
+            if (req->wIndex == SM1_TEST_USB_INDEX &&
+                req->bRequestType == 0xc0 && req->wValue == 0 &&
+                req->wLength == 16 && reqdata_size >= 16)
+            {
+                uint32_t status[] = {current_tick, sm1_test_submitted,
+                                     sm1_test_completed, sm1_test_dispatch_tick};
+                memcpy(reqdata, status, sizeof(status));
+                usb_core_control_response(USB_CONTROL_ACK, reqdata, sizeof(status));
+                return;
+            }
+            unsigned command = 0;
+            if (req->wIndex == SM1_TEST_USB_INDEX &&
+                req->wValue >= SM1_TEST_REBOOT && req->wValue <= SM1_TEST_STOP)
+                command = req->wValue;
+            else if (req->wIndex == SM1_TEST_DEBUG_INDEX &&
+                     sm1_test_debug_name(req->wValue))
+                command = SM1_TEST_DEBUG_BASE + req->wValue;
+
+            if (req->bRequestType == 0x40 && req->wLength == 0 && command &&
+                sm1_test_submitted == sm1_test_completed)
+            {
+                ++sm1_test_submitted;
+                if (button_queue_try_post(SYS_SM1_TEST_CONTROL, command))
+                {
+                    usb_core_control_response(USB_CONTROL_ACK, NULL, 0);
+                    return;
+                }
+                --sm1_test_submitted;
+            }
+        }
+        usb_core_control_response(USB_CONTROL_STALL, NULL, 0);
+        return;
+    }
+#endif
     if (req->bRequest == 0x5c)
     {
         if (usb_state == CONFIGURED && req->bRequestType == 0xc0 &&

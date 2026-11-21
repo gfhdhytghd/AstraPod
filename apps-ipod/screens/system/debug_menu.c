@@ -2445,3 +2445,18 @@ bool run_debug_screen(char* screen)
     splash(HZ, ID2P(LANG_FILE_NOT_FOUND));
     return false;
 }
+
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
+#include "sm1-test-control.h"
+
+const char *sm1_test_debug_name(unsigned index)
+{
+    return index < ARRAYLEN(menuitems) ? menuitems[index].desc : NULL;
+}
+
+void sm1_test_debug_run(unsigned index)
+{
+    if (index < ARRAYLEN(menuitems))
+        run_item(index);
+}
+#endif

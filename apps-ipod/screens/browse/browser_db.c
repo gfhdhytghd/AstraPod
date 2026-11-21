@@ -408,6 +408,7 @@ struct menu_entry {
         int format_id[MAX_TAGS];
         int clause_count[MAX_TAGS];
         int result_seek[MAX_TAGS];
+        bool hide_special;      /* omit optional synthetic rows */
         int header_levels;      /* a bit for each %header_ level */
         int header_untagged;    /* those of them marked %header_untagged */
     } si;
@@ -1042,6 +1043,13 @@ static int get_condition(struct search_instruction *inst)
         {
             int bit = 1 << inst->tagorder_count;
 
+            if (strncasecmp(strp, "%hide_special", 13) == 0
+                && !isalnum((unsigned char)strp[13]) && strp[13] != '_')
+            {
+                inst->hide_special = true;
+                strp += 13;
+                return 1;
+            }
             if (strncasecmp(strp, "%header_all", 11) == 0
                 && !isalnum((unsigned char)strp[11]) && strp[11] != '_')
                 strp += 11;
@@ -3332,19 +3340,20 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
      * without it the descent reaches only the first album. */
     if (tag != tag_title && tag != tag_filename
         && (loading_hidden
-            || (!csi_mentions_spoken() && global_settings.show_all_tracks_row)))
+            || (!csi->hide_special && !csi_mentions_spoken()
+                && global_settings.show_all_tracks_row)))
         dptr = add_head_row(c, dptr, offset, &sidx,
                             csi_mentions_spoken()
                             ? TABLE_ALLSUBENTRIES_SORTED_BY_ALBUMS
                             : TABLE_ALLSUBENTRIES,
                             ID2P(LANG_TAGNAVI_ALL_TRACKS), 0);
-    if (tag != tag_filename && !csi_mentions_spoken()
+    if (tag != tag_filename && !csi->hide_special && !csi_mentions_spoken()
         && global_settings.show_random_row)
         dptr = add_head_row(c, dptr, offset, &sidx, TABLE_NAVIBROWSE,
                             ID2P(LANG_TAGNAVI_RANDOM), -1);
     /* [Shuffle Albums] on a list of albums: its rows are what it shuffles,
      * and the album table it reads them through is only in RAM */
-    if (tag == tag_album && !csi_mentions_spoken()
+    if (tag == tag_album && !csi->hide_special && !csi_mentions_spoken()
         && global_settings.show_shuffle_albums_row
         && tagcache_album_count() > 0)
     {

@@ -571,8 +571,8 @@ replacing CDC-ACM or adding another stream.
 
 ### Profile a large download
 
-Choose an existing regular file under `/Music/` or
-`/iPod_Control/Music/` (up to 128 MiB), or a large allowlisted tagcache file. Use a file that is not changing.
+Choose a stable regular file under `/Music/` or `/iPod_Control/Music/`
+(up to 128 MiB), or a large allowlisted tagcache file.
 `MS3 STREAM SAMPLE <path>` replies `MS3 SAMPLE <size>`, then uses the
 same MSF1 offsets, credits and terminal CRC32 as FILE. SAMPLE is read-only.
 Tagcache mode keeps the firmware's normal revision checks.
@@ -583,7 +583,7 @@ Both return `MS3 PROFILE READY`. A mode change requires an idle IN queue
 and returns `MS3 ERR busy` otherwise. The producer copies straight into
 the second aligned DMA buffer while DMA owns the first. The USB thread
 submits the second immediately after completion. DesignWare still owns one active IN request at a time.
-USB reconfiguration restores BASE. Profiles stop counting at `MS3 PROFILE`,
+FAST is the default at boot and after USB reconfiguration. Profiles stop counting at `MS3 PROFILE`,
 which leaves the selected mode in effect.
 
 The reply has eight fields after `MS3 PROFILE`. Each is

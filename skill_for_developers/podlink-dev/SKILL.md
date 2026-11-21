@@ -124,8 +124,8 @@ tty read statistics. It discards the payload. Stage times include waits
 and preemption. The idle counter covers the whole device capture.
 
 MS3 PROFILE BASE uses the 4 KiB CDC IN path. FAST uses two 16 KiB DMA
-buffers written directly by the producer, with one active DesignWare request. USB reconfiguration restores
-BASE. Record baseline counters first. For UI measurements, repeat a list
+buffers written directly by the producer, with one active DesignWare request.
+FAST is the default at boot and after USB reconfiguration. Record baseline counters first. For UI measurements, repeat a list
 glide or cover-flow transition during each mode with the existing UI
 performance marker enabled. See docs/podlink.md for counter semantics and
 the marker and log paths.

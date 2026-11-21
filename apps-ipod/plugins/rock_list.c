@@ -8,6 +8,11 @@
 static struct gui_synclist *active;
 static struct rock_native_scope list_scope;
 
+bool rock_list_owns(const struct gui_synclist *list)
+{
+    return active == list;
+}
+
 void rock_list_release(bool present)
 {
     if (!active)

@@ -8,13 +8,13 @@
 #include "file.h"
 #include "dir.h"
 #include "podlink_media.h"
+#include "podlink_library.h"
 #include "system/bg_task.h"
 #ifdef HAVE_TAGCACHE
 #include "database/tagcache.h"
 #endif
 
-#define MEDIA_DIR "/Music/PodLink"
-#define SYNC_DIR MEDIA_DIR "/Jellyfin"
+#define SYNC_DIR PODLINK_MEDIA_DIR "/Jellyfin"
 #define STAGING_DIR "/.rockbox/podlink-media"
 #define STAGING_PATH STAGING_DIR "/pending.part"
 #define MAX_TRACK_BYTES (128u * 1024u * 1024u)
@@ -25,8 +25,6 @@ static unsigned int remaining;
 static bool refresh_pending;
 static uint32_t checksum, expected_checksum;
 static char destination[sizeof(SYNC_DIR) + NAME_HASH_LENGTH + 6];
-/* Resident PodLink records are limited to 512 bytes by the transport. */
-#define MEDIA_REPLY_SIZE 500
 static char inventory_reply[MEDIA_REPLY_SIZE];
 static DIR *inventory;
 
@@ -152,6 +150,7 @@ static void reset_files(void)
 #ifdef HAVE_TAGCACHE
     close_local_music();
 #endif
+    podlink_library_close();
     if (refresh_pending)
         refresh_library();
 }
@@ -201,13 +200,13 @@ static const char *begin(const unsigned char *data, unsigned int size, bool sync
         return "MS1 ERR header";
 
     snprintf(destination, sizeof(destination), "%s/%.*s",
-             sync ? SYNC_DIR : MEDIA_DIR, (int)length, (const char *)name);
+             sync ? SYNC_DIR : PODLINK_MEDIA_DIR, (int)length, (const char *)name);
 
     if (file_exists(destination))
         return "MS1 ERR exists";
 
     mkdir("/Music");
-    mkdir(MEDIA_DIR);
+    mkdir(PODLINK_MEDIA_DIR);
     if (sync)
         mkdir(SYNC_DIR);
     mkdir(STAGING_DIR);
@@ -307,6 +306,8 @@ static const char *handle_message(const struct podlink_message *message)
     if (message->type == PODLINK_BINARY && size >= 4 &&
         !memcmp(data, "MSD1", 4))
     {
+        if (podlink_library_active())
+            return "MS1 ERR busy";
         if (track_fd < 0)
             return "MS1 ERR state";
         data += 4;
@@ -321,10 +322,22 @@ static const char *handle_message(const struct podlink_message *message)
         return "MS1 ACK";
     }
 
+    if (message->type == PODLINK_TEXT && size >= 4 && !memcmp(data, "MS3 ", 4))
+    {
+        if (track_fd >= 0 || inventory
+#ifdef HAVE_TAGCACHE
+            || local_open
+#endif
+            )
+            return "MS3 ERR busy";
+        return podlink_library_command(data + 4, size - 4, &refresh_pending);
+    }
     if (message->type == PODLINK_TEXT && size >= 4 && !memcmp(data, "MS2 ", 4))
-        return sync_command(data, size);
+        return podlink_library_active() ? "MS2 ERR busy" : sync_command(data, size);
     if (message->type != PODLINK_TEXT || size < 4 || memcmp(data, "MS1 ", 4))
         return track_fd >= 0 ? "MS1 ERR state" : NULL;
+    if (podlink_library_active())
+        return "MS1 ERR busy";
     if (size == 11 && !memcmp(data, "MS1 REFRESH", 11) && track_fd < 0)
     {
         refresh_library();
@@ -359,7 +372,9 @@ bool podlink_media_enqueue(const struct podlink_message *message)
 {
     if (message->length < 4 || message->length > sizeof(mailbox) ||
         !((message->type == PODLINK_TEXT &&
-           (!memcmp(message->data, "MS1 ", 4) || !memcmp(message->data, "MS2 ", 4))) ||
+           (!memcmp(message->data, "MS1 ", 4) ||
+            !memcmp(message->data, "MS2 ", 4) ||
+            !memcmp(message->data, "MS3 ", 4))) ||
           (message->type == PODLINK_BINARY && !memcmp(message->data, "MSD1", 4))))
         return false;
 

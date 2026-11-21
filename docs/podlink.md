@@ -321,18 +321,24 @@ USB acceptance.
 ## Sync Jellyfin from the desktop
 
 ```sh
-python3 tools/podlink_gui.py
+python3 tools/podlink_gui.py          # add --tray to start hidden in the tray
 ```
 
-The desktop window requires Python with PySide6 (preferred) or PyQt6 (Qt 6
-Widgets). It supports Follow System, Light and Dark themes, saving the UI theme
-preference in `desktop-ui.json` alongside `desktop.json` under
-`$XDG_CONFIG_HOME/podbox-herdremote` (or `~/.config/podbox-herdremote`).
-USB sync also uses pyserial, ffprobe and FFmpeg in the same environment.
-Connect the iPod using its PodLink USB mode. Current firmware answers sync
-requests in the background from any screen. The **System > PodLink** screen
-is for diagnostics. If HerdRemote owns the USB tty, pause it for the preview
-or sync operation and resume it afterwards.
+AstraPod manages the iPod's music from the computer; it does not play audio.
+It browses the iPod library by song, album, artist, genre and composer, shows
+Get Info for any track, imports FLAC, M4A and MP3 files, deletes tracks that
+an import or a Jellyfin sync put on the iPod, and syncs from Jellyfin. It also
+shows HerdRemote's agents, usage and voice input, the input plugins and the
+logs. It needs Python with PySide6; reading the library, importing and syncing
+also need pyserial, ffprobe and FFmpeg.
+
+Connect the iPod in its PodLink USB mode; current firmware answers from any
+screen, and **System > PodLink** is for diagnostics. The application runs
+HerdRemote in the background and borrows its serial connection while it reads
+the library, imports or syncs, then hands it back. Run one copy of the remote
+engine: stop the separate legacy service before using the application.
+Closing the window keeps AstraPod in the system tray; use the tray menu to
+reopen it or quit.
 
 Connect the desktop window to Jellyfin over HTTPS. Sign in with a username
 and password, or select access-token mode. Passwords are cleared from the
@@ -415,3 +421,69 @@ the dedicated sync directory, `MS2 PUT` for staging a synchronized file and
 `MS2 DEL` for removing a validated filename from that directory. Upload
 chunks, checksum verification, final acknowledgements and refresh still use
 the existing media transfer protocol.
+
+## MS3 library
+
+Use MS3 on the iPod Classic in PodLink USB mode. Send one TEXT request
+and wait for its TEXT reply before sending the next request. Replies are
+at most 500 bytes. A
+request that conflicts with an open media upload, inventory, database walk,
+or artwork stream returns `MS1 ERR busy`, `MS2 ERR busy` or `MS3 ERR busy`
+with the requesting command's prefix.
+
+| Request | Reply |
+| --- | --- |
+| `MS3 SUMMARY` | `MS3 SUMMARY <model>\t<firmware>\t<total_bytes>\t<free_bytes>\t<track_count>\t<commit_id>\t<ready>\t<busy>`, or `MS3 MORE` while counting |
+| `MS3 DB` | `MS3 READY` opens the track walk |
+| `MS3 NEXT` | Advances the current count, track walk, or artwork stream |
+| `MS3 STOP` | `MS3 STOPPED` closes the current MS3 operation |
+| `MS3 DETAIL <path>` | `MS3 DETAIL <size_bytes>\t<codec>\t<sample_rate_hz>\t<channels>\t<has_art>` |
+| `MS3 ART <size> <path>` | `MS3 ART <width> <height> <rows\|columns>`, `MS3 NOART`, or `MS3 PLACEHOLDER` |
+| `MS3 DEL <path>` | `MS3 DELETED` removes one regular file |
+
+In the table, `\t` is a literal tab. Booleans are `0` or `1`. Paths are
+absolute, extend to the end of the request, and use the exact bytes from a
+track record, including any spaces. A summary with `ready=0` reports zero
+tracks. Disk figures describe the main volume.
+
+After `MS3 READY`, request `MS3 NEXT` until `MS3 END`. On `MS3 MORE`, send
+another `MS3 NEXT`. Each track is one record split over one or more replies.
+An `MS3 DATA + <base64>` reply continues the record. An `MS3 DATA . <base64>`
+reply ends the record. Decode each chunk separately, then concatenate its
+bytes. The result contains these fields in order, each followed by a NUL.
+
+```text
+index path title artist album album_artist genre composer grouping comment
+year disc track length_ms bitrate_kbps play_count rating play_time_ms
+last_played mtime managed
+```
+
+Strings are the tagcache values. Numbers are decimal ASCII. Use the index
+only within its database snapshot. `last_played` is a play serial, with zero
+for no recorded play. Larger values sort later. `mtime` is the stored
+tagcache value, with zero for unknown. On iPod firmware it encodes the FAT
+local wall time as seconds since 1970 without a timezone offset. Display it
+as a wall time. The commit ID tracks tagcache commits. A deletion-only scan
+can change the track count under the same commit ID. Check the track count
+before reusing a cached walk, and request a fresh walk for current playback
+statistics.
+
+If a database operation returns `MS3 ERR database changed`, discard the
+partial result and start a new operation after the database is ready.
+`MS3 STOP` or disconnect also releases an abandoned walk or artwork stream.
+
+In a detail reply, `size_bytes` is the full file size. Channels are zero
+when the stream configuration is unavailable. `has_art` covers embedded
+art and image files Rockbox finds beside the track or above a disc folder.
+
+The artwork sizes are `list` (44), `coverflow` (128), and `wps` (300). The
+reply gives the actual dimensions and pixel order. After an `MS3 ART` reply,
+send `MS3 NEXT` until the final `MS3 DATA .` reply. Concatenate the decoded
+chunks to get `width * height * 2` bytes of little-endian RGB565 pixels.
+`MS3 NOART` means the requested thumbnail is unavailable.
+`MS3 PLACEHOLDER` means only the shared fallback thumbnail is available.
+
+Only absolute paths under `/Music/PodLink/` on the internal volume are
+deletable. This includes the Jellyfin subdirectory. After `MS3 DELETED`,
+send `MS1 REFRESH` to queue the database update. Disconnect also queues
+any pending update.

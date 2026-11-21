@@ -22,6 +22,9 @@ static struct hr_agent new_agents[HR_MAX_AGENTS];
 static struct hr_tab new_tabs[HR_MAX_TABS];
 static struct hr_question new_question;
 static struct hr_usage new_usage;
+static struct hr_action new_actions[HR_MAX_ACTIONS];
+
+static bool small_count(const char *s, int max, bool clamp, int *out);
 
 void hr_copy(char *dst, const char *src, unsigned int n)
 {
@@ -86,14 +89,24 @@ static const struct hr_workspace *find_ws(const struct hr_model *m,
 
 /* A workspace whose counts have not changed keeps the states its last S
  * gave it, so the S the computer repeats after every W changes nothing */
-static int apply_workspaces(struct hr_model *m, char **cursor)
+static int apply_workspaces(struct hr_model *m, const char *count_text,
+                            char **cursor)
 {
     char *f[HR_MAX_FIELDS], *record;
     int n = 0;
     bool same = true;
+    int t3_start = -1;
     while ((record = next_record(cursor)) && n < HR_MAX_WS)
     {
-        if (split(record, f) != 7)
+        int fields = split(record, f);
+        if (fields == 2 && !strcmp(f[0], "#") && !strcmp(f[1], "T3"))
+        {
+            if (t3_start >= 0)
+                return 0;
+            t3_start = n;
+            continue;
+        }
+        if (fields != 7 || (t3_start >= 0 && strncmp(f[0], "t3", 2)))
             return 0;
         struct hr_workspace *w = &new_ws[n++];
         hr_copy(w->id, f[0], sizeof w->id);
@@ -120,6 +133,14 @@ static int apply_workspaces(struct hr_model *m, char **cursor)
             w->other = '-';
             same = false;
         }
+    }
+    if (t3_start >= 0)
+    {
+        int declared;
+        if (t3_start == n || record ||
+            !small_count(count_text, HR_MAX_WS, false, &declared) ||
+            declared != n)
+            return 0;
     }
     m->ws_shown_changed = !same || n != m->nws;
     memcpy(m->ws, new_ws, n * sizeof new_ws[0]);
@@ -346,6 +367,48 @@ static bool small_count(const char *s, int max, bool clamp, int *out)
     return true;
 }
 
+static bool action_field(const char *s, size_t size)
+{
+    if (!s[0] || strlen(s) >= size)
+        return false;
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++)
+        if (*p < ' ' || *p == 127)
+            return false;
+    return true;
+}
+
+static int apply_actions(struct hr_model *m, const char *target,
+                         const char *count_text, char **cursor)
+{
+    int n;
+    if (!m->actions_target[0] || strcmp(target, m->actions_target) ||
+        m->actions_valid ||
+        !small_count(count_text, HR_MAX_ACTIONS, false, &n) || n < 0)
+        return 0;
+    for (int i = 0; i < n; i++)
+    {
+        char *record = next_record(cursor), *f[HR_MAX_FIELDS];
+        struct hr_action *a = &new_actions[i];
+        if (!record || split(record, f) != 3 ||
+            !action_field(f[0], sizeof a->id) ||
+            !action_field(f[1], sizeof a->label) ||
+            (strcmp(f[2], "0") && strcmp(f[2], "1")))
+            return 0;
+        for (int j = 0; j < i; j++)
+            if (!strcmp(new_actions[j].id, f[0]))
+                return 0;
+        strcpy(a->id, f[0]);
+        strcpy(a->label, f[1]);
+        a->confirm = f[2][0] == '1';
+    }
+    if (*cursor && **cursor)
+        return 0;
+    memcpy(m->actions, new_actions, n * sizeof new_actions[0]);
+    m->nactions = n;
+    m->actions_valid = true;
+    return 'K';
+}
+
 #define HR_SECONDS 99999999     /* over three years */
 
 /* D's age: a decimal integer from -2 to 2147483647, with no sign but a
@@ -535,7 +598,7 @@ int hr_model_apply(struct hr_model *m, const char *data, unsigned int length)
         return 'H';
     }
     if (!strcmp(type, "W") && n == 2)
-        return apply_workspaces(m, &cursor);
+        return apply_workspaces(m, f[1], &cursor);
     if (!strcmp(type, "S") && n == 2)
         return apply_status(m, &cursor);
     if (!strcmp(type, "A") && n == 3)
@@ -546,6 +609,8 @@ int hr_model_apply(struct hr_model *m, const char *data, unsigned int length)
     }
     if (!strcmp(type, "Q"))
         return apply_question(m, f, n, &cursor);
+    if (!strcmp(type, "K") && n == 3)
+        return apply_actions(m, f[1], f[2], &cursor);
     if (!strcmp(type, "X") && n == 2)
     {
         int i = find_question(m, f[1]);

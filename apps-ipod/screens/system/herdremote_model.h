@@ -21,6 +21,7 @@
 #define HR_MAX_OPTIONS   8
 #define HR_USAGE_SVCS    4
 #define HR_MAX_TABS      32
+#define HR_MAX_ACTIONS   12
 /* D's text fields, at their byte budgets (DETAIL-DESIGN.md) */
 #define HR_DETAIL_TEXT   244
 #define HR_DETAIL_SAY    904
@@ -78,6 +79,12 @@ struct hr_option {
     int number;             /* what an answer sends back */
     char label[96];
     bool custom;
+};
+
+struct hr_action {
+    char id[17];
+    char label[41];
+    bool confirm;
 };
 
 struct hr_question {
@@ -139,6 +146,10 @@ struct hr_model {
     char detail_revision[17];
     uint64_t detail_signature;
     struct hr_detail detail;
+    char actions_target[16];  /* target requested by ks, or empty */
+    bool actions_valid;
+    int nactions;
+    struct hr_action actions[HR_MAX_ACTIONS];
     int nquestions;
     struct hr_question questions[HR_MAX_QUESTIONS];
     /* The last command result, until the screen takes it */
@@ -151,7 +162,7 @@ struct hr_model {
 };
 
 /* Apply one message. Returns its type letter ('W', 'S', 'A', 'Q', 'X', 'R',
- * 'T', 'U', 'V', 'D', 'H' for the hello, 'B' for the seven-field T that
+ * 'T', 'U', 'V', 'D', 'K', 'H' for the hello, 'B' for the seven-field T that
  * lists tabs), or 0 if it was not a HerdRemote v1 message, in which case
  * the model is unchanged. */
 int hr_detail_scroll(int position, int old_max, int new_max);

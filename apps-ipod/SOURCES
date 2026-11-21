@@ -164,6 +164,7 @@ input/agents_shortcut.c
 #ifdef HAVE_USB_PODLINK
 screens/system/podlink_screen.c
 screens/system/podlink_media.c
+screens/system/podlink_library.c
 screens/system/podlink_screen_ui.c
 screens/system/agents_screen.c
 screens/playback/cider.c

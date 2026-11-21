@@ -389,40 +389,27 @@ P ...
 N <tokens> <usd_milli>
 ```
 
-- `age`: integer seconds since the oldest service sample. `ok` is `0` when
-  every collector failed, otherwise `1`. This flag is independent of `T`'s
-  herdr status.
-- `state`: `ok` for limits and tokens, `tok` for tokens without limits,
-  `none` for no service data, `err` for collector failure.
-  Failed quota probes retain unexpired last-good windows as `ok`, with their
-  original sample time and a `limits Xm old` note. Expired windows are omitted.
-- `h5_pct`, `wk_pct`: used percent, integer 0–100; `-` for unavailable.
-- `h5_reset`, `wk_reset`: integer seconds from **now** until reset, at
-  least zero; `-` for unavailable. The iPod clock is not trusted.
-- `tokens`: disjoint input, cached input, cache write, output and reasoning
-  tokens in the service's current weekly window (weekly reset minus seven
-  days). Where no current weekly window is known, use the last seven days.
-  Cached input/reasoning that are subsets of other counters count once.
-- `usd_milli`: equivalent API list price for those tokens, per model and
-  token class, in 1/1000 USD. This is not subscription spend. Unknown-model
-  tokens count with cost zero and a note.
-- `note`: at most 40 UTF-8 bytes, sanitized like other text fields; can be
-  empty. An error note explains failure. Incomplete cold indexing uses
-  `ok`/`tok` with `indexing N%`; only real failures use `err`.
-- `N`: sums of all four `P` rows, including any retained counters on error.
+- `age`: integer seconds since the oldest service sample. The T3 source
+  sets `ok=1` for a complete replacement snapshot, including an
+  unavailable snapshot. A legacy `ok=0` keeps the last picture marked
+  stale. This flag is independent of the Agents heartbeat.
+- `state`: `ok` for a limit, `tok` for tokens without a limit, `none` for
+  no service data, `err` for failure. All four rows carry `T3 unavailable`
+  in `note` when T3 cannot supply a snapshot.
+- `h5_pct`, `wk_pct`: used percentage, integer 0–100. `h5_reset` and
+  `wk_reset`: integer seconds from now, clamped at zero. `-` means unknown.
+- `tokens` and `usd_milli`: T3's totals for the latest seven UTC dates.
+  Cost is in thousandths of USD. `-` means unknown, including unpriced
+  usage for the cost field.
+- `note`: up to 40 UTF-8 bytes, sanitized like other text fields.
+- `N`: sums of known `P` values for each field, or `-` if none are known.
 
-The whole message fits the negotiated PodLink maximum (currently 16384 bytes;
-4096 with a legacy peer). The computer answers
-from cache immediately, then schedules a refresh when at least 20 seconds
-old. Collectors never block the link thread. The first reply can be the
-initial `tok/indexing 0%` cache, or the persisted snapshot after restart.
-Claude quota requests have a separate shared 900s interval and 429 backoff;
-20s Usage updates continue to refresh local token totals from the index.
-Background indexing starts with the daemon, including while Usage is closed.
-The next `us` receives the refreshed cache. The player sends `us` on Usage open and every 20 seconds while open;
-it counts reset seconds down locally and stops requests on close. Link
-down or `ok=0`: retain last data and mark it stale. See
-[usage sources and caveats](herdremote-usage.md).
+The player sends `us` on Usage open and every 20 seconds while open.
+The daemon sends its cached snapshot immediately and requests a bounded,
+read-only T3 RPC. It sends the completed snapshot if Usage still expects it.
+The player counts reset seconds down locally. Usage works with both
+`AGENT_CONTROL` values. It uses T3's `server.getConfig` and
+`server.getUsageSummary` RPCs.
 
 ## Player to computer
 
@@ -1128,3 +1115,96 @@ The iPod appends timing, phase, and reason to
 `/.rockbox/handoff-log.txt`. HerdRemote logs match, sync, prepare, seek, go,
 fade, and done at INFO. Samples contain timing and position, with no track
 metadata or backend error bodies.
+
+## Player controls for T3 and actions
+
+With `AGENT_CONTROL=t3`, **System > Agents** lists only T3 projects. The wheel selects a project without changing desktop focus.
+
+| View | Wheel | SELECT | LEFT / RIGHT | MENU |
+|---|---|---|---|---|
+| T3 project | Select a thread and request focus | Request focus and open thread detail | Switch between **Active** and **All**, without wrapping | Spaces |
+| T3 detail | Scroll thread text | Open **Actions** | — | Project |
+| herdr detail | Existing desktop arrow keys | Existing Enter key | Backspace / Open **Actions** | Space |
+| Actions | Select an action | Run it or open confirmation | — | Detail |
+| Interrupt confirmation | — | Confirm | — | Cancel and return to **Actions** |
+
+Hold Play in T3 detail to dictate to the selected thread. The player shows
+the computer's result in the message band. Running an action returns to
+detail and shows the result in the same band.
+If the computer does not return an action list, detail stays open.
+
+For a T3 question with a custom text option, use the click-wheel keyboard.
+On the review screen, RIGHT reopens the keyboard, SELECT sends the text,
+and MENU cancels editing.
+
+## T3 spaces and agent actions
+
+After `hr<TAB>1`, send `tc<TAB>1` to receive T3 projects, threads and
+questions. Send `qx<TAB>1` for the FU21 option records. All records below
+use tabs between fields and newlines between records.
+
+In `herdr` mode (the default), `W` and `Q` contain only herdr records.
+In `t3` mode, a capable player receives only T3 records. A nonempty T3
+`W` starts with the two-field section record `#<TAB>T3` immediately
+before the first project. The count includes up to 32 projects and
+excludes the section record. `S` covers the same project IDs. A client
+without `tc` receives an empty Agents picture in `t3` mode.
+A live settings reload withdraws the previous source's questions with `X`
+and publishes the selected source without reopening PodLink.
+
+Project IDs are `t3p<n>` and thread IDs are `t3t<n>`. Both are stable for
+the daemon's lifetime. Send `sub <project> active` or `sub <project> all`.
+The `T` tab IDs are `active` and `all`. Active lists waiting and running
+threads first, followed by unsettled threads. All lists threads newest
+first, including settled, snoozed and archived threads. `A` has up to 16
+rows. The name is the thread title, the title field is the model and
+branch, and the last field is the first line of the latest assistant
+message. `det <thread>` uses the existing typed `D` record, with the
+thread's title, status and model, latest assistant text, up to three
+recent messages and the oldest pending request. `vd <req> <thread>`
+returns `R <req> err Voice cannot reach T3`.
+
+Send `fp <req> <thread>` to request T3 thread focus. The daemon also
+accepts `fw <req> <thread>`. With `T3_FOLLOW_IPOD=on` (the default),
+the daemon opens a local T3 app link and the desktop app switches its
+thread view. The window may stay behind another window. With follow off,
+the daemon returns success for known threads without opening a link.
+As for panes, the player leaves success silent and shows errors in the
+message band. Replies use `R <req> ok Focused <title>` or
+`R <req> err <reason>`. The daemon keeps only the newest waiting thread
+while an opener is running and replies `err Focus superseded` to
+replaced requests. Project focus requests leave the desktop view unchanged.
+
+T3 user-input Q IDs start with `t3q` and T3 approval Q IDs with `t3a`.
+They share the six-question oldest-first queue with herdr. `X` removes a
+resolved or dismissed request. If a newly read question belongs earlier
+in the queue, the daemon can remove and reinsert the later rows using
+the same IDs. T3 approval `o` rows carry the offered decisions.
+For a T3 user-input Q, send `a <req> <qid> -2` to dismiss the request.
+For a multi-select Q, positive numbers toggle options and zero submits.
+When a request has several questions, each answer advances to a new Q
+ID until the daemon has the complete response.
+
+An FU21 custom row on T3 returns `Input ready` after the client chooses
+it. Collect and review the answer locally. Send
+`qi <req> <qid> enter <text>` to submit a single text field of 1–1024 UTF-8
+bytes with no controls. Send `qi <req> <qid> esc` to cancel local editing
+and leave the request pending.
+
+```text
+ks <target>
+K <target> <n>
+<action> <label> <confirm:0|1>
+act <req> <target> <action>
+R <req> <ok|err> [<text>]
+```
+
+Send `ks` with a pane or thread ID. `K` has up to 12 action records
+with labels of up to 40 UTF-8 bytes. A target with no available actions
+returns zero records. Treat each action ID as opaque and discard the
+sheet when its target changes. Flag `1` means require confirmation
+before sending `act`. Request a fresh sheet after selecting an action.
+A quick reply can be up to 60 bytes even if its label is truncated.
+herdr sheets show up to eight quick replies. T3 sheets show up to seven
+after their five thread actions. A T3 quick reply returns `Queued` when
+there was an active turn at dispatch time.

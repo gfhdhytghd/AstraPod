@@ -101,6 +101,7 @@
 #include "ui/statusbar.h"
 #include "widgets/splash.h"
 #include "widgets/dialog.h"
+#include "widgets/keyboard.h"
 #include "settings/settings.h"
 #include "system/shutdown.h"
 #include "system/activity.h"
@@ -111,18 +112,20 @@
 #include "screens/playback/quick_screen.h"
 
 enum view { VIEW_SPACES, VIEW_AGENTS, VIEW_DETAIL, VIEW_QUESTION, VIEW_USAGE,
-            VIEW_ALERT, VIEW_INPUT };
+            VIEW_ALERT, VIEW_INPUT, VIEW_ACTIONS, VIEW_CONFIRM };
 
 enum row_kind {
     ROW_STATUS,     /* connection trouble; not selectable */
     ROW_HINT,       /* what to do about it; not selectable */
     ROW_ALERT,      /* a question is waiting */
     ROW_SPACE,
+    ROW_T3_HEADER,
     ROW_AGENT,
     ROW_TEXT,       /* a wrapped line of the question */
     ROW_OPTION,
     ROW_SUBMIT,     /* a multi-select question's Submit */
     ROW_EMPTY,
+    ROW_ACTION,
 };
 
 /* id is the workspace or pane a row stands for, copied when the rows are
@@ -136,7 +139,8 @@ struct row {
 
 #define MAX_ROWS   64
 #define TEXT_ROWS  24
-#define OUTBOX     4
+#define OUTBOX     6
+#define T3_INPUT_BYTES 1024
 #define SILENCE    (6 * HZ)
 
 static struct hr_model model;
@@ -155,6 +159,10 @@ static char space_tab[16];      /* its tab; "" is the first */
 static char detail_pane[16];    /* the pane the detail view shows */
 static struct hr_agent detail_agent;    /* that agent, as last listed */
 static bool detail_ready;       /* its fp has succeeded, so keys may go */
+static long actions_until;
+static int action_choice;
+static char action_req[8];
+static long action_until;
 static long detail_at;          /* when the last D came: its age counts on */
 static int detail_shown_age;    /* the minutes the header shows, -1 none */
 /* The detail's task line scrolls when it is wider than the view: it rests
@@ -171,12 +179,13 @@ static char question_id[12], question_saved_detail[16];
 static char question_agent[44], question_tab[44], question_line[124];
 static int question_choice;
 static bool question_custom, question_closing;
+static char t3_input[T3_INPUT_BYTES + 1];
 static char question_pane[16];  /* the pane the question view answers */
 static enum view question_from; /* the view to go back to, on which row */
 static struct row question_from_row;
 static struct hr_popped popped; /* the questions that have popped up */
 
-static char outbox[OUTBOX][96];
+static char outbox[OUTBOX][T3_INPUT_BYTES + 32];
 static int nout;
 static unsigned int next_req = 1;
 static char pending_req[8];     /* the answer awaiting its result */
@@ -225,6 +234,8 @@ static bool talk_remote, talk_discarded;
 static bool talk_held;          /* vd sent, with vu/vc still to come */
 static long talk_since;         /* when the recording began, for its count */
 static char talk_req[8];        /* the vd/vu/vc awaiting its result */
+static char t3_talk_start[8];   /* vd may return after the button is up */
+static bool talk_t3;
 static bool talk_req_up;        /* that request is the vu */
 static long talk_until;         /* when the request or the note expires */
 static char talk_note[64];      /* the last result */
@@ -241,6 +252,23 @@ static struct hr_keys key_runs; /* the taps waiting */
 static struct hr_wheel wheel;
 
 static void talk_result(const char *text, bool failed);
+static bool take_talk_result(void);
+
+static bool is_t3(const char *id)
+{
+    return !strncmp(id, "t3", 2);
+}
+
+static bool take_action_result(void)
+{
+    if (!action_req[0] || strcmp(model.result_req, action_req))
+        return false;
+    model.result_new = false;
+    action_req[0] = '\0';
+    talk_discarded = false;
+    talk_result(model.result_text, !model.result_ok);
+    return true;
+}
 
 static void background_link(const struct podlink_message *m)
 {
@@ -259,12 +287,8 @@ static void background_link(const struct podlink_message *m)
         model.voice = 0;
     if (type == 'R')
     {
-        if (talk_req[0] && !strcmp(model.result_req, talk_req))
-        {
-            talk_req[0] = '\0';
-            if (!model.result_ok || talk_req_up)
-                talk_result(model.result_text, !model.result_ok);
-        }
+        if (take_talk_result())
+            return;
         else if (focus_req[0] && !strcmp(model.result_req, focus_req))
         {
             focus_req[0] = '\0';
@@ -274,6 +298,8 @@ static void background_link(const struct podlink_message *m)
         }
         else if (key_req[0] && !strcmp(model.result_req, key_req))
             key_req[0] = '\0';
+        else if (take_action_result())
+            return;
         else if (pending_req[0] && !strcmp(model.result_req, pending_req))
         {
             pending_req[0] = '\0';
@@ -299,7 +325,7 @@ static void take_req(char *req, size_t size)
 }
 
 /* Queue a command that the daemon answers with R: "<name>\t<req>\t<args>" */
-static void queue_request(const char *name, const char *args)
+static void queue_request(const char *name, const char *args, const char *text)
 {
     char *slot = outbox_slot();
     if (!slot)
@@ -307,19 +333,21 @@ static void queue_request(const char *name, const char *args)
     take_req(pending_req, sizeof pending_req);
     /* An answer waits up to five seconds for the pane to change */
     pending_until = current_tick + 8 * HZ;
-    snprintf(slot, sizeof outbox[0], "%s\t%s\t%s", name, pending_req, args);
+    snprintf(slot, sizeof outbox[0], "%s\t%s\t%s%s%s",
+             name, pending_req, args, text ? "\t" : "", text ? text : "");
 }
 
 /* Queue fw, fp or ft, whose success is silent */
-static void queue_focus(const char *name, const char *args, bool for_detail)
+static bool queue_focus(const char *name, const char *args, bool for_detail)
 {
     char *slot = outbox_slot();
     if (!slot)
-        return;
+        return false;
     take_req(focus_req, sizeof focus_req);
     focus_until = current_tick + FOCUS_REPLY;
     focus_for_detail = for_detail;
     snprintf(slot, sizeof outbox[0], "%s\t%s\t%s", name, focus_req, args);
+    return true;
 }
 
 static void ask_usage(void)
@@ -369,7 +397,8 @@ static char usage_view_signal_pane[16];
 static void signal_usage_view(int active, bool force)
 {
     /* Detail is armed only after its matching pane-focus reply succeeded. */
-    if (active == 2 && (!detail_ready || focus_req[0])) active = 0;
+    if (active == 2 && (!detail_ready || focus_req[0] || is_t3(detail_pane)))
+        active = 0;
     const char *pane = active == 2 ? detail_pane : "";
     if (!force && active == usage_view_signal_value &&
         !strcmp(pane, usage_view_signal_pane) &&
@@ -398,6 +427,14 @@ static void signal_usage_view(int active, bool force)
 
 static const struct hr_question *current_question(void)
 {
+    if (is_t3(question_pane) && question_id[0])
+    {
+        for (int i = 0; i < model.nquestions; i++)
+            if (!strcmp(model.questions[i].id, question_id) &&
+                !strcmp(model.questions[i].pane, question_pane))
+                return &model.questions[i];
+        return NULL;
+    }
     const struct hr_question *q = hr_model_question_for(&model, question_pane);
     return q && (!question_id[0] || !strcmp(q->id, question_id)) ? q : NULL;
 }
@@ -769,7 +806,7 @@ static const char *trouble(char *buf, size_t size)
     }
     if (!model.hello)
         return "Waiting for herdremote…";
-    if (!model.herdr_ok)
+    if (!model.herdr_ok && !is_t3(space_id))
         return "herdr is not running";
     if (TIME_AFTER(current_tick, last_message + SILENCE))
     {
@@ -777,7 +814,7 @@ static const char *trouble(char *buf, size_t size)
                  (current_tick - last_message) / HZ);
         return buf;
     }
-    if (model.herdr_age > 5)
+    if (model.herdr_age > 5 && !is_t3(space_id))
     {
         snprintf(buf, size, "herdr data %d s old", model.herdr_age);
         return buf;
@@ -791,7 +828,7 @@ static const char *trouble_hint(void)
     if (podlink_state() == PODLINK_OPENING)
         return "systemctl --user start herdremote";
     if (podlink_state() == PODLINK_CONNECTED && model.hello &&
-        !model.herdr_ok)
+        !model.herdr_ok && !is_t3(space_id))
         return "Start herdr on the computer";
     return NULL;
 }
@@ -843,8 +880,17 @@ static void build_rows(struct gui_synclist *list)
     char buf[48];
     nrows = 0;
     if (view == VIEW_USAGE || view == VIEW_DETAIL ||
-        view == VIEW_ALERT || view == VIEW_INPUT)
+        view == VIEW_ALERT || view == VIEW_INPUT || view == VIEW_CONFIRM)
         return;
+    if (view == VIEW_ACTIONS)
+    {
+        if (model.actions_valid)
+            for (int i = 0; i < model.nactions; i++)
+                add_row(ROW_ACTION, i);
+        if (!nrows)
+            add_row(ROW_EMPTY, 0);
+        return;
+    }
     if (view != VIEW_QUESTION)
     {
         if (trouble(buf, sizeof buf))
@@ -857,7 +903,18 @@ static void build_rows(struct gui_synclist *list)
     if (view == VIEW_SPACES)
     {
         for (int i = 0; i < model.nws; i++)
+            if (!is_t3(model.ws[i].id))
+                add_row(ROW_SPACE, i);
+        bool header = false;
+        for (int i = 0; i < model.nws; i++)
+        {
+            if (!is_t3(model.ws[i].id))
+                continue;
+            if (!header)
+                add_row(ROW_T3_HEADER, 0);
+            header = true;
             add_row(ROW_SPACE, i);
+        }
         if (!model.nws && model.hello && model.herdr_ok)
             add_row(ROW_EMPTY, 0);
     }
@@ -912,7 +969,14 @@ static const char *row_text(int item, char *buf, size_t size)
             snprintf(buf, size, "%d questions waiting", model.nquestions);
             return buf;
         case ROW_SPACE:
+            if (is_t3(r->id))
+            {
+                snprintf(buf, size, "◆ %s", model.ws[r->index].label);
+                return buf;
+            }
             return model.ws[r->index].label;
+        case ROW_T3_HEADER:
+            return "T3";
         case ROW_AGENT:
             return agent_name(&model.agents[r->index]);
         case ROW_TEXT:
@@ -941,9 +1005,15 @@ static const char *row_text(int item, char *buf, size_t size)
         }
         case ROW_SUBMIT:
             return "Submit";
+        case ROW_ACTION:
+            return model.actions[r->index].label;
         default:
             if (view == VIEW_SPACES)
                 return "No herdr workspaces";
+            if (view == VIEW_ACTIONS)
+                return "No actions";
+            if (is_t3(space_id))
+                return "No threads in this filter";
             return model.hello ? "No agents in this tab"
                                : "Waiting for data…";
     }
@@ -999,7 +1069,10 @@ static const char *row_value(int item, void *data, char *buf, size_t size)
             snprintf(right, sizeof right, "%s", status_word(icon));
             break;
         case ROW_TEXT:
+        case ROW_T3_HEADER:
             style = 'h';
+            break;
+        case ROW_ACTION:
             break;
         case ROW_OPTION:
         {
@@ -1080,7 +1153,7 @@ static bool selectable(int item)
         return false;
     int kind = rows[item].kind;
     return kind != ROW_STATUS && kind != ROW_HINT && kind != ROW_TEXT &&
-           kind != ROW_EMPTY;
+           kind != ROW_EMPTY && kind != ROW_T3_HEADER;
 }
 
 static const char *view_title(void)
@@ -1090,6 +1163,8 @@ static const char *view_title(void)
         return "Answering…";
     if (view == VIEW_AGENTS)
     {
+        if (is_t3(space_id))
+            return !strcmp(space_tab, "all") ? "‹ All" : "Active ›";
         /* The tab, with an arrow for each neighbour; the workspace alone
          * when it has one tab, or from a computer that lists no tabs */
         const struct hr_workspace *w = find_space(space_id);
@@ -1121,6 +1196,8 @@ static const char *view_title(void)
     }
     if (view == VIEW_USAGE)
         return "Usage";
+    if (view == VIEW_ACTIONS || view == VIEW_CONFIRM)
+        return "Actions";
     return "Agents";
 }
 
@@ -1521,14 +1598,13 @@ static int input_lines(const char *text, int width, struct font *pf,
 }
 
 static int draw_input(struct screen *d, struct viewport *vp, int y,
+                      const char *text, const char *cursor_at,
                       unsigned text_colour, unsigned border_colour)
 {
-    const struct hr_detail *det = &model.detail;
     struct font *pf = font_get(vp->font);
     int width = vp->width - 2 * (INPUT_PAD + 1), x0 = INPUT_PAD + 1;
     int h = pf->height, cursor_line;
-    const char *text = det->input, *end;
-    const char *cursor_at = text + hr_utf8_offset(text, det->cursor);
+    const char *end;
     char line[200];
     font_lock(vp->font, true);
     int nlines = input_lines(text, width, pf, cursor_at, &cursor_line);
@@ -1577,6 +1653,45 @@ static int detail_measure(const char *text, int bytes, void *ctx)
  * asking), the message, wrapped to as many lines as it needs, and the last
  * steps, the oldest dropped first when the message needs their lines. A
  * fallback detail is the pane's last lines in grey, with no time. */
+static void draw_t3_body(struct screen *d, struct viewport *vp, int y,
+                         unsigned colour)
+{
+    const struct hr_detail *det = &model.detail;
+    const char *const fields[] = {
+        det->say, det->step[0], det->step[1], det->step[2],
+        det->input[0] ? "Pending request" : "", det->input
+    };
+    struct font *pf = font_get(vp->font);
+    int avail = MAX(1, (vp->height - y) / USE_LINE);
+    font_lock(vp->font, true);
+    int count = 0;
+    for (size_t i = 0; i < sizeof fields / sizeof fields[0]; i++)
+        for (const char *p = fields[i], *end; *p; count++)
+            p = text_wrap_next_punct(p, vp->width, pf, &end);
+    detail_page_lines = avail;
+    detail_scroll_max = MAX(0, count - avail);
+    detail_scroll = MIN(detail_scroll, detail_scroll_max);
+
+    int row = -detail_scroll;
+    for (size_t i = 0; i < sizeof fields / sizeof fields[0]; i++)
+        for (const char *p = fields[i]; *p && row < avail; row++)
+        {
+            const char *end;
+            const char *next = text_wrap_next_punct(p, vp->width, pf, &end);
+            if (row >= 0)
+            {
+                char line[200];
+                int len = MIN(end - p, (long)sizeof line - 1);
+                while (len > 0 && ((unsigned char)p[len] & 0xc0) == 0x80)
+                    len--;
+                snprintf(line, sizeof line, "%.*s", len, p);
+                text_at(d, 0, y + row * USE_LINE, colour, line);
+            }
+            p = next;
+        }
+    font_lock(vp->font, false);
+}
+
 static void draw_detail(struct gui_synclist *list)
 {
     struct screen *d = &screens[SCREEN_MAIN];
@@ -1590,6 +1705,7 @@ static void draw_detail(struct gui_synclist *list)
     if (a)
         detail_agent = *a;
     a = &detail_agent;
+    bool t3 = is_t3(detail_pane);
     bool have = model.detail_valid && !strcmp(model.detail_pane, detail_pane);
     bool fallback = have && det->age == -2;
     int secs = have ? detail_age() : -1;
@@ -1620,12 +1736,15 @@ static void draw_detail(struct gui_synclist *list)
     d->hline(0, vp->width - 1, y);
     y += DET_GAP;
 
-    bool empty = have && !det->task[0] && !det->now[0] && !det->say[0] &&
+    bool empty = have && !(t3 && det->input[0]) &&
+                 !det->task[0] && !det->now[0] && !det->say[0] &&
                  !det->step[0][0] && !det->step[1][0] && !det->step[2][0];
     if (!have || empty)
     {
         task_text[0] = '\0';
         const char *msg = t_trouble ? t_trouble :
+                          t3 ? (have ? "Nothing in the thread"
+                                     : "Waiting for the thread…") :
                           have ? "Nothing in the pane" : "Waiting for the pane…";
         text_at(d, (vp->width - text_w(d, msg)) / 2,
                 y + (vp->height - y - USE_LINE) / 2, ink.muted, msg);
@@ -1651,8 +1770,10 @@ static void draw_detail(struct gui_synclist *list)
     }
 
     /* What is typed, first: it is what the wheel's keys are editing */
-    if (det->input[0])
-        y = draw_input(d, vp, y, t_trouble ? ink.muted : ink.text, ink.muted);
+    if (!t3 && det->input[0])
+        y = draw_input(d, vp, y, det->input,
+                       det->input + hr_utf8_offset(det->input, det->cursor),
+                       t_trouble ? ink.muted : ink.text, ink.muted);
 
     /* The working line, or the state */
     if (det->now[0])
@@ -1673,6 +1794,14 @@ static void draw_detail(struct gui_synclist *list)
         y += USE_LINE;
     }
     y += DET_GAP;
+
+    if (t3)
+    {
+        draw_t3_body(d, vp, y, t_trouble ? ink.muted : ink.text);
+        d->set_viewport(previous);
+        ui_flush_dirty();
+        return;
+    }
 
     /* Retain closed lines during streaming. A reader above the bottom
      * keeps the accepted message, steps and body geometry until returning. */
@@ -1889,12 +2018,31 @@ static void draw_question_overlay(void)
     d->set_background(LCD_BLACK);
     d->clear_viewport();
     d->set_drawmode(DRMODE_FG);
-    int y = q_header(d, &full);
+    int y = view == VIEW_CONFIRM ? Q_HEAD : q_header(d, &full);
     int bar = full.height - Q_BAR;
     const struct hr_question *q = current_question();
-    if (view == VIEW_INPUT)
+    if (view == VIEW_CONFIRM)
+    {
+        static const char *const keys[] = { "SELECT", "Confirm",
+                                           "MENU", "Cancel" };
+        char prompt[80];
+        snprintf(prompt, sizeof prompt, "Interrupt %s?",
+                 agent_name(&detail_agent));
+        struct dialog_text_line lines[4];
+        int n = dialog_wrap_text(prompt, full.width - 2 * Q_MARGIN, FONT_UI,
+                                 lines, 4);
+        for (int i = 0; i < n; i++)
+        {
+            char line[80];
+            snprintf(line, sizeof line, "%.*s", lines[i].len, lines[i].str);
+            text_at(d, Q_MARGIN, y + i * USE_LINE, USE_TEXT, line);
+        }
+        q_keys(d, &full, 2, keys);
+    }
+    else if (view == VIEW_INPUT)
     {
         static const char *const keys[] = { "SELECT", "Send", "MENU", "Cancel" };
+        bool t3 = is_t3(question_pane);
         char line[124];
         text_at(d, Q_MARGIN, y, USE_DIM,
                 fit(line, sizeof line, q && q->nlines ? q->lines[q->nlines - 1]
@@ -1906,19 +2054,36 @@ static void draw_question_overlay(void)
         box.width = full.width - 2 * Q_MARGIN;
         if (!detail_ready)
             text_at(d, Q_MARGIN, y, USE_DIM, "Opening the input…");
-        else if (model.detail_valid && !strcmp(model.detail_pane, question_pane))
+        else if (t3)
         {
             d->set_viewport(&box);
-            if (!model.detail.input[0])
+            draw_input(d, &box, y, t3_input, t3_input + strlen(t3_input),
+                       USE_TEXT, USE_DIM);
+            d->set_viewport(&full);
+            d->set_drawmode(DRMODE_FG);
+        }
+        else if (model.detail_valid && !strcmp(model.detail_pane, question_pane))
+        {
+            const struct hr_detail *det = &model.detail;
+            d->set_viewport(&box);
+            if (!det->input[0])
                 text_at(d, INPUT_PAD + 1, y + INPUT_PAD, Q_FAINT,
                         "Hold PLAY and speak");
-            draw_input(d, &box, y, USE_TEXT, USE_DIM);
+            draw_input(d, &box, y, det->input,
+                       det->input + hr_utf8_offset(det->input, det->cursor),
+                       USE_TEXT, USE_DIM);
             d->set_viewport(&full);
             d->set_drawmode(DRMODE_FG);
         }
         int ky = bar - USE_LINE - 6;
-        draw_mic(d, Q_MARGIN, ky + 2, talk_held ? Q_AMBER : USE_DIM);
-        text_at(d, Q_MARGIN + 18, ky, USE_DIM, "Hold PLAY: speak · LEFT: delete");
+        if (t3)
+            text_at(d, Q_MARGIN, ky, USE_DIM, "RIGHT: Edit text");
+        else
+        {
+            draw_mic(d, Q_MARGIN, ky + 2, talk_held ? Q_AMBER : USE_DIM);
+            text_at(d, Q_MARGIN + 18, ky, USE_DIM,
+                    "Hold PLAY: speak · LEFT: delete");
+        }
         q_keys(d, &full, 2, keys);
     }
     else if (q && q->yes && q->no)
@@ -2003,7 +2168,7 @@ static void draw_talk(struct gui_synclist *list)
     }
     else if (talk_held && !talk_failed)
         text = "Stopped on the computer";
-    else if (!talk_held && talk_req[0])
+    else if (!talk_held && talk_req[0] && !(talk_t3 && talk_failed))
     {
         text = "Sending…";
         colour = USE_DIM;
@@ -2065,7 +2230,7 @@ static void talk_result(const char *text, bool failed)
 static void start_talk(struct gui_synclist *list, bool remote)
 {
     char target[24];
-    if (talk_held)
+    if (talk_held || view == VIEW_ACTIONS || view == VIEW_CONFIRM)
         return;
     if (podlink_state() != PODLINK_CONNECTED || !model.hello)
     {
@@ -2079,6 +2244,8 @@ static void start_talk(struct gui_synclist *list, bool remote)
         return;
     talk_target(list, target, sizeof target);
     take_req(talk_req, sizeof talk_req);
+    talk_t3 = is_t3(target);
+    strcpy(t3_talk_start, talk_t3 ? talk_req : "");
     snprintf(slot, sizeof outbox[0], "vd\t%s\t%s", talk_req, target);
     talk_req_up = false;
     talk_held = true;
@@ -2173,6 +2340,8 @@ static void pump_keys(void)
  * right or enter. A tap past the runs' caps is dropped. */
 static void send_key(const char *key)
 {
+    if ((view == VIEW_DETAIL || view == VIEW_INPUT) && is_t3(detail_pane))
+        return;
     if (podlink_state() != PODLINK_CONNECTED || !model.hello)
     {
         talk_result("No link to the computer", true);
@@ -2228,15 +2397,15 @@ static bool question_binary_page(void)
            q->noptions == 2 && !q->options[0].custom && !q->options[1].custom;
 }
 
-/* The wheel moved in the spaces or agents view: the selected workspace or
- * pane is the one to focus; any other row wants none */
+/* Focus herdr workspaces, panes and T3 threads as the wheel moves. */
 static void want_focus(struct gui_synclist *list)
 {
     int sel = gui_synclist_get_sel_pos(list);
     const struct row *r = sel >= 0 && sel < nrows ? &rows[sel] : NULL;
-    bool is = r && ((view == VIEW_SPACES && r->kind == ROW_SPACE) ||
-                    (view == VIEW_AGENTS && r->kind == ROW_AGENT));
-    snprintf(focus_want, sizeof focus_want, "%s", is ? r->id : "");
+    bool focusable = r && ((view == VIEW_SPACES && r->kind == ROW_SPACE &&
+                            !is_t3(r->id)) ||
+                           (view == VIEW_AGENTS && r->kind == ROW_AGENT));
+    snprintf(focus_want, sizeof focus_want, "%s", focusable ? r->id : "");
 }
 
 /* Forget the wanted and the done focus: the view has changed */
@@ -2249,11 +2418,16 @@ static void reset_focus(void)
  * result in */
 static void send_wanted_focus(void)
 {
-    if (!focus_want[0] || focus_req[0] || talk_held || talk_req[0])
+    if (!focus_want[0] || focus_req[0] || question_id[0] ||
+        talk_held || talk_req[0])
         return;
     if (strcmp(focus_want, focus_done))
     {
-        queue_focus(view == VIEW_SPACES ? "fw" : "fp", focus_want, false);
+        bool for_detail = view == VIEW_DETAIL || view == VIEW_ACTIONS ||
+                          view == VIEW_CONFIRM;
+        if (!queue_focus(view == VIEW_SPACES ? "fw" : "fp", focus_want,
+                         for_detail))
+            return;
         snprintf(focus_done, sizeof focus_done, "%s", focus_want);
     }
     focus_want[0] = '\0';
@@ -2262,11 +2436,21 @@ static void send_wanted_focus(void)
 /* An R for vd or vu. Returns false for any other request's R. */
 static bool take_talk_result(void)
 {
+    if (t3_talk_start[0] && !strcmp(model.result_req, t3_talk_start))
+    {
+        t3_talk_start[0] = '\0';
+        if (!strcmp(model.result_req, talk_req))
+            talk_req[0] = '\0';
+        model.result_new = false;
+        if (!model.result_ok && !talk_discarded)
+            talk_result(model.result_text, true);
+        return true;
+    }
     if (!talk_req[0] || strcmp(model.result_req, talk_req))
         return false;
     model.result_new = false;
     talk_req[0] = '\0';
-    if (!model.result_ok || talk_req_up)
+    if ((!model.result_ok || talk_req_up) && !(talk_t3 && talk_failed))
         talk_result(model.result_text, !model.result_ok);
     return true;
 }
@@ -2300,7 +2484,8 @@ static void update_volume_mode(void)
         iap_agents_volume_enable(want);
         volume_paging = want;
     }
-    iap_agents_volume_host_keys(view == VIEW_DETAIL || view == VIEW_USAGE);
+    iap_agents_volume_host_keys(view == VIEW_USAGE ||
+        (view == VIEW_DETAIL && !is_t3(detail_pane)));
 #endif
 }
 
@@ -2331,7 +2516,8 @@ static void show_at(struct gui_synclist *list, int select, int top)
     else
     {
         gui_synclist_draw(list);
-        if (view == VIEW_ALERT || view == VIEW_INPUT || question_binary_page())
+        if (view == VIEW_ALERT || view == VIEW_INPUT || view == VIEW_CONFIRM ||
+            question_binary_page())
             draw_question_overlay();
     }
 }
@@ -2382,28 +2568,27 @@ static void show_row(struct gui_synclist *list, const struct row *r)
 
 /* The question view over the current view, which it goes back to, on the
  * row it was on */
-static void open_question(struct gui_synclist *list, const char *pane)
+static void open_question(struct gui_synclist *list,
+                          const struct hr_question *q)
 {
     ui_scene_cancel(&page_scene);
     int sel = gui_synclist_get_sel_pos(list);
     question_from = view;
     question_from_row = sel >= 0 && sel < nrows ? rows[sel] : (struct row){0};
     snprintf(question_saved_detail, sizeof question_saved_detail, "%s", detail_pane);
-    question_id[0] = '\0';
     question_choice = 0;
     question_custom = question_closing = false;
-    snprintf(question_pane, sizeof question_pane, "%s", pane);
-    const struct hr_question *q = current_question();
-    if (q)
-    {
-        hr_popped_add(&popped, q->id);
-        snprintf(question_id, sizeof question_id, "%s", q->id);
-        snprintf(question_agent, sizeof question_agent, "%s", q->agent);
-        snprintf(question_tab, sizeof question_tab, "%s", q->tab[0] ? q->tab : q->workspace);
-        snprintf(question_line, sizeof question_line, "%s", q->nlines ? q->lines[0] : "Question");
-    }
+    hr_popped_add(&popped, q->id);
+    snprintf(question_pane, sizeof question_pane, "%s", q->pane);
+    snprintf(question_id, sizeof question_id, "%s", q->id);
+    snprintf(question_agent, sizeof question_agent, "%s", q->agent);
+    snprintf(question_tab, sizeof question_tab, "%s",
+             q->tab[0] ? q->tab : q->workspace);
+    snprintf(question_line, sizeof question_line, "%s",
+             q->nlines ? q->lines[0] : "Question");
+    if (view == VIEW_SPACES || view == VIEW_AGENTS)
+        focus_want[0] = '\0';
     view = VIEW_ALERT;
-    focus_want[0] = '\0';
     show(list, 0);
 }
 
@@ -2417,8 +2602,15 @@ static void leave_question(struct gui_synclist *list)
         snprintf(detail_pane, sizeof detail_pane, "%s", question_saved_detail);
         subscribe_detail(detail_pane);
         detail_ready = false;
-        if (question_from == VIEW_DETAIL)
+        if ((question_from == VIEW_DETAIL || question_from == VIEW_ACTIONS ||
+             question_from == VIEW_CONFIRM) && !is_t3(detail_pane))
             queue_focus("fp", detail_pane, true);
+        if (question_from == VIEW_ACTIONS || question_from == VIEW_CONFIRM)
+        {
+            model.actions_valid = false;
+            model.actions_target[0] = '\0';
+            question_from = VIEW_DETAIL;
+        }
     }
     view = question_from;
     question_id[0] = '\0';
@@ -2426,6 +2618,19 @@ static void leave_question(struct gui_synclist *list)
     pending_req[0] = '\0';
     pending_answer = false;
     show_row(list, &question_from_row);
+}
+
+static void dismiss_question(struct gui_synclist *list)
+{
+    if (!pending_req[0] && !strncmp(question_id, "t3q", 3) &&
+        current_question() &&
+        podlink_state() == PODLINK_CONNECTED)
+    {
+        char args[16];
+        snprintf(args, sizeof args, "%s\t-2", question_id);
+        queue_request("a", args, NULL);
+    }
+    leave_question(list);
 }
 
 /* A question that has not popped up yet does so now, the oldest first and
@@ -2441,7 +2646,9 @@ static void pop_question(struct gui_synclist *list)
         return;
     hr_popped_add(&popped, q->id);
     backlight_on();
-    open_question(list, q->pane);
+    if (!is_t3(q->pane))
+        q = hr_model_question_for(&model, q->pane);
+    open_question(list, q);
 }
 
 static void pan(const void *from, const void *to, int direction)
@@ -2463,6 +2670,8 @@ static void slide(const void *from, const void *to, bool push)
 
 static int tab_index(void)
 {
+    if (is_t3(space_id))
+        return !strcmp(space_tab, "all");
     return MAX(0, hr_model_tab_index(&model, space_id, space_tab));
 }
 
@@ -2493,9 +2702,12 @@ static void enter_space(struct gui_synclist *list, const char *ws)
 {
     slide(&spaces_page, &tab_page[0], true);
     snprintf(space_id, sizeof space_id, "%s", ws);
-    space_tab[0] = '\0';
+    strcpy(space_tab, is_t3(space_id) ? "active" : "");
+    if (is_t3(space_id))
+        model.agents_valid = false;
     subscribe(space_id, space_tab);
-    queue_focus("fw", space_id, false);
+    if (!is_t3(space_id))
+        queue_focus("fw", space_id, false);
     view = VIEW_AGENTS;
     reset_focus();
     show(list, 0);
@@ -2504,7 +2716,7 @@ static void enter_space(struct gui_synclist *list, const char *ws)
 /* Back to the spaces view, on the workspace's row */
 static void close_space(struct gui_synclist *list)
 {
-    slide(&tab_page[0], &spaces_page, false);
+    slide(&tab_page[tab_index()], &spaces_page, false);
     struct row r = { .kind = ROW_SPACE };
     snprintf(r.id, sizeof r.id, "%s", space_id);
     view = VIEW_SPACES;
@@ -2519,10 +2731,15 @@ static void close_space(struct gui_synclist *list)
  * selection goes to the first of them */
 static void select_tab(struct gui_synclist *list, int tab)
 {
-    char args[40];
-    snprintf(space_tab, sizeof space_tab, "%s", model.tabs[tab].id);
-    snprintf(args, sizeof args, "%s\t%s", space_id, space_tab);
-    queue_focus("ft", args, false);
+    if (is_t3(space_id))
+        strcpy(space_tab, tab ? "all" : "active");
+    else
+    {
+        char args[40];
+        snprintf(space_tab, sizeof space_tab, "%s", model.tabs[tab].id);
+        snprintf(args, sizeof args, "%s\t%s", space_id, space_tab);
+        queue_focus("ft", args, false);
+    }
     subscribe(space_id, space_tab);
     model.agents_valid = false;
     reset_focus();
@@ -2531,8 +2748,9 @@ static void select_tab(struct gui_synclist *list, int tab)
 
 static void switch_tab(struct gui_synclist *list, int dir)
 {
-    int i = hr_model_tab_index(&model, space_id, space_tab);
-    if (i < 0 || i + dir < 0 || i + dir >= model.ntabs)
+    bool t3 = is_t3(space_id);
+    int i = t3 ? tab_index() : hr_model_tab_index(&model, space_id, space_tab);
+    if (i < 0 || i + dir < 0 || i + dir >= (t3 ? 2 : model.ntabs))
         return;
     pan(&tab_page[i], &tab_page[i + dir], dir);
     select_tab(list, i + dir);
@@ -2541,7 +2759,7 @@ static void switch_tab(struct gui_synclist *list, int dir)
 static void back_from_tab(struct gui_synclist *list)
 {
     int i = tab_index();
-    if (i == 0)
+    if (i == 0 || is_t3(space_id))
         close_space(list);
     else
     {
@@ -2567,9 +2785,12 @@ static void open_detail(struct gui_synclist *list, const struct hr_agent *a)
     forget_keys();
     model.detail_valid = false;
     subscribe_detail(detail_pane);
-    queue_focus("fp", detail_pane, true);
     view = VIEW_DETAIL;
     reset_focus();
+    if (is_t3(detail_pane))
+        snprintf(focus_want, sizeof focus_want, "%s", detail_pane);
+    else
+        queue_focus("fp", detail_pane, true);
     show(list, 0);
 }
 
@@ -2583,9 +2804,58 @@ static void close_detail(struct gui_synclist *list)
     forget_keys();
     detail_ready = false;
     detail_pane[0] = '\0';
+    model.actions_target[0] = '\0';
+    model.actions_valid = false;
     view = VIEW_AGENTS;
     reset_focus();
     show_row(list, &r);
+}
+
+/* Show the sheet only after its reply, so an older peer leaves RIGHT idle. */
+static void request_actions(void)
+{
+    if (!model.hello || podlink_state() != PODLINK_CONNECTED || talk_held ||
+        talk_req[0] || action_req[0] || model.actions_target[0])
+        return;
+    char *slot = outbox_slot();
+    if (!slot)
+        return;
+    strcpy(model.actions_target, detail_pane);
+    model.actions_valid = false;
+    actions_until = current_tick + FOCUS_REPLY;
+    snprintf(slot, sizeof outbox[0], "ks\t%s", detail_pane);
+}
+
+static void close_actions(struct gui_synclist *list)
+{
+    model.actions_target[0] = '\0';
+    model.actions_valid = false;
+    view = VIEW_DETAIL;
+    show(list, 0);
+}
+
+static void run_action(struct gui_synclist *list, int choice, bool confirmed)
+{
+    if (!model.actions_valid || strcmp(model.actions_target, detail_pane) ||
+        action_req[0] || choice < 0 || choice >= model.nactions ||
+        podlink_state() != PODLINK_CONNECTED)
+        return;
+    const struct hr_action *a = &model.actions[choice];
+    if (a->confirm && !confirmed)
+    {
+        action_choice = choice;
+        view = VIEW_CONFIRM;
+        show(list, 0);
+        return;
+    }
+    char *slot = outbox_slot();
+    if (!slot)
+        return;
+    take_req(action_req, sizeof action_req);
+    action_until = current_tick + FOCUS_REPLY;
+    snprintf(slot, sizeof outbox[0], "act\t%s\t%s\t%s",
+             action_req, detail_pane, a->id);
+    close_actions(list);
 }
 
 /* Act on SELECT: enter the workspace, open the agent's detail or the
@@ -2595,9 +2865,10 @@ static void enter_answer(struct gui_synclist *list)
     if (!current_question() || focus_req[0] || pending_req[0]) return;
     forget_keys();
     snprintf(detail_pane, sizeof detail_pane, "%s", question_pane);
-    detail_ready = false;
+    detail_ready = is_t3(question_pane);
     subscribe_detail(detail_pane);
-    queue_focus("fp", question_pane, true);
+    if (!detail_ready)
+        queue_focus("fp", question_pane, true);
     view = VIEW_QUESTION;
     show(list, 0);
 }
@@ -2611,21 +2882,34 @@ static void answer_number(int number)
     for (int i = 0; i < q->noptions; i++)
         if (q->options[i].number == number) question_custom = q->options[i].custom;
     snprintf(args, sizeof args, "%s\t%d", q->id, number);
-    queue_request("a", args);
+    queue_request("a", args, NULL);
     pending_answer = !q->multi || number == 0;
 }
 
 static void close_input(bool submit)
 {
     if (!detail_ready || pending_req[0] || focus_req[0]) return;
+    bool t3 = is_t3(question_pane);
+    if (t3 && submit && !t3_input[0]) return;
     /* Review must include every queued edit before Enter can be sent. */
     if (submit && (key_req[0] || key_runs.nruns)) return;
     finish_talk(true);
     forget_keys();
     char args[32];
     snprintf(args, sizeof args, "%s\t%s", question_id, submit ? "enter" : "esc");
-    queue_request("qi", args);
+    queue_request("qi", args, t3 && submit ? t3_input : NULL);
     question_closing = pending_req[0] != '\0';
+}
+
+static void edit_t3_input(struct gui_synclist *list)
+{
+    ui_scene_cancel(&page_scene);
+    dialog_input(t3_input, sizeof t3_input);
+    for (char *p = t3_input; *p; p++)
+        if ((unsigned char)*p < ' ' || *p == 127)
+            *p = ' ';
+    input_top = 0;
+    show(list, 0);
 }
 
 static bool question_action(struct gui_synclist *list, int action)
@@ -2646,7 +2930,7 @@ static bool question_action(struct gui_synclist *list, int action)
             const struct hr_question *q = current_question();
             if (view == VIEW_ALERT)
             {
-                if (menu && !pending_req[0]) leave_question(list);
+                if (menu && !pending_req[0]) dismiss_question(list);
                 else if (select) enter_answer(list);
                 else if ((left || right) && !(status & ACTION_REPEAT) && q && q->yes && q->no)
                 {
@@ -2662,6 +2946,11 @@ static bool question_action(struct gui_synclist *list, int action)
             {
                 if (menu) close_input(false);
                 else if (select && !talk_held && !talk_req[0]) close_input(true);
+                else if (is_t3(question_pane))
+                {
+                    if (right && !pending_req[0] && !question_closing)
+                        edit_t3_input(list);
+                }
                 else if (left && detail_ready && !question_closing) send_key("bs");
                 else if (action == ACTION_AGENTS_TALK || action == ACTION_AGENTS_REMOTE_TALK)
                 {
@@ -2694,13 +2983,16 @@ static void activate(struct gui_synclist *list)
     switch (r->kind)
     {
         case ROW_ALERT:
-            open_question(list, model.questions[0].pane);
+            open_question(list, &model.questions[0]);
             return;
         case ROW_SPACE:
             enter_space(list, model.ws[r->index].id);
             return;
         case ROW_AGENT:
             open_detail(list, &model.agents[r->index]);
+            return;
+        case ROW_ACTION:
+            run_action(list, r->index, false);
             return;
         case ROW_OPTION:
         case ROW_SUBMIT:
@@ -2741,6 +3033,9 @@ static bool poll_link(void)
         nout = 0;
         pending_req[0] = '\0';
         focus_req[0] = '\0';
+        model.actions_target[0] = '\0';
+        model.actions_valid = false;
+        action_req[0] = '\0';
         reset_focus();
         /* The computer stops recording when the link goes */
         if (talk_held || talk_req[0])
@@ -2748,6 +3043,7 @@ static bool poll_link(void)
         talk_held = false;
         agents_shortcut_talking(false);
         talk_req[0] = '\0';
+        t3_talk_start[0] = '\0';
         forget_keys();
         if (connected)
         {
@@ -2756,13 +3052,17 @@ static bool poll_link(void)
                 strcpy(slot, "hr\t1");
             slot = outbox_slot();
             if (slot) strcpy(slot, "qx\t1");
+            slot = outbox_slot();
+            if (slot) strcpy(slot, "tc\t1");
             if (space_id[0])
                 subscribe(space_id, space_tab);
             if (detail_pane[0])
             {
-                detail_ready = false;
+                detail_ready = !strcmp(detail_pane, question_pane) &&
+                               is_t3(detail_pane);
                 subscribe_detail(detail_pane);
-                queue_focus("fp", detail_pane, true);
+                if (!is_t3(detail_pane))
+                    queue_focus("fp", detail_pane, true);
             }
             if (view == VIEW_USAGE)
                 ask_usage();
@@ -2802,7 +3102,8 @@ static bool poll_link(void)
         if (type == 'D')
             detail_at = current_tick;
         /* The tab shown has gone: back to the first */
-        if (type == 'B' && space_tab[0] && !strcmp(model.tabs_ws, space_id)
+        if (type == 'B' && !is_t3(space_id) && space_tab[0] &&
+            !strcmp(model.tabs_ws, space_id)
             && hr_model_tab_index(&model, space_id, space_tab) < 0)
         {
             space_tab[0] = '\0';
@@ -2811,7 +3112,7 @@ static bool poll_link(void)
         }
         /* One result at a time: take_result reads it before the next */
         if (type == 'R' && !take_talk_result() && !take_key_result() &&
-            !take_focus_result())
+            !take_focus_result() && !take_action_result())
             break;
     }
     flush_outbox();
@@ -2847,6 +3148,12 @@ static void take_result(struct gui_synclist *list)
         model.detail_valid = false;
         input_top = 0;
         question_custom = false;
+        if (is_t3(question_pane))
+        {
+            t3_input[0] = '\0';
+            edit_t3_input(list);
+            return;
+        }
         show(list, 0);
         return;
     }
@@ -2985,14 +3292,14 @@ static int agents_run(void)
     question_id[0] = '\0';
     question_choice = 0;
     question_custom = question_closing = false;
-    question_pane[0] = pending_req[0] = focus_req[0] = '\0';
+    question_pane[0] = pending_req[0] = focus_req[0] = action_req[0] = '\0';
     pending_answer = was_connected = detail_ready = false;
     detail_shown_age = -1;
     task_text[0] = '\0';
     reset_focus();
     talk_held = talk_shown = talk_discarded = false;
     agents_shortcut_talking(false);
-    talk_req[0] = talk_note[0] = '\0';
+    talk_req[0] = talk_note[0] = t3_talk_start[0] = '\0';
     forget_keys();
     nout = 0;
     last_message = current_tick;
@@ -3026,7 +3333,8 @@ static int agents_run(void)
         gui_synclist_set_top_item(&list, cache_top);
         if (view == VIEW_USAGE) draw_usage(&list);
         else if (view == VIEW_DETAIL) draw_detail(&list);
-        else if (view == VIEW_ALERT || view == VIEW_INPUT) draw_question_overlay();
+        else if (view == VIEW_ALERT || view == VIEW_INPUT ||
+                 view == VIEW_CONFIRM) draw_question_overlay();
         else show_same(&list);
     }
     else
@@ -3067,7 +3375,10 @@ static int agents_run(void)
         if (view == VIEW_INPUT)
         {
             const struct hr_question *replacement = hr_model_question_for(&model, question_pane);
-            if ((replacement && strcmp(replacement->id, question_id)) ||
+            bool stale = is_t3(question_pane) ?
+                         !pending_req[0] && !current_question() :
+                         replacement && strcmp(replacement->id, question_id);
+            if (stale ||
                 podlink_state() != PODLINK_CONNECTED)
             {
                 finish_talk(true);
@@ -3075,6 +3386,27 @@ static int agents_run(void)
             }
         }
         pop_question(&list);
+        if (view == VIEW_DETAIL && model.actions_target[0])
+        {
+            if (model.actions_valid && !talk_held && !talk_req[0])
+            {
+                forget_keys();
+                view = VIEW_ACTIONS;
+                show(&list, 0);
+            }
+            else if (!model.actions_valid &&
+                     TIME_AFTER(current_tick, actions_until))
+                model.actions_target[0] = '\0';
+        }
+        else if ((view == VIEW_ACTIONS || view == VIEW_CONFIRM) &&
+                 !model.actions_valid)
+            close_actions(&list);
+        if (action_req[0] && TIME_AFTER(current_tick, action_until))
+        {
+            action_req[0] = '\0';
+            talk_discarded = false;
+            talk_result("No reply from the computer", true);
+        }
         signal_usage_view(view == VIEW_USAGE ? 1 : view == VIEW_DETAIL ? 2 : 0, false);
         /* Status rows count seconds, so they redraw once a second */
         const char *t = trouble(buf, sizeof buf);
@@ -3164,9 +3496,9 @@ static int agents_run(void)
         }
         int timeout = ui_scene_timeout(&page_scene, ANIM_TICKS);
         if (view == VIEW_USAGE || view == VIEW_DETAIL ||
-            view == VIEW_ALERT || view == VIEW_INPUT || question_binary_page())
+            view == VIEW_ALERT || view == VIEW_INPUT || view == VIEW_CONFIRM ||
+            question_binary_page())
         {
-            /* No list to scroll: the wheel is the arrow keys. */
             action = get_action(CONTEXT_AGENTS, timeout);
 #ifdef IPOD_ACCESSORY_PROTOCOL
             if (action == ACTION_STD_PREV || action == ACTION_STD_NEXT)
@@ -3181,6 +3513,7 @@ static int agents_run(void)
 #endif
             int dir = 0;
             if (view == VIEW_ALERT || view == VIEW_INPUT ||
+                view == VIEW_CONFIRM ||
                 question_binary_page())
                 ;
             else if (action == ACTION_STD_PREV ||
@@ -3212,10 +3545,19 @@ static int agents_run(void)
                 }
                 action = ACTION_NONE;
             }
-            const char *key = dir ? hr_wheel_step(&wheel, current_tick, dir,
-                                                  WHEEL_FAST) : NULL;
-            if (key)
-                send_key(key);
+            if (dir && view == VIEW_DETAIL && is_t3(detail_pane))
+            {
+                detail_scroll = MAX(0, MIN(detail_scroll_max,
+                                           detail_scroll + dir));
+                draw_detail(&list);
+            }
+            else if (dir)
+            {
+                const char *key = hr_wheel_step(&wheel, current_tick, dir,
+                                                WHEEL_FAST);
+                if (key)
+                    send_key(key);
+            }
         }
         else if (list_do_action(CONTEXT_AGENTS, timeout, &list, &action))
         {
@@ -3259,6 +3601,9 @@ static int agents_run(void)
                 if (i >= 0 && i < nrows)
                 {
                     gui_synclist_select_item(&list, i);
+                    if (sel >= 0 && sel < nrows &&
+                        rows[sel].kind == ROW_T3_HEADER)
+                        want_focus(&list);
                     gui_synclist_draw(&list);
                 }
             }
@@ -3289,10 +3634,17 @@ static int agents_run(void)
                 back_from_tab(&list);
             else if (view == VIEW_DETAIL)
                 close_detail(&list);
+            else if (view == VIEW_CONFIRM)
+            {
+                view = VIEW_ACTIONS;
+                show(&list, action_choice);
+            }
+            else if (view == VIEW_ACTIONS)
+                close_actions(&list);
             else if (view == VIEW_INPUT)
                 close_input(false);
             else
-                leave_question(&list);
+                dismiss_question(&list);
             continue;
         }
         if (question_action(&list, action)) continue;
@@ -3319,9 +3671,13 @@ static int agents_run(void)
                 }
                 else if (view == VIEW_DETAIL)
                 {
-                    if (!right)
+                    if (right != is_t3(detail_pane))
+                        request_actions();
+                    else if (!right)
                         send_key("enter");
                 }
+                else if (view == VIEW_CONFIRM && !right)
+                    run_action(&list, action_choice, true);
                 else if (view == VIEW_SPACES && right)
                     open_usage(&list);
                 else if (view == VIEW_AGENTS && right)
@@ -3369,6 +3725,8 @@ static int agents_run(void)
                     else
                         back_from_tab(&list);
                 }
+                else if (view == VIEW_CONFIRM || view == VIEW_ACTIONS)
+                    break;
                 else if (!left)
                     leave_question(&list);
                 break;

@@ -16,6 +16,13 @@ The zip packager reads Rockbox's category and viewer manifests from
 `apps/plugins/`. The AstraPod bundle script installs its own allowlist after
 the theme bundle clears the zip's stock plugin payload.
 
+## Open a plugin file
+
+Select a `.cells` pattern in Files to open it in Rocklife. Select a
+`.ssg` save in Files to resume it in Super Domination. Files in the
+installed plugin folders also appear in the Plugins category browser.
+Selecting the `.rock` module itself starts it without a file.
+
 ## Phase 2 utility candidates
 
 Run the candidate subsets in an ipod6g ARM or SDL build configured with

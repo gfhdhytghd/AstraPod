@@ -201,6 +201,15 @@ elif src.stem == "rocklife":
             "                    /* fall through */\n"
             "                case ROCKLIFE_PLAY_PAUSE:")
 elif src.stem == "superdom":
+    replace('    rb->read(fd, buf, 5);\n    if(rb->strcmp(buf, "SSGv3"))\n'
+            '    {\n        rb->splash(HZ, "Invalid/incompatible savegame");',
+            '    /* SSGv3 stores the phase, twenty resource values, the board\n'
+            '     * and seven settings. Existing saves can have trailing bytes. */\n'
+            '    const off_t save_size = 5 + 28 * sizeof(int) + sizeof(board);\n'
+            '    if (rb->ffilesize(fd) < save_size || rb->read(fd, buf, 5) != 5 ||\n'
+            '        rb->memcmp(buf, "SSGv3", 5) != 0)\n'
+            '    {\n        rb->close(fd);\n'
+            '        rb->splash(HZ, "Invalid/incompatible savegame");')
     replace("            static int sel=1;", "            int sel = superdom_settings.compdiff - 1;")
     replace("        case 4:\n            return RET_VAL_QUIT_ERR;\n            break;",
             "        case MENU_ATTACHED_USB:\n            return RET_VAL_USB;\n"

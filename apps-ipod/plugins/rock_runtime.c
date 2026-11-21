@@ -600,7 +600,8 @@ static bool native_header_valid(const void *opaque, const unsigned char *arena,
 }
 #endif
 
-static int run_rock(const char *path, unsigned char *arena, size_t capacity,
+static int run_rock(const char *path, const char *file,
+                    unsigned char *arena, size_t capacity,
                     fb_data *saved_pixels, fb_data *widget_pixels)
 {
     void *handle;
@@ -647,7 +648,7 @@ static int run_rock(const char *path, unsigned char *arena, size_t capacity,
     button_clear_pressed();
     rock_action_reset();
 
-    result = module->entry_point(NULL);
+    result = module->entry_point(file);
     rock_media_shutdown();
     if (usb_taken)
         result = PLUGIN_USB_CONNECTED;
@@ -671,7 +672,7 @@ unload:
     return result;
 }
 
-int rock_open_from_browser(const char *path)
+int rock_open_from_browser(const char *path, const char *file)
 {
     size_t capacity;
     unsigned char *arena = app_try_claim_buffer(&capacity, arena_owner);
@@ -684,7 +685,8 @@ int rock_open_from_browser(const char *path)
     capacity -= 2 * FRAMEBUFFER_SIZE;
     fb_data *caller_pixels = (fb_data *)(arena + capacity);
     fb_data *widget_pixels = (fb_data *)(arena + capacity + FRAMEBUFFER_SIZE);
-    int result = run_rock(path, arena, capacity, caller_pixels, widget_pixels);
+    int result = run_rock(path, file, arena, capacity, caller_pixels,
+                          widget_pixels);
     app_release_buffer(arena_owner);
 
     if (result == PLUGIN_USB_CONNECTED || result == PLUGIN_GOTO_ROOT)

@@ -55,6 +55,9 @@
 #define FILE_ATTR_LYRICS   0x1c00
 /* An Arcade cart, played by games/arcade/shell.c */
 #define FILE_ATTR_GAME     0x1d00
+#ifdef ASTRAPOD_ROCK_COMPAT
+#define FILE_ATTR_ROCK_VIEWER 0x1e00 /* input to a compatibility viewer */
+#endif
 #define FILE_ATTR_MASK  0xFF00 /* which bits tree.c uses for file types */
 
 /* The rows the browser invents rather than reads off the disk. They name an
@@ -84,9 +87,8 @@ int filetype_get_icon(int attr);
 /* returns true if the attr is supported */
 bool  filetype_supported(int attr);
 
-/* If `attr` is a type owned by a core-linked viewer (text/image), runs that
- * viewer on `file`, stores its GO_TO_* code in *rc and returns true. Returns
- * false (leaving *rc alone) when there is no core viewer for the type. */
+/* Runs the native file handler on `file`, stores its GO_TO_* code in *rc
+ * and returns true. Returns false when the type has no handler here. */
 bool  filetype_open_core_viewer(int attr, const char *file, int *rc);
 
 

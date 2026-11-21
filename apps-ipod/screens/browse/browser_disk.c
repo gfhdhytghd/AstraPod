@@ -438,6 +438,9 @@ int browser_disk_load(struct browser_context* c, const char* tempdir)
            /* show first level directories */
            ((!(dir_attr) || c->dirlevel > 0)       &&
             CHK_FT(SHOW_PLUGINS, FILE_ATTR_ROCK)   &&
+#ifdef ASTRAPOD_ROCK_COMPAT
+                       file_attr != FILE_ATTR_ROCK_VIEWER &&
+#endif
                        file_attr != FILE_ATTR_LUA  &&
                        file_attr != FILE_ATTR_OPX) ||
             (callback_show_item && !callback_show_item(entry->d_name, dptr->attr, c)))
@@ -755,8 +758,6 @@ int browser_disk_enter(struct browser_context* c)
                     return rc;
                 }
 
-                /* Core-linked viewers (text/image) run in-process and hand back
-                 * a GO_TO_* code directly. Other file types have no handler. */
                 filetype_open_core_viewer(file->attr, buf, &rc);
                 break;
             }

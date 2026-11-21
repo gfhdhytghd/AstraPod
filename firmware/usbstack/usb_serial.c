@@ -356,7 +356,7 @@ static bool usb_serial_control_request(struct usb_ctrlrequest* req, uint8_t* req
 static uint32_t stream_generation;
 
 #ifdef HAVE_USB_PODLINK
-static bool fast_in;
+static bool fast_in = true;
 static int tx_prepared, tx_slot;
 static uint32_t tx_submitted_at, tx_completed_at;
 static volatile bool profile_active;
@@ -503,7 +503,8 @@ static void reset_buffers(void)
 #ifdef HAVE_USB_PODLINK
     tx_prepared = tx_slot = 0;
     tx_submitted_at = tx_completed_at = 0;
-    profile_active = fast_in = false;
+    profile_active = false;
+    fast_in = true;
 #endif
 }
 

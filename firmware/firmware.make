@@ -38,6 +38,10 @@ ifneq ($(filter %/usbstack/podlink_rust_platform.c,$(FIRMLIB_SRC)),)
 endif
 FIRMLIB_OBJ := $(call c2obj, $(FIRMLIB_SRC))
 FIRMLIB_OBJ += $(BUILDDIR)/sysfont.o
+
+ifneq ($(filter fmssasm,$(TOOLSET)),)
+  include $(FIRMDIR)/target/arm/s5l8702/ipodnano4g/fmss/fmss.make
+endif
 OTHER_SRC += $(FIRMLIB_SRC)
 
 FIRMLIB = $(BUILDDIR)/firmware/libfirmware.a

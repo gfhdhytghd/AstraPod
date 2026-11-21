@@ -273,6 +273,36 @@ static inline int ipod_4g_button_read(void)
             }
 
         }
+#ifdef IPOD_NANO4G
+        else if ((status & 0x800000ff) == 0x8000005a)
+        {
+            /* Two fingers on the wheel: buttons in bits 24..28, the finger
+             * positions in bits 8..15 and 16..23 (0x7f = no finger). Only
+             * the buttons are reported; scrolling restarts from the next
+             * single-finger packet without a jump. */
+            if (status & 0x01000000)
+                btn |= BUTTON_SELECT;
+            if (status & 0x02000000)
+                btn |= BUTTON_RIGHT;
+            if (status & 0x04000000)
+                btn |= BUTTON_LEFT;
+            if (status & 0x08000000)
+                btn |= BUTTON_PLAY;
+            if (status & 0x10000000)
+                btn |= BUTTON_MENU;
+            wheel_is_touched = ((status >> 8) & 0xff) != 0x7f ||
+                               ((status >> 16) & 0xff) != 0x7f;
+            if (wheel_is_touched)
+            {
+                backlight_on();
+                reset_poweroff_timer();
+            }
+            old_wheel_value = -1;
+        }
+#endif
+#ifdef CPU_PP
+        /* Recovery uses PortalPlayer registers; other targets drop
+         * unknown packets without accessing them. */
         else if ((status & 0x800000ff) != 0x8000003a &&
                  status != 0xFFFFFFFF)
         {
@@ -281,6 +311,7 @@ static inline int ipod_4g_button_read(void)
             outl(inl(0x7000c104) | 0x04000000, 0x7000c104);
             outl(inl(0x7000c100) | 0x60000000, 0x7000c100);
         }
+#endif
 #if CONFIG_CPU==S5L8701 || CONFIG_CPU==S5L8702 || CONFIG_CPU==S5L8720
         else if ((status & 0x8000FFFF) == 0x8000023A)
         {
@@ -406,6 +437,20 @@ static void s5l_clickwheel_init(void)
 #endif
 }
 
+#ifdef IPOD_NANO4G
+static volatile bool wheel_shutting_down;
+
+/* After power_off() a button press only turns the unit on again while the
+ * click wheel runs, so start it again if the hold switch stopped it */
+void button_restart_wheel(void)
+{
+    int oldlevel = disable_irq_save();
+    wheel_shutting_down = true;
+    s5l_clickwheel_init();
+    restore_irq(oldlevel);
+}
+#endif
+
 void button_init_device(void)
 {
     semaphore_init(&button_init_wakeup, 1, 0);
@@ -440,6 +485,9 @@ bool headphones_inserted(void)
 #ifdef IPOD_NANO3G
     /* GPIO 7.0, high with headphones in (measured) */
     return (PDAT(7) & (1 << 0)) != 0;
+#elif defined(IPOD_NANO4G)
+    /* GPIO 5.0, an input after boot, high with headphones in */
+    return (PDAT(5) & (1 << 0)) != 0;
 #else
     return ((PDAT10 & (1 << 6)) != 0);
 #endif
@@ -452,6 +500,12 @@ bool headphones_inserted(void)
  */
 int button_read_device(void)
 {
+#ifdef IPOD_NANO4G
+    /* The tick must not stop the wake source after power_off() has
+     * prepared it, even if a Hold edge arrives during shutdown. */
+    if (wheel_shutting_down)
+        return 0;
+#endif
     static bool hold_button = false;
     bool hold_button_old;
 

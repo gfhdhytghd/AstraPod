@@ -40,7 +40,8 @@ def source(path):
 
 def fields(path):
     body = source(path).split('struct user_settings\n{', 1)[1].split('\n};', 1)[0]
-    pattern = r'^\s*(int|bool|unsigned char)\s+(\w+)\s*(\[[^\]]+\])?\s*;'
+    pattern = (r'^\s*(int|bool|unsigned (?:char|int)|struct eq_band_setting)'
+               r'\s+(\w+)\s*(\[[^\]]+\])?\s*;')
     return {name: (ctype, dim) for ctype, name, dim in re.findall(pattern, body, re.M)}
 
 
@@ -79,12 +80,15 @@ def settings(root, rows):
                 raise ValueError(f'review newly available native {name}')
             rows.append((name, 'fixed empty' if dim else 'fixed zero'))
             continue
-        if native.get(name) != (ctype, dim) and not (
-                name == 'playback_log' and native.get(name) == ('int', '') and ctype == 'bool'):
+        bool_view = name in ('playback_log', 'dithering_enabled') and (
+            native.get(name) == ('int', '') and (ctype, dim) == ('bool', ''))
+        if native.get(name) != (ctype, dim) and not bool_view:
             raise ValueError(f'review setting {name}: {upstream[name]} -> {native.get(name)}')
         dst, old, src = (f'{owner}->{name}' for owner in ('view', 'baseline', 'native'))
         expr = {'playback_log': f'({src} == 1)',
+                'dithering_enabled': f'({src} == DITHER_ALWAYS)',
                 'album_art': f'({src} == AA_PREFER_CACHE ? AA_PREFER_EMBEDDED : {src})'}.get(name, src)
+        write = f'{dst} ? DITHER_ALWAYS : DITHER_OFF' if name == 'dithering_enabled' else dst
         guard = {'start_in_screen': f' && {dst} >= 0 && {dst} <= GO_TO_MAINMENU + 2',
                  'album_art': f' && {dst} >= AA_OFF && {dst} <= AA_PREFER_IMAGE_FILE'}.get(name, '')
         condition = {'battery_capacity': 'BATTERY_CAPACITY_INC > 0',
@@ -95,12 +99,13 @@ def settings(root, rows):
         if dim:
             copy.extend([f'    _Static_assert(sizeof({dst}) == sizeof({src}), "{name}");',
                          f'    memcpy({dst}, {src}, sizeof({dst}));'])
-            flush.extend([f'    if (memcmp({dst}, {old}, sizeof({dst})) &&',
-                          f'        memchr({dst}, 0, sizeof({dst})))',
-                          f'        memcpy({src}, {dst}, sizeof({dst}));'])
+            changed = f'memcmp({dst}, {old}, sizeof({dst}))'
+            if ctype == 'unsigned char':
+                changed += f' &&\n        memchr({dst}, 0, sizeof({dst}))'
+            flush.extend([f'    if ({changed})', f'        memcpy({src}, {dst}, sizeof({dst}));'])
         else:
             copy.append(f'    {dst} = {expr};')
-            flush.extend([f'    if ({dst} != {old}{guard})', f'        {src} = {dst};'])
+            flush.extend([f'    if ({dst} != {old}{guard})', f'        {src} = {write};'])
         if condition:
             copy.append('#endif')
             flush.append('#endif')
@@ -244,7 +249,8 @@ def main():
         'rock_compat_tables.h': ['#pragma once', '#include "settings/settings.h"',
                                  '#include "lang_enum.h"', '#include "input/action.h"', *header, *lang],
         'rock_compat_sync.h': ['#pragma once', '#include "rock_compat_tables.h"',
-                               '#include "root_menu.h"', '#include <string.h>', *sync, *init],
+                               '#include "root_menu.h"', '#include "dsp_misc.h"',
+                               '#include <string.h>', *sync, *init],
         'rock_compat_input.h': action_maps(args.root),
         'mapping.tsv': ['identifier\tpolicy', *('\t'.join(row) for row in rows)],
     }

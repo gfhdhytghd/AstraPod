@@ -4,12 +4,14 @@ What PodBox did about each upstream commit: adopted, declined, or not
 applicable. [`upstream-divergence.md`](upstream-divergence.md) answers the
 by-file question instead: which files differ from upstream, and why.
 
+The [November 2026 sync](upstream-sync-2026-11.md) records the Rockbox and PodBox changes in AstraPod.
+
 ## Baselines
 
 | Tree | Baseline | Parent |
 | --- | --- | --- |
 | `apps-ipod/` | **`dd21a1d1d9`**, 2026-02-10 | [RockPod](https://github.com/nuxcodes/rockpod.git), which was already ~5 months behind Rockbox. Merges from Rockbox never update this tree, and RockPod's later fixes are tracked in their own table below. |
-| Everything else | **`51ea28ffd2`**, merged 2026-10-25 | Rockbox. Everything at or before it is **Inherited**. Moves with each merge. |
+| Everything else | **`79b2ad3967`**, merged 2026-11-21 | Rockbox. Everything at or before it is **Inherited**. Moves with each merge. |
 
 ## Status
 

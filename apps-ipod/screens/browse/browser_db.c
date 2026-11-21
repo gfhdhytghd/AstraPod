@@ -408,6 +408,7 @@ struct menu_entry {
         int format_id[MAX_TAGS];
         int clause_count[MAX_TAGS];
         int result_seek[MAX_TAGS];
+        bool hide_special;      /* omit optional synthetic rows */
         int header_levels;      /* a bit for each %header_ level */
         int header_untagged;    /* those of them marked %header_untagged */
     } si;
@@ -1042,6 +1043,13 @@ static int get_condition(struct search_instruction *inst)
         {
             int bit = 1 << inst->tagorder_count;
 
+            if (strncasecmp(strp, "%hide_special", 13) == 0
+                && !isalnum((unsigned char)strp[13]) && strp[13] != '_')
+            {
+                inst->hide_special = true;
+                strp += 13;
+                return 1;
+            }
             if (strncasecmp(strp, "%header_all", 11) == 0
                 && !isalnum((unsigned char)strp[11]) && strp[11] != '_')
                 strp += 11;
@@ -3332,19 +3340,20 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
      * without it the descent reaches only the first album. */
     if (tag != tag_title && tag != tag_filename
         && (loading_hidden
-            || (!csi_mentions_spoken() && global_settings.show_all_tracks_row)))
+            || (!csi->hide_special && !csi_mentions_spoken()
+                && global_settings.show_all_tracks_row)))
         dptr = add_head_row(c, dptr, offset, &sidx,
                             csi_mentions_spoken()
                             ? TABLE_ALLSUBENTRIES_SORTED_BY_ALBUMS
                             : TABLE_ALLSUBENTRIES,
                             ID2P(LANG_TAGNAVI_ALL_TRACKS), 0);
-    if (tag != tag_filename && !csi_mentions_spoken()
+    if (tag != tag_filename && !csi->hide_special && !csi_mentions_spoken()
         && global_settings.show_random_row)
         dptr = add_head_row(c, dptr, offset, &sidx, TABLE_NAVIBROWSE,
                             ID2P(LANG_TAGNAVI_RANDOM), -1);
     /* [Shuffle Albums] on a list of albums: its rows are what it shuffles,
      * and the album table it reads them through is only in RAM */
-    if (tag == tag_album && !csi_mentions_spoken()
+    if (tag == tag_album && !csi->hide_special && !csi_mentions_spoken()
         && global_settings.show_shuffle_albums_row
         && tagcache_album_count() > 0)
     {
@@ -5267,6 +5276,13 @@ int browser_db_enter(struct browser_context* c, bool is_visible)
         int random_item = c->special_entry_count +
                           (rand() % (c->filesindir - c->special_entry_count));
         dptr = browser_db_get_entry(c, random_item);
+        /* NULL when the entry had to be read and the search was refused,
+         * as it is while the database is being committed */
+        if (!dptr)
+        {
+            splash(HZ, ID2P(LANG_TAGCACHE_BUSY));
+            return 0;
+        }
         seek = dptr->extraseek;
         /* On a track list the chosen row plays rather than descending, and
          * browser_db_play_folder() reads its start position from
@@ -5533,7 +5549,17 @@ int browser_db_enter(struct browser_context* c, bool is_visible)
                 c->dirlevel--;
                 /* about to create a new current playlist...
                  allow user to cancel the operation */
-                if (!warn_on_pl_erase())
+                char path[MAX_PATH];
+                enum pl_erase_answer answer;
+
+                if (browser_db_get_filename(c, path, sizeof(path)) >= 0)
+                    answer = warn_on_pl_erase_track(path);
+                else
+                    answer = warn_on_pl_erase() ? PL_ERASE_REPLACE
+                                                : PL_ERASE_CANCEL;
+                if (answer == PL_ERASE_PLAY_NOW)
+                    rc = 2;
+                if (answer != PL_ERASE_REPLACE)
                     break;
                 if (browser_db_play_folder(c) >= 0)
                     rc = 2;
@@ -5798,7 +5824,17 @@ static bool insert_all_playlist(struct browser_context *c,
             }
         }
 
-        if (!tagcache_retrieve(&tcs, browser_db_get_entry(c, i)->extraseek, tcs.type, buf, sizeof buf))
+        struct tagentry *entry = browser_db_get_entry(c, i);
+
+        /* NULL when the entry had to be read and the search was refused,
+         * as it is once a database commit has started */
+        if (!entry)
+        {
+            exit_loop_now = true;
+            break;
+        }
+
+        if (!tagcache_retrieve(&tcs, entry->extraseek, tcs.type, buf, sizeof buf))
             continue;
 
         if (playlist == NULL)
@@ -6635,13 +6671,6 @@ static int play_shuffled_albums(struct browser_context *c)
 static int browser_db_play_folder(struct browser_context* c)
 {
     logf( "%s", __func__);
-
-    /* An episode plays alone, so playback stops at its end */
-    struct tagentry *picked = browser_db_get_entry(c, c->selected_item);
-
-    if (picked && picked->newtable == TABLE_PLAYTRACK
-        && browser_db_episode_percent(picked->idx_id) >= 0)
-        return play_episodes(c, &picked->idx_id, 1);
 
     /* c->selected_item indexes the displayed list, whose head is the special
      * rows (<Random> on a track list). insert_all_playlist() drops those --

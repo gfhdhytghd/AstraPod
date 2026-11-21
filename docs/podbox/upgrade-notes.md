@@ -93,3 +93,4 @@
 - **The computer companion lives in [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop).**
   If a launcher or user service runs a companion script from the firmware
   checkout, point it at the same script in AstraPod-Desktop.
+- PodLink uses FAST USB downloads by default. Use `MS3 PROFILE BASE` to compare the 4 KiB mode.

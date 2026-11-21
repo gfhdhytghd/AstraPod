@@ -18,15 +18,16 @@
    explicitly if different */
 #define INPUT_SRC_CAPS (SRC_CAP_MIC | SRC_CAP_LINEIN)
 
-/* define the bitmask of hardware sample rates */
+/* Hardware sample rates selected for the CS42L58's 6 MHz MCLK.
+ * Keep 32 kHz disabled until it has been verified on this target. */
 #define HW_SAMPR_CAPS   (SAMPR_CAP_44 | SAMPR_CAP_22 | SAMPR_CAP_11 \
                        | SAMPR_CAP_48 | SAMPR_CAP_24 | SAMPR_CAP_12 \
-                       | SAMPR_CAP_32 | SAMPR_CAP_16 | SAMPR_CAP_8)
+                       | SAMPR_CAP_16 | SAMPR_CAP_8)
 
 /* define the bitmask of recording sample rates */
 #define REC_SAMPR_CAPS  (SAMPR_CAP_44 | SAMPR_CAP_22 | SAMPR_CAP_11 \
                        | SAMPR_CAP_48 | SAMPR_CAP_24 | SAMPR_CAP_12 \
-                       | SAMPR_CAP_32 | SAMPR_CAP_16 | SAMPR_CAP_8)
+                       | SAMPR_CAP_16 | SAMPR_CAP_8)
 
 /* define this if you have a bitmap LCD display */
 #define HAVE_LCD_BITMAP
@@ -80,16 +81,23 @@
 
 #define CONFIG_STORAGE STORAGE_NAND
 
-// TODO
-//#define CONFIG_NAND NAND_SAMSUNG
-#define CONFIG_NAND 0
+#define CONFIG_NAND NAND_S5L8720
+
+/* Write to Apple's FTL. A failed block is not remapped yet: the disk
+ * becomes read-only until reboot. The bootloader arms its own writes
+ * only after PLAY is held. */
+#define N4G_FTL_WRITE
+#ifdef BOOTLOADER
+#define N4G_BL_FTL_WRITE
+#endif
 
 /* define this if at least one storage driver
    needs to do cleanup on shutdown */
 #define HAVE_STORAGE_FLUSH
 
-/* The NAND flash has 2048-byte sectors, and is our only storage */
-#define SECTOR_SIZE 2048
+/* NAND pages, Whimory sectors and the FAT32 volume Apple formats are
+ * all 4 KiB. */
+#define SECTOR_SIZE 4096
 
 /* LCD dimensions */
 #define LCD_WIDTH  240
@@ -128,19 +136,20 @@
 /* Define this if you do software codec */
 #define CONFIG_CODEC SWCODEC
 
-// TODO
-/* define this if you have a real-time clock */
-//#define CONFIG_RTC RTC_NANO3G
-#define CONFIG_RTC  0
+/* Dialog D1759 RTC, BCD, same field order as the Nano 3G reader */
+#define CONFIG_RTC RTC_NANO4G
 
 /* Define if the device can wake from an RTC alarm */
 //#define HAVE_RTC_ALARM
 
 #define CONFIG_LCD LCD_IPOD6GNANO3G4G
 
-// TODO
 /* Define the type of audio codec */
-#define HAVE_CS42L55    /* CS42L58 */
+#define HAVE_CS42L58
+
+/* The codec's headphone volume ends at -60 dB; quieter settings are
+ * attenuated in software (see cs42l58.c) */
+#define HAVE_SW_VOLUME_CONTROL
 
 #define HAVE_PCM_DMA_ADDRESS
 
@@ -176,6 +185,7 @@
 #define HAVE_USB_POWER
 
 #define HAVE_USB_CHARGING_ENABLE
+#define TARGET_USB_CHARGING_DEFAULT USB_CHARGING_FORCE
 
 /* define this if the hardware can be powered off while charging */
 #define HAVE_POWEROFF_WHILE_CHARGING
@@ -188,8 +198,10 @@
 /* The exact type of CPU */
 #define CONFIG_CPU S5L8720
 
-/* Define this to the CPU frequency */
-#define CPU_FREQ        266000000           // TODO: TBC
+/* PLL0 output with the bootloader's PMS (0x06008501) and CPU divisor 1.
+ * (OSC0 * 133 / PDIV) / 2. OSC0 is 24 MHz with PDIV 6, or 12 MHz with
+ * PDIV 3; both lock at 266 MHz. */
+#define CPU_FREQ        266000000
 
 /* Define this if you have adjustable CPU frequency */
 #define HAVE_ADJUSTABLE_CPU_FREQ
@@ -208,7 +220,6 @@
 
 #define BOOTFILE_EXT "ipod"
 #define BOOTFILE "rockbox." BOOTFILE_EXT
-#define BOOTDIR "/.rockbox"
 
 #define HAVE_HARDWARE_CLICK
 

@@ -2524,9 +2524,12 @@ int playlist_get_track_info(struct playlist_info* playlist, int index,
     if (!playlist)
         playlist = &current_playlist;
 
-    playlist_read_lock(playlist);
     if (get_track_filename(playlist, index,
                            info->filename, sizeof(info->filename)) != 0)
+        return -1;
+
+    playlist_read_lock(playlist);
+    if (index >= playlist->amount)
         goto out;
 
     info->attr = 0;
@@ -3901,12 +3904,10 @@ int playlist_resume(void)
                  * and cut from the file so the next append starts a line. A
                  * chunk can begin on the torn line itself, with no newline of
                  * its own to keep. */
-                if (!newline && !exit_loop && pl_cmd == &pl_cmds_run)
-                {
+                if (!newline && !exit_loop && pl_cmd == &pl_cmds_run &&
                     ftruncate(playlist->control_fd, total_read +
-                              (seen_newline ? last_newline + 1 : 0));
+                              (seen_newline ? last_newline + 1 : 0)) == 0)
                     break;
-                }
 
                 /* no newline at end of control file */
                 splashf(HZ * 2, "Err: EOF, %s", str(LANG_PLAYLIST_CONTROL_INVALID));

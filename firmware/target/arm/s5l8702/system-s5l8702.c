@@ -46,6 +46,8 @@ default_interrupt(INT_TIMERE);  /* IRQ7: 32-bit timers */
 default_interrupt(INT_TIMERF);
 #ifndef HAVE_HANG_CATCH_FIQ
 default_interrupt(INT_TIMERG);  /* else the freeze watch's, below */
+#else
+void INT_TIMERG(void);
 #endif
 default_interrupt(INT_TIMERH);
 default_interrupt(INT_TIMERA);  /* IRQ8: 16-bit timers */
@@ -110,6 +112,16 @@ default_interrupt(INT_IRQ63);
 
 static int current_irq IBSS_ATTR;
 
+#if CONFIG_CPU == S5L8720
+static const struct clocking_mode clk_modes[] =
+{
+    /* Bootloader image: PLL0 SDIV 1, CPU /1, buses /2.
+     * 133 and 532 MHz are PLL SDIV changes in set_cpu_frequency.
+     * The CPU post-divider stays /1. */
+    /* cdiv  hdiv  hprat  hsdiv */   /* CClk  HClk  PClk */
+    { 1,    2,    1,     1 },        /* 266   133   133  */
+};
+#else
 static const struct clocking_mode clk_modes[] =
 {
    /* cdiv  hdiv  hprat  hsdiv */    /* CClk  HClk  PClk  SM1Clk  FPS */
@@ -121,6 +133,7 @@ static const struct clocking_mode clk_modes[] =
     { 4,    4,    2,     2 },        /* 54    54    27    27      21  */
 #endif
 };
+#endif
 #define N_CLK_MODES (sizeof(clk_modes) / sizeof(struct clocking_mode))
 
 enum {
@@ -458,22 +471,38 @@ static void null_call_trap_install(void)
 }
 #endif
 
+#if CONFIG_CPU == S5L8720
+static void nano4g_usec_timer_configure(void)
+{
+    /* CS=4 selects ECLK/1. CS=0 divides it by two, and cannot be used
+     * with a prescaler calculated from the full crystal frequency. */
+    TECON = (4 << 8) | (1 << 6);
+    TEPRE = S5L8702_OSC0_HZ / 1000000 - 1;
+    TEDATA0 = ~0u;
+    TECMD = 3;
+}
+#endif
+
 void system_init(void)
 {
     /*
      * Bootloader seems to give a blank screen when IRAM1 is disabled
      * - FW 10/13/19
      */
-#if !defined(BOOTLOADER) && !defined(HAVE_CRUMBS)
+#if !defined(BOOTLOADER) && !defined(HAVE_CRUMBS) && CONFIG_CPU == S5L8702
     /* disable IRAM1 (not used because it is slower than DRAM) */
     clockgate_enable(CLOCKGATE_SM1, false);
 #endif
     /* With HAVE_CRUMBS IRAM1 stays clocked: its top holds a breadcrumb copy */
 
     clocking_init(clk_modes, 0);
+#if CONFIG_CPU == S5L8720
+    nano4g_usec_timer_configure();
+#endif
 #ifndef BOOTLOADER
     gpio_preinit();
-    i2c_preinit(0);
+    if (i2c_preinit(0))
+        while (1);
     pmu_preinit();
 #endif
     gpio_init();
@@ -521,11 +550,134 @@ void system_exception_wait(void)
 }
 
 #ifdef HAVE_ADJUSTABLE_CPU_FREQ
+#if CONFIG_CPU == S5L8720
+/* EFI writes PLL0 SDIV and waits until those bits read back.
+ * SDIV 0 is 532 MHz, 1 is 266, 2 is 133. */
+static void pll0_set_sdiv(unsigned sdiv)
+{
+    uint32_t pms = (PLL0PMS & ~PLLPMS_SDIV_MSK) | (sdiv & PLLPMS_SDIV_MSK);
+
+    PLL0PMS = pms;
+    for (int i = 0; i < 1000000; i++)
+        if ((PLL0PMS & PLLPMS_SDIV_MSK) == (sdiv & PLLPMS_SDIV_MSK))
+            return;
+}
+
+/* FCLK/hdiv stays at 133 MHz while PLL0 is at least 133. SDIV 0 is
+ * 532 so the buses are /4, SDIV 1 is 266 so they are /2, and SDIV 2
+ * is already 133. At SDIV 3 and 4 the buses follow 66.5 and 33.25. */
+static unsigned hdiv_for_sdiv(unsigned sdiv)
+{
+    if (sdiv == 0)
+        return 4;
+    return sdiv <= 1 ? 2 : 1;
+}
+
+/* Panel clock stays at the 266 MHz PLL0 divided by 16. SDIV 0
+ * doubles PLL0, and DIV1 cannot reach 32, so DIV2 takes that bit.
+ * Each slower SDIV halves DIV1: 16, 8. */
+static void lcd_divs_for_sdiv(unsigned sdiv, unsigned *div1, unsigned *div2)
+{
+    *div2 = 1;
+    if (sdiv < 1) {
+        *div1 = 16;
+        *div2 = 2;
+        return;
+    }
+    if (sdiv > 5)
+        sdiv = 5;
+    *div1 = 16u >> (sdiv - 1);
+}
+
+static void lcd_follow_pll(unsigned want1, unsigned want2)
+{
+    uint16_t v = CG16_LCD;
+    unsigned div1 = (v & CG16_DIV1_MSK) + 1;
+    unsigned div2 = ((v >> CG16_DIV2_POS) & CG16_DIV2_MSK) + 1;
+    unsigned sel = (v >> CG16_SEL_POS) & CG16_SEL_MSK;
+    volatile uint32_t *reg32;
+    int shift;
+
+    if ((v & CG16_DISABLE_BIT) || sel != CG16_SEL_PLL0)
+        return;
+    if (want1 < 1 || want1 > 16 || want2 < 1 || want2 > 16)
+        return;
+    if (div1 == want1 && div2 == want2)
+        return;
+
+    v = (v & ~(CG16_DIV1_MSK | (CG16_DIV2_MSK << CG16_DIV2_POS)))
+      | ((want1 - 1) & CG16_DIV1_MSK)
+      | (((want2 - 1) & CG16_DIV2_MSK) << CG16_DIV2_POS);
+    reg32 = (volatile uint32_t *)((uintptr_t)&CG16_LCD & ~3);
+    shift = ((uintptr_t)&CG16_LCD & 2) << 3;
+    *reg32 = (*reg32 & (0xffff0000u >> shift)) | ((uint32_t)v << shift);
+}
+
+/* pmu_preinit() leaves the core rail at 1200 mV. */
+static unsigned vcore_mv = 1200;
+
+static unsigned vcore_mv_for(long frequency)
+{
+    /* 266 and 532 MHz are 1200 mV. Lower steps share 1100 mV. */
+    if (frequency >= CPUFREQ_MAX)
+        return 1200;
+    return 1100;
+}
+#endif
+
 void set_cpu_frequency(long frequency)
 {
     if (cpu_frequency == frequency)
         return;
 
+#if CONFIG_CPU == S5L8720
+    /* CPU post-divider writes freeze the CPU, so it stays at /1.
+     * Slowing drops PLL0 before the buses open. Speeding closes the
+     * buses before PLL0 rises. AHB peaks at 133. */
+    if (!(PLLMODE & PLLMODE_EN_BIT(0)))
+        return;
+
+    /* 532, 266, 133, 66.5, then 33.25. Panic (0) takes 133. */
+    unsigned sdiv = 2;
+    unsigned lcd1, lcd2;
+    if (frequency >= CPUFREQ_USB)
+        sdiv = 0;
+    else if (frequency >= CPUFREQ_MAX)
+        sdiv = 1;
+    else if (frequency && frequency <= CPUFREQ_NORMAL / 2)
+        sdiv = 4;
+    else if (frequency && frequency <= CPUFREQ_NORMAL)
+        sdiv = 3;
+    unsigned cur = PLL0PMS & PLLPMS_SDIV_MSK;
+    unsigned hdiv = hdiv_for_sdiv(sdiv);
+    unsigned mv = vcore_mv_for(frequency);
+    int irq = disable_irq_save();
+
+    lcd_divs_for_sdiv(sdiv, &lcd1, &lcd2);
+
+    /* Raise the rail before the clock. 33.25, 66.5 and 133 MHz are
+     * 1100 mV. 266 and 532 MHz are 1200 mV. */
+    if (mv > vcore_mv)
+        pmu_set_cpu_voltage(mv);
+    if (sdiv < cur) {
+        /* Close the buses and raise the LCD divisor before PLL0,
+         * so AHB stays at 133 and the panel never runs fast. */
+        soc_set_system_divs(1, hdiv, 1);
+        lcd_follow_pll(lcd1, lcd2);
+        pll0_set_sdiv(sdiv);
+    } else if (sdiv > cur) {
+        pll0_set_sdiv(sdiv);
+        soc_set_system_divs(1, hdiv, 1);
+        /* Open AHB before raising the LCD interface clock. At the
+         * 33 MHz PLL step the old /2 bus divider would otherwise leave
+         * both clocks at 16.6 MHz during the transition. */
+        lcd_follow_pll(lcd1, lcd2);
+    }
+    if (mv < vcore_mv)
+        pmu_set_cpu_voltage(mv);
+    vcore_mv = mv;
+    restore_irq(irq);
+#else
     if (frequency == CPUFREQ_MAX)
     {
         pmu_set_cpu_voltage(true); /* high */
@@ -536,6 +688,7 @@ void set_cpu_frequency(long frequency)
         set_clocking_level(CLK_UNBOOST);
         pmu_set_cpu_voltage(false); /* low */
     }
+#endif
 
     cpu_frequency = frequency;
 }
@@ -568,7 +721,17 @@ void memory_init(void)
 #ifdef BOOTLOADER
 #include <stdbool.h>
 
-static void syscon_preinit(void)
+#if CONFIG_CPU == S5L8720
+static bool clkcon1_wait(uint32_t mask)
+{
+    for (int i = 0; i < 1000000; i++)
+        if (!(CLKCON1 & mask))
+            return true;
+    return false;
+}
+#endif
+
+static bool syscon_preinit(void)
 {
     /* after ROM boot, CG16_SYS is using PLL0 @108 MHz
        CClk = 108 MHz, HClk = 54 MHz, PClk = 27 MHz */
@@ -596,11 +759,16 @@ static void syscon_preinit(void)
     cg16_config(&CG16_SYS, true, CG16_SEL_OSC, 1, 1);
     soc_set_system_divs(1, 1, 1);
 #elif CONFIG_CPU == S5L8720
-    cg16_config(&CG16_SYS, true, CG16_SEL_OSC, 1, 1, 0x0);
+    if (cg16_config(&CG16_SYS, true, CG16_SEL_OSC, 1, 1, 0x0))
+        return false;
     // soc_set_system_divs(1, 1, 1);
 
+    /* emcore waits on the busy mask, not for the whole register to
+     * read back as zero. Other bits stick and the old loop never
+     * exited, so the watchdog booted the NAND OS. */
     CLKCON1 = 0;
-    while (CLKCON1);
+    if (!clkcon1_wait(0x003e3e00))
+        return false;
 #endif
 
     /* stop all PLLs */
@@ -608,21 +776,26 @@ static void syscon_preinit(void)
         pll_onoff(pll, false);
 
 #if CONFIG_CPU == S5L8702
-    pll_config(2, PLLOP_DM, 1, 36, 1, 32400);
-    pll_onoff(2, true);
+    if (pll_config(2, PLLOP_DM, 1, 36, 1, 32400)
+        || pll_onoff(2, true) <= 0)
+        return false;
     soc_set_system_divs(1, 2, 2 /*hprat*/);
 #elif CONFIG_CPU == S5L8720
     PLLUNK3C = 0;
 
-    pll_config(0, PLLOP_DM, sec_epoch ? 6 : 3, 133, 1, 39900);
-    pll_onoff(0, true);
+    if (pll_config(0, PLLOP_DM, sec_epoch ? 6 : 3, 133, 1, 39900)
+        || pll_onoff(0, true) <= 0)
+        return false;
 
     // soc_set_system_divs(1, 2, 1 /*hprat*/);
 
-    // XXX: Without this, SDRAM does not work!
+    /* CPU/1, AHB/2, APB/2, EFI clock 18 /2. Same encoding as
+     * soc_set_system_divs(1, 2, 1). Absolute store: SDRAM does
+     * not come up if this image is not written here. */
     uint32_t val = 0x404040;
     CLKCON1 = val;
-    while (CLKCON1 != val);
+    if (!clkcon1_wait(0x003e3e3e))
+        return false;
 
     CLKCON0 |= CLKCON0_UNK30_BIT;
 #endif
@@ -637,15 +810,18 @@ static void syscon_preinit(void)
     cg16_config(&CG16_RTIME, true,  CG16_SEL_OSC,  1, 1);
     cg16_config(&CG16_5L,    false, CG16_SEL_OSC,  1, 1);
 #elif CONFIG_CPU == S5L8720
-    cg16_config(&CG16_SYS,   true,  CG16_SEL_PLL0, 1, 1, 0x0);
+    if (cg16_config(&CG16_SYS, true, CG16_SEL_PLL0, 1, 1, 0x0))
+        return false;
     cg16_config(&CG16_LCD,   false, CG16_SEL_OSC,  1, 1, 0x0);
     cg16_config(&CG16_SVID,  false, CG16_SEL_OSC,  1, 1, 0x0);
     cg16_config(&CG16_AUD0,  false, CG16_SEL_OSC,  1, 1, CG16_UNK14_BIT);
     cg16_config(&CG16_AUD1,  false, CG16_SEL_OSC,  1, 1, CG16_UNK14_BIT);
     cg16_config(&CG16_AUD2,  false, CG16_SEL_OSC,  1, 1, CG16_UNK14_BIT);
-    // TODO: configure a 12 MHz ECLK for all targets, so the timer settings will be the same.
-    // cg16_config(&CG16_RTIME, true,  CG16_SEL_OSC,  (S5L8720_OSC0_HZ / ECLK), 1, 0);
-    cg16_config(&CG16_RTIME, true,  CG16_SEL_OSC,  1, 1, 0x0);
+    if (cg16_config(&CG16_RTIME, true, CG16_SEL_OSC, 1, 1, 0x0))
+        return false;
+    /* usec_timer_init() ran on the BootROM clock. Keep Timer E at 1 MHz
+     * after changing ECLK to the Nano 4G crystal rate. */
+    nano4g_usec_timer_configure();
     cg16_config(&CG16_5L,    false, CG16_SEL_OSC,  1, 1, 0x0);
     cg16_config(&CG16_6L,    false, CG16_SEL_OSC,  1, 1, 0x0);
 #endif
@@ -658,7 +834,35 @@ static void syscon_preinit(void)
     PWRCON_APB = ~((1 << (CLOCKGATE_TIMER - 32)) |
                    (1 << (CLOCKGATE_GPIO - 32)));
 #endif
+    return true;
 }
+
+#if CONFIG_CPU == S5L8720
+/* Non-zero so this stays in .data (SRAM). A zero initializer is
+ * moved to BSS, which is in DRAM and faults if read too early. */
+static int sdram_ok = -1;
+
+static bool miu_wait(uint32_t off, uint32_t mask, bool set)
+{
+    volatile uint32_t *reg = (volatile uint32_t *)(MIU_BASE + off);
+
+    for (int i = 0; i < 1000000; i++) {
+        uint32_t v = *reg;
+        if (set) {
+            if ((v & mask) == mask)
+                return true;
+        } else if ((v & mask) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int system_sdram_ok(void)
+{
+    return sdram_ok > 0;
+}
+#endif
 
 static void miu_preinit(bool selfrefreshing)
 {
@@ -752,11 +956,13 @@ static void miu_preinit(bool selfrefreshing)
     MIU_REG(0x14C) = 0x0;
 
     MIU_REG(0x140) = 0x3B3B2;
-    while (!(MIU_REG(0x140) & 0x2));
+    if (!miu_wait(0x140, 0x2, true))
+        return;
     MIU_REG(0x140) = 0x3B3B3;
 
-    //while ((MIU_REG(0x144) & 0x3) != 3);       // TBC
-    while (~MIU_REG(0x144) & 0x3);       // TBC
+    /* both low bits set: training done */
+    if (!miu_wait(0x144, 0x3, true))
+        return;
     MIU_REG(0x140) = ((MIU_REG(0x144) << 2) & 0x0ff00000) + 0xff53b3b0;
     MIU_REG(0x150) = 0x10;
 
@@ -766,29 +972,29 @@ static void miu_preinit(bool selfrefreshing)
     else {
         MIUCOM = 0x33;      /* No action CMD */
         MIUCOM = 0x233;     /* Precharge all banks CMD */
-        while (MIUCOM & 0x110000);
+        if (!miu_wait(0x104, 0x110000, false)) return;
         MIUCOM = 0x33;
         MIUCOM = 0x33;
         MIUCOM = 0x33;
         MIUCOM = 0x333;     /* Auto-refresh CMD */
-        while (MIUCOM & 0x110000);
+        if (!miu_wait(0x104, 0x110000, false)) return;
         MIUCOM = 0x33;
         MIUCOM = 0x33;
         MIUCOM = 0x33;
         MIUCOM = 0x333;     /* Auto-refresh CMD */
-        while (MIUCOM & 0x110000);
+        if (!miu_wait(0x104, 0x110000, false)) return;
         MIUCOM = 0x33;
         MIUCOM = 0x33;
         MIUCOM = 0x33;
         MIUMRS = 0x33;      /* MRS: Bust Length = 8, CAS = 3 */
         MIUCOM = 0x133;     /* Mode Register Set CMD */
-        while (MIUCOM & 0x110000);
+        if (!miu_wait(0x104, 0x110000, false)) return;
         MIUCOM = 0x33;
         MIUCOM = 0x33;
         MIUCOM = 0x33;
         MIUMRS = 0x8040;    /* EMRS: Strength = 1/4, Self refresh area = Full */
         MIUCOM = 0x133;     /* Mode Register Set CMD */
-        while (MIUCOM & 0x110000);
+        if (!miu_wait(0x104, 0x110000, false)) return;
         MIUCOM = 0x33;
         MIUCOM = 0x33;
         // MIUCOM = 0x33;
@@ -804,6 +1010,7 @@ static void miu_preinit(bool selfrefreshing)
     MIU_REG(0x8) = 0x1;
 
     UNK3E000008 = 0x1f;
+    sdram_ok = 1;
 #endif
 }
 
@@ -824,9 +1031,11 @@ void system_preinit(void)
     boot_config = PDAT3 >> 2;
 #endif
 
-    syscon_preinit();
+    if (!syscon_preinit())
+        while (1);
     gpio_preinit();
-    i2c_preinit(0);
+    if (i2c_preinit(0))
+        while (1);
 
 #if CONFIG_CPU == S5L8720
     /* TBC: store boot config into a PMU memory register */
@@ -837,6 +1046,10 @@ void system_preinit(void)
     pmu_preinit();
 
     miu_preinit(hibernated);
+#if CONFIG_CPU == S5L8720
+    if (!system_sdram_ok())
+        while (1);
+#endif
 }
 
 #endif /* BOOTLOADER */

@@ -26,6 +26,8 @@
 #include "adc-target.h"
 #include "i2c-s5l8702.h"
 #include "gpio-s5l8702.h"
+#include "clocking-s5l8702.h"
+#include "s5l87xx.h"
 
 
 int pmu_read_multiple(int address, int count, unsigned char* buffer)
@@ -40,7 +42,7 @@ int pmu_write_multiple(int address, int count, unsigned char* buffer)
 
 unsigned char pmu_read(int address)
 {
-    unsigned char tmp;
+    unsigned char tmp = 0;
     pmu_read_multiple(address, 1, &tmp);
     return tmp;
 }
@@ -93,41 +95,75 @@ void pmu_ldo_power_off(unsigned int ldo)
 
 void pmu_set_wake_condition(unsigned char condition)
 {
-    // TODO
-    (void) condition;
+    /* 0x0d also holds the boot-config bit preinit may have cleared. */
+    pmu_write(D1759_REG_WAKE, pmu_read(D1759_REG_WAKE) | condition);
+}
+
+static struct mutex pmu_sysctrl_mutex;
+static bool standby_requested;
+
+void pmu_set_backlight(unsigned char output, bool on)
+{
+    mutex_lock(&pmu_sysctrl_mutex);
+    if (!standby_requested)
+    {
+        /* Clear SYSCTRL bits 4..6 around the LED writes, then restore. */
+        unsigned char sysctrl = pmu_read(D1759_REG_SYSCTRL);
+        pmu_write(D1759_REG_SYSCTRL, sysctrl & 0x8f);
+        pmu_write(D1759_REG_LEDOUT, output);
+        pmu_write(D1759_REG_LEDCTL, on ? D1759_LEDCTL_ENABLE : 0);
+        pmu_write(D1759_REG_SYSCTRL, sysctrl);
+    }
+    mutex_unlock(&pmu_sysctrl_mutex);
 }
 
 void pmu_enter_standby(void)
 {
-    // TODO
+    /* A backlight update must not restore an old SYSCTRL value over the
+     * standby request, or turn the LEDs back on during power-down. */
+    mutex_lock(&pmu_sysctrl_mutex);
+    standby_requested = true;
+    /* Apple's firmware powers off with two exact writes: backlight off,
+     * then 0x0a = 1 on its own. OR-ing the request into the other bits of
+     * 0x0a leaves the unit on until the hold switch is toggled. */
+    pmu_write(D1759_REG_LEDCTL, 0x02);
+    pmu_write(D1759_REG_SYSCTRL, D1759_SYSCTRL_STBY);
+    mutex_unlock(&pmu_sysctrl_mutex);
 }
 
 #ifdef HAVE_ADJUSTABLE_CPU_FREQ
-void pmu_set_cpu_voltage(bool high)
+void pmu_set_cpu_voltage(unsigned mv)
 {
-    // TODO
-    (void) high;
+    /* D1759 core buck, register 0x14. code = (mV - 725) / 25.
+     * 1200 mV is 0x13, 1100 mV is 0x0f. 532 and 266 MHz use 1200,
+     * 133, 66.5 and 33.25 MHz use 1100.
+     * Register 0x15 is standby and stays at the 0x0d preinit wrote. */
+    pmu_write(D1759_REG_VCORE, (mv - 725) / 25);
 }
 #endif
 
 #if (CONFIG_RTC == RTC_NANO4G)
 void pmu_read_rtc(unsigned char* buffer)
 {
-    // TODO
-    (void) buffer;
+    pmu_read_multiple(D1759_REG_RTCSEC, 7, buffer);
 }
 
 void pmu_write_rtc(unsigned char* buffer)
 {
-    // TODO
-    (void) buffer;
+    pmu_write_multiple(D1759_REG_RTCSEC, 7, buffer);
 }
 #endif
 
 void pmu_set_usblimit(bool fast_charge)
 {
-    // TODO
-    (void) fast_charge;
+    unsigned char val = pmu_read(D1759_REG_ILIM) & ~D1759_ILIM_MASK;
+
+    val |= fast_charge ? D1759_ILIM_500MA : D1759_ILIM_100MA;
+    pmu_write(D1759_REG_ILIM, val);
+    /* Apple's running firmware follows the input-limit write with 0x04
+     * while enabled, or 0x00 while disabled. Do not retain preinit's
+     * 0x54 setting when USB takes over the power budget. */
+    pmu_write(D1759_REG_CHCTL, (val & ~D1759_ILIM_MASK) ? 0x04 : 0x00);
 }
 
 /*
@@ -139,19 +175,28 @@ static struct mutex pmu_adc_mutex;
 unsigned short pmu_adc_raw2mv(
         const struct pmu_adc_channel *ch, unsigned short raw)
 {
-    // TODO
     (void) ch;
-    (void) raw;
-    return 0;
+    return 2500 + (raw * 2000) / 1023;
 }
 
-/* returns raw value */
+/* returns raw value of the battery channel */
 unsigned short pmu_read_adc(const struct pmu_adc_channel *ch)
 {
-    // TODO
-    int raw = 0;
-    mutex_lock(&pmu_adc_mutex);
+    int raw, tries;
+
     (void) ch;
+    mutex_lock(&pmu_adc_mutex);
+    pmu_write(D1759_REG_ADCCTL, D1759_ADCCTL_EN | D1759_ADCCTL_START
+                              | D1759_ADCCTL_MUX_VBAT);
+    for (tries = 0; tries < 20; tries++)
+    {
+        udelay(50);
+        if (!(pmu_read(D1759_REG_ADCCTL) & D1759_ADCCTL_START))
+            break;
+    }
+    raw = (pmu_read(D1759_REG_ADCHI) << 2)
+        | (pmu_read(D1759_REG_ADCLO) & 3);
+    pmu_write(D1759_REG_ADCCTL, D1759_ADCCTL_EN);
     mutex_unlock(&pmu_adc_mutex);
     return raw;
 }
@@ -163,7 +208,6 @@ unsigned short pmu_read_adc(const struct pmu_adc_channel *ch)
 
 static long pmu_thread_stack[DEFAULT_STACK_SIZE/2/sizeof(long)];
 static struct event_queue pmu_queue;
-static unsigned char ints_msk[3];
 
 static void pmu_eint_isr(struct eic_handler*);
 
@@ -200,8 +244,9 @@ int pmu_firewire_present(void)
 }
 #endif
 
-#if defined(BOOTLOADER)   // XXX: from usb-s5l8702.c
 #include "usb.h"
+
+#if defined(BOOTLOADER) && !defined(HAVE_BOOTLOADER_USB_MODE)   // XXX: from usb-s5l8702.c
 static int usb_status = USB_EXTRACTED;
 
 int usb_detect(void)
@@ -223,16 +268,23 @@ void usb_remove_int(void)
 static void pmu_read_inputs(void)
 {
 #if CONFIG_CHARGING
-    unsigned char status[3];
+    unsigned char status[3] = { 0 };
 #else
-    unsigned char status[2];
+    unsigned char status[2] = { 0 };
 #endif
 
-    pmu_read_multiple(D1759_REG_STATUSA, sizeof(status), status);
+    /* A failed read keeps the last state rather than reporting an unplug */
+    if (pmu_read_multiple(D1759_REG_STATUSA, sizeof(status), status))
+        return;
 
+    /* Report only changes: every USB event restarts the idle poweroff
+     * timer, and the inputs are polled. */
     if (status[0] & D1759_STATUSA_VBUS)
-        usb_insert_int();
-    else
+    {
+        if (usb_detect() != USB_INSERTED)
+            usb_insert_int();
+    }
+    else if (usb_detect() != USB_EXTRACTED)
         usb_remove_int();
 
 #ifdef IPOD_ACCESSORY_PROTOCOL
@@ -256,7 +308,11 @@ static void NORETURN_ATTR pmu_thread(void)
 
     while (true)
     {
-        queue_wait_w_tmo(&pmu_queue, &ev, TIMEOUT_BLOCK);
+        /* GPIO_EINT_PMU never fires on a 16 GB Nano 4G: unplugging USB and
+         * moving the hold switch latch D1759 events, and none of the
+         * candidate pins changes level. USB removal also latches only
+         * EVENTC 0x14, which is masked. Poll the inputs instead. */
+        queue_wait_w_tmo(&pmu_queue, &ev, HZ/5);
         switch (ev.id)
         {
             case Q_EINT:
@@ -275,6 +331,7 @@ static void NORETURN_ATTR pmu_thread(void)
                 break;
 
             case SYS_TIMEOUT:
+                pmu_read_inputs();
                 break;
         }
     }
@@ -283,6 +340,7 @@ static void NORETURN_ATTR pmu_thread(void)
 /* main init */
 void pmu_init(void)
 {
+    mutex_init(&pmu_sysctrl_mutex);
     mutex_init(&pmu_adc_mutex);
     queue_init(&pmu_queue, false);
 
@@ -290,21 +348,31 @@ void pmu_init(void)
             pmu_thread_stack, sizeof(pmu_thread_stack), 0,
             "PMU" IF_PRIO(, PRIORITY_SYSTEM) IF_COP(, CPU));
 
-    /* configure PMU interrutps */
-    ints_msk[0] = 0xff;
-    ints_msk[1] = 0xff;
-    ints_msk[2] = 0xff;
+    /* Copy the running-state setup performed at OF PMU thread startup:
+     * osos routines at 0x0828d306 (0x0c/0x0e) and 0x0828d2b8 (0x22).
+     * The functions of these three registers and their bits are unknown;
+     * these are observed whole-register values. */
+    pmu_write(D1759_REG_UNK0C, 0x05); /* bits 0 and 2 */
+    pmu_write(D1759_REG_UNK0E, 0xd0); /* bits 4, 6 and 7 */
+    pmu_write(D1759_REG_UNK22, 0x05); /* bits 0 and 2 */
 
-    ints_msk[0] &= ~D1759_IRQMASKA_VBUS;      /* USB */
-#ifdef IPOD_ACCESSORY_PROTOCOL
-    ints_msk[0] &= ~D1759_IRQMASKA_INPUT1;    /* Accessory */
-#endif
-    ints_msk[1] &= ~D1759_IRQMASKB_INPUT2;    /* Holdswitch */
-#if CONFIG_CHARGING
-    ints_msk[2] &= ~D1759_IRQMASKC_VADAPTOR;  /* FireWire */
-#endif
-
-    pmu_write_multiple(D1759_REG_IRQMASKA, 3, ints_msk);
+    /* OF interrupt masks from 0x0828d2b8 (1 = masked): 10 fe 2b.
+     * A: unmask USB, accessory and unidentified events 0, 1, 2, 6, 7.
+     * B: unmask Hold only; WARMBOOT stays masked.
+     * C: unmask unidentified events 2, 4, 6, 7; FireWire stays masked.
+     * With the old USB/accessory/Hold/FireWire-only setup, only Hold woke
+     * the unit after power_off(). This complete OF setup also allowed
+     * button wake; the individual bit responsible has not been isolated. */
+    static unsigned char ints_msk[] = {
+        0xff & ~(D1759_IRQMASKA_VBUS | D1759_IRQMASKA_INPUT1 |
+                 D1759_IRQMASKA_UNK0 | D1759_IRQMASKA_UNK1 |
+                 D1759_IRQMASKA_UNK2 | D1759_IRQMASKA_UNK6 |
+                 D1759_IRQMASKA_UNK7),
+        0xff & ~D1759_IRQMASKB_INPUT2,
+        0xff & ~(D1759_IRQMASKC_UNK2 | D1759_IRQMASKC_UNK4 |
+                 D1759_IRQMASKC_UNK6 | D1759_IRQMASKC_UNK7),
+    };
+    pmu_write_multiple(D1759_REG_IRQMASKA, sizeof(ints_msk), ints_msk);
 
     /* clear all interrupts */
     pmu_write_multiple(D1759_REG_EVENTA, 3, "\xFF\xFF\xFF");
@@ -331,7 +399,7 @@ int pmu_wr_multiple(int address, int count, unsigned char* buffer)
 
 unsigned char pmu_rd(int address)
 {
-    unsigned char val;
+    unsigned char val = 0;
     pmu_rd_multiple(address, 1, &val);
     return val;
 }
@@ -341,8 +409,82 @@ int pmu_wr(int address, unsigned char val)
     return pmu_wr_multiple(address, 1, &val);
 }
 
+#ifdef BOOTLOADER
+/* emcore bootstub pmuwrite, with a spin limit. The Rockbox I2C driver
+ * calls udelay(), and the usec timer is not running yet. */
+static int i2c_spin(volatile uint32_t *reg, uint32_t mask, bool set)
+{
+    for (int i = 0; i < 100000; i++) {
+        uint32_t v = *reg;
+        if (set) {
+            if (v & mask)
+                return 0;
+        } else if ((v & mask) == 0) {
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int pmu_wr_bounded(unsigned char addr, unsigned char data)
+{
+    if (i2c_spin(&IICUNK10(0), 0xffffffff, false))
+        return -1;
+
+    IICDS(0) = 0xe6;
+    IICSTAT(0) = 0xf0;
+    IICCON(0) = 0xb7;
+    if (i2c_spin(&IICCON(0), 0x10, true))
+        return -1;
+
+    IICDS(0) = addr;
+    IICCON(0) = 0xb7;
+    if (i2c_spin(&IICCON(0), 0x10, true))
+        return -1;
+
+    IICDS(0) = data;
+    IICCON(0) = 0xb7;
+    if (i2c_spin(&IICCON(0), 0x10, true))
+        return -1;
+
+    IICSTAT(0) = 0xd0;
+    IICCON(0) = 0xb7;
+    return i2c_spin(&IICSTAT(0), 0x20, false);
+}
+
+void nano4g_backlight_now(void)
+{
+    clockgate_enable(CLOCKGATE_I2C0, true);
+    clockgate_enable(CLOCKGATE_I2C0_2, true);
+
+    /* I2C0 pins and controller setup, as in the emcore bootstub */
+    PCON2 = (PCON2 & ~0xf0000000) | 0x20000000;
+    PCON3 = (PCON3 & ~0x0000000f) | 0x00000002;
+    if (i2c_spin(&IICUNK10(0), 0xffffffff, false))
+        return;
+    IICADD(0) = 0x40;
+    IICUNK14(0) = 1;
+    IICUNK18(0) = 0;
+    IICSTAT(0) = 0x80;
+    IICCON(0) = 0;
+    IICSTAT(0) = 0;
+    IICDS(0) = 0x40;
+    IICCON(0) = 0x181;
+    IICSTAT(0) = 0x10;
+
+    /* bootstub final values: brightness 250, LEDCTL = 3 (on, no fade) */
+    if (pmu_wr_bounded(D1759_REG_LEDOUT, 250))
+        return;
+    pmu_wr_bounded(D1759_REG_LEDCTL, 3);
+}
+#endif
+
+/* Non-zero so it stays in .data: pmu_preinit() runs before SDRAM is up */
+unsigned char pmu_chctl_boot = 0xff;
+
 void pmu_preinit(void)
 {
+    pmu_chctl_boot = pmu_rd(D1759_REG_CHCTL);
     pmu_wr(0x14, 0x13);
     pmu_wr(0x15, 0x0d);
     pmu_wr(0xb, 0x22);
@@ -370,10 +512,6 @@ void pmu_preinit(void)
     /* configure and clear interrupts */
     pmu_wr_multiple(D1759_REG_IRQMASKA, 3, "\x50\xFE\x2B");
     pmu_wr_multiple(D1759_REG_EVENTA, 3, "\xFF\xFF\xFF");
-
-    pmu_wr(D1759_REG_LEDOUT, 0x64); /* set backlight brightness to 40% */
-    pmu_wr(D1759_REG_LEDCTL,
-            pmu_rd(D1759_REG_LEDCTL) | D1759_LEDCTL_ENABLE); /* backlight on */
 
     pmu_wr(0xa, 0x70);
     pmu_wr(0x13, 0x02);

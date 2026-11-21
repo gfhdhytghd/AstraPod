@@ -542,6 +542,12 @@ static void init_rec_buffers(void)
 
     /* PCMBUF */
     pcm_buffer = CACHEALIGN_UP(buf); /* Line align */
+    size_t fixed = pcm_buffer - buf + PCM_BUF_SIZE + STREAM_BUF_SIZE +
+                   CHUNK_FILE_COUNT(MAX_PATH) * ENC_HDR_SIZE;
+    if (size <= fixed)
+        panicf("%s(): %lu bytes, need more than %lu", __func__,
+               (unsigned long)size, (unsigned long)fixed);
+
     size -= pcm_buffer + PCM_BUF_SIZE - buf;
     buf = pcm_buffer + PCM_BUF_SIZE;
 
@@ -991,6 +997,11 @@ void audio_stop_recording(void)
 {
     LOGFQUEUE("audio > pcmrec Q_AUDIO_RECORD_STOP");
     audio_queue_post(Q_AUDIO_RECORD_STOP, 0);
+}
+
+void audio_stop_recording_sync(void)
+{
+    audio_queue_send(Q_AUDIO_RECORD_STOP, 0);
 }
 
 /* Pause current recording */
@@ -1590,11 +1601,13 @@ static void on_record(const char *filename)
 
     logf("on_record: new file '%s'", filename);
 
-    /* Copy path and let caller go */
+    /* New captures acknowledge after entering RECORD_RECORDING. A file split
+     * can acknowledge as soon as the path is owned by the audio thread. */
     char path[MAX_PATH];
     strmemccpy(path, filename, MAX_PATH);
 
-    queue_reply(&audio_queue, 0);
+    if (record_state != REC_STATE_IDLE)
+        queue_reply(&audio_queue, 0);
 
     enum mark_stream_action mark_action;
 

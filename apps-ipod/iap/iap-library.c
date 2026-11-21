@@ -942,8 +942,13 @@ static bool play_catalog_playlist(uint32_t nth)
     if (!catalog_name(nth, file, sizeof(file)))
         return false;
 
+    if (global_settings.party_mode && audio_status())
+        return false;
+
     book_resume_save();
-    if (playlist_create(global_settings.playlist_catalog_dir, file) == -1)
+    audio_stop();
+    if (playlist_create(global_settings.playlist_catalog_dir, file) == -1 ||
+        playlist_amount() == 0)
         return false;
     if (global_settings.playlist_shuffle)
         playlist_shuffle(current_tick, -1);

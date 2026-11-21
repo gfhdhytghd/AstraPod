@@ -505,7 +505,9 @@ long read_vorbis_tags(int fd, struct mp3entry *id3,
             enum mp3_aa_type picture_format;
             unsigned picture_type = outlen >= 4 ? get_long_be(buf) : 0;
             if (parse_flac_album_art((unsigned char *)buf, outlen,
-                                     &picture_format, &picframe_pos))
+                                     &picture_format, &picframe_pos) &&
+                base64_encoded_size(picframe_pos + 4) <
+                    (size_t)(after_block_pos - before_block_pos))
             {
                 /* Base64 padding can shift the image header by a few bytes. */
                 off_t pos = base64_encoded_size(picframe_pos + 4) + before_block_pos;

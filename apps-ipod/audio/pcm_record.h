@@ -80,6 +80,9 @@ unsigned long pcm_rec_sample_rate(void);
 
 void recording_init(void);
 
+/* Wait for the encoder drain and file close, leaving errors available. */
+void audio_stop_recording_sync(void);
+
 /* audio.h contains audio_* recording functions */
 
 #endif /* PCM_RECORD_H */

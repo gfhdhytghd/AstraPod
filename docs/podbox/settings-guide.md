@@ -60,7 +60,7 @@ Settings
 | Balance | Shifts the output towards one ear. Meant for correcting a hearing difference or a worn earphone, not for effect. | 0% |  |
 | Channel Configuration | What ends up in each ear: normal stereo, both channels mixed to mono, one channel in both ears, the two swapped, or karaoke, which cancels whatever is common to both and so removes most centred vocals. Mono is the useful one if you often listen with a single earbud. | Stereo |  |
 | Stereo Width | Widens or narrows the stereo image. Below 100% pulls it towards mono; above pushes it apart, which can sound impressive briefly and tiring for long. | 100% |  |
-| Dithering | Adds a very quiet noise when reducing bit depth, which trades a little hiss for the absence of a particular kind of distortion on very quiet passages. Inaudible on almost all material through headphones. | No | **Adv** |
+| Dithering | Adds a very quiet noise when reducing bit depth, which trades a little hiss for the absence of a particular kind of distortion on very quiet passages. Inaudible on almost all material through headphones. Automatic adds it only where it is needed. A 16-bit file plays exactly as it is in the file, bit for bit, unless Replaygain or a sound effect changes it; 24-bit and lossy files are dithered. A USB DAC gets the same, with the volume at 0 dB or above. Always dithers everything. | Off | **Adv** |
 | Auditory Fatigue Reduction | Tames the harshness that makes long listening tiring, mostly in the upper mids. If you can hear it working, it is set too high. | Off |  |
 
 ### Sound Settings — Crossfeed
@@ -129,7 +129,7 @@ Settings
 | Spoken Word Speed | Plays audiobooks and podcasts faster or slower without changing the voice's pitch; music always plays at its own speed. Also in Now Playing's menu while spoken word plays. The first change from 100% restarts the playing track once. | 100% |  |
 | Prevent Track Skipping | Disables skipping entirely. For handing the player to someone else, or a pocket that presses buttons. | No | **Adv** |
 | Frequency | The sample rate the output runs at. Auto follows the file and is right almost always; forcing a rate resamples everything. | Auto | **Adv** |
-| Logging | Records what was played and when. On feeds the listening statistics; the Last.fm setting writes a scrobble log a computer can upload. In Last.fm mode the Playback Report reads that log, so an uploader that empties it after sending also restarts the Report's totals and streaks. | On | **Adv** |
+| Logging | Records what was played and when. On feeds the listening statistics. On + Last.fm also writes a scrobble log a computer can upload. Uploading and emptying that log preserves the Playback Report's totals and streaks. | On | **Adv** |
 
 ### Playback — Fast-Forward/Rewind
 
@@ -158,7 +158,7 @@ Settings
 
 | Setting | What it does | Default | |
 |---|---|---|---|
-| Replaygain Type | Uses the loudness information many rippers write into files, so albums recorded at different levels play at a similar volume. Album gain keeps the balance between tracks on one record; track gain levels everything, which suits shuffling. | Track Gain If Shuffling |  |
+| Replaygain Type | Uses the loudness information many rippers write into files, so albums recorded at different levels play at a similar volume. Album gain keeps the balance between tracks on one record; track gain levels everything, which suits shuffling. Off plays each file at its own level, which a file needs to play bit for bit. | Track Gain If Shuffling |  |
 | Prevent Clipping | Backs the gain off when applying it would push the track into clipping, rather than clipping it. | No | **Adv** |
 | Pre-amp | A fixed adjustment applied on top of whatever Replaygain works out. Useful if the whole library ends up quieter than you want once levelling is applied. | 0 dB | **Adv** |
 
@@ -178,7 +178,7 @@ Settings
 | Playlist Viewer Settings ▸ Show Indices | Numbers the entries in the playing queue. | Yes |  |
 | Playlist Viewer Settings ▸ Track Display | What each entry in the queue and in a saved playlist shows: the filename, the full path, or the title from the tags, alone or with the album. Number, Title & Album also puts the disc and track number first, which shows whether an album's tracks are still in order. | Title from ID3 Tags |  |
 | Recursively Insert Directories | Adding a folder to a playlist also adds everything in its subfolders. | On |  |
-| Queue ▸ Warn When Replacing Queue | Asks before replacing a queue you have built up by hand, which is otherwise easy to lose with one Select. | Yes |  |
+| Queue ▸ Warn When Replacing Queue | Asks before replacing a queue you have built up by hand, which is otherwise easy to lose with one Select. Choosing one track while the queue plays offers Play Now instead, which plays it at once and keeps the rest of the queue. | Yes |  |
 | Queue ▸ Party Mode | Anything selected is added to the end of the queue instead of replacing it, so a second person cannot wipe out what is already lined up. | No |  |
 | Queue ▸ Keep Current Track When Replacing Playlist | Leaves the playing track in place when a new selection replaces the queue, so the music does not stop mid-song. | Yes | **Adv** |
 | Queue ▸ Show Shuffled Adding Options | Adds Play Later Shuffled and Play Last Shuffled to the More menu of a folder, album or playlist. | Yes | **Adv** |
@@ -197,6 +197,7 @@ Settings
 | Default Browser | Which browser the root and the now-playing screen return to: Music, Files or Playlists. | Music |  |
 | Select Action | What a press of Select does on the now-playing screen: go back to the previous screen as Menu does, or to the browser last used, to Music, Album Covers or Files, open the lyrics, the queue or Theme Options, or one of the now-playing menu's other actions. Theme Options says Unavailable when the theme has none. Holding Select always opens the now-playing menu. | Previous Browser | **Adv** |
 | Select + Play Action | What pressing Select and Play together does on the now-playing screen: any of the actions Select offers, or the whole now-playing menu, or nothing. | Lyrics |  |
+| Lyrics lead | Adjusts when the active lyric changes. Positive values show lyrics earlier. | 200 ms |  |
 
 **Appearance** opens `Settings > Appearance > Now Playing Screen`, below.
 
@@ -464,6 +465,8 @@ Separator set above zero.
 | `database art row height` | Row height in the database browser when album or artist art is shown beside rows. A theme-author setting -- it has to match the artwork the theme draws. | 52 px | **Cfg** |
 | Show Icons | Draws an icon beside each row in lists and menus. Turning them off gives the text more room. | Yes |  |
 | Status Bar | Whether the clock and battery strip is drawn, and at which edge. | Top |  |
+| Status Bar Cover Tint | Uses colours from the playing track’s cover in the status bar. | On |  |
+| Animations | Enables animated transitions between screens and pages. | On |  |
 | Scroll Bar ▸ Scroll Bar | Whether a scroll bar is drawn beside lists, and on which side. | Left |  |
 | Scroll Bar ▸ Scroll Bar Width | How wide the scroll bar beside lists is, in pixels. | 6 px | **Adv** |
 | Battery Display | Whether the status bar shows the battery as an icon or as a percentage. | Graphic |  |
@@ -615,7 +618,7 @@ Shadow Colour only while there is a shadow to colour.
 | Storage ▸ Disk Spindown | How long the drive sits idle before it is allowed to stop. The single largest battery saving on a player with a spinning disk, and it does nothing at all on one with an SSD fitted. | 5 s | **Adv** |
 | Storage ▸ Mode | Tells power management what kind of drive is fitted, which decides whether it is worth spinning down and how aggressively. Auto detects it. Set it by hand only if a replacement drive is being detected wrongly. | Auto | **Adv** |
 | Battery Capacity | The capacity of the cell actually fitted, in mAh. Only affects the runtime estimate, not charging. Worth correcting after a battery replacement, since a new cell is often a different size from the original. | 550 mAh (iPod Classic), 400 or 600 mAh by model (iPod Video) | **Adv** |
-| Charge During USB Connection | Whether the player charges from a USB connection. Force charges even from a port that does not advertise enough current, which not every port tolerates. On an iPod Classic, Force also tops up a nearly full battery from a plain charger, which it otherwise leaves alone. | Yes (iPod Classic), Force (iPod Video) |  |
+| Charge During USB Connection | Whether the player charges from a USB connection. On uses 100 mA until the host grants 500 mA. The input limit includes the player's own consumption. Off disables battery charging. Suspend blocks USB input. Force also selects 500 mA after ten seconds without host requests. Eight qualified short dropouts in 90 seconds pause battery charging for one minute. Repeated dropouts double the pause up to 30 minutes. USB still powers the player during the pause. Unplugging, applying charging settings or ten minutes of stable charging resets the back-off. Debug > Battery shows the guard state. | Yes (iPod Classic), Force (iPod Video) |  |
 
 ### Battery & Power — Sleep Timer
 
@@ -654,7 +657,7 @@ Shadow Colour only while there is a shadow to colour.
 | USB Mode | What a USB connection does: present the disk to the computer, or charge only. Charge only suits a plug that would otherwise take the disk and interrupt playback. Docks and cars that play from the player over USB still work. Drive Only presents the disk and nothing else, for a car stereo that reads iPods as USB drives but does not see this one. It overrides Accessory Protocol, Support iPhone Accessories, Identify As, USB Sound Card, USB HID and USB DAC Output without changing them, so cars and docks that play from the player over USB do not work until it is switched back. Docks on the dock connector still do. A change takes effect at the next connection. | Mass Storage |  |
 | USB HID | Presents the player as a keyboard or remote control to the computer, so its buttons can drive playback there. On an iPod Video in mass-storage mode, USB Sound Card takes its place when both are on. | No | **Adv** |
 | USB Keypad Mode | What the buttons send while acting as a USB device: media keys, a mouse, or presentation controls. | Multimedia | **Adv** |
-| USB Sound Card | Lets a computer play through the player: it shows up as a sound card, and what the computer plays comes out of the headphone socket. The computer's volume control sets the player's. Takes effect at the next restart, and while on it keeps about 130K of memory back from playback. On an iPod Video in mass-storage mode it takes USB HID's place, as there is room for only one of the two beside the disk. | Off | **Adv** |
+| USB Sound Card | Lets a computer play through the player: it shows up as a sound card, and what the computer plays comes out of the headphone socket. The wheel sets the player's volume, and so does the computer's volume control where it asks the player rather than turning the sound down itself. Takes effect at the next restart, and while on it keeps about 130K of memory back from playback. On an iPod Video in mass-storage mode it takes USB HID's place, as there is room for only one of the two beside the disk. | Off | **Adv** |
 
 ### System — USB — USB DAC Output
 

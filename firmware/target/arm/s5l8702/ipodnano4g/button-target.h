@@ -27,6 +27,7 @@
 void ipod_mini_button_int(void);
 void ipod_3g_button_int(void);
 void ipod_4g_button_int(void);
+void button_restart_wheel(void);
 
 /* iPod specific button codes */
 
@@ -58,7 +59,7 @@ void ipod_4g_button_int(void);
 #define BUTTON_RC_VOL_DOWN  0x00008000
 
 #define BUTTON_REMOTE (BUTTON_RC_UP|BUTTON_RC_DOWN \
-                |BUTTON_RC_SELECT|BUTTON_RC_PLAY  \
+                |BUTTON_RC_SELECT|BUTTON_RC_MENU \
                 |BUTTON_RC_PLAY|BUTTON_RC_STOP \
                 |BUTTON_RC_LEFT|BUTTON_RC_RIGHT\
                 |BUTTON_RC_VOL_UP|BUTTON_RC_VOL_DOWN)

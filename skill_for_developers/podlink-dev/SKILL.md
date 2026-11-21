@@ -113,19 +113,20 @@ the prefix checks) and `podlink_library.c` (MS3). Host:
 
 ### Transfer profiling
 
-Use `python -m hrlibrary --mode base --mbit 26 <music-file>` from the
-desktop checkout with the daemon venv and PYTHONPATH. Repeat with
-`--mode fast`. SAMPLE accepts regular files under `/Music/` and
-`/iPod_Control/Music/`. Use a multi-MiB file for the 25 Mbit/s gate.
-Use `--tagcache` when passing a database basename. The client borrows the
-tty, checks length, offsets and CRC32, and prints JSON containing eight
-device timing counters, ARM idle percentage on supporting firmware, and
-tty read statistics. It discards the payload. Stage times include waits
-and preemption. The idle counter covers the whole device capture.
+Run `python -m hrlibrary --mode base --mbit 26 <music-file>` with the
+daemon venv and PYTHONPATH from AstraPod-Desktop. Repeat with
+`--mode fast`, the default. See docs/podlink.md for the setup command.
+
+Borrow the tty, send `MS3 PROFILE BASE` or `MS3 PROFILE FAST`, and use
+`MS3 STREAM SAMPLE <path>` on the same file in both modes. SAMPLE accepts
+regular files under `/Music/`, `/iPod_Control/Music/` and `/Recordings/`.
+Use `MS3 STREAM FILE <name>` for an allowlisted tagcache basename.
+Check offsets, length and CRC32. Read the eight timing counters and ARM
+idle time with `MS3 PROFILE CPU`. Stage times include waits and preemption.
 
 MS3 PROFILE BASE uses the 4 KiB CDC IN path. FAST uses two 16 KiB DMA
-buffers written directly by the producer, with one active DesignWare request. USB reconfiguration restores
-BASE. Record baseline counters first. For UI measurements, repeat a list
+buffers written directly by the producer, with one active DesignWare request.
+FAST is the default at boot and after USB reconfiguration. Record baseline counters first. For UI measurements, repeat a list
 glide or cover-flow transition during each mode with the existing UI
 performance marker enabled. See docs/podlink.md for counter semantics and
 the marker and log paths.
@@ -203,7 +204,7 @@ the device configured. Host side uses PyUSB (`podbox-usbkey` venv has it).
 |---|---|---|---|
 | `0x5b` | key ID | Remote keys: Menu 1, Select 2, Vol± 3/4, heartbeat 5, Left 6, Right 7, Play 8 | `firmware/export/button_usb_remote.h` |
 | `0x5c` | 0 | Disk Mode exit status (IN, 8 bytes) and unmount acknowledgement (OUT) | `docs/podlink.md` |
-| `0x5d` | `0x4951` | PodLink Shell: wValue 1 reboot, 2 play test track, 3 seek, 4 stop, 5 open benchmark screen; IN wValue 0 reads 16-byte status | `firmware/export/sm1-test-control.h` |
+| `0x5d` | `0x4951` | PodLink Shell: wValue 1 reboot, 2 play test track, 3 seek, 4 stop, 5 open benchmark screen, 6 record line-in WAV, 7 record mic WAV, 8 stop recording; IN wValue 0 reads 16-byte status, IN wValue 1 reads 96-byte recording status | `firmware/export/sm1-test-control.h` |
 | `0x5d` | `0x4952` | Debug menu: IN reads item name by index (128 bytes), OUT opens that item on the player | same |
 
 PodLink Shell commands need PodLink active and storage not exclusive. One
@@ -222,7 +223,12 @@ python3 podlink_shell.py --serial 2AA0000000000360 debug-list
 python3 podlink_shell.py --serial 2AA0000000000360 debug "Hardware info"
 ```
 
-EP0 works while HerdRemote holds the tty, so the shell needs no lease.
+EP0 works while HerdRemote holds the tty. `record-fetch` borrows the tty
+for the MS3 transfer. The recording status contains two little-endian u32
+fields (capture hardware revision and state), then an 88-byte NUL-terminated
+path to the last completed shell recording. Hardware revision 0 supports dock
+line-in. Revision 1 also supports a headphone-jack mic. See the shell guide
+for commands and state values.
 User guide: `docs/podbox/podlink-shell.md`.
 
 ## Desktop and plugins

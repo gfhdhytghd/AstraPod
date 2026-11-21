@@ -11,6 +11,7 @@
 #include "dir.h"
 #include "mv.h"
 #include "pathfuncs.h"
+#include "rbpaths.h"
 #include "crc32.h"
 #include "database/tagcache.h"
 #include "metadata/art_cache.h"
@@ -253,26 +254,17 @@ static void check_artwork(void)
     assert(remove(TEST_ART_PATH) == 0);
 }
 
-static void check_sample(void)
+static void check_sample(const char *path)
 {
-    const char *path = "/iPod_Control/Music/F00/profile sample.flac";
-    mkdir("/iPod_Control");
-    mkdir("/iPod_Control/Music");
-    mkdir("/iPod_Control/Music/F00");
     int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
     assert(fd >= 0);
     const char data[] = "profiling fixture";
     assert(write(fd, data, sizeof(data)) == sizeof(data));
     close(fd);
 
-    command("MS3 STREAM SAMPLE /outside.flac");
-    assert(!strcmp(reply, "MS3 ERR sample path"));
-    command("MS3 STREAM SAMPLE /Music/PodLink/../outside.flac");
-    assert(!strcmp(reply, "MS3 ERR sample path"));
-    command("MS3 STREAM SAMPLE /iPod_Control/Music/.. /outside.flac");
-    assert(!strcmp(reply, "MS3 ERR sample path"));
-    command("MS3 STREAM SAMPLE /iPod_Control/Music/F00/profile sample.flac");
     char expected[MEDIA_REPLY_SIZE];
+    snprintf(expected, sizeof(expected), "MS3 STREAM SAMPLE %s", path);
+    command(expected);
     snprintf(expected, sizeof(expected), "MS3 SAMPLE %zu", sizeof(data));
     assert(!strcmp(reply, expected));
     podlink_media_work();
@@ -317,7 +309,22 @@ int main(int argc, char **argv)
     tagcache_get_stat()->scanning = false;
     check_file();
     check_artwork();
-    check_sample();
+    mkdir("/iPod_Control");
+    mkdir("/iPod_Control/Music");
+    mkdir("/iPod_Control/Music/F00");
+    mkdir(REC_BASE_DIR);
+    check_sample("/iPod_Control/Music/F00/profile sample.flac");
+    check_sample(REC_BASE_DIR "/PodLink-0001.wav");
+    command("MS3 STREAM SAMPLE /outside.flac");
+    assert(!strcmp(reply, "MS3 ERR sample path"));
+    command("MS3 STREAM SAMPLE /Music/PodLink/../outside.flac");
+    assert(!strcmp(reply, "MS3 ERR sample path"));
+    command("MS3 STREAM SAMPLE /iPod_Control/Music/.. /outside.flac");
+    assert(!strcmp(reply, "MS3 ERR sample path"));
+    command("MS3 STREAM SAMPLE " REC_BASE_DIR "/../outside.wav");
+    assert(!strcmp(reply, "MS3 ERR sample path"));
+    command("MS3 DEL " REC_BASE_DIR "/PodLink-0001.wav");
+    assert(!strcmp(reply, "MS3 ERR unmanaged path"));
 
     command("MS3 DB");
     assert(!strcmp(reply, "MS3 READY"));

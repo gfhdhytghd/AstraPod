@@ -103,6 +103,13 @@ void iap_handlepkt_mode2(const unsigned int len, const unsigned char *buf)
         case 0x00:
         {
             unsigned long btn = BUTTON_NONE;
+            /* True while the accessory still reports any button down,
+             * including Shuffle and Repeat, which map to no BUTTON_*
+             * code. */
+            bool any_down = (buf[2] != 0)
+                         || (len >= 4 && buf[3] != 0)
+                         || (len >= 5 && buf[4] != 0)
+                         || (len >= 6 && buf[5] != 0);
 
             if(buf[2] != 0)
             {
@@ -130,8 +137,19 @@ void iap_handlepkt_mode2(const unsigned int len, const unsigned char *buf)
                     btn |= BUTTON_RC_RIGHT;
                 if(buf[2] & 16)
                     btn |= BUTTON_RC_LEFT;
+                if(buf[2] & 128) /* stop, once a press */
+                {
+                    if (!iap_btnstop)
+                    {
+                        iap_seek_stop();
+                        audio_stop();
+                        iap_btnstop = true;
+                    }
+                }
             }
-            else if(len >= 4 && buf[3] != 0)
+            /* Decode each byte: a remote may hold buttons from two of
+             * them at once, such as Volume Up with Menu */
+            if(len >= 4 && buf[3] != 0)
             {
                 if(buf[3] & 1) /* play */
                 {
@@ -162,7 +180,7 @@ void iap_handlepkt_mode2(const unsigned int len, const unsigned char *buf)
                     }
                 }
             }
-            else if(len >= 5 && buf[4] != 0)
+            if(len >= 5 && buf[4] != 0)
             {
                 if(buf[4] & 1) /* repeat */
                 {
@@ -197,7 +215,7 @@ void iap_handlepkt_mode2(const unsigned int len, const unsigned char *buf)
                 if(buf[4] & 128) /* select */
                     btn |= BUTTON_RC_SELECT;
             }
-            else if(len >= 6 && buf[5] != 0)
+            if(len >= 6 && buf[5] != 0)
             {
                 if(buf[5] & 1) /* up */
                     btn |= BUTTON_RC_UP;
@@ -226,8 +244,26 @@ void iap_handlepkt_mode2(const unsigned int len, const unsigned char *buf)
             }
             else
             {
+                /* Arm the delivery delay on the release edge too, so the
+                 * button driver gets to see BUTTON_NONE. Otherwise a
+                 * release and the next press can be handled back to
+                 * back, no BUTTON_REL is posted, and two taps merge into
+                 * a held press that turns into a seek. A release is
+                 * one-shot, unlike the repeats of a held button, so this
+                 * cannot bring back the stalls the re-arm check above
+                 * avoids.
+                 */
+                if (iap_remotebtn != BUTTON_NONE)
+                    iap_repeatbtn = 2;
                 iap_remotebtn = BUTTON_NONE;
-                iap_timeoutbtn = 0;
+                /* Shuffle and Repeat leave btn at BUTTON_NONE. Zeroing
+                 * the timeout while they are held let iap_periodic()
+                 * clear their debounce flags, and the accessory's
+                 * 30-100ms repeat then toggled them again, each time
+                 * calling settings_save(). Keep the timeout alive while
+                 * anything is still down.
+                 */
+                iap_timeoutbtn = any_down ? 3 : 0;
             }
 
             /* power on released */
@@ -341,7 +377,7 @@ void iap_handlepkt_mode2(const unsigned int len, const unsigned char *buf)
          */
         case 0x04:
         {
-            unsigned char repeatbuf[6];
+            unsigned char repeatbuf[6] = {0};
 
             if (!DEVICE_AUTHENTICATED) {
                 cmd_ack(cmd, IAP_ACK_NO_AUTHEN);
@@ -354,9 +390,36 @@ void iap_handlepkt_mode2(const unsigned int len, const unsigned char *buf)
              * So just route it through the handler again, with 0x00 as the
              * command
              */
-            memcpy(repeatbuf, buf, 6);
-            repeatbuf[1] = 0x00;
-            iap_handlepkt_mode2((len<6)?len:6, repeatbuf);
+            /* Button bytes 1-3 are optional, so the packet may be
+             * shorter than 6 bytes. Copy only what arrived.
+             *
+             * Bytes 0 and 1 mean what ContextButtonStatus's do. Byte 2
+             * holds repeat, Begin FF, Begin REW, then record and reserved
+             * bits, so translate it: read as ContextButtonStatus's, Begin
+             * FF was Power On and Begin REW was Power Off, which paused.
+             * Byte 3 is reserved.
+             */
+            {
+                unsigned int n = (len < 6) ? len : 6;
+
+                memcpy(repeatbuf, buf, n);
+                repeatbuf[1] = 0x00;
+                if (n > 4)
+                {
+                    unsigned char audio = buf[4];
+
+                    repeatbuf[4] = 0;
+                    if (audio & 0x01)   /* repeat */
+                        repeatbuf[4] |= 0x01;
+                    if (audio & 0x02)   /* Begin FF */
+                        repeatbuf[4] |= 0x10;
+                    if (audio & 0x04)   /* Begin REW */
+                        repeatbuf[4] |= 0x20;
+                }
+                if (n > 5)
+                    repeatbuf[5] = 0;
+                iap_handlepkt_mode2(n, repeatbuf);
+            }
 
             cmd_ok(cmd);
             break;

@@ -11,8 +11,12 @@ static int test(void)
 {
     host.playback_log = 2;
     host.album_art = AA_PREFER_CACHE;
+    host.dithering_enabled = DITHER_AUTO;
+    host.eq_band_settings[0].gain = 12;
     rock_compat_begin(&view, &baseline, &host);
-    if (view.playback_log || view.album_art != AA_PREFER_EMBEDDED)
+    if (view.playback_log || view.dithering_enabled ||
+        view.eq_band_settings[0].gain != 12 ||
+        view.album_art != AA_PREFER_EMBEDDED)
         return 1;
     host.brightness = 9; /* native update while plugin is active */
     view.pitch_mode_semitone = true;
@@ -21,11 +25,15 @@ static int test(void)
     rock_compat_flush(&view, &baseline, &host);
     if (host.brightness != 9 || host.album_art != AA_PREFER_CACHE ||
         host.playback_log != 2 || !host.playlist_shuffle || host.font_file[0] != 'A' ||
-        view.pitch_mode_semitone || view.brightness != 9)
+        view.pitch_mode_semitone || view.brightness != 9 ||
+        host.dithering_enabled != DITHER_AUTO)
         return 2;
     view.playback_log = true;
+    view.dithering_enabled = true;
+    view.eq_band_settings[0].gain = -12;
     rock_compat_flush(&view, &baseline, &host);
-    if (host.playback_log != 1)
+    if (host.playback_log != 1 || host.dithering_enabled != DITHER_ALWAYS ||
+        host.eq_band_settings[0].gain != -12)
         return 3;
     native_text[LANG_CANCEL] = (unsigned char *)"translated";
     rock_compat_lang_init(plugin_text, native_text);

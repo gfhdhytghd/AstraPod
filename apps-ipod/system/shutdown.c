@@ -26,6 +26,7 @@
 #include "audio.h"
 #include "audio/playback.h" /* add_playbacklog */
 #include "storage.h"
+#include "iap.h"
 #include "usb_core.h"       /* usb_core_host_wrote_storage */
 #include "usb.h"
 #ifdef HAVE_USB_PODLINK
@@ -141,10 +142,18 @@ static bool clean_shutdown(enum shutdown_type sd_type,
             if (callback != NULL)
                 callback(parameter);
 
+#ifdef IPOD_ACCESSORY_PROTOCOL
+            /* the settings are written by system_flush() */
+            iap_prepare_shutdown(true);
+#endif
             system_flush();
         }
         else
         {
+#ifdef IPOD_ACCESSORY_PROTOCOL
+            /* the settings may still be written; the playlist is not */
+            iap_prepare_shutdown(false);
+#endif
             /* Queued play counts and ratings, and the buffered playback log,
              * are a few sector writes -- but only to a disk already spinning.
              * A spin-up on an empty battery can brown out mid-write and
@@ -271,6 +280,22 @@ void car_adapter_mode_init(void)
 }
 
 #ifdef BOOTFILE
+static void restart_firmware(void)
+{
+    audio_hard_stop();
+    bool was_inserted = usb_inserted();
+#ifdef HAVE_USBSTACK
+    bool device_mode = !usb_host_probe_active();
+#else
+    bool device_mode = true;
+#endif
+    if (was_inserted && device_mode)
+        usb_enable(false);
+    rolo_load(BOOTDIR "/" BOOTFILE);
+    if (was_inserted && device_mode && usb_detect() == USB_INSERTED)
+        usb_enable(true);
+}
+
 /* A computer rewrote the database (tools/database_pb). This run holds the old
  * one's track numbers, in the playlist and the buffered tracks, so start
  * again. Tried once: a failed load leaves the database closed to this run. */
@@ -281,8 +306,7 @@ static void restart_if_database_replaced(void)
     if (!tried && tagcache_changed_over_usb())
     {
         tried = true;
-        audio_hard_stop();
-        rolo_load(BOOTDIR "/" BOOTFILE);
+        restart_firmware();
     }
 }
 
@@ -358,6 +382,13 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
                     complete_shell_command();
                 if (result != 0)
                     return SYS_USB_CONNECTED;
+                button_queue_post(BUTTON_REDRAW, 0);
+                break;
+            }
+            if (command == SM1_TEST_RECORD_LINE_WAV ||
+                command == SM1_TEST_RECORD_MIC_WAV)
+            {
+                sm1_test_record_run(command == SM1_TEST_RECORD_MIC_WAV);
                 button_queue_post(BUTTON_REDRAW, 0);
                 break;
             }
@@ -575,8 +606,10 @@ void check_bootfile(bool do_rolo)
                     button_clear_queue(); /* Empty the keyboard buffer */
                     if(gui_syncyesno_run(&message, NULL, NULL) == YESNO_YES)
                     {
-                        audio_hard_stop();
-                        rolo_load(BOOTDIR "/" BOOTFILE);
+                        mtime = info.mtime;
+                        closedir(dir);
+                        restart_firmware();
+                        return;
                     }
                 }
             }

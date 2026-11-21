@@ -2572,6 +2572,46 @@ static int hotkey_previous_screen(void)
     return leave(GO_TO_PREVIOUS);
 }
 
+static int hotkey_go_to_album(void)
+{
+    struct tagcache_album album;
+    if (!selected_track_album(&album))
+        return leave(GO_TO_PREVIOUS_BROWSER);
+
+    int kind = db_spoken_album_kind(&album);
+    context_menu_result = ONPLAY_OK;
+    if (db_spoken_kind_apart(kind))
+    {
+        if (kind == 2)
+            go_to_podcast();
+        else
+            go_to_audiobook();
+    }
+    else
+        go_to_album();
+    return context_menu_result;
+}
+
+static int hotkey_add_to_playlist(void)
+{
+    push_current_activity(ACTIVITY_CONTEXTMENU);
+    hiding_begin();
+    int result = do_menu(&cat_playlist_menu, NULL, NULL, false);
+    hiding_end();
+    if (get_current_activity() == ACTIVITY_CONTEXTMENU)
+        pop_current_activity();
+    return result == GO_TO_ROOT || result == GO_TO_MAINMENU
+        ? ONPLAY_MAINMENU : ONPLAY_RELOAD_DIR;
+}
+
+static int hotkey_stop_playback(void)
+{
+    if (global_settings.party_mode)
+        return ONPLAY_OK;
+    audio_stop();
+    return leave(GO_TO_PREVIOUS);
+}
+
 static int hotkey_music(void)
 {
     return leave(GO_TO_DBBROWSER);
@@ -2693,6 +2733,24 @@ static const struct hotkey_assignment hotkey_items[] = {
     { .action = HOTKEY_PREVIOUS_BROWSER,
       .lang_id = LANG_PREVIOUS_BROWSER,
       .func = HOTKEY_FUNC(hotkey_previous_browser, NULL),
+      .return_code = ONPLAY_FUNC_RETURN,
+      .flags = HOTKEY_FLAG_WPS,
+      .icon = Icon_NOICON },
+    { .action = HOTKEY_GO_TO_ALBUM,
+      .lang_id = LANG_GO_TO_ALBUM,
+      .func = HOTKEY_FUNC(hotkey_go_to_album, NULL),
+      .return_code = ONPLAY_FUNC_RETURN,
+      .flags = HOTKEY_FLAG_WPS,
+      .icon = Icon_NOICON },
+    { .action = HOTKEY_ADD_TO_PLAYLIST,
+      .lang_id = LANG_ADD_TO_PL,
+      .func = HOTKEY_FUNC(hotkey_add_to_playlist, NULL),
+      .return_code = ONPLAY_FUNC_RETURN,
+      .flags = HOTKEY_FLAG_WPS,
+      .icon = Icon_Playlist },
+    { .action = HOTKEY_STOP_PLAYBACK,
+      .lang_id = LANG_STOP_PLAYBACK,
+      .func = HOTKEY_FUNC(hotkey_stop_playback, NULL),
       .return_code = ONPLAY_FUNC_RETURN,
       .flags = HOTKEY_FLAG_WPS,
       .icon = Icon_NOICON },

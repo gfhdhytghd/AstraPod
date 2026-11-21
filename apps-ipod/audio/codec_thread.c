@@ -153,14 +153,14 @@ static int codec_check_queue__have_msg(void)
 }
 
 /* Does the audio format type equal CODEC_TYPE_ENCODER?
-   Always false in this DAP-only build (no recording). */
+   Targets without recording load only decoders. */
 static inline bool type_is_encoder(int afmt)
 {
 #ifdef AUDIO_HAVE_RECORDING
     return (afmt & CODEC_TYPE_MASK) == CODEC_TYPE_ENCODER;
 #else
-    return false;
     (void)afmt;
+    return false;
 #endif
 }
 
@@ -285,6 +285,10 @@ static bool codec_advance_buffer_counters(size_t amount)
 /* copy up-to size bytes into ptr and return the actual size copied */
 static size_t codec_filebuf_callback(void *ptr, size_t size)
 {
+    /* bufread() takes a size of 0 as "the rest of the file" */
+    if (size == 0)
+        return 0;
+
     ssize_t copy_n = bufread(ci.audio_hid, size, ptr);
 
     /* Nothing requested OR nothing left */

@@ -188,7 +188,12 @@ rel = fn(ser, 'serial_accessory_release')
 assert 'tick_remove_task(serial_acc_tick)' in rel and 'acc_plugged = false' in rel
 sd = (R / 'apps-ipod/system/shutdown.c').read_text()
 cb = fn(sd, 'check_bootfile')
-assert cb.index('LANG_BOOT_CHANGED') < cb.index('rolo_load(BOOTDIR "/" BOOTFILE)')
+assert cb.index('LANG_BOOT_CHANGED') < cb.index('restart_firmware();')
+restart = fn(sd, 'restart_firmware')
+assert restart.index('audio_hard_stop();') < restart.index('usb_enable(false);')
+assert restart.index('usb_enable(false);') < restart.index('rolo_load(BOOTDIR "/" BOOTFILE);')
+assert restart.index('rolo_load(BOOTDIR "/" BOOTFILE);') < restart.index('usb_enable(true);')
+assert 'usb_detect() == USB_INSERTED' in restart
 assert 'check_bootfile(true)' in fn(sd, 'bootfile_session_end')
 main = (R / 'apps-ipod/main.c').read_text()
 mainf = main[main.index('int main(void)'):main.index('static void init(void) INIT_ATTR;')]

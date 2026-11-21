@@ -84,6 +84,11 @@ the absence of a particular kind of distortion on very quiet passages.
 
 Inaudible on almost all material through headphones.
 
+Automatic adds it only where it is needed. A 16-bit file plays exactly as it is
+in the file, bit for bit, unless Replaygain or a sound effect changes it; 24-bit
+and lossy files are dithered. A USB DAC gets the same, with the volume at 0 dB
+or above. Always dithers everything.
+
 [disk spindown]
 How long the drive sits idle before it is allowed to stop.
 
@@ -147,7 +152,8 @@ Uses the loudness information many rippers write into files, so albums recorded
 at different levels play at a similar volume.
 
 Album gain keeps the balance between tracks on one record; track gain levels
-everything, which suits shuffling.
+everything, which suits shuffling. Off plays each file at its own level, which
+a file needs to play bit for bit.
 
 [replaygain preamp]
 A fixed adjustment applied on top of whatever Replaygain works out.
@@ -418,11 +424,9 @@ the calmer choice while you are playing, and shows as much of the name as
 fits. Off as well while Scrolling is off.
 
 [play log]
-Records what was played and when. On feeds the listening statistics; the
-Last.fm setting writes a scrobble log a computer can upload.
-
-In Last.fm mode the Playback Report reads that log, so an uploader that empties
-it after sending also restarts the Report's totals and streaks.
+Records what was played and when. On feeds the listening statistics. On +
+Last.fm also writes a scrobble log a computer can upload. Uploading and
+emptying that log preserves the Playback Report's totals and streaks.
 
 [scan min step]
 How far the first press of fast forward or rewind moves. Smaller is better for
@@ -476,7 +480,8 @@ Adding a folder to a playlist also adds everything in its subfolders.
 
 [warn when erasing dynamic playlist]
 Asks before replacing a queue you have built up by hand, which is otherwise
-easy to lose with one Select.
+easy to lose with one Select. Choosing one track while the queue plays offers
+Play Now instead, which plays it at once and keeps the rest of the queue.
 
 [keep current track when replacing playlist]
 Leaves the playing track in place when a new selection replaces the queue, so
@@ -1350,21 +1355,16 @@ Any button press resets the countdown, so the timer only fires once you have
 actually stopped touching it.
 
 [usb charging]
-Whether the player charges from a USB connection. On enables charging at the
-100 mA input limit before configuration and at 500 mA once a host grants it.
-The input limit includes the player's own consumption. The charge controller
-reduces battery current to leave room for that load. Charging continues with
-the backlight off. Off disables USB battery charging. Suspend blocks USB input.
-Force also selects 500 mA after ten seconds without host requests; this is an
-explicit override, not a host grant.
+Whether the player charges from a USB connection. On uses 100 mA until the
+host grants 500 mA. The input limit includes the player's own consumption.
+Off disables battery charging. Suspend blocks USB input. Force also selects
+500 mA after ten seconds without host requests.
 
-An automatic weak-source guard watches the charge-status pin at both input
-limits, with the light on or off. Eight qualified short dropouts in 90 seconds
-pause battery charging for one minute; repeated patterns double the pause up
-to 30 minutes. USB still powers the player during the pause. Charging retries
-automatically. A steady full-battery or thermal-pause indication does not
-trigger the guard. Unplugging, applying charging settings or ten minutes of
-stable charging resets the back-off. Debug > Battery shows the guard state.
+Eight qualified short dropouts in 90 seconds pause battery charging for one
+minute. Repeated dropouts double the pause up to 30 minutes. USB still powers
+the player during the pause. Unplugging, applying charging settings or ten
+minutes of stable charging resets the back-off. Debug > Battery shows the
+guard state.
 
 [car adapter mode]
 Pauses when external power is cut and resumes when it returns, so the player
@@ -1537,8 +1537,9 @@ presentation controls.
 
 [usb-dac]
 Lets a computer play through the player: it shows up as a sound card, and what
-the computer plays comes out of the headphone socket. The computer's volume
-control sets the player's.
+the computer plays comes out of the headphone socket. The wheel sets the
+player's volume, and so does the computer's volume control where it asks the
+player rather than turning the sound down itself.
 
 Takes effect at the next restart, and while on it keeps about 130K of memory
 back from playback. On an iPod Video in mass-storage mode it takes USB HID's
@@ -2144,6 +2145,15 @@ and Spoken Word clears up audiobooks and podcasts.
 Opens the clock: the time and date themselves, and how they are shown.
 
 The clock is what timestamps play counts and what the status bar reads from.
+
+[animations]
+Enables animated transitions between screens and pages.
+
+[status bar cover tint]
+Uses colours from the playing track’s cover in the status bar.
+
+[lyrics lead]
+Adjusts when the active lyric changes. Positive values show lyrics earlier.
 
 # Recording
 

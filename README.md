@@ -14,7 +14,13 @@ Rockbox specifically and deeply optimized for iPod Classic.
 | 远程播放 | HerdRemote 提供 Cider 播放控制、远程资料库和带时间的歌词。支持播放交接。 [远程协议](docs/podbox/cider-remote-protocol.md) |
 | Agents 和 Usage | 用点击轮查看 herdr 工作区、代理和用量。可以回答问题，也支持经主机配置的录音和键盘操作。 [HerdRemote](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/README.md) |
 | PodLink 与稳定性 | PodLink 使用 USB CDC 串行链路。主线程栈和线程容量经过加固。字形与模糊任务共享后台线程。iAP 创建线程失败后可以重试。 |
-| sm1 DSP | 研发阶段。发行包的音频播放路径未启用 sm1 DSP。 |
+| SM1 DSP | 支持部分 FLAC 和 ALAC 的硬件解码。 |
+
+## 本地音频采样率
+
+受 iPod classic 音频输出硬件限制，AstraPod 的本地播放最高支持 **48 kHz**。固件已移除高于 48 kHz 曲目的直接播放解码路径。尝试播放时，设备会提示先转换为 **48 kHz 或 44.1 kHz FLAC**。
+
+在「设置 → 播放设置 → 将曲库高采样率曲目转换为 48 kHz FLAC」可扫描曲库并批量转换。转换保留原文件。生成转换件后，从原曲入口播放会自动使用转换件。
 
 ## 界面演示
 

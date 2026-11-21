@@ -74,6 +74,14 @@ upstream reference profile. All outputs are build products.
 
 Run `tools/upstream-apps-port.sh` to identify upstream changes that need
 a fork port. That inventory includes application files outside this SDK.
+The dithering boolean reads true in Always mode. The native Auto setting
+survives a sync until a plugin changes the boolean. EQ bands use the shared
+`struct eq_band_setting` type.
+
+The fork SDK has its own ABI version. Upstream API 287 adds
+`tagtree_request_reload()` for `tagnavi_edit`, which is outside the shipped
+module manifest.
+
 Regenerate the tables from the merged tree, compare mapping.tsv and review
 settings registry units, choices and effects. Add a conversion or a
 reviewed fixed policy for an unmatched field. Review new unmatched action,

@@ -1112,7 +1112,7 @@ void settings_apply(bool read_disk)
     /* Configure software equalizer, hardware eq is handled in audio_init() */
     eq_apply();
 
-    dsp_dither_enable(global_settings.dithering_enabled);
+    dsp_dither_set_mode(global_settings.dithering_enabled);
     dsp_surround_set_balance(global_settings.surround_balance);
     dsp_surround_set_cutoff(global_settings.surround_fx1, global_settings.surround_fx2);
     dsp_surround_mix(global_settings.surround_mix);

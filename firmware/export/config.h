@@ -278,6 +278,7 @@
 #define LCD_EROSQ         71 /* as used by the ErosQ (native) */
 #define LCD_ECHO_R1       72 /* ILI9342, as used by the Echo R1 */
 #define LCD_AGPTEK_ROCKER 73 /* ST7735S, as used by the Agptek Rocker (native) */
+#define LCD_HIBY_R1       74 /* as used by the HiBy R1 (native) */
 
 /* LCD_PIXELFORMAT */
 #define HORIZONTAL_PACKING 1
@@ -328,6 +329,7 @@ Lyre prototype 1 */
 #define NAND_CC      4 /* ChinaChip */
 #define NAND_RK27XX  5
 #define NAND_IMX233  6
+#define NAND_S5L8720 7 /* Apple S5L8720 FMI controller (iPod nano 4G) */
 
 /* CONFIG_RK27XX_FTL: the on-flash format of an rk27xx target's NAND. A
  * target that does not define it builds only the FTL scheme finder. */
@@ -598,6 +600,8 @@ Lyre prototype 1 */
 #include "config/hidizsap80max.h"
 #elif defined(SONY_PSP)
 #include "config/sonypsp.h"
+#elif defined(HIBY_R1_NATIVE)
+#include "config/hibyr1native.h"
 #else
 #error "unknown hardware platform!"
 #endif
@@ -916,6 +920,12 @@ Lyre prototype 1 */
 #define HAVE_STORAGE_FLUSH
 #endif
 
+/* ATA drives may cache writes, so flush them before power may be cut: on
+ * USB eject, at shutdown and on ROLO. */
+#if (CONFIG_STORAGE & STORAGE_ATA) && !defined(HAVE_STORAGE_FLUSH)
+#define HAVE_STORAGE_FLUSH
+#endif
+
 #if (CONFIG_STORAGE & (CONFIG_STORAGE - 1)) != 0
 /* Multiple storage drivers */
 #define CONFIG_STORAGE_MULTI
@@ -990,7 +1000,7 @@ Lyre prototype 1 */
 
 /* Enable the directory cache and tagcache in RAM if we have
  * plenty of RAM. Both features can be enabled independently. */
-#if (MEMORYSIZE >= 8) && !defined(BOOTLOADER) && (defined(CHECKWPS) || !defined(__PCTOOL__)) \
+#if (MEMORYSIZE >= 8) && !defined(BOOTLOADER) && !defined(__PCTOOL__) \
     && !defined(APPLICATION)
 #ifndef SIMULATOR
 #define HAVE_DIRCACHE

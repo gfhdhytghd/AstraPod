@@ -405,7 +405,7 @@ agents=(R/'apps-ipod/screens/system/agents_screen.c').read_text()
 a=agents.index('#ifdef IPOD_ACCESSORY_PROTOCOL', agents.index('action = get_action(CONTEXT_AGENTS, timeout);', agents.index('int timeout = ui_scene_timeout')))
 b=agents.index('            if (dir',a)
 translate_end=agents.index('#endif',a)+len('#endif')
-page=agents[a:translate_end]+agents[agents.index('            if (action == ACTION_LISTTREE_PGUP ||',translate_end):b]
+page=agents[a:translate_end]+'\n'+agents[agents.index('            if (action == ACTION_LISTTREE_PGUP ||',translate_end):b]
 pagepre='''
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define MIN(a,b) ((a)<(b)?(a):(b))

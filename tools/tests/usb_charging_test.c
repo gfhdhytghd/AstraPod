@@ -24,6 +24,7 @@ static bool button_queue_try_post(long button, int data)
 volatile unsigned sm1_test_submitted, sm1_test_completed, sm1_test_dispatch_tick;
 const char *sm1_test_debug_name(unsigned index) { (void)index; return NULL; }
 bool sm1_test_record_active(void) { return false; }
+bool sm1_test_record_request_stop(void) { assert(0); return false; }
 void sm1_test_record_status(void *reply) { (void)reply; assert(0); }
 void sm1_test_record_error(void *reply) { (void)reply; assert(0); }
 enum podlink_connection podlink_state(void) { return PODLINK_CLOSED; }

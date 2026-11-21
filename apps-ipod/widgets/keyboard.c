@@ -104,7 +104,10 @@ static int kbd_confirm_cancel(struct kbd_edit *s)
     {
         const char *lines[] = {ID2P(LANG_KBD_DISCARD)};
         struct text_message message = {lines, 1};
-        if (gui_syncyesno_run(&message, NULL, NULL) != YESNO_YES)
+        enum yesno_res result = gui_syncyesno_run(&message, NULL, NULL);
+        if (result == YESNO_USB)
+            return DIALOG_ABORT;
+        if (result != YESNO_YES)
         {
             s->on_buttons = false;   /* keep editing, back to the input */
             return DIALOG_CONTINUE;

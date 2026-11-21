@@ -27,6 +27,9 @@
 #include "system.h"
 #include "kernel.h"
 #include "button.h"
+#include "backlight.h"
+#include "audio/beep.h"
+#include "rbunicode.h"
 #include "file.h"
 #include "dir.h"
 #include "load_code.h"
@@ -50,6 +53,9 @@
 #include "rbpaths.h"
 #include "ui/statusbar.h"
 #include "widgets/menu.h"
+#include "widgets/keyboard.h"
+#include "widgets/list.h"
+#include "widgets/yesno.h"
 #include "widgets/option_select.h"
 
 #if __has_include("rock_compat_tables.h")

@@ -164,6 +164,9 @@ screens/browse/browser_disk.c
 plugins/rock_browser.c
 plugins/rock_files.c
 plugins/rock_runtime.c
+plugins/rock_display.c
+plugins/rock_list.c
+plugins/rock_modal.c
 #if CONFIG_BINFMT == BINFMT_DLOPEN
 sim/rock_host.c
 #endif

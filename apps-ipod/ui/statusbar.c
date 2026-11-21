@@ -199,15 +199,24 @@ bool sb_set_persistent_title(const char *title, enum themable_icons icon,
     return set_title(title, icon, screen, title != NULL);
 }
 
-bool sb_get_persistent_title(enum screen_type screen, char *text, size_t size,
-                             enum themable_icons *icon)
+static bool read_title(enum screen_type screen, char *text, size_t size,
+                       enum themable_icons *icon, bool persistent_only)
 {
     if (status_handle <= 0)
+    {
+        if (!persistent_only)
+        {
+            strlcpy(text, "", size);
+            if (icon)
+                *icon = Icon_NOICON;
+        }
         return false;
+    }
+
     struct statusbar *bar = core_get_data_pinned(status_handle);
     const struct status_title *state = &bar->title[screen];
     bool persistent = state->persistent;
-    if (persistent)
+    if (persistent || !persistent_only)
     {
         strlcpy(text, state->text, size);
         if (icon)
@@ -215,6 +224,18 @@ bool sb_get_persistent_title(enum screen_type screen, char *text, size_t size,
     }
     core_put_data_pinned(bar);
     return persistent;
+}
+
+bool sb_get_persistent_title(enum screen_type screen, char *text, size_t size,
+                             enum themable_icons *icon)
+{
+    return read_title(screen, text, size, icon, true);
+}
+
+bool sb_get_title(enum screen_type screen, char *text, size_t size,
+                   enum themable_icons *icon)
+{
+    return read_title(screen, text, size, icon, false);
 }
 
 void sb_clear_transient_title(enum screen_type screen)

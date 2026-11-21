@@ -1,6 +1,7 @@
 /* AstraPod foreground plugin runtime. GNU GPL version 2 or later. */
 #include "plugins/rock_compat.h"
 #include "plugins/rock_files.h"
+#include "plugins/rock_widgets.h"
 #include "plugins/sdk/plugin.h"
 #include "rock-compat/rock_fingerprint.h"
 #include "core_alloc.h"
@@ -8,10 +9,6 @@
 #include "speech/language.h"
 #include "lang.h"
 #include "system/app_buffer.h"
-#include "ui/frame.h"
-#include "ui/native_wps.h"
-#include "ui/retained.h"
-#include "ui/scene.h"
 #include "widgets/splash.h"
 
 #ifdef ROCK_COMPAT_GENERATED
@@ -38,15 +35,7 @@ static const char arena_owner[] = "Rockbox plugin";
 static const char *filename;
 static unsigned char *tail;
 static size_t tail_size;
-static fb_data *plugin_pixels;
 static bool usb_taken;
-static bool raw, status_update;
-static unsigned theme_depth;
-
-bool rock_ui_raw(void)
-{
-    return raw && !status_update;
-}
 
 bool rock_usb_taken(void)
 {
@@ -62,7 +51,7 @@ const unsigned char *rock_widget_text(const unsigned char *text)
     return text;
 }
 
-static void flush_settings(void)
+void rock_flush_settings(void)
 {
 #ifdef ROCK_COMPAT_GENERATED
     if (!usb_taken)
@@ -70,7 +59,7 @@ static void flush_settings(void)
 #endif
 }
 
-static void begin_settings(void)
+void rock_begin_settings(void)
 {
 #ifdef ROCK_COMPAT_GENERATED
     rock_compat_begin(&settings_view, &settings_baseline, &global_settings);
@@ -82,7 +71,7 @@ void rock_usb_takeover(void)
 {
     if (!filename || usb_taken)
         return;
-    flush_settings();
+    rock_flush_settings();
     usb_taken = true;
     rock_close_files();
 }
@@ -106,57 +95,16 @@ static const char *rock_get_current_filename(void)
     return filename;
 }
 
-/* Modal widgets may call into the plugin (e.g. playback-control callbacks).
- * Each call unwinds its own native state before control returns to the caller. */
-struct native_scope {
-    struct viewport *viewport;
-    bool raw;
-};
-
-static struct native_scope native_begin(void)
-{
-    flush_settings();
-    struct native_scope saved = { lcd_set_viewport(NULL), raw };
-    if (raw)
-    {
-        lcd_scroll_stop();
-        memcpy(plugin_pixels, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
-        raw = false;
-        viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
-    }
-    return saved;
-}
-
-static void native_end(struct native_scope saved)
-{
-    if (saved.raw)
-    {
-        ui_scene_interrupt();
-        lcd_scroll_stop();
-        viewportmanager_theme_undo(SCREEN_MAIN, true);
-        ui_take_dirty(SCREEN_MAIN);
-        raw = true;
-        if (!usb_taken)
-        {
-            memcpy(lcd_framebuffer_default.fb_ptr, plugin_pixels, FRAMEBUFFER_SIZE);
-            lcd_update();
-        }
-    }
-    lcd_set_viewport(saved.viewport);
-    if (!usb_taken)
-        begin_settings();
-}
-
 static int rock_do_menu(const struct menu_item_ex *menu, int *selected,
                         struct viewport *parent, bool hide_theme)
 {
     if (usb_taken)
         return MENU_ATTACHED_USB;
-    struct native_scope saved = native_begin();
+    struct rock_native_scope scope = rock_modal_begin();
     int result = do_menu(menu, selected, parent, hide_theme);
     if (result == MENU_ATTACHED_USB)
         rock_usb_takeover();
-    native_end(saved);
+    rock_modal_end(&scope);
     return result;
 }
 
@@ -166,9 +114,9 @@ static bool rock_set_int(const unsigned char *title, const char *unit, int voice
 {
     if (usb_taken)
         return true;
-    struct native_scope saved = native_begin();
+    struct rock_native_scope scope = rock_modal_begin();
     bool result = set_int(title, unit, voice_unit, value, changed, step, min, max, format);
-    native_end(saved);
+    rock_modal_end(&scope);
     return result;
 }
 
@@ -177,9 +125,9 @@ static bool rock_set_option(const char *title, const void *value, enum optiontyp
 {
     if (usb_taken)
         return true;
-    struct native_scope saved = native_begin();
+    struct rock_native_scope scope = rock_modal_begin();
     bool result = set_option(title, value, type, options, count, changed);
-    native_end(saved);
+    rock_modal_end(&scope);
     return result;
 }
 
@@ -203,9 +151,9 @@ static bool rock_option_screen(const struct settings_list *setting,
         return true;
     if (!setting)
         return false;
-    struct native_scope saved = native_begin();
+    struct rock_native_scope scope = rock_modal_begin();
     bool result = option_screen(setting, parent, temporary, title);
-    native_end(saved);
+    rock_modal_end(&scope);
     return result;
 }
 
@@ -213,59 +161,20 @@ static int rock_settings_save(void)
 {
     if (usb_taken)
         return -1;
-    flush_settings();
+    rock_flush_settings();
     return settings_save();
-}
-
-static void rock_theme_enable(enum screen_type screen, bool enable, struct viewport *vp)
-{
-    viewportmanager_theme_enable(screen, enable, vp);
-    ++theme_depth;
-}
-
-static void rock_theme_undo(enum screen_type screen, bool force)
-{
-    if (theme_depth)
-    {
-        --theme_depth;
-        viewportmanager_theme_undo(screen, force);
-    }
-}
-
-static bool rock_set_title(const char *title, enum themable_icons icon,
-                           enum screen_type screen)
-{
-    return sb_set_persistent_title(P2STR((const unsigned char *)title), icon, screen);
-}
-
-static void rock_send_event(unsigned short id, void *data)
-{
-    if (raw && id == GUI_EVENT_ACTIONUPDATE)
-    {
-        /* Stopwatch explicitly requests native chrome above its own viewport. */
-        if (theme_depth && viewportmanager_theme_enabled(SCREEN_MAIN))
-        {
-            status_update = true;
-            sb_update(SCREEN_MAIN, false);
-            ui_flush_dirty();
-            sb_motion_presented();
-            status_update = false;
-        }
-        return;
-    }
-    send_event(id, data);
 }
 
 static long rock_event_ex(long event, void (*cleanup)(void *), void *parameter)
 {
     if (usb_taken)
         return SYS_USB_CONNECTED;
-    if (!IS_SYSEVENT(event))
+    if (!IS_SYSEVENT(event) || (!rock_ui_raw() && event != SYS_USB_CONNECTED))
         return default_event_handler_ex(event, cleanup, parameter);
 
-    struct native_scope saved = native_begin();
+    struct rock_native_scope scope = rock_modal_begin();
     long result = default_event_handler_ex(event, cleanup, parameter);
-    native_end(saved);
+    rock_modal_end(&scope);
     return result;
 }
 
@@ -276,14 +185,17 @@ static long rock_event(long event)
 
 static void rock_splashf(int ticks, const char *fmt, ...)
 {
+    if (usb_taken)
+        return;
+
     char text[256];
     va_list args;
     va_start(args, fmt);
     vsnprintf(text, sizeof(text), P2STR((const unsigned char *)fmt), args);
     va_end(args);
-    struct native_scope saved = native_begin();
+    struct rock_native_scope scope = rock_modal_begin();
     splashf(ticks, "%s", text);
-    native_end(saved);
+    rock_modal_end(&scope);
 }
 
 static const struct plugin_api api = {
@@ -357,61 +269,25 @@ static int run_rock(const char *path, unsigned char *arena, size_t capacity,
     tail_size = arena + capacity - tail;
     *module->api = &api;
 
-    ui_scene_interrupt();
-    lcd_scroll_stop();
-    memcpy(saved_pixels, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
-    struct viewport *caller = lcd_set_viewport(NULL);
-    struct viewport *default_vp = lcd_init_viewport(NULL);
-    struct viewport saved_vp = *default_vp;
-    fb_data *backdrop = lcd_get_backdrop();
-    char title[MAX_PATH];
-    enum themable_icons icon = Icon_NOICON;
-    bool persistent = sb_get_persistent_title(SCREEN_MAIN, title, sizeof(title), &icon);
-    bool flush_inhibited = ui_flush_inhibited();
-    ui_inhibit_flush(false);
-    ui_take_dirty(SCREEN_MAIN);
-
-    raw = true;
     filename = path;
-    plugin_pixels = widget_pixels;
     usb_taken = false;
-    begin_settings();
-    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
-    sb_set_persistent_title(NULL, Icon_NOICON, SCREEN_MAIN);
-    viewport_set_fullscreen(default_vp, SCREEN_MAIN);
-    lcd_set_backdrop(NULL);
+    rock_begin_settings();
+    rock_display_start(saved_pixels, widget_pixels);
     button_clear_pressed();
 
     result = module->entry_point(NULL);
     if (usb_taken)
         result = PLUGIN_USB_CONNECTED;
-    flush_settings();
+    rock_flush_settings();
     rock_close_files();
-    lcd_scroll_stop();
-    lcd_set_viewport(NULL);
-    while (theme_depth)
-        rock_theme_undo(SCREEN_MAIN, false);
-    viewportmanager_theme_undo(SCREEN_MAIN, true);
-    sb_set_persistent_title(persistent ? title : NULL, icon, SCREEN_MAIN);
-    lcd_set_backdrop(backdrop);
-    *default_vp = saved_vp;
-    lcd_set_viewport(caller);
+    rock_list_discard();
+    button_clear_pressed();
+    rock_display_stop();
 
-    raw = false;
     filename = NULL;
-    plugin_pixels = NULL;
     usb_taken = false;
     tail = NULL;
     tail_size = 0;
-    button_clear_pressed();
-    memcpy(lcd_framebuffer_default.fb_ptr, saved_pixels, FRAMEBUFFER_SIZE);
-    ui_retained_invalidate();
-    native_wps_invalidate();
-    sb_invalidate();
-    ui_mark_dirty(SCREEN_MAIN);
-    ui_flush_dirty();
-    ui_inhibit_flush(flush_inhibited);
-    button_queue_post(BUTTON_REDRAW, 0);
 
 #if CONFIG_BINFMT == BINFMT_DLOPEN
 unload:

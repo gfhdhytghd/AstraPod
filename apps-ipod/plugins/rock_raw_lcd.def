@@ -1,0 +1,34 @@
+/* LCD calls that resume raw drawing. GNU GPL version 2 or later. */
+ROCK_RAW_VOID(lcd_update, (void), ())
+ROCK_RAW_VOID(lcd_update_rect, (int x, int y, int w, int h), (x, y, w, h))
+ROCK_RAW_VOID(lcd_clear_display, (void), ())
+ROCK_RAW_VOID(lcd_puts, (int x, int y, const unsigned char *s), (x, y, s))
+ROCK_RAW_VOID(lcd_putsxy, (int x, int y, const unsigned char *s), (x, y, s))
+ROCK_RAW_VALUE(bool, lcd_puts_scroll,
+               (int x, int y, const unsigned char *s), (x, y, s))
+ROCK_RAW_VALUE(struct viewport *, lcd_set_viewport, (struct viewport *vp), (vp))
+ROCK_RAW_VOID(lcd_set_drawmode, (int mode), (mode))
+ROCK_RAW_VOID(lcd_setfont, (int font), (font))
+ROCK_RAW_VOID(lcd_drawpixel, (int x, int y), (x, y))
+ROCK_RAW_VOID(lcd_drawline, (int x1, int y1, int x2, int y2), (x1, y1, x2, y2))
+ROCK_RAW_VOID(lcd_drawrect, (int x, int y, int w, int h), (x, y, w, h))
+ROCK_RAW_VOID(lcd_fillrect, (int x, int y, int w, int h), (x, y, w, h))
+ROCK_RAW_VOID(lcd_hline, (int x1, int x2, int y), (x1, x2, y))
+ROCK_RAW_VOID(lcd_vline, (int x, int y1, int y2), (x, y1, y2))
+ROCK_RAW_VOID(lcd_bitmap, (const fb_data *src, int x, int y, int w, int h),
+              (src, x, y, w, h))
+ROCK_RAW_VOID(lcd_bitmap_part,
+              (const fb_data *src, int sx, int sy, int stride,
+               int x, int y, int w, int h), (src, sx, sy, stride, x, y, w, h))
+ROCK_RAW_VOID(lcd_bitmap_transparent,
+              (const fb_data *src, int x, int y, int w, int h),
+              (src, x, y, w, h))
+ROCK_RAW_VOID(lcd_mono_bitmap,
+              (const unsigned char *src, int x, int y, int w, int h),
+              (src, x, y, w, h))
+ROCK_RAW_VOID(lcd_set_backdrop, (fb_data *backdrop), (backdrop))
+ROCK_RAW_VOID(lcd_set_background, (unsigned color), (color))
+ROCK_RAW_VOID(lcd_set_foreground, (unsigned color), (color))
+ROCK_RAW_VOID(screen_clear_area,
+              (struct screen *display, int x, int y, int w, int h),
+              (display, x, y, w, h))

@@ -61,10 +61,17 @@ first menu selection and leaves room for the roll string's terminator. Snow buil
   `plugin_get_buffer` exposes the aligned tail. `plugin_reserve_buffer`
   reserves space until exit and returns the remaining size. The arena also holds a copy of the
   caller's framebuffer. Codec IRAM and the playback pool remain available.
-- Raw LCD calls own the display. Use the provided menu, option and splash slots
-  for native widgets. Stopwatch requests native status chrome above its
-  viewport. On return, the core restores the caller's viewport and status title
-  and repaints its page.
+- Use the native menu, list, yes/no, keyboard, option and splash slots to
+  present AstraPod widgets. A list keeps its native layout and selection
+  across draw and action calls. A raw LCD slot releases the list before
+  drawing. Call `gui_synclist_scroll_stop` before drawing directly through
+  `screens[]`. A modal widget returns to the saved raw pixels and viewport.
+  Stopwatch can request native status chrome above its own viewport.
+- The keyboard uses AstraPod's click-wheel editor. On cancel or USB it
+  leaves the buffer unchanged and returns `-1`. A plugin can check
+  `plugin_usb_taken` after a keyboard returns. A yes/no prompt reports
+  `YESNO_USB`. On plugin exit, the core releases list and scroll state,
+  restores the caller's viewport and status title, and repaints its page.
 - Use the SDK file and directory slots. The runtime closes owned streams on
   exit and before the core hands storage to USB. Once that handoff starts,
   file and directory opens fail until the next plugin launch. Return

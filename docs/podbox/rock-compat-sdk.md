@@ -87,7 +87,6 @@ after the dependencies build.
 
 | Entry | Build dependency or behavior to verify |
 | --- | --- |
-| `oscilloscope` | The ARM compiler reports missing `pcm_play_lock` and `mixer_channel_set_buffer_hook`. Define PCM lock and mixer hook ownership. Add OSD viewport buffer adapters and native volume controls. |
 | `pitch_detector` | The ARM compiler reports missing `pcm_record_data` and `plugin_get_audio_buffer`. Define capture callback teardown and the playback-buffer lease. |
 | `rb_info` | Map `talk_id`, `talk_spell` and `strcasestr`. Link the printcell, action and button helpers. Verify spoken rows and their native IDs. |
 
@@ -98,6 +97,16 @@ Files can open `.cells` with Rocklife, `.ssg` with Super Domination and
 for that call. CHIP-8 reads an optional same-stem `.c8k` file to remap
 keys. The firmware routes these extensions through a fixed association
 table. See [the plugin guide](../../apps-ipod/plugins/README.md) for keys.
+
+## Oscilloscope peak display
+
+The Demos category includes the peak-only Oscilloscope. It reads the
+native playback channel's left and right peaks while music plays.
+The graph returns to zero when playback pauses or stops. Select opens
+AstraPod's options and volume controls. Menu returns to the caller.
+
+The build stages the upstream peak plotters for ipod6g. Waveform
+display needs a firmware-owned PCM observer and synchronized teardown.
 
 ## Foreground Metronome
 

@@ -96,12 +96,20 @@ static void controller(void)
         }
     }
 }
+static void configure_usb(void)
+{
+    assert(usb_serial_init_connection() == 0);
+    assert(fast_in);
+    /* Frozen traces include the original 4 KiB submission boundaries. */
+    if (getenv("PODLINK_TRACE"))
+        assert(podlink_profile_start(false));
+}
 static void insert(void)
 {
     plugged = true;
     recv_ptr = NULL;
     sent_size = 0;
-    assert(usb_serial_init_connection() == 0);
+    configure_usb();
 }
 static void remove_usb(void)
 {
@@ -246,7 +254,7 @@ static void test_reconfiguration(void)
     usb_serial_disconnect();
     recv_ptr = NULL;
     sent_size = 0;
-    assert(usb_serial_init_connection() == 0);
+    configure_usb();
     input_frame(PODLINK_OPEN, 100, hello, sizeof(hello));
     assert(poll_message(&m) == 1 && m.type == PODLINK_CLOSE);
     assert(m.length == 2 && m.data[0] == (1006 & 255));
@@ -368,7 +376,15 @@ static void test_fast_in(void)
     serial_notify(0);
     remove_usb();
     insert();
-    assert(!fast_in && !tx_count && !tx_inflight && !tx_prepared);
+    assert(fast_in && !tx_count && !tx_inflight && !tx_prepared);
+    assert(podlink_profile_start(false));
+    assert(!fast_in);
+    assert(usb_serial_write(first, sizeof(first)) == sizeof(first));
+    serial_notify(0);
+    assert(tx_inflight == TRANSIT_BUFFER_SIZE);
+    remove_usb();
+    insert();
+    assert(fast_in && !tx_count && !tx_inflight && !tx_prepared);
     remove_usb();
     puts("PASS: 16 KiB inactive DMA slot is prepared during IN; reset drops it");
 }
@@ -376,6 +392,7 @@ static void test_fast_in(void)
 int main(void)
 {
     assert(!usb_cdrv_serial.needs_cpu_boost);
+    assert(fast_in);
     /* Idle logf can run before init or in an interrupt: no mutex access. */
     serial_mtx.held = 1;
     usb_serial_send((const unsigned char *)"idle", 4);

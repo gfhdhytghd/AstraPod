@@ -85,6 +85,7 @@
 #include "mikey-target.h"
 #include "rbpaths.h"
 #include "sm1-test-control.h"
+#include "strlcpy.h"
 #include "usb.h"
 #endif
 
@@ -1886,7 +1887,7 @@ void sm1_test_record_run(bool mic)
         shell_record_state = SM1_RECORD_BUSY;
     else if ((dir_exists(REC_BASE_DIR) || mkdir(REC_BASE_DIR) == 0) &&
              create_numbered_filename(path, REC_BASE_DIR,
-                                      "PodLink-", ".wav", 4, NULL) &&
+                                      "PodLink-", ".wav", 4 IF_CNFN_NUM_(, NULL)) &&
              !file_exists(path))
     {
         struct audio_recording_options options = {
@@ -1956,7 +1957,7 @@ void sm1_test_record_run(bool mic)
         talk_disable(false);
         int irq = disable_irq_save();
         if (saved)
-            strmemccpy(shell_record_path, path, sizeof(shell_record_path));
+            strlcpy(shell_record_path, path, sizeof(shell_record_path));
         shell_record_state = saved ? SM1_RECORD_READY : SM1_RECORD_ERROR;
         restore_irq(irq);
     }

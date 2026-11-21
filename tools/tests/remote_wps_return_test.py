@@ -26,7 +26,10 @@ static int cider_browse_covers(bool home){assert(!home);return 999;}
 static bool cover_nav_playing(void) {return covers;}
 static bool album_covers_reopen_tracks(void) {return tracks;}
 #define ACTION_WPS_MENU 4
-static void gwps_leave_wps(bool on){assert(on);}
+static int cover_destination = GO_TO_PREVIOUS;
+static int carousel_wps_back(void){return cover_destination;}
+static int leaves;
+static void leave_playback(void){leaves++;}
 static int menu(bool return_agents) {
  (void)return_agents;
  switch(ACTION_WPS_MENU) {
@@ -43,6 +46,8 @@ int main(void) {
  assert(menu(false)==GO_TO_ALBUM_COVERS);
  tracks=true;assert(menu(false)==GO_TO_ALBUM_COVERS_TRACKS);
  remote=true;assert(menu(false)==999);
+ cover_destination=GO_TO_ALBUM_COVERS;assert(menu(true)==GO_TO_ALBUM_COVERS);
+ assert(leaves == 8);
  puts("WPS MENU: Agents and ordinary parents, local covers/tracks, and remote covers PASS");
 }
 '''

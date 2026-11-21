@@ -135,7 +135,7 @@ subprocess.run(cmd+[str(O/'nav.c'),'-o',str(O/'nav')],check=True);subprocess.run
 # not a new root destination, so the origin is its existing caller frame.
 assert re.search(r'case ACTION_WPS_STOP:\s*#ifdef HAVE_USB_PODLINK\s*case ACTION_AGENTS_COVERS:',wps)
 assert 'case ACTION_AGENTS_REMOTE_COVERS:\n        case ACTION_AGENTS_COVERS:\n            return CAROUSEL_REMOTE_RETURN;' in covers
-assert 'case ACTION_AGENTS_SWITCH:\n                gwps_leave_wps(true);\n                return GO_TO_AGENTS;' in wps
+assert 'case ACTION_AGENTS_SWITCH:\n                leave_playback();\n                return GO_TO_AGENTS;' in wps
 assert 'action == ACTION_AGENTS_COVERS' in (R/'apps-ipod/input/action.c').read_text()
 assert 'shortcut_screen_context(context)' in (R/'apps-ipod/input/action.c').read_text()
 print('WPS existing album modal origin; Cover triple returns caller; double remains Agents; custom action bypasses nested dispatch PASS')

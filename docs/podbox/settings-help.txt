@@ -424,11 +424,9 @@ the calmer choice while you are playing, and shows as much of the name as
 fits. Off as well while Scrolling is off.
 
 [play log]
-Records what was played and when. On feeds the listening statistics; the
-Last.fm setting writes a scrobble log a computer can upload.
-
-In Last.fm mode the Playback Report reads that log, so an uploader that empties
-it after sending also restarts the Report's totals and streaks.
+Records what was played and when. On feeds the listening statistics. On +
+Last.fm also writes a scrobble log a computer can upload. Uploading and
+emptying that log preserves the Playback Report's totals and streaks.
 
 [scan min step]
 How far the first press of fast forward or rewind moves. Smaller is better for

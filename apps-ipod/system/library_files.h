@@ -60,6 +60,7 @@
 #define LIB_COVERS_FILE     LIB_CACHE_DIR "/covers.cfg"
 #define LIB_REPORT_INDEX_FILE LIB_CACHE_DIR "/report_index.dat"
 #define LIB_REPORT_MOVES_FILE LIB_CACHE_DIR "/report_moves.dat"
+#define LIB_REPORT_SOURCE_FILE LIB_CACHE_DIR "/report_source.dat"
 #define LIB_DOCUMENTS_FILE  LIB_CACHE_DIR "/documents.dat"
 #define LIB_IMAGES_FILE     LIB_CACHE_DIR "/images.dat"
 #define LIB_BOOK_INDEX_FILE LIB_CACHE_DIR "/books.dat"

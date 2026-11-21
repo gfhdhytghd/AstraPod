@@ -66,6 +66,11 @@ Fireworks, Plasma and Starfield. The games and demos have separate allowlist
 commits and fit the same ARM and SDL build. Starfield uses read-only mixer
 peak queries. Fire and Plasma draw directly into the RGB565 framebuffer.
 
+The allowlist also includes Blackjack, Bubbles, Clix, Invadrox, Jewels, Pegbox,
+Rockblox, Solitaire, Spacerocks, Wormlet and Demystify. Their bitmap rules use
+upstream's target selections and bitmap formats. Menus and option pickers use
+the native theme. The games keep their upstream playfields and help screens.
+
 Remaining entries from the ipod6g Phase 2 source inventory are listed below.
 A generated bitmap dependency refers to an existing upstream asset that the
 AstraPod build still needs to select and compile. The behavior checks apply
@@ -73,24 +78,15 @@ after the dependencies build.
 
 | Entry | Build dependency or behavior to verify |
 | --- | --- |
-| `blackjack` | Generate `card_deck` and `card_back`. Verify dealing, help and the high-score exit. |
-| `bubbles` | Generate `bubbles_background`, `bubbles_bubble` and `bubbles_emblem`. Link fixed-point and XLCD drawing helpers. |
 | `chip8` | Route a selected `.ch8` file to the entry point. Verify the optional `.c8k` key mapping and emulator exit. |
-| `clix` | Link high-score, help and playback helpers. Verify wheel selection and exit from the score screen. |
 | `codebuster` | Supply a native `set_bool` adapter or convert its two boolean options. Verify settings save and USB exit from the nested menu. |
-| `demystify` | Link action and backlight helpers. Verify trail and shape controls, then exit from the draw loop. |
-| `invadrox` | Generate the target-selected alien, ship, projectile, shield, UFO and score sprites. Test viewport swaps and hold-triggered pause. |
-| `jewels` | Generate `jewels`. Verify cursor input, tile swaps and save restoration. |
-| `oscilloscope` | Define PCM lock and mixer hook ownership, including callback teardown. Add OSD viewport buffer adapters and native volume controls. |
-| `pegbox` | Generate `pegbox_header` and `pegbox_pieces`. Verify level selection, board controls and help exit. |
+| `metronome` | The ARM compiler reports missing `timer_register` and `timer_unregister`. Define timer and audio ownership, including callback teardown. |
+| `oscilloscope` | The ARM compiler reports missing `pcm_play_lock` and `mixer_channel_set_buffer_hook`. Define PCM lock and mixer hook ownership. Add OSD viewport buffer adapters and native volume controls. |
+| `pitch_detector` | The ARM compiler reports missing `pcm_record_data` and `plugin_get_audio_buffer`. Define capture callback teardown and the playback-buffer lease. |
 | `rb_info` | Map `talk_id`, `talk_spell` and `strcasestr`. Link the printcell, action and button helpers. Verify spoken rows and their native IDs. |
-| `rockblox` | Link high-score, help, playback and backlight helpers. Verify the iPod wheel, soft poweroff and resume-file lifecycle. |
 | `rocklife` | Verify standalone pattern controls. A `.cells` file also needs viewer routing and plugin entry parameters. |
-| `solitaire` | Generate `card_deck`, `card_back` and `solitaire_suitsi`. Verify stack selection, deals and configuration persistence. |
-| `spacerocks` | Link high-score, help, playback and backlight helpers. Verify held controls, pause and game-over exit. |
 | `superdom` | Generate `superdom_boarditems`. Map boolean settings and the inventory simplelist to native widgets. Review `.ssg` save-file entry parameters. |
 | `vu_meter` | Map boolean options, `mixer_get_frequency` and native volume bounds and updates. Verify the peak display with playback running. |
-| `wormlet` | Link configuration, backlight and playback helpers. Verify the iPod player controls and the game-over exit. |
 
 ## Phase 3 playback metadata
 

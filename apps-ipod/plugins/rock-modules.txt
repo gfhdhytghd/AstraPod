@@ -10,10 +10,14 @@ apps/stopwatch
 demos/bounce
 demos/credits
 demos/cube
+demos/fire
+demos/fireworks
 demos/logo
 demos/matrix
 demos/mosaique
+demos/plasma
 demos/snow
+demos/starfield
 demos/test_kbd
 games/2048
 games/amaze

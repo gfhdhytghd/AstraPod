@@ -26,6 +26,11 @@ bool rock_ui_raw(void)
     return raw && !status_update;
 }
 
+bool rock_ui_native(void)
+{
+    return saved_pixels && !raw;
+}
+
 static void save_display(struct rock_display_state *state)
 {
     state->viewport = lcd_set_viewport(NULL);

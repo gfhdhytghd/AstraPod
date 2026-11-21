@@ -5,15 +5,13 @@
 #include <stdbool.h>
 #include "config.h"
 
-struct gui_synclist;
-
 #ifdef ASTRAPOD_ROCK_COMPAT
 int rock_browser(void *unused);
 /* The selected input path is borrowed until return. NULL starts the module. */
 int rock_open_from_browser(const char *path, const char *file);
 int rock_run_from_shell(const char *path);
 bool rock_ui_raw(void);
-bool rock_list_owns(const struct gui_synclist *list);
+bool rock_ui_native(void);
 bool rock_usb_taken(void);
 void rock_usb_takeover(void);
 void rock_media_shutdown(void);
@@ -25,11 +23,7 @@ static inline void rock_usb_takeover(void) {}
 static inline void rock_media_shutdown(void) {}
 static inline void rock_playback_takeover(void) {}
 static inline bool rock_ui_raw(void) { return false; }
-static inline bool rock_list_owns(const struct gui_synclist *list)
-{
-    (void)list;
-    return false;
-}
+static inline bool rock_ui_native(void) { return false; }
 #endif
 
 #endif

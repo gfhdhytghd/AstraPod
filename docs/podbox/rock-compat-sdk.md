@@ -73,10 +73,7 @@ the native theme. The games keep their upstream playfields and help screens.
 
 Codebuster uses native menus and option pickers. Its local settings save
 on normal exit. Super Domination uses the upstream board tiles and the native
-inventory list. Rocklife starts with a built-in pattern. Rocklife's `.cells`
-viewer association and Super Domination's `.ssg` viewer association are outside
-this build. Super Domination can write its upstream save, but opening it
-from Files still requires the viewer association.
+inventory list. Rocklife starts with a built-in pattern.
 
 VU Meter reads the firmware playback channel's peaks and the mixer output
 rate. The title identifies stopped and paused playback, with the meters at
@@ -90,10 +87,17 @@ after the dependencies build.
 
 | Entry | Build dependency or behavior to verify |
 | --- | --- |
-| `chip8` | Route a selected `.ch8` file to the entry point. Verify the optional `.c8k` key mapping and emulator exit. |
 | `oscilloscope` | The ARM compiler reports missing `pcm_play_lock` and `mixer_channel_set_buffer_hook`. Define PCM lock and mixer hook ownership. Add OSD viewport buffer adapters and native volume controls. |
 | `pitch_detector` | The ARM compiler reports missing `pcm_record_data` and `plugin_get_audio_buffer`. Define capture callback teardown and the playback-buffer lease. |
 | `rb_info` | Map `talk_id`, `talk_spell` and `strcasestr`. Link the printcell, action and button helpers. Verify spoken rows and their native IDs. |
+
+## File viewers
+
+Files can open `.cells` with Rocklife, `.ssg` with Super Domination and
+`.ch8` with CHIP-8. The loader passes the selected path to the module
+for that call. CHIP-8 reads an optional same-stem `.c8k` file to remap
+keys. The firmware routes these extensions through a fixed association
+table. See [the plugin guide](../../apps-ipod/plugins/README.md) for keys.
 
 ## Foreground Metronome
 
@@ -151,7 +155,7 @@ precision for its average bitrate and playlist duration.
 See `apps-ipod/plugins/rock-modules.txt` for the installed applications, games
 and demos. Worker threads, timer callbacks, resident plugins, overlays, codec IRAM,
 audio-buffer leases and stock binary modules
-are outside the current SDK. File associations and cross-plugin dispatch are
-also outside this build. Load modules built from trusted sources. Plugins
+are outside the current SDK. Cross-plugin dispatch is also outside this
+build. Load modules built from trusted sources. Plugins
 execute with firmware privileges, and the host dynamic loader can run module
 initializers before the SDK header check.

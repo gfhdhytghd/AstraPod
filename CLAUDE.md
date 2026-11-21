@@ -335,8 +335,15 @@ Source file selection uses `SOURCES` files (not per-target Makefiles). These are
 There is no plugin system. Upstream's dynamically loaded `.rock` files, the
 `plugin.h` API struct and `plugin_start()` are all gone; `ROCKS` is empty and
 `make rocks` builds nothing. What were plugins are now either core screens
-(text and image viewers, properties, playing time) or deleted outright. Do not
-add one -- put the code in the core.
+(text and image viewers, properties, playing time) or deleted outright. Fork
+features still go in the core, and there is no fork-specific plugin API.
+
+The one plugin goal is source compatibility: upstream plugin sources from
+`apps/plugins/` build for AstraPod without hand edits -- through compat
+headers, generated mapping tables or mechanical conversion rules applied at
+build time -- and draw with AstraPod's widgets and theme. Binary
+compatibility with upstream `.rock` files is not a goal.
+`.specifications/rock-compat.md` is the design and its current state.
 
 **Watch for stubs left behind by the removal.** A plugin-backed feature could
 survive as an entry point that compiles, is reachable from a menu and does

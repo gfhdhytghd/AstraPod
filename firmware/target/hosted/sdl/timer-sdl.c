@@ -27,6 +27,7 @@
 static SDL_SpinLock ticks_lock;
 static SDL_TimerID ticks_id;
 static uintptr_t ticks_generation;
+static Uint32 ticks_time;
 static unsigned int pending_ticks;
 #endif
 
@@ -86,7 +87,13 @@ static Uint32 count_tick(Uint32 interval, void *generation)
     SDL_AtomicLock(&ticks_lock);
     bool active = ticks_id && (uintptr_t)generation == ticks_generation;
     if (active)
-        ++pending_ticks;
+    {
+        /* The host can wake late. Keep the tick count on the SDL clock. */
+        Uint32 elapsed = SDL_GetTicks() - ticks_time;
+        unsigned int ticks = elapsed / interval;
+        ticks_time += ticks * interval;
+        pending_ticks += ticks;
+    }
     SDL_AtomicUnlock(&ticks_lock);
     return active ? interval : 0;
 }
@@ -100,6 +107,7 @@ bool timer_reserve_ticks(long cycles)
     const unsigned long cycles_per_ms = TIMER_FREQ / 1000;
     Uint32 interval = ((unsigned long)cycles - 1) / cycles_per_ms + 1;
     SDL_AtomicLock(&ticks_lock);
+    ticks_time = SDL_GetTicks();
     ticks_id = SDL_AddTimer(interval, count_tick, (void *)++ticks_generation);
     SDL_AtomicUnlock(&ticks_lock);
     return ticks_id != 0;

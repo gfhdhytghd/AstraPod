@@ -137,6 +137,17 @@ bool rock_pitch_start(void)
 }
 
 #ifdef HAVE_ROCK_PITCH_DMA
+bool rock_pitch_suppresses_tones(void)
+{
+    if (!initialized)
+        return false;
+
+    mutex_lock(&pitch_mutex);
+    bool quiet = speech_disabled;
+    mutex_unlock(&pitch_mutex);
+    return quiet;
+}
+
 void rock_pitch_prepare(unsigned int pending)
 {
     mutex_lock(&pitch_mutex);
@@ -153,6 +164,8 @@ void rock_pitch_prepare(unsigned int pending)
 
     talk_disable(true);
     speech_disabled = true;
+    /* UI tones can start the playback clock while capture owns it. */
+    mixer_channel_stop(PCM_MIXER_CHAN_BEEP);
     saved_rate = mixer_get_frequency();
     pcm_init_recording();
     audio_set_output_source(AUDIO_SRC_PLAYBACK);

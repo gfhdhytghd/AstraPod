@@ -36,7 +36,10 @@ static inline void rock_pitch_revoke(void) {}
 #endif
 #define HAVE_ROCK_PITCH_DMA
 void rock_pitch_prepare(unsigned int request);
+bool rock_pitch_suppresses_tones(void);
 bool rock_pitch_sink_lock(void);
 void rock_pitch_sink_unlock(void);
+#else
+static inline bool rock_pitch_suppresses_tones(void) { return false; }
 #endif
 #endif

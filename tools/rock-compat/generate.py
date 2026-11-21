@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # Removed hardware, skin paths and per-plugin controls have no write target.
 FIXED = set("""
 backdrop_file buttonlight_brightness buttonlight_timeout colors_file hw_eq_bands
-icon_file invert pitch_mode_semitone pitch_mode_timestretch rec_mic_gain
+icon_file invert pitch_mode_semitone pitch_mode_timestretch
 remote_backlight_on_button_hold remote_backlight_timeout remote_backlight_timeout_plugged
 remote_icon_file remote_viewers_icon_file rsbs_file rwps_file sbs_file statusbar
 tagcache_db_path touch_mode viewers_icon_file wps_file
@@ -87,9 +87,11 @@ def settings(root, rows):
                 'album_art': f'({src} == AA_PREFER_CACHE ? AA_PREFER_EMBEDDED : {src})'}.get(name, src)
         guard = {'start_in_screen': f' && {dst} >= 0 && {dst} <= GO_TO_MAINMENU + 2',
                  'album_art': f' && {dst} >= AA_OFF && {dst} <= AA_PREFER_IMAGE_FILE'}.get(name, '')
-        if name == 'battery_capacity':
-            copy.append('#if BATTERY_CAPACITY_INC > 0')
-            flush.append('#if BATTERY_CAPACITY_INC > 0')
+        condition = {'battery_capacity': 'BATTERY_CAPACITY_INC > 0',
+                     'rec_mic_gain': 'defined(HAVE_RECORDING)'}.get(name)
+        if condition:
+            copy.append(f'#if {condition}')
+            flush.append(f'#if {condition}')
         if dim:
             copy.extend([f'    _Static_assert(sizeof({dst}) == sizeof({src}), "{name}");',
                          f'    memcpy({dst}, {src}, sizeof({dst}));'])
@@ -99,7 +101,7 @@ def settings(root, rows):
         else:
             copy.append(f'    {dst} = {expr};')
             flush.extend([f'    if ({dst} != {old}{guard})', f'        {src} = {dst};'])
-        if name == 'battery_capacity':
+        if condition:
             copy.append('#endif')
             flush.append('#endif')
         rows.append((name, f'{expr}; compare before write{guard}'))

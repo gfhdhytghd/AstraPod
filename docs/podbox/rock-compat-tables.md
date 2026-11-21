@@ -24,7 +24,7 @@ upstream reference profile. All outputs are build products.
   The 67 names from a raw source search include two comment-only names.
   `fg` is a fragment of the comment “fg|bg_color”, with no stock member.
   The view covers 65 executable member references plus the documented
-  `statusbar` member. It has 43 native mappings and 23 fixed defaults.
+  `statusbar` member. It has 44 native mappings and 22 fixed defaults.
   Conditional hardware EQ keeps its upstream feature guard. Lua raw-memory
   access requires regenerated offsets and a view-sized bound before use.
 * **rock_compat_sync.h** provides inline functions for the runtime. Keep two

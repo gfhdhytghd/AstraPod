@@ -59,9 +59,15 @@ $(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_UTILITIES))): $(ROCK_OUT)/
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-utilities.py $< $@
 
+ROCK_RESOURCE_GAMES := blackjack bubbles clix invadrox jewels pegbox rockblox \
+    solitaire spacerocks wormlet
+$(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_RESOURCE_GAMES))): $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c $(APPSDIR)/plugins/stage-games.py
+	$(SILENT)mkdir -p $(@D)
+	$(SILENT)python3 $(APPSDIR)/plugins/stage-games.py $< $@
+
 ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot \
     minesweeper periodic_table playing_time pong robotfindskitten snake snake2 star stopwatch \
-    lib/highscore $(ROCK_UTILITIES)
+    lib/highscore $(ROCK_UTILITIES) $(ROCK_RESOURCE_GAMES)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
@@ -72,6 +78,7 @@ $(ROCK_OBJECTS)/%.o: $(ROCK_SRC)/%.c $(ROCK_FINGERPRINT)
 
 ROCK_BITMAP_DIR := $(ROCK_OUT)/bitmaps/pluginbitmaps
 ROCK_NATIVE_BMPS := $(call preprocess,$(ROCK_SRC)/bitmaps/native/SOURCES)
+ROCK_MONO_BMPS := $(call preprocess,$(ROCK_SRC)/bitmaps/mono/SOURCES)
 
 define rock_module_bitmaps
 ROCK_BITMAPS += $(2)
@@ -102,15 +109,25 @@ $(eval $(call rock_module_bitmaps,games/snake2,snake2_header1 snake2_header2 \
     snake2_left snake2_right snake2_bottom))
 $(eval $(call rock_module_bitmaps,games/star,star_tiles))
 $(eval $(call rock_module_bitmaps,games/minesweeper,minesweeper_tiles))
+$(eval $(call rock_module_bitmaps,games/blackjack,card_deck card_back))
+$(eval $(call rock_module_bitmaps,games/bubbles,bubbles_background bubbles_bubble bubbles_emblem))
+$(eval $(call rock_module_bitmaps,games/invadrox,invadrox_background invadrox_aliens \
+    invadrox_ships invadrox_bombs invadrox_alien_explode invadrox_shield \
+    invadrox_ufo invadrox_ufo_explode invadrox_numbers invadrox_fire))
+$(eval $(call rock_module_bitmaps,games/jewels,jewels))
+$(eval $(call rock_module_bitmaps,games/pegbox,pegbox_header pegbox_pieces))
+$(eval $(call rock_module_bitmaps,games/rockblox,rockblox_background))
+$(eval $(call rock_module_bitmaps,games/solitaire,card_deck card_back solitaire_suitsi))
 
-# Use upstream's target-selected bitmap and drop its optional dimension suffix.
+# Use upstream's target-selected bitmap and encoding.
 rock_bitmap_name = $(firstword $(subst ., ,$(notdir $(1))))
-$(foreach bmp,$(ROCK_NATIVE_BMPS),$(if $(filter $(call rock_bitmap_name,$(bmp)),$(ROCK_BITMAPS)),\
+$(foreach bmp,$(ROCK_NATIVE_BMPS) $(ROCK_MONO_BMPS),$(if $(filter $(call rock_bitmap_name,$(bmp)),$(ROCK_BITMAPS)),\
     $(eval $(ROCK_BITMAP_DIR)/$(call rock_bitmap_name,$(bmp)).c $(ROCK_BITMAP_DIR)/$(call rock_bitmap_name,$(bmp)).h: $(bmp))))
 
+rock_bitmap_converter = $(if $(filter $(ROCK_SRC)/bitmaps/mono/%,$(1)),$(BMP2RB_MONO),$(BMP2RB_NATIVE))
 $(ROCK_BITMAP_DIR)/%.c $(ROCK_BITMAP_DIR)/%.h: $(TOOLSDIR)/bmp2rb
 	$(SILENT)mkdir -p $(@D)
-	$(call PRINTS,BMP2RB $(*F))$(BMP2RB_NATIVE) -b -h $(@D) $(filter %.bmp,$^) > $(@D)/$*.c
+	$(call PRINTS,BMP2RB $(*F))$(call rock_bitmap_converter,$(filter %.bmp,$^)) -b -h $(@D) $(filter %.bmp,$^) > $(@D)/$*.c
 
 $(ROCK_BITMAP_DIR)/%.o: $(ROCK_BITMAP_DIR)/%.c $(ROCK_BITMAP_DIR)/%.h
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
@@ -119,7 +136,7 @@ ROCK_ACTION_MODULES := demos/snow demos/logo demos/mosaique demos/bounce \
     demos/matrix apps/countdown_timer games/dice games/jackpot games/rockblox1d \
     games/robotfindskitten apps/periodic_table games/2048 games/amaze \
     demos/fire demos/fireworks demos/plasma demos/starfield \
-    apps/alarmclock apps/dart_scorer apps/resistor
+    apps/alarmclock apps/dart_scorer apps/resistor demos/demystify games/bubbles
 $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_ACTION_MODULES))): $(ROCK_OBJECTS)/lib/pluginlib_actions.o
 $(ROCK_OUT)/modules/games/dice.rock: $(addprefix $(ROCK_OBJECTS)/lib/,configfile.o playback_control.o)
 $(ROCK_OUT)/modules/games/jackpot.rock: $(ROCK_OBJECTS)/lib/picture.o
@@ -131,18 +148,24 @@ $(addprefix $(ROCK_OUT)/modules/,apps/lamp.rock demos/lamp.rock): $(addprefix $(
 $(ROCK_OUT)/modules/demos/credits.rock: $(ROCK_OBJECTS)/lib/helper.o
 $(ROCK_OUT)/modules/apps/dart_scorer.rock: $(addprefix $(ROCK_OBJECTS)/lib/,display_text.o helper.o playback_control.o)
 $(ROCK_OUT)/modules/apps/resistor.rock: $(addprefix $(ROCK_OBJECTS)/lib/,display_text.o helper.o picture.o)
-ROCK_GAME_SCORES := games/2048 games/brickmania games/xobox games/snake games/snake2
-ROCK_GAME_CONFIG := games/brickmania games/chopper games/mazezam games/snake
-ROCK_GAME_TEXT := games/2048 games/brickmania games/star
-ROCK_GAME_PLAYBACK := $(sort $(ROCK_GAME_SCORES) $(ROCK_GAME_CONFIG) games/minesweeper games/star)
+ROCK_GAME_SCORES := games/2048 games/brickmania games/xobox games/snake games/snake2 \
+    games/blackjack games/bubbles games/clix games/invadrox games/jewels games/rockblox \
+    games/spacerocks
+ROCK_GAME_CONFIG := games/brickmania games/chopper games/mazezam games/snake \
+    games/pegbox games/solitaire games/wormlet
+ROCK_GAME_TEXT := games/2048 games/brickmania games/star games/blackjack games/clix \
+    games/jewels games/pegbox games/rockblox games/solitaire games/spacerocks
+ROCK_GAME_PLAYBACK := $(sort $(filter-out games/invadrox,$(ROCK_GAME_SCORES)) $(ROCK_GAME_CONFIG) games/minesweeper games/star)
 $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_GAME_SCORES))): $(ROCK_OBJECTS)/lib/highscore.o
 $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_GAME_CONFIG))): $(ROCK_OBJECTS)/lib/configfile.o
 $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_GAME_TEXT))): $(ROCK_OBJECTS)/lib/display_text.o
 $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_GAME_PLAYBACK) demos/fireworks)): $(ROCK_OBJECTS)/lib/playback_control.o
 ROCK_EXTRA_HELPER := games/2048 games/brickmania games/chopper games/maze games/mazezam \
-    games/pong games/xobox demos/fire demos/fireworks demos/plasma demos/starfield
+    games/pong games/xobox demos/fire demos/fireworks demos/plasma demos/starfield \
+    demos/demystify games/invadrox games/rockblox games/spacerocks games/wormlet
 $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_EXTRA_HELPER))): $(ROCK_OBJECTS)/lib/helper.o
-$(ROCK_OUT)/modules/games/chopper.rock: $(ROCK_OBJECTS)/lib/xlcd_draw.o
+$(ROCK_OUT)/modules/games/chopper.rock $(ROCK_OUT)/modules/games/bubbles.rock: $(ROCK_OBJECTS)/lib/xlcd_draw.o
+$(ROCK_OUT)/modules/games/bubbles.rock: $(FIXEDPOINTLIB)
 $(ROCK_OUT)/modules/demos/plasma.rock: $(FIXEDPOINTLIB)
 
 $(ROCKS): $(ROCK_OUT)/modules/%.rock: $(ROCK_OBJECTS)/plugin_crt0.o $(ROCK_LINK_INPUT) $(ROCK_MANIFEST)

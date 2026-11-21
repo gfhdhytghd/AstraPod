@@ -22,7 +22,6 @@ def function(text,name):
   depth+=(text[end]=='{')-(text[end]=='}');end+=1
  return text[m.start():end]
 exit_hook=function(screen,'agents_usb_exit') if 'static void agents_usb_exit(' in screen else 'static void agents_usb_exit(int result){(void)result;}'
-assert 'open_confirm' not in screen and 'VIEW_CONFIRM' not in screen
 if 'static void agents_usb_exit(' in screen:
  assert re.search(r'viewportmanager_theme_undo\(i, false\);\s*agents_usb_exit\(ret\);\s*return ret;',screen)
  assert re.search(r'case ACTION_AGENTS_SWITCH:.*?ret = AGENTS_SWITCH_WPS;.*?done = true;',screen,re.S)

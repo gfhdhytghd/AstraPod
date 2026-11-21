@@ -6,6 +6,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 
@@ -50,7 +51,12 @@ def build_mock(repo, output, jobs, desktop):
     helper = desktop / "tests/firmware/fu79_remote_art_sim.py"
     if not helper.is_file():
         raise RuntimeError(f"Offline peer fixture not found at {helper}. Set --desktop.")
-    instrument = runpy.run_path(str(helper))["instrument"]
+    original_path = sys.path[:]
+    try:
+        sys.path.insert(0, str(helper.parent))
+        instrument = runpy.run_path(str(helper))["instrument"]
+    finally:
+        sys.path[:] = original_path
     source = output / "remote-src"
     source.mkdir()
     # Preserve the current tracked and untracked source, without copying any

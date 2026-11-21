@@ -49,6 +49,7 @@
 #include "system/strutil.h"
 #include "powermgmt.h"
 #include "timefuncs.h"
+#include "version.h"
 #include "lang_enum.h"
 #include "rbpaths.h"
 #include "ui/statusbar.h"
@@ -94,6 +95,8 @@ enum plugin_status {
 #undef write
 #undef lseek
 #undef ffilesize
+#undef remove
+#undef rename
 #undef file_exists
 #undef strrchr
 #undef strchr

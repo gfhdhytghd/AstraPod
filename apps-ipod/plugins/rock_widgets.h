@@ -6,6 +6,7 @@
 #include "rbunicode.h"
 #include "widgets/keyboard.h"
 #include "widgets/list.h"
+#include "widgets/text_box.h"
 #include "widgets/yesno.h"
 
 void rock_flush_settings(void);
@@ -16,6 +17,7 @@ void rock_modal_end(const struct rock_native_scope *scope);
 
 __typeof__(kbd_input) rock_kbd_input;
 __typeof__(gui_syncyesno_run) rock_yesno;
+__typeof__(view_text) rock_view_text;
 
 void rock_list_release(bool present);
 void rock_list_discard(void);

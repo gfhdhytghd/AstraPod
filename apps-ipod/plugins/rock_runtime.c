@@ -9,6 +9,7 @@
 #include "speech/language.h"
 #include "lang.h"
 #include "system/app_buffer.h"
+#include "widgets/folder_select.h"
 #include "widgets/splash.h"
 
 #ifdef ROCK_COMPAT_GENERATED
@@ -283,6 +284,25 @@ static void rock_splashf(int ticks, const char *fmt, ...)
     struct rock_native_scope scope = rock_modal_begin();
     splashf(ticks, "%s", text);
     rock_modal_end(&scope);
+}
+
+static bool rock_select_db_folders(bool autoresume)
+{
+    if (usb_taken)
+        return false;
+
+    struct rock_native_scope scope = rock_modal_begin();
+    bool changed;
+    if (autoresume)
+        changed = folder_select_in_buffer(str(LANG_AUTORESUME),
+                    (char *)global_settings.autoresume_paths,
+                    sizeof(global_settings.autoresume_paths), tail, tail_size);
+    else
+        changed = folder_select_in_buffer(str(LANG_SELECT_FOLDER),
+                    (char *)global_settings.tagcache_scan_paths,
+                    sizeof(global_settings.tagcache_scan_paths), tail, tail_size);
+    rock_modal_end(&scope);
+    return changed;
 }
 
 static const struct plugin_api api = {

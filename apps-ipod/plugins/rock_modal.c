@@ -1,5 +1,6 @@
 /* Modal widgets for foreground plugins. GNU GPL version 2 or later. */
 #include "plugins/rock_compat.h"
+#include "plugins/sdk/plugin.h"
 #include "plugins/rock_widgets.h"
 
 struct rock_native_scope rock_modal_begin(void)
@@ -39,4 +40,15 @@ int rock_kbd_input(char *buffer, int buflen, ucschar_t *kbd)
     int result = kbd_input(buffer, buflen, kbd);
     rock_modal_end(&scope);
     return result;
+}
+
+int rock_view_text(const char *title, const char *text)
+{
+    if (rock_usb_taken())
+        return PLUGIN_USB_CONNECTED;
+
+    struct rock_native_scope scope = rock_modal_begin();
+    view_text(title, text);
+    rock_modal_end(&scope);
+    return rock_usb_taken() ? PLUGIN_USB_CONNECTED : PLUGIN_OK;
 }

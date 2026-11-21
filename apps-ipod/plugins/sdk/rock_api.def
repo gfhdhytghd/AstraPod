@@ -174,4 +174,15 @@ ROCK_DIRECT(gui_synclist_del_item)
 ROCK_RAW(lcd_puts)
 ROCK_DIRECT(backlight_on)
 ROCK_DIRECT(beep_play)
+
+/* Native utility widgets */
+ROCK_DIRECT(strcasecmp)
+ROCK_SLOT(bool (*select_db_folders)(bool autoresume), select_db_folders,
+          rock_select_db_folders)
+ROCK_SLOT(int (*view_text)(const char *, const char *), view_text,
+          rock_view_text)
+ROCK_DIRECT(font_getstringsize)
+ROCK_SLOT(const char *rbversion, rbversion, rbversion)
+ROCK_SLOT(int (*remove)(const char *), remove, rock_remove)
+ROCK_SLOT(int (*rename)(const char *, const char *), rename, rock_rename)
 #undef ROCK_RAW

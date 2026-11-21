@@ -102,6 +102,16 @@ bool rock_file_exists(const char *path)
     return file_exists(path);
 }
 
+int rock_remove(const char *path)
+{
+    return rock_usb_taken() ? -1 : remove(path);
+}
+
+int rock_rename(const char *oldpath, const char *newpath)
+{
+    return rock_usb_taken() ? -1 : rename(oldpath, newpath);
+}
+
 static int dir_slot(DIR *dir)
 {
     if (dir)

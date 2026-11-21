@@ -16,6 +16,8 @@ off_t rock_ffilesize(int);
 int rock_fdprintf(int, const char *, ...) ATTRIBUTE_PRINTF(2, 3);
 int rock_read_line(int, char *, int);
 bool rock_file_exists(const char *);
+int rock_remove(const char *);
+int rock_rename(const char *, const char *);
 DIR *rock_opendir(const char *);
 struct DIRENT *rock_readdir(DIR *);
 int rock_closedir(DIR *);

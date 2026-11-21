@@ -1699,6 +1699,8 @@ static int prime_transfer(int ep_num, void* ptr, int len, bool send, bool wait)
             rc = -2;
             goto pt_error;
         }
+
+        udelay(1);
     }
 
     if (!(REG_ENDPTSTATUS & mask)) {

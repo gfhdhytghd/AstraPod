@@ -43,6 +43,10 @@ extern bool iap_accessory_present(void);
 extern void iap_periodic(void);
 extern void iap_handlepkt(void);
 extern void iap_send_pkt(const unsigned char * data, int len);
+/* Volume to the protocol's 0..255 scales: absolute over the codec's
+ * whole range, and UI normalised to the volume limit */
+unsigned char iap_volume_to_byte(int volume);
+unsigned char iap_volume_to_ui_byte(int volume);
 const unsigned char *iap_get_serbuf(void);
 #ifdef HAVE_LINE_REC
 extern bool iap_record(bool onoff);
@@ -61,5 +65,7 @@ void iap_accessory_poll(void);
 /* What the last poll saw: an accessory is in, or has not been out a second */
 bool iap_accessory_plugged(void);
 #endif
+void iap_load_playlist_ui(void);
+void iap_prepare_shutdown(bool save_playlist);
 bool dbg_iap(void);
 #endif

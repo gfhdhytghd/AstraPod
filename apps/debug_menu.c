@@ -146,6 +146,13 @@
 #include <sys/sysinfo.h>
 #endif
 
+#if defined(EROS_QN)
+#include "power-erosqnative.h"
+#include "lcd-erosqnative.h"
+#include "eros_qn_codec.h"
+#include "x1000/gpio.h"
+#endif
+
 #define SCREEN_MAX_CHARS (LCD_WIDTH / SYSFONT_WIDTH)
 
 static const char* threads_getname(int selected_item, void *data,
@@ -1452,7 +1459,9 @@ static int disk_callback(int btn, struct gui_synclist *lists)
     char buf[128];
     unsigned short* identify_info = ata_get_identify();
     bool timing_info_present = false;
-    (void)btn;
+
+    if (btn != ACTION_REDRAW)
+        return btn;
 
     simplelist_reset_lines();
 
@@ -1843,14 +1852,21 @@ static bool dbg_ata_smart(void)
 #else /* No SD, MMC or ATA */
 static int disk_callback(int btn, struct gui_synclist *lists)
 {
-    (void)lists;
     struct storage_info info;
+
+    if (btn != ACTION_REDRAW)
+        return btn;
+
+    simplelist_reset_lines();
+
+    (void)lists;
+
     storage_get_info(0,&info);
     simplelist_addline("Vendor: %s", info.vendor);
     simplelist_addline("Model: %s", info.product);
     simplelist_addline("Firmware: %s", info.revision);
     simplelist_addline(
-            "Size: %lu MB", (unsigned long)(info.num_sectors*(info.sector_size/512)/2048));
+            "Size: %lu MB", (unsigned long)(info.num_sectors*info.sector_size/1024/1024));
     sector_t free;
     volume_size( IF_MV(0,) NULL, &free );
     simplelist_addline(
@@ -2036,7 +2052,11 @@ static bool dbg_tagcache_info(void)
     /* info.timeout = TIMEOUT_NOBLOCK; */
     info.timeout = 1;
     tagcache_screensync_enable(true);
-    return simplelist_show_list(&info);
+    /* SELECT and USB leave the list without ACTION_STD_CANCEL; left on,
+     * screensync makes the next scan wait for this screen forever. */
+    bool ret = simplelist_show_list(&info);
+    tagcache_screensync_enable(false);
+    return ret;
 }
 #endif
 
@@ -2687,6 +2707,22 @@ static bool dbg_device_data(void)
 
 #if defined(EROS_QN)
     simplelist_addline("Hardware Revision: %d", (int)device_data.hw_rev);
+    simplelist_addline("DAC type: %s", es9018k2m_present_flag ? "ES9018K2M" : "PCM5102A");
+    simplelist_addline("PMU Type: %s",
+                       (eros_qn_pmu_type == EROS_QN_PMU_AXP192 ? "AXP192" :
+                       (eros_qn_pmu_type == EROS_QN_PMU_AXP2101 ? "AXP2101" : "unknown!")));
+    simplelist_addline("LCD autodetected: %s", eros_qn_lcd_autodetected ? "yes" : "no");
+    simplelist_addline("LCD ID: %06" PRIx32, eros_qn_lcd_id);
+    simplelist_addline("LCD ID4: %06" PRIx32, eros_qn_lcd_id4);
+
+    /* Print state of input gpios */
+    for (int i = 0; i < 4; ++i)
+    {
+        simplelist_addline("GPIO_%c: %08lx", "ABCD"[i], (REG_GPIO_PIN(i) &
+                                                         REG_GPIO_PAT1(i) &
+                                                         REG_GPIO_MSK(i) &
+                                                         ~REG_GPIO_INT(i)));
+    }
 #endif
     simplelist_addline("Struct Ver: %d", (int)device_data.version);
 
@@ -2939,10 +2975,7 @@ static const struct {
     CONFIG_CPU == AS3525 || CONFIG_CPU == RK27XX
         { "Dump ROM contents", dbg_save_roms },
 #endif
-#if defined(CPU_COLDFIRE) || defined(CPU_PP) \
-    || CONFIG_CPU == S3C2440 || CONFIG_CPU == IMX31L || CONFIG_CPU == AS3525 \
-    || CONFIG_CPU == DM320 || defined(CPU_S5L87XX) || CONFIG_CPU == AS3525v2 \
-    || CONFIG_CPU == RK27XX || CONFIG_CPU == JZ4760B
+#ifdef HAVE_DBG_PORTS
         { "View I/O ports", dbg_ports },
 #endif
 #if (CONFIG_RTC == RTC_PCF50605) && (CONFIG_PLATFORM & PLATFORM_NATIVE)

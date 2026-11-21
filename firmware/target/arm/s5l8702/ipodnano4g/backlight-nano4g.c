@@ -30,10 +30,18 @@
 #include "lcd-s5l8702.h"
 #endif
 
+static unsigned char led_out = DEFAULT_BRIGHTNESS_SETTING << 2;
+static bool led_on;
+
+static void led_update(void)
+{
+    pmu_set_backlight(led_out, led_on);
+}
 
 void backlight_hw_brightness(int brightness)
 {
-    pmu_write(D1759_REG_LEDOUT, brightness << 2);
+    led_out = brightness << 2;
+    led_update();
 }
 
 void backlight_hw_on(void)
@@ -42,19 +50,19 @@ void backlight_hw_on(void)
     if (!lcd_active())
         lcd_awake();
 #endif
-    pmu_write(D1759_REG_LEDCTL,
-            (pmu_read(D1759_REG_LEDCTL) | D1759_LEDCTL_ENABLE));
+    led_on = true;
+    led_update();
 }
 
 void backlight_hw_off(void)
 {
-    pmu_write(D1759_REG_LEDCTL,
-            (pmu_read(D1759_REG_LEDCTL) & ~D1759_LEDCTL_ENABLE));
+    led_on = false;
+    led_update();
 }
 
 bool backlight_hw_init(void)
 {
-    backlight_hw_brightness(DEFAULT_BRIGHTNESS_SETTING);
+    led_out = DEFAULT_BRIGHTNESS_SETTING << 2;
     backlight_hw_on();
     return true;
 }

@@ -5,7 +5,7 @@
  *   Jukebox    |    |   (  <_> )  \___|    < | \_\ (  <_> > <  <
  *   Firmware   |____|_  /\____/ \___  >__|_ \|___  /\____/__/\_ \
  *                     \/            \/     \/    \/            \/
- * $Id:
+ *
  *
  * Copyright (C) 2015 by Cástor Muñoz
  *
@@ -265,20 +265,19 @@ unsigned pll_get_cfg_freq(int pll);
 unsigned pll_get_out_freq(int pll);
 unsigned soc_get_oscsel_freq(void);
 int soc_get_hsdiv(void);
-
-#ifdef BOOTLOADER
-void usec_timer_init(void);
-
 void soc_set_system_divs(unsigned cdiv, unsigned hdiv, unsigned hprat);
 unsigned soc_get_system_divs(unsigned *cdiv, unsigned *hdiv, unsigned *pdiv);
 void soc_set_hsdiv(int hsdiv);
 
+#ifdef BOOTLOADER
+void usec_timer_init(void);
+
 #if CONFIG_CPU == S5L8702
-void cg16_config(volatile uint16_t* cg16,
-                    bool onoff, int clksel, int div1, int div2);
+int cg16_config(volatile uint16_t* cg16,
+                   bool onoff, int clksel, int div1, int div2);
 #elif CONFIG_CPU == S5L8720
-void cg16_config(volatile uint16_t* cg16,
-                    bool onoff, int clksel, int div1, int div2, int flags);
+int cg16_config(volatile uint16_t* cg16,
+                   bool onoff, int clksel, int div1, int div2, int flags);
 #endif
 
 int pll_config(int pll, int op_mode, int p, int m, int s, int lock_time);

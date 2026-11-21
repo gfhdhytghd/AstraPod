@@ -5,7 +5,7 @@
  *   Jukebox    |    |   (  <_> )  \___|    < | \_\ (  <_> > <  <
  *   Firmware   |____|_  /\____/ \___  >__|_ \|___  /\____/__/\_ \
  *                     \/            \/     \/    \/            \/
- * $Id:
+ *
  *
  * Copyright (C) 2015 by Cástor Muñoz
  *
@@ -60,9 +60,17 @@ unsigned pll_get_cfg_freq(int pll)
         return (f_in * mdiv * pdiv) >> sdiv; /* multiply */
     }
 #else /* S5L8720 */
-    // TODO
-    (void) pll;
-    return 0;
+    unsigned pdiv, mdiv, sdiv;
+    uint32_t pllpms = PLLPMS(pll);
+
+    /* Divide mode only. pll_config() clears PMSMOD for DM and the
+     * input is OSC0. (24 MHz * 133 / 6) >> 1 == 266 MHz. */
+    pdiv = (pllpms >> PLLPMS_PDIV_POS) & PLLPMS_PDIV_MSK;
+    if (pdiv == 0) return 0;
+    mdiv = (pllpms >> PLLPMS_MDIV_POS) & PLLPMS_MDIV_MSK;
+    sdiv = (pllpms >> PLLPMS_SDIV_POS) & PLLPMS_SDIV_MSK;
+
+    return ((uint64_t)S5L8702_OSC0_HZ * mdiv / pdiv) >> sdiv;
 #endif
 }
 
@@ -127,18 +135,62 @@ void soc_set_system_divs(unsigned cdiv, unsigned hdiv, unsigned hprat)
         val |= CLKCON1_PDIV_EN_BIT |
                 ((((pdiv >> 1) - 1) & CLKCON1_PDIV_MSK) << CLKCON1_PDIV_POS);
 
-    // TODO: The 8720 puts the EN_BIT here, it is not used in s5l8702, see if it influences,
-    // it seems that it does NOT behave the same, and when it is all 0 -> 0x40 it does not work (TBC), see EFI
     val |= ((hprat - 1) & CLKCON1_HPRAT_MSK) << CLKCON1_HPRAT_POS;
 
     CLKCON1 = val;
 
     while ((CLKCON1 >> 8) != (val >> 8));
 #else
-    // TODO
-    (void) cdiv;
-    (void) hdiv;
-    (void) hprat;
+    /* EFI clock ids 0/2/4/18. Read-modify-write: an absolute store
+     * drops bits that stick after the bootloader's 0x00404040 write,
+     * and SDRAM depends on that image. div==1 leaves the field clear;
+     * div==2 is the enable bit alone (0x40 in that byte). */
+    uint32_t val = CLKCON1;
+    unsigned pdiv = hdiv * hprat;
+    uint32_t cpu = 0;
+
+    if (cdiv > 1)
+        cpu = ((((cdiv >> 1) - 1) & CLKCON1_CDIV_MSK) << CLKCON1_CDIV_POS)
+            | CLKCON1_CDIV_EN_BIT;
+    val &= ~0x007e7e7eu;
+    if (hdiv > 1)
+        val |= ((((hdiv >> 1) - 1) & CLKCON1_HDIV_MSK) << CLKCON1_HDIV_POS)
+             | CLKCON1_HDIV_EN_BIT
+             | ((((hdiv >> 1) - 1) & CLKCON1_CDIV_MSK) << CLKCON1_LDIV_POS)
+             | CLKCON1_LDIV_EN_BIT;
+    if (pdiv > 1)
+        val |= ((((pdiv >> 1) - 1) & CLKCON1_PDIV_MSK) << CLKCON1_PDIV_POS)
+             | CLKCON1_PDIV_EN_BIT;
+    val = (val & ~0x7e000000u) | cpu;
+
+    /* Clock id 0 clears CLKCON0 bit 15 before touching the CPU field.
+     * Writing that field on its own stops the CPU. Bits 30:25 of
+     * CLKCON0 are the completion flag and must return to the value
+     * they had before the store. Leave CLKCON0 alone when the CPU
+     * field is already right: the boot path stays on the image the
+     * bootloader wrote. */
+    int irq = disable_irq_save();
+    if ((CLKCON1 & 0x7e000000u) != cpu) {
+        uint32_t cpu_done = CLKCON0 & CLKCON0_CPU_DIV_BUSY;
+        CLKCON0 &= ~CLKCON0_CPU_DIV_BIT;
+        CLKCON1 = val;
+        for (int i = 0; i < 1000000; i++) {
+            if ((CLKCON0 & CLKCON0_CPU_DIV_BUSY) == cpu_done &&
+                (CLKCON1 & 0x007e7e7eu) == (val & 0x007e7e7eu)) {
+                restore_irq(irq);
+                return;
+            }
+        }
+    } else {
+        CLKCON1 = val;
+        for (int i = 0; i < 1000000; i++) {
+            if ((CLKCON1 & 0x007e7e7eu) == (val & 0x007e7e7eu)) {
+                restore_irq(irq);
+                return;
+            }
+        }
+    }
+    restore_irq(irq);
 #endif
 }
 
@@ -330,7 +382,16 @@ int pll_onoff(int pll, bool onoff)
     if (onoff)
     {
         PLLMODE |= PLLMODE_EN_BIT(pll); /* start PLL */
-        while (!(PLLLOCK & PLLLOCK_LCK_BIT(pll))); /* locking... */
+        /* Same bound on every CPU. The lock bit is the configured
+         * lock time expiring, not proof that the PLL locked. */
+        for (int i = 0; i < 1000000 &&
+                        !(PLLLOCK & PLLLOCK_LCK_BIT(pll)); i++)
+            ;
+        if (!(PLLLOCK & PLLLOCK_LCK_BIT(pll)))
+        {
+            PLLMODE &= ~PLLMODE_EN_BIT(pll);
+            return -1;
+        }
         PLLMODE |= PLLMODE_PLLOUT_BIT(pll); /* slow mode OFF */
 
         /* returns DMLCK status, only meaningful for Divisor Mode (DM) */
@@ -348,11 +409,11 @@ int pll_onoff(int pll, bool onoff)
 
 /* configure and enable/disable 16-bit clockgate */
 #if (CONFIG_CPU == S5L8702)
-void cg16_config(volatile uint16_t* cg16,
-                    bool onoff, int clksel, int div1, int div2)
+int cg16_config(volatile uint16_t* cg16,
+                   bool onoff, int clksel, int div1, int div2)
 #elif (CONFIG_CPU == S5L8720)
-void cg16_config(volatile uint16_t* cg16,
-                    bool onoff, int clksel, int div1, int div2, int flags)
+int cg16_config(volatile uint16_t* cg16,
+                   bool onoff, int clksel, int div1, int div2, int flags)
 #endif
 {
     uint16_t val16 = ((clksel & CG16_SEL_MSK) << CG16_SEL_POS)
@@ -370,7 +431,14 @@ void cg16_config(volatile uint16_t* cg16,
 
     /*udelay(100);*/  /* probably not needed */
 
+#if CONFIG_CPU == S5L8720
+    for (int i = 0; i < 100000 && *cg16 != val16; i++)
+        ;
+    return *cg16 == val16 ? 0 : -1;
+#else
     while (*cg16 != val16);
+    return 0;
+#endif
 }
 
 /* Configures EClk for USEC_TIMER. DRAM refresh also depends on EClk,
@@ -390,11 +458,15 @@ void usec_timer_init(void)
     /* unmask timer controller clock gate */
     clockgate_enable(CLOCKGATE_TIMER, true);
 #elif CONFIG_CPU == S5L8720
-    cg16_config(&CG16_RTIME, true, CG16_SEL_OSC, 1, 1, 0x0);
-
-    /* unmask timer controller clock gates */
+    /* The BootROM leaves Timer E counting at 1 MHz. system_preinit()
+     * updates its prescaler after changing CG16_RTIME. */
     clockgate_enable(CLOCKGATE_TIMERE, true);
     clockgate_enable(CLOCKGATE_TIMERE_2, true);
+    TECON = 0x40;
+    TEPRE = 0xb;
+    TEDATA0 = ~0;
+    TECMD = 0x3;
+    return;
 #endif
 
     /* configure and start timer E */

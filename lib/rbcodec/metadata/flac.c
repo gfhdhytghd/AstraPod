@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <inttypes.h>
+#include <limits.h>
 #include "platform.h"
 
 #include "metadata.h"
@@ -71,6 +72,8 @@ bool get_flac_metadata(int fd, struct mp3entry* id3)
     unsigned char* buf = (unsigned char *)id3->path;
     bool last_metadata = false;
     bool rc = false;
+#ifdef HAVE_ALBUMART
+#endif
 
     if (!skip_id3v2(fd, id3) || (read(fd, buf, 4) < 4))
     {
@@ -101,15 +104,21 @@ bool get_flac_metadata(int fd, struct mp3entry* id3)
         {
             unsigned long totalsamples;
 
-            if (i >= sizeof(id3->path) || read(fd, buf, i) != (int)i)
+            /* there is only one; a second is junk after a bad block */
+            if (rc || i < 18 || i >= sizeof(id3->path) ||
+                read(fd, buf, i) != (int)i)
             {
-                return rc;
+                return false;
             }
 
             id3->vbr = true;   /* All FLAC files are VBR */
             id3->filesize = ffilesize(fd);
             id3->frequency = (buf[10] << 12) | (buf[11] << 4)
                 | ((buf[12] & 0xf0) >> 4);
+            if (id3->frequency == 0)
+            {
+                return false;
+            }
             rc = true;  /* Got vital metadata */
 
             /* totalsamples is a 36-bit field, but we assume <= 32 bits are used */
@@ -157,7 +166,7 @@ bool get_flac_metadata(int fd, struct mp3entry* id3)
             {
                 unsigned picture_type = get_long_be(buf);
                 unsigned length = get_long_be(buf + picframe_pos);
-                if (length <= (unsigned)(i + bytes_read - picframe_pos - 4))
+                if (length && length <= (unsigned)(i + bytes_read - picframe_pos - 4))
                 {
                     struct mp3_albumart art = {
                         .type = picture_format,

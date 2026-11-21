@@ -45,7 +45,7 @@
 #include "version.h"
 #include "powermgmt.h"
 #include "usb.h"
-#ifdef IPOD_NANO3G
+#if defined(IPOD_NANO3G) || defined(IPOD_NANO4G)
 #include "nand-target.h"
 #endif
 #ifdef NAND_CHECK
@@ -95,6 +95,13 @@ extern int line;
 static void usb_mode(void)
 {
     int button;
+
+#if defined(MAX_VIRT_SECTOR_SIZE) && defined(DEFAULT_VIRT_SECTOR_SIZE)
+#ifdef HAVE_MULTIDRIVE
+    for (int i = 0 ; i < NUM_DRIVES ; i++)
+#endif
+        disk_set_sector_multiplier(IF_MD(i,) DEFAULT_VIRT_SECTOR_SIZE/SECTOR_SIZE);
+#endif
 
     verbose = true;
 
@@ -981,7 +988,8 @@ void main(void)
 #endif
 
     /* Configure I2C0 */
-    i2c_preinit(0);
+    if (i2c_preinit(0))
+        while (1);
 
     if (pmu_is_hibernated()) {
         rc = launch_onb(1); /* 27/2 = 13.5 MHz. */
@@ -1114,6 +1122,14 @@ void main(void)
 #endif
         if (rc != 0) {
             printf("Storage error: %d", rc);
+#ifdef IPOD_NANO4G
+            printf("NAND %08lx x %u", (unsigned long)nand_chip_id(),
+                   nand_get_bank_count());
+            if (rc == NAND_ERR_UNKNOWN)
+                printf("unknown NAND chip");
+            else if (rc <= NAND_ERR_FTL)
+                printf("FTL mount error: %d", rc - NAND_ERR_FTL);
+#endif
             fatal_error(ERR_STORAGE);
         }
 
@@ -1174,12 +1190,6 @@ void main(void)
 #ifdef HAVE_BOOTLOADER_USB_MODE
     /* Enter USB mode if SELECT+RIGHT are pressed */
     if (button_read_device() == (BUTTON_SELECT|BUTTON_RIGHT)) {
-#if defined(MAX_VIRT_SECTOR_SIZE) && defined(DEFAULT_VIRT_SECTOR_SIZE)
-#ifdef HAVE_MULTIDRIVE
-            for (int i = 0 ; i < NUM_DRIVES ; i++)
-#endif
-                disk_set_sector_multiplier(IF_MD(i,) DEFAULT_VIRT_SECTOR_SIZE/SECTOR_SIZE);
-#endif
         usb_mode();
     }
 #endif
@@ -1203,12 +1213,6 @@ void main(void)
                 printf("P%d T%02x S%llx",
                        i, pinfo.type, (unsigned long long)pinfo.size);
         }
-#if defined(IPOD_NANO3G) && defined(DEFAULT_VIRT_SECTOR_SIZE)
-        /* Nothing mounted: show USB hosts Apple's 4096-byte sectors, which
-         * its partition table counts in */
-        disk_set_sector_multiplier(IF_MD(0,)
-                                   DEFAULT_VIRT_SECTOR_SIZE / SECTOR_SIZE);
-#endif
         fatal_error(ERR_RB);
     }
 

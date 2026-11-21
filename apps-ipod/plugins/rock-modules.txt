@@ -18,9 +18,11 @@ demos/logo
 demos/matrix
 demos/mosaique
 demos/plasma
+demos/rocklife
 demos/snow
 demos/starfield
 demos/test_kbd
+demos/vu_meter
 games/2048
 games/amaze
 games/blackjack
@@ -28,6 +30,7 @@ games/brickmania
 games/bubbles
 games/chopper
 games/clix
+games/codebuster
 games/dice
 games/flipit
 games/invadrox
@@ -46,5 +49,6 @@ games/snake2
 games/solitaire
 games/spacerocks
 games/star
+games/superdom
 games/wormlet
 games/xobox

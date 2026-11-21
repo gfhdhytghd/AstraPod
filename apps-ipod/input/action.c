@@ -35,6 +35,7 @@
 #include <stdlib.h>
 
 #include "config.h"
+#include "plugins/rock_compat.h"
 #include "lang.h"
 
 #include "speech/language.h"
@@ -1490,7 +1491,7 @@ int get_custom_action(int context,int timeout,
     scene_takeover(action);
 
 #ifdef HAVE_USB_CONFIRM
-    if (action == SYS_USB_CONFIRM)
+    if (action == SYS_USB_CONFIRM && !rock_ui_raw())
     {
         gui_usb_confirm_run(button_get_data());
         return ACTION_REDRAW;

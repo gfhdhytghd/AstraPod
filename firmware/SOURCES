@@ -59,6 +59,9 @@ target/hosted/rolo.c
 
 #if CONFIG_BINFMT == BINFMT_ROCK
 lc-rock.c
+#ifdef ASTRAPOD_ROCK_COMPAT
+lc-rock-checked.c
+#endif
 #endif
 
 #if defined(HAVE_ELF)

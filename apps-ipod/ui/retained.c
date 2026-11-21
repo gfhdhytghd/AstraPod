@@ -1,5 +1,6 @@
 /* PodBox retained UI. GPL version 2+. */
 #include "config.h"
+#include "plugins/rock_compat.h"
 #include "core_alloc.h"
 #include "lcd.h"
 #include "frame.h"
@@ -116,10 +117,18 @@ void ui_view_append(struct ui_view *parent, struct ui_view *child)
     child->parent = parent;
 }
 
+static unsigned retained_generation;
+
+void ui_retained_invalidate(void)
+{
+    ++retained_generation;
+}
+
 void ui_page_init(struct ui_page *page, struct ui_view *root)
 {
     *page = (struct ui_page){ .root = root, .focus = root,
-                             .damage = view_frame(root).clip };
+                             .damage = view_frame(root).clip,
+                             .generation = retained_generation };
 }
 
 void ui_page_invalidate(struct ui_page *page, struct ui_rect rect)
@@ -213,6 +222,8 @@ void ui_page_cancel_tracks(struct ui_page *page)
 
 void ui_page_step(struct ui_page *page, uint32_t clock)
 {
+    if (rock_ui_raw())
+        return;
     struct ui_track **link = &page->tracks;
     while (*link)
     {
@@ -247,9 +258,21 @@ static void paint_page(struct ui_page *page, struct ui_rect damage)
     page->damage = (struct ui_rect){0};
 }
 
+static struct ui_rect page_damage(struct ui_page *page)
+{
+    if (page->generation != retained_generation)
+    {
+        page->generation = retained_generation;
+        ui_page_invalidate(page, screen);
+    }
+    return page->damage;
+}
+
 struct ui_rect ui_page_paint(struct ui_page *page)
 {
-    struct ui_rect damage = page->damage;
+    if (rock_ui_raw())
+        return (struct ui_rect){0};
+    struct ui_rect damage = page_damage(page);
     if (!empty(damage))
         paint_page(page, damage);
     return damage;
@@ -305,14 +328,14 @@ struct ui_page *ui_nav_pop(struct ui_nav *nav)
 
 void ui_nav_draw(struct ui_nav *nav)
 {
-    if (!nav->depth)
+    if (rock_ui_raw() || !nav->depth)
         return;
     unsigned first = nav->depth - 1;
     while (first && nav->entry[first].presentation != UI_PAGE)
         --first;
     struct ui_rect damage = nav->damage;
     for (unsigned i = first; i < nav->depth; ++i)
-        damage = unite(damage, nav->entry[i].page->damage);
+        damage = unite(damage, page_damage(nav->entry[i].page));
     if (!empty(damage))
     {
         for (unsigned i = first; i < nav->depth; ++i)

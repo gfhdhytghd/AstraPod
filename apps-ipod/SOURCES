@@ -160,6 +160,14 @@ widgets/mask_select.c
 
 screens/browse/browser.c
 screens/browse/browser_disk.c
+#ifdef ASTRAPOD_ROCK_COMPAT
+plugins/rock_browser.c
+plugins/rock_files.c
+plugins/rock_runtime.c
+#if CONFIG_BINFMT == BINFMT_DLOPEN
+sim/rock_host.c
+#endif
+#endif
 screens/browse/browser_flat.c
 screens/context_menu.c
 screens/system/about.c

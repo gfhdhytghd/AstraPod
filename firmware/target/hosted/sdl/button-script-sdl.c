@@ -2,7 +2,7 @@
  *
  * --keys FILE (or PODBOX_UI_KEYS) feeds the regular SDL event loop. Each
  * line is `down NAME`, `up NAME`, or `wait N` at 60 f. NAME is up, down,
- * back, right, select, menu, play or hold. `-` reads stdin.
+ * back, right, select, menu, play, hold or usb (ipod6g). `-` reads stdin.
  *
  * PODBOX_UI_WALK_STATE maps a shared RGB24 ring of recent LCD frames.
  * PODBOX_UI_WALK_RENDER_DELAY=events:frames holds one present after that
@@ -54,6 +54,9 @@ static const struct {
     { "menu", SDLK_ESCAPE },
     { "play", SDLK_SPACE },
     { "hold", SDLK_h },
+#ifdef ASTRAPOD_ROCK_COMPAT
+    { "usb", SDLK_u },
+#endif
 };
 
 static struct shared_state *shared;

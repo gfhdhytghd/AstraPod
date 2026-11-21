@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include "string-extra.h"
 #include "config.h"
+#include "plugins/rock_compat.h"
 #include "button_chord.h"
 #include "input/agents_shortcut.h"
 #include "system/app_buffer.h"
@@ -651,20 +652,7 @@ static int browser(void* param)
     return ret_val;
 }
 
-/* The generic Plugins browser (apps/menus/plugin_menu.c's old Games/Apps/
- * Demos picker, and this screen's own later flat-PLUGIN_DIR replacement)
- * has been removed entirely: lastfm_scrobbler is the only plugin meant to
- * be user-reachable now (see apps/menus/main_menu.c's lastfm_scrobbler_item),
- * everything else is invoked directly by whatever core feature needs it.
- * GO_TO_BROWSEPLUGINS itself can't be removed from the enum/items[] table
- * without risk, though: a device with an existing saved config could still
- * have global_status.last_screen (or, with "start in: previous screen",
- * global_settings.start_in_screen) pointing at this slot from before this
- * change, and an unlisted items[] entry silently zero-initializes to a
- * NULL function pointer -- load_screen() would call through it and crash.
- * This stub exists purely so that stale reference redirects safely to the
- * root menu instead. GO_TO_RECENTBMARKS, Rockbox's Recent Bookmarks, is gone
- * the same way and takes the same stub. */
+/* Saved screen IDs for unavailable features return to the root. */
 static int plugins_browser_removed(void* param)
 {
     (void)param;
@@ -1210,7 +1198,11 @@ static const struct root_items items[] = {
 
 
     [GO_TO_RECENTBMARKS] =  { plugins_browser_removed, NULL, NULL },
+#ifdef ASTRAPOD_ROCK_COMPAT
+    [GO_TO_BROWSEPLUGINS] = { rock_browser, NULL, NULL },
+#else
     [GO_TO_BROWSEPLUGINS] = { plugins_browser_removed, NULL, NULL },
+#endif
     [GO_TO_PLAYLISTS_SCREEN] = { playlist_view_catalog, NULL,
                                                         &playlist_options },
     [GO_TO_PLAYLIST_VIEWER] = { playlist_view, NULL, &playlist_options },
@@ -1382,6 +1374,10 @@ MENUITEM_RETURNVALUE(playlists, ID2P(LANG_PLAYLISTS), GO_TO_PLAYLISTS_SCREEN,
  * viewer marks with a "+" in this very list. */
 MENUITEM_RETURNVALUE(current_playlist, ID2P(LANG_CURRENT_PLAYLIST),
                      GO_TO_PLAYLIST_VIEWER, NULL, Icon_Playlist);
+#ifdef ASTRAPOD_ROCK_COMPAT
+MENUITEM_RETURNVALUE(plugins_item, ID2P(LANG_PLUGINS), GO_TO_BROWSEPLUGINS,
+                     NULL, Icon_Plugin);
+#endif
 MENUITEM_RETURNVALUE(system_menu_, ID2P(LANG_SYSTEM), GO_TO_SYSTEM_SCREEN,
                      NULL, Icon_System_menu);
 
@@ -1426,6 +1422,9 @@ static struct menu_table menu_table[] = {
     { "quiz", &quiz_item },
     { "shortcuts", &shortcut_menu },
     { "settings", &menu_ },
+#ifdef ASTRAPOD_ROCK_COMPAT
+    { "plugins", &plugins_item },
+#endif
     { "system_menu", &system_menu_ },
     /* Kept last: root_menu_get_options()/root_menu_set_default() trim the
      * *tail* of this array down to however many of these are actually backed
@@ -1492,6 +1491,9 @@ static void root_menu_apply_canonical_order(void)
         &current_playlist, &playlists, &spun_item,
         &file_browser, &books_item, &documents_item, &images_item,
         &shortcut_menu, &quiz_item,
+#ifdef ASTRAPOD_ROCK_COMPAT
+        &plugins_item,
+#endif
         &menu_, &system_menu_,
     };
     struct menu_item_ex *reordered[MAX_MENU_ITEMS];

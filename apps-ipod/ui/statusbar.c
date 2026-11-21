@@ -1,5 +1,6 @@
 /* Native status bar service. GPL version 2+. */
 #include "config.h"
+#include "plugins/rock_compat.h"
 #include "statusbar.h"
 
 #include <string.h>
@@ -144,7 +145,7 @@ void sb_motion_presented(void)
 
 int sb_motion_timeout(int timeout)
 {
-    if (!indicators_moving || !lcd_active() || ui_flush_inhibited() ||
+    if (rock_ui_raw() || !indicators_moving || !lcd_active() || ui_flush_inhibited() ||
         lcd_updates_held() || !viewportmanager_theme_enabled(SCREEN_MAIN))
         return timeout;
     int next = ui_clock_poll_timeout(USEC_TIMER - motion_start, motion_duration, HZ);
@@ -310,7 +311,7 @@ int sb_visible_height(void)
 
 void sb_update(enum screen_type screen, bool force)
 {
-    if (status_handle <= 0 || screen != SCREEN_MAIN)
+    if (rock_ui_raw() || status_handle <= 0 || screen != SCREEN_MAIN)
         return;
 
     struct statusbar *bar = core_get_data_pinned(status_handle);

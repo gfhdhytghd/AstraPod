@@ -32,6 +32,7 @@ static int __attribute__((unused)) cider_browse(void){return GO_TO_WPS;}
 #define CAROUSEL_REMOTE_RETURN -22
 #define CAROUSEL_CONTEXT -21
 #define CAROUSEL_PLAY_ALBUM -20
+#define DB_ALBUM_PLAY_USB -2
 #define AUDIO_STATUS_PLAY 1
 static bool wps_return_agents,wps_select_remote,cover_toggled_back;
 #define GO_TO_ALBUM_COVERS 14
@@ -39,12 +40,14 @@ static int agent_result,covers_result,playing=1;
 static int agents_screen(void){return agent_result;}
 static int album_covers_scrn(void*p){(void)p;return GO_TO_PREVIOUS;}
 static int audio_status(void){return playing;}
-static int false_leaves,true_leaves;
-static void gwps_leave_wps(bool on){if(on)true_leaves++;else false_leaves++;}
+static void leave_playback(void){}
 static int album_model;
 static bool tracks_album_valid;
 static int carousel_run(int*m,const char*file){(void)m;(void)file;return covers_result;}
 static int carousel_cover_menu(void){return GO_TO_ROOT;}
+static bool carousel_wps_pending(void){return false;}
+static int carousel_wps_back(void){return GO_TO_ALBUM_COVERS;}
+static void carousel_wps_end(bool on){assert(!on);}
 static void album_covers_cancel_resume(void){}
 static int db_summary_play_pending(void){return 1;}
 int album_covers_return(const char*,bool*);

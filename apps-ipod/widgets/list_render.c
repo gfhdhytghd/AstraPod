@@ -1603,8 +1603,8 @@ static void draw_list(struct gui_synclist *list, bool status_only)
             status_only = false;
         render->artist_generation = generation;
     }
-    /* SDK callers can block waiting for input immediately after a draw. */
-    bool prefetch = !rock_list_owns(list);
+    /* Present complete glyphs in plugin lists and native modals before input. */
+    bool prefetch = !rock_ui_native();
     if (prefetch)
         font_prefetch_begin();
     unsigned epoch = font_prefetch_epoch();

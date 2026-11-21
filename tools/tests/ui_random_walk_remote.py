@@ -19,6 +19,32 @@ ROWS = {
     "playlists": [("list", "Fixture Playlist", "", "", 0, 1, "playlist", "playlist/a")],
 }
 
+# The demo peer has no DMA or profiling clock. Keep the reflected CRC
+# contract in case library work runs while exercising the UI.
+SERIAL_PORTS = r"""
+#include "crc32.h"
+#include "podlink_profile.h"
+void podlink_wake(void) {}
+uint32_t podlink_profile_now(void) { return 0; }
+void podlink_profile_add(enum podlink_stage stage, uint32_t start, unsigned bytes)
+{ (void)stage; (void)start; (void)bytes; }
+bool podlink_profile_start(bool fast) { (void)fast; return false; }
+void podlink_profile_stop(struct podlink_stage_sample *out, uint32_t *idle_us,
+                          uint32_t *wall_us)
+{
+    memset(out, 0, PL_STAGE_COUNT * sizeof(*out));
+    *idle_us = *wall_us = 0;
+}
+uint32_t podlink_bulk_crc(const unsigned char *data, unsigned length,
+                          uint32_t previous, uint32_t *raw)
+{
+    if (!data || !raw || !length || length > PODLINK_MAX_MESSAGE)
+        return previous;
+    *raw = crc_32r(data, length, 0);
+    return crc_32r(data, length, previous);
+}
+"""
+
 
 def build_mock(repo, output, jobs, desktop):
     helper = desktop / "tests/firmware/fu79_remote_art_sim.py"
@@ -42,12 +68,20 @@ def build_mock(repo, output, jobs, desktop):
         shutil.copy2(path, target, follow_symlinks=False)
 
     instrument(source)
+    # The mock exposes PodLink without a device USB stack. Recording still
+    # checks whether MSC owns the disk before accepting a test capture.
+    usb_header = source / "firmware/export/usb.h"
+    usb = usb_header.read_text()
+    marker = "void usb_storage_ejected(void);\n#endif /* HAVE_USBSTACK */"
+    assert usb.count(marker) == 1
+    usb_header.write_text(usb.replace(marker, marker.replace(
+        "#endif", "#else\nstatic inline bool usb_exclusive_storage(void) { return false; }\n#endif")))
     peer = source / "apps-ipod/sim/fu79-peer.c"
     code = peer.read_text()
     marker = "    cider_remote_source();"
     assert code.count(marker) == 1
     peer.write_text(code.replace(marker, '    if (!strcmp(scene, "home")) return screen;\n'
-                                         + marker))
+                                         + marker) + SERIAL_PORTS)
 
     build = output / "remote-sim"
     build.mkdir()

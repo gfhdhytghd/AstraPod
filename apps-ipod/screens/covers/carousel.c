@@ -5090,15 +5090,10 @@ static void panel_read_rows(void)
         return;
     uint64_t playing_key = !model->external && audio_status() && !cider_active()
                          ? panel_cache_playing_key() : 0;
-    const char *remote_id = "";
 #ifdef HAVE_USB_PODLINK
-    struct cider_state state;
+    char remote_id[sizeof(((struct cider_state *)0)->id)] = "";
     if (model->external && cider_active())
-    {
-        cider_snapshot(&state);
-        if (state.available && state.have)
-            remote_id = state.id;
-    }
+        cider_current_id(remote_id);
 #endif
     int first = panel.scroll_y / PANEL_PITCH;
     int rows = 2 * ALBUM_PANEL_ROWS + (panel.scroll_y % PANEL_PITCH != 0);
@@ -5135,8 +5130,6 @@ static void panel_read_rows(void)
 #ifdef HAVE_USB_PODLINK
             playing |= *remote_id && (!strcmp(source->remote_id, remote_id) ||
                                       cider_route_matches(source->route, remote_id));
-#else
-            (void)remote_id;
 #endif
             if (playing != row->playing)
                 panel.dirty = true;

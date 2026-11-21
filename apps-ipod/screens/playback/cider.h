@@ -23,6 +23,7 @@ bool cider_play_pending(void);
 void cider_remote_source(void);
 void cider_source_poll(void);
 void cider_snapshot(struct cider_state *state);
+void cider_current_id(char id[sizeof(((struct cider_state *)0)->id)]);
 /* Snapshot the advertised artwork independently of the decoded WPS cover. */
 void cider_current_art(char key[65]);
 /* Schedule a missing current cover at idle. True means its request failed. */

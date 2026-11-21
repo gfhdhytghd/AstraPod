@@ -810,4 +810,60 @@ static void ICODE_ATTR lcd_alpha_bitmap_part_mix(
 
     BLEND_FINISH;
 }
+#ifdef HAVE_PODBOX_FONT
+#if LCD_PIXELFORMAT == RGB565 && LCD_STRIDEFORMAT == HORIZONTAL_STRIDE
+static unsigned rgb_alpha(const unsigned char *mask, unsigned sample)
+{
+    return (mask[sample >> 1] >> (4 * (sample & 1))) & 15;
+}
+
+static unsigned mix_channel(unsigned background, unsigned foreground, unsigned alpha)
+{
+    unsigned weight = alpha + (alpha >> 3);
+    return (background * weight + foreground * (16 - weight)) >> 4;
+}
+#endif
+
+void lcd_font_glyph(const struct font_glyph *glyph, int skip, int x, int y)
+{
+    int width = glyph->width - skip;
+#if LCD_PIXELFORMAT == RGB565 && LCD_STRIDEFORMAT == HORIZONTAL_STRIDE
+    struct viewport *vp = lcd_current_viewport;
+    if (glyph->rgb && (vp->drawmode == DRMODE_FG || vp->drawmode == DRMODE_SOLID))
+    {
+        int src_x = skip, src_y = 0, height = glyph->height;
+        if (!clip_viewport_rect(vp, &x, &y, &width, &height, &src_x, &src_y))
+            return;
+
+        unsigned fg = vp->fg_pattern;
+        unsigned red = RGB_UNPACK_RED_LCD(fg);
+        unsigned green = RGB_UNPACK_GREEN_LCD(fg);
+        unsigned blue = RGB_UNPACK_BLUE_LCD(fg);
+        bool foreground_only = vp->drawmode == DRMODE_FG;
+        fb_data *dst = FBADDR(x, y);
+        for (int row = 0; row < height; ++row, dst += ROW_INC)
+        {
+            unsigned sample = 3 * ((src_y + row) * glyph->width + src_x);
+            for (int col = 0; col < width; ++col, sample += 3)
+            {
+                unsigned ar = rgb_alpha(glyph->rgb, sample);
+                unsigned ag = rgb_alpha(glyph->rgb, sample + 1);
+                unsigned ab = rgb_alpha(glyph->rgb, sample + 2);
+                if (foreground_only && ar == 15 && ag == 15 && ab == 15)
+                    continue;
+                fb_data *pixel = dst + col;
+                unsigned bg = foreground_only ? *pixel
+                    : lcd_backdrop ? *PTR_ADD(pixel, lcd_backdrop_offset) : vp->bg_pattern;
+                *pixel = LCD_RGBPACK_LCD(mix_channel(RGB_UNPACK_RED_LCD(bg), red, ar),
+                                         mix_channel(RGB_UNPACK_GREEN_LCD(bg), green, ag),
+                                         mix_channel(RGB_UNPACK_BLUE_LCD(bg), blue, ab));
+            }
+        }
+        return;
+    }
+#endif
+    lcd_alpha_bitmap_part(glyph->bits, skip, 0, glyph->width, x, y, width, glyph->height);
+}
+#endif
+
 #endif /* !DISABLE_ALPHA_BITMAP */

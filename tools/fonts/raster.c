@@ -67,10 +67,10 @@ int source_advance(struct source *src, uint32_t cp)
 
 static int raster(struct source *src, uint32_t cp, int phase,
                   int metrics[4], uint8_t *pixels, unsigned capacity,
-                  FT_Render_Mode mode)
+                  FT_Render_Mode mode, FT_Int32 hinting)
 {
     FT_Face face = src->face;
-    if (FT_Load_Char(face, cp, HINTING))
+    if (FT_Load_Char(face, cp, hinting))
         return -1;
     FT_GlyphSlot slot = face->glyph;
     if (slot->format != FT_GLYPH_FORMAT_OUTLINE)
@@ -98,18 +98,19 @@ static int raster(struct source *src, uint32_t cp, int phase,
 int source_raster(struct source *src, uint32_t cp, int phase,
                   int metrics[4], uint8_t *pixels, unsigned capacity)
 {
-    return raster(src, cp, phase, metrics, pixels, capacity, FT_RENDER_MODE_NORMAL);
+    return raster(src, cp, phase, metrics, pixels, capacity, FT_RENDER_MODE_NORMAL, HINTING);
 }
 
 int source_raster_lcd(struct source *src, uint32_t cp, int phase,
-                      int metrics[4], uint8_t *pixels, unsigned capacity)
+                      int metrics[4], uint8_t *pixels, unsigned capacity, int aligned)
 {
     /* FreeType's Harmony renderer applies its own color-fringe suppression
      * when the library was built without configurable LCD filtering. */
     FT_Error error = FT_Library_SetLcdFilter(src->library, FT_LCD_FILTER_DEFAULT);
     if (error && error != FT_Err_Unimplemented_Feature)
         return -1;
-    return raster(src, cp, phase, metrics, pixels, capacity, FT_RENDER_MODE_LCD);
+    return raster(src, cp, phase, metrics, pixels, capacity, FT_RENDER_MODE_LCD,
+                  aligned ? FT_LOAD_NO_BITMAP | FT_LOAD_TARGET_NORMAL : HINTING);
 }
 
 void source_metrics(struct source *src, int metrics[2])

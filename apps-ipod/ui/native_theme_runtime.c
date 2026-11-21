@@ -69,6 +69,8 @@ static bool theme_from_file(struct ui_theme *theme, const char *name)
 
 static void theme_font_path(char *path, size_t size, const char *name, int role)
 {
+    if (role != UI_FONT_ICON && !strcmp(name, "11-noto-sans"))
+        name = "10-noto-sans";
     snprintf(path, size, FONT_DIR "/%s.%s", name, role == UI_FONT_ICON ? "fnt" : "pbf");
 }
 

@@ -72,24 +72,26 @@ class BitmapFont:
             assert cell + stride <= trailer_at and length + 14 <= stride
             assert self.bitmaps + offset == cell + 6
             assert struct.unpack_from("<HHBB", self.data, cell) == (length, advance, left, right)
-            assert self.data[cell + 6] == 1
+            assert self.data[cell + 6] & ~compiler.RECORD_RGB == 1
             assert self.data[cell + 6 + length:cell + 14 + length] == b"\xff" * 8
         assert not variable_index and used_ranks == set(range(count))
         assert all(ranks[compiler.fixed_ordinal(cp)] == i
                    for i, cp in enumerate(order[1:end]))
 
-    def phases(self, cp):
+    def phases(self, cp, *, include_rgb=False):
         offset, size, _, _, _ = self.index[cp]
         record = self.data[self.bitmaps + offset:self.bitmaps + offset + size]
-        phase_count, = record[:1]
+        rgb = bool(record[0] & compiler.RECORD_RGB)
+        phase_count = record[0] & ~compiler.RECORD_RGB
         assert phase_count in (1, 4)
         start = 1
         for _ in range(phase_count):
             x, y, w, h = struct.unpack_from("<bbBB", record, start)
             end = start + 4 + (w * h + 1) // 2
-            assert end <= len(record)
-            yield (x, y, w, h), record[start + 4:end]
-            start = end
+            next_phase = end + ((3 * w * h + 1) // 2 if rgb else 0)
+            assert next_phase <= len(record)
+            yield (x, y, w, h), record[start + 4:next_phase if include_rgb else end]
+            start = next_phase
         assert start == len(record)
 
     def adjustment(self, a, b):
@@ -120,6 +122,7 @@ def check_compiler(first, second, lang):
         for filename in [*manifest["fonts"], "sources.json"]:
             path = filename if filename.endswith(".json") else filename + ".pbf"
             assert (first / path).read_bytes() == (second / path).read_bytes(), path
+        scratch = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="pbf-fusion-")))
         for name, face_info in manifest["fonts"].items():
             bitmap = BitmapFont(first / (name + ".pbf"))
             size, weight = face_info["size"], face_info["weight"]
@@ -131,21 +134,33 @@ def check_compiler(first, second, lang):
                 face.set_size(size, weight)
             assert (bitmap.height, bitmap.ascent) == (face_info["height"], face_info["ascent"])
             shifts = compiler.cjk_alignment(fonts)
+            fusion = compiler.load_fusion(size, compiler.FUSION_CACHE, scratch) if size in (8, 10) else {}
             for cp in bitmap.index:
                 source = mapping[cp]
-                phases = list(bitmap.phases(cp))
+                phases = list(bitmap.phases(cp, include_rgb=True))
                 if source is None:
                     assert phases == [((0, 0, 0, 0), b"")]
                     continue
                 face = fonts[source]
+                dot = fusion.get(cp) if compiler.ideograph(cp) else None
+                if dot:
+                    (x, _, w, h), ink = compiler.glyph_bitmap(dot)
+                    top = bitmap.ascent - (bitmap.height - h) // 2
+                    assert bitmap.index[cp][2] == dot.adv * 64
+                    assert phases == [((x, top, w, h), compiler.pack_alpha(ink))]
+                    continue
                 assert bitmap.index[cp][2] == face.advance(cp)
                 assert len(phases) == (1 if compiler.cjk(cp) else 4)
                 if source >= 2 or cp in map(ord, "封肖师字目AVTo"):
                     for phase, ((x, y, w, h), alpha) in enumerate(phases):
-                        (left, top, width, height), ink = face.bitmap(cp, phase * 16)
+                        if size == 12:
+                            (left, top, width, height), expected = compiler.lcd_bitmap(face, cp, phase * 16)
+                        else:
+                            (left, top, width, height), ink = face.bitmap(cp, phase * 16)
+                            expected = compiler.pack_alpha(ink)
                         y_shift = shifts.get(source, 0) if compiler.cjk(cp) else 0
                         assert (x, y, w, h) == (left, top + y_shift, width, height)
-                        assert alpha == compiler.pack_alpha(ink)
+                        assert alpha == expected
             for a, b in ("AV", "WA", "To", "ク。", "ガ、"):
                 cp = ord(a), ord(b)
                 source = 2 if compiler.cjk(cp[0]) else 0

@@ -17,6 +17,7 @@ enum {
     CACHE_BUDGET = 448 * 1024,
     PREFETCH_GLYPHS = 384,
     MAX_RECORD = 16384,
+    RECORD_RGB = 0x80,
     BLOCK_BYTES = 4096,
     FIXED_TRAILER = 32,
     HAN_COUNT = 0xa000 - 0x3400,
@@ -382,9 +383,16 @@ static const unsigned char *cached_glyph(struct font *font, ucschar_t cp)
     return entry->bitmap;
 }
 
+static size_t phase_size(const unsigned char *p, bool rgb)
+{
+    unsigned pixels = (unsigned)p[2] * p[3];
+    return 4 + (pixels + 1) / 2 + (rgb ? (3 * pixels + 1) / 2 : 0);
+}
+
 static bool valid_record(const unsigned char *record, size_t size)
 {
-    unsigned phases = record[0];
+    bool rgb = (record[0] & RECORD_RGB) != 0;
+    unsigned phases = record[0] & ~RECORD_RGB;
     if (phases != 1 && phases != 4)
         return false;
     size_t next = 1;
@@ -393,7 +401,7 @@ static bool valid_record(const unsigned char *record, size_t size)
         if (size - next < 4)
             return false;
         const unsigned char *p = record + next;
-        next += 4 + ((unsigned)p[2] * p[3] + 1) / 2;
+        next += phase_size(p, rgb);
         if (next > size)
             return false;
     }
@@ -510,17 +518,20 @@ int font_pbf_run(struct font *font, struct font_run *run, ucschar_t cp,
         if (present)
         {
             const unsigned char *p = record + 7;
-            unsigned phases = record[6];
+            bool rgb = (record[6] & RECORD_RGB) != 0;
+            unsigned phases = record[6] & ~RECORD_RGB;
             int rounded = origin + (phases == 4 ? 8 : 32);
             unsigned phase = phases == 4 ? (rounded >> 4) & 3 : 0;
             for (unsigned i = 0; i < phase; ++i)
-                p += 4 + ((unsigned)p[2] * p[3] + 1) / 2;
+                p += phase_size(p, rgb);
             out->x = (rounded >> 6) + (int8_t)p[0];
             out->y = font->ascent - (int8_t)p[1];
             out->width = p[2];
             out->height = p[3];
             out->phase = phase;
             out->bits = p + 4;
+            if (rgb)
+                out->rgb = out->bits + ((unsigned)p[2] * p[3] + 1) / 2;
             out->missing = (record[1] & 0x80) != 0;
         }
     }

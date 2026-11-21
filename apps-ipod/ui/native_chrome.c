@@ -259,8 +259,7 @@ static void draw_clock(struct viewport *damage, const char *text, int font,
             struct font_glyph glyph;
             font_run_next(pf, &run, (unsigned char)*text, &glyph);
             if (glyph.bits && glyph.width && glyph.height)
-                lcd_alpha_bitmap_part(glyph.bits, 0, 0, glyph.width, glyph.x,
-                                      clip.y - vp.y + glyph.y, glyph.width, glyph.height);
+                lcd_font_glyph(&glyph, 0, glyph.x, clip.y - vp.y + glyph.y);
         }
         lcd_set_viewport(damage);
         font_lock(font, false);

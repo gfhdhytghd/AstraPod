@@ -2227,8 +2227,7 @@ static bool dbg_bootflash_dump(void)
 struct font_test_sample {
     int width;
     int height;
-    const uint16_t *gray;
-    const uint16_t *rgb;
+    const uint16_t *coverage[3];
 };
 
 #include "font_test_samples.h"
@@ -2245,9 +2244,11 @@ static unsigned font_test_channel(unsigned coverage, unsigned max, bool dark)
 static void draw_font_test_sample(const struct font_test_sample *sample, int column,
                                   int y, bool dark)
 {
-    const uint16_t *coverage = column == 0 ? sample->gray : sample->rgb;
-    fb_data line[112];
-    int x = column * (LCD_WIDTH / 2) + 6;
+    const uint16_t *coverage = sample->coverage[column];
+    if (!coverage)
+        return;
+    fb_data line[LCD_WIDTH / 3 - 6];
+    int x = column * LCD_WIDTH / 3 + 6;
 
     for (int row = 0; row < sample->height; ++row)
     {
@@ -2264,8 +2265,14 @@ static void draw_font_test_sample(const struct font_test_sample *sample, int col
 
 static bool dbg_font_test(void)
 {
-    static const unsigned char *const labels[] = { "10 px", "12 px", "14 px" };
+    static const unsigned char *const labels[] = {
+        "Fusion Pixel", "ClearType", "CT + Align",
+    };
+    enum { TOP = 19, ROW_HEIGHT = 53, FOOTER = 12 };
+    const int visible = (LCD_HEIGHT - TOP - FOOTER) / ROW_HEIGHT;
+    const int size_count = ARRAYLEN(font_test_sizes);
     struct ui_scene scene = {0};
+    int first = 0;
     bool dark = false;
     bool to_root = false;
 
@@ -2283,19 +2290,22 @@ static bool dbg_font_test(void)
         lcd_set_foreground(dark ? LCD_WHITE : LCD_BLACK);
         lcd_set_background(dark ? LCD_BLACK : LCD_WHITE);
         lcd_clear_display();
-        lcd_putsxy(6, 4, "Grayscale");
-        lcd_putsxy(LCD_WIDTH / 2 + 6, 4, "RGB subpixel");
-        for (unsigned size = 0; size < ARRAYLEN(labels); ++size)
+        for (unsigned column = 0; column < ARRAYLEN(labels); ++column)
+            lcd_putsxy(column * LCD_WIDTH / 3 + 6, 4, labels[column]);
+        for (int row = 0; row < visible && first + row < size_count; ++row)
         {
-            int y = 19 + size * 41;
-            lcd_putsxy(6, y, labels[size]);
-            for (int column = 0; column < 2; ++column)
+            int size = first + row;
+            int y = TOP + row * ROW_HEIGHT;
+            char label[12];
+            snprintf(label, sizeof(label), "%d px", font_test_sizes[size]);
+            lcd_putsxy(6, y, label);
+            for (unsigned column = 0; column < ARRAYLEN(labels); ++column)
             {
                 draw_font_test_sample(&font_test_samples[size * 2], column, y + 10, dark);
-                draw_font_test_sample(&font_test_samples[size * 2 + 1], column, y + 24, dark);
+                draw_font_test_sample(&font_test_samples[size * 2 + 1], column, y + 31, dark);
             }
         }
-        lcd_putsxy(6, LCD_HEIGHT - 12, "Select: invert");
+        lcd_putsxy(6, LCD_HEIGHT - FOOTER, "Wheel: sizes   Select: invert");
         lcd_update();
 
         int action;
@@ -2309,8 +2319,23 @@ static bool dbg_font_test(void)
             }
             if (action == ACTION_STD_CANCEL)
                 goto done;
-        } while (action != ACTION_STD_OK);
-        dark = !dark;
+            if (action == ACTION_STD_OK)
+            {
+                dark = !dark;
+                break;
+            }
+            if ((action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT) && first > 0)
+            {
+                --first;
+                break;
+            }
+            if ((action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT) &&
+                first + visible < size_count)
+            {
+                ++first;
+                break;
+            }
+        } while (true);
     }
 
 done:

@@ -17,16 +17,20 @@ import unicodedata as ud
 
 from fontTools.ttLib import TTFont
 
+from fusion import FUSION_CACHE, glyph_bitmap, load_fusion
+
 ROOT = Path(__file__).resolve().parents[2]
 HEADER = struct.Struct("<4s6H5I")
 INDEX = struct.Struct("<IIHHBB")
 PAIR = struct.Struct("<Bh")
 PAGE = 64
+RECORD_RGB = 0x80
 GAMMA = 0.90
 
 # Nominal pixel sizes come from the existing basenames and theme roles.
 # Preserve the old basenames to read settings and themes from previous releases.
 FONTS = {
+    "8-noto-sans": (8, 400), "10-noto-sans": (10, 400),
     "12-noto-sans": (12, 400), "14-noto-sans": (14, 400),
     "18-noto-sans": (18, 400), "18-noto-sans-bold": (18, 700),
     "20-noto-sans": (20, 400), "20-noto-serif": (20, 400),
@@ -167,7 +171,7 @@ def build_raster(directory):
         "source_layout": (C.c_int, C.c_void_p, C.POINTER(C.c_uint32), C.c_uint,
                           C.c_int, C.c_int, C.POINTER(C.c_int)),
     }
-    args["source_raster_lcd"] = args["source_raster"]
+    args["source_raster_lcd"] = (*args["source_raster"], C.c_int)
     for name, (result, *argtypes) in args.items():
         fn = getattr(lib, name)
         fn.restype, fn.argtypes = result, argtypes
@@ -205,11 +209,12 @@ class Face:
             raise ValueError(f"FreeType could not measure U+{cp:04X}")
         return (advance + 32) & ~63 if cjk(cp) else advance
 
-    def bitmap(self, cp, phase, *, lcd=False):
+    def bitmap(self, cp, phase, *, lcd=False, aligned=False):
         metrics = (C.c_int * 4)()
         pixels = (C.c_uint8 * (160 * 160))()
-        render = self.lib.source_raster_lcd if lcd else self.lib.source_raster
-        size = render(self.handle, cp, phase, metrics, pixels, len(pixels))
+        args = (self.handle, cp, phase, metrics, pixels, len(pixels))
+        size = (self.lib.source_raster_lcd(*args, aligned) if lcd
+                else self.lib.source_raster(*args))
         if size < 0:
             raise ValueError(f"FreeType could not rasterize U+{cp:04X}")
         return tuple(metrics), bytes(pixels[:size])
@@ -346,7 +351,15 @@ def fixed_ordinal(cp):
     return None
 
 
-def compile_font(path, faces, mapping, pairs, size, weight):
+def lcd_bitmap(face, cp, phase):
+    """Use identical LCD bounds for RGB coverage and its grayscale fallback."""
+    (x, y, w, h), rgb = face.bitmap(cp, phase, lcd=True)
+    gray = bytes((r + 2 * g + b + 2) // 4
+                 for r, g, b in zip(rgb[0::3], rgb[1::3], rgb[2::3]))
+    return (x, y, w, h), pack_alpha(gray) + pack_alpha(rgb)
+
+
+def compile_font(path, faces, mapping, pairs, size, weight, fusion=None):
     for face in faces:
         face.set_size(size, weight)
 
@@ -356,12 +369,15 @@ def compile_font(path, faces, mapping, pairs, size, weight):
     height = size + (size >= 18)
     ascent = min(height, max(1, ascent - (source_height - height + 1) // 2))
     cjk_shifts = cjk_alignment(faces)
+    pixel = {cp: fusion[cp] for cp in mapping if ideograph(cp) and cp in fusion} if fusion else {}
 
     ordinal = {cp: i for i, cp in enumerate(mapping)}
     row = collections.defaultdict(dict)
     col = collections.defaultdict(dict)
     pair_count = 0
     for (a, b), i in sorted(pairs.items()):
+        if a in pixel or b in pixel:
+            continue
         face = faces[i]
         sc = int.from_bytes(b"Hani", "big") if cjk(a) or cjk(b) else 0
         with_kern = face.layout((a, b), sc)
@@ -403,18 +419,30 @@ def compile_font(path, faces, mapping, pairs, size, weight):
             advance, record = 0, b"\x01\0\0\0\0"
         else:
             face = faces[source]
-            advance = face.advance(cp)
+            dot = pixel.get(cp)
+            advance = dot.adv * 64 if dot else face.advance(cp)
+            rgb = size == 12
             phases = (0,) if cjk(cp) else (0, 16, 32, 48)
-            record = bytearray([len(phases)])
+            record = bytearray([len(phases) | (RECORD_RGB if rgb else 0)])
             for phase in phases:
-                (x, y, w, h), bitmap = face.bitmap(cp, phase)
-                if cjk(cp):
+                if rgb:
+                    (x, y, w, h), bitmap = lcd_bitmap(face, cp, phase)
+                elif dot:
+                    (x, y, w, h), ink = glyph_bitmap(dot)
+                    y = ascent - (height - h) // 2
+                    bitmap = pack_alpha(ink)
+                else:
+                    (x, y, w, h), ink = face.bitmap(cp, phase)
+                    if cjk(cp):
+                        y += cjk_shifts.get(source, 0)
+                    bitmap = pack_alpha(ink)
+                if rgb and cjk(cp):
                     y += cjk_shifts.get(source, 0)
                 if w and h:
                     ink_above = max(ink_above, y - ascent)
                     ink_below = max(ink_below, ascent - y + h - height)
                 record.extend(struct.pack("<bbBB", x, y, w, h))
-                record.extend(pack_alpha(bitmap))
+                record.extend(bitmap)
         max_record = max(max_record, len(record))
         max_advance = max(max_advance, (advance + 63) // 64)
         glyphs[cp] = (record, advance, left.get(cp, 0), right.get(cp, 0))
@@ -496,6 +524,7 @@ def compile_font(path, faces, mapping, pairs, size, weight):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--fusion-cache", type=Path, default=FUSION_CACHE)
     parser.add_argument("--lang-dir", type=Path, default=ROOT / "apps-ipod/lang")
     parser.add_argument("--font", nargs=3, action="append", default=[],
                         metavar=("FAMILY", "FILE", "FACE_INDEX"))
@@ -533,7 +562,9 @@ def main():
                     if spec[0] == 56:
                         info = compile_font(path, fonts, index_mapping, index_pairs, *spec)
                     else:
-                        info = compile_font(path, fonts, mapping, pairs, *spec)
+                        fusion = (load_fusion(spec[0], args.fusion_cache, Path(temp))
+                                  if spec[0] in (8, 10) else None)
+                        info = compile_font(path, fonts, mapping, pairs, *spec, fusion=fusion)
                     generated[spec] = path, info
                 manifest["fonts"][name] = info
                 print(name, info, flush=True)

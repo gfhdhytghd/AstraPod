@@ -428,9 +428,7 @@ static void LCDFN(putsxyofs)(int x, int y, int ofs, const unsigned char *str)
                 break;
             int skip = ofs ? MAX(0, -left) : 0;
             if (glyph.bits && glyph.width > skip && glyph.height)
-                lcd_alpha_bitmap_part(glyph.bits, skip, 0, glyph.width,
-                                      x + left + skip, y + glyph.y,
-                                      glyph.width - skip, glyph.height);
+                lcd_font_glyph(&glyph, skip, x + left + skip, y + glyph.y);
         }
         font_lock(vp->font, false);
         return;

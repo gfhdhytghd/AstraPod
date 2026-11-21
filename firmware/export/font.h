@@ -107,6 +107,7 @@ struct font_glyph {
     int origin, x, y, width, height;
     unsigned phase;
     const unsigned char *bits;
+    const unsigned char *rgb;
     bool missing;
 };
 

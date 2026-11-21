@@ -679,6 +679,8 @@ extern void lcd_bmp(const struct bitmap* bm, int x, int y);
 extern void lcd_alpha_bitmap_part(const unsigned char *src, int src_x,
                                   int src_y, int stride, int x, int y,
                                   int width, int height);
+struct font_glyph;
+extern void lcd_font_glyph(const struct font_glyph *glyph, int skip, int x, int y);
 extern void lcd_alpha_bitmap_part_img(const fb_data *image,
                                       const unsigned char *alpha,
                                       int src_x, int src_y, int x, int y,

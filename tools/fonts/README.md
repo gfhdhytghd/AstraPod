@@ -36,13 +36,22 @@ advance in 1/64 px, and two 8-bit kerning classes. A bitmap record starts
 with the phase count, 1 or 4. Each phase contains signed 8-bit left and
 top bearings, unsigned 8-bit width and height, and a tightly packed
 row-major alpha mask. Each byte holds two pixels, low nibble first.
-Alpha 0 is opaque and 15 is transparent.
+Alpha 0 is opaque and 15 is transparent. Bit 7 of the phase count marks
+an RGB glyph. Each phase of an RGB glyph appends a second packed mask
+with three samples per pixel, in R, G, B order. The first mask remains
+available for grayscale drawing. Readers that support RGB also accept
+older records with bit 7 clear.
+
+The 8 and 10 px faces use native Fusion Pixel bitmaps for covered Han
+characters and the usual outline fallback for other characters. The
+12 px face stores ClearType-style RGB masks. The compiler downloads
+pinned BDF archives to `~/.cache/podbox-font` on first use. Pass
+`--fusion-cache` to use a different cache.
 
 An optional six-byte trailer starts with `INK1`. Its last two bytes give
 the maximum ink beyond the top and bottom of the logical line cell.
 Lyrics uses these bounds for its native raster, row spacing and repaint
-bands. The header's file length includes the trailer. Existing PBF1
-readers can still use the same index and bitmap records.
+bands. The header's file length includes the trailer. The trailer does not change the index or bitmap records.
 
 An optional `FIX1` descriptor precedes `INK1`. It stores seven unsigned
 32-bit values: absolute directory, hot and cold offsets, cell stride, hot

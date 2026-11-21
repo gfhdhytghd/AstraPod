@@ -344,6 +344,9 @@ enum {
     ACTION_AGENTS_REMOTE_COVERS,
     ACTION_REMOTE_WPS,
 
+    ACTION_REC_PAUSE,
+    ACTION_REC_NEWFILE,
+
     LAST_ACTION_PLACEHOLDER, /* custom actions should be this + something */
 };
 

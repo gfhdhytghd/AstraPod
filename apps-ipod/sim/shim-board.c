@@ -200,3 +200,11 @@ void iap_enable(bool enable)
 }
 
 #endif /* SIMULATOR */
+
+#ifdef HAVE_RECORDING
+/* SDL has playback but no recording DMA backend. */
+bool recording_capture_available(void)
+{
+    return false;
+}
+#endif

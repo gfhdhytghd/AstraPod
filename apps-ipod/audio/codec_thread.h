@@ -10,6 +10,7 @@
 #ifndef _CODEC_THREAD_H
 #define _CODEC_THREAD_H
 
+#include <stddef.h>
 #include <stdbool.h>
 #include "config.h"
 
@@ -32,6 +33,9 @@ void codec_go(void);
 bool codec_pause(void);
 void codec_seek(long time);
 void codec_stop(void);
+#ifdef HAVE_RECORDING
+size_t codec_finish_stream(void);
+#endif
 void codec_unload(void);
 int codec_loaded(void);
 

@@ -55,6 +55,7 @@ static const struct {
     { TAG_SYSTEM,      "system"     },
     { TAG_USB,         "usb"        },
     { TAG_VOICE,       "voice"      },
+    { TAG_RECORDING,   "recording"  },
 };
 
 /* ---- the table ---------------------------------------------------------- */
@@ -164,6 +165,34 @@ static const struct tag_row tag_rows[] = {
 /* automatic resume */
 { "autoresume enable",    TAG_PLAYBACK,                          "resume position" },
 { "autoresume next track",TAG_ADVANCED|TAG_PLAYBACK,             "resume" },
+
+/* --- recording ---------------------------------------------------------- */
+{ "rec format", TAG_RECORDING, NULL },
+{ "mp3_enc bitrate", TAG_RECORDING, NULL },
+{ "rec frequency", TAG_RECORDING, NULL },
+{ "rec source", TAG_RECORDING, NULL },
+{ "rec channels", TAG_RECORDING, NULL },
+{ "rec mono mode", TAG_RECORDING, NULL },
+{ "rec split method", TAG_RECORDING, NULL },
+{ "rec split type", TAG_RECORDING, NULL },
+{ "rec timesplit", TAG_RECORDING, NULL },
+{ "rec sizesplit", TAG_RECORDING, NULL },
+{ "prerecording time", TAG_RECORDING, NULL },
+{ "rec path", TAG_RECORDING, NULL },
+{ "peak meter clipcounter", TAG_RECORDING, NULL },
+{ "cliplight", TAG_RECORDING, NULL },
+{ "trigger mode", TAG_RECORDING, NULL },
+{ "trigger type", TAG_RECORDING, NULL },
+{ "trigger start threshold dB", TAG_RECORDING, NULL },
+{ "trigger start threshold linear", TAG_RECORDING, NULL },
+{ "trigger start duration", TAG_RECORDING, NULL },
+{ "trigger stop threshold dB", TAG_RECORDING, NULL },
+{ "trigger stop threshold linear", TAG_RECORDING, NULL },
+{ "trigger stop duration", TAG_RECORDING, NULL },
+{ "trigger min gap", TAG_RECORDING, NULL },
+{ "rec mic gain", TAG_RECORDING, NULL },
+{ "rec left gain", TAG_RECORDING, NULL },
+{ "rec right gain", TAG_RECORDING, NULL },
 
 /* --- playlists ----------------------------------------------------------- */
 { "sort playlists",      TAG_PLAYLIST|TAG_LIBRARY,               NULL },

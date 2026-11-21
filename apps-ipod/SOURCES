@@ -127,6 +127,12 @@ ui/scene.c
 ui/sheet.c
 widgets/option_select.c
 widgets/rating_dialog.c
+#ifdef HAVE_RECORDING
+audio/enc_config.c
+audio/pcm_record.c
+screens/recording.c
+screens/settings/recording_settings.c
+#endif
 audio/peak_meter.c
 audio/spectrum_meter.c
 audio/beat_analyse.c
@@ -447,6 +453,9 @@ iap/agents_volume.c
 #endif
 iap/iap-artwork.c
 iap/iap-lingo0.c
+#ifdef HAVE_LINE_REC
+iap/iap-lingo1.c
+#endif
 iap/iap-lingo2.c
 iap/iap-lingo3.c
 iap/iap-lingo4.c

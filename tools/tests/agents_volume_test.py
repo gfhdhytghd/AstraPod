@@ -25,8 +25,8 @@ while depth:
 case += '\n'+s[a+m.start():en]
 def body(p):return re.sub(r'^#include .*$', '',p.read_text(),flags=re.M)
 core=(S/'apps-ipod/iap/iap-core.c').read_text()
-def function(text,name):
- a=text.index('void '+name+'(');br=text.index('{',a);en=br+1;depth=1
+def function(text,name,return_type='void'):
+ a=text.index(return_type+' '+name+'(');br=text.index('{',a);en=br+1;depth=1
  while depth:
   depth+=(text[en]=='{')-(text[en]=='}');en+=1
  return text[a:en]
@@ -54,6 +54,7 @@ static bool streaming;
 #include <stdint.h>
 #include <limits.h>
 #include <stdlib.h>
+#include <string.h>
 static bool remote_input_active;
 #define HAVE_USB_PODLINK
 #define IPOD_ACCESSORY_PROTOCOL
@@ -117,7 +118,9 @@ reported+='\nstatic void notify(void){'+notify+'}\n'
 reported+='\nstatic void query(int type){IAP_TX_INIT(3,13);IAP_TX_PUT(type);switch(type){'+replies+'}}\n'
 screen=(S/'apps-ipod/screens/system/agents_screen.c').read_text()
 policy=function(screen,'update_volume_mode') if 'static void update_volume_mode' in screen else 'static void update_volume_mode(void){iap_agents_volume_enable(true);}'
-pre+='\nstatic int view;static bool volume_paging __attribute__((unused));\n#define VIEW_DETAIL 3\n#define VIEW_USAGE 4\n'+policy
+pre+='\nstatic int view;static bool volume_paging __attribute__((unused));\n'
+pre+='static char detail_pane[16]="p1";\n#define VIEW_DETAIL 3\n#define VIEW_USAGE 4\n'
+pre+=(function(screen,'is_t3','bool') if 'static bool is_t3(' in screen else '')+policy
 trace=[]
 for line in (R/'tools/tests/fixtures/remote-volume/2026-11-13.txt').read_text().splitlines():
  m=re.search(r'tick=(\d+).*03 0E 04 00 ([0-9A-F]{2}) 01',line)

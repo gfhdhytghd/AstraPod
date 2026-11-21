@@ -72,13 +72,17 @@ static void text_at(struct screen*d,int x,int y,unsigned c,const char*s){(void)d
 static void draw_disc(struct screen*d,int x,int y,unsigned c){(void)d;(void)x;(void)y;(void)c;}
 static const char *fit(char*b,size_t n,const char*s,int w){(void)b;(void)n;(void)w;return s;}
 static void draw_task(struct gui_synclist*l,struct viewport*v,unsigned c,bool d){(void)l;(void)v;(void)c;(void)d;}
-static int draw_input(struct screen*d,struct viewport*v,int y,unsigned c,unsigned b){(void)d;(void)v;(void)c;(void)b;return y;}
+static void draw_t3_body(struct screen*d,struct viewport*v,int y,unsigned c)
+{(void)d;(void)v;(void)y;(void)c;assert(!"unexpected T3 detail");}
+static int draw_input(struct screen*d,struct viewport*v,int y,const char *text,
+                      const char *cursor,unsigned c,unsigned b)
+{(void)d;(void)v;(void)text;(void)cursor;(void)c;(void)b;return y;}
 '''
 wrap=(S/'apps-ipod/draw/text_wrap.c').read_text()
 code='\n'.join(function(wrap,n) for n in ['is_punct_break','wrap_next','text_wrap_next_punct'])
 for n in ['detail_steps','detail_measure']:
  if re.search(r'\b'+n+r'\(',s):code+='\n'+function(s,n)
-code+='\n'+function(s,'draw_detail')
+code+='\n'+function(s,'is_t3')+'\n'+function(s,'draw_detail')
 post=r'''
 static int glyph(const char*p,int n,void*ctx){(void)p;(void)ctx;return n;}
 int main(void){

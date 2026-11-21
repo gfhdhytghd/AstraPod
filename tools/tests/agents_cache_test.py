@@ -4,7 +4,9 @@ import subprocess,sys
 R=Path(__file__).resolve().parents[2];O=Path(sys.argv[1]).resolve();O.mkdir(parents=True,exist_ok=True)
 s=(R/'apps-ipod/screens/system/agents_screen.c').read_text()
 start=s.index('static void background_link(');end=s.index('/* A free outbox slot',start)
-background=s[start:end]
+talk_start=s.index('static bool take_talk_result(void)\n{')
+action_start=s.index('static bool take_action_result(void)\n{')
+background=s[talk_start:s.index('\n}',talk_start)+2]+s[action_start:end]
 a=s.index('    bool resume =',s.index('int agents_screen(void)'))
 b=s.index('    FOR_NB_SCREENS(i)',a);initial=s[a:b]
 a=s.index('    if (resume)',b);b=s.index('    long frame_at',a);render=s[a:b]
@@ -34,8 +36,8 @@ static struct row cache_row;
 static int cache_top=4,frames,round_trips,resets;
 static uint32_t cache_generation=7,generation=7;
 static bool cache_valid=true,pending_answer,was_connected,detail_ready;
-static bool talk_held,talk_shown,talk_discarded,talk_req_up,talk_failed,focus_for_detail;
-static char key_req[8];
+static bool talk_held,talk_shown,talk_discarded,talk_req_up,talk_failed,talk_t3,focus_for_detail;
+static char key_req[8],action_req[8],t3_talk_start[8];
 static char space_id[16],space_tab[16],detail_pane[16],question_pane[16];
 static char pending_req[8],focus_req[8],talk_req[8],talk_note[64],task_text[244];
 static int detail_shown_age,nout,usage_serial,usage_scroll,detail_scroll,detail_scroll_max,detail_page_lines;

@@ -23,6 +23,7 @@ pre=r'''
 #include <sys/stat.h>
 #include "screens/playback/cider_model.h"
 #include "screens/playback/cider_store.h"
+static void album_blur_request_wps(void) {}
 #define HZ 100
 #define BUTTON_REDRAW 1
 #define ARRAYLEN(a) ((int)(sizeof(a)/sizeof((a)[0])))

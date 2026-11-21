@@ -19,6 +19,8 @@ static unsigned int play_request,loading_request;static struct cider_modes modes
 #include "screens/playback/cider_model.h"
 #include "podlink.h"
 #include "screens/playback/cider_store.h"
+static void album_blur_request_wps(void) {}
+static void album_blur_playing_changed(void) {}
 static struct cider_store_stats diag;
 static bool host_palette;
 static bool host_diag=true,host_store,host_live,live_reply;

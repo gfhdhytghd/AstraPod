@@ -92,6 +92,15 @@ after the dependencies build.
 | `vu_meter` | Map boolean options, `mixer_get_frequency` and native volume bounds and updates. Verify the peak display with playback running. |
 | `wormlet` | Link configuration, backlight and playback helpers. Verify the iPod player controls and the game-over exit. |
 
+## Phase 3 playback metadata
+
+`playing_time` uses the native playlist inspection and list APIs. The SDK
+copies the current track's metadata under the playback lock. The copy
+excludes the cue sheet and remains valid until the next metadata snapshot.
+To parse another entry, pass its path and either `-1` or a file descriptor
+owned by the plugin. The build stages the upstream source with millisecond and byte
+precision for its average bitrate and playlist duration.
+
 ## SDK boundaries
 
 - A plugin enters from the UI thread and returns before another plugin launches.

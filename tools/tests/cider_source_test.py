@@ -137,6 +137,16 @@ static bool buf_pin_handle(int h,bool p){(void)h;(void)p;return true;}
 post=r'''
 int main(void){
 cider_wps_alloc();
+#ifdef TEST_CURRENT_ID
+char track_id[sizeof(state.id)];
+state.available = true;
+strcpy(state.id,"fixture/song");
+cider_current_id(track_id);
+assert(!strcmp(track_id,"fixture/song"));
+state.available = false;
+cider_current_id(track_id);
+assert(!track_id[0]);
+#endif
 struct wps_state w={0};assert(!active);
 strcpy(state.title,"Cider song");strcpy(state.artist,"Artist");strcpy(state.album,"Album");strcpy(state.art,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 state.available=state.have=true;state.generation=7;state.duration=100000;state.position=1000;state.rate=1000;state.volume=42;
@@ -287,6 +297,8 @@ puts("FU32 WPS ACK clears pending; source handover on WPS/elsewhere, local pause
 puts("Production same-song/resume, pending WPS preview, ACK ownership, route decoding PASS");
 puts("Production Local/Cider, disconnect/reconnect, native WPS bitmap/actions PASS");}
 '''
+if 'void cider_current_id(' in resident:
+    pre += '\n#define TEST_CURRENT_ID\n' + fn('cider_current_id')
 (O/'source.c').write_text(pre+'\n'+button_codes+'\nstatic volatile uint32_t status_word;\n'+fn('publish_status')+'\nenum {'+','.join(actions)+'};\n'+fn('cider_active')+fn('cider_play_pending')+'\nstatic bool source_seen;static uint32_t source_generation;static bool handoff_hold_source(void){return false;}\n'+fn('cider_source_poll')+fn('cider_remote_source')+'\n'+fn('queue_control')+'\n'+fn('cider_control')+'\n'+fn('cider_mode_get')+'\n'+fn('cider_mode_set')+'\n'+fn('play_route')+'\n'+fn('cider_play')+'\n'+fn('cider_play_in')+'\n'+fn('cider_play_status')+'\n'+fn('cider_local_play')+'\n'+fn('cider_retain_art')+'\n'+fn('cider_prefetch_art')+'\n'+fn('audio_play',playback)+'\n'+fn('audio_resume',playback)+'\n'+source+'\n'+seek+'\nstatic int get_action(int c,int t){(void)c;(void)t;return seek_actions++ ? ACTION_WPS_STOPSEEK : ACTION_WPS_SEEKFWD;}\n'+post)
 (O/'config.h').write_text('#define HAVE_USB_PODLINK\n')
 cmd=['cc','-std=gnu11','-g','-Wall','-Wextra','-Wno-unused-variable','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'source.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),*wire_args(),'-o',str(O/'source')]

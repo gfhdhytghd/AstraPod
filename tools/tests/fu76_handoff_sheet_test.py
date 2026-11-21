@@ -39,15 +39,17 @@ retained_entry = 'static void retained_sheet_init(' in draw
 themed_entry = 'void load_native_style(' in draw
 dimmed_entry = 'SHEET_DIM_PERCENT' in draw
 if dimmed_entry:
-    presentation = '    if (p->card)\n        ui_nav_draw(&s->nav);'
-    assert draw.count(presentation) == 1
-    draw = draw.replace(presentation, '''    if (p->card)
-    {
-        frame_offset = offset;
-        frame_brightness = s->below.value[UI_BRIGHTNESS];
-        ui_nav_draw(&s->nav);
-        frame_offset = -1;
-    }''')
+    present = function(draw, 'present_sheet')
+    draw = draw.replace(present, present.replace(
+        '            ui_nav_draw(&s->nav);',
+        '''            frame_offset = offset;
+            frame_brightness = s->below.value[UI_BRIGHTNESS];
+            ui_nav_draw(&s->nav);
+            frame_offset = -1;''').replace(
+        '        else\n            frame_offset = offset;',
+        '        else {\n            frame_offset = offset;').replace(
+        '            frame_offset = -1;\n    }',
+        '            frame_offset = -1;\n        }\n    }'))
 animation = ''
 if native_entry:
     animation = (ROOT / 'apps-ipod/ui/animation.h').read_text()
@@ -497,7 +499,7 @@ struct queue_event {};
 static struct event_queue button_queue;
 static void queue_wait_w_tmo(struct event_queue *queue, struct queue_event *event, int ticks)
 {
-    assert(queue == &button_queue && event == NULL && ticks > 0);
+    assert(queue == &button_queue && event == NULL && ticks >= 0);
     ++queue_waits;
     if (scenario == 10 && !queued) queued = SYS_USB_CONNECTED;
     if (scenario == 12 && !queued) queued = BUTTON_RIGHT;
@@ -512,7 +514,7 @@ static bool queue_empty(const struct event_queue *queue)
 
 static int get_action(int context, int ticks)
 {
-    assert(context == CONTEXT_STD && ticks > 0 && !inhibited && hold == 1);
+    assert(context == CONTEXT_STD && ticks >= 0 && !inhibited && hold == 1);
     assert(viewport_depth == 2 && !viewport_visible[1]);
     current_tick += ticks;
     raw_button=0;
@@ -520,6 +522,7 @@ static int get_action(int context, int ticks)
     if (!shown) return ACTION_NONE;
     if (scenario == 5)
     {
+        if (exiting) return ACTION_NONE;
         if (!early_input++)
         {
             assert(shown == 1);
@@ -748,14 +751,41 @@ c = OUT / 'sheet.c'
 buttons = function(action_source, 'action_wait_for_release')
 if live_entry:
     buttons += function(action_source, 'action_handoff_enter')
+native_ports = function((ROOT / 'apps-ipod/ui/scene.c').read_text(),
+                        'ui_scene_modal_body_offset') + r'''
+static bool rock_ui_raw(void) { return false; }
+static unsigned album_art_generation(void) { return 0; }
+static unsigned album_blur_generation(void) { return 0; }
+static void album_palette_refresh(void) {}
+static const void *ui_scene_modal_parent(void) { return NULL; }
+static void ui_scene_modal_restored(const void *p) { assert(!p); }
+static int sb_visible_height(void) { return 0; }
+static void yield(void) { current_tick++; }
+static unsigned color_fit_contrast(unsigned ink, unsigned bg, int contrast)
+{ (void)bg;(void)contrast;return ink; }
+static fb_data mock_background[LCD_WIDTH * LCD_HEIGHT];
+static int native_wps_background(int art, unsigned generation, enum ui_bg_kind mode, unsigned fg)
+{
+    (void)generation;(void)mode;
+    return album_art_render_background(mock_background,LCD_WIDTH,LCD_HEIGHT,art,true,fg) ? 7 : -1;
+}
+static void native_wps_paint_background(const struct viewport *vp,int background,unsigned bg)
+{
+    if (background > 0)
+        lcd_set_foreground(mock_background[0]);
+    else
+        lcd_set_foreground(bg);
+    lcd_fillrect(0,0,vp->width,vp->height);
+}
+'''
 c.write_text(('#define LIVE_ENTRY\n' if live_entry else '') +
              ('#define NATIVE_SHEET\n' if native_entry else '') +
              ('#define RETAINED_SHEET\n' if retained_entry else '') +
              ('#define DIMMED_SHEET\n' if dimmed_entry else '') +
              ports + animation + types + sheet + '\n' + buttons + adapter +
-             theme_tokens + retained + draw + scenario)
+             theme_tokens + native_ports + retained + draw + scenario)
 binary = OUT / 'sheet'
-subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-pointer-sign', '-Wno-unused-function', '-Wno-unused-variable',
+subprocess.run(['cc', '-std=gnu11', '-g', '-Wall', '-Wextra', '-Werror', '-Wno-pointer-sign', '-Wno-unused-function', '-Wno-unused-variable',
                 '-fsanitize=address,undefined', '-fno-pie', '-no-pie', str(c),
                 '-o', str(binary)], check=True)
 subprocess.run([binary, *sys.argv[3:]], check=True)

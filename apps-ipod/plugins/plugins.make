@@ -11,7 +11,7 @@ ROCKS := $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_MODULES)))
 INCLUDES += -I$(ROCK_OUT)
 
 ROCK_STRICT := -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -Werror=int-conversion
-ROCK_FLAGS = -I$(ROCK_SDK) -I$(ROCK_SRC) -I$(ROCK_SRC)/lib \
+ROCK_FLAGS = $(ROCK_EXTRA_INCLUDES) -I$(ROCK_SDK) -I$(ROCK_SRC) -I$(ROCK_SRC)/lib \
     -I$(ROCK_OUT)/bitmaps -DPLUGIN \
     $(CFLAGS) $(SHARED_CFLAGS) $(ROCK_STRICT) -fno-lto -fno-builtin \
     -ffunction-sections -fdata-sections
@@ -54,7 +54,12 @@ ifneq ($(APP_TYPE),sdl-sim)
 ROCK_LINK_INPUT += $(ROCK_OBJECTS)/lib/gcc-support.o
 endif
 
-ROCK_STAGED := dice flipit jackpot periodic_table robotfindskitten stopwatch
+ROCK_UTILITIES := db_folder_select dict credits alarmclock dart_scorer resistor
+$(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_UTILITIES))): $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c $(APPSDIR)/plugins/stage-utilities.py
+	$(SILENT)mkdir -p $(@D)
+	$(SILENT)python3 $(APPSDIR)/plugins/stage-utilities.py $< $@
+
+ROCK_STAGED := dice flipit jackpot periodic_table robotfindskitten stopwatch $(ROCK_UTILITIES)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
@@ -76,6 +81,15 @@ $(eval $(call rock_module_bitmaps,games/jackpot,jackpot_slots))
 $(eval $(call rock_module_bitmaps,demos/logo,rockboxlogo))
 $(eval $(call rock_module_bitmaps,games/flipit,flipit_cursor flipit_tokens))
 $(eval $(call rock_module_bitmaps,demos/matrix,matrix_bold matrix_normal))
+$(eval $(call rock_module_bitmaps,demos/credits,creditslogo))
+$(eval $(call rock_module_bitmaps,apps/resistor,resistor))
+
+$(ROCK_OUT)/upstream-credits/credits.raw: $(DOCSDIR)/CREDITS $(ROCK_SRC)/credits.pl
+	$(SILENT)mkdir -p $(@D)
+	$(call PRINTS,Create upstream credits.raw)perl $(ROCK_SRC)/credits.pl < $< > $@
+
+$(ROCK_OBJECTS)/credits.o: $(ROCK_OUT)/upstream-credits/credits.raw
+$(ROCK_OBJECTS)/credits.o: ROCK_EXTRA_INCLUDES := -I$(ROCK_OUT)/upstream-credits
 
 # Use upstream's target-selected bitmap and drop its optional dimension suffix.
 rock_bitmap_name = $(firstword $(subst ., ,$(notdir $(1))))
@@ -91,7 +105,7 @@ $(ROCK_BITMAP_DIR)/%.o: $(ROCK_BITMAP_DIR)/%.c $(ROCK_BITMAP_DIR)/%.h
 
 ROCK_ACTION_MODULES := demos/snow demos/logo demos/mosaique demos/bounce \
     demos/matrix apps/countdown_timer games/dice games/jackpot games/rockblox1d \
-    games/robotfindskitten apps/periodic_table
+    games/robotfindskitten apps/periodic_table apps/alarmclock apps/dart_scorer apps/resistor
 $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_ACTION_MODULES))): $(ROCK_OBJECTS)/lib/pluginlib_actions.o
 $(ROCK_OUT)/modules/games/dice.rock: $(addprefix $(ROCK_OBJECTS)/lib/,configfile.o playback_control.o)
 $(ROCK_OUT)/modules/games/jackpot.rock: $(ROCK_OBJECTS)/lib/picture.o
@@ -100,6 +114,9 @@ $(ROCK_OUT)/modules/demos/cube.rock: $(ROCK_OBJECTS)/lib/xlcd_draw.o
 $(ROCK_OUT)/modules/demos/cube.rock $(ROCK_OUT)/modules/demos/bounce.rock: $(FIXEDPOINTLIB)
 $(ROCK_OUT)/modules/apps/chessclock.rock: $(ROCK_OBJECTS)/lib/playback_control.o
 $(addprefix $(ROCK_OUT)/modules/,apps/lamp.rock demos/lamp.rock): $(addprefix $(ROCK_OBJECTS)/lib/,pluginlib_actions.o helper.o)
+$(ROCK_OUT)/modules/demos/credits.rock: $(ROCK_OBJECTS)/lib/helper.o
+$(ROCK_OUT)/modules/apps/dart_scorer.rock: $(addprefix $(ROCK_OBJECTS)/lib/,display_text.o helper.o playback_control.o)
+$(ROCK_OUT)/modules/apps/resistor.rock: $(addprefix $(ROCK_OBJECTS)/lib/,display_text.o helper.o picture.o)
 $(ROCKS): $(ROCK_OUT)/modules/%.rock: $(ROCK_OBJECTS)/plugin_crt0.o $(ROCK_LINK_INPUT) $(ROCK_MANIFEST)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,LD $(@F))$(CC) $(ROCK_FLAGS) $(ROCK_LINK) -o $@.elf $(filter %.o,$^) $(filter %.a,$^) -lgcc

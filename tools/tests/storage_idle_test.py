@@ -18,9 +18,15 @@ code = r'''
 struct queue_event { long id; intptr_t data; };
 struct bg_task { const char *name; void (*handle_event)(const struct queue_event *); };
 struct mp3entry { char path[260]; };
-static struct { bool dynamic_colors; } global_settings;
+struct palette_workspace { struct mp3entry idle_track; };
+static struct palette_workspace workspace;
+static int workspace_handle;
 static bool active = true, usb, queued;
-static int posts, peeks, reads, dim = 128;
+static int posts, peeks, reads, pins, dim = 128;
+static void *core_get_data_pinned(int handle)
+{ assert(handle == workspace_handle && handle > 0); pins++; return &workspace; }
+static void core_put_data_pinned(void *data)
+{ assert(data == &workspace && pins == 1); pins--; }
 static bool usb_host_wants_storage(void) { return usb; }
 static bool storage_disk_is_active(void) { return active; }
 static int palette_dim(void) { return dim; }
@@ -34,20 +40,21 @@ static bool bg_task_queued(const struct bg_task *task, long id)
 static void bg_task_post(struct bg_task *task, long id)
 { assert(task->handle_event && id == PALETTE_EVENT_IDLE); posts++; queued = true; }
 '''
-code += function('apps-ipod/skin/skin_albumart_color.c', 'prefetch_idle_work')
-text = (ROOT / 'apps-ipod/skin/skin_albumart_color.c').read_text()
+palette = 'apps-ipod/metadata/album_palette.c'
+code += function(palette, 'prefetch_idle_work')
+text = (ROOT / palette).read_text()
 start = text.index('static struct bg_task palette_idle_task')
 code += text[start:text.index('\n};', start) + 3]
-code += function('apps-ipod/skin/skin_albumart_color.c', 'prefetch_idle_cb')
+code += function(palette, 'prefetch_idle_cb')
 code += r'''
 int main(void)
 {
     prefetch_idle_cb(0, NULL);
-    assert(!posts && !peeks && !reads);
-    global_settings.dynamic_colors = true;
-    prefetch_idle_cb(0, NULL);
     prefetch_idle_cb(0, NULL);
     assert(posts == 1 && queued && !peeks && !reads);
+    prefetch_idle_work(NULL);
+    assert(!peeks && !reads && !pins);
+    workspace_handle = 1;
     /* Worker delayed beyond sleep/USB must do no metadata or disk work. */
     active = false;
     prefetch_idle_work(NULL);
@@ -60,14 +67,11 @@ int main(void)
     assert(!peeks && !reads);
     dim = 128;
     prefetch_idle_work(NULL);
-    assert(peeks == 3 && reads == 2);
-    global_settings.dynamic_colors = false;
-    prefetch_idle_work(NULL);
-    assert(peeks == 3 && reads == 2);
-    queued = false; global_settings.dynamic_colors = true;
+    assert(peeks == 3 && reads == 2 && !pins);
+    queued = false;
     prefetch_idle_cb(0, NULL);
     assert(posts == 2);
-    puts("PASS: deferred idle dispatch, coalescing, disabled colors, USB, sleeping disk, missing size, buffered tracks");
+    puts("PASS: deferred idle dispatch, coalescing, USB, sleeping disk, missing workspace, zero dim, buffered tracks");
 }
 '''
 print(run([build('storage-idle', code)], 'storage-idle'), end='')

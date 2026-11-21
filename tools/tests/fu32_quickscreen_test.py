@@ -1,4 +1,4 @@
-"""FU32/FU34 production key worker, quickscreen, native steps and skin tokens."""
+"""FU32/FU34 production key worker, quickscreen, native steps and displayed values."""
 from pathlib import Path
 import re,subprocess,sys
 R=Path(__file__).resolve().parents[2];O=Path(sys.argv[1]).resolve();O.mkdir(parents=True,exist_ok=True);S=Path(sys.argv[2]) if len(sys.argv)>2 else R
@@ -7,11 +7,10 @@ def fn(s,n):
  e=m.end();d=1
  while d:d+=(s[e]=='{')-(s[e]=='}');e+=1
  return s[m.start():e]
-q=(S/'apps-ipod/screens/playback/quick_screen.c').read_text();a=(S/'apps-ipod/input/action.c').read_text();k=(S/'apps-ipod/input/keymap_ipod.c').read_text();skin=(S/'apps-ipod/skin/skin_tokens.c').read_text()
+q=(S/'apps-ipod/screens/playback/quick_screen.c').read_text();a=(S/'apps-ipod/input/action.c').read_text();k=(S/'apps-ipod/input/keymap_ipod.c').read_text()
 names=['button_context_standard','button_context_wps','button_context_quickscreen','remote_button_context_standard','remote_button_context_wps','remote_button_context_quickscreen']
 tables='\n'.join(re.search(r'static const struct button_mapping '+n+r'\[\].*?\n};',k,re.S).group() for n in names)
 actions=sorted(set(re.findall(r'\bACTION_\w+',tables+fn(q,'gui_syncquickscreen_run')+fn(q,'gui_quickscreen_do_button')))|{'ACTION_UNKNOWN'})
-tokens=sorted(set(re.findall(r'\bSKIN_TOKEN_\w+',fn(skin,'get_qs_token_value'))))
 pre=r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -129,20 +128,37 @@ static void remote_log_event(int a,unsigned long b,int c,int d,const void*e,unsi
 #define REMOTE_LOG_HOLD 3
 #define REMOTE_LOG_TRIPLE 4
 '''
-pre+='enum {'+','.join(actions)+'};\nenum {'+','.join(tokens)+'};\n'
+pre+='enum {'+','.join(actions)+'};\n'
 start=q.index('struct gui_quickscreen\n');end=q.index('\n};',start)+3
 pre+=q[start:end]+'\nstatic bool cider_quickscreen;\n'
 pre+=fn(q,'quick_screen_cider_active') if 'bool quick_screen_cider_active(' in q else 'static bool quick_screen_cider_active(void){return source_cider;}\n'
 pre+=tables+fn(a,'action_code_worker')+fn(a,'remote_context')+fn(a,'remote_volume_action')
 pre+=re.sub(r'^#include .*\n','',(S/'apps-ipod/input/agents_remote.c').read_text(),flags=re.M)
-pre+=fn(skin,'get_qs_token_value')
+pre+=fn(q,'cider_slot_mode')+fn(q,'cider_slot')+fn(q,'quickscreen_title')+fn(q,'quickscreen_value')
 pre+=r'''
-static void assert_values(void){char b[80];struct wps_token t={SKIN_TOKEN_LEFT_QUICKSETTING_VALUE};
- if(global_settings.qs_items[0]&&global_settings.qs_items[0]->lang_id==4){struct wps_token top={SKIN_TOKEN_TOP_QUICKSETTING_VALUE};assert(!strcmp(get_qs_token_value(&top,b,sizeof b),({static char expected[40];snprintf(expected,sizeof expected,"%d",brightness);expected;})));}
- if(kind==0){const char*v=get_qs_token_value(&t,b,sizeof b);assert(!strcmp(v,cider_mode_label(0,modes[0])));t.type=SKIN_TOKEN_RIGHT_QUICKSETTING_VALUE;assert(!strcmp(get_qs_token_value(&t,b,sizeof b),cider_mode_label(1,modes[1])));}}
-static void quickscreen_setup_viewports(struct gui_quickscreen*q,int i){(void)q;(void)i;}
-static void gui_quickscreen_draw(struct gui_quickscreen*q,int i){(void)q;(void)i;draws++;assert_values();}
-static void quickscreen_update(struct gui_quickscreen*q,int i){(void)q;(void)i;draws++;assert_values();}
+struct quickscreen_page { struct { bool active; } sheet; int sheet_handle; };
+static bool ui_flush_inhibited(void){return false;}
+static void ui_inhibit_flush(bool on){assert(!on);}
+static int ui_sheet_timeout(void *sheet,int timeout){(void)sheet;return timeout;}
+static void default_event_handler(int action){(void)action;}
+static bool album_palette_needs_repaint(void){return false;}
+static bool ui_take_dirty(int screen){(void)screen;return false;}
+static void quickscreen_chrome(struct quickscreen_page*v){(void)v;}
+static void quickscreen_present(struct quickscreen_page*v,bool capture){(void)v;(void)capture;assert(0);}
+static void quickscreen_update(struct gui_quickscreen*q,enum quickscreen_item item)
+{
+ (void)item;draws++;
+ char value[80],expected[40];
+ if(q->items[QUICKSCREEN_TOP]&&q->items[QUICKSCREEN_TOP]->lang_id==4){
+  snprintf(expected,sizeof expected,"%d",brightness);
+  assert(!strcmp(quickscreen_title(q,QUICKSCREEN_TOP),"Brightness"));
+  assert(!strcmp(quickscreen_value(q,QUICKSCREEN_TOP,value,sizeof value),expected));
+ }
+ if(q->cider&&kind==0){
+  assert(!strcmp(quickscreen_value(q,QUICKSCREEN_LEFT,value,sizeof value),cider_mode_label(0,modes[0])));
+  assert(!strcmp(quickscreen_value(q,QUICKSCREEN_RIGHT,value,sizeof value),cider_mode_label(1,modes[1])));
+ }
+}
 static void quickscreen_cleanup(void*p){(void)p;cleans++;cider_quickscreen=false;}
 static void quickscreen_draw_cb(unsigned short id,void*d,void*u){(void)id;(void)d;(void)u;}
 static void push_current_activity(int a){(void)a;}
@@ -166,9 +182,17 @@ static int get_action(int context,int timeout){(void)timeout;assert(context==CON
  prev=key;return result;}
 '''
 pre=pre.replace('PRODUCTION_OPTION_STEP',fn((S/'apps-ipod/widgets/option_select.c').read_text() if (S/'apps-ipod/widgets/option_select.c').exists() else (R/'apps-ipod/widgets/option_select.c').read_text(),'option_select_next_val'))
-pre+=fn(q,'cider_slot_mode')
-if 'static bool cider_slot(' in q:pre+=fn(q,'cider_slot')
-pre+=fn(q,'quickscreen_title')+fn(q,'quickscreen_draw_item')+fn(q,'gui_quickscreen_do_button')+fn(q,'gui_syncquickscreen_run')
+loop=fn(q,'gui_syncquickscreen_run')
+start=loop.index('    qs->view_handle =')
+end=loop.index('    while (true)',start)
+loop=loop[:start]+'''    struct quickscreen_page view_storage={0}, *view=&view_storage;
+    qs->view=view;
+    quickscreen_update(qs, QUICKSCREEN_ITEM_COUNT);
+'''+loop[end:]
+start=loop.index('    if (view->sheet_handle > 0)')
+end=loop.index('    /* Notify that',start)
+loop=loop[:start]+loop[end:]
+pre+=fn(q,'gui_quickscreen_do_button')+loop
 if 'static int quick_screen_run(' in q:
  pre+=fn(q,'quick_screen_run')+fn(q,'quick_screen_quick')+fn(q,'quick_screen_cider')+fn(q,'quick_screen_current')
 else:
@@ -232,17 +256,12 @@ int main(void){
   int done=exitkey==0?BUTTON_SELECT:exitkey==1?BUTTON_RC_MENU:BUTTON_RC_PLAY;
   add(done,0,0,0);add(done|BUTTON_REL,0,0,0);
   quick_screen_current(ACTION_STD_QUICKSCREEN,NULL);check_previous();
-  assert(step==limit&&brightness==33&&applied==33&&saves==1&&tweaks==2);
-  char b[40];struct wps_token t={SKIN_TOKEN_TOP_QUICKSETTING_NAME};
-  assert(!strcmp(get_qs_token_value(&t,b,sizeof b),"Brightness"));
-  t.type=SKIN_TOKEN_BOTTOM_QUICKSETTING_VALUE;assert(!strcmp(get_qs_token_value(&t,b,sizeof b),"33"));
- }
- for(int src=0;src<2;src++){
-  struct gui_quickscreen fallback={.cider=src};fallback.items[0]=fallback.items[3]=&bright;brightness=32;
-  quickscreen_draw_item(&fallback,&screens[0],QUICKSCREEN_TOP,false);
-  assert(!strcmp(fallback_lines[0],"Brightness")&&!strcmp(fallback_lines[1],"32"));
-  quickscreen_draw_item(&fallback,&screens[0],QUICKSCREEN_BOTTOM,true);
-  assert(!strcmp(fallback_lines[0],"Brightness: 32"));
+  assert(step==limit&&brightness==33&&applied==33&&saves==1&&tweaks==0);
+  struct gui_quickscreen values={.cider=src};
+  values.items[QUICKSCREEN_TOP]=values.items[QUICKSCREEN_BOTTOM]=&bright;
+  char value[80];
+  assert(!strcmp(quickscreen_title(&values,QUICKSCREEN_TOP),"Brightness"));
+  assert(!strcmp(quickscreen_value(&values,QUICKSCREEN_BOTTOM,value,sizeof value),"33"));
  }
  for(int src=0;src<2;src++){
   /* Limits match native repeated and non-repeated presses, step=1. */
@@ -259,9 +278,9 @@ int main(void){
  add(BUTTON_LEFT,1,0,0);add(BUTTON_RIGHT,1,1,0);
  add(BUTTON_RC_MENU,1,1,0);add(BUTTON_RC_MENU|BUTTON_REL,1,1,0);
  quick_screen_current(ACTION_STD_QUICKSCREEN,NULL);assert(!saves&&!tweaks&&brightness==32);
- puts("FU34 local/Cider brightness: body MENU/PLAY, remote Up/Down, native step/callback/limits/persistence, themed TOP/BOTTOM; remote Menu/Play and body Select exit PASS");
+ puts("FU34 local/Cider brightness: body MENU/PLAY, remote Up/Down, native step/callback/limits/persistence, native TOP/BOTTOM; remote Menu/Play and body Select exit PASS");
 
- puts("FU32 production key worker + quickscreen loop + themed Cider values: device/remote arrows, wheel, physical MENU TOP, remote MENU/centre exit, Play-hold context PASS");
+ puts("FU32 production key worker + quickscreen loop + native Cider values: device/remote arrows, wheel, physical MENU TOP, remote MENU/centre exit, Play-hold context PASS");
 }
 '''
 (O/'test.c').write_text(pre+post);(O/'config.h').write_text('')

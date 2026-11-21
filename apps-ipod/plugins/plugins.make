@@ -54,7 +54,7 @@ ifneq ($(APP_TYPE),sdl-sim)
 ROCK_LINK_INPUT += $(ROCK_OBJECTS)/lib/gcc-support.o
 endif
 
-ROCK_STAGED := dice flipit jackpot robotfindskitten stopwatch
+ROCK_STAGED := dice flipit jackpot periodic_table robotfindskitten stopwatch
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@

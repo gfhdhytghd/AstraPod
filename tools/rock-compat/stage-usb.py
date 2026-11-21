@@ -9,7 +9,7 @@ text = src.read_text()
 def replace(old, new):
     global text
     if text.count(old) != 1:
-        raise SystemExit(f"{src}: refresh USB conversion for {old!r}")
+        raise SystemExit(f"{src}: refresh source conversion for {old!r}")
     text = text.replace(old, new)
 
 if src.stem == "stopwatch":
@@ -61,6 +61,13 @@ elif src.stem == "jackpot":
         "        if (IS_SYSEVENT(action))\n"
         "            exit_on_usb(action);\n"
         "        rb->sleep(SLEEP_TIME);",
+    )
+elif src.stem == "periodic_table":
+    # The table assigns fixed pixel regions to its labels and cells.
+    replace(
+        "    struct font *pf = rb->font_get(rb->screens[SCREEN_MAIN]->getuifont());",
+        "    rb->lcd_setfont(FONT_SYSFIXED);\n"
+        "    struct font *pf = rb->font_get(FONT_SYSFIXED);",
     )
 elif src.stem == "robotfindskitten":
     replace('#include "lib/display_text.h"',

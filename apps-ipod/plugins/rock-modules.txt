@@ -1,6 +1,7 @@
 apps/calculator
 apps/chessclock
 apps/countdown_timer
+apps/lamp
 apps/periodic_table
 apps/stopwatch
 demos/bounce

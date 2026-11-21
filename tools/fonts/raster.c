@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_LCD_FILTER_H
 #include FT_MULTIPLE_MASTERS_H
 #include FT_OUTLINE_H
 #include FT_ADVANCES_H
@@ -64,8 +65,9 @@ int source_advance(struct source *src, uint32_t cp)
     return (advance + 512) >> 10;
 }
 
-int source_raster(struct source *src, uint32_t cp, int phase,
-                  int metrics[4], uint8_t *pixels, unsigned capacity)
+static int raster(struct source *src, uint32_t cp, int phase,
+                  int metrics[4], uint8_t *pixels, unsigned capacity,
+                  FT_Render_Mode mode)
 {
     FT_Face face = src->face;
     if (FT_Load_Char(face, cp, HINTING))
@@ -74,20 +76,40 @@ int source_raster(struct source *src, uint32_t cp, int phase,
     if (slot->format != FT_GLYPH_FORMAT_OUTLINE)
         return -1;
     FT_Outline_Translate(&slot->outline, phase, 0);
-    if (FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL))
+    if (FT_Render_Glyph(slot, mode))
         return -1;
 
     FT_Bitmap *bitmap = &slot->bitmap;
     unsigned w = bitmap->width, h = bitmap->rows;
-    if (w * h > capacity || (w && h && bitmap->pixel_mode != FT_PIXEL_MODE_GRAY))
+    unsigned channels = mode == FT_RENDER_MODE_LCD ? 3 : 1;
+    int pixel_mode = channels == 3 ? FT_PIXEL_MODE_LCD : FT_PIXEL_MODE_GRAY;
+    if (w * h > capacity || w % channels ||
+        (w && h && bitmap->pixel_mode != pixel_mode))
         return -1;
     metrics[0] = slot->bitmap_left;
     metrics[1] = slot->bitmap_top;
-    metrics[2] = w;
+    metrics[2] = w / channels;
     metrics[3] = h;
     for (unsigned y = 0; y < h && w; ++y)
         memcpy(pixels + y * w, bitmap->buffer + (ptrdiff_t)y * bitmap->pitch, w);
     return w * h;
+}
+
+int source_raster(struct source *src, uint32_t cp, int phase,
+                  int metrics[4], uint8_t *pixels, unsigned capacity)
+{
+    return raster(src, cp, phase, metrics, pixels, capacity, FT_RENDER_MODE_NORMAL);
+}
+
+int source_raster_lcd(struct source *src, uint32_t cp, int phase,
+                      int metrics[4], uint8_t *pixels, unsigned capacity)
+{
+    /* FreeType's Harmony renderer applies its own color-fringe suppression
+     * when the library was built without configurable LCD filtering. */
+    FT_Error error = FT_Library_SetLcdFilter(src->library, FT_LCD_FILTER_DEFAULT);
+    if (error && error != FT_Err_Unimplemented_Feature)
+        return -1;
+    return raster(src, cp, phase, metrics, pixels, capacity, FT_RENDER_MODE_LCD);
 }
 
 void source_metrics(struct source *src, int metrics[2])

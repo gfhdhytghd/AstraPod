@@ -2223,6 +2223,107 @@ static bool dbg_bootflash_dump(void)
 #endif
 
 
+#if defined(HAVE_PODBOX_FONT) && defined(HAVE_LCD_COLOR) && LCD_WIDTH >= 240 && LCD_HEIGHT >= 160
+struct font_test_sample {
+    int width;
+    int height;
+    const uint16_t *gray;
+    const uint16_t *rgb;
+};
+
+#include "font_test_samples.h"
+
+/* Match the 4-bit alpha weights used by the LCD font renderer. */
+static unsigned font_test_channel(unsigned coverage, unsigned max, bool dark)
+{
+    unsigned background = 15 - coverage;
+    background += background >> 3;
+    unsigned weight = dark ? 16 - background : background;
+    return (max * weight) >> 4;
+}
+
+static void draw_font_test_sample(const struct font_test_sample *sample, int column,
+                                  int y, bool dark)
+{
+    const uint16_t *coverage = column == 0 ? sample->gray : sample->rgb;
+    fb_data line[112];
+    int x = column * (LCD_WIDTH / 2) + 6;
+
+    for (int row = 0; row < sample->height; ++row)
+    {
+        for (int col = 0; col < sample->width; ++col)
+        {
+            unsigned value = *coverage++;
+            line[col] = LCD_RGBPACK_LCD(font_test_channel(value >> 8, 31, dark),
+                                        font_test_channel((value >> 4) & 15, 63, dark),
+                                        font_test_channel(value & 15, 31, dark));
+        }
+        lcd_bitmap(line, x, y + row, sample->width, 1);
+    }
+}
+
+static bool dbg_font_test(void)
+{
+    static const unsigned char *const labels[] = { "10 px", "12 px", "14 px" };
+    struct ui_scene scene = {0};
+    bool dark = false;
+    bool to_root = false;
+
+    ui_scene_open_page(&scene, "font-test-push");
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
+    int saved_font = lcd_getfont();
+    unsigned fg = lcd_get_foreground();
+    unsigned bg = lcd_get_background();
+    fb_data *backdrop = lcd_get_backdrop();
+    lcd_set_backdrop(NULL);
+    lcd_setfont(FONT_SYSFIXED);
+
+    while (true)
+    {
+        lcd_set_foreground(dark ? LCD_WHITE : LCD_BLACK);
+        lcd_set_background(dark ? LCD_BLACK : LCD_WHITE);
+        lcd_clear_display();
+        lcd_putsxy(6, 4, "Grayscale");
+        lcd_putsxy(LCD_WIDTH / 2 + 6, 4, "RGB subpixel");
+        for (unsigned size = 0; size < ARRAYLEN(labels); ++size)
+        {
+            int y = 19 + size * 41;
+            lcd_putsxy(6, y, labels[size]);
+            for (int column = 0; column < 2; ++column)
+            {
+                draw_font_test_sample(&font_test_samples[size * 2], column, y + 10, dark);
+                draw_font_test_sample(&font_test_samples[size * 2 + 1], column, y + 24, dark);
+            }
+        }
+        lcd_putsxy(6, LCD_HEIGHT - 12, "Select: invert");
+        lcd_update();
+
+        int action;
+        do
+        {
+            action = get_action(CONTEXT_STD, TIMEOUT_BLOCK);
+            if (action == ACTION_STD_MENU || default_event_handler(action) == SYS_USB_CONNECTED)
+            {
+                to_root = true;
+                goto done;
+            }
+            if (action == ACTION_STD_CANCEL)
+                goto done;
+        } while (action != ACTION_STD_OK);
+        dark = !dark;
+    }
+
+done:
+    lcd_setfont(saved_font);
+    lcd_set_foreground(fg);
+    lcd_set_background(bg);
+    lcd_set_backdrop(backdrop);
+    ui_scene_close_modal(&scene, !to_root, "font-test-pop");
+    viewportmanager_theme_undo(SCREEN_MAIN, true);
+    return to_root;
+}
+#endif
+
 static bool dbg_lyrics_perf(void)
 {
     struct simplelist_info info;
@@ -2271,6 +2372,9 @@ static const struct {
     bool *toggle;
 } menuitems[] = {
         { "Lyrics perf", dbg_lyrics_perf, false, NULL },
+#if defined(HAVE_PODBOX_FONT) && defined(HAVE_LCD_COLOR) && LCD_WIDTH >= 240 && LCD_HEIGHT >= 160
+        { "ClearType test", dbg_font_test, false, NULL },
+#endif
 #ifdef HAVE_USB_PODLINK
         { "Cider cover store", cider_store_debug_show, false, NULL },
 #endif

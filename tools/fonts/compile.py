@@ -167,6 +167,7 @@ def build_raster(directory):
         "source_layout": (C.c_int, C.c_void_p, C.POINTER(C.c_uint32), C.c_uint,
                           C.c_int, C.c_int, C.POINTER(C.c_int)),
     }
+    args["source_raster_lcd"] = args["source_raster"]
     for name, (result, *argtypes) in args.items():
         fn = getattr(lib, name)
         fn.restype, fn.argtypes = result, argtypes
@@ -204,10 +205,11 @@ class Face:
             raise ValueError(f"FreeType could not measure U+{cp:04X}")
         return (advance + 32) & ~63 if cjk(cp) else advance
 
-    def bitmap(self, cp, phase):
+    def bitmap(self, cp, phase, *, lcd=False):
         metrics = (C.c_int * 4)()
         pixels = (C.c_uint8 * (160 * 160))()
-        size = self.lib.source_raster(self.handle, cp, phase, metrics, pixels, len(pixels))
+        render = self.lib.source_raster_lcd if lcd else self.lib.source_raster
+        size = render(self.handle, cp, phase, metrics, pixels, len(pixels))
         if size < 0:
             raise ValueError(f"FreeType could not rasterize U+{cp:04X}")
         return tuple(metrics), bytes(pixels[:size])

@@ -36,6 +36,10 @@ static const char *filename;
 static unsigned char *tail;
 static size_t tail_size;
 static bool usb_taken;
+static bool backlight_overridden;
+#ifdef HAVE_SW_POWEROFF
+static bool original_sw_poweroff;
+#endif
 
 bool rock_usb_taken(void)
 {
@@ -67,14 +71,80 @@ void rock_begin_settings(void)
 #endif
 }
 
+static void restore_backlight(void)
+{
+    if (!backlight_overridden)
+        return;
+
+    backlight_overridden = false;
+    backlight_set_timeout(global_settings.backlight_timeout);
+    backlight_set_timeout_plugged(global_settings.backlight_timeout_plugged);
+    backlight_set_on_button_hold(global_settings.backlight_on_button_hold);
+    backlight_set_brightness(global_settings.brightness);
+}
+
+static void restore_input_settings(void)
+{
+    restore_backlight();
+#ifdef HAVE_SW_POWEROFF
+    button_set_sw_poweroff_state(original_sw_poweroff);
+#endif
+}
+
 void rock_usb_takeover(void)
 {
     if (!filename || usb_taken)
         return;
     rock_flush_settings();
+    restore_input_settings();
     usb_taken = true;
     rock_close_files();
 }
+
+static long rock_button_get(bool block)
+{
+    return usb_taken ? SYS_USB_CONNECTED : button_get(block);
+}
+
+static long rock_button_get_w_tmo(int timeout)
+{
+    return usb_taken ? SYS_USB_CONNECTED : button_get_w_tmo(timeout);
+}
+
+static int rock_get_action(int context, int timeout)
+{
+    return usb_taken ? SYS_USB_CONNECTED : get_action(context, timeout);
+}
+
+static int rock_get_custom_action(int context, int timeout,
+                                  const struct button_mapping *(*map)(int))
+{
+    return usb_taken ? SYS_USB_CONNECTED :
+                       get_custom_action(context, timeout, map);
+}
+
+#ifdef HAVE_SW_POWEROFF
+static void rock_button_set_sw_poweroff_state(bool enabled)
+{
+    if (!usb_taken)
+        button_set_sw_poweroff_state(enabled);
+}
+#endif
+
+#define ROCK_BACKLIGHT_SETTER(name) \
+    static void rock_##name(int value) \
+    { \
+        if (!usb_taken) \
+        { \
+            backlight_overridden = true; \
+            name(value); \
+        } \
+    }
+ROCK_BACKLIGHT_SETTER(backlight_set_timeout)
+ROCK_BACKLIGHT_SETTER(backlight_set_timeout_plugged)
+ROCK_BACKLIGHT_SETTER(backlight_set_on_button_hold)
+ROCK_BACKLIGHT_SETTER(backlight_set_brightness)
+#undef ROCK_BACKLIGHT_SETTER
 
 static void *rock_get_buffer(size_t *size)
 {
@@ -134,11 +204,18 @@ static bool rock_set_option(const char *title, const void *value, enum optiontyp
 static const struct settings_list *rock_find_setting(const void *variable)
 {
 #ifdef ROCK_COMPAT_GENERATED
-    /* Playback Control asks for these two settings through the generated view. */
-    if (variable == &settings_view.playlist_shuffle)
-        variable = &global_settings.playlist_shuffle;
-    else if (variable == &settings_view.repeat_mode)
-        variable = &global_settings.repeat_mode;
+    /* Only fields with matching native types, units and choices can expose
+     * the native registry entry. Converted or fixed fields have no such entry. */
+#define ROCK_FIND_MEMBER(member) \
+    if (variable == &settings_view.member) \
+        return find_setting(&global_settings.member)
+    ROCK_FIND_MEMBER(playlist_shuffle);
+    ROCK_FIND_MEMBER(repeat_mode);
+    ROCK_FIND_MEMBER(brightness);
+    ROCK_FIND_MEMBER(backlight_timeout);
+    ROCK_FIND_MEMBER(backlight_timeout_plugged);
+    ROCK_FIND_MEMBER(backlight_on_button_hold);
+#undef ROCK_FIND_MEMBER
 #endif
     return find_setting(variable);
 }
@@ -165,6 +242,16 @@ static int rock_settings_save(void)
     return settings_save();
 }
 
+static void rock_settings_apply(bool read_disk)
+{
+    if (usb_taken)
+        return;
+    struct rock_native_scope scope = rock_modal_begin();
+    settings_apply(read_disk);
+    backlight_overridden = false;
+    rock_modal_end(&scope);
+}
+
 static long rock_event_ex(long event, void (*cleanup)(void *), void *parameter)
 {
     if (usb_taken)
@@ -175,7 +262,7 @@ static long rock_event_ex(long event, void (*cleanup)(void *), void *parameter)
     struct rock_native_scope scope = rock_modal_begin();
     long result = default_event_handler_ex(event, cleanup, parameter);
     rock_modal_end(&scope);
-    return result;
+    return usb_taken ? SYS_USB_CONNECTED : result;
 }
 
 static long rock_event(long event)
@@ -271,14 +358,20 @@ static int run_rock(const char *path, unsigned char *arena, size_t capacity,
 
     filename = path;
     usb_taken = false;
+#ifdef HAVE_SW_POWEROFF
+    original_sw_poweroff = button_get_sw_poweroff_state();
+#endif
     rock_begin_settings();
     rock_display_start(saved_pixels, widget_pixels);
     button_clear_pressed();
+    rock_action_reset();
 
     result = module->entry_point(NULL);
     if (usb_taken)
         result = PLUGIN_USB_CONNECTED;
     rock_flush_settings();
+    if (!usb_taken)
+        restore_input_settings();
     rock_close_files();
     rock_list_discard();
     button_clear_pressed();

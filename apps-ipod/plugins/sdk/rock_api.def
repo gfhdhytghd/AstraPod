@@ -35,11 +35,29 @@ ROCK_DIRECT(font_get)
 ROCK_DIRECT(viewport_set_defaults)
 
 /* Input and kernel */
-ROCK_DIRECT(button_get)
-ROCK_DIRECT(button_get_w_tmo)
+ROCK_SLOT(__typeof__(button_get) *button_get, button_get, rock_button_get)
+ROCK_SLOT(__typeof__(button_get_w_tmo) *button_get_w_tmo,
+          button_get_w_tmo, rock_button_get_w_tmo)
 ROCK_DIRECT(button_get_data)
-ROCK_DIRECT(button_clear_queue)
-ROCK_DIRECT(get_custom_action)
+/* Discard stale presses without dropping releases or system notifications. */
+ROCK_SLOT(__typeof__(button_clear_queue) *button_clear_queue,
+          button_clear_queue, button_clear_pressed)
+ROCK_SLOT(__typeof__(get_action) *get_action, get_action, rock_get_action)
+ROCK_SLOT(__typeof__(get_custom_action) *get_custom_action,
+          get_custom_action, rock_get_custom_action)
+#ifdef HAVE_SW_POWEROFF
+ROCK_DIRECT(button_get_sw_poweroff_state)
+ROCK_SLOT(__typeof__(button_set_sw_poweroff_state) *button_set_sw_poweroff_state,
+          button_set_sw_poweroff_state, rock_button_set_sw_poweroff_state)
+#endif
+ROCK_SLOT(__typeof__(backlight_set_timeout) *backlight_set_timeout,
+          backlight_set_timeout, rock_backlight_set_timeout)
+ROCK_SLOT(__typeof__(backlight_set_timeout_plugged) *backlight_set_timeout_plugged,
+          backlight_set_timeout_plugged, rock_backlight_set_timeout_plugged)
+ROCK_SLOT(__typeof__(backlight_set_on_button_hold) *backlight_set_on_button_hold,
+          backlight_set_on_button_hold, rock_backlight_set_on_button_hold)
+ROCK_SLOT(__typeof__(backlight_set_brightness) *backlight_set_brightness,
+          backlight_set_brightness, rock_backlight_set_brightness)
 ROCK_DIRECT(sleep)
 ROCK_DIRECT(yield)
 ROCK_DIRECT(reset_poweroff_timer)
@@ -61,6 +79,7 @@ ROCK_DIRECT(playlist_resume_track)
 ROCK_DIRECT(__div0)
 #endif
 ROCK_DIRECT(get_time)
+ROCK_DIRECT(talk_value_decimal)
 ROCK_DIRECT(commit_dcache)
 ROCK_DIRECT(commit_discard_idcache)
 ROCK_DIRECT(atoi)
@@ -87,6 +106,7 @@ ROCK_SLOT(__typeof__(set_option) *set_option, set_option, rock_set_option)
 ROCK_SLOT(__typeof__(option_screen) *option_screen, option_screen, rock_option_screen)
 ROCK_SLOT(__typeof__(find_setting) *find_setting, find_setting, rock_find_setting)
 ROCK_SLOT(__typeof__(settings_save) *settings_save, settings_save, rock_settings_save)
+ROCK_SLOT(__typeof__(settings_apply) *settings_apply, settings_apply, rock_settings_apply)
 ROCK_SLOT(__typeof__(viewportmanager_theme_enable) *viewportmanager_theme_enable,
           viewportmanager_theme_enable, rock_theme_enable)
 ROCK_SLOT(__typeof__(viewportmanager_theme_undo) *viewportmanager_theme_undo,

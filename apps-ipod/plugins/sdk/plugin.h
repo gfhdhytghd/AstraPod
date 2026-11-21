@@ -60,6 +60,7 @@
 
 #if __has_include("rock_compat_tables.h")
 #include "rock_compat_tables.h"
+#include "rock_compat_input.h"
 #define ROCK_SETTINGS_TYPE struct rock_compat_settings
 #define ROCK_COMPAT_GENERATED 1
 #else

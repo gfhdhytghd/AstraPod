@@ -99,6 +99,7 @@ $(ROCK_OUT)/modules/games/robotfindskitten.rock: $(ROCK_OBJECTS)/lib/display_tex
 $(ROCK_OUT)/modules/demos/cube.rock: $(ROCK_OBJECTS)/lib/xlcd_draw.o
 $(ROCK_OUT)/modules/demos/cube.rock $(ROCK_OUT)/modules/demos/bounce.rock: $(FIXEDPOINTLIB)
 $(ROCK_OUT)/modules/apps/chessclock.rock: $(ROCK_OBJECTS)/lib/playback_control.o
+$(ROCK_OUT)/modules/demos/lamp.rock: $(addprefix $(ROCK_OBJECTS)/lib/,pluginlib_actions.o helper.o)
 $(ROCKS): $(ROCK_OUT)/modules/%.rock: $(ROCK_OBJECTS)/plugin_crt0.o $(ROCK_LINK_INPUT) $(ROCK_MANIFEST)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,LD $(@F))$(CC) $(ROCK_FLAGS) $(ROCK_LINK) -o $@.elf $(filter %.o,$^) $(filter %.a,$^) -lgcc

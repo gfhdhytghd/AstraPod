@@ -26,6 +26,9 @@
 #include "pcm_mixer.h"
 #include "events.h"
 #include "pcm_sampr.h"
+#ifdef ASTRAPOD_ROCK_COMPAT
+#include "plugins/rock_pitch.h"
+#endif
 
 /* Channels use standard-style PCM callback interface but a latency of one
    frame by double-buffering is introduced in order to facilitate mixing and
@@ -493,11 +496,18 @@ bool mixer_switch_sink_quiet(enum pcm_sink_ids sink)
     if(pcm_current_sink() == sink)
         return true;
 
+#ifdef HAVE_ROCK_PITCH_DMA
+    bool pitch_locked = rock_pitch_sink_lock();
+#endif
     waveform_reconfigure_begin();
     bool switched = pcm_switch_sink(sink);
     if (switched)
         mixer_handle_sampr_change(SAMPR_NUM(pcm_get_frequency()));
     waveform_reconfigure_end();
+#ifdef HAVE_ROCK_PITCH_DMA
+    if (pitch_locked)
+        rock_pitch_sink_unlock();
+#endif
     return switched;
 }
 

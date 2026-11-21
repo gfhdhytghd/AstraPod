@@ -1,5 +1,6 @@
 /* AstraPod foreground plugin runtime. GNU GPL version 2 or later. */
 #include "plugins/rock_compat.h"
+#include "plugins/rock_pitch.h"
 #include "usb.h"
 #include "plugins/rock_files.h"
 #include "plugins/rock_widgets.h"
@@ -79,6 +80,7 @@ static void rock_media_stop_locked(void)
 
 void rock_media_shutdown(void)
 {
+    rock_pitch_revoke();
     if (!media_initialized)
         return;
     mutex_lock(&media_mutex);
@@ -88,6 +90,7 @@ void rock_media_shutdown(void)
 
 void rock_playback_takeover(void)
 {
+    rock_pitch_revoke();
     if (!media_initialized)
         return;
     mutex_lock(&media_mutex);
@@ -661,6 +664,7 @@ static int run_rock(const char *path, const char *file,
 #ifdef HAVE_SW_POWEROFF
     original_sw_poweroff = button_get_sw_poweroff_state();
 #endif
+    rock_pitch_session_open();
     rock_begin_settings();
     rock_display_start(saved_pixels, widget_pixels);
     button_clear_pressed();

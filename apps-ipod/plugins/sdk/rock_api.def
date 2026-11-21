@@ -248,6 +248,13 @@ ROCK_SLOT(unsigned int (*ticks_take)(void), ticks_take, rock_ticks_take)
 ROCK_SLOT(void (*ticks_stop)(void), ticks_stop, rock_ticks_stop)
 ROCK_SLOT(int (*click_min_volume)(void), click_min_volume, rock_click_min_volume)
 ROCK_SLOT(int (*click_max_volume)(void), click_max_volume, rock_click_max_volume)
+/* Tuner capture has no module-owned DMA buffers or callbacks. */
+#ifdef HAVE_ROCK_PITCH
+ROCK_SLOT(bool (*pitch_start)(void), pitch_start, rock_pitch_start)
+ROCK_SLOT(void (*pitch_pause)(void), pitch_pause, rock_pitch_pause)
+ROCK_SLOT(enum rock_pitch_result (*pitch_read)(int16_t (*)[ROCK_PITCH_SAMPLES]),
+          pitch_read, rock_pitch_read)
+#endif
 ROCK_DIRECT(strchr)
 ROCK_DIRECT(strtok_r)
 

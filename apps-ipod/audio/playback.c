@@ -4181,6 +4181,9 @@ void audio_playback_handler(struct queue_event *ev)
 
 #ifdef HAVE_RECORDING
         case Q_AUDIO_INIT_RECORDING:
+#ifdef HAVE_ROCK_PITCH_DMA
+        case Q_AUDIO_PREPARE_PITCH:
+#endif
             return;
 #endif
 #ifdef USB_ENABLE_AUDIO

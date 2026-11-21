@@ -7,6 +7,9 @@ ROCK_OUT := $(BUILDDIR)/rock-compat
 ROCK_TOOLS := $(TOOLSDIR)/rock-compat
 ROCK_MANIFEST := $(APPSDIR)/plugins/rock-modules.txt
 ROCK_MODULES := $(shell cat $(ROCK_MANIFEST))
+ifeq ($(ROCK_PITCH_DETECTOR),1)
+ROCK_MODULES += apps/pitch_detector
+endif
 ROCKS := $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_MODULES)))
 INCLUDES += -I$(ROCK_OUT)
 
@@ -96,8 +99,12 @@ $(ROCK_OUT)/rb-info-input.h: $(APPSDIR)/input/action.h \
 $(ROCK_OBJECTS)/rb_info.o: $(ROCK_OUT)/rb-info-input.h
 -include $(wildcard $(ROCK_OUT)/rb-info-input.h.d)
 
+$(ROCK_OUT)/staged/pitch_detector.c: $(ROCK_SRC)/pitch_detector.c $(APPSDIR)/plugins/stage-pitch.py
+	$(SILENT)mkdir -p $(@D)
+	$(SILENT)python3 $(word 2,$^) $< $@
+
 ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot metronome \
-    minesweeper oscilloscope periodic_table playing_time pong rb_info robotfindskitten snake snake2 star stopwatch \
+    minesweeper oscilloscope periodic_table pitch_detector playing_time pong rb_info robotfindskitten snake snake2 star stopwatch \
     lib/highscore vu_meter $(ROCK_UTILITIES) $(ROCK_GAME_ADAPTERS)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
@@ -125,6 +132,7 @@ $(eval $(call rock_module_bitmaps,games/flipit,flipit_cursor flipit_tokens))
 $(eval $(call rock_module_bitmaps,demos/matrix,matrix_bold matrix_normal))
 $(eval $(call rock_module_bitmaps,demos/credits,creditslogo))
 $(eval $(call rock_module_bitmaps,apps/resistor,resistor))
+$(eval $(call rock_module_bitmaps,apps/pitch_detector,pitch_notes))
 
 $(ROCK_OUT)/upstream-credits/credits.raw: $(DOCSDIR)/CREDITS $(ROCK_SRC)/credits.pl
 	$(SILENT)mkdir -p $(@D)
@@ -171,7 +179,7 @@ ROCK_ACTION_MODULES := demos/snow demos/logo demos/mosaique demos/bounce \
     games/robotfindskitten apps/periodic_table games/2048 games/amaze \
     demos/fire demos/fireworks demos/plasma demos/starfield \
     apps/alarmclock apps/dart_scorer apps/metronome apps/resistor demos/demystify games/bubbles \
-    demos/rocklife games/codebuster games/superdom
+    demos/rocklife games/codebuster games/superdom apps/pitch_detector
 $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_ACTION_MODULES))): $(ROCK_OBJECTS)/lib/pluginlib_actions.o
 $(ROCK_OUT)/modules/games/dice.rock: $(addprefix $(ROCK_OBJECTS)/lib/,configfile.o playback_control.o)
 $(ROCK_OUT)/modules/games/jackpot.rock: $(ROCK_OBJECTS)/lib/picture.o
@@ -208,6 +216,7 @@ $(ROCK_OUT)/modules/demos/oscilloscope.rock: $(addprefix $(ROCK_OBJECTS)/lib/,co
 $(ROCK_OUT)/modules/games/codebuster.rock: $(addprefix $(ROCK_OBJECTS)/lib/,configfile.o playback_control.o)
 $(ROCK_OUT)/modules/games/superdom.rock: $(addprefix $(ROCK_OBJECTS)/lib/,display_text.o playback_control.o)
 $(ROCK_OUT)/modules/apps/metronome.rock: $(FIXEDPOINTLIB)
+$(ROCK_OUT)/modules/apps/pitch_detector.rock: $(addprefix $(ROCK_OBJECTS)/lib/,picture.o helper.o)
 
 $(ROCKS): $(ROCK_OUT)/modules/%.rock: $(ROCK_OBJECTS)/plugin_crt0.o $(ROCK_LINK_INPUT) $(ROCK_MANIFEST)
 	$(SILENT)mkdir -p $(@D)

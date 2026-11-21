@@ -7,6 +7,7 @@
 #endif
 
 #include "config.h"
+#include "plugins/rock_pitch.h"
 
 #ifdef PLUGIN
 /* The phase 1 arena is in DRAM. Codec IRAM remains available to playback. */

@@ -80,15 +80,6 @@ rate. The title identifies stopped and paused playback, with the meters at
 rest in either state. Select opens the native display options. Menu exits.
 The meter has no playback controls, volume controls, or USB audio input.
 
-Remaining entries from the ipod6g Phase 2 source inventory are listed below.
-A generated bitmap dependency refers to an existing upstream asset that the
-AstraPod build still needs to select and compile. The behavior checks apply
-after the dependencies build.
-
-| Entry | Build dependency or behavior to verify |
-| --- | --- |
-| `pitch_detector` | The ARM compiler reports missing `pcm_record_data` and `plugin_get_audio_buffer`. Define capture callback teardown and the playback-buffer lease. |
-
 ## Native diagnostics
 
 `rb_info` presents its diagnostics through native lists. The build
@@ -136,6 +127,31 @@ them on the foreground thread. The module fits its samples to the active
 sink rate. It exits if the rate changes. USB takeover, accepted shutdown,
 and the native playback or recording start release the resources. The
 application browser starts Metronome without a tempo-map file.
+
+## Pitch Detector candidate
+
+Set `ROCK_PITCH_DETECTOR=1` for both the build and the bundle. The default
+allowlist excludes the tuner pending capture qualification on ipod6g.
+
+```sh
+ROCK_PITCH_DETECTOR=1 ./build-sim.sh
+ROCK_PITCH_DETECTOR=1 PATH=/home/wilf/.cache/pocket-stack/rockbox/bin:$PATH ./build-hw.sh ipod6g
+```
+
+Open **Plugins → Applications → pitch_detector**. On a player, select the
+analog source and gain in the native recording settings first. Use a passive
+dock line input or a supported headset microphone. The tuner analyzes the
+left channel at 22,050 Hz. It stops playback on launch. **Menu** opens
+**Tuner Settings** and releases capture while that menu is open. **Return to
+Tuner** starts a new capture. **Quit** returns to Applications. A USB consent
+prompt ends the tuner session, including when you choose **Charge Only**.
+SDL displays a fixed 445 Hz preview labelled **Preview - no audio capture**.
+
+The SDK stages a digest-checked copy of the upstream module. Its tuner
+slots request a foreground session, release capture, or copy one complete
+PCM block. Firmware owns the DMA buffers and callbacks. The reservation
+excludes the native recorder and USB Sound Card. A playback sink switch
+releases the reservation before switching.
 
 ## Phase 3 playback metadata
 

@@ -356,6 +356,27 @@ bool usb_audio_playing = false;
 int tmp_saved_vol;
 /* the host has muted the player: tmp_saved_vol is what unmuting restores */
 static bool host_muted;
+#ifdef HAVE_RECORDING
+static bool recording_reserved;
+
+bool usb_audio_reserve_recording(void)
+{
+    int irq = disable_irq_save();
+    bool available = !usb_audio_playing && !recording_reserved;
+    if (available)
+        recording_reserved = true;
+    restore_irq(irq);
+    return available;
+}
+
+void usb_audio_release_recording(void)
+{
+    int irq = disable_irq_save();
+    recording_reserved = false;
+    restore_irq(irq);
+}
+#endif
+
 /* The 5G needs its PLL while the streaming alternate is active. */
 static bool stream_boosted;
 static unsigned int dsp_claims;
@@ -487,21 +508,39 @@ static void encodeFBfixedpt(uint8_t arr[4], int32_t value, bool portspeed)
 
 static void set_playback_sampling_frequency(unsigned long f)
 {
+    int freq_idx = as_playback_freq_idx;
     // only values 44.1k and higher (array is in descending order)
     for(int i = 0; i <= HW_FREQ_44; i++)
     {
         /* compare errors */
         int err = abs((long)hw_freq_sampr[i] - (long)f);
-        int best_err = abs((long)hw_freq_sampr[as_playback_freq_idx] - (long)f);
+        int best_err = abs((long)hw_freq_sampr[freq_idx] - (long)f);
         if(err < best_err)
-            as_playback_freq_idx = i;
+            freq_idx = i;
     }
 
     logf("usbaudio: set playback sampling frequency to %lu Hz for a requested %lu Hz",
-        hw_freq_sampr[as_playback_freq_idx], f);
-    usb_log(USB_LOG_RATE, 0, 0, f, hw_freq_sampr[as_playback_freq_idx]);
+        hw_freq_sampr[freq_idx], f);
+    usb_log(USB_LOG_RATE, 0, 0, f, hw_freq_sampr[freq_idx]);
 
-    mixer_set_frequency(hw_freq_sampr[as_playback_freq_idx]);
+    if (freq_idx == as_playback_freq_idx)
+        return;
+
+    if (usb_as_playback_intf_alt != 1)
+    {
+        as_playback_freq_idx = freq_idx;
+        return;
+    }
+
+    /* A rate change stops PCM. Drop samples at the old rate and let the
+     * receive path restart the mixer after prebuffering at the new rate. */
+    mixer_channel_stop(PCM_MIXER_CHAN_USBAUDIO);
+    int irq = disable_irq_save();
+    as_playback_freq_idx = freq_idx;
+    rx_play_idx = rx_usb_idx;
+    playback_audio_underflow = true;
+    restore_irq(irq);
+    mixer_set_frequency(hw_freq_sampr[freq_idx]);
 }
 
 unsigned long usb_audio_get_playback_sampling_frequency(void)
@@ -648,7 +687,6 @@ static int usb_audio_set_first_interface(int interface)
  */
 static int usb_audio_get_config_descriptor(unsigned char *dest, int max_packet_size)
 {
-    (void)max_packet_size;
     unsigned int i;
     unsigned char *orig_dest = dest;
 
@@ -689,10 +727,10 @@ static int usb_audio_get_config_descriptor(unsigned char *dest, int max_packet_s
     /* In simpler language, This is intended to emulate full-speed's
      * one-packet-per-frame rate on high-speed, where we have multiple microframes per millisecond.
      */
-    as_iso_audio_out_ep.bInterval = usb_drv_port_speed() ? 4 : 1;
-    as_iso_synch_in_ep.bInterval = usb_drv_port_speed() ? 4 : 1; // per spec
+    as_iso_audio_out_ep.bInterval = max_packet_size == 512 ? 4 : 1;
+    as_iso_synch_in_ep.bInterval = as_iso_audio_out_ep.bInterval;
 
-    logf("usbaudio: port_speed=%s", usb_drv_port_speed()?"hs":"fs");
+    logf("usbaudio: descriptor speed=%s", max_packet_size == 512 ? "hs" : "fs");
 
     /** Packing */
     for(i = 0; i < USB_DESCRIPTORS_LIST_SIZE; i++)
@@ -730,6 +768,8 @@ static void playback_audio_get_more(const void **start, size_t *size)
 
 static void usb_audio_start_playback(void)
 {
+    /* The local decoder and USB share the same DSP configuration. */
+    audio_stop_for_usb();
     if (!stream_boosted)
     {
         cpu_boost(true);
@@ -747,7 +787,6 @@ static void usb_audio_start_playback(void)
     sound_set_pitch(PITCH_SPEED_100);
     dsp_set_timestretch(PITCH_SPEED_100);
 #endif
-    usb_audio_playing = true;
     usb_rx_overflow = false;
     playback_audio_underflow = true;
     rx_play_idx = 0;
@@ -784,6 +823,7 @@ static void usb_audio_start_playback(void)
     mixer_set_frequency(hw_freq_sampr[as_playback_freq_idx]);
     mixer_channel_set_amplitude(PCM_MIXER_CHAN_USBAUDIO, MIX_AMP_UNITY);
 
+    usb_as_playback_intf_alt = 1;
     usb_drv_recv_nonblocking(EP_ISO_OUT, rx_buffer, BUFFER_SIZE);
 }
 
@@ -791,22 +831,24 @@ static void usb_audio_stop_playback(void)
 {
     logf("usbaudio: stop playback");
     usb_log(USB_LOG_AUDIO, USB_LOG_AUDIO_STOP, 0, 0, 0);
-    if(usb_audio_playing)
-    {
-        mixer_channel_stop(PCM_MIXER_CHAN_USBAUDIO);
-        usb_audio_playing = false;
-    }
+    if (!usb_audio_playing)
+        return;
+
+    usb_as_playback_intf_alt = 0;
+    send_fb = false;
+    mixer_channel_stop(PCM_MIXER_CHAN_USBAUDIO);
     if (stream_boosted)
     {
         cpu_boost(false);
         stream_boosted = false;
     }
-    send_fb = false;
     /* The transfer queued for the next packet stays primed when the host
      * stops sending, and the next start primes on top of it: drop it. The
      * completion handler re-arms only at alternate 1, so nothing re-queues
      * it. */
     usb_drv_reset_endpoint(EP_ISO_OUT, false);
+    usb_drv_reset_endpoint(EP_ISO_FEEDBACK_IN, true);
+    usb_audio_playing = false;
 }
 
 /*
@@ -835,10 +877,22 @@ static int usb_audio_set_interface(int intf, int alt)
             logf("usbaudio: playback interface has no alternate %d", alt);
             return -1;
         }
-        usb_as_playback_intf_alt = alt;
-
-        if(usb_as_playback_intf_alt == 1)
+        if (alt == usb_as_playback_intf_alt)
+            return 0;
+        if (alt == 1)
         {
+#ifdef HAVE_RECORDING
+            int irq = disable_irq_save();
+            if (recording_reserved)
+            {
+                restore_irq(irq);
+                return -1;
+            }
+#endif
+            usb_audio_playing = true;
+#ifdef HAVE_RECORDING
+            restore_irq(irq);
+#endif
             usb_log_sync();
             usb_audio_start_playback();
         }
@@ -967,32 +1021,28 @@ static bool feature_unit_set_mute(int value, uint8_t cmd)
         return false;
     }
 
-    if(value == 1)
-    {
-        logf("usbaudio: mute !");
-        tmp_saved_vol = sound_current(SOUND_VOLUME);
-        host_muted = true;
-
-        // setvol does range checking for us!
-        global_status.volume = sound_min(SOUND_VOLUME);
-        setvol();
-        return true;
-    }
-    else if(value == 0)
-    {
-        logf("usbaudio: not muted !");
-        host_muted = false;
-
-        // setvol does range checking for us!
-        global_status.volume = tmp_saved_vol;
-        setvol();
-        return true;
-    }
-    else
+    if (value != 0 && value != 1)
     {
         logf("usbaudio: invalid value for CUR setting of feature unit (%d)", value);
         return false;
     }
+    if (host_muted == (value != 0))
+        return true;
+
+    host_muted = value != 0;
+    if (host_muted)
+    {
+        logf("usbaudio: mute !");
+        tmp_saved_vol = sound_current(SOUND_VOLUME);
+        global_status.volume = sound_min(SOUND_VOLUME);
+    }
+    else
+    {
+        logf("usbaudio: not muted !");
+        global_status.volume = tmp_saved_vol;
+    }
+    setvol();
+    return true;
 }
 
 static bool feature_unit_get_mute(int *value, uint8_t cmd)
@@ -1003,7 +1053,7 @@ static bool feature_unit_get_mute(int *value, uint8_t cmd)
         return false;
     }
 
-    *value = (sound_current(SOUND_VOLUME) == sound_min(SOUND_VOLUME));
+    *value = host_muted;
     return true;
 }
 
@@ -1054,9 +1104,14 @@ static bool feature_unit_set_volume(int value, uint8_t cmd)
 
     logf("usbaudio: set volume=%d dB", usb_audio_volume_to_db(value, sound_numdecimals(SOUND_VOLUME)));
 
-    // setvol does range checking for us!
-    // we cannot guarantee the host will send us a volume within our range
-    global_status.volume = usb_audio_volume_to_db(value, sound_numdecimals(SOUND_VOLUME));
+    /* The host's range can exceed the hardware or the local volume limit. */
+    int volume = usb_audio_volume_to_db(value, sound_numdecimals(SOUND_VOLUME));
+    if (host_muted)
+    {
+        usb_audio_set_unmute_volume(volume);
+        return true;
+    }
+    global_status.volume = volume;
     setvol();
     return true;
 }
@@ -1065,7 +1120,10 @@ static bool feature_unit_get_volume(int *value, uint8_t cmd)
 {
     switch(cmd)
     {
-        case USB_AC_CUR_REQ: *value = db_to_usb_audio_volume(sound_current(SOUND_VOLUME), sound_numdecimals(SOUND_VOLUME)); break;
+        case USB_AC_CUR_REQ:
+            *value = db_to_usb_audio_volume(host_muted ? tmp_saved_vol :
+                     sound_current(SOUND_VOLUME), sound_numdecimals(SOUND_VOLUME));
+            break;
         case USB_AC_MIN_REQ: *value = db_to_usb_audio_volume(sound_min(SOUND_VOLUME), sound_numdecimals(SOUND_VOLUME)); break;
         case USB_AC_MAX_REQ: *value = db_to_usb_audio_volume(sound_max(SOUND_VOLUME), sound_numdecimals(SOUND_VOLUME)); break;
         case USB_AC_RES_REQ: *value = db_to_usb_audio_volume(sound_steps(SOUND_VOLUME), sound_numdecimals(SOUND_VOLUME)); break;
@@ -1235,7 +1293,7 @@ static bool usb_audio_control_request(struct usb_ctrlrequest* req, uint8_t* reqd
 
 /*
  * Called by usb_core_do_set_config() when the
- * connection is ready to be used. Reapplies the sample rate.
+ * connection is ready to be used.
  */
 static int usb_audio_init_connection(void)
 {
@@ -1255,8 +1313,6 @@ static int usb_audio_init_connection(void)
     /* Windows' recovery from a bus reset restores the configuration and the
      * streaming alternate but never resends the rate, so the rate it last
      * set has to outlive the reset. */
-    set_playback_sampling_frequency(
-        usb_audio_get_playback_sampling_frequency());
     tmp_saved_vol = sound_current(SOUND_VOLUME);
     host_muted = false;
     usb_audio_playing = false;
@@ -1267,7 +1323,7 @@ static int usb_audio_init_connection(void)
  * Called by usb_core_exit() AND usb_core_do_set_config().
  *
  * Indicates to the Class driver that the connection is no
- * longer active. Currently just calls usb_audio_stop_playback().
+ * longer active.
  */
 static void usb_audio_disconnect(void)
 {
@@ -1277,6 +1333,8 @@ static void usb_audio_disconnect(void)
         return;
 
     usb_audio_stop_playback();
+    if (host_muted)
+        feature_unit_set_mute(0, USB_AC_CUR_REQ);
     usbaudio_active = false;
 }
 
@@ -1302,7 +1360,8 @@ int usb_audio_get_unmute_volume(void)
 
 void usb_audio_set_unmute_volume(int vol)
 {
-    tmp_saved_vol = vol;
+    tmp_saved_vol = MIN(MAX(vol, sound_min(SOUND_VOLUME)),
+                        MIN(sound_max(SOUND_VOLUME), global_settings.volume_limit));
 }
 
 bool usb_audio_get_alloc_failed(void)
@@ -1412,10 +1471,13 @@ static void usb_audio_notify_event(intptr_t data)
 
 static bool usb_audio_fast_transfer_complete(int ep, int dir, int status, int length)
 {
+    if (usb_as_playback_intf_alt != 1)
+        return false;
+
     (void) dir;
     bool retval = false;
 
-    if(ep == EP_ISO_OUT && usb_as_playback_intf_alt == 1)
+    if(ep == EP_ISO_OUT)
     {
         // check for dropped frames
         if (last_frame != usb_drv_get_frame_number())

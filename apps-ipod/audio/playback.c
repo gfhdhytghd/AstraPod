@@ -4128,6 +4128,21 @@ static void audio_on_audio_flush(void)
     }
 }
 
+static void playback_free_buffer(void)
+{
+    buffer_state = AUDIOBUF_STATE_TRASHED;
+    audiobuf_handle = core_free(audiobuf_handle);
+}
+
+#ifdef HAVE_RECORDING
+void playback_prepare_recording(void)
+{
+    /* Keep queued USB handover events while returning the playback buffer. */
+    audio_stop_playback(false);
+    playback_free_buffer();
+}
+#endif
+
 /* Called by audio thread when playback is started */
 void audio_playback_handler(struct queue_event *ev)
 {
@@ -4163,6 +4178,10 @@ void audio_playback_handler(struct queue_event *ev)
 
 #ifdef HAVE_RECORDING
         case Q_AUDIO_INIT_RECORDING:
+            return;
+#endif
+#ifdef USB_ENABLE_AUDIO
+        case Q_AUDIO_STOP_FOR_USB:
             audio_stop_playback(false);
             return;
 #endif
@@ -4252,8 +4271,7 @@ void audio_playback_handler(struct queue_event *ev)
                 LOGFQUEUE("playback < Q_AUDIO_REMAKE_AUDIO_BUFFER: release");
                 audio_stop_playback(false);
                 queue_clear(&audio_queue);
-                buffer_state = AUDIOBUF_STATE_TRASHED;
-                audiobuf_handle = core_free(audiobuf_handle);
+                playback_free_buffer();
                 return;
             }
             /* buffer needs to be reinitialized */
@@ -4636,6 +4654,13 @@ void audio_stop(void)
     LOGFQUEUE("audio >| audio Q_AUDIO_STOP");
     audio_queue_send(Q_AUDIO_STOP, 0);
 }
+
+#ifdef USB_ENABLE_AUDIO
+void audio_stop_for_usb(void)
+{
+    audio_queue_send(Q_AUDIO_STOP_FOR_USB, 0);
+}
+#endif
 
 /* Pause playback if playing */
 void audio_pause(void)

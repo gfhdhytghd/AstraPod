@@ -45,12 +45,14 @@ extern bool recording_start_automatic;
 /* handles device powerup, sets audio source and peakmeter mode */
 void rec_set_source(int source, unsigned flags);
 
+#ifdef HAVE_RECORDING
 /* Initializes a recording_options structure with global settings.
    pass returned data to audio_set_recording_options or
    rec_set_recording_options */
 void rec_init_recording_options(struct audio_recording_options *options);
 /* steals mp3 buffer, sets source and then options */
 void rec_set_recording_options(struct audio_recording_options *options);
+#endif
 
 enum recording_command
 {

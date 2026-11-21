@@ -477,7 +477,7 @@ bool usb_get_serial(void);
  * (HiBy) drive their configfs gadget. */
 void usb_set_audio(int value);
 
-/* true while host-PCM (USB-DAC) playback is active */
+/* True while the USB sound card configuration is selected. */
 bool usb_audio_get_active(void);
 
 /* While the host has the player muted, the volume unmuting brings back,

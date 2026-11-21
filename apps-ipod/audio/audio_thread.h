@@ -72,6 +72,9 @@ enum
     Q_AUDIO_RECORD_FLUSH,
 #endif
     Q_AUDIO_SEEK_NOW,
+#ifdef USB_ENABLE_AUDIO
+    Q_AUDIO_STOP_FOR_USB,
+#endif
 };
 
 /* (*) If you change these, you must check audio_clear_track_notifications
@@ -83,6 +86,7 @@ unsigned int playback_status(void);
 
 
 #ifdef AUDIO_HAVE_RECORDING
+void playback_prepare_recording(void);
 void recording_init(void);
 void audio_recording_handler(struct queue_event *ev);
 #endif

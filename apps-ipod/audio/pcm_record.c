@@ -47,6 +47,9 @@
 #include "core_alloc.h"
 #include "speech/talk.h"
 #include "audio/voice_thread.h"
+#ifdef USB_ENABLE_AUDIO
+#include "usbstack/usb_audio.h"
+#endif
 
 /* Macros to enable logf for queues
    logging on SYS_TIMEOUT can be disabled */
@@ -979,13 +982,20 @@ unsigned long pcm_rec_sample_rate(void)
 /** audio_* group **/
 
 /* Initializes recording - call before calling any other recording function */
-void audio_init_recording(void)
+bool audio_try_init_recording(void)
 {
+#ifdef USB_ENABLE_AUDIO
+    if (!usb_audio_reserve_recording())
+        return false;
+#endif
     pcm_dma_blocks = 0;
-    /* A stopped player can still own its playback ring, even when idle. */
-    audio_release_buffer();
     LOGFQUEUE("audio >| pcmrec Q_AUDIO_INIT_RECORDING");
-    audio_queue_send(Q_AUDIO_INIT_RECORDING, 1);
+    bool ready = audio_queue_send(Q_AUDIO_INIT_RECORDING, 1);
+#ifdef USB_ENABLE_AUDIO
+    if (!ready)
+        usb_audio_release_recording();
+#endif
+    return ready;
 }
 
 /* Closes recording - call audio_stop_recording first or risk data loss */
@@ -1438,6 +1448,7 @@ static bool on_init_recording(void)
 {
     /* Eight MiB holds 30 s at 48 kHz stereo plus all staging buffers. */
     rec_buffer_size = 8 * 1024 * 1024;
+    voice_stop();
     talk_buffer_set_policy(TALK_BUFFER_LOOSE);
     pcmrec_handle = core_alloc_ex(rec_buffer_size, &buflib_ops_locked);
     if (pcmrec_handle <= 0)
@@ -1449,7 +1460,6 @@ static bool on_init_recording(void)
     rec_buffer = core_get_data(pcmrec_handle);
     init_rec_buffers();
     init_state();
-    voice_stop();
     codec_unload();
     pcm_init_recording();
     send_event(RECORDING_EVENT_START, NULL);
@@ -1530,6 +1540,8 @@ static void on_recording_options(struct audio_recording_options *options)
     enc_config         = options->enc_config;
     enc_config.afmt    = afmt;
 
+    audio_set_input_source(rec_source,
+                           options->rec_source_flags | SRCF_RECORDING);
     queue_reply(&audio_queue, 0);  /* Let caller go */
 
     /* Pick appropriate PCM copy routine */
@@ -1746,6 +1758,7 @@ void audio_recording_handler(struct queue_event *ev)
         ev->id = Q_NULL;
         return;
     }
+    queue_reply(&audio_queue, 1);
 
     while (1)
     {
@@ -1830,6 +1843,9 @@ void audio_recording_handler(struct queue_event *ev)
 
 recording_done:
     on_close_recording();
+#ifdef USB_ENABLE_AUDIO
+    usb_audio_release_recording();
+#endif
 #ifdef HAVE_PRIORITY_SCHEDULING
     /* Restore normal thread priorities */
     thread_set_priority(audio_thread_id, old_prio);

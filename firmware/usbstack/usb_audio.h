@@ -157,6 +157,12 @@ int usb_audio_get_cur_volume(void);
 
 bool usb_audio_get_active(void);
 
+#ifdef HAVE_RECORDING
+/* Hold the audio hardware from recorder initialization through teardown. */
+bool usb_audio_reserve_recording(void);
+void usb_audio_release_recording(void);
+#endif
+
 /*
  * usb_audio_get_dsp_claims():
  *

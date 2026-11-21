@@ -641,9 +641,9 @@ void rec_set_source(int source, unsigned flags)
 
 void rec_set_recording_options(struct audio_recording_options *options)
 {
-    rec_set_source(options->rec_source,
-                   options->rec_source_flags | SRCF_RECORDING);
     audio_set_recording_options(options);
+    peak_meter_playback(false);
+    peak_meter_enable(true);
 }
 
 void rec_command(enum recording_command cmd)
@@ -1000,6 +1000,17 @@ bool recording_screen(bool no_source)
     int prev_rec_source = global_settings.rec_source; /* detect source change */
 #endif
 
+    bool capture = recording_capture_available();
+    if (capture && !audio_try_init_recording())
+    {
+        bool error = audio_status() & AUDIO_STATUS_ERROR;
+        if (error)
+            audio_error_clear();
+        splash(HZ, error ? ID2P(LANG_REC_CAPTURE_ERROR)
+                         : ID2P(LANG_USB_DAC_ACTIVE));
+        return false;
+    }
+
     struct audio_recording_options rec_options;
     rec_status = RCSTAT_IN_RECSCREEN;
     push_current_activity(ACTIVITY_RECORDING);
@@ -1039,9 +1050,6 @@ bool recording_screen(bool no_source)
     audio_enable_speaker(0);
 #endif
 
-    bool capture = recording_capture_available();
-    if (capture)
-        audio_init_recording();
     sound_set_volume(global_status.volume);
 
 #if CONFIG_RTC == 0
@@ -1925,11 +1933,15 @@ void sm1_test_record_run(bool mic)
         int keyclick = global_settings.keyclick;
         global_settings.keyclick = 0;
         talk_disable(true);
-        audio_init_recording();
-        if (audio_status() & AUDIO_STATUS_ERROR)
+        if (!audio_try_init_recording())
         {
-            record_error(SM1_RECORD_STAGE_INIT, 0);
-            audio_error_clear();
+            if (audio_status() & AUDIO_STATUS_ERROR)
+            {
+                record_error(SM1_RECORD_STAGE_INIT, 0);
+                audio_error_clear();
+            }
+            else
+                shell_record_state = SM1_RECORD_BUSY;
             global_settings.keyclick = keyclick;
             talk_disable(false);
             ++sm1_test_completed;

@@ -409,8 +409,6 @@ static int usb_iap_set_first_interface(int interface) {
 #define PACK_DESC(desc) pack_data(&dest, &desc, ((struct usb_descriptor_header*)&desc)->bLength)
 
 static int usb_iap_get_config_descriptor(unsigned char* dest, int max_packet_size) {
-    (void)max_packet_size;
-
     unsigned char* orig_dest = dest;
 
     ipod_audio_control_desc.bInterfaceNumber = ctrl.interface;
@@ -428,7 +426,7 @@ static int usb_iap_get_config_descriptor(unsigned char* dest, int max_packet_siz
     ipod_audio_stream_0_desc.bInterfaceNumber     = stream.interface;
     ipod_audio_stream_1_desc.bInterfaceNumber     = stream.interface;
     ipod_audio_stream_1_endpoint.bEndpointAddress = AS_EP_IN;
-    ipod_audio_stream_1_endpoint.bInterval        = usb_drv_port_speed() ? 4 : 1;
+    ipod_audio_stream_1_endpoint.bInterval        = max_packet_size == 512 ? 4 : 1;
     PACK_DESC(ipod_audio_stream_0_desc);
     PACK_DESC(ipod_audio_stream_1_desc);
     PACK_DESC(ipod_audio_stream_1_uac_header);
@@ -441,7 +439,7 @@ static int usb_iap_get_config_descriptor(unsigned char* dest, int max_packet_siz
 
     ipod_hid_desc.bInterfaceNumber     = hid.interface;
     ipod_hid_endpoint.bEndpointAddress = HID_EP_IN;
-    if(usb_drv_port_speed()) {
+    if(max_packet_size == 512) {
         ipod_hid_hid_desc.wDescriptorLength0 = sizeof(ipod_hid_report_hs);
         ipod_hid_endpoint.wMaxPacketSize     = 64;
     } else {

@@ -79,6 +79,7 @@ static void NORETURN_ATTR audio_thread(void)
         /* Starts the recording engine branch */
         case Q_AUDIO_INIT_RECORDING:
             LOGFQUEUE("audio < Q_AUDIO_INIT_RECORDING");
+            playback_prepare_recording();
             audio_recording_handler(&ev);
             continue;
 #endif

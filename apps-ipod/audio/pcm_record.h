@@ -85,6 +85,9 @@ unsigned long pcm_rec_sample_rate(void);
 
 void recording_init(void);
 
+/* Return false if the recorder cannot claim or initialize the hardware. */
+bool audio_try_init_recording(void);
+
 /* Wait for the encoder drain and file close, leaving errors available. */
 void audio_stop_recording_sync(void);
 

@@ -143,7 +143,7 @@ These three directories cannot be renamed or moved, because something outside
 |---|---|
 | `bitmaps/` | `tools/root.make` (`include $(COREAPPSDIR)/bitmaps/bitmaps.make`) |
 | `lang/` | `tools/root.make` (`lang/lang.make`), and `tools/configure`'s `picklang()`. **This is the language file that builds** — upstream's `apps/lang/` is not compiled, however authoritative it looks. |
-| `plugins/` | Contains no plugin. `tools/root.make` names these paths, and `plugin.lds` is the **live** codec linker script — see `lib/rbcodec/codecs/codecs.make` and `plugins/README.md`. |
+| `plugins/` | SDK, loader and build rules for the opt-in ipod6g plugin build. `plugin.lds` also links codecs. See [plugins/README.md](plugins/README.md). |
 
 ## Where does new code go?
 

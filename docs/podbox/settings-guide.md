@@ -128,7 +128,7 @@ Settings
 | Spoken Word Speed | Plays audiobooks and podcasts faster or slower without changing the voice's pitch; music always plays at its own speed. Also in Now Playing's menu while spoken word plays. The first change from 100% restarts the playing track once. | 100% |  |
 | Prevent Track Skipping | Disables skipping entirely. For handing the player to someone else, or a pocket that presses buttons. | No | **Adv** |
 | Frequency | The sample rate the output runs at. Auto follows the file and is right almost always; forcing a rate resamples everything. | Auto | **Adv** |
-| Logging | Records what was played and when. On feeds the listening statistics; On + Last.fm also writes a scrobble log a computer can upload, and an uploader that empties it after sending leaves the Playback Report's totals and streaks as they were. | On | **Adv** |
+| Logging | Records what was played and when. On feeds the listening statistics. On + Last.fm also writes a scrobble log a computer can upload. Uploading and emptying that log preserves the Playback Report's totals and streaks. | On | **Adv** |
 
 ### Playback — Fast-Forward/Rewind
 
@@ -196,6 +196,7 @@ Settings
 | Default Browser | Which browser the root and the now-playing screen return to: Music, Files or Playlists. | Music |  |
 | Select Action | What a press of Select does on the now-playing screen: go back to the previous screen as Menu does, or to the browser last used, to Music, Album Covers or Files, open the lyrics, the queue or Theme Options, or one of the now-playing menu's other actions. Theme Options says Unavailable when the theme has none. Holding Select always opens the now-playing menu. | Previous Browser | **Adv** |
 | Select + Play Action | What pressing Select and Play together does on the now-playing screen: any of the actions Select offers, or the whole now-playing menu, or nothing. | Lyrics |  |
+| Lyrics lead | Adjusts when the active lyric changes. Positive values show lyrics earlier. | 200 ms |  |
 
 **Appearance** opens `Settings > Appearance > Now Playing Screen`, below.
 
@@ -409,6 +410,8 @@ Separator set above zero.
 | `database art row height` | Row height in the database browser when album or artist art is shown beside rows. A theme-author setting -- it has to match the artwork the theme draws. | 52 px | **Cfg** |
 | Show Icons | Draws an icon beside each row in lists and menus. Turning them off gives the text more room. | Yes |  |
 | Status Bar | Whether the clock and battery strip is drawn, and at which edge. | Top |  |
+| Status Bar Cover Tint | Uses colours from the playing track’s cover in the status bar. | On |  |
+| Animations | Enables animated transitions between screens and pages. | On |  |
 | Scroll Bar ▸ Scroll Bar | Whether a scroll bar is drawn beside lists, and on which side. | Left |  |
 | Scroll Bar ▸ Scroll Bar Width | How wide the scroll bar beside lists is, in pixels. | 6 px | **Adv** |
 | Battery Display | Whether the status bar shows the battery as an icon or as a percentage. | Graphic |  |
@@ -560,7 +563,7 @@ Shadow Colour only while there is a shadow to colour.
 | Storage ▸ Disk Spindown | How long the drive sits idle before it is allowed to stop. The single largest battery saving on a player with a spinning disk, and it does nothing at all on one with an SSD fitted. | 5 s | **Adv** |
 | Storage ▸ Mode | Tells power management what kind of drive is fitted, which decides whether it is worth spinning down and how aggressively. Auto detects it. Set it by hand only if a replacement drive is being detected wrongly. | Auto | **Adv** |
 | Battery Capacity | The capacity of the cell actually fitted, in mAh. Only affects the runtime estimate, not charging. Worth correcting after a battery replacement, since a new cell is often a different size from the original. | 550 mAh (iPod Classic), 400 or 600 mAh by model (iPod Video) | **Adv** |
-| Charge During USB Connection | Whether the player charges from a USB connection. Force charges even from a port that does not advertise enough current, which not every port tolerates. On an iPod Classic, Force also tops up a nearly full battery from a plain charger, which it otherwise leaves alone. | Yes (iPod Classic), Force (iPod Video) |  |
+| Charge During USB Connection | Whether the player charges from a USB connection. On uses 100 mA until the host grants 500 mA. The input limit includes the player's own consumption. Off disables battery charging. Suspend blocks USB input. Force also selects 500 mA after ten seconds without host requests. Eight qualified short dropouts in 90 seconds pause battery charging for one minute. Repeated dropouts double the pause up to 30 minutes. USB still powers the player during the pause. Unplugging, applying charging settings or ten minutes of stable charging resets the back-off. Debug > Battery shows the guard state. | Yes (iPod Classic), Force (iPod Video) |  |
 
 ### Battery & Power — Sleep Timer
 

@@ -14,7 +14,11 @@ static uint32_t sm1_test_desc[4] __attribute__((aligned(32)));
 /* Bounded storage for the isolated profiling firmware. */
 #define SM1_BATCH_FRAMES 8
 static uint8_t sm1_packet[SM1_PACKET_MAX + 32] __attribute__((aligned(32)));
+#ifdef PODBOX_SM1_DMA_PROBE
+#include "sm1_dma_probe.inc"
+#else
 static int16_t sm1_output[9216] __attribute__((aligned(32)));
+#endif
 #include "crc32.h"
 #include "codecs.h"
 #include "sm1_flac_frame.h"
@@ -132,11 +136,11 @@ static void sm1_test_trace(unsigned frame, enum sm1_trace_stage stage)
     sm1_trace[frame][stage].arm = SM1_REG(0x98c);
 }
 
+#include "sm1-irq-6g.h"
+
 static bool sm1_test_complete(unsigned timeout, unsigned frame)
 {
-    /* Poll the source latch with the VIC line masked. A cold device has
-     * completed the init pass without asserting the VIC raw line. */
-    bool signaled = sm1_test_wait(&SM1_REG(0xa98), 4, 4, timeout);
+    bool signaled = sm1_irq_wait(timeout);
     sm1_test_trace(frame, TRACE_EVENT);
     if (!signaled || !sm1_test_claim())
         return false;
@@ -152,11 +156,14 @@ static struct {
 
 static bool sm1_begin(int image)
 {
+#ifdef PODBOX_SM1_DMA_PROBE
+    if (probe_quarantined) return false;
+#endif
     bool irq_enabled = (VIC0INTENABLE & SM1_IRQ) != 0;
     bool gate0 = (PWRCON(0) & (1u << 2)) == 0;
     bool gate1 = (PWRCON(1) & (1u << 3)) == 0;
     bool gate_sm1 = (PWRCON(0) & (1u << CLOCKGATE_SM1)) == 0;
-    VIC0INTENCLEAR = SM1_IRQ;
+    sm1_irq_begin();
     clockgate_enable(2, true);
     clockgate_enable(CLOCKGATE_SM1, true);
     clockgate_enable(35, true);
@@ -216,7 +223,10 @@ static bool sm1_begin(int image)
     }
 
     if (!warm)
+    {
+        sm1_irq_prepare();
         SM1_REG(0x984) = 0;
+    }
     if (!warm && !sm1_test_complete(50000, ARRAYLEN(sm1_trace))) {
         hw.fault = "SM1 init did not complete";
         return false;
@@ -234,6 +244,9 @@ static unsigned sm1_last_us;
 static bool sm1_packet_output(unsigned bytes, unsigned expected_words, unsigned alac_depth,
                               int32_t *left, int32_t *right)
 {
+#ifdef PODBOX_SM1_DMA_PROBE
+    if (probe_quarantined) return false;
+#endif
     unsigned frames = hw.count;
     const bool warm = hw.warm;
     uintptr_t packet = (uintptr_t)sm1_packet & ~0x40000000u;
@@ -272,6 +285,7 @@ static bool sm1_packet_output(unsigned bytes, unsigned expected_words, unsigned 
     }
 
     sm1_test_trace(frames, TRACE_PRE_ARM);
+    sm1_irq_prepare();
     uint32_t start = USEC_TIMER;
     SM1_REG(0x100) = desc | 1;
     if (frames || warm)
@@ -311,9 +325,20 @@ static bool sm1_packet_output(unsigned bytes, unsigned expected_words, unsigned 
             right[i] = (int16_t)SM1_Y[0x81 + 2*i] * 8192 + (low & 255) * 32;
         }
     }
-    else
+    else {
+#ifdef PODBOX_SM1_DMA_PROBE
+        int copied = 0;
+        if (probe_playback_frame)
+            copied = probe_copy(length);
+        if (copied < 0) {
+            hw.fault = "SM1 DMA slot quarantined";
+            return false;
+        }
+        if (!copied)
+#endif
         for (unsigned i = 0; i < length; ++i)
             sm1_output[i] = SM1_Y[0x80 + i];
+    }
     SM1_Y[5] = 0;
     /* The DSP clears its per-frame command word on publishing PCM.
      * Stage the next command while the CPU owns the SRAM. */
@@ -337,6 +362,10 @@ static bool sm1_packet_decode(unsigned bytes, unsigned expected_words)
 static void sm1_end(void)
 {
     if (!hw.owned) return;
+    sm1_irq_disarm();
+#ifdef PODBOX_SM1_DMA_PROBE
+    if (probe_quarantined) return;
+#endif
     sm1_rearm_ready = hw.count && !hw.fault;
     if (hw.signature == 0x004e7309) {
         SM1_REG(0xc48) = 4;
@@ -345,6 +374,9 @@ static void sm1_end(void)
     clockgate_enable(35, hw.g1);
     clockgate_enable(CLOCKGATE_SM1, hw.gsm);
     clockgate_enable(2, hw.g0);
+    struct sm1_irq_stats irq_stats = sm1_irq_stats();
+    debug_log(DEBUG_LOG_PLAYBACK, "SM1 frames=%u IRQ18=%u semaphore=%u tick=%u",
+              hw.count, irq_stats.interrupts, irq_stats.semaphore_wakes, irq_stats.tick_wakes);
     if (hw.irq) VIC0INTENABLE = SM1_IRQ;
     hw.owned = false;
 }

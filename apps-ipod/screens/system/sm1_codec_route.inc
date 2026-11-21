@@ -202,7 +202,15 @@ static int sm1_play_owned(struct codec_api *api)
         sm1_anchor(c);
         unsigned samples=h.block;
         reason = "dsp-error";
-        if (!sm1_packet_decode(bytes,2*samples)) break;
+#ifdef PODBOX_SM1_DMA_PROBE
+        probe_playback_frame = route_depth == 16 && !global_settings.eq_enabled
+            && (route_rate == 44100 || route_rate == 48000);
+#endif
+        bool decoded = sm1_packet_decode(bytes,2*samples);
+#ifdef PODBOX_SM1_DMA_PROBE
+        probe_playback_frame = false;
+#endif
+        if (!decoded) break;
 #ifdef ASTRA_SM1_TEST
         if (submitted<ARRAYLEN(sm1_reports)) {
             sm1_reports[submitted]=(struct sm1_frame_report){c.ordinal,skip,

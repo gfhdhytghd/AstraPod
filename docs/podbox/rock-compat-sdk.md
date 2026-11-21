@@ -91,10 +91,23 @@ after the dependencies build.
 | Entry | Build dependency or behavior to verify |
 | --- | --- |
 | `chip8` | Route a selected `.ch8` file to the entry point. Verify the optional `.c8k` key mapping and emulator exit. |
-| `metronome` | The ARM compiler reports missing `timer_register` and `timer_unregister`. Define timer and audio ownership, including callback teardown. |
 | `oscilloscope` | The ARM compiler reports missing `pcm_play_lock` and `mixer_channel_set_buffer_hook`. Define PCM lock and mixer hook ownership. Add OSD viewport buffer adapters and native volume controls. |
 | `pitch_detector` | The ARM compiler reports missing `pcm_record_data` and `plugin_get_audio_buffer`. Define capture callback teardown and the playback-buffer lease. |
 | `rb_info` | Map `talk_id`, `talk_spell` and `strcasestr`. Link the printcell, action and button helpers. Verify spoken rows and their native IDs. |
+
+## Foreground Metronome
+
+Metronome stops music on entry. Hold Select to start or tap Select to
+set the tempo. Press Play/Pause to pause and Menu to return. Adjust the
+click volume with the wheel. The change applies to the current launch.
+If the timer is busy, Metronome stays paused and displays a retry message.
+
+The SDK exposes an exclusive 2 ms tick counter and click playback on the
+native playback channel. The firmware counts ticks and the module consumes
+them on the foreground thread. The module fits its samples to the active
+sink rate. It exits if the rate changes. USB takeover, accepted shutdown,
+and the native playback or recording start release the resources. The
+application browser starts Metronome without a tempo-map file.
 
 ## Phase 3 playback metadata
 
@@ -136,7 +149,7 @@ precision for its average bitrate and playlist duration.
   the native members and language IDs exercised by the enabled modules.
 
 See `apps-ipod/plugins/rock-modules.txt` for the installed applications, games
-and demos. Worker threads, timers, resident plugins, overlays, codec IRAM,
+and demos. Worker threads, timer callbacks, resident plugins, overlays, codec IRAM,
 audio-buffer leases and stock binary modules
 are outside the current SDK. File associations and cross-plugin dispatch are
 also outside this build. Load modules built from trusted sources. Plugins

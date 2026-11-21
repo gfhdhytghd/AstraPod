@@ -17,6 +17,7 @@
 #include "pcm.h"
 #include "sound.h"
 #include "pcmbuf.h"
+#include "plugins/rock_compat.h"
 #include "system/appevents.h"
 #include "audio_thread.h"
 #ifdef AUDIO_HAVE_RECORDING
@@ -79,6 +80,7 @@ static void NORETURN_ATTR audio_thread(void)
         /* Starts the recording engine branch */
         case Q_AUDIO_INIT_RECORDING:
             LOGFQUEUE("audio < Q_AUDIO_INIT_RECORDING");
+            rock_playback_takeover();
             playback_prepare_recording();
             audio_recording_handler(&ev);
             continue;
@@ -87,6 +89,7 @@ static void NORETURN_ATTR audio_thread(void)
         /* All return upon USB */
         case SYS_USB_CONNECTED:
             LOGFQUEUE("audio < SYS_USB_CONNECTED");
+            rock_media_shutdown();
             voice_stop();
             usb_acknowledge(SYS_USB_CONNECTED_ACK, ev.data);
             usb_wait_for_disconnect(&audio_queue);

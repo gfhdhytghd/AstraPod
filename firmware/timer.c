@@ -26,6 +26,10 @@
 #include "logf.h"
 
 static int timer_prio = -1;
+#ifdef ASTRAPOD_ROCK_COMPAT
+static bool ticks_reserved;
+static volatile unsigned int pending_ticks;
+#endif
 void SHAREDBSS_ATTR (*pfn_timer)(void) = NULL;      /* timer callback */
 void SHAREDBSS_ATTR (*pfn_unregister)(void) = NULL; /* unregister callback */
 
@@ -34,6 +38,10 @@ bool timer_register(int reg_prio, void (*unregister_callback)(void),
                     long cycles, void (*timer_callback)(void)
                     IF_COP(, int core))
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (ticks_reserved)
+        return false;
+#endif
     if (reg_prio <= timer_prio || cycles == 0)
         return false;
 
@@ -50,6 +58,10 @@ bool timer_register(int reg_prio, void (*unregister_callback)(void),
 
 bool timer_set_period(long cycles)
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (ticks_reserved)
+        return false;
+#endif
     return timer_set(cycles, false);
 }
 
@@ -58,10 +70,64 @@ bool timer_set_period(long cycles)
 * overwritten by a lower priority timer using timer_register() */
 void timer_unregister(void)
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (ticks_reserved)
+        return;
+#endif
     timer_stop();
 
     pfn_timer = NULL;
     pfn_unregister = NULL;
     timer_prio = -1;
 }
+
+#ifdef ASTRAPOD_ROCK_COMPAT
+static void count_tick(void)
+{
+    ++pending_ticks;
+}
+
+bool timer_reserve_ticks(long cycles)
+{
+    int irq = disable_irq_save();
+    bool ok = false;
+    if (!ticks_reserved && timer_prio == -1 && cycles > 0 &&
+        timer_set(cycles, true))
+    {
+        pending_ticks = 0;
+        pfn_timer = count_tick;
+        ticks_reserved = timer_start();
+        if (!ticks_reserved)
+        {
+            timer_stop();
+            pfn_timer = NULL;
+        }
+        ok = ticks_reserved;
+    }
+    restore_irq(irq);
+    return ok;
+}
+
+unsigned int timer_take_ticks(void)
+{
+    int irq = disable_irq_save();
+    unsigned int ticks = pending_ticks;
+    pending_ticks = 0;
+    restore_irq(irq);
+    return ticks;
+}
+
+void timer_release_ticks(void)
+{
+    int irq = disable_irq_save();
+    if (ticks_reserved)
+    {
+        timer_stop();
+        pfn_timer = NULL;
+        pending_ticks = 0;
+        ticks_reserved = false;
+    }
+    restore_irq(irq);
+}
+#endif
 

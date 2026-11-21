@@ -158,4 +158,9 @@ void mixer_set_frequency(unsigned int samplerate);
 /* Get output samplerate */
 unsigned int mixer_get_frequency(void);
 
+#ifdef ASTRAPOD_ROCK_COMPAT
+void mixer_click_play(const void *samples, size_t size, unsigned int rate);
+void mixer_click_stop(void);
+#endif
+
 #endif /* PCM_MIXER_H */

@@ -69,7 +69,11 @@ $(ROCK_OUT)/staged/vu_meter.c: $(ROCK_SRC)/vu_meter.c $(APPSDIR)/plugins/stage-u
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-utilities.py $< $@
 
-ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot \
+$(ROCK_OUT)/staged/metronome.c: $(ROCK_SRC)/metronome.c $(APPSDIR)/plugins/stage-metronome.py
+	$(SILENT)mkdir -p $(@D)
+	$(SILENT)python3 $(APPSDIR)/plugins/stage-metronome.py $< $@
+
+ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot metronome \
     minesweeper periodic_table playing_time pong robotfindskitten snake snake2 star stopwatch \
     lib/highscore vu_meter $(ROCK_UTILITIES) $(ROCK_RESOURCE_GAMES)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
@@ -141,7 +145,7 @@ ROCK_ACTION_MODULES := demos/snow demos/logo demos/mosaique demos/bounce \
     demos/matrix apps/countdown_timer games/dice games/jackpot games/rockblox1d \
     games/robotfindskitten apps/periodic_table games/2048 games/amaze \
     demos/fire demos/fireworks demos/plasma demos/starfield \
-    apps/alarmclock apps/dart_scorer apps/resistor demos/demystify games/bubbles \
+    apps/alarmclock apps/dart_scorer apps/metronome apps/resistor demos/demystify games/bubbles \
     demos/rocklife games/codebuster games/superdom
 $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_ACTION_MODULES))): $(ROCK_OBJECTS)/lib/pluginlib_actions.o
 $(ROCK_OUT)/modules/games/dice.rock: $(addprefix $(ROCK_OBJECTS)/lib/,configfile.o playback_control.o)
@@ -177,6 +181,7 @@ $(ROCK_OUT)/modules/demos/rocklife.rock $(ROCK_OUT)/modules/demos/vu_meter.rock:
 $(ROCK_OUT)/modules/demos/vu_meter.rock: $(FIXEDPOINTLIB)
 $(ROCK_OUT)/modules/games/codebuster.rock: $(addprefix $(ROCK_OBJECTS)/lib/,configfile.o playback_control.o)
 $(ROCK_OUT)/modules/games/superdom.rock: $(addprefix $(ROCK_OBJECTS)/lib/,display_text.o playback_control.o)
+$(ROCK_OUT)/modules/apps/metronome.rock: $(FIXEDPOINTLIB)
 
 $(ROCKS): $(ROCK_OUT)/modules/%.rock: $(ROCK_OBJECTS)/plugin_crt0.o $(ROCK_LINK_INPUT) $(ROCK_MANIFEST)
 	$(SILENT)mkdir -p $(@D)

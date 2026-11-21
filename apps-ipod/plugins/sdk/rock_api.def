@@ -237,4 +237,17 @@ ROCK_SLOT(__typeof__(splash_progress_set_delay) *splash_progress_set_delay,
 ROCK_SLOT(void (*splash_progress)(int, int, const char *, ...) ATTRIBUTE_PRINTF(3, 4),
           splash_progress, rock_progress)
 
+/* Foreground click playback and its exclusive tick counter */
+ROCK_SLOT(unsigned int (*click_begin)(void), click_begin, rock_click_begin)
+ROCK_SLOT(bool (*click_active)(void), click_active, rock_click_active)
+ROCK_SLOT(void (*click_play)(const void *, size_t), click_play, rock_click_play)
+ROCK_SLOT(void (*click_volume)(int), click_volume, rock_click_volume)
+ROCK_SLOT(bool (*ticks_start)(void), ticks_start, rock_ticks_start)
+ROCK_SLOT(unsigned int (*ticks_take)(void), ticks_take, rock_ticks_take)
+ROCK_SLOT(void (*ticks_stop)(void), ticks_stop, rock_ticks_stop)
+ROCK_SLOT(int (*click_min_volume)(void), click_min_volume, rock_click_min_volume)
+ROCK_SLOT(int (*click_max_volume)(void), click_max_volume, rock_click_max_volume)
+ROCK_DIRECT(strchr)
+ROCK_DIRECT(strtok_r)
+
 #undef ROCK_RAW

@@ -43,6 +43,13 @@ void timers_adjust_prescale(int multiplier, bool enable_irq);
 * overwritten by a lower priority timer using timer_register() */
 void timer_unregister(void);
 
+#ifdef ASTRAPOD_ROCK_COMPAT
+/* Exclusive foreground tick counter. Native registrations keep their priority. */
+bool timer_reserve_ticks(long cycles);
+unsigned int timer_take_ticks(void);
+void timer_release_ticks(void);
+#endif
+
 /* target-specific interface */
 bool timer_set(long cycles, bool start);
 bool timer_start(IF_COP_VOID(int core));

@@ -80,6 +80,7 @@
 
 #define PLUGIN_MAGIC 0x41535452UL
 #define PLUGIN_API_VERSION 1
+#define ROCK_CLICK_TICK_HZ 500
 #define INTERNAL_PLUGIN_RETVAL_START 0x100
 enum plugin_status {
     PLUGIN_OK = 0,

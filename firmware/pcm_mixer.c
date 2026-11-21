@@ -51,6 +51,20 @@ struct mixer_channel
     const struct mixer_buffer_cbs* buf_cbs; /* Callback for new buffer */
 };
 
+#ifdef ASTRAPOD_ROCK_COMPAT
+/* A firmware-owned marker. The foreground module supplies samples only. */
+static const struct mixer_play_cbs click_owner;
+#endif
+
+static inline unsigned int channel_amplitude(const struct mixer_channel *chan)
+{
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (chan->play_cbs == &click_owner)
+        return MIX_AMP_UNITY;
+#endif
+    return chan->amplitude;
+}
+
 #if (defined(HW_HAVE_192) || defined(HW_HAVE_176))
 #define FRAME_SIZE_MULT  4
 #elif (defined(HW_HAVE_96) || defined(HW_HAVE_88))
@@ -147,6 +161,10 @@ static void channel_stopped(struct mixer_channel *chan)
     chan->size = 0;
     chan->start = NULL;
     chan->status = CHANNEL_STOPPED;
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (chan->play_cbs == &click_owner)
+        chan->play_cbs = NULL;
+#endif
 }
 
 /* Main PCM callback - sends the current prepared frame to play */
@@ -158,6 +176,10 @@ static void mixer_pcm_callback(const void **addr, size_t *size)
 
 static inline void chan_call_buffer_hook(struct mixer_channel *chan)
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (chan->play_cbs == &click_owner)
+        return;
+#endif
     if (UNLIKELY(chan->buf_cbs && chan->buf_cbs->next_buffer))
         chan->buf_cbs->next_buffer(chan->start, chan->size);
 }
@@ -231,7 +253,7 @@ fill_frame:
 
         if (LIKELY(!*chan_p))
         {
-            amp = chan->amplitude;
+            amp = channel_amplitude(chan);
             if (LIKELY(amp == chan->written_amp))
             {
                 write_samples(mixptr, chan->start, amp, mixsize);
@@ -249,7 +271,7 @@ fill_frame:
 
             /* Mix first two channels with each other as the downmix */
             src0 = chan->start;
-            amp0 = chan->amplitude;
+            amp0 = channel_amplitude(chan);
             chan->written_amp = amp0;
             chan->last_size = mixsize;
 
@@ -271,7 +293,7 @@ fill_frame:
                 src0 = mixptr;
                 amp0 = MIX_AMP_UNITY;
                 src1 = chan->start;
-                amp1 = chan->amplitude;
+                amp1 = channel_amplitude(chan);
             }
             amp = amp1;
         }
@@ -424,7 +446,7 @@ void mixer_channel_play_data(enum pcm_mixer_channel channel,
         chan->size = size;
         chan->last_size = 0;
         chan->play_cbs = cbs;
-        chan->written_amp = chan->amplitude; /* Nothing to go on from */
+        chan->written_amp = channel_amplitude(chan);
 
         mixer_activate_channel(chan);
         chan_call_buffer_hook(chan);
@@ -474,6 +496,31 @@ void mixer_channel_stop(enum pcm_mixer_channel channel)
     channel_stopped(chan);
     pcm_play_unlock();
 }
+
+#ifdef ASTRAPOD_ROCK_COMPAT
+void mixer_click_play(const void *samples, size_t size, unsigned int rate)
+{
+    const struct mixer_channel *chan = &channels[PCM_MIXER_CHAN_PLAYBACK];
+
+    pcm_play_lock();
+    if (mixer_get_frequency() == rate &&
+        (chan->status == CHANNEL_STOPPED || chan->play_cbs == &click_owner))
+        mixer_channel_play_data(PCM_MIXER_CHAN_PLAYBACK, &click_owner,
+                                samples, size);
+    pcm_play_unlock();
+}
+
+void mixer_click_stop(void)
+{
+    struct mixer_channel *chan = &channels[PCM_MIXER_CHAN_PLAYBACK];
+
+    pcm_play_lock();
+    if (chan->play_cbs == &click_owner)
+        channel_stopped(chan);
+    pcm_play_unlock();
+    /* PCM and DMA play copies in downmix_buf, never the module's buffer. */
+}
+#endif
 
 /* Switch playback sink */
 bool mixer_switch_sink_quiet(enum pcm_sink_ids sink)
@@ -544,6 +591,13 @@ size_t mixer_channel_get_bytes_waiting(enum pcm_mixer_channel channel)
 const void * mixer_channel_get_buffer(enum pcm_mixer_channel channel, int *count)
 {
     struct mixer_channel *chan = &channels[channel];
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (chan->play_cbs == &click_owner)
+    {
+        *count = 0;
+        return NULL;
+    }
+#endif
     const void * buf = *(const void * volatile *)&chan->start;
     size_t size = *(size_t volatile *)&chan->size;
     const void * buf2 = *(const void * volatile *)&chan->start;

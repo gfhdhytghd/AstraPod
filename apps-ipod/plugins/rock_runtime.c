@@ -6,6 +6,8 @@
 #include "rock-compat/rock_fingerprint.h"
 #include "core_alloc.h"
 #include "root_menu.h"
+#include "sound.h"
+#include "timer.h"
 #include "speech/language.h"
 #include "lang.h"
 #include "system/app_buffer.h"
@@ -38,6 +40,159 @@ static unsigned char *tail;
 static size_t tail_size;
 static bool usb_taken;
 static bool backlight_overridden;
+
+/* Serialize handoff with the audio and USB threads. The timer and mixer
+ * synchronize independently with their interrupt/callback contexts. */
+static struct mutex media_mutex;
+static bool media_initialized;
+static bool media_disabled;
+static bool click_requested;
+static bool timer_owned;
+static unsigned int click_rate;
+static bool volume_overridden;
+
+static void rock_ticks_stop_locked(void)
+{
+    if (timer_owned)
+    {
+        timer_release_ticks();
+        timer_owned = false;
+    }
+}
+
+static void rock_media_stop_locked(void)
+{
+    media_disabled = true;
+    click_requested = false;
+    rock_ticks_stop_locked();
+    if (click_rate)
+        mixer_click_stop();
+    click_rate = 0;
+    if (volume_overridden)
+    {
+        sound_set_transient_volume(global_status.volume);
+        volume_overridden = false;
+    }
+}
+
+void rock_media_shutdown(void)
+{
+    if (!media_initialized)
+        return;
+    mutex_lock(&media_mutex);
+    rock_media_stop_locked();
+    mutex_unlock(&media_mutex);
+}
+
+void rock_playback_takeover(void)
+{
+    if (!media_initialized)
+        return;
+    mutex_lock(&media_mutex);
+    if (click_requested)
+        rock_media_stop_locked();
+    mutex_unlock(&media_mutex);
+}
+
+static bool click_available(void)
+{
+#ifdef USB_ENABLE_AUDIO
+    if (usb_audio_get_active())
+        return false;
+#endif
+    return !media_disabled && !(audio_status() &
+        (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE |
+         AUDIO_STATUS_RECORD | AUDIO_STATUS_PRERECORD));
+}
+
+static unsigned int rock_click_begin(void)
+{
+    /* The audio thread can service a takeover while audio_stop waits. */
+    mutex_lock(&media_mutex);
+    bool allowed = !usb_taken && !media_disabled && !click_requested &&
+        !(audio_status() & (AUDIO_STATUS_RECORD | AUDIO_STATUS_PRERECORD));
+#ifdef USB_ENABLE_AUDIO
+    if (usb_audio_get_active())
+        allowed = false;
+#endif
+    if (allowed)
+        click_requested = true;
+    mutex_unlock(&media_mutex);
+    if (!allowed)
+        return 0;
+    audio_stop();
+    mutex_lock(&media_mutex);
+    if (click_available())
+        click_rate = mixer_get_frequency();
+    click_requested = click_rate != 0;
+    unsigned int rate = click_rate;
+    mutex_unlock(&media_mutex);
+    return rate;
+}
+
+static bool rock_click_active(void)
+{
+    mutex_lock(&media_mutex);
+    bool active = click_rate && click_rate == mixer_get_frequency();
+    mutex_unlock(&media_mutex);
+    return active;
+}
+
+static void rock_click_play(const void *samples, size_t size)
+{
+    mutex_lock(&media_mutex);
+    if (click_rate)
+        mixer_click_play(samples, size, click_rate);
+    mutex_unlock(&media_mutex);
+}
+
+static void rock_click_volume(int value)
+{
+    mutex_lock(&media_mutex);
+    if (click_rate)
+    {
+        sound_set_transient_volume(value);
+        volume_overridden = true;
+    }
+    mutex_unlock(&media_mutex);
+}
+
+static int rock_click_min_volume(void)
+{
+    return sound_min(SOUND_VOLUME);
+}
+
+static int rock_click_max_volume(void)
+{
+    return MIN(sound_max(SOUND_VOLUME), global_settings.volume_limit);
+}
+
+static bool rock_ticks_start(void)
+{
+    mutex_lock(&media_mutex);
+    if (click_rate && click_rate == mixer_get_frequency() && !timer_owned)
+        timer_owned = timer_reserve_ticks(TIMER_FREQ / ROCK_CLICK_TICK_HZ);
+    bool owned = timer_owned;
+    mutex_unlock(&media_mutex);
+    return owned;
+}
+
+static unsigned int rock_ticks_take(void)
+{
+    mutex_lock(&media_mutex);
+    unsigned int ticks = timer_owned ? timer_take_ticks() : 0;
+    mutex_unlock(&media_mutex);
+    return ticks;
+}
+
+static void rock_ticks_stop(void)
+{
+    mutex_lock(&media_mutex);
+    rock_ticks_stop_locked();
+    if (click_rate)
+        mixer_click_stop();
+    mutex_unlock(&media_mutex);
+}
 
 static struct mp3entry *rock_audio_current_track(void)
 {
@@ -128,6 +283,7 @@ void rock_usb_takeover(void)
 {
     if (!filename || usb_taken)
         return;
+    rock_media_shutdown();
     rock_flush_settings();
     restore_input_settings();
     usb_taken = true;
@@ -475,6 +631,14 @@ static int run_rock(const char *path, unsigned char *arena, size_t capacity,
 
     filename = path;
     usb_taken = false;
+    if (!media_initialized)
+    {
+        mutex_init(&media_mutex);
+        media_initialized = true;
+    }
+    mutex_lock(&media_mutex);
+    media_disabled = false;
+    mutex_unlock(&media_mutex);
 #ifdef HAVE_SW_POWEROFF
     original_sw_poweroff = button_get_sw_poweroff_state();
 #endif
@@ -484,6 +648,7 @@ static int run_rock(const char *path, unsigned char *arena, size_t capacity,
     rock_action_reset();
 
     result = module->entry_point(NULL);
+    rock_media_shutdown();
     if (usb_taken)
         result = PLUGIN_USB_CONNECTED;
     rock_flush_settings();

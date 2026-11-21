@@ -72,6 +72,7 @@ static bool reported_high_rate;
 #include "database/path_key.h"
 #include "ab_repeat.h"
 #include "pcm_mixer.h"
+#include "plugins/rock_compat.h"
 #include "pcmbuf.h"
 #include "audio_thread.h"
 #include "pcm_sink.h"
@@ -3618,6 +3619,8 @@ static void audio_start_playback(const struct audio_resume_info *resume_info,
         /* Cold playback start from a stopped state */
         logf("%s(%lu, %lu): starting", __func__, resume.elapsed,
              resume.offset);
+
+        rock_playback_takeover();
 
         /* Set audio parameters */
 #if INPUT_SRC_CAPS != 0

@@ -1825,6 +1825,19 @@ static bool audio_init_codec(struct track_info *track_infop,
     int codt_loaded = get_audio_base_codec_type(codec_loaded());
     int hid = ERR_HANDLE_NOT_FOUND;
 
+#ifdef USB_ENABLE_AUDIO
+    /* A codec sets the DSP's format only when loaded, and a sound card
+     * stream since then has set it to its own */
+    static unsigned int loaded_claims;
+    if (codt_loaded != AFMT_UNKNOWN
+        && loaded_claims != usb_audio_get_dsp_claims())
+    {
+        codec_unload();
+        codt_loaded = AFMT_UNKNOWN;
+    }
+    loaded_claims = usb_audio_get_dsp_claims();
+#endif
+
     if (codt_loaded != AFMT_UNKNOWN)
     {
         int codt = get_audio_base_codec_type(track_id3->codectype);
@@ -4058,6 +4071,10 @@ void audio_playback_handler(struct queue_event *ev)
             audio_stop_playback(ev->id != SYS_USB_CONNECTED && ev->data == 0);
             if (free_sm1_ring && audiobuf_handle > 0)
                 audiobuf_handle=core_free(audiobuf_handle);
+#ifdef USB_ENABLE_AUDIO
+            if (ev->id == SYS_USB_CONNECTED && !track_decode_busy())
+                codec_unload();
+#endif
             if (ev->data != 0 && ev->id != SYS_USB_CONNECTED)
                 queue_clear(&audio_queue);
             return; /* no more playback */

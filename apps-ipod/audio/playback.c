@@ -4058,7 +4058,7 @@ void audio_playback_handler(struct queue_event *ev)
             audio_stop_playback(ev->id != SYS_USB_CONNECTED && ev->data == 0);
             if (free_sm1_ring && audiobuf_handle > 0)
                 audiobuf_handle=core_free(audiobuf_handle);
-            if (ev->data != 0)
+            if (ev->data != 0 && ev->id != SYS_USB_CONNECTED)
                 queue_clear(&audio_queue);
             return; /* no more playback */
 

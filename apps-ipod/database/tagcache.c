@@ -6595,6 +6595,15 @@ static bool check_dir(const char *dirname, int add_files, int depth)
             continue;
 
         struct dirinfo info = dir_get_info(dir, entry);
+        if (info.attribute & ATTR_DIRECTORY)
+        {
+            const char *name = entry->d_name;
+            const char *path = path_key_strip(dirname);
+            if (name[0] == '.' || !strcmp(name, "__MACOSX") ||
+                (!strcmp(path, "/") && (!strcasecmp(name, "Recycled") ||
+                                       !strcasecmp(name, "$RECYCLE.BIN"))))
+                continue;
+        }
         size_t len = strlen(curpath);
         path_append(&curpath[len-1], PA_SEP_HARD, entry->d_name,
                     sizeof (curpath) - len);

@@ -1,4 +1,6 @@
 /* Owned plugin filesystem operations. GNU GPL version 2 or later. */
+#include <errno.h>
+#include <string.h>
 #include "file.h"
 #include "rock_compat.h"
 #include "rock_files.h"
@@ -71,6 +73,11 @@ ssize_t rock_read(int fd, void *buf, size_t size)
 ssize_t rock_write(int fd, const void *buf, size_t size)
 {
     return file_slot(fd) >= 0 ? write(fd, buf, size) : -1;
+}
+
+int rock_file_sync(int fd)
+{
+    return file_slot(fd) >= 0 ? fsync(fd) : -1;
 }
 
 off_t rock_lseek(int fd, off_t offset, int whence)
@@ -160,6 +167,25 @@ struct dirinfo rock_dir_get_info(DIR *dir, struct DIRENT *entry)
     if (dir_slot(dir) < 0 || !entry)
         return (struct dirinfo){0};
     return dir_get_info(dir, entry);
+}
+
+/* Distinguish an I/O error from end-of-directory without exporting errno. */
+int rock_dir_next(DIR *dir, struct DIRENT **entry, struct dirinfo *info)
+{
+    if (dir_slot(dir) < 0)
+        return -1;
+
+    do
+    {
+        errno = 0;
+        *entry = readdir(dir);
+        if (!*entry)
+            return errno ? -1 : 0;
+    } while (!strcmp((*entry)->d_name, ".") || !strcmp((*entry)->d_name, ".."));
+
+    errno = 0;
+    *info = dir_get_info(dir, *entry);
+    return errno ? -1 : 1;
 }
 
 void rock_close_files(void)

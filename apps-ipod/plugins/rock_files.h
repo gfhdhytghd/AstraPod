@@ -23,6 +23,8 @@ DIR *rock_opendir(const char *);
 struct DIRENT *rock_readdir(DIR *);
 int rock_closedir(DIR *);
 struct dirinfo rock_dir_get_info(DIR *, struct DIRENT *);
+int rock_dir_next(DIR *, struct DIRENT **, struct dirinfo *);
+int rock_file_sync(int);
 void rock_close_files(void);
 bool rock_get_metadata(struct mp3entry *id3, int fd, const char *path);
 

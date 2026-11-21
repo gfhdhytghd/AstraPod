@@ -103,9 +103,16 @@ $(ROCK_OUT)/staged/pitch_detector.c: $(ROCK_SRC)/pitch_detector.c $(APPSDIR)/plu
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(word 2,$^) $< $@
 
+$(ROCK_OUT)/staged/stats.c $(ROCK_OUT)/staged/search.c: $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c \
+    $(APPSDIR)/plugins/%-compat.inc $(APPSDIR)/plugins/stage-file-utilities.py
+	$(SILENT)mkdir -p $(@D)
+	$(SILENT)python3 $(word 3,$^) $< $(word 2,$^) $@ $(word 4,$^)
+
+$(ROCK_OUT)/staged/stats.c: $(ROCK_SRC)/lib/mul_id3.c
+
 ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot metronome \
     minesweeper oscilloscope periodic_table pitch_detector playing_time pong rb_info robotfindskitten snake snake2 star stopwatch \
-    lib/highscore vu_meter $(ROCK_UTILITIES) $(ROCK_GAME_ADAPTERS)
+    lib/highscore search stats vu_meter $(ROCK_UTILITIES) $(ROCK_GAME_ADAPTERS)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@

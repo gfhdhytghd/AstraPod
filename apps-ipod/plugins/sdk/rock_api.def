@@ -262,4 +262,11 @@ ROCK_DIRECT(strtok_r)
 ROCK_SLOT(__typeof__(mixer_waveform_read) *waveform_read, waveform_read,
           rock_waveform_read)
 
+/* Checked directory reads and committed writes for foreground file utilities. */
+ROCK_SLOT(int (*dir_next)(DIR *, struct DIRENT **, struct dirinfo *),
+          dir_next, rock_dir_next)
+ROCK_SLOT(int (*file_sync)(int), file_sync, rock_file_sync)
+ROCK_SLOT(int (*filetype_get_attr)(const char *),
+          filetype_get_attr, filetype_get_attr)
+
 #undef ROCK_RAW

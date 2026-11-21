@@ -69,3 +69,25 @@ and modules from the same build.
 | `disktidy` | Held. Recursive deletion needs a reviewed path and traversal contract. The SDK lacks `rmdir` and owned extended event callbacks for its statistics screen. Its stock rule resource is `apps/plugins/disktidy.config`. |
 | `shopper` | Held. The stock viewer expects a `.shopper` path parameter and writes back to that path. It needs an explicit file association and a checked save path. |
 | `remote_control` | Held. It needs `usb_hid_send` and an active USB HID session while the plugin is foreground. The SDK exits foreground plugins during USB storage takeover. |
+
+## Storage stats and playlist search
+
+In **Plugins > Applications**, open **stats** to count files from the storage
+root. The totals classify audio, playlists, images and videos by extension.
+They include hidden folders and report the total bytes and largest folder by
+file count. Press Menu to cancel. If the scan cannot read a folder or fit its
+path, it reports an incomplete scan. Wide folders with many subfolders take
+longer because the scan reopens the parent after each child.
+
+In **Files**, hold Select on an M3U or M3U8 file and choose **Search in
+Playlist**. Enter part of a track path in the keyboard. The search ignores
+ASCII letter case and matches non-ASCII text exactly. A normal Select opens
+the playlist in the native player. Search skips comments and saves only
+matching paths. The result appears beside the source as
+`search_result-1.m3u` or `search_result-1.m3u8`. A later search uses the next
+free number. The result keeps the source extension, any UTF-8 BOM and the
+original path bytes, including relative paths.
+
+Press Menu to cancel. A failed or cancelled search leaves the source and
+earlier results available. If abrupt power loss leaves a hidden
+`.search_result-N.tmp` file, you can delete it.

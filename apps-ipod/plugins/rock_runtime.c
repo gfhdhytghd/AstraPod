@@ -7,6 +7,7 @@
 #include "plugins/sdk/plugin.h"
 #include "rock-compat/rock_fingerprint.h"
 #include "core_alloc.h"
+#include "files/filetypes.h"
 #include "root_menu.h"
 #include "pcm_waveform.h"
 #include "sound.h"

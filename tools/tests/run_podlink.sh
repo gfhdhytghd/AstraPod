@@ -5,4 +5,6 @@ set -eu
 cd "$(dirname "$0")/../.."
 "${PYTHON:-python3}" tools/tests/podlink_recording_test.py \
     "${PODLINK_TEST_BUILD:-build-fu49}/host/recording"
+"${PYTHON:-python3}" tools/tests/podlink_plugin_test.py \
+    "${PODLINK_TEST_BUILD:-build-fu49}/host/plugin"
 "${PYTHON:-python3}" tools/tests/run_podlink_rust.py --build "${PODLINK_TEST_BUILD:-build-fu49}"

@@ -11,6 +11,7 @@ struct gui_synclist;
 int rock_browser(void *unused);
 /* The selected input path is borrowed until return. NULL starts the module. */
 int rock_open_from_browser(const char *path, const char *file);
+int rock_run_from_shell(const char *path);
 bool rock_ui_raw(void);
 bool rock_list_owns(const struct gui_synclist *list);
 bool rock_usb_taken(void);

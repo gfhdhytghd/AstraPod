@@ -76,6 +76,7 @@ static bool file_exists(const char *path)
     return strcmp(path, WAV_PATH) == 0 && file_saved;
 }
 static int audio_status(void) { return capture ? AUDIO_STATUS_RECORD : 0; }
+uint32_t sm1_test_audio_status(void) { return audio_status(); }
 static void audio_error_clear(void) { assert(0); }
 static unsigned pcm_rec_get_errors(void) { return 0; }
 static unsigned pcm_rec_get_dma_blocks(void) { return capture || file_saved; }
@@ -193,6 +194,8 @@ static void audio_stop_recording_sync(void)
     if (cable)
     {
         check_record_status(SM1_RECORD_ACTIVE, "");
+        assert(read_le32(request(0xc0, SM1_TEST_AUDIO_STATUS_VALUE, 4,
+                                 USB_CONTROL_ACK)) == AUDIO_STATUS_RECORD);
         check_shell_counts(2, 1);
     }
     current_tick += HZ;

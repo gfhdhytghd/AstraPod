@@ -1,4 +1,5 @@
 /* Disk control is outside this charging-only controller model. */
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 static uint32_t test_disk_ack;
@@ -10,7 +11,22 @@ bool usb_disk_flush_ack(uint32_t request) { test_disk_ack=request; return test_d
 #include <stdio.h>
 #include "charging_stubs/config.h"
 #define _BUTTON_H_
+/* The device-control request shares this USB core, but is outside the model. */
+#define SYS_SM1_TEST_CONTROL 8
+static bool button_queue_try_post(long button, int data)
+{
+    (void)button;
+    (void)data;
+    assert(!"unexpected SM1 request");
+    return false;
+}
 #include "../../firmware/usbstack/usb_core.c"
+volatile unsigned sm1_test_submitted, sm1_test_completed, sm1_test_dispatch_tick;
+const char *sm1_test_debug_name(unsigned index) { (void)index; return NULL; }
+bool sm1_test_record_active(void) { return false; }
+void sm1_test_record_status(void *reply) { (void)reply; assert(0); }
+void sm1_test_record_error(void *reply) { (void)reply; assert(0); }
+enum podlink_connection podlink_state(void) { return PODLINK_CLOSED; }
 #define BUTTON_NONE 0
 #define BUTTON_RC_MENU 0x00200000
 #define BUTTON_RC_SELECT 0x00400000
@@ -22,6 +38,7 @@ bool usb_disk_flush_ack(uint32_t request) { test_disk_ack=request; return test_d
 
 long current_tick;
 static bool connected, leased, host_probe, exclusive, host_present;
+bool usb_exclusive_storage(void) { return exclusive; }
 static bool backlight_on = true;
 static int update_pending, profile;
 static int speed = 1;

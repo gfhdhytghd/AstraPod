@@ -105,15 +105,23 @@ for that call. CHIP-8 reads an optional same-stem `.c8k` file to remap
 keys. The firmware routes these extensions through a fixed association
 table. See [the plugin guide](../../apps-ipod/plugins/README.md) for keys.
 
-## Oscilloscope peak display
+## Oscilloscope
 
-The Demos category includes the peak-only Oscilloscope. It reads the
-native playback channel's left and right peaks while music plays.
-The graph returns to zero when playback pauses or stops. Select opens
-AstraPod's options and volume controls. Menu returns to the caller.
+In **Plugins > Demos**, open **Oscilloscope**. It starts in Peaks on
+the first launch. Press Select and choose **Graph mode** to switch
+between Peaks and Waveform. Both modes use the native options for
+draw style, orientation and volume. Use **Advance** and **Speed**
+in Peaks. Use **Time span** for a 2–10 ms window in Waveform. Press
+Menu from the graph to return.
 
-The build stages the upstream peak plotters for ipod6g. Waveform
-display needs a firmware-owned PCM observer and synchronized teardown.
+Waveform shows one trace for each stereo channel. A short PCM buffer
+can shorten the window. On pause, stop or unavailable playback
+samples, the graph shows two flat traces.
+
+The SDK supplies a foreground-only `waveform_read` call. Pass space
+for `PCM_WAVEFORM_FRAMES` stereo frames. The result is the number of
+complete interleaved 16-bit frames copied from the native playback
+channel. A zero result means no samples are available for this read.
 
 ## Foreground Metronome
 

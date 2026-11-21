@@ -73,6 +73,7 @@ $(ROCK_OUT)/staged/metronome.c: $(ROCK_SRC)/metronome.c $(APPSDIR)/plugins/stage
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-metronome.py $< $@
 
+ROCK_OSCILLOSCOPE_FLAGS := -DROCK_OSCILLOSCOPE_WAVEFORM
 $(ROCK_OBJECTS)/oscilloscope.o: private ROCK_FLAGS += $(ROCK_OSCILLOSCOPE_FLAGS)
 
 $(ROCK_OUT)/staged/oscilloscope.c: $(ROCK_SRC)/oscilloscope.c $(APPSDIR)/plugins/stage-oscilloscope.py

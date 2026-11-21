@@ -80,8 +80,19 @@ elif src.stem == "playing_time":
         "    /* convert units from ms to s */",
         "    unsigned long long duration = pti->length[ePT_ELAPSED] + pti->length[ePT_REMAINING];\n"
         "    unsigned long long bytes = pti->size[ePT_ELAPSED] + pti->size[ePT_REMAINING];\n"
-        "    pti->avg_bitrate = duration ? bytes * 8 / duration : 0;\n\n"
+        "    pti->avg_bitrate = duration ? bytes * 8 / duration : 0;\n"
+        "    pti->curr_track_length[ePT_TOTAL] = (pti->curr_track_length[ePT_ELAPSED]\n"
+        "                                        + pti->curr_track_length[ePT_REMAINING]) / 1000;\n\n"
         "    /* convert units from ms to s */",
+    )
+    replace(
+        "    pti->length[ePT_TOTAL] = pti->length[ePT_ELAPSED] + pti->length[ePT_REMAINING];",
+        "    pti->length[ePT_TOTAL] = duration / 1000;",
+    )
+    replace(
+        "    pti->curr_track_length[ePT_TOTAL] = pti->curr_track_length[ePT_ELAPSED]\n"
+        "                                       + pti->curr_track_length[ePT_REMAINING];\n",
+        "",
     )
     replace(
         "        /* Convert power of 2 kilobytes to power of 10 kilobits */\n"

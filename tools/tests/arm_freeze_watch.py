@@ -210,7 +210,7 @@ u.hook_del(h)
 assert u.reg_read(UC_ARM_REG_PC) == sym('system_exception_wait')
 assert drawn[0] == 'panic_screen_enter', drawn[:3]
 texts = [d for d in drawn if not d.startswith(('lcd_', 'panic_'))]
-assert texts[0].startswith('*FREEZE* (') and texts[1].startswith('IRQs off %ds')
+assert texts[0].startswith('*FREEZE* (') and texts[1] == 'IRQs off 3s: tick 5000 stopped'
 assert any(t.startswith('thread  s pr lr') for t in texts)
 assert drawn.count('lcd_update') == 2
 cases.append({'case': 'irqs off', 'trip_period': 30, 'pc': hex(fz[1]),

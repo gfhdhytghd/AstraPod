@@ -16,6 +16,12 @@ pre=r'''
 #include "screens/playback/cider_model.h"
 #include "screens/playback/cider_store.h"
 #include "screens/playback/cider_library.h"
+struct ui_scene { int unused; };
+static void ui_scene_open_page(struct ui_scene *s,const char *route){(void)s;assert(route);}
+static void ui_scene_open_modal(struct ui_scene *s,const char *route){(void)s;assert(route);}
+static bool ui_scene_close_modal(struct ui_scene *s,bool animate,const char *route)
+{(void)s;(void)animate;(void)route;return false;}
+
 #define HZ 100
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
@@ -75,8 +81,8 @@ static int do_menu(const struct menu_item_ex*m,void*a,void*b,bool c);
 '''
 post=r'''
 static int do_menu(const struct menu_item_ex*m,void*a,void*b,bool c){(void)a;(void)b;(void)c;
- const struct menu_item_ex *expected[]={&cider_shuffle,&cider_repeat,&cider_rating_item,&cider_info_item,&cider_album_item,&cider_artist_item,&cider_lyrics_item,&cider_sleep_item,&cider_speed_item,&cider_queue_menu,&theme_options_item,&cider_more_menu};
- assert(m->count==12);for(unsigned i=0;i<12;i++)assert(m->items[i]==expected[i]);
+ const struct menu_item_ex *expected[]={&cider_shuffle,&cider_repeat,&cider_rating_item,&cider_info_item,&cider_album_item,&cider_artist_item,&cider_lyrics_item,&cider_sleep_item,&cider_speed_item,&cider_queue_menu,&cider_more_menu};
+ assert(m->count==ARRAYLEN(expected));for(unsigned i=0;i<ARRAYLEN(expected);i++)assert(m->items[i]==expected[i]);
  assert(cider_queue_menu.count==2&&cider_more_menu.count==2&&cider_sound_menu.count==1);
  assert(presenter==&context_presenter);enum list_row_kind kind;const char*value;
  assert(presenter->describe(&cider_shuffle,&kind,&value)&&kind==LIST_ROW_TOGGLE);
@@ -98,4 +104,5 @@ subprocess.run([str(o/'test')],check=True)
 root=s[s.index('MAKE_MENU(cider_context_menu'):s.index('static bool context_setting')]
 for forbidden in ['delete','book','cue','chapter','mix','spike','save','search','reshuffle','equalizer','playback_settings']:
  assert forbidden not in root,forbidden
-wps=(r/'apps-ipod/screens/playback/wps.c').read_text();assert 'cider_context_show()' in wps and 'cider_wps_enter();' in wps
+wps=(r/'apps-ipod/screens/playback/wps.c').read_text();assert 'cider_context_show()' in wps and 'cider_wps_update(state);' in wps
+assert 'cider_wps_enter();' in (r/'apps-ipod/screens/playback/cider_wps.c').read_text()

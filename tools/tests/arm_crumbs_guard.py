@@ -21,7 +21,7 @@ Checks:
    stacks and to DRAM do not. crumbs_guard_off (ROLO) restores low vectors
    and the VA 0 section, with the vector words back at PA 0.
  - guard_tick: quiet on an intact machine (and writes the tick status word
-   to both ring copies); a changed live vector word or a changed word
+   to the retained DRAM ring); a changed live vector word or a changed word
    anywhere in the PA 0 page (written past the MMU, as a DMA would), a
    changed SVC bank, a
    changed IRAM code block and a changed page-table block each end in panicf
@@ -286,7 +286,7 @@ assert blocks >= (ro_end - sym('_icodestart')) // 256
 _q = tick(u, blocks + 70); assert _q is None, _q
 status = 6 * 4                                  # header words before status
 assert rd(u, sym('dram_ring') + status) == rd(u, sym('current_tick'))
-assert rd(u, IRAM1_RING + status) == rd(u, sym('current_tick'))
+assert rd(u, IRAM1_RING + status) == 0
 guard = {}
 
 def newest_id(u, ring):
@@ -318,7 +318,7 @@ word(u, at, rd(u, at) ^ 0x10)
 guard['vector'] = tick(u)
 assert guard['vector'] and guard['vector'].startswith('VECTOR +%02x'), guard
 assert newest_id(u, sym('dram_ring')) == ids['CR_VECTOR_BAD']
-assert newest_id(u, IRAM1_RING) == ids['CR_VECTOR_BAD']
+assert newest_id(u, IRAM1_RING) is None
 
 u = fresh()
 word(u, 0x34, rd(u, 0x34) ^ 0x10)              # DMA aimed at PA 0
@@ -394,8 +394,8 @@ first_seq = rd(u, prev + 8 + 16 * 4 + 4)
 assert valid == 1 and clean == 0 and boot_no == 41 and n == 32, \
     (valid, clean, boot_no, n)
 assert first_seq == 69 and rd(u, prev + 8 + 4 * 4) == 0x55aa
-assert rd(u, sym('crumbs_prev_copies')) == 3
-assert rd(u, sym('dram_ring') + 8) == 42 and rd(u, IRAM1_RING + 8) == 42
+assert rd(u, sym('crumbs_prev_copies')) == 1
+assert rd(u, sym('dram_ring') + 8) == 42 and rd(u, IRAM1_RING + 8) == 41
 assert newest_id(u, sym('dram_ring')) == ids['CR_BOOT']
 res['crumbs_boot'] = dict(previous_boot=boot_no, entries=n, first_seq=first_seq,
                           new_boot=42)
@@ -407,10 +407,14 @@ if 'crumbs_crash_record' in syms:
     u.mem_write(message_addr, message + b'\0')
     context = (1, 0x08123456, 0x08500000, 0, 0, 0x1f, 0, 0)
     u.mem_write(context_addr, struct.pack('<8I', *context))
+    if 'recovery_started' in syms:
+        u.state['stubs'][sym('system_reboot')] = 0
     assert call(u, 'crumbs_crash_record', message_addr, context_addr) == RET
+    if 'recovery_started' in syms:
+        assert u.state['stubs'][sym('system_reboot')] == 1
     crash_addrs = (sym('dram_crash'), IRAM1_RING - 512)
     slots = [bytes(u.mem_read(addr, 364)) for addr in crash_addrs]
-    assert slots[0] == slots[1]
+    assert slots[1] == bytes(364)
     check, magic, boot_no, *saved_context = struct.unpack_from('<11I', slots[0])
     assert magic == 0x43525331 and boot_no == 42 and tuple(saved_context) == context
     checksum = SALT
@@ -422,7 +426,7 @@ if 'crumbs_crash_record' in syms:
     assert call(u, 'crumbs_boot') == RET
     assert rd(u, sym('dram_ring') + 8) == 43
     assert [bytes(u.mem_read(addr, 364)) for addr in crash_addrs] == slots
-    res['native_crash'] = dict(message=message.decode(), copies=2,
+    res['native_crash'] = dict(message=message.decode(), copies=1,
                                retained_from=42, new_boot=43,
                                persist=[hex(addr) for addr in crash_addrs])
 

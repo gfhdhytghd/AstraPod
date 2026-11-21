@@ -37,6 +37,7 @@ int main(void)
     fill(&a, 1000, 1);
     fill(&b, 1000, 1);
     assert(crumb_snapshot_take(&a, &b, &s) == 3 && s.n == 32);
+    assert(crumb_snapshot_take(&a, &a, &s) == 1 && s.valid && s.n == 32);
     for (int i = 0; i < 32; i++)
     {
         assert(s.e[i].value == (uint32_t)(1000 - 32 + i));

@@ -52,6 +52,7 @@ const char *sm1_test_debug_name(unsigned index);
 void sm1_test_debug_run(unsigned index);
 void sm1_test_record_run(bool mic);
 bool sm1_test_record_active(void);
+bool sm1_test_record_request_stop(void);
 void sm1_test_record_status(void *reply);
 void sm1_test_record_error(void *reply);
 

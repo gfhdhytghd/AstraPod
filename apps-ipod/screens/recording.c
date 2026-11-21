@@ -1866,6 +1866,7 @@ rec_abort:
 
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
 static volatile enum sm1_test_record_state shell_record_state;
+static volatile bool shell_record_stop_pending;
 static char shell_record_path[SM1_TEST_RECORD_PATH_SIZE];
 static uint32_t shell_record_error[SM1_TEST_RECORD_ERROR_SIZE / sizeof(uint32_t)];
 
@@ -1893,6 +1894,22 @@ bool sm1_test_record_active(void)
     return shell_record_state == SM1_RECORD_ACTIVE;
 }
 
+bool sm1_test_record_request_stop(void)
+{
+    /* EP0 and the recorder share the request and completion counters.
+     * A UI poll can consume a button event before the recorder sees it. */
+    int irq = disable_irq_save();
+    bool accepted = shell_record_state == SM1_RECORD_ACTIVE &&
+                    sm1_test_submitted == sm1_test_completed;
+    if (accepted)
+    {
+        ++sm1_test_submitted;
+        shell_record_stop_pending = true;
+    }
+    restore_irq(irq);
+    return accepted;
+}
+
 void sm1_test_record_status(void *reply)
 {
     int irq = disable_irq_save();
@@ -1907,7 +1924,7 @@ void sm1_test_record_run(bool mic)
 {
     char path[MAX_PATH];
     int action = ACTION_NONE;
-    bool started = false, stop = false;
+    bool started = false;
     record_error(SM1_RECORD_STAGE_NONE, 0);
     shell_record_state = SM1_RECORD_ERROR;
     if (mic && !mikey_supported())
@@ -1966,17 +1983,12 @@ void sm1_test_record_run(bool mic)
         {
             shell_record_state = SM1_RECORD_ACTIVE;
             ++sm1_test_completed;
-            while (usb_inserted() && usb_podlink_active() &&
+            while (!shell_record_stop_pending &&
+                   usb_inserted() && usb_podlink_active() &&
                    !usb_exclusive_storage() &&
                    !(audio_status() & AUDIO_STATUS_ERROR))
             {
                 action = get_action(CONTEXT_RECSCREEN, HZ / 10);
-                if (action == SYS_SM1_TEST_CONTROL)
-                {
-                    stop = true;
-                    sm1_test_dispatch_tick = current_tick;
-                    break;
-                }
                 if (action == ACTION_STD_CANCEL || action == SYS_USB_CONFIRM ||
                     action == SYS_USB_CONNECTED || action == SYS_USB_DISCONNECTED ||
                     action == SYS_POWEROFF || action == SYS_REBOOT)
@@ -1986,6 +1998,9 @@ void sm1_test_record_run(bool mic)
             }
         }
 
+        bool stop_dispatched = shell_record_stop_pending;
+        if (stop_dispatched)
+            sm1_test_dispatch_tick = current_tick;
         bool failed = audio_status() & AUDIO_STATUS_ERROR;
         if (!started || failed)
             record_error(started ? SM1_RECORD_STAGE_CAPTURE :
@@ -2004,11 +2019,19 @@ void sm1_test_record_run(bool mic)
         if (saved)
             strlcpy(shell_record_path, path, sizeof(shell_record_path));
         shell_record_state = saved ? SM1_RECORD_READY : SM1_RECORD_ERROR;
+        /* A stop can also arrive while a local cancel closes the file. */
+        if (shell_record_stop_pending)
+        {
+            if (!stop_dispatched)
+                sm1_test_dispatch_tick = current_tick;
+            shell_record_stop_pending = false;
+            ++sm1_test_completed;
+        }
         restore_irq(irq);
     }
-    if (!started || stop)
+    if (!started)
         ++sm1_test_completed;
-    if (action != SYS_SM1_TEST_CONTROL && action != ACTION_STD_CANCEL)
+    if (action != ACTION_STD_CANCEL)
         default_event_handler(action);
 }
 #endif

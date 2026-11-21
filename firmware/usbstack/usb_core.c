@@ -1486,10 +1486,21 @@ static void usb_core_control_request_handler(struct usb_ctrlrequest* req, uint8_
                      sm1_test_debug_name(req->wValue))
                 command = SM1_TEST_DEBUG_BASE + req->wValue;
 
-            if (req->bRequestType == 0x40 && req->wLength == 0 && command &&
+            bool command_request = req->bRequestType == 0x40 &&
+                                   req->wLength == 0;
+            if (command_request && command == SM1_TEST_RECORD_STOP)
+            {
+                enum usb_control_response response =
+                    sm1_test_record_request_stop() ? USB_CONTROL_ACK
+                                                   : USB_CONTROL_STALL;
+                usb_core_control_response(response, NULL, 0);
+                return;
+            }
+            if (command_request && command &&
                 sm1_test_submitted == sm1_test_completed &&
-                sm1_test_record_active() == (command == SM1_TEST_RECORD_STOP) &&
-                (command != SM1_TEST_OPEN_BENCH || podlink_state() == PODLINK_CLOSED))
+                !sm1_test_record_active() &&
+                (command != SM1_TEST_OPEN_BENCH ||
+                 podlink_state() == PODLINK_CLOSED))
             {
                 ++sm1_test_submitted;
                 if (button_queue_try_post(SYS_SM1_TEST_CONTROL, command))

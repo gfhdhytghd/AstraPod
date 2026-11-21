@@ -279,6 +279,22 @@ void car_adapter_mode_init(void)
 }
 
 #ifdef BOOTFILE
+static void restart_firmware(void)
+{
+    audio_hard_stop();
+    bool was_inserted = usb_inserted();
+#ifdef HAVE_USBSTACK
+    bool device_mode = !usb_host_probe_active();
+#else
+    bool device_mode = true;
+#endif
+    if (was_inserted && device_mode)
+        usb_enable(false);
+    rolo_load(BOOTDIR "/" BOOTFILE);
+    if (was_inserted && device_mode && usb_detect() == USB_INSERTED)
+        usb_enable(true);
+}
+
 /* A computer rewrote the database (tools/database_pb). This run holds the old
  * one's track numbers, in the playlist and the buffered tracks, so start
  * again. Tried once: a failed load leaves the database closed to this run. */
@@ -289,8 +305,7 @@ static void restart_if_database_replaced(void)
     if (!tried && tagcache_changed_over_usb())
     {
         tried = true;
-        audio_hard_stop();
-        rolo_load(BOOTDIR "/" BOOTFILE);
+        restart_firmware();
     }
 }
 
@@ -582,8 +597,10 @@ void check_bootfile(bool do_rolo)
                     button_clear_queue(); /* Empty the keyboard buffer */
                     if(gui_syncyesno_run(&message, NULL, NULL) == YESNO_YES)
                     {
-                        audio_hard_stop();
-                        rolo_load(BOOTDIR "/" BOOTFILE);
+                        mtime = info.mtime;
+                        closedir(dir);
+                        restart_firmware();
+                        return;
                     }
                 }
             }

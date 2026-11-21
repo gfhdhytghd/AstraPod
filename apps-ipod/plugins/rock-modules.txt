@@ -53,3 +53,4 @@ games/star
 games/superdom
 games/wormlet
 games/xobox
+viewers/chip8

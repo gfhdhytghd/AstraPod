@@ -7,6 +7,7 @@
 
 #if defined(IPOD_6G) && !defined(BOOTLOADER) && !defined(SIMULATOR)
 #define USB_REMOTE_KEY_ENABLED
+/* AstraPod-Desktop sends these requests from usb_remote_key/. */
 #define USB_REMOTE_KEY_REQUEST 0x5b
 #define USB_REMOTE_KEY_MENU 1
 #define USB_REMOTE_KEY_SELECT 2

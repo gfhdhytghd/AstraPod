@@ -12,7 +12,7 @@ Rockbox specifically and deeply optimized for iPod Classic.
 | 歌词 | TTML、LRC、逐字时间、对唱和背景人声。可以手动浏览和按行定位。歌词性能记录采用 30 fps 预算。 [歌词说明](docs/podbox/lyrics.md) |
 | PBF1 字体 | 主机合并 HarmonyOS Sans 与同字号 Noto 补字。覆盖整套 CJK 字符集，支持字偶距、字形缓存和预取。点阵按原生尺寸绘制。 [字体说明](tools/fonts/README.md) |
 | 远程播放 | HerdRemote 提供 Cider 播放控制、远程资料库和带时间的歌词。支持播放交接。 [远程协议](docs/podbox/cider-remote-protocol.md) |
-| Agents 和 Usage | 用点击轮查看 herdr 工作区、代理和用量。可以回答问题，也支持经主机配置的录音和键盘操作。 [HerdRemote](tools/herdremote/README.md) |
+| Agents 和 Usage | 用点击轮查看 herdr 工作区、代理和用量。可以回答问题，也支持经主机配置的录音和键盘操作。 [HerdRemote](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/README.md) |
 | PodLink 与稳定性 | PodLink 使用 USB CDC 串行链路。主线程栈和线程容量经过加固。字形与模糊任务共享后台线程。iAP 创建线程失败后可以重试。 |
 | sm1 DSP | 研发阶段。发行包的音频播放路径未启用 sm1 DSP。 |
 
@@ -66,7 +66,7 @@ Rockbox specifically and deeply optimized for iPod Classic.
 | 底座遥控器 | `Play` 双击／三击 | 双击切换 Agents 和「正在播放」；三击开关 Cover Flow。 |
 | 底座遥控器 | 长按 `Play` | 播放页开关歌词；Agents 中按住说话。 |
 
-[底座和主机的按键归属](docs/podbox/covers-navigation.md) · [Agents 按键及语音](tools/herdremote/README.md)
+[底座和主机的按键归属](docs/podbox/covers-navigation.md) · [Agents 按键及语音](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/README.md)
 
 ## 连接电脑
 
@@ -79,7 +79,7 @@ Rockbox specifically and deeply optimized for iPod Classic.
 
 开发包可以用报告中的 `fast_swap.py` 完整命令。参数依次为新 ZIP、ZIP SHA-256、基线 ZIP、旧固件 SHA-256 和新固件 SHA-256。工具核对基线，备份差异文件，写入并校验后弹出磁盘。有删除项的包用报告指定的 `fast_swap_rm.py`。
 
-兼容的 HerdRemote 服务运行时，可以用 `python3 tools/herdremote/podlink_disk.py --timeout 20` 请求磁盘模式。磁盘模式下长按机身 Menu，可以请求主机先卸载磁盘，再恢复非磁盘连接。 [Disk Mode](docs/podbox/herdremote-usage.md#disk-mode-control-fu42)
+兼容的 HerdRemote 服务运行时，可以在 AstraPod-Desktop 仓库运行 `python3 herdremote/podlink_disk.py --timeout 20` 请求磁盘模式。磁盘模式下长按机身 Menu，可以请求主机先卸载磁盘，再恢复非磁盘连接。 [Disk Mode](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/docs/herdremote-usage.md#disk-mode-control-fu42)
 
 ### PodLink 和 HerdRemote
 
@@ -87,13 +87,9 @@ PodLink 是 USB CDC 串行消息链路。打开「系统 → PodLink」，接线
 
 [PodLink 使用说明](docs/podlink.md)
 
-| 工具 | 用法 |
-| --- | --- |
-| `tools/podlink.py` | `python3 tools/podlink.py info` 查看状态。另有 `ping`、`echo`、`bench`、`latency` 和 `serve`。串行操作依赖 pyserial，WebSocket 服务依赖 websockets ≥14。 |
-| `tools/herdremote/herdremote.py` | 可直接运行，或用随附的 `herdremote.service` 启动。使用 Python 3.9+。依赖清单包括 pyserial、websockets 和 Pillow。 |
-| `tools/herdremote/podlink_disk.py` | 通过运行中的 HerdRemote 请求磁盘模式。 |
-
-主机依赖可以用 `python3 -m pip install -r tools/herdremote/requirements.txt` 安装。运行 HerdRemote 后接线，在 iPod 打开「系统 → Agents」。主机运行 herdr 时可以查看工作区。Cider 后端可用时，首页出现远程资料库入口，「正在播放」也可显示主机提供的歌词。播放交接按屏幕提示确认。 [主机配置](tools/herdremote/README.md) · [远程协议](docs/podbox/cider-remote-protocol.md)
+电脑端应用、PodLink 命令行、HerdRemote 和输入插件见 [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop)。
+运行 HerdRemote 后接线，在 iPod 打开「系统 → Agents」。
+[远程协议](docs/podbox/cider-remote-protocol.md)
 
 ### 故障排查
 

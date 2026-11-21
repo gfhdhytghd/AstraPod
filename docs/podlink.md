@@ -13,16 +13,16 @@ is `firmware/export/podlink.h`; its protocol version is 1.
 1. Unplug the USB cable.
 2. Open **System > PodLink** on the iPod.
 3. Connect USB. The screen shows `USB up / waiting OPEN` until a host connects.
-4. Run the host client:
+4. Run the host client from [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop):
 
 ```sh
 python3 -m venv .venv-podlink
 .venv-podlink/bin/pip install pyserial websockets
-.venv-podlink/bin/python tools/podlink.py ping
-.venv-podlink/bin/python tools/podlink.py info
-.venv-podlink/bin/python tools/podlink.py echo 'hello'
-.venv-podlink/bin/python tools/podlink.py latency --samples 100
-.venv-podlink/bin/python tools/podlink.py bench --bytes 1048576
+.venv-podlink/bin/python podlink.py ping
+.venv-podlink/bin/python podlink.py info
+.venv-podlink/bin/python podlink.py echo 'hello'
+.venv-podlink/bin/python podlink.py latency --samples 100
+.venv-podlink/bin/python podlink.py bench --bytes 1048576
 ```
 
 The client finds a tty with VID `05ac` and PID `1261`. To select a port, pass
@@ -41,7 +41,7 @@ run the host again; restarting the screen is unnecessary.
 ## WebSocket
 
 ```sh
-.venv-podlink/bin/python tools/podlink.py serve --listen-port 8765
+.venv-podlink/bin/python podlink.py serve --listen-port 8765
 ```
 
 Connect one client to `ws://127.0.0.1:8765/`. Text and binary messages retain
@@ -118,11 +118,12 @@ Latency measures protocol PING/PONG and 64-byte binary echo separately.
 ## Host verification
 
 ```sh
-PYTHON=.venv-podlink/bin/python tools/tests/run_podlink.sh
+sh tools/tests/run_podlink.sh
 ```
 
-These checks use mock serial/controller state and a real local WebSocket. They
-cannot establish physical USB, iPod startup, or real-device throughput.
+These checks use synthetic serial/controller state. The [desktop test suite](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/README.md#tests)
+covers the Python client and its local WebSocket. These checks do not
+measure physical USB, iPod startup, or real-device throughput.
 
 The USB mode lease lasts until the screen exits. Cable removal or USB
 reconfiguration resets the byte queues and message handshake. A queued close
@@ -248,7 +249,7 @@ acknowledges a completed host unmount, with `wValue=request_id & 65535` and
 `wIndex=request_id >> 16`. Stale, unsolicited, wrong-direction and malformed
 acknowledgements stall. The USB thread owns these states. It detaches before
 local remount on acknowledgement or after the three-second timeout. See
-`docs/podbox/herdremote-usage.md` for host installation and safety limits.
+[HerdRemote Disk Mode](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/docs/herdremote-usage.md#disk-mode-control-fu42) for host installation and safety limits.
 
 ## Rust firmware build requirement
 
@@ -293,7 +294,7 @@ Time-record consumption uses an independent IRQ-protected mailbox. Read
 Offline checks (put temporary files under your build directory):
 
 ```sh
-PYTHON=.venv-podlink/bin/python tools/tests/run_podlink.sh
+sh tools/tests/run_podlink.sh
 cargo +nightly-2026-02-03 test --manifest-path firmware/usbstack/podlink-rust/Cargo.toml
 python3 tools/tests/run_podlink_rust.py --build build
 python3 tools/tests/arm_podlink_rust.py --elf build/rockbox.elf
@@ -310,9 +311,8 @@ include USB output, state transitions and callback/front-end events. These are
 synthetic protocol-shaped inputs, not device captures.
 
 Host C-ABI tests need a C compiler, OpenSSL development headers (`libcrypto`),
-and the pinned Cargo toolchain. Python checks need pyserial and websockets;
-ARM/RAM scripts need Unicorn and pyelftools. `PODLINK_TEST_BUILD` chooses the
-host artifact directory (default `build-fu49`). The native32 Agents integration
+and the pinned Cargo toolchain. ARM/RAM scripts need Unicorn and pyelftools.
+`PODLINK_TEST_BUILD` chooses the host artifact directory (default `build-fu49`). The native32 Agents integration
 fixture also builds Rust core for `i686-unknown-linux-gnu` and needs multilib C
 libraries. RAM comparison uses a saved C baseline ELF; retired C objects are
 not required. Offline acceptance does not establish device, playback or live
@@ -320,8 +320,10 @@ USB acceptance.
 
 ## Sync Jellyfin from the desktop
 
+Run this command from AstraPod-Desktop:
+
 ```sh
-python3 tools/podlink_gui.py          # add --tray to start hidden in the tray
+python3 podlink_gui.py          # add --tray to start hidden in the tray
 ```
 
 AstraPod manages the iPod's music from the computer; it does not play audio.
@@ -374,10 +376,10 @@ identify a user with download permission.
 
 ## Import audio files from the command line
 
-Connect the iPod using its PodLink USB mode and run:
+Connect the iPod using its PodLink USB mode and run from AstraPod-Desktop:
 
 ```sh
-python3 tools/podlink.py import-media "/path/to/track.mp3" "/path/to/album-track.flac"
+python3 podlink.py import-media "/path/to/track.mp3" "/path/to/album-track.flac"
 ```
 
 The command needs pyserial, ffprobe and exclusive access to the PodLink tty. If

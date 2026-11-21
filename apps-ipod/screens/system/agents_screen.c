@@ -3,7 +3,7 @@
  *
  * System > Agents: the herdr agent dashboard and remote, over PodLink.
  *
- * The computer runs tools/herdremote, which sends HerdRemote v1 messages
+ * AstraPod-Desktop runs HerdRemote, which sends HerdRemote v1 messages
  * (docs/podbox/herdremote-protocol.md) describing herdr's workspaces, the
  * tabs and agents of the one the player subscribes to, the last lines of
  * one pane, and any choice question an agent is asking. This screen keeps

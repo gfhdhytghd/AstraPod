@@ -7,7 +7,9 @@ description: Developer guide to PodLink, the USB link between an iPod Classic ru
 
 This is an internals guide: it names source files. Read the linked document
 before changing a protocol; this page is the map, the documents are the
-contract.
+contract. Host paths and host commands below are relative to
+[AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop). Firmware paths and build commands
+are relative to this checkout.
 
 ## The parts
 
@@ -40,7 +42,7 @@ through `--port /dev/pts/N`.
 | Implementation, Rust, `no_std` | `firmware/usbstack/podlink-rust/` (read `AUDIT.md`) |
 | C platform glue | `firmware/usbstack/podlink_rust_platform.c` |
 | Wire format, API rules, Rust toolchain | `docs/podlink.md` |
-| Python client and frame codec | `tools/podlink.py` (`Link`, `encode`, `find_port`) |
+| Python client and frame codec | `podlink.py` (`Link`, `encode`, `find_port`) |
 
 Rules that bite:
 
@@ -80,9 +82,9 @@ The firmware routes by prefix.
 
 Firmware: `apps-ipod/screens/system/podlink_media.c` (MS1, MS2, dispatch at
 the prefix checks) and `podlink_library.c` (MS3). Host:
-`tools/podlink.py` (`import_media`, `upload_media_track`),
-`tools/herdremote/hrmediasync.py` (Jellyfin) and
-`tools/herdremote/hrlibrary.py` (MS3 client and `LibraryCache`).
+`podlink.py` (`import_media`, `upload_media_track`),
+`herdremote/hrmediasync.py` (Jellyfin) and
+`herdremote/hrlibrary.py` (MS3 client and `LibraryCache`).
 
 - Replies are at most 500 bytes. Large data comes as `MS3 DATA +`/`.`
   base64 chunks; decode each chunk, then join the bytes.
@@ -102,7 +104,7 @@ the prefix checks) and `podlink_library.c` (MS3). Host:
 
 Firmware: `apps-ipod/screens/system/agents_screen.c` (views, keys, action
 sheet) and `herdremote_model.c` (bounded model, 32 KiB). Host:
-`tools/herdremote/herdremote.py` (session), `hrproto.py` (encoders),
+`herdremote/herdremote.py` (session), `hrproto.py` (encoders),
 `hrherdr.py` (herdr), `hrsession.py`/`hrappserver.py` (Claude/Codex detail),
 `hrt3.py` (T3), `hragent.py` (action sheets).
 
@@ -119,7 +121,7 @@ sheet) and `herdremote_model.c` (bounded model, 32 KiB). Host:
 - T3 server access is Effect JSON RPC over WebSocket,
   `/ws?orchestrationProtocol=2`, Bearer token from
   `t3 auth session issue --scope orchestration:read --scope orchestration:operate`.
-  Details in `tools/herdremote/README.md` "T3 remote protocol".
+  Details in `herdremote/README.md` "T3 remote protocol".
 - Model tests: `tests/agents_t3_model_test.c`.
 
 ## Who owns the tty
@@ -136,11 +138,11 @@ with hrmediasync.borrow_serial():                 # daemon releases the port
 
 The lease goes over the disk socket (`hrdisk.default_socket()`) with
 `borrow-serial-v1`; `enter-disk-v1` asks the daemon to put the player in Disk
-Mode. `tools/herdremote/podlink_disk.py` does that and waits for the volume.
+Mode. `herdremote/podlink_disk.py` does that and waits for the volume.
 Run with the daemon's venv:
 `~/.local/share/podbox-herdremote/venv/bin/python`.
 
-`tools/podlink.py` subcommands open the tty themselves; stop the daemon
+`podlink.py` subcommands open the tty themselves; stop the daemon
 first or they fail with the port busy.
 
 ## EP0 side channels
@@ -164,10 +166,10 @@ through `clean_shutdown(SHUTDOWN_REBOOT)`, so settings and the database are
 saved.
 
 ```sh
-python3 tools/podlink.py reboot --serial 2AA0000000000360
-python3 tools/podlink_shell.py --serial 2AA0000000000360 status
-python3 tools/podlink_shell.py --serial 2AA0000000000360 debug-list
-python3 tools/podlink_shell.py --serial 2AA0000000000360 debug "Hardware info"
+python3 podlink.py reboot --serial 2AA0000000000360
+python3 podlink_shell.py --serial 2AA0000000000360 status
+python3 podlink_shell.py --serial 2AA0000000000360 debug-list
+python3 podlink_shell.py --serial 2AA0000000000360 debug "Hardware info"
 ```
 
 EP0 works while HerdRemote holds the tty, so the shell needs no lease.
@@ -177,11 +179,11 @@ User guide: `docs/podbox/podlink-shell.md`.
 
 | Part | Where | Contract |
 |---|---|---|
-| Desktop API, JSON lines on `$XDG_RUNTIME_DIR/podbox-herdremote/desktop.sock` | `tools/herdremote/hrdesktop.py` | `.specifications/astrapod-desktop.md` Interface 2 |
-| AstraPod desktop, PySide6, Material 3 | `tools/astrapod_desktop/`, entry `tools/podlink_gui.py` (`--demo` uses fakes) | same spec |
-| Settings shared by desktop and daemon | `tools/podlink_settings.py` | — |
-| Input plugin host and SDK | `tools/astrapod_plugins/` | `docs/podbox/input-plugins.md` |
-| Apple IR bridge | `tools/usb_remote_key/`, wrapped by plugin `apple-ir` | `docs/podbox/ir-host-fallback.md` |
+| Desktop API, JSON lines on `$XDG_RUNTIME_DIR/podbox-herdremote/desktop.sock` | `herdremote/hrdesktop.py` | [`herdremote/README.md`](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/README.md#desktop-api) |
+| AstraPod desktop, PySide6, Material 3 | `astrapod_desktop/`, entry `podlink_gui.py` (`--demo` uses fakes) | [Desktop README](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/README.md) |
+| Settings shared by desktop and daemon | `podlink_settings.py` | — |
+| Input plugin host and SDK | `astrapod_plugins/` | [`docs/input-plugins.md`](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/docs/input-plugins.md) |
+| Apple IR bridge | `usb_remote_key/`, wrapped by plugin `apple-ir` | [`docs/ir-host-fallback.md`](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/docs/ir-host-fallback.md) |
 
 The desktop manages media only; it never plays audio. It reaches the player
 only through the daemon: the desktop API for state and actions, the serial
@@ -193,15 +195,11 @@ observations; the host executes an action only with the matching permission.
 
 ## Testing
 
-```sh
-# daemon and desktop, from tools/herdremote and tools/
-python -m pytest tools/herdremote/tests
-python -m pytest tools/tests/test_podlink_gui.py
-(cd tools && python -m pytest astrapod_plugins)
-python -m pytest tools/usb_remote_key/tests
+See [desktop tests](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/README.md#tests) for the daemon,
+desktop, plugins and cross-repository contracts. Run transport tests here:
 
-# transport, offline
-PYTHON=.venv-podlink/bin/python tools/tests/run_podlink.sh
+```sh
+sh tools/tests/run_podlink.sh
 cargo +nightly-2026-02-03 test --manifest-path firmware/usbstack/podlink-rust/Cargo.toml
 python3 tools/tests/arm_podlink_link.py --elf build-hw-ipod6g/rockbox.elf
 ```
@@ -218,7 +216,7 @@ commit you built.
 2. Enter Disk Mode: `podlink_disk.py`, wait for the volume by UUID.
 3. Copy the zip onto the volume, verify every file, write `rockbox.ipod`
    last, unmount and eject.
-4. Reboot: `tools/podlink.py reboot`, or by hand. **Writing the firmware does
+4. Reboot: `podlink.py reboot`, or by hand. **Writing the firmware does
    not run it**; until the reboot the old build answers.
 
 A new request that times out right after flashing (for example

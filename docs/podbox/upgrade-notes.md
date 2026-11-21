@@ -90,3 +90,6 @@
   Deploy the matching five Cider Python modules. Host cache schema 3 rebuilds
   its metadata/art index once. Firmware installation alone does not update
   the computer's daemon.
+- **The computer companion lives in [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop).**
+  If a launcher or user service runs a companion script from the firmware
+  checkout, point it at the same script in AstraPod-Desktop.

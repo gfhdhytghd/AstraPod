@@ -2,11 +2,13 @@
 
 iPod classic 固件默认启用 PodLink Shell。它使用 PodLink 非磁盘连接上的 USB 控制端点。主机需要 PyUSB，且必须指定 iPod 的 USB 序列号。
 
+在 [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop) 仓库运行以下命令。
+
 ```sh
-python3 tools/podlink_shell.py --serial USB_SERIAL
-python3 tools/podlink.py reboot --serial USB_SERIAL
-python3 tools/podlink_shell.py --serial USB_SERIAL debug-list
-python3 tools/podlink_shell.py --serial USB_SERIAL debug "Hardware info"
+python3 podlink_shell.py --serial USB_SERIAL
+python3 podlink.py reboot --serial USB_SERIAL
+python3 podlink_shell.py --serial USB_SERIAL debug-list
+python3 podlink_shell.py --serial USB_SERIAL debug "Hardware info"
 ```
 
 - `reboot` 执行正常关机和重启。脚本等待 USB 重新枚举。

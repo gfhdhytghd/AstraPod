@@ -503,6 +503,10 @@ hand-built zip with every **Explain** entry silently empty looks finished.
 
 ## Key Tools
 
+The desktop app, PodLink clients, HerdRemote, Cider bridge and input plugins
+live in [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop). The wire protocols
+are documented in this firmware repository.
+
 - `tools/configure` — build configuration (~4900-line shell script)
 - `tools/rockboxdev.sh` — cross-compiler toolchain builder
 - `tools/genlang` — language file processor

@@ -3,7 +3,7 @@
 Each log family has a **5 MiB (5,242,880 byte) total upper bound**, including
 current and backup. Each part is at most 2.5 MiB. Oldest data is discarded first.
 The device constant is `LOGFILE_TOTAL_BYTES` in `firmware/export/logfile.h`;
-the host constant is `TOTAL_BYTES` in `tools/herdremote/hrlogcap.py`.
+the host constant is `TOTAL_BYTES` in [`herdremote/hrlogcap.py`](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/hrlogcap.py).
 
 ## Device inventory
 

@@ -1,6 +1,6 @@
 # HerdRemote protocol, version 1
 
-HerdRemote is what **System > Agents** speaks to `tools/herdremote/` on the
+HerdRemote is what **System > Agents** speaks to [HerdRemote](https://github.com/gfhdhytghd/AstraPod-Desktop/tree/master/herdremote) on the
 computer. It runs over a PodLink session: every message is one PodLink TEXT
 frame. Read this to write another computer-side program for the screen, or
 to change the messages.
@@ -573,7 +573,7 @@ sources fall back to one visible-viewport herdr read with no line count.
 The adapter refuses scrollback and line-count requests before socket I/O.
 
 Deploy the matching `herdremote.py`, `hrappserver.py`, `hrsession.py`,
-`hrherdr.py`, `hrproto.py`, sibling `tools/podlink.py` and Python dependencies.
+`hrherdr.py`, `hrproto.py`, [the PodLink client](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/podlink.py) and Python dependencies.
 This extension supersedes the older source/window and full-refresh-on-return
 rules while retaining the v1 voice, focus, key and result semantics.
 
@@ -649,7 +649,7 @@ cross-session alignment is required for later calibration. EP0 volume reports id
 VOL traces identify DOCK, and PAGE emits identify the selected PC/DOCK
 source. Outside-Agents/stale PC volume reports are logged as ignored.
 HerdRemote routes these through its existing log writer, without a command,
-voice or tty ownership change. See `tools/usb_remote_key/README.md` for EP0
+voice or tty ownership change. See [the USB remote bridge README](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/usb_remote_key/README.md) for EP0
 IDs 3/4 (volume steps), 5 (receiver heartbeat), fallback timing and matching
 bridge/firmware deployment. Left/Right/Play remain Dock-only.
 
@@ -739,16 +739,8 @@ never queues them. A running bounded tool call may finish after release;
 an unstarted worker expires before the 150 ms IR release timeout. Error
 cleanup sends releases only, with no retry of the batch.
 
-Host files to deploy together, from this ZIP:
-- tools/usb_remote_key/usb_remote_key.py and its README.md;
-- tools/herdremote/herdremote.py, hrproto.py, hrkeys.py, new hrusagekeys.py,
-  and README.md;
-- docs/herdremote-protocol.md (this document).
-
-The existing remaining HerdRemote siblings, podlink.py, units, requirements
-and udev rules remain compatible and are bundled. The IR serial open remains
-O_RDONLY. No installation, key injection, device access or service operation
-is performed by the offline build/tests.
+Update HerdRemote and the USB remote bridge together from
+[AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop). The IR serial port is opened read-only.
 
 ## Detail host keys and Cover Flow gestures (Follow-up 16)
 
@@ -794,12 +786,7 @@ performs the carousel's original random-spin action. Agents' 300 ms remote
 hold and native 150 ms recording classification are unchanged. LOG PLAY now
 also reports triple with its context; older record-kind numbers are retained.
 
-Deploy matching usb_remote_key.py, herdremote.py, hrproto.py and
-hrusagekeys.py, with the two READMEs and this protocol document. The existing
-hrkeys.py backend and other runtime siblings remain compatible and bundled.
-No serial-write, service-operation or installation step is part of this
-build-only package. All hardware/desktop gesture delivery requires separately
-authorized acceptance; local tests use mocked keys and private IPC endpoints.
+Use the matching USB remote bridge and HerdRemote from AstraPod-Desktop.
 
 ## Native Cover Flow chord and real Dock replay (Follow-up 17)
 
@@ -826,9 +813,7 @@ FU16: 200 ms inclusive inter-tap window; double commits only after the
 third-tap window expires. No merged third press is present in those traces.
 This is replay evidence, not physical acceptance of a rebooted FU16 image.
 
-No host runtime or wire-protocol update is required. Continue using the
-matching FU16 bridge and HerdRemote files. This firmware-only package omits
-unchanged host runtimes and includes this updated protocol/control document.
+The FU16 USB remote bridge and HerdRemote still support these gestures.
 
 ## Remote-entry WPS MENU (Follow-up 18)
 
@@ -854,10 +839,7 @@ new override applies only to MENU tap. The ordinary album carousel API
 still returns GO_TO_PREVIOUS for all callers; a separate per-call output
 carries remote-triple provenance to WPS, without a global child-return latch.
 
-Host code and protocol are unchanged. The package restores the complete
-.rockbox/tools host tree (including HerdRemote, bridge, tests/fixtures and
-podlink.py), preserving the previous full package's tool paths for fast_swap.
-No installation or fast_swap operation is executed by this build-only task.
+The firmware handles this change using the same remote key requests.
 
 ## Nonrecursive screen shortcuts (Follow-up 18 V2)
 
@@ -929,9 +911,7 @@ entries use the corrected local time; database last-played ordering uses
 its existing serial numbers. A backward civil-time correction can therefore
 produce a lower wall timestamp, without changing elapsed playback duration.
 
-Deploy the matching `herdremote.py` and `hrproto.py` together; the bridge and
-remaining host runtime files are unchanged. This build package retains the
-complete `.rockbox/tools/` tree.
+Use a HerdRemote release that sends `TS` to enable clock sync.
 
 ## Cover Flow navigation (Follow-up 19 X1/X2)
 

@@ -883,7 +883,7 @@ by the host path allow-list.
 
 The same protocol now serves two host backends: Rufin (preferred) and Cider.
 The host selects one (`hrcider.Bridge._select_remote`); the device keeps one
-session. Setup, token and port rules are in `tools/herdremote/README.md`
+session. Setup, token and port rules are in [the HerdRemote README](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/README.md)
 ("Rufin Remote (FU56)"). Port note: Rufin's configured web-controller port is
 often taken by KDE Connect (1714-1764), and Rufin then binds the next free
 port; the host tries the configured port and port + 1, verifying each with a
@@ -1059,5 +1059,6 @@ without changing the display artwork size. Cider uses its existing capped
 CDN input. A service can supply a different crop or encoding from an
 embedded cover. Palette parity requires equivalent source pixels.
 
-Build the host helper with `python3 tools/herdremote/build-cover-thumb.py OUTPUT_DIR`.
+From [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop), run
+`ASTRAPOD_FIRMWARE=/path/to/AstraPod python3 herdremote/build-cover-thumb.py OUTPUT_DIR`.
 Deploy the resulting executable `cover-thumb` alongside `hrcider.py`.

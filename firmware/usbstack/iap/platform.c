@@ -40,6 +40,7 @@
 #include "platform-macros.h"
 #include "usb_log.h"
 #include "disk.h"
+#include "timefuncs.h"
 
 #include "usb.h"
 #include "../usb_iap.h"

@@ -46,6 +46,8 @@ default_interrupt(INT_TIMERE);  /* IRQ7: 32-bit timers */
 default_interrupt(INT_TIMERF);
 #ifndef HAVE_HANG_CATCH_FIQ
 default_interrupt(INT_TIMERG);  /* else the freeze watch's, below */
+#else
+void INT_TIMERG(void);
 #endif
 default_interrupt(INT_TIMERH);
 default_interrupt(INT_TIMERA);  /* IRQ8: 16-bit timers */

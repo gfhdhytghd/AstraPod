@@ -6,6 +6,7 @@
 #include "plugins/rock_compat.h"
 #include "button.h"
 #include "draw/viewport.h"
+#include "input/action.h"
 #include "kernel.h"
 #include "settings/settings.h"
 #include "lang.h"
@@ -77,6 +78,7 @@ void rock_display_stop(void)
     restore_display(&caller);
 
     raw = false;
+    action_handoff_enter();
     memcpy(lcd_framebuffer_default.fb_ptr, saved_pixels, FRAMEBUFFER_SIZE);
     saved_pixels = plugin_pixels = NULL;
     ui_take_dirty(SCREEN_MAIN);
@@ -102,6 +104,7 @@ struct rock_native_scope rock_display_native_begin(void)
         lcd_scroll_stop();
         memcpy(plugin_pixels, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
         raw = false;
+        action_handoff_enter();
         viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
         lcd_set_backdrop(caller.backdrop);
         viewport_set_defaults(lcd_init_viewport(NULL), SCREEN_MAIN);

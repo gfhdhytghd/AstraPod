@@ -1262,7 +1262,7 @@ void action_wait_for_release_preserve_queue(void)
 }
 
 
-#ifdef HAVE_USB_PODLINK
+#if defined(HAVE_USB_PODLINK) || defined(ASTRAPOD_ROCK_COMPAT)
 void action_handoff_enter(void)
 {
     /* Disown the previous screen's button without discarding queued input.

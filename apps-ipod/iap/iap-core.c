@@ -1240,7 +1240,7 @@ void iap_get_trackinfo(const unsigned int track, struct mp3entry* id3)
     playlist_get_track_info(NULL, tracknum, &info);
     if (current && playlist_get_current()->index == tracknum &&
         !strcmp(current->path, info.filename))
-        memcpy(id3, current, sizeof(*id3));
+        copy_mp3entry(id3, current);
     else if (!tagcache_fill_tags(id3, info.filename) &&
              !get_metadata(id3, -1, info.filename))
         strlcpy(id3->path, info.filename, sizeof(id3->path));

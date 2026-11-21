@@ -244,8 +244,9 @@ static unsigned int read_mp4_atom(int fd, uint32_t* size,
 {
     uint32_t header = 8;
 
-    read_uint32be(fd, size);
-    read_uint32be(fd, type);
+    if (size_left < header ||
+        read_uint32be(fd, size) != 4 || read_uint32be(fd, type) != 4)
+        goto invalid;
 
     if (*size == 1)
     {
@@ -253,15 +254,15 @@ static unsigned int read_mp4_atom(int fd, uint32_t* size,
          * the low 32 bits can be non-zero. */
         uint32_t high;
 
-        read_uint32be(fd, &high);
-        read_uint32be(fd, size);
         header = 16;
+        if (size_left < header ||
+            read_uint32be(fd, &high) != 4 || read_uint32be(fd, size) != 4)
+            goto invalid;
 
         if (high != 0)
         {
             errno = EFBIG;
-            *type = 0;
-            return 0;
+            goto invalid;
         }
     }
 
@@ -272,16 +273,16 @@ static unsigned int read_mp4_atom(int fd, uint32_t* size,
     }
 
     if (*size < header)
-    {
-        *type = 0;
-        *size = 0;
-        return 0;
-    }
+        goto invalid;
 
     size_left -= *size;
     *size -= header;
-
     return size_left;
+
+invalid:
+    *type = 0;
+    *size = 0;
+    return 0;
 }
 
 static unsigned int read_mp4_length(int fd, uint32_t* size)
@@ -1014,43 +1015,38 @@ static bool read_mp4_container(int fd, struct mp3entry* id3,
 
         case MP4_chpl:
             {
-                /* Nero chapter list, read by mp4_read_chapters(); the
-                 * first chapter's start is also Nero's gapless hack. */
-                uint8_t version    = 0;
-                uint8_t chapters   = 0;
-                uint64_t timestamp = 0;
-                int header = 5;     /* version, flags, chapter count */
+                uint8_t version, chapters;
+                uint64_t timestamp;
+                off_t start = lseek(fd, 0, SEEK_CUR);
 
-                read_uint8(fd, &version);
-                if (version)
-                    header += 4;    /* reserved */
-                if (size < (uint32_t)header + 8)
-                {
-                    size--;
+                if (start < 0 || size < 1 || read_uint8(fd, &version) != 1)
                     break;
-                }
-                lseek(fd, header - 2, SEEK_CUR);
-                read_uint8(fd, &chapters);
-                size -= header;
+                size--;
 
-                /* One chapter gives nothing to skip between, and a
-                 * cuesheet takes space on the buffer */
-                if (chapters > 1 && !id3->has_embedded_cuesheet)
+                /* The flags and optional reserved word precede the count. */
+                uint32_t flags = version ? 7 : 3;
+                if (size <= flags || lseek(fd, flags, SEEK_CUR) < 0)
+                    break;
+                size -= flags;
+                if (read_uint8(fd, &chapters) != 1)
+                    break;
+                size--;
+
+                if (chapters > 1 && size >= (uint32_t)chapters * 9 &&
+                    !id3->has_embedded_cuesheet)
                 {
                     id3->has_embedded_cuesheet = true;
-                    id3->embedded_cuesheet.pos = lseek(fd, 0, SEEK_CUR) - 1;
+                    id3->embedded_cuesheet.pos = start + flags + 1;
                     id3->embedded_cuesheet.size = size + 1;
                     id3->embedded_cuesheet.encoding = CHAR_ENC_MP4_CHPL;
                 }
 
-                /* the first chapter's start, in 100 ns units, will be used
-                 * as the lead_trim if it is short enough to be an encoder
-                 * delay: the first chapter of a real chapter list may start
-                 * seconds in. */
-                if (chapters > 0) {
-                    read_uint64be(fd, &timestamp);
-                    if (timestamp < 10000000) /* 1 s */
-                        id3->lead_trim = (timestamp * id3->frequency) / 10000000;
+                if (chapters && size >= 9 &&
+                    read_uint64be(fd, &timestamp) == 8)
+                {
+                    /* Only an encoder-delay-sized offset trims audio. */
+                    if (timestamp < 10000000)
+                        id3->lead_trim = timestamp * id3->frequency / 10000000;
                     size -= 8;
                 }
             }

@@ -348,7 +348,7 @@ static bool set_transfer_range(uint64_t lba, uint32_t count,
 
     uint64_t first = lba * multiplier;
     uint64_t blocks = (uint64_t)count * multiplier;
-    if (blocks > sectors - first || blocks > UINT_MAX)
+    if (blocks > sectors - first || blocks > UINT_MAX / cur_cmd.block_size)
         return false;
 
     cur_cmd.sector = first;

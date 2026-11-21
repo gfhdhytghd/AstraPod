@@ -72,8 +72,6 @@ bool get_flac_metadata(int fd, struct mp3entry* id3)
     unsigned char* buf = (unsigned char *)id3->path;
     bool last_metadata = false;
     bool rc = false;
-#ifdef HAVE_ALBUMART
-#endif
 
     if (!skip_id3v2(fd, id3) || (read(fd, buf, 4) < 4))
     {

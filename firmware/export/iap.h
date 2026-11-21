@@ -69,6 +69,5 @@ void iap_accessory_poll(void);
 bool iap_accessory_plugged(void);
 #endif
 void iap_load_playlist_ui(void);
-void iap_prepare_shutdown(bool save_playlist);
 bool dbg_iap(void);
 #endif

@@ -53,11 +53,44 @@ Customize Main Menu. For a simulator fixture, add
 
 Keep upstream inputs under `apps/plugins/` intact. For a narrow source
 conversion, stage the copy in the build directory. Match the expected upstream
-text exactly and stop the build if it changes. `tools/rock-compat/stage-usb.py`
-stages USB event handling for `stopwatch`, `dice`, `flipit`, `jackpot` and
-`robotfindskitten`. Jackpot also accepts its normal quit action during a
-spin. The script initializes Dice's first menu selection and leaves room for
-the roll string's terminator.
+text exactly and stop the build if it changes. The `ROCK_STAGED` list in
+`apps-ipod/plugins/plugins.make` selects sources for these conversions.
+Include runtime data in the bundle when the corresponding module is enabled.
+For example, Snake 2 reads the unchanged `snake2.levels` next to its module.
+
+## Phase 2 games and demos
+
+The allowlist includes 2048, Amaze, Brickmania, Chopper, Maze, MazezaM,
+Minesweeper, Pong, Snake, Snake 2, Star and Xobox. It also includes Fire,
+Fireworks, Plasma and Starfield. The games and demos have separate allowlist
+commits and fit the same ARM and SDL build. Starfield uses read-only mixer
+peak queries. Fire and Plasma draw directly into the RGB565 framebuffer.
+
+Remaining entries from the ipod6g Phase 2 source inventory are listed below.
+A generated bitmap dependency refers to an existing upstream asset that the
+AstraPod build still needs to select and compile. The behavior checks apply
+after the dependencies build.
+
+| Entry | Build dependency or behavior to verify |
+| --- | --- |
+| `blackjack` | Generate `card_deck` and `card_back`. Verify dealing, help and the high-score exit. |
+| `bubbles` | Generate `bubbles_background`, `bubbles_bubble` and `bubbles_emblem`. Link fixed-point and XLCD drawing helpers. |
+| `chip8` | Route a selected `.ch8` file to the entry point. Verify the optional `.c8k` key mapping and emulator exit. |
+| `clix` | Link high-score, help and playback helpers. Verify wheel selection and exit from the score screen. |
+| `codebuster` | Supply a native `set_bool` adapter or convert its two boolean options. Verify settings save and USB exit from the nested menu. |
+| `demystify` | Link action and backlight helpers. Verify trail and shape controls, then exit from the draw loop. |
+| `invadrox` | Generate the target-selected alien, ship, projectile, shield, UFO and score sprites. Test viewport swaps and hold-triggered pause. |
+| `jewels` | Generate `jewels`. Verify cursor input, tile swaps and save restoration. |
+| `oscilloscope` | Define PCM lock and mixer hook ownership, including callback teardown. Add OSD viewport buffer adapters and native volume controls. |
+| `pegbox` | Generate `pegbox_header` and `pegbox_pieces`. Verify level selection, board controls and help exit. |
+| `rb_info` | Map `talk_id`, `talk_spell` and `strcasestr`. Link the printcell, action and button helpers. Verify spoken rows and their native IDs. |
+| `rockblox` | Link high-score, help, playback and backlight helpers. Verify the iPod wheel, soft poweroff and resume-file lifecycle. |
+| `rocklife` | Verify standalone pattern controls. A `.cells` file also needs viewer routing and plugin entry parameters. |
+| `solitaire` | Generate `card_deck`, `card_back` and `solitaire_suitsi`. Verify stack selection, deals and configuration persistence. |
+| `spacerocks` | Link high-score, help, playback and backlight helpers. Verify held controls, pause and game-over exit. |
+| `superdom` | Generate `superdom_boarditems`. Map boolean settings and the inventory simplelist to native widgets. Review `.ssg` save-file entry parameters. |
+| `vu_meter` | Map boolean options, `mixer_get_frequency` and native volume bounds and updates. Verify the peak display with playback running. |
+| `wormlet` | Link configuration, backlight and playback helpers. Verify the iPod player controls and the game-over exit. |
 
 ## SDK boundaries
 

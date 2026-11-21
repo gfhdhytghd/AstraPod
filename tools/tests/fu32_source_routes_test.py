@@ -12,6 +12,9 @@ a=(R/'apps-ipod/input/action.c').read_text();route=fn(a,'route_screen_shortcut')
 tokens=sorted(set(re.findall(r'\b(?:ACTION_|GO_TO_|AGENTS_NAV_)\w+',functions+route)))
 pre=r'''
 #include <assert.h>
+static void carousel_prepare_transition(void) {}
+static void carousel_cancel_transition(void) {}
+static void album_blur_playing_changed(void) {}
 #include <stdbool.h>
 #include <stdio.h>
 #define HAVE_USB_PODLINK

@@ -61,9 +61,9 @@ for mode in ['normal']:
     subprocess.run([str(out)],check=True)
 # Exercise the actual existing Debug USB/Battery row with output latches.
 s=(R/'apps-ipod/screens/system/debug_menu.c').read_text()
-a=s.index('                lcd_putsf(0, 9,',s.index('                unsigned int gpio_b = PDAT(11)'));b=s.index(';',a)+1
-start=s.rfind('                int input_limit =',0,a)
-body=s[start:b] if start>=0 and a-start<400 else s[a:b]
+start=s.index('            int input_limit =',s.index('unsigned int gpio_b = PDAT(11)'))
+row=s.index('lcd_putsf(0, 9,',start)
+body=s[start:s.index(';',row)+1]
 preamble=r'''
 #include <assert.h>
 #include <stdarg.h>

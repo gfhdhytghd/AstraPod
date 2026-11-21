@@ -68,6 +68,7 @@ static struct cider_row row_ahead;
 static unsigned cider_read_ahead_count(unsigned s,unsigned v){(void)s;(void)v;return 6;}
 static void cider_read_ahead(const char*const*k,unsigned n,const char*t){(void)k;assert(n<=15);assert(!strcmp(t,"M"));}
 #define MIN(a,b) ((a)<(b)?(a):(b))
+#define MAX(a,b) ((a)>(b)?(a):(b))
 #define TIME_BEFORE(a,b) ((long)((a)-(b))<0)
 static long current_tick,moved_at;
 static int previous_center,travel=1;
@@ -85,6 +86,7 @@ static unsigned int cider_art_revision(void){return 0;}
 static void carousel_provider_changed(void){}
 '''
 caption_stubs=r'''
+static bool font_prefetch_text(int font,const char *label){(void)font;assert(label);return true;}
 #define TEXT_FIT_BUF 80
 #define ALBUM_NAME_HIDE 0
 #define ALBUM_AND_ARTIST_TOP 3
@@ -110,13 +112,22 @@ static int get_scroll_line_offset(int n){(void)n;return 0;}
 static void lcd_putsxy(int x,int y,const char*s){(void)x;(void)y;assert(drawn<2);snprintf(text_lines[drawn++],260,"%s",s);}
 '''
 lifetime_stubs=r'''
+#define CAROUSEL_MENU_STAY 19
+#define SYS_USB_CONNECTED 20
+static int resume_index;
+static struct { int cover_remote_index; char cover_remote_id[80]; } global_status;
+static bool cider_available(void){return true;}
+static int default_event_handler(int a){(void)a;return 0;}
+static void carousel_prepare_transition(void) {}
+static void carousel_cancel_transition(void) {}
+
 enum { GO_TO_PREVIOUS, GO_TO_ROOT, CAROUSEL_REMOTE_RETURN,
        ACTION_STD_QUICKSCREEN, ACTION_STD_CANCEL, ACTION_STD_MENU, CONTEXT_STD,
        QUICKSCREEN_IN_USB, AGENTS_NAV_NONE };
 #define ID2P(x) #x
 static bool room=true,alloc_fails,pinned,allocated_scratch;
 static int opens,frees,failures,cancels,alloc_calls;
-static void cider_page_open(const char*r){assert(!strcmp(r,"albums"));}
+static void cider_page_open(const char*r){assert(!strcmp(r,"albums?format=panel"));}
 static int cider_page_total(void){return 5;}
 static int get_action(int c,int t){(void)c;(void)t;assert(0);return 0;}
 static int quick_screen_current(int a,void*p){(void)a;(void)p;assert(0);return 0;}
@@ -177,5 +188,5 @@ room=true;alloc_fails=true;assert(cider_covers()==GO_TO_PREVIOUS&&failures==2&&a
 assert(opens==2&&frees==2&&!surface);
 puts("Native carousel load/get_slide layout + real Cider M columns, XS transpose, bg placeholder PASS");}
 '''
-(O/'carousel.c').write_text(pre+function(carousel,'side_level_bytes')+function(carousel,'build_side_level')+function(art_provider,'art')+'\n'+function(carousel,'load_and_prepare_surface')+'\n'+function(carousel,'get_slide')+tick_stubs+function((R/'apps-ipod/screens/playback/cider_model.c').read_text(),'cider_window')+function(provider,'tick')+caption_stubs+function(carousel,'carousel_album_caption')+lifetime_stubs+function(provider,'cider_covers')+post)
+(O/'carousel.c').write_text(pre+function(carousel,'side_level_bytes')+function(carousel,'build_side_level')+function(art_provider,'art')+'\n'+function(carousel,'load_and_prepare_surface')+'\n'+function(carousel,'get_slide')+tick_stubs+function((R/'apps-ipod/screens/playback/cider_model.c').read_text(),'cider_window')+function(provider,'tick')+caption_stubs+function(carousel,'carousel_album_caption')+lifetime_stubs+''.join(function(provider,n) for n in ['wait_for_library','restore_album','cider_covers'])+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(R/'apps-ipod'),str(O/'carousel.c'),'-o',str(O/'carousel')],check=True);subprocess.run([str(O/'carousel')],check=True)

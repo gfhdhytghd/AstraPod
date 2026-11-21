@@ -18,6 +18,8 @@ pre=r'''
 #include <string.h>
 #include <stdio.h>
 #include <setjmp.h>
+static void podlink_media_disconnect(void) {}
+static bool podlink_media_work(void) { return false; }
 #include "screens/playback/cider_store.h"
 #include "screens/playback/cider_model.h"
 #define HZ 100

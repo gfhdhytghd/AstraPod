@@ -318,5 +318,5 @@ subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
 subprocess.run([binary], check=True)
 
 dialog = (ROOT / 'apps-ipod/widgets/dialog.c').read_text()
-assert dialog.index('viewportmanager_theme_enable(i, true, &d->parent[i])') < dialog.index(
-    'disp = d->cb->on_action(d, action, d->data)') < dialog.index('viewportmanager_theme_undo(i, false)')
+assert dialog.index('ui_hold_scrolling(true)') < dialog.index(
+    'disp = d->cb->on_action(d, action, d->data)') < dialog.index('ui_hold_scrolling(false)')

@@ -18,6 +18,7 @@ source = (O / 'pin.c').read_text().split('int main(void){', 1)[0]
 source = source.replace('static void reset(void){host_live=live_reply=false;state.generation=0;}',
                         'static void reset(void);')
 source += r'''
+static void album_blur_playing_changed(void) {}
 #include "podlink.h"
 static uint32_t status_word, loading_request, play_request;
 static struct cider_modes modes;

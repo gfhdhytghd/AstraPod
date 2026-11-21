@@ -31,12 +31,13 @@ source = source.replace('static bool album_covers_reopen_tracks(void){return tru
                         'static bool album_covers_reopen_tracks(void){return false;}')
 source = source.replace('static int action_budget;', 'static int action_budget;\nstatic int take_step(int);')
 source = source.replace(function(source, 'list_do_action'), r'''
-static void list_do_action(int context,int timeout,struct gui_synclist*l,int*a)
+static bool list_do_action(int context,int timeout,struct gui_synclist*l,int*a)
 {
     (void)context; (void)timeout;
     assert(depth == 0);
     *a = take_step(GO_TO_CIDER);
     l->selected = *a == ACTION_STD_OK ? 0 : l->selected;
+    return false;
 }
 ''')
 source = source.replace(function(source, 'agents_screen'), r'''

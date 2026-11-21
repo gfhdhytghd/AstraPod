@@ -177,7 +177,7 @@ static inline int crumb_snapshot_take(const volatile struct crumb_ring *a,
 {
     struct crumb_entry ea[32], eb[32];
     int max = (int)(sizeof s->e / sizeof s->e[0]);
-    bool oka = crumb_ring_head_ok(a), okb = crumb_ring_head_ok(b);
+    bool oka = crumb_ring_head_ok(a), okb = b != a && crumb_ring_head_ok(b);
     int na = oka ? crumb_ring_newest(a, ea, max) : 0;
     int nb = okb ? crumb_ring_newest(b, eb, max) : 0;
     const volatile struct crumb_ring *r = NULL;

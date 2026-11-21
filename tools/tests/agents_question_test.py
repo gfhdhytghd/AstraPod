@@ -46,7 +46,15 @@ static int raw,status,focused,sent,wakes,shown,keys,voices,discarded;
 #define PODLINK_CLOSE 6
 #define PODLINK_TEXT 2
 struct podlink_message {int type;unsigned int length;const unsigned char *data;};
-static bool cache_valid=true,talk_discarded,talk_failed,talk_req_up,focus_for_detail;
+static bool cache_valid=true,talk_discarded,talk_failed,talk_req_up,talk_t3,focus_for_detail;
+static char t3_talk_start[8],action_req[8],t3_input[80];
+static struct hr_agent detail_agent;
+static int page_scene;
+static void ui_scene_cancel(int *scene){assert(scene == &page_scene);}
+static const char *agent_name(const struct hr_agent*a){return a->name;}
+static void edit_t3_input(struct gui_synclist*list){(void)list;assert(!"unexpected T3 editor");}
+static int podlink_state(void){return 3;}
+#define PODLINK_CONNECTED 3
 static long last_message,current_tick,usage_at;
 static void talk_result(const char *text,bool failed){(void)text;(void)failed;assert(0);}
 static char last_name[16],last_args[64];
@@ -76,7 +84,6 @@ struct viewport {int x,y,width,height,flags,font,drawmode;struct frame_buffer_t 
 static struct frame_buffer_t framebuffer_default={.elems=320*240,.stride=320};
 static struct viewport default_vp;
 INIT_VIEWPORT
-static void set_default_align_flags(struct viewport*v){v->flags=0;}
 static int getuifont(void){return FONT_UI;}
 struct screen {void (*set_viewport)(struct viewport*);void (*clear_viewport)(void);void (*set_foreground)(int);void (*drawrect)(int,int,int,int);void (*update_viewport)(void);struct viewport *(*init_viewport)(struct viewport*);int lcdwidth,lcdheight;int (*getuifont)(void);void (*set_background)(int);void (*set_drawmode)(int);void (*fillrect)(int,int,int,int);void (*hline)(int,int,int);};
 static int full_clears,input_draws,texts,yes_draws,no_draws;
@@ -88,6 +95,8 @@ static void update(void){}
 static void mode(int m){(void)m;}
 static void hline(int a,int b,int y){assert(a>=0&&b<320&&a<=b&&y>=0&&y<240);}
 static struct screen screens[]={{setvp,clearvp,colour,rect,update,init_viewport,320,240,getuifont,colour,mode,rect,hline}};
+static void viewport_set_area(struct viewport*v,enum screen_type screen,bool chrome)
+{assert(screen==main_screen&&!chrome);init_viewport(v);v->width=320;v->height=240;}
 FULLSCREEN
 static void text_at(struct screen*d,int x,int y,int colour,const char*t){(void)d;(void)colour;assert(x>=0&&x<320&&y>=0&&y+USE_LINE<=240);texts++;yes_draws+=strstr(t,"\u25c0")!=NULL;no_draws+=strstr(t,"\u25b6")!=NULL;}
 static int text_px(const char*t){int n=0;for(;*t;t++)n+=((*t&0xc0)!=0x80)*((unsigned char)*t>=0xe0?14:7);return n;}
@@ -103,6 +112,10 @@ static struct font metric_font;
 static struct font *font_get(int id){(void)id;return &metric_font;}
 static void font_lock(int id,bool lock){(void)id;(void)lock;}
 static int font_get_width(struct font *pf,ucschar_t ch){(void)pf;return ch>=0x3000?14:7;}
+struct font_run { int width; };
+static int font_run_next(struct font *pf,struct font_run *run,ucschar_t ch,void *glyph)
+{assert(!glyph);run->width+=font_get_width(pf,ch);return run->width;}
+
 #define IS_DIACRITIC(ch) ((ch)>=0x300 && (ch)<=0x36f)
 UTF8_DECODE
 WRAP_FUNCTIONS
@@ -110,7 +123,9 @@ DIALOG_WRAP
 Q_MACROS
 PROD_HELPERS
 
-static int draw_input(struct screen*d,struct viewport*v,int y,bool dim){(void)d;(void)v;(void)dim;assert(y<240-3*USE_LINE);input_draws++;return y+3*USE_LINE;}
+static int draw_input(struct screen*d,struct viewport*v,int y,const char*text,
+                      const char*cursor,unsigned fg,unsigned bg)
+{(void)d;(void)v;(void)fg;(void)bg;assert(cursor>=text&&cursor<=text+strlen(text));assert(y<240-3*USE_LINE);input_draws++;return y+3*USE_LINE;}
 
 static int gui_synclist_get_sel_pos(struct gui_synclist*l){return l->sel;}
 static void show(struct gui_synclist*l,int i){l->sel=i;shown++;}
@@ -118,7 +133,7 @@ static void show_row(struct gui_synclist*l,const struct row*r){(void)r;show(l,0)
 static void forget_keys(void){keys=0;}
 static void subscribe_detail(const char*p){(void)p;}
 static void queue_focus(const char*n,const char*p,bool detail){assert(!strcmp(n,"fp"));assert(detail);assert(!strcmp(p,detail_pane));strcpy(focus_req,"focus");focused++;}
-static void queue_request(const char*n,const char*a){strcpy(last_name,n);strcpy(last_args,a);strcpy(pending_req,"answer");sent++;}
+static void queue_request(const char*n,const char*a,const char*text){assert(!text);strcpy(last_name,n);strcpy(last_args,a);strcpy(pending_req,"answer");sent++;}
 static void backlight_on(void){wakes++;}
 static int get_action_statuscode(int*b){*b=raw;return status;}
 static void send_key(const char*k){assert(!strcmp(k,"bs"));keys++;}
@@ -133,7 +148,7 @@ pre=pre.replace('WRAP_FUNCTIONS','\n'.join(function(n,w) for n in ['is_punct_bre
 pre=pre.replace('Q_MACROS','\n'.join(l for l in s.splitlines() if l.startswith('#define Q_')))
 pre=pre.replace('PROD_HELPERS','\n'.join(function(n) for n in ['fit','option_parts','join_question']))
 pre=pre.replace('DIALOG_WRAP',function('dialog_wrap_text',(S/'apps-ipod/widgets/dialog.c').read_text()))
-code=pre+'\n'.join(function(n) for n in ['background_link','current_question','question_binary_page','q_header','q_keys','q_body','q_buttons','q_preview','draw_question_overlay','open_question','leave_question','pop_question','enter_answer','answer_number','close_input','question_action'])
+code=pre+'\n'.join(function(n) for n in ['is_t3','take_talk_result','take_action_result','background_link','current_question','question_binary_page','q_header','q_keys','q_body','q_buttons','q_preview','draw_question_overlay','open_question','leave_question','dismiss_question','pop_question','enter_answer','answer_number','close_input','question_action'])
 code+=r'''
 static void reset(void){memset(&model,0,sizeof model);memset(&popped,0,sizeof popped);view=VIEW_AGENTS;question_id[0]=question_pane[0]=pending_req[0]=focus_req[0]=talk_req[0]=detail_pane[0]=0;talk_held=false;focused=sent=wakes=keys=voices=discarded=0;status=raw=0;
 const char*q="Q\tid\tp1\tw1\t-\tAgent\t1\t-1\tTask\n?\tRun command?\no\t1\tYes\t-\no\t2\tAlways allow\t-\no\t3\tNo, and tell Codex differently\tc";assert(hr_model_apply(&model,q,strlen(q))=='Q');}
@@ -166,7 +181,7 @@ talk_held=true;pop_question(&list);assert(view==VIEW_AGENTS);talk_held=false;str
 pop_question(&list);assert(view==VIEW_ALERT&&wakes==1&&focused==0&&sent==0);
 draw_question_overlay();assert(full_clears==1&&yes_draws&&no_draws&&texts>=5);
 key(&list,99,0);assert(focused==0&&sent==0);key(&list,ACTION_STD_MENU,0);assert(view==VIEW_AGENTS&&model.nquestions==1);pop_question(&list);assert(view==VIEW_AGENTS);
-open_question(&list,"p1");assert(view==VIEW_ALERT);key(&list,ACTION_STD_OK,0);assert(view==VIEW_QUESTION&&focused==1&&!detail_ready);answer_number(1);assert(sent==0);focus_req[0]=0;detail_ready=true;answer_number(3);assert(question_custom&&sent==1&&!strcmp(last_args,"id\t3"));
+open_question(&list,&model.questions[0]);assert(view==VIEW_ALERT);key(&list,ACTION_STD_OK,0);assert(view==VIEW_QUESTION&&focused==1&&!detail_ready);answer_number(1);assert(sent==0);focus_req[0]=0;detail_ready=true;answer_number(3);assert(question_custom&&sent==1&&!strcmp(last_args,"id\t3"));
 reset();view=VIEW_DETAIL;strcpy(detail_pane,"p1");detail_ready=true;pop_question(&list);key(&list,ACTION_STD_MENU,0);assert(view==VIEW_DETAIL&&focused==0&&detail_ready);
 reset();pop_question(&list);key(&list,ACTION_STD_CANCEL,BUTTON_LEFT);assert(question_choice==1&&focused==1);
 reset();pop_question(&list);key(&list,ACTION_STD_OK,BUTTON_RIGHT);assert(question_choice==-1&&focused==1);

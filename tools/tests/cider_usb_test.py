@@ -98,6 +98,8 @@ worker_ports = r'''
 #include <stdio.h>
 #include <string.h>
 #include <setjmp.h>
+static void podlink_media_disconnect(void) {}
+static bool podlink_media_work(void) { return false; }
 #define HZ 100
 #define CS_OK 0
 #define SYS_USB_CONNECTED 100

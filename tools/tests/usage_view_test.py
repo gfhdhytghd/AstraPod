@@ -1,13 +1,13 @@
 """Execute the production direct Usage lease sender; no serial/device access."""
 from pathlib import Path
-import re
 import subprocess
 import sys
 R=Path(__file__).resolve().parents[2]
 O=Path(sys.argv[1]).resolve();O.mkdir(parents=True,exist_ok=True)
 s=(R/'apps-ipod/screens/system/agents_screen.c').read_text()
 a=s.index('#define USAGE_VIEW_SIGNAL_TICKS');b=s.index('\nstatic const struct hr_question',a)
-lease=s[a:b]
+helper=s.index('static bool is_t3(')
+lease=s[helper:s.index('\n}',helper)+2]+'\n'+s[a:b]
 assert 'signal_usage_view(view == VIEW_USAGE ? 1 : view == VIEW_DETAIL ? 2 : 0, false);' in s
 assert 'signal_usage_view(false, true);\n    finish_talk(false);' in s
 pre=r'''
@@ -51,6 +51,7 @@ int main(void){
  detail_ready=true;strcpy(focus_req,"f1");signal_usage_view(2,true);assert(!strcmp(last,"vw\t0"));
  focus_req[0]=0;int old_revokes=revokes;signal_usage_view(2,true);assert(revokes==old_revokes+1);assert(!strcmp(last,"vw\tdetail\tw1:p1"));
  strcpy(detail_pane,"w1:p2");signal_usage_view(2,false);assert(!strcmp(last,"vw\tdetail\tw1:p2"));
+ strcpy(detail_pane,"t3-example");signal_usage_view(2,true);assert(!strcmp(last,"vw\t0"));
  signal_usage_view(0,true);assert(!strcmp(last,"vw\t0"));
  puts("S2/FU16 production view lease: direct enter/leave/250ms refresh/busy retry/disconnect/exit/wrap PASS");
 }

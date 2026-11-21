@@ -27,6 +27,7 @@ pre=r'''
 #include <stdint.h>
 #include "screens/playback/cider_model.h"
 #include "screens/playback/cider_wps.h"
+static void album_blur_playing_changed(void) {}
 #define HAVE_USB_PODLINK
 #define HAVE_MULTIMEDIA_KEYS
 #define Q_AUDIO_PAUSE 1
@@ -82,7 +83,10 @@ static int get_action(int c,int t);
 static void play_status_set_ffmode(int m){(void)m;}
 static void audio_pre_ff_rewind(void){assert(!active);}
 static void audio_ff_rewind(unsigned long pos){(void)pos;assert(!active);}
-static void skin_update(int s,int i,int f){(void)s;(void)i;(void)f;}
+static void native_wps_invalidate(void){}
+static bool native_wps_animating(void){return false;}
+static void native_wps_render(const struct wps_state *s,bool submit){(void)s;(void)submit;}
+static void volume_mark_changed(void){global_status.last_volume_change=current_tick;}
 static int default_event_handler(int a){(void)a;return 0;}
 static void talk_value(long p,int u,bool e){(void)p;(void)u;(void)e;}
 static void audio_pause_at_chapter_end(bool b){(void)b;}
@@ -115,9 +119,15 @@ static void audio_queue_send(int q,intptr_t data){(void)q;(void)data;assert(!act
 static void audio_pause(void){pauses++;local_playing=AUDIO_STATUS_PLAY|AUDIO_STATUS_PAUSE;}
 static void cider_request_art(const char*k,const char*t){(void)k;(void)t;request_calls++;}
 static bool bitmap_ready;
+static fb_data art_pixels[240 * 240];
+static int core_alloc_free_space(size_t size){assert(size == sizeof(art_pixels));return 1;}
+static void *core_get_data(int handle){assert(handle == 1);return art_pixels;}
+static void core_pin(int handle){assert(handle == 1);}
+static void core_unpin(int handle){assert(handle == 1);}
+static void *core_get_data_pinned(int handle){core_pin(handle);return core_get_data(handle);}
+static void core_put_data_pinned(void *data){assert(data == art_pixels);core_unpin(1);}
 static bool cider_copy_art(const char*k,const char*t,void*p,unsigned int n){(void)k;(void)t;if(!bitmap_ready)return false;memset(p,0x17,n);return true;}
-static void skin_request_full_update(int x){(void)x;}
-static void skin_albumart_art_opened(int x){assert(x==CIDER_ART_HANDLE);}
+static void album_art_opened(int x){assert(x==CIDER_ART_HANDLE);}
 static int activity=ACTIVITY_WPS;
 static int get_current_activity(void){return activity;}
 static int playback_current_aa_hid(int slot){return slot+10;}
@@ -126,6 +136,17 @@ static bool buf_pin_handle(int h,bool p){(void)h;(void)p;return true;}
 '''
 post=r'''
 int main(void){
+cider_wps_alloc();
+#ifdef TEST_CURRENT_ID
+char track_id[sizeof(state.id)];
+state.available = true;
+strcpy(state.id,"fixture/song");
+cider_current_id(track_id);
+assert(!strcmp(track_id,"fixture/song"));
+state.available = false;
+cider_current_id(track_id);
+assert(!track_id[0]);
+#endif
 struct wps_state w={0};assert(!active);
 strcpy(state.title,"Cider song");strcpy(state.artist,"Artist");strcpy(state.album,"Album");strcpy(state.art,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
 state.available=state.have=true;state.generation=7;state.duration=100000;state.position=1000;state.rate=1000;state.volume=42;
@@ -276,6 +297,8 @@ puts("FU32 WPS ACK clears pending; source handover on WPS/elsewhere, local pause
 puts("Production same-song/resume, pending WPS preview, ACK ownership, route decoding PASS");
 puts("Production Local/Cider, disconnect/reconnect, native WPS bitmap/actions PASS");}
 '''
+if 'void cider_current_id(' in resident:
+    pre += '\n#define TEST_CURRENT_ID\n' + fn('cider_current_id')
 (O/'source.c').write_text(pre+'\n'+button_codes+'\nstatic volatile uint32_t status_word;\n'+fn('publish_status')+'\nenum {'+','.join(actions)+'};\n'+fn('cider_active')+fn('cider_play_pending')+'\nstatic bool source_seen;static uint32_t source_generation;static bool handoff_hold_source(void){return false;}\n'+fn('cider_source_poll')+fn('cider_remote_source')+'\n'+fn('queue_control')+'\n'+fn('cider_control')+'\n'+fn('cider_mode_get')+'\n'+fn('cider_mode_set')+'\n'+fn('play_route')+'\n'+fn('cider_play')+'\n'+fn('cider_play_in')+'\n'+fn('cider_play_status')+'\n'+fn('cider_local_play')+'\n'+fn('cider_retain_art')+'\n'+fn('cider_prefetch_art')+'\n'+fn('audio_play',playback)+'\n'+fn('audio_resume',playback)+'\n'+source+'\n'+seek+'\nstatic int get_action(int c,int t){(void)c;(void)t;return seek_actions++ ? ACTION_WPS_STOPSEEK : ACTION_WPS_SEEKFWD;}\n'+post)
 (O/'config.h').write_text('#define HAVE_USB_PODLINK\n')
 cmd=['cc','-std=gnu11','-g','-Wall','-Wextra','-Wno-unused-variable','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'source.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),*wire_args(),'-o',str(O/'source')]

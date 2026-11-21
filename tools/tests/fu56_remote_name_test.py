@@ -124,14 +124,15 @@ assert 'MENUITEM_RETURNVALUE_DYNTEXT(cider_item, GO_TO_CIDER, item_callback,' in
 assert '"%s Remote", cider_remote_name()' in root and 'MENUITEM_RETURNVALUE(cider_item' not in root
 browser = (P / 'cider_browser.c').read_text()
 assert 'if (!depth && !show_covers) cider_remote_home();' in fn(browser, 'cider_browse')
-assert 'depth ? "%s%s" : "%s Remote%s"' in browser and '"Cider Remote"' not in browser
+assert '"%s Remote", cider_remote_name()' in browser and '"Cider Remote"' not in browser
 assert '"%s could not play the selected item", cider_remote_name()' in browser
-assert 'root_count < (int)ARRAYLEN(root_rows) - 1' in browser
+assert 'library_rows < CIDER_ROOT_LIBRARY_ROWS' in fn(browser, 'root')
+assert 'CIDER_ROOT_FIXED_ROWS + library_rows + 1' in fn(browser, 'root')
 assert '"%s play failed", cider_remote_name()' in (P / 'cider_wps.c').read_text()
 controls = (P / 'cider_controls.c').read_text()
 assert '"%s did not answer", cider_remote_name()' in controls
 assert '"Cider cover store"' in controls                      # debug strings stay "Cider"
-assert 'cider_active() ? cider_remote_name() :' in (R / 'apps-ipod/skin/skin_tokens.c').read_text()
+assert 'model->external ? cider_remote_name()' in (R / 'apps-ipod/screens/covers/carousel.c').read_text()
 assert 'static inline const char *cider_remote_name(void) { return "Cider"; }' in (P / 'cider.h').read_text()
 print('source contract PASS')
 print('FU56 remote name PASS')

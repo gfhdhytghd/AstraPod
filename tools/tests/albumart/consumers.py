@@ -41,8 +41,8 @@ static bool tagcache_is_in_ram(void) { return true; }
 static bool tagcache_ram_refused(void) { return false; }
 static bool art_cache_lookup_hash(unsigned k, int i, char *p, int n, bool *f)
 { (void)k; (void)i; (void)p; (void)n; (void)f; return false; }
-static bool browser_aa_load(const char *p, int s, const struct img_filter *f)
-{ (void)p; (void)s; (void)f; return false; }
+static bool browser_aa_load(const char *p, int s)
+{ (void)p; (void)s; return false; }
 static void *core_get_data(int h) { (void)h; return NULL; }
 static size_t browser_aa_slot_bytes(void) { return 1; }
 static unsigned get_hash(int item, void *data) { (void)item; (void)data; return 0; }
@@ -68,13 +68,13 @@ int main(int argc, char **argv)
         for (int i = 0; i < 3; i++)
         {
             current_generation++;
-            browser_art_row(17, NULL, get_hash, NULL, NULL, 0);
+            browser_art_row(17, NULL, get_hash, NULL);
             assert(!resets && browser_aa_slot[0].item == 17 && browser_aa_no_hash[0] == 17);
         }
         cache_busy = false;
-        browser_art_row(17, NULL, get_hash, NULL, NULL, 0);
+        browser_art_row(17, NULL, get_hash, NULL);
         assert(resets == 1);
-        browser_art_row(17, NULL, get_hash, NULL, NULL, 0);
+        browser_art_row(17, NULL, get_hash, NULL);
         assert(resets == 1);
     }
     else

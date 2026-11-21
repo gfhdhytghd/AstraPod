@@ -40,7 +40,9 @@ static int pf_neighbor_light __attribute__((unused)) = 256;
 #define global_settings dummy
 static struct { int album_covers_parallel_slides; } dummy;
 static int extra_fade, flow_mix;
-''' + between(geometry, 'static void recalc_offsets', 'static int slide_x_range') + between(
+''' + between(geometry, 'static void recalc_offsets', 'static int slide_x_range') + (
+    between(source, 'static inline unsigned int fade_red_blue', 'static pix_t pf_color')
+    if 'static inline unsigned int fade_red_blue' in source else '') + between(
     source, 'struct pf_fade\n', '/**\n * Render a single slide') + between(
     source, 'static int slide_voff', '/* The rows a slide') + between(
     source, 'static bool slide_x_range', '/* Slides are drawn in tiles') + between(

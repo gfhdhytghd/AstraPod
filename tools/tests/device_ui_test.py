@@ -16,14 +16,18 @@ from support import build, function, run  # noqa: E402
 code = r'''
 struct gui_synclist { int unused; };
 static bool inhibited;
-static int dirty, flushes, action_result;
+static int dirty, flushes, action_result, submits;
+#define ACTION_NONE 0
+static bool list_render_motion_due(struct gui_synclist *l){(void)l;return false;}
+static void gui_synclist_draw(struct gui_synclist *l){(void)l;assert(0);}
+static void lcd_update(void){submits++;}
 static int list_do_action_timeout(struct gui_synclist *l, int t)
 { (void)l; return t; }
 static void gui_synclist_keyclick_callback(void) {}
 static void keyclick_set_callback(void (*f)(void), void *d)
 { (void)f; (void)d; }
-static bool skin_flush_inhibited(void) { return inhibited; }
-static void skin_inhibit_flush(bool value) { inhibited = value; }
+static bool ui_flush_inhibited(void) { return inhibited; }
+static void ui_inhibit_flush(bool value) { inhibited = value; }
 static int get_action(int c, int t)
 {
     (void)c; (void)t;
@@ -33,7 +37,7 @@ static int get_action(int c, int t)
 }
 static bool gui_synclist_do_button(struct gui_synclist *l, int *a)
 { (void)l; return *a != 0; }
-static void skin_flush_dirty(void)
+static void ui_flush_dirty(void)
 { assert(!inhibited); if (dirty) { flushes++; dirty = 0; } }
 '''
 listing = (ROOT / 'apps-ipod/widgets/list.c').read_text()
@@ -67,16 +71,16 @@ int main(void)
     int a = -1;
     action_result = 0;
     assert(!list_do_action(0, 10, &list, &a));
-    assert(a == 0 && flushes == 1 && !dirty && !inhibited);
+    assert(a == 0 && flushes == 1 && submits == 1 && !dirty && !inhibited);
     action_result = 1;
     assert(list_do_action(0, 10, &list, &a));
-    assert(flushes == 2 && !dirty);
+    assert(flushes == 2 && submits == 1 && !dirty);
     inhibited = true;
     action_result = 0;
     assert(!list_do_action(0, 10, &list, &a));
-    assert(inhibited && dirty && flushes == 2);
+    assert(inhibited && dirty && flushes == 2 && submits == 2);
     inhibited = false;
-    skin_flush_dirty();
+    ui_flush_dirty();
     assert(flushes == 3);
     /* A nearly full/full battery with !CHRG high still advertises the
      * charging source; only the percentage cap follows this pin. */
@@ -106,22 +110,34 @@ int main(void)
 exe = build('device-ui', code)
 print(run([exe], 'device-ui'), end='')
 
-# Both cells are in the shared Chrome layer. The busy condition cannot select
-# the battery away. Verify the actual shipped theme, including link/time space.
-skin = (ROOT / 'themes/scrim/.rockbox/wps/scrim.sbs').read_text()
-blocks = re.split(r'(?m)^%Vl\(', skin)
-battery = next(b for b in blocks if b.startswith('Chrome,289,5,24,24,2)'))
-busy = next(b for b in blocks if b.startswith('Chrome,263,5,24,24,2)'))
-assert '%?bc<' in battery and '%?bl<' in battery
-assert '%lh' not in battery and '%lb' not in battery and '%lw' not in battery
-assert '%?or(%lh,%lb,%lw)<' in busy and '%?la<' in busy
-for label, title_end, link_x, time_x, time_w in [
-    ('G', 150, 150, 184, 70), ('N', 102, 102, 136, 118)
-]:
-    assert link_x + 24 <= time_x
-    assert time_x + time_w <= 263
-    assert f'%Vl(Chrome{label}L,{link_x},5,24,24,2)' in skin
-    assert f'%Vl(Chrome{label},{time_x},8,{time_w},24,1)' in skin
-assert 263 + 24 <= 289 and 289 + 24 <= 320
-print('PASS: Scrim battery and busy cells coexist with time and PodLink')
+# The native Chrome splits the time, background activity and battery cells.
+chrome = 'apps-ipod/ui/native_chrome.c'
+source = (ROOT / chrome).read_text()
+layout_type = source[source.index('struct status_layout {'):source.index('static struct status_layout status_layout(')]
+code = r'''
+enum { UI_METRIC_STATUS_ICON_SIZE, UI_METRIC_STATUS_ICON_GAP, UI_METRIC_STATUS_GROUP_GAP,
+       UI_METRIC_STATUS_PAD_LEFT, UI_METRIC_STATUS_PAD_RIGHT };
+struct ui_theme { uint16_t metric[5]; };
+struct native_chrome { const struct ui_theme *theme; };
+''' + layout_type + function(chrome, 'status_layout') + r'''
+int main(void)
+{
+    struct ui_theme theme = {{18, 4, 6, 6, 6}};
+    struct native_chrome chrome = {&theme};
+    for (int percent = 0; percent <= 38; percent += 38)
+    {
+        struct status_layout p = status_layout(&chrome, 320, 46, percent);
+        assert(p.battery_x + 18 <= 320);
+        assert(p.play_x + 18 <= p.battery_x);
+        assert(p.clock_x + p.clock_width <= p.play_x);
+        assert(2*p.clock_x + p.clock_width == 320);
+        assert(p.busy_x + 18 <= p.clock_x);
+        assert(6 + p.title_width <= p.busy_x);
+        if (percent)
+            assert(p.play_x + 18 <= p.percent_x && p.percent_x + p.percent_width <= p.battery_x);
+    }
+    puts("PASS: native battery, playback, busy and clock cells do not overlap");
+}
+'''
+print(run([build('native-chrome-layout', code)], 'native-chrome-layout'), end='')
 print('Logs:', OUT)

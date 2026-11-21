@@ -50,7 +50,7 @@ rxpre='''
 #define IAP_EV_MSG_RCVD 1
 #define panicf(...) assert(0)
 static long current_tick;
-static bool iap_setupflag=true, iap_enabled=true, iap_started=false, iap_running=true;
+static bool iap_setupflag=true, iap_enabled=true, iap_running=true;
 static long last_frame_tick;
 static unsigned char rx[200000], *iap_rxpayload=rx, *iap_rxnext=rx;
 static unsigned int iap_rxlen=sizeof(rx);
@@ -402,15 +402,18 @@ uipre+='\nstatic void iap_agents_volume_enable(bool b){(void)b;}\n'
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R),'-I'+str(R/'apps-ipod'),str(O/'screen.c'),'-o',str(O/'screen')],check=True)
 subprocess.run([str(O/'screen')],check=True)
 agents=(R/'apps-ipod/screens/system/agents_screen.c').read_text()
-a=agents.index('            if (action == ACTION_LISTTREE_PGUP ||')
-b=agents.index('            const char *key = dir ?',a)
-page=agents[a:b]
+a=agents.index('#ifdef IPOD_ACCESSORY_PROTOCOL', agents.index('action = get_action(CONTEXT_AGENTS, timeout);', agents.index('int timeout = ui_scene_timeout')))
+b=agents.index('            if (dir',a)
+translate_end=agents.index('#endif',a)+len('#endif')
+page=agents[a:translate_end]+'\n'+agents[agents.index('            if (action == ACTION_LISTTREE_PGUP ||',translate_end):b]
 pagepre='''
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define ACTION_LISTTREE_PGUP 1
 #define ACTION_LISTTREE_PGDOWN 2
 #define ACTION_NONE 0
+#define ACTION_STD_PREV 3
+#define ACTION_STD_NEXT 4
 #define VIEW_USAGE 1
 #define VIEW_DETAIL 2
 #define VIEW_ALERT 3
@@ -420,12 +423,10 @@ pagepre='''
 #define USE_LINE 21
 struct vp {int height;};struct gl {struct vp *parent[1];};
 static int view,usage_scroll,detail_scroll,detail_scroll_max,detail_page_lines,draws;
-static int raw_page,volume_changes;
+
 #define IPOD_ACCESSORY_PROTOCOL
-#define BUTTON_MULTIMEDIA_VOLUME_UP 101
-#define BUTTON_MULTIMEDIA_VOLUME_DOWN 102
-static __attribute__((unused)) void get_action_statuscode(int *b){*b=raw_page;}
-static __attribute__((unused)) void default_event_handler(int b){assert(b==101||b==102);volume_changes++;}
+static int raw_page;
+static void get_action_statuscode(int *button){*button=raw_page;}
 static void draw_usage(struct gl*l){(void)l;draws++;}
 static void draw_detail(struct gl*l){(void)l;draws++;}
 static void page_move(int action){struct vp vp={.height=100};struct gl list={.parent={&vp}};
@@ -437,7 +438,9 @@ int main(void){
  page_move(ACTION_LISTTREE_PGDOWN);assert(usage_scroll==124);
  page_move(ACTION_LISTTREE_PGUP);assert(usage_scroll==24);
  page_move(ACTION_LISTTREE_PGUP);assert(usage_scroll==0);
- raw_page=BUTTON_RC_VOL_UP;int scroll=usage_scroll;page_move(ACTION_LISTTREE_PGUP);assert(!volume_changes&&usage_scroll==scroll);raw_page=0;
+ raw_page=BUTTON_RC_VOL_UP;page_move(ACTION_STD_NEXT);assert(usage_scroll==100);
+ raw_page=BUTTON_RC_VOL_DOWN;page_move(ACTION_STD_PREV);assert(usage_scroll==0);
+ raw_page=0;page_move(ACTION_STD_NEXT);assert(usage_scroll==0);
  view=VIEW_DETAIL;detail_scroll_max=23;detail_page_lines=7;
  page_move(ACTION_LISTTREE_PGDOWN);assert(detail_scroll==7);
  page_move(ACTION_LISTTREE_PGDOWN);assert(detail_scroll==14);

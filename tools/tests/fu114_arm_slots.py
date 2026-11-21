@@ -143,9 +143,9 @@ class Firmware:
         return dict(threads=entries, used=len(entries), spare=self.capacity-len(entries),
                     maxthreads=self.capacity)
 
-    def boot(self, with_dircache=False):
+    def boot(self, with_dircache=False, setup_iap=True):
         for name, stack in BOOT:
-            if name == "usb-log":
+            if name == "usb-log" and setup_iap:
                 self.call("iap_setup", 0)
             assert self.reserve(name, stack), (name, self.table())
         if with_dircache:
@@ -159,6 +159,7 @@ class Firmware:
 
 def run(elf, legacy):
     boot = Firmware(elf)
+    eager_iap = not legacy and "iap_retry_at" not in boot.syms
     boot.usb_inserted = 1
     boot.boot(with_dircache=True)
     boot.call("usb_start_monitoring")
@@ -166,6 +167,8 @@ def run(elf, legacy):
     early = Firmware(elf)
     assert early.rx_sync()["used"] == 1 and not early.attempts
     boot_before = boot.table()
+    if eager_iap:
+        assert not boot.uc.mem_read(boot.syms["iap_started"], 1)[0]
     boot_after = boot.rx_sync()
 
     runtime = Firmware(elf)
@@ -179,7 +182,10 @@ def run(elf, legacy):
     runtime.usb_inserted = 1
     runtime.call("usb_status_event", 1, mode=0x12)
     usb_only = runtime.table()
-    assert "iap" not in usb_only["threads"].values()
+    assert usb_only == operational
+    assert ("iap" in usb_only["threads"].values()) == eager_iap
+    if eager_iap:
+        assert not runtime.uc.mem_read(runtime.syms["iap_started"], 1)[0]
     runtime_after = runtime.rx_sync()
 
     retry = None
@@ -192,21 +198,32 @@ def run(elf, legacy):
             assert "iap" in table["threads"].values() and table["spare"] >= 2, table
         assert "glyph read" not in operational["threads"].values()
         full = Firmware(elf)
-        full.boot(with_dircache=True)
-        full.call("iap_setup", 0)
+        full.boot(with_dircache=True, setup_iap=not eager_iap)
         for n in range(full.table()["spare"]):
             assert full.reserve(f"optional {n}")
+        if eager_iap:
+            full.call("iap_setup", 0)
         full.rx_sync()
         assert not full.panics
+        assert "iap" not in full.table()["threads"].values()
         full.release("optional 0")
-        full.put(full.syms["current_tick"], 101)
+        if eager_iap:
+            attempts = [attempt for attempt in boot.attempts if attempt["name"] == "iap"]
+            assert len(attempts) == 1 and attempts[0]["mode"] == 0x13, attempts
+            assert boot_after == boot_before and runtime_after == usb_only
+            for firmware in (boot, runtime):
+                assert firmware.uc.mem_read(firmware.syms["iap_started"], 1)[0]
+            full.call("iap_setup", 0)
+        else:
+            full.put(full.syms["current_tick"], 101)
         retry = full.rx_sync()
         assert "iap" in retry["threads"].values() and not full.panics, retry
     return dict(boot_without_cable=normal_boot, cable_already_present_before_rx=boot_before,
                 cable_already_present_after_rx=boot_after, after_glyphs_and_blur=peak_ui,
                 cover_flow_with_loader=operational, runtime_usb_without_serial_sync=usb_only,
                 runtime_usb_and_serial_sync=runtime_after,
-                iap_attempt=boot.attempts[-1], boot_panics=boot.panics, runtime_panics=runtime.panics,
+                iap_attempt=next(attempt for attempt in boot.attempts if attempt["name"] == "iap"),
+                boot_panics=boot.panics, runtime_panics=runtime.panics,
                 optional_slot_failure_retry=retry)
 
 

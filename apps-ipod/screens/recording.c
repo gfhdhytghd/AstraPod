@@ -1004,11 +1004,11 @@ bool recording_screen(bool no_source)
     if (capture && !audio_try_init_recording())
     {
         bool error = audio_status() & AUDIO_STATUS_ERROR;
-        int message = LANG_REC_CAPTURE_ERROR;
         if (error)
             audio_error_clear();
+        int message = LANG_REC_CAPTURE_ERROR;
 #ifdef USB_ENABLE_AUDIO
-        else
+        if (!error)
             message = LANG_USB_DAC_ACTIVE;
 #endif
         splash(HZ, ID2P(message));

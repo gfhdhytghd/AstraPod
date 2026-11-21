@@ -4,6 +4,7 @@
 #define HZ 100
 #define TIME_AFTER(a, b) ((long)((b) - (a)) < 0)
 extern long current_tick;
+struct queue_event;
 struct mutex
 {
     int held;

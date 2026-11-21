@@ -20,11 +20,11 @@ def fn(s,n):
 subprocess.run([sys.executable,str(R/'tools/tests/fu32_quickscreen_test.py'),str(O/'qs'),str(S)],check=True)
 base=(O/'qs/test.c').read_text().split('static void add(')[0]
 keymap=(S/'apps-ipod/input/keymap_ipod.c').read_text()
-keymap=keymap[keymap.index('static const struct button_mapping'):]
+keymap=keymap[keymap.index('#ifdef HAVE_RECORDING'):]
 action=(S/'apps-ipod/input/action.c').read_text()
 carousel=(S/'apps-ipod/screens/covers/carousel.c').read_text()
 agents=(S/'apps-ipod/screens/system/agents_screen.c').read_text()
-assert 'open_confirm' not in agents and 'VIEW_CONFIRM' not in agents
+assert 'if (result == AGENTS_EXIT_MENU) usb_confirm_reopen();' in fn(agents,'agents_usb_exit')
 browser=(S/'apps-ipod/screens/browse/browser.c').read_text()
 cbrowser=(S/'apps-ipod/screens/playback/cider_browser.c').read_text()
 # Replace the fixture's six tables with all production context cascades.
@@ -111,7 +111,20 @@ static bool volume_paging,host_keys,volume_enabled,native_play_pending;
 static unsigned long native_play_at;
 static long pending_until;
 static bool pending_answer,question_custom,question_closing,detail_ready=true,talk_held;
-static char pending_req[8],focus_req[8],talk_req[8],question_id[12],detail_pane[16],space_id[16],space_tab[16];
+static char pending_req[8],focus_req[8],talk_req[8],question_id[12],detail_pane[16],space_id[16],space_tab[16],question_pane[16],t3_input[80];
+static struct scene { int handle; bool capturing; } page_scene;
+static void ui_scene_cancel(struct scene*s){assert(!s->handle);}
+static void ui_scene_start(struct scene*s){assert(!s->handle);}
+static void ui_scene_update(struct scene*s,bool redraw){(void)redraw;assert(!s->handle);}
+static int ui_scene_timeout(struct scene*s,int timeout){assert(!s->handle);return timeout;}
+#define ROW_T3_HEADER 200
+static int action_choice, menu_back_calls;
+static bool menu_fixture;
+static void edit_t3_input(struct gui_synclist*l){(void)l;assert(0);}
+static void close_usage(struct gui_synclist*l){(void)l;assert(menu_fixture);menu_back_calls++;}
+static void close_detail(struct gui_synclist*l){(void)l;assert(menu_fixture);menu_back_calls++;}
+static void close_actions(struct gui_synclist*l){(void)l;assert(menu_fixture);menu_back_calls++;}
+static void back_from_tab(struct gui_synclist*l){(void)l;assert(menu_fixture);menu_back_calls++;}
 static int usage_scroll=3,detail_scroll=5,detail_scroll_max=40,detail_page_lines=8,question_choice;
 static struct hr_model model;
 static int nrows=12;
@@ -129,10 +142,11 @@ static bool poll_link(void){
 }
 static void splash(int t,const char*s){(void)t;(void)s;assert(0);}
 static void splashf(int t,const char*s,...){(void)t;(void)s;assert(0);}
-static void leave_question(struct gui_synclist*l){(void)l;question_closing=false;}
+static void leave_question(struct gui_synclist*l){(void)l;question_closing=false;if(menu_fixture)menu_back_calls++;}
+static void dismiss_question(struct gui_synclist*l){leave_question(l);}
 static void enter_answer(struct gui_synclist*l){(void)l;assert(0);}
 static void answer_number(int n){(void)n;assert(0);}
-static void close_input(bool b){(void)b;assert(0);}
+static void close_input(bool b){assert(menu_fixture&&!b);menu_back_calls++;}
 static void start_talk(struct gui_synclist*l,bool r){(void)l;(void)r;assert(0);}
 static const struct hr_question*current_question(void){return NULL;}
 static bool question_binary_page(void){return false;}
@@ -144,7 +158,7 @@ static bool list_do_action(int ctx,int ticks,struct gui_synclist*l,int*a){(void)
 base=base.replace('struct viewport{int dummy;};','struct viewport{int height;};')
 pre+=re.search(r'enum view \{[^}]*\};',agents).group()+'\nstatic enum view view;static int input_top;\n'
 pre+=(fn(agents,'agents_usb_exit') if 'static void agents_usb_exit(' in agents else 'static void agents_usb_exit(int result){(void)result;}')
-pre+=fn(agents,'show_same')+fn(agents,'update_volume_mode')+fn(agents,'take_result')+fn(agents,'question_action')+fn(agents,'agents_menu_exit')
+pre+=fn(agents,'is_t3')+fn(agents,'show_same')+fn(agents,'update_volume_mode')+fn(agents,'take_result')+fn(agents,'question_action')+fn(agents,'agents_menu_exit')
 a=agents.index('static struct\n{\n    bool ready, ok;')
 b=agents.index('static bool agents_play_down',a)
 pre+=agents[a:b]
@@ -172,7 +186,7 @@ a=cbrowser.index('        if (action == ACTION_STD_QUICKSCREEN)')
 b=cbrowser.index('        if (action == ACTION_STD_CANCEL',a)
 pre+='static void run_cider_grid(void){int result=0;while(entry_at<entry_count){int action=get_action(CONTEXT_ID3DB,HZ/5);\n'+cbrowser[a:b]+'}\nassert(!result);}\n'
 # Carousel production quickscreen case and state retained underneath it.
-a=carousel.index('        case ACTION_STD_QUICKSCREEN:',carousel.index('static int album_covers_loop'))
+a=carousel.index('        case ACTION_STD_QUICKSCREEN:',carousel.index('        enum agents_nav_screen nav ='))
 b=carousel.index('        case PF_MENU:',a)
 pre+=r'''
 static int joins,restarts,title_restores,view_restores;static bool loader_running=true;
@@ -186,9 +200,12 @@ static void lcd_set_background(int c){(void)c;}
 static void lcd_set_foreground(int c){(void)c;}
 static void lcd_set_drawmode(int m){(void)m;}
 static int center_index=11,target=13;static unsigned short surfaces[512];
-static int run_covers(void){int ret;while(entry_at<entry_count){int button=get_action(CONTEXT_PLUGIN,HZ/5);switch(button){
+static void ui_perf_end(unsigned trace){(void)trace;}
+static int run_covers(void){int ret;unsigned trace_id=0,*trace=&trace_id;
+ bool trace_attempted=false,pf_show_statusbar=true;
+ while(entry_at<entry_count){int button=get_action(CONTEXT_PLUGIN,HZ/5);switch(button){
 '''+carousel[a:b]+r'''
- default:break;}}return 0;}
+ default:break;}}assert(!trace_attempted);return 0;}
 '''
 post=r'''
 static void add(int raw){events[limit++]=(struct event){.button=raw};}
@@ -244,19 +261,19 @@ int main(void){
  for(int v=VIEW_SPACES;v<=VIEW_INPUT;v++)for(int rk=0;rk<2;rk++){
   view=v;source_cider=true;activity=ACTIVITY_AGENTS;
   prepare(CONTEXT_AGENTS,rk?BUTTON_RC_MENU:BUTTON_MENU,rk);
-  entry_keys[1]=entry_keys[0]|BUTTON_REL;expect_menu_exit=true;
-  int before=cleans,consent_before=consent_requests;model.hello=true;model.nws=2;
-  run_agents_entry();assert(consent_requests==consent_before+1);assert(!step&&cleans==before&&model.hello&&model.nws==2&&view==v);
+  entry_keys[1]=entry_keys[0]|BUTTON_REL;expect_menu_exit=v==VIEW_SPACES;menu_fixture=true;
+  int before=cleans,consent_before=consent_requests,backs=menu_back_calls;model.hello=true;model.nws=2;
+  run_agents_entry();assert(consent_requests==consent_before+expect_menu_exit);assert(menu_back_calls==backs+!expect_menu_exit);assert(!step&&cleans==before&&model.hello&&model.nws==2&&view==v);
   /* A pending answer/focus/voice request does not intercept MENU. */
   pending_answer=true;strcpy(pending_req,"pending");strcpy(focus_req,"focus");strcpy(talk_req,"voice");
   prepare(CONTEXT_AGENTS,rk?BUTTON_RC_MENU:BUTTON_MENU,rk);entry_keys[1]=entry_keys[0]|BUTTON_REL;
-  run_agents_entry();assert(consent_requests==consent_before+2);assert(!step&&!strcmp(pending_req,"pending")&&view==v);
+  run_agents_entry();assert(consent_requests==consent_before+2*expect_menu_exit);assert(menu_back_calls==backs+2*!expect_menu_exit);assert(!step&&!strcmp(pending_req,"pending")&&view==v);
   pending_answer=false;pending_req[0]=focus_req[0]=talk_req[0]=0;
-  printf("Agents view=%d key=%s: short MENU -> direct previous-screen exit, no Leave confirm, one USB consent, no QS/session reset PASS\n",v,rk?"remote":"body");
+  printf("Agents view=%d key=%s: short MENU -> local back or one root USB consent, no QS/session reset PASS\n",v,rk?"remote":"body");
  }
  last_raw=BUTTON_MENU|BUTTON_REL;assert(agents_menu_exit(ACTION_STD_CANCEL));
  last_raw=BUTTON_LEFT;assert(!agents_menu_exit(ACTION_STD_CANCEL));
- expect_menu_exit=false;
+ expect_menu_exit=false;menu_fixture=false;
  assert(title_restores==joins&&view_restores==joins);
  puts("FU34 production dispatch/key/QS matrix: 12 covers + 8 grids + 28 Agents cases PASS");
 }

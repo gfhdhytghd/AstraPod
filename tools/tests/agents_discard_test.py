@@ -67,7 +67,9 @@ pre = r'''
 #define AGENTS_SWITCH_COVERS 3
 #define AGENTS_SWITCH_REMOTE_WPS 4
 static unsigned long current_tick,shortcut_talking_at;
-static bool shortcut_talking,talk_held,talk_remote,talk_discarded,talk_req_up,talk_failed;
+static bool shortcut_talking,talk_held,talk_remote,talk_discarded,talk_req_up,talk_failed,talk_t3;
+static enum { VIEW_SPACES, VIEW_ACTIONS, VIEW_CONFIRM } view;
+static char t3_talk_start[8];
 static long talk_since,talk_until;
 static char talk_req[8],talk_note[64],outbox[OUTBOX][96];
 static int music;
@@ -86,7 +88,7 @@ static void flush(void){for(int i=0;i<nout;i++){assert(ncommands<64);strcpy(comm
 '''
 code = re.sub(r'^#include .*$', '', (R/'firmware/export/button_chord.h').read_text(), flags=re.M)
 code += function(action,'agents_shortcut_talking') + chord + remote
-for name in ['outbox_slot','take_req','talk_result','start_talk','finish_talk','talk_is_short','talk_wanted','take_talk_result']:
+for name in ['is_t3','outbox_slot','take_req','talk_result','start_talk','finish_talk','talk_is_short','talk_wanted','take_talk_result']:
     code += '\n'+function(agents,name)
 if 'static void finish_native_play' in agents:code += '\n'+function(agents,'finish_native_play')
 code += '\nstatic void perform(int button) {struct gui_synclist list={0};int action=0;\n'

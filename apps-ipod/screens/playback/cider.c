@@ -1275,6 +1275,16 @@ void cider_snapshot(struct cider_state *out)
     mutex_unlock(&cider_mutex);
 }
 
+void cider_current_id(char id[sizeof(state.id)])
+{
+    mutex_lock(&cider_mutex);
+    if (cider_available())
+        memcpy(id, state.id, sizeof(state.id));
+    else
+        id[0] = '\0';
+    mutex_unlock(&cider_mutex);
+}
+
 void cider_current_art(char key[65])
 {
     mutex_lock(&cider_mutex);

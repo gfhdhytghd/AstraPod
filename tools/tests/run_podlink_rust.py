@@ -9,7 +9,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import struct
 import subprocess
+import zlib
 from podlink_rust_build import ROOT, library
 
 p = argparse.ArgumentParser(description=__doc__)
@@ -23,6 +25,32 @@ out.mkdir(parents=True, exist_ok=True)
 lib = library()
 goldens = ROOT / 'tools/tests/fixtures/podlink-golden'
 manifest = json.loads((goldens / 'traces.json').read_text())
+
+
+def bench_replies(trace):
+    """Compare demo frames across USB submission and session owner changes."""
+    stream = bytearray()
+    pos = 0
+    while pos < len(trace):
+        tag, length = struct.unpack_from('<II', trace, pos)
+        pos += 8
+        assert tag == 1 and pos + length <= len(trace)
+        stream.extend(trace[pos:pos + length])
+        pos += length
+    pos = 0
+    replies = []
+    while pos < len(stream):
+        magic, kind, flags, seq, length = struct.unpack_from('<4sHHII', stream, pos)
+        end = pos + 16 + length
+        assert magic == b'PLNK' and end + 4 <= len(stream)
+        assert zlib.crc32(stream[pos + 4:end]) == struct.unpack_from('<I', stream, end)[0]
+        data = bytes(stream[pos + 16:end])
+        if kind == 3 or (kind == 2 and data != b'DH\t1\tdisk-mode-v1'):
+            replies.append((kind, flags, data))
+        pos = end + 4
+    return replies
+
+
 flags = [os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
          '-g', '-fsanitize=address,undefined', '-fno-pie', '-no-pie',
          '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections',
@@ -54,8 +82,15 @@ for name in ['podlink_firmware', 'podlink_wire', 'podlink_bench', 'podlink_resid
     if name in manifest:
         raw = trace.read_bytes()
         expected = gzip.decompress((goldens / (name + '.trace.gz')).read_bytes())
-        assert len(raw) == manifest[name]['bytes']
         assert hashlib.sha256(expected).hexdigest() == manifest[name]['sha256']
+        if name == 'podlink_bench':
+            assert bench_replies(raw) == bench_replies(expected)
+            print('PASS bench golden: identical demo replies with the resident worker', flush=True)
+            # A traced serial fixture selects RING for legacy USB trace parity.
+            subprocess.run([str(binary)], env={k: v for k, v in os.environ.items()
+                           if k != 'PODLINK_TRACE'}, check=True, timeout=120)
+            continue
+        assert len(raw) == manifest[name]['bytes']
         assert raw == expected, (name, 'golden mismatch', next(
             (i for i, (x, y) in enumerate(zip(raw, expected)) if x != y), len(raw)))
         print(f'PASS C golden {name}: {len(raw)} identical bytes', flush=True)

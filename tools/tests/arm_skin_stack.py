@@ -30,6 +30,17 @@ build = a.build.resolve()
 root = Path(next(l.split('=', 1)[1].strip() for l in
                  (build / 'Makefile').read_text().splitlines()
                  if l.startswith('export ROOTDIR=')))
+# Native AstraPod builds remove the recursive skin renderer from the ELF.
+# Keep the nested-stack probe for firmware that still includes that renderer.
+if not (root / 'apps-ipod/skin/skin_render.c').is_file():
+    with a.elf.open('rb') as f:
+        symbols = {symbol.name for symbol in
+                   ELFFile(f).get_section_by_name('.symtab').iter_symbols()}
+    assert 'native_wps_render' in symbols
+    assert not {'skin_render_line', 'evaluate_conditional', 'skin_buffer'} & symbols
+    print('PASS: native WPS ELF has no recursive skin renderer')
+    raise SystemExit(0)
+
 fields = ['sizeof(struct skin_element)',
           *['offsetof(struct skin_element, %s)' % n for n in
             ['next', 'children', 'data', 'children_count', 'type']],

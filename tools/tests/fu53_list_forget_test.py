@@ -28,6 +28,7 @@ fixture = r"""
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #define SCREEN_MAIN 0
 #define UNLIKELY(x) (x)
 #define USEC_TIMER 0u
@@ -38,6 +39,7 @@ fixture = r"""
 struct gui_synclist {
     const int *parent[1];
     unsigned generation;
+    void (*callback_prefetch_art)(int,void*,int);
 };
 struct list_motion {
     int visible;
@@ -49,13 +51,20 @@ struct native_list {
     unsigned generation;
     bool has_marquee;
     int art_handle, backdrop;
+    unsigned font_epoch, artist_generation;
+    struct { bool visible; int last_sel; } overlay;
     struct list_motion motion;
     uint32_t marquee_started, marquee_frame;
 };
 static struct native_list state;
 static int renderer_handle = 1;
 static struct { bool scrolling_enabled; } global_settings = {true};
-static int drawn, laid_out, released, traces_ended;
+static int drawn, laid_out, released, traces_ended, font_releases;
+static void index_release_fonts(struct native_list *owner){assert(owner == &state);font_releases++;}
+static bool index_touched(void){return false;}
+static bool font_prefetch_busy(void){return false;}
+static unsigned font_prefetch_epoch(void){return 0;}
+static unsigned artist_tile_generation(void){return 0;}
 static void ui_perf_end(unsigned token) { traces_ended += token != 0; }
 static bool motion_enabled(void) { return true; }
 static unsigned motion_duration(const struct list_motion *motion)
@@ -96,6 +105,7 @@ int main(void)
     state.backdrop = 4;
     state.motion.visible = 6;
     state.motion.trace = 1;
+    state.overlay.last_sel = 2;
     gui_synclist_forget(&b);
     assert(motion_deadline(&a, true) == 1 && motion_deadline(&b, true) == TIMEOUT_BLOCK);
     assert(released == 0 && state.backdrop == 4);
@@ -104,8 +114,8 @@ int main(void)
     assert(motion_deadline(&a, true) == TIMEOUT_BLOCK);
     gui_synclist_forget(&a);
     assert(!state.owner && !state.has_marquee && state.art_handle == -1);
-    assert(released == 1 && state.backdrop == 0);
-    assert(traces_ended == 1 && state.motion.visible == 0);
+    assert(released == 1 && state.backdrop == 0 && font_releases == 1);
+    assert(traces_ended == 1 && state.motion.visible == 0 && state.overlay.last_sel == -1);
 
     gui_synclist_draw(&no_parent);
     assert(laid_out == 0 && drawn == 0);

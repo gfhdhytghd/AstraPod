@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parents[2]
 OUT=Path(sys.argv[1]).resolve(); OUT.mkdir(parents=True,exist_ok=True)
 text=(ROOT/'apps-ipod/input/keymap_ipod.c').read_text()
 # Compile the real mapping arrays, including their context cascades.
-text=text[text.index('static const struct button_mapping'):]
+text=text[text.index('#ifdef HAVE_RECORDING'):]
 ids=sorted(set(re.findall(r'\b(?:ACTION_|CONTEXT_)[A-Z_0-9]+\b',text)))
 preamble='''#include <assert.h>
 #include <stdbool.h>

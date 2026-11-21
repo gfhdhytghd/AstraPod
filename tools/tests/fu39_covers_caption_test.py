@@ -17,7 +17,7 @@ if 'static bool update_caption_version(' in carousel:
     update = fn(carousel, 'update_caption_version')
     check = 'if (update_caption_version(&seen_caption_version))\n            caption_owed = true;'
     assert check in loop
-    assert loop.index('if (model->tick) model->tick();') < loop.index(check) < loop.index('if (caption_owed && !art_owed')
+    assert loop.index('model->tick();') < loop.index(check) < loop.index('if (caption_owed && !art_owed')
     assert 'unsigned int seen_caption_version = 0;' in loop
 else:
     # Execute the old loop's missing notification to prove the same fixture fails.
@@ -25,7 +25,7 @@ else:
 assert 'if (!dark && (art_owed || caption_owed)' in loop
 assert 'current_tick - last_frame_tick >= PF_FRAME_TICKS' in loop
 assert 'get_custom_action(CONTEXT_PLUGIN, timeout, get_context_map)' in loop
-quick = loop[loop.index('        case ACTION_STD_QUICKSCREEN:'):loop.index('        case PF_MENU:')]
+quick = loop[loop.index('        case ACTION_STD_QUICKSCREEN:',loop.index('        enum agents_nav_screen nav =')):loop.index('        case PF_MENU:')]
 pre = r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -85,12 +85,20 @@ static int caption_index,caption_variant,draws,scroll_builds;
 static bool caption_owed;
 static char drawn[2][260],scroll[2][260];
 static struct {int album_covers_show_album_name,album_covers_show_year;}global_settings={4,0};
-static int pf_fg_color,pf_bold_font;
+static int pf_fg_color;
 static struct viewport pf_vp;
 static int pf_bg_color;
-static int font(void){return 1;}
-static struct {int(*getuifont)(void);}screens[]={{font}};
+static int carousel_caption_font(bool bold){(void)bold;return 1;}
 static int count(void){return cider_library_total();}
+static struct { int cover_remote_index; char cover_remote_id[80]; } global_status_cover;
+#define carousel_prepare_transition() ((void)0)
+#define carousel_cancel_transition() ((void)0)
+#define CAROUSEL_MENU_STAY -50
+#define SYS_USB_CONNECTED -51
+#define LANG_OUT_OF_MEMORY 1
+static bool cider_available(void){return true;}
+static int default_event_handler(int a){(void)a;return 0;}
+static bool font_prefetch_text(int font,const char *label){(void)font;assert(label);return true;}
 static void set_current_slide(int i){center_index=i;}
 static bool cider_page_row(int i,struct cider_row*r){return cider_library_row(i,r);}
 static int cider_page_total(void){return cider_library_total();}
@@ -139,11 +147,15 @@ static void sb_set_persistent_title(const char*s,int i,int n){(void)s;(void)i;(v
 static int carousel_run(const struct carousel_model*m,const char*f);
 '''
 post = r'''
+static void ui_perf_end(unsigned trace){assert(trace == 9);}
 static int run_quick(void){
+ unsigned token=9,*trace=&token;
+ bool trace_attempted = true, pf_show_statusbar = true;
  int button=ACTION_STD_QUICKSCREEN,ret;
  switch(button){
 QUICK_BRANCH
  }
+ assert(!token && !trace_attempted);
  return 0;
 }
 static void ui_tick(void){
@@ -181,13 +193,17 @@ static int carousel_run(const struct carousel_model*m,const char*f){
 int main(void){
  for(int restored=0;restored<2;restored++)for(int early=0;early<2;early++)for(int return_path=0;return_path<3;return_path++){
   cider_library_open("reset-fixture");cider_library_reset();
-  resume_index=expected_index=restored?75:0;before_draw=early;from_quick=return_path==2;
+  global_status_cover.cover_remote_index=expected_index=restored?75:0;
+  global_status_cover.cover_remote_id[0]=0;before_draw=early;from_quick=return_path==2;
   int old_waits=waits;
   assert(cider_covers()==GO_TO_PREVIOUS&&waits==old_waits+1);
   if(return_path==1){
-   /* Real provider album callback changes route, then Cover Flow re-enters. */
-   assert(enter(center_index)==GO_TO_PREVIOUS&&resume_index==expected_index);
-   assert(cider_covers()==GO_TO_PREVIOUS&&center_index==expected_index);
+   /* A visit remembers the selected album before releasing the carousel. */
+   assert(remember(center_index));
+   char id[80];snprintf(id,sizeof id,"id-%d",expected_index);
+   assert(!strcmp(global_status_cover.cover_remote_id,id));
+   assert(global_status_cover.cover_remote_index==expected_index);
+   assert(!remember(center_index));
   }
   printf("FU39 offset=%d page=%s return=%s PASS\n",expected_index,early?"before-first-draw":"after-first-draw",return_path==0?"entry":return_path==1?"album":"quick");
  }
@@ -200,9 +216,10 @@ int main(void){
 '''.replace('QUICK_BRANCH',quick)
 (O/'config.h').write_text('')
 (O/'kernel.h').write_text('#define HZ 100\nextern long current_tick;\n#define TIME_BEFORE(a,b) ((long)((a)-(b))<0)\n')
-functions='\n'.join([fn(carousel,'carousel_caption_changed'),update,fn(carousel,'carousel_album_caption'),fn(provider,'initial'),fn(provider,'enter'),fn(provider,'text'),fn(provider,'version')])
+functions='\n'.join([fn(carousel,'carousel_caption_changed'),update,fn(carousel,'carousel_album_caption'),fn(provider,'initial'),fn(provider,'remember').replace('global_status.', 'global_status_cover.'),fn(provider,'text'),fn(provider,'version')])
 model='static const struct carousel_model provider_model={version,text,initial};\n'
-entry=fn(provider,'cider_covers').replace('&model,','&provider_model,')
+entry='\n'.join(fn(provider,name).replace('global_status.', 'global_status_cover.').replace('&model,','&provider_model,')
+                for name in ['wait_for_library','restore_album','cider_covers'])
 (O/'test.c').write_text(pre+functions+model+entry+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R/'apps-ipod'),str(O/'test.c'),str(R/'apps-ipod/screens/playback/cider_library.c'),'-o',str(O/'test')],check=True)
 subprocess.run([str(O/'test')],check=True)

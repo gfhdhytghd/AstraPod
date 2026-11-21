@@ -28,14 +28,12 @@ a = p.parse_args()
 build = a.build.resolve()
 root = Path(next(l.split('=', 1)[1] for l in (build / 'Makefile').read_text().splitlines()
                  if l.startswith('export ROOTDIR=')))
-fields = ['offsetof(struct user_settings, dynamic_colors)',
-          'offsetof(struct mp3entry, path)', 'DISK_EVENT_SPINUP', 'SYS_TIMEOUT',
-          ]
+fields = ['DISK_EVENT_SPINUP', 'SYS_TIMEOUT']
 with tempfile.TemporaryDirectory(prefix='arm-storage-layout-') as tmp:
     tmp = Path(tmp)
     plan = subprocess.check_output(['make', '-C', build, '-Bn',
-        build / 'apps-ipod/skin/skin_render.o', 'V=1'], text=True)
-    cmd = shlex.split(next(l for l in plan.splitlines() if ' -c ' in l and 'skin_render.c' in l))
+        build / 'apps-ipod/metadata/album_palette.o', 'V=1'], text=True)
+    cmd = shlex.split(next(l for l in plan.splitlines() if ' -c ' in l and 'album_palette.c' in l))
     if cmd[0].endswith('ccache'):
         cmd.pop(0)
     cmd = cmd[:cmd.index('-c')]
@@ -121,9 +119,6 @@ def hook(uc, address, size, _):
         raise RuntimeError(('storage callback entered forbidden work', n))
 
 u.hook_add(UC_HOOK_CODE, hook)
-u.mem_write(symbols['global_settings'] + layout['offsetof(struct user_settings, dynamic_colors)'], b'\x01')
-word(symbols['palette_size_idx'], 0)
-# The zero-initialized settings select ART_SOURCE_FILES, matching the fixture.
 # Register the actual callback in the actual firmware event table.
 u.reg_write(UC_ARM_REG_SP, stacktop)
 u.reg_write(UC_ARM_REG_LR, stop)

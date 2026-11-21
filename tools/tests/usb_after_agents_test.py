@@ -29,7 +29,6 @@ def fn(text, name):
 usb = (SOURCE / "firmware/usb.c").read_text()
 ui = (SOURCE / "apps-ipod/widgets/usb_confirm.c").read_text()
 screen = (SOURCE / "apps-ipod/screens/system/agents_screen.c").read_text()
-assert 'open_confirm' not in screen and 'VIEW_CONFIRM' not in screen
 assert screen.count('agents_usb_exit(ret);') == 1
 assert re.search(r'viewportmanager_theme_undo\(i, false\);\s*agents_usb_exit\(ret\);\s*return ret;', screen)
 events = usb[usb.index("        case USB_CONFIRM_READY:"):

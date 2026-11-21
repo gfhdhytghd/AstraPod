@@ -72,17 +72,15 @@ static void yield(void) {}
 # Run Cover Flow's actual refresh block between each simulated publication.
 loop = function('apps-ipod/screens/covers/carousel.c', 'album_covers_loop')
 start = loop.index('        unsigned art_generation = art_cache_generation();')
-end = loop.index('        /* Get input first.', start)
+end = loop.index('        /* Idle-wake-rate backoff:', start)
 code += r'''
 #define EV_WAKEUP 1
-static int thread_q;
 static unsigned art_seen_generation;
 static bool art_owed;
 static void buf_ctx_lock(void) {}
 static void buf_ctx_unlock(void) {}
 static void free_all_slide_prio(int p) { (void)p; reloads++; }
-static void queue_remove_from_head(void *q, int id) { (void)q; (void)id; }
-static void queue_post(void *q, int id, int data) { (void)q; (void)id; (void)data; }
+static void wake_pf_thread(void) {}
 static void offer_frame(void)
 {
 ''' + loop[start:end] + '\n}\n'

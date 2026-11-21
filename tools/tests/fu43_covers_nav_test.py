@@ -26,7 +26,7 @@ route=fn(action,'shortcut_screen_context')+fn(action,'route_screen_shortcut')
 nav=read('input/agents_shortcut.c');nav=nav[nav.index('static bool cover_journey'):nav.index('int agents_shortcut_button(')]
 if 'agents_cover_toggle_target(' not in nav:nav+='\nenum agents_nav_screen agents_cover_toggle_target(void){return agents_nav_has(AGENTS_NAV_COVERS)?AGENTS_NAV_BACK:AGENTS_NAV_COVERS;}\n'
 chord=fn(read('input/agents_shortcut.c'),'agents_cover_chord_button')
-a=carousel.index('        enum agents_nav_screen nav =',carousel.index('static int album_covers_loop(void)'));z=carousel.index('        case PF_WPS:',a)
+a=carousel.index('        enum agents_nav_screen nav =',carousel.index('static int album_covers_loop('));z=carousel.index('        case PF_WPS:',a)
 cover_case=carousel[a:z]+'        default:break;\n        }\n return 9999;\n'
 a=root.index('            if (cover_nav_active())',root.index('        case GO_TO_ALBUM_COVERS_TRACKS:',root.index('        case GO_TO_ALBUM_COVERS_TRACKS:')+1));z=root.index('            if (ret_val == GO_TO_ROOT)',a);track_case=root[a:z].replace('                break;','                return ret_val;')
 header=(R/'apps-ipod/root_menu.h').read_text();a=header.index('enum {');root_enum=header[a:header.index('};',a)+2]
@@ -49,10 +49,12 @@ prefix='''#define HAVE_USB_PODLINK
 #define TAGNAVI_MAIN_MENU_SLOTS 20
 '''+root_enum+'\nenum current_activity {ACTION_NONE=0,'+','.join(sorted(extra))+'};\n'
 pre=pre.replace('#define SYS_USB_CONNECTED 0xffff','#define SYS_USB_CONNECTED 0xffff')
-pre=pre.replace('static struct {bool db_albumart;int db_art_row_height;}global_settings','static struct {bool db_albumart;int db_art_row_height;int wps_menu_action;}global_settings')
+pre=pre.replace('bool db_artistart;}global_settings={true,46,false};',
+                'bool db_artistart;int wps_menu_action;}global_settings={true,46,false,0};')
 pre=pre.replace('static bool cider_play_in(const char*p,const char*c,int i)', 'static bool cider_play_in(const char*p,const char*c,int i)')
 # Forward declarations used by the unchanged source adapters.
-pre=pre.replace('global_settings={true,46};','global_settings={true,46,0};')
+pre=pre.replace('static void push_activity_without_refresh(int n){push_current_activity(n);}',
+                'static void push_activity_without_refresh(int n);')
 pre=pre.replace('static char last_ctx[400];','static bool cider_play(const char*);\nstatic char last_ctx[400];')
 setup=r'''
 #define AUDIO_STATUS_PLAY 1
@@ -92,7 +94,14 @@ static bool cider_play(const char*p){(void)p;plays++;return true;}
 static bool wait_for_album_tables(void){return true;}
 static void album_covers_cancel_resume(void){}
 static bool album_covers_reopen_tracks(void){return true;}
-static void gwps_leave_wps(bool b){(void)b;}
+static void leave_playback(void){}
+static void push_activity_without_refresh(int n){push_current_activity(n);}
+static void carousel_prepare_transition(void){}
+static void carousel_cancel_transition(void){}
+static bool carousel_wps_pending(void){return false;}
+static bool carousel_wps_returning(void){return false;}
+static int carousel_wps_back(void){return GO_TO_PREVIOUS;}
+static void carousel_wps_end(bool retain){(void)retain;}
 static void status_save(bool b){(void)b;}
 static void talk_shutup(void){}
 static int playlist_resume(void){return 0;}
@@ -137,14 +146,14 @@ static int quick_screen_current(int a,void(*poll)(void)){
  (void)a;(void)poll;overlay_open=1;
  int out=next_action(CONTEXT_QUICKSCREEN);assert(out==ACTION_STD_CANCEL);overlay_open=0;overlay_closes++;return 0;
 }
-static void list_do_action(int context,int timeout,struct gui_synclist*l,int*a){
+static bool list_do_action(int context,int timeout,struct gui_synclist*l,int*a){
  (void)timeout;(void)l;
  if(stage>=1&&first_browser_depth<0)first_browser_depth=depth;
- if(use_quick&&!script&&(stage==0||stage==1)){quick_screen_current(0,NULL);*a=ACTION_NONE;}else *a=next_action(context);
+ if(use_quick&&!script&&(stage==0||stage==1)){quick_screen_current(0,NULL);*a=ACTION_NONE;}else *a=next_action(context);return false;
 }
 '''.replace('TRACK_RESULT',track_case)
 # list_do_action reads the real controller's static depth, declared below.
-list_fn=fn(setup,'list_do_action');setup=setup.replace(list_fn,'static void list_do_action(int,int,struct gui_synclist*,int*);')
+list_fn=fn(setup,'list_do_action');setup=setup.replace(list_fn,'static bool list_do_action(int,int,struct gui_synclist*,int*);')
 remote=re.sub(r'^#include .*$', '',(R/'apps-ipod/input/agents_remote.c').read_text(),flags=re.M)
 artist_function=fn((R/'apps-ipod/screens/covers/artist_portraits.c').read_text(),'artist_portraits') if not old else ''
 old_wps = 'bool menu_covers' in fn(wps, 'gui_wps_show')
@@ -160,7 +169,7 @@ int cider_covers(void){
  int result;
  if(!script&&stage==1){assert(!overlay_open);if(use_quick){overlay_open=1;stage=2;int out=route_screen_shortcut(make_gesture(REMOTE_QUICKSCREEN),CONTEXT_QUICKSCREEN);assert(out==ACTION_STD_CANCEL);overlay_open=0;overlay_closes++;result=cover_event(ACTION_NONE);}
  else{stage=2;result=cover_event(route_screen_shortcut(make_gesture(REMOTE_COVERS),CONTEXT_PLUGIN));}}
- else if(script==2&&!opened_album){opened_album=1;struct cider_row row={0};strcpy(row.route,"album/picked");strcpy(row.title,"Picked");cider_browse_album(&row);result=GO_TO_PREVIOUS;}
+ else if(script==2&&!opened_album){opened_album=1;result=GO_TO_WPS;}
  else{menus++;result=cover_event(ACTION_STD_MENU);}
  claimed=false;pop_current_activity();agents_nav_leave(AGENTS_NAV_COVERS);
  return result==CAROUSEL_REMOTE_RETURN?CIDER_COVERS_REMOTE_RETURN:result;
@@ -246,7 +255,7 @@ static void reset(int online){
  claimed=false;overlay_closes=0;available=active=online;paused=false;last_screen=GO_TO_ROOT;back_from_wps=false;cover_toggled_back=false;
  nav_live=0;nav_pending=AGENTS_NAV_NONE;cover_journey=cover_music=false;
  stage=0;script=0;menus=returned=covers_calls=source_calls=action_budget=opened_album=0;
- first_browser_depth=-1;depth=0;show_covers=album_pending=false;cover_album_depth=-1;
+ first_browser_depth=-1;depth=0;show_covers=false;
  RESET_EXTRA
  activity_count=0;activity=ACTIVITY_MAINMENU;overlay_open=0;
  expected_agent_view=agent_view;expected_wps_view=wps_view;
@@ -288,14 +297,21 @@ else:
  }
  for(int online=0;online<2;online++)for(gesture=0;gesture<2;gesture++)for(int origin=0;origin<3;origin++){
   reset(online);use_quick=false;stage=1;expected=origin==1?GO_TO_AGENTS:GO_TO_WPS;cover_nav_begin(origin==1?GO_TO_AGENTS:origin==2?GO_TO_WPS:GO_TO_ROOT);
-  if(online){depth=4;cover_parent_depth=3;cover_album_depth=4;run(GO_TO_CIDER);assert(depth<=3);}
+  if(online){depth=4;cover_parent_depth=3;run(GO_TO_CIDER);assert(depth<=3);}
   else run(GO_TO_ALBUM_COVERS_TRACKS);
   assert(returned==1&&stage==3&&covers_calls==0&&!cover_nav_active()&&!claimed&&!agents_nav_active());combinations++;
  }
  for(int parent=0;parent<12;parent++)for(int album=0;album<2;album++){
   if(parent==11&&album){continue;}reset(1);use_quick=false;script=album?2:1;stage=1;depth=parent;
-  int saved=depth;cover_nav_begin(GO_TO_CIDER);cider_browse_covers(false);run(GO_TO_CIDER);
-  assert(first_browser_depth==(album?saved+1:saved));assert(depth==0&&cover_album_depth==-1&&cover_parent_depth==-1);
+  int saved=depth;cover_nav_begin(GO_TO_CIDER);cider_browse_covers(false);
+  if(album){
+   assert(load_screen(GO_TO_CIDER)==GO_TO_WPS);
+   assert(opened_album&&cover_nav_playing()&&cover_suspended);
+   assert(depth==saved&&cover_parent_depth==saved&&!claimed&&!agents_nav_active());
+   cider_browse_covers(false);
+  }
+  run(GO_TO_CIDER);
+  assert(first_browser_depth==saved);assert(depth==0&&cover_parent_depth==-1);
   assert(covers_calls==1+album&&menus<24&&!agents_nav_active()&&!claimed&&!cover_nav_active());
  }
  /* Repeated MENU from every root-dispatchable screen cannot return to an

@@ -42,19 +42,21 @@ static struct {
     int album_covers_transition_speed;
 } global_settings = { 200, 325 };
 static bool flat_view(void) { return flat; }
-static void queue_post(int *q, int event, int data) {}
+static void wake_pf_thread(void) {}
 static void keyclick_click(bool force, int button) {}
 static void flat_animate(int direction, PFreal frame) {}
-''' + region(src, '#define PF_FLAT_FLIP ', '/* The deal:') + region(
-    src, '#define PF_FLAT_SETTLE ', '/* Not theme-controlled:') + region(
+#define UI_THEME_MOTION_ONE 100
+static void set_current_slide(int slide) { center_index = target = slide; slide_frame = slide << 16; }
+''' + region(src, 'static unsigned pf_motion_scale', '\n}') + '\n}\n' + region(src, '#define PF_FLAT_FLIP ', '/* The deal:') + region(
+    src, '#define PF_FLAT_SETTLE ', '/* The cover geometry') + region(
     src, 'static unsigned motion_rate', 'static void coverflow_idle') + region(
     geom, 'static void recalc_offsets', 'static void coverflow_animate') + region(
     src, 'static void coverflow_animate', 'static void flat_animate') + region(
-    src, 'static int flow_brightness', 'static void coverflow_render(void)\n{') + '''
+    src, 'static int flow_brightness', 'static void coverflow_render(') + '''
 static void reset_slides(void) { coverflow_idle(); }
 ''' + region(src, 'static void start_animation', 'static bool random_was_recent') + region(
     src, 'static int scroll_speed', 'static void cleanup') + region(
-    src, 'static int native_frame_wait', 'static int album_covers_loop(void)\n{') + '''
+    src, 'static int native_frame_wait', '#define ALBUM_PANEL_WIDTH') + '''
 static void seed(uint32_t clock)
 {
     center_slide.slide_index = center_index = target = 3;

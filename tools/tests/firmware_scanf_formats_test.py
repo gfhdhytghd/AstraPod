@@ -12,6 +12,9 @@ for root in ('apps-ipod', 'firmware'):
     for path in (R / root).rglob('*.c'):
         if path.match('firmware/libc/sscanf.c'):
             continue
+        # The SDL button-script reader includes the host <stdio.h>.
+        if path == R / 'firmware/target/hosted/sdl/button-script-sdl.c':
+            continue
         text = path.read_text(errors='replace')
         for m in re.finditer(r'\bsscanf\s*\([^;]*?"((?:[^"\\]|\\.)*)"', text, re.S):
             fmt = m.group(1)

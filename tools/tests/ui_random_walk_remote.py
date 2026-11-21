@@ -1,14 +1,13 @@
 """Offline PodLink fixture for the SDL random walker."""
 import contextlib
 from pathlib import Path
+import runpy
 import shutil
 import socket
 import struct
 import subprocess
 import tempfile
 import threading
-
-from fu79_remote_art_sim import instrument
 
 GENERATION = 42
 LIBRARY = 7
@@ -21,7 +20,11 @@ ROWS = {
 }
 
 
-def build_mock(repo, output, jobs):
+def build_mock(repo, output, jobs, desktop):
+    helper = desktop / "tests/firmware/fu79_remote_art_sim.py"
+    if not helper.is_file():
+        raise RuntimeError(f"Offline peer fixture not found at {helper}. Set --desktop.")
+    instrument = runpy.run_path(str(helper))["instrument"]
     source = output / "remote-src"
     source.mkdir()
     # Preserve the current tracked and untracked source, without copying any

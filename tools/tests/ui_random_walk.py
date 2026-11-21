@@ -364,6 +364,8 @@ def parse_args():
     parser.add_argument("--simulator", type=Path, help="prebuilt simulator binary")
     parser.add_argument("--mock-remote", action="store_true",
                         help="build/use the simulator with the offline PodLink fixture")
+    parser.add_argument("--desktop", type=Path, default=REPO.parent / "AstraPod-Desktop",
+                        help="desktop checkout containing the offline peer build fixture")
     parser.add_argument("--resources", type=Path, default=DEFAULT_RESOURCES)
     parser.add_argument("--fixture", type=Path, help="reuse an already-built fixture")
     parser.add_argument("--output", type=Path, help="new evidence directory")
@@ -407,7 +409,7 @@ def main():
         args.output = Path(tempfile.mkdtemp(prefix="run-", dir=DEFAULT_OUTPUT))
     args.output.mkdir(parents=True, exist_ok=True)
     if args.simulator is None:
-        args.simulator = build_mock(REPO, args.output, args.jobs)
+        args.simulator = build_mock(REPO, args.output, args.jobs, args.desktop.resolve())
     base, tracks = prepare_fixture(args)
     if args.replay:
         runs = [replay_spec(args.replay, "replay")]

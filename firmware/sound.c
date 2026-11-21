@@ -334,17 +334,7 @@ void sound_set_volume(int value)
     set_prescaled_volume();
 }
 
-#ifdef ASTRAPOD_ROCK_COMPAT
-void sound_set_volume(int value)
-{
-    set_volume(value, true);
-}
-
-void sound_set_transient_volume(int value)
-{
-    set_volume(value, false);
-}
-#endif
+#include "sound-plugin-volume.inc"
 
 void sound_set_balance(int value)
 {

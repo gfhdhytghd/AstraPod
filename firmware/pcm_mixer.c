@@ -51,20 +51,6 @@ struct mixer_channel
     const struct mixer_buffer_cbs* buf_cbs; /* Callback for new buffer */
 };
 
-#ifdef ASTRAPOD_ROCK_COMPAT
-/* A firmware-owned marker. The foreground module supplies samples only. */
-static const struct mixer_play_cbs click_owner;
-#endif
-
-static inline unsigned int channel_amplitude(const struct mixer_channel *chan)
-{
-#ifdef ASTRAPOD_ROCK_COMPAT
-    if (chan->play_cbs == &click_owner)
-        return MIX_AMP_UNITY;
-#endif
-    return chan->amplitude;
-}
-
 #if (defined(HW_HAVE_192) || defined(HW_HAVE_176))
 #define FRAME_SIZE_MULT  4
 #elif (defined(HW_HAVE_96) || defined(HW_HAVE_88))
@@ -84,6 +70,8 @@ static size_t next_size = 0;    /* Size of buffer to play next time */
 
 /* Descriptors for all available channels */
 static struct mixer_channel channels[PCM_MIXER_NUM_CHANNELS] IBSS_ATTR;
+
+#include "pcm_mixer-plugin-click.inc"
 
 /* Packed pointer array of all playing (active) channels in "channels" array */
 static struct mixer_channel * active_channels[PCM_MIXER_NUM_CHANNELS+1] IBSS_ATTR;
@@ -496,31 +484,6 @@ void mixer_channel_stop(enum pcm_mixer_channel channel)
     channel_stopped(chan);
     pcm_play_unlock();
 }
-
-#ifdef ASTRAPOD_ROCK_COMPAT
-void mixer_click_play(const void *samples, size_t size, unsigned int rate)
-{
-    const struct mixer_channel *chan = &channels[PCM_MIXER_CHAN_PLAYBACK];
-
-    pcm_play_lock();
-    if (mixer_get_frequency() == rate &&
-        (chan->status == CHANNEL_STOPPED || chan->play_cbs == &click_owner))
-        mixer_channel_play_data(PCM_MIXER_CHAN_PLAYBACK, &click_owner,
-                                samples, size);
-    pcm_play_unlock();
-}
-
-void mixer_click_stop(void)
-{
-    struct mixer_channel *chan = &channels[PCM_MIXER_CHAN_PLAYBACK];
-
-    pcm_play_lock();
-    if (chan->play_cbs == &click_owner)
-        channel_stopped(chan);
-    pcm_play_unlock();
-    /* PCM and DMA play copies in downmix_buf, never the module's buffer. */
-}
-#endif
 
 /* Switch playback sink */
 bool mixer_switch_sink_quiet(enum pcm_sink_ids sink)

@@ -92,6 +92,14 @@ elif src.stem == "robotfindskitten":
         "    exit(PLUGIN_USB_CONNECTED);",
     )
 elif src.stem == "2048":
+    # Score labels sit on the same light canvas as the title.
+    replace(
+        "    rb->lcd_set_foreground(LCD_WHITE);\n"
+        "    rb->lcd_set_background(BOARD_BACKGROUND);",
+        "    rb->lcd_set_foreground(TEXT_COLOR);\n"
+        "    rb->lcd_set_background(BACKGROUND);",
+        count=2,
+    )
     # The two menu loops must propagate USB even from nested native widgets.
     replace(
         "        switch(rb->do_menu(&menu, &sel, NULL, false))\n        {",

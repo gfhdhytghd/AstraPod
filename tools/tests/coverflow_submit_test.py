@@ -20,6 +20,12 @@ program = """
 #define MAX(a,b) ((a)>(b)?(a):(b))
 static int fb[240], panel[240], calls;
 static unsigned render_notes, submit_notes;
+static struct { bool capturing; } pf_scene;
+static void ui_scene_start(void *scene)
+{
+    assert(scene == &pf_scene && calls == 1);
+    pf_scene.capturing = false;
+}
 static uint32_t clock_value;
 #define USEC_TIMER (++clock_value)
 static void ui_perf_note_render(uint32_t elapsed)
@@ -46,6 +52,8 @@ int main(void) {
         int pf_text_y=190,pf_text_h=20;
         if(joined && !drew_art) continue;
         calls=0;
+        bool first_frame = true;
+        pf_scene.capturing = drew_art;
         unsigned token = mask & 1, *trace = &token;
         render_notes = submit_notes = 0;
         uint32_t frame_start = clock_value;
@@ -56,7 +64,8 @@ int main(void) {
         }
         if(mask&16) {dirty_top=0;dirty_end=10;}
 """ + frame + """
-        assert(calls<=1 && !memcmp(panel,fb,sizeof fb));
+        assert(calls<=1 && !memcmp(panel,fb,sizeof fb) && !first_frame);
+        assert(!pf_scene.capturing);
         assert(render_notes == (unsigned)calls * token);
         assert(submit_notes == render_notes);
     }

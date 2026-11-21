@@ -11,6 +11,8 @@ def fn(s,n):
  return s[m.start():e]
 pre=r'''
 #include <assert.h>
+static void carousel_prepare_transition(void) {}
+static void carousel_cancel_transition(void) {}
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,6 +20,8 @@ pre=r'''
 #include "screens/playback/cider_library.h"
 #include "screens/playback/cider_store.h"
 #define HZ 100
+#define MIN(a,b) ((a)<(b)?(a):(b))
+#define MAX(a,b) ((a)>(b)?(a):(b))
 #define TIME_BEFORE(a,b) ((long)((a)-(b))<0)
 #define CONTEXT_STD 0
 #define ACTION_STD_CANCEL 1
@@ -25,6 +29,8 @@ pre=r'''
 #define ACTION_STD_QUICKSCREEN 2
 #define QUICKSCREEN_IN_USB 3
 #define GO_TO_ROOT -2
+#define SYS_USB_CONNECTED 7
+#define CAROUSEL_MENU_STAY 8
 static int quick_calls;
 static int quick_screen_current(int a,void*p){(void)a;(void)p;quick_calls++;return 0;}
 #define AGENTS_NAV_NONE 0
@@ -47,6 +53,12 @@ static const int model;
 static struct cider_store store;
 static void cider_page_open(const char*q){cider_library_open(q);}
 static int cider_page_total(void){return cider_library_total();}
+static int count(void){return cider_page_total();}
+static bool cider_page_row(int index,struct cider_row *row){return cider_library_row(index,row);}
+static bool cider_available(void){return true;}
+static int default_event_handler(int action){assert(action==0);return 0;}
+static int resume_index;
+static struct { int cover_remote_index; char cover_remote_id[80]; } global_status;
 static int agents_nav_pending(void){return 0;}
 static unsigned int cider_art_revision(void){return 0;}
 static void splash(int t,const char*s){(void)t;(void)s;}
@@ -84,6 +96,8 @@ int main(void){
 }
 '''
 (O/'config.h').write_text('');(O/'kernel.h').write_text('#define HZ 100\n#define TIME_BEFORE(a,b) ((long)((a)-(b))<0)\nextern long current_tick;\n')
-(O/'entry.c').write_text(pre+fn((R/'apps-ipod/screens/covers/cider_covers.c').read_text(),'cider_covers')+post)
+source=(R/'apps-ipod/screens/covers/cider_covers.c').read_text()
+(O/'entry.c').write_text(pre+''.join(fn(source,name) for name in
+    ['wait_for_library','restore_album','cider_covers'])+post)
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R/'apps-ipod'),str(O/'entry.c'),str(R/'apps-ipod/screens/playback/cider_library.c'),'-o',str(O/'entry')],check=True)
 subprocess.run([str(O/'entry')],check=True)

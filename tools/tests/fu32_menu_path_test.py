@@ -88,8 +88,9 @@ static int empty_menu_callback(int a,const struct menu_item_ex*m,struct gui_sync
 static void get_menu_callback(const struct menu_item_ex*m,menu_callback_type*cb){(void)m;*cb=empty_menu_callback;}
 static int get_menu_selection(int n,const struct menu_item_ex*m){(void)m;return n;}
 static char*init_title(const struct menu_item_ex*m,int*i,char*b,size_t n){(void)i;(void)b;(void)n;return (char*)str(m->title);}
-static struct gui_synclist*active_list;static int activity;
-static int get_current_activity(void){return activity;}static void push_current_activity(int a){activity=a;}static void pop_current_activity(void){activity=0;}
+static struct gui_synclist*active_list;static enum current_activity activity;
+static void lcd_update(void){}
+static enum current_activity get_current_activity(void){return activity;}static void push_current_activity(enum current_activity a){activity=a;}static void pop_current_activity(void){activity=0;}
 static void gui_synclist_select_item(struct gui_synclist*l,int n){l->selected_item=n;}
 static int gui_synclist_get_sel_pos(struct gui_synclist*l){return l->selected_item;}
 static void gui_synclist_draw_settled(struct gui_synclist*l){active_list=l;}static void gui_synclist_draw(struct gui_synclist*l){active_list=l;}
@@ -141,7 +142,10 @@ static int init_menu_lists(const struct menu_item_ex*m,struct gui_synclist*l,int
 '''
 # Functions below reference action/language enums; insert those before the adapter.
 pre=pre.replace('#include "../firmware/target/arm/s5l8702/ipod6g/button-target.h"','#include "firmware/target/arm/s5l8702/ipod6g/button-target.h"')
-pos=pre.index('struct viewport');pre=pre[:pos]+'enum {'+','.join(tokens)+'};\n'+pre[pos:]
+activities=[token for token in tokens if token.startswith('ACTIVITY_')]
+pos=pre.index('struct viewport')
+pre=(pre[:pos]+'enum {'+','.join(token for token in tokens if token not in activities)+'};\n'
+     +'enum current_activity {'+','.join(activities)+'};\n'+pre[pos:])
 pre+='\nstruct button_mapping{int action_code,button_code,pre_button_code;};typedef struct{int button;}action_last_t;typedef struct{int button;bool is_prebutton;const struct button_mapping*items;}action_cur_t;\n'+tables+fn(a,'action_code_worker')+'\nstatic bool menu_back;\n'+fn(a,'action_set_menu_back')+fn(a,'action_menu_back')+fn(a,'menu_back_action')
 pre+=r'''
 struct event{int key,title,row;};static struct event events[256];static int used,at,prev;
@@ -162,18 +166,19 @@ static void run(int target,int native_flags,bool remote_key){used=at=prev=0;mode
  else if(target==3){tap(select,LANG_TRACK_INFO,0);tap(back,LANG_TRACK_INFO,0);tap(back,LANG_TRACK_INFO,0);}
  else if(target==4||target==5)tap(back,LANG_NOW_PLAYING,target);
  else if(target==6)tap(back,LANG_LYRICS,0);
- else if(target==7||target==10)tap(select,LANG_SLEEP_TIMER,0);
+ else if(target==7)tap(select,LANG_SLEEP_TIMER,0);
  else if(target==8){event(BUTTON_SCROLL_FWD,LANG_SPEED,2);tap(select,LANG_SPEED,3);}
  else if(target==9){tap(select,LANG_CURRENT_PLAYLIST,0);tap(select,LANG_CURRENT_PLAYLIST,0);tap(back,LANG_CURRENT_PLAYLIST,0);tap(back,LANG_CURRENT_PLAYLIST,0);}
- else if(target==11){tap(select,LANG_MORE,0);tap(back,LANG_MORE,0);event(BUTTON_SCROLL_FWD,LANG_MORE,0);tap(select,LANG_MORE,1);tap(select,LANG_SOUND_SETTINGS,0);event(BUTTON_SCROLL_BACK,LANG_VOLUME,0);tap(back,LANG_VOLUME,0);tap(back,LANG_SOUND_SETTINGS,0);tap(back,LANG_MORE,1);}
+ else if(target==10){tap(select,LANG_MORE,0);tap(back,LANG_MORE,0);event(BUTTON_SCROLL_FWD,LANG_MORE,0);tap(select,LANG_MORE,1);tap(select,LANG_SOUND_SETTINGS,0);event(BUTTON_SCROLL_BACK,LANG_VOLUME,0);tap(back,LANG_VOLUME,0);tap(back,LANG_SOUND_SETTINGS,0);tap(back,LANG_MORE,1);}
  
  if(target!=6)tap(back,LANG_NOW_PLAYING,target);
  if(native_flags){struct menu_item_ex native=cider_context_menu;native.flags|=MENU_EXITAFTERTHISMENU;action_set_menu_back(true);int selected=0;do_menu(&native,&selected,NULL,false);action_set_menu_back(false);}
- else {assert(!cider_context_show());}
+ else {assert(cider_context_show() == (target == 6));
+       if (target == 6) assert(cider_context_destination() == GO_TO_WPS);}
  assert(at==used&&!menu_back&&!presenter);
 }
 int main(void){for(unsigned i=0;i<ARRAYLEN(labels);i++)snprintf(labels[i],sizeof labels[i],"label-%u",i);
- for(int flags=0;flags<2;flags++)for(int remote=0;remote<2;remote++)for(int row=0;row<12;row++)run(row,flags,remote);
+ for(int flags=0;flags<2;flags++)for(int remote=0;remote<2;remote++)for(int row=0;row<11;row++)run(row,flags,remote);
  puts("FU32 production action worker + do_menu + simplelist loops: device/remote MENU returns each leaf; lyrics exits directly to WPS PASS");}
 '''
 if 'ui_scene_capture(' in loop:
@@ -181,6 +186,14 @@ if 'ui_scene_capture(' in loop:
     # SDL capture tests exercise the actual scene compositor.
     pre += r'''
 #include "ui/scene.h"
+bool ui_scene_automatic(void) { return false; }
+int ui_scene_poll(int timeout) { return timeout; }
+void ui_scene_open_modal(struct ui_scene *scene, const char *route)
+{ (void)route; assert(!scene->handle); }
+void ui_scene_open_page(struct ui_scene *scene, const char *route)
+{ ui_scene_open_modal(scene, route); }
+bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *route)
+{ (void)animate; (void)route; assert(!scene->handle); return false; }
 void ui_scene_interrupt(void) {}
 void ui_scene_cancel(struct ui_scene *scene) { assert(!scene->handle); }
 void ui_scene_start(struct ui_scene *scene) { assert(!scene->capturing); }

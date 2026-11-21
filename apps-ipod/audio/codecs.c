@@ -183,6 +183,9 @@ static int codec_load_ram(struct codec_api *api)
 
     if (hdr == NULL
         || (hdr->magic != CODEC_MAGIC
+#ifdef HAVE_RECORDING
+            && hdr->magic != CODEC_ENC_MAGIC
+#endif
             )
         || hdr->target_id != TARGET_ID
 #if (CONFIG_PLATFORM & PLATFORM_NATIVE)

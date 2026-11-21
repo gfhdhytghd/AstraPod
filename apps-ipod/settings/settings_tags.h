@@ -49,6 +49,7 @@
 #define TAG_SYSTEM      0x0800
 #define TAG_USB         0x1000
 #define TAG_VOICE       0x2000
+#define TAG_RECORDING   0x4000
 
 /* The tag word for `setting`, or 0 if it carries none. An untagged setting is
  * deliberately harmless: no topic finds it and it shows at every level. */

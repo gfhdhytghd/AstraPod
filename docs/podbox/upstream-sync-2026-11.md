@@ -24,7 +24,7 @@ Rockbox 的插件 API 从 286 升到 287，增加 `tagtree_request_reload()`。
 | 已有本地实现。保留现有队列锁、数据库刷新、滚轮和分隔线行为 | `9b1f1e9e65` `11c4f68656` `8a1aee5c76` `cc41dd21c1` `ab8859915b` `b486769b23` `86a3bb0678` `204c49b796` `5d33e09f7c` `3dc105a54a` |
 | 保留原生 Cover Flow 的渲染和滑动算法 | `73f4f069b5` `58583e3467` `4a821b37f3` `2203d38f38` `4fb20b03d4` `4a66a0ac85` `6256979302` |
 | 保留原生 iAP 的边界检查、队列索引、身份验证或控制逻辑 | `0c52484714` `863f15494e` `5325cfad0e` `0d4207b9de` `47dbd6a393` `5d8d485e61` `66dbfd533c` `3309747e5d` `4485c6960f` `04094ee2dc` `42c52f8f6a` `0c12fb0abc` `b54e29c821` `4ce5cea231` `7cdc5ec7c2` `78b77c2943` `4de8e07f96` `0e390ff86b` `4b7bc2d32e` `4c78914c8f` `923be48eff` `9eca823739` `042b9419d6` `f209e70291` `7163a9d373` `d1febdc3cf` `97eb61cc79` `2b6bf3275c` `55f21af1db` `be2bfa7022` `baa2b4564b` `6a2f2c77ad` `9b078cdb3b` `59c0bff61b` `edb4f34f93` `a587ee311c` `f852fe5aee` `4d89096045` `943a5af196` `68e0953167` `eeedeca4bf` `d5df66a7ca` `e56ef48f7c` |
-| 保留 AstraPod 的队列容量策略。上游的低内存配置不适用于 5G、6G | `2ae4d6cb42` `47379b4475` `f25395e6e5` `a958507036` `15207b1fa4` |
+| 保留 AstraPod 的队列容量策略。上游的低内存配置不适用于 5G、6G | `2ae4d6cb42` `47379b4475` `f25395e6e5` `a958507036` |
 | 保留原生启动和队列恢复。跳过 stock UI 队列消息 | `c6d3012d7b` |
 | 已有本地 JPEG 防护 | `6b6642fcbe` `162241602a` `3be791bc1d` `473b827ea1` |
 | 仅更新镜像。依赖 Rockbox 插件加载器或插件入口 | `51cd988e61` `c4fdfae7a5` `01bcba89b7` `c1a706228c` `ec11d6ba77` `f3ffe789ef` `b9002ac186` `06881ac6a9` `cd9ba1ff77` `47bb59dedb` `683b5fa76b` `230b3624aa` |
@@ -51,3 +51,8 @@ ALAC 保留本地低字节合并、Rice 检查和 ARM 汇编。USB iAP 接收随
 | 已有本地实现。保留 EXIF、ID3 图片回收和封面发布代际逻辑 | `9b7fcfba43` `40cdc819aa` `43d8ca291a` |
 | 保留 AstraPod 的封面失败重试、默认配置和原生 Arcade | `726eef1631` |
 | 移植双写、日志失败恢复和统计兼容 | `c8bc366cb0` `8da393ce4d` `8aea84fda0` `d53352dc5f` `a053baaf74` `e2b52c2eac` |
+
+## master 后续合并
+
+合并 `626da24e7d`，保留 `6290e652b1` 的 PodLink 传输改动和 6G 录音。
+将 Rockbox `15207b1fa4` 的录音缓冲区容量检查移植到原生录音模块。保留 6G 的 8 MiB 录音分配。

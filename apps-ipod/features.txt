@@ -226,6 +226,16 @@ usb_hid_mouse
 #endif
 #endif
 
+#ifdef HAVE_RECORDING
+recording
+#ifdef HAVE_LINE_IN
+recording_linein
+#endif
+#ifdef HAVE_MIC_IN
+recording_mic
+#endif
+#endif
+
 #if defined(HAVE_SPDIF_IN)
 recording_digital
 #endif

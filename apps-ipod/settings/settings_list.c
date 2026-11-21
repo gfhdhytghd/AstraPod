@@ -56,6 +56,7 @@
 #include "audio/playback.h"
 #include "widgets/list.h"
 #include "rbunicode.h"
+#include "audio/pcm_record.h"
 #include "audio/peak_meter.h"
 #include "screens/settings/eq_settings.h"
 #include "iap.h"
@@ -293,6 +294,10 @@ static int32_t list_pad_getlang(int value, int unit)
         default: return TALK_ID(value, unit);
     }
 }
+
+#ifdef HAVE_RECORDING
+static const int time_recording_trigger[] = {0,1,2,5,10,15,20,25,30,60,120,300,600};
+#endif
 
 static const char* formatter_time_unit_0_is_off(char *buffer, size_t buffer_size,
                                     int val, const char *unit)
@@ -1246,6 +1251,118 @@ const struct settings_list settings[] = {
         "peak meter min", UNUSED},
     {F_T_INT, &global_settings.peak_meter_max, LANG_PM_MAX,INT(0),
         "peak meter max", UNUSED},
+
+#ifdef HAVE_RECORDING
+    /* recording */
+    TABLE_SETTING(F_TIME_SETTING | F_ALLOW_ARBITRARY_VALS | F_RECSETTING,
+                  rec_timesplit,
+                  LANG_SPLIT_TIME, 0, "rec timesplit", off, UNIT_MIN,
+                  formatter_time_unit_0_is_off, getlang_time_unit_0_is_off,NULL,
+                  16, 0,5,10,15,30,60,74,80,120,240,360,480,600,720,1080,1440),
+    STRINGCHOICE_SETTING(F_RECSETTING, rec_sizesplit, LANG_SPLIT_SIZE, 0,
+                         "rec sizesplit",
+                         "off,5MB,10MB,15MB,32MB,64MB,75MB,100MB,128MB,"
+                         "256MB,512MB,650MB,700MB,1GB,1.5GB,1.75GB",
+                         NULL, 16, LANG_OFF,
+                         TALK_ID(5, UNIT_MB), TALK_ID(10, UNIT_MB),
+                         TALK_ID(15, UNIT_MB), TALK_ID(32, UNIT_MB),
+                         TALK_ID(64, UNIT_MB), TALK_ID(75, UNIT_MB),
+                         TALK_ID(100, UNIT_MB), TALK_ID(128, UNIT_MB),
+                         TALK_ID(256, UNIT_MB), TALK_ID(512, UNIT_MB),
+                         TALK_ID(650, UNIT_MB), TALK_ID(700, UNIT_MB),
+                         TALK_ID(1024, UNIT_MB), TALK_ID(1536, UNIT_MB),
+                         TALK_ID(1792, UNIT_MB)),
+    {F_T_INT|F_RECSETTING|F_HAS_CFGVALS, &global_settings.rec_channels, LANG_REC_CHANNELS, INT(0),
+     "rec channels",{.cfg_vals="stereo,mono"}},
+    {F_T_INT|F_RECSETTING|F_HAS_CFGVALS, &global_settings.rec_mono_mode,
+     LANG_RECORDING_MONO_MODE, INT(0), "rec mono mode",{.cfg_vals="L+R,L,R"}},
+    CHOICE_SETTING(F_RECSETTING, rec_split_type, LANG_SPLIT_TYPE, 0,
+                   "rec split type", "Split,Stop,Shutdown", NULL, 3,
+                   ID2P(LANG_START_NEW_FILE), ID2P(LANG_STOP_RECORDING),ID2P(LANG_STOP_RECORDING_AND_SHUTDOWN)),
+    CHOICE_SETTING(F_RECSETTING, rec_split_method, LANG_SPLIT_MEASURE, 0,
+                   "rec split method", "Time,Filesize", NULL, 2,
+                   ID2P(LANG_TIME), ID2P(LANG_FILESIZE)),
+    {F_T_INT|F_RECSETTING|F_HAS_CFGVALS, &global_settings.rec_source, LANG_RECORDING_SOURCE,
+        INT(AUDIO_SRC_LINEIN), "rec source",
+        {.cfg_vals=&HAVE_MIC_REC_(",mic")
+        HAVE_LINE_REC_(",line")
+        HAVE_SPDIF_REC_(",spdif")
+        HAVE_FMRADIO_REC_(",fmradio")[1]}},
+    INT_SETTING(F_TIME_SETTING | F_RECSETTING, rec_prerecord_time,
+                LANG_RECORD_PRERECORD_TIME, 0,
+                "prerecording time", UNIT_SEC, 0, 30, 1,
+                formatter_time_unit_0_is_off, getlang_time_unit_0_is_off, NULL),
+
+    { F_RECSETTING | F_T_UCHARPTR, &global_settings.rec_directory,
+      LANG_REC_FOLDER, CHARPTR(REC_BASE_DIR), "rec path",
+      { .filename_setting = (struct filename_setting[]) {
+        { NULL, NULL, sizeof(global_settings.rec_directory) } } } },
+    OFFON_SETTING(F_RECSETTING, peak_meter_clipcounter, LANG_PM_CLIPCOUNTER,
+                  false, "peak meter clipcounter", NULL),
+#ifdef HAVE_BACKLIGHT
+    CHOICE_SETTING(F_RECSETTING, cliplight, LANG_CLIP_LIGHT, 0,
+                   "cliplight", "off,main,both,remote", NULL,
+#ifdef HAVE_REMOTE_LCD
+                   4, ID2P(LANG_OFF), ID2P(LANG_MAIN_UNIT),
+                   ID2P(LANG_REMOTE_MAIN), ID2P(LANG_REMOTE_UNIT)
+#else
+                   2, ID2P(LANG_OFF), ID2P(LANG_ON)
+#endif
+                  ),
+#endif
+    { F_RECSETTING | F_T_INT | F_T_SOUND | F_NO_WRAP,
+      &global_settings.rec_mic_gain, LANG_REC_INPUT_GAIN, NODEFAULT, "rec mic gain",
+      { .sound_setting = (struct sound_setting[]) {{ SOUND_MIC_GAIN }} } },
+    { F_RECSETTING | F_T_INT | F_T_SOUND | F_NO_WRAP,
+      &global_settings.rec_left_gain, LANG_GAIN_LEFT, NODEFAULT, "rec left gain",
+      { .sound_setting = (struct sound_setting[]) {{ SOUND_LEFT_GAIN }} } },
+    { F_RECSETTING | F_T_INT | F_T_SOUND | F_NO_WRAP,
+      &global_settings.rec_right_gain, LANG_GAIN_RIGHT, NODEFAULT, "rec right gain",
+      { .sound_setting = (struct sound_setting[]) {{ SOUND_RIGHT_GAIN }} } },
+    {F_T_INT|F_RECSETTING|F_HAS_CFGVALS,&global_settings.rec_frequency,
+        LANG_REC_FREQUENCY,INT(REC_FREQ_DEFAULT),
+        "rec frequency",{.cfg_vals=REC_FREQ_CFG_VAL_LIST}},
+    {F_T_INT|F_RECSETTING|F_HAS_CFGVALS,&global_settings.rec_format,
+        LANG_REC_FORMAT,INT(REC_FORMAT_DEFAULT),
+        "rec format",{.cfg_vals=REC_FORMAT_CFG_VAL_LIST}},
+    /** Encoder settings start - keep these together **/
+    /* aiff_enc */
+    /* (no settings yet) */
+    /* mp3_enc */
+    {F_T_INT|F_RECSETTING|F_HAS_CFGVALS, &global_settings.mp3_enc_config.bitrate,LANG_BITRATE,
+        INT(MP3_ENC_BITRATE_CFG_DEFAULT),
+        "mp3_enc bitrate",{.cfg_vals=MP3_ENC_BITRATE_CFG_VALUE_LIST}},
+    /* wav_enc */
+    /* (no settings yet) */
+    /* wavpack_enc */
+    /* (no settings yet) */
+    /** Encoder settings end **/
+    /* values for the trigger */
+    INT_SETTING(F_RECSETTING, rec_start_thres_db, LANG_RECORD_START_THRESHOLD, -35,
+        "trigger start threshold dB", UNIT_DB, -89, 0, 1, NULL, NULL, NULL),
+    INT_SETTING(F_RECSETTING, rec_start_thres_linear, LANG_RECORD_START_THRESHOLD, 5,
+        "trigger start threshold linear", UNIT_PERCENT, 0, 100, 1, NULL, NULL, NULL),
+    INT_SETTING(F_RECSETTING, rec_stop_thres_db, LANG_RECORD_STOP_THRESHOLD, -45,
+        "trigger stop threshold dB", UNIT_DB, -89, 0, 1, NULL, NULL, NULL),
+    INT_SETTING(F_RECSETTING, rec_stop_thres_linear, LANG_RECORD_STOP_THRESHOLD, 10,
+        "trigger stop threshold linear", UNIT_PERCENT, 0, 100, 1, NULL, NULL, NULL),
+    TABLE_SETTING_LIST(F_TIME_SETTING | F_RECSETTING, rec_start_duration,
+        LANG_REC_START_DURATION, 0, "trigger start duration",
+        off, UNIT_SEC, NULL, NULL, NULL, 13, time_recording_trigger),
+    TABLE_SETTING_LIST(F_TIME_SETTING | F_RECSETTING, rec_stop_postrec,
+        LANG_REC_STOP_DURATION, 0, "trigger stop duration",
+        off, UNIT_SEC, NULL, NULL, NULL, 13, time_recording_trigger),
+    TABLE_SETTING_LIST(F_TIME_SETTING | F_RECSETTING, rec_stop_gap,
+        LANG_RECORD_STOP_GAP, 1, "trigger min gap",
+        off, UNIT_SEC, NULL, NULL, NULL, 13, time_recording_trigger),
+    CHOICE_SETTING(F_RECSETTING, rec_trigger_mode, LANG_RECORD_TRIGGER, TRIG_MODE_OFF,
+       "trigger mode","off,once,repeat", NULL ,3,
+       ID2P(LANG_OFF), ID2P(LANG_RECORD_TRIG_NOREARM), ID2P(LANG_REPEAT)),
+    CHOICE_SETTING(F_RECSETTING, rec_trigger_type, LANG_RECORD_TRIGGER_TYPE, TRIG_TYPE_STOP,
+        "trigger type","stop,pause,nf stp", NULL ,3,
+       ID2P(LANG_RECORD_TRIGGER_STOP), ID2P(LANG_PAUSE), ID2P(LANG_RECORD_TRIGGER_NEWFILESTP)),
+#endif /* HAVE_RECORDING */
+
     /* voice */
     OFFON_SETTING(F_TEMPVAR|F_CB_ON_SELECT_ONLY|F_CB_ONLY_IF_CHANGED,
                   talk_menu, LANG_SPEAK_ALOUD, false, "talk menu",

@@ -8,6 +8,7 @@
 #include <string.h>
 #include "config.h"
 #include "file.h"
+#include "dir.h"
 #include "mv.h"
 #include "pathfuncs.h"
 #include "crc32.h"
@@ -56,6 +57,12 @@ bool art_folder_file(const char *path, char *out, int size)
 static unsigned int limit = 384;
 unsigned int podlink_max_message(void) { return limit; }
 void podlink_wake(void) {}
+uint32_t podlink_bulk_crc(const unsigned char *data, unsigned int length,
+                          uint32_t previous, uint32_t *raw)
+{
+    *raw = crc_32r(data, length, 0);
+    return crc_32r(data, length, previous);
+}
 
 static char reply[MEDIA_REPLY_SIZE];
 static unsigned char chunk[PODLINK_MAX_MESSAGE];
@@ -87,7 +94,8 @@ static void command(const char *text)
 static unsigned int read_binary(unsigned int capacity)
 {
     bool refill = false;
-    return podlink_media_next_binary(chunk, capacity, &refill);
+    uint32_t raw;
+    return podlink_media_next_binary(chunk, capacity, &refill, &raw);
 }
 
 static void check_file(void)
@@ -209,7 +217,9 @@ static void check_artwork(void)
     {
         bool refill = false;
         podlink_media_work();
-        assert(podlink_media_next_binary(chunk, limit, &refill) == limit);
+        uint32_t raw;
+        assert(podlink_media_next_binary(chunk, limit, &refill, &raw) == limit);
+        assert(raw == crc_32r(chunk + 8, limit - 8, 0));
         assert(refill == (i < 7));
         assert(chunk[4] == ((i * 100) & 0xff));
         assert(!memcmp(chunk + 8, pixels + i * 100, 100));
@@ -243,6 +253,41 @@ static void check_artwork(void)
     assert(remove(TEST_ART_PATH) == 0);
 }
 
+static void check_sample(void)
+{
+    const char *path = "/iPod_Control/Music/F00/profile sample.flac";
+    mkdir("/iPod_Control");
+    mkdir("/iPod_Control/Music");
+    mkdir("/iPod_Control/Music/F00");
+    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    assert(fd >= 0);
+    const char data[] = "profiling fixture";
+    assert(write(fd, data, sizeof(data)) == sizeof(data));
+    close(fd);
+
+    command("MS3 STREAM SAMPLE /outside.flac");
+    assert(!strcmp(reply, "MS3 ERR sample path"));
+    command("MS3 STREAM SAMPLE /Music/PodLink/../outside.flac");
+    assert(!strcmp(reply, "MS3 ERR sample path"));
+    command("MS3 STREAM SAMPLE /iPod_Control/Music/.. /outside.flac");
+    assert(!strcmp(reply, "MS3 ERR sample path"));
+    command("MS3 STREAM SAMPLE /iPod_Control/Music/F00/profile sample.flac");
+    char expected[MEDIA_REPLY_SIZE];
+    snprintf(expected, sizeof(expected), "MS3 SAMPLE %zu", sizeof(data));
+    assert(!strcmp(reply, expected));
+    podlink_media_work();
+    assert(read_binary(limit) == sizeof(data) + 8);
+    assert(!memcmp(chunk, "MSF1\0\0\0\0", 8));
+    assert(!memcmp(chunk + 8, data, sizeof(data)));
+    podlink_media_work();
+    read_text();
+    snprintf(expected, sizeof(expected), "MS3 DONE %zu %08lx", sizeof(data),
+             (unsigned long)(crc_32r(data, sizeof(data), UINT32_MAX) ^
+                             UINT32_MAX));
+    assert(!strcmp(reply, expected));
+    assert(remove(path) == 0);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -272,6 +317,7 @@ int main(int argc, char **argv)
     tagcache_get_stat()->scanning = false;
     check_file();
     check_artwork();
+    check_sample();
 
     command("MS3 DB");
     assert(!strcmp(reply, "MS3 READY"));

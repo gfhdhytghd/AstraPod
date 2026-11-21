@@ -67,6 +67,8 @@
 #include "system/strutil.h"
 #include "system/volume.h"
 #include "font.h"
+#include "button.h"
+#include "audio/enc_config.h"
 #include "audio/peak_meter.h"
 #include "lang.h"
 #include "speech/language.h"
@@ -685,6 +687,12 @@ static bool settings_write_config(const char* filename, int options)
                 if (!(setting->flags & F_SOUNDSETTING))
                     continue;
                 break;
+#ifdef HAVE_RECORDING
+            case SETTINGS_SAVE_RECPRESETS:
+                if (!(setting->flags & F_RECSETTING))
+                    continue;
+                break;
+#endif
             case SETTINGS_SAVE_EQPRESET:
                 if (!(setting->flags & F_EQSETTING))
                     continue;
@@ -815,6 +823,12 @@ bool settings_save_config_as(int options, char *filename, size_t len)
     const char *folder, *namebase;
     switch (options)
     {
+#ifdef HAVE_RECORDING
+        case SETTINGS_SAVE_RECPRESETS:
+            folder = RECPRESETS_DIR;
+            namebase = "recording";
+            break;
+#endif
         case SETTINGS_SAVE_EQPRESET:
             folder = EQS_DIR;
             namebase = "EQ";
@@ -959,6 +973,12 @@ void settings_apply(bool read_disk)
     CHART(">set_codepage");
     set_codepage(global_settings.default_codepage);
     CHART("<set_codepage");
+
+#ifdef HAVE_RECORDING
+    if (!mikey_supported())
+        global_settings.rec_source = AUDIO_SRC_LINEIN;
+    enc_global_settings_apply();
+#endif
 
     sound_settings_apply();
 

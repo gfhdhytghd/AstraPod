@@ -13,7 +13,7 @@ bool podlink_media_enqueue(const struct podlink_message *message);
 void podlink_media_disconnect(void);
 unsigned int podlink_media_next(char *reply, unsigned int size, bool *refill);
 unsigned int podlink_media_next_binary(unsigned char *out, unsigned int size,
-                                       bool *refill);
+                                       bool *refill, uint32_t *raw);
 /* True when streaming work took this disk turn. */
 bool podlink_media_work(void);
 

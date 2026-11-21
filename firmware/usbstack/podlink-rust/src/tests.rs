@@ -169,7 +169,7 @@ fn resident_binary_waits_for_tx_space_and_uses_the_negotiated_limit() {
     s.send_resident_binary(|out| {
         assert_eq!(out.len(), chunk.len());
         out.copy_from_slice(&chunk);
-        out.len()
+        (out.len(), None)
     });
     for _ in 0..3 {
         s.poll(&mut p);
@@ -188,4 +188,44 @@ fn resident_binary_waits_for_tx_space_and_uses_the_negotiated_limit() {
         assert_eq!(parser.payload(meta), payload);
     }
     assert_eq!(offset, p.output.len());
+}
+
+#[test]
+fn folded_msf1_crc_matches_both_original_checksums() {
+    use crate::wire::{self, Kind};
+
+    let history = b"bytes from earlier chunks";
+    let previous = !wire::crc32(history);
+    let data: Vec<u8> = (0..16384).map(|i| ((i * 137) ^ (i >> 3)) as u8).collect();
+    for size in [1, 3, 4, 7, 8, 55, 4096, 16356, 16384] {
+        for prefix_len in 0..=3.min(size) {
+            let body = &data[..size];
+            let mut chunks = body[prefix_len..].chunks_exact(4);
+            let words: Vec<u32> = chunks
+                .by_ref()
+                .map(|part| u32::from_ne_bytes(part.try_into().unwrap()))
+                .collect();
+            let raw = wire::bulk_raw_crc(&body[..prefix_len], &words, chunks.remainder());
+            let mut file = history.to_vec();
+            file.extend_from_slice(body);
+            assert_eq!(!wire::append_raw(previous, raw, size), wire::crc32(&file));
+
+            if size <= wire::MAX - 8 {
+                let mut payload = b"MSF1\x10\x23\x45\x67".to_vec();
+                payload.extend_from_slice(body);
+                let mut original = vec![0; wire::FRAME];
+                let mut folded = original.clone();
+                let used = wire::encode(&mut original, Kind::Binary, 17, &payload);
+                folded[16..16 + payload.len()].copy_from_slice(&payload);
+                wire::finish_encode_with_crc(
+                    &mut folded,
+                    Kind::Binary,
+                    17,
+                    payload.len(),
+                    Some(raw),
+                );
+                assert_eq!(&folded[..used], &original[..used]);
+            }
+        }
+    }
 }

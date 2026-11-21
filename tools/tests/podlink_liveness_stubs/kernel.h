@@ -29,3 +29,5 @@ void semaphore_release(struct semaphore *s);
 int semaphore_wait(struct semaphore *s, int ticks);
 unsigned sleep(unsigned ticks);
 #endif
+
+#define TIMEOUT_BLOCK (-1)

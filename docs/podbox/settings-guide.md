@@ -34,6 +34,7 @@ Settings
 ├─ Sound                       levels, tone, and the DSP effects
 ├─ Playback                    what happens as music plays, the now-playing
 │                              screen, and playlists and resume
+├─ Recording Settings          inputs, formats, levels and automatic recording
 ├─ Library                     the browsers, the database, artwork, the viewers,
 │                              and Maintenance
 ├─ Appearance                  themes, fonts, colours, scrolling and the menus
@@ -199,6 +200,60 @@ Settings
 | Lyrics lead | Adjusts when the active lyric changes. Positive values show lyrics earlier. | 200 ms |  |
 
 **Appearance** opens `Settings > Appearance > Now Playing Screen`, below.
+
+### Recording Settings
+
+On iPod Classic, open **System → Recording** from the home menu.
+Hold Select on the recorder to open its settings.
+
+| Setting | What it does | Default | |
+|---|---|---|---|
+| Recording Format | Choose the file format. PCM Wave and AIFF store uncompressed audio. WavPack compresses without loss. MP3 makes smaller files by discarding some audio detail. | PCM Wave |  |
+| Bitrate | Sets the data rate for MP3 encoding. Higher rates use more space. The bitrate also limits the sample rates and channel counts you can select. | 128 kbit/s |  |
+| Recording Sample Rate | Sets the number of samples recorded per second. Higher rates use more space in uncompressed files. The selected encoder can limit the available rates. | 44.1 kHz |  |
+| Source | Line In takes stereo audio from the 30-pin dock. Microphone uses a headset mic on Classic models with capture hardware version 1. | Line In |  |
+| Recording Channels | Choose a stereo or mono file for the dock input. The headset microphone always records in mono. | Stereo |  |
+| Mono mode | Choose which dock channels go into a mono file. Left plus right averages both channels. The headset microphone always uses the left channel. | Left + Right |  |
+
+### Recording Settings — File Split Options
+
+| Setting | What it does | Default | |
+|---|---|---|---|
+| Split Measure | Choose whether the automatic file limit is measured in time or file size. | Time |  |
+| What to do when Splitting | Choose whether reaching the automatic file limit starts another file, stops recording, or stops and shuts down the player. | Start new file |  |
+| Split Time | Sets the duration limit when Split Measure is Time. Off disables the time limit. | Off |  |
+| Split Filesize | Sets the size limit when Split Measure is Filesize. Off disables the configured size limit. Recording still splits files near 2 GB. | Off |  |
+
+### Recording Settings — Prerecord and Levels
+
+| Setting | What it does | Default | |
+|---|---|---|---|
+| Prerecord Time | Keeps up to 30 seconds of audio before you press Record or the trigger starts. Off starts the file at the record command. | Off |  |
+| Recording Folder | Choose an existing folder by entering its absolute path. Clear Recording Directory restores the default folder, which the recorder creates when needed. | Recordings |  |
+| Clip Counter | Shows the number of clipping events beside the meters. If it increases, reduce the input level or recording gain. | Off |  |
+| Clipping Light | Turns on the backlight when the recording input clips. Use it to spot overload without watching the meters. | Off |  |
+
+### Recording Settings — Trigger
+
+| Setting | What it does | Default | |
+|---|---|---|---|
+| Trigger | Choose manual recording, one sound-triggered recording, or repeated triggering. Press Select on the Recording screen to arm a trigger. | Off |  |
+| Trigtype | Choose what happens when the sound trigger ends. Stop closes the file, Pause keeps it open, and New File starts another file. | Stop |  |
+| Start Above (dB) | Sets the level that starts recording when the peak meter uses dB. Set the threshold above the background noise. | −35 dB |  |
+| Start Above (%) | Sets the level that starts recording when the peak meter uses a linear scale. The percentage is relative to full scale. | 5% |  |
+| Start Hold Time | Sets how long the input must stay above Start Above before the trigger starts the recording. | 0 s |  |
+| Stop Below (dB) | Sets the level below which recording stops or changes state when the peak meter uses dB. | −45 dB |  |
+| Stop Below (%) | Sets the level below which recording stops or changes state when the peak meter uses a linear scale. | 10% |  |
+| Stop Hold Time | Sets how long the input must stay below Stop Below before the selected trigger action runs. | 0 s |  |
+| Presplit Gap | Sets the quiet interval used to decide whether a rise in level belongs to the same take or triggers a new one. | 1 s |  |
+
+### Recording Settings — Input Gain
+
+| Setting | What it does | Default | |
+|---|---|---|---|
+| Microphone Gain | Sets the headset microphone level. Reduce it if the recording clips. The displayed value includes the codec’s fixed 12 dB input gain. | +12 dB displayed |  |
+| Gain L | Sets the left dock input level. Reduce it if the left meter clips. | 0 dB |  |
+| Gain R | Sets the right dock input level. Reduce it if the right meter clips. | 0 dB |  |
 
 ### Library — Files
 

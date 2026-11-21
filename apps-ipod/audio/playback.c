@@ -4161,6 +4161,11 @@ void audio_playback_handler(struct queue_event *ev)
             audio_start_playback((struct audio_resume_info *)ev->data, 0);
             break;
 
+#ifdef HAVE_RECORDING
+        case Q_AUDIO_INIT_RECORDING:
+            audio_stop_playback(false);
+            return;
+#endif
         case SYS_USB_CONNECTED:
         case Q_AUDIO_STOP:
             LOGFQUEUE("playback < Q_AUDIO_STOP");

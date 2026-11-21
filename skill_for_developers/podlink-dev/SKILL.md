@@ -111,6 +111,25 @@ the prefix checks) and `podlink_library.c` (MS3). Host:
   changes the count without a new commit.
 - `MS3 ERR database changed`: drop the partial result and start again.
 
+### Transfer profiling
+
+Use `python -m hrlibrary --mode base --mbit 26 <music-file>` from the
+desktop checkout with the daemon venv and PYTHONPATH. Repeat with
+`--mode fast`. SAMPLE accepts regular files under `/Music/` and
+`/iPod_Control/Music/`. Use a multi-MiB file for the 25 Mbit/s gate.
+Use `--tagcache` when passing a database basename. The client borrows the
+tty, checks length, offsets and CRC32, and prints JSON containing eight
+device timing counters, ARM idle percentage on supporting firmware, and
+tty read statistics. It discards the payload. Stage times include waits
+and preemption. The idle counter covers the whole device capture.
+
+MS3 PROFILE BASE uses the 4 KiB CDC IN path. FAST uses two 16 KiB DMA
+buffers written directly by the producer, with one active DesignWare request. USB reconfiguration restores
+BASE. Record baseline counters first. For UI measurements, repeat a list
+glide or cover-flow transition during each mode with the existing UI
+performance marker enabled. See docs/podlink.md for counter semantics and
+the marker and log paths.
+
 ### Agents and T3
 
 Firmware: `apps-ipod/screens/system/agents_screen.c` (views, keys, action

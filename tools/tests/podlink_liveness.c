@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sched.h>
 #include <unistd.h>
 #include "../../firmware/usbstack/usb_serial.c"
 #include "../../firmware/usbstack/podlink_rust_platform.c"
@@ -40,11 +41,18 @@ static long ms_now(void)
            (t.tv_nsec - start_time.tv_nsec) / 1000000;
 }
 long live_tick(void) { return ms_now() / 10; }
+uint32_t live_usec(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint32_t)((uint64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000);
+}
 static void ms_sleep(long ms)
 {
     struct timespec t = {ms / 1000, (ms % 1000) * 1000000};
     while (nanosleep(&t, &t) && errno == EINTR) {}
 }
+void yield(void) { sched_yield(); }
 unsigned sleep(unsigned ticks) { ms_sleep(10L * ticks); return 0; }
 static pthread_mutex_t irq_lock;
 int disable_irq_save(void) { pthread_mutex_lock(&irq_lock); return 0; }
@@ -97,13 +105,21 @@ void semaphore_release(struct semaphore *s)
 }
 int semaphore_wait(struct semaphore *s, int ticks)
 {
-    struct timespec t;
-    clock_gettime(CLOCK_REALTIME, &t);
-    t.tv_nsec += (long)ticks * 10000000L;
-    t.tv_sec += t.tv_nsec / 1000000000L;
-    t.tv_nsec %= 1000000000L;
     pthread_mutex_lock(&s->lock);
-    while (!s->count && pthread_cond_timedwait(&s->cond, &s->lock, &t) != ETIMEDOUT) {}
+    if (ticks < 0)
+    {
+        while (!s->count)
+            pthread_cond_wait(&s->cond, &s->lock);
+    }
+    else
+    {
+        struct timespec t;
+        clock_gettime(CLOCK_REALTIME, &t);
+        t.tv_nsec += (long)ticks * 10000000L;
+        t.tv_sec += t.tv_nsec / 1000000000L;
+        t.tv_nsec %= 1000000000L;
+        while (!s->count && pthread_cond_timedwait(&s->cond, &s->lock, &t) != ETIMEDOUT) {}
+    }
     int ok = s->count > 0;
     if (ok) s->count--;
     pthread_mutex_unlock(&s->lock);
@@ -146,7 +162,7 @@ static pthread_mutex_t hw = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t hw_cond = PTHREAD_COND_INITIALIZER;
 static int events[64], ev_len[64], ev_first, ev_used, ev_max;
 static unsigned char *out_buf; static int out_size; static bool out_armed;
-static unsigned char in_copy[TRANSIT_BUFFER_SIZE]; static int in_size;
+static unsigned char in_copy[FAST_IN_BYTES]; static int in_size;
 static unsigned char host_tx[1 << 20]; static int host_tx_len; /* host -> device */
 static unsigned char host_rx[1 << 20]; static int host_rx_len; /* device -> host */
 static long last_drain_ms, max_stall_ms, stall_at_ms;
@@ -262,7 +278,16 @@ static void *usb_thread(void *unused)
             last_drain_ms = ms_now();
             pthread_mutex_unlock(&hw);
         }
-        else if (id == EV_CONNECT) usb_serial_init_connection();
+        else if (id == EV_CONNECT)
+        {
+            usb_serial_init_connection();
+            if (getenv("LIVE_FAST_IN"))
+            {
+                mutex_lock(&serial_mtx);
+                fast_in = true;
+                mutex_unlock(&serial_mtx);
+            }
+        }
     }
     return NULL;
 }

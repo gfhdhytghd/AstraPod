@@ -8,6 +8,7 @@
 #include "file.h"
 #include "dir.h"
 #include "podlink_media.h"
+#include "podlink_profile.h"
 #include "podlink_library.h"
 #include "system/bg_task.h"
 #ifdef HAVE_TAGCACHE
@@ -302,7 +303,7 @@ static const char *sync_command(const unsigned char *data, unsigned int size)
 
 static const char *handle_message(const struct podlink_message *message,
                                   unsigned char *binary, unsigned int *binary_size,
-                                  unsigned int *credits)
+                                  unsigned int *credits, uint32_t *raw)
 {
     const unsigned char *data = message->data;
     unsigned int size = message->length;
@@ -335,19 +336,55 @@ static const char *handle_message(const struct podlink_message *message,
             return "MS3 ERR busy";
         data += 4;
         size -= 4;
+#ifdef HAVE_USB_PODLINK
+        if (size >= 7 && !memcmp(data, "PROFILE", 7))
+        {
+            if (podlink_library_active())
+                return "MS3 ERR busy";
+            if (size == 12 && (!memcmp(data + 7, " BASE", 5) ||
+                               !memcmp(data + 7, " FAST", 5)))
+                return podlink_profile_start(data[8] == 'F') ?
+                       "MS3 PROFILE READY" : "MS3 ERR busy";
+            bool cpu = size == 11 && !memcmp(data + 7, " CPU", 4);
+            if (size != 7 && !cpu)
+                return "MS3 ERR command";
+
+            struct podlink_stage_sample samples[PL_STAGE_COUNT];
+            uint32_t idle_us, wall_us;
+            podlink_profile_stop(samples, &idle_us, &wall_us);
+            size_t pos = snprintf(inventory_reply, sizeof(inventory_reply),
+                                  "MS3 PROFILE");
+            for (int i = 0; i < PL_STAGE_COUNT; i++)
+            {
+                const struct podlink_stage_sample *s = &samples[i];
+                pos += snprintf(inventory_reply + pos,
+                                sizeof(inventory_reply) - pos,
+                                " %lu,%lu,%lu,%lu", (unsigned long)s->count,
+                                (unsigned long)s->bytes, (unsigned long)s->us,
+                                (unsigned long)s->max_us);
+            }
+            if (cpu)
+                snprintf(inventory_reply + pos, sizeof(inventory_reply) - pos,
+                         " %lu,%lu", (unsigned long)idle_us,
+                         (unsigned long)wall_us);
+            return inventory_reply;
+        }
+#endif
         bool stream = size >= 7 && !memcmp(data, "STREAM ", 7);
         if (stream)
         {
             data += 7;
             size -= 7;
             if (!(size >= 5 && !memcmp(data, "FILE ", 5)) &&
-                !(size >= 7 && !memcmp(data, "ARTBIN ", 7)))
+                !(size >= 7 && !memcmp(data, "ARTBIN ", 7)) &&
+                !(size >= 7 && !memcmp(data, "SAMPLE ", 7)))
                 return "MS3 ERR command";
         }
         const char *reply = podlink_library_command(data, size, &refresh_pending,
-                                                    binary, binary_size);
+                                                    binary, binary_size, raw);
         if (stream && reply && (!strncmp(reply, "MS3 FILE ", 9) ||
-                                !strncmp(reply, "MS3 ARTBIN ", 11)))
+                                !strncmp(reply, "MS3 ARTBIN ", 11) ||
+                                !strncmp(reply, "MS3 SAMPLE ", 11)))
             *credits = STREAM_WINDOW;
         return reply;
     }
@@ -381,6 +418,7 @@ static struct podlink_message pending_message;
 static unsigned char mailbox[PODLINK_MAX_MESSAGE];
 static char pending_reply[sizeof(inventory_reply)];
 static unsigned int pending_binary, stream_credits;
+static uint32_t pending_raw;
 static bool queued, working, reset_pending, stop_pending;
 static bool streaming;
 
@@ -453,14 +491,17 @@ unsigned int podlink_media_next(char *reply, unsigned int size, bool *refill)
 }
 
 unsigned int podlink_media_next_binary(unsigned char *out, unsigned int size,
-                                       bool *refill)
+                                       bool *refill, uint32_t *raw)
 {
     mutex_lock(&media_mutex);
     unsigned int length = pending_binary;
     if (length && length <= size)
     {
+        uint32_t started = podlink_profile_now();
         memcpy(out, mailbox, length);
+        podlink_profile_add(PL_MAILBOX_COPY, started, length);
         pending_binary = 0;
+        *raw = pending_raw;
         *refill = stream_credits != 0;
     }
     else
@@ -492,6 +533,7 @@ bool podlink_media_work(void)
 
     static const unsigned char stop_cmd[] = "STOP", next_cmd[] = "NEXT";
     unsigned int binary_size = 0;
+    uint32_t raw = 0;
     const char *reply = NULL;
     if (stop)
     {
@@ -505,7 +547,7 @@ bool podlink_media_work(void)
             reply = "MS3 ERR busy";
         else
             reply = podlink_library_command(stop_cmd, sizeof(stop_cmd) - 1,
-                                            &refresh_pending, mailbox, &binary_size);
+                                            &refresh_pending, mailbox, &binary_size, &raw);
     }
     else if (process)
     {
@@ -522,7 +564,7 @@ bool podlink_media_work(void)
         else
         {
             reply = handle_message(&pending_message, mailbox, &binary_size,
-                                   &credits);
+                                   &credits, &raw);
             burst = credits != 0;
         }
     }
@@ -530,7 +572,7 @@ bool podlink_media_work(void)
     {
         credits--;
         reply = podlink_library_command(next_cmd, sizeof(next_cmd) - 1,
-                                        &refresh_pending, mailbox, &binary_size);
+                                        &refresh_pending, mailbox, &binary_size, &raw);
         if (reply)
         {
             credits = 0;
@@ -545,6 +587,7 @@ bool podlink_media_work(void)
         stream_credits = credits;
         streaming = burst;
         pending_binary = binary_size;
+        pending_raw = raw;
         if (reply)
             snprintf(pending_reply, sizeof(pending_reply), "%s", reply);
     }

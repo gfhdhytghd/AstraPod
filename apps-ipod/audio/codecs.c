@@ -139,6 +139,9 @@ struct codec_api ci = {
     /* new stuff at the end, sort into place next time
        the API gets incompatible */
     panicf,
+#ifdef HAVE_RECORDING
+    .round_value_to_list32 = round_value_to_list32,
+#endif
 
 };
 
@@ -300,3 +303,16 @@ int codec_close(void)
     return status;
 }
 
+
+#ifdef HAVE_RECORDING
+enc_callback_t codec_get_enc_callback(void)
+{
+    if (curr_handle == NULL ||
+        c_hdr->lc_hdr.magic != CODEC_ENC_MAGIC) {
+        logf("Codec: not an encoder");
+        return NULL;
+    }
+
+    return c_hdr->rec_extension[0];
+}
+#endif /* HAVE_RECORDING */

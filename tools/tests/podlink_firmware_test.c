@@ -70,7 +70,7 @@ int usb_drv_send_nonblocking(int ep, const void *data, int size)
 {
     (void)ep;
     assert(!sent_size);
-    assert(size > 0 && size <= TRANSIT_BUFFER_SIZE);
+    assert(size > 0 && size <= (fast_in ? FAST_IN_BYTES : TRANSIT_BUFFER_SIZE));
     assert(((uintptr_t)data & 3) == 0);
     assert(output_size + size <= (int)sizeof(output));
     trace(1,data,size);
@@ -327,6 +327,52 @@ static void fuzz_sessions(void) {
  puts("PASS: 256 seeded randomized session streams at HS/FS");
 }
 
+static void test_fast_in(void)
+{
+    unsigned char first[FAST_IN_BYTES], second[FAST_IN_BYTES];
+    struct podlink_stage_sample timings[PL_STAGE_COUNT];
+    memset(first, 0x18, sizeof(first));
+    memset(second, 0x91, sizeof(second));
+    clear_output();
+    insert();
+    assert(podlink_profile_start(true));
+    current_tick++;
+    assert(usb_serial_write(first, sizeof(first)) == sizeof(first));
+    serial_notify(0);
+    assert(tx_inflight == sizeof(first) && !tx_prepared);
+    assert(usb_serial_write(second, sizeof(second)) == sizeof(second));
+    serial_notify(0);
+    assert(tx_inflight == sizeof(first) && tx_prepared == sizeof(second));
+    assert(!tx_count && !podlink_profile_start(false));
+    assert(!memcmp(transit_buffer[tx_slot], first, sizeof(first)));
+    assert(!memcmp(transit_buffer[tx_slot ^ 1], second, sizeof(second)));
+    current_tick++;
+    controller();
+    assert(!tx_count && !tx_prepared && !tx_inflight);
+    assert(output_size == sizeof(first) + sizeof(second));
+    assert(!memcmp(output, first, sizeof(first)));
+    assert(!memcmp(output + sizeof(first), second, sizeof(second)));
+    uint32_t idle_us, wall_us;
+    podlink_profile_stop(timings, &idle_us, &wall_us);
+    assert(!idle_us && wall_us != 0);
+    assert(timings[PL_DMA_ACTIVE].count == 2);
+    assert(timings[PL_DMA_ACTIVE].bytes == sizeof(first) + sizeof(second));
+    assert(timings[PL_DMA_COPY].count == 2);
+    assert(timings[PL_DMA_COPY].bytes == sizeof(first) + sizeof(second));
+    assert(timings[PL_RING_COPY].count == 0);
+
+    assert(podlink_profile_start(true));
+    assert(usb_serial_write(first, sizeof(first)) == sizeof(first));
+    serial_notify(0);
+    assert(usb_serial_write(second, sizeof(second)) == sizeof(second));
+    serial_notify(0);
+    remove_usb();
+    insert();
+    assert(!fast_in && !tx_count && !tx_inflight && !tx_prepared);
+    remove_usb();
+    puts("PASS: 16 KiB inactive DMA slot is prepared during IN; reset drops it");
+}
+
 int main(void)
 {
     assert(!usb_cdrv_serial.needs_cpu_boost);
@@ -502,5 +548,7 @@ int main(void)
            "%u KiB integrity at HS/FS, negotiated limits, CRC recovery, ping, "
            "timeout, close, replug\n", PODLINK_MAX_MESSAGE / 1024);
     fuzz_sessions();
+    if (!getenv("PODLINK_TRACE"))
+        test_fast_in();
     return 0;
 }

@@ -190,6 +190,7 @@ static union line_coding_buffer line_coding;
  */
 #ifdef HAVE_USB_PODLINK
 #include "podlink.h"
+#include "podlink_profile.h"
 #define BUFFER_SIZE PODLINK_CDC_RING_BYTES
 #else
 #define BUFFER_SIZE 512
@@ -205,8 +206,14 @@ static union line_coding_buffer line_coding;
 #define RECV_BUFFER_SIZE TRANSIT_BUFFER_SIZE
 #endif
 static unsigned char send_buffer[BUFFER_SIZE];
-static unsigned char transit_buffer[TRANSIT_BUFFER_SIZE]
+#ifdef HAVE_USB_PODLINK
+#define FAST_IN_BYTES 16384
+static unsigned char transit_buffer[2][FAST_IN_BYTES]
+    USB_DEVBSS_ATTR __attribute__((aligned(32)));
+#else
+static unsigned char transit_buffer[1][TRANSIT_BUFFER_SIZE]
     USB_DEVBSS_ATTR __attribute__((aligned(4)));
+#endif
 static unsigned char receive_buffer[RECV_BUFFER_SIZE]
     USB_DEVBSS_ATTR __attribute__((aligned(32)));
 
@@ -348,6 +355,90 @@ static bool usb_serial_control_request(struct usb_ctrlrequest* req, uint8_t* req
 
 static uint32_t stream_generation;
 
+#ifdef HAVE_USB_PODLINK
+static bool fast_in;
+static int tx_prepared, tx_slot;
+static uint32_t tx_submitted_at, tx_completed_at;
+static volatile bool profile_active;
+static uint32_t profile_start_us, profile_idle_us;
+static struct podlink_stage_sample samples[PL_STAGE_COUNT];
+
+uint32_t podlink_profile_now(void)
+{
+    return profile_active ? USEC_TIMER : 0;
+}
+
+void podlink_profile_add(enum podlink_stage stage, uint32_t start, unsigned bytes)
+{
+    if (!start)
+        return;
+    uint32_t elapsed = USEC_TIMER - start;
+    int irq = disable_irq_save();
+    if (profile_active)
+    {
+        struct podlink_stage_sample *sample = &samples[stage];
+        sample->count++;
+        sample->bytes += bytes;
+        sample->us += elapsed;
+        if (elapsed > sample->max_us)
+            sample->max_us = elapsed;
+    }
+    restore_irq(irq);
+}
+
+void podlink_profile_frame_crc(uint32_t start, unsigned bytes)
+{
+    podlink_profile_add(PL_FRAME_CRC, start, bytes);
+}
+
+bool podlink_profile_start(bool fast)
+{
+    mutex_lock(&serial_mtx);
+    bool idle = !tx_count && !tx_inflight && !tx_prepared;
+    if (idle)
+    {
+        int irq = disable_irq_save();
+        memset(samples, 0, sizeof(samples));
+        tx_submitted_at = tx_completed_at = 0;
+        fast_in = fast;
+        profile_idle_us = 0;
+        profile_start_us = USEC_TIMER;
+        profile_active = true;
+        restore_irq(irq);
+    }
+    mutex_unlock(&serial_mtx);
+    return idle;
+}
+
+void podlink_profile_idle(uint32_t start)
+{
+    profile_idle_us += USEC_TIMER - start;
+}
+
+void podlink_profile_stop(struct podlink_stage_sample *out,
+                          uint32_t *idle_us, uint32_t *wall_us)
+{
+    int irq = disable_irq_save();
+    *idle_us = profile_idle_us;
+    *wall_us = profile_active ? USEC_TIMER - profile_start_us : 0;
+    profile_active = false;
+    memcpy(out, samples, sizeof(samples));
+    restore_irq(irq);
+}
+
+/* Once submitted, a slot belongs to DMA until its completion. The
+ * producer writes directly into the other slot. */
+static int take_prepared_in(void)
+{
+    if (tx_inflight || !tx_prepared)
+        return 0;
+    int n = tx_prepared;
+    tx_slot ^= 1;
+    tx_prepared = 0;
+    return n;
+}
+#endif
+
 /* Called with serial_mtx held, only in the USB thread. */
 static void serial_service(void)
 {
@@ -367,21 +458,40 @@ static void serial_service(void)
         }
     }
 
+    int n = 0, slot = 0;
+#ifdef HAVE_USB_PODLINK
+    if (fast_in)
+    {
+        n = take_prepared_in();
+        slot = tx_slot;
+    }
+    else
+#endif
     if (!tx_inflight && tx_count)
     {
-        int n = MIN(tx_count, TRANSIT_BUFFER_SIZE);
+        n = MIN(tx_count, TRANSIT_BUFFER_SIZE);
         int first = MIN(n, BUFFER_SIZE - tx_start);
-        memcpy(transit_buffer, send_buffer + tx_start, first);
-        memcpy(transit_buffer + first, send_buffer, n - first);
-        if (usb_drv_send_nonblocking(EP_IN, transit_buffer, n) == 0)
-        {
-            tx_inflight = n;
-        }
-        else
-        {
-            active = false;
-            ++stream_generation;
-        }
+#ifdef HAVE_USB_PODLINK
+        uint32_t start = podlink_profile_now();
+#endif
+        memcpy(transit_buffer[0], send_buffer + tx_start, first);
+        memcpy(transit_buffer[0] + first, send_buffer, n - first);
+#ifdef HAVE_USB_PODLINK
+        podlink_profile_add(PL_DMA_COPY, start, n);
+#endif
+    }
+    if (!n)
+        return;
+#ifdef HAVE_USB_PODLINK
+    podlink_profile_add(PL_DMA_GAP, tx_completed_at, 0);
+    tx_submitted_at = podlink_profile_now();
+#endif
+    if (usb_drv_send_nonblocking(EP_IN, transit_buffer[slot], n) == 0)
+        tx_inflight = n;
+    else
+    {
+        active = false;
+        ++stream_generation;
     }
 }
 
@@ -390,6 +500,11 @@ static void reset_buffers(void)
     ++stream_generation;
     tx_start = tx_count = tx_inflight = rx_start = rx_count = 0;
     rx_armed = kick_pending = false;
+#ifdef HAVE_USB_PODLINK
+    tx_prepared = tx_slot = 0;
+    tx_submitted_at = tx_completed_at = 0;
+    profile_active = fast_in = false;
+#endif
 }
 
 void usb_serial_init(void)
@@ -451,8 +566,18 @@ static void serial_notify(intptr_t data)
     (void)data;
     mutex_lock(&serial_mtx);
     kick_pending = false;
+#ifdef HAVE_USB_PODLINK
+    bool staged = fast_in && tx_prepared;
+#endif
     serial_service();
+#ifdef HAVE_USB_PODLINK
+    bool freed = staged && !tx_prepared;
+#endif
     mutex_unlock(&serial_mtx);
+#ifdef HAVE_USB_PODLINK
+    if (freed)
+        wake_screen();
+#endif
 }
 
 bool usb_serial_get_state(uint32_t *generation)
@@ -483,11 +608,33 @@ int usb_serial_write(const unsigned char *data, int length)
     if (!data || length <= 0)
         return 0;
     mutex_lock(&serial_mtx);
+#ifdef HAVE_USB_PODLINK
+    if (fast_in)
+    {
+        int n = active ? MIN(length, FAST_IN_BYTES - tx_prepared) : 0;
+        if (n)
+        {
+            uint32_t started = podlink_profile_now();
+            memcpy(transit_buffer[tx_slot ^ 1] + tx_prepared, data, n);
+            podlink_profile_add(PL_DMA_COPY, started, n);
+            tx_prepared += n;
+            kick();
+        }
+        mutex_unlock(&serial_mtx);
+        return n;
+    }
+#endif
     int n = active ? MIN(length, BUFFER_SIZE - tx_count) : 0;
     int start = (tx_start + tx_count) % BUFFER_SIZE;
     int first = MIN(n, BUFFER_SIZE - start);
+#ifdef HAVE_USB_PODLINK
+    uint32_t started = n ? podlink_profile_now() : 0;
+#endif
     memcpy(send_buffer + start, data, first);
     memcpy(send_buffer, data + first, n - first);
+#ifdef HAVE_USB_PODLINK
+    podlink_profile_add(PL_RING_COPY, started, n);
+#endif
     tx_count += n;
     if (n)
         kick();
@@ -564,8 +711,15 @@ static void usb_serial_transfer_complete(int ep, int dir, int status,
             reset_buffers();
             goto out;
         }
-        tx_start = (tx_start + length) % BUFFER_SIZE;
-        tx_count -= length;
+#ifdef HAVE_USB_PODLINK
+        podlink_profile_add(PL_DMA_ACTIVE, tx_submitted_at, length);
+        tx_completed_at = podlink_profile_now();
+        if (!fast_in)
+#endif
+        {
+            tx_start = (tx_start + length) % BUFFER_SIZE;
+            tx_count -= length;
+        }
         tx_inflight = 0;
     }
     serial_service();
@@ -607,7 +761,10 @@ void usb_serial_wait(int ticks)
  * A nonempty RX ring by itself is not a wakeup when TX is backpressured. */
 void usb_serial_wait_activity(int ticks)
 {
-    semaphore_wait(&serial_wake, ticks);
+    mutex_lock(&serial_mtx);
+    bool configured = active;
+    mutex_unlock(&serial_mtx);
+    semaphore_wait(&serial_wake, configured ? ticks : TIMEOUT_BLOCK);
 }
 
 void usb_serial_wake(void)

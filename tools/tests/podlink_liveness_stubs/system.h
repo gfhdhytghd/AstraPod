@@ -10,6 +10,8 @@
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define ARRAYLEN(a) (sizeof(a) / sizeof((a)[0]))
 long live_tick(void);
+uint32_t live_usec(void);
+#define USEC_TIMER (live_usec())
 #define current_tick (live_tick())
 #define is_thread_context() true
 int disable_irq_save(void);

@@ -5,6 +5,7 @@
 #include "strcasecmp.h"
 #include "file.h"
 #include "mv.h"
+#include "podlink_profile.h"
 #include "version.h"
 #include "screens/system/podlink_library.h"
 #include "screens/system/podlink_media.h"
@@ -30,7 +31,7 @@ static const int text_tags[] = {
     tag_genre, tag_composer, tag_grouping, tag_comment
 };
 
-static enum { IDLE, COUNT, TRACKS, ART_TEXT, ART_BINARY, FILE_STREAM } operation;
+static enum { IDLE, COUNT, TRACKS, ART_TEXT, ART_BINARY, FILE_STREAM, SAMPLE_STREAM } operation;
 static struct tagcache_search walk;
 static int32_t commit_id;
 static uint32_t generation;
@@ -52,7 +53,7 @@ void podlink_library_close(void)
     if (operation == COUNT || operation == TRACKS)
         tagcache_search_finish(&walk);
     if (operation == ART_TEXT || operation == ART_BINARY ||
-        operation == FILE_STREAM)
+        operation == FILE_STREAM || operation == SAMPLE_STREAM)
         close(stream_fd);
     operation = IDLE;
 }
@@ -63,21 +64,22 @@ static const char *fail(const char *message)
     return message;
 }
 
-static bool managed_path(const char *path)
+static bool path_under(const char *path, const char *prefix, bool strict)
 {
-    static const char prefix[] = PODLINK_MEDIA_DIR "/";
+    size_t prefix_len = strlen(prefix);
     if (!strncmp(path, "/<HDD0>/", 8))
         path += 7;
-    if (strncasecmp(path, prefix, sizeof(prefix) - 1) ||
+    if (strncasecmp(path, prefix, prefix_len) ||
         strcspn(path, "\\:<>") != strlen(path))
         return false;
 
-    path += sizeof(prefix) - 1;
+    path += prefix_len;
     while (*path)
     {
         size_t n = strcspn(path, "/");
         if (n == 0 || (n == 1 && path[0] == '.') ||
-            (n == 2 && !memcmp(path, "..", 2)))
+            (n == 2 && !memcmp(path, "..", 2)) ||
+            (strict && (path[n - 1] == '.' || path[n - 1] == ' ')))
             return false;
         path += n;
         if (!*path)
@@ -85,6 +87,17 @@ static bool managed_path(const char *path)
         path++;
     }
     return false;
+}
+
+static bool managed_path(const char *path)
+{
+    return path_under(path, PODLINK_MEDIA_DIR "/", false);
+}
+
+static bool sample_path(const char *path)
+{
+    return path_under(path, "/Music/", true) ||
+           path_under(path, "/iPod_Control/Music/", true);
 }
 
 static const char *data_reply(const unsigned char *data, unsigned int n,
@@ -251,7 +264,8 @@ static const char *database_files(const unsigned char *name, size_t size)
     return reply;
 }
 
-static const char *binary_next(unsigned char *binary, unsigned int *size)
+static const char *binary_next(unsigned char *binary, unsigned int *size,
+                               uint32_t *raw)
 {
     bool database = operation == FILE_STREAM;
     if (database && file_snapshot_changed())
@@ -275,12 +289,19 @@ static const char *binary_next(unsigned char *binary, unsigned int *size)
     memcpy(binary, "MSF1", 4);
     for (unsigned int i = 0; i < 4; i++)
         binary[4 + i] = stream_offset >> (8 * i);
-    if (read(stream_fd, binary + 8, n) != (ssize_t)n)
-        return fail(database ? "MS3 ERR database read" : "MS3 ERR artwork read");
+    uint32_t started = podlink_profile_now();
+    ssize_t bytes = read(stream_fd, binary + 8, n);
+    podlink_profile_add(PL_READ, started, bytes > 0 ? bytes : 0);
+    if (bytes != (ssize_t)n)
+        return fail(database ? "MS3 ERR database read" :
+                    operation == SAMPLE_STREAM ? "MS3 ERR sample read" :
+                    "MS3 ERR artwork read");
     if (database && file_snapshot_changed())
         return fail("MS3 ERR database changed");
 
-    stream_crc = crc_32r(binary + 8, n, stream_crc);
+    started = podlink_profile_now();
+    stream_crc = podlink_bulk_crc(binary + 8, n, stream_crc, raw);
+    podlink_profile_add(PL_FILE_CRC, started, n);
     stream_offset += n;
     *size = n + 8;
     return NULL;
@@ -612,14 +633,15 @@ static const char *file_detail(const char *path)
 
 const char *podlink_library_command(const unsigned char *data, size_t size,
                                    bool *refresh_pending, unsigned char *binary,
-                                   unsigned int *binary_size)
+                                   unsigned int *binary_size, uint32_t *raw)
 {
     if (size == 4 && !memcmp(data, "STOP", 4))
         return fail("MS3 STOPPED");
     if (size == 4 && !memcmp(data, "NEXT", 4))
     {
-        if (operation == FILE_STREAM || operation == ART_BINARY)
-            return binary_next(binary, binary_size);
+        if (operation == FILE_STREAM || operation == ART_BINARY ||
+            operation == SAMPLE_STREAM)
+            return binary_next(binary, binary_size, raw);
         if (operation == ART_TEXT)
             return art_next();
         if (operation != IDLE)
@@ -642,7 +664,13 @@ const char *podlink_library_command(const unsigned char *data, size_t size,
     int art_size = -1;
     bool binary_art = size >= 7 && !memcmp(data, "ARTBIN ", 7);
     bool delete = size > 4 && !memcmp(data, "DEL ", 4);
-    if (size > 7 && !memcmp(data, "DETAIL ", 7))
+    bool sample = size > 7 && !memcmp(data, "SAMPLE ", 7);
+    if (sample)
+    {
+        data += 7;
+        size -= 7;
+    }
+    else if (size > 7 && !memcmp(data, "DETAIL ", 7))
     {
         data += 7;
         size -= 7;
@@ -678,6 +706,24 @@ const char *podlink_library_command(const unsigned char *data, size_t size,
         return "MS3 ERR path";
     memcpy(path, data, size);
     path[size] = '\0';
+    if (sample)
+    {
+        if (!sample_path(path) || !file_exists(path))
+            return "MS3 ERR sample path";
+        int fd = open(path, O_RDONLY);
+        if (fd < 0)
+            return "MS3 ERR sample read";
+        off_t length = ffilesize(fd);
+        if (length <= 0 || (uint64_t)length > 128u * 1024u * 1024u)
+        {
+            close(fd);
+            return "MS3 ERR sample size";
+        }
+        stream_open(fd, length);
+        operation = SAMPLE_STREAM;
+        snprintf(reply, sizeof(reply), "MS3 SAMPLE %lu", (unsigned long)length);
+        return reply;
+    }
     if (delete)
     {
         if (!managed_path(path))
@@ -703,13 +749,14 @@ void podlink_library_close(void)
 
 const char *podlink_library_command(const unsigned char *data, size_t size,
                                    bool *refresh_pending, unsigned char *binary,
-                                   unsigned int *binary_size)
+                                   unsigned int *binary_size, uint32_t *raw)
 {
     (void)data;
     (void)size;
     (void)refresh_pending;
     (void)binary;
     (void)binary_size;
+    (void)raw;
     return "MS3 ERR database unavailable";
 }
 #endif

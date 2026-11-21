@@ -14,8 +14,8 @@ pub trait Ports: Transport {
     fn clear_time(&mut self);
     fn receive(&mut self, m: Meta, data: &[u8]) -> bool;
     fn next_record(&mut self, out: &mut [u8]) -> usize;
-    fn next_binary(&mut self, _out: &mut [u8]) -> usize {
-        0
+    fn next_binary(&mut self, _out: &mut [u8]) -> (usize, Option<u32>) {
+        (0, None)
     }
     fn reset_consumer(&mut self);
     fn background(&mut self, m: Meta, data: &[u8]);

@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <limits.h>
+#include "screens/recording.h"
 #include "config.h"
 #include "timefuncs.h" /* get_time, valid_time */
 #include "string.h"
@@ -471,6 +472,9 @@ MENUITEM_RETURNVALUE(agents_item, "Agents", GO_TO_AGENTS, NULL, Icon_NOICON);
 #endif
 
 MAKE_MENU(info_menu, ID2P(LANG_SYSTEM), 0, Icon_System_menu,
+#ifdef HAVE_RECORDING
+          &recording_entry,
+#endif
           &show_about_item, &show_info_item, &show_credits_item,
           &bg_task_info, &show_license_item,
 #ifdef HAVE_USB_PODLINK
@@ -519,6 +523,9 @@ MAKE_MENU(main_menu_, ID2P(LANG_SETTINGS), NULL,
         &settings_search_item,
         &sound_settings,
         &playback_settings,
+#ifdef HAVE_RECORDING
+        &recording_settings_menu,
+#endif
         &library_menu,
         &theme_menu,
         &appearance_menu,

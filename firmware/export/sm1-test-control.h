@@ -1,6 +1,8 @@
 #ifndef SM1_TEST_CONTROL_H
 #define SM1_TEST_CONTROL_H
 
+#include <stdint.h>
+
 #define SM1_TEST_USB_REQUEST 0x5d
 #define SM1_TEST_USB_INDEX 0x4951
 #define SM1_TEST_DEBUG_INDEX 0x4952
@@ -10,6 +12,7 @@
 #define SM1_TEST_RECORD_STATUS_SIZE 96
 #define SM1_TEST_RECORD_ERROR_VALUE 2
 #define SM1_TEST_RECORD_ERROR_SIZE 20
+#define SM1_TEST_AUDIO_STATUS_VALUE 5
 #define SM1_TEST_RECORD_PATH_SIZE (SM1_TEST_RECORD_STATUS_SIZE - 8)
 #define SM1_TEST_TRACK ROCKBOX_DIR "/sm1-test/irq-dma44.flac"
 #define SM1_TEST_SEEK_MS 6237
@@ -55,5 +58,6 @@ bool sm1_test_record_active(void);
 bool sm1_test_record_request_stop(void);
 void sm1_test_record_status(void *reply);
 void sm1_test_record_error(void *reply);
+uint32_t sm1_test_audio_status(void);
 
 #endif

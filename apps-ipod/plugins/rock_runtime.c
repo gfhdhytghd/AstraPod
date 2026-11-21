@@ -1,6 +1,7 @@
 /* AstraPod foreground plugin runtime. GNU GPL version 2 or later. */
 #include "plugins/rock_compat.h"
 #include "plugins/rock_pitch.h"
+#include "podlink-plugin-test.h"
 #include "usb.h"
 #include "plugins/rock_files.h"
 #include "plugins/rock_widgets.h"
@@ -299,6 +300,9 @@ void rock_usb_takeover(void)
 {
     if (!filename || usb_taken)
         return;
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    podlink_plugin_test_usb_taken();
+#endif
     rock_podlink_close();
     rock_media_shutdown();
     rock_flush_settings();
@@ -625,7 +629,7 @@ static bool native_header_valid(const void *opaque, const unsigned char *arena,
 
 static int run_rock(const char *path, const char *file,
                     unsigned char *arena, size_t capacity,
-                    fb_data *saved_pixels, fb_data *widget_pixels)
+                    fb_data *saved_pixels, fb_data *widget_pixels, bool shell)
 {
     void *handle;
 #if CONFIG_BINFMT == BINFMT_ROCK
@@ -672,7 +676,17 @@ static int run_rock(const char *path, const char *file,
     button_clear_pressed();
     rock_action_reset();
 
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    if (shell)
+        podlink_plugin_test_started();
+#else
+    (void)shell;
+#endif
     result = module->entry_point(file);
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    if (shell)
+        podlink_plugin_test_stopped();
+#endif
     rock_podlink_close();
     rock_media_shutdown();
     if (usb_taken)
@@ -697,28 +711,49 @@ unload:
     return result;
 }
 
-int rock_open_from_browser(const char *path, const char *file)
+static int rock_open_foreground(const char *path, const char *file, bool shell)
 {
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    if (!podlink_plugin_test_claim(shell))
+        return PLUGIN_ERROR;
+#endif
     size_t capacity;
     unsigned char *arena = app_try_claim_buffer(&capacity, arena_owner);
-    if (!arena)
+    int result = PLUGIN_ERROR;
+    if (arena)
     {
-        splash(HZ, ID2P(LANG_PLUGIN_CANT_OPEN));
-        return GO_TO_PREVIOUS;
+        capacity -= 2 * FRAMEBUFFER_SIZE;
+        fb_data *caller_pixels = (fb_data *)(arena + capacity);
+        fb_data *widget_pixels = (fb_data *)(arena + capacity + FRAMEBUFFER_SIZE);
+        result = run_rock(path, file, arena, capacity, caller_pixels,
+                          widget_pixels, shell);
+        app_release_buffer(arena_owner);
+        if (result == PLUGIN_ERROR && !shell)
+            splash(HZ, ID2P(LANG_PLUGIN_ERROR));
     }
+    else if (!shell)
+        splash(HZ, ID2P(LANG_PLUGIN_CANT_OPEN));
 
-    capacity -= 2 * FRAMEBUFFER_SIZE;
-    fb_data *caller_pixels = (fb_data *)(arena + capacity);
-    fb_data *widget_pixels = (fb_data *)(arena + capacity + FRAMEBUFFER_SIZE);
-    int result = run_rock(path, file, arena, capacity, caller_pixels,
-                          widget_pixels);
-    app_release_buffer(arena_owner);
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    podlink_plugin_test_release();
+#endif
+    return result;
+}
 
+int rock_run_from_shell(const char *path)
+{
+    bool previous = action_set_menu_back(true);
+    int result = rock_open_foreground(path, NULL, true);
+    action_set_menu_back(previous);
+    return result;
+}
+
+int rock_open_from_browser(const char *path, const char *file)
+{
+    int result = rock_open_foreground(path, file, false);
     if (result == PLUGIN_USB_CONNECTED || result == PLUGIN_GOTO_ROOT)
         return GO_TO_ROOT;
     if (result == PLUGIN_GOTO_WPS)
         return GO_TO_WPS;
-    if (result == PLUGIN_ERROR)
-        splash(HZ, ID2P(LANG_PLUGIN_ERROR));
     return GO_TO_PREVIOUS;
 }

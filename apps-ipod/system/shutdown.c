@@ -14,6 +14,7 @@
 #include "string-extra.h"
 #include "config.h"
 #include "plugins/rock_compat.h"
+#include "podlink-plugin-test.h"
 #include "system.h"
 #include "kernel.h"
 #include "file.h"
@@ -331,6 +332,11 @@ volatile unsigned sm1_test_submitted;
 volatile unsigned sm1_test_completed;
 volatile unsigned sm1_test_dispatch_tick;
 
+uint32_t sm1_test_audio_status(void)
+{
+    return audio_status();
+}
+
 static void complete_shell_command(void)
 {
     ++sm1_test_completed;
@@ -352,6 +358,12 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
 
     switch(event)
     {
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+        case SYS_PODLINK_PLUGIN_TEST:
+            if (podlink_plugin_test_launch())
+                return SYS_USB_CONNECTED;
+            break;
+#endif
 #ifdef HAVE_USB_CONFIRM
         case SYS_USB_CONFIRM:
             gui_usb_confirm_run(button_get_data());

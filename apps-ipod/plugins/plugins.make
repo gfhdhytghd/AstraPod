@@ -34,6 +34,17 @@ $(APPSBUILDDIR)/plugins/rock_runtime.o: $(ROCK_OUT)/rock_fingerprint.h
 $(APPSBUILDDIR)/sim/rock_host.o: $(ROCK_OUT)/rock_fingerprint.h
 $(APPSBUILDDIR)/plugins/rock_runtime.o $(APPSBUILDDIR)/plugins/rock_files.o: CFLAGS += $(ROCK_STRICT)
 
+# Shell accepts the same installed paths as the bundle, including its opt-in app.
+.PHONY: rock-test-paths-inputs
+$(ROCK_OUT)/rock_test_paths.h: $(ROCK_MANIFEST) rock-test-paths-inputs
+	$(SILENT)mkdir -p "$(@D)"
+	$(SILENT)printf 'PLUGIN_DIR "/%s.rock",\n' $(shell cat $(ROCK_MANIFEST)) \
+	    $(if $(filter 1,$(ROCK_PITCH_DETECTOR)),apps/pitch_detector) > "$@.tmp"
+	$(SILENT)cmp -s "$@.tmp" "$@" || mv "$@.tmp" "$@"
+	$(SILENT)rm -f "$@.tmp"
+
+$(APPSBUILDDIR)/plugins/podlink_plugin_test.o: $(ROCK_OUT)/rock_test_paths.h
+
 ifeq ($(APP_TYPE),sdl-sim)
 ROCK_LINK = $(SHARED_LDFLAGS) $(GLOBAL_LDOPTS) -Wl,--gc-sections
 ROCK_OUTPUT = mv $@.elf $@

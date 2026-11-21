@@ -174,6 +174,11 @@ plugins/rock_pitch.c
 plugins/rock_display.c
 plugins/rock_list.c
 plugins/rock_modal.c
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK) && !defined(BOOTLOADER)
+plugins/podlink_plugin_test.c
+plugins/podlink_plugin_test_keys.c
+plugins/podlink_plugin_test_lcd.c
+#endif
 #if CONFIG_BINFMT == BINFMT_DLOPEN
 sim/rock_host.c
 #endif

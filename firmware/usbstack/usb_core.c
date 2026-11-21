@@ -34,6 +34,7 @@
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
 #include "button.h"
 #include "sm1-test-control.h"
+#include "podlink-plugin-test.h"
 #include "podlink.h"
 #endif
 #include "button_usb_remote.h"
@@ -580,6 +581,9 @@ bool usb_core_storage_pending(void)
 
 void usb_core_exit(void)
 {
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    podlink_plugin_test_clear_keys();
+#endif
     usb_core_do_set_config(0);
     if(initialized) {
         usb_drv_exit();
@@ -597,6 +601,10 @@ void usb_core_exit(void)
 
 /* for sending/receiving control data */
 static uint8_t usb_control_data[256] USB_DEVBSS_ATTR;
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+_Static_assert(sizeof(usb_control_data) >= PODLINK_TEST_CHUNK_SIZE,
+               "EP0 buffer must fit a screenshot chunk");
+#endif
 
 void usb_core_handle_transfer_completion(
     struct usb_transfer_completion_event_data* event)
@@ -606,6 +614,18 @@ void usb_core_handle_transfer_completion(
 
     if(num == EP_CONTROL) {
         logf("ctrl handled %ld req=0x%x", current_tick,event->req->bRequest);
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+        if (podlink_plugin_test_matches(event->req))
+        {
+            bool allowed = usb_state == CONFIGURED && usb_podlink_active() &&
+                !usb_exclusive_storage() && !bus_reset_pending && !control_cancelled &&
+                event->status == 0 && ((event->req->bRequestType & USB_DIR_IN) ||
+                                       event->length == event->req->wLength);
+            podlink_plugin_test_request(event->req, usb_control_data,
+                                        sizeof(usb_control_data), allowed);
+            return;
+        }
+#endif
         usb_core_control_request_handler(event->req, usb_control_data, sizeof(usb_control_data));
         return;
     }
@@ -1455,6 +1475,15 @@ static void usb_core_control_request_handler(struct usb_ctrlrequest* req, uint8_
                 usb_core_control_response(USB_CONTROL_ACK, reqdata, sizeof(status));
                 return;
             }
+            if (req->wIndex == SM1_TEST_USB_INDEX && req->bRequestType == 0xc0 &&
+                req->wValue == SM1_TEST_AUDIO_STATUS_VALUE &&
+                req->wLength == sizeof(uint32_t) && reqdata_size >= sizeof(uint32_t))
+            {
+                uint32_t flags = sm1_test_audio_status();
+                memcpy(reqdata, &flags, sizeof(flags));
+                usb_core_control_response(USB_CONTROL_ACK, reqdata, sizeof(flags));
+                return;
+            }
             if (req->wIndex == SM1_TEST_USB_INDEX &&
                 req->bRequestType == 0xc0 &&
                 req->wValue == SM1_TEST_RECORD_STATUS_VALUE &&
@@ -1574,6 +1603,9 @@ bool usb_core_bus_resetting(void)
 }
 
 static void do_bus_reset(void) {
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    podlink_plugin_test_clear_keys();
+#endif
     usb_address = 0;
     usb_state = DEFAULT;
     bus_reset_pending = false;

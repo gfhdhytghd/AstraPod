@@ -27,6 +27,7 @@ bool sm1_test_record_active(void) { return false; }
 bool sm1_test_record_request_stop(void) { assert(0); return false; }
 void sm1_test_record_status(void *reply) { (void)reply; assert(0); }
 void sm1_test_record_error(void *reply) { (void)reply; assert(0); }
+uint32_t sm1_test_audio_status(void) { assert(0); return 0; }
 enum podlink_connection podlink_state(void) { return PODLINK_CLOSED; }
 #define BUTTON_NONE 0
 #define BUTTON_RC_MENU 0x00200000

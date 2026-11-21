@@ -1,5 +1,6 @@
 /* USB remote key input. Copyright (C) 2026. GPL version 2 or later. */
 #include "button_usb_remote.h"
+#include "podlink-plugin-test.h"
 #include "button.h"
 #include "system.h"
 #include "kernel.h"
@@ -48,6 +49,14 @@ bool button_usb_remote_request(const struct usb_ctrlrequest *req)
     int level = disable_irq_save();
     remote_log_event(REMOTE_LOG_EP0, current_tick, req->wValue, req->wIndex,
                      NULL, 0);
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    if (req->wValue != USB_REMOTE_KEY_HEARTBEAT && podlink_plugin_test_keys_active())
+    {
+        bool accepted = podlink_plugin_test_key(req->wValue, req->wIndex);
+        restore_irq(level);
+        return accepted;
+    }
+#endif
     if (req->wValue == USB_REMOTE_KEY_HEARTBEAT)
     {
         bridge_seen = true;
@@ -96,6 +105,14 @@ bool button_usb_remote_request(const struct usb_ctrlrequest *req)
 int button_usb_remote_read(void)
 {
     int level = disable_irq_save();
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    if (podlink_plugin_test_keys_active())
+    {
+        int buttons = podlink_plugin_test_buttons();
+        restore_irq(level);
+        return buttons;
+    }
+#endif
     if (remote_button && !TIME_BEFORE(current_tick, menu_until))
         remote_button = BUTTON_NONE;
     int button = remote_button;

@@ -37,6 +37,7 @@
 #include "dma-s5l8702.h"
 #include "lcd-s5l8702.h"
 #include "lcd-target.h"
+#include "podlink-plugin-test.h"
 #include "crumbs.h"
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
 #include "videoout.h"
@@ -419,6 +420,16 @@ static void displaylcd_wait_dma(void)
     }
 }
 
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+void lcd_copy_presented_for_test(uint16_t *pixels)
+{
+    mutex_lock(&lcd_mutex);
+    displaylcd_wait_dma();
+    podlink_plugin_test_lcd_copy(pixels);
+    mutex_unlock(&lcd_mutex);
+}
+#endif
+
 /* Update a fraction of the display. */
 void lcd_update_rect(int, int, int, int) ICODE_ATTR;
 void lcd_update_rect(int x, int y, int width, int height)
@@ -427,7 +438,7 @@ void lcd_update_rect(int x, int y, int width, int height)
         return;
 
     int pixels = width * height;
-#if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
+#if (defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)) || defined(HAVE_PODLINK_PLUGIN_TEST)
     int original_height = height;
 #endif
     fb_data* p = FBADDR(x,y);
@@ -471,6 +482,10 @@ void lcd_update_rect(int x, int y, int width, int height)
         videoout_mirror_rgb565(lcd_dblbuf[0], x, y, width,
                                       original_height, width);
 #endif
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+        if (lock)
+            podlink_plugin_test_lcd_present(lcd_dblbuf[0], x, y, width, original_height);
+#endif
         displaylcd_dma(pixels);
     }
     if (lock)
@@ -495,6 +510,9 @@ bool lcd_present_scene(const fb_data *pixels)
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
         videoout_mirror_rgb565(lcd_dblbuf[0], 0, 0, LCD_WIDTH, LCD_HEIGHT,
                              LCD_WIDTH);
+#endif
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+        podlink_plugin_test_lcd_present(lcd_dblbuf[0], 0, 0, LCD_WIDTH, LCD_HEIGHT);
 #endif
         displaylcd_dma(LCD_WIDTH * LCD_HEIGHT);
     }
@@ -521,7 +539,7 @@ void lcd_blit_yuv(unsigned char * const src[3],
 
     width = (width + 1) & ~1;       /* ensure width is even */
 
-#if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
+#if (defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)) || defined(HAVE_PODLINK_PLUGIN_TEST)
     int original_height = height;
 #endif
     int pixels = width * height;
@@ -567,6 +585,9 @@ void lcd_blit_yuv(unsigned char * const src[3],
                                           original_height, width);
 #endif
 
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+        podlink_plugin_test_lcd_present(lcd_dblbuf[0], x, y, width, original_height);
+#endif
         displaylcd_dma(pixels);
     }
     mutex_unlock(&lcd_mutex);
@@ -729,4 +750,7 @@ void lcd_init_device(void)
 #endif
 
     lcd_ispowered = true;
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    podlink_plugin_test_lcd_init();
+#endif
 }

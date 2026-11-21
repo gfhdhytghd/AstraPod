@@ -88,7 +88,14 @@ after the dependencies build.
 | Entry | Build dependency or behavior to verify |
 | --- | --- |
 | `pitch_detector` | The ARM compiler reports missing `pcm_record_data` and `plugin_get_audio_buffer`. Define capture callback teardown and the playback-buffer lease. |
-| `rb_info` | Map `talk_id`, `talk_spell` and `strcasestr`. Link the printcell, action and button helpers. Verify spoken rows and their native IDs. |
+
+## Native diagnostics
+
+`rb_info` presents its diagnostics through native lists. The build
+uses the configured target's action and context enums and button
+definitions. Raw button capture includes the repeat and release
+flags. Printcell data uses a row list and a column detail page.
+The adapter uses the native list voice slots for names and values.
 
 ## File viewers
 

@@ -30,6 +30,14 @@ remap the 16 CHIP-8 keys. The first 16 characters give the physical
 key mappings in hexadecimal order from 0 to F. A missing or short
 sidecar uses the default mapping.
 
+## Rockbox Info
+
+Open Plugins → Applications → rb_info. The diagnostic pages show
+paths, buffers, buttons, actions and contexts in native lists. In
+Action test, select a context and then select Start test. The test
+captures input until four seconds of inactivity. In Printcell test,
+select a sample row to read its eight columns in a native list.
+
 ## Phase 2 utility candidates
 
 Run the candidate subsets in an ipod6g ARM or SDL build configured with
@@ -38,7 +46,7 @@ Run the candidate subsets in an ipod6g ARM or SDL build configured with
 ```sh
 make rocks ROCK_MODULES='apps/db_folder_select apps/dict'
 make rocks ROCK_MODULES='demos/credits apps/resistor apps/alarmclock'
-make rocks ROCK_MODULES='apps/dart_scorer apps/rb_info'
+make rocks ROCK_MODULES='apps/dart_scorer'
 ```
 
 These overrides select build outputs. Packaging uses `rock-modules.txt`.
@@ -56,7 +64,6 @@ and modules from the same build.
 | `alarmclock` | Foreground countdown using the native clock and playback resume state. Start or pause a track before opening it. |
 | `dart_scorer` | Native menus and confirmations, with the upstream score screen and save format. The save uses a sibling temporary file under the games data directory and renames it after closing. |
 | `keybox` | Held. The stock parser trusts the saved byte count and uses unbounded NUL searches. Short or malformed saves need a bounded parser and a verified persistence path. |
-| `rb_info` | Standalone diagnostics. Select a context in Action test, then select Start test. The test captures input until four seconds of inactivity. Select a Printcell sample row to read its columns in a native list. The stock pixel renderer is disabled. |
 | `view_text` | Held as a standalone module. Its parameter is a title/text pointer pair. The browser passes a null parameter, and the SDK has no typed plugin-to-plugin dispatch. `dict` calls the native text box via the SDK. |
 | `md5sum` | Held. The root scan recurses with one open directory and one path buffer per level. The SDK caps directory streams at four, so the stock scan would silently omit deeper paths. |
 | `disktidy` | Held. Recursive deletion needs a reviewed path and traversal contract. The SDK lacks `rmdir` and owned extended event callbacks for its statistics screen. Its stock rule resource is `apps/plugins/disktidy.config`. |

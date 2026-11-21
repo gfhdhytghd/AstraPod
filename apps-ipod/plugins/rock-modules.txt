@@ -7,6 +7,7 @@ apps/lamp
 apps/metronome
 apps/periodic_table
 apps/playing_time
+apps/rb_info
 apps/resistor
 apps/stopwatch
 demos/bounce

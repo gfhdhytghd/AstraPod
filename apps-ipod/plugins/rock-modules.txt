@@ -4,6 +4,7 @@ apps/countdown_timer
 apps/dart_scorer
 apps/db_folder_select
 apps/lamp
+apps/metronome
 apps/periodic_table
 apps/playing_time
 apps/resistor

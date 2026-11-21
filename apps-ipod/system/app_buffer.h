@@ -9,15 +9,8 @@
 
 #include <stddef.h>
 
-/* A single fixed scratch region, always resident, laid out by the linker
- * script. It was the RAM a loadable plugin ran in; with the plugin system
- * gone, several core screens borrow it as working space instead.
- *
- * There is only one of these buffers, it is not reference counted, and
- * nothing copies out of it -- so two overlapping users silently alias each
- * other's memory. While plugins existed that could not happen, because only
- * one plugin ran at a time. It can now: a screen that holds the buffer can
- * reach another screen that wants it.
+/* A single fixed scratch arena for foreground plugins and core screens.
+ * A lease protects pointers into the arena across an input loop.
  *
  * Two ways to take it, depending on how long you need it:
  *

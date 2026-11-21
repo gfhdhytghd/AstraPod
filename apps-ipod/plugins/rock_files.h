@@ -1,0 +1,25 @@
+/* Owned plugin filesystem operations. GNU GPL version 2 or later. */
+#ifndef ASTRAPOD_ROCK_FILES_H
+#define ASTRAPOD_ROCK_FILES_H
+
+#include "file.h"
+#include "gcc_extensions.h"
+#include "dir.h"
+
+int rock_open(const char *, int, ...);
+int rock_creat(const char *, mode_t);
+int rock_close(int);
+ssize_t rock_read(int, void *, size_t);
+ssize_t rock_write(int, const void *, size_t);
+off_t rock_lseek(int, off_t, int);
+off_t rock_ffilesize(int);
+int rock_fdprintf(int, const char *, ...) ATTRIBUTE_PRINTF(2, 3);
+int rock_read_line(int, char *, int);
+bool rock_file_exists(const char *);
+DIR *rock_opendir(const char *);
+struct DIRENT *rock_readdir(DIR *);
+int rock_closedir(DIR *);
+struct dirinfo rock_dir_get_info(DIR *, struct DIRENT *);
+void rock_close_files(void);
+
+#endif

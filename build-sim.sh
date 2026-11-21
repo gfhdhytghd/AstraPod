@@ -82,7 +82,12 @@ if [ -n "$KEEP" ]; then
 fi
 
 cd "$BUILDDIR"
-../tools/configure --target="$TARGET" --type="$TYPE" --appsdir=apps-ipod
+if [ "$TARGET" = ipod6g ]; then
+    set -- --rock-compat
+else
+    set --
+fi
+../tools/configure "$@" --target="$TARGET" --type="$TYPE" --appsdir=apps-ipod
 
 # nproc on Linux, sysctl on macOS, 4 if neither answers. Without a value make
 # would take -j with no argument and fork unbounded jobs.
@@ -94,6 +99,7 @@ make -j"$JOBS"
 # The same scripts build-hw.sh runs, for the same reason.
 make zip
 ../bundle-theme.sh
+../bundle-rocks.sh
 ../bundle-help.sh
 ../bundle-trim.sh
 ../bundle-speech.sh

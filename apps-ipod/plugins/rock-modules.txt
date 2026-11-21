@@ -1,0 +1,3 @@
+apps/stopwatch
+demos/snow
+games/dice

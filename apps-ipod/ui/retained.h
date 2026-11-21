@@ -58,6 +58,7 @@ struct ui_page {
     struct ui_view *root, *focus;
     struct ui_rect damage;
     struct ui_track *tracks;
+    unsigned generation;
 };
 
 enum ui_presentation {
@@ -87,6 +88,7 @@ struct ui_layer {
 void ui_view_init(struct ui_view *, struct ui_rect bounds,
                   const struct ui_view_ops *, void *data);
 void ui_view_append(struct ui_view *parent, struct ui_view *child);
+void ui_retained_invalidate(void);
 void ui_page_init(struct ui_page *, struct ui_view *root);
 void ui_page_layout(struct ui_page *);
 void ui_page_invalidate(struct ui_page *, struct ui_rect screen_rect);

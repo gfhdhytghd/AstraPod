@@ -20,7 +20,12 @@ BUILDDIR="build-hw-${TARGET}"
 rm -rf "$BUILDDIR"
 mkdir "$BUILDDIR"
 cd "$BUILDDIR"
-../tools/configure --target="$TARGET" --type=n --appsdir=apps-ipod
+if [ "$TARGET" = ipod6g ]; then
+    set -- --rock-compat
+else
+    set --
+fi
+../tools/configure "$@" --target="$TARGET" --type=n --appsdir=apps-ipod
 
 # nproc on Linux, sysctl on macOS, 4 if neither answers. Without a value make
 # would take -j with no argument and fork unbounded jobs.
@@ -29,6 +34,7 @@ make -j"$JOBS"
 make zip
 sh ../tools/check-zip-langs.sh rockbox.zip
 ../bundle-theme.sh
+../bundle-rocks.sh
 ../bundle-help.sh
 ../bundle-trim.sh
 ../bundle-speech.sh

@@ -98,7 +98,8 @@ assert '#define MAX_LOADSIZE 8M' in boot and 'ORIGIN = DRAM_ORIG + MAX_LOADSIZE'
 
 crumbs = src('firmware/kernel/crumbs.c')
 assert '#define IRAM1_RING_ADDR 0x2203f800' in crumbs
-assert 'clockgate_enable(CLOCKGATE_SM1, true);' in body(crumbs, 'crumbs_boot')
+assert 'crumb_snapshot_take(RING_A, RING_A, &crumbs_prev)' in body(crumbs, 'crumbs_boot')
+assert 'CLOCKGATE_SM1' not in body(crumbs, 'crumbs_boot')
 assert 'tick_add_task(guard_tick);' in body(crumbs, 'crumbs_guard_init')
 gm = body(crumbs, 'guard_mmu')
 assert 'c1 |= 1u << 13;' in gm and 'i == 0 ? 0 :' not in gm

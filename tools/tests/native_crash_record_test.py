@@ -95,13 +95,16 @@ int main(void)
     /* Corrupted or interrupted DRAM write must leave the IRAM1 copy useful. */
     CRASH_A->data.message[2] ^= 1;
     assert(crumb_crash_latest(CRASH_A, CRASH_B) == CRASH_B);
-    CRASH_A->check = 0;
+    crash_report();
+    assert(!disk_writes && !rename_calls);
+    crumb_crash_store(CRASH_A, 10, "firmware-1", "Stack overflow in menu", &panic);
+    CRASH_B->check = 0;
 
     for (fail = OPEN; fail <= RENAME; fail++)
     {
         crash_report();
         assert(!disk_writes && !strcmp(disk, "previous report"));
-        assert(crumb_crash_valid(CRASH_B));
+        assert(crumb_crash_valid(CRASH_A));
     }
     assert(rename_calls == 1); /* only the complete, synced output reached rename */
 
@@ -120,9 +123,7 @@ int main(void)
         .sp = 0x08400000, .lr = 0x08003456, .status = 0x6000001f,
         .fault_status = 5, .fault_address = 0x10,
     };
-    crumb_crash_store(CRASH_A, 11, "firmware-1", "old panic", &panic);
-    crumb_crash_store(CRASH_B, 12, "firmware-2", "Data abort", &abort);
-    assert(crumb_crash_latest(CRASH_A, CRASH_B) == CRASH_B);
+    crumb_crash_store(CRASH_A, 12, "firmware-2", "Data abort", &abort);
     crash_report();
     assert(disk_writes == 2);
     assert(strstr(disk, "ARM exception: Data abort"));
@@ -154,7 +155,8 @@ def main():
     exception = (ROOT / "firmware/target/arm/system-arm-classic.c").read_text()
     assert exception.index("crumbs_crash_record(uiename[num]") < exception.index("lcd_clear_display()")
     main_c = (ROOT / "apps-ipod/main.c").read_text()
-    assert main_c.index("disk_mount_all();") < main_c.index("crumbs_report();")
+    assert main_c.index("if (disk_mount_all() > 0)") < main_c.index("crumbs_report();")
+    assert main_c.rindex("disk_mount_all();") < main_c.rindex("crumbs_report();")
 
     with tempfile.TemporaryDirectory(prefix="podbox-crash-native-") as folder:
         scratch = Path(folder)

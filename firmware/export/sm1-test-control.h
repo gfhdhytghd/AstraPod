@@ -8,6 +8,8 @@
 #define SM1_TEST_DEBUG_NAME_SIZE 128
 #define SM1_TEST_RECORD_STATUS_VALUE 1
 #define SM1_TEST_RECORD_STATUS_SIZE 96
+#define SM1_TEST_RECORD_ERROR_VALUE 2
+#define SM1_TEST_RECORD_ERROR_SIZE 20
 #define SM1_TEST_RECORD_PATH_SIZE (SM1_TEST_RECORD_STATUS_SIZE - 8)
 #define SM1_TEST_TRACK ROCKBOX_DIR "/sm1-test/irq-dma44.flac"
 #define SM1_TEST_SEEK_MS 6237
@@ -32,6 +34,16 @@ enum sm1_test_record_state {
     SM1_RECORD_BUSY,
 };
 
+enum sm1_test_record_stage {
+    SM1_RECORD_STAGE_NONE,
+    SM1_RECORD_STAGE_DIR,
+    SM1_RECORD_STAGE_FILENAME,
+    SM1_RECORD_STAGE_INIT,
+    SM1_RECORD_STAGE_START,
+    SM1_RECORD_STAGE_CAPTURE,
+    SM1_RECORD_STAGE_SAVE,
+};
+
 extern volatile unsigned sm1_test_submitted;
 extern volatile unsigned sm1_test_completed;
 extern volatile unsigned sm1_test_dispatch_tick;
@@ -41,5 +53,6 @@ void sm1_test_debug_run(unsigned index);
 void sm1_test_record_run(bool mic);
 bool sm1_test_record_active(void);
 void sm1_test_record_status(void *reply);
+void sm1_test_record_error(void *reply);
 
 #endif

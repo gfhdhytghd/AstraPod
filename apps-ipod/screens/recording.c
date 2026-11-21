@@ -1855,6 +1855,26 @@ rec_abort:
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
 static volatile enum sm1_test_record_state shell_record_state;
 static char shell_record_path[SM1_TEST_RECORD_PATH_SIZE];
+static uint32_t shell_record_error[SM1_TEST_RECORD_ERROR_SIZE / sizeof(uint32_t)];
+
+void sm1_test_record_error(void *reply)
+{
+    int irq = disable_irq_save();
+    memcpy(reply, shell_record_error, sizeof(shell_record_error));
+    restore_irq(irq);
+}
+
+static void record_error(enum sm1_test_record_stage stage, unsigned fs_error)
+{
+    int irq = disable_irq_save();
+    shell_record_error[0] = stage;
+    shell_record_error[1] = audio_status();
+    shell_record_error[2] = pcm_rec_get_errors();
+    shell_record_error[3] = fs_error;
+    shell_record_error[4] = stage >= SM1_RECORD_STAGE_INIT ?
+                            pcm_rec_get_dma_blocks() : 0;
+    restore_irq(irq);
+}
 
 bool sm1_test_record_active(void)
 {
@@ -1876,6 +1896,7 @@ void sm1_test_record_run(bool mic)
     char path[MAX_PATH];
     int action = ACTION_NONE;
     bool started = false, stop = false;
+    record_error(SM1_RECORD_STAGE_NONE, 0);
     shell_record_state = SM1_RECORD_ERROR;
     if (mic && !mikey_supported())
         shell_record_state = SM1_RECORD_UNSUPPORTED;
@@ -1885,10 +1906,14 @@ void sm1_test_record_run(bool mic)
 #endif
              )
         shell_record_state = SM1_RECORD_BUSY;
-    else if ((dir_exists(REC_BASE_DIR) || mkdir(REC_BASE_DIR) == 0) &&
-             create_numbered_filename(path, REC_BASE_DIR,
-                                      "PodLink-", ".wav", 4 IF_CNFN_NUM_(, NULL)) &&
-             !file_exists(path))
+    else if (!dir_exists(REC_BASE_DIR) && mkdir(REC_BASE_DIR) < 0)
+        record_error(SM1_RECORD_STAGE_DIR, errno);
+    else if (!create_numbered_filename(path, REC_BASE_DIR, "PodLink-", ".wav",
+                                        4 IF_CNFN_NUM_(, NULL)))
+        record_error(SM1_RECORD_STAGE_FILENAME, errno);
+    else if (file_exists(path))
+        record_error(SM1_RECORD_STAGE_FILENAME, EEXIST);
+    else
     {
         struct audio_recording_options options = {
             .rec_source = mic ? AUDIO_SRC_MIC : AUDIO_SRC_LINEIN,
@@ -1900,10 +1925,10 @@ void sm1_test_record_run(bool mic)
         int keyclick = global_settings.keyclick;
         global_settings.keyclick = 0;
         talk_disable(true);
-        audio_stop();
         audio_init_recording();
         if (audio_status() & AUDIO_STATUS_ERROR)
         {
+            record_error(SM1_RECORD_STAGE_INIT, 0);
             audio_error_clear();
             global_settings.keyclick = keyclick;
             talk_disable(false);
@@ -1945,9 +1970,15 @@ void sm1_test_record_run(bool mic)
             }
         }
 
+        bool failed = audio_status() & AUDIO_STATUS_ERROR;
+        if (!started || failed)
+            record_error(started ? SM1_RECORD_STAGE_CAPTURE :
+                                   SM1_RECORD_STAGE_START, 0);
         audio_stop_recording_sync();
-        bool saved = started && !(audio_status() & AUDIO_STATUS_ERROR) &&
-                     file_exists(path);
+        bool saved = started && !failed &&
+                     !(audio_status() & AUDIO_STATUS_ERROR) && file_exists(path);
+        if (started && !failed && !saved)
+            record_error(SM1_RECORD_STAGE_SAVE, 0);
         audio_close_recording();
         rec_set_source(AUDIO_SRC_PLAYBACK, SRCF_PLAYBACK);
         sound_settings_apply();

@@ -113,15 +113,12 @@ the prefix checks) and `podlink_library.c` (MS3). Host:
 
 ### Transfer profiling
 
-Use `python -m hrlibrary --mode base --mbit 26 <music-file>` from the
-desktop checkout with the daemon venv and PYTHONPATH. Repeat with
-`--mode fast`. SAMPLE accepts regular files under `/Music/` and
-`/iPod_Control/Music/` and `/Recordings/`. Use a multi-MiB file for the 25 Mbit/s gate.
-Use `--tagcache` when passing a database basename. The client borrows the
-tty, checks length, offsets and CRC32, and prints JSON containing eight
-device timing counters, ARM idle percentage on supporting firmware, and
-tty read statistics. It discards the payload. Stage times include waits
-and preemption. The idle counter covers the whole device capture.
+Borrow the tty, send `MS3 PROFILE BASE` or `MS3 PROFILE FAST`, and use
+`MS3 STREAM SAMPLE <path>` on the same file in both modes. SAMPLE accepts
+regular files under `/Music/`, `/iPod_Control/Music/` and `/Recordings/`.
+Use `MS3 STREAM FILE <name>` for an allowlisted tagcache basename.
+Check offsets, length and CRC32. Read the eight timing counters and ARM
+idle time with `MS3 PROFILE CPU`. Stage times include waits and preemption.
 
 MS3 PROFILE BASE uses the 4 KiB CDC IN path. FAST uses two 16 KiB DMA
 buffers written directly by the producer, with one active DesignWare request.

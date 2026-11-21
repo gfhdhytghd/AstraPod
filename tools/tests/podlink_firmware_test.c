@@ -377,6 +377,7 @@ static void test_fast_in(void)
     remove_usb();
     insert();
     assert(fast_in && !tx_count && !tx_inflight && !tx_prepared);
+    clear_output();
     assert(podlink_profile_start(false));
     assert(!fast_in);
     assert(usb_serial_write(first, sizeof(first)) == sizeof(first));

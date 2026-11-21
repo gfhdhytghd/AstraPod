@@ -1945,9 +1945,7 @@ void sm1_test_record_run(bool mic)
             }
         }
 
-        audio_stop_recording();
-        while (audio_status() & AUDIO_STATUS_RECORD)
-            sleep(1);
+        audio_stop_recording_sync();
         bool saved = started && !(audio_status() & AUDIO_STATUS_ERROR) &&
                      file_exists(path);
         audio_close_recording();

@@ -999,6 +999,11 @@ void audio_stop_recording(void)
     audio_queue_post(Q_AUDIO_RECORD_STOP, 0);
 }
 
+void audio_stop_recording_sync(void)
+{
+    audio_queue_send(Q_AUDIO_RECORD_STOP, 0);
+}
+
 /* Pause current recording */
 void audio_pause_recording(void)
 {
@@ -1596,11 +1601,13 @@ static void on_record(const char *filename)
 
     logf("on_record: new file '%s'", filename);
 
-    /* Copy path and let caller go */
+    /* New captures acknowledge after entering RECORD_RECORDING. A file split
+     * can acknowledge as soon as the path is owned by the audio thread. */
     char path[MAX_PATH];
     strmemccpy(path, filename, MAX_PATH);
 
-    queue_reply(&audio_queue, 0);
+    if (record_state != REC_STATE_IDLE)
+        queue_reply(&audio_queue, 0);
 
     enum mark_stream_action mark_action;
 

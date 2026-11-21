@@ -82,6 +82,13 @@ fork's USB work; the `tools/` changes are this fork's.
 
 The player as a disk, a keyboard, a sound card or an iAP accessory's host.
 
+### PodLink
+
+| File | What changed | Why |
+|---|---|---|
+| `usbstack/usb_serial.c` | Default PodLink IN to two 16 KiB DMA buffers on boot and reconfiguration | Higher transfer rate with less CPU time per MiB. |
+| `usbstack/usb_core.c`, `export/sm1-test-control.h` | Add PodLink Shell recording commands and a capture status reply | Start, stop and retrieve a WAV from the host over PodLink. |
+
 ### Host presence
 
 | File | What changed | Why |

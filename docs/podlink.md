@@ -612,26 +612,15 @@ eight-field reply. Frame and file checksum bytes are unchanged: the player
 scans MSF1 data with a slicing-by-four CRC32, then combines its raw remainder
 with the file history and the PLNK/MSF1 prefix.
 
-Run these commands from AstraPod-Desktop with the usual HerdRemote venv.
-Add its system packages to PYTHONPATH if required by the local install.
-The client borrows the tty, validates all bytes, and discards the payload.
+Borrow the tty from HerdRemote before profiling. Send `MS3 PROFILE BASE` or
+`MS3 PROFILE FAST`, then stream the same file in each mode. For a database
+file, use `MS3 STREAM FILE database_idx.tcd`. Validate offsets, length and
+CRC32 before reading the counters with `MS3 PROFILE CPU`.
 
-```sh
-export PYTHONPATH="$PWD:$PWD/herdremote:/usr/lib/python3.14/site-packages"
-~/.local/share/podbox-herdremote/venv/bin/python -m hrlibrary --mode base --mbit 26 '/iPod_Control/Music/F00/example.m4a'
-~/.local/share/podbox-herdremote/venv/bin/python -m hrlibrary --mode fast --mbit 26 '/iPod_Control/Music/F00/example.m4a'
-```
-
-Use a multi-MiB file for the 25 Mbit/s gate. The 26 Mbit/s credit pacing
-example leaves some room for control and final response latency. Pacing
-limits the average by waiting between existing eight-reply windows and
-does not change ordinary library downloads. Omit it for unpaced tests.
-
-Use `--tagcache database_idx.tcd` for an allowlisted basename. Alternate
-the modes on the same file and record cold and warm results separately.
-JSON also reports the number of tty reads, the largest read, and the host
-thread CPU time spent inside reads. A CPU-light receive path with a low
-tty read size is not evidence of a host-side throughput limit.
+Use a multi-MiB file for the 25 Mbit/s gate. To pace a run at 26 Mbit/s,
+space out `MS3 CREDIT` requests based on the cumulative bytes received.
+For unpaced runs, send each credit as soon as the previous window is consumed.
+Record cold and warm results separately.
 
 For UI validation, enable the existing `/.rockbox/ui-perf.enable` marker
 before boot. Run the same list glide or cover-flow animation at idle and

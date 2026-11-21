@@ -73,8 +73,12 @@ $(ROCK_OUT)/staged/metronome.c: $(ROCK_SRC)/metronome.c $(APPSDIR)/plugins/stage
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-metronome.py $< $@
 
+$(ROCK_OUT)/staged/oscilloscope.c: $(ROCK_SRC)/oscilloscope.c $(APPSDIR)/plugins/stage-oscilloscope.py
+	$(SILENT)mkdir -p $(@D)
+	$(SILENT)python3 $(APPSDIR)/plugins/stage-oscilloscope.py $< $@
+
 ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot metronome \
-    minesweeper periodic_table playing_time pong robotfindskitten snake snake2 star stopwatch \
+    minesweeper oscilloscope periodic_table playing_time pong robotfindskitten snake snake2 star stopwatch \
     lib/highscore vu_meter $(ROCK_UTILITIES) $(ROCK_GAME_ADAPTERS)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
@@ -179,6 +183,7 @@ $(ROCK_OUT)/modules/games/bubbles.rock: $(FIXEDPOINTLIB)
 $(ROCK_OUT)/modules/demos/plasma.rock: $(FIXEDPOINTLIB)
 $(ROCK_OUT)/modules/demos/rocklife.rock $(ROCK_OUT)/modules/demos/vu_meter.rock: $(ROCK_OBJECTS)/lib/helper.o
 $(ROCK_OUT)/modules/demos/vu_meter.rock: $(FIXEDPOINTLIB)
+$(ROCK_OUT)/modules/demos/oscilloscope.rock: $(addprefix $(ROCK_OBJECTS)/lib/,configfile.o helper.o)
 $(ROCK_OUT)/modules/games/codebuster.rock: $(addprefix $(ROCK_OBJECTS)/lib/,configfile.o playback_control.o)
 $(ROCK_OUT)/modules/games/superdom.rock: $(addprefix $(ROCK_OBJECTS)/lib/,display_text.o playback_control.o)
 $(ROCK_OUT)/modules/apps/metronome.rock: $(FIXEDPOINTLIB)

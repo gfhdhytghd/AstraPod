@@ -69,6 +69,32 @@ elif src.stem == "periodic_table":
         "    rb->lcd_setfont(FONT_SYSFIXED);\n"
         "    struct font *pf = rb->font_get(FONT_SYSFIXED);",
     )
+elif src.stem == "playing_time":
+    # Preserve milliseconds and bytes for the average bitrate. The displayed
+    # duration is rounded separately to whole seconds.
+    replace(
+        "    int counted;",
+        "    unsigned long avg_bitrate;\n    int counted;",
+    )
+    replace(
+        "    /* convert units from ms to s */",
+        "    unsigned long long duration = pti->length[ePT_ELAPSED] + pti->length[ePT_REMAINING];\n"
+        "    unsigned long long bytes = pti->size[ePT_ELAPSED] + pti->size[ePT_REMAINING];\n"
+        "    pti->avg_bitrate = duration ? bytes * 8 / duration : 0;\n\n"
+        "    /* convert units from ms to s */",
+    )
+    replace(
+        "        /* Convert power of 2 kilobytes to power of 10 kilobits */\n"
+        "        long avg_bitrate = (pti->size[ePT_TOTAL] / pti->length[ePT_TOTAL]\n"
+        "                            * 1024 * 8 / 1000);\n"
+        "        rb->snprintf(buf, buffer_len, \"%ld  kbps\", avg_bitrate);",
+        "        unsigned long avg_bitrate = pti->avg_bitrate;\n"
+        "        rb->snprintf(buf, buffer_len, \"%lu  kbps\", avg_bitrate);",
+    )
+    replace(
+        "    if (!success)\n        return false;",
+        "    if (!success)\n        return rb->plugin_usb_taken();",
+    )
 elif src.stem == "robotfindskitten":
     replace('#include "lib/display_text.h"',
             '#include "lib/display_text.h"\n#include "lib/pluginlib_exit.h"')

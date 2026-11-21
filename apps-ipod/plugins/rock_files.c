@@ -21,6 +21,16 @@ static int file_slot(int fd)
     return -1;
 }
 
+bool rock_get_metadata(struct mp3entry *id3, int fd, const char *path)
+{
+    if (rock_usb_taken() || !id3 || !path || !*path
+        || (fd >= 0 && file_slot(fd) < 0))
+        return false;
+
+    /* The parser closes an internally opened fd and rewinds a supplied fd. */
+    return get_metadata(id3, fd, path);
+}
+
 int rock_open(const char *path, int flags, ...)
 {
     if (rock_usb_taken())

@@ -90,6 +90,8 @@ void audio_buffer_damaged(void);
 void audio_release_buffer(void);
 /* audio_peek_track() that reads only the buffer: safe on a small stack. */
 bool audio_peek_buffered_track(struct mp3entry *id3, int offset);
+/* Copy the current track under the ID3 lock without borrowing its cuesheet. */
+bool audio_current_track_snapshot(struct mp3entry *id3);
 
 unsigned int playback_status(void);
 

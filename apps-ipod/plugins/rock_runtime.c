@@ -38,6 +38,13 @@ static unsigned char *tail;
 static size_t tail_size;
 static bool usb_taken;
 static bool backlight_overridden;
+
+static struct mp3entry *rock_audio_current_track(void)
+{
+    static struct mp3entry snapshot;
+    return !usb_taken && audio_current_track_snapshot(&snapshot) ? &snapshot : NULL;
+}
+
 #ifdef HAVE_ADJUSTABLE_CPU_FREQ
 static bool plugin_boosted;
 
@@ -294,6 +301,39 @@ static long rock_event_ex(long event, void (*cleanup)(void *), void *parameter)
 static long rock_event(long event)
 {
     return rock_event_ex(event, NULL, NULL);
+}
+
+static bool rock_action_userabort(int timeout)
+{
+    if (usb_taken)
+        return true;
+    int action = get_action(CONTEXT_STD, timeout);
+    return action == ACTION_STD_CANCEL || rock_event(action) == SYS_USB_CONNECTED;
+}
+
+static void rock_progress_set_delay(long delay)
+{
+    if (usb_taken)
+        return;
+    rock_list_release(false);
+    splash_progress_set_delay(delay);
+}
+
+static void rock_progress(int current, int total, const char *fmt, ...)
+{
+    if (usb_taken)
+        return;
+
+    char text[256];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(text, sizeof(text), P2STR((const unsigned char *)fmt), args);
+    va_end(args);
+
+    rock_list_release(false);
+    struct rock_native_scope scope = rock_display_native_begin();
+    splash_progress(current, total, "%s", text);
+    rock_display_native_end(&scope, ROCK_RESUME_SILENT);
 }
 
 static void rock_splashf(int ticks, const char *fmt, ...)

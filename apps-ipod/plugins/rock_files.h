@@ -5,6 +5,7 @@
 #include "file.h"
 #include "gcc_extensions.h"
 #include "dir.h"
+#include "metadata.h"
 
 int rock_open(const char *, int, ...);
 int rock_creat(const char *, mode_t);
@@ -23,5 +24,6 @@ struct DIRENT *rock_readdir(DIR *);
 int rock_closedir(DIR *);
 struct dirinfo rock_dir_get_info(DIR *, struct DIRENT *);
 void rock_close_files(void);
+bool rock_get_metadata(struct mp3entry *id3, int fd, const char *path);
 
 #endif

@@ -47,7 +47,10 @@
 #include "draw/viewport.h"
 #include "settings.h"
 #include "settings/settings_list.h"
+#include "speech/language.h"
 #include "speech/talk.h"
+#include "system/app_util.h"
+#include "system/format_time.h"
 #include "system/appevents.h"
 #include "system/shutdown.h"
 #include "system/strutil.h"
@@ -62,6 +65,7 @@
 #include "widgets/list.h"
 #include "widgets/yesno.h"
 #include "widgets/option_select.h"
+#include "widgets/splash.h"
 
 #if __has_include("rock_compat_tables.h")
 #include "rock_compat_tables.h"
@@ -142,6 +146,7 @@ enum plugin_status plugin__start(const void *parameter) NO_PROF_ATTR;
 #endif
 #undef str
 #define str(id) language_strings[(id)]
+#undef splash
 #define splash(ticks, msg) splashf((ticks), (msg))
 #undef DEBUGF
 #undef LDEBUGF

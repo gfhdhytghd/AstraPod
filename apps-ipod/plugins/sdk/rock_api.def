@@ -206,4 +206,28 @@ ROCK_SLOT(void (*cpu_boost_)(bool, char *, int), cpu_boost_, rock_cpu_boost)
 ROCK_SLOT(void (*cpu_boost)(bool), cpu_boost, rock_cpu_boost)
 #endif
 #endif
+
+/* Read-only metadata and playback statistics */
+ROCK_SLOT(__typeof__(get_metadata) *get_metadata, get_metadata, rock_get_metadata)
+ROCK_SLOT(__typeof__(audio_current_track) *audio_current_track,
+          audio_current_track, rock_audio_current_track)
+ROCK_DIRECT(playlist_amount)
+ROCK_DIRECT(playlist_get_track_info)
+ROCK_DIRECT(playlist_get_resume_info)
+ROCK_DIRECT(playlist_get_display_index)
+ROCK_DIRECT(format_time_auto)
+ROCK_DIRECT(output_dyn_value)
+ROCK_DIRECT(lang_is_rtl)
+ROCK_DIRECT(talk_id)
+ROCK_DIRECT(talk_idarray)
+ROCK_DIRECT(talk_number)
+ROCK_DIRECT(talk_force_enqueue_next)
+ROCK_DIRECT(talk_force_shutup)
+ROCK_SLOT(__typeof__(action_userabort) *action_userabort,
+          action_userabort, rock_action_userabort)
+ROCK_SLOT(__typeof__(splash_progress_set_delay) *splash_progress_set_delay,
+          splash_progress_set_delay, rock_progress_set_delay)
+ROCK_SLOT(void (*splash_progress)(int, int, const char *, ...) ATTRIBUTE_PRINTF(3, 4),
+          splash_progress, rock_progress)
+
 #undef ROCK_RAW

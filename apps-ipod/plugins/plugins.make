@@ -60,7 +60,8 @@ $(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_UTILITIES))): $(ROCK_OUT)/
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-utilities.py $< $@
 
 ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot \
-    minesweeper periodic_table pong robotfindskitten snake snake2 star stopwatch lib/highscore $(ROCK_UTILITIES)
+    minesweeper periodic_table playing_time pong robotfindskitten snake snake2 star stopwatch \
+    lib/highscore $(ROCK_UTILITIES)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@

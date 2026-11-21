@@ -44,10 +44,10 @@ static unsigned int next(char *record, unsigned int size)
 }
 static void reset(void) { reset_calls++; }
 
-static const struct podlink_resident full = {receive, next, reset};
-static const struct podlink_resident only_receive = {receive, NULL, NULL};
-static const struct podlink_resident only_next = {NULL, next, NULL};
-static const struct podlink_resident empty = {NULL, NULL, NULL};
+static const struct podlink_resident full = {receive, next, reset, NULL};
+static const struct podlink_resident only_receive = {receive, NULL, NULL, NULL};
+static const struct podlink_resident only_next = {NULL, next, NULL, NULL};
+static const struct podlink_resident empty = {NULL, NULL, NULL, NULL};
 
 static void work(void)
 {

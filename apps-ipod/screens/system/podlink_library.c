@@ -2,13 +2,16 @@
 #include "config.h"
 #include <stdio.h>
 #include <string.h>
+#include "strcasecmp.h"
 #include "file.h"
 #include "mv.h"
 #include "version.h"
 #include "screens/system/podlink_library.h"
 #include "screens/system/podlink_media.h"
 #ifdef HAVE_TAGCACHE
+#include "crc32.h"
 #include "database/tagcache.h"
+#include "system/strutil.h"
 #include "metadata/metadata_common.h"
 #include "metadata/albumart.h"
 #include "metadata/art_cache.h"
@@ -27,7 +30,7 @@ static const int text_tags[] = {
     tag_genre, tag_composer, tag_grouping, tag_comment
 };
 
-static enum { IDLE, COUNT, TRACKS, ART } operation;
+static enum { IDLE, COUNT, TRACKS, ART, FILE_STREAM } operation;
 static struct tagcache_search walk;
 static int32_t commit_id;
 static uint32_t generation;
@@ -38,6 +41,8 @@ static unsigned char record[ARRAYLEN(text_tags) * TAGCACHE_BUFSZ +
 static int art_fd;
 static unsigned int art_left;
 static char reply[MEDIA_REPLY_SIZE];
+static int file_fd;
+static uint32_t file_length, file_offset, file_crc, numeric_revision;
 
 bool podlink_library_active(void)
 {
@@ -50,6 +55,8 @@ void podlink_library_close(void)
         tagcache_search_finish(&walk);
     if (operation == ART)
         close(art_fd);
+    if (operation == FILE_STREAM)
+        close(file_fd);
     operation = IDLE;
 }
 
@@ -166,6 +173,109 @@ static bool database_changed(void)
            commit_id != tagcache_commit_id() ||
            generation != tagcache_generation() ||
            scan_removed != tagcache_get_stat()->scan_removed;
+}
+
+static bool file_snapshot(void)
+{
+    if (database_busy() || !tagcache_is_usable())
+        return false;
+    commit_id = tagcache_commit_id();
+    generation = tagcache_generation();
+    scan_removed = tagcache_get_stat()->scan_removed;
+    return tagcache_export_revision(&numeric_revision) && !database_changed();
+}
+
+static bool file_snapshot_changed(void)
+{
+    uint32_t revision;
+    return !tagcache_export_revision(&revision) || revision != numeric_revision ||
+           database_changed();
+}
+
+static const char *database_files(const unsigned char *name, size_t size)
+{
+    if (!file_snapshot())
+        return "MS3 ERR database unavailable";
+
+    int length = snprintf(reply, sizeof(reply), "MS3 FILES %ld\t%lu\t%d\t%lu",
+                          (long)commit_id, (unsigned long)generation,
+                          scan_removed, (unsigned long)numeric_revision);
+    for (int tag = -1; tag < TAG_COUNT; tag++)
+    {
+        if (tag >= 0 && TAGCACHE_IS_NUMERIC(tag))
+            continue;
+        char basename[24], path[MAX_PATH];
+        if (tag < 0)
+            memcpy(basename, TAGCACHE_FILE_MASTER, sizeof(TAGCACHE_FILE_MASTER));
+        else
+            snprintf(basename, sizeof(basename), TAGCACHE_FILE_INDEX, tag);
+        if (name && (strlen(basename) != size || memcmp(name, basename, size)))
+            continue;
+
+        int fd = open_pathfmt(path, sizeof(path), O_RDONLY, "%s/%s",
+                              tagcache_get_stat()->db_path, basename);
+        off_t bytes = fd < 0 ? -1 : ffilesize(fd);
+        bool changed = file_snapshot_changed();
+        if (changed || bytes < 0 || (uint64_t)bytes > UINT32_MAX)
+        {
+            if (fd >= 0)
+                close(fd);
+            return changed ? "MS3 ERR database changed" : "MS3 ERR database read";
+        }
+        if (name)
+        {
+            file_fd = fd;
+            file_length = bytes;
+            file_offset = 0;
+            file_crc = UINT32_MAX;
+            operation = FILE_STREAM;
+            snprintf(reply, sizeof(reply), "MS3 FILE %lu", (unsigned long)file_length);
+            return reply;
+        }
+
+        close(fd);
+        int n = snprintf(reply + length, sizeof(reply) - length, "\t%s:%lu",
+                         basename, (unsigned long)bytes);
+        if (n < 0 || (size_t)n >= sizeof(reply) - length)
+            return "MS3 ERR database manifest";
+        length += n;
+    }
+    if (name)
+        return "MS3 ERR database file";
+    if (file_snapshot_changed())
+        return "MS3 ERR database changed";
+    if ((unsigned int)length > podlink_max_message())
+        return "MS3 ERR message size";
+    return reply;
+}
+
+static const char *file_next(unsigned char *binary, unsigned int *size)
+{
+    if (file_snapshot_changed())
+        return fail("MS3 ERR database changed");
+    if (file_offset == file_length)
+    {
+        snprintf(reply, sizeof(reply), "MS3 DONE %lu %08lx",
+                 (unsigned long)file_length, (unsigned long)(file_crc ^ UINT32_MAX));
+        return fail(reply);
+    }
+
+    unsigned int limit = podlink_max_message();
+    if (limit <= 8)
+        return fail("MS3 ERR message size");
+    unsigned int n = MIN(MIN(limit, PODLINK_MAX_MESSAGE) - 8, file_length - file_offset);
+    memcpy(binary, "MSF1", 4);
+    for (unsigned int i = 0; i < 4; i++)
+        binary[4 + i] = file_offset >> (8 * i);
+    if (read(file_fd, binary + 8, n) != (ssize_t)n)
+        return fail("MS3 ERR database read");
+    if (file_snapshot_changed())
+        return fail("MS3 ERR database changed");
+
+    file_crc = crc_32r(binary + 8, n, file_crc);
+    file_offset += n;
+    *size = n + 8;
+    return NULL;
 }
 
 static const char *database_next(void)
@@ -492,12 +602,15 @@ static const char *file_detail(const char *path)
 }
 
 const char *podlink_library_command(const unsigned char *data, size_t size,
-                                   bool *refresh_pending)
+                                   bool *refresh_pending, unsigned char *binary,
+                                   unsigned int *binary_size)
 {
     if (size == 4 && !memcmp(data, "STOP", 4))
         return fail("MS3 STOPPED");
     if (size == 4 && !memcmp(data, "NEXT", 4))
     {
+        if (operation == FILE_STREAM)
+            return file_next(binary, binary_size);
         if (operation == ART)
             return art_next();
         if (operation != IDLE)
@@ -511,6 +624,11 @@ const char *podlink_library_command(const unsigned char *data, size_t size,
         return database_open(true);
     if (size == 2 && !memcmp(data, "DB", 2))
         return database_open(false);
+
+    if (size == 5 && !memcmp(data, "FILES", 5))
+        return database_files(NULL, 0);
+    if (size >= 5 && !memcmp(data, "FILE ", 5))
+        return database_files(data + 5, size - 5);
 
     int art_size = -1;
     bool delete = size > 4 && !memcmp(data, "DEL ", 4);
@@ -573,11 +691,14 @@ void podlink_library_close(void)
 }
 
 const char *podlink_library_command(const unsigned char *data, size_t size,
-                                   bool *refresh_pending)
+                                   bool *refresh_pending, unsigned char *binary,
+                                   unsigned int *binary_size)
 {
     (void)data;
     (void)size;
     (void)refresh_pending;
+    (void)binary;
+    (void)binary_size;
     return "MS3 ERR database unavailable";
 }
 #endif

@@ -104,3 +104,14 @@ clean:
 	rm -f database_pb database_pb.exe
 
 .PHONY: all native win clean
+
+# Offline MS3 test. Run against a disposable player root with a database.
+MS3_TEST ?= /tmp/podlink_library_test
+.PHONY: test-library
+test-library: BUILD := $(NATDIR)
+test-library:
+	$(CC) $(OPT) -std=gnu11 $(WARN) $(DEFINES) -DTARGET_NAME='"ipodvideo"' $(INCLUDES) \
+	      -o $(MS3_TEST) ../tests/podlink_library_test.c \
+	      $(filter-out database_pb.c,$(SRC)) $(OSFILE_UNIX) \
+	      $(APPS)/screens/system/podlink_library.c \
+	      $(APPS)/screens/system/podlink_media.c -lm $(LDFLAGS)

@@ -75,11 +75,16 @@ pub fn encode(dest: &mut [u8], kind: Kind, seq: u32, data: &[u8]) -> usize {
         return 0;
     }
     let n = data.len();
+    dest[16..16 + n].copy_from_slice(data);
+    finish_encode(dest, kind, seq, n)
+}
+
+/* The caller has filled the payload starting at byte 16. */
+pub(crate) fn finish_encode(dest: &mut [u8], kind: Kind, seq: u32, n: usize) -> usize {
     dest[..4].copy_from_slice(b"PLNK");
     dest[4..8].copy_from_slice(&[kind as u8, 0, 0, 0]);
     dest[8..12].copy_from_slice(&seq.to_le_bytes());
     dest[12..16].copy_from_slice(&(n as u32).to_le_bytes());
-    dest[16..16 + n].copy_from_slice(data);
     let c = crc32(&dest[4..16 + n]);
     dest[16 + n..20 + n].copy_from_slice(&c.to_le_bytes());
     n + 20

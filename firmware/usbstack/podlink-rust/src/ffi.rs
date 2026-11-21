@@ -29,6 +29,7 @@ pub struct Registry {
     receive: Option<Receive>,
     next: Option<Next>,
     reset: Option<Reset>,
+    next_binary: Option<Next>,
 }
 struct Adapter {
     registry: Registry,
@@ -48,6 +49,7 @@ static CTX: Shared = Shared(UnsafeCell::new(Context {
             receive: None,
             next: None,
             reset: None,
+            next_binary: None,
         },
         background: None,
     },
@@ -179,6 +181,12 @@ impl Ports for Adapter {
     fn next_record(&mut self, out: &mut [u8]) -> usize {
         match self.registry.next {
             Some(f) => unsafe { f(out.as_mut_ptr(), out.len() as c_uint) as usize }.min(out.len()),
+            None => 0,
+        }
+    }
+    fn next_binary(&mut self, out: &mut [u8]) -> usize {
+        match self.registry.next_binary {
+            Some(f) => unsafe { f(out.as_mut_ptr(), out.len() as c_uint) as usize },
             None => 0,
         }
     }
@@ -548,6 +556,6 @@ pub extern "C" fn podlink_rust_invalidate() {
 #[cfg(target_pointer_width = "32")]
 const _: () = {
     assert!(core::mem::size_of::<Message>() == 16);
-    assert!(core::mem::size_of::<Registry>() == 12);
+    assert!(core::mem::size_of::<Registry>() == 16);
     assert!(core::mem::size_of::<Parser>() == FRAME + 8);
 };

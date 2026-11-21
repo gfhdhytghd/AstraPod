@@ -171,12 +171,6 @@ static bool usr_cancel(void);
  * commit id its merge produces. */
 #define TAGCACHE_TEMP_STAMP      0x54435354
 
-/* The main database master index and numeric data. */
-#define TAGCACHE_FILE_MASTER     "database_idx.tcd"
-
-/* The main database string data. */
-#define TAGCACHE_FILE_INDEX      "database_%d.tcd"
-
 /* Present while a commit's .new files are being renamed into place */
 #define TAGCACHE_FILE_SWAP       "database_swap.tcd"
 
@@ -5186,6 +5180,19 @@ static void run_command_queue(bool force)
         register_storage_idle_func(command_queue_sync_callback);
 }
 
+/* Export must see the same numeric values as a search, which can see
+ * unflushed updates. The flush holds this mutex until its writes finish. */
+static uint32_t numeric_revision;
+
+bool tagcache_export_revision(uint32_t *revision)
+{
+    mutex_lock(&command_queue_mutex);
+    bool synced = COMMAND_QUEUE_IS_EMPTY;
+    *revision = numeric_revision;
+    mutex_unlock(&command_queue_mutex);
+    return synced;
+}
+
 static void queue_command(int cmd, long idx_id, int tag, long data)
 {
     while (1)
@@ -5227,6 +5234,7 @@ static void queue_command(int cmd, long idx_id, int tag, long data)
             command_queue_widx = next;
 
             tc_stat.queue_length++;
+            numeric_revision++;
 
             mutex_unlock(&command_queue_mutex);
             break;

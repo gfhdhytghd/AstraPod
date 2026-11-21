@@ -139,3 +139,53 @@ fn clock_mailbox_coalesces_and_rejects_untrusted_records() {
     mailbox.clear();
     assert_eq!(mailbox.take(&mut out), None);
 }
+
+#[test]
+fn resident_binary_waits_for_tx_space_and_uses_the_negotiated_limit() {
+    let mut s = Session::new();
+    let mut p = Port {
+        now: 0,
+        input: vec![],
+        output: vec![],
+        usb: Some(1),
+    };
+    assert!(s.open(&mut p));
+    s.poll(&mut p);
+    let limit = 4096u32;
+    let mut offer = vec![1, 0];
+    offer.extend_from_slice(&limit.to_le_bytes());
+    input(&mut p, Kind::Open, &offer);
+    for _ in 0..3 {
+        s.poll(&mut p);
+    }
+    assert_eq!(s.state, State::Connected);
+    p.output.clear();
+    assert_eq!(s.send(Kind::Text, b"one"), 1);
+    assert_eq!(s.send(Kind::Text, b"two"), 1);
+    assert_eq!(s.send(Kind::Binary, b"three"), 0);
+    s.send_resident_binary(|_| panic!("must retain the chunk while busy"));
+    s.poll(&mut p);
+    let chunk = vec![0x9a; limit as usize];
+    s.send_resident_binary(|out| {
+        assert_eq!(out.len(), chunk.len());
+        out.copy_from_slice(&chunk);
+        out.len()
+    });
+    for _ in 0..3 {
+        s.poll(&mut p);
+    }
+    let mut parser = Parser::new();
+    let mut offset = 0;
+    for (kind, payload) in [
+        (Kind::Text, &b"one"[..]),
+        (Kind::Text, &b"two"[..]),
+        (Kind::Binary, &chunk),
+    ] {
+        let (used, meta) = parser.decode(&p.output[offset..]);
+        offset += used;
+        let meta = meta.unwrap().unwrap();
+        assert_eq!(meta.kind, kind);
+        assert_eq!(parser.payload(meta), payload);
+    }
+    assert_eq!(offset, p.output.len());
+}

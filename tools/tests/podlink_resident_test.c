@@ -256,7 +256,7 @@ int main(void)
     assert(greeting_after_pressure);podlink_close();work();
     /* Dedicated bulk bypasses both foreground byte and frame limits. */
     static const struct podlink_resident consumer = {
-        dedicated_art, cider_next, resident_reset};
+        dedicated_art, cider_next, resident_reset, NULL};
     podlink_set_resident(&consumer);
     assert(podlink_open_agents(background));
     while(traced_client_poll(&m)){}

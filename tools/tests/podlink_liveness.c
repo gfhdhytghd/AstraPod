@@ -579,7 +579,7 @@ int main(int argc, char **argv)
     mutex_init(&cider);
     usb_serial_init();
     podlink_init(); /* real shim: creates the real worker thread */
-    static const struct podlink_resident consumer = {cider_receive, cider_next, cider_reset};
+    static const struct podlink_resident consumer = {cider_receive, cider_next, cider_reset, NULL};
     podlink_set_resident(&consumer);
     pthread_t t[6];
     pthread_create(&t[0], NULL, controller, NULL);

@@ -427,17 +427,18 @@ the existing media transfer protocol.
 ## MS3 library
 
 Use MS3 on the iPod Classic in PodLink USB mode. Send one TEXT request
-and wait for its TEXT reply before sending the next request. Replies are
-at most 500 bytes. A
-request that conflicts with an open media upload, inventory, database walk,
-or artwork stream returns `MS1 ERR busy`, `MS2 ERR busy` or `MS3 ERR busy`
+and wait for its reply before sending the next request. TEXT replies are
+at most 500 bytes. A request that conflicts with an open media upload,
+inventory, database walk, file transfer, or artwork stream returns `MS1 ERR busy`, `MS2 ERR busy` or `MS3 ERR busy`
 with the requesting command's prefix.
 
 | Request | Reply |
 | --- | --- |
 | `MS3 SUMMARY` | `MS3 SUMMARY <model>\t<firmware>\t<total_bytes>\t<free_bytes>\t<track_count>\t<commit_id>\t<ready>\t<busy>`, or `MS3 MORE` while counting |
+| `MS3 FILES` | Lists the database snapshot and file sizes |
+| `MS3 FILE <name>` | `MS3 FILE <size>` opens a listed file |
 | `MS3 DB` | `MS3 READY` opens the track walk |
-| `MS3 NEXT` | Advances the current count, track walk, or artwork stream |
+| `MS3 NEXT` | Advances the current count, track walk, file transfer, or artwork stream |
 | `MS3 STOP` | `MS3 STOPPED` closes the current MS3 operation |
 | `MS3 DETAIL <path>` | `MS3 DETAIL <size_bytes>\t<codec>\t<sample_rate_hz>\t<channels>\t<has_art>` |
 | `MS3 ART <size> <path>` | `MS3 ART <width> <height> <rows\|columns>`, `MS3 NOART`, or `MS3 PLACEHOLDER` |
@@ -447,6 +448,51 @@ In the table, `\t` is a literal tab. Booleans are `0` or `1`. Paths are
 absolute, extend to the end of the request, and use the exact bytes from a
 track record, including any spaces. A summary with `ready=0` reports zero
 tracks. Disk figures describe the main volume.
+
+### Bulk database read
+
+Send `MS3 FILES` before downloading. The reply is a single TEXT frame:
+
+```text
+MS3 FILES <commit_id>\t<generation>\t<scan_removed>\t<numeric_revision>\t<name>:<size>...
+```
+
+All numbers in this reply are decimal. Each file has a tab-separated
+`name:size` field. The files live under `/.rockbox/library/database`.
+The allowlist is `database_idx.tcd` and `database_{0,1,2,3,4,5,6,7,8,12}.tcd`.
+Send only the basename.
+
+For each file, send `MS3 FILE <name>` and check its size against the manifest.
+Request one chunk at a time with `MS3 NEXT`. Each BINARY reply contains
+four ASCII bytes `MSF1`, a little-endian unsigned 32-bit byte offset, and
+the raw file bytes. The first offset is zero. Require contiguous offsets
+and keep each frame within the negotiated PodLink maximum, including the
+eight-byte prefix. After the last data chunk, send one more `MS3 NEXT` for
+TEXT `MS3 DONE <length> <crc32>`. The length is decimal. The CRC is eight
+lowercase hexadecimal digits using standard reflected CRC32 (as in zlib)
+over the complete file, excluding the chunk prefixes.
+
+After all files pass their length and CRC checks, request `MS3 FILES`
+again. Compare all four snapshot values and every file size with the first
+manifest. If they differ, discard the snapshot. A busy database or pending
+playback-statistics write can return `MS3 ERR database unavailable` when
+opening a file or reading the manifest. A change during a transfer returns
+`MS3 ERR database changed`. Use `MS3 STOP` to abandon a transfer.
+If the first `MS3 FILES` returns `MS3 ERR command`, use the track walk.
+
+The files use the `TCH10` tagcache layout (`0x54434810`). Detect byte order
+from the magic. The master contains a 24-byte header and 96-byte rows.
+The header's commit ID is the fifth 32-bit word. Each row has 23 signed
+32-bit tag slots and one flags word. Keep the zero-based row index and
+skip rows with flags bit 0 set. Other files start with a 12-byte header.
+String slots are absolute offsets into the corresponding tag file. At each
+offset, a signed 32-bit length and a signed 32-bit index precede the
+NUL-terminated UTF-8 string. Read up to the first NUL within the stated
+length. The tag slots and display rules are defined in
+`apps-ipod/database/tagcache.h` and `tagcache.c`. The desktop reference
+parser is in `herdremote/hrlibrary.py`.
+
+### Track walk
 
 After `MS3 READY`, request `MS3 NEXT` until `MS3 END`. On `MS3 MORE`, send
 another `MS3 NEXT`. Each track is one record split over one or more replies.

@@ -37,6 +37,10 @@ enum tag_type { tag_artist = 0, tag_album, tag_genre, tag_title,
     tag_virt_episode,
     TAG_COUNT_ALL};
 
+/* Published database files beneath tagcache_stat.db_path. */
+#define TAGCACHE_FILE_MASTER "database_idx.tcd"
+#define TAGCACHE_FILE_INDEX  "database_%d.tcd"
+
 /* How many entries to fetch to the seek table at once while searching. */
 #define SEEK_LIST_SIZE 32
 
@@ -236,6 +240,9 @@ void tagcache_update_numeric(int idx_id, int tag, long data);
  * was read in: keep the two together, and drop an update whose generation
  * has moved on. */
 uint32_t tagcache_generation(void);
+/* False while playback statistics are pending. Revision moves on a write
+ * queued to the master file, even when the database commit ID stays put. */
+bool tagcache_export_revision(uint32_t *revision);
 
 struct tagcache_stat* tagcache_get_stat(void);
 /* Fill in the change counters above. Cheap enough to ask on a timer; the

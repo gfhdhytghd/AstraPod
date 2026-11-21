@@ -299,7 +299,8 @@ static const char *sync_command(const unsigned char *data, unsigned int size)
     return "MS2 ERR command";
 }
 
-static const char *handle_message(const struct podlink_message *message)
+static const char *handle_message(const struct podlink_message *message,
+                                  unsigned char *binary, unsigned int *binary_size)
 {
     const unsigned char *data = message->data;
     unsigned int size = message->length;
@@ -330,7 +331,10 @@ static const char *handle_message(const struct podlink_message *message)
 #endif
             )
             return "MS3 ERR busy";
-        return podlink_library_command(data + 4, size - 4, &refresh_pending);
+        /* Only NEXT produces binary. It has finished inspecting the request
+         * before it overwrites the mailbox. */
+        return podlink_library_command(data + 4, size - 4, &refresh_pending,
+                                       binary, binary_size);
     }
     if (message->type == PODLINK_TEXT && size >= 4 && !memcmp(data, "MS2 ", 4))
         return podlink_library_active() ? "MS2 ERR busy" : sync_command(data, size);
@@ -361,6 +365,7 @@ static struct mutex media_mutex;
 static struct podlink_message pending_message;
 static unsigned char mailbox[PODLINK_MAX_MESSAGE];
 static char pending_reply[sizeof(inventory_reply)];
+static unsigned int pending_binary;
 static bool queued, working, reset_pending;
 
 void podlink_media_init(void)
@@ -379,7 +384,7 @@ bool podlink_media_enqueue(const struct podlink_message *message)
         return false;
 
     mutex_lock(&media_mutex);
-    if (!queued && !working && !pending_reply[0])
+    if (!queued && !working && !pending_reply[0] && !pending_binary)
     {
         memcpy(mailbox, message->data, message->length);
         pending_message = *message;
@@ -395,6 +400,7 @@ void podlink_media_disconnect(void)
     mutex_lock(&media_mutex);
     queued = false;
     pending_reply[0] = '\0';
+    pending_binary = 0;
     reset_pending = true;
     mutex_unlock(&media_mutex);
 }
@@ -407,6 +413,21 @@ unsigned int podlink_media_next(char *reply, unsigned int size)
     {
         memcpy(reply, pending_reply, length);
         pending_reply[0] = '\0';
+    }
+    else
+        length = 0;
+    mutex_unlock(&media_mutex);
+    return length;
+}
+
+unsigned int podlink_media_next_binary(unsigned char *out, unsigned int size)
+{
+    mutex_lock(&media_mutex);
+    unsigned int length = pending_binary;
+    if (length && length <= size)
+    {
+        memcpy(out, mailbox, length);
+        pending_binary = 0;
     }
     else
         length = 0;
@@ -428,10 +449,15 @@ void podlink_media_work(void)
     if (!process)
         return;
 
-    const char *reply = handle_message(&pending_message);
+    unsigned int binary_size = 0;
+    const char *reply = handle_message(&pending_message, mailbox, &binary_size);
     mutex_lock(&media_mutex);
-    if (!reset_pending && reply)
-        snprintf(pending_reply, sizeof(pending_reply), "%s", reply);
+    if (!reset_pending)
+    {
+        pending_binary = binary_size;
+        if (reply)
+            snprintf(pending_reply, sizeof(pending_reply), "%s", reply);
+    }
     working = false;
     mutex_unlock(&media_mutex);
 }

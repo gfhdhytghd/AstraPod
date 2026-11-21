@@ -14,6 +14,9 @@ pub trait Ports: Transport {
     fn clear_time(&mut self);
     fn receive(&mut self, m: Meta, data: &[u8]) -> bool;
     fn next_record(&mut self, out: &mut [u8]) -> usize;
+    fn next_binary(&mut self, _out: &mut [u8]) -> usize {
+        0
+    }
     fn reset_consumer(&mut self);
     fn background(&mut self, m: Meta, data: &[u8]);
     fn log_enabled(&self) -> bool;
@@ -248,6 +251,7 @@ impl Service {
                 self.record_len =
                     core::cmp::min(p.next_record(&mut self.record), self.record.len());
             }
+            self.session.send_resident_binary(|out| p.next_binary(out));
             if self.record_len != 0
                 && self
                     .session

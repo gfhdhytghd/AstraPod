@@ -1188,7 +1188,12 @@ static void resident_reset(void)
 
 void cider_init(void)
 {
-    static const struct podlink_resident consumer = {resident_receive, resident_next, resident_reset};
+    static const struct podlink_resident consumer = {
+        .receive = resident_receive,
+        .next = resident_next,
+        .reset = resident_reset,
+        .next_binary = podlink_media_next_binary,
+    };
     if (initialized) return;
     set_sleep_timer_callback(cider_sleep_pause);
     mutex_init(&cider_mutex);

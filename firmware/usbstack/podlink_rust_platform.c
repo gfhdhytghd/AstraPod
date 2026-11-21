@@ -30,7 +30,7 @@ static struct
 _Static_assert(51000 + sizeof(worker) < 64 * 1024,
                "resident Rust PodLink RAM budget");
 _Static_assert(sizeof(struct podlink_message) == 16, "Rust message ABI");
-_Static_assert(sizeof(struct podlink_resident) == 12, "Rust registry ABI");
+_Static_assert(sizeof(struct podlink_resident) == 16, "Rust registry ABI");
 _Static_assert(sizeof(struct podlink_parser) == PODLINK_FRAME_MAX + 8,
                "Rust parser ABI");
 extern void podlink_rust_step(void);

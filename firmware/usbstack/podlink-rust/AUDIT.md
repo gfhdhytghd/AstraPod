@@ -18,7 +18,7 @@ are Rust values. Application dispatch matches the closed `Kind` enum.
 The resident service owns the bounded frame/byte inbox, HR welcome, TS routing,
 DA/DK one-shot token, outgoing resident/log records and foreground generation.
 It does not hold a pointer to a C callback table. Its FFI adapter copies the
-three callback fields into typed `Option<unsafe extern "C" fn(...)>` entries.
+four callback fields into typed `Option<unsafe extern "C" fn(...)>` entries.
 It checks each Option at the call site while holding the service mutex.
 Registration, replacement and unregistration take that same mutex. Unregister
 returns only after an in-progress callback finishes. No consumer table of raw

@@ -179,6 +179,20 @@ impl Session {
         }
         rc
     }
+    pub(crate) fn send_resident_binary(&mut self, next: impl FnOnce(&mut [u8]) -> usize) {
+        // Pull a chunk only when it can be queued. Control keeps the third slot.
+        if self.count >= 2 || self.peer_max == 0 {
+            return;
+        }
+        let frame = &mut self.tx[(self.head + self.count) % 3];
+        let n = next(&mut frame.data[16..16 + self.peer_max]);
+        if n != 0 && n <= self.peer_max {
+            frame.len = wire::finish_encode(&mut frame.data, Kind::Binary, self.next_seq, n);
+            frame.sent = 0;
+            self.count += 1;
+            self.next();
+        }
+    }
     pub fn close(&mut self, p: &mut impl Transport) {
         if !self.leased || self.release {
             return;

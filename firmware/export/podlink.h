@@ -89,6 +89,8 @@ struct podlink_resident
     bool (*receive)(const struct podlink_message *message);
     unsigned int (*next)(char *record, unsigned int size);
     void (*reset)(void);
+    /* Optional. Called only with a reserved TX slot and negotiated space. */
+    unsigned int (*next_binary)(unsigned char *data, unsigned int size);
 };
 void podlink_set_resident(const struct podlink_resident *consumer);
 

@@ -72,7 +72,7 @@ The firmware routes by prefix.
 | `hr` / `HR`, `W S A T D Q X R U P N` | HerdRemote Agents screen | `docs/podbox/herdremote-protocol.md` |
 | `MS1` | Import one audio file | `docs/podlink.md` "Import audio files" |
 | `MS2` | Jellyfin sync directory: LIST/NEXT/PUT/DEL | `docs/podlink.md` "Sync Jellyfin" |
-| `MS3` | Library: SUMMARY, DB walk, DETAIL, ART, DEL | `docs/podlink.md` "MS3 library" |
+| `MS3` | Library: SUMMARY, FILES, FILE, DB walk, DETAIL, ART, DEL | `docs/podlink.md` "MS3 library" |
 | `DH` / `DA` / `DK` | Disk Mode consent token | `docs/podlink.md` "Resident Disk Mode" |
 | `TS` | Computer clock to the RTC | protocol doc "Computer clock sync" |
 | `HF` / `hf` | Continuity handoff of playback | protocol doc "Continuity handoff v1" |
@@ -86,8 +86,11 @@ the prefix checks) and `podlink_library.c` (MS3). Host:
 `herdremote/hrmediasync.py` (Jellyfin) and
 `herdremote/hrlibrary.py` (MS3 client and `LibraryCache`).
 
-- Replies are at most 500 bytes. Large data comes as `MS3 DATA +`/`.`
-  base64 chunks; decode each chunk, then join the bytes.
+- TEXT replies are at most 500 bytes. The walk and artwork use base64
+  `MS3 DATA +`/`.` chunks.
+- Use `MS3 FILES`, then `MS3 FILE <name>` and `MS3 NEXT` for raw tagcache
+  files. Check the `MSF1` chunk offsets, final length and CRC32, then
+  compare `MS3 FILES` before and after. Fall back on `MS3 ERR command`.
 - A request that collides with another open media operation gets
   `MSx ERR busy`. `MS3 STOP` or disconnect frees an abandoned walk.
 - Uploads stage in `/.rockbox/podlink-media/`, check length and CRC, then

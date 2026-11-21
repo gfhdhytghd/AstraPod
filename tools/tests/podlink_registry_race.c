@@ -70,7 +70,7 @@ void pfu_irq_restore(int level) {(void)level;assert(!pthread_mutex_unlock(&irq))
 int main(void)
 {
     podlink_init();
-    struct podlink_resident transient={receive,NULL,NULL};podlink_set_resident(&transient);
+    struct podlink_resident transient={receive,NULL,NULL,NULL};podlink_set_resident(&transient);
     // Invalidate the caller's table immediately. Rust must own a typed copy.
     memset(&transient,0,sizeof transient);
     const unsigned char hello[]={1,0,0,64,0,0};
@@ -96,7 +96,7 @@ int main(void)
     length+=podlink_encode(input+length,PODLINK_BINARY,8,"CAR1",4);
     for(int i=0;i<8;i++)podlink_rust_step();
     assert(callback_count==before && unregistered && before>=1);
-    podlink_set_resident(&(struct podlink_resident){NULL,NULL,NULL});
+    podlink_set_resident(&(struct podlink_resident){NULL,NULL,NULL,NULL});
     podlink_rust_step();podlink_set_resident(NULL);
     assert(podlink_open_agents(NULL));
     assert(!podlink_poll(NULL) && !podlink_take_time(NULL,NULL));

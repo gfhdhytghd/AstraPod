@@ -23,7 +23,7 @@ static void command(const char *s)
 }
 
 static unsigned int limit, attempts, binary_bytes, invalid_sends;
-static unsigned int turns, stage;
+static unsigned int turns, stage, ready_calls;
 static bool closed;
 static int shortcut_requested, shortcuts, wps_shortcuts;
 bool podlink_open(void)
@@ -91,6 +91,12 @@ void splash(int ticks, const char *s)
     (void)ticks;
     (void)s;
 }
+static void note_ready(void)
+{
+    assert(!closed && !stage && !turns);
+    ++ready_calls;
+}
+
 static void draw_diagnostics(const struct podlink_diagnostics *status, void *data)
 {
     (void)data;
@@ -165,7 +171,8 @@ int main(void)
         limit = limits[i];
         attempts = binary_bytes = invalid_sends = turns = stage = 0;
         closed = false;
-        podlink_screen_run(draw_diagnostics, NULL);
+        podlink_screen_run(draw_diagnostics, NULL, note_ready);
+        assert(ready_calls == i + 1);
         assert(binary_bytes == 8192);
         assert(stage == 2 && invalid_sends <= 3);
         assert(attempts < 8192 / limit + 10);
@@ -173,12 +180,12 @@ int main(void)
     closed = false;
     shortcut_requested = true;
     stage = 2;
-    podlink_screen_run(draw_diagnostics, NULL);
+    podlink_screen_run(draw_diagnostics, NULL, NULL);
     assert(shortcuts == 1 && closed);
     closed = false;
     shortcut_requested = 2;
     stage = 2;
-    podlink_screen_run(draw_diagnostics, NULL);
+    podlink_screen_run(draw_diagnostics, NULL, NULL);
     assert(wps_shortcuts == 1 && shortcuts == 1 && closed);
     puts("PASS: shortcuts close the echo link before opening Agents or WPS");
     puts("PASS: small peer limits recover from INVALID and finish DOWNLOAD");

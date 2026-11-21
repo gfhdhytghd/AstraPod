@@ -45,7 +45,7 @@ static void service_thread(void)
         crumb_status(CS_PL_WORKER, steps << 1);
         for (int i = 0; i < GUARD_WORDS; i++)
             if (worker.guard[i] != GUARD) panicf("PodLink stack overflow");
-        sleep(MAX(1, HZ / 50));
+        usb_serial_wait_activity(MAX(1, HZ / 50));
     }
 }
 bool pfu_init(void)
@@ -114,6 +114,7 @@ bool pfu_host_connected(void)
     restore_irq(level);
     return result;
 }
+void podlink_wake(void) { usb_serial_wake(); }
 int32_t pfu_tick(void) { return (int32_t)current_tick; }
 int32_t pfu_hz(void) { return HZ; }
 void pfu_wait(int ticks) { sleep(MIN(ticks, MAX(1, HZ / 50))); }

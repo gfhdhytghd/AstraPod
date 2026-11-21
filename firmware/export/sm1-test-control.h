@@ -14,6 +14,7 @@ enum sm1_test_command {
     SM1_TEST_PLAY,
     SM1_TEST_SEEK,
     SM1_TEST_STOP,
+    SM1_TEST_OPEN_BENCH,
 };
 
 extern volatile unsigned sm1_test_submitted;

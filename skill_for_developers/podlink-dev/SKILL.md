@@ -64,7 +64,7 @@ Identify the player by USB VID `05ac`, PID `1261` and serial, never by
 
 ## Text protocols on the link
 
-Every protocol is TEXT frames, tab-separated fields, one request in flight.
+Most commands use TEXT frames and one request in flight.
 The firmware routes by prefix.
 
 | Prefix | Purpose | Contract |
@@ -88,12 +88,17 @@ the prefix checks) and `podlink_library.c` (MS3). Host:
 
 - TEXT replies are at most 500 bytes. The walk and artwork use base64
   `MS3 DATA +`/`.` chunks.
-- Use `MS3 FILES`, then `MS3 FILE <name>` and `MS3 NEXT` for raw tagcache
-  files. Check the `MSF1` chunk offsets, final length and CRC32, then
-  compare `MS3 FILES` before and after. Fall back on `MS3 ERR command`.
-- Use `MS3 ARTBIN <size> <path>` and `MS3 NEXT` for cached RGB565 pixels.
-  Check the same MSF1 offsets and final length/CRC32 as for bulk database
-  reads. Fall back to text `MS3 ART` on `MS3 ERR command`.
+- Use `MS3 FILES`, then `MS3 STREAM FILE <name>` for raw tagcache files.
+  Use `MS3 STREAM ARTBIN <size> <path>` for cached RGB565 pixels.
+- Stream opens return the usual metadata followed by up to eight replies.
+  Count each MSF1 frame. If eight arrive without DONE or ERR, send one
+  `MS3 CREDIT`. A terminal reply occupies one credit.
+- Check the MSF1 offsets, final length and CRC32. Compare `MS3 FILES` before
+  and after a database download. On `MS3 ERR command`, use legacy FILE or
+  ARTBIN with NEXT. Fall back from ARTBIN to ART on the same error.
+- The storage worker publishes the next chunk when the resident consumer
+  takes the previous reply. USB completions and new media output wake the
+  Rust worker. Never read from disk in a resident callback.
 - A request that collides with another open media operation gets
   `MSx ERR busy`. `MS3 STOP` or disconnect frees an abandoned walk.
 - Uploads stage in `/.rockbox/podlink-media/`, check length and CRC, then
@@ -148,8 +153,26 @@ Mode. `herdremote/podlink_disk.py` does that and waits for the volume.
 Run with the daemon's venv:
 `~/.local/share/podbox-herdremote/venv/bin/python`.
 
-`podlink.py` subcommands open the tty themselves; stop the daemon
-first or they fail with the port busy.
+`podlink.py` subcommands open the tty themselves. For BENCH, open
+System > Debug > PodLink on the device, or run
+`podlink_shell.py --serial USB_SERIAL open-bench` while connected in PodLink
+mode without another foreground client. Keep HerdRemote running and run
+the benchmark inside the lease:
+
+```python
+from serial.tools import list_ports
+import subprocess, sys
+import hrmediasync, podlink
+
+with hrmediasync.borrow_serial():
+    port = podlink.find_port(list_ports.comports())
+    subprocess.run([sys.executable, "podlink.py", "--port", port,
+                    "bench", "--bytes", "1048576"], check=True)
+```
+
+Run again with `--max-message 16364` before `bench` to compare complete
+16 KiB frames with the default 16 KiB payload, which leaves a 20-byte
+wire tail. Borrowed media connections use 16364 by default.
 
 ## EP0 side channels
 
@@ -161,7 +184,7 @@ the device configured. Host side uses PyUSB (`podbox-usbkey` venv has it).
 |---|---|---|---|
 | `0x5b` | key ID | Remote keys: Menu 1, Select 2, Vol± 3/4, heartbeat 5, Left 6, Right 7, Play 8 | `firmware/export/button_usb_remote.h` |
 | `0x5c` | 0 | Disk Mode exit status (IN, 8 bytes) and unmount acknowledgement (OUT) | `docs/podlink.md` |
-| `0x5d` | `0x4951` | PodLink Shell: wValue 1 reboot, 2 play test track, 3 seek, 4 stop; IN wValue 0 reads 16-byte status | `firmware/export/sm1-test-control.h` |
+| `0x5d` | `0x4951` | PodLink Shell: wValue 1 reboot, 2 play test track, 3 seek, 4 stop, 5 open benchmark screen; IN wValue 0 reads 16-byte status | `firmware/export/sm1-test-control.h` |
 | `0x5d` | `0x4952` | Debug menu: IN reads item name by index (128 bytes), OUT opens that item on the player | same |
 
 PodLink Shell commands need PodLink active and storage not exclusive. One
@@ -169,9 +192,11 @@ command at a time: the device stalls a second one until the first completes.
 The command reaches the UI thread as `SYS_SM1_TEST_CONTROL` and runs in
 `apps-ipod/system/shutdown.c` `default_event_handler_ex`. Reboot goes
 through `clean_shutdown(SHUTDOWN_REBOOT)`, so settings and the database are
-saved.
+saved. For `open-bench`, the UI marks completion when the demo attaches
+and leaves the screen open for repeated benchmarks.
 
 ```sh
+python3 podlink_shell.py --serial 2AA0000000000360 open-bench
 python3 podlink.py reboot --serial 2AA0000000000360
 python3 podlink_shell.py --serial 2AA0000000000360 status
 python3 podlink_shell.py --serial 2AA0000000000360 debug-list

@@ -141,7 +141,7 @@ static void message(const struct podlink_message *m)
 }
 
 int podlink_screen_run(void (*draw)(const struct podlink_diagnostics *, void *),
-                       void *draw_data)
+                       void *draw_data, void (*ready)(void))
 {
     if (!podlink_open())
     {
@@ -154,6 +154,8 @@ int podlink_screen_run(void (*draw)(const struct podlink_diagnostics *, void *),
     received = sent = closes = 0;
     reply_type = 0;
     operation = ECHO;
+    if (ready)
+        ready();
     while (true)
     {
         bool progress = false;

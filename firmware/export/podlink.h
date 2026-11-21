@@ -24,6 +24,7 @@
 
 #define PODLINK_VERSION 1
 #define PODLINK_MAX_MESSAGE 16384
+#define PODLINK_CDC_RING_BYTES 16384
 #define PODLINK_HEADER 16
 #define PODLINK_FRAME_MAX (PODLINK_HEADER + PODLINK_MAX_MESSAGE + 4)
 enum podlink_type
@@ -81,9 +82,12 @@ bool podlink_host_connected(void);
 void podlink_close(void);
 /* Optional screen idle wait; wakes on transport progress, bounded by ticks. */
 void podlink_wait(int ticks);
+/* Wake the resident worker after publishing output. No service mutex. */
+void podlink_wake(void);
 
 /* A resident data consumer bypasses the foreground inbox. Callbacks run
- * under the service mutex and must not call the PodLink API. */
+ * under the service mutex. They may call podlink_wake(), but no function
+ * that acquires the service mutex. */
 struct podlink_resident
 {
     bool (*receive)(const struct podlink_message *message);

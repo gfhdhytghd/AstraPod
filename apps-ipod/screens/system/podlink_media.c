@@ -19,6 +19,7 @@
 #define STAGING_PATH STAGING_DIR "/pending.part"
 #define MAX_TRACK_BYTES (128u * 1024u * 1024u)
 #define NAME_HASH_LENGTH 64
+#define STREAM_WINDOW 8
 
 static int track_fd = -1;
 static unsigned int remaining;
@@ -300,7 +301,8 @@ static const char *sync_command(const unsigned char *data, unsigned int size)
 }
 
 static const char *handle_message(const struct podlink_message *message,
-                                  unsigned char *binary, unsigned int *binary_size)
+                                  unsigned char *binary, unsigned int *binary_size,
+                                  unsigned int *credits)
 {
     const unsigned char *data = message->data;
     unsigned int size = message->length;
@@ -331,10 +333,23 @@ static const char *handle_message(const struct podlink_message *message,
 #endif
             )
             return "MS3 ERR busy";
-        /* Only NEXT produces binary. It has finished inspecting the request
-         * before it overwrites the mailbox. */
-        return podlink_library_command(data + 4, size - 4, &refresh_pending,
-                                       binary, binary_size);
+        data += 4;
+        size -= 4;
+        bool stream = size >= 7 && !memcmp(data, "STREAM ", 7);
+        if (stream)
+        {
+            data += 7;
+            size -= 7;
+            if (!(size >= 5 && !memcmp(data, "FILE ", 5)) &&
+                !(size >= 7 && !memcmp(data, "ARTBIN ", 7)))
+                return "MS3 ERR command";
+        }
+        const char *reply = podlink_library_command(data, size, &refresh_pending,
+                                                    binary, binary_size);
+        if (stream && reply && (!strncmp(reply, "MS3 FILE ", 9) ||
+                                !strncmp(reply, "MS3 ARTBIN ", 11)))
+            *credits = STREAM_WINDOW;
+        return reply;
     }
     if (message->type == PODLINK_TEXT && size >= 4 && !memcmp(data, "MS2 ", 4))
         return podlink_library_active() ? "MS2 ERR busy" : sync_command(data, size);
@@ -365,8 +380,9 @@ static struct mutex media_mutex;
 static struct podlink_message pending_message;
 static unsigned char mailbox[PODLINK_MAX_MESSAGE];
 static char pending_reply[sizeof(inventory_reply)];
-static unsigned int pending_binary;
-static bool queued, working, reset_pending;
+static unsigned int pending_binary, stream_credits;
+static bool queued, working, reset_pending, stop_pending;
+static bool streaming;
 
 void podlink_media_init(void)
 {
@@ -384,7 +400,17 @@ bool podlink_media_enqueue(const struct podlink_message *message)
         return false;
 
     mutex_lock(&media_mutex);
-    if (!queued && !working && !pending_reply[0] && !pending_binary)
+    if (message->type == PODLINK_TEXT && message->length == 8 &&
+        !memcmp(message->data, "MS3 STOP", 8))
+    {
+        /* STOP must fit even while a read owns the shared mailbox. */
+        stop_pending = true;
+        queued = false;
+        pending_reply[0] = '\0';
+        pending_binary = 0;
+    }
+    else if (!queued && !working && !stop_pending &&
+             !pending_reply[0] && !pending_binary)
     {
         memcpy(mailbox, message->data, message->length);
         pending_message = *message;
@@ -398,14 +424,16 @@ bool podlink_media_enqueue(const struct podlink_message *message)
 void podlink_media_disconnect(void)
 {
     mutex_lock(&media_mutex);
-    queued = false;
+    queued = stop_pending = false;
+    stream_credits = 0;
+    streaming = false;
     pending_reply[0] = '\0';
     pending_binary = 0;
     reset_pending = true;
     mutex_unlock(&media_mutex);
 }
 
-unsigned int podlink_media_next(char *reply, unsigned int size)
+unsigned int podlink_media_next(char *reply, unsigned int size, bool *refill)
 {
     mutex_lock(&media_mutex);
     unsigned int length = strlen(pending_reply);
@@ -413,14 +441,19 @@ unsigned int podlink_media_next(char *reply, unsigned int size)
     {
         memcpy(reply, pending_reply, length);
         pending_reply[0] = '\0';
+        *refill = length && stream_credits;
     }
     else
         length = 0;
     mutex_unlock(&media_mutex);
+    /* The resident callback queued output after this USB turn's poll. */
+    if (length)
+        podlink_wake();
     return length;
 }
 
-unsigned int podlink_media_next_binary(unsigned char *out, unsigned int size)
+unsigned int podlink_media_next_binary(unsigned char *out, unsigned int size,
+                                       bool *refill)
 {
     mutex_lock(&media_mutex);
     unsigned int length = pending_binary;
@@ -428,36 +461,96 @@ unsigned int podlink_media_next_binary(unsigned char *out, unsigned int size)
     {
         memcpy(out, mailbox, length);
         pending_binary = 0;
+        *refill = stream_credits != 0;
     }
     else
         length = 0;
     mutex_unlock(&media_mutex);
+    /* The resident callback queued output after this USB turn's poll. */
+    if (length)
+        podlink_wake();
     return length;
 }
 
-void podlink_media_work(void)
+bool podlink_media_work(void)
 {
     mutex_lock(&media_mutex);
     bool reset = reset_pending;
+    bool stop = stop_pending;
     bool process = queued;
-    reset_pending = queued = false;
-    working = process;
+    unsigned int credits = stream_credits;
+    bool burst = streaming;
+    bool refill = credits && !pending_reply[0] && !pending_binary;
+    reset_pending = stop_pending = queued = false;
+    working = stop || process || refill;
     mutex_unlock(&media_mutex);
 
     if (reset)
         reset_files();
-    if (!process)
-        return;
+    if (!stop && !process && !refill)
+        return false;
 
+    static const unsigned char stop_cmd[] = "STOP", next_cmd[] = "NEXT";
     unsigned int binary_size = 0;
-    const char *reply = handle_message(&pending_message, mailbox, &binary_size);
-    mutex_lock(&media_mutex);
-    if (!reset_pending)
+    const char *reply = NULL;
+    if (stop)
     {
+        credits = 0;
+        burst = false;
+        if (track_fd >= 0 || inventory
+#ifdef HAVE_TAGCACHE
+            || local_open
+#endif
+            )
+            reply = "MS3 ERR busy";
+        else
+            reply = podlink_library_command(stop_cmd, sizeof(stop_cmd) - 1,
+                                            &refresh_pending, mailbox, &binary_size);
+    }
+    else if (process)
+    {
+        if (pending_message.type == PODLINK_TEXT && pending_message.length == 10 &&
+            !memcmp(mailbox, "MS3 CREDIT", 10))
+        {
+            if (burst && !credits)
+                credits = STREAM_WINDOW;
+            else
+                reply = "MS3 ERR state";
+        }
+        else if (burst)
+            reply = "MS3 ERR busy";
+        else
+        {
+            reply = handle_message(&pending_message, mailbox, &binary_size,
+                                   &credits);
+            burst = credits != 0;
+        }
+    }
+    if (!reply && credits)
+    {
+        credits--;
+        reply = podlink_library_command(next_cmd, sizeof(next_cmd) - 1,
+                                        &refresh_pending, mailbox, &binary_size);
+        if (reply)
+        {
+            credits = 0;
+            burst = false;
+        }
+    }
+
+    mutex_lock(&media_mutex);
+    bool ready = !reset_pending && !stop_pending && (binary_size || reply);
+    if (!reset_pending && !stop_pending)
+    {
+        stream_credits = credits;
+        streaming = burst;
         pending_binary = binary_size;
         if (reply)
             snprintf(pending_reply, sizeof(pending_reply), "%s", reply);
     }
     working = false;
     mutex_unlock(&media_mutex);
+    if (ready)
+        podlink_wake();
+    return ready && (refill || burst);
 }

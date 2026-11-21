@@ -55,11 +55,12 @@ bool art_folder_file(const char *path, char *out, int size)
 
 static unsigned int limit = 384;
 unsigned int podlink_max_message(void) { return limit; }
+void podlink_wake(void) {}
 
 static char reply[MEDIA_REPLY_SIZE];
 static unsigned char chunk[PODLINK_MAX_MESSAGE];
 
-static void command(const char *text)
+static void enqueue(const char *text)
 {
     struct podlink_message message = {
         .type = PODLINK_TEXT,
@@ -67,8 +68,26 @@ static void command(const char *text)
         .data = (const unsigned char *)text,
     };
     assert(podlink_media_enqueue(&message));
+}
+
+static bool read_text(void)
+{
+    bool refill = false;
+    reply[podlink_media_next(reply, sizeof(reply) - 1, &refill)] = '\0';
+    return refill;
+}
+
+static void command(const char *text)
+{
+    enqueue(text);
     podlink_media_work();
-    reply[podlink_media_next(reply, sizeof(reply) - 1)] = '\0';
+    read_text();
+}
+
+static unsigned int read_binary(unsigned int capacity)
+{
+    bool refill = false;
+    return podlink_media_next_binary(chunk, capacity, &refill);
 }
 
 static void check_file(void)
@@ -91,8 +110,8 @@ static void check_file(void)
     {
         command("MS3 NEXT");
         assert(!reply[0]);
-        assert(podlink_media_next_binary(chunk, 8) == 0);
-        unsigned int n = podlink_media_next_binary(chunk, limit);
+        assert(read_binary(8) == 0);
+        unsigned int n = read_binary(limit);
         assert(n == MIN(limit - 8, length - offset) + 8);
         assert(!memcmp(chunk, "MSF1", 4));
         uint32_t position = 0;
@@ -115,13 +134,13 @@ static void check_file(void)
     tagcache_get_stat()->scan_removed++;
     command("MS3 NEXT");
     assert(!strcmp(reply, "MS3 ERR database changed"));
-    assert(podlink_media_next_binary(chunk, sizeof(chunk)) == 0);
+    assert(read_binary(sizeof(chunk)) == 0);
 
     command("MS3 FILE " TAGCACHE_FILE_MASTER);
     command("MS3 NEXT");
     assert(!reply[0]);
     podlink_media_disconnect();
-    assert(podlink_media_next_binary(chunk, sizeof(chunk)) == 0);
+    assert(read_binary(sizeof(chunk)) == 0);
     podlink_media_work();
     command("MS3 NEXT");
     assert(!strcmp(reply, "MS3 ERR state"));
@@ -162,7 +181,7 @@ static void check_artwork(void)
         command("MS3 NEXT");
         assert(!reply[0]);
         unsigned int length = MIN(limit - 8, sizeof(pixels) - offset);
-        assert(podlink_media_next_binary(chunk, limit) == length + 8);
+        assert(read_binary(limit) == length + 8);
         assert(!memcmp(chunk, "MSF1", 4));
         for (unsigned int i = 0; i < 4; i++)
             assert(chunk[i + 4] == ((offset >> (8 * i)) & 0xff));
@@ -176,6 +195,40 @@ static void check_artwork(void)
                              UINT32_MAX));
     assert(!strcmp(reply, expected));
 
+    /* Force precisely eight chunks. DONE requires the next credit window. */
+    limit = 108;
+    snprintf(request, sizeof(request), "MS3 STREAM ARTBIN %s", path);
+    enqueue(request);
+    podlink_media_work();
+    /* An unrelated disk wake must preserve unconsumed metadata and data. */
+    podlink_media_work();
+    assert(!read_binary(limit));
+    assert(read_text());
+    assert(!strcmp(reply, "MS3 ARTBIN 20 20 columns"));
+    for (unsigned int i = 0; i < 8; i++)
+    {
+        bool refill = false;
+        podlink_media_work();
+        assert(podlink_media_next_binary(chunk, limit, &refill) == limit);
+        assert(refill == (i < 7));
+        assert(chunk[4] == ((i * 100) & 0xff));
+        assert(!memcmp(chunk + 8, pixels + i * 100, 100));
+    }
+    podlink_media_work();
+    assert(!read_text() && !reply[0]);
+    assert(!read_binary(limit));
+    command("MS3 CREDIT");
+    assert(!strcmp(reply, expected));
+
+    command(request);
+    podlink_media_work(); /* One binary reply staged but unread. */
+    command("MS3 STOP");
+    assert(!strcmp(reply, "MS3 STOPPED"));
+    assert(!read_binary(limit));
+    command("MS3 CREDIT");
+    assert(!strcmp(reply, "MS3 ERR state"));
+
+    limit = 384;
     snprintf(request, sizeof(request), "MS3 ART %s", path);
     command(request);
     assert(!strcmp(reply, "MS3 ART 20 20 columns"));

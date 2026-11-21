@@ -32,6 +32,7 @@ bool pfu_host_connected(void) {return running_snapshot && pfu_session_connected(
 int32_t pfu_tick(void) {return 1;}
 int32_t pfu_hz(void) {return 100;}
 void pfu_wait(int ticks) {(void)ticks;}
+void podlink_wake(void) {}
 void pfu_panic(void) {abort();}
 void pfu_redraw(void) {}
 bool usb_podlink_open(void) {return true;}

@@ -9,10 +9,12 @@ python3 podlink_shell.py --serial USB_SERIAL
 python3 podlink.py reboot --serial USB_SERIAL
 python3 podlink_shell.py --serial USB_SERIAL debug-list
 python3 podlink_shell.py --serial USB_SERIAL debug "Hardware info"
+python3 podlink_shell.py --serial USB_SERIAL open-bench
 ```
 
 - `reboot` 执行正常关机和重启。脚本等待 USB 重新枚举。
 - `debug-list` 列出当前固件实际提供的 Debug 菜单项目。`debug` 按名称在机身打开该项目，沿用机身操作和确认流程。需要交互的页面在 iPod 上操作及退出。
+- `open-bench` 打开「System → Debug → PodLink」。播放器必须处于 PodLink USB 模式，且前台没有其他 PodLink 客户端。打开后可以借用串口运行 `podlink.py bench`。
 - `status` 显示开机时钟、已提交及已处理的命令数，以及界面开始处理最后一条命令时的时钟。
 - `play` 用 `/.rockbox/sm1-test/irq-dma44.flac` 建立单曲播放列表。测试文件由测试者放入设备。执行前备份当前播放列表。
 - `seek` 将当前曲目定位到 6.237 秒。`stop` 停止播放。

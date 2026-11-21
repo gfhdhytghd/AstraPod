@@ -267,8 +267,11 @@ static const char *binary_next(unsigned char *binary, unsigned int *size)
     unsigned int limit = podlink_max_message();
     if (limit <= 8)
         return fail("MS3 ERR message size");
-    unsigned int n = MIN(MIN(limit, PODLINK_MAX_MESSAGE) - 8,
-                         stream_length - stream_offset);
+    /* The CDC TX ring holds 16 KiB. Include PLNK framing so that a
+     * full chunk fits in one ring fill even with a 16 KiB payload offer. */
+    limit = MIN(limit, PODLINK_CDC_RING_BYTES -
+                       (PODLINK_FRAME_MAX - PODLINK_MAX_MESSAGE));
+    unsigned int n = MIN(limit - 8, stream_length - stream_offset);
     memcpy(binary, "MSF1", 4);
     for (unsigned int i = 0; i < 4; i++)
         binary[4 + i] = stream_offset >> (8 * i);

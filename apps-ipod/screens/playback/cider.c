@@ -1010,7 +1010,12 @@ static void disk_worker(void)
          * order. Pulling a later connect out of the queue could mistake an
          * older disconnect for the end of the new storage session. */
         if (disk_usb_pending()) continue;
-        podlink_media_work();
+        if (podlink_media_work())
+        {
+            /* Do not start unrelated cache I/O between ready stream chunks. */
+            more = true;
+            continue;
+        }
         if (tagcache_is_busy()) continue;
         bool active = storage_disk_is_active();
         char key[65], tier[3];
@@ -1171,10 +1176,20 @@ static bool resident_receive(const struct podlink_message *m)
 
 static unsigned int resident_next(char *record, unsigned int size)
 {
-    unsigned int n = podlink_media_next(record, size);
+    bool refill = false;
+    unsigned int n = podlink_media_next(record, size, &refill);
+    if (refill) queue_post(&disk_queue, 1, 0);
     if (!n) n = handoff_next(record, size);
     if (!n) n = next(record, size);
     return n ? n : spectrum_next(record, size);
+}
+
+static unsigned int resident_next_binary(unsigned char *out, unsigned int size)
+{
+    bool refill = false;
+    unsigned int n = podlink_media_next_binary(out, size, &refill);
+    if (refill) queue_post(&disk_queue, 1, 0);
+    return n;
 }
 
 static void resident_reset(void)
@@ -1192,7 +1207,7 @@ void cider_init(void)
         .receive = resident_receive,
         .next = resident_next,
         .reset = resident_reset,
-        .next_binary = podlink_media_next_binary,
+        .next_binary = resident_next_binary,
     };
     if (initialized) return;
     set_sleep_timer_callback(cider_sleep_pause);

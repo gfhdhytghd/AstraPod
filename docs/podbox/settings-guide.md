@@ -586,6 +586,12 @@ Shadow Colour only while there is a shadow to colour.
 | Number of Volume Steps | How many steps Perceptual mode divides the range into. More steps mean finer control and more presses to cross the range. Used only in Perceptual mode. | 50 | **Adv** |
 | Show Debug Menu | Reveals the debug screens under System. They read hardware and internal state; nothing there is needed in normal use. | No | **Adv** |
 
+### System — Debug
+
+| Action | What it does |
+|---|---|
+| PodLink | Opens the PodLink message and throughput diagnostics for a computer connected in PodLink USB mode. |
+
 ### System — USB
 
 | Setting | What it does | Default | |

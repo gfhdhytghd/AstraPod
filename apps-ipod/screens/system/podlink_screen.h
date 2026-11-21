@@ -27,6 +27,7 @@ struct podlink_diagnostics {
 };
 
 int podlink_screen(void);
+int podlink_screen_with_ready(void (*ready)(void));
 int podlink_screen_run(void (*draw)(const struct podlink_diagnostics *, void *),
-                       void *draw_data);
+                       void *draw_data, void (*ready)(void));
 #endif

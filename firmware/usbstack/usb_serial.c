@@ -189,7 +189,8 @@ static union line_coding_buffer line_coding;
  * bytes, it doesn't hurt because data can be sent over several transfers.
  */
 #ifdef HAVE_USB_PODLINK
-#define BUFFER_SIZE 16384
+#include "podlink.h"
+#define BUFFER_SIZE PODLINK_CDC_RING_BYTES
 #else
 #define BUFFER_SIZE 512
 #endif
@@ -600,3 +601,17 @@ void usb_serial_wait(int ticks)
     (void)ticks;
 #endif
 }
+
+#ifdef HAVE_USB_PODLINK
+/* The resident worker needs both RX and TX completion notifications.
+ * A nonempty RX ring by itself is not a wakeup when TX is backpressured. */
+void usb_serial_wait_activity(int ticks)
+{
+    semaphore_wait(&serial_wake, ticks);
+}
+
+void usb_serial_wake(void)
+{
+    wake_screen();
+}
+#endif

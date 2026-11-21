@@ -25,6 +25,7 @@ bool pfu_host_connected(void) {return pfu_running && usb_podlink_active() && pfu
 int32_t pfu_tick(void) {return (int32_t)current_tick;}
 int32_t pfu_hz(void) {return HZ;}
 void pfu_wait(int ticks) {current_tick+=MIN(ticks,MAX(1,HZ/50));}
+void podlink_wake(void) {}
 void pfu_panic(void) {fputs("Rust PodLink panic\n",stderr);abort();}
 #ifdef PODLINK_SERVICE_TEST
 extern void button_queue_post(long id,intptr_t data);

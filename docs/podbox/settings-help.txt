@@ -2105,6 +2105,10 @@ under.
 Diagnostic screens for developers. Nothing in here is needed to use the player,
 and some of it can lock it up.
 
+[action: PodLink]
+Opens the PodLink message and throughput diagnostics for a computer connected
+in PodLink USB mode.
+
 [action: Changed Settings]
 Lists every setting that differs from its default, with what it is now.
 

@@ -65,6 +65,9 @@
 #include "screens/shortcuts.h"
 #include "screens/system/beat_debug.h"
 #include "screens/system/probe_debug.h"
+#ifdef HAVE_USB_PODLINK
+#include "screens/system/podlink_screen.h"
+#endif
 #include "games/spike/spike_tap.h"
 #include "viewers/lyric_viewer/lyric_viewer.h"
 #include "dircache.h"
@@ -2383,6 +2386,13 @@ static bool dbg_lyrics_perf(void)
 #include "sm1_flac_driver.inc"
 #endif
 
+#ifdef HAVE_USB_PODLINK
+static bool dbg_podlink(void)
+{
+    return podlink_screen() != 0;
+}
+#endif
+
 /** The menu **/
 /* Grouped, in this order: playback, library, display, accessories, hardware.
  * A saved shortcut names its screen by desc, so renaming one strands it. */
@@ -2482,6 +2492,9 @@ static const struct {
         { "Log file", log_viewer_show, false, NULL },
         { "Dump log file", log_viewer_dump, false, NULL },
 #endif
+#ifdef HAVE_USB_PODLINK
+        { ID2P(LANG_PODLINK_DIAGNOSTICS), dbg_podlink, false, NULL },
+#endif
 };
 
 /* A list screen keeps the theme. One that draws on the LCD gets the whole
@@ -2525,7 +2538,7 @@ static int menu_action_callback(int btn, struct gui_synclist *lists)
     {
         MENUITEM_STRINGLIST(menu_items, "Debug", NULL, ID2P(LANG_ADD_TO_FAVES));
         if (do_menu(&menu_items, NULL, NULL, false) == 0)
-            shortcuts_add(SHORTCUT_DEBUGITEM, menuitems[selection].desc);
+            shortcuts_add(SHORTCUT_DEBUGITEM, P2STR(menuitems[selection].desc));
         return ACTION_STD_CANCEL;
     }
     return btn;
@@ -2536,8 +2549,8 @@ static const char* menu_get_name(int item, void * data,
 {
     (void)data;
     if (!menuitems[item].toggle)
-        return menuitems[item].desc;
-    snprintf(buffer, buffer_len, "%s: %s", menuitems[item].desc,
+        return P2STR(menuitems[item].desc);
+    snprintf(buffer, buffer_len, "%s: %s", P2STR(menuitems[item].desc),
              *menuitems[item].toggle ? "on" : "off");
     return buffer;
 }
@@ -2549,7 +2562,10 @@ static int menu_get_talk(int item, void *data)
     {
         talk_number(item + 1, true);
         talk_id(VOICE_PAUSE, true);
-        talk_name(menuitems[item].desc, true);
+        if (P2ID(menuitems[item].desc) >= 0)
+            talk_id(P2ID(menuitems[item].desc), true);
+        else
+            talk_name(menuitems[item].desc, true);
      }
     return 0;
 }
@@ -2568,7 +2584,7 @@ int debug_menu(void)
 bool run_debug_screen(char* screen)
 {
     for (unsigned i=0; i<ARRAYLEN(menuitems); i++)
-        if (!strcasecmp(screen, menuitems[i].desc))
+        if (!strcasecmp(screen, P2STR(menuitems[i].desc)))
             return run_item(i);
 
     splash(HZ, ID2P(LANG_FILE_NOT_FOUND));
@@ -2580,7 +2596,7 @@ bool run_debug_screen(char* screen)
 
 const char *sm1_test_debug_name(unsigned index)
 {
-    return index < ARRAYLEN(menuitems) ? menuitems[index].desc : NULL;
+    return index < ARRAYLEN(menuitems) ? P2STR(menuitems[index].desc) : NULL;
 }
 
 void sm1_test_debug_run(unsigned index)

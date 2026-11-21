@@ -28384,3 +28384,17 @@
     *: "Converted %d, already converted %d, unsupported %d, failed %d"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_PODLINK_DIAGNOSTICS
+  desc: opens the PodLink benchmark screen from the Debug menu
+  user: core
+  <source>
+    *: "PodLink"
+  </source>
+  <dest>
+    *: "PodLink"
+  </dest>
+  <voice>
+    *: "PodLink"
+  </voice>
+</phrase>

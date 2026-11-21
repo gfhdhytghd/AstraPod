@@ -5,13 +5,14 @@ It uses RAM for messages. It does not use disk files or USB mass storage for
 communication. The default USB mode still provides mass storage. The simulator
 has no PodLink USB transport or PodLink menu entry.
 
-The demo is a native screen at **System > PodLink**. The reusable message API
+The demo is a native screen at **System > Debug > PodLink**. The reusable message API
 is `firmware/export/podlink.h`; its protocol version is 1.
 
 ## Connect
 
 1. Unplug the USB cable.
-2. Open **System > PodLink** on the iPod.
+2. Enable **Settings > System > Show Debug Menu**. Open
+   **System > Debug > PodLink** on the iPod.
 3. Connect USB. The screen shows `USB up / waiting OPEN` until a host connects.
 4. Run the host client from [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop):
 
@@ -24,6 +25,14 @@ python3 -m venv .venv-podlink
 .venv-podlink/bin/python podlink.py latency --samples 100
 .venv-podlink/bin/python podlink.py bench --bytes 1048576
 ```
+
+If the iPod is already connected in PodLink mode, open the demo from the
+host with `podlink_shell.py --serial USB_SERIAL open-bench`. The shell sends
+a vendor OUT request on EP0 with `bRequest=0x5d`, `wIndex=0x4951`,
+`wValue=5` and no data. Commands 1 through 4 retain their values for reboot,
+play, seek and stop. The UI marks the command complete when it attaches
+the demo. Leave any other PodLink foreground client before requesting the
+demo. The shell does not need the tty. Borrow the tty for the benchmark.
 
 The client finds a tty with VID `05ac` and PID `1261`. To select a port, pass
 `--port /dev/serial/by-id/<identified-device>` before the subcommand.
@@ -106,7 +115,8 @@ a `u16` code, followed by a UTF-8 reason. Bad CRC or magic triggers scanning for
 the next valid frame. An oversized length triggers CLOSE 1009 without allocating
 memory for that length. The two sides reset their byte queues on USB reconnect.
 
-Demo throughput commands use TEXT `BENCH TX N` / `BENCH RX N`. After TEXT
+The System > Debug > PodLink demo handles TEXT `BENCH TX N` / `BENCH RX N`.
+Borrow the tty from HerdRemote before running `podlink.py bench`. After TEXT
 `READY TX N` / `READY RX N`, exactly N bytes travel in BINARY messages. Host
 uploads and demo downloads use chunks up to the negotiated limit. Ordinary
 echo messages obey the same limit in either direction.
@@ -195,7 +205,7 @@ cc -std=gnu11 -Wall -Wextra -Werror -g -fsanitize=address,undefined \
 ```
 
 Physical acceptance remains separate. With a partially discharged battery,
-select `on`, unplug, enter **System > PodLink**, and reconnect.
+select `on`, unplug, enter **System > Debug > PodLink**, and reconnect.
 Read the host descriptor using `lsusb -v -d 05ac:1261`: expect `bMaxPower 500mA`,
 one configuration, and CDC interfaces in link mode. Find the matching USB
 device directory under `/sys/bus/usb/devices` by its `idVendor=05ac` and
@@ -335,7 +345,7 @@ logs. It needs Python with PySide6; reading the library, importing and syncing
 also need pyserial, ffprobe and FFmpeg.
 
 Connect the iPod in its PodLink USB mode; current firmware answers from any
-screen, and **System > PodLink** is for diagnostics. The application runs
+screen, and **System > Debug > PodLink** is for diagnostics. The application runs
 HerdRemote in the background and borrows its serial connection while it reads
 the library, imports or syncs, then hands it back. Run one copy of the remote
 engine: stop the separate legacy service before using the application.
@@ -426,8 +436,9 @@ the existing media transfer protocol.
 
 ## MS3 library
 
-Use MS3 on the iPod Classic in PodLink USB mode. Send one TEXT request
-and wait for its reply before sending the next request. TEXT replies are
+Use MS3 on the iPod Classic in PodLink USB mode. Outside windowed downloads,
+send one TEXT request and wait for its reply before sending the next request.
+TEXT replies are
 at most 500 bytes. A request that conflicts with an open media upload,
 inventory, database walk, file transfer, or artwork stream returns `MS1 ERR busy`, `MS2 ERR busy` or `MS3 ERR busy`
 with the requesting command's prefix.
@@ -438,7 +449,10 @@ with the requesting command's prefix.
 | `MS3 FILES` | Lists the database snapshot and file sizes |
 | `MS3 FILE <name>` | `MS3 FILE <size>` opens a listed file |
 | `MS3 DB` | `MS3 READY` opens the track walk |
-| `MS3 NEXT` | Advances the current count, track walk, file transfer, or artwork stream |
+| `MS3 NEXT` | Advances the current count, track walk, legacy file transfer, or legacy artwork stream |
+| `MS3 STREAM FILE <name>` | Opens a file and sends the first window after `MS3 FILE <size>` |
+| `MS3 STREAM ARTBIN <size> <path>` | Opens artwork and sends the first window after the normal `MS3 ARTBIN` reply |
+| `MS3 CREDIT` | Grants the next window of an open stream |
 | `MS3 STOP` | `MS3 STOPPED` closes the current MS3 operation |
 | `MS3 DETAIL <path>` | `MS3 DETAIL <size_bytes>\t<codec>\t<sample_rate_hz>\t<channels>\t<has_art>` |
 | `MS3 ART <size> <path>` | `MS3 ART <width> <height> <rows\|columns>`, `MS3 NOART`, or `MS3 PLACEHOLDER` |
@@ -493,6 +507,64 @@ length. The tag slots and display rules are defined in
 `apps-ipod/database/tagcache.h` and `tagcache.c`. The desktop reference
 parser is in `herdremote/hrlibrary.py`.
 
+### Windowed binary downloads
+
+Try `MS3 STREAM FILE <name>` or `MS3 STREAM ARTBIN <size> <path>` to open
+a download. An old player returns `MS3 ERR command`. Retry the legacy open
+command and use `MS3 NEXT` for each reply. All other errors retain their meaning.
+`MS3 NOART` and `MS3 PLACEHOLDER` terminate the request without a stream.
+
+After the usual file size or artwork dimensions, the player emits up to
+eight replies without another request. An MSF1 chunk consumes one reply.
+`MS3 DONE <length> <crc32>` or `MS3 ERR ...` consumes a reply and ends the
+stream. If eight MSF1 chunks arrive without a terminal reply, send exactly
+one `MS3 CREDIT` for the next eight replies. This also applies when the
+eighth chunk provided the last data bytes. Wait for the terminal reply
+before starting another download. One stream can be open at a time.
+
+Use the same offset, length, file CRC and before/after manifest checks as
+the legacy transfer. The player can use less than the negotiated maximum
+to fit a full PLNK frame inside its 16 KiB CDC transmit ring. `MS3 STOP`
+cancels the current stream. Stop reading it only after `MS3 STOPPED`:
+frames already queued on the wire can precede the acknowledgement.
+Disconnect clears the stream and unused credits.
+
+### Bulk performance on iPod6g
+
+On firmware content `30929e1d8e` (version `dc0b299c10`), a 1 MiB BENCH
+measured 0.522 MB/s host-to-iPod and 0.269 MB/s iPod-to-host. Negotiating
+16364 payload bytes on the same firmware measured 0.530 and 0.522 MB/s.
+This fits the 20 framing bytes in the 16 KiB CDC TX ring.
+
+With the original payload limit, a full legacy MSF1 request took about
+120 ms. About 90 ms elapsed before the first bytes. The first 16 KiB of
+the wire frame arrived within about 0.6 ms, then the 20-byte tail took
+another 29 ms. A FILE or DONE reply also took about 90 ms. The fixed
+resident tick and stop-and-wait requests therefore cost time even when
+there were no data bytes to read. A separate resident PING probe measured
+the same 30 ms median RTT for 8-byte and 16364-byte payloads. Warm large
+echoes spent 24–26 ms between write return and the first read. Host frame
+CRC and codec work took about 7 µs each for encode and decode. Short file
+replies also had outliers. Their cause remains unknown.
+
+High-Speed USB uses 512-byte bulk packets. The CDC class feeds the
+DesignWare DMA engine in 4 KiB IN transfers and arms a single packet at
+a time on OUT. This means four IN completions and 32 OUT completions for
+16 KiB. The link's 480 Mbit/s signaling rate allows up to 53.248
+MB/s of bulk payload in the [USB 2.0 scheduling model](https://www.usb.org/document-library/usb-20-specification).
+The measured burst
+leaves headroom beyond 1.4 MB/s. It does not measure sustained file reads.
+
+After flashing, time MSF1 and BENCH separately. Time cold and warm FILE
+downloads and ARTBIN opens. At 1.4 MB/s, a continuous 16356-byte MSF1
+chunk has a budget of 11.7 ms. If the firmware misses that budget, measure
+file read, media and frame CRC32, and TX-ring stalls separately. The
+ARM926 computes two CRCs and copies from the disk buffer to the Rust TX
+slot, the CDC ring and its DMA buffer. A larger CDC DMA batch or a
+direct DMA buffer would need separate tests for short packets, cache
+coherency, backpressure and reconnect. Profile Linux tty reads before
+replacing CDC-ACM or adding another stream.
+
 ### Track walk
 
 After `MS3 READY`, request `MS3 NEXT` until `MS3 END`. On `MS3 MORE`, send
@@ -529,8 +601,9 @@ art and image files Rockbox finds beside the track or above a disc folder.
 
 Request `MS3 ARTBIN <size> <path>` for a cached thumbnail. The size names
 are `list` (44), `coverflow` (128), and `wps` (300). The reply gives the
-actual dimensions and pixel order. Use the same `MS3 NEXT`, `MSF1`, and
-`MS3 DONE <length> <crc32>` framing as the bulk database read. Check the
+actual dimensions and pixel order. Use `MS3 STREAM ARTBIN` for windowed
+downloads and `MS3 ARTBIN` with `MS3 NEXT` for legacy downloads. Both use
+the same `MSF1` and `MS3 DONE <length> <crc32>` framing as database reads. Check the
 offsets, length, and CRC32. The stream contains exactly `width * height * 2`
 bytes of little-endian RGB565 pixels without the on-disk thumbnail header.
 `MS3 STOP` or disconnect releases an abandoned stream.

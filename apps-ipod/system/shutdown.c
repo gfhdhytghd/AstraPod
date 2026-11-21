@@ -298,10 +298,16 @@ static void bootfile_session_end(void)
 
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
 #include "sm1-test-control.h"
+#include "screens/system/podlink_screen.h"
 
 volatile unsigned sm1_test_submitted;
 volatile unsigned sm1_test_completed;
 volatile unsigned sm1_test_dispatch_tick;
+
+static void complete_shell_command(void)
+{
+    ++sm1_test_completed;
+}
 #endif
 
 long default_event_handler_ex(long event, void (*callback)(void *), void *parameter)
@@ -341,6 +347,17 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
                 ++sm1_test_completed;
                 if (!clean_shutdown(SHUTDOWN_REBOOT, callback, parameter))
                     return SYS_REBOOT;
+                break;
+            }
+            if (command == SM1_TEST_OPEN_BENCH)
+            {
+                unsigned completed = sm1_test_completed;
+                int result = podlink_screen_with_ready(complete_shell_command);
+                if (sm1_test_completed == completed)
+                    complete_shell_command();
+                if (result != 0)
+                    return SYS_USB_CONNECTED;
+                button_queue_post(BUTTON_REDRAW, 0);
                 break;
             }
             if (command >= SM1_TEST_DEBUG_BASE)

@@ -31,6 +31,10 @@ bool usb_serial_get_state(uint32_t *generation);
 /* Nonblocking lifetime check, safe from an IRQ-masked input callback. */
 bool usb_serial_generation_current(uint32_t generation);
 void usb_serial_wait(int ticks);
+#ifdef HAVE_USB_PODLINK
+void usb_serial_wait_activity(int ticks);
+void usb_serial_wake(void);
+#endif
 
 void usb_serial_send(const unsigned char *data, int length);
 

@@ -251,7 +251,6 @@ impl Service {
                 self.record_len =
                     core::cmp::min(p.next_record(&mut self.record), self.record.len());
             }
-            self.session.send_resident_binary(|out| p.next_binary(out));
             if self.record_len != 0
                 && self
                     .session
@@ -259,6 +258,10 @@ impl Service {
                     == 1
             {
                 self.record_len = 0;
+            }
+            // A streamed reply's metadata must enter TX before its data.
+            if self.record_len == 0 {
+                self.session.send_resident_binary(|out| p.next_binary(out));
             }
         }
         if !p.log_enabled() || self.log_epoch != p.log_epoch() {

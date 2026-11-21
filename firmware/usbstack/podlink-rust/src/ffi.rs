@@ -87,6 +87,7 @@ extern "C" {
     fn pfu_tick() -> i32;
     fn pfu_hz() -> i32;
     fn pfu_wait(ticks: c_int);
+    fn podlink_wake();
     fn pfu_panic() -> !;
     fn usb_podlink_open() -> bool;
     fn usb_podlink_close();
@@ -337,10 +338,14 @@ pub extern "C" fn podlink_max_message() -> c_uint {
 /// # Safety
 /// The C caller must satisfy the matching pointer and lifetime contracts in AUDIT.md.
 pub unsafe extern "C" fn podlink_send(kind: c_uint, data: *const c_void, len: c_uint) -> c_int {
-    with(0, |s, _| match (Kind::parse(kind), input(data, len)) {
+    let result = with(0, |s, _| match (Kind::parse(kind), input(data, len)) {
         (Some(k), Some(d)) => s.send(k, d),
         _ => -1,
-    })
+    });
+    if result == 1 {
+        podlink_wake();
+    }
+    result
 }
 #[no_mangle]
 /// # Safety

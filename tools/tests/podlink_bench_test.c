@@ -118,7 +118,7 @@ int main(void)
         {
             current_tick = stage = turns = 0;
             observed = false;
-            podlink_screen_run(draw_diagnostics, NULL);
+            podlink_screen_run(draw_diagnostics, NULL, NULL);
             assert(observed && podlink_state() == PODLINK_CLOSED && !lease);
             remove_usb();
             printf("PASS: BENCH RX %u, negotiated %u, %s\n",

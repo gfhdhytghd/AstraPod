@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "config.h"
 #include "font.h"
+#include "lang.h"
+#include "settings/settings.h"
 #include "podlink_screen.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/retained.h"
@@ -37,7 +39,7 @@ static void paint(const struct ui_view *view, const struct ui_view_frame *frame)
     const int row = font_get(FONT_UI)->height;
 
     lcd_clear_viewport();
-    lcd_putsxy(x, y, "PodLink");
+    lcd_putsxy(x, y, str(LANG_PODLINK_DIAGNOSTICS));
     lcd_putsxy(x, y + 2 * row, names[status->state]);
     lcd_putsxyf(x, y + 4 * row, "RX: %lu  TX: %lu", status->received, status->sent);
     lcd_putsxyf(x, y + 5 * row, "Close events: %lu", status->closes);
@@ -56,10 +58,15 @@ static void draw(const struct podlink_diagnostics *status, void *context)
     ui_page_draw(&diagnostics->page);
 }
 
-int podlink_screen(void)
+int podlink_screen_with_ready(void (*ready)(void))
 {
     struct diagnostic_page diagnostics;
     ui_view_init(&diagnostics.view, bounds, &view_ops, &diagnostics.status);
     ui_page_init(&diagnostics.page, &diagnostics.view);
-    return podlink_screen_run(draw, &diagnostics);
+    return podlink_screen_run(draw, &diagnostics, ready);
+}
+
+int podlink_screen(void)
+{
+    return podlink_screen_with_ready(NULL);
 }

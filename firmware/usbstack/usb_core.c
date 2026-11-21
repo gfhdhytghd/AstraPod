@@ -34,6 +34,7 @@
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
 #include "button.h"
 #include "sm1-test-control.h"
+#include "podlink.h"
 #endif
 #include "button_usb_remote.h"
 
@@ -1441,14 +1442,15 @@ static void usb_core_control_request_handler(struct usb_ctrlrequest* req, uint8_
             }
             unsigned command = 0;
             if (req->wIndex == SM1_TEST_USB_INDEX &&
-                req->wValue >= SM1_TEST_REBOOT && req->wValue <= SM1_TEST_STOP)
+                req->wValue >= SM1_TEST_REBOOT && req->wValue <= SM1_TEST_OPEN_BENCH)
                 command = req->wValue;
             else if (req->wIndex == SM1_TEST_DEBUG_INDEX &&
                      sm1_test_debug_name(req->wValue))
                 command = SM1_TEST_DEBUG_BASE + req->wValue;
 
             if (req->bRequestType == 0x40 && req->wLength == 0 && command &&
-                sm1_test_submitted == sm1_test_completed)
+                sm1_test_submitted == sm1_test_completed &&
+                (command != SM1_TEST_OPEN_BENCH || podlink_state() == PODLINK_CLOSED))
             {
                 ++sm1_test_submitted;
                 if (button_queue_try_post(SYS_SM1_TEST_CONTROL, command))

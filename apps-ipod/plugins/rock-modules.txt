@@ -56,3 +56,5 @@ games/superdom
 games/wormlet
 games/xobox
 viewers/chip8
+apps/search
+apps/stats

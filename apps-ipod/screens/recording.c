@@ -1006,8 +1006,12 @@ bool recording_screen(bool no_source)
         bool error = audio_status() & AUDIO_STATUS_ERROR;
         if (error)
             audio_error_clear();
-        splash(HZ, error ? ID2P(LANG_REC_CAPTURE_ERROR)
-                         : ID2P(LANG_USB_DAC_ACTIVE));
+        int message = LANG_REC_CAPTURE_ERROR;
+#ifdef USB_ENABLE_AUDIO
+        if (!error)
+            message = LANG_USB_DAC_ACTIVE;
+#endif
+        splash(HZ, ID2P(message));
         return false;
     }
 

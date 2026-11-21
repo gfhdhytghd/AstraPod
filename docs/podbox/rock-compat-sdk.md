@@ -84,8 +84,10 @@ first menu selection and leaves room for the roll string's terminator. Snow buil
   fallback IDs display as text without a native voice ID. A standalone build uses
   the native members and language IDs exercised by the three enabled modules.
 
-The allowlist covers Snow, Stopwatch and Dice. Additional modules need device and
-widget coverage for the slots they use. Worker threads, timers, resident
+The allowlist also covers Chess Clock, Countdown Timer and Test Kbd.
+Chess Clock links the existing Playback Control helper. Countdown Timer links
+Pluginlib Actions and uses the generated countdown language strings and the
+native beep. Additional modules need coverage for the slots they use. Worker threads, timers, resident
 plugins, overlays, codec IRAM, audio-buffer leases and stock binary modules
 are outside the current SDK. Load modules built from trusted sources. Plugins
 execute with firmware privileges, and the host dynamic loader can run module

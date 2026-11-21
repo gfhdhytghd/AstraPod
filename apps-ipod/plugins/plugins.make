@@ -57,6 +57,8 @@ $(ROCK_OBJECTS)/%.o: $(ROCK_SRC)/%.c $(ROCK_FINGERPRINT)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
 
 $(ROCK_OUT)/modules/demos/snow.rock: $(ROCK_OBJECTS)/lib/pluginlib_actions.o
+$(ROCK_OUT)/modules/apps/chessclock.rock: $(ROCK_OBJECTS)/lib/playback_control.o
+$(ROCK_OUT)/modules/apps/countdown_timer.rock: $(ROCK_OBJECTS)/lib/pluginlib_actions.o
 $(ROCK_OUT)/modules/games/dice.rock: $(addprefix $(ROCK_OBJECTS)/lib/,pluginlib_actions.o configfile.o playback_control.o)
 $(ROCKS): $(ROCK_OUT)/modules/%.rock: $(ROCK_OBJECTS)/plugin_crt0.o $(ROCK_LINK_INPUT) $(ROCK_MANIFEST)
 	$(SILENT)mkdir -p $(@D)

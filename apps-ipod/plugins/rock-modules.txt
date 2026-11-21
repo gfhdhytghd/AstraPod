@@ -1,3 +1,6 @@
 apps/stopwatch
 demos/snow
 games/dice
+apps/chessclock
+apps/countdown_timer
+demos/test_kbd

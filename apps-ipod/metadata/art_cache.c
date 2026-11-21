@@ -3709,8 +3709,9 @@ static bool artist_locate(const struct artist_tile_job *job, struct aa_src *src,
                           char *folder, char *embedded, char *first)
 {
     struct tagcache_search search;
-    char track[MAX_PATH], name[MAX_PATH], album[MAX_PATH], first_album[MAX_PATH] = "";
-    long first_year = LONG_MAX;
+    char track[MAX_PATH], name[MAX_PATH], tag[MAX_PATH], first_album[MAX_PATH] = "";
+    long first_year = 0;
+    bool first_spoken = true;
     bool have_embedded = false, have_folder = false;
 
     if (!tagcache_seek_string(job->source.tag, job->source.seek, name, sizeof(name)) ||
@@ -3739,16 +3740,23 @@ static bool artist_locate(const struct artist_tile_job *job, struct aa_src *src,
             }
             if (!have_embedded)
             {
-                long year = tagcache_get_numeric(&search, tag_year);
-                if (year <= 0)
-                    year = LONG_MAX;
-                if (year <= first_year &&
-                    tagcache_retrieve(&search, search.idx_id, tag_album, album, sizeof(album)) &&
-                    (!*first || year < first_year || strcasecmp(album, first_album) < 0))
+                bool spoken = tagcache_retrieve(&search, search.idx_id,
+                                               tag_genre, tag, sizeof(tag))
+                              && db_spoken_is_spoken_genre(tag);
+                long year = MAX(0, tagcache_get_numeric(&search, tag_year));
+
+                /* Music supplies the fallback when this artist has both. */
+                bool ahead = !*first || (first_spoken && !spoken);
+                if ((ahead || (spoken == first_spoken && year >= first_year)) &&
+                    tagcache_retrieve(&search, search.idx_id, tag_album,
+                                      tag, sizeof(tag)) &&
+                    (ahead || year > first_year ||
+                     strcasecmp(tag, first_album) < 0))
                 {
-                    strlcpy(first_album, album, sizeof(first_album));
+                    strlcpy(first_album, tag, sizeof(first_album));
                     strlcpy(first, search.result, MAX_PATH);
                     first_year = year;
+                    first_spoken = spoken;
                 }
             }
             yield();

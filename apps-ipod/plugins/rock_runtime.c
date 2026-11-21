@@ -234,6 +234,38 @@ static bool rock_set_option(const char *title, const void *value, enum optiontyp
     return result;
 }
 
+static bool rock_set_bool_options(const char *title, const bool *value,
+                                  const char *yes, int yes_voice,
+                                  const char *no, int no_voice,
+                                  void (*changed)(bool))
+{
+    if (usb_taken)
+        return true;
+    struct rock_native_scope scope = rock_modal_begin();
+    bool result = set_bool_options(title, value, yes, yes_voice,
+                                   no, no_voice, changed);
+    rock_modal_end(&scope);
+    return result;
+}
+
+static bool rock_set_bool(const char *title, const bool *value)
+{
+    return rock_set_bool_options(title, value,
+                                 (const char *)STR(LANG_SET_BOOL_YES),
+                                 (const char *)STR(LANG_SET_BOOL_NO), NULL);
+}
+
+static bool rock_simplelist_show(struct simplelist_info *info)
+{
+    if (usb_taken)
+        return true;
+    struct rock_native_scope scope = rock_modal_begin();
+    /* Native simplelists also return true for the Menu key. */
+    simplelist_show_list(info);
+    rock_modal_end(&scope);
+    return usb_taken;
+}
+
 static const struct settings_list *rock_find_setting(const void *variable)
 {
 #ifdef ROCK_COMPAT_GENERATED

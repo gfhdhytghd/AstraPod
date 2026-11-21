@@ -237,11 +237,160 @@ def resistor(source):
                    '            case GO_TO_PREVIOUS:\n            case GO_TO_ROOT:\n            case 4:\n                menuquit = true;')
 
 
+def vu_meter(source):
+    source = replace(source, '#include "lib/playback_control.h"\n', '')
+    source = replace(source, '''static void change_volume(int delta) {
+    int minvol = rb->sound_min(SOUND_VOLUME);
+    int maxvol = rb->sound_max(SOUND_VOLUME);
+    int vol = rb->global_status->volume + delta;
+
+    if (vol > maxvol) vol = maxvol;
+    else if (vol < minvol) vol = minvol;
+    if (vol != rb->global_status->volume) {
+        rb->sound_set(SOUND_VOLUME, vol);
+        rb->lcd_putsxyf(0,0, "%d", vol);
+        rb->lcd_update();
+        rb->sleep(HZ/12);
+    }
+}
+
+''', '')
+    source = replace(source, '''    int selection;
+    bool menu_quit = false;''', '''    int selection = 0;
+    bool menu_quit = false;''')
+    source = replace(source, '''"Minimeters","Decay Speed","Playback Control",
+                        "Quit");''', '''"Minimeters","Decay Speed","Quit");''')
+    source = replace(source, '''    FOR_NB_SCREENS(i)
+        rb->viewportmanager_theme_enable(i, true, NULL);
+    while (!menu_quit) {''',
+                     '    while (!menu_quit && !rb->plugin_usb_taken()) {')
+    source = replace(source, '''            case 4:
+                playback_control(NULL);
+                break;
+
+            case 5:''', '            case 4:')
+    source = replace(source, '''    FOR_NB_SCREENS(i)
+        rb->viewportmanager_theme_undo(i, false);
+    /* the menu uses the userfont, set it back to sysfont */
+    rb->lcd_setfont(FONT_SYSFIXED);
+    return exit;''', '    return exit;')
+    source = replace(source, '''            rb->read(fp, &vumeter_settings, sizeof(struct saved_settings));
+            rb->close(fp);''', '''        ssize_t size = rb->read(fp, &vumeter_settings, sizeof(vumeter_settings));
+        rb->close(fp);
+        if (size != sizeof(vumeter_settings) ||
+            (vumeter_settings.meter_type != ANALOG &&
+             vumeter_settings.meter_type != DIGITAL) ||
+            (unsigned)vumeter_settings.analog_decay > 6 ||
+            (unsigned)vumeter_settings.digital_decay > 6 ||
+            *(unsigned char *)&vumeter_settings.analog_use_db_scale > 1 ||
+            *(unsigned char *)&vumeter_settings.digital_use_db_scale > 1 ||
+            *(unsigned char *)&vumeter_settings.analog_minimeters > 1 ||
+            *(unsigned char *)&vumeter_settings.digital_minimeters > 1)
+            reset_settings();''')
+    source = replace(source, '''    if(vumeter_settings.analog_use_db_scale) {''',
+                     '''    /* A full-scale sample still falls in the last pixel column. */
+    left_peak = MIN(left_peak, MAX_PEAK - 1);
+    right_peak = MIN(right_peak, MAX_PEAK - 1);
+    if(vumeter_settings.analog_use_db_scale) {''')
+    for channel in ("left", "right"):
+        source = replace(source, f'digital_db_scale[{channel}_peak * 44 / MAX_PEAK]',
+                         f'digital_db_scale[{channel}_peak * (ARRAYLEN(digital_db_scale) - 1) / MAX_PEAK]')
+    source = replace(source, '''static void draw_title(void)
+{
+    static unsigned int sampr;
+    static int x;
+    static char title[16];
+
+    if (sampr != rb->mixer_get_frequency())
+    {
+        sampr = rb->mixer_get_frequency();
+        if ((sampr % 1000) < 100)
+            rb->snprintf(title, sizeof title, "VU %d kHz",
+                         sampr / 1000);
+        else
+            rb->snprintf(title, sizeof title, "VU %d.%u kHz",
+                         sampr / 1000, (sampr % 1000) / 100);
+
+        rb->font_getstringsize(title, &x, NULL, FONT_SYSFIXED);
+        x = half_width - (x/2); /* centered */
+    }
+    rb->lcd_putsxy(x, 0, title);
+}''', '''static void draw_title(int status)
+{
+    char title[32];
+    int width;
+
+    if (!(status & AUDIO_STATUS_PLAY))
+        rb->snprintf(title, sizeof(title), "Playback stopped");
+    else if (status & AUDIO_STATUS_PAUSE)
+        rb->snprintf(title, sizeof(title), "Playback paused");
+    else
+    {
+        unsigned rate = rb->mixer_get_frequency();
+        rb->snprintf(title, sizeof(title), "Playback %u.%u kHz",
+                     rate / 1000, (rate % 1000) / 100);
+    }
+    rb->font_getstringsize(title, &width, NULL, FONT_SYSFIXED);
+    rb->lcd_putsxy(half_width - width / 2, 0, title);
+}''')
+    source = replace(source, '''    load_settings();
+    rb->lcd_setfont(FONT_SYSFIXED);''', '''    load_settings();
+    rb->lcd_set_backdrop(NULL);
+    rb->lcd_set_background(LCD_BLACK);
+    rb->lcd_set_foreground(LCD_WHITE);
+    rb->lcd_setfont(FONT_SYSFIXED);''')
+    source = replace(source, '''        draw_title();
+
+#ifdef USB_ENABLE_AUDIO
+        if (rb->usb_audio_get_playing())
+            rb->mixer_channel_calculate_peaks(PCM_MIXER_CHAN_USBAUDIO,
+                                              &peaks);
+        else
+#endif
+            rb->mixer_channel_calculate_peaks(PCM_MIXER_CHAN_PLAYBACK,
+                                              &peaks);''', '''        int status = rb->audio_status();
+        draw_title(status);
+
+        if ((status & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE)) == AUDIO_STATUS_PLAY)
+            rb->mixer_channel_calculate_peaks(PCM_MIXER_CHAN_PLAYBACK, &peaks);
+        else
+        {
+            peaks.left = peaks.right = 0;
+            last_left_needle_top_x = last_num_left_leds = last_num_right_leds = 0;
+            last_right_needle_top_x = half_width;
+        }''')
+    source = replace(source, '                rb->lcd_puts(0, 2, LABEL_VOLUME ": Volume");',
+                     '                rb->lcd_puts(0, 2, "Playback levels (read only)");')
+    return replace(source, '''                if(vu_meter_menu())
+                    return PLUGIN_OK;
+                break;
+
+            case VUMETER_UP:
+            case VUMETER_UP | BUTTON_REPEAT:
+                change_volume(1);
+                break;
+
+            case VUMETER_DOWN:
+            case VUMETER_DOWN | BUTTON_REPEAT:
+                change_volume(-1);
+                break;''', '''                {
+                    bool quit = vu_meter_menu();
+                    if (rb->plugin_usb_taken())
+                        return PLUGIN_USB_CONNECTED;
+                    if (quit)
+                    {
+                        save_settings();
+                        return PLUGIN_OK;
+                    }
+                }
+                break;''')
+
+
 if __name__ == "__main__":
     infile, outfile = map(Path, sys.argv[1:])
     adapters = {
         "db_folder_select": folder_picker, "dict": dictionary,
         "credits": credits, "alarmclock": alarmclock,
-        "dart_scorer": darts, "resistor": resistor,
+        "dart_scorer": darts, "resistor": resistor, "vu_meter": vu_meter,
     }
     outfile.write_text(adapters[infile.stem](infile.read_text()))

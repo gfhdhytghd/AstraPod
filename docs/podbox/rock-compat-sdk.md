@@ -71,6 +71,18 @@ Rockblox, Solitaire, Spacerocks, Wormlet and Demystify. Their bitmap rules use
 upstream's target selections and bitmap formats. Menus and option pickers use
 the native theme. The games keep their upstream playfields and help screens.
 
+Codebuster uses native menus and option pickers. Its local settings save
+on normal exit. Super Domination uses the upstream board tiles and the native
+inventory list. Rocklife starts with a built-in pattern. Rocklife's `.cells`
+viewer association and Super Domination's `.ssg` viewer association are outside
+this build. Super Domination can write its upstream save, but opening it
+from Files still requires the viewer association.
+
+VU Meter reads the firmware playback channel's peaks and the mixer output
+rate. The title identifies stopped and paused playback, with the meters at
+rest in either state. Select opens the native display options. Menu exits.
+The meter has no playback controls, volume controls, or USB audio input.
+
 Remaining entries from the ipod6g Phase 2 source inventory are listed below.
 A generated bitmap dependency refers to an existing upstream asset that the
 AstraPod build still needs to select and compile. The behavior checks apply
@@ -79,14 +91,10 @@ after the dependencies build.
 | Entry | Build dependency or behavior to verify |
 | --- | --- |
 | `chip8` | Route a selected `.ch8` file to the entry point. Verify the optional `.c8k` key mapping and emulator exit. |
-| `codebuster` | Supply a native `set_bool` adapter or convert its two boolean options. Verify settings save and USB exit from the nested menu. |
 | `metronome` | The ARM compiler reports missing `timer_register` and `timer_unregister`. Define timer and audio ownership, including callback teardown. |
 | `oscilloscope` | The ARM compiler reports missing `pcm_play_lock` and `mixer_channel_set_buffer_hook`. Define PCM lock and mixer hook ownership. Add OSD viewport buffer adapters and native volume controls. |
 | `pitch_detector` | The ARM compiler reports missing `pcm_record_data` and `plugin_get_audio_buffer`. Define capture callback teardown and the playback-buffer lease. |
 | `rb_info` | Map `talk_id`, `talk_spell` and `strcasestr`. Link the printcell, action and button helpers. Verify spoken rows and their native IDs. |
-| `rocklife` | Verify standalone pattern controls. A `.cells` file also needs viewer routing and plugin entry parameters. |
-| `superdom` | Generate `superdom_boarditems`. Map boolean settings and the inventory simplelist to native widgets. Review `.ssg` save-file entry parameters. |
-| `vu_meter` | Map boolean options, `mixer_get_frequency` and native volume bounds and updates. Verify the peak display with playback running. |
 
 ## Phase 3 playback metadata
 
@@ -130,6 +138,7 @@ precision for its average bitrate and playlist duration.
 See `apps-ipod/plugins/rock-modules.txt` for the installed applications, games
 and demos. Worker threads, timers, resident plugins, overlays, codec IRAM,
 audio-buffer leases and stock binary modules
-are outside the current SDK. Load modules built from trusted sources. Plugins
+are outside the current SDK. File associations and cross-plugin dispatch are
+also outside this build. Load modules built from trusted sources. Plugins
 execute with firmware privileges, and the host dynamic loader can run module
 initializers before the SDK header check.

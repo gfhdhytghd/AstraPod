@@ -156,6 +156,69 @@ elif src.stem == "wormlet":
             "    configfile_save(SETTINGS_FILENAME, config,\n"
             "                        sizeof(config)/sizeof(*config),\n"
             "                        SETTINGS_VERSION);\n\n    return PLUGIN_OK;")
+elif src.stem == "codebuster":
+    # The board dimensions and random palette require positive counts.
+    for field in ("pieces", "colors", "guesses"):
+        replace(f"{{TYPE_INT, 0, MAX_{field.upper()}_COUNT",
+                f"{{TYPE_INT, 1, MAX_{field.upper()}_COUNT")
+        replace(f"NULL, -1, MAX_{field.upper()}_COUNT, 1, NULL);",
+                f"NULL, 1, 1, MAX_{field.upper()}_COUNT, NULL);")
+    replace("static void settings_menu(void)", "static bool settings_menu(void)")
+    replace("        switch(rb->do_menu(&settings_menu, &cur_item, NULL, false)) {",
+            "        if (rb->plugin_usb_taken())\n"
+            "            return true;\n"
+            "        switch(rb->do_menu(&settings_menu, &cur_item, NULL, false)) {")
+    replace("            case GO_TO_PREVIOUS:\n                menu_quit = true;",
+            "            case MENU_ATTACHED_USB:\n                return true;\n"
+            "            case GO_TO_ROOT:\n"
+            "            case GO_TO_PREVIOUS:\n                menu_quit = true;")
+    replace("}\n\nstatic bool resume;", "    return false;\n}\n\nstatic bool resume;")
+    replace("                settings_menu();",
+            "                if (settings_menu())\n"
+            "                    quit = usb = menu_quit = true;")
+    replace("                playback_control(NULL);",
+            "                if (playback_control(NULL))\n"
+            "                    quit = usb = menu_quit = true;")
+    replace("            case 4:\n                quit = menu_quit = true;",
+            "            case GO_TO_ROOT:\n"
+            "            case GO_TO_PREVIOUS:\n"
+            "            case 4:\n                quit = menu_quit = true;")
+    replace("                usb = menu_quit = true;",
+            "                quit = usb = menu_quit = true;")
+    replace("            } while( ( button == BUTTON_NONE )\n"
+            "                  || ( button & (BUTTON_REL|BUTTON_REPEAT) ) );\n"
+            "            main_menu();",
+            "            } while (!quit && (button == BUTTON_NONE ||\n"
+            "                               (button & (BUTTON_REL | BUTTON_REPEAT))));\n"
+            "            if (!quit)\n"
+            "                main_menu();")
+    replace("    if (rb->memcmp(&old_settings,",
+            "    if (!usb && rb->memcmp(&old_settings,")
+elif src.stem == "rocklife":
+    replace("                case ROCKLIFE_PLAY_PAUSE:\n                case ROCKLIFE_QUIT:",
+            "                case ROCKLIFE_QUIT:\n"
+            "                    quit = 1;\n"
+            "                    /* fall through */\n"
+            "                case ROCKLIFE_PLAY_PAUSE:")
+elif src.stem == "superdom":
+    replace("            static int sel=1;", "            int sel = superdom_settings.compdiff - 1;")
+    replace("        case 4:\n            return RET_VAL_QUIT_ERR;\n            break;",
+            "        case MENU_ATTACHED_USB:\n            return RET_VAL_USB;\n"
+            "        case GO_TO_ROOT:\n"
+            "        case GO_TO_PREVIOUS:\n"
+            "        case 4:\n            return RET_VAL_QUIT_ERR;")
+    replace('        if(!save_game())\n            rb->splash(HZ, "Game saved");',
+            '    {\n'
+            '        int result = save_game();\n'
+            '        if (rb->plugin_usb_taken())\n            return RET_VAL_USB;\n'
+            '        if (!result)\n            rb->splash(HZ, "Game saved");')
+    replace('            rb->splash(HZ, "Error in save");\n        break;',
+            '            rb->splash(HZ, "Error in save");\n        break;\n    }')
+    replace("        case 1:\n            return RET_VAL_OK;\n            break;\n"
+            "        case 2:\n            if((temp = ingame_menu()) != RET_VAL_OK)",
+            "        case MENU_ATTACHED_USB:\n            return RET_VAL_USB;\n"
+            "        case 1:\n            return RET_VAL_OK;\n"
+            "        case 2:\n            if((temp = ingame_menu()) != RET_VAL_OK)")
 else:
     raise SystemExit(f"Unknown conversion: {src}")
 

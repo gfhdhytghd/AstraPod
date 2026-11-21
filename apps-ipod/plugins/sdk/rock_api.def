@@ -190,6 +190,13 @@ ROCK_SLOT(int (*rename)(const char *, const char *), rename, rock_rename)
 ROCK_DIRECT(font_get_width)
 ROCK_DIRECT(lcd_get_backdrop)
 ROCK_DIRECT(mixer_channel_calculate_peaks)
+ROCK_DIRECT(mixer_get_frequency)
+ROCK_SLOT(__typeof__(set_bool) *set_bool, set_bool, rock_set_bool)
+ROCK_SLOT(__typeof__(set_bool_options) *set_bool_options, set_bool_options,
+          rock_set_bool_options)
+ROCK_DIRECT(simplelist_info_init)
+ROCK_SLOT(__typeof__(simplelist_show_list) *simplelist_show_list,
+          simplelist_show_list, rock_simplelist_show)
 #ifdef USB_ENABLE_AUDIO
 ROCK_DIRECT(usb_audio_get_playing)
 #endif

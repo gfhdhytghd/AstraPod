@@ -113,6 +113,10 @@ the prefix checks) and `podlink_library.c` (MS3). Host:
 
 ### Transfer profiling
 
+Run `python -m hrlibrary --mode base --mbit 26 <music-file>` with the
+daemon venv and PYTHONPATH from AstraPod-Desktop. Repeat with
+`--mode fast`, the default. See docs/podlink.md for the setup command.
+
 Borrow the tty, send `MS3 PROFILE BASE` or `MS3 PROFILE FAST`, and use
 `MS3 STREAM SAMPLE <path>` on the same file in both modes. SAMPLE accepts
 regular files under `/Music/`, `/iPod_Control/Music/` and `/Recordings/`.

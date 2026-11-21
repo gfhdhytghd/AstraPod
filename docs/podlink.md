@@ -612,10 +612,17 @@ eight-field reply. Frame and file checksum bytes are unchanged: the player
 scans MSF1 data with a slicing-by-four CRC32, then combines its raw remainder
 with the file history and the PLNK/MSF1 prefix.
 
-Borrow the tty from HerdRemote before profiling. Send `MS3 PROFILE BASE` or
-`MS3 PROFILE FAST`, then stream the same file in each mode. For a database
-file, use `MS3 STREAM FILE database_idx.tcd`. Validate offsets, length and
-CRC32 before reading the counters with `MS3 PROFILE CPU`.
+Run from AstraPod-Desktop with the HerdRemote venv. The client borrows
+the tty, validates offsets, length and CRC32, and discards the payload.
+
+```sh
+export PYTHONPATH="$PWD:$PWD/herdremote:/usr/lib/python3.14/site-packages"
+~/.local/share/podbox-herdremote/venv/bin/python -m hrlibrary --mode base --mbit 26 '/iPod_Control/Music/F00/example.m4a'
+~/.local/share/podbox-herdremote/venv/bin/python -m hrlibrary --mode fast --mbit 26 '/iPod_Control/Music/F00/example.m4a'
+```
+
+The client defaults to `--mode fast`. Use `--tagcache database_idx.tcd`
+to profile a database file.
 
 Use a multi-MiB file for the 25 Mbit/s gate. To pace a run at 26 Mbit/s,
 space out `MS3 CREDIT` requests based on the cumulative bytes received.

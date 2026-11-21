@@ -1455,9 +1455,21 @@ static void usb_core_control_request_handler(struct usb_ctrlrequest* req, uint8_
                 usb_core_control_response(USB_CONTROL_ACK, reqdata, sizeof(status));
                 return;
             }
+            if (req->wIndex == SM1_TEST_USB_INDEX &&
+                req->bRequestType == 0xc0 &&
+                req->wValue == SM1_TEST_RECORD_STATUS_VALUE &&
+                req->wLength == SM1_TEST_RECORD_STATUS_SIZE &&
+                reqdata_size >= SM1_TEST_RECORD_STATUS_SIZE)
+            {
+                sm1_test_record_status(reqdata);
+                usb_core_control_response(USB_CONTROL_ACK, reqdata,
+                                          SM1_TEST_RECORD_STATUS_SIZE);
+                return;
+            }
             unsigned command = 0;
             if (req->wIndex == SM1_TEST_USB_INDEX &&
-                req->wValue >= SM1_TEST_REBOOT && req->wValue <= SM1_TEST_OPEN_BENCH)
+                req->wValue >= SM1_TEST_REBOOT &&
+                req->wValue <= SM1_TEST_RECORD_STOP)
                 command = req->wValue;
             else if (req->wIndex == SM1_TEST_DEBUG_INDEX &&
                      sm1_test_debug_name(req->wValue))
@@ -1465,6 +1477,7 @@ static void usb_core_control_request_handler(struct usb_ctrlrequest* req, uint8_
 
             if (req->bRequestType == 0x40 && req->wLength == 0 && command &&
                 sm1_test_submitted == sm1_test_completed &&
+                sm1_test_record_active() == (command == SM1_TEST_RECORD_STOP) &&
                 (command != SM1_TEST_OPEN_BENCH || podlink_state() == PODLINK_CLOSED))
             {
                 ++sm1_test_submitted;

@@ -456,7 +456,7 @@ with the requesting command's prefix.
 | `MS3 PROFILE BASE\|FAST` | Clears timing counters and selects the IN submission mode |
 | `MS3 PROFILE` | Stops timing and returns counters |
 | `MS3 PROFILE CPU` | Stops timing and appends core idle time and the capture interval |
-| `MS3 STREAM SAMPLE <path>` | Opens a managed file for the same windowed download |
+| `MS3 STREAM SAMPLE <path>` | Opens an allowlisted sample file for the same windowed download |
 | `MS3 STOP` | `MS3 STOPPED` closes the current MS3 operation |
 | `MS3 DETAIL <path>` | `MS3 DETAIL <size_bytes>\t<codec>\t<sample_rate_hz>\t<channels>\t<has_art>` |
 | `MS3 ART <size> <path>` | `MS3 ART <width> <height> <rows\|columns>`, `MS3 NOART`, or `MS3 PLACEHOLDER` |
@@ -571,8 +571,8 @@ replacing CDC-ACM or adding another stream.
 
 ### Profile a large download
 
-Choose a stable regular file under `/Music/` or `/iPod_Control/Music/`
-(up to 128 MiB), or a large allowlisted tagcache file.
+Choose a stable regular file under `/Music/`, `/iPod_Control/Music/`, or
+`/Recordings/` (up to 128 MiB), or a large allowlisted tagcache file.
 `MS3 STREAM SAMPLE <path>` replies `MS3 SAMPLE <size>`, then uses the
 same MSF1 offsets, credits and terminal CRC32 as FILE. SAMPLE is read-only.
 Tagcache mode keeps the firmware's normal revision checks.

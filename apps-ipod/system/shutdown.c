@@ -385,6 +385,13 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
                 button_queue_post(BUTTON_REDRAW, 0);
                 break;
             }
+            if (command == SM1_TEST_RECORD_LINE_WAV ||
+                command == SM1_TEST_RECORD_MIC_WAV)
+            {
+                sm1_test_record_run(command == SM1_TEST_RECORD_MIC_WAV);
+                button_queue_post(BUTTON_REDRAW, 0);
+                break;
+            }
             if (command >= SM1_TEST_DEBUG_BASE)
                 sm1_test_debug_run(command - SM1_TEST_DEBUG_BASE);
             else if (command == SM1_TEST_PLAY && file_exists(SM1_TEST_TRACK))

@@ -81,6 +81,12 @@
 #include "widgets/list.h"
 #include "general.h"
 #include "system/appevents.h"
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
+#include "mikey-target.h"
+#include "rbpaths.h"
+#include "sm1-test-control.h"
+#include "usb.h"
+#endif
 
 #ifdef HAVE_RECORDING
 /* This array holds the record size interval lengths, in mebibytes */
@@ -1844,6 +1850,122 @@ rec_abort:
     pop_current_activity();
     return (rec_status & RCSTAT_BEEN_IN_USB_MODE) != 0;
 } /* recording_screen */
+
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
+static volatile enum sm1_test_record_state shell_record_state;
+static char shell_record_path[SM1_TEST_RECORD_PATH_SIZE];
+
+bool sm1_test_record_active(void)
+{
+    return shell_record_state == SM1_RECORD_ACTIVE;
+}
+
+void sm1_test_record_status(void *reply)
+{
+    int irq = disable_irq_save();
+    uint32_t fields[] = {mikey_supported(), shell_record_state};
+    memcpy(reply, fields, sizeof(fields));
+    memcpy((char *)reply + sizeof(fields), shell_record_path,
+           sizeof(shell_record_path));
+    restore_irq(irq);
+}
+
+void sm1_test_record_run(bool mic)
+{
+    char path[MAX_PATH];
+    int action = ACTION_NONE;
+    bool started = false, stop = false;
+    shell_record_state = SM1_RECORD_ERROR;
+    if (mic && !mikey_supported())
+        shell_record_state = SM1_RECORD_UNSUPPORTED;
+    else if (in_recording_screen()
+#ifdef USB_ENABLE_AUDIO
+             || (usb_audio_get_active() && usb_audio_get_playing())
+#endif
+             )
+        shell_record_state = SM1_RECORD_BUSY;
+    else if ((dir_exists(REC_BASE_DIR) || mkdir(REC_BASE_DIR) == 0) &&
+             create_numbered_filename(path, REC_BASE_DIR,
+                                      "PodLink-", ".wav", 4, NULL) &&
+             !file_exists(path))
+    {
+        struct audio_recording_options options = {
+            .rec_source = mic ? AUDIO_SRC_MIC : AUDIO_SRC_LINEIN,
+            .rec_frequency = REC_FREQ_44,
+            .rec_channels = mic ? 1 : 2,
+            .rec_mono_mode = 1, /* left ADC */
+            .enc_config.rec_format = REC_FORMAT_PCM_WAV,
+        };
+        int keyclick = global_settings.keyclick;
+        global_settings.keyclick = 0;
+        talk_disable(true);
+        audio_stop();
+        audio_init_recording();
+        if (audio_status() & AUDIO_STATUS_ERROR)
+        {
+            audio_error_clear();
+            global_settings.keyclick = keyclick;
+            talk_disable(false);
+            ++sm1_test_completed;
+            return;
+        }
+        rec_set_recording_options(&options);
+        if (mic)
+            audio_set_recording_gain(global_settings.rec_mic_gain, 0,
+                                     AUDIO_GAIN_MIC);
+        else
+            audio_set_recording_gain(global_settings.rec_left_gain,
+                                     global_settings.rec_right_gain,
+                                     AUDIO_GAIN_LINEIN);
+        audio_record(path);
+        started = (audio_status() & (AUDIO_STATUS_RECORD | AUDIO_STATUS_ERROR))
+                  == AUDIO_STATUS_RECORD;
+        if (started)
+        {
+            shell_record_state = SM1_RECORD_ACTIVE;
+            ++sm1_test_completed;
+            while (usb_inserted() && usb_podlink_active() &&
+                   !usb_exclusive_storage() &&
+                   !(audio_status() & AUDIO_STATUS_ERROR))
+            {
+                action = get_action(CONTEXT_RECSCREEN, HZ / 10);
+                if (action == SYS_SM1_TEST_CONTROL)
+                {
+                    stop = true;
+                    sm1_test_dispatch_tick = current_tick;
+                    break;
+                }
+                if (action == ACTION_STD_CANCEL || action == SYS_USB_CONFIRM ||
+                    action == SYS_USB_CONNECTED || action == SYS_USB_DISCONNECTED ||
+                    action == SYS_POWEROFF || action == SYS_REBOOT)
+                    break;
+                default_event_handler(action);
+                action = ACTION_NONE;
+            }
+        }
+
+        audio_stop_recording();
+        while (audio_status() & AUDIO_STATUS_RECORD)
+            sleep(1);
+        bool saved = started && !(audio_status() & AUDIO_STATUS_ERROR) &&
+                     file_exists(path);
+        audio_close_recording();
+        rec_set_source(AUDIO_SRC_PLAYBACK, SRCF_PLAYBACK);
+        sound_settings_apply();
+        global_settings.keyclick = keyclick;
+        talk_disable(false);
+        int irq = disable_irq_save();
+        if (saved)
+            strmemccpy(shell_record_path, path, sizeof(shell_record_path));
+        shell_record_state = saved ? SM1_RECORD_READY : SM1_RECORD_ERROR;
+        restore_irq(irq);
+    }
+    if (!started || stop)
+        ++sm1_test_completed;
+    if (action != SYS_SM1_TEST_CONTROL && action != ACTION_STD_CANCEL)
+        default_event_handler(action);
+}
+#endif
 
 static int open_recording(void)
 {

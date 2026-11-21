@@ -6,6 +6,7 @@
 #include "file.h"
 #include "mv.h"
 #include "podlink_profile.h"
+#include "rbpaths.h"
 #include "version.h"
 #include "screens/system/podlink_library.h"
 #include "screens/system/podlink_media.h"
@@ -97,7 +98,8 @@ static bool managed_path(const char *path)
 static bool sample_path(const char *path)
 {
     return path_under(path, "/Music/", true) ||
-           path_under(path, "/iPod_Control/Music/", true);
+           path_under(path, "/iPod_Control/Music/", true) ||
+           path_under(path, REC_BASE_DIR "/", true);
 }
 
 static const char *data_reply(const unsigned char *data, unsigned int n,

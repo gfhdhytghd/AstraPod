@@ -12,7 +12,104 @@ def replace(old, new, count=1):
         raise SystemExit(f"{src}: refresh source conversion for {old!r}")
     text = text.replace(old, new)
 
-if src.stem == "blackjack":
+if src.stem == "chip8":
+    # The iPod wheel posts motion events without a corresponding release.
+    replace(
+        "    int button = rb->button_get(false);\n    switch (button)",
+        "    int button = rb->button_get(false);\n"
+        "    chip8_virtual_keys[2] = 0;\n"
+        "    chip8_virtual_keys[8] = 0;\n"
+        "    switch (button)",
+    )
+    for key in ("2", "8"):
+        replace(
+            f"    case CHIP8_KEY{key}:                chip8_virtual_keys[{key}] = 1; break;\n"
+            f"    case CHIP8_KEY{key} | BUTTON_REL:   chip8_virtual_keys[{key}] = 0; break;",
+            f"    case CHIP8_KEY{key} | BUTTON_REPEAT:\n"
+            f"    case CHIP8_KEY{key}: chip8_virtual_keys[{key}] = 1; break;",
+        )
+
+    # Keep the ROM read within the guest program region and reject short reads.
+    replace("    int numread;\n    int fd;\n    int len;", "    int fd;")
+    replace(
+        "    numread = rb->read(fd, chip8_mem+0x200, 4096-0x200);\n"
+        "    rb->close(fd);\n"
+        "    if (numread==-1) {",
+        "    off_t size = rb->ffilesize(fd);\n"
+        "    size_t capacity = sizeof(chip8_mem) - 0x200;\n"
+        "    bool ok = false;\n"
+        "    if (size >= 2 && size <= (off_t)capacity) {\n"
+        "        memset(chip8_mem + 0x200, 0, capacity);\n"
+        "        ok = rb->read(fd, chip8_mem + 0x200, size) == size;\n"
+        "    }\n"
+        "    rb->close(fd);\n"
+        "    if (!ok) {",
+    )
+    replace("    rb->strcpy(c8kname, file);",
+            '    size_t len = rb->strlcpy(c8kname, file, sizeof(c8kname));')
+    replace(
+        "    len = rb->strlen(c8kname);\n"
+        "    c8kname[len-2] = '8';\n"
+        "    c8kname[len-1] = 'k';",
+        '    memcpy(c8kname + len - 4, ".c8k", sizeof(".c8k"));',
+    )
+    replace(
+        '        rb->lcd_puts(0, 6, "File&Keymap OK.");\n'
+        "        numread = rb->read(fd, chip8_keymap, 16);\n"
+        "        rb->close(fd);",
+        "        byte map[16];\n"
+        "        ssize_t count = rb->read(fd, map, sizeof(map));\n"
+        "        bool complete = count == (ssize_t)sizeof(map);\n"
+        "        rb->close(fd);\n"
+        "        if (complete)\n"
+        "            memcpy(chip8_keymap, map, sizeof(map));\n"
+        '        rb->lcd_puts(0, 6, complete ? "File&Keymap OK." : "File OK.");',
+    )
+
+    # Service native events during the upstream credits and load-error screen.
+    replace(
+        "    int ok;\n\n    rb->lcd_clear_display();",
+        "    rb->lcd_setfont(FONT_SYSFIXED);\n"
+        "    rb->lcd_clear_display();",
+    )
+    replace(
+        "    ok = chip8_init(file);\n"
+        "    rb->lcd_update();\n"
+        "    rb->sleep(HZ*1);\n"
+        "    if (!ok)",
+        "    bool ok = chip8_init(file);\n"
+        "    rb->lcd_update();\n"
+        "    long deadline = *rb->current_tick + HZ;\n"
+        "    chip8_running = 1;\n"
+        "    while (chip8_running == 1 && TIME_BEFORE(*rb->current_tick, deadline)) {\n"
+        "        chip8_keyboard();\n"
+        "        rb->sleep(1);\n"
+        "    }\n"
+        "    if (chip8_running != 1)\n"
+        "        return true;\n"
+        "    if (!ok)",
+    )
+    replace(
+        "    const char* filename;\n\n"
+        "    if (parameter == NULL)\n"
+        "    {\n"
+        '        rb->splash(HZ, "Play a .ch8 file!");\n'
+        "        return PLUGIN_ERROR;\n"
+        "    }\n"
+        "    else\n"
+        "    {\n"
+        "        filename = (char*) parameter;\n"
+        "    }",
+        "    const char* filename = parameter;\n"
+        "    size_t len = filename ? rb->strlen(filename) : 0;\n"
+        "    if (len < 4 || len >= MAX_PATH ||\n"
+        '        rb->strcasecmp(filename + len - 4, ".ch8"))\n'
+        "    {\n"
+        '        rb->splash(HZ, "Open a .ch8 file in Files.");\n'
+        "        return rb->plugin_usb_taken() ? PLUGIN_USB_CONNECTED : PLUGIN_OK;\n"
+        "    }",
+    )
+elif src.stem == "blackjack":
     replace('#include "lib/playback_control.h"',
             '#include "lib/playback_control.h"\n#include "lib/pluginlib_exit.h"')
     replace("\n        button = rb->button_get(true);",

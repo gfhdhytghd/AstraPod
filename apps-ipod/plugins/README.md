@@ -23,6 +23,13 @@ Select a `.cells` pattern in Files to open it in Rocklife. Select a
 installed plugin folders also appear in the Plugins category browser.
 Selecting the `.rock` module itself starts it without a file.
 
+Select a `.ch8` program in Files to open CHIP-8. Press Menu to return.
+Left, Play/Pause and Right map to 4, 5 and 6. Wheel back and forward
+send pulses for 2 and 8. Put a same-stem `.c8k` beside the program to
+remap the 16 CHIP-8 keys. The first 16 characters give the physical
+key mappings in hexadecimal order from 0 to F. A missing or short
+sidecar uses the default mapping.
+
 ## Phase 2 utility candidates
 
 Run the candidate subsets in an ipod6g ARM or SDL build configured with

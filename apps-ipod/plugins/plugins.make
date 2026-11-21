@@ -59,9 +59,9 @@ $(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_UTILITIES))): $(ROCK_OUT)/
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-utilities.py $< $@
 
-ROCK_RESOURCE_GAMES := blackjack bubbles clix invadrox jewels pegbox rockblox \
+ROCK_GAME_ADAPTERS := blackjack bubbles chip8 clix invadrox jewels pegbox rockblox \
     solitaire spacerocks wormlet codebuster rocklife superdom
-$(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_RESOURCE_GAMES))): $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c $(APPSDIR)/plugins/stage-games.py
+$(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_GAME_ADAPTERS))): $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c $(APPSDIR)/plugins/stage-games.py
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-games.py $< $@
 
@@ -75,7 +75,7 @@ $(ROCK_OUT)/staged/metronome.c: $(ROCK_SRC)/metronome.c $(APPSDIR)/plugins/stage
 
 ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot metronome \
     minesweeper periodic_table playing_time pong robotfindskitten snake snake2 star stopwatch \
-    lib/highscore vu_meter $(ROCK_UTILITIES) $(ROCK_RESOURCE_GAMES)
+    lib/highscore vu_meter $(ROCK_UTILITIES) $(ROCK_GAME_ADAPTERS)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@

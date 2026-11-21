@@ -112,6 +112,7 @@ static const struct {
     const char *module;
 } rock_viewers[] = {
     { "cells", PLUGIN_DEMOS_DIR "/rocklife.rock" },
+    { "ch8", VIEWERS_DIR "/chip8.rock" },
     { "ssg", PLUGIN_GAMES_DIR "/superdom.rock" },
 };
 #endif

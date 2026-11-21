@@ -40,6 +40,8 @@ extern void splashf_in(struct viewport *area, const char *fmt, ...)
 
 /* set a delay before displaying the progress meter the first time */
 extern void splash_progress_set_delay(long delay_ticks);
+/* Check before preparing a display or formatting a message for the meter. */
+extern bool splash_progress_needs_draw(int current, int total);
 /* Silence the progress meter's own voice, for a caller that announces the same
  * work in better words. Sticky: set it before a run of splash_progress() calls
  * and clear it after. */

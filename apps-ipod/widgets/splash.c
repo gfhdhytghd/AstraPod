@@ -383,6 +383,16 @@ void splash_progress_set_silent(bool silent)
     progress_silent = silent;
 }
 
+static bool progress_due(int current, int total, long now)
+{
+    return current >= total || !TIME_BEFORE(now, progress_next_tick);
+}
+
+bool splash_progress_needs_draw(int current, int total)
+{
+    return progress_due(current, total, current_tick);
+}
+
 /* splash a progress meter */
 void splash_progress(int current, int total, const char *fmt, ...)
 {
@@ -395,10 +405,10 @@ void splash_progress(int current, int total, const char *fmt, ...)
                    || TIME_AFTER(now, progress_last_call + HZ*2);
     progress_last_call = now;
 
+    if (!progress_due(current, total, now))
+        return;
     if (current < total)
     {
-        if(TIME_BEFORE(now, progress_next_tick))
-            return;
         /* limit to 20fps */
         progress_next_tick = now + HZ/20;
         vp_flag = 0; /* don't mark vp dirty to prevent flashing */

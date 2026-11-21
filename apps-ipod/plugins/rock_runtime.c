@@ -321,7 +321,7 @@ static void rock_progress_set_delay(long delay)
 
 static void rock_progress(int current, int total, const char *fmt, ...)
 {
-    if (usb_taken)
+    if (usb_taken || !splash_progress_needs_draw(current, total))
         return;
 
     char text[256];

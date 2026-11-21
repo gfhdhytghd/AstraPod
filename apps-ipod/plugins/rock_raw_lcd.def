@@ -26,6 +26,9 @@ ROCK_RAW_VOID(lcd_bitmap_transparent,
 ROCK_RAW_VOID(lcd_mono_bitmap,
               (const unsigned char *src, int x, int y, int w, int h),
               (src, x, y, w, h))
+ROCK_RAW_VOID(lcd_mono_bitmap_part,
+              (const unsigned char *src, int sx, int sy, int stride,
+               int x, int y, int w, int h), (src, sx, sy, stride, x, y, w, h))
 ROCK_RAW_VOID(lcd_set_backdrop, (fb_data *backdrop), (backdrop))
 ROCK_RAW_VOID(lcd_set_background, (unsigned color), (color))
 ROCK_RAW_VOID(lcd_set_foreground, (unsigned color), (color))

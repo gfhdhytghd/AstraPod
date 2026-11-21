@@ -24,6 +24,7 @@ ROCK_RAW(lcd_bitmap)
 ROCK_RAW(lcd_bitmap_part)
 ROCK_RAW(lcd_bitmap_transparent)
 ROCK_RAW(lcd_mono_bitmap)
+ROCK_RAW(lcd_mono_bitmap_part)
 ROCK_RAW(lcd_set_backdrop)
 ROCK_RAW(lcd_set_background)
 ROCK_RAW(lcd_set_foreground)
@@ -56,6 +57,9 @@ ROCK_DIRECT(playlist_resume)
 ROCK_DIRECT(playlist_resume_track)
 
 /* System and utilities */
+#ifdef ARM_NEED_DIV0
+ROCK_DIRECT(__div0)
+#endif
 ROCK_DIRECT(get_time)
 ROCK_DIRECT(commit_dcache)
 ROCK_DIRECT(commit_discard_idcache)

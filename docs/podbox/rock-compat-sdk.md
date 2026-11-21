@@ -42,8 +42,11 @@ Customize Main Menu. For a simulator fixture, add
 1. Add a category and basename to `apps-ipod/plugins/rock-modules.txt`. Use
    `apps`, `games` or `demos` as the category.
 2. In `apps-ipod/plugins/plugins.make`, add dependencies for any upstream
-   `lib/` sources or generated assets that the module uses. Existing examples
-   build `pluginlib_actions.c`, `configfile.c` and `playback_control.c`.
+   `lib/` sources or generated assets that the module uses. For native bitmaps,
+   pass the bitmap basenames to the module's `rock_module_bitmaps` rule.
+   The build selects the files from upstream's
+   `bitmaps/native/SOURCES` and generates the headers and objects in the build
+   directory.
 3. Build with the SDK include path first. Missing `rb->` members are compile
    errors. Add reviewed bindings to `apps-ipod/plugins/sdk/rock_api.def`. Build
    both variants and check entry, exit and each native widget used by the source.
@@ -51,8 +54,10 @@ Customize Main Menu. For a simulator fixture, add
 Keep upstream inputs under `apps/plugins/` intact. For a narrow source
 conversion, stage the copy in the build directory. Match the expected upstream
 text exactly and stop the build if it changes. `tools/rock-compat/stage-usb.py`
-stages the USB unwind for `stopwatch` and `dice`. It also initializes Dice's
-first menu selection and leaves room for the roll string's terminator. Snow builds directly from its upstream source.
+stages USB event handling for `stopwatch`, `dice`, `flipit`, `jackpot` and
+`robotfindskitten`. Jackpot also accepts its normal quit action during a
+spin. The script initializes Dice's first menu selection and leaves room for
+the roll string's terminator.
 
 ## SDK boundaries
 
@@ -82,13 +87,11 @@ first menu selection and leaves room for the roll string's terminator. Snow buil
   generated settings view and language table when present. The runtime flushes
   settings changes before saving, entering native widgets and exiting. Generated
   fallback IDs display as text without a native voice ID. A standalone build uses
-  the native members and language IDs exercised by the three enabled modules.
+  the native members and language IDs exercised by the enabled modules.
 
-The allowlist also covers Chess Clock, Countdown Timer and Test Kbd.
-Chess Clock links the existing Playback Control helper. Countdown Timer links
-Pluginlib Actions and uses the generated countdown language strings and the
-native beep. Additional modules need coverage for the slots they use. Worker threads, timers, resident
-plugins, overlays, codec IRAM, audio-buffer leases and stock binary modules
+See `apps-ipod/plugins/rock-modules.txt` for the installed applications, games
+and demos. Worker threads, timers, resident plugins, overlays, codec IRAM,
+audio-buffer leases and stock binary modules
 are outside the current SDK. Load modules built from trusted sources. Plugins
 execute with firmware privileges, and the host dynamic loader can run module
 initializers before the SDK header check.

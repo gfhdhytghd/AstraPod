@@ -38,7 +38,7 @@ Run the candidate subsets in an ipod6g ARM or SDL build configured with
 ```sh
 make rocks ROCK_MODULES='apps/db_folder_select apps/dict'
 make rocks ROCK_MODULES='demos/credits apps/resistor apps/alarmclock'
-make rocks ROCK_MODULES='apps/dart_scorer'
+make rocks ROCK_MODULES='apps/dart_scorer apps/rb_info'
 ```
 
 These overrides select build outputs. Packaging uses `rock-modules.txt`.
@@ -56,7 +56,7 @@ and modules from the same build.
 | `alarmclock` | Foreground countdown using the native clock and playback resume state. Start or pause a track before opening it. |
 | `dart_scorer` | Native menus and confirmations, with the upstream score screen and save format. The save uses a sibling temporary file under the games data directory and renames it after closing. |
 | `keybox` | Held. The stock parser trusts the saved byte count and uses unbounded NUL searches. Short or malformed saves need a bounded parser and a verified persistence path. |
-| `rb_info` | Held. The stock source includes private `open_plugin.h`. Its printcell helper draws directly into stock list geometry and overrides list-separator settings. It needs a native table adapter. |
+| `rb_info` | Standalone diagnostics. Select a context in Action test, then select Start test. The test captures input until four seconds of inactivity. Select a Printcell sample row to read its columns in a native list. The stock pixel renderer is disabled. |
 | `view_text` | Held as a standalone module. Its parameter is a title/text pointer pair. The browser passes a null parameter, and the SDK has no typed plugin-to-plugin dispatch. `dict` calls the native text box via the SDK. |
 | `md5sum` | Held. The root scan recurses with one open directory and one path buffer per level. The SDK caps directory streams at four, so the stock scan would silently omit deeper paths. |
 | `disktidy` | Held. Recursive deletion needs a reviewed path and traversal contract. The SDK lacks `rmdir` and owned extended event callbacks for its statistics screen. Its stock rule resource is `apps/plugins/disktidy.config`. |

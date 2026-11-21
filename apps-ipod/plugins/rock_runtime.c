@@ -1,5 +1,6 @@
 /* AstraPod foreground plugin runtime. GNU GPL version 2 or later. */
 #include "plugins/rock_compat.h"
+#include "usb.h"
 #include "plugins/rock_files.h"
 #include "plugins/rock_widgets.h"
 #include "plugins/sdk/plugin.h"
@@ -477,6 +478,12 @@ static long rock_event_ex(long event, void (*cleanup)(void *), void *parameter)
 {
     if (usb_taken)
         return SYS_USB_CONNECTED;
+#ifdef HAVE_USB_CONFIRM
+    /* A retained list can read raw buttons. Its start key's release may
+     * already be consumed when the USB dialog changes the action context. */
+    if (event == SYS_USB_CONFIRM && !rock_ui_raw())
+        action_handoff_enter();
+#endif
     if (!IS_SYSEVENT(event) || (!rock_ui_raw() && event != SYS_USB_CONNECTED))
         return default_event_handler_ex(event, cleanup, parameter);
 

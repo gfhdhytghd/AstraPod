@@ -77,8 +77,24 @@ $(ROCK_OUT)/staged/oscilloscope.c: $(ROCK_SRC)/oscilloscope.c $(APPSDIR)/plugins
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-oscilloscope.py $< $@
 
+$(ROCK_OUT)/staged/rb_info.c: $(ROCK_SRC)/rb_info.c \
+    $(APPSDIR)/plugins/stage-rb-info.py $(APPSDIR)/plugins/rb-info-list.inc
+	$(SILENT)mkdir -p $(@D)
+	$(SILENT)python3 $(word 2,$^) $< $(word 3,$^) $@
+
+# Read the compiled native enum and the platform's button constants.
+$(ROCK_OUT)/rb-info-input.h: $(APPSDIR)/input/action.h \
+    $(APPSDIR)/plugins/gen-rb-info-input.py $(ROCK_FINGERPRINT)
+	$(SILENT)$(CC) $(ROCK_FLAGS) -E -P -x c $< -o $@.actions
+	$(SILENT)$(CC) $(ROCK_FLAGS) -E -dM -include button.h -x c /dev/null \
+	    -MMD -MP -MF $@.d -MT $@ -o $@.buttons
+	$(SILENT)python3 $(word 2,$^) $@.actions $@.buttons $@
+
+$(ROCK_OBJECTS)/rb_info.o: $(ROCK_OUT)/rb-info-input.h
+-include $(wildcard $(ROCK_OUT)/rb-info-input.h.d)
+
 ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot metronome \
-    minesweeper oscilloscope periodic_table playing_time pong robotfindskitten snake snake2 star stopwatch \
+    minesweeper oscilloscope periodic_table playing_time pong rb_info robotfindskitten snake snake2 star stopwatch \
     lib/highscore vu_meter $(ROCK_UTILITIES) $(ROCK_GAME_ADAPTERS)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)

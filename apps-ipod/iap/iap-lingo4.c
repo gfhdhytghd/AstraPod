@@ -14,6 +14,7 @@
 #include "iap-core.h"
 #include "iap-lingo.h"
 #include "audio/remote_seek.h"
+#include "screens/playback/wps.h"
 #include "metadata/cuesheet.h"
 #include "settings.h"
 #include "screens/playback/wps.h"
@@ -1950,6 +1951,8 @@ void iap_handlepkt_mode4(const unsigned int len, const unsigned char *buf)
             uint32_t index = get_u32(&buf[3]);
             bool ok;
 
+            if (index == UINT32_MAX)
+                index = 0;
             if (iap_library_building())
                 ok = true;
             else if (iap_library_tracks_are_queue())
@@ -2026,9 +2029,18 @@ void iap_handlepkt_mode4(const unsigned int len, const unsigned char *buf)
                 case 0x03: /* skip++ */
                     audio_next();
                     break;
-                case 0x04: /* skip-- */
-                    audio_prev();
+                case 0x04: /* previous */
+                {
+                    struct mp3entry *id3 = audio_current_track();
+                    if (id3 && id3->elapsed >= DEFAULT_SKIP_THRESH)
+                    {
+                        audio_pre_ff_rewind();
+                        audio_ff_rewind(0);
+                    }
+                    else
+                        audio_prev();
                     break;
+                }
                 case 0x05: /* ffwd */
                 case 0x06: /* frwd */
                     ok = remote_seek_start(buf[3] == 0x05 ? 1 : -1);
@@ -2264,20 +2276,8 @@ void iap_handlepkt_mode4(const unsigned int len, const unsigned char *buf)
                 cmd_ack(cmd, IAP_ACK_CMD_FAILED);
                 break;
             }
-            if(buf[3] && !global_settings.playlist_shuffle)
-            {
-                global_settings.playlist_shuffle = 1;
-                settings_save();
-                if (audio_status() & AUDIO_STATUS_PLAY)
-                    playlist_randomise(NULL, current_tick, true);
-            }
-            else if(!buf[3] && global_settings.playlist_shuffle)
-            {
-                global_settings.playlist_shuffle = 0;
-                settings_save();
-                if (audio_status() & AUDIO_STATUS_PLAY)
-                    playlist_sort(NULL, true);
-            }
+            /* Byte 7, when present, is the Restore on Exit byte */
+            iap_set_shuffle(buf[3] != 0, len >= 5 && buf[4]);
 
             /* respond with cmd ok packet */
             cmd_ok(cmd);
@@ -2394,20 +2394,10 @@ void iap_handlepkt_mode4(const unsigned int len, const unsigned char *buf)
                 cmd_ack(cmd, IAP_ACK_BAD_PARAM);
                 break;
             }
-            int oldmode = global_settings.repeat_mode;
-            if (buf[3] == 0)
-                global_settings.repeat_mode = REPEAT_OFF;
-            else if (buf[3] == 1)
-                global_settings.repeat_mode = REPEAT_ONE;
-            else if (buf[3] == 2)
-                global_settings.repeat_mode = REPEAT_ALL;
+            static const int modes[] = {REPEAT_OFF, REPEAT_ONE, REPEAT_ALL};
 
-            if (oldmode != global_settings.repeat_mode)
-            {
-                settings_save();
-                if (audio_status() & AUDIO_STATUS_PLAY)
-                    audio_flush_and_reload_tracks();
-            }
+            /* Byte 7, when present, is the Restore on Exit byte */
+            iap_set_repeat(modes[buf[3]], len >= 5 && buf[4]);
             /* respond with cmd ok packet */
             cmd_ok(cmd);
             break;

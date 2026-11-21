@@ -25,6 +25,7 @@
 #include "audio.h"
 #include "audio/playback.h" /* add_playbacklog */
 #include "storage.h"
+#include "iap.h"
 #include "usb_core.h"       /* usb_core_host_wrote_storage */
 #include "usb.h"
 #ifdef HAVE_USB_PODLINK
@@ -140,10 +141,18 @@ static bool clean_shutdown(enum shutdown_type sd_type,
             if (callback != NULL)
                 callback(parameter);
 
+#ifdef IPOD_ACCESSORY_PROTOCOL
+            /* the settings are written by system_flush() */
+            iap_prepare_shutdown(true);
+#endif
             system_flush();
         }
         else
         {
+#ifdef IPOD_ACCESSORY_PROTOCOL
+            /* the settings may still be written; the playlist is not */
+            iap_prepare_shutdown(false);
+#endif
             /* Queued play counts and ratings, and the buffered playback log,
              * are a few sector writes -- but only to a disk already spinning.
              * A spin-up on an empty battery can brown out mid-write and

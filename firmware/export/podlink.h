@@ -101,6 +101,16 @@ struct podlink_resident
 };
 void podlink_set_resident(const struct podlink_resident *consumer);
 
+/* Independent APL1 lane. Same callback lifetime and lock rules as above,
+ * with one binary producer and no access to the foreground inbox. */
+struct podlink_apl_consumer
+{
+    void (*receive)(const struct podlink_message *message);
+    unsigned int (*next)(unsigned char *data, unsigned int size);
+    void (*reset)(void);
+};
+void podlink_set_apl_consumer(const struct podlink_apl_consumer *consumer);
+
 /* Portable wire codec, also built by the host tests. */
 struct podlink_parser
 {

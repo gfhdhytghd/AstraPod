@@ -270,3 +270,12 @@ ROCK_SLOT(int (*filetype_get_attr)(const char *),
           filetype_get_attr, filetype_get_attr)
 
 #undef ROCK_RAW
+
+/* Named PodLink channel and queued file transfers */
+ROCK_SLOT(__typeof__(rock_podlink_open) *podlink_open, podlink_open, rock_podlink_open)
+ROCK_SLOT(__typeof__(rock_podlink_close) *podlink_close, podlink_close, rock_podlink_close)
+ROCK_SLOT(__typeof__(rock_podlink_send) *podlink_send, podlink_send, rock_podlink_send)
+ROCK_SLOT(__typeof__(rock_podlink_poll) *podlink_poll, podlink_poll, rock_podlink_poll)
+ROCK_SLOT(__typeof__(rock_podlink_push) *podlink_push, podlink_push, rock_podlink_push)
+ROCK_SLOT(__typeof__(rock_podlink_pull) *podlink_pull, podlink_pull, rock_podlink_pull)
+ROCK_SLOT(__typeof__(rock_podlink_cancel) *podlink_cancel, podlink_cancel, rock_podlink_cancel)

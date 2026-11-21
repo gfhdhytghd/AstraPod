@@ -32,7 +32,15 @@ pub struct Registry {
     reset: Option<Reset>,
     next_binary: Option<NextBinary>,
 }
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct AplConsumer {
+    receive: Option<Background>,
+    next: Option<Next>,
+    reset: Option<Reset>,
+}
 struct Adapter {
+    apl: AplConsumer,
     registry: Registry,
     background: Option<Background>,
 }
@@ -46,6 +54,11 @@ unsafe impl Sync for Shared {}
 static CTX: Shared = Shared(UnsafeCell::new(Context {
     service: Service::new(),
     ports: Adapter {
+        apl: AplConsumer {
+            receive: None,
+            next: None,
+            reset: None,
+        },
         registry: Registry {
             receive: None,
             next: None,
@@ -196,6 +209,22 @@ impl Ports for Adapter {
             None => (0, None),
         }
     }
+    fn receive_apl(&mut self, m: Meta, data: &[u8]) {
+        if let Some(f) = self.apl.receive {
+            unsafe { f(&message(m, data)) }
+        }
+    }
+    fn next_apl(&mut self, out: &mut [u8]) -> usize {
+        match self.apl.next {
+            Some(f) => unsafe { f(out.as_mut_ptr(), out.len() as c_uint) as usize }.min(out.len()),
+            None => 0,
+        }
+    }
+    fn reset_apl(&mut self) {
+        if let Some(f) = self.apl.reset {
+            unsafe { f() }
+        }
+    }
     fn reset_consumer(&mut self) {
         if let Some(f) = self.registry.reset {
             unsafe { f() }
@@ -289,6 +318,7 @@ pub extern "C" fn podlink_shutdown() {
     with((), |s, p| {
         s.shutdown(p);
         p.registry = Registry::default();
+        p.apl = AplConsumer::default();
         p.background = None;
     });
 }
@@ -303,6 +333,19 @@ pub unsafe extern "C" fn podlink_set_resident(reg: *const Registry) {
             reg.read()
         };
         s.clear_record();
+    });
+}
+#[no_mangle]
+/// # Safety
+/// Same pointer and callback lifetime contracts as podlink_set_resident.
+pub unsafe extern "C" fn podlink_set_apl_consumer(reg: *const AplConsumer) {
+    with((), |_, p| {
+        p.reset_apl();
+        p.apl = if reg.is_null() {
+            AplConsumer::default()
+        } else {
+            reg.read()
+        };
     });
 }
 #[no_mangle]

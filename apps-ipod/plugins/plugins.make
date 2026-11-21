@@ -123,6 +123,10 @@ $(ROCK_OBJECTS)/%.o: $(ROCK_SRC)/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
 
+$(ROCK_OBJECTS)/podlink_echo.o: $(APPSDIR)/plugins/examples/podlink_echo.c $(ROCK_FINGERPRINT)
+	$(SILENT)mkdir -p $(@D)
+	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
+
 ROCK_BITMAP_DIR := $(ROCK_OUT)/bitmaps/pluginbitmaps
 ROCK_NATIVE_BMPS := $(call preprocess,$(ROCK_SRC)/bitmaps/native/SOURCES)
 ROCK_MONO_BMPS := $(call preprocess,$(ROCK_SRC)/bitmaps/mono/SOURCES)

@@ -164,6 +164,10 @@ screens/browse/browser_disk.c
 plugins/rock_browser.c
 plugins/rock_files.c
 plugins/rock_runtime.c
+plugins/rock_podlink.c
+#ifdef HAVE_USB_PODLINK
+plugins/rock_podlink_worker.c
+#endif
 #ifdef IPOD_6G
 plugins/rock_pitch.c
 #endif

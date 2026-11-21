@@ -10,6 +10,9 @@
  ****************************************************************************/
 #include "config.h"
 #include "logfile.h"
+#if defined(HAVE_USB_PODLINK) && defined(ASTRAPOD_ROCK_COMPAT)
+#include "plugins/rock_podlink_port.h"
+#endif
 #include "system.h"
 
 #include "version.h"
@@ -791,6 +794,9 @@ static void init(void)
     usb_init();
 #ifdef HAVE_USB_PODLINK
     cider_init();
+#ifdef ASTRAPOD_ROCK_COMPAT
+    rock_podlink_init();
+#endif
 #endif
 
     backlight_init();

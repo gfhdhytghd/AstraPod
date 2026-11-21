@@ -17,6 +17,7 @@ demos/demystify
 demos/fire
 demos/fireworks
 demos/logo
+demos/podlink_echo
 demos/matrix
 demos/mosaique
 demos/oscilloscope

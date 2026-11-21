@@ -95,6 +95,16 @@ for name in ['podlink_firmware', 'podlink_wire', 'podlink_bench', 'podlink_resid
             (i for i, (x, y) in enumerate(zip(raw, expected)) if x != y), len(raw)))
         print(f'PASS C golden {name}: {len(raw)} identical bytes', flush=True)
 
+# APL1 suite uses the same simulated FAST IN controller and real Rust worker.
+# The resulting binary also accepts an external companion on stdio.
+apl = out / 'podlink_apl'
+subprocess.run(flags + ['-D_GNU_SOURCE', '-Itools/tests/podlink_apl_stubs', '-Iapps-ipod',
+                        'tools/tests/podlink_apl_test.c',
+                        'apps-ipod/plugins/rock_podlink.c',
+                        'firmware/usbstack/remote_log.c',
+                        str(lib), '-lpthread', '-ldl', '-lm', '-o', str(apl)], check=True)
+subprocess.run([str(apl)], check=True, timeout=120)
+
 # Threaded liveness (FU49 round 2): real worker thread, real CDC ring, emulated
 # Rockbox mutex/semaphore/IRQ-mask semantics. ILP32 keeps the firmware ABI.
 live_lib = library('i686-unknown-linux-gnu')

@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "plugins/rock_pitch.h"
+#include "plugins/rock_podlink.h"
 
 #ifdef PLUGIN
 /* The phase 1 arena is in DRAM. Codec IRAM remains available to playback. */

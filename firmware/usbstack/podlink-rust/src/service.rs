@@ -17,6 +17,11 @@ pub trait Ports: Transport {
     fn next_binary(&mut self, _out: &mut [u8]) -> (usize, Option<u32>) {
         (0, None)
     }
+    fn receive_apl(&mut self, _m: Meta, _data: &[u8]) {}
+    fn next_apl(&mut self, _out: &mut [u8]) -> usize {
+        0
+    }
+    fn reset_apl(&mut self) {}
     fn reset_consumer(&mut self);
     fn background(&mut self, m: Meta, data: &[u8]);
     fn log_enabled(&self) -> bool;
@@ -125,6 +130,7 @@ impl Service {
         }
     }
     pub fn invalidate(&mut self, p: &mut impl Ports) {
+        p.reset_apl();
         self.invalidate_inner(p, false);
     }
     fn invalidate_inner(&mut self, p: &mut impl Ports, preserve_time: bool) {
@@ -205,6 +211,12 @@ impl Service {
                 Kind::Close => self.invalidate(p),
                 Kind::Open | Kind::Binary | Kind::Ping | Kind::Hello => {}
             }
+            if m.kind == Kind::Binary && self.session.event[..m.len].starts_with(b"APL1") {
+                if p.connected(&self.session) {
+                    p.receive_apl(m, &self.session.event[..m.len]);
+                }
+                continue;
+            }
             if p.receive(m, &self.session.event[..m.len]) {
                 continue;
             }
@@ -263,6 +275,9 @@ impl Service {
             if self.record_len == 0 {
                 self.session.send_resident_binary(|out| p.next_binary(out));
             }
+        }
+        if p.connected(&self.session) {
+            self.session.send_resident_binary(|out| (p.next_apl(out), None));
         }
         if !p.log_enabled() || self.log_epoch != p.log_epoch() {
             self.log_len = 0;

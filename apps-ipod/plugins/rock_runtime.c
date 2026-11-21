@@ -299,6 +299,7 @@ void rock_usb_takeover(void)
 {
     if (!filename || usb_taken)
         return;
+    rock_podlink_close();
     rock_media_shutdown();
     rock_flush_settings();
     restore_input_settings();
@@ -672,6 +673,7 @@ static int run_rock(const char *path, const char *file,
     rock_action_reset();
 
     result = module->entry_point(file);
+    rock_podlink_close();
     rock_media_shutdown();
     if (usb_taken)
         result = PLUGIN_USB_CONNECTED;

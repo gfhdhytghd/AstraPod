@@ -125,6 +125,65 @@ Byte at offset i is `i % 251`. Final TEXT is `OK TX N errors=0` or
 preserves the active transfer. Both directions verify the complete pattern.
 Latency measures protocol PING/PONG and 64-byte binary echo separately.
 
+## Plugin channel extension (APL1)
+
+Native ipod6g builds with the [AstraPod SDK](podbox/rock-compat-sdk.md#podlink)
+can open one named channel from the foreground module. The resident link
+routes APL1 before its media and foreground consumers. Send and receive
+complete UTF-8 or binary messages. Push or pull one file at a time with a
+desktop companion registered for the same name. APL1 uses the established
+PodLink connection and shows no additional confirmation prompt.
+
+Use PLNK v1 type BINARY and the existing FAST IN path. Prefix its payload
+with this little-endian header. The extension announces itself with its first
+APL1 OPEN.
+
+| Offset | Bytes | Value |
+| --- | --- | --- |
+| 0 | 4 | ASCII `APL1` |
+| 4 | 1 | Opcode |
+| 5 | 3 | Reserved, zero |
+| 8 | 4 | Nonzero channel number allocated by the device |
+| 12 | 4 | Nonzero transfer number allocated by the device, or zero for opcodes 1–5 |
+
+| Code | Operation | Sender and body |
+| --- | --- | --- |
+| 1 | OPEN | Device. Channel name, 1–32 ASCII bytes |
+| 2 | OPEN_OK | Companion. Empty |
+| 3 | CLOSE | Either side. Result code as u16 |
+| 4 | TEXT | Either side. Complete UTF-8 message |
+| 5 | BINARY | Either side. Binary message |
+| 6 | PUSH | Device. u32 file length, then object name |
+| 7 | PULL | Device. Object name |
+| 8 | ACCEPT | Companion. u32 file length |
+| 9 | CREDIT | Receiver. One byte with value 1 or 2 |
+| 10 | CHUNK | Sender. ASCII `MSF1`, u32 offset, then file bytes |
+| 11 | FINISH | Sender. u32 total length, then u32 IEEE CRC32 |
+| 12 | DONE | Receiver. Empty |
+| 13 | CANCEL | Either side. Result code as u16 |
+
+Use lowercase letters and digits in channel names. Use uppercase or
+lowercase letters and digits in object names. Both names also allow
+`.`, `_` and `-` after the first byte. An object name is one component
+of 1–64 bytes. Send names without a NUL byte. The device module supplies
+the local path separately.
+
+Messages and chunk data are limited to 2,048 bytes each. Files are limited
+to 64 MiB. Each receiver can grant up to two outstanding chunk credits
+and can replenish credits after writing data. Every chunk must start at
+the next consecutive offset. The PLNK CRC covers the full frame body.
+The FINISH CRC covers the whole file and matches `zlib.crc32`. A receiver
+closes its temporary file, verifies the transfer and replaces the target
+with a same-directory rename before sending DONE. A sender records success
+after DONE. OPEN has a three-second deadline. Transfers time out after
+ten seconds without progress.
+
+Result codes are 0 success, 1 no companion, 2 busy, 3 invalid frame,
+4 I/O error, 5 timeout, 6 cancelled, 7 link lost and 8 limit exceeded.
+If the module exits, the cable disconnects, the player enters Disk Mode
+or PLNK resets, open a new channel. Frames addressed to an old channel
+number are discarded.
+
 ## Host verification
 
 ```sh
@@ -294,7 +353,7 @@ is prelinked into one relocatable object whose only global definitions are
 helpers from `core`/`compiler_builtins` would replace the firmware's own for
 every caller. `tools/tests/arm_podlink_link.py` checks this on the linked ELF.
 
-The public C ABI and wire protocol are unchanged. Shared public headers remain
+The base C ABI and PLNK framing are shared by the SDK extension and existing services. Public headers remain
 for C callers and the platform/test adapters. Rust copies nullable callback
 fields into typed Option entries under the service mutex. Unregistration uses
 that same mutex. State and host-connected queries use IRQ-protected snapshots.

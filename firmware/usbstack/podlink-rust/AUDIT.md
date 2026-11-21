@@ -24,6 +24,15 @@ Registration, replacement and unregistration take that same mutex. Unregister
 returns only after an in-progress callback finishes. No consumer table of raw
 function addresses is used for dispatch.
 
+The independent APL1 registration copies three typed callbacks under the
+same lock. It leaves the Cider registry layout intact. The service consumes
+only BINARY frames with the APL1 prefix in this lane. TX uses the same
+reserved application slot and PLNK CRC path as other resident binary data.
+Wire invalidation resets APL1. Foreground inbox pressure leaves APL1 open.
+The firmware callbacks publish bounded data and controls under short IRQ
+guards and wake an independent worker. That worker owns all descriptors
+and acknowledges USB storage only after cleanup.
+
 `podlink_open_agents` also copies a typed optional callback under that mutex.
 As in C, detach flushes queued list deltas and keeps the background callback
 for the persistent Agents cache. Its code and cache have static firmware

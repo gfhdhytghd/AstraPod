@@ -199,3 +199,88 @@ are outside the current SDK. Cross-plugin dispatch is also outside this
 build. Load modules built from trusted sources. Plugins
 execute with firmware privileges, and the host dynamic loader can run module
 initializers before the SDK header check.
+
+## PodLink
+
+The `rb->podlink_*` slots are available in the native SDK. The
+[APL1 wire reference](../podlink.md#plugin-channel-extension-apl1) defines
+the channel and transfer limits. On SDL, commands return
+`-ROCK_PODLINK_UNSUPPORTED` and close is a no-op.
+
+| Slot | Foreground use |
+| --- | --- |
+| `podlink_open(name)` | Queue one named channel on the established resident link. Wait for `ROCK_PODLINK_OPENED`. |
+| `podlink_close()` | Invalidate the channel and release its queued work. The loader also calls it on module exit. |
+| `podlink_send(binary, data, length)` | Queue one complete message. Use `false` for UTF-8 and `true` for binary. Copy up to 2,048 bytes. |
+| `podlink_poll(event, timeout_ms, progress, context)` | Copy the next event into your `struct rock_podlink_event`. Pass a callback or `NULL`. |
+| `podlink_push(path, object)` | Queue a file from an absolute device path to a named desktop object. |
+| `podlink_pull(path, object)` | Queue a download from a named desktop object to an absolute device path. |
+| `podlink_cancel()` | Abort the active transfer before the receiver commits it. Wait for terminal completion. |
+
+Commands return zero when queued or a negative result from
+`enum rock_podlink_result`. On `-ROCK_PODLINK_BUSY`, poll and retry.
+Poll regularly to drain the receive mailbox. If a second incoming message
+overflows it, the channel closes with `ROCK_PODLINK_BUSY`.
+The SDK owns copies of accepted names, paths and payloads. The file worker
+owns file handles and temporary files. Close invalidates the channel
+immediately, and the worker closes owned handles before acknowledging a
+USB storage handoff.
+
+Poll returns a positive `enum rock_podlink_event_type`, zero if pending,
+or a negative error. It never sleeps. A nonzero timeout starts a deadline
+the first time a poll finds no event. Continue polling with a nonzero timeout
+until an event or `-ROCK_PODLINK_TIMEOUT`. Polling with zero clears that
+deadline. The poll timeout does not cancel a transfer. An optional callback
+runs inside that same poll call for `ROCK_PODLINK_PROGRESS` and
+`ROCK_PODLINK_COMPLETE`. Progress events can coalesce. The caller owns the
+event buffer and callback context. Test `event.result` on completion or
+close. Read text using `event.length`. The text is not NUL-terminated.
+For a completed transfer, `event.bytes`, `event.total` and `event.crc32`
+describe the file.
+
+### Run PodLink Echo
+
+1. Install the firmware and `podlink_echo.rock` from the same ipod6g package.
+2. In Disk Mode, create the fixture on the player volume. Replace
+   `DEVICE_ROOT` with the volume mount path.
+
+   ```sh
+   python3 - 'DEVICE_ROOT' <<'PY'
+   from pathlib import Path
+   import sys
+   path = Path(sys.argv[1]) / ".rockbox/podlink-echo.in"
+   path.write_bytes(bytes(i % 251 for i in range(5000)))
+   PY
+   ```
+
+3. Eject Disk Mode. Start HerdRemote and enable a desktop companion
+   registered for `astrapod.echo`. Set its working directory to a writable
+   folder. Connect the iPod with **USB Mode** set to **Mass Storage**.
+   At **Computer connected**, press **Menu** to leave the resident PodLink
+   session available. **Select** hands storage to the computer.
+4. Select **Plugins > Demos > podlink_echo**. The module automatically sends
+   `AstraPod echo` and the binary bytes `00 01 ff 80 00 7f`. The companion
+   echoes both messages. The module pushes the fixture to `from-ipod.bin`
+   and pulls that object back to `/.rockbox/podlink-echo.out`.
+5. Read the result. **All checks passed** displays
+   **5000 bytes, CRC c1607408**. **Check failed** displays the reason.
+   Press **Menu** to cancel and exit or to leave the result screen.
+
+### Run the offline peer fixture
+
+From the repository root, run `sh tools/tests/run_podlink.sh`. The driver
+builds `build-fu49/host/podlink_apl`, or use
+`${PODLINK_TEST_BUILD}/host/podlink_apl` with a custom build directory.
+Run the binary without arguments to test valid and rejected transfers.
+The fixture uses the real SDK, PLNK codec and resident service with a
+simulated FAST IN controller.
+
+To connect an external peer, create a temporary volume directory with
+`.rockbox/` and use the fixture-generation command above. Run
+`build-fu49/host/podlink_apl --peer DEVICE_ROOT`. Read one raw APL1 payload
+per stdout line and write replies to stdin. Each line is a hex string
+without spaces or PLNK wrapping. The driver supplies PLNK framing and its
+CRC internally. The first output is OPEN for `astrapod.echo`. The driver
+follows the same echo and file sequence as the device module. Its result
+goes to stderr. Exit status 0 confirms the downloaded file matches the
+fixture byte for byte.

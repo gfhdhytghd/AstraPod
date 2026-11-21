@@ -11,6 +11,10 @@
 #ifndef AUDIO_THREAD_H
 #define AUDIO_THREAD_H
 
+#ifdef HAVE_RECORDING
+#define AUDIO_HAVE_RECORDING
+#endif
+
 enum
 {
     Q_NULL = 0,                 /* reserved */
@@ -57,6 +61,16 @@ enum
     Q_AUDIO_UPDATE_WATERMARK,   /* buffering watermark needs updating */
     /* -> audio */
     Q_AUDIO_REMAKE_AUDIO_BUFFER, /* buffer needs to be reinitialized */
+#ifdef HAVE_RECORDING
+    Q_AUDIO_INIT_RECORDING,
+    Q_AUDIO_CLOSE_RECORDING,
+    Q_AUDIO_RECORDING_OPTIONS,
+    Q_AUDIO_RECORD,
+    Q_AUDIO_RECORD_STOP,
+    Q_AUDIO_RECORD_PAUSE,
+    Q_AUDIO_RECORD_RESUME,
+    Q_AUDIO_RECORD_FLUSH,
+#endif
     Q_AUDIO_SEEK_NOW,
 };
 
@@ -67,6 +81,11 @@ void audio_init(void);
 void playback_init(void);
 unsigned int playback_status(void);
 
+
+#ifdef AUDIO_HAVE_RECORDING
+void recording_init(void);
+void audio_recording_handler(struct queue_event *ev);
+#endif
 void audio_playback_handler(struct queue_event *ev);
 
 /** --- audio_queue helpers --- **/

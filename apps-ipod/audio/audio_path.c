@@ -12,16 +12,35 @@
 #include "system.h"
 #include "cpu.h"
 #include "audio.h"
+#ifdef HAVE_RECORDING
+#include "button.h"
+#endif
 #include "general.h"
 #include "settings/settings.h"
 
-/* With no recording, line-in or SPDIF on these targets there is nothing to
- * power up or monitor, so this reduces to pointing the codec's input mux at
- * the requested source. */
+#if defined(IPOD_ACCESSORY_PROTOCOL) && defined(HAVE_LINE_REC)
+#include "iap.h"
+#endif
+
+/* Selects the codec input and notifies a serial recording accessory. */
 void audio_set_input_source(int source, unsigned flags)
 {
+#ifdef HAVE_RECORDING
+    if (source == AUDIO_SRC_MIC && !mikey_supported())
+        source = AUDIO_SRC_LINEIN;
+#endif
+#if defined(IPOD_ACCESSORY_PROTOCOL) && defined(HAVE_LINE_REC)
+    static bool accessory_recording;
+    bool line_in = source == AUDIO_SRC_LINEIN;
+    if (accessory_recording != line_in)
+        accessory_recording = iap_record(line_in);
+#endif
     audio_input_mux(source, flags);
 }
 
-
-
+#if defined(HAVE_RECORDING) && (CONFIG_PLATFORM & PLATFORM_NATIVE)
+bool recording_capture_available(void)
+{
+    return true;
+}
+#endif

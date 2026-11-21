@@ -259,7 +259,7 @@ other decline sits in a file this fork edits, so it conflicts on merge.
 
 | File | What changed | Why |
 | --- | --- | --- |
-| `export/config/ipod6g.h` | `HAVE_RECORDING` commented out | No recording UI ships. |
+| `export/config/ipod6g.h` | Classic recording enabled | The recorder uses the upstream ADC and IIS0 RX DMA path. Dock line in is available on both capture hardware revisions; headset mic is available on revision 1. |
 | `export/config/ipod6g.h` | `PLUGIN_BUFFER_SIZE` 2 MiB → 3 MiB | The core scratch buffer (`apps-ipod/system/app_buffer.c`) keeps the name. |
 | `export/config/ipod6g.h`, `export/config/ipodvideo.h` | `CODEC_SIZE` stays 1 MiB where upstream has 512 KiB | At 512 KiB the 6G's AAC codec has about 128 KB of heap. libm4a sizes its index of a long audiobook to the heap, so it would hold about a fifth as many chunks, and seeks and chapter jumps would land further from the mark. |
 | `export/config/ipod6g.h` | `TARGET_EXTRA_THREADS` 2 with both `IPOD_ACCESSORY_PROTOCOL` and `HAVE_MIKEY_REMOTE`, else 1 | Upstream adds the remote's poller without a thread for it. Short by one, the feature is silently absent. `__threads` should measure 19. |
@@ -291,6 +291,7 @@ Serial iAP is `apps-ipod/iap/`. It reaches these firmware files:
 
 | File | What changed | Why |
 | --- | --- | --- |
+| `rbcodec/codecs/codecs.h`, `codec_recording_api.h` | On Classic, encoder callbacks follow the existing playback and SM1 ALAC API | Keeps the offsets used by existing AstraPod playback codecs. |
 | `rbcodec/metadata/mp4.c`, `metadata.h` | `has_video` on `struct mp3entry`, set only when a `vide` track's first sample entry is moving video (`avc1`/`avc3`/`hvc1`/`hev1`/`mp4v`/`av01`/`vp09`/`encv`) | Tagcache skips music videos, but keeps M4B/M4A files whose `vide` tracks hold only chapter pictures or covers. |
 | `rbcodec/metadata/mp4.c` | `chpl`: reads the version-0 header, and takes a lead trim only from a single record | A chapter list whose first chapter starts after 0:00 had that much audio cut from the start of the book. |
 | `rbcodec/metadata/dsd.c` | `parse_iso_area()` reads into the master TOC's buffer instead of a second 2 KB one; a `.dff` chunk whose size runs past the end of the file ends the parse | A dock asking for an `.iso`'s tags runs this on the 6.8 KB USB thread. A 64-bit chunk size wrapped the 32-bit seek back onto the same chunk, and the walk never ended. Upstream bug, not yet reported upstream. |

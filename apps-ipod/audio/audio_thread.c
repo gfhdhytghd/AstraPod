@@ -19,6 +19,9 @@
 #include "pcmbuf.h"
 #include "system/appevents.h"
 #include "audio_thread.h"
+#ifdef AUDIO_HAVE_RECORDING
+#include "audio/pcm_record.h"
+#endif
 #include "codec_thread.h"
 #include "voice_thread.h"
 #include "speech/talk.h"
@@ -72,6 +75,14 @@ static void NORETURN_ATTR audio_thread(void)
             audio_playback_handler(&ev);
             break;
 
+#ifdef AUDIO_HAVE_RECORDING
+        /* Starts the recording engine branch */
+        case Q_AUDIO_INIT_RECORDING:
+            LOGFQUEUE("audio < Q_AUDIO_INIT_RECORDING");
+            audio_recording_handler(&ev);
+            continue;
+#endif
+
         /* All return upon USB */
         case SYS_USB_CONNECTED:
             LOGFQUEUE("audio < SYS_USB_CONNECTED");
@@ -102,15 +113,22 @@ intptr_t audio_queue_send(long id, intptr_t data)
     return queue_send(&audio_queue, id, data);
 }
 
+/* Return the playback and recording status */
 int audio_status(void)
 {
-    return playback_status();
+    return playback_status()
+#ifdef AUDIO_HAVE_RECORDING
+            | pcm_rec_status()
+#endif
+    ;
 }
 
-/* Empty: the error state this cleared belonged to recording, which these
- * targets do not have. Declared in firmware/export/audio.h; no callers remain. */
+/* Clear all accumulated audio errors for playback and recording */
 void audio_error_clear(void)
 {
+#ifdef AUDIO_HAVE_RECORDING
+    pcm_rec_error_clear();
+#endif
 }
 
 /** Startup **/
@@ -143,6 +161,9 @@ void INIT_ATTR audio_init(void)
                             audio_thread_id);
 
     playback_init();
+#ifdef AUDIO_HAVE_RECORDING
+    recording_init();
+#endif
 
     add_event(VOICE_EVENT_IS_PLAYING, audio_voice_event);
 

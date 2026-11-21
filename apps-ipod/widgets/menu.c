@@ -422,7 +422,7 @@ static bool explain(const char *key, const char *title)
     return dialog_prose_show(title, text);
 }
 
-static bool explain_setting(const struct settings_list *setting)
+bool menu_explain_setting(const struct settings_list *setting)
 {
     return explain(setting->cfg_name,
                    setting->lang_id != -1 ? (const char *)str(setting->lang_id)
@@ -965,7 +965,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                         case 0: /* explain */
                             /* MENU in the explanation means the root menu,
                                not back to this row's context. */
-                            if (explain_setting(setting))
+                            if (menu_explain_setting(setting))
                             {
                                 ret = GO_TO_ROOT;
                                 done = true;

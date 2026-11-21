@@ -4047,6 +4047,11 @@ void audio_playback_handler(struct queue_event *ev)
             break;
 
         case SYS_USB_CONNECTED:
+#ifdef HAVE_RECORDING
+        case Q_AUDIO_INIT_RECORDING:
+            audio_stop_playback(false);
+            return;
+#endif
         case Q_AUDIO_STOP:
             LOGFQUEUE("playback < Q_AUDIO_STOP");
             /* No fade for USB, nor for a forced stop -- data != 0 marks the

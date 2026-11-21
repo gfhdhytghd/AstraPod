@@ -2144,3 +2144,162 @@ and Spoken Word clears up audiobooks and podcasts.
 Opens the clock: the time and date themselves, and how they are shown.
 
 The clock is what timestamps play counts and what the status bar reads from.
+
+# Recording
+
+[rec format]
+Choose the file format. PCM Wave and AIFF store uncompressed audio. WavPack
+compresses without loss. MP3 makes smaller files by discarding some audio
+detail.
+
+[action: Recording Format]
+Choose the file format. PCM Wave and AIFF store uncompressed audio. WavPack
+compresses without loss. MP3 makes smaller files by discarding some audio
+detail.
+
+[mp3_enc bitrate]
+Sets the data rate for MP3 encoding. Higher rates use more space. The
+bitrate also limits the sample rates and channel counts you can select.
+
+[action: Bitrate]
+Sets the data rate for MP3 encoding. Higher rates use more space. The
+bitrate also limits the sample rates and channel counts you can select.
+
+[rec frequency]
+Sets the number of samples recorded per second. Higher rates use more space
+in uncompressed files. The selected encoder can limit the available rates.
+
+[action: Recording Sample Rate]
+Sets the number of samples recorded per second. Higher rates use more space
+in uncompressed files. The selected encoder can limit the available rates.
+
+[rec source]
+Line In takes stereo audio from the 30-pin dock. Microphone uses a headset
+mic on Classic models with capture hardware version 1.
+
+[action: Source]
+Line In takes stereo audio from the 30-pin dock. Microphone uses a headset
+mic on Classic models with capture hardware version 1.
+
+[rec channels]
+Choose a stereo or mono file for the dock input. The headset microphone
+always records in mono.
+
+[action: Recording Channels]
+Choose a stereo or mono file for the dock input. The headset microphone
+always records in mono.
+
+[rec mono mode]
+Choose which dock channels go into a mono file. Left plus right averages
+both channels. The headset microphone always uses the left channel.
+
+[action: Mono mode]
+Choose which dock channels go into a mono file. Left plus right averages
+both channels. The headset microphone always uses the left channel.
+
+[rec split method]
+Choose whether the automatic file limit is measured in time or file size.
+
+[rec split type]
+Choose whether reaching the automatic file limit starts another file, stops
+recording, or stops and shuts down the player.
+
+[rec timesplit]
+Sets the duration limit when Split Measure is Time. Off disables the time
+limit.
+
+[rec sizesplit]
+Sets the size limit when Split Measure is Filesize. Off disables the
+configured size limit. Recording still splits files near 2 GB.
+
+[prerecording time]
+Keeps up to 30 seconds of audio before you press Record or the trigger
+starts. Off starts the file at the record command.
+
+[rec path]
+Choose an existing folder by entering its absolute path. Clear Recording
+Directory restores the default folder, which the recorder creates when
+needed.
+
+[action: Recording Folder]
+Choose an existing folder by entering its absolute path. Clear Recording
+Directory restores the default folder, which the recorder creates when
+needed.
+
+[peak meter clipcounter]
+Shows the number of clipping events beside the meters. If it increases,
+reduce the input level or recording gain.
+
+[cliplight]
+Turns on the backlight when the recording input clips. Use it to spot
+overload without watching the meters.
+
+[trigger mode]
+Choose manual recording, one sound-triggered recording, or repeated
+triggering. Press Select on the Recording screen to arm a trigger.
+
+[action: Trigger]
+Choose manual recording, one sound-triggered recording, or repeated
+triggering. Press Select on the Recording screen to arm a trigger.
+
+[trigger type]
+Choose what happens when the sound trigger ends. Stop closes the file,
+Pause keeps it open, and New File starts another file.
+
+[trigger start threshold dB]
+Sets the level that starts recording when the peak meter uses dB. Set the
+threshold above the background noise.
+
+[trigger start threshold linear]
+Sets the level that starts recording when the peak meter uses a linear
+scale. The percentage is relative to full scale.
+
+[trigger start duration]
+Sets how long the input must stay above Start Above before the trigger
+starts the recording.
+
+[trigger stop threshold dB]
+Sets the level below which recording stops or changes state when the peak
+meter uses dB.
+
+[trigger stop threshold linear]
+Sets the level below which recording stops or changes state when the peak
+meter uses a linear scale.
+
+[trigger stop duration]
+Sets how long the input must stay below Stop Below before the selected
+trigger action runs.
+
+[trigger min gap]
+Sets the quiet interval used to decide whether a rise in level belongs to
+the same take or triggers a new one.
+
+[rec mic gain]
+Sets the headset microphone level. Reduce it if the recording clips. The
+displayed value includes the codec’s fixed 12 dB input gain.
+
+[rec left gain]
+Sets the left dock input level. Reduce it if the left meter clips.
+
+[rec right gain]
+Sets the right dock input level. Reduce it if the right meter clips.
+
+[action: Recording]
+Opens the recorder on iPod Classic. Press Select to start or split a
+recording. Press Play to pause or resume, Menu to stop or leave, and hold
+Select for Recording Settings.
+
+[action: Encoder Settings]
+Opens the bitrate setting when you select MP3. PCM Wave, AIFF and WavPack
+use their standard lossless encoding settings.
+
+[action: Clear Recording Directory]
+Resets the folder for future recordings to the default Recordings folder.
+Existing files stay in their original folders.
+
+[action: Browse Recording Presets]
+Loads recording settings from a saved preset in the recording presets
+folder.
+
+[action: Save Recording Preset]
+Saves the current recording settings in a file you can load again.

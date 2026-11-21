@@ -28398,3 +28398,201 @@
     *: "PodLink"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_REC_CAPTURE_ERROR
+  desc: Recording stopped because the input, encoder or file failed
+  user: core
+  <source>
+    *: none
+    recording: "Recording error"
+  </source>
+  <dest>
+    *: none
+    recording: "Recording error"
+  </dest>
+  <voice>
+    *: none
+    recording: "Recording error"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_CAPTURE_UNAVAILABLE
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Audio capture is unavailable in the simulator"
+  </source>
+  <dest>
+    *: none
+    recording: "Audio capture is unavailable in the simulator"
+  </dest>
+  <voice>
+    *: none
+    recording: "Audio capture is unavailable in the simulator"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_INPUT_GAIN
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Microphone Gain"
+  </source>
+  <dest>
+    *: none
+    recording: "Microphone Gain"
+  </dest>
+  <voice>
+    *: none
+    recording: "Microphone Gain"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_FORMAT
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Recording Format"
+  </source>
+  <dest>
+    *: none
+    recording: "Recording Format"
+  </dest>
+  <voice>
+    *: none
+    recording: "Recording Format"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_FREQUENCY
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Recording Sample Rate"
+  </source>
+  <dest>
+    *: none
+    recording: "Recording Sample Rate"
+  </dest>
+  <voice>
+    *: none
+    recording: "Recording Sample Rate"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_CHANNELS
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Recording Channels"
+  </source>
+  <dest>
+    *: none
+    recording: "Recording Channels"
+  </dest>
+  <voice>
+    *: none
+    recording: "Recording Channels"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_START_DURATION
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Start Hold Time"
+  </source>
+  <dest>
+    *: none
+    recording: "Start Hold Time"
+  </dest>
+  <voice>
+    *: none
+    recording: "Start Hold Time"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_STOP_DURATION
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Stop Hold Time"
+  </source>
+  <dest>
+    *: none
+    recording: "Stop Hold Time"
+  </dest>
+  <voice>
+    *: none
+    recording: "Stop Hold Time"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_FOLDER
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Recording Folder"
+  </source>
+  <dest>
+    *: none
+    recording: "Recording Folder"
+  </dest>
+  <voice>
+    *: none
+    recording: "Recording Folder"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_PRESET_LOAD
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Browse Recording Presets"
+  </source>
+  <dest>
+    *: none
+    recording: "Browse Recording Presets"
+  </dest>
+  <voice>
+    *: none
+    recording: "Browse Recording Presets"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_PRESET_SAVE
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Save Recording Preset"
+  </source>
+  <dest>
+    *: none
+    recording: "Save Recording Preset"
+  </dest>
+  <voice>
+    *: none
+    recording: "Save Recording Preset"
+  </voice>
+</phrase>

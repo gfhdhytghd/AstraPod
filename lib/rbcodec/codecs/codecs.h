@@ -212,19 +212,9 @@ struct codec_api {
     void (*profile_func_exit)(void *this_fn, void *call_site);
 #endif
 
-#ifdef HAVE_RECORDING
-    int (*enc_pcmbuf_read)(void *buf, int count);
-    int (*enc_pcmbuf_advance)(int count);
-    struct enc_chunk_data * (*enc_encbuf_get_buffer)(size_t need);
-    void (*enc_encbuf_finish_buffer)(void);
-    ssize_t (*enc_stream_read)(void *buf, size_t count);
-    off_t (*enc_stream_lseek)(off_t offset, int whence);
-    ssize_t (*enc_stream_write)(const void *buf, size_t count);
-    int (*round_value_to_list32)(unsigned long value,
-                                 const unsigned long list[],
-                                 int count,
-                                 bool signd);
-#endif /* HAVE_RECORDING */
+#if defined(HAVE_RECORDING) && !defined(IPOD_6G)
+#include "codec_recording_api.h"
+#endif
 
     /* new stuff at the end, sort into place next time
        the API gets incompatible */
@@ -235,6 +225,10 @@ struct codec_api {
     bool (*alac_frame)(const unsigned char *packet, size_t size, unsigned samples,
                        int32_t *left, int32_t *right);
     void (*alac_end)(void);
+#endif
+#if defined(HAVE_RECORDING) && defined(IPOD_6G)
+    /* Preserve the Classic playback API, including the SM1 ALAC entries. */
+#include "codec_recording_api.h"
 #endif
 };
 

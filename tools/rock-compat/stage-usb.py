@@ -106,12 +106,14 @@ elif src.stem == "amaze":
     replace(
         "                                        ARRAYLEN(plugin_contexts));",
         "                                        ARRAYLEN(plugin_contexts));\n"
-        "        exit_on_usb(input);",
+        "        if (IS_SYSEVENT(input))\n"
+        "            exit_on_usb(input);",
     )
     replace(
         "                                    ARRAYLEN(plugin_contexts));\n\n",
         "                                    ARRAYLEN(plugin_contexts));\n"
-        "        exit_on_usb(input);\n\n",
+        "        if (IS_SYSEVENT(input))\n"
+        "            exit_on_usb(input);\n\n",
         count=2,
     )
     replace(
@@ -120,11 +122,15 @@ elif src.stem == "amaze":
         "        case MENU_ATTACHED_USB:\n"
         "            exit(PLUGIN_USB_CONNECTED);",
     )
+elif src.stem == "brickmania":
+    replace("            if (rb->button_hold())",
+            "            if (!IS_SYSEVENT(button) && rb->button_hold())")
 elif src.stem == "chopper":
     replace(
         "        if (rb->button_get(false) == QUIT) {",
         "        int event = rb->button_get(false);\n"
-        "        if (rb->default_event_handler(event) == SYS_USB_CONNECTED)\n"
+        "        if (IS_SYSEVENT(event) &&\n"
+        "            rb->default_event_handler(event) == SYS_USB_CONNECTED)\n"
         "            return PLUGIN_USB_CONNECTED;\n"
         "        if (event == QUIT) {",
     )
@@ -150,7 +156,12 @@ elif src.stem == "fireworks":
         "                exit(PLUGIN_USB_CONNECTED);\n"
         "            case 8:\n                quit_plugin = true;",
     )
-    replace("        switch(button)\n", "        exit_on_usb(button);\n        switch(button)\n")
+    replace(
+        "        switch(button)\n",
+        "        if (IS_SYSEVENT(button))\n"
+        "            exit_on_usb(button);\n"
+        "        switch(button)\n",
+    )
 elif src.stem == "highscore":
     replace('#include "highscore.h"',
             '#include "highscore.h"\n#include "pluginlib_exit.h"')
@@ -182,10 +193,16 @@ elif src.stem == "pong":
     replace(
         "        key = rb->button_get_w_tmo(end - *rb->current_tick);",
         "        key = rb->button_get_w_tmo(end - *rb->current_tick);\n"
-        "        if(rb->default_event_handler(key) == SYS_USB_CONNECTED)\n"
+        "        if(IS_SYSEVENT(key) &&\n"
+        "           rb->default_event_handler(key) == SYS_USB_CONNECTED)\n"
         "            return -1; /* exit game because of USB */",
     )
+elif src.stem == "snake":
+    replace("        if (rb->button_hold() && !pause)",
+            "        if (!IS_SYSEVENT(button) && rb->button_hold() && !pause)")
 elif src.stem == "snake2":
+    replace("        if (rb->button_hold())",
+            "        if (!IS_SYSEVENT(button) && rb->button_hold())")
     replace(
         "        button=rb->button_get(true);",
         "        button=rb->button_get(true);\n"
@@ -197,6 +214,13 @@ elif src.stem == "snake2":
     )
 elif src.stem == "star":
     replace("    int selection, level=1;", "    int selection = 0, level=1;")
+    # The level transition presents rectangles over the previous frame.
+    replace(
+        "                star_run_game(level-1);",
+        "                rb->lcd_clear_display();\n"
+        "                rb->lcd_update();\n"
+        "                star_run_game(level-1);",
+    )
     replace(
         "            case 4:\n                menu_quit = true;",
         "            case MENU_ATTACHED_USB:\n"

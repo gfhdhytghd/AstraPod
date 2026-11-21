@@ -59,8 +59,8 @@ $(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_UTILITIES))): $(ROCK_OUT)/
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-utilities.py $< $@
 
-ROCK_STAGED := 2048 amaze chopper dice fireworks flipit jackpot minesweeper \
-    periodic_table pong robotfindskitten snake2 star stopwatch lib/highscore $(ROCK_UTILITIES)
+ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot \
+    minesweeper periodic_table pong robotfindskitten snake snake2 star stopwatch lib/highscore $(ROCK_UTILITIES)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
@@ -116,7 +116,9 @@ $(ROCK_BITMAP_DIR)/%.o: $(ROCK_BITMAP_DIR)/%.c $(ROCK_BITMAP_DIR)/%.h
 
 ROCK_ACTION_MODULES := demos/snow demos/logo demos/mosaique demos/bounce \
     demos/matrix apps/countdown_timer games/dice games/jackpot games/rockblox1d \
-    games/robotfindskitten apps/periodic_table apps/alarmclock apps/dart_scorer apps/resistor
+    games/robotfindskitten apps/periodic_table games/2048 games/amaze \
+    demos/fire demos/fireworks demos/plasma demos/starfield \
+    apps/alarmclock apps/dart_scorer apps/resistor
 $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_ACTION_MODULES))): $(ROCK_OBJECTS)/lib/pluginlib_actions.o
 $(ROCK_OUT)/modules/games/dice.rock: $(addprefix $(ROCK_OBJECTS)/lib/,configfile.o playback_control.o)
 $(ROCK_OUT)/modules/games/jackpot.rock: $(ROCK_OBJECTS)/lib/picture.o
@@ -139,8 +141,6 @@ $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_GAME_PLAYBACK) demos/f
 ROCK_EXTRA_HELPER := games/2048 games/brickmania games/chopper games/maze games/mazezam \
     games/pong games/xobox demos/fire demos/fireworks demos/plasma demos/starfield
 $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_EXTRA_HELPER))): $(ROCK_OBJECTS)/lib/helper.o
-ROCK_EXTRA_ACTION := games/2048 games/amaze demos/fire demos/fireworks demos/plasma demos/starfield
-$(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_EXTRA_ACTION))): $(ROCK_OBJECTS)/lib/pluginlib_actions.o
 $(ROCK_OUT)/modules/games/chopper.rock: $(ROCK_OBJECTS)/lib/xlcd_draw.o
 $(ROCK_OUT)/modules/demos/plasma.rock: $(FIXEDPOINTLIB)
 

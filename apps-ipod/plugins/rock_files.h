@@ -9,7 +9,6 @@
 int rock_open(const char *, int, ...);
 int rock_creat(const char *, mode_t);
 int rock_close(int);
-int rock_remove(const char *);
 ssize_t rock_read(int, void *, size_t);
 ssize_t rock_write(int, const void *, size_t);
 off_t rock_lseek(int, off_t, int);

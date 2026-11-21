@@ -442,6 +442,7 @@ with the requesting command's prefix.
 | `MS3 STOP` | `MS3 STOPPED` closes the current MS3 operation |
 | `MS3 DETAIL <path>` | `MS3 DETAIL <size_bytes>\t<codec>\t<sample_rate_hz>\t<channels>\t<has_art>` |
 | `MS3 ART <size> <path>` | `MS3 ART <width> <height> <rows\|columns>`, `MS3 NOART`, or `MS3 PLACEHOLDER` |
+| `MS3 ARTBIN <size> <path>` | `MS3 ARTBIN <width> <height> <rows\|columns>`, `MS3 NOART`, or `MS3 PLACEHOLDER` |
 | `MS3 DEL <path>` | `MS3 DELETED` removes one regular file |
 
 In the table, `\t` is a literal tab. Booleans are `0` or `1`. Paths are
@@ -524,12 +525,23 @@ In a detail reply, `size_bytes` is the full file size. Channels are zero
 when the stream configuration is unavailable. `has_art` covers embedded
 art and image files Rockbox finds beside the track or above a disc folder.
 
-The artwork sizes are `list` (44), `coverflow` (128), and `wps` (300). The
-reply gives the actual dimensions and pixel order. After an `MS3 ART` reply,
-send `MS3 NEXT` until the final `MS3 DATA .` reply. Concatenate the decoded
-chunks to get `width * height * 2` bytes of little-endian RGB565 pixels.
+### Artwork
+
+Request `MS3 ARTBIN <size> <path>` for a cached thumbnail. The size names
+are `list` (44), `coverflow` (128), and `wps` (300). The reply gives the
+actual dimensions and pixel order. Use the same `MS3 NEXT`, `MSF1`, and
+`MS3 DONE <length> <crc32>` framing as the bulk database read. Check the
+offsets, length, and CRC32. The stream contains exactly `width * height * 2`
+bytes of little-endian RGB565 pixels without the on-disk thumbnail header.
+`MS3 STOP` or disconnect releases an abandoned stream.
+
+If `MS3 ARTBIN` returns `MS3 ERR command`, use `MS3 ART <size> <path>`.
+After an `MS3 ART` reply, send `MS3 NEXT` until the final `MS3 DATA .` reply.
+Concatenate the decoded chunks to get the same pixels.
 `MS3 NOART` means the requested thumbnail is unavailable.
 `MS3 PLACEHOLDER` means only the shared fallback thumbnail is available.
+
+### Deletion
 
 Only absolute paths under `/Music/PodLink/` on the internal volume are
 deletable. This includes the Jellyfin subdirectory. After `MS3 DELETED`,

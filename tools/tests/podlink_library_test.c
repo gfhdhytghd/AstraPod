@@ -30,14 +30,22 @@ void volume_size(IF_MV(int volume,) sector_t *size, sector_t *free)
     IF_MV((void)volume;)
     *size = *free = 0;
 }
-unsigned int art_cache_track_key(const char *path) { (void)path; return 0; }
-int art_cache_size_dim(int size) { (void)size; return 0; }
-int art_cache_size_index(const char *name) { (void)name; return -1; }
+#define TEST_ART_PATH "/test-ms3-art.aat"
+
+unsigned int art_cache_track_key(const char *path)
+{
+    return !strcmp(path, "/Music/track with spaces.flac");
+}
+int art_cache_size_dim(int size) { return size == 0 ? 44 : 0; }
+int art_cache_size_index(const char *name) { return strcmp(name, "list") ? -1 : 0; }
 bool art_cache_lookup_hash(unsigned int key, int size, char *path, int capacity,
                            bool *fallback)
 {
-    (void)key; (void)size; (void)path; (void)capacity; (void)fallback;
-    return false;
+    *fallback = false;
+    if (key != 1 || size != 0)
+        return false;
+    snprintf(path, capacity, "%s", TEST_ART_PATH);
+    return true;
 }
 bool art_folder_file(const char *path, char *out, int size)
 {
@@ -119,6 +127,69 @@ static void check_file(void)
     assert(!strcmp(reply, "MS3 ERR state"));
 }
 
+static void check_artwork(void)
+{
+    const char *path = "list /Music/track with spaces.flac";
+    struct art_cache_header header = {
+        .magic = ART_CACHE_MAGIC,
+        .version = ART_CACHE_FORMAT_VERSION,
+        .width = 20,
+        .height = 20,
+        .layout = AA_COLUMNS,
+    };
+    unsigned char pixels[20 * 20 * 2];
+    for (unsigned int i = 0; i < sizeof(pixels); i++)
+        pixels[i] = i;
+    int fd = open(TEST_ART_PATH, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    assert(fd >= 0);
+    assert(write(fd, &header, sizeof(header)) == sizeof(header));
+    assert(write(fd, pixels, sizeof(pixels)) == sizeof(pixels));
+    close(fd);
+
+    char request[MEDIA_REPLY_SIZE];
+    snprintf(request, sizeof(request), "MS3 ARTBIN %s", path);
+    command(request);
+    assert(!strcmp(reply, "MS3 ARTBIN 20 20 columns"));
+    command("MS3 STOP");
+    assert(!strcmp(reply, "MS3 STOPPED"));
+    command("MS3 NEXT");
+    assert(!strcmp(reply, "MS3 ERR state"));
+
+    command(request);
+    assert(!strcmp(reply, "MS3 ARTBIN 20 20 columns"));
+    for (unsigned int offset = 0; offset < sizeof(pixels);)
+    {
+        command("MS3 NEXT");
+        assert(!reply[0]);
+        unsigned int length = MIN(limit - 8, sizeof(pixels) - offset);
+        assert(podlink_media_next_binary(chunk, limit) == length + 8);
+        assert(!memcmp(chunk, "MSF1", 4));
+        for (unsigned int i = 0; i < 4; i++)
+            assert(chunk[i + 4] == ((offset >> (8 * i)) & 0xff));
+        assert(!memcmp(chunk + 8, pixels + offset, length));
+        offset += length;
+    }
+    command("MS3 NEXT");
+    char expected[MEDIA_REPLY_SIZE];
+    snprintf(expected, sizeof(expected), "MS3 DONE %zu %08lx", sizeof(pixels),
+             (unsigned long)(crc_32r(pixels, sizeof(pixels), UINT32_MAX) ^
+                             UINT32_MAX));
+    assert(!strcmp(reply, expected));
+
+    snprintf(request, sizeof(request), "MS3 ART %s", path);
+    command(request);
+    assert(!strcmp(reply, "MS3 ART 20 20 columns"));
+    command("MS3 NEXT");
+    assert(!strncmp(reply, "MS3 DATA + ", 11));
+    command("MS3 NEXT");
+    assert(!strncmp(reply, "MS3 DATA + ", 11));
+    command("MS3 NEXT");
+    assert(!strncmp(reply, "MS3 DATA . ", 11));
+    command("MS3 NEXT");
+    assert(!strcmp(reply, "MS3 ERR state"));
+    assert(remove(TEST_ART_PATH) == 0);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -147,6 +218,7 @@ int main(int argc, char **argv)
     assert(!strcmp(reply, "MS3 ERR database unavailable"));
     tagcache_get_stat()->scanning = false;
     check_file();
+    check_artwork();
 
     command("MS3 DB");
     assert(!strcmp(reply, "MS3 READY"));

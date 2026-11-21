@@ -30,7 +30,7 @@ static const int text_tags[] = {
     tag_genre, tag_composer, tag_grouping, tag_comment
 };
 
-static enum { IDLE, COUNT, TRACKS, ART, FILE_STREAM } operation;
+static enum { IDLE, COUNT, TRACKS, ART_TEXT, ART_BINARY, FILE_STREAM } operation;
 static struct tagcache_search walk;
 static int32_t commit_id;
 static uint32_t generation;
@@ -38,11 +38,9 @@ static int slots, window_end, track_count, scan_removed;
 static unsigned int record_len, record_offset;
 static unsigned char record[ARRAYLEN(text_tags) * TAGCACHE_BUFSZ +
                             (ARRAYLEN(number_tags) + 2) * 12];
-static int art_fd;
-static unsigned int art_left;
 static char reply[MEDIA_REPLY_SIZE];
-static int file_fd;
-static uint32_t file_length, file_offset, file_crc, numeric_revision;
+static int stream_fd;
+static uint32_t stream_length, stream_offset, stream_crc, numeric_revision;
 
 bool podlink_library_active(void)
 {
@@ -53,10 +51,9 @@ void podlink_library_close(void)
 {
     if (operation == COUNT || operation == TRACKS)
         tagcache_search_finish(&walk);
-    if (operation == ART)
-        close(art_fd);
-    if (operation == FILE_STREAM)
-        close(file_fd);
+    if (operation == ART_TEXT || operation == ART_BINARY ||
+        operation == FILE_STREAM)
+        close(stream_fd);
     operation = IDLE;
 }
 
@@ -192,6 +189,14 @@ static bool file_snapshot_changed(void)
            database_changed();
 }
 
+static void stream_open(int fd, uint32_t length)
+{
+    stream_fd = fd;
+    stream_length = length;
+    stream_offset = 0;
+    stream_crc = UINT32_MAX;
+}
+
 static const char *database_files(const unsigned char *name, size_t size)
 {
     if (!file_snapshot())
@@ -224,12 +229,9 @@ static const char *database_files(const unsigned char *name, size_t size)
         }
         if (name)
         {
-            file_fd = fd;
-            file_length = bytes;
-            file_offset = 0;
-            file_crc = UINT32_MAX;
+            stream_open(fd, bytes);
             operation = FILE_STREAM;
-            snprintf(reply, sizeof(reply), "MS3 FILE %lu", (unsigned long)file_length);
+            snprintf(reply, sizeof(reply), "MS3 FILE %lu", (unsigned long)bytes);
             return reply;
         }
 
@@ -249,31 +251,34 @@ static const char *database_files(const unsigned char *name, size_t size)
     return reply;
 }
 
-static const char *file_next(unsigned char *binary, unsigned int *size)
+static const char *binary_next(unsigned char *binary, unsigned int *size)
 {
-    if (file_snapshot_changed())
+    bool database = operation == FILE_STREAM;
+    if (database && file_snapshot_changed())
         return fail("MS3 ERR database changed");
-    if (file_offset == file_length)
+    if (stream_offset == stream_length)
     {
         snprintf(reply, sizeof(reply), "MS3 DONE %lu %08lx",
-                 (unsigned long)file_length, (unsigned long)(file_crc ^ UINT32_MAX));
+                 (unsigned long)stream_length,
+                 (unsigned long)(stream_crc ^ UINT32_MAX));
         return fail(reply);
     }
 
     unsigned int limit = podlink_max_message();
     if (limit <= 8)
         return fail("MS3 ERR message size");
-    unsigned int n = MIN(MIN(limit, PODLINK_MAX_MESSAGE) - 8, file_length - file_offset);
+    unsigned int n = MIN(MIN(limit, PODLINK_MAX_MESSAGE) - 8,
+                         stream_length - stream_offset);
     memcpy(binary, "MSF1", 4);
     for (unsigned int i = 0; i < 4; i++)
-        binary[4 + i] = file_offset >> (8 * i);
-    if (read(file_fd, binary + 8, n) != (ssize_t)n)
-        return fail("MS3 ERR database read");
-    if (file_snapshot_changed())
+        binary[4 + i] = stream_offset >> (8 * i);
+    if (read(stream_fd, binary + 8, n) != (ssize_t)n)
+        return fail(database ? "MS3 ERR database read" : "MS3 ERR artwork read");
+    if (database && file_snapshot_changed())
         return fail("MS3 ERR database changed");
 
-    file_crc = crc_32r(binary + 8, n, file_crc);
-    file_offset += n;
+    stream_crc = crc_32r(binary + 8, n, stream_crc);
+    stream_offset += n;
     *size = n + 8;
     return NULL;
 }
@@ -343,16 +348,17 @@ static const char *database_open(bool count)
 static const char *art_next(void)
 {
     unsigned char buffer[DATA_BYTES];
-    unsigned int n = MIN(sizeof(buffer), art_left);
-    if (read(art_fd, buffer, n) != (ssize_t)n)
+    unsigned int n = MIN(sizeof(buffer), stream_length - stream_offset);
+    if (read(stream_fd, buffer, n) != (ssize_t)n)
         return fail("MS3 ERR artwork read");
-    art_left -= n;
-    if (!art_left)
+    stream_offset += n;
+    bool final = stream_offset == stream_length;
+    if (final)
         podlink_library_close();
-    return data_reply(buffer, n, !art_left);
+    return data_reply(buffer, n, final);
 }
 
-static const char *art_open(const char *path, int size)
+static const char *art_open(const char *path, int size, bool binary)
 {
     char thumbnail[MAX_PATH];
     bool fallback;
@@ -380,10 +386,10 @@ static const char *art_open(const char *path, int size)
         return "MS3 ERR artwork read";
     }
 
-    art_fd = fd;
-    art_left = (unsigned int)header.width * header.height * 2;
-    operation = ART;
-    snprintf(reply, sizeof(reply), "MS3 ART %u %u %s", header.width,
+    stream_open(fd, (unsigned int)header.width * header.height * 2);
+    operation = binary ? ART_BINARY : ART_TEXT;
+    snprintf(reply, sizeof(reply), "MS3 %s %u %u %s",
+             binary ? "ARTBIN" : "ART", header.width,
              header.height, header.layout == AA_COLUMNS ? "columns" : "rows");
     return reply;
 }
@@ -609,9 +615,9 @@ const char *podlink_library_command(const unsigned char *data, size_t size,
         return fail("MS3 STOPPED");
     if (size == 4 && !memcmp(data, "NEXT", 4))
     {
-        if (operation == FILE_STREAM)
-            return file_next(binary, binary_size);
-        if (operation == ART)
+        if (operation == FILE_STREAM || operation == ART_BINARY)
+            return binary_next(binary, binary_size);
+        if (operation == ART_TEXT)
             return art_next();
         if (operation != IDLE)
             return database_next();
@@ -631,6 +637,7 @@ const char *podlink_library_command(const unsigned char *data, size_t size,
         return database_files(data + 5, size - 5);
 
     int art_size = -1;
+    bool binary_art = size >= 7 && !memcmp(data, "ARTBIN ", 7);
     bool delete = size > 4 && !memcmp(data, "DEL ", 4);
     if (size > 7 && !memcmp(data, "DETAIL ", 7))
     {
@@ -642,11 +649,12 @@ const char *podlink_library_command(const unsigned char *data, size_t size,
         data += 4;
         size -= 4;
     }
-    else if (size > 4 && !memcmp(data, "ART ", 4))
+    else if (binary_art || (size > 4 && !memcmp(data, "ART ", 4)))
     {
         char name[10];
-        data += 4;
-        size -= 4;
+        unsigned int prefix = binary_art ? 7 : 4;
+        data += prefix;
+        size -= prefix;
         const unsigned char *end = memchr(data, ' ', size);
         if (!end || (size_t)(end - data) >= sizeof(name))
             return "MS3 ERR artwork size";
@@ -677,7 +685,7 @@ const char *podlink_library_command(const unsigned char *data, size_t size,
         return "MS3 DELETED";
     }
     if (art_size >= 0)
-        return art_open(path, art_size);
+        return art_open(path, art_size, binary_art);
     return file_detail(path);
 }
 #else

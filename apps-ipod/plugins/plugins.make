@@ -73,6 +73,8 @@ $(ROCK_OUT)/staged/metronome.c: $(ROCK_SRC)/metronome.c $(APPSDIR)/plugins/stage
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-metronome.py $< $@
 
+$(ROCK_OBJECTS)/oscilloscope.o: private ROCK_FLAGS += $(ROCK_OSCILLOSCOPE_FLAGS)
+
 $(ROCK_OUT)/staged/oscilloscope.c: $(ROCK_SRC)/oscilloscope.c $(APPSDIR)/plugins/stage-oscilloscope.py
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-oscilloscope.py $< $@
@@ -99,6 +101,8 @@ ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot metro
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
+
+$(ROCK_OBJECTS)/oscilloscope.o: $(APPSDIR)/plugins/plugins.make
 
 $(ROCK_OBJECTS)/%.o: $(ROCK_SRC)/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)

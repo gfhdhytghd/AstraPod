@@ -37,6 +37,7 @@
 #include "font.h"
 #include "audio.h"
 #include "pcm_mixer.h"
+#include "pcm_waveform.h"
 #ifdef USB_ENABLE_AUDIO
 #include "usbstack/usb_audio.h"
 #endif

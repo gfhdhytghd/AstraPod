@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage the ipod6g Oscilloscope with the upstream peak plotters only."""
+"""Stage the ipod6g Oscilloscope with the upstream stereo plotters."""
 from hashlib import sha256
 from pathlib import Path
 import sys
@@ -7,12 +7,12 @@ import sys
 
 source_path, output_path = map(Path, sys.argv[1:])
 upstream = source_path.read_bytes()
-# Only copy ranges from the reviewed source. In particular, neither the
-# waveform paths nor the USB channel switch (which clears a hook) enter C.
+# Copy only reviewed plotters. Upstream callback and USB channel management
+# stay out of the generated source.
 if sha256(upstream).hexdigest() != (
     "0afe39bb971c09ce3730baf4730b6ed32632322f144a530454ff1ee1dc2abfd3"
 ):
-    raise SystemExit(f"{source_path}: review the Oscilloscope peak-only staging")
+    raise SystemExit(f"{source_path}: review the Oscilloscope staging")
 
 source = upstream.decode()
 
@@ -56,13 +56,19 @@ plotters = plotters.replace(peaks, """    struct pcm_peaks peaks = {0};
     if (playback == AUDIO_STATUS_PLAY)
         rb->mixer_channel_calculate_peaks(PCM_MIXER_CHAN_PLAYBACK, &peaks);""")
 
+wave_plotters = (
+    section("static void anim_waveform_plot_filled_h", "static long anim_waveform_horizontal")
+    + section("static void anim_waveform_plot_filled_v", "static long anim_waveform_vertical")
+)
+scale = section("#define WAVEFORM_SCALE_PCM", "static void waveform_buffer_set_threshold")
+
 output_path.write_text(header + r'''#include "plugin.h"
 #include "lib/configfile.h"
 #include "lib/helper.h"
 #include "lib/pluginlib_exit.h"
 
 #if LCD_DEPTH != 16 || LCD_STRIDEFORMAT != HORIZONTAL_STRIDE
-#error Oscilloscope peak display requires a row-major RGB565 framebuffer
+#error Oscilloscope requires a row-major RGB565 framebuffer
 #endif
 
 #define BACKG_COLOR LCD_BLACK
@@ -77,6 +83,11 @@ output_path.write_text(header + r'''#include "plugin.h"
 enum { DRAW_FILLED, DRAW_LINE, DRAW_PIXEL, MAX_DRAW };
 enum { ADV_SCROLL, ADV_WRAP, MAX_ADV };
 enum { OSC_HORIZ, OSC_VERT, MAX_OSC };
+#ifdef ROCK_OSCILLOSCOPE_WAVEFORM
+enum { GRAPH_PEAKS, GRAPH_WAVEFORM, MAX_GRAPH };
+#define WINDOW_MIN_MS 2
+#define WINDOW_MAX_MS 10
+#endif
 
 ''' + delay_table + r'''static struct osc_config
 {
@@ -84,13 +95,26 @@ enum { OSC_HORIZ, OSC_VERT, MAX_OSC };
     int draw;
     int advance;
     int orientation;
-} osc_disk = {68, DRAW_FILLED, ADV_SCROLL, OSC_HORIZ};
+#ifdef ROCK_OSCILLOSCOPE_WAVEFORM
+    int mode;
+    int window_ms;
+#endif
+} osc_disk = {
+    .speed = 68, .draw = DRAW_FILLED, .advance = ADV_SCROLL,
+    .orientation = OSC_HORIZ,
+#ifdef ROCK_OSCILLOSCOPE_WAVEFORM
+    .mode = GRAPH_PEAKS, .window_ms = WINDOW_MAX_MS,
+#endif
+};
 
 static struct osc_config osc;
 static const char cfg_filename[] = "oscilloscope.cfg";
 static char *draw_str[] = {"filled", "line", "pixel"};
 static char *advance_str[] = {"scroll", "wrap"};
 static char *orientation_str[] = {"horizontal", "vertical"};
+#ifdef ROCK_OSCILLOSCOPE_WAVEFORM
+static char *mode_str[] = {"peaks", "waveform"};
+#endif
 static struct configdata disk_config[] =
 {
     {TYPE_INT, MIN_SPEED, MAX_SPEED, {.int_p = &osc_disk.speed}, "speed", NULL},
@@ -98,6 +122,11 @@ static struct configdata disk_config[] =
     {TYPE_ENUM, 0, MAX_ADV, {.int_p = &osc_disk.advance}, "advance", advance_str},
     {TYPE_ENUM, 0, MAX_OSC, {.int_p = &osc_disk.orientation}, "orientation",
      orientation_str},
+#ifdef ROCK_OSCILLOSCOPE_WAVEFORM
+    {TYPE_ENUM, 0, MAX_GRAPH, {.int_p = &osc_disk.mode}, "graphmode", mode_str},
+    {TYPE_INT, WINDOW_MIN_MS, WINDOW_MAX_MS, {.int_p = &osc_disk.window_ms},
+     "window ms", NULL},
+#endif
 };
 
 static struct viewport plot;
@@ -126,7 +155,73 @@ static void scroll_plot(int count, bool vertical)
                         (LCD_WIDTH - count) * sizeof(*pixels));
 }
 
-''' + plotters + r'''static void reset_plot(void)
+''' + plotters + r'''#ifdef ROCK_OSCILLOSCOPE_WAVEFORM
+''' + scale + wave_plotters + r'''static long anim_waveform(void)
+{
+    static int16_t samples[2 * PCM_WAVEFORM_FRAMES];
+    static void (* const draw[2][MAX_DRAW])(int, int, int, int, int, int) =
+    {
+        {anim_waveform_plot_filled_h, anim_waveform_plot_lines_h,
+         anim_waveform_plot_pixel_h},
+        {anim_waveform_plot_filled_v, anim_waveform_plot_lines_v,
+         anim_waveform_plot_pixel_v},
+    };
+
+    long now = *rb->current_tick;
+    size_t frames = playback == AUDIO_STATUS_PLAY
+                  ? rb->waveform_read(samples, osc.window_ms) : 0;
+    bool vertical = osc.orientation == OSC_VERT;
+    int length = vertical ? GRAPH_HEIGHT : LCD_WIDTH;
+    int depth = vertical ? LCD_WIDTH : GRAPH_HEIGHT;
+
+    rb->lcd_set_drawmode(DRMODE_SOLID | DRMODE_INVERSEVID);
+    rb->lcd_fillrect(0, 0, LCD_WIDTH, GRAPH_HEIGHT);
+    rb->lcd_set_drawmode(DRMODE_SOLID);
+
+    for (int channel = 0; channel < 2; channel++)
+    {
+        int center = (2 * channel + 1) * depth / 4;
+        if (!frames)
+        {
+            if (vertical)
+                rb->lcd_vline(center, 0, length - 1);
+            else
+                rb->lcd_hline(0, length - 1, center);
+            continue;
+        }
+
+        int prev_min = center, prev_max = center;
+        size_t first = 0;
+        for (int pos = 0; pos < length; pos++)
+        {
+            size_t next = (pos + 1) * frames / length;
+            int low = samples[2 * first + channel];
+            int high = low;
+            for (size_t i = first + 1; i < next; i++)
+            {
+                int sample = samples[2 * i + channel];
+                low = MIN(low, sample);
+                high = MAX(high, sample);
+            }
+            int min = WAVEFORM_SCALE_PCM(depth / 4 - 1, low);
+            int max = WAVEFORM_SCALE_PCM(depth / 4 - 1, high);
+            min = vertical ? center + min : center - min;
+            max = vertical ? center + max : center - max;
+            if (pos == 0)
+                prev_min = min, prev_max = max;
+            draw[vertical][osc.draw](pos, MAX(0, pos - 1), min, max,
+                                     prev_min, prev_max);
+            prev_min = min;
+            prev_max = max;
+            first = next;
+        }
+    }
+    rb->lcd_update();
+    return now + HZ/20;
+}
+#endif
+
+static void reset_plot(void)
 {
     last_left = last_right = last_pos = 0;
     last_tick = *rb->current_tick;
@@ -141,7 +236,12 @@ static void scroll_plot(int count, bool vertical)
     rb->lcd_setfont(FONT_SYSFIXED);
     rb->lcd_set_drawmode(DRMODE_SOLID);
     rb->lcd_clear_display();
+#ifdef ROCK_OSCILLOSCOPE_WAVEFORM
+    rb->lcd_putsxyf(4, 3, "Oscilloscope - %s",
+                   osc.mode == GRAPH_WAVEFORM ? "Waveform" : "Peaks");
+#else
     rb->lcd_putsxy(4, 3, "Oscilloscope - Peak only");
+#endif
     const char *state = "Playing";
     if (!(playback & AUDIO_STATUS_PLAY))
         state = "Stopped";
@@ -159,9 +259,22 @@ static void scroll_plot(int count, bool vertical)
 
 static bool show_options(void)
 {
+#ifdef ROCK_OSCILLOSCOPE_WAVEFORM
+    MENUITEM_STRINGLIST(menu, "Oscilloscope", NULL,
+                        "Draw mode", "Advance", "Orientation", "Speed",
+                        "Volume", "Graph mode", "Quit");
+    MENUITEM_STRINGLIST(wave_menu, "Oscilloscope", NULL,
+                        "Draw mode", "Time span", "Orientation", "Volume",
+                        "Graph mode", "Quit");
+    static const struct opt_items modes[] = {
+        {"Peaks", -1}, {"Waveform", -1}
+    };
+    static const int wave_actions[] = {0, 7, 2, 4, 5, 6};
+#else
     MENUITEM_STRINGLIST(menu, "Oscilloscope - Peak only", NULL,
                         "Draw mode", "Advance", "Orientation", "Speed",
                         "Volume", "Quit");
+#endif
     static const struct opt_items draws[] = {
         {"Filled", -1}, {"Line", -1}, {"Pixel", -1}
     };
@@ -175,7 +288,19 @@ static bool show_options(void)
 
     while (!rb->plugin_usb_taken())
     {
-        switch (rb->do_menu(&menu, &selected, NULL, false))
+        int action;
+#ifdef ROCK_OSCILLOSCOPE_WAVEFORM
+        if (osc.mode == GRAPH_WAVEFORM)
+        {
+            action = rb->do_menu(&wave_menu, &selected, NULL, false);
+            if (action >= 0 && action < (int)ARRAYLEN(wave_actions))
+                action = wave_actions[action];
+        }
+        else
+#endif
+            action = rb->do_menu(&menu, &selected, NULL, false);
+
+        switch (action)
         {
         case 0:
             rb->set_option("Draw mode", &osc.draw, RB_INT, draws,
@@ -197,7 +322,20 @@ static bool show_options(void)
             rb->option_screen(rb->find_setting(&rb->global_status->volume),
                               NULL, false, "Volume");
             break;
+#ifdef ROCK_OSCILLOSCOPE_WAVEFORM
         case 5:
+            rb->set_option("Graph mode", &osc.mode, RB_INT, modes,
+                           ARRAYLEN(modes), NULL);
+            selected = osc.mode == GRAPH_WAVEFORM ? 4 : 5;
+            break;
+        case 7:
+            rb->set_int("Time span", "ms", UNIT_MS, &osc.window_ms, NULL,
+                        1, WINDOW_MIN_MS, WINDOW_MAX_MS, NULL);
+            break;
+        case 6:
+#else
+        case 5:
+#endif
             return true;
         default:
             return false;
@@ -237,7 +375,13 @@ enum plugin_status plugin_start(const void *parameter)
             reset_plot();
         }
 
-        long next = osc.orientation == OSC_HORIZ ? anim_peaks_horizontal()
+        long next;
+#ifdef ROCK_OSCILLOSCOPE_WAVEFORM
+        if (osc.mode == GRAPH_WAVEFORM)
+            next = anim_waveform();
+        else
+#endif
+            next = osc.orientation == OSC_HORIZ ? anim_peaks_horizontal()
                                                 : anim_peaks_vertical();
         long delay = next - *rb->current_tick;
         if (delay <= 0)

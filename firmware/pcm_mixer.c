@@ -85,6 +85,8 @@ static unsigned int idle_counter = 0;
 #define SAMPR_NUM(sampr) (sampr)
 #endif
 
+#include "pcm_mixer-waveform.inc"
+
 static inline unsigned int max_idle_frames(void)
 {
     return SAMPR_NUM(pcm_get_frequency()) * 3 / (mix_frame_size / 4);
@@ -491,11 +493,12 @@ bool mixer_switch_sink_quiet(enum pcm_sink_ids sink)
     if(pcm_current_sink() == sink)
         return true;
 
-    if(!pcm_switch_sink(sink))
-        return false;
-
-    mixer_handle_sampr_change(SAMPR_NUM(pcm_get_frequency()));
-    return true;
+    waveform_reconfigure_begin();
+    bool switched = pcm_switch_sink(sink);
+    if (switched)
+        mixer_handle_sampr_change(SAMPR_NUM(pcm_get_frequency()));
+    waveform_reconfigure_end();
+    return switched;
 }
 
 #if defined(USB_ENABLE_IAP) || defined(HAVE_USB_HOST_AUDIO)
@@ -627,6 +630,7 @@ void mixer_set_frequency(unsigned int samplerate)
     if(pcm_get_frequency() == samplerate)
         return;
 
+    waveform_reconfigure_begin();
     pcm_play_stop();
     idle_counter = 0;
 
@@ -634,6 +638,7 @@ void mixer_set_frequency(unsigned int samplerate)
     mixer_handle_sampr_change(SAMPR_NUM(pcm_get_frequency()));
     if (pcm_is_initialized())
         pcm_apply_settings();
+    waveform_reconfigure_end();
 }
 
 /* Get output samplerate */

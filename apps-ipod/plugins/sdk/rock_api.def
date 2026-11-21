@@ -251,4 +251,8 @@ ROCK_SLOT(int (*click_max_volume)(void), click_max_volume, rock_click_max_volume
 ROCK_DIRECT(strchr)
 ROCK_DIRECT(strtok_r)
 
+/* Foreground read of a bounded stereo PCM snapshot */
+ROCK_SLOT(__typeof__(mixer_waveform_read) *waveform_read, waveform_read,
+          rock_waveform_read)
+
 #undef ROCK_RAW

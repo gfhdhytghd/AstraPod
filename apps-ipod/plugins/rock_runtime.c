@@ -7,6 +7,7 @@
 #include "rock-compat/rock_fingerprint.h"
 #include "core_alloc.h"
 #include "root_menu.h"
+#include "pcm_waveform.h"
 #include "sound.h"
 #include "timer.h"
 #include "speech/language.h"
@@ -193,6 +194,16 @@ static void rock_ticks_stop(void)
     if (click_rate)
         mixer_click_stop();
     mutex_unlock(&media_mutex);
+}
+
+static size_t rock_waveform_read(int16_t *samples, unsigned int window_ms)
+{
+    mutex_lock(&media_mutex);
+    size_t frames = 0;
+    if (!media_disabled && audio_status() == AUDIO_STATUS_PLAY)
+        frames = mixer_waveform_read(samples, window_ms);
+    mutex_unlock(&media_mutex);
+    return frames;
 }
 
 static struct mp3entry *rock_audio_current_track(void)

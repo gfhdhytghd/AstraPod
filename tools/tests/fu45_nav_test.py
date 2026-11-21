@@ -36,29 +36,29 @@ static int ok_key(void){return list_key(BUTTON_SELECT,BUTTON_RC_SELECT,BUTTON_RE
 static int cover_menu_key(void){int key=key_remote?BUTTON_RC_MENU:BUTTON_MENU;return key_action(cover_keys,ARRAYLEN(cover_keys),key|BUTTON_REL,key);}
 '''.replace('LIST_KEYS',','.join(rows)).replace('COVER_KEYS',','.join(cover_rows))
 # Insert before adapter functions so the real controller sees the key scripts.
-pos=source.index('static void list_do_action(int context')
+pos=source.index('static bool list_do_action(int context')
 source=source[:pos]+extra+source[pos:]
 source=source.replace(fn(source,'list_do_action'),r'''
-static void list_do_action(int context,int timeout,struct gui_synclist*l,int*a){
+static bool list_do_action(int context,int timeout,struct gui_synclist*l,int*a){
  (void)context;(void)timeout;assert(nav_step<16);int s=nav_step++;
- if(nav_case==0){assert(s==0&&depth==0&&l->selected==0);*a=menu_key();return;}
+ if(nav_case==0){assert(s==0&&depth==0&&l->selected==0);*a=menu_key();return false;}
  if(nav_case==1){
   switch(s){
-  case 0:assert(depth==0);l->selected=3;*a=ok_key();return;
-  case 1:assert(depth==1);l->selected=1;*a=ok_key();return;
-  case 2:assert(depth==2);l->selected=1;*a=list_key(BUTTON_MENU,BUTTON_RC_MENU,BUTTON_REPEAT);return;
-  case 3:assert(depth==2&&l->selected==1);*a=cancel_key();return;
-  case 4:assert(depth==1&&l->selected==1);*a=menu_key();return;
-  case 5:assert(depth==0&&l->selected==3);*a=menu_key();return;
+  case 0:assert(depth==0);l->selected=3;*a=ok_key();return false;
+  case 1:assert(depth==1);l->selected=1;*a=ok_key();return false;
+  case 2:assert(depth==2);l->selected=1;*a=list_key(BUTTON_MENU,BUTTON_RC_MENU,BUTTON_REPEAT);return false;
+  case 3:assert(depth==2&&l->selected==1);*a=cancel_key();return false;
+  case 4:assert(depth==1&&l->selected==1);*a=menu_key();return false;
+  case 5:assert(depth==0&&l->selected==3);*a=menu_key();return false;
   }assert(0);
  }
  if(nav_case==2){
-  if(s==0){l->selected=3;*a=ok_key();return;}
-  if(s==1){assert(depth==1);l->selected=2;*a=ok_key();return;}
-  assert(s==2&&depth==2);*a=ACTION_REMOTE_WPS;return;
+  if(s==0){l->selected=3;*a=ok_key();return false;}
+  if(s==1){assert(depth==1);l->selected=2;*a=ok_key();return false;}
+  assert(s==2&&depth==2);*a=ACTION_REMOTE_WPS;return false;
  }
- if(nav_case==3){assert(s==0&&depth==1);*a=cancel_key();return;}
- if(nav_case==4){if(s==0)assert(depth==2&&l->selected==2);*a=menu_key();return;}
+ if(nav_case==3){assert(s==0&&depth==1);*a=cancel_key();return false;}
+ if(nav_case==4){if(s==0)assert(depth==2&&l->selected==2);*a=menu_key();return false;}
  assert(0);
 }
 ''')
@@ -71,8 +71,7 @@ source=source.replace(fn(source,'quick_screen_current'),'static int quick_screen
 source=source.replace(fn(source,'cider_covers'),r'''
 int cider_covers(void){
  assert(active&&available&&!claimed);assert(agents_nav_enter(AGENTS_NAV_COVERS));claimed=true;covers_calls++;
- if(nav_case==3&&album_visits++==0){struct cider_row row={0};strcpy(row.route,"album/picked");strcpy(row.title,"Picked");cider_browse_album(&row);}
- int result=cover_event(cover_menu_key());claimed=false;agents_nav_leave(AGENTS_NAV_COVERS);return result;
+ int result=nav_case==3&&album_visits++==0 ? GO_TO_WPS : cover_event(cover_menu_key());claimed=false;agents_nav_leave(AGENTS_NAV_COVERS);return result;
 }
 ''')
 source=source.replace(fn(source,'album_covers_return'),r'''
@@ -94,9 +93,11 @@ int main(void){
   /* Native/Cider WPS -> covers -> MENU leaves the visit. */
   fresh(1,0);cider_browse_covers(true);
   assert(load_screen(GO_TO_CIDER)==GO_TO_PREVIOUS&&last_screen==GO_TO_ROOT&&nav_step==0);released();
-  /* The track child goes back to the same cover visit before MENU exits. */
-  fresh(1,3);cider_browse_covers(true);assert(load_screen(GO_TO_CIDER)==GO_TO_PREVIOUS);
-  assert(covers_calls==2&&nav_step==1&&last_screen==GO_TO_ROOT);released();
+  /* The carousel-owned album panel returns through the same cover visit. */
+  fresh(1,3);cider_browse_covers(true);assert(load_screen(GO_TO_CIDER)==GO_TO_WPS);
+  assert(cover_nav_playing()&&cover_suspended&&!claimed&&!agents_nav_active());
+  cider_browse_covers(false);assert(load_screen(GO_TO_CIDER)==GO_TO_ROOT);
+  assert(covers_calls==2&&nav_step==0&&last_screen==GO_TO_CIDER);released();
   /* Other entry points retain their ordinary menu/browser parent. */
   fresh(0,0);cover_nav_begin(GO_TO_DBBROWSER);assert(album_covers_scrn(NULL)==GO_TO_DBBROWSER);released();
   fresh(1,4);depth=2;history[2].selected=2;cover_nav_begin(GO_TO_CIDER);cider_browse_covers(false);

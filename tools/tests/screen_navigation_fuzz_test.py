@@ -92,7 +92,11 @@ static int __attribute__((unused)) app_buffer_is_claimed(void){return owner!=0;}
 static bool button_get_sw_poweroff_state(void){return poweroff;}
 static void button_set_sw_poweroff_state(bool on){poweroff=on;}
 static int audio_status(void){return AUDIO_STATUS_PLAY;}
-static void gwps_leave_wps(bool on){(void)on;}
+static bool wps_fullscreen;
+static void leave_playback(void){wps_fullscreen = false;}
+static int carousel_wps_back(void){return GO_TO_PREVIOUS;}
+static void carousel_prepare_transition(void){}
+static void carousel_cancel_transition(void){}
 static void finish_talk(bool discard){assert(discard);}
 static bool native_play_pending;
 static bool tracks_valid=true;
@@ -134,11 +138,11 @@ a=current_agents.index('        enum agents_nav_screen nav =',current_agents.ind
 agent_pending=current_agents[a:b]
 a=current_wps.index('            case ACTION_AGENTS_REMOTE_SWITCH:');b=current_wps.index('            case ACTION_WPS_HOTKEY:',a)
 wps_double=current_wps[a:b].replace("#endif", "")
-gui=current_wps[current_wps.index('static long wps_run(bool return_agents)\n{'):]
+gui=current_wps[current_wps.index('static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)\n{'):]
 a=gui.index('            case ACTION_WPS_MENU:');b=gui.index('            case ACTION_WPS_QUICKSCREEN:',a);wps_menu=gui[a:b]
 a=gui.index('            case ACTION_WPS_STOP:');b=gui.index('            /* Bound only',a);wps_cover=gui[a:b]
 a=gui.index('        enum agents_nav_screen nav =');b=gui.index('        bool audio_paused',a);wps_pending=gui[a:b]
-a=current_covers.index('        enum agents_nav_screen nav =',current_covers.index('static int album_covers_loop(void)'));b=current_covers.index('        case PF_WPS:',a)
+a=current_covers.index('        enum agents_nav_screen nav =',current_covers.index('static int album_covers_loop('));b=current_covers.index('        case PF_WPS:',a)
 cover_cases=current_covers[a:b]+'        default: break;\n        }\n return STAY;\n'
 helpers=fn(current_wps,'show_album_covers')+fn(current_wps,'select_cover_source')
 bodies=r'''

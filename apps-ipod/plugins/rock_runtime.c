@@ -9,6 +9,7 @@
 #include "plugins/rock_widgets.h"
 #include "plugins/rock_native_handoff.h"
 #include "plugins/rock_catalog.h"
+#include "plugins/lua/paths.h"
 #include "plugins/sdk/plugin.h"
 #include "rock-compat/rock_fingerprint.h"
 #include "core_alloc.h"
@@ -290,6 +291,68 @@ static struct mp3entry *rock_audio_current_track(void)
     return !usb_taken && audio_current_track_snapshot(&snapshot) ? &snapshot : NULL;
 }
 
+static bool lua_track_watched;
+static volatile unsigned int lua_track_sequence;
+
+static void lua_track_changed(unsigned short event, void *data)
+{
+    (void)event;
+    (void)data;
+    lua_track_sequence++;
+}
+
+static unsigned int rock_lua_track_event(bool enabled)
+{
+    enabled = enabled && !usb_taken;
+    if (enabled && !lua_track_watched)
+        lua_track_watched = add_event(PLAYBACK_EVENT_TRACK_CHANGE,
+                                      lua_track_changed);
+    else if (!enabled && lua_track_watched)
+    {
+        remove_event(PLAYBACK_EVENT_TRACK_CHANGE, lua_track_changed);
+        lua_track_watched = false;
+    }
+    return lua_track_sequence;
+}
+
+static int rock_lua_volume(void)
+{
+    return global_status.volume;
+}
+
+/* Do not overwrite a physical volume change during a fade. */
+static bool rock_lua_fade_volume(int expected, int value)
+{
+    if (usb_taken || global_status.volume != expected ||
+        value > expected || value < sound_min(SOUND_VOLUME))
+        return false;
+    global_status.volume = value;
+    setvol();
+    return true;
+}
+
+static bool rock_lua_sleep_timer(int minutes)
+{
+    if (usb_taken || minutes < 1 || minutes > 240)
+        return false;
+    set_sleeptimer_duration(minutes);
+    return true;
+}
+
+static bool rock_lua_play_playlist(void)
+{
+    if (usb_taken ||
+        !rock_file_exists(ROCK_LUA_PLAYLIST_DIR ROCK_LUA_PLAYLIST))
+        return false;
+
+    audio_stop();
+    if (playlist_create(ROCK_LUA_PLAYLIST_DIR, ROCK_LUA_PLAYLIST) < 0 ||
+        !playlist_amount())
+        return false;
+    playlist_start(0, 0, 0);
+    return true;
+}
+
 #ifdef HAVE_ADJUSTABLE_CPU_FREQ
 static bool plugin_boosted;
 
@@ -378,6 +441,7 @@ void rock_usb_takeover(void)
     podlink_plugin_test_usb_taken();
 #endif
     rock_mpeg_end();
+    rock_lua_track_event(false);
     rock_h264_end();
     rock_media_shutdown();
     rock_execution_end();
@@ -891,6 +955,7 @@ static int invoke_module(void *opaque)
         podlink_plugin_test_stopped();
 #endif
     rock_mpeg_end();
+    rock_lua_track_event(false);
     rock_h264_end();
     rock_media_shutdown();
     rock_execution_end();

@@ -37,8 +37,7 @@ def rockaux(text):
 
 
 def graphics(text):
-    # Keep the upstream image arithmetic and only the drawing wrappers used
-    # by the shipped games and their Lua helpers.
+    # Keep the upstream image arithmetic and scope the drawing wrappers.
     text = replace(text, '#include "rocklib_img.h"',
                    '#include "rocklib_img.h"\n#include "draw/bmp.h"')
     text = replace(text, '    rb->viewport_set_buffer(vp, &fb, SCREEN_MAIN); /* not multiscreen aware yet */',
@@ -91,35 +90,85 @@ def graphics(text):
     if (lua_isnoneornil(L, 1))
     {
         rb->lcd_set_viewport(NULL);
+        lua_pushnil(L);
+        lua_setfield(L, LUA_REGISTRYINDEX, "astrapod.image.viewport");
         return 0;
     }
-    luaL_checktype(L, 1, LUA_TTABLE);
-    int x = check_tablevalue(L, "x", 1);
-    int y = check_tablevalue(L, "y", 1);
-    int width = check_tablevalue(L, "width", 1);
-    int height = check_tablevalue(L, "height", 1);
-    if (x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT ||
-        width <= 0 || height <= 0 ||
-        width > LCD_WIDTH - x || height > LCD_HEIGHT - y)
-        return luaL_error(L, "Invalid viewport bounds");
 
-    rb->viewport_set_defaults(&viewport, SCREEN_MAIN);
-    viewport.x = x;
-    viewport.y = y;
-    viewport.width = width;
-    viewport.height = height;
-    int font = check_tablevalue_def(L, "font", 1, FONT_UI);
+    bool image = lua_type(L, 1) == LUA_TUSERDATA;
+    int opts = image ? 2 : 1;
+    luaL_checktype(L, opts, LUA_TTABLE);
+    int font = check_tablevalue_def(L, "font", opts, FONT_UI);
     if (font != FONT_UI && font != FONT_SYSFIXED)
         return luaL_error(L, "Unsupported viewport font");
-    viewport.font = font == FONT_UI ? rb->screens[SCREEN_MAIN]->getuifont() : font;
-    viewport.fg_pattern = check_tablevalue_def(L, "fg_pattern", 1,
-                                              rb->lcd_get_foreground());
-    viewport.bg_pattern = check_tablevalue_def(L, "bg_pattern", 1,
-                                              rb->lcd_get_background());
-    viewport.drawmode = DRMODE_SOLID;
-    rb->lcd_set_viewport(&viewport);
+
+    struct viewport *vp;
+    if (image)
+    {
+        struct rocklua_image *target = rli_checktype(L, 1);
+        img_set_as_vp(target, &img_vp);
+        vp = &img_vp;
+    }
+    else
+    {
+        int x = check_tablevalue(L, "x", opts);
+        int y = check_tablevalue(L, "y", opts);
+        int width = check_tablevalue(L, "width", opts);
+        int height = check_tablevalue(L, "height", opts);
+        if (x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT ||
+            width <= 0 || height <= 0 ||
+            width > LCD_WIDTH - x || height > LCD_HEIGHT - y)
+            return luaL_error(L, "Invalid viewport bounds");
+        vp = &viewport;
+        rb->viewport_set_defaults(vp, SCREEN_MAIN);
+        vp->x = x;
+        vp->y = y;
+        vp->width = width;
+        vp->height = height;
+    }
+    vp->font = font == FONT_UI ? rb->screens[SCREEN_MAIN]->getuifont() : font;
+    vp->fg_pattern = check_tablevalue_def(L, "fg_pattern", opts, LCD_WHITE);
+    vp->bg_pattern = check_tablevalue_def(L, "bg_pattern", opts, LCD_BLACK);
+    vp->drawmode = check_tablevalue_def(L, "drawmode", opts, DRMODE_SOLID) & (DRMODE_SOLID | DRMODE_INVERSEVID);
+    rb->lcd_set_viewport(vp);
+    if (image)
+        lua_pushvalue(L, 1);
+    else
+        lua_pushnil(L);
+    lua_setfield(L, LUA_REGISTRYINDEX, "astrapod.image.viewport");
     return 0;
 }"""
+    required.update({"read_bmp_file", "track_art"})
+    for name, decode in {
+        "read_bmp_file": "rb->read_plugin_bmp(path, &bm, size, false)",
+        "track_art": "rb->load_plugin_art(&bm, size)",
+    }.items():
+        argument = "const char *path = luaL_checkstring(L, 1);" if name == "read_bmp_file" else ""
+        width, height = ("LCD_WIDTH", "LCD_HEIGHT") if name == "read_bmp_file" else ("64", "64")
+        functions[name] = f"""{{
+    {argument}
+    size_t size;
+    struct rocklua_image *img = alloc_rlimage(L, true, {width}, {height}, &size);
+    img->data = &img->dummy[0][0];
+    struct bitmap bm = {{
+        .width = {width}, .height = {height},
+        .data = (unsigned char *)img->data
+    }};
+    if ({decode} <= 0 ||
+        bm.width <= 0 || bm.width > LCD_WIDTH ||
+        bm.height <= 0 || bm.height > LCD_HEIGHT)
+    {{
+        lua_pushnil(L);
+        return 1;
+    }}
+    int w, h;
+    pixel_to_native(bm.width, bm.height, &w, &h);
+    img->width = bm.width;
+    img->height = bm.height;
+    img->stride = STRIDE_MAIN(w, h);
+    img->elems = (size_t)w * h;
+    return 1;
+}}"""
     functions["lcd_framebuffer"] = """{
     rb->lcd_set_viewport(NULL);
     struct viewport vp;
@@ -160,7 +209,7 @@ def iolib(text):
                    '''  int ok = (lua_file_close(*p, true) == 0);
   if (!ok) {
     *p = -1;
-    return luaL_error(L, "Could not close Lua game file");
+    return luaL_error(L, "Could not close Lua file");
   }''')
     text = replace(text, '  if (*f >= 0)\n    aux_close(L);',
                    '  if (*f >= 0)\n    lua_file_close(*f, false);\n  *f = -1;')
@@ -177,6 +226,10 @@ def oslib(text):
     end = text.index("/*", start)
     text = text[:start] + text[end:]
     text = replace(text, '  {"rename",    os_rename},\n', '')
+    text = replace(text, "    t = mktime(get_time());", """  {
+    struct tm time = *get_time();
+    t = mktime(&time);
+  }""")
     return text
 
 

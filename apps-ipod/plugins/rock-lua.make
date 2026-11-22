@@ -21,7 +21,9 @@ $(ROCK_LUA_OBJECTS): $(ROCK_LUA_OBJ)/%.o: $(ROCK_LUA_STAGE)/%.c $(ROCK_LUA_HEADE
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC lua/$(@F))$(CC) $(ROCK_FLAGS) $(ROCK_LUA_FLAGS) -MMD -MP -c $< -o $@
 
-$(ROCK_LUA_OBJ)/file.o: $(ROCK_LUA_ADAPTER)/file.c $(ROCK_LUA_HEADERS) $(ROCK_FINGERPRINT)
+ROCK_LUA_ADAPTER_OBJECTS := $(addprefix $(ROCK_LUA_OBJ)/,file.o bindings.o events.o)
+
+$(ROCK_LUA_ADAPTER_OBJECTS): $(ROCK_LUA_OBJ)/%.o: $(ROCK_LUA_ADAPTER)/%.c $(ROCK_LUA_HEADERS) $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC lua/$(@F))$(CC) $(ROCK_FLAGS) $(ROCK_LUA_FLAGS) -MMD -MP -c $< -o $@
 
@@ -29,7 +31,7 @@ $(ROCK_OBJECTS)/lua.o: $(ROCK_LUA_ADAPTER)/viewer.c $(ROCK_LUA_HEADERS) $(ROCK_F
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) $(ROCK_LUA_FLAGS) -MMD -MP -c $< -o $@
 
-$(ROCK_OUT)/modules/viewers/lua.rock: $(ROCK_LUA_OBJECTS) $(ROCK_LUA_OBJ)/file.o \
+$(ROCK_OUT)/modules/viewers/lua.rock: $(ROCK_LUA_OBJECTS) $(ROCK_LUA_ADAPTER_OBJECTS) \
     $(ROCK_OBJECTS)/lib/pluginlib_actions.o $(ROCK_OBJECTS)/lib/helper.o $(TLSFLIB)
 $(ROCK_OUT)/modules/viewers/lua.rock: private ROCK_LINK += -Wl,--exclude-libs,ALL
 -include $(wildcard $(ROCK_LUA_OBJ)/*.d)

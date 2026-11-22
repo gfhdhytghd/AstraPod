@@ -10,15 +10,29 @@
 #include "rocklib.h"
 #include "rocklib_img.h"
 #include "rock-lua-file.h"
+#include "bindings.h"
+#include "paths.h"
 
 #undef strcmp
 #undef yield
 #undef splashf
 
-#define GAME_PATH PLUGIN_GAMES_DIR "/"
-#define APP_PATH PLUGIN_APPS_DIR "/"
-#define DEMO_PATH PLUGIN_DEMOS_DIR "/"
-#define ACTION_HOOK "astrapod.action"
+static const struct lua_entry {
+    const char *path;
+    const char *title;
+} entries[] = {
+#define LUA_ENTRY(category, file, title) {PLUGIN_DIR "/" #category "/" #file ".lua", title},
+#include "entries.def"
+#undef LUA_ENTRY
+};
+
+static const struct lua_entry *next_entry;
+static void *pool;
+static size_t pool_size;
+static size_t lua_used;
+static size_t lua_high;
+static lua_Alloc original_alloc;
+static void *original_alloc_context;
 
 static lua_State *active;
 static bool pixel_painter;
@@ -32,21 +46,36 @@ void *get_new_area(size_t *size)
 
 static void cleanup(void)
 {
-    if (active)
-        lua_close(active);
+    if (!active)
+        return;
+
+    lua_reset_events();
     rb->lcd_scroll_stop();
     rb->lcd_set_viewport(NULL);
+    lua_close(active);
     active = NULL;
     lua_file_cleanup();
 }
 
-static void check_exit(void)
+void lua_check_exit(void)
 {
     if (rb->plugin_usb_taken())
         exit(PLUGIN_USB_CONNECTED);
 }
 
-static int get_lua_action(int timeout)
+static int service_input(int input)
+{
+    if (IS_SYSEVENT(input) || (input & BUTTON_MULTIMEDIA))
+    {
+        /* The action layer returns multimedia keys as raw button codes. */
+        exit_on_usb(input);
+        input = ACTION_NONE;
+    }
+    lua_check_exit();
+    return input;
+}
+
+int lua_poll_action(int timeout)
 {
     static const struct button_mapping menu[] = {
         {PLA_CANCEL, BUTTON_MENU | BUTTON_REL, BUTTON_MENU},
@@ -59,16 +88,13 @@ static int get_lua_action(int timeout)
     const struct button_mapping *contexts[] = {
         pixel_painter ? menu : exit, pla_main_ctx,
     };
-    int action = pluginlib_getaction(timeout, contexts, ARRAYLEN(contexts));
-    if (IS_SYSEVENT(action))
-        exit_on_usb(action);
-    check_exit();
-    return action;
+    return service_input(pluginlib_getaction(timeout, contexts,
+                                             ARRAYLEN(contexts)));
 }
 
 static int lua_action(lua_State *L)
 {
-    lua_pushinteger(L, get_lua_action(luaL_checkint(L, 1)));
+    lua_pushinteger(L, lua_poll_action(luaL_checkint(L, 1)));
     return 1;
 }
 
@@ -78,52 +104,16 @@ static int lua_get_action(lua_State *L)
     if (context != CONTEXT_STD && context != CONTEXT_WPS)
         return luaL_argerror(L, 1, "unsupported input context");
     int result = rb->get_action(context, luaL_checkint(L, 2));
-    if (IS_SYSEVENT(result))
-        exit_on_usb(result);
-    check_exit();
-    lua_pushinteger(L, result);
+    lua_pushinteger(L, service_input(result));
     return 1;
 }
 
 static int lua_button_get(lua_State *L)
 {
     long result = rb->button_get(lua_toboolean(L, 1));
-    if (IS_SYSEVENT(result))
-        exit_on_usb(result);
-    check_exit();
+    service_input(result);
     lua_pushinteger(L, result);
     return 1;
-}
-
-static int lua_event_register(lua_State *L)
-{
-    if (rb->strcmp(luaL_checkstring(L, 1), "action"))
-        return luaL_argerror(L, 1, "only foreground action events are supported");
-    luaL_checktype(L, 2, LUA_TFUNCTION);
-    lua_pushvalue(L, 2);
-    lua_setfield(L, LUA_REGISTRYINDEX, ACTION_HOOK);
-    return 0;
-}
-
-static int lua_yield_to_firmware(lua_State *L)
-{
-    lua_getfield(L, LUA_REGISTRYINDEX, ACTION_HOOK);
-    if (lua_isfunction(L, -1))
-    {
-        int action = get_lua_action(TIMEOUT_NOBLOCK);
-        if (action != ACTION_NONE)
-        {
-            lua_pushinteger(L, action);
-            lua_call(L, 1, 0);
-        }
-        else
-            lua_pop(L, 1);
-    }
-    else
-        lua_pop(L, 1);
-    rb->yield();
-    check_exit();
-    return 0;
 }
 
 static int lua_menu(lua_State *L)
@@ -134,8 +124,8 @@ static int lua_menu(lua_State *L)
     if (count < 1 || count > MENU_COUNT_MASK)
         return luaL_argerror(L, 2, "invalid menu size");
 
-    const char **items = lua_newuserdata(L, count * sizeof(*items));
     int selected = luaL_optint(L, 3, 0);
+    const char **items = lua_newuserdata(L, count * sizeof(*items));
     if (selected < 0 || selected >= count)
         selected = 0;
 
@@ -154,7 +144,7 @@ static int lua_menu(lua_State *L)
         {.callback_and_desc = &desc},
     };
     int action = rb->do_menu(&menu, &selected, NULL, false);
-    check_exit();
+    lua_check_exit();
     lua_pushinteger(L, action);
     return 1;
 }
@@ -165,10 +155,43 @@ static int lua_ticks(lua_State *L)
     return 1;
 }
 
-static int lua_sleep_ticks(lua_State *L)
+static void *account_alloc(void *context, void *ptr, size_t old, size_t size)
 {
-    rb->sleep(luaL_checkint(L, 1));
-    check_exit();
+    size_t previous = ptr ? old : 0;
+    void *result = original_alloc(context, ptr, old, size);
+    if (result || !size)
+    {
+        lua_used = lua_used - previous + size;
+        lua_high = MAX(lua_high, lua_used);
+    }
+    return result;
+}
+
+static int lua_mem_stats(lua_State *L)
+{
+    lua_pushinteger(L, lua_high);
+    lua_pushinteger(L, lua_used);
+    lua_pushinteger(L, pool_size > lua_used ? pool_size - lua_used : 0);
+    return 3;
+}
+
+static int lua_scripts(lua_State *L)
+{
+    lua_createtable(L, ARRAYLEN(entries), 0);
+    for (size_t i = 0; i < ARRAYLEN(entries); ++i)
+    {
+        lua_pushstring(L, entries[i].title);
+        lua_rawseti(L, -2, i + 1);
+    }
+    return 1;
+}
+
+static int lua_launch_script(lua_State *L)
+{
+    int index = luaL_checkint(L, 1);
+    if (index < 1 || index > (int)ARRAYLEN(entries))
+        return luaL_argerror(L, 1, "unknown bundled script");
+    next_entry = &entries[index - 1];
     return 0;
 }
 
@@ -182,9 +205,7 @@ static int lua_clear_buttons(lua_State *L)
 static int lua_wait_button(lua_State *L)
 {
     int button = rb->button_get_w_tmo(luaL_checkint(L, 1));
-    if (IS_SYSEVENT(button))
-        exit_on_usb(button);
-    check_exit();
+    service_input(button);
     lua_pushinteger(L, button);
     return 1;
 }
@@ -192,7 +213,7 @@ static int lua_wait_button(lua_State *L)
 static int lua_splash(lua_State *L)
 {
     rb->splashf(luaL_checkint(L, 1), "%s", luaL_checkstring(L, 2));
-    check_exit();
+    lua_check_exit();
     return 0;
 }
 
@@ -201,7 +222,7 @@ static int lua_view_text(lua_State *L)
     const char *title = luaL_checkstring(L, 1);
     const char *text = luaL_checkstring(L, 2);
     rb->view_text(title, text);
-    check_exit();
+    lua_check_exit();
     return 0;
 }
 
@@ -234,22 +255,11 @@ static int lua_exists(lua_State *L)
     return 1;
 }
 
-static int lua_read_setting(lua_State *L)
-{
-    const char *group = luaL_checkstring(L, 1);
-    const char *name = luaL_checkstring(L, 2);
-    if (!rb->strcmp(group, "global_settings") &&
-        !rb->strcmp(name, "list_wraparound"))
-        lua_pushinteger(L, rb->global_settings->list_wraparound);
-    else
-        lua_pushnil(L);
-    return 1;
-}
-
 static int lua_actions(lua_State *L)
 {
     static const struct lua_int_reg actions[] = {
         RB_CONSTANT(ACTION_NONE), RB_CONSTANT(ACTION_STD_CANCEL),
+        RB_CONSTANT(ACTION_REDRAW),
         RB_CONSTANT(ACTION_WPS_MENU), RB_CONSTANT(ACTION_WPS_PLAY),
         RB_CONSTANT(ACTION_WPS_SKIPNEXT), RB_CONSTANT(ACTION_WPS_SKIPPREV),
         RB_CONSTANT(PLA_UP), RB_CONSTANT(PLA_UP_REPEAT),
@@ -305,28 +315,6 @@ static int lua_buttons(lua_State *L)
     return 1;
 }
 
-static int lua_settings(lua_State *L)
-{
-    lua_getglobal(L, "rb");
-    lua_newtable(L);
-    lua_newtable(L);
-    lua_pushliteral(L, "list_wraparound");
-    lua_setfield(L, -2, "list_wraparound");
-    lua_setfield(L, -2, "global_settings");
-    lua_setfield(L, -2, "system");
-    return 0;
-}
-
-static int lua_rbsettings(lua_State *L)
-{
-    lua_getglobal(L, "rb");
-    lua_newtable(L);
-    lua_pushcfunction(L, lua_read_setting);
-    lua_setfield(L, -2, "read");
-    lua_setfield(L, -2, "settings");
-    return 0;
-}
-
 static int lua_rock(lua_State *L)
 {
     static const luaL_Reg methods[] = {
@@ -345,12 +333,17 @@ static int lua_rock(lua_State *L)
         {"backlight_use_settings", lua_light_reset},
         {"file_exists", lua_exists},
         {"dir_exists", lua_directory_exists},
+        {"mem_stats", lua_mem_stats},
+        {"scripts", lua_scripts},
+        {"launch_script", lua_launch_script},
         {NULL, NULL},
     };
     static const struct lua_int_reg values[] = {
         RB_CONSTANT(LCD_WIDTH), RB_CONSTANT(LCD_HEIGHT), RB_CONSTANT(LCD_DEPTH),
         RB_CONSTANT(HZ), RB_CONSTANT(FONT_UI), RB_CONSTANT(FONT_SYSFIXED),
         RB_CONSTANT(PLUGIN_GOTO_WPS),
+        RB_CONSTANT(AUDIO_STATUS_PLAY), RB_CONSTANT(AUDIO_STATUS_PAUSE),
+        RB_CONSTANT(PLAYBACK_EVENT_TRACK_CHANGE),
     };
     luaL_register(L, "rb", methods);
     for (size_t i = 0; i < ARRAYLEN(values); i++)
@@ -364,10 +357,10 @@ static int lua_rock(lua_State *L)
     lua_setfield(L, -2, "PLUGIN_APPS_DATA_DIR");
     lua_pushliteral(L, PLUGIN_DEMOS_DATA_DIR);
     lua_setfield(L, -2, "PLUGIN_DEMOS_DATA_DIR");
-    lua_newtable(L);
-    lua_pushcfunction(L, lua_event_register);
-    lua_setfield(L, -2, "register");
-    lua_setglobal(L, "rockev");
+    lua_pushliteral(L, ROCK_LUA_PLAYLIST_DIR ROCK_LUA_PLAYLIST);
+    lua_setfield(L, -2, "RANDOM_PLAYLIST");
+    lua_register_bindings(L);
+    lua_register_events(L);
     return 1;
 }
 
@@ -416,42 +409,54 @@ static int run_game(lua_State *L)
 enum plugin_status plugin_start(const void *parameter)
 {
     const char *path = parameter;
-    if (!path || (rb->strcmp(path, GAME_PATH "picross.lua") &&
-                  rb->strcmp(path, GAME_PATH "pixel-painter.lua") &&
-                  rb->strcmp(path, GAME_PATH "boomshine.lua") &&
-                  rb->strcmp(path, APP_PATH "stopwatch-lua.lua") &&
-                  rb->strcmp(path, DEMO_PATH "helloworld.lua") &&
-                  rb->strcmp(path, DEMO_PATH "test_viewports.lua") &&
-                  rb->strcmp(path, DEMO_PATH "print_buttons.lua") &&
-                  rb->strcmp(path, DEMO_PATH "splashscroller.lua") &&
-                  rb->strcmp(path, APP_PATH "return2WPS.lua")))
+    const struct lua_entry *entry = NULL;
+    for (size_t i = 0; path && i < ARRAYLEN(entries); ++i)
+        if (!rb->strcmp(path, entries[i].path))
+        {
+            entry = &entries[i];
+            break;
+        }
+    if (!entry)
     {
         rb->splashf(HZ, "%s", "Choose a bundled Lua script.");
         return PLUGIN_ERROR;
     }
 
-    size_t size;
-    void *arena = rb->plugin_get_buffer(&size);
-    if (!arena || size < 256 * 1024)
+    pool = rb->plugin_get_buffer(&pool_size);
+    if (!pool || pool_size < 256 * 1024)
         return PLUGIN_ERROR;
 
-    rb->memset(arena, 0, sizeof(uint32_t));
-    if (init_memory_pool(size, arena) == (size_t)-1)
-        return PLUGIN_ERROR;
-
-    pixel_painter = !rb->strcmp(path, GAME_PATH "pixel-painter.lua");
-    active = luaL_newstate();
-    if (!active)
-        return PLUGIN_ERROR;
     rb_atexit(cleanup);
-    enum plugin_status result = PLUGIN_OK;
-    lua_pushcfunction(active, run_game);
-    lua_pushstring(active, path);
-    if (lua_pcall(active, 1, 0, 0) != 0)
+    do
     {
-        const char *reason = lua_tostring(active, -1);
-        rb->view_text("Lua error", reason ? reason : "Lua stopped.");
-        result = PLUGIN_ERROR;
-    }
-    return rb->plugin_usb_taken() ? PLUGIN_USB_CONNECTED : result;
+        path = entry->path;
+        next_entry = NULL;
+        rb->memset(pool, 0, sizeof(uint32_t));
+        if (init_memory_pool(pool_size, pool) == (size_t)-1)
+            return PLUGIN_ERROR;
+
+        pixel_painter = !rb->strcmp(path, PLUGIN_GAMES_DIR "/pixel-painter.lua");
+        active = luaL_newstate();
+        if (!active)
+            return PLUGIN_ERROR;
+        lua_used = lua_gc(active, LUA_GCCOUNT, 0) * 1024u +
+                   lua_gc(active, LUA_GCCOUNTB, 0);
+        lua_high = lua_used;
+        original_alloc = lua_getallocf(active, &original_alloc_context);
+        lua_setallocf(active, account_alloc, original_alloc_context);
+
+        lua_pushcfunction(active, run_game);
+        lua_pushstring(active, path);
+        if (lua_pcall(active, 1, 0, 0) != 0)
+        {
+            const char *reason = lua_tostring(active, -1);
+            rb->view_text("Lua error", reason ? reason : "Lua stopped.");
+            return PLUGIN_ERROR;
+        }
+        lua_check_exit();
+        cleanup();
+        entry = next_entry;
+    } while (entry);
+
+    return PLUGIN_OK;
 }

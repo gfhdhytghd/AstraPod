@@ -105,4 +105,53 @@ elif source.stem == "print_buttons":
                   or (rb.buttons.BUTTON_RC_MENU and
                       lastkey == rb.buttons.BUTTON_RC_MENU + rb.buttons.BUTTON_REL)''')
 
+elif source.stem == "stars":
+    replace('rb.PLUGIN_DATA_DIR', 'rb.PLUGIN_DEMOS_DATA_DIR')
+    replace('    file:write(start_x', '    if not file then return end\n    file:write(start_x')
+    cut("if not rb.SIMULATOR then", "if start_x and start_y then",
+        "while not action_quit() do _lcd:update(); rb.sleep(2) end\n\n")
+elif source.stem == "menubuttons":
+    cut("local oldrb = rb", "-- Menu Button definitions --", 'require("actions")\n\n')
+    replace("rb = oldrb\n", "")
+elif source.stem == "rb_poly":
+    replace("    rb.yield()", "    rb.sleep(2)")
+    replace("rb.splash_scroller(10 * rb.HZ, table.concat(s_t))",
+            'rb.view_text("Polygon Demo", table.concat(s_t))')
+elif source.stem == "time_date":
+    replace("local ctx = 0 --CONTEXT_STD",
+            'require("actions")\nlocal ctx = rb.contexts.CONTEXT_WPS')
+    replace("rb.splash_scroller(10 * rb.HZ, table.concat(s_t))",
+            'rb.view_text("Time and Date", table.concat(s_t))')
+elif source.stem == "memchk":
+    replace("b[1] = rb.new_image(loops, alloc_sz);",
+            "b[1] = rb.new_image(rb.LCD_WIDTH, rb.LCD_HEIGHT)")
+    replace("rb.lcd_putsxy(0, 20, loops)", "rb.lcd_putsxy(0, 20, tostring(loops))")
+    replace("rb.splash_scroller(10 * rb.HZ, table.concat(s_t))",
+            'rb.view_text("Memory Check", table.concat(s_t))')
+elif source.stem == "rlimg":
+    replace('local _print = require("print") -- advanced text printing\n', '')
+    replace('require("printmenus") --menu', '')
+    script = script.replace('_print.f("%d", _timer.stop(timer))', '_timer.stop(timer)')
+    replace("    print_menu(mt, ft)", """    local title = table.remove(mt, 1)
+    local selected = 0
+    while true do
+        selected = rb.do_menu(title, mt, selected)
+        if selected < 0 or ft[selected + 2]() then return end
+    end""")
+    for name in ("pix", "random", "rainbow", "rocklua"):
+        script = script.replace('"/' + name + '.bmp"',
+                                'rb.PLUGIN_DEMOS_DATA_DIR .. "/lua-' + name + '.bmp"')
+    replace('"pix.bmp"', 'rb.PLUGIN_DEMOS_DATA_DIR .. "/lua-pix.bmp"')
+elif source.stem == "image_save":
+    replace("file = io.open('/' .. name, \"w+\")", 'file = io.open(name, "w")')
+    a = script.index('        local cmp = ')
+    b = script.index("\n", script.index("0xFF) end}", a)) + 1
+    script = script[:a] + """        local cmp = {
+            r = function(c) local r = rb.lcd_rgbunpack(c); return r end,
+            g = function(c) local _, g = rb.lcd_rgbunpack(c); return g end,
+            b = function(c) local _, _, b = rb.lcd_rgbunpack(c); return b end,
+        }
+""" + script[b:]
+    replace('        file:close()', '        file:close()\n        return true')
+
 output.write_text(script)

@@ -29,6 +29,7 @@ my $APPSDIR = $ENV{'APPSDIR'} || "$ROOT/apps";
 # not $APPSDIR, which is a source path. COREAPPSDIR rather than APPSDIR
 # because a bootloader build points the latter at bootloader/.
 my $COREAPPSDIR = $ENV{'COREAPPSDIR'} || "$ROOT/apps";
+my $rock_compat = ($ENV{'EXTRA_DEFINES'} // '') =~ /(?:^|\s)-DASTRAPOD_ROCK_COMPAT(?:\s|$)/;
 my ($APPSBUILDDIR) = $COREAPPSDIR =~ m{([^/]+)$};
 $APPSBUILDDIR = "apps" unless $APPSBUILDDIR;
 
@@ -194,7 +195,7 @@ sub make_install {
     glob_install("$src/rocks/viewers/lua/*", "$libdir/rocks/viewers/lua");
 
     #lua include scripts
-    if(-e "$ROOT/apps/plugins/lua/include_lua") {
+    if (!$rock_compat && -d "$ROOT/apps/plugins/lua/include_lua") {
         unless (glob_mkdir("$libdir/rocks/viewers/lua")) {
             return 0;
         }
@@ -204,7 +205,7 @@ sub make_install {
     }
 
     #lua example scripts
-    if(-e "$ROOT/apps/plugins/lua_scripts") {
+    if (!$rock_compat && -d "$ROOT/apps/plugins/lua_scripts") {
         unless (glob_mkdir("$libdir/rocks/demos/lua_scripts")) {
             return 0;
         }
@@ -485,8 +486,7 @@ sub buildzip {
 
     find(find_copyfile(qr/\.(rock|ovl|lua)/, abs_path("$temp_dir/rocks/")), 'apps/plugins');
 
-    if (($ENV{'EXTRA_DEFINES'} // '') =~ /(?:^|\s)-DASTRAPOD_ROCK_COMPAT(?:\s|$)/ &&
-        -f "rock-compat/modules/apps/imageviewer_compat.rock") {
+    if ($rock_compat && -f "rock-compat/modules/apps/imageviewer_compat.rock") {
         glob_mkdir("$temp_dir/image-decoders");
         foreach my $format (qw(bmp jpeg png ppm gif jpegp)) {
             my $overlay = "image_$format.ovl";
@@ -497,13 +497,13 @@ sub buildzip {
     }
 
     #lua include scripts
-    if(-e "$ROOT/apps/plugins/lua/include_lua") {
+    if (!$rock_compat && -d "$ROOT/apps/plugins/lua/include_lua") {
         glob_mkdir("$temp_dir/rocks/viewers/lua");
         glob_copy("$ROOT/apps/plugins/lua/include_lua/*.lua", "$temp_dir/rocks/viewers/lua/");
     }
 
     #lua example scripts
-    if(-e "$ROOT/apps/plugins/lua_scripts") {
+    if (!$rock_compat && -d "$ROOT/apps/plugins/lua_scripts") {
         glob_mkdir("$temp_dir/rocks/demos/lua_scripts");
         glob_copy("$ROOT/apps/plugins/lua_scripts/*.lua", "$temp_dir/rocks/demos/lua_scripts/");
     }

@@ -1,6 +1,7 @@
 /* Files owned by the Lua viewer. GNU GPL version 2 or later. */
 #include "plugin.h"
 #include "rock-lua-file.h"
+#include "paths.h"
 
 #define GAMES PLUGIN_GAMES_DATA_DIR "/"
 #define PUZZLES GAMES ".picross/"
@@ -35,8 +36,25 @@ bool lua_puzzle_path(const char *path)
     return true;
 }
 
+static const char *const outputs[] = {
+    ROCK_LUA_PLAYLIST_DIR ROCK_LUA_PLAYLIST,
+    PLUGIN_APPS_DATA_DIR "/lua-settings.txt",
+    PLUGIN_APPS_DATA_DIR "/lua-metadata.txt",
+    PLUGIN_APPS_DATA_DIR "/luatagnav-draft.config",
+    PLUGIN_APPS_DATA_DIR "/lua-albumart.bmp",
+    PLUGIN_DEMOS_DATA_DIR "/stars.pos",
+    PLUGIN_DEMOS_DATA_DIR "/lua-pix.bmp",
+    PLUGIN_DEMOS_DATA_DIR "/lua-rainbow.bmp",
+    PLUGIN_DEMOS_DATA_DIR "/lua-random.bmp",
+    PLUGIN_DEMOS_DATA_DIR "/lua-rocklua.bmp",
+};
+
 static bool writable(const char *path)
 {
+    for (size_t i = 0; i < ARRAYLEN(outputs); ++i)
+        if (!rb->strcmp(path, outputs[i]))
+            return true;
+
     return !rb->strcmp(path, PLUGIN_APPS_DATA_DIR "/stopwatch-lua.dat") ||
            !rb->strcmp(path, PLUGIN_DEMOS_DATA_DIR "/hello-lua.txt") ||
            !rb->strcmp(path, GAMES "picross.sav") ||

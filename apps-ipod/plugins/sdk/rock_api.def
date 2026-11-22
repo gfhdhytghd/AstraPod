@@ -433,3 +433,10 @@ ROCK_DIRECT(playlist_insert_track)
 ROCK_DIRECT(playlist_sync)
 ROCK_DIRECT(playlist_shuffle)
 ROCK_DIRECT(playlist_start)
+
+/* Lua foreground services. No settings addresses or plugin callbacks. */
+ROCK_SLOT(int (*lua_volume)(void), lua_volume, rock_lua_volume)
+ROCK_SLOT(bool (*lua_fade_volume)(int, int), lua_fade_volume, rock_lua_fade_volume)
+ROCK_SLOT(bool (*lua_sleep_timer)(int), lua_sleep_timer, rock_lua_sleep_timer)
+ROCK_SLOT(bool (*lua_play_playlist)(void), lua_play_playlist, rock_lua_play_playlist)
+ROCK_SLOT(unsigned int (*lua_track_event)(bool), lua_track_event, rock_lua_track_event)

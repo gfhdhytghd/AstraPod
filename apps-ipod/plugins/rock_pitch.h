@@ -8,6 +8,7 @@
 
 #define ROCK_PITCH_RATE 22050
 #define ROCK_PITCH_SAMPLES 4096 /* Interleaved signed 16-bit stereo samples. */
+#define ROCK_PITCH_CAPTURE_FRAMES ROCK_PITCH_SAMPLES /* Before 2:1 decimation. */
 
 enum rock_pitch_result {
     ROCK_PITCH_STOPPED,
@@ -24,7 +25,9 @@ void rock_pitch_session_open(void);
 void rock_pitch_revoke(void);
 bool rock_pitch_start(void);
 void rock_pitch_pause(void);
-enum rock_pitch_result rock_pitch_read(int16_t (*samples)[ROCK_PITCH_SAMPLES]);
+/* READY returns the latest complete block and the running native frame count. */
+enum rock_pitch_result rock_pitch_read(int16_t (*samples)[ROCK_PITCH_SAMPLES],
+                                     uint32_t *captured_frames);
 #else
 static inline void rock_pitch_init(void) {}
 static inline void rock_pitch_session_open(void) {}

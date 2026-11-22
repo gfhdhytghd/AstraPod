@@ -37,12 +37,17 @@ static int16_t samples[BUFFER_SIZE];
 static fixed yin_buffer[YIN_BUFFER_SIZE];
 #endif
 #ifndef SIMULATOR
-static uint32_t input_frames;
+static uint32_t captured_frames;
+static uint32_t analyzed_frames;
 static unsigned int input_peak;
 #endif
 
 """)
 replace("static unsigned int sample_rate;", "static const int sample_rate = ROCK_PITCH_RATE;")
+replace("#define VOLUME_THRESHOLD (50)", """\
+#define VOLUME_THRESHOLD 14
+#define SIGNAL_THRESHOLD_MIN 5
+#define SIGNAL_THRESHOLD_MAX 95""")
 replace('"/.pitch_detector_settings"', '"/.astrapod_pitch_detector"')
 replace("    unsigned record_gain;\n", "")
 replace("        .record_gain = rb->global_settings->rec_mic_gain,\n", "")
@@ -57,7 +62,8 @@ section("    if(fd < 0){ /* file doesn't exist */", "\n/*-----------------------
     rb->close(fd);
     /* Validate the persisted values before they become indexes or bounds.
      * Read booleans as bytes to reject invalid representations. */
-    if (complete && saved.volume_threshold >= 5 && saved.volume_threshold <= 95 &&
+    if (complete && saved.volume_threshold >= SIGNAL_THRESHOLD_MIN &&
+        saved.volume_threshold <= SIGNAL_THRESHOLD_MAX &&
         saved.sample_size >= SAMPLE_SIZE_MIN && saved.sample_size <= BUFFER_SIZE &&
         saved.sample_size % 4 == 0 &&
         saved.lowest_freq >= sample_rate / (BUFFER_SIZE / 4) &&
@@ -113,8 +119,10 @@ replace("    rb->lcd_update();\n}\n\n#ifndef SIMULATOR", """#ifdef SIMULATOR
         rb->lcd_putsxy(2, HZ_Y, "No pitch. Check mic or line input.");
     }
     rb->lcd_set_foreground(front_color);
-    rb->lcd_putsxyf(2, LCD_HEIGHT - font_h, "Frames %lu  Peak %u/32768",
-                   (unsigned long)input_frames, input_peak);
+    rb->lcd_putsxyf(2, LCD_HEIGHT - font_h, "In %lu  Skip %lu  Peak %u",
+                   (unsigned long)captured_frames,
+                   (unsigned long)(captured_frames - analyzed_frames),
+                   input_peak);
 #endif
     rb->lcd_update();
 }
@@ -168,8 +176,44 @@ static fixed pitchyin(const int16_t *input, fixed *yin)
 }
 
 """)
-section("/* Stop the recording when the buffer is full */", "    /* GUI */", """static fixed detect_frequency(void)
+section("static uint32_t ICODE_ATTR buffer_magnitude", "    /* GUI */", """\
+/* 3 kHz Butterworth low-pass at 22.05 kHz, with Q14 coefficients.
+ * Initialize from this block so a skipped DMA block cannot carry filter state. */
+static void filter_input(int16_t *input)
 {
+    int32_t x1 = input[0], x2 = x1;
+    int32_t y1 = x1, y2 = x1;
+    for (unsigned i = 0; i < (unsigned)settings.sample_size; i += 2)
+    {
+        int32_t x = input[i];
+        int32_t y = (1836 * (x + x2) + 3671 * x1 +
+                     14025 * y1 - 4984 * y2 + 8192) >> 14;
+        x2 = x1;
+        x1 = x;
+        y2 = y1;
+        y1 = y;
+        input[i] = y > INT16_MAX ? INT16_MAX : y < INT16_MIN ? INT16_MIN : y;
+    }
+}
+
+static uint32_t buffer_magnitude(const int16_t *input)
+{
+    int32_t sum = 0;
+    uint64_t squares = 0;
+    const unsigned frames = settings.sample_size / 2;
+    for (unsigned i = 0; i < frames; ++i)
+    {
+        int32_t sample = input[2 * i];
+        sum += sample;
+        squares += sample * sample;
+    }
+    /* AC mean square: remove the input's DC component from the level gate. */
+    return (squares - (int64_t)sum * sum / frames) / frames;
+}
+
+static fixed detect_frequency(void)
+{
+    filter_input(samples);
     /* Threshold is in tenths of a percent of signed PCM full scale. */
     int amplitude = settings.volume_threshold * INT16_MAX / 1000;
     if (buffer_magnitude(samples) <= (uint32_t)sqr(amplitude))
@@ -191,7 +235,8 @@ static void display_capture_start(void)
 #ifdef SIMULATOR
     display_frequency(int2fixed(445));
 #else
-    input_frames = 0;
+    captured_frames = 0;
+    analyzed_frames = 0;
     input_peak = 0;
     display_frequency(FP_ZERO);
 #endif
@@ -247,16 +292,16 @@ static enum plugin_status record_and_get_pitch(void)
         }
 
 #ifdef SIMULATOR
-        enum rock_pitch_result capture = rb->pitch_read(NULL);
+        enum rock_pitch_result capture = rb->pitch_read(NULL, NULL);
 #else
-        enum rock_pitch_result capture = rb->pitch_read(&samples);
+        enum rock_pitch_result capture = rb->pitch_read(&samples, &captured_frames);
         if (capture == ROCK_PITCH_READY)
         {
             unsigned int peak = 0;
             for (unsigned int i = 0; i < BUFFER_SIZE; i += 2)
                 peak = MAX(peak, (unsigned int)abs(samples[i]));
             input_peak = peak;
-            input_frames += BUFFER_SIZE / 2;
+            analyzed_frames += ROCK_PITCH_CAPTURE_FRAMES;
             display_frequency(detect_frequency());
         }
 #endif
@@ -294,5 +339,8 @@ replace("    record_and_get_pitch();\n    save_settings();\n\n    return PLUGIN_
     return result;""")
 replace('"Volume Threshold", "%", UNIT_INT,', '"Signal Threshold", "0.1%", UNIT_INT,')
 replace('                        "Volume Threshold",', '                        "Signal Threshold",')
+replace('                               NULL, 5, 5, 95, NULL);',
+        '                               NULL, 1, SIGNAL_THRESHOLD_MIN,\n'
+        '                               SIGNAL_THRESHOLD_MAX, NULL);')
 
 output.write_text(text)

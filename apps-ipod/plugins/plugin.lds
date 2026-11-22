@@ -8,6 +8,7 @@
 #define __ASSEMBLER__
 
 #include "config.h"
+#include "rock_iram_layout.h"
 #ifdef ASTRAPOD_IMAGE_DECODER
 #include "plugins/rock_image_overlay.h"
 #define IMGVDECODER_OFFSET ROCK_IMAGE_DECODER_OFFSET
@@ -182,8 +183,8 @@ OUTPUT_FORMAT(elf32-littlemips)
 /* S5L8702 have 256KB of IRAM */
 /* IRAM1 (2nd 128KB block) is not used because it is slower than DRAM */
 #define DRAMORIG 0x08000000
-#define IRAMORIG (0x00000000 + (48*1024))
-#define IRAMSIZE (80*1024)
+#define IRAMORIG ROCK_IRAM_ORIGIN
+#define IRAMSIZE (ROCK_IRAM_LIMIT - ROCK_IRAM_ORIGIN)
 
 #elif CONFIG_CPU==S5L8720
 /* S5L8720 have 192KB of IRAM */
@@ -326,7 +327,34 @@ SECTIONS
 #endif
     }
 
+#ifdef ROCK_REQUEST_IRAM
+#if !defined(ASTRAPOD_ROCK) || !defined(IPOD_6G)
+#error IRAM lease requires the ipod6g AstraPod plugin linker
+#endif
+    /* Keep the load image wholly before DRAM BSS. The loader copies it
+       after handover to the plugin and before calling the DRAM entry. */
+    .rock_iram ORIGIN(PLUGIN_IRAM) :
+        AT(ALIGN(LOADADDR(.data) + SIZEOF(.data), 4))
+    {
+        *(.rock_iram.text*)
+        *(.rock_iram.data*)
+        . = ALIGN(4);
+        rock_iram_data_end = .;
+    } > PLUGIN_IRAM
+
+    .rock_iram_bss (NOLOAD) :
+    {
+        *(.rock_iram.bss*)
+        . = ALIGN(4);
+        rock_iram_end = .;
+    } > PLUGIN_IRAM
+
+    rock_iram_source = LOADADDR(.rock_iram);
+    plugin_file_end = rock_iram_source + SIZEOF(.rock_iram);
+    .bss plugin_file_end (NOLOAD) :
+#else
     .bss (NOLOAD) :
+#endif
     {
     	plugin_bss_start = .;
     	_plugin_bss_start = .;
@@ -383,10 +411,13 @@ SECTIONS
     {
         KEEP(*(.iram .iram.* .icode .icode.* .irodata .irodata.*))
         KEEP(*(.idata .idata.* .ibss .ibss.*))
+        KEEP(*(.rock_iram .rock_iram.*))
     } > PLUGIN_RAM
 #endif
 
-#if defined(IRAMSIZE) && IRAMSIZE != 0
+#if defined(ROCK_REQUEST_IRAM)
+    loadendaddr = plugin_end_addr;
+#elif defined(IRAMSIZE) && IRAMSIZE != 0
     .iram IRAMORIG : AT(LOADADDR(.bss))
     {
         iramstart = .;
@@ -413,7 +444,7 @@ SECTIONS
     /* This is for ovl_offset.pl and is the highest address that must
        be loaded into the plugin buffer (past the end of last data in
        stored image). */
-#ifdef ASTRAPOD_ROCK
+#if defined(ASTRAPOD_ROCK) && !defined(ROCK_REQUEST_IRAM)
     plugin_file_end = LOADADDR(.data) + SIZEOF(.data);
 #endif
 
@@ -444,4 +475,15 @@ ASSERT(SIZEOF(.ncbss_vma) == SIZEOF(.ncbss),              ".ncbss_vma has wrong 
 #ifdef ASTRAPOD_ROCK
 ASSERT(SIZEOF(.plugin_forbidden_iram) == 0,
        "AstraPod plugins and overlays must stay in DRAM");
+#endif
+
+#ifdef ROCK_REQUEST_IRAM
+ASSERT(SIZEOF(.rock_iram) > 0, "IRAM image needs a file-backed payload");
+ASSERT(rock_iram_end <= ROCK_IRAM_LIMIT, "IRAM lease overflow");
+ASSERT(rock_iram_source >= LOADADDR(.data) + SIZEOF(.data),
+       "IRAM payload overlaps DRAM data");
+ASSERT(plugin_file_end <= plugin_bss_start, "IRAM payload overlaps DRAM BSS");
+ASSERT(plugin_bss_start >= ADDR(.bss) &&
+       plugin_end_addr >= ADDR(.bss) + SIZEOF(.bss),
+       "IRAM plugin BSS bounds are invalid");
 #endif

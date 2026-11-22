@@ -1,5 +1,7 @@
 /* AstraPod foreground plugin runtime. GNU GPL version 2 or later. */
 #include "plugins/rock_compat.h"
+#include "plugins/rock_iram.h"
+#include "plugins/rock_iram_layout.h"
 #include "plugins/rock_large_stack.h"
 #include "plugins/rock_pitch.h"
 #include "podlink-plugin-test.h"
@@ -457,9 +459,17 @@ void rock_usb_takeover(void)
     rock_close_files();
 }
 
+static long rock_iram_button_event(long event)
+{
+    if (event == SYS_USB_CONNECTED)
+        rock_iram_defer_usb(button_get_data());
+    return event;
+}
+
 static long rock_button_get(bool block)
 {
-    return usb_taken ? SYS_USB_CONNECTED : button_get(block);
+    return usb_taken ? SYS_USB_CONNECTED :
+                       rock_iram_button_event(button_get(block));
 }
 
 /* Raw foreground games own the wheel. Keep queued remote volume separate. */
@@ -476,19 +486,21 @@ static long rock_button_get_with_remote_volume(void)
 
 static long rock_button_get_w_tmo(int timeout)
 {
-    return usb_taken ? SYS_USB_CONNECTED : button_get_w_tmo(timeout);
+    return usb_taken ? SYS_USB_CONNECTED :
+                       rock_iram_button_event(button_get_w_tmo(timeout));
 }
 
 static int rock_get_action(int context, int timeout)
 {
-    return usb_taken ? SYS_USB_CONNECTED : get_action(context, timeout);
+    return usb_taken ? SYS_USB_CONNECTED :
+                       rock_iram_button_event(get_action(context, timeout));
 }
 
 static int rock_get_custom_action(int context, int timeout,
                                   const struct button_mapping *(*map)(int))
 {
     return usb_taken ? SYS_USB_CONNECTED :
-                       get_custom_action(context, timeout, map);
+                       rock_iram_button_event(get_custom_action(context, timeout, map));
 }
 
 #ifdef HAVE_SW_POWEROFF
@@ -791,13 +803,16 @@ static const struct plugin_api api = {
 static bool compatible(const struct plugin_header *header, uint32_t magic)
 {
     uint32_t flags = magic == ROCK_TSR_MAGIC ? 0 : ROCK_IMAGE_LARGE_STACK;
-    return header->lc_hdr.magic == magic &&
+    bool flags_valid = (header->flags & ~flags) == 0;
+#ifdef HAVE_ROCK_IRAM_LEASE
+    flags_valid |= magic == PLUGIN_MAGIC && header->flags == ROCK_IMAGE_IRAM;
+#endif
+    return flags_valid && header->lc_hdr.magic == magic &&
            header->lc_hdr.target_id == TARGET_ID &&
            header->lc_hdr.api_version == PLUGIN_API_VERSION &&
            header->platform == CONFIG_PLATFORM &&
            header->header_size == sizeof(*header) &&
            header->api_size == sizeof(api) &&
-           (header->flags & ~flags) == 0 &&
            !memcmp(header->fingerprint, fingerprint, sizeof(fingerprint));
 }
 
@@ -813,13 +828,27 @@ static bool native_image_valid(const void *opaque, const unsigned char *arena,
     uintptr_t entry = (uintptr_t)header->entry_point;
     uintptr_t slot = (uintptr_t)header->api;
     uintptr_t payload = base + sizeof(*header);
+    uintptr_t source = (uintptr_t)header->rock_iram_source;
+    uintptr_t data_end = (uintptr_t)header->rock_iram_data_end;
+    uintptr_t iram_end = (uintptr_t)header->rock_iram_end;
+    uintptr_t dram_end = file_end;
+
+    if (header->flags == ROCK_IMAGE_IRAM)
+    {
+        if (!rock_iram_extent_valid(payload, file_end, source, data_end, iram_end))
+            return false;
+        dram_end = source;
+    }
+    else if (source || data_end || iram_end)
+        return false;
 
     return compatible(header, magic) && header->lc_hdr.load_addr == arena &&
            (uintptr_t)header->file_end == file_end &&
-           file_end <= bss && bss <= end && end - base <= capacity &&
+           file_end <= bss && bss <= end &&
+           end - base <= (capacity & ~(size_t)(ROCK_BUFFER_ALIGNMENT - 1)) &&
            !(bss % 4) && !(end % 4) &&
-           entry >= payload && entry <= file_end - 4 && !(entry % 4) &&
-           slot >= payload && slot <= file_end - sizeof(rb) &&
+           entry >= payload && entry <= dram_end - 4 && !(entry % 4) &&
+           slot >= payload && slot <= dram_end - sizeof(rb) &&
            !(slot % _Alignof(const struct plugin_api *));
 }
 
@@ -901,7 +930,9 @@ static bool rock_image_decoder_open(const char *name,
     valid = rock_host_header_valid(module) &&
             compatible(module, ROCK_IMAGE_DECODER_MAGIC) &&
             !module->lc_hdr.load_addr && !module->lc_hdr.end_addr &&
-            !module->file_end && !module->bss_start;
+            !module->file_end && !module->bss_start &&
+            !module->rock_iram_source && !module->rock_iram_data_end &&
+            !module->rock_iram_end;
 #endif
     if (valid && !module->flags)
     {
@@ -1036,16 +1067,36 @@ static int run_rock(const char *path, const char *file,
 
     struct plugin_header *module = lc_get_header(handle);
     int result = PLUGIN_ERROR;
+#ifdef HAVE_ROCK_IRAM_LEASE
+    bool iram_held = false;
+#endif
 #if CONFIG_BINFMT == BINFMT_DLOPEN
     uint32_t magic = resident ? ROCK_TSR_MAGIC :
                      overlay ? ROCK_OVERLAY_MAGIC : PLUGIN_MAGIC;
     if (!rock_host_header_valid(module) || !compatible(module, magic) ||
         module->lc_hdr.load_addr || module->lc_hdr.end_addr ||
-        module->file_end || module->bss_start)
+        module->file_end || module->bss_start ||
+        module->rock_iram_source || module->rock_iram_data_end ||
+        module->rock_iram_end)
         goto unload;
+#endif
+#ifdef HAVE_ROCK_IRAM_LEASE
+    if (module->flags == ROCK_IMAGE_IRAM)
+    {
+        if (!rock_iram_acquire())
+            goto unload;
+        iram_held = true;
+#if CONFIG_BINFMT == BINFMT_ROCK
+        uintptr_t data_end = (uintptr_t)module->rock_iram_data_end;
+        memcpy((void *)ROCK_IRAM_ORIGIN, module->rock_iram_source,
+               data_end - ROCK_IRAM_ORIGIN);
+        memset((void *)data_end, 0, (uintptr_t)module->rock_iram_end - data_end);
+        lc_commit_image();
+#endif
+    }
+#endif
     tail = arena;
-#else
-    tail = arena;
+#if CONFIG_BINFMT == BINFMT_ROCK
     if (!resident)
         tail += ALIGN_UP((uintptr_t)module->lc_hdr.end_addr - (uintptr_t)arena,
                          ROCK_BUFFER_ALIGNMENT);
@@ -1083,10 +1134,14 @@ static int run_rock(const char *path, const char *file,
     if (resident)
         return rock_tsr_finish(result == PLUGIN_OK) ? result : PLUGIN_ERROR;
 
-#if CONFIG_BINFMT == BINFMT_DLOPEN
+#if CONFIG_BINFMT == BINFMT_DLOPEN || defined(HAVE_ROCK_IRAM_LEASE)
 unload:
 #endif
     lc_close(handle);
+#ifdef HAVE_ROCK_IRAM_LEASE
+    if (iram_held && rock_iram_release())
+        result = PLUGIN_USB_CONNECTED;
+#endif
     return result;
 }
 
@@ -1139,6 +1194,9 @@ static int rock_open_foreground(const char *path, const char *file, bool shell)
         }
         rock_overlay_end();
         app_release_buffer(arena_owner);
+#ifdef HAVE_ROCK_IRAM_LEASE
+        rock_iram_finish_usb();
+#endif
         if (next)
         {
             struct rock_handoff handoff = *next;

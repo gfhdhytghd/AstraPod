@@ -31,7 +31,7 @@
 #include "plugins/rock_podlink.h"
 
 #ifdef PLUGIN
-/* The phase 1 arena is in DRAM. Codec IRAM remains available to playback. */
+/* Upstream attributes retain their DRAM behavior in every module. */
 #undef USE_IRAM
 #undef ICODE_ATTR
 #undef IDATA_ATTR
@@ -174,6 +174,7 @@ struct plugin_api {
 };
 
 #define ROCK_IMAGE_LARGE_STACK (1u << 0)
+#define ROCK_IMAGE_IRAM        (1u << 1)
 
 struct plugin_header {
     struct lc_header lc_hdr;
@@ -186,6 +187,9 @@ struct plugin_header {
     const struct plugin_api **api;
     const unsigned char *file_end;
     const unsigned char *bss_start;
+    const unsigned char *rock_iram_source;
+    const unsigned char *rock_iram_data_end;
+    const unsigned char *rock_iram_end;
 };
 
 extern const struct plugin_api *rb;
@@ -227,10 +231,33 @@ extern unsigned char plugin_file_end[], plugin_bss_start[];
 #define ROCK_API_STORAGE
 #endif
 
-#ifdef ROCK_REQUEST_LARGE_STACK
+#if defined(ROCK_REQUEST_IRAM)
+#if defined(ROCK_OVERLAY_IMAGE) || defined(ROCK_TSR_IMAGE) || \
+    defined(ROCK_IMAGE_DECODER) || defined(ROCK_REQUEST_LARGE_STACK) || !defined(IPOD_6G)
+#error IRAM requires a foreground ipod6g module
+#endif
+#define ROCK_BUILD_IMAGE_FLAGS ROCK_IMAGE_IRAM
+#if (CONFIG_PLATFORM & PLATFORM_NATIVE)
+#define ROCK_IRAM_CODE __attribute__((section(".rock_iram.text"), noinline))
+#define ROCK_IRAM_DATA __attribute__((section(".rock_iram.data")))
+#define ROCK_IRAM_BSS  __attribute__((section(".rock_iram.bss")))
+extern unsigned char rock_iram_source[], rock_iram_data_end[], rock_iram_end[];
+#define ROCK_IRAM_BOUNDS \
+        .rock_iram_source = rock_iram_source, \
+        .rock_iram_data_end = rock_iram_data_end, \
+        .rock_iram_end = rock_iram_end,
+#else
+#define ROCK_IRAM_CODE __attribute__((noinline))
+#define ROCK_IRAM_DATA
+#define ROCK_IRAM_BSS
+#endif
+#elif defined(ROCK_REQUEST_LARGE_STACK)
 #define ROCK_BUILD_IMAGE_FLAGS ROCK_IMAGE_LARGE_STACK
 #else
 #define ROCK_BUILD_IMAGE_FLAGS 0
+#endif
+#ifndef ROCK_IRAM_BOUNDS
+#define ROCK_IRAM_BOUNDS
 #endif
 
 #define PLUGIN_HEADER \
@@ -244,7 +271,8 @@ extern unsigned char plugin_file_end[], plugin_bss_start[];
         .fingerprint = ROCK_FINGERPRINT, \
         .entry_point = plugin__start, \
         .api = &rb, \
-        .file_end = ROCK_FILE_END, .bss_start = ROCK_BSS_START \
+        .file_end = ROCK_FILE_END, .bss_start = ROCK_BSS_START, \
+        ROCK_IRAM_BOUNDS \
     };
 #endif
 #endif

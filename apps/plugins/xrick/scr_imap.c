@@ -205,7 +205,7 @@ drawlr(void)
 static void
 drawsprite(void)
 {
-  draw_sprite(spnum, 136 + ((spx * 2) & 0x1C), 24 + (spy * 2) + 16);
+  draw_sprite(spnum, 136 + ((spx << 1) & 0x1C), 24 + (spy << 1) + 16);
 }
 
 

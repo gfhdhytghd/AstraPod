@@ -29,23 +29,14 @@
 /* Plug-in entry point */
 enum plugin_status plugin_start(const void* parameter)
 {
-#ifdef ASTRAPOD_XRICK
-    (void)parameter;
-    char *filename = NULL;
-#else
-    char *filename = (char *)parameter;
-#endif
+    char *filename = (char*)parameter;
     bool success = sys_init(1, &filename);
     if (success)
     {
-        success = game_run();
+        game_run();
     }
     sys_shutdown();
-#ifdef ASTRAPOD_XRICK
-    if (rb->plugin_usb_taken())
-        return PLUGIN_USB_CONNECTED;
-#endif
-    return success ? PLUGIN_OK : PLUGIN_ERROR;
+    return (success? PLUGIN_OK : PLUGIN_ERROR);
 }
 
 /* eof */

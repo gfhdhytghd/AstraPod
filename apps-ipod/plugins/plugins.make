@@ -95,8 +95,6 @@ include $(APPSDIR)/plugins/native-viewers.make
 include $(APPSDIR)/plugins/shortcuts-compat.make
 include $(APPSDIR)/plugins/lastfm.make
 include $(APPSDIR)/plugins/retro-compat.make
-include $(APPSDIR)/plugins/xrick-compat.make
-include $(APPSDIR)/plugins/xworld-compat.make
 include $(APPSDIR)/plugins/open-plugins.make
 ifneq ($(APP_TYPE),sdl-sim)
 # The compiler may emit libcalls even with -fno-builtin.

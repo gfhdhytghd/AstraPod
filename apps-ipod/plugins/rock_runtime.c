@@ -27,9 +27,6 @@
 #include "system/app_buffer.h"
 #include "widgets/folder_select.h"
 #include "widgets/splash.h"
-#if defined(IPOD_ACCESSORY_PROTOCOL) && defined(HAVE_USB_PODLINK)
-#include "iap/agents_volume.h"
-#endif
 
 #ifdef ROCK_COMPAT_GENERATED
 #include "rock_compat_sync.h"
@@ -470,18 +467,6 @@ static long rock_button_get(bool block)
 {
     return usb_taken ? SYS_USB_CONNECTED :
                        rock_iram_button_event(button_get(block));
-}
-
-/* Raw foreground games own the wheel. Keep queued remote volume separate. */
-static long rock_button_get_with_remote_volume(void)
-{
-    long button = rock_button_get(false);
-#if defined(IPOD_ACCESSORY_PROTOCOL) && defined(HAVE_USB_PODLINK)
-    if (button == BUTTON_NONE)
-        button = iap_agents_volume_take();
-    button = iap_volume_filter(button);
-#endif
-    return button;
 }
 
 static long rock_button_get_w_tmo(int timeout)

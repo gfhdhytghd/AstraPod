@@ -319,10 +319,6 @@ draw_sprite(U8 number, U16 x, U16 y)
     U16 g;
     U32 d;
 
-    if (number >= sprites_nbr_sprites ||
-        x > SYSVID_WIDTH - SPRITES_NBR_COLS * 8 ||
-        y > SYSVID_HEIGHT - SPRITES_NBR_ROWS)
-        return;
     draw_setfb(x, y);
     g = 0;
     for (i = 0; i < SPRITES_NBR_ROWS; i++) { /* rows */
@@ -348,36 +344,68 @@ draw_sprite(U8 number, U16 x, U16 y)
 void
 draw_sprite2(U8 number, U16 x, U16 y, bool front)
 {
-  if (number >= sprites_nbr_sprites)
+  U32 d = 0;   /* sprite data */
+  S16 x0, y0;  /* clipped x, y */
+  U16 w, h;    /* width, height */
+  S16 g,       /* sprite data offset*/
+    r, c,      /* row, column */
+    i,         /* frame buffer shifter */
+    im;        /* tile flag shifter */
+  U8 flg;      /* tile flag */
+
+  x0 = x;
+  y0 = y;
+  w = SPRITES_NBR_COLS * 8; /* each tile column is 8 pixels */
+  h = SPRITES_NBR_ROWS;
+
+  if (draw_clipms(&x0, &y0, &w, &h))  /* return if not visible */
     return;
 
-  S16 left = x, top = y;
-  for (int row = 0; row < SPRITES_NBR_ROWS; row++) {
-    int my = top + row;
-    if (my < DRAW_XYMAP_SCRTOP || my >= DRAW_XYMAP_HBTOP)
-      continue;
+  g = 0;
+  draw_setfb(x0 - DRAW_XYMAP_SCRLEFT, y0 - DRAW_XYMAP_SCRTOP + 8);
 
-    U8 *line = sysvid_fb + (my - DRAW_XYMAP_SCRTOP + 8) * SYSVID_WIDTH;
-    for (int group = 0; group < SPRITES_NBR_COLS; group++) {
-      U32 pixels = sprites_data[number][row * SPRITES_NBR_COLS + group];
-      for (int col = 7; col >= 0; col--, pixels >>= 4) {
-        int mx = left + group * 8 + col;
-        if ((unsigned)mx >= 256)
-          continue;
+  for (r = 0; r < SPRITES_NBR_ROWS; r++) {
+    if (r >= h || y + r < y0) continue;
+
+    i = 0x1f;
+    im = x - (x & 0xfff8);
+    flg = map_eflg[map_map[(y + r) >> 3][(x + 0x1f)>> 3]];
+
 #ifdef ENABLE_CHEATS
-        bool expose = game_cheat3;
-#else
-        bool expose = false;
-#endif
-        if (!front && !expose && (map_flags_at(my / 8, mx / 8) & MAP_EFLG_FGND))
-          continue;
-        U8 *pixel = &line[mx - DRAW_XYMAP_SCRLEFT];
-        if (pixels & 0x0f)
-          *pixel = (*pixel & 0xf0) | (pixels & 0x0f);
-        if (expose)
-          *pixel |= 0x10;
-      }
+#define LOOP(N, C0, C1) \
+    d = sprites_data[number][g + N]; \
+    for (c = C0; c >= C1; c--, i--, d >>= 4, im--) { \
+      if (im == 0) { \
+    flg = map_eflg[map_map[(y + r) >> 3][(x + c) >> 3]]; \
+    im = 8; \
+      } \
+      if (c >= w || x + c < x0) continue; \
+      if (!front && !game_cheat3 && (flg & MAP_EFLG_FGND)) continue; \
+      if (d & 0x0F) fb[i] = (fb[i] & 0xF0) | (d & 0x0F); \
+      if (game_cheat3) fb[i] |= 0x10; \
     }
+#else
+#define LOOP(N, C0, C1) \
+    d = sprites_data[number][g + N]; \
+    for (c = C0; c >= C1; c--, i--, d >>= 4, im--) { \
+      if (im == 0) { \
+    flg = map_eflg[map_map[(y + r) >> 3][(x + c) >> 3]]; \
+    im = 8; \
+      } \
+      if (!front && (flg & MAP_EFLG_FGND)) continue; \
+      if (c >= w || x + c < x0) continue; \
+      if (d & 0x0F) fb[i] = (fb[i] & 0xF0) | (d & 0x0F); \
+    }
+#endif
+    LOOP(3, 0x1f, 0x18);
+    LOOP(2, 0x17, 0x10);
+    LOOP(1, 0x0f, 0x08);
+    LOOP(0, 0x07, 0x00);
+
+#undef LOOP
+
+    fb += SYSVID_WIDTH;
+    g += SPRITES_NBR_COLS;
   }
 }
 

@@ -171,7 +171,7 @@ game_stopmusic(void)
 /*
  * Main loop
  */
-bool
+void
 game_run(void)
 {
     U32 currentTime,
@@ -183,14 +183,13 @@ game_run(void)
     if (!resources_load())
     {
         resources_unload();
-        return false;
+        return;
     }
 
     if (!sys_cacheData())
     {
         sys_uncacheData();
-        resources_unload();
-        return false;
+        return;
     }
 
     game_period = sysarg_args_period ? sysarg_args_period : GAME_PERIOD;
@@ -199,20 +198,12 @@ game_run(void)
     /* main loop */
     while (game_state != EXIT)
     {
-#ifdef ASTRAPOD_XRICK
-        sysevt_poll();
-        if (control_test(Control_EXIT))
-            break;
-#endif
         currentTime = sys_gettime();
 
         if (currentTime - lastFrameTime >= game_period)
         {
             /* frame */
             frame();
-#ifdef ASTRAPOD_XRICK
-            control_clear(Control_PAUSE);
-#endif
 
             /* video */
             /*DEBUG*//*game_rects=&draw_SCREENRECT;*//*DEBUG*/
@@ -223,7 +214,6 @@ game_run(void)
             ent_rects = NULL;
             draw_STATUSRECT.next = NULL;  /* FIXME freerects should handle this */
 
-#ifndef ASTRAPOD_XRICK
             /* events */
             if (game_waitevt)
             {
@@ -234,7 +224,6 @@ game_run(void)
                 sysevt_poll();  /* process events (non-blocking) */
             }
 
-#endif
             lastFrameTime = currentTime;
         }
 
@@ -252,17 +241,12 @@ game_run(void)
     }
 
 #ifdef ENABLE_SOUND
-#ifdef ASTRAPOD_XRICK
-    syssnd_shutdown();
-#else
     syssnd_stopAll();
-#endif
 #endif
 
     sys_uncacheData();
 
     resources_unload();
-    return true;
 }
 
 /*
@@ -642,7 +626,6 @@ static void
 play0(void)
 {
     if (control_test(Control_END)) {  /* request to end the game */
-      control_clear(Control_END);
         game_state = GAMEOVER;
         return;
     }

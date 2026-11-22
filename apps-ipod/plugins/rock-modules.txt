@@ -155,8 +155,6 @@ games/superdom
 games/wolf3d
 games/wormlet
 games/xobox
-games/xrick
-games/xworld
 games/zxbox
 viewers/chip8
 viewers/lua

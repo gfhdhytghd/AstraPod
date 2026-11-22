@@ -516,19 +516,6 @@ viewer opens one decoder at a time and calls it while the viewer is
 still loaded. Copy the viewer, overlays and firmware from the same
 archive.
 
-## XRick and XWorld
-
-Place the Rockbox XRick resource pack in `/.rockbox/xrick/` and open
-**Plugins > Games > xrick**. The game plays from the built-in PCM queue
-when it is available. On the iPod, scroll forward to open its menu and
-choose **Quit** to return.
-
-Place XWorld's compatible DOS `memlist.bin` and bank files in
-`/.rockbox/xworld/`, then open **Plugins > Games > xworld**. Missing
-data opens the setup screen. Press **Menu** to return to Games.
-Save files belong to the same XWorld data directory. Both engines
-load game data from the device's file system.
-
 ## Rockboy
 
 Open **Plugins > Games > rockboy** and choose an uncompressed GB or GBC

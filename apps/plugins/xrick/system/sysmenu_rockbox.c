@@ -35,9 +35,7 @@
 #include "lib/grey.h"
 #endif
 
-#ifdef ASTRAPOD_XRICK
-#include "xrick-compat.h"
-#elif defined(HAVE_LCD_COLOR)
+#ifdef HAVE_LCD_COLOR
 static fb_data *lcd_fb=NULL;
 #endif
 
@@ -147,16 +145,6 @@ void sysmenu_exec(void)
         rb->button_clear_queue();
 
         result = rb->do_menu(&sysmenu_mainItems, NULL, NULL, false);
-#ifdef ASTRAPOD_XRICK
-        if (rb->plugin_usb_taken())
-        {
-            syssnd_shutdown();
-            control_set(Control_EXIT);
-            return;
-        }
-        if (result == GO_TO_PREVIOUS)
-            result = Menu_RESUME;
-#endif
         switch(result)
         {
             case Menu_RESUME:
@@ -187,10 +175,7 @@ void sysmenu_exec(void)
         }
     } while (!done);
 
-#ifdef ASTRAPOD_XRICK
-    if (!control_test(Control_EXIT))
-        xrick_redraw();
-#elif defined(HAVE_LCD_COLOR)
+#ifdef HAVE_LCD_COLOR
     if (!(control_test(Control_EXIT)))
     {
         if(!lcd_fb)

@@ -8,6 +8,15 @@
 
 #include "config.h"
 #include "plugins/rock_pitch.h"
+#include "plugins/rock_hid.h"
+#include "plugins/rock_game_io.h"
+#include "plugins/rock_overlay.h"
+#include "plugins/rock_resident.h"
+#include "plugins/rock_phase3_settings.h"
+#include "plugins/rock_specialist.h"
+#include "bidi.h"
+#include <ctype.h>
+#include <stdio.h>
 #include "plugins/rock_podlink.h"
 
 #ifdef PLUGIN
@@ -32,6 +41,9 @@
 #include "backlight.h"
 #include "audio/beep.h"
 #include "rbunicode.h"
+#include "diacritic.h"
+#include "strcasestr.h"
+#include "vuprintf.h"
 #include "file.h"
 #include "dir.h"
 #include "load_code.h"
@@ -49,8 +61,12 @@
 #include "action.h"
 #include "draw/screen_access.h"
 #include "draw/viewport.h"
+#include "draw/scrollbar.h"
+#include "screens/browse/browser.h"
+#include "system/volume.h"
 #include "settings.h"
 #include "settings/settings_list.h"
+#include "database/tagcache.h"
 #include "speech/language.h"
 #include "speech/talk.h"
 #include "system/app_util.h"
@@ -83,6 +99,11 @@
 #endif
 
 #define PLUGIN_MAGIC 0x41535452UL
+#ifdef ROCK_OVERLAY_IMAGE
+#define ROCK_IMAGE_MAGIC ROCK_OVERLAY_MAGIC
+#else
+#define ROCK_IMAGE_MAGIC PLUGIN_MAGIC
+#endif
 #define PLUGIN_API_VERSION 1
 #define ROCK_CLICK_TICK_HZ 500
 #define INTERNAL_PLUGIN_RETVAL_START 0x100
@@ -93,6 +114,8 @@ enum plugin_status {
     PLUGIN_GOTO_WPS,
     PLUGIN_GOTO_PLUGIN,
     PLUGIN_GOTO_ROOT,
+    PLUGIN_GOTO_FILEBROWSER,
+    PLUGIN_CHAIN_OVERLAY,
     PLUGIN_ERROR = -1,
 };
 
@@ -120,6 +143,10 @@ enum plugin_status {
 #undef readdir
 #undef closedir
 #undef dir_get_info
+#undef dir_exists
+#undef mkdir
+#undef rmdir
+#undef ftruncate
 
 struct plugin_api {
 #define ROCK_DIRECT(name) __typeof__(name) *name;
@@ -183,7 +210,7 @@ extern unsigned char plugin_file_end[], plugin_bss_start[];
 #define PLUGIN_HEADER \
     const struct plugin_api *rb ROCK_API_STORAGE = NULL; \
     ROCK_HEADER_EXPORT const struct plugin_header __header = { \
-        .lc_hdr = { PLUGIN_MAGIC, TARGET_ID, PLUGIN_API_VERSION, ROCK_IMAGE_BOUNDS }, \
+        .lc_hdr = { ROCK_IMAGE_MAGIC, TARGET_ID, PLUGIN_API_VERSION, ROCK_IMAGE_BOUNDS }, \
         .platform = CONFIG_PLATFORM, \
         .header_size = sizeof(struct plugin_header), \
         .api_size = sizeof(struct plugin_api), \

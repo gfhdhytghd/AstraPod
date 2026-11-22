@@ -299,3 +299,62 @@ Open **Plugins > Applications > view_text** and select a UTF-8 `.txt`
 file up to 32 KiB. View Text displays the filename and text in the native
 text box. Press Menu to return to Applications. The Files browser still
 uses the native document viewer when you open a text file there.
+
+## File picker and module handoff
+
+Call `rb->pick_file` with a path buffer of at least `MAX_PATH`, a start
+directory and a title. Use a comma-separated list such as `.txt,.cfg`
+to filter by extension. Matching ignores ASCII case. The call returns a
+positive value after selection, zero on cancellation, and a negative
+value on error or storage takeover.
+
+Call `rb->queue_handoff` to open another module. Return
+`PLUGIN_GOTO_PLUGIN` after a successful request. The loader copies the
+paths and releases the current module before opening the successor.
+A launch permits one handoff. Native viewers start after the plugin
+arena has been released.
+
+## Foreground overlays
+
+Compile the overlay CRT with `ROCK_OVERLAY_IMAGE`. Install the result as
+`/.rockbox/rocks/overlays/<name>.ovl`. Call `rb->overlay_request` from a
+launcher and return `PLUGIN_CHAIN_OVERLAY` after success. Start the name
+with a lowercase ASCII letter or digit. Use up to 32 lowercase letters,
+digits and underscores. Supply a path of up to `MAX_PATH - 1` bytes or NULL.
+
+The launcher unloads before the overlay starts. The overlay uses the
+same DRAM arena and fingerprint with a distinct header magic. It cannot
+start a second overlay. The linker rejects plugin and overlay IRAM sections.
+
+## USB Remote Control and resident services
+
+Open **remote_control** with USB unplugged, then connect to the computer
+to control. Select a command from Desktop, Presentation or Media Player.
+Menu stops new reports. Unplug before returning to ordinary PodLink or
+Disk Mode.
+
+Battery Benchmark writes `/battery_bench.txt`. Start and stop logging
+from Applications. Logging pauses during Disk Mode and resumes after
+eject. Announce Status speaks during the current session. Enable Voice
+Menus for speech. The native track announcement takes precedence.
+Both services release the module on exit.
+
+## File and playback tools
+
+Use the Files context menu to open Lrcplayer, export CUE, edit or sort
+plain text, speed-read, convert WAV, repair an MP3 index, or edit a bitmap.
+Ordinary Select retains the native file action.
+
+Open Lrcplayer from Applications while playing a track with a timed
+sidecar. The native lyrics player handles embedded lyrics. CUE export
+picks an unused sibling filename.
+
+The Lua viewer opens the packaged BoomShine, Picross and Pixel Painter
+scripts from Games.
+
+## Desktop companion
+
+Set `device_channels` in the desktop manifest to the channel names
+requested by the device. The host routes the first registration for each
+name and releases it when its companion exits. The bundled Echo companion
+uses `astrapod.echo`. See the desktop Input Plugins guide for setup.

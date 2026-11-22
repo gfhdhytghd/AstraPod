@@ -11,6 +11,7 @@
 
 /* Click-wheel single-line text editor. */
 int dialog_input(char* buffer, int buflen);
+int dialog_input_raw(char* buffer, int buflen);
 
 /* Plugin-ABI wrapper for dialog_input(); `kbd` is ignored. */
 int kbd_input(char* buffer, int buflen, ucschar_t *kbd);

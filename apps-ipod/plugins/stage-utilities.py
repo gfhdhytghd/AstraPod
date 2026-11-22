@@ -95,7 +95,8 @@ def view_text(source):
     view_text(title_and_text[0], title_and_text[1]);
     return PLUGIN_OK;''', r'''    (void)parameter;
     char path[MAX_PATH];
-    if (rb->pick_text_file(path, sizeof(path)) < 0)
+    if (rb->pick_file(path, sizeof(path), "/", "Select a text file",
+                      ".txt", 0, false) <= 0)
         return rb->plugin_usb_taken() ? PLUGIN_USB_CONNECTED : PLUGIN_OK;
 
     size_t capacity;

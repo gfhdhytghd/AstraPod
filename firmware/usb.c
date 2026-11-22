@@ -50,6 +50,7 @@
 #include "string.h"
 #ifdef HAVE_USBSTACK
 #include "usb_core.h"
+#include "usbstack/usb_plugin_hid.h"
 #ifdef USB_ENABLE_IAP
 #include "usbstack/usb_iap.h"
 #endif
@@ -429,6 +430,15 @@ static bool usb_audio_wanted(void)
 
 static inline void usb_configure_drivers(int for_state)
 {
+#ifdef HAVE_USB_PLUGIN_HID
+    if (for_state != USB_EXTRACTED && usb_plugin_hid_latched())
+    {
+        for (int i = 0; i < USB_NUM_DRIVERS; ++i)
+            usb_core_enable_driver(i, i == USB_DRIVER_HID);
+        usb_attach();
+        return;
+    }
+#endif
 #ifdef USB_ENABLE_AUDIO
     // FIXME: doesn't seem to get set when loaded at boot...
     usb_audio = global_settings.usb_audio;
@@ -738,6 +748,9 @@ static void usb_extract(void)
 #endif
 
     usb_state = USB_EXTRACTED;
+#ifdef HAVE_USB_PLUGIN_HID
+    usb_plugin_hid_detach();
+#endif
 #ifdef HAVE_USB_PODLINK
     podlink_requested = false;
 #endif
@@ -766,7 +779,7 @@ bool usb_host_probe_active(void)
 
 static void usb_host_probe_switch(bool on)
 {
-    if(on == usb_host_probe_on)
+    if(on == usb_host_probe_on || (on && usb_plugin_hid_reserved()))
         return;
     usb_host_probe_on = on;
     usb_log(USB_LOG_HOST_MODE, on, 0, 0, 0);
@@ -830,7 +843,7 @@ static void usb_dac_auto_step(void);
  * computer, car or dock that is using it, nor from a serial accessory. */
 static void usb_dac_turn(bool on)
 {
-    if(on && !usb_host_probe_on)
+    if(on && !usb_host_probe_on && !usb_plugin_hid_reserved())
     {
         if(usb_state == USB_INSERTED)
             usb_dac_note("refused: a host answered");
@@ -905,6 +918,9 @@ static void usb_dac_auto_step(void)
 {
     const struct usb_drv_host_enum *e;
     struct usb_drv_host_status st;
+
+    if (usb_plugin_hid_reserved())
+        return;
 
     if(usb_dac_polls == 0)
     {
@@ -1179,6 +1195,10 @@ static void NORETURN_ATTR usb_thread(void)
             break;
         case USB_PODLINK_OPEN:
             /* Only an explicit USB Mode change posts this event. */
+#ifdef HAVE_USB_PLUGIN_HID
+            if (usb_plugin_hid_latched())
+                break;
+#endif
             if ((int)ev.data != usb_mode || usb_detect() != USB_INSERTED ||
                 exclusive_storage_enabled || exclusive_storage_requested ||
                 usb_host_probe_on ||
@@ -1213,9 +1233,16 @@ static void NORETURN_ATTR usb_thread(void)
                 break;
             }
 
+#ifdef HAVE_USB_PLUGIN_HID
+            usb_plugin_hid_insert();
+#endif
             usb_state = USB_POWERED;
 
             usb_stack_enable(true);
+#ifdef HAVE_USB_PLUGIN_HID
+            if (usb_plugin_hid_latched())
+                usb_configure_drivers(USB_POWERED);
+#endif
 #ifndef BOOTLOADER
 #ifndef HAVE_USB_POWER
             int usb_mode = -1;
@@ -1233,12 +1260,13 @@ static void NORETURN_ATTR usb_thread(void)
 #endif
 #ifdef HAVE_USB_CONFIRM
             /* The setting is authoritative; a held key is not disk consent. */
-            usb_power_only = usb_mode == USB_MODE_CHARGE;
+            usb_power_only = usb_mode == USB_MODE_CHARGE ||
+                             usb_plugin_hid_latched();
             usb_drive_only_now = usb_mode_drive_only() && !usb_power_only;
             usb_consent_begin(&usb_consent, usb_power_only, false);
             usb_confirm_has_config = false;
 #ifdef HAVE_IPOD_CRASH_RECOVERY
-            if (crumbs_recovery_disk())
+            if (crumbs_recovery_disk() && !usb_plugin_hid_latched())
                 usb_consent.state = USB_CONSENT_CONNECT;
 #endif
 #endif
@@ -1267,7 +1295,7 @@ static void NORETURN_ATTR usb_thread(void)
             usb_set_host_present(true);
 #endif
 #ifdef HAVE_USB_HOST_AUDIO
-            if(usb_dac_auto && !usb_dac_tried &&
+            if(usb_dac_auto && !usb_dac_tried && !usb_plugin_hid_latched() &&
 #ifdef HAVE_USB_CONFIRM
                !usb_drive_only_now
 #else
@@ -1321,7 +1349,8 @@ static void NORETURN_ATTR usb_thread(void)
 
 #ifdef USB_ENABLE_IAP
         case USB_CAR_RECONNECT:
-            if(usb_state != USB_INSERTED || usb_car_no_audio)
+            if(usb_state != USB_INSERTED || usb_car_no_audio ||
+               usb_plugin_hid_latched())
                 break;
             usb_car_no_audio = true;
             usb_log(USB_LOG_IAP2_EVENT, USB_LOG_IAP2_RECONNECT, 0, 0, 0);
@@ -1679,6 +1708,10 @@ bool usb_host_is_present(void)
  * us mid-session releases it before it asks again. */
 bool usb_host_wants_storage(void)
 {
+#ifdef HAVE_USB_PLUGIN_HID
+    if (usb_plugin_hid_latched())
+        return false;
+#endif
 #ifdef HAVE_USB_CONFIRM
     if (usb_confirm_blocked())
         return false;
@@ -1759,6 +1792,10 @@ bool usb_exclusive_storage(void)
 
 void usb_request_exclusive_storage(void)
 {
+#ifdef HAVE_USB_PLUGIN_HID
+    if (usb_plugin_hid_latched())
+        return;
+#endif
 #ifdef HAVE_USB_CONFIRM
     if (usb_confirm_blocked())
         return;
@@ -1840,9 +1877,23 @@ bool usb_storage_is_ejected(void)
 void usb_set_hid(bool enable)
 {
     usb_hid = enable;
-    usb_core_enable_driver(USB_DRIVER_HID, usb_hid && !usb_drive_only());
+    if (!usb_plugin_hid_latched())
+        usb_core_enable_driver(USB_DRIVER_HID, usb_hid && !usb_drive_only());
 }
 #endif /* USB_ENABLE_HID */
+
+#ifdef HAVE_USB_PLUGIN_HID
+bool usb_plugin_hid_open(void)
+{
+    int level = disable_irq_save();
+    bool armed = usb_thread_entry && usb_state == USB_EXTRACTED &&
+                 usb_detect() == USB_EXTRACTED && !usb_host_probe_on &&
+                 !exclusive_storage_enabled && !exclusive_storage_requested &&
+                 usb_plugin_hid_arm();
+    restore_irq(level);
+    return armed;
+}
+#endif
 
 #ifdef USB_ENABLE_IAP
 /* Takes effect at the next connection, either way: off mid-connection would
@@ -1902,6 +1953,10 @@ void usb_podlink_disk(void)
 
 bool usb_podlink_open(void)
 {
+#ifdef HAVE_USB_PLUGIN_HID
+    if (usb_plugin_hid_reserved())
+        return false;
+#endif
     return usb_mode != USB_MODE_CHARGE && !usb_host_probe_on &&
            !exclusive_storage_enabled && !exclusive_storage_requested &&
            (usb_detect() != USB_INSERTED || podlink_requested);

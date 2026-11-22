@@ -63,10 +63,27 @@ $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c $(ROCK_TOOLS)/stage-usb.py
 
 ROCK_FINGERPRINT := $(ROCK_OUT)/rock_fingerprint.h
 ROCK_OBJECTS := $(ROCK_OUT)/obj
+include $(APPSDIR)/plugins/md5sum.make
+include $(APPSDIR)/plugins/disktidy.make
+include $(APPSDIR)/plugins/resident.make
+include $(APPSDIR)/plugins/encoder-compat.make
+include $(APPSDIR)/plugins/playlist-lyrics.make
+include $(APPSDIR)/plugins/phase3-files.make
+include $(APPSDIR)/plugins/phase3-settings.make
+ifneq (,$(filter viewers/lua,$(ROCK_MODULES)))
+include $(APPSDIR)/plugins/rock-lua.make
+endif
+include $(APPSDIR)/plugins/specialist.make
+include $(APPSDIR)/plugins/native-viewers.make
+include $(APPSDIR)/plugins/shortcuts-compat.make
+include $(APPSDIR)/plugins/lastfm.make
+include $(APPSDIR)/plugins/retro-compat.make
+include $(APPSDIR)/plugins/open-plugins.make
 ifneq ($(APP_TYPE),sdl-sim)
 # The compiler may emit libcalls even with -fno-builtin.
 ROCK_LINK_INPUT += $(ROCK_OBJECTS)/lib/gcc-support.o
 endif
+include $(APPSDIR)/plugins/overlay-compat.make
 
 ROCK_UTILITIES := db_folder_select dict view_text credits alarmclock calendar dart_scorer resistor shopper settings_dumper
 $(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_UTILITIES))): $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c $(APPSDIR)/plugins/stage-utilities.py
@@ -128,9 +145,19 @@ $(ROCK_OUT)/staged/wavview.c: $(ROCK_SRC)/wavview.c $(APPSDIR)/plugins/wavview-s
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(word 3,$^) $< $(word 2,$^) $@
 
+$(ROCK_OUT)/staged/keybox.c: $(ROCK_SRC)/keybox.c $(APPSDIR)/plugins/stage-keybox.py $(APPSDIR)/plugins/keybox-file.inc
+	$(SILENT)mkdir -p $(@D)
+	$(SILENT)python3 $(word 2,$^) $< $(word 3,$^) $@
+
+$(ROCK_OUT)/modules/apps/keybox.rock: $(addprefix $(ROCK_OBJECTS)/lib/,md5.o playback_control.o)
+
+$(ROCK_OUT)/staged/remote_control.c: $(ROCK_SRC)/remote_control.c $(APPSDIR)/plugins/stage-remote-control.py
+	$(SILENT)mkdir -p $(@D)
+	$(SILENT)python3 $(word 2,$^) $< $@
+
 ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot metronome \
     minesweeper oscilloscope periodic_table pitch_detector playing_time pong rb_info robotfindskitten snake snake2 star stopwatch \
-    lib/highscore search stats vu_meter wavview $(ROCK_UTILITIES) $(ROCK_GAME_ADAPTERS)
+    lib/highscore keybox remote_control search stats vu_meter wavview $(ROCK_UTILITIES) $(ROCK_GAME_ADAPTERS)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
@@ -189,6 +216,12 @@ $(eval $(call rock_module_bitmaps,games/pegbox,pegbox_header pegbox_pieces))
 $(eval $(call rock_module_bitmaps,games/rockblox,rockblox_background))
 $(eval $(call rock_module_bitmaps,games/solitaire,card_deck card_back solitaire_suitsi))
 $(eval $(call rock_module_bitmaps,games/superdom,superdom_boarditems))
+
+include $(APPSDIR)/plugins/rock-engines.make
+include $(APPSDIR)/plugins/phase4-puzzles.make
+include $(APPSDIR)/plugins/clock-compat.make
+include $(APPSDIR)/plugins/fft-compat.make
+include $(APPSDIR)/plugins/phase3-games.make
 
 # Use upstream's target-selected bitmap and encoding.
 rock_bitmap_name = $(firstword $(subst ., ,$(notdir $(1))))

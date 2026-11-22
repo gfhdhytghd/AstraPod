@@ -21,6 +21,9 @@
 #include "settings/settings.h"
 #include "database/db_spoken.h"
 #include "spoken_speed.h"
+#ifdef ASTRAPOD_ROCK_COMPAT
+#include "plugins/rock_specialist.h"
+#endif
 
 bool spoken_word_track(const struct mp3entry *id3)
 {
@@ -57,6 +60,9 @@ static void apply(const struct mp3entry *id3)
 
 void spoken_speed_track(const struct mp3entry *id3)
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    rock_pitch_preview_revoke();
+#endif
     apply(id3);
 }
 
@@ -69,6 +75,9 @@ void spoken_speed_set(int pct)
 
 void spoken_speed_init(void)
 {
+#ifdef ASTRAPOD_ROCK_COMPAT
+    rock_pitch_preview_init();
+#endif
     if (global_settings.spoken_speed != 100)
         dsp_timestretch_enable(true);
 }

@@ -1589,8 +1589,8 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
                     if(!(attr & ATTR_DIRECTORY)
                        && !file_attr_is_row(attr & FILE_ATTR_MASK))
                     {
-                        tc.browse->flags |= BROWSE_SELECTED;
-                        get_current_file(tc.browse->buf, tc.browse->bufsize);
+                        if (get_current_file(tc.browse->buf, tc.browse->bufsize))
+                            tc.browse->flags |= BROWSE_SELECTED;
                         return exit_to_new_screen(GO_TO_PREVIOUS);
                     }
                 }
@@ -1627,6 +1627,9 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
 
             case ACTION_STD_CANCEL:
                 exit_to_new_screen(0);
+                if ((tc.browse->flags & BROWSE_PLUGIN_PICKER) &&
+                    !strcasecmp(tc.currdir, tc.browse->root))
+                    return GO_TO_PREVIOUS;
                 if (*tc.dirfilter > NUM_FILTER_MODES && tc.dirlevel < 1) {
                     exit_func = true;
                     break;
@@ -1665,10 +1668,14 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
 
 
             case ACTION_TREE_WPS:
+                if (tc.browse->flags & BROWSE_PLUGIN_PICKER)
+                    return exit_to_new_screen(GO_TO_PREVIOUS);
                 return exit_to_new_screen(GO_TO_PREVIOUS_MUSIC);
                 break;
             case ACTION_STD_QUICKSCREEN:
             {
+                if (tc.browse->flags & BROWSE_PLUGIN_PICKER)
+                    break;
                 bool enter_shortcuts_menu = global_settings.shortcuts_replaces_qs;
                 if (enter_shortcuts_menu && *tc.dirfilter >= NUM_FILTER_MODES)
                     break;
@@ -1987,10 +1994,11 @@ int rockbox_browse(struct browse_context *browse)
     int *prev_dirfilter = tc.dirfilter;
     tc.dirfilter = &dirfilter;
     tc.sort_dir = global_settings.sort_dir;
+    bool plugin_picker = browse && (browse->flags & BROWSE_PLUGIN_PICKER);
 
     reload_dir = true;
 
-    if (tc.out_of_tree > 0)
+    if (tc.out_of_tree > 0 && !plugin_picker)
     {
         /* an item has already been loaded out_of_tree holds the selected index
          * what happens with the item is dependent on the browse context */
@@ -2000,11 +2008,11 @@ int rockbox_browse(struct browse_context *browse)
     }
     else
     {
-        if (*tc.dirfilter >= NUM_FILTER_MODES)
+        if (*tc.dirfilter >= NUM_FILTER_MODES || plugin_picker)
         {
             int last_context;
             /* don't reset if its the same browse already loaded */
-            if (tc.browse != browse ||
+            if (plugin_picker || tc.browse != browse ||
                 !(tc.currdir[1] && strstr(tc.currdir, browse->root) != NULL))
             {
                 tc.browse = browse;
@@ -2014,6 +2022,8 @@ int rockbox_browse(struct browse_context *browse)
                 strmemccpy(tc.currdir, browse->root, sizeof(tc.currdir));
             }
 
+            if (plugin_picker)
+                tc.out_of_tree = 0;
             start_wps = false;
             last_context = curr_context;
 
@@ -2046,6 +2056,8 @@ int rockbox_browse(struct browse_context *browse)
     backup_count--;
     if (backup_count >= 0)
         tc = backups[backup_count];
+    else if (plugin_picker)
+        tc.browse = NULL;
     list_select_resume(selecting);
 
     return ret_val;

@@ -25,6 +25,10 @@
 #include "usb_hid_usage_tables.h"
 
 void usb_hid_send(usage_page_t usage_page, int id);
+#ifdef HAVE_USB_PLUGIN_HID
+bool usb_hid_plugin_idle(void);
+void usb_hid_plugin_send(usage_page_t usage_page, int id);
+#endif
 
 extern struct usb_class_driver usb_cdrv_hid;
 

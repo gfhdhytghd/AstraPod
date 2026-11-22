@@ -14,6 +14,7 @@
 #include "string-extra.h"
 #include "config.h"
 #include "plugins/rock_compat.h"
+#include "plugins/rock_resident.h"
 #include "podlink-plugin-test.h"
 #include "system.h"
 #include "kernel.h"
@@ -126,6 +127,7 @@ static bool clean_shutdown(enum shutdown_type sd_type,
                                 str(LANG_SHUTTINGDOWN));
         }
 
+        rock_resident_shutdown(batt_safe);
         rock_media_shutdown();
 
         /* A USB dock is told now, while the saves below give the USB

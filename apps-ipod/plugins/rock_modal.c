@@ -2,7 +2,7 @@
 #include "plugins/rock_compat.h"
 #include "plugins/sdk/plugin.h"
 #include "plugins/rock_widgets.h"
-#include "screens/browse/browser.h"
+#include "widgets/color_picker.h"
 
 struct rock_native_scope rock_modal_begin(void)
 {
@@ -43,6 +43,17 @@ int rock_kbd_input(char *buffer, int buflen, ucschar_t *kbd)
     return result;
 }
 
+int rock_kbd_input_raw(char *buffer, int buflen)
+{
+    if (rock_usb_taken() || !buffer || buflen <= 0)
+        return -1;
+
+    struct rock_native_scope scope = rock_modal_begin();
+    int result = dialog_input_raw(buffer, buflen);
+    rock_modal_end(&scope);
+    return result;
+}
+
 int rock_view_text(const char *title, const char *text)
 {
     if (rock_usb_taken())
@@ -54,32 +65,13 @@ int rock_view_text(const char *title, const char *text)
     return rock_usb_taken() ? PLUGIN_USB_CONNECTED : PLUGIN_OK;
 }
 
-static bool show_text_file(char *name, int attr, struct browser_context *browse)
+bool rock_set_color(const char *title, unsigned *color, unsigned banned)
 {
-    (void)browse;
-    const char *ext = strrchr(name, '.');
-    return (attr & ATTR_DIRECTORY) || (ext && !strcasecmp(ext, ".txt"));
-}
+    if (rock_usb_taken())
+        return true;
 
-int rock_pick_text_file(char *path, size_t size)
-{
-    if (rock_usb_taken() || !path || size < MAX_PATH)
-        return -1;
-
-    struct browse_context browse = {
-        .dirfilter = SHOW_ALL,
-        .flags = BROWSE_DIRFILTER | BROWSE_SELECTONLY | BROWSE_NO_CONTEXT_MENU,
-        .callback_show_item = show_text_file,
-        .title = "Select a text file",
-        .icon = Icon_Plugin,
-        .root = "/",
-        .buf = path,
-        .bufsize = size,
-    };
     struct rock_native_scope scope = rock_modal_begin();
-    bool previous = action_set_menu_back(true);
-    rockbox_browse(&browse);
-    action_set_menu_back(previous);
+    bool result = set_color(title, color, banned);
     rock_modal_end(&scope);
-    return (browse.flags & BROWSE_SELECTED) && !rock_usb_taken() ? 0 : -1;
+    return result || rock_usb_taken();
 }

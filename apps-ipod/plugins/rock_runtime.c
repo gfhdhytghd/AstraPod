@@ -5,6 +5,8 @@
 #include "usb.h"
 #include "plugins/rock_files.h"
 #include "plugins/rock_widgets.h"
+#include "plugins/rock_native_handoff.h"
+#include "plugins/rock_catalog.h"
 #include "plugins/sdk/plugin.h"
 #include "rock-compat/rock_fingerprint.h"
 #include "core_alloc.h"
@@ -83,6 +85,7 @@ static void rock_media_stop_locked(void)
 void rock_media_shutdown(void)
 {
     rock_pitch_revoke();
+    rock_pitch_preview_revoke();
     if (!media_initialized)
         return;
     mutex_lock(&media_mutex);
@@ -93,6 +96,7 @@ void rock_media_shutdown(void)
 void rock_playback_takeover(void)
 {
     rock_pitch_revoke();
+    rock_pitch_preview_revoke();
     if (!media_initialized)
         return;
     mutex_lock(&media_mutex);
@@ -303,11 +307,13 @@ void rock_usb_takeover(void)
 #ifdef HAVE_PODLINK_PLUGIN_TEST
     podlink_plugin_test_usb_taken();
 #endif
+    rock_hid_close();
     rock_podlink_close();
     rock_media_shutdown();
     rock_flush_settings();
     restore_input_settings();
     usb_taken = true;
+    rock_release_plugin_font();
     rock_close_files();
 }
 
@@ -593,9 +599,9 @@ static const struct plugin_api api = {
 #undef ROCK_DIRECT
 };
 
-static bool compatible(const struct plugin_header *header)
+static bool compatible(const struct plugin_header *header, uint32_t magic)
 {
-    return header->lc_hdr.magic == PLUGIN_MAGIC &&
+    return header->lc_hdr.magic == magic &&
            header->lc_hdr.target_id == TARGET_ID &&
            header->lc_hdr.api_version == PLUGIN_API_VERSION &&
            header->platform == CONFIG_PLATFORM &&
@@ -605,8 +611,8 @@ static bool compatible(const struct plugin_header *header)
 }
 
 #if CONFIG_BINFMT == BINFMT_ROCK
-static bool native_header_valid(const void *opaque, const unsigned char *arena,
-                                size_t capacity, size_t bytes)
+static bool native_image_valid(const void *opaque, const unsigned char *arena,
+                               size_t capacity, size_t bytes, uint32_t magic)
 {
     const struct plugin_header *header = opaque;
     uintptr_t base = (uintptr_t)arena;
@@ -617,7 +623,7 @@ static bool native_header_valid(const void *opaque, const unsigned char *arena,
     uintptr_t slot = (uintptr_t)header->api;
     uintptr_t payload = base + sizeof(*header);
 
-    return compatible(header) && header->lc_hdr.load_addr == arena &&
+    return compatible(header, magic) && header->lc_hdr.load_addr == arena &&
            (uintptr_t)header->file_end == file_end &&
            file_end <= bss && bss <= end && end - base <= capacity &&
            !(bss % 4) && !(end % 4) &&
@@ -625,17 +631,36 @@ static bool native_header_valid(const void *opaque, const unsigned char *arena,
            slot >= payload && slot <= file_end - sizeof(rb) &&
            !(slot % _Alignof(const struct plugin_api *));
 }
+
+static bool native_header_valid(const void *header, const unsigned char *arena,
+                                size_t capacity, size_t bytes)
+{
+    return native_image_valid(header, arena, capacity, bytes, PLUGIN_MAGIC);
+}
+
+static bool overlay_header_valid(const void *header, const unsigned char *arena,
+                                 size_t capacity, size_t bytes)
+{
+    return native_image_valid(header, arena, capacity, bytes,
+                              ROCK_OVERLAY_MAGIC);
+}
 #endif
 
 static int run_rock(const char *path, const char *file,
                     unsigned char *arena, size_t capacity,
-                    fb_data *saved_pixels, fb_data *widget_pixels, bool shell)
+                    fb_data *saved_pixels, fb_data *widget_pixels, bool shell,
+                    bool overlay)
 {
+#ifdef HAVE_USBSTACK
+    if (usb_exclusive_storage())
+        return PLUGIN_USB_CONNECTED;
+#endif
     void *handle;
 #if CONFIG_BINFMT == BINFMT_ROCK
     struct plugin_header disk_header;
     handle = lc_open_checked(path, arena, capacity, &disk_header, sizeof(disk_header),
-                             native_header_valid);
+                             overlay ? overlay_header_valid :
+                                       native_header_valid);
 #else
     handle = lc_open(path, arena, capacity);
 #endif
@@ -645,7 +670,7 @@ static int run_rock(const char *path, const char *file,
     struct plugin_header *module = lc_get_header(handle);
     int result = PLUGIN_ERROR;
 #if CONFIG_BINFMT == BINFMT_DLOPEN
-    if (!rock_host_header_valid(module) || !compatible(module) ||
+    if (!rock_host_header_valid(module) || !compatible(module, overlay ? ROCK_OVERLAY_MAGIC : PLUGIN_MAGIC) ||
         module->lc_hdr.load_addr || module->lc_hdr.end_addr ||
         module->file_end || module->bss_start)
         goto unload;
@@ -687,6 +712,7 @@ static int run_rock(const char *path, const char *file,
     if (shell)
         podlink_plugin_test_stopped();
 #endif
+    rock_hid_close();
     rock_podlink_close();
     rock_media_shutdown();
     if (usb_taken)
@@ -694,6 +720,7 @@ static int run_rock(const char *path, const char *file,
     rock_flush_settings();
     if (!usb_taken)
         restore_input_settings();
+    rock_release_plugin_font();
     rock_close_files();
     rock_list_discard();
     button_clear_pressed();
@@ -725,9 +752,50 @@ static int rock_open_foreground(const char *path, const char *file, bool shell)
         capacity -= 2 * FRAMEBUFFER_SIZE;
         fb_data *caller_pixels = (fb_data *)(arena + capacity);
         fb_data *widget_pixels = (fb_data *)(arena + capacity + FRAMEBUFFER_SIZE);
+        rock_overlay_begin();
+        rock_clear_handoff();
         result = run_rock(path, file, arena, capacity, caller_pixels,
-                          widget_pixels, shell);
+                          widget_pixels, shell, false);
+        const struct rock_handoff *next = NULL;
+        if (result == PLUGIN_CHAIN_OVERLAY)
+        {
+            struct rock_overlay_launch launch;
+            if (rock_overlay_take(&launch))
+                result = run_rock(launch.path,
+                                  launch.has_parameter ? launch.parameter : NULL,
+                                  arena, capacity, caller_pixels, widget_pixels,
+                                  shell, true);
+            if (result == PLUGIN_CHAIN_OVERLAY)
+                result = PLUGIN_ERROR;
+        }
+        else if (result == PLUGIN_GOTO_PLUGIN)
+        {
+            if (!shell)
+                next = rock_take_handoff();
+            if (!next)
+                result = PLUGIN_ERROR;
+            else if (next->kind == ROCK_HANDOFF_PLUGIN)
+            {
+                result = run_rock(next->module, next->path[0] ? next->path : NULL,
+                                  arena, capacity,
+                                  caller_pixels, widget_pixels, false, false);
+                if (result == PLUGIN_GOTO_PLUGIN ||
+                    result == PLUGIN_CHAIN_OVERLAY)
+                    result = PLUGIN_ERROR;
+                next = NULL;
+            }
+        }
+        rock_overlay_end();
         app_release_buffer(arena_owner);
+        if (next)
+        {
+            struct rock_handoff handoff = *next;
+            rock_clear_handoff();
+            int native = rock_dispatch_native_handoff(&handoff);
+            result = native == GO_TO_ROOT ? PLUGIN_GOTO_ROOT :
+                     native == GO_TO_WPS ? PLUGIN_GOTO_WPS : PLUGIN_OK;
+        }
+        rock_clear_handoff();
         if (result == PLUGIN_ERROR && !shell)
             splash(HZ, ID2P(LANG_PLUGIN_ERROR));
     }
@@ -755,5 +823,7 @@ int rock_open_from_browser(const char *path, const char *file)
         return GO_TO_ROOT;
     if (result == PLUGIN_GOTO_WPS)
         return GO_TO_WPS;
+    if (result == PLUGIN_GOTO_FILEBROWSER)
+        return GO_TO_FILEBROWSER;
     return GO_TO_PREVIOUS;
 }

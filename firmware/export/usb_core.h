@@ -75,6 +75,9 @@ void usb_core_transfer_complete(int endpoint,int dir,int status,int length);
 void usb_core_bus_reset(void);
 /* True while a host's bus reset is pending or closing class drivers. */
 bool usb_core_bus_resetting(void);
+#ifdef HAVE_USB_PLUGIN_HID
+bool usb_core_plugin_hid_ready(void);
+#endif
 #ifdef HAVE_USB_CHARGING_ENABLE
 /* Controller suspend/resume notification; safe from IRQ context. */
 void usb_core_bus_suspend(bool suspended);

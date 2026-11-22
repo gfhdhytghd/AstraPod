@@ -991,6 +991,9 @@ usbstack/usb_charging_only.c
 #endif
 #ifdef USB_ENABLE_HID
 usbstack/usb_hid.c
+#ifdef HAVE_USB_PLUGIN_HID
+usbstack/usb_plugin_hid.c
+#endif
 #endif
 #ifdef USB_ENABLE_IAP
 usbstack/iap/audio.c

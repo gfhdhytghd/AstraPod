@@ -212,14 +212,23 @@ static int my_stat(const char *path, int *buf)
         span("    char str[30];", "\n}", '    Quit("Cannot open %s", string);')
         replace("static void CAL_HuffExpand(byte *source, byte *dest, int32_t length, huffnode *hufftable)",
                 "static void CAL_HuffExpand(const byte *source, size_t bytes, byte *dest,\n"
-                "                           int32_t length, huffnode *hufftable)")
+                "                           int32_t length, huffnode *hufftable,\n"
+                "                           bool shareware_tiles)")
         replace("    byte val = *source++;\n    byte mask = 1;",
                 "    const byte *source_end = source + bytes;\n"
                 "    byte val = 0;\n    byte mask = 0;")
         replace("    while(1)\n    {\n        if(!(val & mask))",
                 "    while(1)\n    {\n        if (!mask)\n        {\n"
-                "            if (source == source_end)\n"
-                "                Quit(\"Truncated VGAGRAPH chunk\");\n"
+                "            if (source == source_end)\n            {\n"
+                "                /* Early English v1.4 WL1 stores 35 tiles. The\n"
+                "                 * engine keeps the full 72-slot latch table. */\n"
+                "                const int shareware_bytes = 35 * 64;\n"
+                "                if (shareware_tiles && written / 64 == 35 &&\n"
+                "                    length >= shareware_bytes)\n                {\n"
+                "                    memset(end - length + shareware_bytes, 0,\n"
+                "                           length - shareware_bytes);\n"
+                "                    return;\n                }\n"
+                "                Quit(\"Truncated VGAGRAPH chunk\");\n            }\n"
                 "            val = *source++;\n            mask = 1;\n        }\n"
                 "        if(!(val & mask))")
         span("        if(mask==0x80)", "        if(nodeval<256)", "        mask <<= 1;\n\n")
@@ -236,6 +245,8 @@ static int my_stat(const char *path, int *buf)
                 "        Quit(\"Truncated VGAGRAPH picture table\");")
         replace("CAL_HuffExpand(compseg, (byte*)pictable,",
                 "CAL_HuffExpand(compseg, chunkcomplen, (byte*)pictable,")
+        replace("NUMPICS * sizeof(pictabletype), grhuffman);",
+                "NUMPICS * sizeof(pictabletype), grhuffman, false);")
         replace("void CAL_ExpandGrChunk (int chunk, int32_t *source)",
                 "static void CAL_ExpandGrChunk(int chunk, int32_t *source, int32_t compressed)")
         replace("        expanded = *source++;",
@@ -246,8 +257,9 @@ static int my_stat(const char *path, int *buf)
         replace("    grsegs[chunk]=(byte *) malloc(expanded);",
                 "    if (expanded <= 0)\n        Quit(\"Invalid VGAGRAPH decoded size\");\n"
                 "    grsegs[chunk]=(byte *) malloc(expanded);")
-        replace("CAL_HuffExpand((byte *) source, grsegs[chunk]",
-                "CAL_HuffExpand((byte *) source, compressed, grsegs[chunk]")
+        replace("CAL_HuffExpand((byte *) source, grsegs[chunk], expanded, grhuffman);",
+                "CAL_HuffExpand((byte *) source, compressed, grsegs[chunk], expanded,\n"
+                "                   grhuffman, chunk == STARTTILE8 && numEpisodesMissing == 5);")
         replace("    CAL_ExpandGrChunk (chunk,source);",
                 "    CAL_ExpandGrChunk(chunk, source, compressed);")
         replace("        read(grhandle,bufferseg,compressed);",
@@ -269,7 +281,7 @@ static int my_stat(const char *path, int *buf)
                 "    byte *pic = (byte *) malloc(expanded);")
         replace("CAL_HuffExpand((byte *) source, pic, expanded, grhuffman);",
                 "CAL_HuffExpand((byte *) source, compressed - sizeof(*source),\n"
-                "                   pic, expanded, grhuffman);")
+                "                   pic, expanded, grhuffman, false);")
         replace("    read(handle, grhuffman, sizeof(grhuffman));",
                 "    if (read(handle, grhuffman, sizeof(grhuffman)) != sizeof(grhuffman))\n"
                 "        Quit(\"Truncated VGADICT\");")

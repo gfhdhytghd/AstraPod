@@ -703,3 +703,17 @@ Build `rock-iram-probe` explicitly in the configured ARM or SDL build.
 On ARM, use the resulting `demos/iram_probe.rock` with its matching
 firmware. SDL exercises lifecycle and admission. The device verifies
 IRAM execution, initialized data, cleared data and cache maintenance.
+
+## XRick
+
+Extract the Rockbox `xrick-data.zip` to the player's root folder, so that
+`/.rockbox/xrick/filelist.dat` exists. Open **Plugins > Games > xrick**.
+Without the data, the module shows where to copy it and returns on Menu.
+The game data is not part of the package. A damaged data set stops at an
+error splash before the game starts.
+
+The game stops native playback on launch and plays its sound through the
+built-in PCM stream. Use Left and Right to walk, the wheel for Up and Down,
+Select to fire and Play to pause. Hold Select and turn the wheel back to
+shoot, forward to drop dynamite, or press Left or Right to poke. Menu
+opens Resume, Restart, Cheat Settings and Quit.

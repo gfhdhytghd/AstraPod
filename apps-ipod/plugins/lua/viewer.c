@@ -196,6 +196,15 @@ static int lua_splash(lua_State *L)
     return 0;
 }
 
+static int lua_view_text(lua_State *L)
+{
+    const char *title = luaL_checkstring(L, 1);
+    const char *text = luaL_checkstring(L, 2);
+    rb->view_text(title, text);
+    check_exit();
+    return 0;
+}
+
 static int lua_light_on(lua_State *L)
 {
     (void)L;
@@ -269,6 +278,33 @@ static int lua_actions(lua_State *L)
     return 1;
 }
 
+static int lua_buttons(lua_State *L)
+{
+    static const struct lua_int_reg buttons[] = {
+        RB_CONSTANT(BUTTON_NONE), RB_CONSTANT(BUTTON_REL), RB_CONSTANT(BUTTON_REPEAT),
+        RB_CONSTANT(BUTTON_MENU), RB_CONSTANT(BUTTON_SELECT), RB_CONSTANT(BUTTON_PLAY),
+        RB_CONSTANT(BUTTON_LEFT), RB_CONSTANT(BUTTON_RIGHT),
+        RB_CONSTANT(BUTTON_SCROLL_BACK), RB_CONSTANT(BUTTON_SCROLL_FWD),
+#ifdef BUTTON_RC_MENU
+        RB_CONSTANT(BUTTON_RC_MENU), RB_CONSTANT(BUTTON_RC_SELECT),
+        RB_CONSTANT(BUTTON_RC_PLAY), RB_CONSTANT(BUTTON_RC_STOP),
+        RB_CONSTANT(BUTTON_RC_LEFT), RB_CONSTANT(BUTTON_RC_RIGHT),
+        RB_CONSTANT(BUTTON_RC_UP), RB_CONSTANT(BUTTON_RC_DOWN),
+        RB_CONSTANT(BUTTON_RC_VOL_UP), RB_CONSTANT(BUTTON_RC_VOL_DOWN),
+#endif
+    };
+    lua_getglobal(L, "rb");
+    lua_newtable(L);
+    for (size_t i = 0; i < ARRAYLEN(buttons); i++)
+    {
+        lua_pushinteger(L, buttons[i].value);
+        lua_setfield(L, -2, buttons[i].name);
+    }
+    lua_pushvalue(L, -1);
+    lua_setfield(L, -3, "buttons");
+    return 1;
+}
+
 static int lua_settings(lua_State *L)
 {
     lua_getglobal(L, "rb");
@@ -304,6 +340,7 @@ static int lua_rock(lua_State *L)
         {"button_get_w_tmo", lua_wait_button},
         {"do_menu", lua_menu},
         {"splash", lua_splash},
+        {"view_text", lua_view_text},
         {"backlight_force_on", lua_light_on},
         {"backlight_use_settings", lua_light_reset},
         {"file_exists", lua_exists},
@@ -313,6 +350,7 @@ static int lua_rock(lua_State *L)
     static const struct lua_int_reg values[] = {
         RB_CONSTANT(LCD_WIDTH), RB_CONSTANT(LCD_HEIGHT), RB_CONSTANT(LCD_DEPTH),
         RB_CONSTANT(HZ), RB_CONSTANT(FONT_UI), RB_CONSTANT(FONT_SYSFIXED),
+        RB_CONSTANT(PLUGIN_GOTO_WPS),
     };
     luaL_register(L, "rb", methods);
     for (size_t i = 0; i < ARRAYLEN(values); i++)
@@ -365,6 +403,7 @@ static int run_game(lua_State *L)
         lua_call(L, 1, 0);
     }
     preload(L, "actions", lua_actions);
+    preload(L, "buttons", lua_buttons);
     preload(L, "settings", lua_settings);
     preload(L, "rbsettings", lua_rbsettings);
 
@@ -382,7 +421,10 @@ enum plugin_status plugin_start(const void *parameter)
                   rb->strcmp(path, GAME_PATH "boomshine.lua") &&
                   rb->strcmp(path, APP_PATH "stopwatch-lua.lua") &&
                   rb->strcmp(path, DEMO_PATH "helloworld.lua") &&
-                  rb->strcmp(path, DEMO_PATH "test_viewports.lua")))
+                  rb->strcmp(path, DEMO_PATH "test_viewports.lua") &&
+                  rb->strcmp(path, DEMO_PATH "print_buttons.lua") &&
+                  rb->strcmp(path, DEMO_PATH "splashscroller.lua") &&
+                  rb->strcmp(path, APP_PATH "return2WPS.lua")))
     {
         rb->splashf(HZ, "%s", "Choose a bundled Lua script.");
         return PLUGIN_ERROR;

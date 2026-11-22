@@ -19,3 +19,7 @@ for name in helloworld test_viewports; do
     python3 "$adapter" "$src/$name.lua" "$demos/$name.lua"
 done
 python3 "$adapter" "$src/stopwatch.lua" "$apps/stopwatch-lua.lua"
+for name in print_buttons splashscroller; do
+    python3 "$adapter" "$src/lua_scripts/$name.lua" "$demos/$name.lua"
+done
+cp "$src/lua_scripts/return2WPS.lua" "$apps/"

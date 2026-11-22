@@ -7,6 +7,8 @@ room and the headset-mic noise floor without the tone.
 | --- | --- | ---: | ---: |
 | b4b7-silence.wav | mic/b4b7.wav | 13 | 6 |
 | b4b7-tone.wav | mic/b4b7.wav | 36 | 8 |
+| 71fc-silence.wav | mic/71fc.wav | 13 | 6 |
+| 71fc-tone.wav | mic/71fc.wav | 36 | 8 |
 | v26-silence.wav | pitch-v26/rec/mic.wav | 5 | 5 |
 | v26-tone.wav | pitch-v26/rec/mic.wav | 29 | 8 |
 

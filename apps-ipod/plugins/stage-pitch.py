@@ -45,7 +45,7 @@ static unsigned int input_peak;
 """)
 replace("static unsigned int sample_rate;", "static const int sample_rate = ROCK_PITCH_RATE;")
 replace("#define VOLUME_THRESHOLD (50)", """\
-#define VOLUME_THRESHOLD 14
+#define VOLUME_THRESHOLD 8
 #define SIGNAL_THRESHOLD_MIN 5
 #define SIGNAL_THRESHOLD_MAX 95""")
 replace('"/.pitch_detector_settings"', '"/.astrapod_pitch_detector"')

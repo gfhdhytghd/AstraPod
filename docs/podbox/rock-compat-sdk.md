@@ -140,7 +140,7 @@ native gain for the selected input and leaves the recorder's source setting
 alone. Capture uses the recorder's 44,100 Hz input configuration. The tuner
 analyzes the left channel at 22,050 Hz and filters noise above 3 kHz.
 **Signal Threshold** sets the filtered RMS gate in 0.1% of full scale. Its
-default is 14 (1.4%). Use **Reset Settings** in **Tuner Settings** to apply
+default is 8 (0.8%). Use **Reset Settings** in **Tuner Settings** to apply
 the new default to an existing setup.
 
 The bottom row shows **In** (native 44.1 kHz frames), **Skip** (native

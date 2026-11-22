@@ -592,6 +592,11 @@ static const char *row_icon(enum themable_icons icon, enum list_row_kind kind,
         if (equals_lang(label, LANG_PLUGIN_GAMES)) return "Ħ";
         if (equals_lang(label, LANG_PLUGIN_DEMOS)) return "ħ";
 
+        const char *ext = label ? strrchr(label, '.') : NULL;
+        if (icon != Icon_Folder && ext &&
+            (!strcasecmp(ext, ".mid") || !strcasecmp(ext, ".midi")))
+            return "¥";
+
         switch (icon)
         {
             case Icon_Audio: return "¥";

@@ -36,6 +36,10 @@ section("static int audio_head", "/* Notes within one (reference) scale */", """
 static int16_t samples[BUFFER_SIZE];
 static fixed yin_buffer[YIN_BUFFER_SIZE];
 #endif
+#ifndef SIMULATOR
+static uint32_t input_frames;
+static unsigned int input_peak;
+#endif
 
 """)
 replace("static unsigned int sample_rate;", "static const int sample_rate = ROCK_PITCH_RATE;")
@@ -108,6 +112,9 @@ replace("    rb->lcd_update();\n}\n\n#ifndef SIMULATOR", """#ifdef SIMULATOR
         rb->lcd_set_foreground(front_color);
         rb->lcd_putsxy(2, HZ_Y, "No pitch. Check mic or line input.");
     }
+    rb->lcd_set_foreground(front_color);
+    rb->lcd_putsxyf(2, LCD_HEIGHT - font_h, "Frames %lu  Peak %u/32768",
+                   (unsigned long)input_frames, input_peak);
 #endif
     rb->lcd_update();
 }
@@ -195,6 +202,10 @@ static enum plugin_status record_and_get_pitch(void)
         result = PLUGIN_ERROR;
         goto out;
     }
+#ifndef SIMULATOR
+    input_frames = 0;
+    input_peak = 0;
+#endif
     display_frequency(initial_frequency);
 
     while (true)
@@ -238,7 +249,14 @@ static enum plugin_status record_and_get_pitch(void)
 #else
         enum rock_pitch_result capture = rb->pitch_read(&samples);
         if (capture == ROCK_PITCH_READY)
+        {
+            unsigned int peak = 0;
+            for (unsigned int i = 0; i < BUFFER_SIZE; i += 2)
+                peak = MAX(peak, (unsigned int)abs(samples[i]));
+            input_peak = peak;
+            input_frames += BUFFER_SIZE / 2;
             display_frequency(detect_frequency());
+        }
 #endif
         if (capture == ROCK_PITCH_STOPPED)
             break;

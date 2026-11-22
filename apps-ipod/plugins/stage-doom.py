@@ -191,6 +191,24 @@ def rockdoom(source):
 """, "")
     source = replace(source, "       rb->talk_disable(false);\n", "")
     source = replace(source, "   rb->talk_disable(false);\n", "")
+    source = replace(source, """   rb->lcd_setfont(FONT_SYSFIXED);
+
+   // We're using doom's memory management""", """#if LCD_DEPTH > 1
+   rb->lcd_set_backdrop(NULL);
+#endif
+   rb->lcd_setfont(FONT_SYSFIXED);
+   rb->lcd_clear_display();
+   rb->lcd_update();
+
+   // We're using doom's memory management""")
+    source = replace(source, '   printf ("Z_Init: Init zone memory allocation daemon.\\n");\n', '')
+    source = replace(source, '   printf ("M_LoadDefaults: Load system defaults.\\n");\n', '')
+    source = replace(source, '   rb->splash(HZ*2, "Welcome to RockDoom");\n\n', '')
+    source = replace(source, "      return -2;\n", "      return -1;\n")
+    source = replace(source, """       if( result == -1 )
+           return PLUGIN_OK; // Quit was selected
+       else
+           return PLUGIN_ERROR; // Missing base wads""", "       return PLUGIN_OK;")
     source = replace(source, """   while(fpoint>0)
    {
 #if (CONFIG_PLATFORM & PLATFORM_HOSTED)

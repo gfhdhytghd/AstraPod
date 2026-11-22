@@ -10,6 +10,7 @@ out = Path(sys.argv[1]).resolve()
 out.mkdir(parents=True, exist_ok=True)
 code = (root / "apps-ipod/plugins/rock_pitch.c").read_text()
 header = (root / "apps-ipod/plugins/rock_pitch.h").read_text()
+target_audio = (root / "firmware/target/arm/s5l8702/ipod6g/audio-6g.c").read_text()
 usb = (root / "firmware/usbstack/usb_audio.c").read_text()
 
 def function(text, signature):
@@ -30,6 +31,10 @@ prefix = r"""
 #define CONFIG_PLATFORM 1
 #define PLATFORM_NATIVE 1
 #define HAVE_RECORDING
+#define HAVE_MIC_REC
+#define HAVE_LINE_REC
+#define INPUT_SRC_CAPS 3
+#define AUDIO_NUM_SOURCES 3
 #define USB_ENABLE_AUDIO
 #define HZ 100
 #define CACHEALIGN_ATTR __attribute__((aligned(32)))
@@ -65,7 +70,16 @@ static void usb_audio_stop_playback(void)
 static unsigned int queued_request, native_rate = 48000, rate = 48000;
 static int sink = PCM_SINK_BUILTIN, speech_depth, releases, dma_stops, config_checks;
 static bool rec_on, dma_locked, deferred_takeover, fail_start, monitor, tones_stopped;
-static int route = AUDIO_SRC_PLAYBACK;
+int rec_hw_ver = 1;
+static int route = AUDIO_SRC_PLAYBACK, codec_voltage;
+static bool mic_bias, adc_enabled, recording_rate_applied;
+static volatile unsigned int GPIOCMD;
+static void mikey_set_mic_capture(bool enable) { mic_bias = enable; }
+static void pmu_ldo_set_voltage(int ldo, int voltage)
+{
+    assert(ldo == 3);
+    codec_voltage = voltage;
+}
 static long current_tick;
 static void (*more)(void **, size_t *);
 static enum pcm_dma_status (*status_cb)(enum pcm_dma_status);
@@ -102,11 +116,18 @@ static void mixer_set_frequency(unsigned int value)
 {
     assert(sink == PCM_SINK_BUILTIN && !rec_on && recording_reserved);
     assert(speech_depth == 1);
-    if (value & SAMPR_TYPE_REC)
-        assert(releases > 0 && route == (mic_supported && jack_present ? AUDIO_SRC_MIC : AUDIO_SRC_LINEIN) && tones_stopped);
-    else
-        assert(value == native_rate && route == AUDIO_SRC_PLAYBACK && !monitor);
+    assert(value == native_rate && route == AUDIO_SRC_PLAYBACK && !monitor);
+    rate = value;
+}
+static void pcm_set_frequency(unsigned int value)
+{
+    assert(adc_enabled && monitor && value == (44100 | SAMPR_TYPE_REC));
     rate = value & ~SAMPR_TYPE_REC;
+}
+static void pcm_apply_settings(void)
+{
+    assert(adc_enabled && rate == 44100 && recording_reserved);
+    recording_rate_applied = true;
 }
 static void pcm_init_recording(void)
 {
@@ -118,24 +139,34 @@ static void pcm_close_recording(void)
     ++dma_stops;
     tones_stopped = false;
     rec_on = false;
+    recording_rate_applied = false;
     more = NULL;
     status_cb = NULL;
     dma_buffer = NULL;
 }
-static void audio_set_output_source(int source) { assert(source == AUDIO_SRC_PLAYBACK); }
-static void audio_input_mux(int source, unsigned int flags)
+static void audiohw_set_monitor(bool on)
 {
     assert(!rec_on && recording_reserved);
-    assert(flags == (unsigned int)(source == AUDIO_SRC_PLAYBACK ? SRCF_PLAYBACK : SRCF_RECORDING));
-    route = source;
-    monitor = source != AUDIO_SRC_PLAYBACK;
+    monitor = on;
 }
-static void audiohw_set_monitor(bool on) { assert(!on && monitor); monitor = on; }
+static void audiohw_enable_recording(bool mic)
+{
+    assert(!rec_on && !adc_enabled && monitor && codec_voltage == 0xf);
+    assert(mic_bias == mic && GPIOCMD == (mic ? 0xe070f : 0xe070e));
+    route = mic ? AUDIO_SRC_MIC : AUDIO_SRC_LINEIN;
+    adc_enabled = true;
+}
+static void audiohw_disable_recording(void)
+{
+    assert(!rec_on && !monitor);
+    route = AUDIO_SRC_PLAYBACK;
+    adc_enabled = false;
+}
 static int sound_min(int field) { return field == SOUND_MIC_GAIN ? -8 : -12; }
 static int sound_max(int field) { return field == SOUND_MIC_GAIN ? 18 : 20; }
 static void audio_set_recording_gain(int left, int right, int type)
 {
-    assert(!monitor && route == (mic_supported && jack_present ? AUDIO_SRC_MIC : AUDIO_SRC_LINEIN));
+    assert(adc_enabled && monitor && route == (mic_supported && jack_present ? AUDIO_SRC_MIC : AUDIO_SRC_LINEIN));
     if (route == AUDIO_SRC_MIC)
         assert(type == AUDIO_GAIN_MIC && left == 18 && right == 0);
     else
@@ -146,8 +177,9 @@ static void pcm_record_data(void (*callback)(void **, size_t *),
                             enum pcm_dma_status (*status)(enum pcm_dma_status),
                             void *buffer, size_t size)
 {
-    assert((uintptr_t)buffer % 32 == 0 && size == 8192);
-    assert(rate == 22050 && config_checks > 0 && recording_reserved && !monitor);
+    assert((uintptr_t)buffer % 32 == 0 && size == 16384);
+    assert(rate == 44100 && recording_rate_applied && config_checks > 0 &&
+           recording_reserved && adc_enabled && monitor && tones_stopped);
     more = callback;
     status_cb = status;
     dma_buffer = buffer;
@@ -171,15 +203,21 @@ static void complete_block(int16_t signal)
 {
     assert(rec_on && !dma_locked && more);
     int16_t *samples = dma_buffer;
-    for (int i = 0; i < ROCK_PITCH_SAMPLES; ++i)
-        samples[i] = signal + i;
+    for (int i = 0; i < ROCK_PITCH_SAMPLES; i += 2)
+    {
+        samples[2 * i] = signal + i - 2;
+        samples[2 * i + 1] = signal + i - 1;
+        samples[2 * i + 2] = signal + i + 2;
+        samples[2 * i + 3] = signal + i + 3;
+    }
     more(&dma_buffer, &dma_size);
 }
 
 static void restored(void)
 {
     assert(!reserved && !rec_on && !more && !status_cb && !dma_buffer);
-    assert(!recording_reserved && !speech_depth && !monitor);
+    assert(!recording_reserved && !speech_depth && !monitor && !adc_enabled && !mic_bias);
+    assert(GPIOCMD == 0xe070e && codec_voltage == 0x9);
     assert(rate == native_rate && route == AUDIO_SRC_PLAYBACK);
     assert(usb_audio_reserve_recording());
     usb_audio_release_recording();
@@ -233,7 +271,10 @@ int main(void)
     jack_present = true;
     assert(rock_pitch_start());
     rock_pitch_prepare(queued_request);
-    assert(route == AUDIO_SRC_MIC);
+    assert(route == AUDIO_SRC_MIC && mic_bias);
+    complete_block(4512);
+    assert(rock_pitch_read(&samples) == ROCK_PITCH_READY);
+    assert(samples[0] == 4512);
     jack_present = false;
     assert(rock_pitch_read(&samples) == ROCK_PITCH_NO_INPUT);
     restored();
@@ -322,7 +363,7 @@ assembly = (prefix + remove_includes(header)
             + function(usb, "bool usb_audio_reserve_recording(void)")
             + function(usb, "void usb_audio_release_recording(void)")
             + function(usb, "static int usb_audio_set_interface(int intf, int alt)")
-            + remove_includes(code) + suffix)
+            + remove_includes(target_audio) + remove_includes(code) + suffix)
 source = out / "capture-probe.c"
 source.write_text(assembly)
 probe = out / "capture-probe"

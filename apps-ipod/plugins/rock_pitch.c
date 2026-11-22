@@ -3,7 +3,9 @@
 #include "kernel.h"
 
 #ifdef HAVE_ROCK_PITCH_DMA
-#include <string.h>
+/* Capture at the recorder's 44.1 kHz rate and analyze at 22.05 kHz. */
+#define PITCH_CAPTURE_RATE (2 * ROCK_PITCH_RATE)
+
 #include "system.h"
 #include "audio.h"
 #include "audio/audio_thread.h"
@@ -11,6 +13,7 @@
 #include "pcm.h"
 #include "pcm_mixer.h"
 #include "pcm_sampr.h"
+#include "pcm-internal.h"
 #include "settings/settings.h"
 #include "sound.h"
 #include "speech/talk.h"
@@ -33,7 +36,7 @@ static long deadline;
 
 /* The completion callback publishes the finished block and selects the other
  * block for DMA. Only the reader copies data into module memory. */
-static int16_t capture[2][ROCK_PITCH_SAMPLES] CACHEALIGN_ATTR;
+static int16_t capture[2][2 * ROCK_PITCH_SAMPLES] CACHEALIGN_ATTR;
 static int writing;
 static volatile int ready;
 
@@ -190,11 +193,12 @@ void rock_pitch_prepare(unsigned int pending)
     mixer_channel_stop(PCM_MIXER_CHAN_BEEP);
     saved_rate = mixer_get_frequency();
     pcm_init_recording();
-    audio_set_output_source(AUDIO_SRC_PLAYBACK);
     /* Use the analog mux only. A tuner session can end on the USB thread,
      * which must not enter the serial dock's shared iAP transmit path. */
     audio_input_mux(capture_source, SRCF_RECORDING);
-    audiohw_set_monitor(false);
+    pcm_set_frequency(PITCH_CAPTURE_RATE | SAMPR_TYPE_REC);
+    audio_set_output_source(capture_source);
+    pcm_apply_settings();
     if (capture_source == AUDIO_SRC_MIC)
     {
         int gain = pitch_gain(SOUND_MIC_GAIN, global_settings.rec_mic_gain);
@@ -207,7 +211,6 @@ void rock_pitch_prepare(unsigned int pending)
         audio_set_recording_gain(left, right, AUDIO_GAIN_LINEIN);
     }
 
-    mixer_set_frequency(ROCK_PITCH_RATE | SAMPR_TYPE_REC);
     ready = -1;
     writing = 0;
     running = true;
@@ -262,7 +265,12 @@ enum rock_pitch_result rock_pitch_read(int16_t (*samples)[ROCK_PITCH_SAMPLES])
             pcm_rec_lock();
             if (pcm_is_recording() && ready >= 0)
             {
-                memcpy(*samples, capture[ready], sizeof(*samples));
+                const int16_t *input = capture[ready];
+                for (size_t i = 0; i < ROCK_PITCH_SAMPLES; i += 2)
+                {
+                    (*samples)[i] = (input[2 * i] + input[2 * i + 2]) / 2;
+                    (*samples)[i + 1] = (input[2 * i + 1] + input[2 * i + 3]) / 2;
+                }
                 ready = -1;
                 deadline = current_tick + 2 * HZ;
                 result = ROCK_PITCH_READY;

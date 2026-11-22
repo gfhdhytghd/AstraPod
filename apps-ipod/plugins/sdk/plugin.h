@@ -17,6 +17,7 @@
 #include "plugins/rock_overlay.h"
 #include "plugins/rock_image_overlay.h"
 #include "plugins/rock_resident.h"
+#include "plugins/rock_tsr.h"
 #include "plugins/rock_phase3_settings.h"
 #include "plugins/rock_specialist.h"
 #include "bidi.h"
@@ -108,6 +109,8 @@
 #define ROCK_IMAGE_MAGIC ROCK_IMAGE_DECODER_MAGIC
 #elif defined(ROCK_OVERLAY_IMAGE)
 #define ROCK_IMAGE_MAGIC ROCK_OVERLAY_MAGIC
+#elif defined(ROCK_TSR_IMAGE)
+#define ROCK_IMAGE_MAGIC ROCK_TSR_MAGIC
 #else
 #define ROCK_IMAGE_MAGIC PLUGIN_MAGIC
 #endif

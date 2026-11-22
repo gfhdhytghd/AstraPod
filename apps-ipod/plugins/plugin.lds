@@ -12,6 +12,9 @@
 #include "plugins/rock_image_overlay.h"
 #define IMGVDECODER_OFFSET ROCK_IMAGE_DECODER_OFFSET
 #endif
+#ifdef ASTRAPOD_TSR
+#include "plugins/rock_tsr.h"
+#endif
 
 /* These output formats should be in the config-files */
 
@@ -241,6 +244,9 @@ OUTPUT_FORMAT(elf32-littlemips)
 #ifdef CODEC
 #define THIS_LENGTH CODEC_SIZE
 #define THIS_ORIGIN CODEC_ORIGIN
+#elif defined ASTRAPOD_TSR
+#define THIS_LENGTH ROCK_TSR_ARENA_BYTES
+#define THIS_ORIGIN rock_tsr_origin
 #elif defined OVERLAY_OFFSET
 #define THIS_LENGTH (DRAMSIZE - OVERLAY_OFFSET)
 #define THIS_ORIGIN (DRAMORIG + OVERLAY_OFFSET)

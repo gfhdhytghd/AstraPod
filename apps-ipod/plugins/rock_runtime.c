@@ -98,6 +98,12 @@ void rock_media_shutdown(void)
     mutex_unlock(&media_mutex);
 }
 
+void rock_power_shutdown(void)
+{
+    rock_tsr_stop(ROCK_TSR_POWER);
+    rock_media_shutdown();
+}
+
 void rock_playback_takeover(void)
 {
     rock_h264_audio_revoke();
@@ -309,6 +315,7 @@ static void restore_input_settings(void)
 
 void rock_usb_takeover(void)
 {
+    rock_tsr_stop(ROCK_TSR_USB);
     if (!filename || usb_taken)
         return;
 #ifdef HAVE_PODLINK_PLUGIN_TEST
@@ -631,13 +638,14 @@ static const struct plugin_api api = {
 
 static bool compatible(const struct plugin_header *header, uint32_t magic)
 {
+    uint32_t flags = magic == ROCK_TSR_MAGIC ? 0 : ROCK_IMAGE_LARGE_STACK;
     return header->lc_hdr.magic == magic &&
            header->lc_hdr.target_id == TARGET_ID &&
            header->lc_hdr.api_version == PLUGIN_API_VERSION &&
            header->platform == CONFIG_PLATFORM &&
            header->header_size == sizeof(*header) &&
            header->api_size == sizeof(api) &&
-           (header->flags & ~ROCK_IMAGE_LARGE_STACK) == 0 &&
+           (header->flags & ~flags) == 0 &&
            !memcmp(header->fingerprint, fingerprint, sizeof(fingerprint));
 }
 
@@ -674,6 +682,12 @@ static bool overlay_header_valid(const void *header, const unsigned char *arena,
 {
     return native_image_valid(header, arena, capacity, bytes,
                               ROCK_OVERLAY_MAGIC);
+}
+
+static bool tsr_header_valid(const void *header, const unsigned char *arena,
+                             size_t capacity, size_t bytes)
+{
+    return native_image_valid(header, arena, capacity, bytes, ROCK_TSR_MAGIC);
 }
 #endif
 
@@ -838,12 +852,21 @@ static int run_rock(const char *path, const char *file,
     if (usb_exclusive_storage())
         return PLUGIN_USB_CONNECTED;
 #endif
+    size_t length = strlen(path);
+    size_t suffix = sizeof(ROCK_TSR_SUFFIX) - 1;
+    bool resident = !overlay && length >= suffix &&
+        !strcasecmp(path + length - suffix, ROCK_TSR_SUFFIX);
+    if (resident)
+        rock_tsr_stop(ROCK_TSR_REPLACED);
+
     void *handle;
 #if CONFIG_BINFMT == BINFMT_ROCK
     struct plugin_header disk_header;
-    handle = lc_open_checked(path, arena, capacity, &disk_header, sizeof(disk_header),
-                             overlay ? overlay_header_valid :
-                                       native_header_valid);
+    handle = lc_open_checked(path, resident ? rock_tsr_arena : arena,
+        resident ? sizeof(rock_tsr_arena) : capacity,
+        &disk_header, sizeof(disk_header),
+        resident ? tsr_header_valid :
+        overlay ? overlay_header_valid : native_header_valid);
 #else
     handle = lc_open(path, arena, capacity);
 #endif
@@ -853,14 +876,18 @@ static int run_rock(const char *path, const char *file,
     struct plugin_header *module = lc_get_header(handle);
     int result = PLUGIN_ERROR;
 #if CONFIG_BINFMT == BINFMT_DLOPEN
-    if (!rock_host_header_valid(module) || !compatible(module, overlay ? ROCK_OVERLAY_MAGIC : PLUGIN_MAGIC) ||
+    uint32_t magic = resident ? ROCK_TSR_MAGIC :
+                     overlay ? ROCK_OVERLAY_MAGIC : PLUGIN_MAGIC;
+    if (!rock_host_header_valid(module) || !compatible(module, magic) ||
         module->lc_hdr.load_addr || module->lc_hdr.end_addr ||
         module->file_end || module->bss_start)
         goto unload;
     tail = arena;
 #else
-    tail = arena + ALIGN_UP((uintptr_t)module->lc_hdr.end_addr - (uintptr_t)arena,
-                            ROCK_BUFFER_ALIGNMENT);
+    tail = arena;
+    if (!resident)
+        tail += ALIGN_UP((uintptr_t)module->lc_hdr.end_addr - (uintptr_t)arena,
+                         ROCK_BUFFER_ALIGNMENT);
 #endif
     tail_size = arena + capacity - tail;
     const char *leaf = strrchr(path, '/');
@@ -877,6 +904,9 @@ static int run_rock(const char *path, const char *file,
     struct rock_invocation call = {
         module, path, file, saved_pixels, widget_pixels, shell
     };
+    if (resident)
+        rock_tsr_begin(handle, module);
+
     if (module->flags & ROCK_IMAGE_LARGE_STACK)
     {
         result = rock_large_stack_launch(invoke_module, &call);
@@ -889,7 +919,8 @@ static int run_rock(const char *path, const char *file,
     tail_size = 0;
     decoder_base = NULL;
     decoder_capacity = 0;
-
+    if (resident)
+        return rock_tsr_finish(result == PLUGIN_OK) ? result : PLUGIN_ERROR;
 
 #if CONFIG_BINFMT == BINFMT_DLOPEN
 unload:

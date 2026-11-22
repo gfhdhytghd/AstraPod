@@ -128,7 +128,7 @@ static bool clean_shutdown(enum shutdown_type sd_type,
         }
 
         rock_resident_shutdown(batt_safe);
-        rock_media_shutdown();
+        rock_power_shutdown();
 
         /* A USB dock is told now, while the saves below give the USB
          * thread time to send it */

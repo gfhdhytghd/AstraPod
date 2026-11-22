@@ -162,6 +162,7 @@ ROCK_SLOT(struct dirinfo (*dir_get_info)(DIR *, struct DIRENT *), dir_get_info, 
 
 /* Foreground arena and data */
 ROCK_SLOT(bool (*plugin_usb_taken)(void), plugin_usb_taken, rock_usb_taken)
+ROCK_DIRECT(rock_tsr_register)
 ROCK_SLOT(void *(*plugin_get_buffer)(size_t *), plugin_get_buffer, rock_get_buffer)
 ROCK_SLOT(size_t (*plugin_reserve_buffer)(size_t), plugin_reserve_buffer, rock_reserve_buffer)
 ROCK_SLOT(void *(*plugin_claim_scratch)(size_t, size_t, size_t *),

@@ -99,6 +99,7 @@ ifneq ($(APP_TYPE),sdl-sim)
 ROCK_LINK_INPUT += $(ROCK_OBJECTS)/lib/gcc-support.o
 endif
 include $(APPSDIR)/plugins/overlay-compat.make
+include $(APPSDIR)/plugins/tsr-compat.make
 ifeq ($(ROCK_DOOM),1)
 include $(APPSDIR)/plugins/doom-compat.make
 endif

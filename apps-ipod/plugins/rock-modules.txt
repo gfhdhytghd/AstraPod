@@ -158,6 +158,7 @@ games/wormlet
 games/xobox
 games/xrick
 games/zxbox
+games/xworld
 viewers/chip8
 viewers/lua
 viewers/mp3_encoder

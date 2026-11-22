@@ -97,6 +97,9 @@ include $(APPSDIR)/plugins/shortcuts-compat.make
 include $(APPSDIR)/plugins/lastfm.make
 include $(APPSDIR)/plugins/retro-compat.make
 include $(APPSDIR)/plugins/xrick-compat.make
+ifneq (,$(filter games/xworld,$(ROCK_MODULES)))
+include $(APPSDIR)/plugins/xworld-compat.make
+endif
 include $(APPSDIR)/plugins/open-plugins.make
 ifneq ($(APP_TYPE),sdl-sim)
 # The compiler may emit libcalls even with -fno-builtin.

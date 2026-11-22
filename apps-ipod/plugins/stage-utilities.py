@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Stage AstraPod utility adapters from upstream sources. GPL-2.0-or-later."""
+from hashlib import sha256
 from pathlib import Path
 import sys
 
@@ -107,10 +108,16 @@ static bool stop_autoscroll(int action)""")
 def alarmclock(source):
     source = replace(source, 'quit = false, usb = false, waiting',
                      'quit = false, waiting')
+    source = replace(source, '    pause_audio();', '''    struct tm *now = rb->get_time();
+    alarms[0] = (now->tm_hour + (now->tm_min == 59)) % 24;
+    alarms[1] = (now->tm_min + 1) % 60;
+    pause_audio();''')
     source = replace(source, '        button = get_button();', """        button = get_button();
         if (IS_SYSEVENT(button) &&
             rb->default_event_handler(button) == SYS_USB_CONNECTED)
             return PLUGIN_USB_CONNECTED;""")
+    source = replace(source, '            quit = true;\n\n        if (waiting)',
+                     '            break;\n\n        if (waiting)')
     source = replace(source, """                default:
                     if (rb->default_event_handler(button) == SYS_USB_CONNECTED)
                         quit = usb = true;
@@ -119,6 +126,222 @@ def alarmclock(source):
     return replace(source, '''    return (usb) ? PLUGIN_USB_CONNECTED
                  : (done ? PLUGIN_GOTO_WPS : PLUGIN_OK);''',
                    '    return done ? PLUGIN_GOTO_WPS : PLUGIN_OK;')
+
+
+def check_digest(source, digest):
+    if sha256(source.encode()).hexdigest() != digest:
+        raise ValueError("review the AstraPod adapter for this source")
+
+
+def calendar(source):
+    check_digest(source, "d3d3a07fc8e4788dc149d61e54053b4b2ad3ffcbe76fb3cbe532bf6d0edd194d")
+    source = replace(source, '#define TEMP_FILE PLUGIN_APPS_DATA_DIR "/~temp"',
+                     '#define TEMP_FILE MEMO_FILE ".tmp"')
+    source = replace(source, '    int     file_pointer_start;\n    int     file_pointer_end;',
+                     '    off_t   file_pointer_start;\n    off_t   file_pointer_end;')
+    start = source.index('static void load_memo(')
+    end = source.index('static void add_memo(', start)
+    memo_adapter = Path(__file__).with_name("calendar-memo.inc").read_text()
+    source = source[:start] + memo_adapter + '\n' + source[end:]
+    source = replace(source, '    shown->wday = tm->tm_wday - 1;',
+                     '    shown->wday = (tm->tm_wday + 6) % 7;')
+    source = replace(source, 'static void add_memo(struct shown *shown, int type)\n{',
+                     '''static void add_memo(struct shown *shown, int type)
+{
+    if (memos_in_memory >= MAX_MEMOS_IN_A_MONTH)
+    {
+        rb->splash(HZ, "Too many events");
+        return;
+    }''')
+    source = replace(source, '    while (!exit)\n    {\n        switch (rb->do_menu',
+                     '    while (!exit && !rb->plugin_usb_taken())\n    {\n        switch (rb->do_menu')
+    source = replace(source, '    while (!exit)\n    {\n        button = rb->get_action',
+                     '    while (!exit && !been_in_usb_mode)\n    {\n        button = rb->get_action')
+    source = replace(source, '                return edit_memo(pointer_array[selected], shown);',
+                     '''                rb->gui_synclist_scroll_stop(&gui_memos);
+                return edit_memo(pointer_array[selected], shown);''')
+    source = replace(source, '            case ACTION_STD_CANCEL:\n                return false;',
+                     '''            case ACTION_STD_CANCEL:
+                rb->gui_synclist_scroll_stop(&gui_memos);
+                return false;''')
+    source = replace(source, '    while (!exit)\n    {\n        button = rb->button_get',
+                     '    while (!exit && !been_in_usb_mode && !rb->plugin_usb_taken())\n    {\n        button = rb->button_get')
+    source = replace(source, '    if (rb->memcmp(&old_info, &info, sizeof(struct info)))',
+                     '''    if (rb->plugin_usb_taken() || been_in_usb_mode)
+        return PLUGIN_USB_CONNECTED;
+    if (rb->memcmp(&old_info, &info, sizeof(struct info)))''')
+    return replace(source, '    return been_in_usb_mode?PLUGIN_USB_CONNECTED:PLUGIN_OK;',
+                   '    return PLUGIN_OK;')
+
+
+def shopper(source):
+    check_digest(source, "dc1c5073281f224f034f8af00141f9754b23f6b531451ddeb483c608604e8f60")
+    start = source.index('static bool save_changes(')
+    end = source.index('static void create_view(', start)
+    writer = Path(__file__).with_name("shopper-file.inc").read_text()
+    source = source[:start] + writer + '\n' + source[end:]
+    source = replace(source, '#define MAX_LINE_LEN (DESC_SIZE + 1)',
+                     '#define MAX_LINE_LEN (DESC_SIZE + 4)')
+    source = replace(source, 'static char temp_line[DESC_SIZE];',
+                     'char temp_line[MAX_LINE_LEN];')
+    source = replace(source, '    static int count = 0;\n    int linelen;',
+                     '    int read, linelen;')
+    source = replace(source, '    total_item_count = 0;\n\n    fd',
+                     '''    total_item_count = 0;
+    view = EDIT_SHOPPING_LIST;
+    show_categories = true;
+    update_category_string();
+
+    fd''')
+    source = replace(source, '    while (rb->read_line(fd,temp_line,MAX_LINE_LEN))\n    {',
+                     '''    while ((read = rb->read_line(fd, temp_line, sizeof(temp_line))) > 0)
+    {
+        if (read >= MAX_LINE_LEN - 1)
+            goto invalid;
+        if (!temp_line[0])
+            continue;''')
+    source = replace(source, 'if (val <= 2)', 'if (val <= 1)')
+    start = source.index('            new_item.id = count;')
+    end = source.index('    }\n    rb->close(fd);', start)
+    source = source[:start] + '''            const char *description = temp_line;
+            new_item.flag = FL_CLEARED;
+            switch (*description)
+            {
+                case '#': new_item.flag = FL_CATEGORY; description++; break;
+                case '!': new_item.flag = FL_SET; description++; break;
+                case ' ': description++; break;
+            }
+            if (total_item_count == MAX_LIST_SIZE ||
+                rb->strlcpy(new_item.desc, description, sizeof(new_item.desc)) >=
+                sizeof(new_item.desc))
+                goto invalid;
+            new_item.id = total_item_count;
+            items_list[total_item_count++] = new_item;
+        }
+''' + source[end:]
+    source = replace(source, '    rb->close(fd);\n    changed = false;\n    return PLUGIN_OK;',
+                     '''    if (read < 0)
+        goto invalid;
+    rb->close(fd);
+    changed = false;
+    return PLUGIN_OK;
+
+invalid:
+    rb->close(fd);
+    rb->splash(HZ * 2, "Shopping list cannot be read");
+    return PLUGIN_ERROR;''')
+    source = replace(source, 'static bool toggle(int selected_item)\n{',
+                     '''static bool toggle(int selected_item)
+{
+    if (selected_item < 0 || selected_item >= view_item_count)
+        return false;''')
+    start = source.index('#if LCD_DEPTH > 1', source.index('enum plugin_status plugin_start'))
+    end = source.index('    /* now dump it in the list */', start)
+    source = source[:start] + '''    if (!parameter)
+    {
+        rb->splash(HZ, "Open a .shopper file in Files");
+        return PLUGIN_OK;
+    }
+    if (rb->strlcpy(filename, parameter, sizeof(filename)) >= sizeof(filename) ||
+        load_file() != PLUGIN_OK)
+        return PLUGIN_ERROR;
+
+''' + source[end:]
+    source = replace(source, '    rb->lcd_update();\n\n    while (!exit)',
+                     '    while (!exit && !rb->plugin_usb_taken())')
+    menu = '                        switch (rb->do_menu(&menu, NULL, NULL, false))\n                        {'
+    if source.count(menu) != 2:
+        raise ValueError("expected two Shopper menus")
+    source = source.replace(menu, menu + '\n                            case MENU_ATTACHED_USB:\n                                return PLUGIN_USB_CONNECTED;')
+    source = replace(source, '                exit = 1;\n                break;\n            }\n        }',
+                     '''                exit = 1;
+                break;
+            }
+            default:
+                if (rb->default_event_handler(button) == SYS_USB_CONNECTED)
+                    return PLUGIN_USB_CONNECTED;
+                break;
+        }''')
+    return replace(source, '    return PLUGIN_OK;\n}',
+                   '    return rb->plugin_usb_taken() ? PLUGIN_USB_CONNECTED : PLUGIN_OK;\n}')
+
+
+def settings_dumper(text):
+    check_digest(text, "4d777eb3937c8d605ad13187a35e7bab82a6b97c70dd3693b14b6dedcb908251")
+    text = text.replace("rb->fdprintf(", "dump_print(")
+    text = replace(text, 'static int setting_count = 0;', '''#define TEMP_FILE FILENAME ".tmp"
+static int written_count;
+static bool write_failed;
+
+#define dump_print(...) do { \\
+    if (!write_failed && rb->fdprintf(__VA_ARGS__) < 0) \\
+        write_failed = true; \\
+} while (0)''')
+    text = replace(text, '    if (setting->cfg_name == NULL)',
+                   '    if (setting->cfg_name == NULL || (setting->flags & F_RESUMESETTING))')
+    text = replace(text, '    else if (!group && (setting->flags&(F_THEMESETTING|\n                                        F_RECSETTING|',
+                   '    else if (!group && (setting->flags&(F_RECSETTING|')
+    text = replace(text, '    setting_count++;\n    if (setting_count%10 == 0)',
+                   '    written_count++;\n    if (written_count % 10 == 0)')
+    text = replace(text, '                     (setting->choice_setting->cfg_vals == NULL))',
+                   '''                     !(setting->flags & F_CHOICETALKS) &&
+                     (setting->choice_setting->cfg_vals == NULL))''')
+    text = replace(text, '                    rb->snprintf(temp, 64, "%s, ", \n'
+                   '                                 setting->choice_setting->desc[i]);',
+                   '''                    const unsigned char *label = setting->choice_setting->desc[i];
+                    int id = P2ID(label);
+                    rb->snprintf(temp, sizeof(temp), "%s, ", id < 0 ? label : rb->str(id));''')
+    text = text.replace('rb->strcat(text, temp);', 'rb->strlcat(text, temp, sizeof(text));')
+    text = replace(text, '            rb->snprintf(text, sizeof(text), "Text.. Up to %d characters. ",',
+                   '''            if (!setting->filename_setting)
+            {
+                rb->strlcpy(text, "Text", sizeof(text));
+                break;
+            }
+            rb->snprintf(text, sizeof(text), "Text.. Up to %d characters. ",''')
+    text = text.replace('rb->strcat(text, ', 'rb->strlcat(text, ')
+    text = replace(text, '''                rb->strlcat(text, "Should start with:\\"");
+                rb->strlcat(text, setting->filename_setting->prefix);
+                rb->strlcat(text, "\\" and end with:\\"");
+                rb->strlcat(text, setting->filename_setting->suffix);
+                rb->strlcat(text, "\\"");''',
+                   '''                size_t used = rb->strlen(text);
+                rb->snprintf(text + used, sizeof(text) - used, "Prefix: %s, suffix: %s",
+                             setting->filename_setting->prefix,
+                             setting->filename_setting->suffix);''')
+    text = replace(text, '''    fd = rb->open(FILENAME, O_CREAT|O_TRUNC|O_WRONLY, 0666);''',
+                   '''    const char *lines[] = {"Write settings reference?", FILENAME};
+    const struct text_message message = { lines, ARRAYLEN(lines) };
+    enum yesno_res answer = rb->gui_syncyesno_run(&message, NULL, NULL);
+    if (answer != YESNO_YES)
+        return answer == YESNO_USB ? PLUGIN_USB_CONNECTED : PLUGIN_OK;
+
+    fd = rb->open(TEMP_FILE, O_CREAT | O_EXCL | O_WRONLY, 0666);''')
+    text = replace(text, '''    dump_print(fd, "# .cfg file created by rockbox %s - "
+            "http://www.rockbox.org\\r\\n\\r\\n", rb->rbversion);''',
+                   '''    dump_print(fd, "# AstraPod %s settings reference\\r\\n\\r\\n", rb->rbversion);''')
+    text = replace(text, '''    dump_print(fd, "\\r\\n\\r\\n# -- Theme settings -- #\\r\\n");
+    for(i=0;i<setting_count;i++)
+        write_setting(&list[i], fd, F_THEMESETTING);
+''', '')
+    text = replace(text, '''    dump_print(fd, "\\r\\n\\r\\n# Total settings count: %d\\r\\n", setting_count);
+    rb->close(fd);
+    rb->splash(HZ, "Done!");''',
+                   '''    dump_print(fd, "\\r\\n\\r\\n# Total settings count: %d\\r\\n", written_count);
+    if (!write_failed)
+        write_failed = rb->file_sync(fd) < 0;
+    if (rb->close(fd) < 0)
+        write_failed = true;
+    if (!write_failed)
+        write_failed = rb->rename(TEMP_FILE, FILENAME) < 0;
+    if (write_failed)
+    {
+        rb->remove(TEMP_FILE);
+        rb->splash(HZ, "Could not write settings reference");
+        return PLUGIN_ERROR;
+    }
+    rb->splash(HZ, "Settings reference saved");''')
+    return text
 
 
 def darts(source):
@@ -390,7 +613,8 @@ if __name__ == "__main__":
     infile, outfile = map(Path, sys.argv[1:])
     adapters = {
         "db_folder_select": folder_picker, "dict": dictionary,
-        "credits": credits, "alarmclock": alarmclock,
-        "dart_scorer": darts, "resistor": resistor, "vu_meter": vu_meter,
+        "credits": credits, "alarmclock": alarmclock, "calendar": calendar,
+        "dart_scorer": darts, "resistor": resistor, "shopper": shopper,
+        "settings_dumper": settings_dumper, "vu_meter": vu_meter,
     }
     outfile.write_text(adapters[infile.stem](infile.read_text()))

@@ -2375,6 +2375,35 @@ static int search_playlist_file_callback(int action,
 MENUITEM_FUNCTION(search_playlist_file_item, MENU_FUNC_CHECK_RETVAL,
                   ID2P(LANG_SEARCH_IN_PLAYLIST), search_playlist_file,
                   search_playlist_file_callback, Icon_NOICON);
+
+static const char waveform_module[] = VIEWERS_DIR "/wavview.rock";
+
+static int view_waveform(void)
+{
+    int result = rock_open_from_browser(waveform_module, selected_file.path);
+    context_menu_result = result == GO_TO_ROOT ? ONPLAY_MAINMENU : ONPLAY_OK;
+    return result;
+}
+
+static int view_waveform_callback(int action, const struct menu_item_ex *item,
+                                  struct gui_synclist *list)
+{
+    (void)item;
+    (void)list;
+    if (action != ACTION_REQUEST_MENUITEM)
+        return action;
+    if (selected_file.context != CONTEXT_TREE || !selected_file.path ||
+        (selected_file.attr & FILE_ATTR_MASK) != FILE_ATTR_AUDIO)
+        return ACTION_EXIT_MENUITEM;
+    const char *extension = strrchr(selected_file.path, '.');
+    if (!extension || strcasecmp(extension, ".wav") || !file_exists(waveform_module))
+        return ACTION_EXIT_MENUITEM;
+    return action;
+}
+
+MENUITEM_FUNCTION(view_waveform_item, MENU_FUNC_CHECK_RETVAL,
+                  ID2P(LANG_VIEW_WAVEFORM), view_waveform,
+                  view_waveform_callback, Icon_NOICON);
 #endif
 
 /* Select...: the browser turns the list into a selecting one, starting from
@@ -2489,6 +2518,7 @@ MAKE_ONPLAYMENU_TITLED( browser_context_menu,
            &view_playlist_item,
 #ifdef ASTRAPOD_ROCK_COMPAT
            &search_playlist_file_item,
+           &view_waveform_item,
 #endif
            &replace_pl_item, &replace_shuf_pl_item,
            &i_pl_item, &i_first_pl_item, &i_last_pl_item,

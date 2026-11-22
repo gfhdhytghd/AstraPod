@@ -95,11 +95,17 @@ int rock_read_line(int fd, char *buf, int size)
     return file_slot(fd) >= 0 ? read_line(fd, buf, size) : -1;
 }
 
+struct rock_file_print {
+    int fd;
+    bool failed;
+};
+
 static int write_char(void *opaque, int ch)
 {
-    int fd = *(int *)opaque;
+    struct rock_file_print *print = opaque;
     unsigned char byte = ch;
-    return write(fd, &byte, 1) == 1 ? 1 : -1;
+    print->failed = write(print->fd, &byte, 1) != 1;
+    return print->failed ? -1 : 1;
 }
 
 int rock_fdprintf(int fd, const char *fmt, ...)
@@ -109,9 +115,10 @@ int rock_fdprintf(int fd, const char *fmt, ...)
 
     va_list args;
     va_start(args, fmt);
-    int result = vuprintf(write_char, &fd, fmt, args);
+    struct rock_file_print print = { .fd = fd };
+    int result = vuprintf(write_char, &print, fmt, args);
     va_end(args);
-    return result;
+    return print.failed ? -1 : result;
 }
 
 bool rock_file_exists(const char *path)

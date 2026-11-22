@@ -43,7 +43,7 @@ if [ -n "$1" ]; then TOP=$1; else TOP=..; fi
 case "${2:-${COREAPPSDIR:-}}" in
     apps-ipod|*/apps-ipod)
         ASTRA_CHANNEL=Beta
-        ASTRA_VERSION=0.1.0
+        ASTRA_VERSION=0.2.0
         build_id=$(git -C "$TOP" rev-parse --verify --short=10 HEAD 2>/dev/null) ||
             build_id=${VERSION:-unknown}
         printf 'AstraPod %s %s (%s)\n' "$ASTRA_CHANNEL" "$ASTRA_VERSION" "$build_id"

@@ -24,6 +24,7 @@ static bool running;
 
 #ifdef HAVE_ROCK_PITCH_DMA
 static bool reserved;
+static bool prepare_failed;
 static bool speech_disabled;
 static unsigned int request;
 static unsigned int saved_rate;
@@ -52,6 +53,14 @@ static int pitch_gain(int setting, int gain)
 {
     return MAX(sound_min(setting), MIN(sound_max(setting), gain));
 }
+
+static bool pitch_input_available(int source)
+{
+    return !usb_audio_get_active() &&
+           pcm_current_sink() == PCM_SINK_BUILTIN &&
+           (source == AUDIO_SRC_LINEIN ||
+            (source == AUDIO_SRC_MIC && mikey_supported()));
+}
 #endif
 
 static void pitch_stop_locked(void)
@@ -75,6 +84,7 @@ static void pitch_stop_locked(void)
         usb_audio_release_recording();
         reserved = false;
     }
+    prepare_failed = false;
 #endif
     running = false;
 }
@@ -115,14 +125,13 @@ bool rock_pitch_start(void)
     mutex_lock(&pitch_mutex);
     bool start = allowed && !running;
 #ifdef HAVE_ROCK_PITCH_DMA
-    start = start && !reserved && !usb_audio_get_active() &&
-        pcm_current_sink() == PCM_SINK_BUILTIN &&
-        (global_settings.rec_source == AUDIO_SRC_LINEIN ||
-         (global_settings.rec_source == AUDIO_SRC_MIC && mikey_supported())) &&
-        usb_audio_reserve_recording();
+    start = start && !reserved &&
+            pitch_input_available(global_settings.rec_source) &&
+            usb_audio_reserve_recording();
     if (start)
     {
         reserved = true;
+        prepare_failed = false;
         deadline = current_tick + 2 * HZ;
         /* The audio thread must release playback before changing the route.
          * A queued USB takeover can discard this request without blocking UI. */
@@ -162,6 +171,14 @@ void rock_pitch_prepare(unsigned int pending)
     if (!reserved || pending != request)
         goto done;
 
+    int source = global_settings.rec_source;
+    if (!pitch_input_available(source) || TIME_AFTER(current_tick, deadline))
+    {
+        pitch_stop_locked();
+        prepare_failed = true;
+        goto done;
+    }
+
     talk_disable(true);
     speech_disabled = true;
     /* UI tones can start the playback clock while capture owns it. */
@@ -169,7 +186,6 @@ void rock_pitch_prepare(unsigned int pending)
     saved_rate = mixer_get_frequency();
     pcm_init_recording();
     audio_set_output_source(AUDIO_SRC_PLAYBACK);
-    int source = global_settings.rec_source;
     /* Use the analog mux only. A tuner session can end on the USB thread,
      * which must not enter the serial dock's shared iAP transmit path. */
     audio_input_mux(source, SRCF_RECORDING);
@@ -221,10 +237,19 @@ void rock_pitch_sink_unlock(void)
 
 enum rock_pitch_result rock_pitch_read(int16_t (*samples)[ROCK_PITCH_SAMPLES])
 {
+#ifdef HAVE_ROCK_PITCH_DMA
+    if (!samples)
+        return ROCK_PITCH_FAILED;
+#endif
     enum rock_pitch_result result = ROCK_PITCH_STOPPED;
     mutex_lock(&pitch_mutex);
 #ifdef HAVE_ROCK_PITCH_DMA
-    if (reserved)
+    if (prepare_failed)
+    {
+        prepare_failed = false;
+        result = ROCK_PITCH_FAILED;
+    }
+    else if (reserved)
     {
         result = ROCK_PITCH_WAITING;
         if (running)

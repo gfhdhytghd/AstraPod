@@ -43,6 +43,7 @@ replace('"/.pitch_detector_settings"', '"/.astrapod_pitch_detector"')
 replace("    unsigned record_gain;\n", "")
 replace("        .record_gain = rb->global_settings->rec_mic_gain,\n", "")
 section("    if(fd < 0){ /* file doesn't exist */", "\n/*---------------------------------------------------------------------*/", """    tuner_settings_reset();
+    hdd_settings = settings;
     if (fd < 0)
         return;
 
@@ -67,6 +68,22 @@ section("    if(fd < 0){ /* file doesn't exist */", "\n/*-----------------------
     }
 }
 """)
+section("    int fd = rb->creat(SETTINGS_FILENAME, 0666);",
+        "\n/*=================================================================*/", """\
+    const char *temp = SETTINGS_FILENAME ".tmp";
+    int fd = rb->open(temp, O_WRONLY | O_CREAT | O_EXCL, 0666);
+    if (fd >= 0)
+    {
+        bool complete = rb->write(fd, &settings, sizeof(settings)) ==
+                        sizeof(settings) && rb->file_sync(fd) == 0;
+        if (rb->close(fd) == 0 && complete &&
+            rb->rename(temp, SETTINGS_FILENAME) == 0)
+            return;
+        rb->remove(temp);
+    }
+    rb->splash(HZ, "Unable to save tuner settings");
+}
+""")
 replace('    backlight_use_settings();\n#ifdef HAVE_SCHEDULER_BOOSTCTRL\n    rb->cancel_cpu_boost();\n#endif\n',
         '    backlight_use_settings();\n')
 replace('                        "Listening Volume",\n', '')
@@ -83,7 +100,8 @@ replace("rb->lcd_set_foreground(LCD_RGBPACK(255,255,255)); /* Color screens */",
         "rb->lcd_set_foreground(front_color);")
 replace("    rb->lcd_update();\n}\n\n#ifndef SIMULATOR", """#ifdef SIMULATOR
     rb->lcd_set_foreground(front_color);
-    rb->lcd_putsxy(2, 2, "Preview - no audio capture");
+    rb->lcd_putsxy(2, HZ_Y + (settings.display_hz ? font_h : 0),
+                  "Preview - no audio capture");
 #endif
     rb->lcd_update();
 }
@@ -167,6 +185,7 @@ static enum plugin_status record_and_get_pitch(void)
 
     if (!rb->pitch_start())
     {
+        rb->splash(HZ, "Tuner input unavailable");
         result = PLUGIN_ERROR;
         goto out;
     }
@@ -210,6 +229,7 @@ static enum plugin_status record_and_get_pitch(void)
             break;
         if (capture == ROCK_PITCH_FAILED)
         {
+            rb->splash(HZ, "Tuner capture failed");
             result = PLUGIN_ERROR;
             break;
         }

@@ -11,6 +11,7 @@
 #include "plugins/rock_stream.h"
 #include "plugins/rock_h264_audio.h"
 #include "plugins/rock_execution.h"
+#include "plugins/rock_mpeg.h"
 #include "plugins/rock_h264.h"
 #include "plugins/rock_pictureflow.h"
 #ifdef ROCK_FINGERPRINT_PROBE

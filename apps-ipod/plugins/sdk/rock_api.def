@@ -89,6 +89,7 @@ ROCK_RAW(lcd_blit_yuv)
 #endif
 
 /* Foreground PCM producer */
+ROCK_SLOT(const struct rock_mpeg_api *mpeg, mpeg, &rock_mpeg_api)
 ROCK_DIRECT(rock_stream_open)
 ROCK_DIRECT(rock_stream_submit)
 ROCK_DIRECT(rock_stream_pending)

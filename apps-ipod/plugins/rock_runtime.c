@@ -5,6 +5,7 @@
 #include "podlink-plugin-test.h"
 #include "usb.h"
 #include "plugins/rock_files.h"
+#include "storage.h"
 #include "plugins/rock_widgets.h"
 #include "plugins/rock_native_handoff.h"
 #include "plugins/rock_catalog.h"
@@ -52,6 +53,64 @@ static const char *filename;
 static unsigned char *tail;
 static size_t tail_size;
 static bool usb_taken;
+static unsigned int mpeg_owner;
+static void (*mpeg_drain)(void);
+
+static bool rock_mpeg_set_drain(void (*drain)(void))
+{
+    if (!mpeg_owner || thread_self() != mpeg_owner || usb_taken)
+        return false;
+    mpeg_drain = drain;
+    return true;
+}
+
+static unsigned int rock_mpeg_start_worker(void (*run)(void *), void *arg,
+                                           void *stack, size_t bytes)
+{
+    return mpeg_drain ? rock_mpeg_worker_start(run, arg, stack, bytes) : 0;
+}
+
+/* Synchronous stream queues must drain before the generic worker barrier. */
+static void rock_mpeg_end(void)
+{
+    if (mpeg_drain)
+    {
+        void (*drain)(void) = mpeg_drain;
+        mpeg_drain = NULL;
+        drain();
+    }
+    mpeg_owner = 0;
+}
+
+static void rock_mpeg_storage_idle(void)
+{
+    storage_sleep();
+}
+
+static void rock_mpeg_storage_keep_active(void)
+{
+#ifdef HAVE_DISK_STORAGE
+    storage_spin();
+#endif
+}
+
+static const struct rock_mpeg_api rock_mpeg_api = {
+    .set_drain = rock_mpeg_set_drain,
+    .start_worker = rock_mpeg_start_worker,
+    .queue_init = queue_init,
+    .queue_enable_queue_send = queue_enable_queue_send,
+    .queue_empty = queue_empty,
+    .queue_post = queue_post,
+    .queue_send = queue_send,
+    .queue_reply = queue_reply,
+    .queue_wait = queue_wait,
+    .queue_wait_w_tmo = queue_wait_w_tmo,
+    .mutex_init = mutex_init,
+    .mutex_lock = mutex_lock,
+    .mutex_unlock = mutex_unlock,
+    .storage_idle = rock_mpeg_storage_idle,
+    .storage_keep_active = rock_mpeg_storage_keep_active,
+};
 static bool backlight_overridden;
 
 /* Serialize handoff with the audio and USB threads. The timer and mixer
@@ -318,6 +377,7 @@ void rock_usb_takeover(void)
 #ifdef HAVE_PODLINK_PLUGIN_TEST
     podlink_plugin_test_usb_taken();
 #endif
+    rock_mpeg_end();
     rock_h264_end();
     rock_media_shutdown();
     rock_execution_end();
@@ -808,6 +868,7 @@ static int invoke_module(void *opaque)
     rock_pitch_session_open();
     rock_stream_session_open();
     rock_execution_begin();
+    mpeg_owner = thread_self();
     rock_h264_begin(tail, tail_size);
     rock_h264_audio_begin(tail, tail_size);
     rock_begin_settings();
@@ -829,6 +890,7 @@ static int invoke_module(void *opaque)
     if (call->shell)
         podlink_plugin_test_stopped();
 #endif
+    rock_mpeg_end();
     rock_h264_end();
     rock_media_shutdown();
     rock_execution_end();

@@ -5,6 +5,7 @@
 #include "plugins/rock_execution.h"
 
 #define ROCK_WORKERS 2
+#define ROCK_MPEG_WORKERS 3
 
 struct rock_worker {
     unsigned int id;
@@ -12,7 +13,7 @@ struct rock_worker {
     void *arg;
 };
 
-static struct rock_worker workers[ROCK_WORKERS];
+static struct rock_worker workers[ROCK_MPEG_WORKERS];
 static unsigned int foreground;
 static volatile bool stopping;
 static void (*tick_callback)(void *);
@@ -28,7 +29,7 @@ void rock_execution_begin(void)
 static void worker_main(void)
 {
     unsigned int id = thread_self();
-    for (unsigned int i = 0; i < ROCK_WORKERS; i++)
+    for (unsigned int i = 0; i < ROCK_MPEG_WORKERS; i++)
     {
         if (workers[i].id == id)
         {
@@ -40,15 +41,15 @@ static void worker_main(void)
     thread_exit();
 }
 
-unsigned int rock_worker_start(void (*run)(void *), void *arg,
-                               void *stack, size_t bytes)
+static unsigned int start_worker(void (*run)(void *), void *arg,
+                                 void *stack, size_t bytes, unsigned int limit)
 {
     if (stopping || foreground != thread_self() || !run || !stack ||
         bytes < DEFAULT_STACK_SIZE || (uintptr_t)stack % sizeof(long) ||
         bytes % sizeof(long))
         return 0;
 
-    for (unsigned int i = 0; i < ROCK_WORKERS; i++)
+    for (unsigned int i = 0; i < limit; i++)
     {
         struct rock_worker *worker = &workers[i];
         if (worker->id)
@@ -67,6 +68,18 @@ unsigned int rock_worker_start(void (*run)(void *), void *arg,
     return 0;
 }
 
+unsigned int rock_worker_start(void (*run)(void *), void *arg,
+                               void *stack, size_t bytes)
+{
+    return start_worker(run, arg, stack, bytes, ROCK_WORKERS);
+}
+
+unsigned int rock_mpeg_worker_start(void (*run)(void *), void *arg,
+                                    void *stack, size_t bytes)
+{
+    return start_worker(run, arg, stack, bytes, ROCK_MPEG_WORKERS);
+}
+
 bool rock_worker_stopping(void)
 {
     /* Both firmware targets for this SDK schedule plugin workers on the
@@ -79,7 +92,7 @@ bool rock_worker_join(unsigned int id)
     if (!id || foreground != thread_self())
         return false;
 
-    for (unsigned int i = 0; i < ROCK_WORKERS; i++)
+    for (unsigned int i = 0; i < ROCK_MPEG_WORKERS; i++)
     {
         struct rock_worker *worker = &workers[i];
         if (worker->id != id)
@@ -137,7 +150,7 @@ void rock_execution_end(void)
 {
     stopping = true;
     rock_execution_stop_ticks();
-    for (unsigned int i = 0; i < ROCK_WORKERS; i++)
+    for (unsigned int i = 0; i < ROCK_MPEG_WORKERS; i++)
         if (workers[i].id)
             rock_worker_join(workers[i].id);
     foreground = 0;

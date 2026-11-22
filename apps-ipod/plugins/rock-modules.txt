@@ -27,6 +27,7 @@ apps/md5sum
 apps/metronome
 apps/midi
 apps/mikmod
+apps/mpegplayer
 apps/open_plugins
 apps/otp
 apps/periodic_table

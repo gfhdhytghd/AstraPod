@@ -11,6 +11,9 @@ void rock_execution_stop_ticks(void);
 
 unsigned int rock_worker_start(void (*run)(void *), void *arg,
                                void *stack, size_t bytes);
+/* MPEGPlayer owns a third worker for the bounded disk cache. */
+unsigned int rock_mpeg_worker_start(void (*run)(void *), void *arg,
+                                    void *stack, size_t bytes);
 bool rock_worker_stopping(void);
 bool rock_worker_join(unsigned int id);
 

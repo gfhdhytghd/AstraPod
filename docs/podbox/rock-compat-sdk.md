@@ -582,4 +582,42 @@ The check uses GDB and synthetic input files.
 
 | Build | Setup and actions | Expected | Status |
 | --- | --- | --- | --- |
-| ipod6g ARM | Supply the eight matching files. Launch with the built-in output idle. Start a level and use the wheel, physical keys and a remote. Record tap input and the first matching game response on the same time base. Exit via the game menu, relaunch, then accept USB storage during gameplay. Disconnect, relaunch and return to native playback. | Game renders and plays music and effects. Remote taps respond within 40 ms with no stuck keys. Both exits release the worker and PCM. USB opens storage and native playback works afterward. | Pending physical iPod and user-supplied data. |
+| ipod6g ARM | Supply the eight matching files. Launch with the built-in output idle. Start a level and use the wheel, physical keys and a remote. Use VOL taps of at most 40 ms to step one menu row. Exit via the game menu, relaunch, then accept USB storage during gameplay. Disconnect, relaunch and return to native playback. | Game renders and plays music and effects. Remote taps leave no stuck keys. Both exits release the worker and PCM. USB opens storage and native playback works afterward. | Pending physical iPod and user-supplied data. |
+
+## MPEGPlayer on ipod6g
+
+Open **Plugins > Applications > mpegplayer** and choose a local MPEG
+video. The picker accepts `.mpg`, `.mpeg`, `.m2v` and `.mpv`. The
+module decodes MPEG-1/2 4:2:0 video up to 352×288 and MPEG audio in a
+program stream. Elementary video plays without audio or random seek.
+Play pauses or resumes. Left and Right seek by five seconds in a
+seekable stream. The wheel adjusts native volume. Menu returns to
+Applications. The picker starts each file from the beginning.
+
+The staged upstream stream manager, disk cache, PES parser, video
+decoder and audio worker use the plugin's DRAM arena. The foreground
+handles stream commands. Three SDK workers own disk buffering, MPEG
+video and libmad decoding. Their queues are private to the module.
+The audio worker converts and resamples PCM into a bounded local queue.
+The foreground copies timestamped blocks into the owned PCM stream at
+the active sink rate. Launch stops native music and requires the
+built-in sink. Native playback retains its DSP configuration and codec
+thread. MPEGPlayer uses the stock default frame pacing and late-frame
+skipping with the AstraPod picker and controls.
+
+Seek pauses the decoder workers before the foreground discards queued
+PCM. Menu, file completion, errors and a USB consent prompt stop
+production, join the workers and close the file. The SDK also drains
+the registered MPEGPlayer session before USB storage or module unload.
+The checked staging step rejects changes to an upstream input it edits.
+
+Generate the synthetic MPEG files and run the SDL gate from the
+repository root with FFmpeg, Pillow and Tesseract installed:
+
+```sh
+python3 tools/tests/rock_mpegplayer_sim.py BUILD_SDL EVIDENCE_DIR
+```
+
+| Device gate | Action and expected result |
+| --- | --- |
+| MPEGPlayer / ipod6g | Open the generated `colors.mpg` with the matching ARM firmware and module. Verify red video and the 440 Hz tone. Pause and seek right to blue, then resume. While playing, adjust output gain with the wheel in both directions. Exit with Menu, open a native audio track, then reopen MPEGPlayer. Repeat playback with USB consent, Charge Only, and storage takeover. Confirm PCM stops before the prompt and playback works after unplug. Verify the generated invalid and truncated inputs return to Applications. |

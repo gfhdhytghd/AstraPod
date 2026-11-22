@@ -151,7 +151,15 @@ static void memlist_cases(const char *dir)
     memlist_case(dir, bytes, 39, false);
     memlist_case(dir, bytes, 20, false);
     memlist_case(dir, bytes, 19, false);
-    bytes[1] = 6;
+    bytes[1] = RT_POLY_GAMEPLAY;
+    memlist_case(dir, bytes, 21, true);
+    bytes[1] = RT_POLY_GAMEPLAY + 1;
+    memlist_case(dir, bytes, 21, false);
+    bytes[1] = RT_POLY_ANIM;
+    bytes[7] = 1; /* The DOS list may reserve an empty bitmap slot. */
+    memlist_case(dir, bytes, 21, true);
+    bytes[19] = 1;
+    bytes[15] = 1;
     memlist_case(dir, bytes, 21, false);
     bytes[1] = 0;
     bytes[15] = 3;

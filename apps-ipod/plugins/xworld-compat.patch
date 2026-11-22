@@ -807,7 +807,7 @@
              break;
          }
 +        if (bytes != sizeof(entry) || entry[0] != MEMENTRY_STATE_NOT_NEEDED ||
-+            entry[1] > RT_POLY_CINEMATIC ||
++            entry[1] > RT_POLY_GAMEPLAY ||
 +            res->_numMemList == ARRAYLEN(res->_memList))
 +            break;
 
@@ -850,7 +850,7 @@
 +        };
 +        if (me.packedSize > me.size ||
 +            (me.packedSize < me.size && me.packedSize < 12) ||
-+            (me.type == RT_POLY_ANIM && me.bankId && me.size != VID_PAGE_SIZE))
++            (me.type == RT_POLY_ANIM && me.size && me.size != VID_PAGE_SIZE))
 +            break;
 +        res->_memList[res->_numMemList++] = me;
      }
@@ -930,7 +930,7 @@
 +    const unsigned videoCinematicIndex = part[MEMLIST_PART_POLY_CINEMATIC];
 +    const unsigned video2Index = part[MEMLIST_PART_VIDEO2];
 +    const uint8_t types[] = { RT_PALETTE, RT_BYTECODE,
-+                              RT_POLY_CINEMATIC, RT_POLY_CINEMATIC };
++                              RT_POLY_CINEMATIC, RT_POLY_GAMEPLAY };
 +    for (unsigned i = 0; i < ARRAYLEN(types); ++i) {
 +        if (i == MEMLIST_PART_VIDEO2 && part[i] == MEMLIST_PART_NONE)
 +            continue;
@@ -1142,6 +1142,14 @@
 
 --- a/resource.h
 +++ b/resource.h
+@@ -70,6 +70,7 @@
+ #define RT_PALETTE 3
+ #define RT_BYTECODE 4
+ #define RT_POLY_CINEMATIC 5
++#define RT_POLY_GAMEPLAY 6
+
+ struct Resource {
+     struct Video *video;
 @@ -81,6 +81,7 @@
      uint8_t *_memPtrStart, *_scriptBakPtr, *_scriptCurPtr, *_vidBakPtr, *_vidCurPtr;
      bool _useSegVideo2;

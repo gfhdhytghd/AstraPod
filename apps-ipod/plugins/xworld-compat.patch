@@ -2672,3 +2672,32 @@
 
      uint16_t threadsData[NUM_DATA_FIELDS][VM_NUM_THREADS];
      // This array is used:
+diff --git a/xworld.c b/xworld.c
+--- a/xworld.c
++++ b/xworld.c
+@@ -36,6 +36,25 @@
+     const char *dataPath = ROCKBOX_DIR "/xworld";
+     const char *savePath = ROCKBOX_DIR "/xworld";
+     g_debugMask = XWORLD_DEBUGMASK;
++
++    if (!rb->file_exists(ROCKBOX_DIR "/xworld/memlist.bin"))
++    {
++        rb->lcd_clear_display();
++        rb->lcd_setfont(FONT_UI);
++        rb->lcd_puts(0, 0, "Missing XWorld data");
++        rb->lcd_puts(0, 2, "Copy MEMLIST.BIN and BANK files");
++        rb->lcd_puts(0, 3, "to /.rockbox/xworld/");
++        rb->lcd_puts(0, 5, "Menu: return");
++        rb->lcd_update();
++        while (true)
++        {
++            int action = rb->get_action(CONTEXT_STD, HZ / 10);
++            if (rb->default_event_handler(action) == SYS_USB_CONNECTED)
++                return PLUGIN_USB_CONNECTED;
++            if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
++                return PLUGIN_OK;
++        }
++    }
+
+     engine_create(&e, &sys, dataPath, savePath);
+     engine_init(&e);

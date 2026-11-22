@@ -32,6 +32,16 @@ static uint32_t elapsed_frames, base_ms, rate, saved_rate;
 
 static void next_pcm(const void **start, size_t *size)
 {
+    /* The mixer asks for a new buffer when the output route changes. */
+    if (pcm_current_sink() != PCM_SINK_BUILTIN ||
+        mixer_get_frequency() != rate)
+    {
+        used = 0;
+        *start = NULL;
+        *size = 0;
+        return;
+    }
+
     unsigned int frames = MIN(used, (unsigned int)MIX_FRAME_SAMPLES);
     unsigned int first = MIN(frames, capacity - front);
     memcpy(output, queue + 2 * front, first * 4);
@@ -137,9 +147,18 @@ static void drain(void)
     codec_id = 0;
 }
 
+static bool video_running_locked(void)
+{
+    return producing && thread_self() == codec_id &&
+           mixer_channel_status(VIDEO_CHANNEL) != CHANNEL_STOPPED;
+}
+
 static bool video_running(void)
 {
-    return producing && thread_self() == codec_id;
+    pcm_play_lock();
+    bool running = video_running_locked();
+    pcm_play_unlock();
+    return running;
 }
 
 static int video_decode_aac(struct codec_api *api)
@@ -177,9 +196,14 @@ static int video_decode_aac(struct codec_api *api)
 
 static size_t video_write(const int16_t *data, size_t frames)
 {
-    if (!video_running() || !data)
+    if (!data)
         return 0;
     pcm_play_lock();
+    if (!video_running_locked())
+    {
+        pcm_play_unlock();
+        return 0;
+    }
     unsigned int tail = (front + used) % capacity;
     frames = MIN(frames, capacity - used);
     unsigned int first = MIN(frames, capacity - tail);
@@ -227,6 +251,7 @@ static bool video_seek(uint32_t ms)
         drain();
         pcm_play_lock();
         mixer_channel_stop(VIDEO_CHANNEL);
+        mixer_discard_plugin_prefetch();
         front = used = elapsed_frames = 0;
         base_ms = ms;
         play();
@@ -236,13 +261,16 @@ static bool video_seek(uint32_t ms)
     return ok;
 }
 
-static void close_locked(void)
+static void close_locked(bool handover)
 {
     if (!queue)
         return;
     drain();
     pcm_play_lock();
     mixer_channel_stop(VIDEO_CHANNEL);
+    /* A normal close can play the final mixed frame. Handover drops it. */
+    if (handover)
+        mixer_discard_plugin_prefetch();
     queue = NULL;
     uint32_t frequency = rate;
     base_ms += (uint64_t)elapsed_frames * 1000 / frequency;
@@ -258,7 +286,7 @@ static void video_close(void)
 {
     mutex_lock(&lease);
     if (on_foreground())
-        close_locked();
+        close_locked(false);
     mutex_unlock(&lease);
 }
 
@@ -281,7 +309,7 @@ void rock_h264_audio_revoke(void)
     if (!initialized)
         return;
     mutex_lock(&lease);
-    close_locked();
+    close_locked(true);
     owner = 0;
     mutex_unlock(&lease);
 }

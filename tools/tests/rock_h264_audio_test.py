@@ -21,6 +21,7 @@ prefix = r"""
 #define MIX_FRAME_SAMPLES 4
 #define MIX_AMP_UNITY 65536
 #define PCM_MIXER_CHAN_ROCK_STREAM 2
+#define CHANNEL_STOPPED 0
 #define HW_NUM_FREQ 2
 #define PCM_SINK_BUILTIN 1
 #define CODEC_ERROR -1
@@ -39,6 +40,7 @@ struct codec_api ci;
 struct mutex { bool held; };
 struct mixer_play_cbs { void (*get_more)(const void **, size_t *); };
 static unsigned id = 1, mixer_rate = 48000, audio_state, unloads, barriers;
+static unsigned discarded_prefetch;
 static bool codec_loaded, fail_entry, reserved, usb_active, paused, pcm_locked;
 static const struct mixer_play_cbs *mixer;
 static void (*callback)(void);
@@ -75,6 +77,16 @@ static void mixer_channel_stop(int channel)
     assert(channel == PCM_MIXER_CHAN_ROCK_STREAM && pcm_locked);
     mixer = NULL;
     paused = false;
+}
+static int mixer_channel_status(int channel)
+{
+    assert(channel == PCM_MIXER_CHAN_ROCK_STREAM && pcm_locked);
+    return mixer ? 1 : CHANNEL_STOPPED;
+}
+static void mixer_discard_plugin_prefetch(void)
+{
+    assert(pcm_locked && !mixer);
+    ++discarded_prefetch;
 }
 static void mixer_channel_play_data(int channel, const struct mixer_play_cbs *cbs,
                                     const void *data, size_t bytes)
@@ -185,6 +197,7 @@ int main(void)
     assert(api->pause(true) && paused);
     assert(api->seek(12150));
     assert(api->clock_ms() == 12150 && api->buffered() == 0);
+    assert(discarded_prefetch == 1);
     consume(0);
     assert(api->start(produce));
     /* Native playback or USB revokes before callback dispatch. */
@@ -192,6 +205,7 @@ int main(void)
     rock_h264_audio_revoke();
     assert(decoded == 1 && barriers == 2 && !reserved && !mixer &&
            mixer_rate == 48000);
+    assert(discarded_prefetch == 2);
     assert(!api->running() && !api->start(produce));
     id = 1;
     assert(!api->open(scratch, sizeof(scratch), 44100));
@@ -201,6 +215,7 @@ int main(void)
     step_codec();
     api->close();
     assert(decoded == 2 && barriers == 3 && !reserved && !mixer);
+    assert(discarded_prefetch == 2);
     puts("PASS: AAC lease, worker and PCM drain, seek clock, USB exclusion and handback");
 }
 """

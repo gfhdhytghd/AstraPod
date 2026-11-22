@@ -137,7 +137,9 @@ Open **Plugins → Applications → pitch_detector**. On a Mikey-capable player,
 the tuner selects the headset microphone when a plug is present. Remove the
 plug before launch to use the passive dock line input. The tuner uses the
 native gain for the selected input and leaves the recorder's source setting
-alone. It analyzes the left channel at 22,050 Hz. When it cannot detect a
+alone. Capture uses the recorder's 44,100 Hz input configuration. The tuner
+analyzes the left channel at 22,050 Hz. The bottom row shows analysis frames
+received and the latest peak against full scale. When it cannot detect a
 pitch, it displays **No pitch. Check mic or line input.** Removing the plug
 during microphone capture stops the tuner and reports the unplug.
 
@@ -468,8 +470,12 @@ return to Applications. USB storage stops the decoder before the plugin
 releases its workspace.
 
 The VPU backend is available on ipod6g. The SDL entry reports that the
-decoder is unavailable. This player displays video only. It leaves the
-native audio and codec thread available for music.
+decoder is unavailable. On ipod6g, a compatible AAC track uses the shared
+codec thread and becomes the video clock. Stop native playback before
+opening a movie with sound. If the codec, built-in output, or workspace is
+unavailable, the movie uses the video clock. Seeking drains the codec and
+clears queued PCM before restarting from the new keyframe. Return and USB
+takeover drain the codec before releasing plugin scratch.
 
 ## Rockboy
 

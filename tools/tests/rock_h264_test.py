@@ -29,6 +29,12 @@ subprocess.run([
     "slices=1:keyint=48:min-keyint=48:scenecut=0", "-movflags", "+faststart",
     video,
 ], check=True)
+with_audio = out / "astrapod-baseline-aac.mp4"
+subprocess.run([
+    "ffmpeg", "-loglevel", "error", "-y", "-i", video, "-f", "lavfi",
+    "-i", "sine=frequency=440:sample_rate=44100", "-map", "0:v", "-map", "1:a",
+    "-c:v", "copy", "-c:a", "aac", "-shortest", "-movflags", "+faststart", with_audio,
+], check=True)
 broken = out / "truncated.mp4"
 broken.write_bytes(video.read_bytes()[:31])
 binary = out / "test"
@@ -40,4 +46,4 @@ subprocess.run([
     fixture / "probe.c", staged, source / "mp4_demux.c",
     root / "apps-ipod/plugins/rock_h264.c", "-o", binary,
 ], check=True)
-subprocess.run([binary, video, broken], check=True)
+subprocess.run([binary, video, broken, with_audio], check=True)

@@ -86,6 +86,7 @@ static void rock_media_stop_locked(void)
 
 void rock_media_shutdown(void)
 {
+    rock_h264_audio_revoke();
     rock_stream_revoke();
     rock_pitch_revoke();
     rock_pitch_preview_revoke();
@@ -98,6 +99,7 @@ void rock_media_shutdown(void)
 
 void rock_playback_takeover(void)
 {
+    rock_h264_audio_revoke();
     rock_stream_revoke();
     rock_pitch_revoke();
     rock_pitch_preview_revoke();
@@ -703,6 +705,7 @@ static int invoke_module(void *opaque)
     rock_stream_session_open();
     rock_execution_begin();
     rock_h264_begin(tail, tail_size);
+    rock_h264_audio_begin(tail, tail_size);
     rock_begin_settings();
     rock_display_start(call->saved_pixels, call->widget_pixels);
     button_clear_pressed();

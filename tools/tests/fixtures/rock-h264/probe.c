@@ -4,6 +4,7 @@
 #include "plugin.h"
 #include "mp4_demux.h"
 #include "video_playback.h"
+#include "video_audio.h"
 #include "plugins/rock_h264.h"
 
 enum mode { FINISH, SEEK_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR };
@@ -14,6 +15,51 @@ static unsigned int opens, closes, active, configured, decoded, drawn, seeks;
 static int open_files, boosted, backlight;
 static bool sent_menu, sent_seek;
 static uint8_t picture[16 * 16 * 3 / 2];
+
+static unsigned audio_opens, audio_closes, audio_seeks;
+static bool audio_active;
+static uint32_t audio_ms;
+static long audio_tick;
+
+size_t video_audio_workspace_size(const struct mp4v_demux_res *demux)
+{
+    assert(demux->audio_sample_rate == 44100);
+    return 65536;
+}
+
+int video_audio_init(const char *path, const struct mp4v_demux_res *demux,
+                     void *workspace, size_t length, void *buffer, size_t bytes)
+{
+    assert(path && demux->audio_num_samples > 0 && workspace && length == 65536);
+    assert(buffer && bytes >= 65536);
+    audio_opens++;
+    audio_ms = 0;
+    return 0;
+}
+
+void video_audio_play(void) { audio_active = true; audio_tick = current_tick; }
+void video_audio_pause(void) { assert(audio_active); }
+void video_audio_resume(void) { assert(audio_active); }
+void video_audio_seek(uint32_t ms)
+{
+    assert(audio_active && ms > 0);
+    audio_seeks++;
+    audio_ms = ms;
+    audio_tick = current_tick;
+}
+void video_audio_stop(void) { audio_closes++; audio_active = false; }
+bool video_audio_is_active(void) { return audio_active; }
+bool video_audio_failed(void) { return false; }
+static uint32_t audio_clock(void)
+{
+    assert(audio_active);
+    return audio_ms + (current_tick - audio_tick) * 1000 / HZ;
+}
+static uint32_t audio_buffered(void) { return 0; }
+static const struct rock_h264_audio_api audio_api = {
+    .clock_ms = audio_clock,
+    .buffered = audio_buffered,
+};
 
 unsigned int thread_self(void) { return thread_id; }
 
@@ -146,6 +192,7 @@ static const struct status status;
 
 static const struct plugin_api api = {
     .hw_h264 = &rock_h264_api,
+    .h264_audio = &audio_api,
     .global_settings = &settings,
     .global_status = &status,
     .current_tick = &current_tick,
@@ -188,7 +235,7 @@ static void reset(enum mode next)
 
 int main(int argc, char **argv)
 {
-    assert(argc == 3);
+    assert(argc == 4);
     reset(FINISH);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 0);
     assert(opens == 1 && configured == 1 && closes == 1 && decoded == 336);
@@ -221,6 +268,15 @@ int main(int argc, char **argv)
     assert(!rock_h264_api.open(scratch, sizeof(scratch), 320, 240));
     thread_id = 1;
     assert(!active && !open_files && !boosted);
+    assert(audio_opens == 0);
+
+    reset(SEEK_MENU);
+    assert(video_h264_play(argv[3], scratch, sizeof(scratch)) == 1);
+    assert(audio_opens == 1 && audio_seeks == 1 && audio_closes == 1 && !audio_active);
+    reset(USB_EXIT);
+    assert(video_h264_play(argv[3], scratch, sizeof(scratch)) == 2);
+    assert(audio_opens == 2 && audio_closes == 2 && !audio_active);
+
     rock_h264_end();
     puts("PASS H.264 demux, complete playback, seek, Menu, USB, errors, workspace");
 }

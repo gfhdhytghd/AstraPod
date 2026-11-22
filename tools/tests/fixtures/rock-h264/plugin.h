@@ -10,11 +10,13 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include "hw_h264.h"
+#include "plugins/rock_h264_audio.h"
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define TIME_BEFORE(a, b) ((a) < (b))
 #define MAX_PATH 260
+#define CACHEALIGN_SIZE 32
 #define HZ 100
 #define LCD_WIDTH 320
 #define LCD_HEIGHT 240
@@ -34,6 +36,7 @@ struct settings { int backlight_timeout; };
 struct status { int volume; };
 struct plugin_api {
     const struct hw_h264_api *hw_h264;
+    const struct rock_h264_audio_api *h264_audio;
     const struct settings *global_settings;
     const struct status *global_status;
     volatile long *current_tick;

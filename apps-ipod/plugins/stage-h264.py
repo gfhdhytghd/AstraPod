@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage the upstream MP4 player for an owned video-only session."""
+"""Stage the upstream MP4 player for an foreground video and AAC."""
 from pathlib import Path
 import sys
 
@@ -50,37 +50,28 @@ elif src.name == "video_playback.c":
     for header in ("backlight.h", "button.h", "crc32.h", "dir.h", "file.h",
                    "font.h", "kernel.h", "lang.h", "lcd.h", "menu.h", "misc.h",
                    "pcmbuf.h", "rbpaths.h", "settings.h", "sound.h", "splash.h",
-                   "system.h", "video_audio.h", "video_pcm.h"):
+                   "system.h", "video_pcm.h"):
         replace(f'#include "{header}"\n', "")
     cut("#define VIDEO_RESUME_MAGIC", "enum video_input_action")
-    replace("#define VIDEO_PCM_BUFFER         (256u * 1024u)\n", "")
     replace("    VIDEO_INPUT_MENU,\n", "")
     cut("struct video_resume_record", "struct video_pool")
     cut("static void video_resume_filename", "static void video_set_paused")
     cut("enum video_menu_item", "static void video_scale_plane")
-    replace("long *pause_started, bool have_audio,",
-            "long *pause_started,")
-    cut("        if (have_audio)\n", "        if (*cpu_boosted)")
-    cut("        if (have_audio)\n", "    }\n}")
-    replace("                                           bool have_audio,\n", "")
+    replace("            video_pcm_pause(true);\n", "")
+    replace("            video_pcm_pause(false);\n", "")
     cut("    if (action == ACTION_WPS_MENU)", "    if (action == ACTION_WPS_SKIPPREV",
         """    if (action == ACTION_WPS_MENU || action == ACTION_STD_CANCEL ||
         action == ACTION_WPS_STOP)
         return VIDEO_INPUT_EXIT;
 """)
-    replace("                         have_audio, cpu_boosted);", "                         cpu_boosted);")
 
     for line in (
-        "    void *audio_codec_workspace;", "    void *pcm_buffer;",
-        "    size_t audio_codec_workspace_size;", "    bool have_audio = false;",
-        "    bool audio_master = false;", "    uint32_t last_sample = 0;",
+        "    uint32_t last_sample = 0;",
         "    rb->pcmbuf_fade(false, true);", "    rb->pcmbuf_fade(false, false);",
         "    rb->sound_set(SOUND_VOLUME, rb->global_status->volume);",
         "        last_sample = sample;",
     ):
         replace(line + "\n", "")
-    cut("    audio_codec_workspace_size = demux.audio_num_samples",
-        "    if (video_samples == NULL")
     replace("""        scale_buffer == NULL ||
         (demux.audio_num_samples > 0 &&
          (audio_codec_workspace == NULL || pcm_buffer == NULL)))""",
@@ -97,27 +88,112 @@ elif src.name == "video_playback.c":
         rb->splash(HZ * 2, "Unsupported movie duration");
         goto cleanup;
     }""")
-    cut("    if (demux.audio_format", "    rb->lcd_set_foreground")
-    replace("                                 &pause_started, have_audio, &cpu_boosted,",
-            "                                 &pause_started, &cpu_boosted,")
+    cut("    if (demux.audio_format", "    rb->lcd_set_foreground", """\
+    if (rb->h264_audio && audio_codec_workspace && pcm_buffer &&
+        demux.audio_codecdata_len > 0 &&
+        video_audio_init(filepath, &demux, audio_codec_workspace,
+                         audio_codec_workspace_size, pcm_buffer,
+                         VIDEO_PCM_BUFFER) == 0)
+    {
+        have_audio = audio_master = true;
+        video_audio_play();
+    }
+
+""")
     cut("            if (action == VIDEO_INPUT_MENU)", "            if (redraw_requested")
-    replace("""                    (int64_t)(audio_master ? video_pcm_get_clock_ms() :
-                              pts_ms) +""", """                    (int64_t)pts_ms +""")
     replace("                    decoder = NULL;\n", "")
     replace("                if (have_audio)\n                    video_audio_seek(pts_ms);",
-            """                have_frame = false;
+            """                if (have_audio)
+                    video_audio_seek(pts_ms);
+                have_frame = false;
                 overlay_drawn = false;
                 if (paused)
                     pause_started = *rb->current_tick;""")
-    cut("            clock_ms = audio_master", "            if (clock_ms + 2",
-        """            clock_ms = (uint32_t)((uint64_t)(unsigned long)
-                ((*rb->current_tick) - start_tick) * 1000 / HZ);
-""")
-    cut("    if (result == 0)", "    if (video_fd >= 0)", "\ncleanup:\n")
+    replace("(int64_t)(audio_master ? video_pcm_get_clock_ms() :",
+            "(int64_t)(audio_master ? rb->h264_audio->clock_ms() :")
+    replace("clock_ms = audio_master ? video_pcm_get_clock_ms() :",
+            "clock_ms = audio_master ? rb->h264_audio->clock_ms() :")
+    replace("(uint32_t)(((*rb->current_tick) - start_tick) * 1000 / HZ);",
+            """(uint32_t)((uint64_t)(unsigned long)
+                    ((*rb->current_tick) - start_tick) * 1000 / HZ);""")
+    replace("(!video_audio_is_active() && video_pcm_empty())",
+            "(!video_audio_is_active() && rb->h264_audio->buffered() == 0)")
+    cut("    if (result == 0)", "cleanup:", "\n")
     replace("            size == 0 || size > VIDEO_READ_BUFFER ||",
             """            size == 0 || size > VIDEO_READ_BUFFER ||
             offset < demux.mdat_offset ||
             (uint64_t)offset + size >
                 (uint64_t)demux.mdat_offset + demux.mdat_len ||""")
+
+elif src.name == "video_audio.c":
+    for name in ("codec_thread.h", "video_pcm.h"):
+        replace(f'#include "{name}"\n', "")
+    replace("#define AUDIO_START_BUFFER_MS  1000\n", "")
+    replace("static volatile bool audio_is_ready;\n", "")
+    code = code.replace("    audio_is_ready = false;\n", "")
+    replace("    audio_is_ready = true;\n    audio_is_playing = false;", "    audio_is_playing = false;")
+    cut("        if (!audio_is_ready", "    }\n}")
+    cut("bool video_audio_ready(void)", "bool video_audio_is_active(void)")
+    replace("            if (value > 0)\n                audio_sample_rate = (uint32_t)value;",
+            """            if (value != audio_sample_rate)
+                audio_has_error = true;""")
+    replace("while (audio_paused && audio_action == CODEC_ACTION_NULL)",
+            "while (audio_paused && rb->h264_audio->running() && !audio_has_error)")
+    replace("""        /* A seek is a one-shot command.  HALT deliberately remains latched
+         * until codec teardown so the producer cannot resume behind us. */
+""", "")
+    replace("    action = audio_action;", """    if (!rb->h264_audio->running() || audio_has_error)
+        return CODEC_ACTION_HALT;
+    action = audio_action;""")
+    for before, after in (
+        ("consumed < count && audio_action != CODEC_ACTION_HALT", "consumed < count && rb->h264_audio->running() && !audio_has_error"),
+        ("written < frames && audio_action != CODEC_ACTION_HALT", "written < frames && rb->h264_audio->running() && !audio_has_error"),
+    ):
+        replace(before, after)
+    code = code.replace("while (audio_paused && audio_action != CODEC_ACTION_HALT)",
+                        "while (audio_paused && rb->h264_audio->running())")
+    replace("if (audio_action == CODEC_ACTION_HALT)\n            break;",
+            "if (!rb->h264_audio->running())\n            break;")
+    replace("            amount = video_pcm_write", "            amount = rb->h264_audio->write")
+    cut("    rb->memset(&video_ci, 0, sizeof(video_ci));",
+        "    video_ci.codec_get_buffer", """\
+    rb->memset(&video_ci, 0, sizeof(video_ci));
+""")
+    cut("\n#if defined(ARM_NEED_DIV0)", "}\n\nstatic void audio_codec_worker")
+    cut("#ifdef HAVE_PRIORITY_SCHEDULING\n    /* Match mpegplayer",
+        "    if (status < 0", "    status = rb->h264_audio->decode_aac(&video_ci);\n")
+    replace("status < 0 && audio_action != CODEC_ACTION_HALT",
+            "status < 0 && rb->h264_audio->running()")
+    replace("if (!video_pcm_init(audio_sample_rate, pcm_buffer, pcm_buffer_size))",
+            "if (!rb->h264_audio->open(pcm_buffer, pcm_buffer_size, audio_sample_rate))")
+    cut("    audio_action = CODEC_ACTION_NULL;\n    audio_paused = false;\n    audio_is_playing = true;",
+        "\n}", """\
+    audio_is_playing = true;
+    if (!rb->h264_audio->start(audio_codec_worker))
+    {
+        audio_is_playing = false;
+        audio_has_error = true;
+    }""")
+    replace("    audio_paused = true;\n}", "    audio_paused = true;\n    rb->h264_audio->pause(true);\n}")
+    replace("    audio_paused = false;\n}", "    audio_paused = false;\n    rb->h264_audio->pause(false);\n}")
+    cut("    if (!audio_initialized || !audio_is_playing)", "\n}",
+        """\
+    if (!audio_initialized || !rb->h264_audio->seek(target_ms))
+    {
+        audio_has_error = true;
+        return;
+    }
+
+    audio_file_buffer_length = 0;
+    video_ci.curpos = 0;
+    video_ci.filesize = audio_file_size;
+    video_id3.offset = 0;
+    video_id3.elapsed = 0;
+    audio_seek_target_ms = target_ms;
+    audio_action = CODEC_ACTION_SEEK_TIME;
+    rb->h264_audio->pause(audio_paused);
+    video_audio_play();""")
+    cut("    audio_action = CODEC_ACTION_HALT;\n", "    if (audio_fd >= 0)",
+        "    rb->h264_audio->close();\n")
 
 dst.write_text(code)

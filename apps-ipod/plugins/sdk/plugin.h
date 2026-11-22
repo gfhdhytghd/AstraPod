@@ -9,6 +9,7 @@
 #include "config.h"
 #include "plugins/rock_pitch.h"
 #include "plugins/rock_stream.h"
+#include "plugins/rock_h264_audio.h"
 #include "plugins/rock_execution.h"
 #include "plugins/rock_h264.h"
 #include "plugins/rock_hid.h"

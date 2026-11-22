@@ -168,10 +168,9 @@ static int video_decode_aac(struct codec_api *api)
     api->strip_filesize = source.strip_filesize;
     int status = codec_load_file("aac", api);
     if (status >= 0)
-    {
         status = codec_run_proc();
-        codec_close();
-    }
+    /* An entry-point failure can leave the codec loaded. */
+    codec_close();
     *api = source;
     return status;
 }

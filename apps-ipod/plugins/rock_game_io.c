@@ -68,6 +68,19 @@ static bool bmp_dimensions(int fd, int *width, int *height)
     return true;
 }
 
+int rock_read_bmp_fd(int fd, struct bitmap *bm, int maxsize, int format,
+                     const struct custom_format *cformat)
+{
+    int width, height;
+    if (rock_usb_taken() || !bm || maxsize < 0 ||
+        rock_lseek(fd, 0, SEEK_CUR) != 0 ||
+        !bmp_dimensions(fd, &width, &height) ||
+        rock_lseek(fd, 0, SEEK_SET) != 0)
+        return -1;
+
+    return read_bmp_fd(fd, bm, maxsize, format, cformat);
+}
+
 int rock_read_plugin_bmp(const char *path, struct bitmap *bm, size_t size,
                          bool resize)
 {

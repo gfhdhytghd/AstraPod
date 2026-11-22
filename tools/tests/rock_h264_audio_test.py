@@ -39,7 +39,7 @@ struct codec_api ci;
 struct mutex { bool held; };
 struct mixer_play_cbs { void (*get_more)(const void **, size_t *); };
 static unsigned id = 1, mixer_rate = 48000, audio_state, unloads, barriers;
-static bool codec_loaded, reserved, usb_active, paused, pcm_locked;
+static bool codec_loaded, fail_entry, reserved, usb_active, paused, pcm_locked;
 static const struct mixer_play_cbs *mixer;
 static void (*callback)(void);
 static void mutex_init(struct mutex *m) { m->held = false; }
@@ -120,7 +120,7 @@ static int codec_load_file(const char *name, struct codec_api *api)
 {
     assert(!strcmp(name, "aac") && api->data == 42 && id == 2 && !codec_loaded);
     codec_loaded = true;
-    return 0;
+    return fail_entry ? CODEC_ERROR : 0;
 }
 static int codec_run_proc(void) { assert(codec_loaded && id == 2); return 0; }
 static void codec_close(void) { assert(codec_loaded && id == 2); codec_loaded = false; }
@@ -136,6 +136,10 @@ static void produce(void)
     ci.data = 42;
     assert(rock_h264_audio_api.decode_aac(&api) == 0);
     assert(api.data == 0 && api.id3 == &api && api.filesize == 1234);
+    fail_entry = true;
+    assert(rock_h264_audio_api.decode_aac(&api) == CODEC_ERROR);
+    assert(!codec_loaded && api.id3 == &api);
+    fail_entry = false;
     int16_t input[40];
     for (unsigned i = 0; i < 40; ++i)
         input[i] = i + 1;

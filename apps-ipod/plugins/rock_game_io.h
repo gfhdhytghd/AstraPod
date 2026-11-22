@@ -7,6 +7,9 @@
 
 struct bitmap;
 
+struct custom_format;
+int rock_read_bmp_fd(int fd, struct bitmap *bm, int maxsize, int format,
+                     const struct custom_format *cformat);
 int rock_read_plugin_bmp(const char *path, struct bitmap *bm, size_t size,
                          bool resize);
 int rock_load_plugin_art(struct bitmap *bm, size_t size);

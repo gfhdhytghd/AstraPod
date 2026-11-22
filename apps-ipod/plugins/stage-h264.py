@@ -135,8 +135,12 @@ elif src.name == "video_audio.c":
     cut("        if (!audio_is_ready", "    }\n}")
     cut("bool video_audio_ready(void)", "bool video_audio_is_active(void)")
     replace("            if (value > 0)\n                audio_sample_rate = (uint32_t)value;",
-            """            if (value != audio_sample_rate)
+            """            if (value <= 0 || (uint32_t)value != audio_sample_rate)
                 audio_has_error = true;""")
+    replace("    if (position < 0 || position > audio_file_size ||",
+            "    if (!rb->h264_audio->running() || position < 0 || position > audio_file_size ||")
+    replace("    while (done < size && video_ci.curpos < audio_file_size)",
+            "    while (done < size && video_ci.curpos < audio_file_size && rb->h264_audio->running())")
     replace("while (audio_paused && audio_action == CODEC_ACTION_NULL)",
             "while (audio_paused && rb->h264_audio->running() && !audio_has_error)")
     replace("""        /* A seek is a one-shot command.  HALT deliberately remains latched

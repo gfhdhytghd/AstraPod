@@ -4,7 +4,6 @@
 #include "file.h"
 #include "rock_compat.h"
 #include "rock_files.h"
-#include "draw/bmp.h"
 #include "system/strutil.h"
 #include "vuprintf.h"
 
@@ -22,14 +21,6 @@ static int file_slot(int fd)
             if (open_files[i] && open_files[i] - 1 == fd)
                 return i;
     return -1;
-}
-
-int rock_read_bmp_fd(int fd, struct bitmap *bm, int maxsize, int format,
-                     const struct custom_format *cformat)
-{
-    if (rock_usb_taken() || file_slot(fd) < 0 || !bm || maxsize < 0)
-        return -1;
-    return read_bmp_fd(fd, bm, maxsize, format, cformat);
 }
 
 bool rock_get_metadata(struct mp3entry *id3, int fd, const char *path)

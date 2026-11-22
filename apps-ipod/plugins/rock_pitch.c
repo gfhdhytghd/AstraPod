@@ -36,16 +36,27 @@ static long deadline;
 
 /* The completion callback publishes the finished block and selects the other
  * block for DMA. Only the reader copies data into module memory. */
-static int16_t capture[2][2 * ROCK_PITCH_SAMPLES] CACHEALIGN_ATTR;
+static int16_t capture[2][2 * ROCK_PITCH_CAPTURE_FRAMES] CACHEALIGN_ATTR;
 static int writing;
 static volatile int ready;
+static volatile uint32_t captured;
 
 static void pitch_next_block(void **addr, size_t *size)
 {
     ready = writing;
+    captured += ROCK_PITCH_CAPTURE_FRAMES;
     writing ^= 1;
     *addr = capture[writing];
     *size = sizeof(capture[0]);
+}
+
+static void pitch_copy_block(int16_t *samples, const int16_t *input)
+{
+    for (size_t i = 0; i < ROCK_PITCH_SAMPLES; i += 2)
+    {
+        samples[i] = (input[2 * i] + input[2 * i + 2]) / 2;
+        samples[i + 1] = (input[2 * i + 1] + input[2 * i + 3]) / 2;
+    }
 }
 
 static enum pcm_dma_status pitch_dma_status(enum pcm_dma_status status)
@@ -212,6 +223,7 @@ void rock_pitch_prepare(unsigned int pending)
     }
 
     ready = -1;
+    captured = 0;
     writing = 0;
     running = true;
     pcm_record_data(pitch_next_block, pitch_dma_status,
@@ -243,10 +255,11 @@ void rock_pitch_sink_unlock(void)
 }
 #endif
 
-enum rock_pitch_result rock_pitch_read(int16_t (*samples)[ROCK_PITCH_SAMPLES])
+enum rock_pitch_result rock_pitch_read(int16_t (*samples)[ROCK_PITCH_SAMPLES],
+                                     uint32_t *captured_frames)
 {
 #ifdef HAVE_ROCK_PITCH_DMA
-    if (!samples)
+    if (!samples || !captured_frames)
         return ROCK_PITCH_FAILED;
 #endif
     enum rock_pitch_result result = ROCK_PITCH_STOPPED;
@@ -265,12 +278,8 @@ enum rock_pitch_result rock_pitch_read(int16_t (*samples)[ROCK_PITCH_SAMPLES])
             pcm_rec_lock();
             if (pcm_is_recording() && ready >= 0)
             {
-                const int16_t *input = capture[ready];
-                for (size_t i = 0; i < ROCK_PITCH_SAMPLES; i += 2)
-                {
-                    (*samples)[i] = (input[2 * i] + input[2 * i + 2]) / 2;
-                    (*samples)[i + 1] = (input[2 * i + 1] + input[2 * i + 3]) / 2;
-                }
+                pitch_copy_block(*samples, capture[ready]);
+                *captured_frames = captured;
                 ready = -1;
                 deadline = current_tick + 2 * HZ;
                 result = ROCK_PITCH_READY;
@@ -290,6 +299,7 @@ enum rock_pitch_result rock_pitch_read(int16_t (*samples)[ROCK_PITCH_SAMPLES])
     }
 #else
     (void)samples;
+    (void)captured_frames;
     if (running)
         result = ROCK_PITCH_WAITING; /* SDL displays a labelled preview. */
 #endif

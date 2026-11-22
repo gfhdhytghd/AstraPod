@@ -238,7 +238,8 @@ enum { PLA_EXIT = 1, PLA_CANCEL, PLA_UP, SYS_USB_CONNECTED };
 enum plugin_status { PLUGIN_OK, PLUGIN_ERROR, PLUGIN_USB_CONNECTED };
 static const int plugin_contexts = 0;
 static int16_t samples[BUFFER_SIZE];
-static uint32_t input_frames;
+static uint32_t captured_frames;
+static uint32_t analyzed_frames;
 static unsigned int input_peak;
 static unsigned int display_calls;
 static void backlight_ignore_timeout(void) {}
@@ -255,7 +256,7 @@ static void splash(int ticks, const char *message)
 struct tuner_api {
     bool (*pitch_start)(void);
     void (*pitch_pause)(void);
-    enum rock_pitch_result (*pitch_read)(int16_t (*)[BUFFER_SIZE]);
+    enum rock_pitch_result (*pitch_read)(int16_t (*)[BUFFER_SIZE], uint32_t *);
     int (*default_event_handler)(int);
     bool (*plugin_usb_taken)(void);
     void (*splash)(int, const char *);
@@ -273,6 +274,7 @@ static int pluginlib_getaction(int timeout, int contexts, int count)
     {
         rock_pitch_prepare(queued_request);
         complete_block(100);
+        complete_block(200);
         return 0;
     }
     return display_calls == 2 ? PLA_CANCEL : PLA_EXIT;
@@ -286,9 +288,14 @@ static void display_frequency(fixed frequency)
 {
     ++display_calls;
     if (display_calls == 2)
-        assert(frequency == 440 && input_frames == BUFFER_SIZE / 2 && input_peak > 0);
+    {
+        assert(frequency == 440 && input_peak > 0);
+        assert(captured_frames == 2 * ROCK_PITCH_CAPTURE_FRAMES);
+        assert(analyzed_frames == ROCK_PITCH_CAPTURE_FRAMES);
+    }
     else
-        assert(frequency == FP_ZERO && input_frames == 0 && input_peak == 0);
+        assert(frequency == FP_ZERO && captured_frames == 0 &&
+               analyzed_frames == 0 && input_peak == 0);
 }
 """
 
@@ -302,6 +309,7 @@ suffix += loop + r"""
 int main(void)
 {
     int16_t samples[ROCK_PITCH_SAMPLES];
+    uint32_t frames = 0;
     assert(!rock_pitch_suppresses_tones());
     rock_pitch_init();
     assert(!rock_pitch_suppresses_tones());
@@ -321,17 +329,18 @@ int main(void)
 
     assert(rock_pitch_start() && !usb_audio_reserve_recording());
     assert(usb_audio_set_interface(usb_interface + 1, 1) == -1);
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_WAITING);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_WAITING);
     rock_pitch_prepare(queued_request);
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_WAITING);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_WAITING);
     complete_block(500);
     complete_block(900); /* Slow reader keeps newest complete block. */
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_READY);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_READY);
+    assert(frames == 2 * ROCK_PITCH_CAPTURE_FRAMES);
     for (int i = 0; i < ROCK_PITCH_SAMPLES; ++i)
         assert(samples[i] == 900 + i);
     complete_block(-1000);
     assert(samples[0] == 900);
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_READY && samples[0] == -1000);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_READY && samples[0] == -1000);
     assert(rock_pitch_suppresses_tones());
     rock_pitch_pause(); /* Settings menu. */
     restored();
@@ -349,10 +358,10 @@ int main(void)
     rock_pitch_prepare(queued_request);
     assert(route == AUDIO_SRC_MIC && mic_bias);
     complete_block(4512);
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_READY);
-    assert(samples[0] == 4512);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_READY);
+    assert(samples[0] == 4512 && frames == ROCK_PITCH_CAPTURE_FRAMES);
     jack_present = false;
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_NO_INPUT);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_NO_INPUT);
     restored();
 
     jack_present = true;
@@ -362,7 +371,7 @@ int main(void)
     assert(route == AUDIO_SRC_LINEIN);
     rock_pitch_revoke(); /* USB consent, shutdown, or playback handoff. */
     restored();
-    assert(!rock_pitch_start() && rock_pitch_read(&samples) == ROCK_PITCH_STOPPED);
+    assert(!rock_pitch_start() && rock_pitch_read(&samples, &frames) == ROCK_PITCH_STOPPED);
 
     rock_pitch_session_open();
     assert(rock_pitch_start());
@@ -375,25 +384,25 @@ int main(void)
     rock_pitch_prepare(queued_request);
     deferred_takeover = false;
     restored();
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_STOPPED);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_STOPPED);
 
     rock_pitch_session_open();
     assert(rock_pitch_start());
     current_tick += 2*HZ + 1;
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_FAILED);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_FAILED);
     rock_pitch_prepare(queued_request);
     restored();
 
     assert(rock_pitch_start());
     rock_pitch_prepare(queued_request);
     current_tick += 2*HZ + 1;
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_FAILED);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_FAILED);
     restored();
 
     assert(rock_pitch_start());
     fail_start = true;
     rock_pitch_prepare(queued_request);
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_FAILED);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_FAILED);
     fail_start = false;
     restored();
 
@@ -404,36 +413,37 @@ int main(void)
     restored();
     sink = PCM_SINK_USB;
     rock_pitch_sink_unlock();
-    assert(!rock_pitch_start() && rock_pitch_read(&samples) == ROCK_PITCH_STOPPED);
+    assert(!rock_pitch_start() && rock_pitch_read(&samples, &frames) == ROCK_PITCH_STOPPED);
     sink = PCM_SINK_BUILTIN;
     global_settings.rec_source = AUDIO_SRC_LINEIN;
     rock_pitch_session_open();
     assert(rock_pitch_start());
     usb_active = true;
     rock_pitch_prepare(queued_request);
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_FAILED);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_FAILED);
     restored();
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_STOPPED);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_STOPPED);
 
     usb_active = false;
     assert(rock_pitch_start());
     current_tick += 2*HZ + 1;
     rock_pitch_prepare(queued_request);
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_FAILED);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_FAILED);
     restored();
 
     assert(rock_pitch_start());
     rock_pitch_prepare(queued_request);
     complete_block(100);
-    assert(rock_pitch_read(NULL) == ROCK_PITCH_FAILED);
-    assert(rock_pitch_read(&samples) == ROCK_PITCH_READY && samples[0] == 100);
+    assert(rock_pitch_read(NULL, &frames) == ROCK_PITCH_FAILED);
+    assert(rock_pitch_read(&samples, NULL) == ROCK_PITCH_FAILED);
+    assert(rock_pitch_read(&samples, &frames) == ROCK_PITCH_READY && samples[0] == 100);
     rock_pitch_pause();
     restored();
 
     assert(record_and_get_pitch() == PLUGIN_OK && display_calls == 3);
     restored();
 
-    printf("PASS: native/USB exclusion, pending invalidation, DMA copy, gain, timeout, egress, restart diagnostics (%d DMA closes)\n",
+    printf("PASS: native/USB exclusion, pending invalidation, DMA copy and frame totals, gain, timeout, egress, restart diagnostics (%d DMA closes)\n",
            dma_stops);
 }
 """

@@ -98,3 +98,7 @@
   puzzle-piece icon** (iPod Classic). If you had saved your own menu order,
   the row is added there turned on. To hide it, turn it off in **Edit Main
   Menu** (Settings > Appearance > Menus).
+- **Pitch Detector filters high-frequency headset-mic noise.** To use the
+  new Signal Threshold default of 14 (1.4%), choose **Reset Settings** in
+  **Tuner Settings**. This resets all tuner settings. You can also set
+  **Signal Threshold** to 14 directly.

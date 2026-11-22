@@ -288,8 +288,7 @@ ROCK_SLOT(int (*click_max_volume)(void), click_max_volume, rock_click_max_volume
 #ifdef HAVE_ROCK_PITCH
 ROCK_SLOT(bool (*pitch_start)(void), pitch_start, rock_pitch_start)
 ROCK_SLOT(void (*pitch_pause)(void), pitch_pause, rock_pitch_pause)
-ROCK_SLOT(enum rock_pitch_result (*pitch_read)(int16_t (*)[ROCK_PITCH_SAMPLES]),
-          pitch_read, rock_pitch_read)
+ROCK_SLOT(__typeof__(rock_pitch_read) *pitch_read, pitch_read, rock_pitch_read)
 #endif
 ROCK_DIRECT(strchr)
 ROCK_DIRECT(strtok_r)

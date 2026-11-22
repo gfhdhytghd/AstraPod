@@ -138,8 +138,14 @@ the tuner selects the headset microphone when a plug is present. Remove the
 plug before launch to use the passive dock line input. The tuner uses the
 native gain for the selected input and leaves the recorder's source setting
 alone. Capture uses the recorder's 44,100 Hz input configuration. The tuner
-analyzes the left channel at 22,050 Hz. The bottom row shows analysis frames
-received and the latest peak against full scale. When it cannot detect a
+analyzes the left channel at 22,050 Hz and filters noise above 3 kHz.
+**Signal Threshold** sets the filtered RMS gate in 0.1% of full scale. Its
+default is 14 (1.4%). Use **Reset Settings** in **Tuner Settings** to apply
+the new default to an existing setup.
+
+The bottom row shows **In** (native 44.1 kHz frames), **Skip** (native
+frames from blocks replaced before analysis), and **Peak** (the latest
+unfiltered analysis peak, out of 32,768). When the tuner cannot detect a
 pitch, it displays **No pitch. Check mic or line input.** Removing the plug
 during microphone capture stops the tuner and reports the unplug.
 
@@ -150,8 +156,9 @@ prompt ends the tuner session, including when you choose **Charge Only**.
 SDL displays a fixed 445 Hz preview labelled **Preview - no audio capture**.
 
 The SDK stages a digest-checked copy of the upstream module. Its tuner
-slots request a foreground session, release capture, or copy one complete
-PCM block. Firmware owns the DMA buffers and callbacks. The reservation
+slots request a foreground session, release capture, or copy the latest
+complete PCM block with its cumulative native frame count. Firmware owns
+the DMA buffers and callbacks. The reservation
 excludes the native recorder and USB Sound Card. A playback sink switch
 releases the reservation before switching.
 

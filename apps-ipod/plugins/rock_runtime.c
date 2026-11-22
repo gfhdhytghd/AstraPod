@@ -17,6 +17,7 @@
 #include "timer.h"
 #include "speech/language.h"
 #include "lang.h"
+#include "system/activity.h"
 #include "system/app_buffer.h"
 #include "widgets/folder_select.h"
 #include "widgets/splash.h"
@@ -707,7 +708,10 @@ static int run_rock(const char *path, const char *file,
 #else
     (void)shell;
 #endif
+    push_activity_without_refresh(ACTIVITY_PLUGIN);
     result = module->entry_point(file);
+    if (get_current_activity() == ACTIVITY_PLUGIN)
+        pop_current_activity_without_refresh();
 #ifdef HAVE_PODLINK_PLUGIN_TEST
     if (shell)
         podlink_plugin_test_stopped();

@@ -94,9 +94,10 @@ static const char * menu_get_name(int selected_item, void * data,
      * types have to agree, so settle on const char * for both. */
     const char *label = (id != -1) ? (const char *)str(id) : (const char *)p;
 
-    /* The carried item is marked in the row text as well as by its icon: a
-     * theme need never map Icon_Moving, and a move you cannot see is a move
-     * you cannot finish. Same reasoning as the playlist viewer's '>'. */
+    /* The carried item is marked in the row text, since its icon is its home
+     * icon, and a move you cannot see is a move you cannot finish. Same
+     * reasoning as the playlist viewer's '>'. The list renderer strips the
+     * '>' and the ": On" to find that icon. */
     snprintf(buffer, buffer_len, "%s%s: %s",
              selected_item == moving_item ? ">" : "", label,
              menu_items[selected_item].enabled ?
@@ -105,19 +106,39 @@ static const char * menu_get_name(int selected_item, void * data,
     return buffer;
 }
 
+/* The main menu's item for this screen's row 'n' */
+static const struct menu_item_ex *row_item(int n)
+{
+    for (int j = 0; j < menu_item_count; j++)
+        if (strcmp(menu_table[j].string, menu_items[n].string) == 0)
+            return menu_table[j].item;
+    return NULL;
+}
+
+/* Every row, enabled or not, takes the icon and row kind it has on the main
+ * menu, so the renderer draws each as home does. The carried row is marked by
+ * menu_get_name()'s '>'. */
 static enum themable_icons menu_get_icon(int selected_item, void * data)
 {
     (void)data;
+    const struct menu_item_ex *item = row_item(selected_item);
+    int icon = Icon_NOICON;
 
-    if (selected_item == moving_item)
-        return Icon_Moving;
+    if (item && (item->flags & MENU_HAS_DESC))
+        icon = item->callback_and_desc->icon_id;
+    else if (item && (item->flags & MENU_DYNAMIC_DESC))
+        icon = item->menu_get_name_and_icon->icon_id;
+    if (icon == Icon_NOICON)
+        icon = item && (item->flags & MENU_TYPE_MASK) == MT_MENU ?
+               Icon_Submenu : Icon_Menu_functioncall;
+    return icon;
+}
 
-    /* Every row, enabled or not. Icon_NOICON for the disabled ones left a
-     * blank cell wherever an entry was not in the root menu -- which is all of
-     * the tagnavi rows until one is added -- and that reads as a missing icon
-     * rather than as "off". The state is in the row text either way:
-     * menu_get_name() appends ": On" / ": Off". */
-    return Icon_Config;
+static enum list_row_kind menu_get_kind(int selected_item, void * data)
+{
+    (void)data;
+    const struct menu_item_ex *item = row_item(selected_item);
+    return item ? root_menu_item_kind(item) : LIST_ROW_ACTION;
 }
 
 /* 'dest' is the menu_items[] slot this name is being resolved for -- needed
@@ -356,6 +377,7 @@ static int config_screen(const struct menu_item_ex *carry)
     if (global_settings.talk_menu)
         gui_synclist_set_voice_callback(&list, menu_speak_item);
     gui_synclist_set_icon_callback(&list, menu_get_icon);
+    gui_synclist_set_row_callbacks(&list, menu_get_kind, NULL, NULL);
     gui_synclist_set_nb_items(&list, menu_item_count);
     if (moving_item >= 0)
         gui_synclist_select_item(&list, moving_item);

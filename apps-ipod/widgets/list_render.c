@@ -109,7 +109,7 @@ struct native_list {
     /* Row and notes painters run serially while the renderer is pinned. */
     union {
         struct {
-            char name[MAX_PATH], value[96], playing[MAX_PATH];
+            char name[MAX_PATH], value[96], playing[MAX_PATH], home[MAX_PATH];
         } row;
         char notes[2 * MAX_PATH];
     } scratch;
@@ -588,17 +588,25 @@ static const char *row_icon(enum themable_icons icon, enum list_row_kind kind,
         if (equals_lang(label, LANG_SORT_TYPE)) return "ª";
         if (equals_lang(label, LANG_MOODS)) return "í";
         if (equals_lang(label, LANG_JOURNEYS)) return "î";
+        if (equals_lang(label, LANG_PLUGIN_APPS)) return "ĥ";
+        if (equals_lang(label, LANG_PLUGIN_GAMES)) return "Ħ";
+        if (equals_lang(label, LANG_PLUGIN_DEMOS)) return "ħ";
 
         switch (icon)
         {
-            case Icon_Audio: return "¡";
-            case Icon_Playlist: return "¥";
-            case Icon_Folder: return "m";
+            case Icon_Audio: return "¥";
+            case Icon_Playlist: return "m";
+            case Icon_Folder: return "¡";
             case Icon_Font:
             case Icon_Document: return "¦";
             case Icon_Image: return "§";
             case Icon_Book: return "Ę";
             case Icon_Lyrics: return "ė";
+            case Icon_Plugin: return "Ĥ";
+            /* A plugin's own menu runs in a file-row activity. */
+            case Icon_Menu_setting:
+            case Icon_Menu_functioncall:
+            case Icon_Submenu: return NULL;
             default: return icon == Icon_NOICON ? NULL : "¨";
         }
     }
@@ -684,6 +692,17 @@ static const char *row_icon(enum themable_icons icon, enum list_row_kind kind,
     }
 }
 
+/* An Edit Main Menu row's home label: its text without the carried
+ * item's '>' and the ": On" or ": Off" after it. */
+static const char *home_label(const char *text, char *buffer, size_t size)
+{
+    strlcpy(buffer, text + (*text == '>'), size);
+    char *state = strrchr(buffer, ':');
+    if (state && state[1] == ' ')
+        *state = '\0';
+    return buffer;
+}
+
 static const char *row_accessory(const struct gui_synclist *list, int item,
                                  enum list_row_kind kind, const char *label,
                                  const char *value)
@@ -728,7 +747,8 @@ static bool file_rows(enum current_activity activity)
 {
     return activity == ACTIVITY_FILEBROWSER || activity == ACTIVITY_PLAYLISTBROWSER ||
            activity == ACTIVITY_DOCUMENTBROWSER || activity == ACTIVITY_IMAGEBROWSER ||
-           activity == ACTIVITY_PLUGINBROWSER || activity == ACTIVITY_FILE_SEARCH ||
+           activity == ACTIVITY_PLUGINBROWSER || activity == ACTIVITY_PLUGIN ||
+           activity == ACTIVITY_FILE_SEARCH ||
            activity == ACTIVITY_FOLDERSELECT;
 }
 
@@ -785,7 +805,9 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     enum themable_icons icon = list->callback_get_item_icon ?
         list->callback_get_item_icon(item, list->data) : Icon_NOICON;
 
-    bool files = file_rows(activity);
+    /* Edit Main Menu shows each home row as home draws it, wherever it runs */
+    bool menu_config = equals_lang(list->title, LANG_MAIN_MENU_SETTINGS);
+    bool files = file_rows(activity) && !menu_config;
     bool main_settings = activity == ACTIVITY_SETTINGS && equals_lang(list->title, LANG_SETTINGS);
     bool database = activity == ACTIVITY_DATABASEBROWSER;
     bool library_menu = database && (kind == LIST_ROW_MENU || kind == LIST_ROW_ACTION) &&
@@ -798,7 +820,7 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     int margin = m[UI_METRIC_LIST_ICON_MARGIN];
     int text_x = m[UI_METRIC_LIST_TEXT_PADDING];
     bool icon_column = list->show_icons && (files || main_settings || activity == ACTIVITY_SYSTEMSCREEN ||
-        library_menu || books_menu || agents || activity == ACTIVITY_MAINMENU ||
+        library_menu || books_menu || agents || activity == ACTIVITY_MAINMENU || menu_config ||
         (database && (kind == LIST_ROW_CUSTOM || kind == LIST_ROW_CUSTOM_MENU ||
          equals_lang(list->title, LANG_CUSTOM_MENU))));
     if (!icon_column && list->show_icons && database && kind == LIST_ROW_COMMAND)
@@ -810,6 +832,19 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
                             ? P2STR(label_ptr) : "";
         icon_column = !equals_lang(label, LANG_TAGNAVI_ALL_TRACKS) &&
                       !equals_lang(label, LANG_TAGNAVI_ALL_TRACKS_SORTED_BY_ALBUM);
+    }
+    /* Like a native menu, a plugin's menu has an icon column only for a row
+     * that has a glyph of its own. */
+    if (files && list->show_icons &&
+        (kind == LIST_ROW_ACTION || kind == LIST_ROW_MENU ||
+         kind == LIST_ROW_SETTING || kind == LIST_ROW_TOGGLE))
+    {
+        char *name = render->scratch.row.name;
+        const unsigned char *label_ptr = (const unsigned char *)
+            list->callback_get_item_name(item, list->data, name, sizeof(render->scratch.row.name));
+        const char *label = label_ptr && P2ID(label_ptr) <= VOICEONLY_DELIMITER
+                            ? P2STR(label_ptr) : "";
+        icon_column = row_icon(icon, kind, label, true, activity) != NULL;
     }
     int marked = list_select_row_state(list, item);
     if (!icon_column && !art && list->show_icons &&
@@ -838,7 +873,9 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     const char *value = list->callback_get_item_value ?
                         list->callback_get_item_value(item, list->data, render->scratch.row.value,
                                                       sizeof(render->scratch.row.value)) : NULL;
-    const char *aux = activity == ACTIVITY_MAINMENU ? NULL :
+    const char *icon_label = menu_config ? home_label(label, render->scratch.row.home,
+                                                      sizeof(render->scratch.row.home)) : label;
+    const char *aux = activity == ACTIVITY_MAINMENU || menu_config ? NULL :
                       row_accessory(list, item, kind, label, value);
 
     unsigned int fg = render->colors[selected ? UI_COLOR_SELECTED_TEXT : UI_COLOR_MUTED];
@@ -895,7 +932,7 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
             fill(clip, tile, LCD_RGBPACK(45, 45, 45));
         if (!cover && !list->callback_prefetch_art && render->icon_font >= 0)
             draw_text(render, clip, icon_cell, render->icon_font, fg,
-                      row_icon(icon, kind, label, files, activity), false, 0, false);
+                      row_icon(icon, kind, icon_label, files, activity), false, 0, false);
         text_x += cover_size + m[UI_METRIC_LIST_AUX_PADDING] + 1;
     }
     else if (icon_column || marked >= 0)
@@ -904,7 +941,7 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         if (render->icon_font >= 0)
         {
             const char *glyph = marked >= 0 ? (marked ? "×" : "Ö") :
-                                row_icon(icon, kind, label, files, activity);
+                                row_icon(icon, kind, icon_label, files, activity);
             if (now_playing_row && marked < 0)
                 glyph = audio_status() & AUDIO_STATUS_PAUSE ? "B" : "A";
             if (agents && value && value[1] && (value[0] == 'r' || value[0] == 'q'))

@@ -487,6 +487,21 @@ for Up and Down, Left and Right to move, Select for A, Play for Start,
 Select+Left for B and Select+Right for Select. This build keeps
 cartridge RAM in memory for the game session.
 
+## XWorld
+
+Copy `memlist.bin` and the matching `bank01` to `bank0d` files from
+the DOS release of Another World to `/.rockbox/xworld/`. Either case
+works for the file names. Supply the data yourself; the archive does
+not contain it. Open **Plugins > Games > xworld**. Without the data,
+the module displays the directory and waits for Menu. A truncated or
+mismatched data set displays **XWorld data error** with the reason.
+
+The module stops native playback and plays its sound through the
+built-in PCM stream. Left and Right move, Select is the action button
+and Play crouches. The wheel jumps when turned back and crouches when
+turned forward. Menu opens the game menu with Resume, Load, Save and
+Quit. USB storage ends the game; Charge Only leaves it running.
+
 ## ZXBox and Lua examples
 
 Open **Plugins > Games > zxbox** and choose a 48K `.sna` snapshot.

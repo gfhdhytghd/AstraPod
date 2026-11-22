@@ -150,6 +150,7 @@ games/superdom
 games/wormlet
 games/xobox
 games/zxbox
+games/xworld
 viewers/chip8
 viewers/lua
 viewers/mp3_encoder

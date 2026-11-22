@@ -6,7 +6,13 @@
 #include <stddef.h>
 
 #define ROCK_STREAM_BLOCK_BYTES 4096
+/* SDL can pull two mixer frames in one callback, in addition to the
+ * initial pair mixed before the driver starts. */
+#ifdef SIMULATOR
+#define ROCK_STREAM_QUEUE_SIZE 4
+#else
 #define ROCK_STREAM_QUEUE_SIZE 2
+#endif
 
 /* PCM is signed 16-bit stereo in native byte order at the returned rate. */
 unsigned int rock_stream_open(void);

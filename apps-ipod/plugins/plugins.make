@@ -243,6 +243,7 @@ $(eval $(call rock_module_bitmaps,games/superdom,superdom_boarditems))
 include $(APPSDIR)/plugins/rock-engines.make
 include $(APPSDIR)/plugins/pictureflow-compat.make
 include $(APPSDIR)/plugins/wolf3d-compat.make
+include $(APPSDIR)/plugins/pdbox-compat.make
 include $(APPSDIR)/plugins/phase4-puzzles.make
 include $(APPSDIR)/plugins/clock-compat.make
 include $(APPSDIR)/plugins/fft-compat.make

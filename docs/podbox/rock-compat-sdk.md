@@ -621,3 +621,49 @@ python3 tools/tests/rock_mpegplayer_sim.py BUILD_SDL EVIDENCE_DIR
 | Device gate | Action and expected result |
 | --- | --- |
 | MPEGPlayer / ipod6g | Open the generated `colors.mpg` with the matching ARM firmware and module. Verify red video and the 440 Hz tone. Pause and seek right to blue, then resume. While playing, adjust output gain with the wheel in both directions. Exit with Menu, open a native audio track, then reopen MPEGPlayer. Repeat playback with USB consent, Charge Only, and storage takeover. Confirm PCM stops before the prompt and playback works after unplug. Verify the generated invalid and truncated inputs return to Applications. |
+
+
+## PDBox on ipod6g
+
+Use a build configured with `--appsdir=apps-ipod --target=ipod6g --rock-compat`.
+Open **Plugins > Applications > PDBox** and choose a lowercase `.pd` file. Stop native playback or recording first and use the
+player's built-in audio output. Hold **Menu** or press **Select + Menu** to
+return. The short keys still send the stock PDBox patch messages. Headset
+volume buttons adjust the player's volume.
+
+### Source and patch format
+
+The engine is the repository's Rockbox PDBox source in `apps/plugins/pdbox`
+(Git tree `432282f887ad063521373130b8202077a73be562` at base `af15770d48`).
+It includes PDa 0.6, derived from Pd 0.37-4. Its license is in
+`apps/plugins/pdbox/PDa/LICENSE.txt`. The build stages the source locally.
+No external archive, patch library, sample assets, or network setup is
+required. Use [tone.pd](../../tools/tests/fixtures/rock-pdbox/tone.pd) for a
+self-contained example.
+
+PDBox accepts flat text patches within 32 KiB, with up to 128 boxes,
+256 connections (including named sends), and 64 displayed widgets. Each
+semicolon-terminated record fits in 512 bytes and has at most 40 atoms.
+The patch starts with a single canvas. It declares boxes before connections.
+Keep GUI positions in the stock 160 × 120 coordinate space.
+
+- Audio boxes include `osc~`, `phasor~`, `noise~`, `sig~`, `*~`, `+~`,
+  `-~`, `lop~`, `hip~`, and one `dac~` with up to two channels.
+  DSP starts when the patch opens.
+- Control boxes include `loadbang`, `bang`, `float`, `spigot`,
+  `netreceive 3333 1`, `route` for local button messages, and
+  `send` to a unique `pod_` widget receiver. Message boxes take one
+  number or `bang`.
+- The stock renderer displays comments and `pod_` number, bang, slider,
+  and radio widgets. Use linear sliders and set widget send names to
+  `empty` (or `-` for number boxes).
+- The reader rejects unbounded message graphs, subpatches, external
+  abstractions, file I/O objects, and other unsupported records. A patch
+  that requests those features displays an error and returns.
+
+The loader reads the patch once. The DSP worker evaluates the checked copy.
+The GUI worker updates widget values from the bounded datagram queue. The
+foreground submits copied PCM and owns LCD updates, input, and USB events.
+USB storage takeover revokes the stream and joins both workers before
+acknowledgement. Normal return stops PCM and joins both workers before
+releasing the PDa heap.

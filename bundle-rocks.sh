@@ -19,6 +19,11 @@ while IFS= read -r module; do
     if [ "$module" = games/snake2 ]; then
         cp "$root/apps/plugins/snake2.levels" "$stage/$(dirname "$path")/"
     fi
+    if [ "$module" = apps/dict ]; then
+        python3 "$root/tools/rock-compat/wordnet.py" \
+            "${WORDNET_ARCHIVE:-$HOME/.cache/podbox-wordnet/WordNet-3.0.tar.bz2}" \
+            "$stage/$(dirname "$path")"
+    fi
 done < "$stage/manifest"
 (cd "$stage" && zip -qr "$build/rockbox.zip" .rockbox)
 if [ "${ROCK_PITCH_DETECTOR:-0}" != 1 ] &&

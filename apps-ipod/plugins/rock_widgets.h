@@ -18,6 +18,7 @@ void rock_modal_end(const struct rock_native_scope *scope);
 __typeof__(kbd_input) rock_kbd_input;
 __typeof__(gui_syncyesno_run) rock_yesno;
 __typeof__(view_text) rock_view_text;
+int rock_pick_text_file(char *path, size_t size);
 
 void rock_list_release(bool present);
 void rock_list_discard(void);

@@ -2,6 +2,7 @@
 #include "plugins/rock_compat.h"
 #include "plugins/sdk/plugin.h"
 #include "plugins/rock_widgets.h"
+#include "screens/browse/browser.h"
 
 struct rock_native_scope rock_modal_begin(void)
 {
@@ -51,4 +52,34 @@ int rock_view_text(const char *title, const char *text)
     view_text(title, text);
     rock_modal_end(&scope);
     return rock_usb_taken() ? PLUGIN_USB_CONNECTED : PLUGIN_OK;
+}
+
+static bool show_text_file(char *name, int attr, struct browser_context *browse)
+{
+    (void)browse;
+    const char *ext = strrchr(name, '.');
+    return (attr & ATTR_DIRECTORY) || (ext && !strcasecmp(ext, ".txt"));
+}
+
+int rock_pick_text_file(char *path, size_t size)
+{
+    if (rock_usb_taken() || !path || size < MAX_PATH)
+        return -1;
+
+    struct browse_context browse = {
+        .dirfilter = SHOW_ALL,
+        .flags = BROWSE_DIRFILTER | BROWSE_SELECTONLY | BROWSE_NO_CONTEXT_MENU,
+        .callback_show_item = show_text_file,
+        .title = "Select a text file",
+        .icon = Icon_Plugin,
+        .root = "/",
+        .buf = path,
+        .bufsize = size,
+    };
+    struct rock_native_scope scope = rock_modal_begin();
+    bool previous = action_set_menu_back(true);
+    rockbox_browse(&browse);
+    action_set_menu_back(previous);
+    rock_modal_end(&scope);
+    return (browse.flags & BROWSE_SELECTED) && !rock_usb_taken() ? 0 : -1;
 }

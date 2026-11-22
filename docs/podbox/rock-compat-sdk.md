@@ -284,3 +284,18 @@ CRC internally. The first output is OPEN for `astrapod.echo`. The driver
 follows the same echo and file sequence as the device module. Its result
 goes to stderr. Exit status 0 confirms the downloaded file matches the
 fixture byte for byte.
+
+## Dictionary and View Text
+
+Open **Plugins > Applications > dict** and enter an English word or
+phrase. Use the wheel to scroll through the WordNet senses and press
+Menu to return to Applications. The build packages Princeton WordNet 3.0
+under the WordNet redistribution license. The license is in
+`/.rockbox/rocks/apps/dict.LICENSE`. For an offline build, set
+`WORDNET_ARCHIVE` to a local copy of the Princeton archive. The packager
+verifies its SHA-256 before reading it.
+
+Open **Plugins > Applications > view_text** and select a UTF-8 `.txt`
+file up to 32 KiB. View Text displays the filename and text in the native
+text box. Press Menu to return to Applications. The Files browser still
+uses the native document viewer when you open a text file there.

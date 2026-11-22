@@ -68,7 +68,7 @@ ifneq ($(APP_TYPE),sdl-sim)
 ROCK_LINK_INPUT += $(ROCK_OBJECTS)/lib/gcc-support.o
 endif
 
-ROCK_UTILITIES := db_folder_select dict credits alarmclock calendar dart_scorer resistor shopper settings_dumper
+ROCK_UTILITIES := db_folder_select dict view_text credits alarmclock calendar dart_scorer resistor shopper settings_dumper
 $(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_UTILITIES))): $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c $(APPSDIR)/plugins/stage-utilities.py
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-utilities.py $< $@

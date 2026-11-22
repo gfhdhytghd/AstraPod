@@ -5,6 +5,7 @@ apps/chessclock
 apps/countdown_timer
 apps/dart_scorer
 apps/db_folder_select
+apps/dict
 apps/lamp
 apps/metronome
 apps/periodic_table
@@ -13,6 +14,7 @@ apps/rb_info
 apps/resistor
 apps/settings_dumper
 apps/stopwatch
+apps/view_text
 demos/bounce
 demos/credits
 demos/cube

@@ -196,6 +196,7 @@ static void stop_file(unsigned char reason, bool notify)
     file_tx.size = 0;
     cancel_pending = false;
     file_count = 0;
+    progress_event = false;
     file.reason = reason;
     file.phase = STOPPING;
 }
@@ -210,6 +211,7 @@ static void end_channel(unsigned char reason, bool notify, bool report)
     cancel_tx.channel = 0;
     accept_open = close_pending = cancel_pending = false;
     opened = open_sent = opened_event = false;
+    progress_event = false;
     channel = 0;
     wire_max = 0;
     stop_file(reason ? reason : ROCK_PODLINK_CANCELLED, false);
@@ -305,30 +307,30 @@ static void receive(const struct podlink_message *message)
     unsigned int op = p[4], payload = len - HEADER;
     uint32_t id = get32(p + 12);
     bool reserved = p[5] || p[6] || p[7];
-    unsigned char reason = payload == 2 && !p[HEADER + 1] &&
-                           p[HEADER] <= ROCK_PODLINK_LIMIT
-                         ? p[HEADER] : ROCK_PODLINK_INVALID;
+    bool valid_reason = payload == 2 && !p[HEADER + 1] &&
+                        p[HEADER] <= ROCK_PODLINK_LIMIT;
 
     if (!id)
     {
-        if (!reserved && op == CLOSE)
+        if (!reserved && op == CLOSE && valid_reason)
         {
             close_pending = true;
-            close_reason = reason;
+            close_reason = p[HEADER];
             reply_close = false;
         }
         else if (!reserved && op == OPEN_OK && !opened && !payload)
             accept_open = true;
-        else if (!reserved && (opened || accept_open) &&
-                 (op == TEXT || op == BINARY) && payload <= ROCK_PODLINK_MESSAGE_MAX)
+        else if (!close_pending && !reserved && (opened || accept_open) &&
+                 (op == TEXT || op == BINARY))
         {
-            if (message_rx.size && !close_pending)
+            if (payload > ROCK_PODLINK_MESSAGE_MAX || message_rx.size)
             {
                 close_pending = true;
-                close_reason = ROCK_PODLINK_BUSY;
+                close_reason = payload > ROCK_PODLINK_MESSAGE_MAX
+                    ? ROCK_PODLINK_LIMIT : ROCK_PODLINK_BUSY;
                 reply_close = true;
             }
-            else if (!close_pending)
+            else
             {
                 memcpy(message_rx.data, p, len);
                 message_rx.size = len;
@@ -344,10 +346,10 @@ static void receive(const struct podlink_message *message)
     else if (opened && id == file.id && file.phase >= WAIT_ACCEPT &&
              file.phase <= WAIT_DONE && !cancel_pending)
     {
-        if (!reserved && op == CANCEL)
+        if (!reserved && op == CANCEL && valid_reason)
         {
             cancel_pending = true;
-            cancel_reason = reason ? reason : ROCK_PODLINK_CANCELLED;
+            cancel_reason = p[HEADER] ? p[HEADER] : ROCK_PODLINK_CANCELLED;
             reply_cancel = false;
         }
         else if (reserved || len > CAPACITY || op < ACCEPT || op > DONE ||

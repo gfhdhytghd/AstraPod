@@ -310,6 +310,7 @@ void rock_usb_takeover(void)
 #ifdef HAVE_PODLINK_PLUGIN_TEST
     podlink_plugin_test_usb_taken();
 #endif
+    rock_h264_end();
     rock_media_shutdown();
     rock_execution_end();
     rock_hid_close();
@@ -700,6 +701,7 @@ static int invoke_module(void *opaque)
     rock_pitch_session_open();
     rock_stream_session_open();
     rock_execution_begin();
+    rock_h264_begin(tail, tail_size);
     rock_begin_settings();
     rock_display_start(call->saved_pixels, call->widget_pixels);
     button_clear_pressed();
@@ -716,6 +718,7 @@ static int invoke_module(void *opaque)
     if (call->shell)
         podlink_plugin_test_stopped();
 #endif
+    rock_h264_end();
     rock_media_shutdown();
     rock_execution_end();
     rock_hid_close();

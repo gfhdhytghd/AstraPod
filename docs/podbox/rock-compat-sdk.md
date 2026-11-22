@@ -433,3 +433,17 @@ sound effects through the built-in sink when it is free. Enable or
 disable effects from **Options > Sound** before starting a game.
 Supply the WAD files separately. The archive contains the launcher
 and DRAM overlay.
+
+## H.264 video on iPod Classic
+
+Open **Plugins > Applications > h264_player** and choose an MP4 or M4V.
+Use progressive H.264 Baseline up to Level 3.0, at most 30 fps and a
+maximum of 640×480. The video tables and decoder must fit the available
+plugin scratch space. A 320×240 clip leaves room for the index. Use Play
+to pause or resume, Left or Right to seek to a keyframe, and Menu to
+return to Applications. USB storage stops the decoder before the plugin
+releases its workspace.
+
+The VPU backend is available on ipod6g. The SDL entry reports that the
+decoder is unavailable. This player displays video only. It leaves the
+native audio and codec thread available for music.

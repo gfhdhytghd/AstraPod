@@ -70,6 +70,7 @@ $(ROCK_OBJECTS)/midi.o: $(APPSDIR)/plugins/midi-compat.c $(ROCK_FINGERPRINT)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
 
 include $(APPSDIR)/plugins/mikmod-compat.make
+include $(APPSDIR)/plugins/h264-compat.make
 include $(APPSDIR)/plugins/md5sum.make
 include $(APPSDIR)/plugins/disktidy.make
 include $(APPSDIR)/plugins/resident.make

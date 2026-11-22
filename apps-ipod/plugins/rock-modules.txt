@@ -13,6 +13,7 @@ apps/dict
 apps/disktidy
 apps/eq_optimizer
 apps/file_picker
+apps/h264_player
 apps/imageviewer
 apps/keybox
 apps/lamp

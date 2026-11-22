@@ -71,6 +71,14 @@ ROCK_DIRECT(rock_timer_start)
 ROCK_DIRECT(rock_timer_dispatch)
 ROCK_DIRECT(rock_timer_stop)
 
+/* Exclusive VPU decoder, NULL on the simulator. */
+ROCK_SLOT(const struct hw_h264_api *hw_h264, hw_h264, ROCK_H264_API)
+#ifdef HAVE_HW_H264
+ROCK_DIRECT(sound_unit)
+ROCK_DIRECT(sound_val2phys)
+ROCK_RAW(lcd_blit_yuv)
+#endif
+
 /* Foreground PCM producer */
 ROCK_DIRECT(rock_stream_open)
 ROCK_DIRECT(rock_stream_submit)

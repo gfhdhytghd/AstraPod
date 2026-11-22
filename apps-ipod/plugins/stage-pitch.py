@@ -186,14 +186,20 @@ section("/* Stop the recording when the buffer is full */", "    /* GUI */", """
 }
 #endif
 
+static void display_capture_start(void)
+{
+#ifdef SIMULATOR
+    display_frequency(int2fixed(445));
+#else
+    input_frames = 0;
+    input_peak = 0;
+    display_frequency(FP_ZERO);
+#endif
+}
+
 static enum plugin_status record_and_get_pitch(void)
 {
     enum plugin_status result = PLUGIN_OK;
-#ifdef SIMULATOR
-    const fixed initial_frequency = int2fixed(445);
-#else
-    const fixed initial_frequency = FP_ZERO;
-#endif
     backlight_ignore_timeout();
 
     if (!rb->pitch_start())
@@ -202,11 +208,7 @@ static enum plugin_status record_and_get_pitch(void)
         result = PLUGIN_ERROR;
         goto out;
     }
-#ifndef SIMULATOR
-    input_frames = 0;
-    input_peak = 0;
-#endif
-    display_frequency(initial_frequency);
+    display_capture_start();
 
     while (true)
     {
@@ -241,7 +243,7 @@ static enum plugin_status record_and_get_pitch(void)
                 break;
             }
 
-            display_frequency(initial_frequency);
+            display_capture_start();
         }
 
 #ifdef SIMULATOR

@@ -12,6 +12,9 @@ code = (root / "apps-ipod/plugins/rock_pitch.c").read_text()
 header = (root / "apps-ipod/plugins/rock_pitch.h").read_text()
 target_audio = (root / "firmware/target/arm/s5l8702/ipod6g/audio-6g.c").read_text()
 usb = (root / "firmware/usbstack/usb_audio.c").read_text()
+staged = out / "pitch_detector.c"
+subprocess.run([sys.executable, root / "apps-ipod/plugins/stage-pitch.py",
+                root / "apps/plugins/pitch_detector.c", staged], check=True)
 
 def function(text, signature):
     at = text.index(signature + "\n{")
@@ -25,6 +28,7 @@ prefix = r"""
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #define ASTRAPOD_ROCK_COMPAT
 #define IPOD_6G
@@ -223,6 +227,78 @@ static void restored(void)
     usb_audio_release_recording();
 }
 
+/* Exercise the staged native loop with one completed block before Settings
+ * and no DMA completion between Return to Tuner and the next redraw. */
+typedef int fixed;
+#define FP_ZERO 0
+#define BUFFER_SIZE ROCK_PITCH_SAMPLES
+#define IS_SYSEVENT(action) ((action) < 0)
+#define PLA_ARRAY_COUNT 1
+enum { PLA_EXIT = 1, PLA_CANCEL, PLA_UP, SYS_USB_CONNECTED };
+enum plugin_status { PLUGIN_OK, PLUGIN_ERROR, PLUGIN_USB_CONNECTED };
+static const int plugin_contexts = 0;
+static int16_t samples[BUFFER_SIZE];
+static uint32_t input_frames;
+static unsigned int input_peak;
+static unsigned int display_calls;
+static void backlight_ignore_timeout(void) {}
+static void backlight_use_settings(void) {}
+static fixed detect_frequency(void) { return 440; }
+static int default_event_handler(int action) { return action; }
+static bool plugin_usb_taken(void) { return false; }
+static void splash(int ticks, const char *message)
+{
+    (void)ticks;
+    fprintf(stderr, "Unexpected tuner message: %s\n", message);
+    assert(false);
+}
+struct tuner_api {
+    bool (*pitch_start)(void);
+    void (*pitch_pause)(void);
+    enum rock_pitch_result (*pitch_read)(int16_t (*)[BUFFER_SIZE]);
+    int (*default_event_handler)(int);
+    bool (*plugin_usb_taken)(void);
+    void (*splash)(int, const char *);
+};
+static const struct tuner_api tuner_api = {
+    rock_pitch_start, rock_pitch_pause, rock_pitch_read,
+    default_event_handler, plugin_usb_taken, splash
+};
+static const struct tuner_api *rb = &tuner_api;
+
+static int pluginlib_getaction(int timeout, int contexts, int count)
+{
+    assert(timeout == 1 && contexts == plugin_contexts && count == PLA_ARRAY_COUNT);
+    if (display_calls == 1)
+    {
+        rock_pitch_prepare(queued_request);
+        complete_block(100);
+        return 0;
+    }
+    return display_calls == 2 ? PLA_CANCEL : PLA_EXIT;
+}
+static bool main_menu(void)
+{
+    restored();
+    return false;
+}
+static void display_frequency(fixed frequency)
+{
+    ++display_calls;
+    if (display_calls == 2)
+        assert(frequency == 440 && input_frames == BUFFER_SIZE / 2 && input_peak > 0);
+    else
+        assert(frequency == FP_ZERO && input_frames == 0 && input_peak == 0);
+}
+"""
+
+staged_text = staged.read_text()
+detect_start = staged_text.index("static fixed detect_frequency(void)")
+detect_end = "\n}\n#endif\n"
+loop_start = staged_text.index(detect_end, detect_start) + len(detect_end)
+loop = staged_text[loop_start:staged_text.index("static void init_everything(void)")]
+suffix += loop + r"""
+
 int main(void)
 {
     int16_t samples[ROCK_PITCH_SAMPLES];
@@ -354,7 +430,10 @@ int main(void)
     rock_pitch_pause();
     restored();
 
-    printf("PASS: native/USB exclusion, pending invalidation, DMA copy, gain, timeout, egress (%d DMA closes)\n",
+    assert(record_and_get_pitch() == PLUGIN_OK && display_calls == 3);
+    restored();
+
+    printf("PASS: native/USB exclusion, pending invalidation, DMA copy, gain, timeout, egress, restart diagnostics (%d DMA closes)\n",
            dma_stops);
 }
 """

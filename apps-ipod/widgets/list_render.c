@@ -677,6 +677,7 @@ static const char *row_icon(enum themable_icons icon, enum list_row_kind kind,
         case Icon_Playlist: return "¥";
         case Icon_Font: return "¦";
         case Icon_Bookmark: return "Ó";
+        case Icon_Plugin: return "Ĥ";
         case Icon_file_view_menu:
         case Icon_Submenu: return "Þ";
         default: return icon == Icon_NOICON ? NULL : "¨";

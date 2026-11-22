@@ -94,3 +94,7 @@
   If a launcher or user service runs a companion script from the firmware
   checkout, point it at the same script in AstraPod-Desktop.
 - PodLink uses FAST USB downloads by default. Use `MS3 PROFILE BASE` to compare the 4 KiB mode.
+- **Plugins now appears on the main menu, just above Settings, with a
+  puzzle-piece icon** (iPod Classic). If you had saved your own menu order,
+  the row is added there turned on. To hide it, turn it off in **Edit Main
+  Menu** (Settings > Appearance > Menus).

@@ -2,6 +2,7 @@
 #include "plugins/rock_compat.h"
 #include "plugins/sdk/plugin.h"
 #include "plugins/rock_widgets.h"
+#include "widgets/color_picker.h"
 
 struct rock_native_scope rock_modal_begin(void)
 {
@@ -42,6 +43,17 @@ int rock_kbd_input(char *buffer, int buflen, ucschar_t *kbd)
     return result;
 }
 
+int rock_kbd_input_raw(char *buffer, int buflen)
+{
+    if (rock_usb_taken() || !buffer || buflen <= 0)
+        return -1;
+
+    struct rock_native_scope scope = rock_modal_begin();
+    int result = dialog_input_raw(buffer, buflen);
+    rock_modal_end(&scope);
+    return result;
+}
+
 int rock_view_text(const char *title, const char *text)
 {
     if (rock_usb_taken())
@@ -51,4 +63,15 @@ int rock_view_text(const char *title, const char *text)
     view_text(title, text);
     rock_modal_end(&scope);
     return rock_usb_taken() ? PLUGIN_USB_CONNECTED : PLUGIN_OK;
+}
+
+bool rock_set_color(const char *title, unsigned *color, unsigned banned)
+{
+    if (rock_usb_taken())
+        return true;
+
+    struct rock_native_scope scope = rock_modal_begin();
+    bool result = set_color(title, color, banned);
+    rock_modal_end(&scope);
+    return result || rock_usb_taken();
 }

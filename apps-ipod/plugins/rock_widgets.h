@@ -16,8 +16,10 @@ struct rock_native_scope rock_modal_begin(void);
 void rock_modal_end(const struct rock_native_scope *scope);
 
 __typeof__(kbd_input) rock_kbd_input;
+int rock_kbd_input_raw(char *buffer, int buflen);
 __typeof__(gui_syncyesno_run) rock_yesno;
 __typeof__(view_text) rock_view_text;
+bool rock_set_color(const char *title, unsigned *color, unsigned banned);
 
 void rock_list_release(bool present);
 void rock_list_discard(void);

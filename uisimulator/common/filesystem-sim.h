@@ -104,6 +104,7 @@ int   sim_samedir(DIR *dirp1, DIR *dirp2);
 bool  sim_dir_exists(const char *dirname);
 
 struct dirinfo sim_dir_get_info(DIR *dirp, struct sim_dirent *entry);
+struct dirinfo sim_dir_get_info_nofollow(DIR *dirp, struct sim_dirent *entry);
 const char* sim_root_realpath(void);
 #endif /* !DIRFUNCTIONS_DECLARED */
 

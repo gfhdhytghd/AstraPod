@@ -29,6 +29,7 @@
 #include "usb_ch9.h"
 #include "usb_core.h"
 #include "usb_profile.h"
+#include "usb_plugin_hid.h"
 #include "usb_class_driver.h"
 #include "usb_log.h"
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
@@ -102,6 +103,8 @@
  * a phone. */
 static int offered_configs(void)
 {
+    if (usb_plugin_hid_latched())
+        return 1;
     return usb_profile_config_count(NUM_CONFIGS, usb_drive_only(),
 #ifdef HAVE_USB_PODLINK
                                     usb_podlink_active()
@@ -363,6 +366,17 @@ static void usb_core_control_request_handler(struct usb_ctrlrequest* req, uint8_
 
 #define is_active(driver) ((driver)->enabled && !(driver)->error && (driver)->config == usb_config)
 #define has_if(driver, interface) ((interface) >= (driver)->first_interface && (interface) < (driver)->last_interface)
+
+#ifdef HAVE_USB_PLUGIN_HID
+bool usb_core_plugin_hid_ready(void)
+{
+    return usb_state == CONFIGURED && !bus_reset_pending &&
+#ifdef HAVE_USB_CHARGING_ENABLE
+           !usb_suspended &&
+#endif
+           is_active(drivers[USB_DRIVER_HID]);
+}
+#endif
 
 /** NOTE Serial Number
  * The serial number string is split into two parts:
@@ -1565,6 +1579,9 @@ static void usb_core_control_request_handler(struct usb_ctrlrequest* req, uint8_
     if (req->bRequest == USB_REMOTE_KEY_REQUEST)
     {
         bool accepted = usb_state == CONFIGURED &&
+#ifdef HAVE_USB_PLUGIN_HID
+                        !usb_plugin_hid_latched() &&
+#endif
                         button_usb_remote_request(req);
         usb_core_control_response(accepted ? USB_CONTROL_ACK :
                                   USB_CONTROL_STALL, NULL, 0);

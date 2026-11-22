@@ -51,6 +51,7 @@ static void fail(int reason)
         [ROCK_PODLINK_LIMIT] = "Message or file exceeds limit",
         [ROCK_PODLINK_UNSUPPORTED] = "No USB transport in simulator",
     };
+    rb->podlink_close();
     show(FAILURE);
     if (reason > 0 && (unsigned int)reason < ARRAYLEN(messages))
         rb->snprintf(detail, sizeof(detail), "%s", messages[reason]);
@@ -98,6 +99,7 @@ static int transfer_event(int type)
                 show(PULL_FILE);
                 return rb->podlink_pull(TARGET, OBJECT);
             }
+            rb->podlink_close();
             show(SUCCESS);
             rb->snprintf(detail, sizeof(detail), "5000 bytes, CRC c1607408");
             rb->gui_synclist_draw(&list);

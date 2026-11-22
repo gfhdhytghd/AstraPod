@@ -190,7 +190,7 @@ static int kbd_on_action(struct dialog *d, int action, void *data)
 
 /* Click-wheel single-line text editor. Returns 0 on accept (buffer updated),
  * -1 on cancel or USB (buffer left unchanged). */
-int dialog_input(char* text, int buflen)
+static int dialog_input_mode(char* text, int buflen, bool trim)
 {
     static const struct dialog_callbacks cb = {
         .measure   = kbd_measure,
@@ -211,11 +211,21 @@ int dialog_input(char* text, int buflen)
     edit_line_speak(&state->ed);
     bool accepted = dialog_run(&d, TIMEOUT_BLOCK) == DIALOG_ACCEPT;
     if (accepted)
-        edit_line_get(&state->ed, text, buflen, true);
+        edit_line_get(&state->ed, text, buflen, trim);
 
     core_put_data_pinned(state);
     core_free(handle);
     return accepted ? 0 : -1;
+}
+
+int dialog_input(char* text, int buflen)
+{
+    return dialog_input_mode(text, buflen, true);
+}
+
+int dialog_input_raw(char* text, int buflen)
+{
+    return dialog_input_mode(text, buflen, false);
 }
 
 /* Plugin-ABI wrapper: the loadable-layout `kbd` argument is ignored. */

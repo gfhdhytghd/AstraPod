@@ -113,7 +113,17 @@ static const struct {
 } rock_viewers[] = {
     { "cells", PLUGIN_DEMOS_DIR "/rocklife.rock" },
     { "ch8", VIEWERS_DIR "/chip8.rock" },
+    { "md5", PLUGIN_APPS_DIR "/md5sum.rock" },
+    { "md5sum", PLUGIN_APPS_DIR "/md5sum.rock" },
+    { "md5list", PLUGIN_APPS_DIR "/md5sum.rock" },
+    { "lnk", VIEWERS_DIR "/windows_lnk.rock" },
+    { "sok", PLUGIN_GAMES_DIR "/sokoban.rock" },
+    { "ss", PLUGIN_GAMES_DIR "/sudoku.rock" },
     { "shopper", VIEWERS_DIR "/shopper.rock" },
+    { "scrobbler", PLUGIN_APPS_DIR "/lastfm_scrobbler_viewer.rock" },
+    { "link", PLUGIN_APPS_DIR "/shortcuts_view.rock" },
+    { "pgn", PLUGIN_GAMES_DIR "/chessbox.rock" },
+    { "sgf", PLUGIN_GAMES_DIR "/goban.rock" },
     { "ssg", PLUGIN_GAMES_DIR "/superdom.rock" },
 };
 #endif
@@ -308,6 +318,9 @@ bool filetype_open_core_viewer(int attr, const char *file, int *rc)
     switch (attr & FILE_ATTR_MASK)
     {
 #ifdef ASTRAPOD_ROCK_COMPAT
+        case FILE_ATTR_LUA:
+            *rc = rock_open_from_browser(VIEWERS_DIR "/lua.rock", file);
+            return true;
         case FILE_ATTR_ROCK:
             *rc = rock_open_from_browser(file, NULL);
             return true;

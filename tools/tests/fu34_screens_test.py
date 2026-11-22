@@ -67,6 +67,7 @@ pre=r'''
 #define GO_TO_WPS 2003
 #define GO_TO_SHORTCUTMENU 2004
 #define NUM_FILTER_MODES 99
+#define BROWSE_PLUGIN_PICKER 0x0800
 #define Icon_NOICON 0
 #define DRMODE_FG 1
 #define MAX(a,b) ((a)>(b)?(a):(b))
@@ -174,7 +175,9 @@ pre+=r'''
 static bool reload_dir;static int do_restore_display=7;
 static int exit_to_new_screen(int n){return n;}
 static int do_shortcut_menu(void*p){(void)p;assert(0);return 0;}
-static int run_native_grid(void){int filter=0;struct{int*dirfilter;}tc={&filter};int restore=0;
+static int run_native_grid(void){
+ int filter=0;struct{unsigned flags;}browse={0};
+ struct{int *dirfilter;typeof(browse) *browse;}tc={&filter,&browse};int restore=0;
  while(entry_at<entry_count){int button=get_action(CONTEXT_ID3DB,HZ/5);switch(button){
 '''+case+r'''
  default:break;}}

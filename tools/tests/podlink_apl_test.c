@@ -39,6 +39,47 @@ static char source[4096], target[4096], root[4096];
 static const unsigned char binary[] = {0, 1, 255, 128, 0, 127};
 static const char text[] = "AstraPod echo";
 
+enum disk_fault {
+    DISK_OK, SHORT_WRITE, CLOSE_ERROR, CANCEL_ON_CLOSE, RENAME_ERROR
+};
+static enum disk_fault fault;
+
+ssize_t apl_test_write(int fd, const void *data, size_t size)
+{
+    if (fault == SHORT_WRITE)
+    {
+        fault = DISK_OK;
+        size--;
+    }
+    return write(fd, data, size);
+}
+
+int apl_test_close(int fd)
+{
+    int rc = close(fd);
+    if (fault == CANCEL_ON_CLOSE)
+    {
+        fault = DISK_OK;
+        assert(rock_podlink_cancel() == 0);
+    }
+    else if (fault == CLOSE_ERROR)
+    {
+        fault = DISK_OK;
+        return -1;
+    }
+    return rc;
+}
+
+int apl_test_rename(const char *from, const char *to)
+{
+    if (fault == RENAME_ERROR)
+    {
+        fault = DISK_OK;
+        return -1;
+    }
+    return rename(from, to);
+}
+
 void usb_podlink_disk(void) { assert(false); }
 void button_queue_post(long id, intptr_t data) { (void)id; (void)data; }
 int apl_lock(void) { return 0; }
@@ -186,22 +227,29 @@ static void no_temp(void)
     closedir(d);
 }
 
-static uint32_t channel_open(void)
+static uint32_t channel_open_named(const char *expected)
 {
-    char name[] = CHANNEL;
+    char name[33];
+    assert(strlen(expected) < sizeof(name));
+    strcpy(name, expected);
     assert(rock_podlink_open(name) == 0);
     assert(rock_podlink_open(name) == -ROCK_PODLINK_BUSY);
     memset(name, '?', strlen(name));
     pump(true);
     struct frame f = take(OPEN);
-    assert(f.size == 16 + strlen(CHANNEL) &&
-           !memcmp(f.data + 16, CHANNEL, strlen(CHANNEL)));
+    assert(f.size == 16 + strlen(expected) &&
+           !memcmp(f.data + 16, expected, strlen(expected)));
     uint32_t id = u32(f.data + 8);
     assert(id && !u32(f.data + 12));
     emit(OPEN_OK, id, 0, NULL, 0);
     pump(true);
     event(ROCK_PODLINK_OPENED, 0);
     return id;
+}
+
+static uint32_t channel_open(void)
+{
+    return channel_open_named(CHANNEL);
 }
 
 static void verify_chunk(struct frame frame, unsigned int offset, unsigned int len)
@@ -495,6 +543,180 @@ static void test_time_and_reset(void)
     take(CLOSE);
 }
 
+static void test_terminal_frames(void)
+{
+    uint32_t id = channel_open();
+    uint32_t t = pull(id, FIXTURE_SIZE);
+    static const unsigned char invalid[] = {ROCK_PODLINK_LIMIT + 1, 0};
+    emit(CANCEL, id, t, invalid, sizeof(invalid));
+    pump(true);
+    assert(take(CANCEL).data[16] == ROCK_PODLINK_INVALID);
+    event(ROCK_PODLINK_COMPLETE, ROCK_PODLINK_INVALID);
+    no_temp();
+
+    emit(CLOSE, id, 0, invalid, sizeof(invalid));
+    pump(true);
+    assert(take(CLOSE).data[16] == ROCK_PODLINK_INVALID);
+    event(ROCK_PODLINK_CLOSED, ROCK_PODLINK_INVALID);
+
+    assert(rock_podlink_open(CHANNEL) == 0);
+    pump(true);
+    id = u32(take(OPEN).data + 8);
+    static const unsigned char missing[] = {ROCK_PODLINK_NO_COMPANION, 0};
+    emit(CLOSE, id, 0, missing, sizeof(missing));
+    pump(true);
+    event(ROCK_PODLINK_CLOSED, ROCK_PODLINK_NO_COMPANION);
+    empty();
+}
+
+static void test_limits(void)
+{
+    char name[34];
+    memset(name, 'a', sizeof(name) - 1);
+    name[33] = 0;
+    assert(rock_podlink_open(name) == -ROCK_PODLINK_INVALID);
+    name[32] = 0;
+    uint32_t id = channel_open_named(name);
+
+    unsigned char data[ROCK_PODLINK_MESSAGE_MAX + 1];
+    memset(data, 'a', sizeof(data));
+    memcpy(data, "\xc3\xa9", 2);
+    unsigned int max = ROCK_PODLINK_MESSAGE_MAX;
+    assert(rock_podlink_send(false, data, max + 1) == -ROCK_PODLINK_LIMIT);
+    assert(rock_podlink_send(false, data, max) == 0);
+    pump(true);
+    struct frame frame = take(TEXT);
+    assert(frame.size == max + 16 && !memcmp(data, frame.data + 16, max));
+    emit(TEXT, id, 0, data, max);
+    pump(true);
+    struct rock_podlink_event received = event(ROCK_PODLINK_TEXT, 0);
+    assert(received.length == max && !memcmp(received.data, data, max));
+    emit(TEXT, id, 0, data, max + 1);
+    pump(true);
+    assert(take(CLOSE).data[16] == ROCK_PODLINK_LIMIT);
+    event(ROCK_PODLINK_CLOSED, ROCK_PODLINK_LIMIT);
+
+    id = channel_open();
+    static const unsigned char invalid_utf8[] = {0xed, 0xa0, 0x80};
+    emit(TEXT, id, 0, invalid_utf8, sizeof(invalid_utf8));
+    pump(true);
+    empty();
+    event(ROCK_PODLINK_CLOSED, ROCK_PODLINK_INVALID);
+    pump(true);
+    assert(take(CLOSE).data[16] == ROCK_PODLINK_INVALID);
+
+    id = channel_open();
+    char object[66];
+    memset(object, 'Z', sizeof(object) - 1);
+    object[65] = 0;
+    assert(rock_podlink_push(source, object) == -ROCK_PODLINK_INVALID);
+    object[64] = 0;
+    assert(rock_podlink_push(source, object) == 0);
+    pump(true);
+    frame = take(PUSH);
+    assert(frame.size == 20 + 64 && !memcmp(object, frame.data + 20, 64));
+    assert(rock_podlink_cancel() == 0);
+    pump(true);
+    assert(take(CANCEL).data[16] == ROCK_PODLINK_CANCELLED);
+    event(ROCK_PODLINK_COMPLETE, ROCK_PODLINK_CANCELLED);
+
+    static const unsigned char cancelled[] = {ROCK_PODLINK_CANCELLED, 0};
+    uint32_t old = u32(frame.data + 12);
+    uint32_t t = pull(id, 100);
+    assert(t != old);
+    emit(CANCEL, id, old, cancelled, sizeof(cancelled));
+    send_chunk(id, t, 1, 50);
+    pump(true);
+    assert(take(CANCEL).data[16] == ROCK_PODLINK_INVALID);
+    event(ROCK_PODLINK_COMPLETE, ROCK_PODLINK_INVALID);
+    no_temp();
+
+    assert(truncate(source, ROCK_PODLINK_FILE_MAX + 1) == 0);
+    assert(rock_podlink_push(source, OBJECT) == 0);
+    pump(true);
+    event(ROCK_PODLINK_COMPLETE, ROCK_PODLINK_LIMIT);
+    empty();
+    write_file(source, fixture, FIXTURE_SIZE);
+    rock_podlink_close();
+    pump(true);
+    take(CLOSE);
+}
+
+static void test_finalization(void)
+{
+    uint32_t id = channel_open();
+    write_file(target, "keep", 4);
+    for (enum disk_fault kind = SHORT_WRITE; kind <= RENAME_ERROR; kind++)
+    {
+        uint32_t t = pull(id, 100);
+        fault = kind;
+        send_chunk(id, t, 0, 100);
+        send_finish(id, t, 100, podlink_crc32(fixture, 100));
+        pump(true);
+        assert(fault == DISK_OK);
+        int reason = kind == CANCEL_ON_CLOSE
+            ? ROCK_PODLINK_CANCELLED : ROCK_PODLINK_IO;
+        assert(take(CANCEL).data[16] == reason);
+        event(ROCK_PODLINK_COMPLETE, reason);
+        assert_file(target, "keep", 4);
+        no_temp();
+    }
+
+    uint32_t t = pull(id, FIXTURE_SIZE);
+    send_chunk(id, t, 0, 100);
+    pump(true);
+    take(CREDIT);
+    assert(rock_podlink_cancel() == 0);
+    empty(); /* The dismissed transfer has no pending progress. */
+    pump(true);
+    take(CANCEL);
+    event(ROCK_PODLINK_COMPLETE, ROCK_PODLINK_CANCELLED);
+
+    t = pull(id, FIXTURE_SIZE);
+    send_chunk(id, t, 0, 100);
+    pump(true);
+    take(CREDIT);
+    rock_podlink_close(); /* Loader exit suppresses callbacks into the module. */
+    pump(true);
+    assert(take(CLOSE).data[16] == ROCK_PODLINK_OK);
+    empty();
+    no_temp();
+    assert_file(target, "keep", 4);
+    assert(channel_open() != id);
+    rock_podlink_close();
+    pump(true);
+    take(CLOSE);
+}
+
+static void test_negotiated_limit(void)
+{
+    static const unsigned char offer[] = {1, 0, 64, 0, 0, 0};
+    input_frame(PODLINK_OPEN, 43, offer, sizeof(offer));
+    pump(true);
+    uint32_t id = channel_open();
+    unsigned char data[49] = {0};
+    assert(rock_podlink_send(true, data, sizeof(data)) == -ROCK_PODLINK_LIMIT);
+    assert(rock_podlink_send(true, data, sizeof(data) - 1) == 0);
+    pump(true);
+    assert(take(BINARY).size == 64);
+
+    assert(rock_podlink_push(source, OBJECT) == 0);
+    pump(true);
+    uint32_t t = u32(take(PUSH).data + 12);
+    unsigned char size[4], credit = 2;
+    le32(size, FIXTURE_SIZE);
+    emit(ACCEPT, id, t, size, sizeof(size));
+    emit(CREDIT, id, t, &credit, 1);
+    pump(true);
+    verify_chunk(take(CHUNK), 0, 40);
+    verify_chunk(take(CHUNK), 40, 40);
+    assert(event(ROCK_PODLINK_PROGRESS, 0).bytes == 80);
+    empty();
+    rock_podlink_close();
+    pump(true);
+    take(CLOSE);
+}
+
 /* The stdio fixture drives the same SDK steps as podlink_echo. Stdout is
  * exclusively raw APL1 hex. Diagnostics and final status use stderr. */
 static int external_peer(void)
@@ -514,6 +736,11 @@ static int external_peer(void)
         }
         frame_read = frame_count = 0;
         fflush(stdout);
+        if (state == 5)
+        {
+            fputs("PASS external APL1 echo, push, pull and close\n", stderr);
+            return 0;
+        }
         struct rock_podlink_event e;
         int rc = rock_podlink_poll(&e, 0, NULL, NULL);
         if (rc < 0 || (rc && (e.result || rc == ROCK_PODLINK_CLOSED)))
@@ -548,8 +775,8 @@ static int external_peer(void)
                     assert(rc == ROCK_PODLINK_COMPLETE && e.crc32 == FIXTURE_CRC);
                     assert_file(target, fixture, FIXTURE_SIZE);
                     no_temp();
-                    fputs("PASS external APL1 echo, push and pull\n", stderr);
-                    return 0;
+                    rock_podlink_close();
+                    break;
             }
             continue;
         }
@@ -613,7 +840,11 @@ int main(int argc, char **argv)
     test_files(id);
     test_link(channel_open());
     test_time_and_reset();
+    test_terminal_frames();
+    test_limits();
+    test_finalization();
+    test_negotiated_limit();
     assert(unlink(source) == 0 && unlink(target) == 0);
     assert(rmdir(root) == 0 && rmdir(base) == 0);
-    puts("PASS APL1 state machine, golden framing, credits, cancel, CRC, USB and reopen");
+    puts("PASS APL1 framing, bounds, credits, CRC, disk faults and teardown");
 }

@@ -35,6 +35,11 @@
 #include "debug.h"
 #include "mv.h"
 
+#if defined(WIN32) && defined(__MINGW32__)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 #ifndef os_fstatat
 #define USE_OSDIRNAME /* we need to remember the open directory path */
 #endif
@@ -764,7 +769,8 @@ bool sim_dir_exists(const char *dirname)
     return true;
 }
 
-struct dirinfo sim_dir_get_info(DIR *dirp, struct sim_dirent *entry)
+static struct dirinfo get_dir_info(DIR *dirp, struct sim_dirent *entry,
+                                   bool nofollow)
 {
     int rc;
     struct dirstr_desc *dirstr = get_dirstr(dirp);
@@ -784,7 +790,8 @@ struct dirinfo sim_dir_get_info(DIR *dirp, struct sim_dirent *entry)
     OS_STAT_T s;
 
 #ifdef os_fstatat
-    if (os_fstatat(dirstr->osfd, entry->d_name, &s, 0))
+    if (os_fstatat(dirstr->osfd, entry->d_name, &s,
+                   nofollow ? AT_SYMLINK_NOFOLLOW : 0))
 #else /* no fstatat; build file name for stat() */
     char statpath[SIM_TMPBUF_MAX_PATH];
     if (path_append(statpath, dirstr->osdirname, entry->d_name,
@@ -793,7 +800,23 @@ struct dirinfo sim_dir_get_info(DIR *dirp, struct sim_dirent *entry)
         FILE_ERROR(ENAMETOOLONG, RC);
     }
 
-    if (os_stat(statpath, &s)) /* get info */
+#if defined(WIN32) && defined(__MINGW32__)
+    if (nofollow)
+    {
+        wchar_t wide[SIM_TMPBUF_MAX_PATH];
+        if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, statpath, -1,
+                                 wide, ARRAYLEN(wide)))
+            FILE_ERROR(EINVAL, RC);
+        DWORD attr = GetFileAttributesW(wide);
+        if (attr == INVALID_FILE_ATTRIBUTES)
+            FILE_ERROR(EIO, RC);
+        if (attr & FILE_ATTRIBUTE_REPARSE_POINT)
+            return (struct dirinfo){ .attribute = ATTR_LINK };
+    }
+    if (os_stat(statpath, &s))
+#else
+    if (nofollow ? os_lstat(statpath, &s) : os_stat(statpath, &s))
+#endif
 #endif /* os_fstatat */
     {
         /* File size larger than 2 GB? */
@@ -804,6 +827,10 @@ struct dirinfo sim_dir_get_info(DIR *dirp, struct sim_dirent *entry)
         FILE_ERROR(ERRNO, RC);
     }
 
+#ifdef S_ISLNK
+    if (S_ISLNK(s.st_mode))
+        info.attribute |= ATTR_LINK;
+#endif
     if (S_ISDIR(s.st_mode))
         info.attribute |= ATTR_DIRECTORY;
 
@@ -819,6 +846,16 @@ struct dirinfo sim_dir_get_info(DIR *dirp, struct sim_dirent *entry)
 
 file_error:
     return (struct dirinfo){ .size = 0 };
+}
+
+struct dirinfo sim_dir_get_info(DIR *dirp, struct sim_dirent *entry)
+{
+    return get_dir_info(dirp, entry, false);
+}
+
+struct dirinfo sim_dir_get_info_nofollow(DIR *dirp, struct sim_dirent *entry)
+{
+    return get_dir_info(dirp, entry, true);
 }
 
 int os_volume_path(IF_MV(int volume, ) char *buffer, size_t bufsize)

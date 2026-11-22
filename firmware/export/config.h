@@ -1422,6 +1422,9 @@ Lyre prototype 1 */
 
 #ifdef USB_HAS_INTERRUPT
 #define USB_ENABLE_HID
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT)
+#define HAVE_USB_PLUGIN_HID
+#endif
 #else
 #define USB_ENABLE_CHARGING_ONLY
 #endif

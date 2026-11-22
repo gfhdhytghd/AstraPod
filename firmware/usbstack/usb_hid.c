@@ -25,6 +25,7 @@
 #include "powermgmt.h"
 #include "usb_hid.h"
 #include "usb_hid_def.h"
+#include "usb_plugin_hid.h"
 #include "usb_class_driver.h"
 /*#define LOGF_ENABLE*/
 #include "logf.h"
@@ -542,11 +543,19 @@ static int usb_hid_get_config_descriptor(unsigned char *dest, int max_packet_siz
     return (int)(dest - orig_dest);
 }
 
+static void usb_hid_reset_queue(void)
+{
+    memset(send_buffer_len, 0, sizeof(send_buffer_len));
+    cur_buf_prepare = 0;
+    cur_buf_send = 0;
+    currently_sending = false;
+}
+
 static int usb_hid_init_connection(void)
 {
     logf("hid: init connection");
+    usb_hid_reset_queue();
     active = true;
-    currently_sending = false;
     return 0;
 }
 
@@ -555,21 +564,18 @@ static void usb_hid_init(void)
 {
     logf("hid: init");
 
-    for (int i = 0; i < HID_NUM_BUFFERS; i++)
-        send_buffer_len[i] = 0;
-
-    cur_buf_prepare = 0;
-    cur_buf_send = 0;
-
-    active = true;
-    currently_sending = false;
+    usb_hid_reset_queue();
+    active = false;
 }
 
 static void usb_hid_disconnect(void)
 {
     logf("hid: disconnect");
     active = false;
-    currently_sending = false;
+    usb_hid_reset_queue();
+#ifdef HAVE_USB_PLUGIN_HID
+    usb_plugin_hid_flush();
+#endif
 }
 
 /* called by usb_core_transfer_complete() */
@@ -757,9 +763,7 @@ static void usb_hid_try_send_drv(void)
 
     logf("HID: Sending %d bytes",length);
     rc = usb_drv_send_nonblocking(EP_IN, send_buffer[cur_buf_send], length);
-    currently_sending = true;
-    if (rc)
-        send_buffer_len[cur_buf_send] = 0;
+    currently_sending = rc == 0;
 }
 
 static void usb_hid_queue(unsigned char *data, int length)
@@ -805,8 +809,15 @@ void usb_hid_send(usage_page_t usage_page, int id)
     length = report->buf_set(&buf[1], id) + 1;
     logf("length %u", length);
 
-    if (!length)
+    /* Reserve room for the release before queuing the press. */
+    if (!active || send_buffer_len[cur_buf_prepare] ||
+        (report->is_key_released &&
+         send_buffer_len[(cur_buf_prepare + 1) % HID_NUM_BUFFERS]))
+    {
+        if (active)
+            usb_hid_try_send_drv();
         return;
+    }
 
     /* Key pressed */
     buf_dump(buf, length, "key press");
@@ -824,6 +835,26 @@ void usb_hid_send(usage_page_t usage_page, int id)
     usb_hid_try_send_drv();
 }
 
+#ifdef HAVE_USB_PLUGIN_HID
+bool usb_hid_plugin_idle(void)
+{
+    return active && !currently_sending && !send_buffer_len[cur_buf_send];
+}
+
+void usb_hid_plugin_send(usage_page_t usage_page, int id)
+{
+    usb_hid_send(usage_page, id);
+    if (!currently_sending)
+        usb_hid_reset_queue();
+}
+
+static void usb_hid_notify(intptr_t data)
+{
+    (void)data;
+    usb_plugin_hid_deliver();
+}
+#endif
+
 struct usb_class_driver usb_cdrv_hid = {
     .needs_exclusive_storage = false,
     .needs_cpu_boost = false,
@@ -837,4 +868,7 @@ struct usb_class_driver usb_cdrv_hid = {
     .disconnect = usb_hid_disconnect,
     .transfer_complete = usb_hid_transfer_complete,
     .control_request = usb_hid_control_request,
+#ifdef HAVE_USB_PLUGIN_HID
+    .notify_event = usb_hid_notify,
+#endif
 };

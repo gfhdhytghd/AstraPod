@@ -191,7 +191,11 @@ int rock_dir_next(DIR *dir, struct DIRENT **entry, struct dirinfo *info)
     } while (!strcmp((*entry)->d_name, ".") || !strcmp((*entry)->d_name, ".."));
 
     errno = 0;
+#ifdef SIMULATOR
+    *info = sim_dir_get_info_nofollow(dir, *entry);
+#else
     *info = dir_get_info(dir, *entry);
+#endif
     return errno ? -1 : 1;
 }
 
@@ -203,4 +207,24 @@ void rock_close_files(void)
     for (int i = 0; i < ROCK_DIR_MAX; ++i)
         if (open_dirs[i])
             rock_closedir(open_dirs[i]);
+}
+
+bool rock_dir_exists(const char *path)
+{
+    return !rock_usb_taken() && path && dir_exists(path);
+}
+
+int rock_mkdir(const char *path)
+{
+    return rock_usb_taken() ? -1 : mkdir(path);
+}
+
+int rock_rmdir(const char *path)
+{
+    return rock_usb_taken() ? -1 : rmdir(path);
+}
+
+int rock_ftruncate(int fd, off_t length)
+{
+    return file_slot(fd) >= 0 ? ftruncate(fd, length) : -1;
 }

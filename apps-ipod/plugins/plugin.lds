@@ -368,6 +368,14 @@ SECTIONS
         plugin_end_addr = .;
     } > PLUGIN_RAM
 
+#ifdef ASTRAPOD_ROCK
+    .plugin_forbidden_iram (NOLOAD) :
+    {
+        KEEP(*(.iram .iram.* .icode .icode.* .irodata .irodata.*))
+        KEEP(*(.idata .idata.* .ibss .ibss.*))
+    } > PLUGIN_RAM
+#endif
+
 #if defined(IRAMSIZE) && IRAMSIZE != 0
     .iram IRAMORIG : AT(LOADADDR(.bss))
     {
@@ -424,5 +432,6 @@ ASSERT(SIZEOF(.ncbss_vma) == SIZEOF(.ncbss),              ".ncbss_vma has wrong 
 #endif
 
 #ifdef ASTRAPOD_ROCK
-ASSERT(SIZEOF(.iram) == 0 && SIZEOF(.ibss) == 0, "AstraPod plugins must stay in DRAM");
+ASSERT(SIZEOF(.plugin_forbidden_iram) == 0,
+       "AstraPod plugins and overlays must stay in DRAM");
 #endif

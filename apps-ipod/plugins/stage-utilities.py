@@ -86,6 +86,48 @@ def dictionary(source):
                    '    return rb->view_text(searchword, description);')
 
 
+def view_text(source):
+    source = replace(source, '#include "lib/simple_viewer.h"\n', '')
+    return replace(source, '''    if (!parameter)
+        return PLUGIN_ERROR;
+
+    char** title_and_text = (char**)parameter;
+    view_text(title_and_text[0], title_and_text[1]);
+    return PLUGIN_OK;''', r'''    (void)parameter;
+    char path[MAX_PATH];
+    if (rb->pick_file(path, sizeof(path), "/", "Select a text file",
+                      ".txt", 0, false) <= 0)
+        return rb->plugin_usb_taken() ? PLUGIN_USB_CONNECTED : PLUGIN_OK;
+
+    size_t capacity;
+    char *text = rb->plugin_get_buffer(&capacity);
+    int fd = rb->open(path, O_RDONLY);
+    if (fd < 0)
+    {
+        rb->splash(2 * HZ, "Cannot open text file");
+        return PLUGIN_ERROR;
+    }
+    off_t length = rb->ffilesize(fd);
+    bool read_ok = text && length >= 0 && length <= 32 * 1024 &&
+                   (size_t)length < capacity &&
+                   rb->read(fd, text, length) == length;
+    if (rb->close(fd) < 0 || !read_ok)
+    {
+        rb->splash(2 * HZ, "Unreadable text or file exceeds 32 KiB");
+        return PLUGIN_ERROR;
+    }
+    text[length] = '\0';
+    if (rb->strlen(text) != (size_t)length)
+    {
+        rb->splash(2 * HZ, "File contains binary data");
+        return PLUGIN_ERROR;
+    }
+    if (length >= 3 && !rb->memcmp(text, "\xef\xbb\xbf", 3))
+        text += 3;
+    const char *name = rb->strrchr(path, '/');
+    return rb->view_text(name ? name + 1 : path, text);''')
+
+
 def credits(source):
     source = replace(source, 'static bool stop_autoscroll(int action)', """static int credit_action(int context, int timeout)
 {
@@ -613,6 +655,7 @@ if __name__ == "__main__":
     infile, outfile = map(Path, sys.argv[1:])
     adapters = {
         "db_folder_select": folder_picker, "dict": dictionary,
+        "view_text": view_text,
         "credits": credits, "alarmclock": alarmclock, "calendar": calendar,
         "dart_scorer": darts, "resistor": resistor, "shopper": shopper,
         "settings_dumper": settings_dumper, "vu_meter": vu_meter,

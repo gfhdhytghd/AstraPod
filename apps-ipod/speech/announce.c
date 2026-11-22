@@ -24,8 +24,13 @@
 #include "audio/voice_thread.h"
 #include "talk.h"
 #include "announce.h"
+#include "plugins/rock_resident.h"
 
 static bool paused_for_us;      /* this announcement paused the music */
+
+#ifdef ASTRAPOD_ROCK_COMPAT
+enum { ANNOUNCE_RESIDENT = 2 };
+#endif
 
 /* Say the current track's title and artist, after what is being said if
  * enqueue */
@@ -51,10 +56,15 @@ static void track_changed(unsigned short id, void *data)
 {
     const struct track_event *te = data;
     (void)id;
-    if (global_settings.talk_track_change != ANNOUNCE_OFF
-        && global_settings.talk_menu)
+    if (!global_settings.talk_menu)
+        return;
+    if (global_settings.talk_track_change != ANNOUNCE_OFF)
         button_queue_post(SYS_ANNOUNCE_TRACK,
                           (te->flags & TEF_AUTO_SKIP) ? 1 : 0);
+#ifdef ASTRAPOD_ROCK_COMPAT
+    else if (rock_announce_status_on_track_change())
+        button_queue_post(SYS_ANNOUNCE_TRACK, ANNOUNCE_RESIDENT);
+#endif
 }
 
 /* On the voice thread */
@@ -85,6 +95,14 @@ void announce_event(long event, intptr_t data)
 {
     if (event == SYS_ANNOUNCE_TRACK)
     {
+#ifdef ASTRAPOD_ROCK_COMPAT
+        if (data == ANNOUNCE_RESIDENT)
+        {
+            if (global_settings.talk_track_change == ANNOUNCE_OFF)
+                rock_announce_status_track_change();
+            return;
+        }
+#endif
         int status;
 
         /* the end of the last one was posted to a screen that dropped it */

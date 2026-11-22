@@ -2404,6 +2404,11 @@ static int view_waveform_callback(int action, const struct menu_item_ex *item,
 MENUITEM_FUNCTION(view_waveform_item, MENU_FUNC_CHECK_RETVAL,
                   ID2P(LANG_VIEW_WAVEFORM), view_waveform,
                   view_waveform_callback, Icon_NOICON);
+
+#include "plugins/playlist-lyrics-context.inc"
+#include "plugins/encoder-context.inc"
+#include "plugins/phase3-bmp-menu.inc"
+#include "plugins/text-context.inc"
 #endif
 
 /* Select...: the browser turns the list into a selecting one, starting from
@@ -2518,7 +2523,12 @@ MAKE_ONPLAYMENU_TITLED( browser_context_menu,
            &view_playlist_item,
 #ifdef ASTRAPOD_ROCK_COMPAT
            &search_playlist_file_item,
+           &export_playlist_cue_item, &open_lrcplayer_file_item,
            &view_waveform_item,
+           &edit_bitmap_item, &play_bitmap_puzzle_item,
+           &rock_edit_text_item, &rock_sort_text_item,
+           &rock_speedread_item,
+           &encode_mp3_item, &encode_wavpack_item, &repair_vbr_item,
 #endif
            &replace_pl_item, &replace_shuf_pl_item,
            &i_pl_item, &i_first_pl_item, &i_last_pl_item,

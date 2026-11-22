@@ -30,11 +30,16 @@ static int16_t *queue;
 static unsigned int capacity, front, used;
 static uint32_t elapsed_frames, base_ms, rate, saved_rate;
 
+static bool current_output(void)
+{
+    return rate && pcm_current_sink() == PCM_SINK_BUILTIN &&
+           mixer_get_frequency() == rate;
+}
+
 static void next_pcm(const void **start, size_t *size)
 {
     /* The mixer asks for a new buffer when the output route changes. */
-    if (pcm_current_sink() != PCM_SINK_BUILTIN ||
-        mixer_get_frequency() != rate)
+    if (!current_output())
     {
         used = 0;
         *start = NULL;
@@ -149,7 +154,7 @@ static void drain(void)
 
 static bool video_running_locked(void)
 {
-    return producing && thread_self() == codec_id &&
+    return producing && thread_self() == codec_id && current_output() &&
            mixer_channel_status(VIDEO_CHANNEL) != CHANNEL_STOPPED;
 }
 
@@ -217,7 +222,7 @@ static size_t video_write(const int16_t *data, size_t frames)
 static uint32_t video_buffered(void)
 {
     pcm_play_lock();
-    uint32_t frames = used;
+    uint32_t frames = current_output() ? used : 0;
     pcm_play_unlock();
     return frames;
 }
@@ -235,7 +240,7 @@ static uint32_t video_clock(void)
 static bool video_pause(bool paused)
 {
     mutex_lock(&lease);
-    bool ok = on_foreground() && queue;
+    bool ok = on_foreground() && queue && current_output();
     if (ok)
         mixer_channel_play_pause(VIDEO_CHANNEL, !paused);
     mutex_unlock(&lease);
@@ -245,7 +250,7 @@ static bool video_pause(bool paused)
 static bool video_seek(uint32_t ms)
 {
     mutex_lock(&lease);
-    bool ok = on_foreground() && queue;
+    bool ok = on_foreground() && queue && current_output();
     if (ok)
     {
         drain();

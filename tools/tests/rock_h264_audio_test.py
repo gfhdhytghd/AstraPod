@@ -213,6 +213,12 @@ int main(void)
     assert(api->open(scratch, sizeof(scratch), 44100));
     assert(api->start(produce));
     step_codec();
+    assert(api->pause(true));
+    mixer_rate = 48000; /* A paused channel receives no refill on route change. */
+    id = 2;
+    assert(!api->running());
+    id = 1;
+    assert(api->buffered() == 0 && !api->pause(false) && !api->seek(0));
     api->close();
     assert(decoded == 2 && barriers == 3 && !reserved && !mixer);
     assert(discarded_prefetch == 2);

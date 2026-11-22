@@ -704,7 +704,7 @@
      /* Since the virtual machine and SDL are running simultaneously in two different threads */
 --- a/resource.c
 +++ b/resource.c
-@@ -39,144 +39,67 @@
+@@ -39,144 +39,68 @@
      res->requestedNextPart = 0;
  }
  
@@ -853,7 +853,8 @@
 +        };
 +        if (me.packedSize > me.size ||
 +            (me.packedSize < me.size && me.packedSize < 12) ||
-+            (me.type == RT_POLY_ANIM && me.bankId && me.size != VID_PAGE_SIZE))
++            (me.type == RT_POLY_ANIM && me.bankId && me.size &&
++             me.size != VID_PAGE_SIZE))
 +            break;
 +        res->_memList[res->_numMemList++] = me;
      }
@@ -890,7 +891,7 @@
  }
  
  /*
-@@ -213,14 +136,12 @@
+@@ -213,14 +137,12 @@
          } else {
              loadDestination = res->_scriptCurPtr;
              if (me->size > res->_vidBakPtr - res->_scriptCurPtr) {
@@ -907,7 +908,7 @@
              warning("res_load() ec=0x%X (me->bankId == 0)", 0xF00);
              me->state = MEMENTRY_STATE_NOT_NEEDED;
          } else {
-@@ -269,7 +190,9 @@
+@@ -269,7 +191,9 @@
     be a part id. */
  void res_loadPartsOrMemoryEntry(struct Resource* res, uint16_t resourceId) {
  
@@ -918,7 +919,7 @@
  
          res->requestedNextPart = resourceId;
  
-@@ -285,6 +208,39 @@
+@@ -285,6 +209,39 @@
  
  }
  
@@ -958,7 +959,7 @@
  /* Protection screen and cinematic don't need the player and enemies polygon data
     so _memList[video2Index] is never loaded for those parts of the game. When
     needed (for action phrases) _memList[video2Index] is always loaded with 0x11
-@@ -304,6 +260,10 @@
+@@ -304,6 +261,10 @@
      uint8_t videoCinematicIndex  = memListParts[memListPartIndex][MEMLIST_PART_POLY_CINEMATIC];
      uint8_t video2Index  = memListParts[memListPartIndex][MEMLIST_PART_VIDEO2];
  
@@ -969,7 +970,7 @@
      /* Mark all resources as located on harddrive. */
      res_invalidateAll(res);
  
-@@ -319,62 +279,30 @@
+@@ -319,62 +280,30 @@
  
      res_loadMarkedAsNeeded(res);
  
@@ -1049,7 +1050,7 @@
  
      res->_scriptBakPtr = res->_scriptCurPtr = res->_memPtrStart;
      res->_vidBakPtr = res->_vidCurPtr = res->_memPtrStart + MEM_BLOCK_SIZE - 0x800 * 16; //0x800 = 2048, so we have 32KB free for vidBack and vidCur
-@@ -382,13 +310,17 @@
+@@ -382,13 +311,17 @@
  }
  
  void res_freeMemBlock(struct Resource* res) {
@@ -1070,7 +1071,7 @@
      if (ser->_mode == SM_SAVE) {
          rb->memset(loadedList, 0, sizeof(loadedList));
          uint8_t *p = loadedList;
-@@ -415,30 +347,60 @@
+@@ -415,30 +348,60 @@
  
      struct Entry entries[] = {
          SE_ARRAY(loadedList, 64, SES_INT8, VER(1)),

@@ -5,6 +5,7 @@
 ROCK_RAW(lcd_update)
 ROCK_RAW(lcd_update_rect)
 ROCK_RAW(lcd_clear_display)
+ROCK_RAW(lcd_clear_viewport)
 ROCK_DIRECT(lcd_getstringsize)
 ROCK_RAW(lcd_putsxy)
 ROCK_RAW(lcd_putsxyf)

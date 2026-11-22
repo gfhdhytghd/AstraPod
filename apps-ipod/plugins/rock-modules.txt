@@ -93,6 +93,7 @@ games/reversi
 games/robotfindskitten
 games/rockblox
 games/rockblox1d
+games/rockboy
 games/sgt_puzzles/sgt-blackbox
 games/sgt_puzzles/sgt-bridges
 games/sgt_puzzles/sgt-cube
@@ -147,6 +148,7 @@ games/sudoku
 games/superdom
 games/wormlet
 games/xobox
+games/zxbox
 viewers/chip8
 viewers/lua
 viewers/mp3_encoder

@@ -447,3 +447,25 @@ releases its workspace.
 The VPU backend is available on ipod6g. The SDL entry reports that the
 decoder is unavailable. This player displays video only. It leaves the
 native audio and codec thread available for music.
+
+## Rockboy
+
+Open **Plugins > Games > rockboy** and choose an uncompressed GB or GBC
+ROM. A ROM must match the size in its header and fit plugin scratch.
+The current maximum ROM size is 2 MiB. Game audio uses the built-in
+PCM stream when available. Menu opens Resume and Quit. Use the wheel
+for Up and Down, Left and Right to move, Select for A, Play for Start,
+Select+Left for B and Select+Right for Select. This build keeps
+cartridge RAM in memory for the game session.
+
+## ZXBox and Lua examples
+
+Open **Plugins > Games > zxbox** and choose a 48K `.sna` snapshot.
+Use the wheel, Left, Right and Select as Kempston joystick input.
+Menu opens Resume and Quit. Snapshot saves and tape formats are
+outside this adapter. A busy built-in sink leaves the game silent.
+
+The Lua viewer installs Hello World and Viewport Test in Demos.
+Select either script from its plugin directory. Lua Stopwatch appears
+in Applications. It uses the wheel player's physical buttons and
+stores laps in `stopwatch-lua.dat`, separate from the native stopwatch.

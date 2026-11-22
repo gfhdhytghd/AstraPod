@@ -361,6 +361,7 @@ bool pcm_switch_sink(enum pcm_sink_ids sink)
 
 #ifdef ASTRAPOD_ROCK_COMPAT
     rock_stream_revoke();
+    mixer_discard_plugin_prefetch();
 #endif
     /* update sink index */
     cur_sink = sink;

@@ -16,6 +16,8 @@
 #undef splashf
 
 #define GAME_PATH PLUGIN_GAMES_DIR "/"
+#define APP_PATH PLUGIN_APPS_DIR "/"
+#define DEMO_PATH PLUGIN_DEMOS_DIR "/"
 #define ACTION_HOOK "astrapod.action"
 
 static lua_State *active;
@@ -32,6 +34,8 @@ static void cleanup(void)
 {
     if (active)
         lua_close(active);
+    rb->lcd_scroll_stop();
+    rb->lcd_set_viewport(NULL);
     active = NULL;
     lua_file_cleanup();
 }
@@ -65,6 +69,29 @@ static int get_lua_action(int timeout)
 static int lua_action(lua_State *L)
 {
     lua_pushinteger(L, get_lua_action(luaL_checkint(L, 1)));
+    return 1;
+}
+
+static int lua_get_action(lua_State *L)
+{
+    int context = luaL_checkint(L, 1);
+    if (context != CONTEXT_STD && context != CONTEXT_WPS)
+        return luaL_argerror(L, 1, "unsupported input context");
+    int result = rb->get_action(context, luaL_checkint(L, 2));
+    if (IS_SYSEVENT(result))
+        exit_on_usb(result);
+    check_exit();
+    lua_pushinteger(L, result);
+    return 1;
+}
+
+static int lua_button_get(lua_State *L)
+{
+    long result = rb->button_get(lua_toboolean(L, 1));
+    if (IS_SYSEVENT(result))
+        exit_on_usb(result);
+    check_exit();
+    lua_pushinteger(L, result);
     return 1;
 }
 
@@ -213,7 +240,9 @@ static int lua_read_setting(lua_State *L)
 static int lua_actions(lua_State *L)
 {
     static const struct lua_int_reg actions[] = {
-        RB_CONSTANT(ACTION_NONE),
+        RB_CONSTANT(ACTION_NONE), RB_CONSTANT(ACTION_STD_CANCEL),
+        RB_CONSTANT(ACTION_WPS_MENU), RB_CONSTANT(ACTION_WPS_PLAY),
+        RB_CONSTANT(ACTION_WPS_SKIPNEXT), RB_CONSTANT(ACTION_WPS_SKIPPREV),
         RB_CONSTANT(PLA_UP), RB_CONSTANT(PLA_UP_REPEAT),
         RB_CONSTANT(PLA_DOWN), RB_CONSTANT(PLA_DOWN_REPEAT),
         RB_CONSTANT(PLA_LEFT), RB_CONSTANT(PLA_LEFT_REPEAT),
@@ -231,6 +260,12 @@ static int lua_actions(lua_State *L)
     }
     lua_pushvalue(L, -1);
     lua_setfield(L, -3, "actions");
+    lua_newtable(L);
+    lua_pushinteger(L, CONTEXT_STD);
+    lua_setfield(L, -2, "CONTEXT_STD");
+    lua_pushinteger(L, CONTEXT_WPS);
+    lua_setfield(L, -2, "CONTEXT_WPS");
+    lua_setfield(L, -3, "contexts");
     return 1;
 }
 
@@ -260,6 +295,8 @@ static int lua_rock(lua_State *L)
 {
     static const luaL_Reg methods[] = {
         {"get_plugin_action", lua_action},
+        {"get_action", lua_get_action},
+        {"button_get", lua_button_get},
         {"current_tick", lua_ticks},
         {"sleep", lua_sleep_ticks},
         {"yield", lua_yield_to_firmware},
@@ -275,7 +312,7 @@ static int lua_rock(lua_State *L)
     };
     static const struct lua_int_reg values[] = {
         RB_CONSTANT(LCD_WIDTH), RB_CONSTANT(LCD_HEIGHT), RB_CONSTANT(LCD_DEPTH),
-        RB_CONSTANT(HZ), RB_CONSTANT(FONT_UI),
+        RB_CONSTANT(HZ), RB_CONSTANT(FONT_UI), RB_CONSTANT(FONT_SYSFIXED),
     };
     luaL_register(L, "rb", methods);
     for (size_t i = 0; i < ARRAYLEN(values); i++)
@@ -285,6 +322,10 @@ static int lua_rock(lua_State *L)
     }
     lua_pushliteral(L, PLUGIN_GAMES_DATA_DIR);
     lua_setfield(L, -2, "PLUGIN_GAMES_DATA_DIR");
+    lua_pushliteral(L, PLUGIN_APPS_DATA_DIR);
+    lua_setfield(L, -2, "PLUGIN_APPS_DATA_DIR");
+    lua_pushliteral(L, PLUGIN_DEMOS_DATA_DIR);
+    lua_setfield(L, -2, "PLUGIN_DEMOS_DATA_DIR");
     lua_newtable(L);
     lua_pushcfunction(L, lua_event_register);
     lua_setfield(L, -2, "register");
@@ -338,9 +379,12 @@ enum plugin_status plugin_start(const void *parameter)
     const char *path = parameter;
     if (!path || (rb->strcmp(path, GAME_PATH "picross.lua") &&
                   rb->strcmp(path, GAME_PATH "pixel-painter.lua") &&
-                  rb->strcmp(path, GAME_PATH "boomshine.lua")))
+                  rb->strcmp(path, GAME_PATH "boomshine.lua") &&
+                  rb->strcmp(path, APP_PATH "stopwatch-lua.lua") &&
+                  rb->strcmp(path, DEMO_PATH "helloworld.lua") &&
+                  rb->strcmp(path, DEMO_PATH "test_viewports.lua")))
     {
-        rb->splashf(HZ, "%s", "Choose a bundled Lua game.");
+        rb->splashf(HZ, "%s", "Choose a bundled Lua script.");
         return PLUGIN_ERROR;
     }
 

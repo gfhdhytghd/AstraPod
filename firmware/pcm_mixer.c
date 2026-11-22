@@ -75,6 +75,7 @@ static size_t next_size = 0;    /* Size of buffer to play next time */
 static struct mixer_channel channels[PCM_MIXER_NUM_CHANNELS] IBSS_ATTR;
 
 #include "pcm_mixer-plugin-click.inc"
+#include "pcm_mixer-plugin-stream.inc"
 
 /* Packed pointer array of all playing (active) channels in "channels" array */
 static struct mixer_channel * active_channels[PCM_MIXER_NUM_CHANNELS+1] IBSS_ATTR;
@@ -192,6 +193,9 @@ mixer_buffer_callback(enum pcm_dma_status status)
     struct mixer_channel **chan_p;
 
     next_size = 0;
+#ifdef ASTRAPOD_ROCK_COMPAT
+    downmix_has_plugin_stream = false;
+#endif
 
     /* "Loop" back here if one round wasn't enough to fill a frame */
 fill_frame:
@@ -230,6 +234,9 @@ fill_frame:
            size */
         if (chan->size < mixsize)
             mixsize = chan->size;
+#ifdef ASTRAPOD_ROCK_COMPAT
+        mixer_mark_plugin_mix(chan);
+#endif
 
         chan_p++;
     }

@@ -27,8 +27,9 @@
 #include "xrick/util.h"
 
 #include "plugin.h"
+#include <limits.h>
 
-#define XRICK_GAME_DIR ROCKBOX_DIR "/xrick/"
+#define XRICK_GAME_DIR ROCKBOX_DIR "/xrick"
 
 /*
  * Global variables
@@ -63,32 +64,13 @@ void sysfile_clearRootPath()
  */
 file_t sysfile_open(const char *name)
 {
-    long fd;
-
-    size_t fullPathLength = rb->strlen(rootPath) + rb->strlen(name) + 2;
-    char *fullPath = sysmem_push(fullPathLength);
-    if (!fullPath)
-    {
+    char path[MAX_PATH];
+    int length = rb->snprintf(path, sizeof(path), "%s/%s", rootPath, name);
+    if (length < 0 || (size_t)length >= sizeof(path))
         return NULL;
-    }
-    rb->snprintf(fullPath, fullPathLength, "%s/%s", rootPath, name);
-    fd = rb->open(fullPath, O_RDONLY);
-    sysmem_pop(fullPath);
 
-    /*
-     * note: I've never seen zero/NULL being used as a file descriptor under Rockbox.
-     *       Putting a check here in case this will ever happen (will need a fix).
-     */
-    if (fd == 0)
-    {
-        sys_error("(file) unsupported file descriptor (zero/NULL) being used");
-    }
-    if (fd < 0)
-    {
-        return NULL;
-    }
-
-    return (file_t)fd;
+    int fd = rb->open(path, O_RDONLY);
+    return fd < 0 ? NULL : (file_t)((intptr_t)fd + 1);
 }
 
 /*
@@ -96,8 +78,11 @@ file_t sysfile_open(const char *name)
  */
 int sysfile_read(file_t file, void *buf, size_t size, size_t count)
 {
-    long fd = (long)file;
-    return (rb->read(fd, buf, size * count) / size);
+    int fd = (intptr_t)file - 1;
+    if (!size || count > INT_MAX / size)
+        return 0;
+    ssize_t read = rb->read(fd, buf, size * count);
+    return read < 0 ? 0 : read / (ssize_t)size;
 }
 
 /*
@@ -105,8 +90,22 @@ int sysfile_read(file_t file, void *buf, size_t size, size_t count)
  */
 int sysfile_seek(file_t file, long offset, int origin)
 {
-    long fd = (long)file;
+    int fd = (intptr_t)file - 1;
     return rb->lseek(fd, offset, origin);
+}
+
+int sysfile_tell(file_t file)
+{
+    return sysfile_seek(file, 0, SEEK_CUR);
+}
+
+off_t sysfile_size(file_t file)
+{
+#ifdef ASTRAPOD_XRICK
+    return rb->ffilesize((intptr_t)file - 1);
+#else
+    return rb->filesize((intptr_t)file - 1);
+#endif
 }
 
 /*
@@ -114,7 +113,7 @@ int sysfile_seek(file_t file, long offset, int origin)
  */
 void sysfile_close(file_t file)
 {
-    long fd = (long)file;
+    int fd = (intptr_t)file - 1;
     rb->close(fd);
 }
 

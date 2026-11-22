@@ -12,6 +12,9 @@
  */
 
 #include "xrick/resources.h"
+#ifndef ROCKBOX
+#include <stdio.h>
+#endif
 
 #include "xrick/draw.h"
 #include "xrick/ents.h"
@@ -21,6 +24,9 @@
 #include "xrick/data/tiles.h"
 #include "xrick/data/pics.h"
 #include "xrick/system/basic_funcs.h"
+#ifdef ASTRAPOD_XRICK
+#include "xrick-compat.h"
+#endif
 
 #include "xrick/system/miniz_config.h"
 #include "xrick/3rd_party/miniz/miniz.c"
@@ -29,7 +35,7 @@
  * prototypes
  */
 static bool readFile(const unsigned id);
-static bool checkCrc32(const unsigned id);
+static bool checkCrc32(file_t fp, off_t payload);
 static bool readHeader(file_t fp, const unsigned id);
 static bool loadString(file_t fp, char ** str, const char terminator);
 static void unloadString(char ** buffer);
@@ -88,6 +94,8 @@ static bool loadString(file_t fp, char ** buffer, const char terminator)
         return false;
     }
     length = letoh16(u16Temp);
+    if (length > 512)
+        return false;
 
     bufferTemp = sysmem_push(length + 1);
     *buffer = bufferTemp;
@@ -104,6 +112,15 @@ static bool loadString(file_t fp, char ** buffer, const char terminator)
         }
     }
 
+#ifdef ASTRAPOD_XRICK
+    if (terminator == (char)0xfe)
+    {
+        /* An early end marker can leave the intro body reading past the list. */
+        for (unsigned int i = 0; i < length; ++i)
+            if ((unsigned char)bufferTemp[i] == 0xfe)
+                return false;
+    }
+#endif
     bufferTemp[length] = terminator;
 
     return true;
@@ -127,10 +144,18 @@ static bool loadResourceFilelist(file_t fp)
 
     for (id = Resource_PALETTE; id < Resource_MAX_COUNT; ++id)
     {
-        if (!loadString(fp, &(resourceFiles[id]), 0x00))
-        {
+#ifdef ASTRAPOD_XRICK
+        int start = sysfile_tell(fp);
+        if (start < 0)
             return false;
-        }
+#endif
+        if (!loadString(fp, &(resourceFiles[id]), 0x00))
+            return false;
+#ifdef ASTRAPOD_XRICK
+        size_t length = sysfile_tell(fp) - start - sizeof(U16);
+        if (!xrick_resource_path(resourceFiles[id], length))
+            return false;
+#endif
     }
     return true;
 }
@@ -406,7 +431,7 @@ static bool loadResourceImaptext(file_t fp)
     screen_nbr_imaptext = letoh16(u16Temp);
 
     screen_imaptext = sysmem_push(screen_nbr_imaptext * sizeof(*screen_imaptext));
-    if (!screen_imapsteps)
+    if (!screen_imaptext)
     {
         return false;
     }
@@ -428,7 +453,7 @@ static void unloadResourceImaptext()
 {
     int i;
 
-    for (i = screen_nbr_imaptext - 1; i >= 0; --i)
+    for (i = screen_imaptext ? (int)screen_nbr_imaptext - 1 : -1; i >= 0; --i)
     {
         unloadString((char **)(&(screen_imaptext[i])));
     }
@@ -616,7 +641,7 @@ static void unloadResourceTilesData()
 static bool loadImage(file_t fp, img_t ** image)
 {
     U16 u16Temp;
-    size_t pixelCount, colorCount;
+    size_t pixelCount, colorCount = 0;
     resource_pic_t dataTemp;
     img_t * imgTemp;
     void * vp;
@@ -642,14 +667,17 @@ static bool loadImage(file_t fp, img_t ** image)
     memcpy(&u16Temp, dataTemp.yPos, sizeof(U16));
     imgTemp->yPos = letoh16(u16Temp);
 
-    vp = imgTemp->colors;
+    if (!imgTemp->width || !imgTemp->height ||
+        (unsigned)imgTemp->xPos + imgTemp->width > SYSVID_WIDTH ||
+        (unsigned)imgTemp->yPos + imgTemp->height > SYSVID_HEIGHT)
+        return false;
+
+    vp = NULL;
     success = loadRawData(fp, &vp, sizeof(*imgTemp->colors), &colorCount);
     imgTemp->ncolors = colorCount;
     imgTemp->colors = vp;
-    if (!success)
-    {
+    if (!success || !colorCount || colorCount > 256)
         return false;
-    }
 
     pixelCount = (imgTemp->width * imgTemp->height);  /*we use 8b per pixel*/
 
@@ -663,6 +691,9 @@ static bool loadImage(file_t fp, img_t ** image)
     {
         return false;
     }
+    for (size_t i = 0; i < pixelCount; i++)
+        if (imgTemp->pixels[i] >= colorCount)
+            return false;
     return true;
 }
 
@@ -710,6 +741,11 @@ static bool loadPicture(file_t fp, pic_t ** picture)
     picTemp->xPos = letoh16(u16Temp);
     memcpy(&u16Temp, dataTemp.yPos, sizeof(U16));
     picTemp->yPos = letoh16(u16Temp);
+
+    if (!picTemp->width || !picTemp->height || picTemp->width % 8 ||
+        (unsigned)picTemp->xPos + picTemp->width > SYSVID_WIDTH ||
+        (unsigned)picTemp->yPos + picTemp->height > SYSVID_HEIGHT)
+        return false;
 
     pixelWords32b = (picTemp->width * picTemp->height) / 8;  /*we use 4b per pixel*/
 
@@ -803,6 +839,7 @@ static bool loadSound(const unsigned id)
     U32 u32Temp;
     int bytesRead;
     bool isHeaderValid;
+    off_t extent;
 
     if (!fromResourceIdToSound(id, &sound))
     {
@@ -831,6 +868,7 @@ static bool loadSound(const unsigned id)
         return false;
     }
 
+    extent = sysfile_size(fp);
     bytesRead = sysfile_read(fp, &header, sizeof(header), 1);
     sysfile_close(fp);
     if (bytesRead != 1)
@@ -873,8 +911,24 @@ static bool loadSound(const unsigned id)
         }
 
         memcpy(&u32Temp, header.dataChunkSize, sizeof(u32Temp));
-        (*sound)->len = letoh32(u32Temp);
+        U32 samples = letoh32(u32Temp);
+        if (!samples || samples > 2 * 1024 * 1024 ||
+            extent != (off_t)(sizeof(header) + samples))
+            break;
+        memcpy(&u32Temp, header.riffChunkSize, sizeof(u32Temp));
+        if ((off_t)letoh32(u32Temp) != extent - 8)
+            break;
+        memcpy(&u32Temp, header.formatChunkSize, sizeof(u32Temp));
+        if (letoh32(u32Temp) != 16)
+            break;
+        memcpy(&u32Temp, header.byteRate, sizeof(u32Temp));
+        if (letoh32(u32Temp) != Wave_SAMPLE_RATE)
+            break;
+        memcpy(&u16Temp, header.blockAlign, sizeof(u16Temp));
+        if (letoh16(u16Temp) != 1)
+            break;
 
+        (*sound)->len = samples;
         isHeaderValid = true;
         break;
     }
@@ -951,45 +1005,22 @@ static bool readHeader(file_t fp, const unsigned id)
 /*
  *
  */
-static bool checkCrc32(const unsigned id)
+static bool checkCrc32(file_t fp, off_t payload)
 {
-    int bytesRead;
-    U8 tempBuffer[1024];
-    U32 expectedCrc32, calculatedCrc32 = MZ_CRC32_INIT;
+    U8 buffer[512];
+    U32 expected, crc = MZ_CRC32_INIT;
 
-    file_t fp = sysfile_open(resourceFiles[id]);
-    if (fp == NULL)
+    while (payload > 0)
     {
-        sys_error("(resources) unable to open \"%s\"", resourceFiles[id]);
-        return false;
+        size_t chunk = payload > (off_t)sizeof(buffer) ? sizeof(buffer) : (size_t)payload;
+        if (sysfile_read(fp, buffer, 1, chunk) != (int)chunk)
+            return false;
+        crc = mz_crc32(crc, buffer, chunk);
+        payload -= chunk;
     }
 
-    bytesRead = sysfile_read(fp, tempBuffer, sizeof(U32), 1); /* prepare beginning of buffer for the following loop */
-    if (bytesRead != 1)
-    {
-        sys_error("(resources) not enough data for \"%s\"", resourceFiles[id]);
-        sysfile_close(fp);
-        return false;
-    }
-    do
-    {
-        bytesRead = sysfile_read(fp, tempBuffer + sizeof(U32), sizeof(U8), sizeof(tempBuffer) - sizeof(U32));
-
-        calculatedCrc32 = mz_crc32(calculatedCrc32, tempBuffer, bytesRead);
-
-        memcpy(tempBuffer, tempBuffer + bytesRead, sizeof(U32));
-    } while (bytesRead == sizeof(tempBuffer) - sizeof(U32));
-
-    sysfile_close(fp);
-
-    memcpy(&expectedCrc32, tempBuffer, sizeof(U32));
-    expectedCrc32 = letoh32(expectedCrc32);
-    if (expectedCrc32 != calculatedCrc32)
-    {
-        sys_error("(resources) crc check failed for \"%s\"", resourceFiles[id]);
-        return false;
-    }
-    return true;
+    return sysfile_read(fp, &expected, sizeof(expected), 1) == 1 &&
+           letoh32(expected) == crc && sysfile_seek(fp, 0, SEEK_SET) == 0;
 }
 
 /*
@@ -1023,22 +1054,20 @@ static bool readFile(const unsigned id)
         return false;
     }
 
-    if (!checkCrc32(id))
-    {
-        return false;
-    }
-
     fp = sysfile_open(resourceFiles[id]);
     if (fp == NULL)
     {
         if (id == Resource_FILELIST)
-            sys_error("Please install resource files!");
+            sys_error("Missing /.rockbox/xrick/filelist.dat");
         else
             sys_error("(resources) unable to open \"%s\"", resourceFiles[id]);
         return false;
     }
 
-    success = readHeader(fp, id);
+    off_t extent = sysfile_size(fp);
+    off_t payload = extent - (off_t)sizeof(U32);
+    success = payload >= (off_t)sizeof(resource_header_t) && extent <= 128 * 1024 &&
+              checkCrc32(fp, payload) && readHeader(fp, id);
 
     if (success)
     {
@@ -1141,6 +1170,7 @@ static bool readFile(const unsigned id)
         }
     }
 
+    success = success && sysfile_tell(fp) == payload;
     if (!success)
     {
         sys_error("(resources) error when parsing \"%s\"", resourceFiles[id]);
@@ -1165,14 +1195,29 @@ bool resources_load()
 #ifdef ENABLE_SOUND
     for (id = Resource_SOUNDBOMBSHHT; (id <= Resource_SOUNDWALK) && success; ++id)
     {
+#ifdef ASTRAPOD_XRICK
+        if (xrick_load_interrupted())
+            return false;
+#endif
         success = loadSound(id);
     }
 #endif /* ENABLE_SOUND */
 
     for (id = Resource_PALETTE; (id <= Resource_SCREENCONGRATS) && success; ++id)
     {
+#ifdef ASTRAPOD_XRICK
+        if (xrick_load_interrupted())
+            return false;
+#endif
         success = readFile(id);
     }
+#ifdef ASTRAPOD_XRICK
+    if (success && !xrick_resources_valid())
+    {
+        sys_error("(resources) invalid game data indexes");
+        return false;
+    }
+#endif
     return success;
 }
 

@@ -49,7 +49,7 @@ extern U8 game_period;     /* time between each frame, in millisecond */
 
 extern const rect_t *game_rects; /* rectangles to redraw at each frame */
 
-extern void game_run(void);
+extern bool game_run(void);
 #ifdef ENABLE_SOUND
 extern void game_setmusic(sound_t * sound, S8 loop);
 extern void game_stopmusic(void);

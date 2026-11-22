@@ -150,6 +150,7 @@ games/sudoku
 games/superdom
 games/wormlet
 games/xobox
+games/xrick
 games/zxbox
 viewers/chip8
 viewers/lua

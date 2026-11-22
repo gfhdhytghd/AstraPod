@@ -72,7 +72,7 @@ e_bullet_action(U8 e/*unused*/)
         /* update bullet center coordinates */
         e_bullet_xc = E_BULLET_ENT.x + 0x0c;
         e_bullet_yc = E_BULLET_ENT.y + 0x05;
-        if (map_eflg[map_map[e_bullet_yc >> 3][e_bullet_xc >> 3]] & MAP_EFLG_SOLID)
+        if (map_flags_at(e_bullet_yc >> 3, e_bullet_xc >> 3) & MAP_EFLG_SOLID)
         {
             /* hit something: deactivate */
             E_BULLET_ENT.n = 0;

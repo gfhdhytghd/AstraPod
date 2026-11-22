@@ -149,6 +149,16 @@ extern U8 map_frow;
  */
 extern U8 map_tilesBank;
 
+bool map_window_valid(size_t submap, unsigned row);
+
+static inline U8 map_flags_at(int row, int col)
+{
+  if ((unsigned)row >= sizeof(map_map) / sizeof(map_map[0]) ||
+      (unsigned)col >= sizeof(map_map[0]))
+    return MAP_EFLG_SOLID;
+  return map_eflg[map_map[row][col]];
+}
+
 extern void map_expand(void);
 extern void map_init(void);
 extern bool map_chain(void);

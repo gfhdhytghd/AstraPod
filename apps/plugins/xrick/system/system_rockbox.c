@@ -127,7 +127,11 @@ U32 sys_gettime(void)
 */
 void sys_yield(void)
 {
+#ifdef ASTRAPOD_XRICK
+    rb->sleep(1);
+#else
     rb->yield();
+#endif
 }
 
 /*
@@ -169,10 +173,10 @@ bool sys_init(int argc, char **argv)
 */
 void sys_shutdown(void)
 {
-    sysfile_clearRootPath();
 #ifdef ENABLE_SOUND
     syssnd_shutdown();
 #endif
+    sysfile_clearRootPath();
     sysvid_shutdown();
     sysmem_shutdown();
 
@@ -186,7 +190,7 @@ void sys_shutdown(void)
 */
 bool sys_cacheData(void)
 {
-#ifdef ENABLE_SOUND
+#if defined(ENABLE_SOUND) && !defined(ASTRAPOD_XRICK)
     syssnd_load(soundGameover);
     syssnd_load(soundSbonus2);
     syssnd_load(soundBullet);
@@ -225,7 +229,7 @@ bool sys_cacheData(void)
 */
 void sys_uncacheData(void)
 {
-#ifdef ENABLE_SOUND
+#if defined(ENABLE_SOUND) && !defined(ASTRAPOD_XRICK)
     syssnd_unload(soundTune5);
     syssnd_unload(soundTune4);
     syssnd_unload(soundTune3);

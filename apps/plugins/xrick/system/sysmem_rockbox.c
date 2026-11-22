@@ -51,6 +51,11 @@ bool sysmem_init(void)
         return true;
     }
 
+#ifdef ASTRAPOD_XRICK
+    stackBuffer = rb->plugin_claim_scratch(256 * 1024, 256 * 1024, &stackMaxSize);
+    if (!stackBuffer)
+        return false;
+#else
     if (rb->audio_status())
     {
         /* Playback must be stopped the entire time the sound buffer is used.*/
@@ -58,6 +63,7 @@ bool sysmem_init(void)
     }
 
     stackBuffer = rb->plugin_get_audio_buffer(&stackMaxSize);
+#endif
     stackTop = stackBuffer;
     stackSize = 0;
     isMemoryInitialised = true;
@@ -91,23 +97,19 @@ void sysmem_shutdown(void)
  */
 void *sysmem_push(size_t size)
 {
-    uintptr_t alignedPtr;
-    size_t * allocatedSizePtr;
-
-    size_t neededSize = sizeof(size_t) + size + (ALIGNMENT - 1);
-    if (stackSize + neededSize > stackMaxSize)
-    {
-        sys_error("(memory) tried to allocate a block when memory full");
+    size_t overhead = sizeof(size_t) + ALIGNMENT - 1;
+    size_t available = stackMaxSize - stackSize;
+    if (available < overhead || size > available - overhead)
         return NULL;
-    }
 
-    alignedPtr = (((uintptr_t)stackTop) + sizeof(size_t) + ALIGNMENT) & ~((uintptr_t)(ALIGNMENT - 1));
-
-    allocatedSizePtr = (size_t *)(alignedPtr);
-    allocatedSizePtr[-1] = neededSize;
-
+    uintptr_t alignedPtr = ((uintptr_t)stackTop + overhead) &
+                           ~(uintptr_t)(ALIGNMENT - 1);
+    size_t neededSize = alignedPtr - (uintptr_t)stackTop + size;
+    ((size_t *)alignedPtr)[-1] = neededSize;
     stackTop += neededSize;
     stackSize += neededSize;
+    /* Partially parsed structures must be safe to unwind. */
+    rb->memset((void *)alignedPtr, 0, size);
 
     IFDEBUG_MEMORY(
         sys_printf("xrick/memory: allocated %u bytes\n", neededSize);
@@ -135,17 +137,25 @@ void sysmem_pop(void * alignedPtr)
         return;
     }
 
+    if ((uintptr_t)alignedPtr < (uintptr_t)stackBuffer + sizeof(size_t) ||
+        (uintptr_t)alignedPtr > (uintptr_t)stackTop ||
+        (uintptr_t)alignedPtr % ALIGNMENT)
+    {
+        sys_error("(memory) invalid block address");
+        return;
+    }
     allocatedSize = ((size_t *)(alignedPtr))[-1];
+    if (allocatedSize > stackSize ||
+        (uintptr_t)alignedPtr !=
+        (((uintptr_t)(stackTop - allocatedSize) + sizeof(size_t) + ALIGNMENT - 1) &
+         ~(uintptr_t)(ALIGNMENT - 1)))
+    {
+        sys_error("(memory) tried to release a wrong block");
+        return;
+    }
+
     stackTop -= allocatedSize;
     stackSize -= allocatedSize;
-
-    IFDEBUG_MEMORY(
-        if ((uintptr_t)alignedPtr != ((((uintptr_t)stackTop) + sizeof(size_t) + ALIGNMENT) & ~((uintptr_t)(ALIGNMENT - 1))))
-        {
-            sys_error("(memory) tried to release a wrong block");
-            return;
-        }
-    );
 
     IFDEBUG_MEMORY(
         sys_printf("xrick/memory: released %u bytes\n", allocatedSize);

@@ -74,8 +74,15 @@ U8 map_tilesBank;
 /*
  * prototypes
  */
-static void map_eflg_expand(U8);
+static void map_eflg_expand(size_t);
 
+
+bool
+map_window_valid(size_t submap, unsigned row)
+{
+  return submap < map_nbr_submaps &&
+         map_submaps[submap].bnum + ((2 * row) & ~7u) + 88 <= map_nbr_bnums;
+}
 
 /*
  * Fill in map_map with tile numbers by expanding blocks.
@@ -90,7 +97,12 @@ map_expand(void)
 {
   U8 i, j, k, l;
   U8 row, col;
-  U16 pbnum;
+  size_t pbnum;
+
+  if (!map_window_valid(game_submap, map_frow)) {
+    control_set(Control_EXIT);
+    return;
+  }
 
   pbnum = map_submaps[game_submap].bnum + ((2 * map_frow) & 0xfff8);
   row = col = 0;
@@ -128,7 +140,7 @@ map_init(void)
 #ifdef GFXST
   map_tilesBank = 1 + map_submaps[game_submap].page;
 #endif
-  map_eflg_expand(map_submaps[game_submap].page << 4);
+  map_eflg_expand((size_t)map_submaps[game_submap].page * 16);
   map_expand();
   ent_reset();
   ent_actvis(map_frow + MAP_ROW_SCRTOP, map_frow + MAP_ROW_SCRBOT);
@@ -143,13 +155,13 @@ map_init(void)
  * ASM 1117
  */
 void
-map_eflg_expand(U8 offs)
+map_eflg_expand(size_t offs)
 {
-  U8 i, j, k;
-
-  for (i = 0, k = 0; i < 0x10; i++) {
-    j = map_eflg_c[offs + i++];
-    while (j--) map_eflg[k++] = map_eflg_c[offs + i];
+  size_t k = 0;
+  for (size_t i = 0; i < 16; i += 2) {
+    unsigned count = map_eflg_c[offs + i];
+    while (count-- && k < sizeof(map_eflg))
+      map_eflg[k++] = map_eflg_c[offs + i + 1];
   }
 }
 

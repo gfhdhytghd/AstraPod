@@ -166,6 +166,16 @@ void sysvid_update(const rect_t *rects)
         sourceLastRow = sourceRow + rects->height;
         sourceColumn = rects->x;
         sourceLastColumn = sourceColumn + rects->width;
+#ifdef ASTRAPOD_XRICK
+        if (sourceRow >= SYSVID_HEIGHT || sourceColumn >= SYSVID_WIDTH ||
+            !rects->width || !rects->height)
+        {
+            rects = rects->next;
+            continue;
+        }
+        sourceLastRow = MIN(sourceLastRow, SYSVID_HEIGHT);
+        sourceLastColumn = MIN(sourceLastColumn, SYSVID_WIDTH);
+#endif
 
 #if (LCD_WIDTH < SYSVID_WIDTH)
         /* skip black borders */
@@ -188,7 +198,7 @@ void sysvid_update(const rect_t *rects)
         resizedWidth = 0;
 #else
         resizedColumn = sourceColumn;
-        resizedWidth = rects->width;
+        resizedWidth = sourceLastColumn - sourceColumn;
 #endif /* (LCD_WIDTH < SYSVID_WIDTH) */
 
 #if (LCD_HEIGHT < SYSVID_HEIGHT)
@@ -202,7 +212,7 @@ void sysvid_update(const rect_t *rects)
         resizedHeight = 0;
 #else
         resizedRow = sourceRow;
-        resizedHeight = rects->height;
+        resizedHeight = sourceLastRow - sourceRow;
 #endif /* (LCD_HEIGHT < SYSVID_HEIGHT) */
 
         sourceBuf = sysvid_fb;

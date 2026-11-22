@@ -485,7 +485,8 @@ sub buildzip {
 
     find(find_copyfile(qr/\.(rock|ovl|lua)/, abs_path("$temp_dir/rocks/")), 'apps/plugins');
 
-    if (-f "rock-compat/modules/apps/imageviewer_compat.rock") {
+    if (($ENV{'EXTRA_DEFINES'} // '') =~ /(?:^|\s)-DASTRAPOD_ROCK_COMPAT(?:\s|$)/ &&
+        -f "rock-compat/modules/apps/imageviewer_compat.rock") {
         glob_mkdir("$temp_dir/image-decoders");
         foreach my $format (qw(bmp jpeg png ppm gif jpegp)) {
             my $overlay = "image_$format.ovl";

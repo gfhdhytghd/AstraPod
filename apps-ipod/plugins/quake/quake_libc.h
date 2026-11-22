@@ -27,6 +27,7 @@ int quake_log(const char *fmt, ...);
 int quake_unlink(const char *path);
 
 void quake_check_events(void);
+bool quake_system_event(long button);
 void quake_quit(enum plugin_status status) __attribute__((noreturn));
 void quake_close_files(void);
 enum quake_data { QUAKE_DATA_OK, QUAKE_DATA_MISSING, QUAKE_DATA_INVALID };

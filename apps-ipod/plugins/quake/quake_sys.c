@@ -47,7 +47,8 @@ void Sys_Printf(char *format, ...)
     (void)format;
 }
 
-/* Shows a two-line notice on the bare LCD for three seconds. */
+/* Shows a two-line notice on the bare LCD for three seconds, or until
+ * Menu is released. */
 static void show_message(const char *line1, const char *line2)
 {
     quake_audio_stop();
@@ -65,10 +66,17 @@ static void show_message(const char *line1, const char *line2)
     if (line2)
         rb->lcd_putsxy(8, 40, line2);
     rb->lcd_update();
-    for (int i = 0; i < 3 * HZ; i++)
+    long until = *rb->current_tick + 3 * HZ;
+    bool menu = false;
+    while (TIME_BEFORE(*rb->current_tick, until))
     {
-        quake_check_events();
-        rb->sleep(1);
+        long button = rb->button_get_w_tmo(until - *rb->current_tick);
+        if (quake_system_event(button) || !(button & BUTTON_MENU))
+            continue;
+        if (!(button & BUTTON_REL))
+            menu = true;
+        else if (menu)
+            break;
     }
 }
 

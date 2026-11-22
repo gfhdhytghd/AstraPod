@@ -12,12 +12,49 @@ import time
 import wave
 from zipfile import ZipFile
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageChops, ImageOps, ImageStat
 
 
 WIDTH, HEIGHT = 320, 240
 FRAME_BYTES = WIDTH * HEIGHT * 3
 STATE_BYTES = 12 + 8 * (FRAME_BYTES + 4)
+
+
+def image(pixels):
+    return Image.frombytes("RGB", (WIDTH, HEIGHT), pixels)
+
+
+def changed(before, after, box):
+    """Returns the share of pixels in box that changed visibly."""
+    delta = ImageChops.difference(image(before).crop(box),
+                                  image(after).crop(box))
+    mask = ImageOps.grayscale(delta).point(lambda value: value > 12 and 255)
+    return ImageStat.Stat(mask).mean[0] / 255
+
+
+def menu_row(pixels, plaque=None):
+    """Returns the main or Single Player menu row under the spinning cursor.
+
+    The menu fades the scene behind it to one pixel in four, never two side
+    by side, so only the cursor has bright horizontal pairs. A frame of a
+    menu seen earlier, as plaque, also requires the QUAKE plaque beside it."""
+    if plaque and changed(plaque, pixels, PLAQUE) > 0.2:
+        return None
+    gray = ImageOps.grayscale(image(pixels))
+    pairs = ImageChops.darker(gray.crop((54, 32, 72, 132)),
+                              gray.crop((55, 32, 73, 132)))
+    rows = [sum(value > 60 for value in
+                pairs.crop((0, y, 18, y + 18)).get_flattened_data())
+            for y in range(0, 100, 20)]
+    lit = [row for row, count in enumerate(rows) if count >= 10]
+    dark = all(count < 3 for row, count in enumerate(rows) if row not in lit)
+    return lit[0] if len(lit) == 1 and dark else None
+
+
+PLAQUE = (16, 4, 48, 140)
+VIEW = (0, 0, WIDTH, 192)
+AMMO = (224, 216, WIDTH, HEIGHT)
+QUIT_BOX = (72, 84, 248, 116)
 
 
 def wait_for(check, label, timeout=15):
@@ -83,9 +120,11 @@ def exercise(build, external_pak, work, fonts_from):
                 sim.stdin.flush()
 
             def tap(key, hold=0.09):
+                """Presses key, with a gap the button debounce sees."""
                 send("down", key)
                 time.sleep(hold)
                 send("up", key)
+                time.sleep(0.05)
 
             def frame():
                 assert sim.poll() is None, f"simulator exited ({sim.returncode})"
@@ -132,14 +171,21 @@ def exercise(build, external_pak, work, fonts_from):
                     audio.seek(offset)
                     return any(audio.read())
 
-            def check_rejection(label, contents, words=("invalid", "pak")):
+            def check_rejection(label, contents, words=("invalid", "pak"),
+                                menu=False):
                 if contents is not None:
                     pak.write_bytes(contents)
                 tap("select")
                 text(label, *words)
+                if menu:
+                    start = time.monotonic()
+                    tap("menu")
                 text(f"{label}-return", "quake", exclude=words)
+                if menu:
+                    took = time.monotonic() - start
+                    assert took < 2, f"Menu took {took:.1f} s to return"
                 assert not (data / "config.cfg").exists()
-                print(f"PASS {label}", flush=True)
+                print(f"PASS {label}{' with Menu' if menu else ''}", flush=True)
 
             def open_games():
                 text("home", "plugins")
@@ -152,7 +198,10 @@ def exercise(build, external_pak, work, fonts_from):
             try:
                 games_frame = open_games()
                 check_rejection("missing-pack", None, ("found", "pak"))
+                check_rejection("missing-pack-menu", None, ("found", "pak"),
+                                menu=True)
                 check_rejection("wrong-magic", b"WAD2" + b"\0" * 8)
+                check_rejection("wrong-magic-menu", None, menu=True)
                 check_rejection("truncated-directory",
                                 b"PACK" + struct.pack("<II", 12, 64))
                 check_rejection(
@@ -169,35 +218,136 @@ def exercise(build, external_pak, work, fonts_from):
 
                 def snapshot(label):
                     time.sleep(0.5)
-                    Image.frombytes("RGB", (WIDTH, HEIGHT), frame()).save(
-                        work / f"{label}.png")
+                    pixels = frame()
+                    image(pixels).save(work / f"{label}.png")
+                    return pixels
 
-                # Menu, Select, Select: Quake menu, Single Player, New Game.
+                plaque = None
+
+                def shown(test):
+                    pixels = frame()
+                    return pixels if pixels and test(pixels) else None
+
+                def at_row(label, row):
+                    pixels = wait_for(lambda: shown(
+                        lambda pixels: menu_row(pixels, plaque) == row),
+                        label, 5)
+                    image(pixels).save(work / f"{label}.png")
+                    return pixels
+
+                def escape(label):
+                    """Hold on presses Escape, which opens the menu; Hold off
+                    releases it and leaves the menu as it is."""
+                    tap("hold")
+                    pixels = wait_for(lambda: shown(
+                        lambda pixels: menu_row(pixels, plaque) is not None),
+                        label)
+                    image(pixels).save(work / f"{label}.png")
+                    row = menu_row(pixels, plaque)
+                    tap("hold")
+                    rows = set()
+                    for _ in range(6):
+                        time.sleep(0.1)
+                        rows.add(menu_row(frame(), plaque))
+                    assert rows - {None} == {row}, f"{label}: Hold off {rows}"
+                    return row
+
+                def quit_prompt(label, menu):
+                    tap("select")
+                    wait_for(lambda: changed(menu, frame(), QUIT_BOX) > 0.15,
+                             label)
+                    image(frame()).save(work / f"{label}.png")
+
+                def quit_quake(label, cancel=False):
+                    """Leaves through Quit in the Quake main menu."""
+                    escape(f"{label}-menu")
+                    for _ in range(5):
+                        if menu_row(frame(), plaque) == 4:
+                            break
+                        tap("play")
+                        time.sleep(0.3)
+                    menu = at_row(f"{label}-quit-row", 4)
+                    quit_prompt(f"{label}-prompt", menu)
+                    if cancel:
+                        # Escape answers No and returns to the main menu.
+                        tap("hold")
+                        wait_for(lambda: changed(menu, frame(), QUIT_BOX) < 0.05
+                                 and menu_row(frame(), plaque) == 4,
+                                 f"{label}-prompt-cancelled")
+                        tap("hold")
+                        time.sleep(0.3)
+                        quit_prompt(f"{label}-prompt-again", menu)
+                    # Select answers Yes.
+                    tap("select")
+
+                def held(key, seconds):
+                    send("down", key)
+                    time.sleep(seconds)
+                    send("up", key)
+
+                def moved(label, action, floor=0.08):
+                    time.sleep(0.6)
+                    still = frame()
+                    time.sleep(0.6)
+                    idle = changed(still, frame(), VIEW)
+                    before = frame()
+                    action()
+                    time.sleep(0.4)
+                    after = snapshot(label)
+                    share = changed(before, after, VIEW)
+                    print(f"{label}: view changed {share:.3f}, idle {idle:.3f}",
+                          flush=True)
+                    assert share > max(floor, 3 * idle), label
+
+                def ammo_changed(label, action):
+                    time.sleep(0.6)
+                    before = frame()
+                    action()
+                    after = snapshot(label)
+                    share = changed(before, after, AMMO)
+                    print(f"{label}: ammo changed {share:.3f}", flush=True)
+                    assert share > 0.02, label
+
+                def settled():
+                    before = frame()
+                    time.sleep(0.5)
+                    return changed(before, frame(), (0, 0, WIDTH, 216)) < 0.01
+
+                # The demo: Hold opens the main menu on Single Player.
+                assert escape("main-menu") == 0
+                # Play moves down, Menu moves up, Select confirms.
+                tap("play")
+                at_row("menu-play-down", 1)
                 tap("menu")
-                snapshot("quake-menu")
+                plaque = at_row("menu-menu-up", 0)
                 tap("select")
-                snapshot("single-player")
+                at_row("single-player", 0)
+                single = frame()
                 tap("select")
-                time.sleep(4)
+                wait_for(lambda: changed(single, frame(), VIEW) > 0.3,
+                         "new game")
+
+                wait_for(settled, "level loaded", timeout=40)
                 snapshot("new-game")
-                send("down", "play")
-                send("down", "right")
-                time.sleep(1.5)
-                send("up", "right")
-                send("up", "play")
-                tap("select")
-                snapshot("moved-and-fired")
-                for _ in range(8):
-                    tap("up", hold=0.03)
-                snapshot("wheel-strafed")
-                tap("menu", hold=0.75)
-                text("menu-exit", "quake")
+
+                ammo_changed("select-fires", lambda: tap("select"))
+                moved("menu-forward", lambda: held("menu", 1.5))
+                moved("right-turns", lambda: held("right", 0.6))
+                moved("left-turns", lambda: held("back", 0.6))
+                moved("wheel-strafes",
+                      lambda: [tap("up", hold=0.03) for _ in range(10)])
+                ammo_changed("play-cycles-weapon", lambda: tap("play"))
+                ammo_changed("play-cycles-back", lambda: tap("play"))
+                print("PASS level controls", flush=True)
+
+                quit_quake("level-quit", cancel=True)
+                text("quit-exit", "quake")
                 assert (data / "config.cfg").stat().st_size > 0
                 time.sleep(0.15)
                 end = pcm.stat().st_size
                 time.sleep(0.20)
                 assert not audible_since(end), "PCM persisted after exit"
-                print("PASS gameplay, PCM and Menu exit", flush=True)
+                print("PASS Quit menu exit and silence", flush=True)
 
                 tap("select")
                 wait_for(lambda: audible_since(end), "nonzero PCM on relaunch",
@@ -207,7 +357,9 @@ def exercise(build, external_pak, work, fonts_from):
                 tap("select")
                 text("usb-storage", "usb")
                 tap("usb")
-                open_games()
+                text("usb-return", "plugins", "games")
+                tap("select")
+                text("games-after-usb", "quake")
                 time.sleep(0.15)
                 end = pcm.stat().st_size
                 time.sleep(0.20)
@@ -215,7 +367,7 @@ def exercise(build, external_pak, work, fonts_from):
                 tap("select")
                 wait_for(lambda: audible_since(end), "PCM after USB relaunch",
                          timeout=30)
-                tap("menu", hold=0.75)
+                quit_quake("final")
                 text("final-exit", "quake")
                 print("PASS USB takeover, silence and relaunch", flush=True)
 

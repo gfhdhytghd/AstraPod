@@ -68,10 +68,13 @@ ifneq ($(APP_TYPE),sdl-sim)
 ROCK_LINK_INPUT += $(ROCK_OBJECTS)/lib/gcc-support.o
 endif
 
-ROCK_UTILITIES := db_folder_select dict credits alarmclock dart_scorer resistor
+ROCK_UTILITIES := db_folder_select dict credits alarmclock calendar dart_scorer resistor shopper
 $(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_UTILITIES))): $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c $(APPSDIR)/plugins/stage-utilities.py
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-utilities.py $< $@
+
+$(ROCK_OUT)/staged/calendar.c: $(APPSDIR)/plugins/calendar-memo.inc
+$(ROCK_OUT)/staged/shopper.c: $(APPSDIR)/plugins/shopper-file.inc
 
 ROCK_GAME_ADAPTERS := blackjack bubbles chip8 clix invadrox jewels pegbox rockblox \
     solitaire spacerocks wormlet codebuster rocklife superdom
@@ -209,6 +212,8 @@ $(ROCK_OUT)/modules/games/robotfindskitten.rock: $(ROCK_OBJECTS)/lib/display_tex
 $(ROCK_OUT)/modules/demos/cube.rock: $(ROCK_OBJECTS)/lib/xlcd_draw.o
 $(ROCK_OUT)/modules/demos/cube.rock $(ROCK_OUT)/modules/demos/bounce.rock: $(FIXEDPOINTLIB)
 $(ROCK_OUT)/modules/apps/chessclock.rock: $(ROCK_OBJECTS)/lib/playback_control.o
+$(ROCK_OUT)/modules/apps/calendar.rock: $(addprefix $(ROCK_OBJECTS)/lib/,configfile.o playback_control.o)
+$(ROCK_OUT)/modules/viewers/shopper.rock: $(ROCK_OBJECTS)/lib/playback_control.o
 $(addprefix $(ROCK_OUT)/modules/,apps/lamp.rock demos/lamp.rock): $(addprefix $(ROCK_OBJECTS)/lib/,pluginlib_actions.o helper.o)
 $(ROCK_OUT)/modules/demos/credits.rock: $(ROCK_OBJECTS)/lib/helper.o
 $(ROCK_OUT)/modules/apps/dart_scorer.rock: $(addprefix $(ROCK_OBJECTS)/lib/,display_text.o helper.o playback_control.o)

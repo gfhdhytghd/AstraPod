@@ -1,4 +1,6 @@
+apps/alarmclock
 apps/calculator
+apps/calendar
 apps/chessclock
 apps/countdown_timer
 apps/dart_scorer
@@ -57,5 +59,6 @@ games/superdom
 games/wormlet
 games/xobox
 viewers/chip8
+viewers/shopper
 apps/search
 apps/stats

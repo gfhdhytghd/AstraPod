@@ -90,6 +90,7 @@ games/minesweeper
 games/pacbox
 games/pegbox
 games/pong
+games/quake
 games/reversi
 games/robotfindskitten
 games/rockblox

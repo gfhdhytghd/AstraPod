@@ -397,3 +397,7 @@ ROCK_DIRECT(strncasecmp)
 ROCK_SLOT(__typeof__(rock_queue_native_handoff) *queue_native_handoff,
           queue_native_handoff, rock_queue_native_handoff)
 ROCK_SLOT(int (*kbd_input_raw)(char *, int), kbd_input_raw, rock_kbd_input_raw)
+
+/* Fixed-size core storage for the Quake engine. */
+ROCK_SLOT(void *(*quake_heap_acquire)(void), quake_heap_acquire,
+          rock_quake_heap_acquire)

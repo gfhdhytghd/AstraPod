@@ -77,6 +77,7 @@ $(ROCK_OBJECTS)/keyremap.o: $(APPSDIR)/plugins/keyremap-editor.c $(ROCK_FINGERPR
 
 include $(APPSDIR)/plugins/mikmod-compat.make
 include $(APPSDIR)/plugins/h264-compat.make
+include $(APPSDIR)/plugins/quake/quake-compat.make
 include $(APPSDIR)/plugins/md5sum.make
 include $(APPSDIR)/plugins/disktidy.make
 include $(APPSDIR)/plugins/resident.make
@@ -299,7 +300,7 @@ $(ROCK_OUT)/modules/games/superdom.rock: $(addprefix $(ROCK_OBJECTS)/lib/,displa
 $(ROCK_OUT)/modules/apps/metronome.rock: $(FIXEDPOINTLIB)
 $(ROCK_OUT)/modules/apps/pitch_detector.rock: $(addprefix $(ROCK_OBJECTS)/lib/,picture.o helper.o)
 
-$(filter-out %/sgt-solo.rock,$(ROCKS)): $(ROCK_OBJECTS)/plugin_crt0.o
+$(filter-out %/sgt-solo.rock %/quake.rock,$(ROCKS)): $(ROCK_OBJECTS)/plugin_crt0.o
 $(ROCKS): $(ROCK_OUT)/modules/%.rock: $(ROCK_LINK_INPUT) $(ROCK_MANIFEST)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,LD $(@F))$(CC) $(ROCK_FLAGS) $(ROCK_LINK) -o $@.elf $(filter %.o,$^) $(filter %.a,$^) -lgcc

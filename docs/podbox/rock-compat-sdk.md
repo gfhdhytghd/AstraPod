@@ -442,6 +442,24 @@ are silent. The module rejects embedded DEHACKED patches. Freedoom 0.13.0
 permits redistribution under BSD-3-Clause, but its IWAD uses an embedded
 DEHACKED patch and MIDI-format tracks. It stays out of the archive.
 
+## Quake
+
+Place an original `pak0.pak`, shareware or registered, in
+`/.rockbox/quake/id1/`, with `pak1.pak` beside it for a registered copy.
+Stop native playback, then open **Plugins > Games > quake**. The archive
+contains the engine module only. A missing, truncated or damaged pak shows
+the data folder and returns to Games. Quake writes `config.cfg` and saves
+in the same folder. Play moves forward, Left and Right turn, Select fires,
+and the wheel strafes. Menu opens the Quake menu. Hold Menu to return to
+Games.
+
+The engine runs from a 12 MiB core allocation. The module claims it once
+through `quake_heap_acquire()`, which returns NULL while native playback
+or recording is active. The loader frees it after foreground cleanup.
+The module image itself needs about 1.6 MiB of the plugin arena. Sound
+effects use the SDK stream at 16 kHz, resampled to the sink rate by one
+worker.
+
 ## Key Remap
 
 Open **Plugins > Applications > keyremap** to edit Left and Right on

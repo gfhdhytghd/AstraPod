@@ -80,6 +80,7 @@ include $(APPSDIR)/plugins/mikmod-compat.make
 include $(APPSDIR)/plugins/h264-compat.make
 include $(APPSDIR)/plugins/imageviewer-compat.make
 include $(APPSDIR)/plugins/mpegplayer-compat.make
+include $(APPSDIR)/plugins/quake/quake-compat.make
 include $(APPSDIR)/plugins/md5sum.make
 include $(APPSDIR)/plugins/disktidy.make
 include $(APPSDIR)/plugins/resident.make
@@ -313,7 +314,7 @@ $(ROCK_OBJECTS)/plugin_crt0_large_stack.o: $(ROCK_SRC)/plugin_crt0.c $(ROCK_FING
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -DROCK_REQUEST_LARGE_STACK -MMD -MP -c $< -o $@
 
-$(filter-out %/sgt-solo.rock %/pictureflow.rock %/wolf3d.rock %/duke3d.rock,$(ROCKS)): $(ROCK_OBJECTS)/plugin_crt0.o
+$(filter-out %/sgt-solo.rock %/pictureflow.rock %/wolf3d.rock %/duke3d.rock %/quake.rock,$(ROCKS)): $(ROCK_OBJECTS)/plugin_crt0.o
 $(ROCKS): $(ROCK_OUT)/modules/%.rock: $(ROCK_LINK_INPUT) $(ROCK_MANIFEST)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,LD $(@F))$(CC) $(ROCK_FLAGS) $(ROCK_LINK) -o $@.elf $(filter %.o,$^) $(filter %.a,$^) -lgcc

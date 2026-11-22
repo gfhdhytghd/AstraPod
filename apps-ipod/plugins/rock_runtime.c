@@ -16,6 +16,7 @@
 #include "rock-compat/rock_fingerprint.h"
 #include "core_alloc.h"
 #include "draw/resize.h"
+#include "plugins/quake/quake_heap.h"
 #include "files/filetypes.h"
 #include "root_menu.h"
 #include "pcm_waveform.h"
@@ -558,6 +559,34 @@ static size_t rock_reserve_buffer(size_t size)
     return tail_size;
 }
 
+static int quake_heap_handle;
+
+static void *rock_quake_heap_acquire(void)
+{
+    if (!filename || usb_taken || quake_heap_handle ||
+        strcmp(filename, PLUGIN_GAMES_DIR "/quake.rock") ||
+        (audio_status() & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE |
+                           AUDIO_STATUS_RECORD | AUDIO_STATUS_PRERECORD)))
+        return NULL;
+
+    int handle = core_alloc(ROCK_QUAKE_HEAP_BYTES);
+    if (handle <= 0)
+        return NULL;
+
+    core_pin(handle);
+    quake_heap_handle = handle;
+    return core_get_data(handle);
+}
+
+static void rock_quake_heap_release(void)
+{
+    if (quake_heap_handle > 0)
+    {
+        core_unpin(quake_heap_handle);
+        quake_heap_handle = core_free(quake_heap_handle);
+    }
+}
+
 static const char *rock_get_current_filename(void)
 {
     return filename;
@@ -1002,6 +1031,7 @@ static int invoke_module(void *opaque)
         restore_input_settings();
     rock_release_plugin_font();
     rock_close_files();
+    rock_quake_heap_release();
     rock_list_discard();
     button_clear_pressed();
     rock_display_stop();

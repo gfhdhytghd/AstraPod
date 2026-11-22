@@ -441,3 +441,7 @@ ROCK_SLOT(unsigned int (*lua_track_event)(bool), lua_track_event, rock_lua_track
 
 /* Pinned engine workspace, released after foreground cleanup. */
 ROCK_SLOT(void *(*plugin_claim_heap)(size_t), plugin_claim_heap, rock_claim_heap)
+
+/* Fixed-size core storage for the Quake engine. */
+ROCK_SLOT(void *(*quake_heap_acquire)(void), quake_heap_acquire,
+          rock_quake_heap_acquire)

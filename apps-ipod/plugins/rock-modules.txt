@@ -149,6 +149,7 @@ games/spacerocks
 games/star
 games/sudoku
 games/superdom
+games/wolf3d
 games/wormlet
 games/xobox
 games/xrick

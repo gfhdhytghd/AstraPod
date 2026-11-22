@@ -541,3 +541,45 @@ The album-and-artist index comes from `db_summary`. Track queries validate the
 snapshot and use native `tagcache` album ranges. The slide worker uses the
 foreground module's arena and the SDK worker lease. Album covers in the Music
 menu use their own renderer and cache.
+
+## Wolf3D on iPod Classic
+
+Open **Plugins → Games → Wolf3D**. Use the English v1.4 `WL1` data
+supported by the stock Rockbox build. Place these eight files under
+`/.rockbox/wolf3d/` using lowercase names on case-sensitive volumes.
+
+- `audiohed.wl1` and `audiot.wl1`
+- `gamemaps.wl1` and `maphead.wl1`
+- `vgadict.wl1`, `vgagraph.wl1` and `vgahead.wl1`
+- `vswap.wl1`
+
+The module and firmware package require a separate copy of the data. The
+module also omits the embedded stock sign-on bitmap. Wolf3D reads and
+writes its own config and saves in the data directory.
+
+Use Menu and Play to move up and down. Use Left and Right to turn or
+navigate. Select confirms or fires. The wheel strafes. Toggle Hold on,
+then off, to open the game menu. On a remote with the corresponding keys,
+use arrows, Select or Play, and Menu or Stop.
+
+The stock SDL renderer runs on the foreground stack. Wolf3D claims
+between 2 and 3 MiB of arena scratch for SDL and game allocations.
+Digitized sounds decode on demand, with one cached sample per mixer
+channel. One SDK worker runs the SDL mixer. Its stack is 16 KiB on ARM
+and 80 KiB on the SDL signal-stack build. The foreground copies its completed PCM block to `rock_stream`. If the PCM
+sink is busy, Wolf3D starts in silent mode. On USB storage takeover or
+return, the foreground joins the worker and closes the stream.
+
+The SDL bridge uses the SDK thread identity, mutex and semaphore slots.
+Rebuild the firmware and the module set together when the SDK table changes.
+
+For the host check, run `make wolf3d-host-probe` in the configured SDL build.
+Pass that build, a directory containing the two default 18-point PBF
+fonts and a new evidence directory to `tools/rock-compat/wolf3d-host.py`.
+The check uses GDB and synthetic input files.
+
+### Wolf3D device smoke
+
+| Build | Setup and actions | Expected | Status |
+| --- | --- | --- | --- |
+| ipod6g ARM | Supply the eight matching files. Launch with the built-in output idle. Start a level and use the wheel, physical keys and a remote. Record tap input and the first matching game response on the same time base. Exit via the game menu, relaunch, then accept USB storage during gameplay. Disconnect, relaunch and return to native playback. | Game renders and plays music and effects. Remote taps respond within 40 ms with no stuck keys. Both exits release the worker and PCM. USB opens storage and native playback works afterward. | Pending physical iPod and user-supplied data. |

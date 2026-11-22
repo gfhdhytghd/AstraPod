@@ -282,7 +282,9 @@ static void memlist_cases(const char *dir)
     memlist_case(dir, bytes, 39, false);
     memlist_case(dir, bytes, 20, false);
     memlist_case(dir, bytes, 19, false);
-    bytes[1] = 6;
+    bytes[1] = 6; /* VIDEO2 polygons */
+    memlist_case(dir, bytes, 21, true);
+    bytes[1] = 7;
     memlist_case(dir, bytes, 21, false);
     bytes[1] = 0;
     bytes[15] = 3;

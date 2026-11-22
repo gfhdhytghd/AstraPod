@@ -58,19 +58,78 @@ def system(source):
 
 
 def sound(source):
-    source = cut(source, "void get_more(", "//\n// MUSIC API",
-                 """void I_SubmitSound(void) {}
-void I_ShutdownSound(void) {}
+    source = replace(source, "#define SAMPLECOUNT     128",
+                     "#define SAMPLECOUNT (ROCK_STREAM_BLOCK_BYTES / 4)")
+    source = replace(source, "#define NUM_CHANNELS    24",
+                     "#define NUM_CHANNELS    32")
+    source = replace(source, "signed short *mixbuffer;",
+                     "static signed short mixbuffer[MIXBUFFERSIZE];")
+    source = replace(source, "static unsigned short samplerate;",
+                     "static unsigned short samplerate;\nstatic bool stream_active;")
+    source = replace(source, "   int id;", "   int id;\n   int lump;")
+    source = replace(source, "int   *steptable; // Pitch to stepping lookup. (Not setup properly right now)\n", "")
+    source = cut(source, "void* getsfx(", "static void stopchan", "")
+    source = replace(source, "    channelinfo[i].data=NULL;",
+                     """   if (channelinfo[i].data)
+      W_UnlockLumpNum(channelinfo[i].lump);
+   channelinfo[i].data = NULL;""")
+    source = cut(source, "   // We will handle the new SFX.",
+                 "   channelinfo[channel].stepremainder", """   int lump = S_sfx[sfxid].lumpnum;
+   if (!stream_active)
+      return channel;
+   int len = W_LumpLength(lump);
+   if (len <= 9)
+      return channel;
+   const unsigned char *data = W_CacheLumpNum(lump);
+   unsigned int rate = data[2] | ((unsigned int)data[3] << 8);
+   uint32_t samples = (uint32_t)data[4] | ((uint32_t)data[5] << 8) |
+                      ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+   if (data[0] != 3 || data[1] || rate < 4000 || rate > 48000 ||
+       samples < 2 || samples > (uint32_t)(len - 8))
+   {
+      W_UnlockLumpNum(lump);
+      return channel;
+   }
 
-void I_InitSound(void)
-{
-   enable_sound = false;
-}
+   channelinfo[channel].lump = lump;
+   channelinfo[channel].data = data + 8;
+   channelinfo[channel].enddata = data + 8 + samples - 1;
+   channelinfo[channel].samplerate = rate;
+""")
+    source = replace(source, "   int step = steptable[pitch];", "")
+    source = cut(source, "   // Set stepping", "   // Separation",
+                 """   unsigned int step = (channelinfo[slot].samplerate << 16)
+                       / samplerate;
+   channelinfo[slot].step = pitched_sounds ?
+       step * (unsigned int)(128 + pitch) / 256 : step;
 
 """)
-    return replace(source, "void I_UpdateSound( void )\n{",
-                   "void I_UpdateSound( void )\n{\n   if (!enable_sound)\n      return;")
+    source = replace(source, "   int*  steptablemid = steptable + 128;\n", "")
+    source = cut(source, "   // This table provides step widths", "   // Generates", "")
+    source = replace(source, "   return W_GetNumForName(namebuf);",
+                     "   return W_CheckNumForName(namebuf);")
+    source = cut(source, "            channelinfo[chan].data +=",
+                 "         }\n", """            unsigned int advance = channelinfo[chan].stepremainder >> 16;
+            channelinfo[chan].stepremainder &= 0xffff;
+            if (advance >= (size_t)(channelinfo[chan].enddata -
+                                    channelinfo[chan].data))
+               stopchan(chan);
+            else
+               channelinfo[chan].data += advance;
+""")
+    return cut(source, "void get_more(", "//\n// MUSIC API",
+               Path(__file__).with_name("doom-stream.inc").read_text())
 
+
+def defaults(source):
+    return replace(source, '{"enable_sound",{(void *)&enable_sound, NULL},{0, NULL}',
+                   '{"enable_sound",{(void *)&enable_sound, NULL},{1, NULL}')
+
+
+def game_loop(source):
+    source = replace(source, "   I_SubmitSound();\n\n", "")
+    return replace(source, "      // Update display, next frame, with current state.",
+                   "      I_SubmitSound();\n\n      // Update display, next frame, with current state.")
 
 def video(source):
     source = replace(source, '#include "rockmacros.h"',
@@ -147,17 +206,16 @@ def rockdoom(source):
             exit(PLUGIN_USB_CONNECTED);
          case GO_TO_PREVIOUS:
          case 5: /* Quit */""")
-    source = replace(source, """        else if (result > 0)
-            rb->set_option""", """        else if (result == 1)
-            rb->splash(HZ, "Game audio is unavailable");
-        else if (result > 1)
-            rb->set_option""")
+    source = replace(source, '      rb->splash(HZ*2, "Missing Base WAD!");',
+                     """      rb->splash(HZ * 4,
+          "Place rockdoom.wad and a base WAD in /.rockbox/doom/");""")
+    source = replace(source, '   int mod = (rb->sound_max(SOUND_VOLUME)-rb->sound_min(SOUND_VOLUME))/15;',
+                     '   int mod = MAX(1, (rb->sound_max(SOUND_VOLUME) - rb->sound_min(SOUND_VOLUME)) / 15);')
+    source = replace(source, '   if(mod == 0)\n       mod = rb->global_status->volume;\n', '')
     return source
 
 
 def menu(source):
-    source = replace(source, "   M_SetupNextMenu(&SoundDef);",
-                     '   M_StartMessage("Game audio is unavailable", NULL, false);')
     source = replace(source, """   if (ch == -1)
       return false;""", """   if (menuactive && !saveStringEnter && ev->type == ev_scroll)
       ch = ev->data1 < 0 ? KEY_UPARROW : KEY_DOWNARROW;
@@ -173,8 +231,8 @@ def menu(source):
 
 
 adapters = {
-    "i_system.c": system, "i_sound.c": sound, "i_video.c": video,
-    "rockdoom.c": rockdoom, "m_menu.c": menu, "z_zone.c": zone,
+    "i_system.c": system, "i_sound.c": sound, "d_main.c": game_loop, "i_video.c": video,
+    "rockdoom.c": rockdoom, "m_menu.c": menu, "m_misc.c": defaults, "z_zone.c": zone,
 }
 input_path, out = map(Path, sys.argv[1:])
 source = input_path.read_text()

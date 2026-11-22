@@ -5,6 +5,7 @@
 ROCK_RAW(lcd_update)
 ROCK_RAW(lcd_update_rect)
 ROCK_RAW(lcd_clear_display)
+ROCK_RAW(lcd_clear_viewport)
 ROCK_DIRECT(lcd_getstringsize)
 ROCK_RAW(lcd_putsxy)
 ROCK_RAW(lcd_putsxyf)
@@ -62,6 +63,29 @@ ROCK_DIRECT(sleep)
 ROCK_DIRECT(yield)
 ROCK_DIRECT(reset_poweroff_timer)
 ROCK_SLOT(__typeof__(send_event) *send_event, send_event, rock_send_event)
+
+/* Foreground workers and timer dispatch */
+ROCK_DIRECT(rock_worker_start)
+ROCK_DIRECT(rock_worker_stopping)
+ROCK_DIRECT(rock_worker_join)
+ROCK_DIRECT(rock_timer_start)
+ROCK_DIRECT(rock_timer_dispatch)
+ROCK_DIRECT(rock_timer_stop)
+
+/* Exclusive VPU decoder, NULL on the simulator. */
+ROCK_SLOT(const struct hw_h264_api *hw_h264, hw_h264, ROCK_H264_API)
+#ifdef HAVE_HW_H264
+ROCK_DIRECT(sound_unit)
+ROCK_DIRECT(sound_val2phys)
+ROCK_RAW(lcd_blit_yuv)
+#endif
+
+/* Foreground PCM producer */
+ROCK_DIRECT(rock_stream_open)
+ROCK_DIRECT(rock_stream_submit)
+ROCK_DIRECT(rock_stream_pending)
+ROCK_DIRECT(rock_stream_pause)
+ROCK_DIRECT(rock_stream_close)
 
 /* Playback */
 ROCK_DIRECT(audio_status)
@@ -139,6 +163,8 @@ ROCK_SLOT(struct dirinfo (*dir_get_info)(DIR *, struct DIRENT *), dir_get_info, 
 ROCK_SLOT(bool (*plugin_usb_taken)(void), plugin_usb_taken, rock_usb_taken)
 ROCK_SLOT(void *(*plugin_get_buffer)(size_t *), plugin_get_buffer, rock_get_buffer)
 ROCK_SLOT(size_t (*plugin_reserve_buffer)(size_t), plugin_reserve_buffer, rock_reserve_buffer)
+ROCK_SLOT(void *(*plugin_claim_scratch)(size_t, size_t, size_t *),
+          plugin_claim_scratch, rock_claim_scratch)
 ROCK_SLOT(const char *(*plugin_get_current_filename)(void),
           plugin_get_current_filename, rock_get_current_filename)
 ROCK_SLOT(volatile const long *current_tick, current_tick, &current_tick)

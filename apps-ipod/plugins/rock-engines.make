@@ -33,3 +33,6 @@ $(ROCK_OUT)/modules/games/goban.rock: $(addprefix $(ROCK_OBJECTS)/lib/,configfil
 $(eval $(call rock_module_bitmaps,games/chessbox,chessbox_pieces))
 
 -include $(foreach engine,$(ROCK_ENGINES),$(wildcard $(ROCK_OBJECTS)/$(notdir $(engine))/*.d))
+
+include $(APPSDIR)/plugins/rockboy-compat.make
+include $(APPSDIR)/plugins/zxbox-compat.make

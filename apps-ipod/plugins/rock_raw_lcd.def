@@ -2,6 +2,7 @@
 ROCK_RAW_VOID(lcd_update, (void), ())
 ROCK_RAW_VOID(lcd_update_rect, (int x, int y, int w, int h), (x, y, w, h))
 ROCK_RAW_VOID(lcd_clear_display, (void), ())
+ROCK_RAW_VOID(lcd_clear_viewport, (void), ())
 ROCK_RAW_VOID(lcd_puts, (int x, int y, const unsigned char *s), (x, y, s))
 ROCK_RAW_VOID(lcd_putsxy, (int x, int y, const unsigned char *s), (x, y, s))
 ROCK_RAW_VALUE(bool, lcd_puts_scroll,
@@ -32,6 +33,11 @@ ROCK_RAW_VOID(lcd_mono_bitmap,
 ROCK_RAW_VOID(lcd_mono_bitmap_part,
               (const unsigned char *src, int sx, int sy, int stride,
                int x, int y, int w, int h), (src, sx, sy, stride, x, y, w, h))
+#ifdef HAVE_HW_H264
+ROCK_RAW_VOID(lcd_blit_yuv,
+              (unsigned char * const src[3], int sx, int sy, int stride,
+               int x, int y, int w, int h), (src, sx, sy, stride, x, y, w, h))
+#endif
 ROCK_RAW_VOID(lcd_set_backdrop, (fb_data *backdrop), (backdrop))
 ROCK_RAW_VOID(lcd_set_background, (unsigned color), (color))
 ROCK_RAW_VOID(lcd_set_foreground, (unsigned color), (color))

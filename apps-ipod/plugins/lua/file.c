@@ -37,7 +37,9 @@ bool lua_puzzle_path(const char *path)
 
 static bool writable(const char *path)
 {
-    return !rb->strcmp(path, GAMES "picross.sav") ||
+    return !rb->strcmp(path, PLUGIN_APPS_DATA_DIR "/stopwatch-lua.dat") ||
+           !rb->strcmp(path, PLUGIN_DEMOS_DATA_DIR "/hello-lua.txt") ||
+           !rb->strcmp(path, GAMES "picross.sav") ||
            !rb->strcmp(path, GAMES "pixel-painter.save") ||
            !rb->strcmp(path, GAMES "pixel-painter.score") ||
            (lua_puzzle_path(path) && !rb->strncmp(path, PUZZLES "user_freedraw_",

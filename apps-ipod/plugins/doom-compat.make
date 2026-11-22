@@ -1,7 +1,7 @@
 # RockDoom. GNU GPL version 2 or later.
 ROCK_DOOM_SRC := $(call preprocess,$(ROCK_SRC)/doom/SOURCES)
 ROCK_DOOM_OBJ := $(patsubst $(ROCK_SRC)/doom/%.c,$(ROCK_OBJECTS)/doom/%.o,$(ROCK_DOOM_SRC))
-ROCK_DOOM_STAGED := i_system.c i_sound.c i_video.c rockdoom.c m_menu.c z_zone.c
+ROCK_DOOM_STAGED := d_main.c i_system.c i_sound.c i_video.c rockdoom.c m_menu.c m_misc.c z_zone.c
 ROCK_DOOM_FLAGS = $(ROCK_FLAGS) -I$(ROCK_SRC)/doom \
     -include $(APPSDIR)/plugins/doom-build.h -fgnu89-inline \
     -fno-strict-aliasing -Wno-strict-prototypes
@@ -10,6 +10,8 @@ $(addprefix $(ROCK_OUT)/staged/doom/,$(ROCK_DOOM_STAGED)): $(ROCK_OUT)/staged/do
     $(ROCK_SRC)/doom/% $(APPSDIR)/plugins/stage-doom.py
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(word 2,$^) $< $@
+
+$(ROCK_OUT)/staged/doom/i_sound.c: $(APPSDIR)/plugins/doom-stream.inc
 
 $(addprefix $(ROCK_OBJECTS)/doom/,$(ROCK_DOOM_STAGED:.c=.o)): $(ROCK_OBJECTS)/doom/%.o: \
     $(ROCK_OUT)/staged/doom/%.c $(ROCK_FINGERPRINT)

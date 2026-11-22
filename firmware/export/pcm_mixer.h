@@ -78,6 +78,9 @@ enum pcm_mixer_channel
 #ifndef HAVE_HARDWARE_BEEP
     PCM_MIXER_CHAN_BEEP,
 #endif
+#ifdef ASTRAPOD_ROCK_COMPAT
+    PCM_MIXER_CHAN_ROCK_STREAM,
+#endif
     /* Add new channel indexes above this line */
     PCM_MIXER_NUM_CHANNELS,
 };
@@ -161,6 +164,7 @@ unsigned int mixer_get_frequency(void);
 #ifdef ASTRAPOD_ROCK_COMPAT
 void mixer_click_play(const void *samples, size_t size, unsigned int rate);
 void mixer_click_stop(void);
+void mixer_discard_plugin_prefetch(void);
 #endif
 
 #endif /* PCM_MIXER_H */

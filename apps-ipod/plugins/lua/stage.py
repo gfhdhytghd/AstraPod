@@ -53,7 +53,8 @@ def graphics(text):
         luaL_error(L, "Invalid image dimensions");
     pixel_to_native(width, height, &w_native, &h_native);''')
     required = {
-        "lcd_update", "lcd_clear_display", "lcd_putsxy", "lcd_puts_scroll",
+        "lcd_update", "lcd_clear_display", "lcd_putsxy", "lcd_puts", "lcd_puts_scroll",
+        "clear_viewport", "set_viewport", "lcd_bitmap_part",
         "lcd_scroll_stop", "font_getstringsize", "lcd_framebuffer",
         "lcd_set_foreground", "lcd_set_background", "lcd_get_foreground",
         "lcd_get_background", "lcd_update_rect", "lcd_drawrect", "lcd_drawline",
@@ -66,8 +67,59 @@ def graphics(text):
     helpers = (
         re.search(r"static const unsigned char \* lcd_putshelper.*?\n}\n", body, re.S)[0]
         + re.search(r"static void checkint_arr.*?\n}\n", body, re.S)[0]
+        + re.search(r"static int check_tablevalue_def\(.*?\n}\n", body, re.S)[0]
+        + re.search(r"static int check_tablevalue\(.*?\n}\n", body, re.S)[0]
     )
     functions = dict(re.findall(r"^RB_WRAP\((\w+)\)\n(\{.*?^\})", body, re.M | re.S))
+    functions["lcd_bitmap_part"] = """{
+    struct rocklua_image *source = rli_checktype(L, 1);
+    int values[7];
+    checkint_arr(L, values, 2, ARRAYLEN(values));
+    int sx = values[0], sy = values[1], stride = values[2];
+    int x = values[3], y = values[4], w = values[5], h = values[6];
+    if (sx < 0 || sy < 0 || w <= 0 || h <= 0 ||
+        stride != source->stride || w > source->width || h > source->height ||
+        sx > source->width - w || sy > source->height - h ||
+        x < -LCD_WIDTH || x > LCD_WIDTH || y < -LCD_HEIGHT || y > LCD_HEIGHT)
+        return luaL_error(L, "Invalid bitmap bounds");
+    rb->lcd_bitmap_part(source->data, sx, sy, stride, x, y, w, h);
+    return 0;
+}"""
+    functions["set_viewport"] = """{
+    static struct viewport viewport;
+    rb->lcd_scroll_stop();
+    if (lua_isnoneornil(L, 1))
+    {
+        rb->lcd_set_viewport(NULL);
+        return 0;
+    }
+    luaL_checktype(L, 1, LUA_TTABLE);
+    int x = check_tablevalue(L, "x", 1);
+    int y = check_tablevalue(L, "y", 1);
+    int width = check_tablevalue(L, "width", 1);
+    int height = check_tablevalue(L, "height", 1);
+    if (x < 0 || y < 0 || x >= LCD_WIDTH || y >= LCD_HEIGHT ||
+        width <= 0 || height <= 0 ||
+        width > LCD_WIDTH - x || height > LCD_HEIGHT - y)
+        return luaL_error(L, "Invalid viewport bounds");
+
+    rb->viewport_set_defaults(&viewport, SCREEN_MAIN);
+    viewport.x = x;
+    viewport.y = y;
+    viewport.width = width;
+    viewport.height = height;
+    int font = check_tablevalue_def(L, "font", 1, FONT_UI);
+    if (font != FONT_UI && font != FONT_SYSFIXED)
+        return luaL_error(L, "Unsupported viewport font");
+    viewport.font = font == FONT_UI ? rb->screens[SCREEN_MAIN]->getuifont() : font;
+    viewport.fg_pattern = check_tablevalue_def(L, "fg_pattern", 1,
+                                              rb->lcd_get_foreground());
+    viewport.bg_pattern = check_tablevalue_def(L, "bg_pattern", 1,
+                                              rb->lcd_get_background());
+    viewport.drawmode = DRMODE_SOLID;
+    rb->lcd_set_viewport(&viewport);
+    return 0;
+}"""
     functions["lcd_framebuffer"] = """{
     rb->lcd_set_viewport(NULL);
     struct viewport vp;

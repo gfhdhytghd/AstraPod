@@ -12,6 +12,7 @@
 #include "action.h"
 #include "core_alloc.h"
 #include "core_keymap.h"
+#include "plugins/rock_keymap_format.h"
 
 /*#define LOGF_ENABLE*/
 #include "logf.h"
@@ -28,10 +29,11 @@ static int open_key_remap(const char *filename, int *countp)
         return fd;
 
     size_t fsize = ffilesize(fd);
-    int count = fsize / sizeof(struct button_mapping);
-    if (count == 0 || (size_t)(count * sizeof(struct button_mapping)) != fsize)
+    size_t count = fsize / sizeof(struct button_mapping);
+    if (count < 2 || count > ROCK_KEYMAP_MAX_ENTRIES + 1 ||
+        fsize % sizeof(struct button_mapping) != 0)
     {
-        logf("core_keyremap: bad filesize %d / %lu", count, (unsigned long)fsize);
+        logf("core_keyremap: bad filesize %lu", (unsigned long)fsize);
         goto error;
     }
 
@@ -44,13 +46,13 @@ static int open_key_remap(const char *filename, int *countp)
 
     if (header.action_code != KEYREMAP_VERSION ||
         header.button_code != KEYREMAP_HEADERID ||
-        header.pre_button_code != count)
+        header.pre_button_code != (int)count)
     {
-        logf("core_keyremap: bad header %d", count);
+        logf("core_keyremap: bad header %d", (int)count);
         goto error;
     }
 
-    *countp = count - 1;
+    *countp = (int)count - 1;
     return fd;
 
   error:
@@ -67,17 +69,21 @@ int INIT_ATTR core_load_key_remap(const char *filename)
 
     size_t bufsize = count * sizeof(struct button_mapping);
     int handle = core_alloc(bufsize);
-    if (handle > 0)
+    if (handle <= 0)
     {
-        void *data = core_get_data_pinned(handle);
-
-        if (read(fd, data, bufsize) == (ssize_t)bufsize)
-            count = action_set_keymap_handle(handle, count);
-
-        core_put_data_pinned(data);
+        close(fd);
+        return -6;
     }
 
+    void *data = core_get_data_pinned(handle);
+    ssize_t bytes = read(fd, data, bufsize);
+    core_put_data_pinned(data);
     close(fd);
-    return count;
+    if (bytes != (ssize_t)bufsize)
+    {
+        core_free(handle);
+        return -1;
+    }
+    return action_set_keymap_handle(handle, count);
 }
 

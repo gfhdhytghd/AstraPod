@@ -31,6 +31,9 @@
 #include "pcm-internal.h"
 #include "pcm_mixer.h"
 #include "pcm_sw_volume.h"
+#ifdef ASTRAPOD_ROCK_COMPAT
+#include "plugins/rock_stream.h"
+#endif
 
 /**
  * Aspects implemented in the target-specific portion:
@@ -356,6 +359,10 @@ bool pcm_switch_sink(enum pcm_sink_ids sink)
     old_sink->ops.lock();
     new_sink->ops.lock();
 
+#ifdef ASTRAPOD_ROCK_COMPAT
+    rock_stream_revoke();
+    mixer_discard_plugin_prefetch();
+#endif
     /* update sink index */
     cur_sink = sink;
     /* synchronize frequency */

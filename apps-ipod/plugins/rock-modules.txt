@@ -13,6 +13,7 @@ apps/dict
 apps/disktidy
 apps/eq_optimizer
 apps/file_picker
+apps/h264_player
 apps/imageviewer
 apps/keybox
 apps/lamp
@@ -22,6 +23,8 @@ apps/lrcplayer
 apps/main_menu_config
 apps/md5sum
 apps/metronome
+apps/midi
+apps/mikmod
 apps/open_plugins
 apps/otp
 apps/periodic_table
@@ -90,6 +93,7 @@ games/reversi
 games/robotfindskitten
 games/rockblox
 games/rockblox1d
+games/rockboy
 games/sgt_puzzles/sgt-blackbox
 games/sgt_puzzles/sgt-bridges
 games/sgt_puzzles/sgt-cube
@@ -122,6 +126,7 @@ games/sgt_puzzles/sgt-signpost
 games/sgt_puzzles/sgt-singles
 games/sgt_puzzles/sgt-sixteen
 games/sgt_puzzles/sgt-slant
+games/sgt_puzzles/sgt-solo
 games/sgt_puzzles/sgt-slide
 games/sgt_puzzles/sgt-sokoban
 games/sgt_puzzles/sgt-tents
@@ -143,6 +148,7 @@ games/sudoku
 games/superdom
 games/wormlet
 games/xobox
+games/zxbox
 viewers/chip8
 viewers/lua
 viewers/mp3_encoder

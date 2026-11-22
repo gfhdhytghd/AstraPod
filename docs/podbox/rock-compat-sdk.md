@@ -164,11 +164,15 @@ precision for its average bitrate and playlist duration.
 
 ## SDK boundaries
 
-- A plugin enters from the UI thread and returns before another plugin launches.
+- A plugin owns the UI until its entry returns.
   The loader holds the app scratch lease from load through unload.
   `plugin_get_buffer` exposes the aligned tail. `plugin_reserve_buffer`
-  reserves space until exit and returns the remaining size. The arena also holds a copy of the
-  caller's framebuffer. Codec IRAM and the playback pool remain available.
+  reserves space until exit and returns the remaining size. Use
+  `plugin_claim_scratch(minimum, preferred, &granted)` to reserve aligned
+  storage and get its address in one call. It returns NULL and zero bytes
+  if the remaining tail is smaller than the minimum. Reserve before
+  retaining a pointer from `plugin_get_buffer`. The arena also holds the
+  caller's framebuffer. The codec and playback pools keep their own storage.
 - Use the native menu, list, yes/no, keyboard, option and splash slots to
   present AstraPod widgets. A list keeps its native layout and selection
   across draw and action calls. A raw LCD slot releases the list before
@@ -359,10 +363,109 @@ requested by the device. The host routes the first registration for each
 name and releases it when its companion exits. The bundled Echo companion
 uses `astrapod.echo`. See the desktop Input Plugins guide for setup.
 
+## Workers, timers and audio
+
+Create up to two workers with `rock_worker_start(run, context, stack, bytes)`.
+The returned ID is zero on failure. Give each worker a non-overlapping
+long-aligned stack that stays valid until `rock_worker_join(id)` returns.
+Workers run on the foreground core. Use them for computation over owned
+memory and call `rock_worker_stopping()` in each loop and each retry.
+Return when it becomes true. Let the foreground thread own the UI, file
+handles and PCM calls. Workers may sleep or yield. A worker must not call
+the plugin CRT's `exit` or wait for the foreground thread during shutdown.
+If the foreground joins a worker early, signal the worker's own finish
+condition first. The loader requests stop and joins outstanding workers
+on every exit and before USB storage takeover.
+
+Use `rock_timer_start(cycles, callback, context)` to claim the hardware
+timer when available. The firmware counts ticks. Call
+`rock_timer_dispatch(limit)` from the main loop to deliver up to that
+many ticks. Dispatch invokes the callback on the foreground thread.
+SDL rounds the requested period up to whole milliseconds. Applications
+that need interrupt latency must use a firmware service. Call
+`rock_timer_stop()` to discard queued ticks and release the timer.
+Callbacks may stop their timer. Keep callback execution short.
+
+Use `rock_stream_open()` for copied PCM playback. It returns the built-in
+sink's rate or zero. Stop native playback before launching a player
+that requires PCM. Modules can fall back to silent operation if the
+sink is busy. Submit whole stereo signed 16-bit frames in native byte
+order. Each submission accepts up to `ROCK_STREAM_BLOCK_BYTES` bytes.
+The queue has `ROCK_STREAM_QUEUE_SIZE` blocks. Reuse the source buffer
+after `rock_stream_submit()` returns. Poll `rock_stream_pending()` for
+the count, including the current block, and wait outside the callback.
+A negative count indicates that playback is unavailable. Native playback,
+recording, USB takeover and sink changes revoke the stream. Pause with
+`rock_stream_pause(true)` and resume with `rock_stream_pause(false)`.
+The PCM mixer can finish its current output frame after pause or close.
+Call `rock_stream_close()` to discard the queue. The loader also revokes
+it before unload. The mixer calls firmware callbacks only.
+
+The alternate CRT built with `ROCK_REQUEST_LARGE_STACK` requests an
+80 KiB foreground stack. It runs the entry and CRT cleanup on the same
+stack and rejoins the caller before unload. This profile is for modules
+such as Solo that have deep synchronous call stacks. It uses the same
+UI and lifecycle APIs. Use a standard-stack launcher for an overlay
+handoff.
+
+## Tracker and MIDI playback
+
+Open **Plugins > Applications > mikmod** and choose an uncompressed
+four-channel ProTracker `M.K.` MOD of up to 512 KiB. Use Play to pause
+or resume, Left or Right to change position, and Menu to return.
+Selecting a MOD in Files still opens it in the native music player.
+
+Open **Plugins > Applications > midi** and choose a Standard MIDI File.
+The player accepts format 0 and 1 with ticks per quarter note, up to
+32 tracks and 512 KiB. It accepts tempo changes, running status, notes,
+program changes and channel volume. The built-in instruments use four
+original synthesized waveforms and a synthesized noise drum. The
+instruments ship under GPL-2.0-or-later with the player source. The
+player does not require a Gravis patch set. Use Play to pause or resume
+and Menu to return.
+
 ## Optional RockDoom
 
-Set `ROCK_DOOM=1` when building and packaging ipod6g. Place a
-legally obtained `doom1.wad` and `rockdoom.wad` in `/.rockbox/doom`.
-Open **Plugins > Games > doom**. This build runs in the foreground
-without game audio. The archive contains the launcher and DRAM
-overlay. Supply the WAD files separately.
+Set `ROCK_DOOM=1` when building and packaging ipod6g. Place
+`rockdoom.wad` and a compatible base WAD, such as `doom1.wad`, in
+`/.rockbox/doom/`. Open **Plugins > Games > doom**. The module plays WAD
+sound effects through the built-in sink when it is free. Enable or
+disable effects from **Options > Sound** before starting a game.
+Supply the WAD files separately. The archive contains the launcher
+and DRAM overlay.
+
+## H.264 video on iPod Classic
+
+Open **Plugins > Applications > h264_player** and choose an MP4 or M4V.
+Use progressive H.264 Baseline up to Level 3.0, at most 30 fps and a
+maximum of 640×480. The video tables and decoder must fit the available
+plugin scratch space. A 320×240 clip leaves room for the index. Use Play
+to pause or resume, Left or Right to seek to a keyframe, and Menu to
+return to Applications. USB storage stops the decoder before the plugin
+releases its workspace.
+
+The VPU backend is available on ipod6g. The SDL entry reports that the
+decoder is unavailable. This player displays video only. It leaves the
+native audio and codec thread available for music.
+
+## Rockboy
+
+Open **Plugins > Games > rockboy** and choose an uncompressed GB or GBC
+ROM. A ROM must match the size in its header and fit plugin scratch.
+The current maximum ROM size is 2 MiB. Game audio uses the built-in
+PCM stream when available. Menu opens Resume and Quit. Use the wheel
+for Up and Down, Left and Right to move, Select for A, Play for Start,
+Select+Left for B and Select+Right for Select. This build keeps
+cartridge RAM in memory for the game session.
+
+## ZXBox and Lua examples
+
+Open **Plugins > Games > zxbox** and choose a 48K `.sna` snapshot.
+Use the wheel, Left, Right and Select as Kempston joystick input.
+Menu opens Resume and Quit. Snapshot saves and tape formats are
+outside this adapter. A busy built-in sink leaves the game silent.
+
+The Lua viewer installs Hello World and Viewport Test in Demos.
+Select either script from its plugin directory. Lua Stopwatch appears
+in Applications. It uses the wheel player's physical buttons and
+stores laps in `stopwatch-lua.dat`, separate from the native stopwatch.

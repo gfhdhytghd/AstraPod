@@ -164,6 +164,12 @@ screens/browse/browser_disk.c
 plugins/rock_browser.c
 plugins/rock_files.c
 plugins/rock_runtime.c
+plugins/rock_execution.c
+plugins/rock_large_stack.c
+#ifdef HAVE_HW_H264
+plugins/rock_h264.c
+#endif
+plugins/rock_stream.c
 plugins/rock_podlink.c
 #ifdef HAVE_USB_PODLINK
 plugins/rock_podlink_worker.c

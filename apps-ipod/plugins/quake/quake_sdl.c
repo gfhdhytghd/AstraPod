@@ -9,8 +9,31 @@ static SDL_Surface display;
 static SDL_Event events[32];
 static unsigned int first, queued;
 static bool active;
-static SDLKey held_strafe;
-static long strafe_tick;
+static unsigned int held_buttons;
+#ifdef HAS_BUTTON_HOLD
+static bool held_hold;
+#endif
+
+/* The click wheel pad of Rockbox's SDL port: Menu and Play are up and
+ * down, Select is Enter and the wheel strafes with A and D. */
+static const struct
+{
+    unsigned int button;
+    SDLKey key;
+} pad[] = {
+    { BUTTON_SELECT, SDLK_RETURN },
+    { BUTTON_MENU, SDLK_UP },
+    { BUTTON_PLAY, SDLK_DOWN },
+    { BUTTON_LEFT, SDLK_LEFT },
+    { BUTTON_RIGHT, SDLK_RIGHT },
+};
+
+static struct strafe
+{
+    SDLKey key;
+    bool held;
+    long release;
+} strafe[] = { { .key = SDLK_a }, { .key = SDLK_d } };
 
 int quake_sdl_init(unsigned int flags)
 {
@@ -71,7 +94,7 @@ void quake_sdl_update(SDL_Surface *surface, int x, int y, int w, int h)
 
 static void add_key(SDLKey key, bool down)
 {
-    if (queued < ARRAYLEN(events))
+    if (active && queued < ARRAYLEN(events))
     {
         unsigned int next = (first + queued++) % ARRAYLEN(events);
         events[next] = (SDL_Event) {
@@ -79,6 +102,30 @@ static void add_key(SDLKey key, bool down)
             .key = { .keysym = { key }, .state = down }
         };
     }
+}
+
+bool quake_system_event(long button)
+{
+    if (button != SYS_USB_CONNECTED && button != SYS_USB_CONFIRM &&
+        !(button & SYS_EVENT))
+        return false;
+
+    long result = rb->default_event_handler(button);
+    if (result == SYS_USB_CONNECTED)
+        quake_quit(PLUGIN_USB_CONNECTED);
+    if (result == SYS_POWEROFF || result == SYS_REBOOT)
+        quake_quit(PLUGIN_POWEROFF);
+    return true;
+}
+
+/* Each wheel step holds a strafe key, which lifts HZ / 25 after the last
+ * step in that direction. */
+static void strafe_step(struct strafe *strafe, long now)
+{
+    if (!strafe->held)
+        add_key(strafe->key, true);
+    strafe->held = true;
+    strafe->release = now + HZ / 25;
 }
 
 void quake_check_events(void)
@@ -89,97 +136,62 @@ void quake_check_events(void)
         return;
     last_poll = now;
 
-    /* The wheel holds a strafe key until it stops turning. */
-    if (held_strafe && (key_dest != key_game || now - strafe_tick > HZ / 8) &&
-        queued < ARRAYLEN(events))
+    /* The queue only carries the wheel, remote volume and system events;
+     * the buttons below are read as held state. */
+    long button;
+    while ((button = rb->button_get(false)) != BUTTON_NONE)
     {
-        add_key(held_strafe, false);
-        held_strafe = 0;
-    }
-
-    unsigned int budget = ARRAYLEN(events);
-    while (budget--)
-    {
-        long button = rb->button_get(false);
-        if (button == BUTTON_NONE)
-            return;
-
-        if (button == SYS_USB_CONNECTED || button == SYS_USB_CONFIRM ||
-            (button & SYS_EVENT))
-        {
-            long result = rb->default_event_handler(button);
-            if (result == SYS_USB_CONNECTED)
-                quake_quit(PLUGIN_USB_CONNECTED);
-            if (result == SYS_POWEROFF || result == SYS_REBOOT)
-                quake_quit(PLUGIN_POWEROFF);
+        if (quake_system_event(button) || (button & BUTTON_REL))
             continue;
-        }
-
-        bool released = (button & BUTTON_REL) != 0;
-        bool repeat = (button & BUTTON_REPEAT) != 0;
-        long key = button & ~(BUTTON_REL | BUTTON_REPEAT);
-        if (!released || repeat)
+        switch (button & ~BUTTON_REPEAT)
         {
-            switch (key)
-            {
-                case BUTTON_MULTIMEDIA_VOLUME_UP:
+            case BUTTON_SCROLL_BACK:
+                strafe_step(&strafe[0], now);
+                break;
+            case BUTTON_SCROLL_FWD:
+                strafe_step(&strafe[1], now);
+                break;
+            case BUTTON_MULTIMEDIA_VOLUME_UP:
 #ifdef BUTTON_RC_VOL_UP
-                case BUTTON_RC_VOL_UP:
+            case BUTTON_RC_VOL_UP:
 #endif
-                    rb->adjust_volume(1);
-                    continue;
-                case BUTTON_MULTIMEDIA_VOLUME_DOWN:
+                rb->adjust_volume(1);
+                break;
+            case BUTTON_MULTIMEDIA_VOLUME_DOWN:
 #ifdef BUTTON_RC_VOL_DOWN
-                case BUTTON_RC_VOL_DOWN:
+            case BUTTON_RC_VOL_DOWN:
 #endif
-                    rb->adjust_volume(-1);
-                    continue;
-            }
+                rb->adjust_volume(-1);
+                break;
         }
-
-        if (key == BUTTON_MENU && repeat && !released)
-            quake_quit(PLUGIN_OK);
-
-        SDLKey sym;
-        switch (key)
-        {
-            case BUTTON_MENU: sym = SDLK_ESCAPE; break;
-            case BUTTON_SELECT: sym = SDLK_RETURN; break;
-            case BUTTON_LEFT: sym = SDLK_LEFT; break;
-            case BUTTON_RIGHT: sym = SDLK_RIGHT; break;
-            case BUTTON_PLAY: sym = SDLK_UP; break;
-            case BUTTON_SCROLL_BACK: sym = SDLK_UP; break;
-            case BUTTON_SCROLL_FWD: sym = SDLK_DOWN; break;
-            default: continue;
-        }
-        if (!active)
-            continue;
-        if ((key == BUTTON_SCROLL_BACK || key == BUTTON_SCROLL_FWD) &&
-            key_dest == key_game)
-        {
-            SDLKey strafe = key == BUTTON_SCROLL_BACK ? SDLK_a : SDLK_d;
-            if (released)
-                continue;
-            if (held_strafe != strafe && queued + 2 <= ARRAYLEN(events))
-            {
-                if (held_strafe)
-                    add_key(held_strafe, false);
-                add_key(strafe, true);
-                held_strafe = strafe;
-            }
-            strafe_tick = now;
-        }
-        else if (key == BUTTON_SCROLL_BACK || key == BUTTON_SCROLL_FWD)
-        {
-            if (!released && queued + 2 <= ARRAYLEN(events))
-            {
-                add_key(sym, true);
-                add_key(sym, false);
-            }
-        }
-        else
-            add_key(sym, !released);
     }
+    for (unsigned int i = 0; i < ARRAYLEN(strafe); i++)
+    {
+        if (strafe[i].held && TIME_AFTER(now, strafe[i].release))
+        {
+            add_key(strafe[i].key, false);
+            strafe[i].held = false;
+        }
+    }
+
+#ifdef HAS_BUTTON_HOLD
+    /* Hold on presses Escape and Hold off releases it. */
+    bool hold = rb->button_hold();
+    if (hold != held_hold)
+        add_key(SDLK_ESCAPE, hold);
+    held_hold = hold;
+#endif
+
+    unsigned int buttons = rb->button_status();
+    unsigned int released = ~buttons & held_buttons;
+    unsigned int pressed = buttons & ~held_buttons;
+    held_buttons = buttons;
+    for (unsigned int i = 0; i < ARRAYLEN(pad); i++)
+        if (released & pad[i].button)
+            add_key(pad[i].key, false);
+    for (unsigned int i = 0; i < ARRAYLEN(pad); i++)
+        if (pressed & pad[i].button)
+            add_key(pad[i].key, true);
 }
 
 int quake_sdl_poll(SDL_Event *event)

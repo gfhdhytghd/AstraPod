@@ -482,10 +482,14 @@ Place an original `pak0.pak`, shareware or registered, in
 `/.rockbox/quake/id1/`, with `pak1.pak` beside it for a registered copy.
 Stop native playback, then open **Plugins > Games > quake**. The archive
 contains the engine module only. A missing, truncated or damaged pak shows
-the data folder and returns to Games. Quake writes `config.cfg` and saves
-in the same folder. Play moves forward, Left and Right turn, Select fires,
-and the wheel strafes. Menu opens the Quake menu. Hold Menu to return to
-Games.
+the data folder and returns to Games after three seconds, or at once on
+Menu. Quake writes `config.cfg` and saves in the same folder.
+
+The buttons are those of Rockbox's own Quake. In a level, Menu moves
+forward, Play changes weapon and jumps, Left and Right turn, Select fires
+and the wheel strafes. Turn Hold on, then off, to open the Quake menu. In
+the menu, Menu and Play move up and down, Select confirms and Hold goes
+back. To return to Games, choose **Quit** and press Select.
 
 The engine runs from a 12 MiB core allocation. The module claims it once
 through `quake_heap_acquire()`, which returns NULL while native playback

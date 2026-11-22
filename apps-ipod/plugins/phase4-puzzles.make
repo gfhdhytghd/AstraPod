@@ -63,7 +63,13 @@ $(ROCK_OBJECTS)/sgt-$(1).o: $(2) $(ROCK_FINGERPRINT) $(ROCK_TATHAM_HEADERS)
 	$$(call PRINTS,CC $$(@F))$$(CC) $$(ROCK_TATHAM_FLAGS) -MMD -MP -c $$< -o $$@
 $(ROCK_OUT)/modules/games/sgt_puzzles/sgt-$(1).rock: $(ROCK_OBJECTS)/puzzles/help/$(1).o
 endef
-$(foreach src,$(ROCK_TATHAM_GAMES),$(eval $(call rock_tatham_game,$(basename $(notdir $(src))),$(src))))
+$(foreach src,$(filter-out %/solo.c,$(ROCK_TATHAM_GAMES)),$(eval $(call rock_tatham_game,$(basename $(notdir $(src))),$(src))))
+
+$(eval $(call rock_tatham_game,solo,$(ROCK_OUT)/staged/puzzles/src/solo.c))
+$(ROCK_OBJECTS)/plugin_crt0_large_stack.o: $(ROCK_SRC)/plugin_crt0.c $(ROCK_FINGERPRINT)
+	$(SILENT)mkdir -p $(@D)
+	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -DROCK_REQUEST_LARGE_STACK -MMD -MP -c $< -o $@
+$(ROCK_OUT)/modules/games/sgt_puzzles/sgt-solo.rock: $(ROCK_OBJECTS)/plugin_crt0_large_stack.o
 
 $(ROCK_OUT)/staged/puzzles/%.c: $(ROCK_TATHAM_SRC)/%.c \
     $(APPSDIR)/plugins/stage-phase4-puzzles.py

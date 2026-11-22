@@ -8,6 +8,8 @@
 
 #include "config.h"
 #include "plugins/rock_pitch.h"
+#include "plugins/rock_stream.h"
+#include "plugins/rock_execution.h"
 #include "plugins/rock_hid.h"
 #include "plugins/rock_game_io.h"
 #include "plugins/rock_overlay.h"
@@ -156,10 +158,13 @@ struct plugin_api {
 #undef ROCK_DIRECT
 };
 
+#define ROCK_IMAGE_LARGE_STACK (1u << 0)
+
 struct plugin_header {
     struct lc_header lc_hdr;
     uint32_t platform;
     uint32_t header_size;
+    uint32_t flags;
     size_t api_size;
     unsigned char fingerprint[32];
     enum plugin_status (*entry_point)(const void *);
@@ -207,6 +212,12 @@ extern unsigned char plugin_file_end[], plugin_bss_start[];
 #define ROCK_API_STORAGE
 #endif
 
+#ifdef ROCK_REQUEST_LARGE_STACK
+#define ROCK_BUILD_IMAGE_FLAGS ROCK_IMAGE_LARGE_STACK
+#else
+#define ROCK_BUILD_IMAGE_FLAGS 0
+#endif
+
 #define PLUGIN_HEADER \
     const struct plugin_api *rb ROCK_API_STORAGE = NULL; \
     ROCK_HEADER_EXPORT const struct plugin_header __header = { \
@@ -214,6 +225,7 @@ extern unsigned char plugin_file_end[], plugin_bss_start[];
         .platform = CONFIG_PLATFORM, \
         .header_size = sizeof(struct plugin_header), \
         .api_size = sizeof(struct plugin_api), \
+        .flags = ROCK_BUILD_IMAGE_FLAGS, \
         .fingerprint = ROCK_FINGERPRINT, \
         .entry_point = plugin__start, \
         .api = &rb, \

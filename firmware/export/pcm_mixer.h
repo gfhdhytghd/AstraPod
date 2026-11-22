@@ -78,6 +78,9 @@ enum pcm_mixer_channel
 #ifndef HAVE_HARDWARE_BEEP
     PCM_MIXER_CHAN_BEEP,
 #endif
+#ifdef ASTRAPOD_ROCK_COMPAT
+    PCM_MIXER_CHAN_ROCK_STREAM,
+#endif
     /* Add new channel indexes above this line */
     PCM_MIXER_NUM_CHANNELS,
 };

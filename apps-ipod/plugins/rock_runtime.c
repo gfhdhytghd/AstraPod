@@ -1,5 +1,6 @@
 /* AstraPod foreground plugin runtime. GNU GPL version 2 or later. */
 #include "plugins/rock_compat.h"
+#include "plugins/rock_large_stack.h"
 #include "plugins/rock_pitch.h"
 #include "podlink-plugin-test.h"
 #include "usb.h"
@@ -84,6 +85,7 @@ static void rock_media_stop_locked(void)
 
 void rock_media_shutdown(void)
 {
+    rock_stream_revoke();
     rock_pitch_revoke();
     rock_pitch_preview_revoke();
     if (!media_initialized)
@@ -95,6 +97,7 @@ void rock_media_shutdown(void)
 
 void rock_playback_takeover(void)
 {
+    rock_stream_revoke();
     rock_pitch_revoke();
     rock_pitch_preview_revoke();
     if (!media_initialized)
@@ -307,9 +310,10 @@ void rock_usb_takeover(void)
 #ifdef HAVE_PODLINK_PLUGIN_TEST
     podlink_plugin_test_usb_taken();
 #endif
+    rock_media_shutdown();
+    rock_execution_end();
     rock_hid_close();
     rock_podlink_close();
-    rock_media_shutdown();
     rock_flush_settings();
     restore_input_settings();
     usb_taken = true;
@@ -368,9 +372,26 @@ static void *rock_get_buffer(size_t *size)
     return tail_size ? tail : NULL;
 }
 
+static void *rock_claim_scratch(size_t minimum, size_t preferred,
+                                size_t *granted)
+{
+    if (!granted)
+        return NULL;
+    *granted = 0;
+    size_t bytes = MIN(preferred, tail_size) & ~(ROCK_BUFFER_ALIGNMENT - 1);
+    if (usb_taken || !bytes || bytes < minimum)
+        return NULL;
+    void *result = tail;
+    tail += bytes;
+    tail_size -= bytes;
+    *granted = bytes;
+    return result;
+}
+
 static size_t rock_reserve_buffer(size_t size)
 {
-    size = size > tail_size ? tail_size : ALIGN_UP(size, ROCK_BUFFER_ALIGNMENT);
+    size = size >= tail_size ? tail_size :
+           MIN(tail_size, ALIGN_UP(size, ROCK_BUFFER_ALIGNMENT));
     tail += size;
     tail_size -= size;
     return tail_size;
@@ -607,6 +628,7 @@ static bool compatible(const struct plugin_header *header, uint32_t magic)
            header->platform == CONFIG_PLATFORM &&
            header->header_size == sizeof(*header) &&
            header->api_size == sizeof(api) &&
+           (header->flags & ~ROCK_IMAGE_LARGE_STACK) == 0 &&
            !memcmp(header->fingerprint, fingerprint, sizeof(fingerprint));
 }
 
@@ -646,6 +668,75 @@ static bool overlay_header_valid(const void *header, const unsigned char *arena,
 }
 #endif
 
+struct rock_invocation {
+    struct plugin_header *module;
+    const char *path;
+    const char *file;
+    fb_data *saved_pixels;
+    fb_data *widget_pixels;
+    bool shell;
+};
+
+static int invoke_module(void *opaque)
+{
+    const struct rock_invocation *call = opaque;
+#ifdef HAVE_USBSTACK
+    if (usb_exclusive_storage())
+        return PLUGIN_USB_CONNECTED;
+#endif
+    filename = call->path;
+    usb_taken = false;
+    if (!media_initialized)
+    {
+        mutex_init(&media_mutex);
+        media_initialized = true;
+    }
+    mutex_lock(&media_mutex);
+    media_disabled = false;
+    mutex_unlock(&media_mutex);
+#ifdef HAVE_SW_POWEROFF
+    original_sw_poweroff = button_get_sw_poweroff_state();
+#endif
+    rock_pitch_session_open();
+    rock_stream_session_open();
+    rock_execution_begin();
+    rock_begin_settings();
+    rock_display_start(call->saved_pixels, call->widget_pixels);
+    button_clear_pressed();
+    rock_action_reset();
+
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    if (call->shell)
+        podlink_plugin_test_started();
+#else
+    (void)call->shell;
+#endif
+    int result = call->module->entry_point(call->file);
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+    if (call->shell)
+        podlink_plugin_test_stopped();
+#endif
+    rock_media_shutdown();
+    rock_execution_end();
+    rock_hid_close();
+    rock_podlink_close();
+    if (usb_taken)
+        result = PLUGIN_USB_CONNECTED;
+    rock_flush_settings();
+    if (!usb_taken)
+        restore_input_settings();
+    rock_release_plugin_font();
+    rock_close_files();
+    rock_list_discard();
+    button_clear_pressed();
+    rock_display_stop();
+
+    filename = NULL;
+    usb_taken = false;
+
+    return result;
+}
+
 static int run_rock(const char *path, const char *file,
                     unsigned char *arena, size_t capacity,
                     fb_data *saved_pixels, fb_data *widget_pixels, bool shell,
@@ -682,54 +773,20 @@ static int run_rock(const char *path, const char *file,
     tail_size = arena + capacity - tail;
     *module->api = &api;
 
-    filename = path;
-    usb_taken = false;
-    if (!media_initialized)
+    struct rock_invocation call = {
+        module, path, file, saved_pixels, widget_pixels, shell
+    };
+    if (module->flags & ROCK_IMAGE_LARGE_STACK)
     {
-        mutex_init(&media_mutex);
-        media_initialized = true;
+        result = rock_large_stack_launch(invoke_module, &call);
+        if (result == PLUGIN_CHAIN_OVERLAY)
+            result = PLUGIN_ERROR;
     }
-    mutex_lock(&media_mutex);
-    media_disabled = false;
-    mutex_unlock(&media_mutex);
-#ifdef HAVE_SW_POWEROFF
-    original_sw_poweroff = button_get_sw_poweroff_state();
-#endif
-    rock_pitch_session_open();
-    rock_begin_settings();
-    rock_display_start(saved_pixels, widget_pixels);
-    button_clear_pressed();
-    rock_action_reset();
-
-#ifdef HAVE_PODLINK_PLUGIN_TEST
-    if (shell)
-        podlink_plugin_test_started();
-#else
-    (void)shell;
-#endif
-    result = module->entry_point(file);
-#ifdef HAVE_PODLINK_PLUGIN_TEST
-    if (shell)
-        podlink_plugin_test_stopped();
-#endif
-    rock_hid_close();
-    rock_podlink_close();
-    rock_media_shutdown();
-    if (usb_taken)
-        result = PLUGIN_USB_CONNECTED;
-    rock_flush_settings();
-    if (!usb_taken)
-        restore_input_settings();
-    rock_release_plugin_font();
-    rock_close_files();
-    rock_list_discard();
-    button_clear_pressed();
-    rock_display_stop();
-
-    filename = NULL;
-    usb_taken = false;
+    else
+        result = invoke_module(&call);
     tail = NULL;
     tail_size = 0;
+
 
 #if CONFIG_BINFMT == BINFMT_DLOPEN
 unload:

@@ -22,6 +22,8 @@ apps/lrcplayer
 apps/main_menu_config
 apps/md5sum
 apps/metronome
+apps/midi
+apps/mikmod
 apps/open_plugins
 apps/otp
 apps/periodic_table
@@ -122,6 +124,7 @@ games/sgt_puzzles/sgt-signpost
 games/sgt_puzzles/sgt-singles
 games/sgt_puzzles/sgt-sixteen
 games/sgt_puzzles/sgt-slant
+games/sgt_puzzles/sgt-solo
 games/sgt_puzzles/sgt-slide
 games/sgt_puzzles/sgt-sokoban
 games/sgt_puzzles/sgt-tents

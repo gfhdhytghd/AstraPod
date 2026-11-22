@@ -30,3 +30,13 @@ $(ROCK_OUT)/modules/overlays/probe_regular.rock: $(ROCK_OBJECTS)/overlay-probe-p
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,LD $(@F))$(CC) $(ROCK_FLAGS) $(ROCK_LINK) -o $@.elf $(filter %.o %.a,$^) -lgcc
 	$(SILENT)$(ROCK_OUTPUT)
+
+# Foreground execution test image, excluded from the package manifest.
+$(ROCK_OBJECTS)/execution-probe.o: $(TOOLSDIR)/tests/fixtures/rock-execution/probe.c $(ROCK_FINGERPRINT)
+	$(SILENT)mkdir -p $(@D)
+	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
+
+$(ROCK_OUT)/modules/demos/execution_probe.rock: $(ROCK_OBJECTS)/execution-probe.o $(ROCK_OBJECTS)/plugin_crt0.o $(ROCK_LINK_INPUT)
+	$(SILENT)mkdir -p $(@D)
+	$(call PRINTS,LD $(@F))$(CC) $(ROCK_FLAGS) $(ROCK_LINK) -o $@.elf $(filter %.o %.a,$^) -lgcc
+	$(SILENT)$(ROCK_OUTPUT)

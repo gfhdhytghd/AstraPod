@@ -138,6 +138,15 @@ def convert(source, before, after):
     return source.replace(before, after)
 
 
+def solo(source):
+    source = replace(source, "    if (params->c < 2)",
+                     "    if (params->c < 2 || params->r < 1)")
+    return replace(source, """    if ((params->c * params->r) > 31)
+        return "Unable to support more than 31 distinct symbols in a puzzle";""",
+                   """    if ((params->c * params->r) > 16)
+        return "This player supports Solo boards up to 16 by 16";""")
+
+
 def tatham_allocator(source):
     start = source.index("/* We don't load as an overlay anymore")
     end = source.index("void *smalloc", start)
@@ -266,5 +275,5 @@ def tatham_frontend(source):
 if __name__ == "__main__":
     src, out = map(Path, sys.argv[1:])
     adapters = {"sudoku": sudoku, "reversi-gui": reversi, "fractal": fractal,
-                "rockbox": tatham_frontend, "rbmalloc": tatham_allocator}
+                "rockbox": tatham_frontend, "rbmalloc": tatham_allocator, "solo": solo}
     out.write_text(adapters[src.stem](src.read_text()))

@@ -229,6 +229,11 @@ sub make_install {
         glob_install("$src/$t/*", "$userdir/$t");
     }
 
+    if (-d "$src/image-decoders") {
+        glob_mkdir("$userdir/image-decoders") or return 0;
+        glob_install("$src/image-decoders/*.ovl", "$userdir/image-decoders");
+    }
+
     # rest of the files, excluding the binary
     opendir(DIR,$src);
     @files = readdir(DIR);
@@ -481,11 +486,11 @@ sub buildzip {
     find(find_copyfile(qr/\.(rock|ovl|lua)/, abs_path("$temp_dir/rocks/")), 'apps/plugins');
 
     if (-f "rock-compat/modules/apps/imageviewer_compat.rock") {
-        glob_mkdir("$temp_dir/rocks/overlays");
+        glob_mkdir("$temp_dir/image-decoders");
         foreach my $format (qw(bmp jpeg png ppm gif jpegp)) {
             my $overlay = "image_$format.ovl";
             copy("rock-compat/modules/overlays/$overlay",
-                 "$temp_dir/rocks/overlays/$overlay")
+                 "$temp_dir/image-decoders/$overlay")
                 or die "Can't copy image decoder $overlay: $!";
         }
     }

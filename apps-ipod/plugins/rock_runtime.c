@@ -745,8 +745,9 @@ static bool rock_image_decoder_open(const char *name,
     if (i == ARRAYLEN(names))
         return false;
 
-    char path[sizeof(ROCK_OVERLAY_DIR) + sizeof("/image_jpegp.ovl")];
-    snprintf(path, sizeof(path), ROCK_OVERLAY_DIR "/image_%s.ovl", names[i]);
+    char path[sizeof(ROCKBOX_DIR "/image-decoders/image_jpegp.ovl")];
+    snprintf(path, sizeof(path), ROCKBOX_DIR "/image-decoders/image_%s.ovl",
+             names[i]);
 #if CONFIG_BINFMT == BINFMT_ROCK
     struct plugin_header disk_header;
     void *handle = lc_open_checked(path, decoder_base, decoder_capacity,

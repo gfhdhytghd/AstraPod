@@ -484,7 +484,7 @@ The viewer opens BMP, JPEG, progressive JPEG, PNG, PPM and GIF. It can
 move between supported files in the same directory. It uses plugin
 scratch for pixels while native playback continues.
 
-Keep the six `image_*.ovl` files in `/.rockbox/rocks/overlays/`. The
+Keep the six `image_*.ovl` files in `/.rockbox/image-decoders/`. The
 viewer opens one decoder at a time and calls it while the viewer is
 still loaded. Copy the viewer, overlays and firmware from the same
 archive.

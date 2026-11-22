@@ -19,7 +19,7 @@ $(3): $(ROCK_OUT)/staged/%: $(ROCK_SRC)/%
 	$$(SILENT)cp $$< $$@
 endef
 
-ROCK_ENGINES := $(filter games/chessbox games/goban viewers/rockboy viewers/zxbox demos/pictureflow,$(ROCK_MODULES))
+ROCK_ENGINES := $(filter games/chessbox games/goban viewers/rockboy viewers/zxbox,$(ROCK_MODULES))
 rock_engine_sources = $(patsubst $(ROCK_SRC)/%.c,%,$(filter-out %/$(1).c,\
     $(call preprocess,$(ROCK_SRC)/$(1)/SOURCES)))
 rock_engine_headers = $(patsubst $(ROCK_SRC)/%,$(ROCK_OUT)/staged/%,\

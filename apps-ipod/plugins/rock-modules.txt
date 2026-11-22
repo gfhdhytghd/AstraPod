@@ -63,6 +63,7 @@ demos/logo
 demos/matrix
 demos/mosaique
 demos/oscilloscope
+demos/pictureflow
 demos/plasma
 demos/podlink_echo
 demos/rocklife

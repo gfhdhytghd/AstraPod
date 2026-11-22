@@ -407,3 +407,21 @@ ROCK_SLOT(__typeof__(rock_queue_native_handoff) *queue_native_handoff,
 ROCK_SLOT(int (*kbd_input_raw)(char *, int), kbd_input_raw, rock_kbd_input_raw)
 ROCK_SLOT(long (*button_get_with_remote_volume)(void), button_get_with_remote_volume,
           rock_button_get_with_remote_volume)
+
+/* PictureFlow reads the native library and uses native playback. */
+ROCK_DIRECT(rock_pf_db_open)
+ROCK_DIRECT(rock_pf_db_current)
+ROCK_DIRECT(rock_pf_db_name)
+ROCK_DIRECT(rock_pf_tracks_open)
+ROCK_DIRECT(rock_pf_track_next)
+ROCK_DIRECT(rock_pf_art)
+ROCK_DIRECT(rock_pf_cache_read)
+ROCK_DIRECT(rock_pf_cache_write)
+ROCK_DIRECT(rock_pf_confirm_play)
+ROCK_DIRECT(rock_pf_track_info)
+ROCK_DIRECT(rock_pf_catalog)
+ROCK_DIRECT(playlist_create)
+ROCK_DIRECT(playlist_insert_track)
+ROCK_DIRECT(playlist_sync)
+ROCK_DIRECT(playlist_shuffle)
+ROCK_DIRECT(playlist_start)

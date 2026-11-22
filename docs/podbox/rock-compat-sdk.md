@@ -523,3 +523,21 @@ The Lua viewer installs Hello World and Viewport Test in Demos.
 Select either script from its plugin directory. Lua Stopwatch appears
 in Applications. It uses the wheel player's physical buttons and
 stores laps in `stopwatch-lua.dat`, separate from the native stopwatch.
+
+## PictureFlow
+
+Open **Plugins > Demos > PictureFlow** after the Music database has indexed
+your tracks. Scroll through covers with the wheel. Select a cover for its
+track list, then select a track to play the album from that point. Hold
+Menu for PictureFlow settings. Tap Menu to exit.
+
+PictureFlow stores its cover files and settings in `/.rockbox/pictureflow/`.
+**Update cache** refreshes the library and fills missing covers as you browse.
+**Rebuild cache** clears the PictureFlow covers so the worker decodes them
+again. Albums without art show the stock placeholder.
+
+The compatibility build stages the stock renderer and its two bitmaps.
+The album-and-artist index comes from `db_summary`. Track queries validate the
+snapshot and use native `tagcache` album ranges. The slide worker uses the
+foreground module's arena and the SDK worker lease. Album covers in the Music
+menu use their own renderer and cache.

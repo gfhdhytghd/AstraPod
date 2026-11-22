@@ -12,6 +12,10 @@
 #include "plugins/rock_h264_audio.h"
 #include "plugins/rock_execution.h"
 #include "plugins/rock_h264.h"
+#include "plugins/rock_pictureflow.h"
+#ifdef ROCK_FINGERPRINT_PROBE
+#include "database/db_summary.h"
+#endif
 #include "plugins/rock_hid.h"
 #include "plugins/rock_game_io.h"
 #include "plugins/rock_overlay.h"

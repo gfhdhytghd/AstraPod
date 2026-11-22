@@ -38,6 +38,7 @@ $(ROCK_OUT)/rock_fingerprint.h: $(BUILDDIR)/lang_enum.h $(BUILDDIR)/sysfont.h $(
 $(APPSBUILDDIR)/plugins/rock_runtime.o: $(ROCK_OUT)/rock_fingerprint.h
 $(APPSBUILDDIR)/sim/rock_host.o: $(ROCK_OUT)/rock_fingerprint.h
 $(APPSBUILDDIR)/plugins/rock_runtime.o $(APPSBUILDDIR)/plugins/rock_files.o: CFLAGS += $(ROCK_STRICT)
+$(APPSBUILDDIR)/plugins/rock_pictureflow.o: CFLAGS += $(ROCK_STRICT)
 
 # Shell accepts the same installed paths as the bundle, including its opt-in app.
 .PHONY: rock-test-paths-inputs
@@ -239,6 +240,7 @@ $(eval $(call rock_module_bitmaps,games/solitaire,card_deck card_back solitaire_
 $(eval $(call rock_module_bitmaps,games/superdom,superdom_boarditems))
 
 include $(APPSDIR)/plugins/rock-engines.make
+include $(APPSDIR)/plugins/pictureflow-compat.make
 include $(APPSDIR)/plugins/phase4-puzzles.make
 include $(APPSDIR)/plugins/clock-compat.make
 include $(APPSDIR)/plugins/fft-compat.make
@@ -303,7 +305,11 @@ $(ROCK_OUT)/modules/games/superdom.rock: $(addprefix $(ROCK_OBJECTS)/lib/,displa
 $(ROCK_OUT)/modules/apps/metronome.rock: $(FIXEDPOINTLIB)
 $(ROCK_OUT)/modules/apps/pitch_detector.rock: $(addprefix $(ROCK_OBJECTS)/lib/,picture.o helper.o)
 
-$(filter-out %/sgt-solo.rock,$(ROCKS)): $(ROCK_OBJECTS)/plugin_crt0.o
+$(ROCK_OBJECTS)/plugin_crt0_large_stack.o: $(ROCK_SRC)/plugin_crt0.c $(ROCK_FINGERPRINT)
+	$(SILENT)mkdir -p $(@D)
+	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -DROCK_REQUEST_LARGE_STACK -MMD -MP -c $< -o $@
+
+$(filter-out %/sgt-solo.rock %/pictureflow.rock,$(ROCKS)): $(ROCK_OBJECTS)/plugin_crt0.o
 $(ROCKS): $(ROCK_OUT)/modules/%.rock: $(ROCK_LINK_INPUT) $(ROCK_MANIFEST)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,LD $(@F))$(CC) $(ROCK_FLAGS) $(ROCK_LINK) -o $@.elf $(filter %.o,$^) $(filter %.a,$^) -lgcc

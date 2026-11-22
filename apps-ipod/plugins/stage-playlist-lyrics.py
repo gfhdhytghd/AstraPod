@@ -169,8 +169,12 @@ def stage_lrc(text, reader, adapter):
          "            if (!current.id3 || AUDIO_STOP)\n            {\n                current.id3 = NULL;"),
         ("        button = rb->get_action(CONTEXT_TREE, TIMEOUT_BLOCK);",
          "        button = rb->get_action(CONTEXT_TREE, TIMEOUT_BLOCK);\n"
-         "        if (rb->default_event_handler(button) == SYS_USB_CONNECTED)\n"
-         "            return PLUGIN_USB_CONNECTED;\n"
+         "        if (IS_SYSEVENT(button))\n"
+         "        {\n"
+         "            if (rb->default_event_handler(button) == SYS_USB_CONNECTED)\n"
+         "                return PLUGIN_USB_CONNECTED;\n"
+         "            continue;\n"
+         "        }\n"
          "        current.id3 = rb->audio_current_track();\n"
          "        if (!current.id3 || rb->strcmp(current.mp3_file, current.id3->path))\n"
          "            return LRC_GOTO_MAIN;"),

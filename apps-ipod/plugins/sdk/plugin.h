@@ -15,6 +15,7 @@
 #include "plugins/rock_hid.h"
 #include "plugins/rock_game_io.h"
 #include "plugins/rock_overlay.h"
+#include "plugins/rock_image_overlay.h"
 #include "plugins/rock_resident.h"
 #include "plugins/rock_phase3_settings.h"
 #include "plugins/rock_specialist.h"
@@ -103,7 +104,9 @@
 #endif
 
 #define PLUGIN_MAGIC 0x41535452UL
-#ifdef ROCK_OVERLAY_IMAGE
+#if defined(ROCK_IMAGE_DECODER)
+#define ROCK_IMAGE_MAGIC ROCK_IMAGE_DECODER_MAGIC
+#elif defined(ROCK_OVERLAY_IMAGE)
 #define ROCK_IMAGE_MAGIC ROCK_OVERLAY_MAGIC
 #else
 #define ROCK_IMAGE_MAGIC PLUGIN_MAGIC
@@ -151,6 +154,8 @@ enum plugin_status {
 #undef mkdir
 #undef rmdir
 #undef ftruncate
+
+struct custom_format;
 
 struct plugin_api {
 #define ROCK_DIRECT(name) __typeof__(name) *name;

@@ -480,6 +480,16 @@ sub buildzip {
 
     find(find_copyfile(qr/\.(rock|ovl|lua)/, abs_path("$temp_dir/rocks/")), 'apps/plugins');
 
+    if (-f "rock-compat/modules/apps/imageviewer_compat.rock") {
+        glob_mkdir("$temp_dir/rocks/overlays");
+        foreach my $format (qw(bmp jpeg png ppm gif jpegp)) {
+            my $overlay = "image_$format.ovl";
+            copy("rock-compat/modules/overlays/$overlay",
+                 "$temp_dir/rocks/overlays/$overlay")
+                or die "Can't copy image decoder $overlay: $!";
+        }
+    }
+
     #lua include scripts
     if(-e "$ROOT/apps/plugins/lua/include_lua") {
         glob_mkdir("$temp_dir/rocks/viewers/lua");

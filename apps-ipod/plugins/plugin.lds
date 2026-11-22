@@ -8,6 +8,10 @@
 #define __ASSEMBLER__
 
 #include "config.h"
+#ifdef ASTRAPOD_IMAGE_DECODER
+#include "plugins/rock_image_overlay.h"
+#define IMGVDECODER_OFFSET ROCK_IMAGE_DECODER_OFFSET
+#endif
 
 /* These output formats should be in the config-files */
 

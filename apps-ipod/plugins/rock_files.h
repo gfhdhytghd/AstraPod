@@ -32,4 +32,9 @@ int rock_file_sync(int);
 void rock_close_files(void);
 bool rock_get_metadata(struct mp3entry *id3, int fd, const char *path);
 
+struct bitmap;
+struct custom_format;
+int rock_read_bmp_fd(int fd, struct bitmap *bm, int maxsize, int format,
+                     const struct custom_format *cformat);
+
 #endif

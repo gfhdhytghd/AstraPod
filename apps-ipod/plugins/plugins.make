@@ -77,6 +77,7 @@ $(ROCK_OBJECTS)/keyremap.o: $(APPSDIR)/plugins/keyremap-editor.c $(ROCK_FINGERPR
 
 include $(APPSDIR)/plugins/mikmod-compat.make
 include $(APPSDIR)/plugins/h264-compat.make
+include $(APPSDIR)/plugins/imageviewer-compat.make
 include $(APPSDIR)/plugins/md5sum.make
 include $(APPSDIR)/plugins/disktidy.make
 include $(APPSDIR)/plugins/resident.make

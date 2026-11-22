@@ -15,6 +15,7 @@ apps/eq_optimizer
 apps/file_picker
 apps/h264_player
 apps/imageviewer
+apps/imageviewer_compat
 apps/keybox
 apps/keyremap
 apps/lamp

@@ -477,6 +477,18 @@ unavailable, the movie uses the video clock. Seeking drains the codec and
 clears queued PCM before restarting from the new keyframe. Return and USB
 takeover drain the codec before releasing plugin scratch.
 
+## Rockbox Image Viewer
+
+Open **Plugins > Applications > imageviewer_compat** to choose an image.
+The viewer opens BMP, JPEG, progressive JPEG, PNG, PPM and GIF. It can
+move between supported files in the same directory. It uses plugin
+scratch for pixels while native playback continues.
+
+Keep the six `image_*.ovl` files in `/.rockbox/rocks/overlays/`. The
+viewer opens one decoder at a time and calls it while the viewer is
+still loaded. Copy the viewer, overlays and firmware from the same
+archive.
+
 ## Rockboy
 
 Open **Plugins > Games > rockboy** and choose an uncompressed GB or GBC

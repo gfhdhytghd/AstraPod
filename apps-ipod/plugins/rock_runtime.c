@@ -11,6 +11,7 @@
 #include "plugins/sdk/plugin.h"
 #include "rock-compat/rock_fingerprint.h"
 #include "core_alloc.h"
+#include "draw/resize.h"
 #include "files/filetypes.h"
 #include "root_menu.h"
 #include "pcm_waveform.h"
@@ -616,6 +617,10 @@ static bool rock_select_db_folders(bool autoresume)
     return changed;
 }
 
+static bool rock_image_decoder_open(const char *name,
+                                    struct rock_image_decoder_request *request);
+static void rock_image_decoder_close(void);
+
 static const struct plugin_api api = {
 #define ROCK_DIRECT(name) .name = name,
 #define ROCK_SLOT(decl, name, binding) .name = binding,
@@ -672,6 +677,80 @@ static bool overlay_header_valid(const void *header, const unsigned char *arena,
 }
 #endif
 
+#if CONFIG_BINFMT == BINFMT_ROCK
+static bool image_decoder_header_valid(const void *header,
+                                       const unsigned char *arena,
+                                       size_t capacity, size_t bytes)
+{
+    return native_image_valid(header, arena, capacity, bytes,
+                              ROCK_IMAGE_DECODER_MAGIC);
+}
+#endif
+
+static unsigned char *decoder_base;
+static size_t decoder_capacity;
+static void *decoder_handle;
+static unsigned int decoder_owner;
+
+static void rock_image_decoder_close(void)
+{
+    if (decoder_handle && thread_self() == decoder_owner)
+    {
+        lc_close(decoder_handle);
+        decoder_handle = NULL;
+    }
+}
+
+static bool rock_image_decoder_open(const char *name,
+                                    struct rock_image_decoder_request *request)
+{
+    static const char *const names[] = { "bmp", "jpeg", "png", "ppm", "gif", "jpegp" };
+    if (!name || !request || !request->parent_api || !decoder_capacity ||
+        decoder_owner != thread_self() || usb_taken || decoder_handle)
+        return false;
+
+    unsigned int i;
+    for (i = 0; i < ARRAYLEN(names); ++i)
+        if (!strcmp(name, names[i]))
+            break;
+    if (i == ARRAYLEN(names))
+        return false;
+
+    char path[sizeof(ROCK_OVERLAY_DIR) + sizeof("/image_jpegp.ovl")];
+    snprintf(path, sizeof(path), ROCK_OVERLAY_DIR "/image_%s.ovl", names[i]);
+#if CONFIG_BINFMT == BINFMT_ROCK
+    struct plugin_header disk_header;
+    void *handle = lc_open_checked(path, decoder_base, decoder_capacity,
+                                  &disk_header, sizeof(disk_header),
+                                  image_decoder_header_valid);
+#else
+    void *handle = lc_open(path, decoder_base, decoder_capacity);
+#endif
+    if (!handle)
+        return false;
+
+    struct plugin_header *module = lc_get_header(handle);
+    bool valid = true;
+#if CONFIG_BINFMT == BINFMT_DLOPEN
+    valid = rock_host_header_valid(module) &&
+            compatible(module, ROCK_IMAGE_DECODER_MAGIC) &&
+            !module->lc_hdr.load_addr && !module->lc_hdr.end_addr &&
+            !module->file_end && !module->bss_start;
+#endif
+    if (valid && !module->flags)
+    {
+        *module->api = &api;
+        request->decoder = NULL;
+        if (module->entry_point(request) == PLUGIN_OK && request->decoder)
+        {
+            decoder_handle = handle;
+            return true;
+        }
+    }
+    lc_close(handle);
+    return false;
+}
+
 struct rock_invocation {
     struct plugin_header *module;
     const char *path;
@@ -689,6 +768,7 @@ static int invoke_module(void *opaque)
         return PLUGIN_USB_CONNECTED;
 #endif
     filename = call->path;
+    decoder_owner = thread_self();
     usb_taken = false;
     if (!media_initialized)
     {
@@ -741,6 +821,8 @@ static int invoke_module(void *opaque)
     button_clear_pressed();
     rock_display_stop();
 
+    rock_image_decoder_close();
+    decoder_owner = 0;
     filename = NULL;
     usb_taken = false;
 
@@ -781,6 +863,15 @@ static int run_rock(const char *path, const char *file,
                             ROCK_BUFFER_ALIGNMENT);
 #endif
     tail_size = arena + capacity - tail;
+    const char *leaf = strrchr(path, '/');
+    if (leaf && !strcmp(leaf, "/imageviewer_compat.rock") &&
+        capacity > ROCK_IMAGE_DECODER_OFFSET &&
+        tail < arena + ROCK_IMAGE_DECODER_OFFSET)
+    {
+        decoder_base = arena + ROCK_IMAGE_DECODER_OFFSET;
+        decoder_capacity = capacity - ROCK_IMAGE_DECODER_OFFSET;
+        tail_size = decoder_base - tail;
+    }
     *module->api = &api;
 
     struct rock_invocation call = {
@@ -796,6 +887,8 @@ static int run_rock(const char *path, const char *file,
         result = invoke_module(&call);
     tail = NULL;
     tail_size = 0;
+    decoder_base = NULL;
+    decoder_capacity = 0;
 
 
 #if CONFIG_BINFMT == BINFMT_DLOPEN

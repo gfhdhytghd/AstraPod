@@ -349,6 +349,9 @@ ROCK_SLOT(bool (*set_color)(const char *, unsigned *, unsigned),
 ROCK_DIRECT(vsnprintf)
 ROCK_DIRECT(font_get_bits)
 ROCK_DIRECT(bidi_l2v)
+ROCK_SLOT(const struct custom_format *image_native_format, image_native_format, &format_native)
+ROCK_SLOT(int (*read_bmp_fd)(int, struct bitmap *, int, int, const struct custom_format *),
+          read_bmp_fd, rock_read_bmp_fd)
 ROCK_SLOT(int (*read_plugin_bmp)(const char *, struct bitmap *, size_t, bool),
           read_plugin_bmp, rock_read_plugin_bmp)
 ROCK_SLOT(int (*load_plugin_art)(struct bitmap *, size_t),
@@ -367,6 +370,10 @@ ROCK_DIRECT(rock_announce_status_get)
 ROCK_DIRECT(rock_announce_status_set)
 ROCK_DIRECT(rock_announce_status_speak)
 
+ROCK_SLOT(bool (*image_decoder_open)(const char *, struct rock_image_decoder_request *),
+          image_decoder_open, rock_image_decoder_open)
+ROCK_SLOT(void (*image_decoder_close)(void), image_decoder_close,
+          rock_image_decoder_close)
 ROCK_SLOT(bool (*reveal_file)(const char *, bool), reveal_file, rock_reveal_file)
 ROCK_SLOT(bool (*apply_eq)(const struct eq_band_setting *, int),
           apply_eq, rock_apply_eq)

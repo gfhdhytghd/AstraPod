@@ -358,3 +358,11 @@ Set `device_channels` in the desktop manifest to the channel names
 requested by the device. The host routes the first registration for each
 name and releases it when its companion exits. The bundled Echo companion
 uses `astrapod.echo`. See the desktop Input Plugins guide for setup.
+
+## Optional RockDoom
+
+Set `ROCK_DOOM=1` when building and packaging ipod6g. Place a
+legally obtained `doom1.wad` and `rockdoom.wad` in `/.rockbox/doom`.
+Open **Plugins > Games > doom**. This build runs in the foreground
+without game audio. The archive contains the launcher and DRAM
+overlay. Supply the WAD files separately.

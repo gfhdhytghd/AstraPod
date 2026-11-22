@@ -10,6 +10,9 @@ ROCK_MODULES := $(shell cat $(ROCK_MANIFEST))
 ifeq ($(ROCK_PITCH_DETECTOR),1)
 ROCK_MODULES += apps/pitch_detector
 endif
+ifeq ($(ROCK_DOOM),1)
+ROCK_MODULES += games/doom
+endif
 ROCKS := $(addprefix $(ROCK_OUT)/modules/,$(addsuffix .rock,$(ROCK_MODULES)))
 INCLUDES += -I$(ROCK_OUT)
 
@@ -38,8 +41,7 @@ $(APPSBUILDDIR)/plugins/rock_runtime.o $(APPSBUILDDIR)/plugins/rock_files.o: CFL
 .PHONY: rock-test-paths-inputs
 $(ROCK_OUT)/rock_test_paths.h: $(ROCK_MANIFEST) rock-test-paths-inputs
 	$(SILENT)mkdir -p "$(@D)"
-	$(SILENT)printf 'PLUGIN_DIR "/%s.rock",\n' $(shell cat $(ROCK_MANIFEST)) \
-	    $(if $(filter 1,$(ROCK_PITCH_DETECTOR)),apps/pitch_detector) > "$@.tmp"
+	$(SILENT)printf 'PLUGIN_DIR "/%s.rock",\n' $(ROCK_MODULES) > "$@.tmp"
 	$(SILENT)cmp -s "$@.tmp" "$@" || mv "$@.tmp" "$@"
 	$(SILENT)rm -f "$@.tmp"
 
@@ -84,6 +86,9 @@ ifneq ($(APP_TYPE),sdl-sim)
 ROCK_LINK_INPUT += $(ROCK_OBJECTS)/lib/gcc-support.o
 endif
 include $(APPSDIR)/plugins/overlay-compat.make
+ifeq ($(ROCK_DOOM),1)
+include $(APPSDIR)/plugins/doom-compat.make
+endif
 
 ROCK_UTILITIES := db_folder_select dict view_text credits alarmclock calendar dart_scorer resistor shopper settings_dumper
 $(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_UTILITIES))): $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c $(APPSDIR)/plugins/stage-utilities.py

@@ -18,6 +18,7 @@
 #include "usb.h"
 #include "plugins/rock_pitch.h"
 #include "plugins/rock_resident.h"
+#include "plugins/rock_tsr.h"
 
 #define BATTERY_LOG "/battery_bench.txt"
 #define BATTERY_PERIOD (60 * HZ)
@@ -424,4 +425,5 @@ void rock_resident_shutdown(bool disk_safe)
     announcement.track_change = false;
     if (bench_ready)
         queue_send(&bench_queue, disk_safe ? BENCH_SHUTDOWN : BENCH_DISCARD, 0);
+    rock_tsr_stop(ROCK_TSR_POWER);
 }

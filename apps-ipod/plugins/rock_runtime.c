@@ -101,12 +101,6 @@ void rock_media_shutdown(void)
     mutex_unlock(&media_mutex);
 }
 
-void rock_power_shutdown(void)
-{
-    rock_tsr_stop(ROCK_TSR_POWER);
-    rock_media_shutdown();
-}
-
 void rock_playback_takeover(void)
 {
     rock_h264_audio_revoke();

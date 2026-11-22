@@ -48,6 +48,10 @@ static void ab_draw_logo(struct screen *d, struct viewport *vp, int x, int y)
     vp->fg_pattern = ABOUT_LOGO_ACCENT;
     d->alpha_bitmap_part(about_logo_accent, 0, 0, ABOUT_LOGO_W,
                          x, y, ABOUT_LOGO_W, ABOUT_LOGO_H);
+    d->alpha_bitmap_part_img(about_mark, about_mark_alpha, 0, 0,
+                             x + ABOUT_MARK_X, y + ABOUT_MARK_Y,
+                             ABOUT_MARK_N, ABOUT_MARK_N,
+                             ABOUT_MARK_N, ABOUT_MARK_N);
     vp->fg_pattern = fg;
 }
 

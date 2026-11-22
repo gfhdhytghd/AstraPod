@@ -47,7 +47,7 @@ static int key(int body,int remote){int b=remote_keys?remote:body;
  for(unsigned i=0;i<ARRAYLEN(keys);i++)if(keys[i].button==(b|BUTTON_REL)&&keys[i].previous==b)return keys[i].action;
  assert(0);return 0;}
 static unsigned char*item_name(int i,struct items*dest){(void)dest;return (unsigned char*)custom_table[i].string;}
-static int menu_get_name,menu_speak_item,menu_get_icon;
+static int menu_get_name,menu_speak_item,menu_get_icon,menu_get_kind;
 static int str(int n){return n;}
 static void settings_save(void){saves++;}
 static void splash(int n,int s){(void)n;(void)s;assert(0);}
@@ -57,6 +57,7 @@ static void viewportmanager_theme_undo(int n,bool b){(void)n;(void)b;}
 static void gui_synclist_init(struct gui_synclist*l,int n,void*p,bool b,int q,void*v){(void)n;(void)p;(void)b;(void)q;(void)v;l->selected=0;}
 static void gui_synclist_set_voice_callback(struct gui_synclist*l,int n){(void)l;(void)n;}
 static void gui_synclist_set_icon_callback(struct gui_synclist*l,int n){(void)l;(void)n;}
+static void gui_synclist_set_row_callbacks(struct gui_synclist*l,int n,void*a,void*b){(void)l;(void)n;(void)a;(void)b;}
 static void gui_synclist_set_nb_items(struct gui_synclist*l,int n){(void)l;(void)n;}
 static void gui_synclist_select_item(struct gui_synclist*l,int n){l->selected=n;}
 static int gui_synclist_get_sel_pos(struct gui_synclist*l){return l->selected;}

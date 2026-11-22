@@ -9,12 +9,14 @@ trap 'rm -rf "$stage"' EXIT
 cp "$root/apps-ipod/plugins/rock-modules.txt" "$stage/manifest"
 candidate=apps/pitch_detector
 candidate_path=".rockbox/rocks/$candidate.rock"
-if [ "${ROCK_PITCH_DETECTOR:-0}" = 1 ]; then
+ROCK_PITCH_DETECTOR=${ROCK_PITCH_DETECTOR:-1}
+ROCK_DOOM=${ROCK_DOOM:-1}
+if [ "$ROCK_PITCH_DETECTOR" = 1 ]; then
     printf '%s\n' "$candidate" >> "$stage/manifest"
 fi
 doom_launcher=".rockbox/rocks/games/doom.rock"
 doom_overlay=".rockbox/rocks/overlays/doom.ovl"
-if [ "${ROCK_DOOM:-0}" = 1 ]; then
+if [ "$ROCK_DOOM" = 1 ]; then
     printf '%s\n' games/doom >> "$stage/manifest"
     mkdir -p "$stage/$(dirname "$doom_overlay")"
     cp "$build/rock-compat/modules/overlays/doom.ovl" "$stage/$doom_overlay"
@@ -48,11 +50,11 @@ if grep -q "^games/sgt_puzzles/" "$stage/manifest"; then
     cp "$root/apps-ipod/plugins/tatham-fonts-LICENSE" "$fonts/LICENSE"
 fi
 (cd "$stage" && zip -qr "$build/rockbox.zip" .rockbox)
-if [ "${ROCK_PITCH_DETECTOR:-0}" != 1 ] &&
+if [ "$ROCK_PITCH_DETECTOR" != 1 ] &&
         unzip -Z1 "$build/rockbox.zip" "$candidate_path" > /dev/null 2>&1; then
     zip -dq "$build/rockbox.zip" "$candidate_path"
 fi
-if [ "${ROCK_DOOM:-0}" != 1 ]; then
+if [ "$ROCK_DOOM" != 1 ]; then
     for path in "$doom_launcher" "$doom_overlay"; do
         if unzip -Z1 "$build/rockbox.zip" "$path" > /dev/null 2>&1; then
             zip -dq "$build/rockbox.zip" "$path"

@@ -7,6 +7,8 @@ ROCK_OUT := $(BUILDDIR)/rock-compat
 ROCK_TOOLS := $(TOOLSDIR)/rock-compat
 ROCK_MANIFEST := $(APPSDIR)/plugins/rock-modules.txt
 ROCK_MODULES := $(shell cat $(ROCK_MANIFEST))
+ROCK_PITCH_DETECTOR ?= 1
+ROCK_DOOM ?= 1
 ifeq ($(ROCK_PITCH_DETECTOR),1)
 ROCK_MODULES += apps/pitch_detector
 endif
@@ -66,6 +68,10 @@ $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c $(ROCK_TOOLS)/stage-usb.py
 ROCK_FINGERPRINT := $(ROCK_OUT)/rock_fingerprint.h
 ROCK_OBJECTS := $(ROCK_OUT)/obj
 $(ROCK_OBJECTS)/midi.o: $(APPSDIR)/plugins/midi-compat.c $(ROCK_FINGERPRINT)
+	$(SILENT)mkdir -p $(@D)
+	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
+
+$(ROCK_OBJECTS)/keyremap.o: $(APPSDIR)/plugins/keyremap-editor.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
 

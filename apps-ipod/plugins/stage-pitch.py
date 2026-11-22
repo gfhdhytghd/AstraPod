@@ -102,6 +102,12 @@ replace("    rb->lcd_update();\n}\n\n#ifndef SIMULATOR", """#ifdef SIMULATOR
     rb->lcd_set_foreground(front_color);
     rb->lcd_putsxy(2, HZ_Y + (settings.display_hz ? font_h : 0),
                   "Preview - no audio capture");
+#else
+    if (fp_round(freq) == 0)
+    {
+        rb->lcd_set_foreground(front_color);
+        rb->lcd_putsxy(2, HZ_Y, "No pitch. Check mic or line input.");
+    }
 #endif
     rb->lcd_update();
 }
@@ -213,7 +219,16 @@ static enum plugin_status record_and_get_pitch(void)
                 break;
             }
             if (!rb->pitch_start())
-                break; /* The session can be revoked while in the menu. */
+            {
+                if (rb->plugin_usb_taken())
+                    result = PLUGIN_USB_CONNECTED;
+                else
+                {
+                    rb->splash(HZ, "Tuner input unavailable");
+                    result = PLUGIN_ERROR;
+                }
+                break;
+            }
 
             display_frequency(initial_frequency);
         }
@@ -227,6 +242,12 @@ static enum plugin_status record_and_get_pitch(void)
 #endif
         if (capture == ROCK_PITCH_STOPPED)
             break;
+        if (capture == ROCK_PITCH_NO_INPUT)
+        {
+            rb->splash(2 * HZ, "Tuner microphone unplugged");
+            result = PLUGIN_ERROR;
+            break;
+        }
         if (capture == ROCK_PITCH_FAILED)
         {
             rb->splash(HZ, "Tuner capture failed");

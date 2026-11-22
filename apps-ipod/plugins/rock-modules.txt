@@ -16,6 +16,7 @@ apps/file_picker
 apps/h264_player
 apps/imageviewer
 apps/keybox
+apps/keyremap
 apps/lamp
 apps/lastfm_scrobbler
 apps/lastfm_scrobbler_viewer

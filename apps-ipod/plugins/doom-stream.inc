@@ -14,6 +14,7 @@ void I_SubmitSound(void)
     for (int block = pending; block < ROCK_STREAM_QUEUE_SIZE; block++)
     {
         I_UpdateSound();
+        mus_mix();
         if (!rb->rock_stream_submit(mixbuffer, sizeof(mixbuffer)))
             break;
     }

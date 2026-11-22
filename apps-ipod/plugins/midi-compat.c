@@ -303,6 +303,7 @@ static enum plugin_status play(const struct midi_event *events, int count,
     init_instruments(rate);
     rb->lcd_clear_display();
     rb->lcd_puts(0, 0, "MIDI Player");
+    rb->lcd_puts(0, 1, "Playing");
     rb->lcd_puts(0, 2, "Play: pause or resume");
     rb->lcd_puts(0, 3, "Menu: return");
     rb->lcd_update();
@@ -340,6 +341,8 @@ static enum plugin_status play(const struct midi_event *events, int count,
                 paused = !paused;
                 if (!rb->rock_stream_pause(paused))
                     return PLUGIN_OK;
+                rb->lcd_puts(0, 1, paused ? "Paused" : "Playing");
+                rb->lcd_update();
                 break;
             case ACTION_WPS_VOLUP:
                 rb->adjust_volume(1);

@@ -128,20 +128,20 @@ sink rate. It exits if the rate changes. USB takeover, accepted shutdown,
 and the native playback or recording start release the resources. The
 application browser starts Metronome without a tempo-map file.
 
-## Pitch Detector candidate
+## Pitch Detector
 
-Set `ROCK_PITCH_DETECTOR=1` for both the build and the bundle. The default
-allowlist excludes the tuner pending capture qualification on ipod6g.
+The ipod6g package includes Pitch Detector by default. Set
+`ROCK_PITCH_DETECTOR=0` to omit it from both the build and the bundle.
 
-```sh
-ROCK_PITCH_DETECTOR=1 ./build-sim.sh
-ROCK_PITCH_DETECTOR=1 PATH=/home/wilf/.cache/pocket-stack/rockbox/bin:$PATH ./build-hw.sh ipod6g
-```
+Open **Plugins → Applications → pitch_detector**. On a Mikey-capable player,
+the tuner selects the headset microphone when a plug is present. Remove the
+plug before launch to use the passive dock line input. The tuner uses the
+native gain for the selected input and leaves the recorder's source setting
+alone. It analyzes the left channel at 22,050 Hz. When it cannot detect a
+pitch, it displays **No pitch. Check mic or line input.** Removing the plug
+during microphone capture stops the tuner and reports the unplug.
 
-Open **Plugins → Applications → pitch_detector**. On a player, select the
-analog source and gain in the native recording settings first. Use a passive
-dock line input or a supported headset microphone. The tuner analyzes the
-left channel at 22,050 Hz. It stops playback on launch. **Menu** opens
+The tuner stops playback on launch. **Menu** opens
 **Tuner Settings** and releases capture while that menu is open. **Return to
 Tuner** starts a new capture. **Quit** returns to Applications. A USB consent
 prompt ends the tuner session, including when you choose **Charge Only**.
@@ -424,15 +424,38 @@ instruments ship under GPL-2.0-or-later with the player source. The
 player does not require a Gravis patch set. Use Play to pause or resume
 and Menu to return.
 
-## Optional RockDoom
+## RockDoom
 
-Set `ROCK_DOOM=1` when building and packaging ipod6g. Place
+The ipod6g package includes RockDoom by default. Set `ROCK_DOOM=0` to
+omit both its launcher and overlay. Place
 `rockdoom.wad` and a compatible base WAD, such as `doom1.wad`, in
-`/.rockbox/doom/`. Open **Plugins > Games > doom**. The module plays WAD
-sound effects through the built-in sink when it is free. Enable or
-disable effects from **Options > Sound** before starting a game.
-Supply the WAD files separately. The archive contains the launcher
-and DRAM overlay.
+`/.rockbox/doom/`. Open **Plugins > Games > doom**. If either file is
+missing, the launcher displays the data directory and waits for Menu.
+Supply the WAD files separately. The archive contains the launcher and
+DRAM overlay.
+
+The module mixes sound effects and DMX MUS tracks into the same foreground
+PCM queue. **Options > Sound** controls that queue. MIDI-format music lumps
+are silent. The module rejects embedded DEHACKED patches. Freedoom 0.13.0
+permits redistribution under BSD-3-Clause, but its IWAD uses an embedded
+DEHACKED patch and MIDI-format tracks. It stays out of the archive.
+
+## Key Remap
+
+Open **Plugins > Applications > keyremap** to edit Left and Right on
+the iPod or its remote while the Now Playing screen is open. Changes
+affect short taps. The editor offers previous track, next track,
+play/pause and volume controls. **Save for next boot** replaces
+`/.rockbox/keyremap.kmf` after writing and syncing a temporary file.
+Restart to apply it. **Restore defaults** followed by **Save for next boot**
+clears the overrides. The editor preserves keymaps created by other tools.
+To recover from an external mapping, back up and remove that file over
+USB storage and restart.
+
+The Lua viewer also accepts **print_buttons.lua** and **splashscroller.lua**
+under Demos, and **return2WPS.lua** under Applications. The button viewer uses
+named button constants and the scroller uses the native text viewer. Exit
+the button viewer with Menu.
 
 ## H.264 video on iPod Classic
 

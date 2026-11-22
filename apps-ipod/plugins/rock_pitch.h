@@ -14,6 +14,7 @@ enum rock_pitch_result {
     ROCK_PITCH_WAITING,
     ROCK_PITCH_READY,
     ROCK_PITCH_FAILED,
+    ROCK_PITCH_NO_INPUT,
 };
 
 #if defined(ASTRAPOD_ROCK_COMPAT) && defined(IPOD_6G)

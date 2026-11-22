@@ -117,8 +117,18 @@ def sound(source):
             else
                channelinfo[chan].data += advance;
 """)
-    return cut(source, "void get_more(", "//\n// MUSIC API",
-               Path(__file__).with_name("doom-stream.inc").read_text())
+    return cut(source, "void get_more(", "// Interrupt handler.",
+               Path(__file__).with_name("doom-music.inc").read_text() + "\n" +
+               Path(__file__).with_name("doom-stream.inc").read_text() + "\n")
+
+
+def sound_lumps(source):
+    source = replace(source, "void S_ChangeMusic(int musicnum, int looping)",
+                     "int I_RegisterRockSong(const void *data, int size);\n\n"
+                     "void S_ChangeMusic(int musicnum, int looping)")
+    return cut(source, "//   music->handle = I_RegisterSong", "\n   // play it",
+               "   music->handle = I_RegisterRockSong(music->data, "
+               "W_LumpLength(music->lumpnum));\n")
 
 
 def defaults(source):
@@ -127,6 +137,8 @@ def defaults(source):
 
 
 def game_loop(source):
+    source = replace(source, 'if ((p = W_CheckNumForName("DEHACKED")) != -1) // cph - add dehacked-in-a-wad support\n\t\tProcessDehFile(NULL, dehout ? "/dehlog.txt" : NULL, p);',
+                     'if (W_CheckNumForName("DEHACKED") != -1)\n\t\tI_Error("Embedded DEHACKED patches are unsupported");')
     source = replace(source, "   I_SubmitSound();\n\n", "")
     return replace(source, "      // Update display, next frame, with current state.",
                    "      I_SubmitSound();\n\n      // Update display, next frame, with current state.")
@@ -207,8 +219,21 @@ def rockdoom(source):
          case GO_TO_PREVIOUS:
          case 5: /* Quit */""")
     source = replace(source, '      rb->splash(HZ*2, "Missing Base WAD!");',
-                     """      rb->splash(HZ * 4,
-          "Place rockdoom.wad and a base WAD in /.rockbox/doom/");""")
+                     """      rb->lcd_clear_display();
+      rb->lcd_setfont(FONT_UI);
+      rb->lcd_puts(0, 0, "Missing Doom WAD files");
+      rb->lcd_puts(0, 2, "Copy rockdoom.wad and a");
+      rb->lcd_puts(0, 3, "base WAD to /.rockbox/doom/");
+      rb->lcd_puts(0, 5, "Menu: return");
+      rb->lcd_update();
+      while (true)
+      {
+         int action = rb->get_action(CONTEXT_STD, HZ / 10);
+         if (rb->default_event_handler(action) == SYS_USB_CONNECTED)
+            exit(PLUGIN_USB_CONNECTED);
+         if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
+            break;
+      }""")
     source = replace(source, '   int mod = (rb->sound_max(SOUND_VOLUME)-rb->sound_min(SOUND_VOLUME))/15;',
                      '   int mod = MAX(1, (rb->sound_max(SOUND_VOLUME) - rb->sound_min(SOUND_VOLUME)) / 15);')
     source = replace(source, '   if(mod == 0)\n       mod = rb->global_status->volume;\n', '')
@@ -231,7 +256,7 @@ def menu(source):
 
 
 adapters = {
-    "i_system.c": system, "i_sound.c": sound, "d_main.c": game_loop, "i_video.c": video,
+    "i_system.c": system, "i_sound.c": sound, "s_sound.c": sound_lumps, "d_main.c": game_loop, "i_video.c": video,
     "rockdoom.c": rockdoom, "m_menu.c": menu, "m_misc.c": defaults, "z_zone.c": zone,
 }
 input_path, out = map(Path, sys.argv[1:])

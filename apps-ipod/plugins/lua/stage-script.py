@@ -87,4 +87,22 @@ until action == rb.actions.ACTION_WPS_MENU or action == rb.actions.ACTION_STD_CA
         local timestamp = tonumber(line)
         if timestamp and timestamp >= 0 then table.insert(self.lapTimes, timestamp) end''')
 
+elif source.stem == "splashscroller":
+    replace("rb.splash_scroller(rb.HZ * 5, ",
+            'rb.view_text("Splash Scroller", ')
+elif source.stem == "print_buttons":
+    replace('rb.splash_scroller(rb.HZ, table.concat(s, "\\n"))',
+            'rb.view_text("Buttons Found", table.concat(s, "\\n"))\n'
+            'rb.button_clear_queue()')
+    replace('    rb.splash_scroller(-2, table.concat(s_t, "\\n"))',
+            '''    rb.lcd_clear_display()
+    for row = 1, math.min(#s_t, max_lines) do
+        rb.lcd_putsxy(0, (row - 1) * h, s_t[row])
+    end
+    rb.lcd_update()''')
+    replace('until keyrpt >= 2',
+            '''until keyrpt >= 2 or lastkey == rb.buttons.BUTTON_MENU + rb.buttons.BUTTON_REL
+                  or (rb.buttons.BUTTON_RC_MENU and
+                      lastkey == rb.buttons.BUTTON_RC_MENU + rb.buttons.BUTTON_REL)''')
+
 output.write_text(script)

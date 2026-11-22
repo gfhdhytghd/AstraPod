@@ -83,7 +83,10 @@ def trace(path, pattern, timeout=8):
 with session("replacement") as (sim, path):
     sim.tap("down", "select")
     trace(path, r"TSR foreground overwritten\n")
-    sim.tap("menu", "up", "select")
+    sim.tap("menu")
+    sim.capture("after-overwrite", "resident", "foreground")
+    sim.tap("up")
+    sim.tap("select")
     trace(path, r"TSR stop 1 ticks [1-9]\d*\n.*TSR image closed\n.*TSR entry")
     sim.tap("select")
     trace(path, r"TSR foreground overwritten\n.*TSR tick \d+\n.*"

@@ -1608,7 +1608,9 @@ static int root_menu_off_find(const struct menu_item_ex *item)
  * default, or new since the order was saved: turned off, after the first of
  * its anchors that is on, else before Settings. Customize Main Menu then
  * shows it there, and turning it on leaves it there. Podcasts and the tagnavi
- * rows are left out: their settings and tagnavi.config place them. */
+ * rows are left out: their settings and tagnavi.config place them. Plugins
+ * is the exception that goes in on, before Settings: it is on by default, and
+ * an order that does not name it was saved before the row existed. */
 static const struct {
     const struct menu_item_ex *item;
     const struct menu_item_ex *after[3];
@@ -1653,6 +1655,17 @@ static void root_menu_place(int idx, int home)
             break;
         }
     }
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (item == &plugins_item)
+    {
+        memmove(&root_menu__[at + 1], &root_menu__[at],
+                (count - at) * sizeof(root_menu__[0]));
+        root_menu__[at] = (struct menu_item_ex *)item;
+        root_menu_off_shift(at, 1);
+        root_menu_set_count(count + 1);
+        return;
+    }
+#endif
     root_menu_off[root_menu_off_count].idx = idx;
     root_menu_off[root_menu_off_count].after = at;
     root_menu_off_count++;

@@ -681,3 +681,25 @@ foreground submits copied PCM and owns LCD updates, input, and USB events.
 USB storage takeover revokes the stream and joins both workers before
 acknowledgement. Normal return stops PCM and joins both workers before
 releasing the PDa heap.
+
+## Opt-in plugin IRAM
+
+An ipod6g foreground module can opt in with `ROCK_REQUEST_IRAM` and
+mark its code, initialized data and cleared data with `ROCK_IRAM_CODE`,
+`ROCK_IRAM_DATA` and `ROCK_IRAM_BSS`. The IRAM-specific link places
+the executed payload at `0x0000c000` and limits it to `0x00020000`.
+The checked loader validates the stored payload in DRAM and copies it
+after acquiring the codec IRAM window. The foreground image's header
+includes the three bounds and retains the exact SDK fingerprint check.
+
+Launch requires the built-in PCM sink and idle native audio. The firmware
+releases any cached idle codec before reserving IRAM. Modules using the
+ordinary CRT, including callable image decoders and TSRs, use DRAM.
+Workers, callbacks and the image must finish before the IRAM lease ends.
+A storage event received during the lease is delivered to the native UI
+after plugin teardown with its original USB sequence.
+
+Build `rock-iram-probe` explicitly in the configured ARM or SDL build.
+On ARM, use the resulting `demos/iram_probe.rock` with its matching
+firmware. SDL exercises lifecycle and admission. The device verifies
+IRAM execution, initialized data, cleared data and cache maintenance.

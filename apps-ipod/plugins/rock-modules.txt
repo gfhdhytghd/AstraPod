@@ -11,6 +11,7 @@ apps/periodic_table
 apps/playing_time
 apps/rb_info
 apps/resistor
+apps/settings_dumper
 apps/stopwatch
 demos/bounce
 demos/credits
@@ -60,5 +61,6 @@ games/wormlet
 games/xobox
 viewers/chip8
 viewers/shopper
+viewers/wavview
 apps/search
 apps/stats

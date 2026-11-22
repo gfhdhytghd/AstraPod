@@ -68,7 +68,7 @@ ifneq ($(APP_TYPE),sdl-sim)
 ROCK_LINK_INPUT += $(ROCK_OBJECTS)/lib/gcc-support.o
 endif
 
-ROCK_UTILITIES := db_folder_select dict credits alarmclock calendar dart_scorer resistor shopper
+ROCK_UTILITIES := db_folder_select dict credits alarmclock calendar dart_scorer resistor shopper settings_dumper
 $(addprefix $(ROCK_OUT)/staged/,$(addsuffix .c,$(ROCK_UTILITIES))): $(ROCK_OUT)/staged/%.c: $(ROCK_SRC)/%.c $(APPSDIR)/plugins/stage-utilities.py
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(APPSDIR)/plugins/stage-utilities.py $< $@
@@ -124,9 +124,13 @@ $(ROCK_OUT)/staged/stats.c $(ROCK_OUT)/staged/search.c: $(ROCK_OUT)/staged/%.c: 
 
 $(ROCK_OUT)/staged/stats.c: $(ROCK_SRC)/lib/mul_id3.c
 
+$(ROCK_OUT)/staged/wavview.c: $(ROCK_SRC)/wavview.c $(APPSDIR)/plugins/wavview-scan.inc $(APPSDIR)/plugins/stage-wavview.py
+	$(SILENT)mkdir -p $(@D)
+	$(SILENT)python3 $(word 3,$^) $< $(word 2,$^) $@
+
 ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot metronome \
     minesweeper oscilloscope periodic_table pitch_detector playing_time pong rb_info robotfindskitten snake snake2 star stopwatch \
-    lib/highscore search stats vu_meter $(ROCK_UTILITIES) $(ROCK_GAME_ADAPTERS)
+    lib/highscore search stats vu_meter wavview $(ROCK_UTILITIES) $(ROCK_GAME_ADAPTERS)
 $(addprefix $(ROCK_OBJECTS)/,$(addsuffix .o,$(ROCK_STAGED))): $(ROCK_OBJECTS)/%.o: $(ROCK_OUT)/staged/%.c $(ROCK_FINGERPRINT)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@

@@ -38,6 +38,7 @@
 #include "lcd.h"
 #include "font.h"
 #include "audio.h"
+#include "sound.h"
 #include "pcm_mixer.h"
 #include "pcm_waveform.h"
 #ifdef USB_ENABLE_AUDIO

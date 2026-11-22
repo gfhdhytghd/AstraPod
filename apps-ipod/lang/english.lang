@@ -28638,3 +28638,18 @@
     recording: "Save Recording Preset"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_VIEW_WAVEFORM
+  desc: WAV file context menu
+  user: core
+  <source>
+    *: "View waveform"
+  </source>
+  <dest>
+    *: "View waveform"
+  </dest>
+  <voice>
+    *: "View waveform"
+  </voice>
+</phrase>

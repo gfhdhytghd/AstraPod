@@ -266,6 +266,84 @@ invalid:
                    '    return rb->plugin_usb_taken() ? PLUGIN_USB_CONNECTED : PLUGIN_OK;\n}')
 
 
+def settings_dumper(text):
+    check_digest(text, "4d777eb3937c8d605ad13187a35e7bab82a6b97c70dd3693b14b6dedcb908251")
+    text = text.replace("rb->fdprintf(", "dump_print(")
+    text = replace(text, 'static int setting_count = 0;', '''#define TEMP_FILE FILENAME ".tmp"
+static int written_count;
+static bool write_failed;
+
+#define dump_print(...) do { \\
+    if (!write_failed && rb->fdprintf(__VA_ARGS__) < 0) \\
+        write_failed = true; \\
+} while (0)''')
+    text = replace(text, '    if (setting->cfg_name == NULL)',
+                   '    if (setting->cfg_name == NULL || (setting->flags & F_RESUMESETTING))')
+    text = replace(text, '    else if (!group && (setting->flags&(F_THEMESETTING|\n                                        F_RECSETTING|',
+                   '    else if (!group && (setting->flags&(F_RECSETTING|')
+    text = replace(text, '    setting_count++;\n    if (setting_count%10 == 0)',
+                   '    written_count++;\n    if (written_count % 10 == 0)')
+    text = replace(text, '                     (setting->choice_setting->cfg_vals == NULL))',
+                   '''                     !(setting->flags & F_CHOICETALKS) &&
+                     (setting->choice_setting->cfg_vals == NULL))''')
+    text = replace(text, '                    rb->snprintf(temp, 64, "%s, ", \n'
+                   '                                 setting->choice_setting->desc[i]);',
+                   '''                    const unsigned char *label = setting->choice_setting->desc[i];
+                    int id = P2ID(label);
+                    rb->snprintf(temp, sizeof(temp), "%s, ", id < 0 ? label : rb->str(id));''')
+    text = text.replace('rb->strcat(text, temp);', 'rb->strlcat(text, temp, sizeof(text));')
+    text = replace(text, '            rb->snprintf(text, sizeof(text), "Text.. Up to %d characters. ",',
+                   '''            if (!setting->filename_setting)
+            {
+                rb->strlcpy(text, "Text", sizeof(text));
+                break;
+            }
+            rb->snprintf(text, sizeof(text), "Text.. Up to %d characters. ",''')
+    text = text.replace('rb->strcat(text, ', 'rb->strlcat(text, ')
+    text = replace(text, '''                rb->strlcat(text, "Should start with:\\"");
+                rb->strlcat(text, setting->filename_setting->prefix);
+                rb->strlcat(text, "\\" and end with:\\"");
+                rb->strlcat(text, setting->filename_setting->suffix);
+                rb->strlcat(text, "\\"");''',
+                   '''                size_t used = rb->strlen(text);
+                rb->snprintf(text + used, sizeof(text) - used, "Prefix: %s, suffix: %s",
+                             setting->filename_setting->prefix,
+                             setting->filename_setting->suffix);''')
+    text = replace(text, '''    fd = rb->open(FILENAME, O_CREAT|O_TRUNC|O_WRONLY, 0666);''',
+                   '''    const char *lines[] = {"Write settings reference?", FILENAME};
+    const struct text_message message = { lines, ARRAYLEN(lines) };
+    enum yesno_res answer = rb->gui_syncyesno_run(&message, NULL, NULL);
+    if (answer != YESNO_YES)
+        return answer == YESNO_USB ? PLUGIN_USB_CONNECTED : PLUGIN_OK;
+
+    fd = rb->open(TEMP_FILE, O_CREAT | O_EXCL | O_WRONLY, 0666);''')
+    text = replace(text, '''    dump_print(fd, "# .cfg file created by rockbox %s - "
+            "http://www.rockbox.org\\r\\n\\r\\n", rb->rbversion);''',
+                   '''    dump_print(fd, "# AstraPod %s settings reference\\r\\n\\r\\n", rb->rbversion);''')
+    text = replace(text, '''    dump_print(fd, "\\r\\n\\r\\n# -- Theme settings -- #\\r\\n");
+    for(i=0;i<setting_count;i++)
+        write_setting(&list[i], fd, F_THEMESETTING);
+''', '')
+    text = replace(text, '''    dump_print(fd, "\\r\\n\\r\\n# Total settings count: %d\\r\\n", setting_count);
+    rb->close(fd);
+    rb->splash(HZ, "Done!");''',
+                   '''    dump_print(fd, "\\r\\n\\r\\n# Total settings count: %d\\r\\n", written_count);
+    if (!write_failed)
+        write_failed = rb->file_sync(fd) < 0;
+    if (rb->close(fd) < 0)
+        write_failed = true;
+    if (!write_failed)
+        write_failed = rb->rename(TEMP_FILE, FILENAME) < 0;
+    if (write_failed)
+    {
+        rb->remove(TEMP_FILE);
+        rb->splash(HZ, "Could not write settings reference");
+        return PLUGIN_ERROR;
+    }
+    rb->splash(HZ, "Settings reference saved");''')
+    return text
+
+
 def darts(source):
     # A click scores a dart. A hold opens the pause menu without scoring.
     source = replace(source, """#define DARTS_QUIT PLA_SELECT_REPEAT
@@ -537,6 +615,6 @@ if __name__ == "__main__":
         "db_folder_select": folder_picker, "dict": dictionary,
         "credits": credits, "alarmclock": alarmclock, "calendar": calendar,
         "dart_scorer": darts, "resistor": resistor, "shopper": shopper,
-        "vu_meter": vu_meter,
+        "settings_dumper": settings_dumper, "vu_meter": vu_meter,
     }
     outfile.write_text(adapters[infile.stem](infile.read_text()))

@@ -83,6 +83,7 @@ games/chopper
 games/clix
 games/codebuster
 games/dice
+games/duke3d
 games/flipit
 games/goban
 games/invadrox

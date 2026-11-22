@@ -403,6 +403,11 @@ The PCM mixer can finish its current output frame after pause or close.
 Call `rock_stream_close()` to discard the queue. The loader also revokes
 it before unload. The mixer calls firmware callbacks only.
 
+A foreground engine can call `plugin_claim_heap(bytes)` once to claim a
+pinned core allocation of up to 2 MiB. A failed allocation returns NULL.
+The loader releases the allocation after the entry, CRT cleanup and worker
+shutdown. During USB takeover it stays pinned through the foreground unwind.
+
 The alternate CRT built with `ROCK_REQUEST_LARGE_STACK` requests an
 80 KiB foreground stack. It runs the entry and CRT cleanup on the same
 stack and rejoins the caller before unload. This profile is for modules
@@ -441,6 +446,28 @@ PCM queue. **Options > Sound** controls that queue. MIDI-format music lumps
 are silent. The module rejects embedded DEHACKED patches. Freedoom 0.13.0
 permits redistribution under BSD-3-Clause, but its IWAD uses an embedded
 DEHACKED patch and MIDI-format tracks. It stays out of the archive.
+
+## Duke3D
+
+Place an original shareware 1.3D, registered 1.3D, Plutonium 1.4 or
+Atomic 1.5 GRP at `/.rockbox/duke3d/duke3d.grp`. Open
+**Plugins > Games > duke3d**. The bundle contains the engine module.
+Supply the GRP separately. The module streams archive entries and uses
+the CON files inside the GRP. It writes its configuration and save slots
+under `/.rockbox/duke3d/saves/`.
+
+Use Left and Right to turn, the wheel to move forward or navigate, Play
+to jump, and Select to fire or confirm. Menu opens or closes the game
+menu. Choose Quit for the normal exit, or hold Menu and press Select
+to return directly to Games. Hold Menu while turning the wheel to change
+the native volume. Remote volume buttons also adjust it. Stop native
+playback before launch to make the PCM sink available. Game sound effects
+use the SDK stream. MIDI music and external RTS packs are outside this port.
+
+The source uses 32-bit words for CON pointers. For gameplay on a Linux
+SDL host, configure with `--type=s --32-bit --no-sdl-threads` and build
+`make "$PWD/rockboxui" "$PWD/rock-compat/modules/games/duke3d.rock"`.
+The 64-bit simulator entry displays the 32-bit requirement.
 
 ## Key Remap
 

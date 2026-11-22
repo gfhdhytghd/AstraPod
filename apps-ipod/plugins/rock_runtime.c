@@ -47,12 +47,15 @@ bool rock_host_header_valid(const struct plugin_header *header);
 #endif
 
 #define ROCK_BUFFER_ALIGNMENT 8
+#define ROCK_HEAP_LIMIT (2 * 1024 * 1024)
 
 static const unsigned char fingerprint[] = ROCK_FINGERPRINT;
 static const char arena_owner[] = "Rockbox plugin";
 static const char *filename;
 static unsigned char *tail;
 static size_t tail_size;
+static int engine_heap;
+static unsigned int foreground_owner;
 static bool usb_taken;
 static unsigned int mpeg_owner;
 static void (*mpeg_drain)(void);
@@ -533,6 +536,22 @@ static void *rock_claim_scratch(size_t minimum, size_t preferred,
     return result;
 }
 
+/* Keep the heap pinned through CRT cleanup, including USB unwind. */
+static void *rock_claim_heap(size_t bytes)
+{
+    if (!filename || foreground_owner != thread_self() ||
+        usb_taken || engine_heap || !bytes ||
+        bytes > ROCK_HEAP_LIMIT)
+        return NULL;
+
+    int handle = core_alloc(bytes);
+    if (handle <= 0)
+        return NULL;
+    core_pin(handle);
+    engine_heap = handle;
+    return core_get_data(handle);
+}
+
 static size_t rock_reserve_buffer(size_t size)
 {
     size = size >= tail_size ? tail_size :
@@ -837,11 +856,10 @@ static bool image_decoder_header_valid(const void *header,
 static unsigned char *decoder_base;
 static size_t decoder_capacity;
 static void *decoder_handle;
-static unsigned int decoder_owner;
 
 static void rock_image_decoder_close(void)
 {
-    if (decoder_handle && thread_self() == decoder_owner)
+    if (decoder_handle && thread_self() == foreground_owner)
     {
         lc_close(decoder_handle);
         decoder_handle = NULL;
@@ -853,7 +871,7 @@ static bool rock_image_decoder_open(const char *name,
 {
     static const char *const names[] = { "bmp", "jpeg", "png", "ppm", "gif", "jpegp" };
     if (!name || !request || !request->parent_api || !decoder_capacity ||
-        decoder_owner != thread_self() || usb_taken || decoder_handle)
+        foreground_owner != thread_self() || usb_taken || decoder_handle)
         return false;
 
     unsigned int i;
@@ -916,7 +934,7 @@ static int invoke_module(void *opaque)
         return PLUGIN_USB_CONNECTED;
 #endif
     filename = call->path;
-    decoder_owner = thread_self();
+    foreground_owner = thread_self();
     usb_taken = false;
     if (!media_initialized)
     {
@@ -971,9 +989,15 @@ static int invoke_module(void *opaque)
     rock_list_discard();
     button_clear_pressed();
     rock_display_stop();
+    if (engine_heap)
+    {
+        core_unpin(engine_heap);
+        core_free(engine_heap);
+        engine_heap = 0;
+    }
 
     rock_image_decoder_close();
-    decoder_owner = 0;
+    foreground_owner = 0;
     filename = NULL;
     usb_taken = false;
 

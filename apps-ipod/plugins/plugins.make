@@ -244,6 +244,7 @@ include $(APPSDIR)/plugins/rock-engines.make
 include $(APPSDIR)/plugins/pictureflow-compat.make
 include $(APPSDIR)/plugins/wolf3d-compat.make
 include $(APPSDIR)/plugins/pdbox-compat.make
+include $(APPSDIR)/plugins/duke3d/duke3d.make
 include $(APPSDIR)/plugins/phase4-puzzles.make
 include $(APPSDIR)/plugins/clock-compat.make
 include $(APPSDIR)/plugins/fft-compat.make
@@ -312,7 +313,7 @@ $(ROCK_OBJECTS)/plugin_crt0_large_stack.o: $(ROCK_SRC)/plugin_crt0.c $(ROCK_FING
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -DROCK_REQUEST_LARGE_STACK -MMD -MP -c $< -o $@
 
-$(filter-out %/sgt-solo.rock %/pictureflow.rock %/wolf3d.rock,$(ROCKS)): $(ROCK_OBJECTS)/plugin_crt0.o
+$(filter-out %/sgt-solo.rock %/pictureflow.rock %/wolf3d.rock %/duke3d.rock,$(ROCKS)): $(ROCK_OBJECTS)/plugin_crt0.o
 $(ROCKS): $(ROCK_OUT)/modules/%.rock: $(ROCK_LINK_INPUT) $(ROCK_MANIFEST)
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,LD $(@F))$(CC) $(ROCK_FLAGS) $(ROCK_LINK) -o $@.elf $(filter %.o,$^) $(filter %.a,$^) -lgcc

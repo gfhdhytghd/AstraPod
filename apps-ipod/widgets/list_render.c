@@ -603,7 +603,7 @@ static const char *row_icon(enum themable_icons icon, enum list_row_kind kind,
             case Icon_Book: return "Ę";
             case Icon_Lyrics: return "ė";
             case Icon_Plugin: return "Ĥ";
-            /* A plugin's own menu runs in the plugin browser's activity. */
+            /* A plugin's own menu runs in a file-row activity. */
             case Icon_Menu_setting:
             case Icon_Menu_functioncall:
             case Icon_Submenu: return NULL;
@@ -747,7 +747,8 @@ static bool file_rows(enum current_activity activity)
 {
     return activity == ACTIVITY_FILEBROWSER || activity == ACTIVITY_PLAYLISTBROWSER ||
            activity == ACTIVITY_DOCUMENTBROWSER || activity == ACTIVITY_IMAGEBROWSER ||
-           activity == ACTIVITY_PLUGINBROWSER || activity == ACTIVITY_FILE_SEARCH ||
+           activity == ACTIVITY_PLUGINBROWSER || activity == ACTIVITY_PLUGIN ||
+           activity == ACTIVITY_FILE_SEARCH ||
            activity == ACTIVITY_FOLDERSELECT;
 }
 

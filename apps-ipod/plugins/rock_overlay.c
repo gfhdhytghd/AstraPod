@@ -66,9 +66,10 @@ bool rock_overlay_take(struct rock_overlay_launch *launch)
     if (!accepting || thread_self() != foreground_id)
         return false;
     accepting = false;
-    if (requested)
-        *launch = pending;
-    return requested;
+    if (!requested || rock_usb_taken())
+        return false;
+    *launch = pending;
+    return true;
 }
 
 void rock_overlay_end(void)

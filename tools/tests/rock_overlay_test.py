@@ -72,10 +72,18 @@ int main(void)
 
     rock_overlay_begin();
     assert(rock_overlay_request("wolf3d", NULL) == 0);
+    usb = true;
+    assert(!rock_overlay_take(&launch));
+    usb = false;
     rock_overlay_end();
     assert(!rock_overlay_take(&launch));
     rock_overlay_begin();
     assert(!rock_overlay_take(&launch));
+    rock_overlay_end();
+
+    rock_overlay_begin();
+    assert(rock_overlay_request("12345678901234567890123456789012", NULL) == 0);
+    assert(rock_overlay_take(&launch) && !launch.has_parameter);
     rock_overlay_end();
     return 0;
 }

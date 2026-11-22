@@ -39,4 +39,3 @@ void I_InitSound(void)
     if (!vol_lookup)
         I_Error("Not enough memory for sound");
 }
-

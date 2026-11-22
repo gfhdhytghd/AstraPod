@@ -498,3 +498,17 @@ The Lua viewer installs Hello World and Viewport Test in Demos.
 Select either script from its plugin directory. Lua Stopwatch appears
 in Applications. It uses the wheel player's physical buttons and
 stores laps in `stopwatch-lua.dat`, separate from the native stopwatch.
+
+## XRick
+
+Extract the Rockbox `xrick-data.zip` to the player's root folder, so that
+`/.rockbox/xrick/filelist.dat` exists. Open **Plugins > Games > xrick**.
+Without the data, the module shows where to copy it and returns on Menu.
+The game data is not part of the package. A damaged data set stops at an
+error splash before the game starts.
+
+The game stops native playback on launch and plays its sound through the
+built-in PCM stream. Use Left and Right to walk, the wheel for Up and Down,
+Select to fire and Play to pause. Hold Select and turn the wheel back to
+shoot, forward to drop dynamite, or press Left or Right to poke. Menu
+opens Resume, Restart, Cheat Settings and Quit.

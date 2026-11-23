@@ -58,7 +58,6 @@
 #define LV_PIXELS (LCD_WIDTH * LCD_HEIGHT)
 #define LV_FRAME (LV_PIXELS * sizeof(fb_data))
 #define LV_TICKS(ms) MAX(1, ((ms) * HZ + 999) / 1000)
-#define LYRICS_LEAD_MS 300
 #define LV_SCROLL_FRAMES ANIM_F(20)
 #define LV_STAGGER_FRAMES ANIM_F(2)
 #define LV_FOCUS_FRAMES ANIM_F(12)
@@ -780,7 +779,7 @@ static long lv_local_vocal_clock(long raw, uint32_t sequence, uint32_t now, bool
 
 static int lv_lyric_lead(void)
 {
-    return LYRICS_LEAD_MS + global_settings.lyric_lead;
+    return global_settings.lyric_lead;
 }
 
 /* Keep transport and progress on playback time. All lyrics consumers use

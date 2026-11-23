@@ -1884,7 +1884,7 @@ const struct settings_list settings[] = {
     INT_SETTING(0, lyric_next_opacity, LANG_LYRICS_NEXT_OPACITY, 60,
                 "lyric next opacity", UNIT_PERCENT, 0, 100, 5,
                 NULL, NULL, NULL),
-    INT_SETTING(0, lyric_lead, LANG_LYRICS_LEAD, 200,
+    INT_SETTING(0, lyric_lead, LANG_LYRICS_LEAD, 500,
                 "lyrics lead", UNIT_MS, -1000, 1000, 50, NULL, NULL, NULL),
     /* An index, not a duration -- CHOICE_SETTING stores the position in the
      * list. The viewer turns it into milliseconds, so the scale can be

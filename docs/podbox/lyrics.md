@@ -24,7 +24,7 @@ three centre clicks select next or previous. The volume buttons adjust
 volume. The dock remote's +/− keys continue to scroll lyrics. Click-wheel
 skip uses the WPS skip policy and held seek uses the WPS seek loop.
 
-`Lyrics lead` defaults to +200 ms. It accepts −1000 to +1000 ms in 50 ms
+`Lyrics lead` defaults to +500 ms. It accepts −1000 to +1000 ms in 50 ms
 steps. The page adds it to the local or remote lyrics clock and clamps the
 result to the track. A negative value delays the lyrics. Line focus, words,
 and return to Auto use this clock. Playback and the progress bar use the

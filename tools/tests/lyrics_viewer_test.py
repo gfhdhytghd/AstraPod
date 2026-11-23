@@ -24,7 +24,10 @@ h=(r/'apps-ipod/viewers/lyric_viewer/lyrics.h').read_text();h=re.sub(r'^#include
 tokens=sorted(set(re.findall(r'\bACTION_[A-Z_0-9]+',source+' ACTION_WPS_BROWSE ACTION_UNKNOWN')))
 button_codes=(r/'firmware/export/button.h').read_text()
 button_codes='\n'.join(re.findall(r'^#define BUTTON_(?:MULTIMEDIA(?:_(?:PLAYPAUSE|NEXT|PREV|VOLUME_UP|VOLUME_DOWN))?|REPEAT)\s+[^\n]+',button_codes,re.M))
-adapter=r'''
+settings=(r/'apps-ipod/settings/settings_list.c').read_text()
+lead_default=int(re.search(r'INT_SETTING\(0,\s*lyric_lead,\s*LANG_LYRICS_LEAD,\s*(\d+),',settings)[1])
+assert lead_default==500
+adapter=f'enum {{ DEFAULT_LYRIC_LEAD = {lead_default} }};\n'+r'''
 #include <dirent.h>
 #define HAVE_USB_PODLINK
 #define HAVE_ADJUSTABLE_CPU_FREQ
@@ -505,7 +508,7 @@ static int select_scenario(void)
         select_button=(remote_key || remote_source)?BUTTON_RC_SELECT:BUTTON_SELECT;
         return ACTION_UNKNOWN;
     }
-    long expected=backward_seek?0:(remote_source ? 2000 : 4000)-global_settings.lyric_lead-300;
+    long expected=backward_seek?0:(remote_source ? 2000 : 4000)-global_settings.lyric_lead;
     assert(line_seeks==1 && seek_target==expected);
     assert(!lv.mode.manual && lv.mode.focus==focus);
     assert(lv.pose_focus == focus && lv.motion_frames == ANIM_F(15));
@@ -532,7 +535,7 @@ static int select_scenario(void)
         remote_cn("one",2800,0); /* Late pre-seek clock after landing. */
         return ACTION_NONE;
     }
-    assert(lv_lyric_elapsed()==(backward_seek?500:remote_source?2000:4000));
+    assert(lv_lyric_elapsed()==(backward_seek?global_settings.lyric_lead:remote_source?2000:4000));
     assert(lv.pose_focus == focus);
     assert(!title_draws&&!manual_draws);
     return ACTION_WPS_BROWSE; /* SELECT exits again after auto-follow. */
@@ -745,7 +748,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  FILE*f=fopen("song.lrc","w");assert(f);fputs("[00:00.00]One\n[00:04.00]<00:04.00>Two <00:06.00>words\n[00:08.00]Three\n",f);fclose(f);
  f=fopen("other.txt","w");assert(f);fputs("New first line\nNew second line\n中文第三行",f);fclose(f);
  snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);playing.title="Title";playing.artist="Artist";playing.length=60000;
- global_settings.lyric_lead=200;global_settings.fg_color=65535;global_settings.lyric_highlight=true;global_settings.lyric_backlight=true;global_settings.lyric_prev_opacity=global_settings.lyric_next_opacity=60;
+ global_settings.lyric_lead=DEFAULT_LYRIC_LEAD;global_settings.fg_color=65535;global_settings.lyric_highlight=true;global_settings.lyric_backlight=true;global_settings.lyric_prev_opacity=global_settings.lyric_next_opacity=60;
  global_settings.animations=true;
  deny_entry_core=true;
  if (!strcmp(argv[2],"frames")) {
@@ -779,7 +782,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  }
  if (!strcmp(argv[2],"select")) {
    plan=11;remote_source=timed_fixture=false;
-   int lead_settings[]={200,0,-200};
+   int lead_settings[]={DEFAULT_LYRIC_LEAD,0,-200};
    for (int i=0;i<3;i++) {
      global_settings.lyric_lead=lead_settings[i];
      calls=line_seeks=title_draws=manual_draws=0;playing.elapsed=0;
@@ -787,7 +790,7 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
      assert(lyric_viewer()==GO_TO_PREVIOUS && calls==5 && line_seeks==1);
    }
    assert(fast_seeks==3);
-   global_settings.lyric_lead=200;
+   global_settings.lyric_lead=DEFAULT_LYRIC_LEAD;
    plan=12;
    const char *names[]={"song.wav","other.wav"};
    for (int i=0;i<2;i++) {
@@ -875,30 +878,28 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  lyrics_remote_cancel();
  remote_source=false;plan=6;art_present=false;
  snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);
- int leads[]={200,0,-200};
+ int leads[]={DEFAULT_LYRIC_LEAD,0,-200};
  for(int i=0;i<3;i++){
-   calls=0;global_settings.lyric_lead=leads[i];lead_boundary=4000-leads[i]-300;playing.elapsed=lead_boundary-1;
+   calls=0;global_settings.lyric_lead=leads[i];lead_boundary=4000-leads[i];playing.elapsed=lead_boundary-1;
    assert(lyric_viewer()==GO_TO_PREVIOUS);
  }
  assert(updates>40);
  struct lv_state recorder={.entry_at=UINT32_MAX-1999,.first_pending=true};lv_state=&recorder;
- lv.length=60000;lv.elapsed=100;assert(lv_lyric_elapsed()==200);
+ lv.length=60000;lv.elapsed=300;assert(lv_lyric_elapsed()==100);
  global_settings.lyric_lead=-1000;assert(lv_lyric_elapsed()==0);
- global_settings.lyric_lead=200;lv.elapsed=59999;assert(lv_lyric_elapsed()==60000);
+ global_settings.lyric_lead=DEFAULT_LYRIC_LEAD;lv.elapsed=59999;assert(lv_lyric_elapsed()==60000);
  assert(lyrics_begin_text()==LYRICS_OK);
  assert(lyrics_append_ttml("<p begin='0.2s' end='1s'>"
                            "<span begin='0.2s' end='1s'>First</span></p>",false,0));
  assert(lyrics_publish_remote(1000));
- global_settings.lyric_lead=0;
  lv.elapsed=0;
  assert(lyrics_time(0)==200&&lyrics_vocal_cue(0,false,0).begin==200);
  assert(lyrics_index_at(lv_lyric_elapsed())==0&&lv_vocal_window(0,lv_lyric_elapsed()));
- lv.length=1000;lv.elapsed=699;assert(lv_vocal_window(0,lv_lyric_elapsed()));
- lv.elapsed=700;assert(!lv_vocal_window(0,lv_lyric_elapsed()));
+ lv.length=1000;lv.elapsed=499;assert(lv_vocal_window(0,lv_lyric_elapsed()));
+ lv.elapsed=500;assert(!lv_vocal_window(0,lv_lyric_elapsed()));
  assert(lv_follow_index(lv_lyric_elapsed(),lyrics_index_at(lv_lyric_elapsed()))==0);
  lyrics_close();
- global_settings.lyric_lead=200;
- puts("PASS 300 ms lyrics lead: local line and word boundaries, remote line boundary, TTML and track limits");
+ puts("PASS Lyrics lead setting: local line and word boundaries, remote line boundary, TTML and track limits");
  current_tick=0;precise_extra=1000;
  lv_phase_end(LV_RESTORE,500);lv_record(0,LV_STEADY,false);
  for(int i=1;i<95;i++)lv_record(0,LV_STEADY,false);

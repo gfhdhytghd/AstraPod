@@ -459,6 +459,7 @@ speech/talk.c
 
 system/activity.c
 system/app_buffer.c
+system/core_map.c
 system/app_util.c
 system/bg_task.c
 system/library_files.c

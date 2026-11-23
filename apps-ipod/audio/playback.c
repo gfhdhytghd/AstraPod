@@ -98,6 +98,7 @@ static bool reported_high_rate;
 #include "metadata/art_name.h"
 #include "draw/image_load.h"       /* image_embedded_usable() */
 #include "metadata/album_palette.h"
+#include "system/core_map.h"
 
 #include "pcm_mixer.h"
 
@@ -1248,9 +1249,18 @@ static void audio_reset_buffer(void)
         audio_reset_buffer_noalloc(core_get_data(audiobuf_handle));
     }
     else
-    /* someone is abusing core_alloc_maximum(). Fix this evil guy instead of
-     * trying to handle OOM without hope */
-        panicf("%s(): OOM!\n", __func__);
+    {
+        /* someone is abusing core_alloc_maximum(). Fix this evil guy instead
+         * of trying to handle OOM without hope -- core_map names him. */
+        extern unsigned sm1_ahead_target;
+        static char why[200];
+        snprintf(why, sizeof(why), "%s OOM: status %d state %d sm1 %u",
+                 __func__, audio_status(), (int)buffer_state,
+                 sm1_ahead_target);
+        core_map_log(why);
+        core_map_summary(why, sizeof(why));
+        panicf("%s(): OOM! %s", __func__, why);
+    }
 }
 
 /* Set the buffer margin to begin rebuffering when 'seconds' from empty */

@@ -20,6 +20,7 @@ Paths below are relative to `/.rockbox`, except `/.scrobbler.log`.
 | `/.scrobbler.log` / audio playback | Unbounded | Common cap; each current/backup part carries Audioscrobbler header |
 | `logs/buffer_damage.log` / buffering damage snapshot | Unbounded | Common cap on every snapshot line |
 | `logs/upgrade.log` / library layout migration | Unbounded | Common cap |
+| `logs/memory.log` / core allocator map on out-of-memory (`system/core_map.c`) | New | Common cap |
 | `remote-log.txt` / remote input screen | Unbounded append with descriptor held while screen open | Common cap; only actual records open/write/close |
 | `logf.txt` / optional logf dump screen | Separate timestamped snapshots, at most the 16 KiB RAM ring each | One capped dump family; logf disabled in normal build |
 | `rockbox_log.txt` / optional LOGDISKF | Unbounded repeated RAM-buffer flush | Common cap; LOGDISKF disabled in normal build |

@@ -28,6 +28,7 @@
 #include "system/app_buffer.h"
 #include "widgets/folder_select.h"
 #include "widgets/splash.h"
+#include "system/core_map.h"
 
 #ifdef ROCK_COMPAT_GENERATED
 #include "rock_compat_sync.h"
@@ -571,7 +572,10 @@ static void *rock_quake_heap_acquire(void)
 
     int handle = core_alloc(ROCK_QUAKE_HEAP_BYTES);
     if (handle <= 0)
+    {
+        core_map_log("quake heap 12 MiB");
         return NULL;
+    }
 
     core_pin(handle);
     quake_heap_handle = handle;

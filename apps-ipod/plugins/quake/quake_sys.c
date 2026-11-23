@@ -139,6 +139,14 @@ enum plugin_status rock_quake_run(void)
                              QUAKE_DATA);
                 quake_quit(PLUGIN_OK);
         }
+        /* A remote player (Cider, Rufin) pauses local playback rather than
+         * stopping it, so "paused" is the usual case, not a full heap. */
+        if (rb->audio_status() & AUDIO_STATUS_PAUSE)
+        {
+            show_message("Music is paused, which holds its memory.",
+                         "Stop it and try again.");
+            quake_quit(PLUGIN_OK);
+        }
         parms.membase = rb->quake_heap_acquire();
         if (!parms.membase)
         {

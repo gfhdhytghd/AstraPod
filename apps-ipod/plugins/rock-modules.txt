@@ -92,6 +92,7 @@ games/jewels
 games/maze
 games/mazezam
 games/minesweeper
+games/mochipod
 games/pacbox
 games/pegbox
 games/pong

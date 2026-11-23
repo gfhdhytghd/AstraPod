@@ -82,6 +82,7 @@ include $(APPSDIR)/plugins/imageviewer-compat.make
 include $(APPSDIR)/plugins/mpegplayer-compat.make
 include $(APPSDIR)/plugins/quake/quake-compat.make
 include $(APPSDIR)/plugins/md5sum.make
+include $(APPSDIR)/plugins/mochipod.make
 include $(APPSDIR)/plugins/disktidy.make
 include $(APPSDIR)/plugins/resident.make
 include $(APPSDIR)/plugins/encoder-compat.make

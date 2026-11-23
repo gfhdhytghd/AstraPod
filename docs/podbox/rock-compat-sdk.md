@@ -80,6 +80,15 @@ rate. The title identifies stopped and paused playback, with the meters at
 rest in either state. Select opens the native display options. Menu exits.
 The meter has no playback controls, volume controls, or USB audio input.
 
+## MochiPod
+
+**Plugins > Games > mochipod** is MochiPod V3, a Tamagotchi Connection V3
+remake by colliderkkz. The build fetches its source at a pinned commit into
+`~/.cache/podbox-mochipod` the first time, so the first build needs network
+access to GitHub. Saves are `mochipod-*` files in the games data folder. See
+the [MochiPod README](https://github.com/colliderkkz/mochipod) for its
+controls.
+
 ## Native diagnostics
 
 `rb_info` presents its diagnostics through native lists. The build

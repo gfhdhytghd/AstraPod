@@ -6,6 +6,8 @@
 #define CIDER_ART_MAX (12 + 240 * 240 * 2)
 #define CIDER_RAM_BYTES (512 * 1024)
 #define CIDER_SLOTS 24
+/* Room for both M/S and XS failures across a 16-cover read-ahead. */
+#define CIDER_FAILED_COVERS 32
 #define CIDER_CREDIT (128 * 1024)
 struct cider_state
 {
@@ -51,7 +53,7 @@ struct cider_cache
     unsigned char data[CIDER_RAM_BYTES];
     struct cider_slot slot[CIDER_SLOTS];
     unsigned int bytes, clock;
-    struct { char key[65], tier[3]; uint32_t until; } failed[8];
+    struct { char key[65], tier[3]; uint32_t until; } failed[CIDER_FAILED_COVERS];
     unsigned int failed_next;
 };
 struct cider_transfer

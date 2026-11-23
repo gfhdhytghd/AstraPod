@@ -53,8 +53,9 @@ static void img_filter_apply_banded(void*p,int h,int w,const void*f){(void)p;(vo
 static const void*carousel_filter(void){return NULL;}
 static struct {unsigned int(*art_key)(int);bool(*read_art)(int,struct bitmap*);unsigned int(*art_version)(int);} model_data,*model=&model_data;
 static fb_data scratch_pixels[128*128],*surface=scratch_pixels;static int quality;
-static int visited[40],nvisited;
-static bool cider_page_row(int index,struct cider_row*r){if(nvisited<40)visited[nvisited++]=index;memset(r,0,sizeof*r);r->bg=0x123456;strcpy(r->art,"key");return index>=0;}
+static int visited[40],nvisited,demands;
+static bool cider_page_peek(int index,struct cider_row*r){if(nvisited<40)visited[nvisited++]=index;memset(r,0,sizeof*r);r->bg=0x123456;strcpy(r->art,"key");return index>=0;}
+static bool cider_page_row(int index,struct cider_row*r){demands++;return cider_page_peek(index,r);}
 static bool cider_copy_art(const char*k,const char*t,void*p,unsigned int n){(void)k;if((!strcmp(t,"M")&&quality!=3)||(!strcmp(t,"XS")&&quality<2))return false;uint16_t*out=p;for(unsigned int i=0;i<n/2;i++)out[i]=i;return true;}
 static bool local_store;
 static bool cider_art_local(const char*k,const char*t){(void)k;(void)t;return local_store;}
@@ -74,11 +75,13 @@ static long current_tick,moved_at;
 static int previous_center,travel=1;
 static bool flicking;
 static unsigned int revision;
-static int m_requests,xs_requests;
+static int m_requests,xs_requests,rejected;
 static const char*retained_tier;
 static int count(void){return 20;}
 static bool cider_has_art(const char*k,const char*t){(void)k;return !strcmp(t,"M")?quality==3:quality>=2;}
-static void cider_prefetch_art(const char*k,const char*t){(void)k;assert(!strcmp(t,"M"));m_requests++;}
+static bool cider_prefetch_art(const char*k,const char*t){
+ (void)k;assert(!strcmp(t,"M"));if(rejected){rejected--;return false;}m_requests++;return true;
+}
 static void cider_request_xs(const char*const*k,unsigned int n){(void)k;assert(n>0&&n<=5);xs_requests++;}
 static void cider_warm_art(const char*const*k,unsigned int n,const char*t){(void)k;assert(n<=7);(void)t;}
 static void cider_retain_art(const char*const*k,unsigned int n,const char*t){(void)k;assert(n==9);retained_tier=t;}
@@ -129,6 +132,8 @@ static bool room=true,alloc_fails,pinned,allocated_scratch;
 static int opens,frees,failures,cancels,alloc_calls;
 static void cider_page_open(const char*r){assert(!strcmp(r,"albums?format=panel"));}
 static int cider_page_total(void){return 5;}
+static bool cider_page_stale(void){return false;}
+static bool cider_page_pending(void){return false;}
 static int get_action(int c,int t){(void)c;(void)t;assert(0);return 0;}
 static int quick_screen_current(int a,void*p){(void)a;(void)p;assert(0);return 0;}
 static int agents_nav_pending(void){return AGENTS_NAV_NONE;}
@@ -179,7 +184,9 @@ for(int show=0;show<=4;show++){for(int year=0;year<3;year++){
 quality=1;center_index=6;previous_center=5;current_tick=100;moved_at=0;nvisited=0;tick();assert(!flicking&&m_requests==1&&xs_requests==1&&!strcmp(retained_tier,"M"));
 center_index=5;current_tick=110;nvisited=0;tick();assert(flicking&&xs_requests==2&&visited[0]==5&&visited[1]==4&&!strcmp(retained_tier,"M"));
 current_tick=145;tick();assert(!flicking&&m_requests==3&&!strcmp(retained_tier,"M"));
-local_store=true;quality=2;struct bitmap pending;assert(!art(0,&pending));local_store=false;
+rejected=1;nvisited=demands=0;tick();
+assert(!rejected&&m_requests==4&&demands==1);
+local_store=true;quality=2;struct bitmap pending;assert(!art(0,&pending));assert(!art(90,&pending)&&demands==1);local_store=false;
 surface=NULL;
 for(int visit=0;visit<2;visit++)assert(cider_covers()==CIDER_COVERS_REMOTE_RETURN);
 assert(opens==2&&frees==2&&cancels==2&&!surface&&!allocated_scratch&&alloc_calls==2);

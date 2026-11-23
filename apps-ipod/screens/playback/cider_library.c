@@ -6,104 +6,183 @@
 #include <stdlib.h>
 #include <stdio.h>
 #define PAGE_SLOTS 3
-static struct
-{
-    struct cider_row rows[CIDER_PAGE_ROWS];
-    int offset, count;
-    unsigned int request, used;
-    bool pending, tracks;
-    long requested;
-} pages[PAGE_SLOTS];
+/* A Rufin page can include a server timeout followed by a fallback fetch. */
+#define PAGE_TIMEOUT (8 * HZ)
+#define PAGE_LOOKBACK (CIDER_PAGE_ROWS - 9)
+
 struct library_query
 {
     char route[380];
-    int total, wanted;
+    int total, wanted, offset;
     bool stale;
 };
 
-static struct library_query library_query = {.total = -1};
+static struct library_query library_queries[2] = {{.total = -1}, {.total = -1}};
+static struct library_query *library_query = &library_queries[0];
 static struct library_query track_query = {.total = -1};
+static struct page_slot
+{
+    struct cider_row rows[CIDER_PAGE_ROWS];
+    struct library_query *query;
+    int offset, count;
+    unsigned int request, used;
+    bool pending;
+    long requested;
+} pages[PAGE_SLOTS];
+
 static uint32_t library_generation;
 static unsigned int clock, request_id = 0x10000000;
+static bool library_open;
 
-_Static_assert(sizeof pages + sizeof library_query + sizeof track_query < 112 * 1024,
+_Static_assert(sizeof pages + sizeof library_queries + sizeof track_query < 112 * 1024,
                "Cider module RAM budget");
 
 static void reset_query(struct library_query *query)
 {
     query->total = -1;
-    query->wanted = 0;
+    query->wanted = query->offset = 0;
     query->stale = false;
+}
+
+static void clear_pages(void)
+{
+    for (int i = 0; i < PAGE_SLOTS; i++)
+        pages[i].query = NULL;
+    reset_query(&library_queries[0]);
+    reset_query(&library_queries[1]);
+    reset_query(&track_query);
 }
 
 void cider_library_reset(void)
 {
-    memset(pages, 0, sizeof pages);
-    reset_query(&library_query);
-    reset_query(&track_query);
+    clear_pages();
+    library_generation = 0;
 }
 
 void cider_library_invalidate(uint32_t generation)
 {
-    if (!generation || generation == library_generation)
-        return;
-    cider_library_reset();
+    if (generation != library_generation)
+        clear_pages();
     library_generation = generation;
 }
 
-static void open_query(struct library_query *query, const char *route)
+static void forget_pages(struct library_query *query, bool pending_only)
 {
-    if (!strcmp(query->route, route))
-        return;
-    snprintf(query->route, sizeof query->route, "%s", route);
-    reset_query(query);
-    bool tracks = query == &track_query;
     for (int i = 0; i < PAGE_SLOTS; i++)
-        if (pages[i].tracks == tracks)
-            memset(&pages[i], 0, sizeof pages[i]);
+        if (pages[i].query == query && (!pending_only || pages[i].pending))
+            pages[i].query = NULL;
 }
 
-void cider_library_open(const char *route) { open_query(&library_query, route); }
-void cider_library_tracks_open(const char *route) { open_query(&track_query, route); }
-int cider_library_total(void) { return library_query.total; }
+static void replace_route(struct library_query *query, const char *route)
+{
+    forget_pages(query, false);
+    reset_query(query);
+    snprintf(query->route, sizeof query->route, "%s", route);
+}
+
+void cider_library_open(const char *route)
+{
+    library_open = *route != 0;
+    if (library_open && !strcmp(library_query->route, route))
+        return;
+    forget_pages(library_query, true);
+    if (!library_open)
+        return;
+
+    library_query = library_query == &library_queries[0] ?
+                    &library_queries[1] : &library_queries[0];
+    if (strcmp(library_query->route, route) || library_query->stale)
+        replace_route(library_query, route);
+}
+
+void cider_library_tracks_open(const char *route)
+{
+    if (strcmp(track_query.route, route))
+        replace_route(&track_query, route);
+}
+
+int cider_library_total(void)
+{
+    return library_open ? library_query->total : -1;
+}
+
+bool cider_library_pending(void)
+{
+    for (int i = 0; library_open && i < PAGE_SLOTS; i++)
+        if (pages[i].query == library_query && pages[i].pending &&
+            TIME_BEFORE(current_tick, pages[i].requested + PAGE_TIMEOUT))
+            return true;
+    return false;
+}
+
 int cider_library_tracks_total(bool *stale)
 {
     if (stale)
         *stale = track_query.stale;
     return track_query.total;
 }
-bool cider_library_stale(void) { return library_query.stale; }
+bool cider_library_stale(void) { return library_open && library_query->stale; }
 uint32_t cider_library_revision(void) { return library_generation; }
 
-static bool query_row(struct library_query *query, int index, struct cider_row *row)
+static bool contains(const struct page_slot *page, int index)
+{
+    return index >= page->offset && index < page->offset + page->count;
+}
+
+static bool query_row(struct library_query *query, int index,
+                      struct cider_row *row, bool request)
 {
     if (index < 0 || (query->total >= 0 && index >= query->total))
         return false;
-    bool tracks = query == &track_query;
+    int before = -1, after = 1000001;
     for (int i = 0; i < PAGE_SLOTS; i++)
-        if (tracks == pages[i].tracks && index >= pages[i].offset &&
-            index < pages[i].offset + pages[i].count)
+    {
+        struct page_slot *page = &pages[i];
+        if (page->query != query || !page->count)
+            continue;
+        if (contains(page, index))
         {
-            *row = pages[i].rows[index - pages[i].offset];
-            pages[i].used = ++clock;
-            if (!tracks && index >= pages[i].offset + pages[i].count - 8)
-                query->wanted = pages[i].offset + pages[i].count;
+            *row = page->rows[index - page->offset];
+            if (request)
+            {
+                page->used = ++clock;
+                int end = page->offset + page->count;
+                if (query != &track_query && index >= end - 8 &&
+                    (query->wanted == index || query->wanted == end ||
+                     contains(page, query->wanted)))
+                    query->wanted = query->offset = end;
+            }
             return true;
         }
-    /* The transport may truncate a CL frame before 50 rows. Ask for the
-     * missing index so a short page can never hide the rest of the album. */
-    query->wanted = index;
+        if (page->offset > index && page->offset < after)
+            after = page->offset;
+        if (page->offset < index && page->offset + page->count > before)
+            before = page->offset + page->count;
+    }
+    if (request && query->wanted != index)
+    {
+        query->wanted = index;
+        query->offset = index;
+        if (query != &track_query && after <= 1000000 &&
+            (before < 0 || after - index < index - before))
+            query->offset = index > PAGE_LOOKBACK ? index - PAGE_LOOKBACK : 0;
+    }
     return false;
 }
 
 bool cider_library_row(int index, struct cider_row *row)
 {
-    return query_row(&library_query, index, row);
+    return library_open && query_row(library_query, index, row, true);
+}
+
+bool cider_library_peek(int index, struct cider_row *row)
+{
+    return library_open && query_row(library_query, index, row, false);
 }
 
 bool cider_library_track_row(int index, struct cider_row *row)
 {
-    return query_row(&track_query, index, row);
+    return query_row(&track_query, index, row, true);
 }
 
 static unsigned int next_query(struct library_query *query, char *out,
@@ -112,43 +191,65 @@ static unsigned int next_query(struct library_query *query, char *out,
     int wanted = query->wanted;
     if (!*query->route || !gen || (query->total >= 0 && wanted >= query->total))
         return 0;
-    bool tracks = query == &track_query;
-    /* Two track pages keep the six visible rows available at a page boundary. */
-    int first = tracks ? 1 : 0;
-    int end = *track_query.route && !tracks ? 1 : PAGE_SLOTS;
-    int oldest = first;
-    for (int i = first; i < end; i++)
+
+    struct page_slot *victim = NULL, *track_page = NULL, *own_victim = NULL;
+    int parent_pages = 0;
+    for (int i = 0; i < PAGE_SLOTS; i++)
     {
-        if (pages[i].tracks == tracks)
+        struct page_slot *page = &pages[i];
+        if (page->query == query)
         {
-            if (wanted >= pages[i].offset &&
-                wanted < pages[i].offset + pages[i].count)
+            if (contains(page, wanted))
                 return 0;
-            if (pages[i].pending)
-            {
-                if (TIME_BEFORE(current_tick, pages[i].requested + 5 * HZ))
-                    return 0;
-                pages[i].pending = false;
-            }
+            if (page->pending &&
+                TIME_BEFORE(current_tick, page->requested + PAGE_TIMEOUT))
+                return 0;
+            page->pending = false;
+            if (!own_victim || page->used < own_victim->used)
+                own_victim = page;
         }
-        if (pages[i].used < pages[oldest].used)
-            oldest = i;
+        else if (page->query && page->query != &track_query)
+            parent_pages++;
+        if (page->query == &track_query)
+        {
+            track_page = page;
+            continue;
+        }
+        if (page->query && page->pending)
+            continue;
+        if (!victim || (victim->query &&
+                        (!page->query || page->used < victim->used)))
+            victim = page;
     }
-    pages[oldest].offset = wanted;
-    pages[oldest].count = 0;
-    pages[oldest].pending = true;
-    pages[oldest].tracks = tracks;
-    pages[oldest].request = ++request_id;
-    pages[oldest].requested = current_tick;
-    pages[oldest].used = ++clock;
-    return snprintf(out, size, "cq\t%lu\t%u\t%d\t50\t%s", (unsigned long)gen,
-                    pages[oldest].request, wanted, query->route);
+    /* A panel consumes each track fragment before requesting the next one. */
+    if (query == &track_query && track_page)
+        victim = track_page;
+    if (!victim)
+        return 0;
+    /* Keep the parent's last page when two slots can serve the active view. */
+    if (!*track_query.route && parent_pages == 1 && own_victim &&
+        victim->query && victim->query != query)
+        victim = own_victim;
+
+    unsigned int n = snprintf(out, size, "cq\t%lu\t%u\t%d\t%d\t%s",
+                              (unsigned long)gen, ++request_id, query->offset,
+                              CIDER_PAGE_ROWS, query->route);
+    if (n >= size)
+        return 0;
+    victim->query = query;
+    victim->offset = query->offset;
+    victim->count = 0;
+    victim->pending = true;
+    victim->request = request_id;
+    victim->requested = current_tick;
+    victim->used = ++clock;
+    return n;
 }
 
 unsigned int cider_library_next(char *out, unsigned int size, uint32_t gen)
 {
     unsigned int n = next_query(&track_query, out, size, gen);
-    return n ? n : next_query(&library_query, out, size, gen);
+    return n || !library_open ? n : next_query(library_query, out, size, gen);
 }
 
 static bool field(const char **p, const char *end, char *out, unsigned int size)
@@ -191,29 +292,27 @@ bool cider_library_receive(const void *data, unsigned int size,
         if (!*number) return false;
         v[i] = value;
     }
-    if (v[0] != generation || v[2] < library || v[6] > CIDER_PAGE_ROWS ||
-        v[3] > 1000000 || v[4] > 1000000 || v[5] > 1 ||
-        v[3] > v[4] || v[6] > v[4] - v[3])
+    if (v[0] != generation || v[6] > CIDER_PAGE_ROWS ||
+        v[3] > 1000000 || v[4] > 1000000 || v[5] > 1)
         return false;
-    int slot = -1;
+    struct page_slot *page = NULL;
     for (int i = 0; i < PAGE_SLOTS; i++)
-        if (pages[i].pending && pages[i].request == v[1] &&
+        if (pages[i].query && pages[i].pending && pages[i].request == v[1] &&
             (unsigned long)pages[i].offset == v[3])
-            slot = i;
-    if (slot < 0)
+            page = &pages[i];
+    if (!page)
         return false;
-    if (library_generation && v[2] != library_generation)
+    /* Only CG can announce a new generation. Free the request for a retry. */
+    if (v[2] != library)
     {
-        reset_query(&library_query);
-        reset_query(&track_query);
-        for (int i = 0; i < PAGE_SLOTS; i++)
-            if (i != slot)
-                memset(&pages[i], 0, sizeof pages[i]);
+        page->query = NULL;
+        return false;
     }
-    pages[slot].count = 0;
+    if (v[3] > v[4] || v[6] > v[4] - v[3])
+        return false;
     for (unsigned int i = 0; i < v[6]; i++)
     {
-        struct cider_row *r = &pages[slot].rows[i];
+        struct cider_row *r = &page->rows[i];
         memset(r, 0, sizeof *r);
         if (!field(&p, end, r->id, sizeof r->id) ||
             !field(&p, end, r->title, sizeof r->title) ||
@@ -244,10 +343,16 @@ bool cider_library_receive(const void *data, unsigned int size,
     if (p != end)
         return false;
     library_generation = v[2];
-    struct library_query *query = pages[slot].tracks ? &track_query : &library_query;
+    struct library_query *query = page->query;
     query->total = v[4];
     query->stale = v[5] != 0;
-    pages[slot].count = v[6];
-    pages[slot].pending = false;
+    page->count = v[6];
+    page->pending = false;
+    int end_index = page->offset + page->count;
+    /* A short backward page may stop before the requested row. Continue
+     * from its end without sliding the offset back on repeated lookups. */
+    if (page->count && query->offset == page->offset &&
+        query->wanted >= end_index)
+        query->offset = end_index;
     return true;
 }

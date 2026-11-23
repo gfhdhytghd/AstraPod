@@ -36,12 +36,15 @@ static int quick_screen_current(int a,void*p){(void)a;(void)p;quick_calls++;retu
 #define AGENTS_NAV_NONE 0
 #define GO_TO_PREVIOUS -1
 #define LANG_CAROUSEL_NO_ALBUMS "none"
+#define LANG_TIMEOUT "timeout"
+#define LANG_UNAVAILABLE "unavailable"
 #define LANG_OUT_OF_MEMORY "out of memory"
 #define CIDER_COVER_SCRATCH_BYTES 32768u
 #define ID2P(x) (x)
 #define CAROUSEL_REMOTE_RETURN 2
 long current_tick;
-static int generation=7,mode,polls,first_tick,cancels,store_reads;
+static int generation=7,mode,polls,first_tick,cancels,store_reads,splashes;
+static const char *notice;
 static unsigned int revision;
 static void *surface;
 static size_t core_allocatable(void){return CIDER_COVER_SCRATCH_BYTES;}
@@ -53,6 +56,8 @@ static const int model;
 static struct cider_store store;
 static void cider_page_open(const char*q){cider_library_open(q);}
 static int cider_page_total(void){return cider_library_total();}
+static bool cider_page_stale(void){return cider_library_stale();}
+static bool cider_page_pending(void){return cider_library_pending();}
 static int count(void){return cider_page_total();}
 static bool cider_page_row(int index,struct cider_row *row){return cider_library_row(index,row);}
 static bool cider_available(void){return true;}
@@ -61,17 +66,23 @@ static int resume_index;
 static struct { int cover_remote_index; char cover_remote_id[80]; } global_status;
 static int agents_nav_pending(void){return 0;}
 static unsigned int cider_art_revision(void){return 0;}
-static void splash(int t,const char*s){(void)t;(void)s;}
+static void splash(int t,const char*s){(void)t;notice=s;splashes++;}
 static void cider_cancel_art(void){cancels++;}
 static int carousel_run(const void*m,void*p){(void)m;(void)p;assert(store.loaded);assert(store_reads==0);first_tick=current_tick;return 0;}
 static int get_action(int c,int timeout){
  (void)c;assert(timeout>0);polls++;current_tick+=timeout;
  if(mode==1)return ACTION_STD_CANCEL;
  if(mode==2)return 0; /* no host answer */
- char req[512],wire[400];unsigned g,id,offset;
- assert(cider_library_next(req,sizeof req,generation));
- assert(sscanf(req,"cq\t%u\t%u\t%u",&g,&id,&offset)==3);
+ char req[512],wire[400];static unsigned g,id,offset;
+ if (mode!=3 || polls==1)
+ {
+  assert(cider_library_next(req,sizeof req,generation));
+  assert(sscanf(req,"cq\t%u\t%u\t%u",&g,&id,&offset)==3);
+ }
+ if(mode==3&&polls<60)return 0;
  int n=snprintf(wire,sizeof wire,"CL\t%u\t%u\t1\t0\t1\t0\t1\nA\tAlbum\tArtist\t-\t0\t0\talbum\talbum/A\t181818\t2020\n",g,id);
+ if(mode>=4)
+  n=snprintf(wire,sizeof wire,"CL\t%u\t%u\t1\t0\t0\t%d\t0\n",g,id,mode==5);
  assert(cider_library_receive(wire,n,g,1));return 0;
 }
 '''
@@ -84,7 +95,12 @@ int main(void){
  }
  /* A warm page enters immediately, with no disk scan on the UI path. */
  long start=current_tick;polls=0;cider_covers();assert(!polls&&first_tick==start);
- mode=2;cider_library_reset();polls=0;start=current_tick;cider_covers();assert(polls==50&&current_tick-start==5*HZ);
+ mode=3;cider_library_reset();polls=0;start=current_tick;cider_covers();
+ assert(polls==60&&first_tick-start==6*HZ&&!splashes);
+ mode=2;cider_library_reset();polls=0;start=current_tick;cider_covers();
+ assert(polls==50&&current_tick-start==5*HZ&&!strcmp(notice,"timeout"));
+ mode=4;cider_library_reset();polls=0;cider_covers();assert(polls==1&&!strcmp(notice,"none"));
+ mode=5;cider_library_reset();polls=0;cider_covers();assert(polls==1&&!strcmp(notice,"unavailable"));
  mode=1;cider_library_reset();polls=0;cider_covers();assert(polls==1);
  /* Malformed counts/overflow cannot manufacture rows outside the page. */
  char request[512],wire[512];unsigned gen,id,off;
@@ -92,7 +108,7 @@ int main(void){
  int n=snprintf(wire,sizeof wire,"CL\t%u\t%u\t1\t0\t0\t0\t1\n",gen,id);assert(!cider_library_receive(wire,n,gen,1));
  n=snprintf(wire,sizeof wire,"CL\t%u\t4294967296\t1\t0\t1\t0\t0\n",gen);assert(!cider_library_receive(wire,n,gen,1));
  n=snprintf(wire,sizeof wire,"CL\t%u\t%u\t1\t0\t1\t2\t0\n",gen,id);assert(!cider_library_receive(wire,n,gen,1));
- puts("FU35 entry/store present: first-frame adapter 100ms after one modeled page wait; warm page 0ms; 3 generations recover; absent page exits at 5000ms; cancel 100ms PASS");
+ puts("FU35 entry/store present: first-frame adapter 100ms after one modeled page wait; warm page 0ms; 3 generations recover; 6s fallback accepted; absent, empty and stale replies distinguished; cancel 100ms PASS");
 }
 '''
 (O/'config.h').write_text('');(O/'kernel.h').write_text('#define HZ 100\n#define TIME_BEFORE(a,b) ((long)((a)-(b))<0)\nextern long current_tick;\n')

@@ -23,7 +23,7 @@ assert 'SYS_USB_DISCONNECTED' in worker
 # Maintenance (evict/compact/rebuild) is gated by the same spinning-disk check.
 assert worker.index('(active || flush || build) && !busy && store.loaded')<worker.index('cs_maintain(')
 # Only the worker touches the store files; callers see the RAM filter.
-ui=''.join(fn(n) for n in ['cider_request_art','cider_pin_art','cider_unpin_art','cider_warm_art','cider_request_xs','background_start','begin_transfer','next','receive','store_text','store_record'])
+ui=''.join(fn(n) for n in ['request_art','cider_request_art','cider_pin_art','cider_unpin_art','cider_warm_art','cider_request_xs','background_start','begin_transfer','next','receive','store_text','store_record'])
 for banned in ['cs_get(','cs_put(','cs_load(','cs_maintain(','cs_list(','open(','read(','write(','fsync(','remove(','rename(']:
  assert banned not in ui,banned
 assert 'cs_maybe' in fn('store_local')

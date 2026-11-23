@@ -468,8 +468,7 @@ int cider_browse(void)
         }
         bool albums = cider_available() && count > 0 && depth && (!strncmp(history[depth].route, "albums", 6) ||
                                 !strcmp(history[depth].route, "root/Album"));
-        bool header = cider_available() && count > 0 && depth &&
-                      !strncmp(history[depth].route, "album/", 6);
+        bool header = cider_available() && depth && history[depth].header.name[0];
         if (header && history[depth].art[0])
             cider_pin_art(history[depth].art);
         else
@@ -478,7 +477,8 @@ int cider_browse(void)
         if (header && view)
         {
             struct browser_db_header *album = &history[depth].header;
-            album->tracks = count;
+            if (count >= 0 && !cider_page_stale())
+                album->tracks = count;
             browser_album_details(album, view->album_detail,
                                   sizeof(view->album_detail));
             view->header = (struct list_header) {
@@ -510,7 +510,9 @@ int cider_browse(void)
                                         depth && cider_page_stale());
         empty_list = list_notice != NULL;
         gui_synclist_set_nb_items(&list, empty_list ? 1 : MAX(0, count));
-        gui_synclist_select_item(&list, history[depth].selected);
+        if (!empty_list)
+            history[depth].selected = MIN(history[depth].selected, count - 1);
+        gui_synclist_select_item(&list, empty_list ? 0 : history[depth].selected);
         if ((albums || artists) && count > 0)
         {
             static char keys[16][65]; /* UI stack is tight */
@@ -571,7 +573,8 @@ int cider_browse(void)
         } while (action == ACTION_NONE && scene.handle > 0 &&
                  TIME_BEFORE(current_tick, refresh_at));
         int previous = depth;
-        history[depth].selected = gui_synclist_get_sel_pos(&list);
+        if (!empty_list)
+            history[depth].selected = gui_synclist_get_sel_pos(&list);
         enum agents_nav_screen nav = agents_nav_pending();
         if (nav == AGENTS_NAV_AGENTS)
         {

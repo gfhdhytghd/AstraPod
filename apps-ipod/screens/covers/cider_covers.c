@@ -16,6 +16,7 @@
 #include "lang.h"
 #include "kernel.h"
 #include "system/shutdown.h"
+#include "string-extra.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -105,7 +106,7 @@ static bool panel_request(int index, struct panel_request *request)
 static void blur_source(int index, struct album_blur_source *source)
 {
     struct cider_row row;
-    if (cider_page_row(index, &row) && strlen(row.art) == 64)
+    if (cider_page_peek(index, &row) && strlen(row.art) == 64)
         strlcpy(source->remote, row.art, sizeof(source->remote));
 }
 
@@ -122,7 +123,7 @@ static int panel_play(int index, int track, const struct panel_request *request,
 static bool art(int index, struct bitmap *bitmap)
 {
     struct cider_row row;
-    if (!cider_page_row(index, &row))
+    if (!cider_page_peek(index, &row))
         return false;
     int dim = CIDER_COVER_DIM;
     if (!cider_copy_art(row.art, "M", surface, CIDER_COVER_SCRATCH_BYTES))
@@ -177,11 +178,23 @@ static void tick(void)
     const char *visible[9];
     char visible_keys[9][65];
     unsigned int visible_count = 0;
+    bool page_needed = false;
     for (int i = 0; i < n; i++)
     {
         struct cider_row row;
-        if (window[i] >= count() || !cider_page_row(window[i], &row))
+        if (window[i] >= count())
             continue;
+        /* The center and the first visible miss drive paging. The slide
+         * loader and read-ahead inspect whatever is already cached. */
+        bool have = i ? cider_page_peek(window[i], &row)
+                      : cider_page_row(window[i], &row);
+        if (i && !have && !page_needed)
+            have = cider_page_row(window[i], &row);
+        if (!have)
+        {
+            page_needed = true;
+            continue;
+        }
         snprintf(visible_keys[visible_count], sizeof visible_keys[0], "%s",
                  row.art);
         visible[visible_count] = visible_keys[visible_count];
@@ -207,7 +220,7 @@ static void tick(void)
     for (unsigned int i = 0; i < extra && nahead < ARRAYLEN(ahead); i++)
     {
         int at = center_index + travel * (5 + i);
-        if (at < 0 || at >= count() || !cider_page_row(at, &row_ahead)) continue;
+        if (at < 0 || at >= count() || !cider_page_peek(at, &row_ahead)) continue;
         snprintf(ahead_keys[nahead], sizeof ahead_keys[0], "%s", row_ahead.art);
         ahead[nahead] = ahead_keys[nahead]; nahead++;
     }
@@ -223,10 +236,7 @@ static void tick(void)
             !cider_has_art(art_key, "XS"))
             xs[missing++] = art_key;
         if (!full_requested && i < visible_count && (!fast || !i))
-        {
-            cider_prefetch_art(art_key, "M");
-            full_requested = true;
-        }
+            full_requested = cider_prefetch_art(art_key, "M");
     }
     if (missing)
         cider_request_xs(xs, missing);
@@ -240,7 +250,7 @@ static void tick(void)
 static bool caption_at(int index, struct carousel_album_header *text)
 {
     struct cider_row row;
-    if (!cider_page_row(index, &row))
+    if (!cider_page_peek(index, &row))
         return false;
     strlcpy(text->title, row.title, sizeof(text->title));
     strlcpy(text->artist, row.subtitle, sizeof(text->artist));
@@ -261,7 +271,7 @@ static void text(void)
 static unsigned int version(int index)
 {
     struct cider_row row;
-    if (!cider_page_row(index, &row))
+    if (!cider_page_peek(index, &row))
         return 0;
     uint32_t hash = 2166136261u;
     for (const char *p = row.id; *p; p++)
@@ -344,7 +354,8 @@ int cider_covers(void)
     carousel_prepare_transition();
     cider_page_open("albums?format=panel");
     long deadline = current_tick + 5 * HZ;
-    while (cider_page_total() < 0 && TIME_BEFORE(current_tick, deadline))
+    while (cider_page_total() < 0 && cider_available() &&
+           (TIME_BEFORE(current_tick, deadline) || cider_page_pending()))
     {
         int action = wait_for_library();
         if (action != CAROUSEL_MENU_STAY)
@@ -356,7 +367,11 @@ int cider_covers(void)
     if (cider_page_total() <= 0)
     {
         carousel_cancel_transition();
-        splash(HZ, ID2P(LANG_CAROUSEL_NO_ALBUMS));
+        if (cider_page_total() == 0)
+            splash(HZ, cider_page_stale() ? ID2P(LANG_UNAVAILABLE)
+                                          : ID2P(LANG_CAROUSEL_NO_ALBUMS));
+        else if (cider_available())
+            splash(HZ, ID2P(LANG_TIMEOUT));
         return GO_TO_PREVIOUS;
     }
     int restored = restore_album();

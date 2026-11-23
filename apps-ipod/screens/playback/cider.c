@@ -177,7 +177,7 @@ static void reset(void)
     publish_status();
     if (play_request) play_reply = -1;
     cider_library_reset();
-    state.generation = 0;
+    state.generation = state.library_generation = 0;
     host_live = live_reply = host_palette = false;
     transfer.active = false;
     disk_lookup = request_ready = false;
@@ -247,6 +247,7 @@ static bool receive(const struct podlink_message *m)
                                          state.generation, state.library_generation))
                 {
                     art_revision++;
+                    button_queue_post(BUTTON_REDRAW, 0);
                     cider_log("page received tick=%ld bytes=%lu",current_tick,
                               (unsigned long)m->length);
                 }
@@ -696,9 +697,9 @@ static void store_text(const unsigned char *d, unsigned int n)
     }
 }
 
-static void begin_transfer(const char *key, const char *tier, bool fill)
+static bool begin_transfer(const char *key, const char *tier, bool fill)
 {
-    if (cider_cache_backoff(&cache, key, tier, current_tick)) return;
+    if (cider_cache_backoff(&cache, key, tier, current_tick)) return false;
     if (transfer.active)
     {
         cancel_all |= cancel_request != 0;
@@ -723,6 +724,7 @@ static void begin_transfer(const char *key, const char *tier, bool fill)
         (storage_disk_is_active() ? HOLD_ACTIVE : HOLD_ASLEEP) : 0;
     if (!granted) grant = CIDER_CREDIT;
     if (persist && disk_running) queue_post(&disk_queue, 1, 0);
+    return true;
 }
 
 /* Idle-time work, started from next(): the pinned L cover first (above idle
@@ -1405,22 +1407,31 @@ bool cider_palette_supported(void)
     return supported;
 }
 
-void cider_request_art(const char *key, const char *tier)
+static bool request_art(const char *key, const char *tier, bool prefetch)
 {
     if (!valid_key(key) || (strcmp(tier, "L") && strcmp(tier, "M") &&
-        strcmp(tier, "S") && strcmp(tier, "XS") && strcmp(tier, "P"))) return;
+        strcmp(tier, "S") && strcmp(tier, "XS") && strcmp(tier, "P")))
+        return false;
     mutex_lock(&cider_mutex);
     /* A visible cover takes priority over its companion palette. Both are
      * polled by WPS, so letting P replace L would restart them every redraw. */
     bool palette = !strcmp(tier, "P");
     bool cover_in_flight = transfer.active && !transfer.fill &&
                            strcmp(transfer.tier, "P");
-    if ((!palette || (host_palette && !cover_in_flight)) &&
+    bool started = false;
+    if ((!prefetch || (state.generation && (!transfer.active || transfer.fill))) &&
+        (!palette || (host_palette && !cover_in_flight)) &&
         cider_cache_find(&cache, key, tier) < 0 &&
         (!transfer.active || strcmp(transfer.key, key) ||
          strcmp(transfer.tier, tier) || transfer.fill))
-        begin_transfer(key, tier, false);
+        started = begin_transfer(key, tier, false);
     mutex_unlock(&cider_mutex);
+    return started;
+}
+
+void cider_request_art(const char *key, const char *tier)
+{
+    request_art(key, tier, false);
 }
 
 bool cider_request_playing_art(const char *key)
@@ -1616,10 +1627,26 @@ bool cider_page_stale(void)
     mutex_unlock(&cider_mutex);
     return value;
 }
+bool cider_page_pending(void)
+{
+    mutex_lock(&cider_mutex);
+    bool pending = cider_library_pending();
+    mutex_unlock(&cider_mutex);
+    return pending;
+}
+
 bool cider_page_row(int index, struct cider_row *row)
 {
     mutex_lock(&cider_mutex);
     bool have = cider_library_row(index, row);
+    mutex_unlock(&cider_mutex);
+    return have;
+}
+
+bool cider_page_peek(int index, struct cider_row *row)
+{
+    mutex_lock(&cider_mutex);
+    bool have = cider_library_peek(index, row);
     mutex_unlock(&cider_mutex);
     return have;
 }
@@ -1680,12 +1707,9 @@ bool cider_has_art(const char *key, const char *tier)
     return found;
 }
 
-void cider_prefetch_art(const char *key, const char *tier)
+bool cider_prefetch_art(const char *key, const char *tier)
 {
-    mutex_lock(&cider_mutex);
-    bool busy = transfer.active && !transfer.fill;
-    mutex_unlock(&cider_mutex);
-    if (!busy) cider_request_art(key,tier);
+    return request_art(key, tier, true);
 }
 
 void cider_warm_art(const char *const *keys, unsigned int count,

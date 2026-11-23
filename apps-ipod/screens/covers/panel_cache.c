@@ -73,6 +73,8 @@ static unsigned pending_count, serial, working_serial, lru_clock;
 static uint32_t settled_at, remote_at;
 static uint64_t remote_key, local_playing;
 static int remote_first;
+static unsigned remote_rows;
+static bool remote_stale;
 static long retry_at;
 static struct mutex lock;
 static const char *const faces[PANEL_FACES] = {
@@ -493,13 +495,12 @@ static bool query_remote(struct panel_cached *data, bool *persistable)
         cider_track_page_open("");
         return false;
     }
-    *persistable = !stale;
     if (count < work.first)
         return false;
     struct panel_disk *d = &data->disk;
     d->total = count;
     d->count = MIN(count - work.first, PANEL_PAGE_ROWS);
-    for (unsigned i = 0; i < d->count; i++)
+    for (unsigned i = remote_rows; i < d->count; i++)
     {
         struct cider_row row;
         if (cancelled() || !cider_track_page_row(work.first + i, &row))
@@ -515,7 +516,10 @@ static bool query_remote(struct panel_cached *data, bool *persistable)
         out->order = clean_title(out->title, out->duration, order, work.legacy_labels);
         if (!out->order)
             out->order = MIN(work.first + i + 1, UINT16_MAX);
+        remote_rows++;
+        remote_stale |= stale;
     }
+    *persistable = !stale && !remote_stale;
     panel_perf_record(PP_REMOTE, USEC_TIMER - remote_at, d->count, 0);
     remote_at = 0;
     return cider_panel_revision() == work.revision;
@@ -620,6 +624,8 @@ static void close_remote_query(void)
 #endif
     remote_key = 0;
     remote_at = 0;
+    remote_rows = 0;
+    remote_stale = false;
 }
 
 static void prepare(const struct queue_event *event)
@@ -644,7 +650,10 @@ static void prepare(const struct queue_event *event)
     retry_at = current_tick + MAX(1, HZ / 25);
     mutex_unlock(&lock);
 
-    if ((!work.remote || work.key != remote_key || work.first != remote_first) && remote_key)
+    const struct panel_disk *d = &scratch->data.disk;
+    if (remote_key && (!work.remote || work.key != remote_key ||
+                       work.first != remote_first || d->revision != work.revision ||
+                       d->fonts != fonts_revision || d->locale != work.locale))
         close_remote_query();
     if (!work_current() || !fonts_ready())
         return;
@@ -658,18 +667,22 @@ static void prepare(const struct queue_event *event)
     char path[MAX_PATH];
     cache_path(path);
     bool persistable = work.remote || db_stamp;
-    bool disk = persistable && cache_read_file(path);
-    const struct panel_disk *d = &scratch->data.disk;
+    bool disk = !remote_rows && persistable && cache_read_file(path);
     if (!disk)
     {
-        memset(&scratch->data, 0, sizeof(scratch->data));
-        scratch->data.disk = (struct panel_disk){
-            .magic = PANEL_MAGIC, .key = work.key, .first = work.first,
-            .revision = work.revision, .fonts = fonts_revision, .locale = work.locale,
-            .stamp = work.remote ? 0 : db_stamp,
-            .album_seek = work.album.seek, .artist_seek = work.album.artist_seek,
-        };
-        strlcpy(scratch->data.disk.artist, work.artist, sizeof(d->artist));
+        /* Retain the prepared prefix while the track slot fetches the next
+         * fragment. The scratch buffer belongs to this work until publish. */
+        if (!remote_rows)
+        {
+            memset(&scratch->data, 0, sizeof(scratch->data));
+            scratch->data.disk = (struct panel_disk){
+                .magic = PANEL_MAGIC, .key = work.key, .first = work.first,
+                .revision = work.revision, .fonts = fonts_revision, .locale = work.locale,
+                .stamp = work.remote ? 0 : db_stamp,
+                .album_seek = work.album.seek, .artist_seek = work.album.artist_seek,
+            };
+            strlcpy(scratch->data.disk.artist, work.artist, sizeof(d->artist));
+        }
         if (!(work.remote ? query_remote(&scratch->data, &persistable) : query_local(&scratch->data)))
             return;
         build_packs(&scratch->data);

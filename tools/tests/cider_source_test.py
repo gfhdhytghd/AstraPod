@@ -117,7 +117,13 @@ static int local_starts;
 static int audio_status(void){return local_playing;}
 static void audio_queue_send(int q,intptr_t data){(void)q;(void)data;assert(!active);local_starts++;}
 static void audio_pause(void){pauses++;local_playing=AUDIO_STATUS_PLAY|AUDIO_STATUS_PAUSE;}
-static void cider_request_art(const char*k,const char*t){(void)k;(void)t;request_calls++;}
+static struct cider_cache cache;
+static bool host_palette;
+static bool valid_key(const char *key){return !strcmp(key,"near");}
+static bool blocked;
+static bool begin_transfer(const char *key,const char *tier,bool fill)
+{(void)key;(void)tier;assert(!fill);if(blocked)return false;request_calls++;return true;}
+static void cider_request_art(const char*k,const char*t){(void)k;(void)t;}
 static bool bitmap_ready;
 static fb_data art_pixels[240 * 240];
 static int core_alloc_free_space(size_t size){assert(size == sizeof(art_pixels));return 1;}
@@ -178,7 +184,14 @@ ncommands=0;cider_play("play/library-songs/s4");play_reply=1;assert(cider_play_s
 assert(!ffwd_rew(ACTION_WPS_SEEKFWD,false));assert(testing_wps.id3->elapsed>old_position&&strstr(commands[ncommands-1],"seek"));
 transfer.active=true;transfer.request=77;transfer.received=4000;strcpy(transfer.key,"kept");strcpy(transfer.tier,"M");
 const char*visible[]={"near","kept"};cider_retain_art(visible,2,"M");assert(transfer.active&&transfer.request==77&&transfer.received==4000&&!cancel_request);
-request_calls=0;cider_prefetch_art("near","M");assert(!request_calls);transfer.fill=true;cider_prefetch_art("near","M");assert(request_calls==1);transfer.fill=false;cider_retain_art(visible,1,"M");assert(!transfer.active&&cancel_request==77);cider_prefetch_art("near","M");assert(request_calls==2);
+request_calls=0;
+assert(!cider_prefetch_art("near","M")&&!request_calls);
+transfer.fill=true;
+assert(!cider_prefetch_art("-","M")&&!request_calls);
+blocked=true;assert(!cider_prefetch_art("near","M")&&!request_calls);blocked=false;
+assert(cider_prefetch_art("near","M")&&request_calls==1);
+transfer.fill=false;cider_retain_art(visible,1,"M");assert(!transfer.active&&cancel_request==77);
+assert(cider_prefetch_art("near","M")&&request_calls==2);
 cider_local_play();ncommands=0;local_playing=1;int old_pauses=pauses;
 assert(cider_play("play/library-songs/fail"));play_reply=-1;assert(cider_play_status()==-1&&!active&&local_playing&&pauses==old_pauses);
 assert(cider_play("play/library-songs/timeout"));current_tick+=601;assert(cider_play_status()==-1&&!active);
@@ -299,7 +312,7 @@ puts("Production Local/Cider, disconnect/reconnect, native WPS bitmap/actions PA
 '''
 if 'void cider_current_id(' in resident:
     pre += '\n#define TEST_CURRENT_ID\n' + fn('cider_current_id')
-(O/'source.c').write_text(pre+'\n'+button_codes+'\nstatic volatile uint32_t status_word;\n'+fn('publish_status')+'\nenum {'+','.join(actions)+'};\n'+fn('cider_active')+fn('cider_play_pending')+'\nstatic bool source_seen;static uint32_t source_generation;static bool handoff_hold_source(void){return false;}\n'+fn('cider_source_poll')+fn('cider_remote_source')+'\n'+fn('queue_control')+'\n'+fn('cider_control')+'\n'+fn('cider_mode_get')+'\n'+fn('cider_mode_set')+'\n'+fn('play_route')+'\n'+fn('cider_play')+'\n'+fn('cider_play_in')+'\n'+fn('cider_play_status')+'\n'+fn('cider_local_play')+'\n'+fn('cider_retain_art')+'\n'+fn('cider_prefetch_art')+'\n'+fn('audio_play',playback)+'\n'+fn('audio_resume',playback)+'\n'+source+'\n'+seek+'\nstatic int get_action(int c,int t){(void)c;(void)t;return seek_actions++ ? ACTION_WPS_STOPSEEK : ACTION_WPS_SEEKFWD;}\n'+post)
+(O/'source.c').write_text(pre+'\n'+button_codes+'\nstatic volatile uint32_t status_word;\n'+fn('publish_status')+'\nenum {'+','.join(actions)+'};\n'+fn('cider_active')+fn('cider_play_pending')+'\nstatic bool source_seen;static uint32_t source_generation;static bool handoff_hold_source(void){return false;}\n'+fn('cider_source_poll')+fn('cider_remote_source')+'\n'+fn('queue_control')+'\n'+fn('cider_control')+'\n'+fn('cider_mode_get')+'\n'+fn('cider_mode_set')+'\n'+fn('play_route')+'\n'+fn('cider_play')+'\n'+fn('cider_play_in')+'\n'+fn('cider_play_status')+'\n'+fn('cider_local_play')+'\n'+fn('cider_retain_art')+'\n'+fn('request_art')+'\n'+fn('cider_prefetch_art')+'\n'+fn('audio_play',playback)+'\n'+fn('audio_resume',playback)+'\n'+source+'\n'+seek+'\nstatic int get_action(int c,int t){(void)c;(void)t;return seek_actions++ ? ACTION_WPS_STOPSEEK : ACTION_WPS_SEEKFWD;}\n'+post)
 (O/'config.h').write_text('#define HAVE_USB_PODLINK\n')
 cmd=['cc','-std=gnu11','-g','-Wall','-Wextra','-Wno-unused-variable','-Werror','-fsanitize=address,undefined','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R/'apps-ipod'),'-I'+str(R/'firmware/export'),str(O/'source.c'),str(R/'apps-ipod/screens/playback/cider_model.c'),*wire_args(),'-o',str(O/'source')]
 subprocess.run(cmd,check=True);subprocess.run([str(O/'source')],check=True)

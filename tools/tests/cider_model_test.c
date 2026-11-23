@@ -64,9 +64,28 @@ static void check_playback_clock(void)
     assert(cider_playback_position(&s, 800, 100) == 4600);
 }
 
+static void check_cover_backoff(void)
+{
+    char key[65];
+    for (unsigned int i = 0; i < 16; i++)
+    {
+        snprintf(key, sizeof key, "%064x", i);
+        cider_cache_fail(&cache, key, "M", 100, 100);
+        cider_cache_fail(&cache, key, "XS", 100, 100);
+    }
+    for (unsigned int i = 0; i < 16; i++)
+    {
+        snprintf(key, sizeof key, "%064x", i);
+        assert(cider_cache_backoff(&cache, key, "M", 599));
+        assert(cider_cache_backoff(&cache, key, "XS", 599));
+        assert(!cider_cache_backoff(&cache, key, "M", 600));
+    }
+}
+
 int main(void)
 {
     check_playback_clock();
+    check_cover_backoff();
     struct cider_state s={0};
     const char *available="CA\t7\t1\t";
     assert(cider_state_apply(&s,available,strlen(available),100, 100)==1);

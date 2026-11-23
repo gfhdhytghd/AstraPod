@@ -87,15 +87,19 @@ Now-playing is **never** loaded from the persistent cache.
 
 List ids are preserved, with compact title/subtitle fields. A frame returns as
 many rows as fit, at most 50; the next offset is `offset + count`. Each page
-carries its library generation. A future list view discards pages older than
-`CG`, reissues at the new generation, and prefetches the next page near its end.
+carries its library generation, an opaque uint32 value. Use a stable nonzero
+content signature to reuse on-disk panels across sessions. The host sends `CG`
+before any `CL` for that generation in the session. The player compares a
+page's generation for equality with the latest `CG`; ordering has no meaning.
+A generation mismatch for a pending request releases it for immediate retry.
 FU23 sends `cq gen req offset limit route` for native Music pages. Routes are
 bounded escaped tree paths, not arbitrary Apple API URLs. `CL` rows append kind,
 child route, bgColor and year to their original six fields. Replies may contain
 fewer than 50 rows to fit the frame; continue at offset + count. Three 50-row
-slots serve the native list/carousel. Prefetch starts eight rows before the end.
-A library generation change invalidates all old pages. Superseded unstarted
-host requests and obsolete in-flight results are dropped. A dedicated page
+slots serve the native list/carousel, with at most one slot used by a panel's
+track query. Prefetch starts eight rows before the end. A library generation
+change invalidates all old pages. The player can keep one native list query
+and one panel track query outstanding at the same time. A dedicated page
 worker prevents background library sync HTTP from blocking visible queries.
 
 ## Artwork identity, geometry and framing

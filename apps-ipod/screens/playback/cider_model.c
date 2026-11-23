@@ -126,6 +126,7 @@ int cider_state_apply(struct cider_state *s, const void *data,
         {
             s->seq = 0; s->have = false; s->remote = 0;
             s->generation = gen;
+            s->library_generation = 0;
         }
         if (!strcmp(f[2], "0")) s->clock_correction = 0;
         s->available = f[2][0] == '1';
@@ -347,7 +348,7 @@ bool cider_cache_pin(struct cider_cache *c, const char *key, const char *tier)
 bool cider_cache_backoff(struct cider_cache *c, const char *key, const char *tier,
                          uint32_t tick)
 {
-    for (unsigned int i = 0; i < 8; i++)
+    for (unsigned int i = 0; i < CIDER_FAILED_COVERS; i++)
         if (c->failed[i].until && (int32_t)(tick - c->failed[i].until) < 0 &&
             !strcmp(c->failed[i].key, key) && !strcmp(c->failed[i].tier, tier))
             return true;
@@ -357,7 +358,7 @@ bool cider_cache_backoff(struct cider_cache *c, const char *key, const char *tie
 void cider_cache_fail(struct cider_cache *c, const char *key, const char *tier,
                       uint32_t tick, unsigned int hz)
 {
-    unsigned int i = c->failed_next++ % 8;
+    unsigned int i = c->failed_next++ % CIDER_FAILED_COVERS;
     copy(c->failed[i].key, key, sizeof c->failed[i].key);
     copy(c->failed[i].tier, tier, sizeof c->failed[i].tier);
     c->failed[i].until = tick + 5 * hz;

@@ -101,7 +101,10 @@ static int default_event_handler(int a){(void)a;return 0;}
 static bool font_prefetch_text(int font,const char *label){(void)font;assert(label);return true;}
 static void set_current_slide(int i){center_index=i;}
 static bool cider_page_row(int i,struct cider_row*r){return cider_library_row(i,r);}
+static bool cider_page_peek(int i,struct cider_row*r){return cider_library_peek(i,r);}
 static int cider_page_total(void){return cider_library_total();}
+static bool cider_page_stale(void){return cider_library_stale();}
+static bool cider_page_pending(void){return cider_library_pending();}
 static void cider_page_open(const char*s){cider_library_open(s);}
 static unsigned int cider_art_revision(void){return 0;}
 static bool cider_has_art(const char*k,const char*t){(void)k;(void)t;return false;}
@@ -124,10 +127,14 @@ static void splash(int n,const char*s){(void)n;(void)s;assert(0);}
 static int quick_mode,overlay_calls,waits,joins,restarts;
 static void deliver(int index,const char*title,const char*artist){
  struct cider_row row;assert(!cider_library_row(index,&row));
- char request[512],wire[1024];unsigned int gen,req;int offset;
+ char request[512],wire[4096];unsigned int gen,req;int offset;
  assert(cider_library_next(request,sizeof request,7)>0);
- assert(sscanf(request,"cq\t%u\t%u\t%d",&gen,&req,&offset)==3&&offset==index);
- int n=snprintf(wire,sizeof wire,"CL\t7\t%u\t1\t%d\t200\t0\t1\nid-%d\t%s\t%s\tart-%d\t0\t1\talbum\talbum/id-%d\t123456\t2026\n",req,index,index,title,artist,index,index);
+ assert(sscanf(request,"cq\t%u\t%u\t%d",&gen,&req,&offset)==3&&offset<=index);
+ int n=snprintf(wire,sizeof wire,"CL\t7\t%u\t1\t%d\t200\t0\t%d\n",req,offset,index-offset+1);
+ for(int i=offset;i<=index;i++){
+  n+=snprintf(wire+n,sizeof wire-n,"id-%d\t%s\t%s\tart-%d\t0\t1\talbum\talbum/id-%d\t123456\t2026\n",
+              i,i==index?title:"Other",i==index?artist:"Other",i,i);
+ }
  assert(n>0&&(size_t)n<sizeof wire);
  assert(cider_library_receive(wire,n,7,1));
 }

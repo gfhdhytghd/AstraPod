@@ -36,10 +36,12 @@ static int cider_mutex;static unsigned long current_tick;
 static unsigned int granted,grant,cancel_request,ncommands,art_revision;
 #define HZ 100
 #define BUTTON_REDRAW 1
-static void button_queue_post(int b,int d){(void)b;(void)d;}
+static unsigned redraws;
+static void button_queue_post(int b,int d){assert(b==BUTTON_REDRAW);(void)d;redraws++;}
 static void cider_library_reset(void){}
 static void cider_library_invalidate(uint32_t n){(void)n;}
-static bool cider_library_receive(const void*d,unsigned int n,uint32_t g,uint32_t l){(void)d;(void)n;(void)g;(void)l;return true;}
+static bool accept_page;
+static bool cider_library_receive(const void*d,unsigned int n,uint32_t g,uint32_t l){(void)d;(void)n;(void)g;(void)l;return accept_page;}
 static bool disk_lookup,request_ready;
 static unsigned int xs_count;
 static uint32_t xs_request;
@@ -67,6 +69,13 @@ return message;
 int main(void){
 memcpy(packet,"CAR1",4);put32(packet+4,99);struct podlink_message message={.type=PODLINK_BINARY,.data=packet,.length=29};assert(!receive(&message));
 const char*ca="CA\t7\t1\t";message=(struct podlink_message){.type=PODLINK_TEXT,.data=(const unsigned char*)ca,.length=strlen(ca)};assert(receive(&message)&&state.generation==7&&!host_diag);host_diag=true;
+const char *cl="CL\t7\t1\t1\t0\t0\t0\t0\n";
+message=(struct podlink_message){.type=PODLINK_TEXT,.data=(const unsigned char*)cl,.length=strlen(cl)};
+unsigned previous_redraws=redraws, previous_revision=art_revision;
+granted=CIDER_CREDIT;
+assert(receive(&message)&&redraws==previous_redraws&&art_revision==previous_revision);
+accept_page=true;
+assert(receive(&message)&&redraws==previous_redraws+1&&art_revision==previous_revision+1);
 message=send_art("M",1,1);
 assert(!transfer.active&&cider_cache_find(&cache,transfer.key,"M")>=0&&pin_calls>0);
 assert(art_ack_request==1&&art_ack_bytes==sizeof art&&cache.slot[0].dirty);

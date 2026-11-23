@@ -38,7 +38,8 @@ void cider_loading_drawn(bool loading);
 void cider_control(const char *command, int value);
 int cider_mode_get(int mode);
 void cider_mode_set(int mode, int value);
-void cider_prefetch_art(const char *key, const char *tier);
+/* True when this call starts a new artwork transfer. */
+bool cider_prefetch_art(const char *key, const char *tier);
 void cider_warm_art(const char *const *keys, unsigned int count, const char *tier);
 bool cider_palette_supported(void);
 void cider_request_art(const char *key, const char *tier);
@@ -66,7 +67,9 @@ void cider_local_play(void);
 void cider_page_open(const char *route);
 int cider_page_total(void);
 bool cider_page_stale(void);
+bool cider_page_pending(void);
 bool cider_page_row(int index, struct cider_row *row);
+bool cider_page_peek(int index, struct cider_row *row);
 #else
 static inline bool cider_play_pending(void) { return false; }
 static inline const char *cider_remote_name(void) { return "Cider"; }

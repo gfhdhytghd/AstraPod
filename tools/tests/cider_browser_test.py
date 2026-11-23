@@ -26,7 +26,7 @@ pre=r'''
 #define QUICKSCREEN_IN_USB 1
 static int quick_screen_current(int action,void(*poll)(void)){(void)action;(void)poll;return 0;}
 '''
-tokens=sorted((set(tokens)|{'ACTION_STD_MENU'})-{'ACTION_NONE'})
+tokens=sorted((set(tokens)|{'ACTION_STD_MENU','ACTION_REDRAW'})-{'ACTION_NONE'})
 pre+='enum {ACTION_NONE,'+','.join(tokens)+'};\n'
 pre+=r'''
 enum themable_icons {icon_dummy=1000};
@@ -131,9 +131,13 @@ static bool browser_db_get_root_row(int n,int*index,const unsigned char**name){s
 static bool browser_db_root_row_is_hidden(int index){return index==1;}
 static const char*browser_db_root_row_key(int index){static const char*names[]={"Album","Artist","Genre"};return names[index];}
 static void cider_page_open(const char*p){snprintf(route,sizeof route,"%s",p);}
-static int cider_page_total(void){return 3;}
+static int cider_page_total(void)
+{
+    if (mode == 5 && (step == 1 || step == 2)) return -1;
+    return 3;
+}
 static bool cider_page_stale(void){return false;}
-static bool cider_page_row(int i,struct cider_row*r){if(i<0||i>=3)return false;memset(r,0,sizeof*r);snprintf(r->title,sizeof r->title,"Album %d",i);if(!strncmp(route,"album/",6)||!strcmp(route,"random")){r->kind=CIDER_ROW_SONG;snprintf(r->route,sizeof r->route,"play/library-songs/s%d",i);}else{r->kind=CIDER_ROW_ALBUM;snprintf(r->route,sizeof r->route,"album/a%d",i);}return true;}
+static bool cider_page_row(int i,struct cider_row*r){if(i<0||i>=3)return false;memset(r,0,sizeof*r);snprintf(r->title,sizeof r->title,"Album %d",i);if(!strncmp(route,"album/",6)||!strcmp(route,"random")){r->kind=CIDER_ROW_SONG;snprintf(r->route,sizeof r->route,"play/library-songs/s%d",i);}else{r->kind=CIDER_ROW_ALBUM;memset(r->art,'c',64);r->count=9;r->year=2026;strcpy(r->subtitle,"Artist");snprintf(r->route,sizeof r->route,"album/a%d",i);}return true;}
 static void cider_cancel_art(void){}
 static int pins;static bool pinned;
 static void cider_pin_art(const char*k){assert(strlen(k)==64);pins++;pinned=true;}
@@ -147,7 +151,7 @@ static bool cider_copy_art(const char*k,const char*t,void*p,unsigned int n)
     for (unsigned i = 0; i < n / sizeof(fb_data); i++) ((fb_data *)p)[i] = i;
     return true;
 }
-static void cider_prefetch_art(const char*k,const char*t){(void)k;(void)t;}
+static bool cider_prefetch_art(const char*k,const char*t){(void)k;(void)t;return false;}
 static bool cider_art_local(const char*k,const char*t){(void)k;(void)t;return false;}
 static bool cider_has_art(const char*k,const char*t){(void)k;(void)t;return false;}
 static void cider_request_xs(const char*const*k,unsigned int n){(void)k;(void)n;}
@@ -182,6 +186,22 @@ static void gui_synclist_draw_settled(struct gui_synclist *list){gui_synclist_dr
 static void gui_synclist_scroll_stop(struct gui_synclist*l){(void)l;}
 static void gui_synclist_forget(struct gui_synclist*l){l->header=NULL;}
 static bool list_do_action(int context,int timeout,struct gui_synclist*l,int*a){(void)context;(void)timeout;step++;
+if(mode==5){
+    if(step==1){assert(l->selected==2);*a=ACTION_STD_OK;}
+    else if(step==2){
+        assert(l->header&&!strcmp(l->header->title,"Album 2")&&l->count==1);
+        assert(!strcmp(l->header->subtitle,"Artist")&&!strcmp(l->header->detail,"9 tracks"));
+        assert(l->header->cover && pinned);
+        *a=ACTION_STD_CANCEL;
+    } else if(step==3){
+        assert(l->selected==0&&!l->header&&l->count==1);*a=ACTION_REDRAW;
+    } else if(step==4){
+        assert(l->selected==2&&!l->header&&l->count==3);*a=ACTION_STD_MENU;
+    } else {
+        *a=ACTION_STD_MENU;
+    }
+    return false;
+}
 if(mode==4){*a=ACTION_STD_MENU;return false;}if(mode==3){*a=step==1?ACTION_STD_OK:ACTION_STD_CANCEL;return false;}if(mode==0){*a=ACTION_STD_OK;return false;}if(mode==1){*a=ACTION_STD_MENU;return false;}
 if(step>128){*a=ACTION_REMOTE_WPS;return false;}rng=rng*1664525+1013904223;l->selected=(rng>>16)%MAX(1,l->count);*a=(rng&3)==0?ACTION_STD_CANCEL:(rng&3)==1?ACTION_STD_OK:ACTION_NONE;return false;}
 '''
@@ -208,7 +228,7 @@ static void check_art_pixels(void)
 int main(void){
 check_art_pixels();
 mode=0;depth=0;
-struct cider_row album={.kind=CIDER_ROW_ALBUM};strcpy(album.route,"album/a0");
+struct cider_row album={.kind=CIDER_ROW_ALBUM};strcpy(album.route,"album/a0");strcpy(album.title,"Album 0");
 memset(album.art,'c',64);
 assert(cider_browse_at(&album)==GO_TO_WPS&&plays==1&&!live&&depth==0);
 assert(root_count==6&&remote_homes==0);
@@ -216,6 +236,8 @@ struct cider_row root_row;assert(get_root_row(3,&root_row)&&!strcmp(root_row.rou
 mode=1;assert(cider_browse()==GO_TO_ROOT&&!live&&depth==0&&remote_homes==1);
 depth=1;strcpy(history[1].route,"random");assert(cider_browse()==GO_TO_WPS&&depth==0&&!live);assert(cider_browse()==GO_TO_ROOT&&!live);
 fail_play=true;depth=1;strcpy(history[1].route,"album/a0");memset(history[1].art,'c',64);history[1].art[64]=0;pins=0;mode=3;step=0;int raced=plays;assert(cider_browse()==GO_TO_ROOT&&plays==raced&&!live);assert(pins>0&&!pinned);fail_play=false;
+depth=1;strcpy(history[1].route,"root/Album");history[1].header.name[0]=0;
+history[1].selected=2;mode=5;step=0;assert(cider_browse()==GO_TO_ROOT&&step==5);
 available=false;mode=2;step=0;int before=plays;cider_browse();assert(plays==before&&!live&&empty_list);available=true;
 for(int i=1;i<=2000;i++){rng=i;step=0;mode=2;cider_browse();assert(!live);}
 depth=0;mode=4;cider_browse_covers(true);assert(cider_browse()==GO_TO_WPS&&cider_browse_remote_return()&&!cider_browse_remote_return());

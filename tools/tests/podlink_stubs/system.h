@@ -6,6 +6,9 @@
 #include <assert.h>
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define ARRAYLEN(a) (sizeof(a) / sizeof((a)[0]))
+#define STORAGE_ALIGN_ATTR
+#define STORAGE_PAD(x) (x)
+#define STORAGE_OVERLAP(x) 0
 
 extern bool test_thread_context;
 #define is_thread_context() test_thread_context

@@ -5,6 +5,7 @@
 #include <string.h>
 #include "crc32.h"
 #include "kernel.h"
+#include "system.h"
 #include "file.h"
 #include "dir.h"
 #include "podlink_media.h"
@@ -23,7 +24,7 @@
 #define STREAM_WINDOW 8
 
 static int track_fd = -1;
-static unsigned int remaining;
+static unsigned int track_bytes, remaining;
 static bool refresh_pending;
 static uint32_t checksum, expected_checksum;
 static char destination[sizeof(SYNC_DIR) + NAME_HASH_LENGTH + 6];
@@ -216,7 +217,7 @@ static const char *begin(const unsigned char *data, unsigned int size, bool sync
     if (track_fd < 0)
         return "MS1 ERR staging";
 
-    remaining = bytes;
+    track_bytes = remaining = bytes;
     expected_checksum = crc;
     checksum = UINT32_MAX;
     return "MS1 READY";
@@ -314,8 +315,12 @@ static const char *handle_message(const struct podlink_message *message,
             return "MS1 ERR busy";
         if (track_fd < 0)
             return "MS1 ERR state";
-        data += 4;
         size -= 4;
+        /* write() passes whole sectors to the disk straight from here.
+         * Placing the chunk at its file offset modulo a cache line aligns
+         * them, which keeps them off the file system's bounce buffer. */
+        data = memmove(binary + STORAGE_OVERLAP(track_bytes - remaining),
+                       data + 4, size);
         if (!size || size > remaining || write(track_fd, data, size) != (int)size)
         {
             abort_track();
@@ -412,10 +417,11 @@ static const char *handle_message(const struct podlink_message *message,
 }
 
 /* Only the storage worker touches file descriptors. The transport callback
- * owns a single bounded mailbox and never waits for disk I/O. */
+ * owns a single bounded mailbox and never waits for disk I/O. The mailbox
+ * is cache aligned, with a line of slack for realigning an upload chunk. */
 static struct mutex media_mutex;
 static struct podlink_message pending_message;
-static unsigned char mailbox[PODLINK_MAX_MESSAGE];
+static unsigned char mailbox[STORAGE_PAD(PODLINK_MAX_MESSAGE)] STORAGE_ALIGN_ATTR;
 static char pending_reply[sizeof(inventory_reply)];
 static unsigned int pending_binary, stream_credits;
 static uint32_t pending_raw;
@@ -429,7 +435,7 @@ void podlink_media_init(void)
 
 bool podlink_media_enqueue(const struct podlink_message *message)
 {
-    if (message->length < 4 || message->length > sizeof(mailbox) ||
+    if (message->length < 4 || message->length > PODLINK_MAX_MESSAGE ||
         !((message->type == PODLINK_TEXT &&
            (!memcmp(message->data, "MS1 ", 4) ||
             !memcmp(message->data, "MS2 ", 4) ||

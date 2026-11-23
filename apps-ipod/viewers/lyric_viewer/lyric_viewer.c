@@ -58,6 +58,7 @@
 #define LV_PIXELS (LCD_WIDTH * LCD_HEIGHT)
 #define LV_FRAME (LV_PIXELS * sizeof(fb_data))
 #define LV_TICKS(ms) MAX(1, ((ms) * HZ + 999) / 1000)
+#define LYRICS_LEAD_MS 300
 #define LV_SCROLL_FRAMES ANIM_F(20)
 #define LV_STAGGER_FRAMES ANIM_F(2)
 #define LV_FOCUS_FRAMES ANIM_F(12)
@@ -777,11 +778,16 @@ static long lv_local_vocal_clock(long raw, uint32_t sequence, uint32_t now, bool
     return time;
 }
 
+static int lv_lyric_lead(void)
+{
+    return LYRICS_LEAD_MS + global_settings.lyric_lead;
+}
+
 /* Keep transport and progress on playback time. All lyrics consumers use
  * the shifted and clamped clock, after any offset carried by the document. */
 static long lv_lyric_elapsed(void)
 {
-    int64_t time = (int64_t)lv.elapsed + global_settings.lyric_lead;
+    int64_t time = (int64_t)lv.elapsed + lv_lyric_lead();
     return MAX(0, MIN(time, lv.length > 0 ? lv.length : LONG_MAX));
 }
 
@@ -2167,9 +2173,8 @@ static bool lv_select_seek(uint32_t pressed)
         return true;
     }
 
-    /* Invert the display clock, including the configured lead. lyrics_time
-     * already includes the document offset. */
-    int64_t time = (int64_t)lyrics_time(picked) - global_settings.lyric_lead;
+    /* Invert the display clock so the selected line starts at the seek target. */
+    int64_t time = (int64_t)lyrics_time(picked) - lv_lyric_lead();
     long target = MAX(0, MIN(time, lv.length > 0 ? lv.length : LONG_MAX));
     lv.seek_seq = clock.sequence;
     lv.seek_from = lv.elapsed;

@@ -505,7 +505,7 @@ static int select_scenario(void)
         select_button=(remote_key || remote_source)?BUTTON_RC_SELECT:BUTTON_SELECT;
         return ACTION_UNKNOWN;
     }
-    long expected=backward_seek?0:(remote_source ? 2000 : 4000)-global_settings.lyric_lead;
+    long expected=backward_seek?0:(remote_source ? 2000 : 4000)-global_settings.lyric_lead-300;
     assert(line_seeks==1 && seek_target==expected);
     assert(!lv.mode.manual && lv.mode.focus==focus);
     assert(lv.pose_focus == focus && lv.motion_frames == ANIM_F(15));
@@ -532,7 +532,7 @@ static int select_scenario(void)
         remote_cn("one",2800,0); /* Late pre-seek clock after landing. */
         return ACTION_NONE;
     }
-    assert(lv_lyric_elapsed()==(backward_seek?200:remote_source?2000:4000));
+    assert(lv_lyric_elapsed()==(backward_seek?500:remote_source?2000:4000));
     assert(lv.pose_focus == focus);
     assert(!title_draws&&!manual_draws);
     return ACTION_WPS_BROWSE; /* SELECT exits again after auto-follow. */
@@ -660,9 +660,12 @@ static int get_action(int c,int timeout){
      paused_width=lv_sweep(0,lv_lyric_elapsed(),true);current_tick+=120;return ACTION_NONE;
    case 4:assert(lv.elapsed==pause_position&&lv_sweep(0,lv_lyric_elapsed(),true)==paused_width);
      assert(lv.remote&&lv.art_ready&&perf.builds==1);
-     remote_cn("one",1799,0);return ACTION_NONE;
-   case 5:assert(lv.mode.focus==0);remote_cn("one",1800,0);return ACTION_NONE;
-   case 6:assert(lv.elapsed==1800&&lv.mode.focus==1&&lv.pose_focus==1);return ACTION_WPS_VOLDOWN;
+     remote_cn("one",1499,0);return ACTION_NONE;
+   case 5:assert(lv.mode.focus==0);remote_cn("one",1500,0);return ACTION_NONE;
+   case 6:
+     assert(lv.elapsed==1500&&lv.mode.focus==1&&lv.pose_focus==1);
+     assert(lyrics_index_at(lv_lyric_elapsed())==1);
+     return ACTION_WPS_VOLDOWN;
    case 7:assert(lv.mode.manual&&lv.mode.focus==0);current_tick+=400;return ACTION_NONE;
    default:assert(!lv.mode.manual&&lv.mode.focus==1);return ACTION_WPS_LYRICS;
   }
@@ -676,9 +679,19 @@ static int get_action(int c,int timeout){
    assert(lyrics_time(1)==4000&&lv.old_progress==(int)(playing.elapsed*320/playing.length));
    if(calls==1){assert(lv.mode.focus==0);playing.elapsed=lead_boundary;return ACTION_NONE;}
    if(calls==2){assert(lv.mode.focus==1&&lv_sweep(1,lv_lyric_elapsed(),true)==0);playing.elapsed+=500;return ACTION_NONE;}
-   assert(lv_sweep(1,lv_lyric_elapsed(),true)>0);
-   unsigned before=width_reads;
-   assert(lv_sweep(1,lv_lyric_elapsed(),true)>0 && width_reads==before);
+   if(calls==3){
+     assert(lv_sweep(1,lv_lyric_elapsed(),true)>0);
+     unsigned before=width_reads;
+     assert(lv_sweep(1,lv_lyric_elapsed(),true)>0 && width_reads==before);
+     playing.elapsed=lead_boundary+1999;return ACTION_NONE;
+   }
+   if(calls==4 || calls==5){
+     lv_sweep(1,lv_lyric_elapsed(),true);
+     assert(lv.word[true].index==calls-4);
+     playing.elapsed=calls==4?lead_boundary+2000:lead_boundary+4000;
+     return ACTION_NONE;
+   }
+   assert(lv.mode.focus==2&&lyrics_index_at(lv_lyric_elapsed())==2);
    return ACTION_WPS_LYRICS;
  }
  if(plan==5){
@@ -864,13 +877,28 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  snprintf(playing.path,sizeof playing.path,"%s/song.wav",argv[1]);
  int leads[]={200,0,-200};
  for(int i=0;i<3;i++){
-   calls=0;global_settings.lyric_lead=leads[i];lead_boundary=4000-leads[i];playing.elapsed=lead_boundary-1;
+   calls=0;global_settings.lyric_lead=leads[i];lead_boundary=4000-leads[i]-300;playing.elapsed=lead_boundary-1;
    assert(lyric_viewer()==GO_TO_PREVIOUS);
  }
  assert(updates>40);
  struct lv_state recorder={.entry_at=UINT32_MAX-1999,.first_pending=true};lv_state=&recorder;
- lv.length=60000;lv.elapsed=100;assert(lv_lyric_elapsed()==0);
+ lv.length=60000;lv.elapsed=100;assert(lv_lyric_elapsed()==200);
+ global_settings.lyric_lead=-1000;assert(lv_lyric_elapsed()==0);
  global_settings.lyric_lead=200;lv.elapsed=59999;assert(lv_lyric_elapsed()==60000);
+ assert(lyrics_begin_text()==LYRICS_OK);
+ assert(lyrics_append_ttml("<p begin='0.2s' end='1s'>"
+                           "<span begin='0.2s' end='1s'>First</span></p>",false,0));
+ assert(lyrics_publish_remote(1000));
+ global_settings.lyric_lead=0;
+ lv.elapsed=0;
+ assert(lyrics_time(0)==200&&lyrics_vocal_cue(0,false,0).begin==200);
+ assert(lyrics_index_at(lv_lyric_elapsed())==0&&lv_vocal_window(0,lv_lyric_elapsed()));
+ lv.length=1000;lv.elapsed=699;assert(lv_vocal_window(0,lv_lyric_elapsed()));
+ lv.elapsed=700;assert(!lv_vocal_window(0,lv_lyric_elapsed()));
+ assert(lv_follow_index(lv_lyric_elapsed(),lyrics_index_at(lv_lyric_elapsed()))==0);
+ lyrics_close();
+ global_settings.lyric_lead=200;
+ puts("PASS 300 ms lyrics lead: local line and word boundaries, remote line boundary, TTML and track limits");
  current_tick=0;precise_extra=1000;
  lv_phase_end(LV_RESTORE,500);lv_record(0,LV_STEADY,false);
  for(int i=1;i<95;i++)lv_record(0,LV_STEADY,false);

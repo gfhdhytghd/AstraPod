@@ -185,6 +185,8 @@ wrapper — `findsdl` looks for the cross-prefixed name first, which keeps it of
 the host's own `sdl2-config`. SDL links statically, so `rockboxui.exe` needs no
 DLL beside it.
 
-Either way, follow the build with `make zip` and the three `bundle-*.sh` scripts
-and unzip the result into `simdisk/`, or the sim boots themeless with the 6x8
-fallback iconset — which looks exactly like a rendering bug and is not one.
+Either way, run `make zip`, then `../bundle-theme.sh`, `../bundle-rocks.sh`,
+`../bundle-help.sh`, `../bundle-trim.sh`, `../bundle-speech.sh` and
+`../bundle-font.sh`. Unzip the result into `simdisk/`. Scrim and Light are
+built into the simulator. `bundle-theme.sh` supplies the native fonts and
+the first-boot settings for a fresh `simdisk/`.

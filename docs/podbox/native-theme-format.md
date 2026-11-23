@@ -6,7 +6,7 @@ The native interface uses design tokens for colour, font, geometry, backgrounds 
 
 Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Appearance → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim` and `light`. The default is `scrim`.
 
-Place referenced `.fnt` assets in `.rockbox/fonts/` and use the RB12 font format. Firmware falls back to Scrim if a theme file is missing or malformed, or if it references an unsupported font. It records the failure in `.rockbox/native-theme.log`.
+Place referenced font files in `.rockbox/fonts/`. Use PBF1 `.pbf` files for text and an RB12 `.fnt` file for icons. Firmware falls back to Scrim if a theme file is missing or malformed, or if it references an unsupported font. It records the failure in `.rockbox/native-theme.log`.
 
 ## Writing a theme
 
@@ -53,7 +53,7 @@ Scrim's album-driven defaults are `palette.background=dominant,0,15`, `palette.l
 
 ### Fonts
 
-Use `font.<role>=<basename>` to reference a `.fnt` font. The basename can contain 1–31 ASCII letters, digits, hyphens and underscores, and must start with a letter or digit. The firmware appends `.fnt` when loading the asset. `font.icon` uses the glyph mapping for the built-in status and navigation symbols. Use an icon font with the same glyph assignments to preserve their meaning.
+Use `font.<role>=<basename>` to reference a font. The basename can contain 1–31 ASCII letters, digits, hyphens and underscores, and must start with a letter or digit. The firmware appends `.pbf` for text roles and `.fnt` for `font.icon`. `font.icon` uses the glyph mapping for the built-in status and navigation symbols. Use an icon font with the same glyph assignments to preserve their meaning.
 
 | Role | Built-in basename |
 | --- | --- |

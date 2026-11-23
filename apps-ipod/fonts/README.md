@@ -1,60 +1,11 @@
 # Fonts the application ships
 
-Faces the firmware itself needs, as opposed to the ones a theme brings.
-`bundle-theme.sh` copies them into `/.rockbox/fonts/`.
+Run `bundle-theme.sh` after `make zip` to populate `/.rockbox/fonts/`.
+The script copies `24x24-icons.fnt`, `24-spun-badges.fnt` and
+`24-seven-fifteen.fnt` from this directory. It generates PBF1 text fonts
+with `tools/fonts/compile.py` and ships them with the font licences.
 
-**They live here because a theme is not a dependency.** Every other face on
-the player arrives inside `themes/scrim/`, which `bundle-theme.sh` copies
-wholesale -- so a theme that stops using a face takes it off the device, and
-anything in the core that named it falls back to the system font without
-saying so. A face the core cannot do without belongs to the core.
-
-## `NN-noto-serif-figures.fnt`
-
-Spun's card numbers: Noto Serif Bold, subset to the seventeen glyphs a figure
-needs (space, `%,-./`, `0`-`9`, `:`). The full face carries the whole BMP and
-is 6 MB; these are three kilobytes and one and a half.
-
-Regenerate with `.build/fonts/mkfigures.py <size>`. Neither that script nor
-the full faces it reads are in this tree -- `.build/` is a scratch directory
--- which is why the built files are committed: a fresh clone has no way to
-make them.
-
-## `18-`, `20-`, `24-` and `28-noto-serif.fnt`
-
-The reader's other sizes, beside the 22 point that Scrim brings as its
-default, so Larger Text and Smaller Text have somewhere to go: those two step
-through whatever sizes of the reading font are installed. Full Noto Serif,
-as the 22 is -- every glyph the sans set has, so a book in any script the
-interface reads stays readable at every size -- which is why each is 2.5 to
-5 MB.
-
-Built by `.build/fonts/mkserif.py`, which, like the masters it reads, is not
-in this tree; hence the built files are committed.
-
-## `24-spun-badges.fnt`
-
-The plate icons on Spun's badge cards: thirteen Material Symbols at 24x24,
-4bpp, from `0x21` with no gaps. `.build/fonts/mkbadges.py <png-folder>` builds
-it and prints the mapping; the same order is in that script and in the
-`ICON_*` block of `pv_tiles.c`.
-
-Ours rather than more glyphs in the theme's `24x24-icons.fnt` for the reason
-above, and for one more: that face's codepoint table is generated from a
-folder that is not in this tree either, so an entry in it can only ever be
-checked against the screen -- which is exactly where a wrong icon looks
-plausible.
-
-## Licences
-
-Both faces are drawn from someone else's work, so the full licence text of
-each sits beside them here and `bundle-theme.sh` puts it on the player with
-the fonts. Scrim carries the same two texts, but a theme is not a dependency:
-these have to stand on their own.
-
-- Material Design Icons (`24-spun-badges`)
-  - Created by Google (https://fonts.google.com/icons)
-  - Apache License Version 2.0 — `LICENSE-Material-Design-Icons.txt`
-- Noto Serif (`NN-noto-serif-figures`, `NN-noto-serif`)
-  - Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
-  - SIL Open Font License, Version 1.1 — `LICENSE-Noto.txt`
+Scrim and Light share the bundled fonts. The text font filenames retain the
+`noto` basenames used by settings. See
+[the native theme format](../../docs/podbox/native-theme-format.md) for font
+roles and custom themes.

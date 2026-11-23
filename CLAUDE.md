@@ -201,25 +201,26 @@ cd build-hw-ipodvideo && make -j"$(nproc)" && make zip && ../bundle-theme.sh && 
 # Other make targets
 make codecs                 # codecs only
 make bin                    # binary only
-make zip                    # create deployment zip (themeless -- see below)
+make zip                    # create base zip (run the bundle scripts below)
 make reconf                 # reconfigure after tools/configure changes
 make clean / make veryclean
 ```
 
-**Theme bundling — `make zip` is not enough.** `tools/buildzip.pl` is kept as
-close to upstream as possible and knows nothing about this fork's theme, so a
-zip straight from `make zip` has **no Scrim, no first-boot `config.cfg`, no
-setting explanations, no title trimming patterns, no speech
-dictionary and no Arcade text font**. Follow it with the bundle scripts --
-`../bundle-theme.sh`, `../bundle-help.sh`, `../bundle-trim.sh`,
-`../bundle-speech.sh`, `../bundle-font.sh`, and for the player
-`../bundle-tools.sh`, which adds the desktop tools as
-`.rockbox/tools/soundscan.exe`, `database_pb.exe` and `artcache_pb.exe`.
-`./build-hw.sh` runs all six and `./build-sim.sh` the first five; a bare
-`make zip` runs none.
+**Theme bundling — `make zip` is not enough.** Scrim is the default native
+theme and Light is built in too. Choose between them under **Appearance >
+Native theme**. See [the native theme format](docs/podbox/native-theme-format.md)
+to add a custom theme.
 
-Scrim is the only theme in the build. The others in `themes/` are published
-as their own release by `release.sh`, one zip each.
+Run `../bundle-theme.sh` after `make zip` to add the native fonts and
+`.rockbox/default-config.cfg`. On first boot, the config selects Scrim and
+sets the default fonts and other settings. Keep the player's own
+`config.cfg` when updating.
+
+Follow with `../bundle-rocks.sh` for the ipod6g compatibility plugins, then
+`../bundle-help.sh`, `../bundle-trim.sh`, `../bundle-speech.sh` and
+`../bundle-font.sh`. For the player, also run `../bundle-tools.sh`, which adds
+`.rockbox/tools/soundscan.exe`, `database_pb.exe` and `artcache_pb.exe`.
+Use `./build-hw.sh` or `./build-sim.sh` to run the corresponding bundle steps.
 
 `bundle-help.sh`, `bundle-trim.sh`, `bundle-speech.sh` and `bundle-font.sh`
 are the four whose absence is silent.
@@ -239,48 +240,15 @@ nothing. The fourth ships `.rockbox/games/font.bin`, the Arcade's
 Chinese and Korean text shows as `?`. None makes anything else misbehave, so
 a zip built by hand without them looks finished.
 
-`bundle-theme.sh` also deletes the `classic_statusbar` theme, which
-`buildzip.pl` copies straight out of `wps/` without consulting `WPSLIST`. It
-removes the directory *and* the two loose `classic_statusbar.{sbs,rsbs}` files
-written beside it -- a `wps/classic_statusbar/*` pattern does not match those.
-
-**Configure build types:** (N)ormal, (B)ootloader, (C)heckWPS, (D)atabase and
-(S)imulator all work. (W)arble is offered by `tools/configure` and does not.
+**Configure build types:** (N)ormal, (B)ootloader, (D)atabase and (S)imulator
+all work. (W)arble is offered by `tools/configure` and does not.
 
 **The simulator builds and runs** -- SDL2 and a host compiler, output
 `rockboxui`, storage in `simdisk/` beside it. A Windows `.exe` cross-compiles
 with `--type=as6` (that is **(A)dvanced** plus `s` and `6`; plain `--type=s6`
-silently gives a *normal* build). Follow either with `make zip` and
-`bundle-theme.sh`, `bundle-help.sh`, `bundle-trim.sh`, `bundle-speech.sh` and
-`bundle-font.sh`, then unzip into `simdisk/`, or it starts themeless.
+silently gives a *normal* build). Run `make zip` and the simulator bundle steps above, then unzip into
+`simdisk/` to supply the native fonts and first-boot settings.
 Read `apps-ipod/sim/README.md` before touching any of it.
-
-```bash
-mkdir /tmp/cwps && cd /tmp/cwps
-<root>/tools/configure --target=ipodvideo --type=c --appsdir=apps-ipod && make
-```
-Three fork-specific notes, since the tools' own READMEs are upstream's and say
-nothing about any of them:
-
-- **CheckWPS must run from the theme's root folder**, the one holding
-  `.rockbox`: `checkwps .rockbox/wps/<name>.sbs .rockbox/wps/<name>.wps`, or
-  `checkwps .rockbox/themes/<name>.cfg`. From inside `.rockbox` it fails on
-  the fonts rather than the skin, and a `%ft` file is not found: the tag is
-  dropped and the skin still passes. A skin named bare
-  (`wps: scrim`) is not really checked: it finds the bitmap folder of that
-  name and passes.
-- **It links this fork's skin engine, not upstream's**, so it accepts every tag
-  the player does. `tools/checkwps/SOURCES`, `checkwps.make` and
-  `tools/checkwps/include/` are all fork files now; `tools/checkwps/stubs.c`
-  stands in for the rest of the firmware and says which caller relies on each
-  answer. A new setting whose callback is not in there fails the link.
-- **A failure after the parse prints no line and no caret** -- a missing font or
-  bitmap is a `debugf`, which only `-v` shows. On a case-sensitive filesystem
-  that is usually a filename's capitalisation, which FAT on the player does not
-  care about.
-
-The `--type=c` build needs no SDL, and `configure` checks for SDL only for the
-builds that use it, so CheckWPS and warble skip the check.
 
 The (D)atabase build is upstream's tool and writes upstream's database, which
 this firmware does not read. The one that ships is `tools/database_pb/`: it
@@ -381,9 +349,7 @@ upstream's code, rather than writing it into upstream's functions.** A new
 file never conflicts in a merge; every edited line of an upstream file can.
 Keep the hook small, and move existing fork code out when you are already
 working in it, not as a refactor of its own. `manual/`,
-`android/`, `backdrops/`, `screenshots/`, the stock `wps/` themes and every
-`themes/` entry this fork did not convert are all still present and all
-unbuilt. They are
+`android/`, `backdrops/` and `screenshots/` are still present and unbuilt. They are
 kept deliberately so `git merge rockbox/master` applies without delete/modify
 conflicts. Do not prune them to tidy the tree -- being unused is not a reason
 to remove something here.
@@ -527,60 +493,6 @@ are documented in this firmware repository.
   Player's `data.py`) and `text_render.c`, which renders text to a WAV on
   the build server. The synthesiser itself is `apps-ipod/speech/`, and
   `.specifications/COMPLETED/on-device-speech.md` is its specification
-**Theme Lens lives outside the tree**, in the git-ignored `.build/theme-lens/`
-— the skin reader, linter and previewer. `python serve.py <theme folder>` (or
-double-click `ThemeLens.cmd`) edits that folder live; `ctl.py` drives a running
-one from a script. **It carries its own copy of the tag table**, so a change to
-`apps-ipod/skin/custom_tags.c` has to be mirrored into `index.html` or the lens
-explains tags that no longer exist. It also carries a copy of the `.options`
-parser, `apps-ipod/skin/theme_options.c`, as `parseOptions()` in
-`skin-core.js`; change one and change the other. Its list fixtures are not
-mirrored — `extract-lists.py` reads them out of this checkout, so re-run it with `--embed
-index.html` after a menu change.
-
-It is not ready to ship, so it is not versioned here. A fresh clone will not
-have it.
-
-## Debugging a Skin
-
-**Load the `skin-debugging` skill before reading the skin engine.** It is the
-resolution model -- what decides a viewport's colours, font and rectangle, and
-the cross-file coupling that a skin file itself does not show -- with the tag
-reference, one entry per tag, beside it. It lives in the git-ignored
-`.claude/skills/`, so a fresh clone does not have it.
-
-Most skin questions are "what did the parser decide", and three tools answer
-that without reading C. Cheapest first:
-
-```sh
-.build/skinlint.exe theme.sbs             # syntax only, instant, git-ignored
-checkwps --viewports theme.sbs theme.wps  # the resolved viewport table
-```
-
-`--viewports` prints each viewport's rectangle, font and colours, and marks
-every colour `set`, `sbs` or `cfg` -- named on that viewport's own line,
-inherited from the `.sbs` `%Vi`, or neither. **Name the `.sbs` first**: the
-`.wps` then resolves against it the way it does on the player, which is the
-only way that inheritance is visible at all. It ends with a count, and a `.wps`
-reporting most of its viewports as `sbs` is a theme living off the browser
-list's colours. Theme Lens (above) is the third tool, for looking at the result
-rather than the decisions.
-
-**Build CheckWPS on the build server**, in a scratch directory rather than the
-tree:
-
-```sh
-mkdir ~/cwps && cd ~/cwps
-~/podbox/tools/configure --target=ipodvideo --type=c --appsdir=apps-ipod && make -j"$(nproc)"
-```
-
-It does not build on a Windows host, and the reason is worth knowing because it
-is not specific to this tool: `tools/functions.make:24` delimits a `sed`
-expression with `:`, so a `C:` drive letter splits it and `preprocess` returns
-an **empty source list** -- make then links a binary with no objects rather than
-reporting anything. Forcing Git-Bash-style paths past that reaches POSIX calls
-in `firmware/target/hosted/filesystem-app.c` (`os_lstat`, `S_ISLNK`,
-`localtime_r`) that MinGW does not have.
 
 ## Release Workflow
 
@@ -596,15 +508,13 @@ export PODBOX_BUILD_SERVER=user@host   # or pass --server; never committed
 ./release.sh                           # for real
 ```
 
-It builds both targets on the build server from a `git archive` of HEAD, checks
-each zip really contains the theme and the binary, and only then replaces the
-releases -- so a failed build leaves the previous ones standing. Four releases
-go out: `Themes`, `Simulator`, `Bootloader` and then `latest`. `Bootloader` is
-`build-bootloader.sh`'s zip: both bootloaders, `ipodpatcher.exe` and
-`mks5lboot.exe` built from `utils/`, and the scripts and README in
-`tools/bootloader-installer/`. **`latest` is the only release
-marked Latest** -- the other three pass `--latest=false` -- and GitHub features
-that one on the repository's front page.
+It builds both targets on the build server from a `git archive` of HEAD and
+checks each zip for the binary and required bundle files before replacing the
+releases. It publishes `Simulator`, `Voices`, `Bootloader` and then `latest`.
+Pass `--no-voices` to skip `Voices`. `Bootloader` is `build-bootloader.sh`'s zip:
+both bootloaders, `ipodpatcher.exe` and `mks5lboot.exe` built from `utils/`,
+and the scripts and README in `tools/bootloader-installer/`. **`latest` is
+the only release marked Latest.**
 Release notes list every commit since the last release, using the `latest` tag
 itself as the start point -- read from origin, since nothing is tagged locally
 (a rolling tag in the dev checkout only goes stale). That tag always names a

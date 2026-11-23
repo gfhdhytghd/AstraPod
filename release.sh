@@ -14,8 +14,7 @@
 # lands `#!/bin/sh^M` on the server and fails the first build with "bad
 # interpreter". Forcing them off ships true blob content, which also means no
 # `sed 's/\r$//'` pass is needed -- and that matters, because such a pass
-# applied to a binary (the 4bpp theme font) silently eats any 0x0D that happens
-# to precede a 0x0A.
+# applied to a binary font silently eats any 0x0D that precedes a 0x0A.
 #
 # Nothing reaches GitHub until both targets have built and both zips have been
 # checked, so a failed build leaves the previous release standing.
@@ -543,10 +542,8 @@ fi
 # badge to each release as it is created. A visitor must land on the build,
 # which is the firmware.
 #
-# A failure in the last step leaves fresh Themes, Simulator and Bootloader
-# releases beside a stale `latest`. Everything is built and verified before
-# any of this runs, so what remains is a network or gh failure; re-running
-# the script republishes all four.
+# If publishing stops partway through, rerun the script to publish the
+# complete release set.
 
 SHA=$(git rev-parse HEAD)
 

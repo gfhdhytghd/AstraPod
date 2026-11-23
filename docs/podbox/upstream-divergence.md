@@ -419,22 +419,21 @@ Two upstream files reach the app layer by bare include name, through `api/` stub
 | File | What it is |
 | --- | --- |
 | `README.md`, `CLAUDE.md` | The fork's README, and an assistant's instructions. |
-| `build-hw.sh` | Clean build for `ipod6g`/`6g` or `ipodvideo`/`5g`, with `--appsdir` and all five bundle scripts. |
+| `build-hw.sh` | Clean build for `ipod6g`/`6g` or `ipodvideo`/`5g`, with `--appsdir` and the hardware bundle steps. |
 | `build-sim.sh` | The same for the simulator, unpacked into `simdisk/`, which it keeps across the clean. `win` uses `--type=as6`; plain `s6` gives a normal build. |
-| `bundle-theme.sh` | Adds Scrim, `default-config.cfg` and the default iconset to the zip. Deletes `classic_statusbar` (the directory and the loose `.sbs`/`.rsbs` beside it) and the plugin data `buildzip.pl` copies from `apps/plugins/`. The theme is named, not globbed, so a merge cannot start shipping stock themes. |
+| `bundle-theme.sh` | Adds `default-config.cfg`, native PBF1 text fonts, icon fonts and font licences. Removes the upstream plugin files before `bundle-rocks.sh` adds the supported plugins. |
 | `bundle-help.sh` | Ships `settings-help.txt`. Without it every **Explain** is empty and nothing else looks wrong. |
 | `bundle-trim.sh` | Ships `trim.config`, the whole of what **Trim Titles** trims. |
 | `bundle-speech.sh` | Ships the speech synthesiser's `cmudict.bin`, with its licence, and the build's `english.vstrings`. Without them the Built-in voice says nothing and nothing else looks wrong. |
 | `build-voices.sh` | Runs `make voice` with Piper's HTTP server for English and the eleven translations, into `voices.zip`. A voice is numbered by that build's language strings, so it is made per build. |
 | `bundle-tools.sh` | Adds `soundscan.exe`, `database_pb.exe` and `artcache_pb.exe`, rebuilt by make on each run, and the host-built codecs soundscan loads, as `.rockbox/tools/`. A missing Windows simulator is reported, not fatal; a failed tool build is fatal; `release.sh` requires it. |
 | `build-bootloader.sh`, `tools/bootloader-installer/` | Builds both bootloaders and Windows `ipodpatcher.exe` and `mks5lboot.exe` from `utils/`, unchanged, and zips them with the install scripts and README as `podbox-bootloader.zip`. The 5G bootloader is passed to ipodpatcher by `install-5g.cmd`: embedding it needs every iPod model's bootloader beside it. |
-| `release.sh` | Builds both targets on the build server, verifies the zips, then replaces the `Themes`, `Simulator`, `Voices`, `Bootloader` and `latest` releases, in that order. `--no-voices` skips `Voices`. A dry run can build unpublished local commits. |
+| `release.sh` | Builds both targets on the build server, verifies the zips, then replaces the `Simulator`, `Voices`, `Bootloader` and `latest` releases, in that order. `--no-voices` skips `Voices`. A dry run can build unpublished local commits. |
 | `docs/CREDITS` | PodBox, RockPod, Spun, accessory protocol, car protocol, themes-and-fonts, speech and iPod Video display blocks above `For Rockbox:`, a heading this fork adds. Upstream's list below it is untouched, trailing newline included, so merges apply. |
 | `docs/LICENSES` | The CMU Pronouncing Dictionary's licence appended, for `cmudict.bin`. Upstream's text above it is untouched. |
 | `docs/podbox/` (new) | The fork's documents: user guides, `settings-help.txt`, the iAP source ledgers, this file and `upstream-commit-log.md`. |
-| `themes/` (new) | The converted themes `scrim`, `bony`, `jive`, `obsede_2`, `iclassic_square` and `themify_2`, each a folder holding `.rockbox/` with a README and screenshots, and `default-config.cfg`, the first-boot config. `bundle-theme.sh` ships Scrim and the config in the firmware zip; `release.sh` publishes the others as the `Themes` release, one zip each. |
+| `apps-ipod/default-config.cfg` | First-boot settings, including built-in Scrim and its default fonts. The firmware also provides Light. |
 | `.gitignore` | `/build*` narrowed to the build directories; local drafts, `dist/`, editor state and `build-bootloader.sh`'s output added. |
-| `wps/WPSLIST` | `cabbiev2` block removed, so it does not ship. `rockbox_failsafe` stays: it is the parse-failure fallback. |
 
 ---
 

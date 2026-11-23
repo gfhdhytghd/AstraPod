@@ -90,7 +90,7 @@ Rockbox builds out of tree, and `build-hw.sh` is only wrapping five steps:
 make -j"$(nproc)"
 make zip
 sh ../tools/check-zip-langs.sh rockbox.zip
-../bundle-theme.sh && ../bundle-help.sh && ../bundle-trim.sh && ../bundle-speech.sh && ../bundle-tools.sh
+../bundle-theme.sh && ../bundle-help.sh && ../bundle-trim.sh && ../bundle-speech.sh && ../bundle-font.sh && ../bundle-tools.sh
 ```
 
 Three of them are easy to get wrong by hand, and all fail quietly:
@@ -98,11 +98,11 @@ Three of them are easy to get wrong by hand, and all fail quietly:
 - **`--appsdir=apps-ipod` is required.** Rockbox's original `apps/` is still in
   the tree and is never built. Omit the flag and the build compiles `apps/`
   instead — you get working firmware with none of this fork's work in it.
-- **`make zip` on its own is incomplete.** `tools/buildzip.pl` is deliberately
-  kept close to Rockbox and knows nothing about this fork, so its zip has no
-  theme, no first-boot config, no iconset, no setting explanations, no
-  title trimming patterns and no speech dictionary. The `bundle-*.sh` scripts add them and strip what a
-  plugin-less build cannot use; `bundle-tools.sh` also adds the desktop
+- **`make zip` on its own is incomplete.** The firmware includes Scrim and
+  Light. The bundle scripts supply native fonts, first-boot settings,
+  setting explanations, title trimming patterns, speech data and the
+  Arcade text font. For ipod6g, run `bundle-rocks.sh` after
+  `bundle-theme.sh` to add compatible plugins. `bundle-tools.sh` adds the desktop
   tools `soundscan.exe`, `database_pb.exe` and `artcache_pb.exe`, and skips
   them with a warning unless a Windows simulator build
   (`./build-sim.sh 5g win`) is there to link against.
@@ -147,7 +147,7 @@ words that changed. `release.sh --no-voices` releases without them.
 ## Running the simulator
 
 The simulator runs the real application layer against SDL instead of an iPod:
-the same skin engine, the same album art, the same 320x240 screen. It is the
+the same native interface, the same album art, the same 320x240 screen. It is the
 fast way to work on a theme — no cable, no sync, and you can read the debug
 output.
 
@@ -173,13 +173,12 @@ survives it.** Your music and database are worth more than the rebuild.
 mkdir build-sim-ipodvideo && cd build-sim-ipodvideo
 ../tools/configure --target=ipodvideo --type=s --appsdir=apps-ipod
 make -j"$(nproc)"
-make zip && ../bundle-theme.sh && ../bundle-help.sh && ../bundle-trim.sh
+make zip && ../bundle-theme.sh && ../bundle-rocks.sh && ../bundle-help.sh && ../bundle-trim.sh && ../bundle-speech.sh && ../bundle-font.sh
 unzip -oq rockbox.zip -d simdisk/
 ```
 
-**Do not skip the bundle step.** Without it the simulator starts themeless with
-the fallback 6x8 iconset, which looks exactly like a rendering bug and is not
-one.
+**Run the bundle scripts before unpacking.** Scrim and Light are built in.
+`bundle-theme.sh` supplies the native fonts and first-boot settings.
 
 For Windows the build type is `--type=as6`: **(A)dvanced** with the options `s`
 (simulator) and `6` (64-bit Windows). Plain `--type=s6` looks equivalent and
@@ -190,9 +189,8 @@ character at a time, and only `A` forwards the rest.
 
 | | |
 |---|---|
-| `--debugwps` | Traces skin parsing: which `.wps` and `.sbs` loaded, and what every `%Sx()` lang lookup resolved to |
 | `F5` | Screendump — a pixel-exact 320x240 BMP written into `simdisk/` |
-| System > Debug | The portable debug screens, including **Skin memory**. The row is hidden until you turn on Settings > System > Show Debug Menu |
+| System > Debug | The portable debug screens. The row is hidden until you turn on Settings > System > Show Debug Menu |
 
 Controls are the arrow keys, Enter, Esc and Space, or the numeric keypad laid
 out like the click wheel. Note that **Right**, not Enter, opens a list item —

@@ -148,10 +148,12 @@ bool native_chrome_volume_visible(void)
 struct status_layout {
     int battery_x, percent_x, percent_width, play_x, busy_x;
     int clock_x, clock_width, title_width;
+    bool right_clock;
 };
 
-static struct status_layout status_layout(const struct native_chrome *chrome, int width,
-                                          int clock_width, int percent_width)
+static struct status_layout status_layout(const struct native_chrome *chrome,
+                                          int width, int clock_width,
+                                          int percent_width, int title_width)
 {
     const uint16_t *metric = chrome->theme->metric;
     int icon_size = metric[UI_METRIC_STATUS_ICON_SIZE];
@@ -160,22 +162,32 @@ static struct status_layout status_layout(const struct native_chrome *chrome, in
     int left = metric[UI_METRIC_STATUS_PAD_LEFT];
     int battery_x = width - metric[UI_METRIC_STATUS_PAD_RIGHT] - icon_size;
     int play_x = battery_x - gap - icon_size;
-    /* Reserve a centered clock even with battery percentage enabled. */
-    int percent_limit = play_x - gap - group_gap - (width + clock_width + 1) / 2;
+    /* Keep the playback slot even when stopped so the busy icon stays put. */
+    int busy_x = play_x - gap - icon_size;
+    int percent_limit = busy_x - gap - group_gap - left - clock_width;
     percent_width = MIN(percent_width, MAX(0, percent_limit));
     int percent_x = battery_x - gap - percent_width;
     if (percent_width)
+    {
         play_x = percent_x - gap - icon_size;
+        busy_x = play_x - gap - icon_size;
+    }
 
-    int clock_inset = MAX(left + icon_size, width - play_x) + group_gap;
-    clock_width = MIN(clock_width, MAX(0, width - 2 * clock_inset));
+    int clock_right = busy_x - group_gap;
+    clock_width = MIN(clock_width, MAX(0, clock_right - left));
     int clock_x = (width - clock_width) / 2;
-    int busy_x = MAX(left, clock_x - group_gap - icon_size);
+    const int title_gap = 8;
+    bool right_clock = left + title_width + title_gap > clock_x ||
+                       clock_x + clock_width > clock_right;
+    if (right_clock)
+        clock_x = clock_right - clock_width;
+
     return (struct status_layout) {
         .battery_x = battery_x, .percent_x = percent_x, .percent_width = percent_width,
         .play_x = play_x, .busy_x = busy_x,
         .clock_x = clock_x, .clock_width = clock_width,
-        .title_width = busy_x - gap - left,
+        .title_width = MAX(0, clock_x - title_gap - left),
+        .right_clock = right_clock,
     };
 }
 
@@ -327,6 +339,9 @@ static void draw_indicators(const struct native_chrome *chrome, struct viewport 
                   x + cell, y + slide, size, size, battery);
     }
     damage->fg_pattern = foreground;
+    if (chrome->state.busy < ARRAYLEN(busy_icons))
+        draw_text(damage, busy_icons[chrome->state.busy], chrome->icon_font,
+                  x + layout.busy_x, y, size, size, false);
 }
 
 void native_chrome_draw(const struct native_chrome *chrome, const char *left,
@@ -388,7 +403,6 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
     }
     int advance = clock_advance(clock, chrome->status_font);
     int clock_width = 2 * ((advance + 127) / 128);
-    struct status_layout layout = status_layout(chrome, bounds.width, clock_width, percent_width);
     int icon_y = bounds.y + metric[UI_METRIC_STATUS_ICON_Y];
     int text_y = bounds.y + metric[UI_METRIC_STATUS_TEXT_Y];
     int icon_size = metric[UI_METRIC_STATUS_ICON_SIZE];
@@ -398,43 +412,31 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
     if (!playback_modes)
         font_getstringsize((const unsigned char *)title, &title_width, NULL,
                            chrome->title_font);
-    const int gap = 8;
-    bool right_clock = !playback_modes &&
-        left_x + title_width + gap > bounds.x + layout.clock_x;
-    int clock_pen = bounds.x * 64 + clock_origin(bounds.width, advance);
-    if (right_clock)
-    {
-        layout.clock_width = clock_width;
-        layout.clock_x = bounds.width - metric[UI_METRIC_STATUS_PAD_RIGHT] - clock_width;
-        layout.title_width = MAX(0, bounds.x + layout.clock_x - gap - left_x);
-        clock_pen = (bounds.x + layout.clock_x) * 64;
-        char fitted[260];
-        title = text_fit(title, fitted, sizeof(fitted), chrome->title_font,
-                         layout.title_width);
-        draw_text(&damage, title, chrome->title_font, left_x, text_y,
-                  layout.title_width, metric[UI_METRIC_STATUS_TITLE_HEIGHT], false);
-    }
+    struct status_layout layout = status_layout(chrome, bounds.width,
+                                                clock_width, percent_width,
+                                                title_width);
     if (playback_modes)
         draw_text(&damage, left, chrome->icon_font, left_x, icon_y,
                   layout.title_width, icon_size, false);
-    else if (!right_clock)
+    else
+    {
+        char fitted[260];
+        if (title_width > layout.title_width)
+            title = text_fit(title, fitted, sizeof(fitted), chrome->title_font,
+                             layout.title_width);
         draw_text(&damage, title, chrome->title_font, left_x, text_y,
-                  layout.clock_x + bounds.x - left_x - gap,
-                  metric[UI_METRIC_STATUS_TITLE_HEIGHT], false);
-    if (!right_clock && left_x + title_width <= bounds.x + layout.busy_x &&
-        state->busy < ARRAYLEN(busy_icons))
-        draw_text(&damage, busy_icons[state->busy], chrome->icon_font,
-                  bounds.x + layout.busy_x, icon_y, icon_size, icon_size, false);
+                  layout.title_width, metric[UI_METRIC_STATUS_TITLE_HEIGHT], false);
+    }
 
+    int clock_pen = bounds.x * 64 + (layout.right_clock ? layout.clock_x * 64 :
+                                    clock_origin(bounds.width, advance));
     struct ui_rect clock_clip = { bounds.x + layout.clock_x, text_y,
                                   layout.clock_width, icon_size };
     draw_clock(&damage, clock, chrome->status_font, clock_clip, clock_pen);
-    if (!right_clock)
-    {
-        draw_text(&damage, percent, chrome->status_font, bounds.x + layout.percent_x,
-                  text_y, layout.percent_width, icon_size, false);
-        draw_indicators(chrome, &damage, indicators, layout, bounds.x, icon_y, icon_size,
-                        background, foreground);
-    }
+    draw_text(&damage, percent, chrome->status_font,
+              bounds.x + layout.percent_x, text_y, layout.percent_width,
+              icon_size, false);
+    draw_indicators(chrome, &damage, indicators, layout, bounds.x, icon_y,
+                    icon_size, background, foreground);
     lcd_set_viewport(previous);
 }

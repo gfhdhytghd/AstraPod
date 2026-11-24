@@ -126,13 +126,14 @@ int main(void)
     struct native_chrome chrome = {&theme};
     for (int percent = 0; percent <= 38; percent += 38)
     {
-        struct status_layout p = status_layout(&chrome, 320, 46, percent);
+        struct status_layout p = status_layout(&chrome, 320, 46, percent, 60);
         assert(p.battery_x + 18 <= 320);
         assert(p.play_x + 18 <= p.battery_x);
         assert(p.clock_x + p.clock_width <= p.play_x);
         assert(2*p.clock_x + p.clock_width == 320);
-        assert(p.busy_x + 18 <= p.clock_x);
-        assert(6 + p.title_width <= p.busy_x);
+        assert(p.busy_x + 18 + 4 == p.play_x);
+        assert(p.clock_x + p.clock_width <= p.busy_x);
+        assert(6 + p.title_width <= p.clock_x);
         if (percent)
             assert(p.play_x + 18 <= p.percent_x && p.percent_x + p.percent_width <= p.battery_x);
     }

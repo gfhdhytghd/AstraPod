@@ -95,17 +95,35 @@ int main(void)
         [UI_METRIC_STATUS_GROUP_GAP] = 9,
     }};
     struct native_chrome chrome = { .theme = &theme };
-    struct status_layout bar = status_layout(&chrome, 320, 72, 0);
+    struct status_layout bar = status_layout(&chrome, 320, 72, 0, 48);
     assert(bar.clock_x == 124 && bar.clock_width == 72);
     assert(bar.battery_x == 289 && bar.play_x == 263 && !bar.percent_width);
-    assert(10 + bar.title_width < bar.busy_x && bar.busy_x + 24 < bar.clock_x);
-    bar = status_layout(&chrome, 320, 72, 40);
-    assert(bar.clock_x == 124 && bar.clock_width == 72);
-    assert(bar.play_x + 24 < bar.percent_x);
-    assert(bar.percent_width == 40 && bar.percent_x + 40 < bar.battery_x);
-    bar = status_layout(&chrome, 320, 200, 80);
-    assert(bar.clock_x * 2 + bar.clock_width == 320);
-    assert(bar.clock_x + bar.clock_width < bar.play_x);
+    assert(bar.busy_x == 237 && !bar.right_clock);
+
+    /* Both built-in themes share these status metrics. Cover short and long
+     * titles, the empty title width for playback modes, and both clock formats. */
+    const int titles[] = {0, 48, 500};
+    const int clocks[] = {46, 90, 200};
+    for (unsigned t = 0; t < sizeof(titles) / sizeof(*titles); ++t)
+    for (unsigned c = 0; c < sizeof(clocks) / sizeof(*clocks); ++c)
+    for (int percent = 0; percent <= 40; percent += 40)
+    {
+        bar = status_layout(&chrome, 320, clocks[c], percent, titles[t]);
+        assert(bar.clock_width == clocks[c]);
+        assert(10 + bar.title_width + 8 <= bar.clock_x || !bar.title_width);
+        assert(bar.clock_x + bar.clock_width + 9 <= bar.busy_x);
+        assert(bar.busy_x + 24 + 2 == bar.play_x);
+        assert(bar.play_x + 24 + 2 == (bar.percent_width ? bar.percent_x : bar.battery_x));
+        assert(bar.percent_x + bar.percent_width + 2 == bar.battery_x);
+        if (titles[t] == 500 || (clocks[c] == 90 && percent))
+            assert(bar.right_clock);
+        if (clocks[c] < 200)
+            assert(bar.percent_width == percent);
+        if (bar.right_clock)
+            assert(bar.clock_x + bar.clock_width + 9 == bar.busy_x);
+        else
+            assert(2 * bar.clock_x + bar.clock_width == 320);
+    }
     assert(2 * clock_origin(320, 4290) + 4290 == 320 * 64);
     assert(2 * clock_origin(320, 4912) + 4912 == 320 * 64);
     assert(2 * clock_origin(320, 4291) + 4291 == 320 * 64 + 1);

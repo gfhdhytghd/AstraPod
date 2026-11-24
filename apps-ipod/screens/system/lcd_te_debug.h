@@ -9,6 +9,7 @@
 
 bool lcd_te_debug_screen(void);
 bool lcd_te_debug_toggle(void);
+bool lcd_te_debug_timing(void);
 const char *lcd_te_debug_sync_state(void);
 
 #endif /* LCD_TE_DEBUG_H */

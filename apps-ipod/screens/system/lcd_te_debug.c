@@ -118,3 +118,30 @@ bool lcd_te_debug_toggle(void)
     }
     return false;
 }
+
+bool lcd_te_debug_timing(void)
+{
+    if (!lcd_te_supported())
+    {
+        splash(HZ, "Requires LCD type 1");
+        return false;
+    }
+
+    static const unsigned int timings[] = {0x33, 0x22, 0x21, 0x12, 0x11};
+    struct simplelist_info info;
+    simplelist_info_init(&info, "LCD bus timing", 0, NULL);
+    for (unsigned int i = 0; i < ARRAYLEN(timings); ++i)
+    {
+        bool active = timings[i] == lcd_te_bus_timing();
+        simplelist_addline("0x%02x%s", timings[i], active ? " (active)" : "");
+        if (active)
+            info.selection = i;
+    }
+
+    if (simplelist_show_list(&info))
+        return true;
+    if (info.selection >= 0 &&
+        !lcd_te_set_bus_timing(timings[info.selection]))
+        splash(HZ, "LCD bus busy; retry");
+    return false;
+}

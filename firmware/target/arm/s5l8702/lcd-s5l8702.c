@@ -761,7 +761,7 @@ void lcd_init_device(void)
 
     lcd_target_enable_clocks(true);
 #if defined(IPOD_6G) || defined(IPOD_NANO3G)
-    LCD_PHTIME = 0x33;
+    LCD_PHTIME = LCD_PHTIME_CLASSIC_DEFAULT;
 #elif defined(IPOD_NANO4G) && defined(BOOTLOADER)
     cg16_config(&CG16_LCD, true, CG16_SEL_PLL0, 16, 1, 0x0);
     s5l_lcd_write_config(LCD_MODE_S9);

@@ -2,6 +2,7 @@
 #include "config.h"
 #include "kernel.h"
 #include "lcd.h"
+#include "lcd-s5l8702.h"
 #include "lcd-te-s5l8702.h"
 #include "system.h"
 #include "s5l87xx.h"
@@ -20,6 +21,8 @@
 #define POLL_YIELD_US     250u
 #define POLL_MAX_GAP_US   32u
 #define PHASE_GUARD_US    50
+#define LCD_IDLE_MASK    ((1u << 8) | (1u << 1))
+#define LCD_IDLE_WAIT_US  5000u
 
 enum { GPIO_PORTS = 16, STATUS = GPIO_PORTS, INTCON, IRQ_RAW, SOURCE_COUNT };
 
@@ -45,6 +48,7 @@ static struct edge_stats lcd_edges[SOURCE_COUNT - GPIO_PORTS][32];
 static uint32_t pinmux[GPIO_PORTS];
 static struct te_pulse pulse;
 static struct dma_stats full_dma, band_dma, rect_dma;
+static unsigned int bus_timing = LCD_PHTIME_CLASSIC_DEFAULT;
 static uint32_t last_rise;
 static long last_rise_tick;
 static bool have_rise;
@@ -67,6 +71,41 @@ void lcd_te_set_enabled(bool enable)
 {
     if (lcd_te_supported() && (!enable || pulse.valid))
         want_sync = enable;
+}
+
+unsigned int lcd_te_bus_timing(void)
+{
+    return bus_timing;
+}
+
+bool lcd_te_set_bus_timing(unsigned int timing)
+{
+    if (timing == bus_timing)
+        return true;
+    if (!lcd_te_acquire_bus())
+        return false;
+
+    /* DMA completion can precede the last bytes leaving the LCD FIFO. */
+    uint32_t until = USEC_TIMER + LCD_IDLE_WAIT_US;
+    while ((LCD_STATUS & LCD_IDLE_MASK) != LCD_IDLE_MASK)
+    {
+        if (!TIME_BEFORE(USEC_TIMER, until))
+        {
+            lcd_te_release_bus();
+            return false;
+        }
+        yield();
+    }
+
+    /* S5L8700X spec 26-10 to 26-12: [7:4] PH1_TIME and [3:0]
+     * PH2_TIME set the two strobe pulse widths to (value + 1) clock
+     * units. The phase polarity and clock unit on S5L8702 are unverified. */
+    LCD_PHTIME = timing;
+    bus_timing = timing;
+    full_dma = band_dma = rect_dma = (struct dma_stats){0};
+    lead_slots = trail_slots = timed_out = no_window = max_wait = 0;
+    lcd_te_release_bus();
+    return true;
 }
 
 static uint32_t read_source(unsigned int source)
@@ -419,11 +458,15 @@ bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...))
     unsigned int lead = lead_slots, trail = trail_slots;
     unsigned int misses = timed_out, bypasses = no_window;
     uint32_t worst_wait = max_wait;
+    unsigned int timing = LCD_PHTIME;
+    unsigned int status = LCD_STATUS;
     lcd_te_release_bus();
 
     report("TE candidates=%u | sync=%s", measured.valid,
            sync_on ? "on" : "off");
     report("LCD type 1 | panel readback unavailable");
+    report("LCD_PHTIME=0x%02x | DMA samples since timing change", timing);
+    report("LCD_STATUS after DMA=0x%08x", status);
     report("TE pin %s | PDAT6[7] mux=%u",
            measured.valid ? "selected" : "unqualified", pinmux[TE_PORT] >> 28);
     if (measured.period)
@@ -432,6 +475,13 @@ bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...))
                measured.high ? measured.period - measured.high : 0);
     else
         report("TE period/pulse unavailable");
+    if (measured.valid)
+    {
+        unsigned int millihz = (1000000000u + measured.period / 2) /
+                               measured.period;
+        report("TE refresh=%u.%03u Hz | 60 Hz period=16667 us",
+               millihz / 1000, millihz % 1000);
+    }
     report("TE phase assumes active-high blanking, top-to-bottom scan");
     report("TE lead=%u trail=%u timeout=%u no-window=%u",
            lead, trail, misses, bypasses);

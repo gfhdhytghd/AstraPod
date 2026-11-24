@@ -33,6 +33,13 @@
 static struct event_queue button_queue SHAREDBSS_ATTR;
 static intptr_t button_data; /* data value from last message dequeued */
 
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+#include "button-frame-deadline.inc"
+#else
+#define button_frame_wait(ev, ticks) queue_wait_w_tmo(&button_queue, ev, ticks)
+#define button_discard_frame_wake() ((void)0)
+#endif
+
 #ifdef HAVE_ADJUSTABLE_CPU_FREQ
 static bool button_boosted = false;
 static long button_unboost_tick;
@@ -80,7 +87,7 @@ static void button_queue_wait(struct queue_event *evp, int timeout)
             ticks = BUTTON_UNBOOST_TMO;
         }
 
-        queue_wait_w_tmo(&button_queue, evp, ticks);
+        button_frame_wait(evp, ticks);
         if (evp->id != SYS_TIMEOUT)
         {
             /* GUI boost build gets immediate kick, otherwise at least 3
@@ -131,6 +138,7 @@ static inline void button_queue_wait(struct queue_event *evp, int timeout)
 void button_queue_post(long id, intptr_t data)
 {
     int oldlevel = disable_irq_save();
+    button_discard_frame_wake();
     if (queue_full(&button_queue))
     {
 #if defined(HAVE_EXTENDED_MESSAGING_AND_NAME) && \
@@ -161,6 +169,7 @@ void button_queue_post_remove_head(long id, intptr_t data)
 bool button_queue_try_post(long button, int data)
 {
     int oldlevel = disable_irq_save();
+    button_discard_frame_wake();
 #ifdef HAVE_TOUCHSCREEN
     /* one can swipe over the scren very quickly,
      * for this to work we want to forget about old presses and

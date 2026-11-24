@@ -8,6 +8,8 @@
 bool lcd_te_supported(void);
 bool lcd_te_enabled(void);
 void lcd_te_set_enabled(bool enable);
+unsigned int lcd_te_bus_timing(void);
+bool lcd_te_set_bus_timing(unsigned int timing);
 
 /* Reports one line per call after releasing the LCD bus. */
 bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...));

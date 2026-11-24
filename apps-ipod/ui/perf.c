@@ -31,8 +31,8 @@ struct frame_sample {
 
 struct frame_capture {
     char route[32];
-    unsigned seen, work_misses, interval_misses;
-    uint32_t worst_work, worst_interval, skipped;
+    unsigned seen, render_misses, work_misses, interval_misses;
+    uint32_t worst_render, worst_work, worst_interval, skipped;
     uint32_t render_pending, last_submission, slot_phase;
     struct frame_sample samples[PERF_CAPACITY];
     uint32_t scratch[PERF_CAPACITY];
@@ -119,6 +119,8 @@ void ui_perf_note_submit(uint32_t elapsed_clock)
     }
     capture->last_submission = clock;
     uint32_t work = add_time(sample.render, sample.submit);
+    capture->worst_render = MAX(sample.render, capture->worst_render);
+    capture->render_misses += sample.render > FRAME_BUDGET;
     capture->worst_work = MAX(work, capture->worst_work);
     capture->work_misses += work > FRAME_BUDGET;
     capture->samples[capture->seen % PERF_CAPACITY] = sample;
@@ -197,16 +199,19 @@ void ui_perf_end(unsigned token)
         rows = core_get_data_pinned(rows_handle);
         rows_used = format_rows(capture, first, rows, rows_size);
     }
-    char summary[320];
+    char summary[384];
+    unsigned render_worst = as_frames(capture->worst_render);
     int n = snprintf(summary, sizeof(summary),
         "route=%s seen=%u retained=%u dropped=%u rows=%u "
         "work_p99_f=" FRAME_FORMAT " interval_p99_f=" FRAME_FORMAT " "
         "work_worst_f=" FRAME_FORMAT " interval_worst_f=" FRAME_FORMAT " "
-        "work_misses=%u interval_misses=%u skipped_slots=%u\n",
+        "work_misses=%u interval_misses=%u skipped_slots=%u "
+        "render_worst_f=" FRAME_FORMAT " render_misses=%u\n",
         capture->route, capture->seen, retained, first, rows ? retained : 0,
         FRAME_ARG(work_p99), FRAME_ARG(interval_p99),
         FRAME_ARG(work_worst), FRAME_ARG(interval_worst),
-        capture->work_misses, capture->interval_misses, (unsigned)capture->skipped);
+        capture->work_misses, capture->interval_misses, (unsigned)capture->skipped,
+        FRAME_ARG(render_worst), capture->render_misses);
     core_put_data_pinned(capture);
     core_free(handle);
     if (n > 0 && (size_t)n < sizeof(summary))

@@ -169,6 +169,7 @@ int main(void)
     assert(strstr(journal, "route=push seen=3 retained=3 dropped=0 rows=3 "));
     assert(strstr(journal, "work_p99_f=1.1400 interval_p99_f=2.0000"));
     assert(strstr(journal, "work_misses=1 interval_misses=2 skipped_slots=1"));
+    assert(strstr(journal, "render_worst_f=1.0800 render_misses=1"));
     assert(strstr(journal, "\n1,0.3000,0.1200,0.4200,0.0000,0,0,0\n"));
     assert(strstr(journal, "\n2,1.0800,0.0600,1.1400,1.0020,1,1,0\n"));
     assert(!allocations[0] && !allocations[1]);
@@ -182,6 +183,7 @@ int main(void)
     assert(strstr(journal, "route=cover-flow seen=520 retained=512 dropped=8 rows=512 "));
     assert(strstr(journal, "work_p99_f=0.1200 interval_p99_f=1.0000"));
     assert(strstr(journal, "work_worst_f=2.1000 interval_worst_f=1.0000"));
+    assert(strstr(journal, "render_worst_f=1.8000 render_misses=1"));
     assert(strstr(journal, "\n9,0.0600,0.0600,0.1200,1.0000,0,0,0\n"));
     assert(strstr(journal, "\n520,0.0600,0.0600,0.1200,1.0000,0,0,0\n"));
 

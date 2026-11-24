@@ -1471,8 +1471,9 @@ int action_set_keymap_handle(int handle, int count)
 #endif
 }
 
-int get_custom_action(int context,int timeout,
-                      const struct button_mapping* (*get_context_map)(int))
+static int custom_action(int context, int timeout,
+                         const struct button_mapping *(*get_context_map)(int),
+                         const uint32_t *frame_deadline)
 {
 #ifdef ASTRAPOD_ROCK_COMPAT
     if (rock_ui_raw())
@@ -1488,7 +1489,17 @@ int get_custom_action(int context,int timeout,
     action_cur_t current;
     init_act_cur(&current, context, ui_scene_poll(timeout), get_context_map);
 
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+    if (frame_deadline)
+        button_set_frame_deadline(frame_deadline);
+#else
+    (void)frame_deadline;
+#endif
     int action = get_action_worker(&action_last, &current);
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+    if (frame_deadline)
+        button_set_frame_deadline(NULL);
+#endif
 
     action = do_backlight(&action_last, &current, action);
     scene_takeover(action);
@@ -1503,6 +1514,21 @@ int get_custom_action(int context,int timeout,
     action = route_screen_shortcut(step_handoff(action), context);
     return menu_back_action(action);
 }
+
+int get_custom_action(int context, int timeout,
+                      const struct button_mapping *(*get_context_map)(int))
+{
+    return custom_action(context, timeout, get_context_map, NULL);
+}
+
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+int get_custom_action_until(int context, int timeout,
+                            const struct button_mapping *(*get_context_map)(int),
+                            uint32_t deadline)
+{
+    return custom_action(context, timeout, get_context_map, &deadline);
+}
+#endif
 
 intptr_t get_action_data(void)
 {

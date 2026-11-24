@@ -110,6 +110,9 @@
 #include "screens/playback/cider_library.h"
 #include "speech/talk.h"
 #include "ui/animation.h"
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+#include "lcd-te-s5l8702.h"
+#endif
 #include "ui/scene.h"
 
 /******************************* Globals ***********************************/
@@ -544,6 +547,19 @@ static int target;
 static int fade;
 static bool pf_native_motion;
 static unsigned pf_motion_scale = UI_THEME_MOTION_ONE;
+
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+bool carousel_60hz_enabled;
+
+bool carousel_debug_toggle_60hz(void)
+{
+    if (lcd_te_supported())
+        carousel_60hz_enabled = !carousel_60hz_enabled;
+    else
+        splash(HZ, "LCD type 1 only");
+    return false;
+}
+#endif
 
 static unsigned motion_frames(unsigned frames)
 {
@@ -4883,13 +4899,17 @@ static void pf_stats_draw(void)
 
 /* Wait in the kernel's tick units. Render due frames from the engine clock
  * even when the queue returns late or is interrupted by input. */
-static int native_frame_wait(uint32_t clock, unsigned last_frame)
+static int native_frame_wait(uint32_t clock, unsigned last_frame,
+                             uint32_t *deadline)
 {
     uint32_t elapsed = (uint32_t)USEC_TIMER - clock;
     unsigned frame = ui_clock_frame(elapsed);
     if (frame != last_frame)
         return TIMEOUT_NOBLOCK;
-    uint32_t left = ui_frame_clock(frame + 1) - elapsed;
+    uint32_t next = ui_frame_clock(frame + 1);
+    if (deadline)
+        *deadline = clock + next;
+    uint32_t left = next - elapsed;
     return 1 + (left - 1) / (1000000u / HZ);
 }
 
@@ -4945,6 +4965,9 @@ static struct album_panel {
     int scroll_y, scroll_from;
     uint32_t scroll_clock;
     unsigned scroll_frames;
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+    unsigned scroll_sampled;
+#endif
     int from, to, via, position;
     unsigned first, second, sampled, trace;
     uint32_t clock, opened;
@@ -5090,6 +5113,9 @@ static void panel_follow_selection(bool animate)
         /* Keep up with fast input, then use native list cubic ease-out. */
         panel.scroll_y = panel.scroll_from = from;
         panel.scroll_clock = USEC_TIMER;
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+        panel.scroll_sampled = (unsigned)-1;
+#endif
     }
     else
         panel.scroll_y = top * PANEL_PITCH;
@@ -5320,6 +5346,9 @@ static void panel_step_scroll(void)
 {
     uint32_t elapsed = (uint32_t)USEC_TIMER - panel.scroll_clock;
     unsigned frame = ui_clock_frame(elapsed);
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+    panel.scroll_sampled = frame;
+#endif
     const struct ui_tween glide = {
         .from = panel.scroll_from, .to = panel.top * PANEL_PITCH,
         .frames = panel.scroll_frames,
@@ -5764,7 +5793,6 @@ static void NO_INLINE render_album_flip(int position, pix_t color)
 
 static void draw_album_flip(void)
 {
-    uint32_t start = USEC_TIMER;
     show_carousel_entry();
     lcd_set_viewport(&pf_vp);
     pf_update_dynamic_colors();
@@ -5773,14 +5801,18 @@ static void draw_album_flip(void)
     lcd_set_drawmode(DRMODE_FG);
     pix_t color = ui_theme_rgb565(UI_COLOR_MODAL_BG);
     buf_ctx_lock();
+    uint32_t render_start = panel.trace ? USEC_TIMER : 0;
     render_album_flip(panel.position, color);
+    uint32_t render = panel.trace ? (uint32_t)USEC_TIMER - render_start : 0;
     buf_ctx_unlock();
     bool opened = false;
     if (panel.position == FLIP_OPEN)
     {
         uint32_t draw_start = USEC_TIMER;
         paint_album_panel();
-        panel_perf_record(PP_DRAW, USEC_TIMER - draw_start, panel.painted_rows, panel.have_blur);
+        uint32_t draw = (uint32_t)USEC_TIMER - draw_start;
+        render += draw;
+        panel_perf_record(PP_DRAW, draw, panel.painted_rows, panel.have_blur);
         int expected = MIN(panel.count, ALBUM_PANEL_ROWS);
         if (!panel.open_logged && expected >= 0 && panel.header_ready &&
             panel.painted_rows + panel.painted_discs >= (unsigned)expected)
@@ -5788,6 +5820,12 @@ static void draw_album_flip(void)
     }
     uint32_t submit = USEC_TIMER;
     lcd_update();
+    if (panel.trace)
+    {
+        uint32_t submitted = USEC_TIMER;
+        ui_perf_note_render(render);
+        ui_perf_note_submit(submitted - submit);
+    }
     if (opened)
     {
         panel.open_logged = true;
@@ -5796,11 +5834,6 @@ static void draw_album_flip(void)
     }
     if (pf_scene.capturing)
         ui_scene_start(&pf_scene);
-    if (panel.trace)
-    {
-        ui_perf_note_render(submit - start);
-        ui_perf_note_submit((uint32_t)USEC_TIMER - submit);
-    }
     panel.dirty = false;
 }
 
@@ -6283,11 +6316,34 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
          * stays owed, and the wake's full update shows it. */
         bool dark = !lcd_active();
         int timeout;
+        bool clocked_frames = pf_native_motion;
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+        bool high_res = carousel_60hz_enabled;
+        clocked_frames |= high_res;
+        bool wait_for_frame = false;
+        uint32_t deadline = 0;
+#endif
 
         if (restored_pixels)
             timeout = 1;
         else if (!dark && panel.live)
         {
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+            if (high_res && panel.moving)
+            {
+                timeout = native_frame_wait(panel.clock, panel.sampled,
+                                            &deadline);
+                wait_for_frame = true;
+            }
+            else if (high_res && panel.scroll_frames &&
+                     panel.position == FLIP_OPEN)
+            {
+                timeout = native_frame_wait(panel.scroll_clock,
+                                            panel.scroll_sampled, &deadline);
+                wait_for_frame = true;
+            }
+            else
+#endif
             if (panel.moving)
                 timeout = ui_clock_poll_timeout((uint32_t)USEC_TIMER - panel.clock,
                                                  panel.first + panel.second, HZ);
@@ -6309,8 +6365,15 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
              * at once and it is drawn. Waiting a tick there instead throws
              * 10 ms away on every frame that overruns its own interval, which
              * on the 5G is all of them. */
-            if (pf_native_motion)
-                timeout = native_frame_wait(frame_clock, last_frame);
+            if (clocked_frames)
+            {
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+                timeout = native_frame_wait(frame_clock, last_frame, &deadline);
+                wait_for_frame = high_res;
+#else
+                timeout = native_frame_wait(frame_clock, last_frame, NULL);
+#endif
+            }
             else
                 timeout = MAX(PF_FRAME_TICKS - (current_tick - last_frame_tick), 0);
         }
@@ -6321,18 +6384,33 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         {
             long left = speak_due - current_tick;
             if (left < timeout || timeout == TIMEOUT_BLOCK)
+            {
                 timeout = left > 0 ? (int)left : 0;
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+                wait_for_frame = false;
+#endif
+            }
         }
 
         if (panel_waiting)
             timeout = timeout == TIMEOUT_BLOCK ? MAX(1, HZ / 25)
                                                : MIN(timeout, MAX(1, HZ / 25));
         if (font_prefetch_busy())
+        {
             timeout = timeout == TIMEOUT_BLOCK ? 1 : MIN(timeout, 1);
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+            wait_for_frame = false;
+#endif
+        }
         bool inherited_inhibit = ui_flush_inhibited();
         ui_inhibit_flush(true);
         if (first_frame)
             button = ACTION_NONE;
+#ifdef HAVE_BUTTON_FRAME_DEADLINE
+        else if (wait_for_frame && timeout > 0)
+            button = get_custom_action_until(CONTEXT_PLUGIN, timeout,
+                                             get_context_map, deadline);
+#endif
         else
             button = get_custom_action(CONTEXT_PLUGIN, timeout, get_context_map);
         first_frame = false;
@@ -6657,9 +6735,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         }
 
         unsigned frame = last_frame;
-        if (!dark && (art_owed || caption_owed) && pf_native_motion)
+        if (!dark && (art_owed || caption_owed) && clocked_frames)
             frame = ui_clock_frame((uint32_t)USEC_TIMER - frame_clock);
-        bool frame_due = pf_native_motion ? frame != last_frame :
+        bool frame_due = clocked_frames ? frame != last_frame :
                         current_tick - last_frame_tick >= PF_FRAME_TICKS;
         bool dispatch_first = pf_native_motion &&
             (button != ACTION_NONE || agents_nav_pending() != AGENTS_NAV_NONE);
@@ -6671,7 +6749,6 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 *trace = ui_perf_begin(model->motion_trace ?: "cover-flow");
                 trace_attempted = true;
             }
-            uint32_t frame_start = *trace ? USEC_TIMER : 0;
             bool drew_art = art_owed;
             bool drew_caption = caption_owed;
             /* The rows each half touches, and so the rows it has to clear
@@ -6680,6 +6757,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             int art_y = 0, art_h = 0;
             bool joined;
             buf_ctx_lock();
+            uint32_t frame_start = *trace ? USEC_TIMER : 0;
 
             art_owed = false;
             caption_owed = false;
@@ -6753,6 +6831,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             }
 
             carousel_paint(&paint, drew_art, drew_caption, joined, art_y, art_h);
+            uint32_t render = *trace ? (uint32_t)USEC_TIMER - frame_start : 0;
 #if PF_SHOW_STATS
             pf_stats_draw();
             t_flush = USEC_TIMER;
@@ -6788,7 +6867,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 if (*trace)
                 {
                     uint32_t submitted = USEC_TIMER;
-                    ui_perf_note_render(submitting - frame_start);
+                    ui_perf_note_render(render);
                     ui_perf_note_submit(submitted - submitting);
                 }
             }

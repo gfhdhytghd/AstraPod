@@ -77,6 +77,11 @@ void button_clear_queue(void);
 void button_clear_pressed(void);
 long button_get(bool block);
 long button_get_w_tmo(int ticks);
+#if defined(IPOD_6G) && (CONFIG_PLATFORM & PLATFORM_NATIVE) && !defined(BOOTLOADER)
+#define HAVE_BUTTON_FRAME_DEADLINE
+/* The caller brackets an input poll with a USEC_TIMER deadline and NULL. */
+void button_set_frame_deadline(const uint32_t *deadline);
+#endif
 #if (defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))) && !defined(BOOTLOADER)
 void button_set_ui_filter(long (*filter)(long));
 #endif

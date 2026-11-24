@@ -26,6 +26,7 @@
 #include "config.h"
 #include "lcd-target.h"
 
+#define LCD_PHTIME_CLASSIC_DEFAULT 0x33
 
 /* sequence actions */
 enum {

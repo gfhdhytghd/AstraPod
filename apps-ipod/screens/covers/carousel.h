@@ -88,6 +88,11 @@ enum pf_scroll_line_type {
  * MENU_* value in root_menu.h, which stop at -10, so it never collides with
  * one. */
 #define CAROUSEL_PLAY_ALBUM    (-20)
+
+#if defined(IPOD_6G) && (CONFIG_PLATFORM & PLATFORM_NATIVE)
+extern bool carousel_60hz_enabled;
+bool carousel_debug_toggle_60hz(void);
+#endif
 /* on_context() recorded a slide for its menu, which runs once the carousel has
  * let go of the app buffer the menu's rows need. The model's own entry point
  * shows it and opens the carousel again. Below root_menu.h's values too. */

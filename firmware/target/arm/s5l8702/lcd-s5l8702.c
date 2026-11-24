@@ -159,11 +159,26 @@ static struct dmac_tsk lcd_dma_tskbuf[LCD_DMA_TSKBUF_SZ];
 static struct dmac_lli volatile \
             lcd_dma_llibuf[LCD_DMA_LLIBUF_SZ] CACHEALIGN_ATTR;
 
+#if defined(IPOD_6G) && !defined(BOOTLOADER)
+static uint32_t lcd_dma_start_usec;
+
+static void lcd_dma_done(void *data)
+{
+    uint32_t elapsed = USEC_TIMER - lcd_dma_start_usec;
+    unsigned int size = (uintptr_t)data;
+    if (size)
+        lcd_te_dma_done(size & 0xffff, size >> 16, elapsed);
+}
+#endif
+
 static struct dmac_ch lcd_dma_ch =
 {
     .dmac = &s5l8702_dmac0,
     .prio = DMAC_CH_PRIO(4),
-    .cb_fn = NULL,
+#if defined(IPOD_6G) && !defined(BOOTLOADER)
+    .cb_fn = lcd_dma_done,
+    .start_usec = &lcd_dma_start_usec,
+#endif
 
     .tskbuf = lcd_dma_tskbuf,
     .tskbuf_mask = LCD_DMA_TSKBUF_SZ - 1,
@@ -368,10 +383,6 @@ static void displaylcd_setup(int x, int y, int width, int height)
 
     s5l_lcd_set_command_mode();
 
-#if defined(IPOD_6G) && !defined(BOOTLOADER)
-    lcd_te_wait(y);
-#endif
-
 #ifdef S5L_LCD_WITH_CMDSET16
     if (lcd_info->cmdset == LCD_CMDSET_16BIT)
     {
@@ -397,13 +408,23 @@ static void displaylcd_setup(int x, int y, int width, int height)
     }
 }
 
-static void displaylcd_dma(int pixels) ICODE_ATTR;
-static void displaylcd_dma(int pixels)
+static void displaylcd_dma(int y, int width, int height) ICODE_ATTR;
+static void displaylcd_dma(int y, int width, int height)
 {
     s5l_lcd_set_frame_mode();
     commit_dcache();
+    void *data = NULL;
+#if defined(IPOD_6G) && !defined(BOOTLOADER)
+    if (lcd_te_supported() && is_thread_context() && irq_enabled())
+    {
+        lcd_te_wait(y, width, height);
+        data = (void *)(uintptr_t)((unsigned int)height << 16 | width);
+    }
+#else
+    (void)y;
+#endif
     dmac_ch_queue(&lcd_dma_ch, lcd_dblbuf,
-            (void*)S5L8702_DADDR_PERI_LCD_WR, pixels*2, NULL);
+                  (void *)S5L8702_DADDR_PERI_LCD_WR, width * height * 2, data);
 }
 
 // TODO: wait if there is a DMA transfer in progress
@@ -428,7 +449,7 @@ static void displaylcd_wait_dma(void)
 }
 
 #if defined(IPOD_6G) && !defined(BOOTLOADER)
-bool lcd_te_acquire_bus(uint32_t *command_mode)
+bool lcd_te_acquire_bus(void)
 {
     if (!lcd_te_supported() || !is_thread_context() || !irq_enabled() ||
         !lcd_ispowered || lcd_mutex.blocker.thread)
@@ -445,7 +466,6 @@ bool lcd_te_acquire_bus(uint32_t *command_mode)
         }
         yield();
     }
-    *command_mode = lcd_cmd_mode;
     return true;
 }
 
@@ -521,7 +541,7 @@ void lcd_update_rect(int x, int y, int width, int height)
             podlink_plugin_test_lcd_present(lcd_dblbuf[0], x, y, width, original_height);
 #endif
         displaylcd_setup(x, y, width, height);
-        displaylcd_dma(pixels);
+        displaylcd_dma(y, width, height);
     }
     if (lock)
         mutex_unlock(&lcd_mutex);
@@ -549,7 +569,7 @@ bool lcd_present_scene(const fb_data *pixels)
         podlink_plugin_test_lcd_present(lcd_dblbuf[0], 0, 0, LCD_WIDTH, LCD_HEIGHT);
 #endif
         displaylcd_setup(0, 0, LCD_WIDTH, LCD_HEIGHT);
-        displaylcd_dma(LCD_WIDTH * LCD_HEIGHT);
+        displaylcd_dma(0, LCD_WIDTH, LCD_HEIGHT);
     }
     mutex_unlock(&lcd_mutex);
     return ready;
@@ -577,7 +597,6 @@ void lcd_blit_yuv(unsigned char * const src[3],
 #if (defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)) || defined(HAVE_PODLINK_PLUGIN_TEST)
     int original_height = height;
 #endif
-    int pixels = width * height;
     uint16_t* out = lcd_dblbuf[0];
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
     bool videoout_yuv_mirrored = false;
@@ -622,7 +641,7 @@ void lcd_blit_yuv(unsigned char * const src[3],
         podlink_plugin_test_lcd_present(lcd_dblbuf[0], x, y, width, original_height);
 #endif
         displaylcd_setup(x, y, width, height);
-        displaylcd_dma(pixels);
+        displaylcd_dma(y, width, height);
     }
     mutex_unlock(&lcd_mutex);
 }
@@ -711,6 +730,10 @@ void lcd_awake(void)
     lcd_run_seq(lcd_info->seq_awake);
     lcd_ispowered = true;       // XXX: we have to put the lcd_ispowered before the lcd_update()
 
+#if defined(IPOD_6G) && !defined(BOOTLOADER)
+    lcd_te_probe();
+#endif
+
     lcd_update();               // XXX: update the display and wait for the update to finish before returning,
 
     displaylcd_wait_dma();      //      we should really do sleep_out + lcd_update + display_on,
@@ -784,6 +807,9 @@ void lcd_init_device(void)
 #endif
 
     lcd_ispowered = true;
+#if defined(IPOD_6G) && !defined(BOOTLOADER)
+    lcd_te_probe();
+#endif
 #ifdef HAVE_PODLINK_PLUGIN_TEST
     podlink_plugin_test_lcd_init();
 #endif

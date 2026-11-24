@@ -8,19 +8,20 @@
 #include <stdio.h>
 #include <string.h>
 
-#define TE_MIN_US       14000u
-#define TE_MAX_US       17000u
-#define SYNC_WAIT_US    20000u
-#define READ_WAIT_US      250u
-#define SCAN_SAMPLES      768
-#define ID_SAMPLES        256
-#define MAX_SCANLINE     1023u
-#define LCD_READ_READY    0x01u
-#define LCD_BUS_IDLE      0x02u
-#define LCD_WRITE_FULL    0x10u
+#define TE_PORT           6
+#define TE_BIT            7
+#define TE_MASK           (1u << TE_BIT)
+#define TE_MIN_US         13000u
+#define TE_MAX_US         17000u
+#define TE_JITTER_US        700u
+#define TE_PROBE_US       (3 * TE_MAX_US + 1000u)
+#define SYNC_WAIT_US      20000u
+#define POLL_US           3u
+#define POLL_YIELD_US     250u
+#define POLL_MAX_GAP_US   32u
+#define PHASE_GUARD_US    50
 
 enum { GPIO_PORTS = 16, STATUS = GPIO_PORTS, INTCON, IRQ_RAW, SOURCE_COUNT };
-enum sync_method { SYNC_NONE, SYNC_EDGE, SYNC_SCANLINE };
 
 struct edge_stats {
     uint32_t last_rise;
@@ -29,25 +30,27 @@ struct edge_stats {
     uint32_t te_min, te_max, te_periods;
 };
 
-struct scan_stats {
-    unsigned int reads, distinct, advances, retreats, frame_wraps;
-    unsigned int min, max, invalid;
-    uint32_t elapsed, wrap_min, wrap_max;
-    unsigned char first[3];
+struct dma_stats {
+    uint32_t samples, min, max, last;
+    unsigned int width, height;
 };
 
-struct id_stats {
-    unsigned int reads, changes;
-    unsigned char first[4];
+struct te_pulse {
+    uint32_t period, high;
+    bool valid;
 };
 
 static struct edge_stats gpio_edges[GPIO_PORTS][8];
 static struct edge_stats lcd_edges[SOURCE_COUNT - GPIO_PORTS][32];
 static uint32_t pinmux[GPIO_PORTS];
-static enum sync_method method;
-static unsigned int edge_source;
-static uint32_t edge_mask;
-static bool enabled;
+static struct te_pulse pulse;
+static struct dma_stats full_dma, band_dma, rect_dma;
+static uint32_t last_rise;
+static long last_rise_tick;
+static bool have_rise;
+static bool want_sync = true;
+static unsigned int lead_slots, trail_slots, timed_out, no_window;
+static uint32_t max_wait;
 extern int lcd_type;
 
 bool lcd_te_supported(void)
@@ -57,12 +60,13 @@ bool lcd_te_supported(void)
 
 bool lcd_te_enabled(void)
 {
-    return lcd_te_supported() && enabled;
+    return lcd_te_supported() && want_sync && pulse.valid;
 }
 
 void lcd_te_set_enabled(bool enable)
 {
-    enabled = enable && lcd_te_supported() && method != SYNC_NONE;
+    if (lcd_te_supported() && (!enable || pulse.valid))
+        want_sync = enable;
 }
 
 static uint32_t read_source(unsigned int source)
@@ -81,167 +85,188 @@ static bool frame_period(uint32_t period)
     return period >= TE_MIN_US && period <= TE_MAX_US;
 }
 
-static bool wait_status(uint32_t mask, uint32_t expected, uint32_t until)
+/* PCON6[31:28] is normally 3. PDAT6 still exposes the signal in
+ * that mode. The EIC mux routing is unverified, so leave the pin alone. */
+static bool te_high(void)
 {
-    while (TIME_BEFORE(USEC_TIMER, until))
-    {
-        if ((LCD_STATUS & mask) == expected)
-            return true;
-    }
-    return false;
+    return (PDAT(TE_PORT) & TE_MASK) != 0;
 }
 
-/* Parallel DCS read: a dummy cycle precedes the response bytes. */
-static bool read_dcs(unsigned int cmd, unsigned char *data, unsigned int count,
-                     uint32_t until)
+void lcd_te_probe(void)
 {
-    if (!wait_status(LCD_WRITE_FULL, 0, until))
+    if (!lcd_te_supported() || !is_thread_context() || !irq_enabled())
+        return;
+
+    struct te_pulse found = { 0 };
+    have_rise = false;
+    uint32_t now = USEC_TIMER, until = now + TE_PROBE_US;
+    uint32_t previous_time = now, next_yield = now + POLL_YIELD_US;
+    uint32_t rise = 0, high = 0, period_sum = 0, high_sum = 0;
+    bool level = te_high(), seen_rise = false;
+    unsigned int periods = 0;
+
+    while (TIME_BEFORE((now = USEC_TIMER), until))
+    {
+        bool next = te_high();
+        if (next != level)
+        {
+            bool timely = now - previous_time <= POLL_MAX_GAP_US;
+            if (!next && seen_rise)
+                high = timely ? now - rise : 0;
+            if (next)
+            {
+                uint32_t period = now - rise;
+                if (timely && seen_rise && frame_period(period))
+                {
+                    if (high && high < period / 2)
+                    {
+                        if (periods &&
+                            (MAX(period, found.period) -
+                             MIN(period, found.period) > TE_JITTER_US))
+                        {
+                            periods = 0;
+                            period_sum = high_sum = 0;
+                        }
+                        period_sum += period;
+                        high_sum += high;
+                        if (++periods == 2)
+                        {
+                            pulse = (struct te_pulse){
+                                period_sum / periods, high_sum / periods, true
+                            };
+                            last_rise = now;
+                            last_rise_tick = current_tick;
+                            have_rise = true;
+                            return;
+                        }
+                    }
+                    else
+                        periods = 0;
+                    found.period = period;
+                    found.high = high;
+                }
+                else
+                    periods = 0;
+                if (!periods)
+                    period_sum = high_sum = 0;
+                rise = now;
+                high = 0;
+                seen_rise = timely;
+            }
+            level = next;
+        }
+        previous_time = now;
+        if (!TIME_BEFORE(now, next_yield))
+        {
+            yield();
+            next_yield = USEC_TIMER + POLL_YIELD_US;
+        }
+        udelay(POLL_US);
+    }
+    pulse = found;
+}
+
+void lcd_te_dma_done(unsigned int width, unsigned int height, uint32_t usec)
+{
+    struct dma_stats *stats = width != LCD_WIDTH || height < LCD_HEIGHT / 4 ?
+                              &rect_dma :
+                              height == LCD_HEIGHT ? &full_dma : &band_dma;
+    stats->min = stats->samples ? MIN(stats->min, usec) : usec;
+    stats->max = MAX(stats->max, usec);
+    stats->last = usec;
+    stats->width = width;
+    stats->height = height;
+    stats->samples++;
+}
+
+/* DCS TE mode 0: high denotes vertical blanking. Assume the panel
+ * scans logical rows top-to-bottom, like the DMA write. Bound the
+ * first and last rows, using the measured full-frame rate per pixel. */
+static bool phase_window(int y, int width, int height, int *first, int *last)
+{
+    int period = pulse.period;
+    int active = period - pulse.high;
+    int scan_top = pulse.high + active * y / LCD_HEIGHT;
+    int scan_bottom = pulse.high + active * (y + height - 1) / LCD_HEIGHT;
+    int row_time = (active + LCD_HEIGHT - 1) / LCD_HEIGHT;
+    int pixels = width * height;
+    int screen = LCD_WIDTH * LCD_HEIGHT;
+
+    /* Avoid scaling a stalled transfer or extrapolating across two scans. */
+    if (!full_dma.samples || full_dma.max >= 2 * pulse.period)
         return false;
-    LCD_WCMD = cmd;
-    udelay(4);
-    while (count--)
+
+    /* Both measured durations are below two refresh periods. */
+    int fast = full_dma.min * pixels / screen;
+    int slow = (full_dma.max * pixels + screen - 1) / screen;
+    int slow_row = (slow + height - 1) / height;
+    int lead_end = MIN(scan_top - slow_row, scan_bottom - slow);
+
+    if (slow < period && lead_end >= PHASE_GUARD_US)
     {
-        if (!wait_status(LCD_BUS_IDLE, LCD_BUS_IDLE, until))
-            return false;
-        LCD_RDATA = 0;
-        if (!wait_status(LCD_READ_READY, LCD_READ_READY, until))
-            return false;
-        *data++ = (LCD_DBUFF >> 1) & 0xff;
+        *first = 0;
+        *last = lead_end - PHASE_GUARD_US;
+        return true;
     }
-    return true;
+
+    /* Trail this scan but finish each row ahead of the following scan. */
+    *first = MAX(scan_top, scan_bottom - fast * (height - 1) / height)
+             + row_time + PHASE_GUARD_US;
+    *last = MIN(period, period + lead_end) - PHASE_GUARD_US;
+    return *first <= *last;
 }
 
-static unsigned int scanline(const unsigned char *data)
-{
-    return (data[1] << 8) | data[2];
-}
-
-void lcd_te_wait(int y)
+void lcd_te_wait(int y, int width, int height)
 {
     if (!lcd_te_enabled() || !is_thread_context() || !irq_enabled())
         return;
 
-    uint32_t until = USEC_TIMER + SYNC_WAIT_US;
-    if (method == SYNC_EDGE)
+    int first, last;
+    if (!phase_window(y, width, height, &first, &last))
     {
-        /* An already asserted pulse belongs to the current scan. */
-        bool seen_low = false;
-        while (TIME_BEFORE(USEC_TIMER, until))
-        {
-            if (!(read_source(edge_source) & edge_mask))
-                seen_low = true;
-            else if (seen_low)
-                return;
-        }
+        no_window++;
         return;
     }
 
-    unsigned int previous = MAX_SCANLINE + 1;
-    unsigned int top = y;
-    while (TIME_BEFORE(USEC_TIMER, until))
+    uint32_t start = USEC_TIMER, now = start, until = start + SYNC_WAIT_US;
+    uint32_t previous_time = now, next_yield = now + POLL_YIELD_US;
+    bool level = te_high();
+
+    /* The tick check also expires the cached edge across a USEC_TIMER wrap. */
+    if ((unsigned long)(current_tick - last_rise_tick) > 1 + HZ / 50)
+        have_rise = false;
+
+    while (TIME_BEFORE((now = USEC_TIMER), until))
     {
-        unsigned char data[3];
-        uint32_t read_until = USEC_TIMER + READ_WAIT_US;
-        if (TIME_BEFORE(until, read_until))
-            read_until = until;
-        if (!read_dcs(0x45, data, sizeof(data), read_until))
-            return;
-        unsigned int line = scanline(data);
-        if (line > MAX_SCANLINE)
-            return;
-        if (line > top && line <= top + 16 &&
-            (previous <= top || (line < previous && previous <= MAX_SCANLINE &&
-                                 previous >= LCD_HEIGHT - 16 && line <= 16)))
-            return;
-        previous = line;
-        udelay(25);
-    }
-}
-
-static void sample_scan(struct scan_stats *result)
-{
-    uint32_t seen[(MAX_SCANLINE + 1) / 32] = { 0 };
-    uint32_t start = USEC_TIMER;
-    uint32_t last_wrap = start;
-    unsigned int previous = MAX_SCANLINE + 1;
-    result->min = MAX_SCANLINE;
-    result->wrap_min = UINT32_MAX;
-
-    for (unsigned int i = 0; i < SCAN_SAMPLES; i++)
-    {
-        unsigned char data[3];
-        if (!read_dcs(0x45, data, sizeof(data), USEC_TIMER + READ_WAIT_US))
-            break;
-        if (!result->reads++)
-            memcpy(result->first, data, sizeof(data));
-
-        unsigned int line = scanline(data);
-        if (line <= MAX_SCANLINE)
+        bool next = te_high();
+        if (!level && next && now - previous_time <= POLL_MAX_GAP_US)
         {
-            uint32_t bit = 1u << (line % 32);
-            if (!(seen[line / 32] & bit))
-            {
-                seen[line / 32] |= bit;
-                result->distinct++;
-            }
-            result->min = MIN(result->min, line);
-            result->max = MAX(result->max, line);
-            if (previous <= MAX_SCANLINE && line != previous)
-            {
-                if (line > previous && line - previous <= 32)
-                    result->advances++;
-                else if (line <= 16 && previous >= LCD_HEIGHT - 16)
-                {
-                    uint32_t now = USEC_TIMER;
-                    uint32_t period = now - last_wrap;
-                    if (result->retreats && frame_period(period))
-                    {
-                        result->frame_wraps++;
-                        result->wrap_min = MIN(result->wrap_min, period);
-                        result->wrap_max = MAX(result->wrap_max, period);
-                    }
-                    last_wrap = now;
-                    result->retreats++;
-                }
-                else
-                    result->invalid++;
-            }
+            last_rise = now;
+            last_rise_tick = current_tick;
+            have_rise = true;
         }
-        else
-            result->invalid++;
-        previous = line;
-        udelay(80);
-        if (i % 32 == 31)
-            yield();
-    }
-    result->elapsed = USEC_TIMER - start;
-}
-
-static void sample_ids(struct id_stats *ids)
-{
-    static const unsigned char commands[] = { 0x04, 0xda, 0xdb, 0xdc };
-    bool timed_out[ARRAYLEN(commands)] = { false };
-    for (unsigned int i = 0; i < ID_SAMPLES; i++)
-    {
-        for (unsigned int j = 0; j < ARRAYLEN(commands); j++)
+        uint32_t age = now - last_rise;
+        if (have_rise && age >= (uint32_t)first && age <= (uint32_t)last)
         {
-            if (timed_out[j])
-                continue;
-            unsigned char data[4] = { 0 };
-            if (!read_dcs(commands[j], data, j == 0 ? 4 : 2,
-                          USEC_TIMER + READ_WAIT_US))
-            {
-                timed_out[j] = true;
-                continue;
-            }
-            if (!ids[j].reads++)
-                memcpy(ids[j].first, data, sizeof(data));
-            else if (memcmp(ids[j].first + 1, data + 1, sizeof(data) - 1))
-                ids[j].changes++;
+            if (first)
+                trail_slots++;
+            else
+                lead_slots++;
+            max_wait = MAX(max_wait, now - start);
+            return;
         }
-        if (i % 32 == 31)
+        level = next;
+        previous_time = now;
+        if (!TIME_BEFORE(now, next_yield))
+        {
             yield();
+            next_yield = USEC_TIMER + POLL_YIELD_US;
+        }
+        udelay(POLL_US);
     }
+    have_rise = false;
+    max_wait = MAX(max_wait, now - start);
+    timed_out++;
 }
 
 static struct edge_stats *source_edges(unsigned int source)
@@ -329,16 +354,8 @@ static unsigned int sample_edges(uint32_t *elapsed, uint32_t *max_gap)
     return samples;
 }
 
-static bool is_candidate(const struct edge_stats *stats, int mux)
+static void report_edges(int (*report)(const char *fmt, ...), bool qualified)
 {
-    return mux <= 0 && stats->te_periods >= 12 &&
-        stats->te_periods * 2 >= stats->periods &&
-        stats->min_period >= TE_MIN_US && stats->te_max - stats->te_min <= 700;
-}
-
-static unsigned int scan_edges(int (*report)(const char *fmt, ...))
-{
-    unsigned int candidates = 0;
     for (unsigned int source = 0; source < SOURCE_COUNT; source++)
     {
         for (unsigned int bit = 0; bit < source_bits(source); bit++)
@@ -348,17 +365,7 @@ static unsigned int scan_edges(int (*report)(const char *fmt, ...))
                 continue;
             int mux = source < GPIO_PORTS ?
                 (int)((pinmux[source] >> (bit * 4)) & 0xf) : -1;
-            bool candidate = is_candidate(stats, mux);
-            if (!report)
-            {
-                if (candidate)
-                {
-                    candidates++;
-                    edge_source = source;
-                    edge_mask = 1u << bit;
-                }
-                continue;
-            }
+            bool candidate = source == TE_PORT && bit == TE_BIT && qualified;
             char gpio_name[12];
             const char *name = source == STATUS ? "LCD_STATUS" :
                 source == INTCON ? "LCD_INTCON" : "VIC0RAWINTR";
@@ -384,90 +391,56 @@ static unsigned int scan_edges(int (*report)(const char *fmt, ...))
                        (unsigned long)stats->te_max);
         }
     }
-    return candidates;
+}
+
+static void report_dma(int (*report)(const char *fmt, ...), const char *name,
+                       const struct dma_stats *stats)
+{
+    report("DMA %s samples=%u last=%ux%u %u us", name, stats->samples,
+           stats->width, stats->height, stats->last);
+    if (stats->samples)
+        report("  min=%u max=%u us", stats->min, stats->max);
 }
 
 bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...))
 {
-    uint32_t command_mode;
-    if (!lcd_te_acquire_bus(&command_mode))
+    if (!lcd_te_acquire_bus())
     {
         report("LCD unavailable (type, power or DMA busy)");
         return false;
     }
 
-    bool was_enabled = enabled;
-    enabled = false;
-    unsigned int raw_start = read_source(IRQ_RAW) != 0;
+    lcd_te_probe();
     uint32_t elapsed, max_gap = 0;
     unsigned int samples = sample_edges(&elapsed, &max_gap);
-    unsigned int raw_end = read_source(IRQ_RAW) != 0;
-
-    struct scan_stats scan = { 0 };
-    struct id_stats ids[4] = { { 0 } };
-    uint32_t saved_mode = LCD_CON;
-    bool command_ready = wait_status(LCD_BUS_IDLE, LCD_BUS_IDLE,
-                                     USEC_TIMER + READ_WAIT_US);
-    bool restored_idle = command_ready;
-    if (command_ready)
-    {
-        udelay(1);
-        LCD_CON = command_mode;
-        sample_scan(&scan);
-        sample_ids(ids);
-        restored_idle = wait_status(LCD_BUS_IDLE, LCD_BUS_IDLE,
-                                    USEC_TIMER + READ_WAIT_US);
-        if (LCD_STATUS & LCD_READ_READY)
-            (void)LCD_DBUFF;
-        udelay(1);
-        LCD_CON = saved_mode;
-    }
+    struct dma_stats full = full_dma, band = band_dma, rect = rect_dma;
+    struct te_pulse measured = pulse;
+    bool sync_on = lcd_te_enabled();
+    unsigned int lead = lead_slots, trail = trail_slots;
+    unsigned int misses = timed_out, bypasses = no_window;
+    uint32_t worst_wait = max_wait;
     lcd_te_release_bus();
 
-    bool scan_ok = restored_idle && scan.reads == SCAN_SAMPLES &&
-        scan.distinct >= 64 && scan.min <= 16 && scan.max >= LCD_HEIGHT - 1 &&
-        scan.frame_wraps >= 2 && scan.invalid <= scan.advances / 10;
-
-    unsigned int candidates = scan_edges(NULL);
-    method = restored_idle && candidates == 1 ? SYNC_EDGE :
-        scan_ok ? SYNC_SCANLINE : SYNC_NONE;
-    const char *prototype = method == SYNC_EDGE ? "edge" :
-        method == SYNC_SCANLINE ? "scanline" : "unavailable";
-    report("TE candidates=%u | prototype=%s", candidates,
-           prototype);
-    report("LCD type 1 | scanline %s", scan_ok ? "usable" : "unqualified");
-    report("0x45 reads=%u/%u distinct=%u",
-           scan.reads, SCAN_SAMPLES, scan.distinct);
-    if (scan.distinct)
-        report("0x45 min=%u max=%u", scan.min, scan.max);
-    if (scan.reads)
-        report("0x45 first (dummy/MSB/LSB)=%02x %02x %02x",
-               scan.first[0], scan.first[1], scan.first[2]);
-    report("0x45 advance=%u wrap=%u other=%u", scan.advances, scan.retreats,
-           scan.invalid);
-    if (scan.frame_wraps)
-        report("0x45 frame periods=%u min=%lu max=%lu us", scan.frame_wraps,
-               (unsigned long)scan.wrap_min, (unsigned long)scan.wrap_max);
-    report("0x45 elapsed=%lu us", (unsigned long)scan.elapsed);
-    report("Command ready=%u idle before restore=%u",
-           command_ready, restored_idle);
-    report("0x04 reads=%u/%u changed=%u",
-           ids[0].reads, ID_SAMPLES, ids[0].changes);
-    if (ids[0].reads)
-        report("0x04 dummy/ID=%02x %02x %02x %02x", ids[0].first[0],
-               ids[0].first[1], ids[0].first[2], ids[0].first[3]);
-    for (unsigned int i = 1; i < ARRAYLEN(ids); i++)
-    {
-        report("0x%02x reads=%u/%u changed=%u", 0xd9 + i,
-               ids[i].reads, ID_SAMPLES, ids[i].changes);
-        if (ids[i].reads)
-            report("  dummy/ID=%02x %02x", ids[i].first[0], ids[i].first[1]);
-    }
+    report("TE candidates=%u | sync=%s", measured.valid,
+           sync_on ? "on" : "off");
+    report("LCD type 1 | panel readback unavailable");
+    report("TE pin %s | PDAT6[7] mux=%u",
+           measured.valid ? "selected" : "unqualified", pinmux[TE_PORT] >> 28);
+    if (measured.period)
+        report("TE period=%u us high=%u us low=%u us",
+               measured.period, measured.high,
+               measured.high ? measured.period - measured.high : 0);
+    else
+        report("TE period/pulse unavailable");
+    report("TE phase assumes active-high blanking, top-to-bottom scan");
+    report("TE lead=%u trail=%u timeout=%u no-window=%u",
+           lead, trail, misses, bypasses);
+    report("TE max wait=%u us", worst_wait);
+    report_dma(report, "full", &full);
+    report_dma(report, "band (320px wide, 60-239 rows)", &band);
+    report_dma(report, "other rect", &rect);
     report("Signals: %u passes in %lu us (max gap %lu us)", samples,
            (unsigned long)elapsed, (unsigned long)max_gap);
-    report("IRQ_LCD raw start=%u end=%u; IRQ mask untouched",
-           raw_start, raw_end);
-    scan_edges(report);
-    enabled = was_enabled && method != SYNC_NONE;
+    report_edges(report, measured.valid);
     return true;
 }

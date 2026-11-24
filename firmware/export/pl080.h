@@ -207,6 +207,7 @@ struct dmac_ch {
     struct dmac *dmac;
     unsigned int prio;
     void (*cb_fn)(void *cb_data);
+    uint32_t *start_usec; /* optional timestamp at channel enable */
     /* tsk circular buffer */
     struct dmac_tsk *tskbuf;
     uint32_t tskbuf_mask;

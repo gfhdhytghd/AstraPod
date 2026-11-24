@@ -3667,10 +3667,48 @@ static void reverse_animation(int direction)
     anim_sampled_frame = 0;
 }
 
+/* Wheel clicks coming faster than the shortest flip (the same threshold at
+ * which the flat view stops dealing) skip the flip altogether: each click puts
+ * the next cover straight into its resting pose, one cover per click. A flip
+ * still under way lands on its target first, so no click is lost. The 3D
+ * view's fast-scroll tilt keeps its own ramp and releases as usual. */
+static bool wheel_is_fast(void)
+{
+    return pf_flat_interval < flat_duration(PF_FLAT_MIN);
+}
+
+static void step_instantly(int direction)
+{
+    int from = step ? target : center_index;
+    int index = fbound(0, from + direction, number_of_slides - 1);
+
+    if (step == 0 && index == center_index)
+        return;
+    buf_ctx_lock();
+    pf_random_spinning = false;
+    pf_state = pf_idle;
+    step = 0;
+    flow_landed_direction = -direction;
+    if (center_index != index)
+    {
+        center_index = index;
+        wake_pf_thread();
+    }
+    target = center_index;
+    slide_frame = center_index << 16;
+    fade = 256;
+    reset_slides();
+    buf_ctx_unlock();
+}
+
 static void show_previous_slide(void)
 {
     pf_random_spinning = false;
     flow_note_wheel(step || center_index > 0);
+    if (wheel_is_fast()) {
+        step_instantly(-1);
+        return;
+    }
     if (step == 0) {
         if (center_index > 0) {
             target = center_index - 1;
@@ -3695,6 +3733,10 @@ static void show_next_slide(void)
 {
     pf_random_spinning = false;
     flow_note_wheel(step || center_index + 1 < number_of_slides);
+    if (wheel_is_fast()) {
+        step_instantly(1);
+        return;
+    }
     if (step == 0) {
         if (center_index < number_of_slides - 1) {
             target = center_index + 1;
@@ -6170,6 +6212,10 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
      * time round the loop, and a reason to draw must survive until one draws. */
     bool art_owed = true;
     bool caption_owed = true;
+    /* The centre cover at the last cover draw. A fast wheel click moves the
+     * centre between draws rather than during one, so the caption check below
+     * compares against this. */
+    int drawn_index = -1;
     unsigned int seen_caption_version = 0;
     unsigned glyph_epoch = font_prefetch_epoch();
     bool full_flush_owed = false;
@@ -6668,7 +6714,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
             if (drew_art)
             {
-                int was = center_index;
+                int was = drawn_index;
 
                 bool landing = flow_mix != 0;
                 flow_update_mix();
@@ -6688,6 +6734,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                  * says the caption is out of date. */
                 if (center_index != was)
                     drew_caption = true;
+                drawn_index = center_index;
                 cover_rows(&art_y, &art_h);
                 art_h -= art_y;
                 if (art_h <= 0)     /* no slide has a bitmap yet: nothing to
@@ -6874,11 +6921,13 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         case PF_NEXT:
         case PF_NEXT_REPEAT:
             show_next_slide();
+            art_owed = true;
             break;
 
         case PF_PREV:
         case PF_PREV_REPEAT:
             show_previous_slide();
+            art_owed = true;
             break;
 
         case PF_SORTING_NEXT:

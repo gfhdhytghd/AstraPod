@@ -65,6 +65,9 @@
 #include "screens/shortcuts.h"
 #include "screens/system/beat_debug.h"
 #include "screens/system/probe_debug.h"
+#if defined(IPOD_6G) && (CONFIG_PLATFORM & PLATFORM_NATIVE)
+#include "lcd_te_debug.h"
+#endif
 #ifdef HAVE_USB_PODLINK
 #include "screens/system/podlink_screen.h"
 #endif
@@ -2447,6 +2450,10 @@ static const struct {
 
         { "Screendump on USB", dbg_screendump, false,
           &do_screendump_instead_of_usb },
+#if defined(IPOD_6G) && (CONFIG_PLATFORM & PLATFORM_NATIVE)
+        { "LCD TE diagnostics", lcd_te_debug_screen, false, NULL },
+        { "LCD TE sync", lcd_te_debug_toggle, false, NULL },
+#endif
 
 #ifdef HAVE_USBSTACK
         { "USB info", dbg_usb_info, false, NULL },
@@ -2550,6 +2557,14 @@ static const char* menu_get_name(int item, void * data,
                                     char *buffer, size_t buffer_len)
 {
     (void)data;
+#if defined(IPOD_6G) && (CONFIG_PLATFORM & PLATFORM_NATIVE)
+    if (menuitems[item].function == lcd_te_debug_toggle)
+    {
+        snprintf(buffer, buffer_len, "%s: %s", P2STR(menuitems[item].desc),
+                 lcd_te_debug_sync_state());
+        return buffer;
+    }
+#endif
     if (!menuitems[item].toggle)
         return P2STR(menuitems[item].desc);
     snprintf(buffer, buffer_len, "%s: %s", P2STR(menuitems[item].desc),

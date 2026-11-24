@@ -29,6 +29,9 @@
 #include "lcd.h"
 #ifdef IPOD_6G
 #include "pmu-target.h"
+#ifndef BOOTLOADER
+#include "lcd-te-s5l8702.h"
+#endif
 #endif
 #include "backlight-target.h"
 
@@ -365,6 +368,10 @@ static void displaylcd_setup(int x, int y, int width, int height)
 
     s5l_lcd_set_command_mode();
 
+#if defined(IPOD_6G) && !defined(BOOTLOADER)
+    lcd_te_wait(y);
+#endif
+
 #ifdef S5L_LCD_WITH_CMDSET16
     if (lcd_info->cmdset == LCD_CMDSET_16BIT)
     {
@@ -420,6 +427,34 @@ static void displaylcd_wait_dma(void)
     }
 }
 
+#if defined(IPOD_6G) && !defined(BOOTLOADER)
+bool lcd_te_acquire_bus(uint32_t *command_mode)
+{
+    if (!lcd_te_supported() || !is_thread_context() || !irq_enabled() ||
+        !lcd_ispowered || lcd_mutex.blocker.thread)
+        return false;
+
+    mutex_lock(&lcd_mutex);
+    uint32_t until = USEC_TIMER + 50000;
+    while (dmac_ch_running(&lcd_dma_ch))
+    {
+        if (!TIME_BEFORE(USEC_TIMER, until))
+        {
+            mutex_unlock(&lcd_mutex);
+            return false;
+        }
+        yield();
+    }
+    *command_mode = lcd_cmd_mode;
+    return true;
+}
+
+void lcd_te_release_bus(void)
+{
+    mutex_unlock(&lcd_mutex);
+}
+#endif
+
 #ifdef HAVE_PODLINK_PLUGIN_TEST
 void lcd_copy_presented_for_test(uint16_t *pixels)
 {
@@ -463,19 +498,18 @@ void lcd_update_rect(int x, int y, int width, int height)
 
         displaylcd_wait_dma();
 
-        displaylcd_setup(x, y, width, height);
-
         /* Copy display bitmap to hardware */
         if (LCD_WIDTH == width) {
             /* Write all lines at once */
             memcpy(out, p, pixels * 2);
         } else {
+            int lines = height;
             do {
                 /* Write a single line */
                 memcpy(out, p, width * 2);
                 p += LCD_WIDTH;
                 out += width;
-            } while (--height);
+            } while (--lines);
         }
 
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
@@ -486,6 +520,7 @@ void lcd_update_rect(int x, int y, int width, int height)
         if (lock)
             podlink_plugin_test_lcd_present(lcd_dblbuf[0], x, y, width, original_height);
 #endif
+        displaylcd_setup(x, y, width, height);
         displaylcd_dma(pixels);
     }
     if (lock)
@@ -505,7 +540,6 @@ bool lcd_present_scene(const fb_data *pixels)
     bool ready = lcd_ispowered && !dmac_ch_running(&lcd_dma_ch);
     if (ready)
     {
-        displaylcd_setup(0, 0, LCD_WIDTH, LCD_HEIGHT);
         memcpy(lcd_dblbuf[0], pixels, FRAMEBUFFER_SIZE);
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
         videoout_mirror_rgb565(lcd_dblbuf[0], 0, 0, LCD_WIDTH, LCD_HEIGHT,
@@ -514,6 +548,7 @@ bool lcd_present_scene(const fb_data *pixels)
 #ifdef HAVE_PODLINK_PLUGIN_TEST
         podlink_plugin_test_lcd_present(lcd_dblbuf[0], 0, 0, LCD_WIDTH, LCD_HEIGHT);
 #endif
+        displaylcd_setup(0, 0, LCD_WIDTH, LCD_HEIGHT);
         displaylcd_dma(LCD_WIDTH * LCD_HEIGHT);
     }
     mutex_unlock(&lcd_mutex);
@@ -567,9 +602,7 @@ void lcd_blit_yuv(unsigned char * const src[3],
             x, y, width, height);
 #endif
 
-        displaylcd_setup(x, y, width, height);
-
-        height >>= 1;
+        int lines = height >> 1;
 
         do {
             lcd_write_yuv420_lines(yuv_src, out, width, stride);
@@ -577,7 +610,7 @@ void lcd_blit_yuv(unsigned char * const src[3],
             yuv_src[1] += stride >> 1; /* Skip down one chroma line */
             yuv_src[2] += stride >> 1;
             out += width << 1;
-        } while (--height);
+        } while (--lines);
 
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
         if (!videoout_yuv_mirrored)
@@ -588,6 +621,7 @@ void lcd_blit_yuv(unsigned char * const src[3],
 #ifdef HAVE_PODLINK_PLUGIN_TEST
         podlink_plugin_test_lcd_present(lcd_dblbuf[0], x, y, width, original_height);
 #endif
+        displaylcd_setup(x, y, width, height);
         displaylcd_dma(pixels);
     }
     mutex_unlock(&lcd_mutex);

@@ -9,6 +9,7 @@
 #include <limits.h>
 #include "config.h"
 #include "core_alloc.h"
+#include "crumbs.h"
 #include "system.h"
 #include "string-extra.h"
 #include "file.h"
@@ -51,6 +52,10 @@
 #include "lyrics.h"
 #include "lyrics_motion.h"
 #include "lyric_viewer.h"
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
+#include "podlink-shell-playback.h"
+#include "sm1-test-control.h"
+#endif
 #ifdef SIMULATOR
 #include <SDL_timer.h>
 #endif
@@ -116,6 +121,14 @@ struct lv_word {
 };
 enum lv_phase { LV_RESTORE, LV_GLYPHS, LV_BLEND, LV_LCD, LV_WAIT, LV_PHASE_COUNT };
 enum lv_type { LV_STEADY, LV_ENTRY, LV_LINE, LV_MANUAL, LV_TRACK, LV_SWEEP, LV_TYPE_COUNT };
+enum lv_crumb_phase {
+    LV_CRUMB_CLOSED, LV_CRUMB_OPEN, LV_CRUMB_DRAW, LV_CRUMB_LCD,
+    LV_CRUMB_LINE_SEEK, LV_CRUMB_SHELL,
+};
+enum lv_crumb_event {
+    LV_CRUMB_ENTER = 1, LV_CRUMB_EXIT, LV_CRUMB_WHEEL_START,
+    LV_CRUMB_WHEEL_END, LV_CRUMB_LINE_REDRAW, LV_CRUMB_SEEK_CLOCK,
+};
 static const uint32_t perf_bounds[] = {
     0, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000, 6000, 8000,
     10000, 12000, 16000, 20000, 25000, 30000, 33000, 34000, 40000, 50000,
@@ -135,6 +148,7 @@ struct lv_perf {
     bool seek_remote;
 };
 struct lv_state {
+    enum lv_crumb_phase crumb_phase;
     struct viewport vp, mask_vp;
     struct frame_buffer_t mask_fb;
     struct ui_page page;
@@ -227,6 +241,12 @@ static void lv_boost(bool enable)
 #else
     (void)enable;
 #endif
+}
+
+static void lv_crumb_phase(enum lv_crumb_phase phase)
+{
+    lv.crumb_phase = phase;
+    crumb_status(CS_LYRICS, phase);
 }
 
 static void lv_stat_add(struct lv_stat *stat, uint32_t us)
@@ -427,9 +447,12 @@ static void lv_flush(int x, int y, int w, int h)
 {
     if (lcd_updates_held() || !lcd_active())
         return;
+    enum lv_crumb_phase phase = lv.crumb_phase;
+    lv_crumb_phase(LV_CRUMB_LCD);
     uint32_t start = lv_clock();
     if (w == LCD_WIDTH && h == LCD_HEIGHT) lcd_update();
     else lcd_update_rect(x, y, w, h);
+    lv_crumb_phase(phase);
     ui_note_flush(lv_clock() - start);
     lv_phase_end(LV_LCD, start);
     perf.lcd_updates++;
@@ -1584,6 +1607,7 @@ static void lv_prefetch_document(void)
 
 static bool lv_draw_layer(bool force, enum lv_output output, fb_data *layer)
 {
+    lv_crumb_phase(LV_CRUMB_DRAW);
     font_prefetch_begin();
     unsigned epoch = font_prefetch_epoch();
     if (lv.font_epoch != epoch)
@@ -1608,6 +1632,7 @@ static bool lv_draw_layer(bool force, enum lv_output output, fb_data *layer)
     }
     bool drawn = lv_draw_pixels(force, output, layer);
     font_prefetch_end();
+    lv_crumb_phase(LV_CRUMB_OPEN);
     return drawn;
 }
 
@@ -2099,9 +2124,11 @@ static void lv_transport(int action)
     if (action != ACTION_WPS_PLAY) lv.seek_pending = false;
     if (action == ACTION_WPS_SEEKFWD || action == ACTION_WPS_SEEKBACK)
     {
+        crumb(CR_LYRICS_REDRAW, LV_CRUMB_WHEEL_START);
         lv_entry_cancel();
         lv_boost(false);
         wps_lyrics_seek(action, lv_seek_draw);
+        crumb(CR_LYRICS_REDRAW, LV_CRUMB_WHEEL_END);
         return;
     }
     if (lv.remote)
@@ -2137,6 +2164,7 @@ static long lv_seek_elapsed(struct lv_playback_sample clock)
             return elapsed;
         }
         perf.seek_clock_us = lv_clock() - lv.seek_at;
+        crumb(CR_LYRICS_REDRAW, LV_CRUMB_SEEK_CLOCK);
     }
     /* A codec can quantize backward by one frame and the remote UI can
      * lead its next sample. Hold the visual clock through that handoff. */
@@ -2184,10 +2212,14 @@ static bool lv_select_seek(uint32_t pressed)
     lv.seek_pending = true;
     perf.seek_remote = lv.remote;
     perf.seek_clock_us = -1;
+    lv_crumb_phase(LV_CRUMB_LINE_SEEK);
+    crumb(CR_LYRICS_SEEK, target);
     if (lv.remote) cider_control("seek", MIN(target, INT_MAX));
     else audio_seek_now(target);
     perf.seek_issue_us = lv_clock() - pressed;
 
+    lv_crumb_phase(LV_CRUMB_DRAW);
+    crumb(CR_LYRICS_REDRAW, LV_CRUMB_LINE_REDRAW);
     lv.mode.direction = 0;
     lv.elapsed = target;
     lv_entry_cancel();
@@ -2237,6 +2269,8 @@ int lyric_viewer(void)
     uint32_t entry_at = lv_clock();
     memset(&state, 0, sizeof(state));
     lv_state = &state;
+    lv_crumb_phase(LV_CRUMB_OPEN);
+    crumb(CR_LYRICS_REDRAW, LV_CRUMB_ENTER);
     lv.font = lv.small_font = lv.large_font = -1;
     lv.gap_row = lv.pose_gap = -1;
     lv.initial = lv.first_pending = true;
@@ -2330,6 +2364,8 @@ int lyric_viewer(void)
         {
             struct lv_playback_sample clock = lv_playback_clock(id3);
             jump = lv_clock_jump(clock, started) && !lv.seek_pending;
+            if (jump)
+                crumb(CR_LYRICS_REDRAW, LV_CRUMB_SEEK_CLOCK);
             lv.elapsed = lv_seek_elapsed(clock);
             if (!remote && lyrics_ttml())
                 lv.elapsed = lv_local_vocal_clock(lv.elapsed, clock.sequence, started, paused);
@@ -2516,6 +2552,25 @@ int lyric_viewer(void)
 #endif
             case ACTION_REDRAW: lv.painted = false; break;
             case ACTION_NONE: break;
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
+            case SYS_SM1_TEST_CONTROL:
+            {
+                unsigned command = button_get_data();
+                if (command != SHELL_PLAYBACK_EVENT && command != SM1_TEST_STOP)
+                {
+                    event = action;
+                    goto done;
+                }
+                lv_crumb_phase(LV_CRUMB_SHELL);
+                if (default_event_handler(action) == SYS_USB_CONNECTED)
+                {
+                    result = GO_TO_ROOT;
+                    goto done;
+                }
+                lv_crumb_phase(LV_CRUMB_OPEN);
+                break;
+            }
+#endif
             default: if (IS_SYSEVENT(action)) { event = action; goto done; } break;
         }
     }
@@ -2533,6 +2588,8 @@ done:
     viewportmanager_theme_undo(SCREEN_MAIN, false); pop_current_activity();
     ui_hold_scrolling(false); ui_inhibit_flush(old_inhibit);
     if (lv.claimed) app_release_buffer("lyrics");
+    lv_crumb_phase(LV_CRUMB_CLOSED);
+    crumb(CR_LYRICS_REDRAW, LV_CRUMB_EXIT);
     lv_state = NULL;
     if (event && default_event_handler(event) == SYS_USB_CONNECTED) result = GO_TO_ROOT;
     return result;

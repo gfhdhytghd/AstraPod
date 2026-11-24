@@ -23,6 +23,47 @@ python3 podlink_shell.py --serial USB_SERIAL open-bench
 `record-stop` 直接交给录音器。录音器关闭文件并更新录音状态后确认完成。
 其他命令的计数表示界面处理进度。PCM 等测试结果由相应诊断功能提供。
 
+## 播放诊断
+
+```sh
+python3 podlink_shell.py --serial USB_SERIAL play "/iPod_Control/Music/F09/libgpod243817.m4a"
+python3 podlink_shell.py --serial USB_SERIAL play --start-ms 1000 "/Music/Example.m4a"
+python3 podlink_shell.py --serial USB_SERIAL --json playback-status
+python3 podlink_shell.py --serial USB_SERIAL open-lyrics
+python3 podlink_shell.py --serial USB_SERIAL seek 6237
+python3 podlink_shell.py --serial USB_SERIAL next
+python3 podlink_shell.py --serial USB_SERIAL prev
+python3 podlink_shell.py --serial USB_SERIAL log-fetch /.rockbox/crumbs-last.txt ./crumbs-last.txt
+```
+
+- `play PATH` 用设备上的绝对路径建立单曲播放列表。执行前备份当前播放列表。
+  `--start-ms` 指定起始位置，单位为毫秒。省略路径时保留原有测试曲目命令。
+- `seek MS` 定位当前曲目，单位为毫秒。位置必须在曲目时长内。省略参数时保留原有固定位置命令。
+- `next` 和 `prev` 使用当前播放列表的跳曲规则。用多曲播放列表检查跳曲。
+- `open-lyrics` 打开 Now Playing 的歌词页。页面保持打开时可以发送播放命令。
+  使用 `screenshot` 确认设备画面。要复现歌词行选择，用机身转盘或遥控滚动和 Select。
+- `playback-status` 显示播放状态、路径、进度、时长、编码、采样率、源位深和错误。
+  未知位深显示为 0。`command_error` 是最后一条带参数播放命令的错误号，
+  `playback_error` 是音频引擎的错误。命令返回 `processed` 表示界面收到请求。
+  用 `playback-status` 观察播放或 seek 的实际结果。
+- `log-fetch PATH OUTPUT` 用 MS3 借用 HerdRemote 串口并校验长度和 CRC32。
+  可读取 `/.rockbox/crumbs-last.txt`、`/.rockbox/lyrics-perf.txt`、
+  `/.rockbox/lyrics-perf.1.txt` 和 `/.rockbox/sm1/codec-trace.txt`。
+  崩溃后，固件在重启时保存 `crumbs-last.txt`。先下载该文件，再重现下一次崩溃。
+
+分析 `crumbs-last.txt` 时，先核对构建版本和崩溃时钟。用 `mp4-moov` 和
+`mp4-mdat` 查看容器偏移。用 `seek`、`seek-now` 和 `seek-done`
+对齐定位过程。状态行的 `seek-step`、`codec-op`、`buf-op`、
+`buf-fill` 和 `lyrics` 记录各路径的最后阶段。`freeze-ctx` 的高位
+记录看门狗类型，低 8 位记录中断前的 CPSR 标志。
+
+播放控制使用请求 `0x5d`、索引 `0x4954`。OUT 值 1 为播放，
+负载是 32 位起始毫秒值和 2 至 259 字节 UTF-8 路径。OUT 值 2 为定位，
+负载是 32 位毫秒值。OUT 值 3、4、5 分别是下一曲、上一曲、打开歌词页，
+负载为空。IN 值 0 返回 `<IIIi6Ii24s260s>`，各字段依次为版本 1、
+完成计数、操作号、命令错误号、播放标志、进度毫秒、时长毫秒、编码 ID、
+采样率、位深、播放错误号、编码标签、路径。整数均为小端。两个字符串以 NUL 结尾。
+
 ## 设置
 
 保持 iPod classic 处于 PodLink USB 模式。HerdRemote 可以继续使用串口。

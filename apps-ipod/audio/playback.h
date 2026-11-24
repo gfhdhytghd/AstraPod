@@ -93,6 +93,27 @@ bool audio_peek_buffered_track(struct mp3entry *id3, int offset);
 /* Copy the current track under the ID3 lock without borrowing its cuesheet. */
 bool audio_current_track_snapshot(struct mp3entry *id3);
 
+enum audio_playback_debug_error
+{
+    AUDIO_DEBUG_OPEN = -100,
+    AUDIO_DEBUG_METADATA = -101,
+    AUDIO_DEBUG_RATE = -102,
+    AUDIO_DEBUG_BUFFER = -103,
+    AUDIO_DEBUG_CODEC_LOAD = -104,
+    AUDIO_DEBUG_BUSY = -105,
+    AUDIO_DEBUG_BUFFER_DAMAGE = -106,
+};
+
+struct audio_playback_debug
+{
+    uint32_t state, elapsed_ms, length_ms, codec, frequency_hz, bits_per_sample;
+    int32_t error;
+    char path[MAX_PATH];
+};
+
+/* Bounded status read for the PodLink control thread. */
+void audio_playback_debug_snapshot(struct audio_playback_debug *status);
+
 unsigned int playback_status(void);
 
 /* While set, nothing that plays is recorded as having played: no playcount,

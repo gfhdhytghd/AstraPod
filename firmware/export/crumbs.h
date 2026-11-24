@@ -48,6 +48,26 @@ enum crumb_id
     CR_SELFTEST,        /* freeze self-test started; value: kind */
     CR_SCREEN,          /* root screen change; value: screen id */
     CR_TTB_BAD,         /* L1 page table changed; value: address */
+    CR_CODEC_LOAD,      /* codec format (AFMT_*) */
+    CR_CODEC_RUN,       /* audio handle ID */
+    CR_CODEC_DONE,      /* signed decoder return code */
+    CR_CODEC_CONFIG,    /* DSP setting in top 8 bits, argument in low 24 */
+    CR_CODEC_STRIP,     /* requested logical file size */
+    CR_AUDIO_FORMAT,   /* AFMT << 24 | source bits << 16 | (Hz / 10) */
+    CR_AUDIO_ROUTE,    /* converted file or SM1 route decision */
+    CR_AUDIO_ERROR,    /* signed playback diagnostic error */
+    CR_BUF_OPEN,       /* type << 24 | signed handle/result in low 24 */
+    CR_BUF_OPEN_AT,    /* requested file start offset */
+    CR_BUF_REBUFFER,   /* requested file offset outside the buffer */
+    CR_BUF_DAMAGE,     /* rejected list link address */
+    CR_SEEK_REQ,       /* requested position in milliseconds */
+    CR_SEEK_NOW,       /* seamless seek request, milliseconds */
+    CR_SEEK_DONE,      /* resulting playing position in milliseconds */
+    CR_LYRICS_SEEK,    /* seek from selected lyrics line, milliseconds */
+    CR_LYRICS_REDRAW,  /* screen and seek redraw events */
+    CR_MP4_MOOV,       /* moov payload offset */
+    CR_MP4_MDAT,       /* nonempty mdat payload offset */
+    CR_FREEZE_CONTEXT, /* watchdog kind << 8 | interrupted CPSR low byte */
     CR_COUNT
 };
 
@@ -70,6 +90,15 @@ enum crumb_status
     CS_DMA_Q,           /* last pl080 queue: prio << 24 | bytes */
     CS_DMA_SRC,
     CS_DMA_DST,
+    CS_AUDIO_SEEK,      /* audio thread seek phase, 0 outside */
+    CS_CODEC,           /* codec callback phase, top byte; setting in low bits */
+    CS_CODEC_ARG,       /* codec callback's last argument */
+    CS_BUF_OP,          /* buffer operation phase << 24 | handle ID */
+    CS_BUF_POS,         /* requested position or relative advance */
+    CS_BUF_PTR,         /* last handle address from the seek/advance lookup */
+    CS_REBUFFER,        /* buffering thread rebuffer phase, 0 outside */
+    CS_LYRICS,          /* lyrics screen phase, 0 outside */
+    CS_COUNT
 };
 
 enum usb_stage
@@ -93,12 +122,23 @@ enum usb_stage
 /* Both copies, uncached so a reset loses nothing held in the D-cache */
 extern volatile uint32_t *const crumb_status_a;
 extern volatile uint32_t *const crumb_status_b;
+extern volatile uint32_t *const crumb_status_extra_a;
+extern volatile uint32_t *const crumb_status_extra_b;
+#define CRUMB_STATUS_BASE 16
 
 void crumb(enum crumb_id id, uint32_t value);
 static inline void crumb_status(enum crumb_status i, uint32_t v)
 {
-    crumb_status_a[i] = v;
-    crumb_status_b[i] = v;
+    if (i < CRUMB_STATUS_BASE)
+    {
+        crumb_status_a[i] = v;
+        crumb_status_b[i] = v;
+    }
+    else
+    {
+        crumb_status_extra_a[i - CRUMB_STATUS_BASE] = v;
+        crumb_status_extra_b[i - CRUMB_STATUS_BASE] = v;
+    }
 }
 
 /* Crash context saved while the storage and scheduler may be unavailable. */

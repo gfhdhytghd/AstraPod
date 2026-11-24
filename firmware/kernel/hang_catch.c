@@ -394,6 +394,9 @@ int hang_catch_fiq(uint32_t pc, uint32_t spsr)
 
 void hang_catch_fiq_show(void)
 {
+    crumb(CR_FREEZE, freeze.pc);
+    crumb(CR_FREEZE_CONTEXT, (freeze.kind << 8) | (freeze.cpsr & 0xff));
+
     extern const char _irqstackend[];
     const struct thread_entry *t = freeze.running;
     uint32_t mode = freeze.cpsr & 0x1f;
@@ -405,7 +408,6 @@ void hang_catch_fiq_show(void)
     int n = stack_scan(freeze.sp, top, calls, 8);
     char name[8];
 
-    crumb(CR_FREEZE, freeze.pc);
     panic_screen_enter();
     char message[80];
     name8(hang_ui_thread, name);

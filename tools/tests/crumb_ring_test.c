@@ -2,6 +2,7 @@
  * unchanged for the host. A "reset" here is simply reading the ring again,
  * after arbitrary damage. No device access. GPL version 2 or later. */
 #include <assert.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include "crumb_ring.h"
@@ -21,6 +22,7 @@ int main(void)
     struct crumb_entry e[32];
 
     assert(sizeof(struct crumb_ring) <= 2048);
+    assert(offsetof(struct crumb_ring, e) == (6 + 16) * sizeof(uint32_t));
 
     /* Garbage (never written) is no ring */
     memset(&a, 0xa5, sizeof a);
@@ -92,8 +94,16 @@ int main(void)
     fill(&a, 10, 1);
     fill(&b, 12, 1);
     b.status[3] = 0x1234;
+    b.status_extra[3] = 0x5678;
     assert(crumb_snapshot_take(&a, &b, &s) == 3 && s.n == 12);
     assert(s.status[3] == 0x1234);
+    assert(s.status[CRUMB_STATUS_BASE + 3] == 0x5678);
+
+    /* Version 1 entries and the original status survive an upgrade. */
+    b.version = 1;
+    b.head_check = crumb_head_check(b.magic, b.version, b.boot);
+    assert(crumb_snapshot_take(&a, &b, &s) == 3 && s.n == 12);
+    assert(s.status[3] == 0x1234 && s.status[CRUMB_STATUS_BASE + 3] == 0);
 
     /* Clean shutdown marker */
     b.clean = CRUMB_CLEAN;

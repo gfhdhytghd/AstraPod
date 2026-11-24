@@ -39,6 +39,7 @@
 #include "storage.h"
 #include "thread.h"
 #include "kernel.h"
+#include "crumbs.h"
 #include "panic.h"
 #include "debug.h"
 #include "file.h"
@@ -341,6 +342,7 @@ static void note_damage(const char *walk, int step, const void *link,
     damage.from    = from;
     damage.handles = num_handles;
 
+    crumb(CR_BUF_DAMAGE, (uintptr_t)link);
     logf("buffering: bad link %p in %s walk", link, walk);
     audio_buffer_damaged();
 }
@@ -1054,8 +1056,8 @@ management functions for all the actual handle management work.
    return value: <0 if the file cannot be opened, or one file already
    queued to be opened, otherwise the handle for the file in the buffer
 */
-int bufopen(const char *file, off_t offset, enum data_type type,
-            void *user_data)
+static int bufopen_internal(const char *file, off_t offset, enum data_type type,
+                            void *user_data)
 {
     int handle_id = ERR_BUFFER_FULL;
     size_t data;
@@ -1237,6 +1239,19 @@ int bufopen(const char *file, off_t offset, enum data_type type,
     (void)user_data;
 }
 
+int bufopen(const char *file, off_t offset, enum data_type type,
+            void *user_data)
+{
+    bool trace = type == TYPE_ID3 || type == TYPE_CODEC ||
+                 type == TYPE_PACKET_AUDIO || type == TYPE_ATOMIC_AUDIO;
+    if (trace)
+        crumb(CR_BUF_OPEN_AT, offset);
+    int handle_id = bufopen_internal(file, offset, type, user_data);
+    if (trace)
+        crumb(CR_BUF_OPEN, ((uint32_t)type << 24) | (handle_id & 0xffffff));
+    return handle_id;
+}
+
 /* Open a new handle from data that needs to be copied from memory.
    src is the source buffer from which to copy data. It can be NULL to simply
    reserve buffer space.
@@ -1304,8 +1319,10 @@ bool bufclose(int handle_id)
    Q_REBUFFER_HANDLE! */
 static void rebuffer_handle(int handle_id, off_t newpos)
 {
+    crumb_status(CS_REBUFFER, 1);
     struct memory_handle *h = find_handle(handle_id);
     if (!h) {
+        crumb_status(CS_REBUFFER, 0);
         queue_reply(&buffering_queue, ERR_HANDLE_NOT_FOUND);
         return;
     }
@@ -1315,6 +1332,7 @@ static void rebuffer_handle(int handle_id, off_t newpos)
     if (newpos >= h->start && newpos <= h->end) {
         h->ridx = ringbuf_add(h->data, newpos - h->start);
         h->pos  = newpos;
+        crumb_status(CS_REBUFFER, 0);
         queue_reply(&buffering_queue, 0);
         return;
     }
@@ -1327,10 +1345,12 @@ static void rebuffer_handle(int handle_id, off_t newpos)
         h->ridx = ringbuf_add(h->data, newpos - h->start);
         h->pos  = newpos;
 
+        crumb_status(CS_REBUFFER, 2);
         if (buffer_handle(handle_id, amount + 1) && h->end >= h->pos) {
             /* It really did succeed */
             queue_reply(&buffering_queue, 0);
             buffer_handle(handle_id, 0); /* Ok, try the rest */
+            crumb_status(CS_REBUFFER, 0);
             return;
         }
         /* Data collision or other file error - must reset */
@@ -1339,6 +1359,7 @@ static void rebuffer_handle(int handle_id, off_t newpos)
             newpos = h->filesize; /* file truncation happened above */
     }
 
+    crumb_status(CS_REBUFFER, 3);
     mutex_lock(&llist_mutex);
 
     size_t next = ringbuf_offset(HLIST_NEXT(h) ?: HLIST_FIRST);
@@ -1361,8 +1382,10 @@ static void rebuffer_handle(int handle_id, off_t newpos)
     h->ridx = h->widx = h->data = new_index;
     h->start = h->pos = h->end = newpos;
 
-    if (h->fd >= 0)
+    if (h->fd >= 0) {
+        crumb_status(CS_REBUFFER, 4);
         lseek(h->fd, newpos, SEEK_SET);
+    }
 
     off_t filerem = h->filesize - newpos;
     bool send = HLIST_NEXT(h) &&
@@ -1378,8 +1401,10 @@ static void rebuffer_handle(int handle_id, off_t newpos)
     }
 
     /* Now we do the rebuffer */
+    crumb_status(CS_REBUFFER, 5);
     queue_reply(&buffering_queue, 0);
     buffer_handle(handle_id, 0);
+    crumb_status(CS_REBUFFER, 0);
 }
 
 /* Backend to bufseek and bufadvance */
@@ -1389,6 +1414,8 @@ static int seek_handle(struct memory_handle *h, off_t newpos)
         (newpos < h->filesize || h->end < h->filesize)) {
         /* access before or after buffered data and not to end of file or file
            is not buffered to the end-- a rebuffer is needed. */
+        crumb(CR_BUF_REBUFFER, newpos);
+        crumb_status(CS_BUF_OP, 0x05000000 | (h->id & 0xffffff));
         return queue_send(&buffering_queue, Q_REBUFFER_HANDLE,
                     (intptr_t)&(struct buf_message_data){ h->id, newpos });
     }
@@ -1408,14 +1435,16 @@ static int seek_handle(struct memory_handle *h, off_t newpos)
 */
 int bufseek(int handle_id, size_t newpos)
 {
+    crumb_status(CS_BUF_POS, newpos);
+    crumb_status(CS_BUF_OP, 0x01000000 | (handle_id & 0xffffff));
     struct memory_handle *h = find_handle(handle_id);
-    if (!h)
-        return ERR_HANDLE_NOT_FOUND;
-
-    if (newpos > (size_t)h->filesize)
-        return ERR_INVALID_VALUE;
-
-    return seek_handle(h, newpos);
+    crumb_status(CS_BUF_PTR, (uintptr_t)h);
+    crumb_status(CS_BUF_OP, 0x02000000 | (handle_id & 0xffffff));
+    int result = !h ? ERR_HANDLE_NOT_FOUND :
+                 newpos > (size_t)h->filesize ? ERR_INVALID_VALUE :
+                 seek_handle(h, newpos);
+    crumb_status(CS_BUF_OP, 0);
+    return result;
 }
 
 /* Advance the reading index in a handle (relatively to its current position).
@@ -1426,17 +1455,22 @@ int bufseek(int handle_id, size_t newpos)
  */
 int bufadvance(int handle_id, off_t offset)
 {
+    crumb_status(CS_BUF_POS, offset);
+    crumb_status(CS_BUF_OP, 0x03000000 | (handle_id & 0xffffff));
     struct memory_handle *h = find_handle(handle_id);
-    if (!h)
-        return ERR_HANDLE_NOT_FOUND;
-
-    off_t pos = h->pos;
-
-    if ((offset < 0 && offset < -pos) ||
-        (offset >= 0 && offset > h->filesize - pos))
-        return ERR_INVALID_VALUE;
-
-    return seek_handle(h, pos + offset);
+    crumb_status(CS_BUF_PTR, (uintptr_t)h);
+    crumb_status(CS_BUF_OP, 0x04000000 | (handle_id & 0xffffff));
+    int result = ERR_HANDLE_NOT_FOUND;
+    if (h) {
+        off_t pos = h->pos;
+        if ((offset < 0 && offset < -pos) ||
+            (offset >= 0 && offset > h->filesize - pos))
+            result = ERR_INVALID_VALUE;
+        else
+            result = seek_handle(h, pos + offset);
+    }
+    crumb_status(CS_BUF_OP, 0);
+    return result;
 }
 
 /* Get the read position from the start of the file

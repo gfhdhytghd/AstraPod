@@ -163,32 +163,58 @@ static bool read_chunk_esds(qtmovie_t *qtmovie, size_t chunk_len)
     return true;
 }
 
+static bool read_alac_cookie(qtmovie_t *qtmovie, uint32_t bytes)
+{
+    /* The decoder expects 12 bytes of legacy prefix, the 8-byte atom
+     * header, the 28-byte cookie payload and 8 bytes of padding. */
+    enum { prefix = 20, payload = 28, padding = 8 };
+    demux_res_t *res = qtmovie->res;
+    stream_t *stream = qtmovie->stream;
+
+    while (bytes >= 8)
+    {
+        uint32_t size = stream_read_uint32(stream);
+        fourcc_t type = stream_read_uint32(stream);
+        if (size < 8 || size > bytes)
+            return false;
+
+        if (type == MAKEFOURCC('a','l','a','c'))
+        {
+            if (size < 8 + payload)
+                return false;
+            res->codecdata_len = prefix + payload + padding;
+            memset(res->codecdata, 0, res->codecdata_len);
+            stream_read(stream, payload, res->codecdata + prefix);
+            if (bytes > 8 + payload)
+                stream_skip(stream, bytes - 8 - payload);
+            return true;
+        }
+
+        if (size > 8)
+            stream_skip(stream, size - 8);
+        bytes -= size;
+    }
+    return false;
+}
+
 static bool read_chunk_stsd(qtmovie_t *qtmovie, size_t chunk_len)
 {
     unsigned int i;
     int j;
     uint32_t numentries;
-//    size_t size_remaining = chunk_len - 8;
     bool got_codec_data = false;
-    (void)chunk_len;
+    if (chunk_len < 16)
+        return false;
+    size_t bytes = chunk_len - 16;
 
     /* version */
     stream_read_uint8(qtmovie->stream);
-//    size_remaining -= 1;
     /* flags */
     stream_read_uint8(qtmovie->stream);
     stream_read_uint8(qtmovie->stream);
     stream_read_uint8(qtmovie->stream);
-//    size_remaining -= 3;
 
     numentries = stream_read_uint32(qtmovie->stream);
-//    size_remaining -= 4;
-
-    /* if (numentries != 1)
-    {
-        DEBUGF("only expecting one entry in sample description atom!\n");
-        return false;
-    } */
 
     for (i = 0; i < numentries; i++)
     {
@@ -196,7 +222,12 @@ static bool read_chunk_stsd(qtmovie_t *qtmovie, size_t chunk_len)
 
         uint32_t entry_remaining;
 
+        if (bytes < 36)
+            return false;
         entry_size = stream_read_uint32(qtmovie->stream);
+        if (entry_size < 36 || entry_size > bytes)
+            return false;
+        bytes -= entry_size;
         qtmovie->res->format = stream_read_uint32(qtmovie->stream);
         DEBUGF("format: %c%c%c%c\n",SPLITFOURCC(qtmovie->res->format));
         entry_remaining = entry_size;
@@ -225,34 +256,9 @@ static bool read_chunk_stsd(qtmovie_t *qtmovie, size_t chunk_len)
           if (qtmovie->stream->ci->id3->codectype!=AFMT_MP4_ALAC) {
                return false;
           }
-
-          /* 12 = audio format atom, 8 = padding */
-          qtmovie->res->codecdata_len = entry_remaining + 12 + 8;
-          if (qtmovie->res->codecdata_len > MAX_CODECDATA_SIZE)
-          {
-              DEBUGF("codecdata too large (%d) in stsd\n",
-                      (int)qtmovie->res->codecdata_len);
+          if (!read_alac_cookie(qtmovie, entry_remaining))
               return false;
-          }
-
-          memset(qtmovie->res->codecdata, 0, qtmovie->res->codecdata_len);
-          /* audio format atom */
-#if 0
-          /* The ALAC decoder skips these bytes, so there is no need to store them,
-             and this code isn't endian/alignment safe */
-          ((unsigned int*)qtmovie->res->codecdata)[0] = 0x0c000000;
-          ((unsigned int*)qtmovie->res->codecdata)[1] = MAKEFOURCC('a','m','r','f');
-          ((unsigned int*)qtmovie->res->codecdata)[2] = MAKEFOURCC('c','a','l','a');
-#endif
-
-          stream_read(qtmovie->stream,
-                  entry_remaining,
-                  ((char*)qtmovie->res->codecdata) + 12);
-          entry_remaining -= entry_remaining;
           got_codec_data = true;
-
-          if (entry_remaining)
-              stream_skip(qtmovie->stream, entry_remaining);
 
         } else if (qtmovie->res->format==MAKEFOURCC('m','p','4','a')) {
           if (qtmovie->stream->ci->id3->codectype!=AFMT_MP4_AAC &&

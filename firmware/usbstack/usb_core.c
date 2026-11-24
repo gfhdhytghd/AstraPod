@@ -36,6 +36,7 @@
 #include "button.h"
 #include "sm1-test-control.h"
 #include "podlink-shell-settings.h"
+#include "podlink-shell-playback.h"
 #include "podlink-plugin-test.h"
 #include "podlink.h"
 #endif
@@ -647,15 +648,20 @@ void usb_core_handle_transfer_completion(
 #endif
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
         if (event->req->bRequest == SM1_TEST_USB_REQUEST &&
-            event->req->wIndex == SHELL_SETTINGS_INDEX)
+            (event->req->wIndex == SHELL_SETTINGS_INDEX ||
+             event->req->wIndex == SHELL_PLAYBACK_INDEX))
         {
             bool allowed = usb_state == CONFIGURED && usb_podlink_active() &&
                 !usb_exclusive_storage() && !bus_reset_pending &&
                 !control_cancelled && event->status == 0 &&
                 ((event->req->bRequestType & USB_DIR_IN) ||
                  event->length == event->req->wLength);
-            shell_settings_request(event->req, usb_control_data,
-                                   sizeof(usb_control_data), allowed);
+            if (event->req->wIndex == SHELL_SETTINGS_INDEX)
+                shell_settings_request(event->req, usb_control_data,
+                                       sizeof(usb_control_data), allowed);
+            else
+                shell_playback_request(event->req, usb_control_data,
+                                       sizeof(usb_control_data), allowed);
             return;
         }
 #endif
@@ -1708,6 +1714,8 @@ static void process_setup_request(struct usb_ctrlrequest* req) {
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
     if (req->bRequest == SM1_TEST_USB_REQUEST && req->wIndex == SHELL_SETTINGS_INDEX)
         capacity = sizeof(usb_control_data);
+    if (req->bRequest == SM1_TEST_USB_REQUEST && req->wIndex == SHELL_PLAYBACK_INDEX)
+        capacity = SHELL_PLAYBACK_OUT_SIZE;
 #endif
     if(req->wLength > capacity) {
         logf("usb_core: control write too large %u > %u", req->wLength, capacity);

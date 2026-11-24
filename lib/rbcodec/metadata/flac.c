@@ -113,6 +113,7 @@ bool get_flac_metadata(int fd, struct mp3entry* id3)
             id3->filesize = ffilesize(fd);
             id3->frequency = (buf[10] << 12) | (buf[11] << 4)
                 | ((buf[12] & 0xf0) >> 4);
+            id3->bits_per_sample = (((buf[12] & 1) << 4) | (buf[13] >> 4)) + 1;
             if (id3->frequency == 0)
             {
                 return false;

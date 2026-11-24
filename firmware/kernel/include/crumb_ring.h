@@ -23,10 +23,14 @@
 #include <string.h>
 
 #define CRUMB_MAGIC    0x43524d42u  /* "CRMB" */
-#define CRUMB_VERSION  1u
+#define CRUMB_VERSION  2u
 #define CRUMB_CLEAN    0x434c454eu  /* "CLEN": shut down on purpose */
 #define CRUMB_ENTRIES  96
-#define CRUMB_STATUS   16
+#ifndef CRUMB_STATUS_BASE
+#define CRUMB_STATUS_BASE 16
+#endif
+#define CRUMB_STATUS_EXTRA 8
+#define CRUMB_STATUS (CRUMB_STATUS_BASE + CRUMB_STATUS_EXTRA)
 #define CRUMB_SALT     0x9e3779b9u
 
 struct crumb_entry
@@ -43,8 +47,9 @@ struct crumb_ring
     uint32_t magic, version, boot, clean;
     uint32_t head_check;
     uint32_t seq;                       /* the next entry's */
-    uint32_t status[CRUMB_STATUS];
+    uint32_t status[CRUMB_STATUS_BASE];
     struct crumb_entry e[CRUMB_ENTRIES];
+    uint32_t status_extra[CRUMB_STATUS_EXTRA];
 };
 
 /* What was found at boot: the newest entries, oldest first */
@@ -84,8 +89,10 @@ static inline void crumb_ring_start(volatile struct crumb_ring *r,
         r->e[i].check = 0;      /* never a valid check for an all-zero entry */
         r->e[i].tick = r->e[i].id_rep = r->e[i].value = 0;
     }
-    for (int i = 0; i < CRUMB_STATUS; i++)
+    for (int i = 0; i < CRUMB_STATUS_BASE; i++)
         r->status[i] = 0;
+    for (int i = 0; i < CRUMB_STATUS_EXTRA; i++)
+        r->status_extra[i] = 0;
     r->seq = 1;
     r->clean = 0;
     r->boot = boot;
@@ -96,7 +103,8 @@ static inline void crumb_ring_start(volatile struct crumb_ring *r,
 
 static inline bool crumb_ring_head_ok(const volatile struct crumb_ring *r)
 {
-    return r->magic == CRUMB_MAGIC && r->version == CRUMB_VERSION &&
+    return r->magic == CRUMB_MAGIC &&
+           (r->version == 1 || r->version == CRUMB_VERSION) &&
            r->head_check == crumb_head_check(r->magic, r->version, r->boot);
 }
 
@@ -194,8 +202,11 @@ static inline int crumb_snapshot_take(const volatile struct crumb_ring *a,
         s->valid = true;
         s->clean = r->clean == CRUMB_CLEAN;
         s->boot = r->boot;
-        for (int i = 0; i < CRUMB_STATUS; i++)
+        for (int i = 0; i < CRUMB_STATUS_BASE; i++)
             s->status[i] = r->status[i];
+        if (r->version == CRUMB_VERSION)
+            for (int i = 0; i < CRUMB_STATUS_EXTRA; i++)
+                s->status[CRUMB_STATUS_BASE + i] = r->status_extra[i];
         s->n = n;
         memcpy(s->e, src, (size_t)n * sizeof *src);
     }

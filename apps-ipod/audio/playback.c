@@ -49,6 +49,7 @@ static bool reported_high_rate;
 #include "system.h"
 #include "version.h"
 #include "kernel.h"
+#include "crumbs.h"
 #include "panic.h"
 #include "core_alloc.h"
 #ifdef HAVE_USB_PODLINK
@@ -169,6 +170,14 @@ static enum play_status
     PLAY_PLAYING = AUDIO_STATUS_PLAY,
     PLAY_PAUSED  = AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE,
 } play_status = PLAY_STOPPED;
+
+static volatile int32_t playback_debug_error;
+
+static void playback_note_error(int error)
+{
+    playback_debug_error = error;
+    crumb(CR_AUDIO_ERROR, error);
+}
 
 /* Sizeable things that only need exist during playback and not when stopped */
 static struct audio_scratch_memory
@@ -1415,6 +1424,8 @@ static void audio_handle_track_load_status(int trackstat)
             break;
 
     case LOAD_TRACK_ERR_START_CODEC:
+        if (trackstat == LOAD_TRACK_ERR_START_CODEC)
+            playback_note_error(AUDIO_DEBUG_CODEC_LOAD);
         audio_queue_post(Q_AUDIO_CODEC_COMPLETE, CODEC_ERROR);
         break;
 
@@ -1829,6 +1840,7 @@ static void audio_complete_codec_seek(void)
         if (seek_now)
         {
             seek_now = ff_rw_mode = false;
+            crumb_status(CS_AUDIO_SEEK, 5);
             pcmbuf_seek_restart();
             audio_pcmbuf_sync_position();
             seek_serial++;
@@ -1836,6 +1848,8 @@ static void audio_complete_codec_seek(void)
         else
             audio_ff_rewind_end();
         codec_seeking = false; /* set _after_ the call! */
+        crumb(CR_SEEK_DONE, id3_get(PLAYING_ID3)->elapsed);
+        crumb_status(CS_AUDIO_SEEK, 0);
     }
     /* else it's waiting and we must repond */
 }
@@ -2615,6 +2629,7 @@ static int audio_load_track(void)
             fd = open(converted, O_RDONLY);
             if (fd >= 0)
             {
+                crumb(CR_AUDIO_ROUTE, 1);
                 path = converted;
                 break;
             }
@@ -2625,6 +2640,7 @@ static int audio_load_track(void)
             break;
 
         logf("Open failed %s", path);
+        playback_note_error(AUDIO_DEBUG_OPEN);
         debug_log(DEBUG_LOG_PLAYBACK, "skipped, will not open: %s", path);
 
         /* only skip if failed track has a successor in playlist */
@@ -2766,14 +2782,20 @@ static int audio_finish_load_track(struct track_info *infop)
         /* This is an error condition. Track cannot be played without valid
            metadata; skip the track. */
         logf("No metadata");
+        playback_note_error(AUDIO_DEBUG_METADATA);
         debug_log(DEBUG_LOG_PLAYBACK, "skipped, no metadata");
         trackstat = LOAD_TRACK_ERR_FINISH_FAILED;
         goto audio_finish_load_track_exit;
     }
 
+    crumb(CR_AUDIO_FORMAT, (track_id3->codectype << 24) |
+          (track_id3->bits_per_sample << 16) |
+          ((track_id3->frequency / 10) & 0xffff));
+
 #if CONFIG_CPU == S5L8702 && !defined(SIMULATOR)
     if (track_id3->frequency > 48000)
     {
+        playback_note_error(AUDIO_DEBUG_RATE);
         if (!reported_high_rate)
         {
             button_queue_post(SYS_HIRES_SKIPPED, 0);
@@ -2850,6 +2872,7 @@ static int audio_finish_load_track(struct track_info *infop)
                reading the codec file failed part way through, either way,
                skip the track */
             logf("No codec for: %s", track_id3->path);
+            playback_note_error(AUDIO_DEBUG_CODEC_LOAD);
             debug_log(DEBUG_LOG_PLAYBACK, "skipped, no codec (type %d): %s",
                       track_id3->codectype, track_id3->path);
             trackstat = LOAD_TRACK_ERR_FINISH_FAILED;
@@ -2929,6 +2952,7 @@ static int audio_finish_load_track(struct track_info *infop)
         {
             /* Nothing to play if no audio handle - skip this */
             logf("Could not add audio data handle");
+            playback_note_error(hid);
             debug_log(DEBUG_LOG_PLAYBACK, "skipped, buffering refused it "
                       "(%d): %s", hid, track_id3->path);
             trackstat = LOAD_TRACK_ERR_FINISH_FAILED;
@@ -2939,6 +2963,7 @@ audio_finish_load_track_exit:
     if (trackstat >= LOAD_TRACK_OK && !track_info_sync(infop))
     {
         logf("Track info sync failed");
+        playback_note_error(AUDIO_DEBUG_BUFFER);
         trackstat = LOAD_TRACK_ERR_FINISH_FAILED;
     }
 
@@ -3517,6 +3542,8 @@ static void audio_on_track_changed(void)
 static void audio_start_playback(const struct audio_resume_info *resume_info,
                                  unsigned int flags)
 {
+    if (!flags)
+        playback_debug_error = 0;
 /*
  * Refuse to start playback if usb audio SINK is active (iPod receiving audio).
  * Source mode (iPod streaming to external DAC) needs playback to continue.
@@ -3525,6 +3552,7 @@ static void audio_start_playback(const struct audio_resume_info *resume_info,
 #ifdef USB_ENABLE_AUDIO
     if (usb_audio_get_active() && usb_audio_get_playing())
     {
+        playback_note_error(AUDIO_DEBUG_BUSY);
         queue_reply(&audio_queue, 0);
         return;
     }
@@ -3537,6 +3565,7 @@ static void audio_start_playback(const struct audio_resume_info *resume_info,
         core_allocatable() < pcmbuf_size_reqd() + scratch_mem_size()
                              + AUDIO_BUFFER_RESERVE)
     {
+        playback_note_error(AUDIO_DEBUG_BUFFER);
         queue_reply(&audio_queue, 0);
         return;
     }
@@ -3545,12 +3574,14 @@ static void audio_start_playback(const struct audio_resume_info *resume_info,
     reported_high_rate = false;
     if (library_conversion_running())
     {
+        playback_note_error(AUDIO_DEBUG_BUSY);
         queue_reply(&audio_queue, 0);
         return;
     }
 #endif
     if (track_decode_busy())
     {
+        playback_note_error(AUDIO_DEBUG_BUSY);
         queue_reply(&audio_queue, 0);
         return;
     }
@@ -3999,7 +4030,9 @@ static void audio_on_ff_rewind(long time, bool immediate)
             id3->elapsed = time;
         queue_reply(&audio_queue, 1);
 
+        crumb_status(CS_AUDIO_SEEK, 2);
         bool haltres = halt_decoding_track(pending == TRACK_SKIP_AUTO);
+        crumb_status(CS_AUDIO_SEEK, 0);
 
         /* Need this set in case ff/rw mode + error but _after_ the codec
            halt that will reset it */
@@ -4059,7 +4092,9 @@ static void audio_on_ff_rewind(long time, bool immediate)
         }
 
         seek_now = immediate;
+        crumb_status(CS_AUDIO_SEEK, 3);
         codec_seek(time);
+        crumb_status(CS_AUDIO_SEEK, 4);
         return;
         }
 
@@ -4387,6 +4422,7 @@ static void buffer_event_rebuffer_callback(unsigned short id, void *ev_data)
  * before the next play. */
 void audio_buffer_damaged(void)
 {
+    playback_note_error(AUDIO_DEBUG_BUFFER_DAMAGE);
     LOGFQUEUE("buffering > audio Q_AUDIO_REMAKE_AUDIO_BUFFER: damaged");
     audio_queue_post(Q_AUDIO_REMAKE_AUDIO_BUFFER, 0);
 }
@@ -4449,6 +4485,8 @@ void audio_codec_complete(int status)
         /* Normal automatic skip */
         ab_end_of_track_report();
     }
+    else
+        playback_note_error(status);
 
     LOGFQUEUE("codec > audio Q_AUDIO_CODEC_COMPLETE: %d", status);
     audio_queue_post(Q_AUDIO_CODEC_COMPLETE, status);
@@ -4824,11 +4862,13 @@ void audio_pre_ff_rewind(void)
 void audio_ff_rewind(long time)
 {
     LOGFQUEUE("audio > audio Q_AUDIO_FF_REWIND");
+    crumb(CR_SEEK_REQ, time);
     audio_queue_post(Q_AUDIO_FF_REWIND, time);
 }
 
 void audio_seek_now(long time)
 {
+    crumb(CR_SEEK_NOW, time);
     audio_queue_post(Q_AUDIO_SEEK_NOW, time);
 }
 
@@ -5130,6 +5170,33 @@ void audio_set_playback_frequency(unsigned int sample_rate_hz)
 unsigned int playback_status(void)
 {
     return play_status;
+}
+
+void audio_playback_debug_snapshot(struct audio_playback_debug *status)
+{
+    /* The Classic's playback and USB threads run cooperatively. Mask the PCM
+     * interrupt while copying the clock and the published track metadata. */
+    int level = disable_irq_save();
+    const struct mp3entry *track = id3_get(PLAYING_ID3);
+    status->state = audio_status();
+    status->error = playback_debug_error;
+    if (play_status != PLAY_STOPPED)
+    {
+        status->elapsed_ms = track->elapsed;
+        status->length_ms = track->length;
+        status->codec = track->codectype;
+        status->frequency_hz = track->frequency;
+        status->bits_per_sample = track->bits_per_sample;
+        memcpy(status->path, track->path, sizeof(status->path));
+        status->path[sizeof(status->path) - 1] = '\0';
+    }
+    else
+    {
+        status->elapsed_ms = status->length_ms = 0;
+        status->codec = status->frequency_hz = status->bits_per_sample = 0;
+        status->path[0] = '\0';
+    }
+    restore_irq(level);
 }
 
 /** Startup **/

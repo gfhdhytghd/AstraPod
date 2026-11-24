@@ -30,6 +30,7 @@
 #include "config.h"
 #include "system.h"
 #include "kernel.h"
+#include "crumbs.h"
 #include "codecs.h"
 #include "codec_thread.h"
 #include "pcmbuf.h"
@@ -333,7 +334,10 @@ static bool codec_seek_buffer_callback(size_t newpos)
 {
     logf("codec_seek_buffer_callback");
 
+    crumb_status(CS_CODEC_ARG, newpos);
+    crumb_status(CS_CODEC, 0x03000000);
     int ret = bufseek(ci.audio_hid, newpos);
+    crumb_status(CS_CODEC, 0);
     if (ret == 0)
     {
         ci.curpos = newpos;
@@ -366,7 +370,12 @@ static void codec_seek_complete_callback(void)
 
 static void codec_configure_callback(int setting, intptr_t value)
 {
+    crumb(CR_CODEC_CONFIG, ((uint32_t)setting << 24) |
+                           ((uint32_t)value & 0xffffff));
+    crumb_status(CS_CODEC_ARG, value);
+    crumb_status(CS_CODEC, 0x01000000 | setting);
     dsp_configure(ci.dsp, setting, value);
+    crumb_status(CS_CODEC, 0);
 }
 
 static long codec_get_command_callback(intptr_t *param)
@@ -437,9 +446,27 @@ static bool codec_loop_track_callback(void)
 
 void codec_strip_filesize_callback(off_t size)
 {
+    crumb(CR_CODEC_STRIP, size);
+    crumb_status(CS_CODEC_ARG, size);
+    crumb_status(CS_CODEC, 0x02000000);
     if (bufstripsize(ci.audio_hid, size) >= 0)
         ci.filesize = size;
+    crumb_status(CS_CODEC, 0);
 }
+
+#ifdef HAVE_SM1_ALAC_API
+static bool codec_alac_begin(unsigned depth, unsigned channels, unsigned pb,
+                             unsigned kb, unsigned mb)
+{
+    extern bool sm1_alac_begin(unsigned, unsigned, unsigned, unsigned, unsigned);
+    crumb_status(CS_CODEC_ARG, depth);
+    crumb_status(CS_CODEC, 0x04000000);
+    bool enabled = sm1_alac_begin(depth, channels, pb, kb, mb);
+    crumb_status(CS_CODEC, 0);
+    crumb(CR_AUDIO_ROUTE, enabled ? 2 : 3);
+    return enabled;
+}
+#endif
 
 /** Codec thread **/
 
@@ -450,6 +477,7 @@ static void load_codec(const struct codec_load_info *ev_data)
     /* Save a local copy so we can let the audio thread go ASAP */
     struct codec_load_info data = *ev_data;
     bool const encoder = type_is_encoder(data.afmt);
+    crumb(CR_CODEC_LOAD, data.afmt);
 
     if (codec_type != AFMT_UNKNOWN)
     {
@@ -510,6 +538,8 @@ static void run_codec(void)
     }
 
     codec_queue_ack(Q_CODEC_RUN);
+    if (!encoder)
+        crumb(CR_CODEC_RUN, ci.audio_hid);
 
     trigger_cpu_boost();
 
@@ -532,6 +562,7 @@ static void run_codec(void)
     extern int sm1_route_run(struct codec_api *);
     if (codec_type == AFMT_FLAC) {
         status = sm1_route_run(&ci);
+        crumb(CR_AUDIO_ROUTE, status == 1 ? 5 : 4);
         if (status == 1) /* Host preflight declined before touching SM1 or ci.curpos. */
             status = codec_run_proc();
     } else
@@ -540,6 +571,7 @@ static void run_codec(void)
 
     if (!encoder)
     {
+        crumb(CR_CODEC_DONE, status);
         /* Codec is done with it - let it move */
         buf_pin_handle(ci.audio_hid, false);
 
@@ -663,10 +695,9 @@ void INIT_ATTR codec_thread_init(void)
     ci.loop_track       = codec_loop_track_callback;
     ci.strip_filesize = codec_strip_filesize_callback;
 #ifdef HAVE_SM1_ALAC_API
-    extern bool sm1_alac_begin(unsigned, unsigned, unsigned, unsigned, unsigned);
     extern bool sm1_alac_frame(const unsigned char *, size_t, unsigned, int32_t *, int32_t *);
     extern void sm1_alac_end(void);
-    ci.alac_begin = sm1_alac_begin;
+    ci.alac_begin = codec_alac_begin;
     ci.alac_frame = sm1_alac_frame;
     ci.alac_end = sm1_alac_end;
 #endif

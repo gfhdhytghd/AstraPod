@@ -329,6 +329,7 @@ static void bootfile_session_end(void)
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
 #include "sm1-test-control.h"
 #include "podlink-shell-settings.h"
+#include "podlink-shell-playback.h"
 #include "screens/system/podlink_screen.h"
 
 volatile unsigned sm1_test_submitted;
@@ -409,6 +410,8 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
                 button_queue_post(BUTTON_REDRAW, 0);
                 break;
             }
+            if (command == SHELL_PLAYBACK_EVENT)
+                return shell_playback_dispatch();
             if (command == SHELL_SETTINGS_EVENT)
             {
                 unsigned operation = shell_settings_operation();

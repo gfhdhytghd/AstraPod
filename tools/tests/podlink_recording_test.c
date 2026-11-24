@@ -7,6 +7,7 @@
 #include <string.h>
 #include "sm1-test-control.h"
 #include "podlink-shell-settings.h"
+#include "podlink-shell-playback.h"
 #include "usb_ch9.h"
 
 #define IPOD_6G
@@ -112,6 +113,8 @@ static size_t copy_string(char *dest, const char *source, size_t size)
     return strlen(source);
 }
 static int get_action(int context, int timeout);
+long shell_playback_dispatch(void) { assert(0); return 0; }
+
 static long default_event_handler(long event);
 
 #define strlcpy copy_string

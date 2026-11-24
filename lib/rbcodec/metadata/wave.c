@@ -405,6 +405,8 @@ static bool read_header(int fd, struct mp3entry* id3, const unsigned char *chunk
     id3->length = (fmt.formattag != WAVE_FORMAT_ATRAC3)?
                       (uint64_t)fmt.totalsamples * 1000 / id3->frequency :
                       ((id3->filesize - id3->first_frame_offset) * 8) / id3->bitrate;
+    if (fmt.formattag == WAVE_FORMAT_PCM)
+        id3->bits_per_sample = fmt.bitspersample;
 
     /* output header/id3 info (for debug) */
     DEBUGF("%s header info ----\n", (is_64)? "wave64" : "wave");

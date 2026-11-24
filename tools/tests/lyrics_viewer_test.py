@@ -29,6 +29,9 @@ lead_default=int(re.search(r'INT_SETTING\(0,\s*lyric_lead,\s*LANG_LYRICS_LEAD,\s
 assert lead_default==500
 adapter=f'enum {{ DEFAULT_LYRIC_LEAD = {lead_default} }};\n'+r'''
 #include <dirent.h>
+#include "podlink-shell-playback.h"
+#include "sm1-test-control.h"
+#define IPOD_6G
 #define HAVE_USB_PODLINK
 #define HAVE_ADJUSTABLE_CPU_FREQ
 #define HAVE_MULTIMEDIA_KEYS
@@ -92,8 +95,9 @@ static void agents_nav_request(int screen, bool remote)
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define TIME_BEFORE(a,b) ((int32_t)((uint32_t)(a)-(uint32_t)(b))<0)
-#define IS_SYSEVENT(x) ((x)==SYS_USB_CONNECTED)
+#define IS_SYSEVENT(x) ((x)==SYS_USB_CONNECTED || (x)==SYS_SM1_TEST_CONTROL)
 #define SYS_USB_CONNECTED 1001
+#define SYS_SM1_TEST_CONTROL 1002
 #define CONTEXT_WPS 1
 #define SCREEN_MAIN 0
 #define ACTIVITY_LYRICS 1
@@ -121,6 +125,15 @@ static struct mp3entry playing;
 static struct wps_state wps={.id3=&playing};
 static struct font {int height; int ascent;} f14={14,12},f18={18,16},f20={20,18};
 static int calls,plan,loads,unloads,claims,releases,holds,activities,updates,pauses,seeks,skips,controls,remote_at,default_events;
+static unsigned shell_command, shell_events, lyrics_phase, seek_clocks;
+enum { CR_LYRICS_SEEK, CR_LYRICS_REDRAW, CS_LYRICS };
+static void crumb(int id,uint32_t value);
+static void crumb_status(int id,uint32_t value)
+{
+    assert(id==CS_LYRICS);
+    lyrics_phase=value;
+}
+static unsigned button_get_data(void) { return shell_command; }
 static size_t arena_bytes=sizeof app_area;
 static fb_data panel[320*240];
 static fb_data entry_core[2*320*240];
@@ -414,11 +427,7 @@ static bool cider_wps_action(int action){
     if (!remote_source) return false;
     record_multimedia(action);return true;
 }
-static int default_event_handler(int a){
-    if (a & BUTTON_MULTIMEDIA) {assert(!remote_source);record_multimedia(a);}
-    else {assert(clock_refs==1&&claims==releases);default_events++;}
-    return a;
-}
+static int default_event_handler(int action);
 static int get_action(int c,int timeout);
 '''
 retained_header=(r/'apps-ipod/ui/retained.h').read_text()
@@ -427,6 +436,28 @@ adapter=adapter.replace('RETAINED_TEST_HEADER',retained_header)
 # Avoid libc sleep's POSIX signature in this host adapter.
 pre=pre.replace('#include <unistd.h>','#include <unistd.h>\n#include <limits.h>\n#define sleep ui_sleep')
 post=r'''
+static void crumb(int id,uint32_t value)
+{
+    if (id==CR_LYRICS_REDRAW && value==LV_CRUMB_SEEK_CLOCK) seek_clocks++;
+}
+static int default_event_handler(int a){
+    if (a==SYS_SM1_TEST_CONTROL) {
+        assert(activities==1 && lyrics_phase==LV_CRUMB_SHELL);
+        shell_events++;
+        if (shell_command==SHELL_PLAYBACK_EVENT) {
+            assert(lyric_viewer()==GO_TO_PREVIOUS);
+            playing.elapsed=9500;
+            seek_serial++;
+        } else {
+            assert(shell_command==SM1_TEST_STOP);
+            playing_audio=false;
+        }
+        return 0;
+    }
+    if (a & BUTTON_MULTIMEDIA) {assert(!remote_source);record_multimedia(a);}
+    else {assert(clock_refs==1&&claims==releases);default_events++;}
+    return a;
+}
 static uint32_t rng = 1;
 static unsigned pixel_rand(void)
 {
@@ -546,6 +577,21 @@ static int get_action(int c,int timeout){
  assert(!entry_pinned);
  assert(clock_refs == (lv.boost ? 2 : 1));
  if(timeout>HZ/30)assert(!lv.boost);
+ if(plan==17) {
+   assert(activities==1 && lyrics_phase==LV_CRUMB_OPEN);
+   switch (++calls) {
+     case 1:
+       shell_command=SHELL_PLAYBACK_EVENT;
+       return SYS_SM1_TEST_CONTROL;
+     case 2:
+       assert(lv.elapsed==9500 && seek_clocks==1 && shell_events==1);
+       shell_command=SM1_TEST_STOP;
+       return SYS_SM1_TEST_CONTROL;
+     default:
+       assert(!lv.track[0] && shell_events==2);
+       return ACTION_WPS_MENU;
+   }
+ }
  if(plan==15 || plan==16) {
    switch(++calls) {
     case 1:
@@ -751,6 +797,13 @@ int main(int argc,char**argv){assert(argc==3);assert(!chdir(argv[1]));
  global_settings.lyric_lead=DEFAULT_LYRIC_LEAD;global_settings.fg_color=65535;global_settings.lyric_highlight=true;global_settings.lyric_backlight=true;global_settings.lyric_prev_opacity=global_settings.lyric_next_opacity=60;
  global_settings.animations=true;
  deny_entry_core=true;
+ if (!strcmp(argv[2],"shell")) {
+   plan=17;
+   assert(lyric_viewer()==GO_TO_PREVIOUS && calls==3);
+   assert(!lyrics_phase && !lv_state && releases==1 && clock_refs==1);
+   puts("PASS PodLink Shell seek and stop dispatch inside the lyrics page");
+   return 0;
+ }
  if (!strcmp(argv[2],"frames")) {
    plan=14;global_settings.animations=deny_entry_core=true;
    assert(lyric_viewer()==GO_TO_ROOT && calls==5);
@@ -1041,10 +1094,11 @@ playback=r/'apps-ipod/screens/playback'
 subprocess.run(['cc','-m32','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-function',
                 '-g','-fsanitize=address,undefined','-fno-pie','-no-pie','-ffunction-sections','-Wl,--gc-sections',
                 '-I'+str(r/'apps-ipod'),'-I'+str(r/'apps-ipod/viewers/lyric_viewer'),'-I'+str(playback),
+                '-I'+str(r/'firmware/export'),
                 '-I'+str(next(r.glob('firmware/**/podlink.h')).parent),
                 str(p),str(r/'apps-ipod/viewers/lyric_viewer/lyrics_motion.c'),str(r/'apps-ipod/ui/animation.c'),
                 str(playback/'cider_model.c'),'-o',str(o/'viewer')],check=True)
-for scenario in sys.argv[2:] or ['headset', 'select', 'entry', 'background', 'frames', 'entry-frames', 'all']:
+for scenario in sys.argv[2:] or ['headset', 'select', 'entry', 'background', 'frames', 'entry-frames', 'shell', 'all']:
     fixture = o / scenario
     fixture.mkdir()
     subprocess.run([str(o/'viewer'),str(fixture),scenario],check=True)

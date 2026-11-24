@@ -343,6 +343,8 @@ struct mp3entry {
 
     /* MP4 container has a video track */
     bool has_video;
+
+    uint8_t bits_per_sample; /* source PCM depth, zero if unknown */
 };
 
 unsigned int probe_file_format(const char *filename); /* returns audio_fmt */

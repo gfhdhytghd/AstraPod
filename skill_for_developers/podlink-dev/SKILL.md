@@ -207,6 +207,7 @@ the device configured. Host side uses PyUSB (`podbox-usbkey` venv has it).
 | `0x5d` | `0x4951` | PodLink Shell: wValue 1 reboot, 2 play test track, 3 seek, 4 stop, 5 open benchmark screen, 6 record line-in WAV, 7 record mic WAV, 8 stop recording; IN wValue 0 reads 16-byte status, IN wValue 1 reads 96-byte recording status | `firmware/export/sm1-test-control.h` |
 | `0x5d` | `0x4952` | Debug menu: IN reads item name by index (128 bytes), OUT opens that item on the player | same |
 | `0x5d` | `0x4953` | Settings: OUT queues a tree, get, set or action command. IN reads a 128-byte reply page. | Settings protocol below |
+| `0x5d` | `0x4954` | Playback: OUT queues play, seek, skip or open lyrics. IN reads playback and command status. | `docs/podbox/podlink-shell.md` |
 
 PodLink Shell commands need PodLink active and storage not exclusive. One
 command at a time: the device stalls a second one until the first completes.

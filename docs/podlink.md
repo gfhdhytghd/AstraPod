@@ -634,6 +634,8 @@ Choose a stable regular file under `/Music/`, `/iPod_Control/Music/`, or
 `/Recordings/` (up to 128 MiB), or a large allowlisted tagcache file.
 `MS3 STREAM SAMPLE <path>` replies `MS3 SAMPLE <size>`, then uses the
 same MSF1 offsets, credits and terminal CRC32 as FILE. SAMPLE is read-only.
+It also accepts the exact diagnostic log paths listed in the
+[PodLink Shell guide](podbox/podlink-shell.md#播放诊断).
 Tagcache mode keeps the firmware's normal revision checks.
 
 `MS3 PROFILE BASE` clears counters and selects the original 4 KiB IN

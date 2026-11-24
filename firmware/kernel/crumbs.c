@@ -76,6 +76,10 @@ volatile uint32_t *const crumb_status_a =
 volatile uint32_t *const crumb_status_b =
     ((volatile struct crumb_ring *)UNCACHED(&dram_ring))->status;
 
+volatile uint32_t *const crumb_status_extra_a = RING_A->status_extra;
+volatile uint32_t *const crumb_status_extra_b = RING_B->status_extra;
+_Static_assert(CS_COUNT == CRUMB_STATUS, "crumb status count");
+
 #ifdef HAVE_IPOD_CRASH_RECOVERY
 #include "sm1_recovery.h"
 static struct recovery_record recovery_saved __attribute__((section(".persist"), aligned(32)));
@@ -111,6 +115,17 @@ static const char *const crumb_names[CR_COUNT] =
     [CR_ICODE_BAD] = "ICODE-BAD", [CR_BANK_BAD] = "BANK-BAD",
     [CR_SELFTEST] = "selftest", [CR_SCREEN] = "screen",
     [CR_TTB_BAD] = "TTB-BAD",
+    [CR_CODEC_LOAD] = "codec-load", [CR_CODEC_RUN] = "codec-run",
+    [CR_CODEC_DONE] = "codec-done", [CR_CODEC_CONFIG] = "codec-cfg",
+    [CR_CODEC_STRIP] = "codec-strip", [CR_AUDIO_FORMAT] = "audio-fmt",
+    [CR_AUDIO_ROUTE] = "audio-route", [CR_AUDIO_ERROR] = "audio-error",
+    [CR_BUF_OPEN] = "buf-open", [CR_BUF_OPEN_AT] = "buf-open-at",
+    [CR_BUF_REBUFFER] = "buf-rebuf",
+    [CR_BUF_DAMAGE] = "buf-damage", [CR_SEEK_REQ] = "seek",
+    [CR_SEEK_NOW] = "seek-now", [CR_SEEK_DONE] = "seek-done",
+    [CR_LYRICS_SEEK] = "lyrics-seek", [CR_LYRICS_REDRAW] = "lyrics-draw",
+    [CR_MP4_MOOV] = "mp4-moov", [CR_MP4_MDAT] = "mp4-mdat",
+    [CR_FREEZE_CONTEXT] = "freeze-ctx",
 };
 
 static const char *const status_names[CRUMB_STATUS] =
@@ -118,6 +133,8 @@ static const char *const status_names[CRUMB_STATUS] =
     "tick", "irq-in", "irq-out", "thread", "usb-stage", "usb-gint",
     "usb-dmaout", "usb-dmain", "usb-thr", "lcd", "pl-lock", "pl-worker",
     "pl-irq", "dma-q", "dma-src", "dma-dst",
+    "seek-step", "codec-op", "codec-arg", "buf-op", "buf-pos", "buf-ptr",
+    "buf-fill", "lyrics",
 };
 
 /* The previous boot, taken before this one starts writing */

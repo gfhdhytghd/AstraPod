@@ -31,6 +31,7 @@
 #include "metadata_parsers.h"
 #include "logf.h"
 #include "debug.h"
+#include "crumbs.h"
 #include "replaygain.h"
 #include "rbunicode.h"
 
@@ -820,6 +821,8 @@ static bool read_mp4_container(int fd, struct mp3entry* id3,
             /* Fall through */
 
         case MP4_moov:
+            crumb(CR_MP4_MOOV, end - size);
+            /* Fall through */
         case MP4_udta:
         case MP4_mdia:
         case MP4_stbl:
@@ -971,30 +974,17 @@ static bool read_mp4_container(int fd, struct mp3entry* id3,
 
         case MP4_alac:
             {
-                uint32_t frequency;
-                uint32_t subsize;
-                uint32_t subtype;
+                off_t cookie_end = end;
+                uint8_t cookie[28];
 
-                /* Move to the next expected mp4 atom. */
-                lseek(fd, 28, SEEK_CUR);
-                read_mp4_atom(fd, &subsize, &subtype, size);
-                size -= 36;
-#if 0
-                /* We might need to parse for the alac metadata atom. */
-                while (!((subsize==28) && (subtype==MP4_alac)) && (size>0))
+                /* Skip the AudioSampleEntry fields and read ALACSpecificConfig. */
+                if (size >= 28 && lseek(fd, 28, SEEK_CUR) >= 0 &&
+                    find_mp4_child(fd, &cookie_end, MP4_alac) &&
+                    cookie_end - lseek(fd, 0, SEEK_CUR) >= (off_t)sizeof(cookie) &&
+                    read(fd, cookie, sizeof(cookie)) == sizeof(cookie))
                 {
-                    lseek(fd, -7, SEEK_CUR);
-                    read_mp4_atom(fd, &subsize, &subtype, size);
-                    size -= 1;
-                    errno = 0; /* will most likely be set while parsing */
-                }
-#endif
-                if (subtype == MP4_alac)
-                {
-                    lseek(fd, 24, SEEK_CUR);
-                    read_uint32be(fd, &frequency);
-                    size -= 28;
-                    id3->frequency = frequency;
+                    id3->bits_per_sample = cookie[9];
+                    id3->frequency = get_long_be(cookie + 24);
                     id3->codectype = AFMT_MP4_ALAC;
                 }
             }
@@ -1005,6 +995,7 @@ static bool read_mp4_container(int fd, struct mp3entry* id3,
                Ignore them. */
             if(size == 0)
                 break;
+            crumb(CR_MP4_MDAT, end - size);
             /* mdat chunks accumulate! */
             id3->filesize += size;
             if(id3->samples > 0) {
@@ -1288,6 +1279,8 @@ bool get_mp4_metadata(int fd, struct mp3entry* id3)
         sm4_identify(fd,file_bytes,&info)) {
         id3->codectype=AFMT_FLAC;
         id3->frequency=info.rate;
+        id3->bits_per_sample=((info.stream[12] & 1) << 4 |
+                              info.stream[13] >> 4) + 1;
         id3->samples=info.total;
         id3->filesize=file_bytes;
         id3->length=(uint64_t)info.total*1000/info.rate;

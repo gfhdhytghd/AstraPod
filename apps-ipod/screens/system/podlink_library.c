@@ -97,7 +97,11 @@ static bool managed_path(const char *path)
 
 static bool sample_path(const char *path)
 {
-    return path_under(path, "/Music/", true) ||
+    return !strcmp(path, ROCKBOX_DIR "/crumbs-last.txt") ||
+           !strcmp(path, ROCKBOX_DIR "/lyrics-perf.txt") ||
+           !strcmp(path, ROCKBOX_DIR "/lyrics-perf.1.txt") ||
+           !strcmp(path, ROCKBOX_DIR "/sm1/codec-trace.txt") ||
+           path_under(path, "/Music/", true) ||
            path_under(path, "/iPod_Control/Music/", true) ||
            path_under(path, REC_BASE_DIR "/", true);
 }

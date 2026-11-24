@@ -479,6 +479,9 @@ draw/color.c
 audio/sound_feedback.c
 #ifdef HAVE_USB_PODLINK
 system/podlink_time.c
+#ifdef IPOD_6G
+system/podlink_shell_playback.c
+#endif
 #endif
 system/format_time.c
 system/shutdown.c

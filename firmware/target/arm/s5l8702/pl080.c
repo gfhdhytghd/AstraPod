@@ -121,6 +121,8 @@ static void ICODE_ATTR dmac_ch_run(struct dmac_ch *ch)
     /* copy whole LLI to HW registers */
     *DMACCxLLI(ch->baddr) = *(CH_TSK_TAIL(ch)->start_lli);
 
+    if (ch->start_usec)
+        *ch->start_usec = USEC_TIMER;
     dmac_ch_enable(ch);
 }
 

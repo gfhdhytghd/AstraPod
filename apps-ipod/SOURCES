@@ -229,6 +229,9 @@ screens/system/probe_debug.c
 screens/system/sound_scan.c
 screens/system/sound_library.c
 screens/system/debug_menu.c
+#if defined(IPOD_6G) && (CONFIG_PLATFORM & PLATFORM_NATIVE)
+screens/system/lcd_te_debug.c
+#endif
 files/file_ops.c
 files/file_index.c
 files/book_index.c

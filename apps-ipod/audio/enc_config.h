@@ -70,8 +70,11 @@ void enc_global_settings_reset(void);
 
 /* Apply new settings */
 void enc_global_settings_apply(void);
+unsigned long enc_mp3_bitrate_caps(void);
 
 /* Show an encoder's config menu based on the global_settings.
    Modified settings are placed in global_settings.enc_config. */
+struct menu_item_ex;
+const struct menu_item_ex *enc_global_settings_menu(void);
 int enc_global_config_menu(void);
 #endif /* ENC_CONFIG_H */

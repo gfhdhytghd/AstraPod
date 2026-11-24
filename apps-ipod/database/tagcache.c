@@ -6899,6 +6899,29 @@ commit:
     cpu_boost(false);
 }
 
+bool tagcache_scan_paths_valid(char *paths)
+{
+    if (!*paths)
+        return true;
+
+    unsigned count = 0;
+    char *part = paths;
+    while (part)
+    {
+        char *next = strchr(part, ':');
+        if (next)
+            *next = '\0';
+        bool valid = ++count <= MAX_STATIC_ROOTS &&
+                     part[0] == '/' && dir_exists(part);
+        if (next)
+            *next++ = ':';
+        if (!valid)
+            return false;
+        part = next;
+    }
+    return true;
+}
+
 void tagcache_build(void)
 {
     char *vect[MAX_STATIC_ROOTS + 1]; /* +1 to ensure NULL sentinel */

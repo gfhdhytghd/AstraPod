@@ -206,6 +206,7 @@ the device configured. Host side uses PyUSB (`podbox-usbkey` venv has it).
 | `0x5c` | 0 | Disk Mode exit status (IN, 8 bytes) and unmount acknowledgement (OUT) | `docs/podlink.md` |
 | `0x5d` | `0x4951` | PodLink Shell: wValue 1 reboot, 2 play test track, 3 seek, 4 stop, 5 open benchmark screen, 6 record line-in WAV, 7 record mic WAV, 8 stop recording; IN wValue 0 reads 16-byte status, IN wValue 1 reads 96-byte recording status | `firmware/export/sm1-test-control.h` |
 | `0x5d` | `0x4952` | Debug menu: IN reads item name by index (128 bytes), OUT opens that item on the player | same |
+| `0x5d` | `0x4953` | Settings: OUT queues a tree, get, set or action command. IN reads a 128-byte reply page. | Settings protocol below |
 
 PodLink Shell commands need PodLink active and storage not exclusive. One
 command at a time: the device stalls a second one until the first completes.
@@ -230,6 +231,30 @@ path to the last completed shell recording. Hardware revision 0 supports dock
 line-in. Revision 1 also supports a headphone-jack mic. See the shell guide
 for commands and state values.
 User guide: `docs/podbox/podlink-shell.md`.
+
+### Settings protocol
+
+Use vendor device OUT (`0x40`) to submit a command. Prefix its body with
+a nonzero little-endian 32-bit request cookie. The full payload fits in 704
+bytes. The UI thread handles each command through `SYS_SM1_TEST_CONTROL`.
+
+| OUT wValue | Body after cookie | Successful reply |
+|---|---|---|
+| 1 | Zero-based tree row ordinal (little-endian uint16) | Row object or `null` at the end |
+| 2 | UTF-8 cfg name | Setting row object |
+| 3 | UTF-8 `cfg-name: value` in config syntax | Updated setting row object |
+| 4 | Confirmation byte `1`, then UTF-8 action ID from the tree | `{"status":"opened"}` |
+
+Use vendor device IN (`0xc0`) with the zero-based page number in `wValue`.
+Each 128-byte response starts with the little-endian cookie (uint32) and
+total UTF-8 JSON length (uint16). The remaining 122 bytes carry that page's
+JSON slice, padded with zero bytes. Poll page zero until its cookie matches.
+Verify the cookie and total length on every subsequent page. A command
+error returns a JSON object with an `error` field.
+
+Every action requires host confirmation. The UI publishes the reply when
+it accepts the action and keeps the command slot busy until the action
+returns. Native confirmations still require input on the player.
 
 ## Desktop and plugins
 

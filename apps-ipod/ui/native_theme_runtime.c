@@ -94,7 +94,7 @@ static bool theme_has_fonts(const struct ui_theme *theme)
     return true;
 }
 
-static bool select_theme(const char *name)
+static bool select_theme(const char *name, bool fallback)
 {
     bool name_ok = valid_name(name, strlen(name));
     bool valid = false;
@@ -113,6 +113,9 @@ static bool select_theme(const char *name)
         if (!valid)
             replacement = core_free(replacement);
     }
+    if (!valid && !fallback)
+        return false;
+
     if (current_theme > 0)
         core_free(current_theme);
     current_theme = replacement > 0 ? replacement : 0;
@@ -133,7 +136,23 @@ static bool select_theme(const char *name)
 
 void ui_theme_apply_settings(void)
 {
-    select_theme(global_settings.native_theme);
+    select_theme(global_settings.native_theme, true);
+}
+
+bool ui_theme_set(const char *name, bool fallback)
+{
+    bool applied = select_theme(name, fallback);
+
+    if (applied || fallback)
+    {
+        snprintf(global_settings.native_theme,
+                 sizeof(global_settings.native_theme), "%s",
+                 applied ? name : "scrim");
+        settings_apply_display_colors();
+        viewportmanager_theme_changed(THEME_STATUSBAR | THEME_UI_VIEWPORT);
+        settings_save();
+    }
+    return applied;
 }
 
 void ui_theme_snapshot(struct ui_theme *out)
@@ -285,12 +304,7 @@ int ui_theme_choose(void)
     {
         const char *name = info.selection == 0 ? "scrim" : info.selection == 1 ?
                            "light" : files[info.selection - 2];
-        bool applied = select_theme(name);
-        snprintf(global_settings.native_theme, sizeof(global_settings.native_theme),
-                 "%s", applied ? name : "scrim");
-        settings_apply_display_colors();
-        viewportmanager_theme_changed(THEME_STATUSBAR | THEME_UI_VIEWPORT);
-        settings_save();
+        ui_theme_set(name, true);
     }
     if (files)
     {

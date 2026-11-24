@@ -108,6 +108,34 @@ static void load_rows(void)
     }
 }
 
+static void save_hidden(int hidden)
+{
+    global_settings.music_menu_hidden = hidden;
+    global_settings.music_menu_sig = browser_db_root_row_signature();
+    settings_save();
+}
+
+bool music_menu_set_hidden(unsigned mask)
+{
+    unsigned allowed = 0;
+    int count = browser_db_root_row_count();
+    if (count == 0)
+        return false;
+
+    for (int n = 0; n < count; n++)
+    {
+        int index;
+        if (browser_db_get_root_row(n, &index, NULL) &&
+            index >= 0 && index < MAX_ROWS)
+            allowed |= 1u << index;
+    }
+    if (mask & ~allowed)
+        return false;
+
+    save_hidden(mask);
+    return true;
+}
+
 static void save_rows(void)
 {
     int hidden = 0;
@@ -119,11 +147,7 @@ static void save_rows(void)
             hidden |= 1 << rows[i].index;
     }
 
-    /* Written together: the mask is meaningless without the signature that
-     * says which row set it describes. */
-    global_settings.music_menu_hidden = hidden;
-    global_settings.music_menu_sig = browser_db_root_row_signature();
-    settings_save();
+    save_hidden(hidden);
 }
 
 bool music_menu_hide_row(int index)
@@ -137,9 +161,7 @@ bool music_menu_hide_row(int index)
     if (global_settings.music_menu_sig == browser_db_root_row_signature())
         hidden = global_settings.music_menu_hidden;
 
-    global_settings.music_menu_hidden = hidden | (1 << index);
-    global_settings.music_menu_sig = browser_db_root_row_signature();
-    settings_save();
+    save_hidden(hidden | (1 << index));
     return true;
 }
 

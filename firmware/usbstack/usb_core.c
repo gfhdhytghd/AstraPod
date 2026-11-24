@@ -35,6 +35,7 @@
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
 #include "button.h"
 #include "sm1-test-control.h"
+#include "podlink-shell-settings.h"
 #include "podlink-plugin-test.h"
 #include "podlink.h"
 #endif
@@ -614,7 +615,11 @@ void usb_core_exit(void)
 }
 
 /* for sending/receiving control data */
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
+static uint8_t usb_control_data[SHELL_SETTINGS_OUT_SIZE] USB_DEVBSS_ATTR;
+#else
 static uint8_t usb_control_data[256] USB_DEVBSS_ATTR;
+#endif
 #ifdef HAVE_PODLINK_PLUGIN_TEST
 _Static_assert(sizeof(usb_control_data) >= PODLINK_TEST_CHUNK_SIZE,
                "EP0 buffer must fit a screenshot chunk");
@@ -637,6 +642,20 @@ void usb_core_handle_transfer_completion(
                                        event->length == event->req->wLength);
             podlink_plugin_test_request(event->req, usb_control_data,
                                         sizeof(usb_control_data), allowed);
+            return;
+        }
+#endif
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
+        if (event->req->bRequest == SM1_TEST_USB_REQUEST &&
+            event->req->wIndex == SHELL_SETTINGS_INDEX)
+        {
+            bool allowed = usb_state == CONFIGURED && usb_podlink_active() &&
+                !usb_exclusive_storage() && !bus_reset_pending &&
+                !control_cancelled && event->status == 0 &&
+                ((event->req->bRequestType & USB_DIR_IN) ||
+                 event->length == event->req->wLength);
+            shell_settings_request(event->req, usb_control_data,
+                                   sizeof(usb_control_data), allowed);
             return;
         }
 #endif
@@ -1685,8 +1704,13 @@ static void process_setup_request(struct usb_ctrlrequest* req) {
     }
 
     /* start control out data phase without usb thread interaction */
-    if(req->wLength > sizeof(usb_control_data)) {
-        logf("usb_core: control write too large %u > %u", req->wLength, sizeof(usb_control_data));
+    size_t capacity = 256;
+#if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
+    if (req->bRequest == SM1_TEST_USB_REQUEST && req->wIndex == SHELL_SETTINGS_INDEX)
+        capacity = sizeof(usb_control_data);
+#endif
+    if(req->wLength > capacity) {
+        logf("usb_core: control write too large %u > %u", req->wLength, capacity);
         usb_log(USB_LOG_RESPONSE, USB_LOG_RESP_TOO_LONG, req->bRequest,
                 req->wLength, 0);
         usb_drv_stall(EP_CONTROL, true, false);

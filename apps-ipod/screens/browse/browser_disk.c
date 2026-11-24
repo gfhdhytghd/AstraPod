@@ -527,18 +527,33 @@ int browser_disk_take_pending_top_item(void)
     return item;
 }
 
-static void browser_disk_load_font(char *file)
+bool browser_disk_select_font(const char *path)
 {
-    int current_font_id;
     enum screen_type screen = SCREEN_MAIN;
-    set_file(file, (char *)global_settings.font_file);
     ui_set_working(true);
-    current_font_id = screens[screen].getuifont();
+    int font = font_load_ex(path, 0, global_settings.glyphs_to_cache);
+    int current_font_id = screens[screen].getuifont();
+    if (font < 0)
+        return false;
     if (current_font_id >= 0)
         font_unload(current_font_id);
-    screens[screen].setuifont(
-        font_load_ex(file,0,global_settings.glyphs_to_cache));
+    screens[screen].setuifont(font);
+    set_file(path, (char *)global_settings.font_file);
     viewportmanager_theme_changed(THEME_UI_VIEWPORT);
+    return true;
+}
+
+bool browser_disk_select_language(const char *path)
+{
+    ui_set_working(true);
+    if (lang_core_load(path))
+        return false;
+
+    lang_override_load();
+    set_file(path, (char *)global_settings.lang_file);
+    talk_init();
+    viewportmanager_theme_changed(THEME_LANGUAGE);
+    return true;
 }
 
 /* Clear the “… loaded” splash before the new list redraws. */
@@ -710,23 +725,17 @@ int browser_disk_enter(struct browser_context* c)
                 break;
 
             case FILE_ATTR_LNG:
-                ui_set_working(true);
-                if (lang_core_load(buf))
+                if (!browser_disk_select_language(buf))
                 {
                     splash(HZ, ID2P(LANG_FAILED));
                     break;
                 }
-                /* The load put every phrase back to the file's own. */
-                lang_override_load();
-                set_file(buf, (char *)global_settings.lang_file);
-                talk_init(); /* use voice of same language */
-                viewportmanager_theme_changed(THEME_LANGUAGE);
                 splash(HZ, ID2P(LANG_LANGUAGE_LOADED));
                 browser_disk_repaint_after_splash();
                 break;
 
             case FILE_ATTR_FONT:
-                browser_disk_load_font(buf);
+                browser_disk_select_font(buf);
                 break;
 
             case FILE_ATTR_KBD:

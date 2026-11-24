@@ -95,7 +95,8 @@ MENUITEM_FUNCTION(tc_import, MENU_ADVANCED, ID2P(LANG_TAGCACHE_IMPORT),
                   browser_db_import,
                   NULL, Icon_NOICON);
 MENUITEM_FUNCTION(tc_paths, MENU_ADVANCED, ID2P(LANG_SELECT_DATABASE_DIRS),
-                  dirs_to_scan, NULL, Icon_NOICON);
+                  dirs_to_scan, NULL, Icon_NOICON,
+                  .settings = {.variable = &global_settings.tagcache_scan_paths});
 
 MAKE_MENU(tagcache_menu, ID2P(LANG_TAGCACHE), 0, Icon_NOICON,
                 &tagcache_scan_on_startup, &tagcache_scan_on_eject,
@@ -349,7 +350,8 @@ MENUITEM_FUNCTION_DYNTEXT_W_PARAM(hotkey_tree_item, 0,
                                   tree_context_menu_do_setting, (void*)0,
                                   tree_hotkey_get_name,
                                   tree_hotkey_speak_item,
-                                  (void*)0, NULL, Icon_NOICON);
+                                  (void*)0, NULL, Icon_NOICON,
+                  .settings = {.variable = &global_settings.hotkey_tree});
 static int clear_start_directory(void)
 {
     path_append(global_settings.start_directory, PATH_ROOTSTR,
@@ -359,7 +361,8 @@ static int clear_start_directory(void)
     return false;
 }
 MENUITEM_FUNCTION(clear_start_directory_item, 0, ID2P(LANG_RESET_START_DIR),
-                  clear_start_directory, NULL, Icon_file_view_menu);
+                  clear_start_directory, NULL, Icon_file_view_menu,
+                  .settings = {.variable = &global_settings.start_directory});
 
 static int dircache_callback(int action,
                              const struct menu_item_ex *this_item,
@@ -1011,13 +1014,15 @@ MENUITEM_FUNCTION_DYNTEXT_W_PARAM(wps_select_action, 0,
                                   wps_button_get_name,
                                   wps_button_speak_item,
                                   (void*)LANG_WPS_SELECT_ACTION, NULL,
-                                  Icon_NOICON);
+                                  Icon_NOICON,
+                  .settings = {.variable = &global_settings.wps_select_action});
 
 MENUITEM_FUNCTION_DYNTEXT_W_PARAM(hotkey_wps_item, 0,
                                   wps_context_menu_do_setting, (void*)0,
                                   wps_button_get_name,
                                   wps_button_speak_item,
-                                  (void*)LANG_HOTKEY_WPS, NULL, Icon_NOICON);
+                                  (void*)LANG_HOTKEY_WPS, NULL, Icon_NOICON,
+                  .settings = {.variable = &global_settings.context_wps});
 
 
 /* Which picture the screen shows, and where its album cover is looked for
@@ -1116,18 +1121,22 @@ static int album_sort_ctx_option(void *param)
 
 MENUITEM_FUNCTION_W_PARAM(album_sort_root, 0, ID2P(LANG_ALL_ALBUMS),
                           album_sort_ctx_option,
-                          (void*)(intptr_t)DB_ALBUM_CTX_ROOT, NULL, Icon_NOICON);
+                          (void*)(intptr_t)DB_ALBUM_CTX_ROOT, NULL, Icon_NOICON,
+                  .settings = {.variable = &global_settings.database_album_sort_ctx});
 MENUITEM_FUNCTION_W_PARAM(album_sort_artist, 0, ID2P(LANG_ID3_ARTIST),
                           album_sort_ctx_option,
-                          (void*)(intptr_t)DB_ALBUM_CTX_ARTIST, NULL, Icon_NOICON);
+                          (void*)(intptr_t)DB_ALBUM_CTX_ARTIST, NULL, Icon_NOICON,
+                  .settings = {.variable = &global_settings.database_album_sort_ctx});
 MENUITEM_FUNCTION_W_PARAM(album_sort_albumartist, 0, ID2P(LANG_ID3_ALBUMARTIST),
                           album_sort_ctx_option,
                           (void*)(intptr_t)DB_ALBUM_CTX_ALBUMARTIST, NULL,
-                          Icon_NOICON);
+                          Icon_NOICON,
+                  .settings = {.variable = &global_settings.database_album_sort_ctx});
 MENUITEM_FUNCTION_W_PARAM(album_sort_composer, 0, ID2P(LANG_ID3_COMPOSER),
                           album_sort_ctx_option,
                           (void*)(intptr_t)DB_ALBUM_CTX_COMPOSER, NULL,
-                          Icon_NOICON);
+                          Icon_NOICON,
+                  .settings = {.variable = &global_settings.database_album_sort_ctx});
 MENUITEM_SETTING(database_sort_albums_by,
                  &global_settings.database_sort_albums_by, NULL);
 MAKE_MENU(album_sort_menu, ID2P(LANG_SORT_ALBUMS_BY_SHORT), 0, Icon_NOICON,
@@ -1161,7 +1170,8 @@ MAKE_MENU(extra_rows_menu, ID2P(LANG_EXTRA_ROWS), 0, Icon_NOICON,
 
 MENUITEM_FUNCTION(music_menu_config_item, MENU_FUNC_CHECK_RETVAL,
                   ID2P(LANG_MUSIC_MENU_SETTINGS),
-                  music_menu_config, NULL, Icon_NOICON);
+                  music_menu_config, NULL, Icon_NOICON,
+                  .settings = {.variable = &global_settings.music_menu_hidden});
 MENUITEM_SETTING(featured_artists, &global_settings.featured_artists, NULL);
 MENUITEM_SETTING(segregate_audiobooks, &global_settings.segregate_audiobooks,
                  NULL);
@@ -1217,7 +1227,8 @@ MAKE_MENU(viewers_menu, ID2P(LANG_VIEWERS), 0, Icon_NOICON,
 static struct browse_folder_info langs = { LANG_DIR, SHOW_LNG };
 
 MENUITEM_FUNCTION_W_PARAM(browse_langs, 0, ID2P(LANG_LANGUAGE),
-                          browse_folder, (void*)&langs, NULL, Icon_Language);
+                          browse_folder, (void*)&langs, NULL, Icon_Language,
+                  .settings = {.variable = &global_settings.lang_file});
 
 /* Everything about what words the player uses and how it reads them: the
    language it speaks, the voice that speaks it, and the character set it

@@ -96,7 +96,8 @@ int browse_folder(void *param)
 }
 
 MENUITEM_FUNCTION_W_PARAM(browse_fonts, 0, ID2P(LANG_CUSTOM_FONT),
-                          browse_folder, (void*)&fonts, NULL, Icon_Font);
+                          browse_folder, (void*)&fonts, NULL, Icon_Font,
+                  .settings = {.variable = &global_settings.font_file});
 
 MENUITEM_SETTING(show_icons, &global_settings.show_icons, NULL);
 MENUITEM_SETTING(sep_menu, &global_settings.list_separator_height, NULL);
@@ -141,7 +142,9 @@ extern const struct menu_item_ex music_menu_config_item;  /* general_settings.c 
 #define CONTEXT_MENU_ITEM(name, label, kind)                                \
     MENUITEM_FUNCTION_W_PARAM(name, MENU_FUNC_CHECK_RETVAL, ID2P(label),    \
                               context_menu_config, (void *)(kind),          \
-                              NULL, Icon_NOICON)
+                              NULL, Icon_NOICON,                            \
+                              .settings = {                                \
+                                  .variable = &global_settings.context_hidden[kind]})
 CONTEXT_MENU_ITEM(ctxmenu_now_playing_item, LANG_NOW_PLAYING_MENU,
                   CONTEXT_KIND_NOW_PLAYING)
 CONTEXT_MENU_ITEM(ctxmenu_track_item,  LANG_TRACK_MENU,  CONTEXT_KIND_TRACK)
@@ -171,7 +174,8 @@ MAKE_MENU(menus_menu, ID2P(LANG_MENUS), NULL, Icon_NOICON,
 MENUITEM_SETTING(animations, &global_settings.animations, NULL);
 MENUITEM_SETTING(status_cover_tint, &global_settings.status_cover_tint, NULL);
 MENUITEM_FUNCTION(native_theme_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_NATIVE_THEME),
-                  ui_theme_choose, NULL, Icon_Config);
+                  ui_theme_choose, NULL, Icon_Config,
+                  .settings = {.variable = &global_settings.native_theme});
 
 MAKE_MENU(theme_menu, ID2P(LANG_THEME_SETTINGS_MENU), NULL, Icon_Display_menu,
             &native_theme_item, &status_cover_tint);

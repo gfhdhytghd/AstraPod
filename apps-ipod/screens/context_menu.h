@@ -130,6 +130,9 @@ bool context_menu_row_hidden(int kind, int lang_id);
 int context_menu_kind_label(int kind);
 int context_menu_kind_rows(int kind, const short **rows);
 
+bool hotkey_setting_from_cfg(int *setting, char *value);
+bool context_hidden_setting_from_cfg(void *setting, char *value);
+
 /* config.cfg handlers for global_settings.context_hidden[] */
 void context_hidden_load_from_cfg(void *setting, char *value);
 char *context_hidden_write_to_cfg(void *setting, char *buf, int buf_len);

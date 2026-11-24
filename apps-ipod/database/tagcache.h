@@ -371,6 +371,7 @@ bool tagcache_ram_refused(void);
 /* True when it was refused because loading it failed, not for room */
 bool tagcache_ram_failed(void);
 void tagcache_commit_finalize(void);
+bool tagcache_scan_paths_valid(char *paths);
 void tagcache_init(void) INIT_ATTR;
 #ifdef DBTOOL
 /* tools/database_pb: one Update, or Rebuild, of the database under the

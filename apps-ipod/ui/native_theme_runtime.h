@@ -14,6 +14,7 @@ unsigned ui_theme_duration(unsigned frames);
 int ui_theme_font_load(const struct ui_theme *, enum ui_font_role, int glyphs);
 int ui_theme_current_font_load(enum ui_font_role role, int glyphs);
 void ui_theme_apply_settings(void);
+bool ui_theme_set(const char *name, bool fallback);
 int ui_theme_choose(void);
 
 #endif

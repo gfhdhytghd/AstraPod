@@ -1866,6 +1866,31 @@ static int menu_table_index_of_key(const char *key)
     return -1;
 }
 
+bool root_menu_validate_cfg(char *value)
+{
+    if (!strcmp(value, "-"))
+        return true;
+
+    unsigned count = 0;
+    while (*(value = skip_whitespace(value)))
+    {
+        char *end = value + strcspn(value, ", ");
+        char delimiter = *end;
+        *end = '\0';
+        int index = menu_table_index_of_key(value + (*value == '!'));
+        *end = delimiter;
+        if (index < 0 || ++count > MAX_MENU_ITEMS)
+            return false;
+        end = skip_whitespace(end);
+        if (!*end)
+            break;
+        if (*end != ',')
+            return false;
+        value = end + 1;
+    }
+    return count > 0;
+}
+
 void root_menu_load_from_cfg(void* setting, char *value)
 {
     char *next = value, *start, *end;

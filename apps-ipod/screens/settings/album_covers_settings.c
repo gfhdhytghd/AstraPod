@@ -148,7 +148,8 @@ MENUITEM_SETTING(album_covers_background,
                  &global_settings.album_covers_background, background_callback);
 MENUITEM_FUNCTION(album_covers_custom_color_item, MENU_FUNC_CHECK_RETVAL,
                   ID2P(LANG_CAROUSEL_CUSTOM_COLOR), pick_custom_colour,
-                  custom_colour_callback, Icon_NOICON);
+                  custom_colour_callback, Icon_NOICON,
+                  .settings = {.variable = &global_settings.album_covers_custom_color});
 MENUITEM_SETTING(album_covers_statusbar, &global_settings.album_covers_statusbar, NULL);
 
 /* Rebuilding and updating the cache are not here any more: they sit with every

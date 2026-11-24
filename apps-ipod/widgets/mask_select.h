@@ -26,5 +26,5 @@ struct s_mask_items {
     const int bit_value;
 };
 int mask_select(int mask, const unsigned char* headermsg,
-                             struct s_mask_items *mask_items, size_t items);
+                             const struct s_mask_items *mask_items, size_t items);
 #endif /* __MASK_SELECT_H__ */

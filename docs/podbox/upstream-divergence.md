@@ -88,6 +88,7 @@ The player as a disk, a keyboard, a sound card or an iAP accessory's host.
 | File | What changed | Why |
 |---|---|---|
 | `usbstack/usb_serial.c` | Default PodLink IN to two 16 KiB DMA buffers on boot and reconfiguration | Higher transfer rate with less CPU time per MiB. |
+| `usbstack/usb_core.c`, `SOURCES`, `usbstack/podlink_shell_settings.c` (new), `export/podlink-shell-settings.h` (new) | Route PodLink Shell settings requests to a dedicated EP0 handler. It queues UI work and serves paged replies. | The settings CLI shares the cable with the CDC client. |
 | `usbstack/usb_core.c`, `export/sm1-test-control.h` | Add PodLink Shell recording commands and a capture status reply | Start, stop and retrieve a WAV from the host over PodLink. |
 
 ### Host presence

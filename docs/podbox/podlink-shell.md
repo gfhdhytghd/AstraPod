@@ -23,6 +23,31 @@ python3 podlink_shell.py --serial USB_SERIAL open-bench
 `record-stop` 直接交给录音器。录音器关闭文件并更新录音状态后确认完成。
 其他命令的计数表示界面处理进度。PCM 等测试结果由相应诊断功能提供。
 
+## 设置
+
+保持 iPod classic 处于 PodLink USB 模式。HerdRemote 可以继续使用串口。
+
+```sh
+python3 podlink_shell.py --serial USB_SERIAL settings-tree
+python3 podlink_shell.py --serial USB_SERIAL --json settings-tree
+python3 podlink_shell.py --serial USB_SERIAL settings-get "settings mode"
+python3 podlink_shell.py --serial USB_SERIAL settings-set "settings mode" everything
+python3 podlink_shell.py --serial USB_SERIAL settings-action "Update Database" --yes
+```
+
+- `settings-tree` 列出菜单、子菜单、设置和动作。设置行包含配置名、当前值、类型和可用的取值限制。JSON 中的 `visible` 表示播放器当前是否显示该行。`available` 表示该行是否符合当前硬件与设置条件。
+- `settings-get CFG` 用配置名读取设置。菜单名称随播放器语言变化。配置名保持不变。
+- `settings-set CFG VALUE` 接受 `config.cfg` 中的值格式。用树中的配置名和取值限制填写参数。带空格的参数必须加引号。
+- 对于 `writable: false` 的设置，用 `settings-action` 打开原生编辑界面。
+- `settings-action PATH --yes` 接受完整菜单路径、唯一的动作名称或树中显示的动作 ID。路径的各段用 ` / ` 分隔。
+- `--json` 输出机器可读的结果。树的 JSON 是按菜单顺序排列的行数组。每行包含完整路径。
+
+用 `settings-set` 保存扫描目录后，若要立即重建数据库，请打开原生重建动作。
+录音触发阈值随峰值表刻度切换。MP3 比特率在录音格式设为 MP3 后出现。
+
+每个动作都必须加 `--yes`。播放器仍按原有流程显示界面和确认提示。
+如果播放器要求确认，请在机身选择。动作打开后，等待其结束或退出界面，再发送下一条命令。
+
 ## 插件测试与截图
 
 在启用 `--rock-compat` 的 iPod classic 固件上，Shell 可以启动内置安装清单中的插件。

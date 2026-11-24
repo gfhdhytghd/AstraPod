@@ -425,8 +425,10 @@ MENUITEM_FUNCTION(show_info_item, MENU_FUNC_CHECK_RETVAL,
                   show_info, NULL, Icon_NOICON);
 
 int time_screen(void* ignored);
+const struct menu_item_ex *time_settings_menu(void);
 MENUITEM_FUNCTION_W_PARAM(timedate_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_TIME_MENU),
-                          time_screen, NULL, NULL, Icon_NOICON);
+                          time_screen, NULL, NULL, Icon_NOICON,
+                  .settings = {.child_menu = time_settings_menu});
 
 MENUITEM_FUNCTION(show_about_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_ABOUT),
                   about_screen, NULL, Icon_NOICON);
@@ -483,7 +485,8 @@ MAKE_MENU(info_menu, ID2P(LANG_SYSTEM), 0, Icon_System_menu,
           &debug_menu_item);
 
 MENUITEM_FUNCTION(main_menu_config_item, 0, ID2P(LANG_MAIN_MENU_SETTINGS),
-                  main_menu_config, NULL, Icon_NOICON);
+                  main_menu_config, NULL, Icon_NOICON,
+                  .settings = {.variable = &global_settings.root_menu_customized});
 
 /** Main menu **/
 

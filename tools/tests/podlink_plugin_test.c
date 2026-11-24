@@ -11,6 +11,7 @@
 #define HAVE_USB_PODLINK
 #define ASTRAPOD_ROCK_COMPAT
 #include "podlink-plugin-test.h"
+#include "podlink-shell-settings.h"
 #include "button_usb_remote.h"
 #include "button-target.h"
 #include "sm1-test-control.h"
@@ -67,6 +68,15 @@ static void usb_core_control_response(int code, const void *payload, size_t size
     assert(size == 0 || payload == usb_control_data);
     response = code;
     response_size = size;
+}
+void shell_settings_request(const struct usb_ctrlrequest *req,
+                            uint8_t *buffer, size_t capacity, bool allowed)
+{
+    (void)req;
+    (void)buffer;
+    (void)capacity;
+    (void)allowed;
+    assert(0);
 }
 static void usb_core_control_request_handler(struct usb_ctrlrequest *req,
                                             uint8_t *data, size_t size)

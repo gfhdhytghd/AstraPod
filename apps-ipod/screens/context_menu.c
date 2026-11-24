@@ -2711,7 +2711,7 @@ static int hotkey_album_covers(void)
     return ONPLAY_OK;
 }
 
-#define HOTKEY_FUNC(func, param) {{(void *)func}, param}
+#define HOTKEY_FUNC(func, arg) {.function = (void *)func, .param = arg}
 
 /* HOTKEY_CONTEXT_MENU: rather than run one action, offer all of the ones
    valid where we are. */
@@ -3051,6 +3051,31 @@ static const struct
 static bool cfg_name_is(const char *st, size_t len, const char *name)
 {
     return strlen(name) == len && strncasecmp(st, name, len) == 0;
+}
+
+bool hotkey_setting_from_cfg(int *setting, char *value)
+{
+    bool select = setting == &global_settings.wps_select_action;
+    int flag = setting == &global_settings.hotkey_tree ?
+               HOTKEY_FLAG_TREE : HOTKEY_FLAG_WPS;
+    char *comma = strchr(value, ',');
+    size_t length = comma ? (size_t)(comma - value) : strlen(value);
+
+    if (comma && *skip_whitespace(comma + 1))
+        return false;
+
+    for (size_t i = 0; i < ARRAYLEN(hotkey_items); i++)
+    {
+        const struct hotkey_assignment *item = &hotkey_items[i];
+        if ((item->flags & flag) == flag &&
+            (!select || item->action != HOTKEY_OFF) &&
+            cfg_name_is(value, length, lang_id_to_english(item->lang_id)))
+        {
+            *setting = HK_CTX_SET(0, item->action);
+            return true;
+        }
+    }
+    return false;
 }
 
 void wps_context_menu_load_from_cfg(void *setting, char *value)
@@ -3442,32 +3467,47 @@ static int setting_kind(void *setting)
     return (uint32_t *)setting - global_settings.context_hidden;
 }
 
-void context_hidden_load_from_cfg(void *setting, char *value)
+static bool context_hidden_parse(void *setting, char *value, bool strict)
 {
     int kind = setting_kind(setting);
     uint32_t mask = default_mask(kind);
-    char *save, *name = strtok_r(value, ",", &save);
+    char *save;
+    char *name = strtok_r(value, ",", &save);
 
     while (name)
     {
-        bool shown;
-
         name = skip_whitespace(name);
-        shown = (*name == '+');
-        if (shown)
-            name++;
-        for (int i = 0; i < kinds[kind].count; i++)
+        bool shown = *name == '+';
+        name += shown;
+        int row;
+        for (row = 0; row < kinds[kind].count; row++)
         {
-            if (strcasecmp(name, lang_id_to_english(kinds[kind].rows[i])))
-                continue;
-            if (shown)
-                mask &= ~(1u << i);
-            else
-                mask |= 1u << i;
+            if (!strcasecmp(name, lang_id_to_english(kinds[kind].rows[row])))
+                break;
         }
+        if (row == kinds[kind].count)
+        {
+            if (strict)
+                return false;
+        }
+        else if (shown)
+            mask &= ~(1u << row);
+        else
+            mask |= 1u << row;
         name = strtok_r(NULL, ",", &save);
     }
     *(uint32_t *)setting = mask;
+    return true;
+}
+
+void context_hidden_load_from_cfg(void *setting, char *value)
+{
+    context_hidden_parse(setting, value, false);
+}
+
+bool context_hidden_setting_from_cfg(void *setting, char *value)
+{
+    return context_hidden_parse(setting, value, true);
 }
 
 char *context_hidden_write_to_cfg(void *setting, char *buf, int buf_len)

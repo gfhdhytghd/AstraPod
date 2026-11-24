@@ -2308,5 +2308,8 @@ kernel/timeout.c
 
 #ifdef HAVE_USB_PODLINK
 usbstack/podlink_rust_platform.c
+#ifdef IPOD_6G
+usbstack/podlink_shell_settings.c
+#endif
 usbstack/remote_log.c
 #endif

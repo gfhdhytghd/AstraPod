@@ -2284,20 +2284,37 @@ static void tcs_get_basename(struct tagcache_search *tcs, bool is_basename)
 #define ALBUM_SORT_SHIFT(ctx)   ((ctx) * 2)
 #define ALBUM_SORT_HIGH(ctx)    (8 + (ctx))
 
-int browser_db_album_sort_get(int ctx)
+static int album_sort_slot(int packed, int ctx)
 {
-    int packed = global_settings.database_album_sort_ctx;
     int slot;
-
-    if (ctx < 0 || ctx >= DB_ALBUM_CTX_COUNT)
-        return -1;
 
     slot = ((packed >> ALBUM_SORT_SHIFT(ctx)) & 3)
          | (((packed >> ALBUM_SORT_HIGH(ctx)) & 1) << 2);
-    /* A hand-edited slot past the last order reads as unset */
-    if (slot == 0 || slot - 1 > DB_SORT_ALBUMS_ARTIST_YEAR_DESC)
-        return -1;
     return slot - 1;
+}
+
+bool browser_db_album_sort_set_cfg(unsigned packed)
+{
+    if (packed > 0xfff)
+        return false;
+    for (int ctx = 0; ctx < DB_ALBUM_CTX_COUNT; ctx++)
+    {
+        int order = album_sort_slot(packed, ctx);
+        if (order > DB_SORT_ALBUMS_ARTIST_YEAR_DESC ||
+            (browser_db_album_sort_artist_first_moot(ctx) &&
+             order >= DB_SORT_ALBUMS_ARTIST_NAME))
+            return false;
+    }
+    global_settings.database_album_sort_ctx = packed;
+    return true;
+}
+
+int browser_db_album_sort_get(int ctx)
+{
+    if (ctx < 0 || ctx >= DB_ALBUM_CTX_COUNT)
+        return -1;
+    int order = album_sort_slot(global_settings.database_album_sort_ctx, ctx);
+    return order > DB_SORT_ALBUMS_ARTIST_YEAR_DESC ? -1 : order;
 }
 
 void browser_db_album_sort_set(int ctx, int order)

@@ -64,32 +64,40 @@ static int filterfirstkeypress_callback(int action,
     return action;
 }
 
-static int selectivebacklight_set_mask(void* param)
+static const struct s_mask_items backlight_mask_items[] = {
+    {ID2P(LANG_ACTION_VOLUME), SEL_ACTION_VOL},
+    {ID2P(LANG_ACTION_PLAY), SEL_ACTION_PLAY},
+    {ID2P(LANG_ACTION_SEEK), SEL_ACTION_SEEK},
+    {ID2P(LANG_ACTION_SKIP), SEL_ACTION_SKIP},
+    {ID2P(LANG_ACTION_DISABLE_UNMAPPED), SEL_ACTION_NOUNMAPPED},
+    {ID2P(LANG_ACTION_DISABLE_EXT_POWER), SEL_ACTION_NOEXT},
+};
+
+bool backlight_set_selected_actions(unsigned mask)
 {
-    (void)param;
-     int mask = global_settings.bl_selective_actions_mask;
-            struct s_mask_items maskitems[]={
-                                       {ID2P(LANG_ACTION_VOLUME)   , SEL_ACTION_VOL},
-                                       {ID2P(LANG_ACTION_PLAY), SEL_ACTION_PLAY},
-                                       {ID2P(LANG_ACTION_SEEK), SEL_ACTION_SEEK},
-                                       {ID2P(LANG_ACTION_SKIP), SEL_ACTION_SKIP},
-                     {ID2P(LANG_ACTION_DISABLE_UNMAPPED), SEL_ACTION_NOUNMAPPED}
-                        ,{ID2P(LANG_ACTION_DISABLE_EXT_POWER), SEL_ACTION_NOEXT}
-                                            };
+    unsigned allowed = 0;
+    for (unsigned i = 0; i < ARRAYLEN(backlight_mask_items); i++)
+        allowed |= backlight_mask_items[i].bit_value;
+    if (mask & ~allowed)
+        return false;
 
-            mask = mask_select(mask, ID2P(LANG_BACKLIGHT_SELECTIVE)
-                                   , maskitems, ARRAYLEN(maskitems));
-
-            if (mask == SEL_ACTION_NONE ||  mask == SEL_ACTION_NOEXT)
-                global_settings.bl_selective_actions = false;
-            else if (global_settings.bl_selective_actions_mask != mask)
-                global_settings.bl_selective_actions = true;
-
-            global_settings.bl_selective_actions_mask = mask;
-
+    if (mask == SEL_ACTION_NONE || mask == SEL_ACTION_NOEXT)
+        global_settings.bl_selective_actions = false;
+    else if ((unsigned)global_settings.bl_selective_actions_mask != mask)
+        global_settings.bl_selective_actions = true;
+    global_settings.bl_selective_actions_mask = mask;
     return true;
 }
 
+static int selectivebacklight_set_mask(void* param)
+{
+    (void)param;
+    int mask = mask_select(global_settings.bl_selective_actions_mask,
+                           ID2P(LANG_BACKLIGHT_SELECTIVE),
+                           backlight_mask_items, ARRAYLEN(backlight_mask_items));
+    backlight_set_selected_actions(mask);
+    return true;
+}
 
 /** Backlight menu **/
 /* Rows named for the case each covers, under Backlight. The settings keep
@@ -122,7 +130,8 @@ MENUITEM_SETTING(bl_selective_actions,
 
 MENUITEM_FUNCTION(sel_backlight_mask, 0, ID2P(LANG_SETTINGS),
                   selectivebacklight_set_mask, selectivebacklight_callback,
-                  Icon_NOICON);
+                  Icon_NOICON, .settings = {
+                      .variable = &global_settings.bl_selective_actions_mask});
 
 MAKE_MENU(sel_backlight, ID2P(LANG_BACKLIGHT_EXEMPTIONS),
           NULL, Icon_NOICON, &bl_selective_actions, &sel_backlight_mask);
@@ -209,14 +218,8 @@ MENUITEM_SETTING(peak_meter_release,
  * Menu to select wether the scale of the meter
  * displays dBfs of linear values.
  */
-static int peak_meter_scale(void) {
-    bool retval = false;
-    bool use_dbfs = global_settings.peak_meter_dbfs;
-    retval = set_bool_options(str(LANG_PM_SCALE),
-        &use_dbfs,
-        STR(LANG_PM_DBFS), STR(LANG_PM_LINEAR),
-        NULL);
-
+void peak_meter_apply_scale(bool use_dbfs)
+{
     /* has the user really changed the scale? */
     if (use_dbfs != global_settings.peak_meter_dbfs) {
 
@@ -252,7 +255,15 @@ static int peak_meter_scale(void) {
         }
         settings_apply_pm_range();
     }
-    return retval;
+}
+
+static int peak_meter_scale(void)
+{
+    bool use_dbfs = global_settings.peak_meter_dbfs;
+    bool usb = set_bool_options(str(LANG_PM_SCALE), &use_dbfs,
+                               STR(LANG_PM_DBFS), STR(LANG_PM_LINEAR), NULL);
+    peak_meter_apply_scale(use_dbfs);
+    return usb;
 }
 
 /**
@@ -329,11 +340,14 @@ static int peak_meter_max(void) {
    has to be given here -- and until all six carry it the screen itself, which
    is meant to disappear in Standard, stays put. */
 MENUITEM_FUNCTION(peak_meter_scale_item, MENU_ADVANCED, ID2P(LANG_PM_SCALE),
-                  peak_meter_scale, NULL, Icon_NOICON);
+                  peak_meter_scale, NULL, Icon_NOICON,
+                  .settings = {.variable = &global_settings.peak_meter_dbfs});
 MENUITEM_FUNCTION(peak_meter_min_item, MENU_ADVANCED, ID2P(LANG_PM_MIN),
-                  peak_meter_min, NULL, Icon_NOICON);
+                  peak_meter_min, NULL, Icon_NOICON,
+                  .settings = {.variable = &global_settings.peak_meter_min});
 MENUITEM_FUNCTION(peak_meter_max_item, MENU_ADVANCED, ID2P(LANG_PM_MAX),
-                  peak_meter_max, NULL, Icon_NOICON);
+                  peak_meter_max, NULL, Icon_NOICON,
+                  .settings = {.variable = &global_settings.peak_meter_max});
 MAKE_MENU(peak_meter_menu, ID2P(LANG_PM_MENU), NULL, Icon_NOICON,
           &peak_meter_release, &peak_meter_hold,
           &peak_meter_clip_hold,

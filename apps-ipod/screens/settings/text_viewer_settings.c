@@ -59,11 +59,13 @@ static int set_custom_colour(void *which)
 MENUITEM_FUNCTION_W_PARAM(text_viewer_text_colour, MENU_FUNC_CHECK_RETVAL,
                           ID2P(LANG_TEXT_VIEWER_TEXT_COLOUR),
                           set_custom_colour, (void *)1,
-                          custom_colour_callback, Icon_NOICON);
+                          custom_colour_callback, Icon_NOICON,
+                  .settings = {.variable = &global_settings.text_viewer_fg});
 MENUITEM_FUNCTION_W_PARAM(text_viewer_page_colour, MENU_FUNC_CHECK_RETVAL,
                           ID2P(LANG_TEXT_VIEWER_PAGE_COLOUR),
                           set_custom_colour, NULL,
-                          custom_colour_callback, Icon_NOICON);
+                          custom_colour_callback, Icon_NOICON,
+                  .settings = {.variable = &global_settings.text_viewer_bg});
 
 MENUITEM_SETTING(text_viewer_brightness,
                  &global_settings.text_viewer_brightness, NULL);
@@ -117,7 +119,8 @@ static int text_viewer_font_pick(void)
     return 0;
 }
 MENUITEM_FUNCTION(text_viewer_font_item, 0, ID2P(LANG_CUSTOM_FONT),
-                  text_viewer_font_pick, NULL, Icon_Font);
+                  text_viewer_font_pick, NULL, Icon_Font,
+                  .settings = {.variable = &global_settings.text_viewer_font_file});
 
 /* The installed size of the reader's font family next to its own, going
  * 'step' (+1 larger, -1 smaller): fonts are named "NN-family". Its name in

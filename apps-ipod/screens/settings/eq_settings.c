@@ -438,8 +438,28 @@ void eq_reset_defaults(void)
     eq_apply();
 }
 
+/* One cfg record stores the editable fields of each band. */
+static const struct menu_item_ex *eq_filter_menu(void)
+{
+    static struct menu_item_ex rows[EQ_NUM_BANDS];
+    static const struct menu_item_ex *children[EQ_NUM_BANDS];
+    static const struct menu_item_ex menu = {
+        MT_MENU | MENU_ITEM_COUNT(EQ_NUM_BANDS), {.submenus = children},
+        {.menu_callback = NULL},
+    };
+
+    for (unsigned i = 0; i < EQ_NUM_BANDS; i++)
+    {
+        rows[i].flags = MT_SETTING;
+        rows[i].variable = &global_settings.eq_band_settings[i];
+        children[i] = &rows[i];
+    }
+    return &menu;
+}
+
 MENUITEM_FUNCTION(eq_edit, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_EQUALIZER_EDIT),
-                  eq_editor_screen, lowlatency_callback, Icon_EQ);
+                  eq_editor_screen, lowlatency_callback, Icon_EQ,
+                  .settings = {.child_menu = eq_filter_menu});
 MENUITEM_FUNCTION(eq_presets, MENU_FUNC_CHECK_RETVAL,
                   ID2P(LANG_EQUALIZER_PRESETS),
                   eq_presets_screen, lowlatency_callback, Icon_NOICON);

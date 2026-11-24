@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "sm1-test-control.h"
+#include "podlink-shell-settings.h"
 #include "usb_ch9.h"
 
 #define IPOD_6G
@@ -119,6 +120,8 @@ static long default_event_handler(long event);
 
 const char *sm1_test_debug_name(unsigned index) { (void)index; return NULL; }
 void sm1_test_debug_run(unsigned index) { (void)index; assert(0); }
+unsigned shell_settings_operation(void) { assert(0); return 0; }
+long shell_settings_dispatch(void) { assert(0); return 0; }
 static bool button_queue_try_post(long event, int data)
 {
     assert(event == SYS_SM1_TEST_CONTROL);

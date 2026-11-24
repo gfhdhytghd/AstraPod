@@ -261,7 +261,7 @@ static enum themable_icons item_get_icon(int selected_item, void * data)
     new mask returned otherwise, original is returned
 */
 int mask_select(int mask, const unsigned char* headermsg,
-                             struct s_mask_items *mask_items, size_t items)
+                             const struct s_mask_items *mask_items, size_t items)
 {
     struct simplelist_info info;
 

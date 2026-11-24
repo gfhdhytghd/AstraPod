@@ -431,6 +431,13 @@ metadata/album_blur.c
 settings/settings.c
 settings/settings_list.c
 settings/settings_tags.c
+#ifdef IPOD_6G
+settings/shell_menu.c
+settings/shell_value.c
+#ifdef HAVE_USB_PODLINK
+settings/shell_dispatch.c
+#endif
+#endif
 
 input/action.c
 input/core_keymap.c

@@ -374,6 +374,8 @@ void sound_settings_apply(void);
 void settings_apply(bool read_disk);
 void settings_apply_display_colors(void);
 void settings_apply_pm_range(void);
+void peak_meter_apply_scale(bool use_dbfs);
+bool backlight_set_selected_actions(unsigned mask);
 #ifdef HAVE_COMPOSITE_VIDEO_OUT
 void settings_apply_tv_out(void);
 void tv_out_size_set(int size);

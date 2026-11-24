@@ -111,6 +111,13 @@ static void get_menu_callback(const struct menu_item_ex *m,
         *menu_callback = &empty_menu_callback;
 }
 
+int menu_item_event(int action, const struct menu_item_ex *item)
+{
+    menu_callback_type callback;
+    get_menu_callback(item, &callback);
+    return callback(action, item, NULL);
+}
+
 static bool query_audio_status(int *old_audio_status)
 {
     bool redraw_list = false;
@@ -397,6 +404,12 @@ static bool item_hidden(const struct menu_item_ex *item, int depth)
     return false;
 }
 
+bool menu_item_in_settings_mode(const struct menu_item_ex *item)
+{
+    return global_settings.settings_mode != SETTINGS_MODE_STANDARD ||
+           !item_hidden(item, 0);
+}
+
 /* Show the explanation for a setting, or say there is not one.
  *
  * Offered on every setting rather than only where a stanza exists, which would
@@ -506,8 +519,7 @@ static int init_menu_lists(const struct menu_item_ex *menu,
         {
             /* A string list indexes by position and holds no items, so there
                is nothing to hide there. */
-            if (global_settings.settings_mode == SETTINGS_MODE_STANDARD
-                && item_hidden(menu->submenus[i], 0))
+            if (!menu_item_in_settings_mode(menu->submenus[i]))
                 continue;
             if (row_hiding && (menu->flags & MENU_EXITAFTERTHISMENU)
                 && row_hiding->hidden(menu->submenus[i]))
@@ -1233,6 +1245,8 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         }
         else
         {
+            int previous = get_menu_selection(gui_synclist_get_sel_pos(&lists),
+                                              menu);
             if (action == SYS_USB_CONNECTED)
                 gui_synclist_scroll_stop(&lists);
 
@@ -1241,6 +1255,13 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                 case SYS_USB_CONNECTED:
                     ret = MENU_ATTACHED_USB;
                     done = true;
+                    break;
+                case BUTTON_REDRAW:
+                    /* A Shell action can open a nested menu. Restore the
+                     * caller's row map and apply any new setting filters. */
+                    init_menu_lists(menu, &lists, previous, false, vps,
+                                    buf, sizeof buf);
+                    redraw_lists = true;
                     break;
                 case SYS_CALL_HUNG_UP:
                 case BUTTON_MULTIMEDIA_PLAYPAUSE:

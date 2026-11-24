@@ -60,6 +60,7 @@ enum db_album_sort_ctx {
  * database_sort_albums_by". Pass -1 to browser_db_album_sort_set() to put it
  * back. Neither call saves; the caller does. */
 int browser_db_album_sort_get(int ctx);
+bool browser_db_album_sort_set_cfg(unsigned packed);
 void browser_db_album_sort_set(int ctx, int order);
 /* Whether that context reads the artist-first orders as the plain ones. */
 bool browser_db_album_sort_artist_first_moot(int ctx);

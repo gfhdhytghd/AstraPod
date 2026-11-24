@@ -110,7 +110,8 @@ static int recsource_func(void)
     return usb;
 }
 MENUITEM_FUNCTION(recsource, 0, ID2P(LANG_RECORDING_SOURCE),
-                  recsource_func, recmenu_callback, Icon_Menu_setting);
+                  recsource_func, recmenu_callback, Icon_Menu_setting,
+                  .settings = {.variable = &global_settings.rec_source});
 
 /* Makes an options list from a source list of options and indexes */
 static void make_options_from_indexes(const struct opt_items *src_names,
@@ -205,7 +206,8 @@ static int recfrequency_func(void)
     return ret;
 } /* recfrequency */
 MENUITEM_FUNCTION(recfrequency, 0, ID2P(LANG_REC_FREQUENCY),
-                  recfrequency_func, NULL, Icon_Menu_setting);
+                  recfrequency_func, NULL, Icon_Menu_setting,
+                  .settings = {.variable = &global_settings.rec_frequency});
 
 
 static int recchannels_func(void)
@@ -248,7 +250,8 @@ static int recchannels_func(void)
     return ret;
 }
 MENUITEM_FUNCTION(recchannels, 0, ID2P(LANG_REC_CHANNELS),
-                  recchannels_func, recmenu_callback, Icon_Menu_setting);
+                  recchannels_func, recmenu_callback, Icon_Menu_setting,
+                  .settings = {.variable = &global_settings.rec_channels});
 
 static int recmonomode_func(void)
 {
@@ -270,7 +273,8 @@ static int recmonomode_func(void)
     return ret;
 }
 MENUITEM_FUNCTION(recmonomode, 0, ID2P(LANG_RECORDING_MONO_MODE),
-                  recmonomode_func, recmenu_callback, Icon_Menu_setting);
+                  recmonomode_func, recmenu_callback, Icon_Menu_setting,
+                  .settings = {.variable = &global_settings.rec_mono_mode});
 
 static int recformat_func(void)
 {
@@ -296,10 +300,12 @@ static int recformat_func(void)
     return res;
 } /* recformat */
 MENUITEM_FUNCTION(recformat, 0, ID2P(LANG_REC_FORMAT),
-                  recformat_func, NULL, Icon_Menu_setting);
+                  recformat_func, NULL, Icon_Menu_setting,
+                  .settings = {.variable = &global_settings.rec_format});
 
 MENUITEM_FUNCTION(enc_global_config_menu_item, 0, ID2P(LANG_ENCODER_SETTINGS),
-                  enc_global_config_menu, NULL, Icon_Submenu);
+                  enc_global_config_menu, NULL, Icon_Submenu,
+                  .settings = {.child_menu = enc_global_settings_menu});
 
 static int recmenu_callback(int action,
                              const struct menu_item_ex *this_item,
@@ -349,7 +355,8 @@ static int choose_rec_directory(void)
     return 0;
 }
 MENUITEM_FUNCTION(rec_directory, 0, ID2P(LANG_REC_FOLDER),
-                  choose_rec_directory, NULL, Icon_Folder);
+                  choose_rec_directory, NULL, Icon_Folder,
+                  .settings = {.variable = &global_settings.rec_directory});
 
 static int clear_rec_directory(void)
 {
@@ -421,7 +428,8 @@ static int agc_cliptime_func(void)
 MENUITEM_FUNCTION(agc_preset, 0, ID2P(LANG_RECORDING_AGC_PRESET),
                   agc_preset_func, NULL, Icon_Menu_setting);
 MENUITEM_FUNCTION(agc_cliptime, 0, ID2P(LANG_RECORDING_AGC_CLIPTIME),
-                  agc_cliptime_func, NULL, Icon_Menu_setting);
+                  agc_cliptime_func, NULL, Icon_Menu_setting,
+                  .settings = {.variable = &global_settings.rec_agc_cliptime});
 #endif /* HAVE_AGC */
 
 /** Rec trigger **/
@@ -486,6 +494,35 @@ static void trigger_speak_item(const struct settings_list **settings,
         option_talk_value(s, temp, title);
     }
 }
+/* The trigger screen and shell use the same ordered set of controls. */
+MENUITEM_SETTING(trigger_mode, &global_settings.rec_trigger_mode, NULL);
+MENUITEM_SETTING(trigger_type, &global_settings.rec_trigger_type, NULL);
+MENUITEM_SETTING(trigger_start_db, &global_settings.rec_start_thres_db, NULL);
+MENUITEM_SETTING(trigger_stop_db, &global_settings.rec_stop_thres_db, NULL);
+MENUITEM_SETTING(trigger_start_linear,
+                 &global_settings.rec_start_thres_linear, NULL);
+MENUITEM_SETTING(trigger_stop_linear,
+                 &global_settings.rec_stop_thres_linear, NULL);
+MENUITEM_SETTING(trigger_start_duration,
+                 &global_settings.rec_start_duration, NULL);
+MENUITEM_SETTING(trigger_stop_postrec, &global_settings.rec_stop_postrec, NULL);
+MENUITEM_SETTING(trigger_stop_gap, &global_settings.rec_stop_gap, NULL);
+
+#define TRIGGER_ROWS(start, stop)                                           \
+    &trigger_mode, &trigger_type, &rec_prerecord_time, &start,                \
+    &trigger_start_duration, &stop, &trigger_stop_postrec, &trigger_stop_gap
+
+MAKE_MENU(trigger_db, ID2P(LANG_RECORD_TRIGGER), NULL, Icon_NOICON,
+          TRIGGER_ROWS(trigger_start_db, trigger_stop_db));
+MAKE_MENU(trigger_linear, ID2P(LANG_RECORD_TRIGGER), NULL, Icon_NOICON,
+          TRIGGER_ROWS(trigger_start_linear, trigger_stop_linear));
+#undef TRIGGER_ROWS
+
+static const struct menu_item_ex *recording_trigger_menu(void)
+{
+    return global_settings.peak_meter_dbfs ? &trigger_db : &trigger_linear;
+}
+
 int rectrigger(void)
 {
     struct viewport vp[NB_SCREENS], triggervp[NB_SCREENS];
@@ -531,32 +568,9 @@ int rectrigger(void)
     }
     /* TODO: what to do if there is < 4 lines on the screen? */
 
-    settings[TRIGGER_MODE] =
-            find_setting(&global_settings.rec_trigger_mode);
-    settings[TRIGGER_TYPE] =
-            find_setting(&global_settings.rec_trigger_type);
-    settings[PRERECORD_TIME] =
-            find_setting(&global_settings.rec_prerecord_time);
-    settings[START_DURATION] =
-            find_setting(&global_settings.rec_start_duration);
-    settings[STOP_POSTREC] =
-            find_setting(&global_settings.rec_stop_postrec);
-    settings[STOP_GAP] =
-            find_setting(&global_settings.rec_stop_gap);
-    if (global_settings.peak_meter_dbfs) /* show the dB settings */
-    {
-        settings[START_THRESHOLD] =
-                find_setting(&global_settings.rec_start_thres_db);
-        settings[STOP_THRESHOLD] =
-                find_setting(&global_settings.rec_stop_thres_db);
-    }
-    else
-    {
-        settings[START_THRESHOLD] =
-                find_setting(&global_settings.rec_start_thres_linear);
-        settings[STOP_THRESHOLD] =
-                find_setting(&global_settings.rec_stop_thres_linear);
-    }
+    const struct menu_item_ex *menu = recording_trigger_menu();
+    for (int i = 0; i < TRIG_OPTION_COUNT; i++)
+        settings[i] = find_setting(menu->submenus[i]->variable);
     gui_synclist_init(&lists, trigger_get_name, settings, false, 2, vp);
     gui_synclist_set_nb_items(&lists, TRIG_OPTION_COUNT*2);
     gui_synclist_set_icon_callback(&lists, global_settings.show_icons?trigger_get_icon:NULL);
@@ -649,7 +663,8 @@ int rectrigger(void)
     return result;
 }
 MENUITEM_FUNCTION(rectrigger_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_RECORD_TRIGGER),
-                  rectrigger, NULL, Icon_Menu_setting);
+                  rectrigger, NULL, Icon_Menu_setting,
+                  .settings = {.child_menu = recording_trigger_menu});
 
 static struct browse_folder_info rec_config_browse = {RECPRESETS_DIR, SHOW_CFG};
 MENUITEM_FUNCTION_W_PARAM(browse_recconfigs, 0, ID2P(LANG_REC_PRESET_LOAD),

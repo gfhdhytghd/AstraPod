@@ -170,6 +170,11 @@ MAKE_MENU(time_menu, ID2P(LANG_TIME_MENU), time_menu_callback, Icon_NOICON,
 #endif
           &timeformat);
 
+const struct menu_item_ex *time_settings_menu(void)
+{
+    return &time_menu;
+}
+
 int time_screen(void* ignored)
 {
     (void)ignored;

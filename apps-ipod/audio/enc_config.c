@@ -123,6 +123,22 @@ static void mp3_enc_convert_config(struct encoder_config *cfg,
     }
 } /* mp3_enc_convert_config */
 
+unsigned long enc_mp3_bitrate_caps(void)
+{
+    return 0
+#ifdef HAVE_MPEG1_SAMPR
+            | MPEG1_BITR_CAPS
+#endif
+#ifdef HAVE_MPEG2_SAMPR
+#ifdef HAVE_MPEG1_SAMPR
+            | (MPEG2_BITR_CAPS & ~(MP3_BITR_CAP_144 | MP3_BITR_CAP_8))
+#else
+            | (MPEG2_BITR_CAPS & ~(MP3_BITR_CAP_8))
+#endif
+#endif /* HAVE_MPEG2_SAMPR */
+    ;
+}
+
 /* mp3_enc: show the bitrate setting options */
 static bool mp3_enc_bitrate(struct menucallback_data *data)
 {
@@ -170,18 +186,7 @@ static bool mp3_enc_bitrate(struct menucallback_data *data)
        storing and maintaining yet another list of numbers */
     int n_rates = make_list_from_caps32(
             MPEG1_BITR_CAPS | MPEG2_BITR_CAPS, mp3_enc_bitr,
-            0
-#ifdef HAVE_MPEG1_SAMPR
-            | MPEG1_BITR_CAPS
-#endif
-#ifdef HAVE_MPEG2_SAMPR
-#ifdef HAVE_MPEG1_SAMPR
-            | (MPEG2_BITR_CAPS & ~(MP3_BITR_CAP_144 | MP3_BITR_CAP_8))
-#else
-            | (MPEG2_BITR_CAPS & ~(MP3_BITR_CAP_8))
-#endif
-#endif /* HAVE_MPEG2_SAMPR */
-            , rate_list);
+            enc_mp3_bitrate_caps(), rate_list);
 
     int index = round_value_to_list32(cfg->mp3_enc.bitrate, rate_list,
                                       n_rates, false);
@@ -445,6 +450,15 @@ void enc_global_settings_apply(void)
     enc_rec_settings_changed(&cfg);
     encoder_config_to_global(&cfg);
 } /* enc_global_settings_apply */
+
+MENUITEM_SETTING(mp3_bitrate_setting, &global_settings.mp3_enc_config.bitrate, NULL);
+MAKE_MENU(mp3_shell_menu, ID2P(LANG_ENCODER_SETTINGS), NULL, Icon_NOICON,
+          &mp3_bitrate_setting);
+
+const struct menu_item_ex *enc_global_settings_menu(void)
+{
+    return global_settings.rec_format == REC_FORMAT_MPA_L3 ? &mp3_shell_menu : NULL;
+}
 
 /* Show an encoder's config menu based on the global_settings.
    Modified settings are placed in global_settings.enc_config. */

@@ -21,7 +21,10 @@
 #define POLL_YIELD_US     250u
 #define POLL_MAX_GAP_US   32u
 #define PHASE_GUARD_US    50
-#define LCD_IDLE_MASK    ((1u << 8) | (1u << 1))
+/* Bit 1 is set when the FIFO accepts data; bit 4 is set while it drains,
+ * the same pair lcd-s5l8702.c polls before a command. */
+#define LCD_READY_BIT    (1u << 1)
+#define LCD_BUSY_BIT     (1u << 4)
 #define LCD_IDLE_WAIT_US  5000u
 
 enum { GPIO_PORTS = 16, STATUS = GPIO_PORTS, INTCON, IRQ_RAW, SOURCE_COUNT };
@@ -87,7 +90,7 @@ bool lcd_te_set_bus_timing(unsigned int timing)
 
     /* DMA completion can precede the last bytes leaving the LCD FIFO. */
     uint32_t until = USEC_TIMER + LCD_IDLE_WAIT_US;
-    while ((LCD_STATUS & LCD_IDLE_MASK) != LCD_IDLE_MASK)
+    while ((LCD_STATUS & (LCD_READY_BIT | LCD_BUSY_BIT)) != LCD_READY_BIT)
     {
         if (!TIME_BEFORE(USEC_TIMER, until))
         {

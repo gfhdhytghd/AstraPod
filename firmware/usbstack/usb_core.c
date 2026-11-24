@@ -37,6 +37,7 @@
 #include "sm1-test-control.h"
 #include "podlink-shell-settings.h"
 #include "podlink-shell-playback.h"
+#include "podlink-shell-lcd.h"
 #include "podlink-plugin-test.h"
 #include "podlink.h"
 #endif
@@ -649,7 +650,8 @@ void usb_core_handle_transfer_completion(
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
         if (event->req->bRequest == SM1_TEST_USB_REQUEST &&
             (event->req->wIndex == SHELL_SETTINGS_INDEX ||
-             event->req->wIndex == SHELL_PLAYBACK_INDEX))
+             event->req->wIndex == SHELL_PLAYBACK_INDEX ||
+             event->req->wIndex == SHELL_LCD_INDEX))
         {
             bool allowed = usb_state == CONFIGURED && usb_podlink_active() &&
                 !usb_exclusive_storage() && !bus_reset_pending &&
@@ -659,9 +661,11 @@ void usb_core_handle_transfer_completion(
             if (event->req->wIndex == SHELL_SETTINGS_INDEX)
                 shell_settings_request(event->req, usb_control_data,
                                        sizeof(usb_control_data), allowed);
-            else
+            else if (event->req->wIndex == SHELL_PLAYBACK_INDEX)
                 shell_playback_request(event->req, usb_control_data,
                                        sizeof(usb_control_data), allowed);
+            else
+                shell_lcd_request(event->req, usb_control_data, allowed);
             return;
         }
 #endif

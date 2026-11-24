@@ -449,12 +449,22 @@ bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...))
         return false;
     }
 
+    /* Sampling reports a fresh probe without changing the active sync. */
+    struct te_pulse saved_pulse = pulse;
+    uint32_t saved_rise = last_rise;
+    long saved_rise_tick = last_rise_tick;
+    bool saved_have_rise = have_rise;
+    bool sync_on = lcd_te_enabled();
     lcd_te_probe();
+    struct te_pulse measured = pulse;
+    pulse = saved_pulse;
+    last_rise = saved_rise;
+    last_rise_tick = saved_rise_tick;
+    have_rise = saved_have_rise;
+
     uint32_t elapsed, max_gap = 0;
     unsigned int samples = sample_edges(&elapsed, &max_gap);
     struct dma_stats full = full_dma, band = band_dma, rect = rect_dma;
-    struct te_pulse measured = pulse;
-    bool sync_on = lcd_te_enabled();
     unsigned int lead = lead_slots, trail = trail_slots;
     unsigned int misses = timed_out, bypasses = no_window;
     uint32_t worst_wait = max_wait;

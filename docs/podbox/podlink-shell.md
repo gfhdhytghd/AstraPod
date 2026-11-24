@@ -64,6 +64,44 @@ python3 podlink_shell.py --serial USB_SERIAL log-fetch /.rockbox/crumbs-last.txt
 完成计数、操作号、命令错误号、播放标志、进度毫秒、时长毫秒、编码 ID、
 采样率、位深、播放错误号、编码标签、路径。整数均为小端。两个字符串以 NUL 结尾。
 
+## LCD 实验
+
+以下命令适用于 LCD type 1。命令不打开调试菜单。时序、TE 同步和
+Cover Flow 帧率设置只在本次开机期间有效。
+
+```sh
+python3 podlink_shell.py --serial USB_SERIAL lcd-timing
+python3 podlink_shell.py --serial USB_SERIAL lcd-timing 0x22
+python3 podlink_shell.py --serial USB_SERIAL lcd-te-sync get
+python3 podlink_shell.py --serial USB_SERIAL lcd-te-sync off
+python3 podlink_shell.py --serial USB_SERIAL coverflow-60hz on
+python3 podlink_shell.py --serial USB_SERIAL coverflow-60hz get
+python3 podlink_shell.py --serial USB_SERIAL lcd-diag
+python3 podlink_shell.py --serial USB_SERIAL log-fetch /.rockbox/lcd-te-diag.txt ./lcd-te-diag.txt
+python3 podlink_shell.py --serial USB_SERIAL ui-perf ./ui-perf.txt
+```
+
+- `lcd-timing` 读取 `LCD_PHTIME`。带参数时接受 `0x33`、`0x22`、`0x21`、
+  `0x12` 或 `0x11`。默认值为 `0x33`。成功切换时清空 DMA 样本。
+- `lcd-te-sync` 和 `coverflow-60hz` 都接受 `on`、`off` 和 `get`。
+  TE 同步默认在探测到有效信号后启用。无可用信号时，`lcd-te-sync on` 返回错误。
+  Cover Flow 60 Hz 默认关闭。
+- `lcd-diag` 等待 `/.rockbox/lcd-te-diag.txt` 写入成功。报告包含当前
+  `LCD_PHTIME` 和上次切换时序后的 DMA 次数与耗时。运行前保持 LCD 唤醒。
+  要收集新时序下的 DMA 样本，切换后让界面先绘制相应画面，再运行诊断。
+  `debug "LCD TE diagnostics"` 仍打开机身预览，命令计数在退出预览时更新。
+- `log-fetch` 下载本次诊断报告。`ui-perf OUTPUT` 下载已有的
+  `/.rockbox/ui-perf.txt`。要启用帧耗时采集，开机前放置
+  `/.rockbox/ui-perf.enable`。两种下载都使用 MS3。
+
+LCD 控制使用 EP0 请求 `0x5d`、索引 `0x4955`。OUT 值 1、2、3、4
+对应时序、TE 同步、Cover Flow 60 Hz 和诊断。负载为小端 `<IB>`，
+包含非零请求标识和一个参数字节。时序参数 0 表示读取。两个开关的参数
+0、1、2 分别表示关闭、启用、读取。诊断参数为 0。
+IN 值 0 返回小端 `<4I>`，依次为版本 1、完成请求标识、固件错误号和结果。
+错误号 0 表示成功。时序结果为当前值，开关结果为 0 或 1。
+诊断在关闭临时文件并替换报告后才发布成功结果。
+
 ## 设置
 
 保持 iPod classic 处于 PodLink USB 模式。HerdRemote 可以继续使用串口。

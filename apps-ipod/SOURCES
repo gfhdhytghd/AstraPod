@@ -484,6 +484,7 @@ audio/sound_feedback.c
 system/podlink_time.c
 #ifdef IPOD_6G
 system/podlink_shell_playback.c
+system/podlink_shell_lcd.c
 #endif
 #endif
 system/format_time.c

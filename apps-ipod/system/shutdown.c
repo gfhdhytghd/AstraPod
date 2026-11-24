@@ -330,6 +330,7 @@ static void bootfile_session_end(void)
 #include "sm1-test-control.h"
 #include "podlink-shell-settings.h"
 #include "podlink-shell-playback.h"
+#include "podlink-shell-lcd.h"
 #include "screens/system/podlink_screen.h"
 
 volatile unsigned sm1_test_submitted;
@@ -412,6 +413,11 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
             }
             if (command == SHELL_PLAYBACK_EVENT)
                 return shell_playback_dispatch();
+            if (command == SHELL_LCD_EVENT)
+            {
+                shell_lcd_dispatch();
+                break;
+            }
             if (command == SHELL_SETTINGS_EVENT)
             {
                 unsigned operation = shell_settings_operation();

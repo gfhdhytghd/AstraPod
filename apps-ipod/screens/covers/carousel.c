@@ -6312,9 +6312,9 @@ static int stage_caption(int left, int right, int *top, int end, int pixels,
     return rows;
 }
 
-/* Leave takes 250 ms from the backdated stock timer. On entry, keep the
- * parent visible through the centre cover's 250 ms delay. */
-#define FLOW_ENTER_FADE_US 500000u
+/* The menu cross-fade follows the wall stagger. Leave uses the remaining
+ * 250 ms of the backdated stock timer. */
+#define FLOW_MENU_FADE_US STOCK_MENU_TIME(500000u)
 #define FLOW_LEAVE_FADE_US 250000u
 
 static bool flow_present_fade(struct ui_scene *source, unsigned opacity)
@@ -7189,7 +7189,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 if (fade)
                 {
                     uint32_t age = (uint32_t)USEC_TIMER - fade_start;
-                    unsigned duration = leaving ? FLOW_LEAVE_FADE_US : FLOW_ENTER_FADE_US;
+                    unsigned duration = leaving ? FLOW_LEAVE_FADE_US : FLOW_MENU_FADE_US;
                     unsigned phase = MIN(age, duration) * 256 / duration;
                     unsigned alpha = leaving ? leave_from * (256 - phase) / 256 : phase;
                     if (flow_present_fade(fade, alpha))

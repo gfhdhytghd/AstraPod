@@ -1170,13 +1170,23 @@ records the evidence for each constant and the limits of the emulator replay.
 
 A new outer cover inherits its neighbour's start pose and timer, with x
 offset by 15 units outwards. The precise stock insertion trigger is
-inferred. On entry, side covers start 100 units outwards and wait 100 ms
-per slot. The centre starts at (−43, −10, 72.5), yaw −9°, after 250 ms.
-The centre start pose lacks frame confirmation. The inferred leave path
-uses a 500 ms quintic ease-in, backdated by 250 + 100 × abs(k) ms. Side
-covers move 100 units outwards and the centre moves to (170, −9, 40),
-yaw +90°. The stock emulator comparisons cover scrolling. AstraPod omits
-the mirrored reflection and keeps its themed caption and album panel.
+inferred. Side covers start 100 units outside their slots. On return from
+Now Playing the walls start 100 ms apart. The selected cover starts at
+(−43, −10, 72.5), yaw −9°, holds for 250 ms and then returns to the
+centre in 1000 ms. Firmware report §6 confirms this return pose.
+
+On menu entry, AstraPod places the selected album at the front of the
+right stack, starting at (155, −9, 40), yaw +90°. Its right neighbours
+start one slot farther out. All visible covers start off-screen. The
+menu uses 3/8 of the authored timings: walls start 37.5 ms apart and
+travel for 375 ms. At 150 ms the right stack starts a one-slot scroll
+that turns the selected album forward. It reaches the centre at 525 ms.
+This menu choreography is an AstraPod choice.
+
+The inferred menu leave path uses a 500 ms quintic ease-in, backdated
+by 250 + 100 × abs(k) ms. Side covers move 100 units outwards. The
+centre moves to (170, −9, 40), yaw +90°. AstraPod omits the mirrored
+reflection and keeps its themed caption and album panel.
 
 On the Classic, the button driver delivers groups of four positions as
 detents in bits 24–30 of the scroll event. The carousel applies the full
@@ -1195,8 +1205,16 @@ markers in the stock emulator frames. The replay uses the stock driver's
 input filter and a 34 ms delivery offset for those captures. That offset
 does not enter the player code.
 
-The 3D carousel uses the stock entry and inferred leave poses for the covers.
-The underlying page, caption and status area cross-fade over 500 ms on
-entry and 250 ms on return. The cover silhouettes stay opaque.
-This fade is an AstraPod presentation choice. The flipped track panel has
-its own transition.
+On menu entry the parent page, caption and status area cross-fade over
+187.5 ms. The reverse fade lasts 250 ms. Cover silhouettes stay opaque.
+
+Album and playback transitions use the same camera. The selected cover
+turns 180° to the panel in 500 ms and returns in 1000 ms. Its back face
+uses a snapshot of the themed panel. The live panel takes over at rest.
+Transitions from the panel or the cover to Now Playing use a 500 ms
+quadratic ease-out, then cut from the stock pose to the playback screen.
+These transitions and the return from Now Playing use no fade.
+
+Scrolling transfers the smallest contiguous row band that contains changed
+cover or background pixels. Caption transfers use the remaining bandwidth.
+Each scroll still submits one full-screen refresh when the motion settles.

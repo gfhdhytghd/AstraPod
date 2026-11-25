@@ -94,6 +94,8 @@ static inline void stock_init(struct stock_flow *f, int count, int selected,
 /* The selected album enters as wall 1 of the right stack. Albums to its
  * right start one wall farther out and shift into their final slots. */
 #define STOCK_MENU_TURN_US 400000u
+#define STOCK_MENU_AUTHORED_US (STOCK_SCROLL_US + STOCK_MENU_TURN_US)
+#define STOCK_MENU_TIME(us) ((us) * 3u / 8u)
 
 static inline void stock_enter(struct stock_flow *f, int count, int selected,
                                uint32_t now, bool from_playback)
@@ -129,6 +131,11 @@ static inline struct stock_visible stock_current(const struct stock_flow *f,
     struct stock_pose a = f->start[anchor], b = stock_slot_base(rel);
     int64_t from_slots = i - anchor, to_slots = rel;
     uint32_t elapsed = now - f->start_us;
+    /* The menu runs its authored poses on a clock compressed to 3/8 time.
+     * Clamp before rescaling so a late sample cannot wrap the clock. */
+    if (f->phase == STOCK_MENU_ENTER)
+        elapsed = elapsed < STOCK_MENU_TIME(STOCK_MENU_AUTHORED_US) ?
+                  elapsed * 8u / 3u : STOCK_MENU_AUTHORED_US;
     int32_t entry_offset = 0;
     if (f->phase == STOCK_MENU_ENTER && rel >= 0) {
         /* Translate the stack in wall order. Once the inner wall is visible,
@@ -249,7 +256,7 @@ static inline bool stock_animating(const struct stock_flow *f, uint32_t now)
     if (f->phase == STOCK_LEAVE)
         duration = 250000;
     else if (f->phase == STOCK_MENU_ENTER)
-        duration += STOCK_MENU_TURN_US;
+        duration = STOCK_MENU_TIME(STOCK_MENU_AUTHORED_US);
     else if (f->phase == STOCK_ENTER)
         duration += (f->selected >= 3 || f->count - f->selected > 3) ? 300000 : 250000;
     return now - f->start_us < duration;

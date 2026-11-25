@@ -1,10 +1,10 @@
 # Native PodBox theme format
 
-The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in AstraPod's fonts.
+The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in AstraPod's fonts. The built-in Plastic theme is Classic drawn with Apple's own bitmaps from that firmware.
 
 ## Installing and choosing a theme
 
-Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Appearance → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim`, `light` and `classic`. The default is `scrim`.
+Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Appearance → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim`, `light`, `classic` and `plastic`. The default is `scrim`.
 
 Place referenced font files in `.rockbox/fonts/`. Use PBF1 `.pbf` files for text and an RB12 `.fnt` file for icons. Firmware falls back to Scrim if a theme file is missing or malformed, or if it references an unsupported font. It records the failure in `.rockbox/native-theme.log`.
 
@@ -152,9 +152,10 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 | `page_motion` | `cascade`, `slide` | Pages slide side by side under a fixed status bar, at full brightness. |
 | `wps_layout` | `cover`, `classic` | Now Playing with a status bar, a tilted cover and its reflection on the left, the track text on the right, and the progress bar with both times at the bottom. Turning the wheel slides the volume bar in from the right in place of the progress bar. The layout is fixed; colours, fonts and gradients apply. |
 | `scrollbar` | `plain`, `classic` | A 4-pixel thumb with rounded ends and no track, drawn at the right edge. |
+| `art` | `none`, `plastic` | Apple's bitmaps from the stock firmware replace the drawn battery, play and pause icons, the selected row's chevron, and the Now Playing shuffle icon and speakers. The status, selection, `progress` and `progress_track` gradients become Apple's exact rows, whatever the theme sets for them. The bitmaps are sized for the Classic layout. |
 
-Classic sets the second keyword of every style. To start a custom theme from
-Classic, copy its values from the table below.
+Classic sets the second keyword of every style except `art`. To start a
+custom theme from Classic, copy its values from the table below.
 
 ### The Classic theme
 
@@ -192,6 +193,16 @@ motion_easing = quad
 
 Classic also changes the list and status paddings and the album-row size.
 A custom theme keeps Scrim's values for those unless it sets them.
+
+### The Plastic theme
+
+Plastic is Classic with these additions:
+
+```ini
+style.art = plastic
+metric.status_pad_right = 5
+metric.status_icon_gap = 6
+```
 
 ## Native rendering and animation
 

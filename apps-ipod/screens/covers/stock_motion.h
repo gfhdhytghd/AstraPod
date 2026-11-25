@@ -89,6 +89,16 @@ static inline void stock_init(struct stock_flow *f, int count, int selected,
     }
 }
 
+/* Only a return from playback has an on-screen cover to carry into the row.
+ * A menu entry starts the centre another 100 world units to the left. */
+static inline void stock_enter(struct stock_flow *f, int count, int selected,
+                               uint32_t now, bool from_playback)
+{
+    stock_init(f, count, selected, now, true);
+    if (count && !from_playback)
+        f->start[selected - f->first].x -= 100 * STOCK_ONE;
+}
+
 static inline int stock_scroll_progress(const struct stock_flow *f, uint32_t now)
 {
     return f->phase == STOCK_SCROLL ?
@@ -226,9 +236,11 @@ static inline int stock_sample(const struct stock_flow *f, uint32_t now,
     int n = 0;
     for (int a = stock_first(f, now, e); a < limit && n < STOCK_MAX_VISIBLE; ++a) {
         struct stock_visible v = stock_current(f, a, now, e);
-        if (v.pose.x >= STOCK_BAND * STOCK_ONE && f->phase != STOCK_LEAVE)
+        if (v.pose.x >= STOCK_BAND * STOCK_ONE && f->phase == STOCK_SCROLL)
             break;
-        if (v.pose.x <= -STOCK_BAND * STOCK_ONE || v.pose.x >= STOCK_BAND * STOCK_ONE)
+        /* Entry walls start at the viewport edge and slide into the band. */
+        if (f->phase != STOCK_ENTER &&
+            (v.pose.x <= -STOCK_BAND * STOCK_ONE || v.pose.x >= STOCK_BAND * STOCK_ONE))
             continue;
         int pos = n++;
         while (pos && stock_abs(v.pose.x) > stock_abs(out[pos - 1].pose.x)) {

@@ -6420,7 +6420,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 fade_start = USEC_TIMER;
                 fade = entry_source->backdrop_handle > 0 ? entry_source : NULL;
                 opacity = fade ? 0 : 256;
-                stock_init(&flow_row, number_of_slides, center_index, fade_start, true);
+                stock_enter(&flow_row, number_of_slides, center_index, fade_start, pf_wps_entry);
                 step = 1;
                 pf_state = pf_scrolling;
             }

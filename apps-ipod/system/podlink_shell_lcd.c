@@ -2,6 +2,8 @@
 #include <errno.h>
 #include <string.h>
 #include "button.h"
+#include "lcd.h"
+#include "lcd-experiment-s5l8702.h"
 #include "lcd-te-s5l8702.h"
 #include "podlink-shell-lcd.h"
 #include "screens/system/lcd_te_debug.h"
@@ -17,9 +19,14 @@ enum shell_lcd_op {
     SHELL_LCD_SYNC,
     SHELL_LCD_PACING,
     SHELL_LCD_DIAG,
-    /* 5 to 9 are the LCD throughput experiments' ops; keep them free. */
+    /* 5 to 7 and 9 are reserved for the other throughput experiments. */
+    SHELL_LCD_BENCH = 8,
     SHELL_LCD_PACE_STATUS = 10,
     SHELL_LCD_ASYNC,
+    SHELL_LCD_STOCK_REGS,
+    SHELL_LCD_TE_IRQ,
+    SHELL_LCD_PATTERN,
+    SHELL_LCD_TE_OFFSET,
 };
 
 /* The ui_pace_status field SHELL_LCD_PACE_STATUS returns. */
@@ -38,20 +45,52 @@ enum shell_lcd_pace_field {
 enum { LCD_OFF, LCD_ON, LCD_GET };
 
 static uint32_t cookie;
-static unsigned int operation, argument;
+static unsigned int operation;
+static int argument;
 static uint32_t reply[4] = {1};
+static unsigned int reply_operation;
+
+union lcd_details {
+    struct lcd_stock_readback stock;
+    struct {
+        uint32_t frames, dma_mean, elapsed_mean;
+    } bench;
+};
+
+static struct {
+    uint32_t cookie;
+    union lcd_details details;
+} detail_reply;
+
+static unsigned int detail_size(unsigned int op)
+{
+    if (op == SHELL_LCD_STOCK_REGS)
+        return sizeof(detail_reply.cookie) + sizeof(detail_reply.details.stock);
+    if (op == SHELL_LCD_BENCH)
+        return sizeof(detail_reply.cookie) + sizeof(detail_reply.details.bench);
+    return 0;
+}
 
 static bool submit(unsigned int op, const uint8_t *data)
 {
-    unsigned int arg = data[4];
+    int32_t arg = data[4];
+    if (op == SHELL_LCD_TE_OFFSET)
+        memcpy(&arg, data + sizeof(cookie), sizeof(arg));
     if (op < SHELL_LCD_TIMING ||
-        (op > SHELL_LCD_DIAG && op != SHELL_LCD_PACE_STATUS &&
-         op != SHELL_LCD_ASYNC) ||
+        (op > SHELL_LCD_DIAG && op < SHELL_LCD_PACE_STATUS &&
+         op != SHELL_LCD_BENCH) ||
+        op > SHELL_LCD_TE_OFFSET ||
         (op == SHELL_LCD_TIMING && arg && !lcd_te_debug_valid_timing(arg)) ||
         ((op == SHELL_LCD_SYNC || op == SHELL_LCD_PACING ||
           op == SHELL_LCD_ASYNC) &&
          arg > LCD_GET) ||
         (op == SHELL_LCD_DIAG && arg > 1) ||
+        (op == SHELL_LCD_BENCH && arg > 1) ||
+        (op == SHELL_LCD_STOCK_REGS && arg > LCD_STOCK_ALL) ||
+        (op == SHELL_LCD_TE_IRQ && arg > LCD_TE_IRQ_FALL) ||
+        (op == SHELL_LCD_PATTERN && arg) ||
+        (op == SHELL_LCD_TE_OFFSET &&
+         (arg < -LCD_TE_OFFSET_LIMIT_US || arg > LCD_TE_OFFSET_LIMIT_US)) ||
         (op == SHELL_LCD_PACE_STATUS && arg >= PACE_FIELDS) ||
         sm1_test_submitted != sm1_test_completed || sm1_test_record_active())
         return false;
@@ -81,7 +120,25 @@ void shell_lcd_request(const struct usb_ctrlrequest *req, uint8_t *buffer,
         usb_core_control_response(USB_CONTROL_ACK, buffer, sizeof(reply));
         return;
     }
-    if (allowed && req->bRequestType == 0x40 && req->wLength == 5 &&
+    if (allowed && req->bRequestType == 0xc0)
+    {
+        unsigned int length = detail_size(req->wValue);
+        if (length && req->wLength == length)
+        {
+            int flags = disable_irq_save();
+            bool ready = reply_operation == req->wValue && !reply[2];
+            if (ready)
+                memcpy(buffer, &detail_reply, length);
+            restore_irq(flags);
+            if (ready)
+            {
+                usb_core_control_response(USB_CONTROL_ACK, buffer, length);
+                return;
+            }
+        }
+    }
+    unsigned int command_size = req->wValue == SHELL_LCD_TE_OFFSET ? 8 : 5;
+    if (allowed && req->bRequestType == 0x40 && req->wLength == command_size &&
         submit(req->wValue, buffer))
     {
         usb_core_control_response(USB_CONTROL_ACK, NULL, 0);
@@ -114,7 +171,53 @@ static unsigned int pace_field(unsigned int field)
     return status.enabled | status.measured << 1 | status.phased << 2;
 }
 
-static int dispatch(unsigned int *value)
+static void draw_bars(uint16_t *pixels, int height, unsigned int frame)
+{
+    static const fb_data colors[] = {
+        LCD_WHITE, LCD_RGBPACK(255, 255, 0), LCD_RGBPACK(0, 255, 255),
+        LCD_RGBPACK(0, 255, 0), LCD_RGBPACK(255, 0, 255),
+        LCD_RGBPACK(255, 0, 0), LCD_RGBPACK(0, 0, 255), LCD_BLACK,
+    };
+    const unsigned int bar_width = LCD_WIDTH / ARRAYLEN(colors);
+    for (unsigned int x = 0; x < LCD_WIDTH; x++)
+        pixels[x] = colors[((x + 4 * frame) / bar_width) % ARRAYLEN(colors)];
+    for (int y = 1; y < height; y++)
+        memcpy(pixels + y * LCD_WIDTH, pixels, LCD_WIDTH * sizeof(*pixels));
+}
+
+static int run_lcd_test(bool pattern, union lcd_details *details)
+{
+    if (!lcd_te_acquire_bus())
+        return EBUSY;
+
+    int height = !pattern && argument == 1 ? 199 : LCD_HEIGHT;
+    int y = (LCD_HEIGHT - height) / 2;
+    unsigned int frames = pattern ? 64 : 8;
+    uint32_t dma = lcd_experiment_dma_total();
+    uint32_t start = USEC_TIMER;
+    for (unsigned int i = 0; i < frames; i++)
+        lcd_experiment_present(y, height, draw_bars, i);
+    uint32_t elapsed = USEC_TIMER - start;
+    dma = lcd_experiment_dma_total() - dma;
+    if (pattern)
+        sleep(HZ);
+    lcd_te_release_bus();
+
+    /* The bars use staging memory, so the UI framebuffer can redraw. */
+    lcd_update();
+    if (!dma)
+        return EIO;
+
+    if (!pattern)
+    {
+        details->bench.frames = frames;
+        details->bench.dma_mean = dma / frames;
+        details->bench.elapsed_mean = elapsed / frames;
+    }
+    return 0;
+}
+
+static int dispatch(unsigned int *value, union lcd_details *details)
 {
     if (!usb_podlink_active() || usb_exclusive_storage())
         return ENOTCONN;
@@ -154,6 +257,28 @@ static int dispatch(unsigned int *value)
             return 0;
         case SHELL_LCD_DIAG:
             return lcd_te_debug_save_report(argument);
+        case SHELL_LCD_STOCK_REGS:
+            if (!lcd_stock_set(argument, &details->stock))
+                return EBUSY;
+            *value = argument;
+            return 0;
+        case SHELL_LCD_TE_IRQ:
+            if (!lcd_te_set_irq_mode(argument))
+                return EBUSY;
+            *value = argument;
+            return 0;
+        case SHELL_LCD_TE_OFFSET:
+            if (!lcd_te_set_irq_offset(argument))
+                return EBUSY;
+            *value = (uint32_t)argument;
+            return 0;
+        case SHELL_LCD_BENCH:
+        case SHELL_LCD_PATTERN:
+        {
+            int error = run_lcd_test(operation == SHELL_LCD_PATTERN, details);
+            *value = details->bench.frames;
+            return error;
+        }
     }
     return EINVAL;
 }
@@ -161,12 +286,16 @@ static int dispatch(unsigned int *value)
 void shell_lcd_dispatch(void)
 {
     unsigned int value = 0;
-    int error = dispatch(&value);
+    union lcd_details details = {0};
+    int error = dispatch(&value, &details);
 
     int oldlevel = disable_irq_save();
     reply[1] = cookie;
     reply[2] = error;
     reply[3] = value;
+    reply_operation = operation;
+    detail_reply.cookie = cookie;
+    detail_reply.details = details;
     ++sm1_test_completed;
     restore_irq(oldlevel);
 }

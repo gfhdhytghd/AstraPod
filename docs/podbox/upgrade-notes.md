@@ -22,4 +22,4 @@
 - **Cover Flow's layout** is closer to the original iPod's: the side covers
   turn by the same angle with Parallel Slides on or off, three and the edge
   of a fourth show on each side, all at full brightness, and the caption is
-  smaller, bold on both lines and closer to the covers.
+  bold on both lines and closer to the covers.

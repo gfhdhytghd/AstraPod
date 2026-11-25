@@ -29,9 +29,8 @@ beyond it.
 
 It sweeps the settings that move the geometry (centre margin, slide tuck,
 parallel slides), the two things that resize the viewport (status bar height and
-caption band), the row anywhere within half a slide of rest with the turn level
-with it or up to two and a half slides ahead either way, and — the case that
-catches real bugs — covers of different shapes, since art keeps its aspect
+caption band), the row anywhere within half a slide of rest, and — the case
+that catches real bugs — covers of different shapes, since art keeps its aspect
 ratio and a tall or wide cover does not decode to the same size as a square one.
 
 Nothing here is built or shipped. It has no Rockbox headers and no dependencies.
@@ -53,8 +52,8 @@ does not, across the whole sweep.
 
 **Update this file's mirror when `carousel.c`'s geometry changes.** The banner
 in `pfgeom.c` marks the copied region: the fixed-point helpers, `fsin`,
-`recalc_offsets`, `flow_cx`, `flow_place`, `coverflow_place`, `slide_x_range`,
-`slide_dy_at`, `slide_covers`, `cull_side`, and the column walk and draw order
-out of `render_slide_clipped`/`coverflow_render`. A mirror that has drifted
+`recalc_offsets`, `flow_cx`, `flow_turn`, `flow_place`, `coverflow_place`,
+`slide_x_range`, `slide_dy_at`, `slide_covers`, `cull_side`, and the column
+walk and draw order out of `render_slide_clipped`/`coverflow_render`. A mirror that has drifted
 still passes — it is checking itself — so the answer it gives is only worth what
 the copy is.

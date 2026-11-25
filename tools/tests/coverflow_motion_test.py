@@ -2,8 +2,9 @@
 
 The 3D view's chase (flow_chase, flow_click, flow_update) is copied out of
 carousel.c and run against click sequences -- a single click, slow clicks, a
-fast burst, the stop after it, and a reversal -- checking the speed law, that
-nothing passes its target, and that the turn leads the row. Flat's timeline
+fast burst, the stop after it, and a reversal -- checking the speed law and
+that nothing passes its target. The slot shape (flow_turn, flow_place) is
+checked against the stock player's. Flat's timeline
 and the frame deadlines run through the same copies.
 
 Usage: python3 tools/tests/coverflow_motion_test.py <scratch dir>
@@ -102,14 +103,14 @@ static void draw_at(uint32_t clock, unsigned frame)
     update_scroll_animation();
 }
 
-/* One 3D frame, checked against the law. Each chase moves straight towards
- * the target by min(d, (FLOOR + gain * min(d, REACH)) * dt), so it can never
- * pass it, and an advance that matches the law to a unit is the law. */
-static void check_step(int from, int to, int now, int gain)
+/* One 3D frame, checked against the law. The row moves straight towards the
+ * target by min(d, (FLOOR + GAIN * min(d, REACH)) * dt), so it can never pass
+ * it, and an advance that matches the law to a unit is the law. */
+static void check_step(int from, int to, int now)
 {
     double d = dabs((double)to - from);
     double law = (FLOW_FLOOR / 1000.0 * ONE_SLIDE
-                  + gain / 1000.0 * dmin(d, FLOW_REACH)) * frame_s;
+                  + FLOW_GAIN / 1000.0 * dmin(d, FLOW_REACH)) * frame_s;
     double want = dmin(d, law);
     double got = dabs((double)now - from);
 
@@ -121,7 +122,7 @@ static int frames_run;
 
 static void frame(void)
 {
-    int p = slide_frame, q = pose_frame, to = target << 16;
+    int p = slide_frame, to = target << 16;
     bool moving = pf_state == pf_scrolling;
 
     clock_counter += ui_frame_clock(1);
@@ -130,8 +131,7 @@ static void frame(void)
     frames_run++;
     if (!moving)
         return;
-    check_step(p, to, slide_frame, FLOW_GAIN);
-    check_step(q, to, pose_frame, FLOW_POSE_GAIN);
+    check_step(p, to, slide_frame);
     assert(center_index == (slide_frame + 0x8000) >> 16);
 }
 
@@ -145,7 +145,7 @@ static void frames(unsigned n)
 static bool at_rest_on(int index)
 {
     return pf_state == pf_idle && step == 0 && center_index == index
-        && slide_frame == index << 16 && pose_frame == index << 16;
+        && slide_frame == index << 16;
 }
 
 static void check_single_click(uint32_t epoch)
@@ -153,32 +153,32 @@ static void check_single_click(uint32_t epoch)
     seed(epoch, 3);
     show_next_slide();
     assert(target == 4 && pf_state == pf_scrolling);
-    int t90 = -1, rest = -1, pose_rest = -1;
+    int t50 = -1, t90 = -1, rest = -1;
     for (int f = 1; f < 200 && rest < 0; f++) {
-        int p0 = slide_frame - (3 << 16), q0 = pose_frame - (3 << 16);
+        int p0 = slide_frame - (3 << 16);
         frame();
-        int p = slide_frame - (3 << 16), q = pose_frame - (3 << 16);
-        /* The turn leads the row at every frame of the step. */
-        assert(q >= p && q >= q0 && p >= p0);
+        int p = slide_frame - (3 << 16);
+        assert(p >= p0);
+        if (t50 < 0 && p >= ONE_SLIDE / 2)
+            t50 = f;
         if (t90 < 0 && p >= ONE_SLIDE * 9 / 10)
             t90 = f;
-        if (pose_rest < 0 && pose_frame == 4 << 16)
-            pose_rest = f;
         if (pf_state == pf_idle)
             rest = f;
     }
     assert(at_rest_on(4));
-    double t90_s = t90 * frame_s, rest_s = rest * frame_s;
-    printf("single click: 90%% at %.3f s, at rest at %.3f s, turned at %.3f s\n",
-           t90_s, rest_s, pose_rest * frame_s);
-    /* The stock player: 90 % at 0.35-0.38 s, at rest at 0.48-0.51 s. */
-    assert(t90_s >= 0.33 && t90_s <= 0.40);
-    assert(rest_s >= 0.46 && rest_s <= 0.53);
-    assert(pose_rest < rest);
+    double t50_s = t50 * frame_s, t90_s = t90 * frame_s, rest_s = rest * frame_s;
+    printf("single click: 50%% at %.3f s, 90%% at %.3f s, at rest at %.3f s\n",
+           t50_s, t90_s, rest_s);
+    /* The stock player's fit: 50 % at 114 ms, 90 % at 349 ms, at rest at
+     * 567 ms; the first frame in which the row is past is the one counted. */
+    assert(t50_s >= 0.10 && t50_s <= 0.14);
+    assert(t90_s >= 0.33 && t90_s <= 0.37);
+    assert(rest_s >= 0.54 && rest_s <= 0.60);
 }
 
-/* `count` clicks `interval_s` apart in `direction`, checking the turn leads
- * the row and the row only ever moves one way. Returns the largest lag. */
+/* `count` clicks `interval_s` apart in `direction`, checking the row only
+ * ever moves one way. Returns the largest lag. */
 static double clicks(int count, double interval_s, int direction)
 {
     double lag = 0, next = 0, t = 0;
@@ -197,7 +197,6 @@ static double clicks(int count, double interval_s, int direction)
         t += frame_s;
         int to = target << 16;
         assert(direction * (slide_frame - last) >= 0);
-        assert(abs(to - pose_frame) <= abs(to - slide_frame));
         last = slide_frame;
         lag = dmax(lag, dabs((double)(to - slide_frame)) / ONE_SLIDE);
     }
@@ -291,35 +290,69 @@ static void check_late_frames(uint32_t epoch)
     seed(epoch, 3);
     clicks(3, 0.03, 1);
     uint32_t from = clock_counter;
-    int saved_p = slide_frame, saved_q = pose_frame, saved_t = target;
+    int saved_p = slide_frame, saved_t = target;
     unsigned saved_sample = anim_sampled_frame;
     for (unsigned f = 1; f <= 9; f++)
         draw_at(from, f);
-    int p = slide_frame, q = pose_frame;
+    int p = slide_frame;
     slide_frame = saved_p;
-    pose_frame = saved_q;
     target = saved_t;
     anim_sampled_frame = saved_sample;
     pf_state = pf_scrolling;
     step = 1;
     draw_at(from, 9);
-    assert(slide_frame == p && pose_frame == q);
+    assert(slide_frame == p);
 }
 
-/* The geometry at the moment of a step: the turn is ahead of the row, so the
- * leaving cover is further round than it is across. */
-static void check_pose(uint32_t epoch)
+/* The slot shape: world x linear in the distance from the middle, and the
+ * turn a (3 + a) / 4 of the full tilt, which through the projection gives the
+ * stock player's slot shapes (.specifications/coverflow-stock-motion.md,
+ * section 7). Checked on every slide of every frame of a step. */
+static void check_turn_shape(void)
 {
+    static const double want[] = { 0.078, 0.160, 0.248, 0.340, 0.438,
+                                   0.540, 0.648, 0.760, 0.878 };
+    for (int i = 1; i <= 9; i++) {
+        double got = flow_turn(i * 65536 / 10) / 65536.0;
+        assert(dabs(got - want[i - 1]) < 0.001);
+    }
+    assert(flow_turn(0) == 0 && flow_turn(65536) == 65536);
+    for (int a = 1; a <= 65536; a++)
+        assert(flow_turn(a) >= flow_turn(a - 1));
+}
+
+static void check_placement(struct slide_data *si)
+{
+    int r = (si->slide_index << 16) - slide_frame;
+    double u = r / 65536.0, a = dmin(dabs(u), 1);
+    double angle = -(u < 0 ? -1 : 1) * itilt * a * (3 + a) / 4;
+    double cx = (u < 0 ? -1 : 1) * (dabs(u) <= 1 ? offsetX * a
+              : offsetX + stack_spacing * (dabs(u) - 1));
+
+    assert(dabs(si->angle - angle) <= 1);
+    /* flow_cx() works in 1/1024 of a slide: an eighth of a pixel. */
+    assert(dabs(si->cx - cx) <= PFREAL_ONE / 8);
+}
+
+static void check_shape(uint32_t epoch)
+{
+    check_turn_shape();
     recalc_offsets();
-    seed(epoch, 3);
-    show_next_slide();
-    frames(4);
-    int pos = center_slide.cx < 0 ? -center_slide.cx : center_slide.cx;
-    int across = (int)((long long)pos * 65536 / offsetX);
-    int round = (int)((long long)center_slide.angle * 65536 / itilt);
-    assert(round > across && across > 0);
-    printf("after 4 frames: leaving cover %.2f across, %.2f round\n",
-           across / 65536.0, round / 65536.0);
+    for (int dir = -1; dir <= 1; dir += 2) {
+        seed(epoch, 10);
+        if (dir > 0)
+            show_next_slide();
+        else
+            show_previous_slide();
+        while (pf_state == pf_scrolling) {
+            frame();
+            check_placement(&center_slide);
+            for (int i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++) {
+                check_placement(&left_slides[i]);
+                check_placement(&right_slides[i]);
+            }
+        }
+    }
 }
 
 static void check_timeline(uint32_t epoch)
@@ -391,7 +424,7 @@ int main(void)
         check_reversal(epoch);
         check_ends(epoch);
         check_late_frames(epoch);
-        check_pose(epoch);
+        check_shape(epoch);
         for (int layout = 0; layout < 2; layout++) {
             flat = !!layout;
             check_timeline(epoch);
@@ -413,7 +446,7 @@ int main(void)
     clock_counter = deadline + 0x90000000u;
     assert(frame_due(deadline));
     puts("PASS single click, slow clicks, burst, stop, reversal, ends, "
-         "late frames and the leading turn");
+         "late frames and the slot shape");
     puts("PASS flat timeline, frame deadlines and timer wrap");
     return 0;
 }

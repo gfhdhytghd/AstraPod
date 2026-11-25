@@ -540,10 +540,6 @@ static int slide_frame;
 static int step;
 /* The slide the wheel has picked, which the covers move towards. */
 static int target;
-/* How far the 3D view's covers have turned, as a slide index << 16. It
- * chases the same target as slide_frame but faster, so a cover turns towards
- * its stack before it has slid there. See flow_update(). */
-static int pose_frame;
 static unsigned pf_motion_scale = UI_THEME_MOTION_ONE;
 
 static unsigned motion_frames(unsigned frames)
@@ -2550,36 +2546,32 @@ static void flat_note_scroll(void)
 }
 
 /* --- The 3D view's motion -------------------------------------------------
- * The covers chase the slide the wheel has picked. Each frame a position moves
- * towards it at FLOW_FLOOR + gain * d slides a second, d being the distance
- * still to go, and stops on it without passing it: fast while far behind,
- * easing into the last slide, with no fixed duration, so clicks that come
- * while the covers move only move the goal. Two positions chase the same
- * target. slide_frame places the covers along the row at FLOW_GAIN, and
- * pose_frame turns them at FLOW_POSE_GAIN, so a cover turns before it slides.
- * In a fast scroll the turn runs a cover or so ahead of the row.
+ * The covers chase the slide the wheel has picked. Each frame slide_frame
+ * moves towards it at FLOW_FLOOR + FLOW_GAIN * d slides a second, d being the
+ * distance still to go, and stops on it without passing it: fast while far
+ * behind, easing into the last slide, with no fixed duration, so clicks that
+ * come while the covers move only move the goal. Every cover is placed from
+ * its distance to slide_frame alone; see flow_place() for how it turns.
  *
  * The rates are the stock iPod Classic's, measured from video, and are real
  * time: each refresh advances by its measured length, so a faster panel
- * refresh draws more frames of the same motion. Scroll Speed scales them all,
- * with FLOW_SPEED_REF giving the stock speed. Rates are thousandths of a slide
- * a second (floor) or thousandths per second (gains). */
-#define FLOW_FLOOR      500
-#define FLOW_GAIN       4600
-#define FLOW_POSE_GAIN  8000
+ * refresh draws more frames of the same motion. Scroll Speed scales both,
+ * with FLOW_SPEED_REF giving the stock speed. FLOW_FLOOR is in thousandths of
+ * a slide a second, FLOW_GAIN in thousandths per second. */
+#define FLOW_FLOOR      200
+#define FLOW_GAIN       5700
 /* Beyond this distance the speed stops growing: about 19 slides a second. */
 #define FLOW_REACH      (4 << 16)
 #define FLOW_SPEED_REF  175
 
-/* `from` after one frame of `frame_us` chasing `to` at `gain`, both as slide
- * index << 16. num / den scales the rates. */
-static int flow_chase(int from, int to, int gain, int num, int den,
-                      uint32_t frame_us)
+/* `from` after one frame of `frame_us` chasing `to`, both as slide index
+ * << 16. num / den scales the rates. */
+static int flow_chase(int from, int to, int num, int den, uint32_t frame_us)
 {
     int d = to - from;
     int dist = d < 0 ? -d : d;
     int64_t rate = (int64_t)FLOW_FLOOR * 65536
-                 + (int64_t)gain * MIN(dist, FLOW_REACH);
+                 + (int64_t)FLOW_GAIN * MIN(dist, FLOW_REACH);
     int64_t adv = rate * num / den * frame_us / 1000000000;
 
     if (adv >= dist)
@@ -2601,21 +2593,30 @@ static PFreal flow_cx(int r)
     return r < 0 ? -x : x;
 }
 
+/* Turn of a cover `a` slides from the middle (0 to 65536, slide index << 16)
+ * as a fraction of itilt << 16: a (3 + a) / 4, which starts at three quarters
+ * of the linear rate and ends at five quarters of it. With the world x linear
+ * this reproduces the stock player's two slot shapes: a cover leaving the
+ * middle slides and turns early, and one arriving faces the viewer late. */
+static int flow_turn(int a)
+{
+    return (int)(((int64_t)a * (3 * 65536 + a)) >> 18);
+}
+
 static void flow_place(struct slide_data *si, int index)
 {
     int r = (index << 16) - slide_frame;
-    int rq = (index << 16) - pose_frame;
+    int turn = flow_turn(MIN(r < 0 ? -r : r, 65536));
 
-    rq = MAX(-65536, MIN(rq, 65536));
     si->slide_index = index;
     si->cx = flow_cx(r);
-    si->angle = -(rq * itilt) >> 16;
+    si->angle = (r < 0 ? turn : -turn) * itilt >> 16;
     si->cy = 0;
     si->distance = 0;
 }
 
-/* Every cover from slide_frame and pose_frame. The middle slot holds the
- * slide nearest slide_frame, which coverflow_render() draws last. */
+/* Every cover from slide_frame. The middle slot holds the slide nearest it,
+ * which coverflow_render() draws last. */
 static void coverflow_place(void)
 {
     int i;
@@ -2629,7 +2630,7 @@ static void coverflow_place(void)
 
 static void coverflow_idle(void)
 {
-    slide_frame = pose_frame = center_index << 16;
+    slide_frame = center_index << 16;
     coverflow_place();
 }
 
@@ -2677,10 +2678,10 @@ static void reset_slides(void)
 }
 
 
-/* The side covers: turned this many degrees from face-on, and stacked this
- * far apart on screen (27.5 px), as on the stock player. */
-#define PF_SIDE_TILT   70
-#define PF_STACK_PITCH (55 * PFREAL_ONE / 2)
+/* The side covers: turned this many tenths of a degree from face-on, and
+ * stacked this far apart on screen (28.2 px), as on the stock player. */
+#define PF_SIDE_TILT   675
+#define PF_STACK_PITCH (282 * PFREAL_ONE / 10)
 
 /**
  Updates look-up table and other stuff necessary for the rendering.
@@ -2703,7 +2704,7 @@ static void recalc_offsets(void)
                 - global_settings.album_covers_slide_tuck * PFREAL_ONE;
     PFreal cosr, sinr;
 
-    itilt = PF_SIDE_TILT * IANGLE_MAX / 360;
+    itilt = PF_SIDE_TILT * IANGLE_MAX / 3600;
     cosr = fcos(-itilt);
     sinr = fsin(-itilt);
     zo = fmuln(MAXSLIDE_LEFT_R, sinr, PFREAL_SHIFT - 2, 0);
@@ -3607,8 +3608,7 @@ static void reverse_animation(int direction)
 static void flow_click(int direction)
 {
     target = fbound(0, target + direction, number_of_slides - 1);
-    if (pf_state != pf_scrolling &&
-        (slide_frame != target << 16 || pose_frame != target << 16))
+    if (pf_state != pf_scrolling && slide_frame != target << 16)
         start_animation();
 }
 
@@ -3759,8 +3759,8 @@ static void flat_render(bool center)
  * the first member that cannot be shown to -- and culls up to whatever it
  * reached, so one member that does not carry costs only its own stretch rather
  * than the whole claim. That matters because the runs are genuinely mixed: in
- * motion the turn leads the slide (see flow_update()), so any slide can be
- * part way turned, and the centre one most of all.
+ * motion the slides between the middle and the first slot are part way
+ * turned (see flow_place()).
  *
  * Everything is trimmed by PF_CULL_MARGIN before being relied on, because
  * slide_x_range() solves for the slide's edges directly while the render walks
@@ -4054,7 +4054,7 @@ static void land(void)
     step = 0;
 }
 
-/* The 3D view's frame: both chases advance one step per refresh elapsed, so a
+/* The 3D view's frame: the chase advances one step per refresh elapsed, so a
  * frame that spans several, at half rate or after a late wake, lands where
  * the same refreshes drawn one by one would have. See FLOW_FLOOR. */
 static void flow_update(void)
@@ -4065,16 +4065,11 @@ static void flow_update(void)
     int num = global_settings.album_covers_scroll_speed * UI_THEME_MOTION_ONE;
     int den = FLOW_SPEED_REF * (int)MAX(1u, pf_motion_scale);
 
-    for (; frames > 0 && (slide_frame != to || pose_frame != to); frames--)
-    {
-        slide_frame = flow_chase(slide_frame, to, FLOW_GAIN, num, den,
-                                 frame_us);
-        pose_frame = flow_chase(pose_frame, to, FLOW_POSE_GAIN, num, den,
-                                frame_us);
-    }
+    for (; frames > 0 && slide_frame != to; frames--)
+        slide_frame = flow_chase(slide_frame, to, num, den, frame_us);
 
     move_center((slide_frame + 0x8000) >> 16);
-    if (slide_frame == to && pose_frame == to)
+    if (slide_frame == to)
         land();
     else
         coverflow_place();

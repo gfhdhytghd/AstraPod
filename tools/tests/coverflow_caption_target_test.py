@@ -165,16 +165,16 @@ int main(void)
         assert(two.y2 - two.y1 >= caption_font.height);
     }
 
-    /* A 15 px caption font (height 15, ascent 12): rows 26-158 for the covers
-     * and 160-192 for the caption, so 166 rows for the two together. */
-    caption_font = (struct font){ 15, 12 };
+    /* The 18 px bold title font (height 19, ascent 16): rows 26-158 for the
+     * covers and 160-201 for the caption, so 175 rows for the two together. */
+    caption_font = (struct font){ 19, 16 };
     struct pf_caption cap;
     carousel_caption_layout(true, &cap);
     int art_y0 = 28 - PF_ROW_MARGIN, art_y1 = 28 + 128 + PF_ROW_MARGIN;
     int text_y0 = cap.y1, text_y1 = cap.y1 + caption_block(true);
-    assert(cap.y1 == 160 && cap.y2 == 177);
+    assert(cap.y1 == 160 && cap.y2 == 182);
     assert(art_y0 == 26 && art_y1 == 158 && art_y1 <= text_y0);
-    assert(text_y1 == 192 && text_y1 - art_y0 == 166);
+    assert(text_y1 == 201 && text_y1 - art_y0 == 175);
 
     /* Top caption: above the covers, the one-line block inside the two-line
      * one, so the reserved caption rows hold either. */
@@ -197,4 +197,4 @@ subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-g',
                check=True)
 subprocess.run([str(exe)], check=True)
 print('PASS caption names the click target at once, a random spin its centre; '
-      'covers 26-158 + caption 160-192 = 166 rows')
+      'covers 26-158 + caption 160-201 = 175 rows')

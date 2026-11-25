@@ -1017,3 +1017,118 @@ cover width, 128 px.
     partway, with no frontal cover.
   - stop after fast scroll: 11 items of catch-up in about 0.3 s; the target
     cover arrives already frontal and slides in at 5.7-7 /s.
+
+### 9.10 (v4) Turn speed, interpenetration and depth
+
+The implementation of 9.9 (AstraPod 7904142300) reported three problems:
+the covers next to the centre are near face-on at 20+ clicks/s; neighbours
+interpenetrate in fast fans; and the centre cover never recedes. This
+section tests rules for all three against the same stills and single
+steps.
+
+**Variants tested (F).** All keep 9.9 and add one rule.
+- **ce:** the yaw rate grows with the speed beyond what a single step
+  reaches: `ky + ce * max(0, |v| - (k + v0))`.
+- **kde:** the yaw also advances by at least `kde * 90 deg` per item of that
+  excess travel.
+- **YT:** yaw keyed to T, with no lead cap (L unlimited).
+- **clear:** a cover is turned at least `acos(2 * gap)`, so it clears a
+  neighbour at the stack step.
+- **push:** a geometric rule with no constant. Covers are placed from the
+  most turned to the least turned. Each less-turned cover moves back in
+  depth (never forward) until its top-view segment clears every placed
+  cover within two slots.
+
+Neither speed term affects the single step, because a single step never
+exceeds k + v0. The scores use the 9.9 metric. "Single step" uses a new
+harness (`ystep.py`): there 9.9's Y scores 0.097, against 0.080 in the
+9.9 harness, because the harnesses take the step's first frame from
+different refreshes. "Crossing frames" count refreshes where any two
+covers within 6 slots intersect in 3D. The test is constant clicks for 3
+s, then a stop, at 66.9 Hz (302 refreshes per rate).
+
+| Rule | v1 | v4 | both | single step | crossing frames 3 / 10 / 20 / 48 clicks/s | centre yaw at 20/s |
+|---|---|---|---|---|---|---|
+| 9.9 (L 1) | 9.79 | 9.87 | 9.83 | 0.097 | 0 / 56 / 39 / 87 | 27 |
+| **L 1 + push** | 9.88 | 9.97 | **9.93** | 0.097 | **0 / 0 / 0 / 0** | 27 (pushed back) |
+| L 2 + push | 10.94 | **9.15** | 10.05 | 0.097 | 0 / 0 / 0 / 0 | - |
+| L 1 + ce 1 + push | 10.64 | 9.72 | 10.18 | 0.097 | 0 / 0 / 0 / 0 | 28 |
+| L 1 + ce 2 + push | 11.73 | 12.67 | 12.20 | 0.097 | 0 / 0 / 0 / 0 | 49 |
+| L 1 + kde 1 + push | 9.84 | 12.10 | 10.97 | 0.097 | 0 / 0 / 0 / 0 | 39 |
+| L 1 + kde 2 + push | 14.08 | 21.62 | 17.85 | 0.097 | 0 / 0 / 0 / 0 | 79 |
+| YT + kde 8 (+ push) | 19.75 | 28.31 (27.90) | 24.0 | 0.097 | 9 / 36 / 3 / 1 (push: 0 / 0 / 0 / 0) | 90 |
+| YT + clear | - | - | - | 0.097 | 0 / 0 / 2 / 177 | 15 |
+| YT + kd 2-12 (distance rule on all travel) | - | - | - | 0.198-0.275 | - | - |
+
+Findings:
+- **A faster turn at speed is not supported by the stills (F).** Every
+  speed term makes the stills worse, by 0.8 px (ce 1) to 14 px (YT kde 8).
+  - All-edge-on rows (YT kde 8, centre yaw 90 at 20 clicks/s) score 39 px
+    on v4 f1424 and 26-29 px on v1 f0560 / f0700.
+  - The measured fast frames do not show every cover edge-on:
+    - v1 f0560 and f1154 are shingles at 20-40 deg, f0446 is at about
+      60 deg (9.4).
+    - In v4 f1424 the arriving side is turned partway (top-view segments
+      slope by 30-60 deg).
+    - Only the reversal still v1 f0819 is all 75-90 deg.
+  - A distance rule applied to all travel (kd) breaks the single step
+    (0.20-0.28 against 0.097).
+- **Push removes every crossing (F).** Its stills score is within 0.1 px of
+  9.9, and the single step is unchanged. The yaw-only rule (clear) leaves
+  crossings at 48 clicks/s and keeps the near-frontal cover.
+- **Push also gives the recede (F, M).** The cover nearest the lead point
+  stays the least turned. When its turned neighbours reach into its span,
+  it is pushed behind them.
+  - Model at 3-10 clicks/s: that cover sits at z 1.2-1.4 (up to 2.2 while a
+    neighbour slat overlaps it). It returns to z 1.06 within 0.08 s of the
+    neighbours turning away.
+  - Measured: v1 fans f0395 / f0901 have a frontal cover at z 1.55-1.6
+    (9.4). The v4 fan at frames 2938-2954 has a near-frontal cover at z
+    1.30-1.43 (h 94-104 px). Rest is at z 1.04-1.07. **M**
+  - So no rule tied to speed or to d is needed. Depth follows from turn
+    plus no interpenetration. At 20+ clicks/s, push puts the near-frontal
+    cover at u ~1 behind the slats, and the slats largely hide it. This
+    answers "the centre is near face-on" without a faster turn. (I: not
+    checked against rendered stock frames.)
+- **Push does not match the v4 stop (M against F).**
+  - Stock at frame 1494 has the arriving cover frontal at z 1.1 while its
+    right neighbour's slat, drawn in front of it, crosses its span. **Stock
+    interpenetrates there for about one render, and the draw order hides
+    it.**
+  - The model pushes that cover back to z 2.2-2.4 until d < 0.5. It also
+    turns the cover later: the model reaches X 0.6 with yaw -17 deg (L 2)
+    or -36 deg (L 1); stock shows 0 deg at X 0.61.
+  - With vcap 40 the model arrives 16 frames after stock (vcap 25: about
+    50 frames later). Stock's post-release catch-up averages about 35
+    items/s.
+  - This is one event. It points to L 2 and vcap 40, which gives v4 9.15
+    but v1 10.94.
+
+**Winning equations (F).** These are 9.9's, with one geometric step added
+after the yaw update. The world unit is 128 px (S).
+
+```
+d   = T - p
+v   = min(5.7*|d| + 0.2, vcap)                       vcap 25 (40 fits the v4 stop better)
+p  += sign(d) * min(|d|, v*dt)
+Tl  = p + clamp(d, -L, +L)                           L 1 (L 2 fits the v4 stop better)
+for each visible cover i (|i - p| <= 7):
+    yaw_t  = -sign(i - Tl) * 90 * min(|i - Tl|, 1)
+    yaw_i += (yaw_t - yaw_i) * (8*dt - 32*dt*dt)
+    X_i    = sign(u) * (104.6*|u|)                   |u| < 1, u = i - p
+           = sign(u) * (104.6 + 28.2*(|u| - 1))     |u| >= 1
+    z_i    = 135.7 + 64*|sin yaw_i|                  centre; edges at X -+ 64 cos, z -+ 64 sin
+push:  sort visible covers by |yaw| descending; for each cover c in that order:
+         dz = 0
+         while dz < 205 and segment(c, z_c + dz) properly crosses
+               segment(n) for any already-placed n with |n - c| <= 2:
+             dz += 2.56                              (0.02 S per step)
+         z_c += dz
+T clamped to p +- 11 when input arrives; draw by |i - round(p)|, centre last
+```
+
+A crossing is a proper intersection of the two top-view segments.
+Touching at an endpoint does not count: a slat's near edge resting on a
+frontal face is allowed, and the stacks themselves rely on this. The loop
+costs at most 80 steps x 4 tests per cover, and is empty for most covers
+in most refreshes.

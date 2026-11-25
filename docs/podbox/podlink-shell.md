@@ -48,7 +48,9 @@ python3 podlink_shell.py --serial USB_SERIAL log-fetch /.rockbox/crumbs-last.txt
   用 `playback-status` 观察播放或 seek 的实际结果。
 - `log-fetch PATH OUTPUT` 用 MS3 借用 HerdRemote 串口并校验长度和 CRC32。
   可读取 `/.rockbox/crumbs-last.txt`、`/.rockbox/lyrics-perf.txt`、
-  `/.rockbox/lyrics-perf.1.txt` 和 `/.rockbox/sm1/codec-trace.txt`。
+  `/.rockbox/lyrics-perf.1.txt`、`/.rockbox/sm1/codec-trace.txt`
+  和 `/.rockbox/logs/` 下的调试日志，例如 `tasks.log`。
+  其他路径返回 `MS3 ERR sample path`。
   崩溃后，固件在重启时保存 `crumbs-last.txt`。先下载该文件，再重现下一次崩溃。
 
 分析 `crumbs-last.txt` 时，先核对构建版本和崩溃时钟。用 `mp4-moov` 和

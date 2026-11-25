@@ -768,11 +768,10 @@ struct user_settings
     /* Flat view only: how far below the middle cover the piles sit, in pixels.
      * A cover eases down to it on its way out and back up on its way in. */
     int  album_covers_pile_offset;
-    /* The three below shape the tilted view only; flat mode ignores them and
+    /* The two below shape the tilted view only; flat mode ignores them and
      * the menu hides them. */
     int  album_covers_center_margin;
     int  album_covers_slide_tuck;
-    bool album_covers_parallel_slides;
     int  album_covers_scroll_speed;
     int  album_covers_random_spin;  /* 0..2: covers a held PLAY passes */
     int  album_covers_show_album_name;

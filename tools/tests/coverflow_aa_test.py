@@ -1,4 +1,5 @@
-"""Exercise the firmware's pixel loops and time the same slide/settle poses on the host."""
+"""Exercise the firmware's pixel loops and time them on the host, over the
+refreshes pfgeom records from the 3D view's motion."""
 from pathlib import Path
 import subprocess
 import sys
@@ -37,9 +38,9 @@ static int pf_neighbor_light __attribute__((unused)) = 256;
 #define BUFFER_WIDTH 320
 #define NO_INLINE __attribute__((noinline))
 #define fabs fabsr
-#define global_settings dummy
-static struct { int album_covers_parallel_slides; } dummy;
-''' + between(geometry, '#define PF_SIDE_TILT', 'static int slide_x_range') + (
+''' + between(source, '#define FLIP_DIST ', '#define DISPLAY_LEFT_R') + between(
+    source, '/* n / FLIP_DIST', '/* num / den for') + between(
+    geometry, '#define PF_SLOT_X', 'static int slide_x_range') + (
     between(source, 'static inline unsigned int fade_red_blue', 'static pix_t pf_color')
     if 'static inline unsigned int fade_red_blue' in source else '') + between(
     source, 'struct pf_fade\n', '/**\n * Render a single slide') + between(
@@ -47,15 +48,16 @@ static struct { int album_covers_parallel_slides; } dummy;
     source, 'static bool slide_x_range', '/* Slides are drawn in tiles') + between(
     source, '#define PF_TILE_W', 'void set_current_slide') + between(
     source, 'static void cull_side', '/* The rows the covers will disturb') + between(
-    geometry, 'static void pose', '/* Rows the frame')
+    geometry, 'struct pose\n', '/* Rows the frame')
 if aa:
     program += between(source, 'static void build_side_level', 'static int read_pfraw')
 program += '''
 int main(void) {
     image.size = (struct dim){128,128};
     pf_half_height=90; pf_lower_half=90;
-    dummy.album_covers_parallel_slides=set_parallel;
-    recalc_offsets(); pose(0);
+    recalc_offsets();
+    center_index = target = 500;
+    coverflow_idle();
     for (int x=0;x<128;x++)
         for (int y=0;y<128;y++)
             image.data[x*128+y]=(x&1)?0xffff:0;
@@ -100,19 +102,16 @@ program += '''
         for(int j=0;j<128*128*2;j++) side_art[i].data[j]=(pix_t)(37*j+i);
     }
     volatile unsigned checksum=0;
+    record_scenarios();
     for(int pass=0;pass<7;pass++) {
         clock_t start=clock();
-        for(int cycle=0;cycle<50;cycle++) {
-            for(int frame=0;frame<33;frame++) {
-                /* The row up to half a slide off rest. */
-                int s=(frame==32)?0:((cycle&1)?-1:1);
-                pose(s*frame*1024);
-                memset(buffer,0,sizeof buffer);
-                coverflow_render();
-                checksum+=buffer[90*320+102];
-            }
+        for(int q=0;q<n_poses;q++) {
+            pose(&poses[q]);
+            memset(buffer,0,sizeof buffer);
+            coverflow_render();
+            checksum+=buffer[90*320+102];
         }
-        printf("%.3f ",1e6*(clock()-start)/CLOCKS_PER_SEC/(50*33));
+        printf("%.3f ",1e6*(clock()-start)/CLOCKS_PER_SEC/n_poses);
     }
     printf("us/frame checksum=%u\\n",checksum);
 }
@@ -122,5 +121,6 @@ if album_flip:
 cfile = out / 'coverflow_pixels.c'
 cfile.write_text(program)
 binary = out / 'coverflow_pixels'
-subprocess.run(['cc', '-O2', '-fwrapv', str(cfile), '-o', str(binary)], check=True)
+subprocess.run(['cc', '-O2', '-std=gnu11', '-fwrapv', str(cfile), '-o',
+                str(binary), '-lm'], check=True)
 subprocess.run([str(binary)], check=True)

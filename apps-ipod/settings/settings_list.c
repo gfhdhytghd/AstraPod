@@ -1962,8 +1962,6 @@ const struct settings_list settings[] = {
     INT_SETTING(0, album_covers_slide_tuck, LANG_NUMBER_OF_SLIDES, 32,
                 "album covers slide tuck", UNIT_INT, 0, 64, 1,
                 NULL, NULL, NULL),
-    OFFON_SETTING(0, album_covers_parallel_slides, LANG_SPACING, true,
-                  "album covers parallel slides", NULL),
     /* Diagnostics: append what the two background workers are doing to
      * .rockbox/logs/tagcache.log and art.log. Both drive the same
      * "Building" indicator, so when it will not go away these say which. */

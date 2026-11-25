@@ -506,7 +506,6 @@ Also reached as **Appearance** under `Settings > Playback > Now Playing Screen`.
 | View Mode | 3D angles the covers away on both sides. Flat lays them face-on and the same size, in two piles either side of the current one. | 3D |  |
 | 3D Centre Margin | The gap between the front cover and its neighbours in the 3D view. | 0 | **Adv** |
 | 3D Slide Tuck | How far the side covers stack back behind the front one in the 3D view. | 32 | **Adv** |
-| 3D Parallel Slides | Draws every side cover the same shape and slides it into place, rather than in true perspective from where it sits, which reads as a row of covers rather than a tunnel. The side covers turn by the same angle either way. | Yes | **Adv** |
 | Flat Pile Fade | How far the two piles in the Flat view are blended towards the background, so the cover in the middle stands out. Zero leaves them solid. | 0% | **Adv** |
 | Flat Pile Offset | How far below the middle cover the Flat view's piles sit. A cover eases down onto its pile as it leaves and back up as it arrives. | 0 px | **Adv** |
 | Artwork Filter ▸ Filter 1 | First of three image adjustments applied to the covers in the carousel. Art rows in the browser are not affected. | Off | **Adv** |

@@ -16,13 +16,18 @@
   leaves in `config.cfg` is ignored.
 
 - **Cover Flow moves like the original iPod's.** Every click of the wheel
-  counts, the covers follow faster the further they have to go, and the
-  album name changes on the click instead of when the cover arrives.
+  counts, up to 11 covers ahead, and the covers follow faster the further
+  they have to go. The album name changes on the click instead of when the
+  cover arrives. A cover turns to face you before it reaches the middle,
+  and the covers fan out while you scroll.
 
-- **Cover Flow's layout** is closer to the original iPod's: the side covers
-  turn by the same angle with Parallel Slides on or off, three and the edge
-  of a fourth show on each side, all at full brightness, and the caption is
-  bold on both lines and closer to the covers.
+- **Cover Flow's layout** is the original iPod's: a wider view, with the
+  side covers standing edge-on to the front one, three on each side, all at
+  full brightness. The caption is bold on both lines and closer to the
+  covers. **3D Parallel Slides is gone**, and the line it leaves in
+  `config.cfg` is ignored. 3D Centre Margin and 3D Slide Tuck still move the
+  side covers out and in; at 20 and 32, the first-boot settings, the layout
+  is the original iPod's.
 
 - **Cover Flow's album panel** (press Select on a cover) is laid out like the
   original iPod's: a wider card from under the covers' top edge to the bottom

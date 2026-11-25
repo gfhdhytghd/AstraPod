@@ -67,9 +67,10 @@ struct dim { int width, height; };
 static struct slide_data left_slides[MAX_SLIDES_COUNT];
 static struct slide_data right_slides[MAX_SLIDES_COUNT];
 static struct slide_data center_slide;
-static PFreal offsetX, auto_slide_spacing;
+static PFreal offsetX, stack_spacing;
 static int itilt;
-static int fade, step;
+/* The two chases, as offsets from the centre slide's index << 16. */
+static int slide_frame, pose_frame;
 
 static inline PFreal fmul(PFreal a, PFreal b) { return (a*b) >> PFREAL_SHIFT; }
 static inline PFreal fmuln(PFreal a, PFreal b, int ps1, int ps2)
@@ -142,6 +143,9 @@ static struct dim *surface(struct slide_data *s)
     return &slide_dim;
 }
 
+#define PF_SIDE_TILT   70
+#define PF_STACK_PITCH (55 * PFREAL_ONE / 2)
+
 static void recalc_offsets(void)
 {
     PFreal xs = PFREAL_HALF - DISPLAY_WIDTH * PFREAL_HALF;
@@ -150,65 +154,49 @@ static void recalc_offsets(void)
                 set_center_margin * PFREAL_ONE) - set_slide_tuck * PFREAL_ONE;
     PFreal cosr, sinr;
 
-    itilt = (set_parallel ? 55 : 70) * IANGLE_MAX / 360;
+    itilt = PF_SIDE_TILT * IANGLE_MAX / 360;
     cosr = fcos(-itilt);
     sinr = fsin(-itilt);
     zo = fmuln(MAXSLIDE_LEFT_R, sinr, PFREAL_SHIFT - 2, 0);
     offsetX = xp - fmul(xs, cosr) + fmuln(xp,
         zo + fmuln(xs, sinr, PFREAL_SHIFT - 2, 0), PFREAL_SHIFT - 2, 0) / CAM_DIST;
-    {
-        PFreal cx_last;
-        if (set_parallel) {
-            PFreal edge_r = fdiv(CAM_DIST * fmul(-xs, cosr),
-                CAM_DIST_R + zo + fmul(-xs, sinr));
-            PFreal target = -DISPLAY_LEFT_R - edge_r;
-            cx_last = target + fmuln(target, zo, PFREAL_SHIFT - 2, 0) / CAM_DIST;
-        } else
-            cx_last = (-DISPLAY_LEFT_R) + fmul(xs, cosr);
-        PFreal span = cx_last - offsetX;
-        if (span < PFREAL_ONE) span = PFREAL_ONE;
-        auto_slide_spacing = span / 2;
-    }
+
+    PFreal depth = CAM_DIST_R + zo;
+    if (!set_parallel)
+        depth += fmul(-xs, sinr);
+    stack_spacing = (int64_t)PF_STACK_PITCH * depth / CAM_DIST_R;
 }
 
-static void coverflow_idle(void)
+static PFreal flow_cx(int r)
 {
-    int i;
-    center_slide.angle = 0; center_slide.cx = 0; center_slide.cy = 0;
-    center_slide.distance = 0;
-    for (i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++) {
-        left_slides[i].angle = itilt;
-        left_slides[i].cx = -(offsetX + auto_slide_spacing * i);
-        left_slides[i].cy = 0; left_slides[i].distance = 0;
-        right_slides[i].angle = -itilt;
-        right_slides[i].cx = offsetX + auto_slide_spacing * i;
-        right_slides[i].cy = 0; right_slides[i].distance = 0;
-    }
+    int a = r < 0 ? -r : r;
+    PFreal x = (a <= 65536) ? fmul(offsetX, a >> 6)
+             : offsetX + fmul(stack_spacing, (a - 65536) >> 6);
+
+    return r < 0 ? -x : x;
 }
 
-static void coverflow_animate(int s, int tick, int neg, PFreal ftick)
+static void flow_place(struct slide_data *si, int index)
+{
+    int r = (index << 16) - slide_frame;
+    int rq = (index << 16) - pose_frame;
+
+    rq = MAX(-65536, MIN(rq, 65536));
+    si->cx = flow_cx(r);
+    si->angle = -(rq * itilt) >> 16;
+    si->cy = 0;
+    si->distance = 0;
+}
+
+/* coverflow_place() with the centre slide at index 0. */
+static void coverflow_place(void)
 {
     int i;
-    center_slide.angle = (s * tick * itilt) >> 16;
-    center_slide.cx = -s * fmul(offsetX, ftick);
-    center_slide.cy = 0;
+
+    flow_place(&center_slide, 0);
     for (i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++) {
-        left_slides[i].angle = itilt;
-        left_slides[i].cx = -(offsetX + auto_slide_spacing * i
-                              + s * fmul(auto_slide_spacing, ftick));
-        left_slides[i].cy = 0;
-        right_slides[i].angle = -itilt;
-        right_slides[i].cx = offsetX + auto_slide_spacing * i
-                              - s * fmul(auto_slide_spacing, ftick);
-        right_slides[i].cy = 0;
-    }
-    PFreal fneg = (neg * PFREAL_ONE) >> 16;
-    if (s > 0) {
-        right_slides[0].angle = -(neg * itilt) >> 16;
-        right_slides[0].cx = fmul(offsetX, fneg);
-    } else {
-        left_slides[0].angle = (neg * itilt) >> 16;
-        left_slides[0].cx = -fmul(offsetX, fneg);
+        flow_place(&left_slides[i], -1 - i);
+        flow_place(&right_slides[i], 1 + i);
     }
 }
 
@@ -563,88 +551,44 @@ static long render_slide_clipped(struct slide_data *slide, int x_from, int x_to)
 static long render_frame(int with_cull)
 {
     const int n = ALBUM_COVERS_NUM_SLIDES;
-    int left_alpha[MAX_SLIDES_COUNT], right_alpha[MAX_SLIDES_COUNT];
+    int alpha[MAX_SLIDES_COUNT];
     int left_to[MAX_SLIDES_COUNT], right_from[MAX_SLIDES_COUNT];
-    int center_alpha = 256;
-    int redraw_left_0 = 0, redraw_right_0 = 0;
-    int alpha, index;
+    int index;
     long px = 0;
 
     for (index = 0; index < n; index++)
-        left_alpha[index] = right_alpha[index] = 0;
-
-    if (step == 0) {
-        for (index = n - 2; index >= 0; index--) {
-            alpha = (index < n - 2) ? 256 : 128;
-            if (alpha > 0)
-                left_alpha[index] = right_alpha[index] = alpha;
-        }
-    } else {
-        PFreal cd = fabsr(center_slide.cx);
-
-        if (step > 0) redraw_right_0 = (fabsr(right_slides[0].cx) < cd);
-        else          redraw_left_0  = (fabsr(left_slides[0].cx) < cd);
-
-        alpha = ((step > 0) ? 0 : ((n == 1) ? 256 : 128)) - fade / 2;
-        for (index = n - 1; index >= 0; index--) {
-            if (alpha > 0 && !(index == 0 && redraw_left_0))
-                left_alpha[index] = alpha;
-            alpha += 128;
-            if (alpha > 256) alpha = 256;
-        }
-        alpha = ((step > 0) ? ((n == 1) ? 128 : 0) : -128) + fade / 2;
-        for (index = n - 1; index >= 0; index--) {
-            if (alpha > 0 && !(index == 0 && redraw_right_0))
-                right_alpha[index] = alpha;
-            alpha += 128;
-            if (alpha > 256) alpha = 256;
-        }
-        if (n <= 2)
-            center_alpha = (step > 0) ? 256 - fade / 2 : 128 + fade / 2;
-    }
+        alpha[index] = 256;
 
     if (with_cull) {
-        cull_side(left_slides, left_alpha, center_alpha, left_to, 0);
-        cull_side(right_slides, right_alpha, center_alpha, right_from, 1);
+        cull_side(left_slides, alpha, 256, left_to, 0);
+        cull_side(right_slides, alpha, 256, right_from, 1);
     } else {
         for (index = 0; index < n; index++)
             { left_to[index] = LCD_WIDTH; right_from[index] = 0; }
     }
 
-    for (index = n - 1; index >= 0; index--)
-        if (left_alpha[index] > 0) {
-            fb_mark_id = 1 + index;
-            px += render_slide_clipped(&left_slides[index], 0, left_to[index]);
-        }
-    for (index = n - 1; index >= 0; index--)
-        if (right_alpha[index] > 0) {
-            fb_mark_id = 11 + index;
-            px += render_slide_clipped(&right_slides[index],
-                                       right_from[index], LCD_WIDTH);
-        }
+    for (index = n - 1; index >= 0; index--) {
+        fb_mark_id = 1 + index;
+        px += render_slide_clipped(&left_slides[index], 0, left_to[index]);
+    }
+    for (index = n - 1; index >= 0; index--) {
+        fb_mark_id = 11 + index;
+        px += render_slide_clipped(&right_slides[index],
+                                   right_from[index], LCD_WIDTH);
+    }
     fb_mark_id = 21;
     px += render_slide_clipped(&center_slide, 0, LCD_WIDTH);
-
-    if (redraw_right_0) {
-        fb_mark_id = 11;
-        px += render_slide_clipped(&right_slides[0], 0, LCD_WIDTH);
-    } else if (redraw_left_0) {
-        fb_mark_id = 1;
-        px += render_slide_clipped(&left_slides[0], 0, LCD_WIDTH);
-    }
     return px;
 }
 
-static void pose(int dir, int tick)
+/* The covers with the row at `p` and the turn at `q`, both offsets from the
+ * centre slide as index << 16. p stays within half a slide, as the middle slot
+ * holds the slide nearest it; q leads it by up to FLOW_REACH. */
+static void pose(int p, int q)
 {
-    step = dir;
-    if (dir == 0) {
-        fade = 256;
-        coverflow_idle();
-    } else {
-        fade = ((dir < 0) ? (65536 - tick) : tick) / 256;
-        coverflow_animate(dir, tick, 65536 - tick, (tick * PFREAL_ONE) >> 16);
-    }
+    slide_frame = p;
+    pose_frame = q;
+    coverflow_place();
 }
 
 /* Rows the frame in fb_top actually wrote to. */
@@ -688,17 +632,17 @@ static void check_rows(void)
 
 /* One frame, both ways round. Returns pixels the cull saved; *bad gets the
  * count of pixels the two renders disagree on, which must be zero. */
-static long check_frame(int dir, int tick, long *plain, long long *bad)
+static long check_frame(int p, int q, long *plain, long long *bad)
 {
     long culled;
     int i;
 
-    pose(dir, tick);
+    pose(p, q);
     memset(fb_top, 0, sizeof fb_top);
     *plain = render_frame(0);
     memcpy(fb_ref, fb_top, sizeof fb_top);
 
-    pose(dir, tick);
+    pose(p, q);
     memset(fb_top, 0, sizeof fb_top);
     culled = render_frame(1);
     check_rows();
@@ -731,6 +675,56 @@ static long long check_divisions(void)
     return bad;
 }
 
+/* -l: where each cover sits at rest with the default settings (centre margin
+ * 20 from default-config.cfg, slide tuck 32), drawn alone: its columns, and
+ * its height at the inner and outer one. */
+static int column_height(int x)
+{
+    int y, n = 0;
+
+    for (y = 0; y < FBH; y++)
+        if (fb_top[y * LCD_WIDTH + x])
+            n++;
+    return n;
+}
+
+static void print_layout(void)
+{
+    for (int par = 1; par >= 0; par--) {
+        set_parallel = par;
+        set_center_margin = 20;
+        set_slide_tuck = 32;
+        pf_half_height = 120;
+        pf_lower_half = 120;
+        recalc_offsets();
+        printf("parallel %d: tilt %d deg, stack spacing %.1f world\n", par,
+               PF_SIDE_TILT, stack_spacing / (double)PFREAL_ONE);
+        for (int i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
+            right_slides[i].sw = right_slides[i].sh = 128;
+        center_slide.sw = center_slide.sh = 128;
+        pose(0, 0);
+        for (int i = -1; i < ALBUM_COVERS_NUM_SLIDES; i++) {
+            struct slide_data *si = i < 0 ? &center_slide : &right_slides[i];
+            int x0 = -1, x1 = -1;
+
+            memset(fb_top, 0, sizeof fb_top);
+            fb_mark_id = 1;
+            render_slide_clipped(si, 0, LCD_WIDTH);
+            for (int x = 0; x < LCD_WIDTH; x++)
+                if (column_height(x)) {
+                    if (x0 < 0) x0 = x;
+                    x1 = x + 1;
+                }
+            if (x0 < 0)
+                printf("  slot %d: off screen\n", i + 1);
+            else
+                printf("  slot %d: x %d-%d (%d wide), height %d inner, "
+                       "%d outer\n", i + 1, x0, x1, x1 - x0,
+                       column_height(x0), column_height(x1 - 1));
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     /* Cover shapes: covers are scaled into DISPLAY_WIDTH x DISPLAY_HEIGHT
@@ -742,12 +736,19 @@ int main(int argc, char **argv)
     static const int MARGIN[] = { 0, 12, 28 };             /* setting: 0..80 */
     static const int SBS[]    = { 0, 20, 40 };             /* status bar      */
     static const int BAND[]   = { 0, 30, 49, 70 };         /* caption band    */
+    static const int LEAD[]   = { 0, 8192, -8192, 32768, -32768, 65536,
+                                  -65536, 98304, -98304, 163840, -163840 };
     const int TICKS = 40;
 
     long long saved = 0, plain_total = 0, bad = 0;
     long long frames = 0, configs = 0;
     unsigned seed = 12345;
     int verbose = (argc > 1 && !strcmp(argv[1], "-v"));
+
+    if (argc > 1 && !strcmp(argv[1], "-l")) {
+        print_layout();
+        return 0;
+    }
 
     long long div_bad = check_divisions();
     printf("division by multiplying: %lld wrong quotients%s\n", div_bad,
@@ -791,22 +792,23 @@ int main(int argc, char **argv)
         }
         configs++;
 
-        for (int dir = 1; dir >= -1; dir--) {
-            int n = (dir == 0) ? 1 : TICKS;
-            for (int k = 0; k < n; k++) {
-                long plain, was_bad = bad;
-                int tick = (dir == 0) ? 0 : (int)((long long)k * 65536 / TICKS);
+        /* The row anywhere within half a slide of rest, with the turn
+         * level with it or leading it either way by up to 2.5 slides. */
+        for (int k = -TICKS / 2; k <= TICKS / 2; k++)
+        for (unsigned l = 0; l < sizeof LEAD / sizeof *LEAD; l++) {
+            long plain, was_bad = bad;
+            int p = (int)((long long)k * 65536 / TICKS);
+            int q = p + LEAD[l];
 
-                saved += check_frame(dir, tick, &plain, &bad);
-                plain_total += plain;
-                frames++;
-                if (bad != was_bad || verbose)
-                    printf("%s par=%d tuck=%d margin=%d sbs=%d band=%d "
-                           "shapes=%d dir=%d tick=%d: %lld stale pixels\n",
-                           bad != was_bad ? "ARTEFACT" : "ok", par, TUCK[t],
-                           MARGIN[g], SBS[s], BAND[b], shapes, dir, tick,
-                           bad - was_bad);
-            }
+            saved += check_frame(p, q, &plain, &bad);
+            plain_total += plain;
+            frames++;
+            if (bad != was_bad || verbose)
+                printf("%s par=%d tuck=%d margin=%d sbs=%d band=%d "
+                       "shapes=%d p=%d q=%d: %lld stale pixels\n",
+                       bad != was_bad ? "ARTEFACT" : "ok", par, TUCK[t],
+                       MARGIN[g], SBS[s], BAND[b], shapes, p, q,
+                       bad - was_bad);
         }
     }
 

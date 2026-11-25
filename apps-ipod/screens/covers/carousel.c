@@ -259,10 +259,8 @@ static void pf_update_dynamic_colors(void)
 #define PF_TEXT_WIDTH  (LCD_WIDTH - 2 * PF_TEXT_MARGIN)
 
 #define MAX_SLIDES_COUNT 10
-/* Number of side slides rendered per side (3 visible + 1 animation buffer).
- * Was a user-configurable field in the original plugin's config struct, but
- * was never actually exposed in any settings menu, so it's now a fixed
- * constant. */
+/* Side slides rendered per side: three, and a sliver of a fourth at the
+ * screen edge. */
 #define ALBUM_COVERS_NUM_SLIDES 4
 
 /* --- The flat view ---------------------------------------------------------
@@ -290,9 +288,6 @@ static void pf_update_dynamic_colors(void)
 #define PF_FLAT_FLIP ANIM_F(15)
 /* Below this duration a cover snaps directly into the centre. */
 #define PF_FLAT_MIN  ANIM_F(4)
-#define PF_FLOW_FAST ANIM_F(4)
-#define PF_FLOW_SLOW ANIM_F(7)
-#define PF_FLOW_RAMP ANIM_F(7)
 
 /* The deal: the cover on top slides off to its pile, and the top of the other
  * pile slides into the middle behind it, PF_DEAL_LEAD of a flip later.
@@ -539,10 +534,16 @@ static bool pf_boosted;
 static struct slide_data center_slide;
 static struct slide_data left_slides[MAX_SLIDES_COUNT];
 static struct slide_data right_slides[MAX_SLIDES_COUNT];
+/* Where the covers are along the row, as a slide index << 16. */
 static int slide_frame;
+/* Nonzero while the covers move, and in Flat the direction of the flip. */
 static int step;
+/* The slide the wheel has picked, which the covers move towards. */
 static int target;
-static int fade;
+/* How far the 3D view's covers have turned, as a slide index << 16. It
+ * chases the same target as slide_frame but faster, so a cover turns towards
+ * its stack before it has slid there. See flow_update(). */
+static int pose_frame;
 static unsigned pf_motion_scale = UI_THEME_MOTION_ONE;
 
 static unsigned motion_frames(unsigned frames)
@@ -550,8 +551,8 @@ static unsigned motion_frames(unsigned frames)
     return MAX(1u, (frames * pf_motion_scale + UI_THEME_MOTION_ONE / 2) /
                     UI_THEME_MOTION_ONE);
 }
-/* The scroll and transition speed settings are a step per this many
- * authored frames, see scroll_speed(). */
+/* Flat's flip speed is a step per this many authored frames, see
+ * scroll_speed(). */
 #define PF_SPEED_FRAMES 2
 /* Frames are presented on the deadlines these give, one pace per animated
  * loop, since each learns its own rate and wake phase. The covers are sent
@@ -566,13 +567,10 @@ static int anim_frac;
 /* Direction of the gap on screen. Reversing travel can walk the same
  * geometry backwards, then choose a new gap when it crosses the centre. */
 static int anim_pose_step;
-/* Always 0: nothing sets it any more, but render_all_slides()'s fade
- * arithmetic still reads it, so it stays as a no-op term. */
-static int extra_fade;
 int center_index = 0; /* index of the slide that is in the center */
 static int itilt;
 static PFreal offsetX;
-static PFreal auto_slide_spacing;
+static PFreal stack_spacing;
 static int number_of_slides;
 /* Flat view pacing: when the user last asked for a cover and how far apart they
  * have been asking, plus the two per-flip decisions those feed -- whether this
@@ -581,12 +579,6 @@ static int number_of_slides;
 static uint32_t pf_flat_last_input;
 static int  pf_flat_interval;
 static bool pf_flat_snap;
-/* Wheel cadence controls the 3D pose independently of album progression. */
-static bool flow_fast;
-static int flow_mix, flow_landed_direction;
-static uint32_t flow_pose_clock;
-static unsigned flow_sampled_frame;
-static int flow_mix_frames;
 static bool pf_flat_moving;
 /* Whether the arriving cover has taken the top of the stack from the one it is
  * replacing. See flat_animate(). */
@@ -2536,8 +2528,7 @@ static int flat_rate(uint32_t now)
     return MAX(flat_pace(now), flat_duration(PF_FLAT_MIN));
 }
 
-/* Every scroll action, whether or not it is one the engine can act on yet --
- * the ones it discards past its two-cover lookahead still say how fast the
+/* Every scroll action, including one at the end of the row, says how fast the
  * user is going. */
 static void flat_note_scroll(void)
 {
@@ -2552,110 +2543,88 @@ static void flat_note_scroll(void)
         pf_flat_interval = (pf_flat_interval + gap) / 2;
 }
 
-static void flow_note_wheel(bool can_move)
+/* --- The 3D view's motion -------------------------------------------------
+ * The covers chase the slide the wheel has picked. Each frame a position moves
+ * towards it at FLOW_FLOOR + gain * d slides a second, d being the distance
+ * still to go, and stops on it without passing it: fast while far behind,
+ * easing into the last slide, with no fixed duration, so clicks that come
+ * while the covers move only move the goal. Two positions chase the same
+ * target. slide_frame places the covers along the row at FLOW_GAIN, and
+ * pose_frame turns them at FLOW_POSE_GAIN, so a cover turns before it slides.
+ * In a fast scroll the turn runs a cover or so ahead of the row.
+ *
+ * The rates are the stock iPod Classic's, measured from video, and are real
+ * time: each refresh advances by its measured length, so a faster panel
+ * refresh draws more frames of the same motion. Scroll Speed scales them all,
+ * with FLOW_SPEED_REF giving the stock speed. Rates are thousandths of a slide
+ * a second (floor) or thousandths per second (gains). */
+#define FLOW_FLOOR      500
+#define FLOW_GAIN       4600
+#define FLOW_POSE_GAIN  8000
+/* Beyond this distance the speed stops growing: about 19 slides a second. */
+#define FLOW_REACH      (4 << 16)
+#define FLOW_SPEED_REF  175
+
+/* `from` after one frame of `frame_us` chasing `to` at `gain`, both as slide
+ * index << 16. num / den scales the rates. */
+static int flow_chase(int from, int to, int gain, int num, int den,
+                      uint32_t frame_us)
 {
-    flat_note_scroll();
-    if (flat_view() || !can_move)
-        return;
-    if (pf_flat_interval <= (int)motion_frames(PF_FLOW_FAST))
-    {
-        if (!flow_fast && !flow_mix)
-        {
-            flow_pose_clock = pf_flat_last_input;
-            flow_sampled_frame = 0;
-        }
-        flow_fast = true;
+    int d = to - from;
+    int dist = d < 0 ? -d : d;
+    int64_t rate = (int64_t)FLOW_FLOOR * 65536
+                 + (int64_t)gain * MIN(dist, FLOW_REACH);
+    int64_t adv = rate * num / den * frame_us / 1000000000;
+
+    if (adv >= dist)
+        return to;
+    if (adv < 1)
+        adv = 1;
+    return d < 0 ? from - (int)adv : from + (int)adv;
+}
+
+/* World x of a cover `r` slides right of the middle (slide index << 16):
+ * from the middle to the first slot over the first slide, then a stack step
+ * per slide after that. */
+static PFreal flow_cx(int r)
+{
+    int a = r < 0 ? -r : r;
+    PFreal x = (a <= 65536) ? fmul(offsetX, a >> 6)
+             : offsetX + fmul(stack_spacing, (a - 65536) >> 6);
+
+    return r < 0 ? -x : x;
+}
+
+static void flow_place(struct slide_data *si, int index)
+{
+    int r = (index << 16) - slide_frame;
+    int rq = (index << 16) - pose_frame;
+
+    rq = MAX(-65536, MIN(rq, 65536));
+    si->slide_index = index;
+    si->cx = flow_cx(r);
+    si->angle = -(rq * itilt) >> 16;
+    si->cy = 0;
+    si->distance = 0;
+}
+
+/* Every cover from slide_frame and pose_frame. The middle slot holds the
+ * slide nearest slide_frame, which coverflow_render() draws last. */
+static void coverflow_place(void)
+{
+    int i;
+
+    flow_place(&center_slide, center_index);
+    for (i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++) {
+        flow_place(&left_slides[i], center_index - 1 - i);
+        flow_place(&right_slides[i], center_index + 1 + i);
     }
-    else if (pf_flat_interval >= (int)motion_frames(PF_FLOW_SLOW))
-        flow_fast = false;
-}
-
-/* Keep the last incoming cover tilted briefly between wheel events.
- * The landing continues to repaint after the logical album has settled. */
-static void flow_update_mix(void)
-{
-    if (!pf_motion_scale)
-        return;
-    uint32_t now = motion_clock();
-    bool allow_tilt = !flat_view() && !pf_random_spinning;
-    if (!allow_tilt)
-        flow_fast = false;
-    int ramp = motion_frames(PF_FLOW_RAMP);
-    uint32_t release = pf_flat_last_input + ui_frame_clock(motion_frames(PF_FLOW_SLOW));
-    if (flow_fast && (int32_t)(now - release) > 0)
-    {
-        /* A skipped render can span the hold and the release. Advance
-         * each part on its own timeline so the tilt doesn't jump. */
-        unsigned held = motion_elapsed(release, flow_pose_clock) - flow_sampled_frame;
-        flow_mix_frames = MIN(flow_mix_frames + held, (unsigned)ramp);
-        flow_pose_clock = release;
-        flow_sampled_frame = 0;
-        flow_fast = false;
-    }
-    unsigned elapsed = motion_elapsed(now, flow_pose_clock);
-    int delta = MIN(elapsed - flow_sampled_frame, (unsigned)ramp);
-    flow_sampled_frame = elapsed;
-    int frames = flow_mix_frames + (flow_fast ? delta : -delta);
-    flow_mix_frames = MIN(MAX(frames, 0), ramp);
-    flow_mix = flow_mix_frames * PFREAL_ONE / ramp;
-}
-
-/* Pull both piles inward together. Inner slot spacing is chosen from the
- * projected cover width so the pair meets near the middle at full tilt. */
-/* About twelve degrees of extra yaw on the two inner covers. */
-#define FLOW_INNER_TILT (12 * IANGLE_MAX / 360)
-
-static PFreal flow_inner_slot(void)
-{
-    PFreal projected = fmul(DISPLAY_WIDTH * PFREAL_ONE, fcos(itilt + FLOW_INNER_TILT));
-    return MAX(0, (projected - auto_slide_spacing) / 2);
-}
-
-static void flow_shift_piles(PFreal inner)
-{
-    PFreal shift = fmul(flow_mix, offsetX - inner - auto_slide_spacing);
-    for (int i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
-    {
-        left_slides[i].cx += shift;
-        right_slides[i].cx -= shift;
-    }
-}
-
-static void flow_tilt(struct slide_data *slide, int side, PFreal progress,
-                      PFreal normal_x, PFreal inner)
-{
-    PFreal slot = inner + fmul(auto_slide_spacing, progress);
-    slide->angle += side * fmul(itilt, fmul(flow_mix, PFREAL_ONE - progress));
-    slide->angle += side * fmul(FLOW_INNER_TILT, flow_mix);
-    slide->cx = normal_x + fmul(flow_mix, -side * slot - normal_x);
 }
 
 static void coverflow_idle(void)
 {
-    center_slide.angle = 0;
-    center_slide.cx = 0;
-    center_slide.cy = 0;
-    center_slide.distance = 0;
-    center_slide.slide_index = center_index;
-
-    int i;
-    for (i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++) {
-        struct slide_data *si = &left_slides[i];
-        si->angle = itilt;
-        si->cx = -(offsetX + auto_slide_spacing * i);
-        si->cy = 0;
-        si->slide_index = center_index - 1 - i;
-        si->distance = 0;
-    }
-
-    for (i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++) {
-        struct slide_data *si = &right_slides[i];
-        si->angle = -itilt;
-        si->cx = offsetX + auto_slide_spacing * i;
-        si->cy = 0;
-        si->slide_index = center_index + 1 + i;
-        si->distance = 0;
-    }
+    slide_frame = pose_frame = center_index << 16;
+    coverflow_place();
 }
 
 /* Every card on its resting place: one cover in the middle, and the rest
@@ -2702,6 +2671,11 @@ static void reset_slides(void)
 }
 
 
+/* The side covers: turned this many degrees from face-on, and stacked this
+ * far apart on screen (27.5 px), as on the stock player. */
+#define PF_SIDE_TILT   70
+#define PF_STACK_PITCH (55 * PFREAL_ONE / 2)
+
 /**
  Updates look-up table and other stuff necessary for the rendering.
  Call this when the viewport size or slide dimension is changed.
@@ -2723,7 +2697,7 @@ static void recalc_offsets(void)
                 - global_settings.album_covers_slide_tuck * PFREAL_ONE;
     PFreal cosr, sinr;
 
-    itilt = (global_settings.album_covers_parallel_slides ? 55 : 70) * IANGLE_MAX / 360;
+    itilt = PF_SIDE_TILT * IANGLE_MAX / 360;
     cosr = fcos(-itilt);
     sinr = fsin(-itilt);
     zo = fmuln(MAXSLIDE_LEFT_R, sinr, PFREAL_SHIFT - 2, 0);
@@ -2731,34 +2705,13 @@ static void recalc_offsets(void)
         zo + fmuln(xs, sinr, PFREAL_SHIFT - 2, 0), PFREAL_SHIFT - 2, 0)
         / CAM_DIST;
 
-    /* auto-compute side slide spacing for 3 visible slides per side.
-     * We distribute 3 visible slides across 2 intervals from offsetX
-     * to cx_last (the world-space cx where the last slide's far edge
-     * reaches the screen border).
-     */
-    {
-        PFreal cx_last;
-        if (global_settings.album_covers_parallel_slides) {
-            /* In parallel mode, each slide is rendered at cx=0 then
-             * shifted by screen_cx = CAM_DIST*cx/(CAM_DIST_R+zo).
-             * Find the canonical far-edge position (right bitmap edge
-             * of a right slide rendered at cx=0), then invert the
-             * shift to find the cx that reaches the screen border. */
-            PFreal edge_r = fdiv(CAM_DIST * fmul(-xs, cosr),
-                CAM_DIST_R + zo + fmul(-xs, sinr));
-            PFreal target = -DISPLAY_LEFT_R - edge_r;
-            /* Invert: cx = target * (CAM_DIST_R+zo) / CAM_DIST_R
-             *            = target + target * zo / CAM_DIST_R */
-            cx_last = target
-                + fmuln(target, zo, PFREAL_SHIFT - 2, 0) / CAM_DIST;
-        } else {
-            cx_last = (-DISPLAY_LEFT_R) + fmul(xs, cosr);
-        }
-        PFreal span = cx_last - offsetX;
-        if (span < PFREAL_ONE)
-            span = PFREAL_ONE;
-        auto_slide_spacing = span / 2;
-    }
+    /* The world step that puts PF_STACK_PITCH between outer edges on screen.
+     * A parallel slide moves whole, by CAM_DIST * cx / (CAM_DIST_R + zo); an
+     * angled one projects its outer edge from depth CAM_DIST_R + zo - xs sinr. */
+    PFreal depth = CAM_DIST_R + zo;
+    if (!global_settings.album_covers_parallel_slides)
+        depth += fmul(-xs, sinr);
+    stack_spacing = (int64_t)PF_STACK_PITCH * depth / CAM_DIST_R;
 }
 
 /* Nominal cover height. Covers are scaled into DISPLAY_WIDTH x DISPLAY_HEIGHT
@@ -3264,8 +3217,6 @@ static void render_slide_clipped(struct slide_data *slide, const int alpha,
     const int p_start_upper = (half_height - 1 - vertical_offset) * PFREAL_ONE;
     const int p_start_lower = (half_height - vertical_offset) * PFREAL_ONE;
     /* Once per slide, not once per pixel -- see struct pf_fade. */
-    /* Not named `fade`: that is the module-level animation ramp this function
-     * has no business shadowing. */
     struct pf_fade fd;
     fade_prepare(&fd, alpha);
     const struct pf_fade *f = (alpha == 256 && pf_neighbor_light == 256) ? NULL : &fd;
@@ -3542,9 +3493,6 @@ void set_current_slide(const int slide_index)
     buf_ctx_lock();
     int old_center_index = center_index;
     step = 0;
-    flow_mix = 0;
-    flow_mix_frames = 0;
-    flow_fast = false;
     unsigned scale = ui_theme_duration(UI_THEME_MOTION_ONE);
     bool clock_changed = pf_motion_scale != scale;
     pf_motion_scale = scale;
@@ -3553,8 +3501,6 @@ void set_current_slide(const int slide_index)
         pf_flat_interval = flat_duration(PF_FLAT_FLIP);
         pf_flat_last_input = motion_clock();
     }
-    flow_pose_clock = motion_clock();
-    flow_sampled_frame = 0;
     pf_random_spinning = false;
     center_index = fbound(0, slide_index, number_of_slides - 1);
     if (thread_is_running && old_center_index != center_index)
@@ -3665,46 +3611,22 @@ static void reverse_animation(int direction)
     anim_sampled_frame = 0;
 }
 
-/* Wheel clicks coming faster than the shortest flip (the same threshold at
- * which the flat view stops dealing) skip the flip altogether: each click puts
- * the next cover straight into its resting pose, one cover per click. A flip
- * still under way lands on its target first, so no click is lost. The 3D
- * view's fast-scroll tilt keeps its own ramp and releases as usual. */
-static bool wheel_is_fast(void)
+/* One wheel click in the 3D view: the target moves a slide, and the covers
+ * chase it from wherever they are. */
+static void flow_click(int direction)
 {
-    return pf_flat_interval < flat_duration(PF_FLAT_MIN);
-}
-
-static void step_instantly(int direction)
-{
-    int from = step ? target : center_index;
-    int index = fbound(0, from + direction, number_of_slides - 1);
-
-    if (step == 0 && index == center_index)
-        return;
-    buf_ctx_lock();
-    pf_random_spinning = false;
-    pf_state = pf_idle;
-    step = 0;
-    flow_landed_direction = -direction;
-    if (center_index != index)
-    {
-        center_index = index;
-        wake_pf_thread();
-    }
-    target = center_index;
-    slide_frame = center_index << 16;
-    fade = 256;
-    reset_slides();
-    buf_ctx_unlock();
+    target = fbound(0, target + direction, number_of_slides - 1);
+    if (pf_state != pf_scrolling &&
+        (slide_frame != target << 16 || pose_frame != target << 16))
+        start_animation();
 }
 
 static void show_previous_slide(void)
 {
     pf_random_spinning = false;
-    flow_note_wheel(step || center_index > 0);
-    if (wheel_is_fast()) {
-        step_instantly(-1);
+    flat_note_scroll();
+    if (!flat_view()) {
+        flow_click(-1);
         return;
     }
     if (step == 0) {
@@ -3715,16 +3637,16 @@ static void show_previous_slide(void)
     } else if ( step > 0 ) {
         reverse_animation(-1);
     } else {
-        target = fmax(0, center_index - 2);
+        target = MAX(0, target - 1);
     }
 }
 
 static void show_next_slide(void)
 {
     pf_random_spinning = false;
-    flow_note_wheel(step || center_index + 1 < number_of_slides);
-    if (wheel_is_fast()) {
-        step_instantly(1);
+    flat_note_scroll();
+    if (!flat_view()) {
+        flow_click(1);
         return;
     }
     if (step == 0) {
@@ -3735,7 +3657,7 @@ static void show_next_slide(void)
     } else if ( step < 0 ) {
         reverse_animation(1);
     } else {
-        target = fmin(center_index + 2, number_of_slides - 1);
+        target = MIN(target + 1, number_of_slides - 1);
     }
 }
 
@@ -3845,9 +3767,9 @@ static void flat_render(bool center)
  * that run in turn whether it hides this slide. It stops at the first gap or
  * the first member that cannot be shown to -- and culls up to whatever it
  * reached, so one member that does not carry costs only its own stretch rather
- * than the whole claim. That matters because the runs are genuinely mixed:
- * coverflow_animate() gives index 0 an angle of its own on whichever side the
- * scroll is coming from, and the centre slide tilts throughout.
+ * than the whole claim. That matters because the runs are genuinely mixed: in
+ * motion the turn leads the slide (see flow_update()), so any slide can be
+ * part way turned, and the centre one most of all.
  *
  * Everything is trimmed by PF_CULL_MARGIN before being relied on, because
  * slide_x_range() solves for the slide's edges directly while the render walks
@@ -3947,115 +3869,29 @@ static void cull_side(struct slide_data *side, const int *alpha,
     }
 }
 
-static int flow_brightness(int alpha, int mix)
-{
-    return alpha + fmul(256 - alpha, mix);
-}
-
+/* Every cover at full brightness, furthest from the middle first: each side
+ * outward in, then the middle slot, which holds the cover nearest the middle
+ * (see coverflow_place()). */
 static void coverflow_render(bool center)
 {
-    const int nleft = ALBUM_COVERS_NUM_SLIDES;
-    const int nright = ALBUM_COVERS_NUM_SLIDES;
-    /* Worked out before anything is drawn, because the cull needs to know which
-     * slides are on screen at all: one that is faded out covers nothing, and
-     * one drawn last covers everything under it. */
-    int left_alpha[MAX_SLIDES_COUNT], right_alpha[MAX_SLIDES_COUNT];
+    int alpha[MAX_SLIDES_COUNT];
     int left_to[MAX_SLIDES_COUNT], right_from[MAX_SLIDES_COUNT];
-    int center_alpha = 256;
-    /* The transitioning slide is drawn again on top once it is closer to screen
-     * centre than the outgoing centre slide, which gives a smooth z-order
-     * handover instead of a sudden flip. Its first render is then skipped
-     * rather than drawing a whole slide that is immediately overwritten. */
-    bool redraw_left_0 = false, redraw_right_0 = false;
-    int alpha, index;
+    int index;
 
     for (index = 0; index < ALBUM_COVERS_NUM_SLIDES; index++)
-        left_alpha[index] = right_alpha[index] = 0;
+        alpha[index] = 256;
 
-    if (step == 0) {
-        /* no animation, boring plain rendering */
-        for (index = nleft - 2; index >= 0; index--) {
-            alpha = ((index < nleft - 2) ? 256 : 128) - extra_fade;
-            if (alpha > 0)
-                left_alpha[index] = right_alpha[index] = alpha;
-        }
-    } else {
-        /* the first and last slide must fade in/fade out */
-        PFreal cd = (center_slide.cx >= 0) ? center_slide.cx : -center_slide.cx;
-        PFreal td;
+    cull_side(left_slides, alpha, center ? 256 : 0, left_to, false);
+    cull_side(right_slides, alpha, center ? 256 : 0, right_from, true);
 
-        if (step > 0) {
-            td = (right_slides[0].cx >= 0) ? right_slides[0].cx
-                                           : -right_slides[0].cx;
-            redraw_right_0 = (td < cd);
-        } else {
-            td = (left_slides[0].cx >= 0) ? left_slides[0].cx
-                                          : -left_slides[0].cx;
-            redraw_left_0 = (td < cd);
-        }
-
-        /* if step<0 and nleft==1, left_slides[0] is fading in  */
-        alpha = ((step > 0) ? 0 : ((nleft == 1) ? 256 : 128)) - fade / 2;
-        for (index = nleft - 1; index >= 0; index--) {
-            if (alpha > 0 && !(index == 0 && redraw_left_0))
-                left_alpha[index] = alpha;
-            alpha += 128;
-            if (alpha > 256) alpha = 256;
-        }
-        /* if step>0 and nright==1, right_slides[0] is fading in  */
-        /* -128, not -64. Both keep the ramp continuous across a crossing --
-         * that only constrains the difference between one index and the next --
-         * but only -128 also meets the resting state this side starts and ends
-         * a backwards scroll in. A scroll opens with fade at 256, so the ramp
-         * has to reproduce the step==0 alphas above at that value: index 2 at
-         * 128 needs X + 256 == 128. At -64 it came out 192 instead, and index 3
-         * came out at 64 where at rest it is not drawn at all -- so a cover
-         * appeared at the right edge, brightened its neighbour, and faded away
-         * again, once per scroll. The other three side/direction combinations
-         * were already exact; this was the only one adrift. */
-        alpha = ((step > 0) ? ((nright == 1) ? 128 : 0) : -128) + fade / 2;
-        for (index = nright - 1; index >= 0; index--) {
-            if (alpha > 0 && !(index == 0 && redraw_right_0))
-                right_alpha[index] = alpha;
-            alpha += 128;
-            if (alpha > 256) alpha = 256;
-        }
-
-        if (ALBUM_COVERS_NUM_SLIDES <= 2)   /* fading out center slide */
-            center_alpha = (step > 0) ? 256 - fade / 2 : 128 + fade / 2;
-    }
-
-    if (flow_mix)
-    {
-        for (index = 0; index < nleft; index++)
-        {
-            if (index || !redraw_left_0)
-                left_alpha[index] = flow_brightness(left_alpha[index], flow_mix);
-            if (index || !redraw_right_0)
-                right_alpha[index] = flow_brightness(right_alpha[index], flow_mix);
-        }
-        center_alpha = flow_brightness(center_alpha, flow_mix);
-    }
-
-    cull_side(left_slides, left_alpha, center ? center_alpha : 0, left_to, false);
-    cull_side(right_slides, right_alpha, center ? center_alpha : 0, right_from, true);
-
-    for (index = nleft - 1; index >= 0; index--)
-        if (left_alpha[index] > 0)
-            render_slide_clipped(&left_slides[index], left_alpha[index],
-                                 0, left_to[index]);
-    for (index = nright - 1; index >= 0; index--)
-        if (right_alpha[index] > 0)
-            render_slide_clipped(&right_slides[index], right_alpha[index],
-                                 right_from[index], LCD_WIDTH);
+    for (index = ALBUM_COVERS_NUM_SLIDES - 1; index >= 0; index--)
+        render_slide_clipped(&left_slides[index], 256, 0, left_to[index]);
+    for (index = ALBUM_COVERS_NUM_SLIDES - 1; index >= 0; index--)
+        render_slide_clipped(&right_slides[index], 256, right_from[index],
+                             LCD_WIDTH);
 
     if (center)
-        render_slide(&center_slide, center_alpha);
-
-    if (redraw_right_0)
-        render_slide(&right_slides[0], 256);
-    else if (redraw_left_0)
-        render_slide(&left_slides[0], 256);
+        render_slide(&center_slide, 256);
 }
 
 /* The rows the covers will disturb this frame: the ones they can reach now,
@@ -4120,64 +3956,10 @@ static void render_all_slides(int y, int h)
 #endif
 }
 
-/* The two layouts, mid-flip. `s` is the direction (the scroll's step), and
- * ftick how far through the gap between two covers this frame has got: 0 at the
- * start, PFREAL_ONE at the end. Everything above the call -- the timing, the
- * boundary snap that reassigns slide_index, the loader wake-ups -- is layout
- * independent, and stays in one copy in update_scroll_animation(). */
-static void coverflow_animate(int s, int tick, int neg, PFreal ftick)
-{
-    int i;
-
-    center_slide.angle = (s * tick * itilt) >> 16;
-    center_slide.cx = -s * fmul(offsetX, ftick);
-    center_slide.cy = 0;
-
-    for (i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++) {
-        struct slide_data *si = &left_slides[i];
-        si->angle = itilt;
-        si->cx =
-            -(offsetX + auto_slide_spacing * i + s
-                        * fmul(auto_slide_spacing, ftick));
-        si->cy = 0;
-    }
-
-    for (i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++) {
-        struct slide_data *si = &right_slides[i];
-        si->angle = -itilt;
-        si->cx =
-            offsetX + auto_slide_spacing * i - s
-                      * fmul(auto_slide_spacing, ftick);
-        si->cy = 0;
-    }
-
-    PFreal fneg = (neg * PFREAL_ONE) >> 16;
-    if (s > 0) {
-        right_slides[0].angle = -(neg * itilt) >> 16;
-        right_slides[0].cx = fmul(offsetX, fneg);
-    } else {
-        left_slides[0].angle = (neg * itilt) >> 16;
-        left_slides[0].cx = -fmul(offsetX, fneg);
-    }
-    if (flow_mix)
-    {
-        struct slide_data *incoming = s > 0 ? &right_slides[0] : &left_slides[0];
-        PFreal normal_x = incoming->cx;
-        PFreal inner = flow_inner_slot();
-        flow_shift_piles(inner);
-        /* The next card in the departing pile crosses the outer transition. */
-        struct slide_data *outer = s > 0 ? &left_slides[0] : &right_slides[0];
-        outer->angle += s * fmul(fmul(FLOW_INNER_TILT, flow_mix), PFREAL_ONE - ftick);
-        if (ALBUM_COVERS_NUM_SLIDES > 1)
-        {
-            struct slide_data *following = s > 0 ? &right_slides[1] : &left_slides[1];
-            following->angle -= s * fmul(fmul(FLOW_INNER_TILT, flow_mix), ftick);
-        }
-        flow_tilt(&center_slide, s, ftick, center_slide.cx, inner);
-        flow_tilt(incoming, -s, PFREAL_ONE - ftick, normal_x, inner);
-    }
-}
-
+/* Flat mid-flip. `s` is the direction (the scroll's step), and ftick how far
+ * through the gap between two covers this frame has got: 0 at the start,
+ * PFREAL_ONE at the end. The timing, the boundary snap that reassigns
+ * slide_index and the loader wake-ups stay in update_scroll_animation(). */
 static void flat_animate(int s, PFreal ftick)
 {
     struct slide_data *arriving;
@@ -4190,12 +3972,9 @@ static void flat_animate(int s, PFreal ftick)
      * and let the covers simply change in the middle, which is what you want
      * when hunting for one anyway.
      *
-     * The scroll then stops dead rather than settling, and that is deliberate.
-     * Replaying the missed move afterwards flickers: it has to bring back the
-     * cover a snapped scroll already took out of the middle. Holding a cover
-     * back so the last one can be dealt for real does not work either -- the
-     * engine only ever aims two ahead, so holding one back leaves a single gap
-     * and every cover ends up dealt. */
+     * The scroll then stops dead rather than settling. Replaying the missed
+     * move afterwards flickers: it has to bring back the cover a snapped
+     * scroll already took out of the middle. */
     if (pf_flat_snap) {
         flat_idle();
         return;
@@ -4235,29 +4014,12 @@ static void flat_animate(int s, PFreal ftick)
     pf_flat_moving = true;
 }
 
-/* The flip's speed at `frame`, as a step per PF_SPEED_FRAMES authored frames:
- * fastest leaving a cover and slowing to a crawl as it nears the target. */
-static int scroll_speed(int frame, uint32_t sample_clock)
+/* Flat's flip speed, as a step per PF_SPEED_FRAMES authored frames. Flat
+ * deals two covers per flip, one after the other, so it runs at a constant
+ * rate set by the pace the user is scrolling at: see flat_rate(). */
+static int scroll_speed(uint32_t sample_clock)
 {
-    /* The flat view deals two covers per flip, one after the other, so it needs
-     * long enough for both moves to read -- and the ease curve below spends
-     * most of a flip crawling through its last tenth, which is a rotation
-     * settling in the 3D view and a stall in this one. Constant rate instead,
-     * at the pace the user is scrolling: see flat_rate(). */
-    if (flat_view())
-        return 65536 * PF_SPEED_FRAMES / flat_rate(sample_clock);
-
-    const int max = 2 * 65536;
-    int fi = frame - (target << 16);
-    if (fi < 0)
-        fi = -fi;
-    fi = fmin(fi, max);
-
-    int ia = IANGLE_MAX * (fi - max / 2) / (max * 2);
-    int accel = 16384 * (PFREAL_ONE + fsin(ia)) / PFREAL_ONE;
-    int speed = 512 * global_settings.album_covers_transition_speed / 100
-              + accel * global_settings.album_covers_scroll_speed / 100;
-    return MAX(1, speed * UI_THEME_MOTION_ONE / (int)MAX(1u, pf_motion_scale));
+    return 65536 * PF_SPEED_FRAMES / flat_rate(sample_clock);
 }
 
 /* Authored frames since the flip's last sample. */
@@ -4274,12 +4036,69 @@ static int slide_at(int frame, int direction)
     return direction < 0 ? (frame + 0xffff) >> 16 : frame >> 16;
 }
 
+/* The middle slot changes hands: the slides take their new places and the
+ * loader learns the new centre. */
+static void move_center(int index)
+{
+    if (center_index == index)
+        return;
+    center_index = index;
+    wake_pf_thread();
+    if (pf_random_spinning)
+        keyclick_click(true, BUTTON_SCROLL_FWD);
+    center_slide.slide_index = center_index;
+    for (int i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
+        left_slides[i].slide_index = center_index - 1 - i;
+    for (int i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
+        right_slides[i].slide_index = center_index + 1 + i;
+}
+
+/* The covers at rest on the target. */
+static void land(void)
+{
+    reset_slides();
+    pf_state = pf_idle;
+    pf_random_spinning = false;
+    slide_frame = center_index << 16;
+    step = 0;
+}
+
+/* The 3D view's frame: both chases advance one step per refresh elapsed, so a
+ * frame that spans several, at half rate or after a late wake, lands where
+ * the same refreshes drawn one by one would have. See FLOW_FLOOR. */
+static void flow_update(void)
+{
+    unsigned frames = scroll_time(USEC_TIMER);
+    uint32_t frame_us = ui_frame_period();
+    int to = target << 16;
+    int num = global_settings.album_covers_scroll_speed * UI_THEME_MOTION_ONE;
+    int den = FLOW_SPEED_REF * (int)MAX(1u, pf_motion_scale);
+
+    for (; frames > 0 && (slide_frame != to || pose_frame != to); frames--)
+    {
+        slide_frame = flow_chase(slide_frame, to, FLOW_GAIN, num, den,
+                                 frame_us);
+        pose_frame = flow_chase(pose_frame, to, FLOW_POSE_GAIN, num, den,
+                                frame_us);
+    }
+
+    move_center((slide_frame + 0x8000) >> 16);
+    if (slide_frame == to && pose_frame == to)
+        land();
+    else
+        coverflow_place();
+}
+
 static void update_scroll_animation(void)
 {
     if (step == 0)
         return;
+    if (!flat_view())
+    {
+        flow_update();
+        return;
+    }
 
-    bool flat = flat_view();
     unsigned left = scroll_time(USEC_TIMER);
     int target_frame = target << 16;
     /* Clamp distance as well as time so crossing the collection bounds is
@@ -4290,21 +4109,19 @@ static void update_scroll_animation(void)
         remain = 0;
 
     /* Recalculate the speed for each elapsed frame, so a frame that advances
-     * several, at half rate or after a late wake, follows the same curve. */
+     * several, at half rate or after a late wake, follows the same pace. */
     int adv = 0;
-    uint32_t sample_clock = motion_clock();
     unsigned sample = anim_sampled_frame - left;
     while (left > 0 && adv < remain)
     {
-        if (flat)
-            sample_clock = anim_clock + ui_frame_clock(++sample);
+        uint32_t sample_clock = anim_clock + ui_frame_clock(++sample);
         int previous = slide_frame + adv * step;
-        int num = scroll_speed(previous, sample_clock) + anim_frac;
+        int num = scroll_speed(sample_clock) + anim_frac;
         int a = num / PF_SPEED_FRAMES;
 
         anim_frac = num - a * PF_SPEED_FRAMES;
         adv = MIN(adv + a, remain);
-        if (flat && slide_at(previous, step) != slide_at(slide_frame + adv * step, step))
+        if (slide_at(previous, step) != slide_at(slide_frame + adv * step, step))
             pf_flat_snap = flat_pace(sample_clock) < flat_duration(PF_FLAT_MIN);
         left--;
     }
@@ -4318,53 +4135,27 @@ static void update_scroll_animation(void)
      * away from the direction of travel resolves both, and matters because
      * a frame can land exactly on a boundary.
      *
-     * tick is progress through the gap, 0 at the start, and neg is what
-     * remains; both are measured along the direction of travel, so the
-     * geometry below reads the same either way. */
+     * tick is progress through the gap, 0 at the start, measured along the
+     * direction of travel, so the geometry below reads the same either way. */
     int offset = slide_frame - (center_index << 16);
     if (offset == 0 || (offset < 0) == (step < 0))
         anim_pose_step = step;
     int pose_step = anim_pose_step;
-    int index = slide_at(slide_frame, pose_step);
 
-    if (center_index != index) {
-        center_index = index;
-        wake_pf_thread();
-        if (pf_random_spinning)
-            keyclick_click(true, BUTTON_SCROLL_FWD);
-        center_slide.slide_index = center_index;
-        for (int i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
-            left_slides[i].slide_index = center_index - 1 - i;
-        for (int i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
-            right_slides[i].slide_index = center_index + 1 + i;
-    }
+    move_center(slide_at(slide_frame, pose_step));
 
-    /* Derived after the crossing, so nothing can describe the gap we just left:
-     * fade drives the whole alpha ramp and ftick the slide geometry, and
-     * carrying either across a crossing shows as a one-frame flash. */
+    /* Derived after the crossing, so nothing can describe the gap we just
+     * left: carrying ftick across a crossing shows as a one-frame flash. */
     int tick = (pose_step < 0) ? ((-slide_frame) & 0xffff)
                           : (slide_frame & 0xffff);
-    int neg = 65536 - tick;
     PFreal ftick = (tick * PFREAL_ONE) >> 16;
 
-    /* the leftmost and rightmost slide must fade away */
-    fade = ((pose_step < 0) ? neg : tick) / 256;
-
     if (slide_frame == target_frame) {
-        flow_landed_direction = -step;
-        reset_slides();
-        pf_state = pf_idle;
-        pf_random_spinning = false;
-        slide_frame = center_index << 16;
-        step = 0;
-        fade = 256;
+        land();
         return;
     }
 
-    if (flat_view())
-        flat_animate(pose_step, ftick);
-    else
-        coverflow_animate(pose_step, tick, neg, ftick);
+    flat_animate(pose_step, ftick);
 }
 
 static void cleanup(void)
@@ -4552,7 +4343,7 @@ static bool init(void)
         lcd_setfont(carousel_caption_font(false));
         init_scroll_lines();
         buffer = LCD_BUF + (pf_vp_y + pf_draw_y_shift) * BUFFER_WIDTH;
-        pf_state = pf_idle; step = 0; fade = 256;
+        pf_state = pf_idle; step = 0; target = center_index;
         recalc_offsets(); reset_slides();
         lcd_set_drawmode(DRMODE_FG);
         return true;
@@ -4682,7 +4473,6 @@ static bool init(void)
     slide_frame = 0;
     step = 0;
     target = 0;
-    fade = 256;
 
     recalc_offsets();
     reset_slides();
@@ -6292,7 +6082,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                           panel.missing || panel.play_pending || panel.to == FLIP_OPEN
                           ? HZ / 20 : HZ / 5;
         }
-        else if (!dark && (pf_state == pf_scrolling || flow_mix || art_owed ||
+        else if (!dark && (pf_state == pf_scrolling || art_owed ||
                            caption_owed || caption_flush_owed))
         {
             /* There is a frame coming, so wait for its deadline rather than
@@ -6577,7 +6367,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         if (update_scroll_lines())
             caption_owed = true;
 
-        if (pf_state == pf_scrolling || flow_mix)
+        if (pf_state == pf_scrolling)
             art_owed = true;
 
         if (seen_slides_loaded != pf_slides_loaded)
@@ -6623,7 +6413,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
          * caption step or a slide arriving does not switch the clock each
          * time; an idle screen gives the boost back. */
         dark = !lcd_active();
-        bool motion = !dark && (pf_state == pf_scrolling || flow_mix);
+        bool motion = !dark && pf_state == pf_scrolling;
         if (!motion && trace_attempted)
         {
             ui_perf_end(*trace);
@@ -6711,19 +6501,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             {
                 int was = drawn_index;
 
-                bool landing = flow_mix != 0;
-                flow_update_mix();
                 if (pf_state == pf_scrolling)
                     update_scroll_animation();
-                if (pf_state == pf_idle && (flow_mix || landing) && !flat_view())
-                {
-                    coverflow_idle();
-                    PFreal inner = flow_inner_slot();
-                    flow_shift_piles(inner);
-                    left_slides[0].angle += fmul(FLOW_INNER_TILT, flow_mix);
-                    right_slides[0].angle -= fmul(FLOW_INNER_TILT, flow_mix);
-                    flow_tilt(&center_slide, flow_landed_direction, 0, 0, inner);
-                }
                 /* The covers no longer wipe the caption on their way past, so
                  * the crossing that hands the middle to the next album is what
                  * says the caption is out of date. */
@@ -7012,9 +6791,10 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         {
             if (model->panel_request)
             {
-                if (pf_state == pf_scrolling || flow_mix)
+                /* The album the caption names: the scroll's target. */
+                if (pf_state == pf_scrolling)
                 {
-                    set_current_slide(center_index);
+                    set_current_slide(target);
                     pf_state = pf_idle;
                 }
                 ui_perf_end(*trace);

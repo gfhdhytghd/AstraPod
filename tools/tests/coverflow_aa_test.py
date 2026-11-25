@@ -39,8 +39,7 @@ static int pf_neighbor_light __attribute__((unused)) = 256;
 #define fabs fabsr
 #define global_settings dummy
 static struct { int album_covers_parallel_slides; } dummy;
-static int extra_fade, flow_mix;
-''' + between(geometry, 'static void recalc_offsets', 'static int slide_x_range') + (
+''' + between(geometry, '#define PF_SIDE_TILT', 'static int slide_x_range') + (
     between(source, 'static inline unsigned int fade_red_blue', 'static pix_t pf_color')
     if 'static inline unsigned int fade_red_blue' in source else '') + between(
     source, 'struct pf_fade\n', '/**\n * Render a single slide') + between(
@@ -56,7 +55,7 @@ int main(void) {
     image.size = (struct dim){128,128};
     pf_half_height=90; pf_lower_half=90;
     dummy.album_covers_parallel_slides=set_parallel;
-    recalc_offsets(); coverflow_idle();
+    recalc_offsets(); pose(0, 0);
     for (int x=0;x<128;x++)
         for (int y=0;y<128;y++)
             image.data[x*128+y]=(x&1)?0xffff:0;
@@ -105,7 +104,9 @@ program += '''
         clock_t start=clock();
         for(int cycle=0;cycle<50;cycle++) {
             for(int frame=0;frame<33;frame++) {
-                pose(frame==32?0:((cycle&1)?-1:1),frame*2048);
+                /* The row up to half a slide off rest, the turn ahead. */
+                int s=(frame==32)?0:((cycle&1)?-1:1);
+                pose(s*frame*1024, s*frame*3072);
                 memset(buffer,0,sizeof buffer);
                 coverflow_render();
                 checksum+=buffer[90*320+102];

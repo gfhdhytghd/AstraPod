@@ -29,9 +29,10 @@ beyond it.
 
 It sweeps the settings that move the geometry (centre margin, slide tuck,
 parallel slides), the two things that resize the viewport (status bar height and
-caption band), the scroll in both directions, and — the case that catches real
-bugs — covers of different shapes, since art keeps its aspect ratio and a tall
-or wide cover does not decode to the same size as a square one.
+caption band), the row anywhere within half a slide of rest with the turn level
+with it or up to two and a half slides ahead either way, and — the case that
+catches real bugs — covers of different shapes, since art keeps its aspect
+ratio and a tall or wide cover does not decode to the same size as a square one.
 
 Nothing here is built or shipped. It has no Rockbox headers and no dependencies.
 
@@ -40,6 +41,7 @@ gcc -O2 -W -Wall -Wextra -std=gnu11 -o pfgeom tools/pfgeom/pfgeom.c
 ./pfgeom          # the sweep; exit status is 0 only if nothing went stale
 ./pfgeom -x       # compare dy at every column instead of sampling three
 ./pfgeom -v       # print every frame, not just the failures
+./pfgeom -l       # where each cover sits at rest with the default settings
 ```
 
 `-x` is the one worth knowing about. `slide_covers()` decides whether one slide
@@ -51,7 +53,7 @@ does not, across the whole sweep.
 
 **Update this file's mirror when `carousel.c`'s geometry changes.** The banner
 in `pfgeom.c` marks the copied region: the fixed-point helpers, `fsin`,
-`recalc_offsets`, `coverflow_idle`, `coverflow_animate`, `slide_x_range`,
+`recalc_offsets`, `flow_cx`, `flow_place`, `coverflow_place`, `slide_x_range`,
 `slide_dy_at`, `slide_covers`, `cull_side`, and the column walk and draw order
 out of `render_slide_clipped`/`coverflow_render`. A mirror that has drifted
 still passes — it is checking itself — so the answer it gives is only worth what

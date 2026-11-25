@@ -22,6 +22,7 @@
 #include "config.h"
 #include "kernel.h"
 #include "backlight.h"
+#include "lcd.h"
 #include "backlight-target.h"
 #include "pmu-target.h"
 
@@ -49,6 +50,9 @@ void backlight_hw_on(void)
 
 void backlight_hw_off(void)
 {
+#ifndef BOOTLOADER
+    lcd_wait_idle();
+#endif
     pmu_write(0x29, 0);
 }
 
@@ -69,5 +73,5 @@ bool backlight_hw_init(void)
 void backlight_hw_kill(void)
 {
     pmu_write(0x2b, 0);  /* T_dimstep = 0 */
-    backlight_hw_off();
+    pmu_write(0x29, 0);
 }

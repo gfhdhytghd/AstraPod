@@ -133,6 +133,11 @@ void screen_dump(void)
     if (fd < 0)
         return;
 
+#if defined(IPOD_6G) && (CONFIG_PLATFORM & PLATFORM_NATIVE) && \
+    !defined(BOOTLOADER)
+    lcd_wait_idle();
+#endif
+
     if (screen_dump_hook)
     {
         screen_dump_hook(fd);

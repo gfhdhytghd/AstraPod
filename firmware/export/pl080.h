@@ -262,6 +262,8 @@ void dmac_ch_queue_2d(struct dmac_ch *ch, void *srcaddr, void *dstaddr,
 
 void dmac_ch_stop(struct dmac_ch* ch);
 
+bool dmac_ch_queue_until(struct dmac_ch *ch, void *srcaddr, void *dstaddr,
+                         size_t size, void *cb_data, uint32_t deadline);
 bool dmac_ch_running(struct dmac_ch *ch);
 void dmac_ch_poll(struct dmac_ch *ch);
 

@@ -11,6 +11,7 @@
 #include "kernel.h"
 #include "rbpaths.h"
 #include "lcd_te_debug.h"
+#include "lcd-s5l8702.h"
 #include "lcd-te-s5l8702.h"
 #include "ui/pace.h"
 #include "widgets/list.h"
@@ -21,7 +22,7 @@
 #define LCD_TE_PREVIEW_WIDTH 80
 #define LCD_TE_PREVIEW_LINES 26
 
-static const unsigned int timings[] = {0x33, 0x22, 0x21, 0x12, 0x11};
+static const unsigned int timings[] = {LCD_PHTIME_CLASSIC_DEFAULT};
 
 static int report_fd;
 static bool report_ok;
@@ -101,6 +102,8 @@ static void report_pacing(void)
                 (unsigned long)status.offset,
                 status.phased ? "" : " (phase unknown)",
                 (unsigned long)status.cost, (unsigned long)status.dma);
+    if (status.async)
+        report_line("LCD service=%lu us", (unsigned long)status.busy);
 }
 
 static int save_report(bool with_preview, bool survey)

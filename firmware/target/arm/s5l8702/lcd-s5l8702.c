@@ -31,6 +31,7 @@
 #include "pmu-target.h"
 #ifndef BOOTLOADER
 #include "lcd-te-s5l8702.h"
+#define HAVE_LCD_TE_QUEUE
 #endif
 #endif
 #include "backlight-target.h"
@@ -159,15 +160,26 @@ static struct dmac_tsk lcd_dma_tskbuf[LCD_DMA_TSKBUF_SZ];
 static struct dmac_lli volatile \
             lcd_dma_llibuf[LCD_DMA_LLIBUF_SZ] CACHEALIGN_ATTR;
 
-#if defined(IPOD_6G) && !defined(BOOTLOADER)
+#ifdef HAVE_LCD_TE_QUEUE
+static uint16_t lcd_second_stage[LCD_HEIGHT * LCD_WIDTH] CACHEALIGN_ATTR;
+static struct semaphore lcd_progress;
 static uint32_t lcd_dma_start_usec;
+static bool next_stage, lcd_async = true;
+static struct {
+    uint16_t *pixels;
+    int x, y, width;
+} pending_rect;
 
 static void lcd_dma_done(void *data)
 {
     uint32_t elapsed = USEC_TIMER - lcd_dma_start_usec;
     unsigned int size = (uintptr_t)data;
     if (size)
+    {
         lcd_te_dma_done(size & 0xffff, size >> 16, elapsed);
+        if (!is_thread_context())
+            semaphore_release(&lcd_progress);
+    }
 }
 #endif
 
@@ -175,7 +187,7 @@ static struct dmac_ch lcd_dma_ch =
 {
     .dmac = &s5l8702_dmac0,
     .prio = DMAC_CH_PRIO(4),
-#if defined(IPOD_6G) && !defined(BOOTLOADER)
+#ifdef HAVE_LCD_TE_QUEUE
     .cb_fn = lcd_dma_done,
     .start_usec = &lcd_dma_start_usec,
 #endif
@@ -408,47 +420,186 @@ static void displaylcd_setup(int x, int y, int width, int height)
     }
 }
 
-static void displaylcd_dma(int y, int width, int height) ICODE_ATTR;
-static void displaylcd_dma(int y, int width, int height)
+static void displaylcd_dma(int width, int height)
 {
     s5l_lcd_set_frame_mode();
     commit_dcache();
     void *data = NULL;
-#if defined(IPOD_6G) && !defined(BOOTLOADER)
-    if (lcd_te_supported() && is_thread_context() && irq_enabled())
+#ifdef HAVE_LCD_TE_QUEUE
+    if (lcd_te_supported())
     {
-        lcd_te_wait(y, width, height);
+        lcd_te_untimed_start();
         data = (void *)(uintptr_t)((unsigned int)height << 16 | width);
     }
-#else
-    (void)y;
 #endif
-    dmac_ch_queue(&lcd_dma_ch, lcd_dblbuf,
+    dmac_ch_queue(&lcd_dma_ch, lcd_dblbuf[0],
                   (void *)S5L8702_DADDR_PERI_LCD_WR, width * height * 2, data);
 }
 
-// TODO: wait if there is a DMA transfer in progress
-/* With interrupts off, as a panic or a crash draws, no completion
- * interrupt comes and no other thread may run: the end is polled for, for
- * 50 ms, ten times a full screen's transfer, and a channel that has not
- * finished by then is stopped, as the crash may be the DMA's own */
+#ifdef HAVE_LCD_TE_QUEUE
+bool lcd_te_dma_busy(void)
+{
+    return dmac_ch_running(&lcd_dma_ch);
+}
+
+static bool lcd_bus_idle(void)
+{
+    return (LCD_STATUS & 0x12) == 0x02;
+}
+
+/* Type 1 uses DCS commands. Never spin indefinitely in the timer IRQ. */
+static bool displaylcd_try_setup(int offset, int rows, uint32_t until)
+{
+    if (!lcd_bus_idle())
+        return false;
+
+    int x = pending_rect.x, y = pending_rect.y + offset;
+    int xe = x + pending_rect.width - 1;
+    int ye = y + rows - 1;
+    const uint8_t seq[] = {
+        R_COLUMN_ADDR_SET, x >> 8, x, xe >> 8, xe,
+        R_ROW_ADDR_SET, y >> 8, y, ye >> 8, ye,
+        R_MEMORY_WRITE,
+    };
+
+    udelay(1);
+    LCD_CON = lcd_cmd_mode;
+    for (unsigned int i = 0; i < sizeof seq; i++)
+    {
+        while (LCD_STATUS & 0x10)
+            if (!TIME_BEFORE(USEC_TIMER, until))
+                return false;
+        if (i % 5)
+            LCD_WDATA = seq[i];
+        else
+            LCD_WCMD = seq[i];
+    }
+    while (!(LCD_STATUS & 0x2))
+        if (!TIME_BEFORE(USEC_TIMER, until))
+            return false;
+    udelay(1);
+    LCD_CON = lcd_frame_mode;
+    return true;
+}
+
+bool lcd_te_start_dma(int offset, int rows, bool timed,
+                      uint32_t deadline, uint32_t *started)
+{
+    uint32_t until = USEC_TIMER + 100;
+    if (timed && TIME_BEFORE(deadline, until))
+        until = deadline;
+    if (!displaylcd_try_setup(offset, rows, until))
+        return false;
+
+    int width = pending_rect.width;
+    uint16_t *src = pending_rect.pixels + offset * width;
+    void *data = (void *)(uintptr_t)((unsigned int)rows << 16 | width);
+    void *dst = (void *)S5L8702_DADDR_PERI_LCD_WR;
+    unsigned int bytes = width * rows * sizeof(uint16_t);
+    if (timed)
+    {
+        if (!dmac_ch_queue_until(&lcd_dma_ch, src, dst,
+                                 bytes, data, deadline))
+            return false;
+    }
+    else
+        dmac_ch_queue(&lcd_dma_ch, src, dst, bytes, data);
+    *started = lcd_dma_start_usec;
+    semaphore_release(&lcd_progress);
+    return true;
+}
+
+static uint16_t *displaylcd_stage(void)
+{
+    /* One waiter owns the producer mutex. The IRQ releases the slot when
+     * it claims its buffer; the other buffer cannot be in use by DMA. */
+    while (lcd_te_pending())
+        semaphore_wait(&lcd_progress, TIMEOUT_BLOCK);
+    next_stage = !next_stage;
+    return next_stage ? lcd_second_stage : lcd_dblbuf[0];
+}
+
+static void displaylcd_submit(uint16_t *pixels, int x, int y,
+                              int width, int height, uint32_t copy)
+{
+    int flags = disable_irq_save();
+    pending_rect.pixels = pixels;
+    pending_rect.x = x;
+    pending_rect.y = y;
+    pending_rect.width = width;
+    lcd_te_submit(y, width, height, copy);
+    restore_irq(flags);
+}
+#endif
+
+/* Panic rendering cannot wait for its own DMA or timer interrupt. */
 static void displaylcd_wait_dma(void) ICODE_ATTR;
 static void displaylcd_wait_dma(void)
 {
-    unsigned long stop = USEC_TIMER + 50000;
+    bool can_wait = is_thread_context() && irq_enabled();
+    uint32_t stop = USEC_TIMER + 50000;
+
+#ifdef HAVE_LCD_TE_QUEUE
+    if (lcd_te_supported())
+    {
+        if (can_wait)
+        {
+            while (lcd_te_pending() || dmac_ch_running(&lcd_dma_ch))
+                semaphore_wait(&lcd_progress, TIMEOUT_BLOCK);
+        }
+        else
+            lcd_te_cancel();
+    }
+#endif
 
     while (dmac_ch_running(&lcd_dma_ch))
     {
-        if (irq_enabled())
+        if (can_wait)
             yield();
         else if (TIME_BEFORE(USEC_TIMER, stop))
             dmac_ch_poll(&lcd_dma_ch);
         else
             dmac_ch_stop(&lcd_dma_ch);
     }
+
+#ifdef HAVE_LCD_TE_QUEUE
+    if (lcd_te_supported() && lcd_ispowered)
+    {
+        stop = USEC_TIMER + 5000;
+        while (!lcd_bus_idle() && TIME_BEFORE(USEC_TIMER, stop))
+            if (can_wait)
+                yield();
+    }
+#endif
 }
 
-#if defined(IPOD_6G) && !defined(BOOTLOADER)
+#ifdef HAVE_LCD_TE_QUEUE
+bool lcd_te_async_enabled(void)
+{
+    return lcd_te_supported() && lcd_async;
+}
+
+void lcd_te_set_async_enabled(bool enable)
+{
+    if (!lcd_te_supported())
+        return;
+
+    mutex_lock(&lcd_mutex);
+    displaylcd_wait_dma();
+    lcd_async = enable;
+    mutex_unlock(&lcd_mutex);
+}
+
+void lcd_wait_idle(void)
+{
+    if (!is_thread_context() || !irq_enabled())
+        return;
+
+    mutex_lock(&lcd_mutex);
+    displaylcd_wait_dma();
+    mutex_unlock(&lcd_mutex);
+}
+
 bool lcd_te_acquire_bus(void)
 {
     if (!lcd_te_supported() || !is_thread_context() || !irq_enabled() ||
@@ -456,16 +607,12 @@ bool lcd_te_acquire_bus(void)
         return false;
 
     mutex_lock(&lcd_mutex);
-    uint32_t until = USEC_TIMER + 50000;
-    while (dmac_ch_running(&lcd_dma_ch))
+    if (!lcd_ispowered)
     {
-        if (!TIME_BEFORE(USEC_TIMER, until))
-        {
-            mutex_unlock(&lcd_mutex);
-            return false;
-        }
-        yield();
+        mutex_unlock(&lcd_mutex);
+        return false;
     }
+    displaylcd_wait_dma();
     return true;
 }
 
@@ -492,12 +639,15 @@ void lcd_update_rect(int x, int y, int width, int height)
     if (lcd_updates_held() && is_thread_context() && irq_enabled())
         return;
 
+    if (x < 0 || y < 0 || width <= 0 || height <= 0 ||
+        width > LCD_WIDTH - x || height > LCD_HEIGHT - y)
+        return;
+
     int pixels = width * height;
 #if (defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)) || defined(HAVE_PODLINK_PLUGIN_TEST)
     int original_height = height;
 #endif
     fb_data* p = FBADDR(x,y);
-    uint16_t* out = lcd_dblbuf[0];
     /* the lock's holder cannot run with interrupts off */
     bool lock = is_thread_context() && irq_enabled();
 #ifdef HAVE_CRUMBS
@@ -510,14 +660,19 @@ void lcd_update_rect(int x, int y, int width, int height)
         mutex_lock(&lcd_mutex);
     if (lcd_ispowered)
     {
-        // XXX: We contemplate the case where the LCD has entered SLEEP,
-        //      the s5l_lcd_set_command_mode() writes LCD_CONFIG
-        // XXX: It is also possible that if the LCD clockgate has been disabled,
-        //      the LCD_CONFIG = xxx may still be blocked by the while(status == ok),
-        //      since it does not check the same status bit as when writing command/data
+        uint16_t *stage = lcd_dblbuf[0];
+#ifdef HAVE_LCD_TE_QUEUE
+        bool queue = lock && lcd_te_supported();
+        if (queue)
+            stage = displaylcd_stage();
+        else
+#endif
+            displaylcd_wait_dma();
 
-        displaylcd_wait_dma();
-
+        uint16_t *out = stage;
+#ifdef HAVE_LCD_TE_QUEUE
+        uint32_t copy_start = USEC_TIMER;
+#endif
         /* Copy display bitmap to hardware */
         if (LCD_WIDTH == width) {
             /* Write all lines at once */
@@ -532,16 +687,35 @@ void lcd_update_rect(int x, int y, int width, int height)
             } while (--lines);
         }
 
+#ifdef HAVE_LCD_TE_QUEUE
+        uint32_t copy = 0;
+        if (queue)
+        {
+            commit_dcache_range(stage, pixels * sizeof(*stage));
+            copy = USEC_TIMER - copy_start;
+        }
+#endif
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
-        videoout_mirror_rgb565(lcd_dblbuf[0], x, y, width,
-                                      original_height, width);
+        videoout_mirror_rgb565(stage, x, y, width, original_height, width);
 #endif
 #ifdef HAVE_PODLINK_PLUGIN_TEST
         if (lock)
-            podlink_plugin_test_lcd_present(lcd_dblbuf[0], x, y, width, original_height);
+            podlink_plugin_test_lcd_present(stage, x, y, width,
+                                            original_height);
 #endif
-        displaylcd_setup(x, y, width, height);
-        displaylcd_dma(y, width, height);
+#ifdef HAVE_LCD_TE_QUEUE
+        if (queue)
+        {
+            displaylcd_submit(stage, x, y, width, height, copy);
+            if (!lcd_te_async_enabled())
+                displaylcd_wait_dma();
+        }
+        else
+#endif
+        {
+            displaylcd_setup(x, y, width, height);
+            displaylcd_dma(width, height);
+        }
     }
     if (lock)
         mutex_unlock(&lcd_mutex);
@@ -552,24 +726,52 @@ void lcd_update_rect(int x, int y, int width, int height)
 
 bool lcd_present_scene(const fb_data *pixels)
 {
-    if (!lcd_ispowered || lcd_mutex.blocker.thread ||
-        dmac_ch_running(&lcd_dma_ch))
+    if (!lcd_ispowered || lcd_mutex.blocker.thread)
         return false;
 
     mutex_lock(&lcd_mutex);
     bool ready = lcd_ispowered && !dmac_ch_running(&lcd_dma_ch);
+#ifdef HAVE_LCD_TE_QUEUE
+    bool queue = lcd_te_supported();
+    if (queue)
+        ready = lcd_ispowered && !lcd_te_pending();
+#endif
     if (ready)
     {
-        memcpy(lcd_dblbuf[0], pixels, FRAMEBUFFER_SIZE);
+        uint16_t *stage = lcd_dblbuf[0];
+#ifdef HAVE_LCD_TE_QUEUE
+        if (queue)
+            stage = displaylcd_stage();
+        uint32_t copy_start = USEC_TIMER;
+#endif
+        memcpy(stage, pixels, FRAMEBUFFER_SIZE);
+#ifdef HAVE_LCD_TE_QUEUE
+        uint32_t copy = 0;
+        if (queue)
+        {
+            commit_dcache_range(stage, FRAMEBUFFER_SIZE);
+            copy = USEC_TIMER - copy_start;
+        }
+#endif
 #if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
-        videoout_mirror_rgb565(lcd_dblbuf[0], 0, 0, LCD_WIDTH, LCD_HEIGHT,
-                             LCD_WIDTH);
+        videoout_mirror_rgb565(stage, 0, 0, LCD_WIDTH, LCD_HEIGHT, LCD_WIDTH);
 #endif
 #ifdef HAVE_PODLINK_PLUGIN_TEST
-        podlink_plugin_test_lcd_present(lcd_dblbuf[0], 0, 0, LCD_WIDTH, LCD_HEIGHT);
+        podlink_plugin_test_lcd_present(stage, 0, 0, LCD_WIDTH, LCD_HEIGHT);
 #endif
-        displaylcd_setup(0, 0, LCD_WIDTH, LCD_HEIGHT);
-        displaylcd_dma(0, LCD_WIDTH, LCD_HEIGHT);
+#ifdef HAVE_LCD_TE_QUEUE
+        if (queue)
+        {
+            displaylcd_submit(stage, 0, 0, LCD_WIDTH, LCD_HEIGHT, copy);
+            if (!lcd_te_async_enabled())
+                displaylcd_wait_dma();
+        }
+        else
+#endif
+        {
+            displaylcd_setup(0, 0, LCD_WIDTH, LCD_HEIGHT);
+            displaylcd_dma(LCD_WIDTH, LCD_HEIGHT);
+        }
     }
     mutex_unlock(&lcd_mutex);
     return ready;
@@ -640,8 +842,19 @@ void lcd_blit_yuv(unsigned char * const src[3],
 #ifdef HAVE_PODLINK_PLUGIN_TEST
         podlink_plugin_test_lcd_present(lcd_dblbuf[0], x, y, width, original_height);
 #endif
-        displaylcd_setup(x, y, width, height);
-        displaylcd_dma(y, width, height);
+#ifdef HAVE_LCD_TE_QUEUE
+        if (lcd_te_supported())
+        {
+            commit_dcache_range(lcd_dblbuf[0], width * height * 2);
+            displaylcd_submit(lcd_dblbuf[0], x, y, width, height, 0);
+            displaylcd_wait_dma();
+        }
+        else
+#endif
+        {
+            displaylcd_setup(x, y, width, height);
+            displaylcd_dma(width, height);
+        }
     }
     mutex_unlock(&lcd_mutex);
 }
@@ -690,6 +903,9 @@ static void lcd_powersave(void)
     }
 
     displaylcd_wait_dma();
+#ifdef HAVE_LCD_TE_QUEUE
+    lcd_te_stop();
+#endif
                                    // XXX: Do not change modes while data is being sent
     s5l_lcd_set_command_mode();
     lcd_run_seq(lcd_info->seq_sleep);
@@ -730,7 +946,7 @@ void lcd_awake(void)
     lcd_run_seq(lcd_info->seq_awake);
     lcd_ispowered = true;       // XXX: we have to put the lcd_ispowered before the lcd_update()
 
-#if defined(IPOD_6G) && !defined(BOOTLOADER)
+#ifdef HAVE_LCD_TE_QUEUE
     lcd_te_probe();
 #endif
 
@@ -758,6 +974,9 @@ void lcd_read_display_id(int mpuiface, uint8_t *lcd_id)
 void lcd_init_device(void)
 {
     mutex_init(&lcd_mutex);
+#ifdef HAVE_LCD_TE_QUEUE
+    semaphore_init(&lcd_progress, 1, 0);
+#endif
 
     lcd_target_enable_clocks(true);
 #if defined(IPOD_6G) || defined(IPOD_NANO3G)
@@ -807,7 +1026,7 @@ void lcd_init_device(void)
 #endif
 
     lcd_ispowered = true;
-#if defined(IPOD_6G) && !defined(BOOTLOADER)
+#ifdef HAVE_LCD_TE_QUEUE
     lcd_te_probe();
 #endif
 #ifdef HAVE_PODLINK_PLUGIN_TEST

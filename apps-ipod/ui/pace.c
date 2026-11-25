@@ -101,14 +101,17 @@ static void begin(struct ui_pace *pace, uint32_t start, unsigned frame,
 {
     /* Stay at half rate while the last run's transfers or work could not
      * fit one refresh; otherwise try full rate again. */
+    uint32_t cost_limit = pace->async ? period * 15 / 16 : period * 3 / 4;
     bool half = pace->divisor == 2 &&
-                (pace->dma > period * 15 / 16 || pace->cost > period * 3 / 4);
+                ((!pace->async && pace->dma > period * 15 / 16) ||
+                 pace->cost > cost_limit ||
+                 pace->busy > period + period / 16);
     pace->divisor = ui_te_pacing && half ? 2 : 1;
     pace->start = start;
     pace->frame = frame;
     pace->late = 0;
     pace->shown = pace->missed = 0;
-    pace->dma = 0;
+    pace->dma = pace->busy = 0;
     pace->running = true;
 }
 
@@ -132,7 +135,8 @@ static void follow_window(struct ui_pace *pace, uint32_t wait, uint32_t period)
 }
 #endif
 
-static void measure(struct ui_pace *pace, uint32_t cost, uint32_t period)
+static void measure(struct ui_pace *pace, uint32_t cost, uint32_t period,
+                    uint32_t busy)
 {
     pace->cost = pace->shown ? (pace->cost * 3 + cost) / 4 : cost;
     uint32_t dma = 0;
@@ -142,7 +146,7 @@ static void measure(struct ui_pace *pace, uint32_t cost, uint32_t period)
     lcd_vsync_last_transfer(&wait, &dma, &count);
     if (count == pace->transfers || !ui_te_pacing)
         dma = 0;
-    else
+    else if (!pace->async)
         follow_window(pace, wait, period);
     pace->transfers = count;
     /* The first reading may still be another screen's transfer. */
@@ -151,10 +155,13 @@ static void measure(struct ui_pace *pace, uint32_t cost, uint32_t period)
     else
         dma = 0;
 #endif
+    pace->busy = busy;
     if (!ui_te_pacing)
         pace->offset = 0;
     else if (pace->divisor == 1 &&
-             (cost > period * 15 / 16 || dma > period * 15 / 16) &&
+             (cost > period * 15 / 16 ||
+              (!pace->async && dma > period * 15 / 16) ||
+              busy > period + period / 16) &&
              ++pace->late >= LATE_LIMIT)
         pace->divisor = 2;
     pace->shown++;
@@ -164,20 +171,35 @@ uint32_t ui_pace_next(struct ui_pace *pace, uint32_t start)
 {
     uint32_t now = USEC_TIMER;
     uint32_t period = ui_frame_period();
+    uint32_t busy = 0, next_slot = now;
+    bool async = false;
+#ifdef HAVE_LCD_VSYNC
+    async = ui_te_pacing && lcd_vsync_async_timing(&busy, NULL, &next_slot, NULL);
+#endif
     int32_t drift = start - pace->start;
     last_pace = pace;
 
+    if (pace->async != async)
+    {
+        pace->async = async;
+        pace->divisor = 1;
+        pace->offset = pace->cost = 0;
+        pace->running = false;
+    }
     if (!pace->running || drift > (int32_t)period / 4 ||
         drift < -(int32_t)period / 4)
         begin(pace, start, ui_clock_frame(now - start), period);
     else if ((int32_t)(now - pace->due) < 0)
         return pace->due;
     else
-        measure(pace, now - pace->due, period);
+        measure(pace, now - pace->due, period, busy);
 
-    /* The first slot after now, kept on this animation's frame parity. */
+    /* Render ahead of the next staging slot by the measured CPU cost. */
+    uint32_t first = next_slot - MIN(pace->cost, period);
+    if (!async || (int32_t)(first - now) <= 0)
+        first = now;
     unsigned divisor = pace->divisor;
-    int32_t since = now - pace->start - pace->offset;
+    int32_t since = first - pace->start - pace->offset;
     unsigned slot = since < 0 ? 0 : ui_clock_frame(since) + 1;
     unsigned next = pace->frame + divisor;
     if (slot > next)
@@ -201,6 +223,8 @@ void ui_pace_get_status(struct ui_pace_status *status)
     status->offset = last_pace->offset;
     status->cost = last_pace->cost;
     status->dma = last_pace->dma;
+    status->busy = last_pace->busy;
+    status->async = last_pace->async;
     status->shown = last_pace->shown;
     status->missed = last_pace->missed;
     status->divisor = last_pace->divisor;

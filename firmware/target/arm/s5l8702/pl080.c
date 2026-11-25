@@ -349,9 +349,10 @@ static inline void clean_dcache_line(void volatile *addr)
     : : "r"((uint32_t)addr & ~(CACHEALIGN_SIZE - 1)));
 }
 
-void ICODE_ATTR dmac_ch_queue_2d(
+static bool ICODE_ATTR queue_2d(
                 struct dmac_ch *ch, void *srcaddr, void *dstaddr,
-                size_t size, size_t width, size_t stride, void *cb_data)
+                size_t size, size_t width, size_t stride, void *cb_data,
+                const uint32_t *deadline)
 {
     #ifdef PANIC_DEBUG
     PANIC_DEBUG_CHANNEL(ch);
@@ -436,6 +437,12 @@ void ICODE_ATTR dmac_ch_queue_2d(
 
     int flags = disable_irq_save();
 
+    if (deadline && !TIME_BEFORE(USEC_TIMER + 20, *deadline))
+    {
+        restore_irq(flags);
+        return false;
+    }
+
     ch->llibuf_top = next_lli;
 
     /* queue new task, launch it if it is the only queued task */
@@ -477,6 +484,22 @@ void ICODE_ATTR dmac_ch_queue_2d(
     }
 
     restore_irq(flags);
+    return true;
+}
+
+void ICODE_ATTR dmac_ch_queue_2d(struct dmac_ch *ch, void *srcaddr,
+                                void *dstaddr, size_t size, size_t width,
+                                size_t stride, void *cb_data)
+{
+    queue_2d(ch, srcaddr, dstaddr, size, width, stride, cb_data, NULL);
+}
+
+/* The caller owns an idle channel. Descriptor preparation may consume the
+ * remaining window, so check the deadline just before committing the task. */
+bool dmac_ch_queue_until(struct dmac_ch *ch, void *srcaddr, void *dstaddr,
+                         size_t size, void *cb_data, uint32_t deadline)
+{
+    return queue_2d(ch, srcaddr, dstaddr, size, size, size, cb_data, &deadline);
 }
 
 void dmac_ch_stop(struct dmac_ch* ch)

@@ -22,6 +22,12 @@ void lcd_vsync_sleep_until(uint32_t deadline);
 /* The last TE-synchronized transfer: how long it waited for its window and
  * how long the last DMA took, in microseconds. *count advances per transfer. */
 void lcd_vsync_last_transfer(uint32_t *wait, uint32_t *dma, unsigned int *count);
+
+/* Async LCD scheduling. The next slot is a USEC_TIMER deadline. Phase and
+ * the calling thread's copy time are UINT32_MAX when unavailable. Outputs
+ * may be NULL. False means asynchronous submission is inactive. */
+bool lcd_vsync_async_timing(uint32_t *busy, uint32_t *phase,
+                           uint32_t *next_slot, uint32_t *copy);
 #endif
 
 #endif

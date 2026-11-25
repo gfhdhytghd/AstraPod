@@ -19,6 +19,7 @@ enum shell_lcd_op {
     SHELL_LCD_DIAG,
     /* 5 to 9 are the LCD throughput experiments' ops; keep them free. */
     SHELL_LCD_PACE_STATUS = 10,
+    SHELL_LCD_ASYNC,
 };
 
 /* The ui_pace_status field SHELL_LCD_PACE_STATUS returns. */
@@ -44,9 +45,11 @@ static bool submit(unsigned int op, const uint8_t *data)
 {
     unsigned int arg = data[4];
     if (op < SHELL_LCD_TIMING ||
-        (op > SHELL_LCD_DIAG && op != SHELL_LCD_PACE_STATUS) ||
+        (op > SHELL_LCD_DIAG && op != SHELL_LCD_PACE_STATUS &&
+         op != SHELL_LCD_ASYNC) ||
         (op == SHELL_LCD_TIMING && arg && !lcd_te_debug_valid_timing(arg)) ||
-        ((op == SHELL_LCD_SYNC || op == SHELL_LCD_PACING) &&
+        ((op == SHELL_LCD_SYNC || op == SHELL_LCD_PACING ||
+          op == SHELL_LCD_ASYNC) &&
          arg > LCD_GET) ||
         (op == SHELL_LCD_DIAG && arg > 1) ||
         (op == SHELL_LCD_PACE_STATUS && arg >= PACE_FIELDS) ||
@@ -144,6 +147,11 @@ static int dispatch(unsigned int *value)
                 lcd_te_set_enabled(argument == LCD_ON);
             *value = lcd_te_enabled();
             return argument == LCD_ON && !*value ? ENODATA : 0;
+        case SHELL_LCD_ASYNC:
+            if (argument != LCD_GET)
+                lcd_te_set_async_enabled(argument == LCD_ON);
+            *value = lcd_te_async_enabled();
+            return 0;
         case SHELL_LCD_DIAG:
             return lcd_te_debug_save_report(argument);
     }

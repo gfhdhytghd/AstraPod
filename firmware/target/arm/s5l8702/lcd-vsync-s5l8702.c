@@ -77,6 +77,12 @@ void lcd_vsync_last_transfer(uint32_t *wait, uint32_t *dma, unsigned int *count)
     lcd_te_last_transfer(wait, dma, count);
 }
 
+bool lcd_vsync_async_timing(uint32_t *busy, uint32_t *phase,
+                           uint32_t *next_slot, uint32_t *copy)
+{
+    return lcd_te_async_timing(busy, phase, next_slot, copy);
+}
+
 static void wake_fire(void)
 {
     timer_stop();

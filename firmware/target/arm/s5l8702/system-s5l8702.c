@@ -234,7 +234,7 @@ void irq_handler(void)
  * watch (hang_catch.c). VIC line 7 carries all four 32-bit timers, so it is
  * routed as the FIQ only while no other of them can interrupt: E is the
  * free-running microsecond counter without interrupts, F is the generic
- * user timer, and H is unused. Should another timer
+ * user timer, and H schedules LCD TE writes on the Classic. If another timer
  * interrupt anyway, the line goes back to IRQ, its own handler runs, and
  * timer G's IRQ returns the line to the FIQ once that timer is stopped. */
 #define TIMER32_LINE (1 << IRQ_TIMER32)

@@ -527,6 +527,12 @@ bool lcd_updates_held(void);
 bool lcd_present_scene(const fb_data *pixels);
 #endif
 
+#if defined(IPOD_6G) && (CONFIG_PLATFORM & PLATFORM_NATIVE) && \
+    !defined(BOOTLOADER)
+/* In thread context, wait for staged updates and the active DMA. */
+void lcd_wait_idle(void);
+#endif
+
 #define FB_CURRENTVP_BUFFER (lcd_current_viewport->buffer)
 #define FBADDRBUF(buffer,x,y) ((fb_data*) buffer->get_address_fn(x,y))
 #define FBADDR(x,y) (FBADDRBUF(lcd_current_viewport->buffer,x,y))

@@ -6,6 +6,7 @@
 #include "lcd-te-s5l8702.h"
 #include "system.h"
 #include "s5l87xx.h"
+#include "gpio-s5l8702.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -16,16 +17,20 @@
 #define TE_MAX_US         17000u
 #define TE_JITTER_US        700u
 #define TE_PROBE_US       (3 * TE_MAX_US + 1000u)
-#define SYNC_WAIT_US      20000u
 #define POLL_US           3u
 #define POLL_YIELD_US     250u
 #define POLL_MAX_GAP_US   32u
-#define PHASE_GUARD_US    50
-/* Bit 1 is set when the FIFO accepts data; bit 4 is set while it drains,
- * the same pair lcd-s5l8702.c polls before a command. */
-#define LCD_READY_BIT    (1u << 1)
-#define LCD_BUSY_BIT     (1u << 4)
-#define LCD_IDLE_WAIT_US  5000u
+#define PHASE_GUARD_US    150
+#define START_BUDGET_US   120u
+#define SAMPLE_MARGIN_US  220u
+#define SEARCH_US         240u
+#define MAX_SAMPLE_GAP_US 600u
+#define TE_HIGH_MAX_US    1800u
+#define TE_LOST_PERIODS   3u
+
+/* Include bus and FIFO time around the measured 23.47 ms at 0x33. */
+#define FULL_DMA_FAST_US  22000
+#define FULL_DMA_SLOW_US  25500
 
 enum { GPIO_PORTS = 16, STATUS = GPIO_PORTS, INTCON, IRQ_RAW, SOURCE_COUNT };
 
@@ -51,16 +56,36 @@ static struct edge_stats lcd_edges[SOURCE_COUNT - GPIO_PORTS][32];
 static uint32_t pinmux[GPIO_PORTS];
 static struct te_pulse pulse;
 static struct dma_stats full_dma, band_dma, rect_dma;
-static unsigned int bus_timing = LCD_PHTIME_CLASSIC_DEFAULT;
-static uint32_t last_rise;
+struct te_edge {
+    uint32_t lower, upper;
+    bool valid;
+};
+
+enum sample_mode { SAMPLE_PRE_EDGE, SAMPLE_POST_EDGE, SAMPLE_SEARCH };
+
+static struct te_edge edge, previous_edge;
+static uint32_t last_rise, sample_at, sample_time, stable_since;
 static long last_rise_tick;
-static bool have_rise;
+static enum sample_mode sample_mode;
+static bool te_registered, sample_valid, sample_high, loss_confirmed;
+static bool observed_high;
+static unsigned int model_guard = PHASE_GUARD_US;
+static uint32_t observed_high_width, last_any_rise;
 static bool want_sync = true;
-static unsigned int lead_slots, trail_slots, timed_out, no_window;
-static uint32_t max_wait;
-static uint32_t last_wait, last_dma;
+static volatile bool pending;
+static bool deferred;
+static int first_phase, last_phase;
+static uint32_t admitted, slot_at, occupancy, last_copy, running_until;
+static unsigned int copy_owner;
+static unsigned int queued, deferred_count, untimed, no_window, trail_slots;
+static unsigned int loss_starts, gpio_rises, timer_rises, missed_starts;
+static uint32_t max_wait, max_irq_late, max_irq_bound, max_edge_error;
+static uint32_t active_wait, last_wait, last_dma;
+static uint32_t last_phase_us = UINT32_MAX;
 static unsigned int transfers;
 extern int lcd_type;
+
+static void schedule(void);
 
 bool lcd_te_supported(void)
 {
@@ -69,65 +94,68 @@ bool lcd_te_supported(void)
 
 bool lcd_te_enabled(void)
 {
-    return lcd_te_supported() && want_sync && pulse.valid;
+    return lcd_te_supported() && want_sync;
 }
 
 void lcd_te_set_enabled(bool enable)
 {
-    if (lcd_te_supported() && (!enable || pulse.valid))
-        want_sync = enable;
+    if (!lcd_te_supported())
+        return;
+
+    int flags = disable_irq_save();
+    want_sync = enable;
+    restore_irq(flags);
+}
+
+bool lcd_te_async_timing(uint32_t *busy, uint32_t *phase,
+                         uint32_t *next_slot, uint32_t *copy)
+{
+    int flags = disable_irq_save();
+    bool active = lcd_te_async_enabled();
+    if (busy)
+        *busy = occupancy;
+    if (phase)
+        *phase = last_phase_us;
+    if (next_slot)
+        *next_slot = pending ? slot_at : USEC_TIMER;
+    if (copy)
+        *copy = is_thread_context() && copy_owner == thread_self() ?
+                last_copy : UINT32_MAX;
+    restore_irq(flags);
+    return active;
 }
 
 bool lcd_te_timing(uint32_t *period, uint32_t *rise, long *rise_tick)
 {
-    if (!lcd_te_supported() || !pulse.valid)
-        return false;
-    *period = pulse.period;
-    *rise = last_rise;
-    *rise_tick = last_rise_tick;
-    return true;
+    int flags = disable_irq_save();
+    bool valid = lcd_te_supported() && pulse.valid && edge.valid;
+    if (valid)
+    {
+        *period = pulse.period;
+        *rise = last_rise;
+        *rise_tick = last_rise_tick;
+    }
+    restore_irq(flags);
+    return valid;
 }
 
 void lcd_te_last_transfer(uint32_t *wait, uint32_t *dma, unsigned int *count)
 {
+    int flags = disable_irq_save();
     *wait = last_wait;
     *dma = last_dma;
     *count = transfers;
+    restore_irq(flags);
 }
 
 unsigned int lcd_te_bus_timing(void)
 {
-    return bus_timing;
+    return LCD_PHTIME_CLASSIC_DEFAULT;
 }
 
 bool lcd_te_set_bus_timing(unsigned int timing)
 {
-    if (timing == bus_timing)
-        return true;
-    if (!lcd_te_acquire_bus())
-        return false;
-
-    /* DMA completion can precede the last bytes leaving the LCD FIFO. */
-    uint32_t until = USEC_TIMER + LCD_IDLE_WAIT_US;
-    while ((LCD_STATUS & (LCD_READY_BIT | LCD_BUSY_BIT)) != LCD_READY_BIT)
-    {
-        if (!TIME_BEFORE(USEC_TIMER, until))
-        {
-            lcd_te_release_bus();
-            return false;
-        }
-        yield();
-    }
-
-    /* S5L8700X spec 26-10 to 26-12: [7:4] PH1_TIME and [3:0]
-     * PH2_TIME set the two strobe pulse widths to (value + 1) clock
-     * units. The phase polarity and clock unit on S5L8702 are unverified. */
-    LCD_PHTIME = timing;
-    bus_timing = timing;
-    full_dma = band_dma = rect_dma = (struct dma_stats){0};
-    lead_slots = trail_slots = timed_out = no_window = max_wait = 0;
-    lcd_te_release_bus();
-    return true;
+    return timing == LCD_PHTIME_CLASSIC_DEFAULT;
 }
 
 static uint32_t read_source(unsigned int source)
@@ -153,13 +181,9 @@ static bool te_high(void)
     return (PDAT(TE_PORT) & TE_MASK) != 0;
 }
 
-void lcd_te_probe(void)
+static struct te_pulse measure_pulse(struct te_edge *rise_out)
 {
-    if (!lcd_te_supported() || !is_thread_context() || !irq_enabled())
-        return;
-
     struct te_pulse found = { 0 };
-    have_rise = false;
     uint32_t now = USEC_TIMER, until = now + TE_PROBE_US;
     uint32_t previous_time = now, next_yield = now + POLL_YIELD_US;
     uint32_t rise = 0, high = 0, period_sum = 0, high_sum = 0;
@@ -179,7 +203,7 @@ void lcd_te_probe(void)
                 uint32_t period = now - rise;
                 if (timely && seen_rise && frame_period(period))
                 {
-                    if (high && high < period / 2)
+                    if (high > MAX_SAMPLE_GAP_US && high <= TE_HIGH_MAX_US)
                     {
                         if (periods &&
                             (MAX(period, found.period) -
@@ -192,13 +216,12 @@ void lcd_te_probe(void)
                         high_sum += high;
                         if (++periods == 2)
                         {
-                            pulse = (struct te_pulse){
+                            *rise_out = (struct te_edge){
+                                previous_time, now, true
+                            };
+                            return (struct te_pulse){
                                 period_sum / periods, high_sum / periods, true
                             };
-                            last_rise = now;
-                            last_rise_tick = current_tick;
-                            have_rise = true;
-                            return;
                         }
                     }
                     else
@@ -224,7 +247,186 @@ void lcd_te_probe(void)
         }
         udelay(POLL_US);
     }
-    pulse = found;
+    return found;
+}
+
+static void timer_stop(void)
+{
+    THCMD = 0;
+    TSTAT = 0x07;
+}
+
+static void timer_arm(uint32_t now, uint32_t deadline)
+{
+    timer_stop();
+    THDATA0 = TIME_BEFORE(now, deadline) ? deadline - now : 1;
+    THCMD = 3; /* clear and enable */
+}
+
+static void record_rise(struct te_edge next, uint32_t estimate)
+{
+    uint32_t period = estimate - last_any_rise;
+    if (!pulse.valid && last_any_rise && frame_period(period) &&
+        observed_high_width > MAX_SAMPLE_GAP_US &&
+        observed_high_width <= TE_HIGH_MAX_US)
+    {
+        pulse = (struct te_pulse){period, observed_high_width, true};
+        /* Bound one period error plus the two samples bounding TE high. */
+        model_guard = 3 * MAX_SAMPLE_GAP_US;
+    }
+    last_any_rise = estimate;
+    previous_edge = edge;
+    if (current_tick - last_rise_tick > 2 + HZ / 20)
+        previous_edge.valid = false;
+    edge = next;
+    last_rise = estimate;
+    last_rise_tick = current_tick;
+    sample_valid = loss_confirmed = false;
+    observed_high = true;
+    if (pulse.valid)
+    {
+        sample_mode = SAMPLE_PRE_EDGE;
+        sample_at = estimate + pulse.period - SAMPLE_MARGIN_US;
+    }
+    else
+    {
+        sample_mode = SAMPLE_SEARCH;
+        sample_at = next.upper + SEARCH_US;
+    }
+}
+
+static void te_gpio_rise(struct eic_handler *handler)
+{
+    (void)handler;
+    uint32_t now = USEC_TIMER;
+    if (!te_high())
+    {
+        sample_valid = loss_confirmed = false;
+        return;
+    }
+    if (edge.valid && now - edge.upper < TE_MIN_US / 2)
+        return;
+
+    uint32_t lower = now - TE_HIGH_MAX_US;
+    if (sample_valid && !sample_high && now - sample_time < TE_HIGH_MAX_US)
+        lower = sample_time;
+
+    /* The GPIO controller latches an edge without capturing its time. */
+    gpio_rises++;
+    max_irq_bound = MAX(max_irq_bound, now - lower);
+    uint32_t estimate = now;
+    if (pulse.valid && edge.valid)
+    {
+        uint32_t predicted = last_rise + pulse.period;
+        if (!TIME_BEFORE(predicted, lower) && !TIME_BEFORE(now, predicted))
+        {
+            estimate = predicted;
+            max_irq_late = MAX(max_irq_late, now - predicted);
+        }
+    }
+    record_rise((struct te_edge){lower, now, true}, estimate);
+    schedule();
+}
+
+static struct eic_handler te_gpio = {
+    .gpio_n = TE_PORT * 8 + TE_BIT,
+    .type = EIC_INTTYPE_EDGE,
+    .level = EIC_INTLEVEL_HIGH,
+    .isr = te_gpio_rise,
+};
+
+void lcd_te_probe(void)
+{
+    if (!lcd_te_supported() || !is_thread_context() || !irq_enabled())
+        return;
+
+    struct te_edge rise = {0};
+    struct te_pulse measured = measure_pulse(&rise);
+    int flags = disable_irq_save();
+    edge.valid = previous_edge.valid = false;
+    sample_valid = loss_confirmed = observed_high = false;
+    observed_high_width = last_any_rise = 0;
+    sample_mode = SAMPLE_SEARCH;
+    sample_at = USEC_TIMER;
+    if (measured.valid)
+    {
+        pulse = measured;
+        model_guard = PHASE_GUARD_US;
+        record_rise(rise, rise.upper);
+    }
+    if (!te_registered)
+    {
+        /* PDAT exposes TE in its LCD mux; keep the board's pin setup. */
+        THCON = (1 << 12) | (4 << 8) | (1 << 6);
+        THPRE = 11; /* 12 MHz ECLK / (11 + 1) */
+        timer_stop();
+        eint_register(&te_gpio);
+        te_registered = true;
+    }
+    restore_irq(flags);
+}
+
+void lcd_te_stop(void)
+{
+    int flags = disable_irq_save();
+    if (te_registered)
+    {
+        timer_stop();
+        eint_unregister(&te_gpio);
+        te_registered = false;
+    }
+    edge.valid = previous_edge.valid = false;
+    restore_irq(flags);
+}
+
+static void sample_pin(uint32_t now)
+{
+    bool high = te_high();
+    bool close_sample = sample_valid &&
+                        now - sample_time <= MAX_SAMPLE_GAP_US;
+    bool same_level = close_sample && high == sample_high;
+
+    if (high)
+    {
+        if (close_sample && !sample_high &&
+            (!edge.valid || now - edge.upper >= TE_MIN_US / 2))
+        {
+            uint32_t estimate = sample_time + (now - sample_time) / 2;
+            max_edge_error = MAX(max_edge_error, now - sample_time);
+            timer_rises++;
+            record_rise((struct te_edge){sample_time, now, true}, estimate);
+        }
+        else if (sample_mode != SAMPLE_PRE_EDGE || !pulse.valid ||
+                 !edge.valid || !TIME_BEFORE(now, sample_at))
+        {
+            sample_mode = SAMPLE_SEARCH;
+            sample_at = now + SEARCH_US;
+        }
+        observed_high = true;
+    }
+    else
+    {
+        if (observed_high && edge.valid && now - edge.lower <= TE_HIGH_MAX_US)
+            observed_high_width = now - edge.lower;
+        observed_high = false;
+        if (sample_mode == SAMPLE_PRE_EDGE)
+        {
+            sample_mode = SAMPLE_POST_EDGE;
+            sample_at = now + 2 * SAMPLE_MARGIN_US;
+        }
+        else
+        {
+            sample_mode = SAMPLE_SEARCH;
+            sample_at = now + SEARCH_US;
+        }
+    }
+    if (!same_level)
+        stable_since = now;
+    uint32_t period = pulse.valid ? pulse.period : TE_MAX_US;
+    loss_confirmed = now - stable_since >= TE_LOST_PERIODS * period;
+    sample_valid = true;
+    sample_high = high;
+    sample_time = now;
 }
 
 void lcd_te_dma_done(unsigned int width, unsigned int height, uint32_t usec)
@@ -235,16 +437,19 @@ void lcd_te_dma_done(unsigned int width, unsigned int height, uint32_t usec)
     stats->min = stats->samples ? MIN(stats->min, usec) : usec;
     stats->max = MAX(stats->max, usec);
     stats->last = usec;
+    last_wait = active_wait;
     last_dma = usec;
+    transfers++;
     stats->width = width;
     stats->height = height;
     stats->samples++;
+    if (pending)
+        schedule();
 }
 
-/* DCS TE mode 0: high denotes vertical blanking. Assume the panel
- * scans logical rows top-to-bottom, like the DMA write. Bound the
- * first and last rows, using the measured full-frame rate per pixel. */
-static bool phase_window(int y, int width, int height, int *first, int *last)
+/* Trail each row of this scan and finish it before the next. Both
+ * endpoint inequalities also hold for the intervening rows. */
+static void phase_window(int y, int width, int height)
 {
     int period = pulse.period;
     int active = period - pulse.high;
@@ -253,88 +458,210 @@ static bool phase_window(int y, int width, int height, int *first, int *last)
     int row_time = (active + LCD_HEIGHT - 1) / LCD_HEIGHT;
     int pixels = width * height;
     int screen = LCD_WIDTH * LCD_HEIGHT;
-
-    /* Avoid scaling a stalled transfer or extrapolating across two scans. */
-    if (!full_dma.samples || full_dma.max >= 2 * pulse.period)
-        return false;
-
-    /* Both measured durations are below two refresh periods. */
-    int fast = full_dma.min * pixels / screen;
-    int slow = (full_dma.max * pixels + screen - 1) / screen;
+    int fast = FULL_DMA_FAST_US * pixels / screen;
+    int slow = (FULL_DMA_SLOW_US * pixels + screen - 1) / screen;
     int slow_row = (slow + height - 1) / height;
-    int lead_end = MIN(scan_top - slow_row, scan_bottom - slow);
 
-    if (slow < period && lead_end >= PHASE_GUARD_US)
-    {
-        *first = 0;
-        *last = lead_end - PHASE_GUARD_US;
-        return true;
-    }
-
-    /* Trail this scan but finish each row ahead of the following scan. */
-    *first = MAX(scan_top, scan_bottom - fast * (height - 1) / height)
-             + row_time + PHASE_GUARD_US;
-    *last = MIN(period, period + lead_end) - PHASE_GUARD_US;
-    return *first <= *last;
+    first_phase = MAX(scan_top, scan_bottom - fast * (height - 1) / height)
+                  + row_time + model_guard;
+    last_phase = period + MIN(scan_top - slow_row, scan_bottom - slow)
+                 - model_guard;
 }
 
-void lcd_te_wait(int y, int width, int height)
-{
-    if (!lcd_te_enabled() || !is_thread_context() || !irq_enabled())
-        return;
+static int pending_y, pending_width, rows_left, rows_done;
 
-    int first, last;
-    if (!phase_window(y, width, height, &first, &last))
+static bool start_window(struct te_edge bounds, uint32_t now,
+                         uint32_t *open, uint32_t *close)
+{
+    if (!pulse.valid || !bounds.valid)
+        return false;
+
+    *open = bounds.upper + first_phase;
+    *close = bounds.lower + last_phase;
+    return now - bounds.lower < 2 * pulse.period &&
+           TIME_BEFORE(*open + START_BUDGET_US, *close) &&
+           TIME_BEFORE(now + START_BUDGET_US, *close);
+}
+
+static void mark_deferred(void)
+{
+    if (!deferred)
     {
-        no_window++;
-        last_wait = 0;
-        transfers++;
+        deferred = true;
+        deferred_count++;
+    }
+}
+
+static bool next_window(uint32_t now, uint32_t *open, uint32_t *close,
+                        uint32_t *origin, int *rows)
+{
+    if (!pulse.valid)
+        return false;
+
+    *rows = rows_left;
+    phase_window(pending_y + rows_done, pending_width, *rows);
+    while (*rows > 1 && last_phase - first_phase <=
+                        (int)(START_BUDGET_US + MAX_SAMPLE_GAP_US))
+    {
+        *rows /= 2;
+        phase_window(pending_y + rows_done, pending_width, *rows);
+    }
+    if (start_window(previous_edge, now, open, close))
+        *origin = previous_edge.upper;
+    else if (start_window(edge, now, open, close))
+        *origin = edge.upper;
+    else
+    {
+        mark_deferred();
+        return false;
+    }
+    return true;
+}
+
+static void schedule(void)
+{
+    if (!pending)
+    {
+        if (te_registered)
+            timer_stop();
         return;
     }
 
-    uint32_t start = USEC_TIMER, now = start, until = start + SYNC_WAIT_US;
-    uint32_t previous_time = now, next_yield = now + POLL_YIELD_US;
-    bool level = te_high();
-
-    /* The tick check also expires the cached edge across a USEC_TIMER wrap. */
-    if ((unsigned long)(current_tick - last_rise_tick) > 1 + HZ / 50)
-        have_rise = false;
-
-    while (TIME_BEFORE((now = USEC_TIMER), until))
+    uint32_t now = USEC_TIMER;
+    uint32_t next = sample_at;
+    uint32_t open, close, origin;
+    int rows;
+    bool busy = lcd_te_dma_busy();
+    if (!want_sync || loss_confirmed)
+        next = busy ? now + SEARCH_US : now + 1;
+    else if (busy)
+        mark_deferred();
+    else if (next_window(now, &open, &close, &origin, &rows))
     {
-        bool next = te_high();
-        if (!level && next && now - previous_time <= POLL_MAX_GAP_US)
+        if (TIME_BEFORE(open, next))
+            next = open;
+        slot_at = TIME_BEFORE(now, open) ? open : now;
+        timer_arm(now, next);
+        return;
+    }
+
+    slot_at = TIME_BEFORE(now, next) ? next : now;
+    if (busy && TIME_BEFORE(slot_at, running_until))
+        slot_at = running_until;
+    timer_arm(now, next);
+}
+
+void INT_TIMERH(void)
+{
+    timer_stop();
+    uint32_t now = USEC_TIMER;
+    if (!pending)
+        return;
+
+    if (want_sync && !TIME_BEFORE(now, sample_at))
+        sample_pin(now);
+
+    if (!lcd_te_dma_busy())
+    {
+        uint32_t open, close, origin, started;
+        int rows = rows_left;
+        bool timed = want_sync && !loss_confirmed;
+        bool start = !timed;
+        if (timed && next_window(now, &open, &close, &origin, &rows))
+            start = !TIME_BEFORE(now, open);
+
+        if (start && lcd_te_start_dma(rows_done, rows, timed,
+                                      timed ? close : 0, &started))
         {
-            last_rise = now;
-            last_rise_tick = current_tick;
-            have_rise = true;
-        }
-        uint32_t age = now - last_rise;
-        if (have_rise && age >= (uint32_t)first && age <= (uint32_t)last)
-        {
-            if (first)
+            running_until = started +
+                (FULL_DMA_SLOW_US * rows * pending_width +
+                 LCD_WIDTH * LCD_HEIGHT - 1) / (LCD_WIDTH * LCD_HEIGHT);
+            rows_done += rows;
+            rows_left -= rows;
+            pending = rows_left > 0;
+            if (timed)
+            {
                 trail_slots++;
+                last_phase_us = started - origin;
+            }
             else
-                lead_slots++;
-            max_wait = MAX(max_wait, now - start);
-            last_wait = now - start;
-            transfers++;
+            {
+                lcd_te_untimed_start();
+                if (want_sync)
+                    loss_starts++;
+            }
+            active_wait = started - admitted;
+            if (rows_done == rows)
+                max_wait = MAX(max_wait, active_wait);
+            if (pending)
+                schedule();
             return;
         }
-        level = next;
-        previous_time = now;
-        if (!TIME_BEFORE(now, next_yield))
+        if (start)
         {
-            yield();
-            next_yield = USEC_TIMER + POLL_YIELD_US;
+            if (timed)
+                missed_starts++;
+            mark_deferred();
+            /* Retry after a late command/descriptor setup or FIFO drain. */
+            timer_arm(USEC_TIMER, USEC_TIMER + START_BUDGET_US);
+            return;
         }
-        udelay(POLL_US);
     }
-    have_rise = false;
-    max_wait = MAX(max_wait, now - start);
-    last_wait = now - start;
-    transfers++;
-    timed_out++;
+    schedule();
+}
+
+void lcd_te_submit(int y, int width, int height, uint32_t copy)
+{
+    uint32_t now = USEC_TIMER;
+    if (now - sample_time > MAX_SAMPLE_GAP_US)
+        sample_valid = loss_confirmed = false;
+    if (current_tick - last_rise_tick > 2 + HZ / 20)
+        edge.valid = previous_edge.valid = false;
+    if (!edge.valid || !TIME_BEFORE(now, sample_at))
+    {
+        sample_mode = SAMPLE_SEARCH;
+        sample_at = now;
+    }
+    pending_y = y;
+    pending_width = width;
+    rows_done = 0;
+    rows_left = height;
+    pending = true;
+    deferred = false;
+    admitted = now;
+    last_copy = copy;
+    copy_owner = thread_self();
+    occupancy = (FULL_DMA_SLOW_US * width * height +
+                 LCD_WIDTH * LCD_HEIGHT - 1) / (LCD_WIDTH * LCD_HEIGHT);
+    if (want_sync && pulse.valid)
+        occupancy = MAX(occupancy, pulse.period);
+    if (pulse.valid)
+    {
+        phase_window(y, width, height);
+        if (first_phase + (int)START_BUDGET_US >= last_phase)
+            no_window++;
+    }
+    queued++;
+    schedule();
+}
+
+bool lcd_te_pending(void)
+{
+    return pending;
+}
+
+void lcd_te_cancel(void)
+{
+    pending = false;
+    schedule();
+}
+
+void lcd_te_untimed_start(void)
+{
+    if (!pending)
+        active_wait = 0;
+    untimed++;
+    last_phase_us = UINT32_MAX;
 }
 
 static struct edge_stats *source_edges(unsigned int source)
@@ -478,18 +805,11 @@ bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...), bool survey)
         return false;
     }
 
-    /* Sampling reports a fresh probe without changing the active sync. */
-    struct te_pulse saved_pulse = pulse;
-    uint32_t saved_rise = last_rise;
-    long saved_rise_tick = last_rise_tick;
-    bool saved_have_rise = have_rise;
+    /* Measure a fresh pulse without changing the active scheduler. */
+    struct te_edge measured_rise;
+    struct te_pulse measured = measure_pulse(&measured_rise);
     bool sync_on = lcd_te_enabled();
-    lcd_te_probe();
-    struct te_pulse measured = pulse;
-    pulse = saved_pulse;
-    last_rise = saved_rise;
-    last_rise_tick = saved_rise_tick;
-    have_rise = saved_have_rise;
+    bool async_on = lcd_te_async_enabled();
 
     uint32_t elapsed = 0, max_gap = 0;
     unsigned int samples = 0;
@@ -498,17 +818,22 @@ bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...), bool survey)
     else
         pinmux[TE_PORT] = PCON(TE_PORT);
     struct dma_stats full = full_dma, band = band_dma, rect = rect_dma;
-    unsigned int lead = lead_slots, trail = trail_slots;
-    unsigned int misses = timed_out, bypasses = no_window;
-    uint32_t worst_wait = max_wait;
+    int flags = disable_irq_save();
+    unsigned int trail = trail_slots, misses = missed_starts;
+    unsigned int no_slot = no_window, accepted = queued, held = deferred_count;
+    unsigned int bypasses = untimed, lost = loss_starts;
+    unsigned int gpio = gpio_rises, sampled = timer_rises;
+    uint32_t irq_late = max_irq_late, irq_bound = max_irq_bound;
+    uint32_t sample_bound = max_edge_error, worst_wait = max_wait;
+    restore_irq(flags);
     unsigned int timing = LCD_PHTIME;
     unsigned int status = LCD_STATUS;
     lcd_te_release_bus();
 
-    report("TE candidates=%u | sync=%s", measured.valid,
-           sync_on ? "on" : "off");
+    report("TE candidates=%u | sync=%s | async=%s", measured.valid,
+           sync_on ? "on" : "off", async_on ? "on" : "off");
     report("LCD type 1 | panel readback unavailable");
-    report("LCD_PHTIME=0x%02x | DMA samples since timing change", timing);
+    report("LCD_PHTIME=0x%02x | DMA samples since boot", timing);
     report("LCD_STATUS after DMA=0x%08x", status);
     report("TE pin %s | PDAT6[7] mux=%u",
            measured.valid ? "selected" : "unqualified", pinmux[TE_PORT] >> 28);
@@ -526,9 +851,14 @@ bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...), bool survey)
                millihz / 1000, millihz % 1000);
     }
     report("TE phase assumes active-high blanking, top-to-bottom scan");
-    report("TE lead=%u trail=%u timeout=%u no-window=%u",
-           lead, trail, misses, bypasses);
-    report("TE max wait=%u us", worst_wait);
+    report("TE trail=%u start-retry=%u no-window=%u", trail, misses, no_slot);
+    report("LCD queued=%u coalesced=0 deferred=%u untimed=%u te-lost=%u",
+           accepted, held, bypasses, lost);
+    report("LCD max queue wait=%u us", worst_wait);
+    report("TE GPIO rises=%u timer rises=%u", gpio, sampled);
+    report("TE IRQ latency estimate max=%u us bound=%u us",
+           irq_late, irq_bound);
+    report("TE timer edge uncertainty max=%u us", sample_bound);
     report_dma(report, "full", &full);
     report_dma(report, "band (320px wide, 60-239 rows)", &band);
     report_dma(report, "other rect", &rect);

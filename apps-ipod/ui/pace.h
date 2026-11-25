@@ -9,17 +9,17 @@
  * across animations: the rate and wake phase it learns carry over. */
 struct ui_pace {
     const void *site;
-    uint32_t start, due, offset, cost, dma;
+    uint32_t start, due, offset, cost, dma, busy;
     unsigned frame, shown, missed, transfers;
     uint8_t divisor, late;
-    bool running;
+    bool running, async;
 };
 
 struct ui_pace_status {
-    uint32_t period, offset, cost, dma;
+    uint32_t period, offset, cost, dma, busy;
     unsigned shown, missed;
     uint8_t divisor;
-    bool enabled, measured, phased;
+    bool enabled, measured, phased, async;
 };
 
 /* TE pacing: on, frames follow the panel refresh and a loop that cannot

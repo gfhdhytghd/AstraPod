@@ -71,9 +71,10 @@ python3 podlink_shell.py --serial USB_SERIAL log-fetch /.rockbox/crumbs-last.txt
 
 ```sh
 python3 podlink_shell.py --serial USB_SERIAL lcd-timing
-python3 podlink_shell.py --serial USB_SERIAL lcd-timing 0x22
 python3 podlink_shell.py --serial USB_SERIAL lcd-te-sync get
-python3 podlink_shell.py --serial USB_SERIAL lcd-te-sync off
+python3 podlink_shell.py --serial USB_SERIAL lcd-async get
+python3 podlink_shell.py --serial USB_SERIAL lcd-async off
+python3 podlink_shell.py --serial USB_SERIAL lcd-async on
 python3 podlink_shell.py --serial USB_SERIAL lcd-pacing off
 python3 podlink_shell.py --serial USB_SERIAL lcd-pacing status
 python3 podlink_shell.py --serial USB_SERIAL lcd-diag
@@ -81,10 +82,11 @@ python3 podlink_shell.py --serial USB_SERIAL log-fetch /.rockbox/lcd-te-diag.txt
 python3 podlink_shell.py --serial USB_SERIAL ui-perf ./ui-perf.txt
 ```
 
-- `lcd-timing` 读取 `LCD_PHTIME`。带参数时接受 `0x33`、`0x22`、`0x21`、
-  `0x12` 或 `0x11`。默认值为 `0x33`。成功切换时清空 DMA 样本。
+- `lcd-timing` 读取固定的 `LCD_PHTIME` 值 `0x33`。
 - `lcd-te-sync` 和 `lcd-pacing` 都接受 `on`、`off` 和 `get`。
-  TE 同步默认在探测到有效信号后启用。无可用信号时，`lcd-te-sync on` 返回错误。
+  TE 同步默认开启。信号连续丢失时，驱动记录无 TE 定时的启动。
+- `lcd-async on|off|get` 切换或查询 LCD type 1 的异步提交。默认开启。
+  对比两种提交方式时，保持 `lcd-te-sync on`，执行相同的滑动，再分别下载日志。
 - `lcd-pacing` 选择界面动画的时钟，默认开启。开启时，动画帧跟随面板刷新，
   约 66.96 Hz。一帧在一次刷新内画不完时，该动画改为每两次刷新显示一帧。
   关闭时，动画按 60 fps 运行。机身的「Debug → UI TE pacing」是同一开关。
@@ -98,18 +100,19 @@ python3 podlink_shell.py --serial USB_SERIAL ui-perf ./ui-perf.txt
 - `lcd-diag` 等待 `/.rockbox/lcd-te-diag.txt` 写入成功。`lcd-diag survey`
   另外用一秒采样全部 GPIO 和 LCD 信号，这一秒内机身画面停止更新。
   机身预览不做这项采样。报告开头是
-  `lcd-pacing status` 的内容。其后是当前 `LCD_PHTIME` 和上次切换时序后的
-  DMA 次数与耗时。运行前保持 LCD 唤醒。
-  要收集新时序下的 DMA 样本，切换后让界面先绘制相应画面，再运行诊断。
+  `lcd-pacing status` 的内容。其后是 `LCD_PHTIME`、DMA 次数与耗时，
+  以及排队、推迟和无 TE 定时启动的计数。运行前保持 LCD 唤醒。
   `debug "LCD TE diagnostics"` 仍打开机身预览，命令计数在退出预览时更新。
 - `log-fetch` 下载本次诊断报告。`ui-perf OUTPUT` 下载已有的
   `/.rockbox/ui-perf.txt`。要启用帧耗时采集，开机前放置
   `/.rockbox/ui-perf.enable`。两种下载都使用 MS3。
+  异步模式下，`submit_f` 记录复制耗时。`submit_overhead_f` 记录其余提交耗时。
+  `last_dma_start_phase_us` 记录采样时最近一次 DMA 相对其调度 TE 边沿的启动相位。
 
-LCD 控制使用 EP0 请求 `0x5d`、索引 `0x4955`。OUT 值 1、2、3、4、10
-对应时序、TE 同步、动画节奏开关、诊断和动画节奏状态。值 5 至 9
+LCD 控制使用 EP0 请求 `0x5d`、索引 `0x4955`。OUT 值 1、2、3、4、10、11
+对应时序、TE 同步、动画节奏开关、诊断、动画节奏状态和异步提交开关。值 5 至 9
 保留给 LCD 吞吐实验，本固件拒绝这些值。负载为小端 `<IB>`，
-包含非零请求标识和一个参数字节。时序参数 0 表示读取。两个开关的参数
+包含非零请求标识和一个参数字节。时序参数 0 表示读取。三个开关的参数
 0、1、2 分别表示关闭、启用、读取。诊断参数 0 跳过信号采样，1 加入采样。
 状态的参数选择一个字段：0 周期（µs），1 帧率除数（1 全速，2 半速，
 0 尚无动画），2 已显示帧数，3 错过的刷新数，4 唤醒偏移（µs），

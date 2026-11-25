@@ -127,7 +127,11 @@ void gpio_group_set(int group, uint32_t mask, uint32_t cfg)
  * eINT API
  */
 #ifndef EINT_MAX_HANDLERS
+#if defined(IPOD_6G) && !defined(BOOTLOADER)
+#define EINT_MAX_HANDLERS 2
+#else
 #define EINT_MAX_HANDLERS 1
+#endif
 #endif
 static struct eic_handler* l_handlers[EINT_MAX_HANDLERS] IDATA_ATTR;
 

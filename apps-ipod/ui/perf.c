@@ -11,6 +11,7 @@
 #include "pace.h"
 #include "core_alloc.h"
 #include "file.h"
+#include "lcd-vsync.h"
 #include "logfile.h"
 #include "rbpaths.h"
 #include "string-extra.h"
@@ -30,7 +31,8 @@
 /* Times are in USEC_TIMER units and frames are panel refreshes. A phase is
  * microseconds after the predicted TE rise, UINT32_MAX when unknown. */
 struct frame_sample {
-    uint32_t render, submit, interval, skipped, phase;
+    uint32_t render, submit, submit_overhead, interval, skipped, phase;
+    uint32_t dma_phase;
     uint8_t divisor;
     uint8_t parts;
     uint16_t art_rows, caption_rows;
@@ -44,7 +46,7 @@ struct frame_capture {
     int32_t slot_phase;
     uint8_t parts_pending;
     uint16_t art_pending, caption_pending;
-    bool enabled, measured;
+    bool enabled, measured, async;
     struct frame_sample samples[PERF_CAPACITY];
     uint32_t scratch[PERF_CAPACITY];
 };
@@ -57,6 +59,12 @@ static unsigned serial, owner;
 static uint32_t add_time(uint32_t a, uint32_t b)
 {
     return a > UINT32_MAX - b ? UINT32_MAX : a + b;
+}
+
+static uint32_t frame_work(const struct frame_sample *sample)
+{
+    return add_time(sample->render,
+                    add_time(sample->submit, sample->submit_overhead));
 }
 
 static uint32_t as_frames(uint32_t elapsed, uint32_t period_q8)
@@ -134,10 +142,18 @@ void ui_perf_note_submit(uint32_t elapsed_clock)
     ui_pace_get_status(&pace);
     uint32_t period_q8 = ui_frame_period_q8();
     uint32_t period = (period_q8 + 128) >> 8;
+    uint32_t dma_phase = UINT32_MAX, copy = UINT32_MAX;
+    bool async = false;
+#ifdef HAVE_LCD_VSYNC
+    async = lcd_vsync_async_timing(NULL, &dma_phase, NULL, &copy);
+#endif
+    uint32_t submit = async && copy <= elapsed_clock ? copy : elapsed_clock;
     struct frame_capture *capture = core_get_data_pinned(active_handle);
     struct frame_sample sample = { .render = capture->render_pending,
-                                  .submit = elapsed_clock,
+                                  .submit = submit,
+                                  .submit_overhead = elapsed_clock - submit,
                                   .phase = ui_clock_phase(clock - elapsed_clock),
+                                  .dma_phase = dma_phase,
                                   .divisor = MAX(1, pace.divisor),
                                   .parts = capture->parts_pending,
                                   .art_rows = capture->art_pending,
@@ -148,6 +164,7 @@ void ui_perf_note_submit(uint32_t elapsed_clock)
     capture->period_q8 = period_q8;
     capture->enabled = pace.enabled;
     capture->measured = pace.measured;
+    capture->async = async;
     capture->half_frames += sample.divisor > 1;
     if (capture->seen)
     {
@@ -166,7 +183,7 @@ void ui_perf_note_submit(uint32_t elapsed_clock)
         capture->worst_interval = MAX(sample.interval, capture->worst_interval);
     }
     capture->last_submission = clock;
-    uint32_t work = add_time(sample.render, sample.submit);
+    uint32_t work = frame_work(&sample);
     capture->worst_render = MAX(sample.render, capture->worst_render);
     capture->render_misses += sample.render > period;
     capture->worst_work = MAX(work, capture->worst_work);
@@ -195,7 +212,7 @@ static uint32_t percentile(struct frame_capture *capture, unsigned first,
     {
         const struct frame_sample *sample = &capture->samples[i % PERF_CAPACITY];
         if (value == WORK)
-            capture->scratch[count++] = add_time(sample->render, sample->submit);
+            capture->scratch[count++] = frame_work(sample);
         else if (value == INTERVAL && i != 0)
             capture->scratch[count++] = sample->interval;
         else if (value == PHASE && sample->phase != UINT32_MAX)
@@ -223,7 +240,8 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
 {
     static const char header[] =
         "frame,render_f,submit_f,work_f,interval_f,work_miss,interval_miss,skipped_slots,"
-        "divisor,phase_us,parts,art_rows,caption_rows\n";
+        "divisor,phase_us,parts,art_rows,caption_rows,submit_overhead_f,"
+        "last_dma_start_phase_us\n";
     static const char *const parts[] = { "-", "a", "c", "ac" };
     uint32_t period_q8 = capture->period_q8;
     uint32_t period = (period_q8 + 128) >> 8;
@@ -231,21 +249,23 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
     for (unsigned i = first; i < capture->seen; ++i)
     {
         const struct frame_sample *sample = &capture->samples[i % PERF_CAPACITY];
-        uint32_t work = add_time(sample->render, sample->submit);
+        uint32_t work = frame_work(sample);
         unsigned work_f = as_frames(work, period_q8);
         unsigned render_f = as_frames(sample->render, period_q8);
         unsigned submit_f = as_frames(sample->submit, period_q8);
+        unsigned overhead_f = as_frames(sample->submit_overhead, period_q8);
         unsigned interval_f = as_frames(sample->interval, period_q8);
         bool interval_miss =
             sample->interval > interval_budget(period, sample->divisor);
         int n = snprintf(output + used, size - used,
             "%u," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT
-            ",%u,%u,%u,%u,%d,%s,%u,%u\n",
+            ",%u,%u,%u,%u,%d,%s,%u,%u," FRAME_FORMAT ",%d\n",
             i + 1, FRAME_ARG(render_f), FRAME_ARG(submit_f), FRAME_ARG(work_f),
             FRAME_ARG(interval_f), work > period, interval_miss,
             (unsigned)sample->skipped, sample->divisor,
             phase_arg(sample->phase), parts[sample->parts & 3],
-            sample->art_rows, sample->caption_rows);
+            sample->art_rows, sample->caption_rows, FRAME_ARG(overhead_f),
+            phase_arg(sample->dma_phase));
         if (n < 0 || (size_t)n >= size - used)
             break;
         used += n;
@@ -270,7 +290,7 @@ void ui_perf_end(unsigned token)
     unsigned interval_worst = as_frames(capture->worst_interval, period_q8);
     int phase_p50 = phase_arg(percentile(capture, first, PHASE, 50));
     int phase_p99 = phase_arg(percentile(capture, first, PHASE, 99));
-    size_t rows_size = 160 + (size_t)retained * 116;
+    size_t rows_size = 200 + (size_t)retained * 144;
     int rows_handle = retained ? core_alloc_free_space(rows_size) : 0;
     char *rows = NULL;
     size_t rows_used = 0;
@@ -291,14 +311,15 @@ void ui_perf_end(unsigned token)
         "work_worst_f=" FRAME_FORMAT " interval_worst_f=" FRAME_FORMAT " "
         "work_misses=%u interval_misses=%u skipped_slots=%u "
         "render_worst_f=" FRAME_FORMAT " render_misses=%u "
-        "period_us=%u te=%s rate=%s half_frames=%u "
+        "period_us=%u te=%s async=%s rate=%s half_frames=%u "
         "phase_p50_us=%d phase_p99_us=%d\n",
         capture->route, capture->seen, retained, first, rows ? retained : 0,
         FRAME_ARG(work_p99), FRAME_ARG(interval_p99),
         FRAME_ARG(work_worst), FRAME_ARG(interval_worst),
         capture->work_misses, capture->interval_misses, (unsigned)capture->skipped,
         FRAME_ARG(render_worst), capture->render_misses,
-        (unsigned)((period_q8 + 128) >> 8), te, rate, capture->half_frames,
+        (unsigned)((period_q8 + 128) >> 8), te,
+        capture->async ? "on" : "off", rate, capture->half_frames,
         phase_p50, phase_p99);
     core_put_data_pinned(capture);
     core_free(handle);

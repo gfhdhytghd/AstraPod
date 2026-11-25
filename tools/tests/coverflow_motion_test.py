@@ -6,8 +6,10 @@ beside a floating-point model of the stock player's motion
 (.specifications/coverflow-stock-motion.md, section 9.9): every frame, the
 row's position and every placed cover's turn and x must match it. On top of
 that: a single click's timing, the shapes at 3, 10 and 20 clicks a second,
-the stop after a fast spin, a reversal and the ends. pfgeom then checks the
-draw order and that neighbouring covers do not cross where the motion is slow.
+the stop after a fast spin, a reversal and the ends. Each refresh's push
+(section 9.10) is checked against stepping each cover back until it clears.
+pfgeom then checks the draw order, that no two covers cross at any speed,
+and the depth of the cover that recedes in a fan.
 Flat's timeline and the frame deadlines run through the same copies.
 
 Usage: python3 tools/tests/coverflow_motion_test.py <scratch dir>
@@ -168,8 +170,95 @@ static double ref_x(int i)
 }
 
 /* The largest differences seen between the firmware's motion and the
- * model's: position in items, turn in quarter turns, x in world pixels. */
-static double worst_p, worst_turn, worst_x;
+ * model's: position in items, turn in quarter turns, x in world pixels, and
+ * push in world pixels. */
+static double worst_p, worst_turn, worst_x, worst_push;
+static long pushes, coarse_apart;
+
+/* --- The push as section 9.10 states it, in floating point -------------
+ * Seen from above, the most turned first, each cover stepped back until it
+ * properly crosses no placed cover within two slots. Each cover is stepped
+ * against the firmware's placing of the covers before it, so a difference
+ * is the push's own and does not carry on. An end within `touch` px of the
+ * other's line is a touch: the firmware lets an edge rest half a pixel into
+ * a face, and either reading is accepted.
+ *
+ * The firmware solves for the least shift, which is stepping's limit as the
+ * step shrinks, so it is checked against a fine step. The section's own
+ * step, 0.02 S, can jump a gap narrower than itself and stop deeper; how
+ * often is printed. */
+#define REF_PUSH_FINE  0.125
+#define REF_PUSH_STEP  2.56
+#define REF_PUSH_MAX   256
+
+struct ref_seg { double x0, z0, x1, z1; };
+
+static struct ref_seg ref_seg_of(const struct slide_data *s, double dz)
+{
+    double a = s->angle * 2 * M_PI / IANGLE_MAX, c = cos(a), sn = sin(a);
+    double cx = s->cx / (double)PFREAL_ONE, z = dz + 63.5 * dabs(sn);
+
+    return (struct ref_seg){ cx - 63.5 * c, z - 63.5 * sn,
+                             cx + 64 * c, z + 64 * sn };
+}
+
+static bool ref_apart(const struct ref_seg *g, const struct ref_seg *e,
+                      double touch)
+{
+    double dx = g->x1 - g->x0, dz = g->z1 - g->z0, len = hypot(dx, dz);
+    double d0 = (dx * (e->z0 - g->z0) - dz * (e->x0 - g->x0)) / len;
+    double d1 = (dx * (e->z1 - g->z1) - dz * (e->x1 - g->x1)) / len;
+
+    return d0 * d1 < 0 && dabs(d0) > touch && dabs(d1) > touch;
+}
+
+static double ref_push(int c, const bool *placed, double touch, double step)
+{
+    struct slide_data *s = flow_slide(c);
+    double dz = 0;
+
+    for (;;) {
+        struct ref_seg a = ref_seg_of(s, dz);
+        bool hit = false;
+        for (int j = c - 2; j <= c + 2; j++)
+            if (j >= 0 && j < FLOW_PLACED && placed[j]) {
+                struct ref_seg b = ref_seg_of(flow_slide(j),
+                                              flow_slide(j)->distance);
+                if (ref_apart(&a, &b, touch) && ref_apart(&b, &a, touch))
+                    hit = true;
+            }
+        if (!hit || dz >= REF_PUSH_MAX)
+            return dz;
+        dz += step;
+    }
+}
+
+static void check_push(void)
+{
+    bool placed[FLOW_PLACED] = { false };
+    int order[FLOW_PLACED];
+
+    for (int i = 0; i < FLOW_PLACED; i++) {
+        int j, turn = abs(flow_slide(i)->angle);
+        for (j = i; j > 0 && abs(flow_slide(order[j - 1])->angle) < turn; j--)
+            order[j] = order[j - 1];
+        order[j] = i;
+    }
+    for (int k = 0; k < FLOW_PLACED; k++) {
+        int c = order[k], d = flow_slide(c)->distance;
+        double fine = dmin(
+            dabs(d - ref_push(c, placed, 1e-9, REF_PUSH_FINE)),
+            dabs(d - ref_push(c, placed, 0.5, REF_PUSH_FINE)));
+        double coarse = dmin(
+            dabs(d - ref_push(c, placed, 1e-9, REF_PUSH_STEP)),
+            dabs(d - ref_push(c, placed, 0.5, REF_PUSH_STEP)));
+
+        placed[c] = true;
+        pushes += d > 0;
+        worst_push = dmax(worst_push, fine);
+        coarse_apart += coarse > REF_PUSH_STEP + 1;
+    }
+}
 
 static void check_slide(struct slide_data *si)
 {
@@ -191,6 +280,7 @@ static void check_model(void)
         check_slide(&left_slides[i]);
         check_slide(&right_slides[i]);
     }
+    check_push();
 }
 
 static void seed(uint32_t clock, int index)
@@ -600,8 +690,12 @@ int main(void)
     clock_counter = deadline + 0x90000000u;
     assert(frame_due(deadline));
     printf("largest difference from the model: position %.4f items, turn "
-           "%.2f degrees, x %.2f px\n", worst_p, worst_turn * 90, worst_x);
+           "%.2f degrees, x %.2f px; push %.2f px over %ld pushed covers, "
+           "against stepping 1/8 px (stepping 0.02 S stops deeper for %ld)\n",
+           worst_p, worst_turn * 90, worst_x, worst_push, pushes,
+           coarse_apart);
     assert(worst_p < 0.01 && worst_turn * 90 < 1 && worst_x < 1);
+    assert(worst_push <= 1.5 && pushes > 0);
     puts("PASS single click, 3/10/20 clicks/s, fast stop, reversal, ends, "
          "random clicks and late frames, against the model");
     puts("PASS flat timeline, frame deadlines and timer wrap");
@@ -626,13 +720,33 @@ scene = {m.group(1).strip(): (int(m.group(2)), int(m.group(3)))
          for m in re.finditer(r'^  (.+?)\s+\d+ refreshes  crossing\s+(\d+)'
                               r'  painter wrong\s+\d+, worst (\d+) columns',
                               report, re.M)}
-table = report[report.index('the scene'):]
-print(table[:table.index('\n\n')])
-# Slow motion keeps neighbours apart and the painter right to a column.
+push = {m.group(1).strip(): (int(m.group(2)), int(m.group(3)),
+                             float(m.group(4)), float(m.group(5)),
+                             int(m.group(6)))
+        for m in re.finditer(r'^  (.+?)\s+pushed\s+(\d+)  facing\s+(\d+)  '
+                             r'deepest ([\d.]+)  longest ([\d.]+) s  '
+                             r'at rest (\d+) px', report, re.M)}
+for title in ('the scene', 'the push'):
+    table = report[report.index(title):]
+    print(table[:table.index('\n\n') if title == 'the scene'
+                else table.index('\ncovers crossing')])
+# No two covers cross at any speed, and the painter is right everywhere.
+assert len(scene) == len(push) == 7
+for name, (crossing, worst) in scene.items():
+    assert crossing == 0 and worst == 0, name
+# The push leaves a single click and slow clicks alone, and every cover
+# comes back to rest.
 for name in ('one click', '3 clicks/s'):
-    crossing, worst = scene[name]
-    assert crossing == 0 and worst <= 1, name
+    assert push[name][0] == 0, name
+for name, (pushed, facing, deepest, longest, rest) in push.items():
+    assert rest == 0, name
+# In a fan the cover facing the viewer sits back behind its turned
+# neighbours, at a depth of 1.2-1.4 cover widths, and comes forward again
+# within 0.08 s.
+pushed, facing, deepest, longest, rest = push['20 clicks/s']
+assert facing > 0 and 1.2 <= deepest <= 1.45 and longest <= 0.08
 assert 'stale pixels: 0  (pass)' in report
 assert 'divisions by zero: 0  (pass)' in report
-print('PASS pfgeom: no stale pixels, no division by zero, slow motion '
-      'crossing-free')
+print('PASS pfgeom: no covers crossing and the painter right at 3, 10, 20 '
+      'and 48 clicks/s, the receding cover in a fan, no stale pixels, no '
+      'division by zero')

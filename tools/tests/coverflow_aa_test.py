@@ -114,6 +114,26 @@ program += '''
         printf("%.3f ",1e6*(clock()-start)/CLOCKS_PER_SEC/n_poses);
     }
     printf("us/frame checksum=%u\\n",checksum);
+    /* The depth push and the draw order alone, over the same refreshes. */
+    double push_s=0, order_s=0;
+    for(int q=0;q<n_poses;q++) {
+        pose(&poses[q]);
+        int keep[FLOW_PLACED];
+        for(int i=0;i<FLOW_PLACED;i++) keep[i]=flow_slide(i)->distance;
+        clock_t start=clock();
+        for(int r=0;r<200;r++) {
+            for(int i=0;i<FLOW_PLACED;i++) flow_slide(i)->distance=0;
+            flow_push();
+        }
+        push_s+=(double)(clock()-start)/CLOCKS_PER_SEC/200;
+        for(int i=0;i<FLOW_PLACED;i++) assert(flow_slide(i)->distance==keep[i]);
+        start=clock();
+        for(int r=0;r<200;r++) flow_order();
+        order_s+=(double)(clock()-start)/CLOCKS_PER_SEC/200;
+        checksum+=flow_drawn[0];
+    }
+    printf("push %.3f us/frame, draw order %.3f us/frame\\n",
+           1e6*push_s/n_poses, 1e6*order_s/n_poses);
 }
 '''
 if album_flip:

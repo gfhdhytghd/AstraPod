@@ -19,7 +19,9 @@
   counts, up to 11 covers ahead, and the covers follow faster the further
   they have to go. The album name changes on the click instead of when the
   cover arrives. A cover turns to face you before it reaches the middle,
-  and the covers fan out while you scroll.
+  and the covers fan out while you scroll. Covers no longer pass through
+  each other: while you scroll fast, a cover between turned neighbours
+  sits back behind them for a moment.
 
 - **Cover Flow's layout** is the original iPod's: a wider view, with the
   side covers standing edge-on to the front one, three on each side, all at

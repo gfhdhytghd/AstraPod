@@ -266,6 +266,281 @@ static void flow_place(struct slide_data *si, int index)
     si->distance = 0;
 }
 
+/* --- Depth: no cover passes through another --------------------------------
+ * Seen from above each cover is a segment. Covers are placed from the most
+ * turned to the least, and each is moved back, never forward, until it no
+ * longer crosses a placed cover within FLOW_PUSH_REACH slides; a cover may
+ * rest an end on another. So a cover face-on between turned neighbours sits
+ * behind them, and comes forward again as they turn away. The segment is the
+ * nominal DISPLAY_WIDTH cover, the widest any art decodes to.
+ *
+ * Shifting one segment in depth, the shifts at which it crosses another form
+ * one interval, and its ends are where an end of one segment lies on the
+ * other. So each pair is solved once, and the push for a cover is the least
+ * shift outside all of its intervals. */
+#define FLOW_PUSH_REACH 2
+/* The furthest a cover is pushed back, in pixels: two cover widths. */
+#define FLOW_PUSH_MAX   256
+/* A crossing shallower than this is a touch, as rounding leaves an edge
+ * resting on a face. */
+#define FLOW_PUSH_SLACK PFREAL_HALF
+#define FLOW_PLACED     (2 * ALBUM_COVERS_NUM_SLIDES + 1)
+
+struct flow_seg
+{
+    PFreal x0, z0, x1, z1;      /* x0 <= x1; z from the camera's plane */
+};
+
+static void flow_seg_of(const struct slide_data *s, struct flow_seg *g)
+{
+    PFreal cosr = fcos(s->angle), sinr = fsin(s->angle);
+    PFreal z = PFREAL_ONE * s->distance
+             - fmuln(MAXSLIDE_LEFT_R, fabsr(sinr), PFREAL_SHIFT - 2, 0);
+    PFreal l = PFREAL_HALF - DISPLAY_WIDTH * PFREAL_HALF;
+    PFreal r = DISPLAY_WIDTH * PFREAL_HALF;
+    PFreal xl = s->cx + fmul(l, cosr), zl = z + fmul(l, sinr);
+    PFreal xr = s->cx + fmul(r, cosr), zr = z + fmul(r, sinr);
+
+    if (xl <= xr)
+        *g = (struct flow_seg){ xl, zl, xr, zr };
+    else
+        *g = (struct flow_seg){ xr, zr, xl, zl };
+}
+
+/* For each end of `e` over `on`: the depth from it to `on`, negated when
+ * `on` is the one that moves. */
+static int flow_ends_on(const struct flow_seg *e, const struct flow_seg *on,
+                        int sign, PFreal *depth, int n)
+{
+    for (int k = 0; k < 2; k++)
+    {
+        PFreal x = k ? e->x1 : e->x0, z = k ? e->z1 : e->z0;
+
+        if (x < on->x0 || x > on->x1)
+            continue;
+        if (on->x1 == on->x0)
+        {
+            depth[n++] = sign * (on->z0 - z);
+            depth[n++] = sign * (on->z1 - z);
+        }
+        else
+            depth[n++] = sign * (on->z0 - z + (PFreal)((int64_t)(x - on->x0)
+                                  * (on->z1 - on->z0) / (on->x1 - on->x0)));
+    }
+    return n;
+}
+
+/* The shifts in depth of `a` at which it crosses `b`, (*lo, *hi). False if
+ * there are none. */
+static bool flow_crossing(const struct flow_seg *a, const struct flow_seg *b,
+                          PFreal *lo, PFreal *hi)
+{
+    PFreal depth[8];
+    int n, k;
+
+    if (a->x1 < b->x0 || b->x1 < a->x0)
+        return false;
+    n = flow_ends_on(a, b, 1, depth, 0);
+    n = flow_ends_on(b, a, -1, depth, n);
+    if (n < 2)
+        return false;
+    *lo = *hi = depth[0];
+    for (k = 1; k < n; k++)
+    {
+        *lo = MIN(*lo, depth[k]);
+        *hi = MAX(*hi, depth[k]);
+    }
+    return *hi - *lo > 2 * FLOW_PUSH_SLACK;
+}
+
+/* The slide in slot `slot`: 0 the leftmost, ALBUM_COVERS_NUM_SLIDES the
+ * middle, so slots i and j are |i - j| slides apart. */
+static struct slide_data *flow_slide(int slot)
+{
+    if (slot < ALBUM_COVERS_NUM_SLIDES)
+        return &left_slides[ALBUM_COVERS_NUM_SLIDES - 1 - slot];
+    if (slot > ALBUM_COVERS_NUM_SLIDES)
+        return &right_slides[slot - ALBUM_COVERS_NUM_SLIDES - 1];
+    return &center_slide;
+}
+
+static void flow_push(void)
+{
+    struct slide_data *cover[FLOW_PLACED];
+    struct flow_seg seg[FLOW_PLACED];
+    int order[FLOW_PLACED];
+    bool placed[FLOW_PLACED];
+    int i, j, k;
+
+    /* The most turned first; a stable insertion sort of 13. */
+    for (i = 0; i < FLOW_PLACED; i++)
+    {
+        int turn;
+
+        cover[i] = flow_slide(i);
+        turn = abs(cover[i]->angle);
+
+        for (j = i; j > 0 && abs(cover[order[j - 1]]->angle) < turn; j--)
+            order[j] = order[j - 1];
+        order[j] = i;
+        flow_seg_of(cover[i], &seg[i]);
+        placed[i] = false;
+    }
+
+    for (k = 0; k < FLOW_PLACED; k++)
+    {
+        PFreal lo[2 * FLOW_PUSH_REACH], hi[2 * FLOW_PUSH_REACH];
+        PFreal dz = 0;
+        int c = order[k], n = 0;
+        bool moved = true;
+
+        for (j = MAX(0, c - FLOW_PUSH_REACH);
+             j <= MIN(FLOW_PLACED - 1, c + FLOW_PUSH_REACH); j++)
+            if (placed[j] && flow_crossing(&seg[c], &seg[j], &lo[n], &hi[n]))
+                n++;
+        /* The shift only grows, so each interval moves it at most once. */
+        while (moved)
+        {
+            moved = false;
+            for (j = 0; j < n; j++)
+                if (lo[j] + FLOW_PUSH_SLACK < dz
+                    && dz < hi[j] - FLOW_PUSH_SLACK)
+                {
+                    dz = hi[j];
+                    moved = true;
+                }
+        }
+        placed[c] = true;
+        if (dz <= 0)
+            continue;
+        cover[c]->distance = MIN(FLOW_PUSH_MAX,
+                                 (dz + PFREAL_ONE - 1) >> PFREAL_SHIFT);
+        seg[c].z0 += cover[c]->distance * PFREAL_ONE;
+        seg[c].z1 += cover[c]->distance * PFREAL_ONE;
+    }
+}
+
+/* --- Draw order --------------------------------------------------------------
+ * Furthest from the middle slot first, a pair at a time, and the middle slot
+ * last, except that a cover is never drawn after one it sits behind: the push
+ * puts a face-on cover behind its neighbours' slats. Slots are numbered as in
+ * flow_push(); flow_drawn[] is the order and flow_rank[] each slot's place in
+ * it. */
+static int flow_drawn[FLOW_PLACED];
+static int flow_rank[FLOW_PLACED];
+
+/* Which side of g's line (x, z) lies on: 1, -1, or 0 within a pixel of it,
+ * as the push leaves crossings shallower than that. The cross product is the
+ * distance times the segment's length, DISPLAY_WIDTH. */
+#define FLOW_ON_LINE ((int64_t)DISPLAY_WIDTH * PFREAL_ONE * PFREAL_ONE)
+
+static int flow_side(const struct flow_seg *g, PFreal x, PFreal z)
+{
+    int64_t c = (int64_t)(g->x1 - g->x0) * (z - g->z0)
+              - (int64_t)(g->z1 - g->z0) * (x - g->x0);
+
+    return (c > FLOW_ON_LINE) - (c < -FLOW_ON_LINE);
+}
+
+/* Whether p is left of q on screen. */
+static bool flow_left(PFreal px, PFreal pz, PFreal qx, PFreal qz)
+{
+    return (int64_t)px * (CAM_DIST_R + qz) < (int64_t)qx * (CAM_DIST_R + pz);
+}
+
+/* A segment's ends as they fall on screen, left then right. Two overlap on
+ * screen where each one's left end is left of the other's right end. */
+struct flow_screen
+{
+    PFreal lx, lz, rx, rz;
+};
+
+static void flow_screen_of(const struct flow_seg *g, struct flow_screen *e)
+{
+    if (flow_left(g->x1, g->z1, g->x0, g->z0))
+        *e = (struct flow_screen){ g->x1, g->z1, g->x0, g->z0 };
+    else
+        *e = (struct flow_screen){ g->x0, g->z0, g->x1, g->z1 };
+}
+
+/* Whether `a` hides `b` where they overlap on screen. Of two segments that do
+ * not cross, one lies to one side of the other's line, and whether that is
+ * the eye's side says which is nearer. */
+static bool flow_in_front(const struct flow_seg *a, const struct flow_seg *b)
+{
+    int s0 = flow_side(a, b->x0, b->z0), s1 = flow_side(a, b->x1, b->z1);
+    int e = flow_side(a, 0, -CAM_DIST_R);
+
+    if (s0 * s1 >= 0 && s0 + s1 && e)
+        return (s0 + s1 > 0) != (e > 0);
+    s0 = flow_side(b, a->x0, a->z0);
+    s1 = flow_side(b, a->x1, a->z1);
+    e = flow_side(b, 0, -CAM_DIST_R);
+    return s0 * s1 >= 0 && s0 + s1 && e && (s0 + s1 > 0) == (e > 0);
+}
+
+static void flow_order(void)
+{
+    struct flow_seg seg[FLOW_PLACED];
+    struct flow_screen screen[FLOW_PLACED];
+    unsigned under[FLOW_PLACED];        /* the slots to draw before each */
+    unsigned drawn = 0;
+    int base[FLOW_PLACED];
+    int i, j, k, n = 0;
+
+    for (i = ALBUM_COVERS_NUM_SLIDES - 1; i >= 0; i--)
+    {
+        base[n++] = ALBUM_COVERS_NUM_SLIDES - 1 - i;
+        base[n++] = ALBUM_COVERS_NUM_SLIDES + 1 + i;
+    }
+    base[n] = ALBUM_COVERS_NUM_SLIDES;
+
+    for (i = 0; i < FLOW_PLACED; i++)
+    {
+        flow_seg_of(flow_slide(i), &seg[i]);
+        flow_screen_of(&seg[i], &screen[i]);
+        under[i] = 0;
+    }
+    for (i = 0; i < FLOW_PLACED; i++)
+        for (j = i + 1; j < FLOW_PLACED; j++)
+            if (flow_left(screen[j].lx, screen[j].lz,
+                          screen[i].rx, screen[i].rz)
+                && flow_left(screen[i].lx, screen[i].lz,
+                             screen[j].rx, screen[j].rz))
+            {
+                if (flow_in_front(&seg[i], &seg[j]))
+                    under[i] |= 1u << j;
+                else if (flow_in_front(&seg[j], &seg[i]))
+                    under[j] |= 1u << i;
+            }
+
+    /* Each time the first slot in the base order with nothing left to draw
+     * under it. Covers that touch can make a cycle by a rounding; then the
+     * first not drawn. */
+    for (k = 0; k < FLOW_PLACED; k++)
+    {
+        int pick = -1;
+
+        for (i = 0; i < FLOW_PLACED; i++)
+        {
+            int s = base[i];
+
+            if (drawn & (1u << s))
+                continue;
+            if (pick < 0)
+                pick = s;
+            if (!(under[s] & ~drawn))
+            {
+                pick = s;
+                break;
+            }
+        }
+        drawn |= 1u << pick;
+        flow_drawn[k] = pick;
+        flow_rank[pick] = k;
+    }
+}
+
 static void coverflow_place(void)
 {
     int i;
@@ -275,6 +550,7 @@ static void coverflow_place(void)
         flow_place(&left_slides[i], center_index - 1 - i);
         flow_place(&right_slides[i], center_index + 1 + i);
     }
+    flow_push();
 }
 
 static void coverflow_idle(void)
@@ -418,6 +694,7 @@ static void cull_side(struct slide_data *side, const int *alpha,
     struct slide_data *cover[ALBUM_COVERS_NUM_SLIDES + 1];
     int cover_lo[ALBUM_COVERS_NUM_SLIDES + 1];
     int cover_hi[ALBUM_COVERS_NUM_SLIDES + 1];
+    int cover_slot[ALBUM_COVERS_NUM_SLIDES + 1];
     int n_cover = 0;
     int i, k, x0, x1, lo, hi;
     int edge = 0, span = LCD_WIDTH;
@@ -429,6 +706,7 @@ static void cull_side(struct slide_data *side, const int *alpha,
         if (hi > lo)
         {
             cover[0] = &center_slide;
+            cover_slot[0] = ALBUM_COVERS_NUM_SLIDES;
             cover_lo[0] = lo;
             cover_hi[0] = hi;
             n_cover = 1;
@@ -451,6 +729,8 @@ static void cull_side(struct slide_data *side, const int *alpha,
         if (n_cover && lo - PF_CULL_MARGIN >= span)
         {
             int reached = lo - PF_CULL_MARGIN;
+            int rank = flow_rank[right ? ALBUM_COVERS_NUM_SLIDES + 1 + i
+                                       : ALBUM_COVERS_NUM_SLIDES - 1 - i];
 
             for (k = 0; k < n_cover; k++)
             {
@@ -459,6 +739,8 @@ static void cull_side(struct slide_data *side, const int *alpha,
                 if (cover_hi[k] <= reached)
                     continue;
                 if (cover_lo[k] > reached)
+                    break;
+                if (flow_rank[cover_slot[k]] < rank)
                     break;
 
                 last = MIN(cover_hi[k], MIN(hi, edge)) - 1;
@@ -494,6 +776,8 @@ static void cull_side(struct slide_data *side, const int *alpha,
             continue;
 
         cover[n_cover] = &side[i];
+        cover_slot[n_cover] = right ? ALBUM_COVERS_NUM_SLIDES + 1 + i
+                                    : ALBUM_COVERS_NUM_SLIDES - 1 - i;
         cover_lo[n_cover] = lo;
         cover_hi[n_cover] = hi;
         n_cover++;
@@ -672,6 +956,7 @@ static long render_frame(int with_cull)
     for (index = 0; index < n; index++)
         alpha[index] = 256;
 
+    flow_order();
     if (with_cull) {
         cull_side(left_slides, alpha, 256, left_to, 0);
         cull_side(right_slides, alpha, 256, right_from, 1);
@@ -680,15 +965,22 @@ static long render_frame(int with_cull)
             { left_to[index] = LCD_WIDTH; right_from[index] = 0; }
     }
 
-    for (index = n - 1; index >= 0; index--) {
-        fb_mark_id = 1 + index;
-        px += render_slide_clipped(&left_slides[index], 0, left_to[index]);
-        fb_mark_id = 11 + index;
-        px += render_slide_clipped(&right_slides[index],
-                                   right_from[index], LCD_WIDTH);
+    for (int k = 0; k < FLOW_PLACED; k++) {
+        int slot = flow_drawn[k];
+        if (slot < n) {
+            index = n - 1 - slot;
+            fb_mark_id = 1 + index;
+            px += render_slide_clipped(&left_slides[index], 0, left_to[index]);
+        } else if (slot > n) {
+            index = slot - n - 1;
+            fb_mark_id = 11 + index;
+            px += render_slide_clipped(&right_slides[index],
+                                       right_from[index], LCD_WIDTH);
+        } else {
+            fb_mark_id = 21;
+            px += render_slide_clipped(&center_slide, 0, LCD_WIDTH);
+        }
     }
-    fb_mark_id = 21;
-    px += render_slide_clipped(&center_slide, 0, LCD_WIDTH);
     return px;
 }
 
@@ -933,8 +1225,9 @@ struct seg { double x0, z0, x1, z1; int id; };
 
 static struct seg segment(struct slide_data *s, int id)
 {
-    double a = s->angle * 2 * M_PI / IANGLE_MAX;
-    double c = cos(a), sn = sin(a);
+    /* The render's own sine table, so a cover is where it is drawn. */
+    double c = fcos(s->angle) / (double)PFREAL_ONE;
+    double sn = fsin(s->angle) / (double)PFREAL_ONE;
     double cx = s->cx / (double)PFREAL_ONE;
     double z = CAM_DIST + s->distance + 63.5 * fabs(sn);
     struct seg g = { cx - 63.5 * c, z - 63.5 * sn, cx + 64 * c, z + 64 * sn,
@@ -958,23 +1251,39 @@ static double ray_depth(const struct seg *g, double x)
     return g->z0 + u * dz;
 }
 
+/* Signed distance of (x, z) from the line through g. */
+static double side_of(const struct seg *g, double x, double z)
+{
+    double dx = g->x1 - g->x0, dz = g->z1 - g->z0;
+
+    return (dx * (z - g->z0) - dz * (x - g->x0)) / sqrt(dx * dx + dz * dz);
+}
+
+/* A crossing: each segment's ends on either side of the other's line, by
+ * more than a pixel, so an end resting on a face is not one. */
 static bool segs_cross(const struct seg *a, const struct seg *b)
 {
-#define ORIENT(p, q, r) ((q##x - p##x) * (r##z - p##z) \
-                         - (q##z - p##z) * (r##x - p##x))
-    double ax = a->x0, az = a->z0, bx = a->x1, bz = a->z1;
-    double cx = b->x0, cz = b->z0, dx = b->x1, dz = b->z1;
-    double d1 = ORIENT(c, d, a), d2 = ORIENT(c, d, b);
-    double d3 = ORIENT(a, b, c), d4 = ORIENT(a, b, d);
-#undef ORIENT
-    return d1 * d2 < -1e-6 && d3 * d4 < -1e-6;
+    double d1 = side_of(b, a->x0, a->z0), d2 = side_of(b, a->x1, a->z1);
+    double d3 = side_of(a, b->x0, b->z0), d4 = side_of(a, b->x1, b->z1);
+
+    return d1 * d2 < 0 && d3 * d4 < 0 && fabs(d1) > 1 && fabs(d2) > 1
+        && fabs(d3) > 1 && fabs(d4) > 1;
 }
 
 static struct
 {
     long long frames, crossed_frames, wrong_frames, wrong_cols;
     int wrong_max;
+    /* The push: refreshes with any cover pushed; with a cover within 20
+     * degrees of face-on pushed, the deepest such cover's centre in cover
+     * widths (1.07 at rest), and the most refreshes running one stays so;
+     * and the deepest push in the last refresh, at rest. */
+    long long pushed_frames, facing_frames;
+    double facing_z;
+    int facing_run, rest_push;
 } scene[N_SCENARIOS];
+
+#define FACING_ANGLE 57     /* 20 degrees */
 
 /* After render_frame(0) of the pose: what the painter left on the middle row
  * against what is nearest. A column only counts where the two depths differ
@@ -1010,6 +1319,38 @@ static void check_scene(int sc)
         if (top_depth >= 0 && top_depth > best + 1)
             wrong++;
     }
+    static int run_index[2 * ALBUM_COVERS_NUM_SLIDES + 1];
+    static int run_length[2 * ALBUM_COVERS_NUM_SLIDES + 1];
+    static int last_sc = -1;
+    int now_index[2 * ALBUM_COVERS_NUM_SLIDES + 1];
+    int now_length[2 * ALBUM_COVERS_NUM_SLIDES + 1];
+    int deepest = 0, facing = 0;
+
+    if (sc != last_sc)
+        memset(run_length, 0, sizeof run_length);
+    last_sc = sc;
+    for (int k = 0; k < n; k++) {
+        struct slide_data *sl = k == 0 ? &center_slide
+            : (k & 1) ? &left_slides[(k - 1) / 2] : &right_slides[(k - 1) / 2];
+        now_index[k] = sl->slide_index;
+        now_length[k] = 0;
+        deepest = MAX(deepest, sl->distance);
+        if (sl->distance <= 0 || abs(sl->angle) > FACING_ANGLE)
+            continue;
+        facing = 1;
+        scene[sc].facing_z = fmax(scene[sc].facing_z,
+                                  (g[k].z0 + g[k].z1) / 2 / DISPLAY_WIDTH);
+        now_length[k] = 1;
+        for (int j = 0; j < n; j++)
+            if (run_index[j] == sl->slide_index)
+                now_length[k] += run_length[j];
+        scene[sc].facing_run = MAX(scene[sc].facing_run, now_length[k]);
+    }
+    memcpy(run_index, now_index, sizeof run_index);
+    memcpy(run_length, now_length, sizeof run_length);
+    scene[sc].pushed_frames += deepest > 0;
+    scene[sc].facing_frames += facing;
+    scene[sc].rest_push = deepest;
     scene[sc].frames++;
     scene[sc].crossed_frames += crossed > 0;
     scene[sc].wrong_frames += wrong > 0;
@@ -1071,11 +1412,28 @@ int main(int argc, char **argv)
     }
     printf("\nthe scene, first-boot settings (refreshes with crossing "
            "covers; with the painter wrong somewhere, and its worst):\n");
-    for (int sc = 0; sc < N_SCENARIOS; sc++)
+    long long crossed = 0, painted_wrong = 0;
+    for (int sc = 0; sc < N_SCENARIOS; sc++) {
         printf("  %-40s %5lld refreshes  crossing %4lld  painter wrong "
                "%4lld, worst %d columns\n", SCENARIO_NAME[sc],
                scene[sc].frames, scene[sc].crossed_frames,
                scene[sc].wrong_frames, scene[sc].wrong_max);
+        crossed += scene[sc].crossed_frames;
+        painted_wrong += scene[sc].wrong_frames;
+    }
+    printf("\nthe push (refreshes with a cover pushed back; with one within "
+           "20 degrees of face-on pushed, the deepest in cover widths, 1.07 "
+           "at rest, and the longest it stays; the push left at rest):\n");
+    for (int sc = 0; sc < N_SCENARIOS; sc++)
+        printf("  %-40s pushed %4lld  facing %4lld  deepest %.2f  longest "
+               "%.3f s  at rest %d px\n", SCENARIO_NAME[sc],
+               scene[sc].pushed_frames, scene[sc].facing_frames,
+               scene[sc].facing_z, scene[sc].facing_run * REFRESH_US / 1e6,
+               scene[sc].rest_push);
+    printf("covers crossing: %lld refreshes%s\n", crossed,
+           crossed ? "  *** FAILED ***" : "  (pass)");
+    printf("painter wrong: %lld refreshes%s\n", painted_wrong,
+           painted_wrong ? "  *** FAILED ***" : "  (pass)");
 
     /* The cull and the band, across the settings, a share of the recorded
      * refreshes each, a different share each time. */
@@ -1146,5 +1504,6 @@ int main(int argc, char **argv)
            rows_short, rows_over_max,
            rows_short ? "  *** FAILED ***" : "  (pass)");
 
-    return (bad || rows_short || div_bad || fdiv_zero) ? 1 : 0;
+    return (bad || rows_short || div_bad || fdiv_zero || crossed
+            || painted_wrong) ? 1 : 0;
 }

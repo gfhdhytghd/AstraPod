@@ -346,7 +346,7 @@ void ui_scene_fade_out(void)
     cpu_boost(true);
     lcd_hold_updates(true);
     unsigned trace = ui_perf_begin("shutdown-fade");
-    struct ui_tween fade = { .start_clock = USEC_TIMER, .frames = duration,
+    struct ui_tween fade = { .start_clock = ui_clock_start(), .frames = duration,
                             .from = UI_FULL_OPACITY, .to = 0 };
     int composed = -1, last = -1;
     while (lcd_active())
@@ -368,11 +368,7 @@ void ui_scene_fade_out(void)
         }
         if (!last || frame > duration + ANIM_F(2))
             break;
-        int timeout = ui_clock_poll_timeout(elapsed, duration, HZ);
-        if (timeout > 0)
-            sleep(timeout);
-        else
-            yield();
+        ui_clock_sleep(ui_clock_poll_timeout(elapsed, duration, HZ));
     }
     lcd_hold_updates(false);
     cpu_boost(false);
@@ -616,7 +612,7 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     scene->target_front = false;
     scene->last_offset = scene->composed_offset = -1;
     scene->tween = (struct ui_tween){
-        .start_clock = USEC_TIMER, .from = offset,
+        .start_clock = ui_clock_start(), .from = offset,
         .to = scene->vertical ? LCD_HEIGHT : LCD_WIDTH, .frames = frames, .ease_in = true,
     };
     while (owner == scene)
@@ -629,7 +625,7 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
         if (button_queue_wait_pending(timeout))
             break;
 #else
-        sleep(timeout);
+        ui_clock_sleep(timeout);
 #endif
     }
     if (owner == scene)
@@ -671,7 +667,7 @@ void ui_scene_start(struct ui_scene *scene)
         set_push_duration(scene);
     }
     scene->capturing = false;
-    scene->tween.start_clock = USEC_TIMER;
+    scene->tween.start_clock = ui_clock_start();
     /* The first frame of a reversed pan is the pose already on screen. */
     ui_scene_update(scene, !scene->reuse_target);
     scene->reuse_target = false;
@@ -749,7 +745,10 @@ int ui_scene_timeout(const struct ui_scene *scene, int timeout)
     unsigned frame = ui_clock_frame(elapsed);
     if (frame >= scene->tween.frames || scene->tween.from == scene->tween.to)
         return 1;
-    if ((scene->staggered ? (int)frame : position(scene, frame)) != scene->last_offset)
+    /* Retry a composed frame the LCD refused. A frame the clock has reached
+     * waits for its presentation slot, so a half-rate scene keeps its
+     * parity. */
+    if (scene->composed_offset != scene->last_offset)
         return TIMEOUT_NOBLOCK;
 
     int ticks = ui_clock_poll_timeout(elapsed, scene->tween.frames, HZ);

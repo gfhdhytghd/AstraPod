@@ -113,6 +113,13 @@ static void set_scroll_line(const char*s,int n){(void)s;(void)n;}
 static void carousel_caption_layout(bool two,struct pf_caption*c){c->y1=0;c->y2=two?1:0;}
 static int get_scroll_line_offset(int n){(void)n;return 0;}
 static void lcd_putsxy(int x,int y,const char*s){(void)x;(void)y;assert(drawn<2);snprintf(text_lines[drawn++],260,"%s",s);}
+static int caption_rows_y,caption_rows_h,caption_clear_y,caption_clear_h;
+static bool caption_clears_itself;
+static struct {uint32_t text;int x,y,font,fg;bool valid;} caption_artist;
+static uint32_t fnv1a_str(const char*s){uint32_t h=2166136261u;while(*s)h=(h^(unsigned char)*s++)*16777619u;return h;}
+struct font {int height;};static struct font caption_test_font={1};
+static struct font*font_get(int f){(void)f;return &caption_test_font;}
+static void pf_clear_band(int y,int h){(void)y;(void)h;}
 '''
 lifetime_stubs=r'''
 #define CAROUSEL_MENU_STAY 19

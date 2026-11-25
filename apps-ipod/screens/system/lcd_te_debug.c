@@ -12,6 +12,7 @@
 #include "rbpaths.h"
 #include "lcd_te_debug.h"
 #include "lcd-te-s5l8702.h"
+#include "ui/pace.h"
 #include "widgets/list.h"
 #include "widgets/splash.h"
 
@@ -78,7 +79,31 @@ static int report_line(const char *fmt, ...)
     return len;
 }
 
-static int save_report(bool with_preview)
+static void report_pacing(void)
+{
+    struct ui_pace_status status;
+    ui_pace_get_status(&status);
+    unsigned int millihz = (1000000000u + status.period / 2) / status.period;
+    report_line("UI pacing=%s | period=%lu us %u.%03u Hz (%s)",
+                status.enabled ? "on" : "off", (unsigned long)status.period,
+                millihz / 1000, millihz % 1000,
+                !status.enabled ? "authored 60 fps" :
+                status.measured ? "measured TE" : "nominal TE");
+    if (!status.divisor)
+    {
+        report_line("Last animation: none");
+        return;
+    }
+    report_line("Last animation: %s rate | shown=%u missed=%u",
+                status.divisor == 1 ? "full" : "half",
+                status.shown, status.missed);
+    report_line("Wake offset=%lu us%s | cost=%lu us | DMA max=%lu us",
+                (unsigned long)status.offset,
+                status.phased ? "" : " (phase unknown)",
+                (unsigned long)status.cost, (unsigned long)status.dma);
+}
+
+static int save_report(bool with_preview, bool survey)
 {
     if (!lcd_te_supported())
         return ENOTSUP;
@@ -86,7 +111,8 @@ static int save_report(bool with_preview)
     report_preview = with_preview;
     report_fd = open(LCD_TE_LOG_TMP, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     report_ok = report_fd >= 0;
-    bool sampled = lcd_te_run_diagnostic(report_line);
+    report_pacing();
+    bool sampled = lcd_te_run_diagnostic(report_line, survey);
     if (report_fd >= 0 && close(report_fd) < 0)
         report_ok = false;
 
@@ -97,9 +123,9 @@ static int save_report(bool with_preview)
     return sampled ? EIO : EBUSY;
 }
 
-int lcd_te_debug_save_report(void)
+int lcd_te_debug_save_report(bool survey)
 {
-    return save_report(false);
+    return save_report(false, survey);
 }
 
 static const char *preview_name(int item, void *data,
@@ -126,7 +152,7 @@ bool lcd_te_debug_screen(void)
     splash(0, "Sampling LCD...");
     preview.count = 0;
     preview.limited = false;
-    int error = save_report(true);
+    int error = save_report(true, false);
     snprintf(preview.status, sizeof(preview.status), "%s",
              error == EBUSY ? "LCD unavailable; retry" :
              error ? "Could not save lcd-te-diag.txt" :
@@ -158,6 +184,12 @@ bool lcd_te_debug_toggle(void)
         if (enable != lcd_te_enabled())
             splash(HZ, "No usable LCD sync source");
     }
+    return false;
+}
+
+bool lcd_te_debug_toggle_pacing(void)
+{
+    ui_te_pacing = !ui_te_pacing;
     return false;
 }
 

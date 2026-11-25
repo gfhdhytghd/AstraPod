@@ -34,6 +34,7 @@
 #include "system/activity.h"
 #include "ui/frame.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/pace.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
 #include "ui/statusbar.h"
@@ -120,6 +121,7 @@ struct native_list {
 };
 
 static int renderer_handle;
+static struct ui_pace glide_pace;
 
 void list_render_init(void)
 {
@@ -420,7 +422,8 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
         trace = ui_perf_begin("list-glide");
     *motion = (struct list_motion) {
         .from = from, .live = live, .rest = rest,
-        .started = now, .painted = 0, .trace = trace,
+        .started = continuing ? now : ui_clock_start(),
+        .painted = 0, .trace = trace,
         .glide_frames = glide, .spring_frames = ui_theme_duration(SPRING_F),
         .visible = visible, .count = list->nb_items, .span = span,
         .bounds = g.rows, .pitch = g.pitch, .wheel = wheel,
@@ -502,7 +505,8 @@ static void fill(struct ui_rect clip, struct ui_rect cell, unsigned int fg)
 
 static unsigned marquee_frames(void)
 {
-    return MAX(1, (lcd_scroll_info.ticks * UI_ANIM_FPS + HZ / 2) / HZ);
+    uint32_t step = lcd_scroll_info.ticks * (1000000 / HZ);
+    return MAX(1, ui_clock_frame(step + ui_frame_period() / 2));
 }
 
 static unsigned marquee_shift(struct native_list *render, unsigned max_offset)
@@ -512,7 +516,7 @@ static unsigned marquee_shift(struct native_list *render, unsigned max_offset)
     render->has_marquee = true;
     unsigned elapsed = ui_clock_frame(USEC_TIMER - render->marquee_started);
     /* The stored delay setting is expressed in milliseconds. */
-    unsigned delay = global_settings.scroll_delay * UI_ANIM_FPS / 1000;
+    unsigned delay = ui_clock_frame(global_settings.scroll_delay * 1000);
     unsigned step = MAX(1, global_settings.scroll_step);
     unsigned frames = marquee_frames();
     unsigned trip = (max_offset + step - 1) / step * frames;
@@ -1398,7 +1402,8 @@ static bool step_index(struct native_list *render)
         return true;
 
     uint32_t now = USEC_TIMER;
-    uint32_t window = ui_frame_clock(INDEX_WINDOW_F);
+    /* A gesture window, in real time at the authored rate. */
+    uint32_t window = INDEX_WINDOW_F * 1000000 / UI_ANIM_FPS;
     int selection = list->selected_item;
     if (selection != index->last_sel && index->last_sel >= 0)
         index_sample(index, index->last_sel, now);
@@ -1683,7 +1688,7 @@ static void draw_list(struct gui_synclist *list, bool status_only)
         render->owner = list;
         render->generation = list->generation;
         render->selection = list->selected_item;
-        render->marquee_started = USEC_TIMER;
+        render->marquee_started = ui_clock_start();
     }
     if (!status_only)
     {
@@ -1845,11 +1850,16 @@ static int motion_deadline(const struct gui_synclist *list, bool poll)
         if (motion->visible)
         {
             uint32_t elapsed = now - motion->started;
-            if (!motion_enabled() || ui_clock_frame(elapsed) > motion->painted)
+            /* A new frame waits for its presentation slot, so a half-rate
+             * glide keeps its frame parity. */
+            bool due = ui_clock_frame(elapsed) > motion->painted &&
+                       (int32_t)(now - glide_pace.due) >= 0;
+            if (!motion_enabled() || due)
                 delay = 0;
             else if (poll)
             {
-                int motion_delay = ui_clock_poll_timeout(elapsed, motion_duration(motion) + 1, HZ);
+                uint32_t deadline = ui_pace_next(&glide_pace, motion->started);
+                int motion_delay = ui_clock_wait_until(deadline);
                 if (delay == TIMEOUT_BLOCK || motion_delay < delay)
                     delay = motion_delay;
             }
@@ -1858,8 +1868,9 @@ static int motion_deadline(const struct gui_synclist *list, bool poll)
         {
             unsigned frames = marquee_frames();
             unsigned frame = ui_clock_frame(now - render->marquee_started);
+            int tick = 1000000 / HZ;
             int ticks = frame / frames != render->marquee_frame / frames ?
-                        0 : (frames * HZ + UI_ANIM_FPS - 1) / UI_ANIM_FPS;
+                        0 : (ui_frame_clock(frames) + tick - 1) / tick;
             if (delay == TIMEOUT_BLOCK || ticks < delay)
                 delay = ticks;
         }

@@ -36,7 +36,11 @@ static intptr_t button_data; /* data value from last message dequeued */
 #ifdef HAVE_BUTTON_FRAME_DEADLINE
 #include "button-frame-deadline.inc"
 #else
-#define button_frame_wait(ev, ticks) queue_wait_w_tmo(&button_queue, ev, ticks)
+static inline bool button_frame_wait(struct queue_event *ev, int ticks)
+{
+    queue_wait_w_tmo(&button_queue, ev, ticks);
+    return false;
+}
 #define button_discard_frame_wake() ((void)0)
 #endif
 
@@ -235,6 +239,7 @@ bool button_queue_wait_pending(int ticks)
 {
     const bool forever = ticks == TIMEOUT_BLOCK;
     long deadline = current_tick + MAX(ticks, 0);
+    bool frame_due = false;
     do {
 #ifdef HAVE_EXTENDED_MESSAGING_AND_NAME
         /* A release from the gesture which closed the sheet still belongs
@@ -253,14 +258,14 @@ bool button_queue_wait_pending(int ticks)
             return true;
         queue_remove_from_head(&button_queue, BUTTON_NONE);
         queue_remove_from_head(&button_queue, BUTTON_REDRAW);
-        if (ticks == TIMEOUT_NOBLOCK)
+        if (ticks == TIMEOUT_NOBLOCK || frame_due)
             return false;
         if (!queue_empty(&button_queue))
             sleep(1); /* Queue waits wake immediately while a release is pending. */
         else
-            queue_wait_w_tmo(&button_queue, NULL, ticks);
+            frame_due = button_frame_wait(NULL, ticks);
 #else
-        queue_wait_w_tmo(&button_queue, NULL, ticks);
+        button_frame_wait(NULL, ticks);
         return !queue_empty(&button_queue);
 #endif
         if (!forever)

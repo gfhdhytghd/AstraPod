@@ -632,7 +632,7 @@ static void close_native_sheet(struct sheet_presentation *p)
     p->closing = true;
     present_sheet(p, p->offset, false);
     struct ui_tween tween = {
-        .start_clock = USEC_TIMER,
+        .start_clock = ui_clock_start(),
         .from = p->offset, .to = LCD_HEIGHT, .frames = p->close_frames,
         .ease_in = true,
     };
@@ -687,7 +687,7 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
         }
         if (entering)
         {
-            tween.start_clock = USEC_TIMER;
+            tween.start_clock = ui_clock_start();
             entering = false;
         }
         int ticks = HZ / 10;

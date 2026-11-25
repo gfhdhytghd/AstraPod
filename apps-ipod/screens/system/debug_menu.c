@@ -67,7 +67,7 @@
 #include "screens/system/probe_debug.h"
 #if defined(IPOD_6G) && (CONFIG_PLATFORM & PLATFORM_NATIVE)
 #include "lcd_te_debug.h"
-#include "screens/covers/carousel.h"
+#include "ui/pace.h"
 #endif
 #ifdef HAVE_USB_PODLINK
 #include "screens/system/podlink_screen.h"
@@ -2455,8 +2455,7 @@ static const struct {
         { "LCD TE diagnostics", lcd_te_debug_screen, false, NULL },
         { "LCD bus timing", lcd_te_debug_timing, false, NULL },
         { "LCD TE sync", lcd_te_debug_toggle, false, NULL },
-        { "Cover Flow 60 Hz", carousel_debug_toggle_60hz, false,
-          &carousel_60hz_enabled },
+        { "UI TE pacing", lcd_te_debug_toggle_pacing, false, &ui_te_pacing },
 #endif
 
 #ifdef HAVE_USBSTACK

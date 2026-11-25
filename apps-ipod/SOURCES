@@ -117,6 +117,7 @@ widgets/list_render.c
 widgets/list_select.c
 widgets/menu.c
 ui/animation.c
+ui/pace.c
 ui/native_chrome.c
 ui/native_theme.c
 ui/native_theme_runtime.c

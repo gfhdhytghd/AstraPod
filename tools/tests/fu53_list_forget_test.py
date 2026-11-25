@@ -33,7 +33,6 @@ fixture = r"""
 #define UNLIKELY(x) (x)
 #define USEC_TIMER 0u
 #define HZ 100
-#define UI_ANIM_FPS 60u
 #define TIMEOUT_BLOCK -1
 
 struct gui_synclist {
@@ -67,10 +66,12 @@ static unsigned font_prefetch_epoch(void){return 0;}
 static unsigned artist_tile_generation(void){return 0;}
 static void ui_perf_end(unsigned token) { traces_ended += token != 0; }
 static bool motion_enabled(void) { return true; }
-static unsigned motion_duration(const struct list_motion *motion)
-{ assert(motion->visible); return 8; }
-static int ui_clock_poll_timeout(uint32_t elapsed, unsigned duration, unsigned hz)
-{ assert(elapsed == 0 && duration == 9 && hz == HZ); return 1; }
+struct ui_pace { uint32_t due; };
+static struct ui_pace glide_pace;
+static uint32_t ui_pace_next(struct ui_pace *pace, uint32_t start)
+{ assert(pace == &glide_pace && start == 0); return pace->due = 5; }
+static int ui_clock_wait_until(uint32_t deadline)
+{ assert(deadline == 5); return 1; }
 static void *core_get_data_pinned(int handle)
 { assert(handle == 1); return &state; }
 static void core_put_data_pinned(void *data)
@@ -79,6 +80,7 @@ static void ui_layer_free(int *layer) { *layer = 0; released++; }
 static bool ui_scrolling_held(void) { return false; }
 static unsigned marquee_frames(void) { return 3; }
 static uint32_t ui_clock_frame(uint32_t clock) { return clock; }
+static uint32_t ui_frame_clock(unsigned frame) { return frame; }
 static void list_render_draw(struct gui_synclist *list)
 { assert(list->parent[0]); drawn++; }
 static void gui_synclist_layout(struct gui_synclist *list)

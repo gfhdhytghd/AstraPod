@@ -361,11 +361,6 @@ struct button_mapping {
 /* custom button_mappings may "chain" to inbuilt CONTEXT's */
 int get_custom_action(int context,int timeout,
                       const struct button_mapping* (*get_context_map)(int));
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-int get_custom_action_until(int context, int timeout,
-                            const struct button_mapping *(*get_context_map)(int),
-                            uint32_t deadline);
-#endif
 /* use if one of the standard CONTEXT_ mappings will work (ALL the core should be using this! */
 /* Scope MENU to one step back in Now Playing's control-menu subtree. */
 bool action_set_menu_back(bool enabled);

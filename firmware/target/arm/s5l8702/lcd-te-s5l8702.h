@@ -10,9 +10,17 @@ bool lcd_te_enabled(void);
 void lcd_te_set_enabled(bool enable);
 unsigned int lcd_te_bus_timing(void);
 bool lcd_te_set_bus_timing(unsigned int timing);
+/* The probed refresh period and the latest TE rise seen, in USEC_TIMER
+ * microseconds, with the kernel tick it was seen at. False until a probe
+ * qualifies the pulse. */
+bool lcd_te_timing(uint32_t *period, uint32_t *rise, long *rise_tick);
+/* The last synchronized transfer: how long it waited for its TE window and
+ * how long its DMA took, in microseconds. *count advances per transfer. */
+void lcd_te_last_transfer(uint32_t *wait, uint32_t *dma, unsigned int *count);
 
-/* Reports one line per call after releasing the LCD bus. */
-bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...));
+/* Reports one line per call after releasing the LCD bus. The survey of
+ * every GPIO and LCD signal holds the calling thread for one second. */
+bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...), bool survey);
 
 /* Driver hooks. The wait runs with the LCD mutex held, before DMA. */
 void lcd_te_probe(void);

@@ -23,7 +23,7 @@ else:
     # Execute the old loop's missing notification to prove the same fixture fails.
     update = 'static bool update_caption_version(unsigned int *seen) {(void)seen;return false;}'
 assert 'if (!dark && (art_owed || caption_owed)' in loop
-assert 'current_tick - last_frame_tick >= PF_FRAME_TICKS' in loop
+assert 'frame_due(flow_due)' in loop
 assert 'get_custom_action(CONTEXT_PLUGIN, timeout, get_context_map)' in loop
 quick = loop[loop.index('        case ACTION_STD_QUICKSCREEN:',loop.index('        enum agents_nav_screen nav =')):loop.index('        case PF_MENU:')]
 pre = r'''
@@ -122,6 +122,13 @@ static void set_scroll_line(const char*s,int n){snprintf(scroll[n],sizeof scroll
 static void carousel_caption_layout(bool two,struct pf_caption*c){c->y1=0;c->y2=two?1:0;}
 static int get_scroll_line_offset(int n){(void)n;return 0;}
 static void lcd_putsxy(int x,int y,const char*s){(void)x;assert(y>=0&&y<2);snprintf(drawn[y],sizeof drawn[y],"%s",s);draws++;}
+static int caption_rows_y,caption_rows_h,caption_clear_y,caption_clear_h;
+static bool caption_clears_itself;
+static struct {uint32_t text;int x,y,font,fg;bool valid;} caption_artist;
+static uint32_t fnv1a_str(const char*s){uint32_t h=2166136261u;while(*s)h=(h^(unsigned char)*s++)*16777619u;return h;}
+struct font {int height;};static struct font caption_test_font={1};
+static struct font*font_get(int f){(void)f;return &caption_test_font;}
+static void pf_clear_band(int y,int h){(void)y;(void)h;}
 static int agents_nav_pending(void){return AGENTS_NAV_NONE;}
 static void splash(int n,const char*s){(void)n;(void)s;assert(0);}
 static int quick_mode,overlay_calls,waits,joins,restarts;

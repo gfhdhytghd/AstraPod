@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the production 60 Hz clock and cubic curves in a host build."""
+"""Check the production refresh clock and cubic curves in a host build."""
 import ctypes as c
 from pathlib import Path
 import subprocess
@@ -22,7 +22,8 @@ with tempfile.TemporaryDirectory(prefix="podbox-ui-test-") as temp:
     lib = Path(temp) / "animation.so"
     subprocess.run(
         ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-shared", "-fPIC",
-         str(root / "apps-ipod/ui/animation.c"), "-o", str(lib)],
+         str(root / "apps-ipod/ui/animation.c"),
+         str(root / "tools/tests/fixtures/ui_refresh_stub.c"), "-o", str(lib)],
         check=True,
     )
     animation = c.CDLL(str(lib))
@@ -30,18 +31,19 @@ with tempfile.TemporaryDirectory(prefix="podbox-ui-test-") as temp:
     animation.ui_frame_clock.restype = c.c_uint32
     animation.ui_clock_frame.argtypes = [c.c_uint32]
     animation.ui_clock_frame.restype = c.c_uint
-    animation.ui_clock_timeout.argtypes = [c.c_uint32, c.c_uint, c.c_uint]
-    animation.ui_clock_timeout.restype = c.c_int
     animation.ui_tween_sample.argtypes = [c.POINTER(Tween), c.c_uint]
     animation.ui_tween_sample.restype = c.c_int
 
+    # One frame per refresh of the nominal 66.96 Hz panel, 14934.29 us.
     for f in range(1, 601):
         clock = animation.ui_frame_clock(f)
+        assert clock == -(-f * 3823178 // 256)
         assert animation.ui_clock_frame(clock - 1) == f - 1
         assert animation.ui_clock_frame(clock) == f
-        assert animation.ui_clock_timeout(clock - 1, f, 100) == 1
-        assert animation.ui_clock_timeout(clock, f, 100) == 0
-        assert animation.ui_clock_timeout(clock, f + 1, 100) == 1
+    assert animation.ui_frame_clock(1) == 14935
+    assert animation.ui_clock_frame(1000000) == 66
+    # Authored 60 fps durations play about 11% faster.
+    assert 0.89 < animation.ui_frame_clock(60) / 1e6 < 0.90
 
     for start, end, frames, in_curve in [(320, 0, 12, False), (0, 320, 10, True)]:
         tween = Tween(0, start, end, frames, in_curve)
@@ -63,4 +65,4 @@ with tempfile.TemporaryDirectory(prefix="podbox-ui-test-") as temp:
     wrapped_end = c.c_uint32(wrapped_start + animation.ui_frame_clock(12)).value
     assert animation.ui_clock_frame(c.c_uint32(wrapped_end - wrapped_start).value) == 12
 
-print("PASS 60 Hz boundaries, wraparound, 12 f / 10 f, skipped and reversed frames")
+print("PASS refresh-period boundaries, wraparound, 12 f / 10 f, skipped and reversed frames")

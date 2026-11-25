@@ -62,13 +62,20 @@ struct statusbar {
 };
 
 static int status_handle;
-static int update_delay = BUSY_REDRAW_FRAMES * HZ / UI_ANIM_FPS;
+/* Negative: the busy redraw interval. */
+static int update_delay = -1;
 static bool invalidated;
 static volatile bool indicators_moving;
 static uint32_t motion_start;
 static unsigned motion_duration;
 static unsigned motion_trace, final_flush_count;
 static bool trace_finished, trace_needs_flush;
+
+/* Kernel ticks of a redraw interval authored in frames. */
+static int redraw_ticks(unsigned frames)
+{
+    return ui_frame_clock(frames) / (1000000 / HZ);
+}
 
 static int mix_indicator(int from, int to, int amount)
 {
@@ -404,7 +411,8 @@ void sb_update(enum screen_type screen, bool force)
     }
     bar->palette_generation = palette_generation;
     if (poll)
-        bar->next_update = current_tick + update_delay;
+        bar->next_update = current_tick + (update_delay < 0 ?
+            redraw_ticks(BUSY_REDRAW_FRAMES) : update_delay);
     title->dirty = invalidated = false;
 done:
     core_put_data_pinned(bar);
@@ -446,12 +454,12 @@ static void wake_statusbar(void)
         bool active = indicators_moving || native_chrome_volume_visible() || sb_show_disk_activity() ||
                       sb_show_background_tasks() || sb_show_working();
         unsigned frames = active || was_active ? BUSY_REDRAW_FRAMES : IDLE_REDRAW_FRAMES;
-        next_check = current_tick + frames * HZ / UI_ANIM_FPS;
+        next_check = current_tick + redraw_ticks(frames);
         was_active = active;
         button_queue_post(BUTTON_NONE, 0);
     }
     else
-        next_check = current_tick + BUSY_REDRAW_FRAMES * HZ / UI_ANIM_FPS;
+        next_check = current_tick + redraw_ticks(BUSY_REDRAW_FRAMES);
 }
 
 void sb_init(void)

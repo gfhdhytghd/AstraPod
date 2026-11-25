@@ -129,7 +129,7 @@ int text_reel_run(const char *const *lines, unsigned char *heights, int count)
                 talk_text_part(lines[i]);
     }
 
-    uint32_t scroll_clock = USEC_TIMER;
+    uint32_t scroll_clock = ui_clock_start();
     while (1)
     {
         uint32_t elapsed = USEC_TIMER - scroll_clock;
@@ -145,7 +145,7 @@ int text_reel_run(const char *const *lines, unsigned char *heights, int count)
             case ACTION_STD_NEXT:        /* wheel forward: nudge the reel up   */
             case ACTION_STD_NEXTREPEAT:
                 manual = true;
-                scroll_clock = USEC_TIMER;
+                scroll_clock = ui_clock_start();
                 last_pixels = 0;
                 reel.scroll += reel.pitch;
                 break;
@@ -153,7 +153,7 @@ int text_reel_run(const char *const *lines, unsigned char *heights, int count)
             case ACTION_STD_PREV:        /* wheel back: nudge the reel down    */
             case ACTION_STD_PREVREPEAT:
                 manual = true;
-                scroll_clock = USEC_TIMER;
+                scroll_clock = ui_clock_start();
                 last_pixels = 0;
                 reel.scroll -= reel.pitch;
                 break;
@@ -164,11 +164,12 @@ int text_reel_run(const char *const *lines, unsigned char *heights, int count)
                 if (manual && frame >= TR_RESUME_FRAMES)
                 {
                     manual = false;
-                    scroll_clock = USEC_TIMER;
+                    scroll_clock = ui_clock_start();
                 }
                 else if (!manual)
                 {
-                    unsigned pixels = frame * TR_PIXELS_PER_SECOND / UI_ANIM_FPS;
+                    unsigned pixels = (uint64_t)ui_frame_clock(frame) *
+                                      TR_PIXELS_PER_SECOND / 1000000;
                     reel.scroll += pixels - last_pixels;
                     last_pixels = pixels;
                 }

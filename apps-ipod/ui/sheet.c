@@ -34,7 +34,7 @@ void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route)
     int to = open ? SHEET_PROGRESS : 0;
     ui_sheet_cancel(sheet);
     sheet->tween = (struct ui_tween){
-        .start_clock = now, .from = from, .to = to,
+        .start_clock = ui_clock_start(), .from = from, .to = to,
         .frames = lcd_active() && from != to
                     ? ui_theme_duration(open ? SHEET_OPEN_FRAMES : SHEET_CLOSE_FRAMES) : 0,
         .ease_in = !open,
@@ -63,13 +63,12 @@ bool ui_sheet_wait(const struct ui_sheet *sheet)
     if (!sheet->active || ui_flush_inhibited())
         return false;
     int timeout = ui_sheet_timeout(sheet, TIMEOUT_BLOCK);
+#if defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))
     if (!timeout)
         yield();
-#if defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))
     return !button_queue_wait_pending(timeout);
 #else
-    if (timeout > 0)
-        sleep(timeout);
+    ui_clock_sleep(timeout);
     return true;
 #endif
 }

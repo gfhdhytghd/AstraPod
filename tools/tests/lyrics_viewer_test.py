@@ -88,6 +88,7 @@ static void agents_nav_request(int screen, bool remote)
 #define ROCKBOX_DIR "."
 #include "lyric_viewer.h"
 #include "ui/animation.h"
+#include "ui/pace.h"
 #include "ui/native_theme.h"
 #define fdprintf dprintf
 #define USEC_TIMER mock_usec()
@@ -118,6 +119,19 @@ struct wps_state {struct mp3entry *id3,*nid3;int ff_rewind_count;bool paused;};
 struct cider_row {char id[80],title[124],subtitle[124];};
 static uint32_t current_tick, precise_extra;
 static uint32_t mock_usec(void){return current_tick*10000+precise_extra;}
+/* The pacing of a player without TE: the next refresh, waits rounded down
+ * to ticks. */
+uint32_t ui_pace_next(struct ui_pace *pace, uint32_t start)
+{
+    pace->start = start;
+    pace->running = true;
+    return pace->due = start + ui_frame_clock(ui_clock_frame(mock_usec() - start) + 1);
+}
+int ui_clock_wait_until(uint32_t deadline)
+{
+    int32_t left = deadline - mock_usec();
+    return left <= 0 ? TIMEOUT_NOBLOCK : left / 10000;
+}
 static fb_data screen_pixels[320*240],app_area[3*1024*1024/sizeof(fb_data)];
 static struct viewport default_vp,*vp=&default_vp;
 static struct frame_buffer_t lcd_framebuffer_default={.fb_ptr=screen_pixels,.stride=320,.elems=320*240};
@@ -674,7 +688,7 @@ static int get_action(int c,int timeout){
   if(calls==4){assert(!lv.mode.manual&&lv.mode.focus==2);return ACTION_WPS_PLAY;}
   if(calls==5)return ACTION_WPS_SEEKFWD;
   if(calls==6)return ACTION_WPS_SKIPNEXT;
-  if(calls==7){assert(!lyrics_timed()&&lyrics_count()==3&&lv.track_fade);assert(timeout<=1 && "track fade must schedule its next 60 Hz pose");assert(!memcmp(lv_frame(),lv.snapshot,LV_FRAME));current_tick+=20;return ACTION_NONE;}
+  if(calls==7){assert(!lyrics_timed()&&lyrics_count()==3&&lv.track_fade);assert(timeout<=1 && "track fade must schedule its next refresh pose");assert(!memcmp(lv_frame(),lv.snapshot,LV_FRAME));current_tick+=20;return ACTION_NONE;}
   assert(!lv.track_fade&&!lv.boost&&lv.mode.focus==0&&!strcmp(lyrics_text(0),"New first line"));return ACTION_WPS_BROWSE;
  }
  if(plan==1){remote_key=true;
@@ -1097,6 +1111,7 @@ subprocess.run(['cc','-m32','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unuse
                 '-I'+str(r/'firmware/export'),
                 '-I'+str(next(r.glob('firmware/**/podlink.h')).parent),
                 str(p),str(r/'apps-ipod/viewers/lyric_viewer/lyrics_motion.c'),str(r/'apps-ipod/ui/animation.c'),
+                str(r/'tools/tests/fixtures/ui_refresh_stub.c'),
                 str(playback/'cider_model.c'),'-o',str(o/'viewer')],check=True)
 for scenario in sys.argv[2:] or ['headset', 'select', 'entry', 'background', 'frames', 'entry-frames', 'shell', 'all']:
     fixture = o / scenario

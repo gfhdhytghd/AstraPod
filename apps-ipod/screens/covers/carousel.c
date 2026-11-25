@@ -110,9 +110,7 @@
 #include "screens/playback/cider_library.h"
 #include "speech/talk.h"
 #include "ui/animation.h"
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-#include "lcd-te-s5l8702.h"
-#endif
+#include "ui/pace.h"
 #include "ui/scene.h"
 
 /******************************* Globals ***********************************/
@@ -545,68 +543,29 @@ static int slide_frame;
 static int step;
 static int target;
 static int fade;
-static bool pf_native_motion;
 static unsigned pf_motion_scale = UI_THEME_MOTION_ONE;
-
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-bool carousel_60hz_enabled;
-
-bool carousel_debug_toggle_60hz(void)
-{
-    if (lcd_te_supported())
-        carousel_60hz_enabled = !carousel_60hz_enabled;
-    else
-        splash(HZ, "LCD type 1 only");
-    return false;
-}
-#endif
 
 static unsigned motion_frames(unsigned frames)
 {
     return MAX(1u, (frames * pf_motion_scale + UI_THEME_MOTION_ONE / 2) /
                     UI_THEME_MOTION_ONE);
 }
-/* Wall clock for the flip, see update_scroll_animation(). The scroll and
- * transition speed settings are calibrated as a per-frame step at this rate. */
-#define CAROUSEL_NOMINAL_FPS 30
-/* Most frames a second the screen will draw. The animation is advanced by
- * elapsed time, not per frame, so this changes how many intermediate positions
- * a flip is shown at and not how long the flip takes. Above it there is little
- * left to see and a great deal to pay: a frame here costs 11-15 ms, so an
- * uncapped loop spends essentially all the CPU it takes from playback drawing
- * positions that are replaced before the panel has finished showing them.
- *
- * Equal to CAROUSEL_NOMINAL_FPS by coincidence rather than by rule -- that one
- * calibrates the scroll and transition speed settings, so welding the two
- * together would make retuning this rescale those. HZ/30 is 3 ticks, i.e. 33
- * frames a second, tick granularity being what it is. */
-/* The 6G draws faster than the 5G to reduce seam width when a GRAM
- * transfer crosses the panel scan. LCD type 1 can synchronize qualified
- * transfers to TE; types 2/3 still update without synchronization.
- *
- * The 5G writes into the BCM's own framebuffer and has it push a whole frame,
- * so it cannot tear and has no reason to pay for the extra frames.
- *
- * HZ is 100, so the only rates the tick offers are 33, 50 and 100. */
-#if CONFIG_LCD == LCD_IPOD6GNANO3G4G
-#define PF_MAX_FPS       50
-#else
-#define PF_MAX_FPS       30
-#endif
-#define PF_FRAME_TICKS   MAX(HZ / PF_MAX_FPS, 1)
-/* The flip's clock, see update_scroll_animation(): USEC_TIMER at the last
- * advance, the step's carried remainder, four times the smoothed interval
- * between advances in ms, the ms a long frame left to be made up, and whether
- * the next advance is a flip's first. */
+/* The scroll and transition speed settings are a step per this many
+ * authored frames, see scroll_speed(). */
+#define PF_SPEED_FRAMES 2
+/* Frames are presented on the deadlines these give, one pace per animated
+ * loop, since each learns its own rate and wake phase. The covers are sent
+ * apart from the caption so a moving band fits one panel refresh; the album
+ * panel sends the whole screen, which does not, and settles at half rate. */
+static struct ui_pace flow_pace, panel_pace;
+/* The flip's clock, see update_scroll_animation(): its start, the last frame
+ * sampled from it and the step's carried remainder. */
 static uint32_t anim_clock;
 static unsigned anim_sampled_frame;
+static int anim_frac;
 /* Direction of the gap on screen. Reversing travel can walk the same
  * geometry backwards, then choose a new gap when it crosses the centre. */
 static int anim_pose_step;
-static int anim_frac;
-static int anim_avg4_ms = 4 * 1000 / PF_MAX_FPS;
-static int anim_owed_ms;
-static bool anim_started;
 /* Always 0: nothing sets it any more, but render_all_slides()'s fade
  * arithmetic still reads it, so it stays as a no-op term. */
 static int extra_fade;
@@ -713,6 +672,20 @@ static struct pf_scroll_line scroll_lines[PF_MAX_SCROLL_LINES];
 static int  caption_index;
 static int  caption_variant;
 static bool caption_valid;
+/* The caption rows the last paint changed, from the top of pf_vp. */
+static int caption_rows_y, caption_rows_h;
+/* The rows paint_caption() leaves to carousel_album_caption() to clear, so an
+ * unchanged artist line can stay. Zero high while paint_caption() clears. */
+static int caption_clear_y, caption_clear_h;
+/* Whether this loop's model draws through carousel_album_caption(). */
+static bool caption_clears_itself;
+/* The artist line on screen, so a new caption can tell whether it changes. */
+static struct {
+    uint32_t text;
+    int x, y, font;
+    pix_t fg;
+    bool valid;
+} caption_artist;
 
 enum ePFS{ePFS_ARTIST = 0, ePFS_ALBUM};
 
@@ -725,6 +698,7 @@ enum pf_states {
 static int pf_state;
 
 /** code */
+static void pf_clear_band(int y, int h);
 static bool free_slide_prio(int prio);
 static inline bool load_and_prepare_surface(int slide_index,int cache_index,int prio);
 bool load_new_slide(void);
@@ -1599,7 +1573,8 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
      * currently active, to center/scroll it, so it has to see the album
      * name's *actual* rendering font, not FONT_UI, or a bold font with a
      * different average glyph width would end up mis-centered. */
-    lcd_setfont(carousel_caption_font(true));
+    int album_font = carousel_caption_font(true);
+    lcd_setfont(album_font);
     album_line = carousel_caption_fit(album_and_year, album_fit,
                                       sizeof(album_fit));
     if (album_changed)
@@ -1612,28 +1587,65 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
 
     albumtxt_x = get_scroll_line_offset(PF_SCROLL_ALBUM);
 
+    /* Measured in the artist font before anything is drawn, so an artist line
+     * the same as the one on screen is neither cleared nor drawn again. Only
+     * the album line's rows change then. */
+    bool keep_artist = false;
+    caption_clears_itself = true;
     if (show_artist)
     {
-        if (!untagged)
-            lcd_putsxy(albumtxt_x, albumtxt_y, album_line);
-        /* Restored before the artist line: render_all_slides()/the FPS
-         * overlay/etc all assume pf_vp's font is the real UI font, and the
-         * artist name itself is never bold. carousel_caption_font(false),
-         * not the FONT_UI constant -- see init()'s comment on carousel_caption_font(true). */
-        lcd_setfont(carousel_caption_font(false));
-
+        int artist_font = carousel_caption_font(false);
+        lcd_setfont(artist_font);
         artist_line = carousel_caption_fit(artisttxt, artist_fit,
                                            sizeof(artist_fit));
         if (album_changed)
             set_scroll_line(artist_line, PF_SCROLL_ARTIST);
         artisttxt_x = get_scroll_line_offset(PF_SCROLL_ARTIST);
-        lcd_putsxy(artisttxt_x, cap.y2, artist_line);
+        uint32_t text = fnv1a_str(artist_line);
+        int album_end = albumtxt_y + font_get(album_font)->height;
+        keep_artist = caption_clear_h > 0 && caption_artist.valid &&
+                      caption_artist.text == text &&
+                      caption_artist.x == artisttxt_x &&
+                      caption_artist.y == cap.y2 &&
+                      caption_artist.font == artist_font &&
+                      caption_artist.fg == pf_fg_color &&
+                      album_end <= cap.y2 &&
+                      albumtxt_y >= caption_clear_y &&
+                      album_end <= caption_clear_y + caption_clear_h;
+        caption_artist.text = text;
+        caption_artist.x = artisttxt_x;
+        caption_artist.y = cap.y2;
+        caption_artist.font = artist_font;
+        caption_artist.fg = pf_fg_color;
+        caption_artist.valid = true;
+        if (keep_artist)
+        {
+            caption_rows_y = albumtxt_y;
+            caption_rows_h = album_end - albumtxt_y;
+        }
     }
     else
+        caption_artist.valid = false;
+    /* pf_clear_band() clears in pf_vp's background, set by paint_caption(). */
+    if (caption_clear_h > 0)
     {
-        lcd_putsxy(albumtxt_x, albumtxt_y, album_line);
-        lcd_setfont(carousel_caption_font(false));
+        if (keep_artist)
+            pf_clear_band(caption_rows_y, caption_rows_h);
+        else
+            pf_clear_band(caption_clear_y, caption_clear_h);
+        caption_clear_h = 0;
     }
+
+    lcd_setfont(album_font);
+    if (!show_artist || !untagged)
+        lcd_putsxy(albumtxt_x, albumtxt_y, album_line);
+    /* Restored after the album line: render_all_slides()/the FPS overlay/etc
+     * all assume pf_vp's font is the real UI font, and the artist name itself
+     * is never bold. carousel_caption_font(false), not the FONT_UI constant
+     * -- see init()'s comment on carousel_caption_font(true). */
+    lcd_setfont(carousel_caption_font(false));
+    if (show_artist && !keep_artist)
+        lcd_putsxy(artisttxt_x, cap.y2, artist_line);
     carousel_text_end(saved_vp);
 }
 
@@ -2472,26 +2484,20 @@ static PFreal smoothstep(PFreal u)
     return (uu * (3 * PFREAL_ONE - 2 * u)) >> PFREAL_SHIFT;
 }
 
-static unsigned motion_rate(void)
-{
-    return pf_native_motion ? UI_ANIM_FPS : HZ;
-}
-
 static uint32_t motion_clock(void)
 {
-    return pf_native_motion ? (uint32_t)USEC_TIMER : (uint32_t)current_tick;
+    return USEC_TIMER;
 }
 
 static unsigned motion_elapsed(uint32_t now, uint32_t since)
 {
-    return pf_native_motion ? ui_clock_frame(now - since) : now - since;
+    return ui_clock_frame(now - since);
 }
 
-/* Scale the duration by the scroll speed setting, relative to 200%. Apply
- * the original tick rounding when using the original clock. */
+/* Scale the duration by the scroll speed setting, relative to 200%. */
 static int flat_duration(unsigned frames)
 {
-    unsigned period = motion_frames(frames) * motion_rate() / UI_ANIM_FPS;
+    unsigned period = motion_frames(frames);
     return MAX(period * 200 / global_settings.album_covers_scroll_speed, 1u);
 }
 
@@ -2551,16 +2557,16 @@ static void flow_note_wheel(bool can_move)
     flat_note_scroll();
     if (flat_view() || !can_move)
         return;
-    if (pf_flat_interval <= (pf_native_motion ? (int)motion_frames(PF_FLOW_FAST) : HZ * 6 / 100))
+    if (pf_flat_interval <= (int)motion_frames(PF_FLOW_FAST))
     {
-        if (pf_native_motion && !flow_fast && !flow_mix)
+        if (!flow_fast && !flow_mix)
         {
             flow_pose_clock = pf_flat_last_input;
             flow_sampled_frame = 0;
         }
         flow_fast = true;
     }
-    else if (pf_flat_interval >= (pf_native_motion ? (int)motion_frames(PF_FLOW_SLOW) : HZ * 12 / 100))
+    else if (pf_flat_interval >= (int)motion_frames(PF_FLOW_SLOW))
         flow_fast = false;
 }
 
@@ -2574,35 +2580,24 @@ static void flow_update_mix(void)
     bool allow_tilt = !flat_view() && !pf_random_spinning;
     if (!allow_tilt)
         flow_fast = false;
-    if (pf_native_motion)
+    int ramp = motion_frames(PF_FLOW_RAMP);
+    uint32_t release = pf_flat_last_input + ui_frame_clock(motion_frames(PF_FLOW_SLOW));
+    if (flow_fast && (int32_t)(now - release) > 0)
     {
-        int ramp = motion_frames(PF_FLOW_RAMP);
-        uint32_t release = pf_flat_last_input + ui_frame_clock(motion_frames(PF_FLOW_SLOW));
-        if (flow_fast && (int32_t)(now - release) > 0)
-        {
-            /* A skipped render can span the hold and the release. Advance
-             * each part on its own timeline so the tilt doesn't jump. */
-            unsigned held = motion_elapsed(release, flow_pose_clock) - flow_sampled_frame;
-            flow_mix_frames = MIN(flow_mix_frames + held, (unsigned)ramp);
-            flow_pose_clock = release;
-            flow_sampled_frame = 0;
-            flow_fast = false;
-        }
-        unsigned elapsed = motion_elapsed(now, flow_pose_clock);
-        int delta = MIN(elapsed - flow_sampled_frame, (unsigned)ramp);
-        flow_sampled_frame = elapsed;
-        int frames = flow_mix_frames + (flow_fast ? delta : -delta);
-        flow_mix_frames = MIN(MAX(frames, 0), ramp);
-        flow_mix = flow_mix_frames * PFREAL_ONE / ramp;
-        return;
-    }
-    if (motion_elapsed(now, pf_flat_last_input) > HZ * 12 / 100)
+        /* A skipped render can span the hold and the release. Advance
+         * each part on its own timeline so the tilt doesn't jump. */
+        unsigned held = motion_elapsed(release, flow_pose_clock) - flow_sampled_frame;
+        flow_mix_frames = MIN(flow_mix_frames + held, (unsigned)ramp);
+        flow_pose_clock = release;
+        flow_sampled_frame = 0;
         flow_fast = false;
+    }
     unsigned elapsed = motion_elapsed(now, flow_pose_clock);
-    flow_pose_clock = now;
-    int delta = MIN(elapsed, (unsigned)HZ) * PFREAL_ONE / MAX(HZ * 12 / 100, 1);
-    flow_mix = flow_fast ? MIN(PFREAL_ONE, flow_mix + delta)
-                         : MAX(0, flow_mix - delta);
+    int delta = MIN(elapsed - flow_sampled_frame, (unsigned)ramp);
+    flow_sampled_frame = elapsed;
+    int frames = flow_mix_frames + (flow_fast ? delta : -delta);
+    flow_mix_frames = MIN(MAX(frames, 0), ramp);
+    flow_mix = flow_mix_frames * PFREAL_ONE / ramp;
 }
 
 /* Pull both piles inward together. Inner slot spacing is chosen from the
@@ -3551,9 +3546,8 @@ void set_current_slide(const int slide_index)
     flow_mix_frames = 0;
     flow_fast = false;
     unsigned scale = ui_theme_duration(UI_THEME_MOTION_ONE);
-    bool clock_changed = pf_motion_scale != scale || pf_native_motion != (scale > 0);
+    bool clock_changed = pf_motion_scale != scale;
     pf_motion_scale = scale;
-    pf_native_motion = scale > 0;
     if (clock_changed || !flat_view())
     {
         pf_flat_interval = flat_duration(PF_FLAT_FLIP);
@@ -3656,22 +3650,18 @@ static void start_animation(void)
     }
     step = (target < center_slide.slide_index) ? -1 : 1;
     pf_state = pf_scrolling;
-    anim_clock = USEC_TIMER;
+    anim_clock = ui_clock_start();
     anim_sampled_frame = 0;
     anim_pose_step = step;
     anim_frac = 0;
-    anim_owed_ms = 0;
-    anim_started = true;
     pf_flat_snap = flat_pace(motion_clock()) < flat_duration(PF_FLAT_MIN);
 }
-
-static void update_scroll_animation(void);
 
 static void reverse_animation(int direction)
 {
     target = center_index + (anim_pose_step == direction ? direction : 0);
     step = direction;
-    anim_clock = USEC_TIMER;
+    anim_clock = ui_clock_start();
     anim_sampled_frame = 0;
 }
 
@@ -3723,15 +3713,7 @@ static void show_previous_slide(void)
             start_animation();
         }
     } else if ( step > 0 ) {
-        if (pf_native_motion)
-        {
-            reverse_animation(-1);
-            return;
-        }
-        target = center_index;
-        step = (target <= center_slide.slide_index) ? -1 : 1;
-        if (step < 0)
-            update_scroll_animation();
+        reverse_animation(-1);
     } else {
         target = fmax(0, center_index - 2);
     }
@@ -3751,15 +3733,7 @@ static void show_next_slide(void)
             start_animation();
         }
     } else if ( step < 0 ) {
-        if (pf_native_motion)
-        {
-            reverse_animation(1);
-            return;
-        }
-        target = center_index;
-        step = (target < center_slide.slide_index) ? -1 : 1;
-        if (step > 0)
-            update_scroll_animation();
+        reverse_animation(1);
     } else {
         target = fmin(center_index + 2, number_of_slides - 1);
     }
@@ -4261,7 +4235,7 @@ static void flat_animate(int s, PFreal ftick)
     pf_flat_moving = true;
 }
 
-/* The flip's speed at `frame`, as a step per frame at CAROUSEL_NOMINAL_FPS:
+/* The flip's speed at `frame`, as a step per PF_SPEED_FRAMES authored frames:
  * fastest leaving a cover and slowing to a crawl as it nears the target. */
 static int scroll_speed(int frame, uint32_t sample_clock)
 {
@@ -4271,7 +4245,7 @@ static int scroll_speed(int frame, uint32_t sample_clock)
      * settling in the 3D view and a stall in this one. Constant rate instead,
      * at the pace the user is scrolling: see flat_rate(). */
     if (flat_view())
-        return 65536 * motion_rate() / (CAROUSEL_NOMINAL_FPS * flat_rate(sample_clock));
+        return 65536 * PF_SPEED_FRAMES / flat_rate(sample_clock);
 
     const int max = 2 * 65536;
     int fi = frame - (target << 16);
@@ -4286,39 +4260,13 @@ static int scroll_speed(int frame, uint32_t sample_clock)
     return MAX(1, speed * UI_THEME_MOTION_ONE / (int)MAX(1u, pf_motion_scale));
 }
 
-/* The original path smooths long frame advances and carries time owed.
- * Advance the new path once for each elapsed engine frame, with no debt. */
-static int scroll_time(uint32_t now)
+/* Authored frames since the flip's last sample. */
+static unsigned scroll_time(uint32_t now)
 {
-    if (pf_native_motion)
-    {
-        unsigned frame = ui_clock_frame(now - anim_clock);
-        unsigned elapsed = frame - anim_sampled_frame;
-        anim_sampled_frame = frame;
-        return elapsed * (1000 * CAROUSEL_NOMINAL_FPS / UI_ANIM_FPS);
-    }
-
-    uint32_t us = now - anim_clock;
-    if (us > 200000)
-    {
-        us = 200000;
-        anim_clock = now - us;
-    }
-    int dt = us / 1000;
-    anim_clock += dt * 1000;
-
-    int avg = anim_avg4_ms / 4;
-    int due = dt + anim_owed_ms;
-    int use = MIN(due, MAX(avg + avg / 2, 1));
-    anim_owed_ms = MIN(due - use, 200);
-    /* The first advance of a flip is timed from the button, not from a
-     * frame, so it says nothing about the frame rate. */
-    if (anim_started)
-        anim_started = false;
-    else
-        anim_avg4_ms += dt - avg;
-
-    return use * CAROUSEL_NOMINAL_FPS;
+    unsigned frame = ui_clock_frame(now - anim_clock);
+    unsigned elapsed = frame - anim_sampled_frame;
+    anim_sampled_frame = frame;
+    return elapsed;
 }
 
 static int slide_at(int frame, int direction)
@@ -4331,10 +4279,8 @@ static void update_scroll_animation(void)
     if (step == 0)
         return;
 
-    bool native = pf_native_motion;
-    bool native_flat = native && flat_view();
-    int left = scroll_time(USEC_TIMER);
-    int quantum = native ? 1000 * CAROUSEL_NOMINAL_FPS / UI_ANIM_FPS : 1000;
+    bool flat = flat_view();
+    unsigned left = scroll_time(USEC_TIMER);
     int target_frame = target << 16;
     /* Clamp distance as well as time so crossing the collection bounds is
      * impossible, even when the next frame is late. */
@@ -4343,25 +4289,24 @@ static void update_scroll_animation(void)
     if (remain < 0)
         remain = 0;
 
-    /* Recalculate the speed for each elapsed frame so a late wake advances
-     * along the same curve. `left` is in thousandths of a nominal frame. */
+    /* Recalculate the speed for each elapsed frame, so a frame that advances
+     * several, at half rate or after a late wake, follows the same curve. */
     int adv = 0;
     uint32_t sample_clock = motion_clock();
-    unsigned sample = native ? anim_sampled_frame - left / quantum : 0u;
+    unsigned sample = anim_sampled_frame - left;
     while (left > 0 && adv < remain)
     {
-        int part = MIN(left, quantum);
-        if (native_flat)
+        if (flat)
             sample_clock = anim_clock + ui_frame_clock(++sample);
         int previous = slide_frame + adv * step;
-        int num = scroll_speed(previous, sample_clock) * part + anim_frac;
-        int a = num / 1000;
+        int num = scroll_speed(previous, sample_clock) + anim_frac;
+        int a = num / PF_SPEED_FRAMES;
 
-        anim_frac = num - a * 1000;
+        anim_frac = num - a * PF_SPEED_FRAMES;
         adv = MIN(adv + a, remain);
-        if (native_flat && slide_at(previous, step) != slide_at(slide_frame + adv * step, step))
+        if (flat && slide_at(previous, step) != slide_at(slide_frame + adv * step, step))
             pf_flat_snap = flat_pace(sample_clock) < flat_duration(PF_FLAT_MIN);
-        left -= part;
+        left--;
     }
 
     slide_frame += adv * step;
@@ -4376,27 +4321,17 @@ static void update_scroll_animation(void)
      * tick is progress through the gap, 0 at the start, and neg is what
      * remains; both are measured along the direction of travel, so the
      * geometry below reads the same either way. */
-    int pose_step = step;
-    if (native)
-    {
-        int offset = slide_frame - (center_index << 16);
-        if (offset == 0 || (offset < 0) == (step < 0))
-            anim_pose_step = step;
-        pose_step = anim_pose_step;
-    }
+    int offset = slide_frame - (center_index << 16);
+    if (offset == 0 || (offset < 0) == (step < 0))
+        anim_pose_step = step;
+    int pose_step = anim_pose_step;
     int index = slide_at(slide_frame, pose_step);
 
     if (center_index != index) {
         center_index = index;
-        /* Decided per cover, at the crossing, where every card is on its
-         * resting place and the choice costs nothing to make. */
-        if (!native)
-            pf_flat_snap = flat_pace(motion_clock()) < flat_duration(PF_FLAT_MIN);
         wake_pf_thread();
         if (pf_random_spinning)
             keyclick_click(true, BUTTON_SCROLL_FWD);
-        if (!native)
-            slide_frame = index << 16;
         center_slide.slide_index = center_index;
         for (int i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
             left_slides[i].slide_index = center_index - 1 - i;
@@ -4415,7 +4350,7 @@ static void update_scroll_animation(void)
     /* the leftmost and rightmost slide must fade away */
     fade = ((pose_step < 0) ? neg : tick) / 256;
 
-    if (native ? slide_frame == target_frame : center_index == target) {
+    if (slide_frame == target_frame) {
         flow_landed_direction = -step;
         reset_slides();
         pf_state = pf_idle;
@@ -4430,15 +4365,6 @@ static void update_scroll_animation(void)
         flat_animate(pose_step, ftick);
     else
         coverflow_animate(pose_step, tick, neg, ftick);
-
-    /* must change direction ? */
-    if (!native)
-    {
-        if (target < index && step > 0)
-            step = -1;
-        if (target > index && step < 0)
-            step = 1;
-    }
 }
 
 static void cleanup(void)
@@ -4897,20 +4823,24 @@ static void pf_stats_draw(void)
 }
 #endif /* PF_SHOW_STATS */
 
-/* Wait in the kernel's tick units. Render due frames from the engine clock
- * even when the queue returns late or is interrupted by input. */
-static int native_frame_wait(uint32_t clock, unsigned last_frame,
-                             uint32_t *deadline)
+/* A frame deadline is never further ahead than this. One that seems to be
+ * has passed long enough ago for the timer to wrap. */
+#define PF_DEADLINE_AHEAD_US 100000
+
+static bool frame_due(uint32_t deadline)
 {
-    uint32_t elapsed = (uint32_t)USEC_TIMER - clock;
-    unsigned frame = ui_clock_frame(elapsed);
-    if (frame != last_frame)
+    uint32_t ahead = deadline - (uint32_t)USEC_TIMER;
+    return ahead == 0 || ahead > PF_DEADLINE_AHEAD_US;
+}
+
+/* The input wait to a frame deadline. Without a precise wake the wait rounds
+ * down to whole ticks, and the last part is slept rather than spun through. */
+static int frame_wait(uint32_t deadline)
+{
+    if (frame_due(deadline))
         return TIMEOUT_NOBLOCK;
-    uint32_t next = ui_frame_clock(frame + 1);
-    if (deadline)
-        *deadline = clock + next;
-    uint32_t left = next - elapsed;
-    return 1 + (left - 1) / (1000000u / HZ);
+    int timeout = ui_clock_wait_until(deadline);
+    return timeout == TIMEOUT_NOBLOCK && !frame_due(deadline) ? 1 : timeout;
 }
 
 #define ALBUM_PANEL_WIDTH ALBUM_BLUR_PANEL_W
@@ -4965,12 +4895,10 @@ static struct album_panel {
     int scroll_y, scroll_from;
     uint32_t scroll_clock;
     unsigned scroll_frames;
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-    unsigned scroll_sampled;
-#endif
     int from, to, via, position;
     unsigned first, second, sampled, trace;
-    uint32_t clock, opened;
+    /* due is the next flip or list scroll frame's deadline. */
+    uint32_t clock, opened, due;
     unsigned painted_rows, painted_discs;
     bool open_logged;
     long next_read;
@@ -5026,6 +4954,7 @@ static bool open_album_panel(int selected, int top)
     if (!model->panel_request || !request_panel(center_index, &panel.request))
         return false;
     panel.opened = USEC_TIMER;
+    caption_artist.valid = false;
     panel_perf_record(PP_SELECT, 0, center_index, model->external);
     panel.live = true;
     panel.count = -1;
@@ -5074,7 +5003,7 @@ static void flip_to(bool open)
     panel.first = (first * abs(panel.via - panel.from) + FLIP_MID - 1) / FLIP_MID;
     panel.second = (second * abs(panel.to - panel.via) + FLIP_MID - 1) / FLIP_MID;
     panel.sampled = (unsigned)-1;
-    panel.clock = USEC_TIMER;
+    panel.clock = panel.due = ui_clock_start();
     panel.moving = panel.first || panel.second;
     panel.dirty = true;
     if (!panel.moving)
@@ -5112,10 +5041,7 @@ static void panel_follow_selection(bool animate)
     {
         /* Keep up with fast input, then use native list cubic ease-out. */
         panel.scroll_y = panel.scroll_from = from;
-        panel.scroll_clock = USEC_TIMER;
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-        panel.scroll_sampled = (unsigned)-1;
-#endif
+        panel.scroll_clock = panel.due = ui_clock_start();
     }
     else
         panel.scroll_y = top * PANEL_PITCH;
@@ -5346,9 +5272,6 @@ static void panel_step_scroll(void)
 {
     uint32_t elapsed = (uint32_t)USEC_TIMER - panel.scroll_clock;
     unsigned frame = ui_clock_frame(elapsed);
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-    panel.scroll_sampled = frame;
-#endif
     const struct ui_tween glide = {
         .from = panel.scroll_from, .to = panel.top * PANEL_PITCH,
         .frames = panel.scroll_frames,
@@ -5837,10 +5760,16 @@ static void draw_album_flip(void)
     panel.dirty = false;
 }
 
+/* A flip or a list scroll samples and presents a frame only on its
+ * deadlines; other changes draw when they come. */
 static void step_album_flip(void)
 {
     bool done = false;
-    if (panel.moving)
+    bool scrolling = panel.scroll_frames && panel.position == FLIP_OPEN &&
+                     panel.to == FLIP_OPEN;
+    bool animating = panel.moving || scrolling;
+    bool due = frame_due(panel.due);
+    if (panel.moving && due)
     {
         unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER - panel.clock);
         if (frame != panel.sampled)
@@ -5862,15 +5791,25 @@ static void step_album_flip(void)
         panel.album_font = panel_cache_font(PANEL_ALBUM);
         panel.title_font = panel_cache_font(PANEL_BODY);
         panel.small_font = panel_cache_font(PANEL_SMALL);
-        if (panel.scroll_frames)
+        if (panel.scroll_frames && due)
             panel_step_scroll();
         if (!panel.resuming && !TIME_BEFORE(current_tick, panel.next_read))
             panel_read_tracks();
     }
-    if ((panel.dirty || (panel.command_count && !panel.menu_ready)) && lcd_active())
+    bool draw = (panel.dirty || (panel.command_count && !panel.menu_ready)) &&
+                lcd_active() && (!animating || due);
+    if (draw)
     {
         draw_album_flip();
         panel.resuming = false;
+    }
+    if (animating && due)
+    {
+        uint32_t start = panel.moving ? panel.clock : panel.scroll_clock;
+        panel.due = ui_pace_next(&panel_pace, start);
+    }
+    if (draw)
+    {
         if (done)
         {
             ui_perf_end(panel.trace);
@@ -6133,14 +6072,29 @@ static void paint_slides(const struct ui_view *view, const struct ui_view_frame 
 static void paint_caption(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     const struct carousel_frame *paint = view->data;
+    caption_rows_y = frame->clip.y - pf_vp_y;
+    caption_rows_h = frame->clip.height;
     if (!paint->joined)
     {
         lcd_set_background(pf_bg_color);
-        pf_clear_band(frame->clip.y - pf_vp_y, frame->clip.height);
+        caption_clear_y = caption_rows_y;
+        caption_clear_h = caption_rows_h;
+        if (!caption_clears_itself)
+        {
+            pf_clear_band(caption_clear_y, caption_clear_h);
+            caption_clear_h = 0;
+        }
     }
 #if !PF_SHOW_STATS
     model->draw_text();
 #endif
+    /* A caption that drew nothing leaves its rows to be cleared here. */
+    if (caption_clear_h > 0)
+    {
+        pf_clear_band(caption_clear_y, caption_clear_h);
+        caption_clear_h = 0;
+        caption_artist.valid = false;
+    }
 }
 
 static const struct ui_view_ops slide_ops = { .paint = paint_slides };
@@ -6184,6 +6138,8 @@ static void carousel_paint(struct carousel_frame *paint, bool art, bool caption,
     paint->slides.value[UI_HEIGHT] = art ? height : 0;
     paint->captions.value[UI_Y] = pf_vp_y + pf_text_y;
     paint->captions.value[UI_HEIGHT] = caption ? pf_text_h : 0;
+    caption_rows_y = pf_text_y;
+    caption_rows_h = pf_text_h;
     if (art)
         ui_page_invalidate(&paint->page, (struct ui_rect){0, pf_vp_y + y, LCD_WIDTH, height});
     if (caption)
@@ -6225,6 +6181,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
     unsigned palette_seen_generation = album_palette_generation();
     struct carousel_frame paint;
     carousel_frame_init(&paint);
+    caption_clears_itself = false;
+    caption_artist.valid = false;
     /* What the screen owes, split so that the two things that change on their
      * own account can be repaired on their own account. The covers are the
      * expensive half by a wide margin, and while a track plays most frames want
@@ -6246,6 +6204,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
     bool full_flush_owed = false;
     int dirty_top = LCD_HEIGHT, dirty_end = 0;
     int dirty_left = LCD_WIDTH, dirty_right = 0;
+    /* The caption's rows, painted and not yet sent. */
+    bool caption_flush_owed = false;
+    int caption_flush_top = 0, caption_flush_end = 0;
     bool trace_attempted = false;
     /* The viewport as a whole has changed and every row of it has to be cleared
      * and sent, not just the rows the two halves above account for. True for
@@ -6253,10 +6214,12 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
      * so, and for a change of background colour. */
     bool full_repaint_owed = true;
     pix_t last_bg = pf_bg_color;
-    /* Far enough back that the first frame is due immediately. */
-    long last_frame_tick = current_tick - PF_FRAME_TICKS;
     uint32_t frame_clock = USEC_TIMER;
-    unsigned last_frame = (unsigned)-1;
+    /* The next frame's deadline: from flow_pace while the covers move, and
+     * otherwise the next refresh, so other changes draw no more than once a
+     * refresh. flow_start is when the motion began. */
+    uint32_t flow_due = frame_clock, flow_start = frame_clock;
+    bool flow_moving = false;
     unsigned int seen_slides_loaded = pf_slides_loaded;
     long boost_until = current_tick + HZ;
     int spoken_index = -1;
@@ -6316,66 +6279,26 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
          * stays owed, and the wake's full update shows it. */
         bool dark = !lcd_active();
         int timeout;
-        bool clocked_frames = pf_native_motion;
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-        bool high_res = carousel_60hz_enabled;
-        clocked_frames |= high_res;
-        bool wait_for_frame = false;
-        uint32_t deadline = 0;
-#endif
 
         if (restored_pixels)
             timeout = 1;
         else if (!dark && panel.live)
         {
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-            if (high_res && panel.moving)
-            {
-                timeout = native_frame_wait(panel.clock, panel.sampled,
-                                            &deadline);
-                wait_for_frame = true;
-            }
-            else if (high_res && panel.scroll_frames &&
-                     panel.position == FLIP_OPEN)
-            {
-                timeout = native_frame_wait(panel.scroll_clock,
-                                            panel.scroll_sampled, &deadline);
-                wait_for_frame = true;
-            }
-            else
-#endif
-            if (panel.moving)
-                timeout = ui_clock_poll_timeout((uint32_t)USEC_TIMER - panel.clock,
-                                                 panel.first + panel.second, HZ);
-            else if (panel.scroll_frames && panel.position == FLIP_OPEN)
-                timeout = ui_clock_timeout((uint32_t)USEC_TIMER - panel.scroll_clock,
-                                           panel.scroll_frames, HZ);
+            if (panel.moving ||
+                (panel.scroll_frames && panel.position == FLIP_OPEN))
+                timeout = frame_wait(panel.due);
             else
                 timeout = panel.dirty ? TIMEOUT_NOBLOCK :
                           panel.missing || panel.play_pending || panel.to == FLIP_OPEN
                           ? HZ / 20 : HZ / 5;
         }
-        else if (!dark && (pf_state == pf_scrolling || flow_mix || art_owed || caption_owed))
+        else if (!dark && (pf_state == pf_scrolling || flow_mix || art_owed ||
+                           caption_owed || caption_flush_owed))
         {
-            /* There is a frame coming, so wait out the rest of its interval
-             * rather than going round again to find it still not due. Trap:
-             * waiting zero here turns the cap into a spin, and burns exactly
-             * the CPU the cap exists to hand back. */
-            /* Zero when the frame is already due or overdue: the poll returns
-             * at once and it is drawn. Waiting a tick there instead throws
-             * 10 ms away on every frame that overruns its own interval, which
-             * on the 5G is all of them. */
-            if (clocked_frames)
-            {
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-                timeout = native_frame_wait(frame_clock, last_frame, &deadline);
-                wait_for_frame = high_res;
-#else
-                timeout = native_frame_wait(frame_clock, last_frame, NULL);
-#endif
-            }
-            else
-                timeout = MAX(PF_FRAME_TICKS - (current_tick - last_frame_tick), 0);
+            /* There is a frame coming, so wait for its deadline rather than
+             * going round again to find it still not due. Zero when it is due
+             * or overdue: the poll returns at once and it is drawn. */
+            timeout = frame_wait(flow_due);
         }
         else
             timeout = (quiescent || dark) ? HZ/2 : HZ/16;
@@ -6384,33 +6307,18 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         {
             long left = speak_due - current_tick;
             if (left < timeout || timeout == TIMEOUT_BLOCK)
-            {
                 timeout = left > 0 ? (int)left : 0;
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-                wait_for_frame = false;
-#endif
-            }
         }
 
         if (panel_waiting)
             timeout = timeout == TIMEOUT_BLOCK ? MAX(1, HZ / 25)
                                                : MIN(timeout, MAX(1, HZ / 25));
         if (font_prefetch_busy())
-        {
             timeout = timeout == TIMEOUT_BLOCK ? 1 : MIN(timeout, 1);
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-            wait_for_frame = false;
-#endif
-        }
         bool inherited_inhibit = ui_flush_inhibited();
         ui_inhibit_flush(true);
         if (first_frame)
             button = ACTION_NONE;
-#ifdef HAVE_BUTTON_FRAME_DEADLINE
-        else if (wait_for_frame && timeout > 0)
-            button = get_custom_action_until(CONTEXT_PLUGIN, timeout,
-                                             get_context_map, deadline);
-#endif
         else
             button = get_custom_action(CONTEXT_PLUGIN, timeout, get_context_map);
         first_frame = false;
@@ -6624,23 +6532,20 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
         /* Apply wheel input before sampling the new frame. Other actions
          * dispatch below without waiting for a cover render. */
-        if (pf_native_motion)
+        switch (button)
         {
-            switch (button)
-            {
-            case PF_NEXT:
-            case PF_NEXT_REPEAT:
-                show_next_slide();
-                art_owed = true;
-                button = ACTION_NONE;
-                break;
-            case PF_PREV:
-            case PF_PREV_REPEAT:
-                show_previous_slide();
-                art_owed = true;
-                button = ACTION_NONE;
-                break;
-            }
+        case PF_NEXT:
+        case PF_NEXT_REPEAT:
+            show_next_slide();
+            art_owed = true;
+            button = ACTION_NONE;
+            break;
+        case PF_PREV:
+        case PF_PREV_REPEAT:
+            show_previous_slide();
+            art_owed = true;
+            button = ACTION_NONE;
+            break;
         }
 
         /* Said where the row comes to rest, not at every slide it passes:
@@ -6704,16 +6609,16 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                     && pf_text_y + pf_text_h > pf_slides_y0)))
             art_owed = true;
 
-        /* Draw only what would come out different, and no more often than
-         * PF_MAX_FPS. Re-rendering the covers is far and away the most
+        /* Draw only what would come out different, and only at a frame
+         * deadline. Re-rendering the covers is far and away the most
          * expensive thing this loop does, and an idle frame pays all of it to
          * arrive at pixels identical to the ones already there -- out of the
          * same budget the codec is drawing on, since the wait above
          * deliberately keeps its normal rate while a track is running.
          *
-         * Timed from the start of the frame, so the cap is a rate and not a
-         * gap: a frame that overruns its own interval simply makes the next one
-         * due immediately, rather than having its cost added to the wait. */
+         * Moving covers present on flow_pace's deadlines: one frame a panel
+         * refresh while a frame fits in one, otherwise every second refresh.
+         * Any other change draws at the next refresh at most. */
         /* Boosted while there is drawing to do and for a second after, so a
          * caption step or a slide arriving does not switch the clock each
          * time; an idle screen gives the boost back. */
@@ -6734,20 +6639,42 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             cpu_boost(pf_boosted);
         }
 
-        unsigned frame = last_frame;
-        if (!dark && (art_owed || caption_owed) && clocked_frames)
-            frame = ui_clock_frame((uint32_t)USEC_TIMER - frame_clock);
-        bool frame_due = clocked_frames ? frame != last_frame :
-                        current_tick - last_frame_tick >= PF_FRAME_TICKS;
-        bool dispatch_first = pf_native_motion &&
-            (button != ACTION_NONE || agents_nav_pending() != AGENTS_NAV_NONE);
-        if (!dark && (art_owed || caption_owed) && frame_due && !dispatch_first)
+        if (!motion)
+            flow_moving = false;
+        bool dispatch_first = button != ACTION_NONE ||
+                              agents_nav_pending() != AGENTS_NAV_NONE;
+        if (!dark && caption_flush_owed && frame_due(flow_due) &&
+            !dispatch_first)
+        {
+            /* The caption painted with the last covers, on its own deadline.
+             * The covers wait for the next one. */
+            int rows = caption_flush_end - caption_flush_top;
+            uint32_t submitting = *trace ? USEC_TIMER : 0;
+            lcd_update_rect(0, caption_flush_top, LCD_WIDTH, rows);
+            caption_flush_owed = false;
+            if (*trace)
+            {
+                uint32_t submitted = USEC_TIMER;
+                ui_perf_note_rects(UI_PERF_CAPTION, 0, rows);
+                ui_perf_note_submit(submitted - submitting);
+            }
+            flow_due = flow_moving ? ui_pace_next(&flow_pace, flow_start)
+                                   : ui_clock_start() + ui_frame_period();
+            yield();
+        }
+        else if (!dark && (art_owed || caption_owed) && frame_due(flow_due) &&
+                 !dispatch_first)
         {
             show_carousel_entry();
             if (motion && !trace_attempted)
             {
                 *trace = ui_perf_begin(model->motion_trace ?: "cover-flow");
                 trace_attempted = true;
+            }
+            if (motion && !flow_moving)
+            {
+                flow_start = ui_clock_start();
+                flow_moving = true;
             }
             bool drew_art = art_owed;
             bool drew_caption = caption_owed;
@@ -6761,8 +6688,6 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
             art_owed = false;
             caption_owed = false;
-            last_frame_tick = current_tick;
-            last_frame = frame;
 #if PF_SHOW_STATS
             unsigned long t_start = USEC_TIMER, t_flush;
             /* The overlay sits over the covers rather than in them, so it needs
@@ -6822,15 +6747,25 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                       && pf_text_y < art_y + art_h
                       && pf_text_y + pf_text_h > art_y);
 
+            /* Joined only by an overlap, the clear repaints the same ground
+             * outside the covers' rows and the caption's, so only those rows
+             * are sent. */
+            int paint_y = art_y, paint_h = art_h;
             if (joined)
             {
-                art_y = 0;
-                art_h = pf_height;
+                paint_y = 0;
+                paint_h = pf_height;
                 drew_art = true;
                 drew_caption = (pf_text_h > 0);
+                if (full_repaint_owed)
+                {
+                    art_y = paint_y;
+                    art_h = paint_h;
+                }
             }
 
-            carousel_paint(&paint, drew_art, drew_caption, joined, art_y, art_h);
+            carousel_paint(&paint, drew_art, drew_caption, joined,
+                           paint_y, paint_h);
             uint32_t render = *trace ? (uint32_t)USEC_TIMER - frame_start : 0;
 #if PF_SHOW_STATS
             pf_stats_draw();
@@ -6843,16 +6778,25 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
              * Everything below pf_vp_y is this screen's own; the rows above it
              * only need sending when the status bar redrew into them. Full
              * width in every case, which is the single-burst path in both
-             * targets' drivers -- a narrower rect goes line by line. */
+             * targets' drivers -- a narrower rect goes line by line.
+             *
+             * The covers and the caption together take longer to send than
+             * one panel refresh, so they go apart: the caption waits for the
+             * next deadline, and a newer caption replaces one still waiting.
+             * A caption lying inside the other rows goes with them. */
             if (drew_art)
             {
                 dirty_top = MIN(dirty_top, pf_vp_y + art_y);
                 dirty_end = MAX(dirty_end, pf_vp_y + art_y + art_h);
             }
-            if (drew_caption && !joined && pf_text_h > 0)
+            if (drew_caption && pf_text_h > 0 && caption_rows_h > 0)
             {
-                dirty_top = MIN(dirty_top, pf_vp_y + pf_text_y);
-                dirty_end = MAX(dirty_end, pf_vp_y + pf_text_y + pf_text_h);
+                int top = pf_vp_y + caption_rows_y, end = top + caption_rows_h;
+                caption_flush_top = caption_flush_owed ?
+                                    MIN(caption_flush_top, top) : top;
+                caption_flush_end = caption_flush_owed ?
+                                    MAX(caption_flush_end, end) : end;
+                caption_flush_owed = true;
             }
             if (full_flush_owed)
             {
@@ -6860,13 +6804,42 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 dirty_end = LCD_HEIGHT;
                 full_flush_owed = false;
             }
+            unsigned parts = UI_PERF_ART, caption_rows = 0;
+            if (caption_flush_owed)
+            {
+                int top = caption_flush_top, end = caption_flush_end;
+                if (dirty_end <= top || dirty_top >= end)
+                    ;
+                else if (dirty_top < top && end < dirty_end)
+                {
+                    caption_flush_owed = false;
+                    parts |= UI_PERF_CAPTION;
+                    caption_rows = end - top;
+                }
+                else if (dirty_top >= top)
+                    dirty_top = MIN(end, dirty_end);
+                else
+                    dirty_end = top;
+                if (dirty_end <= dirty_top && caption_flush_owed)
+                {
+                    dirty_top = top;
+                    dirty_end = end;
+                    caption_flush_owed = false;
+                    parts = UI_PERF_CAPTION;
+                    caption_rows = end - top;
+                }
+            }
             if (dirty_end > dirty_top)
             {
+                int rows = dirty_end - dirty_top;
                 uint32_t submitting = *trace ? USEC_TIMER : 0;
-                lcd_update_rect(0, dirty_top, LCD_WIDTH, dirty_end - dirty_top);
+                lcd_update_rect(0, dirty_top, LCD_WIDTH, rows);
                 if (*trace)
                 {
                     uint32_t submitted = USEC_TIMER;
+                    ui_perf_note_rects(parts,
+                                       parts & UI_PERF_ART ? rows : 0,
+                                       caption_rows);
                     ui_perf_note_render(render);
                     ui_perf_note_submit(submitted - submitting);
                 }
@@ -6882,6 +6855,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 #if PF_SHOW_STATS
             pf_stats_frame(t_start, t_flush - t_start, USEC_TIMER - t_flush);
 #endif
+            flow_due = motion ? ui_pace_next(&flow_pace, flow_start)
+                              : ui_clock_start() + ui_frame_period();
             yield();
         }
 
@@ -6987,18 +6962,6 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 lcd_set_foreground(pf_fg_color);
             }
             lcd_set_drawmode(DRMODE_FG);
-            break;
-
-        case PF_NEXT:
-        case PF_NEXT_REPEAT:
-            show_next_slide();
-            art_owed = true;
-            break;
-
-        case PF_PREV:
-        case PF_PREV_REPEAT:
-            show_previous_slide();
-            art_owed = true;
             break;
 
         case PF_SORTING_NEXT:

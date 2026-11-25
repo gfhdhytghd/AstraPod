@@ -24,16 +24,23 @@ program = fixtures + '''
 #define TIMEOUT_NOBLOCK 0
 #define EV_WAKEUP 1
 #define BUTTON_SCROLL_FWD 2
-#define CAROUSEL_NOMINAL_FPS 30
-static uint32_t clock_counter, current_tick, pf_flat_last_input, flow_pose_clock;
+#define MAX(a,b) ((a)>(b)?(a):(b))
+static uint32_t clock_counter, pf_flat_last_input, flow_pose_clock;
+uint32_t ui_frame_period_q8(void) { return (1000000u << 8) / UI_ANIM_FPS; }
+uint32_t ui_clock_start(void) { return clock_counter; }
+/* Without a precise wake: whole ticks, rounded down. */
+int ui_clock_wait_until(uint32_t deadline)
+{
+    int32_t left = deadline - clock_counter;
+    return left <= 0 ? TIMEOUT_NOBLOCK : left / (1000000 / HZ);
+}
 static unsigned flow_sampled_frame;
 static int pf_flat_interval=25, flow_mix;
 static int flow_mix_frames;
-static bool flow_fast, pf_random_spinning, flat, pf_native_motion, pf_flat_snap;
+static bool flow_fast, pf_random_spinning, flat, pf_flat_snap;
 static uint32_t anim_clock;
 static unsigned anim_sampled_frame;
-static int anim_pose_step, anim_frac, anim_avg4_ms = 80, anim_owed_ms;
-static bool anim_started;
+static int anim_pose_step, anim_frac;
 static int center_index, target, slide_frame, pf_state, flow_landed_direction;
 static int number_of_slides = 10, thread_q;
 enum {pf_idle, pf_scrolling};
@@ -43,20 +50,24 @@ static struct {
 } global_settings = { 200, 325 };
 static bool flat_view(void) { return flat; }
 static void wake_pf_thread(void) {}
+static void buf_ctx_lock(void) {}
+static void buf_ctx_unlock(void) {}
+static int fbound(int lo, int x, int hi) { return x < lo ? lo : x > hi ? hi : x; }
 static void keyclick_click(bool force, int button) {}
 static void flat_animate(int direction, PFreal frame) {}
 #define UI_THEME_MOTION_ONE 100
 static void set_current_slide(int slide) { center_index = target = slide; slide_frame = slide << 16; }
-''' + region(src, 'static unsigned pf_motion_scale', '\n}') + '\n}\n' + region(src, '#define PF_FLAT_FLIP ', '/* The deal:') + region(
+''' + region(src, 'static unsigned pf_motion_scale', '\n}') + '\n}\n' + region(
+    src, '#define PF_SPEED_FRAMES', 'static struct ui_pace') + region(src, '#define PF_FLAT_FLIP ', '/* The deal:') + region(
     src, '#define PF_FLAT_SETTLE ', '/* The cover geometry') + region(
-    src, 'static unsigned motion_rate', 'static void coverflow_idle') + region(
+    src, 'static uint32_t motion_clock', 'static void coverflow_idle') + region(
     geom, 'static void recalc_offsets', 'static void coverflow_animate') + region(
     src, 'static void coverflow_animate', 'static void flat_animate') + region(
     src, 'static int flow_brightness', 'static void coverflow_render(') + '''
 static void reset_slides(void) { coverflow_idle(); }
 ''' + region(src, 'static void start_animation', 'static bool random_was_recent') + region(
     src, 'static int scroll_speed', 'static void cleanup') + region(
-    src, 'static int native_frame_wait', '#define ALBUM_PANEL_WIDTH') + '''
+    src, '#define PF_DEADLINE_AHEAD_US', '#define ALBUM_PANEL_WIDTH') + '''
 static void seed(uint32_t clock)
 {
     center_slide.slide_index = center_index = target = 3;
@@ -140,11 +151,11 @@ int main(void)
     recalc_offsets();
     coverflow_idle();
     for (int i=0; i<6; i++) {
-        current_tick+=20; flow_note_wheel(true); flow_update_mix();
+        clock_counter+=ui_frame_clock(12); flow_note_wheel(true); flow_update_mix();
         assert(!flow_fast && !flow_mix);
     }
     for (int i=0; i<10; i++) {
-        current_tick+=3; flow_note_wheel(true); flow_update_mix();
+        clock_counter+=ui_frame_clock(2); flow_note_wheel(true); flow_update_mix();
     }
     assert(flow_fast && flow_mix==PFREAL_ONE);
     for (int s=-1; s<=1; s+=2) {
@@ -157,27 +168,26 @@ int main(void)
             assert(s*center_slide.cx<=0 && s*incoming->cx>=0);
         }
     }
-    current_tick+=9; flow_note_wheel(true); flow_update_mix();
+    clock_counter+=ui_frame_clock(4); flow_note_wheel(true); flow_update_mix();
     assert(flow_fast);
     for (int i=0; i<30; i++) {
         int before=flow_mix;
-        current_tick++; flow_update_mix();
-        assert(flow_mix<=before && before-flow_mix<=PFREAL_ONE/12+1);
+        clock_counter+=ui_frame_clock(1); flow_update_mix();
+        assert(flow_mix<=before && before-flow_mix<=PFREAL_ONE/PF_FLOW_RAMP+1);
     }
     assert(!flow_fast && !flow_mix);
     coverflow_idle();
     flow_tilt(&center_slide,1,0,0,flow_inner_slot());
     assert(!center_slide.angle && !center_slide.cx);
     for(int i=0; i<10; i++) {
-        current_tick+=2; flow_note_wheel(false); flow_update_mix();
+        clock_counter+=ui_frame_clock(1); flow_note_wheel(false); flow_update_mix();
     }
     assert(!flow_fast && !flow_mix);
     flat=true;
     for(int i=0; i<10; i++) {
-        current_tick+=2; flow_note_wheel(true); flow_update_mix();
+        clock_counter+=ui_frame_clock(1); flow_note_wheel(true); flow_update_mix();
     }
     assert(!flow_fast && !flow_mix);
-    pf_native_motion = true;
     flat = false;
     uint32_t epoch = UINT32_MAX - ui_frame_clock(10);
     pf_flat_last_input = flow_pose_clock = epoch;
@@ -205,13 +215,20 @@ int main(void)
         check_timeline(epoch);
     }
     check_flat_deal_timeline(epoch);
+    uint32_t deadline = epoch + ui_frame_clock(13);
     clock_counter = epoch + ui_frame_clock(12);
-    assert(native_frame_wait(epoch, 12) > TIMEOUT_NOBLOCK);
-    assert(native_frame_wait(epoch, 11) == TIMEOUT_NOBLOCK);
-    clock_counter = epoch + ui_frame_clock(30);
-    assert(native_frame_wait(epoch, 12) == TIMEOUT_NOBLOCK);
+    assert(!frame_due(deadline) && frame_wait(deadline) >= 1);
+    clock_counter = deadline - 5000;
+    assert(!frame_due(deadline) && frame_wait(deadline) == 1);
+    clock_counter = deadline;
+    assert(frame_due(deadline) && frame_wait(deadline) == TIMEOUT_NOBLOCK);
+    clock_counter = deadline + ui_frame_clock(30);
+    assert(frame_due(deadline) && frame_wait(deadline) == TIMEOUT_NOBLOCK);
+    clock_counter = deadline + 0x90000000u;
+    assert(frame_due(deadline));
     puts("PASS slow, fast, reverse, release, blocked boundary and flat layout");
-    puts("PASS 60 Hz deadlines, late samples, timer wrap, and in-gap reversal");
+    puts("PASS frame deadlines, tick-rounded waits, late samples, timer wrap, "
+         "and in-gap reversal");
 }
 '''
 c = out / 'pose.c'

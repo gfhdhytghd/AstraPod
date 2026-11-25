@@ -142,7 +142,7 @@ bool native_chrome_volume_visible(void)
 {
     return global_status.last_volume_change &&
            TIME_BEFORE(current_tick, global_status.last_volume_change +
-                       VOLUME_HOLD * HZ / UI_ANIM_FPS);
+                       ui_frame_clock(VOLUME_HOLD) / (1000000 / HZ));
 }
 
 struct status_layout {

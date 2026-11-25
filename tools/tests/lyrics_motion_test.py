@@ -9,6 +9,7 @@ flags=['cc','-std=c99','-Wall','-Wextra','-Werror','-g','-fsanitize=address,unde
 def run(source, name, expect=True):
     exe=out/name
     subprocess.run(flags+[str(source),str(apps/'ui/animation.c'),
+                          str(root/'tools/tests/fixtures/ui_refresh_stub.c'),
                           str(root/'tools/tests/lyrics_motion_test.c'),'-o',str(exe)],check=True)
     result=subprocess.run([str(exe)],capture_output=True,text=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=0'})
     (out/(name+'.log')).write_text(result.stdout+result.stderr)

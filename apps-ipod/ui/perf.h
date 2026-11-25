@@ -17,5 +17,11 @@ void ui_perf_end(unsigned capture);
  * the next actual framebuffer submission. */
 void ui_perf_note_render(uint32_t elapsed_clock);
 void ui_perf_note_submit(uint32_t elapsed_clock);
+/* What the next submission sends: UI_PERF_* parts, the art rect's rows and
+ * the caption's rows. With both parts the caption lies inside the art rect. */
+#define UI_PERF_ART 1u
+#define UI_PERF_CAPTION 2u
+void ui_perf_note_rects(unsigned parts, unsigned art_rows,
+                        unsigned caption_rows);
 
 #endif

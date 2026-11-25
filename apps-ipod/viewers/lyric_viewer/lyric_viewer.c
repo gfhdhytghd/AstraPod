@@ -46,6 +46,7 @@
 #include "screens/playback/cider_wps.h"
 #include "screens/playback/cider_library.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/pace.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
 #include "ui/scene.h"
@@ -227,6 +228,18 @@ static uint32_t lv_clock(void)
 #else
     return (uint32_t)current_tick * (1000000 / HZ);
 #endif
+}
+
+static struct ui_pace lv_pace;
+
+/* Ticks to the next frame presented of an animation elapsed into its run,
+ * on the panel's refresh; zero once it has run its frames. */
+static int lv_frame_wait(uint32_t elapsed, unsigned frames)
+{
+    if (ui_clock_frame(elapsed) >= frames)
+        return TIMEOUT_NOBLOCK;
+    uint32_t start = (uint32_t)USEC_TIMER - elapsed;
+    return MAX(1, ui_clock_wait_until(ui_pace_next(&lv_pace, start)));
 }
 
 /* Own at most one reference, including when playback already owns another. */
@@ -2449,36 +2462,27 @@ int lyric_viewer(void)
         }
         if (animated || sweeping)
             timeout = MAX(1, timeout - (int)((uint32_t)current_tick - frame_at));
-        if (sweeping)
-            timeout = MIN(timeout, MAX(1, HZ / (int)UI_ANIM_FPS));
+        /* One pace presents every animation, so a half-rate viewer keeps
+         * its frame parity: a frame waits for its presentation slot. */
+        uint32_t clock = lv_clock();
         if (lv.entry_handle)
-        {
-            uint32_t elapsed = (uint32_t)lv_clock() - lv.entry_clock;
-            int next_frame = ui_clock_frame(elapsed) != (unsigned)lv.entry_frame
-                ? TIMEOUT_NOBLOCK : ui_clock_timeout(elapsed, lv.entry_frames, HZ);
-            timeout = MIN(timeout, next_frame);
-        }
+            timeout = MIN(timeout, lv_frame_wait(clock - lv.entry_clock, lv.entry_frames));
         else if (lv.track_fade)
-        {
-            uint32_t elapsed = lv_clock() - lv.track_clock;
-            int next_frame = ui_clock_frame(elapsed) != (unsigned)lv.track_frame
-                ? TIMEOUT_NOBLOCK : ui_clock_poll_timeout(elapsed, lv.track_frames, HZ);
-            timeout = MIN(timeout, next_frame);
-        }
+            timeout = MIN(timeout, lv_frame_wait(clock - lv.track_clock, lv.track_frames));
         else if (line_moving)
         {
-            uint32_t clock = lv_clock();
             uint32_t at = lv.mode.manual ? lv.wheel.at : lv.motion_at;
             unsigned frames = lv.mode.manual ? lv_wheel_duration() : lv.motion_frames;
-            int next_frame = lv.mode.manual && lv_wheel_age(clock) >= frames ?
-                             MAX(1, HZ / (int)UI_ANIM_FPS) : ui_clock_timeout(clock - at, frames, HZ);
-            unsigned age = lv.mode.manual ? MIN(lv_wheel_age(clock), frames) : lv_motion_age(clock);
-            if (age != lv.painted_frame)
-                next_frame = TIMEOUT_NOBLOCK;
-            timeout = MIN(timeout, next_frame);
+            /* Manual progress keeps animating after the wheel settles. */
+            if (lv.mode.manual && lv_wheel_age(clock) >= frames)
+                frames = UINT_MAX;
+            timeout = MIN(timeout, lv_frame_wait(clock - at, frames));
         }
         else if (gap_moving)
-            timeout = MIN(timeout, MAX(1, HZ / (int)UI_ANIM_FPS));
+            timeout = MIN(timeout, lv_frame_wait(clock - lv.gap_at, UINT_MAX));
+        else if (sweeping)
+            timeout = MIN(timeout, lv_frame_wait((uint32_t)USEC_TIMER - lv_pace.start,
+                                                 UINT_MAX));
         if (font_prefetch_busy())
             timeout = timeout < 0 ? 1 : MIN(timeout, 1);
         uint32_t wait_at = lv_clock();

@@ -58,6 +58,8 @@ static bool have_rise;
 static bool want_sync = true;
 static unsigned int lead_slots, trail_slots, timed_out, no_window;
 static uint32_t max_wait;
+static uint32_t last_wait, last_dma;
+static unsigned int transfers;
 extern int lcd_type;
 
 bool lcd_te_supported(void)
@@ -74,6 +76,23 @@ void lcd_te_set_enabled(bool enable)
 {
     if (lcd_te_supported() && (!enable || pulse.valid))
         want_sync = enable;
+}
+
+bool lcd_te_timing(uint32_t *period, uint32_t *rise, long *rise_tick)
+{
+    if (!lcd_te_supported() || !pulse.valid)
+        return false;
+    *period = pulse.period;
+    *rise = last_rise;
+    *rise_tick = last_rise_tick;
+    return true;
+}
+
+void lcd_te_last_transfer(uint32_t *wait, uint32_t *dma, unsigned int *count)
+{
+    *wait = last_wait;
+    *dma = last_dma;
+    *count = transfers;
 }
 
 unsigned int lcd_te_bus_timing(void)
@@ -216,6 +235,7 @@ void lcd_te_dma_done(unsigned int width, unsigned int height, uint32_t usec)
     stats->min = stats->samples ? MIN(stats->min, usec) : usec;
     stats->max = MAX(stats->max, usec);
     stats->last = usec;
+    last_dma = usec;
     stats->width = width;
     stats->height = height;
     stats->samples++;
@@ -267,6 +287,8 @@ void lcd_te_wait(int y, int width, int height)
     if (!phase_window(y, width, height, &first, &last))
     {
         no_window++;
+        last_wait = 0;
+        transfers++;
         return;
     }
 
@@ -295,6 +317,8 @@ void lcd_te_wait(int y, int width, int height)
             else
                 lead_slots++;
             max_wait = MAX(max_wait, now - start);
+            last_wait = now - start;
+            transfers++;
             return;
         }
         level = next;
@@ -308,6 +332,8 @@ void lcd_te_wait(int y, int width, int height)
     }
     have_rise = false;
     max_wait = MAX(max_wait, now - start);
+    last_wait = now - start;
+    transfers++;
     timed_out++;
 }
 
@@ -444,7 +470,7 @@ static void report_dma(int (*report)(const char *fmt, ...), const char *name,
         report("  min=%u max=%u us", stats->min, stats->max);
 }
 
-bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...))
+bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...), bool survey)
 {
     if (!lcd_te_acquire_bus())
     {
@@ -465,8 +491,12 @@ bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...))
     last_rise_tick = saved_rise_tick;
     have_rise = saved_have_rise;
 
-    uint32_t elapsed, max_gap = 0;
-    unsigned int samples = sample_edges(&elapsed, &max_gap);
+    uint32_t elapsed = 0, max_gap = 0;
+    unsigned int samples = 0;
+    if (survey)
+        samples = sample_edges(&elapsed, &max_gap);
+    else
+        pinmux[TE_PORT] = PCON(TE_PORT);
     struct dma_stats full = full_dma, band = band_dma, rect = rect_dma;
     unsigned int lead = lead_slots, trail = trail_slots;
     unsigned int misses = timed_out, bypasses = no_window;
@@ -502,6 +532,11 @@ bool lcd_te_run_diagnostic(int (*report)(const char *fmt, ...))
     report_dma(report, "full", &full);
     report_dma(report, "band (320px wide, 60-239 rows)", &band);
     report_dma(report, "other rect", &rect);
+    if (!survey)
+    {
+        report("Signals: survey skipped");
+        return true;
+    }
     report("Signals: %u passes in %lu us (max gap %lu us)", samples,
            (unsigned long)elapsed, (unsigned long)max_gap);
     report_edges(report, measured.valid);

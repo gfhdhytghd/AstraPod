@@ -54,8 +54,24 @@ animation = ''
 if native_entry:
     animation = (ROOT / 'apps-ipod/ui/animation.h').read_text()
     animation += (ROOT / 'apps-ipod/ui/animation.c').read_text().replace('#include "animation.h"', '')
+    animation += r'''
+static bool button_frame_wait(struct queue_event *ev, int ticks);
+'''
     animation += function((ROOT / 'firmware/drivers/button_queue.c').read_text(),
                           'button_queue_wait_pending')
+    # The pacing clock of a player without TE: the nominal refresh, waits
+    # rounded down to ticks.
+    animation += r'''
+uint32_t ui_frame_period_q8(void) { return 3823178u; }
+uint32_t ui_clock_start(void) { return USEC_TIMER; }
+int ui_clock_poll_timeout(uint32_t elapsed, unsigned duration, unsigned ticks_per_second)
+{
+    unsigned frame = ui_clock_frame(elapsed);
+    if (frame >= duration)
+        return 0;
+    return (uint64_t)(ui_frame_clock(frame + 1) - elapsed) * ticks_per_second / 1000000;
+}
+'''
 retained = ''
 if retained_entry:
     retained = (ROOT / 'apps-ipod/ui/retained.h').read_text()
@@ -120,6 +136,7 @@ struct dialog_native_ui;
 #define VP_FLAG_VP_SET_CLEAN 1
 #define Icon_NOICON 0
 #define TIMEOUT_BLOCK -1
+#define TIMEOUT_NOBLOCK 0
 #define CUSTOM_STATUSBAR 0
 #define SYS_USB_CONFIRM 1000
 #define SYS_USB_CONNECTED 1001
@@ -504,6 +521,11 @@ static void queue_wait_w_tmo(struct event_queue *queue, struct queue_event *even
     if (scenario == 10 && !queued) queued = SYS_USB_CONNECTED;
     if (scenario == 12 && !queued) queued = BUTTON_RIGHT;
     if (!queued) current_tick += ticks;
+}
+static bool button_frame_wait(struct queue_event *ev, int ticks)
+{
+    queue_wait_w_tmo(&button_queue, ev, ticks);
+    return false;
 }
 static bool queue_empty(const struct event_queue *queue)
 {

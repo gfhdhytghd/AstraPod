@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check production status indicator targets and 60 Hz interpolation."""
+"""Check production status indicator targets and refresh-clock interpolation."""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -140,5 +140,7 @@ with tempfile.TemporaryDirectory(prefix="podbox-status-motion-") as temp:
     subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
                     "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
                     "-I", str(apps), "-I", str(ui), str(source),
-                    str(ui / "animation.c"), "-o", str(binary)], check=True)
+                    str(ui / "animation.c"),
+                    str(apps.parent / "tools/tests/fixtures/ui_refresh_stub.c"),
+                    "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

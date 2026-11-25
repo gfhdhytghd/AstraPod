@@ -43,7 +43,7 @@ static void *fade;
 static uint32_t fade_start;
 static unsigned leave_from, opacity;
 #define FLOW_LEAVE_FADE_US 250000u
-#define FLOW_ENTER_FADE_US 500000u
+#define FLOW_MENU_FADE_US 187500u
 #define flow_present_fade(p,a) (abort(), false)
 #define lcd_update() abort()
 

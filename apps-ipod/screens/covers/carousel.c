@@ -12,11 +12,8 @@
  * slide cache, 3D projection, scrolling, input loop and worker thread.
  * Each screen supplies a model.
  *
- * There is no floating point here. Positions and angles are PFreal, a signed
- * fixed-point long with PFREAL_SHIFT (10) fractional bits -- so PFREAL_ONE is
- * 1.0, and the fmul/fdiv/fsin/fcos helpers below are the arithmetic. Angles
- * are 0..IANGLE_MAX (1024) for a full turn, not radians or degrees, so they
- * mask instead of wrapping.
+ * Turn projects the 3D carousel into Q16 screen coordinates. Flat layout
+ * and album-panel texture sampling use PFreal with 10 fractional bits.
  *
  * Slides are decoded on a worker thread into a fixed set of cache slots.
  * Which slot holds which slide is tracked by the lla_* helpers -- a doubly
@@ -40,7 +37,6 @@
 #include <stdio.h>
 #include <stdlib.h>           /* rand, for the random pick */
 #include <stdint.h>
-#include <limits.h>           /* INT_MIN, for the cover turns' empty entries */
 #include <stdbool.h>
 #include <stddef.h>
 #include "string-extra.h"
@@ -106,6 +102,7 @@
 #include "album_covers.h"
 #include "carousel.h"
 #include "panel_perf.h"
+#include "turn.h"
 #include "database/path_key.h"     /* the shared engine: carousel_idx, the model */
 #include "screens/playback/cider.h"
 #include "screens/playback/cider_library.h"
@@ -246,17 +243,10 @@ static void pf_update_dynamic_colors(void)
 #define DISPLAY_HEIGHT (LCD_HEIGHT * 2 / 3)
 #define DISPLAY_WIDTH MAX((LCD_HEIGHT * LCD_PIXEL_ASPECT_HEIGHT / \
     LCD_PIXEL_ASPECT_WIDTH / 2), (LCD_WIDTH * 2 / 5))
-/* The 3D view's one pinhole camera: a cover facing it at this depth shows at
- * its own width, 128 px, and the horizontal field is about 100 degrees, as on
- * the stock player. */
-#define CAM_DIST 137
-#define CAM_DIST_R (CAM_DIST << PFREAL_SHIFT)
 /* The album flip's camera, further back so the card turning towards the
  * viewer stays in proportion. */
 #define FLIP_DIST 240
 #define FLIP_DIST_R (FLIP_DIST << PFREAL_SHIFT)
-#define DISPLAY_LEFT_R (PFREAL_HALF - LCD_WIDTH * PFREAL_HALF)
-#define MAXSLIDE_LEFT_R (PFREAL_HALF - DISPLAY_WIDTH * PFREAL_HALF)
 
 
 /* Caption lines are inset from the screen edges by this much. A caption long
@@ -267,8 +257,7 @@ static void pf_update_dynamic_colors(void)
 #define PF_TEXT_WIDTH  (LCD_WIDTH - 2 * PF_TEXT_MARGIN)
 
 #define MAX_SLIDES_COUNT 10
-/* Side slides placed per side. At rest three show; in motion turned covers
- * show less of the stack's edge, and six fill the width. */
+/* Flat slots per side and the caption prefetch radius. */
 #define ALBUM_COVERS_NUM_SLIDES 6
 
 /* --- The flat view ---------------------------------------------------------
@@ -356,11 +345,9 @@ static const unsigned char pf_dither_table[16] =
 /** structs we use */
 struct slide_data {
     int slide_index;
-    int angle;
     PFreal cx;
-    PFreal cy;      /* downward shift; the flat view's pile offset, 0 in 3D */
-    PFreal distance;
-    int alpha;      /* flat view only -- the 3D view derives its own per frame */
+    PFreal cy;      /* downward shift of a flat pile */
+    int alpha;      /* flat view opacity */
     int cached_slot; /* last cache slot this slide resolved to (see surface()) */
 };
 
@@ -572,8 +559,6 @@ static int anim_frac;
  * geometry backwards, then choose a new gap when it crosses the centre. */
 static int anim_pose_step;
 int center_index = 0; /* index of the slide that is in the center */
-static PFreal offsetX;
-static PFreal stack_spacing;
 static int number_of_slides;
 /* Flat view pacing: when the user last asked for a cover and how far apart they
  * have been asking, plus the two per-flip decisions those feed -- whether this
@@ -921,16 +906,6 @@ static inline PFreal fmul(PFreal a, PFreal b)
     return (a*b) >> PFREAL_SHIFT;
 }
 
-/**
- * This version preshifts each operand, which is useful when we know how many
- * of the least significant bits will be empty, or are worried about overflow
- * in a particular calculation
- */
-static inline PFreal fmuln(PFreal a, PFreal b, int ps1, int ps2)
-{
-    return ((a >> ps1) * (b >> ps2)) >> (PFREAL_SHIFT - ps1 - ps2);
-}
-
 /* ARMv5+ has a clz instruction equivalent to our function.
  */
 #if (defined(CPU_ARM) && (ARM_ARCH > 4))
@@ -991,21 +966,6 @@ static inline PFreal fdiv(PFreal num, PFreal den)
     return num / den;
 }
 
-/* The render's per-column divisions, done by multiplying. Neither target's ARM
- * has a divide instruction, and -Os calls the library even for a constant
- * divisor, so each of these was a call of several dozen cycles. Both are exact:
- * tools/pfgeom checks them against plain division over every value the render
- * can reach. */
-
-/* n / CAM_DIST, for 0 <= n < 2^26: 0xef2eb720 >> 39 is the reciprocal of 137,
- * exact over that range, and the render's numerators stay under 2^19. */
-static inline int div_cam_dist(int n)
-{
-    if (CAM_DIST != 137 || n < 0)
-        return n / CAM_DIST;
-    return (int)(((uint64_t)(unsigned)n * 0xef2eb720u) >> 39);
-}
-
 /* n / FLIP_DIST, for n >= 0. 240 is 16 * 15, and 0x88888889 >> 35 is the
  * exact reciprocal of 15 for any 32-bit numerator. */
 static inline int div_flip_dist(int n)
@@ -1031,7 +991,6 @@ static inline int div_by_recip(unsigned int num, unsigned int den,
 
 #define fmin(a,b) (((a) < (b)) ? (a) : (b))
 #define fmax(a,b) (((a) > (b)) ? (a) : (b))
-#define fabs(a) (a < 0 ? -a : a)
 #define fbound(min,val,max) (fmax((min),fmin((max),(val))))
 
 
@@ -2231,8 +2190,7 @@ static inline bool load_and_prepare_surface(const int slide_index,
     if (cache_index < SLIDE_CACHE_SIZE)
         pf_sldcache.cache[cache_index].index = slide_index;
 
-    if (slide_index >= center_index - ALBUM_COVERS_NUM_SLIDES &&
-        slide_index <= center_index + ALBUM_COVERS_NUM_SLIDES)
+    if (abs(slide_index - center_index) <= TURN_RADIUS)
         pf_slides_loaded++;
 
 #if PF_SHOW_STATS
@@ -2561,448 +2519,42 @@ static void flat_note_scroll(void)
         pf_flat_interval = (pf_flat_interval + gap) / 2;
 }
 
-/* --- The 3D view's motion -------------------------------------------------
- * One rule moves every cover: the stock iPod Classic's, measured from video.
- * The wheel moves the target T an item a click. The row's position p
- * (slide_frame) chases T at FLOW_FLOOR + FLOW_GAIN * d items a second, d
- * being the distance still to go, up to FLOW_CAP, and stops on T without
- * passing it. A cover's x follows from its distance to p (flow_cx()). Its
- * turn chases its resting turn about a lead point -- T, or one item from p
- * towards T when T is further -- at FLOW_TURN_RATE, and its depth follows
- * from its turn: the render keeps its near edge on the centre cover's plane.
- * So the cover arriving turns face-on ahead of the row, and the covers fan
- * out while the row trails the wheel.
- *
- * The rates are real time: each refresh advances by its measured length, so
- * a faster panel draws more frames of the same motion. Scroll Speed scales
- * time, with FLOW_SPEED_REF giving the stock speed. FLOW_FLOOR is in
- * thousandths of an item a second, FLOW_GAIN in thousandths per second. */
-#define FLOW_FLOOR      200
-#define FLOW_GAIN       5700
-#define FLOW_CAP        25      /* items a second */
-#define FLOW_TURN_RATE  8       /* per second */
-#define FLOW_SPEED_REF  175
-/* How far ahead of the row a click can put T. Clicks beyond it are lost. */
-#define FLOW_LEAD_MAX   11
-/* The turn's step, x - x^2 / 2 for x = FLOW_TURN_RATE * dt, is
- * 1 - exp(-x) to within 0.3% while dt is under 30 ms, and a longer refresh
- * is taken in steps of this many microseconds. */
-#define FLOW_STEP_US    31250
-/* A turn this close to its resting turn has arrived: 0.35 degrees. */
-#define FLOW_TURN_EPS   256
-/* A quarter turn, as the render takes it: it draws |angle| < 256. */
-#define PF_SIDE_ANGLE   255
+static struct turn_row flow_row;
+static uint32_t flow_sample_us;
 
-/* Each placed cover's turn, as a fraction of a quarter turn in Q16, positive
- * as a cover on the left turns. Entries are keyed by slide index, so a turn
- * stays with its cover when the middle slot changes hands. The placed window,
- * 2 * ALBUM_COVERS_NUM_SLIDES + 1 covers, is under FLOW_RING, so no two of
- * them share an entry. */
-#define FLOW_RING 16
-static struct flow_turn
+/* At the stock speed and theme duration, model seconds are wall seconds. */
+#define FLOW_SPEED_REF 175
+
+static void flow_sample(uint32_t now)
 {
-    int index;
-    int turn;
-} flow_turns[FLOW_RING];
-
-/* `from` after `dt_us` chasing `to`, both as slide index << 16. */
-static int flow_chase(int from, int to, uint32_t dt_us)
-{
-    int d = to - from;
-    int dist = d < 0 ? -d : d;
-    int64_t rate = (int64_t)FLOW_FLOOR * 65536 + (int64_t)FLOW_GAIN * dist;
-    int64_t adv = MIN(rate, (int64_t)FLOW_CAP * 1000 * 65536)
-                * dt_us / 1000000000;
-
-    if (adv >= dist)
-        return to;
-    if (adv < 1)
-        adv = 1;
-    return d < 0 ? from - (int)adv : from + (int)adv;
-}
-
-/* The point the covers turn about, as slide index << 16. */
-static int flow_lead(void)
-{
-    int d = (target << 16) - slide_frame;
-
-    return slide_frame + MAX(-65536, MIN(d, 65536));
-}
-
-/* The resting turn of cover `index` about `lead`: a quarter turn away from it
- * a slide or more off, face-on on it, and in proportion between. */
-static int flow_rest_turn(int index, int lead)
-{
-    int r = (index << 16) - lead;
-    int a = MIN(r < 0 ? -r : r, 65536);
-
-    return r < 0 ? a : -a;
-}
-
-/* Cover `index`'s turn. A cover new to the window starts at rest. */
-static struct flow_turn *flow_turn_of(int index, int lead)
-{
-    struct flow_turn *t = &flow_turns[index & (FLOW_RING - 1)];
-
-    if (t->index != index)
+    uint32_t elapsed = now - flow_sample_us;
+    flow_sample_us = now;
+    unsigned speed = global_settings.album_covers_scroll_speed;
+    if (speed != FLOW_SPEED_REF || pf_motion_scale != UI_THEME_MOTION_ONE)
     {
-        t->index = index;
-        t->turn = flow_rest_turn(index, lead);
+        uint64_t scaled = (uint64_t)elapsed * speed * UI_THEME_MOTION_ONE /
+                          (FLOW_SPEED_REF * MAX(1u, pf_motion_scale));
+        elapsed = MIN(scaled, UINT32_MAX);
     }
-    return t;
+    turn_advance(&flow_row, elapsed);
 }
 
-/* Every placed cover's turn after `dt_us` chasing its resting turn. True
- * when all of them have arrived. */
-static bool flow_turn_step(uint32_t dt_us)
-{
-    int lead = flow_lead();
-    int lo = ((slide_frame + 0x8000) >> 16) - ALBUM_COVERS_NUM_SLIDES;
-    int hi = lo + 2 * ALBUM_COVERS_NUM_SLIDES;
-    int64_t x = (int64_t)FLOW_TURN_RATE * 65536 * dt_us / 1000000;
-    int a = (int)(x - (x * x >> 17));
-    bool rest = true;
-    int i;
+static struct turn_card flow_cards[TURN_CARDS];
+static int flow_count;
 
-    /* A cover leaving the window forgets its turn, so it comes back at rest
-     * rather than as it left. */
-    for (i = 0; i < FLOW_RING; i++)
-        if (flow_turns[i].index < lo || flow_turns[i].index > hi)
-            flow_turns[i].index = INT_MIN;
-
-    for (i = lo; i <= hi; i++)
-    {
-        int goal = flow_rest_turn(i, lead);
-        struct flow_turn *t = flow_turn_of(i, lead);
-
-        t->turn += (int)((int64_t)(goal - t->turn) * a >> 16);
-        if (abs(goal - t->turn) > FLOW_TURN_EPS)
-            rest = false;
-    }
-    return rest;
-}
-
-/* World x of a cover `r` slides right of the middle (slide index << 16):
- * from the middle to the first slot over the first slide, then a stack step
- * per slide after that. */
-static PFreal flow_cx(int r)
-{
-    int a = r < 0 ? -r : r;
-    PFreal x = (a <= 65536) ? fmul(offsetX, a >> 6)
-             : offsetX + fmul(stack_spacing, (a - 65536) >> 6);
-
-    return r < 0 ? -x : x;
-}
-
-static void flow_place(struct slide_data *si, int index)
-{
-    int turn = flow_turn_of(index, flow_lead())->turn;
-
-    si->slide_index = index;
-    si->cx = flow_cx((index << 16) - slide_frame);
-    si->angle = (turn * PF_SIDE_ANGLE + (turn < 0 ? -32768 : 32768)) / 65536;
-    si->cy = 0;
-    si->distance = 0;
-}
-
-/* --- Depth: no cover passes through another --------------------------------
- * Seen from above each cover is a segment. Covers are placed from the most
- * turned to the least, and each is moved back, never forward, until it no
- * longer crosses a placed cover within FLOW_PUSH_REACH slides; a cover may
- * rest an end on another. So a cover face-on between turned neighbours sits
- * behind them, and comes forward again as they turn away. The segment is the
- * nominal DISPLAY_WIDTH cover, the widest any art decodes to.
- *
- * Shifting one segment in depth, the shifts at which it crosses another form
- * one interval, and its ends are where an end of one segment lies on the
- * other. So each pair is solved once, and the push for a cover is the least
- * shift outside all of its intervals. */
-#define FLOW_PUSH_REACH 2
-/* The furthest a cover is pushed back, in pixels: two cover widths. */
-#define FLOW_PUSH_MAX   256
-/* A crossing shallower than this is a touch, as rounding leaves an edge
- * resting on a face. */
-#define FLOW_PUSH_SLACK PFREAL_HALF
-#define FLOW_PLACED     (2 * ALBUM_COVERS_NUM_SLIDES + 1)
-
-struct flow_seg
-{
-    PFreal x0, z0, x1, z1;      /* x0 <= x1; z from the camera's plane */
-};
-
-static void flow_seg_of(const struct slide_data *s, struct flow_seg *g)
-{
-    PFreal cosr = fcos(s->angle), sinr = fsin(s->angle);
-    PFreal z = PFREAL_ONE * s->distance
-             - fmuln(MAXSLIDE_LEFT_R, fabs(sinr), PFREAL_SHIFT - 2, 0);
-    PFreal l = PFREAL_HALF - DISPLAY_WIDTH * PFREAL_HALF;
-    PFreal r = DISPLAY_WIDTH * PFREAL_HALF;
-    PFreal xl = s->cx + fmul(l, cosr), zl = z + fmul(l, sinr);
-    PFreal xr = s->cx + fmul(r, cosr), zr = z + fmul(r, sinr);
-
-    if (xl <= xr)
-        *g = (struct flow_seg){ xl, zl, xr, zr };
-    else
-        *g = (struct flow_seg){ xr, zr, xl, zl };
-}
-
-/* For each end of `e` over `on`: the depth from it to `on`, negated when
- * `on` is the one that moves. */
-static int flow_ends_on(const struct flow_seg *e, const struct flow_seg *on,
-                        int sign, PFreal *depth, int n)
-{
-    for (int k = 0; k < 2; k++)
-    {
-        PFreal x = k ? e->x1 : e->x0, z = k ? e->z1 : e->z0;
-
-        if (x < on->x0 || x > on->x1)
-            continue;
-        if (on->x1 == on->x0)
-        {
-            depth[n++] = sign * (on->z0 - z);
-            depth[n++] = sign * (on->z1 - z);
-        }
-        else
-            depth[n++] = sign * (on->z0 - z + (PFreal)((int64_t)(x - on->x0)
-                                  * (on->z1 - on->z0) / (on->x1 - on->x0)));
-    }
-    return n;
-}
-
-/* The shifts in depth of `a` at which it crosses `b`, (*lo, *hi). False if
- * there are none. */
-static bool flow_crossing(const struct flow_seg *a, const struct flow_seg *b,
-                          PFreal *lo, PFreal *hi)
-{
-    PFreal depth[8];
-    int n, k;
-
-    if (a->x1 < b->x0 || b->x1 < a->x0)
-        return false;
-    n = flow_ends_on(a, b, 1, depth, 0);
-    n = flow_ends_on(b, a, -1, depth, n);
-    if (n < 2)
-        return false;
-    *lo = *hi = depth[0];
-    for (k = 1; k < n; k++)
-    {
-        *lo = MIN(*lo, depth[k]);
-        *hi = MAX(*hi, depth[k]);
-    }
-    return *hi - *lo > 2 * FLOW_PUSH_SLACK;
-}
-
-/* The slide in slot `slot`: 0 the leftmost, ALBUM_COVERS_NUM_SLIDES the
- * middle, so slots i and j are |i - j| slides apart. */
-static struct slide_data *flow_slide(int slot)
-{
-    if (slot < ALBUM_COVERS_NUM_SLIDES)
-        return &left_slides[ALBUM_COVERS_NUM_SLIDES - 1 - slot];
-    if (slot > ALBUM_COVERS_NUM_SLIDES)
-        return &right_slides[slot - ALBUM_COVERS_NUM_SLIDES - 1];
-    return &center_slide;
-}
-
-static void flow_push(void)
-{
-    struct slide_data *cover[FLOW_PLACED];
-    struct flow_seg seg[FLOW_PLACED];
-    int order[FLOW_PLACED];
-    bool placed[FLOW_PLACED];
-    int i, j, k;
-
-    /* The most turned first; a stable insertion sort of 13. */
-    for (i = 0; i < FLOW_PLACED; i++)
-    {
-        int turn;
-
-        cover[i] = flow_slide(i);
-        turn = abs(cover[i]->angle);
-
-        for (j = i; j > 0 && abs(cover[order[j - 1]]->angle) < turn; j--)
-            order[j] = order[j - 1];
-        order[j] = i;
-        flow_seg_of(cover[i], &seg[i]);
-        placed[i] = false;
-    }
-
-    for (k = 0; k < FLOW_PLACED; k++)
-    {
-        PFreal lo[2 * FLOW_PUSH_REACH], hi[2 * FLOW_PUSH_REACH];
-        PFreal dz = 0;
-        int c = order[k], n = 0;
-        bool moved = true;
-
-        for (j = MAX(0, c - FLOW_PUSH_REACH);
-             j <= MIN(FLOW_PLACED - 1, c + FLOW_PUSH_REACH); j++)
-            if (placed[j] && flow_crossing(&seg[c], &seg[j], &lo[n], &hi[n]))
-                n++;
-        /* The shift only grows, so each interval moves it at most once. */
-        while (moved)
-        {
-            moved = false;
-            for (j = 0; j < n; j++)
-                if (lo[j] + FLOW_PUSH_SLACK < dz
-                    && dz < hi[j] - FLOW_PUSH_SLACK)
-                {
-                    dz = hi[j];
-                    moved = true;
-                }
-        }
-        placed[c] = true;
-        if (dz <= 0)
-            continue;
-        cover[c]->distance = MIN(FLOW_PUSH_MAX,
-                                 (dz + PFREAL_ONE - 1) >> PFREAL_SHIFT);
-        seg[c].z0 += cover[c]->distance * PFREAL_ONE;
-        seg[c].z1 += cover[c]->distance * PFREAL_ONE;
-    }
-}
-
-/* --- Draw order --------------------------------------------------------------
- * Furthest from the middle slot first, a pair at a time, and the middle slot
- * last, except that a cover is never drawn after one it sits behind: the push
- * puts a face-on cover behind its neighbours' slats. Slots are numbered as in
- * flow_push(); flow_drawn[] is the order and flow_rank[] each slot's place in
- * it. */
-static int flow_drawn[FLOW_PLACED];
-static int flow_rank[FLOW_PLACED];
-
-/* Which side of g's line (x, z) lies on: 1, -1, or 0 within a pixel of it,
- * as the push leaves crossings shallower than that. The cross product is the
- * distance times the segment's length, DISPLAY_WIDTH. */
-#define FLOW_ON_LINE ((int64_t)DISPLAY_WIDTH * PFREAL_ONE * PFREAL_ONE)
-
-static int flow_side(const struct flow_seg *g, PFreal x, PFreal z)
-{
-    int64_t c = (int64_t)(g->x1 - g->x0) * (z - g->z0)
-              - (int64_t)(g->z1 - g->z0) * (x - g->x0);
-
-    return (c > FLOW_ON_LINE) - (c < -FLOW_ON_LINE);
-}
-
-/* Whether p is left of q on screen. */
-static bool flow_left(PFreal px, PFreal pz, PFreal qx, PFreal qz)
-{
-    return (int64_t)px * (CAM_DIST_R + qz) < (int64_t)qx * (CAM_DIST_R + pz);
-}
-
-/* A segment's ends as they fall on screen, left then right. Two overlap on
- * screen where each one's left end is left of the other's right end. */
-struct flow_screen
-{
-    PFreal lx, lz, rx, rz;
-};
-
-static void flow_screen_of(const struct flow_seg *g, struct flow_screen *e)
-{
-    if (flow_left(g->x1, g->z1, g->x0, g->z0))
-        *e = (struct flow_screen){ g->x1, g->z1, g->x0, g->z0 };
-    else
-        *e = (struct flow_screen){ g->x0, g->z0, g->x1, g->z1 };
-}
-
-/* Whether `a` hides `b` where they overlap on screen. Of two segments that do
- * not cross, one lies to one side of the other's line, and whether that is
- * the eye's side says which is nearer. */
-static bool flow_in_front(const struct flow_seg *a, const struct flow_seg *b)
-{
-    int s0 = flow_side(a, b->x0, b->z0), s1 = flow_side(a, b->x1, b->z1);
-    int e = flow_side(a, 0, -CAM_DIST_R);
-
-    if (s0 * s1 >= 0 && s0 + s1 && e)
-        return (s0 + s1 > 0) != (e > 0);
-    s0 = flow_side(b, a->x0, a->z0);
-    s1 = flow_side(b, a->x1, a->z1);
-    e = flow_side(b, 0, -CAM_DIST_R);
-    return s0 * s1 >= 0 && s0 + s1 && e && (s0 + s1 > 0) == (e > 0);
-}
-
-static void flow_order(void)
-{
-    struct flow_seg seg[FLOW_PLACED];
-    struct flow_screen screen[FLOW_PLACED];
-    unsigned under[FLOW_PLACED];        /* the slots to draw before each */
-    unsigned drawn = 0;
-    int base[FLOW_PLACED];
-    int i, j, k, n = 0;
-
-    for (i = ALBUM_COVERS_NUM_SLIDES - 1; i >= 0; i--)
-    {
-        base[n++] = ALBUM_COVERS_NUM_SLIDES - 1 - i;
-        base[n++] = ALBUM_COVERS_NUM_SLIDES + 1 + i;
-    }
-    base[n] = ALBUM_COVERS_NUM_SLIDES;
-
-    for (i = 0; i < FLOW_PLACED; i++)
-    {
-        flow_seg_of(flow_slide(i), &seg[i]);
-        flow_screen_of(&seg[i], &screen[i]);
-        under[i] = 0;
-    }
-    for (i = 0; i < FLOW_PLACED; i++)
-        for (j = i + 1; j < FLOW_PLACED; j++)
-            if (flow_left(screen[j].lx, screen[j].lz,
-                          screen[i].rx, screen[i].rz)
-                && flow_left(screen[i].lx, screen[i].lz,
-                             screen[j].rx, screen[j].rz))
-            {
-                if (flow_in_front(&seg[i], &seg[j]))
-                    under[i] |= 1u << j;
-                else if (flow_in_front(&seg[j], &seg[i]))
-                    under[j] |= 1u << i;
-            }
-
-    /* Each time the first slot in the base order with nothing left to draw
-     * under it. Covers that touch can make a cycle by a rounding; then the
-     * first not drawn. */
-    for (k = 0; k < FLOW_PLACED; k++)
-    {
-        int pick = -1;
-
-        for (i = 0; i < FLOW_PLACED; i++)
-        {
-            int s = base[i];
-
-            if (drawn & (1u << s))
-                continue;
-            if (pick < 0)
-                pick = s;
-            if (!(under[s] & ~drawn))
-            {
-                pick = s;
-                break;
-            }
-        }
-        drawn |= 1u << pick;
-        flow_drawn[k] = pick;
-        flow_rank[pick] = k;
-    }
-}
-
-/* Every cover from slide_frame. The middle slot holds the slide nearest
- * it. */
 static void coverflow_place(void)
 {
-    int i;
-
-    flow_place(&center_slide, center_index);
-    for (i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++) {
-        flow_place(&left_slides[i], center_index - 1 - i);
-        flow_place(&right_slides[i], center_index + 1 + i);
-    }
-    flow_push();
+    center_slide.slide_index = center_index;
+    flow_count = turn_project(&flow_row, flow_cards);
 }
 
 static void coverflow_idle(void)
 {
-    int i;
-
     slide_frame = center_index << 16;
-    for (i = 0; i < FLOW_RING; i++)
-        flow_turns[i].index = INT_MIN;
-    for (i = -ALBUM_COVERS_NUM_SLIDES; i <= ALBUM_COVERS_NUM_SLIDES; i++)
-        flow_turn_of(center_index + i, slide_frame);
+    flow_sample_us = USEC_TIMER;
+    turn_reset(&flow_row, center_index, number_of_slides);
+    flow_row.margin_delta = global_settings.album_covers_center_margin - 20
+                          + 32 - global_settings.album_covers_slide_tuck;
     coverflow_place();
 }
 
@@ -3013,10 +2565,8 @@ static void flat_idle(void)
     int pile = pile_alpha();
     PFreal drop = pile_offset();
 
-    center_slide.angle = 0;
     center_slide.cx = 0;
     center_slide.cy = 0;
-    center_slide.distance = 0;
     center_slide.alpha = 256;
     center_slide.slide_index = center_index;
 
@@ -3025,8 +2575,6 @@ static void flat_idle(void)
         struct slide_data *l = &left_slides[i];
         struct slide_data *r = &right_slides[i];
 
-        l->angle = r->angle = 0;
-        l->distance = r->distance = 0;
         l->alpha = r->alpha = pile;
         l->cy = r->cy = drop;
         l->cx = -PF_PILE_CX;
@@ -3050,25 +2598,6 @@ static void reset_slides(void)
 }
 
 
-/* The rest layout in world pixels, a cover being 128 wide: the first side
- * slot PF_SLOT_X from the middle and the rest PF_STACK_PITCH apart, as on the
- * stock player. Centre Margin and Slide Tuck move the first slot out and in;
- * the first-boot settings, 20 and 32, leave it there. */
-#define PF_SLOT_X      (1046 * PFREAL_ONE / 10)
-#define PF_STACK_PITCH (282 * PFREAL_ONE / 10)
-#define PF_MARGIN_REST 20
-#define PF_TUCK_REST   32
-
-/* Call this when the settings that move the slots change. */
-static void recalc_offsets(void)
-{
-    offsetX = PF_SLOT_X + (global_settings.album_covers_center_margin
-                           - PF_MARGIN_REST + PF_TUCK_REST
-                           - global_settings.album_covers_slide_tuck)
-                          * PFREAL_ONE;
-    stack_spacing = PF_STACK_PITCH;
-}
-
 /* Nominal cover height. Covers are scaled into DISPLAY_WIDTH x DISPLAY_HEIGHT
  * keeping their aspect, so a square one -- nearly all of them -- comes out
  * width-limited at this height. The caption is placed against this rather than
@@ -3076,9 +2605,7 @@ static void recalc_offsets(void)
  * other shape scrolls past. */
 #define PF_NOMINAL_ART_H  MIN(DISPLAY_WIDTH, DISPLAY_HEIGHT)
 
-/* Rows the covers give up to the caption, whatever its font. They decide
- * where the covers sit -- a 128-row cover on rows 28-155 of the 240-row
- * screen -- so the caption's size never moves the covers. */
+/* Flat layout reserves a caption band before centering the piles. */
 #define PF_CAPTION_BAND   55
 
 /* Clear rows between the nominal cover and the caption's first line box. */
@@ -3114,20 +2641,36 @@ void carousel_caption_layout(bool two_lines, struct pf_caption *out)
         art_top = 0;
     art_top += pf_draw_y_shift;
 
-    if (pf_draw_y_shift)    /* caption above the covers */
+    /* At b >= |g| the nearest edge is at least 139.78 units away.
+     * The moving silhouette therefore occupies at most rows 31..174. */
+    if (!flat_view())
+        out->y1 = pf_draw_y_shift ? MAX(0, 31 - caption_block(two_lines)) : 175;
+    else if (pf_draw_y_shift)    /* caption above the covers */
         out->y1 = MAX(0, art_top - PF_CAPTION_GAP - caption_block(two_lines));
     else
         out->y1 = art_top + PF_NOMINAL_ART_H + PF_CAPTION_GAP;
     out->y2 = out->y1 + caption_line2();
 }
 
-/* Re-apply the geometry settings (zoom / centre margin / slide tuck / tilt) to
- * the slide layout without rebuilding the index -- used after the in-screen
- * settings menu changes a purely visual setting. Preserves the current slide. */
+static void update_caption_bounds(void)
+{
+    pf_text_y = pf_text_h = 0;
+    if (pf_caption_band)
+    {
+        struct pf_caption cap;
+        carousel_caption_layout(true, &cap);
+        pf_text_y = cap.y1;
+        pf_text_h = MAX(0, MIN(caption_block(true), pf_height - pf_text_y));
+    }
+}
+
+/* Switching views in the settings menu also moves the caption. */
 void carousel_refresh(void)
 {
-    recalc_offsets();
+    update_caption_bounds();
     reset_slides();
+    if (!flat_view() && pf_state == pf_scrolling)
+        turn_target(&flow_row, target);
 }
 
 /**
@@ -3161,30 +2704,6 @@ static inline pix_t fade_color(pix_t c, unsigned int fa, unsigned int frb,
     unsigned int g = ((c & 0x7e0) * fa + fg) >> 8;
     return ((rb >> 5) & 0xf800) | (g & 0x07e0) | (rb & 0x001f);
 }
-
-/**
- * Render a single slide
- * Where xc is the slide's horizontal offset from center, xs is the horizontal
- * on the slide from its center, zo is the slide's depth offset from the plane
- * of the display, r is the angle at which the slide is tilted, and xp is the
- * point on the display corresponding to xs on the slide, the projection
- * formulas are:
- *
- *      z * (xc + xs * cos(r))
- * xp = ──────────────────────
- *       z + zo + xs * sin(r)
- *
- *      z * (xc - xp) - xp * zo
- * xs = ────────────────────────
- *      xp * sin(r) - z * cos(r)
- *
- * We use the xp projection once, to find the left edge of the slide on the
- * display. From there, we use the xs reverse projection to find the horizontal
- * offset from the slide center of each column on the screen, until we reach
- * the right edge of the slide, or the screen. The reverse projection can be
- * optimized by saving the numerator and denominator of the fraction, which can
- * then be incremented by (z + zo) and sin(r) respectively.
- */
 
 /* Clear `h` rows starting `y` rows down this screen's viewport -- never the
  * status bar, which belongs to the theme. Uses screen->clear_viewport(), which
@@ -3222,29 +2741,14 @@ static int slide_voff(int sh, PFreal cy)
 {
     int voff = ((pf_half_height + pf_lower_half) - sh) / 2;
 
-    if (cy > 0)             /* the flat view's pile offset; zero in 3D */
+    if (cy > 0)
         voff += cy >> PFREAL_SHIFT;
     if (voff > pf_half_height)
         voff = pf_half_height;
     return voff;
 }
 
-/* The rows a slide can write to, measured from the top of the viewport. Empty
- * if the slide has no bitmap.
- *
- * Both of render_slide_clipped()'s loops start at the middle row and step by
- * dy, so a slide is at its tallest where dy is at its least -- face-on, at
- * dy == PFREAL_ONE, occupying exactly its own sh rows from slide_voff(). That
- * bound holds whatever the tilt, which is why this can be had up front rather
- * than counted as the columns are walked.
- *
- * Except that dy dips a whisker below PFREAL_ONE at the outer edge of a slide
- * as wide as DISPLAY_WIDTH: zo is worked out from DISPLAY_WIDTH - 1 while the
- * xs term reaches DISPLAY_WIDTH, so the two cancel one PFREAL_HALF short and
- * dy bottoms out at 1021/1024. The lower loop takes a ceiling, so any shortfall
- * at all buys a whole extra row -- one, since 160 rows of cover at 3/1024 over
- * is half a row. PF_ROW_MARGIN covers it with a row to spare; tools/pfgeom
- * checks the bound against the rows a render really wrote. */
+/* Enclose the native-size flat bitmap and its dirty-row margin. */
 #define PF_ROW_MARGIN 2
 
 static void slide_rows(struct slide_data *slide, int *y0, int *y1)
@@ -3263,47 +2767,6 @@ static void slide_rows(struct slide_data *slide, int *y0, int *y1)
     *y0 = MAX(0, voff - PF_ROW_MARGIN) + pf_draw_y_shift;
     *y1 = MIN(pf_half_height + pf_lower_half, voff + sh + PF_ROW_MARGIN)
         + pf_draw_y_shift;
-}
-
-/* The screen columns a slide would occupy, [*x0, *x1), clipped to the display.
- * False if it lands entirely off-screen.
- *
- * Same projection as render_slide()'s, run on the slide's two vertical edges
- * instead of every column -- a handful of divisions rather than a walk. Used to
- * work out what hides what before anything is drawn. */
-static bool slide_x_range(struct slide_data *slide, int *x0, int *x1)
-{
-    struct dim *bmp = surface(slide);
-    PFreal cosr, sinr, zo, xs, xp;
-    int sw, lo, hi;
-
-    if (!bmp || slide->angle > 255 || slide->angle < -255)
-        return false;
-
-    sw = bmp->width;
-    cosr = fcos(slide->angle);
-    sinr = fsin(slide->angle);
-    zo = PFREAL_ONE * slide->distance
-       - fmuln(MAXSLIDE_LEFT_R, fabs(sinr), PFREAL_SHIFT - 2, 0);
-
-    xs = -sw * PFREAL_HALF + PFREAL_HALF;        /* left edge */
-    xp = fdiv(CAM_DIST * (slide->cx + fmul(xs, cosr)),
-              CAM_DIST_R + zo + fmul(xs, sinr));
-    lo = (fmax(DISPLAY_LEFT_R, xp) - DISPLAY_LEFT_R + PFREAL_ONE - 1)
-         >> PFREAL_SHIFT;
-
-    xs = sw * PFREAL_HALF;                       /* right edge */
-    xp = fdiv(CAM_DIST * (slide->cx + fmul(xs, cosr)),
-              CAM_DIST_R + zo + fmul(xs, sinr));
-    hi = (xp - DISPLAY_LEFT_R + PFREAL_ONE - 1) >> PFREAL_SHIFT;
-
-    if (lo < 0)
-        lo = 0;
-    if (hi > LCD_WIDTH)
-        hi = LCD_WIDTH;
-    *x0 = lo;
-    *x1 = hi;
-    return lo < hi;
 }
 
 /* Slides are drawn in tiles: PF_TILE_W columns -- one 16-byte cache line of a
@@ -3418,32 +2881,6 @@ static int draw_tile_half(struct pf_col *cols, int ncols, int step,
     return total;
 }
 
-static void draw_tile(struct pf_col *up, struct pf_col *lo, int ncols,
-                      const struct pf_fade *f)
-{
-    /* With a continuous source step the two halves form one run. Walk it
-     * from top to bottom, keeping the tiled framebuffer writes. */
-    int separate = 0;
-    for (int i = 0; i < ncols; ++i)
-    {
-        if (up[i].n && up[i].p != lo[i].p - lo[i].dp)
-        {
-            separate += draw_tile_half(up + i, 1, -BUFFER_WIDTH, f);
-            continue;
-        }
-        int upper = up[i].n;
-        lo[i].px -= upper * BUFFER_WIDTH;
-        lo[i].p -= upper * lo[i].dp;
-        lo[i].n += upper;
-    }
-    int px = separate + draw_tile_half(lo, ncols, BUFFER_WIDTH, f);
-#if PF_SHOW_STATS
-    pf_px += px;
-#else
-    (void)px;
-#endif
-}
-
 /* The split line is a pixel boundary. extent is the source distance from
  * that line to the silhouette. Only the last pixel needs the framebuffer. */
 struct pf_extent { int rows; unsigned int coverage; };
@@ -3475,197 +2912,39 @@ static inline void cover_half(struct pf_col *col, struct pf_extent span,
                         (bg & 0x07e0) * (256 - coverage));
 }
 
-/* Draw only columns in [x_from, x_to). The projection's state is carried
- * forward a column at a time, so the walk starts at the slide's left edge and
- * jumps the hidden columns before x_from rather than stepping through them. */
-static void render_slide_clipped(struct slide_data *slide, const int alpha,
-                                 int x_from, int x_to)
-{
-    struct dim *bmp = surface(slide);
-    if (!bmp) {
-        return;
-    }
-    if (slide->angle > 255 || slide->angle < -255)
-        return;
-    /* Wholly hidden, which the cull makes common: skip the projection set-up,
-     * which is several divisions before the walk even starts. */
-    if (x_from >= x_to)
-        return;
-    pix_t *src = (pix_t*)(sizeof(struct dim) + (char *)bmp);
-
-    const int sw = bmp->width;
-    const int sh = bmp->height;
-    const PFreal slide_left = -sw * PFREAL_HALF + PFREAL_HALF;
-    const int w = LCD_WIDTH;
-
-    PFreal cosr = fcos(slide->angle);
-    PFreal sinr = fsin(slide->angle);
-    PFreal zo = PFREAL_ONE * slide->distance
-        - fmuln(MAXSLIDE_LEFT_R, fabs(sinr), PFREAL_SHIFT - 2, 0);
-
-    PFreal xs = slide_left, xsnum, xsnumi, xsden, xsdeni;
-    PFreal xp = fdiv(CAM_DIST * (slide->cx + fmul(xs, cosr)),
-        (CAM_DIST_R + zo + fmul(xs,sinr)));
-
-    int xi = (fmax(DISPLAY_LEFT_R, xp) - DISPLAY_LEFT_R + PFREAL_ONE - 1)
-        >> PFREAL_SHIFT;
-    xp = DISPLAY_LEFT_R + xi * PFREAL_ONE;
-    if (xi >= w) {
-        return;
-    }
-    xsnum = CAM_DIST * (slide->cx - xp)
-        - fmuln(xp, zo, PFREAL_SHIFT - 2, 0);
-    xsden = fmuln(xp, sinr, PFREAL_SHIFT - 2, 0) - CAM_DIST * cosr;
-    xs = fdiv(xsnum, xsden);
-
-    xsnumi = -CAM_DIST_R - zo;
-    xsdeni = sinr;
-    int x;
-    int dy = PFREAL_ONE;
-    const int half_height = pf_half_height;
-    const int lower_half = pf_lower_half;
-    const bool perspective = (zo != 0 || slide->angle != 0);
-    /* sh (the decoded cover's own height, after FORMAT_KEEP_ASPECT scaling
-     * into the DISPLAY_WIDTH x DISPLAY_HEIGHT box) is rarely equal to
-     * pf_height -- e.g. square album art is width-limited by DISPLAY_WIDTH,
-     * so sh ends up well short of DISPLAY_HEIGHT, let alone this theme's own
-     * pf_height. vertical_offset centers whatever the real sh is within the
-     * viewport: positive when the image is shorter than the viewport (equal
-     * blank margin top and bottom), negative when it's taller (equal crop
-     * top and bottom). Without this, the split was implicitly anchored to
-     * the viewport's own half_height regardless of sh, which only matched
-     * the original plugin's fixed full-screen numbers by coincidence (see
-     * the removed pf_display_offs) -- any other sh left the image sitting
-     * top-anchored, with a blank gap only at the bottom. */
-    /* cy shifts the image down within that centred position -- the flat view's
-     * pile offset, and zero in the 3D view. Clamped, because the lower loop
-     * reads its source row unsigned: a start below row 0 would wrap to a huge
-     * index and read far outside the bitmap rather than clipping. The upper
-     * loop needs no clamp; a negative start simply fails its first test. */
-    const int vertical_offset = slide_voff(sh, slide->cy);
-    const int p_start_upper = (half_height - 1 - vertical_offset) * PFREAL_ONE;
-    const int p_start_lower = (half_height - vertical_offset) * PFREAL_ONE;
-    /* Once per slide, not once per pixel -- see struct pf_fade. */
-    struct pf_fade fd;
-    fade_prepare(&fd, alpha);
-    const struct pf_fade *f = (alpha == 256 && pf_neighbor_light == 256) ? NULL : &fd;
-
-    /* Walked a column at a time, which is the order the source is stored in
-     * (art_sizes.h keeps the coverflow thumbnails column-major for exactly
-     * this), and drawn a tile at a time -- see PF_TILE_W. Each column is
-     * collected as its projection is worked out, and a tile is drawn once its
-     * last column is in.
-     *
-     * Trap: writing along rows instead is ~20% slower than even the untiled
-     * column walk: the column-major source is then read across its stride,
-     * and the misses move from the stores onto the loads. */
-#ifdef CPU_PP
-    struct pf_col tile_up[PF_TILE_W], tile_lo[PF_TILE_W];
-    int ncols = 0;
-#else
-    /* A full column fits the 6G band. Emit it while the projection is hot. */
-    struct pf_col upper, lower;
-    struct pf_col *u = &upper, *l = &lower;
-#endif
-
 #define LCDADDR(x, y) (&buffer[(y)*BUFFER_WIDTH + (x)])
 
-    /* Nothing at or past x_to is drawn, so the walk stops there. */
-    for (x = xi; x < x_to; x++) {
-        /* Rounding in the reverse projection above can leave xs a fraction
-         * below the slide's left edge. The cast is unsigned, so that would
-         * wrap to a huge column and break out of the loop, truncating the
-         * slide mid-render rather than drawing its first column. */
-        if (xs < slide_left)
-            xs = slide_left;
-        int column = (unsigned)(xs - slide_left) >> PFREAL_SHIFT;
-        if (column >= sw)
-            break;
-
-        /* Hidden: jump the walk straight to x_from. Its numerator and
-         * denominator step by fixed amounts, so k steps are one multiply. */
-        if (x < x_from)
-        {
-            int k = x_from - x;
-
-            if (perspective)
-            {
-                xsnum += k * xsnumi;
-                xsden += k * xsdeni;
-                xs = fdiv(xsnum, xsden);
-            } else
-                xs += k * PFREAL_ONE;
-            x = x_from - 1;
-            continue;
-        }
-
-        if (perspective)
-            dy = div_cam_dist(CAM_DIST_R + zo + fmul(xs, sinr));
-
-        PFreal next = xs + PFREAL_ONE;
-        if (perspective)
-        {
-            xsnum += xsnumi;
-            xsden += xsdeni;
-            next = fdiv(xsnum, xsden);
-        }
-        const pix_t *ptr = src + column * sh;
-        if (slide->angle && next - xs >= PFREAL_ONE + PFREAL_HALF)
-            ptr = src + (sw + column / 2) * sh;
-        xs = next;
-        /* The rows each half draws: upward from the middle row while p stays
-         * at or above plim, downward while it stays below plo. */
-        int plim = MAX(0, p_start_upper - (half_height-1) * dy);
-        int plo = MIN(sh * PFREAL_ONE, p_start_lower + lower_half * dy);
-        unsigned int recip = 0xffffffffu / dy;
-#ifdef CPU_PP
-        struct pf_col *u = &tile_up[ncols], *l = &tile_lo[ncols];
-#endif
-
-        u->src = l->src = ptr;
-        u->p = p_start_upper;
-        u->dp = -dy;
-        u->px = LCDADDR(x, half_height - 1);
-        l->p = p_start_lower;
-        l->dp = dy;
-        l->px = LCDADDR(x, half_height);
-        if (slide->angle)
-        {
-            int split = MIN(p_start_lower, sh * PFREAL_ONE);
-            u->p = split - dy;
-            int below = sh * PFREAL_ONE - split;
-            struct pf_extent top = project_extent(split, dy, recip);
-            struct pf_extent bottom = split == below ? top : project_extent(below, dy, recip);
-            cover_half(u, top, half_height, -BUFFER_WIDTH, ptr[0], f);
-            cover_half(l, bottom, lower_half, BUFFER_WIDTH, ptr[sh - 1], f);
-        }
+/* Flat cards translate at their native bitmap size. */
+static void render_slide(struct slide_data *slide, int alpha)
+{
+    struct dim *bmp = surface(slide);
+    if (!bmp)
+        return;
+    const pix_t *src = (const pix_t *)(bmp + 1);
+    int left = (slide->cx + (LCD_WIDTH - bmp->width) * PFREAL_HALF
+                + PFREAL_ONE - 1) >> PFREAL_SHIFT;
+    int top = slide_voff(bmp->height, slide->cy);
+    int y = MAX(0, top);
+    int rows = MIN(top + bmp->height, pf_half_height + pf_lower_half) - y;
+    if (rows <= 0)
+        return;
+    struct pf_fade fade;
+    fade_prepare(&fade, alpha);
+    for (int x = MAX(0, left); x < MIN(LCD_WIDTH, left + bmp->width); x++)
+    {
+        struct pf_col col = {src + (x - left) * bmp->height, LCDADDR(x, y),
+                             (y - top) * PFREAL_ONE, PFREAL_ONE, rows};
+        if (alpha == 256 && pf_neighbor_light == 256)
+            draw_run(&col, rows, BUFFER_WIDTH);
         else
-        {
-            u->n = (p_start_upper >= plim)
-                 ? div_by_recip(p_start_upper - plim, dy, recip) + 1 : 0;
-            l->n = (plo > p_start_lower)
-                 ? div_by_recip(plo - p_start_lower + dy - 1, dy, recip) : 0;
-        }
-
-#ifdef CPU_PP
-        /* A tile ends where a cache line does, not after PF_TILE_W columns
-         * counted from wherever the slide happens to start. */
-        if (++ncols == PF_TILE_W || (x & (PF_TILE_W - 1)) == PF_TILE_W - 1)
-        {
-            draw_tile(tile_up, tile_lo, ncols, f);
-            ncols = 0;
-        }
-#else
-        draw_tile(u, l, 1, f);
+            draw_run_faded(&col, rows, BUFFER_WIDTH, &fade);
+#if PF_SHOW_STATS
+        pf_px += rows;
 #endif
     }
-#ifdef CPU_PP
-    if (ncols > 0)
-        draw_tile(tile_up, tile_lo, ncols, f);
-#endif
 }
 
-/* The slide walk's pinhole projection from FLIP_DIST, with the pivot at the
+/* The panel flip projects from FLIP_DIST, with the pivot at the
  * centre of the card. Only the artwork is texture mapped. The moving back
  * is a solid surface, and its text is drawn separately at the flat pose. */
 static void render_flip_face(int angle, int width, int height,
@@ -3676,7 +2955,7 @@ static void render_flip_face(int angle, int width, int height,
         return;
 
     const pix_t *src = NULL;
-    int sw = width, sh = height;
+    int sw = width, sh = height, stride = sh;
     if (!back)
     {
         struct dim *bmp = surface(&center_slide);
@@ -3685,6 +2964,13 @@ static void render_flip_face(int angle, int width, int height,
         sw = bmp->width;
         sh = bmp->height;
         src = (const pix_t *)(bmp + 1);
+        stride = sh;
+        if (!flat_view())
+        {
+            int size = MIN(sw, sh);
+            src += (sw - size) / 2 * stride + (sh - size) / 2;
+            sw = sh = size;
+        }
     }
     if (sw <= 0 || sh <= 0)
         return;
@@ -3722,7 +3008,7 @@ static void render_flip_face(int angle, int width, int height,
         if ((unsigned)u >= (unsigned)(width * PFREAL_ONE))
             continue;
         const int col = fmul(u, u_scale) >> PFREAL_SHIFT;
-        const pix_t *column = back ? NULL : src + col * sh;
+        const pix_t *column = back ? NULL : src + col * stride;
         dy = MAX(1, dy);
         unsigned int recip = 0xffffffffu / dy;
         struct pf_extent top = project_extent(split, dy, recip);
@@ -3749,75 +3035,11 @@ static void render_flip_face(int angle, int width, int height,
         draw_tile_half(cols, ncols, BUFFER_WIDTH, NULL);
 }
 
-static void render_slide(struct slide_data *slide, const int alpha)
-{
-    render_slide_clipped(slide, alpha, 0, LCD_WIDTH);
-}
-
-/* How many source rows one screen row covers at screen column x -- the render
- * loop's `dy`, worked out for a single column instead of walked to.
- *
- * This is the whole of the "does this slide hide that one" question: both loops
- * in render_slide_clipped() start at the middle row and step by dy, so the
- * number of rows a column draws falls as dy rises, and two slides sharing a
- * vertical offset are ordered by dy alone. */
-static int slide_dy_at(struct slide_data *slide, int x)
-{
-    struct dim *bmp = surface(slide);
-    PFreal cosr, sinr, zo, xp, xsnum, xsden, xs;
-    PFreal slide_left;
-
-    if (!bmp)
-        return 0;
-
-    cosr = fcos(slide->angle);
-    sinr = fsin(slide->angle);
-    zo = PFREAL_ONE * slide->distance
-       - fmuln(MAXSLIDE_LEFT_R, fabs(sinr), PFREAL_SHIFT - 2, 0);
-
-    xp = DISPLAY_LEFT_R + x * PFREAL_ONE;
-    xsnum = CAM_DIST * (slide->cx - xp)
-          - fmuln(xp, zo, PFREAL_SHIFT - 2, 0);
-    xsden = fmuln(xp, sinr, PFREAL_SHIFT - 2, 0) - CAM_DIST * cosr;
-    xs = fdiv(xsnum, xsden);
-
-    slide_left = -bmp->width * PFREAL_HALF + PFREAL_HALF;
-    if (xs < slide_left)        /* the render clamps before it takes dy */
-        xs = slide_left;
-
-    return (CAM_DIST_R + zo + fmul(xs, sinr)) / CAM_DIST;
-}
-
-/* An antialiased silhouette needs the underlying slide in its partial row.
- * At the endpoints and midpoint reserve a whole row of separation on the
- * shorter half, so both silhouettes lie inside the opaque interior. */
-static bool slide_covers(struct slide_data *near, struct slide_data *far,
-                         int a, int b)
-{
-    struct dim *n = surface(near), *f = surface(far);
-    if (b < a || !n || !f || n->height != f->height || near->cy != far->cy)
-        return false;
-    int split = pf_half_height - slide_voff(n->height, near->cy);
-    int half = MIN(split, n->height - split);
-    if (!near->angle && !near->distance)
-        return slide_dy_at(far, a) >= PFREAL_ONE && slide_dy_at(far, b) >= PFREAL_ONE;
-    if (half <= 0)
-        return false;
-    for (int i = 0; i < 3; i++)
-    {
-        int x = i == 0 ? a : (i == 1 ? (a + b) / 2 : b);
-        int nd = slide_dy_at(near, x), fd = slide_dy_at(far, x);
-        if (fd <= nd || (int64_t)half * PFREAL_ONE * (fd - nd) <
-                        (int64_t)nd * fd)
-            return false;
-    }
-    return true;
-}
-
 void set_current_slide(const int slide_index)
 {
     buf_ctx_lock();
     int old_center_index = center_index;
+    pf_state = pf_idle;
     step = 0;
     unsigned scale = ui_theme_duration(UI_THEME_MOTION_ONE);
     bool clock_changed = pf_motion_scale != scale;
@@ -3924,6 +3146,12 @@ static void start_animation(void)
     pf_state = pf_scrolling;
     anim_clock = ui_clock_start();
     anim_sampled_frame = 0;
+    if (!flat_view())
+    {
+        flow_sample(USEC_TIMER);
+        turn_target(&flow_row, target);
+        return;
+    }
     anim_pose_step = step;
     anim_frac = 0;
     pf_flat_snap = flat_pace(motion_clock()) < flat_duration(PF_FLAT_MIN);
@@ -3942,12 +3170,16 @@ static void reverse_animation(int direction)
 static void flow_click(int direction)
 {
     int to = fbound(0, target + direction, number_of_slides - 1);
-    int ahead = (to << 16) - slide_frame;
-
-    if ((direction < 0 ? -ahead : ahead) > FLOW_LEAD_MAX << 16)
+    if (to == target)
         return;
+    if (pf_state == pf_scrolling)
+    {
+        /* Integrate up to acceptance with the previous target. */
+        flow_sample(USEC_TIMER);
+        turn_target(&flow_row, to);
+    }
     target = to;
-    if (pf_state != pf_scrolling && slide_frame != target << 16)
+    if (pf_state != pf_scrolling)
         start_animation();
 }
 
@@ -4084,162 +3316,138 @@ static void flat_render(bool center)
     }
 }
 
-/* Columns a side slide need not draw because slides already drawn over it cover
- * them -- its neighbours nearer the centre, and the centre slide itself.
- *
- * One side at a time, working outwards, which is mostly the reverse of the
- * order they are drawn in: index 0 is painted after index 1, and the centre
- * slide after all of them. `cover` collects the slides nearer the middle, in
- * the order they cover the screen, and the run they make between them is
- * [span, edge). A member that flow_order() draws before this slide does not
- * cover it, and ends the walk.
- *
- * For each slide, the walk starts at its own inner edge and asks each member of
- * that run in turn whether it hides this slide. It stops at the first gap or
- * the first member that cannot be shown to -- and culls up to whatever it
- * reached, so one member that does not carry costs only its own stretch rather
- * than the whole claim. That matters because the runs are genuinely mixed: in
- * motion the slides between the middle and the first slot are part way
- * turned (see flow_place()).
- *
- * Everything is trimmed by PF_CULL_MARGIN before being relied on, because
- * slide_x_range() solves for the slide's edges directly while the render walks
- * columns one step at a time, and the two can land a column apart.
- *
- * Left and right are the same walk with the columns mirrored, so the code below
- * reads as the right-hand side throughout and the caller unmirrors the answer. */
-#define PF_CULL_MARGIN 1
-#define PF_CULL_MIRROR(v) (LCD_WIDTH - 1 - (v))
-
-static void cull_side(struct slide_data *side, const int *alpha,
-                      int center_alpha, int *edge_out, bool right)
+/* For square cards with the same world-space Y extent, projected height
+ * is proportional to reciprocal depth. The tallest card on each ray owns
+ * the whole column, including when two faces cross inside their overlap. */
+struct flow_column
 {
-    struct slide_data *cover[ALBUM_COVERS_NUM_SLIDES + 1];
-    int cover_lo[ALBUM_COVERS_NUM_SLIDES + 1];
-    int cover_hi[ALBUM_COVERS_NUM_SLIDES + 1];
-    int cover_slot[ALBUM_COVERS_NUM_SLIDES + 1];
-    int n_cover = 0;
-    int i, k, x0, x1, lo, hi;
-    int edge = 0, span = LCD_WIDTH;
+    int height, top, u_height;  /* Q16 pixels; u_height is texture u * height */
+    const struct dim *bmp;
+    bool mip;
+};
 
-    if (center_alpha > 0 && slide_x_range(&center_slide, &x0, &x1))
+static struct flow_column flow_columns[LCD_WIDTH];
+static struct slide_data flow_surfaces[TURN_CARDS];
+
+static int flow_clip_top(void)
+{
+    return pf_draw_y_shift && pf_text_h ? pf_text_y + pf_text_h : 0;
+}
+
+static int flow_clip_end(void)
+{
+    return !pf_draw_y_shift && pf_text_h ? pf_text_y : pf_height;
+}
+
+static void flow_cover_columns(const struct turn_card *card, int slot, int spread)
+{
+    int x0 = card->x[0], x1 = card->x[1];
+    /* Album-panel neighbours spread in world pixels (Q10). */
+    if (spread)
     {
-        lo = (right ? x0 : LCD_WIDTH - x1) + PF_CULL_MARGIN;
-        hi = (right ? x1 : LCD_WIDTH - x0) - PF_CULL_MARGIN;
-        if (hi > lo)
-        {
-            cover[0] = &center_slide;
-            cover_slot[0] = ALBUM_COVERS_NUM_SLIDES;
-            cover_lo[0] = lo;
-            cover_hi[0] = hi;
-            n_cover = 1;
-            span = lo;
-            edge = hi;
-        }
+        int dx = card->id < center_index ? -spread : spread;
+        x0 += (int64_t)dx * 156 * (1LL << 22) / card->z[0];
+        x1 += (int64_t)dx * 156 * (1LL << 22) / card->z[1];
     }
+    bool reversed = x0 > x1;
+    int left = MIN(x0, x1), width = abs(x1 - x0);
+    int first = MAX(0, (left + 32767) >> 16);
+    int end = MIN(LCD_WIDTH, (MAX(x0, x1) + 32767) >> 16);
+    if (first >= end)
+        return;
 
-    for (i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
+    struct slide_data *slide = &flow_surfaces[slot];
+    slide->slide_index = card->id;
+    const struct dim *bmp = surface(slide);
+    if (!bmp)
+        return;
+    int t = ((int64_t)((first << 16) + 32768 - left) << 16) / width;
+    int dt = end - first > 1 ? (1ULL << 32) / width : 0;
+    int h0 = card->bottom[0] - card->top[0];
+    int h1 = card->bottom[1] - card->top[1];
+    bool mip = width < MIN(bmp->width, bmp->height) * (2 * 65536 / 3);
+    if (reversed)
     {
-        edge_out[i] = right ? 0 : LCD_WIDTH;
-
-        if (alpha[i] <= 0)              /* not drawn: nothing to cull, and it
-                                         * covers nothing either */
+        t = 65536 - t;
+        dt = -dt;
+    }
+    for (int x = first; x < end; x++, t += dt)
+    {
+        int h = h0 + ((int64_t)(h1 - h0) * t >> 16);
+        struct flow_column *col = &flow_columns[x];
+        if (h <= col->height)
             continue;
-        if (!slide_x_range(&side[i], &x0, &x1))
-            continue;
-        lo = right ? x0 : LCD_WIDTH - x1;
-        hi = right ? x1 : LCD_WIDTH - x0;
-
-        if (n_cover && lo - PF_CULL_MARGIN >= span)
-        {
-            int reached = lo - PF_CULL_MARGIN;
-            int rank = flow_rank[right ? ALBUM_COVERS_NUM_SLIDES + 1 + i
-                                       : ALBUM_COVERS_NUM_SLIDES - 1 - i];
-
-            for (k = 0; k < n_cover; k++)
-            {
-                int last;
-
-                if (cover_hi[k] <= reached)     /* behind the walk already */
-                    continue;
-                if (cover_lo[k] > reached)      /* a gap: nothing beyond it */
-                    break;
-                if (flow_rank[cover_slot[k]] < rank)    /* drawn under it */
-                    break;
-
-                last = MIN(cover_hi[k], MIN(hi, edge)) - 1;
-                if (last < reached)
-                    break;
-                if (!slide_covers(cover[k], &side[i],
-                                  right ? reached : PF_CULL_MIRROR(last),
-                                  right ? last : PF_CULL_MIRROR(reached)))
-                    break;
-                reached = last + 1;
-            }
-            if (reached > lo)
-                edge_out[i] = right ? reached : LCD_WIDTH - reached;
-        }
-
-        lo += PF_CULL_MARGIN;
-        hi -= PF_CULL_MARGIN;
-        if (hi <= lo)
-            continue;
-
-        if (lo > edge)                  /* a gap: this starts a fresh run */
-        {
-            n_cover = 0;
-            span = lo;
-            edge = hi;
-        }
-        else if (hi > edge)             /* carries the run further out */
-        {
-            edge = hi;
-            span = MIN(span, lo);
-        }
-        else
-            continue;                   /* wholly inside the run already there */
-
-        cover[n_cover] = &side[i];
-        cover_slot[n_cover] = right ? ALBUM_COVERS_NUM_SLIDES + 1 + i
-                                    : ALBUM_COVERS_NUM_SLIDES - 1 - i;
-        cover_lo[n_cover] = lo;
-        cover_hi[n_cover] = hi;
-        n_cover++;
+        col->height = h;
+        col->top = card->top[0] + ((int64_t)(card->top[1] - card->top[0]) * t >> 16);
+        col->u_height = (int64_t)h1 * t >> 16;
+        col->bmp = bmp;
+        col->mip = mip;
     }
 }
 
-/* Every cover at full brightness, in flow_order(). */
+static void flow_render_spread(bool center, int spread)
+{
+    memset(flow_columns, 0, sizeof(flow_columns));
+    for (int i = 0; i < flow_count; i++)
+        if (center || flow_cards[i].id != center_index)
+            flow_cover_columns(&flow_cards[i], i, spread);
+
+    struct pf_fade fade;
+    fade_prepare(&fade, 256);
+    const struct pf_fade *ink = pf_neighbor_light == 256 ? NULL : &fade;
+    int top = flow_clip_top(), end = flow_clip_end();
+    for (int x = 0; x < LCD_WIDTH; x++)
+    {
+        const struct flow_column *col = &flow_columns[x];
+        if (!col->height)
+            continue;
+        const struct dim *bmp = col->bmp;
+        int size = MIN(bmp->width, bmp->height);
+        /* Interpolate u/Z and 1/Z before dividing for the texture column. */
+        int u = (bmp->width - size) / 2 +
+                MIN((unsigned)(col->u_height * size) / (unsigned)col->height,
+                    (unsigned)(size - 1));
+        if (col->mip)
+            u = bmp->width + u / 2;
+        const pix_t *src = (const pix_t *)(bmp + 1) + u * bmp->height
+                         + (bmp->height - size) / 2;
+        int y0 = col->top, y1 = y0 + col->height;
+        int first = MAX(top, (y0 + 65535) >> 16);
+        int last = MIN(end, y1 >> 16);
+        int dy = (size << 20) / (col->height >> 6);
+        int p = ((int64_t)((first << 16) + 32768 - y0) * dy) >> 16;
+        if (first < last)
+        {
+            struct pf_col run = {src, LCDADDR(x, first - pf_draw_y_shift), p, dy, last - first};
+            if (ink)
+                draw_run_faded(&run, run.n, BUFFER_WIDTH, ink);
+            else
+                draw_run(&run, run.n, BUFFER_WIDTH);
+#if PF_SHOW_STATS
+            pf_px += run.n;
+#endif
+        }
+        /* Only the outer row on each silhouette has fractional coverage. */
+        for (int edge = 0; edge < 2; edge++)
+        {
+            int y = edge ? y1 >> 16 : y0 >> 16;
+            int amount = edge ? (y1 & 65535) : ((-y0) & 65535);
+            if (!amount || y < top || y >= end)
+                continue;
+            unsigned a = ((amount + 512) >> 10) * 4;
+            pix_t pixel = src[edge ? size - 1 : 0];
+            if (ink)
+                pixel = fade_color(pixel, ink->a, ink->rb, ink->g);
+            pix_t *dest = LCDADDR(x, y - pf_draw_y_shift);
+            *dest = fade_color(pixel, a, fade_red_blue(*dest) * (256 - a),
+                               (*dest & 0x07e0) * (256 - a));
+        }
+    }
+}
+
 static void coverflow_render(bool center)
 {
-    int alpha[MAX_SLIDES_COUNT];
-    int left_to[MAX_SLIDES_COUNT], right_from[MAX_SLIDES_COUNT];
-    int index, k;
-
-    for (index = 0; index < ALBUM_COVERS_NUM_SLIDES; index++)
-        alpha[index] = 256;
-
-    flow_order();
-    cull_side(left_slides, alpha, center ? 256 : 0, left_to, false);
-    cull_side(right_slides, alpha, center ? 256 : 0, right_from, true);
-
-    for (k = 0; k < FLOW_PLACED; k++)
-    {
-        int slot = flow_drawn[k];
-
-        if (slot < ALBUM_COVERS_NUM_SLIDES)
-        {
-            index = ALBUM_COVERS_NUM_SLIDES - 1 - slot;
-            render_slide_clipped(&left_slides[index], 256, 0, left_to[index]);
-        }
-        else if (slot > ALBUM_COVERS_NUM_SLIDES)
-        {
-            index = slot - ALBUM_COVERS_NUM_SLIDES - 1;
-            render_slide_clipped(&right_slides[index], 256,
-                                 right_from[index], LCD_WIDTH);
-        }
-        else if (center)
-            render_slide(&center_slide, 256);
-    }
+    flow_render_spread(center, 0);
 }
 
 /* The rows the covers will disturb this frame: the ones they can reach now,
@@ -4254,18 +3462,36 @@ static void cover_rows(int *y0, int *y1)
 {
     int lo, hi, a, b, i;
 
-    slide_rows(&center_slide, &lo, &hi);
-
-    for (i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
+    if (flat_view())
     {
-        slide_rows(&left_slides[i], &a, &b);
-        lo = MIN(lo, a);
-        hi = MAX(hi, b);
-        slide_rows(&right_slides[i], &a, &b);
-        lo = MIN(lo, a);
-        hi = MAX(hi, b);
-    }
+        slide_rows(&center_slide, &lo, &hi);
 
+        for (i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
+        {
+            slide_rows(&left_slides[i], &a, &b);
+            lo = MIN(lo, a);
+            hi = MAX(hi, b);
+            slide_rows(&right_slides[i], &a, &b);
+            lo = MIN(lo, a);
+            hi = MAX(hi, b);
+        }
+    }
+    else
+    {
+        lo = pf_height;
+        hi = 0;
+        for (i = 0; i < flow_count; i++)
+        {
+            const struct turn_card *card = &flow_cards[i];
+            if (MAX(card->x[0], card->x[1]) <= 0 ||
+                MIN(card->x[0], card->x[1]) >= LCD_WIDTH * 65536)
+                continue;
+            lo = MIN(lo, MIN(card->top[0], card->top[1]) >> 16);
+            hi = MAX(hi, (MAX(card->bottom[0], card->bottom[1]) + 65535) >> 16);
+        }
+        lo = MAX(lo, flow_clip_top());
+        hi = MIN(hi, flow_clip_end());
+    }
     *y0 = MIN(lo, pf_slides_y0);
     *y1 = MAX(hi, pf_slides_y1);
     pf_slides_y0 = lo;
@@ -4404,46 +3630,20 @@ static void move_center(int index)
 /* The covers at rest on the target. */
 static void land(void)
 {
-    reset_slides();
     pf_state = pf_idle;
     pf_random_spinning = false;
     slide_frame = center_index << 16;
     step = 0;
 }
 
-/* The 3D view's frame: the chase advances one step per refresh elapsed, so a
- * frame that spans several, at half rate or after a late wake, lands where
- * the same refreshes drawn one by one would have. See FLOW_FLOOR. The covers
- * come to rest once the row is on the target and every turn has arrived. */
 static void flow_update(void)
 {
-    unsigned frames = scroll_time(USEC_TIMER);
-    uint32_t dt_us = (uint64_t)ui_frame_period()
-                   * global_settings.album_covers_scroll_speed
-                   * UI_THEME_MOTION_ONE
-                   / (FLOW_SPEED_REF * MAX(1u, pf_motion_scale));
-    int to = target << 16;
-    bool rest = false;
-
-    for (; frames > 0 && !rest; frames--)
-    {
-        uint32_t left = dt_us;
-
-        while (left > 0)
-        {
-            uint32_t step = MIN(left, (uint32_t)FLOW_STEP_US);
-
-            slide_frame = flow_chase(slide_frame, to, step);
-            rest = flow_turn_step(step) && slide_frame == to;
-            left -= step;
-        }
-    }
-
+    flow_sample(USEC_TIMER);
+    slide_frame = (int)flow_row.p;
     move_center((slide_frame + 0x8000) >> 16);
-    if (rest)
+    coverflow_place();
+    if (!turn_moving(&flow_row))
         land();
-    else
-        coverflow_place();
 }
 
 static void update_scroll_animation(void)
@@ -4508,6 +3708,7 @@ static void update_scroll_animation(void)
     PFreal ftick = (tick * PFREAL_ONE) >> 16;
 
     if (slide_frame == target_frame) {
+        flat_idle();
         land();
         return;
     }
@@ -4610,22 +3811,8 @@ static bool init(void)
     panel_cache_follow_theme();
     pf_body_font = ui_theme_font_load(&theme, UI_FONT_BODY, 64);
 
-    /* Reserve real, empty vertical space for draw_album_text()'s overlay,
-     * rather than just biasing where the up/down split falls: since
-     * pf_lower_half is *defined* as pf_height - pf_half_height, upper and
-     * lower always summed to exactly pf_height no matter how the split was
-     * biased (a "+8"-style offset, tried first, only shifts which rows go
-     * above vs below center -- it never actually shrinks the total drawn
-     * area, so the art always ran the full height of the viewport
-     * regardless). Actually keeping clear of the text means genuinely
-     * reducing the drawable height by a margin the caption fits in, and --
-     * for a *top*-anchored caption -- also shifting the render origin down so
-     * the reserved strip is skipped rather than just repositioning within it.
-     *
-     * The band is PF_CAPTION_BAND whichever mode is set, so the covers do not
-     * change size or place between the album and artist screens --
-     * carousel_caption_layout() places whatever it is actually given against
-     * the covers. */
+    /* Flat piles fit in the drawable band. Turn uses the panel camera
+     * and clips to the caption's actual line boxes. */
     {
         bool text_at_top;
         int draw_height;
@@ -4657,24 +3844,7 @@ static bool init(void)
         pf_lower_half = draw_height - pf_half_height;
         pf_draw_y_shift = text_at_top ? pf_caption_band : 0;
 
-        /* Where the caption itself lands, so a frame can repaint that and
-         * nothing else. Asked for two lines because that block contains the
-         * one-line one: both sit against the covers. */
-        if (pf_caption_band > 0)
-        {
-            struct pf_caption cap;
-
-            carousel_caption_layout(true, &cap);
-            pf_text_y = MAX(0, cap.y1);
-            pf_text_h = MIN(pf_height, cap.y1 + caption_block(true)) - pf_text_y;
-            if (pf_text_h < 0)
-                pf_text_h = 0;
-        }
-        else
-        {
-            pf_text_y = 0;
-            pf_text_h = 0;
-        }
+        update_caption_bounds();
 
         /* Nothing has been drawn yet, so claim the lot: the first frame is a
          * full one regardless, and this must never read as "the covers are
@@ -4701,7 +3871,7 @@ static bool init(void)
         init_scroll_lines();
         buffer = LCD_BUF + (pf_vp_y + pf_draw_y_shift) * BUFFER_WIDTH;
         pf_state = pf_idle; step = 0; target = center_index;
-        recalc_offsets(); reset_slides();
+        reset_slides();
         lcd_set_drawmode(DRMODE_FG);
         return true;
     }
@@ -4831,7 +4001,6 @@ static bool init(void)
     step = 0;
     target = 0;
 
-    recalc_offsets();
     reset_slides();
 
     lcd_set_drawmode(DRMODE_FG);
@@ -5960,8 +5129,7 @@ static void panel_repaint_marquee(void)
     lcd_set_viewport(previous);
     lcd_update_rect(view.x + 1, rows.y + y, view.width - 2, PANEL_PITCH);
 }
-/* Draw the neighbours with the existing culling and span renderer.
- * The artwork is the only transformed texture. */
+/* Neighbours stay visible around the turning panel. */
 static void NO_INLINE render_album_flip(int position, pix_t color)
 {
     pf_clear_band(0, pf_height);
@@ -5978,6 +5146,11 @@ static void NO_INLINE render_album_flip(int position, pix_t color)
     int w = cover ? cover->width : DISPLAY_WIDTH;
     int h = cover ? cover->height : DISPLAY_WIDTH;
     int cy = pf_vp_y + pf_draw_y_shift + slide_voff(h, center_slide.cy) + h / 2;
+    if (!flat_view())
+    {
+        w = h = DISPLAY_WIDTH;
+        cy = 105;
+    }
     bool back = position >= FLIP_MID;
     const struct ui_tween ease = {.from = 0, .to = FLIP_MID,
                                   .frames = FLIP_MID, .ease_in = !back};
@@ -5987,21 +5160,7 @@ static void NO_INLINE render_album_flip(int position, pix_t color)
     if (flat_view())
         flat_render(false);
     else
-    {
-        /* Expose the inner neighbours at the sides of the wider back face. */
-        PFreal spread = back ? 48 * turn : 0;
-        for (int i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
-        {
-            left_slides[i].cx -= spread;
-            right_slides[i].cx += spread;
-        }
-        coverflow_render(false);
-        for (int i = 0; i < ALBUM_COVERS_NUM_SLIDES; i++)
-        {
-            left_slides[i].cx += spread;
-            right_slides[i].cx -= spread;
-        }
-    }
+        flow_render_spread(false, back ? 48 * turn : 0);
     pf_neighbor_light = 256;
     if (back)
     {

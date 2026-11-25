@@ -1132,3 +1132,19 @@ Touching at an endpoint does not count: a slat's near edge resting on a
 frontal face is allowed, and the stacks themselves rely on this. The loop
 costs at most 80 steps x 4 tests per cover, and is empty for most covers
 in most refreshes.
+
+### 9.11 Turn
+
+| Symbol | Value | Meaning |
+|---|---:|---|
+| J, k | .04889487371, 5.741560141/s | interruption impulse area and free relaxation rate |
+| H, W, τ | .04500622572 s, .040 s, .1338588077 s | recovery onset, ramp width, impulse decay time |
+| R, m | 3.625962361 items, .9413078492 | turning field half-width and gain |
+| c, r | 4.841117576/s, 1.051554892 items | local hinge relaxation and radius |
+| Jb, τb | .04572036368, .06917145764 s | bank impulse area and decay time |
+| ΔH | .005194731245 s | extra recovery delay per additional accepted item, up to four |
+| e, L | .031496, .4 item | finite endpoint offset and contact allowance coefficient |
+
+At the default settings, time is measured in physical seconds. Split the interval at each accepted selection and integrate at most 1/60 s at a time. The carrier, hinge and depth states stay continuous across changes of target.
+
+For unit hinge `g` and depth state `b`, yaw is −πg/2, X = 27.776(i−p) + 73.344g and Z = 156 + 59.264b. The square has side 128, its center Y is −14.976, and the focal length is 156 px about (160,120). Evaluate the 31 albums centered on round(p), clipped to the library. Resolve XZ contacts in descending absolute yaw, breaking ties by increasing index. Limit the lift by the speed-dependent allowance before projection. Composite the nearest positive depth at each column.

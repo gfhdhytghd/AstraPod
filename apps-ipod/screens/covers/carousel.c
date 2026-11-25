@@ -103,7 +103,7 @@
 #include "album_covers.h"
 #include "carousel.h"
 #include "panel_perf.h"
-#include "turn.h"
+#include "stock_motion.h"
 #include "database/path_key.h"     /* the shared engine: carousel_idx, the model */
 #include "screens/playback/cider.h"
 #include "screens/playback/cider_library.h"
@@ -1910,30 +1910,6 @@ static void free_all_slide_prio(int prio)
 }
 
 
-/* Keep a two-column box-filtered level behind the native pixels in the
- * movable surface. It is built once, after the user's artwork filters. */
-static size_t side_level_bytes(int width, int height)
-{
-    return ((width + 1) / 2) * height * sizeof(pix_t);
-}
-
-static void build_side_level(struct dim *bm)
-{
-    const int h = bm->height;
-    const pix_t *src = (pix_t *)(bm + 1);
-    pix_t *dst = (pix_t *)src + bm->width * h;
-    for (int x = 0; x < bm->width; x += 2)
-    {
-        const pix_t *left = src + x * h;
-        const pix_t *right = x + 1 < bm->width ? left + h : left;
-        for (int y = 0; y < h; y++)
-        {
-            unsigned int a = left[y], b = right[y];
-            *dst++ = (a & b) + (((a ^ b) & 0xf7de) >> 1);
-        }
-    }
-}
-
 /* Read a pfraw image into the slide cache; a buflib handle, or -1.
  *
  * Only the placeholder comes through here, and both callers assign the result
@@ -1965,8 +1941,7 @@ static int read_pfraw(char* filename, int prio)
     }
 
     int size =  sizeof(int) + sizeof(struct dim) +
-                sizeof(pix_t) * bmph.width * bmph.height +
-                side_level_bytes(bmph.width, bmph.height);
+                sizeof(pix_t) * bmph.width * bmph.height;
 
     int hid;
     do {
@@ -1997,7 +1972,6 @@ static int read_pfraw(char* filename, int prio)
         return -1;
     }
 
-    build_side_level(bm);
     close( fh );
     return hid;
 }
@@ -2150,7 +2124,7 @@ static inline bool load_and_prepare_surface(const int slide_index,
     unsigned int version = model->art_version ? model->art_version(slide_index) : 0;
     unsigned int hash = model->read_art ? 0 : model->art_key(slide_index);
 
-    /* The new surface stays private until its pixels and mip level are ready.
+    /* The new surface stays private until its pixels are ready.
      * A cache reset can retire the request while the loader yields. */
     buf_ctx_unlock();
     struct bitmap bitmap;
@@ -2162,8 +2136,7 @@ static inline bool load_and_prepare_surface(const int slide_index,
         if (model->read_art(slide_index, &bitmap))
         {
             len = sizeof(pix_t) * bitmap.width * bitmap.height;
-            allocation = sizeof(int) + sizeof(struct dim) + len
-                         + side_level_bytes(bitmap.width, bitmap.height);
+            allocation = sizeof(int) + sizeof(struct dim) + len;
         }
     }
     else if (hash && pf_cover_size_idx >= 0)
@@ -2179,8 +2152,7 @@ static inline bool load_and_prepare_surface(const int slide_index,
             if (len > most)
                 len = most;
             if (len > header)
-                allocation = sizeof(int) + PF_READ_SLACK + len
-                             + (len - header + DISPLAY_HEIGHT * sizeof(pix_t)) / 2;
+                allocation = sizeof(int) + PF_READ_SLACK + len;
         }
     }
 
@@ -2212,11 +2184,8 @@ static inline bool load_and_prepare_surface(const int slide_index,
             memcpy(bm + 1, bitmap.data, len);
         }
         if (bm)
-        {
             img_filter_apply_banded((pix_t *)(bm + 1), bm->height,
                                     bm->width, carousel_filter());
-            build_side_level(bm);
-        }
     }
     if (fh >= 0)
         close(fh);
@@ -2239,7 +2208,7 @@ static inline bool load_and_prepare_surface(const int slide_index,
     pf_sldcache.cache[cache_index].version = version;
     pf_sldcache.cache[cache_index].index = slide_index;
 
-    if (abs(slide_index - center_index) <= TURN_RADIUS)
+    if (abs(slide_index - center_index) <= ALBUM_COVERS_NUM_SLIDES)
         pf_slides_loaded++;
 
 #if PF_SHOW_STATS
@@ -2570,37 +2539,33 @@ static void flat_note_scroll(void)
 
 /* Points to the current foreground render's counters only during capture. */
 static uint32_t *flow_stages;
-static struct turn_row flow_row;
-static uint32_t flow_sample_us;
+struct flow_card {
+    int id;
+    bool linear;
+    struct stock_edge edge[2];
+};
 
-/* At the stock speed and theme duration, model seconds are wall seconds. */
-#define FLOW_SPEED_REF 175
-
-static void flow_sample(uint32_t now)
-{
-    uint32_t elapsed = now - flow_sample_us;
-    flow_sample_us = now;
-    unsigned speed = global_settings.album_covers_scroll_speed;
-    if (speed != FLOW_SPEED_REF || pf_motion_scale != UI_THEME_MOTION_ONE)
-    {
-        uint64_t scaled = (uint64_t)elapsed * speed * UI_THEME_MOTION_ONE /
-                          (FLOW_SPEED_REF * MAX(1u, pf_motion_scale));
-        elapsed = MIN(scaled, UINT32_MAX);
-    }
-    uint32_t start = flow_stages ? USEC_TIMER : 0;
-    turn_advance(&flow_row, elapsed);
-    if (flow_stages)
-        flow_stages[UI_COVER_MOTION] += (uint32_t)USEC_TIMER - start;
-}
-
-static struct turn_card flow_cards[TURN_CARDS];
+static struct stock_flow flow_row;
+static struct stock_visible flow_visible[STOCK_MAX_VISIBLE];
+static struct flow_card flow_cards[STOCK_MAX_VISIBLE];
 static int flow_count;
 
-static void coverflow_place(void)
+static void coverflow_place(uint32_t now)
 {
-    center_slide.slide_index = center_index;
     uint32_t start = flow_stages ? USEC_TIMER : 0;
-    flow_count = turn_project(&flow_row, flow_cards);
+    flow_count = stock_sample(&flow_row, now, flow_visible);
+    if (flow_stages)
+    {
+        uint32_t sampled = USEC_TIMER;
+        flow_stages[UI_COVER_MOTION] += sampled - start;
+        start = sampled;
+    }
+    for (int i = 0; i < flow_count; i++)
+    {
+        flow_cards[i].id = flow_visible[i].album;
+        flow_cards[i].linear = flow_visible[i].linear;
+        stock_project(flow_visible[i].pose, flow_cards[i].edge);
+    }
     if (flow_stages)
         flow_stages[UI_COVER_PROJECT] += (uint32_t)USEC_TIMER - start;
 }
@@ -2608,12 +2573,10 @@ static void coverflow_place(void)
 static void coverflow_idle(void)
 {
     flow_pace.recover_full_rate = true;
-    slide_frame = center_index << 16;
-    flow_sample_us = USEC_TIMER;
-    turn_reset(&flow_row, center_index, number_of_slides);
-    flow_row.margin_delta = global_settings.album_covers_center_margin - 20
-                          + 32 - global_settings.album_covers_slide_tuck;
-    coverflow_place();
+    center_slide.slide_index = center_index;
+    uint32_t now = USEC_TIMER;
+    stock_init(&flow_row, number_of_slides, center_index, now, false);
+    coverflow_place(now);
 }
 
 /* Every card on its resting place: one cover in the middle, and the rest
@@ -2700,8 +2663,7 @@ void carousel_caption_layout(bool two_lines, struct pf_caption *out)
         art_top = 0;
     art_top += pf_draw_y_shift;
 
-    /* At b >= |g| the nearest edge is at least 139.78 units away.
-     * The moving silhouette therefore occupies at most rows 31..174. */
+    /* The 3D view keeps the caption at its fixed screen position. */
     if (!flat_view())
         out->y1 = pf_draw_y_shift ? MAX(0, 31 - caption_block(two_lines)) : 175;
     else if (pf_draw_y_shift)    /* caption above the covers */
@@ -2729,7 +2691,7 @@ void carousel_refresh(void)
     update_caption_bounds();
     reset_slides();
     if (!flat_view() && pf_state == pf_scrolling)
-        turn_target(&flow_row, target);
+        stock_scroll(&flow_row, target - flow_row.selected, USEC_TIMER);
 }
 
 /**
@@ -3274,8 +3236,7 @@ static void start_animation(void)
     anim_sampled_frame = 0;
     if (!flat_view())
     {
-        flow_sample(USEC_TIMER);
-        turn_target(&flow_row, target);
+        stock_scroll(&flow_row, target - flow_row.selected, USEC_TIMER);
         return;
     }
     anim_pose_step = step;
@@ -3296,27 +3257,35 @@ static void reverse_animation(int direction)
 static void flow_click(int direction)
 {
     int to = fbound(0, target + direction, number_of_slides - 1);
-    if (to == target)
+    if (to == target || flow_row.phase == STOCK_LEAVE)
         return;
     if (pf_state == pf_scrolling)
-    {
-        /* Integrate up to acceptance with the previous target. */
-        flow_sample(USEC_TIMER);
-        turn_target(&flow_row, to);
-    }
+        stock_scroll(&flow_row, to - target, USEC_TIMER);
     target = to;
     if (pf_state != pf_scrolling)
         start_animation();
 }
 
+/* The wheel posts physical detents in bits 24..30 and velocity below them.
+ * A key or accessory action without a wheel payload moves one album. */
+static int flow_wheel_steps(void)
+{
+    int button;
+    unsigned data = get_action_data();
+    get_action_statuscode(&button);
+    if ((button & (BUTTON_SCROLL_BACK | BUTTON_SCROLL_FWD)) && (data >> 31))
+        return MAX(1u, (data >> 24) & 0x7f);
+    return 1;
+}
+
 static void show_previous_slide(void)
 {
     pf_random_spinning = false;
-    flat_note_scroll();
     if (!flat_view()) {
-        flow_click(-1);
+        flow_click(-flow_wheel_steps());
         return;
     }
+    flat_note_scroll();
     if (step == 0) {
         if (center_index > 0) {
             target = center_index - 1;
@@ -3332,11 +3301,11 @@ static void show_previous_slide(void)
 static void show_next_slide(void)
 {
     pf_random_spinning = false;
-    flat_note_scroll();
     if (!flat_view()) {
-        flow_click(1);
+        flow_click(flow_wheel_steps());
         return;
     }
+    flat_note_scroll();
     if (step == 0) {
         if (center_index < number_of_slides - 1) {
             target = center_index + 1;
@@ -3448,7 +3417,8 @@ static void flat_render(bool center)
 struct flow_face
 {
     const pix_t *pixels;
-    int stride, size, crop, mip;
+    int stride, size, crop;
+    bool linear;
     int top, top_delta, end_height; /* Q16 projected edge coordinates */
 };
 
@@ -3459,8 +3429,8 @@ struct flow_column
 };
 
 static struct flow_column flow_columns[LCD_WIDTH];
-static struct flow_face flow_faces[TURN_CARDS];
-static struct slide_data flow_surfaces[TURN_CARDS];
+static struct flow_face flow_faces[STOCK_MAX_VISIBLE];
+static struct slide_data flow_surfaces[STOCK_MAX_VISIBLE];
 
 static int flow_clip_top(void)
 {
@@ -3472,16 +3442,38 @@ static int flow_clip_end(void)
     return !pf_draw_y_shift && pf_text_h ? pf_text_y : pf_height;
 }
 
-/* A Q16 endpoint can round onto a pixel center from either side. Resolve
- * the half-open coverage bound against the unrounded ray in world space. */
-static int flow_edge_column(int x, const struct turn_card *card, int edge, int dx)
+/* For d normalized to [2^31,2^32), m approximates 2^62/d. Bin midpoints
+ * seed two fixed-point Newton iterations. Callers correct the final quotient
+ * against the original integer operands. */
+static const uint16_t flow_recip_seed[128] = {
+    65281, 64777, 64281, 63792, 63310, 62836, 62369, 61909, 61455, 61008, 60568, 60133,
+    59705, 59283, 58867, 58457, 58053, 57654, 57260, 56872, 56489, 56111, 55738, 55370,
+    55007, 54649, 54295, 53946, 53601, 53261, 52925, 52593, 52265, 51942, 51622, 51306,
+    50995, 50686, 50382, 50081, 49784, 49490, 49200, 48913, 48630, 48349, 48072, 47798,
+    47528, 47260, 46995, 46733, 46474, 46218, 45965, 45714, 45467, 45222, 44979, 44739,
+    44502, 44267, 44035, 43805, 43577, 43352, 43129, 42908, 42690, 42474, 42260, 42048,
+    41838, 41631, 41425, 41222, 41020, 40820, 40623, 40427, 40233, 40041, 39851, 39662,
+    39476, 39291, 39108, 38926, 38746, 38568, 38392, 38217, 38044, 37872, 37702, 37533,
+    37366, 37200, 37036, 36873, 36712, 36552, 36393, 36236, 36080, 35926, 35772, 35620,
+    35470, 35320, 35172, 35026, 34880, 34735, 34592, 34450, 34309, 34169, 34031, 33893,
+    33757, 33622, 33487, 33354, 33222, 33091, 32961, 32832,
+};
+
+struct flow_recip {
+    uint32_t m;
+    unsigned norm;
+};
+
+static inline struct flow_recip flow_reciprocal(uint32_t denominator)
 {
-    int column = x >> 16;
-    if (abs((x & 65535) - 32768) > 8)
-        return (x + 32767) >> 16;
-    int ray = 2 * column + 1 - LCD_WIDTH;
-    int32_t world_x = card->world_x[edge] + dx * 64;
-    return column + ((int64_t)(2 * 156) * world_x > (int64_t)ray * card->z[edge]);
+    unsigned norm = __builtin_clz(denominator);
+    uint32_t d = denominator << norm;
+    uint32_t m = (uint32_t)flow_recip_seed[(d >> 24)-128] << 15;
+    for (int i = 0; i < 2; i++) {
+        int32_t error = (1 << 30) - (uint32_t)((uint64_t)d*m >> 32);
+        m += (int32_t)((int64_t)m*error >> 30);
+    }
+    return (struct flow_recip){ m, norm };
 }
 
 /* Q30 quotients use the normalized reciprocal, then correct its last bits
@@ -3501,18 +3493,18 @@ static inline uint32_t flow_quotient(uint32_t low, uint32_t width, uint32_t q)
     return q;
 }
 
-static void flow_cover_columns(const struct turn_card *card, int slot, int spread)
+static void flow_cover_columns(const struct flow_card *card, int slot, int spread)
 {
-    int x0 = card->x[0], x1 = card->x[1];
+    int x0 = card->edge[0].x, x1 = card->edge[1].x;
     /* Album-panel neighbours spread in world pixels (Q10). */
     int dx = card->id < center_index ? -spread : spread;
     if (dx)
     {
-        x0 += (int64_t)dx * 156 * (1LL << 22) / card->z[0];
-        x1 += (int64_t)dx * 156 * (1LL << 22) / card->z[1];
+        x0 += (int64_t)dx * STOCK_CAMERA * (1LL << 22) / card->edge[0].depth;
+        x1 += (int64_t)dx * STOCK_CAMERA * (1LL << 22) / card->edge[1].depth;
     }
-    int edge0 = flow_edge_column(x0, card, 0, dx);
-    int edge1 = flow_edge_column(x1, card, 1, dx);
+    int edge0 = (x0 + 32767) >> 16;
+    int edge1 = (x1 + 32767) >> 16;
     bool reversed = edge0 > edge1;
     int left = MIN(x0, x1), width = abs(x1 - x0);
     int first = MAX(0, MIN(edge0, edge1));
@@ -3530,7 +3522,7 @@ static void flow_cover_columns(const struct turn_card *card, int slot, int sprea
     int offset = MAX(0, MIN(width, (first << 16) + 32768 - left));
     int t = 1 << 29, dt = 0;
     if (width) {
-        struct turn_recip rec = turn_reciprocal(width);
+        struct flow_recip rec = flow_reciprocal(width);
         uint32_t q = ((uint64_t)(unsigned)offset * rec.m) >> (32-rec.norm);
         t = flow_quotient((unsigned)offset << 30, width, q);
         if (end - first > 1) {
@@ -3538,16 +3530,15 @@ static void flow_cover_columns(const struct turn_card *card, int slot, int sprea
             dt = flow_quotient(0, width, q);
         }
     }
-    int h0 = card->bottom[0] - card->top[0];
-    int h1 = card->bottom[1] - card->top[1];
+    int h0 = card->edge[0].bottom - card->edge[0].top;
+    int h1 = card->edge[1].bottom - card->edge[1].top;
     int size = MIN(bmp->width, bmp->height);
-    int mip = width < size * (2 * 65536 / 3);
     struct flow_face *face = &flow_faces[slot];
     *face = (struct flow_face) {
-        .pixels = (const pix_t *)(bmp+1) + (bmp->height-size)/2
-                + (mip ? bmp->width*bmp->height : 0),
+        .pixels = (const pix_t *)(bmp+1) + (bmp->height-size)/2,
         .stride = bmp->height, .size = size, .crop = (bmp->width-size)/2,
-        .mip = mip, .top = card->top[0], .top_delta = card->top[1]-card->top[0],
+        .linear = card->linear, .top = card->edge[0].top,
+        .top_delta = card->edge[1].top - card->edge[0].top,
         .end_height = h1
     };
     if (reversed)
@@ -3559,7 +3550,7 @@ static void flow_cover_columns(const struct turn_card *card, int slot, int sprea
     {
         int h = h0 + ((int64_t)(h1 - h0) * t >> 30);
         struct flow_column *col = &flow_columns[x];
-        if (h <= col->height)
+        if (h < col->height)
             continue;
         col->height = h;
         col->t = t;
@@ -3570,7 +3561,7 @@ static void flow_cover_columns(const struct turn_card *card, int slot, int sprea
 struct flow_sample
 {
     const pix_t *src;
-    int size, y0, y1, first, last, dy, p;
+    int size, y0, y1, first, last, dy, p, x_weight;
 };
 
 static void flow_sample_column(const struct flow_column *col, int top, int end,
@@ -3584,16 +3575,28 @@ static void flow_sample_column(const struct flow_column *col, int top, int end,
     int u_height = (int64_t)face->end_height * MAX(0, t) >> 30;
     uint32_t num = (uint32_t)u_height * size;
     uint32_t height = col->height, rows = height >> 6;
-    struct turn_recip rec = turn_reciprocal(rows);
+    struct flow_recip rec = flow_reciprocal(rows);
     uint32_t u_guess = ((uint64_t)num * rec.m) >> (68-rec.norm);
     int32_t u_rem = num - u_guess*height;
     while (u_rem < 0) {
         u_guess--;
         u_rem += height;
     }
-    int u = face->crop + MIN(u_guess + (u_rem >= (int32_t)height),
-                             (unsigned)(size-1));
-    const pix_t *src = face->pixels + (u >> face->mip) * face->stride;
+    if (u_rem >= (int32_t)height) {
+        u_guess++;
+        u_rem -= height;
+    }
+    int u = MIN(u_guess, (unsigned)(size - 1));
+    int x_weight = 0;
+    if (face->linear)
+    {
+        /* Texture coordinate zero is half a texel before the first centre. */
+        int fraction = ((uint64_t)(uint32_t)u_rem * rec.m) >> (63 - rec.norm);
+        int coord = fbound(0, (int)u_guess * 32 + fraction - 16, (size - 1) * 32);
+        u = coord >> 5;
+        x_weight = coord & 31;
+    }
+    const pix_t *src = face->pixels + (face->crop + u) * face->stride;
     int y0 = face->top + ((int64_t)face->top_delta * t >> 30);
     int y1 = y0 + col->height;
     int first = MAX(top, (y0 + 65535) >> 16);
@@ -3603,7 +3606,47 @@ static void flow_sample_column(const struct flow_column *col, int top, int end,
     int32_t d_rem = d_num - dy*rows;
     dy += (d_rem >= (int32_t)rows) - (d_rem < 0);
     int p = ((int64_t)((first << 16) + 32768 - y0) * dy) >> 16;
-    *sample = (struct flow_sample){ src, size, y0, y1, first, last, dy, p };
+    *sample = (struct flow_sample){ src, size, y0, y1, first, last, dy, p, x_weight };
+}
+
+/* Separate RGB565 into lanes with five spare bits for interpolation. */
+#define FLOW_COLOR_LANES 0x07e0f81fu
+
+static inline uint32_t flow_lanes(uint32_t color)
+{
+    return (color | (color << 16)) & FLOW_COLOR_LANES;
+}
+
+static inline uint32_t flow_mix(uint32_t a, uint32_t b, unsigned weight)
+{
+    return (a + (((b - a) * weight) >> 5)) & FLOW_COLOR_LANES;
+}
+
+static void flow_draw_linear(const struct flow_sample *sample, int src_stride,
+                             pix_t *dst, int dst_stride, const struct pf_fade *ink)
+{
+    /* Pad the endpoints to clamp the bilinear footprint to the square crop. */
+    static uint32_t texels[DISPLAY_HEIGHT + 2];
+    uint32_t *at = texels + 1;
+    const pix_t *src = sample->src;
+    int size = sample->size, weight = sample->x_weight;
+    if (weight)
+        for (int j = 0; j < size; j++)
+            at[j] = flow_mix(flow_lanes(src[j]), flow_lanes(src[j + src_stride]), weight);
+    else
+        for (int j = 0; j < size; j++)
+            at[j] = flow_lanes(src[j]);
+    at[-1] = at[0];
+    at[size] = at[size - 1];
+    int p = sample->p - PFREAL_HALF;
+    for (int y = sample->first; y < sample->last; y++, dst += dst_stride, p += sample->dy)
+    {
+        int j = p >> PFREAL_SHIFT;
+        unsigned v = (p >> (PFREAL_SHIFT - 5)) & 31;
+        uint32_t c = flow_mix(at[j], at[j + 1], v);
+        pix_t color = c | (c >> 16);
+        *dst = ink ? fade_color(color, ink->a, ink->rb, ink->g) : color;
+    }
 }
 
 static inline void flow_draw_column(int x, int top, int end, pix_t *pixels,
@@ -3617,7 +3660,9 @@ static inline void flow_draw_column(int x, int top, int end, pix_t *pixels,
     const pix_t *src = sample.src;
     int size = sample.size, y0 = sample.y0, y1 = sample.y1;
     int first = sample.first, last = sample.last, dy = sample.dy, p = sample.p;
-    if (first < last)
+    if (first < last && col->face->linear)
+        flow_draw_linear(&sample, col->face->stride, pixels + first * stride, stride, ink);
+    else if (first < last)
     {
         struct pf_col run = {src, pixels + first * stride, p, dy, last - first};
         if (ink)
@@ -3772,12 +3817,12 @@ static void cover_rows(int *y0, int *y1)
         hi = 0;
         for (i = 0; i < flow_count; i++)
         {
-            const struct turn_card *card = &flow_cards[i];
-            if (MAX(card->x[0], card->x[1]) <= 0 ||
-                MIN(card->x[0], card->x[1]) >= LCD_WIDTH * 65536)
+            const struct flow_card *card = &flow_cards[i];
+            if (MAX(card->edge[0].x, card->edge[1].x) <= 0 ||
+                MIN(card->edge[0].x, card->edge[1].x) >= LCD_WIDTH * 65536)
                 continue;
-            lo = MIN(lo, MIN(card->top[0], card->top[1]) >> 16);
-            hi = MAX(hi, (MAX(card->bottom[0], card->bottom[1]) + 65535) >> 16);
+            lo = MIN(lo, MIN(card->edge[0].top, card->edge[1].top) >> 16);
+            hi = MAX(hi, (MAX(card->edge[0].bottom, card->edge[1].bottom) + 65535) >> 16);
         }
         lo = MAX(lo, flow_clip_top());
         hi = MIN(hi, flow_clip_end());
@@ -3930,12 +3975,16 @@ static void land(void)
 
 static void flow_update(void)
 {
-    flow_sample(USEC_TIMER);
-    slide_frame = (int)flow_row.p;
-    move_center((slide_frame + 0x8000) >> 16);
-    coverflow_place();
-    if (!turn_moving(&flow_row))
+    uint32_t now = USEC_TIMER;
+    coverflow_place(now);
+    move_center(flow_count ? flow_cards[flow_count - 1].id : target);
+    if (!stock_animating(&flow_row, now))
+    {
+        move_center(target);
+        if (flow_row.phase != STOCK_LEAVE)
+            stock_init(&flow_row, number_of_slides, target, now, false);
         land();
+    }
 }
 
 static void update_scroll_animation(void)
@@ -4232,7 +4281,6 @@ static bool init(void)
     /* The largest slide read_aat() will accept, and so what one costs the
      * cache below. */
     size_t slide_max = (size_t)DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(pix_t)
-                     + side_level_bytes(DISPLAY_WIDTH + 1, DISPLAY_HEIGHT)
                      + sizeof(int) + PF_READ_SLACK + sizeof(struct art_cache_header);
 
     ALIGN_BUFFER(carousel_idx.buf, carousel_idx.buf_sz, sizeof(long));
@@ -5441,7 +5489,7 @@ static void NO_INLINE render_album_flip(int position, pix_t color)
     if (!flat_view())
     {
         w = h = DISPLAY_WIDTH;
-        cy = 105;
+        cy = 104;
     }
     bool back = position >= FLIP_MID;
     const struct ui_tween ease = {.from = 0, .to = FLIP_MID,
@@ -6061,7 +6109,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
      * otherwise the next refresh, so other changes draw no more than once a
      * refresh. flow_start is when the motion began. */
     uint32_t flow_due = frame_clock, flow_start = frame_clock;
-    bool flow_moving = false;
+    bool flow_moving = false, leaving = false;
     unsigned int seen_slides_loaded = pf_slides_loaded;
     long boost_until = current_tick + HZ;
     int spoken_index = -1;
@@ -6379,6 +6427,13 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             }
         }
 
+        if (leaving && button != ACTION_NONE)
+        {
+            if (default_event_handler(button) == SYS_USB_CONNECTED)
+                return GO_TO_ROOT;
+            return GO_TO_PREVIOUS;
+        }
+
         /* Apply wheel input before sampling the new frame. Other actions
          * dispatch below without waiting for a cover render. */
         int old_target = target;
@@ -6555,7 +6610,16 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         else if (!dark && (art_owed || caption_owed) && frame_due(flow_due) &&
                  !dispatch_first)
         {
+            bool entering = pf_entry_prepared && !flat_view() &&
+                            pf_motion_scale && pf_state == pf_idle;
             show_carousel_entry();
+            if (entering)
+            {
+                stock_init(&flow_row, number_of_slides, center_index, USEC_TIMER, true);
+                step = 1;
+                pf_state = pf_scrolling;
+                motion = true;
+            }
             if (motion && !trace_attempted)
             {
                 transfers = (struct ui_perf_transfers){0};
@@ -6833,6 +6897,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 full_repaint_owed = true;
         }
 
+        if (leaving && (pf_state == pf_idle || dark))
+            return GO_TO_PREVIOUS;
+
         enum agents_nav_screen nav = agents_nav_pending();
         if (nav == AGENTS_NAV_COVERS) agents_nav_take(nav);
         else if (nav == AGENTS_NAV_BACK)
@@ -6853,17 +6920,17 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         case ACTION_AGENTS_COVERS:
             return CAROUSEL_REMOTE_RETURN;
 #endif
-        case PF_QUIT:
-            /* The caller owns the parent: WPS resumes playback, while a
-             * browser/menu returns to the level that opened the covers. */
-            return GO_TO_PREVIOUS;
         case PF_WPS:
             return GO_TO_WPS;
+        case PF_QUIT:
         case PF_BACK:
-            /* Whichever screen this was opened from, as anywhere else in the
-             * firmware. Not the WPS: this is a main-menu screen in its own
-             * right, reachable without anything playing. */
-            return GO_TO_PREVIOUS;
+            if (flat_view() || !pf_motion_scale || dark || leaving)
+                return GO_TO_PREVIOUS;
+            stock_leave(&flow_row, USEC_TIMER);
+            step = 1;
+            pf_state = pf_scrolling;
+            leaving = true;
+            break;
         case ACTION_STD_QUICKSCREEN:
         case ACTION_WPS_QUICKSCREEN:
             /* Leave the model, position and surfaces alive under the overlay.

@@ -38,6 +38,15 @@ def check(source):
 #define ui_perf_add_transfer(a,b,c) ((void)(b), (void)(c))
 
 static enum { pf_idle, pf_scrolling } pf_state;
+/* The ordinary carousel has no entry/exit picture to blend. */
+static void *fade;
+static uint32_t fade_start;
+static unsigned leave_from, opacity;
+#define FLOW_LEAVE_FADE_US 250000u
+#define FLOW_ENTER_FADE_US 500000u
+#define flow_present_fade(p,a) (abort(), false)
+#define lcd_update() abort()
+
 static bool full_flush_owed, caption_owed, land_now, leaving;
 static int captioned_index, samples, full, partial;
 static uint8_t panel[LCD_HEIGHT][LCD_WIDTH], framebuffer[LCD_HEIGHT][LCD_WIDTH];

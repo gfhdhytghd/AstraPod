@@ -560,6 +560,97 @@ void ui_scene_show_modal(struct ui_scene *scene, const char *route)
     own_transition(scene, route);
 }
 
+/* With five fractional bits, the RGB565 lanes can share one unsigned
+ * multiply. The mask drops the padding and any borrow between lanes. */
+static inline fb_data fade_pixel(fb_data front, fb_data back, unsigned weight)
+{
+    const uint32_t mask = 0x07e0f81f;
+    uint32_t f = (front | ((uint32_t)front << 16)) & mask;
+    uint32_t b = (back | ((uint32_t)back << 16)) & mask;
+    uint32_t c = (b + (((f - b) * weight) >> 5)) & mask;
+    return c | (c >> 16);
+}
+
+static void compose_fade(fb_data *out, const fb_data *front, const fb_data *back,
+                         unsigned opacity, const int16_t *art_top,
+                         const int16_t *art_end)
+{
+    unsigned weight = (opacity + 4) >> 3;
+    /* A tile spans one framebuffer cache line. Only the silhouette rows
+     * test individual columns. The solid interior copies directly. */
+    for (int x = 0; x < LCD_WIDTH; x += 16)
+    {
+        int n = MIN(16, LCD_WIDTH - x);
+        int top = LCD_HEIGHT, end = 0, solid_top = 0, solid_end = LCD_HEIGHT;
+        if (art_top)
+            for (int k = 0; k < n; k++)
+            {
+                top = MIN(top, art_top[x + k]);
+                end = MAX(end, art_end[x + k]);
+                solid_top = MAX(solid_top, art_top[x + k]);
+                solid_end = MIN(solid_end, art_end[x + k]);
+            }
+        for (int y = 0, i = x; y < LCD_HEIGHT; y++, i += LCD_WIDTH)
+        {
+            if (y < top || y >= end)
+            {
+                if (!weight)
+                    memcpy(out + i, back + i, n * sizeof(*out));
+                else
+                    for (int k = 0; k < n; k++)
+                        out[i + k] = fade_pixel(front[i + k], back[i + k], weight);
+            }
+            else if (y >= solid_top && y < solid_end)
+                memcpy(out + i, front + i, n * sizeof(*out));
+            else
+                for (int k = 0; k < n; k++)
+                    out[i + k] = y >= art_top[x + k] && y < art_end[x + k]
+                               ? front[i + k] : fade_pixel(front[i + k], back[i + k], weight);
+        }
+    }
+}
+
+bool ui_scene_present_fade(struct ui_scene *scene, unsigned opacity,
+                           const int16_t *art_top, const int16_t *art_end)
+{
+    if (scene->backdrop_handle <= 0 || owner || !lcd_active())
+        return false;
+    const fb_data *front = lcd_framebuffer_default.fb_ptr;
+    if (opacity >= UI_FULL_OPACITY)
+    {
+        if (scene->handle > 0)
+            scene->handle = core_free(scene->handle);
+        return present(front);
+    }
+    if (scene->handle <= 0)
+        scene->handle = core_alloc_free_space(FRAMEBUFFER_SIZE);
+    if (scene->handle <= 0)
+        return false;
+    fb_data *out = core_get_data_pinned(scene->handle);
+    const fb_data *back = core_get_data_pinned(scene->backdrop_handle);
+    compose_fade(out, front, back, opacity, art_top, art_end);
+    bool shown = present(out);
+    core_put_data_pinned((void *)back);
+    core_put_data_pinned(out);
+    return shown;
+}
+
+bool ui_scene_restore_modal(struct ui_scene *scene)
+{
+    if (scene->backdrop_handle <= 0 || (owner && owner != scene))
+    {
+        release_scene(scene);
+        return false;
+    }
+    fb_data *back = core_get_data_pinned(scene->backdrop_handle);
+    memcpy(lcd_framebuffer_default.fb_ptr, back, FRAMEBUFFER_SIZE);
+    core_put_data_pinned(back);
+    release_scene(scene);
+    lcd_update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT);
+    ui_scene_modal_restored(scene->back_page);
+    return true;
+}
+
 bool ui_scene_capture_modal(struct ui_scene *scene)
 {
     return capture_panel(scene, true);

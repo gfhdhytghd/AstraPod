@@ -79,7 +79,8 @@ int present_art(int dirty_top, int dirty_end) {
     return rows;
 }
 int can_paint_caption(void) {
-    bool caption_owed = true, motion = true, full_repaint_owed = false;
+    bool caption_owed = true;
+    struct ui_scene *fade = NULL;
     PAINT_DECISION
     return drew_caption;
 }
@@ -95,7 +96,7 @@ int transfer(int pixels) {
     values = f"{height},{ascent},{{1,{above},{below}}}"
     program = (template.replace("FONT_VALUES", values)
                .replace("LAYOUT", region("static int caption_line2(", "/* Switching views"))
-               .replace("STAGE", region("static int stage_caption(", "static int album_covers_loop("))
+               .replace("STAGE", region("static int stage_caption(", "\n}") + "\n}")
                .replace("ART_OVERLAP", region("unsigned parts = UI_PERF_ART, caption_rows = 0;",
                                               "if (rows)"))
                .replace("PAINT_DECISION", region("bool drew_caption =", ";\n")+";")

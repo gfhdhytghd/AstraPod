@@ -2502,6 +2502,15 @@ static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push
     if (carousel_wps_pending() &&
         (to == GO_TO_WPS || carousel_wps_returning()))
         return;
+    /* The 3D carousel owns its transition. Keep the source page as the
+     * modal parent until the carousel takes its retained snapshot. */
+    if (global_settings.album_covers_view_mode != CAROUSEL_VIEW_FLAT)
+    {
+        if (to == GO_TO_ALBUM_COVERS || to == GO_TO_ARTIST_PORTRAITS)
+            to = from;
+        else if (from == GO_TO_ALBUM_COVERS || from == GO_TO_ARTIST_PORTRAITS)
+            from = to;
+    }
     /* Identity keys are used only for comparing endpoints. */
     ui_scene_enter(scene, (const void *)(intptr_t)(from + 16),
                     (const void *)(intptr_t)(to + 16), push);

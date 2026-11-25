@@ -449,6 +449,8 @@ static int pf_vp_y;             /* viewport y-offset (status bar height) */
 static struct viewport pf_vp;   /* PF rendering viewport (below status bar) */
 static bool pf_show_statusbar;  /* Cover Flow never shows the status bar */
 static struct ui_scene pf_scene;
+static bool pf_wps_entry;
+static bool flat_view(void);
 static bool pf_shown, pf_entry_prepared, cover_resume_dirty;
 static int pf_neighbor_light = 256;
 static struct {
@@ -483,7 +485,8 @@ static void show_carousel_entry(void)
 {
     if (pf_entry_prepared)
     {
-        ui_scene_show_modal(&pf_scene, "covers-up");
+        if (flat_view())
+            ui_scene_show_modal(&pf_scene, "covers-up");
         pf_entry_prepared = false;
     }
     pf_shown = true;
@@ -501,7 +504,8 @@ bool carousel_wps_returning(void)
 
 void carousel_wps_begin(void)
 {
-    ui_scene_show_modal(&wps_handover.sheet, "covers-wps-up");
+    if (flat_view())
+        ui_scene_show_modal(&wps_handover.sheet, "covers-wps-up");
 }
 
 int carousel_wps_back(void)
@@ -516,8 +520,17 @@ void carousel_wps_end(bool back)
 {
     if (back)
     {
-        wps_handover.restored_pixels =
-            ui_scene_close_modal(&wps_handover.sheet, true, "covers-wps-down");
+        if (flat_view())
+            wps_handover.restored_pixels =
+                ui_scene_close_modal(&wps_handover.sheet, true, "covers-wps-down");
+        else if (wps_handover.panel_open)
+            wps_handover.restored_pixels = ui_scene_restore_modal(&wps_handover.sheet);
+        else
+        {
+            ui_scene_discard(&wps_handover.sheet);
+            ui_scene_capture_modal(&wps_handover.sheet);
+            pf_wps_entry = true;
+        }
         return;
     }
     if (wps_handover.model)
@@ -6131,6 +6144,26 @@ static int stage_caption(int left, int right, int *top, int end, int pixels,
     return rows;
 }
 
+/* Leave takes 250 ms from the backdated stock timer. On entry, keep the
+ * parent visible through the centre cover's 250 ms delay. */
+#define FLOW_ENTER_FADE_US 500000u
+#define FLOW_LEAVE_FADE_US 250000u
+
+static bool flow_present_fade(struct ui_scene *source, unsigned opacity)
+{
+    static int16_t fade_top[LCD_WIDTH], fade_end[LCD_WIDTH];
+    const int top = flow_clip_top(), end = flow_clip_end();
+    for (int x = 0; x < LCD_WIDTH; x++)
+    {
+        const struct flow_column *c = &flow_columns[x];
+        int first = MIN(flow_top[x], c->y0 >> 16);
+        int last = MAX(flow_end[x], (c->y0 + c->height + 65535) >> 16);
+        fade_top[x] = c->height ? MAX(top, first) : 0;
+        fade_end[x] = c->height ? MIN(end, last) : 0;
+    }
+    return ui_scene_present_fade(source, opacity, fade_top, fade_end);
+}
+
 static int album_covers_loop(unsigned *trace, bool restored_pixels)
 {
     int ret;
@@ -6184,6 +6217,11 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
      * refresh. flow_start is when the motion began. */
     uint32_t flow_due = frame_clock, flow_start = frame_clock;
     bool flow_moving = false, leaving = false;
+    struct ui_scene *entry_source = pf_wps_entry ? &wps_handover.sheet : &pf_scene;
+    struct ui_scene *fade = NULL;
+    uint32_t fade_start = 0;
+    unsigned opacity = 256, leave_from = 256;
+    int leave_result = GO_TO_PREVIOUS;
     unsigned int seen_slides_loaded = pf_slides_loaded;
     long boost_until = current_tick + HZ;
     int spoken_index = -1;
@@ -6371,6 +6409,20 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             restored_pixels = false;
         }
 
+        if (!flat_view() && (pf_entry_prepared || (pf_wps_entry && !pf_shown)))
+        {
+            show_carousel_entry();
+            if (pf_motion_scale && !panel.live)
+            {
+                fade_start = USEC_TIMER;
+                fade = entry_source->backdrop_handle > 0 ? entry_source : NULL;
+                opacity = fade ? 0 : 256;
+                stock_init(&flow_row, number_of_slides, center_index, fade_start, true);
+                step = 1;
+                pf_state = pf_scrolling;
+            }
+        }
+
         if (pf_state == pf_idle && remembered_index != center_index)
         {
             remember_current_cover();
@@ -6505,7 +6557,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         {
             if (default_event_handler(button) == SYS_USB_CONNECTED)
                 return GO_TO_ROOT;
-            return GO_TO_PREVIOUS;
+            return leave_result;
         }
 
         /* Apply wheel input before sampling the new frame. Other actions
@@ -6566,7 +6618,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             caption_owed = true;
         }
 
-        if (pf_state == pf_scrolling)
+        if (pf_state == pf_scrolling || fade)
             art_owed = true;
 
         if (seen_slides_loaded != pf_slides_loaded)
@@ -6612,7 +6664,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
          * caption step or a slide arriving does not switch the clock each
          * time; an idle screen gives the boost back. */
         dark = !lcd_active();
-        bool motion = !dark && pf_state == pf_scrolling;
+        bool motion = !dark && (pf_state == pf_scrolling || fade);
         if (!motion && trace_attempted)
         {
             ui_perf_end(*trace);
@@ -6644,7 +6696,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             caption_wake = false;
         bool finish_caption = caption_owed && caption_flush_owed && caption_pixels >=
                               (caption_right - caption_left) * (caption_flush_end - caption_flush_top);
-        if (motion && !flat_view() && !dispatch_first && caption_flush_owed &&
+        if (!fade && motion && !flat_view() && !dispatch_first && caption_flush_owed &&
             caption_pixels > 0 && (!caption_stage_busy(NULL) ||
             ((finish_caption || deferred_frames >= 2) && frame_due(flow_due))))
         {
@@ -6659,7 +6711,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             caption_wake = false;
             deferred_frames = 0;
         }
-        if (!dark && caption_flush_owed && (!motion || flat_view()) && frame_due(flow_due) &&
+        if (!fade && !dark && caption_flush_owed && (!motion || flat_view()) && frame_due(flow_due) &&
             !dispatch_first)
         {
             /* The caption painted with the last covers, on its own deadline.
@@ -6684,16 +6736,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         else if (!dark && (art_owed || caption_owed) && frame_due(flow_due) &&
                  !dispatch_first)
         {
-            bool entering = pf_entry_prepared && !flat_view() &&
-                            pf_motion_scale && pf_state == pf_idle;
             show_carousel_entry();
-            if (entering)
-            {
-                stock_init(&flow_row, number_of_slides, center_index, USEC_TIMER, true);
-                step = 1;
-                pf_state = pf_scrolling;
-                motion = true;
-            }
+            if (fade)
+                full_flush_owed = true;
             if (motion && !trace_attempted)
             {
                 transfers = (struct ui_perf_transfers){0};
@@ -6710,7 +6755,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             /* Keep the framebuffer caption stable until its last slice reaches
              * the panel. Rapid selection changes otherwise rewind the slice
              * cursor to the title and starve the artist. */
-            bool drew_caption = caption_owed && !caption_flush_owed;
+            bool drew_caption = caption_owed && (!caption_flush_owed || fade);
             /* The rows each half touches, and so the rows it has to clear
              * before it draws and send afterwards. Nothing else in the viewport
              * has changed since it was last flushed. */
@@ -6892,7 +6937,24 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             if (rows)
             {
                 uint32_t start = *trace ? USEC_TIMER : 0;
-                lcd_update_rect(0, dirty_top, LCD_WIDTH, rows);
+                if (fade)
+                {
+                    uint32_t age = (uint32_t)USEC_TIMER - fade_start;
+                    unsigned duration = leaving ? FLOW_LEAVE_FADE_US : FLOW_ENTER_FADE_US;
+                    unsigned phase = MIN(age, duration) * 256 / duration;
+                    unsigned alpha = leaving ? leave_from * (256 - phase) / 256 : phase;
+                    if (flow_present_fade(fade, alpha))
+                        opacity = alpha;
+                    if (phase == 256 && !leaving)
+                    {
+                        if (opacity != 256)
+                            lcd_update();
+                        opacity = 256;
+                        fade = NULL;
+                    }
+                }
+                else
+                    lcd_update_rect(0, dirty_top, LCD_WIDTH, rows);
                 if (*trace)
                     ui_perf_add_transfer(&transfers, start, parts & UI_PERF_ART ?
                                          UI_PERF_ART : UI_PERF_CAPTION);
@@ -6985,14 +7047,15 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         }
 
         if (leaving && (pf_state == pf_idle || dark))
-            return GO_TO_PREVIOUS;
+            return leave_result;
 
         enum agents_nav_screen nav = agents_nav_pending();
         if (nav == AGENTS_NAV_COVERS) agents_nav_take(nav);
         else if (nav == AGENTS_NAV_BACK)
         {
             agents_nav_take(nav);
-            return CAROUSEL_REMOTE_RETURN;
+            leave_result = CAROUSEL_REMOTE_RETURN;
+            button = PF_BACK;
         }
         else if (nav == AGENTS_NAV_AGENTS) return GO_TO_AGENTS;
         else if (nav == AGENTS_NAV_WPS) return GO_TO_WPS;
@@ -7005,15 +7068,22 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             return GO_TO_WPS;
         case ACTION_AGENTS_REMOTE_COVERS:
         case ACTION_AGENTS_COVERS:
-            return CAROUSEL_REMOTE_RETURN;
+            leave_result = CAROUSEL_REMOTE_RETURN;
+            goto leave_covers;
 #endif
         case PF_WPS:
             return GO_TO_WPS;
         case PF_QUIT:
         case PF_BACK:
+#ifdef HAVE_USB_PODLINK
+        leave_covers:
+#endif
             if (flat_view() || !pf_motion_scale || dark || leaving)
-                return GO_TO_PREVIOUS;
-            stock_leave(&flow_row, USEC_TIMER);
+                return leave_result;
+            fade_start = USEC_TIMER;
+            leave_from = opacity;
+            fade = pf_scene.backdrop_handle > 0 ? &pf_scene : NULL;
+            stock_leave(&flow_row, fade_start);
             step = 1;
             pf_state = pf_scrolling;
             leaving = true;
@@ -7175,6 +7245,11 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     workspace = core_get_data_pinned(handle);
     pf_shown = false;
     int result = carousel_body(m, selected_file);
+    if (pf_wps_entry)
+    {
+        ui_scene_discard(&wps_handover.sheet);
+        pf_wps_entry = false;
+    }
     panel_cache_window(NULL, 0);
     album_blur_request_window(NULL, 0);
     carousel_cancel_transition();
@@ -7207,7 +7282,8 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
         }
         else
             close_album_panel();
-        ui_scene_capture_modal(&wps_handover.sheet);
+        if (flat_view() || wps_handover.panel_open)
+            ui_scene_capture_modal(&wps_handover.sheet);
         /* The Cover Flow pixels are fullscreen. Its viewport stack has
          * already unwound to Home so that playback can take over. */
         wps_handover.sheet.status_height = 0;
@@ -7215,8 +7291,11 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     else
     {
         close_album_panel();
-        if (pf_scene.backdrop_handle > 0)
+        if (pf_scene.backdrop_handle > 0 && flat_view())
             ui_scene_close_modal(&pf_scene, pf_shown, "covers-down");
+        else if (pf_scene.backdrop_handle > 0 && pf_shown &&
+                 (result == GO_TO_PREVIOUS || result == CAROUSEL_REMOTE_RETURN))
+            ui_scene_restore_modal(&pf_scene);
         else
             ui_scene_discard(&pf_scene);
         carousel_wps_end(false);
@@ -7295,7 +7374,8 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
             else
                 close_album_panel();
         }
-        ui_scene_discard(&wps_handover.sheet);
+        if (!pf_wps_entry)
+            ui_scene_discard(&wps_handover.sheet);
         wps_handover.model = NULL;
         wps_handover.returning = false;
     }
@@ -7321,7 +7401,9 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
      * and a refresh on the way past would only flash it. So does
      * CAROUSEL_CONTEXT, which a menu replaces. */
     if (ret == GO_TO_WPS || ret == GO_TO_PREVIOUS_MUSIC || ret == GO_TO_PLUGIN
-        || ret == CAROUSEL_PLAY_ALBUM || ret == CAROUSEL_CONTEXT)
+        || ret == CAROUSEL_PLAY_ALBUM || ret == CAROUSEL_CONTEXT
+        || (!flat_view() && pf_scene.backdrop_handle > 0 &&
+            (ret == GO_TO_PREVIOUS || ret == CAROUSEL_REMOTE_RETURN)))
         pop_current_activity_without_refresh();
     else
         pop_current_activity();

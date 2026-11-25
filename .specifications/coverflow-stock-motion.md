@@ -1194,3 +1194,9 @@ compares the projected edges with the reference model and with tracked
 markers in the stock emulator frames. The replay uses the stock driver's
 input filter and a 34 ms delivery offset for those captures. That offset
 does not enter the player code.
+
+The 3D carousel uses the stock entry and inferred leave poses for the covers.
+The underlying page, caption and status area cross-fade over 500 ms on
+entry and 250 ms on return. The cover silhouettes stay opaque.
+This fade is an AstraPod presentation choice. The flipped track panel has
+its own transition.

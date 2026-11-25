@@ -30,7 +30,13 @@
 
 /* Times are in USEC_TIMER units and frames are panel refreshes. A phase is
  * microseconds after the predicted TE rise, UINT32_MAX when unknown. */
+struct cover_work {
+    unsigned target_changes;
+    uint32_t cache_wait_us, caption_us;
+};
+
 struct frame_sample {
+    struct cover_work cover;
     uint32_t render, submit, submit_overhead, interval, skipped, phase;
     uint32_t dma_phase;
     uint8_t divisor;
@@ -44,6 +50,7 @@ struct frame_capture {
     uint32_t worst_render, worst_work, worst_interval, skipped;
     uint32_t render_pending, last_submission, period_q8;
     int32_t slot_phase;
+    struct cover_work cover_pending;
     uint8_t parts_pending;
     uint16_t art_pending, caption_pending;
     bool enabled, measured, async;
@@ -83,6 +90,11 @@ void ui_perf_init(void)
     enabled = file_exists(PERF_MARKER);
 }
 
+bool ui_perf_enabled(void)
+{
+    return enabled;
+}
+
 static unsigned begin_capture(const char *route, bool passive)
 {
     if (!enabled)
@@ -112,6 +124,19 @@ static unsigned begin_capture(const char *route, bool passive)
 unsigned ui_perf_begin(const char *route) { return begin_capture(route, false); }
 unsigned ui_perf_begin_passive(const char *route) { return begin_capture(route, true); }
 
+void ui_perf_note_cover_work(unsigned changes, uint32_t cache_wait_us,
+                             uint32_t caption_us)
+{
+    if (active_handle <= 0 || owner != thread_self())
+        return;
+    struct frame_capture *capture = core_get_data_pinned(active_handle);
+    struct cover_work *work = &capture->cover_pending;
+    work->target_changes += changes;
+    work->cache_wait_us = add_time(work->cache_wait_us, cache_wait_us);
+    work->caption_us = add_time(work->caption_us, caption_us);
+    core_put_data_pinned(capture);
+}
+
 void ui_perf_note_render(uint32_t elapsed_clock)
 {
     if (active_handle <= 0 || owner != thread_self())
@@ -133,38 +158,70 @@ void ui_perf_note_rects(unsigned parts, unsigned art_rows,
     core_put_data_pinned(capture);
 }
 
+static void add_transfer(struct ui_perf_transfers *timing, uint32_t start,
+                         uint32_t end)
+{
+    uint32_t elapsed = end - start;
+    uint32_t copy = UINT32_MAX;
+    timing->dma_phase = UINT32_MAX;
+#ifdef HAVE_LCD_VSYNC
+    timing->async = lcd_vsync_async_timing(NULL, &timing->dma_phase, NULL, &copy);
+#endif
+    if (!timing->sampled)
+        timing->first = start;
+    timing->sampled = true;
+    timing->last = end;
+    timing->calls_us = add_time(timing->calls_us, elapsed);
+    timing->copy_us = add_time(timing->copy_us,
+                               timing->async && copy <= elapsed ? copy : elapsed);
+}
+
+void ui_perf_add_transfer(struct ui_perf_transfers *timing, uint32_t start)
+{
+    add_transfer(timing, start, USEC_TIMER);
+}
+
 void ui_perf_note_submit(uint32_t elapsed_clock)
 {
     if (active_handle <= 0 || owner != thread_self())
         return;
-    uint32_t clock = USEC_TIMER;
+    struct ui_perf_transfers timing = {0};
+    uint32_t end = USEC_TIMER;
+    add_transfer(&timing, end - elapsed_clock, end);
+    ui_perf_note_transfers(&timing);
+}
+
+void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
+{
+    if (!timing->sampled || active_handle <= 0 || owner != thread_self())
+        return;
+    uint32_t clock = timing->last;
     struct ui_pace_status pace;
     ui_pace_get_status(&pace);
     uint32_t period_q8 = ui_frame_period_q8();
     uint32_t period = (period_q8 + 128) >> 8;
-    uint32_t dma_phase = UINT32_MAX, copy = UINT32_MAX;
-    bool async = false;
-#ifdef HAVE_LCD_VSYNC
-    async = lcd_vsync_async_timing(NULL, &dma_phase, NULL, &copy);
-#endif
-    uint32_t submit = async && copy <= elapsed_clock ? copy : elapsed_clock;
     struct frame_capture *capture = core_get_data_pinned(active_handle);
     struct frame_sample sample = { .render = capture->render_pending,
-                                  .submit = submit,
-                                  .submit_overhead = elapsed_clock - submit,
-                                  .phase = ui_clock_phase(clock - elapsed_clock),
-                                  .dma_phase = dma_phase,
+                                  .submit = timing->copy_us,
+                                  .submit_overhead = timing->calls_us - timing->copy_us,
+                                  .phase = ui_clock_phase(timing->first),
+                                  .dma_phase = timing->dma_phase,
                                   .divisor = MAX(1, pace.divisor),
                                   .parts = capture->parts_pending,
                                   .art_rows = capture->art_pending,
                                   .caption_rows = capture->caption_pending };
+    if (sample.parts & UI_PERF_ART)
+    {
+        sample.cover = capture->cover_pending;
+        capture->cover_pending = (struct cover_work){0};
+    }
     capture->render_pending = 0;
     capture->parts_pending = 0;
     capture->art_pending = capture->caption_pending = 0;
     capture->period_q8 = period_q8;
     capture->enabled = pace.enabled;
     capture->measured = pace.measured;
-    capture->async = async;
+    capture->async = timing->async;
     capture->half_frames += sample.divisor > 1;
     if (capture->seen)
     {
@@ -241,7 +298,7 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
     static const char header[] =
         "frame,render_f,submit_f,work_f,interval_f,work_miss,interval_miss,skipped_slots,"
         "divisor,phase_us,parts,art_rows,caption_rows,submit_overhead_f,"
-        "last_dma_start_phase_us\n";
+        "last_dma_start_phase_us,target_changes,cache_wait_us,caption_us\n";
     static const char *const parts[] = { "-", "a", "c", "ac" };
     uint32_t period_q8 = capture->period_q8;
     uint32_t period = (period_q8 + 128) >> 8;
@@ -259,13 +316,14 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
             sample->interval > interval_budget(period, sample->divisor);
         int n = snprintf(output + used, size - used,
             "%u," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT
-            ",%u,%u,%u,%u,%d,%s,%u,%u," FRAME_FORMAT ",%d\n",
+            ",%u,%u,%u,%u,%d,%s,%u,%u," FRAME_FORMAT ",%d,%u,%u,%u\n",
             i + 1, FRAME_ARG(render_f), FRAME_ARG(submit_f), FRAME_ARG(work_f),
             FRAME_ARG(interval_f), work > period, interval_miss,
             (unsigned)sample->skipped, sample->divisor,
             phase_arg(sample->phase), parts[sample->parts & 3],
             sample->art_rows, sample->caption_rows, FRAME_ARG(overhead_f),
-            phase_arg(sample->dma_phase));
+            phase_arg(sample->dma_phase), sample->cover.target_changes,
+            (unsigned)sample->cover.cache_wait_us, (unsigned)sample->cover.caption_us);
         if (n < 0 || (size_t)n >= size - used)
             break;
         used += n;
@@ -290,7 +348,7 @@ void ui_perf_end(unsigned token)
     unsigned interval_worst = as_frames(capture->worst_interval, period_q8);
     int phase_p50 = phase_arg(percentile(capture, first, PHASE, 50));
     int phase_p99 = phase_arg(percentile(capture, first, PHASE, 99));
-    size_t rows_size = 200 + (size_t)retained * 144;
+    size_t rows_size = 256 + (size_t)retained * 180;
     int rows_handle = retained ? core_alloc_free_space(rows_size) : 0;
     char *rows = NULL;
     size_t rows_used = 0;

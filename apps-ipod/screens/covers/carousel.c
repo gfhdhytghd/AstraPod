@@ -589,6 +589,7 @@ static const struct carousel_model *pf_random_model;
 static bool pf_random_spinning;
 
 static struct pf_slide_cache pf_sldcache;
+static unsigned int slide_cache_generation;
 
 struct carousel_workspace {
     unsigned long loader_stack[THREAD_STACK_SIZE / sizeof(long)];
@@ -1841,6 +1842,7 @@ void carousel_provider_changed(void)
 
 static void free_all_slide_prio(int prio)
 {
+    ++slide_cache_generation;
     while (free_slide_prio(prio))
     {;;}
 }
@@ -2016,52 +2018,20 @@ static const struct img_filter *carousel_filter(void)
 #define PF_READ_SLACK 0
 #endif
 
-/* Read a shared-cache thumbnail from an open fd (.aat: struct art_cache_header
- * followed by native pixels) into a buflib surface in the column-major layout
- * render_slide() expects. The fd stays the caller's to close.
- *
- * Takes an fd rather than a path because the caller has to open the file
- * anyway, and asking the cache whether it exists first would be a second
- * directory lookup for the same answer.
- *
- * The file is read whole, header and all, into a line-aligned spot in the
- * block, so every sector of it goes by DMA in one transfer. The struct dim
- * then goes over the end of the header, just ahead of the pixels.
- *
- * Returns a buflib handle, empty_slide_hid on a corrupt file, or -1 on
- * allocation failure. */
-static int read_aat(int fh, int prio)
+/* A whole-file aligned read leaves native columns and their dimensions in
+ * place. Row-major thumbnails are transposed into the same private block. */
+static struct dim *read_aat(int fh, ssize_t len, char *block)
 {
     struct art_cache_header hdr;
-    static pix_t rowbuf[DISPLAY_WIDTH];  /* off the loader thread's stack */
-    const ssize_t most = sizeof(hdr)
-                       + sizeof(pix_t) * DISPLAY_WIDTH * DISPLAY_HEIGHT;
-    ssize_t len = ffilesize(fh);
-    int row, col, w, h, hid;
-
-    if (len <= (ssize_t)sizeof(hdr))
-        return empty_slide_hid;
-    if (len > most)
-        len = most;
-
-    /* At most half the native pixels, plus one padded column for odd widths. */
-    do {
-        hid = buflib_alloc(&buf_ctx, sizeof(int) + PF_READ_SLACK + len +
-                           (len - sizeof(hdr) + DISPLAY_HEIGHT * sizeof(pix_t)) / 2);
-    } while (hid < 0 && free_slide_prio(prio));
-
-    if (hid < 0)
-        return -1;
-
-    char *block = buflib_get_data(&buf_ctx, hid);
+    static pix_t rowbuf[DISPLAY_WIDTH];
+    int row, col, w, h;
     char *file = CACHEALIGN_UP(block + sizeof(int));
     struct dim *bm = (struct dim *)(file + sizeof(hdr) - sizeof(struct dim));
     pix_t *dst = (pix_t *)(file + sizeof(hdr));
 
     if (read(fh, file, len) != len)
     {
-        buflib_free(&buf_ctx, hid);
-        return empty_slide_hid;
+        return NULL;
     }
 
     memcpy(&hdr, file, sizeof(hdr));
@@ -2072,8 +2042,7 @@ static int read_aat(int fh, int prio)
         w == 0 || h == 0 || w > DISPLAY_WIDTH || h > DISPLAY_HEIGHT ||
         len - (ssize_t)sizeof(hdr) < (ssize_t)(sizeof(pix_t) * w * h))
     {
-        buflib_free(&buf_ctx, hid);
-        return empty_slide_hid;
+        return NULL;
     }
 
     *(int *)block = (char *)bm - block;    /* see get_slide() */
@@ -2088,30 +2057,21 @@ static int read_aat(int fh, int prio)
     {
         if (lseek(fh, sizeof(hdr), SEEK_SET) != (off_t)sizeof(hdr))
         {
-            buflib_free(&buf_ctx, hid);
-            return empty_slide_hid;
+            return NULL;
         }
         for (row = 0; row < h; row++)
         {
             if (read(fh, rowbuf, sizeof(pix_t) * w)
                 != (ssize_t)(sizeof(pix_t) * w))
             {
-                buflib_free(&buf_ctx, hid);
-                return empty_slide_hid;
+                return NULL;
             }
             for (col = 0; col < w; col++)
                 dst[col * h + row] = rowbuf[col];
         }
     }
 
-    /* Height and width that way round: the slide is stored column-major, so a
-     * "row" of this buffer is a column of the picture. Only the dither cares
-     * -- it is the one filter that reads a pixel's position -- and a Bayer
-     * grid turned on its side is still a Bayer grid. */
-    img_filter_apply_banded(dst, h, w, carousel_filter());
-    build_side_level(bm);
-
-    return hid;
+    return bm;
 }
 
 /**
@@ -2121,74 +2081,101 @@ static inline bool load_and_prepare_surface(const int slide_index,
                                             const int cache_index,
                                             const int prio)
 {
-    if ((unsigned)cache_index >= SLIDE_CACHE_SIZE || slide_index < 0) return false;
-    int hid = -1;
-    bool got_shared = false;
+    if ((unsigned)cache_index >= SLIDE_CACHE_SIZE || slide_index < 0)
+        return false;
+    unsigned int generation = slide_cache_generation;
+    int center = center_index;
+    unsigned int version = model->art_version ? model->art_version(slide_index) : 0;
+    unsigned int hash = model->read_art ? 0 : model->art_key(slide_index);
 
+    /* The new surface stays private until its pixels and mip level are ready.
+     * A cache reset can retire the request while the loader yields. */
+    buf_ctx_unlock();
+    struct bitmap bitmap;
+    ssize_t len = 0;
+    size_t allocation = 0;
+    int fh = -1;
     if (model->read_art)
     {
-        struct bitmap bitmap;
         if (model->read_art(slide_index, &bitmap))
         {
-            size_t bytes = bitmap.width * bitmap.height * sizeof(pix_t);
-            size_t size = sizeof(int) + sizeof(struct dim) + bytes +
-                          side_level_bytes(bitmap.width, bitmap.height);
-            do {
-                hid = buflib_alloc(&buf_ctx, size);
-            } while (hid < 0 && free_slide_prio(prio));
-            if (hid < 0) return false;
-            char *block = buflib_get_data(&buf_ctx, hid);
-            *(int *)block = sizeof(int);
-            struct dim *dim = (struct dim *)(block + sizeof(int));
-            dim->width = bitmap.width; dim->height = bitmap.height;
-            memcpy(dim + 1, bitmap.data, bytes);
-            img_filter_apply_banded((pix_t *)(dim + 1), bitmap.height,
-                                    bitmap.width, carousel_filter());
-            build_side_level(dim);
-            got_shared = true;
+            len = sizeof(pix_t) * bitmap.width * bitmap.height;
+            allocation = sizeof(int) + sizeof(struct dim) + len
+                         + side_level_bytes(bitmap.width, bitmap.height);
         }
     }
-
-    /* Prefer the shared, database-driven thumbnail cache. It is keyed by a hash
-     * of the folder the tracks live in, which the album tables resolved when
-     * the database loaded -- so this costs a file open, not a database search. */
-    unsigned int art_hash = model->art_key(slide_index);
-    if (!model->read_art && pf_cover_size_idx >= 0 && art_hash != 0)
+    else if (hash && pf_cover_size_idx >= 0)
     {
-        static char aat_file[MAX_PATH];  /* off the loader thread's stack */
-        int fh;
-
-        /* Opened rather than looked up: this runs while an animation is
-         * scrolling, and asking whether the file exists before opening it is
-         * two directory lookups where one will do. A folder the cache has no
-         * art for simply fails to open and falls through below, which is also
-         * what happens while a pass is still running and has not reached it --
-         * the pass finishing drops these slides and loads them again (see
-         * album_covers_loop), so real art replaces the empty slide when it
-         * lands. */
-        art_cache_thumb_path(art_hash, pf_cover_size_idx,
-                             aat_file, sizeof(aat_file));
-        fh = open(aat_file, O_RDONLY);
+        static char path[MAX_PATH];
+        art_cache_thumb_path(hash, pf_cover_size_idx, path, sizeof(path));
+        fh = open(path, O_RDONLY);
         if (fh >= 0)
         {
-            hid = read_aat(fh, prio);
-            close(fh);
-            if (hid < 0)
-                return false; /* allocation failure: retry later */
-            got_shared = (hid != empty_slide_hid);
+            const ssize_t header = sizeof(struct art_cache_header);
+            const ssize_t most = header + sizeof(pix_t) * DISPLAY_WIDTH * DISPLAY_HEIGHT;
+            len = ffilesize(fh);
+            if (len > most)
+                len = most;
+            if (len > header)
+                allocation = sizeof(int) + PF_READ_SLACK + len
+                             + (len - header + DISPLAY_HEIGHT * sizeof(pix_t)) / 2;
         }
     }
 
-    /* No thumbnail for this slide yet -- the background pass has not reached
-     * it, or the folder has no art. The placeholder stands in until it does. */
-    if (!got_shared)
-        hid = empty_slide_hid;
+    buf_ctx_lock();
+    bool current = generation == slide_cache_generation && center == center_index;
+    int hid = empty_slide_hid;
+    char *block = NULL;
+    if (current && allocation)
+    {
+        do {
+            hid = buflib_alloc(&buf_ctx, allocation);
+        } while (hid < 0 && free_slide_prio(prio));
+        if (hid > 0)
+            block = buflib_get_data_pinned(&buf_ctx, hid);
+    }
+    buf_ctx_unlock();
+
+    struct dim *bm = NULL;
+    if (block)
+    {
+        if (fh >= 0)
+            bm = read_aat(fh, len, block);
+        else
+        {
+            *(int *)block = sizeof(int);
+            bm = (struct dim *)(block + sizeof(int));
+            bm->width = bitmap.width;
+            bm->height = bitmap.height;
+            memcpy(bm + 1, bitmap.data, len);
+        }
+        if (bm)
+        {
+            img_filter_apply_banded((pix_t *)(bm + 1), bm->height,
+                                    bm->width, carousel_filter());
+            build_side_level(bm);
+        }
+    }
+    if (fh >= 0)
+        close(fh);
+
+    buf_ctx_lock();
+    current = current && generation == slide_cache_generation;
+    if (block)
+    {
+        buflib_put_data_pinned(&buf_ctx, block);
+        if (!current || !bm)
+        {
+            buflib_free(&buf_ctx, hid);
+            hid = empty_slide_hid;
+        }
+    }
+    if (!current || hid < 0)
+        return false;
 
     pf_sldcache.cache[cache_index].hid = hid;
-    pf_sldcache.cache[cache_index].version = model->art_version ?
-                                           model->art_version(slide_index) : 0;
-    if (cache_index < SLIDE_CACHE_SIZE)
-        pf_sldcache.cache[cache_index].index = slide_index;
+    pf_sldcache.cache[cache_index].version = version;
+    pf_sldcache.cache[cache_index].index = slide_index;
 
     if (abs(slide_index - center_index) <= TURN_RADIUS)
         pf_slides_loaded++;
@@ -3361,25 +3348,27 @@ static void flow_cover_columns(const struct turn_card *card, int slot, int sprea
     const struct dim *bmp = surface(slide);
     if (!bmp)
         return;
-    int t = ((int64_t)((first << 16) + 32768 - left) << 16) / width;
-    int dt = end - first > 1 ? (1ULL << 32) / width : 0;
+    /* Interpolate in Q30: a rounded Q16 step accumulates enough error
+     * across a face to exchange nearly coincident depth samples. */
+    int t = ((int64_t)((first << 16) + 32768 - left) << 30) / width;
+    int dt = end - first > 1 ? (1ULL << 46) / width : 0;
     int h0 = card->bottom[0] - card->top[0];
     int h1 = card->bottom[1] - card->top[1];
     bool mip = width < MIN(bmp->width, bmp->height) * (2 * 65536 / 3);
     if (reversed)
     {
-        t = 65536 - t;
+        t = (1 << 30) - t;
         dt = -dt;
     }
     for (int x = first; x < end; x++, t += dt)
     {
-        int h = h0 + ((int64_t)(h1 - h0) * t >> 16);
+        int h = h0 + ((int64_t)(h1 - h0) * t >> 30);
         struct flow_column *col = &flow_columns[x];
         if (h <= col->height)
             continue;
         col->height = h;
-        col->top = card->top[0] + ((int64_t)(card->top[1] - card->top[0]) * t >> 16);
-        col->u_height = (int64_t)h1 * t >> 16;
+        col->top = card->top[0] + ((int64_t)(card->top[1] - card->top[0]) * t >> 30);
+        col->u_height = (int64_t)h1 * t >> 30;
         col->bmp = bmp;
         col->mip = mip;
     }
@@ -5525,7 +5514,8 @@ static int album_panel_action(int button)
 struct carousel_frame {
     struct ui_page page;
     struct ui_view root, slides, captions;
-    bool joined;
+    bool joined, tracing;
+    uint32_t caption_us;
 };
 
 static void paint_slides(const struct ui_view *view, const struct ui_view_frame *frame)
@@ -5536,7 +5526,8 @@ static void paint_slides(const struct ui_view *view, const struct ui_view_frame 
 
 static void paint_caption(const struct ui_view *view, const struct ui_view_frame *frame)
 {
-    const struct carousel_frame *paint = view->data;
+    struct carousel_frame *paint = view->data;
+    uint32_t start = paint->tracing ? USEC_TIMER : 0;
     caption_rows_y = frame->clip.y - pf_vp_y;
     caption_rows_h = frame->clip.height;
     if (!paint->joined)
@@ -5560,6 +5551,8 @@ static void paint_caption(const struct ui_view *view, const struct ui_view_frame
         caption_clear_h = 0;
         caption_artist.valid = false;
     }
+    if (paint->tracing)
+        paint->caption_us += (uint32_t)USEC_TIMER - start;
 }
 
 static const struct ui_view_ops slide_ops = { .paint = paint_slides };
@@ -5582,10 +5575,15 @@ static void prefetch_captions(void)
         return;
     int font = carousel_caption_font(true);
     int at = carousel_caption_index();
+    int radius = 2 * ALBUM_COVERS_NUM_SLIDES;
     font_prefetch_text(font, ".0123456789 –");
-    for (int i = 0; i <= 4 * ALBUM_COVERS_NUM_SLIDES; i++)
+    for (int i = 0; i <= 2 * radius; i++)
     {
         int index = at + (i % 2 ? (i + 1) / 2 : -i / 2);
+        /* Consecutive selections share all but one neighbour. Always give
+         * the displayed caption first chance at the glyph queue. */
+        if (i && caption_valid && abs(index - caption_index) <= radius)
+            continue;
         struct carousel_album_header text;
         if (index >= 0 && index < number_of_slides && model->caption_at(index, &text))
         {
@@ -5593,6 +5591,30 @@ static void prefetch_captions(void)
             font_prefetch_text(font, text.artist);
         }
     }
+}
+
+/* The caption has a solid ground. Include both the old and the new ink so
+ * shortening a title also erases its tail on the panel. */
+static void caption_ink_bounds(struct carousel_frame *paint, int top, int end,
+                               int *left, int *right)
+{
+    uint32_t start = paint->tracing ? USEC_TIMER : 0;
+    for (int y = top; y < end; y++)
+    {
+        const pix_t *row = LCD_BUF + LCD_WIDTH * (pf_vp_y + y);
+        int x = 0;
+        while (x < *left && row[x] == pf_bg_color)
+            x++;
+        if (x < *left)
+            *left = x;
+        x = LCD_WIDTH;
+        while (x > *right && row[x-1] == pf_bg_color)
+            x--;
+        if (x > *right)
+            *right = x;
+    }
+    if (paint->tracing)
+        paint->caption_us += (uint32_t)USEC_TIMER - start;
 }
 
 static void carousel_paint(struct carousel_frame *paint, bool art, bool caption,
@@ -5612,7 +5634,12 @@ static void carousel_paint(struct carousel_frame *paint, bool art, bool caption,
     font_prefetch_begin();
     if (caption && (!caption_valid ||
                     caption_index != carousel_caption_index()))
+    {
+        uint32_t start = paint->tracing ? USEC_TIMER : 0;
         prefetch_captions();
+        if (paint->tracing)
+            paint->caption_us += (uint32_t)USEC_TIMER - start;
+    }
     ui_page_paint(&paint->page);
     font_prefetch_end();
 }
@@ -5671,7 +5698,10 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
     /* The caption's rows, painted and not yet sent. */
     bool caption_flush_owed = false;
     int caption_flush_top = 0, caption_flush_end = 0;
+    int caption_left = 0, caption_right = LCD_WIDTH;
     bool trace_attempted = false;
+    bool profile_input = ui_perf_enabled();
+    unsigned target_changes = 0;
     /* The viewport as a whole has changed and every row of it has to be cleared
      * and sent, not just the rows the two halves above account for. True for
      * the first frame, for anything that drew over the screen and did not say
@@ -6001,6 +6031,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
         /* Apply wheel input before sampling the new frame. Other actions
          * dispatch below without waiting for a cover render. */
+        int old_target = target;
         switch (button)
         {
         case PF_NEXT:
@@ -6016,6 +6047,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             button = ACTION_NONE;
             break;
         }
+
+        if (profile_input && old_target != target && pf_state == pf_scrolling)
+            target_changes++;
 
         /* Said where the row comes to rest, not at every slide it passes:
          * once it has stayed there for TALK_SETTLE. */
@@ -6119,14 +6153,14 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             flow_moving = false;
         bool dispatch_first = button != ACTION_NONE ||
                               agents_nav_pending() != AGENTS_NAV_NONE;
-        if (!dark && caption_flush_owed && frame_due(flow_due) &&
+        if (!dark && caption_flush_owed && (!motion || flat_view()) && frame_due(flow_due) &&
             !dispatch_first)
         {
             /* The caption painted with the last covers, on its own deadline.
              * The covers wait for the next one. */
             int rows = caption_flush_end - caption_flush_top;
             uint32_t submitting = *trace ? USEC_TIMER : 0;
-            lcd_update_rect(0, caption_flush_top, LCD_WIDTH, rows);
+            lcd_update_rect(caption_left, caption_flush_top, caption_right - caption_left, rows);
             caption_flush_owed = false;
             if (*trace)
             {
@@ -6159,6 +6193,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
              * has changed since it was last flushed. */
             int art_y = 0, art_h = 0;
             bool joined;
+            uint32_t lock_start = *trace ? USEC_TIMER : 0;
             buf_ctx_lock();
             uint32_t frame_start = *trace ? USEC_TIMER : 0;
 
@@ -6221,8 +6256,19 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 }
             }
 
+            paint.tracing = *trace != 0;
+            paint.caption_us = 0;
+            bool trim_caption = !joined && drew_caption && !flat_view();
+            int ink_left = trim_caption ? LCD_WIDTH : 0;
+            int ink_right = trim_caption ? 0 : LCD_WIDTH;
+            if (trim_caption)
+                caption_ink_bounds(&paint, pf_text_y, pf_text_y + pf_text_h,
+                                   &ink_left, &ink_right);
             carousel_paint(&paint, drew_art, drew_caption, joined,
                            paint_y, paint_h);
+            if (trim_caption)
+                caption_ink_bounds(&paint, caption_rows_y, caption_rows_y + caption_rows_h,
+                                   &ink_left, &ink_right);
             uint32_t render = *trace ? (uint32_t)USEC_TIMER - frame_start : 0;
 #if PF_SHOW_STATS
             pf_stats_draw();
@@ -6230,25 +6276,23 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 #endif
 
             buf_ctx_unlock();
+            if (*trace)
+                ui_perf_note_cover_work(target_changes, frame_start - lock_start,
+                                        paint.caption_us);
+            target_changes = 0;
 
-            /* Copy offscreen buffer to LCD and give time to other threads.
-             * Everything below pf_vp_y is this screen's own; the rows above it
-             * only need sending when the status bar redrew into them. Full
-             * width in every case, which is the single-burst path in both
-             * targets' drivers -- a narrower rect goes line by line.
-             *
-             * The covers and the caption together take longer to send than
-             * one panel refresh, so they go apart: the caption waits for the
-             * next deadline, and a newer caption replaces one still waiting.
-             * A caption lying inside the other rows goes with them. */
+            /* Art uses a contiguous full-width DMA. Caption damage keeps its
+             * own bounds until its last row has been staged. */
             if (drew_art)
             {
                 dirty_top = MIN(dirty_top, pf_vp_y + art_y);
                 dirty_end = MAX(dirty_end, pf_vp_y + art_y + art_h);
             }
-            if (drew_caption && pf_text_h > 0 && caption_rows_h > 0)
+            if (drew_caption && pf_text_h > 0 && caption_rows_h > 0 && ink_right > ink_left)
             {
                 int top = pf_vp_y + caption_rows_y, end = top + caption_rows_h;
+                caption_left = caption_flush_owed ? MIN(caption_left, ink_left) : ink_left;
+                caption_right = caption_flush_owed ? MAX(caption_right, ink_right) : ink_right;
                 caption_flush_top = caption_flush_owed ?
                                     MIN(caption_flush_top, top) : top;
                 caption_flush_end = caption_flush_owed ?
@@ -6286,20 +6330,43 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                     caption_rows = end - top;
                 }
             }
-            if (dirty_end > dirty_top)
+            int rows = MAX(0, dirty_end - dirty_top);
+            struct ui_perf_transfers transfers;
+            if (*trace)
+                transfers = (struct ui_perf_transfers){0};
+            if (rows)
             {
-                int rows = dirty_end - dirty_top;
-                uint32_t submitting = *trace ? USEC_TIMER : 0;
+                uint32_t start = *trace ? USEC_TIMER : 0;
                 lcd_update_rect(0, dirty_top, LCD_WIDTH, rows);
                 if (*trace)
-                {
-                    uint32_t submitted = USEC_TIMER;
-                    ui_perf_note_rects(parts,
-                                       parts & UI_PERF_ART ? rows : 0,
-                                       caption_rows);
-                    ui_perf_note_render(render);
-                    ui_perf_note_submit(submitted - submitting);
-                }
+                    ui_perf_add_transfer(&transfers, start);
+            }
+            else
+                parts = 0;
+
+            /* Set the art deadline from the art DMA. A second, narrow DMA can
+             * use the remaining bandwidth without reserving another art TE. */
+            flow_due = motion ? ui_pace_next(&flow_pace, flow_start)
+                              : ui_clock_start() + ui_frame_period();
+            if (motion && !flat_view() && caption_flush_owed && rows < 150)
+            {
+                int width = caption_right - caption_left;
+                int budget = (150 - rows) * LCD_WIDTH;
+                int n = MIN(caption_flush_end - caption_flush_top, budget / width);
+                uint32_t start = *trace ? USEC_TIMER : 0;
+                lcd_update_rect(caption_left, caption_flush_top, width, n);
+                if (*trace)
+                    ui_perf_add_transfer(&transfers, start);
+                caption_flush_top += n;
+                caption_flush_owed = caption_flush_top < caption_flush_end;
+                caption_rows += n;
+                parts |= UI_PERF_CAPTION;
+            }
+            if (*trace && transfers.sampled)
+            {
+                ui_perf_note_rects(parts, parts & UI_PERF_ART ? rows : 0, caption_rows);
+                ui_perf_note_render(render);
+                ui_perf_note_transfers(&transfers);
             }
             if (pf_scene.capturing)
                 ui_scene_start(&pf_scene);
@@ -6312,8 +6379,6 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 #if PF_SHOW_STATS
             pf_stats_frame(t_start, t_flush - t_start, USEC_TIMER - t_flush);
 #endif
-            flow_due = motion ? ui_pace_next(&flow_pace, flow_start)
-                              : ui_clock_start() + ui_frame_period();
             yield();
         }
 

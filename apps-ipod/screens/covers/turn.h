@@ -10,6 +10,7 @@
 #define TURN_ONE (1 << 24)
 #define TURN_RADIUS 15
 #define TURN_CARDS (2 * TURN_RADIUS + 1)
+#define TURN_CONTACT_RING (TURN_CARDS + 1)
 #define TURN_HISTORY_RADIUS 32
 #define TURN_RING 128
 #define TURN_LOCAL_RING 32
@@ -22,7 +23,11 @@ struct turn_row {
     int64_t p;
     int32_t age, hold, weight, shock, bank_shock;
     int32_t speed, history; /* Q16 items/second */
+    int32_t carrier_rate; /* Q24 reciprocal seconds */
+    int64_t carrier_offset; /* Q16 items */
     unsigned stamp;
+    struct { int id; unsigned stamp; int32_t lift; } contact[TURN_CONTACT_RING];
+    bool contact_moving;
     struct turn_slot slot[TURN_RING], local_slot[TURN_LOCAL_RING];
     struct turn_hinge far[2];
 };
@@ -168,6 +173,14 @@ static inline int64_t turn_error(const struct turn_row *r)
     return (int64_t)r->target * 65536 - r->p;
 }
 
+static int32_t turn_integral(int32_t age, int32_t hold)
+{
+    int32_t x = turn_max(0, age - hold);
+    if (x >= TURN_WINDOW)
+        return x - TURN_WINDOW/2;
+    return turn_mul(turn_mul(x, TURN_INV_WINDOW), x) / 2;
+}
+
 static void turn_target(struct turn_row *r, int target)
 {
     if (!r->count)
@@ -183,15 +196,24 @@ static void turn_target(struct turn_row *r, int target)
     r->target = target;
     r->shock += turn_mul(TURN_IMPULSE, r->weight);
     r->bank_shock += turn_mul(TURN_BANK_IMPULSE, r->weight);
+    /* Average the interrupted carrier gain over the last accepted interval.
+     * The interrupted part uses an offset proportional to the distance at
+     * acceptance. Both speed laws decrease with the remaining distance. */
+    int32_t gap = r->age;
+    int32_t rate;
+    if (gap) {
+        int32_t rec = turn_integral(gap, r->hold);
+        int32_t gain = turn_mul(TURN_FREE, gap + turn_mul(r->weight, rec-gap))
+                     + turn_mul(r->shock, turn_release(turn_mul(gap, TURN_INV_TAU)));
+        rate = (int64_t)gain * TURN_ONE / gap;
+    } else {
+        rate = turn_mul(TURN_FREE, TURN_ONE-r->weight) + turn_mul(r->shock, TURN_INV_TAU);
+    }
+    error = turn_error(r);
+    int64_t distance = error < 0 ? -error : error;
+    r->carrier_offset = (TURN_TAIL >> 8) + ((distance * r->weight) >> 24);
+    r->carrier_rate = (int64_t)rate * TURN_ONE / (TURN_ONE + r->weight);
     r->age = 0;
-}
-
-static int32_t turn_integral(int32_t age, int32_t hold)
-{
-    int32_t x = turn_max(0, age - hold);
-    if (x >= TURN_WINDOW)
-        return x - TURN_WINDOW/2;
-    return turn_mul(turn_mul(x, TURN_INV_WINDOW), x) / 2;
 }
 
 /* The local goal equals the bank goal throughout most of the visible bank. */
@@ -253,6 +275,8 @@ static void turn_step_slot(struct turn_row *r, int i, struct turn_slot *s,
                     turn_mul(common, TURN_ONE-n));
 }
 
+static void turn_contact_step(struct turn_row *r, int32_t dt);
+
 static void turn_step(struct turn_row *r, int32_t dt)
 {
     int32_t z = turn_release(turn_mul(dt, TURN_INV_TAU));
@@ -267,9 +291,14 @@ static void turn_step(struct turn_row *r, int32_t dt)
     r->bank_shock -= bank_fast;
     int64_t error = turn_error(r);
     int64_t distance = error < 0 ? -error : error;
-    int32_t fraction = turn_release(free_gain + fast);
-    int64_t travel = ((distance + (TURN_TAIL >> 8)) * fraction +
-                      TURN_ONE/2) >> 24;
+    int32_t fraction = turn_release(turn_mul(TURN_FREE, dt));
+    int64_t travel = ((distance + (TURN_TAIL >> 8)) * fraction + TURN_ONE/2) >> 24;
+    if (r->weight) {
+        fraction = turn_release(turn_mul(r->carrier_rate, dt));
+        int64_t limited = ((distance + r->carrier_offset) * fraction + TURN_ONE/2) >> 24;
+        if (limited < travel)
+            travel = limited;
+    }
     if (travel > distance)
         travel = distance;
     int previous_center = turn_center(r);
@@ -277,11 +306,13 @@ static void turn_step(struct turn_row *r, int32_t dt)
     /* Far jumps saturate only the speed used to limit the clearance lift. */
     int64_t v = travel * TURN_ONE / dt;
     r->history += turn_mul(z, (int32_t)(v > INT32_MAX ? INT32_MAX : v) - r->history);
-    int32_t recovered = turn_min(TURN_ONE, turn_max(0, r->age - r->hold) * (TURN_INV_WINDOW >> 24));
-    int32_t rate = turn_mul(TURN_FREE, TURN_ONE - turn_mul(r->weight, TURN_ONE-recovered))
-                   + turn_mul(r->shock, TURN_INV_TAU);
     int64_t speed = distance == travel ? 0 :
-                    ((distance-travel + (TURN_TAIL >> 8)) * rate >> 24);
+                    ((distance-travel + (TURN_TAIL >> 8)) * TURN_FREE >> 24);
+    if (r->weight) {
+        int64_t limited = (distance-travel + r->carrier_offset) * r->carrier_rate >> 24;
+        if (limited < speed)
+            speed = limited;
+    }
     r->speed = speed > INT32_MAX ? INT32_MAX : speed;
 
     int center = turn_center(r);
@@ -311,11 +342,12 @@ static void turn_step(struct turn_row *r, int32_t dt)
                            banks, local_rate, common);
     for (int j = 0; j < 2; j++)
         turn_hinge_step(&r->far[j], banks[j], banks[j], 0, common);
+    turn_contact_step(r, dt);
 }
 
 static bool turn_moving(const struct turn_row *r)
 {
-    if (turn_error(r))
+    if (turn_error(r) || r->contact_moving)
         return true;
     for (int i = turn_max(0, r->target-TURN_HISTORY_RADIUS);
          i <= turn_min(r->count-1, r->target+TURN_HISTORY_RADIUS); i++) {
@@ -416,26 +448,30 @@ static void turn_clear(struct turn_segment *seg, const int *order, int count)
     }
 }
 
-static int turn_project(const struct turn_row *r, struct turn_card out[TURN_CARDS])
+static struct turn_segment turn_segment_for(const struct turn_row *r, int i)
 {
-    /* Only the foreground carousel draws this scratch geometry. */
+    const struct turn_hinge *h = &r->slot[i % TURN_RING].hinge;
+    int32_t a = turn_abs(h->g);
+    int32_t cos64 = (turn_lookup(turn_sine, TURN_ONE-a) + 2) >> 2;
+    int32_t sin64 = (turn_lookup(turn_sine, a) + 2) >> 2;
+    if (h->g > 0) sin64 = -sin64;
+    int64_t d = (int64_t)i * 65536 - r->p;
+    int32_t x = ((d * 1820328) >> 16) + turn_mul(h->g, 4806672 + r->margin_delta * 65536);
+    int32_t z = (156 << 16) + turn_mul(h->b, 3883926);
+    return (struct turn_segment){
+        { x-cos64, x+cos64 }, { z-sin64, z+sin64 }, a, 0
+    };
+}
+
+static void turn_contact_step(struct turn_row *r, int32_t dt)
+{
     static struct turn_segment seg[TURN_CARDS];
     int order[TURN_CARDS];
     int first = turn_max(0, turn_center(r)-TURN_RADIUS);
     int count = turn_min(r->count-1,turn_center(r)+TURN_RADIUS) - first + 1;
     for (int n = 0; n < count; n++) {
-        int i = first+n;
-        const struct turn_hinge *h = &r->slot[i % TURN_RING].hinge;
-        int32_t a = turn_abs(h->g);
-        int32_t cos64 = (turn_lookup(turn_sine, TURN_ONE-a) + 2) >> 2;
-        int32_t sin64 = (turn_lookup(turn_sine, a) + 2) >> 2;
-        if (h->g > 0) sin64 = -sin64;
-        int64_t d = (int64_t)i * 65536 - r->p;
-        int32_t x = ((d * 1820328) >> 16) + turn_mul(h->g, 4806672 + r->margin_delta * 65536);
-        int32_t z = (156 << 16) + turn_mul(h->b, 3883926);
-        seg[n] = (struct turn_segment){
-            { x-cos64, x+cos64 }, { z-sin64, z+sin64 }, a, 0
-        };
+        seg[n] = turn_segment_for(r, first+n);
+        int32_t a = seg[n].angle;
         int j = n;
         while (j && seg[order[j-1]].angle < a) {
             order[j] = order[j-1];
@@ -453,17 +489,45 @@ static int turn_project(const struct turn_row *r, struct turn_card out[TURN_CARD
         if (cap < reserve)
             reserve = cap;
     }
+    /* Contact travels at 128 units/s plus two widths per excess album/s.
+     * Crossing faces retain their per-column depth order during the lift. */
+    int64_t allowed = ((int64_t)dt * turn_max(0, excess) + 32768) >> 16;
+    allowed += (dt + 1) >> 1;
+    int32_t max_move = allowed < INT32_MAX ? (int32_t)allowed : INT32_MAX;
+    r->contact_moving = false;
+    for (int n = 0; n < count; n++) {
+        int id = first + n;
+        int slot = id % TURN_CONTACT_RING;
+        int32_t wanted = turn_min(seg[n].lift, reserve);
+        int32_t lift = r->contact[slot].id == id &&
+                       r->contact[slot].stamp == r->stamp - 1 ? r->contact[slot].lift : 0;
+        int32_t change = turn_max(-max_move, turn_min(max_move, wanted-lift));
+        r->contact[slot].id = id;
+        r->contact[slot].stamp = r->stamp;
+        r->contact[slot].lift = lift + change;
+        if (lift + change != wanted)
+            r->contact_moving = true;
+    }
+}
+
+static int turn_project(const struct turn_row *r, struct turn_card out[TURN_CARDS])
+{
+    int first = turn_max(0, turn_center(r)-TURN_RADIUS);
+    int count = turn_min(r->count-1,turn_center(r)+TURN_RADIUS) - first + 1;
     for (int n = 0; n < count; n++) {
         struct turn_card *c = &out[n];
         c->id = first + n;
+        struct turn_segment seg = turn_segment_for(r, c->id);
+        int slot = c->id % TURN_CONTACT_RING;
+        int32_t lift = r->contact[slot].id == c->id ? r->contact[slot].lift : 0;
         for (int j = 0; j < 2; j++) {
-            int32_t z = seg[n].z[j] + turn_min(seg[n].lift, reserve);
-            /* Q16 projection scale. One division serves all three coordinates. */
-            int32_t scale = (UINT32_C(156) << 24) / ((z+128) >> 8);
+            int32_t z = seg.z[j] + lift;
+            /* Q24 preserves reciprocal-depth ordering at near-coincident edges. */
+            int32_t scale = ((INT64_C(156) << 40) + z/2) / z;
             c->z[j] = z;
-            c->x[j] = (160 << 16) + ((int64_t)seg[n].x[j] * scale >> 16);
-            c->top[j] = (120 << 16) + ((int64_t)-5175771 * scale >> 16);
-            c->bottom[j] = (120 << 16) + ((int64_t)3212837 * scale >> 16);
+            c->x[j] = (160 << 16) + turn_mul(seg.x[j], scale);
+            c->top[j] = (120 << 16) + turn_mul(-5175771, scale);
+            c->bottom[j] = (120 << 16) + turn_mul(3212837, scale);
         }
     }
     return count;

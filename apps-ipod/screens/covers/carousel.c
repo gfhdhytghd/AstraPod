@@ -1288,7 +1288,7 @@ int get_scroll_line_offset(enum pf_scroll_line_type type, int y)
     {
         const struct font *font = font_get(lcd_getfont());
         painted_top = MIN(painted_top, y - font->pbf.ink_above);
-        painted_end = MAX(painted_end, y + font->height + font->pbf.ink_below);
+        painted_end = MAX(painted_end, y + (int)font->height + font->pbf.ink_below);
         painted_ink_known = false;
     }
     else
@@ -6757,7 +6757,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                     if (pf_state == pf_idle && !leaving)
                     {
                         full_flush_owed = true;
-                        drew_caption |= captioned_index != carousel_caption_index();
+                        drew_caption |= caption_owed || captioned_index != carousel_caption_index();
+                        caption_owed = false;
                         captioned_index = carousel_caption_index();
                     }
                 }

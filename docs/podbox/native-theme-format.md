@@ -62,10 +62,11 @@ Use `font.<role>=<basename>` to reference a font. The basename can contain 1–3
 | `icon` | `24x24-icons` |
 | `wps_title`, `handoff_title`, `lyrics_focus` | `26-noto-sans-medium` |
 | `wps_meta`, `handoff_caption` | `12-noto-sans` |
+| `panel` | `14-noto-sans` |
 
 ### Cover Flow album panel
 
-The album panel's track rows look like a list's. They use the `list` font,
+The album panel's track rows look like a list's. They use the `panel` font,
 with titles in `muted` and durations in a dimmer `muted`. The selected row
 has `selected_text`, `selected_secondary` and a `selection` marker set by
 `list_selection_width` and `list_selection_alpha`. The playing track has a

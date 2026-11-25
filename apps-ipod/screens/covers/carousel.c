@@ -5861,14 +5861,20 @@ static void step_album_flip(void)
             done = frame >= panel.first + panel.second;
         }
     }
-    if (panel.to == FLIP_OPEN && (panel.position == FLIP_OPEN || !flat_view()))
+    if (!flat_view() || (panel.position == FLIP_OPEN && panel.to == FLIP_OPEN))
     {
         unsigned blur_generation = album_blur_generation();
         if (blur_generation != panel.blur_generation)
         {
             panel.blur_generation = blur_generation;
+            /* A cold blur can arrive while either flip shows the back. */
+            if (!panel.solid && !panel.have_blur)
+                panel.back_ready = false;
             panel.dirty = true;
         }
+    }
+    if (panel.to == FLIP_OPEN && (panel.position == FLIP_OPEN || !flat_view()))
+    {
         panel.album_font = panel_cache_font(PANEL_ALBUM);
         panel.title_font = panel_cache_font(PANEL_BODY);
         panel.small_font = panel_cache_font(PANEL_SMALL);

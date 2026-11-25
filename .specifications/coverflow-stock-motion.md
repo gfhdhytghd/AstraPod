@@ -1226,9 +1226,13 @@ leading edge reaches the cover rectangle as the cover lands. Over the next
 180 ms the native controls move to their normal positions over the stationary
 art. Both stages use quadratic ease-out. Return plays the control motion in
 reverse, clearing the artwork before its turn begins. The backdrop travels
-under the cover. Both phases share the turn's presentation clock. The selected
-album supplies the cached blur before playback decoding. A late bitmap updates
-only the cover during the slide. A cache miss uses the theme background until
+under the cover. The stationary slide starts after the flat landing frame is
+submitted. It advances by elapsed time, capped at 30 ms per submitted frame
+so a late LCD transfer cannot skip the slide. The playback page retains the
+landed cover pixels beneath the controls until it paints the selected track's
+own artwork, the track changes, or the page closes. The selected album supplies
+the cached blur before playback decoding. A late bitmap updates only the cover
+during the slide. A cache miss uses the theme background until
 playback can reveal its blur underneath the controls. Each transition frame
 updates the whole LCD.
 

@@ -6654,17 +6654,16 @@ static void paint_playback_row(struct stock_flow *walls, struct stock_pose centr
 
 /* WPS still owns its views and fonts on both sides of the stationary phase.
  * Draw each control over the flat artwork with its normal theme painter. */
-static void slide_playback_controls(bool returning, uint32_t start,
-                                   uint32_t clock_origin)
+static void slide_playback_controls(bool returning)
 {
-    if (!native_wps_active() || playback_scene.screen <= 0 || !lcd_active())
+    if (!native_wps_active() || !lcd_active() ||
+        (returning && playback_scene.screen <= 0))
         return;
-    uint32_t now = returning ? start : USEC_TIMER;
+    uint32_t start = USEC_TIMER, previous = start, elapsed = 0;
     for (;;)
     {
         if (!returning && playback_scene.slot.width && !playback_scene.screen_has_art)
             native_wps_pick_up_art();
-        unsigned elapsed = MIN(now - start, PLAYBACK_SLIDE_US);
         unsigned time = returning ? elapsed : PLAYBACK_SLIDE_US - elapsed;
         unsigned t = time * 1024 / PLAYBACK_SLIDE_US;
         int hidden = (playback_scene.chrome_stop * t * t + (1u << 19)) / (1u << 20);
@@ -6675,8 +6674,13 @@ static void slide_playback_controls(bool returning, uint32_t start,
         lcd_update();
         if (elapsed == PLAYBACK_SLIDE_US || !lcd_active())
             break;
-        ui_clock_sleep(ui_clock_wait_until(ui_pace_next(&flow_pace, clock_origin)));
-        now = USEC_TIMER;
+        ui_clock_sleep(ui_clock_wait_until(ui_pace_next(&flow_pace, start)));
+        uint32_t now = USEC_TIMER;
+        /* A delayed LCD submission holds the current image. Keep at least
+         * six distinct steps across the stationary artwork. */
+        elapsed = MIN(PLAYBACK_SLIDE_US, elapsed +
+                      MIN(now - previous, PLAYBACK_SLIDE_US / 6));
+        previous = now;
     }
     playback_scene.chrome_staged = true;
 }
@@ -6688,10 +6692,7 @@ void carousel_wps_capture_return(void)
     capture_playback_frame(true);
     playback_scene.returning = true;
     if (pf_motion_scale)
-    {
-        uint32_t start = USEC_TIMER;
-        slide_playback_controls(true, start, start);
-    }
+        slide_playback_controls(true);
 }
 
 /* WPS has now laid out the selected track and painted its first frame. At
@@ -6763,10 +6764,16 @@ void carousel_wps_present(const struct wps_state *state)
         ui_clock_sleep(ui_clock_wait_until(ui_pace_next(&flow_pace, start)));
         now = USEC_TIMER;
     }
-    uint32_t slide_start = blend_us ? blend_start + blend_us :
-                                     start + flip.duration;
     if (native_wps_active())
-        slide_playback_controls(false, slide_start, start);
+    {
+        if (lcd_active() && playback_scene.slot.width &&
+            (playback_scene.art.handle > 0 || playback_cover(playback_scene.album)))
+        {
+            native_wps_keep_landing(playback_scene.screen, &playback_scene.slot);
+            playback_scene.screen = 0;
+        }
+        slide_playback_controls(false);
+    }
     else if (lcd_active())
     {
         restore_playback_pixels();

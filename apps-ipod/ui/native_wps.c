@@ -87,6 +87,8 @@ struct native_wps {
     unsigned motion_trace;
     bool volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
     bool current_art_only, cover_backdrop, wait_for_blur;
+    int landing;
+    struct ui_rect landing_bounds;
     unsigned reveal_base;
     char cover_remote_key[65];
 };
@@ -200,13 +202,49 @@ static void paint_background(const struct ui_view *view,
     lcd_set_viewport(previous);
 }
 
+/* The turn has already projected the centre artwork exactly into the slot.
+ * Pack those LCD pixels into the spent scene buffer before the controls move. */
+void native_wps_keep_landing(int handle, const struct ui_rect *bounds)
+{
+    if (wps->landing > 0)
+        core_free(wps->landing);
+    wps->landing = handle;
+    wps->landing_bounds = *bounds;
+    fb_data *dst = core_get_data_pinned(handle);
+    const fb_data *src = (const fb_data *)lcd_framebuffer_default.fb_ptr +
+                         bounds->y * LCD_WIDTH + bounds->x;
+    for (int y = 0; y < bounds->height; y++)
+        memcpy(dst + y * bounds->width, src + y * LCD_WIDTH,
+               bounds->width * sizeof(*dst));
+    core_put_data_pinned(dst);
+}
+
+static void paint_landing(const struct ui_view_frame *frame)
+{
+    if (wps->landing <= 0)
+        return;
+    painted_art = wps->landing_bounds;
+    struct viewport viewport;
+    struct viewport *previous = paint_viewport(&viewport, frame, FONT_SYSFIXED);
+    fb_data *pixels = core_get_data_pinned(wps->landing);
+    lcd_bitmap_part(pixels, 0, 0, painted_art.width,
+                    painted_art.x - frame->clip.x, painted_art.y - frame->clip.y,
+                    painted_art.width, painted_art.height);
+    core_put_data_pinned(pixels);
+    lcd_set_viewport(previous);
+}
+
 static void paint_cover(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     (void)view;
     painted_art = (struct ui_rect){0};
-    if (wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM ||
-        wps->art_handle < 0 || !wps_art_pin(wps->art_handle, true))
+    if (wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM)
         return;
+    if (wps->art_handle < 0 || !wps_art_pin(wps->art_handle, true))
+    {
+        paint_landing(frame);
+        return;
+    }
 
     struct bitmap *art;
     if (wps_art_bitmap(wps->art_handle, &art) && art->data)
@@ -227,6 +265,10 @@ static void paint_cover(const struct ui_view *view, const struct ui_view_frame *
         lcd_set_viewport(previous);
     }
     wps_art_pin(wps->art_handle, false);
+    if (!painted_art.width)
+        paint_landing(frame);
+    else if (wps->landing > 0)
+        wps->landing = core_free(wps->landing);
 }
 
 bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major)
@@ -236,6 +278,15 @@ bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major)
     *bounds = painted_art;
     if (!column_major)
         return true;
+    if (wps->landing > 0)
+    {
+        const fb_data *pixels = core_get_data_pinned(wps->landing);
+        for (int x = 0; x < bounds->width; x++)
+            for (int y = 0; y < bounds->height; y++)
+                *column_major++ = pixels[y * bounds->width + x];
+        core_put_data_pinned((void *)pixels);
+        return true;
+    }
     if (painted_generation != album_art_generation() ||
         !wps_art_pin(wps->art_handle, true))
         return false;
@@ -559,8 +610,8 @@ static void refresh_progress(const struct wps_state *state, bool remote, uint32_
     unsigned long length = track ? track->length : 0;
     bool same_track = length && progress->length == length && remote == progress->remote &&
                       !strcmp(progress->path, track->path);
-    if (!same_track)
-        snprintf(progress->path, sizeof(progress->path), "%s", track ? track->path : "");
+    if (!same_track && track && *track->path)
+        strlcpy(progress->path, track->path, sizeof(progress->path));
 
     bool preview = state->ff_rewind_count || play_mode == STATUS_FASTFORWARD ||
                    play_mode == STATUS_FASTBACKWARD;
@@ -671,17 +722,31 @@ static unsigned theme_color(enum ui_color_role role, const struct ui_album_palet
     return LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
 }
 
+static int handoff_art(void)
+{
+#ifdef HAVE_USB_PODLINK
+    if (cider_active())
+    {
+        if (*wps->cover_remote_key &&
+            strcmp(wps->cover_remote_key, cider_wps_art_key()))
+            return -1;
+        return album_art_current();
+    }
+#endif
+    return playback_track_aa_hid(art_slot);
+}
+
 static void refresh_art(void)
 {
     album_palette_refresh();
     unsigned palette_generation = album_palette_generation();
     unsigned art_generation = album_art_generation();
     int handle = album_art_current();
-    if (wps->current_art_only && !cider_active())
+    if (wps->current_art_only || wps->landing > 0)
     {
         /* An ordinary WPS retains the last cover during a track change.
          * A flip belongs to the newly selected track, including missing art. */
-        handle = playback_track_aa_hid(art_slot);
+        handle = handoff_art();
         if (handle >= 0 || handle == ERR_UNSUPPORTED_TYPE)
             wps->current_art_only = false;
     }
@@ -729,8 +794,7 @@ void native_wps_pick_up_art(void)
 {
     if (!active || rock_ui_raw())
         return;
-    int art = cider_active() ? album_art_current() :
-                               playback_track_aa_hid(art_slot);
+    int art = handoff_art();
     if (art >= 0)
     {
         wps->art_handle = art;
@@ -886,21 +950,25 @@ void native_wps_render(const struct wps_state *state, bool submit)
     struct cider_status source = {0};
     if (remote)
         cider_status(&source);
-    if (wps->cover_backdrop || wps->wait_for_blur)
+    if (wps->cover_backdrop || wps->wait_for_blur || wps->landing > 0)
     {
-        bool same = remote == wps->progress.remote && state->id3 &&
-                    !strcmp(wps->progress.path, state->id3->path);
+        bool same = remote == wps->progress.remote;
+        if (same && state->id3 && *state->id3->path && *wps->progress.path)
+            same = !strcmp(wps->progress.path, state->id3->path);
 #ifdef HAVE_USB_PODLINK
         if (same && remote)
         {
             char key[65];
             cider_current_art(key);
-            same = !strcmp(key, wps->cover_remote_key);
+            if (*key && *wps->cover_remote_key)
+                same = !strcmp(key, wps->cover_remote_key);
         }
 #endif
         if (!same)
         {
-            wps->cover_backdrop = wps->wait_for_blur = false;
+            if (wps->landing > 0)
+                wps->landing = core_free(wps->landing);
+            wps->current_art_only = wps->cover_backdrop = wps->wait_for_blur = false;
             wps->background = -1;
             wps->blur_generation = (unsigned)-1;
         }
@@ -944,6 +1012,8 @@ void native_wps_paint_handoff(const struct wps_state *state,
 {
     if (!active || rock_ui_raw())
         return;
+    strlcpy(wps->cover_remote_key, source->remote,
+            sizeof(wps->cover_remote_key));
     wps->current_art_only = true;
     native_wps_render(state, false);
     if (wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM ||
@@ -955,8 +1025,6 @@ void native_wps_paint_handoff(const struct wps_state *state,
     fb_data *pixels = core_get_data_pinned(blur_handle);
     bool ready = album_blur_render_cover_wps(pixels, source, wps->fg);
     core_put_data_pinned(pixels);
-    strlcpy(wps->cover_remote_key, source->remote,
-            sizeof(wps->cover_remote_key));
     wps->wait_for_blur = !ready && wps->background <= 0;
     wps->reveal_base = wps->bg;
     if (ready)
@@ -980,6 +1048,8 @@ void native_wps_close(void)
     if (!active)
         return;
     active = false;
+    if (wps->landing > 0)
+        wps->landing = core_free(wps->landing);
     ui_perf_end(wps->motion_trace);
     ui_page_cancel_tracks(&wps->page);
     if (wps->title.font >= 0)

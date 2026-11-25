@@ -30,6 +30,8 @@ bool native_wps_art_layout(struct ui_rect *bounds);
  * A NULL destination queries bounds only. Otherwise supply width * height
  * RGB565 pixels; the output is packed column-major, top to bottom. */
 bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major);
+/* Take ownership of the outgoing scene buffer and retain the landed cover. */
+void native_wps_keep_landing(int handle, const struct ui_rect *bounds);
 void native_wps_pick_up_art(void);
 void native_wps_paint_chrome(void);
 int native_wps_chrome_stop(void);

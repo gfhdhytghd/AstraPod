@@ -64,6 +64,7 @@ static void check_builtins(void)
     assert(dark.metric[UI_METRIC_STATUS_ICON_Y] == 5);
     assert(!strcmp(dark.font[UI_FONT_LIST], "18-noto-sans"));
     assert(!strcmp(dark.font[UI_FONT_TITLE], "18-noto-sans-bold"));
+    assert(!strcmp(dark.font[UI_FONT_COVER_CAPTION], "15-noto-sans-bold"));
     assert(!strcmp(dark.font[UI_FONT_ICON], "24x24-icons"));
     assert(dark.background[UI_BG_LIST] == UI_BG_BLURRED_COVER);
     assert(dark.background[UI_BG_WPS] == UI_BG_COVER_SCRIM);

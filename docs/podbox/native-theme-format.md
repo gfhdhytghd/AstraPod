@@ -62,6 +62,7 @@ Use `font.<role>=<basename>` to reference a font. The basename can contain 1–3
 | `icon` | `24x24-icons` |
 | `wps_title`, `handoff_title`, `lyrics_focus` | `26-noto-sans-medium` |
 | `wps_meta`, `handoff_caption` | `12-noto-sans` |
+| `cover_caption` (both lines of the Cover Flow caption) | `15-noto-sans-bold` |
 
 ### Metrics
 

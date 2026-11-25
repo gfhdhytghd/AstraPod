@@ -32,6 +32,7 @@ GAMMA = 0.90
 FONTS = {
     "8-noto-sans": (8, 400), "10-noto-sans": (10, 400),
     "12-noto-sans": (12, 400), "14-noto-sans": (14, 400),
+    "15-noto-sans-bold": (15, 700),
     "18-noto-sans": (18, 400), "18-noto-sans-bold": (18, 700),
     "20-noto-sans": (20, 400), "20-noto-serif": (20, 400),
     "22-noto-sans-medium": (22, 500), "22-noto-serif": (22, 400),

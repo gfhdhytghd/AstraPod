@@ -4240,7 +4240,7 @@ static bool init(void)
 
     struct ui_theme theme;
     ui_theme_snapshot(&theme);
-    pf_title_font = ui_theme_font_load(&theme, UI_FONT_TITLE, 64);
+    pf_title_font = ui_theme_font_load(&theme, UI_FONT_COVER_CAPTION, 64);
     pf_body_font = ui_theme_font_load(&theme, UI_FONT_BODY, 64);
 
     /* Reserve real, empty vertical space for draw_album_text()'s overlay,

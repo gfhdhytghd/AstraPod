@@ -727,7 +727,9 @@ static int handoff_art(void)
 #ifdef HAVE_USB_PODLINK
     if (cider_active())
     {
-        if (*wps->cover_remote_key &&
+        if (!*wps->cover_remote_key)
+            cider_current_art(wps->cover_remote_key);
+        if (!*wps->cover_remote_key ||
             strcmp(wps->cover_remote_key, cider_wps_art_key()))
             return -1;
         return album_art_current();

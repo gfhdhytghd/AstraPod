@@ -14,11 +14,11 @@
 #include "lcd.h"
 #include "metadata.h"
 #include "sound.h"
+#include "string-extra.h"
 #include "system.h"
 
 #include "audio/playback.h"
 #include "audio/buffering.h"
-#include "button.h"
 #include "audio/play_status.h"
 #include "audio/spectrum_meter.h"
 #include "metadata/album_palette.h"
@@ -76,7 +76,7 @@ struct native_wps {
     struct ui_theme theme;
     struct wps_label title, artist, index, remaining;
     struct wps_progress progress;
-    struct ui_track volume_width, volume_reveal;
+    struct ui_track volume_width, volume_reveal, blur_reveal;
     char title_text[MAX_PATH], artist_text[MAX_PATH];
     char index_text[16], remaining_text[24];
     unsigned bg, fg, accent, panel, meter_fg, meter_peak;
@@ -86,7 +86,9 @@ struct native_wps {
     long meter_due;
     unsigned motion_trace;
     bool volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
-    bool current_art_only;
+    bool current_art_only, cover_backdrop, wait_for_blur;
+    unsigned reveal_base;
+    char cover_remote_key[65];
 };
 
 static int wps_handle, blur_handle;
@@ -171,6 +173,22 @@ void native_wps_paint_background(const struct viewport *vp, int background, unsi
     }
 }
 
+/* The first playback blur can arrive after the slide. Reveal it beneath
+ * the live controls, starting at the exact solid background on the LCD. */
+static void reveal_background(int width, int height)
+{
+    int brightness = wps->view[WPS_ROOT].value[UI_BRIGHTNESS];
+    if (brightness >= UI_FULL_OPACITY)
+        return;
+    unsigned alpha = 15 - (brightness * 15 + UI_FULL_OPACITY / 2) /
+                          UI_FULL_OPACITY;
+    lcd_set_foreground(wps->reveal_base);
+    if (alpha == 15)
+        lcd_fillrect(0, 0, width, height);
+    else
+        lcd_blendrect(0, 0, width, height, alpha);
+}
+
 static void paint_background(const struct ui_view *view,
                              const struct ui_view_frame *frame)
 {
@@ -178,6 +196,7 @@ static void paint_background(const struct ui_view *view,
     struct viewport viewport;
     struct viewport *previous = paint_viewport(&viewport, frame, FONT_SYSFIXED);
     native_wps_paint_background(&viewport, wps->background, wps->bg);
+    reveal_background(viewport.width, viewport.height);
     lcd_set_viewport(previous);
 }
 
@@ -240,7 +259,9 @@ bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major)
 static void paint_panel(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     (void)view;
-    if (wps->art_handle < 0 || wps->theme.background[UI_BG_WPS] == UI_BG_SOLID)
+    int mode = wps->theme.background[UI_BG_WPS];
+    if (mode == UI_BG_SOLID ||
+        (mode != UI_BG_COVER_SCRIM && wps->art_handle < 0))
         return;
     struct viewport viewport;
     struct viewport *previous = paint_viewport(&viewport, frame, FONT_SYSFIXED);
@@ -455,6 +476,7 @@ void native_wps_paint_slide(int hidden, fb_data base)
         fb_data *src = core_get_data_pinned(wps->background);
         lcd_bitmap_part(src, hidden, 0, LCD_WIDTH, 0, 0, width, LCD_HEIGHT);
         core_put_data_pinned(src);
+        reveal_background(width, LCD_HEIGHT);
     }
     else
     {
@@ -683,27 +705,37 @@ static void refresh_art(void)
         wps->art_generation = art_generation;
         wps->blur_generation = blur_generation;
         wps->art_handle = handle;
-        wps->background = native_wps_background(handle, art_generation,
-                              wps->theme.background[UI_BG_WPS], wps->fg);
+        int bg = native_wps_background(handle, art_generation,
+                            wps->theme.background[UI_BG_WPS], wps->fg);
+        if (wps->wait_for_blur && bg > 0)
+        {
+            wps->wait_for_blur = false;
+            struct ui_view *root = &wps->view[WPS_ROOT];
+            ui_page_set(&wps->page, root, UI_BRIGHTNESS, 0);
+            ui_page_tween(&wps->page, &wps->blur_reveal, root, UI_BRIGHTNESS,
+                          UI_FULL_OPACITY, ANIM_F(12), false, USEC_TIMER);
+        }
+        if (bg > 0 || !wps->cover_backdrop)
+        {
+            wps->background = bg;
+            wps->cover_backdrop = false;
+        }
         ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
     }
 }
 
-/* A decode may finish while the carousel is turning. Paint its native
- * endpoint off-screen as soon as the selected track has a bitmap. */
-bool native_wps_paint_ready_art(void)
+/* Picking up a texture must not change the moving controls or their ink. */
+void native_wps_pick_up_art(void)
 {
     if (!active || rock_ui_raw())
-        return false;
+        return;
     int art = cider_active() ? album_art_current() :
                                playback_track_aa_hid(art_slot);
-    if (art < 0)
-        return false;
-    wps->current_art_only = true;
-    refresh_art();
-    ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
-    ui_page_paint(&wps->page);
-    return painted_art.width > 0;
+    if (art >= 0)
+    {
+        wps->art_handle = art;
+        wps->art_generation = album_art_generation();
+    }
 }
 
 static void refresh_volume(const struct cider_status *source, bool remote, uint32_t now)
@@ -854,14 +886,35 @@ void native_wps_render(const struct wps_state *state, bool submit)
     struct cider_status source = {0};
     if (remote)
         cider_status(&source);
+    if (wps->cover_backdrop || wps->wait_for_blur)
+    {
+        bool same = remote == wps->progress.remote && state->id3 &&
+                    !strcmp(wps->progress.path, state->id3->path);
+#ifdef HAVE_USB_PODLINK
+        if (same && remote)
+        {
+            char key[65];
+            cider_current_art(key);
+            same = !strcmp(key, wps->cover_remote_key);
+        }
+#endif
+        if (!same)
+        {
+            wps->cover_backdrop = wps->wait_for_blur = false;
+            wps->background = -1;
+            wps->blur_generation = (unsigned)-1;
+        }
+    }
     refresh_art();
     uint32_t now = USEC_TIMER;
     refresh_labels(state, remote, now);
     refresh_volume(&source, remote, now);
     if (wps->page.tracks && !wps->motion_tried)
     {
-        const char *route = wps->page.tracks == &wps->progress.motion
-                            ? "wps-seek-progress" : "wps-volume";
+        const char *route = wps->page.tracks == &wps->progress.motion ?
+                            "wps-seek-progress" :
+                            wps->page.tracks == &wps->blur_reveal ?
+                            "wps-blur-ready" : "wps-volume";
         wps->motion_trace = ui_perf_begin(route);
         wps->motion_tried = true;
     }
@@ -886,34 +939,35 @@ void native_wps_render(const struct wps_state *state, bool submit)
         cider_loading_drawn(source.loading);
 }
 
-static bool handoff_art_pending(void)
+void native_wps_paint_handoff(const struct wps_state *state,
+                              const struct album_blur_source *source)
 {
-    if (wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM ||
-        !wps->theme.metric[UI_METRIC_COVER_SIZE])
-        return false;
-#ifdef HAVE_USB_PODLINK
-    if (cider_active())
-        return *cider_wps_art_key() && album_art_current() < 0;
-#endif
-    if (art_slot < 0)
-        return false;
-    int h = playback_track_aa_hid(art_slot);
-    return h < 0 && h != ERR_UNSUPPORTED_TYPE;
-}
-
-void native_wps_paint_handoff(struct wps_state *state)
-{
-    if (!active)
+    if (!active || rock_ui_raw())
         return;
-    uint32_t start = USEC_TIMER;
-    while (handoff_art_pending() && (uint32_t)USEC_TIMER - start < 150000u &&
-           lcd_active() && button_queue_empty())
-    {
-        sleep(1);
-        cider_wps_update(state);
-    }
     wps->current_art_only = true;
     native_wps_render(state, false);
+    if (wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM ||
+        blur_handle <= 0)
+        return;
+
+    /* The carousel and playback share the selected album's blur plane.
+     * It is already usable before audio buffering publishes a WPS bitmap. */
+    fb_data *pixels = core_get_data_pinned(blur_handle);
+    bool ready = album_blur_render_cover_wps(pixels, source, wps->fg);
+    core_put_data_pinned(pixels);
+    strlcpy(wps->cover_remote_key, source->remote,
+            sizeof(wps->cover_remote_key));
+    wps->wait_for_blur = !ready && wps->background <= 0;
+    wps->reveal_base = wps->bg;
+    if (ready)
+    {
+        backdrop.art = -1;
+        backdrop.ready = false;
+        wps->background = blur_handle;
+        wps->cover_backdrop = true;
+        ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
+        ui_page_paint(&wps->page);
+    }
 }
 
 void native_wps_invalidate(void)

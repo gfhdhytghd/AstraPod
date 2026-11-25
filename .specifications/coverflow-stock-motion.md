@@ -1226,7 +1226,11 @@ leading edge reaches the cover rectangle as the cover lands. Over the next
 180 ms the native controls move to their normal positions over the stationary
 art. Both stages use quadratic ease-out. Return plays the control motion in
 reverse, clearing the artwork before its turn begins. The backdrop travels
-under the cover. Each frame of these transitions updates the whole LCD.
+under the cover. Both phases share the turn's presentation clock. The selected
+album supplies the cached blur before playback decoding. A late bitmap updates
+only the cover during the slide. A cache miss uses the theme background until
+playback can reveal its blur underneath the controls. Each transition frame
+updates the whole LCD.
 
 MENU after playing a panel track retraces the 500 ms turn and wall motion,
 then restores the same panel and selected row. Its next MENU returns to the

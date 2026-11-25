@@ -1035,6 +1035,33 @@ bool album_blur_draw_panel(const struct album_blur_source *source, int top, int 
     return true;
 }
 
+static bool render_wps_slot(fb_data *out, int slot, unsigned fg)
+{
+    if (slot < 0)
+        return false;
+    struct blur_pixels *cache = core_get_data_pinned(cache_handle);
+    struct img_filter filter;
+    img_filter_compile("blur12+scrim+dither", IMG_CLASSES_ALL, &filter);
+    img_filter_adapt(&filter, &cache[slot].cached.levels, wps_ink_luminance(fg));
+    img_filter_render_prepared(out, LCD_WIDTH, LCD_HEIGHT,
+                               cache[slot].cached.plane, &filter);
+    core_put_data_pinned(cache);
+    release_slot(slot);
+    return true;
+}
+
+bool album_blur_render_cover_wps(fb_data *out,
+                                 const struct album_blur_source *source,
+                                 unsigned fg)
+{
+    if (cache_handle <= 0)
+        return false;
+    mutex_lock(&cache_lock);
+    int slot = acquire_slot(source);
+    mutex_unlock(&cache_lock);
+    return render_wps_slot(out, slot, fg);
+}
+
 bool album_blur_render_wps(fb_data *out, int art, unsigned generation, unsigned fg)
 {
     mutex_lock(&cache_lock);
@@ -1047,17 +1074,7 @@ bool album_blur_render_wps(fb_data *out, int art, unsigned generation, unsigned 
     else
         slot = -1;
     mutex_unlock(&cache_lock);
-    if (slot < 0)
-        return false;
-    struct blur_pixels *cache = core_get_data_pinned(cache_handle);
-    struct img_filter filter;
-    img_filter_compile("blur12+scrim+dither", IMG_CLASSES_ALL, &filter);
-    img_filter_adapt(&filter, &cache[slot].cached.levels, wps_ink_luminance(fg));
-    img_filter_render_prepared(out, LCD_WIDTH, LCD_HEIGHT,
-                               cache[slot].cached.plane, &filter);
-    core_put_data_pinned(cache);
-    release_slot(slot);
-    return true;
+    return render_wps_slot(out, slot, fg);
 }
 
 static void write_source(int fd, const struct album_blur_source *source)

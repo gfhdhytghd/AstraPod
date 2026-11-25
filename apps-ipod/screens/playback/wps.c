@@ -825,10 +825,7 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
         else
             gwps_caption_backlight(state);
         if (carousel_wps_present_pending())
-        {
-            native_wps_paint_handoff(state);
-            carousel_wps_present();
-        }
+            carousel_wps_present(state);
         else
         {
             native_wps_render(state, submit);

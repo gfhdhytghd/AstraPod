@@ -9,6 +9,7 @@
 struct viewport;
 struct ui_rect;
 struct wps_state;
+struct album_blur_source;
 
 void native_wps_alloc(void);
 int native_wps_art_slot(void);
@@ -19,9 +20,9 @@ void native_wps_open(const struct wps_state *state);
 bool native_wps_active(void);
 bool native_wps_animating(void);
 void native_wps_render(const struct wps_state *state, bool submit);
-/* Paint the first Cover Flow handoff frame without submitting. Pending
- * artwork gets at most 150 ms while the preceding screen stays visible. */
-void native_wps_paint_handoff(struct wps_state *state);
+/* Paint the first frame using the selected album's backdrop. */
+void native_wps_paint_handoff(const struct wps_state *state,
+                              const struct album_blur_source *source);
 /* The theme slot is available before the page opens. An empty rectangle
  * means no slot. True means the live page has confirmed the layout. */
 bool native_wps_art_layout(struct ui_rect *bounds);
@@ -29,7 +30,7 @@ bool native_wps_art_layout(struct ui_rect *bounds);
  * A NULL destination queries bounds only. Otherwise supply width * height
  * RGB565 pixels; the output is packed column-major, top to bottom. */
 bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major);
-bool native_wps_paint_ready_art(void);
+void native_wps_pick_up_art(void);
 void native_wps_paint_chrome(void);
 int native_wps_chrome_stop(void);
 void native_wps_paint_slide(int hidden, fb_data base);

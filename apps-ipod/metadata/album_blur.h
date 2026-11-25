@@ -35,6 +35,9 @@ unsigned album_blur_generation(void);
 /* Rows `top` to `top + height` of the album panel's backdrop, drawn at the
  * same rows of the current viewport. */
 bool album_blur_draw_panel(const struct album_blur_source *source, int top, int height);
+bool album_blur_render_cover_wps(fb_data *out,
+                                 const struct album_blur_source *source,
+                                 unsigned fg);
 bool album_blur_render_wps(fb_data *out, int art, unsigned generation, unsigned fg);
 /* Debug > Album Blur: the slots, the window, the panel's wait and the last
  * steps, as lines of text. */

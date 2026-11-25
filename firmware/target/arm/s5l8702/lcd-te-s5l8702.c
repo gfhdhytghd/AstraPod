@@ -84,9 +84,15 @@ static unsigned int queued, deferred_count, untimed, no_window, trail_slots;
 static unsigned int loss_starts, gpio_rises, timer_rises, missed_starts;
 static uint32_t max_wait, max_irq_late, max_irq_bound, max_edge_error;
 static uint32_t active_wait, last_wait, last_dma, dma_total;
-static uint32_t irq_edge_at, irq_deadline, irq_origin, irq_delay;
-static int irq_edge_phase;
-static bool irq_edge_valid, irq_armed;
+static uint32_t irq_edge_at, irq_previous, irq_deadline;
+static bool irq_edge_valid, irq_previous_valid, irq_lost;
+static void schedule_irq(uint32_t now);
+
+static bool irq_mode_active(void)
+{
+    return want_sync && !irq_lost &&
+           lcd_experiment_irq_mode() != LCD_TE_IRQ_OFF;
+}
 static uint32_t last_phase_us = UINT32_MAX;
 static unsigned int transfers;
 extern int lcd_type;
@@ -114,7 +120,6 @@ void lcd_te_set_enabled(bool enable)
         want_sync = enable;
         if (pending && lcd_experiment_irq_mode() != LCD_TE_IRQ_OFF)
         {
-            irq_armed = false;
             irq_deadline = USEC_TIMER + TE_LOST_PERIODS * TE_MAX_US;
             schedule();
         }
@@ -143,7 +148,8 @@ bool lcd_te_async_timing(uint32_t *busy, uint32_t *phase,
 bool lcd_te_timing(uint32_t *period, uint32_t *rise, long *rise_tick)
 {
     int flags = disable_irq_save();
-    bool valid = lcd_te_supported() && pulse.valid && edge.valid;
+    bool valid = lcd_te_supported() && pulse.valid &&
+                 (irq_mode_active() ? irq_edge_valid : edge.valid);
     if (valid)
     {
         *period = pulse.period;
@@ -322,34 +328,26 @@ static void start_complete(int rows, uint32_t started)
     pending = rows_left > 0;
 }
 
-static void arm_irq_slot(uint32_t now, uint32_t origin)
-{
-    irq_origin = origin;
-    irq_armed = true;
-    slot_at = origin + irq_delay;
-    timer_arm(now, slot_at);
-}
-
 static void te_irq_edge(enum lcd_te_irq_mode mode, uint32_t now)
 {
     if (te_high() != (mode == LCD_TE_IRQ_RISE))
         return;
 
-    irq_edge_at = now;
-    irq_edge_valid = true;
-    if (mode == LCD_TE_IRQ_RISE || pulse.valid)
-    {
-        last_rise = mode == LCD_TE_IRQ_RISE ? now : now - pulse.high;
-        last_rise_tick = current_tick;
-        edge.valid = true;
-    }
-    if (!pending || !want_sync)
+    uint32_t interval = now - irq_edge_at;
+    if (irq_edge_valid && interval < TE_MIN_US / 2)
         return;
 
+    irq_previous = irq_edge_at;
+    irq_previous_valid = irq_edge_valid && !irq_lost && frame_period(interval);
+    irq_edge_at = now;
+    irq_edge_valid = true;
+    irq_lost = false;
     irq_deadline = now + TE_LOST_PERIODS * TE_MAX_US;
-    /* A late-row slot can land after the next edge. Keep its own origin. */
-    if (!irq_armed)
-        arm_irq_slot(now, now);
+    last_rise = mode == LCD_TE_IRQ_RISE ? now :
+                now - (pulse.valid ? pulse.high : TE_NOMINAL_HIGH_US);
+    last_rise_tick = current_tick;
+    if (pending && want_sync)
+        timer_arm(now, now + 1);
 }
 
 static void te_gpio_edge(struct eic_handler *handler)
@@ -418,7 +416,8 @@ bool lcd_te_set_irq_mode(enum lcd_te_irq_mode mode)
     if (te_registered)
         eint_unregister(&te_gpio);
     lcd_experiment_irq_select(mode);
-    edge.valid = previous_edge.valid = irq_edge_valid = irq_armed = false;
+    edge.valid = previous_edge.valid = false;
+    irq_edge_valid = irq_previous_valid = irq_lost = false;
     sample_valid = loss_confirmed = observed_high = false;
     last_any_rise = observed_high_width = 0;
     last_phase_us = UINT32_MAX;
@@ -474,7 +473,8 @@ void lcd_te_stop(void)
         eint_unregister(&te_gpio);
         te_registered = false;
     }
-    edge.valid = previous_edge.valid = irq_edge_valid = irq_armed = false;
+    edge.valid = previous_edge.valid = false;
+    irq_edge_valid = irq_previous_valid = irq_lost = false;
     restore_irq(flags);
 }
 
@@ -543,7 +543,7 @@ void lcd_te_dma_done(unsigned int width, unsigned int height, uint32_t usec)
     stats->width = width;
     stats->height = height;
     stats->samples++;
-    if (pending && !irq_armed)
+    if (pending)
         schedule();
 }
 
@@ -622,58 +622,99 @@ static bool next_window(uint32_t now, uint32_t *open, uint32_t *close,
     return true;
 }
 
-/* Timer H watches for a missing edge while no start slot is armed. */
+static int irq_edge_phase(void)
+{
+    if (lcd_experiment_irq_mode() == LCD_TE_IRQ_RISE)
+        return 0;
+    return pulse.valid ? pulse.high : TE_NOMINAL_HIGH_US;
+}
+
+static bool choose_irq_slot(uint32_t now, struct lcd_te_scan_slot *slot)
+{
+    if (!irq_edge_valid || !TIME_BEFORE(now, irq_deadline))
+        return false;
+    phase_window(pending_y + rows_done, pending_width, rows_left);
+    return lcd_te_scan_choose(now, irq_edge_at, irq_previous,
+                              irq_previous_valid, first_phase, last_phase,
+                              irq_edge_phase(),
+                              pulse.valid ? pulse.period : TE_NOMINAL_US,
+                              START_BUDGET_US, slot);
+}
+
+/* DMA completion wakes the scheduler while busy. The timer is a watchdog
+ * when there is no usable slot on the observed edges. */
 static void schedule_irq(uint32_t now)
 {
-    uint32_t period = pulse.valid ? pulse.period : TE_NOMINAL_US;
-    uint32_t ready = now;
-    if (lcd_te_dma_busy() && TIME_BEFORE(now, running_until))
-        ready = running_until;
-
-    slot_at = ready;
-    if (irq_edge_valid && now - irq_edge_at < TE_LOST_PERIODS * TE_MAX_US)
+    bool busy = lcd_te_dma_busy();
+    uint32_t ready = busy && TIME_BEFORE(now, running_until) ?
+                      running_until : now;
+    struct lcd_te_scan_slot slot;
+    bool found = choose_irq_slot(ready, &slot);
+    slot_at = found ? slot.at : ready;
+    if (!found && irq_edge_valid && TIME_BEFORE(ready, irq_deadline))
     {
-        uint32_t next = irq_edge_at + period + irq_delay;
-        if (TIME_BEFORE(next, ready))
-            next += ((ready - next + period - 1) / period) * period;
-        slot_at = next;
+        /* Predict a wake for the UI, but arm only from observed edges. */
+        uint32_t period = pulse.valid ? pulse.period : TE_NOMINAL_US;
+        uint32_t next = irq_edge_at + period;
+        if (lcd_te_scan_choose(ready, next, irq_edge_at, true,
+                               first_phase, last_phase, irq_edge_phase(),
+                               period, START_BUDGET_US, &slot))
+            slot_at = slot.at;
     }
-    timer_arm(now, TIME_BEFORE(now, irq_deadline) ?
-                  irq_deadline : now + SEARCH_US);
+    timer_arm(now, found && !busy ? slot.at : irq_deadline);
 }
 
 static void start_irq_slot(uint32_t now)
 {
-    uint32_t target = irq_origin + irq_delay;
-    if (TIME_BEFORE(now, target))
+    if (lcd_te_dma_busy())
     {
-        timer_arm(now, target);
+        mark_deferred();
+        schedule_irq(now);
         return;
     }
 
-    irq_armed = false;
-    unsigned int y0 = pending_y + rows_done;
-    int rows = rows_left;
-    uint32_t started, deadline = target + START_BUDGET_US;
-    if (!TIME_BEFORE(now, deadline) || lcd_te_dma_busy() ||
-        !lcd_te_start_dma(rows_done, rows, true, deadline, &started))
+    struct lcd_te_scan_slot slot;
+    if (!choose_irq_slot(now, &slot))
     {
         mark_deferred();
+        schedule_irq(now);
+        return;
+    }
+    slot_at = slot.at;
+    if (TIME_BEFORE(now, slot.at))
+    {
+        timer_arm(now, slot.at);
+        return;
+    }
+
+    unsigned int y0 = pending_y + rows_done;
+    int rows = rows_left;
+    uint32_t started, deadline = now + START_BUDGET_US;
+    if (TIME_BEFORE(slot.close, deadline))
+        deadline = slot.close;
+    if (!lcd_te_start_dma(rows_done, rows, true, deadline, &started))
+    {
         lcd_experiment_irq_retry();
-        schedule_irq(USEC_TIMER);
+        mark_deferred();
+        timer_arm(USEC_TIMER, USEC_TIMER + SEARCH_US);
         return;
     }
 
     start_complete(rows, started);
     active_wait = started - admitted;
     max_wait = MAX(max_wait, active_wait);
-    uint32_t phase = started - irq_origin;
-    int rise_phase = phase + irq_edge_phase;
+    uint32_t phase = started - slot.origin;
+    int rise_phase = phase + irq_edge_phase();
     last_phase_us = rise_phase;
+    uint32_t period = pulse.valid ? pulse.period : TE_NOMINAL_US;
+    int close = slot.ahead ? last_phase - (int)period +
+                (int)(irq_edge_at - irq_previous) : last_phase;
     lcd_experiment_irq_started(&(struct lcd_te_irq_sample){
         .y0 = y0, .y1 = y0 + rows, .width = pending_width,
-        .delay = irq_delay, .phase = phase, .wait = active_wait,
-        .inside_window = rise_phase >= first_phase && rise_phase <= last_phase,
+        .delay = slot.at - irq_edge_at, .phase = started - irq_edge_at,
+        .wait = active_wait,
+        .inside_window = rise_phase >= first_phase && rise_phase <= close,
+        .ahead = slot.ahead,
     });
 }
 
@@ -687,7 +728,7 @@ static void schedule(void)
     }
 
     uint32_t now = USEC_TIMER;
-    if (want_sync && lcd_experiment_irq_mode() != LCD_TE_IRQ_OFF)
+    if (irq_mode_active())
     {
         schedule_irq(now);
         return;
@@ -723,29 +764,32 @@ void INT_TIMERH(void)
     if (!pending)
         return;
 
-    bool edge_mode = want_sync &&
-                     lcd_experiment_irq_mode() != LCD_TE_IRQ_OFF;
-    if (edge_mode)
+    if (irq_mode_active())
     {
-        if (irq_armed)
+        if (TIME_BEFORE(now, irq_deadline))
         {
             start_irq_slot(now);
             return;
         }
-        if (TIME_BEFORE(now, irq_deadline))
-        {
-            schedule_irq(now);
-            return;
-        }
+
+        /* Qualify fresh sampled edges before relying on the timer model. */
+        lcd_experiment_irq_fallback();
+        irq_lost = true;
+        irq_edge_valid = irq_previous_valid = false;
+        edge.valid = previous_edge.valid = false;
+        sample_valid = observed_high = loss_confirmed = false;
+        observed_high_width = last_any_rise = 0;
+        sample_mode = SAMPLE_SEARCH;
+        sample_at = now;
     }
-    else if (want_sync && !TIME_BEFORE(now, sample_at))
+    if (want_sync && !TIME_BEFORE(now, sample_at))
         sample_pin(now);
 
     if (!lcd_te_dma_busy())
     {
         uint32_t open, close, origin, started;
         int rows = rows_left;
-        bool timed = want_sync && !loss_confirmed && !edge_mode;
+        bool timed = want_sync && !loss_confirmed;
         bool start = !timed;
         if (timed && next_window(now, &open, &close, &origin, &rows))
             start = !TIME_BEFORE(now, open);
@@ -764,8 +808,6 @@ void INT_TIMERH(void)
                 lcd_te_untimed_start();
                 if (want_sync)
                     loss_starts++;
-                if (edge_mode)
-                    lcd_experiment_irq_fallback();
             }
             active_wait = started - admitted;
             if (rows_done == rows)
@@ -806,7 +848,8 @@ void lcd_te_submit(int y, int width, int height, uint32_t copy)
     pending = true;
     deferred = false;
     admitted = now;
-    irq_deadline = now + TE_LOST_PERIODS * TE_MAX_US;
+    if (!irq_edge_valid)
+        irq_deadline = now + TE_LOST_PERIODS * TE_MAX_US;
     last_copy = copy;
     copy_owner = thread_self();
     occupancy = (FULL_DMA_SLOW_US * width * height +
@@ -821,21 +864,6 @@ void lcd_te_submit(int y, int width, int height, uint32_t copy)
             no_window++;
     }
     queued++;
-    if (mode != LCD_TE_IRQ_OFF)
-    {
-        irq_edge_phase = mode == LCD_TE_IRQ_RISE ? 0 :
-                         pulse.valid ? pulse.high : TE_NOMINAL_HIGH_US;
-        irq_delay = lcd_experiment_irq_delay(first_phase, irq_edge_phase);
-        /* A submission after TE can still catch this scan's row slot. */
-        uint32_t period = pulse.valid ? pulse.period : TE_NOMINAL_US;
-        now = USEC_TIMER;
-        if (want_sync && irq_edge_valid && now - irq_edge_at < period &&
-            TIME_BEFORE(now, irq_edge_at + irq_delay))
-        {
-            arm_irq_slot(now, irq_edge_at);
-            return;
-        }
-    }
     schedule();
 }
 
@@ -847,7 +875,6 @@ bool lcd_te_pending(void)
 void lcd_te_cancel(void)
 {
     pending = false;
-    irq_armed = false;
     schedule();
 }
 

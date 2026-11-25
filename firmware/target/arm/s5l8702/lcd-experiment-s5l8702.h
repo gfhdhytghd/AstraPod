@@ -36,11 +36,19 @@ void lcd_experiment_irq_bind(struct eic_handler *handler);
 struct lcd_te_irq_sample {
     unsigned int y0, y1, width;
     uint32_t delay, phase, wait;
-    bool inside_window;
+    bool inside_window, ahead;
 };
 
 void lcd_experiment_irq_offset(int offset);
-uint32_t lcd_experiment_irq_delay(int first_phase, int edge_phase);
+struct lcd_te_scan_slot {
+    uint32_t at, close, origin;
+    bool ahead;
+};
+
+bool lcd_te_scan_choose(uint32_t now, uint32_t edge, uint32_t previous,
+                        bool previous_valid, int first, int last,
+                        int high, uint32_t period, unsigned int budget,
+                        struct lcd_te_scan_slot *slot);
 void lcd_experiment_irq_started(const struct lcd_te_irq_sample *sample);
 void lcd_experiment_irq_retry(void);
 void lcd_experiment_irq_fallback(void);

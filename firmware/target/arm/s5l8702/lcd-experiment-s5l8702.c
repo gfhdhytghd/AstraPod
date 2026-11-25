@@ -13,11 +13,12 @@ static unsigned int stock_mask;
 
 #define IRQ_TRACE_SIZE 16
 
-static enum lcd_te_irq_mode irq_mode;
+static enum lcd_te_irq_mode irq_mode = LCD_TE_IRQ_FALL;
 static int irq_offset;
 static struct {
     unsigned int started, retries, fallbacks;
-    uint32_t max_wait, max_phase;
+    uint32_t max_wait;
+    unsigned int ahead, wait_buckets[6];
     struct lcd_te_irq_sample trace[IRQ_TRACE_SIZE];
 } irq_stats;
 
@@ -95,9 +96,30 @@ void lcd_experiment_irq_offset(int offset)
     memset(&irq_stats, 0, sizeof(irq_stats));
 }
 
-uint32_t lcd_experiment_irq_delay(int first_phase, int edge_phase)
+/* One interval trails its own scan and leads the following scan. Try the
+ * preceding interval first, using the newest measured edge for its close. */
+bool lcd_te_scan_choose(uint32_t now, uint32_t edge, uint32_t previous,
+                        bool previous_valid, int first, int last,
+                        int high, uint32_t period, unsigned int budget,
+                        struct lcd_te_scan_slot *slot)
 {
-    return MAX(0, first_phase - edge_phase + irq_offset);
+    uint32_t open = previous + first - high + irq_offset;
+    uint32_t close = edge + last - period - high + irq_offset;
+    uint32_t at = TIME_BEFORE(now, open) ? open : now;
+    if (previous_valid && TIME_BEFORE(at + budget, close))
+    {
+        *slot = (struct lcd_te_scan_slot){at, close, previous, true};
+        return true;
+    }
+
+    open = edge + first - high + irq_offset;
+    close = edge + last - high + irq_offset;
+    at = TIME_BEFORE(now, open) ? open : now;
+    if (!TIME_BEFORE(at + budget, close))
+        return false;
+
+    *slot = (struct lcd_te_scan_slot){at, close, edge, false};
+    return true;
 }
 
 void lcd_experiment_irq_started(const struct lcd_te_irq_sample *sample)
@@ -105,7 +127,12 @@ void lcd_experiment_irq_started(const struct lcd_te_irq_sample *sample)
     unsigned int slot = irq_stats.started++ % IRQ_TRACE_SIZE;
     irq_stats.trace[slot] = *sample;
     irq_stats.max_wait = MAX(irq_stats.max_wait, sample->wait);
-    irq_stats.max_phase = MAX(irq_stats.max_phase, sample->phase);
+    irq_stats.ahead += sample->ahead;
+    uint32_t wait = sample->wait;
+    unsigned int bucket = wait < 1000 ? 0 : wait < 2500 ? 1 :
+                          wait < 5000 ? 2 : wait < 10000 ? 3 :
+                          wait < 15000 ? 4 : 5;
+    irq_stats.wait_buckets[bucket]++;
 }
 
 void lcd_experiment_irq_retry(void)
@@ -134,17 +161,24 @@ void lcd_experiment_report(int (*report)(const char *, ...))
         report("TE IRQ scan offset=%d us | y1 is exclusive", offset);
     if (stats.started)
     {
-        report("TE IRQ max ready-to-start=%lu us max edge-to-start=%lu us",
-               (unsigned long)stats.max_wait, (unsigned long)stats.max_phase);
+        report("TE IRQ ahead=%u behind=%u max ready-to-start=%lu us",
+               stats.ahead, stats.started - stats.ahead,
+               (unsigned long)stats.max_wait);
+        report("TE IRQ wait bins (ms): <1=%u 1-2.5=%u 2.5-5=%u "
+               "5-10=%u 10-15=%u >=15=%u",
+               stats.wait_buckets[0], stats.wait_buckets[1],
+               stats.wait_buckets[2], stats.wait_buckets[3],
+               stats.wait_buckets[4], stats.wait_buckets[5]);
         report("TE IRQ edge timestamps are taken at ISR entry");
         unsigned int first = stats.started - MIN(stats.started, IRQ_TRACE_SIZE);
         for (unsigned int i = first; i < stats.started; i++)
         {
             const struct lcd_te_irq_sample *s = &stats.trace[i % IRQ_TRACE_SIZE];
             report("  frame %u y0=%u y1=%u width=%u delay=%lu us "
-                   "edge-to-start=%lu us wait=%lu us window=%s",
+                   "edge-to-start=%lu us wait=%lu us %s window=%s",
                    i + 1, s->y0, s->y1, s->width, (unsigned long)s->delay,
                    (unsigned long)s->phase, (unsigned long)s->wait,
+                   s->ahead ? "ahead" : "behind",
                    s->inside_window ? "inside" : "outside");
         }
     }

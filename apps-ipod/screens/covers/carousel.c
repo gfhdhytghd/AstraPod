@@ -6389,7 +6389,9 @@ static struct {
     struct playback_texture wall[STOCK_MAX_VISIBLE + 1], art;
     struct stock_pose centre, playing;
     struct stock_flow walls;
-    int count, album, screen;
+    int count, album, screen, chrome;
+    int chrome_stop;
+    bool screen_has_art, chrome_staged;
     pix_t bg;
     bool pending, from_panel, returning;
 } playback_scene;
@@ -6406,6 +6408,7 @@ static void release_playback_scene(void)
     for (int i = 0; i < playback_scene.count; i++)
         drop_playback_bitmap(&playback_scene.wall[i].handle);
     drop_playback_bitmap(&playback_scene.art.handle);
+    drop_playback_bitmap(&playback_scene.chrome);
     drop_playback_bitmap(&playback_scene.screen);
     memset(&playback_scene, 0, sizeof(playback_scene));
 }
@@ -6455,10 +6458,14 @@ static void keep_playback_cover(int album)
 static void capture_playback_frame(void)
 {
     drop_playback_bitmap(&playback_scene.art.handle);
+    drop_playback_bitmap(&playback_scene.chrome);
     drop_playback_bitmap(&playback_scene.screen);
     playback_scene.playing = stock_playing_pose();
     struct ui_rect r;
-    if (native_wps_art_frame(&r, NULL))
+    playback_scene.chrome_stop = native_wps_chrome_stop();
+    playback_scene.chrome_staged = false;
+    playback_scene.screen_has_art = native_wps_art_frame(&r, NULL);
+    if (playback_scene.screen_has_art)
     {
         int art = core_alloc_free_space(r.width * r.height * sizeof(pix_t));
         if (art > 0)
@@ -6478,23 +6485,28 @@ static void capture_playback_frame(void)
     if (playback_scene.screen > 0)
     {
         pix_t *dst = core_get_data_pinned(playback_scene.screen);
-        memcpy(dst, lcd_framebuffer_default.fb_ptr, LCD_WIDTH * LCD_HEIGHT * sizeof(*dst));
+        size_t bytes = LCD_WIDTH * LCD_HEIGHT * sizeof(*dst);
+        memcpy(dst, lcd_framebuffer_default.fb_ptr, bytes);
+        if (playback_scene.screen_has_art)
+        {
+            playback_scene.chrome = core_alloc_free_space(bytes);
+            if (playback_scene.chrome > 0)
+            {
+                native_wps_paint_chrome();
+                pix_t *chrome = core_get_data_pinned(playback_scene.chrome);
+                memcpy(chrome, lcd_framebuffer_default.fb_ptr, bytes);
+                core_put_data_pinned(chrome);
+                memcpy(lcd_framebuffer_default.fb_ptr, dst, bytes);
+            }
+        }
         core_put_data_pinned(dst);
     }
-}
-
-void carousel_wps_capture_return(void)
-{
-    if (flat_view())
-        return;
-    capture_playback_frame();
-    playback_scene.returning = true;
 }
 
 static void restore_playback_pixels(void)
 {
     const pix_t *src = core_get_data_pinned(playback_scene.screen);
-    memcpy(LCD_BUF, src, LCD_WIDTH * LCD_HEIGHT * sizeof(*src));
+    memcpy(lcd_framebuffer_default.fb_ptr, src, LCD_WIDTH * LCD_HEIGHT * sizeof(*src));
     core_put_data_pinned((void *)src);
 }
 
@@ -6526,10 +6538,46 @@ static void paint_playback_cover(struct stock_pose pose, int album)
     }
 }
 
+/* During the turn the leading control can travel as far as the cover's
+ * left edge. Both directions use the same position at the phase boundary. */
+#define PLAYBACK_TURN_US 500000u
+#define PLAYBACK_SLIDE_US 180000u
+
+static int playback_turn_width(uint32_t elapsed, bool returning)
+{
+    unsigned time = MIN(elapsed, PLAYBACK_TURN_US);
+    if (!returning)
+        time = PLAYBACK_TURN_US - time;
+    unsigned t = time * 1024 / PLAYBACK_TURN_US;
+    int travel = LCD_WIDTH - playback_scene.chrome_stop;
+    return travel - (travel * t * t + (1u << 19)) / (1u << 20);
+}
+
+static void paint_playback_background(int width)
+{
+    int handle = playback_scene.screen_has_art ? playback_scene.chrome : playback_scene.screen;
+    if (!width || handle <= 0)
+    {
+        memset16(LCD_BUF, playback_scene.bg, LCD_WIDTH * LCD_HEIGHT);
+        return;
+    }
+    const pix_t *pixels = core_get_data_pinned(handle);
+    int hidden = LCD_WIDTH - width;
+    for (int y = 0; y < LCD_HEIGHT; y++)
+    {
+        pix_t *dst = LCD_BUF + y * LCD_WIDTH;
+        memcpy(dst, pixels + y * LCD_WIDTH + hidden, width * sizeof(*dst));
+        if (hidden)
+            memset16(dst + width, playback_scene.bg, hidden);
+    }
+    core_put_data_pinned((void *)pixels);
+}
+
 static void paint_playback_row(struct stock_flow *walls, struct stock_pose centre, uint32_t now)
 {
     int n = stock_sample(walls, now, flow_visible);
-    memset16(LCD_BUF, playback_scene.bg, LCD_WIDTH * LCD_HEIGHT);
+    int width = playback_turn_width(now - walls->start_us, playback_scene.returning);
+    paint_playback_background(width);
     for (int i = 0; i < n; i++)
         if (flow_visible[i].album != playback_scene.album)
             paint_playback_cover(flow_visible[i].pose, flow_visible[i].album);
@@ -6542,6 +6590,42 @@ static void paint_playback_row(struct stock_flow *walls, struct stock_pose centr
         paint_playback_cover(centre, playback_scene.album);
 }
 
+/* WPS still owns its views and fonts on both sides of the stationary phase.
+ * Draw each control over the flat artwork with its normal theme painter. */
+static void slide_playback_controls(bool returning)
+{
+    if (!native_wps_active() || playback_scene.screen <= 0 || !lcd_active())
+        return;
+    uint32_t start = USEC_TIMER, now = start;
+    for (;;)
+    {
+        unsigned elapsed = MIN(now - start, PLAYBACK_SLIDE_US);
+        unsigned time = returning ? elapsed : PLAYBACK_SLIDE_US - elapsed;
+        unsigned t = time * 1024 / PLAYBACK_SLIDE_US;
+        int hidden = (playback_scene.chrome_stop * t * t + (1u << 19)) / (1u << 20);
+        if (hidden)
+            native_wps_paint_slide(hidden, playback_scene.bg);
+        else
+            restore_playback_pixels();
+        lcd_update();
+        if (elapsed == PLAYBACK_SLIDE_US || !lcd_active())
+            break;
+        ui_clock_sleep(ui_clock_wait_until(ui_pace_next(&flow_pace, start)));
+        now = USEC_TIMER;
+    }
+    playback_scene.chrome_staged = true;
+}
+
+void carousel_wps_capture_return(void)
+{
+    if (flat_view())
+        return;
+    capture_playback_frame();
+    playback_scene.returning = true;
+    if (pf_motion_scale)
+        slide_playback_controls(true);
+}
+
 /* WPS has now laid out the selected track and painted its first frame. At
  * the landing, the overlap includes any WPS text or scrim across the art. */
 void carousel_wps_present(void)
@@ -6551,6 +6635,7 @@ void carousel_wps_present(void)
     if (playback_scene.screen <= 0 || !lcd_active())
     {
         drop_playback_bitmap(&playback_scene.art.handle);
+        drop_playback_bitmap(&playback_scene.chrome);
         drop_playback_bitmap(&playback_scene.screen);
         if (lcd_active())
             lcd_update();
@@ -6567,18 +6652,18 @@ void carousel_wps_present(void)
     {
         paint_playback_row(&playback_scene.walls, stock_flip_pose(&flip, now), now);
         bool landed = stock_flip_done(&flip, now);
-        if (landed && playback_scene.art.handle > 0)
-            restore_playback_pixels();
         lcd_update();
         if (landed || !lcd_active())
             break;
         ui_clock_sleep(ui_clock_wait_until(ui_pace_next(&flow_pace, start)));
         now = USEC_TIMER;
     }
+    slide_playback_controls(false);
     restore_playback_pixels();
     lcd_update();
     cpu_boost(false);
     drop_playback_bitmap(&playback_scene.art.handle);
+    drop_playback_bitmap(&playback_scene.chrome);
     drop_playback_bitmap(&playback_scene.screen);
 }
 
@@ -6629,7 +6714,7 @@ static void return_from_playback(void)
     {
         for (;;)
         {
-            if (now == start && playback_scene.screen > 0)
+            if (now == start && playback_scene.screen > 0 && !playback_scene.chrome_staged)
                 restore_playback_pixels();
             else
             {

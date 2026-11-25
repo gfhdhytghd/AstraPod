@@ -26,6 +26,9 @@ void native_wps_paint_handoff(struct wps_state *state);
  * A NULL destination queries bounds only. Otherwise supply width * height
  * RGB565 pixels; the output is packed column-major, top to bottom. */
 bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major);
+void native_wps_paint_chrome(void);
+int native_wps_chrome_stop(void);
+void native_wps_paint_slide(int hidden, fb_data base);
 void native_wps_invalidate(void);
 void native_wps_close(void);
 

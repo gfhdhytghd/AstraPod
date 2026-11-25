@@ -1217,6 +1217,13 @@ actual LCD rectangle and source crop determine the face-on endpoint.
 The inverse projection keeps the longer side at 70 world units. A theme
 without visible art uses the stock playback pose.
 
+Playback controls slide in from the left during the 500 ms turn. Their
+leading edge reaches the cover rectangle as the cover lands. Over the next
+180 ms the native controls move to their normal positions over the stationary
+art. Both stages use quadratic ease-out. Return plays the control motion in
+reverse, clearing the artwork before its turn begins. The backdrop travels
+under the cover. Each frame of these transitions updates the whole LCD.
+
 MENU after playing a panel track retraces the 500 ms turn and wall motion,
 then restores the same panel and selected row. Its next MENU returns to the
 carousel. A direct return from playback holds the playback pose for 250 ms,

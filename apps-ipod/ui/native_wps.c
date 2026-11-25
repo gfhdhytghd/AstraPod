@@ -212,8 +212,12 @@ static void paint_cover(const struct ui_view *view, const struct ui_view_frame *
 
 bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major)
 {
-    if (!active || painted_art.width <= 0 || painted_art.height <= 0 ||
-        painted_generation != album_art_generation() ||
+    if (!active || painted_art.width <= 0 || painted_art.height <= 0)
+        return false;
+    *bounds = painted_art;
+    if (!column_major)
+        return true;
+    if (painted_generation != album_art_generation() ||
         !wps_art_pin(wps->art_handle, true))
         return false;
 
@@ -222,16 +226,12 @@ bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major)
                  art->width >= painted_art.width && art->height >= painted_art.height;
     if (valid)
     {
-        *bounds = painted_art;
-        if (column_major)
-        {
-            const fb_data *src = (const fb_data *)art->data +
-                (art->height - bounds->height) / 2 * art->width +
-                (art->width - bounds->width) / 2;
-            for (int x = 0; x < bounds->width; x++)
-                for (int y = 0; y < bounds->height; y++)
-                    *column_major++ = src[y * art->width + x];
-        }
+        const fb_data *src = (const fb_data *)art->data +
+            (art->height - bounds->height) / 2 * art->width +
+            (art->width - bounds->width) / 2;
+        for (int x = 0; x < bounds->width; x++)
+            for (int y = 0; y < bounds->height; y++)
+                *column_major++ = src[y * art->width + x];
     }
     wps_art_pin(wps->art_handle, false);
     return valid;
@@ -343,7 +343,8 @@ static void paint_volume(const struct ui_view *view, const struct ui_view_frame 
     struct viewport *previous = paint_viewport(&viewport, frame, wps->volume_font);
     lcd_set_foreground(wps->bg);
     lcd_fillrect(0, 0, viewport.width, viewport.height);
-    int x = m[UI_METRIC_WPS_VOLUME_X] - frame->clip.x;
+    int left = frame->bounds.x - frame->clip.x;
+    int x = left + m[UI_METRIC_WPS_VOLUME_X];
     int layer_y = frame->bounds.y - frame->clip.y;
     int y = m[UI_METRIC_WPS_VOLUME_Y] + layer_y;
     int width = m[UI_METRIC_WPS_VOLUME_WIDTH];
@@ -352,9 +353,9 @@ static void paint_volume(const struct ui_view *view, const struct ui_view_frame 
     lcd_fillrect(x, y, width, height);
     lcd_set_foreground(wps->fg);
     y = m[UI_METRIC_WPS_TRANSPORT_Y] + layer_y + 4;
-    lcd_putsxy(m[UI_METRIC_STATUS_PAD_LEFT] - frame->clip.x, y,
+    lcd_putsxy(left + m[UI_METRIC_STATUS_PAD_LEFT], y,
                (const unsigned char *)(wps->volume_muted ? "M" : "N"));
-    lcd_putsxy(LCD_WIDTH - frame->clip.x - m[UI_METRIC_STATUS_PAD_RIGHT] -
+    lcd_putsxy(left + LCD_WIDTH - m[UI_METRIC_STATUS_PAD_RIGHT] -
                m[UI_METRIC_STATUS_ICON_SIZE], y, (const unsigned char *)"O");
     lcd_set_viewport(previous);
 }
@@ -372,6 +373,75 @@ static struct ui_rect view_bounds(enum wps_view id)
 {
     const int *v = wps->view[id].value;
     return (struct ui_rect) { v[UI_X], v[UI_Y], v[UI_WIDTH], v[UI_HEIGHT] };
+}
+
+/* Paint the retained layers below and above the artwork once, without
+ * submitting or advancing the page clock. The caller restores the LCD buffer. */
+void native_wps_paint_chrome(void)
+{
+    struct ui_view *cover = &wps->view[WPS_COVER];
+    int opacity = cover->value[UI_OPACITY];
+    cover->value[UI_OPACITY] = 0;
+    ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
+    ui_page_paint(&wps->page);
+    cover->value[UI_OPACITY] = opacity;
+}
+
+/* Horizontal shift that puts the rightmost visible control at the artwork's
+ * left edge. Themes without painted artwork use their configured cover slot. */
+int native_wps_chrome_stop(void)
+{
+    if (!active)
+        return LCD_WIDTH;
+    int left = painted_art.width ? painted_art.x : view_bounds(WPS_COVER).x;
+    int right = 0;
+    struct ui_view *root = &wps->view[WPS_ROOT];
+    for (struct ui_view *v = root->first_child; v; v = v->next_sibling)
+    {
+        const int *p = v->value;
+        int y = p[UI_Y] + p[UI_OFFSET_Y];
+        if (v != &wps->view[WPS_COVER] && p[UI_OPACITY] && y < LCD_HEIGHT &&
+            y + p[UI_HEIGHT] > 0)
+            right = MAX(right, p[UI_X] + p[UI_OFFSET_X] + p[UI_WIDTH]);
+    }
+    return MAX(0, MIN(right, LCD_WIDTH) - left);
+}
+
+/* Translate the backdrop and control views. The artwork keeps its native
+ * bounds. The full page is painted without advancing the playback UI clock. */
+void native_wps_paint_slide(int hidden, fb_data base)
+{
+    if (rock_ui_raw())
+        return;
+    struct viewport *previous = lcd_set_viewport(NULL);
+    lcd_set_drawmode(DRMODE_SOLID);
+    int width = LCD_WIDTH - hidden;
+    lcd_set_foreground(base);
+    lcd_fillrect(width, 0, hidden, LCD_HEIGHT);
+    if (wps->background > 0)
+    {
+        fb_data *src = core_get_data_pinned(wps->background);
+        lcd_bitmap_part(src, hidden, 0, LCD_WIDTH, 0, 0, width, LCD_HEIGHT);
+        core_put_data_pinned(src);
+    }
+    else
+    {
+        lcd_set_foreground(wps->bg);
+        lcd_fillrect(0, 0, width, LCD_HEIGHT);
+    }
+    lcd_set_viewport(previous);
+
+    struct ui_view *root = &wps->view[WPS_ROOT];
+    root->ops = NULL;
+    for (struct ui_view *v = root->first_child; v; v = v->next_sibling)
+        if (v != &wps->view[WPS_COVER])
+            v->value[UI_OFFSET_X] -= hidden;
+    ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
+    ui_page_paint(&wps->page);
+    for (struct ui_view *v = root->first_child; v; v = v->next_sibling)
+        if (v != &wps->view[WPS_COVER])
+            v->value[UI_OFFSET_X] += hidden;
+    root->ops = &background_ops;
 }
 
 static void label_set(struct wps_label *label, int font, char *text, size_t capacity)

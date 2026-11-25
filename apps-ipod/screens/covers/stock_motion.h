@@ -21,7 +21,7 @@ struct stock_pose { int32_t x, y, z, yaw; };
 struct stock_edge { int32_t x, top, bottom, depth; };
 struct stock_visible { int album; struct stock_pose pose; bool linear; };
 
-enum stock_phase { STOCK_REST, STOCK_ENTER, STOCK_SCROLL, STOCK_LEAVE };
+enum stock_phase { STOCK_REST, STOCK_ENTER, STOCK_MENU_ENTER, STOCK_SCROLL, STOCK_LEAVE };
 struct stock_flow {
     int count, selected, first, length;
     uint32_t start_us;
@@ -91,14 +91,27 @@ static inline void stock_init(struct stock_flow *f, int count, int selected,
     }
 }
 
-/* Only a return from playback has an on-screen cover to carry into the row.
- * A menu entry starts the centre another 100 world units to the left. */
+/* The selected album enters as wall 1 of the right stack. Albums to its
+ * right start one wall farther out and shift into their final slots. */
+#define STOCK_MENU_TURN_US 400000u
+
 static inline void stock_enter(struct stock_flow *f, int count, int selected,
                                uint32_t now, bool from_playback)
 {
     stock_init(f, count, selected, now, true);
-    if (count && !from_playback)
-        f->start[selected - f->first].x -= 100 * STOCK_ONE;
+    if (from_playback || !count)
+        return;
+    f->phase = STOCK_MENU_ENTER;
+    for (int i = selected - f->first; i < f->length; i++) {
+        int wall = f->first + i - selected + 1;
+        f->start[i] = stock_slot_base(wall);
+        f->start[i].x += (100 + wall * STOCK_SPACING) * STOCK_ONE;
+    }
+}
+
+static inline bool stock_entering(const struct stock_flow *f)
+{
+    return f->phase == STOCK_ENTER || f->phase == STOCK_MENU_ENTER;
 }
 
 static inline int stock_scroll_progress(const struct stock_flow *f, uint32_t now)
@@ -116,7 +129,18 @@ static inline struct stock_visible stock_current(const struct stock_flow *f,
     struct stock_pose a = f->start[anchor], b = stock_slot_base(rel);
     int64_t from_slots = i - anchor, to_slots = rel;
     uint32_t elapsed = now - f->start_us;
-    if (f->phase == STOCK_ENTER) {
+    int32_t entry_offset = 0;
+    if (f->phase == STOCK_MENU_ENTER && rel >= 0) {
+        /* Translate the stack in wall order. Once the inner wall is visible,
+         * apply the normal one-slot scroll to every right-hand member. */
+        unsigned delay = (unsigned)(rel + 1) * 100000u;
+        int ingress = stock_progress(elapsed > delay ? elapsed - delay : 0,
+                                     STOCK_SCROLL_US, false);
+        entry_offset = 100 * (STOCK_ONE - ingress);
+        a.x -= 100 * STOCK_ONE;
+        e = stock_progress(elapsed > STOCK_MENU_TURN_US ? elapsed - STOCK_MENU_TURN_US : 0,
+                           STOCK_SCROLL_US, false);
+    } else if (stock_entering(f)) {
         unsigned delay = rel ? (unsigned)stock_abs(rel) * 100000u : 250000u;
         e = stock_progress(elapsed > delay ? elapsed - delay : 0, STOCK_SCROLL_US, false);
     } else if (f->phase == STOCK_LEAVE) {
@@ -131,7 +155,7 @@ static inline struct stock_visible stock_current(const struct stock_flow *f,
                                     40 * STOCK_ONE, 90 * STOCK_ONE};
         }
     }
-    int64_t x = a.x + stock_mul(b.x - a.x, e) +
+    int64_t x = entry_offset + a.x + stock_mul(b.x - a.x, e) +
                 STOCK_SPACING * (from_slots * (STOCK_ONE - e) + to_slots * e);
     struct stock_visible v = {
         .album = album,
@@ -224,6 +248,8 @@ static inline bool stock_animating(const struct stock_flow *f, uint32_t now)
         return false;
     if (f->phase == STOCK_LEAVE)
         duration = 250000;
+    else if (f->phase == STOCK_MENU_ENTER)
+        duration += STOCK_MENU_TURN_US;
     else if (f->phase == STOCK_ENTER)
         duration += (f->selected >= 3 || f->count - f->selected > 3) ? 300000 : 250000;
     return now - f->start_us < duration;
@@ -241,7 +267,7 @@ static inline int stock_sample(const struct stock_flow *f, uint32_t now,
             break;
         /* Playback and entry walls remain visible until their last pixels
          * cross the viewport edge. Scrolling recycles at the world band. */
-        if (f->phase != STOCK_ENTER && !f->playback_walls &&
+        if (!stock_entering(f) && !f->playback_walls &&
             (v.pose.x <= -STOCK_BAND * STOCK_ONE || v.pose.x >= STOCK_BAND * STOCK_ONE))
             continue;
         int pos = n++;

@@ -17,6 +17,7 @@
 #define PACE_SITES 10
 /* Frames over budget at full rate before an animation drops to half rate. */
 #define LATE_LIMIT 2
+#define RECOVERY_FRAMES 4
 /* Wake so the submit reaches the driver this long before its TE window. */
 #define WINDOW_LEAD_US 1500
 /* Keeps a wake inside the frame it is for despite wake latency. */
@@ -109,7 +110,7 @@ static void begin(struct ui_pace *pace, uint32_t start, unsigned frame,
     pace->divisor = ui_te_pacing && half ? 2 : 1;
     pace->start = start;
     pace->frame = frame;
-    pace->late = 0;
+    pace->late = pace->on_time = 0;
     pace->shown = pace->missed = 0;
     pace->dma = pace->busy = 0;
     pace->running = true;
@@ -158,12 +159,29 @@ static void measure(struct ui_pace *pace, uint32_t cost, uint32_t period,
     pace->busy = busy;
     if (!ui_te_pacing)
         pace->offset = 0;
-    else if (pace->divisor == 1 &&
-             (cost > period * 15 / 16 ||
-              (!pace->async && dma > period * 15 / 16) ||
-              busy > period + period / 16) &&
-             ++pace->late >= LATE_LIMIT)
-        pace->divisor = 2;
+    else {
+        bool late = cost > period * 15 / 16 ||
+                    (!pace->async && dma > period * 15 / 16) ||
+                    busy > period + period / 16;
+        if (pace->divisor == 1 && late) {
+            if (++pace->late >= LATE_LIMIT) {
+                pace->divisor = 2;
+                pace->on_time = 0;
+            }
+        } else if (pace->async && pace->recover_full_rate) {
+            /* A wheel gesture can slow down without starting a new animation.
+             * Require spare time for four draws before resuming every TE. */
+            pace->late = 0;
+            if (pace->divisor == 2 && !late && cost <= period * 7 / 8) {
+                if (++pace->on_time >= RECOVERY_FRAMES) {
+                    pace->divisor = 1;
+                    pace->on_time = 0;
+                }
+            } else {
+                pace->on_time = 0;
+            }
+        }
+    }
     pace->shown++;
 }
 

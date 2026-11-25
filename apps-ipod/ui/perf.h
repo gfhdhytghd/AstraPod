@@ -15,19 +15,24 @@ unsigned ui_perf_begin(const char *route);
 unsigned ui_perf_begin_passive(const char *route);
 void ui_perf_end(unsigned capture);
 
-/* Accumulate carousel diagnostics until the next artwork submission. */
+enum ui_cover_stage {
+    UI_COVER_MOTION, UI_COVER_PROJECT, UI_COVER_COLUMNS, UI_COVER_BLIT,
+    UI_COVER_CLEAR, UI_COVER_OTHER, UI_COVER_STAGE_COUNT
+};
+/* Non-overlapping render stages accumulate until the next art submission. */
 void ui_perf_note_cover_work(unsigned changes, uint32_t cache_wait_us,
-                             uint32_t caption_us);
+                             uint32_t caption_us, const uint32_t stages[UI_COVER_STAGE_COUNT]);
 void ui_perf_note_render(uint32_t elapsed_clock);
 void ui_perf_note_submit(uint32_t elapsed_clock);
 
 /* For a frame with multiple driver calls, sample each immediately on return.
  * Zero-initialize the accumulator before the first call. */
 struct ui_perf_transfers {
-    uint32_t first, last, calls_us, copy_us, dma_phase;
+    uint32_t primary_start, last, calls_us, copy_us, dma_phase;
+    uint32_t caption_calls_us, caption_copy_us;
     bool sampled, async;
 };
-void ui_perf_add_transfer(struct ui_perf_transfers *timing, uint32_t start);
+void ui_perf_add_transfer(struct ui_perf_transfers *timing, uint32_t start, unsigned part);
 void ui_perf_note_transfers(const struct ui_perf_transfers *timing);
 /* What the next submission sends: UI_PERF_* parts, the art rect's rows and
  * the caption's rows. Both parts can share a rect or use two transfers. */

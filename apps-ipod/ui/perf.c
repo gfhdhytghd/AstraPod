@@ -33,12 +33,13 @@
 struct cover_work {
     unsigned target_changes;
     uint32_t cache_wait_us, caption_us;
+    uint32_t stage_us[UI_COVER_STAGE_COUNT];
 };
 
 struct frame_sample {
     struct cover_work cover;
     uint32_t render, submit, submit_overhead, interval, skipped, phase;
-    uint32_t dma_phase;
+    uint32_t dma_phase, caption_copy_us, caption_overhead_us;
     uint8_t divisor;
     uint8_t parts;
     uint16_t art_rows, caption_rows;
@@ -125,7 +126,7 @@ unsigned ui_perf_begin(const char *route) { return begin_capture(route, false); 
 unsigned ui_perf_begin_passive(const char *route) { return begin_capture(route, true); }
 
 void ui_perf_note_cover_work(unsigned changes, uint32_t cache_wait_us,
-                             uint32_t caption_us)
+                             uint32_t caption_us, const uint32_t stages[UI_COVER_STAGE_COUNT])
 {
     if (active_handle <= 0 || owner != thread_self())
         return;
@@ -134,6 +135,8 @@ void ui_perf_note_cover_work(unsigned changes, uint32_t cache_wait_us,
     work->target_changes += changes;
     work->cache_wait_us = add_time(work->cache_wait_us, cache_wait_us);
     work->caption_us = add_time(work->caption_us, caption_us);
+    for (unsigned i = 0; i < UI_COVER_STAGE_COUNT; i++)
+        work->stage_us[i] = add_time(work->stage_us[i], stages[i]);
     core_put_data_pinned(capture);
 }
 
@@ -159,7 +162,7 @@ void ui_perf_note_rects(unsigned parts, unsigned art_rows,
 }
 
 static void add_transfer(struct ui_perf_transfers *timing, uint32_t start,
-                         uint32_t end)
+                         uint32_t end, unsigned part)
 {
     uint32_t elapsed = end - start;
     uint32_t copy = UINT32_MAX;
@@ -167,18 +170,25 @@ static void add_transfer(struct ui_perf_transfers *timing, uint32_t start,
 #ifdef HAVE_LCD_VSYNC
     timing->async = lcd_vsync_async_timing(NULL, &timing->dma_phase, NULL, &copy);
 #endif
-    if (!timing->sampled)
-        timing->first = start;
+    /* A pending caption can be submitted before this frame's artwork. */
+    if (!timing->sampled || (part & UI_PERF_ART))
+        timing->primary_start = start;
     timing->sampled = true;
     timing->last = end;
     timing->calls_us = add_time(timing->calls_us, elapsed);
-    timing->copy_us = add_time(timing->copy_us,
-                               timing->async && copy <= elapsed ? copy : elapsed);
+    if (!timing->async || copy > elapsed)
+        copy = elapsed;
+    timing->copy_us = add_time(timing->copy_us, copy);
+    if (part == UI_PERF_CAPTION)
+    {
+        timing->caption_calls_us = add_time(timing->caption_calls_us, elapsed);
+        timing->caption_copy_us = add_time(timing->caption_copy_us, copy);
+    }
 }
 
-void ui_perf_add_transfer(struct ui_perf_transfers *timing, uint32_t start)
+void ui_perf_add_transfer(struct ui_perf_transfers *timing, uint32_t start, unsigned part)
 {
-    add_transfer(timing, start, USEC_TIMER);
+    add_transfer(timing, start, USEC_TIMER, part);
 }
 
 void ui_perf_note_submit(uint32_t elapsed_clock)
@@ -187,7 +197,7 @@ void ui_perf_note_submit(uint32_t elapsed_clock)
         return;
     struct ui_perf_transfers timing = {0};
     uint32_t end = USEC_TIMER;
-    add_transfer(&timing, end - elapsed_clock, end);
+    add_transfer(&timing, end - elapsed_clock, end, 0);
     ui_perf_note_transfers(&timing);
 }
 
@@ -204,12 +214,22 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
     struct frame_sample sample = { .render = capture->render_pending,
                                   .submit = timing->copy_us,
                                   .submit_overhead = timing->calls_us - timing->copy_us,
-                                  .phase = ui_clock_phase(timing->first),
+                                  .phase = ui_clock_phase(timing->primary_start),
                                   .dma_phase = timing->dma_phase,
                                   .divisor = MAX(1, pace.divisor),
                                   .parts = capture->parts_pending,
                                   .art_rows = capture->art_pending,
                                   .caption_rows = capture->caption_pending };
+    if (sample.parts == UI_PERF_CAPTION)
+    {
+        sample.caption_copy_us = sample.submit;
+        sample.caption_overhead_us = sample.submit_overhead;
+    }
+    else
+    {
+        sample.caption_copy_us = timing->caption_copy_us;
+        sample.caption_overhead_us = timing->caption_calls_us - timing->caption_copy_us;
+    }
     if (sample.parts & UI_PERF_ART)
     {
         sample.cover = capture->cover_pending;
@@ -298,7 +318,9 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
     static const char header[] =
         "frame,render_f,submit_f,work_f,interval_f,work_miss,interval_miss,skipped_slots,"
         "divisor,phase_us,parts,art_rows,caption_rows,submit_overhead_f,"
-        "last_dma_start_phase_us,target_changes,cache_wait_us,caption_us\n";
+        "last_dma_start_phase_us,target_changes,cache_wait_us,caption_us,"
+        "motion_us,project_us,columns_us,blit_us,clear_us,render_other_us,"
+        "art_copy_us,art_submit_overhead_us,caption_copy_us,caption_submit_overhead_us\n";
     static const char *const parts[] = { "-", "a", "c", "ac" };
     uint32_t period_q8 = capture->period_q8;
     uint32_t period = (period_q8 + 128) >> 8;
@@ -316,14 +338,24 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
             sample->interval > interval_budget(period, sample->divisor);
         int n = snprintf(output + used, size - used,
             "%u," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT
-            ",%u,%u,%u,%u,%d,%s,%u,%u," FRAME_FORMAT ",%d,%u,%u,%u\n",
+            ",%u,%u,%u,%u,%d,%s,%u,%u," FRAME_FORMAT ",%d,%u,%u,%u"
+            ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
             i + 1, FRAME_ARG(render_f), FRAME_ARG(submit_f), FRAME_ARG(work_f),
             FRAME_ARG(interval_f), work > period, interval_miss,
             (unsigned)sample->skipped, sample->divisor,
             phase_arg(sample->phase), parts[sample->parts & 3],
             sample->art_rows, sample->caption_rows, FRAME_ARG(overhead_f),
             phase_arg(sample->dma_phase), sample->cover.target_changes,
-            (unsigned)sample->cover.cache_wait_us, (unsigned)sample->cover.caption_us);
+            (unsigned)sample->cover.cache_wait_us, (unsigned)sample->cover.caption_us,
+            (unsigned)sample->cover.stage_us[UI_COVER_MOTION],
+            (unsigned)sample->cover.stage_us[UI_COVER_PROJECT],
+            (unsigned)sample->cover.stage_us[UI_COVER_COLUMNS],
+            (unsigned)sample->cover.stage_us[UI_COVER_BLIT],
+            (unsigned)sample->cover.stage_us[UI_COVER_CLEAR],
+            (unsigned)sample->cover.stage_us[UI_COVER_OTHER],
+            sample->parts & UI_PERF_ART ? (unsigned)(sample->submit - sample->caption_copy_us) : 0,
+            sample->parts & UI_PERF_ART ? (unsigned)(sample->submit_overhead - sample->caption_overhead_us) : 0,
+            (unsigned)sample->caption_copy_us, (unsigned)sample->caption_overhead_us);
         if (n < 0 || (size_t)n >= size - used)
             break;
         used += n;
@@ -348,7 +380,7 @@ void ui_perf_end(unsigned token)
     unsigned interval_worst = as_frames(capture->worst_interval, period_q8);
     int phase_p50 = phase_arg(percentile(capture, first, PHASE, 50));
     int phase_p99 = phase_arg(percentile(capture, first, PHASE, 99));
-    size_t rows_size = 256 + (size_t)retained * 180;
+    size_t rows_size = 480 + (size_t)retained * 290;
     int rows_handle = retained ? core_alloc_free_space(rows_size) : 0;
     char *rows = NULL;
     size_t rows_used = 0;

@@ -346,6 +346,12 @@ static void turn_advance(struct turn_row *r, unsigned elapsed_us)
     /* Convert once so a two-tick interval has the same total elapsed time. */
     int64_t left = ((int64_t)elapsed_us * TURN_ONE + 500000) / 1000000;
     const int nominal = (TURN_ONE + 30)/60;
+    /* Divide a missed TE evenly: each half then follows a full-rate step.
+     * A 60 Hz period rounds to 16667 when sampled in whole microseconds. */
+    const int bound = (INT64_C(16667) * TURN_ONE + 500000) / 1000000;
+    int steps = left <= bound ? 1 : left <= 2*bound ? 2 : (left+bound-1)/bound;
+    int32_t dt = steps == 1 ? left : steps == 2 ? left >> 1 : left / steps;
+    int short_steps = steps - (left - (int64_t)steps * dt);
     while (left > 0) {
         if (left > 8*nominal && !turn_moving(r)) {
             /* A stationary row can skip intermediate poses after suspension. */
@@ -357,9 +363,9 @@ static void turn_advance(struct turn_row *r, unsigned elapsed_us)
             r->age = turn_min(TURN_ONE, r->age + t);
             break;
         }
-        int32_t dt = left > nominal ? nominal : left;
-        turn_step(r, dt);
-        left -= dt;
+        int32_t step = dt + (short_steps-- <= 0);
+        turn_step(r, step);
+        left -= step;
     }
 }
 
@@ -371,13 +377,22 @@ struct turn_segment {
 
 /* The interval of Z+s*X contains the entire face. Separating two such
  * intervals on any one axis suffices to separate the rigid faces in XZ. */
-static int32_t turn_axis_gap(const struct turn_segment *front,
+static inline __attribute__((always_inline)) int32_t turn_axis_x(int32_t x, int slope_q2)
+{
+    if (slope_q2 == 1 || slope_q2 == -1)
+        return (x / 4) * slope_q2;
+    if (slope_q2 == 2 || slope_q2 == -2)
+        return (x / 2) * (slope_q2 / 2);
+    return x * (slope_q2 / 4);
+}
+
+static inline __attribute__((always_inline)) int32_t turn_axis_gap(const struct turn_segment *front,
                              const struct turn_segment *back, int slope_q2)
 {
-    int32_t a0 = front->z[0] + (int64_t)slope_q2 * front->x[0] / 4;
-    int32_t a1 = front->z[1] + (int64_t)slope_q2 * front->x[1] / 4;
-    int32_t b0 = back->z[0] + (int64_t)slope_q2 * back->x[0] / 4;
-    int32_t b1 = back->z[1] + (int64_t)slope_q2 * back->x[1] / 4;
+    int32_t a0 = front->z[0] + turn_axis_x(front->x[0], slope_q2);
+    int32_t a1 = front->z[1] + turn_axis_x(front->x[1], slope_q2);
+    int32_t b0 = back->z[0] + turn_axis_x(back->x[0], slope_q2);
+    int32_t b1 = back->z[1] + turn_axis_x(back->x[1], slope_q2);
     return turn_max(a0, a1) - turn_min(b0, b1) + TURN_CLEARANCE;
 }
 
@@ -392,15 +407,25 @@ static int32_t turn_depth_gap(const struct turn_segment *front,
     if (dx >= 0) {
         /* Reduce the lift continuously across open space. The extreme slope
          * minimizes the interval gap when the two X ranges are disjoint. */
-        gap -= 4 * dx;
+        gap -= 8 * dx;
         if (gap > lift) {
-            int slope = back->x[0] >= front->x[1] ? 32 : -32;
-            gap = turn_min(gap, turn_axis_gap(front, back, slope));
+            gap = turn_min(gap, back->x[0] >= front->x[1]
+                                ? turn_axis_gap(front, back, 32)
+                                : turn_axis_gap(front, back, -32));
         }
     } else {
-        static const int8_t slopes[] = {-1, 1, -2, 2, -4, 4, -8, 8, -16, 16, -32, 32};
-        for (unsigned k = 0; k < sizeof(slopes)/sizeof(slopes[0]) && gap > lift; k++)
-            gap = turn_min(gap, turn_axis_gap(front, back, slopes[k]));
+        /* Each fixed slope becomes a shift on ARM. */
+#define TURN_TRY(s) do { \
+            gap = turn_min(gap, turn_axis_gap(front, back, s)); \
+            if (gap <= lift) return gap; \
+        } while (0)
+        TURN_TRY(-1);  TURN_TRY(1);
+        TURN_TRY(-2);  TURN_TRY(2);
+        TURN_TRY(-4);  TURN_TRY(4);
+        TURN_TRY(-8);  TURN_TRY(8);
+        TURN_TRY(-16); TURN_TRY(16);
+        TURN_TRY(-32); TURN_TRY(32);
+#undef TURN_TRY
     }
     return gap;
 }
@@ -430,9 +455,9 @@ static void turn_separate_depth(struct turn_segment seg[TURN_CARDS],
         int32_t lift = 0;
         int step = left ? 1 : -1;
         for (int j = left ? lo : hi; j >= lo && j <= hi; j += step) {
-            /* Skip the rest of the bank when even its deepest face is clear. */
+            /* The extreme axis separates by at least eight times the X gap. */
             int32_t bound = left ? suffix_left[j] - b->x[1] : b->x[0] - prefix_right[j];
-            if (limit-lift <= 4*turn_max(0, bound))
+            if (limit-lift <= 8*turn_max(0, bound))
                 break;
             const struct turn_segment *a = &seg[j];
             int32_t gap = turn_depth_gap(a, b, near_z, lift);
@@ -511,6 +536,40 @@ static int turn_segments(const struct turn_row *r,
     return count;
 }
 
+/* For d normalized to [2^31,2^32), m approximates 2^62/d. Bin midpoints
+ * seed two fixed-point Newton iterations. Callers correct the final quotient
+ * against the original integer operands. */
+static const uint16_t turn_recip_seed[128] = {
+    65281, 64777, 64281, 63792, 63310, 62836, 62369, 61909, 61455, 61008, 60568, 60133,
+    59705, 59283, 58867, 58457, 58053, 57654, 57260, 56872, 56489, 56111, 55738, 55370,
+    55007, 54649, 54295, 53946, 53601, 53261, 52925, 52593, 52265, 51942, 51622, 51306,
+    50995, 50686, 50382, 50081, 49784, 49490, 49200, 48913, 48630, 48349, 48072, 47798,
+    47528, 47260, 46995, 46733, 46474, 46218, 45965, 45714, 45467, 45222, 44979, 44739,
+    44502, 44267, 44035, 43805, 43577, 43352, 43129, 42908, 42690, 42474, 42260, 42048,
+    41838, 41631, 41425, 41222, 41020, 40820, 40623, 40427, 40233, 40041, 39851, 39662,
+    39476, 39291, 39108, 38926, 38746, 38568, 38392, 38217, 38044, 37872, 37702, 37533,
+    37366, 37200, 37036, 36873, 36712, 36552, 36393, 36236, 36080, 35926, 35772, 35620,
+    35470, 35320, 35172, 35026, 34880, 34735, 34592, 34450, 34309, 34169, 34031, 33893,
+    33757, 33622, 33487, 33354, 33222, 33091, 32961, 32832,
+};
+
+struct turn_recip {
+    uint32_t m;
+    unsigned norm;
+};
+
+static inline struct turn_recip turn_reciprocal(uint32_t denominator)
+{
+    unsigned norm = __builtin_clz(denominator);
+    uint32_t d = denominator << norm;
+    uint32_t m = (uint32_t)turn_recip_seed[(d >> 24)-128] << 15;
+    for (int i = 0; i < 2; i++) {
+        int32_t error = (1 << 30) - (uint32_t)((uint64_t)d*m >> 32);
+        m += (int32_t)((int64_t)m*error >> 30);
+    }
+    return (struct turn_recip){ m, norm };
+}
+
 /* The two edges of a fully turned, fully recessed cover share their camera
  * scales with the rest of that bank, regardless of the direction of travel. */
 static int32_t turn_camera_scale(int32_t z)
@@ -522,7 +581,10 @@ static int32_t turn_camera_scale(int32_t z)
         return (focal + near/2) / near;
     if (z == far)
         return (focal + far/2) / far;
-    return (focal + z/2) / z;
+    struct turn_recip r = turn_reciprocal(z);
+    uint32_t guess = ((uint64_t)156 * r.m) >> (22-r.norm);
+    int32_t rem = (uint32_t)(focal + z/2) - guess*(uint32_t)z;
+    return guess + (rem >= z) - (rem < 0);
 }
 
 static int turn_project(const struct turn_row *r, struct turn_card out[TURN_CARDS])

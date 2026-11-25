@@ -85,6 +85,7 @@
 #include "screens/playback/quick_screen.h"
 #include "lcd.h"
 #include "font.h"
+#include "bidi.h"
 #include "draw/icon_bitmaps.h"
 #include "widgets/menu.h"             /* MENUITEM_STRINGLIST, do_menu */
 #include "draw/bmp.h"              /* read_bmp_file */
@@ -109,6 +110,10 @@
 #include "speech/talk.h"
 #include "ui/animation.h"
 #include "ui/pace.h"
+#include "lcd-vsync.h"
+#ifdef HAVE_LCD_VSYNC
+#include "lcd-te-s5l8702.h"
+#endif
 #include "ui/scene.h"
 
 /******************************* Globals ***********************************/
@@ -388,7 +393,12 @@ struct pf_scroll_line_info {
     long next_scroll;   /* tick of the next move */
 };
 
+struct caption_span { int left, right; };
+
 struct pf_scroll_line {
+    struct caption_span ink;
+    uint32_t text_hash;
+    int font;
     int width;          /* width of the string */
     int offset;         /* x coordinate of the string */
     int step;           /* 0 if scroll is disabled. otherwise, pixels to move */
@@ -658,6 +668,10 @@ static int caption_rows_y, caption_rows_h;
 /* The rows paint_caption() leaves to carousel_album_caption() to clear, so an
  * unchanged artist line can stay. Zero high while paint_caption() clears. */
 static int caption_clear_y, caption_clear_h;
+static struct caption_span previous_ink, painted_ink;
+static bool painted_ink_known;
+static const char *caption_line;
+
 /* Whether this loop's model draws through carousel_album_caption(). */
 static bool caption_clears_itself;
 /* The artist line on screen, so a new caption can tell whether it changes. */
@@ -1181,8 +1195,9 @@ static bool update_caption_version(unsigned int *seen)
 
 const char *carousel_caption_fit(const char *str, char *buf, size_t size)
 {
-    return global_settings.scrolling_enabled ? str
+    caption_line = global_settings.scrolling_enabled ? str
          : text_fit(str, buf, size, lcd_getfont(), PF_TEXT_WIDTH);
+    return caption_line;
 }
 
 /* The model's title is a phrase, resolved each time it is shown. */
@@ -1195,7 +1210,35 @@ static const char *model_title(void)
 void set_scroll_line(const char *str, enum pf_scroll_line_type type)
 {
     struct pf_scroll_line *s = &scroll_lines[type];
-    s->width = lcd_getstringsize(str, NULL, NULL);
+    int id = lcd_getfont();
+    font_lock(id, true);
+    struct font *font = font_get(id);
+    if (font->pbf.file_size)
+    {
+        /* PBF advances place the line; ink includes bearings and combining marks. */
+        struct font_run run = {0};
+        s->ink = (struct caption_span){INT_MAX, INT_MIN};
+        s->width = 0;
+        for (const ucschar_t *p = bidi_l2v((const unsigned char *)str, 1); p && *p; p++)
+        {
+            struct font_glyph glyph;
+            s->width = font_run_next(font, &run, *p, &glyph);
+            if (glyph.bits && glyph.height && glyph.width)
+            {
+                s->ink.left = MIN(s->ink.left, glyph.x);
+                s->ink.right = MAX(s->ink.right, glyph.x + glyph.width);
+            }
+        }
+        s->font = id;
+        s->text_hash = fnv1a_str(str);
+        font_lock(id, false);
+    }
+    else
+    {
+        font_lock(id, false);
+        s->font = INT_MIN;
+        s->width = lcd_getstringsize(str, NULL, NULL);
+    }
     s->step = 0;
     s->offset = 0;
     s->start_tick = current_tick + scroll_line_info.delay;
@@ -1221,6 +1264,9 @@ struct viewport *carousel_text_begin(void)
         text_vp.x = pf_vp.x + PF_TEXT_MARGIN;
         text_vp.width = pf_vp.width - 2 * PF_TEXT_MARGIN;
     }
+    painted_ink = (struct caption_span){LCD_WIDTH, 0};
+    painted_ink_known = !(text_vp.flags & VP_FLAG_ALIGNMENT_MASK);
+    caption_line = NULL;
     return lcd_set_viewport(&text_vp);
 }
 
@@ -1231,7 +1277,23 @@ void carousel_text_end(struct viewport *saved)
 
 int get_scroll_line_offset(enum pf_scroll_line_type type)
 {
-    return scroll_lines[type].offset;
+    const struct pf_scroll_line *line = &scroll_lines[type];
+    if (!caption_line || line->font != lcd_getfont() ||
+        line->text_hash != fnv1a_str(caption_line))
+        painted_ink_known = false;
+    else if (painted_ink_known && line->ink.left < line->ink.right)
+    {
+        const struct viewport *vp = lcd_current_viewport;
+        int left = MAX(0, line->offset + line->ink.left);
+        int right = MIN(vp->width, line->offset + line->ink.right);
+        if (left < right)
+        {
+            painted_ink.left = MIN(painted_ink.left, vp->x + left);
+            painted_ink.right = MAX(painted_ink.right, vp->x + right);
+        }
+    }
+    caption_line = NULL;
+    return line->offset;
 }
 
 /* True when a line actually moved, so the caller knows a frame is owed. A line
@@ -2506,6 +2568,8 @@ static void flat_note_scroll(void)
         pf_flat_interval = (pf_flat_interval + gap) / 2;
 }
 
+/* Points to the current foreground render's counters only during capture. */
+static uint32_t *flow_stages;
 static struct turn_row flow_row;
 static uint32_t flow_sample_us;
 
@@ -2523,7 +2587,10 @@ static void flow_sample(uint32_t now)
                           (FLOW_SPEED_REF * MAX(1u, pf_motion_scale));
         elapsed = MIN(scaled, UINT32_MAX);
     }
+    uint32_t start = flow_stages ? USEC_TIMER : 0;
     turn_advance(&flow_row, elapsed);
+    if (flow_stages)
+        flow_stages[UI_COVER_MOTION] += (uint32_t)USEC_TIMER - start;
 }
 
 static struct turn_card flow_cards[TURN_CARDS];
@@ -2532,11 +2599,15 @@ static int flow_count;
 static void coverflow_place(void)
 {
     center_slide.slide_index = center_index;
+    uint32_t start = flow_stages ? USEC_TIMER : 0;
     flow_count = turn_project(&flow_row, flow_cards);
+    if (flow_stages)
+        flow_stages[UI_COVER_PROJECT] += (uint32_t)USEC_TIMER - start;
 }
 
 static void coverflow_idle(void)
 {
+    flow_pace.recover_full_rate = true;
     slide_frame = center_index << 16;
     flow_sample_us = USEC_TIMER;
     turn_reset(&flow_row, center_index, number_of_slides);
@@ -2549,6 +2620,7 @@ static void coverflow_idle(void)
  * squared up in the two piles, each exactly on top of the one below it. */
 static void flat_idle(void)
 {
+    flow_pace.recover_full_rate = false;
     int pile = pile_alpha();
     PFreal drop = pile_offset();
 
@@ -2700,20 +2772,30 @@ static inline pix_t fade_color(pix_t c, unsigned int fa, unsigned int frb,
  * The viewport is static because lcd_set_viewport() keeps the pointer rather
  * than a copy, so one on the stack would be dangling by the time anything drew
  * through it. */
-static void pf_clear_band(int y, int h)
+static void pf_clear_rect(int x, int y, int w, int h)
 {
     static struct viewport band_vp;
     struct viewport *saved;
 
-    if (h <= 0)
+    if (h <= 0 || w <= 0)
         return;
 
     band_vp = pf_vp;
     band_vp.y = pf_vp.y + y;
+    band_vp.x += x;
+    band_vp.width = w;
     band_vp.height = h;
     saved = lcd_set_viewport(&band_vp);
     screens[SCREEN_MAIN].clear_viewport();
     lcd_set_viewport(saved);
+}
+
+static void pf_clear_band(int y, int h)
+{
+    if (caption_clear_h)
+        pf_clear_rect(previous_ink.left, y, previous_ink.right - previous_ink.left, h);
+    else
+        pf_clear_rect(0, y, pf_vp.width, h);
 }
 
 /* Where a bitmap `sh` rows tall sits in the drawable area. Shared, because two
@@ -2820,6 +2902,35 @@ static void NO_INLINE draw_run(struct pf_col *k, int n, int step)
             full -= 4;
         } while (full);
     }
+#if defined(IPOD_6G) && defined(__arm__) && !defined(__thumb__) && !defined(SIMULATOR)
+    /* Keep the texel address in halfwords. Carry from the fractional
+     * step advances it by one extra texel before the next sample. */
+    if (n >= 8)
+    {
+        unsigned at = ((uintptr_t)src >> 1) + (p >> PFREAL_SHIFT);
+        unsigned frac = p << (32 - PFREAL_SHIFT);
+        unsigned increment = (unsigned)dp << (32 - PFREAL_SHIFT);
+        unsigned blocks = n >> 3;
+        unsigned value;
+        p += (n & ~7) * (unsigned)dp;
+        n &= 7;
+        asm volatile(
+            "1:\n"
+            ".rept 8\n"
+            "ldrh %[v], [%[at], %[at]]\n"
+            "adds %[frac], %[frac], %[inc]\n"
+            "adc %[at], %[at], %[whole]\n"
+            "strh %[v], [%[dst]], %[stride]\n"
+            ".endr\n"
+            "subs %[blocks], %[blocks], #1\n"
+            "bne 1b"
+            : [at] "+&r"(at), [frac] "+&r"(frac), [dst] "+&r"(pixel),
+              [blocks] "+&r"(blocks), [v] "=&r"(value)
+            : [inc] "r"(increment), [whole] "r"(dp >> PFREAL_SHIFT),
+              [stride] "r"(step * (int)sizeof(*pixel))
+            : "cc", "memory");
+    }
+#else
     for (; n >= 4; n -= 4)
     {
 #pragma GCC unroll 4
@@ -2829,6 +2940,7 @@ static void NO_INLINE draw_run(struct pf_col *k, int n, int step)
             p += dp;
         }
     }
+#endif
     while (n-- > 0)
     {
         *pixel = src[p >> PFREAL_SHIFT]; p += dp; pixel += step;
@@ -3333,14 +3445,21 @@ static void flat_render(bool center)
 /* For square cards with the same world-space Y extent, projected height
  * is proportional to reciprocal depth. The tallest card on each ray owns
  * the whole column, including when two faces cross inside their overlap. */
+struct flow_face
+{
+    const pix_t *pixels;
+    int stride, size, crop, mip;
+    int top, top_delta, end_height; /* Q16 projected edge coordinates */
+};
+
 struct flow_column
 {
-    int height, top, u_height;  /* Q16 pixels; u_height is texture u * height */
-    const struct dim *bmp;
-    bool mip;
+    int height, t; /* Q16 height and Q30 fraction along the winning face */
+    const struct flow_face *face;
 };
 
 static struct flow_column flow_columns[LCD_WIDTH];
+static struct flow_face flow_faces[TURN_CARDS];
 static struct slide_data flow_surfaces[TURN_CARDS];
 
 static int flow_clip_top(void)
@@ -3363,6 +3482,23 @@ static int flow_edge_column(int x, const struct turn_card *card, int edge, int d
     int ray = 2 * column + 1 - LCD_WIDTH;
     int32_t world_x = card->world_x[edge] + dx * 64;
     return column + ((int64_t)(2 * 156) * world_x > (int64_t)ray * card->z[edge]);
+}
+
+/* Q30 quotients use the normalized reciprocal, then correct its last bits
+ * against the original numerator and denominator. The low word suffices:
+ * the initial estimate differs by at most a few units on a clipped span. */
+static inline uint32_t flow_quotient(uint32_t low, uint32_t width, uint32_t q)
+{
+    int32_t rem = low - q*width;
+    while (rem < 0) {
+        rem += width;
+        q--;
+    }
+    while ((uint32_t)rem >= width) {
+        rem -= width;
+        q++;
+    }
+    return q;
 }
 
 static void flow_cover_columns(const struct turn_card *card, int slot, int spread)
@@ -3392,11 +3528,28 @@ static void flow_cover_columns(const struct turn_card *card, int slot, int sprea
     /* Interpolate in Q30: a rounded Q16 step accumulates enough error
      * across a face to exchange nearly coincident depth samples. */
     int offset = MAX(0, MIN(width, (first << 16) + 32768 - left));
-    int t = width ? ((int64_t)offset << 30) / width : (1 << 29);
-    int dt = end - first > 1 ? (1ULL << 46) / width : 0;
+    int t = 1 << 29, dt = 0;
+    if (width) {
+        struct turn_recip rec = turn_reciprocal(width);
+        uint32_t q = ((uint64_t)(unsigned)offset * rec.m) >> (32-rec.norm);
+        t = flow_quotient((unsigned)offset << 30, width, q);
+        if (end - first > 1) {
+            q = rec.norm <= 16 ? rec.m >> (16-rec.norm) : rec.m << (rec.norm-16);
+            dt = flow_quotient(0, width, q);
+        }
+    }
     int h0 = card->bottom[0] - card->top[0];
     int h1 = card->bottom[1] - card->top[1];
-    bool mip = width < MIN(bmp->width, bmp->height) * (2 * 65536 / 3);
+    int size = MIN(bmp->width, bmp->height);
+    int mip = width < size * (2 * 65536 / 3);
+    struct flow_face *face = &flow_faces[slot];
+    *face = (struct flow_face) {
+        .pixels = (const pix_t *)(bmp+1) + (bmp->height-size)/2
+                + (mip ? bmp->width*bmp->height : 0),
+        .stride = bmp->height, .size = size, .crop = (bmp->width-size)/2,
+        .mip = mip, .top = card->top[0], .top_delta = card->top[1]-card->top[0],
+        .end_height = h1
+    };
     if (reversed)
     {
         t = (1 << 30) - t;
@@ -3409,71 +3562,177 @@ static void flow_cover_columns(const struct turn_card *card, int slot, int sprea
         if (h <= col->height)
             continue;
         col->height = h;
-        col->top = card->top[0] + ((int64_t)(card->top[1] - card->top[0]) * t >> 30);
-        col->u_height = (int64_t)h1 * MAX(0, t) >> 30;
-        col->bmp = bmp;
-        col->mip = mip;
+        col->t = t;
+        col->face = face;
     }
 }
 
-static void flow_render_spread(bool center, int spread)
+struct flow_sample
 {
-    memset(flow_columns, 0, sizeof(flow_columns));
+    const pix_t *src;
+    int size, y0, y1, first, last, dy, p;
+};
+
+static void flow_sample_column(const struct flow_column *col, int top, int end,
+                               struct flow_sample *sample)
+{
+    const struct flow_face *face = col->face;
+    int size = face->size;
+    int t = col->t;
+    /* Only the nearest face needs a texture column. One reciprocal also
+     * gives the vertical texture step, whose denominator drops six bits. */
+    int u_height = (int64_t)face->end_height * MAX(0, t) >> 30;
+    uint32_t num = (uint32_t)u_height * size;
+    uint32_t height = col->height, rows = height >> 6;
+    struct turn_recip rec = turn_reciprocal(rows);
+    uint32_t u_guess = ((uint64_t)num * rec.m) >> (68-rec.norm);
+    int32_t u_rem = num - u_guess*height;
+    while (u_rem < 0) {
+        u_guess--;
+        u_rem += height;
+    }
+    int u = face->crop + MIN(u_guess + (u_rem >= (int32_t)height),
+                             (unsigned)(size-1));
+    const pix_t *src = face->pixels + (u >> face->mip) * face->stride;
+    int y0 = face->top + ((int64_t)face->top_delta * t >> 30);
+    int y1 = y0 + col->height;
+    int first = MAX(top, (y0 + 65535) >> 16);
+    int last = MIN(end, y1 >> 16);
+    uint32_t d_num = (uint32_t)size << 20;
+    int dy = ((uint64_t)d_num * rec.m) >> (62-rec.norm);
+    int32_t d_rem = d_num - dy*rows;
+    dy += (d_rem >= (int32_t)rows) - (d_rem < 0);
+    int p = ((int64_t)((first << 16) + 32768 - y0) * dy) >> 16;
+    *sample = (struct flow_sample){ src, size, y0, y1, first, last, dy, p };
+}
+
+static inline void flow_draw_column(int x, int top, int end, pix_t *pixels,
+                                    int stride, const struct pf_fade *ink)
+{
+    const struct flow_column *col = &flow_columns[x];
+    if (!col->height)
+        return;
+    struct flow_sample sample;
+    flow_sample_column(col, top, end, &sample);
+    const pix_t *src = sample.src;
+    int size = sample.size, y0 = sample.y0, y1 = sample.y1;
+    int first = sample.first, last = sample.last, dy = sample.dy, p = sample.p;
+    if (first < last)
+    {
+        struct pf_col run = {src, pixels + first * stride, p, dy, last - first};
+        if (ink)
+            draw_run_faded(&run, run.n, stride, ink);
+        else
+            draw_run(&run, run.n, stride);
+#if PF_SHOW_STATS
+        pf_px += run.n;
+#endif
+    }
+    /* Only the outer row on each silhouette has fractional coverage. */
+    for (int edge = 0; edge < 2; edge++)
+    {
+        int y = edge ? y1 >> 16 : y0 >> 16;
+        int amount = edge ? (y1 & 65535) : ((-y0) & 65535);
+        if (!amount || y < top || y >= end)
+            continue;
+        unsigned a = ((amount + 512) >> 10) * 4;
+        pix_t pixel = src[edge ? size - 1 : 0];
+        if (ink)
+            pixel = fade_color(pixel, ink->a, ink->rb, ink->g);
+        pix_t *dest = pixels + y * stride;
+        *dest = fade_color(pixel, a, fade_red_blue(*dest) * (256 - a),
+                           (*dest & 0x07e0) * (256 - a));
+    }
+}
+
+#define FLOW_STRIP_WIDTH 16
+static pix_t flow_strip[LCD_HEIGHT * FLOW_STRIP_WIDTH] CACHEALIGN_ATTR;
+
+/* One aligned RGB565 cache line per row. Both source and destination point
+ * to the first requested screen row. One of them is the contiguous strip. */
+static inline void flow_copy_strip(pix_t *dst, int dst_stride, const pix_t *src,
+                                   int src_stride, int rows)
+{
+#if defined(IPOD_6G) && defined(__arm__) && !defined(__thumb__) && !defined(SIMULATOR)
+    asm volatile(
+        "1:\n"
+        "ldmia %[src]!, {r1-r8}\n"
+        "stmia %[dst]!, {r1-r8}\n"
+        "add %[src], %[src], %[src_gap]\n"
+        "add %[dst], %[dst], %[dst_gap]\n"
+        "subs %[rows], %[rows], #1\n"
+        "bne 1b"
+        : [src] "+&r"(src), [dst] "+&r"(dst), [rows] "+&r"(rows)
+        : [src_gap] "Ir"((src_stride - FLOW_STRIP_WIDTH) * (int)sizeof(*src)),
+          [dst_gap] "Ir"((dst_stride - FLOW_STRIP_WIDTH) * (int)sizeof(*dst))
+        : "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "cc", "memory");
+#else
+    for (int y = 0; y < rows; y++)
+        memcpy(dst + y * dst_stride, src + y * src_stride,
+               FLOW_STRIP_WIDTH * sizeof(*src));
+#endif
+}
+
+static void flow_paint(bool center, int spread, int clear_y, int clear_h)
+{
+    uint32_t start = flow_stages ? USEC_TIMER : 0;
+    for (int x = 0; x < LCD_WIDTH; x++)
+        flow_columns[x].height = 0;
     for (int i = 0; i < flow_count; i++)
         if (center || flow_cards[i].id != center_index)
             flow_cover_columns(&flow_cards[i], i, spread);
+    if (flow_stages)
+    {
+        uint32_t now = USEC_TIMER;
+        flow_stages[UI_COVER_COLUMNS] += now - start;
+        start = now;
+    }
 
     struct pf_fade fade;
     fade_prepare(&fade, 256);
     const struct pf_fade *ink = pf_neighbor_light == 256 ? NULL : &fade;
     int top = flow_clip_top(), end = flow_clip_end();
-    for (int x = 0; x < LCD_WIDTH; x++)
+    pix_t *frame = buffer - pf_draw_y_shift * BUFFER_WIDTH;
+    uint32_t clear_us = 0;
+    if (clear_h > 0)
     {
-        const struct flow_column *col = &flow_columns[x];
-        if (!col->height)
-            continue;
-        const struct dim *bmp = col->bmp;
-        int size = MIN(bmp->width, bmp->height);
-        /* Interpolate u/Z and 1/Z before dividing for the texture column. */
-        int u = (bmp->width - size) / 2 +
-                MIN((unsigned)(col->u_height * size) / (unsigned)col->height,
-                    (unsigned)(size - 1));
-        if (col->mip)
-            u = bmp->width + u / 2;
-        const pix_t *src = (const pix_t *)(bmp + 1) + u * bmp->height
-                         + (bmp->height - size) / 2;
-        int y0 = col->top, y1 = y0 + col->height;
-        int first = MAX(top, (y0 + 65535) >> 16);
-        int last = MIN(end, y1 >> 16);
-        int dy = (size << 20) / (col->height >> 6);
-        int p = ((int64_t)((first << 16) + 32768 - y0) * dy) >> 16;
-        if (first < last)
+        bool inverse = pf_vp.drawmode & DRMODE_INVERSEVID;
+        const pix_t *backdrop = inverse ? NULL : lcd_get_backdrop();
+        pix_t bg = inverse ? pf_vp.fg_pattern : pf_bg_color;
+        top = MAX(top, clear_y);
+        end = MIN(end, clear_y + clear_h);
+        for (int x = 0; x < LCD_WIDTH; x += FLOW_STRIP_WIDTH)
         {
-            struct pf_col run = {src, LCDADDR(x, first - pf_draw_y_shift), p, dy, last - first};
-            if (ink)
-                draw_run_faded(&run, run.n, BUFFER_WIDTH, ink);
+            uint32_t clear_start = flow_stages ? USEC_TIMER : 0;
+            pix_t *strip = flow_strip + clear_y * FLOW_STRIP_WIDTH;
+            if (backdrop)
+                flow_copy_strip(strip, FLOW_STRIP_WIDTH,
+                    backdrop + (pf_vp_y + clear_y) * BUFFER_WIDTH + x,
+                    BUFFER_WIDTH, clear_h);
             else
-                draw_run(&run, run.n, BUFFER_WIDTH);
-#if PF_SHOW_STATS
-            pf_px += run.n;
-#endif
-        }
-        /* Only the outer row on each silhouette has fractional coverage. */
-        for (int edge = 0; edge < 2; edge++)
-        {
-            int y = edge ? y1 >> 16 : y0 >> 16;
-            int amount = edge ? (y1 & 65535) : ((-y0) & 65535);
-            if (!amount || y < top || y >= end)
-                continue;
-            unsigned a = ((amount + 512) >> 10) * 4;
-            pix_t pixel = src[edge ? size - 1 : 0];
-            if (ink)
-                pixel = fade_color(pixel, ink->a, ink->rb, ink->g);
-            pix_t *dest = LCDADDR(x, y - pf_draw_y_shift);
-            *dest = fade_color(pixel, a, fade_red_blue(*dest) * (256 - a),
-                               (*dest & 0x07e0) * (256 - a));
+                memset16(strip, bg, clear_h * FLOW_STRIP_WIDTH);
+            if (flow_stages)
+                clear_us += (uint32_t)USEC_TIMER - clear_start;
+            for (int col = 0; col < FLOW_STRIP_WIDTH; col++)
+                flow_draw_column(x + col, top, end, flow_strip + col,
+                                 FLOW_STRIP_WIDTH, ink);
+            flow_copy_strip(frame + clear_y * BUFFER_WIDTH + x,
+                            BUFFER_WIDTH, strip, FLOW_STRIP_WIDTH, clear_h);
         }
     }
+    else
+        for (int x = 0; x < LCD_WIDTH; x++)
+            flow_draw_column(x, top, end, frame + x, BUFFER_WIDTH, ink);
+    if (flow_stages)
+    {
+        flow_stages[UI_COVER_CLEAR] += clear_us;
+        flow_stages[UI_COVER_BLIT] += (uint32_t)USEC_TIMER - start - clear_us;
+    }
+}
+
+static void flow_render_spread(bool center, int spread)
+{
+    flow_paint(center, spread, 0, 0);
 }
 
 static void coverflow_render(bool center)
@@ -3541,7 +3800,9 @@ static void render_all_slides(int y, int h)
 #if PF_SHOW_STATS
     t0 = USEC_TIMER;
 #endif
-    pf_clear_band(y, h);
+    bool flat = flat_view();
+    if (flat)
+        pf_clear_band(y, h);
 #if PF_SHOW_STATS
     pf_clear_us = USEC_TIMER - t0;
     pf_px = 0;
@@ -3552,10 +3813,10 @@ static void render_all_slides(int y, int h)
      * and a turn handed to the codec mid-frame shows them late by however long
      * it took, which differs from frame to frame and reads as judder. The
      * frame's one yield comes after its flush. */
-    if (flat_view())
+    if (flat)
         flat_render(true);
     else
-        coverflow_render(true);
+        flow_paint(true, 0, y, h);
 #if PF_SHOW_STATS
     pf_slides_us = USEC_TIMER - t0;
 #endif
@@ -5570,6 +5831,7 @@ static void paint_caption(const struct ui_view *view, const struct ui_view_frame
 {
     struct carousel_frame *paint = view->data;
     uint32_t start = paint->tracing ? USEC_TIMER : 0;
+    painted_ink_known = false;
     caption_rows_y = frame->clip.y - pf_vp_y;
     caption_rows_h = frame->clip.height;
     if (!paint->joined)
@@ -5611,20 +5873,19 @@ static void carousel_frame_init(struct carousel_frame *paint)
     ui_page_init(&paint->page, &paint->root);
 }
 
-static void prefetch_captions(void)
+static void prefetch_captions(int previous)
 {
     if (!model->caption_at || global_settings.album_covers_show_album_name == ALBUM_NAME_HIDE)
         return;
     int font = carousel_caption_font(true);
     int at = carousel_caption_index();
     int radius = 2 * ALBUM_COVERS_NUM_SLIDES;
-    font_prefetch_text(font, ".0123456789 –");
-    for (int i = 0; i <= 2 * radius; i++)
+    if (previous < 0)
+        font_prefetch_text(font, ".0123456789 –");
+    for (int i = 1; i <= 2 * radius; i++)
     {
         int index = at + (i % 2 ? (i + 1) / 2 : -i / 2);
-        /* Consecutive selections share all but one neighbour. Always give
-         * the displayed caption first chance at the glyph queue. */
-        if (i && caption_valid && abs(index - caption_index) <= radius)
+        if (previous >= 0 && abs(index - previous) <= radius)
             continue;
         struct carousel_album_header text;
         if (index >= 0 && index < number_of_slides && model->caption_at(index, &text))
@@ -5679,15 +5940,17 @@ static void carousel_paint(struct carousel_frame *paint, bool art, bool caption,
     if (caption)
         ui_page_invalidate(&paint->page, (struct ui_rect){0, pf_vp_y + pf_text_y, LCD_WIDTH, pf_text_h});
     font_prefetch_begin();
-    if (caption && (!caption_valid ||
-                    caption_index != carousel_caption_index()))
+    int previous = caption_valid ? caption_index : -1;
+    bool warm_neighbours = caption && previous != carousel_caption_index();
+    /* The caption queues its own glyphs before the neighbouring titles. */
+    ui_page_paint(&paint->page);
+    if (warm_neighbours)
     {
         uint32_t start = paint->tracing ? USEC_TIMER : 0;
-        prefetch_captions();
+        prefetch_captions(previous);
         if (paint->tracing)
             paint->caption_us += (uint32_t)USEC_TIMER - start;
     }
-    ui_page_paint(&paint->page);
     font_prefetch_end();
 }
 
@@ -5711,6 +5974,39 @@ static void remember_current_cover(void)
 {
     if (model->remember && model->remember(center_index))
         cover_resume_dirty = true;
+}
+
+/* The DMA producer has one pending staging slot. Leave it to the artwork
+ * until the interrupt claims its buffer. The driver still arbitrates a race
+ * with another producer after this check. */
+static bool caption_stage_busy(uint32_t *slot)
+{
+#ifdef HAVE_LCD_VSYNC
+    if (lcd_te_async_enabled() && lcd_te_pending())
+    {
+        if (slot)
+            lcd_vsync_async_timing(NULL, NULL, slot, NULL);
+        return true;
+    }
+#else
+    (void)slot;
+#endif
+    return false;
+}
+
+static int stage_caption(int left, int right, int *top, int end, int pixels,
+                         struct ui_perf_transfers *timing)
+{
+    int rows = MIN(end - *top, pixels / (right-left));
+    if (rows > 0)
+    {
+        uint32_t start = timing ? USEC_TIMER : 0;
+        lcd_update_rect(left, *top, right-left, rows);
+        if (timing)
+            ui_perf_add_transfer(timing, start, UI_PERF_CAPTION);
+        *top += rows;
+    }
+    return rows;
 }
 
 static int album_covers_loop(unsigned *trace, bool restored_pixels)
@@ -5746,7 +6042,11 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
     bool caption_flush_owed = false;
     int caption_flush_top = 0, caption_flush_end = 0;
     int caption_left = 0, caption_right = LCD_WIDTH;
-    int previous_ink_left = 0, previous_ink_right = LCD_WIDTH;
+    int caption_pixels = 0, deferred_frames = 0, deferred_rows = 0;
+    uint32_t caption_due = 0;
+    bool caption_wake = false;
+    struct ui_perf_transfers transfers = {0};
+    previous_ink = (struct caption_span){0, LCD_WIDTH};
     bool trace_attempted = false;
     bool profile_input = ui_perf_enabled();
     unsigned target_changes = 0;
@@ -5845,7 +6145,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             /* There is a frame coming, so wait for its deadline rather than
              * going round again to find it still not due. Zero when it is due
              * or overdue: the poll returns at once and it is drawn. */
-            timeout = frame_wait(flow_due);
+            uint32_t due = caption_wake && TIME_BEFORE(caption_due, flow_due) ?
+                           caption_due : flow_due;
+            timeout = frame_wait(due);
         }
         else
             timeout = (quiescent || dark) ? HZ/2 : HZ/16;
@@ -6201,6 +6503,33 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             flow_moving = false;
         bool dispatch_first = button != ACTION_NONE ||
                               agents_nav_pending() != AGENTS_NAV_NONE;
+        if (full_repaint_owed)
+        {
+            /* A menu or theme change can replace the saved caption pixels.
+             * The full viewport redraw publishes their replacement. */
+            caption_flush_owed = false;
+            caption_pixels = deferred_frames = 0;
+            caption_wake = false;
+        }
+        if (caption_wake && frame_due(caption_due))
+            caption_wake = false;
+        bool finish_caption = caption_owed && caption_flush_owed && caption_pixels >=
+                              (caption_right - caption_left) * (caption_flush_end - caption_flush_top);
+        if (motion && !flat_view() && !dispatch_first && caption_flush_owed &&
+            caption_pixels > 0 && (!caption_stage_busy(NULL) ||
+            ((finish_caption || deferred_frames >= 2) && frame_due(flow_due))))
+        {
+            /* Use the previous art band's spare pixels before painting over
+             * its caption. Finish the old title if it fits. Otherwise
+             * a sustained queue may defer it for one art frame. */
+            deferred_rows += stage_caption(caption_left, caption_right, &caption_flush_top,
+                                           caption_flush_end, caption_pixels,
+                                           *trace ? &transfers : NULL);
+            caption_flush_owed = caption_flush_top < caption_flush_end;
+            caption_pixels = 0;
+            caption_wake = false;
+            deferred_frames = 0;
+        }
         if (!dark && caption_flush_owed && (!motion || flat_view()) && frame_due(flow_due) &&
             !dispatch_first)
         {
@@ -6210,6 +6539,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             uint32_t submitting = *trace ? USEC_TIMER : 0;
             lcd_update_rect(caption_left, caption_flush_top, caption_right - caption_left, rows);
             caption_flush_owed = false;
+            caption_pixels = deferred_frames = deferred_rows = 0;
+            caption_wake = false;
+            transfers = (struct ui_perf_transfers){0};
             if (*trace)
             {
                 uint32_t submitted = USEC_TIMER;
@@ -6226,6 +6558,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             show_carousel_entry();
             if (motion && !trace_attempted)
             {
+                transfers = (struct ui_perf_transfers){0};
+                deferred_rows = 0;
                 *trace = ui_perf_begin(model->motion_trace ?: "cover-flow");
                 trace_attempted = true;
             }
@@ -6244,6 +6578,13 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             uint32_t lock_start = *trace ? USEC_TIMER : 0;
             buf_ctx_lock();
             uint32_t frame_start = *trace ? USEC_TIMER : 0;
+            uint32_t stages[UI_COVER_STAGE_COUNT];
+            if (*trace)
+            {
+                memset(stages, 0, sizeof(stages));
+                if (!flat_view())
+                    flow_stages = stages;
+            }
 
             art_owed = false;
             caption_owed = false;
@@ -6311,21 +6652,22 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                            paint_y, paint_h);
             if (drew_caption && !flat_view())
             {
-                int left, right;
-                caption_ink_bounds(&paint, pf_text_y, pf_text_y + pf_text_h,
-                                   &left, &right);
+                int left = painted_ink.left, right = painted_ink.right;
+                if (!painted_ink_known || joined || lcd_get_backdrop())
+                    caption_ink_bounds(&paint, pf_text_y, pf_text_y + pf_text_h,
+                                       &left, &right);
                 if (!joined)
                 {
-                    ink_left = MIN(left, previous_ink_left);
-                    ink_right = MAX(right, previous_ink_right);
+                    ink_left = MIN(left, previous_ink.left);
+                    ink_right = MAX(right, previous_ink.right);
                 }
-                previous_ink_left = left;
-                previous_ink_right = right;
+                previous_ink.left = left;
+                previous_ink.right = right;
             }
             else if (drew_caption)
             {
-                previous_ink_left = 0;
-                previous_ink_right = LCD_WIDTH;
+                previous_ink.left = 0;
+                previous_ink.right = LCD_WIDTH;
             }
             uint32_t render = *trace ? (uint32_t)USEC_TIMER - frame_start : 0;
 #if PF_SHOW_STATS
@@ -6333,10 +6675,17 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             t_flush = USEC_TIMER;
 #endif
 
+            flow_stages = NULL;
             buf_ctx_unlock();
             if (*trace)
+            {
+                uint32_t measured = paint.caption_us;
+                for (unsigned i = 0; i < UI_COVER_OTHER; i++)
+                    measured += stages[i];
+                stages[UI_COVER_OTHER] = render - measured;
                 ui_perf_note_cover_work(target_changes, frame_start - lock_start,
-                                        paint.caption_us);
+                                        paint.caption_us, stages);
+            }
             target_changes = 0;
 
             /* Art uses a contiguous full-width DMA. Caption damage keeps its
@@ -6389,15 +6738,13 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 }
             }
             int rows = MAX(0, dirty_end - dirty_top);
-            struct ui_perf_transfers transfers;
-            if (*trace)
-                transfers = (struct ui_perf_transfers){0};
             if (rows)
             {
                 uint32_t start = *trace ? USEC_TIMER : 0;
                 lcd_update_rect(0, dirty_top, LCD_WIDTH, rows);
                 if (*trace)
-                    ui_perf_add_transfer(&transfers, start);
+                    ui_perf_add_transfer(&transfers, start, parts & UI_PERF_ART ?
+                                         UI_PERF_ART : UI_PERF_CAPTION);
             }
             else
                 parts = 0;
@@ -6406,25 +6753,45 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
              * use the remaining bandwidth without reserving another art TE. */
             flow_due = motion ? ui_pace_next(&flow_pace, flow_start)
                               : ui_clock_start() + ui_frame_period();
+            caption_pixels = 0;
+            caption_wake = false;
             if (motion && !flat_view() && caption_flush_owed && rows < 150)
             {
-                int width = caption_right - caption_left;
-                int budget = (150 - rows) * LCD_WIDTH;
-                int n = MIN(caption_flush_end - caption_flush_top, budget / width);
-                uint32_t start = *trace ? USEC_TIMER : 0;
-                lcd_update_rect(caption_left, caption_flush_top, width, n);
-                if (*trace)
-                    ui_perf_add_transfer(&transfers, start);
-                caption_flush_top += n;
-                caption_flush_owed = caption_flush_top < caption_flush_end;
-                caption_rows += n;
+                caption_pixels = (150 - rows) * LCD_WIDTH;
+                uint32_t slot;
+                if (caption_stage_busy(&slot))
+                {
+                    /* One wake between art deadlines; button wakes and the
+                     * next art deadline also get to use the released slot. */
+                    uint32_t now = USEC_TIMER;
+                    caption_due = TIME_BEFORE(now, slot) ? slot + 100 : now + 500;
+                    caption_wake = TIME_BEFORE(caption_due, flow_due);
+                    deferred_frames++;
+                }
+                else
+                {
+                    deferred_rows += stage_caption(caption_left, caption_right,
+                                                   &caption_flush_top, caption_flush_end,
+                                                   caption_pixels, *trace ? &transfers : NULL);
+                    caption_flush_owed = caption_flush_top < caption_flush_end;
+                    caption_pixels = 0;
+                    deferred_frames = 0;
+                }
+            }
+            else
+                deferred_frames = 0;
+            if (deferred_rows)
+            {
+                caption_rows += deferred_rows;
                 parts |= UI_PERF_CAPTION;
+                deferred_rows = 0;
             }
             if (*trace && transfers.sampled)
             {
                 ui_perf_note_rects(parts, parts & UI_PERF_ART ? rows : 0, caption_rows);
                 ui_perf_note_render(render);
                 ui_perf_note_transfers(&transfers);
+                transfers = (struct ui_perf_transfers){0};
             }
             if (pf_scene.capturing)
                 ui_scene_start(&pf_scene);

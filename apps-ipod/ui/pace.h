@@ -11,8 +11,8 @@ struct ui_pace {
     const void *site;
     uint32_t start, due, offset, cost, dma, busy;
     unsigned frame, shown, missed, transfers;
-    uint8_t divisor, late;
-    bool running, async;
+    uint8_t divisor, late, on_time;
+    bool running, async, recover_full_rate;
 };
 
 struct ui_pace_status {

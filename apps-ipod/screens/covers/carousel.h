@@ -227,6 +227,9 @@ void carousel_provider_changed(void);
 
 void carousel_forget_resume(void);
 bool carousel_wps_pending(void);
+bool carousel_wps_present_pending(void);
+void carousel_wps_present(void);
+void carousel_wps_capture_return(void);
 void carousel_wps_begin(void);
 void carousel_wps_end(bool back);
 int carousel_wps_back(void);

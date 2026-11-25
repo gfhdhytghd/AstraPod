@@ -17,9 +17,34 @@ static void read_exact(const char *path, void *data, size_t size)
     fclose(f);
 }
 
+static void check_playback_rect(int x, int y, int width, int height)
+{
+    struct stock_pose pose;
+    assert(stock_wps_pose(x, y, width, height, &pose) && pose.yaw == 0);
+    struct stock_edge edge[2];
+    stock_project(pose, edge);
+    for (int i = 0; i < 2; i++) {
+        assert(((edge[i].x + STOCK_ONE / 2) >> 16) == x + i * width);
+        assert(((edge[i].top + STOCK_ONE / 2) >> 16) == y);
+        assert(((edge[i].bottom + STOCK_ONE / 2) >> 16) == y + height);
+    }
+    struct stock_flip out, back;
+    stock_flip_start(&out, STOCK_PANEL_TO_PLAYING, stock_slot_base(0), 0);
+    out.target = pose;
+    stock_flip_start(&back, STOCK_PLAYING_TO_PANEL, pose, 0);
+    for (unsigned t = 0; t <= out.duration; t += 1000) {
+        struct stock_pose a = stock_flip_pose(&out, t);
+        struct stock_pose b = stock_flip_pose(&back, out.duration - t);
+        assert(!memcmp(&a, &b, sizeof(a)));
+    }
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 3);
+    check_playback_rect(80, 0, 240, 240);
+    check_playback_rect(19, 26, 203, 131);
+    check_playback_rect(319, 0, 1, 240);
     struct stock_pose edge_on = stock_slot_base(0);
     edge_on.yaw = 90 * STOCK_ONE;
     assert(!stock_back_face(edge_on));

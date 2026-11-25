@@ -1171,7 +1171,7 @@ records the evidence for each constant and the limits of the emulator replay.
 A new outer cover inherits its neighbour's start pose and timer, with x
 offset by 15 units outwards. The precise stock insertion trigger is
 inferred. Side covers start 100 units outside their slots. On return from
-Now Playing the walls start 100 ms apart. The selected cover starts at
+the stock Now Playing screen the walls start 100 ms apart. The selected cover starts at
 (−43, −10, 72.5), yaw −9°, holds for 250 ms and then returns to the
 centre in 1000 ms. Firmware report §6 confirms this return pose.
 
@@ -1212,8 +1212,15 @@ Album and playback transitions use the same camera. The selected cover
 turns 180° to the panel in 500 ms and returns in 1000 ms. Its back face
 uses a snapshot of the themed panel. The live panel takes over at rest.
 Transitions from the panel or the cover to Now Playing use a 500 ms
-quadratic ease-out, then cut from the stock pose to the playback screen.
-These transitions and the return from Now Playing use no fade.
+quadratic ease-out. When the active playback theme paints a cover, its
+actual LCD rectangle and source crop determine the face-on endpoint.
+The inverse projection keeps the longer side at 70 world units. A theme
+without visible art uses the stock playback pose.
+
+MENU after playing a panel track retraces the 500 ms turn and wall motion,
+then restores the same panel and selected row. Its next MENU returns to the
+carousel. A direct return from playback holds the playback pose for 250 ms,
+then moves to the centre over 1000 ms. These transitions use no fade.
 
 Scrolling transfers the smallest contiguous row band that contains changed
 cover or background pixels. Caption transfers use the remaining bandwidth.

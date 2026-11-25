@@ -17,7 +17,11 @@
 #define STOCK_MAX_VISIBLE 16
 #define STOCK_STARTS (2 * STOCK_MAX_VISIBLE)
 
-struct stock_pose { int32_t x, y, z, yaw; };
+struct stock_pose {
+    int32_t x, y, z, yaw;
+    /* Offsets from the standard 35-unit half extents, in world Q16. */
+    int32_t width_delta, height_delta;
+};
 struct stock_edge { int32_t x, top, bottom, depth; };
 struct stock_visible { int album; struct stock_pose pose; bool linear; };
 
@@ -26,7 +30,7 @@ struct stock_flow {
     int count, selected, first, length;
     uint32_t start_us;
     enum stock_phase phase;
-    bool playback_walls;
+    bool playback_walls, reverse_walls;
     struct stock_pose start[STOCK_STARTS];
 };
 
@@ -60,7 +64,7 @@ static inline struct stock_pose stock_slot_base(int rel)
     struct stock_pose p = { sign * (55 - STOCK_SPACING) * STOCK_ONE,
                             -9 * STOCK_ONE,
                             rel ? 40 * STOCK_ONE : 145 * (STOCK_ONE / 2),
-                            sign * 90 * STOCK_ONE };
+                            sign * 90 * STOCK_ONE, 0, 0 };
     return p;
 }
 
@@ -74,6 +78,7 @@ static inline void stock_init(struct stock_flow *f, int count, int selected,
     f->start_us = now;
     f->phase = enter ? STOCK_ENTER : STOCK_REST;
     f->playback_walls = false;
+    f->reverse_walls = false;
     for (int i = 0; i < f->length; ++i) {
         int rel = f->first + i - selected;
         struct stock_pose p = stock_slot_base(rel);
@@ -151,6 +156,11 @@ static inline struct stock_visible stock_current(const struct stock_flow *f,
         unsigned delay = rel ? (unsigned)stock_abs(rel) * 100000u : 250000u;
         e = stock_progress(elapsed > delay ? elapsed - delay : 0, STOCK_SCROLL_US, false);
     } else if (f->phase == STOCK_LEAVE) {
+        if (f->reverse_walls) {
+            if (elapsed >= STOCK_LEAVE_US)
+                return (struct stock_visible){album, a, true};
+            elapsed = STOCK_LEAVE_US - elapsed;
+        }
         unsigned back = stock_abs(rel) >= 3 ? STOCK_LEAVE_US :
                         250000u + (unsigned)stock_abs(rel) * 100000u;
         e = elapsed >= STOCK_LEAVE_US ? STOCK_ONE :
@@ -159,7 +169,7 @@ static inline struct stock_visible stock_current(const struct stock_flow *f,
             b.x += (rel > 0 ? 100 : -100) * STOCK_ONE;
         } else {
             b = (struct stock_pose){170 * STOCK_ONE, -9 * STOCK_ONE,
-                                    40 * STOCK_ONE, 90 * STOCK_ONE};
+                                    40 * STOCK_ONE, 90 * STOCK_ONE, 0, 0};
         }
     }
     int64_t x = entry_offset + a.x + stock_mul(b.x - a.x, e) +
@@ -169,7 +179,9 @@ static inline struct stock_visible stock_current(const struct stock_flow *f,
         .pose = { x < INT32_MIN ? INT32_MIN : x > INT32_MAX ? INT32_MAX : (int32_t)x,
                   a.y + stock_mul(b.y - a.y, e),
                   a.z + stock_mul(b.z - a.z, e),
-                  a.yaw + stock_mul(b.yaw - a.yaw, e) },
+                  a.yaw + stock_mul(b.yaw - a.yaw, e),
+                  a.width_delta ? stock_mul(a.width_delta, STOCK_ONE - e) : 0,
+                  a.height_delta ? stock_mul(a.height_delta, STOCK_ONE - e) : 0 },
         .linear = e >= 65209  /* ceil(0.995 * 65536) */
     };
     return v;
@@ -246,6 +258,7 @@ static inline void stock_leave(struct stock_flow *f, uint32_t now)
     stock_snapshot(f, now);
     f->phase = STOCK_LEAVE;
     f->playback_walls = false;
+    f->reverse_walls = false;
 }
 
 static inline bool stock_animating(const struct stock_flow *f, uint32_t now)
@@ -254,7 +267,7 @@ static inline bool stock_animating(const struct stock_flow *f, uint32_t now)
     if (f->phase == STOCK_REST || !f->count)
         return false;
     if (f->phase == STOCK_LEAVE)
-        duration = 250000;
+        duration = f->reverse_walls ? STOCK_LEAVE_US : 250000;
     else if (f->phase == STOCK_MENU_ENTER)
         duration = STOCK_MENU_TIME(STOCK_MENU_AUTHORED_US);
     else if (f->phase == STOCK_ENTER)
@@ -314,25 +327,34 @@ static inline void stock_leave_to_playing(struct stock_flow *f, uint32_t now)
     f->start_us = now;
     f->phase = STOCK_LEAVE;
     f->playback_walls = true;
+    f->reverse_walls = false;
+}
+
+/* Use the retained C departure row so a mid-scroll exit can retrace each
+ * wall from its own captured pose. The last frame restores the pre-C row. */
+static inline void stock_reverse_walls(struct stock_flow *f, uint32_t now)
+{
+    f->reverse_walls = true;
+    f->start_us = now;
 }
 
 /* A and D inherit the selected cover's current pose. At BACK, +180 and
  * -180 project the same panel but start different turn directions. */
 enum stock_transition {
     STOCK_TO_BACK, STOCK_TO_FRONT, STOCK_PANEL_TO_PLAYING,
-    STOCK_COVER_TO_PLAYING, STOCK_FROM_PLAYING
+    STOCK_COVER_TO_PLAYING, STOCK_FROM_PLAYING, STOCK_PLAYING_TO_PANEL
 };
 
 struct stock_flip {
     struct stock_pose start, target;
     uint32_t start_us, duration, delay;
-    bool quadratic;
+    bool quadratic, reverse;
 };
 
 static inline struct stock_pose stock_playing_pose(void)
 {
     return (struct stock_pose){-43 * STOCK_ONE, -10 * STOCK_ONE,
-                               145 * (STOCK_ONE / 2), -9 * STOCK_ONE};
+                               145 * (STOCK_ONE / 2), -9 * STOCK_ONE, 0, 0};
 }
 
 static inline void stock_flip_start(struct stock_flip *f,
@@ -340,12 +362,13 @@ static inline void stock_flip_start(struct stock_flip *f,
                                     struct stock_pose current, uint32_t now)
 {
     const struct stock_pose centre = stock_slot_base(0);
-    struct stock_pose back = {0, 632422, 465 * (STOCK_ONE / 4), 180 * STOCK_ONE};
+    struct stock_pose back = {0, 632422, 465 * (STOCK_ONE / 4), 180 * STOCK_ONE, 0, 0};
     /* BACK y = 9.65 and z = 116.25 put a 256-pixel texture at native scale. */
     f->start_us = now;
     f->delay = 0;
     f->duration = 500000;
     f->quadratic = false;
+    f->reverse = false;
     switch (transition) {
     case STOCK_TO_BACK:
         f->start = current;
@@ -373,6 +396,12 @@ static inline void stock_flip_start(struct stock_flip *f,
         f->duration = STOCK_SCROLL_US;
         f->delay = 250000;
         break;
+    case STOCK_PLAYING_TO_PANEL:
+        f->start = current;
+        back.yaw = -back.yaw;
+        f->target = back;
+        f->quadratic = f->reverse = true;
+        break;
     }
 }
 
@@ -397,8 +426,10 @@ static inline struct stock_pose stock_flip_pose(const struct stock_flip *f,
         return f->target;
     int e;
     if (f->quadratic) {
-        int t = ((f->duration - elapsed) * (STOCK_ONE / 32)) / (f->duration / 32);
-        e = STOCK_ONE - stock_mul(t, t);
+        uint32_t remaining = f->reverse ? elapsed : f->duration - elapsed;
+        int t = (remaining * (STOCK_ONE / 32)) / (f->duration / 32);
+        int square = stock_mul(t, t);
+        e = f->reverse ? square : STOCK_ONE - square;
     } else {
         e = stock_progress(elapsed, f->duration, false);
     }
@@ -406,7 +437,9 @@ static inline struct stock_pose stock_flip_pose(const struct stock_flip *f,
         stock_lerp(f->start.x, f->target.x, e),
         stock_lerp(f->start.y, f->target.y, e),
         stock_lerp(f->start.z, f->target.z, e),
-        stock_lerp(f->start.yaw, f->target.yaw, e)
+        stock_lerp(f->start.yaw, f->target.yaw, e),
+        stock_lerp(f->start.width_delta, f->target.width_delta, e),
+        stock_lerp(f->start.height_delta, f->target.height_delta, e)
     };
 }
 
@@ -432,18 +465,53 @@ static inline int stock_sin(int degrees)
     return degrees < 0 ? -value : value;
 }
 
+/* A Q8 denominator keeps the perspective divide in 32 bits on ARM. */
+static inline int stock_camera_scale(int depth)
+{
+    return (STOCK_CAMERA * STOCK_ONE * 256u) / ((depth + 128) >> 8);
+}
+
+/* Invert the same fixed-point camera that draws the quad. The longer side
+ * spans 70 world units. Its pixel size fixes depth, the other side fixes
+ * aspect, and the rectangle midpoint fixes the translation. */
+static inline bool stock_wps_pose(int x, int y, int width, int height,
+                                  struct stock_pose *out)
+{
+    if (width < 1 || width > 320 || height < 1 || height > 240 ||
+        x < 0 || x > 320 - width || y < 0 || y > 240 - height)
+        return false;
+    int longer = width > height ? width : height;
+    int depth = (STOCK_CAMERA * STOCK_HALF * 2 * STOCK_ONE + longer / 2) / longer;
+    int scale = stock_camera_scale(depth);
+    const int64_t half_unit = (int64_t)STOCK_ONE * STOCK_ONE / 2;
+    *out = (struct stock_pose){
+        (2 * x + width - 320) * half_unit / scale,
+        (2 * y + height - 240) * half_unit / scale,
+        STOCK_CAMERA * STOCK_ONE - depth, 0,
+        width * half_unit / scale - STOCK_HALF * STOCK_ONE,
+        height * half_unit / scale - STOCK_HALF * STOCK_ONE
+    };
+    return true;
+}
+
 static inline void stock_project(struct stock_pose p, struct stock_edge edges[2])
 {
-    int dx = STOCK_HALF * stock_sin(90 * STOCK_ONE - stock_abs(p.yaw));
-    int dz = STOCK_HALF * stock_sin(p.yaw);
+    int cosine = stock_sin(90 * STOCK_ONE - stock_abs(p.yaw));
+    int sine = stock_sin(p.yaw);
+    int dx = STOCK_HALF * cosine;
+    int dz = STOCK_HALF * sine;
+    if (p.width_delta) {
+        dx += stock_mul(p.width_delta, cosine);
+        dz += stock_mul(p.width_delta, sine);
+    }
+    int half_height = STOCK_HALF * STOCK_ONE + p.height_delta;
     for (int i = 0; i < 2; ++i) {
         int depth = STOCK_CAMERA * STOCK_ONE - (p.z + (i ? dz : -dz));
-        /* A Q8 denominator keeps the perspective divide in 32 bits on ARM. */
-        int scale = (STOCK_CAMERA * STOCK_ONE * 256u) / ((depth + 128) >> 8);
+        int scale = stock_camera_scale(depth);
         edges[i] = (struct stock_edge){
             160 * STOCK_ONE + stock_mul(p.x + (i ? dx : -dx), scale),
-            120 * STOCK_ONE + stock_mul(p.y - STOCK_HALF * STOCK_ONE, scale),
-            120 * STOCK_ONE + stock_mul(p.y + STOCK_HALF * STOCK_ONE, scale),
+            120 * STOCK_ONE + stock_mul(p.y - half_height, scale),
+            120 * STOCK_ONE + stock_mul(p.y + half_height, scale),
             depth
         };
     }

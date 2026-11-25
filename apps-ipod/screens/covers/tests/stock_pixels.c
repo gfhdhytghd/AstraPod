@@ -96,7 +96,7 @@ void replay_flip_face(struct stock_pose p, uint8_t *rgb)
         }
     bool back = stock_back_face(p);
     stock_draw_quad(&frame[0][0], p, back ? &fixture_panel[0][0] : fixture[0].texels,
-                    back ? 256 : TEX_SIZE, back ? 256 : TEX_SIZE);
+                    back ? 256 : TEX_SIZE, back ? 256 : TEX_SIZE, back ? 256 : TEX_SIZE);
     for (int y = 0; y < LCD_HEIGHT; y++)
         for (int x = 0; x < LCD_WIDTH; x++) {
             pix_t c = frame[y][x];

@@ -17,6 +17,8 @@
 #include "system.h"
 
 #include "audio/playback.h"
+#include "audio/buffering.h"
+#include "button.h"
 #include "audio/play_status.h"
 #include "audio/spectrum_meter.h"
 #include "metadata/album_palette.h"
@@ -84,6 +86,7 @@ struct native_wps {
     long meter_due;
     unsigned motion_trace;
     bool volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
+    bool current_art_only;
 };
 
 static int wps_handle, blur_handle;
@@ -95,6 +98,8 @@ static struct {
 static int art_slot = -1;
 static struct native_wps *wps;
 static volatile bool active, repaint;
+static struct ui_rect painted_art;
+static unsigned painted_generation;
 
 void native_wps_alloc(void)
 {
@@ -179,6 +184,7 @@ static void paint_background(const struct ui_view *view,
 static void paint_cover(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     (void)view;
+    painted_art = (struct ui_rect){0};
     if (wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM ||
         wps->art_handle < 0 || !wps_art_pin(wps->art_handle, true))
         return;
@@ -192,6 +198,8 @@ static void paint_cover(const struct ui_view *view, const struct ui_view_frame *
         int height = MIN(frame->bounds.height, art->height);
         int x = frame->bounds.x + (frame->bounds.width - width) / 2 - frame->clip.x;
         int y = frame->bounds.y + (frame->bounds.height - height) / 2 - frame->clip.y;
+        painted_art = (struct ui_rect){x + frame->clip.x, y + frame->clip.y, width, height};
+        painted_generation = wps->art_generation;
         /* Audio buffering returns RGB565 data, but its bitmap format field
          * describes the decoder, not the display primitive. */
         lcd_bitmap_part((const fb_data *)art->data, (art->width - width) / 2,
@@ -200,6 +208,33 @@ static void paint_cover(const struct ui_view *view, const struct ui_view_frame *
         lcd_set_viewport(previous);
     }
     wps_art_pin(wps->art_handle, false);
+}
+
+bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major)
+{
+    if (!active || painted_art.width <= 0 || painted_art.height <= 0 ||
+        painted_generation != album_art_generation() ||
+        !wps_art_pin(wps->art_handle, true))
+        return false;
+
+    struct bitmap *art;
+    bool valid = wps_art_bitmap(wps->art_handle, &art) && art->data &&
+                 art->width >= painted_art.width && art->height >= painted_art.height;
+    if (valid)
+    {
+        *bounds = painted_art;
+        if (column_major)
+        {
+            const fb_data *src = (const fb_data *)art->data +
+                (art->height - bounds->height) / 2 * art->width +
+                (art->width - bounds->width) / 2;
+            for (int x = 0; x < bounds->width; x++)
+                for (int y = 0; y < bounds->height; y++)
+                    *column_major++ = src[y * art->width + x];
+        }
+    }
+    wps_art_pin(wps->art_handle, false);
+    return valid;
 }
 
 static void paint_panel(const struct ui_view *view, const struct ui_view_frame *frame)
@@ -518,6 +553,14 @@ static void refresh_art(void)
     unsigned palette_generation = album_palette_generation();
     unsigned art_generation = album_art_generation();
     int handle = album_art_current();
+    if (wps->current_art_only && !cider_active())
+    {
+        /* An ordinary WPS retains the last cover during a track change.
+         * A flip belongs to the newly selected track, including missing art. */
+        handle = playback_track_aa_hid(art_slot);
+        if (handle >= 0 || handle == ERR_UNSUPPORTED_TYPE)
+            wps->current_art_only = false;
+    }
     bool colors_changed = palette_generation != wps->palette_generation;
     if (colors_changed)
     {
@@ -637,6 +680,7 @@ void native_wps_open(const struct wps_state *state)
     (void)state;
     if (wps_handle <= 0 || active)
         return;
+    painted_art = (struct ui_rect){0};
     wps = core_get_data_pinned(wps_handle);
     memset(wps, 0, sizeof(*wps));
     ui_theme_snapshot(&wps->theme);
@@ -722,6 +766,36 @@ void native_wps_render(const struct wps_state *state, bool submit)
     }
     if (remote)
         cider_loading_drawn(source.loading);
+}
+
+static bool handoff_art_pending(void)
+{
+    if (wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM ||
+        !wps->theme.metric[UI_METRIC_COVER_SIZE])
+        return false;
+#ifdef HAVE_USB_PODLINK
+    if (cider_active())
+        return *cider_wps_art_key() && album_art_current() < 0;
+#endif
+    if (art_slot < 0)
+        return false;
+    int h = playback_track_aa_hid(art_slot);
+    return h < 0 && h != ERR_UNSUPPORTED_TYPE;
+}
+
+void native_wps_paint_handoff(struct wps_state *state)
+{
+    if (!active)
+        return;
+    uint32_t start = USEC_TIMER;
+    while (handoff_art_pending() && (uint32_t)USEC_TIMER - start < 150000u &&
+           lcd_active() && button_queue_empty())
+    {
+        sleep(1);
+        cider_wps_update(state);
+    }
+    wps->current_art_only = true;
+    native_wps_render(state, false);
 }
 
 void native_wps_invalidate(void)

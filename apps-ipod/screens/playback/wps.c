@@ -626,6 +626,7 @@ static long do_party_mode(long action)
  * is to be left, for the screen in *go_to. */
 static bool show_album_covers(long *go_to, bool return_agents)
 {
+    carousel_wps_capture_return();
     if (cover_nav_playing())
     {
         leave_playback();
@@ -823,11 +824,19 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
         }
         else
             gwps_caption_backlight(state);
-        native_wps_render(state, submit);
+        if (carousel_wps_present_pending())
+        {
+            native_wps_paint_handoff(state);
+            carousel_wps_present();
+        }
+        else
+        {
+            native_wps_render(state, submit);
 #ifdef HAVE_USB_PODLINK
-        if (!submit)
-            handoff_present_remote();
+            if (!submit)
+                handoff_present_remote();
 #endif
+        }
 
         if (exit)
         {
@@ -1080,24 +1089,24 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
             /* menu key functions */
             case ACTION_WPS_MENU:
             {
-                leave_playback();
                 int destination = carousel_wps_back();
-                if (destination != GO_TO_PREVIOUS)
+                if (destination == GO_TO_PREVIOUS && cover_nav_playing())
                 {
+                    if (cider_active())
+                        destination = GO_TO_CIDER;
+                    else
+                        destination = album_covers_reopen_tracks() ? GO_TO_ALBUM_COVERS_TRACKS
+                                                                   : GO_TO_ALBUM_COVERS;
+                }
+                if (destination == GO_TO_ALBUM_COVERS || destination == GO_TO_CIDER)
+                    carousel_wps_capture_return();
+                leave_playback();
 #ifdef HAVE_USB_PODLINK
-                    if (destination == GO_TO_CIDER)
-                        return cider_browse_covers(false);
+                if (destination == GO_TO_CIDER)
+                    return cider_browse_covers(false);
 #endif
+                if (destination != GO_TO_PREVIOUS)
                     return destination;
-                }
-                if (cider_active())
-                {
-                    if (cover_nav_playing()) return cider_browse_covers(false);
-                    return return_agents ? GO_TO_AGENTS : GO_TO_PREVIOUS;
-                }
-                if (cover_nav_playing())
-                    return album_covers_reopen_tracks() ? GO_TO_ALBUM_COVERS_TRACKS
-                                                        : GO_TO_ALBUM_COVERS;
                 return return_agents ? GO_TO_AGENTS : GO_TO_PREVIOUS;
             }
 

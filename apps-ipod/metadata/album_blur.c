@@ -40,6 +40,8 @@
 #define BLUR_EVENT_WPS 0x1180
 #define BLUR_EVENT_WINDOW 0x1181
 #define PANEL_ALPHA_MAX 224
+/* How much darker the album panel's header band is than its rows. */
+#define PANEL_BAND_ALPHA 80
 #define WCAG_OFFSET 3277u /* 0.05 in Q16 */
 #define STATUS_ART_GRACE HZ
 
@@ -64,9 +66,15 @@ static struct {
     unsigned tint;
 } slots[BLUR_SLOTS];
 
+/* The covers around Cover Flow's centre, centre first. A pass takes them in
+ * order: `next` is the next to start and `done` the number finished.
+ * `missing` marks those found to have no art; `rerun` starts another pass
+ * when this one ends. */
 static struct {
     struct album_blur_source source[ALBUM_BLUR_NEIGHBORS];
-    unsigned count, next, revision;
+    unsigned count, next, done, revision;
+    unsigned missing;
+    bool rerun;
 } window;
 static struct album_blur_source wps_source;
 static int wps_art = -1;
@@ -118,6 +126,15 @@ static void release_slot(int slot)
     mutex_unlock(&cache_lock);
 }
 
+/* Whether a slot holds one of the window's covers. Call with the lock held. */
+static bool in_window(int slot)
+{
+    for (unsigned i = 0; i < window.count; i++)
+        if (same_source(&slots[slot].source, &window.source[i]))
+            return true;
+    return false;
+}
+
 static int reserve_slot(const struct album_blur_source *source, unsigned hash,
                         unsigned wps_lum, bool *hit)
 {
@@ -145,7 +162,11 @@ static int reserve_slot(const struct album_blur_source *source, unsigned hash,
             victim = i;
             break;
         }
-        if (victim < 0 || slots[i].recent < slots[victim].recent)
+        /* Slots outside the window go first, so Now Playing's art never
+         * pushes out the blur behind the album panel. */
+        bool kept = in_window(i);
+        if (victim < 0 || in_window(victim) > kept ||
+            (in_window(victim) == kept && slots[i].recent < slots[victim].recent))
             victim = i;
     }
     if (victim >= 0)
@@ -463,6 +484,8 @@ static unsigned prepare(const struct album_blur_source *source, int art,
     if (scrim)
         for (unsigned i = 0; i < ARRAYLEN(entry->panel); i++)
             entry->panel[i] = color_blend(entry->panel[i], LCD_BLACK, scrim);
+    for (unsigned i = 0; i < ALBUM_BLUR_DIVIDER * ALBUM_BLUR_PANEL_W; i++)
+        entry->panel[i] = color_blend(entry->panel[i], LCD_BLACK, PANEL_BAND_ALPHA);
     DEBUGF("FU112_BLUR %s %08x %lu %u\n", disk ? "disk" : "cold", hash,
            (unsigned long)(USEC_TIMER-start), scrim);
     panel_perf_record(PP_BLUR, USEC_TIMER - start, disk, hash);
@@ -549,11 +572,28 @@ static void blur_work(const struct queue_event *ev)
             mutex_unlock(&cache_lock);
             return;
         }
-        struct album_blur_source source = window.source[window.next++];
-        bool more = window.next < window.count;
+        unsigned index = window.next++;
+        struct album_blur_source source = window.source[index];
         mutex_unlock(&cache_lock);
-        prepare(&source, -1, wps_lum, revision, NULL);
-        if (more && !window_stale(revision) && !bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
+        bool missing = false;
+        prepare(&source, -1, wps_lum, revision, &missing);
+        mutex_lock(&cache_lock);
+        bool more = revision == window.revision;
+        if (more)
+        {
+            window.done = index + 1;
+            if (missing)
+                window.missing |= 1u << index;
+        }
+        if (more && window.next >= window.count)
+        {
+            more = window.rerun;
+            window.rerun = false;
+            if (more)
+                window.next = window.done = 0;
+        }
+        mutex_unlock(&cache_lock);
+        if (more && !bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
             bg_task_post(&blur_task, BLUR_EVENT_WINDOW);
         return;
     }
@@ -746,19 +786,44 @@ enum album_blur_tint_state album_blur_status_tint(unsigned height, unsigned *col
     return state;
 }
 
+/* Another pass over the window, after the one under way. Call with the lock
+ * held; true when the caller must post the event. */
+static bool look_again(void)
+{
+    window.missing = 0;
+    if (window.next < window.count || window.done < window.next)
+    {
+        window.rerun = true;
+        return false;
+    }
+    window.next = window.done = 0;
+    return true;
+}
+
 void album_blur_request_window(const struct album_blur_source *sources, unsigned count)
 {
     if (cache_handle <= 0)
         return;
+    count = MIN(count, ALBUM_BLUR_NEIGHBORS);
     mutex_lock(&cache_lock);
-    window.count = MIN(count, ALBUM_BLUR_NEIGHBORS);
-    window.next = 0;
-    if (++window.revision == 0)
-        ++window.revision;
-    if (window.count)
-        memcpy(window.source, sources, window.count * sizeof(*sources));
+    bool same = count && count == window.count;
+    for (unsigned i = 0; same && i < count; i++)
+        same = same_source(&sources[i], &window.source[i]);
+    /* The same covers asked for again, as a slide or a cached cover arrives:
+     * a new revision would throw away the blur being built for the centre. */
+    bool post = same ? look_again() : count > 0;
+    if (!same)
+    {
+        window.count = count;
+        window.next = window.done = window.missing = 0;
+        window.rerun = false;
+        if (++window.revision == 0)
+            ++window.revision;
+        if (count)
+            memcpy(window.source, sources, count * sizeof(*sources));
+    }
     mutex_unlock(&cache_lock);
-    if (count && !bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
+    if (post && !bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
         bg_task_post(&blur_task, BLUR_EVENT_WINDOW);
 }
 
@@ -767,15 +832,27 @@ unsigned album_blur_generation(void)
     return cache_generation;
 }
 
-bool album_blur_draw_panel(const struct album_blur_source *source)
+bool album_blur_draw_panel(const struct album_blur_source *source, int top, int height)
 {
     mutex_lock(&cache_lock);
     int slot = acquire_slot(source);
+    bool post = false;
+    /* A window cover with art whose blur has gone since its pass is built
+     * again, and the panel redrawn when it is ready. */
+    for (unsigned i = 0; slot < 0 && i < window.done; i++)
+        if (same_source(source, &window.source[i]) && !(window.missing & 1u << i))
+        {
+            post = look_again();
+            break;
+        }
     mutex_unlock(&cache_lock);
+    if (post && !bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
+        bg_task_post(&blur_task, BLUR_EVENT_WINDOW);
     if (slot < 0)
         return false;
     struct blur_pixels *cache = core_get_data_pinned(cache_handle);
-    lcd_bitmap(cache[slot].panel, 0, 0, ALBUM_BLUR_PANEL_W, ALBUM_BLUR_PANEL_H);
+    lcd_bitmap_part(cache[slot].panel, 0, top, ALBUM_BLUR_PANEL_W, 0, top,
+                    ALBUM_BLUR_PANEL_W, height);
     core_put_data_pinned(cache);
     release_slot(slot);
     return true;

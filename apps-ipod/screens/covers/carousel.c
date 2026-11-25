@@ -58,6 +58,7 @@
 #include "draw/color.h"
 #include "draw/line.h"              /* text_fit() */
 #include "draw/img_filter.h"    /* the slides' own treatment */
+#include "draw/round_rect.h"    /* the album panel's selection marker */
 #include "audio/sound_feedback.h" /* keyclick_click, for the random spin */
 #include "lang.h"
 #include "widgets/splash.h"
@@ -4618,7 +4619,11 @@ static int frame_wait(uint32_t deadline)
 #define PANEL_LEFT ALBUM_BLUR_TEXT_LEFT
 #define PANEL_HEADER_RIGHT ALBUM_BLUR_HEADER_RIGHT
 #define PANEL_ROWS_RIGHT ALBUM_BLUR_ROWS_RIGHT
-/* The scroll bar sits in the right inset, clear of the durations. */
+/* Left of the text, as in the theme's lists: the selection marker, then the
+ * playing or marked sign. The scroll bar sits in the right inset, clear of
+ * the durations. */
+#define PANEL_MARK_X 3
+#define PANEL_SIGN_X 8
 #define PANEL_BAR_X (ALBUM_PANEL_WIDTH - 6)
 #define PANEL_TIME_GAP 8
 #define ALBUM_PANEL_ROWS ALBUM_BLUR_ROWS
@@ -4684,28 +4689,45 @@ static struct album_panel {
     long marquee_start;
 } panel;
 
-/* The panel's colours, all from the theme. */
+/* The panel's colours, all from the theme. The rows take a list's colours
+ * and its selection marker; `dim` is the durations' quieter `muted`. */
 struct panel_ink {
-    pix_t back, header, text, muted, edge;
+    pix_t back, band, title, text, dim, edge, accent;
     pix_t selection, selected_text, selected_muted;
+    int mark_width, mark_alpha;
+    unsigned char mark_mask[2];
 };
 
 static void panel_ink(struct panel_ink *ink)
 {
     ink->back = ui_theme_rgb565(UI_COLOR_BACKGROUND);
-    ink->header = ui_theme_rgb565(UI_COLOR_LIST_TINT);
-    ink->text = ui_theme_rgb565(UI_COLOR_FOREGROUND);
-    ink->muted = ui_theme_rgb565(UI_COLOR_MUTED);
+    ink->band = ui_theme_rgb565(UI_COLOR_LIST_TINT);
+    ink->title = ui_theme_rgb565(UI_COLOR_FOREGROUND);
+    /* A band the same colour as the rows would not read as one. */
+    if (ink->band == ink->back)
+        ink->band = color_blend(ink->back, ink->title, 32);
+    ink->text = ui_theme_rgb565(UI_COLOR_MUTED);
+    ink->dim = color_blend(ink->text, ink->back, 64);
     ink->edge = ui_theme_rgb565(UI_COLOR_SEPARATOR);
-    /* A header the same colour as the rows would not read as one. */
-    if (ink->header == ink->back)
-        ink->header = color_blend(ink->back, ink->text, 32);
+    ink->accent = ui_theme_rgb565(UI_COLOR_ACCENT);
     ink->selection = ui_theme_rgb565(UI_COLOR_SELECTION);
-    /* A filled selection needs contrasting ink. */
-    ink->selected_text = color_fit_contrast(
-        ui_theme_rgb565(UI_COLOR_SELECTED_TEXT), ink->selection, 450);
-    ink->selected_muted = color_fit_contrast(
-        ui_theme_rgb565(UI_COLOR_SELECTED_SECONDARY), ink->selection, 450);
+    ink->selected_text = ui_theme_rgb565(UI_COLOR_SELECTED_TEXT);
+    ink->selected_muted = ui_theme_rgb565(UI_COLOR_SELECTED_SECONDARY);
+    ink->mark_width = ui_theme_metric(UI_METRIC_LIST_SELECTION_WIDTH);
+    ink->mark_alpha = ui_theme_metric(UI_METRIC_LIST_SELECTION_ALPHA);
+    round_rect_build_mask(ink->mark_mask, 1, ink->mark_alpha);
+}
+
+/* The marker beside the selected row at `y`. */
+static void panel_mark(int y, const struct panel_ink *ink)
+{
+    if (!ink->mark_width)
+        return;
+    lcd_set_foreground(ink->selection);
+    fill_round_rect_aa(&screens[SCREEN_MAIN], PANEL_MARK_X, y + 3,
+                       ink->mark_width, PANEL_PITCH - 6,
+                       MIN(ink->mark_width / 2, 1), ink->mark_mask,
+                       ink->mark_alpha);
 }
 
 static void panel_layout_header(void);
@@ -5170,7 +5192,10 @@ static void panel_layout_header(void)
     else if (panel.count >= 0)
     {
         const char *format = panel_chinese() ? "%d 首" : (const char *)str(LANG_N_TRACKS_TITLE);
-        snprintf(panel.count_label, sizeof(panel.count_label), format, panel.count);
+        int year = panel.request.album.year;
+        int n = year > 0 ? snprintf(panel.count_label, sizeof(panel.count_label),
+                                    "%d%s", year, panel_middot) : 0;
+        snprintf(panel.count_label + n, sizeof(panel.count_label) - n, format, panel.count);
     }
     bool ready = font_prefetch_text(title, panel.header.title);
     ready &= font_prefetch_text(title, ".");
@@ -5251,12 +5276,12 @@ static void panel_header(const struct panel_ink *ink)
     int meta_height = font_get(meta)->height;
     int title_y = (PANEL_DIVIDER - title_height - meta_height) / 2;
     int y = title_y + title_height;
-    lcd_set_foreground(ink->text);
+    lcd_set_foreground(ink->title);
     lcd_setfont(title);
     if (ready)
         lcd_putsxy(PANEL_LEFT, title_y, panel.fitted_title);
     lcd_setfont(meta);
-    lcd_set_foreground(ink->muted);
+    lcd_set_foreground(ink->text);
     if (ready && *panel.fitted_artist)
         lcd_putsxy(PANEL_LEFT, y, panel.fitted_artist);
     if (ready && panel.dot_x)
@@ -5314,7 +5339,7 @@ static void panel_paint_menu(struct viewport *view, const struct panel_ink *ink)
     }
 
     lcd_setfont(title);
-    lcd_set_foreground(ink->text);
+    lcd_set_foreground(ink->title);
     panel.menu_ready = panel_text(heading, PANEL_LEFT,
                                   panel_line_top(title, PANEL_DIVIDER) +
                                   font_get(title)->ascent, PANEL_HEADER_RIGHT);
@@ -5328,14 +5353,10 @@ static void panel_paint_menu(struct viewport *view, const struct panel_ink *ink)
     for (int i = 0; i < panel.command_count; ++i)
     {
         int y = i * PANEL_PITCH;
-        pix_t foreground = ink->text;
-        if (i == panel.command_selected)
-        {
-            lcd_set_foreground(ink->selection);
-            lcd_fillrect(1, y, ALBUM_PANEL_WIDTH - 2, PANEL_PITCH);
-            foreground = ink->selected_text;
-        }
-        lcd_set_foreground(foreground);
+        bool selected = i == panel.command_selected;
+        if (selected)
+            panel_mark(y, ink);
+        lcd_set_foreground(selected ? ink->selected_text : ink->text);
         const char *label = str(panel_command_labels[panel.commands[i]]);
         panel.menu_ready &= panel_text(label, PANEL_LEFT, y + baseline,
                                        PANEL_ROWS_RIGHT);
@@ -5402,11 +5423,9 @@ static void panel_paint_track(struct viewport *rows, int track, int y,
     int body = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
     struct panel_track *row = &panel.rows[track % PANEL_CACHE];
     bool selected = track == panel.selected;
+    pix_t text = selected ? ink->selected_text : ink->text;
     if (selected)
-    {
-        lcd_set_foreground(ink->selection);
-        lcd_fillrect(1, y, ALBUM_PANEL_WIDTH - 2, PANEL_PITCH);
-    }
+        panel_mark(y, ink);
     bool ready = row->index == track + 1 && row->glyphs_ready;
     if (ready)
     {
@@ -5420,7 +5439,7 @@ static void panel_paint_track(struct viewport *rows, int track, int y,
         char number[16];
         snprintf(number, sizeof(number), "%d", track + 1);
         lcd_setfont(FONT_SYSFIXED);
-        lcd_set_foreground(selected ? ink->selected_text : ink->muted);
+        lcd_set_foreground(text);
         lcd_putsxy(PANEL_LEFT, y + panel_line_top(FONT_SYSFIXED, PANEL_PITCH),
                    number);
         return;
@@ -5430,24 +5449,24 @@ static void panel_paint_track(struct viewport *rows, int track, int y,
     int mark = y + (PANEL_PITCH - 7) / 2;
     if (panel_marked(track))
     {
-        lcd_set_foreground(selected ? ink->selected_text : ink->text);
-        lcd_drawline(3, mark + 3, 5, mark + 5);
-        lcd_drawline(5, mark + 5, 9, mark);
+        lcd_set_foreground(text);
+        lcd_drawline(PANEL_SIGN_X, mark + 3, PANEL_SIGN_X + 2, mark + 5);
+        lcd_drawline(PANEL_SIGN_X + 2, mark + 5, PANEL_SIGN_X + 6, mark);
     }
     else if (row->playing)
     {
-        lcd_set_foreground(selected ? ink->selected_text : ink->text);
+        lcd_set_foreground(ink->accent);
         for (int i = 0; i < 7; i++)
-            lcd_hline(3, 3 + MIN(i, 6 - i) * 5 / 3, mark + i);
+            lcd_hline(PANEL_SIGN_X, PANEL_SIGN_X + MIN(i, 6 - i), mark + i);
     }
     int top = y + panel_line_top(body, PANEL_PITCH);
     lcd_setfont(body);
     if (row->duration)
     {
-        lcd_set_foreground(selected ? ink->selected_muted : ink->muted);
+        lcd_set_foreground(selected ? ink->selected_muted : ink->dim);
         panel_duration(row, top);
     }
-    lcd_set_foreground(selected ? ink->selected_text : ink->text);
+    lcd_set_foreground(text);
     if (selected)
         panel_marquee_select(track, row, body);
     if (!panel_marquee_on(track))
@@ -5480,7 +5499,7 @@ static void panel_paint_scrollbar(int height, int y0,
             ((total - ALBUM_PANEL_ROWS) * PANEL_PITCH);
     lcd_set_foreground(ink->edge);
     lcd_fillrect(PANEL_BAR_X, -y0, 2, height);
-    lcd_set_foreground(ink->muted);
+    lcd_set_foreground(ink->text);
     lcd_fillrect(PANEL_BAR_X, y - y0, 2, thumb);
 }
 
@@ -5517,7 +5536,7 @@ static void panel_paint_rows(struct viewport *view, const struct panel_ink *ink)
                 char label[80];
                 panel_disc_label(disc, label, sizeof(label));
                 lcd_setfont(small);
-                lcd_set_foreground(ink->muted);
+                lcd_set_foreground(ink->dim);
                 if (font_prefetch_text(small, label))
                     panel.painted_discs++;
                 int baseline = panel_line_top(small, PANEL_PITCH) +
@@ -5553,16 +5572,20 @@ static void NO_INLINE paint_album_panel(void)
     panel_ink(&ink);
     lcd_set_background(ink.back);
     lcd_set_drawmode(DRMODE_SOLID);
-    panel.have_blur = !panel.solid && album_blur_draw_panel(&panel.blur_source);
+    panel.have_blur = !panel.solid &&
+        album_blur_draw_panel(&panel.blur_source, 0, ALBUM_PANEL_HEIGHT);
+    /* The blurred cover carries its own darker header band. */
     if (!panel.have_blur)
+    {
         lcd_clear_viewport();
+        lcd_set_foreground(ink.band);
+        lcd_fillrect(1, 1, view.width - 2, PANEL_DIVIDER - 1);
+    }
     /* The card runs off the bottom of the screen: no edge there. */
     lcd_set_foreground(ink.edge);
     lcd_hline(0, view.width - 1, 0);
     lcd_vline(0, 1, view.height - 1);
     lcd_vline(view.width - 1, 1, view.height - 1);
-    lcd_set_foreground(ink.header);
-    lcd_fillrect(1, 1, view.width - 2, PANEL_DIVIDER - 1);
 
     lcd_set_drawmode(DRMODE_FG);
     if (panel.command_count)
@@ -5585,9 +5608,20 @@ static void panel_repaint_marquee(void)
     struct viewport rows = view;
     rows.y += PANEL_ROWS_Y;
     rows.height = ALBUM_PANEL_ROWS * PANEL_PITCH;
-    struct viewport *previous = lcd_set_viewport(&rows);
+    struct viewport *previous = lcd_set_viewport(&view);
     struct panel_ink ink;
     panel_ink(&ink);
+    /* The row's backdrop again first: no bar covers the old title. */
+    int top = PANEL_ROWS_Y + y;
+    lcd_set_drawmode(DRMODE_SOLID);
+    lcd_set_foreground(ink.back);
+    if (!panel.have_blur ||
+        !album_blur_draw_panel(&panel.blur_source, top, PANEL_PITCH))
+        lcd_fillrect(0, top, view.width, PANEL_PITCH);
+    lcd_set_foreground(ink.edge);
+    lcd_vline(0, top, top + PANEL_PITCH - 1);
+    lcd_vline(view.width - 1, top, top + PANEL_PITCH - 1);
+    lcd_set_viewport(&rows);
     lcd_set_drawmode(DRMODE_FG);
     unsigned painted = panel.painted_rows;
     panel_paint_track(&rows, panel.selected, y, &ink);

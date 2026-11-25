@@ -5,10 +5,11 @@
 #include "lcd.h"
 
 /* The Cover Flow album panel: a card 254 px wide from row 28 to the bottom
- * of the screen, a 44 px header over seven 24 px track rows. */
+ * of the screen, a 44 px header over seven 24 px track rows. The text starts
+ * 16 px in, past the selection marker and the playing sign. */
 #define ALBUM_BLUR_PANEL_W 254
 #define ALBUM_BLUR_PANEL_H 212
-#define ALBUM_BLUR_TEXT_LEFT 12
+#define ALBUM_BLUR_TEXT_LEFT 16
 #define ALBUM_BLUR_HEADER_RIGHT (ALBUM_BLUR_PANEL_W - 12)
 #define ALBUM_BLUR_DIVIDER 44
 #define ALBUM_BLUR_ROWS_TOP ALBUM_BLUR_DIVIDER
@@ -31,7 +32,9 @@ void album_blur_request_wps(void);
 void album_blur_playing_changed(void);
 void album_blur_request_window(const struct album_blur_source *sources, unsigned count);
 unsigned album_blur_generation(void);
-bool album_blur_draw_panel(const struct album_blur_source *source);
+/* Rows `top` to `top + height` of the album panel's backdrop, drawn at the
+ * same rows of the current viewport. */
+bool album_blur_draw_panel(const struct album_blur_source *source, int top, int height);
 bool album_blur_render_wps(fb_data *out, int art, unsigned generation, unsigned fg);
 
 enum album_blur_tint_state { ALBUM_BLUR_WAITING, ALBUM_BLUR_NO_ART, ALBUM_BLUR_TINT };

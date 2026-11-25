@@ -1,10 +1,10 @@
 # Native PodBox theme format
 
-The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry.
+The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in AstraPod's fonts. The built-in Plastic theme is Classic drawn with Apple's own bitmaps from that firmware.
 
 ## Installing and choosing a theme
 
-Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Appearance → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim` and `light`. The default is `scrim`.
+Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Appearance → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim`, `light`, `classic` and `plastic`. The default is `scrim`.
 
 Place referenced font files in `.rockbox/fonts/`. Use PBF1 `.pbf` files for text and an RB12 `.fnt` file for icons. Firmware falls back to Scrim if a theme file is missing or malformed, or if it references an unsupported font. It records the failure in `.rockbox/native-theme.log`.
 
@@ -63,6 +63,7 @@ Use `font.<role>=<basename>` to reference a font. The basename can contain 1–3
 | `wps_title`, `handoff_title`, `lyrics_focus` | `26-noto-sans-medium` |
 | `wps_meta`, `handoff_caption` | `12-noto-sans` |
 | `panel` | `14-noto-sans` |
+| `status_title` | `18-noto-sans-bold` |
 
 ### Cover Flow album panel
 
@@ -117,6 +118,96 @@ contrast tint. The parser still accepts `background.handoff`, `handoff_bg`
 and `handoff_scrim_alpha` in existing theme files.
 
 `motion_scale` is a whole percentage from 0 to 300. `100` keeps the default frame count, `50` halves it, and `0` disables motion. The animation setting also controls whether motion plays. Durations are measured in frames on the 60 Hz clock.
+
+`motion.<role>` sets one transition's duration in frames on the same clock,
+from 0 to 120. The roles are `push` and `pop` (page transitions), `list`
+(the selection bar and list scrolling), `sheet_in` and `sheet_out`. `0` makes
+that motion a jump. An omitted role keeps the built-in duration, and
+`motion_scale` applies to every role.
+
+`motion_easing` sets the curve of slide page transitions: `cubic` (the
+default), `quad`, `quint`, `sine` or `linear`, all ease-out. Transitions to
+and from Now Playing, and full-screen panels, always slide at constant speed.
+
+### Gradients
+
+`gradient.<role>` replaces a solid fill with a gradient. The value is `none`,
+two colours (top and bottom) or four: a one-pixel top line, the top and bottom
+of the body, and a one-pixel bottom line. Rows between are blended evenly.
+
+| Role | Fill | Replaces |
+| --- | --- | --- |
+| `selection` | the list selection bar, with `style.selection=bar` | `color.selection` |
+| `status` | the status bar and its volume overlay; the bar then never takes the cover tint | `color.status_bg` |
+| `progress` | the Now Playing progress and volume fill, with `style.wps_layout=classic` | `color.wps_accent` |
+| `progress_track` | the track behind that fill | |
+| `scrollbar` | the scroll thumb, with `style.scrollbar=classic`, shaded left to right | the darkened thumb |
+
+### Styles
+
+`style.<name>` chooses between drawing styles. The first keyword is Scrim's.
+
+| Key | Keywords | Effect of the second keyword |
+| --- | --- | --- |
+| `selection` | `marker`, `bar` | A full-width bar behind the selected row instead of a thin marker. Selected text uses `selected_text`, other rows `muted`. |
+| `list_icons` | `auto`, `off` | No icon column in lists. The Agents screen and multi-select marks keep theirs. |
+| `accessory` | `all`, `selected` | The chevron shows on the selected row only. Setting rows show their value as text in `accent`, right-aligned. |
+| `status_clock` | `on`, `off` | No clock in the status bar; the title takes the room. |
+| `status_title` | `left`, `center` | The title is centred and the clock moves right. |
+| `page_motion` | `cascade`, `slide` | Pages slide side by side under a fixed status bar, at full brightness. |
+| `wps_layout` | `cover`, `classic` | Now Playing with a status bar, a tilted cover and its reflection on the left, the track text on the right, and the progress bar with both times at the bottom. Turning the wheel slides the volume bar in from the right in place of the progress bar. The layout is fixed; colours, fonts and gradients apply. |
+| `scrollbar` | `plain`, `classic` | A 4-pixel thumb with rounded ends and no track, drawn at the right edge. |
+| `art` | `none`, `plastic` | Apple's bitmaps from the stock firmware replace the drawn battery, play and pause icons, the selected row's chevron, and the Now Playing shuffle icon and speakers. The status, selection, `progress` and `progress_track` gradients become Apple's exact rows, whatever the theme sets for them. The bitmaps are sized for the Classic layout. |
+
+Classic sets the second keyword of every style except `art`. To start a
+custom theme from Classic, copy its values from the table below.
+
+### The Classic theme
+
+Classic uses Light's colours as its base, with these changes:
+
+```ini
+color.background = ffffff
+color.foreground = 000000
+color.muted = 000000
+color.accent = 3185d0
+color.selection = 0089de
+color.selected_text = ffffff
+color.status_bg = cecfce
+color.status_fg = 000000
+color.wps_muted = 3d3d3d
+gradient.selection = 96c5da,09a4e1,0065d3,004386
+gradient.status = fcfcfc,f8f8f8,9f9e9e,5b5b5b
+gradient.progress = 6483f0,6789f2,56aeff,4e8fce
+gradient.progress_track = dbdbdb,fdfdfd,e2e2e2,bababa
+font.list = 18-noto-sans-bold
+font.status = 14-noto-sans
+font.status_title = 14-noto-sans
+font.wps_title = 18-noto-sans-bold
+metric.row_height = 24
+metric.list_x = 0
+metric.list_y = 20
+metric.list_bottom = 0
+metric.status_height = 20
+background.status = solid
+motion.push = 18
+motion.pop = 18
+motion.list = 0
+motion_easing = quad
+```
+
+Classic also changes the list and status paddings and the album-row size.
+A custom theme keeps Scrim's values for those unless it sets them.
+
+### The Plastic theme
+
+Plastic is Classic with these additions:
+
+```ini
+style.art = plastic
+metric.status_pad_right = 5
+metric.status_icon_gap = 6
+```
 
 ## Native rendering and animation
 

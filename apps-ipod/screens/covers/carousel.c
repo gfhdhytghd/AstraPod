@@ -6508,6 +6508,8 @@ static void keep_playback_cover(int album)
 static struct stock_pose playback_target(struct ui_rect slot)
 {
     struct stock_pose pose;
+    if (slot.width && native_wps_art_turned())
+        return stock_playing_pose();
     if (stock_wps_pose(slot.x, slot.y, slot.width, slot.height, &pose))
         return pose;
     return stock_playing_pose();
@@ -6540,6 +6542,30 @@ static void paint_playback_texture(struct stock_pose pose, const struct playback
     pix_t *pixels = core_get_data_pinned(texture->handle);
     stock_draw_quad(LCD_BUF, pose, pixels, texture->width, texture->height, texture->height);
     core_put_data_pinned(pixels);
+}
+
+/* A turned cover on screen is no texture: take the WPS's own cover, which
+ * the return turn starts from. */
+static void capture_turned_art(void)
+{
+    drop_playback_bitmap(&playback_scene.art.handle);
+    int side = native_wps_art_side();
+    int handle = side ? core_alloc_free_space(side * side * sizeof(pix_t)) : 0;
+    if (handle <= 0)
+        return;
+    pix_t *dst = core_get_data_pinned(handle);
+    native_wps_copy_art(dst, side);
+    core_put_data_pinned(dst);
+    playback_scene.art = (struct playback_texture){0, handle, side, side};
+}
+
+static void paint_return_landing(const struct ui_rect *clip)
+{
+    const struct playback_texture *art = &playback_scene.art;
+    const pix_t *src = core_get_data_pinned(art->handle);
+    stock_draw_clipped_quad(LCD_BUF, playback_scene.playing, src,
+                            art->width, art->height, art->height, clip);
+    core_put_data_pinned((void *)src);
 }
 
 /* The WPS borrows the same texture as the last turn frame. */
@@ -6626,10 +6652,16 @@ void carousel_wps_capture_return(uint32_t action_us)
     playback_scene.returning = true;
     native_wps_art_layout(&playback_scene.slot);
     playback_scene.playing = playback_target(playback_scene.slot);
+    bool turned = playback_scene.slot.width && native_wps_art_turned();
+    if (turned && pf_motion_scale && lcd_active())
+        capture_turned_art();
+    /* The uncovered cover is the return turn's first frame. */
+    if (turned && playback_scene.art.handle > 0)
+        native_wps_set_landing(paint_return_landing);
     if (pf_motion_scale)
         slide_playback_controls(NULL, action_us);
     playback_scene.return_start = USEC_TIMER;
-    if (pf_motion_scale && lcd_active())
+    if (!turned && pf_motion_scale && lcd_active())
         capture_return_art();
 }
 

@@ -52,7 +52,7 @@ static int position(const struct ui_scene *scene, unsigned frame)
 {
     const struct ui_tween *tween = &scene->tween;
     int offset;
-    if (scene->pan_top && frame < tween->frames)
+    if (scene->pan_top && !scene->slide && frame < tween->frames)
     {
         /* Smoothstep: zero velocity at each end, equal travel in each half. */
         int t = frame * 128 / tween->frames;
@@ -113,7 +113,7 @@ static void compose_modal(fb_data *out, const fb_data *back, const fb_data *fron
 static void compose_pages(const struct ui_scene *scene, fb_data *out,
                           const fb_data *back, const fb_data *front, int offset)
 {
-    if (!scene->pan_top)
+    if (!scene->pan_top && !scene->slide)
     {
         compose(out, back, front, offset);
         return;
@@ -182,7 +182,9 @@ static unsigned push_duration_half(const struct ui_scene *scene)
 
 static void set_push_duration(struct ui_scene *scene)
 {
-    scene->push_half_frames = ui_theme_duration(push_duration_half(scene));
+    scene->push_half_frames = ui_theme_motion(UI_MOTION_PUSH,
+                                              push_duration_half(scene),
+                                              2 * PUSH_ROW_FRAMES);
     scene->tween.frames = (scene->push_half_frames + 1) / 2;
 }
 
@@ -310,7 +312,8 @@ void ui_scene_snap_push(void)
 void ui_scene_push_rows(int y, int pitch, int count)
 {
     struct ui_scene *scene = owner;
-    if (!scene || !scene->staggered || thread_self() != owner_thread)
+    if (!scene || !(scene->staggered || scene->slide) ||
+        thread_self() != owner_thread)
         return;
     y = MIN(MAX(y, 0), LCD_HEIGHT);
     count = MAX(0, count);
@@ -326,7 +329,8 @@ void ui_scene_push_rows(int y, int pitch, int count)
     /* A loading row can become a list while the incoming page is in flight. */
     if (!scene->capturing)
     {
-        set_push_duration(scene);
+        if (scene->staggered)
+            set_push_duration(scene);
         scene->rows_changed = true;
     }
 }
@@ -378,12 +382,34 @@ void ui_scene_fade_out(void)
     ui_perf_end(trace);
 }
 
-static bool capture_scene(struct ui_scene *scene, const void *from, const void *to,
-                          bool push, const char *route, int pan_top, int pan_dir)
+static bool slide_motion(void)
 {
-    bool staggered = push && !pan_top;
-    unsigned frames = ui_theme_duration(pan_top ? PAN_FRAMES :
-                                        push ? PUSH_ROW_FRAMES : POP_FRAMES);
+    return ui_theme_style(UI_STYLE_PAGE_MOTION) == UI_PAGE_MOTION_SLIDE;
+}
+
+/* A slide moves the pages below the status bar; the bar changes in place. */
+static int slide_top(void)
+{
+    return sb_visible_height();
+}
+
+static unsigned page_frames(bool push)
+{
+    return push
+        ? ui_theme_motion(UI_MOTION_PUSH, PUSH_ROW_FRAMES, PUSH_ROW_FRAMES)
+        : ui_theme_motion(UI_MOTION_POP, POP_FRAMES, POP_FRAMES);
+}
+
+/* A pan with slide set is a theme's page push (pan_dir 1) or pop (-1). */
+static bool capture_scene(struct ui_scene *scene, const void *from, const void *to,
+                          bool push, const char *route, int pan_top,
+                          int pan_dir, bool slide)
+{
+    bool panning = pan_top || slide;
+    bool staggered = push && !panning;
+    unsigned frames = slide ? page_frames(pan_dir > 0)
+                    : pan_top ? ui_theme_duration(PAN_FRAMES)
+                    : page_frames(push);
     ui_scene_snap_push();
     if (!frames || !lcd_active() || (owner && owner != scene))
         return false;
@@ -399,10 +425,11 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     }
     int offset = push ? LCD_WIDTH : 0;
     int end = push ? 0 : LCD_WIDTH;
-    bool reverse_pan = active && pan_top && pan_top == scene->pan_top &&
+    bool reverse_pan = active && panning && pan_top == scene->pan_top &&
+        slide == scene->slide &&
         to == (scene->target_front ? scene->back_page : scene->front_page) &&
         from == (scene->target_front ? scene->front_page : scene->back_page);
-    if (pan_top)
+    if (panning)
     {
         offset = pan_dir * LCD_WIDTH;
         if (reverse_pan)
@@ -412,7 +439,7 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
         }
     }
     if (reverse_pan ||
-        (active && !staggered && !pan_top && !scene->pan_top &&
+        (active && !staggered && !panning && !scene->pan_top && !scene->slide &&
          (!scene->capturing || push != scene->target_front) &&
          from == (push ? scene->back_page : scene->front_page) &&
          to == (push ? scene->front_page : scene->back_page)))
@@ -448,12 +475,13 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
 
     scene->target_front = push;
     scene->pan_top = pan_top;
+    scene->slide = slide;
     scene->staggered = staggered;
     scene->reuse_target = reverse_pan;
     scene->row_y = scene->row_count = 0;
     scene->tween = (struct ui_tween){
-        .from = offset, .to = end,
-        .frames = frames, .ease_in = !push,
+        .from = offset, .to = end, .frames = frames,
+        .ease_in = !push && !slide, .easing = slide ? ui_theme_easing() : 0,
     };
     scene->last_offset = scene->composed_offset = -1;
     scene->capturing = true;
@@ -464,22 +492,27 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
 bool ui_scene_capture(struct ui_scene *scene, const void *from, const void *to,
                       bool push)
 {
-    return capture_scene(scene, from, to, push, push ? "push" : "pop", 0, 0);
+    const char *route = push ? "push" : "pop";
+    if (slide_motion())
+        return capture_scene(scene, from, to, true, route, slide_top(),
+                             push ? 1 : -1, true);
+    return capture_scene(scene, from, to, push, route, 0, 0, false);
 }
 
 bool ui_scene_capture_pan(struct ui_scene *scene, const void *from, const void *to,
                           int direction, int top)
 {
-    return capture_scene(scene, from, to, true, "pan", top, direction);
+    return capture_scene(scene, from, to, true, "pan", top, direction, false);
 }
 
 void ui_scene_boot(struct ui_scene *scene)
 {
-    if (capture_scene(scene, scene, NULL, true, "boot", 0, 0))
+    if (capture_scene(scene, scene, NULL, true, "boot", 0, 0, false))
         scene->automatic = true;
 }
 
-void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bool push)
+void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bool push,
+                    bool full_screen)
 {
     const void *restored = restored_page;
     restored_page = NULL;
@@ -490,6 +523,9 @@ void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bo
     {
         scene->root_entry = true;
         scene->automatic = true;
+        /* Full-screen slides move at constant speed; menu slides ease. */
+        if (full_screen && scene->slide)
+            scene->tween.easing = UI_EASE_LINEAR;
     }
 }
 
@@ -507,7 +543,10 @@ void ui_scene_modal_restored(const void *page)
 
 static bool capture_panel(struct ui_scene *scene, bool vertical)
 {
-    unsigned frames = ui_theme_duration(vertical ? MODAL_UP_FRAMES : PUSH_ROW_FRAMES);
+    bool slide = !vertical && slide_motion();
+    unsigned frames = vertical
+        ? ui_theme_motion(UI_MOTION_SHEET_IN, MODAL_UP_FRAMES, MODAL_UP_FRAMES)
+        : page_frames(true);
     if (!frames || !lcd_active())
         return false;
 
@@ -527,8 +566,10 @@ static bool capture_panel(struct ui_scene *scene, bool vertical)
     memcpy(backdrop, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
     core_put_data_pinned(backdrop);
     scene->vertical = vertical;
+    /* A panel page often hides the status bar, so the whole screen slides. */
     scene->pan_top = 0;
-    scene->staggered = !vertical;
+    scene->slide = slide;
+    scene->staggered = !vertical && !slide;
     scene->row_y = scene->row_count = 0;
     scene->back_page = parent;
     scene->status_height = vertical ? sb_visible_height() : 0;
@@ -537,6 +578,7 @@ static bool capture_panel(struct ui_scene *scene, bool vertical)
     scene->last_offset = scene->composed_offset = -1;
     scene->tween = (struct ui_tween){
         .from = vertical ? LCD_HEIGHT : LCD_WIDTH, .to = 0, .frames = frames,
+        .easing = slide ? UI_EASE_LINEAR : 0,
     };
     return true;
 }
@@ -708,8 +750,10 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
 {
     if (scene->backdrop_handle <= 0)
         return false;
-    unsigned duration = scene->vertical ? MODAL_DOWN_FRAMES : POP_FRAMES;
-    unsigned frames = animate ? ui_theme_duration(duration) : 0;
+    unsigned frames = !animate ? 0 : scene->vertical
+        ? ui_theme_motion(UI_MOTION_SHEET_OUT, MODAL_DOWN_FRAMES,
+                          MODAL_DOWN_FRAMES)
+        : page_frames(false);
     if (!frames || !lcd_active() || (owner && owner != scene))
     {
         release_scene(scene);
@@ -740,7 +784,9 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     scene->last_offset = scene->composed_offset = -1;
     scene->tween = (struct ui_tween){
         .start_clock = ui_clock_start(), .from = offset,
-        .to = scene->vertical ? LCD_HEIGHT : LCD_WIDTH, .frames = frames, .ease_in = true,
+        .to = scene->vertical ? LCD_HEIGHT : LCD_WIDTH, .frames = frames,
+        .ease_in = !scene->slide,
+        .easing = scene->slide ? UI_EASE_LINEAR : 0,
     };
     while (owner == scene)
     {

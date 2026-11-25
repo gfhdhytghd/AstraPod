@@ -26,6 +26,12 @@ void native_wps_paint_handoff(const struct wps_state *state,
 /* The theme slot is available before the page opens. An empty rectangle
  * means no slot. True means the live page has confirmed the layout. */
 bool native_wps_art_layout(struct ui_rect *bounds);
+/* The slot is a cover turned away at the stock Now Playing pose; its bounds
+ * are the face's. */
+bool native_wps_art_turned(void);
+/* The current cover's square centre, column-major, and its side or 0. */
+int native_wps_art_side(void);
+void native_wps_copy_art(fb_data *dst, int side);
 bool native_wps_has_art(void);
 /* Borrow the carousel's selected cover until native art or a different track arrives. */
 void native_wps_set_landing(void (*paint)(const struct ui_rect *clip));

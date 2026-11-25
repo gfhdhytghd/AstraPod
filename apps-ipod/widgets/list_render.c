@@ -77,6 +77,12 @@ struct list_motion {
     bool wheel;
 };
 
+/* A theme gradient as RGB565 rows, for a fill `height` rows tall. */
+struct gradient_rows {
+    uint16_t color[LCD_HEIGHT];
+    int height;
+};
+
 struct list_index {
     char key[16];
     uint32_t samples_at[INDEX_SAMPLES];
@@ -115,6 +121,7 @@ struct native_list {
         char notes[2 * MAX_PATH];
     } scratch;
     int row_shift, cursor_y;
+    struct gradient_rows bar_rows, thumb_rows;
     uint32_t marquee_started, marquee_frame;
     bool has_marquee;
     unsigned char mark_mask[2];
@@ -150,6 +157,7 @@ static void refresh_tokens(struct native_list *render)
     ui_theme_snapshot(&render->theme);
     render->theme_generation = generation;
     render->colors_current = false;
+    render->bar_rows.height = render->thumb_rows.height = 0;
     font_unload(render->text_font);
     font_unload(render->title_font);
     font_unload(render->icon_font);
@@ -257,7 +265,8 @@ int list_render_visible_rows(const struct gui_synclist *list, enum screen_type s
 
 static bool motion_enabled(void)
 {
-    return !ui_scrolling_held() && ui_theme_duration(GLIDE_F) != 0;
+    return !ui_scrolling_held() &&
+           ui_theme_motion(UI_MOTION_LIST, GLIDE_F, GLIDE_F) != 0;
 }
 
 static int64_t fixed_row(int index)
@@ -337,7 +346,7 @@ void list_render_settle(const struct gui_synclist *list)
 void list_render_retarget(const struct gui_synclist *list, int selection, int top,
                           int offset, bool wheel)
 {
-    unsigned glide = ui_theme_duration(GLIDE_F);
+    unsigned glide = ui_theme_motion(UI_MOTION_LIST, GLIDE_F, GLIDE_F);
     if (!glide || ui_scrolling_held() || renderer_handle <= 0 || !list->nb_items ||
         !list->parent[SCREEN_MAIN])
         return;
@@ -424,7 +433,8 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
         .from = from, .live = live, .rest = rest,
         .started = continuing ? now : ui_clock_start(),
         .painted = 0, .trace = trace,
-        .glide_frames = glide, .spring_frames = ui_theme_duration(SPRING_F),
+        .glide_frames = glide,
+        .spring_frames = ui_theme_motion(UI_MOTION_LIST, SPRING_F, GLIDE_F),
         .visible = visible, .count = list->nb_items, .span = span,
         .bounds = g.rows, .pitch = g.pitch, .wheel = wheel,
     };
@@ -481,6 +491,7 @@ static void refresh_colors(struct native_list *render)
     static const enum ui_color_role list_colors[] = {
         UI_COLOR_BACKGROUND, UI_COLOR_FOREGROUND, UI_COLOR_MUTED, UI_COLOR_SELECTION,
         UI_COLOR_SELECTED_TEXT, UI_COLOR_LIST_TINT, UI_COLOR_DIM,
+        UI_COLOR_ACCENT,
     };
     for (unsigned i = 0; i < ARRAYLEN(list_colors); ++i)
     {
@@ -500,6 +511,42 @@ static void fill(struct ui_rect clip, struct ui_rect cell, unsigned int fg)
         return;
     struct viewport *prior = lcd_set_viewport(&vp);
     lcd_fillrect(0, 0, vp.width, vp.height);
+    lcd_set_viewport(prior);
+}
+
+static const uint16_t *gradient_rows(struct native_list *render,
+                                     struct gradient_rows *rows,
+                                     enum ui_gradient_role role, int height)
+{
+    height = MIN(MAX(height, 1), LCD_HEIGHT);
+    if (rows->height != height)
+    {
+        for (int y = 0; y < height; ++y)
+        {
+            uint32_t rgb = ui_theme_gradient_at(&render->theme.gradient[role],
+                                                y, height, 0);
+            rows->color[y] = LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255,
+                                         rgb & 255);
+        }
+        rows->height = height;
+    }
+    return rows->color;
+}
+
+/* Fill `cell` with one colour per row from `colors`, indexed from its top. */
+static void fill_rows(struct ui_rect clip, struct ui_rect cell,
+                      const uint16_t *colors)
+{
+    struct viewport vp;
+    if (!set_clip(&vp, clip, cell, FONT_UI, 0))
+        return;
+    struct viewport *prior = lcd_set_viewport(&vp);
+    const uint16_t *color = colors + (vp.y - cell.y);
+    for (int y = 0; y < vp.height; ++y)
+    {
+        lcd_set_foreground(color[y]);
+        lcd_fillrect(0, y, vp.width, 1);
+    }
     lcd_set_viewport(prior);
 }
 
@@ -712,6 +759,9 @@ static const char *home_label(const char *text, char *buffer, size_t size)
     return buffer;
 }
 
+/* The accessory of a row that opens another screen. */
+static const char chevron[] = "Þ";
+
 static const char *row_accessory(const struct gui_synclist *list, int item,
                                  enum list_row_kind kind, const char *label,
                                  const char *value)
@@ -749,7 +799,7 @@ static const char *row_accessory(const struct gui_synclist *list, int item,
     if (list->callback_item_is_playing && list->callback_item_is_playing(item, list->data))
         return "A";
     return kind == LIST_ROW_MENU || kind == LIST_ROW_CONTAINER ||
-           kind == LIST_ROW_CUSTOM_MENU ? "Þ" : NULL;
+           kind == LIST_ROW_CUSTOM_MENU ? chevron : NULL;
 }
 
 static bool file_rows(enum current_activity activity)
@@ -802,8 +852,10 @@ static void draw_owner_row(struct gui_synclist *list, struct ui_rect clip,
     lcd_set_viewport(prior);
 }
 
+/* `lit` draws the text for the selection colour behind it; under a bar it
+ * can differ from `selected` while the bar moves between rows. */
 static void paint_row(struct native_list *render, struct ui_rect clip,
-                      struct ui_rect row, int item, bool selected,
+                      struct ui_rect row, int item, bool selected, bool lit,
                       bool marker_only)
 {
     struct gui_synclist *list = render->owner;
@@ -859,6 +911,10 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     if (!icon_column && !art && list->show_icons &&
         (kind == LIST_ROW_CONTAINER || kind == LIST_ROW_CUSTOM_MENU))
         icon_column = icon != Icon_NOICON;
+    /* Agents keeps its column: it holds each agent's live state. */
+    if (render->theme.style[UI_STYLE_LIST_ICONS] == UI_LIST_ICONS_OFF &&
+        !agents)
+        icon_column = false;
 
     if (marker_only)
     {
@@ -884,10 +940,25 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
                                                       sizeof(render->scratch.row.value)) : NULL;
     const char *icon_label = menu_config ? home_label(label, render->scratch.row.home,
                                                       sizeof(render->scratch.row.home)) : label;
-    const char *aux = activity == ACTIVITY_MAINMENU || menu_config ? NULL :
+    bool chevron_selected =
+        render->theme.style[UI_STYLE_ACCESSORY] == UI_ACCESSORY_SELECTED;
+    const char *aux = menu_config ||
+                      (activity == ACTIVITY_MAINMENU && !chevron_selected) ? NULL :
                       row_accessory(list, item, kind, label, value);
+    /* Home's rows open screens, except the ones that start playback. */
+    if (activity == ACTIVITY_MAINMENU && chevron_selected && !aux &&
+        !equals_lang(label, LANG_NOW_PLAYING) &&
+        !equals_lang(label, LANG_RESUME_PLAYBACK) &&
+        !equals_lang(label, LANG_SHUFFLE_SONGS) &&
+        !equals_lang(label, LANG_RANDOM_ALBUM))
+        aux = chevron;
+    /* With stock accessories a setting shows its value in words instead. */
+    bool value_text = chevron_selected && value && *value &&
+                      (kind == LIST_ROW_SETTING || kind == LIST_ROW_TOGGLE);
+    if (value_text)
+        aux = NULL;
 
-    unsigned int fg = render->colors[selected ? UI_COLOR_SELECTED_TEXT : UI_COLOR_MUTED];
+    unsigned int fg = render->colors[lit ? UI_COLOR_SELECTED_TEXT : UI_COLOR_MUTED];
     unsigned int bg = render->colors[UI_COLOR_BACKGROUND];
     if (list->callback_get_item_color)
     {
@@ -921,6 +992,8 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     bool ready = list_text_ready(text_font, label);
     if (agents && value && value[0] == 'r' && value[1] && value[2])
         ready &= list_text_ready(text_font, value + 2);
+    if (value_text)
+        ready &= list_text_ready(text_font, value);
     if (!ready)
         return;
 
@@ -989,9 +1062,24 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         draw_text(render, clip, row_cell(row, right - value_width, text_y,
                   value_width, text_height, rtl), text_font, fg, value + 2, false, 0, false);
     }
+    if (value_text)
+    {
+        int inset = m[UI_METRIC_LIST_TEXT_PADDING];
+        int value_width = MIN(font_getstringsize((const unsigned char *)value,
+                                                 NULL, NULL, text_font),
+                              (right - text_x) / 2);
+        int value_x = right - inset - value_width;
+        text_right = value_x - m[UI_METRIC_LIST_AUX_PADDING];
+        draw_text(render, clip, row_cell(row, value_x, text_y, value_width,
+                  text_height, rtl), text_font,
+                  lit ? fg : render->colors[UI_COLOR_ACCENT], value, false, 0,
+                  false);
+    }
     draw_text(render, clip, row_cell(row, text_x, text_y,
               text_right - text_x, text_height, rtl), text_font, fg, label,
               selected || list->scroll_all, list->offset_position[SCREEN_MAIN], false);
+    if (aux == chevron && chevron_selected && !lit)
+        aux = NULL;
     if (render->icon_font >= 0)
         draw_text(render, clip, row_cell(row, arrow, icon_y, icon_size, icon_size, rtl),
                   render->icon_font, fg, aux, false, 0, false);
@@ -1003,6 +1091,85 @@ static int scrollbar_width(const struct gui_synclist *list, struct ui_rect bound
     if (visible <= 0 || list->nb_items <= visible || list->scrollbar == SCROLLBAR_OFF)
         return 0;
     return MIN(MAX(global_settings.scrollbar_width, 1), bounds.width / 4);
+}
+
+/* The classic scroll indicator always sits at the right edge. */
+static bool scrollbar_left(const struct native_list *render,
+                           const struct gui_synclist *list)
+{
+    return list->scrollbar == SCROLLBAR_LEFT &&
+           render->theme.style[UI_STYLE_SCROLLBAR] != UI_SCROLLBAR_CLASSIC;
+}
+
+static void blend(struct ui_rect clip, struct ui_rect cell, unsigned int color,
+                  unsigned opacity)
+{
+    struct viewport vp;
+    if (!set_clip(&vp, clip, cell, FONT_UI, color))
+        return;
+    struct viewport *prior = lcd_set_viewport(&vp);
+    lcd_blendrect(0, 0, vp.width, vp.height, opacity);
+    lcd_set_viewport(prior);
+}
+
+/* The stock indicator: no track, a translucent foreground thumb with rounded
+ * ends inside a faint background rim, laid over the rows. gradient.scrollbar
+ * instead shades an opaque thumb across its width. Items run [first, last)
+ * of `items`, in any unit. */
+static void paint_classic_scrollbar(struct native_list *render,
+                                    struct ui_rect clip, struct ui_rect bar,
+                                    int items, int first, int last)
+{
+    struct ui_rect track = { bar.x + 1, bar.y + 3, bar.width - 2,
+                             bar.height - 6 };
+    if (track.width <= 0 || track.height <= 0 || items <= 0)
+        return;
+    first = MIN(MAX(first, 0), items);
+    last = MIN(MAX(last, first), items);
+    int top = (int64_t)first * track.height / items;
+    int bottom = (int64_t)last * track.height / items;
+    int min_height = MIN(track.height, 2 * track.width);
+    if (bottom - top < min_height)
+    {
+        top = MIN(top, track.height - min_height);
+        bottom = top + min_height;
+    }
+    struct ui_rect thumb = { track.x, track.y + top, track.width,
+                             bottom - top };
+
+    if (render->theme.gradient[UI_GRADIENT_SCROLLBAR].stops)
+    {
+        const uint16_t *shade = gradient_rows(render, &render->thumb_rows,
+                                              UI_GRADIENT_SCROLLBAR,
+                                              thumb.width);
+        struct ui_rect column = { thumb.x, thumb.y, 1, thumb.height };
+        for (int x = 0; x < thumb.width; ++x, ++column.x)
+            fill(clip, column, shade[x]);
+        return;
+    }
+
+    unsigned int rim = render->colors[UI_COLOR_BACKGROUND];
+    unsigned int ink = render->colors[UI_COLOR_FOREGROUND];
+    int x = thumb.x, y = thumb.y, w = thumb.width, h = thumb.height;
+    blend(clip, (struct ui_rect){ x - 1, y - 1, w + 2, 1 }, rim, 2);
+    blend(clip, (struct ui_rect){ x - 1, y + h, w + 2, 1 }, rim, 2);
+    blend(clip, (struct ui_rect){ x - 1, y, 1, h }, rim, 2);
+    blend(clip, (struct ui_rect){ x + w, y, 1, h }, rim, 2);
+    /* The two rows at each end fade towards the corners. */
+    static const uint8_t corner[2] = { 1, 4 }, middle[2] = { 5, 7 };
+    for (int edge = 0; edge < 2 && 2 * edge < h; ++edge)
+        for (int end = 0; end < 2; ++end)
+        {
+            int row = end ? y + h - 1 - edge : y + edge;
+            blend(clip, (struct ui_rect){ x, row, 1, 1 }, ink, corner[edge]);
+            blend(clip, (struct ui_rect){ x + w - 1, row, 1, 1 }, ink,
+                  corner[edge]);
+            blend(clip, (struct ui_rect){ x + 1, row, w - 2, 1 }, ink,
+                  middle[edge]);
+            if (2 * edge + 1 == h)
+                break;
+        }
+    blend(clip, (struct ui_rect){ x, y + 2, w, h - 4 }, ink, 7);
 }
 
 static void paint_rows(const struct ui_view *view, const struct ui_view_frame *frame)
@@ -1024,26 +1191,56 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
     row.y += render->row_shift + (first - frame->scroll_offset) * pitch;
     row.height = pitch;
     int bar_width = scrollbar_width(list, frame->bounds, visible);
-    if (list->scrollbar == SCROLLBAR_LEFT)
+    if (scrollbar_left(render, list))
         row.x += bar_width;
     row.width -= bar_width;
 
+    /* The classic indicator lies over the bar; row content keeps clear. */
+    bool overlay =
+        render->theme.style[UI_STYLE_SCROLLBAR] == UI_SCROLLBAR_CLASSIC;
+    struct ui_rect highlight = {overlay ? content.x : row.x, render->cursor_y,
+                                overlay ? content.width : row.width,
+                                pitch * list->selected_size};
     if (list->selection_color && list->nb_items)
-    {
-        struct ui_rect highlight = {row.x, render->cursor_y, row.width,
-                                    pitch * list->selected_size};
         fill(clip, highlight, list->selection_color->line_color);
+
+    bool selection_bar =
+        render->theme.style[UI_STYLE_SELECTION] == UI_SELECTION_BAR &&
+        !list->selection_color && !list->callback_draw_item;
+    /* Under a bar, the rows above and below it take plain text and the band
+     * the bar covers takes selected text, so the text follows a moving bar. */
+    struct ui_rect bands[3] = { clip };
+    int nbands = 1;
+    if (selection_bar && frame->selection >= 0 && frame->selection < list->nb_items)
+    {
+        const struct ui_theme_gradient *gradient =
+            &render->theme.gradient[UI_GRADIENT_SELECTION];
+        if (gradient->stops && highlight.height <= LCD_HEIGHT)
+            fill_rows(clip, highlight, gradient_rows(render, &render->bar_rows,
+                      UI_GRADIENT_SELECTION, highlight.height));
+        else
+            fill(clip, highlight, render->colors[UI_COLOR_SELECTION]);
+        int top = MIN(MAX(highlight.y, clip.y), clip.y + clip.height);
+        int bottom = MIN(MAX(highlight.y + highlight.height, top),
+                         clip.y + clip.height);
+        bands[0] = (struct ui_rect){clip.x, clip.y, clip.width, top - clip.y};
+        bands[1] = (struct ui_rect){clip.x, top, clip.width, bottom - top};
+        bands[2] = (struct ui_rect){clip.x, bottom, clip.width,
+                                    clip.y + clip.height - bottom};
+        nbands = 3;
     }
 
     for (int item = first; item < end; ++item, row.y += pitch)
     {
         bool selected = item >= frame->selection && item - frame->selection < list->selected_size;
-        if (intersection(row, clip).height > 0)
-            paint_row(render, clip, row, item, selected, false);
+        for (int band = 0; band < nbands; ++band)
+            if (intersection(row, bands[band]).height > 0)
+                paint_row(render, bands[band], row, item, selected,
+                          selection_bar ? band == 1 : selected, false);
     }
 
     /* The bar can be half visible even if its corresponding text is clipped. */
-    if (!list->selection_color && !list->callback_draw_item)
+    if (!selection_bar && !list->selection_color && !list->callback_draw_item)
     {
         for (int line = 0; line < list->selected_size; ++line)
         {
@@ -1052,13 +1249,13 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
                 break;
             row.y = render->cursor_y + line * pitch;
             if (intersection(row, clip).height > 0)
-                paint_row(render, clip, row, item, true, true);
+                paint_row(render, clip, row, item, true, true, true);
         }
     }
 
     if (bar_width)
     {
-        int bar_x = list->scrollbar == SCROLLBAR_LEFT ? frame->bounds.x :
+        int bar_x = scrollbar_left(render, list) ? frame->bounds.x :
                     frame->bounds.x + frame->bounds.width - bar_width;
         struct ui_rect bar = {bar_x, content.y, bar_width, content.height};
         struct viewport vp;
@@ -1069,11 +1266,17 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
             int units = MIN(ROW_UNIT, INT_MAX / MAX(1, bar.height) / list->nb_items);
             units = MAX(1, units);
             int start = frame->scroll_offset * units - render->row_shift * units / pitch;
-            struct viewport *prior = lcd_set_viewport(&vp);
-            gui_scrollbar_draw(&screens[SCREEN_MAIN], bar.x - vp.x, bar.y - vp.y,
-                              bar.width, bar.height, list->nb_items * units, start,
-                              start + visible * units, VERTICAL | FOREGROUND);
-            lcd_set_viewport(prior);
+            if (overlay)
+                paint_classic_scrollbar(render, clip, bar, list->nb_items * units,
+                                        start, start + visible * units);
+            else
+            {
+                struct viewport *prior = lcd_set_viewport(&vp);
+                gui_scrollbar_draw(&screens[SCREEN_MAIN], bar.x - vp.x, bar.y - vp.y,
+                                  bar.width, bar.height, list->nb_items * units, start,
+                                  start + visible * units, VERTICAL | FOREGROUND);
+                lcd_set_viewport(prior);
+            }
         }
     }
 }
@@ -1736,7 +1939,7 @@ static void draw_list(struct gui_synclist *list, bool status_only)
         int width = render->theme.metric[UI_METRIC_LIST_ICON_SIZE] +
                     render->theme.metric[UI_METRIC_LIST_ICON_MARGIN];
         int bar_width = scrollbar_width(list, g.rows, g.rows.height / g.pitch);
-        int left = g.rows.x + (list->scrollbar == SCROLLBAR_LEFT ? bar_width : 0);
+        int left = g.rows.x + (scrollbar_left(render, list) ? bar_width : 0);
         int x = VP_IS_RTL(list->parent[SCREEN_MAIN]) ?
                 left + g.rows.width - bar_width - width : left;
         render->page.damage = (struct ui_rect){x, g.rows.y, width, g.rows.height};

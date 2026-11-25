@@ -2504,7 +2504,8 @@ static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push
         return;
     /* Identity keys are used only for comparing endpoints. */
     ui_scene_enter(scene, (const void *)(intptr_t)(from + 16),
-                    (const void *)(intptr_t)(to + 16), push);
+                    (const void *)(intptr_t)(to + 16), push,
+                    from == GO_TO_WPS || to == GO_TO_WPS);
 }
 
 void root_menu(void)

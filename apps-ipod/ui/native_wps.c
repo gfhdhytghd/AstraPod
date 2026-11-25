@@ -11,6 +11,7 @@
 #include "core_alloc.h"
 #include "font.h"
 #include "kernel.h"
+#include "lang.h"
 #include "lcd.h"
 #include "metadata.h"
 #include "sound.h"
@@ -30,6 +31,7 @@
 #include "system/format_time.h"
 #include "system/volume.h"
 
+#include "native_chrome.h"
 #include "native_theme_runtime.h"
 #include "native_wps.h"
 #include "perf.h"
@@ -44,10 +46,55 @@
 #define VOLUME_OPEN_FRAMES ANIM_F(16)
 #define VOLUME_CLOSE_FRAMES ANIM_F(12)
 
+/* Classic geometry, from the stock firmware's Now Playing at 320x240. The
+ * cover turns away on its vertical axis: its near (left) edge is
+ * CLASSIC_ART_NEAR rows tall, its far edge CLASSIC_ART_FAR rows, starting
+ * CLASSIC_ART_DROP rows lower. A blank row separates it from a reflection
+ * that fades out over CLASSIC_REFLECTION rows. */
+#define CLASSIC_ART_X 9
+#define CLASSIC_ART_Y 33
+#define CLASSIC_ART_WIDTH 136
+#define CLASSIC_ART_NEAR 135
+#define CLASSIC_ART_FAR 119
+#define CLASSIC_ART_DROP 10
+#define CLASSIC_REFLECTION 68
+#define CLASSIC_REFLECTION_ALPHA 15 /* of 32 */
+#define CLASSIC_TEXT_X 158
+#define CLASSIC_TEXT_WIDTH 156
+#define CLASSIC_TITLE_Y 68
+#define CLASSIC_TITLE_HEIGHT 24
+#define CLASSIC_ARTIST_Y 90
+#define CLASSIC_ALBUM_Y 108
+#define CLASSIC_INDEX_Y 145
+#define CLASSIC_LINE 17
+/* The progress and volume rows share one strip and slide through it. */
+#define CLASSIC_ROW_Y 203
+#define CLASSIC_ROW_HEIGHT 30
+#define CLASSIC_BAR_Y 4
+#define CLASSIC_BAR_HEIGHT 14
+#define CLASSIC_BAR_REFLECTION 11
+#define CLASSIC_BAR_VIEW (CLASSIC_BAR_HEIGHT + 1 + CLASSIC_BAR_REFLECTION)
+#define CLASSIC_TIME_Y 6
+#define CLASSIC_PROGRESS_X 54
+#define CLASSIC_PROGRESS_WIDTH 212
+#define CLASSIC_ELAPSED_X 14
+#define CLASSIC_REMAINING_RIGHT 310
+#define CLASSIC_VOLUME_X 56
+#define CLASSIC_VOLUME_WIDTH 208
+#define CLASSIC_QUIET_X 37
+#define CLASSIC_LOUD_X 274
+#define CLASSIC_SPEAKER_Y 12
+#define CLASSIC_SHUFFLE_X 292
+#define CLASSIC_SHUFFLE_Y 26
+/* 4.0 s and 270 ms at the panel's 66.96 Hz. */
+#define CLASSIC_VOLUME_HOLD ANIM_F(268)
+#define CLASSIC_SLIDE_FRAMES ANIM_F(18)
+
 enum wps_view {
     WPS_ROOT, WPS_COVER, WPS_PANEL, WPS_TITLE, WPS_ARTIST,
     WPS_PROGRESS, WPS_PROGRESS_FILL, WPS_INDEX, WPS_REMAINING, WPS_SPECTRUM,
-    WPS_VOLUME, WPS_VOLUME_FILL, WPS_VIEW_COUNT,
+    WPS_VOLUME, WPS_VOLUME_FILL, WPS_HEADER, WPS_ALBUM, WPS_ELAPSED,
+    WPS_ROW, WPS_TIMELINE, WPS_SHUFFLE, WPS_VIEW_COUNT,
 };
 
 struct wps_label {
@@ -55,7 +102,7 @@ struct wps_label {
     char *text;
     size_t length, capacity;
     uint32_t scroll_started;
-    bool right, scroll;
+    bool right, scroll, muted;
 };
 
 struct wps_progress {
@@ -72,18 +119,22 @@ struct native_wps {
     struct ui_page page;
     struct ui_view view[WPS_VIEW_COUNT];
     struct ui_theme theme;
-    struct wps_label title, artist, index, remaining;
+    struct wps_label title, artist, album, index, elapsed, remaining;
     struct wps_progress progress;
     struct ui_track volume_width, volume_reveal;
-    char title_text[MAX_PATH], artist_text[MAX_PATH];
-    char index_text[16], remaining_text[24];
+    struct native_chrome chrome;
+    char title_text[MAX_PATH], artist_text[MAX_PATH], album_text[MAX_PATH];
+    char index_text[32], elapsed_text[24], remaining_text[24];
     unsigned bg, fg, accent, panel, meter_fg, meter_peak;
+    uint32_t accent_rgb, muted_rgb;
     unsigned palette_generation, art_generation, blur_generation;
     int art_handle, background, peak_height, volume_target, volume_font;
+    int progress_span, volume_span;
     int level[BANDS], peak[BANDS];
     long meter_due;
     unsigned motion_trace;
     bool volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
+    bool classic, chrome_ready;
 };
 
 static int wps_handle, blur_handle;
@@ -220,6 +271,8 @@ static void paint_label(const struct ui_view *view, const struct ui_view_frame *
     const struct wps_label *label = view->data;
     struct viewport viewport;
     struct viewport *previous = paint_viewport(&viewport, frame, label->font);
+    if (label->muted)
+        viewport.fg_pattern = wps->meter_peak;
     int x = frame->bounds.x - frame->clip.x - label->offset;
     int y = frame->bounds.y - frame->clip.y;
     if (label->right)
@@ -324,6 +377,296 @@ static void paint_volume(const struct ui_view *view, const struct ui_view_frame 
     lcd_set_viewport(previous);
 }
 
+static void paint_header(const struct ui_view *view,
+                         const struct ui_view_frame *frame)
+{
+    (void)view;
+    /* Volume belongs to the bar over the progress line, not the header. */
+    struct native_chrome chrome = wps->chrome;
+    chrome.state.volume_visible = 0;
+    struct native_chrome_indicators icons;
+    native_chrome_indicators(&chrome.state, &icons);
+    struct viewport *previous = lcd_set_viewport(NULL);
+    native_chrome_draw(&chrome, str(LANG_NOW_PLAYING), false, frame, NULL,
+                       &icons, NULL);
+    lcd_set_viewport(previous);
+}
+
+/* Average of four RGB565 pixels. */
+static fb_data mix4(fb_data a, fb_data b, fb_data c, fb_data d)
+{
+    unsigned rb = (a & 0xf81f) + (b & 0xf81f) + (c & 0xf81f) + (d & 0xf81f);
+    unsigned g = (a & 0x07e0) + (b & 0x07e0) + (c & 0x07e0) + (d & 0x07e0);
+    return ((rb >> 2) & 0xf81f) | ((g >> 2) & 0x07e0);
+}
+
+/* a over b, with a weighing `w` of 32. */
+static fb_data blend32(fb_data a, fb_data b, unsigned w)
+{
+    unsigned rb = ((a & 0xf81f) * w + (b & 0xf81f) * (32 - w)) >> 5;
+    unsigned g = ((a & 0x07e0) * w + (b & 0x07e0) * (32 - w)) >> 5;
+    return (rb & 0xf81f) | (g & 0x07e0);
+}
+
+/* The cover's pixels, or with none a drawn placeholder: a pair of beamed
+ * notes on a 96-unit square. */
+struct art_source {
+    const fb_data *pixels;
+    int stride, side;
+    fb_data paper, ink;
+};
+
+static fb_data art_pixel(const struct art_source *src, int u, int v)
+{
+    if (src->pixels)
+        return src->pixels[v * src->stride + u];
+    static const struct { int8_t x, y; } heads[] = { { 37, 66 }, { 58, 60 } };
+    for (size_t i = 0; i < ARRAYLEN(heads); i++)
+    {
+        int dx = u - heads[i].x, dy = v - heads[i].y;
+        if (dx * dx * 36 + dy * dy * 81 <= 36 * 81)
+            return src->ink;
+    }
+    int beam = 30 - (u - 42) * 6 / 23;
+    bool stem = (u >= 42 && u < 45 && v >= 30 && v < 66) ||
+                (u >= 62 && u < 65 && v >= 24 && v < 60);
+    bool bar = u >= 42 && u < 65 && v >= beam && v < beam + 7;
+    return stem || bar ? src->ink : src->paper;
+}
+
+/* One screen column of the turned cover, in 1/256 px. */
+struct art_column {
+    int top, height, inverse;
+    uint16_t u[2];
+};
+
+static void art_columns(struct art_column *col, int first, int last, int side)
+{
+    const int w = CLASSIC_ART_WIDTH, near = CLASSIC_ART_NEAR;
+    const int far = CLASSIC_ART_FAR;
+    for (int c = first; c < last; ++c)
+    {
+        int t = (2 * c + 1) * 128 / w;
+        col[c].top = CLASSIC_ART_DROP * t;
+        col[c].height = near * 256 + (far - near) * t;
+        col[c].inverse = (side << 16) / col[c].height;
+        /* Perspective: texture position is linear in depth, not in x. */
+        for (int k = 0; k < 2; ++k)
+        {
+            int s = 4 * c + 1 + 2 * k;
+            col[c].u[k] = side * s * far / ((4 * w - s) * near + s * far);
+        }
+    }
+}
+
+/* The source row under screen position y (in 1/256 px) of a column. */
+static int art_row(const struct art_column *col, int y, int side)
+{
+    int v = (y - col->top) * col->inverse >> 16;
+    return v < 0 ? 0 : v >= side ? side - 1 : v;
+}
+
+static fb_data art_sample(const struct art_source *src,
+                          const struct art_column *col, int y)
+{
+    int a = art_row(col, y + 64, src->side);
+    int b = art_row(col, y + 192, src->side);
+    return mix4(art_pixel(src, col->u[0], a), art_pixel(src, col->u[1], a),
+                art_pixel(src, col->u[0], b), art_pixel(src, col->u[1], b));
+}
+
+static int overlap(int y, int from, int to)
+{
+    return MAX(0, MIN(y + 256, to) - MAX(y, from));
+}
+
+/* Classic art: the turned cover and its reflection, edges antialiased. */
+static void paint_art(const struct ui_view *view,
+                      const struct ui_view_frame *frame)
+{
+    (void)view;
+    struct viewport viewport;
+    struct viewport *previous = paint_viewport(&viewport, frame,
+                                               FONT_SYSFIXED);
+    struct art_source src = { .side = 96, .ink = wps->meter_peak };
+    uint32_t rgb = ui_theme_color(&wps->theme,
+                                  UI_COLOR_HANDOFF_COVER_PLACEHOLDER, NULL);
+    src.paper = LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
+    struct bitmap *art = NULL;
+    bool pinned = wps->art_handle >= 0 && wps_art_pin(wps->art_handle, true);
+    if (pinned && wps_art_bitmap(wps->art_handle, &art) && art->data &&
+        art->width > 0 && art->height > 0)
+    {
+        /* Square centre crop. */
+        src.side = MIN(art->width, art->height);
+        src.stride = art->width;
+        src.pixels = (const fb_data *)art->data +
+            (art->height - src.side) / 2 * art->width +
+            (art->width - src.side) / 2;
+    }
+
+    int first = MAX(0, frame->clip.x - frame->bounds.x);
+    int last = MIN(CLASSIC_ART_WIDTH,
+                   frame->clip.x + frame->clip.width - frame->bounds.x);
+    int top = frame->clip.y - frame->bounds.y;
+    struct art_column column[CLASSIC_ART_WIDTH];
+    fb_data row[CLASSIC_ART_WIDTH];
+    art_columns(column, first, last, src.side);
+    for (int dy = top; dy < top + frame->clip.height; ++dy)
+    {
+        int y = dy * 256;
+        for (int c = first; c < last; ++c)
+        {
+            const struct art_column *col = &column[c];
+            int bottom = col->top + col->height;
+            /* Mirror about the blank row's middle. */
+            int start = bottom + 256, end = start + CLASSIC_REFLECTION * 256;
+            fb_data pixel = wps->bg;
+            int cover = overlap(y, start, end);
+            if (cover)
+            {
+                int fade = CLASSIC_REFLECTION_ALPHA * (end - y - 128) /
+                           (end - start);
+                fb_data mirror = art_sample(&src, col,
+                                            2 * (bottom + 128) - y - 256);
+                pixel = blend32(mirror, pixel, fade * cover >> 8);
+            }
+            cover = overlap(y, col->top, bottom);
+            if (cover)
+                pixel = blend32(art_sample(&src, col, y), pixel, cover >> 3);
+            row[c] = pixel;
+        }
+        lcd_bitmap(row + first, frame->bounds.x - frame->clip.x + first,
+                   dy - top, last - first, 1);
+    }
+    if (pinned)
+        wps_art_pin(wps->art_handle, false);
+    lcd_set_viewport(previous);
+}
+
+/* A glossy bar, one gradient row per scanline, over a blank row and a
+ * reflection of itself that fades out. */
+static void paint_bar(const struct ui_view_frame *frame,
+                      const struct ui_theme_gradient *gradient,
+                      uint32_t fallback)
+{
+    struct viewport viewport;
+    struct viewport *previous = paint_viewport(&viewport, frame,
+                                               FONT_SYSFIXED);
+    int offset = frame->clip.y - frame->bounds.y;
+    for (int y = 0; y < viewport.height; ++y)
+    {
+        int row = offset + y, reflect = row - CLASSIC_BAR_HEIGHT - 1;
+        if (reflect >= 0)
+            row = CLASSIC_BAR_HEIGHT - 1 - reflect;
+        else if (row >= CLASSIC_BAR_HEIGHT)
+            continue;
+        uint32_t rgb = ui_theme_gradient_at(gradient, row,
+                                            CLASSIC_BAR_HEIGHT, fallback);
+        lcd_set_foreground(LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255,
+                                       rgb & 255));
+        if (reflect < 0)
+            lcd_hline(0, viewport.width - 1, y);
+        else
+        {
+            const int rows = CLASSIC_BAR_REFLECTION;
+            lcd_blendrect(0, y, viewport.width, 1,
+                          (5 * (rows - reflect) + rows - 1) / rows);
+        }
+    }
+    lcd_set_viewport(previous);
+}
+
+static void paint_track(const struct ui_view *view,
+                        const struct ui_view_frame *frame)
+{
+    (void)view;
+    paint_bar(frame, &wps->theme.gradient[UI_GRADIENT_PROGRESS_TRACK],
+              wps->muted_rgb);
+}
+
+static void paint_fill(const struct ui_view *view,
+                       const struct ui_view_frame *frame)
+{
+    (void)view;
+    paint_bar(frame, &wps->theme.gradient[UI_GRADIENT_PROGRESS],
+              wps->accent_rgb);
+}
+
+/* A speaker facing right, its cone `y` centred, with `waves` sound arcs. */
+static void speaker(int x, int y, int waves)
+{
+    lcd_fillrect(x, y - 2, 6, 5);
+    lcd_vline(x + 5, y - 3, y + 3);
+    lcd_vline(x + 6, y - 5, y + 5);
+    lcd_vline(x + 7, y - 6, y + 6);
+    for (int wave = 0; wave < waves; ++wave)
+    {
+        int r = 3 + 5 * wave;
+        for (int dy = -r * 4 / 5; dy <= r * 4 / 5; ++dy)
+        {
+            int dx = 0;
+            while ((dx + 1) * (dx + 1) + dy * dy <= r * r)
+                ++dx;
+            lcd_drawpixel(x + 7 + dx, y + dy);
+        }
+    }
+}
+
+/* Two crossing arrows, pointing right. */
+static void paint_shuffle(const struct ui_view *view,
+                          const struct ui_view_frame *frame)
+{
+    (void)view;
+    struct viewport viewport;
+    struct viewport *previous = paint_viewport(&viewport, frame,
+                                               FONT_SYSFIXED);
+    int x = frame->bounds.x - frame->clip.x;
+    int y = frame->bounds.y - frame->clip.y;
+    lcd_set_foreground(wps->fg);
+    for (int arrow = 0; arrow < 2; ++arrow)
+    {
+        /* Rows 2 and 9 of the 17 x 12 icon, swapped for the second. */
+        int from = y + (arrow ? 9 : 2), to = y + (arrow ? 2 : 9);
+        lcd_hline(x, x + 4, from);
+        lcd_drawline(x + 4, from, x + 10, to);
+        lcd_drawline(x + 5, from, x + 11, to);
+        lcd_hline(x + 10, x + 16, to);
+        lcd_drawline(x + 14, to - 2, x + 16, to);
+        lcd_drawline(x + 14, to + 2, x + 16, to);
+    }
+    lcd_set_viewport(previous);
+}
+
+static void paint_classic_volume(const struct ui_view *view,
+                                 const struct ui_view_frame *frame)
+{
+    struct viewport viewport;
+    struct viewport *previous = paint_viewport(&viewport, frame,
+                                               FONT_SYSFIXED);
+    int x = frame->bounds.x - frame->clip.x;
+    int y = frame->bounds.y - frame->clip.y + CLASSIC_SPEAKER_Y;
+    lcd_set_foreground(wps->fg);
+    speaker(x + CLASSIC_QUIET_X, y, wps->volume_muted ? 0 : 1);
+    speaker(x + CLASSIC_LOUD_X, y, 3);
+    lcd_set_viewport(previous);
+
+    struct ui_view_frame track = *frame;
+    track.bounds = (struct ui_rect){ frame->bounds.x + CLASSIC_VOLUME_X,
+        frame->bounds.y + CLASSIC_BAR_Y, wps->volume_span, CLASSIC_BAR_VIEW };
+    int x0 = MAX(track.bounds.x, frame->clip.x);
+    int y0 = MAX(track.bounds.y, frame->clip.y);
+    int x1 = MIN(track.bounds.x + track.bounds.width,
+                 frame->clip.x + frame->clip.width);
+    int y1 = MIN(track.bounds.y + track.bounds.height,
+                 frame->clip.y + frame->clip.height);
+    if (x1 > x0 && y1 > y0)
+    {
+        track.clip = (struct ui_rect){ x0, y0, x1 - x0, y1 - y0 };
+        paint_track(view, &track);
+    }
+}
+
 static const struct ui_view_ops background_ops = { .paint = paint_background };
 static const struct ui_view_ops cover_ops = { .paint = paint_cover };
 static const struct ui_view_ops panel_ops = { .paint = paint_panel };
@@ -332,11 +675,27 @@ static const struct ui_view_ops progress_ops = { .paint = paint_progress };
 static const struct ui_view_ops progress_fill_ops = { .paint = paint_progress_fill };
 static const struct ui_view_ops meter_ops = { .paint = paint_meter };
 static const struct ui_view_ops volume_ops = { .paint = paint_volume };
+static const struct ui_view_ops header_ops = { .paint = paint_header };
+static const struct ui_view_ops art_ops = { .paint = paint_art };
+static const struct ui_view_ops track_ops = { .paint = paint_track };
+static const struct ui_view_ops fill_ops = { .paint = paint_fill };
+static const struct ui_view_ops shuffle_ops = { .paint = paint_shuffle };
+static const struct ui_view_ops classic_volume_ops = {
+    .paint = paint_classic_volume
+};
 
+/* Screen bounds of a view, without its own offset. */
 static struct ui_rect view_bounds(enum wps_view id)
 {
-    const int *v = wps->view[id].value;
-    return (struct ui_rect) { v[UI_X], v[UI_Y], v[UI_WIDTH], v[UI_HEIGHT] };
+    const struct ui_view *view = &wps->view[id];
+    const int *v = view->value;
+    struct ui_rect bounds = { v[UI_X], v[UI_Y], v[UI_WIDTH], v[UI_HEIGHT] };
+    for (view = view->parent; view; view = view->parent)
+    {
+        bounds.x += view->value[UI_X] + view->value[UI_OFFSET_X];
+        bounds.y += view->value[UI_Y] + view->value[UI_OFFSET_Y];
+    }
+    return bounds;
 }
 
 static void label_set(struct wps_label *label, int font, char *text, size_t capacity)
@@ -419,14 +778,16 @@ static void refresh_progress(const struct wps_state *state, bool remote, uint32_
     progress->clock = now;
 
     struct ui_view *fill = &wps->view[WPS_PROGRESS_FILL];
-    int track_width = view_bounds(WPS_PROGRESS).width;
+    int track_width = wps->progress_span;
     /* Scale before multiplication so this also works on 32-bit targets. */
     while (length > (unsigned long)INT_MAX / track_width)
     {
         length >>= 1;
         position >>= 1;
     }
-    int width = length ? MAX(1, (int)(position * track_width / length)) : 0;
+    /* Stock shows no fill at 0:00. */
+    int width = length ? MAX(!wps->classic,
+                             (int)(position * track_width / length)) : 0;
     if (!same_track)
     {
         ui_page_set(&wps->page, fill, UI_WIDTH, width);
@@ -460,14 +821,30 @@ static void refresh_labels(const struct wps_state *state, bool remote, uint32_t 
     label_update(WPS_TITLE, &wps->title, title, now);
     label_update(WPS_ARTIST, &wps->artist, track ? track->artist : NULL, now);
 
-    snprintf(buf, sizeof(buf), "%02d", remote ? 1 : MAX(0, playlist_get_display_index()));
+    int index = remote ? 1 : MAX(0, playlist_get_display_index());
+    if (!wps->classic)
+        snprintf(buf, sizeof(buf), "%02d", index);
+    else if (remote)
+        buf[0] = '\0';
+    else
+        snprintf(buf, sizeof(buf), "%d %s %d", index, str(LANG_OF),
+                 playlist_amount());
     label_update(WPS_INDEX, &wps->index, buf, now);
 
     unsigned long length = track ? track->length : 0;
     /* Preview offsets are signed. Clamp both ends before deriving labels. */
     int64_t preview = track ? (int64_t)track->elapsed + state->ff_rewind_count : 0;
     unsigned long position = preview < 0 ? 0 : MIN((uint64_t)preview, length);
-    format_time(buf, sizeof(buf), (long)MIN(length - position, LONG_MAX));
+    char *time = buf;
+    if (wps->classic)
+    {
+        label_update(WPS_ALBUM, &wps->album, track ? track->album : NULL, now);
+        format_time(buf, sizeof(buf), (long)MIN(position, LONG_MAX));
+        label_update(WPS_ELAPSED, &wps->elapsed, buf, now);
+        *time++ = '-';
+    }
+    format_time(time, sizeof(buf) - (time - buf),
+                (long)MIN(length - position, LONG_MAX));
     label_update(WPS_REMAINING, &wps->remaining, buf, now);
 
     refresh_progress(state, remote, now, position, current_playmode());
@@ -530,6 +907,10 @@ static void refresh_art(void)
         wps->panel = theme_color(UI_COLOR_WPS_PANEL, &palette);
         wps->meter_fg = theme_color(UI_COLOR_WPS_METER, &palette);
         wps->meter_peak = theme_color(UI_COLOR_WPS_MUTED, &palette);
+        wps->accent_rgb = ui_theme_color(&wps->theme, UI_COLOR_WPS_ACCENT,
+                                         &palette);
+        wps->muted_rgb = ui_theme_color(&wps->theme, UI_COLOR_WPS_MUTED,
+                                        &palette);
     }
     unsigned blur_generation = album_blur_generation();
     if (wps->art_generation != art_generation || wps->art_handle != handle || colors_changed ||
@@ -546,14 +927,15 @@ static void refresh_art(void)
 
 static void refresh_volume(const struct cider_status *source, bool remote, uint32_t now)
 {
-    bool visible = volume_changed_within(now, ui_frame_clock(VOLUME_HOLD_FRAMES));
+    bool visible = volume_changed_within(now, ui_frame_clock(
+        wps->classic ? CLASSIC_VOLUME_HOLD : VOLUME_HOLD_FRAMES));
     int min = sound_min(SOUND_VOLUME);
     int max = sound_max(SOUND_VOLUME);
     int percent = remote ? source->volume :
         (global_status.volume - min) * 100 / MAX(1, max - min);
     percent = MIN(100, MAX(0, percent));
     bool muted = remote ? source->muted : global_status.volume <= min;
-    int target = wps->theme.metric[UI_METRIC_WPS_VOLUME_WIDTH] * percent / 100;
+    int target = wps->volume_span * percent / 100;
     struct ui_view *overlay = &wps->view[WPS_VOLUME];
     struct ui_view *fill = &wps->view[WPS_VOLUME_FILL];
     if (!wps->volume_known || target != wps->volume_target)
@@ -566,7 +948,20 @@ static void refresh_volume(const struct cider_status *source, bool remote, uint3
         wps->volume_target = target;
         wps->volume_known = true;
     }
-    if (wps->volume_visible != visible)
+    if (wps->volume_visible != visible && wps->classic)
+    {
+        /* The incoming row enters from the right as the other leaves left. */
+        struct ui_view *row = &wps->view[WPS_ROW];
+        struct ui_view *timeline = &wps->view[WPS_TIMELINE];
+        ui_page_set(&wps->page, visible ? timeline : overlay, UI_X, 0);
+        ui_page_set(&wps->page, visible ? overlay : timeline, UI_X, LCD_WIDTH);
+        ui_page_set(&wps->page, row, UI_OFFSET_X, 0);
+        ui_page_tween(&wps->page, &wps->volume_reveal, row, UI_OFFSET_X,
+                      -LCD_WIDTH, CLASSIC_SLIDE_FRAMES, false, now);
+        wps->volume_reveal.tween.easing = UI_EASE_QUAD;
+        wps->volume_visible = visible;
+    }
+    else if (wps->volume_visible != visible)
     {
         int offset = visible ? 0 : -overlay->value[UI_HEIGHT];
         ui_page_tween(&wps->page, &wps->volume_reveal, overlay, UI_OFFSET_Y, offset,
@@ -623,12 +1018,85 @@ static void setup_page(void)
     ui_view_init(&wps->view[WPS_VOLUME], bounds[WPS_VOLUME], &volume_ops, NULL);
     ui_view_init(&wps->view[WPS_VOLUME_FILL], bounds[WPS_VOLUME_FILL], &progress_fill_ops, NULL);
     wps->view[WPS_VOLUME].value[UI_OFFSET_Y] = -bounds[WPS_VOLUME].height;
-    for (int i = WPS_ROOT + 1; i < WPS_VIEW_COUNT; i++)
+    wps->progress_span = bounds[WPS_PROGRESS].width;
+    wps->volume_span = m[UI_METRIC_WPS_VOLUME_WIDTH];
+    for (int i = WPS_ROOT + 1; i <= WPS_VOLUME_FILL; i++)
     {
         enum wps_view parent = i == WPS_PROGRESS_FILL ? WPS_PROGRESS :
                                i == WPS_VOLUME_FILL ? WPS_VOLUME : WPS_ROOT;
         ui_view_append(&wps->view[parent], &wps->view[i]);
     }
+    ui_page_init(&wps->page, &wps->view[WPS_ROOT]);
+}
+
+static void setup_classic(void)
+{
+    enum { ROW = CLASSIC_ROW_HEIGHT, TIME_W = CLASSIC_PROGRESS_X,
+           REMAINING_X = CLASSIC_REMAINING_RIGHT - TIME_W };
+    static const struct {
+        uint8_t id, parent;
+        struct ui_rect bounds;
+    } layout[] = {
+        { WPS_HEADER, WPS_ROOT, { 0, 0, LCD_WIDTH, 0 } },
+        { WPS_COVER, WPS_ROOT, { CLASSIC_ART_X, CLASSIC_ART_Y,
+                                 CLASSIC_ART_WIDTH,
+                                 CLASSIC_ART_NEAR + 1 + CLASSIC_REFLECTION } },
+        { WPS_TITLE, WPS_ROOT, { CLASSIC_TEXT_X, CLASSIC_TITLE_Y,
+                                 CLASSIC_TEXT_WIDTH, CLASSIC_TITLE_HEIGHT } },
+        { WPS_ARTIST, WPS_ROOT, { CLASSIC_TEXT_X, CLASSIC_ARTIST_Y,
+                                  CLASSIC_TEXT_WIDTH, CLASSIC_LINE } },
+        { WPS_ALBUM, WPS_ROOT, { CLASSIC_TEXT_X, CLASSIC_ALBUM_Y,
+                                 CLASSIC_TEXT_WIDTH, CLASSIC_LINE } },
+        { WPS_INDEX, WPS_ROOT, { CLASSIC_TEXT_X, CLASSIC_INDEX_Y,
+                                 CLASSIC_TEXT_WIDTH, CLASSIC_LINE } },
+        { WPS_SHUFFLE, WPS_ROOT, { CLASSIC_SHUFFLE_X, CLASSIC_SHUFFLE_Y,
+                                   17, 12 } },
+        { WPS_ROW, WPS_ROOT, { 0, CLASSIC_ROW_Y, 2 * LCD_WIDTH, ROW } },
+        { WPS_TIMELINE, WPS_ROW, { 0, 0, LCD_WIDTH, ROW } },
+        { WPS_PROGRESS, WPS_TIMELINE, { CLASSIC_PROGRESS_X, CLASSIC_BAR_Y,
+                                        CLASSIC_PROGRESS_WIDTH,
+                                        CLASSIC_BAR_VIEW } },
+        { WPS_PROGRESS_FILL, WPS_PROGRESS, { 0, 0, 0, CLASSIC_BAR_VIEW } },
+        { WPS_ELAPSED, WPS_TIMELINE, { CLASSIC_ELAPSED_X, CLASSIC_TIME_Y,
+                                       TIME_W - CLASSIC_ELAPSED_X,
+                                       CLASSIC_LINE } },
+        { WPS_REMAINING, WPS_TIMELINE, { REMAINING_X, CLASSIC_TIME_Y,
+                                         TIME_W, CLASSIC_LINE } },
+        { WPS_VOLUME, WPS_ROW, { LCD_WIDTH, 0, LCD_WIDTH, ROW } },
+        { WPS_VOLUME_FILL, WPS_VOLUME, { CLASSIC_VOLUME_X, CLASSIC_BAR_Y,
+                                         0, CLASSIC_BAR_VIEW } },
+    };
+    static const struct ui_view_ops *const ops[WPS_VIEW_COUNT] = {
+        [WPS_HEADER] = &header_ops, [WPS_COVER] = &art_ops,
+        [WPS_INDEX] = &label_ops, [WPS_TITLE] = &label_ops,
+        [WPS_ARTIST] = &label_ops, [WPS_ALBUM] = &label_ops,
+        [WPS_PROGRESS] = &track_ops, [WPS_PROGRESS_FILL] = &fill_ops,
+        [WPS_ELAPSED] = &label_ops, [WPS_REMAINING] = &label_ops,
+        [WPS_VOLUME] = &classic_volume_ops, [WPS_VOLUME_FILL] = &fill_ops,
+        [WPS_SHUFFLE] = &shuffle_ops,
+    };
+    void *const data[WPS_VIEW_COUNT] = {
+        [WPS_INDEX] = &wps->index, [WPS_TITLE] = &wps->title,
+        [WPS_ARTIST] = &wps->artist, [WPS_ALBUM] = &wps->album,
+        [WPS_ELAPSED] = &wps->elapsed, [WPS_REMAINING] = &wps->remaining,
+    };
+
+    ui_view_init(&wps->view[WPS_ROOT],
+                 (struct ui_rect){ 0, 0, LCD_WIDTH, LCD_HEIGHT },
+                 &background_ops, NULL);
+    for (size_t i = 0; i < ARRAYLEN(layout); i++)
+    {
+        struct ui_view *view = &wps->view[layout[i].id];
+        ui_view_init(view, layout[i].bounds, ops[layout[i].id],
+                     data[layout[i].id]);
+        ui_view_append(&wps->view[layout[i].parent], view);
+    }
+    wps->view[WPS_HEADER].value[UI_HEIGHT] =
+        wps->theme.metric[UI_METRIC_STATUS_HEIGHT];
+    wps->artist.muted = wps->album.muted = wps->index.muted = true;
+    wps->view[WPS_SHUFFLE].value[UI_OPACITY] = 0;
+    wps->progress_span = CLASSIC_PROGRESS_WIDTH;
+    wps->volume_span = CLASSIC_VOLUME_WIDTH;
     ui_page_init(&wps->page, &wps->view[WPS_ROOT]);
 }
 
@@ -644,18 +1112,34 @@ void native_wps_open(const struct wps_state *state)
     wps->art_generation = wps->palette_generation = (unsigned)-1;
     wps->meter_due = current_tick;
 
+    wps->classic =
+        wps->theme.style[UI_STYLE_WPS_LAYOUT] == UI_WPS_LAYOUT_CLASSIC;
     label_set(&wps->title, ui_theme_font_load(&wps->theme, UI_FONT_WPS_TITLE, 48),
               wps->title_text, sizeof(wps->title_text));
-    label_set(&wps->artist, ui_theme_font_load(&wps->theme, UI_FONT_BODY, 48),
+    label_set(&wps->artist, ui_theme_font_load(&wps->theme,
+                  wps->classic ? UI_FONT_WPS_META : UI_FONT_BODY, 48),
               wps->artist_text, sizeof(wps->artist_text));
     label_set(&wps->index, ui_theme_font_load(&wps->theme, UI_FONT_WPS_META, 48),
               wps->index_text, sizeof(wps->index_text));
     label_set(&wps->remaining, wps->index.font, wps->remaining_text, sizeof(wps->remaining_text));
-    wps->volume_font = ui_theme_font_load(&wps->theme, UI_FONT_ICON, 48);
+    wps->volume_font = wps->classic ? -1 :
+                       ui_theme_font_load(&wps->theme, UI_FONT_ICON, 48);
 
     wps->remaining.right = true;
     wps->title.scroll = wps->artist.scroll = true;
-    setup_page();
+    if (wps->classic)
+    {
+        /* These share the artist and index fonts; close unloads those. */
+        label_set(&wps->album, wps->artist.font, wps->album_text,
+                  sizeof(wps->album_text));
+        label_set(&wps->elapsed, wps->index.font, wps->elapsed_text,
+                  sizeof(wps->elapsed_text));
+        wps->album.scroll = true;
+        wps->chrome_ready = native_chrome_open(&wps->chrome, &wps->theme);
+        setup_classic();
+    }
+    else
+        setup_page();
     cider_wps_enter();
     repaint = true;
     active = true;
@@ -696,6 +1180,15 @@ void native_wps_render(const struct wps_state *state, bool submit)
     uint32_t now = USEC_TIMER;
     refresh_labels(state, remote, now);
     refresh_volume(&source, remote, now);
+    if (wps->classic)
+    {
+        bool shuffle = remote ? source.shuffle :
+                       global_settings.playlist_shuffle;
+        ui_page_set(&wps->page, &wps->view[WPS_SHUFFLE], UI_OPACITY,
+                    shuffle ? UI_FULL_OPACITY : 0);
+    }
+    if (wps->chrome_ready && native_chrome_poll(&wps->chrome))
+        ui_page_invalidate(&wps->page, view_bounds(WPS_HEADER));
     if (wps->page.tracks && !wps->motion_tried)
     {
         const char *route = wps->page.tracks == &wps->progress.motion
@@ -704,7 +1197,8 @@ void native_wps_render(const struct wps_state *state, bool submit)
         wps->motion_tried = true;
     }
     ui_page_step(&wps->page, now);
-    refresh_meter(remote);
+    if (!wps->classic)
+        refresh_meter(remote);
     if (repaint || !submit)
     {
         repaint = false;
@@ -744,6 +1238,8 @@ void native_wps_close(void)
         font_unload(wps->index.font);
     if (wps->volume_font >= 0)
         font_unload(wps->volume_font);
+    if (wps->chrome_ready)
+        native_chrome_close(&wps->chrome);
     core_put_data_pinned(wps);
     wps = NULL;
 }

@@ -119,7 +119,7 @@ bool native_chrome_open(struct native_chrome *chrome, const struct ui_theme *the
     chrome->status_font = ui_theme_font_load(theme, UI_FONT_STATUS, glyphs);
     if (chrome->status_font < 0)
         return false;
-    chrome->title_font = ui_theme_font_load(theme, UI_FONT_TITLE, glyphs);
+    chrome->title_font = ui_theme_font_load(theme, UI_FONT_STATUS_TITLE, glyphs);
     chrome->icon_font = ui_theme_font_load(theme, UI_FONT_ICON, glyphs);
     if (chrome->title_font < 0 || chrome->icon_font < 0)
     {
@@ -253,6 +253,37 @@ static void draw_text(struct viewport *damage, const char *text, int font,
     lcd_set_viewport(damage);
 }
 
+/* A glyph larger than its square slot is centred on the slot, not cut to
+ * it; right-aligned, its right edge stays on the slot's. */
+static void draw_icon(struct viewport *damage, const char *glyph, int font,
+                      int x, int y, int size, bool right_aligned)
+{
+    int width, height;
+    font_getstringsize((const unsigned char *)glyph, &width, &height, font);
+    if (width <= size && height <= size)
+    {
+        draw_text(damage, glyph, font, x, y, size, size, right_aligned);
+        return;
+    }
+    x += right_aligned ? size - width : (size - width) / 2;
+    draw_text(damage, glyph, font, x, y + (size - height) / 2, width, height,
+              false);
+}
+
+/* Fill the damaged part of a status bar `height` rows tall from its top. */
+static void fill_gradient(struct viewport *damage, int top, int height,
+                          const struct ui_theme_gradient *gradient)
+{
+    for (int y = 0; y < damage->height; ++y)
+    {
+        uint32_t rgb = ui_theme_gradient_at(gradient, damage->y + y - top,
+                                            height, 0);
+        damage->fg_pattern = LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255,
+                                         rgb & 255);
+        lcd_fillrect(0, y, damage->width, 1);
+    }
+}
+
 static void draw_clock(struct viewport *damage, const char *text, int font,
                        struct ui_rect clip, int origin)
 {
@@ -306,12 +337,22 @@ static void draw_volume(const struct native_chrome *chrome, struct viewport *dam
     int bar_height = MAX(1, bounds.height / 6);
     int bar_y = bounds.y + (bounds.height - bar_height) / 2;
 
-    damage->fg_pattern = status_color(theme, UI_COLOR_BACKGROUND, palette);
-    lcd_fillrect(0, 0, damage->width, damage->height);
-    damage->fg_pattern = status_color(theme, UI_COLOR_FOREGROUND, palette);
-    draw_text(damage, chrome->state.volume_percent ? "N" : "M", chrome->icon_font,
-              x, icon_y, icon_size, icon_size, false);
-    draw_text(damage, "O", chrome->icon_font, right, icon_y, icon_size, icon_size, true);
+    const struct ui_theme_gradient *gradient =
+        &theme->gradient[UI_GRADIENT_STATUS];
+    if (gradient->stops)
+    {
+        fill_gradient(damage, bounds.y, bounds.height, gradient);
+        damage->fg_pattern = status_color(theme, UI_COLOR_STATUS_FG, palette);
+    }
+    else
+    {
+        damage->fg_pattern = status_color(theme, UI_COLOR_BACKGROUND, palette);
+        lcd_fillrect(0, 0, damage->width, damage->height);
+        damage->fg_pattern = status_color(theme, UI_COLOR_FOREGROUND, palette);
+    }
+    draw_icon(damage, chrome->state.volume_percent ? "N" : "M",
+              chrome->icon_font, x, icon_y, icon_size, false);
+    draw_icon(damage, "O", chrome->icon_font, right, icon_y, icon_size, true);
 
     damage->fg_pattern = status_color(theme, UI_COLOR_SEPARATOR, palette);
     lcd_fillrect(bar_x - damage->x, bar_y - damage->y, bar_width, bar_height);
@@ -335,13 +376,13 @@ static void draw_indicators(const struct native_chrome *chrome, struct viewport 
                              color_blend(background, foreground, ink);
         bool battery = i >= CHROME_BATTERY_FIRST;
         int cell = battery ? layout.battery_x : layout.play_x;
-        draw_text(damage, indicator_icons[i], chrome->icon_font,
-                  x + cell, y + slide, size, size, battery);
+        draw_icon(damage, indicator_icons[i], chrome->icon_font,
+                  x + cell, y + slide, size, battery);
     }
     damage->fg_pattern = foreground;
     if (chrome->state.busy < ARRAYLEN(busy_icons))
-        draw_text(damage, busy_icons[chrome->state.busy], chrome->icon_font,
-                  x + layout.busy_x, y, size, size, false);
+        draw_icon(damage, busy_icons[chrome->state.busy], chrome->icon_font,
+                  x + layout.busy_x, y, size, false);
 }
 
 void native_chrome_draw(const struct native_chrome *chrome, const char *left,
@@ -376,8 +417,15 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
                           status_color(theme, UI_COLOR_STATUS_BG, palette);
     unsigned foreground = colors ? colors->foreground :
                           status_color(theme, UI_COLOR_STATUS_FG, palette);
-    damage.fg_pattern = background;
-    lcd_fillrect(0, 0, damage.width, damage.height);
+    const struct ui_theme_gradient *gradient =
+        &theme->gradient[UI_GRADIENT_STATUS];
+    if (gradient->stops)
+        fill_gradient(&damage, bounds.y, bounds.height, gradient);
+    else
+    {
+        damage.fg_pattern = background;
+        lcd_fillrect(0, 0, damage.width, damage.height);
+    }
     damage.fg_pattern = foreground;
 
     const struct native_chrome_state *state = &chrome->state;
@@ -401,7 +449,10 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
         font_getstringsize((const unsigned char *)percent, &percent_width, NULL,
                            chrome->status_font);
     }
-    int advance = clock_advance(clock, chrome->status_font);
+    bool show_clock = theme->style[UI_STYLE_STATUS_CLOCK] == UI_STATUS_CLOCK_ON;
+    bool center_title =
+        theme->style[UI_STYLE_STATUS_TITLE] == UI_STATUS_TITLE_CENTER;
+    int advance = show_clock ? clock_advance(clock, chrome->status_font) : 0;
     int clock_width = 2 * ((advance + 127) / 128);
     int icon_y = bounds.y + metric[UI_METRIC_STATUS_ICON_Y];
     int text_y = bounds.y + metric[UI_METRIC_STATUS_TEXT_Y];
@@ -412,9 +463,23 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
     if (!playback_modes)
         font_getstringsize((const unsigned char *)title, &title_width, NULL,
                            chrome->title_font);
+    /* A centred title keeps the clock at the right of the bar. */
     struct status_layout layout = status_layout(chrome, bounds.width,
                                                 clock_width, percent_width,
+                                                center_title ? bounds.width :
                                                 title_width);
+    if (!show_clock)
+        layout.title_width = MAX(0, layout.busy_x -
+                                    metric[UI_METRIC_STATUS_GROUP_GAP] -
+                                    metric[UI_METRIC_STATUS_PAD_LEFT]);
+    if (center_title && title_width < layout.title_width)
+    {
+        int title_x = MIN((bounds.width - title_width) / 2,
+                          metric[UI_METRIC_STATUS_PAD_LEFT] +
+                          layout.title_width - title_width);
+        left_x = bounds.x + MAX(title_x, metric[UI_METRIC_STATUS_PAD_LEFT]);
+        layout.title_width = title_width;
+    }
     if (playback_modes)
         draw_text(&damage, left, chrome->icon_font, left_x, icon_y,
                   layout.title_width, icon_size, false);
@@ -432,7 +497,8 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
                                     clock_origin(bounds.width, advance));
     struct ui_rect clock_clip = { bounds.x + layout.clock_x, text_y,
                                   layout.clock_width, icon_size };
-    draw_clock(&damage, clock, chrome->status_font, clock_clip, clock_pen);
+    if (show_clock)
+        draw_clock(&damage, clock, chrome->status_font, clock_clip, clock_pen);
     draw_text(&damage, percent, chrome->status_font,
               bounds.x + layout.percent_x, text_y, layout.percent_width,
               icon_size, false);

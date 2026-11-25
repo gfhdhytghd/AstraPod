@@ -38,9 +38,16 @@ static bool valid_name(const char *name, size_t len)
     return true;
 }
 
-static bool builtin_name(const char *name)
+/* The built-in theme called `name`, or -1. */
+static int builtin_id(const char *name, size_t len)
 {
-    return !strcmp(name, "scrim") || !strcmp(name, "light");
+    for (int id = 0; id < UI_THEME_BUILTIN_COUNT; ++id)
+    {
+        const char *builtin = ui_theme_builtin_name(id);
+        if (strlen(builtin) == len && !memcmp(builtin, name, len))
+            return id;
+    }
+    return -1;
 }
 
 static bool theme_from_file(struct ui_theme *theme, const char *name)
@@ -102,9 +109,10 @@ static bool select_theme(const char *name, bool fallback)
     if (replacement > 0)
     {
         struct ui_theme *tokens = core_get_data_pinned(replacement);
-        if (builtin_name(name))
+        int builtin = builtin_id(name, strlen(name));
+        if (builtin >= 0)
         {
-            ui_theme_builtin(tokens, !strcmp(name, "light"));
+            ui_theme_builtin(tokens, builtin);
             valid = true;
         }
         else
@@ -164,7 +172,7 @@ void ui_theme_snapshot(struct ui_theme *out)
         core_put_data_pinned(theme);
     }
     else
-        ui_theme_builtin(out, false);
+        ui_theme_builtin(out, UI_THEME_SCRIM);
 }
 
 unsigned ui_theme_generation(void)
@@ -210,6 +218,45 @@ unsigned ui_theme_duration(unsigned frames)
     unsigned scale = theme->motion_scale;
     core_put_data_pinned(theme);
     return ((uint64_t)frames * scale + UI_THEME_MOTION_ONE / 2) / UI_THEME_MOTION_ONE;
+}
+
+unsigned ui_theme_motion(enum ui_motion_role role, unsigned frames,
+                         unsigned base)
+{
+    unsigned motion = UI_MOTION_DEFAULT;
+    if (current_theme > 0)
+    {
+        struct ui_theme *theme = core_get_data_pinned(current_theme);
+        motion = theme->motion[role];
+        core_put_data_pinned(theme);
+    }
+    if (motion != UI_MOTION_DEFAULT && base)
+        frames = (frames * motion + base / 2) / base;
+    return ui_theme_duration(frames);
+}
+
+unsigned ui_theme_style(enum ui_style_role role)
+{
+    unsigned style = 0;
+    if (current_theme > 0)
+    {
+        struct ui_theme *theme = core_get_data_pinned(current_theme);
+        style = theme->style[role];
+        core_put_data_pinned(theme);
+    }
+    return style;
+}
+
+unsigned ui_theme_easing(void)
+{
+    unsigned easing = UI_EASE_CUBIC;
+    if (current_theme > 0)
+    {
+        struct ui_theme *theme = core_get_data_pinned(current_theme);
+        easing = theme->easing;
+        core_put_data_pinned(theme);
+    }
+    return easing;
 }
 
 int ui_theme_font_load(const struct ui_theme *theme, enum ui_font_role role, int glyphs)
@@ -258,8 +305,7 @@ static int find_themes(char (*names)[UI_THEME_NAME_MAX], int capacity)
     {
         size_t len = file_theme_name(entry->d_name);
         if (!len || (dir_get_info(dir, entry).attribute & ATTR_DIRECTORY) ||
-            (len == 5 && (!memcmp(entry->d_name, "scrim", len) ||
-                                  !memcmp(entry->d_name, "light", len))))
+            builtin_id(entry->d_name, len) >= 0)
             continue;
         if (names)
         {
@@ -277,38 +323,44 @@ static const char *theme_name(int item, void *data, char *buf, size_t len)
     (void)buf;
     (void)len;
     char (*files)[UI_THEME_NAME_MAX] = data;
-    static const char *const builtins[] = { "Scrim", "Light" };
-    return item < 2 ? builtins[item] : files[item - 2];
+    static const char *const builtins[UI_THEME_BUILTIN_COUNT] = {
+        "Scrim", "Light", "Classic"
+    };
+    return item < UI_THEME_BUILTIN_COUNT ? builtins[item] :
+           files[item - UI_THEME_BUILTIN_COUNT];
 }
 
 int ui_theme_choose(void)
 {
-    int count = find_themes(NULL, INT_MAX / UI_THEME_NAME_MAX - 2);
+    int count = find_themes(NULL, INT_MAX / UI_THEME_NAME_MAX - UI_THEME_BUILTIN_COUNT);
     int names_handle = count ? core_alloc_free_space(count * UI_THEME_NAME_MAX) : 0;
     char (*files)[UI_THEME_NAME_MAX] = names_handle > 0 ? core_get_data_pinned(names_handle) : NULL;
     count = files ? find_themes(files, count) : 0;
 
     struct simplelist_info info;
-    simplelist_info_init(&info, str(LANG_NATIVE_THEME), count + 2, files);
+    simplelist_info_init(&info, str(LANG_NATIVE_THEME),
+                         count + UI_THEME_BUILTIN_COUNT, files);
     info.get_name = theme_name;
     if (current_theme > 0)
     {
         const char *selected = global_settings.native_theme;
-        if (!strcmp(selected, "light"))
-            info.selection = 1;
+        int builtin = builtin_id(selected, strlen(selected));
+        if (builtin >= 0)
+            info.selection = builtin;
         else
             for (int i = 0; i < count; ++i)
                 if (!strcmp(files[i], selected))
                 {
-                    info.selection = i + 2;
+                    info.selection = i + UI_THEME_BUILTIN_COUNT;
                     break;
                 }
     }
     bool to_root = simplelist_show_list(&info);
     if (!to_root && info.selection >= 0)
     {
-        const char *name = info.selection == 0 ? "scrim" : info.selection == 1 ?
-                           "light" : files[info.selection - 2];
+        const char *name = info.selection < UI_THEME_BUILTIN_COUNT ?
+                           ui_theme_builtin_name(info.selection) :
+                           files[info.selection - UI_THEME_BUILTIN_COUNT];
         ui_theme_set(name, true);
     }
     if (files)

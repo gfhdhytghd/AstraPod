@@ -62,6 +62,7 @@ static const struct {
     [UI_FONT_LYRICS_FOCUS] = { "lyrics_focus", "20-noto-sans" },
     [UI_FONT_LYRICS_BACKGROUND] = { "lyrics_background", "14-noto-sans" },
     [UI_FONT_PANEL]     = { "panel",     "14-noto-sans" },
+    [UI_FONT_STATUS_TITLE] = { "status_title", "18-noto-sans-bold" },
 };
 
 static const struct {
@@ -168,8 +169,114 @@ static const struct {
     [UI_BG_HANDOFF] = { "handoff", UI_BG_COVER_SCRIM },
 };
 
-void ui_theme_builtin(struct ui_theme *theme, bool light)
+static const char *const builtin_names[UI_THEME_BUILTIN_COUNT] = {
+    [UI_THEME_SCRIM] = "scrim", [UI_THEME_LIGHT] = "light",
+    [UI_THEME_CLASSIC] = "classic",
+};
+
+static const struct {
+    const char *key;
+    const char *const *keywords;
+} styles[UI_STYLE_COUNT] = {
+    [UI_STYLE_SELECTION]    = { "selection",    (const char *const[]){ "marker", "bar", NULL } },
+    [UI_STYLE_LIST_ICONS]   = { "list_icons",   (const char *const[]){ "auto", "off", NULL } },
+    [UI_STYLE_ACCESSORY]    = { "accessory",    (const char *const[]){ "all", "selected", NULL } },
+    [UI_STYLE_STATUS_CLOCK] = { "status_clock", (const char *const[]){ "on", "off", NULL } },
+    [UI_STYLE_STATUS_TITLE] = { "status_title", (const char *const[]){ "left", "center", NULL } },
+    [UI_STYLE_PAGE_MOTION]  = { "page_motion",  (const char *const[]){ "cascade", "slide", NULL } },
+    [UI_STYLE_WPS_LAYOUT]   = { "wps_layout",   (const char *const[]){ "cover", "classic", NULL } },
+    [UI_STYLE_SCROLLBAR]    = { "scrollbar",    (const char *const[]){ "plain", "classic", NULL } },
+};
+
+static const char *const gradients[UI_GRADIENT_COUNT] = {
+    [UI_GRADIENT_SELECTION] = "selection", [UI_GRADIENT_STATUS] = "status",
+    [UI_GRADIENT_PROGRESS] = "progress",
+    [UI_GRADIENT_PROGRESS_TRACK] = "progress_track",
+    [UI_GRADIENT_SCROLLBAR] = "scrollbar",
+};
+
+static const char *const motions[UI_MOTION_COUNT] = {
+    [UI_MOTION_PUSH] = "push", [UI_MOTION_POP] = "pop",
+    [UI_MOTION_LIST] = "list", [UI_MOTION_SHEET_IN] = "sheet_in",
+    [UI_MOTION_SHEET_OUT] = "sheet_out",
+};
+
+static const char *const easings[] = {
+    [UI_EASE_CUBIC] = "cubic", [UI_EASE_QUAD] = "quad",
+    [UI_EASE_QUINT] = "quint", [UI_EASE_SINE] = "sine",
+    [UI_EASE_LINEAR] = "linear", NULL
+};
+
+/* Classic: the look of the stock iPod Classic firmware, on Light's base. */
+static void classic(struct ui_theme *theme)
 {
+    static const struct { uint8_t role; uint32_t rgb; } color_set[] = {
+        { UI_COLOR_BACKGROUND, 0xffffff }, { UI_COLOR_FOREGROUND, 0x000000 },
+        { UI_COLOR_MUTED, 0x000000 }, { UI_COLOR_ACCENT, 0x3185d0 },
+        { UI_COLOR_SELECTION, 0x0089de },
+        { UI_COLOR_SELECTED_SECONDARY, 0xffffff },
+        { UI_COLOR_SELECTED_TEXT, 0xffffff }, { UI_COLOR_SEPARATOR, 0xa5a6a5 },
+        { UI_COLOR_STATUS_BG, 0xcecfce }, { UI_COLOR_STATUS_FG, 0x000000 },
+        { UI_COLOR_LIST_TINT, 0xefefef },
+        { UI_COLOR_MODAL_BG, 0xffffff }, { UI_COLOR_MODAL_FG, 0x000000 },
+        { UI_COLOR_MODAL_BORDER, 0x5a595a }, { UI_COLOR_MODAL_ACCENT, 0x0089de },
+        { UI_COLOR_MODAL_SELECTED_TEXT, 0xffffff },
+        { UI_COLOR_WPS_BG, 0xffffff }, { UI_COLOR_WPS_FG, 0x000000 },
+        { UI_COLOR_WPS_MUTED, 0x3d3d3d }, { UI_COLOR_WPS_ACCENT, 0x0071d6 },
+        { UI_COLOR_WPS_METER, 0x0071d6 }, { UI_COLOR_WPS_PANEL, 0xffffff },
+        { UI_COLOR_HANDOFF_BG, 0xffffff }, { UI_COLOR_HANDOFF_FG, 0x000000 },
+        { UI_COLOR_HANDOFF_COVER_PLACEHOLDER, 0xdedfde },
+    };
+    static const struct { uint8_t role; uint16_t value; } metric_set[] = {
+        { UI_METRIC_ROW_HEIGHT, 24 }, { UI_METRIC_LIST_X, 0 },
+        { UI_METRIC_LIST_Y, 20 }, { UI_METRIC_LIST_BOTTOM, 0 },
+        { UI_METRIC_LIST_TEXT_PADDING, 5 }, { UI_METRIC_LIST_RIGHT_PADDING, 0 },
+        { UI_METRIC_LIST_ICON_MARGIN, 0 }, { UI_METRIC_LIST_ICON_GAP, 0 },
+        { UI_METRIC_LIST_TEXT_HEIGHT, 20 }, { UI_METRIC_LIST_ACCESSORY_GAP, 2 },
+        { UI_METRIC_LIST_SELECTION_WIDTH, 0 },
+        { UI_METRIC_STATUS_HEIGHT, 20 }, { UI_METRIC_STATUS_PAD_LEFT, 6 },
+        { UI_METRIC_STATUS_PAD_RIGHT, 7 }, { UI_METRIC_STATUS_TEXT_Y, 2 },
+        { UI_METRIC_STATUS_TITLE_HEIGHT, 18 }, { UI_METRIC_STATUS_ICON_Y, 0 },
+        { UI_METRIC_STATUS_ICON_SIZE, 20 },
+        { UI_METRIC_MODAL_BORDER_WIDTH, 1 },
+        { UI_METRIC_LIST_ART_SIZE, 55 }, { UI_METRIC_LIST_ART_ROW_HEIGHT, 55 },
+        { UI_METRIC_LIST_ART_TOP_GAP, 0 }, { UI_METRIC_LIST_ART_BOTTOM_GAP, 0 },
+    };
+    for (size_t i = 0; i < ARRAY_COUNT(color_set); i++)
+        theme->color[color_set[i].role] = color_set[i].rgb;
+    for (size_t i = 0; i < ARRAY_COUNT(metric_set); i++)
+        theme->metric[metric_set[i].role] = metric_set[i].value;
+    strcpy(theme->font[UI_FONT_LIST], "18-noto-sans-bold");
+    strcpy(theme->font[UI_FONT_STATUS], "14-noto-sans");
+    strcpy(theme->font[UI_FONT_STATUS_TITLE], "14-noto-sans");
+    theme->gradient[UI_GRADIENT_SELECTION] = (struct ui_theme_gradient){
+        { 0x96c5da, 0x09a4e1, 0x0065d3, 0x004386 }, 4 };
+    theme->gradient[UI_GRADIENT_STATUS] = (struct ui_theme_gradient){
+        { 0xfcfcfc, 0xf8f8f8, 0x9f9e9e, 0x5b5b5b }, 4 };
+    strcpy(theme->font[UI_FONT_WPS_TITLE], "18-noto-sans-bold");
+    theme->gradient[UI_GRADIENT_PROGRESS] = (struct ui_theme_gradient){
+        { 0x6483f0, 0x6789f2, 0x56aeff, 0x4e8fce }, 4 };
+    theme->gradient[UI_GRADIENT_PROGRESS_TRACK] = (struct ui_theme_gradient){
+        { 0xdbdbdb, 0xfdfdfd, 0xe2e2e2, 0xbababa }, 4 };
+    theme->background[UI_BG_STATUS] = UI_BG_SOLID;
+    theme->style[UI_STYLE_SELECTION] = UI_SELECTION_BAR;
+    theme->style[UI_STYLE_LIST_ICONS] = UI_LIST_ICONS_OFF;
+    theme->style[UI_STYLE_ACCESSORY] = UI_ACCESSORY_SELECTED;
+    theme->style[UI_STYLE_STATUS_CLOCK] = UI_STATUS_CLOCK_OFF;
+    theme->style[UI_STYLE_PAGE_MOTION] = UI_PAGE_MOTION_SLIDE;
+    /* The stock slides last 270 ms, 18 refreshes of the 67 Hz panel, with
+     * quadratic ease-out; its list bar and rows move a whole row at once. */
+    theme->motion[UI_MOTION_PUSH] = 18;
+    theme->motion[UI_MOTION_POP] = 18;
+    theme->motion[UI_MOTION_LIST] = 0;
+    theme->easing = UI_EASE_QUAD;
+    theme->style[UI_STYLE_WPS_LAYOUT] = UI_WPS_LAYOUT_CLASSIC;
+    theme->style[UI_STYLE_SCROLLBAR] = UI_SCROLLBAR_CLASSIC;
+}
+
+void ui_theme_builtin(struct ui_theme *theme, enum ui_theme_builtin_id id)
+{
+    bool light = id != UI_THEME_SCRIM;
     memset(theme, 0, sizeof(*theme));
     for (size_t i = 0; i < ARRAY_COUNT(colors); i++)
     {
@@ -185,6 +292,48 @@ void ui_theme_builtin(struct ui_theme *theme, bool light)
         theme->background[i] = light ? UI_BG_SOLID : backgrounds[i].scrim;
     theme->background[UI_BG_STATUS] = UI_BG_COVER_TINT;
     theme->motion_scale = UI_THEME_MOTION_ONE;
+    for (size_t i = 0; i < UI_MOTION_COUNT; i++)
+        theme->motion[i] = UI_MOTION_DEFAULT;
+    if (id == UI_THEME_CLASSIC)
+        classic(theme);
+}
+
+const char *ui_theme_builtin_name(enum ui_theme_builtin_id id)
+{
+    return (unsigned)id < UI_THEME_BUILTIN_COUNT ? builtin_names[id] : NULL;
+}
+
+static uint32_t mix_rgb(uint32_t a, uint32_t b, int num, int den)
+{
+    uint32_t out = 0;
+    for (int shift = 0; shift <= 16; shift += 8)
+    {
+        int ca = (a >> shift) & 255, cb = (b >> shift) & 255;
+        out |= (uint32_t)(ca + (cb - ca) * num / den) << shift;
+    }
+    return out;
+}
+
+uint32_t ui_theme_gradient_at(const struct ui_theme_gradient *gradient,
+                              int y, int height, uint32_t fallback)
+{
+    if (!gradient || !gradient->stops || height <= 0)
+        return fallback;
+    int first = 0, last = height - 1;
+    if (gradient->stops == 4 && height >= 3)
+    {
+        if (y <= 0)
+            return gradient->color[0];
+        if (y >= height - 1)
+            return gradient->color[3];
+        first = 1;
+        last = height - 2;
+    }
+    const uint32_t *ends = gradient->stops == 4 ? gradient->color + 1 : gradient->color;
+    if (last <= first)
+        return ends[0];
+    y = y < first ? first : y > last ? last : y;
+    return mix_rgb(ends[0], ends[1], y - first, last - first);
 }
 
 unsigned ui_theme_builtin_metric(enum ui_metric_role role)
@@ -353,7 +502,44 @@ static bool bg_kind(struct span value, uint8_t *out)
 struct seen_tokens {
     bool color[UI_COLOR_COUNT], palette[UI_COLOR_COUNT], font[UI_FONT_COUNT];
     bool metric[UI_METRIC_COUNT], background[UI_BG_COUNT], motion;
+    bool gradient[UI_GRADIENT_COUNT], style[UI_STYLE_COUNT];
+    bool duration[UI_MOTION_COUNT], easing;
 };
+
+static bool keyword(struct span value, const char *const *list, uint8_t *out)
+{
+    for (uint8_t i = 0; list[i]; i++)
+        if (same(value, list[i]))
+        {
+            *out = i;
+            return true;
+        }
+    return false;
+}
+
+static bool gradient_rule(struct span value, struct ui_theme_gradient *out)
+{
+    struct ui_theme_gradient parsed = {0};
+    if (same(value, "none"))
+    {
+        *out = parsed;
+        return true;
+    }
+    for (;;)
+    {
+        struct span rest;
+        bool more = split(&value, ',', &rest);
+        if (parsed.stops == 4 || !rgb(value, &parsed.color[parsed.stops++]))
+            return false;
+        if (!more)
+            break;
+        value = rest;
+    }
+    if (parsed.stops != 2 && parsed.stops != 4)
+        return false;
+    *out = parsed;
+    return true;
+}
 
 static bool first_token(bool *seen)
 {
@@ -367,6 +553,8 @@ static bool parse_token(struct ui_theme *theme, struct seen_tokens *seen,
 {
     if (same(key, "motion_scale"))
         return first_token(&seen->motion) && number(value, 0, 300, &theme->motion_scale);
+    if (same(key, "motion_easing"))
+        return first_token(&seen->easing) && keyword(value, easings, &theme->easing);
 
     struct span role;
     if (!split(&key, '.', &role))
@@ -396,6 +584,27 @@ static bool parse_token(struct ui_theme *theme, struct seen_tokens *seen,
             if (same(role, metrics[i].key))
                 return first_token(&seen->metric[i]) &&
                        number(value, metrics[i].min, metrics[i].max, &theme->metric[i]);
+    }
+    else if (same(key, "gradient"))
+    {
+        for (size_t i = 0; i < ARRAY_COUNT(gradients); i++)
+            if (same(role, gradients[i]))
+                return first_token(&seen->gradient[i]) &&
+                       gradient_rule(value, &theme->gradient[i]);
+    }
+    else if (same(key, "style"))
+    {
+        for (size_t i = 0; i < ARRAY_COUNT(styles); i++)
+            if (same(role, styles[i].key))
+                return first_token(&seen->style[i]) &&
+                       keyword(value, styles[i].keywords, &theme->style[i]);
+    }
+    else if (same(key, "motion"))
+    {
+        for (size_t i = 0; i < ARRAY_COUNT(motions); i++)
+            if (same(role, motions[i]))
+                return first_token(&seen->duration[i]) &&
+                       number(value, 0, 120, &theme->motion[i]);
     }
     else if (same(key, "background"))
     {
@@ -478,7 +687,7 @@ bool ui_theme_parse(struct ui_theme *theme, const char *data, size_t size)
     struct ui_theme parsed;
     struct seen_tokens seen = {0};
     bool version = false;
-    ui_theme_builtin(&parsed, false);
+    ui_theme_builtin(&parsed, UI_THEME_SCRIM);
     parsed.background[UI_BG_STATUS] = UI_BG_SOLID;
 
     while (size)

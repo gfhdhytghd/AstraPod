@@ -164,6 +164,7 @@ int rock_remove_theme_file(const char *path)
     const char *active = global_settings.native_theme;
     if ((length == 5 && (!strncasecmp(name, "scrim", length) ||
                          !strncasecmp(name, "light", length))) ||
+        (length == 7 && !strncasecmp(name, "classic", length)) ||
         (native && strlen(active) == length &&
          !strncasecmp(name, active, length)))
         return -1;

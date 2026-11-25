@@ -36,7 +36,13 @@ void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route)
     sheet->tween = (struct ui_tween){
         .start_clock = ui_clock_start(), .from = from, .to = to,
         .frames = lcd_active() && from != to
-                    ? ui_theme_duration(open ? SHEET_OPEN_FRAMES : SHEET_CLOSE_FRAMES) : 0,
+                    ? open ? ui_theme_motion(UI_MOTION_SHEET_IN,
+                                             SHEET_OPEN_FRAMES,
+                                             SHEET_OPEN_FRAMES)
+                           : ui_theme_motion(UI_MOTION_SHEET_OUT,
+                                             SHEET_CLOSE_FRAMES,
+                                             SHEET_CLOSE_FRAMES)
+                    : 0,
         .ease_in = !open,
     };
     if (sheet->tween.frames)

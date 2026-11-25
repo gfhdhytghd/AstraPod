@@ -291,7 +291,6 @@ static const struct tag_row tag_rows[] = {
 { "album covers center margin",   TAG_ADVANCED|TAG_APPEARANCE|TAG_THEMEAUTHOR, "carousel 3d" },
 { "album covers slide tuck",      TAG_ADVANCED|TAG_APPEARANCE|TAG_THEMEAUTHOR, "carousel 3d" },
 { "album covers parallel slides", TAG_ADVANCED|TAG_APPEARANCE|TAG_THEMEAUTHOR, "carousel 3d" },
-{ "album covers transition speed",TAG_ADVANCED|TAG_APPEARANCE|TAG_THEMEAUTHOR, "carousel 3d speed" },
 { "album covers pile fade",       TAG_ADVANCED|TAG_APPEARANCE|TAG_THEMEAUTHOR, "carousel flat" },
 { "album covers pile offset",     TAG_ADVANCED|TAG_APPEARANCE|TAG_THEMEAUTHOR, "carousel flat" },
 { "album covers filter 1",        TAG_ADVANCED|TAG_APPEARANCE|TAG_ARTWORK, "carousel artwork filter image" },

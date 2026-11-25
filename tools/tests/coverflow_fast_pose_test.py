@@ -46,8 +46,7 @@ static int number_of_slides = 10, thread_q;
 enum {pf_idle, pf_scrolling};
 static struct {
     int album_covers_scroll_speed;
-    int album_covers_transition_speed;
-} global_settings = { 200, 325 };
+} global_settings = { 200 };
 static bool flat_view(void) { return flat; }
 static void wake_pf_thread(void) {}
 static void buf_ctx_lock(void) {}

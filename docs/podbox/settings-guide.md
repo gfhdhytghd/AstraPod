@@ -349,7 +349,7 @@ Audiobooks lists have no <All Tracks> or <Random> rows.
 | Sort ▸ Artists By | The order artist portraits appear in: by name, or most played first. | Name |  |
 | Sort ▸ Ignore The/A/An | Sorts covers and portraits as if a leading "The", "A" or "An" were not there, so The Beatles sits among the Bs. The names still show in full. | No |  |
 | On Album Select | What Select does on a cover: open the album's track list, or start playing it. | Show tracks |  |
-| Scroll Speed | How far a flick of the wheel carries. Affects both view modes. | 175% |  |
+| Scroll Speed | How quickly the covers catch up with the album the wheel has picked. In 3D the default, 175%, matches the original iPod's Cover Flow; higher settles sooner. Flat times its covers off the wheel, scaled by this setting. | 175% |  |
 | Random Spin Length | How many covers go past when holding Play picks an album at random. Long makes more of a show of it and takes a little longer to land. | Medium |  |
 
 **Appearance** opens `Settings > Appearance > Carousel`, below.
@@ -506,8 +506,7 @@ Also reached as **Appearance** under `Settings > Playback > Now Playing Screen`.
 | View Mode | 3D angles the covers away on both sides. Flat lays them face-on and the same size, in two piles either side of the current one. | 3D |  |
 | 3D Centre Margin | The gap between the front cover and its neighbours in the 3D view. | 0 | **Adv** |
 | 3D Slide Tuck | How far the side covers stack back behind the front one in the 3D view. | 32 | **Adv** |
-| 3D Parallel Slides | Draws the side covers face-on rather than angled, which reads as a row of covers rather than a tunnel. | Yes | **Adv** |
-| 3D Transition Speed | How quickly the 3D view settles after scrolling. No effect in Flat, which times itself off the wheel instead. | 325% | **Adv** |
+| 3D Parallel Slides | Draws every side cover the same shape and slides it into place, rather than in true perspective from where it sits, which reads as a row of covers rather than a tunnel. The side covers turn by the same angle either way. | Yes | **Adv** |
 | Flat Pile Fade | How far the two piles in the Flat view are blended towards the background, so the cover in the middle stands out. Zero leaves them solid. | 0% | **Adv** |
 | Flat Pile Offset | How far below the middle cover the Flat view's piles sit. A cover eases down onto its pile as it leaves and back up as it arrives. | 0 px | **Adv** |
 | Artwork Filter ▸ Filter 1 | First of three image adjustments applied to the covers in the carousel. Art rows in the browser are not affected. | Off | **Adv** |

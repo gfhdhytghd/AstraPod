@@ -26,10 +26,8 @@
  * does nothing is worse than a missing one, and the prefix says which mode a
  * row belongs to without having to switch back to find out.
  *
- * Transition speed is in the 3D group and not the shared one: the flat view
- * replaces the whole speed expression it feeds (see update_scroll_animation()),
- * timing itself off the wheel instead. Scroll speed is genuinely shared -- flat
- * scales its own durations by it in flat_ticks(). */
+ * Scroll speed is shared: the 3D view scales its chase by it, and flat scales
+ * its own durations by it in flat_duration(). */
 static int tilt_only_callback(int action,
                               const struct menu_item_ex *this_item,
                               struct gui_synclist *this_list)
@@ -62,7 +60,6 @@ MENUITEM_SETTING(album_covers_slide_tuck, &global_settings.album_covers_slide_tu
 MENUITEM_SETTING(album_covers_parallel_slides, &global_settings.album_covers_parallel_slides, tilt_only_callback);
 MENUITEM_SETTING(album_covers_scroll_speed, &global_settings.album_covers_scroll_speed, NULL);
 MENUITEM_SETTING(album_covers_random_spin, &global_settings.album_covers_random_spin, NULL);
-MENUITEM_SETTING(album_covers_transition_speed, &global_settings.album_covers_transition_speed, tilt_only_callback);
 MENUITEM_SETTING(album_covers_show_album_name, &global_settings.album_covers_show_album_name, NULL);
 /* Under Sort Same as Music the carousel's own three sort rows do nothing, so
  * they are hidden while it is on. */
@@ -223,7 +220,6 @@ MAKE_MENU(album_covers_filter_menu, ID2P(LANG_ARTWORK_FILTER), NULL, Icon_NOICON
             &album_covers_center_margin,                                \
             &album_covers_slide_tuck,                                   \
             &album_covers_parallel_slides,                              \
-            &album_covers_transition_speed,                             \
             &album_covers_pile_fade,                                    \
             &album_covers_pile_offset,                                  \
             &album_covers_filter_menu

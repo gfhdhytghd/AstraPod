@@ -775,7 +775,6 @@ struct user_settings
     bool album_covers_parallel_slides;
     int  album_covers_scroll_speed;
     int  album_covers_random_spin;  /* 0..2: covers a held PLAY passes */
-    int  album_covers_transition_speed;
     int  album_covers_show_album_name;
     int  album_covers_sort_albums_by;
     int  album_covers_sort_artists_by; /* SORT_ARTISTS_*: portraits ordering */

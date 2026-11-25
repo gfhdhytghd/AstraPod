@@ -17641,16 +17641,16 @@
 </phrase>
 <phrase>
   id: LANG_CAROUSEL_TRANSITION_SPEED
-  desc: in apps/menus/album_covers_menu.c
+  desc: deprecated
   user: core
   <source>
-    *: "3D Transition Speed"
+    *: none
   </source>
   <dest>
-    *: "3D-övergångshastighet"
+    *: none
   </dest>
   <voice>
-    *: ""
+    *: none
   </voice>
 </phrase>
 <phrase>

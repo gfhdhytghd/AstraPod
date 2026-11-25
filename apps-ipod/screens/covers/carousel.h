@@ -168,7 +168,7 @@ void set_scroll_line(const char *str, enum pf_scroll_line_type type);
  * font with "..." -- which set_scroll_line() then centres and never moves.
  * 'buf' is TEXT_FIT_BUF bytes. */
 const char *carousel_caption_fit(const char *str, char *buf, size_t size);
-int  get_scroll_line_offset(enum pf_scroll_line_type type);
+int  get_scroll_line_offset(enum pf_scroll_line_type type, int y);
 /* True when the caption needs building again -- a different slide, or a
  * different `variant` (whatever else the model's caption text depends on;
  * pass 0 if nothing does). A model calls this once per draw and re-runs

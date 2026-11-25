@@ -230,7 +230,7 @@ static void artist_draw_text(void)
     carousel_caption_layout(false, &cap);
     txt_y = cap.y1;
 
-    txt_x = get_scroll_line_offset(PF_SCROLL_ALBUM);
+    txt_x = get_scroll_line_offset(PF_SCROLL_ALBUM, txt_y);
     lcd_putsxy(txt_x, txt_y, line);
     lcd_setfont(carousel_caption_font(false));
     carousel_text_end(saved_vp);

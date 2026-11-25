@@ -12,7 +12,7 @@
  * slide cache, 3D projection, scrolling, input loop and worker thread.
  * Each screen supplies a model.
  *
- * Turn projects the 3D carousel into Q16 screen coordinates. Flat layout
+ * The stock camera projects the 3D carousel into Q16 screen coordinates. Flat layout
  * and album-panel texture sampling use PFreal with 10 fractional bits.
  *
  * Slides are decoded on a worker thread into a fixed set of cache slots.
@@ -397,6 +397,7 @@ struct caption_span { int left, right; };
 
 struct pf_scroll_line {
     struct caption_span ink;
+    int ink_top, ink_end;
     uint32_t text_hash;
     int font;
     int width;          /* width of the string */
@@ -669,6 +670,7 @@ static int caption_rows_y, caption_rows_h;
  * unchanged artist line can stay. Zero high while paint_caption() clears. */
 static int caption_clear_y, caption_clear_h;
 static struct caption_span previous_ink, painted_ink;
+static int painted_top = INT_MAX, painted_end;
 static bool painted_ink_known;
 static const char *caption_line;
 
@@ -679,7 +681,7 @@ static struct {
     uint32_t text;
     int x, y, font;
     pix_t fg;
-    bool valid;
+    bool valid, album_in_box;
 } caption_artist;
 
 enum ePFS{ePFS_ARTIST = 0, ePFS_ALBUM};
@@ -1218,6 +1220,7 @@ void set_scroll_line(const char *str, enum pf_scroll_line_type type)
         /* PBF advances place the line; ink includes bearings and combining marks. */
         struct font_run run = {0};
         s->ink = (struct caption_span){INT_MAX, INT_MIN};
+        s->ink_top = s->ink_end = 0;
         s->width = 0;
         for (const ucschar_t *p = bidi_l2v((const unsigned char *)str, 1); p && *p; p++)
         {
@@ -1225,6 +1228,8 @@ void set_scroll_line(const char *str, enum pf_scroll_line_type type)
             s->width = font_run_next(font, &run, *p, &glyph);
             if (glyph.bits && glyph.height && glyph.width)
             {
+                s->ink_top = MIN(s->ink_top, glyph.y);
+                s->ink_end = MAX(s->ink_end, glyph.y + glyph.height);
                 s->ink.left = MIN(s->ink.left, glyph.x);
                 s->ink.right = MAX(s->ink.right, glyph.x + glyph.width);
             }
@@ -1275,13 +1280,23 @@ void carousel_text_end(struct viewport *saved)
     lcd_set_viewport(saved);
 }
 
-int get_scroll_line_offset(enum pf_scroll_line_type type)
+int get_scroll_line_offset(enum pf_scroll_line_type type, int y)
 {
     const struct pf_scroll_line *line = &scroll_lines[type];
     if (!caption_line || line->font != lcd_getfont() ||
         line->text_hash != fnv1a_str(caption_line))
+    {
+        const struct font *font = font_get(lcd_getfont());
+        painted_top = MIN(painted_top, y - font->pbf.ink_above);
+        painted_end = MAX(painted_end, y + font->height + font->pbf.ink_below);
         painted_ink_known = false;
-    else if (painted_ink_known && line->ink.left < line->ink.right)
+    }
+    else
+    {
+        painted_top = MIN(painted_top, y + line->ink_top);
+        painted_end = MAX(painted_end, y + line->ink_end);
+    }
+    if (painted_ink_known && line->ink.left < line->ink.right)
     {
         const struct viewport *vp = lcd_current_viewport;
         int left = MAX(0, line->offset + line->ink.left);
@@ -1617,7 +1632,7 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
     carousel_caption_layout(show_artist, &cap);
     albumtxt_y = cap.y1;
 
-    albumtxt_x = get_scroll_line_offset(PF_SCROLL_ALBUM);
+    albumtxt_x = get_scroll_line_offset(PF_SCROLL_ALBUM, albumtxt_y);
 
     /* Measured in the artist font before anything is drawn, so an artist line
      * the same as the one on screen is neither cleared nor drawn again. Only
@@ -1632,18 +1647,24 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
                                            sizeof(artist_fit));
         if (album_changed)
             set_scroll_line(artist_line, PF_SCROLL_ARTIST);
-        artisttxt_x = get_scroll_line_offset(PF_SCROLL_ARTIST);
+        artisttxt_x = get_scroll_line_offset(PF_SCROLL_ARTIST, cap.y2);
         uint32_t text = fnv1a_str(artist_line);
         int album_end = albumtxt_y + font_get(album_font)->height;
+        const struct pf_scroll_line *album = &scroll_lines[PF_SCROLL_ALBUM];
+        const struct pf_scroll_line *artist = &scroll_lines[PF_SCROLL_ARTIST];
+        bool in_box = painted_ink_known && album->ink_top >= 0 &&
+                      albumtxt_y + album->ink_end <= album_end;
         keep_artist = caption_clear_h > 0 && caption_artist.valid &&
+                      caption_artist.album_in_box && in_box &&
                       caption_artist.text == text &&
                       caption_artist.x == artisttxt_x &&
                       caption_artist.y == cap.y2 &&
                       caption_artist.font == artist_font &&
                       caption_artist.fg == pf_fg_color &&
-                      album_end <= cap.y2 &&
+                      album_end <= cap.y2 + artist->ink_top &&
                       albumtxt_y >= caption_clear_y &&
                       album_end <= caption_clear_y + caption_clear_h;
+        caption_artist.album_in_box = in_box;
         caption_artist.text = text;
         caption_artist.x = artisttxt_x;
         caption_artist.y = cap.y2;
@@ -2680,8 +2701,11 @@ static void update_caption_bounds(void)
     {
         struct pf_caption cap;
         carousel_caption_layout(true, &cap);
-        pf_text_y = cap.y1;
-        pf_text_h = MAX(0, MIN(caption_block(true), pf_height - pf_text_y));
+        /* PBF ink can extend past the line box. Reserve only the overhang
+         * of the displayed glyphs, so normal captions leave the art intact. */
+        pf_text_y = MAX(0, MIN(cap.y1, painted_top));
+        int end = MAX(cap.y1 + caption_block(true), painted_end);
+        pf_text_h = MAX(0, MIN(end, pf_height) - pf_text_y);
     }
 }
 
@@ -4193,7 +4217,7 @@ static bool init(void)
     panel_cache_follow_theme();
     pf_body_font = ui_theme_font_load(&theme, UI_FONT_BODY, 64);
 
-    /* Flat piles fit in the drawable band. Turn uses the panel camera
+    /* Flat piles fit in the drawable band. The 3D view uses the panel camera
      * and clips to the caption's actual line boxes. */
     {
         bool text_at_top;
@@ -5921,6 +5945,8 @@ static void paint_caption(const struct ui_view *view, const struct ui_view_frame
     struct carousel_frame *paint = view->data;
     uint32_t start = paint->tracing ? USEC_TIMER : 0;
     painted_ink_known = false;
+    painted_top = INT_MAX;
+    painted_end = 0;
     caption_rows_y = frame->clip.y - pf_vp_y;
     caption_rows_h = frame->clip.height;
     if (!paint->joined)
@@ -5943,6 +5969,13 @@ static void paint_caption(const struct ui_view *view, const struct ui_view_frame
         pf_clear_band(caption_clear_y, caption_clear_h);
         caption_clear_h = 0;
         caption_artist.valid = false;
+    }
+    int old_top = pf_text_y, old_end = pf_text_y + pf_text_h;
+    update_caption_bounds();
+    if (old_top != pf_text_y || old_end != pf_text_y + pf_text_h)
+    {
+        caption_rows_y = MIN(old_top, pf_text_y);
+        caption_rows_h = MAX(old_end, pf_text_y + pf_text_h) - caption_rows_y;
     }
     if (paint->tracing)
         paint->caption_us += (uint32_t)USEC_TIMER - start;
@@ -6674,7 +6707,10 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 flow_moving = true;
             }
             bool drew_art = art_owed;
-            bool drew_caption = caption_owed;
+            /* Keep the framebuffer caption stable until its last slice reaches
+             * the panel. Rapid selection changes otherwise rewind the slice
+             * cursor to the title and starve the artist. */
+            bool drew_caption = caption_owed && !caption_flush_owed;
             /* The rows each half touches, and so the rows it has to clear
              * before it draws and send afterwards. Nothing else in the viewport
              * has changed since it was last flushed. */
@@ -6692,7 +6728,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             }
 
             art_owed = false;
-            caption_owed = false;
+            caption_owed &= !drew_caption;
 #if PF_SHOW_STATS
             unsigned long t_start = USEC_TIMER, t_flush;
             /* The overlay sits over the covers rather than in them, so it needs

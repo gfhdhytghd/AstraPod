@@ -1153,7 +1153,8 @@ For unit hinge `g` and depth state `b`, yaw is −πg/2, X = 27.776(i−p) + 73.
 
 The 3D carousel uses the slot, timing and projection constants in
 `apps-ipod/screens/covers/stock_motion.h`. Sections 9.9–9.11 describe
-earlier fitted models.
+earlier fitted models. The [firmware report](coverflow-stock-firmware.md)
+records the evidence for each constant and the limits of the emulator replay.
 
 | Quantity | Stock value |
 |---|---|
@@ -1184,7 +1185,9 @@ when it posts an event, so the carousel cannot reproduce stock remainder
 carry or its initial gesture dead band from that event. Remote and simulator
 actions without a physical count advance one album.
 
-The renderer resolves depth at each screen column. Moving covers use nearest
+The renderer composites covers from the outermost inwards, with the
+highest-z cover last. Each column retains exposed rows of earlier covers.
+Moving covers use nearest
 sampling. At eased progress ≥ 0.995 they switch to linear filtering. The
 headless host replay in `apps-ipod/screens/covers/tests/stock_replay.py`
 compares the projected edges with the reference model and with tracked

@@ -31,6 +31,7 @@
 #include "pmu-target.h"
 #ifndef BOOTLOADER
 #include "lcd-te-s5l8702.h"
+#include "lcd-experiment-s5l8702.h"
 #define HAVE_LCD_TE_QUEUE
 #endif
 #endif
@@ -620,6 +621,29 @@ void lcd_te_release_bus(void)
 {
     mutex_unlock(&lcd_mutex);
 }
+
+bool lcd_stock_set(unsigned int mask, struct lcd_stock_readback *readback)
+{
+    if (mask > LCD_STOCK_ALL || !lcd_te_acquire_bus())
+        return false;
+    bool idle = lcd_bus_idle();
+    if (idle)
+        lcd_stock_reconfigure(mask, readback, &lcd_cmd_mode, &lcd_frame_mode);
+    lcd_te_release_bus();
+    return idle;
+}
+
+void lcd_experiment_present(int y, int height,
+                            void (*draw)(uint16_t *, int, unsigned int),
+                            unsigned int frame)
+{
+    uint16_t *stage = displaylcd_stage();
+    uint32_t start = USEC_TIMER;
+    draw(stage, height, frame);
+    commit_dcache_range(stage, height * LCD_WIDTH * sizeof(*stage));
+    displaylcd_submit(stage, 0, y, LCD_WIDTH, height, USEC_TIMER - start);
+    displaylcd_wait_dma();
+}
 #endif
 
 #ifdef HAVE_PODLINK_PLUGIN_TEST
@@ -941,6 +965,10 @@ void lcd_awake(void)
     mutex_lock(&lcd_mutex);
 
     lcd_target_enable_clocks(true);
+#ifdef HAVE_LCD_TE_QUEUE
+    if (!lcd_ispowered)
+        lcd_stock_restore_active();
+#endif
                                  // XXX: Do not change modes while data is being sent
     s5l_lcd_set_command_mode();
     lcd_run_seq(lcd_info->seq_awake);

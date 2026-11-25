@@ -539,6 +539,7 @@ void carousel_wps_end(bool back)
             close_album_panel();
         ui_scene_discard(&wps_handover.sheet);
         ui_scene_discard(&pf_scene);
+        pf_wps_entry = false;
         wps_handover.model = NULL;
         wps_handover.returning = false;
     }
@@ -6151,6 +6152,8 @@ static int stage_caption(int left, int right, int *top, int end, int pixels,
 
 static bool flow_present_fade(struct ui_scene *source, unsigned opacity)
 {
+    if (opacity >= UI_FULL_OPACITY || !flow_count)
+        return ui_scene_present_fade(source, opacity, NULL, NULL);
     static int16_t fade_top[LCD_WIDTH], fade_end[LCD_WIDTH];
     const int top = flow_clip_top(), end = flow_clip_end();
     for (int x = 0; x < LCD_WIDTH; x++)

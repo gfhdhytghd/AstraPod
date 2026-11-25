@@ -3411,24 +3411,24 @@ static void flat_render(bool center)
     }
 }
 
-/* For square cards with the same world-space Y extent, projected height
- * is proportional to reciprocal depth. The tallest card on each ray owns
- * the whole column, including when two faces cross inside their overlap. */
+/* stock_sample emits outer covers first and the front cover last. */
 struct flow_face
 {
     const pix_t *pixels;
     int stride, size, crop;
+    int first, end, t0, dt, start_height;
     bool linear;
     int top, top_delta, end_height; /* Q16 projected edge coordinates */
 };
 
 struct flow_column
 {
-    int height, t; /* Q16 height and Q30 fraction along the winning face */
+    int y0, height, t; /* Q16 top and height and Q30 fraction along the winning face */
     const struct flow_face *face;
 };
 
 static struct flow_column flow_columns[LCD_WIDTH];
+static int16_t flow_top[LCD_WIDTH], flow_end[LCD_WIDTH];
 static struct flow_face flow_faces[STOCK_MAX_VISIBLE];
 static struct slide_data flow_surfaces[STOCK_MAX_VISIBLE];
 
@@ -3495,6 +3495,8 @@ static inline uint32_t flow_quotient(uint32_t low, uint32_t width, uint32_t q)
 
 static void flow_cover_columns(const struct flow_card *card, int slot, int spread)
 {
+    struct flow_face *face = &flow_faces[slot];
+    face->end = 0;
     int x0 = card->edge[0].x, x1 = card->edge[1].x;
     /* Album-panel neighbours spread in world pixels (Q10). */
     int dx = card->id < center_index ? -spread : spread;
@@ -3533,25 +3535,31 @@ static void flow_cover_columns(const struct flow_card *card, int slot, int sprea
     int h0 = card->edge[0].bottom - card->edge[0].top;
     int h1 = card->edge[1].bottom - card->edge[1].top;
     int size = MIN(bmp->width, bmp->height);
-    struct flow_face *face = &flow_faces[slot];
     *face = (struct flow_face) {
         .pixels = (const pix_t *)(bmp+1) + (bmp->height-size)/2,
         .stride = bmp->height, .size = size, .crop = (bmp->width-size)/2,
         .linear = card->linear, .top = card->edge[0].top,
         .top_delta = card->edge[1].top - card->edge[0].top,
-        .end_height = h1
+        .start_height = h0, .end_height = h1, .first = first, .end = end
     };
     if (reversed)
     {
         t = (1 << 30) - t;
         dt = -dt;
     }
+    face->t0 = t;
+    face->dt = dt;
     for (int x = first; x < end; x++, t = (uint32_t)t + dt)
     {
         int h = h0 + ((int64_t)(h1 - h0) * t >> 30);
+        int y0 = face->top + ((int64_t)face->top_delta * t >> 30);
         struct flow_column *col = &flow_columns[x];
-        if (h < col->height)
-            continue;
+        if (col->height)
+        {
+            flow_top[x] = MIN(flow_top[x], col->y0 >> 16);
+            flow_end[x] = MAX(flow_end[x], (col->y0 + col->height + 65535) >> 16);
+        }
+        col->y0 = y0;
         col->height = h;
         col->t = t;
         col->face = face;
@@ -3597,8 +3605,7 @@ static void flow_sample_column(const struct flow_column *col, int top, int end,
         x_weight = coord & 31;
     }
     const pix_t *src = face->pixels + (face->crop + u) * face->stride;
-    int y0 = face->top + ((int64_t)face->top_delta * t >> 30);
-    int y1 = y0 + col->height;
+    int y0 = col->y0, y1 = y0 + col->height;
     int first = MAX(top, (y0 + 65535) >> 16);
     int last = MIN(end, y1 >> 16);
     uint32_t d_num = (uint32_t)size << 20;
@@ -3622,7 +3629,7 @@ static inline uint32_t flow_mix(uint32_t a, uint32_t b, unsigned weight)
     return (a + (((b - a) * weight) >> 5)) & FLOW_COLOR_LANES;
 }
 
-static void flow_draw_linear(const struct flow_sample *sample, int src_stride,
+static __attribute__((noinline, optimize("O3"))) void flow_draw_linear(const struct flow_sample *sample, int src_stride,
                              pix_t *dst, int dst_stride, const struct pf_fade *ink)
 {
     /* Pad the endpoints to clamp the bilinear footprint to the square crop. */
@@ -3649,12 +3656,9 @@ static void flow_draw_linear(const struct flow_sample *sample, int src_stride,
     }
 }
 
-static inline void flow_draw_column(int x, int top, int end, pix_t *pixels,
-                                    int stride, const struct pf_fade *ink)
+static void flow_draw_span(const struct flow_column *col, int top, int end,
+                           pix_t *pixels, int stride, const struct pf_fade *ink)
 {
-    const struct flow_column *col = &flow_columns[x];
-    if (!col->height)
-        return;
     struct flow_sample sample;
     flow_sample_column(col, top, end, &sample);
     const pix_t *src = sample.src;
@@ -3690,6 +3694,37 @@ static inline void flow_draw_column(int x, int top, int end, pix_t *pixels,
     }
 }
 
+/* Draw exposed strips of earlier faces above and below the front face's
+ * opaque span. The order also composites fractional silhouette rows. */
+static void flow_draw_column(int x, int top, int end, pix_t *pixels,
+                             int stride, const struct pf_fade *ink)
+{
+    const struct flow_column *front = &flow_columns[x];
+    if (!front->height)
+        return;
+    const struct flow_face *face = front->face;
+    int y0 = front->y0;
+    int first = (y0 + 65535) >> 16;
+    int last = (y0 + front->height) >> 16;
+    if (flow_top[x] < first || flow_end[x] > last)
+    {
+        for (const struct flow_face *f = flow_faces; f < face; f++)
+        {
+            if (x < f->first || x >= f->end)
+                continue;
+            int t = f->t0 + (x - f->first) * f->dt;
+            int h = f->start_height + ((int64_t)(f->end_height - f->start_height) * t >> 30);
+            int y = f->top + ((int64_t)f->top_delta * t >> 30);
+            struct flow_column back = { y, h, t, f };
+            if ((y >> 16) < first && first > top)
+                flow_draw_span(&back, top, MIN(end, first), pixels, stride, ink);
+            if (((y + h + 65535) >> 16) > last && last < end)
+                flow_draw_span(&back, MAX(top, last), end, pixels, stride, ink);
+        }
+    }
+    flow_draw_span(front, top, end, pixels, stride, ink);
+}
+
 #define FLOW_STRIP_WIDTH 16
 static pix_t flow_strip[LCD_HEIGHT * FLOW_STRIP_WIDTH] CACHEALIGN_ATTR;
 
@@ -3722,10 +3757,16 @@ static void flow_paint(bool center, int spread, int clear_y, int clear_h)
 {
     uint32_t start = flow_stages ? USEC_TIMER : 0;
     for (int x = 0; x < LCD_WIDTH; x++)
+    {
         flow_columns[x].height = 0;
+        flow_top[x] = pf_height;
+        flow_end[x] = 0;
+    }
     for (int i = 0; i < flow_count; i++)
         if (center || flow_cards[i].id != center_index)
             flow_cover_columns(&flow_cards[i], i, spread);
+        else
+            flow_faces[i].end = 0;
     if (flow_stages)
     {
         uint32_t now = USEC_TIMER;
@@ -6674,7 +6715,16 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             if (drew_art)
             {
                 if (pf_state == pf_scrolling)
+                {
                     update_scroll_animation();
+                    /* Publish the complete framebuffer once on the final pose. */
+                    if (pf_state == pf_idle && !leaving)
+                    {
+                        full_flush_owed = true;
+                        drew_caption |= captioned_index != carousel_caption_index();
+                        captioned_index = carousel_caption_index();
+                    }
+                }
                 cover_rows(&art_y, &art_h);
                 art_h -= art_y;
                 if (art_h <= 0)     /* no slide has a bitmap yet: nothing to
@@ -6782,7 +6832,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 int top = caption_flush_top, end = caption_flush_end;
                 if (dirty_end <= top || dirty_top >= end)
                     ;
-                else if (dirty_top < top && end < dirty_end)
+                else if (dirty_top <= top && end <= dirty_end)
                 {
                     caption_flush_owed = false;
                     parts |= UI_PERF_CAPTION;

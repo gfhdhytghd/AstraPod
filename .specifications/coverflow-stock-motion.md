@@ -1148,3 +1148,46 @@ in most refreshes.
 At the default settings, time is measured in physical seconds. Split the interval at each accepted selection and integrate at most 1/60 s at a time. The carrier, hinge and depth states stay continuous across changes of target.
 
 For unit hinge `g` and depth state `b`, yaw is −πg/2, X = 27.776(i−p) + 73.344g and Z = 156 + 59.264b. The square has side 128, its center Y is −14.976, and the focal length is 156 px about (160,120). Evaluate the 31 albums centered on round(p), clipped to the library. Resolve XZ contacts in descending absolute yaw, breaking ties by increasing index. Limit the lift by the speed-dependent allowance before projection. Composite the nearest positive depth at each column.
+
+### 9.12 Stock algorithm
+
+The 3D carousel uses the slot, timing and projection constants in
+`apps-ipod/screens/covers/stock_motion.h`. Sections 9.9–9.11 describe
+earlier fitted models.
+
+| Quantity | Stock value |
+|---|---|
+| Viewport origin and focal length | (160, 120) px and 160 px |
+| Eye and projection | Eye at z = 160, scale = 160 / (160 − z) |
+| Cover | 70 × 70 world units, centred at y = −9 |
+| Selected slot | x = 0, z = 72.5, yaw = 0°, projected width = 128 px |
+| Side slot k ≥ 1 | x = ±(55 + 15(k−1)), z = 40, yaw = ±90° |
+| Visible band | Current centre satisfies abs(x) < 100 |
+| Retarget | Sample the current pose at input time, then interpolate to the new slot over 1000 ms |
+| Position and yaw | Both use 1 − (1 − t)⁵, with t clamped to [0, 1] |
+| Wheel | Four of 96 positions per revolution advance one album. Keep the signed remainder across reversals. Clamp selection at the ends. |
+
+A new outer cover inherits its neighbour's start pose and timer, with x
+offset by 15 units outwards. The precise stock insertion trigger is
+inferred. On entry, side covers start 100 units outwards and wait 100 ms
+per slot. The centre starts at (−43, −10, 72.5), yaw −9°, after 250 ms.
+The centre start pose lacks frame confirmation. The inferred leave path
+uses a 500 ms quintic ease-in, backdated by 250 + 100 × abs(k) ms. Side
+covers move 100 units outwards and the centre moves to (170, −9, 40),
+yaw +90°. The stock emulator comparisons cover scrolling. AstraPod omits
+the mirrored reflection and keeps its themed caption and album panel.
+
+On the Classic, the button driver delivers groups of four positions as
+detents in bits 24–30 of the scroll event. The carousel applies the full
+detent count once and ignores velocity. The driver discards the remainder
+when it posts an event, so the carousel cannot reproduce stock remainder
+carry or its initial gesture dead band from that event. Remote and simulator
+actions without a physical count advance one album.
+
+The renderer resolves depth at each screen column. Moving covers use nearest
+sampling. At eased progress ≥ 0.995 they switch to linear filtering. The
+headless host replay in `apps-ipod/screens/covers/tests/stock_replay.py`
+compares the projected edges with the reference model and with tracked
+markers in the stock emulator frames. The replay uses the stock driver's
+input filter and a 34 ms delivery offset for those captures. That offset
+does not enter the player code.

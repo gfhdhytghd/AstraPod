@@ -21,25 +21,6 @@
 #include "root_menu.h"          /* MENU_ATTACHED_USB */
 #include "widgets/color_picker.h"
 
-/* The settings each view mode owns are named for it and grouped together under
- * View Mode, and each is hidden while the other mode is selected -- a row that
- * does nothing is worse than a missing one, and the prefix says which mode a
- * row belongs to without having to switch back to find out.
- *
- * Scroll speed is shared: the 3D view scales its chase by it, and flat scales
- * its own durations by it in flat_duration(). */
-static int tilt_only_callback(int action,
-                              const struct menu_item_ex *this_item,
-                              struct gui_synclist *this_list)
-{
-    (void)this_item;
-    (void)this_list;
-    if (action == ACTION_REQUEST_MENUITEM
-        && global_settings.album_covers_view_mode == CAROUSEL_VIEW_FLAT)
-        return ACTION_EXIT_MENUITEM;
-    return action;
-}
-
 static int flat_only_callback(int action,
                               const struct menu_item_ex *this_item,
                               struct gui_synclist *this_list)
@@ -55,9 +36,7 @@ static int flat_only_callback(int action,
 MENUITEM_SETTING(album_covers_view_mode, &global_settings.album_covers_view_mode, NULL);
 MENUITEM_SETTING(album_covers_pile_fade, &global_settings.album_covers_pile_fade, flat_only_callback);
 MENUITEM_SETTING(album_covers_pile_offset, &global_settings.album_covers_pile_offset, flat_only_callback);
-MENUITEM_SETTING(album_covers_center_margin, &global_settings.album_covers_center_margin, tilt_only_callback);
-MENUITEM_SETTING(album_covers_slide_tuck, &global_settings.album_covers_slide_tuck, tilt_only_callback);
-MENUITEM_SETTING(album_covers_scroll_speed, &global_settings.album_covers_scroll_speed, NULL);
+MENUITEM_SETTING(album_covers_scroll_speed, &global_settings.album_covers_scroll_speed, flat_only_callback);
 MENUITEM_SETTING(album_covers_random_spin, &global_settings.album_covers_random_spin, NULL);
 MENUITEM_SETTING(album_covers_show_album_name, &global_settings.album_covers_show_album_name, NULL);
 /* Under Sort Same as Music the carousel's own three sort rows do nothing, so
@@ -215,9 +194,6 @@ MAKE_MENU(album_covers_filter_menu, ID2P(LANG_ARTWORK_FILTER), NULL, Icon_NOICON
             &album_covers_custom_color_item,                            \
             &album_covers_statusbar,                                    \
             &album_covers_view_mode,                                    \
-            /* Whichever mode is selected, its own settings follow it. */ \
-            &album_covers_center_margin,                                \
-            &album_covers_slide_tuck,                                   \
             &album_covers_pile_fade,                                    \
             &album_covers_pile_offset,                                  \
             &album_covers_filter_menu

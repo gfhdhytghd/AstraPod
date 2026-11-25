@@ -15,6 +15,7 @@
 #define STOCK_LEAVE_US 500000u
 /* The 200-unit band holds at most 14 covers at 15-unit spacing. */
 #define STOCK_MAX_VISIBLE 16
+#define STOCK_STARTS (2 * STOCK_MAX_VISIBLE)
 
 struct stock_pose { int32_t x, y, z, yaw; };
 struct stock_edge { int32_t x, top, bottom, depth; };
@@ -25,7 +26,7 @@ struct stock_flow {
     int count, selected, first, length;
     uint32_t start_us;
     enum stock_phase phase;
-    struct stock_pose start[STOCK_MAX_VISIBLE];
+    struct stock_pose start[STOCK_STARTS];
 };
 
 static inline int stock_abs(int n)
@@ -154,17 +155,28 @@ static inline int stock_first(const struct stock_flow *f, uint32_t now, int e)
 
 static inline void stock_snapshot(struct stock_flow *f, uint32_t now)
 {
-    struct stock_pose next[STOCK_MAX_VISIBLE];
+    struct stock_pose next[STOCK_STARTS];
     int e = stock_scroll_progress(f, now);
     int first = stock_first(f, now, e);
+    if (f->phase == STOCK_SCROLL && first > 0) {
+        --first;
+        /* Retain the target and its adjacent wall when input outruns the
+         * visible strip. Only these offscreen poses differ from translating a
+         * neighbour by one slot. The visible strip always has room. */
+        int left = f->selected > 0 ? f->selected - 1 : 0;
+        if (first > left) {
+            int extend = first - left;
+            first -= extend < STOCK_MAX_VISIBLE ? extend : STOCK_MAX_VISIBLE;
+        }
+    }
     int n = 0;
-    for (int a = first; a < f->count && n < STOCK_MAX_VISIBLE; ++a) {
+    for (int a = first; a < f->count && n < STOCK_STARTS; ++a) {
         if (f->phase != STOCK_SCROLL && n == f->length)
             break;
         struct stock_pose p = stock_current(f, a, now, e).pose;
-        if (f->phase == STOCK_SCROLL && p.x >= STOCK_BAND * STOCK_ONE && n)
-            break;
         next[n++] = p;
+        if (f->phase == STOCK_SCROLL && p.x >= STOCK_BAND * STOCK_ONE && a > f->selected)
+            break;
     }
     for (int i = 0; i < n; ++i)
         f->start[i] = next[i];

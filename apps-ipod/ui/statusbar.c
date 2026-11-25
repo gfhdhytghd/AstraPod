@@ -268,8 +268,10 @@ static unsigned int viewport_color(const struct ui_theme *theme, enum ui_color_r
 
 static bool refresh_status_colors(struct statusbar *bar)
 {
+    /* A status gradient replaces the cover tint. */
     bool adaptive = global_settings.status_cover_tint &&
-                    bar->theme.background[UI_BG_STATUS] == UI_BG_COVER_TINT;
+                    bar->theme.background[UI_BG_STATUS] == UI_BG_COVER_TINT &&
+                    !bar->theme.gradient[UI_GRADIENT_STATUS].stops;
     bool changed = bar->adaptive != adaptive;
     bar->adaptive = adaptive;
     if (!adaptive)

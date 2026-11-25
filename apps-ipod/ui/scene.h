@@ -14,7 +14,7 @@ struct ui_scene {
     int status_height, push_top, row_y, row_pitch, row_count;
     unsigned trace, dim_color, push_half_frames;
     bool target_front, capturing, automatic, vertical, root_entry;
-    bool staggered, rows_changed, reuse_target;
+    bool staggered, rows_changed, reuse_target, slide;
 };
 
 /* The UI thread owns a scene from capture through the end of its transition.
@@ -34,8 +34,10 @@ void ui_scene_cancel(struct ui_scene *scene);
 void ui_scene_discard(struct ui_scene *scene);
 void ui_scene_interrupt(void);
 void ui_scene_fade_out(void);
-/* Root-level screens hand their first painted frame to the action pump. */
-void ui_scene_enter(struct ui_scene *, const void *from, const void *to, bool push);
+/* Root-level screens hand their first painted frame to the action pump.
+ * full_screen marks a page that does not keep the menu chrome. */
+void ui_scene_enter(struct ui_scene *, const void *from, const void *to, bool push,
+                    bool full_screen);
 void ui_scene_boot(struct ui_scene *scene);
 /* A full-page picker retains its underlying page until dismissal. */
 void ui_scene_open_modal(struct ui_scene *scene, const char *route);

@@ -33,6 +33,7 @@ enum ui_font_role {
     UI_FONT_LYRICS_FOCUS,
     UI_FONT_LYRICS_BACKGROUND,
     UI_FONT_PANEL,
+    UI_FONT_STATUS_TITLE,
     UI_FONT_COUNT
 };
 
@@ -89,6 +90,57 @@ enum ui_bg_role { UI_BG_LIST, UI_BG_WPS, UI_BG_LYRICS, UI_BG_HANDOFF,
 enum ui_bg_kind { UI_BG_SOLID, UI_BG_BLURRED_COVER, UI_BG_COVER_SCRIM,
                   UI_BG_COVER_TINT };
 
+/* Optional gradients that replace a solid fill: top to bottom, except the
+ * scroll thumb, which is shaded left to right. */
+enum ui_gradient_role {
+    UI_GRADIENT_SELECTION, UI_GRADIENT_STATUS, UI_GRADIENT_PROGRESS,
+    UI_GRADIENT_PROGRESS_TRACK, UI_GRADIENT_SCROLLBAR, UI_GRADIENT_COUNT
+};
+
+/* Keyword tokens. Value 0 is each style's Scrim behaviour. */
+enum ui_style_role {
+    UI_STYLE_SELECTION, UI_STYLE_LIST_ICONS, UI_STYLE_ACCESSORY,
+    UI_STYLE_STATUS_CLOCK, UI_STYLE_STATUS_TITLE, UI_STYLE_PAGE_MOTION,
+    UI_STYLE_WPS_LAYOUT, UI_STYLE_SCROLLBAR, UI_STYLE_ART, UI_STYLE_COUNT
+};
+enum { UI_SELECTION_MARKER, UI_SELECTION_BAR };
+enum { UI_LIST_ICONS_AUTO, UI_LIST_ICONS_OFF };
+enum { UI_ACCESSORY_ALL, UI_ACCESSORY_SELECTED };
+enum { UI_STATUS_CLOCK_ON, UI_STATUS_CLOCK_OFF };
+enum { UI_STATUS_TITLE_LEFT, UI_STATUS_TITLE_CENTER };
+enum { UI_PAGE_MOTION_CASCADE, UI_PAGE_MOTION_SLIDE };
+enum { UI_WPS_LAYOUT_COVER, UI_WPS_LAYOUT_CLASSIC };
+enum { UI_SCROLLBAR_PLAIN, UI_SCROLLBAR_CLASSIC };
+enum { UI_ART_NONE, UI_ART_PLASTIC };
+
+/* Per-transition durations in 60 Hz frames; UI_MOTION_DEFAULT keeps the
+ * engine's own. */
+enum ui_motion_role {
+    UI_MOTION_PUSH, UI_MOTION_POP, UI_MOTION_LIST, UI_MOTION_SHEET_IN,
+    UI_MOTION_SHEET_OUT, UI_MOTION_COUNT
+};
+#define UI_MOTION_DEFAULT 0xffffu
+
+/* Easing of page transitions. */
+enum { UI_EASE_CUBIC, UI_EASE_QUAD, UI_EASE_QUINT, UI_EASE_SINE,
+       UI_EASE_LINEAR };
+
+enum ui_theme_builtin_id {
+    UI_THEME_SCRIM, UI_THEME_LIGHT, UI_THEME_CLASSIC, UI_THEME_PLASTIC,
+    UI_THEME_BUILTIN_COUNT
+};
+
+/* stops is 0 (no gradient), 2 (top and bottom) or 4 (a one-pixel top line,
+ * top and bottom of the body, a one-pixel bottom line). `rows`, when set,
+ * replaces the stops with `nrows` exact RGB888 rows, stretched through the
+ * body and keeping the first and last as the edge lines. */
+struct ui_theme_gradient {
+    uint32_t color[4];
+    uint8_t stops;
+    uint8_t nrows;
+    const uint32_t *rows;
+};
+
 enum ui_palette_source {
     UI_PALETTE_NONE, UI_PALETTE_DOMINANT, UI_PALETTE_ACCENT, UI_PALETTE_VIVID
 };
@@ -112,9 +164,19 @@ struct ui_theme {
     uint16_t metric[UI_METRIC_COUNT];
     uint8_t background[UI_BG_COUNT];
     uint16_t motion_scale;
+    struct ui_theme_gradient gradient[UI_GRADIENT_COUNT];
+    uint8_t style[UI_STYLE_COUNT];
+    uint16_t motion[UI_MOTION_COUNT];
+    uint8_t easing;
 };
 
-void ui_theme_builtin(struct ui_theme *theme, bool light);
+void ui_theme_builtin(struct ui_theme *theme, enum ui_theme_builtin_id id);
+/* The built-in theme's name, or NULL past the last. */
+const char *ui_theme_builtin_name(enum ui_theme_builtin_id id);
+/* Colour of a gradient at row y of a fill `height` rows tall, RGB888.
+ * A role without a gradient returns `fallback`. */
+uint32_t ui_theme_gradient_at(const struct ui_theme_gradient *gradient,
+                              int y, int height, uint32_t fallback);
 unsigned ui_theme_builtin_metric(enum ui_metric_role role);
 const char *ui_theme_builtin_font(enum ui_font_role role);
 

@@ -15,6 +15,8 @@ struct ui_tween {
     int from, to;
     unsigned frames;
     bool ease_in;
+    /* A UI_EASE_* curve from native_theme.h; zero is cubic. */
+    uint8_t easing;
 };
 
 /* The refresh period one frame lasts, in 1/256 microseconds: the panel's

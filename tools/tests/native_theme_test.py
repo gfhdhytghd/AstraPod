@@ -213,11 +213,36 @@ static void check_palette(void)
     assert(ui_theme_color(&theme, UI_COLOR_ACCENT, &palette) == 0xffffff);
 }
 
+/* Plastic's bars are Apple's rows: exact at their own height, and with the
+ * edge lines kept when a row is shorter. */
+static void check_plastic(void)
+{
+    struct ui_theme theme;
+    ui_theme_builtin(&theme, UI_THEME_PLASTIC);
+    assert(theme.style[UI_STYLE_ART] == UI_ART_PLASTIC);
+    const struct ui_theme_gradient *bar = &theme.gradient[UI_GRADIENT_SELECTION];
+    assert(ui_theme_gradient_at(bar, 0, 25, 0) == 0x96c5da);
+    assert(ui_theme_gradient_at(bar, 12, 25, 0) == 0x0484da);
+    assert(ui_theme_gradient_at(bar, 24, 25, 0) == 0x004386);
+    assert(ui_theme_gradient_at(bar, 1, 24, 0) == 0x09a4e1);
+    assert(ui_theme_gradient_at(bar, 22, 24, 0) == 0x0065d3);
+    assert(ui_theme_gradient_at(bar, 23, 24, 0) == 0x004386);
+    assert(ui_theme_gradient_at(&theme.gradient[UI_GRADIENT_STATUS], 9, 20,
+                                0) == 0xcfd0d0);
+
+    static const char file[] =
+        "podbox-theme=1\ngradient.status=000000,ffffff\nstyle.art=plastic\n";
+    assert(ui_theme_parse(&theme, file, sizeof(file) - 1));
+    assert(ui_theme_gradient_at(&theme.gradient[UI_GRADIENT_STATUS], 19, 20,
+                                0) == 0x5b5b5b);
+}
+
 int main(void)
 {
     check_builtins();
     check_parser();
     check_palette();
+    check_plastic();
     puts("PASS native theme defaults, overrides, atomic validation and palette bounds");
     return 0;
 }

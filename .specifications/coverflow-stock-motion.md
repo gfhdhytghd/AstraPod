@@ -1221,20 +1221,20 @@ live slot over the remaining time, with a minimum of 150 ms. With UI performance
 logging enabled, each C/D choice records the rectangle, reason and bitmap state
 in `/.rockbox/ui-perf.txt` under `cover-wps`.
 
-Playback controls slide in from the left during the 500 ms turn. Their
-leading edge reaches the cover rectangle as the cover lands. Over the next
-180 ms the native controls move to their normal positions over the stationary
-art. Both stages use quadratic ease-out. Return plays the control motion in
-reverse, clearing the artwork before its turn begins. The backdrop travels
-under the cover. The stationary slide starts after the flat landing frame is
-submitted. It advances by elapsed time, capped at 30 ms per submitted frame
-so a late LCD transfer cannot skip the slide. The playback page retains the
-landed cover pixels beneath the controls until it paints the selected track's
-own artwork, the track changes, or the page closes. The selected album supplies
-the cached blur before playback decoding. A late bitmap updates only the cover
-during the slide. A cache miss uses the theme background until
-playback can reveal its blur underneath the controls. Each transition frame
-updates the whole LCD.
+The carousel accepts SELECT or PLAY on key release. That action starts the
+500 ms cover turn and wall departure. All turn frames use the carousel
+background. Once the landing frame is submitted, the whole playback page
+slides in from x = −320 to x = 0 over 270 ms with quadratic ease-out.
+The Scrim background passes under the stationary cover and native labels,
+progress, and meter pass over it. Light has no artwork slot, so its opaque
+page progressively covers the stationary stock pose. The zero-offset frame
+uses the ordinary playback painter. MENU reverses the page translation
+before any covers move. The marquee clock resumes when playback takes over.
+
+Scrim keeps the projected cover pixels until the selected track's own image
+can be painted. A late decoder replaces only the artwork. The selected album
+supplies the cached blur. A missing blur uses the theme background until
+playback reveals the new blur. Each transition frame updates the whole LCD.
 
 MENU after playing a panel track retraces the 500 ms turn and wall motion,
 then restores the same panel and selected row. Its next MENU returns to the

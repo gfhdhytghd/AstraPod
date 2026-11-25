@@ -26,15 +26,10 @@ void native_wps_paint_handoff(const struct wps_state *state,
 /* The theme slot is available before the page opens. An empty rectangle
  * means no slot. True means the live page has confirmed the layout. */
 bool native_wps_art_layout(struct ui_rect *bounds);
-/* Actual last painted artwork, before the panel, text and meter overlays.
- * A NULL destination queries bounds only. Otherwise supply width * height
- * RGB565 pixels; the output is packed column-major, top to bottom. */
-bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major);
-/* Take ownership of the outgoing scene buffer and retain the landed cover. */
-void native_wps_keep_landing(int handle, const struct ui_rect *bounds);
+bool native_wps_has_art(void);
+/* Borrow the carousel's selected cover until native art or a different track arrives. */
+void native_wps_set_landing(void (*paint)(const struct ui_rect *clip));
 void native_wps_pick_up_art(void);
-void native_wps_paint_chrome(void);
-int native_wps_chrome_stop(void);
 void native_wps_paint_slide(int hidden, fb_data base);
 void native_wps_invalidate(void);
 void native_wps_close(void);

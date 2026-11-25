@@ -624,9 +624,9 @@ static long do_party_mode(long action)
 
 /* Album covers takes ownership of the display. True when the WPS
  * is to be left, for the screen in *go_to. */
-static bool show_album_covers(long *go_to, bool return_agents)
+static bool show_album_covers(long *go_to, bool return_agents, uint32_t action_us)
 {
-    carousel_wps_capture_return();
+    carousel_wps_capture_return(action_us);
     if (cover_nav_playing())
     {
         leave_playback();
@@ -789,7 +789,7 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
             agents_nav_take(nav);
             select_cover_source();
             long go_to;
-            if (show_album_covers(&go_to, return_agents)) return go_to;
+            if (show_album_covers(&go_to, return_agents, USEC_TIMER)) return go_to;
             restore = true;
         }
         if (!cider_wps_poll())
@@ -846,6 +846,7 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
         /* Poll PCM while the display is visible. Each retained node damages
          * only the region it actually changed. */
         button = get_action(CONTEXT_WPS|ALLOW_SOFTLOCK, lcd_active() ? 1 : HZ/5);
+        uint32_t action_us = USEC_TIMER;
 
 #ifdef HAVE_USB_PODLINK
         if (button == ACTION_NONE && cider_active())
@@ -907,7 +908,7 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
                     break;
                 if (act == HOTKEY_ALBUM_COVERS)
                 {
-                    if (show_album_covers(&go_to, return_agents)) return go_to;
+                    if (show_album_covers(&go_to, return_agents, action_us)) return go_to;
                     restore = true;
                     break;
                 }
@@ -1096,7 +1097,7 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
                                                                    : GO_TO_ALBUM_COVERS;
                 }
                 if (destination == GO_TO_ALBUM_COVERS || destination == GO_TO_CIDER)
-                    carousel_wps_capture_return();
+                    carousel_wps_capture_return(action_us);
                 leave_playback();
 #ifdef HAVE_USB_PODLINK
                 if (destination == GO_TO_CIDER)
@@ -1161,7 +1162,7 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
                     if (button == ACTION_AGENTS_REMOTE_COVERS || button == ACTION_AGENTS_COVERS)
                         select_cover_source();
                     long go_to;
-                    if (show_album_covers(&go_to, return_agents))
+                    if (show_album_covers(&go_to, return_agents, action_us))
                         return go_to;
                     restore = true;
                 }

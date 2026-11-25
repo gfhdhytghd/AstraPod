@@ -86,9 +86,8 @@ struct native_wps {
     long meter_due;
     unsigned motion_trace;
     bool volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
-    bool current_art_only, cover_backdrop, wait_for_blur;
-    int landing;
-    struct ui_rect landing_bounds;
+    bool current_art_only, cover_backdrop, wait_for_blur, labels_frozen;
+    void (*landing)(const struct ui_rect *clip);
     unsigned reveal_base;
     char cover_remote_key[65];
 };
@@ -102,8 +101,7 @@ static struct {
 static int art_slot = -1;
 static struct native_wps *wps;
 static volatile bool active, repaint;
-static struct ui_rect painted_art;
-static unsigned painted_generation;
+static bool painted_art;
 
 void native_wps_alloc(void)
 {
@@ -202,42 +200,22 @@ static void paint_background(const struct ui_view *view,
     lcd_set_viewport(previous);
 }
 
-/* The turn has already projected the centre artwork exactly into the slot.
- * Pack those LCD pixels into the spent scene buffer before the controls move. */
-void native_wps_keep_landing(int handle, const struct ui_rect *bounds)
+void native_wps_set_landing(void (*paint)(const struct ui_rect *clip))
 {
-    if (wps->landing > 0)
-        core_free(wps->landing);
-    wps->landing = handle;
-    wps->landing_bounds = *bounds;
-    fb_data *dst = core_get_data_pinned(handle);
-    const fb_data *src = (const fb_data *)lcd_framebuffer_default.fb_ptr +
-                         bounds->y * LCD_WIDTH + bounds->x;
-    for (int y = 0; y < bounds->height; y++)
-        memcpy(dst + y * bounds->width, src + y * LCD_WIDTH,
-               bounds->width * sizeof(*dst));
-    core_put_data_pinned(dst);
+    wps->landing = paint;
 }
 
 static void paint_landing(const struct ui_view_frame *frame)
 {
-    if (wps->landing <= 0)
-        return;
-    painted_art = wps->landing_bounds;
-    struct viewport viewport;
-    struct viewport *previous = paint_viewport(&viewport, frame, FONT_SYSFIXED);
-    fb_data *pixels = core_get_data_pinned(wps->landing);
-    lcd_bitmap_part(pixels, 0, 0, painted_art.width,
-                    painted_art.x - frame->clip.x, painted_art.y - frame->clip.y,
-                    painted_art.width, painted_art.height);
-    core_put_data_pinned(pixels);
-    lcd_set_viewport(previous);
+    painted_art = wps->landing != NULL;
+    if (painted_art)
+        wps->landing(&frame->clip);
 }
 
 static void paint_cover(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     (void)view;
-    painted_art = (struct ui_rect){0};
+    painted_art = false;
     if (wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM)
         return;
     if (wps->art_handle < 0 || !wps_art_pin(wps->art_handle, true))
@@ -255,8 +233,7 @@ static void paint_cover(const struct ui_view *view, const struct ui_view_frame *
         int height = MIN(frame->bounds.height, art->height);
         int x = frame->bounds.x + (frame->bounds.width - width) / 2 - frame->clip.x;
         int y = frame->bounds.y + (frame->bounds.height - height) / 2 - frame->clip.y;
-        painted_art = (struct ui_rect){x + frame->clip.x, y + frame->clip.y, width, height};
-        painted_generation = wps->art_generation;
+        painted_art = width > 0 && height > 0;
         /* Audio buffering returns RGB565 data, but its bitmap format field
          * describes the decoder, not the display primitive. */
         lcd_bitmap_part((const fb_data *)art->data, (art->width - width) / 2,
@@ -265,46 +242,15 @@ static void paint_cover(const struct ui_view *view, const struct ui_view_frame *
         lcd_set_viewport(previous);
     }
     wps_art_pin(wps->art_handle, false);
-    if (!painted_art.width)
+    if (!painted_art)
         paint_landing(frame);
-    else if (wps->landing > 0)
-        wps->landing = core_free(wps->landing);
+    else
+        wps->landing = NULL;
 }
 
-bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major)
+bool native_wps_has_art(void)
 {
-    if (!active || painted_art.width <= 0 || painted_art.height <= 0)
-        return false;
-    *bounds = painted_art;
-    if (!column_major)
-        return true;
-    if (wps->landing > 0)
-    {
-        const fb_data *pixels = core_get_data_pinned(wps->landing);
-        for (int x = 0; x < bounds->width; x++)
-            for (int y = 0; y < bounds->height; y++)
-                *column_major++ = pixels[y * bounds->width + x];
-        core_put_data_pinned((void *)pixels);
-        return true;
-    }
-    if (painted_generation != album_art_generation() ||
-        !wps_art_pin(wps->art_handle, true))
-        return false;
-
-    struct bitmap *art;
-    bool valid = wps_art_bitmap(wps->art_handle, &art) && art->data &&
-                 art->width >= painted_art.width && art->height >= painted_art.height;
-    if (valid)
-    {
-        const fb_data *src = (const fb_data *)art->data +
-            (art->height - bounds->height) / 2 * art->width +
-            (art->width - bounds->width) / 2;
-        for (int x = 0; x < bounds->width; x++)
-            for (int y = 0; y < bounds->height; y++)
-                *column_major++ = src[y * art->width + x];
-    }
-    wps_art_pin(wps->art_handle, false);
-    return valid;
+    return active && painted_art;
 }
 
 static void paint_panel(const struct ui_view *view, const struct ui_view_frame *frame)
@@ -479,73 +425,66 @@ bool native_wps_art_layout(struct ui_rect *bounds)
     return false;
 }
 
-/* Paint the retained layers below and above the artwork once, without
- * submitting or advancing the page clock. The caller restores the LCD buffer. */
-void native_wps_paint_chrome(void)
-{
-    struct ui_view *cover = &wps->view[WPS_COVER];
-    int opacity = cover->value[UI_OPACITY];
-    cover->value[UI_OPACITY] = 0;
-    ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
-    ui_page_paint(&wps->page);
-    cover->value[UI_OPACITY] = opacity;
-}
-
-/* Horizontal shift that puts the rightmost visible control at the artwork's
- * left edge. Themes without painted artwork use their configured cover slot. */
-int native_wps_chrome_stop(void)
-{
-    if (!active)
-        return LCD_WIDTH;
-    int left = view_bounds(WPS_COVER).x;
-    int right = 0;
-    struct ui_view *root = &wps->view[WPS_ROOT];
-    for (struct ui_view *v = root->first_child; v; v = v->next_sibling)
-    {
-        const int *p = v->value;
-        int y = p[UI_Y] + p[UI_OFFSET_Y];
-        if (v != &wps->view[WPS_COVER] && p[UI_OPACITY] && y < LCD_HEIGHT &&
-            y + p[UI_HEIGHT] > 0)
-            right = MAX(right, p[UI_X] + p[UI_OFFSET_X] + p[UI_WIDTH]);
-    }
-    return MAX(0, MIN(right, LCD_WIDTH) - left);
-}
-
-/* Translate the backdrop and control views. The artwork keeps its native
- * bounds. The full page is painted without advancing the playback UI clock. */
+/* The page slides under Scrim's stationary artwork and its controls pass
+ * over it. Light's opaque page covers the original scene from the left. */
 void native_wps_paint_slide(int hidden, fb_data base)
 {
-    if (rock_ui_raw())
+    if (!active || rock_ui_raw())
         return;
+    struct ui_view *root = &wps->view[WPS_ROOT];
+    struct ui_view *cover = &wps->view[WPS_COVER];
+    struct ui_rect screen = view_bounds(WPS_ROOT);
+    hidden = MIN(MAX(hidden, 0), LCD_WIDTH);
+    if (!hidden)
+    {
+        ui_page_invalidate(&wps->page, screen);
+        ui_page_paint(&wps->page);
+        return;
+    }
+
+    int width = LCD_WIDTH - hidden;
     struct viewport *previous = lcd_set_viewport(NULL);
     lcd_set_drawmode(DRMODE_SOLID);
-    int width = LCD_WIDTH - hidden;
     lcd_set_foreground(base);
     lcd_fillrect(width, 0, hidden, LCD_HEIGHT);
-    if (wps->background > 0)
+    if (wps->landing && wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM)
+    {
+        const struct ui_rect exposed = {width, 0, hidden, LCD_HEIGHT};
+        wps->landing(&exposed);
+    }
+    if (width && wps->background > 0)
     {
         fb_data *src = core_get_data_pinned(wps->background);
         lcd_bitmap_part(src, hidden, 0, LCD_WIDTH, 0, 0, width, LCD_HEIGHT);
         core_put_data_pinned(src);
         reveal_background(width, LCD_HEIGHT);
     }
-    else
+    else if (width)
     {
         lcd_set_foreground(wps->bg);
         lcd_fillrect(0, 0, width, LCD_HEIGHT);
     }
     lcd_set_viewport(previous);
 
-    struct ui_view *root = &wps->view[WPS_ROOT];
+    if (wps->theme.background[UI_BG_WPS] == UI_BG_COVER_SCRIM)
+    {
+        struct ui_rect slot = view_bounds(WPS_COVER);
+        struct ui_view_frame frame = { .bounds = slot, .clip = slot };
+        if (!width && wps->landing)
+            paint_landing(&frame);
+        else
+            paint_cover(cover, &frame);
+    }
+    if (!width)
+        return;
+
     root->ops = NULL;
-    for (struct ui_view *v = root->first_child; v; v = v->next_sibling)
-        if (v != &wps->view[WPS_COVER])
-            v->value[UI_OFFSET_X] -= hidden;
-    ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
+    cover->ops = NULL;
+    root->value[UI_OFFSET_X] -= hidden;
+    ui_page_invalidate(&wps->page, screen);
     ui_page_paint(&wps->page);
-    for (struct ui_view *v = root->first_child; v; v = v->next_sibling)
-        if (v != &wps->view[WPS_COVER])
-            v->value[UI_OFFSET_X] += hidden;
+    root->value[UI_OFFSET_X] += hidden;
+    cover->ops = &cover_ops;
     root->ops = &background_ops;
 }
 
@@ -657,6 +596,13 @@ static void refresh_progress(const struct wps_state *state, bool remote, uint32_
 
 static void refresh_labels(const struct wps_state *state, bool remote, uint32_t now)
 {
+    if (wps->labels_frozen)
+    {
+        uint32_t held = now - wps->progress.clock;
+        wps->title.scroll_started += held;
+        wps->artist.scroll_started += held;
+        wps->labels_frozen = false;
+    }
     char buf[MAX_PATH];
     const struct mp3entry *track = state->id3;
     const char *title = "";
@@ -744,7 +690,7 @@ static void refresh_art(void)
     unsigned palette_generation = album_palette_generation();
     unsigned art_generation = album_art_generation();
     int handle = album_art_current();
-    if (wps->current_art_only || wps->landing > 0)
+    if (wps->current_art_only || (wps->landing && wps->theme.background[UI_BG_WPS] == UI_BG_COVER_SCRIM))
     {
         /* An ordinary WPS retains the last cover during a track change.
          * A flip belongs to the newly selected track, including missing art. */
@@ -896,7 +842,7 @@ void native_wps_open(const struct wps_state *state)
     (void)state;
     if (wps_handle <= 0 || active)
         return;
-    painted_art = (struct ui_rect){0};
+    painted_art = false;
     wps = core_get_data_pinned(wps_handle);
     memset(wps, 0, sizeof(*wps));
     ui_theme_snapshot(&wps->theme);
@@ -952,7 +898,7 @@ void native_wps_render(const struct wps_state *state, bool submit)
     struct cider_status source = {0};
     if (remote)
         cider_status(&source);
-    if (wps->cover_backdrop || wps->wait_for_blur || wps->landing > 0)
+    if (wps->cover_backdrop || wps->wait_for_blur || wps->landing)
     {
         bool same = remote == wps->progress.remote;
         if (same && state->id3 && *state->id3->path && *wps->progress.path)
@@ -968,8 +914,7 @@ void native_wps_render(const struct wps_state *state, bool submit)
 #endif
         if (!same)
         {
-            if (wps->landing > 0)
-                wps->landing = core_free(wps->landing);
+            wps->landing = NULL;
             wps->current_art_only = wps->cover_backdrop = wps->wait_for_blur = false;
             wps->background = -1;
             wps->blur_generation = (unsigned)-1;
@@ -1018,6 +963,7 @@ void native_wps_paint_handoff(const struct wps_state *state,
             sizeof(wps->cover_remote_key));
     wps->current_art_only = true;
     native_wps_render(state, false);
+    wps->labels_frozen = true;
     if (wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM ||
         blur_handle <= 0)
         return;
@@ -1050,8 +996,7 @@ void native_wps_close(void)
     if (!active)
         return;
     active = false;
-    if (wps->landing > 0)
-        wps->landing = core_free(wps->landing);
+    wps->landing = NULL;
     ui_perf_end(wps->motion_trace);
     ui_page_cancel_tracks(&wps->page);
     if (wps->title.font >= 0)

@@ -230,7 +230,7 @@ bool carousel_wps_pending(void);
 bool carousel_wps_present_pending(void);
 struct wps_state;
 void carousel_wps_present(const struct wps_state *state);
-void carousel_wps_capture_return(void);
+void carousel_wps_capture_return(uint32_t action_us);
 void carousel_wps_begin(void);
 void carousel_wps_end(bool back);
 int carousel_wps_back(void);

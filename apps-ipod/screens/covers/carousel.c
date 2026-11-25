@@ -451,6 +451,8 @@ static int pf_vp_y;             /* viewport y-offset (status bar height) */
 static struct viewport pf_vp;   /* PF rendering viewport (below status bar) */
 static bool pf_show_statusbar;  /* Cover Flow never shows the status bar */
 static struct ui_scene pf_scene;
+/* Home's album colours and theme when pf_scene was taken of it. */
+static unsigned pf_scene_palette, pf_scene_theme;
 static bool pf_wps_entry;
 static bool flat_view(void);
 static bool pf_shown, pf_entry_prepared, cover_resume_dirty;
@@ -473,7 +475,19 @@ void carousel_prepare_transition(void)
     ui_scene_discard(&pf_scene);
     memset(&pf_scene, 0, sizeof(pf_scene));
     ui_scene_capture_modal(&pf_scene);
+    pf_scene_palette = album_palette_generation();
+    pf_scene_theme = ui_theme_generation();
     pf_entry_prepared = true;
+}
+
+/* Whether Home has changed since pf_scene was taken of it, as it does when
+ * another album starts playing. Home is then drawn afresh, never shown from
+ * the old picture first. */
+static bool pf_scene_stale(void)
+{
+    return album_palette_pending() ||
+           pf_scene_palette != album_palette_generation() ||
+           pf_scene_theme != ui_theme_generation();
 }
 
 void carousel_cancel_transition(void)
@@ -7745,6 +7759,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 #endif
             if (flat_view() || !pf_motion_scale || dark || leaving)
                 return leave_result;
+            if (pf_scene_stale())
+                ui_scene_discard(&pf_scene);
             fade_start = USEC_TIMER;
             leave_from = opacity;
             fade = pf_scene.backdrop_handle > 0 ? &pf_scene : NULL;
@@ -7962,6 +7978,8 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     else
     {
         close_album_panel();
+        if (pf_scene_stale())
+            ui_scene_discard(&pf_scene);
         if (pf_scene.backdrop_handle > 0 && flat_view())
             ui_scene_close_modal(&pf_scene, pf_shown, "covers-down");
         else if (pf_scene.backdrop_handle > 0 && pf_shown &&

@@ -61,7 +61,7 @@ struct blur_pixels {
 
 static struct {
     struct album_blur_source source;
-    unsigned hash, recent, users;
+    unsigned hash, recent, users, art_generation;
     long built;
     bool ready;
     uint8_t wps_lum;
@@ -454,14 +454,39 @@ static unsigned panel_scrim(const fb_data *panel, const struct img_filter *wps)
     return alpha;
 }
 
-static bool window_stale(unsigned revision)
+/* Whether a window cover being built has left the window. A cover that is
+ * still in it, at whatever place, is finished: the wheel often lands on the
+ * neighbour being built. */
+static bool unwanted(const struct album_blur_source *source, unsigned revision)
 {
     if (!revision)
         return false;
     mutex_lock(&cache_lock);
-    bool stale = revision != window.revision;
+    bool wanted = false;
+    for (unsigned i = 0; !wanted && i < window.count; i++)
+        wanted = same_source(source, &window.source[i]);
     mutex_unlock(&cache_lock);
-    return stale;
+    return !wanted;
+}
+
+/* A window cover whose blur is held and whose thumbnail has not changed
+ * since: its pixels are not read again to prove it. */
+static unsigned held(const struct album_blur_source *source, unsigned wps_lum,
+                     unsigned art_generation)
+{
+    unsigned hash = 0;
+    mutex_lock(&cache_lock);
+    int slot = source->local ? find_slot(source) : -1;
+    if (slot >= 0 && slots[slot].wps_lum == wps_lum &&
+        slots[slot].art_generation == art_generation)
+    {
+        slots[slot].recent = ++use_clock;
+        hash = slots[slot].hash;
+    }
+    mutex_unlock(&cache_lock);
+    if (hash)
+        note(NOTE_RAM, source, slot, 0);
+    return hash;
 }
 
 static unsigned prepare(const struct album_blur_source *source, int art,
@@ -475,7 +500,10 @@ static unsigned prepare(const struct album_blur_source *source, int art,
             *missing = true;
         return 0;
     }
-    unsigned result = 0;
+    unsigned art_generation = art_cache_generation();
+    unsigned result = revision ? held(source, wps_lum, art_generation) : 0;
+    if (result)
+        return result;
     uint32_t start = USEC_TIMER;
     fb_data *scratch = core_get_data_pinned(scratch_handle);
     int width = 0, height = 0;
@@ -498,7 +526,7 @@ static unsigned prepare(const struct album_blur_source *source, int art,
 #endif
             width = height = local_pixels(source->local, scratch);
     }
-    if (window_stale(revision) || usb_host_wants_storage())
+    if (unwanted(source, revision) || usb_host_wants_storage())
     {
         note(NOTE_STALE, source, -1, 0);
         goto done;
@@ -571,7 +599,7 @@ static unsigned prepare(const struct album_blur_source *source, int art,
         img_filter_adapt(&filter, &entry->cached.levels, wps_lum);
         entry->cached.panel_alpha = panel_scrim(entry->panel, &filter);
         entry->cached.wps_lum = wps_lum;
-        if (!window_stale(revision) && !usb_host_wants_storage())
+        if (!usb_host_wants_storage())
             write_record(path, &entry->cached);
     }
     unsigned scrim = entry->cached.panel_alpha;
@@ -585,15 +613,10 @@ static unsigned prepare(const struct album_blur_source *source, int art,
     panel_perf_record(PP_BLUR, USEC_TIMER - start, disk, hash);
     core_put_data_pinned(cache);
     mutex_lock(&cache_lock);
-    if (revision && revision != window.revision)
-    {
-        mutex_unlock(&cache_lock);
-        note(NOTE_STALE, source, slot, 1);
-        goto done;
-    }
     slots[slot].built = current_tick;
     slots[slot].source = *source;
     slots[slot].hash = hash;
+    slots[slot].art_generation = art_generation;
     slots[slot].wps_lum = wps_lum;
     slots[slot].recent = ++use_clock;
     slots[slot].tint_rows = 0;

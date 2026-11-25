@@ -9,6 +9,9 @@
  * /.rockbox/ui-perf.txt on exit. Route names are short string literals. */
 void ui_perf_init(void);
 bool ui_perf_enabled(void);
+struct ui_rect;
+void ui_perf_wps_target(char route, const struct ui_rect *rect,
+                        const char *reason, const char *bitmap);
 unsigned ui_perf_begin(const char *route);
 /* Ancillary animation. Foreground motion can claim the recorder immediately
  * and discard an overlapping passive trace without writing on its hot path. */

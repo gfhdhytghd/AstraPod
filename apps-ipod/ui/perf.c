@@ -1,6 +1,7 @@
 /* Optional frame-time capture for native motion. GPL version 2+. */
 #include "config.h"
 #include "perf.h"
+#include "retained.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -94,6 +95,22 @@ void ui_perf_init(void)
 bool ui_perf_enabled(void)
 {
     return enabled;
+}
+
+void ui_perf_wps_target(char route, const struct ui_rect *rect,
+                        const char *reason, const char *bitmap)
+{
+    if (!enabled)
+        return;
+    int fd = logfile_open(PERF_LOG);
+    if (fd >= 0)
+    {
+        logfile_printf(fd, "cover-wps route=%c source=%s rect=%d,%d,%d,%d "
+                       "reason=%s bitmap=%s\n", route,
+                       rect->width ? "layout" : "fallback", rect->x, rect->y,
+                       rect->width, rect->height, reason, bitmap);
+        logfile_close(fd);
+    }
 }
 
 static unsigned begin_capture(const char *route, bool passive)

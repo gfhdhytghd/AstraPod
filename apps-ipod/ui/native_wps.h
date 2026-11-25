@@ -22,10 +22,14 @@ void native_wps_render(const struct wps_state *state, bool submit);
 /* Paint the first Cover Flow handoff frame without submitting. Pending
  * artwork gets at most 150 ms while the preceding screen stays visible. */
 void native_wps_paint_handoff(struct wps_state *state);
+/* The theme slot is available before the page opens. An empty rectangle
+ * means no slot. True means the live page has confirmed the layout. */
+bool native_wps_art_layout(struct ui_rect *bounds);
 /* Actual last painted artwork, before the panel, text and meter overlays.
  * A NULL destination queries bounds only. Otherwise supply width * height
  * RGB565 pixels; the output is packed column-major, top to bottom. */
 bool native_wps_art_frame(struct ui_rect *bounds, fb_data *column_major);
+bool native_wps_paint_ready_art(void);
 void native_wps_paint_chrome(void);
 int native_wps_chrome_stop(void);
 void native_wps_paint_slide(int hidden, fb_data base);

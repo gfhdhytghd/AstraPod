@@ -1212,10 +1212,14 @@ Album and playback transitions use the same camera. The selected cover
 turns 180° to the panel in 500 ms and returns in 1000 ms. Its back face
 uses a snapshot of the themed panel. The live panel takes over at rest.
 Transitions from the panel or the cover to Now Playing use a 500 ms
-quadratic ease-out. When the active playback theme paints a cover, its
-actual LCD rectangle and source crop determine the face-on endpoint.
-The inverse projection keeps the longer side at 70 world units. A theme
-without visible art uses the stock playback pose.
+quadratic ease-out. The playback theme's artwork slot determines the face-on
+endpoint, even when the track has no artwork or decoding is still in progress.
+The inverse projection keeps the longer side at 70 world units. Themes without
+an artwork slot use the stock pose. If the live layout differs from the
+configured slot after the turn begins, the destination moves smoothly to the
+live slot over the remaining time, with a minimum of 150 ms. With UI performance
+logging enabled, each C/D choice records the rectangle, reason and bitmap state
+in `/.rockbox/ui-perf.txt` under `cover-wps`.
 
 Playback controls slide in from the left during the 500 ms turn. Their
 leading edge reaches the cover rectangle as the cover lands. Over the next

@@ -375,6 +375,38 @@ static struct ui_rect view_bounds(enum wps_view id)
     return (struct ui_rect) { v[UI_X], v[UI_Y], v[UI_WIDTH], v[UI_HEIGHT] };
 }
 
+static struct ui_rect theme_cover_bounds(const struct ui_theme *theme)
+{
+    int side = MIN(theme->metric[UI_METRIC_COVER_SIZE],
+                   MIN(LCD_WIDTH, LCD_HEIGHT));
+    return (struct ui_rect){LCD_WIDTH - side, (LCD_HEIGHT - side) / 2,
+                            side, side};
+}
+
+bool native_wps_art_layout(struct ui_rect *bounds)
+{
+    if (active)
+    {
+        if (wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM)
+        {
+            *bounds = (struct ui_rect){0};
+            return true;
+        }
+        *bounds = view_bounds(WPS_COVER);
+        if (bounds->width > 0 && bounds->height > 0)
+            return true;
+        *bounds = theme_cover_bounds(&wps->theme);
+    }
+    else
+    {
+        struct ui_theme theme;
+        ui_theme_snapshot(&theme);
+        *bounds = theme.background[UI_BG_WPS] == UI_BG_COVER_SCRIM ?
+                  theme_cover_bounds(&theme) : (struct ui_rect){0};
+    }
+    return false;
+}
+
 /* Paint the retained layers below and above the artwork once, without
  * submitting or advancing the page clock. The caller restores the LCD buffer. */
 void native_wps_paint_chrome(void)
@@ -393,7 +425,7 @@ int native_wps_chrome_stop(void)
 {
     if (!active)
         return LCD_WIDTH;
-    int left = painted_art.width ? painted_art.x : view_bounds(WPS_COVER).x;
+    int left = view_bounds(WPS_COVER).x;
     int right = 0;
     struct ui_view *root = &wps->view[WPS_ROOT];
     for (struct ui_view *v = root->first_child; v; v = v->next_sibling)
@@ -657,6 +689,23 @@ static void refresh_art(void)
     }
 }
 
+/* A decode may finish while the carousel is turning. Paint its native
+ * endpoint off-screen as soon as the selected track has a bitmap. */
+bool native_wps_paint_ready_art(void)
+{
+    if (!active || rock_ui_raw())
+        return false;
+    int art = cider_active() ? album_art_current() :
+                               playback_track_aa_hid(art_slot);
+    if (art < 0)
+        return false;
+    wps->current_art_only = true;
+    refresh_art();
+    ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
+    ui_page_paint(&wps->page);
+    return painted_art.width > 0;
+}
+
 static void refresh_volume(const struct cider_status *source, bool remote, uint32_t now)
 {
     bool visible = volume_changed_within(now, ui_frame_clock(VOLUME_HOLD_FRAMES));
@@ -697,11 +746,10 @@ static void refresh_volume(const struct cider_status *source, bool remote, uint3
 static void setup_page(void)
 {
     const uint16_t *m = wps->theme.metric;
-    int cover = MIN(m[UI_METRIC_COVER_SIZE], MIN(LCD_WIDTH, LCD_HEIGHT));
     wps->peak_height = m[UI_METRIC_WPS_METER_PEAK_HEIGHT];
     const struct ui_rect bounds[WPS_VIEW_COUNT] = {
         [WPS_ROOT] = { 0, 0, LCD_WIDTH, LCD_HEIGHT },
-        [WPS_COVER] = { LCD_WIDTH - cover, (LCD_HEIGHT - cover) / 2, cover, cover },
+        [WPS_COVER] = theme_cover_bounds(&wps->theme),
         [WPS_PANEL] = { 0, m[UI_METRIC_WPS_PANEL_TOP], m[UI_METRIC_WPS_PROGRESS_WIDTH],
                         MAX(0, m[UI_METRIC_WPS_PROGRESS_Y] - m[UI_METRIC_WPS_PANEL_TOP]) },
         [WPS_TITLE] = { m[UI_METRIC_WPS_TITLE_X], m[UI_METRIC_WPS_TITLE_Y],

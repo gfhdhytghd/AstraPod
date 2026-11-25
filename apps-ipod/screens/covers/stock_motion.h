@@ -415,6 +415,29 @@ static inline int32_t stock_lerp(int32_t a, int32_t b, int e)
     return ((int64_t)a * (STOCK_ONE - e) + (int64_t)b * e + STOCK_ONE / 2) >> 16;
 }
 
+static inline struct stock_pose stock_pose_lerp(struct stock_pose a,
+                                                struct stock_pose b, int e)
+{
+    return (struct stock_pose){
+        stock_lerp(a.x, b.x, e),
+        stock_lerp(a.y, b.y, e),
+        stock_lerp(a.z, b.z, e),
+        stock_lerp(a.yaw, b.yaw, e),
+        stock_lerp(a.width_delta, b.width_delta, e),
+        stock_lerp(a.height_delta, b.height_delta, e)
+    };
+}
+
+/* Move the destination itself with zero slope at both ends. The cover
+ * continues along its existing turn when the measured layout arrives. */
+static inline int stock_target_progress(uint32_t elapsed, uint32_t duration)
+{
+    if (elapsed >= duration)
+        return STOCK_ONE;
+    int t = (uint64_t)elapsed * STOCK_ONE / duration;
+    return ((int64_t)t * t * (3 * STOCK_ONE - 2 * t) + (1LL << 31)) >> 32;
+}
+
 static inline struct stock_pose stock_flip_pose(const struct stock_flip *f,
                                                 uint32_t now)
 {
@@ -433,14 +456,7 @@ static inline struct stock_pose stock_flip_pose(const struct stock_flip *f,
     } else {
         e = stock_progress(elapsed, f->duration, false);
     }
-    return (struct stock_pose){
-        stock_lerp(f->start.x, f->target.x, e),
-        stock_lerp(f->start.y, f->target.y, e),
-        stock_lerp(f->start.z, f->target.z, e),
-        stock_lerp(f->start.yaw, f->target.yaw, e),
-        stock_lerp(f->start.width_delta, f->target.width_delta, e),
-        stock_lerp(f->start.height_delta, f->target.height_delta, e)
-    };
+    return stock_pose_lerp(f->start, f->target, e);
 }
 
 static inline bool stock_back_face(struct stock_pose pose)

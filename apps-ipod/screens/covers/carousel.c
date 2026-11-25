@@ -6405,6 +6405,9 @@ static struct {
     struct stock_flow walls;
     int count, album, screen, chrome;
     int chrome_stop;
+    struct ui_rect slot;
+    bool layout_ready;
+    const char *bitmap_state;
     bool screen_has_art, chrome_staged;
     pix_t bg;
     bool pending, from_panel, returning;
@@ -6469,25 +6472,37 @@ static void keep_playback_cover(int album)
         (struct playback_texture){album, handle, side, side};
 }
 
+static struct stock_pose playback_target(struct ui_rect slot)
+{
+    struct stock_pose pose;
+    if (stock_wps_pose(slot.x, slot.y, slot.width, slot.height, &pose))
+        return pose;
+    return stock_playing_pose();
+}
+
 static void capture_playback_frame(void)
 {
     drop_playback_bitmap(&playback_scene.art.handle);
     drop_playback_bitmap(&playback_scene.chrome);
     drop_playback_bitmap(&playback_scene.screen);
-    playback_scene.playing = stock_playing_pose();
+    playback_scene.layout_ready = native_wps_art_layout(&playback_scene.slot);
+    playback_scene.playing = playback_target(playback_scene.slot);
     struct ui_rect r;
     playback_scene.chrome_stop = native_wps_chrome_stop();
     playback_scene.chrome_staged = false;
     playback_scene.screen_has_art = native_wps_art_frame(&r, NULL);
+    playback_scene.bitmap_state = "not-painted";
     if (playback_scene.screen_has_art)
     {
+        playback_scene.bitmap_state = "no-buffer";
         int art = core_alloc_free_space(r.width * r.height * sizeof(pix_t));
         if (art > 0)
         {
             pix_t *dst = core_get_data_pinned(art);
             bool valid = native_wps_art_frame(&r, dst);
             core_put_data_pinned(dst);
-            if (valid && stock_wps_pose(r.x, r.y, r.width, r.height, &playback_scene.playing))
+            playback_scene.bitmap_state = valid ? "ready" : "unavailable";
+            if (valid)
             {
                 playback_scene.art = (struct playback_texture){0, art, r.width, r.height};
             }
@@ -6613,6 +6628,15 @@ static void slide_playback_controls(bool returning)
     uint32_t start = USEC_TIMER, now = start;
     for (;;)
     {
+        if (!returning && playback_scene.slot.width &&
+            !playback_scene.screen_has_art && native_wps_paint_ready_art())
+        {
+            pix_t *dst = core_get_data_pinned(playback_scene.screen);
+            memcpy(dst, lcd_framebuffer_default.fb_ptr,
+                   LCD_WIDTH * LCD_HEIGHT * sizeof(*dst));
+            core_put_data_pinned(dst);
+            playback_scene.screen_has_art = true;
+        }
         unsigned elapsed = MIN(now - start, PLAYBACK_SLIDE_US);
         unsigned time = returning ? elapsed : PLAYBACK_SLIDE_US - elapsed;
         unsigned t = time * 1024 / PLAYBACK_SLIDE_US;
@@ -6646,6 +6670,11 @@ void carousel_wps_present(void)
 {
     playback_scene.pending = false;
     capture_playback_frame();
+    char route = playback_scene.from_panel ? 'C' : 'D';
+    const char *reason = !playback_scene.slot.width ? "theme-no-art-slot" :
+        playback_scene.layout_ready ? "page-slot" : "configured-slot";
+    ui_perf_wps_target(route, &playback_scene.slot, reason,
+                       playback_scene.bitmap_state);
     if (playback_scene.screen <= 0 || !lcd_active())
     {
         drop_playback_bitmap(&playback_scene.art.handle);
@@ -6659,13 +6688,44 @@ void carousel_wps_present(void)
     uint32_t start = USEC_TIMER, now = start;
     stock_flip_start(&flip, playback_scene.from_panel ? STOCK_PANEL_TO_PLAYING :
                      STOCK_COVER_TO_PLAYING, playback_scene.centre, start);
-    flip.target = playback_scene.playing;
+    struct stock_pose initial = playback_scene.playing;
+    flip.target = initial;
+    uint32_t blend_start = 0, blend_us = 0;
+    int initial_stop = playback_scene.chrome_stop, final_stop = initial_stop;
+    bool changed_slot = false;
     playback_scene.walls.start_us = start;
     cpu_boost(true);
     for (;;)
     {
+        if (!playback_scene.layout_ready && native_wps_active())
+        {
+            struct ui_rect measured;
+            playback_scene.layout_ready = native_wps_art_layout(&measured);
+            if (playback_scene.layout_ready)
+            {
+                changed_slot = memcmp(&measured, &playback_scene.slot,
+                                      sizeof(measured)) != 0;
+                playback_scene.slot = measured;
+                playback_scene.playing = playback_target(measured);
+                final_stop = native_wps_chrome_stop();
+                if (changed_slot || final_stop != initial_stop)
+                {
+                    uint32_t remaining = flip.duration -
+                                         MIN(now - start, flip.duration);
+                    blend_start = now;
+                    blend_us = MAX(remaining, 150000u);
+                }
+            }
+        }
+        if (blend_us)
+        {
+            int e = stock_target_progress(now - blend_start, blend_us);
+            flip.target = stock_pose_lerp(initial, playback_scene.playing, e);
+            playback_scene.chrome_stop = stock_lerp(initial_stop, final_stop, e);
+        }
         paint_playback_row(&playback_scene.walls, stock_flip_pose(&flip, now), now);
-        bool landed = stock_flip_done(&flip, now);
+        bool landed = stock_flip_done(&flip, now) &&
+                      (!blend_us || now - blend_start >= blend_us);
         lcd_update();
         if (landed || !lcd_active())
             break;
@@ -6676,6 +6736,10 @@ void carousel_wps_present(void)
     restore_playback_pixels();
     lcd_update();
     cpu_boost(false);
+    if (changed_slot)
+        ui_perf_wps_target(route, &playback_scene.slot,
+                           playback_scene.slot.width ? "late-page-slot" :
+                           "late-page-no-slot", playback_scene.bitmap_state);
     drop_playback_bitmap(&playback_scene.art.handle);
     drop_playback_bitmap(&playback_scene.chrome);
     drop_playback_bitmap(&playback_scene.screen);

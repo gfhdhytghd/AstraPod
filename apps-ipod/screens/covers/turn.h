@@ -21,6 +21,7 @@ struct turn_row {
     int count, target, margin_delta;
     int64_t p;
     int32_t age, hold, weight, shock, bank_shock;
+    int32_t previous_gap;
     int32_t carrier_rate; /* Q24 reciprocal seconds */
     int64_t carrier_offset; /* Q16 items */
     unsigned stamp;
@@ -196,6 +197,17 @@ static void turn_target(struct turn_row *r, int target)
      * The interrupted part uses an offset proportional to the distance at
      * acceptance. Both speed laws decrease with the remaining distance. */
     int32_t gap = r->age;
+    /* Blend two wheel intervals through the hold boundary. History fades
+     * over 1/128 second at either end of its half-second validity. */
+    int32_t history = r->previous_gap;
+    if (history && gap > r->hold) {
+        int32_t edge = turn_min(turn_min(history, gap - r->hold),
+                                TURN_ONE/2 - turn_max(gap, history));
+        int32_t confidence = turn_min(TURN_ONE, turn_max(0, edge) * 128);
+        int32_t forecast = turn_max(r->hold + TURN_WINDOW, (gap + history)/2);
+        gap += turn_mul(confidence, forecast - gap);
+    }
+    r->previous_gap = r->age;
     int32_t rate;
     if (gap) {
         int32_t rec = turn_integral(gap, r->hold);
@@ -375,164 +387,121 @@ struct turn_segment {
 
 #define TURN_CLEARANCE 84 /* .00128 world unit in Q16 */
 
-/* The interval of Z+s*X contains the entire face. Separating two such
- * intervals on any one axis suffices to separate the rigid faces in XZ. */
-static inline __attribute__((always_inline)) int32_t turn_axis_x(int32_t x, int slope_q2)
-{
-    if (slope_q2 == 1 || slope_q2 == -1)
-        return (x / 4) * slope_q2;
-    if (slope_q2 == 2 || slope_q2 == -2)
-        return (x / 2) * (slope_q2 / 2);
-    return x * (slope_q2 / 4);
-}
+/* Q24 quarter-turns: acos(cos(pi*u/2)^2) / (pi/2). The two opening cards
+ * have complementary horizontal half-widths and fit inside one stock arm. */
+static const int32_t turn_aperture[129] = {
+    0, 185361, 370709, 556029, 741306, 926528, 1111680, 1296748,
+    1481717, 1666575, 1851306, 2035896, 2220330, 2404596, 2588677, 2772559,
+    2956228, 3139668, 3322865, 3505804, 3688469, 3870844, 4052915, 4234666,
+    4416081, 4597143, 4777837, 4958147, 5138054, 5317544, 5496598, 5675200,
+    5853331, 6030975, 6208112, 6384726, 6560797, 6736306, 6911235, 7085564,
+    7259273, 7432342, 7604751, 7776479, 7947505, 8117808, 8287366, 8456157,
+    8624158, 8791347, 8957699, 9123192, 9287802, 9451503, 9614271, 9776081,
+    9936906, 10096720, 10255497, 10413209, 10569828, 10725327, 10879677, 11032848,
+    11184811, 11335535, 11484991, 11633147, 11779971, 11925431, 12069495, 12212129,
+    12353300, 12492974, 12631116, 12767691, 12902663, 13035997, 13167656, 13297603,
+    13425801, 13552212, 13676799, 13799522, 13920343, 14039223, 14156123, 14271003,
+    14383824, 14494544, 14603125, 14709525, 14813706, 14915625, 15015244, 15112521,
+    15207417, 15299892, 15389906, 15477419, 15562394, 15644791, 15724571, 15801699,
+    15876136, 15947846, 16016794, 16082946, 16146267, 16206725, 16264288, 16318925,
+    16370608, 16419307, 16464996, 16507650, 16547244, 16583757, 16617166, 16647454,
+    16674601, 16698593, 16719414, 16737054, 16751501, 16762746, 16770783, 16775608,
+    16777216,
+};
 
-static inline __attribute__((always_inline)) int32_t turn_axis_gap(const struct turn_segment *front,
-                             const struct turn_segment *back, int slope_q2)
-{
-    int32_t a0 = front->z[0] + turn_axis_x(front->x[0], slope_q2);
-    int32_t a1 = front->z[1] + turn_axis_x(front->x[1], slope_q2);
-    int32_t b0 = back->z[0] + turn_axis_x(back->x[0], slope_q2);
-    int32_t b1 = back->z[1] + turn_axis_x(back->x[1], slope_q2);
-    return turn_max(a0, a1) - turn_min(b0, b1) + TURN_CLEARANCE;
-}
+#define TURN_PITCH 1820328 /* 0.217 S in Q16 world coordinates */
+#define TURN_ARM 4806672 /* 0.573 S */
+#define TURN_CONTACT_DIAMETER 838864 /* 0.10 S, rounded up */
 
-static int32_t turn_depth_gap(const struct turn_segment *front,
-                              const struct turn_segment *back,
-                              int32_t near_z, int32_t lift)
+static void turn_fit_side(const int32_t half[], int count, int direction,
+                          const int32_t wanted[], int32_t fitted[])
 {
-    int32_t gap = turn_max(front->z[0], front->z[1]) - near_z + TURN_CLEARANCE;
-    if (gap <= lift)
-        return gap;
-    int32_t dx = turn_max(front->x[0] - back->x[1], back->x[0] - front->x[1]);
-    if (dx >= 0) {
-        /* Reduce the lift continuously across open space. The extreme slope
-         * minimizes the interval gap when the two X ranges are disjoint. */
-        gap -= 8 * dx;
-        if (gap > lift) {
-            gap = turn_min(gap, back->x[0] >= front->x[1]
-                                ? turn_axis_gap(front, back, 32)
-                                : turn_axis_gap(front, back, -32));
+    int first = direction > 0 ? 0 : count - 1;
+    int32_t far_edge = INT32_MIN / 2;
+    for (int j = 0; j < count; j++) {
+        int i = first + direction * j;
+        int prev = i - direction;
+        int32_t x = direction * wanted[i];
+        if (j >= 1) {
+            /* Only the outer tenth of both half-widths can overlap. */
+            int32_t gap = half[i] + half[prev] - turn_min(half[i], half[prev]) / 10;
+            x = turn_max(x, direction * fitted[prev] + gap + TURN_CLEARANCE);
         }
-    } else {
-        /* Each fixed slope becomes a shift on ARM. */
-#define TURN_TRY(s) do { \
-            gap = turn_min(gap, turn_axis_gap(front, back, s)); \
-            if (gap <= lift) return gap; \
-        } while (0)
-        TURN_TRY(-1);  TURN_TRY(1);
-        TURN_TRY(-2);  TURN_TRY(2);
-        TURN_TRY(-4);  TURN_TRY(4);
-        TURN_TRY(-8);  TURN_TRY(8);
-        TURN_TRY(-16); TURN_TRY(16);
-        TURN_TRY(-32); TURN_TRY(32);
-#undef TURN_TRY
-    }
-    return gap;
-}
-
-static void turn_separate_depth(struct turn_segment seg[TURN_CARDS],
-                                int count, int32_t local_p)
-{
-    int32_t prefix_right[TURN_CARDS], suffix_left[TURN_CARDS];
-    int32_t rightmost = INT32_MIN, leftmost = INT32_MAX;
-    for (int n = 0; n < count; n++) {
-        rightmost = turn_max(rightmost, seg[n].x[1]);
-        prefix_right[n] = rightmost;
-    }
-    for (int n = count-1; n >= 0; n--) {
-        leftmost = turn_min(leftmost, seg[n].x[0]);
-        suffix_left[n] = leftmost;
-    }
-    /* Visit faces nearest the carrier first. Equal distances choose the lower ID. */
-    int lo = (local_p+32767) >> 16, hi = lo;
-    int32_t peak = turn_max(seg[lo].z[0], seg[lo].z[1]);
-    while (lo || hi+1 < count) {
-        bool left = lo && (hi+1 == count || ((lo+hi) << 15) >= local_p);
-        int n = left ? lo-1 : hi+1;
-        struct turn_segment *b = &seg[n];
-        int32_t near_z = turn_min(b->z[0], b->z[1]);
-        int32_t limit = peak - near_z + TURN_CLEARANCE;
-        int32_t lift = 0;
-        int step = left ? 1 : -1;
-        for (int j = left ? lo : hi; j >= lo && j <= hi; j += step) {
-            /* The extreme axis separates by at least eight times the X gap. */
-            int32_t bound = left ? suffix_left[j] - b->x[1] : b->x[0] - prefix_right[j];
-            if (limit-lift <= 8*turn_max(0, bound))
-                break;
-            const struct turn_segment *a = &seg[j];
-            int32_t gap = turn_depth_gap(a, b, near_z, lift);
-            if (gap <= lift)
-                continue;
-            int32_t midpoint = turn_abs(((j+n) << 15) - local_p);
-            /* X already separates the pair in this interval. Fade its depth
-             * constraint to zero where the two faces exchange priority. */
-            if (midpoint < 32768)
-                gap = ((int64_t)gap * midpoint) >> 15;
-            lift = turn_max(lift, gap);
+        if (j >= 2) {
+            /* A disk touching three cards must span two non-neighbours.
+             * Keep their intervals over one disk diameter apart, even at 90°. */
+            int older = prev - direction;
+            far_edge = turn_max(far_edge, direction * fitted[older] + half[older]);
+            x = turn_max(x, far_edge + half[i] + TURN_CONTACT_DIAMETER + 16);
         }
-        b->z[0] += lift;
-        b->z[1] += lift;
-        peak = turn_max(peak, turn_max(b->z[0], b->z[1]));
-        if (left)
-            lo--;
-        else
-            hi++;
+        fitted[i] = direction * x;
     }
 }
 
-static int turn_segments(const struct turn_row *r,
-                         struct turn_segment seg[TURN_CARDS], int *first)
+static int turn_segments(const struct turn_row *r, struct turn_segment seg[TURN_CARDS],
+                         int *first)
 {
     int center = turn_center(r);
-    *first = turn_max(0, center-TURN_RADIUS);
-    int count = turn_min(r->count-1, center+TURN_RADIUS) - *first + 1;
-    if (count < 1)
+    *first = turn_max(0, center - TURN_RADIUS);
+    int count = turn_min(r->count - 1, center + TURN_RADIUS) - *first + 1;
+    if (count <= 0)
         return 0;
-    int32_t local_p = r->p - ((int64_t)*first << 16);
-    int carrier = r->p >> 16;
-    int32_t shift = 0, anchor = 0;
-    for (int n = 0; n < count; n++) {
-        int i = *first+n;
-        const struct turn_hinge *h = &r->slot[i % TURN_RING].hinge;
-        int32_t angle = turn_abs(h->g);
-        int32_t half_x = (turn_lookup(turn_sine, TURN_ONE-angle) + 2) >> 2;
-        int32_t half_z = (turn_lookup(turn_sine, angle) + 2) >> 2;
-        if (h->g > 0)
-            half_z = -half_z;
-        int32_t d = n * 65536 - local_p;
-        int32_t x = (((int64_t)d * 1820328) >> 16)
-                    + turn_mul(h->g, 4806672 + r->margin_delta * 65536);
+
+    int32_t fan[TURN_CARDS], half[TURN_CARDS], track[TURN_CARDS], wanted[TURN_CARDS];
+    int32_t low[TURN_CARDS], high[TURN_CARDS], left[TURN_CARDS], right[TURN_CARDS];
+    int32_t arm = TURN_ARM + r->margin_delta * 65536;
+    int32_t reach = turn_max(TURN_ARM, arm);
+    int32_t bank = (r->far[0].g + r->far[1].g) / 2;
+    int32_t local_p = r->p - (int64_t)*first * 65536;
+    for (int i = 0; i < count; i++) {
+        int32_t d = i * 65536 - local_p;
+        int32_t phase = turn_min(TURN_ONE, turn_max(-TURN_ONE, 256*d + bank));
+        int32_t angle = turn_lookup(turn_aperture, turn_abs(phase));
+        fan[i] = phase < 0 ? -angle : angle;
+        int32_t native = r->slot[(*first+i) % TURN_RING].hinge.g;
+        /* Certify the widest pose of the whole yaw interpolation. */
+        int32_t least = (fan[i] < 0) == (native < 0) ? turn_min(angle, turn_abs(native)) : 0;
+        half[i] = (turn_lookup(turn_sine, TURN_ONE - least) + 2) >> 2;
+        track[i] = (int64_t)d * TURN_PITCH >> 16;
+        wanted[i] = track[i] + turn_mul(native, arm);
+        low[i] = turn_max(track[i] - reach, wanted[i] - TURN_PITCH);
+        high[i] = turn_min(track[i] + reach, wanted[i] + TURN_PITCH);
+    }
+
+    turn_fit_side(half, count, 1, low, left);
+    /* Recover native yaw continuously as two world units of slack open. */
+    int32_t room = 2 * 65536;
+    for (int i = 0; i < count; i++)
+        room = turn_min(room, high[i] - left[i]);
+    int32_t restore = turn_max(0, room) * 128;
+    for (int i = 0; i < count; i++) {
+        const struct turn_hinge *h = &r->slot[(*first+i) % TURN_RING].hinge;
+        int32_t yaw = fan[i] + turn_mul(h->g - fan[i], restore);
+        int32_t a = turn_abs(yaw);
+        int32_t hx = (turn_lookup(turn_sine, TURN_ONE - a) + 2) >> 2;
+        int32_t hz = (turn_lookup(turn_sine, a) + 2) >> 2;
         int32_t z = (156 << 16) + turn_mul(h->b, 3883926);
-        int32_t left = x - half_x, right = x + half_x;
-        int32_t z0 = z - half_z, z1 = z + half_z;
-        int32_t previous = shift;
-        /* Clear X fully within half an album of a front-order exchange.
-         * Taper over the next album so contact starts before the edges meet. */
-        int mirror = (local_p >> 15) - n;
-        int end = turn_min(n, mirror+4);
-        for (int j = turn_max(0, mirror-2); j < end; j++) {
-            int32_t dx = seg[j].x[1] + TURN_CLEARANCE - left - previous;
-            if (dx <= 0)
-                continue;
-            int32_t t = turn_abs(((n+j) << 15) - local_p);
-            if (t >= 98304)
-                continue;
-            if (t > 32768)
-                dx = ((int64_t)dx * (98304-t)) >> 16;
-            shift = turn_max(shift, previous+dx);
-        }
-        seg[n] = (struct turn_segment){ { left+shift, right+shift }, { z0, z1 } };
-        /* Anchor the chain at fractional p as the carrier passes an index. */
-        if (i == carrier)
-            anchor = shift;
-        if (i == carrier+1)
-            anchor = previous + (((int64_t)(shift-previous) * (r->p & 65535)) >> 16);
+        if (yaw > 0)
+            hz = -hz;
+        seg[i] = (struct turn_segment){{-hx, hx}, {z - hz, z + hz}};
+        half[i] = hx;
+        low[i] = track[i] - reach;
+        high[i] = track[i] + reach;
     }
-    for (int n = 0; n < count; n++) {
-        seg[n].x[0] -= anchor;
-        seg[n].x[1] -= anchor;
+
+    /* Both directional fits satisfy the same linear spacing constraints.
+     * Their midpoint shares each correction and preserves feasible native X. */
+    turn_fit_side(half, count, 1, low, left);
+    turn_fit_side(half, count, -1, high, right);
+    for (int i = 0; i < count; i++)
+        wanted[i] = turn_max(left[i], turn_min(right[i], wanted[i]));
+    turn_fit_side(half, count, 1, wanted, left);
+    turn_fit_side(half, count, -1, wanted, right);
+    for (int i = 0; i < count; i++) {
+        int32_t x = (left[i] + right[i]) / 2;
+        seg[i].x[0] += x;
+        seg[i].x[1] += x;
     }
-    turn_separate_depth(seg, count, local_p);
     return count;
 }
 

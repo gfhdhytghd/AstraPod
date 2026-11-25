@@ -506,6 +506,12 @@ void carousel_wps_begin(void)
 {
     if (flat_view())
         ui_scene_show_modal(&wps_handover.sheet, "covers-wps-up");
+    else if (wps_handover.panel_open)
+    {
+        /* A failed local play returns to the panel before WPS starts. */
+        close_album_panel();
+        wps_handover.panel_open = false;
+    }
 }
 
 int carousel_wps_back(void)
@@ -523,14 +529,8 @@ void carousel_wps_end(bool back)
         if (flat_view())
             wps_handover.restored_pixels =
                 ui_scene_close_modal(&wps_handover.sheet, true, "covers-wps-down");
-        else if (wps_handover.panel_open)
-            wps_handover.restored_pixels = ui_scene_restore_modal(&wps_handover.sheet);
         else
-        {
-            ui_scene_discard(&wps_handover.sheet);
-            ui_scene_capture_modal(&wps_handover.sheet);
             pf_wps_entry = true;
-        }
         return;
     }
     if (wps_handover.model)
@@ -3091,12 +3091,6 @@ static void render_flip_face(int angle, int width, int height,
         sh = bmp->height;
         src = (const pix_t *)(bmp + 1);
         stride = sh;
-        if (!flat_view())
-        {
-            int size = MIN(sw, sh);
-            src += (sw - size) / 2 * stride + (sh - size) / 2;
-            sw = sh = size;
-        }
     }
     if (sw <= 0 || sh <= 0)
         return;
@@ -3791,6 +3785,50 @@ static inline void flow_copy_strip(pix_t *dst, int dst_stride, const pix_t *src,
 #endif
 }
 
+/* The uncommitted strip and the framebuffer are cache-line aligned. */
+static bool flow_row_equal(const pix_t *strip, const pix_t *frame)
+{
+    typedef uint32_t pixel_pair __attribute__((may_alias));
+    const pixel_pair *a = (const pixel_pair *)strip;
+    const pixel_pair *b = (const pixel_pair *)frame;
+#pragma GCC unroll 8
+    for (int i = 0; i < FLOW_STRIP_WIDTH / 2; i++)
+        if (a[i] != b[i])
+            return false;
+    return true;
+}
+
+struct flow_damage { int top, end; };
+static struct flow_damage *flow_damage;
+
+/* Compare before writeback, including background exposed by moving artwork. */
+static void flow_write_strip(pix_t *frame, const pix_t *strip, int y, int rows)
+{
+    if (flow_damage)
+    {
+        while (rows && y < flow_damage->top && flow_row_equal(strip, frame))
+        {
+            y++;
+            rows--;
+            strip += FLOW_STRIP_WIDTH;
+            frame += BUFFER_WIDTH;
+        }
+        if (!rows)
+            return;
+        int end = y + rows;
+        while (end > flow_damage->end && end > y &&
+               flow_row_equal(strip + (end-y-1) * FLOW_STRIP_WIDTH,
+                              frame + (end-y-1) * BUFFER_WIDTH))
+            end--;
+        if (end == y)
+            return;
+        flow_damage->top = MIN(flow_damage->top, y);
+        flow_damage->end = MAX(flow_damage->end, end);
+        rows = end - y;
+    }
+    flow_copy_strip(frame, BUFFER_WIDTH, strip, FLOW_STRIP_WIDTH, rows);
+}
+
 static void flow_paint(bool center, int spread, int clear_y, int clear_h)
 {
     uint32_t start = flow_stages ? USEC_TIMER : 0;
@@ -3840,8 +3878,7 @@ static void flow_paint(bool center, int spread, int clear_y, int clear_h)
             for (int col = 0; col < FLOW_STRIP_WIDTH; col++)
                 flow_draw_column(x + col, top, end, flow_strip + col,
                                  FLOW_STRIP_WIDTH, ink);
-            flow_copy_strip(frame + clear_y * BUFFER_WIDTH + x,
-                            BUFFER_WIDTH, strip, FLOW_STRIP_WIDTH, clear_h);
+            flow_write_strip(frame + clear_y * BUFFER_WIDTH + x, strip, clear_y, clear_h);
         }
     }
     else
@@ -3852,16 +3889,6 @@ static void flow_paint(bool center, int spread, int clear_y, int clear_h)
         flow_stages[UI_COVER_CLEAR] += clear_us;
         flow_stages[UI_COVER_BLIT] += (uint32_t)USEC_TIMER - start - clear_us;
     }
-}
-
-static void flow_render_spread(bool center, int spread)
-{
-    flow_paint(center, spread, 0, 0);
-}
-
-static void coverflow_render(bool center)
-{
-    flow_render_spread(center, 0);
 }
 
 /* The rows the covers will disturb this frame: the ones they can reach now,
@@ -4634,6 +4661,9 @@ static struct album_panel {
     uint32_t scroll_clock;
     unsigned scroll_frames;
     int from, to, via, position;
+    struct stock_flip flip;
+    int back_handle;
+    bool back_ready;
     unsigned first, second, sampled, trace;
     /* due is the next flip or list scroll frame's deadline. */
     uint32_t clock, opened, due;
@@ -4706,6 +4736,8 @@ static void close_album_panel(void)
     if (!panel.live)
         return;
     ui_perf_end(panel.trace);
+    if (panel.back_handle > 0)
+        core_free(panel.back_handle);
     panel_drop_pages();
     panel_cache_hold_fonts(false);
     memset(&panel, 0, sizeof(panel));
@@ -4722,6 +4754,8 @@ static bool open_album_panel(int selected, int top)
 {
     if (!model->panel_request || !request_panel(center_index, &panel.request))
         return false;
+    if (!flat_view())
+        panel.back_handle = core_alloc_free_space(256 * 256 * sizeof(pix_t));
     panel.opened = USEC_TIMER;
     caption_artist.valid = false;
     panel_cache_hold_fonts(true);
@@ -4761,6 +4795,24 @@ static int flip_position(unsigned frame)
 
 static void flip_to(bool open)
 {
+    if (!flat_view())
+    {
+        if (panel.moving && panel.to == (open ? FLIP_OPEN : 0))
+            return;
+        uint32_t now = USEC_TIMER;
+        struct stock_pose current = panel.moving ? stock_flip_pose(&panel.flip, now) :
+            stock_current(&flow_row, center_index, now, stock_scroll_progress(&flow_row, now)).pose;
+        ui_perf_end(panel.trace);
+        stock_flip_start(&panel.flip, open ? STOCK_TO_BACK : STOCK_TO_FRONT, current, now);
+        panel.clock = panel.due = now;
+        panel.to = open ? FLIP_OPEN : 0;
+        panel.moving = pf_motion_scale && panel.back_handle > 0;
+        panel.position = panel.moving ? FLIP_MID : panel.to;
+        panel.back_ready = false;
+        panel.dirty = true;
+        panel.trace = panel.moving ? ui_perf_begin(open ? "cover-flip-open" : "cover-flip-close") : 0;
+        return;
+    }
     if (panel.moving)
     {
         panel.position = flip_position(ui_clock_frame((uint32_t)USEC_TIMER - panel.clock));
@@ -5549,15 +5601,110 @@ static void panel_repaint_marquee(void)
     lcd_update_rect(view.x + 1, rows.y + y, view.width - 2, PANEL_PITCH);
 }
 /* Neighbours stay visible around the turning panel. */
+/* Match the live panel's inset at BACK. Rows below the LCD have the same
+ * theme background as the list. The texture is column-major like cover art. */
+static void prepare_stock_back(void)
+{
+    if (panel.back_handle <= 0)
+        return;
+    paint_album_panel();
+    pix_t *back = core_get_data_pinned(panel.back_handle);
+    pix_t bg = ui_theme_rgb565(UI_COLOR_BACKGROUND);
+    memset16(back, bg, 256 * 256);
+    int side = MAX(256, MAX(ALBUM_PANEL_WIDTH, ALBUM_PANEL_HEIGHT));
+    int inset_x = (side - ALBUM_PANEL_WIDTH) / 2;
+    int inset_y = fbound(0, ALBUM_PANEL_Y - 27, side - ALBUM_PANEL_HEIGHT);
+    for (int x = 0; x < 256; x++)
+    {
+        int sx = x * side / 256 - inset_x;
+        if ((unsigned)sx >= ALBUM_PANEL_WIDTH)
+            continue;
+        for (int y = 0; y < 256; y++)
+        {
+            int sy = y * side / 256 - inset_y;
+            if ((unsigned)sy < ALBUM_PANEL_HEIGHT)
+                back[x * 256 + y] = LCD_BUF[(ALBUM_PANEL_Y + sy) * BUFFER_WIDTH +
+                                             ALBUM_PANEL_X + sx];
+        }
+    }
+    core_put_data_pinned(back);
+    panel.back_ready = true;
+}
+
+/* Map a column-major square onto the two projected vertical edges.
+ * The panel reads left to right when the back faces the viewer. */
+static void stock_draw_quad(pix_t *dst, struct stock_pose pose, const pix_t *texture,
+                            int size, int stride)
+{
+    struct stock_edge edge[2];
+    stock_project(pose, edge);
+    bool reverse = edge[0].x > edge[1].x;
+    struct stock_edge left = edge[reverse], right = edge[!reverse];
+    int width = right.x - left.x;
+    int first = MAX(0, (left.x + 32767) >> 16);
+    int end = MIN(LCD_WIDTH, (right.x + 32767) >> 16);
+    if (first >= end)
+        return;
+    int hl = left.bottom - left.top, hr = right.bottom - right.top;
+    bool mirror = reverse != stock_back_face(pose);
+    for (int x = first; x < end; x++)
+    {
+        int t = ((int64_t)((x << 16) + 32768 - left.x) << 16) / width;
+        int h = hl + ((int64_t)(hr - hl) * t >> 16);
+        int top = left.top + ((int64_t)(right.top - left.top) * t >> 16);
+        int y = MAX(0, (top + 32767) >> 16);
+        int bottom = MIN(LCD_HEIGHT, (top + h + 32767) >> 16);
+        if (bottom <= y)
+            continue;
+        int u = ((int64_t)hr * t * size / h) >> 16;
+        u = MIN(size - 1, u);
+        if (mirror)
+            u = size - 1 - u;
+        int dy = ((int64_t)size << (16 + PFREAL_SHIFT)) / h;
+        int v = ((int64_t)((y << 16) + 32768 - top) * dy) >> 16;
+        struct pf_col col = {texture + u * stride, dst + y * BUFFER_WIDTH + x,
+                             v, dy, bottom - y};
+        draw_run(&col, col.n, BUFFER_WIDTH);
+    }
+}
+
+static void render_stock_flip(struct stock_pose pose, int album, uint32_t now,
+                              bool show_label)
+{
+    coverflow_place(now);
+    bool visible = pose.x > -STOCK_BAND * STOCK_ONE && pose.x < STOCK_BAND * STOCK_ONE;
+    bool back = stock_back_face(pose);
+    if (visible && back && !panel.back_ready)
+        prepare_stock_back();
+    flow_paint(false, 0, 0, pf_height);
+    if (visible && back && panel.back_handle > 0)
+    {
+        const pix_t *tex = core_get_data_pinned(panel.back_handle);
+        stock_draw_quad(LCD_BUF, pose, tex, 256, 256);
+        core_put_data_pinned((void *)tex);
+    }
+    else if (visible && !back)
+    {
+        struct slide_data slide = {.slide_index = album, .cached_slot = -1};
+        const struct dim *bmp = surface(&slide);
+        if (bmp)
+        {
+            int size = MIN(bmp->width, bmp->height);
+            const pix_t *crop = (const pix_t *)(bmp + 1) +
+                (bmp->width - size) / 2 * bmp->height + (bmp->height - size) / 2;
+            stock_draw_quad(LCD_BUF, pose, crop, size, bmp->height);
+        }
+    }
+    if (show_label)
+        model->draw_text();
+}
+
 static void NO_INLINE render_album_flip(int position, pix_t color)
 {
     pf_clear_band(0, pf_height);
     if (!position)
     {
-        if (flat_view())
-            flat_render(true);
-        else
-            coverflow_render(true);
+        flat_render(true);
         model->draw_text();
         return;
     }
@@ -5565,21 +5712,13 @@ static void NO_INLINE render_album_flip(int position, pix_t color)
     int w = cover ? cover->width : DISPLAY_WIDTH;
     int h = cover ? cover->height : DISPLAY_WIDTH;
     int cy = pf_vp_y + pf_draw_y_shift + slide_voff(h, center_slide.cy) + h / 2;
-    if (!flat_view())
-    {
-        w = h = DISPLAY_WIDTH;
-        cy = 104;
-    }
     bool back = position >= FLIP_MID;
     const struct ui_tween ease = {.from = 0, .to = FLIP_MID,
                                   .frames = FLIP_MID, .ease_in = !back};
     int turn = ui_tween_sample(&ease, back ? position - FLIP_MID : position);
     int angle = back ? -256 + 256 * turn / FLIP_MID : 256 * turn / FLIP_MID;
     pf_neighbor_light = 256 - 128 * MIN(position, FLIP_MID) / FLIP_MID;
-    if (flat_view())
-        flat_render(false);
-    else
-        flow_render_spread(false, back ? 48 * turn : 0);
+    flat_render(false);
     pf_neighbor_light = 256;
     if (back)
     {
@@ -5605,7 +5744,23 @@ static void draw_album_flip(void)
     pix_t color = ui_theme_rgb565(UI_COLOR_MODAL_BG);
     buf_ctx_lock();
     uint32_t render_start = panel.trace ? USEC_TIMER : 0;
-    render_album_flip(panel.position, color);
+    if (flat_view())
+        render_album_flip(panel.position, color);
+    else if (panel.position == FLIP_OPEN || !panel.position)
+    {
+        uint32_t now = USEC_TIMER;
+        if (flow_row.phase != STOCK_REST && !stock_animating(&flow_row, now))
+            stock_init(&flow_row, number_of_slides, center_index, now, false);
+        coverflow_place(now);
+        flow_paint(!panel.position, 0, 0, pf_height);
+        if (!panel.position)
+            model->draw_text();
+    }
+    else
+    {
+        uint32_t now = USEC_TIMER;
+        render_stock_flip(stock_flip_pose(&panel.flip, now), center_index, now, panel.to == 0);
+    }
     uint32_t render = panel.trace ? (uint32_t)USEC_TIMER - render_start : 0;
     buf_ctx_unlock();
     bool opened = false;
@@ -5647,20 +5802,32 @@ static void step_album_flip(void)
     bool done = false;
     bool scrolling = panel.scroll_frames && panel.position == FLIP_OPEN &&
                      panel.to == FLIP_OPEN;
-    bool animating = panel.moving || scrolling;
+    bool walls = !flat_view() && stock_animating(&flow_row, USEC_TIMER);
+    bool animating = panel.moving || scrolling || walls;
     bool due = frame_due(panel.due);
+    if (walls && due)
+        panel.dirty = true;
     if (panel.moving && due)
     {
-        unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER - panel.clock);
-        if (frame != panel.sampled)
+        if (!flat_view())
         {
-            panel.sampled = frame;
-            panel.position = flip_position(frame);
+            done = stock_flip_done(&panel.flip, USEC_TIMER);
+            panel.position = done ? panel.to : FLIP_MID;
             panel.dirty = true;
         }
-        done = frame >= panel.first + panel.second;
+        else
+        {
+            unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER - panel.clock);
+            if (frame != panel.sampled)
+            {
+                panel.sampled = frame;
+                panel.position = flip_position(frame);
+                panel.dirty = true;
+            }
+            done = frame >= panel.first + panel.second;
+        }
     }
-    if (panel.position == FLIP_OPEN && panel.to == FLIP_OPEN)
+    if (panel.to == FLIP_OPEN && (panel.position == FLIP_OPEN || !flat_view()))
     {
         unsigned blur_generation = album_blur_generation();
         if (blur_generation != panel.blur_generation)
@@ -5689,7 +5856,7 @@ static void step_album_flip(void)
     }
     if (animating && due)
     {
-        uint32_t start = panel.moving ? panel.clock : panel.scroll_clock;
+        uint32_t start = panel.moving || walls ? panel.clock : panel.scroll_clock;
         panel.due = ui_pace_next(&panel_pace, start);
     }
     if (draw)
@@ -5929,7 +6096,7 @@ static int album_panel_action(int button)
             if (!row)
                 break;
             int ret = model->panel_play(center_index, panel.selected, &panel.request, row);
-            if (ret != CAROUSEL_PLAY_PENDING)
+            if (!flat_view() || ret != CAROUSEL_PLAY_PENDING)
                 return ret;
             panel.play_pending = true;
             panel.dirty = true;
@@ -6167,6 +6334,71 @@ static bool flow_present_fade(struct ui_scene *source, unsigned opacity)
     return ui_scene_present_fade(source, opacity, fade_top, fade_end);
 }
 
+/* Wait for a remote acknowledgement while the selected cover turns. If the
+ * provider rejects playback, leave the original album or panel available. */
+static int stock_to_wps(int album, bool from_panel, int destination)
+{
+    if (destination != CAROUSEL_PLAY_ALBUM && destination != GO_TO_WPS &&
+        destination != CAROUSEL_PLAY_PENDING)
+        return destination;
+    uint32_t start = USEC_TIMER, due = start;
+    struct stock_flip flip;
+    struct stock_pose current = stock_current(&flow_row, album, start,
+                                  stock_scroll_progress(&flow_row, start)).pose;
+    stock_flip_start(&flip, from_panel ? STOCK_PANEL_TO_PLAYING :
+                                        STOCK_COVER_TO_PLAYING, current, start);
+    move_center(album);
+    stock_leave_to_playing(&flow_row, start);
+    if (from_panel)
+        panel.back_ready = false;
+    bool finished = !pf_motion_scale || !lcd_active();
+    if (!finished && !pf_boosted)
+    {
+        pf_boosted = true;
+        cpu_boost(true);
+    }
+    for (;;)
+    {
+        if (destination == CAROUSEL_PLAY_PENDING)
+        {
+            int status = model->panel_play_status();
+            if (status < 0)
+            {
+                set_current_slide(album);
+                if (from_panel)
+                {
+                    panel.play_failed = true;
+                    panel.dirty = true;
+                }
+                return CAROUSEL_MENU_STAY;
+            }
+            if (status > 0)
+                destination = GO_TO_WPS;
+        }
+        if (!finished && frame_due(due))
+        {
+            uint32_t now = USEC_TIMER;
+            lcd_set_viewport(&pf_vp);
+            lcd_set_background(pf_bg_color);
+            lcd_set_foreground(pf_fg_color);
+            lcd_set_drawmode(DRMODE_FG);
+            buf_ctx_lock();
+            render_stock_flip(stock_flip_pose(&flip, now), album, now, false);
+            buf_ctx_unlock();
+            lcd_update();
+            finished = stock_flip_done(&flip, now);
+            due = ui_pace_next(&flow_pace, start);
+        }
+        if (finished && destination != CAROUSEL_PLAY_PENDING)
+            return destination;
+        int action = get_custom_action(CONTEXT_PLUGIN,
+                              finished ? MAX(1, HZ / 20) : frame_wait(due),
+                              get_context_map);
+        if (default_event_handler(action) == SYS_USB_CONNECTED)
+            return GO_TO_ROOT;
+    }
+}
+
 static int album_covers_loop(unsigned *trace, bool restored_pixels)
 {
     int ret;
@@ -6220,7 +6452,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
      * refresh. flow_start is when the motion began. */
     uint32_t flow_due = frame_clock, flow_start = frame_clock;
     bool flow_moving = false, leaving = false;
-    struct ui_scene *entry_source = pf_wps_entry ? &wps_handover.sheet : &pf_scene;
+    struct ui_scene *entry_source = &pf_scene;
     struct ui_scene *fade = NULL;
     uint32_t fade_start = 0;
     unsigned opacity = 256, leave_from = 256;
@@ -6289,7 +6521,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             timeout = 1;
         else if (!dark && panel.live)
         {
-            if (panel.moving ||
+            if (panel.moving || (!flat_view() && stock_animating(&flow_row, USEC_TIMER)) ||
                 (panel.scroll_frames && panel.position == FLIP_OPEN))
                 timeout = frame_wait(panel.due);
             else
@@ -6418,7 +6650,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             if (pf_motion_scale && !panel.live)
             {
                 fade_start = USEC_TIMER;
-                fade = entry_source->backdrop_handle > 0 ? entry_source : NULL;
+                fade = !pf_wps_entry && entry_source->backdrop_handle > 0 ? entry_source : NULL;
                 opacity = fade ? 0 : 256;
                 stock_enter(&flow_row, number_of_slides, center_index, fade_start, pf_wps_entry);
                 step = 1;
@@ -6505,7 +6737,12 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         {
             int result = album_panel_action(button);
             if (result != CAROUSEL_MENU_STAY)
-                return result;
+            {
+                if (!flat_view())
+                    result = stock_to_wps(center_index, true, result);
+                if (result != CAROUSEL_MENU_STAY)
+                    return result;
+            }
             if (panel.play_pending)
             {
                 int status = model->panel_play_status();
@@ -6847,8 +7084,17 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             paint.tracing = *trace != 0;
             paint.caption_us = 0;
             int ink_left = 0, ink_right = LCD_WIDTH;
+            struct flow_damage damage = { LCD_HEIGHT, 0 };
+            if (drew_art && motion && !flat_view() && !joined && !full_flush_owed)
+                flow_damage = &damage;
             carousel_paint(&paint, drew_art, drew_caption, joined,
                            paint_y, paint_h);
+            if (flow_damage)
+            {
+                flow_damage = NULL;
+                art_y = damage.top;
+                art_h = MAX(0, damage.end - damage.top);
+            }
             if (drew_caption && !flat_view())
             {
                 int left = painted_ink.left, right = painted_ink.right;
@@ -6889,7 +7135,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
             /* Art uses a contiguous full-width DMA. Caption damage keeps its
              * own bounds until its last row has been staged. */
-            if (drew_art)
+            if (drew_art && art_h > 0)
             {
                 dirty_top = MIN(dirty_top, pf_vp_y + art_y);
                 dirty_end = MAX(dirty_end, pf_vp_y + art_y + art_h);
@@ -7075,6 +7321,15 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             goto leave_covers;
 #endif
         case PF_WPS:
+            if (!flat_view() && !panel.live && model->play_album &&
+                !(audio_status() & AUDIO_STATUS_PLAY) && !cider_active())
+            {
+                int result = stock_to_wps(target, false, model->play_album(target));
+                if (result != CAROUSEL_MENU_STAY)
+                    return result;
+                art_owed = caption_owed = full_repaint_owed = true;
+                break;
+            }
             return GO_TO_WPS;
         case PF_QUIT:
         case PF_BACK:
@@ -7189,7 +7444,13 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 /* The album the caption names: the scroll's target. */
                 if (pf_state == pf_scrolling)
                 {
-                    set_current_slide(target);
+                    if (flat_view())
+                        set_current_slide(target);
+                    else
+                    {
+                        move_center(target);
+                        land();
+                    }
                     pf_state = pf_idle;
                 }
                 ui_perf_end(*trace);
@@ -7285,7 +7546,7 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
         }
         else
             close_album_panel();
-        if (flat_view() || wps_handover.panel_open)
+        if (flat_view())
             ui_scene_capture_modal(&wps_handover.sheet);
         /* The Cover Flow pixels are fullscreen. Its viewport stack has
          * already unwound to Home so that playback can take over. */

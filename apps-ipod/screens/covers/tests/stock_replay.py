@@ -150,25 +150,29 @@ def replay(fixture, out, scenario):
     return result
 
 
-def main():
-    fixture, out = [Path(p).resolve() for p in sys.argv[1:]]
+def build_probe(fixture, out, name, defines=()):
     out.mkdir(parents=True, exist_ok=True)
     tests = Path(__file__).resolve().parent
     sim = tests.parents[3] / 'build-sim-ipod6g'
     flags = subprocess.check_output(
         ['make', '-s', '--no-print-directory', '--eval=replay-flags: ; @echo $(CFLAGS)',
          'replay-flags'], cwd=sim, text=True).splitlines()[-1]
-    subprocess.run(['cc', *shlex.split(flags), '-ffunction-sections', '-fdata-sections',
+    subprocess.run(['cc', *shlex.split(flags), *defines, '-ffunction-sections', '-fdata-sections',
                     '-fsanitize=undefined', '-fno-sanitize-recover=all', '-c',
                     tests / 'stock_pixels.c', '-o', out / 'stock_pixels.o'], check=True)
     subprocess.run(['cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=undefined', '-fno-sanitize-recover=all',
-                    tests / 'stock_replay.c', out / 'stock_pixels.o', '-Wl,--gc-sections', '-lm',
-                    '-o', out / 'stock_replay'], check=True)
+                    tests / (name + '.c'), out / 'stock_pixels.o', '-Wl,--gc-sections', '-lm',
+                    '-o', out / name], check=True)
     with (out / 'art.rgb').open('wb') as artwork:
         for i in range(1, 25):
             art = Image.open(fixture / 'disk/src' / f'c{i:03}.jpg')
             artwork.write(art.convert('RGB').resize((128, 128)).tobytes())
+
+
+def main():
+    fixture, out = [Path(p).resolve() for p in sys.argv[1:]]
+    build_probe(fixture, out, 'stock_replay')
     with (out / 'results.csv').open('w') as dst:
         rows = csv.writer(dst)
         rows.writerow('scenario frames final tracked absent tracker_p50 tracker_p90 tracker_max model_p50 model_p90 model_max'.split())

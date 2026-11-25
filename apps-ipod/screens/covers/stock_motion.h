@@ -26,6 +26,7 @@ struct stock_flow {
     int count, selected, first, length;
     uint32_t start_us;
     enum stock_phase phase;
+    bool playback_walls;
     struct stock_pose start[STOCK_STARTS];
 };
 
@@ -72,6 +73,7 @@ static inline void stock_init(struct stock_flow *f, int count, int selected,
     f->length = count - selected > 3 ? selected - f->first + 4 : count - f->first;
     f->start_us = now;
     f->phase = enter ? STOCK_ENTER : STOCK_REST;
+    f->playback_walls = false;
     for (int i = 0; i < f->length; ++i) {
         int rel = f->first + i - selected;
         struct stock_pose p = stock_slot_base(rel);
@@ -123,13 +125,11 @@ static inline struct stock_visible stock_current(const struct stock_flow *f,
         e = elapsed >= STOCK_LEAVE_US ? STOCK_ONE :
             stock_progress(elapsed + back, STOCK_LEAVE_US, true);
         if (rel) {
-            b = a;
             b.x += (rel > 0 ? 100 : -100) * STOCK_ONE;
         } else {
             b = (struct stock_pose){170 * STOCK_ONE, -9 * STOCK_ONE,
                                     40 * STOCK_ONE, 90 * STOCK_ONE};
         }
-        to_slots = 0;
     }
     int64_t x = a.x + stock_mul(b.x - a.x, e) +
                 STOCK_SPACING * (from_slots * (STOCK_ONE - e) + to_slots * e);
@@ -214,6 +214,7 @@ static inline void stock_leave(struct stock_flow *f, uint32_t now)
 {
     stock_snapshot(f, now);
     f->phase = STOCK_LEAVE;
+    f->playback_walls = false;
 }
 
 static inline bool stock_animating(const struct stock_flow *f, uint32_t now)
@@ -238,8 +239,9 @@ static inline int stock_sample(const struct stock_flow *f, uint32_t now,
         struct stock_visible v = stock_current(f, a, now, e);
         if (v.pose.x >= STOCK_BAND * STOCK_ONE && f->phase == STOCK_SCROLL)
             break;
-        /* Entry walls start at the viewport edge and slide into the band. */
-        if (f->phase != STOCK_ENTER &&
+        /* Playback and entry walls remain visible until their last pixels
+         * cross the viewport edge. Scrolling recycles at the world band. */
+        if (f->phase != STOCK_ENTER && !f->playback_walls &&
             (v.pose.x <= -STOCK_BAND * STOCK_ONE || v.pose.x >= STOCK_BAND * STOCK_ONE))
             continue;
         int pos = n++;
@@ -262,6 +264,124 @@ static inline int stock_sample(const struct stock_flow *f, uint32_t now,
     return n;
 }
 
+/* Keep exactly the row on screen at the playback handoff. The first wall
+ * reaches the recycling boundary before its far edge leaves the LCD. */
+static inline void stock_leave_to_playing(struct stock_flow *f, uint32_t now)
+{
+    struct stock_visible visible[STOCK_MAX_VISIBLE];
+    int n = stock_sample(f, now, visible);
+    int first = f->count;
+    for (int i = 0; i < n; ++i)
+        if (visible[i].album < first)
+            first = visible[i].album;
+    for (int i = 0; i < n; ++i)
+        f->start[visible[i].album - first] = visible[i].pose;
+    f->first = first;
+    f->length = n;
+    f->start_us = now;
+    f->phase = STOCK_LEAVE;
+    f->playback_walls = true;
+}
+
+/* A and D inherit the selected cover's current pose. At BACK, +180 and
+ * -180 project the same panel but start different turn directions. */
+enum stock_transition {
+    STOCK_TO_BACK, STOCK_TO_FRONT, STOCK_PANEL_TO_PLAYING,
+    STOCK_COVER_TO_PLAYING, STOCK_FROM_PLAYING
+};
+
+struct stock_flip {
+    struct stock_pose start, target;
+    uint32_t start_us, duration, delay;
+    bool quadratic;
+};
+
+static inline struct stock_pose stock_playing_pose(void)
+{
+    return (struct stock_pose){-43 * STOCK_ONE, -10 * STOCK_ONE,
+                               145 * (STOCK_ONE / 2), -9 * STOCK_ONE};
+}
+
+static inline void stock_flip_start(struct stock_flip *f,
+                                    enum stock_transition transition,
+                                    struct stock_pose current, uint32_t now)
+{
+    const struct stock_pose centre = stock_slot_base(0);
+    struct stock_pose back = {0, 632422, 465 * (STOCK_ONE / 4), 180 * STOCK_ONE};
+    /* BACK y = 9.65 and z = 116.25 put a 256-pixel texture at native scale. */
+    f->start_us = now;
+    f->delay = 0;
+    f->duration = 500000;
+    f->quadratic = false;
+    switch (transition) {
+    case STOCK_TO_BACK:
+        f->start = current;
+        if (current.x < 0)
+            back.yaw = -back.yaw;
+        f->target = back;
+        break;
+    case STOCK_TO_FRONT:
+        f->start = back;
+        f->target = centre;
+        f->duration = STOCK_SCROLL_US;
+        break;
+    case STOCK_PANEL_TO_PLAYING:
+        back.yaw = -back.yaw;
+        current = back;
+        /* fall through */
+    case STOCK_COVER_TO_PLAYING:
+        f->start = current;
+        f->target = stock_playing_pose();
+        f->quadratic = true;
+        break;
+    case STOCK_FROM_PLAYING:
+        f->start = stock_playing_pose();
+        f->target = centre;
+        f->duration = STOCK_SCROLL_US;
+        f->delay = 250000;
+        break;
+    }
+}
+
+static inline bool stock_flip_done(const struct stock_flip *f, uint32_t now)
+{
+    return now - f->start_us >= f->delay + f->duration;
+}
+
+static inline int32_t stock_lerp(int32_t a, int32_t b, int e)
+{
+    return ((int64_t)a * (STOCK_ONE - e) + (int64_t)b * e + STOCK_ONE / 2) >> 16;
+}
+
+static inline struct stock_pose stock_flip_pose(const struct stock_flip *f,
+                                                uint32_t now)
+{
+    uint32_t elapsed = now - f->start_us;
+    if (elapsed <= f->delay)
+        return f->start;
+    elapsed -= f->delay;
+    if (elapsed >= f->duration)
+        return f->target;
+    int e;
+    if (f->quadratic) {
+        int t = ((f->duration - elapsed) * (STOCK_ONE / 32)) / (f->duration / 32);
+        e = STOCK_ONE - stock_mul(t, t);
+    } else {
+        e = stock_progress(elapsed, f->duration, false);
+    }
+    return (struct stock_pose){
+        stock_lerp(f->start.x, f->target.x, e),
+        stock_lerp(f->start.y, f->target.y, e),
+        stock_lerp(f->start.z, f->target.z, e),
+        stock_lerp(f->start.yaw, f->target.yaw, e)
+    };
+}
+
+static inline bool stock_back_face(struct stock_pose pose)
+{
+    return stock_abs(pose.yaw) > 90 * STOCK_ONE;
+}
+
 /* First quadrant at five-degree intervals, with linear interpolation. */
 static inline int stock_sin(int degrees)
 {
@@ -270,6 +390,8 @@ static inline int stock_sin(int degrees)
         50203, 53684, 56756, 59396, 61584, 63303, 64540, 65287, 65536
     };
     unsigned angle = stock_abs(degrees);
+    if (angle > 90 * STOCK_ONE)
+        angle = 180 * STOCK_ONE - angle;
     unsigned i = angle / (5 * STOCK_ONE);
     int value = table[i];
     if (i < 18)

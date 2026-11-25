@@ -75,3 +75,34 @@ bool replay_pixels(struct stock_visible *visible, int n, uint8_t *rgb)
         }
     return memcmp(frame, whole, sizeof(frame)) == 0;
 }
+
+#ifdef REPLAY_STOCK_FLIP
+static pix_t fixture_panel[256][256];
+
+void replay_flip_texture(const uint8_t *rgb)
+{
+    for (int y = 0; y < 256; y++)
+        for (int x = 0; x < 256; x++, rgb += 3)
+            fixture_panel[x][y] = LCD_RGBPACK(rgb[0], rgb[1], rgb[2]);
+}
+
+void replay_flip_face(struct stock_pose p, uint8_t *rgb)
+{
+    static pix_t frame[LCD_HEIGHT][LCD_WIDTH];
+    for (int y = 0; y < LCD_HEIGHT; y++)
+        for (int x = 0; x < LCD_WIDTH; x++) {
+            const uint8_t *at = rgb + (y * LCD_WIDTH + x) * 3;
+            frame[y][x] = LCD_RGBPACK(at[0], at[1], at[2]);
+        }
+    bool back = stock_back_face(p);
+    stock_draw_quad(&frame[0][0], p, back ? &fixture_panel[0][0] : fixture[0].texels,
+                    back ? 256 : TEX_SIZE, back ? 256 : TEX_SIZE);
+    for (int y = 0; y < LCD_HEIGHT; y++)
+        for (int x = 0; x < LCD_WIDTH; x++) {
+            pix_t c = frame[y][x];
+            *rgb++ = RGB_UNPACK_RED(c);
+            *rgb++ = RGB_UNPACK_GREEN(c);
+            *rgb++ = RGB_UNPACK_BLUE(c);
+        }
+}
+#endif

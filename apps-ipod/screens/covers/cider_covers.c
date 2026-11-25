@@ -16,6 +16,7 @@
 #include "lang.h"
 #include "kernel.h"
 #include "system/shutdown.h"
+#include "system/hash.h"
 #include "string-extra.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +24,9 @@
 static int resume_index, previous_center;
 static int travel = 1;
 static bool flicking;
+static int first_track_album = -1;
+static long first_track_deadline;
+static struct panel_request first_track_request;
 static long moved_at;
 static unsigned int revision;
 static struct cider_row row_ahead;
@@ -52,6 +56,7 @@ static int jump(void)
 static void initial(const char *file)
 {
     (void)file;
+    first_track_album = -1;
     set_current_slide(MAX(0, MIN(count() - 1, resume_index)));
     previous_center = center_index;
     moved_at = current_tick - HZ;
@@ -120,6 +125,45 @@ static int panel_play(int index, int track, const struct panel_request *request,
     return cider_play_in(row->route, request->route, track)
         ? CAROUSEL_PLAY_PENDING : CAROUSEL_MENU_STAY;
 }
+
+/* A remote album can use an opaque route. Ask its first track to play in
+ * that album's context, just like selecting row zero in the open panel. */
+static int play_album(int index)
+{
+    memset(&first_track_request, 0, sizeof(first_track_request));
+    first_track_request.locale = fnv1a_str(global_settings.lang_file);
+    if (!panel_request(index, &first_track_request))
+        return CAROUSEL_MENU_STAY;
+    first_track_album = index;
+    first_track_deadline = current_tick + 6 * HZ;
+    panel_cache_window(&first_track_request, 1);
+    return CAROUSEL_PLAY_PENDING;
+}
+
+static int play_status(void)
+{
+    if (first_track_album < 0)
+        return cider_play_status();
+    if (!cider_available() || cider_panel_revision() != first_track_request.revision ||
+        TIME_AFTER(current_tick, first_track_deadline))
+    {
+        first_track_album = -1;
+        return -1;
+    }
+    const struct panel_cached *page = panel_cache_acquire(&first_track_request, 0);
+    if (!page)
+    {
+        panel_cache_pump();
+        return 0;
+    }
+    const struct panel_cache_row *row = panel_cache_row(page, 0);
+    int result = row ? panel_play(first_track_album, 0, &first_track_request, row)
+                     : CAROUSEL_MENU_STAY;
+    panel_cache_release(page);
+    first_track_album = -1;
+    return result == CAROUSEL_PLAY_PENDING ? 0 : -1;
+}
+
 static bool art(int index, struct bitmap *bitmap)
 {
     struct cider_row row;
@@ -299,8 +343,9 @@ static const struct carousel_model model = {
     .blur_source = blur_source,
     .tick = tick,
     .panel_request = panel_request,
+    .play_album = play_album,
     .panel_play = panel_play,
-    .panel_play_status = cider_play_status,
+    .panel_play_status = play_status,
     .remember = remember,
 };
 

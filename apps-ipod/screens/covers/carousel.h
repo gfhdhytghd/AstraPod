@@ -129,6 +129,7 @@ struct carousel_model {
     void (*blur_source)(int index, struct album_blur_source *source);
     void (*tick)(void);                                /* nonblocking provider */
     bool (*panel_request)(int index, struct panel_request *request);
+    int (*play_album)(int index); /* PLAY on a stopped 3D carousel */
     int (*panel_play)(int index, int track, const struct panel_request *request,
                       const struct panel_cache_row *row);
     int (*panel_play_status)(void);                    /* 0 pending, +1 success, -1 error */

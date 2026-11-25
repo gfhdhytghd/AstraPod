@@ -116,6 +116,7 @@ enum pf_states {
 static int  album_count(void);
 static unsigned int album_art_key(int slide_index);
 static bool album_panel_request(int index, struct panel_request *request);
+static int album_play(int index);
 static int album_panel_play(int index, int track, const struct panel_request *request,
                             const struct panel_cache_row *row);
 static int  jmp_idx_prev(void);
@@ -137,6 +138,7 @@ static const struct carousel_model album_model = {
     .count       = album_count,
     .art_key     = album_art_key,
     .panel_request = album_panel_request,
+    .play_album = album_play,
     .panel_play = album_panel_play,
     .remember    = album_remember,
     .jump_prev   = jmp_idx_prev,
@@ -716,6 +718,15 @@ static bool album_panel_request(int index, struct panel_request *request)
     get_album_artist(index, request->artist, sizeof(request->artist));
     request->key = panel_cache_identity("local", request->title, request->artist);
     return true;
+}
+
+static int album_play(int index)
+{
+    if (!db_summary_current(&carousel_idx) || index < 0 || index >= carousel_idx.album_ct)
+        return CAROUSEL_MENU_STAY;
+    pf_cfg.last_album = index;
+    db_summary_play_album_on_exit(&carousel_idx.album_index[index]);
+    return CAROUSEL_PLAY_ALBUM;
 }
 
 static int album_panel_play(int index, int track, const struct panel_request *request,

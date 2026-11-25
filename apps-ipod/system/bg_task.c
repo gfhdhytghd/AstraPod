@@ -251,7 +251,8 @@ bool bg_task_should_stop(const struct bg_task *task)
         return true;
 
     /* A scan must yield before a settled album can be prepared. */
-    if (queue_peek_ex(&bg_queue, NULL, 0, QPEEK_FILTER1(BG_EVENT_PANEL)))
+    if (queue_peek_ex(&bg_queue, NULL, 0, QPEEK_FILTER1(BG_EVENT_PANEL)) ||
+        queue_peek_ex(&bg_queue, NULL, 0, QPEEK_FILTER1(BG_EVENT_BLUR)))
         return true;
 #ifdef HAVE_PODBOX_FONT
     if (queue_peek_ex(&bg_queue, NULL, 0, QPEEK_FILTER1(BG_EVENT_GLYPHS)))

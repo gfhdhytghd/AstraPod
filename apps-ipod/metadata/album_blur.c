@@ -18,6 +18,7 @@
 #include "events.h"
 #include "file.h"
 #include "kernel.h"
+#include "logfile.h"
 #include "metadata.h"
 #include "playlist/playlist.h"
 #include "screens/playback/cider.h"
@@ -26,6 +27,7 @@
 #include "strlcpy.h"
 #include "system.h"
 #include "system/bg_task.h"
+#include "system/debug_log.h"
 #include "screens/covers/panel_perf.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/native_wps.h"
@@ -38,7 +40,7 @@
 #define BLUR_W ((LCD_WIDTH + 3) / 4)
 #define BLUR_H ((LCD_HEIGHT + 3) / 4)
 #define BLUR_EVENT_WPS 0x1180
-#define BLUR_EVENT_WINDOW 0x1181
+#define BLUR_EVENT_WINDOW BG_EVENT_BLUR
 #define PANEL_ALPHA_MAX 224
 /* How much darker the album panel's header band is than its rows. */
 #define PANEL_BAND_ALPHA 80
@@ -60,6 +62,7 @@ struct blur_pixels {
 static struct {
     struct album_blur_source source;
     unsigned hash, recent, users;
+    long built;
     bool ready;
     uint8_t wps_lum;
     uint8_t tint_rows;
@@ -90,6 +93,84 @@ static struct {
     unsigned revision, height, color;
     enum album_blur_tint_state state;
 } status_tint;
+
+/* Diagnostics: the cache's last steps, which Debug > Album Blur writes to
+ * the background tasks log, and which go there as they happen while that
+ * log is on. */
+#define NOTE_RING 48
+enum note_kind {
+    NOTE_WINDOW, NOTE_AGAIN, NOTE_START, NOTE_RAM, NOTE_DISK, NOTE_COLD,
+    NOTE_STALE, NOTE_NO_ART, NOTE_NO_SLOT, NOTE_EVICT, NOTE_MISS, NOTE_SHOWN,
+    NOTE_USB,
+};
+static const char *const note_names[] = {
+    "window", "again", "start", "ram", "disk", "cold", "stale", "no-art",
+    "no-slot", "evict", "panel-miss", "panel-shown", "usb-has-disk",
+};
+/* Why the panel drew without its blur. */
+enum miss_reason {
+    MISS_NO_MEMORY, MISS_NO_KEY, MISS_UNREQUESTED, MISS_QUEUED,
+    MISS_BUILDING, MISS_NO_ART, MISS_LOST,
+};
+static const char *const miss_names[] = {
+    "no memory", "no art key", "not requested", "queued", "building",
+    "no art", "lost",
+};
+static struct note {
+    long tick;
+    unsigned key, revision;
+    int arg;
+    int8_t slot;
+    uint8_t kind;
+    char type;
+} notes[NOTE_RING];
+static unsigned note_count;
+/* The cover the panel is waiting for, while it waits. */
+static struct {
+    struct album_blur_source source;
+    long since;
+    int reason;
+} panel_wait = { .reason = -1 };
+
+static char source_type(const struct album_blur_source *source)
+{
+    if (source->remote[0])
+        return 'r';
+    if (!source->local)
+        return '-';
+    return source->portrait ? 'a' : 'l';
+}
+
+static unsigned source_key(const struct album_blur_source *source)
+{
+    return source->remote[0] ?
+        (unsigned)crc_32(source->remote, strlen(source->remote), 0xffffffff) :
+        source->local;
+}
+
+static void note_line(const struct note *n, char *line, size_t size)
+{
+    snprintf(line, size, "%s %c%08x slot %d rev %u arg %d",
+             note_names[n->kind], n->type, n->key, n->slot, n->revision,
+             n->arg);
+}
+
+static void note(enum note_kind kind, const struct album_blur_source *source,
+                 int slot, int arg)
+{
+    struct note *n = &notes[note_count++ % NOTE_RING];
+    n->tick = current_tick;
+    n->kind = kind;
+    n->type = source ? source_type(source) : '-';
+    n->key = source ? source_key(source) : 0;
+    n->slot = slot;
+    n->revision = window.revision;
+    n->arg = arg;
+    char line[80];
+    note_line(n, line, sizeof(line));
+    DEBUGF("album blur: %s\n", line);
+    debug_log(DEBUG_LOG_TASKS, "album blur: %s", line);
+}
 
 static bool same_source(const struct album_blur_source *a,
                         const struct album_blur_source *b)
@@ -172,7 +253,10 @@ static int reserve_slot(const struct album_blur_source *source, unsigned hash,
     if (victim >= 0)
     {
         if (slots[victim].ready)
+        {
+            note(NOTE_EVICT, &slots[victim].source, victim, in_window(victim));
             ++cache_generation;
+        }
         slots[victim].ready = false;
     }
     mutex_unlock(&cache_lock);
@@ -415,9 +499,13 @@ static unsigned prepare(const struct album_blur_source *source, int art,
             width = height = local_pixels(source->local, scratch);
     }
     if (window_stale(revision) || usb_host_wants_storage())
+    {
+        note(NOTE_STALE, source, -1, 0);
         goto done;
+    }
     if (!width)
     {
+        note(NOTE_NO_ART, source, -1, revision != 0);
         if (missing)
             *missing = true;
         mutex_lock(&cache_lock);
@@ -441,6 +529,12 @@ static unsigned prepare(const struct album_blur_source *source, int art,
         DEBUGF("FU112_BLUR ram %08x %lu\n", hash, (unsigned long)(USEC_TIMER-start));
     if (slot < 0 || hit)
     {
+        /* Now Playing asks every quarter second while it waits: only the
+         * window's hits are worth a note. */
+        if (!hit)
+            note(NOTE_NO_SLOT, source, -1, revision != 0);
+        else if (revision)
+            note(NOTE_RAM, source, slot, (USEC_TIMER - start) / 1000);
         if (hit)
             panel_perf_record(PP_BLUR, USEC_TIMER - start, 2, hash);
         result = hit ? hash : 0;
@@ -494,8 +588,10 @@ static unsigned prepare(const struct album_blur_source *source, int art,
     if (revision && revision != window.revision)
     {
         mutex_unlock(&cache_lock);
+        note(NOTE_STALE, source, slot, 1);
         goto done;
     }
+    slots[slot].built = current_tick;
     slots[slot].source = *source;
     slots[slot].hash = hash;
     slots[slot].wps_lum = wps_lum;
@@ -504,6 +600,8 @@ static unsigned prepare(const struct album_blur_source *source, int art,
     slots[slot].ready = true;
     ++cache_generation;
     mutex_unlock(&cache_lock);
+    note(disk ? NOTE_DISK : NOTE_COLD, source, slot,
+         (USEC_TIMER - start) / 1000);
     result = hash;
 
 done:
@@ -559,7 +657,11 @@ static void publish_status_tint(unsigned revision, unsigned generation,
 static void blur_work(const struct queue_event *ev)
 {
     if (usb_host_wants_storage())
+    {
+        if (ev->id == BLUR_EVENT_WINDOW)
+            note(NOTE_USB, NULL, -1, 0);
         return;
+    }
     struct ui_theme theme;
     ui_theme_snapshot(&theme);
     unsigned wps_lum = wps_scrim_luminance(&theme);
@@ -575,6 +677,7 @@ static void blur_work(const struct queue_event *ev)
         unsigned index = window.next++;
         struct album_blur_source source = window.source[index];
         mutex_unlock(&cache_lock);
+        note(NOTE_START, &source, -1, index);
         bool missing = false;
         prepare(&source, -1, wps_lum, revision, &missing);
         mutex_lock(&cache_lock);
@@ -595,6 +698,20 @@ static void blur_work(const struct queue_event *ev)
         mutex_unlock(&cache_lock);
         if (more && !bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
             bg_task_post(&blur_task, BLUR_EVENT_WINDOW);
+        return;
+    }
+
+    /* The covers around Cover Flow's centre go first: their panel is what
+     * is on screen. */
+    mutex_lock(&cache_lock);
+    bool window_waits = window.next < window.count;
+    mutex_unlock(&cache_lock);
+    if (window_waits)
+    {
+        if (!bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
+            bg_task_post(&blur_task, BLUR_EVENT_WINDOW);
+        if (!bg_task_queued(&blur_task, BLUR_EVENT_WPS))
+            bg_task_post(&blur_task, BLUR_EVENT_WPS);
         return;
     }
 
@@ -823,6 +940,11 @@ void album_blur_request_window(const struct album_blur_source *sources, unsigned
             memcpy(window.source, sources, count * sizeof(*sources));
     }
     mutex_unlock(&cache_lock);
+    /* A cover arriving asks again often: only a pass started anew is noted. */
+    if (!same)
+        note(NOTE_WINDOW, count ? &sources[0] : NULL, -1, count);
+    else if (post)
+        note(NOTE_AGAIN, &sources[0], -1, count);
     if (post && !bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
         bg_task_post(&blur_task, BLUR_EVENT_WINDOW);
 }
@@ -832,22 +954,77 @@ unsigned album_blur_generation(void)
     return cache_generation;
 }
 
+static void write_state(int fd);
+
+/* Notes the start and end of a wait for the panel's blur. */
+static void panel_waits(const struct album_blur_source *source, int reason)
+{
+    bool same = panel_wait.reason >= 0 &&
+                same_source(source, &panel_wait.source);
+    if (reason < 0)
+    {
+        if (same)
+            note(NOTE_SHOWN, source, -1,
+                 (current_tick - panel_wait.since) * 1000 / HZ);
+        panel_wait.reason = -1;
+        return;
+    }
+    if (same && reason == panel_wait.reason)
+        return;
+    if (!same)
+    {
+        panel_wait.source = *source;
+        panel_wait.since = current_tick;
+    }
+    panel_wait.reason = reason;
+    note(NOTE_MISS, source, -1, reason);
+    if (debug_log_enabled(DEBUG_LOG_TASKS))
+    {
+        /* Puts the lines held so far above the state. */
+        debug_log_sync(DEBUG_LOG_TASKS, "album blur: the panel waits");
+        int fd = debug_log_open(DEBUG_LOG_TASKS);
+        if (fd >= 0)
+        {
+            write_state(fd);
+            debug_log_close(DEBUG_LOG_TASKS, fd);
+        }
+    }
+}
+
 bool album_blur_draw_panel(const struct album_blur_source *source, int top, int height)
 {
+    if (cache_handle <= 0)
+    {
+        panel_waits(source, MISS_NO_MEMORY);
+        return false;
+    }
     mutex_lock(&cache_lock);
     int slot = acquire_slot(source);
     bool post = false;
-    /* A window cover with art whose blur has gone since its pass is built
-     * again, and the panel redrawn when it is ready. */
-    for (unsigned i = 0; slot < 0 && i < window.done; i++)
-        if (same_source(source, &window.source[i]) && !(window.missing & 1u << i))
+    int reason = slot >= 0 ? -1 :
+                 !source->local && !source->remote[0] ? MISS_NO_KEY :
+                 MISS_UNREQUESTED;
+    for (unsigned i = 0; slot < 0 && i < window.count; i++)
+    {
+        if (!same_source(source, &window.source[i]))
+            continue;
+        if (window.missing & 1u << i)
+            reason = MISS_NO_ART;
+        else if (i < window.done)
         {
+            /* Its blur has gone since its pass: built again, and the panel
+             * redrawn when it is ready. */
+            reason = MISS_LOST;
             post = look_again();
-            break;
         }
+        else
+            reason = i < window.next ? MISS_BUILDING : MISS_QUEUED;
+        break;
+    }
     mutex_unlock(&cache_lock);
     if (post && !bg_task_queued(&blur_task, BLUR_EVENT_WINDOW))
         bg_task_post(&blur_task, BLUR_EVENT_WINDOW);
+    panel_waits(source, reason);
     if (slot < 0)
         return false;
     struct blur_pixels *cache = core_get_data_pinned(cache_handle);
@@ -881,4 +1058,74 @@ bool album_blur_render_wps(fb_data *out, int art, unsigned generation, unsigned 
     core_put_data_pinned(cache);
     release_slot(slot);
     return true;
+}
+
+static void write_source(int fd, const struct album_blur_source *source)
+{
+    logfile_printf(fd, "%c%08x", source_type(source), source_key(source));
+}
+
+/* The window, the slots and the panel's wait. */
+static void write_state(int fd)
+{
+    mutex_lock(&cache_lock);
+    logfile_printf(fd, "album blur at %ld: memory %s, generation %u%s\n",
+                   current_tick, cache_handle > 0 ? "yes" : "NO",
+                   cache_generation,
+                   usb_host_wants_storage() ? ", USB host has the disk" : "");
+    logfile_printf(fd, "  window rev %u count %u next %u done %u missing %x%s%s\n",
+                   window.revision, window.count, window.next, window.done,
+                   window.missing, window.rerun ? " rerun" : "",
+                   bg_task_queued(&blur_task, BLUR_EVENT_WINDOW) ?
+                   " queued" : "");
+    for (unsigned i = 0; i < window.count; i++)
+    {
+        logfile_printf(fd, "    [%u] ", i);
+        write_source(fd, &window.source[i]);
+        logfile_printf(fd, " slot %d\n", find_slot(&window.source[i]));
+    }
+    /* The darkening is up to PANEL_ALPHA_MAX of 256: near it, a bright
+     * cover's blur is close to black. */
+    struct blur_pixels *cache = cache_handle > 0 ?
+                                core_get_data_pinned(cache_handle) : NULL;
+    for (int i = 0; i < BLUR_SLOTS; i++)
+    {
+        logfile_printf(fd, "  slot %d %s ", i,
+                       slots[i].ready ? "ready" : "empty");
+        write_source(fd, &slots[i].source);
+        logfile_printf(fd, " hash %08x darkening %u users %u recent %u"
+                       " built %ld ms ago%s\n",
+                       slots[i].hash, cache ? cache[i].cached.panel_alpha : 0,
+                       slots[i].users, slots[i].recent,
+                       (current_tick - slots[i].built) * 1000 / HZ,
+                       in_window(i) ? " window" : "");
+    }
+    if (cache)
+        core_put_data_pinned(cache);
+    logfile_printf(fd, "  now playing ");
+    write_source(fd, &wps_source);
+    logfile_printf(fd, " hash %08x\n", wps_hash);
+    if (panel_wait.reason >= 0)
+    {
+        logfile_printf(fd, "  panel waits for ");
+        write_source(fd, &panel_wait.source);
+        logfile_printf(fd, ": %s, %ld ms\n", miss_names[panel_wait.reason],
+                       (current_tick - panel_wait.since) * 1000 / HZ);
+    }
+    mutex_unlock(&cache_lock);
+}
+
+void album_blur_write_diagnostics(int fd)
+{
+    char line[80];
+    write_state(fd);
+    unsigned count = note_count;
+    unsigned first = count > NOTE_RING ? count - NOTE_RING : 0;
+    for (unsigned i = first; i < count; i++)
+    {
+        const struct note *n = &notes[i % NOTE_RING];
+        note_line(n, line, sizeof(line));
+        logfile_printf(fd, "  %ld ms: %s\n",
+                       (n->tick - current_tick) * 1000 / HZ, line);
+    }
 }

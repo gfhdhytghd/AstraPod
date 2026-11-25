@@ -36,6 +36,9 @@ unsigned album_blur_generation(void);
  * same rows of the current viewport. */
 bool album_blur_draw_panel(const struct album_blur_source *source, int top, int height);
 bool album_blur_render_wps(fb_data *out, int art, unsigned generation, unsigned fg);
+/* Debug > Album Blur: the slots, the window, the panel's wait and the last
+ * steps, as lines of text. */
+void album_blur_write_diagnostics(int fd);
 
 enum album_blur_tint_state { ALBUM_BLUR_WAITING, ALBUM_BLUR_NO_ART, ALBUM_BLUR_TINT };
 enum album_blur_tint_state album_blur_status_tint(unsigned height, unsigned *color);

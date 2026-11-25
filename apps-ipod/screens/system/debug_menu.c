@@ -117,6 +117,7 @@
 #include "system/usb_log_file.h"
 #endif
 #include "system/debug_log.h"
+#include "metadata/album_blur.h"
 #ifdef HAVE_USB_HOST_AUDIO
 #include "usb_host_audio.h"
 #endif
@@ -1884,6 +1885,21 @@ static bool dbg_screendump(void)
 
 extern bool write_metadata_log;
 
+/* Writes the album panel's blur cache into the background tasks log. */
+static bool dbg_album_blur(void)
+{
+    debug_log_header(DEBUG_LOG_TASKS, "album blur");
+    int fd = debug_log_open(DEBUG_LOG_TASKS);
+    if (fd >= 0)
+    {
+        album_blur_write_diagnostics(fd);
+        debug_log_close(DEBUG_LOG_TASKS, fd);
+    }
+    splashf(HZ * 2, "%s %s", fd >= 0 ? "Written to" : "Could not write",
+            LIB_TASKS_LOG);
+    return false;
+}
+
 static bool dbg_metadatalog(void)
 {
     write_metadata_log = !write_metadata_log;
@@ -2447,6 +2463,7 @@ static const struct {
         { "Database", dbg_tagcache_info, false, NULL },
         { "Directory cache", dbg_dircache_info, false, NULL },
         { "Featured artists", dbg_featured, false, NULL },
+        { "Album blur", dbg_album_blur, false, NULL },
         { "Metadata log", dbg_metadatalog, false, &write_metadata_log },
 
         { "Screendump on USB", dbg_screendump, false,

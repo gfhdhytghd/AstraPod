@@ -182,6 +182,9 @@ void do_setting_screen(const struct settings_list *setting, const char * title,
 int do_menu(const struct menu_item_ex *menu, int *start_selected,
             struct viewport parent[NB_SCREENS], bool hide_theme);
 
+/* Draw the menu's first frame as do_menu() would, without running it. */
+void menu_paint(const struct menu_item_ex *menu, int selected);
+
 struct ui_scene;
 /* Link the next top-level menu call to its peer across root dispatch. */
 void menu_link_scene(struct ui_scene *scene, const struct menu_item_ex *menu,

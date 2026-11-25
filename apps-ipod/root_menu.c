@@ -2516,6 +2516,21 @@ static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push
                     (const void *)(intptr_t)(to + 16), push);
 }
 
+/* Home as do_menu() would draw it on return, so that a page kept over
+ * Home can show it afresh. */
+static bool paint_home(const void *page)
+{
+    if (page != (const void *)(intptr_t)(GO_TO_ROOT + 16))
+        return false;
+    audiobooks_row(global_settings.segregate_audiobooks, false);
+    podcasts_row(global_settings.segregate_podcasts, false);
+    lcd_set_viewport(NULL);
+    push_activity_without_refresh(ACTIVITY_MAINMENU);
+    menu_paint(&root_menu_, get_selection(global_status.last_screen));
+    pop_current_activity_without_refresh();
+    return true;
+}
+
 void root_menu(void)
 {
 #ifdef HAVE_WHEEL_WPS_CHORD
@@ -2526,6 +2541,7 @@ void root_menu(void)
     struct ui_scene menu_scene = {0};
     struct ui_scene route_scene = {0};
     int presented = GO_TO_PREVIOUS;
+    ui_scene_set_parent_painter(paint_home);
 
     /* A failed tagnavi.config parse reports no rows at all, and the fixup
      * would drop every database slot from the saved order for good. */

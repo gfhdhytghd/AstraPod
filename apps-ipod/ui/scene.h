@@ -46,6 +46,11 @@ void ui_scene_show_modal(struct ui_scene *scene, const char *route);
 bool ui_scene_present_fade(struct ui_scene *scene, unsigned opacity,
                            const int16_t *art_top, const int16_t *art_end);
 bool ui_scene_restore_modal(struct ui_scene *scene);
+/* Draw the retained parent page afresh, off screen. The painter is given the
+ * parent's page key and returns false, having drawn nothing, for a page it
+ * does not know. */
+void ui_scene_set_parent_painter(bool (*paint)(const void *page));
+bool ui_scene_repaint_backdrop(struct ui_scene *scene);
 void ui_scene_open_page(struct ui_scene *scene, const char *route);
 const void *ui_scene_modal_parent(void);
 void ui_scene_modal_restored(const void *page);

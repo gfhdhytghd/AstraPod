@@ -721,6 +721,26 @@ void menu_link_scene(struct ui_scene *scene, const struct menu_item_ex *menu,
 }
 
 /* display a menu */
+void menu_paint(const struct menu_item_ex *menu, int selected)
+{
+    char buf[80];
+    int icon;
+    struct gui_synclist lists;
+    int top = pending_top_item;
+    char *title = init_title(menu, &icon, buf, sizeof buf);
+    FOR_NB_SCREENS(i)
+    {
+        sb_set_persistent_title(title, icon, i);
+        viewportmanager_theme_enable(i, true, NULL);
+    }
+    init_menu_lists(menu, &lists, selected, false, NULL, buf, sizeof buf);
+    pending_top_item = top;
+    gui_synclist_draw_settled(&lists);
+    gui_synclist_scroll_stop(&lists);
+    FOR_NB_SCREENS(i)
+        viewportmanager_theme_undo(i, false);
+}
+
 int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             struct viewport parent[NB_SCREENS], bool hide_theme)
 {

@@ -451,8 +451,9 @@ static int pf_vp_y;             /* viewport y-offset (status bar height) */
 static struct viewport pf_vp;   /* PF rendering viewport (below status bar) */
 static bool pf_show_statusbar;  /* Cover Flow never shows the status bar */
 static struct ui_scene pf_scene;
-/* Home's album colours and theme when pf_scene was taken of it. */
-static unsigned pf_scene_palette, pf_scene_theme;
+/* Home's album colours, artwork and theme when pf_scene was taken of it. */
+static unsigned pf_scene_palette, pf_scene_art, pf_scene_theme;
+static bool pf_scene_redrawn;
 static bool pf_wps_entry;
 static bool flat_view(void);
 static bool pf_shown, pf_entry_prepared, cover_resume_dirty;
@@ -476,18 +477,46 @@ void carousel_prepare_transition(void)
     memset(&pf_scene, 0, sizeof(pf_scene));
     ui_scene_capture_modal(&pf_scene);
     pf_scene_palette = album_palette_generation();
+    pf_scene_art = album_art_generation();
     pf_scene_theme = ui_theme_generation();
+    pf_scene_redrawn = false;
     pf_entry_prepared = true;
 }
 
 /* Whether Home has changed since pf_scene was taken of it, as it does when
- * another album starts playing. Home is then drawn afresh, never shown from
- * the old picture first. */
+ * another album starts playing. */
 static bool pf_scene_stale(void)
 {
-    return album_palette_pending() ||
+    return (album_palette_pending() && !pf_scene_redrawn) ||
            pf_scene_palette != album_palette_generation() ||
+           pf_scene_art != album_art_generation() ||
            pf_scene_theme != ui_theme_generation();
+}
+
+/* Draw a stale Home afresh into pf_scene, so that leaving still fades into
+ * it. The new album's colours are waited for, up to PF_SCENE_WAIT; past
+ * that Home is drawn with what it has. False when pf_scene still holds an
+ * out-of-date page, as it does for a parent other than Home. */
+#define PF_SCENE_WAIT (HZ / 2)
+static bool pf_scene_refresh(void)
+{
+    if (pf_scene.backdrop_handle <= 0 || !pf_scene_stale())
+        return true;
+    long until = current_tick + PF_SCENE_WAIT;
+    album_palette_refresh();
+    while (album_palette_pending() && TIME_BEFORE(current_tick, until))
+    {
+        sleep(1);
+        album_palette_refresh();
+    }
+    if (ui_scene_repaint_backdrop(&pf_scene))
+    {
+        pf_scene_palette = album_palette_generation();
+        pf_scene_art = album_art_generation();
+        pf_scene_theme = ui_theme_generation();
+        pf_scene_redrawn = true;
+    }
+    return !pf_scene_stale();
 }
 
 void carousel_cancel_transition(void)
@@ -7832,8 +7861,17 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 #endif
             if (flat_view() || !pf_motion_scale || dark || leaving)
                 return leave_result;
-            if (pf_scene_stale())
-                ui_scene_discard(&pf_scene);
+            if (pf_scene.backdrop_handle > 0 && pf_scene_stale())
+            {
+                /* Join before the theme changes, as for the modal screens. */
+                end_pf_thread();
+                pf_scene_refresh();
+                create_pf_thread();
+                lcd_set_viewport(&pf_vp);
+                lcd_set_background(pf_bg_color);
+                lcd_set_foreground(pf_fg_color);
+                lcd_set_drawmode(DRMODE_FG);
+            }
             fade_start = USEC_TIMER;
             leave_from = opacity;
             fade = pf_scene.backdrop_handle > 0 ? &pf_scene : NULL;
@@ -8051,7 +8089,7 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     else
     {
         close_album_panel();
-        if (pf_scene_stale())
+        if (!pf_scene_refresh())
             ui_scene_discard(&pf_scene);
         if (pf_scene.backdrop_handle > 0 && flat_view())
             ui_scene_close_modal(&pf_scene, pf_shown, "covers-down");

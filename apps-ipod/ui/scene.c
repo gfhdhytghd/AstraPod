@@ -35,6 +35,7 @@
 static struct ui_scene *owner;
 static unsigned int owner_thread;
 static const void *root_page, *restored_page;
+static bool (*parent_painter)(const void *page);
 
 size_t ui_scene_reserve_size(void)
 {
@@ -649,6 +650,41 @@ bool ui_scene_restore_modal(struct ui_scene *scene)
     lcd_update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT);
     ui_scene_modal_restored(scene->back_page);
     return true;
+}
+
+void ui_scene_set_parent_painter(bool (*paint)(const void *page))
+{
+    parent_painter = paint;
+}
+
+static void swap_backdrop(struct ui_scene *scene)
+{
+    uint32_t *back = core_get_data_pinned(scene->backdrop_handle);
+    uint32_t *fb = (uint32_t *)lcd_framebuffer_default.fb_ptr;
+    for (size_t i = 0; i < FRAMEBUFFER_SIZE / sizeof(*fb); i++)
+    {
+        uint32_t pixels = fb[i];
+        fb[i] = back[i];
+        back[i] = pixels;
+    }
+    core_put_data_pinned(back);
+}
+
+bool ui_scene_repaint_backdrop(struct ui_scene *scene)
+{
+    if (scene->backdrop_handle <= 0 || !parent_painter || owner)
+        return false;
+    /* The painter draws into the framebuffer, so the page on screen waits in
+     * the backdrop meanwhile and nothing reaches the LCD. */
+    swap_backdrop(scene);
+    bool held = lcd_updates_held();
+    lcd_hold_updates(true);
+    bool painted = parent_painter(scene->back_page);
+    lcd_hold_updates(held);
+    swap_backdrop(scene);
+    FOR_NB_SCREENS(i)
+        ui_take_dirty(i);
+    return painted;
 }
 
 bool ui_scene_capture_modal(struct ui_scene *scene)

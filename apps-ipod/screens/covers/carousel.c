@@ -6389,7 +6389,6 @@ static struct {
     struct playback_texture wall[STOCK_MAX_VISIBLE + 1], art;
     struct stock_pose centre, playing;
     struct stock_flow walls;
-    struct ui_rect rect;
     int count, album, screen;
     pix_t bg;
     bool pending, from_panel, returning;
@@ -6470,7 +6469,6 @@ static void capture_playback_frame(void)
             if (valid && stock_wps_pose(r.x, r.y, r.width, r.height, &playback_scene.playing))
             {
                 playback_scene.art = (struct playback_texture){0, art, r.width, r.height};
-                playback_scene.rect = r;
             }
             else
                 core_free(art);
@@ -6493,18 +6491,10 @@ void carousel_wps_capture_return(void)
     playback_scene.returning = true;
 }
 
-static void restore_playback_pixels(bool whole)
+static void restore_playback_pixels(void)
 {
     const pix_t *src = core_get_data_pinned(playback_scene.screen);
-    if (whole)
-        memcpy(LCD_BUF, src, LCD_WIDTH * LCD_HEIGHT * sizeof(*src));
-    else
-    {
-        struct ui_rect r = playback_scene.rect;
-        for (int y = r.y; y < r.y + r.height; y++)
-            memcpy(LCD_BUF + y * LCD_WIDTH + r.x, src + y * LCD_WIDTH + r.x,
-                   r.width * sizeof(*src));
-    }
+    memcpy(LCD_BUF, src, LCD_WIDTH * LCD_HEIGHT * sizeof(*src));
     core_put_data_pinned((void *)src);
 }
 
@@ -6578,14 +6568,14 @@ void carousel_wps_present(void)
         paint_playback_row(&playback_scene.walls, stock_flip_pose(&flip, now), now);
         bool landed = stock_flip_done(&flip, now);
         if (landed && playback_scene.art.handle > 0)
-            restore_playback_pixels(false);
+            restore_playback_pixels();
         lcd_update();
         if (landed || !lcd_active())
             break;
         ui_clock_sleep(ui_clock_wait_until(ui_pace_next(&flow_pace, start)));
         now = USEC_TIMER;
     }
-    restore_playback_pixels(true);
+    restore_playback_pixels();
     lcd_update();
     cpu_boost(false);
     drop_playback_bitmap(&playback_scene.art.handle);
@@ -6640,7 +6630,7 @@ static void return_from_playback(void)
         for (;;)
         {
             if (now == start && playback_scene.screen > 0)
-                restore_playback_pixels(true);
+                restore_playback_pixels();
             else
             {
                 bool landed = stock_flip_done(&flip, now) && !stock_animating(&flow_row, now);

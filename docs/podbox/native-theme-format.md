@@ -62,6 +62,18 @@ Use `font.<role>=<basename>` to reference a font. The basename can contain 1–3
 | `icon` | `24x24-icons` |
 | `wps_title`, `handoff_title`, `lyrics_focus` | `26-noto-sans-medium` |
 | `wps_meta`, `handoff_caption` | `12-noto-sans` |
+| `panel` | `14-noto-sans` |
+
+### Cover Flow album panel
+
+The album panel draws its header in `list_tint`, with the album title in
+`foreground` and the `title` font and the artist line in `muted` and the
+`wps_meta` font. A `list_tint` equal to `background` is lifted slightly toward
+`foreground` so the header still stands apart. Track rows use the `panel`
+font, `foreground` titles and `muted` durations; the selected row is a
+`selection` bar with `selected_text` and `selected_secondary`. `separator`
+draws the card's edge. With `background.list=blurred_cover` the rows sit on the
+blurred album art, and with `solid` on `background`.
 
 ### Metrics
 

@@ -61,6 +61,7 @@ static const struct {
     [UI_FONT_HANDOFF_TITLE] = { "handoff_title", "26-noto-sans-medium" },
     [UI_FONT_LYRICS_FOCUS] = { "lyrics_focus", "20-noto-sans" },
     [UI_FONT_LYRICS_BACKGROUND] = { "lyrics_background", "14-noto-sans" },
+    [UI_FONT_PANEL]     = { "panel",     "14-noto-sans" },
 };
 
 static const struct {

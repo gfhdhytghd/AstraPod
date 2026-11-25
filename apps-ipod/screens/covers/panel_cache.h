@@ -47,6 +47,10 @@ unsigned panel_cache_disc_number(const struct panel_cached *data, int n);
 const char *panel_cache_artist(const struct panel_cached *data);
 const struct panel_cache_row *panel_cache_row(const struct panel_cached *data, int index);
 int panel_cache_font(enum panel_face face);
+/* Read the theme's fonts again; Cover Flow calls it on entry. */
+void panel_cache_follow_theme(void);
+/* An open album panel holds the faces, so a theme change waits for it. */
+void panel_cache_hold_fonts(bool hold);
 void panel_cache_bind(const struct panel_cached *primary, const struct panel_cached *adjacent);
 
 #endif

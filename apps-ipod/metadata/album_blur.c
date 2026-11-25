@@ -32,7 +32,7 @@
 #include "usb.h"
 
 #define BLUR_DIR ROCKBOX_DIR "/podbox/cache/blur"
-#define BLUR_MAGIC 0x334c4250u
+#define BLUR_MAGIC 0x344c4250u
 #define BLUR_SLOTS 4
 #define BLUR_EDGE 240
 #define BLUR_W ((LCD_WIDTH + 3) / 4)

@@ -4236,6 +4236,7 @@ static bool init(void)
     struct ui_theme theme;
     ui_theme_snapshot(&theme);
     pf_title_font = ui_theme_font_load(&theme, UI_FONT_TITLE, 64);
+    panel_cache_follow_theme();
     pf_body_font = ui_theme_font_load(&theme, UI_FONT_BODY, 64);
 
     /* Reserve real, empty vertical space for draw_album_text()'s overlay,
@@ -4621,7 +4622,7 @@ static int frame_wait(uint32_t deadline)
 #define ALBUM_PANEL_WIDTH ALBUM_BLUR_PANEL_W
 #define ALBUM_PANEL_HEIGHT ALBUM_BLUR_PANEL_H
 #define ALBUM_PANEL_X ((LCD_WIDTH - ALBUM_PANEL_WIDTH) / 2)
-#define ALBUM_PANEL_Y ((LCD_HEIGHT - ALBUM_PANEL_HEIGHT) / 2)
+#define ALBUM_PANEL_Y (LCD_HEIGHT - ALBUM_PANEL_HEIGHT)
 #define FLIP_MID PFREAL_ONE
 #define FLIP_OPEN (2 * FLIP_MID)
 
@@ -4630,9 +4631,12 @@ static int frame_wait(uint32_t deadline)
 #define PANEL_PITCH ALBUM_BLUR_ROW_PITCH
 #define PANEL_LEFT ALBUM_BLUR_TEXT_LEFT
 #define PANEL_HEADER_RIGHT ALBUM_BLUR_HEADER_RIGHT
+#define PANEL_ROWS_RIGHT ALBUM_BLUR_ROWS_RIGHT
+/* The scroll bar sits in the right inset, clear of the durations. */
+#define PANEL_BAR_X (ALBUM_PANEL_WIDTH - 6)
+#define PANEL_TIME_GAP 8
 #define ALBUM_PANEL_ROWS ALBUM_BLUR_ROWS
 #define PANEL_CACHE (2 * ALBUM_PANEL_ROWS + 1)
-#define PANEL_GRAY(v) LCD_RGBPACK(v, v, v)
 
 struct panel_track {
     int index; /* One-based, so a zeroed slot is unused. */
@@ -4683,7 +4687,37 @@ static struct album_panel {
     int dot_x, count_x;
     int digit_width;
     bool tabular, header_ready, digits_ready, resuming;
+    /* The theme's list background is solid rather than the blurred cover. */
+    bool solid;
+    /* The selected title, scrolled by `marquee` pixels when it is too long for
+     * its row. Zero `marquee_step` means it fits or is waiting. */
+    int marquee_track, marquee, marquee_step, marquee_width, marquee_room;
+    long marquee_start;
 } panel;
+
+/* The panel's colours, all from the theme. */
+struct panel_ink {
+    pix_t back, header, text, muted, edge;
+    pix_t selection, selected_text, selected_muted;
+};
+
+static void panel_ink(struct panel_ink *ink)
+{
+    ink->back = ui_theme_rgb565(UI_COLOR_BACKGROUND);
+    ink->header = ui_theme_rgb565(UI_COLOR_LIST_TINT);
+    ink->text = ui_theme_rgb565(UI_COLOR_FOREGROUND);
+    ink->muted = ui_theme_rgb565(UI_COLOR_MUTED);
+    ink->edge = ui_theme_rgb565(UI_COLOR_SEPARATOR);
+    /* A header the same colour as the rows would not read as one. */
+    if (ink->header == ink->back)
+        ink->header = color_blend(ink->back, ink->text, 32);
+    ink->selection = ui_theme_rgb565(UI_COLOR_SELECTION);
+    /* A filled selection needs contrasting ink. */
+    ink->selected_text = color_fit_contrast(
+        ui_theme_rgb565(UI_COLOR_SELECTED_TEXT), ink->selection, 450);
+    ink->selected_muted = color_fit_contrast(
+        ui_theme_rgb565(UI_COLOR_SELECTED_SECONDARY), ink->selection, 450);
+}
 
 static void panel_layout_header(void);
 static void panel_layout_digits(void);
@@ -4714,6 +4748,7 @@ static void close_album_panel(void)
         return;
     ui_perf_end(panel.trace);
     panel_drop_pages();
+    panel_cache_hold_fonts(false);
     memset(&panel, 0, sizeof(panel));
 }
 
@@ -4730,6 +4765,10 @@ static bool open_album_panel(int selected, int top)
         return false;
     panel.opened = USEC_TIMER;
     caption_artist.valid = false;
+    panel_cache_hold_fonts(true);
+    struct ui_theme theme;
+    ui_theme_snapshot(&theme);
+    panel.solid = theme.background[UI_BG_LIST] == UI_BG_SOLID;
     panel_perf_record(PP_SELECT, 0, center_index, model->external);
     panel.live = true;
     panel.count = -1;
@@ -5067,10 +5106,10 @@ static void panel_step_scroll(void)
 
 static void panel_layout_digits(void)
 {
-    int small = panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED;
-    if (!font_prefetch_text(small, "0123456789:"))
+    int body = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
+    if (!font_prefetch_text(body, "0123456789:"))
         return;
-    struct font *font = font_get(small);
+    struct font *font = font_get(body);
     panel.digit_width = font_get_width(font, '0');
     panel.tabular = true;
     for (int ch = '1'; ch <= '9'; ch++)
@@ -5111,7 +5150,7 @@ static void panel_fit(const char *label, char *fitted, size_t size, int font, in
 static void panel_layout_header(void)
 {
     int title = panel.album_font >= 0 ? panel.album_font : FONT_SYSFIXED;
-    int small = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
+    int small = panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED;
     panel.dot_x = 0;
     panel.count_x = PANEL_LEFT;
     panel.count_label[0] = 0;
@@ -5155,8 +5194,7 @@ static void panel_layout_track(struct panel_track *row)
     row->glyphs_ready = ready && (!row->duration || panel.digits_ready);
     if (!row->glyphs_ready)
         return;
-    int right = panel.count > ALBUM_PANEL_ROWS ? 206 : ALBUM_BLUR_ROWS_RIGHT;
-    int end = right;
+    int end = PANEL_ROWS_RIGHT;
     if (row->duration)
     {
         unsigned int s = row->duration / 1000;
@@ -5166,25 +5204,30 @@ static void panel_layout_track(struct panel_track *row)
         else
             snprintf(row->time, sizeof(row->time), "%u:%02u", s / 60, s % 60);
 
-        int small = panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED;
         if (panel.tabular)
-            end -= font_getstringsize(row->time, NULL, NULL, small);
+            end -= font_getstringsize(row->time, NULL, NULL, title);
         else
         {
-            int colon = font_get_width(font_get(small), ':');
+            int colon = font_get_width(font_get(title), ':');
             for (const char *ch = row->time; *ch; ch++)
                 end -= *ch == ':' ? colon : panel.digit_width;
         }
         row->time_x = end;
-        end -= 8;
+        end -= PANEL_TIME_GAP;
     }
     panel_fit(row->title, row->fitted, sizeof(row->fitted), title, end - PANEL_LEFT);
 }
 
-static void panel_header(void)
+/* The top of a line of `font` centred in a span `height` rows tall. */
+static int panel_line_top(int font, int height)
+{
+    return (height - font_get(font)->height) / 2;
+}
+
+static void panel_header(const struct panel_ink *ink)
 {
     int title = panel.album_font >= 0 ? panel.album_font : FONT_SYSFIXED;
-    int meta = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
+    int meta = panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED;
     bool ready = panel.header_ready;
     if (ready)
     {
@@ -5195,22 +5238,20 @@ static void panel_header(void)
     }
     int title_height = font_get(title)->height;
     int meta_height = font_get(meta)->height;
-    int title_y = (PANEL_DIVIDER - title_height - meta_height - 3) / 2;
-    int y = title_y + title_height + 3;
-    lcd_set_foreground(LCD_WHITE);
+    int title_y = (PANEL_DIVIDER - title_height - meta_height) / 2;
+    int y = title_y + title_height;
+    lcd_set_foreground(ink->text);
     lcd_setfont(title);
     if (ready)
         lcd_putsxy(PANEL_LEFT, title_y, panel.fitted_title);
     lcd_setfont(meta);
-    lcd_set_foreground(PANEL_GRAY(0xb0));
+    lcd_set_foreground(ink->muted);
     if (ready && *panel.fitted_artist)
         lcd_putsxy(PANEL_LEFT, y, panel.fitted_artist);
     if (ready && panel.dot_x)
         lcd_putsxy(panel.dot_x, y, panel_middot);
     if (ready && *panel.count_label)
         lcd_putsxy(panel.count_x, y, panel.count_label);
-    lcd_set_foreground(PANEL_GRAY(0x2e));
-    lcd_hline(6, 213, PANEL_DIVIDER);
 }
 
 static void panel_duration(const struct panel_track *row, int y)
@@ -5248,7 +5289,7 @@ static void panel_toggle_mark(void)
     panel.dirty = true;
 }
 
-static void panel_paint_menu(struct viewport *view)
+static void panel_paint_menu(struct viewport *view, const struct panel_ink *ink)
 {
     int title = panel.album_font >= 0 ? panel.album_font : FONT_SYSFIXED;
     int body = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
@@ -5262,48 +5303,180 @@ static void panel_paint_menu(struct viewport *view)
     }
 
     lcd_setfont(title);
-    lcd_set_foreground(LCD_WHITE);
-    panel.menu_ready = panel_text(heading, PANEL_LEFT, 38, PANEL_HEADER_RIGHT);
-    lcd_set_foreground(PANEL_GRAY(0x2e));
-    lcd_hline(6, 213, PANEL_DIVIDER);
+    lcd_set_foreground(ink->text);
+    panel.menu_ready = panel_text(heading, PANEL_LEFT,
+                                  panel_line_top(title, PANEL_DIVIDER) +
+                                  font_get(title)->ascent, PANEL_HEADER_RIGHT);
 
     struct viewport rows = *view;
     rows.y += PANEL_ROWS_Y;
     rows.height = ALBUM_PANEL_ROWS * PANEL_PITCH;
     lcd_set_viewport(&rows);
     lcd_setfont(body);
-    pix_t selection = ui_theme_rgb565(UI_COLOR_SELECTION);
+    int baseline = panel_line_top(body, PANEL_PITCH) + font_get(body)->ascent;
     for (int i = 0; i < panel.command_count; ++i)
     {
         int y = i * PANEL_PITCH;
-        pix_t foreground = PANEL_GRAY(0xe6);
+        pix_t foreground = ink->text;
         if (i == panel.command_selected)
         {
-            lcd_set_foreground(selection);
+            lcd_set_foreground(ink->selection);
             lcd_fillrect(1, y, ALBUM_PANEL_WIDTH - 2, PANEL_PITCH);
-            foreground = color_fit_contrast(ui_theme_rgb565(UI_COLOR_SELECTED_TEXT),
-                                            selection, 450);
+            foreground = ink->selected_text;
         }
         lcd_set_foreground(foreground);
         const char *label = str(panel_command_labels[panel.commands[i]]);
-        panel.menu_ready &= panel_text(label, PANEL_LEFT, y + 14, ALBUM_BLUR_ROWS_RIGHT);
+        panel.menu_ready &= panel_text(label, PANEL_LEFT, y + baseline,
+                                       PANEL_ROWS_RIGHT);
     }
     lcd_set_viewport(view);
 }
 
-static void panel_paint_rows(struct viewport *view)
+/* The row the selected track is drawn in, counting disc labels. */
+static int panel_selected_row(void)
 {
-    int right = panel.count > ALBUM_PANEL_ROWS ? 206 : 210;
+    int row = panel.selected;
+    for (int i = 0; i < panel.disc_count &&
+                    panel_disc_track(i) <= panel.selected; i++)
+        row++;
+    return row;
+}
+
+static bool panel_marquee_on(int track)
+{
+    return track + 1 == panel.marquee_track && panel.marquee;
+}
+
+/* A selected title too long for its row scrolls with the caption's scroll
+ * settings, from its start to its end and back. */
+static void panel_marquee_select(int track, const struct panel_track *row,
+                                 int body)
+{
+    if (track + 1 == panel.marquee_track)
+        return;
+    panel.marquee_track = track + 1;
+    panel.marquee = panel.marquee_step = 0;
+    int end = row->duration ? row->time_x - PANEL_TIME_GAP : PANEL_ROWS_RIGHT;
+    panel.marquee_room = end - PANEL_LEFT;
+    panel.marquee_width = font_getstringsize(row->title, NULL, NULL, body);
+    if (global_settings.scrolling_enabled && strcmp(row->title, row->fitted) &&
+        panel.marquee_width > panel.marquee_room)
+    {
+        panel.marquee_step = MAX(1, scroll_line_info.step);
+        panel.marquee_start = current_tick + scroll_line_info.delay;
+    }
+}
+
+/* True when the selected title moved. */
+static bool panel_marquee_step(void)
+{
+    if (!panel.marquee_step || TIME_BEFORE(current_tick, panel.marquee_start))
+        return false;
+    int end = panel.marquee_width - panel.marquee_room;
+    panel.marquee += panel.marquee_step;
+    panel.marquee_start = current_tick + scroll_line_info.ticks;
+    if (panel.marquee >= end || panel.marquee <= 0)
+    {
+        panel.marquee = MIN(MAX(panel.marquee, 0), end);
+        panel.marquee_step = -panel.marquee_step;
+        panel.marquee_start = current_tick + scroll_line_info.delay * 2;
+    }
+    return true;
+}
+
+/* One track row at `y` in the rows viewport `rows`. */
+static void panel_paint_track(struct viewport *rows, int track, int y,
+                              const struct panel_ink *ink)
+{
+    int body = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
+    struct panel_track *row = &panel.rows[track % PANEL_CACHE];
+    bool selected = track == panel.selected;
+    if (selected)
+    {
+        lcd_set_foreground(ink->selection);
+        lcd_fillrect(1, y, ALBUM_PANEL_WIDTH - 2, PANEL_PITCH);
+    }
+    bool ready = row->index == track + 1 && row->glyphs_ready;
+    if (ready)
+    {
+        ready &= font_prefetch_text(body, row->fitted);
+        ready &= font_prefetch_text(body, row->time);
+        /* Retry layout and repaint when a formerly resident glyph returns. */
+        row->glyphs_ready = ready;
+    }
+    if (!ready)
+    {
+        char number[16];
+        snprintf(number, sizeof(number), "%d", track + 1);
+        lcd_setfont(FONT_SYSFIXED);
+        lcd_set_foreground(selected ? ink->selected_text : ink->muted);
+        lcd_putsxy(PANEL_LEFT, y + panel_line_top(FONT_SYSFIXED, PANEL_PITCH),
+                   number);
+        return;
+    }
+
+    panel.painted_rows++;
+    int mark = y + (PANEL_PITCH - 7) / 2;
+    if (panel_marked(track))
+    {
+        lcd_set_foreground(selected ? ink->selected_text : ink->text);
+        lcd_drawline(3, mark + 3, 5, mark + 5);
+        lcd_drawline(5, mark + 5, 9, mark);
+    }
+    else if (row->playing)
+    {
+        lcd_set_foreground(selected ? ink->selected_text : ink->text);
+        for (int i = 0; i < 7; i++)
+            lcd_hline(3, 3 + MIN(i, 6 - i) * 5 / 3, mark + i);
+    }
+    int top = y + panel_line_top(body, PANEL_PITCH);
+    lcd_setfont(body);
+    if (row->duration)
+    {
+        lcd_set_foreground(selected ? ink->selected_muted : ink->muted);
+        panel_duration(row, top);
+    }
+    lcd_set_foreground(selected ? ink->selected_text : ink->text);
+    if (selected)
+        panel_marquee_select(track, row, body);
+    if (!panel_marquee_on(track))
+    {
+        lcd_putsxy(PANEL_LEFT, top, row->fitted);
+        return;
+    }
+    if (!font_prefetch_text(body, row->title))
+        return;
+    struct viewport clip = *rows;
+    clip.x += PANEL_LEFT;
+    clip.y += y;
+    clip.width = panel.marquee_room;
+    clip.height = PANEL_PITCH;
+    lcd_set_viewport(&clip);
+    lcd_setfont(body);
+    lcd_set_foreground(ink->selected_text);
+    lcd_putsxy(-panel.marquee, top - y, row->title);
+    lcd_set_viewport(rows);
+}
+
+static void panel_paint_scrollbar(int height, int y0,
+                                  const struct panel_ink *ink)
+{
+    if (panel.count <= ALBUM_PANEL_ROWS)
+        return;
+    int total = panel.count + panel.disc_count;
+    int thumb = MAX(12, height * ALBUM_PANEL_ROWS / total);
+    int y = (int64_t)(height - thumb) * panel.scroll_y /
+            ((total - ALBUM_PANEL_ROWS) * PANEL_PITCH);
+    lcd_set_foreground(ink->edge);
+    lcd_fillrect(PANEL_BAR_X, -y0, 2, height);
+    lcd_set_foreground(ink->muted);
+    lcd_fillrect(PANEL_BAR_X, y - y0, 2, thumb);
+}
+
+static void panel_paint_rows(struct viewport *view, const struct panel_ink *ink)
+{
     int small = panel.small_font >= 0 ? panel.small_font : FONT_SYSFIXED;
     int title = panel.title_font >= 0 ? panel.title_font : FONT_SYSFIXED;
-    int title_ascent = font_get(title)->ascent;
-    int small_ascent = font_get(small)->ascent;
-    pix_t selection = ui_theme_rgb565(UI_COLOR_SELECTION);
-    /* Native lists use a marker. A filled selection needs contrasting ink. */
-    pix_t selected_text = color_fit_contrast(ui_theme_rgb565(UI_COLOR_SELECTED_TEXT),
-                                            selection, 450);
-    pix_t secondary = color_fit_contrast(ui_theme_rgb565(UI_COLOR_SELECTED_SECONDARY),
-                                        selection, 450);
 
     struct viewport rows = *view;
     rows.y += PANEL_ROWS_Y;
@@ -5316,8 +5489,10 @@ static void panel_paint_rows(struct viewport *view)
             panel.count == -1 ? str(LANG_WAIT) :
             panel.count == -2 ? str(LANG_TAGCACHE_BUSY) : str(LANG_NO_FILES);
         lcd_setfont(title);
-        lcd_set_foreground(PANEL_GRAY(0xe6));
-        panel_text(label, PANEL_LEFT, 14, right);
+        lcd_set_foreground(ink->text);
+        panel_text(label, PANEL_LEFT,
+                   panel_line_top(title, PANEL_PITCH) + font_get(title)->ascent,
+                   PANEL_ROWS_RIGHT);
     }
     else
     {
@@ -5331,81 +5506,24 @@ static void panel_paint_rows(struct viewport *view)
                 char label[80];
                 panel_disc_label(disc, label, sizeof(label));
                 lcd_setfont(small);
-                lcd_set_foreground(ALBUM_BLUR_DIM_TEXT);
+                lcd_set_foreground(ink->muted);
                 if (font_prefetch_text(small, label))
                     panel.painted_discs++;
-                panel_text(label, PANEL_LEFT, y + 14, right);
+                int baseline = panel_line_top(small, PANEL_PITCH) +
+                               font_get(small)->ascent;
+                panel_text(label, PANEL_LEFT, y + baseline, PANEL_ROWS_RIGHT);
                 disc++;
                 continue;
             }
-
-            struct panel_track *row = &panel.rows[track % PANEL_CACHE];
-            bool selected = track == panel.selected;
-            if (selected)
-            {
-                lcd_set_foreground(selection);
-                lcd_fillrect(1, y, ALBUM_PANEL_WIDTH - 2, PANEL_PITCH);
-            }
-            bool ready = row->index == track + 1 && row->glyphs_ready;
-            if (ready)
-            {
-                ready &= font_prefetch_text(title, row->fitted);
-                ready &= font_prefetch_text(small, row->time);
-                /* Retry layout and repaint when a formerly resident glyph returns. */
-                row->glyphs_ready = ready;
-            }
-            if (ready)
-            {
-                panel.painted_rows++;
-                if (panel_marked(track))
-                {
-                    lcd_set_foreground(selected ? selected_text : LCD_WHITE);
-                    lcd_drawline(3, y + 10, 5, y + 12);
-                    lcd_drawline(5, y + 12, 9, y + 7);
-                }
-                else if (row->playing)
-                {
-                    lcd_set_foreground(selected ? selected_text : LCD_WHITE);
-                    for (int i = 0; i < 7; i++)
-                        lcd_hline(3, 3 + MIN(i, 6 - i) * 5 / 3, y + 6 + i);
-                }
-                if (row->duration)
-                {
-                    lcd_setfont(small);
-                    lcd_set_foreground(selected ? secondary : ALBUM_BLUR_DIM_TEXT);
-                    panel_duration(row, y + 14 - small_ascent);
-                }
-                lcd_setfont(title);
-                lcd_set_foreground(selected ? selected_text : PANEL_GRAY(0xe6));
-                lcd_putsxy(PANEL_LEFT, y + 14 - title_ascent, row->fitted);
-            }
-            else
-            {
-                char number[16];
-                snprintf(number, sizeof(number), "%d", track + 1);
-                lcd_setfont(FONT_SYSFIXED);
-                lcd_set_foreground(selected ? selected_text : ALBUM_BLUR_DIM_TEXT);
-                lcd_putsxy(PANEL_LEFT, y + 14 - font_get(FONT_SYSFIXED)->ascent, number);
-            }
+            panel_paint_track(&rows, track, y, ink);
             track++;
         }
-
-        if (panel.count > ALBUM_PANEL_ROWS)
-        {
-            int total = panel.count + panel.disc_count;
-            int height = MAX(12, rows.height * ALBUM_PANEL_ROWS / total);
-            int y = (int64_t)(rows.height - height) * panel.scroll_y /
-                    ((total - ALBUM_PANEL_ROWS) * PANEL_PITCH);
-            lcd_set_foreground(PANEL_GRAY(0x22));
-            lcd_fillrect(215, 0, 2, rows.height);
-            lcd_set_foreground(PANEL_GRAY(0x5a));
-            lcd_fillrect(215, y, 2, height);
-        }
+        panel_paint_scrollbar(rows.height, 0, ink);
     }
     lcd_set_viewport(view);
 }
 
-static void NO_INLINE paint_album_panel(void)
+static struct viewport panel_viewport(void)
 {
     struct viewport view = pf_vp;
     view.x = ALBUM_PANEL_X;
@@ -5413,26 +5531,64 @@ static void NO_INLINE paint_album_panel(void)
     view.width = ALBUM_PANEL_WIDTH;
     view.height = ALBUM_PANEL_HEIGHT;
     view.flags &= ~VP_FLAG_ALIGNMENT_MASK;
+    return view;
+}
+
+static void NO_INLINE paint_album_panel(void)
+{
+    struct viewport view = panel_viewport();
     struct viewport *previous = lcd_set_viewport(&view);
-    lcd_set_background(PANEL_GRAY(0x12));
+    struct panel_ink ink;
+    panel_ink(&ink);
+    lcd_set_background(ink.back);
     lcd_set_drawmode(DRMODE_SOLID);
-    panel.have_blur = album_blur_draw_panel(&panel.blur_source);
+    panel.have_blur = !panel.solid && album_blur_draw_panel(&panel.blur_source);
     if (!panel.have_blur)
         lcd_clear_viewport();
-    lcd_set_foreground(PANEL_GRAY(0x3c));
-    lcd_drawrect(0, 0, view.width, view.height);
+    /* The card runs off the bottom of the screen: no edge there. */
+    lcd_set_foreground(ink.edge);
+    lcd_hline(0, view.width - 1, 0);
+    lcd_vline(0, 1, view.height - 1);
+    lcd_vline(view.width - 1, 1, view.height - 1);
+    lcd_set_foreground(ink.header);
+    lcd_fillrect(1, 1, view.width - 2, PANEL_DIVIDER - 1);
 
     lcd_set_drawmode(DRMODE_FG);
     if (panel.command_count)
-        panel_paint_menu(&view);
+        panel_paint_menu(&view, &ink);
     else
     {
-        panel_header();
-        panel_paint_rows(&view);
+        panel_header(&ink);
+        panel_paint_rows(&view, &ink);
     }
     lcd_set_viewport(previous);
 }
 
+/* Moves the selected title on: repaints its row alone. */
+static void panel_repaint_marquee(void)
+{
+    int y = panel_selected_row() * PANEL_PITCH - panel.scroll_y;
+    if (y < 0 || y + PANEL_PITCH > ALBUM_PANEL_ROWS * PANEL_PITCH)
+        return;
+    struct viewport view = panel_viewport();
+    struct viewport rows = view;
+    rows.y += PANEL_ROWS_Y;
+    rows.height = ALBUM_PANEL_ROWS * PANEL_PITCH;
+    struct viewport *previous = lcd_set_viewport(&rows);
+    struct panel_ink ink;
+    panel_ink(&ink);
+    lcd_set_drawmode(DRMODE_FG);
+    unsigned painted = panel.painted_rows;
+    panel_paint_track(&rows, panel.selected, y, &ink);
+    panel.painted_rows = painted;
+    struct viewport bar = rows;
+    bar.y += y;
+    bar.height = PANEL_PITCH;
+    lcd_set_viewport(&bar);
+    panel_paint_scrollbar(rows.height, y, &ink);
+    lcd_set_viewport(previous);
+    lcd_update_rect(view.x + 1, rows.y + y, view.width - 2, PANEL_PITCH);
+}
 /* Draw the neighbours with the existing culling and span renderer.
  * The artwork is the only transformed texture. */
 static void NO_INLINE render_album_flip(int position, pix_t color)
@@ -5480,7 +5636,7 @@ static void NO_INLINE render_album_flip(int position, pix_t color)
     {
         w += (ALBUM_PANEL_WIDTH - w) * turn / FLIP_MID;
         h += (ALBUM_PANEL_HEIGHT - h) * turn / FLIP_MID;
-        cy += (LCD_HEIGHT / 2 - cy) * turn / FLIP_MID;
+        cy += (ALBUM_PANEL_Y + ALBUM_PANEL_HEIGHT / 2 - cy) * turn / FLIP_MID;
     }
     pix_t *saved = buffer;
     buffer = LCD_BUF;
@@ -5571,6 +5727,10 @@ static void step_album_flip(void)
         if (!panel.resuming && !TIME_BEFORE(current_tick, panel.next_read))
             panel_read_tracks();
     }
+    if (panel.position == FLIP_OPEN && panel.to == FLIP_OPEN && !animating &&
+        !panel.command_count && panel_marquee_step() && !panel.dirty &&
+        lcd_active())
+        panel_repaint_marquee();
     bool draw = (panel.dirty || (panel.command_count && !panel.menu_ready)) &&
                 lcd_active() && (!animating || due);
     if (draw)
@@ -6062,9 +6222,14 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 (panel.scroll_frames && panel.position == FLIP_OPEN))
                 timeout = frame_wait(panel.due);
             else
+            {
                 timeout = panel.dirty ? TIMEOUT_NOBLOCK :
                           panel.missing || panel.play_pending || panel.to == FLIP_OPEN
                           ? HZ / 20 : HZ / 5;
+                if (panel.marquee_step)
+                    timeout = MIN(timeout,
+                                  MAX(1, panel.marquee_start - current_tick));
+            }
         }
         else if (!dark && (pf_state == pf_scrolling || art_owed ||
                            caption_owed || caption_flush_owed))

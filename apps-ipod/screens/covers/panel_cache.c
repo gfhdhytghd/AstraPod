@@ -28,6 +28,7 @@
 #include "system.h"
 #include "system/bg_task.h"
 #include "system/appevents.h"
+#include "ui/native_theme_runtime.h"
 #include "usb.h"
 
 #define PANEL_DIR ROCKBOX_DIR "/podbox/cache/panel"
@@ -77,11 +78,14 @@ static unsigned remote_rows;
 static bool remote_stale;
 static long retry_at;
 static struct mutex lock;
-static const char *const faces[PANEL_FACES] = {
-    FONT_DIR "/18-noto-sans.pbf", FONT_DIR "/14-noto-sans.pbf",
-    FONT_DIR "/12-noto-sans.pbf",
+/* The faces are the theme's title, panel and metadata fonts. A theme that
+ * names others takes effect while no album panel holds the current ones. */
+static const enum ui_font_role face_roles[PANEL_FACES] = {
+    UI_FONT_TITLE, UI_FONT_PANEL, UI_FONT_WPS_META,
 };
-static const unsigned sizes[PANEL_FACES] = {18, 14, 12};
+static char faces[PANEL_FACES][UI_THEME_FONT_PATH_MAX];
+static char wanted[PANEL_FACES][UI_THEME_FONT_PATH_MAX];
+static bool fonts_held;
 static int fonts[PANEL_FACES] = {-1, -1, -1};
 static uint32_t fonts_revision, db_stamp, db_seen_generation, db_seen_revision;
 static struct bg_task task;
@@ -241,8 +245,56 @@ static bool cancelled(void)
     return stale;
 }
 
+static void want_theme_fonts(void)
+{
+    for (unsigned i = 0; i < PANEL_FACES; i++)
+        ui_theme_current_font_path(face_roles[i], wanted[i], sizeof(wanted[i]));
+}
+
+void panel_cache_follow_theme(void)
+{
+    mutex_lock(&lock);
+    want_theme_fonts();
+    mutex_unlock(&lock);
+}
+
+void panel_cache_hold_fonts(bool hold)
+{
+    mutex_lock(&lock);
+    fonts_held = hold;
+    mutex_unlock(&lock);
+}
+
+static unsigned face_height(unsigned face)
+{
+    return fonts[face] >= 0 ? (unsigned)font_get(fonts[face])->height : 0;
+}
+
 static bool fonts_ready(void)
 {
+    mutex_lock(&lock);
+    if (!*wanted[0])
+        want_theme_fonts();
+    bool changed = false;
+    for (unsigned i = 0; i < PANEL_FACES; i++)
+        changed |= strcmp(faces[i], wanted[i]) != 0;
+    for (unsigned i = 0; i < PANEL_SLOTS; i++)
+        changed &= !slots[i].refs;
+    if (changed && !fonts_held)
+    {
+        for (unsigned i = 0; i < PANEL_FACES; i++)
+        {
+            if (fonts[i] >= 0)
+                font_unload(fonts[i]);
+            fonts[i] = -1;
+            strcpy(faces[i], wanted[i]);
+        }
+        /* A slot's glyph packs belong to the faces it was built with. */
+        for (unsigned i = 0; i < PANEL_SLOTS; i++)
+            slots[i].used = 0;
+        fonts_revision = 0;
+    }
+    mutex_unlock(&lock);
     if (fonts_revision)
         return true;
     uint32_t revision = PANEL_MAGIC;
@@ -252,7 +304,7 @@ static bool fonts_ready(void)
         {
             uint32_t start = USEC_TIMER;
             fonts[i] = font_load_private(faces[i], 96);
-            panel_perf_record(PP_FONT, USEC_TIMER - start, sizes[i], 0);
+            panel_perf_record(PP_FONT, USEC_TIMER - start, face_height(i), 0);
         }
         if (fonts[i] < 0)
             return false;
@@ -570,9 +622,7 @@ static void build_packs(struct panel_cached *data)
             gather_text(codes, &n, work.title);
         else if (face == PANEL_BODY)
         {
-            gather_text(codes, &n, d->artist);
-            gather_text(codes, &n, " ·");
-            gather_text(codes, &n, count_label);
+            gather_text(codes, &n, "0123456789:");
             for (unsigned row = 0; row < d->count; row++)
             {
                 if (row == PANEL_PACK_ROWS)
@@ -586,7 +636,10 @@ static void build_packs(struct panel_cached *data)
         }
         else
         {
-            gather_text(codes, &n, "0123456789: ");
+            gather_text(codes, &n, d->artist);
+            gather_text(codes, &n, " ·");
+            gather_text(codes, &n, count_label);
+            gather_text(codes, &n, "0123456789");
             if (d->disc_count)
                 gather_text(codes, &n, chinese ? "光盘" : (const char *)str(LANG_DISC));
         }
@@ -602,7 +655,7 @@ static void build_packs(struct panel_cached *data)
                                                 scratch->bytes + d->bytes,
                                                 PANEL_BYTES - d->bytes, cancelled);
         d->bytes += d->length[face];
-        panel_perf_record(PP_FONT, USEC_TIMER - start, sizes[face],
+        panel_perf_record(PP_FONT, USEC_TIMER - start, face_height(face),
                           d->length[face] ? n : 0);
     }
 }

@@ -219,17 +219,22 @@ int ui_theme_font_load(const struct ui_theme *theme, enum ui_font_role role, int
     return font_load_ex(path, 0, glyphs);
 }
 
-int ui_theme_current_font_load(enum ui_font_role role, int glyphs)
+void ui_theme_current_font_path(enum ui_font_role role, char *path, size_t size)
 {
-    char path[sizeof(FONT_DIR "/.pbf") + UI_THEME_FONT_NAME_MAX];
     if (current_theme > 0)
     {
         struct ui_theme *theme = core_get_data_pinned(current_theme);
-        theme_font_path(path, sizeof(path), theme->font[role], role);
+        theme_font_path(path, size, theme->font[role], role);
         core_put_data_pinned(theme);
     }
     else
-        theme_font_path(path, sizeof(path), ui_theme_builtin_font(role), role);
+        theme_font_path(path, size, ui_theme_builtin_font(role), role);
+}
+
+int ui_theme_current_font_load(enum ui_font_role role, int glyphs)
+{
+    char path[UI_THEME_FONT_PATH_MAX];
+    ui_theme_current_font_path(role, path, sizeof(path));
     return font_load_ex(path, 0, glyphs);
 }
 

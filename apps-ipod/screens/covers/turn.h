@@ -20,9 +20,12 @@ struct turn_slot { int id; unsigned stamp; struct turn_hinge hinge; };
 struct turn_row {
     int count, target, margin_delta;
     int64_t p;
+    int64_t opening; /* Q16 index of the face opening during a fast scroll */
+    int32_t opening_weight;
     int32_t age, hold, weight, shock, bank_shock;
     int32_t previous_gap;
-    int32_t carrier_rate; /* Q24 reciprocal seconds */
+    int32_t brake_weight;
+    int32_t carrier_rate, terminal_rate; /* Q24 reciprocal seconds */
     int64_t carrier_offset; /* Q16 items */
     unsigned stamp;
     struct turn_slot slot[TURN_RING], local_slot[TURN_LOCAL_RING];
@@ -146,8 +149,10 @@ static void turn_reset(struct turn_row *r, int selected, int count)
     r->count = count;
     r->target = selected;
     r->p = (int64_t)selected * 65536;
+    r->opening = r->p;
     r->age = TURN_ONE;
     r->hold = TURN_HOLD;
+    r->terminal_rate = TURN_FREE;
     r->far[0] = (struct turn_hinge){ -TURN_ONE, TURN_ONE };
     r->far[1] = (struct turn_hinge){ TURN_ONE, TURN_ONE };
     r->stamp = 1;
@@ -207,6 +212,16 @@ static void turn_target(struct turn_row *r, int target)
         int32_t forecast = turn_max(r->hold + TURN_WINDOW, (gap + history)/2);
         gap += turn_mul(confidence, forecast - gap);
     }
+    /* Two short detents can interrupt the recovery ramp entirely. Include
+     * part of that ramp when the carrier is several albums behind the wheel. */
+    int32_t recent = turn_max(history, r->age);
+    int32_t cadence = turn_min(TURN_ONE, 25 * turn_max(0, r->hold + TURN_WINDOW - recent));
+    cadence = turn_mul(cadence, turn_min(TURN_ONE, history * 64));
+    int64_t pending = error - 65536;
+    int32_t backlog = pending <= 0 ? 0 :
+                      pending >= 8 * 65536 ? TURN_ONE : (int32_t)pending * 32;
+    int32_t braking = turn_mul(cadence, backlog);
+    gap += turn_mul(braking, turn_max(0, r->hold + 3 * TURN_WINDOW / 4 - gap));
     r->previous_gap = r->age;
     int32_t rate;
     if (gap) {
@@ -219,8 +234,14 @@ static void turn_target(struct turn_row *r, int target)
     }
     error = turn_error(r);
     int64_t distance = error < 0 ? -error : error;
-    r->carrier_offset = (TURN_TAIL >> 8) + ((distance * r->weight) >> 24);
-    r->carrier_rate = (int64_t)rate * TURN_ONE / (TURN_ONE + r->weight);
+    /* At speed, a longer initial coast and a shorter terminal approach
+     * close the queue without raising the speed after the final detent. */
+    int32_t stretch = TURN_ONE + 3 * turn_mul(r->weight, braking);
+    int32_t coast = turn_mul(r->weight, stretch);
+    r->carrier_offset = (TURN_TAIL >> 8) + ((distance * coast) >> 24);
+    r->carrier_rate = (int64_t)rate * TURN_ONE / (TURN_ONE + coast);
+    r->brake_weight = braking;
+    r->terminal_rate = TURN_FREE + 3 * turn_mul(TURN_FREE, braking) / 2;
     r->age = 0;
 }
 
@@ -283,6 +304,45 @@ static void turn_step_slot(struct turn_row *r, int i, struct turn_slot *s,
                     turn_mul(common, TURN_ONE-n));
 }
 
+/* The outermost two slots lie beyond every drawn opening. Rebase there
+ * after a large seek so the visible fan can recover at its usual speed. */
+static void turn_follow_opening(struct turn_row *r, int32_t dt, int32_t bank_gain)
+{
+    const int speed = 23; /* albums/second */
+    const int rate = 30; /* reciprocal seconds */
+    const int32_t tail = 1024; /* 1/64 album, Q16 */
+    const int32_t crossover = speed * 65536 / rate - tail;
+    const int32_t extent = (TURN_RADIUS + 2) * 65536;
+    if (r->opening < r->p - extent)
+        r->opening = r->p - extent;
+    if (r->opening > r->p + extent)
+        r->opening = r->p + extent;
+    int64_t error = (int64_t)r->target * 65536 - r->opening;
+    int64_t distance = error < 0 ? -error : error;
+
+    /* Integrate the linear part up to the exponential crossover. A frame
+     * straddling it spends only the remaining time on the exponential. */
+    int64_t travel = 0;
+    if (distance > crossover) {
+        int32_t available = (dt * speed + 128) >> 8;
+        travel = distance - crossover;
+        if (travel >= available) {
+            travel = available;
+            dt = 0;
+        } else {
+            dt -= ((int32_t)travel * 256 + speed / 2) / speed;
+        }
+    }
+    if (dt > 0 && distance) {
+        int32_t gain = turn_release(dt * rate);
+        travel += ((distance - travel + tail) * gain + TURN_ONE/2) >> 24;
+    }
+    if (travel > distance)
+        travel = distance;
+    r->opening += error < 0 ? -travel : travel;
+    r->opening_weight += turn_mul(r->brake_weight - r->opening_weight, bank_gain);
+}
+
 static void turn_step(struct turn_row *r, int32_t dt)
 {
     int32_t z = turn_release(turn_mul(dt, TURN_INV_TAU));
@@ -297,13 +357,22 @@ static void turn_step(struct turn_row *r, int32_t dt)
     r->bank_shock -= bank_fast;
     int64_t error = turn_error(r);
     int64_t distance = error < 0 ? -error : error;
-    int32_t fraction = turn_release(turn_mul(TURN_FREE, dt));
+    int32_t fraction = turn_release(turn_mul(r->terminal_rate, dt));
     int64_t travel = ((distance + (TURN_TAIL >> 8)) * fraction + TURN_ONE/2) >> 24;
     if (r->weight) {
         fraction = turn_release(turn_mul(r->carrier_rate, dt));
         int64_t limited = ((distance + r->carrier_offset) * fraction + TURN_ONE/2) >> 24;
-        if (limited < travel)
-            travel = limited;
+        int64_t smaller = limited < travel ? limited : travel;
+        int64_t larger = limited < travel ? travel : limited;
+        travel = smaller;
+        if (r->brake_weight && smaller) {
+            /* At full braking weight, m*(1-(m/M)^2/5) has equal slopes on
+             * both sides of m=M. This rounds the change into the terminal rate. */
+            int32_t ratio = (smaller << 16) / larger;
+            int32_t square = ((int64_t)ratio * ratio) >> 16;
+            int32_t reduction = turn_mul(r->brake_weight, square) / 5;
+            travel -= (smaller * reduction + 32768) >> 16;
+        }
     }
     if (travel > distance)
         travel = distance;
@@ -336,11 +405,12 @@ static void turn_step(struct turn_row *r, int32_t dt)
                            banks, local_rate, common);
     for (int j = 0; j < 2; j++)
         turn_hinge_step(&r->far[j], banks[j], banks[j], 0, common);
+    turn_follow_opening(r, dt, zb);
 }
 
 static bool turn_moving(const struct turn_row *r)
 {
-    if (turn_error(r))
+    if (turn_error(r) || r->opening != r->p)
         return true;
     for (int i = turn_max(0, r->target-TURN_HISTORY_RADIUS);
          i <= turn_min(r->count-1, r->target+TURN_HISTORY_RADIUS); i++) {
@@ -438,6 +508,28 @@ static void turn_fit_side(const int32_t half[], int count, int direction,
     }
 }
 
+/* An opening follows the moving target only as its hinge comes forward
+ * of both neighbours. Interpolate between indices before moving the fan. */
+static int32_t turn_opening_offset(const struct turn_row *r, int32_t bank)
+{
+    if (!r->opening_weight)
+        return -bank;
+    int id = r->opening >> 16;
+    int32_t level[2];
+    for (int j = 0; j < 2; j++) {
+        int n = turn_min(r->count - 1, turn_max(0, id + j));
+        int32_t b = r->slot[n % TURN_RING].hinge.b;
+        int32_t left = n > 0 ? r->slot[(n-1) % TURN_RING].hinge.b : TURN_ONE;
+        int32_t right = n+1 < r->count ? r->slot[(n+1) % TURN_RING].hinge.b : TURN_ONE;
+        int32_t rise = turn_max(0, (left + right)/2 - b);
+        level[j] = turn_min(TURN_ONE, 2 * turn_mul(rise, rise));
+    }
+    int32_t fraction = (r->opening & 65535) * 256;
+    int32_t level_at_opening = level[0] + turn_mul(fraction, level[1] - level[0]);
+    int32_t weight = turn_mul(r->opening_weight, level_at_opening);
+    return -bank + (((r->opening - r->p + bank) * weight) >> 24);
+}
+
 static int turn_segments(const struct turn_row *r, struct turn_segment seg[TURN_CARDS],
                          int *first)
 {
@@ -452,12 +544,24 @@ static int turn_segments(const struct turn_row *r, struct turn_segment seg[TURN_
     int32_t arm = TURN_ARM + r->margin_delta * 65536;
     int32_t reach = turn_max(TURN_ARM, arm);
     int32_t bank = (r->far[0].g + r->far[1].g) / 2;
+    int32_t opening = turn_opening_offset(r, bank / 256);
+    int32_t off_axis = turn_min(TURN_ONE, turn_max(0, turn_abs(opening) - 32768) * 64);
+    int32_t bank_x = turn_mul(bank, arm);
     int32_t local_p = r->p - (int64_t)*first * 65536;
     for (int i = 0; i < count; i++) {
         int32_t d = i * 65536 - local_p;
-        int32_t phase = turn_min(TURN_ONE, turn_max(-TURN_ONE, 256*d + bank));
+        int32_t phase = turn_clip_goal((int64_t)d - opening);
         int32_t angle = turn_lookup(turn_aperture, turn_abs(phase));
         fan[i] = phase < 0 ? -angle : angle;
+        if (off_axis) {
+            /* Edge-on cards disappear on the central camera ray. Expose
+             * a little of each face within 40 world units of that ray. */
+            int32_t x = (int64_t)d * TURN_PITCH / 65536 + bank_x;
+            int32_t cover = turn_max(0, 40 * 65536 - turn_abs(x)) / 40 * 256;
+            int32_t extra = turn_mul(5452595, turn_mul(off_axis, turn_mul(cover, cover)));
+            fan[i] -= turn_mul(extra, fan[i]); /* at most 0.325 quarter-turn */
+            angle = turn_abs(fan[i]);
+        }
         int32_t native = r->slot[(*first+i) % TURN_RING].hinge.g;
         /* Certify the widest pose of the whole yaw interpolation. */
         int32_t least = (fan[i] < 0) == (native < 0) ? turn_min(angle, turn_abs(native)) : 0;

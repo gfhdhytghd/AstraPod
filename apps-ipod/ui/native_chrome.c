@@ -5,6 +5,7 @@
 #include "draw/line.h"
 #include "native_theme_runtime.h"
 #include "retained.h"
+#include "theme_art.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -160,7 +161,10 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
     int gap = metric[UI_METRIC_STATUS_ICON_GAP];
     int group_gap = metric[UI_METRIC_STATUS_GROUP_GAP];
     int left = metric[UI_METRIC_STATUS_PAD_LEFT];
-    int battery_x = width - metric[UI_METRIC_STATUS_PAD_RIGHT] - icon_size;
+    const struct ui_art *battery = ui_theme_art(chrome->theme,
+                                                UI_ART_BATTERY_FULL);
+    int battery_x = width - metric[UI_METRIC_STATUS_PAD_RIGHT] -
+                    (battery ? battery->width : icon_size);
     int play_x = battery_x - gap - icon_size;
     /* Keep the playback slot even when stopped so the busy icon stays put. */
     int busy_x = play_x - gap - icon_size;
@@ -361,12 +365,48 @@ static void draw_volume(const struct native_chrome *chrome, struct viewport *dam
                  bar_width * chrome->state.volume_percent / 100, bar_height);
 }
 
+/* Apple's battery fills its 22 inner columns with the charge; the playback
+ * icon sits right-aligned in its slot. */
+#define ART_BATTERY_CELLS 22
+static void draw_art_indicators(const struct native_chrome *chrome,
+                                const struct viewport *damage,
+                                const struct native_chrome_indicators *icons,
+                                struct status_layout layout, int x, int y,
+                                int size)
+{
+    x -= damage->x;
+    y -= damage->y;
+    const struct ui_theme *theme = chrome->theme;
+    const struct native_chrome_state *state = &chrome->state;
+    if (state->battery >= 0)
+    {
+        const struct ui_art *full = ui_theme_art(theme, UI_ART_BATTERY_FULL);
+        int battery_x = x + layout.battery_x;
+        ui_art_draw(ui_theme_art(theme, UI_ART_BATTERY_EMPTY), battery_x, y,
+                    full->width);
+        ui_art_draw(full, battery_x, y,
+                    1 + (ART_BATTERY_CELLS * state->battery + 50) / 100);
+        if (state->charging)
+            ui_art_draw(ui_theme_art(theme, UI_ART_CHARGING), battery_x, y,
+                        UINT8_MAX);
+    }
+    const struct ui_art *play =
+        icons->ink[CHROME_PLAY] ? ui_theme_art(theme, UI_ART_PLAY) :
+        icons->ink[CHROME_PAUSE] ? ui_theme_art(theme, UI_ART_PAUSE) : NULL;
+    if (play)
+        ui_art_draw(play, x + layout.play_x + size - play->width, y,
+                    play->width);
+}
+
 static void draw_indicators(const struct native_chrome *chrome, struct viewport *damage,
                             const struct native_chrome_indicators *icons,
                             struct status_layout layout, int x, int y, int size,
                             unsigned background, unsigned foreground)
 {
-    for (int i = 0; i < CHROME_GLYPH_COUNT; ++i)
+    bool art = ui_theme_art(chrome->theme, UI_ART_BATTERY_FULL) != NULL;
+    if (art)
+        draw_art_indicators(chrome, damage, icons, layout, x, y, size);
+    for (int i = 0; i < CHROME_GLYPH_COUNT && !art; ++i)
     {
         unsigned ink = icons->ink[i];
         if (!ink)

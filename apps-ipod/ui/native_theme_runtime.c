@@ -324,7 +324,7 @@ static const char *theme_name(int item, void *data, char *buf, size_t len)
     (void)len;
     char (*files)[UI_THEME_NAME_MAX] = data;
     static const char *const builtins[UI_THEME_BUILTIN_COUNT] = {
-        "Scrim", "Light", "Classic"
+        "Scrim", "Light", "Classic", "Plastic"
     };
     return item < UI_THEME_BUILTIN_COUNT ? builtins[item] :
            files[item - UI_THEME_BUILTIN_COUNT];

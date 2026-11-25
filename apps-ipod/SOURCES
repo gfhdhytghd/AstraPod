@@ -121,6 +121,8 @@ ui/pace.c
 ui/native_chrome.c
 ui/native_theme.c
 ui/native_theme_runtime.c
+ui/plastic_art.c
+ui/theme_art.c
 ui/native_wps.c
 ui/perf.c
 ui/retained.c

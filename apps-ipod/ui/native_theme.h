@@ -101,7 +101,7 @@ enum ui_gradient_role {
 enum ui_style_role {
     UI_STYLE_SELECTION, UI_STYLE_LIST_ICONS, UI_STYLE_ACCESSORY,
     UI_STYLE_STATUS_CLOCK, UI_STYLE_STATUS_TITLE, UI_STYLE_PAGE_MOTION,
-    UI_STYLE_WPS_LAYOUT, UI_STYLE_SCROLLBAR, UI_STYLE_COUNT
+    UI_STYLE_WPS_LAYOUT, UI_STYLE_SCROLLBAR, UI_STYLE_ART, UI_STYLE_COUNT
 };
 enum { UI_SELECTION_MARKER, UI_SELECTION_BAR };
 enum { UI_LIST_ICONS_AUTO, UI_LIST_ICONS_OFF };
@@ -111,6 +111,7 @@ enum { UI_STATUS_TITLE_LEFT, UI_STATUS_TITLE_CENTER };
 enum { UI_PAGE_MOTION_CASCADE, UI_PAGE_MOTION_SLIDE };
 enum { UI_WPS_LAYOUT_COVER, UI_WPS_LAYOUT_CLASSIC };
 enum { UI_SCROLLBAR_PLAIN, UI_SCROLLBAR_CLASSIC };
+enum { UI_ART_NONE, UI_ART_PLASTIC };
 
 /* Per-transition durations in 60 Hz frames; UI_MOTION_DEFAULT keeps the
  * engine's own. */
@@ -125,14 +126,19 @@ enum { UI_EASE_CUBIC, UI_EASE_QUAD, UI_EASE_QUINT, UI_EASE_SINE,
        UI_EASE_LINEAR };
 
 enum ui_theme_builtin_id {
-    UI_THEME_SCRIM, UI_THEME_LIGHT, UI_THEME_CLASSIC, UI_THEME_BUILTIN_COUNT
+    UI_THEME_SCRIM, UI_THEME_LIGHT, UI_THEME_CLASSIC, UI_THEME_PLASTIC,
+    UI_THEME_BUILTIN_COUNT
 };
 
 /* stops is 0 (no gradient), 2 (top and bottom) or 4 (a one-pixel top line,
- * top and bottom of the body, a one-pixel bottom line). */
+ * top and bottom of the body, a one-pixel bottom line). `rows`, when set,
+ * replaces the stops with `nrows` exact RGB888 rows, stretched through the
+ * body and keeping the first and last as the edge lines. */
 struct ui_theme_gradient {
     uint32_t color[4];
     uint8_t stops;
+    uint8_t nrows;
+    const uint32_t *rows;
 };
 
 enum ui_palette_source {

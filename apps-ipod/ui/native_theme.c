@@ -6,6 +6,7 @@
 #include "config.h"
 #include "lcd.h"
 #include "draw/color.h"
+#include "plastic_columns.h"
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -171,7 +172,7 @@ static const struct {
 
 static const char *const builtin_names[UI_THEME_BUILTIN_COUNT] = {
     [UI_THEME_SCRIM] = "scrim", [UI_THEME_LIGHT] = "light",
-    [UI_THEME_CLASSIC] = "classic",
+    [UI_THEME_CLASSIC] = "classic", [UI_THEME_PLASTIC] = "plastic",
 };
 
 static const struct {
@@ -186,6 +187,7 @@ static const struct {
     [UI_STYLE_PAGE_MOTION]  = { "page_motion",  (const char *const[]){ "cascade", "slide", NULL } },
     [UI_STYLE_WPS_LAYOUT]   = { "wps_layout",   (const char *const[]){ "cover", "classic", NULL } },
     [UI_STYLE_SCROLLBAR]    = { "scrollbar",    (const char *const[]){ "plain", "classic", NULL } },
+    [UI_STYLE_ART]          = { "art",          (const char *const[]){ "none", "plastic", NULL } },
 };
 
 static const char *const gradients[UI_GRADIENT_COUNT] = {
@@ -250,14 +252,14 @@ static void classic(struct ui_theme *theme)
     strcpy(theme->font[UI_FONT_STATUS], "14-noto-sans");
     strcpy(theme->font[UI_FONT_STATUS_TITLE], "14-noto-sans");
     theme->gradient[UI_GRADIENT_SELECTION] = (struct ui_theme_gradient){
-        { 0x96c5da, 0x09a4e1, 0x0065d3, 0x004386 }, 4 };
+        .color = { 0x96c5da, 0x09a4e1, 0x0065d3, 0x004386 }, .stops = 4 };
     theme->gradient[UI_GRADIENT_STATUS] = (struct ui_theme_gradient){
-        { 0xfcfcfc, 0xf8f8f8, 0x9f9e9e, 0x5b5b5b }, 4 };
+        .color = { 0xfcfcfc, 0xf8f8f8, 0x9f9e9e, 0x5b5b5b }, .stops = 4 };
     strcpy(theme->font[UI_FONT_WPS_TITLE], "18-noto-sans-bold");
     theme->gradient[UI_GRADIENT_PROGRESS] = (struct ui_theme_gradient){
-        { 0x6483f0, 0x6789f2, 0x56aeff, 0x4e8fce }, 4 };
+        .color = { 0x6483f0, 0x6789f2, 0x56aeff, 0x4e8fce }, .stops = 4 };
     theme->gradient[UI_GRADIENT_PROGRESS_TRACK] = (struct ui_theme_gradient){
-        { 0xdbdbdb, 0xfdfdfd, 0xe2e2e2, 0xbababa }, 4 };
+        .color = { 0xdbdbdb, 0xfdfdfd, 0xe2e2e2, 0xbababa }, .stops = 4 };
     theme->background[UI_BG_STATUS] = UI_BG_SOLID;
     theme->style[UI_STYLE_SELECTION] = UI_SELECTION_BAR;
     theme->style[UI_STYLE_LIST_ICONS] = UI_LIST_ICONS_OFF;
@@ -272,6 +274,42 @@ static void classic(struct ui_theme *theme)
     theme->easing = UI_EASE_QUAD;
     theme->style[UI_STYLE_WPS_LAYOUT] = UI_WPS_LAYOUT_CLASSIC;
     theme->style[UI_STYLE_SCROLLBAR] = UI_SCROLLBAR_CLASSIC;
+}
+
+/* Apple's own bars take over the gradients they replace. */
+static void plastic_columns(struct ui_theme *theme)
+{
+    static const struct {
+        uint8_t role, rows;
+        const uint32_t *column;
+    } column_set[] = {
+        { UI_GRADIENT_STATUS, ARRAY_COUNT(plastic_status), plastic_status },
+        { UI_GRADIENT_SELECTION, ARRAY_COUNT(plastic_selection),
+          plastic_selection },
+        { UI_GRADIENT_PROGRESS, ARRAY_COUNT(plastic_progress),
+          plastic_progress },
+        { UI_GRADIENT_PROGRESS_TRACK, ARRAY_COUNT(plastic_progress_track),
+          plastic_progress_track },
+    };
+    for (size_t i = 0; i < ARRAY_COUNT(column_set); i++)
+    {
+        struct ui_theme_gradient *gradient =
+            &theme->gradient[column_set[i].role];
+        const uint32_t *column = column_set[i].column;
+        int last = column_set[i].rows - 1;
+        *gradient = (struct ui_theme_gradient){
+            .color = { column[0], column[1], column[last - 1], column[last] },
+            .stops = 4, .nrows = column_set[i].rows, .rows = column };
+    }
+}
+
+/* Plastic: Classic drawn with Apple's own bitmaps. */
+static void plastic(struct ui_theme *theme)
+{
+    theme->style[UI_STYLE_ART] = UI_ART_PLASTIC;
+    theme->metric[UI_METRIC_STATUS_PAD_RIGHT] = 5;
+    theme->metric[UI_METRIC_STATUS_ICON_GAP] = 6;
+    plastic_columns(theme);
 }
 
 void ui_theme_builtin(struct ui_theme *theme, enum ui_theme_builtin_id id)
@@ -294,8 +332,10 @@ void ui_theme_builtin(struct ui_theme *theme, enum ui_theme_builtin_id id)
     theme->motion_scale = UI_THEME_MOTION_ONE;
     for (size_t i = 0; i < UI_MOTION_COUNT; i++)
         theme->motion[i] = UI_MOTION_DEFAULT;
-    if (id == UI_THEME_CLASSIC)
+    if (id == UI_THEME_CLASSIC || id == UI_THEME_PLASTIC)
         classic(theme);
+    if (id == UI_THEME_PLASTIC)
+        plastic(theme);
 }
 
 const char *ui_theme_builtin_name(enum ui_theme_builtin_id id)
@@ -319,6 +359,17 @@ uint32_t ui_theme_gradient_at(const struct ui_theme_gradient *gradient,
 {
     if (!gradient || !gradient->stops || height <= 0)
         return fallback;
+    if (gradient->rows)
+    {
+        int last = gradient->nrows - 1;
+        if (y <= 0 || height == 1)
+            return gradient->rows[0];
+        if (y >= height - 1)
+            return gradient->rows[last];
+        if (height == 3 || last < 3)
+            return gradient->rows[y < last ? y : last];
+        return gradient->rows[1 + (y - 1) * (last - 2) / (height - 3)];
+    }
     int first = 0, last = height - 1;
     if (gradient->stops == 4 && height >= 3)
     {
@@ -726,6 +777,8 @@ bool ui_theme_parse(struct ui_theme *theme, const char *data, size_t size)
 
     if (!version || !layout_fits(parsed.metric))
         return false;
+    if (parsed.style[UI_STYLE_ART] == UI_ART_PLASTIC)
+        plastic_columns(&parsed);
 
     *theme = parsed;
     return true;

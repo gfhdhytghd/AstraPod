@@ -36,6 +36,7 @@
 #include "native_wps.h"
 #include "perf.h"
 #include "retained.h"
+#include "theme_art.h"
 
 #define COVER_EDGE 240
 #define BANDS 8
@@ -85,7 +86,7 @@
 #define CLASSIC_LOUD_X 274
 #define CLASSIC_SPEAKER_Y 12
 #define CLASSIC_SHUFFLE_X 292
-#define CLASSIC_SHUFFLE_Y 26
+#define CLASSIC_SHUFFLE_Y 25
 /* 4.0 s and 270 ms at the panel's 66.96 Hz. */
 #define CLASSIC_VOLUME_HOLD ANIM_F(268)
 #define CLASSIC_SLIDE_FRAMES ANIM_F(18)
@@ -623,11 +624,18 @@ static void paint_shuffle(const struct ui_view *view,
                                                FONT_SYSFIXED);
     int x = frame->bounds.x - frame->clip.x;
     int y = frame->bounds.y - frame->clip.y;
+    const struct ui_art *art = ui_theme_art(&wps->theme, UI_ART_SHUFFLE);
+    if (art)
+    {
+        ui_art_draw(art, x, y, art->width);
+        lcd_set_viewport(previous);
+        return;
+    }
     lcd_set_foreground(wps->fg);
     for (int arrow = 0; arrow < 2; ++arrow)
     {
-        /* Rows 2 and 9 of the 17 x 12 icon, swapped for the second. */
-        int from = y + (arrow ? 9 : 2), to = y + (arrow ? 2 : 9);
+        /* Rows 3 and 10 of the 18 x 14 icon, swapped for the second. */
+        int from = y + (arrow ? 10 : 3), to = y + (arrow ? 3 : 10);
         lcd_hline(x, x + 4, from);
         lcd_drawline(x + 4, from, x + 10, to);
         lcd_drawline(x + 5, from, x + 11, to);
@@ -647,8 +655,20 @@ static void paint_classic_volume(const struct ui_view *view,
     int x = frame->bounds.x - frame->clip.x;
     int y = frame->bounds.y - frame->clip.y + CLASSIC_SPEAKER_Y;
     lcd_set_foreground(wps->fg);
-    speaker(x + CLASSIC_QUIET_X, y, wps->volume_muted ? 0 : 1);
-    speaker(x + CLASSIC_LOUD_X, y, 3);
+    const struct ui_art *quiet = ui_theme_art(&wps->theme,
+                                              UI_ART_SPEAKER_QUIET);
+    if (quiet)
+    {
+        ui_art_draw(quiet, x + CLASSIC_QUIET_X, y, quiet->width);
+        const struct ui_art *loud = ui_theme_art(&wps->theme,
+                                                 UI_ART_SPEAKER_LOUD);
+        ui_art_draw(loud, x + CLASSIC_LOUD_X, y, loud->width);
+    }
+    else
+    {
+        speaker(x + CLASSIC_QUIET_X, y, wps->volume_muted ? 0 : 1);
+        speaker(x + CLASSIC_LOUD_X, y, 3);
+    }
     lcd_set_viewport(previous);
 
     struct ui_view_frame track = *frame;
@@ -1050,7 +1070,7 @@ static void setup_classic(void)
         { WPS_INDEX, WPS_ROOT, { CLASSIC_TEXT_X, CLASSIC_INDEX_Y,
                                  CLASSIC_TEXT_WIDTH, CLASSIC_LINE } },
         { WPS_SHUFFLE, WPS_ROOT, { CLASSIC_SHUFFLE_X, CLASSIC_SHUFFLE_Y,
-                                   17, 12 } },
+                                   18, 14 } },
         { WPS_ROW, WPS_ROOT, { 0, CLASSIC_ROW_Y, 2 * LCD_WIDTH, ROW } },
         { WPS_TIMELINE, WPS_ROW, { 0, 0, LCD_WIDTH, ROW } },
         { WPS_PROGRESS, WPS_TIMELINE, { CLASSIC_PROGRESS_X, CLASSIC_BAR_Y,

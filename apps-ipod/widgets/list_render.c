@@ -38,6 +38,7 @@
 #include "ui/perf.h"
 #include "ui/retained.h"
 #include "ui/statusbar.h"
+#include "ui/theme_art.h"
 #include "plugins/rock_compat.h"
 #include "list_render.h"
 #include "ui/scene.h"
@@ -478,6 +479,17 @@ static bool set_clip(struct viewport *vp, struct ui_rect clip,
     vp->fg_pattern = fg;
     vp->drawmode = DRMODE_FG;
     return true;
+}
+
+static void draw_art(struct ui_rect clip, struct ui_rect cell,
+                     const struct ui_art *art, unsigned int fg)
+{
+    struct viewport vp;
+    if (!set_clip(&vp, clip, cell, FONT_UI, fg))
+        return;
+    struct viewport *prior = lcd_set_viewport(&vp);
+    ui_art_draw(art, cell.x - vp.x, cell.y - vp.y, art->width);
+    lcd_set_viewport(prior);
 }
 
 static void refresh_colors(struct native_list *render)
@@ -1080,6 +1092,16 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
               selected || list->scroll_all, list->offset_position[SCREEN_MAIN], false);
     if (aux == chevron && chevron_selected && !lit)
         aux = NULL;
+    /* Apple's chevron keeps 6 columns clear of the row's right edge. */
+    const struct ui_art *glyph = aux == chevron && !rtl ?
+        ui_theme_art(&render->theme, UI_ART_CHEVRON) : NULL;
+    if (glyph)
+    {
+        draw_art(clip, row_cell(row, right - 6 - glyph->width,
+                                (row.height - glyph->height + 1) / 2,
+                                glyph->width, glyph->height, false), glyph, fg);
+        aux = NULL;
+    }
     if (render->icon_font >= 0)
         draw_text(render, clip, row_cell(row, arrow, icon_y, icon_size, icon_size, rtl),
                   render->icon_font, fg, aux, false, 0, false);

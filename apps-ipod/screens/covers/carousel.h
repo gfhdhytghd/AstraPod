@@ -51,19 +51,17 @@ typedef fb_data pix_t;
  * clear height beside the covers for it. They were separate copies of the same
  * arithmetic, which is how the text and the band drifted apart.
  *
- * Band and text are sized separately, on purpose:
+ * Band and text are sized separately:
  *
- *   The band fixes where the covers stop, and nothing else. It is always sized
- *   for a two-line caption, so the covers come out the same size on the album
- *   and artist screens.
+ *   The band fixes where the covers stop, and nothing else. It is a fixed
+ *   number of rows, whatever the caption's font, so the covers come out the
+ *   same size and in the same place on the album and artist screens.
  *
- *   The text is then centred in the clear space the band opens up, so a
- *   one-line caption lands in the middle of it rather than sitting high in
- *   room meant for two, and neither has to be kept numerically in step with
- *   the other. */
+ *   The text then sits against the covers, a few clear rows from them, its
+ *   first line in the same place whether one line is drawn or two. */
 struct pf_caption {
-    int y1;   /* top of the first line, drawn in the title font */
-    int y2;   /* top of the second line, drawn in the UI font */
+    int y1;   /* top of the first line */
+    int y2;   /* top of the second line; both are drawn in the caption font */
 };
 
 enum pf_scroll_line_type {
@@ -183,13 +181,16 @@ int  get_scroll_line_offset(enum pf_scroll_line_type type);
  * set_scroll_line() never ran, and a caption too long for the box sat still at
  * the previous session's offset. */
 bool carousel_caption_changed(int index, int variant);
+/* The slide the caption names: the one a scroll is heading to, so a wheel
+ * click changes the caption at once, and otherwise the centre slide. */
+int carousel_caption_index(void);
 /* Clip drawing to the inset caption box; offsets from get_scroll_line_offset()
  * are relative to it. Enter before setting the font or colour, and pass the
  * returned viewport back to carousel_text_end() when the caption is drawn. */
 struct viewport *carousel_text_begin(void);
 void carousel_text_end(struct viewport *saved);
-/* Where the caption's lines go, centred in the space the band opens up. y2 is
- * meaningful only when two_lines is set. */
+/* Where the caption's lines go, against the covers. y2 is meaningful only
+ * when two_lines is set. */
 void carousel_caption_layout(bool two_lines, struct pf_caption *out);
 void carousel_album_caption(const char *album, const char *artist,
                             int year, bool untagged, int revision);

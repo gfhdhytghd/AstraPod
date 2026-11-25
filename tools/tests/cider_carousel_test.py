@@ -106,13 +106,16 @@ static int drawn;static char text_lines[2][260];
 static struct viewport*carousel_text_begin(void){return NULL;}
 static void carousel_text_end(struct viewport*p){(void)p;}
 static void lcd_set_foreground(int n){(void)n;}
-static void lcd_setfont(int n){(void)n;}
+static int current_font;
+static void lcd_setfont(int n){current_font=n;}
+static int carousel_caption_index(void){return 0;}
 static bool carousel_caption_changed(int i,int v){(void)i;(void)v;return true;}
 static const char*carousel_caption_fit(const char*s,char*b,size_t n){snprintf(b,n,"%s",s);return b;}
 static void set_scroll_line(const char*s,int n){(void)s;(void)n;}
 static void carousel_caption_layout(bool two,struct pf_caption*c){c->y1=0;c->y2=two?1:0;}
 static int get_scroll_line_offset(int n){(void)n;return 0;}
-static void lcd_putsxy(int x,int y,const char*s){(void)x;(void)y;assert(drawn<2);snprintf(text_lines[drawn++],260,"%s",s);}
+/* Both caption lines are drawn in the bold caption font. */
+static void lcd_putsxy(int x,int y,const char*s){(void)x;(void)y;assert(drawn<2&&current_font==2);snprintf(text_lines[drawn++],260,"%s",s);}
 static int caption_rows_y,caption_rows_h,caption_clear_y,caption_clear_h;
 static bool caption_clears_itself;
 static struct {uint32_t text;int x,y,font,fg;bool valid;} caption_artist;

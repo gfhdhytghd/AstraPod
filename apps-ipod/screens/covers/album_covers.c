@@ -628,10 +628,10 @@ struct bg_task album_covers_task =
 /* Drawn directly inside pf_vp -- the same viewport the coverflow itself uses,
  * not a separate panel -- overlaid near the top or bottom of that area, in
  * pf_fg_color, so the now-playing dynamic colour fade applies here as it does
- * everywhere else. Always center_index: there is no mid-scroll transition to
- * track. The album name uses the carousel’s title font
- * where the theme configured one (global_settings.bold_font_file, settings.h)
- * -- not a double-drawn faux bold, which does not look right. */
+ * everywhere else. Always carousel_caption_index(), the album the wheel has
+ * sent the covers to, with no transition between captions. Both lines use the
+ * carousel's caption font, a real bold face -- not a double-drawn faux bold,
+ * which does not look right. */
 static bool album_caption_at(int index, struct carousel_album_header *text)
 {
     get_album_name(index, text->title, sizeof(text->title));
@@ -642,11 +642,12 @@ static bool album_caption_at(int index, struct carousel_album_header *text)
 static void draw_album_text(void)
 {
     char album[TAGCACHE_BUFSZ], artist[TAGCACHE_BUFSZ];
-    get_album_name(center_index,album,sizeof album);
-    get_album_artist(center_index,artist,sizeof artist);
+    int index = carousel_caption_index();
+    get_album_name(index,album,sizeof album);
+    get_album_artist(index,artist,sizeof artist);
     carousel_album_caption(album,artist,
-                           carousel_idx.album_index[center_index].year,
-                           carousel_idx.album_index[center_index].seek ==
+                           carousel_idx.album_index[index].year,
+                           carousel_idx.album_index[index].seek ==
                                carousel_idx.album_untagged_seek,0);
 }
 

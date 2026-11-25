@@ -209,7 +209,9 @@ static void artist_draw_text(void)
     if (global_settings.album_covers_show_album_name == ALBUM_NAME_HIDE)
         return;
 
-    artist_name(center_index, name, sizeof(name));
+    int index = carousel_caption_index();
+
+    artist_name(index, name, sizeof(name));
     bool ready = font_prefetch_text(carousel_caption_font(true), name);
     ready &= font_prefetch_text(carousel_caption_font(true), ".");
     if (!ready)
@@ -219,14 +221,12 @@ static void artist_draw_text(void)
     lcd_setfont(carousel_caption_font(true));
     line = carousel_caption_fit(name, fit, sizeof(fit));
     /* Nothing but the slide decides this caption, hence the 0 variant. */
-    if (carousel_caption_changed(center_index, 0))
+    if (carousel_caption_changed(index, 0))
         set_scroll_line(line, PF_SCROLL_ALBUM);
 
     /* One line where the album carousel draws two. The engine reserves the
-     * same band either way and centres whatever it is given in it, so this
-     * lands in the middle of that band rather than sitting high in space
-     * sized for a pair -- which is what made it read as misaligned against
-     * the same screen showing albums. */
+     * same band either way and places the first line in the same rows, so
+     * this lines up with the album name on the screen showing albums. */
     carousel_caption_layout(false, &cap);
     txt_y = cap.y1;
 

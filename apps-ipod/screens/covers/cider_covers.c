@@ -260,7 +260,7 @@ static bool caption_at(int index, struct carousel_album_header *text)
 static void text(void)
 {
     struct cider_row row;
-    if (!cider_page_row(center_index, &row))
+    if (!cider_page_row(carousel_caption_index(), &row))
     {
         snprintf(row.title, sizeof row.title, "...");
         row.subtitle[0] = 0;

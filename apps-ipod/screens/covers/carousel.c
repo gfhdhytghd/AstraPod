@@ -419,10 +419,10 @@ static int pf_lower_half;       /* rows of drawable (post text-margin) height be
 static int pf_draw_y_shift;     /* rows skipped below pf_vp_y for a TOP text caption's margin */
 static int pf_caption_band;     /* rows the covers give up to the caption */
 /* The caption's own rows, measured from the top of the viewport. Not the same
- * as the band: the band is a reservation, and carousel_caption_layout() centres
- * the text in the space that opens up, which starts a few rows above where the
- * band does. Sized for a two-line caption, which contains the one-line case --
- * both are centred on the same point, so the taller block covers the shorter. */
+ * as the band: the band is a reservation, and carousel_caption_layout() places
+ * the text against the covers, rows away from where the band starts. Sized for
+ * a two-line caption, which contains the one-line case -- both sit against the
+ * covers, so the taller block covers the shorter. */
 static int pf_text_y, pf_text_h;
 /* Rows the last render actually wrote to, again from the top of the viewport.
  * A caption can only be repainted on its own if the covers stayed clear of it,
@@ -1169,6 +1169,15 @@ static void init_scroll_lines(void)
     caption_valid = false;
 }
 
+/* See carousel.h. A random spin is a show of the covers going past, so its
+ * caption names each one as it reaches the middle. */
+int carousel_caption_index(void)
+{
+    if (pf_state != pf_scrolling || pf_random_spinning)
+        return center_index;
+    return target;
+}
+
 /* See carousel.h. Records what it was asked about, so a model calls it once
  * per draw and uses the answer for every line of its caption. */
 bool carousel_caption_changed(int index, int variant)
@@ -1190,7 +1199,7 @@ static bool update_caption_version(unsigned int *seen)
 {
     if (!model->art_version)
         return false;
-    unsigned int next = model->art_version(center_index);
+    unsigned int next = model->art_version(carousel_caption_index());
     if (*seen == next)
         return false;
     *seen = next;
@@ -1543,11 +1552,7 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
     bool ready = font_prefetch_text(bold, album_and_year);
     ready &= font_prefetch_text(bold, ".");
     if (show_artist)
-    {
-        int regular = carousel_caption_font(false);
-        ready &= font_prefetch_text(regular, artisttxt);
-        ready &= font_prefetch_text(regular, ".");
-    }
+        ready &= font_prefetch_text(bold, artisttxt);
     if (!ready)
         return;
 
@@ -1557,7 +1562,8 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
     /* The year is the caption's other input: moving it changes the string
      * without moving the selection. */
     bool album_changed = carousel_caption_changed(
-                             center_index, revision ^ global_settings.album_covers_show_year);
+                             carousel_caption_index(),
+                             revision ^ global_settings.album_covers_show_year);
 
     /* Switched to carousel_caption_font(true) (plain FONT_UI, a no-op, if no bold font is
      * configured -- see its declaration) *before* set_scroll_line() below:
@@ -1572,8 +1578,8 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
     if (album_changed)
         set_scroll_line(album_line, PF_SCROLL_ALBUM);
 
-    /* The engine measures both fonts and centres the block for us, so top and
-     * bottom captions need no separate arithmetic here. */
+    /* The engine measures the font and places the block against the covers,
+     * so top and bottom captions need no separate arithmetic here. */
     carousel_caption_layout(show_artist, &cap);
     albumtxt_y = cap.y1;
 
@@ -1586,7 +1592,7 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
     caption_clears_itself = true;
     if (show_artist)
     {
-        int artist_font = carousel_caption_font(false);
+        int artist_font = carousel_caption_font(true);
         lcd_setfont(artist_font);
         artist_line = carousel_caption_fit(artisttxt, artist_fit,
                                            sizeof(artist_fit));
@@ -1631,13 +1637,13 @@ void carousel_album_caption(const char *albumtxt, const char *artisttxt,
     lcd_setfont(album_font);
     if (!show_artist || !untagged)
         lcd_putsxy(albumtxt_x, albumtxt_y, album_line);
-    /* Restored after the album line: render_all_slides()/the FPS overlay/etc
-     * all assume pf_vp's font is the real UI font, and the artist name itself
-     * is never bold. carousel_caption_font(false), not the FONT_UI constant
-     * -- see init()'s comment on carousel_caption_font(true). */
-    lcd_setfont(carousel_caption_font(false));
     if (show_artist && !keep_artist)
         lcd_putsxy(artisttxt_x, cap.y2, artist_line);
+    /* Restored after the caption: render_all_slides()/the FPS overlay/etc
+     * all assume pf_vp's font is the real UI font. Both lines are bold.
+     * carousel_caption_font(false), not the FONT_UI constant -- see init()'s
+     * comment on carousel_caption_font(true). */
+    lcd_setfont(carousel_caption_font(false));
     carousel_text_end(saved_vp);
 }
 
@@ -2721,45 +2727,38 @@ static void recalc_offsets(void)
  * other shape scrolls past. */
 #define PF_NOMINAL_ART_H  MIN(DISPLAY_WIDTH, DISPLAY_HEIGHT)
 
-/* Least clear air above and below the caption. It only bounds how tight the
- * band may get -- the block is centred in whatever space the band actually
- * opens up, which is more than this. */
-#define PF_CAPTION_PAD    6
+/* Rows the covers give up to the caption, whatever its font. They decide
+ * where the covers sit -- a 128-row cover on rows 28-155 of the 240-row
+ * screen -- so the caption's size never moves the covers. */
+#define PF_CAPTION_BAND   55
 
-/* Second line's offset from the first line's box top: clear air of half the
- * album font's ascent, measured from that line's baseline.
+/* Clear rows between the nominal cover and the caption's first line box. */
+#define PF_CAPTION_GAP    4
+
+/* Second line's offset from the first line's box top: 17/12 of the caption
+ * font's ascent, so 17 rows for a 12-row ascent against stock's measured 17.5.
  *
- * Both halves of that are load-bearing. Measured from the baseline rather than
- * the box bottom, because a box carries a descent running anywhere from a
- * fifth to nearly a third of its height depending on the font, and spacing off
- * the bottom hands that variation straight to the gap.
- *
- * Keyed to the *album* font, not the artist font or the larger of the two,
- * because the gap reads as belonging to the line above it. Sizing it by the
- * larger font goes visibly too wide wherever a theme sets a small album line
- * under a large artist one. Half the album ascent lands at 6-7px across the
- * fonts themes use, which matches how they look.
- *
- * Half an ascent also reliably exceeds a descent (ascent runs ~70% of the box,
- * descent ~28%), so a descending album name still clears the line below. */
+ * Measured from the ascent rather than the box height, because a box carries a
+ * descent running anywhere from a fifth to nearly a third of its height
+ * depending on the font, and spacing off the bottom hands that variation
+ * straight to the gap. The 5/12 of an ascent left below the baseline exceeds a
+ * descent (ascent runs ~70% of the box, descent ~28%), so a descending album
+ * name still clears the line below. */
 static int caption_line2(void)
 {
-    return font_get(carousel_caption_font(true))->ascent * 3 / 2;
+    return font_get(carousel_caption_font(true))->ascent * 17 / 12;
 }
 
 static int caption_block(bool two_lines)
 {
-    if (!two_lines)
-        return (int)font_get(carousel_caption_font(true))->height;
-    return caption_line2()
-         + (int)font_get(carousel_caption_font(false))->height;
+    int height = font_get(carousel_caption_font(true))->height;
+
+    return two_lines ? caption_line2() + height : height;
 }
 
 void carousel_caption_layout(bool two_lines, struct pf_caption *out)
 {
-    int block = caption_block(two_lines);
     int art_top = (pf_height - pf_caption_band - PF_NOMINAL_ART_H) / 2;
-    int space, top;
 
     if (art_top < 0)        /* cover taller than the drawable area: it is
                              * clipped to that area, so it starts at the top */
@@ -2767,17 +2766,9 @@ void carousel_caption_layout(bool two_lines, struct pf_caption *out)
     art_top += pf_draw_y_shift;
 
     if (pf_draw_y_shift)    /* caption above the covers */
-    {
-        top = 0;
-        space = art_top;
-    }
+        out->y1 = MAX(0, art_top - PF_CAPTION_GAP - caption_block(two_lines));
     else
-    {
-        top = art_top + PF_NOMINAL_ART_H;
-        space = pf_height - top;
-    }
-
-    out->y1 = (space > block) ? top + (space - block) / 2 : top;
+        out->y1 = art_top + PF_NOMINAL_ART_H + PF_CAPTION_GAP;
     out->y2 = out->y1 + caption_line2();
 }
 
@@ -4260,15 +4251,14 @@ static bool init(void)
      * above vs below center -- it never actually shrinks the total drawn
      * area, so the art always ran the full height of the viewport
      * regardless). Actually keeping clear of the text means genuinely
-     * reducing the drawable height by a margin sized to match
-     * draw_album_text()'s own geometry, and -- for a *top*-anchored
-     * caption -- also shifting the render origin down so the reserved
-     * strip is skipped rather than just repositioning within it.
+     * reducing the drawable height by a margin the caption fits in, and --
+     * for a *top*-anchored caption -- also shifting the render origin down so
+     * the reserved strip is skipped rather than just repositioning within it.
      *
-     * The band is always sized for a two-line caption, whichever mode is set,
-     * so the covers do not change size between the album and artist screens --
-     * carousel_caption_layout() centres whatever it is actually given in the
-     * space this opens up. */
+     * The band is PF_CAPTION_BAND whichever mode is set, so the covers do not
+     * change size or place between the album and artist screens --
+     * carousel_caption_layout() places whatever it is actually given against
+     * the covers. */
     {
         bool text_at_top;
         int draw_height;
@@ -4281,13 +4271,13 @@ static bool init(void)
                 break;
             case ALBUM_NAME_TOP:
             case ALBUM_AND_ARTIST_TOP:
-                pf_caption_band = caption_block(true) + 2 * PF_CAPTION_PAD;
+                pf_caption_band = PF_CAPTION_BAND;
                 text_at_top = true;
                 break;
             case ALBUM_NAME_BOTTOM:
             case ALBUM_AND_ARTIST_BOTTOM:
             default:
-                pf_caption_band = caption_block(true) + 2 * PF_CAPTION_PAD;
+                pf_caption_band = PF_CAPTION_BAND;
                 text_at_top = false;
                 break;
         }
@@ -4302,7 +4292,7 @@ static bool init(void)
 
         /* Where the caption itself lands, so a frame can repaint that and
          * nothing else. Asked for two lines because that block contains the
-         * one-line one: both are centred on the same point. */
+         * one-line one: both sit against the covers. */
         if (pf_caption_band > 0)
         {
             struct pf_caption cap;
@@ -5905,17 +5895,17 @@ static void prefetch_captions(void)
 {
     if (!model->caption_at || global_settings.album_covers_show_album_name == ALBUM_NAME_HIDE)
         return;
-    int title = carousel_caption_font(true), artist = carousel_caption_font(false);
-    font_prefetch_text(title, ".0123456789 –");
-    font_prefetch_text(artist, ".");
+    int font = carousel_caption_font(true);
+    int at = carousel_caption_index();
+    font_prefetch_text(font, ".0123456789 –");
     for (int i = 0; i <= 4 * ALBUM_COVERS_NUM_SLIDES; i++)
     {
-        int index = center_index + (i % 2 ? (i + 1) / 2 : -i / 2);
+        int index = at + (i % 2 ? (i + 1) / 2 : -i / 2);
         struct carousel_album_header text;
         if (index >= 0 && index < number_of_slides && model->caption_at(index, &text))
         {
-            font_prefetch_text(title, text.title);
-            font_prefetch_text(artist, text.artist);
+            font_prefetch_text(font, text.title);
+            font_prefetch_text(font, text.artist);
         }
     }
 }
@@ -5935,7 +5925,8 @@ static void carousel_paint(struct carousel_frame *paint, bool art, bool caption,
     if (caption)
         ui_page_invalidate(&paint->page, (struct ui_rect){0, pf_vp_y + pf_text_y, LCD_WIDTH, pf_text_h});
     font_prefetch_begin();
-    if (caption && (!caption_valid || caption_index != center_index))
+    if (caption && (!caption_valid ||
+                    caption_index != carousel_caption_index()))
         prefetch_captions();
     ui_page_paint(&paint->page);
     font_prefetch_end();
@@ -5985,10 +5976,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
      * time round the loop, and a reason to draw must survive until one draws. */
     bool art_owed = true;
     bool caption_owed = true;
-    /* The centre cover at the last cover draw. A fast wheel click moves the
-     * centre between draws rather than during one, so the caption check below
-     * compares against this. */
-    int drawn_index = -1;
+    /* The slide named by the caption on screen, or by the one owed. */
+    int captioned_index = -1;
     unsigned int seen_caption_version = 0;
     unsigned glyph_epoch = font_prefetch_epoch();
     bool full_flush_owed = false;
@@ -6366,6 +6355,13 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             caption_owed = true;
         if (update_scroll_lines())
             caption_owed = true;
+        /* The caption names where the wheel sends the covers, so a click owes
+         * it at the next frame whether the covers draw then or not. */
+        if (captioned_index != carousel_caption_index())
+        {
+            captioned_index = carousel_caption_index();
+            caption_owed = true;
+        }
 
         if (pf_state == pf_scrolling)
             art_owed = true;
@@ -6499,16 +6495,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
             if (drew_art)
             {
-                int was = drawn_index;
-
                 if (pf_state == pf_scrolling)
                     update_scroll_animation();
-                /* The covers no longer wipe the caption on their way past, so
-                 * the crossing that hands the middle to the next album is what
-                 * says the caption is out of date. */
-                if (center_index != was)
-                    drew_caption = true;
-                drawn_index = center_index;
                 cover_rows(&art_y, &art_h);
                 art_h -= art_y;
                 if (art_h <= 0)     /* no slide has a bitmap yet: nothing to

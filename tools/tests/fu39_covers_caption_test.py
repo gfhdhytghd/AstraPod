@@ -71,6 +71,7 @@ struct carousel_model {unsigned int (*art_version)(int);void (*draw_text)(void);
 static const struct carousel_model provider_model;
 static const struct carousel_model *model=&provider_model;
 static int center_index,resume_index,previous_center;
+enum {pf_idle,pf_scrolling};static int pf_state,target;static bool pf_random_spinning;
 static bool flicking,caption_valid;
 static long moved_at;
 long current_tick;
@@ -230,7 +231,7 @@ int main(void){
 '''.replace('QUICK_BRANCH',quick)
 (O/'config.h').write_text('')
 (O/'kernel.h').write_text('#define HZ 100\nextern long current_tick;\n#define TIME_BEFORE(a,b) ((long)((a)-(b))<0)\n')
-functions='\n'.join([fn(carousel,'carousel_caption_changed'),update,fn(carousel,'carousel_album_caption'),fn(provider,'initial'),fn(provider,'remember').replace('global_status.', 'global_status_cover.'),fn(provider,'text'),fn(provider,'version')])
+functions='\n'.join([fn(carousel,'carousel_caption_index'),fn(carousel,'carousel_caption_changed'),update,fn(carousel,'carousel_album_caption'),fn(provider,'initial'),fn(provider,'remember').replace('global_status.', 'global_status_cover.'),fn(provider,'text'),fn(provider,'version')])
 model='static const struct carousel_model provider_model={version,text,initial};\n'
 entry='\n'.join(fn(provider,name).replace('global_status.', 'global_status_cover.').replace('&model,','&provider_model,')
                 for name in ['wait_for_library','restore_album','cider_covers'])

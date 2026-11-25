@@ -34,6 +34,8 @@
 - **Cover Flow's album panel** (press Select on a cover) is laid out like the
   original iPod's: a wider card from under the covers' top edge to the bottom
   of the screen, seven track rows with the times in a column, and a long
-  selected title that scrolls. It takes its colours from the native theme, so
-  Light shows a light panel. Each album's blurred background, on Now Playing
-  and in the panel, is built again the first time it is shown.
+  selected title that scrolls. Its rows look like the theme's lists, with the
+  same marker beside the selected track, and the header adds the album's
+  year. On Scrim the card shows the album's blurred cover; Light shows a
+  light panel. Each album's blurred background, on Now Playing and in the
+  panel, is built again the first time it is shown.

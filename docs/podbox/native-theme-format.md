@@ -62,18 +62,22 @@ Use `font.<role>=<basename>` to reference a font. The basename can contain 1–3
 | `icon` | `24x24-icons` |
 | `wps_title`, `handoff_title`, `lyrics_focus` | `26-noto-sans-medium` |
 | `wps_meta`, `handoff_caption` | `12-noto-sans` |
-| `panel` | `14-noto-sans` |
 
 ### Cover Flow album panel
 
-The album panel draws its header in `list_tint`, with the album title in
-`foreground` and the `title` font and the artist line in `muted` and the
-`wps_meta` font. A `list_tint` equal to `background` is lifted slightly toward
-`foreground` so the header still stands apart. Track rows use the `panel`
-font, `foreground` titles and `muted` durations; the selected row is a
-`selection` bar with `selected_text` and `selected_secondary`. `separator`
-draws the card's edge. With `background.list=blurred_cover` the rows sit on the
-blurred album art, and with `solid` on `background`.
+The album panel's track rows look like a list's. They use the `list` font,
+with titles in `muted` and durations in a dimmer `muted`. The selected row
+has `selected_text`, `selected_secondary` and a `selection` marker set by
+`list_selection_width` and `list_selection_alpha`. The playing track has a
+sign in `accent`. The header shows the album title in `foreground` and the
+`title` font, and the artist, year and track count in `muted` and the
+`wps_meta` font. `separator` draws the card's edge.
+
+With `background.list=blurred_cover`, the card shows the album's blurred
+cover, darkened to keep the text legible, with a darker header band. With
+`solid`, or for an album without art, the rows sit on `background` and the
+header band is `list_tint`. A `list_tint` equal to `background` is lifted
+slightly toward `foreground` so the band still stands apart.
 
 ### Metrics
 

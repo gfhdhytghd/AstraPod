@@ -40,6 +40,8 @@
 #define BLUR_EVENT_WPS 0x1180
 #define BLUR_EVENT_WINDOW 0x1181
 #define PANEL_ALPHA_MAX 224
+/* How much darker the album panel's header band is than its rows. */
+#define PANEL_BAND_ALPHA 80
 #define WCAG_OFFSET 3277u /* 0.05 in Q16 */
 #define STATUS_ART_GRACE HZ
 
@@ -482,6 +484,8 @@ static unsigned prepare(const struct album_blur_source *source, int art,
     if (scrim)
         for (unsigned i = 0; i < ARRAYLEN(entry->panel); i++)
             entry->panel[i] = color_blend(entry->panel[i], LCD_BLACK, scrim);
+    for (unsigned i = 0; i < ALBUM_BLUR_DIVIDER * ALBUM_BLUR_PANEL_W; i++)
+        entry->panel[i] = color_blend(entry->panel[i], LCD_BLACK, PANEL_BAND_ALPHA);
     DEBUGF("FU112_BLUR %s %08x %lu %u\n", disk ? "disk" : "cold", hash,
            (unsigned long)(USEC_TIMER-start), scrim);
     panel_perf_record(PP_BLUR, USEC_TIMER - start, disk, hash);
@@ -828,7 +832,7 @@ unsigned album_blur_generation(void)
     return cache_generation;
 }
 
-bool album_blur_draw_panel(const struct album_blur_source *source)
+bool album_blur_draw_panel(const struct album_blur_source *source, int top, int height)
 {
     mutex_lock(&cache_lock);
     int slot = acquire_slot(source);
@@ -847,7 +851,8 @@ bool album_blur_draw_panel(const struct album_blur_source *source)
     if (slot < 0)
         return false;
     struct blur_pixels *cache = core_get_data_pinned(cache_handle);
-    lcd_bitmap(cache[slot].panel, 0, 0, ALBUM_BLUR_PANEL_W, ALBUM_BLUR_PANEL_H);
+    lcd_bitmap_part(cache[slot].panel, 0, top, ALBUM_BLUR_PANEL_W, 0, top,
+                    ALBUM_BLUR_PANEL_W, height);
     core_put_data_pinned(cache);
     release_slot(slot);
     return true;

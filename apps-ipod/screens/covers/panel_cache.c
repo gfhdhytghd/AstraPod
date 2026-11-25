@@ -78,10 +78,10 @@ static unsigned remote_rows;
 static bool remote_stale;
 static long retry_at;
 static struct mutex lock;
-/* The faces are the theme's title, panel and metadata fonts. A theme that
+/* The faces are the theme's title, list and metadata fonts. A theme that
  * names others takes effect while no album panel holds the current ones. */
 static const enum ui_font_role face_roles[PANEL_FACES] = {
-    UI_FONT_TITLE, UI_FONT_PANEL, UI_FONT_WPS_META,
+    UI_FONT_TITLE, UI_FONT_LIST, UI_FONT_WPS_META,
 };
 static char faces[PANEL_FACES][UI_THEME_FONT_PATH_MAX];
 static char wanted[PANEL_FACES][UI_THEME_FONT_PATH_MAX];

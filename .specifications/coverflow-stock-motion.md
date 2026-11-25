@@ -290,7 +290,7 @@ grows with the rate: ~0.6 item at 3 items/s (sum law), 1.5-2 items at
 identifying it as the target is uncertain). No separate speed multiplier
 or skip logic is visible. **F/I**
 
-**(d) Sustained fast scrolling** (13-18 items/s, f0425-0460, f0764-0812,
+**(d) Sustained fast scrolling** **(v3: the 3D description in section 9.4 supersedes the screen-space notes below.)** (13-18 items/s, f0425-0460, f0764-0812,
 f1135-1190):
 
 - Full-detail covers, no blur, no simplification. **M**
@@ -460,6 +460,10 @@ Minimum rect, `(art_top - 2) .. (y2 + line_height)`, with art rows 28-155:
 
 ## 7. Model to implement
 
+**(v3) Superseded for transitions.** One display position (below) cannot
+produce the slow-to-fast fan. Section 9.6 gives the supported per-cover
+form. The v2 constants remain the per-cover rate (k = 5.7 /s).
+
 **(v2)** One chase. The pose lead is in the slot shape, not in a second
 state.
 
@@ -518,6 +522,11 @@ zone, add a pose lead for d > 1 only (section 3.3, open).
 
 ## 8. Open questions
 
+- **(v3)** Sustained fast scroll and the reversal slats are not reproduced
+  by any tested model (9.5). A clip at steady wheel speed with the wheel's
+  ticks visible (high frame rate) would give the target exactly and pin
+  the lag, the cap and the fast pose.
+
 - ~~No clean single click from rest~~: answered by v2 (3.1, 3.2 a).
 - ~~Pose-lead ratio~~: answered by v2; no separate pose chase at d <= 1
   (3.3).
@@ -533,3 +542,478 @@ zone, add a pose lead for d > 1 only (section 3.3, open).
   wrap) was not recorded.
 - Whether stock flushes the caption in the same panel refresh as the covers
   cannot be seen at 60 fps. v2 shows them in the same camera frame.
+
+## 9. (v3) The scene in 3D, and the fast regime
+
+Sources: v1 stills chosen by the owner: f0395 (6.59 s) and f0901 (15.02 s),
+slow to fast; f0819 (13.65 s), fast. Supporting frames: f0380, f0424, f0432,
+f0446, f0560, f0700, f0790 and f1154. f0901 had no automatic LCD fit. It was
+rectified with a quad interpolated between f0896 and f0908, so its
+positions carry about +-3 px more error. Scripts: `scripts/topview.py`,
+`segs.py`, `sim3d.py`, `run3d.py`, `cmp3d.py`. Images: `v3/tv3.png` (top
+views), `v3/cmpA2.png` and `v3/cmpUA.png` (model against still).
+
+### 9.1 Method
+
+- Every cover is centred on the horizon y = 105.1, so the camera sits at
+  cover-centre height. Each image column's cover height `h` (twice the
+  distance from the top silhouette to the horizon) maps one column to one
+  point in the scene. With S = 1 cover width:
+  - X = (x - cx) / h
+  - z = F / h
+- The top-edge silhouette of a frame is therefore a **top view of the
+  scene**: the nearest cover at every column. The silhouette is detected
+  against the background, so white and pale covers drop out.
+- Models are scored against this profile (RMS of `h`, px). Detection
+  noise is ~8 px: that is the rest layout's own residual.
+
+### 9.2 Camera (M/F)
+
+- **One pinhole camera for the whole scene.** Stock does not project each
+  cover separately as AstraPod's Parallel Slides does.
+- Evidence: the top edges of the stacked covers on one side meet in one
+  vanishing point (v2 rest: x ~129 left, ~188 right). Separate
+  projections would put the stacked covers' vanishing points 28 px apart.
+- **F = 135 +- 10 px.** Fitted to 168 unoccluded cover quads from the v2
+  single steps, with each cover's length fixed at 1. Length residual 5 %.
+- Principal point x = 158-160.5. The fit cannot pin it closer.
+- Centre cover depth **z0 = F/126 = 1.07 S**. Horizontal field of view
+  ~100 deg.
+- AstraPod: cover 128 at `CAM_DIST` 240, so z0 = 1.875 S and F = 240 px.
+  Stock's camera is **1.75 times closer and much wider**.
+
+### 9.3 Rest layout in 3D (F, h-profile RMS 7.9 px)
+
+| Item | Value |
+|---|---|
+| Centre cover | frontal, centre at X = 0, z = 1.07 |
+| Side covers | **yaw 90 deg** (perpendicular to the screen, inner face visible because of the wide lens) |
+| Near (outer) edge of side covers | on the centre cover's plane, z = 1.06 |
+| First side slot | near edge at abs(X) = **0.817** |
+| Stack spacing | **0.22** S per cover |
+
+- The single-step screen shapes of section 3.1 **follow from this scene
+  with no fitting**. Interpolate X, z and yaw linearly over one slot,
+  then project. Screen-x progress at abs(u) = 0.1 to 0.9 comes out
+  0.14 0.27 0.38 0.49 0.59 0.69 0.77 0.85 0.93, against measured 0.13
+  0.25 0.36 0.47 0.57 0.67 0.76 0.84 0.92.
+- The concave screen shape is perspective.
+- The inner-edge proxy runs ahead of the measured curve (0.75 against
+  0.64 at abs(u) = 0.5). It would match with yaw at 0.45 times the
+  position rate. That contradicts the fan stills (9.5).
+- The v2 tracker reads the side inner edge low: 57.5 against the model's
+  65.5. So this mismatch is not counted as evidence.
+
+### 9.4 What the stills show, in 3D (M)
+
+- **f0395 and f0901: concave chain ("fan").**
+  - The covers join edge to edge in a U.
+  - The frontal centre cover sits **0.5 S behind rest** (z 1.55-1.6;
+    screen height 92-97 against 126).
+  - Its neighbours turn in at moderate yaw: f0395 yellow ~40-55 deg. Each
+    further cover is turned more and is nearer: the outer near edges are at
+    z ~1.0-1.05 and 112-135 px tall.
+  - Nearer covers are drawn over farther ones: the yellow cover hides the
+    left 16 px of the frontal one.
+  - Both stills are moments when the target outruns the display:
+    - f0395 is 0.42 s after the thumb went from ~3 to ~14 items/s.
+    - f0901 is the turn from +11 to -8 items/s.
+- **f0819: stack slats through the centre.**
+  - Every cover is at yaw 75-90 deg.
+  - Near edges lie on z = 1.02-1.09 at a **uniform X spacing of 0.21**
+    from screen edge to screen edge, with no centre slot.
+  - Near the centre the covers are edge-on slivers (3-10 px wide).
+  - The thumb is reversing (-16 to +7 items/s), and the caption still
+    counts down until ~f0825.
+- **f0560, f1154, f0432-0446: forward fast scroll, shingles.**
+  - The covers keep stack spacing (~0.2) across the whole width.
+  - They share one moderate yaw with the **outgoing** orientation: in a
+    forward scroll every cover, including those right of centre, faces as
+    the left stack does.
+  - The row sits at z ~1.1-1.25.
+  - The incoming side shows the turning zone: a near-frontal cover at
+    x 258-300 in f1154, and covers reaching back to z 1.5-2.
+  - Yaw is ~20-40 deg in f0560 and f1154 and ~60 deg in f0446. These are
+    short visible pieces, so the uncertainty is +-15 deg.
+- **f0700: reverse fast scroll, -25 items/s.** The incoming (left) side
+  is a flat, overlapping frontal ribbon at z ~1.17. The outgoing side is
+  steep slats at stack spacing.
+
+### 9.5 Models tested
+
+All models use the 3D camera and layout above. The target T comes from the
+thumb track at 15 deg per item (scale +-20 %). Each still takes the best
+of +-6 frames and four target phases.
+
+| Model | f0395 | f0901 | f0560 | f0700 | f0819 | Verdict |
+|---|---|---|---|---|---|---|
+| B: one display position p (v2 law), every cover from slot(i - p) (as `fb2b010a7d`) | 18.5 | 20.9 | 15.5 | 13.2 | 23.1 | **rejected**: no fan, no slats |
+| A: every cover chases its own 3D slot pose slot(i - T): X, z and yaw, first order, k = 5.7 /s each | **6.3** | **8.2** | 12.4 | 10.7 | 21.3 | fans at noise level; fast look wrong |
+| A2: same, critically damped spring, omega = 8 /s | **5.2** | **6.3** | 12.3 | 11.0 | 20.9 | as A |
+| A with yaw at 0.45 k (from the v2 inner-edge proxy) | 15.8 | 13.8 | 17.2 | 16.2 | 23.8 | rejected |
+| U: as A, but yaw only toward 0 (target) or 90 (all others), side from X | 15.1 | 14.2 | 23.2 | 22.6 | 21.0 | rejected |
+| P: yaw and z per cover from T; X packed by each cover's footprint, anchored at p | 38 | 31 | 43 | 44 | 25 | rejected as built (implementation not checked further) |
+
+- A sweep of A's separate X, z and yaw rates (2-25 /s) gives no f0819
+  better than 19 px. That failure is structural.
+- **Supported (F): per-cover chase (A/A2).** It reproduces both
+  slow-to-fast stills from one rule with the single-step rate. Each cover
+  carries its own 3D state and chases the rest slot pose for the
+  *target*.
+  - The fan follows from that rule.
+  - The covers T has just passed are part way through their swing at the
+    same moment.
+  - The frontal one stays back because its z target was 0 for only 1/r
+    seconds.
+- **Not reproduced (failed): sustained fast and the reversal slats.** In
+  A and A2 the covers in transit swing through frontal and spread out.
+  Stock keeps them at stack spacing and steep or shingled, and they never
+  turn frontal in mid-transit.
+- What a full model must add (I, untested):
+  - The centre gap opens only around a cover that is actually frontal.
+    One way is X packed by each cover's current footprint.
+  - Yaw flips on the incoming side, ahead of the display, so covers
+    arrive at the centre already in the outgoing orientation. This
+    matches 3.3's "turning zone on the incoming side".
+- **The magnitudes of d > 1 were not measured.** That covers lag in
+  items, display speed against wheel rate, a speed cap and gain against
+  distance. The thumb proxy drifts 116 deg (~8 items) over the video, and
+  the caption skips items above the render rate, so neither gives the
+  target to better than a few items in fast segments.
+
+### 9.6 For AstraPod (I)
+
+- Plugging stock's scene into `carousel.c` / `tools/pfgeom.c` needs:
+  - single-camera projection (Parallel Slides off)
+  - `CAM_DIST` ~137 for a 128 cover (1.07 S) instead of 240
+  - side tilt 90 deg, with the near edge on the centre plane
+  - first slot near edge at 104.6 (0.817 x 128)
+  - stack spacing 28.2 (0.22 x 128)
+- The stack covers' screen look (near edge 126 tall, falling to ~70-90
+  inside 28 px) comes from that wide lens. AstraPod's 240 camera cannot
+  show it at any tilt.
+- Per-cover chase, per refresh with measured dt:
+  - Each slide i keeps (X_i, z_i, yaw_i) in PFreal.
+  - Each refresh: `q += (slot_q(i - T) - q) * a` with `a = 1 - exp(-5.7 * dt)`
+    (table, or `a ~ k*dt / (1 + k*dt/2)`).
+  - Spring form (A2): `v += (w*w*(tgt - q) - 2*w*v) * dt; q += v * dt`,
+    w = 8 /s.
+  - When T moves, the targets change and nothing restarts.
+- This reproduces the rest layout, the single step and the slow-to-fast
+  fan. It will **not** give stock's sustained fast look (9.5).
+
+### 9.7 (v3.1) The owner's hypothesis H: translation from p, flip lagging
+
+**H.** The row translates with the display position p, which chases T by
+the v2 law. Each cover's yaw is a delayed follower of its rest yaw
+yaw_rest(i - p). Two variants:
+
+- **H1 (spacing from offset).** X from slot_X(i - p).
+- **H2 (spacing from own yaw).** A chain anchored at p. Consecutive
+  centres are `0.22 + 1.194*(|cos yaw_i| + |cos yaw_i+1|)/2` apart, so
+  the X extents of neighbours never overlap and no two covers can
+  intersect.
+
+The `y` variants (H1y, H2y) take depth from the cover's own yaw, pivoting
+about its near edge, instead of from the offset. Models B, A and A2 are
+from 9.5. Same scoring as 9.5, with three frames added: f1154 (forward
+fast), f0830 (just after the f0819 reversal) and f1205 (settling after
+the stop at f1191).
+
+| Model | f0395 | f0560 | f0700 | f0819 | f0901 | f1154 | f0830 | f1205 | mean |
+|---|---|---|---|---|---|---|---|---|---|
+| B (p, yaw instant) | 18.5 | 15.6 | 13.2 | 23.3 | 21.3 | 25.6 | 33.3 | 14.0 | 20.6 |
+| **A** (per cover to slot(i - T), k 5.7) | **6.2** | 12.4 | 10.9 | 21.2 | **7.8** | 15.2 | 32.6 | 13.2 | **14.9** |
+| **A2** (spring, omega 8) | **5.3** | 12.3 | 11.0 | 21.1 | **6.3** | 15.3 | 32.8 | 13.2 | **14.7** |
+| H1, yaw lag k 8 / 4 / 2 /s | 32 / 42 / 54 | 35 / 50 / 62 | 38 / 50 / 62 | 28 / 29 / 40 | 25 / 35 / 45 | 37 / 48 / 56 | 32 / 32 / 34 | 14 / 20 / 34 | 30 / 38 / 48 |
+| H1, spring omega 16 / 8 | 34 / 47 | 41 / 58 | 41 / 58 | 28 / 29 | 26 / 38 | 40 / 51 | 33 / 32 | 14 / 22 | 32 / 42 |
+| H1, pure delay 50 / 100 ms | 30 / 45 | 37 / 51 | 38 / 51 | 26 / 28 | 23 / 30 | 41 / 48 | 34 / 35 | 13 / 14 | 30 / 38 |
+| H1y, lag k 8 | 27.6 | 35.4 | 35.0 | 24.0 | 21.4 | 38.4 | 31.3 | 15.8 | 28.6 |
+| H2 (chain), yaw instant / lag 8 / lag 4 | 23 / 43 / 52 | 17 / 45 / 62 | 16 / 45 / 62 | 23 / 37 / 46 | 23 / 34 / 44 | 27 / 42 / 58 | 34 / 33 / 35 | 16 / 19 / 31 | 22 / 37 / 49 |
+| H2y (chain), yaw instant / lag 8 | 21.9 / 37.7 | 16.5 / 50.9 | 15.9 / 50.6 | 23.7 / 31.8 | 22.7 / 34.6 | 22.1 / 46.0 | 33.3 / 32.2 | 16.3 / 22.5 | 21.6 / 38.3 |
+
+Single step: time-domain RMS against the five v2 steps, over four curves
+(centre and inner edge of the outgoing and the incoming cover).
+`scripts/step3d.py`.
+
+| Model | RMS |
+|---|---|
+| B (offset, yaw instant) | **0.055** |
+| A, all rates 5.7 | 0.067 |
+| A, yaw 8 /s | 0.057 |
+| H1, yaw lag k 16 / 8 / 4 / 2.6 | 0.067 / 0.095 / 0.151 / 0.191 |
+| H2 chain, yaw instant | 0.093 |
+| H2 chain, yaw lag k 16 / 8 / 4 | 0.113 / 0.140 / 0.193 |
+
+Findings:
+
+- **H is rejected (F).**
+  - Every flip lag or delay makes every still and the single step worse
+    than no lag. The score rises monotonically from B (lag 0) as the lag
+    grows.
+  - H does not produce the fan.
+  - H's corollary points the wrong way:
+    - A lagging flip happens *after* a cover passes the centre, on the
+      outgoing side.
+    - Stock turns covers on the **arriving** side in forward fast scroll:
+      in f1154 a near-frontal cover sits at x 258-300, and in f0560 the
+      turning covers reach back to z 1.5 on the right.
+    - In stock the flip *leads* the display. That is the behaviour of A,
+      whose covers chase the target T.
+- **Spacing from own yaw (chain) does not help (F).** With yaw instant it
+  scores 21.6-22.4 against B's 20.6. On the single step it scores 0.093
+  against 0.055.
+- **No-interpenetration constraint (M/F).**
+  - Stock's scene is collision-free without any constraint. With
+    sides at yaw 90 and near edges on the centre plane, the offset layout
+    (X, z, yaw interpolated over one slot) gives **no intersection
+    between neighbours at any point of a step** (checked at p = 0, 0.1,
+    ..., 1).
+  - AstraPod clips because of its own geometry: sides at 55-67.5 deg
+    about the near edge, a 1.875 S camera and per-slide projection. Its
+    motion law is not the cause.
+  - Stock's neighbours are not pushed on contact. In v2 steps F and G the
+    left neighbour's near edge starts moving in the caption frame. Its
+    progress at 33 / 100 / 200 / 300 / 400 ms is 0.14 / 0.43 / 0.68 /
+    0.82 / 0.93, and p (v2 law) predicts 0.18 / 0.45 / 0.71 / 0.85 /
+    0.94. **M**
+  - So adopting stock's scene (9.6) removes the clipping. A collision
+    rule is not needed.
+- **Still open:** f0819, f0830 (21-33 for every model) and the shingles of
+  f0560 / f1154 (12-15 for A). The best model remains A / A2. Its
+  remaining fault is that covers in transit swing through frontal and
+  spread out, where stock keeps them at stack spacing.
+
+### 9.8 (v4) Slow-motion reference IMG_3742.mov
+
+Source: iPhone slow motion, 1920x1080, exported at 30 fps, 3452 frames.
+The video carries location metadata. It stays outside the repository and
+is referenced only as a symlink in the scratch area. Working data:
+`/tmp/claude-1000/coverflow-ref/v4/` (`rect/` LCD 640x480, `dev/` device
+plane with the click wheel, `theta.npy` finger angle, `flow.npy` stack
+shifts, `diff.npy` render changes).
+
+**Time map (M).**
+- Frames 0-~100: normal speed (1/30 s per frame). The finger moves 3 deg
+  per frame, and the scene changes in every frame.
+- Frames ~100-~115: the iPhone speed ramp.
+- Frames ~115-~3340: 240 fps capture played 8x slow (1/240 s per frame).
+  This agrees with the finger: its real angular speed is continuous across
+  both boundaries (0.6 rev/s before the ramp, 0.5-0.7 rev/s after it; and
+  -0.5 rev/s before the end ramp, -1.5 rev/s after it).
+- Frames ~3340-3452: normal speed.
+- The analysed span is frames 115-3236 (13.0 s real). The LCD is lost to
+  glare in frames 473-498, 2500-2506 and 3237-3353.
+
+**Render cadence (M).** The stock renderer updates every 7-9 capture
+frames (27-34 Hz) while it settles or scrolls slowly, and every 14-18
+frames (13-17 Hz) in steady fast scroll. A still scene issues no updates.
+
+**Input (M).** The fingertip is tracked on the click wheel in the device
+plane, in all but 121 of 3452 frames.
+- Frames 115-1430 (5.5 s): forward. The finger accelerates from 0.5 to
+  2.2 rev/s and holds 1.9-2.3 rev/s from frame 740 to 1340.
+- Frames 1430-1850 (1.75 s): the finger rests on the wheel.
+- Frames 1850-3236 (5.8 s): back, at 0.5-2 rev/s, with several slowdowns.
+
+**The caption leads the covers (M).** In scroll the caption names an
+album ahead of the one at the centre. At frame 288 the caption reads
+"STAY" (The Kid LAROI) while the centre holds K-391's "Play"; the order
+is Play, Monsters, STAY, so the caption is 2 items ahead. The caption
+crossfades between names. The caption is the best available reading of
+the target T.
+
+**Steady fast scroll (M).**
+- Every cover on screen is a slat. No cover is frontal, and the slats
+  keep near-stack spacing across the whole width (frames 1000-1448).
+- Top views (F = 135) put the near edges on a line from z 1.07 at the
+  centre to z 1.3-1.35 at X +1.5 on the arriving side. The arriving-side
+  slats show more of their faces than the departing-side slats.
+- The stack moves 28-46 LCD px per render on the departing side, which is
+  1.0-1.6 items per render, or about 15-25 items/s at a finger speed of
+  2 rev/s. Faster passages exceed what matching can resolve: above about
+  3 items per render the slat pattern aliases. These speeds are lower
+  bounds.
+
+**Stop after fast scroll (M).** This is the cleanest event in the video.
+- The finger stops at frame ~1430.
+- The display runs on for 70 frames (0.29 s) and moves about 11 items
+  (+/-3, from stack shifts) as slats. This is the lag d at release.
+- At frame 1494 the arriving cover is already frontal (a flat top-view
+  segment at z 1.1, X 0.2-0.55). Its right neighbour is drawn in front of
+  it and hides its right half. Between frames 1494 and 1498, one render,
+  the draw order swaps: the arriving cover is drawn on top and shows whole,
+  0.61 S right of centre (77 LCD px), still at z 1.07-1.1. What changes in
+  that render is the **draw order**, not the yaw (corrected in 9.9).
+- The frontal cover then slides to the centre with no further turning.
+  The remaining distance decays exponentially: 62, 48, 36, 27 and 19 px
+  at frames 1506, 1517, 1524, 1534 and 1542. That gives **k = 7 +/- 1 /s**
+  (tau 0.14 s), close to v2's k = 5.7 (F). The cover is centred by frame
+  ~1610 (0.42 s after the flip).
+- So the flip **leads** the translation. At X = 0.61 the offset layout
+  (9.3) would give the cover a yaw of 67 deg; stock already shows 0 deg.
+
+**What this means for the model (I).**
+- Position: one scroll position p chases T at about the rate measured in
+  v2 (k 6-7 /s near the end of travel).
+- Yaw is keyed to the target, not to p. During fast scroll T is about 11
+  items ahead of p, so the cover with i = T sits off screen to the right.
+  Every cover on screen has i < T and takes a slat yaw: no centre cover
+  turns frontal. When T stops, the cover with i = T enters the view
+  already frontal, or flips within a render, and slides to the centre at
+  rate k.
+- The single step (v2, d <= 1) shows a smooth 0.3 s turn. A model with yaw
+  = slot_yaw(i - T) plus a fast yaw spring is consistent with both, if the
+  spring rate is set by the step: the v2 single step needs yaw to follow
+  within about 0.1 s. This is not fitted yet.
+- Candidate for the next fit: X(i), z(i) from slot(i - p); yaw(i) from a
+  spring toward slot_yaw(i - T); p from the v2 sum law. One set of
+  constants. It predicts slats at speed (all i < T), the stop seen here,
+  and fans when d is 1-3.
+
+**Not done (v4).**
+- p(t) through the fastest passages needs per-slat identity matching
+  (colour per slat, order kept) instead of strip translation.
+- T(t) as a count: counting caption changes, or a fixed degrees-per-item
+  with acceleration. The finger gives 2.5-20 items per revolution in the
+  windows that matched (median about 10), which suggests wheel
+  acceleration but does not measure it.
+- The unified fit and the score table against all stills (v1 and v4) and
+  the v2 single step.
+- Only one stop is measured. The reverse passages (frames 1850-3236)
+  contain more slowdowns to check.
+
+### 9.9 (v4) Unified model, scores and equations for AstraPod
+
+**More stop samples (M).** The reverse segment (frames 1850-3236) has
+no stop after fast scroll. The finger never rests there: its slowest speed
+is 0.18 rev/s at frame 2990. It has slow single steps instead (frames
+1850-2160, render gaps of 31-57 frames), and five slowdowns from 1.3-2.5
+rev/s to 0.2-0.6 rev/s (frames 2410, 2590, 2850, 3010, 3130). The
+slowdowns give the fan look of v1: one near-frontal cover on the
+**arriving** side, left of centre in reverse. Frame 2946 has it 0.44 S
+from centre, which is u = 0.54 in slot terms. So frame 1430-1610 remains
+the only measured stop. Lag at release, flip position and translation
+rate come from that one event (9.8).
+
+**Draw order (M).** Stock draws covers by distance from the centre slot,
+with the centre cover last. The swap happens once d falls to about 0.5-0.75.
+The arriving cover's right neighbour is drawn over it until then.
+
+**The model (F).** The yaw target leads p by the lag, capped at one item.
+It is one rule, with one set of constants:
+
+```
+d   = T - p                                    (items)
+p  += sign(d) * min(|d|, min(k*|d| + v0, vcap) * dt)
+Tl  = p + clamp(d, -L, +L)                     (yaw lead point)
+for each cover i:
+    u      = i - p
+    X_i    = s * (xn1 * |u|)                   |u| < 1
+           = s * (xn1 + dx * (|u| - 1))        |u| >= 1        (s = sign u)
+    yaw_t  = -sign(i - Tl) * ths * min(|i - Tl|, 1)
+    yaw_i += (yaw_t - yaw_i) * (1 - exp(-ky * dt))
+    z_i    = zn + 0.5 * |sin yaw_i|            (near edge on the centre plane)
+T clamped to p +- dmax when input arrives
+```
+
+Constants: k 5.7 /s, v0 0.2 items/s (v2); **ky 8 /s** (v2 single step,
+best of 4-40); **L 1 item**; ths 90 deg, xn1 0.817 S, dx 0.22 S, zn 1.06 S
+(v3 rest fit). vcap 25 items/s and dmax 11 items are **F from one event**.
+They do not change the v1 scores (no v1 still exceeds d 3.6), and they
+improve the v4 mean by 0.7 px. The stills hardly constrain them. The v4
+stop does: 11 +/- 3 items left at release, covered in 0.29 s.
+
+**Scores (F).** The metric is the h-profile RMS over the best 80 % of
+columns (px). Trimming drops pale cover tops that the silhouette misses:
+the v4 centre cover's white top costs 23 px untrimmed at rest. Each still
+takes the best frame within +-0.1 s and the best of four target phases, as
+before. The input is 15 deg per item from the finger (v1 thumb, v4
+fingertip).
+
+| Model | v1 mean | v4 mean | both | single step (v2) |
+|---|---|---|---|---|
+| B (all from p) | 13.0 | **8.9** | 11.0 | 0.055 |
+| A (all chase slot(i-T)) | **8.8** | 13.4 | 11.1 | 0.067 |
+| Y, L unlimited (yaw keyed to T) | 9.3 | 14.4 | 11.9 | 0.080 |
+| Y, L 2 | 9.4 | 10.4 | 9.9 | 0.080 |
+| **Y, L 1** | 9.8 | 10.6 | 10.2 | 0.080 |
+| **Y, L 1, vcap 25, dmax 11** | 9.8 | 9.9 | **9.9** | 0.080 |
+| Y, L 1, ky 16 | 9.6 | 9.8 | 9.7 | 0.149 |
+| Yz (z from slot), L 2 | 9.9 | 12.0 | 11.0 | 0.056 |
+
+Per still (Y, L 1, vcap 25, dmax 11): v1 f0395 6.2, f0560 8.1, f0700
+6.0, f0819 13.3, f0830 13.8, f0901 7.3, f1154 15.6, f1205 7.9; v4 f0300
+7.2, f1016 8.8, f1424 9.9, f1488 11.0, f1502 10.6, f1700 9.2, f2700
+12.0, f2946 10.3. The detection floor is about 8 px.
+
+Findings:
+- No single model wins every column. **Y with L 1-2 is the only one
+  within 1.5 px of the best on both videos.**
+  - B is best on v4 but worst on v1: it has no fans.
+  - A is best on v1 but swings covers through frontal at speed (v4 f1016:
+    22 px).
+- Keying yaw to T without a cap on the lead (L unlimited) fails at speed
+  (v4 f1424: 17.6). With T 10 items ahead, every cover on screen turns to
+  the departing side, even on the arriving side. Stock's arriving-side
+  covers keep the arriving-side orientation, partly turned.
+- z from yaw (Y) against z from slot (Yz): the stills favour z from yaw
+  (the v4 stop shows a frontal cover at z 1.07-1.1, 0.61 S off centre).
+  The single step favours z from slot (0.056 against 0.080). **Choose z
+  from yaw.** It is the geometry of stock's rest layout, it keeps covers
+  collision-free, and the single-step gap is 2.4 % of the step's travel.
+- Still open: f0819 and f0830 (13-14) and f1154 (15.6). These are the
+  steady-fast slats of v1.
+
+**Wheel to T (F, not confirmed in v4).** v1 measured 15-17.5 deg per item
+with no acceleration (section 2). In v4 the caption-band changes give
+13-17 deg per item in slow passages: 15 changes in 197 deg at frames
+1850-2160, and 21 in 350 deg at frames 116-420. The band also changes on
+renders and reflections, so this is only consistent with v1, not a
+measurement. At 15 deg per item, the forward pass (3160 deg of finger)
+feeds 210 items. The display travelled at least 112 items (strip matching
+undercounts above 3 items per render). Either part of the input is
+dropped (dmax) or the display count is low. **Not confirmed.** Counting
+captions in the fastest passage needs per-slat identity matching, which
+was skipped. So vcap is a lower bound (15-30 items/s measured) and dmax
+has +/- 3 items of uncertainty.
+
+**AstraPod per refresh (I, ready to implement).** The world unit is the
+cover width, 128 px.
+
+- Camera: one pinhole for the whole scene, no per-slide projection.
+  - F = CAM_DIST = 137 px.
+  - Screen x = 160 + F * X / z, half height = 64 * F / z, about the
+    horizon row.
+  - A cover at z 137 shows 128 px wide. The horizontal FOV is about 100
+    deg.
+- Layout:
+  - first side slot: outer (near) edge at X = 104.6, i.e. 0.817 * 128.
+  - stack spacing 28.2 (0.22 * 128).
+  - side yaw 90 deg.
+  - near edges on z = 135.7 (1.06 * 128, the centre plane).
+  - frontal centre at z 137.
+- State: T (int), p (Q16.16 items), and yaw per visible cover (Q16.16
+  deg; |i - p| <= 8).
+- Wheel: 4 raw ticks (15 deg) = T +- 1. Clamp T to p +- 11.
+- Each refresh, with dt the real time since the last one (about 15 ms at
+  66.9 Hz):
+  1. `d = T - p`; `v = min(5.7*|d| + 0.2, 25)`;
+     `p += sign(d) * min(|d|, v*dt)`.
+  2. `Tl = p + clamp(d, -1, 1)`.
+  3. For each visible cover: `yaw_t = -sign(i - Tl) * 90 * min(|i - Tl|, 1)`
+     and `yaw += (yaw_t - yaw) * a`, where `a = 1 - exp(-8*dt)`. In fixed
+     point use `a = 8*dt - 32*dt*dt` (error under 0.3 % at dt <= 30 ms).
+  4. `u = i - p`. X is `104.6*|u|` inside |u| < 1, otherwise
+     `104.6 + 28.2*(|u| - 1)`, with the sign of u.
+     `z = 135.7 + 64*|sin yaw|` (centre of the cover). The cover's edges
+     sit at `X -+ 64*cos yaw`, `z -+ 64*sin yaw`.
+  5. Draw order: by `|i - round(p)|`, largest first, centre last.
+- Expected look:
+  - single step: the centre cover turns over about 0.3 s while p moves.
+  - slowing down: one near-frontal cover on the arriving side, 0.5-1 slot
+    out (fans).
+  - steady fast: all covers are slats. The arriving side is turned
+    partway, with no frontal cover.
+  - stop after fast scroll: 11 items of catch-up in about 0.3 s; the target
+    cover arrives already frontal and slides in at 5.7-7 /s.

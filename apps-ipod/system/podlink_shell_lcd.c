@@ -26,6 +26,7 @@ enum shell_lcd_op {
     SHELL_LCD_STOCK_REGS,
     SHELL_LCD_TE_IRQ,
     SHELL_LCD_PATTERN,
+    SHELL_LCD_TE_OFFSET,
 };
 
 /* The ui_pace_status field SHELL_LCD_PACE_STATUS returns. */
@@ -44,7 +45,8 @@ enum shell_lcd_pace_field {
 enum { LCD_OFF, LCD_ON, LCD_GET };
 
 static uint32_t cookie;
-static unsigned int operation, argument;
+static unsigned int operation;
+static int argument;
 static uint32_t reply[4] = {1};
 static unsigned int reply_operation;
 
@@ -71,11 +73,13 @@ static unsigned int detail_size(unsigned int op)
 
 static bool submit(unsigned int op, const uint8_t *data)
 {
-    unsigned int arg = data[4];
+    int32_t arg = data[4];
+    if (op == SHELL_LCD_TE_OFFSET)
+        memcpy(&arg, data + sizeof(cookie), sizeof(arg));
     if (op < SHELL_LCD_TIMING ||
         (op > SHELL_LCD_DIAG && op < SHELL_LCD_PACE_STATUS &&
          op != SHELL_LCD_BENCH) ||
-        op > SHELL_LCD_PATTERN ||
+        op > SHELL_LCD_TE_OFFSET ||
         (op == SHELL_LCD_TIMING && arg && !lcd_te_debug_valid_timing(arg)) ||
         ((op == SHELL_LCD_SYNC || op == SHELL_LCD_PACING ||
           op == SHELL_LCD_ASYNC) &&
@@ -85,6 +89,8 @@ static bool submit(unsigned int op, const uint8_t *data)
         (op == SHELL_LCD_STOCK_REGS && arg > LCD_STOCK_ALL) ||
         (op == SHELL_LCD_TE_IRQ && arg > LCD_TE_IRQ_FALL) ||
         (op == SHELL_LCD_PATTERN && arg) ||
+        (op == SHELL_LCD_TE_OFFSET &&
+         (arg < -LCD_TE_OFFSET_LIMIT_US || arg > LCD_TE_OFFSET_LIMIT_US)) ||
         (op == SHELL_LCD_PACE_STATUS && arg >= PACE_FIELDS) ||
         sm1_test_submitted != sm1_test_completed || sm1_test_record_active())
         return false;
@@ -131,7 +137,8 @@ void shell_lcd_request(const struct usb_ctrlrequest *req, uint8_t *buffer,
             }
         }
     }
-    if (allowed && req->bRequestType == 0x40 && req->wLength == 5 &&
+    unsigned int command_size = req->wValue == SHELL_LCD_TE_OFFSET ? 8 : 5;
+    if (allowed && req->bRequestType == 0x40 && req->wLength == command_size &&
         submit(req->wValue, buffer))
     {
         usb_core_control_response(USB_CONTROL_ACK, NULL, 0);
@@ -259,6 +266,11 @@ static int dispatch(unsigned int *value, union lcd_details *details)
             if (!lcd_te_set_irq_mode(argument))
                 return EBUSY;
             *value = argument;
+            return 0;
+        case SHELL_LCD_TE_OFFSET:
+            if (!lcd_te_set_irq_offset(argument))
+                return EBUSY;
+            *value = (uint32_t)argument;
             return 0;
         case SHELL_LCD_BENCH:
         case SHELL_LCD_PATTERN:

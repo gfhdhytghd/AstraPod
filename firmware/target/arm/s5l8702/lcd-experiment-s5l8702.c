@@ -14,12 +14,11 @@ static unsigned int stock_mask;
 #define IRQ_TRACE_SIZE 16
 
 static enum lcd_te_irq_mode irq_mode;
+static int irq_offset;
 static struct {
     unsigned int started, retries, fallbacks;
     uint32_t max_wait, max_phase;
-    struct {
-        uint32_t wait, phase;
-    } trace[IRQ_TRACE_SIZE];
+    struct lcd_te_irq_sample trace[IRQ_TRACE_SIZE];
 } irq_stats;
 
 static void read_regs(uint32_t *values)
@@ -90,13 +89,23 @@ void lcd_experiment_irq_bind(struct eic_handler *handler)
     eint_register(handler);
 }
 
-void lcd_experiment_irq_started(uint32_t wait, uint32_t phase)
+void lcd_experiment_irq_offset(int offset)
+{
+    irq_offset = offset;
+    memset(&irq_stats, 0, sizeof(irq_stats));
+}
+
+uint32_t lcd_experiment_irq_delay(int first_phase, int edge_phase)
+{
+    return MAX(0, first_phase - edge_phase + irq_offset);
+}
+
+void lcd_experiment_irq_started(const struct lcd_te_irq_sample *sample)
 {
     unsigned int slot = irq_stats.started++ % IRQ_TRACE_SIZE;
-    irq_stats.trace[slot].wait = wait;
-    irq_stats.trace[slot].phase = phase;
-    irq_stats.max_wait = MAX(irq_stats.max_wait, wait);
-    irq_stats.max_phase = MAX(irq_stats.max_phase, phase);
+    irq_stats.trace[slot] = *sample;
+    irq_stats.max_wait = MAX(irq_stats.max_wait, sample->wait);
+    irq_stats.max_phase = MAX(irq_stats.max_phase, sample->phase);
 }
 
 void lcd_experiment_irq_retry(void)
@@ -113,6 +122,7 @@ void lcd_experiment_report(int (*report)(const char *, ...))
 {
     int flags = disable_irq_save();
     enum lcd_te_irq_mode mode = irq_mode;
+    int offset = irq_offset;
     typeof(irq_stats) stats = irq_stats;
     restore_irq(flags);
 
@@ -120,18 +130,22 @@ void lcd_experiment_report(int (*report)(const char *, ...))
            mode == LCD_TE_IRQ_RISE ? "rise" :
            mode == LCD_TE_IRQ_FALL ? "fall" : "off",
            stats.started, stats.retries, stats.fallbacks);
+    if (mode != LCD_TE_IRQ_OFF)
+        report("TE IRQ scan offset=%d us | y1 is exclusive", offset);
     if (stats.started)
     {
-        report("TE IRQ max ready-to-start=%lu us max ISR-to-start=%lu us",
+        report("TE IRQ max ready-to-start=%lu us max edge-to-start=%lu us",
                (unsigned long)stats.max_wait, (unsigned long)stats.max_phase);
-        report("TE IRQ recent frames: ready-to-start / selected ISR-to-start");
+        report("TE IRQ edge timestamps are taken at ISR entry");
         unsigned int first = stats.started - MIN(stats.started, IRQ_TRACE_SIZE);
         for (unsigned int i = first; i < stats.started; i++)
         {
-            unsigned int slot = i % IRQ_TRACE_SIZE;
-            report("  frame %u: %lu / %lu us", i + 1,
-                   (unsigned long)stats.trace[slot].wait,
-                   (unsigned long)stats.trace[slot].phase);
+            const struct lcd_te_irq_sample *s = &stats.trace[i % IRQ_TRACE_SIZE];
+            report("  frame %u y0=%u y1=%u width=%u delay=%lu us "
+                   "edge-to-start=%lu us wait=%lu us window=%s",
+                   i + 1, s->y0, s->y1, s->width, (unsigned long)s->delay,
+                   (unsigned long)s->phase, (unsigned long)s->wait,
+                   s->inside_window ? "inside" : "outside");
         }
     }
 }

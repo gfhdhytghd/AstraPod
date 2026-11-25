@@ -2780,6 +2780,19 @@ struct pf_col
     int n;              /* rows left to write */
 };
 
+/* The ARM926 halfword store can advance the destination by a register stride. */
+static inline pix_t *column_store(pix_t *pixel, pix_t value, int step)
+{
+#if defined(IPOD_6G) && defined(__arm__) && !defined(__thumb__) && !defined(SIMULATOR)
+    asm volatile("strh %1, [%0], %2" : "+&r"(pixel)
+                 : "r"(value), "r"(step * (int)sizeof(*pixel)) : "memory");
+    return pixel;
+#else
+    *pixel = value;
+    return pixel + step;
+#endif
+}
+
 /* `n` pixels of one column, from where it left off, `step` apart in the
  * framebuffer. The two runs are functions of their own, never inlined, so that
  * everything a pixel touches stays in a register: folded into the tile loop at
@@ -2793,14 +2806,28 @@ static void NO_INLINE draw_run(struct pf_col *k, int n, int step)
     unsigned int p = k->p;
     const int dp = k->dp;
 
+    if (dp == PFREAL_ONE && n >= 4)
+    {
+        const pix_t *at = src + (p >> PFREAL_SHIFT);
+        int full = n & ~3;
+        n -= full;
+        p += full * (unsigned)dp;
+        do
+        {
+#pragma GCC unroll 4
+            for (int i = 0; i < 4; i++)
+                pixel = column_store(pixel, *at++, step);
+            full -= 4;
+        } while (full);
+    }
     for (; n >= 4; n -= 4)
     {
-        pixel[0] = src[p >> PFREAL_SHIFT];
-        pixel[step] = src[(p + dp) >> PFREAL_SHIFT];
-        pixel[2 * step] = src[(p + 2u * dp) >> PFREAL_SHIFT];
-        pixel[3 * step] = src[(p + 3u * dp) >> PFREAL_SHIFT];
-        p += 4u * dp;
-        pixel += 4 * step;
+#pragma GCC unroll 4
+        for (int i = 0; i < 4; i++)
+        {
+            pixel = column_store(pixel, src[p >> PFREAL_SHIFT], step);
+            p += dp;
+        }
     }
     while (n-- > 0)
     {
@@ -3326,20 +3353,34 @@ static int flow_clip_end(void)
     return !pf_draw_y_shift && pf_text_h ? pf_text_y : pf_height;
 }
 
+/* A Q16 endpoint can round onto a pixel center from either side. Resolve
+ * the half-open coverage bound against the unrounded ray in world space. */
+static int flow_edge_column(int x, const struct turn_card *card, int edge, int dx)
+{
+    int column = x >> 16;
+    if (abs((x & 65535) - 32768) > 8)
+        return (x + 32767) >> 16;
+    int ray = 2 * column + 1 - LCD_WIDTH;
+    int32_t world_x = card->world_x[edge] + dx * 64;
+    return column + ((int64_t)(2 * 156) * world_x > (int64_t)ray * card->z[edge]);
+}
+
 static void flow_cover_columns(const struct turn_card *card, int slot, int spread)
 {
     int x0 = card->x[0], x1 = card->x[1];
     /* Album-panel neighbours spread in world pixels (Q10). */
-    if (spread)
+    int dx = card->id < center_index ? -spread : spread;
+    if (dx)
     {
-        int dx = card->id < center_index ? -spread : spread;
         x0 += (int64_t)dx * 156 * (1LL << 22) / card->z[0];
         x1 += (int64_t)dx * 156 * (1LL << 22) / card->z[1];
     }
-    bool reversed = x0 > x1;
+    int edge0 = flow_edge_column(x0, card, 0, dx);
+    int edge1 = flow_edge_column(x1, card, 1, dx);
+    bool reversed = edge0 > edge1;
     int left = MIN(x0, x1), width = abs(x1 - x0);
-    int first = MAX(0, (left + 32767) >> 16);
-    int end = MIN(LCD_WIDTH, (MAX(x0, x1) + 32767) >> 16);
+    int first = MAX(0, MIN(edge0, edge1));
+    int end = MIN(LCD_WIDTH, MAX(edge0, edge1));
     if (first >= end)
         return;
 
@@ -3350,7 +3391,8 @@ static void flow_cover_columns(const struct turn_card *card, int slot, int sprea
         return;
     /* Interpolate in Q30: a rounded Q16 step accumulates enough error
      * across a face to exchange nearly coincident depth samples. */
-    int t = ((int64_t)((first << 16) + 32768 - left) << 30) / width;
+    int offset = MAX(0, MIN(width, (first << 16) + 32768 - left));
+    int t = width ? ((int64_t)offset << 30) / width : (1 << 29);
     int dt = end - first > 1 ? (1ULL << 46) / width : 0;
     int h0 = card->bottom[0] - card->top[0];
     int h1 = card->bottom[1] - card->top[1];
@@ -3360,7 +3402,7 @@ static void flow_cover_columns(const struct turn_card *card, int slot, int sprea
         t = (1 << 30) - t;
         dt = -dt;
     }
-    for (int x = first; x < end; x++, t += dt)
+    for (int x = first; x < end; x++, t = (uint32_t)t + dt)
     {
         int h = h0 + ((int64_t)(h1 - h0) * t >> 30);
         struct flow_column *col = &flow_columns[x];
@@ -3368,7 +3410,7 @@ static void flow_cover_columns(const struct turn_card *card, int slot, int sprea
             continue;
         col->height = h;
         col->top = card->top[0] + ((int64_t)(card->top[1] - card->top[0]) * t >> 30);
-        col->u_height = (int64_t)h1 * t >> 30;
+        col->u_height = (int64_t)h1 * MAX(0, t) >> 30;
         col->bmp = bmp;
         col->mip = mip;
     }
@@ -5593,26 +5635,31 @@ static void prefetch_captions(void)
     }
 }
 
-/* The caption has a solid ground. Include both the old and the new ink so
- * shortening a title also erases its tail on the panel. */
+/* The default RGB565 framebuffer is aligned. Compare two pixels per load;
+ * a one-pixel margin on either side is safe to include in the transfer. */
 static void caption_ink_bounds(struct carousel_frame *paint, int top, int end,
                                int *left, int *right)
 {
+    typedef uint32_t pixel_pair __attribute__((may_alias));
     uint32_t start = paint->tracing ? USEC_TIMER : 0;
+    uint32_t bg = (uint32_t)pf_bg_color * 0x10001u;
+    int lo = LCD_WIDTH / 2, hi = 0;
     for (int y = top; y < end; y++)
     {
-        const pix_t *row = LCD_BUF + LCD_WIDTH * (pf_vp_y + y);
+        const pixel_pair *row = (const pixel_pair *)(LCD_BUF + LCD_WIDTH * (pf_vp_y + y));
         int x = 0;
-        while (x < *left && row[x] == pf_bg_color)
+        while (x < lo && row[x] == bg)
             x++;
-        if (x < *left)
-            *left = x;
-        x = LCD_WIDTH;
-        while (x > *right && row[x-1] == pf_bg_color)
+        lo = x;
+        if (lo == LCD_WIDTH / 2)
+            continue;
+        x = LCD_WIDTH / 2;
+        while (x > hi && row[x-1] == bg)
             x--;
-        if (x > *right)
-            *right = x;
+        hi = x;
     }
+    *left = 2 * lo;
+    *right = 2 * hi;
     if (paint->tracing)
         paint->caption_us += (uint32_t)USEC_TIMER - start;
 }
@@ -5699,6 +5746,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
     bool caption_flush_owed = false;
     int caption_flush_top = 0, caption_flush_end = 0;
     int caption_left = 0, caption_right = LCD_WIDTH;
+    int previous_ink_left = 0, previous_ink_right = LCD_WIDTH;
     bool trace_attempted = false;
     bool profile_input = ui_perf_enabled();
     unsigned target_changes = 0;
@@ -6258,17 +6306,27 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
             paint.tracing = *trace != 0;
             paint.caption_us = 0;
-            bool trim_caption = !joined && drew_caption && !flat_view();
-            int ink_left = trim_caption ? LCD_WIDTH : 0;
-            int ink_right = trim_caption ? 0 : LCD_WIDTH;
-            if (trim_caption)
-                caption_ink_bounds(&paint, pf_text_y, pf_text_y + pf_text_h,
-                                   &ink_left, &ink_right);
+            int ink_left = 0, ink_right = LCD_WIDTH;
             carousel_paint(&paint, drew_art, drew_caption, joined,
                            paint_y, paint_h);
-            if (trim_caption)
-                caption_ink_bounds(&paint, caption_rows_y, caption_rows_y + caption_rows_h,
-                                   &ink_left, &ink_right);
+            if (drew_caption && !flat_view())
+            {
+                int left, right;
+                caption_ink_bounds(&paint, pf_text_y, pf_text_y + pf_text_h,
+                                   &left, &right);
+                if (!joined)
+                {
+                    ink_left = MIN(left, previous_ink_left);
+                    ink_right = MAX(right, previous_ink_right);
+                }
+                previous_ink_left = left;
+                previous_ink_right = right;
+            }
+            else if (drew_caption)
+            {
+                previous_ink_left = 0;
+                previous_ink_right = LCD_WIDTH;
+            }
             uint32_t render = *trace ? (uint32_t)USEC_TIMER - frame_start : 0;
 #if PF_SHOW_STATS
             pf_stats_draw();

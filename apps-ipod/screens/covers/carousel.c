@@ -3727,6 +3727,7 @@ static void flow_cover_columns(const struct flow_card *card, int slot, int sprea
         t = (1 << 30) - t;
         dt = -dt;
     }
+    const bool depth_test = flow_row.phase == STOCK_SCROLL || flow_row.phase == STOCK_REST;
     face->t0 = t;
     face->dt = dt;
     for (int x = first; x < end; x++, t = (uint32_t)t + dt)
@@ -3734,7 +3735,14 @@ static void flow_cover_columns(const struct flow_card *card, int slot, int sprea
         int h = h0 + ((int64_t)(h1 - h0) * t >> 30);
         int y0 = face->top + ((int64_t)face->top_delta * t >> 30);
         struct flow_column *col = &flow_columns[x];
-        if (col->height)
+        /* At rest and while scrolling, projected height gives reciprocal
+         * depth on this ray. Intersecting faces can exchange order mid-span. */
+        if (depth_test)
+        {
+            if (h < col->height)
+                continue;
+        }
+        else if (col->height)
         {
             flow_top[x] = MIN(flow_top[x], col->y0 >> 16);
             flow_end[x] = MAX(flow_end[x],

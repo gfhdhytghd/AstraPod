@@ -1940,20 +1940,37 @@ static void refresh_backdrop(struct native_list *render, bool visible)
         ui_layer_free(&render->backdrop);
 }
 
-/* Under snapped scrolling a marker frame is drawn this long before the
- * refresh it is for, so even the frame that recolours two rows, at 0.3
- * refresh of work, reaches the panel ahead of that refresh's scan. A frame
- * ready before the previous scan has passed its rows waits for it. */
-#define SNAP_LEAD_US 5000
+/* The panel's scan reaches row y this long after the TE rise: the TE
+ * pulse, then the rows at an even pace through the rest of the refresh. */
+#define TE_PULSE_US 1100
+#define SCAN_MARGIN_US 500
 
-static uint32_t snap_deadline(const struct native_list *render)
+static uint32_t scan_reaches(int y)
 {
-    return render->presented + ui_frame_period() - SNAP_LEAD_US;
+    uint32_t period = ui_frame_period();
+    return TE_PULSE_US + (period - TE_PULSE_US) * MAX(0, y) / LCD_HEIGHT +
+           SCAN_MARGIN_US;
 }
 
-/* Whether the next marker frame is due: one per refresh, after the one the
- * last frame reached. A deadline further ahead than any frame queues is
- * left from long ago. */
+/* A marker frame for the next refresh is drawn once the scan of the
+ * refresh showing the last one has reached the marker. The LCD driver then
+ * cannot start it ahead of that scan, which would show it a refresh early
+ * on top of the last frame, and it has most of a refresh to reach the
+ * panel behind the scan. */
+static uint32_t snap_deadline(const struct native_list *render)
+{
+    const struct list_motion *motion = &render->motion;
+    struct list_pose next = motion_sample(motion,
+        MIN(motion->painted + 1, motion_duration(motion)));
+    int y = motion->bounds.y +
+            (next.cursor - next.top) * motion->pitch / ROW_UNIT;
+    if (render->shown.valid)
+        y = MAX(y, render->shown.cursor_y);
+    return render->presented + scan_reaches(y);
+}
+
+/* Whether the next marker frame is due. A deadline further ahead than any
+ * frame queues is left from long ago. */
 static bool snap_due(const struct native_list *render, uint32_t now)
 {
     int32_t left = snap_deadline(render) - now;
@@ -1969,13 +1986,12 @@ static void snap_presented(struct native_list *render, bool submitted)
         render->presented = refresh;
         return;
     }
-    uint32_t soonest = now + SNAP_LEAD_US;
-    uint32_t phase = ui_clock_phase(soonest);
-    if (phase != UINT32_MAX)
-        soonest -= phase;
-    /* Unreported, the frame keeps to the refresh grid unless a whole
-     * refresh has gone by without one. */
+    /* Unreported, the frame counts for the next refresh, and keeps to the
+     * refresh grid unless a whole refresh has gone by without one. */
     int32_t period = ui_frame_period();
+    uint32_t soonest = now, phase = ui_clock_phase(now);
+    if (phase != UINT32_MAX)
+        soonest += period - phase;
     uint32_t next = render->presented + period;
     int32_t late = soonest - next;
     render->presented = late >= period || late < -3 * period ? soonest : next;

@@ -4,6 +4,7 @@
 #include "button.h"
 #include "lcd.h"
 #include "lcd-experiment-s5l8702.h"
+#include "lcd-hwscroll.h"
 #include "lcd-te-s5l8702.h"
 #include "podlink-shell-lcd.h"
 #include "screens/system/lcd_te_debug.h"
@@ -27,6 +28,7 @@ enum shell_lcd_op {
     SHELL_LCD_TE_IRQ,
     SHELL_LCD_PATTERN,
     SHELL_LCD_TE_OFFSET,
+    SHELL_LCD_VSCROLL,
 };
 
 /* The ui_pace_status field SHELL_LCD_PACE_STATUS returns. */
@@ -47,6 +49,7 @@ enum { LCD_OFF, LCD_ON, LCD_GET };
 static uint32_t cookie;
 static unsigned int operation;
 static int argument;
+static struct lcd_hwscroll_request scroll_request;
 static uint32_t reply[4] = {1};
 static unsigned int reply_operation;
 
@@ -73,13 +76,17 @@ static unsigned int detail_size(unsigned int op)
 
 static bool submit(unsigned int op, const uint8_t *data)
 {
+    struct lcd_hwscroll_request scroll = {0};
     int32_t arg = data[4];
     if (op == SHELL_LCD_TE_OFFSET)
         memcpy(&arg, data + sizeof(cookie), sizeof(arg));
+    if (op == SHELL_LCD_VSCROLL)
+        memcpy(&scroll, data + sizeof(cookie), sizeof(scroll));
     if (op < SHELL_LCD_TIMING ||
         (op > SHELL_LCD_DIAG && op < SHELL_LCD_PACE_STATUS &&
          op != SHELL_LCD_BENCH) ||
-        op > SHELL_LCD_TE_OFFSET ||
+        op > SHELL_LCD_VSCROLL ||
+        (op == SHELL_LCD_VSCROLL && !lcd_hwscroll_valid(&scroll)) ||
         (op == SHELL_LCD_TIMING && arg && !lcd_te_debug_valid_timing(arg)) ||
         ((op == SHELL_LCD_SYNC || op == SHELL_LCD_PACING ||
           op == SHELL_LCD_ASYNC) &&
@@ -100,6 +107,7 @@ static bool submit(unsigned int op, const uint8_t *data)
         return false;
     operation = op;
     argument = arg;
+    scroll_request = scroll;
     ++sm1_test_submitted;
     if (button_queue_try_post(SYS_SM1_TEST_CONTROL, SHELL_LCD_EVENT))
         return true;
@@ -137,7 +145,11 @@ void shell_lcd_request(const struct usb_ctrlrequest *req, uint8_t *buffer,
             }
         }
     }
-    unsigned int command_size = req->wValue == SHELL_LCD_TE_OFFSET ? 8 : 5;
+    unsigned int command_size = 5;
+    if (req->wValue == SHELL_LCD_TE_OFFSET)
+        command_size = 8;
+    if (req->wValue == SHELL_LCD_VSCROLL)
+        command_size = sizeof(cookie) + sizeof(scroll_request);
     if (allowed && req->bRequestType == 0x40 && req->wLength == command_size &&
         submit(req->wValue, buffer))
     {
@@ -272,6 +284,8 @@ static int dispatch(unsigned int *value, union lcd_details *details)
                 return EBUSY;
             *value = (uint32_t)argument;
             return 0;
+        case SHELL_LCD_VSCROLL:
+            return lcd_hwscroll_test(&scroll_request);
         case SHELL_LCD_BENCH:
         case SHELL_LCD_PATTERN:
         {

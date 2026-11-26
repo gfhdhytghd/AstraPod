@@ -33,26 +33,16 @@
 #define MODAL_UP_FRAMES ANIM_F(16)
 #define MODAL_DOWN_FRAMES ANIM_F(12)
 #define MODAL_DIM (UI_FULL_OPACITY * 35 / 100)
-/* An even count keeps a half-rate fade on its last refresh. */
-#define FADE_FRAMES ANIM_F(10)
 
 static struct ui_scene *owner;
 static unsigned int owner_thread;
 static const void *root_page, *restored_page;
 static bool (*parent_painter)(const void *page);
-/* Whether the root screen on show, and the one a root transition leaves,
- * is a list: a list may move past a list, where other screens fade. */
-static bool root_list = true, left_list;
 
 size_t ui_scene_reserve_size(void)
 {
     /* One settled backdrop under a nested panel that is still moving. */
     return 4 * FRAMEBUFFER_SIZE + 3 * (BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t));
-}
-
-static bool fade_entry(void)
-{
-    return ui_theme_style(UI_STYLE_SCREEN_ENTRY) == UI_SCREEN_ENTRY_FADE;
 }
 
 static fb_data *surface(fb_data *data, bool front)
@@ -399,8 +389,7 @@ void ui_scene_snap_push(void)
 void ui_scene_push_rows(int y, int pitch, int count)
 {
     struct ui_scene *scene = owner;
-    if (!scene || !(scene->staggered || scene->slide ||
-                    (scene->root_entry && fade_entry())) ||
+    if (!scene || !(scene->staggered || scene->slide) ||
         thread_self() != owner_thread)
         return;
     y = MIN(MAX(y, 0), LCD_HEIGHT);
@@ -475,22 +464,6 @@ static bool slide_motion(void)
     return ui_theme_style(UI_STYLE_PAGE_MOTION) == UI_PAGE_MOTION_SLIDE;
 }
 
-/* Cross-fade to the target from `opacity`, one step per refresh. */
-static void start_fade(struct ui_scene *scene, int opacity)
-{
-    scene->fade = true;
-    scene->staggered = false;
-    scene->tween.from = opacity;
-    scene->tween.to = UI_FULL_OPACITY;
-    scene->tween.frames = ui_theme_duration(FADE_FRAMES);
-    scene->tween.ease_in = false;
-    scene->tween.easing = UI_EASE_LINEAR;
-}
-
-static void compose_fade(fb_data *out, const fb_data *front, const fb_data *back,
-                         unsigned opacity, const int16_t *art_top,
-                         const int16_t *art_end);
-
 /* A slide moves the pages below the status bar; the bar changes in place. */
 static int slide_top(void)
 {
@@ -529,8 +502,7 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     }
     int offset = push ? LCD_WIDTH : 0;
     int end = push ? 0 : LCD_WIDTH;
-    bool reverse_pan = active && panning && !scene->fade &&
-        pan_top == scene->pan_top &&
+    bool reverse_pan = active && panning && pan_top == scene->pan_top &&
         slide == scene->slide &&
         to == (scene->target_front ? scene->back_page : scene->front_page) &&
         from == (scene->target_front ? scene->front_page : scene->back_page);
@@ -545,7 +517,6 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     }
     if (reverse_pan ||
         (active && !staggered && !panning && !scene->pan_top && !scene->slide &&
-         !scene->fade &&
          (!scene->capturing || push != scene->target_front) &&
          from == (push ? scene->back_page : scene->front_page) &&
          to == (push ? scene->front_page : scene->back_page)))
@@ -566,15 +537,8 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
             previous = surface(data, !scene->target_front);
             if (scene->last_offset != -1)
             {
-                if (scene->fade)
-                    compose_fade(data + 2 * PAGE_PIXELS,
-                                 surface(data, scene->target_front),
-                                 surface(data, !scene->target_front),
-                                 scene->last_offset, NULL, NULL);
-                else
-                    compose_pages(scene, data + 2 * PAGE_PIXELS,
-                                  surface(data, false), surface(data, true),
-                                  scene->last_offset);
+                compose_pages(scene, data + 2 * PAGE_PIXELS, surface(data, false),
+                              surface(data, true), scene->last_offset);
                 previous = data + 2 * PAGE_PIXELS;
             }
         }
@@ -594,7 +558,7 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     scene->target_front = push;
     scene->pan_top = pan_top;
     scene->slide = slide;
-    scene->full_screen = scene->back_still = scene->fade = false;
+    scene->full_screen = scene->back_still = false;
     scene->staggered = staggered;
     scene->reuse_target = reverse_pan;
     scene->row_y = scene->row_count = 0;
@@ -638,9 +602,6 @@ void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bo
     root_page = to;
     if (restored == to)
         return;
-    /* A screen entered without a transition is taken for a list. */
-    left_list = root_list;
-    root_list = true;
     if (from != to && ui_scene_capture(scene, from, to, push))
     {
         scene->root_entry = true;
@@ -698,7 +659,6 @@ static bool capture_panel(struct ui_scene *scene, bool vertical)
     memcpy(backdrop, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
     core_put_data_pinned(backdrop);
     scene->vertical = vertical;
-    scene->fade = false;
     /* A panel page often hides the status bar, so the whole screen slides. */
     scene->pan_top = 0;
     scene->slide = slide;
@@ -870,24 +830,10 @@ bool ui_scene_capture_modal(struct ui_scene *scene)
 void ui_scene_open_modal(struct ui_scene *scene, const char *route)
 {
     if (ui_scene_capture_modal(scene))
-    {
-        if (fade_entry())
-            start_fade(scene, 0);
         ui_scene_show_modal(scene, route);
-    }
 }
 
 void ui_scene_open_page(struct ui_scene *scene, const char *route)
-{
-    if (capture_panel(scene, false))
-    {
-        if (fade_entry())
-            start_fade(scene, 0);
-        ui_scene_show_modal(scene, route);
-    }
-}
-
-void ui_scene_open_core_page(struct ui_scene *scene, const char *route)
 {
     if (capture_panel(scene, false))
         ui_scene_show_modal(scene, route);
@@ -897,8 +843,7 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
 {
     if (scene->backdrop_handle <= 0)
         return false;
-    unsigned frames = !animate ? 0 : scene->fade
-        ? ui_theme_duration(FADE_FRAMES) : scene->vertical
+    unsigned frames = !animate ? 0 : scene->vertical
         ? ui_theme_motion(UI_MOTION_SHEET_OUT, MODAL_DOWN_FRAMES,
                           MODAL_DOWN_FRAMES)
         : page_frames(false);
@@ -912,9 +857,6 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     bool was_opening = owner == scene;
     int offset = was_opening
         ? (scene->last_offset >= 0 ? scene->last_offset : scene->tween.from) : 0;
-    /* A fade back starts from the parent's share of the frame on show. */
-    if (scene->fade)
-        offset = was_opening ? UI_FULL_OPACITY - offset : 0;
     if (scene->handle <= 0)
         scene->handle = core_alloc_free_space(PANEL_WORKSPACE_BYTES);
     if (scene->handle <= 0)
@@ -935,11 +877,9 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     scene->last_offset = scene->composed_offset = -1;
     scene->tween = (struct ui_tween){
         .start_clock = ui_clock_start(), .from = offset,
-        .to = scene->fade ? UI_FULL_OPACITY
-            : scene->vertical ? LCD_HEIGHT : LCD_WIDTH,
-        .frames = frames,
-        .ease_in = !scene->slide && !scene->fade,
-        .easing = scene->slide || scene->fade ? UI_EASE_LINEAR : 0,
+        .to = scene->vertical ? LCD_HEIGHT : LCD_WIDTH, .frames = frames,
+        .ease_in = !scene->slide,
+        .easing = scene->slide ? UI_EASE_LINEAR : 0,
     };
     while (owner == scene)
     {
@@ -985,14 +925,6 @@ void ui_scene_start(struct ui_scene *scene)
 {
     if (!scene->capturing)
         return;
-    if (scene->root_entry)
-    {
-        /* A root screen fades in unless it and the screen it leaves are both
-         * lists, or one of them is Now Playing. */
-        root_list = scene->row_count > 0 || menu_pane_split();
-        if (fade_entry() && !scene->full_screen && !(left_list && root_list))
-            start_fade(scene, 0);
-    }
     if (scene->staggered)
     {
         scene->push_top = viewportmanager_theme_enabled(SCREEN_MAIN)
@@ -1033,8 +965,7 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
         return;
     }
 
-    int offset = scene->fade ? ui_tween_sample(&scene->tween, frame)
-                             : position(scene, frame);
+    int offset = position(scene, frame);
     int pose = scene->staggered ? (int)frame : offset;
     if (pose == scene->last_offset && !target_changed)
         return;
@@ -1059,15 +990,11 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
             else
                 scene->back_split = split;
             /* A full page passes a menu at constant speed. */
-            if (scene->slide && !scene->full_screen && !scene->fade)
+            if (scene->slide && !scene->full_screen)
                 scene->tween.easing = scene->back_split != scene->front_split
                                       ? UI_EASE_LINEAR : ui_theme_easing();
         }
-        if (scene->fade)
-            compose_fade(out, scene->target_front ? front : back,
-                         scene->target_front ? back : front, offset,
-                         NULL, NULL);
-        else if (scene->vertical)
+        if (scene->vertical)
             compose_modal(out, back, front, offset,
                           scene->target_front ? 0 : scene->status_height,
                           scene->dim_color);

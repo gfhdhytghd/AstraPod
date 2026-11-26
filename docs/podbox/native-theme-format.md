@@ -186,7 +186,6 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 | `art` | `none`, `plastic` | Apple's bitmaps from the stock firmware replace the drawn status bar, battery, play and pause icons, the selected row's chevron, the scrollbar, the Now Playing progress and volume bars, its shuffle icon and its speakers. The selection gradient becomes Apple's exact rows, whatever the theme sets for it. A long selected row scrolls as on the original iPod: after about 1.3 s it moves left 2 pixels every 34 ms and loops round, and the scroll settings do not apply. The bitmaps are sized for the Classic layout and come from `.rockbox/themes/stock-art.bin`; without that file they are not drawn. |
 | `list_scroll` | `glide`, `snap` | The rows jump a whole row at a time and only the selection marker moves; the ends of the list do not stretch. See *Native rendering and animation*. |
 | `list_rows` | `pitch`, `fill` | The rows fill the list's height: the pixels left below the last whole row go one each to the top rows, so nine 24-pixel rows in 220 pixels become four of 25 and five of 24. |
-| `screen_entry` | `move`, `fade` | Screens other than lists fade in and back out over 10 refreshes, about 150 ms, instead of moving: sheets such as a context menu or a picker, pages such as the equaliser or a viewer, and a main-menu screen that is not a list. Lists, Now Playing, About and License keep the page motion, and Cover Flow its own. `motion_scale` applies. |
 
 Light keeps Scrim's styles.
 Classic sets the second keyword of every style except `list_scroll`. To

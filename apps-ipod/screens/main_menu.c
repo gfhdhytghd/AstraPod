@@ -121,7 +121,7 @@ static int show_credits(void)
 static int show_license(void)
 {
     struct ui_scene scene = {0};
-    ui_scene_open_core_page(&scene, "license-push");
+    ui_scene_open_page(&scene, "license-push");
     int ret = text_viewer(ROCKBOX_DIR "/docs/COPYING.txt");
     ui_scene_close_modal(&scene, ret == GO_TO_PREVIOUS, "license-pop");
     return ret == GO_TO_ROOT ? MENU_ATTACHED_USB : 0;

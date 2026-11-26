@@ -60,7 +60,7 @@ struct native_list {
     struct list_motion motion;
     struct { bool valid; int indicator; } shown;
     uint32_t marquee_started, marquee_frame;
-    bool batched;
+    bool batched, repairing;
 };
 static struct native_list state;
 static int renderer_handle = 1;

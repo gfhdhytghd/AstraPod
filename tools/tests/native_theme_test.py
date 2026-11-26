@@ -237,13 +237,37 @@ static void check_plastic(void)
                                 0) == 0x5b5b5b);
 }
 
+/* Only Classic and its Plastic split their menus, in the pane's own fonts. */
+static void check_menu_pane(void)
+{
+    struct ui_theme theme;
+    ui_theme_builtin(&theme, UI_THEME_SCRIM);
+    assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_NONE);
+    ui_theme_builtin(&theme, UI_THEME_LIGHT);
+    assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_NONE);
+    ui_theme_builtin(&theme, UI_THEME_CLASSIC);
+    assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_SPLIT);
+    assert(!strcmp(theme.font[UI_FONT_PANE_TITLE], "17-helvetica-bold-pane"));
+    assert(!strcmp(theme.font[UI_FONT_PANE_TEXT], "13-helvetica-bold"));
+    ui_theme_builtin(&theme, UI_THEME_PLASTIC);
+    assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_SPLIT);
+
+    static const char file[] = VERSION "style.menu_pane=split\n"
+        "font.pane_title=Local_20-Bold\nfont.pane_text=Local_12\n";
+    assert(ui_theme_parse(&theme, file, sizeof(file) - 1));
+    assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_SPLIT);
+    assert(!strcmp(theme.font[UI_FONT_PANE_TITLE], "Local_20-Bold"));
+    assert(!strcmp(theme.font[UI_FONT_PANE_TEXT], "Local_12"));
+}
+
 int main(void)
 {
     check_builtins();
     check_parser();
     check_palette();
     check_plastic();
-    puts("PASS native theme defaults, overrides, atomic validation and palette bounds");
+    check_menu_pane();
+    puts("PASS native theme defaults, overrides, atomic validation, palette bounds and menu pane");
     return 0;
 }
 ''', objects)

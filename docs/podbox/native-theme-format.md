@@ -69,12 +69,17 @@ Use `font.<role>=<basename>` to reference a font. The basename can contain 1–3
 | `wps_meta` | `12-noto-sans` | `13-helvetica-bold` |
 | `handoff_caption` | `12-noto-sans` | `12-noto-sans` |
 | `panel` | `14-noto-sans` | `14-noto-sans` |
+| `pane_title` | `18-noto-sans-bold` | `17-helvetica-bold-pane` |
+| `pane_text` | `14-noto-sans` | `13-helvetica-bold` |
 
 The `helvetica` fonts are Apple's Helvetica from the stock firmware, at the
 stock sizes, with its CJK bitmaps at 11 or 16 px. They keep the stock
 layout: whole-pixel glyph positions and no kerning. Other scripts come from
 the `noto` fonts' faces at the same size. `17-helvetica-bold-pane` is a
-slightly larger 17 px bold for the art panel's headings.
+slightly larger 17 px bold for the split menu pane's headings.
+
+`pane_title` and `pane_text` are the split menu pane's large and small text,
+used only with `style.menu_pane=split`.
 
 ### Cover Flow album panel
 
@@ -139,6 +144,8 @@ that motion a jump. An omitted role keeps the built-in duration, and
 `motion_easing` sets the curve of slide page transitions: `cubic` (the
 default), `quad`, `quint`, `sine` or `linear`, all ease-out. Transitions to
 and from Now Playing, and full-screen panels, always slide at constant speed.
+With `style.menu_pane=split`, so does a full-width list passing a split menu;
+between two split menus only the rows slide, and the pane stays.
 
 ### Gradients
 
@@ -168,6 +175,7 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 | `page_motion` | `cascade`, `slide` | Pages slide side by side under a fixed status bar, at full brightness. |
 | `wps_layout` | `cover`, `classic` | Now Playing with a status bar, a tilted cover and its reflection on the left, the track text on the right, and the progress bar with both times at the bottom. Turning the wheel slides the volume bar in from the right in place of the progress bar. The layout is fixed; colours, fonts and gradients apply. |
 | `scrollbar` | `plain`, `classic` | A 4-pixel thumb with rounded ends and no track, drawn at the right edge. |
+| `menu_pane` | `none`, `split` | Menus take the left half of the screen, and their status bar spans it. The right half shows the selected row: a slow pan across the library's covers for music rows, otherwise its icon and name, a settings row's title, icon and value, the playing track, or the free space. A new row's pane follows half a second after the selection. Lists of the library's contents stay full width. |
 | `art` | `none`, `plastic` | Apple's bitmaps from the stock firmware replace the drawn battery, play and pause icons, the selected row's chevron, and the Now Playing shuffle icon and speakers. The status, selection, `progress` and `progress_track` gradients become Apple's exact rows, whatever the theme sets for them. The bitmaps are sized for the Classic layout. |
 
 Classic sets the second keyword of every style except `art`. To start a
@@ -198,6 +206,8 @@ font.status = 13-helvetica-bold
 font.status_title = 13-helvetica-bold
 font.wps_title = 17-helvetica-bold
 font.wps_meta = 13-helvetica-bold
+font.pane_title = 17-helvetica-bold-pane
+font.pane_text = 13-helvetica-bold
 metric.row_height = 24
 metric.list_x = 0
 metric.list_y = 20

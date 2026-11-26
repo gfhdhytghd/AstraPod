@@ -262,6 +262,8 @@ static void classic(struct ui_theme *theme)
         .color = { 0xfcfcfc, 0xf8f8f8, 0x9f9e9e, 0x5b5b5b }, .stops = 4 };
     strcpy(theme->font[UI_FONT_WPS_TITLE], "17-helvetica-bold");
     strcpy(theme->font[UI_FONT_WPS_META], "13-helvetica-bold");
+    strcpy(theme->font[UI_FONT_PANE_TITLE], "17-helvetica-bold-pane");
+    strcpy(theme->font[UI_FONT_PANE_TEXT], "13-helvetica-bold");
     theme->gradient[UI_GRADIENT_PROGRESS] = (struct ui_theme_gradient){
         .color = { 0x6483f0, 0x6789f2, 0x56aeff, 0x4e8fce }, .stops = 4 };
     theme->gradient[UI_GRADIENT_PROGRESS_TRACK] = (struct ui_theme_gradient){

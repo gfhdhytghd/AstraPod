@@ -43,6 +43,8 @@ struct frame_sample {
     uint32_t dma_phase, caption_copy_us, caption_overhead_us;
     uint8_t divisor;
     uint8_t parts;
+    /* TE rises since the last submission began; UINT8_MAX when unknown. */
+    uint8_t te_slots;
     uint16_t art_rows, caption_rows;
 };
 
@@ -51,6 +53,8 @@ struct frame_capture {
     unsigned seen, render_misses, work_misses, interval_misses, half_frames;
     uint32_t worst_render, worst_work, worst_interval, skipped;
     uint32_t render_pending, last_submission, period_q8;
+    uint32_t last_start, last_phase;
+    unsigned te_gaps, te_repeats;
     int32_t slot_phase;
     struct cover_work cover_pending;
     uint8_t parts_pending;
@@ -234,6 +238,7 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
                                   .phase = ui_clock_phase(timing->primary_start),
                                   .dma_phase = timing->dma_phase,
                                   .divisor = MAX(1, pace.divisor),
+                                  .te_slots = UINT8_MAX,
                                   .parts = capture->parts_pending,
                                   .art_rows = capture->art_pending,
                                   .caption_rows = capture->caption_pending };
@@ -275,8 +280,18 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
         capture->interval_misses +=
             sample.interval > interval_budget(period, sample.divisor);
         capture->worst_interval = MAX(sample.interval, capture->worst_interval);
+        if (sample.phase != UINT32_MAX && capture->last_phase != UINT32_MAX)
+        {
+            uint64_t since = capture->last_phase +
+                             (uint64_t)(timing->primary_start - capture->last_start);
+            sample.te_slots = MIN(UINT8_MAX - 1, (since << 8) / period_q8);
+            capture->te_gaps += sample.te_slots > 1;
+            capture->te_repeats += sample.te_slots == 0;
+        }
     }
     capture->last_submission = clock;
+    capture->last_start = timing->primary_start;
+    capture->last_phase = sample.phase;
     uint32_t work = frame_work(&sample);
     capture->worst_render = MAX(sample.render, capture->worst_render);
     capture->render_misses += sample.render > period;
@@ -337,7 +352,8 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
         "divisor,phase_us,parts,art_rows,caption_rows,submit_overhead_f,"
         "last_dma_start_phase_us,target_changes,cache_wait_us,caption_us,"
         "motion_us,project_us,columns_us,blit_us,clear_us,render_other_us,"
-        "art_copy_us,art_submit_overhead_us,caption_copy_us,caption_submit_overhead_us\n";
+        "art_copy_us,art_submit_overhead_us,caption_copy_us,caption_submit_overhead_us,"
+        "te_slots\n";
     static const char *const parts[] = { "-", "a", "c", "ac" };
     uint32_t period_q8 = capture->period_q8;
     uint32_t period = (period_q8 + 128) >> 8;
@@ -356,7 +372,7 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
         int n = snprintf(output + used, size - used,
             "%u," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT
             ",%u,%u,%u,%u,%d,%s,%u,%u," FRAME_FORMAT ",%d,%u,%u,%u"
-            ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+            ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d\n",
             i + 1, FRAME_ARG(render_f), FRAME_ARG(submit_f), FRAME_ARG(work_f),
             FRAME_ARG(interval_f), work > period, interval_miss,
             (unsigned)sample->skipped, sample->divisor,
@@ -372,7 +388,8 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
             (unsigned)sample->cover.stage_us[UI_COVER_OTHER],
             sample->parts & UI_PERF_ART ? (unsigned)(sample->submit - sample->caption_copy_us) : 0,
             sample->parts & UI_PERF_ART ? (unsigned)(sample->submit_overhead - sample->caption_overhead_us) : 0,
-            (unsigned)sample->caption_copy_us, (unsigned)sample->caption_overhead_us);
+            (unsigned)sample->caption_copy_us, (unsigned)sample->caption_overhead_us,
+            sample->te_slots == UINT8_MAX ? -1 : (int)sample->te_slots);
         if (n < 0 || (size_t)n >= size - used)
             break;
         used += n;
@@ -397,7 +414,7 @@ void ui_perf_end(unsigned token)
     unsigned interval_worst = as_frames(capture->worst_interval, period_q8);
     int phase_p50 = phase_arg(percentile(capture, first, PHASE, 50));
     int phase_p99 = phase_arg(percentile(capture, first, PHASE, 99));
-    size_t rows_size = 480 + (size_t)retained * 290;
+    size_t rows_size = 490 + (size_t)retained * 294;
     int rows_handle = retained ? core_alloc_free_space(rows_size) : 0;
     char *rows = NULL;
     size_t rows_used = 0;
@@ -419,7 +436,7 @@ void ui_perf_end(unsigned token)
         "work_misses=%u interval_misses=%u skipped_slots=%u "
         "render_worst_f=" FRAME_FORMAT " render_misses=%u "
         "period_us=%u te=%s async=%s rate=%s half_frames=%u "
-        "phase_p50_us=%d phase_p99_us=%d\n",
+        "phase_p50_us=%d phase_p99_us=%d te_gaps=%u te_repeats=%u\n",
         capture->route, capture->seen, retained, first, rows ? retained : 0,
         FRAME_ARG(work_p99), FRAME_ARG(interval_p99),
         FRAME_ARG(work_worst), FRAME_ARG(interval_worst),
@@ -427,7 +444,7 @@ void ui_perf_end(unsigned token)
         FRAME_ARG(render_worst), capture->render_misses,
         (unsigned)((period_q8 + 128) >> 8), te,
         capture->async ? "on" : "off", rate, capture->half_frames,
-        phase_p50, phase_p99);
+        phase_p50, phase_p99, capture->te_gaps, capture->te_repeats);
     core_put_data_pinned(capture);
     core_free(handle);
     if (n > 0 && (size_t)n < sizeof(summary))

@@ -70,15 +70,19 @@ struct list_pose {
     int64_t top, cursor;
 };
 
+/* Frame n of a motion is the pose due at the panel's refresh n after it
+ * starts. A frame drawn during refresh period p reaches the panel at the
+ * next refresh, so it draws frame p + lead: lead is 1, or 0 when a frame
+ * for that refresh was already submitted. */
 struct list_motion {
     struct list_pose from, live, rest;
-    uint32_t started;
-    unsigned painted, trace;
+    uint32_t started, presented;
+    unsigned painted, trace, lead;
     unsigned glide_frames, spring_frames;
     int visible, count, span;
     struct ui_rect bounds;
     int pitch;
-    bool wheel;
+    bool wheel, snap;
 };
 
 /* A theme gradient as RGB565 rows, for a fill `height` rows tall. */
@@ -344,6 +348,24 @@ static int64_t limit_top(const struct list_motion *motion, struct list_pose pose
     return MIN(top, pose.cursor + HALF_ROW);
 }
 
+/* Under snapped scrolling the eased tail would repeat a pixel. A marker
+ * with at least a pixel per frame left to go keeps moving a pixel or more
+ * on every frame until it arrives. */
+static int64_t marker_tail(const struct list_motion *motion, int64_t cursor,
+                           unsigned frame)
+{
+    int pitch = MAX(1, motion->pitch);
+    int64_t pixel = (ROW_UNIT + pitch - 1) / pitch;
+    int64_t from = motion->from.cursor, to = motion->live.cursor;
+    int64_t left = (int64_t)(motion->glide_frames - frame) * pixel;
+    int64_t span = (int64_t)motion->glide_frames * pixel;
+    if (to - from >= span)
+        return MIN(cursor, to - left);
+    if (from - to >= span)
+        return MAX(cursor, to + left);
+    return cursor;
+}
+
 static struct list_pose motion_sample(const struct list_motion *motion, unsigned frame)
 {
     struct list_pose pose = motion->live;
@@ -352,6 +374,8 @@ static struct list_pose motion_sample(const struct list_motion *motion, unsigned
     {
         pose.top = ease_out(motion->from.top, pose.top, frame, glide);
         pose.cursor = ease_out(motion->from.cursor, pose.cursor, frame, glide);
+        if (motion->snap)
+            pose.cursor = marker_tail(motion, pose.cursor, frame);
     }
     else if (pose.top != motion->rest.top)
     {
@@ -404,11 +428,17 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
                       motion->rest.top == from.top && motion->rest.cursor == from.cursor;
     if (continuing)
     {
-        from = motion_sample(motion, frame);
+        /* Set out from the pose last drawn, which is on screen or queued
+         * for the next refresh. */
+        from = motion_sample(motion, motion->painted);
         /* Carry the frame phase through rapid wheel events. Restarting the
          * clock at each detent would stall a glide when detents arrive < 1 f apart. */
         now -= elapsed - ui_frame_clock(frame);
     }
+    uint32_t start = continuing ? now : ui_clock_start();
+    int32_t queued = motion->presented - (start + ui_frame_clock(1));
+    int32_t half = ui_frame_period() / 2;
+    unsigned lead = queued > -half && queued < half ? 0 : 1;
 
     struct list_pose rest = { fixed_row(list->start_item[SCREEN_MAIN]),
                               fixed_row(list->selected_item) };
@@ -471,12 +501,12 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
         trace = ui_perf_begin("list-glide");
     *motion = (struct list_motion) {
         .from = from, .live = live, .rest = rest,
-        .started = continuing ? now : ui_clock_start(),
-        .painted = 0, .trace = trace,
+        .started = start, .presented = motion->presented,
+        .painted = 0, .trace = trace, .lead = lead,
         .glide_frames = glide,
         .spring_frames = ui_theme_motion(UI_MOTION_LIST, SPRING_F, GLIDE_F),
         .visible = visible, .count = list->nb_items, .span = span,
-        .bounds = g.rows, .pitch = g.pitch, .wheel = wheel,
+        .bounds = g.rows, .pitch = g.pitch, .wheel = wheel, .snap = snap,
     };
 
 done:
@@ -1924,7 +1954,9 @@ static bool update_row_pose(struct native_list *render, const struct list_geomet
     bool finished = false;
     if (motion_enabled() && motion_matches(motion, g, list))
     {
-        motion->painted = ui_clock_frame((uint32_t)USEC_TIMER - motion->started);
+        unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER - motion->started);
+        motion->painted = frame + motion->lead;
+        motion->presented = motion->started + ui_frame_clock(frame + 1);
         pose = motion_sample(motion, motion->painted);
         finished = motion->painted >= motion_duration(motion);
     }
@@ -2315,8 +2347,9 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
             uint32_t elapsed = now - motion->started;
             /* A new frame waits for its presentation slot, so a half-rate
              * glide keeps its frame parity. */
-            bool due = ui_clock_frame(elapsed) > motion->painted &&
-                       (int32_t)(now - glide_pace.due) >= 0;
+            bool due =
+                ui_clock_frame(elapsed) + motion->lead > motion->painted &&
+                (int32_t)(now - glide_pace.due) >= 0;
             if (!motion_enabled() || due)
                 delay = 0;
             else if (poll)

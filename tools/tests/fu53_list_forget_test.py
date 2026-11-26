@@ -42,7 +42,7 @@ struct gui_synclist {
 };
 struct list_motion {
     int visible;
-    unsigned painted, trace;
+    unsigned painted, trace, lead;
     uint32_t started;
 };
 struct native_list {

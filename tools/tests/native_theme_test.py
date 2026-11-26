@@ -223,8 +223,18 @@ static void check_plastic(void)
     struct ui_theme theme;
     ui_theme_builtin(&theme, UI_THEME_CLASSIC);
     assert(theme.style[UI_STYLE_ART] == UI_ART_PLASTIC);
-    assert(UI_THEME_BUILTIN_COUNT == 3);
+    assert(UI_THEME_BUILTIN_COUNT == 4);
     assert(!strcmp(ui_theme_builtin_name(UI_THEME_CLASSIC), "classic"));
+    assert(theme.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_ASTRAPOD);
+
+    /* Fruit Company is Classic with the stock menu tree */
+    struct ui_theme fruit;
+    ui_theme_builtin(&fruit, UI_THEME_FRUIT_COMPANY);
+    assert(!strcmp(ui_theme_builtin_name(UI_THEME_FRUIT_COMPANY),
+                   "fruit-company"));
+    assert(fruit.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_STOCK);
+    fruit.style[UI_STYLE_MENU_TREE] = UI_MENU_TREE_ASTRAPOD;
+    assert(!memcmp(&fruit, &theme, sizeof(theme)));
     assert(!strcmp(theme.font[UI_FONT_WPS_TIME], "14-helvetica-bold"));
     const struct ui_theme_gradient *bar = &theme.gradient[UI_GRADIENT_SELECTION];
     assert(ui_theme_gradient_at(bar, 0, 25, 0) == 0x96c5da);

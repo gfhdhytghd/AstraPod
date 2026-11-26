@@ -54,7 +54,7 @@ static const struct browse_folder_info config = {ROCKBOX_DIR, SHOW_CFG};
 static int show_info(void);
 /** Manage settings menu **/
 
-static int reset_settings(void)
+int main_menu_reset_settings(void)
 {
     static const char *lines[]={ID2P(LANG_ARE_YOU_SURE), ID2P(LANG_RESET)};
     static const char *yes_lines[]={
@@ -102,7 +102,7 @@ MENUITEM_FUNCTION_W_PARAM(save_sound_item, 0, ID2P(LANG_SAVE_SOUND),
                           write_settings_file, (void*)SETTINGS_SAVE_SOUND,
                           NULL, Icon_NOICON);
 MENUITEM_FUNCTION(reset_settings_item, 0, ID2P(LANG_RESET),
-                  reset_settings, NULL, Icon_NOICON);
+                  main_menu_reset_settings, NULL, Icon_NOICON);
 
 MENUITEM_SETTING(settings_mode_item, &global_settings.settings_mode, NULL);
 
@@ -118,7 +118,7 @@ static int show_credits(void)
     return credits_screen() == SYS_USB_CONNECTED ? MENU_ATTACHED_USB : 0;
 }
 
-static int show_license(void)
+int main_menu_show_license(void)
 {
     struct ui_scene scene = {0};
     ui_scene_open_page(&scene, "license-push");
@@ -455,7 +455,7 @@ MENUITEM_FUNCTION(debug_menu_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_DEBUG),
 
 MENUITEM_FUNCTION(show_license_item, MENU_FUNC_CHECK_RETVAL,
                   ID2P(LANG_LICENSE),
-                  show_license, NULL, Icon_NOICON);
+                  main_menu_show_license, NULL, Icon_NOICON);
 
 /* The screen reports leaving for the root menu the way simplelist does, as a
  * bool; the menu wants it as MENU_ATTACHED_USB so it unwinds rather than

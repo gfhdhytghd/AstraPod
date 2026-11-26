@@ -145,12 +145,21 @@ enum {
     GO_TO_LISTEN_STATS,
     GO_TO_AGENTS,
     GO_TO_CIDER,
+    /* A row of a tagnavi.config menu, named by root_menu_library_row() */
+    GO_TO_LIBRARY_ROW,
 };
 extern struct menu_item_ex root_menu_;
 
 /* Open the file browser at this file the next time it is entered, rather
    than where it was left. Cleared as soon as it is used. */
 void browser_reveal_on_next_load(const char *path);
+
+/* For a menu run inside the main menu's do_menu(): the screen `screen`, and
+ * the Music menu's row `label` of tagnavi.config's menu `menu_id`. 0 is back
+ * to the menu, as leaving the screen for Home is; anything else is what the
+ * menu should return. */
+int root_menu_run_screen(int screen);
+int root_menu_library_row(const char *menu_id, const char *label);
 
 bool root_menu_validate_cfg(char *value);
 void root_menu_load_from_cfg(void* setting, char *value);

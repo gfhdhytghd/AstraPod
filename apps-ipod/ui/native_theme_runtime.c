@@ -338,7 +338,7 @@ static const char *theme_name(int item, void *data, char *buf, size_t len)
     (void)len;
     char (*files)[UI_THEME_NAME_MAX] = data;
     static const char *const builtins[UI_THEME_BUILTIN_COUNT] = {
-        "Scrim", "Light", "Classic"
+        "Scrim", "Light", "Classic", "Fruit Company"
     };
     return item < UI_THEME_BUILTIN_COUNT ? builtins[item] :
            files[item - UI_THEME_BUILTIN_COUNT];
@@ -375,7 +375,10 @@ int ui_theme_choose(void)
         const char *name = info.selection < UI_THEME_BUILTIN_COUNT ?
                            ui_theme_builtin_name(info.selection) :
                            files[info.selection - UI_THEME_BUILTIN_COUNT];
+        unsigned tree = ui_theme_style(UI_STYLE_MENU_TREE);
         ui_theme_set(name, true);
+        /* The menu this list was opened from is no longer the theme's */
+        to_root = ui_theme_style(UI_STYLE_MENU_TREE) != tree;
     }
     if (files)
     {

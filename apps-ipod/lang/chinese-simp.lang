@@ -28276,3 +28276,618 @@
     *: "已转换 %d 首，已有 %d 首，不支持 %d 首，失败 %d 首"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_FRUIT_NOT_AVAILABLE
+  desc: Fruit Company: splash for a stock row AstraPod has nothing behind
+  user: core
+  <source>
+    *: "Not available on AstraPod"
+  </source>
+  <dest>
+    *: "AstraPod 暂不支持此项目"
+  </dest>
+  <voice>
+    *: "AstraPod 暂不支持此项目"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_EXTRAS
+  desc: Fruit Company: the main menu's Extras
+  user: core
+  <source>
+    *: "Extras"
+  </source>
+  <dest>
+    *: "附加功能"
+  </dest>
+  <voice>
+    *: "附加功能"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_VIDEOS
+  desc: Fruit Company: the main menu's Videos
+  user: core
+  <source>
+    *: "Videos"
+  </source>
+  <dest>
+    *: "视频"
+  </dest>
+  <voice>
+    *: "视频"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_PHOTOS
+  desc: Fruit Company: the main menu's Photos
+  user: core
+  <source>
+    *: "Photos"
+  </source>
+  <dest>
+    *: "照片"
+  </dest>
+  <voice>
+    *: "照片"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_COMPILATIONS
+  desc: Fruit Company: Music > Compilations
+  user: core
+  <source>
+    *: "Compilations"
+  </source>
+  <dest>
+    *: "合辑"
+  </dest>
+  <voice>
+    *: "合辑"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_SONGS
+  desc: Fruit Company: Music > Songs
+  user: core
+  <source>
+    *: "Songs"
+  </source>
+  <dest>
+    *: "歌曲"
+  </dest>
+  <voice>
+    *: "歌曲"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_GENRES
+  desc: Fruit Company: Music > Genres
+  user: core
+  <source>
+    *: "Genres"
+  </source>
+  <dest>
+    *: "风格"
+  </dest>
+  <voice>
+    *: "风格"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_COMPOSERS
+  desc: Fruit Company: Music > Composers
+  user: core
+  <source>
+    *: "Composers"
+  </source>
+  <dest>
+    *: "作曲者"
+  </dest>
+  <voice>
+    *: "作曲者"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_ALARMS
+  desc: Fruit Company: Extras > Alarms
+  user: core
+  <source>
+    *: "Alarms"
+  </source>
+  <dest>
+    *: "闹钟"
+  </dest>
+  <voice>
+    *: "闹钟"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_CALENDARS
+  desc: Fruit Company: Extras > Calendars
+  user: core
+  <source>
+    *: "Calendars"
+  </source>
+  <dest>
+    *: "日历"
+  </dest>
+  <voice>
+    *: "日历"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_CLOCKS
+  desc: Fruit Company: Settings > Main Menu's row for the clocks
+  user: core
+  <source>
+    *: "Clocks"
+  </source>
+  <dest>
+    *: "时钟"
+  </dest>
+  <voice>
+    *: "时钟"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_CONTACTS
+  desc: Fruit Company: Extras > Contacts
+  user: core
+  <source>
+    *: "Contacts"
+  </source>
+  <dest>
+    *: "通讯录"
+  </dest>
+  <voice>
+    *: "通讯录"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_NOTES
+  desc: Fruit Company: Extras > Notes
+  user: core
+  <source>
+    *: "Notes"
+  </source>
+  <dest>
+    *: "备忘录"
+  </dest>
+  <voice>
+    *: "备忘录"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_SCREEN_LOCK
+  desc: Fruit Company: Extras > Screen Lock
+  user: core
+  <source>
+    *: "Screen Lock"
+  </source>
+  <dest>
+    *: "屏幕锁"
+  </dest>
+  <voice>
+    *: "屏幕锁"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_STOPWATCH
+  desc: Fruit Company: Extras > Stopwatch
+  user: core
+  <source>
+    *: "Stopwatch"
+  </source>
+  <dest>
+    *: "秒表"
+  </dest>
+  <voice>
+    *: "秒表"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_SLEEP
+  desc: Fruit Company: Settings > Main Menu's Sleep row
+  user: core
+  <source>
+    *: "Sleep"
+  </source>
+  <dest>
+    *: "睡眠"
+  </dest>
+  <voice>
+    *: "睡眠"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_MUSIC_MENU
+  desc: Fruit Company: Settings > Music Menu
+  user: core
+  <source>
+    *: "Music Menu"
+  </source>
+  <dest>
+    *: "音乐菜单"
+  </dest>
+  <voice>
+    *: "音乐菜单"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_VOLUME_LIMIT
+  desc: Fruit Company: Settings > Volume Limit
+  user: core
+  <source>
+    *: "Volume Limit"
+  </source>
+  <dest>
+    *: "音量限制"
+  </dest>
+  <voice>
+    *: "音量限制"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_EQ
+  desc: Fruit Company: Settings > EQ
+  user: core
+  <source>
+    *: "EQ"
+  </source>
+  <dest>
+    *: "均衡器"
+  </dest>
+  <voice>
+    *: "均衡器"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_SOUND_CHECK
+  desc: Fruit Company: Settings > Sound Check, the ReplayGain setting
+  user: core
+  <source>
+    *: "Sound Check"
+  </source>
+  <dest>
+    *: "音量平衡"
+  </dest>
+  <voice>
+    *: "音量平衡"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_CLICKER
+  desc: Fruit Company: Settings > Clicker, the piezo click
+  user: core
+  <source>
+    *: "Clicker"
+  </source>
+  <dest>
+    *: "点按声"
+  </dest>
+  <voice>
+    *: "点按声"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_DATE_TIME
+  desc: Fruit Company: Settings > Date & Time
+  user: core
+  <source>
+    *: "Date & Time"
+  </source>
+  <dest>
+    *: "日期与时间"
+  </dest>
+  <voice>
+    *: "日期与时间"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_SORT_BY
+  desc: Fruit Company: Settings > Sort By
+  user: core
+  <source>
+    *: "Sort By"
+  </source>
+  <dest>
+    *: "排序方式"
+  </dest>
+  <voice>
+    *: "排序方式"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_LEGAL
+  desc: Fruit Company: Settings > Legal, the licence
+  user: core
+  <source>
+    *: "Legal"
+  </source>
+  <dest>
+    *: "法律信息"
+  </dest>
+  <voice>
+    *: "法律信息"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_ADVANCED_SETTINGS
+  desc: Fruit Company: Settings > Advanced Settings, AstraPod's own Settings
+  user: core
+  <source>
+    *: "Advanced Settings"
+  </source>
+  <dest>
+    *: "高级设置"
+  </dest>
+  <voice>
+    *: "高级设置"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RADIO
+  desc: Fruit Company: Settings > Main Menu and Music Menu's Radio row
+  user: core
+  <source>
+    *: "Radio"
+  </source>
+  <dest>
+    *: "收音机"
+  </dest>
+  <voice>
+    *: "收音机"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_MOVIES
+  desc: Fruit Company: Videos > Movies
+  user: core
+  <source>
+    *: "Movies"
+  </source>
+  <dest>
+    *: "影片"
+  </dest>
+  <voice>
+    *: "影片"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RENTALS
+  desc: Fruit Company: Videos > Rentals
+  user: core
+  <source>
+    *: "Rentals"
+  </source>
+  <dest>
+    *: "租借影片"
+  </dest>
+  <voice>
+    *: "租借影片"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_TV_SHOWS
+  desc: Fruit Company: Videos > TV Shows
+  user: core
+  <source>
+    *: "TV Shows"
+  </source>
+  <dest>
+    *: "电视节目"
+  </dest>
+  <voice>
+    *: "电视节目"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_MUSIC_VIDEOS
+  desc: Fruit Company: Videos > Music Videos
+  user: core
+  <source>
+    *: "Music Videos"
+  </source>
+  <dest>
+    *: "音乐视频"
+  </dest>
+  <voice>
+    *: "音乐视频"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_VIDEO_PLAYLISTS
+  desc: Fruit Company: Videos > Video Playlists
+  user: core
+  <source>
+    *: "Video Playlists"
+  </source>
+  <dest>
+    *: "视频播放列表"
+  </dest>
+  <voice>
+    *: "视频播放列表"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_ALL_PHOTOS
+  desc: Fruit Company: Photos > All Photos
+  user: core
+  <source>
+    *: "All Photos"
+  </source>
+  <dest>
+    *: "所有照片"
+  </dest>
+  <voice>
+    *: "所有照片"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RESET_MENU
+  desc: Fruit Company: last row of Settings > Main Menu and Music Menu
+  user: core
+  <source>
+    *: "Reset Menu"
+  </source>
+  <dest>
+    *: "还原菜单"
+  </dest>
+  <voice>
+    *: "还原菜单"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RESET_MAIN_MENU
+  desc: Fruit Company: Settings > Main Menu > Reset Menu's question
+  user: core
+  <source>
+    *: "Do you want to reset the main menu?"
+  </source>
+  <dest>
+    *: "要还原主菜单吗？"
+  </dest>
+  <voice>
+    *: "要还原主菜单吗？"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RESET_MUSIC_MENU
+  desc: Fruit Company: Settings > Music Menu > Reset Menu's question
+  user: core
+  <source>
+    *: "Do you want to reset the music menu?"
+  </source>
+  <dest>
+    *: "要还原音乐菜单吗？"
+  </dest>
+  <voice>
+    *: "要还原音乐菜单吗？"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RESET_MENU_DETAIL
+  desc: Fruit Company: Reset Menu's second line
+  user: core
+  <source>
+    *: "This will restore the menu to its original state."
+  </source>
+  <dest>
+    *: "菜单将恢复为原始状态。"
+  </dest>
+  <voice>
+    *: "菜单将恢复为原始状态。"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_DATE
+  desc: Fruit Company: Settings > Date & Time > Date
+  user: core
+  <source>
+    *: "Date"
+  </source>
+  <dest>
+    *: "日期"
+  </dest>
+  <voice>
+    *: "日期"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_TIME
+  desc: Fruit Company: Settings > Date & Time > Time
+  user: core
+  <source>
+    *: "Time"
+  </source>
+  <dest>
+    *: "时间"
+  </dest>
+  <voice>
+    *: "时间"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_TIME_ZONE
+  desc: Fruit Company: Settings > Date & Time > Time Zone
+  user: core
+  <source>
+    *: "Time Zone"
+  </source>
+  <dest>
+    *: "时区"
+  </dest>
+  <voice>
+    *: "时区"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_24_HOUR_CLOCK
+  desc: Fruit Company: Settings > Date & Time > 24 Hour Clock
+  user: core
+  <source>
+    *: "24 Hour Clock"
+  </source>
+  <dest>
+    *: "24 小时制"
+  </dest>
+  <voice>
+    *: "24 小时制"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_TIME_IN_TITLE
+  desc: Fruit Company: Settings > Date & Time > Time in Title
+  user: core
+  <source>
+    *: "Time in Title"
+  </source>
+  <dest>
+    *: "标题中显示时间"
+  </dest>
+  <voice>
+    *: "标题中显示时间"
+  </voice>
+</phrase>

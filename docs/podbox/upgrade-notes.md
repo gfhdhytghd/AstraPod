@@ -54,3 +54,10 @@
   pictures arrive in
   `.rockbox/themes/stock-art.bin`: update from the whole zip, or those themes
   show an empty pane and no battery.
+
+- **Fruit Company** is a new built-in theme: Classic's look with the
+  original iPod's menus. Music, Videos, Photos, Podcasts, Extras, Settings
+  and Shuffle Songs are the main menu, and Settings > Main Menu and Music
+  Menu choose their rows as on the original iPod. AstraPod's own settings
+  are under Settings > Advanced Settings, where Theme Settings > Native
+  theme switches back.

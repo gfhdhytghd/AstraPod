@@ -79,6 +79,7 @@
 #include "viewers/playback_viewer/pv_row.h"
 #include "disk.h"
 #include "sound.h"
+#include "screens/fruit_menu.h"
 #ifdef USB_ENABLE_AUDIO
 #include "usbstack/usb_audio.h"
 #endif
@@ -102,6 +103,11 @@ static int last_screen = GO_TO_ROOT; /* unfortunatly needed so we can resume
 
 /* Set while the screen being loaded was reached by BACK */
 static bool came_back;
+/* The row GO_TO_LIBRARY_ROW opens */
+static const char *library_menu_id, *library_label;
+/* A screen a row of the stock tree left for, whose code do_menu() cannot
+ * return: GO_TO_FILEBROWSER is 0, which is staying in the menu */
+static bool fruit_files_next;
 
 /* Set when Now Playing left by going back, for root_menu() to choose a screen
  * that can be reopened: see wps_back_to() */
@@ -442,6 +448,22 @@ static int browser(void* param)
             push_current_activity(ACTIVITY_DATABASEBROWSER);
         break;
 
+        case GO_TO_LIBRARY_ROW:
+            /* Resumed at boot, with no row named since */
+            if (!library_menu_id)
+                return GO_TO_ROOT;
+            if (!wait_for_tagcache_ready() || !db_browser_ready())
+                return GO_TO_PREVIOUS;
+            filter = SHOW_ID3DB;
+            last_ft_dirlevel = tc->dirlevel;
+            tc->dirlevel = 0;
+            tc->currtable = 0;
+            browser_db_clear_shortcut_base();
+            browser_db_enter_menu_row_on_next_load(library_menu_id,
+                                                   library_label);
+            push_current_activity(ACTIVITY_DATABASEBROWSER);
+        break;
+
         case GO_TO_ALBUM_COVERS_TRACKS:
             if (!wait_for_tagcache_ready() || !db_browser_ready())
                 return GO_TO_PREVIOUS;
@@ -563,6 +585,13 @@ static int browser(void* param)
                 row_selection = tc->selected_item;
                 row_table = tc->currtable;
             }
+            tc->dirlevel = last_ft_dirlevel;
+            tc->currtable = 0;
+            last_db_dirlevel = 0;
+            last_db_selection = 0;
+        break;
+
+        case GO_TO_LIBRARY_ROW:
             tc->dirlevel = last_ft_dirlevel;
             tc->currtable = 0;
             last_db_dirlevel = 0;
@@ -1223,6 +1252,7 @@ static const struct root_items items[] = {
     [GO_TO_IMAGES] = { images_scrn, NULL, NULL },
     [GO_TO_BOOKS] = { books_scrn, NULL, &text_viewer_menu },
     [GO_TO_PODCASTS] = { browser, (void*)GO_TO_PODCASTS, &tagcache_menu },
+    [GO_TO_LIBRARY_ROW] = { browser, (void*)GO_TO_LIBRARY_ROW, &tagcache_menu },
     [GO_TO_SPUN] = { playback_viewer_scrn, NULL, NULL },
     [GO_TO_MUSIC_QUIZ] = { music_quiz_scrn, NULL, &tagcache_menu },
     [GO_TO_LISTEN_STATS] = { listen_stats_scrn, NULL, &tagcache_menu },
@@ -2383,6 +2413,26 @@ static inline int load_screen(int screen)
     return ret_val;
 }
 
+int root_menu_run_screen(int screen)
+{
+    int ret = load_screen(screen);
+    if (ret == GO_TO_FILEBROWSER)
+    {
+        fruit_files_next = true;
+        return GO_TO_ROOT;
+    }
+    /* A screen's own way out is GO_TO_ROOT, its parent being Home in
+     * AstraPod's tree: here the menu that opened it is the parent. */
+    return ret == GO_TO_PREVIOUS || ret == GO_TO_ROOT ? 0 : ret;
+}
+
+int root_menu_library_row(const char *menu_id, const char *label)
+{
+    library_menu_id = menu_id;
+    library_label = label;
+    return root_menu_run_screen(GO_TO_LIBRARY_ROW);
+}
+
 /* The main menu row a long press is on, and the settings it opens on, for
  * the menu below */
 static const struct menu_item_ex *ctx_row;
@@ -2569,6 +2619,9 @@ static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push
                     from == GO_TO_WPS || to == GO_TO_WPS);
 }
 
+/* Where the stock tree's main menu was left */
+static int fruit_selected;
+
 /* Home as do_menu() would draw it on return, so that a page kept over
  * Home can show it afresh. */
 static bool paint_home(const void *page)
@@ -2579,7 +2632,10 @@ static bool paint_home(const void *page)
     podcasts_row(global_settings.segregate_podcasts, false);
     lcd_set_viewport(NULL);
     push_activity_without_refresh(ACTIVITY_MAINMENU);
-    menu_paint(&root_menu_, get_selection(global_status.last_screen));
+    if (fruit_menu_active())
+        menu_paint(fruit_menu_root(), fruit_selected);
+    else
+        menu_paint(&root_menu_, get_selection(global_status.last_screen));
     pop_current_activity_without_refresh();
     return true;
 }
@@ -2659,6 +2715,30 @@ void root_menu(void)
                  * away above it would move */
                 audiobooks_row(global_settings.segregate_audiobooks, false);
                 podcasts_row(global_settings.segregate_podcasts, false);
+                if (fruit_files_next)
+                {
+                    fruit_files_next = false;
+                    next_screen = GO_TO_FILEBROWSER;
+                    break;
+                }
+                if (fruit_menu_active())
+                {
+                    global_status.last_screen = GO_TO_ROOT;
+                    ignore_back_button_stub(true);
+                    if (presented != GO_TO_MAINMENU)
+                        root_scene_enter(&route_scene, presented, GO_TO_ROOT,
+                                         false);
+                    next_screen = do_menu(fruit_menu_root(), &fruit_selected,
+                                          NULL, false);
+                    if (route_scene.capturing)
+                        ui_scene_cancel(&route_scene);
+                    presented = GO_TO_ROOT;
+                    ignore_back_button_stub(false);
+                    came_back = false;
+                    if (next_screen != GO_TO_PREVIOUS)
+                        last_screen = GO_TO_ROOT;
+                    break;
+                }
                 if (last_screen != GO_TO_ROOT)
                     selected = get_selection(last_screen);
                 global_status.last_screen = GO_TO_ROOT; /* We've returned to ROOT */

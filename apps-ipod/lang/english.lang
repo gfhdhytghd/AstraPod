@@ -28667,3 +28667,577 @@
     *: "Cover Flow"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_FRUIT_NOT_AVAILABLE
+  desc: Fruit Company: splash for a stock row AstraPod has nothing behind
+  user: core
+  <source>
+    *: "Not available on AstraPod"
+  </source>
+  <dest>
+    *: "Not available on AstraPod"
+  </dest>
+  <voice>
+    *: "Not available on AstraPod"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_EXTRAS
+  desc: Fruit Company: the main menu's Extras
+  user: core
+  <source>
+    *: "Extras"
+  </source>
+  <dest>
+    *: "Extras"
+  </dest>
+  <voice>
+    *: "Extras"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_VIDEOS
+  desc: Fruit Company: the main menu's Videos
+  user: core
+  <source>
+    *: "Videos"
+  </source>
+  <dest>
+    *: "Videos"
+  </dest>
+  <voice>
+    *: "Videos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_PHOTOS
+  desc: Fruit Company: the main menu's Photos
+  user: core
+  <source>
+    *: "Photos"
+  </source>
+  <dest>
+    *: "Photos"
+  </dest>
+  <voice>
+    *: "Photos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_COMPILATIONS
+  desc: Fruit Company: Music > Compilations
+  user: core
+  <source>
+    *: "Compilations"
+  </source>
+  <dest>
+    *: "Compilations"
+  </dest>
+  <voice>
+    *: "Compilations"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_SONGS
+  desc: Fruit Company: Music > Songs
+  user: core
+  <source>
+    *: "Songs"
+  </source>
+  <dest>
+    *: "Songs"
+  </dest>
+  <voice>
+    *: "Songs"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GENRES
+  desc: Fruit Company: Music > Genres
+  user: core
+  <source>
+    *: "Genres"
+  </source>
+  <dest>
+    *: "Genres"
+  </dest>
+  <voice>
+    *: "Genres"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_COMPOSERS
+  desc: Fruit Company: Music > Composers
+  user: core
+  <source>
+    *: "Composers"
+  </source>
+  <dest>
+    *: "Composers"
+  </dest>
+  <voice>
+    *: "Composers"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ALARMS
+  desc: Fruit Company: Extras > Alarms
+  user: core
+  <source>
+    *: "Alarms"
+  </source>
+  <dest>
+    *: "Alarms"
+  </dest>
+  <voice>
+    *: "Alarms"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_CALENDARS
+  desc: Fruit Company: Extras > Calendars
+  user: core
+  <source>
+    *: "Calendars"
+  </source>
+  <dest>
+    *: "Calendars"
+  </dest>
+  <voice>
+    *: "Calendars"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_CLOCKS
+  desc: Fruit Company: Settings > Main Menu's row for the clocks
+  user: core
+  <source>
+    *: "Clocks"
+  </source>
+  <dest>
+    *: "Clocks"
+  </dest>
+  <voice>
+    *: "Clocks"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_CONTACTS
+  desc: Fruit Company: Extras > Contacts
+  user: core
+  <source>
+    *: "Contacts"
+  </source>
+  <dest>
+    *: "Contacts"
+  </dest>
+  <voice>
+    *: "Contacts"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NOTES
+  desc: Fruit Company: Extras > Notes
+  user: core
+  <source>
+    *: "Notes"
+  </source>
+  <dest>
+    *: "Notes"
+  </dest>
+  <voice>
+    *: "Notes"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_SCREEN_LOCK
+  desc: Fruit Company: Extras > Screen Lock
+  user: core
+  <source>
+    *: "Screen Lock"
+  </source>
+  <dest>
+    *: "Screen Lock"
+  </dest>
+  <voice>
+    *: "Screen Lock"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_STOPWATCH
+  desc: Fruit Company: Extras > Stopwatch
+  user: core
+  <source>
+    *: "Stopwatch"
+  </source>
+  <dest>
+    *: "Stopwatch"
+  </dest>
+  <voice>
+    *: "Stopwatch"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_SLEEP
+  desc: Fruit Company: Settings > Main Menu's Sleep row
+  user: core
+  <source>
+    *: "Sleep"
+  </source>
+  <dest>
+    *: "Sleep"
+  </dest>
+  <voice>
+    *: "Sleep"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_MUSIC_MENU
+  desc: Fruit Company: Settings > Music Menu
+  user: core
+  <source>
+    *: "Music Menu"
+  </source>
+  <dest>
+    *: "Music Menu"
+  </dest>
+  <voice>
+    *: "Music Menu"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_VOLUME_LIMIT
+  desc: Fruit Company: Settings > Volume Limit
+  user: core
+  <source>
+    *: "Volume Limit"
+  </source>
+  <dest>
+    *: "Volume Limit"
+  </dest>
+  <voice>
+    *: "Volume Limit"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_EQ
+  desc: Fruit Company: Settings > EQ
+  user: core
+  <source>
+    *: "EQ"
+  </source>
+  <dest>
+    *: "EQ"
+  </dest>
+  <voice>
+    *: "EQ"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_SOUND_CHECK
+  desc: Fruit Company: Settings > Sound Check, the ReplayGain setting
+  user: core
+  <source>
+    *: "Sound Check"
+  </source>
+  <dest>
+    *: "Sound Check"
+  </dest>
+  <voice>
+    *: "Sound Check"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_CLICKER
+  desc: Fruit Company: Settings > Clicker, the piezo click
+  user: core
+  <source>
+    *: "Clicker"
+  </source>
+  <dest>
+    *: "Clicker"
+  </dest>
+  <voice>
+    *: "Clicker"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_DATE_TIME
+  desc: Fruit Company: Settings > Date & Time
+  user: core
+  <source>
+    *: "Date & Time"
+  </source>
+  <dest>
+    *: "Date & Time"
+  </dest>
+  <voice>
+    *: "Date & Time"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_SORT_BY
+  desc: Fruit Company: Settings > Sort By
+  user: core
+  <source>
+    *: "Sort By"
+  </source>
+  <dest>
+    *: "Sort By"
+  </dest>
+  <voice>
+    *: "Sort By"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_LEGAL
+  desc: Fruit Company: Settings > Legal, the licence
+  user: core
+  <source>
+    *: "Legal"
+  </source>
+  <dest>
+    *: "Legal"
+  </dest>
+  <voice>
+    *: "Legal"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ADVANCED_SETTINGS
+  desc: Fruit Company: Settings > Advanced Settings, AstraPod's own Settings
+  user: core
+  <source>
+    *: "Advanced Settings"
+  </source>
+  <dest>
+    *: "Advanced Settings"
+  </dest>
+  <voice>
+    *: "Advanced Settings"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_RADIO
+  desc: Fruit Company: Settings > Main Menu and Music Menu's Radio row
+  user: core
+  <source>
+    *: "Radio"
+  </source>
+  <dest>
+    *: "Radio"
+  </dest>
+  <voice>
+    *: "Radio"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_MOVIES
+  desc: Fruit Company: Videos > Movies
+  user: core
+  <source>
+    *: "Movies"
+  </source>
+  <dest>
+    *: "Movies"
+  </dest>
+  <voice>
+    *: "Movies"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_RENTALS
+  desc: Fruit Company: Videos > Rentals
+  user: core
+  <source>
+    *: "Rentals"
+  </source>
+  <dest>
+    *: "Rentals"
+  </dest>
+  <voice>
+    *: "Rentals"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_TV_SHOWS
+  desc: Fruit Company: Videos > TV Shows
+  user: core
+  <source>
+    *: "TV Shows"
+  </source>
+  <dest>
+    *: "TV Shows"
+  </dest>
+  <voice>
+    *: "TV Shows"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_MUSIC_VIDEOS
+  desc: Fruit Company: Videos > Music Videos
+  user: core
+  <source>
+    *: "Music Videos"
+  </source>
+  <dest>
+    *: "Music Videos"
+  </dest>
+  <voice>
+    *: "Music Videos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_VIDEO_PLAYLISTS
+  desc: Fruit Company: Videos > Video Playlists
+  user: core
+  <source>
+    *: "Video Playlists"
+  </source>
+  <dest>
+    *: "Video Playlists"
+  </dest>
+  <voice>
+    *: "Video Playlists"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ALL_PHOTOS
+  desc: Fruit Company: Photos > All Photos
+  user: core
+  <source>
+    *: "All Photos"
+  </source>
+  <dest>
+    *: "All Photos"
+  </dest>
+  <voice>
+    *: "All Photos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_RESET_MENU
+  desc: Fruit Company: last row of Settings > Main Menu and Music Menu
+  user: core
+  <source>
+    *: "Reset Menu"
+  </source>
+  <dest>
+    *: "Reset Menu"
+  </dest>
+  <voice>
+    *: "Reset Menu"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_RESET_MAIN_MENU
+  desc: Fruit Company: Settings > Main Menu > Reset Menu's question
+  user: core
+  <source>
+    *: "Do you want to reset the main menu?"
+  </source>
+  <dest>
+    *: "Do you want to reset the main menu?"
+  </dest>
+  <voice>
+    *: "Do you want to reset the main menu?"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_RESET_MUSIC_MENU
+  desc: Fruit Company: Settings > Music Menu > Reset Menu's question
+  user: core
+  <source>
+    *: "Do you want to reset the music menu?"
+  </source>
+  <dest>
+    *: "Do you want to reset the music menu?"
+  </dest>
+  <voice>
+    *: "Do you want to reset the music menu?"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_RESET_MENU_DETAIL
+  desc: Fruit Company: Reset Menu's second line
+  user: core
+  <source>
+    *: "This will restore the menu to its original state."
+  </source>
+  <dest>
+    *: "This will restore the menu to its original state."
+  </dest>
+  <voice>
+    *: "This will restore the menu to its original state."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_DATE
+  desc: Fruit Company: Settings > Date & Time > Date
+  user: core
+  <source>
+    *: "Date"
+  </source>
+  <dest>
+    *: "Date"
+  </dest>
+  <voice>
+    *: "Date"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_TIME
+  desc: Fruit Company: Settings > Date & Time > Time
+  user: core
+  <source>
+    *: "Time"
+  </source>
+  <dest>
+    *: "Time"
+  </dest>
+  <voice>
+    *: "Time"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_TIME_ZONE
+  desc: Fruit Company: Settings > Date & Time > Time Zone
+  user: core
+  <source>
+    *: "Time Zone"
+  </source>
+  <dest>
+    *: "Time Zone"
+  </dest>
+  <voice>
+    *: "Time Zone"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_24_HOUR_CLOCK
+  desc: Fruit Company: Settings > Date & Time > 24 Hour Clock
+  user: core
+  <source>
+    *: "24 Hour Clock"
+  </source>
+  <dest>
+    *: "24 Hour Clock"
+  </dest>
+  <voice>
+    *: "24 Hour Clock"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_TIME_IN_TITLE
+  desc: Fruit Company: Settings > Date & Time > Time in Title
+  user: core
+  <source>
+    *: "Time in Title"
+  </source>
+  <dest>
+    *: "Time in Title"
+  </dest>
+  <voice>
+    *: "Time in Title"
+  </voice>
+</phrase>

@@ -336,6 +336,7 @@ screens/settings/eq_editor.c
 screens/settings/eq_curve.c
 screens/main_menu.c
 screens/main_menu_config.c
+screens/fruit_menu.c
 screens/context_menu_config.c
 screens/music_menu_config.c
 screens/settings/common_settings.c

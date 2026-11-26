@@ -1,10 +1,10 @@
 # Native PodBox theme format
 
-The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica and with its own bitmaps.
+The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica and with its own bitmaps. The built-in Fruit Company theme looks like Classic and replaces AstraPod's menus with the original firmware's: Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle Songs.
 
 ## Installing and choosing a theme
 
-Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Appearance → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim`, `light` and `classic`. A saved `plastic` selects Classic. The default is `scrim`.
+Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Settings → Theme Settings → Native theme**; under Fruit Company that is **Settings → Advanced Settings → Theme Settings → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim`, `light`, `classic` and `fruit-company`. A saved `plastic` selects Classic. The default is `scrim`.
 
 Place referenced font files in `.rockbox/fonts/`. Use PBF1 `.pbf` files for text and an RB12 `.fnt` file for icons. Firmware falls back to Scrim if a theme file is missing or malformed, or if it references an unsupported font. It records the failure in `.rockbox/native-theme.log`.
 
@@ -186,9 +186,11 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 | `art` | `none`, `plastic` | Apple's bitmaps from the stock firmware replace the drawn status bar, battery, play and pause icons, the selected row's chevron, the scrollbar, the Now Playing progress and volume bars, its shuffle icon and its speakers. The selection gradient becomes Apple's exact rows, whatever the theme sets for it. A long selected row scrolls as on the original iPod: after about 1.3 s it moves left 2 pixels every 34 ms and loops round, and the scroll settings do not apply. The bitmaps are sized for the Classic layout and come from `.rockbox/themes/stock-art.bin`; without that file they are not drawn. |
 | `list_scroll` | `glide`, `snap` | The rows jump a whole row at a time and only the selection marker moves; the ends of the list do not stretch. See *Native rendering and animation*. |
 | `list_rows` | `pitch`, `fill` | The rows fill the list's height: the pixels left below the last whole row go one each to the top rows, so nine 24-pixel rows in 220 pixels become four of 25 and five of 24. |
+| `menu_tree` | `astrapod`, `stock` | The main menu and everything under it are the original iPod Classic's: Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle Songs, with Menu going back one level. AstraPod's own settings are under **Settings → Advanced Settings**, and its System menu under **Extras**. A row the original firmware has and AstraPod does not either does nothing, as an empty list does there, or says it is not available. Choosing a theme that changes this goes back to the main menu. |
 
 Light keeps Scrim's styles.
-Classic sets the second keyword of every style except `list_scroll`. To
+Classic sets the second keyword of every style except `list_scroll` and
+`menu_tree`. Fruit Company is Classic with `style.menu_tree=stock`. To
 start a custom theme from Classic, copy its values from the table below.
 
 ### The Classic theme

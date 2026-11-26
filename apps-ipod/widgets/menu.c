@@ -78,6 +78,7 @@
 #include "list.h"
 #include "ui/scene.h"
 #include "ui/stock_art_ids.h"
+#include "screens/fruit_menu.h"
 
 #define MAX_MENUS 8
 /* used to allow for dynamic menus */
@@ -317,6 +318,9 @@ static const struct {
     { LANG_MANAGE_MENU, STOCK_ART_SETTINGS_RESET },
     { LANG_RESET, STOCK_ART_SETTINGS_RESET },
     { LANG_SETTINGS_CHANGED, STOCK_ART_SETTINGS_RESET },
+    { LANG_FRUIT_VOLUME_LIMIT, STOCK_ART_SETTINGS_VOLUMELIMIT },
+    { LANG_FRUIT_SORT_BY, STOCK_ART_SETTINGS_SORTBY },
+    { LANG_AUDIOBOOKS, STOCK_ART_SETTINGS_AUDIOBOOKS },
 };
 
 static int backlight_tile(int timeout)
@@ -356,6 +360,9 @@ static int value_tile(const void *variable)
     if (variable == &global_settings.keyclick)
         return global_settings.keyclick ? STOCK_ART_SETTINGS_CLICKERON :
                                           STOCK_ART_SETTINGS_CLICKEROFF;
+    if (variable == &global_settings.keyclick_hardware)
+        return global_settings.keyclick_hardware ?
+               STOCK_ART_SETTINGS_CLICKERON : STOCK_ART_SETTINGS_CLICKEROFF;
     if (variable == &global_settings.backlight_timeout)
         return backlight_tile(global_settings.backlight_timeout);
     if (variable == &global_settings.backlight_timeout_plugged)
@@ -386,6 +393,8 @@ static int item_tile(const struct menu_item_ex *item)
     int lang_id = item_lang_id(item);
     if (lang_id == LANG_BACKLIGHT)
         return backlight_tile(global_settings.backlight_timeout);
+    if (lang_id == LANG_FRUIT_SOUND_CHECK)
+        return value_tile(&global_settings.replaygain_settings.type);
     for (unsigned i = 0; art < 0 && i < ARRAYLEN(pane_tiles); i++)
         if (pane_tiles[i].lang_id == lang_id)
             art = pane_tiles[i].art;
@@ -435,6 +444,8 @@ static enum list_pane_kind menu_get_pane(int selected_item, void * data,
 
     if (menu == &root_menu_ && (menu->flags&MENU_TYPE_MASK) == MT_MENU)
         return root_menu_item_pane(item, art);
+    if (fruit_menu_owns(menu))
+        return fruit_menu_item_pane(menu, item, art);
     if (item != menu && item_lang_id(item) == LANG_ABOUT)
         return LIST_PANE_DEVICE;
     *art = item != menu ? item_tile(item) : -1;
@@ -676,7 +687,8 @@ static int init_menu_lists(const struct menu_item_ex *menu,
         {
             /* A string list indexes by position and holds no items, so there
                is nothing to hide there. */
-            if (!menu_item_in_settings_mode(menu->submenus[i]))
+            if (!fruit_menu_is_stock(menu) &&
+                !menu_item_in_settings_mode(menu->submenus[i]))
                 continue;
             if (row_hiding && (menu->flags & MENU_EXITAFTERTHISMENU)
                 && row_hiding->hidden(menu->submenus[i]))
@@ -988,7 +1000,8 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         /* Root CANCEL normally stays at Home. A deferred screen shortcut
          * must instead return to root_menu's dispatcher, which consumes it.
          * Otherwise get_action keeps returning CANCEL without a queue wait. */
-        if (menu == &root_menu_ && agents_nav_pending() != AGENTS_NAV_NONE)
+        if ((menu == &root_menu_ || menu == fruit_menu_root()) &&
+            agents_nav_pending() != AGENTS_NAV_NONE)
         {
             ret = agents_nav_pending() == AGENTS_NAV_WPS ? GO_TO_WPS : GO_TO_PREVIOUS;
             done = true;
@@ -1039,6 +1052,9 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             action != ACTION_STD_OK && action != ACTION_STD_CANCEL &&
             !(top_settings && action == ACTION_STD_MENU))
             ui_scene_cancel(scene);
+        /* In the stock tree Menu goes back one level, as stock's does */
+        if (action == ACTION_STD_MENU && start_menu == fruit_menu_root())
+            action = ACTION_STD_CANCEL;
         if (action == ACTION_STD_QUICKSCREEN)
         {
             if (global_settings.shortcuts_replaces_qs ||
@@ -1281,7 +1297,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                 /* new menu, so reload the callback */
                 get_menu_callback(menu, &menu_callback);
             }
-            else if (menu != &root_menu_)
+            else if (menu != &root_menu_ && menu != fruit_menu_root())
             {
                 ret = GO_TO_PREVIOUS;
                 done = true;

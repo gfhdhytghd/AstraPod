@@ -803,6 +803,11 @@ struct user_settings
      * whose signature is stored beside it. See browser_db.h. */
     int  music_menu_hidden;
     int  music_menu_sig;
+    /* Fruit Company's main menu and Music menu rows that are on: one bit per
+     * row of each, in the order Settings > Main Menu and Music Menu list
+     * them (screens/fruit_menu.c). */
+    int  fruit_main_menu;
+    int  fruit_music_menu;
     /* Rows hidden from each kind of context menu: a bit per row of the kind's
      * list in screens/context_menu.c, saved by the rows' names. */
 #define CONTEXT_MENU_KINDS 8

@@ -62,6 +62,9 @@ struct browse_folder_info {
     int show_options;
 };
 int browse_folder(void *param); /* in theme_settings.c */
+/* Settings' Reset Settings and System's License, in main_menu.c */
+int main_menu_reset_settings(void);
+int main_menu_show_license(void);
 int main_menu_config(void); /* in main_menu_config.c */
 /* The main menu's own long press on 'item': whether it can be hidden (all
  * but Settings, the way back to this), hiding it, and the editor opened

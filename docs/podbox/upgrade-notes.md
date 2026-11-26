@@ -69,3 +69,8 @@
   files that hold a picture track. Select one to watch it. The list fills
   after the first scan of the disk; that scan starts by itself once after
   this update. To hide the row, use **Edit Main Menu**.
+
+- **Films open where you find them.** Select an `.m4v`, or an `.mp4` that
+  holds a picture track, in **Files**, a search result or a shortcut, and
+  it plays in the video player; music that was playing stops. An `.mp4` or
+  `.m4a` with only sound plays as music, as before.

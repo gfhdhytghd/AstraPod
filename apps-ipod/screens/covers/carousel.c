@@ -2580,11 +2580,9 @@ static bool stock_look(void)
  * middle of a motion shows as a stumble. */
 static uint32_t flow_pace_next(struct ui_pace *pace, uint32_t start)
 {
-    if (stock_look())
-    {
+    pace->half_rate = stock_look();
+    if (pace->half_rate)
         pace->recover_full_rate = false;
-        pace->divisor = 2;
-    }
     return ui_pace_next(pace, start);
 }
 
@@ -7665,7 +7663,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             caption_wake = false;
         bool finish_caption = caption_owed && caption_flush_owed && caption_pixels >=
                               (caption_right - caption_left) * (caption_flush_end - caption_flush_top);
-        if (!fade && motion && !flat_view() && !dispatch_first && caption_flush_owed &&
+        if (!fade && motion && !flat_view() && !stock_look() && !dispatch_first &&
+            caption_flush_owed &&
             caption_pixels > 0 && (!caption_stage_busy(NULL) ||
             ((finish_caption || deferred_frames >= 2) && frame_due(flow_due))))
         {
@@ -7715,7 +7714,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 *trace = ui_perf_begin(model->motion_trace ?: "cover-flow");
                 trace_attempted = true;
             }
-            if (motion && !flow_moving)
+            bool motion_begins = motion && !flow_moving;
+            if (motion_begins)
             {
                 flow_start = ui_clock_start();
                 flow_moving = true;
@@ -7890,6 +7890,13 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             if (caption_flush_owed)
             {
                 int top = caption_flush_top, end = caption_flush_end;
+                /* The stock look sends the caption with the covers, so a
+                 * frame is one transfer in one refresh. */
+                if (stock_look() && dirty_end > dirty_top)
+                {
+                    dirty_top = MIN(dirty_top, top);
+                    dirty_end = MAX(dirty_end, end);
+                }
                 if (dirty_end <= top || dirty_top >= end)
                     ;
                 else if (dirty_top <= top && end <= dirty_end)
@@ -7940,13 +7947,25 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             else
                 parts = 0;
 
+            /* The stock look's motion starts from the refresh its first frame
+             * finished in, however long that frame took to draw, so the
+             * second frame follows it by two refreshes and moves two
+             * refreshes' worth. */
+            if (motion_begins && stock_look())
+            {
+                uint32_t edge = ui_clock_start(), late = edge - flow_start;
+                flow_start = edge;
+                flow_row.start_us += late;
+                fade_start += late;
+            }
             /* Set the art deadline from the art DMA. A second, narrow DMA can
              * use the remaining bandwidth without reserving another art TE. */
             flow_due = motion ? flow_pace_next(&flow_pace, flow_start)
                               : ui_clock_start() + ui_frame_period();
             caption_pixels = 0;
             caption_wake = false;
-            if (motion && !flat_view() && caption_flush_owed && rows < 150)
+            if (motion && !flat_view() && !stock_look() && caption_flush_owed &&
+                rows < 150)
             {
                 caption_pixels = (150 - rows) * LCD_WIDTH;
                 uint32_t slot;

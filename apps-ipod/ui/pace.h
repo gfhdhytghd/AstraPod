@@ -13,6 +13,8 @@ struct ui_pace {
     unsigned frame, shown, missed, transfers;
     uint8_t divisor, late, on_time;
     bool running, async, recover_full_rate;
+    /* Present every second refresh whatever the cost. */
+    bool half_rate;
 };
 
 struct ui_pace_status {

@@ -146,7 +146,7 @@ static void begin(struct ui_pace *pace, uint32_t start, unsigned frame,
                 ((!pace->async && pace->dma > period * 15 / 16) ||
                  pace->cost > cost_limit ||
                  pace->busy > period + period / 16);
-    pace->divisor = ui_te_pacing && half ? 2 : 1;
+    pace->divisor = ui_te_pacing && (half || pace->half_rate) ? 2 : 1;
     pace->start = start;
     pace->frame = frame;
     pace->late = pace->on_time = 0;
@@ -198,6 +198,8 @@ static void measure(struct ui_pace *pace, uint32_t cost, uint32_t period,
     pace->busy = busy;
     if (!ui_te_pacing)
         pace->offset = 0;
+    else if (pace->half_rate)
+        pace->late = pace->on_time = 0;
     else {
         bool late = cost > period * 15 / 16 ||
                     (!pace->async && dma > period * 15 / 16) ||

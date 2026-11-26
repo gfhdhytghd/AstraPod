@@ -43,8 +43,9 @@ struct frame_sample {
     uint32_t dma_phase, caption_copy_us, caption_overhead_us;
     uint8_t divisor;
     uint8_t parts;
-    /* TE rises since the last submission began; UINT8_MAX when unknown. */
-    uint8_t te_slots;
+    /* TE rises since the last submission began, and refreshes since the
+     * last submission's first refresh; UINT8_MAX when unknown. */
+    uint8_t te_slots, present_slots;
     uint16_t art_rows, caption_rows;
 };
 
@@ -53,8 +54,9 @@ struct frame_capture {
     unsigned seen, render_misses, work_misses, interval_misses, half_frames;
     uint32_t worst_render, worst_work, worst_interval, skipped;
     uint32_t render_pending, last_submission, period_q8;
-    uint32_t last_start, last_phase;
-    unsigned te_gaps, te_repeats;
+    uint32_t last_start, last_phase, last_present;
+    unsigned te_gaps, te_repeats, present_gaps, present_repeats;
+    bool presented;
     int32_t slot_phase;
     struct cover_work cover_pending;
     uint8_t parts_pending;
@@ -239,6 +241,7 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
                                   .dma_phase = timing->dma_phase,
                                   .divisor = MAX(1, pace.divisor),
                                   .te_slots = UINT8_MAX,
+                                  .present_slots = UINT8_MAX,
                                   .parts = capture->parts_pending,
                                   .art_rows = capture->art_pending,
                                   .caption_rows = capture->caption_pending };
@@ -288,6 +291,21 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
             capture->te_gaps += sample.te_slots > 1;
             capture->te_repeats += sample.te_slots == 0;
         }
+    }
+    uint32_t present;
+    if (ui_present_refresh(USEC_TIMER, &present))
+    {
+        if (capture->presented)
+        {
+            int32_t since = present - capture->last_present;
+            int64_t slots = since <= 0 ? 0 :
+                (((int64_t)since << 8) + period_q8 / 2) / period_q8;
+            sample.present_slots = MIN(UINT8_MAX - 1, slots);
+            capture->present_gaps += sample.present_slots > 1;
+            capture->present_repeats += sample.present_slots == 0;
+        }
+        capture->last_present = present;
+        capture->presented = true;
     }
     capture->last_submission = clock;
     capture->last_start = timing->primary_start;
@@ -353,7 +371,7 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
         "last_dma_start_phase_us,target_changes,cache_wait_us,caption_us,"
         "motion_us,project_us,columns_us,blit_us,clear_us,render_other_us,"
         "art_copy_us,art_submit_overhead_us,caption_copy_us,caption_submit_overhead_us,"
-        "te_slots\n";
+        "te_slots,present_slots\n";
     static const char *const parts[] = { "-", "a", "c", "ac" };
     uint32_t period_q8 = capture->period_q8;
     uint32_t period = (period_q8 + 128) >> 8;
@@ -372,7 +390,7 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
         int n = snprintf(output + used, size - used,
             "%u," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT
             ",%u,%u,%u,%u,%d,%s,%u,%u," FRAME_FORMAT ",%d,%u,%u,%u"
-            ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d\n",
+            ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%d\n",
             i + 1, FRAME_ARG(render_f), FRAME_ARG(submit_f), FRAME_ARG(work_f),
             FRAME_ARG(interval_f), work > period, interval_miss,
             (unsigned)sample->skipped, sample->divisor,
@@ -389,7 +407,9 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
             sample->parts & UI_PERF_ART ? (unsigned)(sample->submit - sample->caption_copy_us) : 0,
             sample->parts & UI_PERF_ART ? (unsigned)(sample->submit_overhead - sample->caption_overhead_us) : 0,
             (unsigned)sample->caption_copy_us, (unsigned)sample->caption_overhead_us,
-            sample->te_slots == UINT8_MAX ? -1 : (int)sample->te_slots);
+            sample->te_slots == UINT8_MAX ? -1 : (int)sample->te_slots,
+            sample->present_slots == UINT8_MAX ? -1 :
+                                                 (int)sample->present_slots);
         if (n < 0 || (size_t)n >= size - used)
             break;
         used += n;
@@ -414,7 +434,7 @@ void ui_perf_end(unsigned token)
     unsigned interval_worst = as_frames(capture->worst_interval, period_q8);
     int phase_p50 = phase_arg(percentile(capture, first, PHASE, 50));
     int phase_p99 = phase_arg(percentile(capture, first, PHASE, 99));
-    size_t rows_size = 490 + (size_t)retained * 294;
+    size_t rows_size = 510 + (size_t)retained * 298;
     int rows_handle = retained ? core_alloc_free_space(rows_size) : 0;
     char *rows = NULL;
     size_t rows_used = 0;
@@ -423,7 +443,7 @@ void ui_perf_end(unsigned token)
         rows = core_get_data_pinned(rows_handle);
         rows_used = format_rows(capture, first, rows, rows_size);
     }
-    char summary[512];
+    char summary[640];
     unsigned render_worst = as_frames(capture->worst_render, period_q8);
     const char *te = !capture->enabled ? "off" :
                      capture->measured ? "measured" : "nominal";
@@ -436,7 +456,8 @@ void ui_perf_end(unsigned token)
         "work_misses=%u interval_misses=%u skipped_slots=%u "
         "render_worst_f=" FRAME_FORMAT " render_misses=%u "
         "period_us=%u te=%s async=%s rate=%s half_frames=%u "
-        "phase_p50_us=%d phase_p99_us=%d te_gaps=%u te_repeats=%u\n",
+        "phase_p50_us=%d phase_p99_us=%d te_gaps=%u te_repeats=%u "
+        "present_gaps=%u present_repeats=%u\n",
         capture->route, capture->seen, retained, first, rows ? retained : 0,
         FRAME_ARG(work_p99), FRAME_ARG(interval_p99),
         FRAME_ARG(work_worst), FRAME_ARG(interval_worst),
@@ -444,7 +465,8 @@ void ui_perf_end(unsigned token)
         FRAME_ARG(render_worst), capture->render_misses,
         (unsigned)((period_q8 + 128) >> 8), te,
         capture->async ? "on" : "off", rate, capture->half_frames,
-        phase_p50, phase_p99, capture->te_gaps, capture->te_repeats);
+        phase_p50, phase_p99, capture->te_gaps, capture->te_repeats,
+        capture->present_gaps, capture->present_repeats);
     core_put_data_pinned(capture);
     core_free(handle);
     if (n > 0 && (size_t)n < sizeof(summary))

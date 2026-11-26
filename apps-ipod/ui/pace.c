@@ -8,6 +8,9 @@
 #include "button.h"
 #include "kernel.h"
 #include "lcd-vsync.h"
+#ifdef HAVE_LCD_VSYNC
+#include "lcd-te-s5l8702.h"
+#endif
 #include "system.h"
 
 #define CLOCK_HZ 1000000u
@@ -87,6 +90,39 @@ uint32_t ui_clock_phase(uint32_t clock)
     bool known;
     uint32_t period = period_q8(&edge, &known);
     return known ? phase_of(clock, edge, period) : UINT32_MAX;
+}
+
+bool ui_present_refresh(uint32_t now, uint32_t *refresh)
+{
+#ifdef HAVE_LCD_VSYNC
+    uint32_t edge, phase, slot;
+    bool known;
+    uint32_t period = period_q8(&edge, &known);
+    if (!known)
+        return false;
+    lcd_vsync_async_timing(NULL, &phase, &slot, NULL);
+    if (lcd_te_pending())
+    {
+        *refresh = slot - phase_of(slot, edge, period) + ((period + 128) >> 8);
+        return true;
+    }
+    if (phase == UINT32_MAX)
+        return false;
+    /* The transfer's phase counts from the rise before the one whose scan
+     * it ran ahead of. */
+    uint32_t whole = (period + 128) >> 8;
+    bool ahead = phase >= whole;
+    uint32_t started = ahead ? phase - whole : phase;
+    uint32_t rise = now - phase_of(now, edge, period);
+    if (now - rise < started)
+        rise -= whole;
+    *refresh = ahead ? rise : rise + whole;
+    return true;
+#else
+    (void)now;
+    (void)refresh;
+    return false;
+#endif
 }
 
 uint32_t ui_clock_start(void)

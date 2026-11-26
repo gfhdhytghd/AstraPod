@@ -39,3 +39,12 @@
   year. On Scrim the card shows the album's blurred cover; Light shows a
   light panel. Each album's blurred background, on Now Playing and in the
   panel, is built again the first time it is shown.
+
+- **Scrim's lists jump a whole row** at each click of the wheel, and only
+  the selection marker slides. For the old gliding lists, choose Light under
+  **Appearance > Native theme**, or set `style.list_scroll=glide` in a
+  custom theme.
+
+- **Classic and Plastic show the original iPod's split menus**, with the
+  list on the left half and a picture of the selected row on the right, in
+  the original iPod's Helvetica.

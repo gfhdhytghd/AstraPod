@@ -833,7 +833,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             action = get_action(CONTEXT_MAINMENU|ALLOW_SOFTLOCK,
                                 ui_scene_timeout(&modal, ui_scene_timeout(scene, list_do_action_timeout(&lists, HZ))));
         }
-        if (action == ACTION_NONE)
+        if (action == ACTION_NONE && !gui_synclist_moving(&lists))
             lcd_update();
 
 #ifdef HAVE_WHEEL_WPS_CHORD

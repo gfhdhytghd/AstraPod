@@ -714,6 +714,25 @@ static bool list_wheel_event(void)
 #endif
 }
 
+/* A frame of selection movement, which leaves the rows' contents alone. */
+static void draw_moved(struct gui_synclist *list)
+{
+    if (UNLIKELY(!list->parent[SCREEN_MAIN]))
+        return;
+    gui_synclist_layout(list);
+    list_render_draw_moved(list);
+}
+
+/* A wake with motion due: a frame of the list, of the pane beside it, or
+ * both. */
+static void draw_due(struct gui_synclist *list)
+{
+    if (UNLIKELY(!list->parent[SCREEN_MAIN]))
+        return;
+    gui_synclist_layout(list);
+    list_render_draw_due(list);
+}
+
 static void list_move(struct gui_synclist *list, int offset, bool wrap,
                       bool wheel)
 {
@@ -722,7 +741,7 @@ static void list_move(struct gui_synclist *list, int offset, bool wrap,
     int top = list->start_item[SCREEN_MAIN];
     gui_list_select_at_offset(list, offset, wrap);
     list_render_retarget(list, selection, top, offset, wheel);
-    gui_synclist_draw(list);
+    draw_moved(list);
 }
 
 static void list_page(struct gui_synclist *list, int direction)
@@ -841,8 +860,7 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
         _gui_synclist_speak_item(lists, true);
     if (action == ACTION_NONE && list_render_motion_due(lists))
     {
-        gui_synclist_layout(lists);
-        list_render_draw_due(lists);
+        draw_due(lists);
         return true;
     }
     {
@@ -913,11 +931,9 @@ bool list_do_action(int context, int timeout,
     if (*action == ACTION_NONE)
     {
         if (list_render_motion_due(lists))
-        {
-            gui_synclist_layout(lists);
-            list_render_draw_due(lists);
-        }
-        lcd_update();
+            draw_due(lists);
+        if (!gui_synclist_moving(lists))
+            lcd_update();
     }
     return handled;
 }

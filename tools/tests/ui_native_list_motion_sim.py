@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise native list glide, edge margins, and spring-back in SDL."""
+"""Exercise Light's list glide, edge margins, and spring-back in SDL."""
 
 import argparse
 import json
@@ -122,7 +122,7 @@ def run(binary, resource, root, output, env, animations, theme_motion_off=False)
         themes = rockbox / "native-themes"
         themes.mkdir()
         (themes / "still.podtheme").write_text("podbox-theme=1\nmotion_scale=0\n")
-    theme = "still" if theme_motion_off else "scrim"
+    theme = "still" if theme_motion_off else "light"
     (rockbox / "config.cfg").write_text(
         "start in screen: files\nshow files: supported\nlist wraparound: off\n"
         "backlight timeout: off\nvoice menus: off\nkeyclick: off\n"

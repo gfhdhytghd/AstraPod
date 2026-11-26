@@ -28891,3 +28891,33 @@
     *: "标题中显示时间"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_FRUIT_THEME_WARNING
+  desc: Native theme: the question asked before a theme that changes the menus to the stock iPod's
+  user: core
+  <source>
+    *: "This theme changes the menus to the iPod's own layout."
+  </source>
+  <dest>
+    *: "这个主题把菜单改为 iPod 原版的结构。"
+  </dest>
+  <voice>
+    *: "这个主题把菜单改为 iPod 原版的结构。"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_THEME_WARNING_DETAIL
+  desc: Native theme: the second line of LANG_FRUIT_THEME_WARNING
+  user: core
+  <source>
+    *: "AstraPod's settings move to Settings > Advanced Settings. To switch back, choose another theme in Settings > Advanced Settings > Theme Settings > Native theme."
+  </source>
+  <dest>
+    *: "AstraPod 的设置移到 设置 > 高级设置。要切换回来，在 设置 > 高级设置 > 主题设置 > 原生主题 中选择其他主题。"
+  </dest>
+  <voice>
+    *: "AstraPod 的设置移到 设置 > 高级设置。要切换回来，在 设置 > 高级设置 > 主题设置 > 原生主题 中选择其他主题。"
+  </voice>
+</phrase>

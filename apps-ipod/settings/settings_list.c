@@ -2017,9 +2017,10 @@ const struct settings_list settings[] = {
                 NULL, NULL, NULL),
     /* Fruit Company's own main menu and Music menu rows: Music, Radio,
      * Photos, Podcasts, Videos, Extras and Shuffle Songs on the main menu,
-     * all of Music, as the stock firmware starts. Their checklists are the UI. */
+     * all of Music, as the stock firmware starts. Their checklists are the UI.
+     * Every bit of the main menu's is a row, the sign bit Playback Report. */
     INT_SETTING(F_BANFROMQS, fruit_main_menu, LANG_MAIN_MENU, 0x20107081,
-                "fruit main menu", UNIT_INT, 0, 0x7fffffff, 1,
+                "fruit main menu", UNIT_INT, -0x7fffffff - 1, 0x7fffffff, 1,
                 NULL, NULL, NULL),
     INT_SETTING(F_BANFROMQS, fruit_music_menu, LANG_FRUIT_MUSIC_MENU, 0x7ff,
                 "fruit music menu", UNIT_INT, 0, 0x7fffffff, 1,

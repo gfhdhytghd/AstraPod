@@ -29241,3 +29241,31 @@
     *: "Time in Title"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_FRUIT_THEME_WARNING
+  desc: Native theme: the question asked before a theme that changes the menus to the stock iPod's
+  user: core
+  <source>
+    *: "This theme changes the menus to the iPod's own layout."
+  </source>
+  <dest>
+    *: "This theme changes the menus to the iPod's own layout."
+  </dest>
+  <voice>
+    *: "This theme changes the menus to the iPod's own layout."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_THEME_WARNING_DETAIL
+  desc: Native theme: the second line of LANG_FRUIT_THEME_WARNING
+  user: core
+  <source>
+    *: "AstraPod's settings move to Settings > Advanced Settings. To switch back, choose another theme in Settings > Advanced Settings > Theme Settings > Native theme."
+  </source>
+  <dest>
+    *: "AstraPod's settings move to Settings > Advanced Settings. To switch back, choose another theme in Settings > Advanced Settings > Theme Settings > Native theme."
+  </dest>
+  <voice>
+    *: "AstraPod's settings move to Settings > Advanced Settings. To switch back, choose another theme in Settings > Advanced Settings > Theme Settings > Native theme."
+  </voice>
+</phrase>

@@ -102,6 +102,8 @@ static int podcasts(void)     { return run(GO_TO_PODCASTS); }
 static int now_playing(void)  { return run(GO_TO_WPS); }
 static int notes(void)        { return run(GO_TO_DOCUMENTS); }
 static int games(void)        { return run(GO_TO_BROWSEPLUGINS); }
+static int files(void)        { return run(GO_TO_FILEBROWSER); }
+static int playback_report(void) { return run(GO_TO_SPUN); }
 
 /* AstraPod's sleep timer menu, the stock Sleep row */
 extern const struct menu_item_ex sleep_timer_menu;
@@ -289,6 +291,7 @@ ROW(extras_games_row, LANG_PLUGIN_GAMES, games, NULL);
 ROW(extras_notes_row, LANG_FRUIT_NOTES, notes, NULL);
 ROW(extras_screen_lock_row, LANG_FRUIT_SCREEN_LOCK, extras_screen_lock, NULL);
 ROW(extras_stopwatch_row, LANG_FRUIT_STOPWATCH, extras_stopwatch, NULL);
+ROW(extras_files_row, LANG_DIR_BROWSER, files, NULL);
 
 /* Not static in main_menu.c: AstraPod's System menu */
 extern const struct menu_item_ex info_menu;
@@ -297,7 +300,7 @@ extern const struct menu_item_ex info_menu;
 static const struct menu_item_ex *const extras_rows[] = {
     &extras_clocks_row, &extras_calendars_row, &extras_contacts_row,
     &extras_alarms_row, &extras_games_row, &extras_notes_row,
-    &extras_screen_lock_row, &extras_stopwatch_row, &info_menu,
+    &extras_screen_lock_row, &extras_stopwatch_row, &extras_files_row, &info_menu,
 };
 
 MENU(extras_menu, LANG_FRUIT_EXTRAS, home_callback, extras_rows);
@@ -519,7 +522,7 @@ enum {
     HOME_VIDEO_PLAYLISTS, HOME_MOVIES, HOME_TV_SHOWS, HOME_MUSIC_VIDEOS,
     HOME_RENTALS, HOME_EXTRAS, HOME_CLOCKS, HOME_ALARMS, HOME_CALENDARS,
     HOME_CONTACTS, HOME_GAMES, HOME_NOTES, HOME_SCREEN_LOCK, HOME_STOPWATCH,
-    HOME_SHUFFLE_SONGS, HOME_SLEEP, HOME_ROWS
+    HOME_SHUFFLE_SONGS, HOME_SLEEP, HOME_PLAYBACK_REPORT, HOME_ROWS
 };
 
 /* Settings > Main Menu, as stock lists it: a row's sub-items indented */
@@ -539,6 +542,7 @@ static const struct check_row home_checks[HOME_ROWS] = {
     { LANG_PLUGIN_GAMES, true }, { LANG_FRUIT_NOTES, true },
     { LANG_FRUIT_SCREEN_LOCK, true }, { LANG_FRUIT_STOPWATCH, true },
     { LANG_SHUFFLE_SONGS, false }, { LANG_FRUIT_SLEEP, false },
+    { LANG_SPUN, false },
 };
 
 static int main_menu_rows(void)
@@ -579,6 +583,7 @@ ROW(home_screen_lock, LANG_FRUIT_SCREEN_LOCK, extras_screen_lock,
 ROW(home_stopwatch, LANG_FRUIT_STOPWATCH, extras_stopwatch, home_callback);
 ROW(home_shuffle, LANG_SHUFFLE_SONGS, shuffle_songs, home_callback);
 ROW(home_sleep, LANG_FRUIT_SLEEP, sleep_timer, home_callback);
+ROW(home_playback_report, LANG_SPUN, playback_report, home_callback);
 ROW(home_now_playing, LANG_NOW_PLAYING, now_playing, home_callback);
 
 static const struct row_bit home_bits[] = {
@@ -598,6 +603,7 @@ static const struct row_bit home_bits[] = {
     { &home_notes, HOME_NOTES }, { &home_screen_lock, HOME_SCREEN_LOCK },
     { &home_stopwatch, HOME_STOPWATCH }, { &home_shuffle, HOME_SHUFFLE_SONGS },
     { &home_sleep, HOME_SLEEP },
+    { &home_playback_report, HOME_PLAYBACK_REPORT },
 };
 
 /* Hides the main menu's rows Settings > Main Menu turned off, and Now
@@ -618,7 +624,8 @@ static int home_callback(int action, const struct menu_item_ex *this_item,
 }
 
 /* The main menu in the order it shows its rows: stock's seven, each
- * followed by the sub-items Settings > Main Menu put beside it */
+ * followed by the sub-items Settings > Main Menu put beside it, then
+ * AstraPod's Playback Report, which starts hidden */
 static const struct menu_item_ex *const home_rows[] = {
     &music_menu_fruit, &home_cover_flow, &home_playlists, &home_artists,
     &home_albums, &home_compilations, &home_songs, &home_genres,
@@ -629,7 +636,8 @@ static const struct menu_item_ex *const home_rows[] = {
     &extras_menu, &home_clocks, &home_alarms, &home_calendars,
     &home_contacts, &home_games, &home_notes, &home_screen_lock,
     &home_stopwatch,
-    &settings_menu, &home_shuffle, &home_sleep, &home_now_playing,
+    &settings_menu, &home_shuffle, &home_sleep, &home_playback_report,
+    &home_now_playing,
 };
 
 MENU(home_menu, LANG_ROCKBOX_TITLE, NULL, home_rows);

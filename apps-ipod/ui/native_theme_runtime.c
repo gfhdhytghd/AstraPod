@@ -13,6 +13,7 @@
 #include "metadata/album_palette.h"
 #include "settings/settings.h"
 #include "widgets/list.h"
+#include "widgets/yesno.h"
 #include "native_theme_runtime.h"
 #include <limits.h>
 #include <stdio.h>
@@ -375,10 +376,24 @@ int ui_theme_choose(void)
         const char *name = info.selection < UI_THEME_BUILTIN_COUNT ?
                            ui_theme_builtin_name(info.selection) :
                            files[info.selection - UI_THEME_BUILTIN_COUNT];
+        char previous[sizeof(global_settings.native_theme)];
+        strcpy(previous, global_settings.native_theme);
         unsigned tree = ui_theme_style(UI_STYLE_MENU_TREE);
         ui_theme_set(name, true);
         /* The menu this list was opened from is no longer the theme's */
         to_root = ui_theme_style(UI_STYLE_MENU_TREE) != tree;
+        /* Asked with the new theme showing, which is what Yes keeps */
+        if (to_root && tree == UI_MENU_TREE_ASTRAPOD)
+        {
+            const char *lines[] = { ID2P(LANG_FRUIT_THEME_WARNING),
+                                    ID2P(LANG_FRUIT_THEME_WARNING_DETAIL) };
+            const struct text_message message = { lines, 2 };
+            if (gui_syncyesno_run(&message, NULL, NULL) != YESNO_YES)
+            {
+                ui_theme_set(previous, true);
+                to_root = false;
+            }
+        }
     }
     if (files)
     {

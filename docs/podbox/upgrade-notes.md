@@ -60,4 +60,6 @@
   and Shuffle Songs are the main menu, and Settings > Main Menu and Music
   Menu choose their rows as on the original iPod. AstraPod's own settings
   are under Settings > Advanced Settings, where Theme Settings > Native
-  theme switches back.
+  theme switches back. Choosing it asks first. Files and the System menu
+  are in Extras, and Playback Report is a main menu row that starts
+  hidden: turn it on in Settings > Main Menu.

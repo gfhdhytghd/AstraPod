@@ -1395,6 +1395,7 @@ static int get_rock_action(int context, int timeout,
 
 int get_action(int context, int timeout)
 {
+    wheel_set_detent_mode(false);
 #ifdef ASTRAPOD_ROCK_COMPAT
     if (rock_ui_raw())
         return get_rock_action(context, timeout, NULL);
@@ -1474,6 +1475,8 @@ int action_set_keymap_handle(int handle, int count)
 int get_custom_action(int context,int timeout,
                       const struct button_mapping* (*get_context_map)(int))
 {
+    wheel_set_detent_mode((context & CONTEXT_WHEEL_DETENTS) != 0);
+    context &= ~CONTEXT_WHEEL_DETENTS;
 #ifdef ASTRAPOD_ROCK_COMPAT
     if (rock_ui_raw())
         return get_rock_action(context, timeout, get_context_map);

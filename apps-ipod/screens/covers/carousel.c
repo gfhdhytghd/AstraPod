@@ -7299,7 +7299,12 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         if (first_frame)
             button = ACTION_NONE;
         else
-            button = get_custom_action(CONTEXT_PLUGIN, timeout, get_context_map);
+        {
+            int context = CONTEXT_PLUGIN;
+            if (!flat_view() && !panel.live && !leaving)
+                context |= CONTEXT_WHEEL_DETENTS;
+            button = get_custom_action(context, timeout, get_context_map);
+        }
         uint32_t action_us = USEC_TIMER;
         first_frame = false;
         ui_inhibit_flush(inherited_inhibit);
@@ -8409,6 +8414,7 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
     unsigned trace = 0;
     cover_resume_dirty = false;
     ret = album_covers_loop(&trace, restored_pixels || pf_entry_prepared);
+    wheel_set_detent_mode(false);
     button_set_sw_poweroff_state(true);
 
     remember_current_cover();

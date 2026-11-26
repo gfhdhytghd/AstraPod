@@ -23,6 +23,7 @@
 #define CONTEXT_CUSTOM  0x40000000 /* | this against anything to get your context number */
 #define CONTEXT_CUSTOM2 0x20000000 /* as above */
 #define CONTEXT_PLUGIN  0x10000000 /* for plugins using get_custom_action */
+#define CONTEXT_WHEEL_DETENTS 0x02000000 /* physical wheel steps for this input context */
 #define CONTEXT_REMAPPED 0x08000000 /* marker for key remap context table */
 #define CORE_CONTEXT_REMAP(context) (CONTEXT_REMAPPED | context)
 #define CONTEXT_LOCKED  0x04000000 /* flag to use alternate keymap when screen is locked */

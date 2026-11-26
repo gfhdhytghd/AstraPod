@@ -92,6 +92,15 @@ controls.
 AstraPod answers **Save and exit?** with the buttons instead of the wheel:
 press Select to save and quit, or Menu to keep playing.
 
+The status-bar tray shows how the pet is doing: a smiling Mochi when it is
+content, zZ while it sleeps, Mochi with ! when it needs care (food, a treat,
+cleaning, a call, the lights left on, a hatched egg or a visitor), and a
+skull when it is sick or has died. After you leave, the icon keeps following
+the pet for up to four changes over the next two days; open MochiPod to
+bring it up to date. The icon hides while the pet is paused or waiting on a
+clock check, and goes away if you leave before setting up a new pet or after
+a farewell.
+
 ## App reminders and tray icons
 
 The tray shows passive reminders wherever a native status bar is visible.
@@ -151,10 +160,10 @@ return false for invalid inputs, lack of space, storage errors, and USB
 storage takeover. After unplugging, retry a failed call. Back up or remove
 the store over USB and restart to keep or reset all reminders.
 
-For MochiPod, register the pet's artwork when it opens. When the player feeds
-the pet or leaves the game, set the current icon or hide it. Install rules for
-the next hunger thresholds before returning to the firmware. Keep the full pet
-state and game rules in MochiPod's own save.
+MochiPod shows the pattern. It registers its four icons when it opens and
+sets the current one when the pet's state changes. Before it returns, it
+installs rules for the pet's next changes, predicted by running its own game
+rules on a copy of the pet. The full pet state stays in MochiPod's own save.
 
 ### Try the demo
 

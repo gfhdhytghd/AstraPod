@@ -2,6 +2,7 @@
 #include "config.h"
 #include "plugins/rock_compat.h"
 #include "frame.h"
+#include "hwscroll.h"
 #include "perf.h"
 #include "system.h"
 #include <stddef.h>
@@ -96,6 +97,7 @@ void ui_flush_dirty(void)
         {
             struct viewport *previous = screens[i].set_viewport(NULL);
             unsigned int start = USEC_TIMER;
+            ui_hwscroll_note_update();
             screens[i].update_rect(region.x, region.y, region.w, region.h);
             ui_note_flush(USEC_TIMER - start);
             screens[i].set_viewport(previous);

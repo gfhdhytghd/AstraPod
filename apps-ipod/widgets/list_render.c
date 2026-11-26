@@ -45,6 +45,7 @@
 #include "plugins/rock_compat.h"
 #include "list_render.h"
 #include "ui/scene.h"
+#include "list_hwscroll.h"
 #include "list_select.h"
 
 struct list_geometry {
@@ -99,13 +100,14 @@ struct list_index {
 };
 
 /* What the last paint left on screen, to tell a frame in which only the
- * selection marker moved. */
+ * selection marker moved, or one the panel can scroll to. on_panel: the
+ * paint reached the LCD, after which ui_hwscroll_writes() read writes. */
 struct list_shown {
     struct ui_rect rows, marker;
-    int pitch, top, cursor_y, lit, selected;
-    unsigned theme, palette, art, font, artist;
+    int pitch, top, top_px, cursor_y, lit, selected;
+    unsigned theme, palette, art, font, artist, writes;
     int art_handle;
-    bool valid;
+    bool valid, on_panel;
 };
 
 struct native_list {
@@ -141,9 +143,10 @@ struct native_list {
     int row_shift, cursor_y;
     struct gradient_rows bar_rows, thumb_rows;
     uint32_t marquee_started, marquee_frame;
-    /* The refresh at which the last snapped frame reaches the panel. */
+    /* The refresh at which the last snapped or hardware-scroll frame
+     * reaches the panel; batched while a glide follows the latter. */
     uint32_t presented;
-    bool has_marquee, snap_frame;
+    bool has_marquee, snap_frame, batched;
     unsigned char mark_mask[2];
 };
 
@@ -1997,6 +2000,25 @@ static void snap_presented(struct native_list *render, bool submitted)
     render->presented = late >= period || late < -3 * period ? soonest : next;
 }
 
+/* While a glide goes by hardware-scroll frames, each is drawn once the
+ * last one is on the panel, for the refresh after it, or for the first
+ * one it can still reach. */
+static uint32_t batch_deadline(const struct native_list *render)
+{
+    return render->presented +
+           scan_reaches(render->theme.metric[UI_METRIC_STATUS_HEIGHT]);
+}
+
+static unsigned batch_frame(const struct native_list *render)
+{
+    uint32_t period = ui_frame_period();
+    uint32_t target = render->presented + period;
+    int32_t late = (uint32_t)USEC_TIMER + period / 2 - target;
+    if (late >= 0)
+        target += (late / period + 1) * period;
+    return ui_clock_frame(target - render->motion.started + period / 2);
+}
+
 static bool update_row_pose(struct native_list *render, const struct list_geometry *g)
 {
     struct gui_synclist *list = render->owner;
@@ -2019,6 +2041,8 @@ static bool update_row_pose(struct native_list *render, const struct list_geomet
                 render->snap_frame = true;
             }
         }
+        else if (render->batched)
+            motion->painted = batch_frame(render);
         else
             motion->painted =
                 ui_clock_frame((uint32_t)USEC_TIMER - motion->started);
@@ -2051,6 +2075,23 @@ static bool marquee_resting(const struct native_list *render)
            elapsed < ui_clock_frame(global_settings.scroll_delay * 1000);
 }
 
+/* Whether the rows the last paint left differ from this frame's only by
+ * where the list and its selection stand. */
+static bool shown_current(const struct native_list *render,
+                          const struct list_geometry *g)
+{
+    const struct list_shown *shown = &render->shown;
+    return shown->valid && shown->pitch == g->pitch &&
+           !memcmp(&shown->rows, &g->rows, sizeof(g->rows)) &&
+           shown->theme == render->theme_generation &&
+           shown->palette == render->palette_generation &&
+           shown->art == render->art_generation &&
+           shown->art_handle == render->art_handle &&
+           shown->font == render->font_epoch &&
+           shown->artist == render->artist_generation &&
+           marquee_resting(render);
+}
+
 /* Under snapped scrolling, a frame whose rows stand where the last paint
  * left them repaints only the marker's path, plus the rows whose text
  * colour follows it. False when anything else may have changed. */
@@ -2061,18 +2102,10 @@ static bool marker_damage(const struct native_list *render,
     const struct gui_synclist *list = render->owner;
     int top = render->rows.value[UI_SCROLL_OFFSET];
     int lit = render->rows.value[UI_SELECTION];
-    if (!shown->valid ||
+    if (!shown_current(render, g) ||
         render->theme.style[UI_STYLE_LIST_SCROLL] != UI_LIST_SCROLL_SNAP ||
-        render->row_shift || shown->top != top || shown->pitch != g->pitch ||
-        memcmp(&shown->rows, &g->rows, sizeof(g->rows)) ||
-        shown->theme != render->theme_generation ||
-        shown->palette != render->palette_generation ||
-        shown->art != render->art_generation ||
-        shown->art_handle != render->art_handle ||
-        shown->font != render->font_epoch ||
-        shown->artist != render->artist_generation ||
-        (g->notes.height > 0 && shown->selected != list->selected_item) ||
-        !marquee_resting(render))
+        render->row_shift || shown->top != top ||
+        (g->notes.height > 0 && shown->selected != list->selected_item))
         return false;
 
     int height = g->pitch * list->selected_size;
@@ -2097,6 +2130,78 @@ static bool marker_damage(const struct native_list *render,
     *damage = intersection(band, g->rows);
     if (damage->width <= 0 || damage->height <= 0)
         *damage = (struct ui_rect){0};
+    return true;
+}
+
+/* A full-width list over a plain background, whose last paint the panel
+ * still shows untouched, can reach it as a hardware-scroll frame. */
+static bool batch_ready(const struct native_list *render,
+                        const struct list_geometry *g)
+{
+    const struct gui_synclist *list = render->owner;
+    return render->shown.on_panel && shown_current(render, g) &&
+           render->backdrop.handle <= 0 && list->default_viewport &&
+           !list->selection_color && !list->callback_draw_item &&
+           g->background.x == 0 && g->background.width == LCD_WIDTH &&
+           g->background.y + g->background.height == LCD_HEIGHT &&
+           ui_hwscroll_writes() == render->shown.writes;
+}
+
+static void batch_pose(const struct native_list *render,
+                       struct list_hwscroll_pose *pose)
+{
+    const struct list_shown *shown = &render->shown;
+    struct ui_rect marker = { shown->marker.x, shown->cursor_y,
+                              shown->marker.width,
+                              shown->pitch * render->owner->selected_size };
+    if (render->theme.style[UI_STYLE_SELECTION] == UI_SELECTION_BAR)
+    {
+        marker.x = 0;
+        marker.width = LCD_WIDTH;
+    }
+    *pose = (struct list_hwscroll_pose){
+        .top = shown->top_px, .marker = marker, .lit = shown->lit,
+        .selected = shown->selected,
+    };
+}
+
+/* Sends the frame just painted, and `other`, the damage outside the list,
+ * as a hardware-scroll frame. False when they must go by update_rect(). */
+static bool batch_submit(struct native_list *render,
+                         const struct list_geometry *g,
+                         const struct list_hwscroll_pose *before,
+                         const struct ui_rect *other)
+{
+    const struct gui_synclist *list = render->owner;
+    int visible = g->rows.height / g->pitch;
+    int bar = scrollbar_width(list, g->rows, visible);
+    struct list_hwscroll_layout layout = {
+        .width = LCD_WIDTH, .height = LCD_HEIGHT, .area_top = g->background.y,
+        .content = { g->rows.x, g->rows.y, g->rows.width, visible * g->pitch },
+        .scrollbar = { scrollbar_left(render, list) ? g->rows.x :
+                       g->rows.x + g->rows.width - bar, g->rows.y, bar,
+                       visible * g->pitch },
+        .notes = g->notes, .pitch = g->pitch, .span = list->selected_size,
+    };
+    struct list_hwscroll_pose after;
+    struct ui_hwscroll_frame frame;
+    batch_pose(render, &after);
+    if (!list_hwscroll_plan(&layout, before, &after, &frame))
+        return false;
+    render->batched = false;
+    if (!frame.shift && !frame.count)
+    {
+        /* Nothing on the panel changes. */
+        ui_take_dirty(SCREEN_MAIN);
+        ui_mark_dirty_rect(SCREEN_MAIN, other->x, other->y, other->width,
+                           other->height);
+        ui_flush_dirty();
+        return true;
+    }
+    if (!ui_hwscroll_submit(&frame, other))
+        return false;
+    ui_take_dirty(SCREEN_MAIN);
+    render->batched = ui_hwscroll_latest(&render->presented);
     return true;
 }
 
@@ -2257,9 +2362,19 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     }
 
     bool held = ui_flush_inhibited();
+    struct list_hwscroll_pose before;
+    bool batch = moved && !status_only && !show_index && !split && !partial &&
+                 !held && !gui_synclist_flush_inhibited() &&
+                 batch_ready(render, &g);
+    if (batch)
+        batch_pose(render, &before);
     ui_inhibit_flush(true);
     if (!status_only)
         sb_update(SCREEN_MAIN, false);
+    /* The status bar's damage goes ahead of a hardware-scroll frame. */
+    struct ui_dirty_rect status = {0};
+    if (batch)
+        ui_take_dirty_rects(SCREEN_MAIN, &status);
     bool painted = render->page.damage.width > 0;
     if (!status_only && painted)
         render->shown.marker.width = 0;
@@ -2272,6 +2387,8 @@ static void draw_list(struct gui_synclist *list, bool status_only,
         render->shown = (struct list_shown) {
             .rows = g.rows, .marker = marker, .pitch = g.pitch,
             .top = render->rows.value[UI_SCROLL_OFFSET],
+            .top_px = render->rows.value[UI_SCROLL_OFFSET] * g.pitch -
+                      render->row_shift,
             .cursor_y = render->cursor_y,
             .lit = render->rows.value[UI_SELECTION],
             .selected = list->selected_item,
@@ -2284,8 +2401,22 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     }
     ui_inhibit_flush(held);
     unsigned flushes = ui_flush_count();
-    if (!gui_synclist_flush_inhibited())
-        ui_flush_dirty();
+    struct ui_rect other = { status.x, status.y, status.w, status.h };
+    bool sent = batch && batch_submit(render, &g, &before, &other);
+    if (!sent)
+    {
+        ui_mark_dirty_rect(SCREEN_MAIN, other.x, other.y, other.width,
+                           other.height);
+        if (!gui_synclist_flush_inhibited())
+            ui_flush_dirty();
+    }
+    if (!status_only && painted)
+    {
+        if (!sent)
+            render->batched = false;
+        render->shown.on_panel = sent || ui_flush_count() != flushes;
+        render->shown.writes = ui_hwscroll_writes();
+    }
     if (render->snap_frame)
     {
         render->snap_frame = false;
@@ -2419,13 +2550,16 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
             /* A new frame waits for its presentation slot, so a half-rate
              * glide keeps its frame parity. */
             bool due = motion->snap ? snap_due(render, now) :
+                       render->batched ?
+                       (int32_t)(now - batch_deadline(render)) >= 0 :
                        ui_clock_frame(elapsed) > motion->painted &&
                        (int32_t)(now - glide_pace.due) >= 0;
             if (!motion_enabled() || due)
                 delay = 0;
-            else if (poll && motion->snap)
+            else if (poll && (motion->snap || render->batched))
             {
-                int motion_delay = ui_clock_wait_until(snap_deadline(render));
+                int motion_delay = ui_clock_wait_until(motion->snap ?
+                    snap_deadline(render) : batch_deadline(render));
                 if (delay == TIMEOUT_BLOCK || motion_delay < delay)
                     delay = motion_delay;
             }

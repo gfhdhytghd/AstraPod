@@ -88,6 +88,12 @@ the real sweep is designed around does not arise. The test the rule is really
 asking is whether the caller stays correct: apply it to the *screen*, not only
 to the return value.
 
+`shim-hwscroll.c` implements too. It stands in for the iPod Classic panel's
+hardware scroll behind `ui/hwscroll.c`, with the SDL window's surface as the
+panel, and prints a line for each frame that would leave a wrong pixel on the
+real panel (for every frame with `PODBOX_HWSCROLL_LOG` set).
+`tools/tests/ui_list_hwscroll_sim.py` reads those lines.
+
 Two return values are load-bearing, and getting either wrong hangs the boot
 silently rather than failing:
 

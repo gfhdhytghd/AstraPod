@@ -1,6 +1,6 @@
 # Native PodBox theme format
 
-The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry, and its lists glide. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica. The built-in Plastic theme is Classic drawn with Apple's own bitmaps from that firmware.
+The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica. The built-in Plastic theme is Classic drawn with Apple's own bitmaps from that firmware.
 
 ## Installing and choosing a theme
 
@@ -137,8 +137,8 @@ and `handoff_scrim_alpha` in existing theme files.
 
 `motion.<role>` sets one transition's duration in frames on the same clock,
 from 0 to 120. The roles are `push` and `pop` (page transitions), `list`
-(the selection marker or bar, and list scrolling with
-`style.list_scroll=glide`), `sheet_in` and `sheet_out`. `0` makes
+(the selection marker or bar, and list scrolling unless
+`style.list_scroll=snap`), `sheet_in` and `sheet_out`. `0` makes
 that motion a jump. An omitted role keeps the built-in duration, and
 `motion_scale` applies to every role.
 
@@ -178,10 +178,11 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 | `scrollbar` | `plain`, `classic` | A 4-pixel thumb with rounded ends and no track, drawn at the right edge. |
 | `menu_pane` | `none`, `split` | Menus take the left half of the screen, and their status bar spans it. The right half shows the selected row: a slow pan across the library's covers for music rows, otherwise its icon and name, a settings row's title, icon and value, the playing track, or the free space. A new row's pane follows half a second after the selection. Lists of the library's contents stay full width. |
 | `art` | `none`, `plastic` | Apple's bitmaps from the stock firmware replace the drawn battery, play and pause icons, the selected row's chevron, and the Now Playing shuffle icon and speakers. The status, selection, `progress` and `progress_track` gradients become Apple's exact rows, whatever the theme sets for them. The bitmaps are sized for the Classic layout. |
-| `list_scroll` | `snap`, `glide` | The rows glide to each new position instead of jumping a whole row; the wheel can pull the list half a row past either end, and it settles back when input stops. See *Native rendering and animation*. |
+| `list_scroll` | `glide`, `snap` | The rows jump a whole row at a time and only the selection marker moves; the ends of the list do not stretch. See *Native rendering and animation*. |
 
-Light sets `style.list_scroll=glide` and keeps Scrim's other styles.
-Classic sets the second keyword of every style except `art`. To start a
+Light keeps Scrim's styles.
+Classic sets the second keyword of every style except `art` and
+`list_scroll`. To start a
 custom theme from Classic, copy its values from the table below.
 
 ### The Classic theme
@@ -250,13 +251,16 @@ push uses 18 f and the pop uses 15 f. The page behind moves by up to 30% of the
 screen width and reaches 70% brightness. Sheets use 16 f in and 12 f out with
 35% background dimming. Lists keep selection and scroll position separately.
 The selection moves over 8 f, and a new detent starts from wherever the
-selection is drawn. With `style.list_scroll=snap`, the rows jump a whole row
-at a time and only the selection marker moves. A step that scrolls the list
-keeps the marker on its screen row, and the ends of the list do not stretch.
-With `glide`, the rows glide too, the wheel can expose at most half a row
-beyond the viewport, and when input stops the list settles over 10 f with one
-row of context where available. Status icons and changing playback values use
-8 f. Lyric line motion uses 16 f.
+selection is drawn. The rows glide too, over the same 8 f. The wheel can
+expose at most half a row beyond the viewport, and when input stops the list
+settles over 10 f with one row of context where available. With
+`style.list_scroll=snap`, the rows instead jump a whole row at a time and only
+the selection marker moves. A step that scrolls the list keeps the marker on
+its screen row, and the ends of the list do not stretch. On the iPod Classic a
+full-width list moves the panel's own scroll and sends only the rows that
+change, so every frame reaches the screen, at each refresh; a list drawn over
+the album backdrop, and a split menu, send each frame whole. Status icons and
+changing playback values use 8 f. Lyric line motion uses 16 f.
 
 Set `/.rockbox/ui-perf.enable` before starting the firmware to record frame
 timing. Each animation writes its samples and summary to
@@ -270,4 +274,7 @@ small rect sent early in a refresh shows in it, a large one in the next. A
 motion that shows a new frame at every refresh reads `present_slots` 1 after
 its first row; the summary's `present_gaps` and `present_repeats` count the
 rows above and below 1, and `te_gaps` and `te_repeats` do the same for
-`te_slots`. The log cannot see the panel scanning out the pixels.
+`te_slots`. `hw_offset` is the panel's scroll offset after a frame that moved
+the panel's scroll, and -1 for a frame sent whole. `band_rows` is how many
+screen-wide rows of pixels such a frame sent. The log cannot see the panel
+scanning out the pixels.

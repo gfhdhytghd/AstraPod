@@ -43,5 +43,8 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing);
 #define UI_PERF_CAPTION 2u
 void ui_perf_note_rects(unsigned parts, unsigned art_rows,
                         unsigned caption_rows);
+/* The next submission is a hardware-scroll frame: the panel's scroll
+ * offset after it and the rows of pixels its bands carry. */
+void ui_perf_note_hwscroll(int offset, unsigned rows);
 
 #endif

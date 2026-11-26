@@ -47,6 +47,10 @@ struct frame_sample {
      * last submission's first refresh; UINT8_MAX when unknown. */
     uint8_t te_slots, present_slots;
     uint16_t art_rows, caption_rows;
+    /* The panel's scroll offset after a hardware-scroll frame, -1 for a
+     * frame sent whole, and the rows its bands carry. */
+    int16_t hw_offset;
+    uint16_t band_rows;
 };
 
 struct frame_capture {
@@ -61,6 +65,8 @@ struct frame_capture {
     struct cover_work cover_pending;
     uint8_t parts_pending;
     uint16_t art_pending, caption_pending;
+    int16_t hw_offset_pending;
+    uint16_t band_rows_pending;
     bool enabled, measured, async;
     struct frame_sample samples[PERF_CAPACITY];
     uint32_t scratch[PERF_CAPACITY];
@@ -136,6 +142,7 @@ static unsigned begin_capture(const char *route, bool passive)
     struct frame_capture *capture = core_get_data_pinned(handle);
     memset(capture, 0, sizeof(*capture));
     strlcpy(capture->route, route, sizeof(capture->route));
+    capture->hw_offset_pending = -1;
     core_put_data_pinned(capture);
     owner = thread_self();
     if (++serial == 0)
@@ -181,6 +188,16 @@ void ui_perf_note_rects(unsigned parts, unsigned art_rows,
     capture->parts_pending = parts;
     capture->art_pending = art_rows;
     capture->caption_pending = caption_rows;
+    core_put_data_pinned(capture);
+}
+
+void ui_perf_note_hwscroll(int offset, unsigned rows)
+{
+    if (active_handle <= 0 || owner != thread_self())
+        return;
+    struct frame_capture *capture = core_get_data_pinned(active_handle);
+    capture->hw_offset_pending = offset;
+    capture->band_rows_pending = rows;
     core_put_data_pinned(capture);
 }
 
@@ -244,7 +261,9 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
                                   .present_slots = UINT8_MAX,
                                   .parts = capture->parts_pending,
                                   .art_rows = capture->art_pending,
-                                  .caption_rows = capture->caption_pending };
+                                  .caption_rows = capture->caption_pending,
+                                  .hw_offset = capture->hw_offset_pending,
+                                  .band_rows = capture->band_rows_pending };
     if (sample.parts == UI_PERF_CAPTION)
     {
         sample.caption_copy_us = sample.submit;
@@ -263,6 +282,8 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
     capture->render_pending = 0;
     capture->parts_pending = 0;
     capture->art_pending = capture->caption_pending = 0;
+    capture->hw_offset_pending = -1;
+    capture->band_rows_pending = 0;
     capture->period_q8 = period_q8;
     capture->enabled = pace.enabled;
     capture->measured = pace.measured;
@@ -371,7 +392,7 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
         "last_dma_start_phase_us,target_changes,cache_wait_us,caption_us,"
         "motion_us,project_us,columns_us,blit_us,clear_us,render_other_us,"
         "art_copy_us,art_submit_overhead_us,caption_copy_us,caption_submit_overhead_us,"
-        "te_slots,present_slots\n";
+        "te_slots,present_slots,hw_offset,band_rows\n";
     static const char *const parts[] = { "-", "a", "c", "ac" };
     uint32_t period_q8 = capture->period_q8;
     uint32_t period = (period_q8 + 128) >> 8;
@@ -390,7 +411,7 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
         int n = snprintf(output + used, size - used,
             "%u," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT
             ",%u,%u,%u,%u,%d,%s,%u,%u," FRAME_FORMAT ",%d,%u,%u,%u"
-            ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%d\n",
+            ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%d,%d,%u\n",
             i + 1, FRAME_ARG(render_f), FRAME_ARG(submit_f), FRAME_ARG(work_f),
             FRAME_ARG(interval_f), work > period, interval_miss,
             (unsigned)sample->skipped, sample->divisor,
@@ -409,7 +430,8 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
             (unsigned)sample->caption_copy_us, (unsigned)sample->caption_overhead_us,
             sample->te_slots == UINT8_MAX ? -1 : (int)sample->te_slots,
             sample->present_slots == UINT8_MAX ? -1 :
-                                                 (int)sample->present_slots);
+                                                 (int)sample->present_slots,
+            sample->hw_offset, sample->band_rows);
         if (n < 0 || (size_t)n >= size - used)
             break;
         used += n;
@@ -434,7 +456,7 @@ void ui_perf_end(unsigned token)
     unsigned interval_worst = as_frames(capture->worst_interval, period_q8);
     int phase_p50 = phase_arg(percentile(capture, first, PHASE, 50));
     int phase_p99 = phase_arg(percentile(capture, first, PHASE, 99));
-    size_t rows_size = 510 + (size_t)retained * 298;
+    size_t rows_size = 530 + (size_t)retained * 310;
     int rows_handle = retained ? core_alloc_free_space(rows_size) : 0;
     char *rows = NULL;
     size_t rows_used = 0;

@@ -6,6 +6,7 @@
 
 #include "animation.h"
 #include "button.h"
+#include "hwscroll.h"
 #include "kernel.h"
 #include "lcd-vsync.h"
 #ifdef HAVE_LCD_VSYNC
@@ -94,6 +95,8 @@ uint32_t ui_clock_phase(uint32_t clock)
 
 bool ui_present_refresh(uint32_t now, uint32_t *refresh)
 {
+    if (ui_hwscroll_latest(refresh))
+        return true;
 #ifdef HAVE_LCD_VSYNC
     uint32_t edge, phase, slot;
     bool known;

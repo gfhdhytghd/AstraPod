@@ -43,7 +43,8 @@ uint32_t ui_clock_phase(uint32_t clock);
 /* Call right after a submission: the TE rise of the refresh that first
  * shows it. A transfer that started ahead of the panel's scan shows in the
  * refresh it started in; one behind the scan, or still waiting for its
- * window, shows in the next. False when the LCD does not report it. */
+ * window, shows in the next, and a hardware-scroll frame in the refresh
+ * the driver chose for it. False when the LCD does not report it. */
 bool ui_present_refresh(uint32_t now, uint32_t *refresh);
 
 #endif

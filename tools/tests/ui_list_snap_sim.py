@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Check snapped list scrolling in SDL: Scrim's rows jump a whole row and
-only the selection marker glides; Light and Classic match an older build.
+"""Check snapped list scrolling in SDL: under a custom theme that sets
+style.list_scroll=snap on Scrim's tokens, the rows jump a whole row and only
+the selection marker glides; Light and Classic match an older build.
 
 Arguments: NEW_ROCKBOXUI NEW_ZIP OLD_ROCKBOXUI OLD_ZIP OUTPUT_DIRECTORY
 Xvfb is private to this process. Writes frame strips, result.json and each
@@ -124,6 +125,11 @@ def run(binary, resource, root, theme, output, env, scenarios):
             if path.startswith(".rockbox/fonts/"):
                 archive.extract(path, root)
     rockbox = root / ".rockbox"
+    if theme == "snap":
+        themes = rockbox / "native-themes"
+        themes.mkdir()
+        (themes / "snap.podtheme").write_text(
+            "podbox-theme=1\nstyle.list_scroll=snap\n")
     (rockbox / "config.cfg").write_text(
         "start in screen: files\nshow files: supported\nlist wraparound: off\n"
         "backlight timeout: off\nvoice menus: off\nkeyclick: off\n"
@@ -170,7 +176,7 @@ SCENARIOS = [
 ]
 
 
-def check_scrim(result):
+def check_snap(result):
     summary = {}
     for name, *_ in SCENARIOS:
         samples = result[name]
@@ -236,10 +242,10 @@ def main():
                        SDL_RENDER_DRIVER="software", LIBGL_ALWAYS_SOFTWARE="1")
 
             result = {}
-            scrim, perf = run(args.new, args.new_zip, root / "scrim", "scrim",
-                              args.output, env, SCENARIOS)
-            result["scrim"] = check_scrim(scrim)
-            result["scrim"]["perf"] = perf_captures(perf)
+            snap, perf = run(args.new, args.new_zip, root / "snap", "snap",
+                             args.output, env, SCENARIOS)
+            result["snap"] = check_snap(snap)
+            result["snap"]["perf"] = perf_captures(perf)
             for theme in ("light", "classic"):
                 new, _ = run(args.new, args.new_zip, root / f"{theme}-after", theme,
                              args.output, env, SCENARIOS)
@@ -261,7 +267,7 @@ def main():
                     }
                 result[theme] = compare
     (args.output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    print("PASS Scrim snapped list scrolling; Light and Classic end frames unchanged")
+    print("PASS snapped list scrolling; Light and Classic end frames unchanged")
 
 
 if __name__ == "__main__":

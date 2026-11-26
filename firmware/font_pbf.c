@@ -18,6 +18,7 @@ enum {
     PREFETCH_GLYPHS = 384,
     MAX_RECORD = 16384,
     RECORD_RGB = 0x80,
+    RECORD_GRAY8 = 0x40,
     BLOCK_BYTES = 4096,
     FIXED_TRAILER = 32,
     HAN_COUNT = 0xa000 - 0x3400,
@@ -389,8 +390,16 @@ static size_t phase_size(const unsigned char *p, bool rgb)
     return 4 + (pixels + 1) / 2 + (rgb ? (3 * pixels + 1) / 2 : 0);
 }
 
+/* A RECORD_GRAY8 record has one phase of one coverage byte per pixel. */
+static size_t gray8_size(const unsigned char *p)
+{
+    return 4 + (unsigned)p[2] * p[3];
+}
+
 static bool valid_record(const unsigned char *record, size_t size)
 {
+    if (record[0] == (1 | RECORD_GRAY8))
+        return size >= 5 && 1 + gray8_size(record + 1) == size;
     bool rgb = (record[0] & RECORD_RGB) != 0;
     unsigned phases = record[0] & ~RECORD_RGB;
     if (phases != 1 && phases != 4)
@@ -519,7 +528,7 @@ int font_pbf_run(struct font *font, struct font_run *run, ucschar_t cp,
         {
             const unsigned char *p = record + 7;
             bool rgb = (record[6] & RECORD_RGB) != 0;
-            unsigned phases = record[6] & ~RECORD_RGB;
+            unsigned phases = record[6] & ~(RECORD_RGB | RECORD_GRAY8);
             int rounded = origin + (phases == 4 ? 8 : 32);
             unsigned phase = phases == 4 ? (rounded >> 4) & 3 : 0;
             for (unsigned i = 0; i < phase; ++i)
@@ -533,6 +542,7 @@ int font_pbf_run(struct font *font, struct font_run *run, ucschar_t cp,
             if (rgb)
                 out->rgb = out->bits + ((unsigned)p[2] * p[3] + 1) / 2;
             out->missing = (record[1] & 0x80) != 0;
+            out->coverage8 = (record[6] & RECORD_GRAY8) != 0;
         }
     }
     return (run->pen + 32) >> 6;

@@ -117,6 +117,8 @@ static bool select_theme(const char *name, bool fallback)
         }
         else
             valid = theme_from_file(tokens, name) && theme_has_fonts(tokens);
+        if (valid)
+            lcd_set_glyph_palette(tokens->color, UI_COLOR_COUNT);
         core_put_data_pinned(tokens);
         if (!valid)
             replacement = core_free(replacement);

@@ -824,8 +824,15 @@ static unsigned mix_channel(unsigned background, unsigned foreground, unsigned a
 }
 #endif
 
+#include "lcd-glyph8.c"
+
 void lcd_font_glyph(const struct font_glyph *glyph, int skip, int x, int y)
 {
+    if (glyph->coverage8)
+    {
+        lcd_font_glyph8(glyph, skip, x, y);
+        return;
+    }
     int width = glyph->width - skip;
 #if LCD_PIXELFORMAT == RGB565 && LCD_STRIDEFORMAT == HORIZONTAL_STRIDE
     struct viewport *vp = lcd_current_viewport;

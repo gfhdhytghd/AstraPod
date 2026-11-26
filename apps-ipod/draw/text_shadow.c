@@ -131,7 +131,9 @@ static void mask_from_text(struct screen *display, struct viewport *vp,
             for (int px = start_x; px < stop_x; ++px)
             {
                 int col = (x + left + px - mx) >> 1;
-                unsigned coverage = pf->depth
+                unsigned coverage = glyph.coverage8
+                    ? glyph.bits[py * glyph.width + px] * LCD_BLEND_OPAQUE / 255
+                    : pf->depth
                     ? glyph_nibble(glyph.bits, py * glyph.width + px)
                     : ((glyph.bits[(py >> 3) * glyph.width + px] >> (py & 7)) & 1u)
                       * LCD_BLEND_OPAQUE;

@@ -109,7 +109,12 @@ struct font_glyph {
     const unsigned char *bits;
     const unsigned char *rgb;
     bool missing;
+    bool coverage8; /* bits holds one coverage byte per pixel, 0 transparent */
 };
+
+/* 24-bit colours that an 8-bit coverage glyph blends with in place of the
+ * foreground pattern they pack to. */
+void lcd_set_glyph_palette(const uint32_t *rgb, unsigned count);
 
 /* builtin C-based proportional/fixed font structure */
 /* based on The Microwindows Project http://microwindows.org */

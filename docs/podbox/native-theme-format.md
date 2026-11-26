@@ -168,7 +168,7 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 
 | Key | Keywords | Effect of the second keyword |
 | --- | --- | --- |
-| `selection` | `marker`, `bar` | A full-width bar behind the selected row instead of a thin marker. Selected text uses `selected_text`, other rows `muted`. |
+| `selection` | `marker`, `bar` | A full-width bar behind the selected row instead of a thin marker. Selected text uses `selected_text`, other rows `muted`. A label too long for a row that does not scroll ends in `...`. |
 | `list_icons` | `auto`, `off` | No icon column in lists. The Agents screen and multi-select marks keep theirs. |
 | `accessory` | `all`, `selected` | The chevron shows on the selected row only. Setting rows show their value as text in `accent`, right-aligned. |
 | `status_clock` | `on`, `off` | No clock in the status bar; the title takes the room. |

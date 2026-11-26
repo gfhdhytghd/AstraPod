@@ -25,6 +25,7 @@
 #include "metadata.h"
 #include "draw/bmp.h"
 #include "draw/color.h"
+#include "draw/line.h"
 #include "draw/round_rect.h"
 #include "draw/scrollbar.h"
 #include "draw/text_wrap.h"
@@ -1141,9 +1142,17 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
                   lit ? fg : render->colors[UI_COLOR_ACCENT], value, false, 0,
                   false);
     }
+    bool scroll = selected || list->scroll_all;
+    char fitted[TEXT_FIT_BUF];
+    /* Under the bar, as in the stock firmware, a row that does not scroll
+     * ends its cut label in "...". */
+    if (!scroll && !list->offset_position[SCREEN_MAIN] &&
+        render->theme.style[UI_STYLE_SELECTION] == UI_SELECTION_BAR)
+        label = text_fit(label, fitted, sizeof(fitted), text_font,
+                         text_right - text_x);
     draw_text(render, clip, row_cell(row, text_x, text_y,
               text_right - text_x, text_height, rtl), text_font, fg, label,
-              selected || list->scroll_all, list->offset_position[SCREEN_MAIN], false);
+              scroll, list->offset_position[SCREEN_MAIN], false);
     if (aux == chevron && chevron_selected && !lit)
         aux = NULL;
     /* Apple's chevron keeps 6 columns clear of the row's right edge. */

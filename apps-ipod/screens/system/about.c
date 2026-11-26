@@ -152,7 +152,7 @@ int about_screen(void)
 
     ui_view_init(&view, bounds, &about_ops, &about);
     ui_page_init(&page, &view);
-    ui_scene_open_page(&scene, "about-push");
+    ui_scene_open_core_page(&scene, "about-push");
     viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
 
     if (global_settings.talk_menu)

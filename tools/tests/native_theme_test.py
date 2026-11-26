@@ -286,6 +286,31 @@ static void check_list_rows(void)
     assert(!strcmp(theme.font[UI_FONT_LIST_VALUE], "Local_12"));
 }
 
+/* Classic and Plastic fade the screens that are not lists; Scrim and Light
+ * move them. */
+static void check_screen_entry(void)
+{
+    struct ui_theme theme;
+    ui_theme_builtin(&theme, UI_THEME_SCRIM);
+    assert(theme.style[UI_STYLE_SCREEN_ENTRY] == UI_SCREEN_ENTRY_MOVE);
+    ui_theme_builtin(&theme, UI_THEME_LIGHT);
+    assert(theme.style[UI_STYLE_SCREEN_ENTRY] == UI_SCREEN_ENTRY_MOVE);
+    ui_theme_builtin(&theme, UI_THEME_CLASSIC);
+    assert(theme.style[UI_STYLE_SCREEN_ENTRY] == UI_SCREEN_ENTRY_FADE);
+    ui_theme_builtin(&theme, UI_THEME_PLASTIC);
+    assert(theme.style[UI_STYLE_SCREEN_ENTRY] == UI_SCREEN_ENTRY_FADE);
+
+    static const char fade[] = VERSION "style.screen_entry=fade\n";
+    ui_theme_builtin(&theme, UI_THEME_SCRIM);
+    assert(ui_theme_parse(&theme, fade, sizeof(fade) - 1));
+    assert(theme.style[UI_STYLE_SCREEN_ENTRY] == UI_SCREEN_ENTRY_FADE);
+    static const char move[] = VERSION "style.screen_entry=move\n";
+    assert(ui_theme_parse(&theme, move, sizeof(move) - 1));
+    assert(theme.style[UI_STYLE_SCREEN_ENTRY] == UI_SCREEN_ENTRY_MOVE);
+    static const char bad[] = VERSION "style.screen_entry=slide\n";
+    reject(&theme, bad, sizeof(bad) - 1);
+}
+
 int main(void)
 {
     check_builtins();
@@ -294,7 +319,8 @@ int main(void)
     check_plastic();
     check_menu_pane();
     check_list_rows();
-    puts("PASS native theme defaults, overrides, atomic validation, palette bounds, menu pane and list rows");
+    check_screen_entry();
+    puts("PASS native theme defaults, overrides, atomic validation, palette bounds, menu pane, list rows and screen entry");
     return 0;
 }
 ''', objects)

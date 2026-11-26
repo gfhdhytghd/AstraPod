@@ -195,6 +195,7 @@ static const struct {
     [UI_STYLE_MENU_PANE]    = { "menu_pane",    (const char *const[]){ "none", "split", NULL } },
     [UI_STYLE_LIST_SCROLL]  = { "list_scroll",  (const char *const[]){ "glide", "snap", NULL } },
     [UI_STYLE_LIST_ROWS]    = { "list_rows",    (const char *const[]){ "pitch", "fill", NULL } },
+    [UI_STYLE_SCREEN_ENTRY] = { "screen_entry", (const char *const[]){ "move", "fade", NULL } },
 };
 
 static const char *const gradients[UI_GRADIENT_COUNT] = {
@@ -290,6 +291,7 @@ static void classic(struct ui_theme *theme)
     theme->style[UI_STYLE_SCROLLBAR] = UI_SCROLLBAR_CLASSIC;
     theme->style[UI_STYLE_MENU_PANE] = UI_MENU_PANE_SPLIT;
     theme->style[UI_STYLE_LIST_ROWS] = UI_LIST_ROWS_FILL;
+    theme->style[UI_STYLE_SCREEN_ENTRY] = UI_SCREEN_ENTRY_FADE;
 }
 
 /* Stock's selection bar is a colour gradient, not a bitmap: its rows take

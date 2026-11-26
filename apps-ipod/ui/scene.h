@@ -18,6 +18,8 @@ struct ui_scene {
     /* A split menu on each surface, a root page without menu chrome, and
      * an outgoing page that stays still under the incoming one. */
     bool back_split, front_split, full_screen, back_still;
+    /* A cross-fade in place of the motion (style.screen_entry=fade). */
+    bool fade;
 };
 
 /* The UI thread owns a scene from capture through the end of its transition.
@@ -57,6 +59,9 @@ bool ui_scene_restore_modal(struct ui_scene *scene);
 void ui_scene_set_parent_painter(bool (*paint)(const void *page));
 bool ui_scene_repaint_backdrop(struct ui_scene *scene);
 void ui_scene_open_page(struct ui_scene *scene, const char *route);
+/* A page the original iPod also opens from a menu, such as About. It keeps
+ * the page motion where style.screen_entry fades other pages. */
+void ui_scene_open_core_page(struct ui_scene *scene, const char *route);
 const void *ui_scene_modal_parent(void);
 void ui_scene_modal_restored(const void *page);
 int ui_scene_modal_body_offset(int offset, int status_height);

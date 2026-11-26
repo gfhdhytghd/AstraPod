@@ -2586,6 +2586,16 @@ static uint32_t flow_pace_next(struct ui_pace *pace, uint32_t start)
     return ui_pace_next(pace, start);
 }
 
+/* Moves a stock-look motion's clock that began at `*start` on to the
+ * refresh now under way, and returns by how much: the motion then resumes
+ * from the pose it last showed, however long the work since took. */
+static uint32_t stock_rebase(uint32_t *start)
+{
+    uint32_t edge = ui_clock_start(), late = edge - *start;
+    *start = edge;
+    return late;
+}
+
 /* The alpha a cover sitting on a pile is drawn at, the setting being how far
  * toward the background it is taken. Note this is a dimming, not a
  * transparency: render_slide() blends toward the background colour, so a pile
@@ -4870,6 +4880,8 @@ static struct album_panel {
     struct stock_flip flip;
     int back_handle;
     bool back_ready;
+    /* The stock look's flip has yet to draw its first frame. */
+    bool flip_first;
     unsigned first, second, sampled, trace;
     /* due is the next flip or list scroll frame's deadline. */
     uint32_t clock, opened, due;
@@ -4941,6 +4953,7 @@ static void panel_mark(int y, const struct panel_ink *ink)
 
 static void panel_layout_header(void);
 static void panel_layout_digits(void);
+static void prepare_stock_back(void);
 static void panel_layout_track(struct panel_track *row);
 
 static struct album_blur_source panel_blur_source(int index)
@@ -5030,6 +5043,16 @@ static void flip_to(bool open)
     {
         if (panel.moving && panel.to == (open ? FLIP_OPEN : 0))
             return;
+        /* The stock look draws the opening back before the turn starts,
+         * not on the frame where it first shows. */
+        bool prepared = stock_look() && open && !panel.moving &&
+                        panel.back_handle > 0 && pf_motion_scale;
+        if (prepared)
+        {
+            buf_ctx_lock();
+            prepare_stock_back();
+            buf_ctx_unlock();
+        }
         uint32_t now = USEC_TIMER;
         struct stock_pose current = panel.moving ? stock_flip_pose(&panel.flip, now) :
             stock_current(&flow_row, center_index, now, stock_scroll_progress(&flow_row, now)).pose;
@@ -5039,7 +5062,8 @@ static void flip_to(bool open)
         panel.to = open ? FLIP_OPEN : 0;
         panel.moving = pf_motion_scale && panel.back_handle > 0;
         panel.position = panel.moving ? FLIP_MID : panel.to;
-        panel.back_ready = false;
+        panel.back_ready = prepared;
+        panel.flip_first = stock_look() && panel.moving;
         panel.dirty = true;
         panel.trace = panel.moving ? ui_perf_begin(open ? "cover-flip-open" : "cover-flip-close") : 0;
         return;
@@ -6157,6 +6181,9 @@ static void step_album_flip(void)
     {
         draw_album_flip(true);
         panel.resuming = false;
+        if (panel.flip_first && panel.moving)
+            panel.flip.start_us += stock_rebase(&panel.clock);
+        panel.flip_first = false;
     }
     if (animating && due)
     {
@@ -6655,6 +6682,8 @@ static struct {
     struct album_blur_source source;
     bool layout_ready;
     uint32_t return_start;
+    /* When the turn left Cover Flow mid-way, its next frame's deadline. */
+    uint32_t resume_us;
     pix_t bg;
     bool pending, from_panel, returning;
 } playback_scene;
@@ -6864,6 +6893,9 @@ static void slide_playback_controls(const struct wps_state *incoming, uint32_t s
         lcd_update();
         if (elapsed == PLAYBACK_SLIDE_US || !lcd_active())
             break;
+        /* The stock look's slide starts from its first frame's refresh. */
+        if (!elapsed && stock_look())
+            stock_rebase(&start);
         ui_clock_sleep(ui_clock_wait_until(flow_pace_next(&flow_pace, start)));
         elapsed = MIN((uint32_t)USEC_TIMER - start, PLAYBACK_SLIDE_US);
     }
@@ -6907,6 +6939,15 @@ void carousel_wps_present(const struct wps_state *state)
     char route = playback_scene.from_panel ? 'C' : 'D';
     if (!lcd_active())
         return;
+    /* The stock look's turn resumes where it left Cover Flow: the time
+     * Now Playing took to set up passes with the turn held. */
+    if (playback_scene.resume_us && stock_look())
+    {
+        int32_t late = ui_clock_start() - playback_scene.resume_us;
+        if (late > 0)
+            playback_scene.walls.start_us += late;
+    }
+    playback_scene.resume_us = 0;
     struct stock_flip flip = playback_turn();
     uint32_t start = flip.start_us, now = USEC_TIMER;
     struct stock_pose initial = flip.target;
@@ -7077,9 +7118,13 @@ static int stock_to_wps(int album, bool from_panel, int destination, uint32_t ac
     playback_scene.from_panel = from_panel;
     bool animate = pf_motion_scale && lcd_active();
     struct stock_flip flip;
+    playback_scene.resume_us = 0;
     if (animate)
     {
         prepare_playback_turn(album, from_panel, action_us);
+        /* Under the stock look the turn starts once it is ready to draw. */
+        if (stock_look())
+            playback_scene.walls.start_us += stock_rebase(&action_us);
         flip = playback_turn();
     }
     bool landed = false;
@@ -7098,6 +7143,8 @@ static int stock_to_wps(int album, bool from_panel, int destination, uint32_t ac
         if (status > 0)
         {
             destination = GO_TO_WPS;
+            if (animate && !landed && stock_look())
+                playback_scene.resume_us = flow_pace_next(&flow_pace, action_us);
             break;
         }
         if (status < 0)
@@ -7953,8 +8000,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
              * refreshes' worth. */
             if (motion_begins && stock_look())
             {
-                uint32_t edge = ui_clock_start(), late = edge - flow_start;
-                flow_start = edge;
+                uint32_t late = stock_rebase(&flow_start);
                 flow_row.start_us += late;
                 fade_start += late;
             }

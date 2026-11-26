@@ -86,12 +86,15 @@ static void list_render_draw(struct gui_synclist *list)
 { assert(list->parent[0]); drawn++; }
 static void gui_synclist_layout(struct gui_synclist *list)
 { assert(list->parent[0]); laid_out++; }
+static bool split_list(const struct gui_synclist *list) { (void)list; return false; }
+static int menu_pane_deadline(void) { return TIMEOUT_BLOCK; }
 
 @MOTION_OWNER@
 @MOTION_STOP@
 @FORGET_RENDERER@
 @FORGET_LIST@
 @DRAW_LIST@
+@LIST_DEADLINE@
 @MOTION_DEADLINE@
 
 int main(void)
@@ -135,6 +138,7 @@ for token, source, name in (
     ("@FORGET_RENDERER@", renderer, "list_render_forget"),
     ("@FORGET_LIST@", list_source, "gui_synclist_forget"),
     ("@DRAW_LIST@", list_source, "gui_synclist_draw"),
+    ("@LIST_DEADLINE@", renderer, "list_deadline"),
     ("@MOTION_DEADLINE@", renderer, "motion_deadline"),
 ):
     fixture = fixture.replace(token, function(source, name))

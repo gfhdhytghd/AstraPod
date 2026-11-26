@@ -45,6 +45,9 @@ void menu_pane_viewport_left(int depth);
 /* Whether the framebuffer shows a split page, for a transition taking it
  * as its outgoing page. The next page painted answers the next call. */
 bool menu_pane_take_screen(void);
+/* The pane's backdrop mirrored across a whole screen-sized buffer, the
+ * first frame of Now Playing entered from a split menu. */
+void menu_pane_backdrop(fb_data *buffer);
 /* Cast the rows' shadow on columns `edge` onwards of a framebuffer row,
  * stopping short of `limit`. */
 void menu_pane_shadow(fb_data *row, int edge, int limit);

@@ -15,8 +15,9 @@ struct ui_scene {
     unsigned trace, dim_color, push_half_frames;
     bool target_front, capturing, automatic, vertical, root_entry;
     bool staggered, rows_changed, reuse_target, slide;
-    /* A split menu on each surface, and a root page without menu chrome. */
-    bool back_split, front_split, full_screen;
+    /* A split menu on each surface, a root page without menu chrome, and
+     * an outgoing page that stays still under the incoming one. */
+    bool back_split, front_split, full_screen, back_still;
 };
 
 /* The UI thread owns a scene from capture through the end of its transition.

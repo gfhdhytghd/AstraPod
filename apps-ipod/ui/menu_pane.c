@@ -359,32 +359,45 @@ static uint32_t mix_rgb(uint32_t a, uint32_t b, int num, int den)
     return out;
 }
 
+/* `count` pixels of backdrop row `y` from pane column `column`, stepping
+ * `dir` columns a pixel. */
+static void backdrop_row(fb_data *out, int y, int column, int count, int dir)
+{
+    int band = MIN(y / 20, (int)ARRAYLEN(backdrop_left) - 2);
+    int part = y - band * 20;
+    uint32_t left = mix_rgb(backdrop_left[band], backdrop_left[band + 1],
+                            part, 20);
+    uint32_t right = mix_rgb(backdrop_right[band], backdrop_right[band + 1],
+                             part, 20);
+    /* 16.16 channels stepped across the row. */
+    int32_t c[3], step[3];
+    for (int i = 0; i < 3; i++)
+    {
+        int l = (left >> (16 - 8 * i)) & 255;
+        int r = (right >> (16 - 8 * i)) & 255;
+        step[i] = ((r - l) << 16) / (PANE_W - 1) * dir;
+        c[i] = (l << 16) + step[i] * column * dir;
+    }
+    for (int x = 0; x < count; x++)
+    {
+        *out++ = FB_RGBPACK(c[0] >> 16, c[1] >> 16, c[2] >> 16);
+        for (int i = 0; i < 3; i++)
+            c[i] += step[i];
+    }
+}
+
 static void paint_backdrop(struct ui_rect clip)
 {
     for (int y = clip.y; y < clip.y + clip.height; y++)
+        backdrop_row(fb_at(clip.x, y), y, clip.x - MENU_PANE_X, clip.width, 1);
+}
+
+void menu_pane_backdrop(fb_data *buffer)
+{
+    for (int y = 0; y < LCD_HEIGHT; y++, buffer += LCD_WIDTH)
     {
-        int band = MIN(y / 20, (int)ARRAYLEN(backdrop_left) - 2);
-        int part = y - band * 20;
-        uint32_t left = mix_rgb(backdrop_left[band], backdrop_left[band + 1],
-                                part, 20);
-        uint32_t right = mix_rgb(backdrop_right[band],
-                                 backdrop_right[band + 1], part, 20);
-        /* 16.16 channels stepped across the row. */
-        int32_t c[3], step[3];
-        for (int i = 0; i < 3; i++)
-        {
-            int l = (left >> (16 - 8 * i)) & 255;
-            int r = (right >> (16 - 8 * i)) & 255;
-            step[i] = ((r - l) << 16) / (PANE_W - 1);
-            c[i] = (l << 16) + step[i] * (clip.x - MENU_PANE_X);
-        }
-        fb_data *out = fb_at(clip.x, y);
-        for (int x = 0; x < clip.width; x++)
-        {
-            *out++ = FB_RGBPACK(c[0] >> 16, c[1] >> 16, c[2] >> 16);
-            for (int i = 0; i < 3; i++)
-                c[i] += step[i];
-        }
+        backdrop_row(buffer, y, MENU_PANE_X - 1, MENU_PANE_X, -1);
+        backdrop_row(buffer + MENU_PANE_X, y, 0, PANE_W, 1);
     }
 }
 
@@ -680,8 +693,9 @@ static void paint_device(struct ui_rect clip, const struct menu_pane_content *c)
     unsigned long long kib = (unsigned long long)free;
     bool gib = kib >= 1024ull * 1024;
     unsigned long long unit = gib ? 1024ull * 1024 : 1024;
-    snprintf(text, sizeof(text), "%s %llu.%llu %s", str(LANG_DISK_FREE_INFO),
-             kib / unit, kib * 10 / unit % 10, gib ? "GB" : "MB");
+    snprintf(text, sizeof(text), "%s %u.%u %s", str(LANG_DISK_FREE_INFO),
+             (unsigned)(kib / unit), (unsigned)(kib * 10 / unit % 10),
+             gib ? "GB" : "MB");
     pane_line(clip, text, fonts.title, 212);
 }
 

@@ -148,7 +148,8 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
         const fb_data *l = left + i, *r = right + i;
         if (scene->full_screen)
         {
-            put_span(row, l, p - LCD_WIDTH, LCD_WIDTH, 0, LCD_WIDTH);
+            put_span(row, l, scene->back_still ? 0 : p - LCD_WIDTH, LCD_WIDTH,
+                     0, LCD_WIDTH);
             put_span(row, r, p, LCD_WIDTH, 0, LCD_WIDTH);
         }
         else if (both)
@@ -554,7 +555,7 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     scene->target_front = push;
     scene->pan_top = pan_top;
     scene->slide = slide;
-    scene->full_screen = false;
+    scene->full_screen = scene->back_still = false;
     scene->staggered = staggered;
     scene->reuse_target = reverse_pan;
     scene->row_y = scene->row_count = 0;
@@ -606,6 +607,15 @@ void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bo
         if (full_screen && scene->slide)
             scene->tween.easing = UI_EASE_LINEAR;
         scene->full_screen = full_screen;
+        /* Now Playing slides in over the pane's backdrop, spread across the
+         * screen in place of the menu. */
+        if (full_screen && push && scene->slide && scene->back_split)
+        {
+            fb_data *data = core_get_data_pinned(scene->handle);
+            menu_pane_backdrop(surface(data, false));
+            core_put_data_pinned(data);
+            scene->back_still = true;
+        }
     }
 }
 

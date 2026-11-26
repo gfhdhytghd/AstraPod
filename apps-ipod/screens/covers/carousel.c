@@ -6692,6 +6692,10 @@ static struct {
     uint32_t return_start;
     /* When the turn left Cover Flow mid-way, its next frame's deadline. */
     uint32_t resume_us;
+    /* Under the stock look, the frame Now Playing's chrome fades in over,
+     * or that chrome and its mask as it fades out; and the status bar
+     * Cover Flow showed, which the turn back fades to. */
+    int chrome, bar;
     pix_t bg;
     bool pending, from_panel, returning;
 } playback_scene;
@@ -6708,6 +6712,8 @@ static void release_playback_scene(void)
     for (int i = 0; i < playback_scene.count; i++)
         drop_playback_bitmap(&playback_scene.wall[i].handle);
     drop_playback_bitmap(&playback_scene.art.handle);
+    drop_playback_bitmap(&playback_scene.chrome);
+    drop_playback_bitmap(&playback_scene.bar);
     memset(&playback_scene, 0, sizeof(playback_scene));
 }
 
@@ -6879,6 +6885,118 @@ static void paint_playback_row(struct stock_flow *walls, struct stock_pose centr
         paint_playback_cover(centre, playback_scene.album);
 }
 
+/* Under the stock look Now Playing's status bar, text and controls fade in
+ * over the turn to it and out over the turn back, in no fewer refreshes
+ * than this; the cover turns as it does without them. */
+#define CHROME_FADE_FRAMES 10
+#define CHROME_FRAME (LCD_WIDTH * LCD_HEIGHT)
+
+/* `weight` 32nds of the way from `from` to `to`. */
+static inline pix_t chrome_blend(pix_t to, pix_t from, unsigned weight)
+{
+    const uint32_t mask = 0x07e0f81f;
+    uint32_t f = (to | ((uint32_t)to << 16)) & mask;
+    uint32_t b = (from | ((uint32_t)from << 16)) & mask;
+    uint32_t c = (b + (((f - b) * weight) >> 5)) & mask;
+    return c | (c >> 16);
+}
+
+/* How far in, of 32, a fade begun at `start` and lasting `length` is. */
+static unsigned chrome_weight(uint32_t now, uint32_t start, uint32_t length)
+{
+    return MIN(32u, (now - start) * 32 / MAX(length, 1u));
+}
+
+/* Keep the status bar the turn to Now Playing leaves, for the turn back
+ * too, and room for the frame the chrome is composed over. */
+static bool chrome_fade_open(void)
+{
+    size_t rows = pf_chrome_h * LCD_WIDTH;
+    playback_scene.bar = core_alloc_free_space(rows * sizeof(pix_t));
+    playback_scene.chrome = core_alloc_free_space(CHROME_FRAME * sizeof(pix_t));
+    if (playback_scene.bar <= 0 || playback_scene.chrome <= 0)
+    {
+        drop_playback_bitmap(&playback_scene.bar);
+        drop_playback_bitmap(&playback_scene.chrome);
+        return false;
+    }
+    pix_t *bar = core_get_data_pinned(playback_scene.bar);
+    memcpy(bar, LCD_BUF, rows * sizeof(pix_t));
+    core_put_data_pinned(bar);
+    return true;
+}
+
+/* Put back the status bar Cover Flow showed, or the background if none
+ * was kept. */
+static void chrome_restore_bar(void)
+{
+    size_t rows = pf_chrome_h * LCD_WIDTH;
+    if (playback_scene.bar <= 0)
+    {
+        memset16(LCD_BUF, playback_scene.bg, rows);
+        return;
+    }
+    const pix_t *bar = core_get_data_pinned(playback_scene.bar);
+    memcpy(LCD_BUF, bar, rows * sizeof(pix_t));
+    core_put_data_pinned((void *)bar);
+}
+
+/* Now Playing's chrome over the turn's frame, `weight` 32nds of the way in
+ * from the status bar the turn left. */
+static void chrome_fade_in(unsigned weight)
+{
+    pix_t *under = core_get_data_pinned(playback_scene.chrome);
+    chrome_restore_bar();
+    memcpy(under, LCD_BUF, CHROME_FRAME * sizeof(pix_t));
+    native_wps_paint_chrome();
+    for (int i = 0; i < CHROME_FRAME; i++)
+        if (LCD_BUF[i] != under[i])
+            LCD_BUF[i] = chrome_blend(LCD_BUF[i], under[i], weight);
+    core_put_data_pinned(under);
+}
+
+/* Keep the page's chrome drawn over its background alone, and which of its
+ * pixels differ from that background. The screen is left as it was. */
+static bool chrome_fade_capture(void)
+{
+    int handle = core_alloc_free_space(CHROME_FRAME * sizeof(pix_t) +
+                                       CHROME_FRAME / 8);
+    if (handle <= 0)
+        return false;
+    pix_t *chrome = core_get_data_pinned(handle);
+    uint8_t *mask = (uint8_t *)(chrome + CHROME_FRAME);
+    memcpy(chrome, LCD_BUF, CHROME_FRAME * sizeof(pix_t));
+    memset16(LCD_BUF, playback_scene.bg, CHROME_FRAME);
+    native_wps_paint_chrome();
+    memset(mask, 0, CHROME_FRAME / 8);
+    for (int i = 0; i < CHROME_FRAME; i++)
+    {
+        pix_t drawn = LCD_BUF[i];
+        LCD_BUF[i] = chrome[i];
+        chrome[i] = drawn;
+        if (drawn != playback_scene.bg)
+            mask[i >> 3] |= 1 << (i & 7);
+    }
+    core_put_data_pinned(chrome);
+    playback_scene.chrome = handle;
+    return true;
+}
+
+/* The page's chrome over the turn back's frame, `weight` 32nds of it left,
+ * over the status bar Cover Flow showed. */
+static void chrome_fade_out(unsigned weight)
+{
+    chrome_restore_bar();
+    if (!weight)
+        return;
+    const pix_t *chrome = core_get_data_pinned(playback_scene.chrome);
+    const uint8_t *mask = (const uint8_t *)(chrome + CHROME_FRAME);
+    for (int i = 0; i < CHROME_FRAME; i++)
+        if (mask[i >> 3] & (1 << (i & 7)))
+            LCD_BUF[i] = chrome_blend(chrome[i], LCD_BUF[i], weight);
+    core_put_data_pinned((void *)chrome);
+}
+
 /* The WPS moves one screen width over the stationary landing. */
 static void slide_playback_controls(const struct wps_state *incoming, uint32_t start)
 {
@@ -6922,7 +7040,9 @@ void carousel_wps_capture_return(uint32_t action_us)
     /* The uncovered cover is the return turn's first frame. */
     if (turned && playback_scene.art.handle > 0)
         native_wps_set_landing(paint_return_landing);
-    if (pf_motion_scale)
+    bool fade = stock_look() && pf_motion_scale && lcd_active() &&
+                native_wps_active() && chrome_fade_capture();
+    if (pf_motion_scale && !fade)
         slide_playback_controls(NULL, action_us);
     playback_scene.return_start = USEC_TIMER;
     if (!turned && pf_motion_scale && lcd_active())
@@ -6942,11 +7062,16 @@ static struct stock_flip playback_turn(void)
 void carousel_wps_present(const struct wps_state *state)
 {
     playback_scene.pending = false;
+    bool fade = stock_look() && pf_motion_scale && lcd_active() &&
+                chrome_fade_open();
     native_wps_paint_handoff(state, &playback_scene.source);
     const char *bitmap_state = native_wps_has_art() ? "ready" : "not-painted";
     char route = playback_scene.from_panel ? 'C' : 'D';
     if (!lcd_active())
+    {
+        drop_playback_bitmap(&playback_scene.chrome);
         return;
+    }
     /* The stock look's turn resumes where it left Cover Flow: the time
      * Now Playing took to set up passes with the turn held. */
     if (playback_scene.resume_us && stock_look())
@@ -6962,6 +7087,10 @@ void carousel_wps_present(const struct wps_state *state)
     uint32_t blend_start = 0, blend_us = 0;
     const char *reason = playback_scene.slot.width ? "configured-slot" :
                                                      "theme-no-art-slot";
+    uint32_t turn_us = flip.delay + flip.duration;
+    uint32_t fade_us = MAX(turn_us - MIN(now - start, turn_us),
+                           CHROME_FADE_FRAMES * ui_frame_period());
+    uint32_t fade_start = now;
     cpu_boost(true);
     for (;;)
     {
@@ -6990,6 +7119,12 @@ void carousel_wps_present(const struct wps_state *state)
         paint_playback_row(&playback_scene.walls, stock_flip_pose(&flip, now), now);
         bool landed = stock_flip_done(&flip, now) &&
                       (!blend_us || now - blend_start >= blend_us);
+        if (fade && native_wps_active())
+        {
+            unsigned weight = chrome_weight(now, fade_start, fade_us);
+            chrome_fade_in(weight);
+            landed = landed && weight == 32;
+        }
         lcd_update();
         if (landed || !lcd_active())
             break;
@@ -7001,8 +7136,16 @@ void carousel_wps_present(const struct wps_state *state)
         uint32_t landed_at = USEC_TIMER;
         if (playback_cover(playback_scene.album))
             native_wps_set_landing(paint_playback_landing);
-        slide_playback_controls(state, landed_at);
+        if (fade)
+        {
+            native_wps_pick_up_art();
+            native_wps_render(state, false);
+            lcd_update();
+        }
+        else
+            slide_playback_controls(state, landed_at);
     }
+    drop_playback_bitmap(&playback_scene.chrome);
     cpu_boost(false);
     ui_perf_wps_target(route, &playback_scene.slot, reason, bitmap_state);
 }
@@ -7021,6 +7164,18 @@ static void refresh_return_panel(void)
     prepare_stock_back();
     font_prefetch_end();
     panel.blur_generation = album_blur_generation();
+}
+
+/* A new key ends the turn back; the release of the one that began it
+ * does not. */
+static bool return_interrupted(void)
+{
+#if (defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))) \
+    && !defined(BOOTLOADER)
+    return button_queue_wait_pending(TIMEOUT_NOBLOCK);
+#else
+    return !button_queue_empty();
+#endif
 }
 
 static void return_from_playback(void)
@@ -7050,11 +7205,16 @@ static void return_from_playback(void)
         flip.start = playback_scene.playing;
     }
     show_carousel_entry();
+    uint32_t fade_us = MAX(flip.delay + flip.duration,
+                           CHROME_FADE_FRAMES * ui_frame_period());
     if (pf_motion_scale && lcd_active() && flow_row.count)
     {
         for (;;)
         {
             bool landed = stock_flip_done(&flip, now) && !stock_animating(&flow_row, now);
+            unsigned weight = playback_scene.chrome > 0 ?
+                              32 - chrome_weight(now, start, fade_us) : 0;
+            landed = landed && !weight;
             struct stock_pose current = stock_flip_pose(&flip, now);
             if (to_panel && stock_back_face(current) &&
                 (!panel.back_ready || (!panel.have_blur &&
@@ -7075,6 +7235,8 @@ static void return_from_playback(void)
                 if (!to_panel)
                     model->draw_text();
             }
+            if (playback_scene.chrome > 0)
+                chrome_fade_out(weight);
             if (landed)
             {
                 lcd_update();
@@ -7083,7 +7245,7 @@ static void return_from_playback(void)
             lcd_update();
             ui_clock_sleep(ui_clock_wait_until(flow_pace_next(&flow_pace, start)));
             now = USEC_TIMER;
-            if (!lcd_active() || !button_queue_empty())
+            if (!lcd_active() || return_interrupted())
                 break;
         }
     }

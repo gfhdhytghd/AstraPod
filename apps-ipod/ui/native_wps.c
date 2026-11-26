@@ -1025,6 +1025,22 @@ void native_wps_paint_slide(int hidden, fb_data base)
     root->ops = &background_ops;
 }
 
+void native_wps_paint_chrome(void)
+{
+    if (!active || rock_ui_raw())
+        return;
+    struct ui_view *root = &wps->view[WPS_ROOT];
+    struct ui_view *cover = &wps->view[WPS_COVER];
+    const struct ui_view_ops *root_paint = root->ops;
+    const struct ui_view_ops *cover_paint = cover->ops;
+    root->ops = NULL;
+    cover->ops = NULL;
+    ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
+    ui_page_paint(&wps->page);
+    cover->ops = cover_paint;
+    root->ops = root_paint;
+}
+
 static void label_set(struct wps_label *label, int font, char *text, size_t capacity)
 {
     *label = (struct wps_label) { .font = font, .text = text, .capacity = capacity };

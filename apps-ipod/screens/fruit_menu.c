@@ -29,10 +29,11 @@
 #include "widgets/splash.h"
 #include "root_menu.h"
 #include "database/tagcache.h"
+#include "screens/browse/app_list.h"
 #include "screens/browse/browser_db.h"
 #include "screens/settings/exported_settings.h"
 #include "screens/settings/sound_settings.h"
-#include "screens/system/about.h"
+#include "screens/system/fruit_about.h"
 #include "widgets/option_select.h"
 #include "system/volume.h"
 #include "screens/settings/eq_editor.h"
@@ -101,7 +102,22 @@ static int photos(void)       { return run(GO_TO_IMAGES); }
 static int podcasts(void)     { return run(GO_TO_PODCASTS); }
 static int now_playing(void)  { return run(GO_TO_WPS); }
 static int notes(void)        { return run(GO_TO_DOCUMENTS); }
-static int games(void)        { return run(GO_TO_BROWSEPLUGINS); }
+static int movies(void)       { return run(GO_TO_VIDEOS); }
+
+/* Music Quiz is a screen of the main menu's, not a plugin: the list leaves
+ * for it, and comes back once it is done */
+static int app_list(enum app_list_kind kind)
+{
+    int ret;
+    while ((ret = app_list_screen(kind)) == GO_TO_MUSIC_QUIZ)
+        if ((ret = run(GO_TO_MUSIC_QUIZ)))
+            return ret;
+    return ret == GO_TO_PREVIOUS || ret == GO_TO_ROOT ? 0 : ret;
+}
+
+static int games(void)        { return app_list(APP_LIST_GAMES); }
+static int other_apps(void)   { return app_list(APP_LIST_OTHER); }
+static int demos(void)        { return app_list(APP_LIST_DEMOS); }
 static int files(void)        { return run(GO_TO_FILEBROWSER); }
 static int playback_report(void) { return run(GO_TO_SPUN); }
 
@@ -248,7 +264,7 @@ MENU(music_menu_fruit, LANG_MUSIC_BROWSER, home_callback, music_rows);
 
 /** Videos **/
 
-ROW(movies_row, LANG_FRUIT_MOVIES, empty, NULL);
+ROW(movies_row, LANG_FRUIT_MOVIES, movies, NULL);
 ROW(rentals_row, LANG_FRUIT_RENTALS, empty, NULL);
 ROW(tv_shows_row, LANG_FRUIT_TV_SHOWS, empty, NULL);
 ROW(music_videos_row, LANG_FRUIT_MUSIC_VIDEOS, empty, NULL);
@@ -291,6 +307,8 @@ ROW(extras_games_row, LANG_PLUGIN_GAMES, games, NULL);
 ROW(extras_notes_row, LANG_FRUIT_NOTES, notes, NULL);
 ROW(extras_screen_lock_row, LANG_FRUIT_SCREEN_LOCK, extras_screen_lock, NULL);
 ROW(extras_stopwatch_row, LANG_FRUIT_STOPWATCH, extras_stopwatch, NULL);
+ROW(extras_other_apps_row, LANG_APP_LIST_OTHER, other_apps, NULL);
+ROW(extras_demos_row, LANG_PLUGIN_DEMOS, demos, NULL);
 ROW(extras_files_row, LANG_DIR_BROWSER, files, NULL);
 
 /* Not static in main_menu.c: AstraPod's System menu */
@@ -300,7 +318,8 @@ extern const struct menu_item_ex info_menu;
 static const struct menu_item_ex *const extras_rows[] = {
     &extras_clocks_row, &extras_calendars_row, &extras_contacts_row,
     &extras_alarms_row, &extras_games_row, &extras_notes_row,
-    &extras_screen_lock_row, &extras_stopwatch_row, &extras_files_row, &info_menu,
+    &extras_screen_lock_row, &extras_stopwatch_row, &extras_other_apps_row,
+    &extras_demos_row, &extras_files_row, &info_menu,
 };
 
 MENU(extras_menu, LANG_FRUIT_EXTRAS, home_callback, extras_rows);
@@ -309,7 +328,8 @@ MENU(extras_menu, LANG_FRUIT_EXTRAS, home_callback, extras_rows);
 
 static int show_about(void)
 {
-    return about_screen() ? MENU_ATTACHED_USB : 0;
+    int ret = fruit_about_screen();
+    return ret == GO_TO_ROOT ? MENU_ATTACHED_USB : ret;
 }
 
 static int volume_limit(void)
@@ -566,7 +586,7 @@ ROW(home_genres, LANG_FRUIT_GENRES, genres, home_callback);
 ROW(home_composers, LANG_FRUIT_COMPOSERS, composers, home_callback);
 ROW(home_audiobooks, LANG_AUDIOBOOKS, audiobooks, home_callback);
 ROW(home_search, LANG_SEARCH, search, home_callback);
-ROW(home_movies, LANG_FRUIT_MOVIES, empty, home_callback);
+ROW(home_movies, LANG_FRUIT_MOVIES, movies, home_callback);
 ROW(home_rentals, LANG_FRUIT_RENTALS, empty, home_callback);
 ROW(home_tv_shows, LANG_FRUIT_TV_SHOWS, empty, home_callback);
 ROW(home_music_videos, LANG_FRUIT_MUSIC_VIDEOS, empty, home_callback);
@@ -671,7 +691,7 @@ enum list_pane_kind fruit_menu_item_pane(const struct menu_item_ex *menu,
         bit = bit_of(music_bits, ARRAYLEN(music_bits), item) >= 0 ?
               HOME_COVER_FLOW : -1;
     if (menu == &videos_menu || (bit >= HOME_VIDEOS && bit <= HOME_RENTALS))
-        bit = HOME_PHOTOS;
+        bit = HOME_VIDEOS;
     if (menu == &photos_menu)
         bit = HOME_PHOTOS;
     if (menu == &extras_menu)
@@ -690,6 +710,8 @@ enum list_pane_kind fruit_menu_item_pane(const struct menu_item_ex *menu,
         return LIST_PANE_SHUFFLE;
     else if (item == &home_now_playing)
         return LIST_PANE_PLAYING;
+    else if (bit == HOME_VIDEOS)
+        *art = STOCK_ART_NO_CONTENT_MOVIES_PREVIEW;
     else if (bit == HOME_PHOTOS)
         *art = STOCK_ART_NO_CONTENT_PHOTO_PREVIEW;
     else if (bit == HOME_PODCASTS)

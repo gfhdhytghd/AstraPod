@@ -138,14 +138,14 @@ static void read_identity(struct about_info *info)
 
 static void read_info(struct about_info *info)
 {
-    int docs;
     memset(info, 0, sizeof(*info));
     sector_t total = 0, free = 0;
     volume_size(IF_MV(0,) &total, &free);
     info->total_kib = total;
     info->free_kib = free;
     count_library(info);
-    file_index_counts(&docs, &info->photos);
+    info->photos = file_index_count(FLAT_IMAGES);
+    info->videos = file_index_count(FLAT_VIDEOS);
     read_identity(info);
     /* "AstraPod Beta 0.2.0 (ae20a40148)" leaves no room for its column:
      * the name is in the title and the commit is in the other About, so

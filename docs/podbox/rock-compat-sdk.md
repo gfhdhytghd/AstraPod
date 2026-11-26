@@ -89,6 +89,9 @@ access to GitHub. Saves are `mochipod-*` files in the games data folder. See
 the [MochiPod README](https://github.com/colliderkkz/mochipod) for its
 controls.
 
+AstraPod answers **Save and exit?** with the buttons instead of the wheel:
+press Select to save and quit, or Menu to keep playing.
+
 ## App reminders and tray icons
 
 The tray shows passive reminders wherever a native status bar is visible.

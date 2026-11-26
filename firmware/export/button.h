@@ -104,6 +104,13 @@ int wheel_status(void);
 void wheel_send_events(bool send);
 #endif
 
+#if defined(IPOD_6G) && (CONFIG_PLATFORM & PLATFORM_NATIVE) && !defined(BOOTLOADER)
+#define HAVE_WHEEL_DETENT_MODE
+void wheel_set_detent_mode(bool enabled);
+#else
+static inline void wheel_set_detent_mode(bool enabled) { (void)enabled; }
+#endif
+
 #ifdef HAVE_WHEEL_ACCELERATION
 int button_apply_acceleration(const unsigned int data);
 #endif

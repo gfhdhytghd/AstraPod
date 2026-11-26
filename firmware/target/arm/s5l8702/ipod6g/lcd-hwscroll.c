@@ -140,17 +140,16 @@ static void send_frame(void)
         next->height >> 8, next->height & 0xff, 0, 0,
     };
     uint8_t line[] = { start >> 8, start & 0xff };
-    /* A command that finds the bus still draining sends nothing. */
-    bool sent = batch.redefine ?
-        lcd_hwscroll_send_until(DCS_SCROLL_AREA, area, sizeof(area), until) :
-        lcd_hwscroll_send_until(DCS_SCROLL_START, line, sizeof(line), until);
-    if (!sent)
+    /* Retry the first unfinished command before publishing the row map. */
+    if (batch.redefine)
+        batch.redefine = !lcd_hwscroll_send_until(DCS_SCROLL_AREA, area,
+                                                   sizeof(area), until);
+    if (batch.redefine ||
+        !lcd_hwscroll_send_until(DCS_SCROLL_START, line, sizeof(line), until))
     {
         lcd_te_timer_arm(USEC_TIMER + RETRY_US);
         return;
     }
-    if (batch.redefine)
-        lcd_hwscroll_send_until(DCS_SCROLL_START, line, sizeof(line), until);
 
     ring = *next;
     batch.state = BATCH_SENDING;

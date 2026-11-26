@@ -2,6 +2,8 @@
  * then paint the same projected columns and RGB565 samples as the player. */
 #include "../carousel.c"
 
+struct user_settings global_settings;
+
 enum { FIXTURE_ALBUMS = 24, TEX_SIZE = 128 };
 static struct fixture_album {
     int offset;
@@ -53,18 +55,24 @@ bool replay_pixels(struct stock_visible *visible, int n, uint8_t *rgb)
     }
     for (int x = 0; x < LCD_WIDTH; x++)
         flow_draw_column(x, 0, LCD_HEIGHT, &frame[0][x], LCD_WIDTH, NULL);
-    /* Compare the clipped spans with drawing every complete face in order. */
+    /* Independently select the closest face on each ray in steady scroll. */
     static pix_t whole[LCD_HEIGHT][LCD_WIDTH];
     memset(whole, 255, sizeof(whole));
-    for (int i = 0; i < n; i++) {
-        const struct flow_face *f = &flow_faces[i];
-        for (int x = f->first; x < f->end; x++) {
+    for (int x = 0; x < LCD_WIDTH; x++) {
+        struct flow_column nearest = {0};
+        for (int i = 0; i < n; i++) {
+            const struct flow_face *f = &flow_faces[i];
+            if (x < f->first || x >= f->end)
+                continue;
             int t = f->t0 + (x - f->first) * f->dt;
             int h = f->start_height + ((int64_t)(f->end_height - f->start_height) * t >> 30);
-            int y = f->top + ((int64_t)f->top_delta * t >> 30);
-            struct flow_column col = { y, h, t, f };
-            flow_draw_span(&col, 0, LCD_HEIGHT, &whole[0][x], LCD_WIDTH, NULL);
+            if (h >= nearest.height) {
+                int y = f->top + ((int64_t)f->top_delta * t >> 30);
+                nearest = (struct flow_column){ y, h, t, f };
+            }
         }
+        if (nearest.height)
+            flow_draw_span(&nearest, 0, LCD_HEIGHT, &whole[0][x], LCD_WIDTH, NULL);
     }
     for (int y = 0; y < LCD_HEIGHT; y++)
         for (int x = 0; x < LCD_WIDTH; x++) {

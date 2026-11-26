@@ -395,6 +395,10 @@ static void displaylcd_setup(int x, int y, int width, int height)
     int xe = (x + width) - 1;           /* max horiz */
     int ye = (y + height) - 1;          /* max vert */
 
+#ifdef HAVE_LCD_TE_QUEUE
+    if (lcd_hwscroll_offset())
+        lcd_hwscroll_reset();
+#endif
     s5l_lcd_set_command_mode();
 
 #ifdef S5L_LCD_WITH_CMDSET16
@@ -450,13 +454,13 @@ static bool lcd_bus_idle(void)
 }
 
 /* Type 1 uses DCS commands. Never spin indefinitely in the timer IRQ. */
-static bool displaylcd_try_setup(int offset, int rows, uint32_t until)
+static bool displaylcd_try_setup(int x, int y, int width, int rows,
+                                 uint32_t until)
 {
     if (!lcd_bus_idle())
         return false;
 
-    int x = pending_rect.x, y = pending_rect.y + offset;
-    int xe = x + pending_rect.width - 1;
+    int xe = x + width - 1;
     int ye = y + rows - 1;
     const uint8_t seq[] = {
         R_COLUMN_ADDR_SET, x >> 8, x, xe >> 8, xe,
@@ -484,14 +488,17 @@ static bool displaylcd_try_setup(int offset, int rows, uint32_t until)
     return true;
 }
 
-bool lcd_te_start_dma(int offset, int rows, bool timed,
-                      uint32_t deadline, uint32_t *started)
+int lcd_te_start_dma(int offset, int rows, bool timed,
+                     uint32_t deadline, uint32_t *started)
 {
     uint32_t until = USEC_TIMER + 100;
     if (timed && TIME_BEFORE(deadline, until))
         until = deadline;
-    if (!displaylcd_try_setup(offset, rows, until))
-        return false;
+    int y = pending_rect.y + offset;
+    rows = lcd_hwscroll_run(y, rows);
+    if (!displaylcd_try_setup(pending_rect.x, lcd_hwscroll_map(y),
+                              pending_rect.width, rows, until))
+        return 0;
 
     int width = pending_rect.width;
     uint16_t *src = pending_rect.pixels + offset * width;
@@ -502,11 +509,29 @@ bool lcd_te_start_dma(int offset, int rows, bool timed,
     {
         if (!dmac_ch_queue_until(&lcd_dma_ch, src, dst,
                                  bytes, data, deadline))
-            return false;
+            return 0;
     }
     else
         dmac_ch_queue(&lcd_dma_ch, src, dst, bytes, data);
     *started = lcd_dma_start_usec;
+    semaphore_release(&lcd_progress);
+    return rows;
+}
+
+bool lcd_hwscroll_start_dma(const uint16_t *pixels, int x, int y,
+                            int width, int rows)
+{
+    uint32_t until = USEC_TIMER + 100;
+    while (!lcd_bus_idle())
+        if (!TIME_BEFORE(USEC_TIMER, until))
+            return false;
+    if (!displaylcd_try_setup(x, y, width, rows, until))
+        return false;
+
+    void *data = (void *)(uintptr_t)((unsigned int)rows << 16 | width);
+    dmac_ch_queue(&lcd_dma_ch, (void *)pixels,
+                  (void *)S5L8702_DADDR_PERI_LCD_WR,
+                  width * rows * sizeof(uint16_t), data);
     semaphore_release(&lcd_progress);
     return true;
 }
@@ -625,7 +650,12 @@ void lcd_te_release_bus(void)
 
 bool lcd_hwscroll_send(uint8_t cmd, const uint8_t *data, unsigned int size)
 {
-    uint32_t deadline = USEC_TIMER + 5000;
+    return lcd_hwscroll_send_until(cmd, data, size, USEC_TIMER + 5000);
+}
+
+bool lcd_hwscroll_send_until(uint8_t cmd, const uint8_t *data,
+                             unsigned int size, uint32_t deadline)
+{
     while (!lcd_bus_idle())
         if (!TIME_BEFORE(USEC_TIMER, deadline))
             return false;
@@ -656,6 +686,37 @@ bool lcd_stock_set(unsigned int mask, struct lcd_stock_readback *readback)
         lcd_stock_reconfigure(mask, readback, &lcd_cmd_mode, &lcd_frame_mode);
     lcd_te_release_bus();
     return idle;
+}
+
+uint16_t *lcd_hwscroll_stage(void)
+{
+    if (!lcd_te_supported() || !is_thread_context() || !irq_enabled() ||
+        lcd_updates_held())
+        return NULL;
+
+    mutex_lock(&lcd_mutex);
+    if (lcd_ispowered)
+        return displaylcd_stage();
+    mutex_unlock(&lcd_mutex);
+    return NULL;
+}
+
+void lcd_hwscroll_staged(int y, int height, bool queued)
+{
+    if (queued)
+    {
+#if defined(HAVE_COMPOSITE_VIDEO_OUT) && !defined(BOOTLOADER)
+        videoout_mirror_rgb565(FBADDR(0, y), 0, y, LCD_WIDTH, height,
+                               LCD_WIDTH);
+#endif
+#ifdef HAVE_PODLINK_PLUGIN_TEST
+        podlink_plugin_test_lcd_present(FBADDR(0, y), 0, y, LCD_WIDTH,
+                                        height);
+#endif
+        if (!lcd_te_async_enabled())
+            displaylcd_wait_dma();
+    }
+    mutex_unlock(&lcd_mutex);
 }
 
 void lcd_experiment_present(int y, int height,
@@ -962,6 +1023,9 @@ static void lcd_powersave(void)
     lcd_target_enable_clocks(false);
 
     lcd_ispowered = false;
+#ifdef HAVE_LCD_TE_QUEUE
+    lcd_hwscroll_forget();
+#endif
 
     mutex_unlock(&lcd_mutex);
 }
@@ -1000,6 +1064,7 @@ void lcd_awake(void)
     lcd_ispowered = true;       // XXX: we have to put the lcd_ispowered before the lcd_update()
 
 #ifdef HAVE_LCD_TE_QUEUE
+    lcd_hwscroll_reset();
     lcd_te_probe();
 #endif
 
@@ -1080,6 +1145,7 @@ void lcd_init_device(void)
 
     lcd_ispowered = true;
 #ifdef HAVE_LCD_TE_QUEUE
+    lcd_hwscroll_reset();
     lcd_te_probe();
 #endif
 #ifdef HAVE_PODLINK_PLUGIN_TEST

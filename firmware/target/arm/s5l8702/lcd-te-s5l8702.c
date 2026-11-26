@@ -3,6 +3,7 @@
 #include "kernel.h"
 #include "lcd.h"
 #include "lcd-experiment-s5l8702.h"
+#include "lcd-hwscroll.h"
 #include "lcd-s5l8702.h"
 #include "lcd-te-s5l8702.h"
 #include "system.h"
@@ -30,10 +31,6 @@
 #define TE_LOST_PERIODS   3u
 #define TE_NOMINAL_US     14933u
 #define TE_NOMINAL_HIGH_US 1100u
-
-/* Include bus and FIFO time around the measured 23.47 ms at 0x33. */
-#define FULL_DMA_FAST_US  22000
-#define FULL_DMA_SLOW_US  25500
 
 enum { GPIO_PORTS = 16, STATUS = GPIO_PORTS, INTCON, IRQ_RAW, SOURCE_COUNT };
 
@@ -346,7 +343,7 @@ static void te_irq_edge(enum lcd_te_irq_mode mode, uint32_t now)
     last_rise = mode == LCD_TE_IRQ_RISE ? now :
                 now - (pulse.valid ? pulse.high : TE_NOMINAL_HIGH_US);
     last_rise_tick = current_tick;
-    if (pending && want_sync)
+    if ((pending || lcd_hwscroll_pending()) && want_sync)
         timer_arm(now, now + 1);
 }
 
@@ -543,6 +540,8 @@ void lcd_te_dma_done(unsigned int width, unsigned int height, uint32_t usec)
     stats->width = width;
     stats->height = height;
     stats->samples++;
+    if (lcd_hwscroll_dma_done())
+        return;
     if (pending)
         schedule();
 }
@@ -692,7 +691,8 @@ static void start_irq_slot(uint32_t now)
     uint32_t started, deadline = now + START_BUDGET_US;
     if (TIME_BEFORE(slot.close, deadline))
         deadline = slot.close;
-    if (!lcd_te_start_dma(rows_done, rows, true, deadline, &started))
+    rows = lcd_te_start_dma(rows_done, rows, true, deadline, &started);
+    if (!rows)
     {
         lcd_experiment_irq_retry();
         mark_deferred();
@@ -761,6 +761,11 @@ void INT_TIMERH(void)
 {
     timer_stop();
     uint32_t now = USEC_TIMER;
+    if (lcd_hwscroll_pending())
+    {
+        lcd_hwscroll_timer(now);
+        return;
+    }
     if (!pending)
         return;
 
@@ -794,8 +799,10 @@ void INT_TIMERH(void)
         if (timed && next_window(now, &open, &close, &origin, &rows))
             start = !TIME_BEFORE(now, open);
 
-        if (start && lcd_te_start_dma(rows_done, rows, timed,
-                                      timed ? close : 0, &started))
+        if (start)
+            rows = lcd_te_start_dma(rows_done, rows, timed,
+                                    timed ? close : 0, &started);
+        if (start && rows)
         {
             start_complete(rows, started);
             if (timed)
@@ -852,6 +859,7 @@ void lcd_te_submit(int y, int width, int height, uint32_t copy)
         irq_deadline = now + TE_LOST_PERIODS * TE_MAX_US;
     last_copy = copy;
     copy_owner = thread_self();
+    lcd_hwscroll_queued(y, height);
     occupancy = (FULL_DMA_SLOW_US * width * height +
                  LCD_WIDTH * LCD_HEIGHT - 1) / (LCD_WIDTH * LCD_HEIGHT);
     if (want_sync && pulse.valid)
@@ -869,13 +877,34 @@ void lcd_te_submit(int y, int width, int height, uint32_t copy)
 
 bool lcd_te_pending(void)
 {
-    return pending;
+    return pending || lcd_hwscroll_pending();
 }
 
 void lcd_te_cancel(void)
 {
     pending = false;
+    lcd_hwscroll_cancel();
     schedule();
+}
+
+bool lcd_te_irq_timing(uint32_t *rise, uint32_t *period, uint32_t *high)
+{
+    int flags = disable_irq_save();
+    bool valid = lcd_te_supported() && pulse.valid && irq_mode_active() &&
+                 irq_edge_valid && TIME_BEFORE(USEC_TIMER, irq_deadline);
+    if (valid)
+    {
+        *rise = irq_edge_at - irq_edge_phase();
+        *period = pulse.period;
+        *high = pulse.high;
+    }
+    restore_irq(flags);
+    return valid;
+}
+
+void lcd_te_timer_arm(uint32_t deadline)
+{
+    timer_arm(USEC_TIMER, deadline);
 }
 
 void lcd_te_untimed_start(void)

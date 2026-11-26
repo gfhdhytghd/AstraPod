@@ -1708,6 +1708,7 @@ target/arm/s5l8702/ipodnano4g/cscodec-nano4g.c
 target/arm/s5l8702/ipod6g/lcd-6g.c
 #ifndef BOOTLOADER
 target/arm/s5l8702/ipod6g/lcd-hwscroll.c
+target/arm/s5l8702/ipod6g/lcd-hwscroll-plan.c
 #endif
 #ifndef BOOTLOADER
 target/arm/s5l8702/lcd-te-s5l8702.c

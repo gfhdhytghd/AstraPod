@@ -95,6 +95,9 @@
 #include "ui/scene.h"
 #include "ui/native_wps.h"
 #include "ui/statusbar.h"
+#ifdef ASTRAPOD_ROCK_COMPAT
+#include "plugins/app_tray.h"
+#endif
 #include "bootchart.h"
 #include "logdiskf.h"
 #include "bootdata.h"
@@ -189,6 +192,9 @@ int main(void)
     paint_startup_background();
     list_init();
     browser_init();
+#ifdef ASTRAPOD_ROCK_COMPAT
+    app_tray_init();
+#endif
     /* Keep the order of this 3
      * Must be done before any code uses the multi-screen API */
     /* All threads should be created and public queues registered by now */

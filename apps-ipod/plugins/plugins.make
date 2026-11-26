@@ -200,6 +200,10 @@ $(ROCK_OBJECTS)/podlink_echo.o: $(APPSDIR)/plugins/examples/podlink_echo.c $(ROC
 	$(SILENT)mkdir -p $(@D)
 	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
 
+$(ROCK_OBJECTS)/app_tray_demo.o: $(APPSDIR)/plugins/examples/app_tray_demo.c $(ROCK_FINGERPRINT)
+	$(SILENT)mkdir -p $(@D)
+	$(call PRINTS,CC $(@F))$(CC) $(ROCK_FLAGS) -MMD -MP -c $< -o $@
+
 ROCK_BITMAP_DIR := $(ROCK_OUT)/bitmaps/pluginbitmaps
 ROCK_NATIVE_BMPS := $(call preprocess,$(ROCK_SRC)/bitmaps/native/SOURCES)
 ROCK_MONO_BMPS := $(call preprocess,$(ROCK_SRC)/bitmaps/mono/SOURCES)

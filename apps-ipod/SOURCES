@@ -171,6 +171,7 @@ screens/browse/browser_disk.c
 plugins/rock_browser.c
 plugins/rock_files.c
 plugins/rock_runtime.c
+plugins/app_tray.c
 plugins/rock_execution.c
 plugins/rock_large_stack.c
 #ifdef HAVE_HW_H264

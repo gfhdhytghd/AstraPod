@@ -102,8 +102,11 @@ bool native_chrome_poll(struct native_chrome *chrome)
             next.volume_percent = (volume - minimum) * 100 / (maximum - minimum);
     }
 
-    /* Every member is one byte. These samples are compared to invalidate
-     * only the status bar when no list geometry or contents changed. */
+#ifdef ASTRAPOD_ROCK_COMPAT
+    app_tray_snapshot(now, &next.tray);
+#endif
+    /* The sample has byte alignment and no padding. Compare it to
+     * invalidate only the status bar when list geometry is unchanged. */
     bool changed = memcmp(&chrome->state, &next, sizeof(next)) != 0;
     chrome->state = next;
     return changed;
@@ -150,6 +153,7 @@ bool native_chrome_volume_visible(void)
 struct status_layout {
     int battery_x, percent_x, percent_width, play_x, busy_x;
     int clock_x, clock_width, title_width;
+    int tray_x, tray_count;
     bool right_clock;
 };
 
@@ -177,7 +181,15 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
         busy_x = play_x - gap - icon_size;
     }
 
-    int clock_right = busy_x - group_gap;
+    int tray_x = busy_x;
+    int tray_count = 0;
+#ifdef ASTRAPOD_ROCK_COMPAT
+    int tray_pitch = ROCK_TRAY_ICON_SIZE + gap;
+    int tray_room = busy_x - group_gap - left - clock_width;
+    tray_count = MIN(chrome->state.tray.count, MAX(0, tray_room) / tray_pitch);
+    tray_x -= tray_count * tray_pitch;
+#endif
+    int clock_right = tray_x - group_gap;
     clock_width = MIN(clock_width, MAX(0, clock_right - left));
     int clock_x = (width - clock_width) / 2;
     const int title_gap = 8;
@@ -189,6 +201,7 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
     return (struct status_layout) {
         .battery_x = battery_x, .percent_x = percent_x, .percent_width = percent_width,
         .play_x = play_x, .busy_x = busy_x,
+        .tray_x = tray_x, .tray_count = tray_count,
         .clock_x = clock_x, .clock_width = clock_width,
         .title_width = MAX(0, clock_x - title_gap - left),
         .right_clock = right_clock,
@@ -574,7 +587,7 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
                                                 center_title ? bounds.width :
                                                 title_width);
     if (!show_clock)
-        layout.title_width = MAX(0, layout.busy_x -
+        layout.title_width = MAX(0, layout.tray_x -
                                     metric[UI_METRIC_STATUS_GROUP_GAP] -
                                     metric[UI_METRIC_STATUS_PAD_LEFT]);
     if (center_title && title_width < layout.title_width)
@@ -613,5 +626,15 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
               icon_size, false);
     draw_indicators(chrome, &damage, indicators, layout, bounds.x, icon_y,
                     icon_size, background, foreground);
+#ifdef ASTRAPOD_ROCK_COMPAT
+    int tray_x = bounds.x + layout.tray_x - damage.x;
+    int tray_y = bounds.y + (bounds.height - ROCK_TRAY_ICON_SIZE) / 2 - damage.y;
+    for (int i = 0; i < layout.tray_count; ++i)
+    {
+        lcd_mono_bitmap(state->tray.icons[i].columns, tray_x, tray_y,
+                        ROCK_TRAY_ICON_SIZE, ROCK_TRAY_ICON_SIZE);
+        tray_x += ROCK_TRAY_ICON_SIZE + metric[UI_METRIC_STATUS_ICON_GAP];
+    }
+#endif
     lcd_set_viewport(previous);
 }

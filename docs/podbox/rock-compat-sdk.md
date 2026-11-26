@@ -89,6 +89,86 @@ access to GitHub. Saves are `mochipod-*` files in the games data folder. See
 the [MochiPod README](https://github.com/colliderkkz/mochipod) for its
 controls.
 
+## App reminders and tray icons
+
+The tray shows passive reminders wherever a native status bar is visible.
+This includes the Classic Now Playing header. Scrim and Light omit the
+status bar on Now Playing. The firmware evaluates time thresholds from data
+copied out of the foreground module. This lets reminders survive plugin
+unload and reboot, with no resident plugin code, scheduler thread, or disk
+write at a deadline.
+
+Use the following appended API slots in SDK image version 2. Build the
+module and firmware from the same SDK.
+
+```c
+bool (*app_tray_register)(const struct rock_tray_bitmap *frames, unsigned count);
+bool (*app_tray_set)(unsigned frame);
+int (*app_tray_get)(void);
+bool (*app_background_schedule)(const struct rock_tray_rule *rules, unsigned count);
+```
+
+Call these functions on the foreground module's entry thread. The firmware
+uses the basename of the loaded module as the icon ID, omitting the extension
+and folding ASCII case. Choose a unique, stable name of up to 31 characters
+from `a-z`, `0-9`, `-` and `_`. Copies with the same basename share one
+slot. Renaming a module changes its ID.
+
+- **Register** copies 1–4 bitmaps. A new icon starts hidden. Re-registering
+  replaces the artwork and keeps the selection and schedule if all referenced
+  frames still exist. Pass `NULL, 0` to remove the icon and release its slot.
+- **Set** selects a zero-based frame or `ROCK_TRAY_HIDDEN` and cancels the
+  schedule. The selection persists until another successful change.
+- **Get** returns the effective frame, `ROCK_TRAY_HIDDEN`, or `-1` if the
+  slot is unavailable.
+- **Schedule** copies up to four `{delay_seconds, frame}` rules. The first
+  rule must be at least 30 seconds out. Each later rule must be at least
+  30 seconds after the preceding rule. The currently selected frame lasts
+  until the first deadline. The last due rule wins and its frame stays selected
+  until another change. Pass `NULL, 0` to cancel and keep the current frame.
+
+Each frame is 8×8, with one byte per column and bit 0 at the top. A set bit
+uses the status foreground color. Other pixels are transparent. The firmware
+keeps four slots. It shows up to two visible icons by ascending slot
+index. A new registration uses the first free slot. Narrow bars can show
+fewer icons. The native volume overlay and plugins that own the LCD can cover
+the status bar. The tray has no input actions.
+
+Deadlines use the player's local RTC, including time spent powered off or in
+USB storage mode. A valid clock is required to install rules. If the clock is
+invalid, the firmware uses the schedule's initial frame. Clock changes can
+skip or revisit thresholds. The next native status poll or Get call evaluates
+all elapsed thresholds at once. No deadline wakes the player, spins the disk,
+or requires a redraw while the status bar is covered.
+
+Registration, setting a frame, and changing rules save
+`/.rockbox/app-tray.dat` synchronously. Identical registrations and selections
+need no write. A failed save leaves the previous state active. Mutations
+return false for invalid inputs, lack of space, storage errors, and USB
+storage takeover. After unplugging, retry a failed call. Back up or remove
+the store over USB and restart to keep or reset all reminders.
+
+For MochiPod, register the pet's artwork when it opens. When the player feeds
+the pet or leaves the game, set the current icon or hide it. Install rules for
+the next hunger thresholds before returning to the firmware. Keep the full pet
+state and game rules in MochiPod's own save.
+
+### Try the demo
+
+1. Open **Plugins > Demos > app_tray_demo**. The demo displays
+   **Tray demo started** and returns.
+2. In the status bar, look for the outlined circle. Start music and return
+   to a menu to see the circle during playback. In Classic, the circle also
+   appears in the Now Playing header.
+3. After one minute, the circle gets a dot. After two minutes, it fills in.
+   After three minutes, the icon clears.
+4. Relaunch the demo to start again. Relaunch while the icon is visible to
+   clear it immediately and release its slot.
+
+Run `sh apps-ipod/plugins/tests/app_tray_test.sh` from the repository root.
+The host test exercises deadlines, slot order, reboot, corrupt files and
+failed saves.
+
 ## Native diagnostics
 
 `rb_info` presents its diagnostics through native lists. The build

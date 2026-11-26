@@ -9,6 +9,8 @@
  * volume while the player is a sound card.
  *
  * Themes do not get to draw this screen. See usb_screen_fix_viewports().
+ * The stock look (style.art) shows the stock firmware's screen instead, drawn
+ * as plainly (usb_stock.c).
  ****************************************************************************/
 
 #include <stdio.h>
@@ -24,6 +26,7 @@
 #include "led.h"
 #include "system/appevents.h"
 #include "usb_screen.h"
+#include "usb_stock.h"
 #include "draw/viewport.h"
 #include "ui/frame.h"   /* ui_inhibit_flush, ui_flush_dirty */
 #include "playlist/playlist.h"
@@ -149,6 +152,8 @@ static void usb_screens_draw(void)
     FOR_NB_SCREENS(i)
         screens[i].backlight_on();
 
+    if (usb_stock_draw())
+        return;
     splashf(0, "%s\n%s", str(LANG_USB_CONNECTED),
                          str(LANG_USB_EJECT_BEFORE_DISCONNECT));
 }
@@ -178,6 +183,7 @@ void gui_usb_screen_run(bool early_usb, intptr_t seqnum)
     /* Draw the message once here -- before the fonts are closed and before the
      * mass-storage handoff -- so its glyphs get cached while the fonts are
      * still open and the app still owns storage. */
+    usb_stock_open();
     usb_screens_draw();
 
     /* Then let the USB thread run. It is raised to PRIORITY_REALTIME the moment
@@ -242,6 +248,7 @@ void gui_usb_screen_run(bool early_usb, intptr_t seqnum)
         /* Reload playlist */
         playlist_resume();
     }
+    usb_stock_close();
 
     FOR_NB_SCREENS(i)
     {

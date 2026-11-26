@@ -19,15 +19,20 @@ bool lcd_hwscroll_valid(const struct lcd_hwscroll_request *request)
            request->start >= request->top && request->start < end;
 }
 
+static unsigned int fixed_top, fixed_end;
+
 static void draw_grid(uint16_t *pixels, int height, unsigned int frame)
 {
     (void)frame;
     for (int y = 0; y < height; y++)
     {
+        bool fixed = (unsigned int)y < fixed_top || (unsigned int)y >= fixed_end;
         for (int x = 0; x < LCD_WIDTH; x++)
         {
-            /* The white lines and color steps identify both axes. */
-            *pixels++ = x % 40 < 2 || y % 20 < 2 ? LCD_WHITE :
+            /* The white lines and color steps identify both axes; the
+             * rows meant to stay fixed are solid red. */
+            *pixels++ = fixed ? LCD_RGBPACK(220, 0, 0) :
+                x % 40 < 2 || y % 20 < 2 ? LCD_WHITE :
                 LCD_RGBPACK(32 + (x / 40) * 28, 24 + (y / 20) * 19, 72);
         }
     }
@@ -58,6 +63,8 @@ int lcd_hwscroll_test(const struct lcd_hwscroll_request *request)
     bool ok = lcd_hwscroll_send(DCS_NORMAL, NULL, 0);
     if (ok && request->lines)
     {
+        fixed_top = request->top;
+        fixed_end = request->top + request->height;
         uint32_t dma = lcd_experiment_dma_total();
         lcd_experiment_present(0, LCD_HEIGHT, draw_grid, 0);
         ok = lcd_experiment_dma_total() != dma;
@@ -65,9 +72,17 @@ int lcd_hwscroll_test(const struct lcd_hwscroll_request *request)
         {
             sleep(2 * HZ);
             /* Send only commands between the baseline and shifted image. */
-            ok = set_scroll(request);
-            if (ok)
-                sleep(4 * HZ);
+            struct lcd_hwscroll_request step = *request;
+            ok = set_scroll(&step);
+            /* Step the start line every tick for eight seconds. */
+            for (int i = 1; ok && i < 8 * HZ; i++)
+            {
+                sleep(1);
+                step.start = request->top +
+                    (request->start - request->top + i) % request->height;
+                uint8_t start[] = { step.start >> 8, step.start & 0xff };
+                ok = lcd_hwscroll_send(DCS_SCROLL_START, start, sizeof(start));
+            }
         }
         if (!lcd_hwscroll_send(DCS_NORMAL, NULL, 0))
             ok = false;

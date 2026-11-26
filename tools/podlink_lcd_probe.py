@@ -19,7 +19,7 @@ def run(serial, geometry):
     if ep0_transfer(player, 0x40, REQUEST, 16, LCD_INDEX, payload) != len(payload):
         raise RuntimeError("Short PodLink Shell LCD command write")
 
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         reply = ep0_transfer(player, 0xC0, REQUEST, 0, LCD_INDEX, LCD_REPLY.size)
         version, completed, error, _ = LCD_REPLY.unpack(bytes(reply))

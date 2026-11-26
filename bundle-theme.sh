@@ -27,6 +27,9 @@ cp "$STAGE/generated/"*.pbf "$FONTS/"
 mkdir -p "$STAGE/.rockbox/themes"
 python3 "$ROOT/apps-ipod/bitmaps/source/stock/gen_stock_art.py" \
     --pack "$STAGE/.rockbox/themes/stock-art.bin"
+# The Games, Other Apps and Demos lists draw each app's icon from this pack.
+python3 "$ROOT/apps-ipod/bitmaps/source/apps/gen_app_icons.py" \
+    --pack "$STAGE/.rockbox/themes/app-icons.bin"
 cat > "$FONTS/NOTICE-HarmonyOS-Sans.txt" <<'NOTICE'
 AstraPod renders its bitmap text using HarmonyOS Sans and HarmonyOS Sans SC.
 HarmonyOS Sans is Copyright 2021-2024 Huawei Device Co., Ltd.

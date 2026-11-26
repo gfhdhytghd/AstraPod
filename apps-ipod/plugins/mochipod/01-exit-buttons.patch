@@ -1,0 +1,49 @@
+Answer "Save and exit?" with the buttons: Center quits, Menu stays.
+The wheel no longer toggles the answer, so the prompt shows no choice dots.
+
+diff --git a/src/core/ui.c b/src/core/ui.c
+index 603711a..dda2a49 100644
+--- a/src/core/ui.c
++++ b/src/core/ui.c
+@@ -62,7 +62,7 @@ int ui_count(const Ui *u,const Pet *p)
+     case OFFER: return 2;
+     case HOME: return ICON_COUNT;
+     case STATUS: return p->character==V3_LEGACY ? 7 : 11;
+-    case FOOD: case TRAIN: case EXIT_ASK: case HATCH_ASK: case REPLACE_ASK: case INPUT_MODE: return 2;
++    case FOOD: case TRAIN: case HATCH_ASK: case REPLACE_ASK: case INPUT_MODE: return 2;
+     case ACTIV_MENU:return 5;
+     case ITEMS:return owned_count(p,false,false);
+     case OPTIONS: return 5;
+@@ -250,6 +250,12 @@ void ui_command(Ui *u,Pet *p,enum Command cmd)
+         if (u->page!=EXIT_ASK) enter(u,EXIT_ASK);
+         return;
+     }
++    if (u->page==EXIT_ASK) {
++        /* Center quits and Menu stays; the wheel does not answer. */
++        if (cmd==CMD_OK) u->exit_requested=true;
++        else if (cmd==CMD_BACK || cmd==CMD_CANCEL) back(u);
++        return;
++    }
+     if (u->page==OFFER && (cmd==CMD_BACK || cmd==CMD_CANCEL)) {
+         family_answer(p,false);home(u);return;
+     }
+diff --git a/src/render/lcd.c b/src/render/lcd.c
+index 44994ec..68cc723 100644
+--- a/src/render/lcd.c
++++ b/src/render/lcd.c
+@@ -648,8 +648,13 @@ void draw_frame(Display *d,const Pet *p,const Ui *u)
+         centered(d,60,"Controls",2);
+         centered(d,112,u->choice==CLASSIC_V3?"Classic V3":"Native iPod",3);
+         break;
+-    case EXIT_ASK: case HATCH_ASK: case REPLACE_ASK:
+-        centered(d,68,u->page==EXIT_ASK?"Save and exit?":u->page==HATCH_ASK?"Start new game?":"Replace this pet?",3);
++    case EXIT_ASK:
++        centered(d,68,"Save and exit?",3);
++        centered(d,118,"Center: Yes",3);
++        centered(d,152,"MENU: No",3);
++        break;
++    case HATCH_ASK: case REPLACE_ASK:
++        centered(d,68,u->page==HATCH_ASK?"Start new game?":"Replace this pet?",3);
+         centered(d,127,u->choice?"Yes":"Cancel",4);
+         break;
+     case DISPLAY_TEST: draw_display_test(d,u->choice,u->frame); return;

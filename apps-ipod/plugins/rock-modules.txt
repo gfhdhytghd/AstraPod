@@ -53,6 +53,7 @@ apps/text_editor
 apps/text_viewer
 apps/theme_remove
 apps/view_text
+demos/app_tray_demo
 demos/bounce
 demos/credits
 demos/cube

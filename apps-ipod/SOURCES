@@ -119,6 +119,7 @@ widgets/menu.c
 ui/animation.c
 ui/pace.c
 ui/native_chrome.c
+ui/menu_pane.c
 ui/native_theme.c
 ui/native_theme_runtime.c
 ui/plastic_art.c

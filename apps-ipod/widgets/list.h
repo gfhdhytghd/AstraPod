@@ -151,6 +151,19 @@ typedef int list_get_range(int selected_item, void * data);
  */
 typedef bool list_is_playing(int selected_item, void * data);
 
+/* What a split-screen menu shows beside its rows for the selected row, under
+ * a theme with style.menu_pane=split. A list without the callback stays full
+ * width. */
+enum list_pane_kind
+{
+    LIST_PANE_INFO,             /* the row's name, icon and value */
+    LIST_PANE_CATEGORY,         /* the row's icon and name */
+    LIST_PANE_ART,              /* a slideshow of the library's covers */
+    LIST_PANE_PLAYING,          /* the playing track */
+    LIST_PANE_DEVICE,           /* the player's name and free space */
+};
+typedef enum list_pane_kind list_get_pane(int selected_item, void * data);
+
 /* The icon-sized status cell is already clipped and active for this callback. */
 typedef bool list_draw_status(int selected_item, void *data,
                               struct screen *display, struct viewport *vp);
@@ -239,6 +252,7 @@ struct gui_synclist
     list_get_name *callback_get_item_description;
     list_get_name *callback_get_index_key;
     list_draw_status *callback_draw_status;
+    list_get_pane *callback_get_item_pane;
     /* Number from the last row up when a list is sorted newest first. The
      * oldest track stays numbered 1. */
     bool count_down;
@@ -292,6 +306,9 @@ extern void gui_synclist_set_description_callback(struct gui_synclist * lists,
                                                   list_get_name callback);
 extern void gui_synclist_set_index_key_callback(struct gui_synclist * lists,
                                                 list_get_name callback);
+/* Optional content pane beside the rows. */
+extern void gui_synclist_set_pane_callback(struct gui_synclist * lists,
+                                           list_get_pane callback);
 /* Optional status cell for each visible row. */
 extern void gui_synclist_set_status_callback(struct gui_synclist * lists,
                                              list_draw_status callback);

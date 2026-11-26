@@ -15,6 +15,8 @@ void list_render_forget(const struct gui_synclist *list);
 int list_render_row_height(const struct gui_synclist *list, enum screen_type screen);
 int list_render_visible_rows(const struct gui_synclist *list, enum screen_type screen);
 bool list_render_motion_due(const struct gui_synclist *list);
+/* Draw what list_render_motion_due() found due, and only that. */
+void list_render_draw_due(struct gui_synclist *list);
 int list_render_timeout(const struct gui_synclist *list, int timeout);
 
 #endif

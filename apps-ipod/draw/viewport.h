@@ -46,6 +46,8 @@ void viewportmanager_theme_undo(enum screen_type screen, bool force_redraw);
 
 /* True while the page reserves room for the native status bar. */
 bool viewportmanager_theme_enabled(enum screen_type screen);
+/* How many screens have pushed a chrome setting. */
+int viewportmanager_depth(enum screen_type screen);
 
 /* Notify views that the native theme or layout settings changed. */
 void viewportmanager_theme_changed(const int);

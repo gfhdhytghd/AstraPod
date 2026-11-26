@@ -1831,6 +1831,29 @@ void root_menu_set_podcasts_row(bool on)
     podcasts_row(on, true);
 }
 
+enum list_pane_kind root_menu_item_pane(const struct menu_item_ex *item)
+{
+    if (item == audiobooks_item())
+        return LIST_PANE_CATEGORY;
+    if (tagnavi_slot_of_item(item) >= 0)
+        return LIST_PANE_ART;
+    if ((item->flags & MENU_TYPE_MASK) != MT_RETURN_VALUE)
+        return LIST_PANE_CATEGORY;
+    switch (item->value)
+    {
+        case GO_TO_DBBROWSER:
+        case GO_TO_ALBUM_COVERS:
+        case GO_TO_RANDOM_ALBUM:
+            return LIST_PANE_ART;
+        case GO_TO_WPS:
+            return LIST_PANE_PLAYING;
+        case GO_TO_MAINMENU:
+            return LIST_PANE_DEVICE;
+        default:
+            return LIST_PANE_CATEGORY;
+    }
+}
+
 /* menu_table[] less the tagnavi slots whose row is hidden, such as Custom
  * menu with no tagnavi_custom.config: the slot keeps its number, but Customize
  * Main Menu does not offer it. */

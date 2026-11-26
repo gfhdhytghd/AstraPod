@@ -15,6 +15,7 @@
 #include "system/appevents.h"
 #include "speech/language.h"
 #include "ui/frame.h"
+#include "ui/menu_pane.h"
 #include "ui/statusbar.h"
 #include "viewport.h"
 
@@ -26,6 +27,11 @@ static unsigned char viewport_depth[NB_SCREENS];
 bool viewportmanager_theme_enabled(enum screen_type screen)
 {
     return (chrome_visibility[screen] >> viewport_depth[screen]) & 1u;
+}
+
+int viewportmanager_depth(enum screen_type screen)
+{
+    return viewport_depth[screen];
 }
 
 static void viewport_changed(enum screen_type screen, bool previous, bool redraw)
@@ -65,6 +71,8 @@ void viewportmanager_theme_undo(enum screen_type screen, bool force_redraw)
         panicf("Stack underflow... viewportmanager");
     bool previous = viewportmanager_theme_enabled(screen);
     --viewport_depth[screen];
+    if (screen == SCREEN_MAIN)
+        menu_pane_viewport_left(viewport_depth[screen]);
     viewport_changed(screen, previous, force_redraw);
 }
 

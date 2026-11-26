@@ -64,6 +64,8 @@ static const struct {
     [UI_FONT_LYRICS_BACKGROUND] = { "lyrics_background", "14-noto-sans" },
     [UI_FONT_PANEL]     = { "panel",     "14-noto-sans" },
     [UI_FONT_STATUS_TITLE] = { "status_title", "18-noto-sans-bold" },
+    [UI_FONT_PANE_TITLE] = { "pane_title", "18-noto-sans-bold" },
+    [UI_FONT_PANE_TEXT] = { "pane_text", "14-noto-sans" },
 };
 
 static const struct {
@@ -188,6 +190,7 @@ static const struct {
     [UI_STYLE_WPS_LAYOUT]   = { "wps_layout",   (const char *const[]){ "cover", "classic", NULL } },
     [UI_STYLE_SCROLLBAR]    = { "scrollbar",    (const char *const[]){ "plain", "classic", NULL } },
     [UI_STYLE_ART]          = { "art",          (const char *const[]){ "none", "plastic", NULL } },
+    [UI_STYLE_MENU_PANE]    = { "menu_pane",    (const char *const[]){ "none", "split", NULL } },
 };
 
 static const char *const gradients[UI_GRADIENT_COUNT] = {
@@ -274,6 +277,7 @@ static void classic(struct ui_theme *theme)
     theme->easing = UI_EASE_QUAD;
     theme->style[UI_STYLE_WPS_LAYOUT] = UI_WPS_LAYOUT_CLASSIC;
     theme->style[UI_STYLE_SCROLLBAR] = UI_SCROLLBAR_CLASSIC;
+    theme->style[UI_STYLE_MENU_PANE] = UI_MENU_PANE_SPLIT;
 }
 
 /* Apple's own bars take over the gradients they replace. */

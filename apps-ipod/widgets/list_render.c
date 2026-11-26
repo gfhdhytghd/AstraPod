@@ -33,6 +33,8 @@
 #include "metadata/art_cache.h"
 #include "system/activity.h"
 #include "ui/frame.h"
+#include "ui/menu_pane.h"
+#include "ui/native_chrome.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/pace.h"
 #include "ui/perf.h"
@@ -98,7 +100,7 @@ struct native_list {
     unsigned theme_generation, palette_generation;
     bool colors_current;
     int text_font, title_font, icon_font;
-    struct ui_view root, title, header, rows, notes, art, index_view;
+    struct ui_view root, title, header, rows, notes, art, index_view, pane;
     struct ui_page page;
     struct ui_layer backdrop;
     unsigned art_generation, artist_generation;
@@ -191,6 +193,14 @@ static struct ui_rect take_top(struct ui_rect *rect, int height)
     return top;
 }
 
+/* A menu that shares the screen with the pane beside it. */
+static bool split_list(const struct gui_synclist *list)
+{
+    return list->callback_get_item_pane && list->default_viewport &&
+           !list->selection_color &&
+           viewportmanager_theme_enabled(SCREEN_MAIN) && menu_pane_themed();
+}
+
 static struct list_geometry measure(const struct gui_synclist *list,
                                     enum screen_type screen,
                                     const uint16_t *metric)
@@ -209,6 +219,11 @@ static struct list_geometry measure(const struct gui_synclist *list,
     {
         int top = metric[UI_METRIC_STATUS_HEIGHT];
         g.background = (struct ui_rect){0, top, LCD_WIDTH, LCD_HEIGHT - top};
+        if (split_list(list))
+        {
+            g.background.width = MENU_PANE_X;
+            rows.width = MIN(rows.width, MENU_PANE_X - rows.x);
+        }
 
         if (list->callback_get_item_albumart && !list->header && !list->show_notes)
         {
@@ -1773,6 +1788,51 @@ static const struct ui_view_ops row_ops = { .paint = paint_rows };
 static const struct ui_view_ops note_ops = { .paint = paint_notes };
 static const struct ui_view_ops index_ops = { .paint = paint_index };
 
+static void paint_pane(const struct ui_view *view, const struct ui_view_frame *frame)
+{
+    (void)view;
+    menu_pane_paint(frame->clip);
+}
+static const struct ui_view_ops pane_ops = { .paint = paint_pane };
+
+/* The selected row as the pane shows it. */
+static void select_pane(struct native_list *render)
+{
+    struct gui_synclist *list = render->owner;
+    struct menu_pane_content content = { .kind = LIST_PANE_INFO };
+    int item = list->selected_item;
+    if (item >= 0 && item < list->nb_items)
+    {
+        content.kind = list->callback_get_item_pane(item, list->data);
+        char *name = render->scratch.row.name;
+        const unsigned char *label_ptr = (const unsigned char *)
+            list->callback_get_item_name(item, list->data, name,
+                                         sizeof(render->scratch.row.name));
+        const char *label = label_ptr && P2ID(label_ptr) <= VOICEONLY_DELIMITER
+                            ? (const char *)P2STR(label_ptr) : "";
+        strlcpy(content.title, label, sizeof(content.title));
+        const char *value = list->callback_get_item_value ?
+            list->callback_get_item_value(item, list->data,
+                                          render->scratch.row.value,
+                                          sizeof(render->scratch.row.value)) :
+            NULL;
+        if (value)
+            strlcpy(content.caption, value, sizeof(content.caption));
+        enum list_row_kind kind = list->callback_get_item_kind ?
+            list->callback_get_item_kind(item, list->data) : LIST_ROW_PLAIN;
+        enum themable_icons icon = list->callback_get_item_icon ?
+            list->callback_get_item_icon(item, list->data) : Icon_NOICON;
+        const char *glyph = row_icon(icon, kind, label, false,
+                                     get_current_activity());
+        if (glyph)
+            strlcpy(content.glyph, glyph, sizeof(content.glyph));
+    }
+    if (content.kind == LIST_PANE_DEVICE)
+        strlcpy(content.title, native_chrome_title(list->title),
+                sizeof(content.title));
+    menu_pane_select(&content, list->generation);
+}
+
 static void add_view(struct native_list *render, struct ui_view *node,
                      struct ui_rect rect, const struct ui_view_ops *ops, void *data)
 {
@@ -1860,7 +1920,9 @@ static void prefetch_list_page(struct native_list *render, const struct list_geo
     }
 }
 
-static void draw_list(struct gui_synclist *list, bool status_only)
+/* keep_pane leaves the pane as it is on screen: the list moved, not it. */
+static void draw_list(struct gui_synclist *list, bool status_only,
+                      bool keep_pane)
 {
     list_render_init();
     if (renderer_handle <= 0)
@@ -1886,6 +1948,8 @@ static void draw_list(struct gui_synclist *list, bool status_only)
         render->index_font_key[0] = '\0';
         render->font_epoch = epoch;
         status_only = false;
+        /* The pane's text waited for the same glyphs. */
+        keep_pane = false;
     }
     if (!same_owner)
     {
@@ -1923,6 +1987,13 @@ static void draw_list(struct gui_synclist *list, bool status_only)
                          viewportmanager_theme_enabled(SCREEN_MAIN) && !list->selection_color);
     }
     bool show_index = step_index(render);
+    bool split = split_list(list);
+    if (!status_only)
+    {
+        menu_pane_page(split);
+        if (split)
+            select_pane(render);
+    }
     struct list_geometry g = measure(list, SCREEN_MAIN, render->theme.metric);
     if (!status_only)
         ui_scene_push_rows(g.rows.y, g.pitch, MIN(g.rows.height / g.pitch,
@@ -1953,9 +2024,12 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     add_view(render, &render->notes, g.notes, &note_ops, render);
     if (show_index)
         add_view(render, &render->index_view, g.background, &index_ops, render);
+    if (split)
+        add_view(render, &render->pane, menu_pane_rect(), &pane_ops, render);
     ui_page_init(&render->page, &render->root);
     render->page.focus = &render->rows;
-    render->page.damage = g.background;
+    render->page.damage = split && !keep_pane ?
+        (struct ui_rect){0, 0, LCD_WIDTH, LCD_HEIGHT} : g.background;
     if (status_only)
     {
         int width = render->theme.metric[UI_METRIC_LIST_ICON_SIZE] +
@@ -1998,13 +2072,13 @@ done:
 
 void list_render_draw(struct gui_synclist *list)
 {
-    draw_list(list, false);
+    draw_list(list, false, false);
 }
 
 void gui_synclist_draw_status(struct gui_synclist *list)
 {
     if (list->callback_draw_status)
-        draw_list(list, true);
+        draw_list(list, true, false);
 }
 
 bool gui_synclist_paint_background(const struct gui_synclist *list,
@@ -2054,7 +2128,24 @@ void gui_synclist_scroll_stop(struct gui_synclist *list)
         screens[i].scroll_stop_viewport(list->parent[i]);
 }
 
+static int list_deadline(const struct gui_synclist *list, bool poll);
+
 static int motion_deadline(const struct gui_synclist *list, bool poll)
+{
+    int delay = list_deadline(list, poll);
+    if (renderer_handle <= 0 || ui_scrolling_held())
+        return delay;
+    struct native_list *render = core_get_data_pinned(renderer_handle);
+    bool split = motion_owner(render, list) && split_list(list);
+    core_put_data_pinned(render);
+    int pane = split ? menu_pane_deadline() : TIMEOUT_BLOCK;
+    if (pane != TIMEOUT_BLOCK && (delay == TIMEOUT_BLOCK || pane < delay))
+        delay = pane;
+    return delay;
+}
+
+/* When the list itself next moves, the pane aside. */
+static int list_deadline(const struct gui_synclist *list, bool poll)
 {
     if (renderer_handle <= 0 || ui_scrolling_held())
         return TIMEOUT_BLOCK;
@@ -2113,6 +2204,20 @@ static int motion_deadline(const struct gui_synclist *list, bool poll)
 bool list_render_motion_due(const struct gui_synclist *list)
 {
     return motion_deadline(list, false) == 0;
+}
+
+void list_render_draw_due(struct gui_synclist *list)
+{
+    if (list_deadline(list, false) == 0)
+        draw_list(list, false, true);
+    struct ui_rect damage = menu_pane_step();
+    if (damage.width > 0 && damage.height > 0 &&
+        !gui_synclist_flush_inhibited())
+    {
+        ui_mark_dirty_rect(SCREEN_MAIN, damage.x, damage.y, damage.width,
+                           damage.height);
+        ui_flush_dirty();
+    }
 }
 
 int list_render_timeout(const struct gui_synclist *list, int timeout)

@@ -2,6 +2,7 @@
 #include "config.h"
 #include "plugins/rock_compat.h"
 #include "statusbar.h"
+#include "menu_pane.h"
 
 #include <string.h>
 
@@ -65,6 +66,7 @@ static int status_handle;
 /* Negative: the busy redraw interval. */
 static int update_delay = -1;
 static bool invalidated;
+static int drawn_width;
 static volatile bool indicators_moving;
 static uint32_t motion_start;
 static unsigned motion_duration;
@@ -357,6 +359,9 @@ void sb_update(enum screen_type screen, bool force)
     unsigned palette_generation = album_palette_generation();
     force |= invalidated || title->dirty || palette_generation != bar->palette_generation;
     force |= refresh_status_colors(bar);
+    int split = menu_pane_split();
+    int width = split ? split : LCD_WIDTH;
+    force |= width != drawn_width;
     bool poll = force || !TIME_BEFORE(current_tick, bar->next_update);
     if (!poll && !indicators_moving)
         goto done;
@@ -391,8 +396,10 @@ void sb_update(enum screen_type screen, bool force)
             retire_trace(changed || force);
         if (changed || force)
         {
-            struct ui_rect area = { 0, 0, LCD_WIDTH,
+            /* Beside a menu's pane the bar spans the rows only. */
+            struct ui_rect area = { 0, 0, width,
                 bar->theme.metric[UI_METRIC_STATUS_HEIGHT] };
+            drawn_width = width;
             struct ui_view_frame frame = { .bounds = area, .clip = area,
                 .opacity = UI_FULL_OPACITY, .brightness = UI_FULL_OPACITY };
             struct ui_album_palette palette;

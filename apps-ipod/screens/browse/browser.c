@@ -247,6 +247,13 @@ static const char *browser_get_value(int selected_item, void *data,
     return NULL;
 }
 
+static enum list_pane_kind browser_get_pane(int selected_item, void *data)
+{
+    (void)selected_item;
+    (void)data;
+    return LIST_PANE_ART;
+}
+
 static int browser_get_range(int selected_item, void * data)
 {
     struct browser_context * local_tc=(struct browser_context *)data;
@@ -943,6 +950,11 @@ static int update_dir(struct browser_album_panel *panel)
     gui_synclist_set_unnumbered(list, id3db && browser_db_unnumbered(&tc));
     gui_synclist_set_description_callback(list, browser_get_description);
     gui_synclist_set_index_key_callback(list, browser_get_index_key);
+    /* Home's Music menu is a split-screen menu; every level under it is a
+     * list of its own. */
+    gui_synclist_set_pane_callback(list, id3db && tc.dirlevel == 0 && tc.browse &&
+                                   (tc.browse->flags & BROWSE_HOME_LIBRARY) ?
+                                   browser_get_pane : NULL);
     /* Art (cover callback + tall uniform rows) on album lists (album art) and
      * artist lists (artist art), each behind its own toggle -- so ordinary lists
      * and the whole off path never touch the art-resolution code.

@@ -286,6 +286,15 @@ static const char* menu_get_value(int selected_item, void * data,
                                   option_value_as_int(setting));
 }
 
+static enum list_pane_kind menu_get_pane(int selected_item, void * data)
+{
+    const struct menu_item_ex *menu = (const struct menu_item_ex *)data;
+
+    if (menu != &root_menu_ || (menu->flags&MENU_TYPE_MASK) != MT_MENU)
+        return LIST_PANE_INFO;
+    return root_menu_item_pane(menu_row_item(selected_item, menu));
+}
+
 static int menu_get_range(int selected_item, void * data)
 {
     const struct settings_list *setting =
@@ -545,6 +554,10 @@ static int init_menu_lists(const struct menu_item_ex *menu,
     gui_synclist_set_icon_callback(lists, global_settings.show_icons?menu_get_icon:NULL);
     gui_synclist_set_row_callbacks(lists, menu_get_kind, menu_get_value, NULL);
     gui_synclist_set_range_callback(lists, menu_get_range);
+    /* A menu that is a page of its own, not a sheet or a plugin's. */
+    enum current_activity activity = get_current_activity();
+    if (activity != ACTIVITY_CONTEXTMENU && activity != ACTIVITY_PLUGIN)
+        gui_synclist_set_pane_callback(lists, menu_get_pane);
     if(global_settings.talk_menu)
         gui_synclist_set_voice_callback(lists, talk_menu_item);
     gui_synclist_set_nb_items(lists,current_subitems_count);

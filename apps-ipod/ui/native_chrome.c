@@ -195,7 +195,7 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
     };
 }
 
-static const char *title_text(const char *title)
+const char *native_chrome_title(const char *title)
 {
     if (!title)
         return "";
@@ -498,7 +498,7 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
     int text_y = bounds.y + metric[UI_METRIC_STATUS_TEXT_Y];
     int icon_size = metric[UI_METRIC_STATUS_ICON_SIZE];
     int left_x = bounds.x + metric[UI_METRIC_STATUS_PAD_LEFT];
-    const char *title = title_text(left);
+    const char *title = native_chrome_title(left);
     int title_width = 0;
     if (!playback_modes)
         font_getstringsize((const unsigned char *)title, &title_width, NULL,

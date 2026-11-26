@@ -36,6 +36,8 @@ void root_menu_set_podcasts_row(bool on);
 /* %Lk of a row that does not open a menu: a Music row on the main menu says
  * whether it is one of the user's own, and the rest are actions. */
 enum list_row_kind root_menu_item_kind(const struct menu_item_ex *item);
+/* What Home's split-screen pane shows beside the item. */
+enum list_pane_kind root_menu_item_pane(const struct menu_item_ex *item);
 
 /* Number of reserved root-menu shortcut slots for tagnavi.config's root
  * ("main") menu's rows, then the custom menu's in whatever is left -- see the

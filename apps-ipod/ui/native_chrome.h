@@ -49,6 +49,8 @@ void native_chrome_close(struct native_chrome *chrome);
 /* Refresh the retained status values and return whether the view changed. */
 bool native_chrome_poll(struct native_chrome *chrome);
 bool native_chrome_volume_visible(void);
+/* A screen title as the status bar shows it. */
+const char *native_chrome_title(const char *title);
 void native_chrome_indicators(const struct native_chrome_state *state,
                              struct native_chrome_indicators *out);
 

@@ -202,6 +202,7 @@ void gui_synclist_init(struct gui_synclist * gui_list,
     gui_list->callback_get_item_description = NULL;
     gui_list->callback_get_index_key = NULL;
     gui_list->callback_draw_status = NULL;
+    gui_list->callback_get_item_pane = NULL;
     gui_list->count_down = false;
     gui_list->unnumbered = false;
     gui_list->show_notes = false;
@@ -597,6 +598,12 @@ void gui_synclist_set_description_callback(struct gui_synclist * lists,
     lists->callback_get_item_description = callback;
 }
 
+void gui_synclist_set_pane_callback(struct gui_synclist * lists,
+                                    list_get_pane callback)
+{
+    lists->callback_get_item_pane = callback;
+}
+
 void gui_synclist_set_index_key_callback(struct gui_synclist * lists,
                                          list_get_name callback)
 {
@@ -834,7 +841,8 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
         _gui_synclist_speak_item(lists, true);
     if (action == ACTION_NONE && list_render_motion_due(lists))
     {
-        gui_synclist_draw(lists);
+        gui_synclist_layout(lists);
+        list_render_draw_due(lists);
         return true;
     }
     {
@@ -905,7 +913,10 @@ bool list_do_action(int context, int timeout,
     if (*action == ACTION_NONE)
     {
         if (list_render_motion_due(lists))
-            gui_synclist_draw(lists);
+        {
+            gui_synclist_layout(lists);
+            list_render_draw_due(lists);
+        }
         lcd_update();
     }
     return handled;

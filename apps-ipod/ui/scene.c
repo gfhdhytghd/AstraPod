@@ -10,6 +10,7 @@
 #include "system.h"
 #include "thread.h"
 #include "frame.h"
+#include "menu_pane.h"
 #include "native_theme_runtime.h"
 #include "perf.h"
 #include "retained.h"
@@ -110,12 +111,84 @@ static void compose_modal(fb_data *out, const fb_data *back, const fb_data *fron
            (LCD_HEIGHT - status_height - offset) * LCD_WIDTH * sizeof(*out));
 }
 
+/* out[x] = src[x - at] over [x0, x1), within the source's first `width`
+ * columns. */
+static void put_span(fb_data *out, const fb_data *src, int at, int width,
+                     int x0, int x1)
+{
+    x0 = MAX(x0, at);
+    x1 = MIN(x1, at + width);
+    if (x1 > x0)
+        memcpy(out + x0, src + (x0 - at), (x1 - x0) * sizeof(*out));
+}
+
+/* A slide with a split menu on either side. Two menus slide their rows past
+ * a still pane, the arriving page's. A full page slides over the pane on the
+ * way in and under it on the way out, pushing the rows aside or pulled by
+ * them. A root page without menu chrome moves whole. */
+static void compose_split(const struct ui_scene *scene, fb_data *out,
+                          const fb_data *back, const fb_data *front, int offset)
+{
+    const int half = MENU_PANE_X;
+    bool front_right = offset >= 0;
+    const fb_data *left = front_right ? back : front;
+    const fb_data *right = front_right ? front : back;
+    bool left_split = front_right ? scene->back_split : scene->front_split;
+    bool right_split = front_right ? scene->front_split : scene->back_split;
+    bool target_right = front_right == scene->target_front;
+    /* The left edge of the page on the right. */
+    int p = front_right ? offset : LCD_WIDTH + offset;
+    bool both = left_split && right_split && !scene->full_screen;
+    int top = both ? scene->pan_top : 0;
+    memcpy(out, lcd_framebuffer_default.fb_ptr, top * LCD_WIDTH * sizeof(*out));
+    for (int y = top; y < LCD_HEIGHT; y++)
+    {
+        int i = y * LCD_WIDTH;
+        fb_data *row = out + i;
+        const fb_data *l = left + i, *r = right + i;
+        if (scene->full_screen)
+        {
+            put_span(row, l, p - LCD_WIDTH, LCD_WIDTH, 0, LCD_WIDTH);
+            put_span(row, r, p, LCD_WIDTH, 0, LCD_WIDTH);
+        }
+        else if (both)
+        {
+            /* The rows travel half as far as the pages. */
+            int a = (p - LCD_WIDTH) / 2;
+            put_span(row, l, a, half, 0, half);
+            put_span(row, r, a + half, half, 0, half);
+            menu_pane_shadow(row, a + half, half);
+            memcpy(row + half, (target_right ? r : l) + half,
+                   (LCD_WIDTH - half) * sizeof(*row));
+        }
+        else
+        {
+            const fb_data *split = left_split ? l : r;
+            const fb_data *full = left_split ? r : l;
+            int full_x = left_split ? p : p - LCD_WIDTH;
+            int rows_x = left_split ? MIN(0, p - half) : MAX(0, p);
+            bool full_over = left_split == target_right;
+            memcpy(row + half, split + half, (LCD_WIDTH - half) * sizeof(*row));
+            put_span(row, split, rows_x, half, 0, half);
+            put_span(row, full, full_x, LCD_WIDTH, 0,
+                     full_over ? LCD_WIDTH : half);
+            if (!full_over && left_split)
+                menu_pane_shadow(row, rows_x + half, half);
+        }
+    }
+}
+
 static void compose_pages(const struct ui_scene *scene, fb_data *out,
                           const fb_data *back, const fb_data *front, int offset)
 {
     if (!scene->pan_top && !scene->slide)
     {
         compose(out, back, front, offset);
+        return;
+    }
+    if (scene->slide && (scene->back_split || scene->front_split))
+    {
+        compose_split(scene, out, back, front, offset);
         return;
     }
 
@@ -468,6 +541,11 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
         fb_data *snapshot = surface(data, !push);
         if (snapshot != previous)
             memcpy(snapshot, previous, FRAMEBUFFER_SIZE);
+        bool split = menu_pane_take_screen();
+        if (push)
+            scene->back_split = split;
+        else
+            scene->front_split = split;
         core_put_data_pinned(data);
         scene->back_page = push ? from : to;
         scene->front_page = push ? to : from;
@@ -476,6 +554,7 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     scene->target_front = push;
     scene->pan_top = pan_top;
     scene->slide = slide;
+    scene->full_screen = false;
     scene->staggered = staggered;
     scene->reuse_target = reverse_pan;
     scene->row_y = scene->row_count = 0;
@@ -526,6 +605,7 @@ void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bo
         /* Full-screen slides move at constant speed; menu slides ease. */
         if (full_screen && scene->slide)
             scene->tween.easing = UI_EASE_LINEAR;
+        scene->full_screen = full_screen;
     }
 }
 
@@ -888,6 +968,18 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
         if (target_changed && (!panel || scene->target_front))
             memcpy(scene->target_front ? front : back, lcd_framebuffer_default.fb_ptr,
                    FRAMEBUFFER_SIZE);
+        if (target_changed && !panel)
+        {
+            bool split = menu_pane_split() != 0;
+            if (scene->target_front)
+                scene->front_split = split;
+            else
+                scene->back_split = split;
+            /* A full page passes a menu at constant speed. */
+            if (scene->slide && !scene->full_screen)
+                scene->tween.easing = scene->back_split != scene->front_split
+                                      ? UI_EASE_LINEAR : ui_theme_easing();
+        }
         if (scene->vertical)
             compose_modal(out, back, front, offset,
                           scene->target_front ? 0 : scene->status_height,

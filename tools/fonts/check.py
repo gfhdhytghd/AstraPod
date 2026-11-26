@@ -144,8 +144,10 @@ def check_compiler(first, second, lang):
         for name, face_info in manifest["fonts"].items():
             bitmap = BitmapFont(first / (name + ".pbf"))
             size, weight = face_info["size"], face_info["weight"]
-            required = (compiler.required_codepoints(lang, full=False)
-                        if size == 56 else mapping.keys())
+            required = (compiler.index_subset(mapping, compiler.INDEX_GLYPHS)
+                        if size == 56 else
+                        compiler.index_subset(mapping, stock_sets[name].glyphs)
+                        if name.endswith("-index") else mapping).keys()
             assert set(bitmap.index) == set(required)
             bitmap.check_fixed_cells(face_info)
             for face in fonts:

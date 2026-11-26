@@ -307,6 +307,8 @@ extern void gui_synclist_set_unnumbered(struct gui_synclist * lists,
 /* Optional notes for the selected item. */
 extern void gui_synclist_set_description_callback(struct gui_synclist * lists,
                                                   list_get_name callback);
+/* Optional letter-jump key for a row: a key of quickscroll_key_of() or a
+ * group label such as a year. Empty or NULL files the row by its name. */
 extern void gui_synclist_set_index_key_callback(struct gui_synclist * lists,
                                                 list_get_name callback);
 /* Optional content pane beside the rows. */

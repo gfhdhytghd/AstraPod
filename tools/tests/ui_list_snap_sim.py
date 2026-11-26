@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Check snapped list scrolling in SDL: under a custom theme that sets
 style.list_scroll=snap on Scrim's tokens, the rows jump a whole row and only
-the selection marker glides; Light matches an older build.
+the selection marker glides; Light ends where an older build does, but for
+the fast spin, which follows stock's wheel.
 
 Arguments: NEW_ROCKBOXUI NEW_ZIP OLD_ROCKBOXUI OLD_ZIP OUTPUT_DIRECTORY
 Xvfb is private to this process. Writes frame strips, result.json and each
@@ -255,7 +256,10 @@ def main():
                 for name, *_ in SCENARIOS:
                     same_end = not ImageChops.difference(
                         new[name + "_final"], old[name + "_final"]).getbbox()
-                    assert same_end, (theme, name)
+                    # Stock's wheel first speeds up after 350 ms, so the
+                    # fast spin's 14 detents in 238 ms move a row each, where
+                    # the older build sped up.
+                    assert same_end or name == "fast", (theme, name)
                     compare[name] = {
                         "final_frame_identical": same_end,
                         "text_phases_before": sorted({s["text_phase_px"] for s in old[name]}),
@@ -267,7 +271,7 @@ def main():
                     }
                 result[theme] = compare
     (args.output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    print("PASS snapped list scrolling; Light end frames unchanged")
+    print("PASS snapped list scrolling; Light end frames unchanged but the fast spin")
 
 
 if __name__ == "__main__":

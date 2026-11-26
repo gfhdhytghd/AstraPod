@@ -25,9 +25,10 @@ MARKER_X = 47
 THUMB_X = 305
 EMPTY_X = 314
 TRACK_COUNT = 20
-# SDL accelerates notches less than 50 ms apart. Keep each notch at one
-# row while still interrupting the 8-frame list glide.
-DETENT_FRAMES = 3.6
+# The list accelerates a spin faster than 20 ms a wheel position, 80 ms a
+# notch. Keep each notch at one row while still interrupting the 8-frame
+# list glide.
+DETENT_FRAMES = 5.4
 
 
 def driver_delay(frames):

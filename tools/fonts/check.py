@@ -82,12 +82,13 @@ class BitmapFont:
         offset, size, _, _, _ = self.index[cp]
         record = self.data[self.bitmaps + offset:self.bitmaps + offset + size]
         rgb = bool(record[0] & compiler.RECORD_RGB)
-        phase_count = record[0] & ~compiler.RECORD_RGB
-        assert phase_count in (1, 4)
+        gray8 = bool(record[0] & compiler.RECORD_GRAY8)
+        phase_count = record[0] & ~(compiler.RECORD_RGB | compiler.RECORD_GRAY8)
+        assert phase_count in (1, 4) and not (gray8 and (rgb or phase_count != 1))
         start = 1
         for _ in range(phase_count):
             x, y, w, h = struct.unpack_from("<bbBB", record, start)
-            end = start + 4 + (w * h + 1) // 2
+            end = start + 4 + (w * h if gray8 else (w * h + 1) // 2)
             next_phase = end + ((3 * w * h + 1) // 2 if rgb else 0)
             assert next_phase <= len(record)
             yield (x, y, w, h), record[start + 4:next_phase if include_rgb else end]

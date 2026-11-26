@@ -9,36 +9,57 @@ defaults to apps-ipod/fonts/stock. compile.py merges each Helvetica glyph
 set (SGL1) with its CJK strike and then with the fallback faces at the same
 pixel size into a PBF1 font of the same basename.
 
-The stock firmware draws unhinted Helvetica outlines with linear coverage at
-whole-pixel origins, advances each glyph by its linear advance rounded to a
-whole pixel and applies no kerning. CJK comes from the 4-bit bitmap strikes.
+The stock firmware renders the unhinted Helvetica outlines with FreeType
+2.3.5 into 8-bit grey coverage at whole-pixel origins, advances each glyph by
+FreeType's advance rounded to a whole pixel and applies no kerning: FreeType
+does not read the fonts' AAT kern table. Its Helvetica glyphs are converted
+the same way, with FreeType 2.3.5 built from a pinned release in
+~/.cache/podbox-font on first use. CJK comes from the 4-bit bitmap strikes.
 """
 import argparse
 from contextlib import ExitStack
+import ctypes as C
+import hashlib
+import io
 import os
 from pathlib import Path
+import shlex
 import struct
+import subprocess
+import tarfile
 import tempfile
+from urllib.request import urlopen
 
 from fontTools.ttLib import TTFont
 
 import compile as compiler
+from fusion import FUSION_CACHE
 
 STOCK_DIR = compiler.ROOT / "apps-ipod/fonts/stock"
 HEADER = struct.Struct("<4sHHHHHI")
 ENTRY = struct.Struct("<IHH")
-LINEAR = tuple(15 - round(15 * v / 255) for v in range(256))
+FREETYPE = "freetype-2.3.5"
+FREETYPE_URL = f"https://download.savannah.gnu.org/releases/freetype/freetype-old/{FREETYPE}.tar.gz"
+FREETYPE_SHA256 = "f3e43b388eb706342a8b86d9fb8aa782bfc76d8eef30b070f85b55425ee3076f"
+FREETYPE_SOURCES = ("src/base/ftsystem.c", "src/base/ftinit.c", "src/base/ftbase.c",
+                    "src/truetype/truetype.c", "src/sfnt/sfnt.c", "src/smooth/smooth.c")
+FREETYPE_MODULES = b"""FT_USE_MODULE(tt_driver_class)
+FT_USE_MODULE(sfnt_module_class)
+FT_USE_MODULE(ft_smooth_renderer_class)
+"""
 
-# basename: (stock file, scale in 1/64 px, fallback weight, line height,
-# ascent, CJK strike). The scale reproduces the stock text widths; FreeType
-# rounds it to the whole ppem the firmware reports. The 13 px faces keep the
-# firmware's own 11/4 line; the larger faces fit the Classic layout's cells.
+# basename: (stock file, size in 1/64 px, fallback weight, line height,
+# ascent, CJK strike). Each size is the one whose glyphs match the stock
+# screens pixel for pixel: list rows 16.265625 px, Now Playing title
+# 16.984375 px, the side pane's title 17.40625 px and the 13.125 px small
+# text. The 13 px faces keep the firmware's own 11/4 line; the larger faces
+# fit the Classic layout's cells.
 STOCK = {
     "13-helvetica": ("Helvetica.ttf", 840, 400, 15, 11, 11),
     "13-helvetica-bold": ("HelveticaBold.ttf", 840, 700, 15, 11, 11),
-    "16-helvetica-bold": ("HelveticaBold.ttf", 1040, 700, 20, 16, 16),
-    "17-helvetica-bold": ("HelveticaBold.ttf", 1088, 700, 18, 14, 16),
-    "17-helvetica-bold-pane": ("HelveticaBold.ttf", 1116, 700, 19, 14, 16),
+    "16-helvetica-bold": ("HelveticaBold.ttf", 1041, 700, 20, 16, 16),
+    "17-helvetica-bold": ("HelveticaBold.ttf", 1087, 700, 18, 14, 16),
+    "17-helvetica-bold-pane": ("HelveticaBold.ttf", 1114, 700, 19, 14, 16),
 }
 CJK_FILES = {11: "CJK11.ttf", 16: "CJK16.ttf"}
 
@@ -79,11 +100,50 @@ def write(path, size64, weight, height, ascent, cjk, glyphs):
                                  len(glyphs)) + entries + records)
 
 
+def build_raster(directory, cache):
+    """stock_raster.c linked with the pinned FreeType release."""
+    path = cache / f"{FREETYPE}.tar.gz"
+    data = path.read_bytes() if path.is_file() else None
+    if data is None:
+        with urlopen(FREETYPE_URL, timeout=30) as response:
+            data = response.read()
+    if hashlib.sha256(data).hexdigest() != FREETYPE_SHA256:
+        raise ValueError(f"Unexpected checksum: {path.name}")
+    if not path.is_file():
+        cache.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+        members = [m for m in archive.getmembers()
+                   if m.name.startswith((f"{FREETYPE}/include/", f"{FREETYPE}/src/"))]
+        archive.extractall(directory, members, filter="data")
+    (directory / "stock_modules.h").write_bytes(FREETYPE_MODULES)
+    library = directory / "stock_raster.so"
+    source = directory / FREETYPE
+    subprocess.run(
+        [*shlex.split(os.environ.get("CC", "cc")), "-O2", "-w", "-std=gnu99", "-fPIC", "-shared",
+         "-DFT2_BUILD_LIBRARY", '-DFT_CONFIG_MODULES_H="stock_modules.h"',
+         f"-I{directory}", f"-I{source / 'include'}",
+         *(str(source / name) for name in FREETYPE_SOURCES),
+         str(Path(__file__).with_name("stock_raster.c")), "-o", str(library)], check=True
+    )
+    lib = C.CDLL(str(library))
+    lib.stock_open.restype = C.c_void_p
+    lib.stock_open.argtypes = (C.c_char_p, C.c_int)
+    lib.stock_close.restype = None
+    lib.stock_close.argtypes = (C.c_void_p,)
+    lib.stock_glyph.restype = C.c_int
+    lib.stock_glyph.argtypes = (C.c_void_p, C.c_uint32, C.POINTER(C.c_int),
+                                C.POINTER(C.c_uint8), C.c_uint)
+    return lib
+
+
 def outlines(lib, source, size64, required):
+    """8-bit coverage records: phase count 1 with RECORD_GRAY8, the bearings
+    and size, then one coverage byte per pixel, 0 transparent."""
     font = TTFont(source)
     cmap = font.getBestCmap()
     font.close()
-    handle = lib.source_open_scaled(os.fsencode(source), 0, size64, 400)
+    handle = lib.stock_open(os.fsencode(source), size64)
     if not handle:
         raise ValueError(f"FreeType could not open {source}")
     glyphs = {}
@@ -91,18 +151,16 @@ def outlines(lib, source, size64, required):
         for cp in sorted(required & cmap.keys()):
             if compiler.invisible(cp):
                 continue
-            metrics = (compiler.C.c_int * 4)()
-            pixels = (compiler.C.c_uint8 * (160 * 160))()
-            size = lib.source_raster_unhinted(handle, cp, 0, metrics, pixels, len(pixels))
-            advance = lib.source_advance(handle, cp)
-            if size < 0 or advance < 0:
+            metrics = (C.c_int * 5)()
+            pixels = (C.c_uint8 * (160 * 160))()
+            size = lib.stock_glyph(handle, cp, metrics, pixels, len(pixels))
+            if size < 0:
                 raise ValueError(f"FreeType could not rasterize U+{cp:04X}")
-            x, y, w, h = metrics
-            record = bytearray(struct.pack("<BbbBB", 1, x, y, w, h))
-            record += compiler.pack_alpha(bytes(pixels[:size]), LINEAR)
-            glyphs[cp] = (bytes(record), (advance + 32) & ~63)
+            x, y, w, h, advance = metrics
+            record = struct.pack("<BbbBB", 1 | compiler.RECORD_GRAY8, x, y, w, h)
+            glyphs[cp] = (record + bytes(pixels[:size]), (advance + 32) & ~63)
     finally:
-        lib.source_close(handle)
+        lib.stock_close(handle)
     return glyphs
 
 
@@ -139,12 +197,13 @@ def main():
     parser.add_argument("fonts", type=Path)
     parser.add_argument("output", type=Path, nargs="?", default=STOCK_DIR)
     parser.add_argument("--lang-dir", type=Path, default=compiler.ROOT / "apps-ipod/lang")
+    parser.add_argument("--cache", type=Path, default=FUSION_CACHE)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     required = compiler.required_codepoints(args.lang_dir)
     with ExitStack() as stack:
-        lib = compiler.build_raster(Path(stack.enter_context(
-            tempfile.TemporaryDirectory(prefix="podbox-raster-"))))
+        lib = build_raster(Path(stack.enter_context(
+            tempfile.TemporaryDirectory(prefix="podbox-raster-"))), args.cache)
         for ppem, file in CJK_FILES.items():
             height, ascent, glyphs = strike(args.fonts / file, required)
             path = args.output / f"cjk{ppem}.sgl"

@@ -25,6 +25,7 @@ INDEX = struct.Struct("<IIHHBB")
 PAIR = struct.Struct("<Bh")
 PAGE = 64
 RECORD_RGB = 0x80
+RECORD_GRAY8 = 0x40
 GAMMA = 0.90
 
 # Nominal pixel sizes come from the existing basenames and theme roles.

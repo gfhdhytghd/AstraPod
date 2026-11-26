@@ -26,6 +26,15 @@ named in the set, then the faces above at the set's whole pixel size. Every
 glyph of these fonts has one phase and a whole-pixel advance, and none is
 kerned, as on the stock firmware.
 
+The stock firmware renders Helvetica with FreeType 2.3.5: unhinted, 8-bit
+grey coverage at whole-pixel origins, each advance FreeType's own rounded to
+a whole pixel. FreeType does not read the fonts' AAT `kern` table, so the
+stock text has no kerning. `stock.py` builds the same FreeType release from
+a pinned archive, cached in `~/.cache/podbox-font` (`--cache`), and stores
+the coverage unquantised in 8-bit records, so these glyphs match the stock
+screens pixel for pixel. A later FreeType moves the coverage of curved edges
+by up to 11 levels.
+
 An SGL1 file is a little-endian header (`SGL1`, the scale in 1/64 px, the
 fallback weight, line height, ascent, CJK strike ppem or 0, glyph count),
 one entry per glyph (32-bit codepoint, 16-bit advance in 1/64 px, 16-bit
@@ -35,9 +44,13 @@ record size), then the PBF1 bitmap records in the same order.
 |---|---|---|
 | `13-helvetica` | Helvetica | 13.125 px |
 | `13-helvetica-bold` | Helvetica Bold | 13.125 px |
-| `16-helvetica-bold` | Helvetica Bold | 16.25 px |
-| `17-helvetica-bold` | Helvetica Bold | 17 px |
-| `17-helvetica-bold-pane` | Helvetica Bold | 17.4375 px |
+| `16-helvetica-bold` | Helvetica Bold | 16.265625 px |
+| `17-helvetica-bold` | Helvetica Bold | 16.984375 px |
+| `17-helvetica-bold-pane` | Helvetica Bold | 17.40625 px |
+
+The scale is `FT_Set_Char_Size`'s, in 1/64 px at 72 dpi. The stock firmware
+also draws Now Playing's times in Helvetica Bold at 13.796875 px, which no
+font here provides.
 
 ## PBF1 layout
 
@@ -65,7 +78,10 @@ Alpha 0 is opaque and 15 is transparent. Bit 7 of the phase count marks
 an RGB glyph. Each phase of an RGB glyph appends a second packed mask
 with three samples per pixel, in R, G, B order. The first mask remains
 available for grayscale drawing. Readers that support RGB also accept
-older records with bit 7 clear.
+older records with bit 7 clear. Bit 6 marks an 8-bit glyph, which has one
+phase and no RGB mask: its mask holds one coverage byte per pixel, 0
+transparent and 255 opaque. The stock Helvetica glyphs are 8-bit; every
+other glyph keeps 4-bit records.
 
 The 8 and 10 px faces use native Fusion Pixel bitmaps for covered Han
 characters and the usual outline fallback for other characters. The

@@ -265,6 +265,7 @@ screens/playback/quick_screen.c
 #endif
 #ifndef USB_NONE
 screens/system/usb_screen.c
+screens/system/usb_stock.c
 #endif
 
 /* Core-linked "Album covers" screen, ported from the pictureflow plugin.

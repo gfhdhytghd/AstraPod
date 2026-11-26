@@ -37,6 +37,9 @@ bool native_wps_has_art(void);
 void native_wps_set_landing(void (*paint)(const struct ui_rect *clip));
 void native_wps_pick_up_art(void);
 void native_wps_paint_slide(int hidden, fb_data base);
+/* The page's status bar, text and controls over what the frame buffer holds,
+ * without its background or cover. */
+void native_wps_paint_chrome(void);
 void native_wps_invalidate(void);
 void native_wps_close(void);
 

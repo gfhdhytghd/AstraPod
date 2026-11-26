@@ -107,6 +107,7 @@ static struct {
     int dx, dy;             /* the window's step per pan tick */
     int drawn_x, drawn_y;
     bool fading;
+    uint32_t none_at;       /* when a load last found no cover */
 } show = { .album = -1 };
 
 static struct menu_pane_content shown, pending, under;
@@ -272,6 +273,8 @@ static void show_work(const struct queue_event *ev)
         show.album = -1;
         return;
     }
+    if (!loaded)
+        show.none_at = USEC_TIMER;
     show.state = loaded ? SHOW_FRESH : SHOW_NONE;
 }
 
@@ -289,12 +292,13 @@ static void show_request(void)
 }
 
 /* Whether the buffer holds a picture to draw. While the next cover loads
- * over it the pane keeps the old one on screen. */
+ * over it, or after a load that found none, the pane keeps the old one on
+ * screen. */
 static bool show_drawable(void)
 {
     return show.state == SHOW_READY || show.state == SHOW_FRESH ||
-           ((show.state == SHOW_REQUESTED || show.state == SHOW_LOADING) &&
-            show.album >= 0);
+           ((show.state == SHOW_REQUESTED || show.state == SHOW_LOADING ||
+             show.state == SHOW_NONE) && show.album >= 0);
 }
 
 /* A new cover pans diagonally or straight up or down, from the end of its
@@ -758,6 +762,13 @@ void menu_pane_select(const struct menu_pane_content *content,
 static void cover_step(uint32_t now, struct ui_rect *damage)
 {
     struct ui_rect pane = menu_pane_rect();
+    /* A load that found no cover is tried again a cover's life later: the
+     * art cache may still be filling. */
+    if (show.state == SHOW_NONE && now - show.none_at >= SHOW_LIFE_US)
+    {
+        show_request();
+        return;
+    }
     if (show.state == SHOW_FRESH)
     {
         show_begin(now);

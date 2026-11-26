@@ -2586,6 +2586,16 @@ static uint32_t flow_pace_next(struct ui_pace *pace, uint32_t start)
     return ui_pace_next(pace, start);
 }
 
+/* Moves a stock-look motion's clock that began at `*start` on to the
+ * refresh now under way, and returns by how much: the motion then resumes
+ * from the pose it last showed, however long the work since took. */
+static uint32_t stock_rebase(uint32_t *start)
+{
+    uint32_t edge = ui_clock_start(), late = edge - *start;
+    *start = edge;
+    return late;
+}
+
 /* The alpha a cover sitting on a pile is drawn at, the setting being how far
  * toward the background it is taken. Note this is a dimming, not a
  * transparency: render_slide() blends toward the background colour, so a pile
@@ -4878,6 +4888,8 @@ static struct album_panel {
     struct stock_flip flip;
     int back_handle;
     bool back_ready;
+    /* The stock look's flip has yet to draw its first frame. */
+    bool flip_first;
     unsigned first, second, sampled, trace;
     /* due is the next flip or list scroll frame's deadline. */
     uint32_t clock, opened, due;
@@ -4949,6 +4961,7 @@ static void panel_mark(int y, const struct panel_ink *ink)
 
 static void panel_layout_header(void);
 static void panel_layout_digits(void);
+static void prepare_stock_back(void);
 static void panel_layout_track(struct panel_track *row);
 
 static struct album_blur_source panel_blur_source(int index)
@@ -5038,6 +5051,16 @@ static void flip_to(bool open)
     {
         if (panel.moving && panel.to == (open ? FLIP_OPEN : 0))
             return;
+        /* The stock look draws the opening back before the turn starts,
+         * not on the frame where it first shows. */
+        bool prepared = stock_look() && open && !panel.moving &&
+                        panel.back_handle > 0 && pf_motion_scale;
+        if (prepared)
+        {
+            buf_ctx_lock();
+            prepare_stock_back();
+            buf_ctx_unlock();
+        }
         uint32_t now = USEC_TIMER;
         struct stock_pose current = panel.moving ? stock_flip_pose(&panel.flip, now) :
             stock_current(&flow_row, center_index, now, stock_scroll_progress(&flow_row, now)).pose;
@@ -5047,7 +5070,8 @@ static void flip_to(bool open)
         panel.to = open ? FLIP_OPEN : 0;
         panel.moving = pf_motion_scale && panel.back_handle > 0;
         panel.position = panel.moving ? FLIP_MID : panel.to;
-        panel.back_ready = false;
+        panel.back_ready = prepared;
+        panel.flip_first = stock_look() && panel.moving;
         panel.dirty = true;
         panel.trace = panel.moving ? ui_perf_begin(open ? "cover-flip-open" : "cover-flip-close") : 0;
         return;
@@ -6165,6 +6189,9 @@ static void step_album_flip(void)
     {
         draw_album_flip(true);
         panel.resuming = false;
+        if (panel.flip_first && panel.moving)
+            panel.flip.start_us += stock_rebase(&panel.clock);
+        panel.flip_first = false;
     }
     if (animating && due)
     {
@@ -6663,6 +6690,12 @@ static struct {
     struct album_blur_source source;
     bool layout_ready;
     uint32_t return_start;
+    /* When the turn left Cover Flow mid-way, its next frame's deadline. */
+    uint32_t resume_us;
+    /* Under the stock look, the frame Now Playing's chrome fades in over,
+     * or that chrome and its mask as it fades out; and the status bar
+     * Cover Flow showed, which the turn back fades to. */
+    int chrome, bar;
     pix_t bg;
     bool pending, from_panel, returning;
 } playback_scene;
@@ -6679,6 +6712,8 @@ static void release_playback_scene(void)
     for (int i = 0; i < playback_scene.count; i++)
         drop_playback_bitmap(&playback_scene.wall[i].handle);
     drop_playback_bitmap(&playback_scene.art.handle);
+    drop_playback_bitmap(&playback_scene.chrome);
+    drop_playback_bitmap(&playback_scene.bar);
     memset(&playback_scene, 0, sizeof(playback_scene));
 }
 
@@ -6850,6 +6885,118 @@ static void paint_playback_row(struct stock_flow *walls, struct stock_pose centr
         paint_playback_cover(centre, playback_scene.album);
 }
 
+/* Under the stock look Now Playing's status bar, text and controls fade in
+ * over the turn to it and out over the turn back, in no fewer refreshes
+ * than this; the cover turns as it does without them. */
+#define CHROME_FADE_FRAMES 10
+#define CHROME_FRAME (LCD_WIDTH * LCD_HEIGHT)
+
+/* `weight` 32nds of the way from `from` to `to`. */
+static inline pix_t chrome_blend(pix_t to, pix_t from, unsigned weight)
+{
+    const uint32_t mask = 0x07e0f81f;
+    uint32_t f = (to | ((uint32_t)to << 16)) & mask;
+    uint32_t b = (from | ((uint32_t)from << 16)) & mask;
+    uint32_t c = (b + (((f - b) * weight) >> 5)) & mask;
+    return c | (c >> 16);
+}
+
+/* How far in, of 32, a fade begun at `start` and lasting `length` is. */
+static unsigned chrome_weight(uint32_t now, uint32_t start, uint32_t length)
+{
+    return MIN(32u, (now - start) * 32 / MAX(length, 1u));
+}
+
+/* Keep the status bar the turn to Now Playing leaves, for the turn back
+ * too, and room for the frame the chrome is composed over. */
+static bool chrome_fade_open(void)
+{
+    size_t rows = pf_chrome_h * LCD_WIDTH;
+    playback_scene.bar = core_alloc_free_space(rows * sizeof(pix_t));
+    playback_scene.chrome = core_alloc_free_space(CHROME_FRAME * sizeof(pix_t));
+    if (playback_scene.bar <= 0 || playback_scene.chrome <= 0)
+    {
+        drop_playback_bitmap(&playback_scene.bar);
+        drop_playback_bitmap(&playback_scene.chrome);
+        return false;
+    }
+    pix_t *bar = core_get_data_pinned(playback_scene.bar);
+    memcpy(bar, LCD_BUF, rows * sizeof(pix_t));
+    core_put_data_pinned(bar);
+    return true;
+}
+
+/* Put back the status bar Cover Flow showed, or the background if none
+ * was kept. */
+static void chrome_restore_bar(void)
+{
+    size_t rows = pf_chrome_h * LCD_WIDTH;
+    if (playback_scene.bar <= 0)
+    {
+        memset16(LCD_BUF, playback_scene.bg, rows);
+        return;
+    }
+    const pix_t *bar = core_get_data_pinned(playback_scene.bar);
+    memcpy(LCD_BUF, bar, rows * sizeof(pix_t));
+    core_put_data_pinned((void *)bar);
+}
+
+/* Now Playing's chrome over the turn's frame, `weight` 32nds of the way in
+ * from the status bar the turn left. */
+static void chrome_fade_in(unsigned weight)
+{
+    pix_t *under = core_get_data_pinned(playback_scene.chrome);
+    chrome_restore_bar();
+    memcpy(under, LCD_BUF, CHROME_FRAME * sizeof(pix_t));
+    native_wps_paint_chrome();
+    for (int i = 0; i < CHROME_FRAME; i++)
+        if (LCD_BUF[i] != under[i])
+            LCD_BUF[i] = chrome_blend(LCD_BUF[i], under[i], weight);
+    core_put_data_pinned(under);
+}
+
+/* Keep the page's chrome drawn over its background alone, and which of its
+ * pixels differ from that background. The screen is left as it was. */
+static bool chrome_fade_capture(void)
+{
+    int handle = core_alloc_free_space(CHROME_FRAME * sizeof(pix_t) +
+                                       CHROME_FRAME / 8);
+    if (handle <= 0)
+        return false;
+    pix_t *chrome = core_get_data_pinned(handle);
+    uint8_t *mask = (uint8_t *)(chrome + CHROME_FRAME);
+    memcpy(chrome, LCD_BUF, CHROME_FRAME * sizeof(pix_t));
+    memset16(LCD_BUF, playback_scene.bg, CHROME_FRAME);
+    native_wps_paint_chrome();
+    memset(mask, 0, CHROME_FRAME / 8);
+    for (int i = 0; i < CHROME_FRAME; i++)
+    {
+        pix_t drawn = LCD_BUF[i];
+        LCD_BUF[i] = chrome[i];
+        chrome[i] = drawn;
+        if (drawn != playback_scene.bg)
+            mask[i >> 3] |= 1 << (i & 7);
+    }
+    core_put_data_pinned(chrome);
+    playback_scene.chrome = handle;
+    return true;
+}
+
+/* The page's chrome over the turn back's frame, `weight` 32nds of it left,
+ * over the status bar Cover Flow showed. */
+static void chrome_fade_out(unsigned weight)
+{
+    chrome_restore_bar();
+    if (!weight)
+        return;
+    const pix_t *chrome = core_get_data_pinned(playback_scene.chrome);
+    const uint8_t *mask = (const uint8_t *)(chrome + CHROME_FRAME);
+    for (int i = 0; i < CHROME_FRAME; i++)
+        if (mask[i >> 3] & (1 << (i & 7)))
+            LCD_BUF[i] = chrome_blend(chrome[i], LCD_BUF[i], weight);
+    core_put_data_pinned((void *)chrome);
+}
+
 /* The WPS moves one screen width over the stationary landing. */
 static void slide_playback_controls(const struct wps_state *incoming, uint32_t start)
 {
@@ -6872,6 +7019,9 @@ static void slide_playback_controls(const struct wps_state *incoming, uint32_t s
         lcd_update();
         if (elapsed == PLAYBACK_SLIDE_US || !lcd_active())
             break;
+        /* The stock look's slide starts from its first frame's refresh. */
+        if (!elapsed && stock_look())
+            stock_rebase(&start);
         ui_clock_sleep(ui_clock_wait_until(flow_pace_next(&flow_pace, start)));
         elapsed = MIN((uint32_t)USEC_TIMER - start, PLAYBACK_SLIDE_US);
     }
@@ -6890,7 +7040,9 @@ void carousel_wps_capture_return(uint32_t action_us)
     /* The uncovered cover is the return turn's first frame. */
     if (turned && playback_scene.art.handle > 0)
         native_wps_set_landing(paint_return_landing);
-    if (pf_motion_scale)
+    bool fade = stock_look() && pf_motion_scale && lcd_active() &&
+                native_wps_active() && chrome_fade_capture();
+    if (pf_motion_scale && !fade)
         slide_playback_controls(NULL, action_us);
     playback_scene.return_start = USEC_TIMER;
     if (!turned && pf_motion_scale && lcd_active())
@@ -6910,17 +7062,35 @@ static struct stock_flip playback_turn(void)
 void carousel_wps_present(const struct wps_state *state)
 {
     playback_scene.pending = false;
+    bool fade = stock_look() && pf_motion_scale && lcd_active() &&
+                chrome_fade_open();
     native_wps_paint_handoff(state, &playback_scene.source);
     const char *bitmap_state = native_wps_has_art() ? "ready" : "not-painted";
     char route = playback_scene.from_panel ? 'C' : 'D';
     if (!lcd_active())
+    {
+        drop_playback_bitmap(&playback_scene.chrome);
         return;
+    }
+    /* The stock look's turn resumes where it left Cover Flow: the time
+     * Now Playing took to set up passes with the turn held. */
+    if (playback_scene.resume_us && stock_look())
+    {
+        int32_t late = ui_clock_start() - playback_scene.resume_us;
+        if (late > 0)
+            playback_scene.walls.start_us += late;
+    }
+    playback_scene.resume_us = 0;
     struct stock_flip flip = playback_turn();
     uint32_t start = flip.start_us, now = USEC_TIMER;
     struct stock_pose initial = flip.target;
     uint32_t blend_start = 0, blend_us = 0;
     const char *reason = playback_scene.slot.width ? "configured-slot" :
                                                      "theme-no-art-slot";
+    uint32_t turn_us = flip.delay + flip.duration;
+    uint32_t fade_us = MAX(turn_us - MIN(now - start, turn_us),
+                           CHROME_FADE_FRAMES * ui_frame_period());
+    uint32_t fade_start = now;
     cpu_boost(true);
     for (;;)
     {
@@ -6949,6 +7119,12 @@ void carousel_wps_present(const struct wps_state *state)
         paint_playback_row(&playback_scene.walls, stock_flip_pose(&flip, now), now);
         bool landed = stock_flip_done(&flip, now) &&
                       (!blend_us || now - blend_start >= blend_us);
+        if (fade && native_wps_active())
+        {
+            unsigned weight = chrome_weight(now, fade_start, fade_us);
+            chrome_fade_in(weight);
+            landed = landed && weight == 32;
+        }
         lcd_update();
         if (landed || !lcd_active())
             break;
@@ -6960,8 +7136,16 @@ void carousel_wps_present(const struct wps_state *state)
         uint32_t landed_at = USEC_TIMER;
         if (playback_cover(playback_scene.album))
             native_wps_set_landing(paint_playback_landing);
-        slide_playback_controls(state, landed_at);
+        if (fade)
+        {
+            native_wps_pick_up_art();
+            native_wps_render(state, false);
+            lcd_update();
+        }
+        else
+            slide_playback_controls(state, landed_at);
     }
+    drop_playback_bitmap(&playback_scene.chrome);
     cpu_boost(false);
     ui_perf_wps_target(route, &playback_scene.slot, reason, bitmap_state);
 }
@@ -6980,6 +7164,18 @@ static void refresh_return_panel(void)
     prepare_stock_back();
     font_prefetch_end();
     panel.blur_generation = album_blur_generation();
+}
+
+/* A new key ends the turn back; the release of the one that began it
+ * does not. */
+static bool return_interrupted(void)
+{
+#if (defined(HAVE_USB_PODLINK) || (defined(SIMULATOR) && defined(IPOD_6G))) \
+    && !defined(BOOTLOADER)
+    return button_queue_wait_pending(TIMEOUT_NOBLOCK);
+#else
+    return !button_queue_empty();
+#endif
 }
 
 static void return_from_playback(void)
@@ -7009,11 +7205,16 @@ static void return_from_playback(void)
         flip.start = playback_scene.playing;
     }
     show_carousel_entry();
+    uint32_t fade_us = MAX(flip.delay + flip.duration,
+                           CHROME_FADE_FRAMES * ui_frame_period());
     if (pf_motion_scale && lcd_active() && flow_row.count)
     {
         for (;;)
         {
             bool landed = stock_flip_done(&flip, now) && !stock_animating(&flow_row, now);
+            unsigned weight = playback_scene.chrome > 0 ?
+                              32 - chrome_weight(now, start, fade_us) : 0;
+            landed = landed && !weight;
             struct stock_pose current = stock_flip_pose(&flip, now);
             if (to_panel && stock_back_face(current) &&
                 (!panel.back_ready || (!panel.have_blur &&
@@ -7034,6 +7235,8 @@ static void return_from_playback(void)
                 if (!to_panel)
                     model->draw_text();
             }
+            if (playback_scene.chrome > 0)
+                chrome_fade_out(weight);
             if (landed)
             {
                 lcd_update();
@@ -7042,7 +7245,7 @@ static void return_from_playback(void)
             lcd_update();
             ui_clock_sleep(ui_clock_wait_until(flow_pace_next(&flow_pace, start)));
             now = USEC_TIMER;
-            if (!lcd_active() || !button_queue_empty())
+            if (!lcd_active() || return_interrupted())
                 break;
         }
     }
@@ -7085,9 +7288,13 @@ static int stock_to_wps(int album, bool from_panel, int destination, uint32_t ac
     playback_scene.from_panel = from_panel;
     bool animate = pf_motion_scale && lcd_active();
     struct stock_flip flip;
+    playback_scene.resume_us = 0;
     if (animate)
     {
         prepare_playback_turn(album, from_panel, action_us);
+        /* Under the stock look the turn starts once it is ready to draw. */
+        if (stock_look())
+            playback_scene.walls.start_us += stock_rebase(&action_us);
         flip = playback_turn();
     }
     bool landed = false;
@@ -7106,6 +7313,8 @@ static int stock_to_wps(int album, bool from_panel, int destination, uint32_t ac
         if (status > 0)
         {
             destination = GO_TO_WPS;
+            if (animate && !landed && stock_look())
+                playback_scene.resume_us = flow_pace_next(&flow_pace, action_us);
             break;
         }
         if (status < 0)
@@ -7966,8 +8175,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
              * refreshes' worth. */
             if (motion_begins && stock_look())
             {
-                uint32_t edge = ui_clock_start(), late = edge - flow_start;
-                flow_start = edge;
+                uint32_t late = stock_rebase(&flow_start);
                 flow_row.start_us += late;
                 fade_start += late;
             }

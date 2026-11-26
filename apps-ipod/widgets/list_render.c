@@ -92,6 +92,16 @@ struct list_index {
     bool visible, swallow_menu;
 };
 
+/* What the last paint left on screen, to tell a frame in which only the
+ * selection marker moved. */
+struct list_shown {
+    struct ui_rect rows, marker;
+    int pitch, top, cursor_y, lit, selected;
+    unsigned theme, palette, art, font, artist;
+    int art_handle;
+    bool valid;
+};
+
 struct native_list {
     struct ui_theme theme;
     unsigned int colors[UI_COLOR_COUNT];
@@ -111,6 +121,7 @@ struct native_list {
     unsigned font_epoch;
     int prefetched_top;
     struct list_motion motion;
+    struct list_shown shown;
     struct list_index overlay;
     int index_font, index_width, index_faces[2];
     char index_font_key[sizeof(((struct list_index *)0)->key)];
@@ -395,7 +406,16 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     bool fast = wheel && (offset < -1 || offset > 1 ||
                          (continuing && motion->wheel && frame < motion->glide_frames));
 
-    if (physical_end)
+    bool snap =
+        render->theme.style[UI_STYLE_LIST_SCROLL] == UI_LIST_SCROLL_SNAP;
+    if (snap)
+    {
+        /* The rows jump to their new place and the marker sets out from
+         * where it was on screen. */
+        from.cursor += rest.top - from.top;
+        from.top = rest.top;
+    }
+    else if (physical_end)
     {
         bool bottom = offset > 0;
         int64_t edge = bottom ? max_top : 0;
@@ -427,6 +447,9 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
         goto done;
     }
 
+    /* A snapped jump costs a whole-list frame; the marker's own frames
+     * that follow are cheap enough for every refresh again. */
+    glide_pace.recover_full_rate = snap;
     unsigned trace = motion->trace;
     if (!trace)
         trace = ui_perf_begin("list-glide");
@@ -451,6 +474,16 @@ static struct ui_rect intersection(struct ui_rect a, struct ui_rect b)
         left, top,
         MIN(a.x + a.width, b.x + b.width) - left,
         MIN(a.y + a.height, b.y + b.height) - top,
+    };
+}
+
+static struct ui_rect bounding(struct ui_rect a, struct ui_rect b)
+{
+    int left = MIN(a.x, b.x), top = MIN(a.y, b.y);
+    return (struct ui_rect) {
+        left, top,
+        MAX(a.x + a.width, b.x + b.width) - left,
+        MAX(a.y + a.height, b.y + b.height) - top,
     };
 }
 
@@ -936,9 +969,15 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         else if (icon_column || marked >= 0)
             text_x += icon_size + m[UI_METRIC_LIST_ICON_GAP];
         int x = text_x - m[UI_METRIC_LIST_TEXT_PADDING] + margin;
-        marker(render, clip, row_cell(row, x, 0, m[UI_METRIC_LIST_SELECTION_WIDTH],
-                                      row.height, VP_IS_RTL(list->parent[SCREEN_MAIN])),
-               render->colors[UI_COLOR_SELECTION]);
+        struct ui_rect rect = row_cell(row, x, 0,
+                                       m[UI_METRIC_LIST_SELECTION_WIDTH],
+                                       row.height,
+                                       VP_IS_RTL(list->parent[SCREEN_MAIN]));
+        marker(render, clip, rect, render->colors[UI_COLOR_SELECTION]);
+        struct ui_rect *column = &render->shown.marker;
+        if (column->width > 0)
+            rect = bounding(*column, rect);
+        *column = (struct ui_rect){ rect.x, 0, rect.width, 0 };
         return;
     }
 
@@ -1839,6 +1878,62 @@ static bool update_row_pose(struct native_list *render, const struct list_geomet
     return finished;
 }
 
+static bool marquee_resting(const struct native_list *render)
+{
+    unsigned elapsed = ui_clock_frame(USEC_TIMER - render->marquee_started);
+    return !render->has_marquee ||
+           elapsed < ui_clock_frame(global_settings.scroll_delay * 1000);
+}
+
+/* Under snapped scrolling, a frame whose rows stand where the last paint
+ * left them repaints only the marker's path, plus the rows whose text
+ * colour follows it. False when anything else may have changed. */
+static bool marker_damage(const struct native_list *render,
+                          const struct list_geometry *g, struct ui_rect *damage)
+{
+    const struct list_shown *shown = &render->shown;
+    const struct gui_synclist *list = render->owner;
+    int top = render->rows.value[UI_SCROLL_OFFSET];
+    int lit = render->rows.value[UI_SELECTION];
+    if (!shown->valid ||
+        render->theme.style[UI_STYLE_LIST_SCROLL] != UI_LIST_SCROLL_SNAP ||
+        render->row_shift || shown->top != top || shown->pitch != g->pitch ||
+        memcmp(&shown->rows, &g->rows, sizeof(g->rows)) ||
+        shown->theme != render->theme_generation ||
+        shown->palette != render->palette_generation ||
+        shown->art != render->art_generation ||
+        shown->art_handle != render->art_handle ||
+        shown->font != render->font_epoch ||
+        shown->artist != render->artist_generation ||
+        (g->notes.height > 0 && shown->selected != list->selected_item) ||
+        !marquee_resting(render))
+        return false;
+
+    int height = g->pitch * list->selected_size;
+    struct ui_rect band = { g->rows.x, MIN(shown->cursor_y, render->cursor_y),
+                            g->rows.width, 0 };
+    band.height = MAX(shown->cursor_y, render->cursor_y) + height - band.y;
+    if (lit != shown->lit)
+    {
+        struct ui_rect row = { g->rows.x, 0, g->rows.width, height };
+        row.y = g->rows.y + (shown->lit - top) * g->pitch;
+        band = bounding(band, row);
+        row.y = g->rows.y + (lit - top) * g->pitch;
+        band = bounding(band, row);
+    }
+    else if (shown->cursor_y == render->cursor_y)
+        band.height = 0;
+    else if (shown->marker.width > 0)
+    {
+        band.x = shown->marker.x;
+        band.width = shown->marker.width;
+    }
+    *damage = intersection(band, g->rows);
+    if (damage->width <= 0 || damage->height <= 0)
+        *damage = (struct ui_rect){0};
+    return true;
+}
+
 static void prefetch_list_page(struct native_list *render, const struct list_geometry *g)
 {
     struct gui_synclist *list = render->owner;
@@ -1860,7 +1955,7 @@ static void prefetch_list_page(struct native_list *render, const struct list_geo
     }
 }
 
-static void draw_list(struct gui_synclist *list, bool status_only)
+static void draw_list(struct gui_synclist *list, bool status_only, bool moved)
 {
     list_render_init();
     if (renderer_handle <= 0)
@@ -1889,6 +1984,7 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     }
     if (!same_owner)
     {
+        render->shown.valid = false;
         motion_stop(&render->motion);
         index_release_fonts(render);
         memset(&render->overlay, 0, sizeof(render->overlay));
@@ -1956,6 +2052,8 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     ui_page_init(&render->page, &render->root);
     render->page.focus = &render->rows;
     render->page.damage = g.background;
+    bool partial = moved && !status_only && !show_index &&
+                   marker_damage(render, &g, &render->page.damage);
     if (status_only)
     {
         int width = render->theme.metric[UI_METRIC_LIST_ICON_SIZE] +
@@ -1968,7 +2066,8 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     }
     else
     {
-        render->has_marquee = false;
+        if (!partial)
+            render->has_marquee = false;
         render->marquee_frame = ui_clock_frame(USEC_TIMER - render->marquee_started);
         sb_set_title_text(list->title, list->title_icon, SCREEN_MAIN);
     }
@@ -1977,9 +2076,28 @@ static void draw_list(struct gui_synclist *list, bool status_only)
     ui_inhibit_flush(true);
     if (!status_only)
         sb_update(SCREEN_MAIN, false);
+    bool painted = render->page.damage.width > 0;
+    if (!status_only && painted)
+        render->shown.marker.width = 0;
     struct ui_rect damage = ui_page_paint(&render->page);
     if (!gui_synclist_flush_inhibited())
         ui_mark_dirty_rect(SCREEN_MAIN, damage.x, damage.y, damage.width, damage.height);
+    if (!status_only && painted)
+    {
+        struct ui_rect marker = render->shown.marker;
+        render->shown = (struct list_shown) {
+            .rows = g.rows, .marker = marker, .pitch = g.pitch,
+            .top = render->rows.value[UI_SCROLL_OFFSET],
+            .cursor_y = render->cursor_y,
+            .lit = render->rows.value[UI_SELECTION],
+            .selected = list->selected_item,
+            .theme = render->theme_generation,
+            .palette = render->palette_generation,
+            .art = render->art_generation, .art_handle = render->art_handle,
+            .font = render->font_epoch, .artist = render->artist_generation,
+            .valid = !show_index && !gui_synclist_flush_inhibited(),
+        };
+    }
     ui_inhibit_flush(held);
     if (!gui_synclist_flush_inhibited())
         ui_flush_dirty();
@@ -1998,13 +2116,28 @@ done:
 
 void list_render_draw(struct gui_synclist *list)
 {
-    draw_list(list, false);
+    draw_list(list, false, false);
+}
+
+void list_render_draw_moved(struct gui_synclist *list)
+{
+    draw_list(list, false, true);
 }
 
 void gui_synclist_draw_status(struct gui_synclist *list)
 {
     if (list->callback_draw_status)
-        draw_list(list, true);
+        draw_list(list, true, false);
+}
+
+bool gui_synclist_moving(const struct gui_synclist *list)
+{
+    if (renderer_handle <= 0)
+        return false;
+    struct native_list *render = core_get_data_pinned(renderer_handle);
+    bool moving = motion_owner(render, list) && render->motion.visible;
+    core_put_data_pinned(render);
+    return moving;
 }
 
 bool gui_synclist_paint_background(const struct gui_synclist *list,
@@ -2036,6 +2169,7 @@ void list_render_forget(const struct gui_synclist *list)
     if (render->owner == list)
     {
         render->owner = NULL;
+        render->shown.valid = false;
         render->has_marquee = false;
         motion_stop(&render->motion);
         index_release_fonts(render);

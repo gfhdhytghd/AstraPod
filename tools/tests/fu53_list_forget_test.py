@@ -53,6 +53,7 @@ struct native_list {
     unsigned font_epoch, artist_generation;
     struct { bool visible; int last_sel; } overlay;
     struct list_motion motion;
+    struct { bool valid; } shown;
     uint32_t marquee_started, marquee_frame;
 };
 static struct native_list state;
@@ -107,6 +108,7 @@ int main(void)
     state.backdrop = 4;
     state.motion.visible = 6;
     state.motion.trace = 1;
+    state.shown.valid = true;
     state.overlay.last_sel = 2;
     gui_synclist_forget(&b);
     assert(motion_deadline(&a, true) == 1 && motion_deadline(&b, true) == TIMEOUT_BLOCK);
@@ -116,6 +118,7 @@ int main(void)
     assert(motion_deadline(&a, true) == TIMEOUT_BLOCK);
     gui_synclist_forget(&a);
     assert(!state.owner && !state.has_marquee && state.art_handle == -1);
+    assert(!state.shown.valid);
     assert(released == 1 && state.backdrop == 0 && font_releases == 1);
     assert(traces_ended == 1 && state.motion.visible == 0 && state.overlay.last_sel == -1);
 

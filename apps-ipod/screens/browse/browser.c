@@ -1529,7 +1529,7 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
         if (home_library && button == ACTION_STD_MENU)
             button = ACTION_STD_CANCEL;
         ui_scene_update(scene, redrew);
-        if (button == ACTION_NONE)
+        if (button == ACTION_NONE && !gui_synclist_moving(&browser_lists))
             lcd_update();
         tc.selected_item = gui_synclist_get_sel_pos(&browser_lists);
 

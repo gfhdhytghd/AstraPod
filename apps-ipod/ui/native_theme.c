@@ -188,6 +188,7 @@ static const struct {
     [UI_STYLE_WPS_LAYOUT]   = { "wps_layout",   (const char *const[]){ "cover", "classic", NULL } },
     [UI_STYLE_SCROLLBAR]    = { "scrollbar",    (const char *const[]){ "plain", "classic", NULL } },
     [UI_STYLE_ART]          = { "art",          (const char *const[]){ "none", "plastic", NULL } },
+    [UI_STYLE_LIST_SCROLL]  = { "list_scroll",  (const char *const[]){ "snap", "glide", NULL } },
 };
 
 static const char *const gradients[UI_GRADIENT_COUNT] = {
@@ -329,6 +330,8 @@ void ui_theme_builtin(struct ui_theme *theme, enum ui_theme_builtin_id id)
     for (size_t i = 0; i < ARRAY_COUNT(backgrounds); i++)
         theme->background[i] = light ? UI_BG_SOLID : backgrounds[i].scrim;
     theme->background[UI_BG_STATUS] = UI_BG_COVER_TINT;
+    if (light)
+        theme->style[UI_STYLE_LIST_SCROLL] = UI_LIST_SCROLL_GLIDE;
     theme->motion_scale = UI_THEME_MOTION_ONE;
     for (size_t i = 0; i < UI_MOTION_COUNT; i++)
         theme->motion[i] = UI_MOTION_DEFAULT;

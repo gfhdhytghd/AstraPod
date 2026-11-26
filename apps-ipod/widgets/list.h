@@ -298,6 +298,9 @@ extern void gui_synclist_set_status_callback(struct gui_synclist * lists,
 void gui_synclist_set_header(struct gui_synclist *list, const struct list_header *header);
 void gui_synclist_set_notes(struct gui_synclist *list, bool show);
 void gui_synclist_draw_status(struct gui_synclist *list);
+/* True while the selection is still travelling. Its frames reach the LCD
+ * themselves, so a wait for input need not submit the whole screen. */
+bool gui_synclist_moving(const struct gui_synclist *list);
 /* Repaint a region of the main list's last backdrop without submitting it. */
 bool gui_synclist_paint_background(const struct gui_synclist *list,
                                    const struct viewport *region);

@@ -8,6 +8,9 @@ void list_render_init(void);
 bool list_render_index_action(struct gui_synclist *list, int *action,
                               bool wheel, int steps);
 void list_render_draw(struct gui_synclist *list);
+/* A frame drawn because the selection moved: the list's contents are as
+ * the last frame left them. */
+void list_render_draw_moved(struct gui_synclist *list);
 void list_render_settle(const struct gui_synclist *list);
 void list_render_retarget(const struct gui_synclist *list, int selection, int top,
                           int offset, bool wheel);

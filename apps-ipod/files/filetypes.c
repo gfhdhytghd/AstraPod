@@ -32,6 +32,7 @@
 #include "dir.h"
 #include "file.h"
 #include "draw/icon_bitmaps.h"
+#include "metadata_common.h"      /* mp4_has_video */
 /*#define LOGF_ENABLE*/
 #include "logf.h"
 
@@ -104,6 +105,10 @@ static const struct filetype_inbuilt inbuilt_filetypes[] = {
     { "gif",  FILE_ATTR_IMG },
     { "webp", FILE_ATTR_IMG },
     { "pbg",  FILE_ATTR_GAME },
+#ifdef HAVE_VIDEO_PLAYER
+    /* Not .mov: the player misreads QuickTime's sound descriptions */
+    { "m4v",  FILE_ATTR_VIDEO },
+#endif
 };
 
 #ifdef ASTRAPOD_ROCK_COMPAT
@@ -155,6 +160,7 @@ static const struct fileattr_icon_voice inbuilt_attr_icons_voices[] = {
     { FILE_ATTR_BOOK,  Icon_Book, -1 },
     { FILE_ATTR_LYRICS, Icon_Lyrics, -1 },
     { FILE_ATTR_GAME,  Icon_Plugin,    -1 },
+    { FILE_ATTR_VIDEO, Icon_Video,     -1 },
 #ifdef ASTRAPOD_ROCK_COMPAT
     { FILE_ATTR_ROCK_VIEWER, Icon_Plugin, -1 },
 #endif
@@ -312,11 +318,50 @@ bool filetype_supported(int attr)
     return find_attr(attr) >= 0;
 }
 
+bool filetype_is_video(const char *file, int attr)
+{
+#ifdef HAVE_VIDEO_PLAYER
+    const char *ext = strrchr(file, '.');
+    bool video = false;
+    int fd;
+
+    if ((attr & FILE_ATTR_MASK) == FILE_ATTR_VIDEO)
+        return true;
+    if ((attr & FILE_ATTR_MASK) != FILE_ATTR_AUDIO || !ext
+        || strcasecmp(ext, ".mp4"))
+        return false;
+    fd = open(file, O_RDONLY);
+    if (fd >= 0)
+    {
+        video = mp4_has_video(fd);
+        close(fd);
+    }
+    return video;
+#else
+    (void)file; (void)attr;
+    return false;
+#endif
+}
+
 /* Native file open dispatch, including the fixed compatibility viewers. */
 bool filetype_open_core_viewer(int attr, const char *file, int *rc)
 {
     switch (attr & FILE_ATTR_MASK)
     {
+#ifdef HAVE_VIDEO_PLAYER
+        case FILE_ATTR_AUDIO:
+            if (!filetype_is_video(file, attr))
+                return false;
+            /* fall through */
+        case FILE_ATTR_VIDEO:
+            /* The player takes the codec for the film's sound only while
+             * nothing else plays; otherwise the film is silent */
+            if (audio_status())
+                audio_stop();
+            *rc = rock_open_from_browser(PLUGIN_APPS_DIR "/h264_player.rock",
+                                         file);
+            return true;
+#endif
 #ifdef ASTRAPOD_ROCK_COMPAT
         case FILE_ATTR_LUA:
             *rc = rock_open_from_browser(VIEWERS_DIR "/lua.rock", file);

@@ -147,6 +147,11 @@ enum {
     GO_TO_CIDER,
     /* A row of a tagnavi.config menu, named by root_menu_library_row() */
     GO_TO_LIBRARY_ROW,
+    /* Videos: the flat list of what the video player plays
+     * (screens/browse/browser_flat.c). Dispatched on every build, so another
+     * theme's menu can open it by returning this code; the main-menu row
+     * exists only where there is a video player (HAVE_VIDEO_PLAYER). */
+    GO_TO_VIDEOS,
 };
 extern struct menu_item_ex root_menu_;
 

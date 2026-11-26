@@ -6,12 +6,11 @@
 #ifndef _BROWSER_FLAT_H
 #define _BROWSER_FLAT_H
 
-#include <stdbool.h>
+#include "files/file_index.h"
 
-/* Every image on the player when 'images' is set, every document otherwise,
- * in one flat list. Owns the screen until the user leaves. Returns a GO_TO_*
- * code. */
-int browser_flat(bool images);
+/* Every document, image or video on the player, by 'kind', in one flat list.
+ * Owns the screen until the user leaves. Returns a GO_TO_* code. */
+int browser_flat(enum flat_kind kind);
 
 /* global_settings.sort_documents and sort_images */
 enum flat_sort {

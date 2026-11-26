@@ -47,6 +47,10 @@ struct ogg_file
 
 /* On success these leave the stream at the UTF-8 value and return its size. */
 long find_mp4_lyrics(int fd);
+
+/* Whether an MP4 file holds a track of moving video, as has_video judges it,
+ * read from the moov's tracks alone: no tags, no sample tables. */
+bool mp4_has_video(int fd);
 long find_vorbis_lyrics(struct ogg_file *file, int fd, int type);
 
 int id3_unsynchronize(char* tag, int len, bool *ff_found);

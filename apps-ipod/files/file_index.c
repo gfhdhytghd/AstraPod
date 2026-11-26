@@ -1,17 +1,19 @@
 /***************************************************************************
  * GNU General Public License (version 2+)
  *
- * An index of the documents and images on the player.
+ * An index of the documents, images and videos on the player.
  *
  * Nothing else indexes them. The tag database knows about audio and nothing
  * but audio, so a flat "every document on the device" list has no existing
  * source to read -- which is why this walks the disk itself.
  *
- * One walk produces both lists. Classifying a file is a lookup on its
+ * One walk produces all three lists. Classifying a file is a lookup on its
  * extension (filetype_get_attr()), so having found a file it is as cheap to
- * ask both questions as one; walking twice would double the only expensive
- * part. The same walk keeps the book index (book_index.c) current, handing
- * it each book with the size and time its directory entry already gave.
+ * ask every question as one; walking again would repeat the only expensive
+ * part. An .mp4 is the exception: it is a video only if it holds a track of
+ * moving video, so each is opened to look. The same walk keeps the book index
+ * (book_index.c) current, handing it each book with the size and time its
+ * directory entry already gave.
  *
  * The lists are plain text, one path per line, written to a .tmp and renamed
  * only on a completed walk -- so an interrupted one leaves the previous list
@@ -54,8 +56,10 @@
 #include "metadata/art_cache.h"     /* new covers want a pass */
 #include "file_index.h"
 
-#define FILE_INDEX_DOCS   LIB_DOCUMENTS_FILE
-#define FILE_INDEX_IMAGES LIB_IMAGES_FILE
+/* By enum flat_kind */
+static const char * const fi_files[] = {
+    LIB_DOCUMENTS_FILE, LIB_IMAGES_FILE, LIB_VIDEOS_FILE,
+};
 
 /* Deepest nesting the walk will follow. Recursion here costs stack, and the
  * thread's is modest; anything filed deeper than this is almost certainly not
@@ -67,10 +71,9 @@ static volatile bool fi_wants_scan;
 static volatile bool fi_abort;
 static volatile bool fi_busy;
 
-/* The walk's two output lists. path_list owns the .tmp-and-rename publishing,
- * and the line accounting with it. */
-static struct path_list_writer fi_docs;
-static struct path_list_writer fi_images;
+/* The walk's output lists, by enum flat_kind. path_list owns the
+ * .tmp-and-rename publishing, and the line accounting with it. */
+static struct path_list_writer fi_lists[FLAT_KINDS];
 
 /* One path buffer, reused down the recursion rather than one per level:
  * MAX_PATH per frame times the depth limit is far more stack than the thread
@@ -93,10 +96,9 @@ const char *file_index_state(void)
 
 /* The writers keep their line counts past the close, so these are the last
  * pass's totals once it has finished and its running ones while it walks. */
-void file_index_counts(int *docs, int *images)
+int file_index_count(enum flat_kind kind)
 {
-    *docs = fi_docs.count;
-    *images = fi_images.count;
+    return fi_lists[kind].count;
 }
 
 const char *file_index_activity(void)
@@ -104,9 +106,9 @@ const char *file_index_activity(void)
     return fi_busy ? fi_path : "";
 }
 
-const char *file_index_list(bool images)
+const char *file_index_list(enum flat_kind kind)
 {
-    return images ? FILE_INDEX_IMAGES : FILE_INDEX_DOCS;
+    return fi_files[kind];
 }
 
 /* A line of a list: the file's time (FAT date and time) in eight hex
@@ -166,11 +168,13 @@ static bool fi_is_cover_art(const char *name)
     return false;
 }
 
-/* Both lists full: nothing more can be recorded, so stop walking. */
+/* Every list full: nothing more can be recorded, so stop walking. */
 static bool fi_lists_full(void)
 {
-    return path_list_write_full(&fi_docs)
-        && path_list_write_full(&fi_images);
+    for (int k = 0; k < FLAT_KINDS; k++)
+        if (!path_list_write_full(&fi_lists[k]))
+            return false;
+    return true;
 }
 
 /* Walk 'fi_path' (a directory) and everything under it. */
@@ -216,17 +220,24 @@ static void fi_walk(int depth)
         }
         else
         {
-            switch (filetype_get_attr(fi_path) & FILE_ATTR_MASK)
+            int attr = filetype_get_attr(fi_path);
+
+            switch (attr & FILE_ATTR_MASK)
             {
                 case FILE_ATTR_TXT:
                 case FILE_ATTR_BOOK:
                 case FILE_ATTR_LYRICS:
-                    fi_record(&fi_docs, info.mtime);
+                    fi_record(&fi_lists[FLAT_DOCUMENTS], info.mtime);
                     book_index_found(fi_path, info.size, info.mtime);
                     break;
                 case FILE_ATTR_IMG:
                     if (!fi_is_cover_art((char *)entry->d_name))
-                        fi_record(&fi_images, info.mtime);
+                        fi_record(&fi_lists[FLAT_IMAGES], info.mtime);
+                    break;
+                case FILE_ATTR_AUDIO:
+                case FILE_ATTR_VIDEO:
+                    if (filetype_is_video(fi_path, attr))
+                        fi_record(&fi_lists[FLAT_VIDEOS], info.mtime);
                     break;
             }
         }
@@ -244,18 +255,21 @@ static void fi_run_scan(void)
 {
     bool completed;
     long started;
+    int k;
 
     fi_abort = false;
     fi_busy = true;
 
-    /* Both or neither. One walk fills both lists, so a pass that could only
-     * open one of them has nothing worth publishing -- and publishing half a
-     * pass would leave the two lists describing different walks. */
-    if (!path_list_write_open(&fi_docs, FILE_INDEX_DOCS)
-        || !path_list_write_open(&fi_images, FILE_INDEX_IMAGES))
+    /* All or none. One walk fills every list, so a pass that could open only
+     * some of them has nothing worth publishing -- and publishing part of a
+     * pass would leave the lists describing different walks. */
+    for (k = 0; k < FLAT_KINDS; k++)
+        if (!path_list_write_open(&fi_lists[k], fi_files[k]))
+            break;
+    if (k < FLAT_KINDS)
     {
-        path_list_write_close(&fi_docs, false);
-        path_list_write_close(&fi_images, false);
+        for (k = 0; k < FLAT_KINDS; k++)
+            path_list_write_close(&fi_lists[k], false);
         fi_busy = false;
         fi_wants_scan = true;     /* no room to write now; try again later */
         return;
@@ -277,8 +291,8 @@ static void fi_run_scan(void)
     debug_log(DEBUG_LOG_TASKS, "%s: walk %s after %ld s",
               file_index_task.name, completed ? "done" : "interrupted",
               (long)(current_tick - started) / HZ);
-    path_list_write_close(&fi_docs, completed);
-    path_list_write_close(&fi_images, completed);
+    for (k = 0; k < FLAT_KINDS; k++)
+        path_list_write_close(&fi_lists[k], completed);
 
     fi_busy = false;
     fi_wants_scan = !completed;   /* interrupted: try again later */
@@ -306,7 +320,7 @@ static void fi_tick(void)
 }
 
 /* bg_task.request: both triggers do the same thing here. There is nothing to
- * keep between passes -- the walk rewrites both lists from scratch -- so a
+ * keep between passes -- the walk rewrites every list from scratch -- so a
  * rebuild and an update are the same walk. The thread sends one after a USB
  * session too: the host has had the disk, the one moment files reliably
  * appear and disappear without anyone telling us. */
@@ -318,7 +332,7 @@ static void fi_request(bool rebuild)
 
 struct bg_task file_index_task =
 {
-    .name    = "books, documents & images",
+    .name    = "books, documents, images & videos",
     .rank    = BG_RANK_FILES,
     .work_bytes = BOOK_INDEX_WORK_BYTES,
     .request = fi_request,
@@ -329,9 +343,10 @@ void file_index_init(void)
 {
     bg_task_init(&file_index_task);
 
-    /* Nothing to read on a first boot, or after the lists were deleted; or
-     * a book index an older version wrote, which only a walk replaces. */
-    if ((!file_exists(FILE_INDEX_DOCS) && !file_exists(FILE_INDEX_IMAGES))
-        || book_index_stale())
+    /* Nothing to read on a first boot, or after the lists were deleted; no
+     * video list, which an older version did not write; or a book index an
+     * older version wrote, which only a walk replaces. */
+    if ((!file_exists(LIB_DOCUMENTS_FILE) && !file_exists(LIB_IMAGES_FILE))
+        || !file_exists(LIB_VIDEOS_FILE) || book_index_stale())
         fi_wants_scan = true;
 }

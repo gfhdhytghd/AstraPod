@@ -29479,3 +29479,17 @@
     *: "PC"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_VIDEOS
+  desc: main menu, every video on the player in one list
+  user: core
+  <source>
+    *: "Videos"
+  </source>
+  <dest>
+    *: "Videos"
+  </dest>
+  <voice>
+    *: "Videos"
+  </voice>
+</phrase>

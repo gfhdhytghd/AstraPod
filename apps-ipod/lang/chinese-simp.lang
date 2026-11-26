@@ -29131,3 +29131,18 @@
     *: "PC"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_VIDEOS
+  desc: main menu, every video on the player in one list
+  user: core
+  <source>
+    *: "Videos"
+  </source>
+  <dest>
+    *: "视频"
+  </dest>
+  <voice>
+    *: "视频"
+  </voice>
+</phrase>

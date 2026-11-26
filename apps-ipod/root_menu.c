@@ -1029,18 +1029,24 @@ static int book_shelf_scrn(void* param)
     return book_shelf_run();
 }
 
-/* No database wait for these two: their list comes from the file index, which
- * walks the disk itself and knows nothing about the tag database. */
+/* No database wait for these three: their list comes from the file index,
+ * which walks the disk itself and knows nothing about the tag database. */
 static int documents_scrn(void* param)
 {
     (void)param;
-    return browser_flat(false);
+    return browser_flat(FLAT_DOCUMENTS);
 }
 
 static int images_scrn(void* param)
 {
     (void)param;
-    return browser_flat(true);
+    return browser_flat(FLAT_IMAGES);
+}
+
+static int videos_scrn(void* param)
+{
+    (void)param;
+    return browser_flat(FLAT_VIDEOS);
 }
 
 static int books_scrn(void* param)
@@ -1250,6 +1256,7 @@ static const struct root_items items[] = {
     [GO_TO_FEATURED_TRACKS] = { featured_tracks_scrn, NULL, &music_menu },
     [GO_TO_DOCUMENTS] = { documents_scrn, NULL, &text_viewer_menu },
     [GO_TO_IMAGES] = { images_scrn, NULL, NULL },
+    [GO_TO_VIDEOS] = { videos_scrn, NULL, NULL },
     [GO_TO_BOOKS] = { books_scrn, NULL, &text_viewer_menu },
     [GO_TO_PODCASTS] = { browser, (void*)GO_TO_PODCASTS, &tagcache_menu },
     [GO_TO_LIBRARY_ROW] = { browser, (void*)GO_TO_LIBRARY_ROW, &tagcache_menu },
@@ -1315,6 +1322,10 @@ MENUITEM_RETURNVALUE(documents_item, ID2P(LANG_DOCUMENTS), GO_TO_DOCUMENTS,
                         NULL, Icon_Font);
 MENUITEM_RETURNVALUE(images_item, ID2P(LANG_IMAGES), GO_TO_IMAGES,
                         NULL, Icon_Font);
+#ifdef HAVE_VIDEO_PLAYER
+MENUITEM_RETURNVALUE(videos_item, ID2P(LANG_VIDEOS), GO_TO_VIDEOS,
+                        NULL, Icon_Font);
+#endif
 MENUITEM_RETURNVALUE(books_item, ID2P(LANG_EBOOKS), GO_TO_BOOKS,
                         NULL, Icon_Font);
 MENUITEM_RETURNVALUE(spun_item, ID2P(LANG_SPUN), GO_TO_SPUN,
@@ -1445,6 +1456,9 @@ static struct menu_table menu_table[] = {
     { "search", &db_search_item },
     { "docs", &documents_item },
     { "images", &images_item },
+#ifdef HAVE_VIDEO_PLAYER
+    { "videos", &videos_item },
+#endif
     { "books", &books_item },
     { "spun", &spun_item },
     { "podcasts", &podcasts_item },
@@ -1521,6 +1535,9 @@ static void root_menu_apply_canonical_order(void)
     static const struct menu_item_ex * const after_tagnavi[] = {
         &current_playlist, &playlists, &spun_item,
         &file_browser, &books_item, &documents_item, &images_item,
+#ifdef HAVE_VIDEO_PLAYER
+        &videos_item,
+#endif
         &shortcut_menu, &quiz_item,
 #ifdef ASTRAPOD_ROCK_COMPAT
         &plugins_item,
@@ -1639,9 +1656,10 @@ static int root_menu_off_find(const struct menu_item_ex *item)
  * default, or new since the order was saved: turned off, after the first of
  * its anchors that is on, else before Settings. Customize Main Menu then
  * shows it there, and turning it on leaves it there. Podcasts and the tagnavi
- * rows are left out: their settings and tagnavi.config place them. Plugins
- * is the exception that goes in on, before Settings: it is on by default, and
- * an order that does not name it was saved before the row existed. */
+ * rows are left out: their settings and tagnavi.config place them. Plugins,
+ * before Settings, and Videos, at its home, are the exceptions that go in on:
+ * each is on by default, and an order that does not name it was saved before
+ * the row existed. */
 static const struct {
     const struct menu_item_ex *item;
     const struct menu_item_ex *after[3];
@@ -1649,6 +1667,9 @@ static const struct {
     { &books_item,        { &file_browser, NULL } },
     { &documents_item,    { &books_item, &file_browser } },
     { &images_item,       { &documents_item, &books_item, &file_browser } },
+#ifdef HAVE_VIDEO_PLAYER
+    { &videos_item,       { &images_item, &books_item, &file_browser } },
+#endif
     { &random_album_item, { &db_browser, NULL } },
     { &db_search_item,    { &db_browser, NULL } },
     { &current_playlist,  { &playlists, NULL } },
@@ -1662,6 +1683,21 @@ static unsigned root_menu_find(const struct menu_item_ex *item, unsigned count)
     for (i = 0; i < count && root_menu__[i] != item; i++)
         ;
     return i;
+}
+
+/* The rows that go in on where the order does not name them */
+static bool root_menu_new_on(const struct menu_item_ex *item)
+{
+#ifdef ASTRAPOD_ROCK_COMPAT
+    if (item == &plugins_item)
+        return true;
+#endif
+#ifdef HAVE_VIDEO_PLAYER
+    if (item == &videos_item)
+        return true;
+#endif
+    (void)item;
+    return false;
 }
 
 /* Turned off at its home, if the order does not name it. 'home' indexes
@@ -1686,8 +1722,7 @@ static void root_menu_place(int idx, int home)
             break;
         }
     }
-#ifdef ASTRAPOD_ROCK_COMPAT
-    if (item == &plugins_item)
+    if (root_menu_new_on(item))
     {
         memmove(&root_menu__[at + 1], &root_menu__[at],
                 (count - at) * sizeof(root_menu__[0]));
@@ -1696,7 +1731,6 @@ static void root_menu_place(int idx, int home)
         root_menu_set_count(count + 1);
         return;
     }
-#endif
     root_menu_off[root_menu_off_count].idx = idx;
     root_menu_off[root_menu_off_count].after = at;
     root_menu_off_count++;
@@ -1901,6 +1935,9 @@ enum list_pane_kind root_menu_item_pane(const struct menu_item_ex *item,
             break;
         case GO_TO_IMAGES:
             *art = STOCK_ART_NO_CONTENT_PHOTO_PREVIEW;
+            break;
+        case GO_TO_VIDEOS:
+            *art = STOCK_ART_NO_CONTENT_MOVIES_PREVIEW;
             break;
         case GO_TO_PODCASTS:
             *art = STOCK_ART_NO_CONTENT_PODCAST_PREVIEW;

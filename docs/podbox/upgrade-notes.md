@@ -63,3 +63,9 @@
   theme switches back. Choosing it asks first. Files and the System menu
   are in Extras, and Playback Report is a main menu row that starts
   hidden: turn it on in Settings > Main Menu.
+
+- **Videos** is a new row on the main menu, below Books. It lists every
+  film on the player that the video player plays: `.m4v` files, and `.mp4`
+  files that hold a picture track. Select one to watch it. The list fills
+  after the first scan of the disk; that scan starts by itself once after
+  this update. To hide the row, use **Edit Main Menu**.

@@ -51,7 +51,7 @@ static bool auto_absent(const struct menu_item_ex*i,unsigned n){(void)i;(void)n;
 static void write_shown(char**p,int*n,const struct menu_item_ex*i){(void)p;(void)n;(void)i;assert(0);}
 static const struct {const struct menu_item_ex*item;const struct menu_item_ex*after[3];}root_menu_homes[]={{&other,{&db_browser,NULL}}};
 '''
-functions='\n'.join(fn(s,n) for n in ['root_menu_refresh','root_menu_set_count','root_menu_active_count','root_menu_off_shift','root_menu_off_find','root_menu_find','root_menu_place','root_menu_place_unlisted','root_menu_get_options','menu_table_index_of_key','root_menu_load_from_cfg','write_key','root_menu_write_to_cfg'])
+functions='\n'.join(fn(s,n) for n in ['root_menu_refresh','root_menu_set_count','root_menu_active_count','root_menu_off_shift','root_menu_off_find','root_menu_find','root_menu_new_on','root_menu_place','root_menu_place_unlisted','root_menu_get_options','menu_table_index_of_key','root_menu_load_from_cfg','write_key','root_menu_write_to_cfg'])
 post=r'''
 static void load(const char*text){char cfg[512];bool customized=false;snprintf(cfg,sizeof cfg,"%s",text);root_menu_load_from_cfg(&customized,cfg);assert(customized);}
 static void save(char*out){memset(out,0,512);root_menu_write_to_cfg(NULL,out,512);}

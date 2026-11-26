@@ -59,6 +59,7 @@ enum themable_icons {
     Icon_Image,
     Icon_Book,
     Icon_Lyrics,
+    Icon_Video,
 };
 
 /*

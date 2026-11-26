@@ -48,6 +48,7 @@ struct list_motion {
     int visible;
     unsigned painted, trace;
     uint32_t started;
+    bool snap;
 };
 struct native_list {
     struct gui_synclist *owner;
@@ -88,6 +89,10 @@ static bool ui_scrolling_held(void) { return false; }
 static unsigned marquee_frames(void) { return 3; }
 static uint32_t ui_clock_frame(uint32_t clock) { return clock; }
 static uint32_t ui_frame_clock(unsigned frame) { return frame; }
+static uint32_t snap_deadline(const struct native_list *render)
+{ (void)render; return 5; }
+static bool snap_due(const struct native_list *render, uint32_t now)
+{ (void)render; (void)now; return false; }
 static void list_render_draw(struct gui_synclist *list)
 { assert(list->parent[0]); drawn++; }
 static void gui_synclist_layout(struct gui_synclist *list)

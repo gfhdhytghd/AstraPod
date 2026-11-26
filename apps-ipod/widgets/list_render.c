@@ -70,6 +70,9 @@ struct list_pose {
     int64_t top, cursor;
 };
 
+/* A glide samples frame n at refresh n after it starts. Under snapped
+ * scrolling the marker instead steps one frame per refresh it reaches:
+ * painted counts the frames drawn. */
 struct list_motion {
     struct list_pose from, live, rest;
     uint32_t started;
@@ -78,7 +81,7 @@ struct list_motion {
     int visible, count, span;
     struct ui_rect bounds;
     int pitch;
-    bool wheel;
+    bool wheel, snap;
 };
 
 /* A theme gradient as RGB565 rows, for a fill `height` rows tall. */
@@ -142,7 +145,9 @@ struct native_list {
     int indicator;
     struct gradient_rows bar_rows, thumb_rows;
     uint32_t marquee_started, marquee_frame;
-    bool has_marquee;
+    /* The refresh at which the last snapped frame reaches the panel. */
+    uint32_t presented;
+    bool has_marquee, snap_frame;
     unsigned char mark_mask[2];
 };
 
@@ -370,6 +375,24 @@ static int64_t limit_top(const struct list_motion *motion, struct list_pose pose
     return MIN(top, pose.cursor + HALF_ROW);
 }
 
+/* Under snapped scrolling the eased tail would repeat a pixel. A marker
+ * with at least a pixel per frame left to go keeps moving a pixel or more
+ * on every frame until it arrives. */
+static int64_t marker_tail(const struct list_motion *motion, int64_t cursor,
+                           unsigned frame)
+{
+    int pitch = MAX(1, motion->pitch);
+    int64_t pixel = (ROW_UNIT + pitch - 1) / pitch;
+    int64_t from = motion->from.cursor, to = motion->live.cursor;
+    int64_t left = (int64_t)(motion->glide_frames - frame) * pixel;
+    int64_t span = (int64_t)motion->glide_frames * pixel;
+    if (to - from >= span)
+        return MIN(cursor, to - left);
+    if (from - to >= span)
+        return MAX(cursor, to + left);
+    return cursor;
+}
+
 static struct list_pose motion_sample(const struct list_motion *motion, unsigned frame)
 {
     struct list_pose pose = motion->live;
@@ -378,6 +401,8 @@ static struct list_pose motion_sample(const struct list_motion *motion, unsigned
     {
         pose.top = ease_out(motion->from.top, pose.top, frame, glide);
         pose.cursor = ease_out(motion->from.cursor, pose.cursor, frame, glide);
+        if (motion->snap)
+            pose.cursor = marker_tail(motion, pose.cursor, frame);
     }
     else if (pose.top != motion->rest.top)
     {
@@ -428,9 +453,11 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
                       motion->count == list->nb_items && motion->span == span &&
                       !memcmp(&motion->bounds, &g.rows, sizeof(g.rows)) &&
                       motion->rest.top == from.top && motion->rest.cursor == from.cursor;
+    bool snap =
+        render->theme.style[UI_STYLE_LIST_SCROLL] == UI_LIST_SCROLL_SNAP;
     if (continuing)
     {
-        from = motion_sample(motion, frame);
+        from = motion_sample(motion, snap ? motion->painted : frame);
         /* Carry the frame phase through rapid wheel events. Restarting the
          * clock at each detent would stall a glide when detents arrive < 1 f apart. */
         now -= elapsed - ui_frame_clock(frame);
@@ -448,8 +475,6 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     bool fast = wheel && (offset < -1 || offset > 1 ||
                          (continuing && motion->wheel && frame < motion->glide_frames));
 
-    bool snap =
-        render->theme.style[UI_STYLE_LIST_SCROLL] == UI_LIST_SCROLL_SNAP;
     if (snap)
     {
         /* The rows jump to their new place and the marker sets out from
@@ -502,7 +527,7 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
         .glide_frames = glide,
         .spring_frames = ui_theme_motion(UI_MOTION_LIST, SPRING_F, GLIDE_F),
         .visible = visible, .count = list->nb_items, .span = span,
-        .bounds = g.rows, .pitch = g.pitch, .wheel = wheel,
+        .bounds = g.rows, .pitch = g.pitch, .wheel = wheel, .snap = snap,
     };
 
 done:
@@ -2094,6 +2119,63 @@ static void refresh_backdrop(struct native_list *render, bool visible)
         ui_layer_free(&render->backdrop);
 }
 
+/* The panel's scan reaches row y this long after the TE rise: the TE
+ * pulse, then the rows at an even pace through the rest of the refresh. */
+#define TE_PULSE_US 1100
+#define SCAN_MARGIN_US 500
+
+static uint32_t scan_reaches(int y)
+{
+    uint32_t period = ui_frame_period();
+    return TE_PULSE_US + (period - TE_PULSE_US) * MAX(0, y) / LCD_HEIGHT +
+           SCAN_MARGIN_US;
+}
+
+/* A marker frame for the next refresh is drawn once the scan of the
+ * refresh showing the last one has reached the marker. The LCD driver then
+ * cannot start it ahead of that scan, which would show it a refresh early
+ * on top of the last frame, and it has most of a refresh to reach the
+ * panel behind the scan. */
+static uint32_t snap_deadline(const struct native_list *render)
+{
+    const struct list_motion *motion = &render->motion;
+    struct list_pose next = motion_sample(motion,
+        MIN(motion->painted + 1, motion_duration(motion)));
+    int y = motion->bounds.y +
+            (next.cursor - next.top) * motion->pitch / ROW_UNIT;
+    if (render->shown.valid)
+        y = MAX(y, render->shown.cursor_y);
+    return render->presented + scan_reaches(y);
+}
+
+/* Whether the next marker frame is due. A deadline further ahead than any
+ * frame queues is left from long ago. */
+static bool snap_due(const struct native_list *render, uint32_t now)
+{
+    int32_t left = snap_deadline(render) - now;
+    return left <= 0 || left > 3 * (int32_t)ui_frame_period();
+}
+
+/* Records the refresh the marker frame just drawn reaches. */
+static void snap_presented(struct native_list *render, bool submitted)
+{
+    uint32_t now = USEC_TIMER, refresh;
+    if (submitted && ui_present_refresh(now, &refresh))
+    {
+        render->presented = refresh;
+        return;
+    }
+    /* Unreported, the frame counts for the next refresh, and keeps to the
+     * refresh grid unless a whole refresh has gone by without one. */
+    int32_t period = ui_frame_period();
+    uint32_t soonest = now, phase = ui_clock_phase(now);
+    if (phase != UINT32_MAX)
+        soonest += period - phase;
+    uint32_t next = render->presented + period;
+    int32_t late = soonest - next;
+    render->presented = late >= period || late < -3 * period ? soonest : next;
+}
+
 static bool update_row_pose(struct native_list *render, const struct list_geometry *g)
 {
     struct gui_synclist *list = render->owner;
@@ -2103,7 +2185,22 @@ static bool update_row_pose(struct native_list *render, const struct list_geomet
     bool finished = false;
     if (motion_enabled() && motion_matches(motion, g, list))
     {
-        motion->painted = ui_clock_frame((uint32_t)USEC_TIMER - motion->started);
+        if (motion->snap)
+        {
+            /* A jump of the rows is a frame of its own and carries the
+             * marker's next step. */
+            bool jump = render->shown.valid && render->shown.top !=
+                        MAX(0, list->start_item[SCREEN_MAIN]);
+            if (motion->painted < motion_duration(motion) &&
+                (jump || snap_due(render, USEC_TIMER)))
+            {
+                motion->painted++;
+                render->snap_frame = true;
+            }
+        }
+        else
+            motion->painted =
+                ui_clock_frame((uint32_t)USEC_TIMER - motion->started);
         pose = motion_sample(motion, motion->painted);
         finished = motion->painted >= motion_duration(motion);
     }
@@ -2394,8 +2491,14 @@ static void draw_list(struct gui_synclist *list, bool status_only,
         };
     }
     ui_inhibit_flush(held);
+    unsigned flushes = ui_flush_count();
     if (!gui_synclist_flush_inhibited())
         ui_flush_dirty();
+    if (render->snap_frame)
+    {
+        render->snap_frame = false;
+        snap_presented(render, ui_flush_count() != flushes);
+    }
     if (motion_finished)
         motion_stop(&render->motion);
 #ifdef HAVE_ADJUSTABLE_CPU_FREQ
@@ -2523,10 +2626,17 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
             uint32_t elapsed = now - motion->started;
             /* A new frame waits for its presentation slot, so a half-rate
              * glide keeps its frame parity. */
-            bool due = ui_clock_frame(elapsed) > motion->painted &&
+            bool due = motion->snap ? snap_due(render, now) :
+                       ui_clock_frame(elapsed) > motion->painted &&
                        (int32_t)(now - glide_pace.due) >= 0;
             if (!motion_enabled() || due)
                 delay = 0;
+            else if (poll && motion->snap)
+            {
+                int motion_delay = ui_clock_wait_until(snap_deadline(render));
+                if (delay == TIMEOUT_BLOCK || motion_delay < delay)
+                    delay = motion_delay;
+            }
             else if (poll)
             {
                 uint32_t deadline = ui_pace_next(&glide_pace, motion->started);

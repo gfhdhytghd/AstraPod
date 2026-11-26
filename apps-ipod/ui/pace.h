@@ -40,5 +40,10 @@ static inline unsigned ui_pace_frame(const struct ui_pace *pace)
 void ui_pace_get_status(struct ui_pace_status *status);
 /* Microseconds after the predicted TE rise, or UINT32_MAX when unknown. */
 uint32_t ui_clock_phase(uint32_t clock);
+/* Call right after a submission: the TE rise of the refresh that first
+ * shows it. A transfer that started ahead of the panel's scan shows in the
+ * refresh it started in; one behind the scan, or still waiting for its
+ * window, shows in the next. False when the LCD does not report it. */
+bool ui_present_refresh(uint32_t now, uint32_t *refresh);
 
 #endif

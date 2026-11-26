@@ -268,5 +268,12 @@ Set `/.rockbox/ui-perf.enable` before starting the firmware to record frame
 timing. Each animation writes its samples and summary to
 `/.rockbox/ui-perf.txt` when it exits. The reported work combines renderer and
 synchronous LCD submission time. Submission intervals are recorded separately.
-They include scheduling and any skipped visual updates. The log measures
-submissions to the LCD driver. It cannot see the panel scanning out the pixels.
+They include scheduling and any skipped visual updates. Each row's
+`te_slots` counts the panel refreshes since the previous submission began.
+`present_slots` counts the refreshes between the ones that first show this
+frame and the previous one, as the LCD driver scheduled their transfers: a
+small rect sent early in a refresh shows in it, a large one in the next. A
+motion that shows a new frame at every refresh reads `present_slots` 1 after
+its first row; the summary's `present_gaps` and `present_repeats` count the
+rows above and below 1, and `te_gaps` and `te_repeats` do the same for
+`te_slots`. The log cannot see the panel scanning out the pixels.

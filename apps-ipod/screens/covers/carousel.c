@@ -3725,6 +3725,7 @@ static void flow_cover_columns(const struct flow_card *card, int slot, int sprea
         t = (1 << 30) - t;
         dt = -dt;
     }
+    const bool depth_test = flow_row.phase == STOCK_SCROLL || flow_row.phase == STOCK_REST;
     face->t0 = t;
     face->dt = dt;
     for (int x = first; x < end; x++, t = (uint32_t)t + dt)
@@ -3732,7 +3733,14 @@ static void flow_cover_columns(const struct flow_card *card, int slot, int sprea
         int h = h0 + ((int64_t)(h1 - h0) * t >> 30);
         int y0 = face->top + ((int64_t)face->top_delta * t >> 30);
         struct flow_column *col = &flow_columns[x];
-        if (col->height)
+        /* At rest and while scrolling, projected height gives reciprocal
+         * depth on this ray. Intersecting faces can exchange order mid-span. */
+        if (depth_test)
+        {
+            if (h < col->height)
+                continue;
+        }
+        else if (col->height)
         {
             flow_top[x] = MIN(flow_top[x], col->y0 >> 16);
             flow_end[x] = MAX(flow_end[x],
@@ -7289,7 +7297,12 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         if (first_frame)
             button = ACTION_NONE;
         else
-            button = get_custom_action(CONTEXT_PLUGIN, timeout, get_context_map);
+        {
+            int context = CONTEXT_PLUGIN;
+            if (!flat_view() && !panel.live && !leaving)
+                context |= CONTEXT_WHEEL_DETENTS;
+            button = get_custom_action(context, timeout, get_context_map);
+        }
         uint32_t action_us = USEC_TIMER;
         first_frame = false;
         ui_inhibit_flush(inherited_inhibit);
@@ -8420,6 +8433,7 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
     unsigned trace = 0;
     cover_resume_dirty = false;
     ret = album_covers_loop(&trace, restored_pixels || pf_entry_prepared);
+    wheel_set_detent_mode(false);
     button_set_sw_poweroff_state(true);
 
     remember_current_cover();

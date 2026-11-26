@@ -28653,3 +28653,17 @@
     *: "View waveform"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_COVER_FLOW_TITLE
+  desc: Album Covers' status bar title under Classic and Plastic
+  user: core
+  <source>
+    *: "Cover Flow"
+  </source>
+  <dest>
+    *: "Cover Flow"
+  </dest>
+  <voice>
+    *: "Cover Flow"
+  </voice>
+</phrase>

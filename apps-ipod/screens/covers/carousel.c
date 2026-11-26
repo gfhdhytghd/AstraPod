@@ -1282,8 +1282,11 @@ const char *carousel_caption_fit(const char *str, char *buf, size_t size)
 /* The model's title is a phrase, resolved each time it is shown. */
 static const char *model_title(void)
 {
-    return model->external ? cider_remote_name()
-                           : P2STR((unsigned char *)model->title);
+    if (model->external)
+        return cider_remote_name();
+    const char *title = pf_stock && model->stock_title ? model->stock_title
+                                                       : model->title;
+    return P2STR((unsigned char *)title);
 }
 
 void set_scroll_line(const char *str, enum pf_scroll_line_type type)

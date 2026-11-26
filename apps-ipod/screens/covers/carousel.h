@@ -122,6 +122,7 @@ struct carousel_model {
     void (*speak)(int index); /* say a slide, once it comes to rest */
     bool owns_cache_version;                           /* honours pf_cfg.cache_version */
     const char *title;                                 /* status-bar title */
+    const char *stock_title;   /* its title under the stock look; NULL = title */
     const char *motion_trace;                          /* optional frame-log route */
     bool external;                                    /* independent library */
     bool (*read_art)(int index, struct bitmap *bitmap); /* native columns */

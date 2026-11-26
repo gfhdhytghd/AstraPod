@@ -154,6 +154,7 @@ static const struct carousel_model album_model = {
     .speak       = album_speak,
     .owns_cache_version = true,
     .title       = (const char *)ID2P(LANG_ALBUM_COVERS),
+    .stock_title = (const char *)ID2P(LANG_COVER_FLOW_TITLE),
 };
 
 /**

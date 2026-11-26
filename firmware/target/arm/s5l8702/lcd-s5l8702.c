@@ -32,6 +32,7 @@
 #ifndef BOOTLOADER
 #include "lcd-te-s5l8702.h"
 #include "lcd-experiment-s5l8702.h"
+#include "lcd-hwscroll.h"
 #define HAVE_LCD_TE_QUEUE
 #endif
 #endif
@@ -620,6 +621,30 @@ bool lcd_te_acquire_bus(void)
 void lcd_te_release_bus(void)
 {
     mutex_unlock(&lcd_mutex);
+}
+
+bool lcd_hwscroll_send(uint8_t cmd, const uint8_t *data, unsigned int size)
+{
+    uint32_t deadline = USEC_TIMER + 5000;
+    while (!lcd_bus_idle())
+        if (!TIME_BEFORE(USEC_TIMER, deadline))
+            return false;
+
+    udelay(1);
+    LCD_CON = lcd_cmd_mode;
+    LCD_WCMD = cmd;
+    while (size--)
+    {
+        while (LCD_STATUS & 0x10)
+            if (!TIME_BEFORE(USEC_TIMER, deadline))
+                return false;
+        LCD_WDATA = *data++;
+    }
+
+    while (!lcd_bus_idle())
+        if (!TIME_BEFORE(USEC_TIMER, deadline))
+            return false;
+    return true;
 }
 
 bool lcd_stock_set(unsigned int mask, struct lcd_stock_readback *readback)

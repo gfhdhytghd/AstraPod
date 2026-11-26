@@ -163,6 +163,7 @@ def build_raster(directory):
     lib = C.CDLL(str(library))
     args = {
         "source_open": (C.c_void_p, C.c_char_p, C.c_int, C.c_int, C.c_int),
+        "source_open_scaled": (C.c_void_p, C.c_char_p, C.c_int, C.c_int, C.c_int),
         "source_close": (None, C.c_void_p),
         "source_metrics": (None, C.c_void_p, C.POINTER(C.c_int)),
         "source_advance": (C.c_int, C.c_void_p, C.c_uint32),
@@ -172,6 +173,7 @@ def build_raster(directory):
                           C.c_int, C.c_int, C.POINTER(C.c_int)),
     }
     args["source_raster_lcd"] = (*args["source_raster"], C.c_int)
+    args["source_raster_unhinted"] = args["source_raster"]
     for name, (result, *argtypes) in args.items():
         fn = getattr(lib, name)
         fn.restype, fn.argtypes = result, argtypes
@@ -292,11 +294,12 @@ def winning_pairs(faces, mapping):
     return choices
 
 
-def pack_alpha(pixels):
+def pack_alpha(pixels, table=None):
+    table = table or ALPHA
     result = bytearray()
     for offset in range(0, len(pixels), 2):
-        low = ALPHA[pixels[offset]]
-        high = ALPHA[pixels[offset + 1]] if offset + 1 < len(pixels) else 15
+        low = table[pixels[offset]]
+        high = table[pixels[offset + 1]] if offset + 1 < len(pixels) else 15
         result.append(low | high << 4)
     return result
 
@@ -359,7 +362,9 @@ def lcd_bitmap(face, cp, phase):
     return (x, y, w, h), pack_alpha(gray) + pack_alpha(rgb)
 
 
-def compile_font(path, faces, mapping, pairs, size, weight, fusion=None):
+def compile_font(path, faces, mapping, pairs, size, weight, fusion=None, stock=None):
+    """With a stock glyph set, its glyphs and line metrics take precedence and
+    every glyph keeps one phase and a whole-pixel advance, without kerning."""
     for face in faces:
         face.set_size(size, weight)
 
@@ -368,6 +373,8 @@ def compile_font(path, faces, mapping, pairs, size, weight, fusion=None):
     ascent, source_height = faces[1].metrics()
     height = size + (size >= 18)
     ascent = min(height, max(1, ascent - (source_height - height + 1) // 2))
+    if stock:
+        height, ascent, pairs = stock.height, stock.ascent, {}
     cjk_shifts = cjk_alignment(faces)
     pixel = {cp: fusion[cp] for cp in mapping if ideograph(cp) and cp in fusion} if fusion else {}
 
@@ -417,12 +424,20 @@ def compile_font(path, faces, mapping, pairs, size, weight, fusion=None):
         source = mapping[cp]
         if source is None:
             advance, record = 0, b"\x01\0\0\0\0"
+        elif stock and cp in stock.glyphs:
+            record, advance = stock.glyphs[cp]
+            _, x, y, w, h = struct.unpack_from("<BbbBB", record)
+            if w and h:
+                ink_above = max(ink_above, y - ascent)
+                ink_below = max(ink_below, ascent - y + h - height)
         else:
             face = faces[source]
             dot = pixel.get(cp)
             advance = dot.adv * 64 if dot else face.advance(cp)
-            rgb = size == 12
-            phases = (0,) if cjk(cp) else (0, 16, 32, 48)
+            if stock:
+                advance = (advance + 32) & ~63
+            rgb = size == 12 and not stock
+            phases = (0,) if cjk(cp) or stock else (0, 16, 32, 48)
             record = bytearray([len(phases) | (RECORD_RGB if rgb else 0)])
             for phase in phases:
                 if rgb:
@@ -521,11 +536,19 @@ def compile_font(path, faces, mapping, pairs, size, weight, fusion=None):
             "fixed_count": len(slots), "cell_bytes": stride, "map_bytes": len(ranks) * 2 + INDEX.size * len(variable)}
 
 
+def stock_glyph_sets(directory):
+    """The stock firmware glyph sets that stock.py converted, by basename."""
+    from stock import GlyphSet
+    return {path.stem: GlyphSet(path) for path in sorted(directory.glob("*.sgl"))
+            if not path.stem.startswith("cjk")}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("--fusion-cache", type=Path, default=FUSION_CACHE)
     parser.add_argument("--lang-dir", type=Path, default=ROOT / "apps-ipod/lang")
+    parser.add_argument("--stock-dir", type=Path, default=ROOT / "apps-ipod/fonts/stock")
     parser.add_argument("--font", nargs=3, action="append", default=[],
                         metavar=("FAMILY", "FILE", "FACE_INDEX"))
     args = parser.parse_args()
@@ -566,6 +589,15 @@ def main():
                                   if spec[0] in (8, 10) else None)
                         info = compile_font(path, fonts, mapping, pairs, *spec, fusion=fusion)
                     generated[spec] = path, info
+                manifest["fonts"][name] = info
+                print(name, info, flush=True)
+            for name, stock in stock_glyph_sets(args.stock_dir).items():
+                path = args.output / (name + ".pbf")
+                info = compile_font(path, fonts, mapping, pairs, stock.size, stock.weight,
+                                    stock=stock)
+                info["stock_size64"] = stock.size64
+                info["stock_glyphs"] = sum(mapping.get(cp) is not None for cp in stock.glyphs)
+                info["stock_outline_glyphs"] = stock.own
                 manifest["fonts"][name] = info
                 print(name, info, flush=True)
             (args.output / "sources.json").write_text(

@@ -7,7 +7,7 @@ import struct
 from zipfile import ZipFile
 
 from check import BitmapFont
-from compile import FONTS, ROOT, cjk, required_codepoints
+from compile import FONTS, ROOT, cjk, required_codepoints, stock_glyph_sets
 
 # These are the transcriptions to check, not identifications of the songs.
 PHOTO_CANDIDATES = "囉個驚妳謊揮卻暈遺忘臉"
@@ -63,7 +63,7 @@ def check(font_dir, baseline, database, fixtures):
               "photo_candidates": {ch: {"codepoint": f"U+{ord(ch):04X}", "in_gb2312": ord(ch) in gb,
                                         "in_baseline": ord(ch) in old.index} for ch in PHOTO_CANDIDATES},
               "fonts": {}}
-    for name in FONTS:
+    for name in [*FONTS, *stock_glyph_sets(ROOT / "apps-ipod/fonts/stock")]:
         font = BitmapFont(font_dir / (name + ".pbf"))
         index_only = name.startswith("56-")
         missing = (db | lyrics) - font.index.keys()

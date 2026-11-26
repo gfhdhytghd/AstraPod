@@ -1,6 +1,6 @@
 # Native PodBox theme format
 
-The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in AstraPod's fonts. The built-in Plastic theme is Classic drawn with Apple's own bitmaps from that firmware.
+The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica. The built-in Plastic theme is Classic drawn with Apple's own bitmaps from that firmware.
 
 ## Installing and choosing a theme
 
@@ -55,15 +55,26 @@ Scrim's album-driven defaults are `palette.background=dominant,0,15`, `palette.l
 
 Use `font.<role>=<basename>` to reference a font. The basename can contain 1–31 ASCII letters, digits, hyphens and underscores, and must start with a letter or digit. The firmware appends `.pbf` for text roles and `.fnt` for `font.icon`. `font.icon` uses the glyph mapping for the built-in status and navigation symbols. Use an icon font with the same glyph assignments to preserve their meaning.
 
-| Role | Built-in basename |
-| --- | --- |
-| `list`, `body`, `lyrics`, `status` | `18-noto-sans` |
-| `title` | `18-noto-sans-bold` |
-| `icon` | `24x24-icons` |
-| `wps_title`, `handoff_title`, `lyrics_focus` | `26-noto-sans-medium` |
-| `wps_meta`, `handoff_caption` | `12-noto-sans` |
-| `panel` | `14-noto-sans` |
-| `status_title` | `18-noto-sans-bold` |
+| Role | Scrim and Light | Classic and Plastic |
+| --- | --- | --- |
+| `list` | `18-noto-sans` | `16-helvetica-bold` |
+| `title` | `18-noto-sans-bold` | `17-helvetica-bold` |
+| `body` | `18-noto-sans` | `13-helvetica` |
+| `lyrics` | `18-noto-sans` | `18-noto-sans` |
+| `status` | `18-noto-sans` | `13-helvetica-bold` |
+| `status_title` | `18-noto-sans-bold` | `13-helvetica-bold` |
+| `icon` | `24x24-icons` | `24x24-icons` |
+| `wps_title` | `26-noto-sans-medium` | `17-helvetica-bold` |
+| `handoff_title`, `lyrics_focus` | `26-noto-sans-medium` | `26-noto-sans-medium` |
+| `wps_meta` | `12-noto-sans` | `13-helvetica-bold` |
+| `handoff_caption` | `12-noto-sans` | `12-noto-sans` |
+| `panel` | `14-noto-sans` | `14-noto-sans` |
+
+The `helvetica` fonts are Apple's Helvetica from the stock firmware, at the
+stock sizes, with its CJK bitmaps at 11 or 16 px. They keep the stock
+layout: whole-pixel glyph positions and no kerning. Other scripts come from
+the `noto` fonts' faces at the same size. `17-helvetica-bold-pane` is a
+slightly larger 17 px bold for the art panel's headings.
 
 ### Cover Flow album panel
 
@@ -180,10 +191,13 @@ gradient.selection = 96c5da,09a4e1,0065d3,004386
 gradient.status = fcfcfc,f8f8f8,9f9e9e,5b5b5b
 gradient.progress = 6483f0,6789f2,56aeff,4e8fce
 gradient.progress_track = dbdbdb,fdfdfd,e2e2e2,bababa
-font.list = 18-noto-sans-bold
-font.status = 14-noto-sans
-font.status_title = 14-noto-sans
-font.wps_title = 18-noto-sans-bold
+font.list = 16-helvetica-bold
+font.title = 17-helvetica-bold
+font.body = 13-helvetica
+font.status = 13-helvetica-bold
+font.status_title = 13-helvetica-bold
+font.wps_title = 17-helvetica-bold
+font.wps_meta = 13-helvetica-bold
 metric.row_height = 24
 metric.list_x = 0
 metric.list_y = 20

@@ -251,14 +251,17 @@ static void classic(struct ui_theme *theme)
         theme->color[color_set[i].role] = color_set[i].rgb;
     for (size_t i = 0; i < ARRAY_COUNT(metric_set); i++)
         theme->metric[metric_set[i].role] = metric_set[i].value;
-    strcpy(theme->font[UI_FONT_LIST], "18-noto-sans-bold");
-    strcpy(theme->font[UI_FONT_STATUS], "14-noto-sans");
-    strcpy(theme->font[UI_FONT_STATUS_TITLE], "14-noto-sans");
+    strcpy(theme->font[UI_FONT_LIST], "16-helvetica-bold");
+    strcpy(theme->font[UI_FONT_TITLE], "17-helvetica-bold");
+    strcpy(theme->font[UI_FONT_BODY], "13-helvetica");
+    strcpy(theme->font[UI_FONT_STATUS], "13-helvetica-bold");
+    strcpy(theme->font[UI_FONT_STATUS_TITLE], "13-helvetica-bold");
     theme->gradient[UI_GRADIENT_SELECTION] = (struct ui_theme_gradient){
         .color = { 0x96c5da, 0x09a4e1, 0x0065d3, 0x004386 }, .stops = 4 };
     theme->gradient[UI_GRADIENT_STATUS] = (struct ui_theme_gradient){
         .color = { 0xfcfcfc, 0xf8f8f8, 0x9f9e9e, 0x5b5b5b }, .stops = 4 };
-    strcpy(theme->font[UI_FONT_WPS_TITLE], "18-noto-sans-bold");
+    strcpy(theme->font[UI_FONT_WPS_TITLE], "17-helvetica-bold");
+    strcpy(theme->font[UI_FONT_WPS_META], "13-helvetica-bold");
     theme->gradient[UI_GRADIENT_PROGRESS] = (struct ui_theme_gradient){
         .color = { 0x6483f0, 0x6789f2, 0x56aeff, 0x4e8fce }, .stops = 4 };
     theme->gradient[UI_GRADIENT_PROGRESS_TRACK] = (struct ui_theme_gradient){

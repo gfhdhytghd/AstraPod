@@ -29,7 +29,8 @@ void source_close(struct source *src)
     free(src);
 }
 
-struct source *source_open(const char *file, int index, int px, int weight)
+/* The size is in 1/64 px. */
+struct source *source_open_scaled(const char *file, int index, int size, int weight)
 {
     struct source *src = calloc(1, sizeof(*src));
     if (!src)
@@ -43,7 +44,8 @@ struct source *source_open(const char *file, int index, int px, int weight)
         if (FT_Set_Var_Design_Coordinates(src->face, 1, &value))
             goto error;
     }
-    if (FT_Set_Pixel_Sizes(src->face, 0, px))
+    if (size % 64 ? FT_Set_Char_Size(src->face, 0, size, 72, 72)
+                  : FT_Set_Pixel_Sizes(src->face, 0, size / 64))
         goto error;
 
     src->font = hb_ft_font_create_referenced(src->face);
@@ -54,6 +56,11 @@ struct source *source_open(const char *file, int index, int px, int weight)
 error:
     source_close(src);
     return NULL;
+}
+
+struct source *source_open(const char *file, int index, int px, int weight)
+{
+    return source_open_scaled(file, index, px * 64, weight);
 }
 
 int source_advance(struct source *src, uint32_t cp)
@@ -99,6 +106,14 @@ int source_raster(struct source *src, uint32_t cp, int phase,
                   int metrics[4], uint8_t *pixels, unsigned capacity)
 {
     return raster(src, cp, phase, metrics, pixels, capacity, FT_RENDER_MODE_NORMAL, HINTING);
+}
+
+/* Apple's firmware draws its Helvetica outlines without hinting. */
+int source_raster_unhinted(struct source *src, uint32_t cp, int phase,
+                           int metrics[4], uint8_t *pixels, unsigned capacity)
+{
+    return raster(src, cp, phase, metrics, pixels, capacity, FT_RENDER_MODE_NORMAL,
+                  FT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING);
 }
 
 int source_raster_lcd(struct source *src, uint32_t cp, int phase,

@@ -14,6 +14,31 @@ HarmonyOS Sans SC supplies CJK. Noto supplements missing glyphs at the
 same size. Each bitmap has a fixed common baseline. Index and active lyrics
 each load a separate native size. The UI reads alpha samples at 1:1.
 
+## Stock firmware fonts
+
+The `NN-helvetica*` fonts of the Classic and Plastic themes start from
+Apple's Helvetica and its CJK bitmap strikes in the stock iPod Classic
+firmware. `python3 tools/fonts/stock.py FONT_DIR` converts the stock Fonts
+folder into the SGL1 glyph sets in `apps-ipod/fonts/stock/`, which are
+committed; the stock files stay outside Git. `compile.py` then builds one
+PBF1 font per set: the stock Helvetica glyphs first, then the CJK strike
+named in the set, then the faces above at the set's whole pixel size. Every
+glyph of these fonts has one phase and a whole-pixel advance, and none is
+kerned, as on the stock firmware.
+
+An SGL1 file is a little-endian header (`SGL1`, the scale in 1/64 px, the
+fallback weight, line height, ascent, CJK strike ppem or 0, glyph count),
+one entry per glyph (32-bit codepoint, 16-bit advance in 1/64 px, 16-bit
+record size), then the PBF1 bitmap records in the same order.
+
+| Basename | Stock face | Scale |
+|---|---|---|
+| `13-helvetica` | Helvetica | 13.125 px |
+| `13-helvetica-bold` | Helvetica Bold | 13.125 px |
+| `16-helvetica-bold` | Helvetica Bold | 16.25 px |
+| `17-helvetica-bold` | Helvetica Bold | 17 px |
+| `17-helvetica-bold-pane` | Helvetica Bold | 17.4375 px |
+
 ## PBF1 layout
 
 All multibyte fields are little-endian. The header contains the magic

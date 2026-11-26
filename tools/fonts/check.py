@@ -114,9 +114,25 @@ def font_sources(stack, lang):
     return fonts, mapping
 
 
+def check_stock(bitmap, stock, faces, mapping):
+    """Stock glyphs are copied as converted; every other glyph has one phase,
+    a whole-pixel advance and no kerning."""
+    assert (bitmap.height, bitmap.ascent, bitmap.rows) == (stock.height, stock.ascent, 0)
+    for cp, (offset, length, advance, _, _) in bitmap.index.items():
+        record = bitmap.data[bitmap.bitmaps + offset:bitmap.bitmaps + offset + length]
+        if mapping[cp] is None:
+            assert record == b"\x01\0\0\0\0"
+        elif cp in stock.glyphs:
+            assert (record, advance) == stock.glyphs[cp], f"U+{cp:04X}"
+        else:
+            assert len(list(bitmap.phases(cp))) == 1 and not advance % 64
+            assert advance == (faces[mapping[cp]].advance(cp) + 32) & ~63
+
+
 def check_compiler(first, second, lang):
     manifest = json.loads((first / "sources.json").read_text())
-    assert len(manifest["fonts"]) == len(compiler.FONTS)
+    stock_sets = compiler.stock_glyph_sets(compiler.ROOT / "apps-ipod/fonts/stock")
+    assert len(manifest["fonts"]) == len(compiler.FONTS) + len(stock_sets)
     with ExitStack() as stack:
         fonts, mapping = font_sources(stack, lang)
         for filename in [*manifest["fonts"], "sources.json"]:
@@ -133,6 +149,9 @@ def check_compiler(first, second, lang):
             for face in fonts:
                 face.set_size(size, weight)
             assert (bitmap.height, bitmap.ascent) == (face_info["height"], face_info["ascent"])
+            if name in stock_sets:
+                check_stock(bitmap, stock_sets[name], fonts, mapping)
+                continue
             shifts = compiler.cjk_alignment(fonts)
             fusion = compiler.load_fusion(size, compiler.FUSION_CACHE, scratch) if size in (8, 10) else {}
             for cp in bitmap.index:

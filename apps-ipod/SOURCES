@@ -113,11 +113,13 @@ widgets/dialog_prose.c
 widgets/edit_line.c
 widgets/keyboard.c
 widgets/list.c
+widgets/list_hwscroll.c
 widgets/list_render.c
 widgets/list_select.c
 widgets/menu.c
 ui/animation.c
 ui/pace.c
+ui/hwscroll.c
 ui/native_chrome.c
 ui/menu_pane.c
 ui/native_theme.c
@@ -531,5 +533,6 @@ sim/shim-board.c
 sim/shim-buffer.c
 sim/shim-dircache.c
 sim/shim-fs.c
+sim/shim-hwscroll.c
 sim/shim-usb.c
 #endif

@@ -40,9 +40,9 @@
   light panel. Each album's blurred background, on Now Playing and in the
   panel, is built again the first time it is shown.
 
-- **Scrim's lists jump a whole row** at each click of the wheel, and only
-  the selection marker slides. For the old gliding lists, choose Light under
-  **Appearance > Native theme**, or set `style.list_scroll=glide` in a
+- **Scrim's lists glide again**, at every refresh of the screen. The wheel
+  can pull a list half a row past either end, and it settles back when you
+  stop. For lists that jump a whole row, set `style.list_scroll=snap` in a
   custom theme.
 
 - **Classic and Plastic show the original iPod's split menus**, with the

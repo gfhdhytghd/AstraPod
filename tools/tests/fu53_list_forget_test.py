@@ -60,6 +60,7 @@ struct native_list {
     struct list_motion motion;
     struct { bool valid; int indicator; } shown;
     uint32_t marquee_started, marquee_frame;
+    bool batched;
 };
 static struct native_list state;
 static int renderer_handle = 1;
@@ -93,6 +94,8 @@ static uint32_t snap_deadline(const struct native_list *render)
 { (void)render; return 5; }
 static bool snap_due(const struct native_list *render, uint32_t now)
 { (void)render; (void)now; return false; }
+static uint32_t batch_deadline(const struct native_list *render)
+{ (void)render; return 5; }
 static void list_render_draw(struct gui_synclist *list)
 { assert(list->parent[0]); drawn++; }
 static void gui_synclist_layout(struct gui_synclist *list)

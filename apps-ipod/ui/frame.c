@@ -78,6 +78,7 @@ void ui_note_flush(unsigned int usec)
     flush_usec += usec;
     ++flush_count;
     ui_perf_note_submit(usec);
+    ui_hwscroll_flushed();
 }
 unsigned int ui_flush_count(void) { return flush_count; }
 unsigned int ui_render_usec(void) { return render_usec; }

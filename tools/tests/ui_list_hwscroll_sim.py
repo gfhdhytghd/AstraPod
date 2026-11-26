@@ -7,7 +7,10 @@ With PODBOX_HWSCROLL_LOG set it prints one line per frame. Under Scrim (no
 album art), Light and Classic this drives a slow scroll, a fast spin and
 both ends of the list, and checks that frames went this way and that no
 pixel of any of them differed. Classic's rows fill the list unevenly, so
-there only the frames that leave the rows standing may go this way.
+there only the frames that leave the rows standing may go this way. Last
+it pushes into a folder whose names load glyphs, waits, and scrolls: with
+PODBOX_PANEL_RECORD, every submission from the first step on must be a
+hardware-scroll frame, as later ones are.
 
 Arguments: ROCKBOXUI ZIP OUTPUT_DIRECTORY [STRIP_DIRECTORY]
 Xvfb is private to this process. Writes result.json, each run's log and
@@ -19,6 +22,7 @@ import argparse
 import json
 import os
 import re
+import struct
 import subprocess
 import tempfile
 import time
@@ -30,6 +34,8 @@ from ui_menu_sim import FPS, Screen, process
 
 
 TRACK_COUNT = 40
+RECORD = struct.Struct("<4sIcBhhhI32h")
+RECORD_SIZE = RECORD.size + 320 * 240 * 2
 LINE = re.compile(r"^hwscroll: frame (\d+) top (-?\d+) shift (-?\d+) "
                   r"bands (\d+) wrong (\d+)$", re.M)
 
@@ -44,6 +50,20 @@ SCENARIOS = [
 def frames_in(log, start):
     text = log.read_text(errors="replace")[start:]
     return [tuple(int(v) for v in match.groups()) for match in LINE.finditer(text)]
+
+
+def kinds_in(record, start):
+    """The kind of each panel record from record number `start` on."""
+    data = record.read_bytes() if record.is_file() else b""
+    count = len(data) // RECORD_SIZE
+    return "".join(RECORD.unpack_from(data, i * RECORD_SIZE)[2].decode()
+                   for i in range(start, count)), count
+
+
+def tap(env, key):
+    subprocess.run(["xdotool", "keydown", key], env=env, check=True)
+    time.sleep(3 / FPS)
+    subprocess.run(["xdotool", "keyup", key], env=env, check=True)
 
 
 def perf_rows(text):
@@ -72,12 +92,18 @@ def run(binary, resource, root, theme, output, strips, env):
     (rockbox / "ui-perf.enable").touch()
     for i in range(TRACK_COUNT):
         (root / f"Track {i + 1:02d}").mkdir()
+    # Names in characters no earlier page drew, so their glyphs load.
+    for i in range(TRACK_COUNT):
+        name = "".join(chr(0x4E00 + 5 * i + k) for k in range(5))
+        (root / "Track 01" / f"Item {i + 1:02d} {name}").mkdir()
 
     log_path = output / f"{theme}-sim.log"
     result = {}
     with log_path.open("w") as log, process(
         [str(binary), "--root", str(root), "--nobackground", "--zoom", "1",
-         "--screenshot"], log, env=dict(env, PODBOX_HWSCROLL_LOG="1"), cwd=root,
+         "--screenshot"], log, cwd=root,
+        env=dict(env, PODBOX_HWSCROLL_LOG="1",
+                 PODBOX_PANEL_RECORD=str(root / "panel.rec")),
     ) as firmware:
         screen = Screen(env, firmware)
         time.sleep(240 / FPS)
@@ -101,6 +127,15 @@ def run(binary, resource, root, theme, output, strips, env):
                 "wrong_pixels": sum(f[4] for f in frames),
                 "shifts": sorted({f[2] for f in frames}),
             }
+        # The top-end scenario leaves Search selected; Track 01 is next.
+        click(screen, 1, 5, 250)
+        time.sleep(40 / FPS)
+        tap(env, "Return")
+        time.sleep(40 / FPS)
+        _, start = kinds_in(root / "panel.rec", 0)
+        click(screen, 5, 5, 250)
+        time.sleep(40 / FPS)
+        result["after-push"] = kinds_in(root / "panel.rec", start)[0]
         assert firmware.poll() is None
     perf = rockbox / "ui-perf.txt"
     text = perf.read_text() if perf.is_file() else ""
@@ -166,6 +201,8 @@ def main():
                 assert (outcome["moved"] == 0) == (theme == "classic"), \
                     (theme, name, outcome)
             assert outcome["wrong_pixels"] == 0, (theme, name, outcome)
+        kinds = scenarios["after-push"]
+        assert kinds and set(kinds) == {"h"}, (theme, kinds)
     print("PASS full-width lists by hardware scroll: "
           + ", ".join(f"{theme} {sum(s[n]['batches'] for n, *_ in SCENARIOS)} frames"
                       for theme, s in result.items()) + ", no pixel wrong")

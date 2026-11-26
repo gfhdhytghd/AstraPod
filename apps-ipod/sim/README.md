@@ -91,8 +91,11 @@ to the return value.
 `shim-hwscroll.c` implements too. It stands in for the iPod Classic panel's
 hardware scroll behind `ui/hwscroll.c`, with the SDL window's surface as the
 panel, and prints a line for each frame that would leave a wrong pixel on the
-real panel (for every frame with `PODBOX_HWSCROLL_LOG` set).
-`tools/tests/ui_list_hwscroll_sim.py` reads those lines.
+real panel (for every frame with `PODBOX_HWSCROLL_LOG` set). With
+`PODBOX_PANEL_RECORD` naming a file it also appends, for every submission,
+a header and the image the panel then shows; the header's layout is
+`struct panel_record` in that file.
+`tools/tests/ui_list_hwscroll_sim.py` reads both.
 
 Two return values are load-bearing, and getting either wrong hangs the boot
 silently rather than failing:

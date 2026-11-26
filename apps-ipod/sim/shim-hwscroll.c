@@ -10,6 +10,10 @@
  * differs is one the real panel would show wrong; each such frame prints a
  * line. The window then shows the framebuffer. With PODBOX_HWSCROLL_LOG
  * set, every frame prints a line, for the tests to count.
+ *
+ * With PODBOX_PANEL_RECORD naming a file, every submission appends a
+ * struct panel_record and the 320x240 RGB565 image the panel then shows:
+ * the emulated panel after a frame, the window after any other transfer.
  ****************************************************************************/
 #include "config.h"
 
@@ -29,6 +33,7 @@ bool hwscroll_panel_present(const struct ui_hwscroll_frame *frame);
 bool hwscroll_panel_presented(uint32_t *rise);
 unsigned int hwscroll_panel_writes(void);
 int hwscroll_panel_offset(void);
+void hwscroll_panel_flushed(void);
 
 extern SDL_Surface *lcd_surface;
 
@@ -36,6 +41,19 @@ static fb_data seen[LCD_HEIGHT][LCD_WIDTH];
 static fb_data panel[LCD_HEIGHT][LCD_WIDTH];
 static unsigned int writes, frames;
 static int area_top, offset;
+
+struct panel_record {
+    char magic[4];          /* "PNL1" */
+    uint32_t usec;          /* USEC_TIMER at the submission's end */
+    char kind;              /* 'h' a hardware-scroll frame, 's' any other */
+    uint8_t count;          /* the frame's bands */
+    int16_t top, shift, offset;
+    uint32_t wrong;         /* the frame's pixels that differ */
+    int16_t band[UI_HWSCROLL_BANDS][4];
+};
+
+static struct panel_record latest;
+static bool latest_frame;
 
 static const fb_data *surface_row(int y)
 {
@@ -105,8 +123,47 @@ bool hwscroll_panel_present(const struct ui_hwscroll_frame *frame)
     }
     area_top = top;
     offset = ((offset + frame->shift) % height + height) % height;
+    latest = (struct panel_record){
+        .kind = 'h', .count = frame->count, .top = top,
+        .shift = frame->shift, .offset = offset, .wrong = wrong,
+    };
+    for (int i = 0; i < frame->count; ++i)
+    {
+        const struct ui_rect *band = &frame->band[i];
+        latest.band[i][0] = band->x;
+        latest.band[i][1] = band->y;
+        latest.band[i][2] = band->width;
+        latest.band[i][3] = band->height;
+    }
+    latest_frame = true;
     lcd_update_rect(0, top, LCD_WIDTH, height);
     return true;
+}
+
+void hwscroll_panel_flushed(void)
+{
+    static FILE *file;
+    static bool opened;
+    if (!opened)
+    {
+        const char *path = getenv("PODBOX_PANEL_RECORD");
+        opened = true;
+        file = path ? fopen(path, "wb") : NULL;
+    }
+    bool frame = latest_frame;
+    latest_frame = false;
+    if (!file || !surface_usable())
+        return;
+    struct panel_record record = frame ? latest : (struct panel_record){
+        .kind = 's', .top = area_top, .offset = offset,
+    };
+    memcpy(record.magic, "PNL1", 4);
+    record.usec = USEC_TIMER;
+    fwrite(&record, sizeof(record), 1, file);
+    for (int y = 0; y < LCD_HEIGHT; ++y)
+        fwrite(frame && y >= record.top ? panel[y] : surface_row(y),
+               sizeof(fb_data), LCD_WIDTH, file);
+    fflush(file);
 }
 
 bool hwscroll_panel_presented(uint32_t *rise)

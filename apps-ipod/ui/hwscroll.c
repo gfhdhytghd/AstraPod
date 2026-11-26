@@ -23,6 +23,7 @@ bool hwscroll_panel_present(const struct ui_hwscroll_frame *frame);
 bool hwscroll_panel_presented(uint32_t *rise);
 unsigned int hwscroll_panel_writes(void);
 int hwscroll_panel_offset(void);
+void hwscroll_panel_flushed(void);
 
 #ifdef HAVE_LCD_VSYNC
 #if UI_HWSCROLL_BANDS > LCD_HWSCROLL_BANDS
@@ -66,6 +67,10 @@ int hwscroll_panel_offset(void)
 {
     return lcd_hwscroll_offset();
 }
+
+void hwscroll_panel_flushed(void)
+{
+}
 #elif CONFIG_PLATFORM & PLATFORM_NATIVE
 bool hwscroll_panel_present(const struct ui_hwscroll_frame *frame)
 {
@@ -88,10 +93,15 @@ int hwscroll_panel_offset(void)
 {
     return 0;
 }
+
+void hwscroll_panel_flushed(void)
+{
+}
 #endif
 
 static bool latest;
 static unsigned int latest_writes;
+static unsigned int framebuffers, framebuffer_writes;
 
 bool ui_hwscroll_submit(const struct ui_hwscroll_frame *frame,
                         const struct ui_rect *other)
@@ -149,4 +159,21 @@ unsigned int ui_hwscroll_writes(void)
 int ui_hwscroll_offset(void)
 {
     return hwscroll_panel_offset();
+}
+
+void ui_hwscroll_flushed(void)
+{
+    hwscroll_panel_flushed();
+}
+
+void ui_hwscroll_note_framebuffer(void)
+{
+    ++framebuffers;
+    framebuffer_writes = hwscroll_panel_writes();
+}
+
+unsigned int ui_hwscroll_framebuffers(unsigned int *writes)
+{
+    *writes = framebuffer_writes;
+    return framebuffers;
 }

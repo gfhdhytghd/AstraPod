@@ -101,13 +101,16 @@ struct list_index {
 
 /* What the last paint left on screen, to tell a frame in which only the
  * selection marker moved, or one the panel can scroll to. on_panel: the
- * paint reached the LCD, after which ui_hwscroll_writes() read writes. */
+ * paint reached the LCD, after which ui_hwscroll_writes() read writes.
+ * held: a page transition held the paint back, when the panel had shown
+ * the framebuffer whole `framebuffers` times. complete: no text waited
+ * for its glyphs, so a later font epoch leaves the paint as it is. */
 struct list_shown {
     struct ui_rect rows, marker;
     int pitch, top, top_px, cursor_y, cursor_height, lit, selected, indicator;
-    unsigned theme, palette, art, font, artist, writes;
+    unsigned theme, palette, art, font, artist, writes, framebuffers;
     int art_handle;
-    bool valid, on_panel;
+    bool valid, on_panel, held, complete;
 };
 
 struct native_list {
@@ -743,9 +746,14 @@ static unsigned stock_marquee_shift(struct native_list *render,
     return MIN(period, 2 * (phase + 1)) % period;
 }
 
+/* Set by any text a paint leaves out until its glyphs load. */
+static bool text_deferred;
+
 static bool list_text_ready(int font, const char *text)
 {
-    return !font_prefetch_active() || font_prefetch_text(font, text);
+    bool ready = !font_prefetch_active() || font_prefetch_text(font, text);
+    text_deferred |= !ready;
+    return ready;
 }
 
 static void draw_text(struct native_list *render, struct ui_rect clip,
@@ -2283,7 +2291,7 @@ static bool shown_current(const struct native_list *render,
            shown->palette == render->palette_generation &&
            shown->art == render->art_generation &&
            shown->art_handle == render->art_handle &&
-           shown->font == render->font_epoch &&
+           (shown->font == render->font_epoch || shown->complete) &&
            shown->artist == render->artist_generation &&
            marquee_resting(render);
 }
@@ -2336,6 +2344,21 @@ static bool marker_damage(const struct native_list *render,
         *damage = damage->width > 0 ? bounding(*damage, bar) : bar;
     }
     return true;
+}
+
+/* A paint a page transition held back reached the panel with the
+ * transition's last frame, which shows the framebuffer whole. */
+static void adopt_framebuffer(struct native_list *render)
+{
+    struct list_shown *shown = &render->shown;
+    unsigned int writes;
+    if (shown->valid && shown->held &&
+        ui_hwscroll_framebuffers(&writes) != shown->framebuffers)
+    {
+        shown->held = false;
+        shown->on_panel = true;
+        shown->writes = writes;
+    }
 }
 
 /* A full-width list over a plain background, whose last paint the panel
@@ -2573,6 +2596,7 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     }
 
     bool held = ui_flush_inhibited();
+    adopt_framebuffer(render);
     struct list_hwscroll_pose before;
     bool batch = moved && !status_only && !show_index && !split && !partial &&
                  !held && !gui_synclist_flush_inhibited() &&
@@ -2589,7 +2613,11 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     bool painted = render->page.damage.width > 0;
     if (!status_only && painted)
         render->shown.marker.width = 0;
+    /* A partial paint leaves the rest as the last one did. */
+    bool complete = !partial || render->shown.complete;
+    text_deferred = false;
     struct ui_rect damage = ui_page_paint(&render->page);
+    complete &= !text_deferred;
     if (!gui_synclist_flush_inhibited())
         ui_mark_dirty_rect(SCREEN_MAIN, damage.x, damage.y, damage.width, damage.height);
     if (!status_only && painted)
@@ -2608,7 +2636,7 @@ static void draw_list(struct gui_synclist *list, bool status_only,
             .palette = render->palette_generation,
             .art = render->art_generation, .art_handle = render->art_handle,
             .font = render->font_epoch, .artist = render->artist_generation,
-            .indicator = render->indicator,
+            .indicator = render->indicator, .complete = complete,
             .valid = !show_index && !gui_synclist_flush_inhibited(),
         };
     }
@@ -2629,6 +2657,9 @@ static void draw_list(struct gui_synclist *list, bool status_only,
             render->batched = false;
         render->shown.on_panel = sent || ui_flush_count() != flushes;
         render->shown.writes = ui_hwscroll_writes();
+        render->shown.held = !render->shown.on_panel && lcd_updates_held();
+        unsigned int writes;
+        render->shown.framebuffers = ui_hwscroll_framebuffers(&writes);
     }
     if (render->snap_frame)
     {

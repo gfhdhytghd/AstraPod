@@ -10,6 +10,7 @@
 #include "system.h"
 #include "thread.h"
 #include "frame.h"
+#include "hwscroll.h"
 #include "menu_pane.h"
 #include "native_theme_runtime.h"
 #include "perf.h"
@@ -355,6 +356,7 @@ void ui_scene_cancel(struct ui_scene *scene)
     struct viewport *previous = lcd_set_viewport(NULL);
     lcd_update();
     lcd_set_viewport(previous);
+    ui_hwscroll_note_framebuffer();
 }
 
 void ui_scene_discard(struct ui_scene *scene)
@@ -378,6 +380,7 @@ void ui_scene_snap_push(void)
         struct viewport *previous = lcd_set_viewport(NULL);
         lcd_update();
         lcd_set_viewport(previous);
+        ui_hwscroll_note_framebuffer();
     }
     else
         ui_scene_cancel(owner);
@@ -953,6 +956,7 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
     {
         if (present(lcd_framebuffer_default.fb_ptr))
         {
+            ui_hwscroll_note_framebuffer();
             if (scene->backdrop_handle > 0 && scene->target_front)
                 settle_panel(scene);
             else

@@ -46,4 +46,16 @@ unsigned int ui_hwscroll_writes(void);
 /* The start line's distance from `top`, 0 when the panel is not scrolled. */
 int ui_hwscroll_offset(void);
 
+/* Every submission ends here (ui_note_flush()). The simulator can record
+ * what the panel then shows. */
+void ui_hwscroll_flushed(void);
+
+/* Call once the panel shows the framebuffer whole, as after a page
+ * transition's last frame. */
+void ui_hwscroll_note_framebuffer(void);
+
+/* How many times the panel has shown the framebuffer whole, and
+ * ui_hwscroll_writes() just after the latest. */
+unsigned int ui_hwscroll_framebuffers(unsigned int *writes);
+
 #endif

@@ -914,8 +914,14 @@ int menu_pane_deadline(void)
         else if (show.state == SHOW_READY)
         {
             uint32_t age = now - show.started;
+            int x, y;
+            show_window(now, &x, &y);
             uint32_t next = (age / PAN_US_PER_PX + 1) * PAN_US_PER_PX - age;
-            if (age < SHOW_LIFE_US)
+            if (x != show.drawn_x || y != show.drawn_y ||
+                (age >= SHOW_LIFE_US &&
+                 (storage_disk_is_active() || age >= IDLE_DWELL_US)))
+                next = 0;
+            else if (age < SHOW_LIFE_US)
                 next = MIN(next, SHOW_LIFE_US - age);
             wait = MIN(wait, next);
         }

@@ -28921,3 +28921,213 @@
     *: "AstraPod 的设置移到 设置 > 高级设置。要切换回来，在 设置 > 高级设置 > 主题设置 > 原生主题 中选择其他主题。"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_ABOUT_USED
+  desc: Settings > About under Fruit Company: the used space, %s the amount
+  user: core
+  <source>
+    *: "%s Used"
+  </source>
+  <dest>
+    *: "已用 %s"
+  </dest>
+  <voice>
+    *: "已用"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_FREE
+  desc: Settings > About under Fruit Company: the free space, %s the amount
+  user: core
+  <source>
+    *: "%s Free"
+  </source>
+  <dest>
+    *: "可用 %s"
+  </dest>
+  <voice>
+    *: "可用"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_AUDIO
+  desc: Settings > About under Fruit Company: the capacity bar's key: audio files
+  user: core
+  <source>
+    *: "Audio"
+  </source>
+  <dest>
+    *: "音频"
+  </dest>
+  <voice>
+    *: "音频"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_VIDEO
+  desc: Settings > About under Fruit Company: the capacity bar's key: video files
+  user: core
+  <source>
+    *: "Video"
+  </source>
+  <dest>
+    *: "视频"
+  </dest>
+  <voice>
+    *: "视频"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_PHOTOS
+  desc: Settings > About under Fruit Company: the capacity bar's key, and the count of photos
+  user: core
+  <source>
+    *: "Photos"
+  </source>
+  <dest>
+    *: "照片"
+  </dest>
+  <voice>
+    *: "照片"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_OTHER
+  desc: Settings > About under Fruit Company: the capacity bar's key: everything else
+  user: core
+  <source>
+    *: "Other"
+  </source>
+  <dest>
+    *: "其他"
+  </dest>
+  <voice>
+    *: "其他"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_SONGS
+  desc: Settings > About under Fruit Company: the count of songs
+  user: core
+  <source>
+    *: "Songs"
+  </source>
+  <dest>
+    *: "歌曲"
+  </dest>
+  <voice>
+    *: "歌曲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_VIDEOS
+  desc: Settings > About under Fruit Company: the count of videos
+  user: core
+  <source>
+    *: "Videos"
+  </source>
+  <dest>
+    *: "视频"
+  </dest>
+  <voice>
+    *: "视频"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_PODCASTS
+  desc: Settings > About under Fruit Company: the count of podcast episodes
+  user: core
+  <source>
+    *: "Podcasts"
+  </source>
+  <dest>
+    *: "播客"
+  </dest>
+  <voice>
+    *: "播客"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_GAMES
+  desc: Settings > About under Fruit Company: the count of games
+  user: core
+  <source>
+    *: "Games"
+  </source>
+  <dest>
+    *: "游戏"
+  </dest>
+  <voice>
+    *: "游戏"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_CONTACTS
+  desc: Settings > About under Fruit Company: the count of contacts
+  user: core
+  <source>
+    *: "Contacts"
+  </source>
+  <dest>
+    *: "联系人"
+  </dest>
+  <voice>
+    *: "联系人"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_SERIAL_NUMBER
+  desc: Settings > About under Fruit Company: the player's serial number
+  user: core
+  <source>
+    *: "Serial Number"
+  </source>
+  <dest>
+    *: "序列号"
+  </dest>
+  <voice>
+    *: "序列号"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_MODEL
+  desc: Settings > About under Fruit Company: the player's model number
+  user: core
+  <source>
+    *: "Model"
+  </source>
+  <dest>
+    *: "型号"
+  </dest>
+  <voice>
+    *: "型号"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_VERSION
+  desc: Settings > About under Fruit Company: the firmware version
+  user: core
+  <source>
+    *: "Version"
+  </source>
+  <dest>
+    *: "版本"
+  </dest>
+  <voice>
+    *: "版本"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_WINDOWS_FORMAT
+  desc: Settings > About under Fruit Company: after the version: the disk is formatted for Windows (FAT32)
+  user: core
+  <source>
+    *: "PC"
+  </source>
+  <dest>
+    *: "PC"
+  </dest>
+  <voice>
+    *: "PC"
+  </voice>
+</phrase>

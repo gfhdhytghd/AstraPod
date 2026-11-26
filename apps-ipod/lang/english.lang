@@ -29269,3 +29269,213 @@
     *: "AstraPod's settings move to Settings > Advanced Settings. To switch back, choose another theme in Settings > Advanced Settings > Theme Settings > Native theme."
   </voice>
 </phrase>
+<phrase>
+  id: LANG_ABOUT_USED
+  desc: Settings > About under Fruit Company: the used space, %s the amount
+  user: core
+  <source>
+    *: "%s Used"
+  </source>
+  <dest>
+    *: "%s Used"
+  </dest>
+  <voice>
+    *: "Used"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_FREE
+  desc: Settings > About under Fruit Company: the free space, %s the amount
+  user: core
+  <source>
+    *: "%s Free"
+  </source>
+  <dest>
+    *: "%s Free"
+  </dest>
+  <voice>
+    *: "Free"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_AUDIO
+  desc: Settings > About under Fruit Company: the capacity bar's key: audio files
+  user: core
+  <source>
+    *: "Audio"
+  </source>
+  <dest>
+    *: "Audio"
+  </dest>
+  <voice>
+    *: "Audio"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_VIDEO
+  desc: Settings > About under Fruit Company: the capacity bar's key: video files
+  user: core
+  <source>
+    *: "Video"
+  </source>
+  <dest>
+    *: "Video"
+  </dest>
+  <voice>
+    *: "Video"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_PHOTOS
+  desc: Settings > About under Fruit Company: the capacity bar's key, and the count of photos
+  user: core
+  <source>
+    *: "Photos"
+  </source>
+  <dest>
+    *: "Photos"
+  </dest>
+  <voice>
+    *: "Photos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_OTHER
+  desc: Settings > About under Fruit Company: the capacity bar's key: everything else
+  user: core
+  <source>
+    *: "Other"
+  </source>
+  <dest>
+    *: "Other"
+  </dest>
+  <voice>
+    *: "Other"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_SONGS
+  desc: Settings > About under Fruit Company: the count of songs
+  user: core
+  <source>
+    *: "Songs"
+  </source>
+  <dest>
+    *: "Songs"
+  </dest>
+  <voice>
+    *: "Songs"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_VIDEOS
+  desc: Settings > About under Fruit Company: the count of videos
+  user: core
+  <source>
+    *: "Videos"
+  </source>
+  <dest>
+    *: "Videos"
+  </dest>
+  <voice>
+    *: "Videos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_PODCASTS
+  desc: Settings > About under Fruit Company: the count of podcast episodes
+  user: core
+  <source>
+    *: "Podcasts"
+  </source>
+  <dest>
+    *: "Podcasts"
+  </dest>
+  <voice>
+    *: "Podcasts"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_GAMES
+  desc: Settings > About under Fruit Company: the count of games
+  user: core
+  <source>
+    *: "Games"
+  </source>
+  <dest>
+    *: "Games"
+  </dest>
+  <voice>
+    *: "Games"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_CONTACTS
+  desc: Settings > About under Fruit Company: the count of contacts
+  user: core
+  <source>
+    *: "Contacts"
+  </source>
+  <dest>
+    *: "Contacts"
+  </dest>
+  <voice>
+    *: "Contacts"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_SERIAL_NUMBER
+  desc: Settings > About under Fruit Company: the player's serial number
+  user: core
+  <source>
+    *: "Serial Number"
+  </source>
+  <dest>
+    *: "Serial Number"
+  </dest>
+  <voice>
+    *: "Serial Number"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_MODEL
+  desc: Settings > About under Fruit Company: the player's model number
+  user: core
+  <source>
+    *: "Model"
+  </source>
+  <dest>
+    *: "Model"
+  </dest>
+  <voice>
+    *: "Model"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_VERSION
+  desc: Settings > About under Fruit Company: the firmware version
+  user: core
+  <source>
+    *: "Version"
+  </source>
+  <dest>
+    *: "Version"
+  </dest>
+  <voice>
+    *: "Version"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_WINDOWS_FORMAT
+  desc: Settings > About under Fruit Company: after the version: the disk is formatted for Windows (FAT32)
+  user: core
+  <source>
+    *: "PC"
+  </source>
+  <dest>
+    *: "PC"
+  </dest>
+  <voice>
+    *: "PC"
+  </voice>
+</phrase>

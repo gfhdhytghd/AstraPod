@@ -6,14 +6,15 @@
  * goes in a band: the parts of the area outside the rows, which must not
  * move; the rows the move exposes; the marker or bar where it was, carried
  * along, and where it is now; the rows whose text colour follows the
- * selection; and the scrollbar, whenever it moves or fades. The list's background is one colour along
+ * selection; the scrollbar, whenever it moves or fades; and the rows the
+ * caller repaired in place. The list's background is one colour along
  * the scroll axis, so the rows' surroundings move unchanged. */
 #include <string.h>
 #include "list_hwscroll.h"
 
 /* Bands before merging: two outside the rows, the exposed rows, the
- * scrollbar or notes, two markers and two selected rows. */
-#define RAW_BANDS 12
+ * scrollbar or notes, two markers, two selected rows and the repairs. */
+#define RAW_BANDS (12 + LIST_HWSCROLL_REPAIRS)
 
 struct bands {
     struct ui_rect band[RAW_BANDS];
@@ -90,7 +91,7 @@ bool list_hwscroll_plan(const struct list_hwscroll_layout *layout,
     int shift = next->top - shown->top;
     int bottom = content->y + content->height;
     if (content->height <= 0 || shift >= content->height ||
-        -shift >= content->height)
+        -shift >= content->height || next->repairs > LIST_HWSCROLL_REPAIRS)
         return false;
 
     struct bands set = { .count = 0 };
@@ -127,6 +128,8 @@ bool list_hwscroll_plan(const struct list_hwscroll_layout *layout,
         rows.y = content->y - next->top + next->lit * layout->pitch;
         add(&set, clip(rows, *content), area);
     }
+    for (int i = 0; i < next->repairs; ++i)
+        add(&set, clip(next->repair[i], *content), area);
 
     merge(&set);
     if (set.count > UI_HWSCROLL_BANDS)

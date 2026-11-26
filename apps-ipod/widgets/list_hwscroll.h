@@ -27,11 +27,17 @@ struct list_hwscroll_pose {
     int lit;                   /* the first item in selected text */
     int selected;
     int indicator;             /* the scrollbar's strength as drawn */
+    /* Rows whose text changed where they stand, as `next` draws them. */
+    const struct ui_rect *repair;
+    int repairs;
 };
 
+#define LIST_HWSCROLL_REPAIRS 4
+
 /* The frame that turns what `shown` left on the panel into `next`. False
- * when the content moves its whole height or more, or the changed rows
- * need more than UI_HWSCROLL_BANDS bands or LIST_HWSCROLL_ROWS rows. */
+ * when the content moves its whole height or more, `next` has more than
+ * LIST_HWSCROLL_REPAIRS repairs, or the changed rows need more than
+ * UI_HWSCROLL_BANDS bands or LIST_HWSCROLL_ROWS rows. */
 bool list_hwscroll_plan(const struct list_hwscroll_layout *layout,
                         const struct list_hwscroll_pose *shown,
                         const struct list_hwscroll_pose *next,

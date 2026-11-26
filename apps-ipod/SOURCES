@@ -533,6 +533,7 @@ sim/shim-board.c
 sim/shim-buffer.c
 sim/shim-dircache.c
 sim/shim-fs.c
+sim/shim-glyphs.c
 sim/shim-hwscroll.c
 sim/shim-usb.c
 #endif

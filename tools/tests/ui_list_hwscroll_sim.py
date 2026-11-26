@@ -10,7 +10,11 @@ pixel of any of them differed. Classic's rows fill the list unevenly, so
 there only the frames that leave the rows standing may go this way. Last
 it pushes into a folder whose names load glyphs, waits, and scrolls: with
 PODBOX_PANEL_RECORD, every submission from the first step on must be a
-hardware-scroll frame, as later ones are.
+hardware-scroll frame, as later ones are. PODBOX_GLYPH_DELAY_MS holds each
+glyph batch back past the push, as the player's disk does, so the rows
+first show without their text: once the list shows, every submission must
+be a hardware-scroll frame, and the rows that gain their text must reach
+the panel as row bands of their own.
 
 Arguments: ROCKBOXUI ZIP OUTPUT_DIRECTORY [STRIP_DIRECTORY]
 Xvfb is private to this process. Writes result.json, each run's log and
@@ -34,6 +38,9 @@ from ui_menu_sim import FPS, Screen, process
 
 
 TRACK_COUNT = 40
+GLYPH_DELAY_MS = 600
+# A band at least this wide covers a row rather than the marker.
+LIST_WIDTH = 280
 RECORD = struct.Struct("<4sIcBhhhI32h")
 RECORD_SIZE = RECORD.size + 320 * 240 * 2
 LINE = re.compile(r"^hwscroll: frame (\d+) top (-?\d+) shift (-?\d+) "
@@ -50,6 +57,17 @@ SCENARIOS = [
 def frames_in(log, start):
     text = log.read_text(errors="replace")[start:]
     return [tuple(int(v) for v in match.groups()) for match in LINE.finditer(text)]
+
+
+def records_in(record, start):
+    """(kind, shift, bands) of each panel record from number `start` on."""
+    data = record.read_bytes() if record.is_file() else b""
+    out = []
+    for i in range(start, len(data) // RECORD_SIZE):
+        head = RECORD.unpack_from(data, i * RECORD_SIZE)
+        bands = [head[8 + 4 * b:12 + 4 * b] for b in range(head[3])]
+        out.append((head[2].decode(), head[5], bands))
+    return out
 
 
 def kinds_in(record, start):
@@ -103,7 +121,8 @@ def run(binary, resource, root, theme, output, strips, env):
         [str(binary), "--root", str(root), "--nobackground", "--zoom", "1",
          "--screenshot"], log, cwd=root,
         env=dict(env, PODBOX_HWSCROLL_LOG="1",
-                 PODBOX_PANEL_RECORD=str(root / "panel.rec")),
+                 PODBOX_PANEL_RECORD=str(root / "panel.rec"),
+                 PODBOX_GLYPH_DELAY_MS=str(GLYPH_DELAY_MS)),
     ) as firmware:
         screen = Screen(env, firmware)
         time.sleep(240 / FPS)
@@ -130,12 +149,23 @@ def run(binary, resource, root, theme, output, strips, env):
         # The top-end scenario leaves Search selected; Track 01 is next.
         click(screen, 1, 5, 250)
         time.sleep(40 / FPS)
+        _, pushed = kinds_in(root / "panel.rec", 0)
         tap(env, "Return")
-        time.sleep(40 / FPS)
+        time.sleep(2 * GLYPH_DELAY_MS / 1000)
         _, start = kinds_in(root / "panel.rec", 0)
         click(screen, 5, 5, 250)
         time.sleep(40 / FPS)
         result["after-push"] = kinds_in(root / "panel.rec", start)[0]
+        # From the list's first frame on: no software frame, and the
+        # frames before the wheel moves that resend whole rows in place.
+        shown = records_in(root / "panel.rec", pushed)
+        first = next((i for i, r in enumerate(shown) if r[0] == "h"),
+                     len(shown))
+        result["after-list"] = "".join(r[0] for r in shown[first:])
+        result["row-repairs"] = [
+            [list(b) for b in r[2]] for r in shown[first:start - pushed]
+            if r[0] == "h" and r[1] == 0 and
+            any(b[2] >= LIST_WIDTH for b in r[2])]
         assert firmware.poll() is None
     perf = rockbox / "ui-perf.txt"
     text = perf.read_text() if perf.is_file() else ""
@@ -203,6 +233,13 @@ def main():
             assert outcome["wrong_pixels"] == 0, (theme, name, outcome)
         kinds = scenarios["after-push"]
         assert kinds and set(kinds) == {"h"}, (theme, kinds)
+        assert set(scenarios["after-list"]) == {"h"}, \
+            (theme, scenarios["after-list"])
+        repairs = scenarios["row-repairs"]
+        assert repairs, (theme, "no row repaired once its glyphs loaded")
+        for bands in repairs:
+            rows = sum(b[2] * b[3] for b in bands) // 320
+            assert rows < 240 - 35, (theme, bands)
     print("PASS full-width lists by hardware scroll: "
           + ", ".join(f"{theme} {sum(s[n]['batches'] for n, *_ in SCENARIOS)} frames"
                       for theme, s in result.items()) + ", no pixel wrong")

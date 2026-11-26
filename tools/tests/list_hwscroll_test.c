@@ -30,6 +30,8 @@ struct model {
 };
 
 static unsigned old_fb[H][W], new_fb[H][W], panel[H][W];
+/* The item whose text the old drawing left out for its glyphs, or -1. */
+static int waiting = -1;
 
 /* Pixels that differ between items, rows of an item, columns, and whether
  * the item is in selected text, so a misplaced row cannot pass. */
@@ -65,6 +67,8 @@ static void draw(const struct model *m, const struct list_hwscroll_pose *p,
                 if (item >= 0 && item < COUNT)
                     v = item_pixel(item, row, x,
                                    item >= p->lit && item < p->lit + l->span);
+                if (waiting >= 0 && item == waiting && fb == old_fb)
+                    v = 3;
                 if (in_bar)
                     v += 70000;
                 if (m->style == MARKER && x >= p->marker.x &&
@@ -95,7 +99,9 @@ static struct list_hwscroll_pose pose(const struct model *m, int top,
         marker.x = 0;
         marker.width = W;
     }
-    return (struct list_hwscroll_pose){ top, marker, lit, selected, 0 };
+    return (struct list_hwscroll_pose){
+        .top = top, .marker = marker, .lit = lit, .selected = selected,
+    };
 }
 
 /* Applies the frame to the panel the way the LCD does and counts the
@@ -273,6 +279,27 @@ int main(void)
     a = pose(&noted, 30, 46 + 30, 2, 2);
     b = pose(&noted, 30, 46 + 60, 3, 3);
     assert(check(&noted, &a, &b, &frame) == 0 && frame.shift == 0);
+
+    /* Glyphs load for a row whose text waited: at rest that row alone
+     * goes, and in a scroll step it goes with the step. */
+    waiting = 7;
+    a = pose(&m, 60, 46 + 30, 3, 3);
+    b = a;
+    struct ui_rect repair = { 0, 46 + 7 * l->pitch - 60, W, l->pitch };
+    b.repair = &repair;
+    b.repairs = 1;
+    assert(check(&m, &a, &b, &frame) == 0);
+    assert(frame.shift == 0 && frame.count == 1 && band_rows(&frame) == 30);
+    b = pose(&m, 64, 46 + 34, 3, 3);
+    repair.y = 46 + 7 * l->pitch - 64;
+    b.repair = &repair;
+    b.repairs = 1;
+    assert(check(&m, &a, &b, &frame) == 0 && frame.shift == 4);
+    b.repairs = 0;
+    assert(check(&m, &a, &b, &frame) > 0);
+    b.repairs = LIST_HWSCROLL_REPAIRS + 1;
+    assert(check(&m, &a, &b, &frame) < 0);
+    waiting = -1;
 
     /* Large jumps are refused: the whole content height, and more rows
      * than one refresh's gap holds. */

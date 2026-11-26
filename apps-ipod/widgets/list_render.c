@@ -103,14 +103,20 @@ struct list_index {
  * selection marker moved, or one the panel can scroll to. on_panel: the
  * paint reached the LCD, after which ui_hwscroll_writes() read writes.
  * held: a page transition held the paint back, when the panel had shown
- * the framebuffer whole `framebuffers` times. complete: no text waited
- * for its glyphs, so a later font epoch leaves the paint as it is. */
+ * the framebuffer whole `framebuffers` times. complete: no text outside
+ * the rows waited for its glyphs. skipped: for each of the `slots` rows
+ * painted from `top`, which of its texts, in the order drawn, waited for
+ * glyphs; a later font epoch repaints and resends only the rows this
+ * marks. */
+#define SHOWN_ROWS 24
 struct list_shown {
     struct ui_rect rows, marker;
     int pitch, top, top_px, cursor_y, cursor_height, lit, selected, indicator;
     unsigned theme, palette, art, font, artist, writes, framebuffers;
     int art_handle;
     bool valid, on_panel, held, complete;
+    int slots;
+    unsigned char skipped[SHOWN_ROWS];
 };
 
 struct native_list {
@@ -133,6 +139,9 @@ struct native_list {
     int prefetched_top;
     struct list_motion motion;
     struct list_shown shown;
+    /* shown.slots and shown.skipped for the paint in progress. */
+    int slots;
+    unsigned char skipping[SHOWN_ROWS];
     struct list_index overlay;
     int index_font, index_width, index_faces[2];
     char index_font_key[sizeof(((struct list_index *)0)->key)];
@@ -154,6 +163,12 @@ struct native_list {
      * reaches the panel; batched while a glide follows the latter. */
     uint32_t presented;
     bool has_marquee, snap_frame, batched;
+    /* The last frame left rows of waiting text for the next one. */
+    bool repairing;
+    /* While every row paints for a hardware-scroll frame: how many rows of
+     * waiting text may still change; the rest keep their text as shown. */
+    bool holding;
+    int repair_rows;
     unsigned char mark_mask[2];
 };
 
@@ -746,24 +761,36 @@ static unsigned stock_marquee_shift(struct native_list *render,
     return MIN(period, 2 * (phase + 1)) % period;
 }
 
-/* Set by any text a paint leaves out until its glyphs load. */
+/* Set by any text a paint leaves out until its glyphs load. row_skipped
+ * marks such texts by their order in the row, row_texts counting them;
+ * row_hold marks the texts to leave out again, as the last paint did. */
 static bool text_deferred;
+static unsigned char row_skipped, row_hold;
+static int row_texts;
+
+/* Rows of changed text one frame sends besides what moves. */
+#define REPAIR_ROWS (LIST_HWSCROLL_ROWS / 2)
 
 static bool list_text_ready(int font, const char *text)
 {
-    bool ready = !font_prefetch_active() || font_prefetch_text(font, text);
+    bool ready = !(row_hold & 1u << MIN(row_texts, 7)) &&
+                 (!font_prefetch_active() || font_prefetch_text(font, text));
     text_deferred |= !ready;
+    if (!ready)
+        row_skipped |= 1u << MIN(row_texts, 7);
+    ++row_texts;
     return ready;
 }
 
+/* Texts the clip leaves out count too, so every paint of a row asks for
+ * the same texts in the same order. */
 static void draw_text(struct native_list *render, struct ui_rect clip,
                       struct ui_rect cell, int font, unsigned int fg,
                       const char *text, bool scroll, int offset, bool centered)
 {
     struct viewport vp;
-    if (!text || !*text || !set_clip(&vp, clip, cell, font, fg))
-        return;
-    if (!list_text_ready(vp.font, text))
+    if (!text || !*text || !list_text_ready(font >= 0 ? font : FONT_UI, text) ||
+        !set_clip(&vp, clip, cell, font, fg))
         return;
     int width = font_getstringsize((const unsigned char *)text, NULL, NULL, vp.font);
     int x = cell.x - vp.x;
@@ -1539,10 +1566,41 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
         row.y = rows_top + slot_y(slot, pitch, spare);
         row.height = slot_y(slot + 1, pitch, spare) - (row.y - rows_top);
         bool selected = item >= frame->selection && item - frame->selection < list->selected_size;
+        bool deferred = text_deferred;
+        row_skipped = 0;
+        row_hold = 0;
+        const struct list_shown *shown = &render->shown;
+        int old = item - shown->top;
+        if (render->holding && old >= 0 &&
+            old < MIN(shown->slots, SHOWN_ROWS) && shown->skipped[old])
+        {
+            if (render->repair_rows >= row.height)
+                render->repair_rows -= row.height;
+            else
+            {
+                row_hold = shown->skipped[old];
+                render->repairing = true;
+            }
+        }
         for (int band = 0; band < nbands; ++band)
             if (intersection(row, bands[band]).height > 0)
+            {
+                row_texts = 0;
                 paint_row(render, bands[band], row, item, selected,
                           selection_bar ? band == 1 : selected, false);
+            }
+        text_deferred = deferred;
+        row_hold = 0;
+        struct ui_rect painted = intersection(row, clip);
+        if (painted.height <= 0)
+            continue;
+        render->slots = MAX(render->slots, slot + 1);
+        if (slot >= SHOWN_ROWS)
+            text_deferred |= row_skipped != 0;
+        else if (!memcmp(&painted, &row, sizeof(row)))
+            render->skipping[slot] = row_skipped;
+        else
+            render->skipping[slot] |= row_skipped;
     }
 
     /* The bar can be half visible even if its corresponding text is clipped. */
@@ -2392,12 +2450,95 @@ static void batch_pose(const struct native_list *render,
     };
 }
 
+static struct ui_rect slot_row(const struct native_list *render,
+                               const struct list_geometry *g, int slot)
+{
+    int spare = row_spare(&render->theme, g->rows.height, g->pitch);
+    int top = g->rows.y + render->row_shift;
+    struct ui_rect row = { g->rows.x, top + slot_y(slot, g->pitch, spare),
+                           g->rows.width, 0 };
+    row.height = top + slot_y(slot + 1, g->pitch, spare) - row.y;
+    return intersection(row, g->rows);
+}
+
+static bool rows_waiting(const struct list_shown *shown)
+{
+    for (int slot = 0; slot < SHOWN_ROWS; ++slot)
+        if (shown->skipped[slot])
+            return true;
+    return false;
+}
+
+/* Repaints the rows whose text last waited for glyphs, and only them,
+ * until REPAIR_ROWS rows of them have changed. True when rows are left
+ * for the next frame. */
+static bool repaint_waiting(struct native_list *render,
+                            const struct list_geometry *g)
+{
+    int rows = 0;
+    for (int slot = 0; slot < MIN(render->shown.slots, SHOWN_ROWS); ++slot)
+    {
+        struct ui_rect row = slot_row(render, g, slot);
+        if (!render->shown.skipped[slot] || row.height <= 0)
+            continue;
+        if (rows + row.height > REPAIR_ROWS)
+            return true;
+        render->page.damage = row;
+        ui_page_paint(&render->page);
+        if (render->skipping[slot] != render->shown.skipped[slot])
+            rows += row.height;
+    }
+    return false;
+}
+
+/* Whether this frame leaves the list as the last paint did. */
+static bool list_still(const struct native_list *render,
+                       const struct list_geometry *g)
+{
+    const struct list_shown *shown = &render->shown;
+    return shown_current(render, g) && !render->row_shift &&
+           shown->top == render->rows.value[UI_SCROLL_OFFSET] &&
+           shown->lit == render->rows.value[UI_SELECTION] &&
+           shown->cursor_y == render->cursor_y &&
+           shown->selected == render->owner->selected_item &&
+           shown->indicator == render->indicator;
+}
+
+/* The rows the paint just done drew with other text than the last paint
+ * left where they stand now: text whose glyphs have loaded since. As
+ * LIST_HWSCROLL_REPAIRS runs at most; the last takes any overflow. */
+static int repaired_rows(const struct native_list *render,
+                         const struct list_geometry *g, struct ui_rect *runs)
+{
+    const struct list_shown *shown = &render->shown;
+    int top = render->rows.value[UI_SCROLL_OFFSET];
+    int count = 0;
+    for (int slot = 0; shown->valid && slot < SHOWN_ROWS; ++slot)
+    {
+        int old = top + slot - shown->top;
+        struct ui_rect row = slot_row(render, g, slot);
+        if (old < 0 || old >= MIN(shown->slots, SHOWN_ROWS) ||
+            row.height <= 0 ||
+            render->skipping[slot] == shown->skipped[old])
+            continue;
+        struct ui_rect *last = count ? &runs[count - 1] : NULL;
+        if (last && (last->y + last->height == row.y ||
+                     count == LIST_HWSCROLL_REPAIRS))
+            *last = bounding(*last, row);
+        else
+            runs[count++] = row;
+    }
+    return count;
+}
+
 /* Sends the frame just painted, and `other`, the damage outside the list,
- * as a hardware-scroll frame. False when they must go by update_rect(). */
+ * as a hardware-scroll frame, with the `repairs` rows in `repair` resent
+ * where they stand. False when they must go by update_rect(). */
 static bool batch_submit(struct native_list *render,
                          const struct list_geometry *g,
                          const struct list_hwscroll_pose *before,
-                         const struct ui_rect *other)
+                         const struct ui_rect *other,
+                         const struct ui_rect *repair, int repairs)
 {
     const struct gui_synclist *list = render->owner;
     int visible = g->rows.height / g->pitch;
@@ -2417,6 +2558,8 @@ static bool batch_submit(struct native_list *render,
     struct list_hwscroll_pose after;
     struct ui_hwscroll_frame frame;
     batch_pose(render, &after);
+    after.repair = repair;
+    after.repairs = repairs;
     if ((spare && after.top != before->top) ||
         !list_hwscroll_plan(&layout, before, &after, &frame))
         return false;
@@ -2578,6 +2721,20 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     bool partial = moved && !status_only && !show_index &&
                    (!split || keep_pane) &&
                    marker_damage(render, &g, &render->page.damage);
+    /* Glyphs have loaded since rows of a list left in place waited. */
+    bool repair = moved && !status_only && !show_index &&
+                  (!split || keep_pane) &&
+                  (render->shown.font != render->font_epoch ||
+                   render->repairing) &&
+                  rows_waiting(&render->shown) &&
+                  (partial || list_still(render, &g));
+    if (repair && !partial)
+    {
+        partial = true;
+        render->page.damage = (struct ui_rect){0};
+    }
+    if (!status_only && !repair)
+        render->repairing = false;
     if (status_only)
     {
         int width = render->theme.metric[UI_METRIC_LIST_ICON_SIZE] +
@@ -2598,7 +2755,8 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     bool held = ui_flush_inhibited();
     adopt_framebuffer(render);
     struct list_hwscroll_pose before;
-    bool batch = moved && !status_only && !show_index && !split && !partial &&
+    bool batch = moved && !status_only && !show_index && !split &&
+                 (!partial || repair) &&
                  !held && !gui_synclist_flush_inhibited() &&
                  batch_ready(render, &g);
     if (batch)
@@ -2616,10 +2774,32 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     /* A partial paint leaves the rest as the last one did. */
     bool complete = !partial || render->shown.complete;
     text_deferred = false;
+    render->slots = partial ? render->shown.slots : 0;
+    if (partial)
+        memcpy(render->skipping, render->shown.skipped,
+               sizeof(render->skipping));
+    else
+        memset(render->skipping, 0, sizeof(render->skipping));
+    /* Rows over the budget keep their text as shown, and wait for the
+     * next frame. */
+    render->holding = batch && !partial;
+    render->repair_rows = REPAIR_ROWS;
     struct ui_rect damage = ui_page_paint(&render->page);
+    render->holding = false;
+    if (repair)
+        render->repairing = repaint_waiting(render, &g);
     complete &= !text_deferred;
     if (!gui_synclist_flush_inhibited())
         ui_mark_dirty_rect(SCREEN_MAIN, damage.x, damage.y, damage.width, damage.height);
+    struct ui_rect repairs[LIST_HWSCROLL_REPAIRS];
+    int nrepairs = batch || repair ? repaired_rows(render, &g, repairs) : 0;
+    for (int i = 0; i < nrepairs && !gui_synclist_flush_inhibited(); ++i)
+        ui_mark_dirty_rect(SCREEN_MAIN, repairs[i].x, repairs[i].y,
+                           repairs[i].width, repairs[i].height);
+    painted |= repair;
+    /* A repair that found no glyph to add left the panel as it was. */
+    bool kept = repair && damage.width <= 0 && !nrepairs &&
+                render->shown.on_panel;
     if (!status_only && painted)
     {
         struct ui_rect marker = render->shown.marker;
@@ -2639,11 +2819,15 @@ static void draw_list(struct gui_synclist *list, bool status_only,
             .indicator = render->indicator, .complete = complete,
             .valid = !show_index && !gui_synclist_flush_inhibited(),
         };
+        render->shown.slots = render->slots;
+        memcpy(render->shown.skipped, render->skipping,
+               sizeof(render->shown.skipped));
     }
     ui_inhibit_flush(held);
     unsigned flushes = ui_flush_count();
     struct ui_rect other = { status.x, status.y, status.w, status.h };
-    bool sent = batch && batch_submit(render, &g, &before, &other);
+    bool sent = batch && batch_submit(render, &g, &before, &other, repairs,
+                                      nrepairs);
     if (!sent)
     {
         ui_mark_dirty_rect(SCREEN_MAIN, other.x, other.y, other.width,
@@ -2655,7 +2839,7 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     {
         if (!sent)
             render->batched = false;
-        render->shown.on_panel = sent || ui_flush_count() != flushes;
+        render->shown.on_panel = sent || kept || ui_flush_count() != flushes;
         render->shown.writes = ui_hwscroll_writes();
         render->shown.held = !render->shown.on_panel && lcd_updates_held();
         unsigned int writes;
@@ -2779,7 +2963,7 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
     int delay = TIMEOUT_BLOCK;
     if (motion_owner(render, list))
     {
-        if (render->font_epoch != font_prefetch_epoch())
+        if (render->font_epoch != font_prefetch_epoch() || render->repairing)
             delay = 0;
         else if (poll && font_prefetch_busy())
             delay = 1;

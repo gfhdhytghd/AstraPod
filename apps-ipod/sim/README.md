@@ -95,6 +95,11 @@ real panel (for every frame with `PODBOX_HWSCROLL_LOG` set). With
 `PODBOX_PANEL_RECORD` naming a file it also appends, for every submission,
 a header and the image the panel then shows; the header's layout is
 `struct panel_record` in that file.
+
+`shim-glyphs.c` adds nothing a caller needs. With `PODBOX_GLYPH_DELAY_MS`
+set, each batch of glyphs the font prefetch reads reaches the font that
+many milliseconds late, as on the player's disk; without it the host disk
+loads a page's glyphs before a list shows them missing.
 `tools/tests/ui_list_hwscroll_sim.py` reads both.
 
 Two return values are load-bearing, and getting either wrong hangs the boot

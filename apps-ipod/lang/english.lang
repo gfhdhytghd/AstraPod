@@ -29493,3 +29493,2215 @@
     *: "Videos"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_APP_LIST_OTHER
+  desc: Extras: the folder of apps that are neither games nor demos, and its title
+  user: core
+  <source>
+    *: "Other Apps"
+  </source>
+  <dest>
+    *: "Other Apps"
+  </dest>
+  <voice>
+    *: "Other Apps"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_2048
+  desc: Games, Other Apps and Demos lists: 2048 game
+  user: core
+  <source>
+    *: "2048"
+  </source>
+  <dest>
+    *: "2048"
+  </dest>
+  <voice>
+    *: "2048"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_AMAZE
+  desc: Games, Other Apps and Demos lists: Amaze game
+  user: core
+  <source>
+    *: "Amaze"
+  </source>
+  <dest>
+    *: "Amaze"
+  </dest>
+  <voice>
+    *: "Amaze"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BLACKJACK
+  desc: Games, Other Apps and Demos lists: Blackjack game
+  user: core
+  <source>
+    *: "Blackjack"
+  </source>
+  <dest>
+    *: "Blackjack"
+  </dest>
+  <voice>
+    *: "Blackjack"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BRICKMANIA
+  desc: Games, Other Apps and Demos lists: Brickmania game
+  user: core
+  <source>
+    *: "Brickmania"
+  </source>
+  <dest>
+    *: "Brickmania"
+  </dest>
+  <voice>
+    *: "Brickmania"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BUBBLES
+  desc: Games, Other Apps and Demos lists: Bubbles game
+  user: core
+  <source>
+    *: "Bubbles"
+  </source>
+  <dest>
+    *: "Bubbles"
+  </dest>
+  <voice>
+    *: "Bubbles"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CHESSBOX
+  desc: Games, Other Apps and Demos lists: Chess game
+  user: core
+  <source>
+    *: "Chess"
+  </source>
+  <dest>
+    *: "Chess"
+  </dest>
+  <voice>
+    *: "Chess"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CHOPPER
+  desc: Games, Other Apps and Demos lists: Chopper game
+  user: core
+  <source>
+    *: "Chopper"
+  </source>
+  <dest>
+    *: "Chopper"
+  </dest>
+  <voice>
+    *: "Chopper"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CLIX
+  desc: Games, Other Apps and Demos lists: Clix game
+  user: core
+  <source>
+    *: "Clix"
+  </source>
+  <dest>
+    *: "Clix"
+  </dest>
+  <voice>
+    *: "Clix"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CODEBUSTER
+  desc: Games, Other Apps and Demos lists: Codebuster game
+  user: core
+  <source>
+    *: "Codebuster"
+  </source>
+  <dest>
+    *: "Codebuster"
+  </dest>
+  <voice>
+    *: "Codebuster"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DICE
+  desc: Games, Other Apps and Demos lists: Dice game
+  user: core
+  <source>
+    *: "Dice"
+  </source>
+  <dest>
+    *: "Dice"
+  </dest>
+  <voice>
+    *: "Dice"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DOOM
+  desc: Games, Other Apps and Demos lists: Doom game
+  user: core
+  <source>
+    *: "Doom"
+  </source>
+  <dest>
+    *: "Doom"
+  </dest>
+  <voice>
+    *: "Doom"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DUKE3D
+  desc: Games, Other Apps and Demos lists: Duke Nukem 3D game
+  user: core
+  <source>
+    *: "Duke Nukem 3D"
+  </source>
+  <dest>
+    *: "Duke Nukem 3D"
+  </dest>
+  <voice>
+    *: "Duke Nukem 3D"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FLIPIT
+  desc: Games, Other Apps and Demos lists: Flip It game
+  user: core
+  <source>
+    *: "Flip It"
+  </source>
+  <dest>
+    *: "Flip It"
+  </dest>
+  <voice>
+    *: "Flip It"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_GOBAN
+  desc: Games, Other Apps and Demos lists: Go game
+  user: core
+  <source>
+    *: "Go"
+  </source>
+  <dest>
+    *: "Go"
+  </dest>
+  <voice>
+    *: "Go"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_INVADROX
+  desc: Games, Other Apps and Demos lists: Invaders game
+  user: core
+  <source>
+    *: "Invaders"
+  </source>
+  <dest>
+    *: "Invaders"
+  </dest>
+  <voice>
+    *: "Invaders"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_JACKPOT
+  desc: Games, Other Apps and Demos lists: Jackpot game
+  user: core
+  <source>
+    *: "Jackpot"
+  </source>
+  <dest>
+    *: "Jackpot"
+  </dest>
+  <voice>
+    *: "Jackpot"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_JEWELS
+  desc: Games, Other Apps and Demos lists: Jewels game
+  user: core
+  <source>
+    *: "Jewels"
+  </source>
+  <dest>
+    *: "Jewels"
+  </dest>
+  <voice>
+    *: "Jewels"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MAZE
+  desc: Games, Other Apps and Demos lists: Maze game
+  user: core
+  <source>
+    *: "Maze"
+  </source>
+  <dest>
+    *: "Maze"
+  </dest>
+  <voice>
+    *: "Maze"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MAZEZAM
+  desc: Games, Other Apps and Demos lists: MazezaM game
+  user: core
+  <source>
+    *: "MazezaM"
+  </source>
+  <dest>
+    *: "MazezaM"
+  </dest>
+  <voice>
+    *: "MazezaM"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MINESWEEPER
+  desc: Games, Other Apps and Demos lists: Minesweeper game
+  user: core
+  <source>
+    *: "Minesweeper"
+  </source>
+  <dest>
+    *: "Minesweeper"
+  </dest>
+  <voice>
+    *: "Minesweeper"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MOCHIPOD
+  desc: Games, Other Apps and Demos lists: MochiPod game
+  user: core
+  <source>
+    *: "MochiPod"
+  </source>
+  <dest>
+    *: "MochiPod"
+  </dest>
+  <voice>
+    *: "MochiPod"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PACBOX
+  desc: Games, Other Apps and Demos lists: Pac-Box game
+  user: core
+  <source>
+    *: "Pac-Box"
+  </source>
+  <dest>
+    *: "Pac-Box"
+  </dest>
+  <voice>
+    *: "Pac-Box"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PEGBOX
+  desc: Games, Other Apps and Demos lists: Pegbox game
+  user: core
+  <source>
+    *: "Pegbox"
+  </source>
+  <dest>
+    *: "Pegbox"
+  </dest>
+  <voice>
+    *: "Pegbox"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PONG
+  desc: Games, Other Apps and Demos lists: Pong game
+  user: core
+  <source>
+    *: "Pong"
+  </source>
+  <dest>
+    *: "Pong"
+  </dest>
+  <voice>
+    *: "Pong"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_QUAKE
+  desc: Games, Other Apps and Demos lists: Quake game
+  user: core
+  <source>
+    *: "Quake"
+  </source>
+  <dest>
+    *: "Quake"
+  </dest>
+  <voice>
+    *: "Quake"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_REVERSI
+  desc: Games, Other Apps and Demos lists: Reversi game
+  user: core
+  <source>
+    *: "Reversi"
+  </source>
+  <dest>
+    *: "Reversi"
+  </dest>
+  <voice>
+    *: "Reversi"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROBOTFINDSKITTEN
+  desc: Games, Other Apps and Demos lists: robotfindskitten game
+  user: core
+  <source>
+    *: "robotfindskitten"
+  </source>
+  <dest>
+    *: "robotfindskitten"
+  </dest>
+  <voice>
+    *: "robotfindskitten"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKBLOX
+  desc: Games, Other Apps and Demos lists: Blocks game
+  user: core
+  <source>
+    *: "Blocks"
+  </source>
+  <dest>
+    *: "Blocks"
+  </dest>
+  <voice>
+    *: "Blocks"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKBLOX1D
+  desc: Games, Other Apps and Demos lists: Blocks 1D game
+  user: core
+  <source>
+    *: "Blocks 1D"
+  </source>
+  <dest>
+    *: "Blocks 1D"
+  </dest>
+  <voice>
+    *: "Blocks 1D"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKBOY
+  desc: Games, Other Apps and Demos lists: Game Boy game
+  user: core
+  <source>
+    *: "Game Boy"
+  </source>
+  <dest>
+    *: "Game Boy"
+  </dest>
+  <voice>
+    *: "Game Boy"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_BLACKBOX
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Black Box
+  user: core
+  <source>
+    *: "Black Box"
+  </source>
+  <dest>
+    *: "Black Box"
+  </dest>
+  <voice>
+    *: "Black Box"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_BRIDGES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Bridges
+  user: core
+  <source>
+    *: "Bridges"
+  </source>
+  <dest>
+    *: "Bridges"
+  </dest>
+  <voice>
+    *: "Bridges"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_CUBE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Cube
+  user: core
+  <source>
+    *: "Cube"
+  </source>
+  <dest>
+    *: "Cube"
+  </dest>
+  <voice>
+    *: "Cube"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_DOMINOSA
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Dominosa
+  user: core
+  <source>
+    *: "Dominosa"
+  </source>
+  <dest>
+    *: "Dominosa"
+  </dest>
+  <voice>
+    *: "Dominosa"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FIFTEEN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Fifteen
+  user: core
+  <source>
+    *: "Fifteen"
+  </source>
+  <dest>
+    *: "Fifteen"
+  </dest>
+  <voice>
+    *: "Fifteen"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FILLING
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Filling
+  user: core
+  <source>
+    *: "Filling"
+  </source>
+  <dest>
+    *: "Filling"
+  </dest>
+  <voice>
+    *: "Filling"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FLIP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Flip
+  user: core
+  <source>
+    *: "Flip"
+  </source>
+  <dest>
+    *: "Flip"
+  </dest>
+  <voice>
+    *: "Flip"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FLOOD
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Flood
+  user: core
+  <source>
+    *: "Flood"
+  </source>
+  <dest>
+    *: "Flood"
+  </dest>
+  <voice>
+    *: "Flood"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_GALAXIES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Galaxies
+  user: core
+  <source>
+    *: "Galaxies"
+  </source>
+  <dest>
+    *: "Galaxies"
+  </dest>
+  <voice>
+    *: "Galaxies"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_GROUP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Group
+  user: core
+  <source>
+    *: "Group"
+  </source>
+  <dest>
+    *: "Group"
+  </dest>
+  <voice>
+    *: "Group"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_GUESS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Guess
+  user: core
+  <source>
+    *: "Guess"
+  </source>
+  <dest>
+    *: "Guess"
+  </dest>
+  <voice>
+    *: "Guess"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_INERTIA
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Inertia
+  user: core
+  <source>
+    *: "Inertia"
+  </source>
+  <dest>
+    *: "Inertia"
+  </dest>
+  <voice>
+    *: "Inertia"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_KEEN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Keen
+  user: core
+  <source>
+    *: "Keen"
+  </source>
+  <dest>
+    *: "Keen"
+  </dest>
+  <voice>
+    *: "Keen"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_LIGHTUP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Light Up
+  user: core
+  <source>
+    *: "Light Up"
+  </source>
+  <dest>
+    *: "Light Up"
+  </dest>
+  <voice>
+    *: "Light Up"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_LOOPY
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Loopy
+  user: core
+  <source>
+    *: "Loopy"
+  </source>
+  <dest>
+    *: "Loopy"
+  </dest>
+  <voice>
+    *: "Loopy"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MAGNETS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Magnets
+  user: core
+  <source>
+    *: "Magnets"
+  </source>
+  <dest>
+    *: "Magnets"
+  </dest>
+  <voice>
+    *: "Magnets"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MAP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Map
+  user: core
+  <source>
+    *: "Map"
+  </source>
+  <dest>
+    *: "Map"
+  </dest>
+  <voice>
+    *: "Map"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MINES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Mines
+  user: core
+  <source>
+    *: "Mines"
+  </source>
+  <dest>
+    *: "Mines"
+  </dest>
+  <voice>
+    *: "Mines"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MOSAIC
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Mosaic
+  user: core
+  <source>
+    *: "Mosaic"
+  </source>
+  <dest>
+    *: "Mosaic"
+  </dest>
+  <voice>
+    *: "Mosaic"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_NET
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Net
+  user: core
+  <source>
+    *: "Net"
+  </source>
+  <dest>
+    *: "Net"
+  </dest>
+  <voice>
+    *: "Net"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_NETSLIDE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Netslide
+  user: core
+  <source>
+    *: "Netslide"
+  </source>
+  <dest>
+    *: "Netslide"
+  </dest>
+  <voice>
+    *: "Netslide"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PALISADE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Palisade
+  user: core
+  <source>
+    *: "Palisade"
+  </source>
+  <dest>
+    *: "Palisade"
+  </dest>
+  <voice>
+    *: "Palisade"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PATTERN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Pattern
+  user: core
+  <source>
+    *: "Pattern"
+  </source>
+  <dest>
+    *: "Pattern"
+  </dest>
+  <voice>
+    *: "Pattern"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PEARL
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Pearl
+  user: core
+  <source>
+    *: "Pearl"
+  </source>
+  <dest>
+    *: "Pearl"
+  </dest>
+  <voice>
+    *: "Pearl"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PEGS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Pegs
+  user: core
+  <source>
+    *: "Pegs"
+  </source>
+  <dest>
+    *: "Pegs"
+  </dest>
+  <voice>
+    *: "Pegs"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_RANGE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Range
+  user: core
+  <source>
+    *: "Range"
+  </source>
+  <dest>
+    *: "Range"
+  </dest>
+  <voice>
+    *: "Range"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_RECT
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Rectangles
+  user: core
+  <source>
+    *: "Rectangles"
+  </source>
+  <dest>
+    *: "Rectangles"
+  </dest>
+  <voice>
+    *: "Rectangles"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SAMEGAME
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Same Game
+  user: core
+  <source>
+    *: "Same Game"
+  </source>
+  <dest>
+    *: "Same Game"
+  </dest>
+  <voice>
+    *: "Same Game"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SIGNPOST
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Signpost
+  user: core
+  <source>
+    *: "Signpost"
+  </source>
+  <dest>
+    *: "Signpost"
+  </dest>
+  <voice>
+    *: "Signpost"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SINGLES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Singles
+  user: core
+  <source>
+    *: "Singles"
+  </source>
+  <dest>
+    *: "Singles"
+  </dest>
+  <voice>
+    *: "Singles"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SIXTEEN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Sixteen
+  user: core
+  <source>
+    *: "Sixteen"
+  </source>
+  <dest>
+    *: "Sixteen"
+  </dest>
+  <voice>
+    *: "Sixteen"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SLANT
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Slant
+  user: core
+  <source>
+    *: "Slant"
+  </source>
+  <dest>
+    *: "Slant"
+  </dest>
+  <voice>
+    *: "Slant"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SLIDE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Slide
+  user: core
+  <source>
+    *: "Slide"
+  </source>
+  <dest>
+    *: "Slide"
+  </dest>
+  <voice>
+    *: "Slide"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SOKOBAN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Sokoban
+  user: core
+  <source>
+    *: "Random Sokoban"
+  </source>
+  <dest>
+    *: "Random Sokoban"
+  </dest>
+  <voice>
+    *: "Random Sokoban"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SOLO
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Solo
+  user: core
+  <source>
+    *: "Solo"
+  </source>
+  <dest>
+    *: "Solo"
+  </dest>
+  <voice>
+    *: "Solo"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TENTS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Tents
+  user: core
+  <source>
+    *: "Tents"
+  </source>
+  <dest>
+    *: "Tents"
+  </dest>
+  <voice>
+    *: "Tents"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TOWERS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Towers
+  user: core
+  <source>
+    *: "Towers"
+  </source>
+  <dest>
+    *: "Towers"
+  </dest>
+  <voice>
+    *: "Towers"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TRACKS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Tracks
+  user: core
+  <source>
+    *: "Tracks"
+  </source>
+  <dest>
+    *: "Tracks"
+  </dest>
+  <voice>
+    *: "Tracks"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TWIDDLE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Twiddle
+  user: core
+  <source>
+    *: "Twiddle"
+  </source>
+  <dest>
+    *: "Twiddle"
+  </dest>
+  <voice>
+    *: "Twiddle"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNDEAD
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Undead
+  user: core
+  <source>
+    *: "Undead"
+  </source>
+  <dest>
+    *: "Undead"
+  </dest>
+  <voice>
+    *: "Undead"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNEQUAL
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Unequal
+  user: core
+  <source>
+    *: "Unequal"
+  </source>
+  <dest>
+    *: "Unequal"
+  </dest>
+  <voice>
+    *: "Unequal"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNRULY
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Unruly
+  user: core
+  <source>
+    *: "Unruly"
+  </source>
+  <dest>
+    *: "Unruly"
+  </dest>
+  <voice>
+    *: "Unruly"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNTANGLE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Untangle
+  user: core
+  <source>
+    *: "Untangle"
+  </source>
+  <dest>
+    *: "Untangle"
+  </dest>
+  <voice>
+    *: "Untangle"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SLIDING_PUZZLE
+  desc: Games, Other Apps and Demos lists: Sliding Puzzle game
+  user: core
+  <source>
+    *: "Sliding Puzzle"
+  </source>
+  <dest>
+    *: "Sliding Puzzle"
+  </dest>
+  <voice>
+    *: "Sliding Puzzle"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SNAKE
+  desc: Games, Other Apps and Demos lists: Snake game
+  user: core
+  <source>
+    *: "Snake"
+  </source>
+  <dest>
+    *: "Snake"
+  </dest>
+  <voice>
+    *: "Snake"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SNAKE2
+  desc: Games, Other Apps and Demos lists: Snake 2 game
+  user: core
+  <source>
+    *: "Snake 2"
+  </source>
+  <dest>
+    *: "Snake 2"
+  </dest>
+  <voice>
+    *: "Snake 2"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SOKOBAN
+  desc: Games, Other Apps and Demos lists: Sokoban game
+  user: core
+  <source>
+    *: "Sokoban"
+  </source>
+  <dest>
+    *: "Sokoban"
+  </dest>
+  <voice>
+    *: "Sokoban"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SOLITAIRE
+  desc: Games, Other Apps and Demos lists: Solitaire game
+  user: core
+  <source>
+    *: "Solitaire"
+  </source>
+  <dest>
+    *: "Solitaire"
+  </dest>
+  <voice>
+    *: "Solitaire"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SPACEROCKS
+  desc: Games, Other Apps and Demos lists: Space Rocks game
+  user: core
+  <source>
+    *: "Space Rocks"
+  </source>
+  <dest>
+    *: "Space Rocks"
+  </dest>
+  <voice>
+    *: "Space Rocks"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_STAR
+  desc: Games, Other Apps and Demos lists: Star game
+  user: core
+  <source>
+    *: "Star"
+  </source>
+  <dest>
+    *: "Star"
+  </dest>
+  <voice>
+    *: "Star"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SUDOKU
+  desc: Games, Other Apps and Demos lists: Sudoku game
+  user: core
+  <source>
+    *: "Sudoku"
+  </source>
+  <dest>
+    *: "Sudoku"
+  </dest>
+  <voice>
+    *: "Sudoku"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SUPERDOM
+  desc: Games, Other Apps and Demos lists: Super Domination game
+  user: core
+  <source>
+    *: "Super Domination"
+  </source>
+  <dest>
+    *: "Super Domination"
+  </dest>
+  <voice>
+    *: "Super Domination"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_WOLF3D
+  desc: Games, Other Apps and Demos lists: Wolfenstein 3D game
+  user: core
+  <source>
+    *: "Wolfenstein 3D"
+  </source>
+  <dest>
+    *: "Wolfenstein 3D"
+  </dest>
+  <voice>
+    *: "Wolfenstein 3D"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_WORMLET
+  desc: Games, Other Apps and Demos lists: Wormlet game
+  user: core
+  <source>
+    *: "Wormlet"
+  </source>
+  <dest>
+    *: "Wormlet"
+  </dest>
+  <voice>
+    *: "Wormlet"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_XOBOX
+  desc: Games, Other Apps and Demos lists: Xobox game
+  user: core
+  <source>
+    *: "Xobox"
+  </source>
+  <dest>
+    *: "Xobox"
+  </dest>
+  <voice>
+    *: "Xobox"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_XRICK
+  desc: Games, Other Apps and Demos lists: Rick Dangerous game
+  user: core
+  <source>
+    *: "Rick Dangerous"
+  </source>
+  <dest>
+    *: "Rick Dangerous"
+  </dest>
+  <voice>
+    *: "Rick Dangerous"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_XWORLD
+  desc: Games, Other Apps and Demos lists: Another World game
+  user: core
+  <source>
+    *: "Another World"
+  </source>
+  <dest>
+    *: "Another World"
+  </dest>
+  <voice>
+    *: "Another World"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ZXBOX
+  desc: Games, Other Apps and Demos lists: ZX Spectrum game
+  user: core
+  <source>
+    *: "ZX Spectrum"
+  </source>
+  <dest>
+    *: "ZX Spectrum"
+  </dest>
+  <voice>
+    *: "ZX Spectrum"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ANNOUNCE_STATUS
+  desc: Games, Other Apps and Demos lists: Speaks time, battery and track info aloud
+  user: core
+  <source>
+    *: "Announce Status"
+  </source>
+  <dest>
+    *: "Announce Status"
+  </dest>
+  <voice>
+    *: "Announce Status"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CALCULATOR
+  desc: Games, Other Apps and Demos lists: Pocket calculator
+  user: core
+  <source>
+    *: "Calculator"
+  </source>
+  <dest>
+    *: "Calculator"
+  </dest>
+  <voice>
+    *: "Calculator"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CHESSCLOCK
+  desc: Games, Other Apps and Demos lists: Two-player game clock
+  user: core
+  <source>
+    *: "Chess Clock"
+  </source>
+  <dest>
+    *: "Chess Clock"
+  </dest>
+  <voice>
+    *: "Chess Clock"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_COUNTDOWN_TIMER
+  desc: Games, Other Apps and Demos lists: Countdown timer
+  user: core
+  <source>
+    *: "Timer"
+  </source>
+  <dest>
+    *: "Timer"
+  </dest>
+  <voice>
+    *: "Timer"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CUE_PLAYLIST
+  desc: Games, Other Apps and Demos lists: Plays tracks from a .cue sheet
+  user: core
+  <source>
+    *: "Cue Playlist"
+  </source>
+  <dest>
+    *: "Cue Playlist"
+  </dest>
+  <voice>
+    *: "Cue Playlist"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DART_SCORER
+  desc: Games, Other Apps and Demos lists: Darts score keeper
+  user: core
+  <source>
+    *: "Dart Scorer"
+  </source>
+  <dest>
+    *: "Dart Scorer"
+  </dest>
+  <voice>
+    *: "Dart Scorer"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DB_FOLDER_SELECT
+  desc: Games, Other Apps and Demos lists: Chooses which folders the music database scans
+  user: core
+  <source>
+    *: "Database Folders"
+  </source>
+  <dest>
+    *: "Database Folders"
+  </dest>
+  <voice>
+    *: "Database Folders"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DICT
+  desc: Games, Other Apps and Demos lists: English dictionary (WordNet)
+  user: core
+  <source>
+    *: "Dictionary"
+  </source>
+  <dest>
+    *: "Dictionary"
+  </dest>
+  <voice>
+    *: "Dictionary"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DISKTIDY
+  desc: Games, Other Apps and Demos lists: Deletes junk files left by computers
+  user: core
+  <source>
+    *: "Disk Tidy"
+  </source>
+  <dest>
+    *: "Disk Tidy"
+  </dest>
+  <voice>
+    *: "Disk Tidy"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_EQ_OPTIMIZER
+  desc: Games, Other Apps and Demos lists: Tunes the equalizer for headphones
+  user: core
+  <source>
+    *: "EQ Optimizer"
+  </source>
+  <dest>
+    *: "EQ Optimizer"
+  </dest>
+  <voice>
+    *: "EQ Optimizer"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_H264_PLAYER
+  desc: Games, Other Apps and Demos lists: Plays H.264 MP4 videos
+  user: core
+  <source>
+    *: "Video Player"
+  </source>
+  <dest>
+    *: "Video Player"
+  </dest>
+  <voice>
+    *: "Video Player"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_IMAGEVIEWER
+  desc: Games, Other Apps and Demos lists: Views JPEG/PNG/BMP/GIF pictures
+  user: core
+  <source>
+    *: "Image Viewer"
+  </source>
+  <dest>
+    *: "Image Viewer"
+  </dest>
+  <voice>
+    *: "Image Viewer"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_IMAGEVIEWER_COMPAT
+  desc: Games, Other Apps and Demos lists: Rockbox image viewer
+  user: core
+  <source>
+    *: "Image Viewer (Classic)"
+  </source>
+  <dest>
+    *: "Image Viewer (Classic)"
+  </dest>
+  <voice>
+    *: "Image Viewer (Classic)"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_KEYBOX
+  desc: Games, Other Apps and Demos lists: Encrypted password store
+  user: core
+  <source>
+    *: "Keybox"
+  </source>
+  <dest>
+    *: "Keybox"
+  </dest>
+  <voice>
+    *: "Keybox"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_KEYREMAP
+  desc: Games, Other Apps and Demos lists: Remaps buttons
+  user: core
+  <source>
+    *: "Key Remap"
+  </source>
+  <dest>
+    *: "Key Remap"
+  </dest>
+  <voice>
+    *: "Key Remap"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LAMP
+  desc: Games, Other Apps and Demos lists: Turns the screen into a light
+  user: core
+  <source>
+    *: "Lamp"
+  </source>
+  <dest>
+    *: "Lamp"
+  </dest>
+  <voice>
+    *: "Lamp"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LASTFM_SCROBBLER
+  desc: Games, Other Apps and Demos lists: Logs plays for Last.fm
+  user: core
+  <source>
+    *: "Last.fm Scrobbler"
+  </source>
+  <dest>
+    *: "Last.fm Scrobbler"
+  </dest>
+  <voice>
+    *: "Last.fm Scrobbler"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LASTFM_SCROBBLER_VIEWER
+  desc: Games, Other Apps and Demos lists: Views the Last.fm play log
+  user: core
+  <source>
+    *: "Scrobble Log"
+  </source>
+  <dest>
+    *: "Scrobble Log"
+  </dest>
+  <voice>
+    *: "Scrobble Log"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LRCPLAYER
+  desc: Games, Other Apps and Demos lists: Shows synced .lrc lyrics
+  user: core
+  <source>
+    *: "Lyrics Player"
+  </source>
+  <dest>
+    *: "Lyrics Player"
+  </dest>
+  <voice>
+    *: "Lyrics Player"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MAIN_MENU_CONFIG
+  desc: Games, Other Apps and Demos lists: Edits the main menu
+  user: core
+  <source>
+    *: "Main Menu Setup"
+  </source>
+  <dest>
+    *: "Main Menu Setup"
+  </dest>
+  <voice>
+    *: "Main Menu Setup"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MD5SUM
+  desc: Games, Other Apps and Demos lists: Computes file checksums
+  user: core
+  <source>
+    *: "MD5 Sum"
+  </source>
+  <dest>
+    *: "MD5 Sum"
+  </dest>
+  <voice>
+    *: "MD5 Sum"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_METRONOME
+  desc: Games, Other Apps and Demos lists: Metronome with tap tempo
+  user: core
+  <source>
+    *: "Metronome"
+  </source>
+  <dest>
+    *: "Metronome"
+  </dest>
+  <voice>
+    *: "Metronome"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MIDI
+  desc: Games, Other Apps and Demos lists: Plays MIDI files
+  user: core
+  <source>
+    *: "MIDI Player"
+  </source>
+  <dest>
+    *: "MIDI Player"
+  </dest>
+  <voice>
+    *: "MIDI Player"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MIKMOD
+  desc: Games, Other Apps and Demos lists: Plays MOD/XM/S3M/IT tracker music
+  user: core
+  <source>
+    *: "Module Player"
+  </source>
+  <dest>
+    *: "Module Player"
+  </dest>
+  <voice>
+    *: "Module Player"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MPEGPLAYER
+  desc: Games, Other Apps and Demos lists: Plays MPEG-1/2 video
+  user: core
+  <source>
+    *: "MPEG Player"
+  </source>
+  <dest>
+    *: "MPEG Player"
+  </dest>
+  <voice>
+    *: "MPEG Player"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_OPEN_PLUGINS
+  desc: Games, Other Apps and Demos lists: Assigns apps to file types
+  user: core
+  <source>
+    *: "Open With"
+  </source>
+  <dest>
+    *: "Open With"
+  </dest>
+  <voice>
+    *: "Open With"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_OTP
+  desc: Games, Other Apps and Demos lists: TOTP/HOTP code generator
+  user: core
+  <source>
+    *: "One-Time Passwords"
+  </source>
+  <dest>
+    *: "One-Time Passwords"
+  </dest>
+  <voice>
+    *: "One-Time Passwords"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PDBOX
+  desc: Games, Other Apps and Demos lists: Pure Data patch player
+  user: core
+  <source>
+    *: "Pure Data"
+  </source>
+  <dest>
+    *: "Pure Data"
+  </dest>
+  <voice>
+    *: "Pure Data"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PERIODIC_TABLE
+  desc: Games, Other Apps and Demos lists: Periodic table of elements
+  user: core
+  <source>
+    *: "Periodic Table"
+  </source>
+  <dest>
+    *: "Periodic Table"
+  </dest>
+  <voice>
+    *: "Periodic Table"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PITCH_DETECTOR
+  desc: Games, Other Apps and Demos lists: Instrument tuner using the microphone
+  user: core
+  <source>
+    *: "Tuner"
+  </source>
+  <dest>
+    *: "Tuner"
+  </dest>
+  <voice>
+    *: "Tuner"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PITCH_SCREEN
+  desc: Games, Other Apps and Demos lists: Changes playback pitch and speed
+  user: core
+  <source>
+    *: "Pitch"
+  </source>
+  <dest>
+    *: "Pitch"
+  </dest>
+  <voice>
+    *: "Pitch"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PLAYING_TIME
+  desc: Games, Other Apps and Demos lists: Total time of the playlist
+  user: core
+  <source>
+    *: "Playing Time"
+  </source>
+  <dest>
+    *: "Playing Time"
+  </dest>
+  <voice>
+    *: "Playing Time"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PROPERTIES
+  desc: Games, Other Apps and Demos lists: File details
+  user: core
+  <source>
+    *: "Properties"
+  </source>
+  <dest>
+    *: "Properties"
+  </dest>
+  <voice>
+    *: "Properties"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_RANDOM_FOLDER_ADVANCE_CONFIG
+  desc: Games, Other Apps and Demos lists: Sets up random folder advance
+  user: core
+  <source>
+    *: "Random Folder"
+  </source>
+  <dest>
+    *: "Random Folder"
+  </dest>
+  <voice>
+    *: "Random Folder"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_RB_INFO
+  desc: Games, Other Apps and Demos lists: Diagnostic pages for developers
+  user: core
+  <source>
+    *: "System Info"
+  </source>
+  <dest>
+    *: "System Info"
+  </dest>
+  <voice>
+    *: "System Info"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_REMOTE_CONTROL
+  desc: Games, Other Apps and Demos lists: Uses the iPod as a computer remote
+  user: core
+  <source>
+    *: "Remote Control"
+  </source>
+  <dest>
+    *: "Remote Control"
+  </dest>
+  <voice>
+    *: "Remote Control"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_RESISTOR
+  desc: Games, Other Apps and Demos lists: Resistor colour code calculator
+  user: core
+  <source>
+    *: "Resistor Codes"
+  </source>
+  <dest>
+    *: "Resistor Codes"
+  </dest>
+  <voice>
+    *: "Resistor Codes"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKPAINT
+  desc: Games, Other Apps and Demos lists: Drawing program
+  user: core
+  <source>
+    *: "Paint"
+  </source>
+  <dest>
+    *: "Paint"
+  </dest>
+  <voice>
+    *: "Paint"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SETTINGS_DUMPER
+  desc: Games, Other Apps and Demos lists: Writes all settings to a file
+  user: core
+  <source>
+    *: "Settings Dump"
+  </source>
+  <dest>
+    *: "Settings Dump"
+  </dest>
+  <voice>
+    *: "Settings Dump"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SHORTCUTS_APPEND
+  desc: Games, Other Apps and Demos lists: Adds a file to Shortcuts
+  user: core
+  <source>
+    *: "Add Shortcut"
+  </source>
+  <dest>
+    *: "Add Shortcut"
+  </dest>
+  <voice>
+    *: "Add Shortcut"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SHORTCUTS_VIEW
+  desc: Games, Other Apps and Demos lists: Lists shortcuts
+  user: core
+  <source>
+    *: "Shortcuts"
+  </source>
+  <dest>
+    *: "Shortcuts"
+  </dest>
+  <voice>
+    *: "Shortcuts"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SORT
+  desc: Games, Other Apps and Demos lists: Sorts a text file's lines
+  user: core
+  <source>
+    *: "Sort Lines"
+  </source>
+  <dest>
+    *: "Sort Lines"
+  </dest>
+  <voice>
+    *: "Sort Lines"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SPEEDREAD
+  desc: Games, Other Apps and Demos lists: Shows text one word at a time
+  user: core
+  <source>
+    *: "Speed Reader"
+  </source>
+  <dest>
+    *: "Speed Reader"
+  </dest>
+  <voice>
+    *: "Speed Reader"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_STATS
+  desc: Games, Other Apps and Demos lists: Counts files and folders on the disk
+  user: core
+  <source>
+    *: "File Stats"
+  </source>
+  <dest>
+    *: "File Stats"
+  </dest>
+  <voice>
+    *: "File Stats"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TAGNAVI_EDIT
+  desc: Games, Other Apps and Demos lists: Edits the music database menu
+  user: core
+  <source>
+    *: "Database Menu Editor"
+  </source>
+  <dest>
+    *: "Database Menu Editor"
+  </dest>
+  <voice>
+    *: "Database Menu Editor"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TEXT_EDITOR
+  desc: Games, Other Apps and Demos lists: Edits text files
+  user: core
+  <source>
+    *: "Text Editor"
+  </source>
+  <dest>
+    *: "Text Editor"
+  </dest>
+  <voice>
+    *: "Text Editor"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TEXT_VIEWER
+  desc: Games, Other Apps and Demos lists: Reads text files
+  user: core
+  <source>
+    *: "Text Viewer"
+  </source>
+  <dest>
+    *: "Text Viewer"
+  </dest>
+  <voice>
+    *: "Text Viewer"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_THEME_REMOVE
+  desc: Games, Other Apps and Demos lists: Removes installed themes
+  user: core
+  <source>
+    *: "Theme Remover"
+  </source>
+  <dest>
+    *: "Theme Remover"
+  </dest>
+  <voice>
+    *: "Theme Remover"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BATTERY_BENCH
+  desc: Games, Other Apps and Demos lists: Logs battery drain over time
+  user: core
+  <source>
+    *: "Battery Bench"
+  </source>
+  <dest>
+    *: "Battery Bench"
+  </dest>
+  <voice>
+    *: "Battery Bench"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BOUNCE
+  desc: Games, Other Apps and Demos lists: Bouncing text demo
+  user: core
+  <source>
+    *: "Bounce"
+  </source>
+  <dest>
+    *: "Bounce"
+  </dest>
+  <voice>
+    *: "Bounce"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CREDITS
+  desc: Games, Other Apps and Demos lists: Scrolling credits
+  user: core
+  <source>
+    *: "Credits"
+  </source>
+  <dest>
+    *: "Credits"
+  </dest>
+  <voice>
+    *: "Credits"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CUBE
+  desc: Games, Other Apps and Demos lists: Rotating 3D cube
+  user: core
+  <source>
+    *: "Cube"
+  </source>
+  <dest>
+    *: "Cube"
+  </dest>
+  <voice>
+    *: "Cube"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DEMYSTIFY
+  desc: Games, Other Apps and Demos lists: Line-pattern screensaver
+  user: core
+  <source>
+    *: "Demystify"
+  </source>
+  <dest>
+    *: "Demystify"
+  </dest>
+  <voice>
+    *: "Demystify"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FFT
+  desc: Games, Other Apps and Demos lists: Audio spectrum analyser
+  user: core
+  <source>
+    *: "Spectrum"
+  </source>
+  <dest>
+    *: "Spectrum"
+  </dest>
+  <voice>
+    *: "Spectrum"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FIRE
+  desc: Games, Other Apps and Demos lists: Fire effect
+  user: core
+  <source>
+    *: "Fire"
+  </source>
+  <dest>
+    *: "Fire"
+  </dest>
+  <voice>
+    *: "Fire"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FIREWORKS
+  desc: Games, Other Apps and Demos lists: Fireworks display
+  user: core
+  <source>
+    *: "Fireworks"
+  </source>
+  <dest>
+    *: "Fireworks"
+  </dest>
+  <voice>
+    *: "Fireworks"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FRACTALS
+  desc: Games, Other Apps and Demos lists: Mandelbrot explorer
+  user: core
+  <source>
+    *: "Fractals"
+  </source>
+  <dest>
+    *: "Fractals"
+  </dest>
+  <voice>
+    *: "Fractals"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LOGO
+  desc: Games, Other Apps and Demos lists: Bouncing logo
+  user: core
+  <source>
+    *: "Logo"
+  </source>
+  <dest>
+    *: "Logo"
+  </dest>
+  <voice>
+    *: "Logo"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MATRIX
+  desc: Games, Other Apps and Demos lists: Falling green code
+  user: core
+  <source>
+    *: "Matrix"
+  </source>
+  <dest>
+    *: "Matrix"
+  </dest>
+  <voice>
+    *: "Matrix"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MOSAIQUE
+  desc: Games, Other Apps and Demos lists: Screen mosaic effect
+  user: core
+  <source>
+    *: "Mosaique"
+  </source>
+  <dest>
+    *: "Mosaique"
+  </dest>
+  <voice>
+    *: "Mosaique"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_OSCILLOSCOPE
+  desc: Games, Other Apps and Demos lists: Audio waveform display
+  user: core
+  <source>
+    *: "Oscilloscope"
+  </source>
+  <dest>
+    *: "Oscilloscope"
+  </dest>
+  <voice>
+    *: "Oscilloscope"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PICTUREFLOW
+  desc: Games, Other Apps and Demos lists: Album cover flow
+  user: core
+  <source>
+    *: "PictureFlow"
+  </source>
+  <dest>
+    *: "PictureFlow"
+  </dest>
+  <voice>
+    *: "PictureFlow"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PLASMA
+  desc: Games, Other Apps and Demos lists: Plasma colour effect
+  user: core
+  <source>
+    *: "Plasma"
+  </source>
+  <dest>
+    *: "Plasma"
+  </dest>
+  <voice>
+    *: "Plasma"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PODLINK_ECHO
+  desc: Games, Other Apps and Demos lists: PodLink connection test
+  user: core
+  <source>
+    *: "PodLink Echo"
+  </source>
+  <dest>
+    *: "PodLink Echo"
+  </dest>
+  <voice>
+    *: "PodLink Echo"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKLIFE
+  desc: Games, Other Apps and Demos lists: Conway's Game of Life
+  user: core
+  <source>
+    *: "Life"
+  </source>
+  <dest>
+    *: "Life"
+  </dest>
+  <voice>
+    *: "Life"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SNOW
+  desc: Games, Other Apps and Demos lists: Falling snow
+  user: core
+  <source>
+    *: "Snow"
+  </source>
+  <dest>
+    *: "Snow"
+  </dest>
+  <voice>
+    *: "Snow"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_STARFIELD
+  desc: Games, Other Apps and Demos lists: Flying through stars
+  user: core
+  <source>
+    *: "Starfield"
+  </source>
+  <dest>
+    *: "Starfield"
+  </dest>
+  <voice>
+    *: "Starfield"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TEST_KBD
+  desc: Games, Other Apps and Demos lists: On-screen keyboard test
+  user: core
+  <source>
+    *: "Keyboard Test"
+  </source>
+  <dest>
+    *: "Keyboard Test"
+  </dest>
+  <voice>
+    *: "Keyboard Test"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_VU_METER
+  desc: Games, Other Apps and Demos lists: Analog VU meters
+  user: core
+  <source>
+    *: "VU Meter"
+  </source>
+  <dest>
+    *: "VU Meter"
+  </dest>
+  <voice>
+    *: "VU Meter"
+  </voice>
+</phrase>

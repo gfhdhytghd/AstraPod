@@ -29146,3 +29146,2215 @@
     *: "视频"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_APP_LIST_OTHER
+  desc: Extras: the folder of apps that are neither games nor demos, and its title
+  user: core
+  <source>
+    *: "Other Apps"
+  </source>
+  <dest>
+    *: "其他应用"
+  </dest>
+  <voice>
+    *: "其他应用"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_2048
+  desc: Games, Other Apps and Demos lists: 2048 game
+  user: core
+  <source>
+    *: "2048"
+  </source>
+  <dest>
+    *: "2048"
+  </dest>
+  <voice>
+    *: "2048"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_AMAZE
+  desc: Games, Other Apps and Demos lists: Amaze game
+  user: core
+  <source>
+    *: "Amaze"
+  </source>
+  <dest>
+    *: "3D 迷宫"
+  </dest>
+  <voice>
+    *: "3D 迷宫"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BLACKJACK
+  desc: Games, Other Apps and Demos lists: Blackjack game
+  user: core
+  <source>
+    *: "Blackjack"
+  </source>
+  <dest>
+    *: "二十一点"
+  </dest>
+  <voice>
+    *: "二十一点"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BRICKMANIA
+  desc: Games, Other Apps and Demos lists: Brickmania game
+  user: core
+  <source>
+    *: "Brickmania"
+  </source>
+  <dest>
+    *: "打砖块"
+  </dest>
+  <voice>
+    *: "打砖块"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BUBBLES
+  desc: Games, Other Apps and Demos lists: Bubbles game
+  user: core
+  <source>
+    *: "Bubbles"
+  </source>
+  <dest>
+    *: "泡泡龙"
+  </dest>
+  <voice>
+    *: "泡泡龙"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CHESSBOX
+  desc: Games, Other Apps and Demos lists: Chess game
+  user: core
+  <source>
+    *: "Chess"
+  </source>
+  <dest>
+    *: "国际象棋"
+  </dest>
+  <voice>
+    *: "国际象棋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CHOPPER
+  desc: Games, Other Apps and Demos lists: Chopper game
+  user: core
+  <source>
+    *: "Chopper"
+  </source>
+  <dest>
+    *: "直升机"
+  </dest>
+  <voice>
+    *: "直升机"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CLIX
+  desc: Games, Other Apps and Demos lists: Clix game
+  user: core
+  <source>
+    *: "Clix"
+  </source>
+  <dest>
+    *: "消色块"
+  </dest>
+  <voice>
+    *: "消色块"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CODEBUSTER
+  desc: Games, Other Apps and Demos lists: Codebuster game
+  user: core
+  <source>
+    *: "Codebuster"
+  </source>
+  <dest>
+    *: "猜密码"
+  </dest>
+  <voice>
+    *: "猜密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DICE
+  desc: Games, Other Apps and Demos lists: Dice game
+  user: core
+  <source>
+    *: "Dice"
+  </source>
+  <dest>
+    *: "骰子"
+  </dest>
+  <voice>
+    *: "骰子"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DOOM
+  desc: Games, Other Apps and Demos lists: Doom game
+  user: core
+  <source>
+    *: "Doom"
+  </source>
+  <dest>
+    *: "毁灭战士"
+  </dest>
+  <voice>
+    *: "毁灭战士"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DUKE3D
+  desc: Games, Other Apps and Demos lists: Duke Nukem 3D game
+  user: core
+  <source>
+    *: "Duke Nukem 3D"
+  </source>
+  <dest>
+    *: "毁灭公爵 3D"
+  </dest>
+  <voice>
+    *: "毁灭公爵 3D"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FLIPIT
+  desc: Games, Other Apps and Demos lists: Flip It game
+  user: core
+  <source>
+    *: "Flip It"
+  </source>
+  <dest>
+    *: "翻转"
+  </dest>
+  <voice>
+    *: "翻转"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_GOBAN
+  desc: Games, Other Apps and Demos lists: Go game
+  user: core
+  <source>
+    *: "Go"
+  </source>
+  <dest>
+    *: "围棋"
+  </dest>
+  <voice>
+    *: "围棋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_INVADROX
+  desc: Games, Other Apps and Demos lists: Invaders game
+  user: core
+  <source>
+    *: "Invaders"
+  </source>
+  <dest>
+    *: "太空入侵者"
+  </dest>
+  <voice>
+    *: "太空入侵者"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_JACKPOT
+  desc: Games, Other Apps and Demos lists: Jackpot game
+  user: core
+  <source>
+    *: "Jackpot"
+  </source>
+  <dest>
+    *: "老虎机"
+  </dest>
+  <voice>
+    *: "老虎机"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_JEWELS
+  desc: Games, Other Apps and Demos lists: Jewels game
+  user: core
+  <source>
+    *: "Jewels"
+  </source>
+  <dest>
+    *: "宝石"
+  </dest>
+  <voice>
+    *: "宝石"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MAZE
+  desc: Games, Other Apps and Demos lists: Maze game
+  user: core
+  <source>
+    *: "Maze"
+  </source>
+  <dest>
+    *: "迷宫"
+  </dest>
+  <voice>
+    *: "迷宫"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MAZEZAM
+  desc: Games, Other Apps and Demos lists: MazezaM game
+  user: core
+  <source>
+    *: "MazezaM"
+  </source>
+  <dest>
+    *: "推箱迷宫"
+  </dest>
+  <voice>
+    *: "推箱迷宫"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MINESWEEPER
+  desc: Games, Other Apps and Demos lists: Minesweeper game
+  user: core
+  <source>
+    *: "Minesweeper"
+  </source>
+  <dest>
+    *: "扫雷"
+  </dest>
+  <voice>
+    *: "扫雷"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MOCHIPOD
+  desc: Games, Other Apps and Demos lists: MochiPod game
+  user: core
+  <source>
+    *: "MochiPod"
+  </source>
+  <dest>
+    *: "MochiPod"
+  </dest>
+  <voice>
+    *: "MochiPod"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PACBOX
+  desc: Games, Other Apps and Demos lists: Pac-Box game
+  user: core
+  <source>
+    *: "Pac-Box"
+  </source>
+  <dest>
+    *: "吃豆"
+  </dest>
+  <voice>
+    *: "吃豆"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PEGBOX
+  desc: Games, Other Apps and Demos lists: Pegbox game
+  user: core
+  <source>
+    *: "Pegbox"
+  </source>
+  <dest>
+    *: "推钉"
+  </dest>
+  <voice>
+    *: "推钉"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PONG
+  desc: Games, Other Apps and Demos lists: Pong game
+  user: core
+  <source>
+    *: "Pong"
+  </source>
+  <dest>
+    *: "乒乓"
+  </dest>
+  <voice>
+    *: "乒乓"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_QUAKE
+  desc: Games, Other Apps and Demos lists: Quake game
+  user: core
+  <source>
+    *: "Quake"
+  </source>
+  <dest>
+    *: "雷神之锤"
+  </dest>
+  <voice>
+    *: "雷神之锤"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_REVERSI
+  desc: Games, Other Apps and Demos lists: Reversi game
+  user: core
+  <source>
+    *: "Reversi"
+  </source>
+  <dest>
+    *: "黑白棋"
+  </dest>
+  <voice>
+    *: "黑白棋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROBOTFINDSKITTEN
+  desc: Games, Other Apps and Demos lists: robotfindskitten game
+  user: core
+  <source>
+    *: "robotfindskitten"
+  </source>
+  <dest>
+    *: "机器人找小猫"
+  </dest>
+  <voice>
+    *: "机器人找小猫"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKBLOX
+  desc: Games, Other Apps and Demos lists: Blocks game
+  user: core
+  <source>
+    *: "Blocks"
+  </source>
+  <dest>
+    *: "方块"
+  </dest>
+  <voice>
+    *: "方块"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKBLOX1D
+  desc: Games, Other Apps and Demos lists: Blocks 1D game
+  user: core
+  <source>
+    *: "Blocks 1D"
+  </source>
+  <dest>
+    *: "一维方块"
+  </dest>
+  <voice>
+    *: "一维方块"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKBOY
+  desc: Games, Other Apps and Demos lists: Game Boy game
+  user: core
+  <source>
+    *: "Game Boy"
+  </source>
+  <dest>
+    *: "Game Boy 模拟器"
+  </dest>
+  <voice>
+    *: "Game Boy 模拟器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_BLACKBOX
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Black Box
+  user: core
+  <source>
+    *: "Black Box"
+  </source>
+  <dest>
+    *: "黑盒"
+  </dest>
+  <voice>
+    *: "黑盒"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_BRIDGES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Bridges
+  user: core
+  <source>
+    *: "Bridges"
+  </source>
+  <dest>
+    *: "搭桥"
+  </dest>
+  <voice>
+    *: "搭桥"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_CUBE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Cube
+  user: core
+  <source>
+    *: "Cube"
+  </source>
+  <dest>
+    *: "滚立方"
+  </dest>
+  <voice>
+    *: "滚立方"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_DOMINOSA
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Dominosa
+  user: core
+  <source>
+    *: "Dominosa"
+  </source>
+  <dest>
+    *: "多米诺"
+  </dest>
+  <voice>
+    *: "多米诺"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FIFTEEN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Fifteen
+  user: core
+  <source>
+    *: "Fifteen"
+  </source>
+  <dest>
+    *: "十五数码"
+  </dest>
+  <voice>
+    *: "十五数码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FILLING
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Filling
+  user: core
+  <source>
+    *: "Filling"
+  </source>
+  <dest>
+    *: "填充"
+  </dest>
+  <voice>
+    *: "填充"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FLIP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Flip
+  user: core
+  <source>
+    *: "Flip"
+  </source>
+  <dest>
+    *: "翻转灯"
+  </dest>
+  <voice>
+    *: "翻转灯"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FLOOD
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Flood
+  user: core
+  <source>
+    *: "Flood"
+  </source>
+  <dest>
+    *: "洪水"
+  </dest>
+  <voice>
+    *: "洪水"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_GALAXIES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Galaxies
+  user: core
+  <source>
+    *: "Galaxies"
+  </source>
+  <dest>
+    *: "星系"
+  </dest>
+  <voice>
+    *: "星系"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_GROUP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Group
+  user: core
+  <source>
+    *: "Group"
+  </source>
+  <dest>
+    *: "群"
+  </dest>
+  <voice>
+    *: "群"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_GUESS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Guess
+  user: core
+  <source>
+    *: "Guess"
+  </source>
+  <dest>
+    *: "猜颜色"
+  </dest>
+  <voice>
+    *: "猜颜色"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_INERTIA
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Inertia
+  user: core
+  <source>
+    *: "Inertia"
+  </source>
+  <dest>
+    *: "惯性"
+  </dest>
+  <voice>
+    *: "惯性"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_KEEN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Keen
+  user: core
+  <source>
+    *: "Keen"
+  </source>
+  <dest>
+    *: "算独"
+  </dest>
+  <voice>
+    *: "算独"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_LIGHTUP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Light Up
+  user: core
+  <source>
+    *: "Light Up"
+  </source>
+  <dest>
+    *: "点灯"
+  </dest>
+  <voice>
+    *: "点灯"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_LOOPY
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Loopy
+  user: core
+  <source>
+    *: "Loopy"
+  </source>
+  <dest>
+    *: "回路"
+  </dest>
+  <voice>
+    *: "回路"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MAGNETS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Magnets
+  user: core
+  <source>
+    *: "Magnets"
+  </source>
+  <dest>
+    *: "磁铁"
+  </dest>
+  <voice>
+    *: "磁铁"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MAP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Map
+  user: core
+  <source>
+    *: "Map"
+  </source>
+  <dest>
+    *: "四色地图"
+  </dest>
+  <voice>
+    *: "四色地图"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MINES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Mines
+  user: core
+  <source>
+    *: "Mines"
+  </source>
+  <dest>
+    *: "地雷"
+  </dest>
+  <voice>
+    *: "地雷"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MOSAIC
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Mosaic
+  user: core
+  <source>
+    *: "Mosaic"
+  </source>
+  <dest>
+    *: "马赛克"
+  </dest>
+  <voice>
+    *: "马赛克"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_NET
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Net
+  user: core
+  <source>
+    *: "Net"
+  </source>
+  <dest>
+    *: "网络"
+  </dest>
+  <voice>
+    *: "网络"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_NETSLIDE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Netslide
+  user: core
+  <source>
+    *: "Netslide"
+  </source>
+  <dest>
+    *: "滑动网络"
+  </dest>
+  <voice>
+    *: "滑动网络"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PALISADE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Palisade
+  user: core
+  <source>
+    *: "Palisade"
+  </source>
+  <dest>
+    *: "栅栏"
+  </dest>
+  <voice>
+    *: "栅栏"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PATTERN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Pattern
+  user: core
+  <source>
+    *: "Pattern"
+  </source>
+  <dest>
+    *: "数织"
+  </dest>
+  <voice>
+    *: "数织"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PEARL
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Pearl
+  user: core
+  <source>
+    *: "Pearl"
+  </source>
+  <dest>
+    *: "珍珠"
+  </dest>
+  <voice>
+    *: "珍珠"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PEGS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Pegs
+  user: core
+  <source>
+    *: "Pegs"
+  </source>
+  <dest>
+    *: "孔明棋"
+  </dest>
+  <voice>
+    *: "孔明棋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_RANGE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Range
+  user: core
+  <source>
+    *: "Range"
+  </source>
+  <dest>
+    *: "视野"
+  </dest>
+  <voice>
+    *: "视野"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_RECT
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Rectangles
+  user: core
+  <source>
+    *: "Rectangles"
+  </source>
+  <dest>
+    *: "矩形"
+  </dest>
+  <voice>
+    *: "矩形"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SAMEGAME
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Same Game
+  user: core
+  <source>
+    *: "Same Game"
+  </source>
+  <dest>
+    *: "消消乐"
+  </dest>
+  <voice>
+    *: "消消乐"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SIGNPOST
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Signpost
+  user: core
+  <source>
+    *: "Signpost"
+  </source>
+  <dest>
+    *: "路标"
+  </dest>
+  <voice>
+    *: "路标"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SINGLES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Singles
+  user: core
+  <source>
+    *: "Singles"
+  </source>
+  <dest>
+    *: "单一"
+  </dest>
+  <voice>
+    *: "单一"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SIXTEEN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Sixteen
+  user: core
+  <source>
+    *: "Sixteen"
+  </source>
+  <dest>
+    *: "十六"
+  </dest>
+  <voice>
+    *: "十六"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SLANT
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Slant
+  user: core
+  <source>
+    *: "Slant"
+  </source>
+  <dest>
+    *: "斜线"
+  </dest>
+  <voice>
+    *: "斜线"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SLIDE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Slide
+  user: core
+  <source>
+    *: "Slide"
+  </source>
+  <dest>
+    *: "滑块"
+  </dest>
+  <voice>
+    *: "滑块"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SOKOBAN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Sokoban
+  user: core
+  <source>
+    *: "Random Sokoban"
+  </source>
+  <dest>
+    *: "随机推箱子"
+  </dest>
+  <voice>
+    *: "随机推箱子"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SOLO
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Solo
+  user: core
+  <source>
+    *: "Solo"
+  </source>
+  <dest>
+    *: "变体数独"
+  </dest>
+  <voice>
+    *: "变体数独"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TENTS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Tents
+  user: core
+  <source>
+    *: "Tents"
+  </source>
+  <dest>
+    *: "帐篷"
+  </dest>
+  <voice>
+    *: "帐篷"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TOWERS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Towers
+  user: core
+  <source>
+    *: "Towers"
+  </source>
+  <dest>
+    *: "高楼"
+  </dest>
+  <voice>
+    *: "高楼"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TRACKS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Tracks
+  user: core
+  <source>
+    *: "Tracks"
+  </source>
+  <dest>
+    *: "轨道"
+  </dest>
+  <voice>
+    *: "轨道"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TWIDDLE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Twiddle
+  user: core
+  <source>
+    *: "Twiddle"
+  </source>
+  <dest>
+    *: "旋转"
+  </dest>
+  <voice>
+    *: "旋转"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNDEAD
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Undead
+  user: core
+  <source>
+    *: "Undead"
+  </source>
+  <dest>
+    *: "亡灵"
+  </dest>
+  <voice>
+    *: "亡灵"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNEQUAL
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Unequal
+  user: core
+  <source>
+    *: "Unequal"
+  </source>
+  <dest>
+    *: "不等式"
+  </dest>
+  <voice>
+    *: "不等式"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNRULY
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Unruly
+  user: core
+  <source>
+    *: "Unruly"
+  </source>
+  <dest>
+    *: "黑白格"
+  </dest>
+  <voice>
+    *: "黑白格"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNTANGLE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Untangle
+  user: core
+  <source>
+    *: "Untangle"
+  </source>
+  <dest>
+    *: "解结"
+  </dest>
+  <voice>
+    *: "解结"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SLIDING_PUZZLE
+  desc: Games, Other Apps and Demos lists: Sliding Puzzle game
+  user: core
+  <source>
+    *: "Sliding Puzzle"
+  </source>
+  <dest>
+    *: "拼图"
+  </dest>
+  <voice>
+    *: "拼图"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SNAKE
+  desc: Games, Other Apps and Demos lists: Snake game
+  user: core
+  <source>
+    *: "Snake"
+  </source>
+  <dest>
+    *: "贪吃蛇"
+  </dest>
+  <voice>
+    *: "贪吃蛇"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SNAKE2
+  desc: Games, Other Apps and Demos lists: Snake 2 game
+  user: core
+  <source>
+    *: "Snake 2"
+  </source>
+  <dest>
+    *: "贪吃蛇 2"
+  </dest>
+  <voice>
+    *: "贪吃蛇 2"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SOKOBAN
+  desc: Games, Other Apps and Demos lists: Sokoban game
+  user: core
+  <source>
+    *: "Sokoban"
+  </source>
+  <dest>
+    *: "推箱子"
+  </dest>
+  <voice>
+    *: "推箱子"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SOLITAIRE
+  desc: Games, Other Apps and Demos lists: Solitaire game
+  user: core
+  <source>
+    *: "Solitaire"
+  </source>
+  <dest>
+    *: "纸牌"
+  </dest>
+  <voice>
+    *: "纸牌"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SPACEROCKS
+  desc: Games, Other Apps and Demos lists: Space Rocks game
+  user: core
+  <source>
+    *: "Space Rocks"
+  </source>
+  <dest>
+    *: "太空陨石"
+  </dest>
+  <voice>
+    *: "太空陨石"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_STAR
+  desc: Games, Other Apps and Demos lists: Star game
+  user: core
+  <source>
+    *: "Star"
+  </source>
+  <dest>
+    *: "星星"
+  </dest>
+  <voice>
+    *: "星星"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SUDOKU
+  desc: Games, Other Apps and Demos lists: Sudoku game
+  user: core
+  <source>
+    *: "Sudoku"
+  </source>
+  <dest>
+    *: "数独"
+  </dest>
+  <voice>
+    *: "数独"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SUPERDOM
+  desc: Games, Other Apps and Demos lists: Super Domination game
+  user: core
+  <source>
+    *: "Super Domination"
+  </source>
+  <dest>
+    *: "超级霸权"
+  </dest>
+  <voice>
+    *: "超级霸权"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_WOLF3D
+  desc: Games, Other Apps and Demos lists: Wolfenstein 3D game
+  user: core
+  <source>
+    *: "Wolfenstein 3D"
+  </source>
+  <dest>
+    *: "德军总部 3D"
+  </dest>
+  <voice>
+    *: "德军总部 3D"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_WORMLET
+  desc: Games, Other Apps and Demos lists: Wormlet game
+  user: core
+  <source>
+    *: "Wormlet"
+  </source>
+  <dest>
+    *: "蠕虫"
+  </dest>
+  <voice>
+    *: "蠕虫"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_XOBOX
+  desc: Games, Other Apps and Demos lists: Xobox game
+  user: core
+  <source>
+    *: "Xobox"
+  </source>
+  <dest>
+    *: "圈地"
+  </dest>
+  <voice>
+    *: "圈地"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_XRICK
+  desc: Games, Other Apps and Demos lists: Rick Dangerous game
+  user: core
+  <source>
+    *: "Rick Dangerous"
+  </source>
+  <dest>
+    *: "瑞克历险记"
+  </dest>
+  <voice>
+    *: "瑞克历险记"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_XWORLD
+  desc: Games, Other Apps and Demos lists: Another World game
+  user: core
+  <source>
+    *: "Another World"
+  </source>
+  <dest>
+    *: "另一个世界"
+  </dest>
+  <voice>
+    *: "另一个世界"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ZXBOX
+  desc: Games, Other Apps and Demos lists: ZX Spectrum game
+  user: core
+  <source>
+    *: "ZX Spectrum"
+  </source>
+  <dest>
+    *: "ZX Spectrum 模拟器"
+  </dest>
+  <voice>
+    *: "ZX Spectrum 模拟器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ANNOUNCE_STATUS
+  desc: Games, Other Apps and Demos lists: Speaks time, battery and track info aloud
+  user: core
+  <source>
+    *: "Announce Status"
+  </source>
+  <dest>
+    *: "状态播报"
+  </dest>
+  <voice>
+    *: "状态播报"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CALCULATOR
+  desc: Games, Other Apps and Demos lists: Pocket calculator
+  user: core
+  <source>
+    *: "Calculator"
+  </source>
+  <dest>
+    *: "计算器"
+  </dest>
+  <voice>
+    *: "计算器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CHESSCLOCK
+  desc: Games, Other Apps and Demos lists: Two-player game clock
+  user: core
+  <source>
+    *: "Chess Clock"
+  </source>
+  <dest>
+    *: "棋钟"
+  </dest>
+  <voice>
+    *: "棋钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_COUNTDOWN_TIMER
+  desc: Games, Other Apps and Demos lists: Countdown timer
+  user: core
+  <source>
+    *: "Timer"
+  </source>
+  <dest>
+    *: "倒计时"
+  </dest>
+  <voice>
+    *: "倒计时"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CUE_PLAYLIST
+  desc: Games, Other Apps and Demos lists: Plays tracks from a .cue sheet
+  user: core
+  <source>
+    *: "Cue Playlist"
+  </source>
+  <dest>
+    *: "CUE 播放列表"
+  </dest>
+  <voice>
+    *: "CUE 播放列表"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DART_SCORER
+  desc: Games, Other Apps and Demos lists: Darts score keeper
+  user: core
+  <source>
+    *: "Dart Scorer"
+  </source>
+  <dest>
+    *: "飞镖计分"
+  </dest>
+  <voice>
+    *: "飞镖计分"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DB_FOLDER_SELECT
+  desc: Games, Other Apps and Demos lists: Chooses which folders the music database scans
+  user: core
+  <source>
+    *: "Database Folders"
+  </source>
+  <dest>
+    *: "数据库文件夹"
+  </dest>
+  <voice>
+    *: "数据库文件夹"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DICT
+  desc: Games, Other Apps and Demos lists: English dictionary (WordNet)
+  user: core
+  <source>
+    *: "Dictionary"
+  </source>
+  <dest>
+    *: "词典"
+  </dest>
+  <voice>
+    *: "词典"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DISKTIDY
+  desc: Games, Other Apps and Demos lists: Deletes junk files left by computers
+  user: core
+  <source>
+    *: "Disk Tidy"
+  </source>
+  <dest>
+    *: "磁盘清理"
+  </dest>
+  <voice>
+    *: "磁盘清理"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_EQ_OPTIMIZER
+  desc: Games, Other Apps and Demos lists: Tunes the equalizer for headphones
+  user: core
+  <source>
+    *: "EQ Optimizer"
+  </source>
+  <dest>
+    *: "均衡器优化"
+  </dest>
+  <voice>
+    *: "均衡器优化"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_H264_PLAYER
+  desc: Games, Other Apps and Demos lists: Plays H.264 MP4 videos
+  user: core
+  <source>
+    *: "Video Player"
+  </source>
+  <dest>
+    *: "视频播放器"
+  </dest>
+  <voice>
+    *: "视频播放器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_IMAGEVIEWER
+  desc: Games, Other Apps and Demos lists: Views JPEG/PNG/BMP/GIF pictures
+  user: core
+  <source>
+    *: "Image Viewer"
+  </source>
+  <dest>
+    *: "图片查看器"
+  </dest>
+  <voice>
+    *: "图片查看器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_IMAGEVIEWER_COMPAT
+  desc: Games, Other Apps and Demos lists: Rockbox image viewer
+  user: core
+  <source>
+    *: "Image Viewer (Classic)"
+  </source>
+  <dest>
+    *: "图片查看器（经典）"
+  </dest>
+  <voice>
+    *: "图片查看器（经典）"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_KEYBOX
+  desc: Games, Other Apps and Demos lists: Encrypted password store
+  user: core
+  <source>
+    *: "Keybox"
+  </source>
+  <dest>
+    *: "密码箱"
+  </dest>
+  <voice>
+    *: "密码箱"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_KEYREMAP
+  desc: Games, Other Apps and Demos lists: Remaps buttons
+  user: core
+  <source>
+    *: "Key Remap"
+  </source>
+  <dest>
+    *: "按键映射"
+  </dest>
+  <voice>
+    *: "按键映射"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LAMP
+  desc: Games, Other Apps and Demos lists: Turns the screen into a light
+  user: core
+  <source>
+    *: "Lamp"
+  </source>
+  <dest>
+    *: "手电筒"
+  </dest>
+  <voice>
+    *: "手电筒"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LASTFM_SCROBBLER
+  desc: Games, Other Apps and Demos lists: Logs plays for Last.fm
+  user: core
+  <source>
+    *: "Last.fm Scrobbler"
+  </source>
+  <dest>
+    *: "Last.fm 记录"
+  </dest>
+  <voice>
+    *: "Last.fm 记录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LASTFM_SCROBBLER_VIEWER
+  desc: Games, Other Apps and Demos lists: Views the Last.fm play log
+  user: core
+  <source>
+    *: "Scrobble Log"
+  </source>
+  <dest>
+    *: "播放记录查看"
+  </dest>
+  <voice>
+    *: "播放记录查看"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LRCPLAYER
+  desc: Games, Other Apps and Demos lists: Shows synced .lrc lyrics
+  user: core
+  <source>
+    *: "Lyrics Player"
+  </source>
+  <dest>
+    *: "歌词播放器"
+  </dest>
+  <voice>
+    *: "歌词播放器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MAIN_MENU_CONFIG
+  desc: Games, Other Apps and Demos lists: Edits the main menu
+  user: core
+  <source>
+    *: "Main Menu Setup"
+  </source>
+  <dest>
+    *: "主菜单设置"
+  </dest>
+  <voice>
+    *: "主菜单设置"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MD5SUM
+  desc: Games, Other Apps and Demos lists: Computes file checksums
+  user: core
+  <source>
+    *: "MD5 Sum"
+  </source>
+  <dest>
+    *: "MD5 校验"
+  </dest>
+  <voice>
+    *: "MD5 校验"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_METRONOME
+  desc: Games, Other Apps and Demos lists: Metronome with tap tempo
+  user: core
+  <source>
+    *: "Metronome"
+  </source>
+  <dest>
+    *: "节拍器"
+  </dest>
+  <voice>
+    *: "节拍器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MIDI
+  desc: Games, Other Apps and Demos lists: Plays MIDI files
+  user: core
+  <source>
+    *: "MIDI Player"
+  </source>
+  <dest>
+    *: "MIDI 播放器"
+  </dest>
+  <voice>
+    *: "MIDI 播放器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MIKMOD
+  desc: Games, Other Apps and Demos lists: Plays MOD/XM/S3M/IT tracker music
+  user: core
+  <source>
+    *: "Module Player"
+  </source>
+  <dest>
+    *: "模块音乐播放器"
+  </dest>
+  <voice>
+    *: "模块音乐播放器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MPEGPLAYER
+  desc: Games, Other Apps and Demos lists: Plays MPEG-1/2 video
+  user: core
+  <source>
+    *: "MPEG Player"
+  </source>
+  <dest>
+    *: "MPEG 播放器"
+  </dest>
+  <voice>
+    *: "MPEG 播放器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_OPEN_PLUGINS
+  desc: Games, Other Apps and Demos lists: Assigns apps to file types
+  user: core
+  <source>
+    *: "Open With"
+  </source>
+  <dest>
+    *: "打开方式"
+  </dest>
+  <voice>
+    *: "打开方式"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_OTP
+  desc: Games, Other Apps and Demos lists: TOTP/HOTP code generator
+  user: core
+  <source>
+    *: "One-Time Passwords"
+  </source>
+  <dest>
+    *: "一次性密码"
+  </dest>
+  <voice>
+    *: "一次性密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PDBOX
+  desc: Games, Other Apps and Demos lists: Pure Data patch player
+  user: core
+  <source>
+    *: "Pure Data"
+  </source>
+  <dest>
+    *: "Pure Data"
+  </dest>
+  <voice>
+    *: "Pure Data"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PERIODIC_TABLE
+  desc: Games, Other Apps and Demos lists: Periodic table of elements
+  user: core
+  <source>
+    *: "Periodic Table"
+  </source>
+  <dest>
+    *: "元素周期表"
+  </dest>
+  <voice>
+    *: "元素周期表"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PITCH_DETECTOR
+  desc: Games, Other Apps and Demos lists: Instrument tuner using the microphone
+  user: core
+  <source>
+    *: "Tuner"
+  </source>
+  <dest>
+    *: "调音器"
+  </dest>
+  <voice>
+    *: "调音器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PITCH_SCREEN
+  desc: Games, Other Apps and Demos lists: Changes playback pitch and speed
+  user: core
+  <source>
+    *: "Pitch"
+  </source>
+  <dest>
+    *: "变调"
+  </dest>
+  <voice>
+    *: "变调"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PLAYING_TIME
+  desc: Games, Other Apps and Demos lists: Total time of the playlist
+  user: core
+  <source>
+    *: "Playing Time"
+  </source>
+  <dest>
+    *: "播放时长"
+  </dest>
+  <voice>
+    *: "播放时长"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PROPERTIES
+  desc: Games, Other Apps and Demos lists: File details
+  user: core
+  <source>
+    *: "Properties"
+  </source>
+  <dest>
+    *: "属性"
+  </dest>
+  <voice>
+    *: "属性"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_RANDOM_FOLDER_ADVANCE_CONFIG
+  desc: Games, Other Apps and Demos lists: Sets up random folder advance
+  user: core
+  <source>
+    *: "Random Folder"
+  </source>
+  <dest>
+    *: "随机文件夹"
+  </dest>
+  <voice>
+    *: "随机文件夹"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_RB_INFO
+  desc: Games, Other Apps and Demos lists: Diagnostic pages for developers
+  user: core
+  <source>
+    *: "System Info"
+  </source>
+  <dest>
+    *: "系统信息"
+  </dest>
+  <voice>
+    *: "系统信息"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_REMOTE_CONTROL
+  desc: Games, Other Apps and Demos lists: Uses the iPod as a computer remote
+  user: core
+  <source>
+    *: "Remote Control"
+  </source>
+  <dest>
+    *: "遥控器"
+  </dest>
+  <voice>
+    *: "遥控器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_RESISTOR
+  desc: Games, Other Apps and Demos lists: Resistor colour code calculator
+  user: core
+  <source>
+    *: "Resistor Codes"
+  </source>
+  <dest>
+    *: "电阻色环"
+  </dest>
+  <voice>
+    *: "电阻色环"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKPAINT
+  desc: Games, Other Apps and Demos lists: Drawing program
+  user: core
+  <source>
+    *: "Paint"
+  </source>
+  <dest>
+    *: "画板"
+  </dest>
+  <voice>
+    *: "画板"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SETTINGS_DUMPER
+  desc: Games, Other Apps and Demos lists: Writes all settings to a file
+  user: core
+  <source>
+    *: "Settings Dump"
+  </source>
+  <dest>
+    *: "导出设置"
+  </dest>
+  <voice>
+    *: "导出设置"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SHORTCUTS_APPEND
+  desc: Games, Other Apps and Demos lists: Adds a file to Shortcuts
+  user: core
+  <source>
+    *: "Add Shortcut"
+  </source>
+  <dest>
+    *: "添加快捷方式"
+  </dest>
+  <voice>
+    *: "添加快捷方式"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SHORTCUTS_VIEW
+  desc: Games, Other Apps and Demos lists: Lists shortcuts
+  user: core
+  <source>
+    *: "Shortcuts"
+  </source>
+  <dest>
+    *: "快捷方式"
+  </dest>
+  <voice>
+    *: "快捷方式"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SORT
+  desc: Games, Other Apps and Demos lists: Sorts a text file's lines
+  user: core
+  <source>
+    *: "Sort Lines"
+  </source>
+  <dest>
+    *: "排序"
+  </dest>
+  <voice>
+    *: "排序"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SPEEDREAD
+  desc: Games, Other Apps and Demos lists: Shows text one word at a time
+  user: core
+  <source>
+    *: "Speed Reader"
+  </source>
+  <dest>
+    *: "速读"
+  </dest>
+  <voice>
+    *: "速读"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_STATS
+  desc: Games, Other Apps and Demos lists: Counts files and folders on the disk
+  user: core
+  <source>
+    *: "File Stats"
+  </source>
+  <dest>
+    *: "文件统计"
+  </dest>
+  <voice>
+    *: "文件统计"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TAGNAVI_EDIT
+  desc: Games, Other Apps and Demos lists: Edits the music database menu
+  user: core
+  <source>
+    *: "Database Menu Editor"
+  </source>
+  <dest>
+    *: "数据库菜单编辑"
+  </dest>
+  <voice>
+    *: "数据库菜单编辑"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TEXT_EDITOR
+  desc: Games, Other Apps and Demos lists: Edits text files
+  user: core
+  <source>
+    *: "Text Editor"
+  </source>
+  <dest>
+    *: "文本编辑器"
+  </dest>
+  <voice>
+    *: "文本编辑器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TEXT_VIEWER
+  desc: Games, Other Apps and Demos lists: Reads text files
+  user: core
+  <source>
+    *: "Text Viewer"
+  </source>
+  <dest>
+    *: "文本查看器"
+  </dest>
+  <voice>
+    *: "文本查看器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_THEME_REMOVE
+  desc: Games, Other Apps and Demos lists: Removes installed themes
+  user: core
+  <source>
+    *: "Theme Remover"
+  </source>
+  <dest>
+    *: "主题卸载"
+  </dest>
+  <voice>
+    *: "主题卸载"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BATTERY_BENCH
+  desc: Games, Other Apps and Demos lists: Logs battery drain over time
+  user: core
+  <source>
+    *: "Battery Bench"
+  </source>
+  <dest>
+    *: "电池测试"
+  </dest>
+  <voice>
+    *: "电池测试"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BOUNCE
+  desc: Games, Other Apps and Demos lists: Bouncing text demo
+  user: core
+  <source>
+    *: "Bounce"
+  </source>
+  <dest>
+    *: "弹跳"
+  </dest>
+  <voice>
+    *: "弹跳"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CREDITS
+  desc: Games, Other Apps and Demos lists: Scrolling credits
+  user: core
+  <source>
+    *: "Credits"
+  </source>
+  <dest>
+    *: "致谢"
+  </dest>
+  <voice>
+    *: "致谢"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CUBE
+  desc: Games, Other Apps and Demos lists: Rotating 3D cube
+  user: core
+  <source>
+    *: "Cube"
+  </source>
+  <dest>
+    *: "立方体"
+  </dest>
+  <voice>
+    *: "立方体"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DEMYSTIFY
+  desc: Games, Other Apps and Demos lists: Line-pattern screensaver
+  user: core
+  <source>
+    *: "Demystify"
+  </source>
+  <dest>
+    *: "迷幻线条"
+  </dest>
+  <voice>
+    *: "迷幻线条"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FFT
+  desc: Games, Other Apps and Demos lists: Audio spectrum analyser
+  user: core
+  <source>
+    *: "Spectrum"
+  </source>
+  <dest>
+    *: "频谱"
+  </dest>
+  <voice>
+    *: "频谱"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FIRE
+  desc: Games, Other Apps and Demos lists: Fire effect
+  user: core
+  <source>
+    *: "Fire"
+  </source>
+  <dest>
+    *: "火焰"
+  </dest>
+  <voice>
+    *: "火焰"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FIREWORKS
+  desc: Games, Other Apps and Demos lists: Fireworks display
+  user: core
+  <source>
+    *: "Fireworks"
+  </source>
+  <dest>
+    *: "烟花"
+  </dest>
+  <voice>
+    *: "烟花"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FRACTALS
+  desc: Games, Other Apps and Demos lists: Mandelbrot explorer
+  user: core
+  <source>
+    *: "Fractals"
+  </source>
+  <dest>
+    *: "分形"
+  </dest>
+  <voice>
+    *: "分形"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LOGO
+  desc: Games, Other Apps and Demos lists: Bouncing logo
+  user: core
+  <source>
+    *: "Logo"
+  </source>
+  <dest>
+    *: "标志"
+  </dest>
+  <voice>
+    *: "标志"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MATRIX
+  desc: Games, Other Apps and Demos lists: Falling green code
+  user: core
+  <source>
+    *: "Matrix"
+  </source>
+  <dest>
+    *: "代码雨"
+  </dest>
+  <voice>
+    *: "代码雨"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MOSAIQUE
+  desc: Games, Other Apps and Demos lists: Screen mosaic effect
+  user: core
+  <source>
+    *: "Mosaique"
+  </source>
+  <dest>
+    *: "马赛克"
+  </dest>
+  <voice>
+    *: "马赛克"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_OSCILLOSCOPE
+  desc: Games, Other Apps and Demos lists: Audio waveform display
+  user: core
+  <source>
+    *: "Oscilloscope"
+  </source>
+  <dest>
+    *: "示波器"
+  </dest>
+  <voice>
+    *: "示波器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PICTUREFLOW
+  desc: Games, Other Apps and Demos lists: Album cover flow
+  user: core
+  <source>
+    *: "PictureFlow"
+  </source>
+  <dest>
+    *: "封面流"
+  </dest>
+  <voice>
+    *: "封面流"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PLASMA
+  desc: Games, Other Apps and Demos lists: Plasma colour effect
+  user: core
+  <source>
+    *: "Plasma"
+  </source>
+  <dest>
+    *: "等离子"
+  </dest>
+  <voice>
+    *: "等离子"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PODLINK_ECHO
+  desc: Games, Other Apps and Demos lists: PodLink connection test
+  user: core
+  <source>
+    *: "PodLink Echo"
+  </source>
+  <dest>
+    *: "PodLink 回声"
+  </dest>
+  <voice>
+    *: "PodLink 回声"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKLIFE
+  desc: Games, Other Apps and Demos lists: Conway's Game of Life
+  user: core
+  <source>
+    *: "Life"
+  </source>
+  <dest>
+    *: "生命游戏"
+  </dest>
+  <voice>
+    *: "生命游戏"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SNOW
+  desc: Games, Other Apps and Demos lists: Falling snow
+  user: core
+  <source>
+    *: "Snow"
+  </source>
+  <dest>
+    *: "雪花"
+  </dest>
+  <voice>
+    *: "雪花"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_STARFIELD
+  desc: Games, Other Apps and Demos lists: Flying through stars
+  user: core
+  <source>
+    *: "Starfield"
+  </source>
+  <dest>
+    *: "星空"
+  </dest>
+  <voice>
+    *: "星空"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TEST_KBD
+  desc: Games, Other Apps and Demos lists: On-screen keyboard test
+  user: core
+  <source>
+    *: "Keyboard Test"
+  </source>
+  <dest>
+    *: "键盘测试"
+  </dest>
+  <voice>
+    *: "键盘测试"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_VU_METER
+  desc: Games, Other Apps and Demos lists: Analog VU meters
+  user: core
+  <source>
+    *: "VU Meter"
+  </source>
+  <dest>
+    *: "音量表"
+  </dest>
+  <voice>
+    *: "音量表"
+  </voice>
+</phrase>

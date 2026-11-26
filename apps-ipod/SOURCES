@@ -167,6 +167,7 @@ widgets/mask_select.c
 
 screens/browse/browser.c
 screens/browse/browser_disk.c
+screens/browse/app_list.c
 #ifdef ASTRAPOD_ROCK_COMPAT
 plugins/rock_browser.c
 plugins/rock_files.c

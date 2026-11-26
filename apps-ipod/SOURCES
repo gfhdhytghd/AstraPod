@@ -271,6 +271,7 @@ screens/system/usb_screen.c
 screens/covers/album_covers.c
 screens/covers/artist_portraits.c
 screens/covers/carousel.c
+screens/covers/reflection.c
 screens/covers/panel_perf.c
 screens/covers/panel_cache.c
 #endif

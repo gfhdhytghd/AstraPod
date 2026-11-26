@@ -99,6 +99,7 @@
 #include "ui/frame.h"
 #include "ui/statusbar.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/theme_art.h"
 #include "ui/native_wps.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
@@ -106,6 +107,7 @@
 #include "carousel.h"
 #include "panel_perf.h"
 #include "stock_motion.h"
+#include "reflection.h"
 #include "database/path_key.h"     /* the shared engine: carousel_idx, the model */
 #include "screens/playback/cider.h"
 #include "screens/playback/cider_library.h"
@@ -449,7 +451,17 @@ int carousel_caption_font(bool bold)
 
 static int pf_vp_y;             /* viewport y-offset (status bar height) */
 static struct viewport pf_vp;   /* PF rendering viewport (below status bar) */
-static bool pf_show_statusbar;  /* Cover Flow never shows the status bar */
+static bool pf_show_statusbar;  /* only the stock look shows the status bar */
+/* The stock look: Cover Flow as the stock firmware draws it, under a theme
+ * with the stock Now Playing layout. The status bar lies over the top
+ * pf_chrome_h rows of the full-screen viewport and nothing else draws
+ * there, and every slide carries its reflection (slide_reflection()).
+ * Fixed for the whole visit, because the slide cache is sized by it. */
+static bool pf_stock;
+static int pf_chrome_h;
+/* The stock look's selected panel row: the theme's selection gradient, a
+ * colour a row of the panel's pitch. */
+static pix_t panel_bar[ALBUM_BLUR_ROW_PITCH];
 static struct ui_scene pf_scene;
 /* Home's album colours, artwork and theme when pf_scene was taken of it. */
 static unsigned pf_scene_palette, pf_scene_art, pf_scene_theme;
@@ -775,6 +787,7 @@ static void *owned_buffer, *resume_placeholder;
 static size_t owned_bytes;
 static const struct carousel_model *resume_model;
 static struct db_summary_t resume_index;
+static bool resume_stock;
 void carousel_forget_resume(void)
 {
     if (resume_handle > 0) core_free(resume_handle);
@@ -790,6 +803,7 @@ static bool carousel_save_resume(void)
     memcpy(core_get_data(handle), owned_buffer, owned_bytes);
     resume_handle = handle;
     resume_model = model;
+    resume_stock = pf_stock;
     resume_index = carousel_idx;
     resume_placeholder = pf_placeholder_buf;
     return true;
@@ -797,7 +811,8 @@ static bool carousel_save_resume(void)
 static bool carousel_restore_resume(void *buffer, size_t bytes)
 {
     if (resume_handle <= 0) return false;
-    if (resume_model != model || owned_buffer != buffer || owned_bytes != bytes)
+    if (resume_model != model || resume_stock != pf_stock ||
+        owned_buffer != buffer || owned_bytes != bytes)
     {
         carousel_forget_resume();
         return false;
@@ -1993,6 +2008,32 @@ static void free_all_slide_prio(int prio)
 }
 
 
+/* Bytes a slide of `pixels` pixels needs for its reflection, with two
+ * texels of slack for the sampler's last rounded row. */
+static size_t reflection_bytes(size_t pixels)
+{
+    return pf_stock ? (pixels / 2 + 2) * sizeof(pix_t) : 0;
+}
+
+/* The reflection follows the slide's pixels: reflection_rows() texels for
+ * each column of its centred square. */
+static inline const pix_t *slide_reflection(const struct dim *bmp)
+{
+    return pf_stock ? (const pix_t *)(bmp + 1) + bmp->width * bmp->height
+                    : NULL;
+}
+
+static void make_reflection(struct dim *bmp)
+{
+    if (!pf_stock)
+        return;
+    int size = MIN(bmp->width, bmp->height);
+    const pix_t *crop = (const pix_t *)(bmp + 1) +
+        (bmp->width - size) / 2 * bmp->height + (bmp->height - size) / 2;
+    reflection_build((pix_t *)slide_reflection(bmp), crop, size, bmp->height,
+                     pf_bg_color);
+}
+
 /* Read a pfraw image into the slide cache; a buflib handle, or -1.
  *
  * Only the placeholder comes through here, and both callers assign the result
@@ -2024,7 +2065,8 @@ static int read_pfraw(char* filename, int prio)
     }
 
     int size =  sizeof(int) + sizeof(struct dim) +
-                sizeof(pix_t) * bmph.width * bmph.height;
+                sizeof(pix_t) * bmph.width * bmph.height +
+                reflection_bytes(bmph.width * bmph.height);
 
     int hid;
     do {
@@ -2056,6 +2098,7 @@ static int read_pfraw(char* filename, int prio)
     }
 
     close( fh );
+    make_reflection(bm);
     return hid;
 }
 
@@ -2219,7 +2262,8 @@ static inline bool load_and_prepare_surface(const int slide_index,
         if (model->read_art(slide_index, &bitmap))
         {
             len = sizeof(pix_t) * bitmap.width * bitmap.height;
-            allocation = sizeof(int) + sizeof(struct dim) + len;
+            allocation = sizeof(int) + sizeof(struct dim) + len +
+                         reflection_bytes(bitmap.width * bitmap.height);
         }
     }
     else if (hash && pf_cover_size_idx >= 0)
@@ -2235,7 +2279,8 @@ static inline bool load_and_prepare_surface(const int slide_index,
             if (len > most)
                 len = most;
             if (len > header)
-                allocation = sizeof(int) + PF_READ_SLACK + len;
+                allocation = sizeof(int) + PF_READ_SLACK + len +
+                             reflection_bytes((len - header) / sizeof(pix_t));
         }
     }
 
@@ -2267,8 +2312,11 @@ static inline bool load_and_prepare_surface(const int slide_index,
             memcpy(bm + 1, bitmap.data, len);
         }
         if (bm)
+        {
             img_filter_apply_banded((pix_t *)(bm + 1), bm->height,
                                     bm->width, carousel_filter());
+            make_reflection(bm);
+        }
     }
     if (fh >= 0)
         close(fh);
@@ -2517,6 +2565,26 @@ static bool flat_view(void)
     return global_settings.album_covers_view_mode == CAROUSEL_VIEW_FLAT;
 }
 
+/* Reflections, the caption's place and the steady half rate belong to the
+ * 3D view; the flat view under the stock look keeps only the status bar. */
+static bool stock_look(void)
+{
+    return pf_stock && !flat_view();
+}
+
+/* The stock look presents every second refresh and stays there: its frame
+ * with reflections does not fit one refresh, and changing rate in the
+ * middle of a motion shows as a stumble. */
+static uint32_t flow_pace_next(struct ui_pace *pace, uint32_t start)
+{
+    if (stock_look())
+    {
+        pace->recover_full_rate = false;
+        pace->divisor = 2;
+    }
+    return ui_pace_next(pace, start);
+}
+
 /* The alpha a cover sitting on a pile is drawn at, the setting being how far
  * toward the background it is taken. Note this is a dimming, not a
  * transparency: render_slide() blends toward the background colour, so a pile
@@ -2716,6 +2784,10 @@ static void reset_slides(void)
 /* Clear rows between the nominal cover and the caption's first line box. */
 #define PF_CAPTION_GAP    4
 
+/* The stock caption: baselines at rows 204 and 222 under the reflection. */
+#define STOCK_CAPTION_BASELINE 204
+#define STOCK_CAPTION_PITCH    18
+
 /* Second line's offset from the first line's box top: 17/12 of the caption
  * font's ascent, so 17 rows for a 12-row ascent against stock's measured 17.5.
  *
@@ -2727,6 +2799,8 @@ static void reset_slides(void)
  * name still clears the line below. */
 static int caption_line2(void)
 {
+    if (stock_look())
+        return STOCK_CAPTION_PITCH;
     return font_get(carousel_caption_font(true))->ascent * 17 / 12;
 }
 
@@ -2747,8 +2821,12 @@ void carousel_caption_layout(bool two_lines, struct pf_caption *out)
     art_top += pf_draw_y_shift;
 
     /* The 3D view keeps the caption at its fixed screen position. */
-    if (!flat_view())
-        out->y1 = pf_draw_y_shift ? MAX(0, 31 - caption_block(two_lines)) : 175;
+    if (stock_look() && !pf_draw_y_shift)
+        out->y1 = STOCK_CAPTION_BASELINE -
+                  font_get(carousel_caption_font(true))->ascent;
+    else if (!flat_view())
+        out->y1 = pf_draw_y_shift ?
+                  MAX(pf_chrome_h, 31 - caption_block(two_lines)) : 175;
     else if (pf_draw_y_shift)    /* caption above the covers */
         out->y1 = MAX(0, art_top - PF_CAPTION_GAP - caption_block(two_lines));
     else
@@ -2825,6 +2903,11 @@ static void pf_clear_rect(int x, int y, int w, int h)
     static struct viewport band_vp;
     struct viewport *saved;
 
+    if (y < pf_chrome_h)
+    {
+        h -= pf_chrome_h - y;
+        y = pf_chrome_h;
+    }
     if (h <= 0 || w <= 0)
         return;
 
@@ -3495,6 +3578,10 @@ static void flat_render(bool center)
 struct flow_face
 {
     const pix_t *pixels;
+    /* The reflection continues each column below the cover: `rows` texels
+     * a column, or none. */
+    const pix_t *refl;
+    int rows;
     int stride, size, crop;
     int first, end, t0, dt, start_height;
     bool linear;
@@ -3508,18 +3595,26 @@ struct flow_column
 };
 
 static struct flow_column flow_columns[LCD_WIDTH];
+
+/* A column's rows from its top, the reflection's included: it is half the
+ * cover's height, as its texture is half the cover's. */
+static inline int flow_extent(const struct flow_face *face, int height)
+{
+    return face->rows ? height + height / 2 : height;
+}
 static int16_t flow_top[LCD_WIDTH], flow_end[LCD_WIDTH];
 static struct flow_face flow_faces[STOCK_MAX_VISIBLE];
 static struct slide_data flow_surfaces[STOCK_MAX_VISIBLE];
 
 static int flow_clip_top(void)
 {
-    return pf_draw_y_shift && pf_text_h ? pf_text_y + pf_text_h : 0;
+    return MAX(pf_chrome_h, pf_draw_y_shift && pf_text_h ? pf_text_y + pf_text_h : 0);
 }
 
+/* The stock look draws its caption over the reflections. */
 static int flow_clip_end(void)
 {
-    return !pf_draw_y_shift && pf_text_h ? pf_text_y : pf_height;
+    return !stock_look() && !pf_draw_y_shift && pf_text_h ? pf_text_y : pf_height;
 }
 
 /* For d normalized to [2^31,2^32), m approximates 2^62/d. Bin midpoints
@@ -3615,8 +3710,10 @@ static void flow_cover_columns(const struct flow_card *card, int slot, int sprea
     int h0 = card->edge[0].bottom - card->edge[0].top;
     int h1 = card->edge[1].bottom - card->edge[1].top;
     int size = MIN(bmp->width, bmp->height);
+    const pix_t *refl = stock_look() ? slide_reflection(bmp) : NULL;
     *face = (struct flow_face) {
         .pixels = (const pix_t *)(bmp+1) + (bmp->height-size)/2,
+        .refl = refl, .rows = refl ? reflection_rows(size) : 0,
         .stride = bmp->height, .size = size, .crop = (bmp->width-size)/2,
         .linear = card->linear, .top = card->edge[0].top,
         .top_delta = card->edge[1].top - card->edge[0].top,
@@ -3637,7 +3734,8 @@ static void flow_cover_columns(const struct flow_card *card, int slot, int sprea
         if (col->height)
         {
             flow_top[x] = MIN(flow_top[x], col->y0 >> 16);
-            flow_end[x] = MAX(flow_end[x], (col->y0 + col->height + 65535) >> 16);
+            flow_end[x] = MAX(flow_end[x],
+                (col->y0 + flow_extent(col->face, col->height) + 65535) >> 16);
         }
         col->y0 = y0;
         col->height = h;
@@ -3646,10 +3744,11 @@ static void flow_cover_columns(const struct flow_card *card, int slot, int sprea
     }
 }
 
+/* y1 ends the column's extent; refl is its reflection column, if any. */
 struct flow_sample
 {
-    const pix_t *src;
-    int size, y0, y1, first, last, dy, p, x_weight;
+    const pix_t *src, *refl;
+    int size, rows, y0, y1, first, last, dy, p, x_weight;
 };
 
 static void flow_sample_column(const struct flow_column *col, int top, int end,
@@ -3685,7 +3784,8 @@ static void flow_sample_column(const struct flow_column *col, int top, int end,
         x_weight = coord & 31;
     }
     const pix_t *src = face->pixels + (face->crop + u) * face->stride;
-    int y0 = col->y0, y1 = y0 + col->height;
+    const pix_t *refl = face->rows ? face->refl + u * face->rows : NULL;
+    int y0 = col->y0, y1 = y0 + flow_extent(face, col->height);
     int first = MAX(top, (y0 + 65535) >> 16);
     int last = MIN(end, y1 >> 16);
     uint32_t d_num = (uint32_t)size << 20;
@@ -3693,7 +3793,8 @@ static void flow_sample_column(const struct flow_column *col, int top, int end,
     int32_t d_rem = d_num - dy*rows;
     dy += (d_rem >= (int32_t)rows) - (d_rem < 0);
     int p = ((int64_t)((first << 16) + 32768 - y0) * dy) >> 16;
-    *sample = (struct flow_sample){ src, size, y0, y1, first, last, dy, p, x_weight };
+    *sample = (struct flow_sample){ src, refl, size, face->rows, y0, y1, first,
+                                    last, dy, p, x_weight };
 }
 
 /* Separate RGB565 into lanes with five spare bits for interpolation. */
@@ -3712,17 +3813,27 @@ static inline uint32_t flow_mix(uint32_t a, uint32_t b, unsigned weight)
 static __attribute__((noinline, optimize("O3"))) void flow_draw_linear(const struct flow_sample *sample, int src_stride,
                              pix_t *dst, int dst_stride, const struct pf_fade *ink)
 {
-    /* Pad the endpoints to clamp the bilinear footprint to the square crop. */
-    static uint32_t texels[DISPLAY_HEIGHT + 2];
+    /* Pad the endpoints to clamp the bilinear footprint to the square crop.
+     * A reflection's texels follow the cover's, as its quad follows. */
+    static uint32_t texels[DISPLAY_HEIGHT * 3 / 2 + 2];
     uint32_t *at = texels + 1;
-    const pix_t *src = sample->src;
-    int size = sample->size, weight = sample->x_weight;
+    const pix_t *src = sample->src, *refl = sample->refl;
+    int size = sample->size, rows = sample->rows, weight = sample->x_weight;
     if (weight)
+    {
         for (int j = 0; j < size; j++)
             at[j] = flow_mix(flow_lanes(src[j]), flow_lanes(src[j + src_stride]), weight);
+        for (int j = 0; j < rows; j++)
+            at[size + j] = flow_mix(flow_lanes(refl[j]), flow_lanes(refl[j + rows]), weight);
+    }
     else
+    {
         for (int j = 0; j < size; j++)
             at[j] = flow_lanes(src[j]);
+        for (int j = 0; j < rows; j++)
+            at[size + j] = flow_lanes(refl[j]);
+    }
+    size += rows;
     at[-1] = at[0];
     at[size] = at[size - 1];
     int p = sample->p - PFREAL_HALF;
@@ -3736,6 +3847,34 @@ static __attribute__((noinline, optimize("O3"))) void flow_draw_linear(const str
     }
 }
 
+/* Rows whose texel lies past the cover read on in its reflection. */
+static void flow_draw_nearest(const struct flow_sample *sample, pix_t *dst,
+                              int stride, const struct pf_fade *ink)
+{
+    int n = sample->last - sample->first, split = n;
+    int limit = sample->size << PFREAL_SHIFT;
+    if (sample->refl)
+        split = sample->p >= limit ? 0 :
+                MIN(n, (limit - sample->p + sample->dy - 1) / sample->dy);
+    struct pf_col run = {sample->src, dst, sample->p, sample->dy, split};
+    for (int part = 0; part < 2; part++)
+    {
+        if (run.n > 0)
+        {
+            if (ink)
+                draw_run_faded(&run, run.n, stride, ink);
+            else
+                draw_run(&run, run.n, stride);
+        }
+        run.src = sample->refl;
+        run.p -= limit;
+        run.n = n - split;
+    }
+#if PF_SHOW_STATS
+    pf_px += n;
+#endif
+}
+
 static void flow_draw_span(const struct flow_column *col, int top, int end,
                            pix_t *pixels, int stride, const struct pf_fade *ink)
 {
@@ -3743,20 +3882,11 @@ static void flow_draw_span(const struct flow_column *col, int top, int end,
     flow_sample_column(col, top, end, &sample);
     const pix_t *src = sample.src;
     int size = sample.size, y0 = sample.y0, y1 = sample.y1;
-    int first = sample.first, last = sample.last, dy = sample.dy, p = sample.p;
+    int first = sample.first, last = sample.last;
     if (first < last && col->face->linear)
         flow_draw_linear(&sample, col->face->stride, pixels + first * stride, stride, ink);
     else if (first < last)
-    {
-        struct pf_col run = {src, pixels + first * stride, p, dy, last - first};
-        if (ink)
-            draw_run_faded(&run, run.n, stride, ink);
-        else
-            draw_run(&run, run.n, stride);
-#if PF_SHOW_STATS
-        pf_px += run.n;
-#endif
-    }
+        flow_draw_nearest(&sample, pixels + first * stride, stride, ink);
     /* Only the outer row on each silhouette has fractional coverage. */
     for (int edge = 0; edge < 2; edge++)
     {
@@ -3765,7 +3895,8 @@ static void flow_draw_span(const struct flow_column *col, int top, int end,
         if (!amount || y < top || y >= end)
             continue;
         unsigned a = ((amount + 512) >> 10) * 4;
-        pix_t pixel = src[edge ? size - 1 : 0];
+        pix_t pixel = !edge ? src[0] : sample.refl ? sample.refl[sample.rows - 1]
+                                                   : src[size - 1];
         if (ink)
             pixel = fade_color(pixel, ink->a, ink->rb, ink->g);
         pix_t *dest = pixels + y * stride;
@@ -3785,7 +3916,7 @@ static void flow_draw_column(int x, int top, int end, pix_t *pixels,
     const struct flow_face *face = front->face;
     int y0 = front->y0;
     int first = (y0 + 65535) >> 16;
-    int last = (y0 + front->height) >> 16;
+    int last = (y0 + flow_extent(face, front->height)) >> 16;
     if (flow_top[x] < first || flow_end[x] > last)
     {
         for (const struct flow_face *f = flow_faces; f < face; f++)
@@ -3798,7 +3929,7 @@ static void flow_draw_column(int x, int top, int end, pix_t *pixels,
             struct flow_column back = { y, h, t, f };
             if ((y >> 16) < first && first > top)
                 flow_draw_span(&back, top, MIN(end, first), pixels, stride, ink);
-            if (((y + h + 65535) >> 16) > last && last < end)
+            if (((y + flow_extent(f, h) + 65535) >> 16) > last && last < end)
                 flow_draw_span(&back, MAX(top, last), end, pixels, stride, ink);
         }
     }
@@ -3880,6 +4011,13 @@ static void flow_write_strip(pix_t *frame, const pix_t *strip, int y, int rows)
 static void flow_paint(bool center, int spread, int clear_y, int clear_h)
 {
     uint32_t start = flow_stages ? USEC_TIMER : 0;
+    if (clear_h > 0 && clear_y < pf_chrome_h)
+    {
+        clear_h -= pf_chrome_h - clear_y;
+        clear_y = pf_chrome_h;
+        if (clear_h <= 0)
+            return;
+    }
     for (int x = 0; x < LCD_WIDTH; x++)
     {
         flow_columns[x].height = 0;
@@ -3975,8 +4113,14 @@ static void cover_rows(int *y0, int *y1)
             if (MAX(card->edge[0].x, card->edge[1].x) <= 0 ||
                 MIN(card->edge[0].x, card->edge[1].x) >= LCD_WIDTH * 65536)
                 continue;
+            int end[2];
+            for (int e = 0; e < 2; e++)
+            {
+                const struct stock_edge *edge = &card->edge[e];
+                end[e] = edge->bottom + (pf_stock ? (edge->bottom - edge->top) / 2 : 0);
+            }
             lo = MIN(lo, MIN(card->edge[0].top, card->edge[1].top) >> 16);
-            hi = MAX(hi, (MAX(card->edge[0].bottom, card->edge[1].bottom) + 65535) >> 16);
+            hi = MAX(hi, (MAX(end[0], end[1]) + 65535) >> 16);
         }
         lo = MAX(lo, flow_clip_top());
         hi = MIN(hi, flow_clip_end());
@@ -4286,7 +4430,9 @@ static bool init(void)
     config_set_defaults(&pf_cfg); /* must appear before pf_config_load */
     pf_config_load();
 
-    pf_show_statusbar = false;
+    pf_stock = ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC;
+    pf_show_statusbar = pf_stock;
+    pf_chrome_h = pf_stock ? ui_theme_metric(UI_METRIC_STATUS_HEIGHT) : 0;
     pf_theme_pushed = true;
     FOR_NB_SCREENS(i)
         viewportmanager_theme_enable(i, pf_show_statusbar, NULL);
@@ -4303,6 +4449,13 @@ static bool init(void)
     struct ui_theme theme;
     ui_theme_snapshot(&theme);
     pf_title_font = ui_theme_font_load(&theme, UI_FONT_TITLE, 64);
+    for (int y = 0; pf_stock && y < ALBUM_BLUR_ROW_PITCH; y++)
+    {
+        uint32_t rgb = ui_theme_gradient_at(
+            &theme.gradient[UI_GRADIENT_SELECTION], y, ALBUM_BLUR_ROW_PITCH,
+            theme.color[UI_COLOR_SELECTION]);
+        panel_bar[y] = LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 0xff, rgb & 0xff);
+    }
     panel_cache_follow_theme();
     pf_body_font = ui_theme_font_load(&theme, UI_FONT_BODY, 64);
 
@@ -4763,6 +4916,14 @@ static void panel_ink(struct panel_ink *ink)
     ink->mark_width = ui_theme_metric(UI_METRIC_LIST_SELECTION_WIDTH);
     ink->mark_alpha = ui_theme_metric(UI_METRIC_LIST_SELECTION_ALPHA);
     round_rect_build_mask(ink->mark_mask, 1, ink->mark_alpha);
+    if (stock_look())
+    {
+        /* Stock's back: white text on its blue header, rows in the list's
+         * own colour, edged in the header tile's last row. */
+        ink->text = ink->title;
+        ink->title = LCD_RGBPACK(255, 255, 255);
+        ink->edge = LCD_RGBPACK(126, 129, 131);
+    }
 }
 
 /* The marker beside the selected row at `y`. */
@@ -5236,7 +5397,7 @@ static void panel_layout_header(void)
     panel.count_label[0] = 0;
     if (panel.selecting)
         snprintf(panel.count_label, sizeof(panel.count_label), str(LANG_N_SELECTED), panel.marked);
-    else if (panel.count >= 0)
+    else if (panel.count >= 0 && !stock_look())
     {
         const char *format = panel_chinese() ? "%d 首" : (const char *)str(LANG_N_TRACKS_TITLE);
         int year = panel.request.album.year;
@@ -5256,13 +5417,14 @@ static void panel_layout_header(void)
     panel_fit(panel.header.title, panel.fitted_title, sizeof(panel.fitted_title),
               title, budget);
     int spacing = font_getstringsize(panel_middot, NULL, NULL, small);
-    if (panel.count >= 0)
+    bool counted = panel.count >= 0 && *panel.count_label;
+    if (counted)
         budget -= spacing + font_getstringsize(panel.count_label, NULL, NULL, small);
     panel.fitted_artist[0] = 0;
     if (budget >= 3 * font_get_width(font_get(small), '.'))
         panel_fit(panel.header.artist, panel.fitted_artist, sizeof(panel.fitted_artist),
                   small, budget);
-    if (panel.count >= 0 && *panel.fitted_artist)
+    if (counted && *panel.fitted_artist)
     {
         panel.dot_x = PANEL_LEFT + font_getstringsize(panel.fitted_artist, NULL, NULL, small);
         panel.count_x = panel.dot_x + spacing;
@@ -5328,7 +5490,7 @@ static void panel_header(const struct panel_ink *ink)
     if (ready)
         lcd_putsxy(PANEL_LEFT, title_y, panel.fitted_title);
     lcd_setfont(meta);
-    lcd_set_foreground(ink->text);
+    lcd_set_foreground(stock_look() ? ink->title : ink->text);
     if (ready && *panel.fitted_artist)
         lcd_putsxy(PANEL_LEFT, y, panel.fitted_artist);
     if (ready && panel.dot_x)
@@ -5471,7 +5633,15 @@ static void panel_paint_track(struct viewport *rows, int track, int y,
     struct panel_track *row = &panel.rows[track % PANEL_CACHE];
     bool selected = track == panel.selected;
     pix_t text = selected ? ink->selected_text : ink->text;
-    if (selected)
+    if (selected && stock_look())
+    {
+        for (int i = 0; i < PANEL_PITCH; i++)
+        {
+            lcd_set_foreground(panel_bar[i]);
+            lcd_hline(1, rows->width - 2, y + i);
+        }
+    }
+    else if (selected)
         panel_mark(y, ink);
     bool ready = row->index == track + 1 && row->glyphs_ready;
     if (ready)
@@ -5626,11 +5796,21 @@ static void NO_INLINE paint_album_panel(void)
     {
         lcd_clear_viewport();
         lcd_set_foreground(ink.band);
-        lcd_fillrect(1, 1, view.width - 2, PANEL_DIVIDER - 1);
+        if (!stock_look())
+            lcd_fillrect(1, 1, view.width - 2, PANEL_DIVIDER - 1);
     }
-    /* The card runs off the bottom of the screen: no edge there. */
+    /* The card runs off the bottom of the screen: no edge there. Stock's
+     * header tile starts at the card's top, its edge row below the tile. */
     lcd_set_foreground(ink.edge);
-    lcd_hline(0, view.width - 1, 0);
+    if (stock_look())
+    {
+        ui_art_tile(STOCK_ART_COVERFLOW_BACKSIDE_TOP, view.x, view.y,
+                    view.width, false,
+                    (struct ui_rect){view.x, view.y, view.width, PANEL_DIVIDER});
+        lcd_hline(0, view.width - 1, PANEL_DIVIDER - 1);
+    }
+    else
+        lcd_hline(0, view.width - 1, 0);
     lcd_vline(0, 1, view.height - 1);
     lcd_vline(view.width - 1, 1, view.height - 1);
 
@@ -5713,9 +5893,12 @@ static void prepare_stock_back(void)
 }
 
 /* Map a column-major square onto the two projected vertical edges.
- * The panel reads left to right when the back faces the viewer. */
-static void stock_draw_clipped_quad(pix_t *dst, struct stock_pose pose, const pix_t *texture,
-                            int tex_w, int tex_h, int stride, const struct ui_rect *clip)
+ * The panel reads left to right when the back faces the viewer. With
+ * `reflection`, map instead the quad half as tall directly below the face,
+ * whose texture holds tex_h texels a column. */
+static void stock_draw_part(pix_t *dst, struct stock_pose pose, const pix_t *texture,
+                            int tex_w, int tex_h, int stride,
+                            const struct ui_rect *clip, bool reflection)
 {
     struct stock_edge edge[2];
     stock_project(pose, edge);
@@ -5733,11 +5916,17 @@ static void stock_draw_clipped_quad(pix_t *dst, struct stock_pose pose, const pi
         int t = ((int64_t)((x << 16) + 32768 - left.x) << 16) / width;
         int h = hl + ((int64_t)(hr - hl) * t >> 16);
         int top = left.top + ((int64_t)(right.top - left.top) * t >> 16);
+        int u_height = h;
+        if (reflection)
+        {
+            top += h;
+            h /= 2;
+        }
         int y = MAX(clip->y, (top + 32767) >> 16);
         int bottom = MIN(clip->y + clip->height, (top + h + 32767) >> 16);
         if (bottom <= y)
             continue;
-        int u = ((int64_t)hr * t * tex_w / h) >> 16;
+        int u = ((int64_t)hr * t * tex_w / u_height) >> 16;
         u = MIN(tex_w - 1, u);
         if (mirror)
             u = tex_w - 1 - u;
@@ -5749,10 +5938,26 @@ static void stock_draw_clipped_quad(pix_t *dst, struct stock_pose pose, const pi
     }
 }
 
+static void stock_draw_clipped_quad(pix_t *dst, struct stock_pose pose, const pix_t *texture,
+                            int tex_w, int tex_h, int stride, const struct ui_rect *clip)
+{
+    stock_draw_part(dst, pose, texture, tex_w, tex_h, stride, clip, false);
+}
+
+/* A cover's reflection, `refl` holding reflection_rows(side) texels for
+ * each of its `side` columns. */
+static void stock_draw_reflection(pix_t *dst, struct stock_pose pose,
+                                  const pix_t *refl, int side)
+{
+    const struct ui_rect screen = {0, pf_chrome_h, LCD_WIDTH, LCD_HEIGHT - pf_chrome_h};
+    int rows = reflection_rows(side);
+    stock_draw_part(dst, pose, refl, side, rows, rows, &screen, true);
+}
+
 static void stock_draw_quad(pix_t *dst, struct stock_pose pose, const pix_t *texture,
                             int tex_w, int tex_h, int stride)
 {
-    const struct ui_rect screen = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+    const struct ui_rect screen = {0, pf_chrome_h, LCD_WIDTH, LCD_HEIGHT - pf_chrome_h};
     stock_draw_clipped_quad(dst, pose, texture, tex_w, tex_h, stride, &screen);
 }
 
@@ -5781,6 +5986,8 @@ static void render_stock_flip(struct stock_pose pose, int album, uint32_t now,
             const pix_t *crop = (const pix_t *)(bmp + 1) +
                 (bmp->width - size) / 2 * bmp->height + (bmp->height - size) / 2;
             stock_draw_quad(LCD_BUF, pose, crop, size, size, bmp->height);
+            if (stock_look())
+                stock_draw_reflection(LCD_BUF, pose, slide_reflection(bmp), size);
         }
     }
     if (show_label)
@@ -5953,7 +6160,7 @@ static void step_album_flip(void)
     if (animating && due)
     {
         uint32_t start = panel.moving || walls ? panel.clock : panel.scroll_clock;
-        panel.due = ui_pace_next(&panel_pace, start);
+        panel.due = flow_pace_next(&panel_pace, start);
     }
     if (draw)
     {
@@ -6423,7 +6630,9 @@ static bool flow_present_fade(struct ui_scene *source, unsigned opacity)
     {
         const struct flow_column *c = &flow_columns[x];
         int first = MIN(flow_top[x], c->y0 >> 16);
-        int last = MAX(flow_end[x], (c->y0 + c->height + 65535) >> 16);
+        int last = MAX(flow_end[x],
+                       (c->y0 + (c->height ? flow_extent(c->face, c->height) : 0)
+                        + 65535) >> 16);
         fade_top[x] = c->height ? MAX(top, first) : 0;
         fade_end[x] = c->height ? MIN(end, last) : 0;
     }
@@ -6434,6 +6643,7 @@ static bool flow_present_fade(struct ui_scene *source, unsigned opacity)
  * its art. Retain just the visible textures and wall poses across that handoff. */
 struct playback_texture {
     int album, handle, width, height;
+    bool reflected;     /* its reflection follows its pixels */
 };
 static struct {
     struct playback_texture wall[STOCK_MAX_VISIBLE + 1], art;
@@ -6492,7 +6702,9 @@ static void keep_playback_cover(int album)
     int side = MIN(bmp->width, bmp->height);
     if (side <= 0)
         return;
-    int handle = core_alloc_free_space(side * side * sizeof(pix_t));
+    bool reflected = stock_look();
+    int rows = reflected ? reflection_rows(side) : 0;
+    int handle = core_alloc_free_space(side * (side + rows) * sizeof(pix_t));
     if (handle <= 0)
         return;
     pix_t *dst = core_get_data_pinned(handle);
@@ -6500,9 +6712,12 @@ static void keep_playback_cover(int album)
             (bmp->width - side) / 2 * bmp->height + (bmp->height - side) / 2;
     for (int x = 0; x < side; x++)
         memcpy(dst + x * side, src + x * bmp->height, side * sizeof(*dst));
+    if (reflected)
+        memcpy(dst + side * side, slide_reflection(bmp),
+               side * rows * sizeof(*dst));
     core_put_data_pinned(dst);
     playback_scene.wall[playback_scene.count++] =
-        (struct playback_texture){album, handle, side, side};
+        (struct playback_texture){album, handle, side, side, reflected};
 }
 
 static struct stock_pose playback_target(struct ui_rect slot)
@@ -6532,7 +6747,8 @@ static void capture_return_art(void)
         for (int y = 0; y < slot.height; y++)
             dst[x * slot.height + y] = src[y * LCD_WIDTH + x];
     core_put_data_pinned(dst);
-    playback_scene.art = (struct playback_texture){0, handle, slot.width, slot.height};
+    playback_scene.art = (struct playback_texture){0, handle, slot.width,
+                                                   slot.height, false};
 }
 
 static void paint_playback_texture(struct stock_pose pose, const struct playback_texture *texture)
@@ -6541,6 +6757,10 @@ static void paint_playback_texture(struct stock_pose pose, const struct playback
         return;
     pix_t *pixels = core_get_data_pinned(texture->handle);
     stock_draw_quad(LCD_BUF, pose, pixels, texture->width, texture->height, texture->height);
+    if (texture->reflected && !stock_back_face(pose))
+        stock_draw_reflection(LCD_BUF, pose,
+                              pixels + texture->width * texture->height,
+                              texture->width);
     core_put_data_pinned(pixels);
 }
 
@@ -6556,7 +6776,7 @@ static void capture_turned_art(void)
     pix_t *dst = core_get_data_pinned(handle);
     native_wps_copy_art(dst, side);
     core_put_data_pinned(dst);
-    playback_scene.art = (struct playback_texture){0, handle, side, side};
+    playback_scene.art = (struct playback_texture){0, handle, side, side, false};
 }
 
 static void paint_return_landing(const struct ui_rect *clip)
@@ -6597,6 +6817,8 @@ static void paint_playback_cover(struct stock_pose pose, int album)
         const pix_t *crop = (const pix_t *)(bmp + 1) +
             (bmp->width - side) / 2 * bmp->height + (bmp->height - side) / 2;
         stock_draw_quad(LCD_BUF, pose, crop, side, side, bmp->height);
+        if (stock_look())
+            stock_draw_reflection(LCD_BUF, pose, slide_reflection(bmp), side);
     }
 }
 
@@ -6605,11 +6827,12 @@ static void paint_playback_cover(struct stock_pose pose, int album)
 static void paint_playback_row(struct stock_flow *walls, struct stock_pose centre, uint32_t now)
 {
     int n = stock_sample(walls, now, flow_visible);
-    memset16(LCD_BUF, playback_scene.bg, LCD_WIDTH * LCD_HEIGHT);
+    memset16(LCD_BUF + pf_chrome_h * LCD_WIDTH, playback_scene.bg,
+             LCD_WIDTH * (LCD_HEIGHT - pf_chrome_h));
     for (int i = 0; i < n; i++)
         if (flow_visible[i].album != playback_scene.album)
             paint_playback_cover(flow_visible[i].pose, flow_visible[i].album);
-    struct playback_texture back = {0, panel.back_handle, 256, 256};
+    struct playback_texture back = {0, panel.back_handle, 256, 256, false};
     if (stock_back_face(centre))
         paint_playback_texture(centre, &back);
     else if (playback_scene.art.handle > 0)
@@ -6640,7 +6863,7 @@ static void slide_playback_controls(const struct wps_state *incoming, uint32_t s
         lcd_update();
         if (elapsed == PLAYBACK_SLIDE_US || !lcd_active())
             break;
-        ui_clock_sleep(ui_clock_wait_until(ui_pace_next(&flow_pace, start)));
+        ui_clock_sleep(ui_clock_wait_until(flow_pace_next(&flow_pace, start)));
         elapsed = MIN((uint32_t)USEC_TIMER - start, PLAYBACK_SLIDE_US);
     }
 }
@@ -6720,7 +6943,7 @@ void carousel_wps_present(const struct wps_state *state)
         lcd_update();
         if (landed || !lcd_active())
             break;
-        ui_clock_sleep(ui_clock_wait_until(ui_pace_next(&flow_pace, start)));
+        ui_clock_sleep(ui_clock_wait_until(flow_pace_next(&flow_pace, start)));
         now = USEC_TIMER;
     }
     if (native_wps_active() && lcd_active())
@@ -6808,7 +7031,7 @@ static void return_from_playback(void)
                 break;
             }
             lcd_update();
-            ui_clock_sleep(ui_clock_wait_until(ui_pace_next(&flow_pace, start)));
+            ui_clock_sleep(ui_clock_wait_until(flow_pace_next(&flow_pace, start)));
             now = USEC_TIMER;
             if (!lcd_active() || !button_queue_empty())
                 break;
@@ -6884,7 +7107,7 @@ static int stock_to_wps(int album, bool from_panel, int destination, uint32_t ac
             return CAROUSEL_MENU_STAY;
         }
         int wait = animate && !landed && lcd_active() ?
-                   frame_wait(ui_pace_next(&flow_pace, action_us)) : MAX(1, HZ / 20);
+                   frame_wait(flow_pace_next(&flow_pace, action_us)) : MAX(1, HZ / 20);
         if (default_event_handler(get_custom_action(CONTEXT_PLUGIN, wait, get_context_map))
                 == SYS_USB_CONNECTED)
         {
@@ -7215,8 +7438,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
             for (i = 0; i < n; i++)
             {
+                /* The stock look's status bar is no part of the covers'. */
                 if (dirty[i].y < pf_vp_y + pf_height
-                    && dirty[i].y + dirty[i].h > pf_vp_y)
+                    && dirty[i].y + dirty[i].h > pf_vp_y + pf_chrome_h)
                 {
                     /* It could have painted anywhere in the viewport, not just
                      * over the covers, so the whole of it has to be laid down
@@ -7471,7 +7695,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 ui_perf_note_rects(UI_PERF_CAPTION, 0, rows);
                 ui_perf_note_submit(submitted - submitting);
             }
-            flow_due = flow_moving ? ui_pace_next(&flow_pace, flow_start)
+            flow_due = flow_moving ? flow_pace_next(&flow_pace, flow_start)
                                    : ui_clock_start() + ui_frame_period();
             yield();
         }
@@ -7715,7 +7939,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
             /* Set the art deadline from the art DMA. A second, narrow DMA can
              * use the remaining bandwidth without reserving another art TE. */
-            flow_due = motion ? ui_pace_next(&flow_pace, flow_start)
+            flow_due = motion ? flow_pace_next(&flow_pace, flow_start)
                               : ui_clock_start() + ui_frame_period();
             caption_pixels = 0;
             caption_wake = false;

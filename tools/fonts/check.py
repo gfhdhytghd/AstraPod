@@ -117,7 +117,8 @@ def font_sources(stack, lang):
 def check_stock(bitmap, stock, faces, mapping):
     """Stock glyphs are copied as converted; every other glyph has one phase,
     a whole-pixel advance and no kerning."""
-    assert (bitmap.height, bitmap.ascent, bitmap.rows) == (stock.height, stock.ascent, 0)
+    assert (bitmap.height, bitmap.ascent) == (stock.height, stock.ascent)
+    assert (bitmap.rows, bitmap.kern) == (1, bytes(4))
     for cp, (offset, length, advance, _, _) in bitmap.index.items():
         record = bitmap.data[bitmap.bitmaps + offset:bitmap.bitmaps + offset + length]
         if mapping[cp] is None:

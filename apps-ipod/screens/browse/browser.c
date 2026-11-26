@@ -91,6 +91,7 @@
 #include "screens/shortcuts.h"
 #include "system/appevents.h"
 #include "ui/scene.h"
+#include "ui/stock_art_ids.h"
 
 #include "root_menu.h"
 
@@ -248,13 +249,13 @@ static const char *browser_get_value(int selected_item, void *data,
 }
 
 /* Shuffle Songs shows stock's shuffle pane; every other row of the Music
- * menu its covers. */
+ * menu its covers, or with none to show stock's music note. */
 static enum list_pane_kind browser_get_pane(int selected_item, void *data,
                                             int *art)
 {
     struct browser_context *local_tc = (struct browser_context *)data;
     int selected = local_tc->selected_item;
-    (void)art;
+    *art = STOCK_ART_NO_CONTENT_MUSIC_PREVIEW;
     local_tc->selected_item = selected_item;
     int action = browser_db_get_custom_action(local_tc);
     local_tc->selected_item = selected;

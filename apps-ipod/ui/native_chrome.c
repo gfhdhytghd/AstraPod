@@ -296,6 +296,43 @@ static void fill_art(const struct viewport *damage, int top)
                                      damage->height });
 }
 
+/* The bar's colour at row `y` of its `height`, as 0xRRGGBB. */
+static uint32_t bar_rgb(const struct ui_theme *theme, int y, int height)
+{
+    if (ui_theme_art(theme) && stock_art_ready())
+    {
+        const struct stock_art *art =
+            &stock_art[STOCK_ART_STATUSBARWHITE_BACKGROUND];
+        int i = MIN(MAX(y, 0), art->height - 1) * art->width;
+        unsigned n = art->colors <= 256 ? ((const uint8_t *)art->pixels)[i] :
+                                          ((const uint16_t *)art->pixels)[i];
+        return art->palette[n] & 0xffffff;
+    }
+    return ui_theme_gradient_at(&theme->gradient[UI_GRADIENT_STATUS], y,
+                                height, 0);
+}
+
+/* A bar with gradient.status embosses its title as stock does: the title in
+ * white at 144/255 one row lower, under the title. Little of it shows but
+ * the row below the baseline, so it is drawn in the white blended over the
+ * bar on that row. */
+static void draw_emboss(struct viewport *damage, const struct ui_theme *theme,
+                        const char *title, int font, int x, int y, int width,
+                        int height, struct ui_rect bounds)
+{
+    int row = y + font_get(font)->ascent - bounds.y;
+    uint32_t bar = bar_rgb(theme, row, bounds.height);
+    const unsigned alpha = 144 + (144 >> 7);
+    unsigned c[3];
+    for (int i = 0; i < 3; ++i)
+        c[i] = (((bar >> (16 - 8 * i)) & 255) * (256 - alpha) +
+                255 * alpha) >> 8;
+    unsigned foreground = damage->fg_pattern;
+    damage->fg_pattern = LCD_RGBPACK(c[0], c[1], c[2]);
+    draw_text(damage, title, font, x, y + 1, width, height, false);
+    damage->fg_pattern = foreground;
+}
+
 static void draw_clock(struct viewport *damage, const char *text, int font,
                        struct ui_rect clip, int origin)
 {
@@ -390,18 +427,32 @@ static void draw_art_indicators(const struct native_chrome *chrome,
     const struct native_chrome_state *state = &chrome->state;
     struct ui_rect clip = { damage->x, damage->y, damage->width,
                             damage->height };
-    if (state->battery >= 0)
+    enum stock_art_id level = ui_art_battery(MAX(state->battery, 0));
+    uint32_t pixels[26 * 13] = { 0 };
+    struct stock_canvas canvas = {
+        pixels, x + layout.battery_x, y + 3, stock_art[level].width,
+        stock_art[level].height,
+    };
+    /* The bar, the battery and its bolt are composed at 8 bits a channel
+     * and truncated once, as stock composes them. */
+    if (state->battery >= 0 &&
+        canvas.width * canvas.height <= (int)ARRAYLEN(pixels))
     {
-        int battery_x = x + layout.battery_x;
-        stock_art_draw(ui_art_battery(state->battery), battery_x, y + 3, clip);
+        int bar_top = y - chrome->theme->metric[UI_METRIC_STATUS_ICON_Y];
+        stock_art_put_part(&canvas, STOCK_ART_STATUSBARWHITE_BACKGROUND, 0,
+                           canvas.y - bar_top, canvas.width, canvas.height,
+                           canvas.x, canvas.y);
+        stock_art_put(&canvas, level, canvas.x, canvas.y);
         if (state->charging)
-            stock_art_draw(STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_CHARGE,
-                           battery_x, y + 3, clip);
+            stock_art_put(&canvas,
+                          STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_CHARGE,
+                          canvas.x, canvas.y);
 #if CONFIG_CHARGING
         else if (charger_inserted())
-            stock_art_draw(STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_PLUG,
-                           battery_x, y + 3, clip);
+            stock_art_put(&canvas, STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_PLUG,
+                          canvas.x, canvas.y);
 #endif
+        stock_canvas_show(&canvas, clip);
     }
     int play = icons->ink[CHROME_PLAY] ? STOCK_ART_NOWPLAYING_WHITE_PLAY :
                icons->ink[CHROME_PAUSE] ? STOCK_ART_NOWPLAYING_WHITE_PAUSE : -1;
@@ -543,6 +594,10 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
         if (title_width > layout.title_width)
             title = text_fit(title, fitted, sizeof(fitted), chrome->title_font,
                              layout.title_width);
+        if (gradient->stops)
+            draw_emboss(&damage, theme, title, chrome->title_font, left_x,
+                        text_y, layout.title_width,
+                        metric[UI_METRIC_STATUS_TITLE_HEIGHT], bounds);
         draw_text(&damage, title, chrome->title_font, left_x, text_y,
                   layout.title_width, metric[UI_METRIC_STATUS_TITLE_HEIGHT], false);
     }

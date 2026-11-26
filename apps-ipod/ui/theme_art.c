@@ -1,5 +1,6 @@
 #include "theme_art.h"
 #include "system.h"
+#include "plastic_columns.h"
 
 bool ui_theme_art(const struct ui_theme *theme)
 {
@@ -57,4 +58,18 @@ void ui_art_tile(enum stock_art_id id, int x, int y, int width, bool flush,
     clip.width = right - clip.x;
     for (; x < end && clip.width > 0; x += tile)
         stock_art_draw(id, x, y, clip);
+}
+
+const uint32_t *ui_art_selection(int height)
+{
+    switch (height)
+    {
+    case ARRAYLEN(plastic_selection):
+        return plastic_selection;
+    case ARRAYLEN(plastic_selection_24):
+        return plastic_selection_24;
+    case ARRAYLEN(plastic_selection_44):
+        return plastic_selection_44;
+    }
+    return NULL;
 }

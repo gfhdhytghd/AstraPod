@@ -18,4 +18,8 @@ enum stock_art_id ui_art_battery(int percent);
 void ui_art_tile(enum stock_art_id id, int x, int y, int width, bool flush,
                  struct ui_rect clip);
 
+/* Stock's selection bar `height` rows tall, RGB888 from the top, for the
+ * heights it draws; NULL for any other. */
+const uint32_t *ui_art_selection(int height);
+
 #endif

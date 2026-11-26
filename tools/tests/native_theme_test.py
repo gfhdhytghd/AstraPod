@@ -65,6 +65,7 @@ static void check_builtins(void)
     assert(!strcmp(dark.font[UI_FONT_LIST], "18-noto-sans"));
     assert(!strcmp(dark.font[UI_FONT_TITLE], "18-noto-sans-bold"));
     assert(!strcmp(dark.font[UI_FONT_ICON], "24x24-icons"));
+    assert(!strcmp(dark.font[UI_FONT_WPS_TIME], "12-noto-sans"));
     assert(dark.background[UI_BG_LIST] == UI_BG_BLURRED_COVER);
     assert(dark.background[UI_BG_WPS] == UI_BG_COVER_SCRIM);
     assert(dark.background[UI_BG_HANDOFF] == UI_BG_COVER_SCRIM);
@@ -221,6 +222,7 @@ static void check_plastic(void)
     struct ui_theme theme;
     ui_theme_builtin(&theme, UI_THEME_PLASTIC);
     assert(theme.style[UI_STYLE_ART] == UI_ART_PLASTIC);
+    assert(!strcmp(theme.font[UI_FONT_WPS_TIME], "14-helvetica-bold"));
     const struct ui_theme_gradient *bar = &theme.gradient[UI_GRADIENT_SELECTION];
     assert(ui_theme_gradient_at(bar, 0, 25, 0) == 0x96c5da);
     assert(ui_theme_gradient_at(bar, 12, 25, 0) == 0x0484da);
@@ -259,6 +261,28 @@ static void check_menu_pane(void)
     assert(!strcmp(theme.font[UI_FONT_PANE_TEXT], "Local_12"));
 }
 
+/* Classic and Plastic share out the list's spare height among the rows and
+ * show a setting's value in the smaller stock face; Scrim and Light do not. */
+static void check_list_rows(void)
+{
+    struct ui_theme theme;
+    ui_theme_builtin(&theme, UI_THEME_SCRIM);
+    assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_PITCH);
+    ui_theme_builtin(&theme, UI_THEME_LIGHT);
+    assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_PITCH);
+    ui_theme_builtin(&theme, UI_THEME_CLASSIC);
+    assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_FILL);
+    assert(!strcmp(theme.font[UI_FONT_LIST_VALUE], "13-helvetica-bold"));
+    ui_theme_builtin(&theme, UI_THEME_PLASTIC);
+    assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_FILL);
+
+    static const char file[] = VERSION "style.list_rows=fill\n"
+        "font.list_value=Local_12\n";
+    assert(ui_theme_parse(&theme, file, sizeof(file) - 1));
+    assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_FILL);
+    assert(!strcmp(theme.font[UI_FONT_LIST_VALUE], "Local_12"));
+}
+
 int main(void)
 {
     check_builtins();
@@ -266,7 +290,8 @@ int main(void)
     check_palette();
     check_plastic();
     check_menu_pane();
-    puts("PASS native theme defaults, overrides, atomic validation, palette bounds and menu pane");
+    check_list_rows();
+    puts("PASS native theme defaults, overrides, atomic validation, palette bounds, menu pane and list rows");
     return 0;
 }
 ''', objects)

@@ -66,6 +66,8 @@ static const struct {
     [UI_FONT_STATUS_TITLE] = { "status_title", "18-noto-sans-bold" },
     [UI_FONT_PANE_TITLE] = { "pane_title", "18-noto-sans-bold" },
     [UI_FONT_PANE_TEXT] = { "pane_text", "14-noto-sans" },
+    [UI_FONT_LIST_VALUE] = { "list_value", "18-noto-sans" },
+    [UI_FONT_WPS_TIME]  = { "wps_time",  "12-noto-sans" },
 };
 
 static const struct {
@@ -192,6 +194,7 @@ static const struct {
     [UI_STYLE_ART]          = { "art",          (const char *const[]){ "none", "plastic", NULL } },
     [UI_STYLE_MENU_PANE]    = { "menu_pane",    (const char *const[]){ "none", "split", NULL } },
     [UI_STYLE_LIST_SCROLL]  = { "list_scroll",  (const char *const[]){ "snap", "glide", NULL } },
+    [UI_STYLE_LIST_ROWS]    = { "list_rows",    (const char *const[]){ "pitch", "fill", NULL } },
 };
 
 static const char *const gradients[UI_GRADIENT_COUNT] = {
@@ -238,10 +241,10 @@ static void classic(struct ui_theme *theme)
         { UI_METRIC_LIST_Y, 20 }, { UI_METRIC_LIST_BOTTOM, 0 },
         { UI_METRIC_LIST_TEXT_PADDING, 5 }, { UI_METRIC_LIST_RIGHT_PADDING, 0 },
         { UI_METRIC_LIST_ICON_MARGIN, 0 }, { UI_METRIC_LIST_ICON_GAP, 0 },
-        { UI_METRIC_LIST_TEXT_HEIGHT, 20 }, { UI_METRIC_LIST_ACCESSORY_GAP, 2 },
+        { UI_METRIC_LIST_TEXT_HEIGHT, 21 }, { UI_METRIC_LIST_ACCESSORY_GAP, 2 },
         { UI_METRIC_LIST_SELECTION_WIDTH, 0 },
         { UI_METRIC_STATUS_HEIGHT, 20 }, { UI_METRIC_STATUS_PAD_LEFT, 6 },
-        { UI_METRIC_STATUS_PAD_RIGHT, 7 }, { UI_METRIC_STATUS_TEXT_Y, 2 },
+        { UI_METRIC_STATUS_PAD_RIGHT, 7 }, { UI_METRIC_STATUS_TEXT_Y, 3 },
         { UI_METRIC_STATUS_TITLE_HEIGHT, 18 }, { UI_METRIC_STATUS_ICON_Y, 0 },
         { UI_METRIC_STATUS_ICON_SIZE, 20 },
         { UI_METRIC_MODAL_BORDER_WIDTH, 1 },
@@ -265,6 +268,8 @@ static void classic(struct ui_theme *theme)
     strcpy(theme->font[UI_FONT_WPS_META], "13-helvetica-bold");
     strcpy(theme->font[UI_FONT_PANE_TITLE], "17-helvetica-bold-pane");
     strcpy(theme->font[UI_FONT_PANE_TEXT], "13-helvetica-bold");
+    strcpy(theme->font[UI_FONT_LIST_VALUE], "13-helvetica-bold");
+    strcpy(theme->font[UI_FONT_WPS_TIME], "14-helvetica-bold");
     theme->gradient[UI_GRADIENT_PROGRESS] = (struct ui_theme_gradient){
         .color = { 0x6483f0, 0x6789f2, 0x56aeff, 0x4e8fce }, .stops = 4 };
     theme->gradient[UI_GRADIENT_PROGRESS_TRACK] = (struct ui_theme_gradient){
@@ -284,6 +289,7 @@ static void classic(struct ui_theme *theme)
     theme->style[UI_STYLE_WPS_LAYOUT] = UI_WPS_LAYOUT_CLASSIC;
     theme->style[UI_STYLE_SCROLLBAR] = UI_SCROLLBAR_CLASSIC;
     theme->style[UI_STYLE_MENU_PANE] = UI_MENU_PANE_SPLIT;
+    theme->style[UI_STYLE_LIST_ROWS] = UI_LIST_ROWS_FILL;
 }
 
 /* Stock's selection bar is a colour gradient, not a bitmap: its rows take

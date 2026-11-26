@@ -51,12 +51,13 @@ FT_USE_MODULE(ft_smooth_renderer_class)
 # basename: (stock file, size in 1/64 px, fallback weight, line height,
 # ascent, CJK strike). Each size is the one whose glyphs match the stock
 # screens pixel for pixel: list rows 16.265625 px, Now Playing title
-# 16.984375 px, the side pane's title 17.40625 px and the 13.125 px small
-# text. The 13 px faces keep the firmware's own 11/4 line; the larger faces
-# fit the Classic layout's cells.
+# 16.984375 px, the side pane's title 17.40625 px, Now Playing's times
+# 13.796875 px and the 13.125 px small text. The 13 px faces keep the
+# firmware's own 11/4 line; the larger faces fit the Classic layout's cells.
 STOCK = {
     "13-helvetica": ("Helvetica.ttf", 840, 400, 15, 11, 11),
     "13-helvetica-bold": ("HelveticaBold.ttf", 840, 700, 15, 11, 11),
+    "14-helvetica-bold": ("HelveticaBold.ttf", 883, 700, 16, 12, 11),
     "16-helvetica-bold": ("HelveticaBold.ttf", 1041, 700, 20, 16, 16),
     "17-helvetica-bold": ("HelveticaBold.ttf", 1087, 700, 18, 14, 16),
     "17-helvetica-bold-pane": ("HelveticaBold.ttf", 1114, 700, 19, 14, 16),

@@ -9,10 +9,13 @@
  * channel with a' = a + (a >> 7).
  ****************************************************************************/
 
+#include <stddef.h>
 #include "config.h"
 #include "system.h"
+#include "bidi.h"
 #include "core_alloc.h"
 #include "file.h"
+#include "font.h"
 #include "logf.h"
 #include "stock_art.h"
 
@@ -21,6 +24,7 @@
 
 static int pack_handle;
 static bool pack_failed;
+static bool over_layer;
 
 /* Buflib moves the pack only while the UI thread is away, so repointing the
  * table here keeps every pointer good. */
@@ -204,6 +208,50 @@ void stock_canvas_blend(struct stock_canvas *canvas, int x, int y,
     }
 }
 
+/* d * (255 - a) / 255 + s * a / 255, rounded down. */
+static inline unsigned mix255(unsigned d, unsigned s, unsigned a)
+{
+    return ((d * (255 - a) + s * a + 1) * 257) >> 16;
+}
+
+void stock_canvas_text(struct stock_canvas *canvas, int font, const char *text,
+                       int x, int y, uint32_t rgb)
+{
+    if (font_prefetch_active() && !font_prefetch_text(font, text))
+        return;
+    font_lock(font, true);
+    struct font *pf = font_get(font);
+    struct font_run run = { 0 };
+    for (const ucschar_t *ucs = bidi_l2v((const unsigned char *)text, 1);
+         pf->pbf.file_size && ucs && *ucs; ucs++)
+    {
+        struct font_glyph g;
+        font_run_next(pf, &run, *ucs, &g);
+        if (!g.bits)
+            continue;
+        for (int row = 0; row < g.height; row++)
+        {
+            int py = y + g.y + row - canvas->y;
+            if (py < 0 || py >= canvas->height)
+                continue;
+            for (int col = 0; col < g.width; col++)
+            {
+                int px = x + g.x + col - canvas->x, i = row * g.width + col;
+                /* A 4-bit glyph packs its pixels low nibble first, 15 clear. */
+                unsigned a = g.coverage8 ? g.bits[i] :
+                    (15 - ((g.bits[i >> 1] >> (i & 1 ? 4 : 0)) & 15)) * 17;
+                if (!a || px < 0 || px >= canvas->width)
+                    continue;
+                uint32_t *p = canvas->pixels + py * canvas->width + px;
+                *p = mix255(*p >> 16 & 255, rgb >> 16 & 255, a) << 16 |
+                     mix255(*p >> 8 & 255, rgb >> 8 & 255, a) << 8 |
+                     mix255(*p & 255, rgb & 255, a);
+            }
+        }
+    }
+    font_lock(font, false);
+}
+
 void stock_canvas_show(const struct stock_canvas *canvas, struct ui_rect clip)
 {
     int x0, y0, x1, y1;
@@ -220,6 +268,15 @@ void stock_canvas_show(const struct stock_canvas *canvas, struct ui_rect clip)
     }
 }
 
+/* The LCD controller's blend of the UI layer's `s` over the picture
+ * layer's RGB565 `d`, which it widens with zero low bits. */
+static inline fb_data blend_layer(fb_data d, uint32_t s, unsigned a)
+{
+    return FB_RGBPACK(mix255(FB_UNPACK_RED(d) & 0xf8, (s >> 16) & 255, a),
+                      mix255(FB_UNPACK_GREEN(d) & 0xfc, (s >> 8) & 255, a),
+                      mix255(FB_UNPACK_BLUE(d) & 0xf8, s & 255, a));
+}
+
 /* Blend `count` texels of `art` from index `at` over the 565 pixels at
  * `out`: each pixel is widened to 8 bits, blended and truncated. */
 static void blend_span(const struct stock_art *art, int at, fb_data *out,
@@ -231,9 +288,16 @@ static void blend_span(const struct stock_art *art, int at, fb_data *out,
         unsigned a = t >> 24;
         if (a == 255 && !mask)
             *out = narrow(t);
+        else if (a && over_layer)
+            *out = blend_layer(*out, mask ? rgb : t, a);
         else if (a)
             *out = narrow(blend(widen(*out), mask ? rgb : t, a));
     }
+}
+
+void stock_art_over_layer(bool on)
+{
+    over_layer = on;
 }
 
 static void draw(enum stock_art_id id, int x, int y, bool mask, uint32_t rgb,

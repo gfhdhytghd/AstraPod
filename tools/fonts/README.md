@@ -44,13 +44,12 @@ record size), then the PBF1 bitmap records in the same order.
 |---|---|---|
 | `13-helvetica` | Helvetica | 13.125 px |
 | `13-helvetica-bold` | Helvetica Bold | 13.125 px |
+| `14-helvetica-bold` | Helvetica Bold | 13.796875 px |
 | `16-helvetica-bold` | Helvetica Bold | 16.265625 px |
 | `17-helvetica-bold` | Helvetica Bold | 16.984375 px |
 | `17-helvetica-bold-pane` | Helvetica Bold | 17.40625 px |
 
-The scale is `FT_Set_Char_Size`'s, in 1/64 px at 72 dpi. The stock firmware
-also draws Now Playing's times in Helvetica Bold at 13.796875 px, which no
-font here provides.
+The scale is `FT_Set_Char_Size`'s, in 1/64 px at 72 dpi.
 
 ## PBF1 layout
 

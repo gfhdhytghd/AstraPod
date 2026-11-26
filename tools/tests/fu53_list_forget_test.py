@@ -34,6 +34,10 @@ fixture = r"""
 #define USEC_TIMER 0u
 #define HZ 100
 #define TIMEOUT_BLOCK -1
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define STOCK_MARQUEE_TICK 34000
+#define INDICATOR_HOLD 270000
+#define INDICATOR_STEP_US STOCK_MARQUEE_TICK
 
 struct gui_synclist {
     const int *parent[1];
@@ -53,7 +57,7 @@ struct native_list {
     unsigned font_epoch, artist_generation;
     struct { bool visible; int last_sel; } overlay;
     struct list_motion motion;
-    struct { bool valid; } shown;
+    struct { bool valid; int indicator; } shown;
     uint32_t marquee_started, marquee_frame;
 };
 static struct native_list state;
@@ -67,6 +71,8 @@ static unsigned font_prefetch_epoch(void){return 0;}
 static unsigned artist_tile_generation(void){return 0;}
 static void ui_perf_end(unsigned token) { traces_ended += token != 0; }
 static bool motion_enabled(void) { return true; }
+static bool stock_marquee(const struct native_list *r) { (void)r; return false; }
+static int indicator_level(const struct native_list *r) { (void)r; return 0; }
 struct ui_pace { uint32_t due; };
 static struct ui_pace glide_pace;
 static uint32_t ui_pace_next(struct ui_pace *pace, uint32_t start)

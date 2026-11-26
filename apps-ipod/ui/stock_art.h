@@ -52,6 +52,11 @@ void stock_art_mask(struct stock_canvas *canvas, enum stock_art_id id,
 /* Blend `rgb` over the canvas pixel at screen (x, y) with `alpha` of 255. */
 void stock_canvas_blend(struct stock_canvas *canvas, int x, int y,
                         uint32_t rgb, unsigned alpha);
+/* Draw `text` in the PodBox font `font` with its line's top-left on screen
+ * (x, y), each glyph's coverage blending `rgb` over the canvas as stock
+ * blends text: d * (255 - a) / 255 + rgb * a / 255, rounded down. */
+void stock_canvas_text(struct stock_canvas *canvas, int font, const char *text,
+                       int x, int y, uint32_t rgb);
 /* Write the part of the canvas inside `clip` to the default framebuffer. */
 void stock_canvas_show(const struct stock_canvas *canvas, struct ui_rect clip);
 
@@ -61,6 +66,11 @@ void stock_art_draw(enum stock_art_id id, int x, int y, struct ui_rect clip);
 /* The same for the mask `id` in `rgb`. */
 void stock_art_draw_mask(enum stock_art_id id, int x, int y, uint32_t rgb,
                          struct ui_rect clip);
+/* While on, the two draws above and stock_art_row() blend as the stock LCD
+ * lays its UI layer over its picture layer: the RGB565 pixels below are
+ * widened with zero low bits and blended with alpha / 255. Stock's Now
+ * Playing draws its controls on that layer over the cover. */
+void stock_art_over_layer(bool on);
 /* Blend `count` pixels of row `sy` of `id`, from column `sx`, over `out`, a
  * run of pixels in any framebuffer-format buffer. */
 void stock_art_row(enum stock_art_id id, int sx, int sy, fb_data *out,

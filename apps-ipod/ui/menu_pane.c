@@ -436,37 +436,37 @@ static void blend_cover(struct ui_rect clip, int x, int y, unsigned weight)
     core_put_data_pinned((void *)pixels);
 }
 
-/* `text` centred on the pane with its baseline on `baseline`. */
-static void pane_line(struct ui_rect clip, const char *text, int font,
-                     int baseline)
+/* A still pane's text, laid out before its picture is composed. */
+struct pane_lines {
+    int count;
+    struct {
+        char text[TEXT_FIT_BUF];
+        int font, x, top;
+    } line[3];
+};
+
+/* Add `text`, centred on the pane with its baseline on `baseline`. */
+static void pane_line(struct pane_lines *lines, const char *text, int font,
+                      int baseline)
 {
-    if (font < 0 || !*text)
+    if (font < 0 || !*text || lines->count >= (int)ARRAYLEN(lines->line))
         return;
-    struct font *pf = font_get(font);
-    int top = baseline - pf->ascent;
-    struct ui_rect area = clip_to(clip, (struct ui_rect){
-        MENU_PANE_X, top, PANE_W, pf->height });
-    if (area.width <= 0 || area.height <= 0)
-        return;
-    char fitted[TEXT_FIT_BUF];
     const int margin = 8;
-    text = text_fit(text, fitted, sizeof(fitted), font, PANE_W - 2 * margin);
+    char *line = lines->line[lines->count].text;
+    const char *fitted = text_fit(text, line, TEXT_FIT_BUF, font,
+                                  PANE_W - 2 * margin);
+    if (fitted != line)
+        strlcpy(line, fitted, TEXT_FIT_BUF);
     int width;
-    font_getstringsize((const unsigned char *)text, &width, NULL, font);
-    struct viewport vp = {
-        .x = area.x, .y = area.y, .width = area.width, .height = area.height,
-        .font = font, .drawmode = DRMODE_FG,
-        .fg_pattern = LCD_RGBPACK(255, 255, 255),
-        .buffer = &lcd_framebuffer_default, .flags = VP_DEFAULT_FLAGS,
-    };
-    struct viewport *prior = lcd_set_viewport(&vp);
-    lcd_putsxy(PANE_MID - width / 2 - area.x, top - area.y,
-               (const unsigned char *)text);
-    lcd_set_viewport(prior);
+    font_getstringsize((const unsigned char *)line, &width, NULL, font);
+    lines->line[lines->count].font = font;
+    lines->line[lines->count].x = PANE_MID - width / 2;
+    lines->line[lines->count].top = baseline - font_get(font)->ascent;
+    lines->count++;
 }
 
 /* A description in at most two lines, the last on `baseline`. */
-static void put_wrapped(struct ui_rect clip, const char *text, int font,
+static void put_wrapped(struct pane_lines *lines, const char *text, int font,
                         int baseline)
 {
     if (font < 0)
@@ -488,12 +488,12 @@ static void put_wrapped(struct ui_rect clip, const char *text, int font,
     font_getstringsize((const unsigned char *)text, &whole, NULL, font);
     if (whole <= WRAP_W || !cut)
     {
-        pane_line(clip, text, font, baseline);
+        pane_line(lines, text, font, baseline);
         return;
     }
     *cut = '\0';
-    pane_line(clip, first, font, baseline - 15);
-    pane_line(clip, cut + 1, font, baseline);
+    pane_line(lines, first, font, baseline - 15);
+    pane_line(lines, cut + 1, font, baseline);
 }
 
 /* A 119-pixel preview sits where stock puts them all, anything else centred
@@ -566,9 +566,10 @@ static int capacity_used(void)
     return total ? (int)((uint64_t)(total - free) * CAPACITY_W / total) : 0;
 }
 
-/* The picture under a still pane's text, inside `band`. */
+/* A still pane inside `band`: its picture, then its text. */
 static void compose_still(struct stock_canvas *band,
-                          const struct menu_pane_content *c, int used)
+                          const struct menu_pane_content *c, int used,
+                          const struct pane_lines *lines)
 {
     stock_art_put(band, STOCK_ART_BACKGROUND_LIGHTBLUE, 0, 0);
     switch (c->kind)
@@ -592,20 +593,23 @@ static void compose_still(struct stock_canvas *band,
                 put_picture(band, c->art);
             break;
     }
+    for (int i = 0; i < lines->count; i++)
+        stock_canvas_text(band, lines->line[i].font, lines->line[i].text,
+                          lines->line[i].x, lines->line[i].top, WHITE);
     stock_art_put(band, STOCK_ART_PREVIEWAREA_SHADOW, MENU_PANE_X, 0);
 }
 
-static void paint_playing(struct ui_rect clip)
+static void playing_lines(struct pane_lines *lines)
 {
     struct mp3entry *id3 = audio_current_track();
     if (!id3)
         return;
-    pane_line(clip, id3->title ? id3->title : "", fonts.title, 183);
-    pane_line(clip, id3->artist ? id3->artist : "", fonts.text, 202);
-    pane_line(clip, id3->album ? id3->album : "", fonts.text, 219);
+    pane_line(lines, id3->title ? id3->title : "", fonts.title, 184);
+    pane_line(lines, id3->artist ? id3->artist : "", fonts.text, 203);
+    pane_line(lines, id3->album ? id3->album : "", fonts.text, 220);
 }
 
-static void paint_free(struct ui_rect clip)
+static void free_line(struct pane_lines *lines)
 {
     sector_t total = 0, free = 0;
     volume_size(IF_MV(0,) &total, &free);
@@ -621,10 +625,10 @@ static void paint_free(struct ui_rect clip)
     char text[64];
     snprintf(text, sizeof(text), "%u.%u %s %s", (unsigned)(kib / unit),
              (unsigned)(kib * 10 / unit % 10), gib ? "GB" : "MB", label);
-    pane_line(clip, text, fonts.title, 212);
+    pane_line(lines, text, fonts.title, 213);
 }
 
-static void paint_songs(struct ui_rect clip)
+static void songs_line(struct pane_lines *lines)
 {
     struct tagcache_marks marks;
     tagcache_get_marks(&marks);
@@ -632,12 +636,43 @@ static void paint_songs(struct ui_rect clip)
     snprintf(text, sizeof(text), "%d %s",
              MAX(0, tagcache_get_stat()->total_entries - marks.deleted_ct),
              str(LANG_PV_K_SONGS));
-    pane_line(clip, text, fonts.title, 205);
+    pane_line(lines, text, fonts.title, 206);
 }
 
-/* A pane on the backdrop: the picture composed at 8 bits, then the text. */
+/* The text of the pane `c`. */
+static void still_lines(struct pane_lines *lines,
+                        const struct menu_pane_content *c)
+{
+    switch (c->kind)
+    {
+        case LIST_PANE_INFO:
+            pane_line(lines, c->title, fonts.title, 34);
+            put_wrapped(lines, c->caption, fonts.text, 216);
+            break;
+        case LIST_PANE_PLAYING:
+            playing_lines(lines);
+            break;
+        case LIST_PANE_DEVICE:
+            pane_line(lines, c->title, fonts.title, 34);
+            free_line(lines);
+            break;
+        case LIST_PANE_SHUFFLE:
+            pane_line(lines, c->title, fonts.title, 34);
+            songs_line(lines);
+            break;
+        default:
+            pane_line(lines, c->title, fonts.title, 179);
+            break;
+    }
+}
+
+/* A pane on the backdrop, composed at 8 bits a channel as stock composes
+ * it, text and all, and truncated once. */
 static void paint_still(struct ui_rect clip, const struct menu_pane_content *c)
 {
+    struct pane_lines lines;
+    lines.count = 0;
+    still_lines(&lines, c);
     int used = c->kind == LIST_PANE_DEVICE ? capacity_used() : 0;
     for (int y = clip.y; y < clip.y + clip.height; y += BAND_ROWS)
     {
@@ -645,29 +680,8 @@ static void paint_still(struct ui_rect clip, const struct menu_pane_content *c)
             band_pixels, clip.x, y, clip.width,
             MIN(BAND_ROWS, clip.y + clip.height - y),
         };
-        compose_still(&band, c, used);
+        compose_still(&band, c, used, &lines);
         stock_canvas_show(&band, clip);
-    }
-    switch (c->kind)
-    {
-        case LIST_PANE_INFO:
-            pane_line(clip, c->title, fonts.title, 33);
-            put_wrapped(clip, c->caption, fonts.text, 215);
-            break;
-        case LIST_PANE_PLAYING:
-            paint_playing(clip);
-            break;
-        case LIST_PANE_DEVICE:
-            pane_line(clip, c->title, fonts.title, 33);
-            paint_free(clip);
-            break;
-        case LIST_PANE_SHUFFLE:
-            pane_line(clip, c->title, fonts.title, 33);
-            paint_songs(clip);
-            break;
-        default:
-            pane_line(clip, c->title, fonts.title, 178);
-            break;
     }
 }
 

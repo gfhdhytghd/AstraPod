@@ -52,8 +52,11 @@
 /* Classic geometry, from the stock firmware's Now Playing at 320x240. The
  * cover turns away on its vertical axis: its near (left) edge is
  * CLASSIC_ART_NEAR rows tall, its far edge CLASSIC_ART_FAR rows, starting
- * CLASSIC_ART_DROP rows lower. A blank row separates it from a reflection
- * that fades out over CLASSIC_REFLECTION rows. */
+ * CLASSIC_ART_DROP rows lower. Each column's reflection mirrors it about a
+ * line CLASSIC_MIRROR_AXIS 256ths of a row below its bottom and fades out
+ * from CLASSIC_REFLECTION_ALPHA of 256 over CLASSIC_REFLECTION_SPAN 256ths
+ * of the column's height, inside CLASSIC_REFLECTION rows below the near
+ * edge. */
 #define CLASSIC_ART_X 9
 #define CLASSIC_ART_Y 33
 #define CLASSIC_ART_WIDTH 136
@@ -61,14 +64,16 @@
 #define CLASSIC_ART_FAR 119
 #define CLASSIC_ART_DROP 10
 #define CLASSIC_REFLECTION 68
-#define CLASSIC_REFLECTION_ALPHA 15 /* of 32 */
-#define CLASSIC_TEXT_X 158
+#define CLASSIC_MIRROR_AXIS 224
+#define CLASSIC_REFLECTION_SPAN 105
+#define CLASSIC_REFLECTION_ALPHA 125
+#define CLASSIC_TEXT_X 159
 #define CLASSIC_TEXT_WIDTH 156
 #define CLASSIC_TITLE_Y 68
 #define CLASSIC_TITLE_HEIGHT 24
-#define CLASSIC_ARTIST_Y 90
-#define CLASSIC_ALBUM_Y 108
-#define CLASSIC_INDEX_Y 145
+#define CLASSIC_ARTIST_Y 89
+#define CLASSIC_ALBUM_Y 107
+#define CLASSIC_INDEX_Y 144
 #define CLASSIC_LINE 17
 /* The progress and volume rows share one strip and slide through it. */
 #define CLASSIC_ROW_Y 203
@@ -77,10 +82,10 @@
 #define CLASSIC_BAR_HEIGHT 14
 #define CLASSIC_BAR_REFLECTION 11
 #define CLASSIC_BAR_VIEW (CLASSIC_BAR_HEIGHT + 1 + CLASSIC_BAR_REFLECTION)
-#define CLASSIC_TIME_Y 6
+#define CLASSIC_TIME_Y 5
 #define CLASSIC_PROGRESS_X 54
 #define CLASSIC_PROGRESS_WIDTH 212
-#define CLASSIC_ELAPSED_X 14
+#define CLASSIC_ELAPSED_X 15
 #define CLASSIC_REMAINING_RIGHT 310
 #define CLASSIC_VOLUME_X 56
 #define CLASSIC_VOLUME_WIDTH 208
@@ -366,6 +371,23 @@ static void paint_label(const struct ui_view *view, const struct ui_view_frame *
     lcd_set_viewport(previous);
 }
 
+/* Stock's Now Playing draws its controls and text on a UI layer that the
+ * LCD lays over the cover's layer; drawn over the cover here, they blend as
+ * that layer does. */
+static void over_cover(bool on)
+{
+    lcd_set_glyph_layer(on);
+    stock_art_over_layer(on);
+}
+
+static void paint_classic_label(const struct ui_view *view,
+                                const struct ui_view_frame *frame)
+{
+    over_cover(true);
+    paint_label(view, frame);
+    over_cover(false);
+}
+
 static void paint_progress(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     (void)view;
@@ -455,12 +477,13 @@ static fb_data mix4(fb_data a, fb_data b, fb_data c, fb_data d)
     return ((rb >> 2) & 0xf81f) | ((g >> 2) & 0x07e0);
 }
 
-/* a over b, with a weighing `w` of 32. */
-static fb_data blend32(fb_data a, fb_data b, unsigned w)
+/* a over b, with a weighing `w` of 256. */
+static fb_data blend256(fb_data a, fb_data b, unsigned w)
 {
-    unsigned rb = ((a & 0xf81f) * w + (b & 0xf81f) * (32 - w)) >> 5;
-    unsigned g = ((a & 0x07e0) * w + (b & 0x07e0) * (32 - w)) >> 5;
-    return (rb & 0xf81f) | (g & 0x07e0);
+    unsigned r = ((a >> 11) * w + (b >> 11) * (256 - w)) >> 8;
+    unsigned g = (((a >> 5) & 63) * w + ((b >> 5) & 63) * (256 - w)) >> 8;
+    unsigned bl = ((a & 31) * w + (b & 31) * (256 - w)) >> 8;
+    return r << 11 | g << 5 | bl;
 }
 
 /* The cover's pixels, or with none a drawn placeholder: a pair of beamed
@@ -585,21 +608,21 @@ static bool paint_turned(const struct ui_view_frame *frame, fb_data under,
         {
             const struct art_column *col = &column[c];
             int bottom = col->top + col->height;
-            /* Mirror about the blank row's middle. */
-            int start = bottom + 256, end = start + CLASSIC_REFLECTION * 256;
+            int axis = bottom + CLASSIC_MIRROR_AXIS;
+            int start = axis + 128;
+            int end = start + col->height * CLASSIC_REFLECTION_SPAN / 256;
             fb_data pixel = under;
             int cover = reflect ? overlap(y, start, end) : 0;
             if (cover)
             {
                 int fade = CLASSIC_REFLECTION_ALPHA * (end - y - 128) /
                            (end - start);
-                fb_data mirror = art_sample(&src, col,
-                                            2 * (bottom + 128) - y - 256);
-                pixel = blend32(mirror, pixel, fade * cover >> 8);
+                fb_data mirror = art_sample(&src, col, 2 * axis - y - 256);
+                pixel = blend256(mirror, pixel, MAX(fade, 0) * cover >> 8);
             }
             cover = overlap(y, col->top, bottom);
             if (cover)
-                pixel = blend32(art_sample(&src, col, y), pixel, cover >> 3);
+                pixel = blend256(art_sample(&src, col, y), pixel, cover);
             row[c] = pixel;
         }
         lcd_bitmap(row + first, frame->bounds.x - frame->clip.x + first,
@@ -666,9 +689,11 @@ static void paint_track(const struct ui_view *view,
         const struct ui_view *fill = view->first_child;
         int filled = fill ? MIN(MAX(fill->value[UI_WIDTH], 0),
                                 frame->bounds.width) : 0;
+        over_cover(true);
         ui_art_tile(STOCK_ART_NOWPLAYING_PROGRESSBAR_ACTIVE_BACKGROUND,
                     frame->bounds.x + filled, frame->bounds.y,
                     frame->bounds.width - filled, true, frame->clip);
+        over_cover(false);
         return;
     }
     paint_bar(frame, &wps->theme.gradient[UI_GRADIENT_PROGRESS_TRACK],
@@ -681,9 +706,11 @@ static void paint_fill(const struct ui_view *view,
     (void)view;
     if (ui_theme_art(&wps->theme))
     {
+        over_cover(true);
         ui_art_tile(STOCK_ART_NOWPLAYING_PROGRESSBAR_ACTIVE_FILL,
                     frame->bounds.x, frame->bounds.y, frame->bounds.width,
                     false, frame->clip);
+        over_cover(false);
         return;
     }
     paint_bar(frame, &wps->theme.gradient[UI_GRADIENT_PROGRESS],
@@ -722,8 +749,10 @@ static void paint_shuffle(const struct ui_view *view,
     int y = frame->bounds.y - frame->clip.y;
     if (ui_theme_art(&wps->theme))
     {
+        over_cover(true);
         stock_art_draw(STOCK_ART_NOWPLAYING_CLASSIC_SHUFFLE, frame->bounds.x,
                        frame->bounds.y, frame->clip);
+        over_cover(false);
         lcd_set_viewport(previous);
         return;
     }
@@ -755,10 +784,12 @@ static void paint_classic_volume(const struct ui_view *view,
     {
         /* Stock's speakers stand level with the bar's top. */
         y = frame->bounds.y + CLASSIC_BAR_Y;
+        over_cover(true);
         stock_art_draw(STOCK_ART_NOWPLAYING_WHITE_VOLUME_LOW,
                        frame->bounds.x + CLASSIC_QUIET_X, y, frame->clip);
         stock_art_draw(STOCK_ART_NOWPLAYING_WHITE_VOLUME_HIGH,
                        frame->bounds.x + CLASSIC_LOUD_X, y, frame->clip);
+        over_cover(false);
     }
     else
     {
@@ -787,6 +818,9 @@ static const struct ui_view_ops background_ops = { .paint = paint_background };
 static const struct ui_view_ops cover_ops = { .paint = paint_cover };
 static const struct ui_view_ops panel_ops = { .paint = paint_panel };
 static const struct ui_view_ops label_ops = { .paint = paint_label };
+static const struct ui_view_ops classic_label_ops = {
+    .paint = paint_classic_label
+};
 static const struct ui_view_ops progress_ops = { .paint = paint_progress };
 static const struct ui_view_ops progress_fill_ops = { .paint = paint_progress_fill };
 static const struct ui_view_ops meter_ops = { .paint = paint_meter };
@@ -1417,10 +1451,11 @@ static void setup_classic(void)
     };
     static const struct ui_view_ops *const ops[WPS_VIEW_COUNT] = {
         [WPS_HEADER] = &header_ops, [WPS_COVER] = &art_ops,
-        [WPS_INDEX] = &label_ops, [WPS_TITLE] = &label_ops,
-        [WPS_ARTIST] = &label_ops, [WPS_ALBUM] = &label_ops,
+        [WPS_INDEX] = &classic_label_ops, [WPS_TITLE] = &classic_label_ops,
+        [WPS_ARTIST] = &classic_label_ops, [WPS_ALBUM] = &classic_label_ops,
         [WPS_PROGRESS] = &track_ops, [WPS_PROGRESS_FILL] = &fill_ops,
-        [WPS_ELAPSED] = &label_ops, [WPS_REMAINING] = &label_ops,
+        [WPS_ELAPSED] = &classic_label_ops,
+        [WPS_REMAINING] = &classic_label_ops,
         [WPS_VOLUME] = &classic_volume_ops, [WPS_VOLUME_FILL] = &fill_ops,
         [WPS_SHUFFLE] = &shuffle_ops,
     };
@@ -1479,10 +1514,15 @@ void native_wps_open(const struct wps_state *state)
     wps->title.scroll = wps->artist.scroll = true;
     if (wps->classic)
     {
-        /* These share the artist and index fonts; close unloads those. */
+        /* The album shares the artist's font and the times their own;
+         * close unloads those. */
         label_set(&wps->album, wps->artist.font, wps->album_text,
                   sizeof(wps->album_text));
-        label_set(&wps->elapsed, wps->index.font, wps->elapsed_text,
+        label_set(&wps->remaining,
+                  ui_theme_font_load(&wps->theme, UI_FONT_WPS_TIME, 48),
+                  wps->remaining_text, sizeof(wps->remaining_text));
+        wps->remaining.right = true;
+        label_set(&wps->elapsed, wps->remaining.font, wps->elapsed_text,
                   sizeof(wps->elapsed_text));
         wps->album.scroll = true;
         wps->chrome_ready = native_chrome_open(&wps->chrome, &wps->theme);
@@ -1643,6 +1683,8 @@ void native_wps_close(void)
         font_unload(wps->artist.font);
     if (wps->index.font >= 0)
         font_unload(wps->index.font);
+    if (wps->classic && wps->remaining.font >= 0)
+        font_unload(wps->remaining.font);
     if (wps->volume_font >= 0)
         font_unload(wps->volume_font);
     if (wps->chrome_ready)

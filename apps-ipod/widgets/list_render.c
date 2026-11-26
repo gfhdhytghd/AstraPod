@@ -99,7 +99,7 @@ struct list_index {
  * selection marker moved. */
 struct list_shown {
     struct ui_rect rows, marker;
-    int pitch, top, cursor_y, lit, selected;
+    int pitch, top, cursor_y, lit, selected, indicator;
     unsigned theme, palette, art, font, artist;
     int art_handle;
     bool valid;
@@ -110,7 +110,7 @@ struct native_list {
     unsigned int colors[UI_COLOR_COUNT];
     unsigned theme_generation, palette_generation;
     bool colors_current;
-    int text_font, title_font, icon_font;
+    int text_font, title_font, icon_font, value_font;
     struct ui_view root, title, header, rows, notes, art, index_view, pane;
     struct ui_page page;
     struct ui_layer backdrop;
@@ -135,9 +135,11 @@ struct native_list {
         } row;
         char notes[2 * MAX_PATH];
     } scratch;
-    int row_shift, cursor_y;
+    int row_shift, cursor_y, cursor_height;
     /* Columns the scroll indicator takes from the rows' right edge. */
     int row_inset;
+    /* The classic indicator's strength in the last paint of the rows. */
+    int indicator;
     struct gradient_rows bar_rows, thumb_rows;
     uint32_t marquee_started, marquee_frame;
     bool has_marquee;
@@ -160,6 +162,7 @@ void list_render_init(void)
         render->index_font = FONT_SYSFIXED;
         render->index_faces[0] = render->index_faces[1] = -1;
         render->text_font = render->title_font = render->icon_font = -1;
+        render->value_font = -1;
         render->theme_generation = (unsigned)-1;
         core_put_data_pinned(render);
     }
@@ -178,10 +181,15 @@ static void refresh_tokens(struct native_list *render)
     font_unload(render->text_font);
     font_unload(render->title_font);
     font_unload(render->icon_font);
+    font_unload(render->value_font);
     int glyphs = global_settings.glyphs_to_cache;
     render->text_font = ui_theme_font_load(&render->theme, UI_FONT_LIST, glyphs);
     render->title_font = ui_theme_font_load(&render->theme, UI_FONT_TITLE, glyphs);
     render->icon_font = ui_theme_font_load(&render->theme, UI_FONT_ICON, glyphs);
+    /* Only rows that show their value in words draw it. */
+    render->value_font = render->theme.style[UI_STYLE_ACCESSORY] ==
+                         UI_ACCESSORY_SELECTED ?
+        ui_theme_font_load(&render->theme, UI_FONT_LIST_VALUE, glyphs) : -1;
     round_rect_build_mask(render->mark_mask, 1,
                           render->theme.metric[UI_METRIC_LIST_SELECTION_ALPHA]);
 }
@@ -196,6 +204,22 @@ static int row_pitch(const struct gui_synclist *list, enum screen_type screen,
     if (list->default_viewport && viewportmanager_theme_enabled(screen))
         return metric[UI_METRIC_ROW_HEIGHT];
     return MAX(list->line_height[screen], 1);
+}
+
+/* Under style.list_rows=fill the rows take the height the last whole row
+ * leaves, a pixel each from the top row down: stock's nine rows in 220
+ * pixels are four of 25 and five of 24. */
+static int row_spare(const struct ui_theme *theme, int height, int pitch)
+{
+    if (theme->style[UI_STYLE_LIST_ROWS] != UI_LIST_ROWS_FILL || pitch <= 0)
+        return 0;
+    return height % pitch;
+}
+
+/* The top of the row `slot` rows below the first, from the first's top. */
+static int slot_y(int slot, int pitch, int spare)
+{
+    return slot * pitch + MIN(MAX(slot, 0), spare);
 }
 
 static struct ui_rect take_top(struct ui_rect *rect, int height)
@@ -573,9 +597,13 @@ static const uint16_t *gradient_rows(struct native_list *render,
     height = MIN(MAX(height, 1), LCD_HEIGHT);
     if (rows->height != height)
     {
+        const uint32_t *art = role == UI_GRADIENT_SELECTION &&
+                              ui_theme_art(&render->theme) ?
+                              ui_art_selection(height) : NULL;
         for (int y = 0; y < height; ++y)
         {
-            uint32_t rgb = ui_theme_gradient_at(&render->theme.gradient[role],
+            uint32_t rgb = art ? art[y] :
+                           ui_theme_gradient_at(&render->theme.gradient[role],
                                                 y, height, 0);
             rows->color[y] = LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255,
                                          rgb & 255);
@@ -639,6 +667,28 @@ static unsigned marquee_shift(struct native_list *render, unsigned max_offset)
 #define STOCK_MARQUEE_TICK 34100 /* us */
 #define STOCK_MARQUEE_WAIT 38 /* ticks */
 #define STOCK_MARQUEE_GAP 26
+
+/* Under style.scrollbar=classic the indicator shows only around a move, as
+ * stock's: at full strength for INDICATOR_HOLD after the selection moves or
+ * the list opens, then a step weaker each INDICATOR_STEP_US until gone. */
+#define INDICATOR_HOLD 270000 /* us */
+#define INDICATOR_STEP_US STOCK_MARQUEE_TICK
+#define INDICATOR_STEPS 14
+
+static bool classic_indicator(const struct native_list *render)
+{
+    return render->theme.style[UI_STYLE_SCROLLBAR] == UI_SCROLLBAR_CLASSIC;
+}
+
+/* The indicator's strength now, INDICATOR_STEPS (full) down to 0 (gone). */
+static int indicator_level(const struct native_list *render)
+{
+    uint32_t elapsed = USEC_TIMER - render->marquee_started;
+    if (elapsed < INDICATOR_HOLD)
+        return INDICATOR_STEPS;
+    uint32_t steps = (elapsed - INDICATOR_HOLD) / INDICATOR_STEP_US;
+    return steps >= INDICATOR_STEPS ? 0 : INDICATOR_STEPS - (int)steps;
+}
 
 static bool stock_marquee(const struct native_list *render)
 {
@@ -1048,7 +1098,6 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
                       row_accessory(list, item, kind, label, value);
     /* Home's rows open screens, except the ones that start playback. */
     if (activity == ACTIVITY_MAINMENU && chevron_selected && !aux &&
-        !equals_lang(label, LANG_NOW_PLAYING) &&
         !equals_lang(label, LANG_RESUME_PLAYBACK) &&
         !equals_lang(label, LANG_SHUFFLE_SONGS) &&
         !equals_lang(label, LANG_RANDOM_ALBUM))
@@ -1079,7 +1128,9 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
 
     bool now_playing_row = activity == ACTIVITY_MAINMENU &&
                            equals_lang(label, LANG_NOW_PLAYING);
-    if (now_playing_row)
+    /* With stock accessories the row reads a plain "Now Playing", as
+     * stock's does. */
+    if (now_playing_row && !chevron_selected)
     {
         const struct mp3entry *id3 = audio_current_track();
         if (id3 && id3->title && *id3->title)
@@ -1093,8 +1144,9 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     bool ready = list_text_ready(text_font, label);
     if (agents && value && value[0] == 'r' && value[1] && value[2])
         ready &= list_text_ready(text_font, value + 2);
+    int value_font = render->value_font >= 0 ? render->value_font : text_font;
     if (value_text)
-        ready &= list_text_ready(text_font, value);
+        ready &= list_text_ready(value_font, value);
     if (!ready)
         return;
 
@@ -1155,7 +1207,21 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     int arrow = right - icon_size;
     int text_height = MIN(row.height, m[UI_METRIC_LIST_TEXT_HEIGHT]);
     int text_y = (row.height - text_height) / 2;
-    int text_right = aux ? arrow - m[UI_METRIC_LIST_ACCESSORY_GAP] : right;
+    /* With stock accessories a row's text keeps the text padding clear at
+     * its right end, or stops short of the chevron, which keeps 6 columns
+     * clear of the list's right edge, the scroll indicator's included. */
+    if (aux == chevron && chevron_selected && !lit)
+        aux = NULL;
+    const struct stock_art *glyph = &stock_art[STOCK_ART_SYSTEM_SUBMENU];
+    int chevron_x = right + render->row_inset - 6 - glyph->width;
+    bool art_chevron = aux == chevron && !rtl && ui_theme_art(&render->theme);
+    int text_right = right;
+    if (aux == chevron && chevron_selected)
+        text_right = chevron_x - m[UI_METRIC_LIST_ACCESSORY_GAP];
+    else if (aux)
+        text_right = arrow - m[UI_METRIC_LIST_ACCESSORY_GAP];
+    else if (chevron_selected)
+        text_right = right - m[UI_METRIC_LIST_TEXT_PADDING];
     if (agents && value && value[0] == 'r' && value[1] && value[2])
     {
         int value_width = 4 * text_height;
@@ -1167,12 +1233,15 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     {
         int inset = m[UI_METRIC_LIST_TEXT_PADDING];
         int value_width = MIN(font_getstringsize((const unsigned char *)value,
-                                                 NULL, NULL, text_font),
+                                                 NULL, NULL, value_font),
                               (right - text_x) / 2);
         int value_x = right - inset - value_width;
+        /* The value shares the label's baseline. */
+        int value_y = text_y + font_get(text_font)->ascent -
+                      font_get(value_font)->ascent;
         text_right = value_x - m[UI_METRIC_LIST_AUX_PADDING];
-        draw_text(render, clip, row_cell(row, value_x, text_y, value_width,
-                  text_height, rtl), text_font,
+        draw_text(render, clip, row_cell(row, value_x, value_y, value_width,
+                  text_height, rtl), value_font,
                   lit ? fg : render->colors[UI_COLOR_ACCENT], value, false, 0,
                   false);
     }
@@ -1187,15 +1256,9 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     draw_text(render, clip, row_cell(row, text_x, text_y,
               text_right - text_x, text_height, rtl), text_font, fg, label,
               scroll, list->offset_position[SCREEN_MAIN], false);
-    if (aux == chevron && chevron_selected && !lit)
-        aux = NULL;
-    /* Stock's chevron keeps 6 columns clear of the list's right edge, the
-     * scroll indicator's columns included. */
-    if (aux == chevron && !rtl && ui_theme_art(&render->theme))
+    if (art_chevron)
     {
-        const struct stock_art *glyph = &stock_art[STOCK_ART_SYSTEM_SUBMENU];
-        struct ui_rect cell = row_cell(row, right + render->row_inset - 6 -
-                                       glyph->width,
+        struct ui_rect cell = row_cell(row, chevron_x,
                                        (row.height - glyph->height) / 2,
                                        glyph->width, glyph->height, false);
         stock_art_draw(STOCK_ART_SYSTEM_SUBMENU, cell.x, cell.y,
@@ -1223,6 +1286,12 @@ static bool scrollbar_left(const struct native_list *render,
            render->theme.style[UI_STYLE_SCROLLBAR] != UI_SCROLLBAR_CLASSIC;
 }
 
+/* `opacity` at `level` of INDICATOR_STEPS strength. */
+static unsigned faded(unsigned opacity, int level)
+{
+    return opacity * level / INDICATOR_STEPS;
+}
+
 static void blend(struct ui_rect clip, struct ui_rect cell, unsigned int color,
                   unsigned opacity)
 {
@@ -1234,11 +1303,48 @@ static void blend(struct ui_rect clip, struct ui_rect cell, unsigned int color,
     lcd_set_viewport(prior);
 }
 
+/* `id` at (x, y) as stock_art_draw() draws it, at `level` of
+ * INDICATOR_STEPS strength. */
+static void draw_art_faded(enum stock_art_id id, int x, int y,
+                           struct ui_rect clip, int level)
+{
+    const struct stock_art *art = &stock_art[id];
+    if (level >= INDICATOR_STEPS)
+    {
+        stock_art_draw(id, x, y, clip);
+        return;
+    }
+    clip = intersection(clip, (struct ui_rect){ x, y, art->width,
+                                                art->height });
+    clip = intersection(clip, (struct ui_rect){ 0, 0, LCD_WIDTH,
+                                                LCD_HEIGHT });
+    if (clip.width <= 0 || clip.height <= 0 || clip.width > 16)
+        return;
+    for (int row = clip.y; row < clip.y + clip.height; ++row)
+    {
+        fb_data *out = lcd_framebuffer_default.fb_ptr + row * LCD_WIDTH +
+                       clip.x;
+        fb_data mixed[16];
+        memcpy(mixed, out, clip.width * sizeof(*out));
+        stock_art_row(id, clip.x - x, row - y, mixed, clip.width);
+        for (int i = 0; i < clip.width; ++i)
+        {
+            int c[3] = { FB_UNPACK_RED(out[i]), FB_UNPACK_GREEN(out[i]),
+                         FB_UNPACK_BLUE(out[i]) };
+            int m[3] = { FB_UNPACK_RED(mixed[i]), FB_UNPACK_GREEN(mixed[i]),
+                         FB_UNPACK_BLUE(mixed[i]) };
+            for (int k = 0; k < 3; ++k)
+                c[k] += (m[k] - c[k]) * level / INDICATOR_STEPS;
+            out[i] = FB_RGBPACK(c[0], c[1], c[2]);
+        }
+    }
+}
+
 /* Stock's own indicator: its top and bottom bitmaps with the middle one
  * repeated between, against the bar's right edge, in a track 2 rows short
  * of the bar at each end. Its length is the visible share of the track. */
 static void paint_art_scrollbar(struct ui_rect clip, struct ui_rect bar,
-                                int items, int first, int last)
+                                int items, int first, int last, int level)
 {
     const struct stock_art *top = &stock_art[STOCK_ART_SYSTEM_SCROLLBARTOP];
     int bottom = stock_art[STOCK_ART_SYSTEM_SCROLLBARBOTTOM].height;
@@ -1258,9 +1364,9 @@ static void paint_art_scrollbar(struct ui_rect clip, struct ui_rect bar,
     struct ui_rect body = intersection(clip, (struct ui_rect){
         x, y + top->height, top->width, end - y - top->height });
     for (int row = y + top->height; row < end; row += middle)
-        stock_art_draw(STOCK_ART_SYSTEM_SCROLLBARCENTER, x, row, body);
-    stock_art_draw(STOCK_ART_SYSTEM_SCROLLBARTOP, x, y, clip);
-    stock_art_draw(STOCK_ART_SYSTEM_SCROLLBARBOTTOM, x, end, clip);
+        draw_art_faded(STOCK_ART_SYSTEM_SCROLLBARCENTER, x, row, body, level);
+    draw_art_faded(STOCK_ART_SYSTEM_SCROLLBARTOP, x, y, clip, level);
+    draw_art_faded(STOCK_ART_SYSTEM_SCROLLBARBOTTOM, x, end, clip, level);
 }
 
 /* The stock indicator: no track, a translucent foreground thumb with rounded
@@ -1269,11 +1375,11 @@ static void paint_art_scrollbar(struct ui_rect clip, struct ui_rect bar,
  * of `items`, in any unit. */
 static void paint_classic_scrollbar(struct native_list *render,
                                     struct ui_rect clip, struct ui_rect bar,
-                                    int items, int first, int last)
+                                    int items, int first, int last, int level)
 {
     if (ui_theme_art(&render->theme))
     {
-        paint_art_scrollbar(clip, bar, items, first, last);
+        paint_art_scrollbar(clip, bar, items, first, last, level);
         return;
     }
     struct ui_rect track = { bar.x + 1, bar.y + 3, bar.width - 2,
@@ -1307,25 +1413,27 @@ static void paint_classic_scrollbar(struct native_list *render,
     unsigned int rim = render->colors[UI_COLOR_BACKGROUND];
     unsigned int ink = render->colors[UI_COLOR_FOREGROUND];
     int x = thumb.x, y = thumb.y, w = thumb.width, h = thumb.height;
-    blend(clip, (struct ui_rect){ x - 1, y - 1, w + 2, 1 }, rim, 2);
-    blend(clip, (struct ui_rect){ x - 1, y + h, w + 2, 1 }, rim, 2);
-    blend(clip, (struct ui_rect){ x - 1, y, 1, h }, rim, 2);
-    blend(clip, (struct ui_rect){ x + w, y, 1, h }, rim, 2);
+    unsigned edge_opacity = faded(2, level);
+    blend(clip, (struct ui_rect){ x - 1, y - 1, w + 2, 1 }, rim, edge_opacity);
+    blend(clip, (struct ui_rect){ x - 1, y + h, w + 2, 1 }, rim, edge_opacity);
+    blend(clip, (struct ui_rect){ x - 1, y, 1, h }, rim, edge_opacity);
+    blend(clip, (struct ui_rect){ x + w, y, 1, h }, rim, edge_opacity);
     /* The two rows at each end fade towards the corners. */
     static const uint8_t corner[2] = { 1, 4 }, middle[2] = { 5, 7 };
     for (int edge = 0; edge < 2 && 2 * edge < h; ++edge)
         for (int end = 0; end < 2; ++end)
         {
             int row = end ? y + h - 1 - edge : y + edge;
-            blend(clip, (struct ui_rect){ x, row, 1, 1 }, ink, corner[edge]);
+            blend(clip, (struct ui_rect){ x, row, 1, 1 }, ink,
+                  faded(corner[edge], level));
             blend(clip, (struct ui_rect){ x + w - 1, row, 1, 1 }, ink,
-                  corner[edge]);
+                  faded(corner[edge], level));
             blend(clip, (struct ui_rect){ x + 1, row, w - 2, 1 }, ink,
-                  middle[edge]);
+                  faded(middle[edge], level));
             if (2 * edge + 1 == h)
                 break;
         }
-    blend(clip, (struct ui_rect){ x, y + 2, w, h - 4 }, ink, 7);
+    blend(clip, (struct ui_rect){ x, y + 2, w, h - 4 }, ink, faded(7, level));
 }
 
 static void paint_rows(const struct ui_view *view, const struct ui_view_frame *frame)
@@ -1334,8 +1442,9 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
     struct gui_synclist *list = render->owner;
     int pitch = row_pitch(list, SCREEN_MAIN, render->theme.metric);
     int visible = frame->bounds.height / pitch;
+    int spare = row_spare(&render->theme, frame->bounds.height, pitch);
     struct ui_rect content = frame->bounds;
-    content.height = visible * pitch;
+    content.height = visible * pitch + spare;
     struct ui_rect clip = intersection(frame->clip, content);
     if (clip.width <= 0 || clip.height <= 0)
         return;
@@ -1344,20 +1453,21 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
     int end = MIN(frame->scroll_offset + visible + (render->row_shift != 0),
                   list->nb_items);
     struct ui_rect row = content;
-    row.y += render->row_shift + (first - frame->scroll_offset) * pitch;
-    row.height = pitch;
+    int rows_top = content.y + render->row_shift;
     int bar_width = scrollbar_width(list, frame->bounds, visible);
-    if (scrollbar_left(render, list))
+    /* The classic indicator lies over the rows for a moment after a move;
+     * the rows keep their width. */
+    bool overlay = classic_indicator(render);
+    int level = overlay && bar_width ? render->indicator : 0;
+    if (!overlay && scrollbar_left(render, list))
         row.x += bar_width;
-    row.width -= bar_width;
-    render->row_inset = scrollbar_left(render, list) ? 0 : bar_width;
+    if (!overlay)
+        row.width -= bar_width;
+    render->row_inset = overlay || scrollbar_left(render, list) ? 0 : bar_width;
 
-    /* The classic indicator lies over the bar; row content keeps clear. */
-    bool overlay =
-        render->theme.style[UI_STYLE_SCROLLBAR] == UI_SCROLLBAR_CLASSIC;
     struct ui_rect highlight = {overlay ? content.x : row.x, render->cursor_y,
                                 overlay ? content.width : row.width,
-                                pitch * list->selected_size};
+                                render->cursor_height};
     if (list->selection_color && list->nb_items)
         fill(clip, highlight, list->selection_color->line_color);
 
@@ -1387,8 +1497,11 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
         nbands = 3;
     }
 
-    for (int item = first; item < end; ++item, row.y += pitch)
+    for (int item = first; item < end; ++item)
     {
+        int slot = item - frame->scroll_offset;
+        row.y = rows_top + slot_y(slot, pitch, spare);
+        row.height = slot_y(slot + 1, pitch, spare) - (row.y - rows_top);
         bool selected = item >= frame->selection && item - frame->selection < list->selected_size;
         for (int band = 0; band < nbands; ++band)
             if (intersection(row, bands[band]).height > 0)
@@ -1405,12 +1518,13 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
             if (item < 0 || item >= list->nb_items)
                 break;
             row.y = render->cursor_y + line * pitch;
+            row.height = pitch;
             if (intersection(row, clip).height > 0)
                 paint_row(render, clip, row, item, true, true, true);
         }
     }
 
-    if (bar_width)
+    if (bar_width && (!overlay || level))
     {
         int bar_x = scrollbar_left(render, list) ? frame->bounds.x :
                     frame->bounds.x + frame->bounds.width - bar_width;
@@ -1425,7 +1539,7 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
             int start = frame->scroll_offset * units - render->row_shift * units / pitch;
             if (overlay)
                 paint_classic_scrollbar(render, clip, bar, list->nb_items * units,
-                                        start, start + visible * units);
+                                        start, start + visible * units, level);
             else
             {
                 struct viewport *prior = lcd_set_viewport(&vp);
@@ -2005,8 +2119,21 @@ static bool update_row_pose(struct native_list *render, const struct list_geomet
         --first;
         fraction += ROW_UNIT;
     }
+    int spare = row_spare(&render->theme, g->rows.height, g->pitch);
+    int64_t cursor = pose.cursor - pose.top;
     render->row_shift = -fraction * g->pitch / ROW_UNIT;
-    render->cursor_y = g->rows.y + (pose.cursor - pose.top) * g->pitch / ROW_UNIT;
+    render->cursor_y = g->rows.y + cursor * g->pitch / ROW_UNIT;
+    render->cursor_height = g->pitch * render->owner->selected_size;
+    if (spare && cursor >= 0)
+    {
+        int slot = cursor / ROW_UNIT;
+        int top = slot_y(slot, g->pitch, spare);
+        int height = slot_y(slot + 1, g->pitch, spare) - top;
+        render->cursor_y = g->rows.y + top +
+                           (cursor % ROW_UNIT) * height / ROW_UNIT;
+        render->cursor_height = slot_y(slot + render->owner->selected_size,
+                                       g->pitch, spare) - top;
+    }
     render->rows.value[UI_SCROLL_OFFSET] = first;
     render->rows.value[UI_SELECTION] = (pose.cursor + HALF_ROW) / ROW_UNIT;
     return finished;
@@ -2047,16 +2174,18 @@ static bool marker_damage(const struct native_list *render,
         !marquee_resting(render))
         return false;
 
-    int height = g->pitch * list->selected_size;
+    /* The tallest run of selected_size rows. */
+    int spare = row_spare(&render->theme, g->rows.height, g->pitch);
+    int height = slot_y(list->selected_size, g->pitch, spare);
     struct ui_rect band = { g->rows.x, MIN(shown->cursor_y, render->cursor_y),
                             g->rows.width, 0 };
     band.height = MAX(shown->cursor_y, render->cursor_y) + height - band.y;
     if (lit != shown->lit)
     {
         struct ui_rect row = { g->rows.x, 0, g->rows.width, height };
-        row.y = g->rows.y + (shown->lit - top) * g->pitch;
+        row.y = g->rows.y + slot_y(shown->lit - top, g->pitch, spare);
         band = bounding(band, row);
-        row.y = g->rows.y + (lit - top) * g->pitch;
+        row.y = g->rows.y + slot_y(lit - top, g->pitch, spare);
         band = bounding(band, row);
     }
     else if (shown->cursor_y == render->cursor_y)
@@ -2069,6 +2198,13 @@ static bool marker_damage(const struct native_list *render,
     *damage = intersection(band, g->rows);
     if (damage->width <= 0 || damage->height <= 0)
         *damage = (struct ui_rect){0};
+    if (render->indicator != shown->indicator)
+    {
+        int width = scrollbar_width(list, g->rows, g->rows.height / g->pitch);
+        struct ui_rect bar = { g->rows.x + g->rows.width - width, g->rows.y,
+                               width, g->rows.height };
+        *damage = damage->width > 0 ? bounding(*damage, bar) : bar;
+    }
     return true;
 }
 
@@ -2205,6 +2341,9 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     render->page.focus = &render->rows;
     render->page.damage = split && !keep_pane ?
         (struct ui_rect){0, 0, LCD_WIDTH, LCD_HEIGHT} : g.background;
+    int bar_width = scrollbar_width(list, g.rows, g.rows.height / g.pitch);
+    render->indicator = classic_indicator(render) && bar_width ?
+                        indicator_level(render) : 0;
     /* A split menu's pane follows the selection, so only a frame that
      * keeps the pane may shrink to the marker's path. */
     bool partial = moved && !status_only && !show_index &&
@@ -2214,7 +2353,6 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     {
         int width = render->theme.metric[UI_METRIC_LIST_ICON_SIZE] +
                     render->theme.metric[UI_METRIC_LIST_ICON_MARGIN];
-        int bar_width = scrollbar_width(list, g.rows, g.rows.height / g.pitch);
         int left = g.rows.x + (scrollbar_left(render, list) ? bar_width : 0);
         int x = VP_IS_RTL(list->parent[SCREEN_MAIN]) ?
                 left + g.rows.width - bar_width - width : left;
@@ -2251,6 +2389,7 @@ static void draw_list(struct gui_synclist *list, bool status_only,
             .palette = render->palette_generation,
             .art = render->art_generation, .art_handle = render->art_handle,
             .font = render->font_epoch, .artist = render->artist_generation,
+            .indicator = render->indicator,
             .valid = !show_index && !gui_synclist_flush_inhibited(),
         };
     }
@@ -2404,6 +2543,19 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
             int tick = 1000000 / HZ;
             int ticks = frame / frames != render->marquee_frame / frames ?
                         0 : (ui_frame_clock(frames) + tick - 1) / tick;
+            if (delay == TIMEOUT_BLOCK || ticks < delay)
+                delay = ticks;
+        }
+        if (render->shown.valid && render->shown.indicator > 0)
+        {
+            uint32_t elapsed = now - render->marquee_started;
+            uint32_t next = INDICATOR_HOLD + INDICATOR_STEP_US;
+            if (elapsed >= INDICATOR_HOLD)
+                next += (elapsed - INDICATOR_HOLD) / INDICATOR_STEP_US *
+                        INDICATOR_STEP_US;
+            int tick = 1000000 / HZ;
+            int ticks = indicator_level(render) != render->shown.indicator ?
+                        0 : (int)((next - elapsed + tick - 1) / tick);
             if (delay == TIMEOUT_BLOCK || ticks < delay)
                 delay = ticks;
         }

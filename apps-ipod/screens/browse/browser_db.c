@@ -78,6 +78,7 @@
 #include "playlist/playlist.h"
 #include "widgets/keyboard.h"
 #include "widgets/list.h"
+#include "widgets/list_quickscroll.h"
 #include "core_alloc.h"
 #include "widgets/yesno.h"
 #include "system/activity.h"
@@ -1249,6 +1250,11 @@ static bool parse_search(struct menu_entry *entry, const char *str)
  * names compare as written. */
 static int sort_prefix;
 static bool sort_prefix_inverse;
+/* The loaded list is in the order of its names past The/A/An, which its
+ * letter jump then follows. */
+static bool index_sort_names;
+/* The loaded list is of genres, which stock gives no letter jump. */
+static bool index_genres;
 
 /* Whether a row's name, past its 'prefix' sort key, is [Untagged]. */
 static bool name_is_untagged(const char *name, int prefix)
@@ -3593,6 +3599,8 @@ entry_skip_formatter:
         total_count--;
     }
 
+    index_sort_names = false;
+    index_genres = tag == tag_genre;
     if (sort)
     {
         /* A list sorted only to move The/A/An compares as the database
@@ -3607,6 +3615,7 @@ entry_skip_formatter:
         if (tagcache_tag_skips_articles(tag) && strip == order_prefix)
             sort_prefix = order_prefix;
         sort_prefix_inverse = sort_inverse;
+        index_sort_names = sort_prefix == 0 && global_settings.sort_ignore_articles;
 
         struct tagentry *entries = get_entries(c);
         qsort(&entries[c->special_entry_count],
@@ -6803,6 +6812,11 @@ bool browser_db_index_key(struct browser_context *c, int id, char *buf, size_t s
     buf[0] = '\0';
     if (c->currtable == TABLE_ROOT)
         return false;
+    if (index_genres)
+    {
+        strlcpy(buf, QUICKSCROLL_NONE, size);
+        return true;
+    }
     if (browser_db_get_entry_kind(c, id) == LIST_ROW_TRACK &&
         browser_db_album_header(c, &header))
     {
@@ -6813,7 +6827,15 @@ bool browser_db_index_key(struct browser_context *c, int id, char *buf, size_t s
         return true;
     }
     if (!year_sort || !album_years_valid)
-        return false;
+    {
+        if (!index_sort_names)
+            return false;
+        char *name = browser_db_get_entry_name(c, id, buf, size);
+        if (name != buf)
+            return false;
+        quickscroll_key_of(tagcache_sort_name(buf), buf);
+        return true;
+    }
     realid = id - current_offset;
     if (realid < 0 || realid >= current_entry_count)
         return false;

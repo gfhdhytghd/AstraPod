@@ -114,6 +114,7 @@ widgets/edit_line.c
 widgets/keyboard.c
 widgets/list.c
 widgets/list_hwscroll.c
+widgets/list_quickscroll.c
 widgets/list_render.c
 widgets/list_select.c
 widgets/menu.c

@@ -47,6 +47,7 @@
 #include "ui/scene.h"
 #include "list_hwscroll.h"
 #include "list_select.h"
+#include "list_quickscroll.h"
 
 struct list_geometry {
     struct ui_rect background, title, header, rows, notes;
@@ -59,10 +60,14 @@ enum {
     ROW_UNIT = 256,
     HALF_ROW = ROW_UNIT / 2,
     MAX_WHEEL_LAG = 3 * ROW_UNIT,
-    INDEX_MIN_ITEMS = 51,
-    INDEX_WINDOW_F = 10,
-    INDEX_TRIGGER = 8,
-    INDEX_SAMPLES = 12,
+    /* Stock's overlay tile, and its letter's baseline on it. */
+    INDEX_TILE_WIDTH = 74,
+    INDEX_TILE_HEIGHT = 70,
+    INDEX_TEXT_BASELINE = 51,
+    INDEX_PRELOAD_ROWS = 50,
+    INDEX_GLYPHS = 40,
+    INDEX_NEAR = 4,
+    INDEX_PREFETCH_ROWS = 12,
     INDEX_SCRIM_RETAIN = 56,  /* 78% dim */
     INDEX_BORDER_RETAIN = 225, /* 12% white */
 };
@@ -91,12 +96,13 @@ struct gradient_rows {
     int height;
 };
 
+/* The wheel's letter jump for one list, and its overlay. */
 struct list_index {
-    char key[16];
-    uint32_t samples_at[INDEX_SAMPLES];
-    int selections[INDEX_SAMPLES];
-    int samples, last_sel;
-    bool visible, swallow_menu;
+    struct quickscroll qs;
+    const struct gui_synclist *list;
+    unsigned generation;
+    char key[QUICKSCROLL_KEY_SIZE];
+    bool visible;
 };
 
 /* What the last paint left on screen, to tell a frame in which only the
@@ -131,8 +137,8 @@ struct native_list {
     struct list_motion motion;
     struct list_shown shown;
     struct list_index overlay;
-    int index_font, index_width, index_faces[2];
-    char index_font_key[sizeof(((struct list_index *)0)->key)];
+    int index_faces[3];
+    char index_shown[QUICKSCROLL_KEY_SIZE];
     /* Row and notes painters run serially while the renderer is pinned. */
     union {
         struct {
@@ -166,9 +172,8 @@ void list_render_init(void)
     {
         struct native_list *render = core_get_data_pinned(renderer_handle);
         memset(render, 0, sizeof(*render));
-        render->overlay.last_sel = -1;
-        render->index_font = FONT_SYSFIXED;
-        render->index_faces[0] = render->index_faces[1] = -1;
+        for (unsigned i = 0; i < ARRAYLEN(render->index_faces); i++)
+            render->index_faces[i] = -1;
         render->text_font = render->title_font = render->icon_font = -1;
         render->value_font = -1;
         render->theme_generation = (unsigned)-1;
@@ -1464,6 +1469,12 @@ static void paint_classic_scrollbar(struct native_list *render,
     blend(clip, (struct ui_rect){ x, y + 2, w, h - 4 }, ink, faded(7, level));
 }
 
+/* Whether the list shows stock's letter tile: the themes with stock's look. */
+static bool stock_index(const struct native_list *render)
+{
+    return render->theme.style[UI_STYLE_WPS_LAYOUT] == UI_WPS_LAYOUT_CLASSIC;
+}
+
 static void paint_rows(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     struct native_list *render = view->data;
@@ -1493,10 +1504,12 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
         row.width -= bar_width;
     render->row_inset = overlay || scrollbar_left(render, list) ? 0 : bar_width;
 
+    /* Stock hides the selection while its letter tile shows. */
+    bool unlit = render->overlay.visible && stock_index(render);
     struct ui_rect highlight = {overlay ? content.x : row.x, render->cursor_y,
                                 overlay ? content.width : row.width,
                                 render->cursor_height};
-    if (list->selection_color && list->nb_items)
+    if (list->selection_color && list->nb_items && !unlit)
         fill(clip, highlight, list->selection_color->line_color);
 
     bool selection_bar =
@@ -1506,7 +1519,8 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
      * the bar covers takes selected text, so the text follows a moving bar. */
     struct ui_rect bands[3] = { clip };
     int nbands = 1;
-    if (selection_bar && frame->selection >= 0 && frame->selection < list->nb_items)
+    if (selection_bar && !unlit && frame->selection >= 0 &&
+        frame->selection < list->nb_items)
     {
         const struct ui_theme_gradient *gradient =
             &render->theme.gradient[UI_GRADIENT_SELECTION];
@@ -1530,7 +1544,8 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
         int slot = item - frame->scroll_offset;
         row.y = rows_top + slot_y(slot, pitch, spare);
         row.height = slot_y(slot + 1, pitch, spare) - (row.y - rows_top);
-        bool selected = item >= frame->selection && item - frame->selection < list->selected_size;
+        bool selected = !unlit && item >= frame->selection &&
+                        item - frame->selection < list->selected_size;
         for (int band = 0; band < nbands; ++band)
             if (intersection(row, bands[band]).height > 0)
                 paint_row(render, bands[band], row, item, selected,
@@ -1538,7 +1553,8 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
     }
 
     /* The bar can be half visible even if its corresponding text is clipped. */
-    if (!selection_bar && !list->selection_color && !list->callback_draw_item)
+    if (!selection_bar && !list->selection_color && !list->callback_draw_item &&
+        !unlit)
     {
         for (int line = 0; line < list->selected_size; ++line)
         {
@@ -1692,240 +1708,171 @@ static void paint_notes(const struct ui_view *view, const struct ui_view_frame *
     lcd_set_viewport(prior);
 }
 
-static void index_from_text(const char *text, char *out, size_t n)
+/* A row's key: the list's own when it has one (a year, a track number, or
+ * a letter its sort chose), otherwise stock's key of the row's name. */
+static void row_key(int item, char *key, void *ctx)
 {
-    ucschar_t ch = 0;
-
-    out[0] = '\0';
-    if (!text || n < 2)
-        return;
-    while (*text == ' ')
-        text++;
-    utf8decode((const unsigned char *)text, &ch);
-    if (!ch)
-        return;
-    if (ch < 128)
-    {
-        if (islower((int)ch))
-            ch = (ucschar_t)toupper((int)ch);
-        out[0] = (ch >= 'A' && ch <= 'Z') ? (char)ch : '#';
-        out[1] = '\0';
-        return;
-    }
-    *utf8encode(ch, (unsigned char *)out) = '\0';
-}
-
-static bool index_touched(void)
-{
-#if defined(IPOD_6G) && !defined(SIMULATOR)
-    return wheel_status() >= 0;
-#else
-    return true;
-#endif
-}
-
-static void index_key(struct gui_synclist *list, int item, char *out, size_t n)
-{
+    struct gui_synclist *list = ctx;
     char name[MAX_PATH];
-    const unsigned char *label;
-    const char *text;
 
-    out[0] = '\0';
-    if (!list || item < 0 || item >= list->nb_items)
+    if (item < 0 || item >= list->nb_items)
         return;
     if (list->callback_get_index_key)
     {
-        const char *key = list->callback_get_index_key(item,
-                              list->data, name, sizeof(name));
-        if (key && *key)
+        const char *own = list->callback_get_index_key(item, list->data, name,
+                                                       sizeof(name));
+        if (own && *own)
         {
-            snprintf(out, n, "%s", key);
+            strlcpy(key, own, QUICKSCROLL_KEY_SIZE);
             return;
         }
     }
     if (!list->callback_get_item_name)
         return;
-    label = (const unsigned char *)list->callback_get_item_name(
-        item, list->data, name, sizeof(name));
-    text = label && P2ID(label) <= VOICEONLY_DELIMITER ?
-           (const char *)P2STR(label) : "";
-    index_from_text(text, out, n);
+    const unsigned char *label = (const unsigned char *)
+        list->callback_get_item_name(item, list->data, name, sizeof(name));
+    quickscroll_key_of(label && P2ID(label) <= VOICEONLY_DELIMITER ?
+                       (const char *)P2STR(label) : "", key);
 }
 
-static void index_sample(struct list_index *index, int selection, uint32_t now)
+#if !defined(IPOD_6G) || defined(SIMULATOR)
+static uint32_t index_wheel_at;
+#endif
+
+/* Whether a finger is on the wheel. A wheel with no touch sensor counts as
+ * touched for half a second after each notch. */
+static bool index_touched(void)
 {
-    if (index->samples == INDEX_SAMPLES)
-    {
-        memmove(index->samples_at, index->samples_at + 1,
-                (INDEX_SAMPLES - 1) * sizeof(index->samples_at[0]));
-        memmove(index->selections, index->selections + 1,
-                (INDEX_SAMPLES - 1) * sizeof(index->selections[0]));
-        index->samples--;
-    }
-    index->samples_at[index->samples] = now;
-    index->selections[index->samples++] = selection;
+#if defined(IPOD_6G) && !defined(SIMULATOR)
+    return wheel_status() >= 0;
+#else
+    return USEC_TIMER - index_wheel_at < 500000;
+#endif
+}
+
+static struct quickscroll_list index_rows(struct native_list *render,
+                                          struct gui_synclist *list)
+{
+    return (struct quickscroll_list){
+        .count = list->nb_items, .selected = list->selected_item,
+        .row_height = row_pitch(list, SCREEN_MAIN, render->theme.metric) *
+                      MAX(1, list->selected_size),
+        .key = row_key, .ctx = list,
+    };
 }
 
 static void index_release_fonts(struct native_list *render);
 
-static void index_close(struct native_list *render)
+/* A list's wheel state lasts while its contents do, as each stock screen
+ * keeps its own. */
+static void index_own(struct native_list *render, struct gui_synclist *list)
 {
     struct list_index *index = &render->overlay;
+    if (index->list == list && index->generation == list->generation)
+        return;
+    quickscroll_reset(&index->qs);
+    index->list = list;
+    index->generation = list->generation;
     index->visible = false;
-    index->samples = 0;
-    index->last_sel = render->owner->selected_item;
-    index_release_fonts(render);
+    index->key[0] = '\0';
+    render->index_shown[0] = '\0';
 }
 
-static int index_first(struct gui_synclist *list, int item, const char *key)
+static void index_refresh(struct native_list *render, struct gui_synclist *list)
 {
-    while (item > 0)
-    {
-        char prior[sizeof(((struct list_index *)0)->key)];
-        index_key(list, item - 1, prior, sizeof(prior));
-        if (strcmp(prior, key))
-            break;
-        item--;
-    }
-    return item;
-}
-
-static int index_step(struct gui_synclist *list, int item, int direction,
-                      const char *key, char *next)
-{
-    for (int i = item + direction; i >= 0 && i < list->nb_items; i += direction)
-    {
-        index_key(list, i, next, sizeof(((struct list_index *)0)->key));
-        if (*next && strcmp(key, next))
-            return direction > 0 ? i : index_first(list, i, next);
-    }
-    return item;
-}
-
-bool list_render_index_action(struct gui_synclist *list, int *action,
-                              bool wheel, int steps)
-{
-    if (renderer_handle <= 0)
-        return false;
-    struct native_list *render = core_get_data_pinned(renderer_handle);
     struct list_index *index = &render->overlay;
-    bool handled = false, redraw = false;
-    if (!motion_owner(render, list))
-        goto done;
+    struct quickscroll_list rows = index_rows(render, list);
+    index->visible = quickscroll_overlay(&index->qs, &rows, index->key);
+    if (!index->visible)
+        render->index_shown[0] = '\0';
+}
 
-    int button;
-    get_action_statuscode(&button);
-    bool menu = *action == ACTION_STD_MENU;
-#ifdef BUTTON_MENU
-    menu |= *action == ACTION_STD_CANCEL && (button & BUTTON_MENU);
-#endif
-    if (menu && (index->visible || index->swallow_menu))
+/* Asks for the text of the groups either side of the selection, so the
+ * next jump draws its rows on the frame it lands. */
+static void index_prefetch_groups(struct native_list *render,
+                                  struct gui_synclist *list,
+                                  struct quickscroll_list *rows)
+{
+    int font = render->text_font >= 0 ? render->text_font :
+                                        list->parent[SCREEN_MAIN]->font;
+    if (!list->callback_get_item_name)
+        return;
+    for (int d = -1; d <= 1; d += 2)
     {
-        index->swallow_menu = false;
-        index_close(render);
-        *action = ACTION_NONE;
-        handled = redraw = true;
-    }
-    else if (index->visible && *action == ACTION_STD_OK)
-    {
-        index_close(render);
-        redraw = true;
-    }
-    else if (index->visible && !index_touched())
-    {
-#ifdef BUTTON_MENU
-        index->swallow_menu = (button_status() & BUTTON_MENU) != 0;
-#endif
-        index_close(render);
-        redraw = true;
-    }
-    else if (index->visible && wheel)
-    {
-        int direction = 0;
-        if (*action == ACTION_STD_NEXT || *action == ACTION_STD_NEXTREPEAT)
-            direction = 1;
-        else if (*action == ACTION_STD_PREV || *action == ACTION_STD_PREVREPEAT)
-            direction = -1;
-        if (direction)
+        int start = quickscroll_group(rows, list->selected_item, d);
+        int end = MIN(list->nb_items, start + INDEX_PREFETCH_ROWS);
+        for (int i = start; i < end; i++)
         {
-            int item = list->selected_item;
-            for (int n = 0; n < steps; n++)
-            {
-                char next[sizeof(index->key)];
-                int candidate = index_step(list, item, direction, index->key, next);
-                if (candidate == item)
-                    break;
-                item = candidate;
-                strcpy(index->key, next);
-            }
-            motion_stop(&render->motion);
-            gui_synclist_select_item(list, item);
-            index->last_sel = item;
-            *action = direction > 0 ? ACTION_STD_NEXT : ACTION_STD_PREV;
-            handled = redraw = true;
+            const unsigned char *label = (const unsigned char *)
+                list->callback_get_item_name(i, list->data,
+                                             render->scratch.row.name,
+                                             sizeof(render->scratch.row.name));
+            if (label && P2ID(label) <= VOICEONLY_DELIMITER)
+                font_prefetch_text(font, P2STR(label));
         }
     }
-done:
+}
+
+bool list_render_wheel(struct gui_synclist *list, int positions, int *rows)
+{
+    *rows = 0;
+    if (renderer_handle <= 0)
+    {
+        *rows = positions / 4;
+        return false;
+    }
+    struct native_list *render = core_get_data_pinned(renderer_handle);
+    struct list_index *index = &render->overlay;
+    refresh_tokens(render);
+    index_own(render, list);
+    uint32_t now = USEC_TIMER;
+#if !defined(IPOD_6G) || defined(SIMULATOR)
+    index_wheel_at = now;
+#endif
+    struct quickscroll_list in = index_rows(render, list);
+    /* The wheel reports each position it passes at the speeds where
+     * stock's thresholds lie, so each is a report. */
+    quickscroll_moved(&index->qs, now, abs(positions));
+    struct quickscroll_move move = quickscroll_wheel(&index->qs, &in, now,
+                                                     positions, index_touched());
+    bool handled = !move.rows && (index->qs.mode || move.jumped);
+    *rows = move.rows;
+    if (handled)
+    {
+        motion_stop(&render->motion);
+        gui_synclist_select_item(list, move.selected);
+        if (move.jumped)
+        {
+            gui_synclist_set_top_item(list, move.selected);
+            in.selected = move.selected;
+            index_prefetch_groups(render, list, &in);
+        }
+    }
+    index_refresh(render, list);
     core_put_data_pinned(render);
-    if (redraw)
+    if (handled)
         gui_synclist_draw(list);
     return handled;
 }
 
+static int index_face(struct native_list *render, int i);
+
+/* The overlay of the list being drawn: it closes when the finger leaves
+ * the wheel. A list long enough to jump has its face loaded ahead, as a
+ * jump needs more than a second of spinning first. */
 static bool step_index(struct native_list *render)
 {
     struct gui_synclist *list = render->owner;
     struct list_index *index = &render->overlay;
-    if (!list || list->nb_items < INDEX_MIN_ITEMS)
+    index_own(render, list);
+    if (list->nb_items >= INDEX_PRELOAD_ROWS)
+        index_face(render, stock_index(render) ? 2 : 0);
+    if (index->qs.mode && !index_touched())
     {
-        index_release_fonts(render);
-        memset(index, 0, sizeof(*index));
-        index->last_sel = -1;
-        return false;
+        quickscroll_release(&index->qs);
+        index_refresh(render, list);
     }
-
-    if (!index_touched())
-    {
-        if (index->visible)
-        {
-#ifdef BUTTON_MENU
-            index->swallow_menu = (button_status() & BUTTON_MENU) != 0;
-#endif
-            index_close(render);
-        }
-        else
-        {
-            index->samples = 0;
-            index->last_sel = list->selected_item;
-        }
-        return false;
-    }
-    if (index->visible)
-        return true;
-
-    uint32_t now = USEC_TIMER;
-    /* A gesture window, in real time at the authored rate. */
-    uint32_t window = INDEX_WINDOW_F * 1000000 / UI_ANIM_FPS;
-    int selection = list->selected_item;
-    if (selection != index->last_sel && index->last_sel >= 0)
-        index_sample(index, index->last_sel, now);
-    index->last_sel = selection;
-    for (int i = index->samples - 1; i >= 0; i--)
-    {
-        if (now - index->samples_at[i] >= window)
-            break;
-        if (abs(selection - index->selections[i]) >= INDEX_TRIGGER)
-        {
-            index_key(list, selection, index->key, sizeof(index->key));
-            if (*index->key)
-                gui_synclist_select_item(list, index_first(list, selection, index->key));
-            motion_stop(&render->motion);
-            index->last_sel = list->selected_item;
-            index->visible = true;
-            return true;
-        }
-    }
-    return false;
+    return index->visible;
 }
 
 static void index_release_fonts(struct native_list *render)
@@ -1935,86 +1882,130 @@ static void index_release_fonts(struct native_list *render)
         font_unload(render->index_faces[i]);
         render->index_faces[i] = -1;
     }
-    render->index_font = FONT_SYSFIXED;
-    render->index_font_key[0] = '\0';
+    render->index_shown[0] = '\0';
 }
 
-static bool index_font_has_key(int id, const unsigned char *text)
-{
-    font_lock(id, true);
-    struct font *font = font_get(id);
-    bool covered = true;
-    while (*text && covered)
-    {
-        ucschar_t ch;
-        text = utf8decode(text, &ch);
-        covered = font_has_glyph(font, ch);
-    }
-    font_lock(id, false);
-    return covered;
-}
-
-static int index_find_font(struct native_list *render, const unsigned char *text,
-                           int max_width)
+/* The overlay's faces: Scrim's letters, its figures for longer labels, and
+ * stock's letters. */
+static int index_face(struct native_list *render, int i)
 {
     static const char *const paths[] = {
         FONT_DIR "/56-podbox-index.pbf", FONT_DIR "/30-noto-serif-figures.pbf",
+        FONT_DIR "/46-helvetica-bold-index.pbf",
     };
-    for (unsigned i = 0; i < ARRAYLEN(paths); i++)
-    {
-        int id = render->index_faces[i];
-        if (id < 0)
-            id = render->index_faces[i] = font_load_ex(paths[i], 0, sizeof(render->overlay.key));
-        if (id < 0)
-            continue;
-        if (!list_text_ready(id, (const char *)text))
-        {
-            /* Retain the new face while its key is loading. The epoch
-             * invalidates the key, so readiness is checked again. */
-            render->index_width = 0;
-            return id;
-        }
-        if (index_font_has_key(id, text))
-        {
-            int width = font_getstringsize(text, NULL, NULL, id);
-            if (width <= max_width || i == ARRAYLEN(paths) - 1)
-            {
-                render->index_width = width;
-                return id;
-            }
-        }
-    }
-    return FONT_UI;
+    if (render->index_faces[i] < 0)
+        render->index_faces[i] = font_load_ex(paths[i], 0, INDEX_GLYPHS);
+    return render->index_faces[i];
 }
 
+/* Loads the keys either side of `key` ahead of the wheel, so the next letter
+ * shows on the frame it is due. A 56 px face's cache holds about 20 of its
+ * letters, not the whole alphabet. */
+static void index_near(int font, const char *key, const char *order)
+{
+    const char *at = key[0] && !key[1] ? strchr(order, key[0]) : NULL;
+    if (!at)
+        return;
+    char near[2 * INDEX_NEAR + 2];
+    const char *from = MAX(order, at - INDEX_NEAR);
+    strlcpy(near, from, MIN(sizeof(near), (size_t)(at - from) + INDEX_NEAR + 2));
+    list_text_ready(font, near);
+}
+
+/* Whether stock shows its "123" for `key`: digits, symbols, and a year or
+ * track number of the list's own. */
+static bool index_digits(const char *key)
+{
+    return isdigit((unsigned char)key[0]) || !strcmp(key, QUICKSCROLL_DIGITS);
+}
+
+/* The key the overlay draws: the new one once its glyphs are ready, until
+ * then the one before, so a change of key never shows an empty box. */
+static const char *index_text(struct native_list *render, int font, bool ready,
+                              const char *order)
+{
+    const char *key = render->overlay.key;
+    if (strcmp(render->index_shown, key) &&
+        (ready || list_text_ready(font, key)))
+        strlcpy(render->index_shown, key, sizeof(render->index_shown));
+    index_near(font, key, order);
+    return render->index_shown;
+}
+
+/* Stock's overlay: its tile centred across the list and down the screen,
+ * and on it the letter in white, or for digits and symbols its "123". */
+static void paint_stock_index(struct native_list *render,
+                              const struct ui_view_frame *frame)
+{
+    struct ui_rect tile = {
+        frame->bounds.x + (frame->bounds.width - INDEX_TILE_WIDTH) / 2,
+        (LCD_HEIGHT - INDEX_TILE_HEIGHT) / 2,
+        INDEX_TILE_WIDTH, INDEX_TILE_HEIGHT,
+    };
+    struct ui_rect clip = intersection(frame->clip, tile);
+    if (clip.width <= 0 || clip.height <= 0)
+        return;
+    int font = index_face(render, 2);
+    if (font < 0)
+        font = FONT_UI;
+    const char *text = index_text(render, font,
+                                  index_digits(render->overlay.key),
+                                  "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    if (!*text)
+        return;
+    stock_art_draw(STOCK_ART_SYSTEM_QUICKSCROLL, tile.x, tile.y, clip);
+    if (index_digits(text))
+    {
+        stock_art_draw_mask(STOCK_ART_SYSTEM_QUICKSCROLL_123, tile.x, tile.y,
+                            0xffffff, clip);
+        return;
+    }
+    struct viewport vp;
+    if (!set_clip(&vp, frame->clip, tile, font, LCD_WHITE))
+        return;
+    struct viewport *prior = lcd_set_viewport(&vp);
+    int width = font_getstringsize((const unsigned char *)text, NULL, NULL, font);
+    /* Stock rounds the odd half pixel of centring to the right. */
+    lcd_putsxy(tile.x - vp.x + (tile.width - width + 1) / 2,
+               tile.y - vp.y + INDEX_TEXT_BASELINE - font_get(font)->ascent,
+               (const unsigned char *)text);
+    lcd_set_viewport(prior);
+}
+
+/* A square twice the letter face's line height, dimmed, with a faint
+ * border, the same size for every key. */
 static void paint_index(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     struct native_list *render = view->data;
-    const unsigned char *text = (const unsigned char *)render->overlay.key;
-    if (!*text)
+    if (!render->overlay.key[0])
         return;
-    if (strcmp(render->index_font_key, render->overlay.key))
+    if (stock_index(render))
     {
-        int id = render->index_font = index_find_font(render, text, frame->bounds.width / 2);
-        strcpy(render->index_font_key, render->overlay.key);
-        if (id == FONT_UI)
-            render->index_width = font_getstringsize((const unsigned char *)"#", NULL, NULL, id);
+        paint_stock_index(render, frame);
+        return;
     }
 
-    int id = render->index_font;
-    if (!render->index_width)
+    int letters = index_face(render, 0);
+    int font = letters >= 0 ? letters : FONT_UI;
+    int height = font_get(font)->height;
+    int side = 2 * height;
+    const char *text = index_text(render, font, false,
+                                  "#ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    if (!*text)
         return;
-    if (id == FONT_UI)
-        text = (const unsigned char *)"#";
-    int width = render->index_width;
-    int height = font_get(id)->height;
-    struct ui_rect area = frame->bounds;
-    area.x += (area.width - 2 * width) / 2;
-    area.y += (area.height - 2 * height) / 2;
-    area.width = 2 * width;
-    area.height = 2 * height;
+    int width = font_getstringsize((const unsigned char *)text, NULL, NULL, font);
+    if (width > side - height / 2 && index_face(render, 1) >= 0)
+    {
+        font = render->index_faces[1];
+        width = font_getstringsize((const unsigned char *)text, NULL, NULL, font);
+    }
+    struct ui_rect area = {
+        frame->bounds.x + (frame->bounds.width - side) / 2,
+        frame->bounds.y + (frame->bounds.height - side) / 2,
+        side, side,
+    };
     struct viewport vp;
-    if (set_clip(&vp, frame->clip, area, id, LCD_WHITE))
+    if (set_clip(&vp, frame->clip, area, font, LCD_WHITE))
     {
         unsigned dim = render->colors[UI_COLOR_DIM];
         int right = vp.x + vp.width;
@@ -2035,9 +2026,9 @@ static void paint_index(const struct ui_view *view, const struct ui_view_frame *
         }
 
         struct viewport *prior = lcd_set_viewport(&vp);
-        int x = area.x - vp.x + width / 2;
-        int y = area.y - vp.y + height / 2;
-        lcd_putsxy(x, y, text);
+        lcd_putsxy(area.x - vp.x + (side - width) / 2,
+                   area.y - vp.y + (side - font_get(font)->height) / 2,
+                   (const unsigned char *)text);
         lcd_set_viewport(prior);
     }
 }
@@ -2461,7 +2452,6 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     unsigned epoch = font_prefetch_epoch();
     if (render->font_epoch != epoch)
     {
-        render->index_font_key[0] = '\0';
         render->font_epoch = epoch;
         status_only = false;
         /* The pane's text waited for the same glyphs. */
@@ -2471,12 +2461,9 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     {
         render->shown.valid = false;
         motion_stop(&render->motion);
-        index_release_fonts(render);
-        memset(&render->overlay, 0, sizeof(render->overlay));
-        render->overlay.last_sel = -1;
     }
     bool animate = render->motion.visible;
-    if (render->overlay.visible && !index_touched())
+    if (render->overlay.qs.mode && !index_touched())
         status_only = false;
     if (animate)
     {
@@ -2708,7 +2695,6 @@ void list_render_forget(const struct gui_synclist *list)
         motion_stop(&render->motion);
         index_release_fonts(render);
         memset(&render->overlay, 0, sizeof(render->overlay));
-        render->overlay.last_sel = -1;
         render->art_handle = -1;
         ui_layer_free(&render->backdrop);
     }
@@ -2808,7 +2794,7 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
             if (delay == TIMEOUT_BLOCK || ticks < delay)
                 delay = ticks;
         }
-        if (render->overlay.visible)
+        if (render->overlay.qs.mode)
         {
             int ticks = !index_touched() ? 0 : poll ? 1 : TIMEOUT_BLOCK;
             if (ticks != TIMEOUT_BLOCK && (delay == TIMEOUT_BLOCK || ticks < delay))

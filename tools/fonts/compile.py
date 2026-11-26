@@ -85,7 +85,7 @@ def lang_strings(lang_dir):
                 yield file.name, re.sub(r'\\(["\\])', r"\1", match[1])
 
 
-def required_codepoints(lang_dir, full=True):
+def required_codepoints(lang_dir):
     result = set(range(32, 127)) | set(range(0xA0, 0x180))
     result.update(map(ord, COVERAGE))
     result.add(REPLACEMENT)
@@ -99,18 +99,29 @@ def required_codepoints(lang_dir, full=True):
         result.update(map(ord, file.read_text(encoding="utf-8-sig")))
     # The firmware bidi path emits Arabic presentation forms.
     result.update(range(0xFE80, 0xFEFD))
-    if full:
-        result.update(range(0x202a, 0x202f))  # invisible directional formatting
-        ranges = (
-            (0x0370, 0x03e1), (0x03f0, 0x04ff),  # Greek and Cyrillic
-            (0x3000, 0x303f), (0x3040, 0x30ff), (0x3100, 0x312f),
-            (0x31a0, 0x31bb), (0x31f0, 0x31ff),  # Bopomofo and kana extensions
-            (0x3400, 0x4dbf), (0x4e00, 0x9fff), (0xac00, 0xd7a3),
-            (0xff00, 0xffef),
-        )
-        result.update(cp for start, end in ranges for cp in range(start, end + 1)
-                      if ud.category(chr(cp)) != "Cn")
+    result.update(range(0x202a, 0x202f))  # invisible directional formatting
+    ranges = (
+        (0x0370, 0x03e1), (0x03f0, 0x04ff),  # Greek and Cyrillic
+        (0x3000, 0x303f), (0x3040, 0x30ff), (0x3100, 0x312f),
+        (0x31a0, 0x31bb), (0x31f0, 0x31ff),  # Bopomofo and kana extensions
+        (0x3400, 0x4dbf), (0x4e00, 0x9fff), (0xac00, 0xd7a3),
+        (0xff00, 0xffef),
+    )
+    result.update(cp for start, end in ranges for cp in range(start, end + 1)
+                  if ud.category(chr(cp)) != "Cn")
     return result
+
+
+# The list's letter overlays: A to Z, '#' and figures.
+INDEX_GLYPHS = range(0x21, 0x7f)
+
+
+def index_subset(mapping, codepoints):
+    """An overlay face holds only what it shows, so a glyph cache entry stays
+    small enough to keep every letter at once; also a space, and the one
+    ideograph the format's fixed cells need."""
+    return {cp: mapping[cp] for cp in (*codepoints, 0x20, 0x4e00, REPLACEMENT)
+            if cp in mapping}
 
 
 def ideograph(cp):
@@ -565,7 +576,7 @@ def main():
                 fonts.append(face)
             mapping = resolve(fonts, required_codepoints(args.lang_dir))
             pairs = winning_pairs(fonts, mapping)
-            index_mapping = resolve(fonts, required_codepoints(args.lang_dir, full=False))
+            index_mapping = index_subset(mapping, INDEX_GLYPHS)
             index_pairs = {pair: face for pair, face in pairs.items()
                            if all(cp in index_mapping for cp in pair)}
             manifest = {
@@ -594,7 +605,9 @@ def main():
                 print(name, info, flush=True)
             for name, stock in stock_glyph_sets(args.stock_dir).items():
                 path = args.output / (name + ".pbf")
-                info = compile_font(path, fonts, mapping, pairs, stock.size, stock.weight,
+                own = (index_subset(mapping, stock.glyphs)
+                       if name.endswith("-index") else mapping)
+                info = compile_font(path, fonts, own, pairs, stock.size, stock.weight,
                                     stock=stock)
                 info["stock_size64"] = stock.size64
                 info["stock_glyphs"] = sum(mapping.get(cp) is not None for cp in stock.glyphs)

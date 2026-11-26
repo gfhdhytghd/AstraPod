@@ -84,10 +84,13 @@ void browser_db_clear_shortcut_base(void);
  * <All tracks>/<Random> rows), or -1 for no preference. Clears the request, so
  * only the load that made it is affected -- call once, right after selecting. */
 int browser_db_take_pending_top_item(void);
+/* A row's letter-jump key: a track's number or an album's year where the
+ * list runs by them, the letter of a name sorted past The/A/An, or none in
+ * a list of genres. */
+bool browser_db_index_key(struct browser_context *c, int id, char *buf, size_t size);
 /* As browser_db_get_entry_name(), with what the row shows beside the name --
  * an album's year, under Show Year in Album Lists. For drawing only: the name
  * itself is what titles, keys and playlist names are made from. */
-bool browser_db_index_key(struct browser_context *c, int id, char *buf, size_t size);
 char* browser_db_get_display_name(struct browser_context *c, int id,
                                   char* buf, size_t bufsize);
 char* browser_db_get_entry_name(struct browser_context *c, int id,

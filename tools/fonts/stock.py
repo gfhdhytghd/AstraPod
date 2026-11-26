@@ -54,6 +54,8 @@ FT_USE_MODULE(ft_smooth_renderer_class)
 # 16.984375 px, the side pane's title 17.40625 px, Now Playing's times
 # 13.796875 px and the 13.125 px small text. The 13 px faces keep the
 # firmware's own 11/4 line; the larger faces fit the Classic layout's cells.
+# The list's letter overlay is QuickScroll_Font, size 202, and holds only
+# the letters it shows.
 STOCK = {
     "13-helvetica": ("Helvetica.ttf", 840, 400, 15, 11, 11),
     "13-helvetica-bold": ("HelveticaBold.ttf", 840, 700, 15, 11, 11),
@@ -61,7 +63,9 @@ STOCK = {
     "16-helvetica-bold": ("HelveticaBold.ttf", 1041, 700, 20, 16, 16),
     "17-helvetica-bold": ("HelveticaBold.ttf", 1087, 700, 18, 14, 16),
     "17-helvetica-bold-pane": ("HelveticaBold.ttf", 1114, 700, 19, 14, 16),
+    "46-helvetica-bold-index": ("HelveticaBold.ttf", 2926, 700, 46, 35, 0),
 }
+LETTERS_ONLY = {"46-helvetica-bold-index"}
 CJK_FILES = {11: "CJK11.ttf", 16: "CJK16.ttf"}
 
 
@@ -211,7 +215,8 @@ def main():
             write(path, ppem * 64, 0, height, ascent, 0, glyphs)
             print(path.stem, len(glyphs), "glyphs", path.stat().st_size, "bytes")
         for name, (file, size64, weight, height, ascent, cjk) in STOCK.items():
-            glyphs = outlines(lib, args.fonts / file, size64, required)
+            glyphs = outlines(lib, args.fonts / file, size64,
+                              set(range(0x41, 0x5b)) if name in LETTERS_ONLY else required)
             path = args.output / (name + ".sgl")
             write(path, size64, weight, height, ascent, cjk, glyphs)
             print(name, len(glyphs), "glyphs", path.stat().st_size, "bytes")

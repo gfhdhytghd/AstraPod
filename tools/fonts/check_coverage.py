@@ -65,7 +65,7 @@ def check(font_dir, baseline, database, fixtures):
               "fonts": {}}
     for name in [*FONTS, *stock_glyph_sets(ROOT / "apps-ipod/fonts/stock")]:
         font = BitmapFont(font_dir / (name + ".pbf"))
-        index_only = name.startswith("56-")
+        index_only = name.endswith("-index")
         missing = (db | lyrics) - font.index.keys()
         assert index_only or required <= font.index.keys(), name
         assert index_only or not any(cjk(cp) for cp in missing), (name, describe(missing))

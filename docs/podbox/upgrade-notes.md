@@ -53,3 +53,10 @@
   Plastic, which are now the same theme. The pictures arrive in
   `.rockbox/themes/stock-art.bin`: update from the whole zip, or those themes
   show an empty pane and no battery.
+
+- **Lists scroll like the original iPod's.** The wheel speeds up as the
+  original's does, starting a little later than before. A fast spin that
+  leaves the letter you started on jumps a letter a click, with the letter
+  in the middle of the screen until you lift your finger. Classic and
+  Plastic show the original iPod's letter tile; Scrim and Light show a
+  square of their own. Genre lists have no letter jump.

@@ -757,18 +757,29 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
     int action = *actionptr;
     static bool pgleft_allow_cancel = false;
 
-    /* A step count comes only with a wheel event. A button -- an accessory
-     * remote's up and down -- carries none and moves one row. */
-    unsigned int data = get_action_data();
-    bool wheel = list_wheel_event();
-    if (list_render_index_action(lists, actionptr, wheel, MAX(1, (data >> 24) & 0x7f)))
-        return true;
-    int next_item_modifier = button_apply_acceleration(data);
-    if (next_item_modifier < 1)
-        next_item_modifier = 1;
-
     /* Repeat actions block list wraparound. */
     bool allow_wrap = lists->wraparound;
+
+    /* The wheel moves the list as stock's does, from the positions it
+     * turned: its event carries the detents, four positions each. A button
+     * -- an accessory remote's up and down -- moves one row. */
+    bool wheel = list_wheel_event();
+    int next = action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT ?
+               1 : action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT ?
+               -1 : 0;
+    if (wheel && next)
+    {
+        int detents = MAX(1, (get_action_data() >> 24) & 0x7f);
+        int rows;
+        bool repeat = action == ACTION_STD_NEXTREPEAT ||
+                      action == ACTION_STD_PREVREPEAT;
+        if (!list_render_wheel(lists, next * detents * 4, &rows) && rows)
+            list_move(lists, rows, allow_wrap && !repeat, wheel);
+        yield();
+        *actionptr = next > 0 ? ACTION_STD_NEXT : ACTION_STD_PREV;
+        return true;
+    }
+    int next_item_modifier = 1;
 
     switch (action)
     {

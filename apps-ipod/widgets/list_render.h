@@ -5,8 +5,10 @@
 #include "list.h"
 
 void list_render_init(void);
-bool list_render_index_action(struct gui_synclist *list, int *action,
-                              bool wheel, int steps);
+/* A wheel event of `positions` raw wheel positions, signed. True when the
+ * letter jump moved the selection and drew the list; otherwise *rows is how
+ * far the selection moves, 0 for not at all. */
+bool list_render_wheel(struct gui_synclist *list, int positions, int *rows);
 void list_render_draw(struct gui_synclist *list);
 /* A frame drawn because the selection moved: the list's contents are as
  * the last frame left them. */

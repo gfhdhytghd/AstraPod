@@ -1,0 +1,226 @@
+Show the pet in the AstraPod status-bar tray: content, asleep, needs care,
+or sick. The schedule is predicted by running the game rules on a copy of
+the pet, so the icon keeps changing after MochiPod closes.
+
+diff --git a/src/platform/rockbox.c b/src/platform/rockbox.c
+index 7439933..cc55167 100644
+--- a/src/platform/rockbox.c
++++ b/src/platform/rockbox.c
+@@ -60,11 +60,13 @@ static bool commit_pet(const Pet *candidate)
+     return true;
+ }
+ static bool persist(void) { return commit_pet(&pet); }
++#include "tray.inc"
+ 
+ static void on_system_exit(void *ignored)
+ {
+     (void)ignored;
+     if (!persist()) rb->splash(HZ,"MochiPod: save failed");
++    tray_sync(&pet,true);
+ }
+ 
+ #if LCD_WIDTH != LCD_COLS || LCD_HEIGHT != LCD_ROWS
+@@ -183,6 +185,7 @@ static bool review_clock(enum plugin_status *stop)
+         if (key==BUTTON_MENU) {
+             if (choice) { choice=0; continue; }
+             *stop=PLUGIN_OK;
++            tray_sync(&pet,true);
+             return false;
+         }
+         if (!clock_can_resume(now,sec)) continue;
+@@ -208,6 +211,7 @@ static bool review_clock(enum plugin_status *stop)
+             live_anchor=(ClockAnchor){now*60+sec,accepted_tick};
+             previous_second=now*60+sec;
+             pet=candidate;
++            tray_sync(&pet,false);
+             return true;
+         }
+     }
+@@ -230,6 +234,7 @@ static bool update_time(bool startup,bool trusted,enum plugin_status *stop)
+                 *stop=PLUGIN_ERROR;
+                 return false;
+             }
++            tray_sync(&pet,false);
+         }
+     }
+     if (issue) {
+@@ -289,6 +294,8 @@ enum plugin_status plugin_start(const void *parameter)
+     if (serial==before_review && !persist()) {
+         rb->splash(2*HZ,"Cannot write save"); return PLUGIN_ERROR;
+     }
++    tray_basis=tray_digest(&pet);
++    tray_sync(&pet,false);
+     Ui ui;
+     ui_start(&ui);
+     ui_growth(&ui,&pet,previous);
+@@ -314,9 +321,11 @@ enum plugin_status plugin_start(const void *parameter)
+             bool playing=ui.page==PLAYING && !ui.play.done;
+             ui_tick(&ui,&pet);
+             bool proposal_shown=before_tick.page!=OFFER && ui.page==OFFER;
+-            if ((previous_phase!=pet.family.phase || proposal_shown || (playing && ui.play.done)) && !persist()) {
++            bool event=previous_phase!=pet.family.phase || proposal_shown || (playing && ui.play.done);
++            if (event && !persist()) {
+                 rb->splash(HZ,"Cannot save progress");return PLUGIN_ERROR;
+             }
++            tray_after_tick(&pet,event);
+             enum Cue cue=feedback_change(before_tick,&pet,&ui,CMD_NONE);
+             if (cue!=SILENT) sound=(Sound){cue,0};
+             if (pet.muted) sound=(Sound){0};
+@@ -362,13 +371,14 @@ enum plugin_status plugin_start(const void *parameter)
+             if ((phase_before_input!=pet.family.phase || rb->memcmp(&before_action,&pet,sizeof pet)) && !persist()) {
+                 rb->splash(HZ,"Cannot save progress");return PLUGIN_ERROR;
+             }
++            tray_after_input(&pet);
+             if (ui.mode!=before && !store_mode(ui.mode)) {
+                 ui.mode=before;
+                 rb->splash(HZ,"Cannot save controls");invalidate_lcd=true;
+             }
+             if (!ui.exit_requested) {paint(&ui);redraw=false;}
+             if (ui.exit_requested) {
+-                if (persist()) return PLUGIN_OK;
++                if (persist()) { tray_sync(&pet,true); return PLUGIN_OK; }
+                 ui.exit_requested=false;
+                 rb->splash(HZ,"Save failed; try again");invalidate_lcd=true;
+             }
+diff --git a/src/platform/tray.inc b/src/platform/tray.inc
+new file mode 100644
+index 0000000..bec1779
+--- /dev/null
++++ b/src/platform/tray.inc
+@@ -0,0 +1,136 @@
++/* AstraPod status-bar tray: the pet's condition as one of four 8x8 icons.
++   The schedule is predicted by running the game rules on a copy of the
++   pet, so the icon keeps changing after MochiPod closes. All calls are
++   best effort: a full tray or USB storage never disturbs the game. */
++enum { TRAY_CONTENT, TRAY_SLEEP, TRAY_CARE, TRAY_ALERT, TRAY_FRAMES };
++#define TRAY_HORIZON (48u*60u)
++#define TRAY_EVENTS 32
++
++/* One byte per column, bit 0 at the top. */
++static const struct rock_tray_bitmap tray_art[TRAY_FRAMES]={
++    {{0x38,0x7f,0xef,0xfc,0xfc,0xef,0x7f,0x38}}, /* content: Mochi */
++    {{0x90,0xd0,0xb0,0x90,0x09,0x0d,0x0b,0x09}}, /* asleep: zZ */
++    {{0x38,0x6e,0x78,0x6e,0x38,0x00,0x5f,0x00}}, /* needs care: Mochi! */
++    {{0x1c,0x72,0x33,0x7f,0x7f,0x33,0x72,0x1c}}, /* sick or dead: skull */
++};
++
++static uint8_t tray_frame(const Pet *p)
++{
++    if (p->stage==DEAD) return TRAY_ALERT;
++    if (p->setup>=8) return TRAY_CARE;
++    if (p->character==V3_EGG) return TRAY_CONTENT;
++    bool asleep=pet_sleeping(p);
++    /* Medicine cannot be given asleep, so sickness shows from wake time. */
++    if (!asleep && (p->illness || p->family.child_doses)) return TRAY_ALERT;
++    if (asleep && p->character!=V3_LEGACY && !p->dark && !p->sleep_ack &&
++        p->light_wait<60) return TRAY_CARE;
++    if (p->family.phase==VISIT ||
++        (p->family.phase==HANDOVER && !p->family.event_age)) return TRAY_CARE;
++    if (!asleep && (!p->hunger || !p->happy || p->call || p->mess))
++        return TRAY_CARE;
++    if (asleep || p->family.phase==HANDOVER) return TRAY_SLEEP;
++    return TRAY_CONTENT;
++}
++
++/* Keep the first change and the last state; drop the shortest middle
++   state, merging the neighbours it separated, until the rules fit. */
++static unsigned tray_compress(struct rock_tray_rule *e,unsigned n)
++{
++    while (n>ROCK_TRAY_MAX_RULES) {
++        unsigned best=1;
++        for (unsigned i=2;i+1<n;++i)
++            if (e[i+1].delay_seconds-e[i].delay_seconds<=
++                e[best+1].delay_seconds-e[best].delay_seconds) best=i;
++        unsigned drop=e[best+1].frame==e[best-1].frame ? 2 : 1;
++        for (unsigned i=best;i+drop<n;++i) e[i]=e[i+drop];
++        n-=drop;
++    }
++    return n;
++}
++
++static unsigned tray_predict(const Pet *p,unsigned second,struct rock_tray_rule *e)
++{
++    static Pet sim; /* about 1 KiB: off the plugin stack */
++    unsigned n=0;
++    uint8_t current=tray_frame(p);
++    if (p->character==V3_EGG) {
++        unsigned left=HATCH_SECONDS-p->egg_seconds;
++        e[0]=(struct rock_tray_rule){MAX(left,ROCK_TRAY_MIN_DELAY),TRAY_CARE};
++        return 1;
++    }
++    if (p->stage==DEAD || p->setup) return 0;
++    sim=*p;
++    for (uint32_t k=1;k<=TRAY_HORIZON && sim.last<MAX_CLOCK;++k) {
++        pet_advance(&sim,sim.last+1);
++        uint8_t frame=tray_frame(&sim);
++        if (frame!=current && n<TRAY_EVENTS) {
++            uint32_t delay=k*60u-second;
++            if (!n && delay<ROCK_TRAY_MIN_DELAY) delay=ROCK_TRAY_MIN_DELAY;
++            e[n++]=(struct rock_tray_rule){delay,frame};
++            current=frame;
++        }
++        if (sim.stage==DEAD ||
++            (sim.family.phase==HANDOVER && !sim.family.event_age)) break;
++    }
++    return tray_compress(e,n);
++}
++
++static int tray_shown=-1;
++static void tray_sync(const Pet *p,bool on_exit)
++{
++    bool unstarted=p->setup>=1 && p->setup<=7;
++    if (on_exit && (p->stage==DEAD || unstarted)) {
++        rb->app_tray_register(NULL,0);
++        tray_shown=-1;
++        return;
++    }
++    if (p->paused || p->clock_hold || unstarted) {
++        rb->app_tray_set(ROCK_TRAY_HIDDEN);
++        tray_shown=ROCK_TRAY_HIDDEN;
++        return;
++    }
++    static struct rock_tray_rule events[TRAY_EVENTS];
++    unsigned second;
++    current_minute(&second);
++    unsigned n=tray_predict(p,second,events);
++    uint8_t frame=tray_frame(p);
++    /* An identical registration or selection writes nothing. */
++    if (!rb->app_tray_register(tray_art,TRAY_FRAMES) || !rb->app_tray_set(frame))
++        return;
++    tray_shown=frame;
++    if (n) rb->app_background_schedule(events,n);
++}
++
++/* What the schedule was predicted from, beyond the icon itself. */
++static uint32_t tray_digest(const Pet *p)
++{
++    const uint32_t fields[]={p->stage,p->character,p->setup,p->paused,
++        p->clock_hold,p->hunger,p->happy,p->mess,p->illness,p->call,p->dark,
++        p->sleep_ack,p->potty_used,p->light_wait,p->hungry_minutes,
++        p->ill_minutes,p->neglected,p->family.phase,p->family.child_doses,
++        p->family.event_age};
++    uint32_t hash=2166136261u;
++    for (unsigned i=0;i<sizeof fields/sizeof fields[0];++i)
++        hash=(hash^fields[i])*16777619u;
++    return hash;
++}
++
++static uint32_t tray_basis;
++/* After a key: resync if anything the prediction used has changed. */
++static void tray_after_input(const Pet *p)
++{
++    uint32_t digest=tray_digest(p);
++    if (digest==tray_basis) return;
++    tray_basis=digest;
++    tray_sync(p,false);
++}
++/* On a frame tick the stored schedule already covers time passing; resync
++   only when the icon itself moved or the caller saw a rule-changing event. */
++static void tray_after_tick(const Pet *p,bool event)
++{
++    bool hidden=p->paused || p->clock_hold || (p->setup>=1 && p->setup<=7);
++    int want=hidden ? ROCK_TRAY_HIDDEN : tray_frame(p);
++    if (!event && want==tray_shown) return;
++    tray_basis=tray_digest(p);
++    tray_sync(p,false);
++}

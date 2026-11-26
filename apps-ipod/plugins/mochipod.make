@@ -15,9 +15,22 @@ $(MOCHIPOD_DIR)/.fetched:
 	$(SILENT)git -C "$(@D)" checkout -q $(MOCHIPOD_COMMIT)
 	$(SILENT)touch $@
 
-$(ROCK_OUT)/staged/mochipod.c: $(MOCHIPOD_DIR)/.fetched
+# Our changes are the patches in mochipod/, applied in name order to a copy
+# of the fetched tree; the cache itself stays pristine. Editing a patch
+# re-stages the copy.
+MOCHIPOD_PATCHES := $(sort $(wildcard $(APPSDIR)/plugins/mochipod/*.patch))
+MOCHIPOD_SRC := $(ROCK_OUT)/mochipod
+
+$(MOCHIPOD_SRC)/.patched: $(MOCHIPOD_DIR)/.fetched $(MOCHIPOD_PATCHES)
+	$(SILENT)rm -rf "$(@D)" && mkdir -p "$(@D)"
+	$(SILENT)cp -R "$(MOCHIPOD_DIR)/src" "$(@D)/src"
+	$(SILENT)for p in $(MOCHIPOD_PATCHES); do \
+	    patch -s -p1 -d "$(@D)" < "$$p" || exit 1; done
+	$(SILENT)touch $@
+
+$(ROCK_OUT)/staged/mochipod.c: $(MOCHIPOD_SRC)/.patched
 	$(SILENT)mkdir -p $(@D)
-	$(SILENT)printf '#include "$(MOCHIPOD_DIR)/src/%s.c"\n' $(MOCHIPOD_UNITS) > $@
+	$(SILENT)printf '#include "$(MOCHIPOD_SRC)/src/%s.c"\n' $(MOCHIPOD_UNITS) > $@
 
 # The SDK names upstream's rb->filesize ffilesize.
 $(ROCK_OBJECTS)/mochipod.o: $(ROCK_OUT)/staged/mochipod.c $(ROCK_FINGERPRINT)

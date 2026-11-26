@@ -1,0 +1,2 @@
+# The patches carry upstream's CRLF lines (src/platform/rockbox.c) verbatim.
+*.patch -text

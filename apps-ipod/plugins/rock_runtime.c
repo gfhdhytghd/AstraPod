@@ -1,5 +1,6 @@
 /* AstraPod foreground plugin runtime. GNU GPL version 2 or later. */
 #include "plugins/rock_compat.h"
+#include "plugins/app_tray.h"
 #include "plugins/rock_iram.h"
 #include "plugins/rock_iram_layout.h"
 #include "plugins/rock_large_stack.h"
@@ -809,6 +810,45 @@ static bool rock_select_db_folders(bool autoresume)
 static bool rock_image_decoder_open(const char *name,
                                     struct rock_image_decoder_request *request);
 static void rock_image_decoder_close(void);
+
+static bool rock_app_tray_available(void)
+{
+    return foreground_owner && thread_self() == foreground_owner && !usb_taken;
+}
+
+static bool rock_app_tray_writable(void)
+{
+    if (!rock_app_tray_available() || usb_host_wants_storage())
+        return false;
+#ifdef HAVE_USBSTACK
+    if (usb_exclusive_storage())
+        return false;
+#endif
+    return true;
+}
+
+static bool rock_app_tray_register(const struct rock_tray_bitmap *frames,
+                                   unsigned count)
+{
+    return rock_app_tray_writable() && app_tray_register(filename, frames, count);
+}
+
+static bool rock_app_tray_set(unsigned frame)
+{
+    return rock_app_tray_writable() && app_tray_set(filename, frame);
+}
+
+static int rock_app_tray_get(void)
+{
+    return rock_app_tray_available() ? app_tray_get(filename, get_time()) : -1;
+}
+
+static bool rock_app_background_schedule(const struct rock_tray_rule *rules,
+                                         unsigned count)
+{
+    return rock_app_tray_writable() &&
+           app_background_schedule(filename, rules, count, get_time());
+}
 
 static const struct plugin_api api = {
 #define ROCK_DIRECT(name) .name = name,

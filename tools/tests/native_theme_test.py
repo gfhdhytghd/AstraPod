@@ -214,12 +214,15 @@ static void check_palette(void)
     assert(ui_theme_color(&theme, UI_COLOR_ACCENT, &palette) == 0xffffff);
 }
 
-/* Plastic's selection bar is stock's rows, whatever the theme file sets:
+/* Classic and Plastic draw with stock's bitmaps. Their selection bar is
+ * stock's rows, whatever the theme file sets:
  * exact at their own height, and with the edge lines kept when a row is
  * shorter. */
 static void check_plastic(void)
 {
     struct ui_theme theme;
+    ui_theme_builtin(&theme, UI_THEME_CLASSIC);
+    assert(theme.style[UI_STYLE_ART] == UI_ART_PLASTIC);
     ui_theme_builtin(&theme, UI_THEME_PLASTIC);
     assert(theme.style[UI_STYLE_ART] == UI_ART_PLASTIC);
     assert(!strcmp(theme.font[UI_FONT_WPS_TIME], "14-helvetica-bold"));

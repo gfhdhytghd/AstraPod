@@ -1,6 +1,6 @@
 # Native PodBox theme format
 
-The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry, and its lists glide. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica. The built-in Plastic theme is Classic drawn with Apple's own bitmaps from that firmware.
+The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry, and its lists glide. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica and with its own bitmaps. The built-in Plastic theme is the same as Classic.
 
 ## Installing and choosing a theme
 
@@ -188,7 +188,7 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 | `list_rows` | `pitch`, `fill` | The rows fill the list's height: the pixels left below the last whole row go one each to the top rows, so nine 24-pixel rows in 220 pixels become four of 25 and five of 24. |
 
 Light sets `style.list_scroll=glide` and keeps Scrim's other styles.
-Classic sets the second keyword of every style except `art`. To start a
+Classic sets the second keyword of every style. To start a
 custom theme from Classic, copy its values from the table below.
 
 ### The Classic theme
@@ -230,6 +230,9 @@ motion.push = 18
 motion.pop = 18
 motion.list = 0
 motion_easing = quad
+style.art = plastic
+metric.status_pad_right = 5
+metric.status_icon_gap = 5
 ```
 
 Classic also changes the list and status paddings and the album-row size.
@@ -237,13 +240,7 @@ A custom theme keeps Scrim's values for those unless it sets them.
 
 ### The Plastic theme
 
-Plastic is Classic with these additions:
-
-```ini
-style.art = plastic
-metric.status_pad_right = 5
-metric.status_icon_gap = 6
-```
+Plastic is the same as Classic.
 
 ## Native rendering and animation
 

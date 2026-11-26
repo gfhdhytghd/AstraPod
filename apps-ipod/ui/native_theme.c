@@ -304,7 +304,8 @@ static void plastic_columns(struct ui_theme *theme)
         .stops = 4, .nrows = last + 1, .rows = plastic_selection };
 }
 
-/* Plastic: Classic drawn with Apple's own bitmaps. */
+/* The stock firmware's own bitmaps, which Classic and Plastic both draw
+ * with. */
 static void plastic(struct ui_theme *theme)
 {
     theme->style[UI_STYLE_ART] = UI_ART_PLASTIC;
@@ -336,9 +337,10 @@ void ui_theme_builtin(struct ui_theme *theme, enum ui_theme_builtin_id id)
     for (size_t i = 0; i < UI_MOTION_COUNT; i++)
         theme->motion[i] = UI_MOTION_DEFAULT;
     if (id == UI_THEME_CLASSIC || id == UI_THEME_PLASTIC)
+    {
         classic(theme);
-    if (id == UI_THEME_PLASTIC)
         plastic(theme);
+    }
 }
 
 const char *ui_theme_builtin_name(enum ui_theme_builtin_id id)

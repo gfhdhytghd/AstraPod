@@ -48,7 +48,8 @@
 - **Classic and Plastic show the original iPod's split menus**, with the
   list on the left half and a picture of the selected row on the right, in
   the original iPod's Helvetica.
-  The right half and, under Plastic, the status bar, battery, scrollbar and
-  Now Playing bars now use the original iPod's own pictures, which arrive in
+  The right half, the status bar, battery, scrollbar and Now Playing bars
+  now use the original iPod's own pictures, under Classic as well as
+  Plastic, which are now the same theme. The pictures arrive in
   `.rockbox/themes/stock-art.bin`: update from the whole zip, or those themes
   show an empty pane and no battery.

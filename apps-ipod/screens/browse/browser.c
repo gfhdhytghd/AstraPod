@@ -247,11 +247,19 @@ static const char *browser_get_value(int selected_item, void *data,
     return NULL;
 }
 
-static enum list_pane_kind browser_get_pane(int selected_item, void *data)
+/* Shuffle Songs shows stock's shuffle pane; every other row of the Music
+ * menu its covers. */
+static enum list_pane_kind browser_get_pane(int selected_item, void *data,
+                                            int *art)
 {
-    (void)selected_item;
-    (void)data;
-    return LIST_PANE_ART;
+    struct browser_context *local_tc = (struct browser_context *)data;
+    int selected = local_tc->selected_item;
+    (void)art;
+    local_tc->selected_item = selected_item;
+    int action = browser_db_get_custom_action(local_tc);
+    local_tc->selected_item = selected;
+    return action == ONPLAY_CUSTOMACTION_SHUFFLE_SONGS ? LIST_PANE_SHUFFLE :
+                                                         LIST_PANE_ART;
 }
 
 static int browser_get_range(int selected_item, void * data)

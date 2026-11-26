@@ -158,7 +158,7 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
             int a = (p - LCD_WIDTH) / 2;
             put_span(row, l, a, half, 0, half);
             put_span(row, r, a + half, half, 0, half);
-            menu_pane_shadow(row, a + half, half);
+            menu_pane_shadow(row, y, a + half, half);
             memcpy(row + half, (target_right ? r : l) + half,
                    (LCD_WIDTH - half) * sizeof(*row));
         }
@@ -174,7 +174,7 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
             put_span(row, full, full_x, LCD_WIDTH, 0,
                      full_over ? LCD_WIDTH : half);
             if (!full_over && left_split)
-                menu_pane_shadow(row, rows_x + half, half);
+                menu_pane_shadow(row, y, rows_x + half, half);
         }
     }
 }

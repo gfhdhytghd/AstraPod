@@ -77,6 +77,7 @@
 /* gui api */
 #include "list.h"
 #include "ui/scene.h"
+#include "ui/stock_art_ids.h"
 
 #define MAX_MENUS 8
 /* used to allow for dynamic menus */
@@ -286,13 +287,160 @@ static const char* menu_get_value(int selected_item, void * data,
                                   option_value_as_int(setting));
 }
 
-static enum list_pane_kind menu_get_pane(int selected_item, void * data)
+/* The full settings tree, as the root Settings entry opens it. */
+extern const struct menu_item_ex main_menu_;
+
+/* The stock settings tile for what a row or a menu is named, in any
+ * language. */
+static const struct {
+    int16_t lang_id;
+    uint8_t art;
+} pane_tiles[] = {
+    { LANG_SOUND_SETTINGS, STOCK_ART_SETTINGS_SOUNDCHECKON },
+    { LANG_REPLAYGAIN, STOCK_ART_SETTINGS_SOUNDCHECKON },
+    { LANG_VOLUME_LIMIT, STOCK_ART_SETTINGS_VOLUMELIMIT },
+    { LANG_PLAYBACK, STOCK_ART_SETTINGS_REPEATALL },
+    { LANG_SPOKEN_WORD_SPEED, STOCK_ART_SETTINGS_AUDIOBOOKS },
+    { LANG_SEGREGATE_AUDIOBOOKS, STOCK_ART_SETTINGS_AUDIOBOOKS },
+    { LANG_LIBRARY, STOCK_ART_SETTINGS_SORTBY },
+    { LANG_SORT_MENU, STOCK_ART_SETTINGS_SORTBY },
+    { LANG_SORT_ALBUMS_BY_SHORT, STOCK_ART_SETTINGS_SORTBY },
+    { LANG_THEME_SETTINGS_MENU, STOCK_ART_SETTINGS_BRIGHTNESS },
+    { LANG_BRIGHTNESS, STOCK_ART_SETTINGS_BRIGHTNESS },
+    { LANG_APPEARANCE, STOCK_ART_SETTINGS_MAINMENU },
+    { LANG_MENUS, STOCK_ART_SETTINGS_MAINMENU },
+    { LANG_MAIN_MENU_SETTINGS, STOCK_ART_SETTINGS_MAINMENU },
+    { LANG_MUSIC_MENU_SETTINGS, STOCK_ART_SETTINGS_MAINMENU },
+    { LANG_BATTERY_POWER, STOCK_ART_SETTINGS_BACKLIGHT_ON },
+    { LANG_SYSTEM, STOCK_ART_SETTINGS_CLICKEROFF },
+    { LANG_KEYCLICK, STOCK_ART_SETTINGS_CLICKERON },
+    { LANG_MANAGE_MENU, STOCK_ART_SETTINGS_RESET },
+    { LANG_RESET, STOCK_ART_SETTINGS_RESET },
+    { LANG_SETTINGS_CHANGED, STOCK_ART_SETTINGS_RESET },
+};
+
+static int backlight_tile(int timeout)
+{
+    static const struct { int8_t up_to; uint8_t art; } steps[] = {
+        { 2, STOCK_ART_SETTINGS_BACKLIGHT_2S },
+        { 5, STOCK_ART_SETTINGS_BACKLIGHT_5S },
+        { 10, STOCK_ART_SETTINGS_BACKLIGHT_10S },
+        { 20, STOCK_ART_SETTINGS_BACKLIGHT_20S },
+    };
+    /* -1 is Off and 0 Always On. */
+    if (timeout <= 0)
+        return timeout < 0 ? STOCK_ART_SETTINGS_BACKLIGHT_OFF :
+                             STOCK_ART_SETTINGS_BACKLIGHT_ON;
+    for (unsigned i = 0; i < ARRAYLEN(steps); i++)
+        if (timeout <= steps[i].up_to)
+            return steps[i].art;
+    return STOCK_ART_SETTINGS_BACKLIGHT_30S;
+}
+
+/* A tile that shows a setting's value, as stock's Shuffle, Repeat, Sound
+ * Check, Clicker and Backlight do, or -1. */
+static int value_tile(const void *variable)
+{
+    if (variable == &global_settings.playlist_shuffle)
+        return global_settings.playlist_shuffle ?
+               STOCK_ART_SETTINGS_SHUFFLESONGS : STOCK_ART_SETTINGS_SHUFFLEOFF;
+    if (variable == &global_settings.repeat_mode)
+        return global_settings.repeat_mode == REPEAT_OFF ?
+                   STOCK_ART_SETTINGS_REPEATOFF :
+               global_settings.repeat_mode == REPEAT_ONE ?
+                   STOCK_ART_SETTINGS_REPEATONE : STOCK_ART_SETTINGS_REPEATALL;
+    if (variable == &global_settings.replaygain_settings.type)
+        return global_settings.replaygain_settings.type == REPLAYGAIN_OFF ?
+               STOCK_ART_SETTINGS_SOUNDCHECKOFF :
+               STOCK_ART_SETTINGS_SOUNDCHECKON;
+    if (variable == &global_settings.keyclick)
+        return global_settings.keyclick ? STOCK_ART_SETTINGS_CLICKERON :
+                                          STOCK_ART_SETTINGS_CLICKEROFF;
+    if (variable == &global_settings.backlight_timeout)
+        return backlight_tile(global_settings.backlight_timeout);
+    if (variable == &global_settings.backlight_timeout_plugged)
+        return backlight_tile(global_settings.backlight_timeout_plugged);
+    return -1;
+}
+
+/* The language id an item is named by, or -1 for a name of its own. */
+static int item_lang_id(const struct menu_item_ex *item)
+{
+    int type = item->flags & MENU_TYPE_MASK;
+    if (type == MT_SETTING || type == MT_SETTING_W_TEXT)
+    {
+        const struct settings_list *setting = find_setting(item->variable);
+        return setting ? setting->lang_id : -1;
+    }
+    if (!(item->flags & MENU_HAS_DESC) || (item->flags & MENU_DYNAMIC_DESC))
+        return -1;
+    return P2ID(item->callback_and_desc->desc);
+}
+
+/* The tile for an item of its own, or -1. */
+static int item_tile(const struct menu_item_ex *item)
+{
+    int type = item->flags & MENU_TYPE_MASK;
+    int art = type == MT_SETTING || type == MT_SETTING_W_TEXT ?
+              value_tile(item->variable) : -1;
+    int lang_id = item_lang_id(item);
+    if (lang_id == LANG_BACKLIGHT)
+        return backlight_tile(global_settings.backlight_timeout);
+    for (unsigned i = 0; art < 0 && i < ARRAYLEN(pane_tiles); i++)
+        if (pane_tiles[i].lang_id == lang_id)
+            art = pane_tiles[i].art;
+    return art;
+}
+
+/* The tile of the nearest menu from `menu` up to `tree` that has one,
+ * `inherited` when none below `tree` has; -2 when `menu` is not in `tree`. */
+static int branch_tile(const struct menu_item_ex *tree,
+                       const struct menu_item_ex *menu, int inherited,
+                       int depth)
+{
+    int own = item_tile(tree);
+    if (own >= 0)
+        inherited = own;
+    if (tree == menu)
+        return inherited;
+    if (depth > 12)
+        return -2;
+    for (unsigned i = 0; i < MENU_GET_COUNT(tree->flags); i++)
+    {
+        const struct menu_item_ex *sub = tree->submenus[i];
+        if (!sub || (sub->flags & MENU_TYPE_MASK) != MT_MENU)
+            continue;
+        int art = branch_tile(sub, menu, inherited, depth + 1);
+        if (art != -2)
+            return art;
+    }
+    return -2;
+}
+
+/* A row with no tile of its own takes its menu's, or the one its menu
+ * inherits from its branch of Settings. */
+static int menu_tile(const struct menu_item_ex *menu)
+{
+    int art = branch_tile(&main_menu_, menu, STOCK_ART_SETTINGS_MAINMENU, 0);
+    if (art < 0)
+        art = item_tile(menu);
+    return art < 0 ? STOCK_ART_SETTINGS_MAINMENU : art;
+}
+
+static enum list_pane_kind menu_get_pane(int selected_item, void * data,
+                                         int *art)
 {
     const struct menu_item_ex *menu = (const struct menu_item_ex *)data;
+    const struct menu_item_ex *item = menu_row_item(selected_item, menu);
 
-    if (menu != &root_menu_ || (menu->flags&MENU_TYPE_MASK) != MT_MENU)
-        return LIST_PANE_INFO;
-    return root_menu_item_pane(menu_row_item(selected_item, menu));
+    if (menu == &root_menu_ && (menu->flags&MENU_TYPE_MASK) == MT_MENU)
+        return root_menu_item_pane(item, art);
+    if (item != menu && item_lang_id(item) == LANG_ABOUT)
+        return LIST_PANE_DEVICE;
+    *art = item != menu ? item_tile(item) : -1;
+    if (*art < 0)
+        *art = menu_tile(menu);
+    return LIST_PANE_INFO;
 }
 
 static int menu_get_range(int selected_item, void * data)

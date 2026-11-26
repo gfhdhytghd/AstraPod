@@ -654,10 +654,23 @@ static void paint_bar(const struct ui_view_frame *frame,
     lcd_set_viewport(previous);
 }
 
+/* Stock's track is its own bar from where the fill ends: a tile repeated
+ * from there, the last one against the right end. The fill's tile repeats
+ * from the left. Both carry their reflection. */
 static void paint_track(const struct ui_view *view,
                         const struct ui_view_frame *frame)
 {
-    (void)view;
+    if (ui_theme_art(&wps->theme))
+    {
+        /* The progress and volume tracks each hold their fill. */
+        const struct ui_view *fill = view->first_child;
+        int filled = fill ? MIN(MAX(fill->value[UI_WIDTH], 0),
+                                frame->bounds.width) : 0;
+        ui_art_tile(STOCK_ART_NOWPLAYING_PROGRESSBAR_ACTIVE_BACKGROUND,
+                    frame->bounds.x + filled, frame->bounds.y,
+                    frame->bounds.width - filled, true, frame->clip);
+        return;
+    }
     paint_bar(frame, &wps->theme.gradient[UI_GRADIENT_PROGRESS_TRACK],
               wps->muted_rgb);
 }
@@ -666,6 +679,13 @@ static void paint_fill(const struct ui_view *view,
                        const struct ui_view_frame *frame)
 {
     (void)view;
+    if (ui_theme_art(&wps->theme))
+    {
+        ui_art_tile(STOCK_ART_NOWPLAYING_PROGRESSBAR_ACTIVE_FILL,
+                    frame->bounds.x, frame->bounds.y, frame->bounds.width,
+                    false, frame->clip);
+        return;
+    }
     paint_bar(frame, &wps->theme.gradient[UI_GRADIENT_PROGRESS],
               wps->accent_rgb);
 }
@@ -700,10 +720,10 @@ static void paint_shuffle(const struct ui_view *view,
                                                FONT_SYSFIXED);
     int x = frame->bounds.x - frame->clip.x;
     int y = frame->bounds.y - frame->clip.y;
-    const struct ui_art *art = ui_theme_art(&wps->theme, UI_ART_SHUFFLE);
-    if (art)
+    if (ui_theme_art(&wps->theme))
     {
-        ui_art_draw(art, x, y, art->width);
+        stock_art_draw(STOCK_ART_NOWPLAYING_CLASSIC_SHUFFLE, frame->bounds.x,
+                       frame->bounds.y, frame->clip);
         lcd_set_viewport(previous);
         return;
     }
@@ -731,14 +751,14 @@ static void paint_classic_volume(const struct ui_view *view,
     int x = frame->bounds.x - frame->clip.x;
     int y = frame->bounds.y - frame->clip.y + CLASSIC_SPEAKER_Y;
     lcd_set_foreground(wps->fg);
-    const struct ui_art *quiet = ui_theme_art(&wps->theme,
-                                              UI_ART_SPEAKER_QUIET);
-    if (quiet)
+    if (ui_theme_art(&wps->theme))
     {
-        ui_art_draw(quiet, x + CLASSIC_QUIET_X, y, quiet->width);
-        const struct ui_art *loud = ui_theme_art(&wps->theme,
-                                                 UI_ART_SPEAKER_LOUD);
-        ui_art_draw(loud, x + CLASSIC_LOUD_X, y, loud->width);
+        /* Stock's speakers stand level with the bar's top. */
+        y = frame->bounds.y + CLASSIC_BAR_Y;
+        stock_art_draw(STOCK_ART_NOWPLAYING_WHITE_VOLUME_LOW,
+                       frame->bounds.x + CLASSIC_QUIET_X, y, frame->clip);
+        stock_art_draw(STOCK_ART_NOWPLAYING_WHITE_VOLUME_HIGH,
+                       frame->bounds.x + CLASSIC_LOUD_X, y, frame->clip);
     }
     else
     {

@@ -20,6 +20,7 @@
 #include "lcd.h"
 #include "led.h"
 #include "metadata/art_cache.h"
+#include "power.h"
 #include "powermgmt.h"
 #include "settings/settings.h"
 #include "sound.h"
@@ -161,10 +162,9 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
     int gap = metric[UI_METRIC_STATUS_ICON_GAP];
     int group_gap = metric[UI_METRIC_STATUS_GROUP_GAP];
     int left = metric[UI_METRIC_STATUS_PAD_LEFT];
-    const struct ui_art *battery = ui_theme_art(chrome->theme,
-                                                UI_ART_BATTERY_FULL);
     int battery_x = width - metric[UI_METRIC_STATUS_PAD_RIGHT] -
-                    (battery ? battery->width : icon_size);
+        (ui_theme_art(chrome->theme) ?
+         stock_art[STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_0].width : icon_size);
     int play_x = battery_x - gap - icon_size;
     /* Keep the playback slot even when stopped so the busy icon stays put. */
     int busy_x = play_x - gap - icon_size;
@@ -288,6 +288,14 @@ static void fill_gradient(struct viewport *damage, int top, int height,
     }
 }
 
+/* Stock's status bar is one bitmap, the same in every column. */
+static void fill_art(const struct viewport *damage, int top)
+{
+    stock_art_draw(STOCK_ART_STATUSBARWHITE_BACKGROUND, damage->x, top,
+                   (struct ui_rect){ damage->x, damage->y, damage->width,
+                                     damage->height });
+}
+
 static void draw_clock(struct viewport *damage, const char *text, int font,
                        struct ui_rect clip, int origin)
 {
@@ -343,7 +351,12 @@ static void draw_volume(const struct native_chrome *chrome, struct viewport *dam
 
     const struct ui_theme_gradient *gradient =
         &theme->gradient[UI_GRADIENT_STATUS];
-    if (gradient->stops)
+    if (ui_theme_art(theme))
+    {
+        fill_art(damage, bounds.y);
+        damage->fg_pattern = status_color(theme, UI_COLOR_STATUS_FG, palette);
+    }
+    else if (gradient->stops)
     {
         fill_gradient(damage, bounds.y, bounds.height, gradient);
         damage->fg_pattern = status_color(theme, UI_COLOR_STATUS_FG, palette);
@@ -365,37 +378,36 @@ static void draw_volume(const struct native_chrome *chrome, struct viewport *dam
                  bar_width * chrome->state.volume_percent / 100, bar_height);
 }
 
-/* Apple's battery fills its 22 inner columns with the charge; the playback
- * icon sits right-aligned in its slot. */
-#define ART_BATTERY_CELLS 22
+/* Stock draws the battery 3 rows down and the playback icon 2 rows down,
+ * right-aligned in its slot. A charging battery wears a bolt, and a charged
+ * one still on power a plug. */
 static void draw_art_indicators(const struct native_chrome *chrome,
                                 const struct viewport *damage,
                                 const struct native_chrome_indicators *icons,
                                 struct status_layout layout, int x, int y,
                                 int size)
 {
-    x -= damage->x;
-    y -= damage->y;
-    const struct ui_theme *theme = chrome->theme;
     const struct native_chrome_state *state = &chrome->state;
+    struct ui_rect clip = { damage->x, damage->y, damage->width,
+                            damage->height };
     if (state->battery >= 0)
     {
-        const struct ui_art *full = ui_theme_art(theme, UI_ART_BATTERY_FULL);
         int battery_x = x + layout.battery_x;
-        ui_art_draw(ui_theme_art(theme, UI_ART_BATTERY_EMPTY), battery_x, y,
-                    full->width);
-        ui_art_draw(full, battery_x, y,
-                    1 + (ART_BATTERY_CELLS * state->battery + 50) / 100);
+        stock_art_draw(ui_art_battery(state->battery), battery_x, y + 3, clip);
         if (state->charging)
-            ui_art_draw(ui_theme_art(theme, UI_ART_CHARGING), battery_x, y,
-                        UINT8_MAX);
+            stock_art_draw(STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_CHARGE,
+                           battery_x, y + 3, clip);
+#if CONFIG_CHARGING
+        else if (charger_inserted())
+            stock_art_draw(STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_PLUG,
+                           battery_x, y + 3, clip);
+#endif
     }
-    const struct ui_art *play =
-        icons->ink[CHROME_PLAY] ? ui_theme_art(theme, UI_ART_PLAY) :
-        icons->ink[CHROME_PAUSE] ? ui_theme_art(theme, UI_ART_PAUSE) : NULL;
-    if (play)
-        ui_art_draw(play, x + layout.play_x + size - play->width, y,
-                    play->width);
+    int play = icons->ink[CHROME_PLAY] ? STOCK_ART_NOWPLAYING_WHITE_PLAY :
+               icons->ink[CHROME_PAUSE] ? STOCK_ART_NOWPLAYING_WHITE_PAUSE : -1;
+    if (play >= 0)
+        stock_art_draw(play, x + layout.play_x + size - stock_art[play].width,
+                       y + 2, clip);
 }
 
 static void draw_indicators(const struct native_chrome *chrome, struct viewport *damage,
@@ -403,7 +415,7 @@ static void draw_indicators(const struct native_chrome *chrome, struct viewport 
                             struct status_layout layout, int x, int y, int size,
                             unsigned background, unsigned foreground)
 {
-    bool art = ui_theme_art(chrome->theme, UI_ART_BATTERY_FULL) != NULL;
+    bool art = ui_theme_art(chrome->theme);
     if (art)
         draw_art_indicators(chrome, damage, icons, layout, x, y, size);
     for (int i = 0; i < CHROME_GLYPH_COUNT && !art; ++i)
@@ -459,7 +471,9 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
                           status_color(theme, UI_COLOR_STATUS_FG, palette);
     const struct ui_theme_gradient *gradient =
         &theme->gradient[UI_GRADIENT_STATUS];
-    if (gradient->stops)
+    if (ui_theme_art(theme))
+        fill_art(&damage, bounds.y);
+    else if (gradient->stops)
         fill_gradient(&damage, bounds.y, bounds.height, gradient);
     else
     {

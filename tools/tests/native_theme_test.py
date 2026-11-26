@@ -213,8 +213,9 @@ static void check_palette(void)
     assert(ui_theme_color(&theme, UI_COLOR_ACCENT, &palette) == 0xffffff);
 }
 
-/* Plastic's bars are Apple's rows: exact at their own height, and with the
- * edge lines kept when a row is shorter. */
+/* Plastic's selection bar is stock's rows, whatever the theme file sets:
+ * exact at their own height, and with the edge lines kept when a row is
+ * shorter. */
 static void check_plastic(void)
 {
     struct ui_theme theme;
@@ -227,14 +228,12 @@ static void check_plastic(void)
     assert(ui_theme_gradient_at(bar, 1, 24, 0) == 0x09a4e1);
     assert(ui_theme_gradient_at(bar, 22, 24, 0) == 0x0065d3);
     assert(ui_theme_gradient_at(bar, 23, 24, 0) == 0x004386);
-    assert(ui_theme_gradient_at(&theme.gradient[UI_GRADIENT_STATUS], 9, 20,
-                                0) == 0xcfd0d0);
 
     static const char file[] =
-        "podbox-theme=1\ngradient.status=000000,ffffff\nstyle.art=plastic\n";
+        "podbox-theme=1\ngradient.selection=000000,ffffff\nstyle.art=plastic\n";
     assert(ui_theme_parse(&theme, file, sizeof(file) - 1));
-    assert(ui_theme_gradient_at(&theme.gradient[UI_GRADIENT_STATUS], 19, 20,
-                                0) == 0x5b5b5b);
+    assert(ui_theme_gradient_at(&theme.gradient[UI_GRADIENT_SELECTION], 24, 25,
+                                0) == 0x004386);
 }
 
 /* Only Classic and its Plastic split their menus, in the pane's own fonts. */

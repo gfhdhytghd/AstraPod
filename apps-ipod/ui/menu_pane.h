@@ -14,9 +14,9 @@
 
 struct menu_pane_content {
     enum list_pane_kind kind;
+    int art;                    /* enum stock_art_id, or -1 */
     char title[96];
     char caption[96];
-    char glyph[8];
 };
 
 /* Whether the current theme splits menus. */
@@ -45,11 +45,11 @@ void menu_pane_viewport_left(int depth);
 /* Whether the framebuffer shows a split page, for a transition taking it
  * as its outgoing page. The next page painted answers the next call. */
 bool menu_pane_take_screen(void);
-/* The pane's backdrop mirrored across a whole screen-sized buffer, the
- * first frame of Now Playing entered from a split menu. */
+/* The whole of the pane's backdrop in a screen-sized buffer, the first
+ * frame of Now Playing entered from a split menu. */
 void menu_pane_backdrop(fb_data *buffer);
-/* Cast the rows' shadow on columns `edge` onwards of a framebuffer row,
- * stopping short of `limit`. */
-void menu_pane_shadow(fb_data *row, int edge, int limit);
+/* Cast the rows' shadow on columns `edge` onwards of row `y` of a
+ * framebuffer, stopping short of `limit`. */
+void menu_pane_shadow(fb_data *row, int y, int edge, int limit);
 
 #endif

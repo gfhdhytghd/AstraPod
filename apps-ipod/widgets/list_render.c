@@ -136,6 +136,8 @@ struct native_list {
         char notes[2 * MAX_PATH];
     } scratch;
     int row_shift, cursor_y;
+    /* Columns the scroll indicator takes from the rows' right edge. */
+    int row_inset;
     struct gradient_rows bar_rows, thumb_rows;
     uint32_t marquee_started, marquee_frame;
     bool has_marquee;
@@ -530,17 +532,6 @@ static bool set_clip(struct viewport *vp, struct ui_rect clip,
     return true;
 }
 
-static void draw_art(struct ui_rect clip, struct ui_rect cell,
-                     const struct ui_art *art, unsigned int fg)
-{
-    struct viewport vp;
-    if (!set_clip(&vp, clip, cell, FONT_UI, fg))
-        return;
-    struct viewport *prior = lcd_set_viewport(&vp);
-    ui_art_draw(art, cell.x - vp.x, cell.y - vp.y, art->width);
-    lcd_set_viewport(prior);
-}
-
 static void refresh_colors(struct native_list *render)
 {
     unsigned generation = album_palette_generation();
@@ -640,6 +631,40 @@ static unsigned marquee_shift(struct native_list *render, unsigned max_offset)
     return (max_offset - MIN(max_offset, (phase - delay) / frames * step));
 }
 
+/* Stock's marquee, kept by the themes with its selection bar: the label
+ * waits STOCK_MARQUEE_WAIT ticks of 34.1 ms at its start, then runs left 2
+ * columns a tick with a copy STOCK_MARQUEE_GAP columns behind it, and rests
+ * one tick less each time the copy reaches the start. The scroll settings
+ * do not apply to it. */
+#define STOCK_MARQUEE_TICK 34100 /* us */
+#define STOCK_MARQUEE_WAIT 38 /* ticks */
+#define STOCK_MARQUEE_GAP 26
+
+static bool stock_marquee(const struct native_list *render)
+{
+    return render->theme.style[UI_STYLE_SELECTION] == UI_SELECTION_BAR;
+}
+
+/* The offset into a run of `period` columns, the label's and its gap's. */
+static unsigned stock_marquee_shift(struct native_list *render,
+                                    unsigned period)
+{
+    if (!global_settings.scrolling_enabled || ui_scrolling_held())
+        return 0;
+    render->has_marquee = true;
+    unsigned tick = (USEC_TIMER - render->marquee_started) /
+                    STOCK_MARQUEE_TICK;
+    if (tick < STOCK_MARQUEE_WAIT)
+        return 0;
+    /* A run's last tick lands back on the start and counts as rest. */
+    unsigned run = (period + 1) / 2;
+    unsigned phase = (tick - STOCK_MARQUEE_WAIT) %
+                     (run + STOCK_MARQUEE_WAIT - 2);
+    if (phase >= run)
+        return 0;
+    return MIN(period, 2 * (phase + 1)) % period;
+}
+
 static bool list_text_ready(int font, const char *text)
 {
     return !font_prefetch_active() || font_prefetch_text(font, text);
@@ -666,10 +691,19 @@ static void draw_text(struct native_list *render, struct ui_rect clip,
     }
     if (!global_settings.offset_out_of_view)
         offset = MIN(overflow, offset);
-    if (!offset && scroll)
+    int period = 0;
+    if (!offset && scroll && overflow && stock_marquee(render))
+    {
+        period = width + STOCK_MARQUEE_GAP;
+        offset = stock_marquee_shift(render, period);
+    }
+    else if (!offset && scroll)
         offset = marquee_shift(render, overflow);
     struct viewport *prior = lcd_set_viewport(&vp);
     lcd_putsxy(x - offset, cell.y - vp.y, (const unsigned char *)text);
+    if (period && offset)
+        lcd_putsxy(x - offset + period, cell.y - vp.y,
+                   (const unsigned char *)text);
     lcd_set_viewport(prior);
 }
 
@@ -1155,14 +1189,17 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
               scroll, list->offset_position[SCREEN_MAIN], false);
     if (aux == chevron && chevron_selected && !lit)
         aux = NULL;
-    /* Apple's chevron keeps 6 columns clear of the row's right edge. */
-    const struct ui_art *glyph = aux == chevron && !rtl ?
-        ui_theme_art(&render->theme, UI_ART_CHEVRON) : NULL;
-    if (glyph)
+    /* Stock's chevron keeps 6 columns clear of the list's right edge, the
+     * scroll indicator's columns included. */
+    if (aux == chevron && !rtl && ui_theme_art(&render->theme))
     {
-        draw_art(clip, row_cell(row, right - 6 - glyph->width,
-                                (row.height - glyph->height + 1) / 2,
-                                glyph->width, glyph->height, false), glyph, fg);
+        const struct stock_art *glyph = &stock_art[STOCK_ART_SYSTEM_SUBMENU];
+        struct ui_rect cell = row_cell(row, right + render->row_inset - 6 -
+                                       glyph->width,
+                                       (row.height - glyph->height) / 2,
+                                       glyph->width, glyph->height, false);
+        stock_art_draw(STOCK_ART_SYSTEM_SUBMENU, cell.x, cell.y,
+                       intersection(clip, cell));
         aux = NULL;
     }
     if (render->icon_font >= 0)
@@ -1197,6 +1234,35 @@ static void blend(struct ui_rect clip, struct ui_rect cell, unsigned int color,
     lcd_set_viewport(prior);
 }
 
+/* Stock's own indicator: its top and bottom bitmaps with the middle one
+ * repeated between, against the bar's right edge, in a track 2 rows short
+ * of the bar at each end. Its length is the visible share of the track. */
+static void paint_art_scrollbar(struct ui_rect clip, struct ui_rect bar,
+                                int items, int first, int last)
+{
+    const struct stock_art *top = &stock_art[STOCK_ART_SYSTEM_SCROLLBARTOP];
+    int bottom = stock_art[STOCK_ART_SYSTEM_SCROLLBARBOTTOM].height;
+    int middle = stock_art[STOCK_ART_SYSTEM_SCROLLBARCENTER].height;
+    int track = bar.height - 4;
+    if (track < top->height + bottom || items <= 0)
+        return;
+    first = MIN(MAX(first, 0), items);
+    last = MIN(MAX(last, first), items);
+    int length = (int64_t)track * (last - first) / items;
+    length = MAX(length, top->height + bottom);
+    int span = items - (last - first);
+    int y = bar.y + 2 +
+            (span > 0 ? (int64_t)(track - length) * first / span : 0);
+    int x = bar.x + bar.width - top->width;
+    int end = y + length - bottom;
+    struct ui_rect body = intersection(clip, (struct ui_rect){
+        x, y + top->height, top->width, end - y - top->height });
+    for (int row = y + top->height; row < end; row += middle)
+        stock_art_draw(STOCK_ART_SYSTEM_SCROLLBARCENTER, x, row, body);
+    stock_art_draw(STOCK_ART_SYSTEM_SCROLLBARTOP, x, y, clip);
+    stock_art_draw(STOCK_ART_SYSTEM_SCROLLBARBOTTOM, x, end, clip);
+}
+
 /* The stock indicator: no track, a translucent foreground thumb with rounded
  * ends inside a faint background rim, laid over the rows. gradient.scrollbar
  * instead shades an opaque thumb across its width. Items run [first, last)
@@ -1205,6 +1271,11 @@ static void paint_classic_scrollbar(struct native_list *render,
                                     struct ui_rect clip, struct ui_rect bar,
                                     int items, int first, int last)
 {
+    if (ui_theme_art(&render->theme))
+    {
+        paint_art_scrollbar(clip, bar, items, first, last);
+        return;
+    }
     struct ui_rect track = { bar.x + 1, bar.y + 3, bar.width - 2,
                              bar.height - 6 };
     if (track.width <= 0 || track.height <= 0 || items <= 0)
@@ -1279,6 +1350,7 @@ static void paint_rows(const struct ui_view *view, const struct ui_view_frame *f
     if (scrollbar_left(render, list))
         row.x += bar_width;
     row.width -= bar_width;
+    render->row_inset = scrollbar_left(render, list) ? 0 : bar_width;
 
     /* The classic indicator lies over the bar; row content keeps clear. */
     bool overlay =
@@ -1847,11 +1919,12 @@ static const struct ui_view_ops pane_ops = { .paint = paint_pane };
 static void select_pane(struct native_list *render)
 {
     struct gui_synclist *list = render->owner;
-    struct menu_pane_content content = { .kind = LIST_PANE_INFO };
+    struct menu_pane_content content = { .kind = LIST_PANE_INFO, .art = -1 };
     int item = list->selected_item;
     if (item >= 0 && item < list->nb_items)
     {
-        content.kind = list->callback_get_item_pane(item, list->data);
+        content.kind = list->callback_get_item_pane(item, list->data,
+                                                    &content.art);
         char *name = render->scratch.row.name;
         const unsigned char *label_ptr = (const unsigned char *)
             list->callback_get_item_name(item, list->data, name,
@@ -1866,17 +1939,9 @@ static void select_pane(struct native_list *render)
             NULL;
         if (value)
             strlcpy(content.caption, value, sizeof(content.caption));
-        enum list_row_kind kind = list->callback_get_item_kind ?
-            list->callback_get_item_kind(item, list->data) : LIST_ROW_PLAIN;
-        enum themable_icons icon = list->callback_get_item_icon ?
-            list->callback_get_item_icon(item, list->data) : Icon_NOICON;
-        const char *glyph = row_icon(icon, kind, label, false,
-                                     get_current_activity());
-        if (glyph)
-            strlcpy(content.glyph, glyph, sizeof(content.glyph));
     }
-    if (content.kind == LIST_PANE_DEVICE)
-        strlcpy(content.title, native_chrome_title(list->title),
+    if (content.kind == LIST_PANE_DEVICE || content.kind == LIST_PANE_SHUFFLE)
+        strlcpy(content.title, native_chrome_title(str(LANG_ROCKBOX_TITLE)),
                 sizeof(content.title));
     menu_pane_select(&content, list->generation);
 }
@@ -1949,9 +2014,13 @@ static bool update_row_pose(struct native_list *render, const struct list_geomet
 
 static bool marquee_resting(const struct native_list *render)
 {
-    unsigned elapsed = ui_clock_frame(USEC_TIMER - render->marquee_started);
+    uint32_t elapsed = USEC_TIMER - render->marquee_started;
+    if (stock_marquee(render))
+        return !render->has_marquee ||
+               elapsed / STOCK_MARQUEE_TICK < STOCK_MARQUEE_WAIT;
     return !render->has_marquee ||
-           elapsed < ui_clock_frame(global_settings.scroll_delay * 1000);
+           ui_clock_frame(elapsed) <
+           ui_clock_frame(global_settings.scroll_delay * 1000);
 }
 
 /* Under snapped scrolling, a frame whose rows stand where the last paint
@@ -2329,7 +2398,8 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
         }
         if (global_settings.scrolling_enabled && render->has_marquee)
         {
-            unsigned frames = marquee_frames();
+            unsigned frames = stock_marquee(render) ?
+                MAX(1, ui_clock_frame(STOCK_MARQUEE_TICK)) : marquee_frames();
             unsigned frame = ui_clock_frame(now - render->marquee_started);
             int tick = 1000000 / HZ;
             int ticks = frame / frames != render->marquee_frame / frames ?

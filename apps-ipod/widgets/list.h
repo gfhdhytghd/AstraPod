@@ -153,16 +153,19 @@ typedef bool list_is_playing(int selected_item, void * data);
 
 /* What a split-screen menu shows beside its rows for the selected row, under
  * a theme with style.menu_pane=split. A list without the callback stays full
- * width. */
+ * width. The callback may set `art` to the picture's enum stock_art_id; it
+ * is -1 on entry. */
 enum list_pane_kind
 {
-    LIST_PANE_INFO,             /* the row's name, icon and value */
-    LIST_PANE_CATEGORY,         /* the row's icon and name */
+    LIST_PANE_INFO,             /* the row's name, tile and value */
+    LIST_PANE_CATEGORY,         /* the row's picture and name */
     LIST_PANE_ART,              /* a slideshow of the library's covers */
     LIST_PANE_PLAYING,          /* the playing track */
     LIST_PANE_DEVICE,           /* the player's name and free space */
+    LIST_PANE_SHUFFLE,          /* the player's name and song count */
 };
-typedef enum list_pane_kind list_get_pane(int selected_item, void * data);
+typedef enum list_pane_kind list_get_pane(int selected_item, void * data,
+                                          int *art);
 
 /* The icon-sized status cell is already clipped and active for this callback. */
 typedef bool list_draw_status(int selected_item, void *data,

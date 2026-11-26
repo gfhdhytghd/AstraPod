@@ -447,6 +447,7 @@ for target in $TARGETS; do
                     .rockbox/fonts/18-noto-sans.pbf \
                     .rockbox/docs/settings-help.txt \
                     .rockbox/trim.config \
+                    .rockbox/themes/stock-art.bin \
                     .rockbox/speech/cmudict.bin \
                     .rockbox/games/font.bin \
                     .rockbox/langs/english.vstrings \

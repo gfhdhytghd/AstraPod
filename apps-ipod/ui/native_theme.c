@@ -286,31 +286,16 @@ static void classic(struct ui_theme *theme)
     theme->style[UI_STYLE_MENU_PANE] = UI_MENU_PANE_SPLIT;
 }
 
-/* Apple's own bars take over the gradients they replace. */
+/* Stock's selection bar is a colour gradient, not a bitmap: its rows take
+ * over the gradient the theme sets. Its other bars are bitmaps
+ * (theme_art.h). */
 static void plastic_columns(struct ui_theme *theme)
 {
-    static const struct {
-        uint8_t role, rows;
-        const uint32_t *column;
-    } column_set[] = {
-        { UI_GRADIENT_STATUS, ARRAY_COUNT(plastic_status), plastic_status },
-        { UI_GRADIENT_SELECTION, ARRAY_COUNT(plastic_selection),
-          plastic_selection },
-        { UI_GRADIENT_PROGRESS, ARRAY_COUNT(plastic_progress),
-          plastic_progress },
-        { UI_GRADIENT_PROGRESS_TRACK, ARRAY_COUNT(plastic_progress_track),
-          plastic_progress_track },
-    };
-    for (size_t i = 0; i < ARRAY_COUNT(column_set); i++)
-    {
-        struct ui_theme_gradient *gradient =
-            &theme->gradient[column_set[i].role];
-        const uint32_t *column = column_set[i].column;
-        int last = column_set[i].rows - 1;
-        *gradient = (struct ui_theme_gradient){
-            .color = { column[0], column[1], column[last - 1], column[last] },
-            .stops = 4, .nrows = column_set[i].rows, .rows = column };
-    }
+    const int last = ARRAY_COUNT(plastic_selection) - 1;
+    theme->gradient[UI_GRADIENT_SELECTION] = (struct ui_theme_gradient){
+        .color = { plastic_selection[0], plastic_selection[1],
+                   plastic_selection[last - 1], plastic_selection[last] },
+        .stops = 4, .nrows = last + 1, .rows = plastic_selection };
 }
 
 /* Plastic: Classic drawn with Apple's own bitmaps. */
@@ -318,7 +303,7 @@ static void plastic(struct ui_theme *theme)
 {
     theme->style[UI_STYLE_ART] = UI_ART_PLASTIC;
     theme->metric[UI_METRIC_STATUS_PAD_RIGHT] = 5;
-    theme->metric[UI_METRIC_STATUS_ICON_GAP] = 6;
+    theme->metric[UI_METRIC_STATUS_ICON_GAP] = 5;
     plastic_columns(theme);
 }
 

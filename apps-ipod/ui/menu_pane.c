@@ -2,13 +2,15 @@
  * PodBox split-screen menu pane. GPL version 2+.
  *
  * The right half of a menu under style.menu_pane=split, as the stock iPod
- * Classic draws it: a slideshow of the library's covers, or on a grey
- * backdrop the playing track, the player's free space, or the selected row's
- * name, icon and value. The rows cast a shadow on its first columns.
+ * Classic draws it, from its own bitmaps: a slideshow of the library's
+ * covers, or on the blue-grey backdrop the playing track, the player's free
+ * space, or the selected row's name, picture and value. The rows cast a
+ * shadow on its first columns.
  *
  * Parts: the page on screen and its depth; the fonts; the slideshow, whose
- * covers the background thread reads into one buffer; the painters; the
- * content shown and the pause before a new row's; and the motion.
+ * covers the background thread reads into one buffer; the painters, which
+ * compose a still pane at 8 bits a channel as stock does; the content shown
+ * and the pause before a new row's; and the motion.
  ****************************************************************************/
 
 #include <stdio.h>
@@ -18,7 +20,6 @@
 #include "core_alloc.h"
 #include "file.h"
 #include "font.h"
-#include "rbunicode.h"
 #include "kernel.h"
 #include "lcd.h"
 #include "storage.h"
@@ -38,10 +39,12 @@
 #include "menu_pane.h"
 #include "retained.h"
 #include "native_theme_runtime.h"
+#include "stock_art.h"
 
 #define PANE_W (LCD_WIDTH - MENU_PANE_X)
 #define PANE_MID (MENU_PANE_X + PANE_W / 2)
-#define SHADOW_W 25
+/* PreviewArea_Shadow_Image's width. */
+#define SHADOW_W 26
 /* A cover is read 272 pixels square, so the pane has room to pan over it. */
 #define SHOW_EDGE 272
 #define SHOW_BYTES (SHOW_EDGE * SHOW_EDGE * sizeof(fb_data))
@@ -59,9 +62,22 @@
 #define SLIDE_US 270000u
 #define FRAME_US 33333u
 #define PLAYING_POLL HZ
-#define TILE 78
-#define TILE_REFLECTION 35
 #define WRAP_W 132
+/* Where stock draws its pictures. */
+#define PREVIEW_X 178
+#define PREVIEW_Y 44
+#define PREVIEW_EDGE 119
+#define TILE_X 202
+#define TILE_Y 81
+#define LOGO_X 202
+#define LOGO_Y 65
+#define SHUFFLE_X 180
+#define SHUFFLE_Y 55
+#define CAPACITY_X 179
+#define CAPACITY_Y 173
+#define CAPACITY_W 130
+#define WHITE 0xffffff
+#define TILE_GLYPH 0xeeeeee
 
 enum show_state { SHOW_EMPTY, SHOW_REQUESTED, SHOW_LOADING, SHOW_FRESH,
                   SHOW_READY, SHOW_NONE };
@@ -73,8 +89,8 @@ static struct {
 
 static struct {
     unsigned generation;
-    int title, text, icon;
-} fonts = { (unsigned)-1, -1, -1, -1 };
+    int title, text;
+} fonts = { (unsigned)-1, -1, -1 };
 
 /* The slideshow. Its buffer is kept while the theme splits menus, so a cover
  * stays in place from one menu to the next. The background thread owns it
@@ -102,6 +118,11 @@ static uint32_t pending_at, slide_started, stepped_at;
 static int slide_dir;
 static char playing_key[300];
 static long playing_polled;
+
+/* A still pane is composed a band of rows at a time: the whole pane at 8
+ * bits a channel would take 150 KiB the firmware image has no room for. */
+#define BAND_ROWS 16
+static uint32_t band_pixels[PANE_W * BAND_ROWS];
 
 /* ---- the page on screen ---- */
 
@@ -166,11 +187,9 @@ static void load_fonts(void)
         return;
     font_unload(fonts.title);
     font_unload(fonts.text);
-    font_unload(fonts.icon);
     int glyphs = global_settings.glyphs_to_cache;
     fonts.title = ui_theme_current_font_load(UI_FONT_PANE_TITLE, glyphs);
     fonts.text = ui_theme_current_font_load(UI_FONT_PANE_TEXT, glyphs);
-    fonts.icon = ui_theme_current_font_load(UI_FONT_ICON, glyphs);
     fonts.generation = generation;
 }
 
@@ -337,93 +356,29 @@ static struct ui_rect clip_to(struct ui_rect a, struct ui_rect b)
     return (struct ui_rect){ x0, y0, MAX(0, x1 - x0), MAX(0, y1 - y0) };
 }
 
-/* The grey backdrop: brighter at the top and towards the rows, sampled
- * from the stock pane every 20 rows at its two edges. */
-static const uint32_t backdrop_left[] = {
-    0x98acba, 0x9bb0bd, 0x98aaba, 0x93a6b3, 0x8b9bac, 0x7f949f, 0x748391,
-    0x677682, 0x5d6774, 0x535e67, 0x4c5660, 0x4b5359, 0x464f55,
-};
-static const uint32_t backdrop_right[] = {
-    0x8597a4, 0x8496a5, 0x80929e, 0x7a8b98, 0x74838f, 0x6c7d87, 0x63717c,
-    0x5c6871, 0x535f68, 0x4d5761, 0x495059, 0x454f56, 0x434c52,
-};
-
-static uint32_t mix_rgb(uint32_t a, uint32_t b, int num, int den)
-{
-    uint32_t out = 0;
-    for (int shift = 0; shift < 24; shift += 8)
-    {
-        int ca = (a >> shift) & 255, cb = (b >> shift) & 255;
-        out |= (uint32_t)(ca + (cb - ca) * num / den) << shift;
-    }
-    return out;
-}
-
-/* `count` pixels of backdrop row `y` from pane column `column`, stepping
- * `dir` columns a pixel. */
-static void backdrop_row(fb_data *out, int y, int column, int count, int dir)
-{
-    int band = MIN(y / 20, (int)ARRAYLEN(backdrop_left) - 2);
-    int part = y - band * 20;
-    uint32_t left = mix_rgb(backdrop_left[band], backdrop_left[band + 1],
-                            part, 20);
-    uint32_t right = mix_rgb(backdrop_right[band], backdrop_right[band + 1],
-                             part, 20);
-    /* 16.16 channels stepped across the row. */
-    int32_t c[3], step[3];
-    for (int i = 0; i < 3; i++)
-    {
-        int l = (left >> (16 - 8 * i)) & 255;
-        int r = (right >> (16 - 8 * i)) & 255;
-        step[i] = ((r - l) << 16) / (PANE_W - 1) * dir;
-        c[i] = (l << 16) + step[i] * column * dir;
-    }
-    for (int x = 0; x < count; x++)
-    {
-        *out++ = FB_RGBPACK(c[0] >> 16, c[1] >> 16, c[2] >> 16);
-        for (int i = 0; i < 3; i++)
-            c[i] += step[i];
-    }
-}
-
-static void paint_backdrop(struct ui_rect clip)
-{
-    for (int y = clip.y; y < clip.y + clip.height; y++)
-        backdrop_row(fb_at(clip.x, y), y, clip.x - MENU_PANE_X, clip.width, 1);
-}
-
 void menu_pane_backdrop(fb_data *buffer)
 {
     for (int y = 0; y < LCD_HEIGHT; y++, buffer += LCD_WIDTH)
-    {
-        backdrop_row(buffer, y, MENU_PANE_X - 1, MENU_PANE_X, -1);
-        backdrop_row(buffer + MENU_PANE_X, y, 0, PANE_W, 1);
-    }
+        stock_art_row(STOCK_ART_BACKGROUND_LIGHTBLUE, 0, y, buffer,
+                      LCD_WIDTH);
 }
 
-/* The shadow the rows cast on the pane, as the brightness left in each of
- * its first columns, measured from the stock pane. */
-static const uint8_t shadow_keep[SHADOW_W] = {
-    139, 150, 159, 168, 176, 182, 188, 195, 202, 209, 215, 221, 227,
-    232, 237, 242, 245, 247, 249, 251, 252, 254, 254, 254, 254,
-};
-
-void menu_pane_shadow(fb_data *row, int edge, int limit)
+void menu_pane_shadow(fb_data *row, int y, int edge, int limit)
 {
-    for (int x = MAX(edge, 0); x < MIN(edge + SHADOW_W, limit); x++)
-        ui_blit_dim(row + x, row + x, 1, shadow_keep[x - edge]);
+    int from = MAX(edge, 0), to = MIN(edge + SHADOW_W, limit);
+    if (to > from)
+        stock_art_row(STOCK_ART_PREVIEWAREA_SHADOW, from - edge, y,
+                      row + from, to - from);
 }
 
+/* The rows' shadow on the framebuffer inside `clip`. */
 static void shade(struct ui_rect clip)
 {
     struct ui_rect band = clip_to(clip, (struct ui_rect){
         MENU_PANE_X, 0, SHADOW_W, LCD_HEIGHT });
     for (int y = band.y; y < band.y + band.height; y++)
-    {
-        fb_data *out = fb_at(band.x, y);
-        for (int x = band.x; x < band.x + band.width; x++, out++)
-            ui_blit_dim(out, out, 1, shadow_keep[x - MENU_PANE_X]);
-    }
+        stock_art_row(STOCK_ART_PREVIEWAREA_SHADOW, band.x - MENU_PANE_X, y,
+                      fb_at(band.x, y), band.width);
 }
 
 /* The cover through the window at (`x`, `y`), its left edge at screen
@@ -465,19 +420,18 @@ static inline fb_data blend_pixel(fb_data to, fb_data from, unsigned weight)
 static void blend_cover(struct ui_rect clip, int x, int y, unsigned weight)
 {
     const fb_data *pixels = core_get_data_pinned(show.handle);
+    int column = clip.x - MENU_PANE_X;
     for (int row = clip.y; row < clip.y + clip.height; row++)
     {
-        const fb_data *src = pixels + (row + y) * SHOW_EDGE + x +
-                             (clip.x - MENU_PANE_X);
+        fb_data to[PANE_W];
+        memcpy(to, pixels + (row + y) * SHOW_EDGE + x + column,
+               clip.width * sizeof(fb_data));
+        if (column < SHADOW_W)
+            stock_art_row(STOCK_ART_PREVIEWAREA_SHADOW, column, row, to,
+                          MIN(SHADOW_W - column, clip.width));
         fb_data *out = fb_at(clip.x, row);
         for (int i = 0; i < clip.width; i++)
-        {
-            fb_data to = src[i];
-            int column = clip.x + i - MENU_PANE_X;
-            if (column < SHADOW_W)
-                ui_blit_dim(&to, &to, 1, shadow_keep[column]);
-            out[i] = blend_pixel(to, out[i], weight);
-        }
+            out[i] = blend_pixel(to[i], out[i], weight);
     }
     core_put_data_pinned((void *)pixels);
 }
@@ -542,138 +496,107 @@ static void put_wrapped(struct ui_rect clip, const char *text, int font,
     pane_line(clip, cut + 1, font, baseline);
 }
 
-/* The row's icon glyph in white, `scale` times its size, centred on
- * (`cx`, `cy`). */
-static void put_icon(struct ui_rect clip, const char *glyph, int cx, int cy,
-                     int scale)
+/* A 119-pixel preview sits where stock puts them all, anything else centred
+ * on the same point. A mask is white. */
+static void put_picture(struct stock_canvas *band, int art)
 {
-    enum { CELL = 32 };
-    if (!*glyph || fonts.icon < 0)
+    const struct stock_art *a = &stock_art[art];
+    int x = PREVIEW_X, y = PREVIEW_Y;
+    if (a->width != PREVIEW_EDGE || a->height != PREVIEW_EDGE)
+    {
+        x = PREVIEW_X + (PREVIEW_EDGE - a->width) / 2;
+        y = PREVIEW_Y + (PREVIEW_EDGE - a->height) / 2;
+    }
+    if (a->colors)
+        stock_art_put(band, art, x, y);
+    else
+        stock_art_mask(band, art, x, y, WHITE);
+}
+
+/* `id`, one column wide, drawn across columns [`from`, `to`). */
+static void put_stretched(struct stock_canvas *band, enum stock_art_id id,
+                          int from, int to)
+{
+    for (int x = from; x < to; x++)
+        stock_art_put(band, id, x, CAPACITY_Y);
+}
+
+/* The capacity bar, `used` of its CAPACITY_W columns light from the left. */
+static void put_capacity(struct stock_canvas *band, int used)
+{
+    const int x0 = CAPACITY_X, x1 = CAPACITY_X + CAPACITY_W;
+    const int fill_cap =
+        stock_art[STOCK_ART_CAPACITYVIEW_SIMPLE_FILLLEFT].width;
+    const int empty_cap =
+        stock_art[STOCK_ART_CAPACITYVIEW_SIMPLE_EMPTYLEFT].width;
+    if (used >= CAPACITY_W - fill_cap)
+    {
+        stock_art_put(band, STOCK_ART_CAPACITYVIEW_SIMPLE_FILLLEFT, x0,
+                      CAPACITY_Y);
+        put_stretched(band, STOCK_ART_CAPACITYVIEW_SIMPLE_FILLCENTER,
+                      x0 + fill_cap, x1 - fill_cap);
+        stock_art_put(band, STOCK_ART_CAPACITYVIEW_SIMPLE_FILLRIGHT,
+                      x1 - fill_cap, CAPACITY_Y);
         return;
-    struct font *pf = font_get(fonts.icon);
-    ucschar_t ch;
-    utf8decode((const unsigned char *)glyph, &ch);
-    const unsigned char *bits = font_get_bits(pf, ch);
-    int width = font_get_width(pf, ch);
-    int height = pf->height;
-    if (!bits || !pf->depth || width <= 0 || width > CELL || height > CELL)
-        return;
-    int x0 = cx - width * scale / 2;
-    int y0 = cy - height * scale / 2;
-    struct ui_rect area = clip_to(clip, (struct ui_rect){
-        x0, y0, width * scale, height * scale });
-    const fb_data white = FB_RGBPACK(255, 255, 255);
-    for (int y = area.y; y < area.y + area.height; y++)
-    {
-        int fy = ((y - y0) * 2 + 1) * 128 / scale - 128;
-        for (int x = area.x; x < area.x + area.width; x++)
-        {
-            /* Bilinear over the 4bpp coverage, packed across rows with the
-             * low nibble first and 0 opaque. */
-            int fx = ((x - x0) * 2 + 1) * 128 / scale - 128;
-            int ix = fx >> 8, iy = fy >> 8, wx = fx & 255, wy = fy & 255;
-            unsigned cover = 0;
-            for (int k = 0; k < 4; k++)
-            {
-                int px = ix + (k & 1), py = iy + (k >> 1);
-                if (px < 0 || px >= width || py < 0 || py >= height)
-                    continue;
-                int at = py * width + px;
-                unsigned byte = bits[at / 2];
-                unsigned c = 15 - ((at & 1) ? byte >> 4 : byte & 15);
-                cover += c * ((k & 1) ? wx : 256 - wx) *
-                             ((k >> 1) ? wy : 256 - wy);
-            }
-            unsigned alpha = cover / (15 * 256);
-            if (!alpha)
-                continue;
-            fb_data *out = fb_at(x, y);
-            ui_blit_mix(out, &white, out, 1, alpha, UI_FULL_OPACITY - alpha);
-        }
     }
-}
-
-/* A settings icon: a black glossy tile with rounded corners and its
- * reflection, the glyph in white on it. */
-static void put_tile(struct ui_rect clip, const char *glyph)
-{
-    static const uint8_t corner[] = { 5, 2, 1 };
-    const int x0 = PANE_MID - TILE / 2, y0 = 81;
-    for (int r = 0; r < TILE + TILE_REFLECTION; r++)
+    int empty_from = x0 + empty_cap;
+    if (used > 0)
     {
-        int y = y0 + r;
-        if (y < clip.y || y >= clip.y + clip.height)
-            continue;
-        int mirrored = r < TILE ? r : 2 * TILE - 1 - r;
-        int edge = MIN(mirrored, TILE - 1 - mirrored);
-        int inset = edge < (int)ARRAYLEN(corner) ? corner[edge] : 0;
-        int from = MAX(clip.x, x0 + inset);
-        int to = MIN(clip.x + clip.width, x0 + TILE - inset);
-        if (to <= from)
-            continue;
-        fb_data *out = fb_at(from, y);
-        if (r < TILE)
-        {
-            unsigned v = r == 0 ? 0x40 : r == 1 ? 0xa1 :
-                         r < 39 ? 0x79 - (0x79 - 0x23) * (r - 2) / 36 : 0;
-            fb_data fill = FB_RGBPACK(v, v, v);
-            for (int x = from; x < to; x++)
-                *out++ = fill;
-        }
-        else
-        {
-            /* The reflection darkens the backdrop by 53% and fades out. */
-            int k = r - TILE;
-            unsigned alpha = 136 - 136 * k / TILE_REFLECTION;
-            ui_blit_dim(out, out, to - from, UI_FULL_OPACITY - alpha);
-        }
+        used = MAX(used, fill_cap);
+        stock_art_put(band, STOCK_ART_CAPACITYVIEW_SIMPLE_FILLLEFT, x0,
+                      CAPACITY_Y);
+        put_stretched(band, STOCK_ART_CAPACITYVIEW_SIMPLE_FILLCENTER,
+                      x0 + fill_cap, x0 + used);
+        empty_from = x0 + used;
     }
-    put_icon(clip, glyph, PANE_MID, y0 + TILE / 2, 2);
+    else
+        stock_art_put(band, STOCK_ART_CAPACITYVIEW_SIMPLE_EMPTYLEFT, x0,
+                      CAPACITY_Y);
+    put_stretched(band, STOCK_ART_CAPACITYVIEW_SIMPLE_EMPTYCENTER, empty_from,
+                  x1 - empty_cap);
+    stock_art_put(band, STOCK_ART_CAPACITYVIEW_SIMPLE_EMPTYRIGHT,
+                  x1 - empty_cap, CAPACITY_Y);
 }
 
-static void put_capsule(struct ui_rect clip, int used_width)
+/* The columns of the capacity bar that stand for used space. */
+static int capacity_used(void)
 {
-    static const uint32_t used[] = {
-        0x5e6164, 0xf6f9fa, 0xf1f2f6, 0xeaedf0, 0xe1e5e7, 0xdadde0, 0xcfd4d7,
-        0xc7cbcf, 0xbec2c8, 0xb5bbc1, 0xafb5bb, 0xabb1b7, 0x727b84,
-    };
-    static const uint32_t unused[] = {
-        0x343b43, 0x414448, 0x42464a, 0x45494c, 0x474b50, 0x4a4f55, 0x4d5259,
-        0x50575d, 0x535a62, 0x565d65, 0x596069, 0x515a62, 0x727b84,
-    };
-    static const uint8_t inset[] = { 5, 3, 2, 1, 0, 0, 0, 0, 0, 1, 2, 3, 5 };
-    const int x0 = 179, width = 129, y0 = 173;
-    for (int r = 0; r < (int)ARRAYLEN(used); r++)
+    sector_t total = 0, free = 0;
+    volume_size(IF_MV(0,) &total, &free);
+    return total ? (int)((uint64_t)(total - free) * CAPACITY_W / total) : 0;
+}
+
+/* The picture under a still pane's text, inside `band`. */
+static void compose_still(struct stock_canvas *band,
+                          const struct menu_pane_content *c, int used)
+{
+    stock_art_put(band, STOCK_ART_BACKGROUND_LIGHTBLUE, 0, 0);
+    switch (c->kind)
     {
-        int y = y0 + r;
-        if (y < clip.y || y >= clip.y + clip.height)
-            continue;
-        int from = MAX(clip.x, x0 + inset[r]);
-        int to = MIN(clip.x + clip.width, x0 + width - inset[r]);
-        for (int x = from; x < to; x++)
-        {
-            uint32_t c = x < x0 + used_width ? used[r] : unused[r];
-            *fb_at(x, y) = FB_RGBPACK(c >> 16, (c >> 8) & 255, c & 255);
-        }
+        case LIST_PANE_INFO:
+            stock_art_put(band, STOCK_ART_SETTINGS_BASEPANEL, TILE_X, TILE_Y);
+            if (c->art >= 0)
+                stock_art_mask(band, c->art, TILE_X, TILE_Y, TILE_GLYPH);
+            break;
+        case LIST_PANE_DEVICE:
+            stock_art_mask(band, STOCK_ART_ASTRAPOD_LOGO, LOGO_X, LOGO_Y,
+                           WHITE);
+            put_capacity(band, used);
+            break;
+        case LIST_PANE_SHUFFLE:
+            stock_art_mask(band, STOCK_ART_MAINMENU_SHUFFLE, SHUFFLE_X,
+                           SHUFFLE_Y, WHITE);
+            break;
+        default:
+            if (c->art >= 0)
+                put_picture(band, c->art);
+            break;
     }
+    stock_art_put(band, STOCK_ART_PREVIEWAREA_SHADOW, MENU_PANE_X, 0);
 }
 
-static void paint_category(struct ui_rect clip, const struct menu_pane_content *c)
+static void paint_playing(struct ui_rect clip)
 {
-    put_icon(clip, c->glyph, PANE_MID, 103, 3);
-    pane_line(clip, c->title, fonts.title, 178);
-}
-
-static void paint_info(struct ui_rect clip, const struct menu_pane_content *c)
-{
-    pane_line(clip, c->title, fonts.title, 33);
-    put_tile(clip, c->glyph);
-    put_wrapped(clip, c->caption, fonts.text, 215);
-}
-
-static void paint_playing(struct ui_rect clip, const struct menu_pane_content *c)
-{
-    put_icon(clip, c->glyph, PANE_MID, 103, 3);
     struct mp3entry *id3 = audio_current_track();
     if (!id3)
         return;
@@ -682,33 +605,69 @@ static void paint_playing(struct ui_rect clip, const struct menu_pane_content *c
     pane_line(clip, id3->album ? id3->album : "", fonts.text, 219);
 }
 
-static void paint_device(struct ui_rect clip, const struct menu_pane_content *c)
+static void paint_free(struct ui_rect clip)
 {
-    pane_line(clip, c->title, fonts.title, 33);
-    put_icon(clip, c->glyph, PANE_MID, 103, 3);
     sector_t total = 0, free = 0;
     volume_size(IF_MV(0,) &total, &free);
-    put_capsule(clip, total ? (int)((uint64_t)(total - free) * 129 / total) : 0);
-    char text[48];
     unsigned long long kib = (unsigned long long)free;
     bool gib = kib >= 1024ull * 1024;
     unsigned long long unit = gib ? 1024ull * 1024 : 1024;
-    snprintf(text, sizeof(text), "%s %u.%u %s", str(LANG_DISK_FREE_INFO),
-             (unsigned)(kib / unit), (unsigned)(kib * 10 / unit % 10),
-             gib ? "GB" : "MB");
+    /* "Free:" without its colon, after the amount. */
+    char label[32];
+    strlcpy(label, str(LANG_DISK_FREE_INFO), sizeof(label));
+    size_t n = strlen(label);
+    if (n && label[n - 1] == ':')
+        label[n - 1] = '\0';
+    char text[64];
+    snprintf(text, sizeof(text), "%u.%u %s %s", (unsigned)(kib / unit),
+             (unsigned)(kib * 10 / unit % 10), gib ? "GB" : "MB", label);
     pane_line(clip, text, fonts.title, 212);
 }
 
-/* A pane on the grey backdrop. */
+static void paint_songs(struct ui_rect clip)
+{
+    struct tagcache_marks marks;
+    tagcache_get_marks(&marks);
+    char text[48];
+    snprintf(text, sizeof(text), "%d %s",
+             MAX(0, tagcache_get_stat()->total_entries - marks.deleted_ct),
+             str(LANG_PV_K_SONGS));
+    pane_line(clip, text, fonts.title, 205);
+}
+
+/* A pane on the backdrop: the picture composed at 8 bits, then the text. */
 static void paint_still(struct ui_rect clip, const struct menu_pane_content *c)
 {
-    paint_backdrop(clip);
+    int used = c->kind == LIST_PANE_DEVICE ? capacity_used() : 0;
+    for (int y = clip.y; y < clip.y + clip.height; y += BAND_ROWS)
+    {
+        struct stock_canvas band = {
+            band_pixels, clip.x, y, clip.width,
+            MIN(BAND_ROWS, clip.y + clip.height - y),
+        };
+        compose_still(&band, c, used);
+        stock_canvas_show(&band, clip);
+    }
     switch (c->kind)
     {
-        case LIST_PANE_INFO: paint_info(clip, c); break;
-        case LIST_PANE_PLAYING: paint_playing(clip, c); break;
-        case LIST_PANE_DEVICE: paint_device(clip, c); break;
-        default: paint_category(clip, c); break;
+        case LIST_PANE_INFO:
+            pane_line(clip, c->title, fonts.title, 33);
+            put_wrapped(clip, c->caption, fonts.text, 215);
+            break;
+        case LIST_PANE_PLAYING:
+            paint_playing(clip);
+            break;
+        case LIST_PANE_DEVICE:
+            pane_line(clip, c->title, fonts.title, 33);
+            paint_free(clip);
+            break;
+        case LIST_PANE_SHUFFLE:
+            pane_line(clip, c->title, fonts.title, 33);
+            paint_songs(clip);
+            break;
+        default:
+            pane_line(clip, c->title, fonts.title, 178);
+            break;
     }
 }
 
@@ -733,6 +692,8 @@ static void paint_content(struct ui_rect clip, uint32_t now)
                                                     left - MENU_PANE_X,
                                                     LCD_HEIGHT }), &under);
     paint_cover(clip, x, y, left);
+    shade(clip_to(clip, (struct ui_rect){ left, 0, LCD_WIDTH - left,
+                                          LCD_HEIGHT }));
     show.drawn_x = x;
     show.drawn_y = y;
 }
@@ -741,7 +702,6 @@ void menu_pane_paint(struct ui_rect clip)
 {
     load_fonts();
     paint_content(clip, USEC_TIMER);
-    shade(clip);
 }
 
 /* ---- the content shown ---- */
@@ -749,8 +709,8 @@ void menu_pane_paint(struct ui_rect clip)
 static bool same_content(const struct menu_pane_content *a,
                          const struct menu_pane_content *b)
 {
-    return a->kind == b->kind && !strcmp(a->title, b->title) &&
-           !strcmp(a->caption, b->caption) && !strcmp(a->glyph, b->glyph);
+    return a->kind == b->kind && a->art == b->art &&
+           !strcmp(a->title, b->title) && !strcmp(a->caption, b->caption);
 }
 
 void menu_pane_select(const struct menu_pane_content *content,
@@ -884,7 +844,6 @@ struct ui_rect menu_pane_step(void)
     {
         damage = menu_pane_rect();
         paint_content(damage, now);
-        shade(damage);
     }
     stepped_at = now;
     return damage;

@@ -22,6 +22,7 @@
 #include "system/appevents.h"
 #include "widgets/menu.h"
 #include "ui/scene.h"
+#include "ui/stock_art_ids.h"
 #include "root_menu.h"
 #include "screens/playback/cider.h"
 #include "screens/covers/carousel.h"
@@ -1831,10 +1832,17 @@ void root_menu_set_podcasts_row(bool on)
     podcasts_row(on, true);
 }
 
-enum list_pane_kind root_menu_item_pane(const struct menu_item_ex *item)
+/* The stock firmware's art for each row: its picture for an empty library
+ * where a row has one, and the music note for the rest. */
+enum list_pane_kind root_menu_item_pane(const struct menu_item_ex *item,
+                                        int *art)
 {
+    *art = STOCK_ART_NO_CONTENT_MUSIC_PREVIEW;
     if (item == audiobooks_item())
+    {
+        *art = STOCK_ART_NO_CONTENT_AUDIOBOOKS_PREVIEW;
         return LIST_PANE_CATEGORY;
+    }
     if (tagnavi_slot_of_item(item) >= 0)
         return LIST_PANE_ART;
     if ((item->flags & MENU_TYPE_MASK) != MT_RETURN_VALUE)
@@ -1848,10 +1856,31 @@ enum list_pane_kind root_menu_item_pane(const struct menu_item_ex *item)
         case GO_TO_WPS:
             return LIST_PANE_PLAYING;
         case GO_TO_MAINMENU:
+        case GO_TO_SYSTEM_SCREEN:
             return LIST_PANE_DEVICE;
-        default:
-            return LIST_PANE_CATEGORY;
+        case GO_TO_FILEBROWSER:
+        case GO_TO_DOCUMENTS:
+        case GO_TO_PLAYLISTS_SCREEN:
+        case GO_TO_PLAYLIST_VIEWER:
+        case GO_TO_SHORTCUTMENU:
+            *art = STOCK_ART_NO_CONTENT_PLAYLIST_PREVIEW;
+            break;
+        case GO_TO_LASTDOC:
+        case GO_TO_BOOKS:
+            *art = STOCK_ART_NO_CONTENT_AUDIOBOOKS_PREVIEW;
+            break;
+        case GO_TO_IMAGES:
+            *art = STOCK_ART_NO_CONTENT_PHOTO_PREVIEW;
+            break;
+        case GO_TO_PODCASTS:
+            *art = STOCK_ART_NO_CONTENT_PODCAST_PREVIEW;
+            break;
+        case GO_TO_MUSIC_QUIZ:
+        case GO_TO_BROWSEPLUGINS:
+            *art = STOCK_ART_EXTRAS_GAMES_PREVIEW;
+            break;
     }
+    return LIST_PANE_CATEGORY;
 }
 
 /* menu_table[] less the tagnavi slots whose row is hidden, such as Custom

@@ -1953,23 +1953,36 @@ static void paint_stock_index(struct native_list *render,
                                   "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
     if (!*text)
         return;
-    stock_art_draw(STOCK_ART_SYSTEM_QUICKSCROLL, tile.x, tile.y, clip);
+    /* Composed at 8 bits a channel and written once, as stock's 32-bit
+     * layer is: what lies below, the tile twice, as stock blends it, then
+     * the letter or "123" in white. */
+    static uint32_t pixels[INDEX_TILE_WIDTH * INDEX_TILE_HEIGHT];
+    struct stock_canvas canvas = { pixels, tile.x, tile.y, tile.width,
+                                   tile.height };
+    for (int y = clip.y; y < clip.y + clip.height; y++)
+        for (int x = clip.x; x < clip.x + clip.width; x++)
+        {
+            fb_data p = *FBADDR(x, y);
+            pixels[(y - tile.y) * tile.width + x - tile.x] =
+                (uint32_t)FB_UNPACK_RED(p) << 16 |
+                (uint32_t)FB_UNPACK_GREEN(p) << 8 | FB_UNPACK_BLUE(p);
+        }
+    for (int pass = 0; pass < 2; pass++)
+        stock_art_put(&canvas, STOCK_ART_SYSTEM_QUICKSCROLL, tile.x, tile.y);
     if (index_digits(text))
+        stock_art_mask(&canvas, STOCK_ART_SYSTEM_QUICKSCROLL_123, tile.x,
+                       tile.y, 0xffffff);
+    else
     {
-        stock_art_draw_mask(STOCK_ART_SYSTEM_QUICKSCROLL_123, tile.x, tile.y,
-                            0xffffff, clip);
-        return;
+        int width = font_getstringsize((const unsigned char *)text, NULL, NULL,
+                                       font);
+        /* Stock rounds the odd half pixel of centring to the right. */
+        stock_canvas_text(&canvas, font, text,
+                          tile.x + (tile.width - width + 1) / 2,
+                          tile.y + INDEX_TEXT_BASELINE - font_get(font)->ascent,
+                          0xffffff);
     }
-    struct viewport vp;
-    if (!set_clip(&vp, frame->clip, tile, font, LCD_WHITE))
-        return;
-    struct viewport *prior = lcd_set_viewport(&vp);
-    int width = font_getstringsize((const unsigned char *)text, NULL, NULL, font);
-    /* Stock rounds the odd half pixel of centring to the right. */
-    lcd_putsxy(tile.x - vp.x + (tile.width - width + 1) / 2,
-               tile.y - vp.y + INDEX_TEXT_BASELINE - font_get(font)->ascent,
-               (const unsigned char *)text);
-    lcd_set_viewport(prior);
+    stock_canvas_show(&canvas, clip);
 }
 
 /* A square twice the letter face's line height, dimmed, with a faint

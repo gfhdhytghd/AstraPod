@@ -169,6 +169,8 @@ struct status_layout {
 /* Stock's play art inks columns 1 to 11 of its 14; pause sits within. */
 #define ART_PLAY_INK_LEFT 1
 #define ART_PLAY_INK_RIGHT 11
+/* Every busy frame of the stock icon font inks the middle 12 columns. */
+#define ART_BUSY_INK 12
 
 #ifdef ASTRAPOD_ROCK_COMPAT
 static int tray_ink(const struct rock_tray_bitmap *icon, int *first)
@@ -210,9 +212,16 @@ static struct status_layout art_layout(const struct native_chrome *chrome,
                  icon_size;
     if (play_shown)
         edge = play_left + ART_PLAY_INK_LEFT;
-    out.busy_x = edge - ART_INK_GAP - icon_size;
+    /* Where draw_icon puts the glyph in its slot, then the ink in that. */
+    int busy_width, busy_height;
+    font_getstringsize((const unsigned char *)busy_icons[0], &busy_width,
+                       &busy_height, chrome->icon_font);
+    int busy_ink = (busy_width - ART_BUSY_INK) / 2;
+    if (busy_width > icon_size || busy_height > icon_size)
+        busy_ink += (icon_size - busy_width) / 2;
+    out.busy_x = edge - ART_INK_GAP - ART_BUSY_INK - busy_ink;
     if (chrome->state.busy < ARRAYLEN(busy_icons))
-        edge = out.busy_x;
+        edge = out.busy_x + busy_ink;
 
 #ifdef ASTRAPOD_ROCK_COMPAT
     const struct app_tray_view *tray = &chrome->state.tray;

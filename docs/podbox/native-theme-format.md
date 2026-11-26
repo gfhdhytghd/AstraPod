@@ -1,10 +1,10 @@
 # Native PodBox theme format
 
-The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica and with its own bitmaps. The built-in Plastic theme is the same as Classic.
+The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica and with its own bitmaps.
 
 ## Installing and choosing a theme
 
-Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Appearance → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim`, `light`, `classic` and `plastic`. The default is `scrim`.
+Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Appearance → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim`, `light` and `classic`. A saved `plastic` selects Classic. The default is `scrim`.
 
 Place referenced font files in `.rockbox/fonts/`. Use PBF1 `.pbf` files for text and an RB12 `.fnt` file for icons. Firmware falls back to Scrim if a theme file is missing or malformed, or if it references an unsupported font. It records the failure in `.rockbox/native-theme.log`.
 
@@ -55,7 +55,7 @@ Scrim's album-driven defaults are `palette.background=dominant,0,15`, `palette.l
 
 Use `font.<role>=<basename>` to reference a font. The basename can contain 1–31 ASCII letters, digits, hyphens and underscores, and must start with a letter or digit. The firmware appends `.pbf` for text roles and `.fnt` for `font.icon`. `font.icon` uses the glyph mapping for the built-in status and navigation symbols. Use an icon font with the same glyph assignments to preserve their meaning.
 
-| Role | Scrim and Light | Classic and Plastic |
+| Role | Scrim and Light | Classic |
 | --- | --- | --- |
 | `list` | `18-noto-sans` | `16-helvetica-bold` |
 | `title` | `18-noto-sans-bold` | `17-helvetica-bold` |
@@ -237,10 +237,6 @@ metric.status_icon_gap = 5
 
 Classic also changes the list and status paddings and the album-row size.
 A custom theme keeps Scrim's values for those unless it sets them.
-
-### The Plastic theme
-
-Plastic is the same as Classic.
 
 ## Native rendering and animation
 

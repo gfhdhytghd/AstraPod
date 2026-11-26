@@ -23,7 +23,7 @@ done
 cp "$ROOT/apps-ipod/fonts/"LICENSE-*.txt "$FONTS/"
 python3 "$ROOT/tools/fonts/compile.py" "$STAGE/generated"
 cp "$STAGE/generated/"*.pbf "$FONTS/"
-# Classic and Plastic draw the stock firmware's bitmaps from this pack.
+# Classic draws the stock firmware's bitmaps from this pack.
 mkdir -p "$STAGE/.rockbox/themes"
 python3 "$ROOT/apps-ipod/bitmaps/source/stock/gen_stock_art.py" \
     --pack "$STAGE/.rockbox/themes/stock-art.bin"

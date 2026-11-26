@@ -38,9 +38,12 @@ static bool valid_name(const char *name, size_t len)
     return true;
 }
 
-/* The built-in theme called `name`, or -1. */
+/* The built-in theme called `name`, or -1. "plastic" is a saved name for
+ * Classic. */
 static int builtin_id(const char *name, size_t len)
 {
+    if (len == 7 && !memcmp(name, "plastic", 7))
+        return UI_THEME_CLASSIC;
     for (int id = 0; id < UI_THEME_BUILTIN_COUNT; ++id)
     {
         const char *builtin = ui_theme_builtin_name(id);
@@ -144,13 +147,22 @@ static bool select_theme(const char *name, bool fallback)
     return valid;
 }
 
+/* Plastic was Classic under a name of its own. */
+static const char *current_name(const char *name)
+{
+    return strcmp(name, "plastic") ? name : "classic";
+}
+
 void ui_theme_apply_settings(void)
 {
+    if (!strcmp(global_settings.native_theme, "plastic"))
+        strcpy(global_settings.native_theme, current_name("plastic"));
     select_theme(global_settings.native_theme, true);
 }
 
 bool ui_theme_set(const char *name, bool fallback)
 {
+    name = current_name(name);
     bool applied = select_theme(name, fallback);
 
     if (applied || fallback)
@@ -326,7 +338,7 @@ static const char *theme_name(int item, void *data, char *buf, size_t len)
     (void)len;
     char (*files)[UI_THEME_NAME_MAX] = data;
     static const char *const builtins[UI_THEME_BUILTIN_COUNT] = {
-        "Scrim", "Light", "Classic", "Plastic"
+        "Scrim", "Light", "Classic"
     };
     return item < UI_THEME_BUILTIN_COUNT ? builtins[item] :
            files[item - UI_THEME_BUILTIN_COUNT];

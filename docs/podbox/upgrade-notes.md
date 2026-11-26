@@ -45,11 +45,12 @@
   stop. For lists that jump a whole row, set `style.list_scroll=snap` in a
   custom theme.
 
-- **Classic and Plastic show the original iPod's split menus**, with the
+- **Classic shows the original iPod's split menus**, with the
   list on the left half and a picture of the selected row on the right, in
   the original iPod's Helvetica.
   The right half, the status bar, battery, scrollbar and Now Playing bars
-  now use the original iPod's own pictures, under Classic as well as
-  Plastic, which are now the same theme. The pictures arrive in
+  now use the original iPod's own pictures. **Plastic is gone**: it drew
+  the same as Classic, and a player set to Plastic now shows Classic. The
+  pictures arrive in
   `.rockbox/themes/stock-art.bin`: update from the whole zip, or those themes
   show an empty pane and no battery.

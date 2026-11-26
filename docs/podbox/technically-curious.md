@@ -99,7 +99,7 @@ Three of them are easy to get wrong by hand, and all fail quietly:
   the tree and is never built. Omit the flag and the build compiles `apps/`
   instead — you get working firmware with none of this fork's work in it.
 - **`make zip` on its own is incomplete.** The firmware includes Scrim,
-  Light, Classic and Plastic. The bundle scripts supply native fonts, first-boot settings,
+  Light and Classic. The bundle scripts supply native fonts, first-boot settings,
   setting explanations, title trimming patterns, speech data and the
   Arcade text font. For ipod6g, run `bundle-rocks.sh` after
   `bundle-theme.sh` to add compatible plugins. `bundle-tools.sh` adds the desktop
@@ -177,7 +177,7 @@ make zip && ../bundle-theme.sh && ../bundle-rocks.sh && ../bundle-help.sh && ../
 unzip -oq rockbox.zip -d simdisk/
 ```
 
-**Run the bundle scripts before unpacking.** Scrim, Light, Classic and Plastic
+**Run the bundle scripts before unpacking.** Scrim, Light and Classic
 are built in.
 `bundle-theme.sh` supplies the native fonts and first-boot settings.
 

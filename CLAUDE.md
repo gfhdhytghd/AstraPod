@@ -207,13 +207,13 @@ make clean / make veryclean
 ```
 
 **Theme bundling — `make zip` is not enough.** Scrim is the default native
-theme; Light, Classic and Plastic are built in too. Choose between them under
+theme; Light and Classic are built in too. Choose between them under
 **Appearance > Native theme**. See [the native theme format](docs/podbox/native-theme-format.md)
 to add a custom theme.
 
 Run `../bundle-theme.sh` after `make zip` to add the native fonts,
 `.rockbox/default-config.cfg` and `.rockbox/themes/stock-art.bin`, the stock
-firmware bitmaps Classic and Plastic draw (written from
+firmware bitmaps Classic draws (written from
 `apps-ipod/bitmaps/source/stock/`; without it those themes lose their art
 and their split-menu pane, silently). On first boot, the config selects Scrim and
 sets the default fonts and other settings. Keep the player's own

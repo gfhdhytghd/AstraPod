@@ -16,7 +16,7 @@ each load a separate native size. The UI reads alpha samples at 1:1.
 
 ## Stock firmware fonts
 
-The `NN-helvetica*` fonts of the Classic and Plastic themes start from
+The `NN-helvetica*` fonts of the Classic theme start from
 Apple's Helvetica and its CJK bitmap strikes in the stock iPod Classic
 firmware. `python3 tools/fonts/stock.py FONT_DIR` converts the stock Fonts
 folder into the SGL1 glyph sets in `apps-ipod/fonts/stock/`, which are

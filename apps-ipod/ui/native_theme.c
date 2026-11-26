@@ -176,7 +176,7 @@ static const struct {
 
 static const char *const builtin_names[UI_THEME_BUILTIN_COUNT] = {
     [UI_THEME_SCRIM] = "scrim", [UI_THEME_LIGHT] = "light",
-    [UI_THEME_CLASSIC] = "classic", [UI_THEME_PLASTIC] = "plastic",
+    [UI_THEME_CLASSIC] = "classic",
 };
 
 static const struct {
@@ -304,8 +304,7 @@ static void plastic_columns(struct ui_theme *theme)
         .stops = 4, .nrows = last + 1, .rows = plastic_selection };
 }
 
-/* The stock firmware's own bitmaps, which Classic and Plastic both draw
- * with. */
+/* The stock firmware's own bitmaps, which Classic draws with. */
 static void plastic(struct ui_theme *theme)
 {
     theme->style[UI_STYLE_ART] = UI_ART_PLASTIC;
@@ -334,7 +333,7 @@ void ui_theme_builtin(struct ui_theme *theme, enum ui_theme_builtin_id id)
     theme->motion_scale = UI_THEME_MOTION_ONE;
     for (size_t i = 0; i < UI_MOTION_COUNT; i++)
         theme->motion[i] = UI_MOTION_DEFAULT;
-    if (id == UI_THEME_CLASSIC || id == UI_THEME_PLASTIC)
+    if (id == UI_THEME_CLASSIC)
     {
         classic(theme);
         plastic(theme);

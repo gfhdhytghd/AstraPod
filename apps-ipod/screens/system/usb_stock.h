@@ -10,6 +10,8 @@ void usb_stock_open(void);
 /* Draw the screen and send it to the LCD, or return false and draw nothing
  * when the theme is not the stock look or its art is missing. */
 bool usb_stock_draw(void);
+/* Fruit Company Ultra's entry, once the host is answered. */
+void usb_stock_enter(void);
 /* Unload what usb_stock_open() loaded. */
 void usb_stock_close(void);
 

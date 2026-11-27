@@ -136,6 +136,9 @@ ui/retained.c
 ui/scene.c
 ui/sheet.c
 ui/ultra.c
+ui/ultra_sheet.c
+ui/ultra_wps.c
+screens/system/usb_ultra.c
 widgets/option_select.c
 widgets/rating_dialog.c
 #ifdef HAVE_RECORDING

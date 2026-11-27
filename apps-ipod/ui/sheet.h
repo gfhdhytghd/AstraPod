@@ -11,8 +11,10 @@ struct ui_sheet {
     unsigned trace;
     uint32_t requested_at;
     int light;
+    /* Fruit Company Ultra's position, which may pass its place. */
+    int shown;
     fb_data tint;
-    bool active, starting;
+    bool active, starting, ultra;
 };
 
 void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route);

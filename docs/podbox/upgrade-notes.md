@@ -54,3 +54,11 @@
   pictures arrive in
   `.rockbox/themes/stock-art.bin`: update from the whole zip, or those themes
   show an empty pane and no battery.
+
+- **Extras** (Clocks, Calendars, Contacts, Alarms, Notes, Screen Lock and
+  Stopwatch) look and work like the original iPod's. An alarm rings while
+  the player is on, over any screen but a game or plugin, and pauses the
+  music until you answer it. Nothing wakes a player that is off or asleep
+  for an alarm. Alarms, clocks and the Screen Lock combination are kept in
+  `.rockbox/`; Notes reads the `.txt` files in `/Notes`. Update from the
+  whole zip: the Extras need its new fonts and `stock-art.bin`.

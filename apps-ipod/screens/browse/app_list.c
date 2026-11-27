@@ -250,6 +250,9 @@ static int by_name(const void *a, const void *b)
     return order ? order : x - y;
 }
 
+/* What the last look at each list found, -1 before the first */
+static int counts[] = { -1, -1, -1 };
+
 static void collect(enum app_list_kind kind)
 {
     rows.count = 0;
@@ -257,6 +260,14 @@ static void collect(enum app_list_kind kind)
         if (apps[i].kind == kind && installed(&apps[i]))
             rows.app[rows.count++] = i;
     qsort(rows.app, rows.count, sizeof(rows.app[0]), by_name);
+    counts[kind] = rows.count;
+}
+
+int app_list_count(enum app_list_kind kind)
+{
+    if (counts[kind] < 0)
+        collect(kind);
+    return counts[kind];
 }
 
 static int launch(const struct app *app)

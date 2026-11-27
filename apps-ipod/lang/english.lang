@@ -33665,3 +33665,45 @@
     *: "You have a party to attend."
   </voice>
 </phrase>
+<phrase>
+  id: LANG_FRUIT_NO_CONTACTS
+  desc: Fruit Company: Extras side pane beside Contacts, which lists none
+  user: core
+  <source>
+    *: "No Contacts"
+  </source>
+  <dest>
+    *: "No Contacts"
+  </dest>
+  <voice>
+    *: "No Contacts"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_COUNT
+  desc: Fruit Company: Extras side pane beside Games, the number of games; keep %d
+  user: core
+  <source>
+    *: "%d Games"
+  </source>
+  <dest>
+    *: "%d Games"
+  </dest>
+  <voice>
+    *: "%d Games"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ONE_GAME
+  desc: Fruit Company: Extras side pane beside Games when there is one
+  user: core
+  <source>
+    *: "1 Game"
+  </source>
+  <dest>
+    *: "1 Game"
+  </dest>
+  <voice>
+    *: "1 Game"
+  </voice>
+</phrase>

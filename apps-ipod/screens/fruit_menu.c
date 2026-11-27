@@ -30,6 +30,11 @@
 #include "root_menu.h"
 #include "database/tagcache.h"
 #include "screens/browse/app_list.h"
+#include "screens/extras/extras.h"
+#include "screens/extras/extras_calendars.h"
+#include "screens/extras/extras_clock.h"
+#include "ui/menu_pane.h"
+#include "timefuncs.h"
 #include "screens/browse/browser_db.h"
 #include "screens/settings/exported_settings.h"
 #include "screens/settings/sound_settings.h"
@@ -101,7 +106,6 @@ static int search(void)       { return run(GO_TO_DB_SEARCH); }
 static int photos(void)       { return run(GO_TO_IMAGES); }
 static int podcasts(void)     { return run(GO_TO_PODCASTS); }
 static int now_playing(void)  { return run(GO_TO_WPS); }
-static int notes(void)        { return run(GO_TO_DOCUMENTS); }
 static int movies(void)       { return run(GO_TO_VIDEOS); }
 
 /* Music Quiz is a screen of the main menu's, not a plugin: the list leaves
@@ -292,21 +296,31 @@ MENU(photos_menu, LANG_FRUIT_PHOTOS, home_callback, photos_rows);
 /** Extras **/
 
 /* Stock Extras rows with no AstraPod screen behind them yet */
-#define extras_alarms       not_available
-#define extras_calendars    not_available
-#define extras_clocks       not_available
-#define extras_contacts     not_available
-#define extras_screen_lock  not_available
-#define extras_stopwatch    not_available
+/* An Extras item's own way out: 0 back to the menu, or a GO_TO_* code */
+static int extra(int (*item)(void))
+{
+    int ret = item();
+    if (ret == GO_TO_ROOT)
+        return MENU_ATTACHED_USB;
+    return ret == GO_TO_PREVIOUS ? 0 : ret;
+}
 
-ROW(extras_clocks_row, LANG_FRUIT_CLOCKS, extras_clocks, NULL);
-ROW(extras_calendars_row, LANG_FRUIT_CALENDARS, extras_calendars, NULL);
-ROW(extras_contacts_row, LANG_FRUIT_CONTACTS, extras_contacts, NULL);
-ROW(extras_alarms_row, LANG_FRUIT_ALARMS, extras_alarms, NULL);
+static int clocks(void)       { return extra(extras_clock); }
+static int calendars(void)    { return extra(extras_calendars); }
+static int contacts(void)     { return extra(extras_contacts); }
+static int alarms(void)       { return extra(extras_alarms); }
+static int notes(void)        { return extra(extras_notes); }
+static int screen_lock(void)  { return extra(extras_screen_lock); }
+static int stopwatch(void)    { return extra(extras_stopwatch); }
+
+ROW(extras_clocks_row, LANG_FRUIT_CLOCKS, clocks, NULL);
+ROW(extras_calendars_row, LANG_FRUIT_CALENDARS, calendars, NULL);
+ROW(extras_contacts_row, LANG_FRUIT_CONTACTS, contacts, NULL);
+ROW(extras_alarms_row, LANG_FRUIT_ALARMS, alarms, NULL);
 ROW(extras_games_row, LANG_PLUGIN_GAMES, games, NULL);
 ROW(extras_notes_row, LANG_FRUIT_NOTES, notes, NULL);
-ROW(extras_screen_lock_row, LANG_FRUIT_SCREEN_LOCK, extras_screen_lock, NULL);
-ROW(extras_stopwatch_row, LANG_FRUIT_STOPWATCH, extras_stopwatch, NULL);
+ROW(extras_screen_lock_row, LANG_FRUIT_SCREEN_LOCK, screen_lock, NULL);
+ROW(extras_stopwatch_row, LANG_FRUIT_STOPWATCH, stopwatch, NULL);
 ROW(extras_other_apps_row, LANG_APP_LIST_OTHER, other_apps, NULL);
 ROW(extras_demos_row, LANG_PLUGIN_DEMOS, demos, NULL);
 ROW(extras_files_row, LANG_DIR_BROWSER, files, NULL);
@@ -592,15 +606,14 @@ ROW(home_tv_shows, LANG_FRUIT_TV_SHOWS, empty, home_callback);
 ROW(home_music_videos, LANG_FRUIT_MUSIC_VIDEOS, empty, home_callback);
 ROW(home_video_playlists, LANG_FRUIT_VIDEO_PLAYLISTS, empty, home_callback);
 ROW(home_podcasts, LANG_PODCASTS, podcasts, home_callback);
-ROW(home_clocks, LANG_FRUIT_CLOCKS, extras_clocks, home_callback);
-ROW(home_calendars, LANG_FRUIT_CALENDARS, extras_calendars, home_callback);
-ROW(home_contacts, LANG_FRUIT_CONTACTS, extras_contacts, home_callback);
-ROW(home_alarms, LANG_FRUIT_ALARMS, extras_alarms, home_callback);
+ROW(home_clocks, LANG_FRUIT_CLOCKS, clocks, home_callback);
+ROW(home_calendars, LANG_FRUIT_CALENDARS, calendars, home_callback);
+ROW(home_contacts, LANG_FRUIT_CONTACTS, contacts, home_callback);
+ROW(home_alarms, LANG_FRUIT_ALARMS, alarms, home_callback);
 ROW(home_games, LANG_PLUGIN_GAMES, games, home_callback);
 ROW(home_notes, LANG_FRUIT_NOTES, notes, home_callback);
-ROW(home_screen_lock, LANG_FRUIT_SCREEN_LOCK, extras_screen_lock,
-    home_callback);
-ROW(home_stopwatch, LANG_FRUIT_STOPWATCH, extras_stopwatch, home_callback);
+ROW(home_screen_lock, LANG_FRUIT_SCREEN_LOCK, screen_lock, home_callback);
+ROW(home_stopwatch, LANG_FRUIT_STOPWATCH, stopwatch, home_callback);
 ROW(home_shuffle, LANG_SHUFFLE_SONGS, shuffle_songs, home_callback);
 ROW(home_sleep, LANG_FRUIT_SLEEP, sleep_timer, home_callback);
 ROW(home_playback_report, LANG_SPUN, playback_report, home_callback);
@@ -682,10 +695,68 @@ bool fruit_menu_is_stock(const struct menu_item_ex *menu)
            menu == &date_time_menu;
 }
 
+/* Beside a stock Extras item, stock's picture of it at stock's place, and
+ * the caption under it. Whether `item` is one. */
+static bool extras_pane(const struct menu_item_ex *item)
+{
+    struct menu_pane_content c = {
+        .kind = LIST_PANE_PICTURE, .art = -1, .baseline = 221,
+    };
+    if (item == &extras_clocks_row || item == &home_clocks)
+    {
+        struct tm *tm = get_time();
+        c.paint = extras_clock_pane_paint;
+        c.stamp = tm->tm_hour * 60 + tm->tm_min;
+        snprintf(c.title, sizeof(c.title), "%s %d %d",
+                 str(LANG_MONTH_JANUARY + tm->tm_mon), tm->tm_mday,
+                 tm->tm_year + 1900);
+    }
+    else if (item == &extras_calendars_row || item == &home_calendars)
+        extras_calendars_pane(&c);
+    else if (item == &extras_contacts_row || item == &home_contacts)
+    {
+        c.art = STOCK_ART_ADDRESSVIEWER_PREVIEW;
+        c.x = 186, c.y = 47;
+        strlcpy(c.title, str(LANG_FRUIT_NO_CONTACTS), sizeof(c.title));
+    }
+    else if (item == &extras_alarms_row || item == &home_alarms)
+        c.art = STOCK_ART_ALARMS_CLOCK_STATIC, c.x = 178, c.y = 56;
+    else if (item == &extras_notes_row || item == &home_notes)
+    {
+        c.art = STOCK_ART_NOTES_PREVIEW;
+        c.x = 180, c.y = 47;
+        strlcpy(c.title, str(LANG_FRUIT_NOTES), sizeof(c.title));
+    }
+    else if (item == &extras_screen_lock_row || item == &home_screen_lock)
+    {
+        c.art = STOCK_ART_LOCKSCREEN_PADLOCK;
+        c.x = 179, c.y = 22;
+        strlcpy(c.title, str(extras_screen_lock_set() ?
+                             LANG_EXTRAS_SCREEN_LOCK_SET :
+                             LANG_EXTRAS_SCREEN_LOCK_NONE), sizeof(c.title));
+    }
+    else if (item == &extras_stopwatch_row || item == &home_stopwatch)
+        c.paint = extras_stopwatch_pane_paint;
+    else if (item == &extras_games_row || item == &home_games)
+    {
+        int games = app_list_count(APP_LIST_GAMES);
+        c.art = STOCK_ART_EXTRAS_GAMES_PREVIEW;
+        c.x = 170, c.y = 83;
+        snprintf(c.title, sizeof(c.title), str(games == 1 ?
+                 LANG_FRUIT_ONE_GAME : LANG_FRUIT_GAMES_COUNT), games);
+    }
+    else
+        return false;
+    menu_pane_set_picture(&c);
+    return true;
+}
+
 enum list_pane_kind fruit_menu_item_pane(const struct menu_item_ex *menu,
                                          const struct menu_item_ex *item,
                                          int *art)
 {
+    if (extras_pane(item))
+        return LIST_PANE_PICTURE;
     int bit = bit_of(home_bits, ARRAYLEN(home_bits), item);
     if (bit < 0)
         bit = bit_of(music_bits, ARRAYLEN(music_bits), item) >= 0 ?

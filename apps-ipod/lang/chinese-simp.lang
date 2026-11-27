@@ -33318,3 +33318,48 @@
     *: "你有一个聚会要参加。"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_FRUIT_NO_CONTACTS
+  desc: Fruit Company: Extras side pane beside Contacts, which lists none
+  user: core
+  <source>
+    *: "No Contacts"
+  </source>
+  <dest>
+    *: "无联系人"
+  </dest>
+  <voice>
+    *: "无联系人"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_GAMES_COUNT
+  desc: Fruit Company: Extras side pane beside Games, the number of games; keep %d
+  user: core
+  <source>
+    *: "%d Games"
+  </source>
+  <dest>
+    *: "%d 个游戏"
+  </dest>
+  <voice>
+    *: "%d 个游戏"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_ONE_GAME
+  desc: Fruit Company: Extras side pane beside Games when there is one
+  user: core
+  <source>
+    *: "1 Game"
+  </source>
+  <dest>
+    *: "1 个游戏"
+  </dest>
+  <voice>
+    *: "1 个游戏"
+  </voice>
+</phrase>

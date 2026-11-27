@@ -37,7 +37,7 @@ TREE = [
                 ("Video Playlists", "empty"), ("Settings", "open")], [1]),
     ("photos", [("All Photos", "open"), ("Settings", "open")], [2]),
     ("extras", [("Clocks", "open"), ("Calendars", "open"),
-                ("Contacts", "open"), ("Alarms", "open"), ("Games", "open"),
+                ("Contacts", "empty"), ("Alarms", "open"), ("Games", "open"),
                 ("Notes", "open"), ("Screen Lock", "open"),
                 ("Stopwatch", "open"), ("Other Apps", "open"),
                 ("Demos", "open"), ("Files", "open"), ("System", "open")],

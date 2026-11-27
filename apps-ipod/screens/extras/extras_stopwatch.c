@@ -264,6 +264,11 @@ static void put_dial(struct stock_canvas *c, int left, long cs)
              MINS_X + left, MINS_Y);
 }
 
+void extras_stopwatch_pane_paint(struct stock_canvas *band)
+{
+    put_dial(band, MENU_PANE_X, current ? sw_elapsed(&logs[0]) : 0);
+}
+
 /* Lap rows fade with age: stock draws each in this colour at this alpha. */
 #define LAP_RGB 0xdce6fa
 static const uint8_t lap_alpha[LAPS_SHOWN] = { 120, 54, 30 };

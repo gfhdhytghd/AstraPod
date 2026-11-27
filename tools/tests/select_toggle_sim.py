@@ -37,6 +37,7 @@ from pathlib import Path
 from PIL import ImageChops
 
 from ui_menu_sim import FPS, Screen, process
+from ui_quickscreen_sim import ULTRA_FALLBACK_THEME
 
 FULL = (0, 22, 320, 240)
 HALF = (0, 22, 160, 240)
@@ -50,6 +51,7 @@ THEMES = {
                       [("Down", 5), ("Return", 1), ("Down", 17),
                        ("Return", 1), ("Down", 1), ("Return", 1)]),
 }
+THEMES["fruit-company-ultra"] = THEMES["fruit-company"]
 # From Playback back into the settings tree's top level. The tree is a
 # screen of its own -- Settings started in, or Fruit Company's Advanced
 # Settings -- which Menu leaves, with its row still selected.
@@ -207,8 +209,15 @@ def run_theme(args, env, theme, out):
         rockbox = root / ".rockbox"
         rockbox.mkdir(parents=True)
         for entry in (args.simdisk / ".rockbox").iterdir():
-            if entry.name not in ("config.cfg", "library"):
+            if entry.name not in ("config.cfg", "library", "native-themes"):
                 (rockbox / entry.name).symlink_to(entry)
+        if theme == "fruit-company-ultra":
+            themes = rockbox / "native-themes"
+            themes.mkdir()
+            filename = "fruit-company-ultra.podtheme"
+            original = args.simdisk / ".rockbox/native-themes" / filename
+            (themes / filename).write_text(original.read_text() if original.exists()
+                                           else ULTRA_FALLBACK_THEME)
         config = rockbox / "config.cfg"
         config.write_text(
             (args.simdisk / ".rockbox/default-config.cfg").read_text() +

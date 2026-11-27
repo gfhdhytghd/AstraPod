@@ -173,6 +173,10 @@ def exercise(sim):
     assert same(capture(sim, "previous-track"), seeked, TITLE)
     sim.tap("menu", 35)
     assert not wps(capture(sim, "menu")), "MENU did not leave Now Playing"
+    # A simulated USB storage session flushes the tagcache write queue.
+    sim.tap("usb", 60)
+    sim.tap("select", 120)
+    sim.tap("usb", 90)
 
 
 def run(binary, disk, out, script):
@@ -206,20 +210,27 @@ def check_cover_flow(sim):
     sim.tap("select", 42)  # Music.
     sim.tap("select", 155)  # Cover Flow's opened library.
     covers = capture(sim, "covers")
-    sim.tap("play", 100)
+    sim.tap("select", 100)  # Open the album's tracks.
+    sim.tap("select", 100)  # Play the selected track.
     assert wps(capture(sim, "cover-playing"))
     sim.tap("select", 24)
     assert scrub(capture(sim, "cover-scrub"))
     sim.tap("menu", 90)
+    sim.tap("menu", 80)
     returned = capture(sim, "cover-return")
     # The cover caption may be moving, but the screen returns to its covers.
     assert not wps(returned) and same(covers, returned, (0, 25, 320, 165))
 
 
 def check_classic(sim):
-    play_playlist(sim)
+    paused = play_playlist(sim)
     sim.tap("select", 42)
-    assert not wps(capture(sim, "classic-select")), "Classic lost its Lyrics action"
+    lyrics = capture(sim, "classic-select")
+    assert not same(paused, lyrics, (0, 20, 320, 195)), (
+        "Classic SELECT did not change the lyrics body")
+    sim.tap("menu", 42)
+    assert same(paused, capture(sim, "classic-return"), (0, 20, 320, 195)), (
+        "MENU did not return from Lyrics to Now Playing")
 
 
 def main():

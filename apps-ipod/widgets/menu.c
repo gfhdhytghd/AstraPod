@@ -148,6 +148,9 @@ static int find_menu_selection(int selected)
             return i;
     return 0;
 }
+static const char *item_label(const struct menu_item_ex *menu, int type,
+                              int index, char *buffer, size_t buffer_len);
+
 static const char* get_menu_item_name(int selected_item,
                                       void * data,
                                       char *buffer,
@@ -176,9 +179,15 @@ static const char* get_menu_item_name(int selected_item,
     }
     if (type == MT_MENU)
         menu = menu->submenus[selected_item];
+    return item_label(menu, type, selected_item, buffer, buffer_len);
+}
 
+/* The name of `menu`, row `index` of a menu of `type`. */
+static const char *item_label(const struct menu_item_ex *menu, int type,
+                              int index, char *buffer, size_t buffer_len)
+{
     if ((menu->flags&MENU_DYNAMIC_DESC) && (type != MT_SETTING_W_TEXT))
-        return menu->menu_get_name_and_icon->list_get_name(selected_item,
+        return menu->menu_get_name_and_icon->list_get_name(index,
             menu->menu_get_name_and_icon->list_get_name_data, buffer, buffer_len);
 
     type = (menu->flags&MENU_TYPE_MASK);
@@ -561,6 +570,50 @@ static bool item_hidden(const struct menu_item_ex *item, int depth)
     return false;
 }
 
+/* A submenu row's page as it opens: its title and its rows, leaving out
+ * those Settings Mode hides. A row's own menu callback can hide it too,
+ * which this does not ask. */
+static bool menu_child_texts(int selected_item, void *data, int rows,
+                             unsigned token, list_child_text *text,
+                             void *context)
+{
+    (void)rows;
+    (void)token;
+    static char buf[MAX_PATH];
+    const struct menu_item_ex *menu = data;
+    if ((menu->flags & MENU_TYPE_MASK) != MT_MENU)
+        return true;
+    const struct menu_item_ex *sub =
+        menu->submenus[get_menu_selection(selected_item, menu)];
+    int type = sub->flags & MENU_TYPE_MASK;
+    if (type != MT_MENU && type != MT_RETURN_ID)
+        return true;
+
+    int count = MIN(MENU_GET_COUNT(sub->flags), MAX_MENU_SUBITEMS);
+    for (int i = 0; i < count; i++)
+    {
+        const char *name;
+        if (type == MT_MENU)
+        {
+            if (!menu_item_in_settings_mode(sub->submenus[i]))
+                continue;
+            name = item_label(sub->submenus[i], type, i, buf, sizeof(buf));
+        }
+        else if (sub->flags & MENU_DYNAMIC_DESC)
+            name = sub->menu_get_name_and_icon->list_get_name(
+                i, sub->menu_get_name_and_icon->list_get_name_data,
+                buf, sizeof(buf));
+        else
+            name = sub->strings[i];
+
+        if (name && P2ID((const unsigned char *)name) <= VOICEONLY_DELIMITER)
+            text(i, P2STR((const unsigned char *)name), context);
+    }
+    int icon;
+    text(-1, init_title(sub, &icon, buf, sizeof(buf)), context);
+    return true;
+}
+
 bool menu_item_in_settings_mode(const struct menu_item_ex *item)
 {
     return global_settings.settings_mode != SETTINGS_MODE_STANDARD ||
@@ -705,7 +758,11 @@ static int init_menu_lists(const struct menu_item_ex *menu,
     /* A menu that is a page of its own, not a sheet or a plugin's. */
     enum current_activity activity = get_current_activity();
     if (activity != ACTIVITY_CONTEXTMENU && activity != ACTIVITY_PLUGIN)
+    {
         gui_synclist_set_pane_callback(lists, menu_get_pane);
+        if (!parent)
+            gui_synclist_set_child_texts_callback(lists, menu_child_texts);
+    }
     if(global_settings.talk_menu)
         gui_synclist_set_voice_callback(lists, talk_menu_item);
     gui_synclist_set_nb_items(lists,current_subitems_count);

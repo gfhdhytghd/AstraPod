@@ -846,7 +846,7 @@ void font_prefetch_mark_hot(int id)
         font_get(id)->pbf.want_hot = true;
 }
 
-bool font_prefetch_text(int id, const char *text)
+static bool prefetch_text(int id, const char *text, unsigned *budget)
 {
     if (!text || !*text)
         return true;
@@ -856,9 +856,19 @@ bool font_prefetch_text(int id, const char *text)
     struct buflib_alloc_data *data = core_get_data_pinned(buflib_allocations[id]);
     bool ready = !data->font.pbf.file_size ||
         font_pbf_prefetch(&data->font, id, data->path,
-                          bidi_l2v((const unsigned char *)text, 1));
+                          bidi_l2v((const unsigned char *)text, 1), budget);
     core_put_data_pinned(data);
     return ready;
+}
+bool font_prefetch_text(int id, const char *text)
+{
+    return prefetch_text(id, text, NULL);
+}
+
+void font_prefetch_speculative_text(int id, const char *text, unsigned *budget)
+{
+    if (*budget)
+        prefetch_text(id, text, budget);
 }
 #endif
 

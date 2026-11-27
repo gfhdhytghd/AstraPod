@@ -110,10 +110,6 @@ def run(binary, resource, root, theme, output, strips, env):
     (rockbox / "ui-perf.enable").touch()
     for i in range(TRACK_COUNT):
         (root / f"Track {i + 1:02d}").mkdir()
-    # Names in characters no earlier page drew, so their glyphs load.
-    for i in range(TRACK_COUNT):
-        name = "".join(chr(0x4E00 + 5 * i + k) for k in range(5))
-        (root / "Track 01" / f"Item {i + 1:02d} {name}").mkdir()
 
     log_path = output / f"{theme}-sim.log"
     result = {}
@@ -149,6 +145,11 @@ def run(binary, resource, root, theme, output, strips, env):
         # The top-end scenario leaves Search selected; Track 01 is next.
         click(screen, 1, 5, 250)
         time.sleep(40 / FPS)
+        # Populate after the parent has idled so its previews cannot warm
+        # these names. This deliberately exercises cold-page row repair.
+        for i in range(TRACK_COUNT):
+            name = "".join(chr(0x4E00 + 5 * i + k) for k in range(5))
+            (root / "Track 01" / f"Item {i + 1:02d} {name}").mkdir()
         _, pushed = kinds_in(root / "panel.rec", 0)
         tap(env, "Return")
         time.sleep(2 * GLYPH_DELAY_MS / 1000)

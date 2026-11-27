@@ -9,6 +9,7 @@
 #ifndef _BROWSER_DISK_H_
 #define _BROWSER_DISK_H_
 #include "browser.h"
+#include "widgets/list.h"
 
 int browser_disk_load(struct browser_context* c, const char* tempdir);
 int browser_disk_enter(struct browser_context* c);
@@ -24,5 +25,10 @@ bool browser_disk_select_language(const char *path);
  * a root carrying the Search row opens scrolled past it. Clears the request.
  * The counterpart to browser_db_take_pending_top_item(). */
 int browser_disk_take_pending_top_item(void);
+/* Return false while the worker gathers a folder's first screen. */
+bool browser_disk_child_texts(struct browser_context *c, const char *name,
+                              int rows, unsigned token, list_child_text *text,
+                              void *context);
+bool browser_disk_hide_extension(bool isdir, int attr, int filter);
 
 #endif

@@ -171,6 +171,9 @@ struct native_list {
     bool has_marquee, snap_frame, batched;
     /* The last frame left rows of waiting text for the next one. */
     bool repairing;
+    int child_next;
+    unsigned child_glyphs;
+    uint32_t child_after;
     /* While every row paints for a hardware-scroll frame: how many rows of
      * waiting text may still change; the rest keep their text as shown. */
     bool holding;
@@ -180,6 +183,27 @@ struct native_list {
 
 static int renderer_handle;
 static struct ui_pace glide_pace;
+static unsigned child_token;
+
+#define CHILD_IDLE_US 120000
+#define CHILD_GLYPHS 96
+#define CHILD_PAGES 64
+
+bool list_render_child_current(unsigned token)
+{
+    return token == __atomic_load_n(&child_token, __ATOMIC_RELAXED);
+}
+
+static void child_reset(struct native_list *render)
+{
+    /* The list thread is the sole writer. The directory worker polls it. */
+    __atomic_store_n(&child_token, child_token + 1, __ATOMIC_RELAXED);
+    if (render->child_glyphs)
+        font_prefetch_speculative_cancel();
+    render->child_after = USEC_TIMER + CHILD_IDLE_US;
+    render->child_next = 0;
+    render->child_glyphs = 0;
+}
 
 void list_render_init(void)
 {
@@ -2654,14 +2678,14 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     }
 
     refresh_tokens(render);
-    if (render->owner != list || render->generation != list->generation ||
-        render->selection != list->selected_item)
+    if (!same_owner || render->selection != list->selected_item)
     {
         render->prefetched_top = -1;
         render->owner = list;
         render->generation = list->generation;
         render->selection = list->selected_item;
         render->marquee_started = ui_clock_start();
+        child_reset(render);
     }
     if (!status_only)
     {
@@ -2911,6 +2935,16 @@ bool gui_synclist_paint_background(const struct gui_synclist *list,
     return same_owner;
 }
 
+void list_render_child_input(const struct gui_synclist *list)
+{
+    if (renderer_handle <= 0 || !list->callback_child_texts)
+        return;
+    struct native_list *render = core_get_data_pinned(renderer_handle);
+    if (render->owner == list)
+        child_reset(render);
+    core_put_data_pinned(render);
+}
+
 void list_render_forget(const struct gui_synclist *list)
 {
     if (renderer_handle <= 0)
@@ -2918,6 +2952,8 @@ void list_render_forget(const struct gui_synclist *list)
     struct native_list *render = core_get_data_pinned(renderer_handle);
     if (render->owner == list)
     {
+        if (render->owner->callback_child_texts)
+            child_reset(render);
         render->owner = NULL;
         render->shown.valid = false;
         render->has_marquee = false;
@@ -2939,14 +2975,90 @@ void gui_synclist_scroll_stop(struct gui_synclist *list)
 
 static int list_deadline(const struct gui_synclist *list, bool poll);
 
+static bool child_due(const struct native_list *render, uint32_t now)
+{
+    return !font_prefetch_busy() &&
+           (int32_t)(now - render->child_after) >= 0;
+}
+
+struct child_scan {
+    int row_font, title_font;
+    unsigned budget;
+};
+
+static void child_text(int row, const char *text, void *context)
+{
+    struct child_scan *scan = context;
+    int font = row < 0 ? scan->title_font : scan->row_font;
+    if (font >= 0)
+        font_prefetch_speculative_text(font, text, &scan->budget);
+}
+
+static void child_step(struct native_list *render, struct gui_synclist *list)
+{
+    int pages = MIN(list->nb_items, CHILD_PAGES);
+    int visible = list_render_visible_rows(list, SCREEN_MAIN) + 1;
+    int n = render->child_next;
+    /* Give the selected page priority, then work around the selection. */
+    int item = (list->selected_item + n) % list->nb_items;
+    bool chrome = viewportmanager_theme_enabled(SCREEN_MAIN);
+    struct child_scan scan = {
+        .row_font = render->text_font >= 0 ? render->text_font :
+                    list->parent[SCREEN_MAIN]->font,
+        .title_font = chrome ? sb_title_font() :
+                      render->title_font >= 0 ? render->title_font : FONT_UI,
+        .budget = CHILD_GLYPHS - render->child_glyphs,
+    };
+    unsigned budget = scan.budget;
+    /* Sample bodies near the selection, where the next wheel step can
+     * reach them. Menu providers use their in-memory labels at any index. */
+    int rows = n < visible ? visible : 0;
+    font_prefetch_begin();
+    bool done = list->callback_child_texts(item, list->data, rows,
+                                          child_token, child_text, &scan);
+    font_prefetch_end();
+    render->child_glyphs += budget - scan.budget;
+    if (done)
+    {
+        __atomic_store_n(&child_token, child_token + 1, __ATOMIC_RELAXED);
+        ++render->child_next;
+    }
+    if (!scan.budget)
+        render->child_next = pages;
+    /* Give the action queue a tick between children or result polls. */
+    render->child_after = USEC_TIMER + (1000000 / HZ);
+}
+
+static int child_deadline(const struct native_list *render,
+                          const struct gui_synclist *list, bool poll)
+{
+    if (!list->callback_child_texts || !render->shown.valid ||
+        render->child_next >= MIN(list->nb_items, CHILD_PAGES) ||
+        render->motion.visible || render->overlay.visible ||
+        render->repairing || !render->shown.complete ||
+        rows_waiting(&render->shown))
+        return TIMEOUT_BLOCK;
+    uint32_t now = USEC_TIMER;
+    if (child_due(render, now))
+        return 0;
+    if (!poll)
+        return TIMEOUT_BLOCK;
+    int32_t left = render->child_after - now;
+    return MAX(1, left / (1000000 / HZ) + 1);
+}
+
 static int motion_deadline(const struct gui_synclist *list, bool poll)
 {
     int delay = list_deadline(list, poll);
     if (renderer_handle <= 0 || ui_scrolling_held())
         return delay;
     struct native_list *render = core_get_data_pinned(renderer_handle);
-    bool split = motion_owner(render, list) && split_list(list);
+    bool owner = motion_owner(render, list);
+    bool split = owner && split_list(list);
+    int child = owner ? child_deadline(render, list, poll) : TIMEOUT_BLOCK;
     core_put_data_pinned(render);
+    if (child != TIMEOUT_BLOCK && (delay == TIMEOUT_BLOCK || child < delay))
+        delay = child;
     int pane = split ? menu_pane_deadline() : TIMEOUT_BLOCK;
     if (pane != TIMEOUT_BLOCK && (delay == TIMEOUT_BLOCK || pane < delay))
         delay = pane;
@@ -3043,6 +3155,15 @@ void list_render_draw_due(struct gui_synclist *list)
 {
     if (list_deadline(list, false) == 0)
         draw_list(list, false, true, true);
+    if (renderer_handle > 0 && !ui_scrolling_held())
+    {
+        struct native_list *render = core_get_data_pinned(renderer_handle);
+        if (motion_owner(render, list) &&
+            child_deadline(render, list, false) == 0 &&
+            button_queue_empty() && !gui_synclist_flush_inhibited())
+            child_step(render, list);
+        core_put_data_pinned(render);
+    }
     struct ui_rect damage = menu_pane_step();
     if (damage.width > 0 && damage.height > 0 &&
         !gui_synclist_flush_inhibited())

@@ -495,12 +495,17 @@ static int kern_adjust(const struct font *font, unsigned row, unsigned column)
     return 0;
 }
 
+static const unsigned char *warm_glyph_for_draw(struct font *font,
+                                                  ucschar_t cp);
+
 int font_pbf_run(struct font *font, struct font_run *run, ucschar_t cp,
                  struct font_glyph *out)
 {
     if (cp == 0xffff)
         cp = font->defaultchar;
     const unsigned char *record = cached_glyph(font, cp);
+    if (!record)
+        record = warm_glyph_for_draw(font, cp);
     if (!record && font->fd >= 0 && !font_prefetch_active())
     {
         const struct font_cache_entry *entry = font_cache_get(&font->cache, cp, false, cache_read, font);
@@ -562,7 +567,7 @@ struct pbf_request {
     struct font_pbf file;
     unsigned height;
     char path[MAX_PATH];
-    unsigned count;
+    unsigned count, ticket, order;
     struct pbf_record glyphs[PREFETCH_GLYPHS];
     unsigned char *hot;
 };
@@ -584,6 +589,16 @@ static volatile bool suspended;
 static struct mutex batch_lock;
 static void (*schedule_prefetch)(void);
 static void (*batch_trace)(unsigned, uint32_t, unsigned);
+
+static void copy_record(unsigned char *dst, const struct pbf_record *r)
+{
+    unsigned bytes = u16(r->header) & 0x7fff;
+    memcpy(dst, r->header, 6);
+    memcpy(dst + 6, batch_data + r->data, bytes);
+    memset(dst + 6 + bytes, 0xff, ALPHA_PADDING);
+}
+
+#include "font_pbf_speculative.h"
 
 void font_pbf_set_batch_trace(void (*trace)(unsigned, uint32_t, unsigned))
 {
@@ -625,9 +640,11 @@ static bool stream_open(int fd, uint32_t start)
     return lseek(fd, stream_cursor, SEEK_SET) == (off_t)stream_cursor;
 }
 
+static unsigned stream_ticket;
+
 static bool stream_at(int fd, uint32_t offset, unsigned char *out, size_t size, uint32_t end)
 {
-    while (size && !suspended)
+    while (size && !suspended && warm_current(stream_ticket))
     {
         if (offset >= stream_start + stream_length)
         {
@@ -728,7 +745,7 @@ static unsigned read_batch(int fd, bool *loaded_hot)
         return 0;
 
     unsigned used = 0, copied = 0;
-    for (; copied < job.count && !suspended; copied++)
+    for (; copied < job.count && !batch_aborted(); copied++)
     {
         struct pbf_record *r = &records[copied];
         if (job.hot && !*loaded_hot && r->offset >= job.file.hot_offset)
@@ -774,6 +791,7 @@ static unsigned read_batch(int fd, bool *loaded_hot)
 void font_pbf_prefetch_init(void (*schedule)(void))
 {
     mutex_init(&batch_lock);
+    warm_handle = core_alloc_free_space(WARM_BYTES);
     schedule_prefetch = schedule;
 }
 
@@ -785,16 +803,7 @@ void font_pbf_prefetch_work(void)
         mutex_unlock(&batch_lock);
         return;
     }
-    int id = -1;
-    for (int offset = 1; offset <= MAXFONTS; offset++)
-    {
-        int next = (job_font + offset) % MAXFONTS;
-        if (pending[next].count)
-        {
-            id = next;
-            break;
-        }
-    }
+    int id = next_batch();
     if (id < 0)
     {
         mutex_unlock(&batch_lock);
@@ -809,7 +818,8 @@ void font_pbf_prefetch_work(void)
     uint32_t start = batch_trace ? USEC_TIMER : 0;
     unsigned count = 0;
     bool loaded_hot = false;
-    int fd = open(job.path, O_RDONLY);
+    stream_ticket = job.ticket;
+    int fd = batch_aborted() ? -1 : open(job.path, O_RDONLY);
     if (fd >= 0)
     {
         if (ffilesize(fd) == (off_t)job.file.file_size)
@@ -817,10 +827,11 @@ void font_pbf_prefetch_work(void)
         close(fd);
     }
 
-    if (batch_trace)
+    stream_ticket = 0;
+    if (batch_trace && !batch_aborted())
         batch_trace(job.height, USEC_TIMER - start, count);
     mutex_lock(&batch_lock);
-    batch_count = suspended ? 0 : count;
+    batch_count = batch_aborted() ? 0 : count;
     batch_hot = !suspended && loaded_hot;
     batch = BATCH_READY;
     mutex_unlock(&batch_lock);
@@ -828,11 +839,7 @@ void font_pbf_prefetch_work(void)
 
 static void publish_record(struct font_cache_entry *entry, void *context)
 {
-    const struct pbf_record *r = context;
-    unsigned bytes = u16(r->header) & 0x7fff;
-    memcpy(entry->bitmap, r->header, 6);
-    memcpy(entry->bitmap + 6, batch_data + r->data, bytes);
-    memset(entry->bitmap + 6 + bytes, 0xff, ALPHA_PADDING);
+    copy_record(entry->bitmap, context);
 }
 
 unsigned font_prefetch_epoch(void)
@@ -849,11 +856,14 @@ unsigned font_prefetch_epoch(void)
     mutex_unlock(&batch_lock);
 
     int id = job_font;
-    if ((batch_count || batch_hot) && !suspended)
+    if ((batch_count || batch_hot) && !batch_aborted())
     {
         font_lock(id, true);
         struct font *font = font_get(id);
-        if (font->pbf.serial == job.file.serial && !font->disabled)
+        if (font->pbf.serial == job.file.serial && !font->disabled &&
+            job.ticket)
+            warm_publish(font);
+        else if (font->pbf.serial == job.file.serial && !font->disabled)
         {
             font->pbf.hot_ready |= batch_hot;
             for (unsigned i = 0; i < batch_count; i++)
@@ -1131,22 +1141,23 @@ void font_pbf_pack_bind(int id, const unsigned char *primary, const unsigned cha
 
 
 bool font_pbf_prefetch(struct font *font, int id, const char *path,
-                       const ucschar_t *text)
+                       const ucschar_t *text, unsigned *budget)
 {
     /* With no background thread, the ordinary font renderer can still
      * use its synchronous cache-fill path. */
-    if (!text || !schedule_prefetch)
+    if (!text || !schedule_prefetch || (budget && warm_handle <= 0))
         return true;
+    unsigned ticket = budget ? warm_generation : 0;
     bool ready = true;
     for (const ucschar_t *p = text; *p; p++)
     {
         ucschar_t cp = *p == 0xffff ? (ucschar_t)font->defaultchar : *p;
-        ready &= cached_glyph(font, cp) != NULL;
+        ready &= cached_glyph(font, cp) || warm_glyph(font, cp);
     }
     if (ready || suspended || font->disabled)
         return ready;
 
-    if (hot_memory && font->pbf.want_hot && !font->pbf.hot_slot && font->pbf.stride)
+    if (!ticket && hot_memory && font->pbf.want_hot && !font->pbf.hot_slot && font->pbf.stride)
     {
         for (unsigned i = 0; i < ARRAYLEN(hot_slots); i++)
         {
@@ -1168,21 +1179,32 @@ bool font_pbf_prefetch(struct font *font, int id, const char *path,
         strlcpy(request->path, path, sizeof(request->path));
         request->count = 0;
     }
+    if (!prefetch_class(request, ticket))
+    {
+        mutex_unlock(&batch_lock);
+        return false;
+    }
     unsigned limit = MIN(PREFETCH_GLYPHS, font->cache._capacity);
+    if (budget)
+        limit = MIN(limit, request->count + *budget);
     bool in_flight = batch != BATCH_EMPTY && job_font == id &&
-                     job.file.serial == font->pbf.serial;
+                     job.file.serial == font->pbf.serial &&
+                     job.ticket == ticket;
     for (; *text && request->count < limit; text++)
     {
         ucschar_t cp = *text == 0xffff ? (ucschar_t)font->defaultchar : *text;
-        if (cached_glyph(font, cp) || contains(request, cp) || (in_flight && contains(&job, cp)))
+        if (cached_glyph(font, cp) || warm_glyph(font, cp) ||
+            contains(request, cp) || (in_flight && contains(&job, cp)))
             continue;
         if (!resolve(font, cp, &request->glyphs[request->count]))
             continue;
         request->count++;
+        if (budget)
+            --*budget;
         requested = true;
     }
     if (request->count)
-        request->hot = font->pbf.hot_slot && !font->pbf.hot_ready &&
+        request->hot = !ticket && font->pbf.hot_slot && !font->pbf.hot_ready &&
                        !(in_flight && job.hot) ? hot_data(font->pbf.hot_slot) : NULL;
     mutex_unlock(&batch_lock);
     if (!scope_depth && requested)

@@ -150,7 +150,7 @@ void bg_task_start(void);
 
 /* Queue an event for the task's handle_event(), to run on the thread. One
  * that arrives during a USB session is thrown away unhandled. */
-void bg_task_post(struct bg_task *task, long id);
+bool bg_task_post(struct bg_task *task, long id);
 /* Whether the task's event id is waiting on the queue. Exact only for an id
  * no other task posts. */
 bool bg_task_queued(const struct bg_task *task, long id);

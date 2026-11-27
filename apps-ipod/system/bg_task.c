@@ -545,10 +545,12 @@ void bg_task_start(void)
 #endif
 }
 
-void bg_task_post(struct bg_task *task, long id)
+bool bg_task_post(struct bg_task *task, long id)
 {
-    if (bg_thread_id)
-        queue_post(&bg_queue, id, (intptr_t)task);
+    if (!bg_thread_id)
+        return false;
+    queue_post(&bg_queue, id, (intptr_t)task);
+    return true;
 }
 
 bool bg_task_queued(const struct bg_task *task, long id)

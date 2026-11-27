@@ -178,6 +178,9 @@ void font_prefetch_end(void);
 bool font_prefetch_active(void);
 void font_prefetch_mark_hot(int font_id);
 bool font_prefetch_text(int font_id, const char *text);
+/* Warm the idle child page without evicting the current page's glyphs. */
+void font_prefetch_speculative_text(int id, const char *text, unsigned *budget);
+void font_prefetch_speculative_cancel(void);
 unsigned font_prefetch_epoch(void);
 bool font_prefetch_busy(void);
 #else
@@ -187,6 +190,10 @@ static inline bool font_prefetch_active(void) { return false; }
 static inline void font_prefetch_mark_hot(int id) { (void)id; }
 static inline bool font_prefetch_text(int id, const char *text)
 { (void)id; (void)text; return true; }
+static inline void font_prefetch_speculative_text(int id, const char *text,
+                                                  unsigned *budget)
+{ (void)id; (void)text; (void)budget; }
+static inline void font_prefetch_speculative_cancel(void) {}
 static inline unsigned font_prefetch_epoch(void) { return 0; }
 static inline bool font_prefetch_busy(void) { return false; }
 #endif

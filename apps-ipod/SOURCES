@@ -205,6 +205,7 @@ sim/rock_host.c
 #endif
 #endif
 screens/browse/browser_flat.c
+screens/extras/extras_alarm_ring.c
 screens/extras/extras_alarms.c
 screens/extras/extras_bar.c
 screens/extras/extras_calendars.c

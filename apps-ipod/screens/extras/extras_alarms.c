@@ -6,18 +6,16 @@
  * it share the split pane's red alarm clock; the Date and Time editors are
  * full pages on the black status bar.
  *
- * Sleep Timer is the player's own (set_sleeptimer_duration). An alarm is
- * stored in ALARMS_FILE with its date, time, repeat, sound and label; the
- * player has no alarm wake-up, so a stored alarm does not sound.
+ * Sleep Timer is the player's own (set_sleeptimer_duration). The alarms are
+ * alarm_table, which extras_alarm_ring.c keeps in its file and rings.
  *
- * Parts: the alarms and their file; the text of a row and of the pane; the
+ * Parts: the alarms; the text of a row and of the pane; the
  * list pages; the Date and Time editors; the pages themselves.
  ****************************************************************************/
 #include "config.h"
 #include "system.h"
 #include <stdio.h>
 #include <string.h>
-#include "file.h"
 #include "fixedpoint.h"
 #include "font.h"
 #include "kernel.h"
@@ -39,13 +37,10 @@
 #include "widgets/list.h"
 #include "root_menu.h"
 #include "extras.h"
+#include "extras_alarm_ring.h"
 #include "extras_bar.h"
 #include "extras_font.h"
 #include "extras_calendars.h"
-
-#define ALARMS_FILE ROCKBOX_DIR "/alarms.dat"
-#define ALARMS_MAGIC 0x314d4c41u /* "ALM1" */
-#define MAX_ALARMS 8
 
 /* Where stock draws the pane's clock and its two lines of text. */
 #define PANE_ART_X 178
@@ -87,18 +82,6 @@
  * on it, or leave Alarms for the root menu (a USB attach). */
 enum { BACK = -100, STAY = -101, LEFT = -102 };
 
-struct alarm {
-    uint8_t on, repeat, sound, label;
-    uint8_t hour, minute, month, day;
-    uint16_t year;
-};
-
-static struct {
-    uint32_t magic;
-    uint32_t count;
-    struct alarm list[MAX_ALARMS];
-} alarms;
-
 static int editing;                     /* the alarm the editor shows */
 static int sub_font = -1, digit_font = -1, caption_font = -1;
 static uint32_t band_pixels[LCD_WIDTH * BAND_ROWS];
@@ -109,20 +92,6 @@ static const int repeat_names[] = {
     LANG_EXTRAS_ALARMS_WEEKDAYS, LANG_EXTRAS_ALARMS_WEEKENDS,
     LANG_EXTRAS_ALARMS_EVERY_WEEK, LANG_EXTRAS_ALARMS_EVERY_MONTH,
     LANG_EXTRAS_ALARMS_EVERY_YEAR,
-};
-static const int label_names[] = {
-    LANG_EXTRAS_ALARMS_WAKE_UP, LANG_EXTRAS_ALARMS_WORK,
-    LANG_EXTRAS_ALARMS_CLASS, LANG_EXTRAS_ALARMS_ALARM,
-    LANG_EXTRAS_ALARMS_APPOINTMENT, LANG_EXTRAS_ALARMS_PHONE_CALL,
-    LANG_EXTRAS_ALARMS_BREAKFAST, LANG_EXTRAS_ALARMS_LUNCH,
-    LANG_EXTRAS_ALARMS_DINNER, LANG_EXTRAS_ALARMS_IMPORTANT,
-    LANG_EXTRAS_ALARMS_PRESCRIPTION, LANG_EXTRAS_ALARMS_TAKE_MEDICINE,
-    LANG_EXTRAS_ALARMS_RETURN_CALL, LANG_EXTRAS_ALARMS_DELIVERY,
-    LANG_EXTRAS_ALARMS_PICK_UP, LANG_EXTRAS_ALARMS_MEETING,
-    LANG_EXTRAS_ALARMS_REMINDER, LANG_EXTRAS_ALARMS_DATE,
-    LANG_EXTRAS_ALARMS_ANNIVERSARY, LANG_EXTRAS_ALARMS_BIRTHDAY,
-    LANG_EXTRAS_ALARMS_HOLIDAY, LANG_EXTRAS_ALARMS_GO_HOME,
-    LANG_EXTRAS_ALARMS_PARTY,
 };
 #define LABEL_ALARM 3
 static const int sound_names[] = {
@@ -142,52 +111,31 @@ static const int month_names[] = {
     LANG_MONTH_NOVEMBER, LANG_MONTH_DECEMBER,
 };
 
-/* ---- the alarms and their file ---- */
-
-static void load_alarms(void)
-{
-    int fd = open(ALARMS_FILE, O_RDONLY);
-    bool ok = fd >= 0 && read(fd, &alarms, sizeof(alarms)) == sizeof(alarms)
-              && alarms.magic == ALARMS_MAGIC && alarms.count <= MAX_ALARMS;
-    if (fd >= 0)
-        close(fd);
-    if (!ok)
-        alarms.count = 0;
-    alarms.magic = ALARMS_MAGIC;
-}
-
-static void save_alarms(void)
-{
-    int fd = open(ALARMS_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (fd < 0)
-        return;
-    write(fd, &alarms, sizeof(alarms));
-    close(fd);
-}
+/* ---- the alarms ---- */
 
 /* A new alarm, on, at the current minute, today. */
 static bool create_alarm(void)
 {
-    if (alarms.count >= MAX_ALARMS)
+    if (alarm_table.count >= MAX_ALARMS)
         return false;
     struct tm *now = get_time();
-    alarms.list[alarms.count] = (struct alarm){
+    alarm_table.list[alarm_table.count] = (struct alarm){
         .on = 1, .sound = SOUND_BEEP, .label = LABEL_ALARM,
         .hour = now->tm_hour, .minute = now->tm_min,
         .month = now->tm_mon + 1, .day = now->tm_mday,
         .year = now->tm_year + 1900,
     };
-    editing = alarms.count++;
-    save_alarms();
+    editing = alarm_table.count++;
+    alarm_table_save();
     return true;
 }
 
 static void delete_alarm(int index)
 {
-    alarms.count--;
-    memmove(&alarms.list[index], &alarms.list[index + 1],
-            (alarms.count - index) * sizeof(alarms.list[0]));
-    save_alarms();
+    alarm_table.count--;
+    memmove(&alarm_table.list[index], &alarm_table.list[index + 1],
+            (alarm_table.count - index) * sizeof(alarm_table.list[0]));
+    alarm_table_save();
 }
 
 static int days_in_month(int month, int year)
@@ -307,11 +255,11 @@ static enum list_pane_kind get_pane(int item, void *data, int *art)
         strlcpy(pane_title, sleep_caption(buffer, sizeof(buffer)),
                 sizeof(pane_title));
     }
-    else if (index >= 0 && index < (int)alarms.count)
+    else if (index >= 0 && index < (int)alarm_table.count)
     {
-        const struct alarm *a = &alarms.list[index];
+        const struct alarm *a = &alarm_table.list[index];
         format_time(pane_title, sizeof(pane_title), a->hour, a->minute);
-        strlcpy(pane_caption, str(label_names[a->label]),
+        strlcpy(pane_caption, str(alarm_label_names[a->label]),
                 sizeof(pane_caption));
     }
     /* A new text repaints the pane. */
@@ -342,8 +290,8 @@ static void tall_texts(int item, const char **title, const char **sub,
     }
     else
     {
-        const struct alarm *a = &alarms.list[item - 2];
-        *title = str(label_names[a->label]);
+        const struct alarm *a = &alarm_table.list[item - 2];
+        *title = str(alarm_label_names[a->label]);
         *sub = format_when(buffer, size, a);
     }
 }
@@ -496,7 +444,7 @@ static int show_choice(int title, list_get_name *name, int count, int start,
     if (result >= 0)
     {
         *value = result;
-        save_alarms();
+        alarm_table_save();
     }
     return result;
 }
@@ -510,7 +458,7 @@ static const char *repeat_name(int item, void *data, char *buf, size_t size)
 static const char *label_name(int item, void *data, char *buf, size_t size)
 {
     (void)data; (void)buf; (void)size;
-    return name_lang(label_names, item);
+    return name_lang(alarm_label_names, item);
 }
 
 static const char *sound_name(int item, void *data, char *buf, size_t size)
@@ -530,7 +478,7 @@ static const char *none_name(int item, void *data, char *buf, size_t size)
 static int choose_sounds(struct page *page, int row)
 {
     (void)page;
-    struct alarm *a = &alarms.list[editing];
+    struct alarm *a = &alarm_table.list[editing];
     uint8_t none = 0;
     int result = row == 0 ?
         show_choice(LANG_EXTRAS_ALARMS_SOUNDS, sound_name,
@@ -539,7 +487,7 @@ static int choose_sounds(struct page *page, int row)
     if (row != 0 && result >= 0)
     {
         a->sound = 0;
-        save_alarms();
+        alarm_table_save();
     }
     return result == LEFT ? LEFT : result >= 0 ? BACK : STAY;
 }
@@ -639,7 +587,7 @@ static void slot_text(const struct editor *e, int slot, char *buf,
 
 static void compose_editor(struct stock_canvas *band, const struct editor *e)
 {
-    const struct alarm *a = &alarms.list[editing];
+    const struct alarm *a = &alarm_table.list[editing];
     stock_art_put(band, STOCK_ART_BACKGROUND_LIGHTBLUE, 0, 0);
     extras_bar_put(band, str(LANG_EXTRAS_ALARMS));
     if (e->date)
@@ -664,8 +612,8 @@ static void compose_editor(struct stock_canvas *band, const struct editor *e)
     char time[24];
     format_time(time, sizeof(time), a->hour, a->minute);
     centred_text(band, caption_font, time, CAPTION_X, CAPTION_BASELINE);
-    centred_text(band, caption_font, str(label_names[a->label]), CAPTION_X,
-                 CAPTION_BASELINE + CAPTION_LEADING);
+    centred_text(band, caption_font, str(alarm_label_names[a->label]),
+                 CAPTION_X, CAPTION_BASELINE + CAPTION_LEADING);
 }
 
 static void paint_editor(const struct editor *e)
@@ -684,7 +632,7 @@ static void paint_editor(const struct editor *e)
 /* Write the editor's fields back to the alarm being edited. */
 static void store_editor(const struct editor *e)
 {
-    struct alarm *a = &alarms.list[editing];
+    struct alarm *a = &alarm_table.list[editing];
     if (e->date)
     {
         a->month = e->value[0];
@@ -727,7 +675,7 @@ static void step_field(struct editor *e, int delta)
 
 static int show_editor(bool date)
 {
-    const struct alarm *a = &alarms.list[editing];
+    const struct alarm *a = &alarm_table.list[editing];
     struct editor e = { .date = date };
     if (date)
     {
@@ -764,7 +712,7 @@ static int show_editor(bool date)
         }
         else if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
             break;
-        else if (action == ACTION_NONE)
+        else if (action == ACTION_NONE || action == ACTION_REDRAW)
             paint_editor(&e);
         else if (default_event_handler(action) == SYS_USB_CONNECTED)
         {
@@ -772,7 +720,7 @@ static int show_editor(bool date)
             break;
         }
     }
-    save_alarms();
+    alarm_table_save();
     font_unload(digit_font);
     digit_font = -1;
     extras_bar_release();
@@ -800,19 +748,19 @@ static const char *editor_value(int item, void *data, char *buf, size_t size)
     (void)data; (void)buf; (void)size;
     if (item != ROW_ON)
         return NULL;
-    return str(alarms.list[editing].on ? LANG_ON : LANG_OFF);
+    return str(alarm_table.list[editing].on ? LANG_ON : LANG_OFF);
 }
 
 static int choose_editor_row(struct page *page, int row)
 {
     (void)page;
-    struct alarm *a = &alarms.list[editing];
+    struct alarm *a = &alarm_table.list[editing];
     int result = STAY;
     switch (row)
     {
         case ROW_ON:
             a->on = !a->on;
-            save_alarms();
+            alarm_table_save();
             return STAY;
         case ROW_DATE:
         case ROW_TIME:
@@ -829,7 +777,7 @@ static int choose_editor_row(struct page *page, int row)
         case ROW_LABEL:
             /* Stock opens Label on its first row, whatever is set. */
             result = show_choice(LANG_EXTRAS_ALARMS, label_name,
-                                 ARRAYLEN(label_names), 0, &a->label);
+                                 ARRAYLEN(alarm_label_names), 0, &a->label);
             break;
         case ROW_DELETE:
             delete_alarm(editing);
@@ -903,20 +851,20 @@ static int choose_main_row(struct page *page, int row)
         editing = row - 2;
         result = show_alarm();
     }
-    page->count = 2 + alarms.count;
+    page->count = 2 + alarm_table.count;
     return result == LEFT ? LEFT : STAY;
 }
 
 int extras_alarms(void)
 {
-    load_alarms();
+    alarm_table_load();
     push_current_activity(ACTIVITY_TIMEDATESCREEN);
     sub_font = ui_theme_current_font_load(UI_FONT_BODY,
                                           global_settings.glyphs_to_cache);
     caption_font = font_load_ex(CAPTION_FONT, 0,
                                 global_settings.glyphs_to_cache);
     struct page page = {
-        .title = LANG_EXTRAS_ALARMS, .count = 2 + alarms.count,
+        .title = LANG_EXTRAS_ALARMS, .count = 2 + alarm_table.count,
         .name = main_name, .kind = kind_menu, .choose = choose_main_row,
         .pane = PANE_MAIN, .tall = true,
     };

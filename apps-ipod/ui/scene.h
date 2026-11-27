@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "animation.h"
+#include "lcd.h"
 
 struct ui_scene {
     const void *back_page, *front_page;
@@ -76,6 +77,9 @@ int ui_scene_modal_body_offset(int offset, int status_height);
 /* Returns true after restoring the retained backdrop to the framebuffer. */
 bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *route);
 bool ui_scene_automatic(void);
+/* Present a full-height page offset down over another full-height page. */
+void ui_scene_compose_sheet(fb_data *out, const fb_data *back,
+                            const fb_data *front, int offset);
 int ui_scene_poll(int timeout);
 /* Space to leave free when laying out a new playback buffer. */
 size_t ui_scene_reserve_size(void);

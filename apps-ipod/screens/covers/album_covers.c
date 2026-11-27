@@ -136,6 +136,7 @@ static void album_prepare(void);
 static int  album_build_index(void);
 static void album_speak(int index);
 static bool album_remember(int index);
+static bool album_key(int index, struct carousel_album_key *key);
 
 static const struct carousel_model album_model = {
     .build_index = album_build_index,
@@ -145,6 +146,7 @@ static const struct carousel_model album_model = {
     .play_album = album_play,
     .panel_play = album_panel_play,
     .remember    = album_remember,
+    .album_key   = album_key,
     .jump_prev   = jmp_idx_prev,
     .jump_next   = jmp_idx_next,
     .draw_text   = draw_album_text,
@@ -502,6 +504,20 @@ static bool album_remember(int index)
     global_status.cover_local_index = index;
     global_status.cover_album_hash = album;
     global_status.cover_artist_hash = artist;
+    return true;
+}
+
+/* The names id3_get_index() matches a track by. */
+static bool album_key(int index, struct carousel_album_key *key)
+{
+    if (!db_summary_current(&carousel_idx) || index < 0 || index >= album_count())
+        return false;
+    memset(key, 0, sizeof(*key));
+    get_album_name(index, key->title, sizeof(key->title));
+    get_album_artist(index, key->artist, sizeof(key->artist));
+    long seek = carousel_idx.album_index[index].seek;
+    for (int i = 0; i < album_count() && !key->shared_title; i++)
+        key->shared_title = i != index && carousel_idx.album_index[i].seek == seek;
     return true;
 }
 

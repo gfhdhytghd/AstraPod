@@ -77,6 +77,19 @@ static bool remember(int index)
     snprintf(global_status.cover_remote_id, sizeof(global_status.cover_remote_id), "%s", row.id);
     return true;
 }
+static bool album_key(int index, struct carousel_album_key *key)
+{
+    struct cider_row row;
+    if (!cider_page_row(index, &row))
+        return false;
+    memset(key, 0, sizeof(*key));
+    key->remote = true;
+    strlcpy(key->title, row.title, sizeof(key->title));
+    strlcpy(key->artist, row.subtitle, sizeof(key->artist));
+    strlcpy(key->art, row.art, sizeof(key->art));
+    return true;
+}
+
 static bool legacy_panel_labels(const char *route)
 {
     if (strncmp(route, "album/t", 7) || strlen(route + 7) != 24)
@@ -380,6 +393,7 @@ static const struct carousel_model model = {
     .panel_play = panel_play,
     .panel_play_status = play_status,
     .remember = remember,
+    .album_key = album_key,
 };
 
 static int wait_for_library(void)

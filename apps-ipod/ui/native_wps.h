@@ -30,6 +30,8 @@ bool native_wps_art_layout(struct ui_rect *bounds);
 /* The slot is a cover turned away at the stock Now Playing pose; its bounds
  * are the face's. */
 bool native_wps_art_turned(void);
+/* Scrim can wait for the blurred backdrop before the first sheet frame. */
+bool native_wps_sheet_ready(void);
 /* The current cover's square centre, column-major, and its side or 0. */
 int native_wps_art_side(void);
 void native_wps_copy_art(fb_data *dst, int side);

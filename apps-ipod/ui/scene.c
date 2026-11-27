@@ -1137,6 +1137,17 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     return true;
 }
 
+/* The full Now Playing page, including its title, moves as one layer. */
+void ui_scene_compose_sheet(fb_data *out, const fb_data *back,
+                            const fb_data *front, int offset)
+{
+    size_t uncovered = offset * LCD_WIDTH * sizeof(*out);
+    if (uncovered)
+        memcpy(out, back, uncovered);
+    memcpy(out + offset * LCD_WIDTH, front,
+           LCD_WIDTH * LCD_HEIGHT * sizeof(*out) - uncovered);
+}
+
 bool ui_scene_automatic(void)
 {
     return owner && owner->automatic && owner_thread == thread_self();

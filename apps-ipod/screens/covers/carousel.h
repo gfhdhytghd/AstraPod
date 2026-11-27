@@ -103,6 +103,16 @@ struct carousel_album_header {
     char title[CAROUSEL_TRACK_TEXT], artist[CAROUSEL_TRACK_TEXT];
 };
 
+/* An album as the track playing names it, kept past the screen's index so
+ * Now Playing can tell whether Cover Flow's centre holds that track. A
+ * shared title is one another album of the index also has; such an album
+ * also needs its artist to match. */
+struct carousel_album_key {
+    bool remote, shared_title;
+    char title[TAGCACHE_BUFSZ], artist[TAGCACHE_BUFSZ];
+    char art[65];
+};
+
 /* The seam between the generic coverflow engine and the data it shows. */
 struct carousel_model {
     int  (*build_index)(void);                         /* build the slide data; SUCCESS/ERROR_* */
@@ -138,6 +148,7 @@ struct carousel_model {
                       const struct panel_cache_row *row);
     int (*panel_play_status)(void);                    /* 0 pending, +1 success, -1 error */
     bool (*remember)(int index);                       /* update resume state in RAM */
+    bool (*album_key)(int index, struct carousel_album_key *key);
 };
 
 /* Engine-owned persistent config for the album carousel (cache version + resume

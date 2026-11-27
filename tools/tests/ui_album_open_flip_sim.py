@@ -24,7 +24,7 @@ def perf_marker(root):
 def missing_panel_font(root):
     perf_marker(root)
     # Withhold the private panel font. The worker cannot publish a page
-    # before the two-second deadline, even on a fast host.
+    # before the local readiness deadline, even on a fast host.
     (root / ".rockbox/fonts/14-noto-sans.pbf").unlink()
 
 
@@ -53,7 +53,8 @@ def local(sim):
 
 
 def settled(sim, frames=135):
-    covers(sim)
+    # Entry can spend two seconds waiting for the visible covers.
+    covers(sim, wait=210)
     return {"rest": sim.record(frames, "select")}
 
 
@@ -142,7 +143,8 @@ def main():
     if not args.fixture:
         make_fixture(args.binary, args.resource, fixture)
     cases = {
-        "cold": dict(script=lambda sim: settled(sim, 200),
+        # Record past the four-second local wait and the turn itself.
+        "cold": dict(script=lambda sim: settled(sim, 300),
                      prepare=missing_panel_font, reason="page-timeout"),
         "local": dict(script=local),
         "warm": dict(script=settled),

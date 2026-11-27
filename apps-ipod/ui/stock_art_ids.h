@@ -4,7 +4,7 @@
 #ifndef STOCK_ART_IDS_H
 #define STOCK_ART_IDS_H
 
-#define STOCK_ART_FINGERPRINT 0xde6eb039u
+#define STOCK_ART_FINGERPRINT 0x185edb17u
 
 enum stock_art_id {
     STOCK_ART_ALARMS_CLOCK_STATIC,

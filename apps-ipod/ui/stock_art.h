@@ -13,17 +13,30 @@
  * caller picks. An image's pixels index its ARGB8888 palette, a byte each up
  * to 256 colours and two bytes past that. The sizes are built in; palette
  * and pixels point into STOCK_ART_PACK once it is loaded, which every draw
- * below does on first use. Without the pack the art draws nothing. */
+ * below does on first use. Without the pack the art draws nothing.
+ * The pixels cover only the ink rectangle, rows of ink_w from (ink_x, ink_y)
+ * of the width x height bitmap; a mask is clear outside it, an image's
+ * rectangle is the whole bitmap. Read a mask through stock_art_alpha(). */
 struct stock_art {
     uint16_t width, height;
     uint16_t colors;
     const uint32_t *palette;
     const void *pixels;
+    uint16_t ink_x, ink_y, ink_w, ink_h;
 };
 
 extern struct stock_art stock_art[STOCK_ART_COUNT];
 
 #define STOCK_ART_PACK THEME_DIR "/stock-art.bin"
+
+/* The alpha of mask `art` at bitmap (x, y); the pack must be loaded. */
+static inline unsigned stock_art_alpha(const struct stock_art *art, int x,
+                                       int y)
+{
+    unsigned u = x - art->ink_x, v = y - art->ink_y;
+    return u < art->ink_w && v < art->ink_h ?
+           ((const uint8_t *)art->pixels)[v * art->ink_w + u] : 0;
+}
 
 /* Load the pack if it is not loaded, and say whether the art is there. */
 bool stock_art_ready(void);

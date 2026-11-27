@@ -438,13 +438,13 @@ static void put_hand(struct stock_canvas *c, bool hour, int step, int x,
     bool mirror = !hour && within > 15;
     if (!stock_art_ready())
         return;
-    const uint8_t *alpha = stock_art[hour ? hour_frames[within] :
-        minute_frames[mirror ? 30 - within : within]].pixels;
+    const struct stock_art *art = &stock_art[hour ? hour_frames[within] :
+        minute_frames[mirror ? 30 - within : within]];
     const int last = HAND_EDGE - 1;
     for (int sy = 0; sy < HAND_EDGE; sy++)
         for (int sx = 0; sx < HAND_EDGE; sx++)
         {
-            unsigned a = alpha[sy * HAND_EDGE + sx];
+            unsigned a = stock_art_alpha(art, sx, sy);
             if (!a)
                 continue;
             int u = sx, v = sy;
@@ -478,7 +478,6 @@ static void put_hands(struct stock_canvas *c, int x, int y, int hour,
 static void put_map(struct stock_canvas *c)
 {
     const struct stock_art *art = &stock_art[STOCK_ART_WORLDCLOCK_MAP];
-    const uint8_t *alpha = art->pixels;
     if (!stock_art_ready())
         return;
     for (int y = MAX(c->y, 0); y < MIN(c->y + c->height, art->height); y++)
@@ -486,7 +485,7 @@ static void put_map(struct stock_canvas *c)
         uint32_t *row = c->pixels + (y - c->y) * c->width - c->x;
         for (int x = MAX(c->x, 0); x < MIN(c->x + c->width, art->width); x++)
         {
-            unsigned a = alpha[y * art->width + x];
+            unsigned a = stock_art_alpha(art, x, y);
             if (!a)
                 continue;
             uint32_t d = row[x], out = 0;

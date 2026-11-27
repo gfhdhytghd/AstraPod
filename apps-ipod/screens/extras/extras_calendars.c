@@ -297,7 +297,6 @@ static void put_text(struct stock_canvas *c, int font, const char *text,
 static void put_digit(struct stock_canvas *c, int n, int x, int base)
 {
     const struct stock_art *a = &stock_art[STOCK_ART_ASTRAPOD_CALENDARDIGITS];
-    const unsigned char *px = a->pixels;
     if (!stock_art_ready())
         return;
     for (int row = 0; row < a->height; row++)
@@ -307,7 +306,7 @@ static void put_digit(struct stock_canvas *c, int n, int x, int base)
             continue;
         for (int col = 0; col < DIGIT_W; col++)
         {
-            unsigned cover = px[row * a->width + n * DIGIT_W + col];
+            unsigned cover = stock_art_alpha(a, n * DIGIT_W + col, row);
             int cx = x + col - c->x;
             if (!cover || cx < 0 || cx >= c->width)
                 continue;

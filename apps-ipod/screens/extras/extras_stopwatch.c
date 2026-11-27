@@ -226,7 +226,7 @@ static void put_hand(struct stock_canvas *c, enum stock_art_id first,
                      int edge, int k, int x, int y)
 {
     k %= 120;
-    const uint8_t *m = stock_art[first + frame_order[k % 30]].pixels;
+    const struct stock_art *m = &stock_art[first + frame_order[k % 30]];
     int quarter = k / 30, n = edge - 1;
     int y0 = MAX(y, c->y), y1 = MIN(y + edge, c->y + c->height);
     for (int v = y0 - y; v < y1 - y; v++)
@@ -236,7 +236,8 @@ static void put_hand(struct stock_canvas *c, enum stock_art_id first,
                       quarter == 2 ? n - v : u;
             int col = quarter == 0 ? u : quarter == 1 ? v :
                       quarter == 2 ? n - u : n - v;
-            stock_canvas_blend(c, x + u, y + v, BLACK, m[row * edge + col]);
+            stock_canvas_blend(c, x + u, y + v, BLACK,
+                               stock_art_alpha(m, col, row));
         }
 }
 

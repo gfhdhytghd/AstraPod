@@ -51,6 +51,13 @@ size_t pcmbuf_get_bufsize(void);
 int pcmbuf_used_descs(void);
 int pcmbuf_descs(void);
 
+struct pcmbuf_counters
+{
+    unsigned chunks_played;
+    unsigned underruns;
+};
+struct pcmbuf_counters pcmbuf_get_counters(void);
+
 /* Fading and channel volume control */
 #ifdef HAVE_USB_PODLINK
 void pcmbuf_handoff_fade(unsigned long start);

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "animation.h"
+#include "audio/pcmbuf.h"
 #include "pace.h"
 #include "core_alloc.h"
 #include "file.h"
@@ -55,6 +56,7 @@ struct frame_sample {
 
 struct frame_capture {
     char route[32];
+    struct pcmbuf_counters pcm;
     unsigned seen, render_misses, work_misses, interval_misses, half_frames;
     uint32_t worst_render, worst_work, worst_interval, skipped;
     uint32_t render_pending, last_submission, period_q8;
@@ -203,6 +205,7 @@ static unsigned begin_capture(const char *route, bool passive)
     struct frame_capture *capture = core_get_data_pinned(handle);
     memset(capture, 0, sizeof(*capture));
     strlcpy(capture->route, route, sizeof(capture->route));
+    capture->pcm = pcmbuf_get_counters();
     capture->hw_offset_pending = -1;
     core_put_data_pinned(capture);
     owner = thread_self();
@@ -524,6 +527,7 @@ void ui_perf_end(unsigned token)
 {
     if (!token || active_handle <= 0 || token != serial || owner != thread_self())
         return;
+    struct pcmbuf_counters pcm = pcmbuf_get_counters();
     int handle = active_handle;
     active_handle = 0;
     struct frame_capture *capture = core_get_data_pinned(handle);
@@ -546,7 +550,7 @@ void ui_perf_end(unsigned token)
         rows = core_get_data_pinned(rows_handle);
         rows_used = format_rows(capture, first, rows, rows_size);
     }
-    char summary[704], readiness[64] = "";
+    char summary[832], readiness[64] = "";
     if (capture->readiness_measured)
         snprintf(readiness, sizeof(readiness), " ready_wait_us=%lu first_run=%u",
                  (unsigned long)capture->ready_wait_us, capture->first_run ? 1u : 0u);
@@ -563,7 +567,8 @@ void ui_perf_end(unsigned token)
         "render_worst_f=" FRAME_FORMAT " render_misses=%u "
         "period_us=%u te=%s async=%s rate=%s half_frames=%u "
         "phase_p50_us=%d phase_p99_us=%d te_gaps=%u te_repeats=%u "
-        "present_gaps=%u present_repeats=%u%s\n",
+        "present_gaps=%u present_repeats=%u "
+        "pcm_chunks=%u pcm_underruns=%u pcm_underruns_total=%u%s\n",
         capture->route, capture->seen, retained, first, rows ? retained : 0,
         FRAME_ARG(work_p99), FRAME_ARG(interval_p99),
         FRAME_ARG(work_worst), FRAME_ARG(interval_worst),
@@ -572,7 +577,9 @@ void ui_perf_end(unsigned token)
         (unsigned)((period_q8 + 128) >> 8), te,
         capture->async ? "on" : "off", rate, capture->half_frames,
         phase_p50, phase_p99, capture->te_gaps, capture->te_repeats,
-        capture->present_gaps, capture->present_repeats, readiness);
+        capture->present_gaps, capture->present_repeats,
+        pcm.chunks_played - capture->pcm.chunks_played,
+        pcm.underruns - capture->pcm.underruns, pcm.underruns, readiness);
     core_put_data_pinned(capture);
     core_free(handle);
     if (n > 0 && (size_t)n < sizeof(summary))

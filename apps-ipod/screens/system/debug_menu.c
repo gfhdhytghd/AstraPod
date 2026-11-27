@@ -492,6 +492,8 @@ static int buffering_callback(int action, struct gui_synclist *lists)
     simplelist_reset_lines();
 
     buffering_addline_used("pcm", bufsize - pcmbuf_free(), bufsize);
+    struct pcmbuf_counters pcm = pcmbuf_get_counters();
+    simplelist_addline("PCM underruns: %u", pcm.underruns);
     buffering_addline_used("alloc", audio_filebufused(), filebuflen);
     buffering_addline_used("real", d.buffered_data, filebuflen);
     buffering_addline_used("useful", d.useful_data, filebuflen);

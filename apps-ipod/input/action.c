@@ -217,6 +217,7 @@ static struct agents_remote_state remote;
 #include "ui/statusbar.h"
 #include "usb.h"
 #include "widgets/dialog.h"
+#include "screens/extras/extras_alarm_ring.h"
 #include "widgets/usb_confirm.h"
 
 
@@ -1406,6 +1407,8 @@ int get_action(int context, int timeout)
     if (agents_nav_pending() != AGENTS_NAV_NONE && !shortcut_screen_context(context))
         return ACTION_STD_CANCEL;
 #endif
+    if (extras_alarm_ring_poll(&timeout))
+        return ACTION_REDRAW;
     action_cur_t current;
     init_act_cur(&current, context, ui_scene_poll(timeout), NULL);
 

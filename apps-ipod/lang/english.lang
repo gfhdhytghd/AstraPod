@@ -31705,3 +31705,1963 @@
     *: "VU Meter"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES
+  desc: Extras > Notes: the screen's title
+  user: core
+  <source>
+    *: "Notes"
+  </source>
+  <dest>
+    *: "Notes"
+  </dest>
+  <voice>
+    *: "Notes"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_INSTRUCTIONS
+  desc: Extras > Notes: the built-in note on how to add notes, its row and title
+  user: core
+  <source>
+    *: "Instructions"
+  </source>
+  <dest>
+    *: "Instructions"
+  </dest>
+  <voice>
+    *: "Instructions"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_HOWTO
+  desc: Extras > Notes > Instructions: the heading
+  user: core
+  <source>
+    *: "How to view and create notes:"
+  </source>
+  <dest>
+    *: "How to view and create notes:"
+  </dest>
+  <voice>
+    *: "How to view and create notes:"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_HOWTO_TEXT
+  desc: Extras > Notes > Instructions: the first paragraph
+  user: core
+  <source>
+    *: "To view text files here, enable your iPod for disk use in iTunes, then simply drag text files to the Notes folder on your iPod."
+  </source>
+  <dest>
+    *: "To view text files here, enable your iPod for disk use in iTunes, then simply drag text files to the Notes folder on your iPod."
+  </dest>
+  <voice>
+    *: "To view text files here, enable your iPod for disk use in iTunes, then simply drag text files to the Notes folder on your iPod."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_HOWTO_MORE
+  desc: Extras > Notes > Instructions: the second paragraph
+  user: core
+  <source>
+    *: "See the iPod Features Guide or visit www.apple.com/support/ipod for additional information."
+  </source>
+  <dest>
+    *: "See the iPod Features Guide or visit www.apple.com/support/ipod for additional information."
+  </dest>
+  <voice>
+    *: "See the iPod Features Guide or visit www.apple.com/support/ipod for additional information."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS
+  desc: Extras > Calendars: the menu's title
+  user: core
+  <source>
+    *: "Calendars"
+  </source>
+  <dest>
+    *: "Calendars"
+  </dest>
+  <voice>
+    *: "Calendars"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_ALL
+  desc: Extras > Calendars: the row that opens the month view
+  user: core
+  <source>
+    *: "All Calendars"
+  </source>
+  <dest>
+    *: "All Calendars"
+  </dest>
+  <voice>
+    *: "All Calendars"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TODOS
+  desc: Extras > Calendars: the row that opens the To Do items
+  user: core
+  <source>
+    *: "To Do's"
+  </source>
+  <dest>
+    *: "To Do's"
+  </dest>
+  <voice>
+    *: "To Do's"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_ALARMS
+  desc: Extras > Calendars: the row that sets how event alarms sound
+  user: core
+  <source>
+    *: "Alarms"
+  </source>
+  <dest>
+    *: "Alarms"
+  </dest>
+  <voice>
+    *: "Alarms"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_BEEP
+  desc: Extras > Calendars > Alarms: event alarms beep
+  user: core
+  <source>
+    *: "Beep"
+  </source>
+  <dest>
+    *: "Beep"
+  </dest>
+  <voice>
+    *: "Beep"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NONE
+  desc: Extras > Calendars > Alarms: event alarms show without a sound
+  user: core
+  <source>
+    *: "None"
+  </source>
+  <dest>
+    *: "None"
+  </dest>
+  <voice>
+    *: "None"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TODO_HOWTO
+  desc: Extras > Calendars > To Do's: the heading
+  user: core
+  <source>
+    *: "How to view To Do items:"
+  </source>
+  <dest>
+    *: "How to view To Do items:"
+  </dest>
+  <voice>
+    *: "How to view To Do items:"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TODO_TEXT
+  desc: Extras > Calendars > To Do's: the first paragraph
+  user: core
+  <source>
+    *: "To view your To Do items here, enable syncing from iTunes under the Calendar section of the Contacts tab."
+  </source>
+  <dest>
+    *: "To view your To Do items here, enable syncing from iTunes under the Calendar section of the Contacts tab."
+  </dest>
+  <voice>
+    *: "To view your To Do items here, enable syncing from iTunes under the Calendar section of the Contacts tab."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NO_EVENTS
+  desc: Extras > Calendars: a day without events
+  user: core
+  <source>
+    *: "No events for this day"
+  </source>
+  <dest>
+    *: "No events for this day"
+  </dest>
+  <voice>
+    *: "No events for this day"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MONTH_TITLE
+  desc: Extras > Calendars: the month view's title; M is replaced by the short month name, Y by the year
+  user: core
+  <source>
+    *: "M Y"
+  </source>
+  <dest>
+    *: "M Y"
+  </dest>
+  <voice>
+    *: "M Y"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_DAY_TITLE
+  desc: Extras > Calendars: a day's title; M is replaced by the full month name, D by the day, Y by the year
+  user: core
+  <source>
+    *: "M D, Y"
+  </source>
+  <dest>
+    *: "M D, Y"
+  </dest>
+  <voice>
+    *: "M D, Y"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_JANUARY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "January"
+  </source>
+  <dest>
+    *: "January"
+  </dest>
+  <voice>
+    *: "January"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_FEBRUARY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "February"
+  </source>
+  <dest>
+    *: "February"
+  </dest>
+  <voice>
+    *: "February"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MARCH
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "March"
+  </source>
+  <dest>
+    *: "March"
+  </dest>
+  <voice>
+    *: "March"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_APRIL
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "April"
+  </source>
+  <dest>
+    *: "April"
+  </dest>
+  <voice>
+    *: "April"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MAY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "May"
+  </source>
+  <dest>
+    *: "May"
+  </dest>
+  <voice>
+    *: "May"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_JUNE
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "June"
+  </source>
+  <dest>
+    *: "June"
+  </dest>
+  <voice>
+    *: "June"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_JULY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "July"
+  </source>
+  <dest>
+    *: "July"
+  </dest>
+  <voice>
+    *: "July"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_AUGUST
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "August"
+  </source>
+  <dest>
+    *: "August"
+  </dest>
+  <voice>
+    *: "August"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_SEPTEMBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "September"
+  </source>
+  <dest>
+    *: "September"
+  </dest>
+  <voice>
+    *: "September"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_OCTOBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "October"
+  </source>
+  <dest>
+    *: "October"
+  </dest>
+  <voice>
+    *: "October"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NOVEMBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "November"
+  </source>
+  <dest>
+    *: "November"
+  </dest>
+  <voice>
+    *: "November"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_DECEMBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "December"
+  </source>
+  <dest>
+    *: "December"
+  </dest>
+  <voice>
+    *: "December"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_SUNDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Sunday"
+  </source>
+  <dest>
+    *: "Sunday"
+  </dest>
+  <voice>
+    *: "Sunday"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MONDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Monday"
+  </source>
+  <dest>
+    *: "Monday"
+  </dest>
+  <voice>
+    *: "Monday"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TUESDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Tuesday"
+  </source>
+  <dest>
+    *: "Tuesday"
+  </dest>
+  <voice>
+    *: "Tuesday"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_WEDNESDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Wednesday"
+  </source>
+  <dest>
+    *: "Wednesday"
+  </dest>
+  <voice>
+    *: "Wednesday"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_THURSDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Thursday"
+  </source>
+  <dest>
+    *: "Thursday"
+  </dest>
+  <voice>
+    *: "Thursday"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_FRIDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Friday"
+  </source>
+  <dest>
+    *: "Friday"
+  </dest>
+  <voice>
+    *: "Friday"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_SATURDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Saturday"
+  </source>
+  <dest>
+    *: "Saturday"
+  </dest>
+  <voice>
+    *: "Saturday"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK
+  desc: Extras > Screen Lock: the item and its screen title
+  user: core
+  <source>
+    *: "Screen Lock"
+  </source>
+  <dest>
+    *: "Screen Lock"
+  </dest>
+  <voice>
+    *: "Screen Lock"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_NEW
+  desc: Extras > Screen Lock: choosing a new four-digit combination
+  user: core
+  <source>
+    *: "New Combination"
+  </source>
+  <dest>
+    *: "New Combination"
+  </dest>
+  <voice>
+    *: "New Combination"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_CONFIRM
+  desc: Extras > Screen Lock: entering the new combination again
+  user: core
+  <source>
+    *: "Confirm Combination"
+  </source>
+  <dest>
+    *: "Confirm Combination"
+  </dest>
+  <voice>
+    *: "Confirm Combination"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_ENTER
+  desc: Extras > Screen Lock: entering the combination to unlock or reset
+  user: core
+  <source>
+    *: "Enter Combination"
+  </source>
+  <dest>
+    *: "Enter Combination"
+  </dest>
+  <voice>
+    *: "Enter Combination"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_INCORRECT
+  desc: Extras > Screen Lock: the combination entered was wrong
+  user: core
+  <source>
+    *: "Incorrect Combination"
+  </source>
+  <dest>
+    *: "Incorrect Combination"
+  </dest>
+  <voice>
+    *: "Incorrect Combination"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_LOCK
+  desc: Extras > Screen Lock: button that locks the screen
+  user: core
+  <source>
+    *: "Lock"
+  </source>
+  <dest>
+    *: "Lock"
+  </dest>
+  <voice>
+    *: "Lock"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_RESET
+  desc: Extras > Screen Lock: button that changes the combination
+  user: core
+  <source>
+    *: "Reset"
+  </source>
+  <dest>
+    *: "Reset"
+  </dest>
+  <voice>
+    *: "Reset"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_NONE
+  desc: Extras menu side pane: no screen lock combination is set
+  user: core
+  <source>
+    *: "No Combination"
+  </source>
+  <dest>
+    *: "No Combination"
+  </dest>
+  <voice>
+    *: "No Combination"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_SET
+  desc: Extras menu side pane: a screen lock combination is set
+  user: core
+  <source>
+    *: "Combination Set"
+  </source>
+  <dest>
+    *: "Combination Set"
+  </dest>
+  <voice>
+    *: "Combination Set"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH
+  desc: Extras > Stopwatch: its title and menu row
+  user: core
+  <source>
+    *: "Stopwatch"
+  </source>
+  <dest>
+    *: "Stopwatch"
+  </dest>
+  <voice>
+    *: "Stopwatch"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_NEW_TIMER
+  desc: Stopwatch menu: start a fresh session
+  user: core
+  <source>
+    *: "New Timer"
+  </source>
+  <dest>
+    *: "New Timer"
+  </dest>
+  <voice>
+    *: "New Timer"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_CLEAR_LOGS
+  desc: Stopwatch menu: delete every session
+  user: core
+  <source>
+    *: "Clear Logs"
+  </source>
+  <dest>
+    *: "Clear Logs"
+  </dest>
+  <voice>
+    *: "Clear Logs"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_CURRENT_LOG
+  desc: Stopwatch menu: the running session's log
+  user: core
+  <source>
+    *: "Current Log"
+  </source>
+  <dest>
+    *: "Current Log"
+  </dest>
+  <voice>
+    *: "Current Log"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_LOG
+  desc: Stopwatch: title of a session's log
+  user: core
+  <source>
+    *: "Stopwatch Log"
+  </source>
+  <dest>
+    *: "Stopwatch Log"
+  </dest>
+  <voice>
+    *: "Stopwatch Log"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_TOTAL
+  desc: Stopwatch log: the session's whole time
+  user: core
+  <source>
+    *: "Total"
+  </source>
+  <dest>
+    *: "Total"
+  </dest>
+  <voice>
+    *: "Total"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_SHORTEST
+  desc: Stopwatch log: the shortest lap
+  user: core
+  <source>
+    *: "Shortest"
+  </source>
+  <dest>
+    *: "Shortest"
+  </dest>
+  <voice>
+    *: "Shortest"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_LONGEST
+  desc: Stopwatch log: the longest lap
+  user: core
+  <source>
+    *: "Longest"
+  </source>
+  <dest>
+    *: "Longest"
+  </dest>
+  <voice>
+    *: "Longest"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_AVERAGE
+  desc: Stopwatch log: the mean lap
+  user: core
+  <source>
+    *: "Average"
+  </source>
+  <dest>
+    *: "Average"
+  </dest>
+  <voice>
+    *: "Average"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_LAP
+  desc: Stopwatch log: one lap's row, %d is its number
+  user: core
+  <source>
+    *: "Lap %d"
+  </source>
+  <dest>
+    *: "Lap %d"
+  </dest>
+  <voice>
+    *: "Lap %d"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_DELETE_LOG
+  desc: Stopwatch log: delete this session
+  user: core
+  <source>
+    *: "Delete Log"
+  </source>
+  <dest>
+    *: "Delete Log"
+  </dest>
+  <voice>
+    *: "Delete Log"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_ADD
+  desc: Clocks: button that adds a clock
+  user: core
+  <source>
+    *: "Add"
+  </source>
+  <dest>
+    *: "Add"
+  </dest>
+  <voice>
+    *: "Add"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_REGION
+  desc: Clocks: title of the region list
+  user: core
+  <source>
+    *: "Region"
+  </source>
+  <dest>
+    *: "Region"
+  </dest>
+  <voice>
+    *: "Region"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_CITY
+  desc: Clocks: title of the city list
+  user: core
+  <source>
+    *: "City"
+  </source>
+  <dest>
+    *: "City"
+  </dest>
+  <voice>
+    *: "City"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_TODAY
+  desc: Clocks: a clock's day is the player's day
+  user: core
+  <source>
+    *: "Today"
+  </source>
+  <dest>
+    *: "Today"
+  </dest>
+  <voice>
+    *: "Today"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_TOMORROW
+  desc: Clocks: a clock's day is the player's next day
+  user: core
+  <source>
+    *: "Tomorrow"
+  </source>
+  <dest>
+    *: "Tomorrow"
+  </dest>
+  <voice>
+    *: "Tomorrow"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_YESTERDAY
+  desc: Clocks: a clock's day is the player's previous day
+  user: core
+  <source>
+    *: "Yesterday"
+  </source>
+  <dest>
+    *: "Yesterday"
+  </dest>
+  <voice>
+    *: "Yesterday"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_AFRICA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Africa"
+  </source>
+  <dest>
+    *: "Africa"
+  </dest>
+  <voice>
+    *: "Africa"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_ASIA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Asia"
+  </source>
+  <dest>
+    *: "Asia"
+  </dest>
+  <voice>
+    *: "Asia"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_ATLANTIC
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Atlantic"
+  </source>
+  <dest>
+    *: "Atlantic"
+  </dest>
+  <voice>
+    *: "Atlantic"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_AUSTRALIA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Australia"
+  </source>
+  <dest>
+    *: "Australia"
+  </dest>
+  <voice>
+    *: "Australia"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_EUROPE
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Europe"
+  </source>
+  <dest>
+    *: "Europe"
+  </dest>
+  <voice>
+    *: "Europe"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_NORTH_AMERICA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "North America"
+  </source>
+  <dest>
+    *: "North America"
+  </dest>
+  <voice>
+    *: "North America"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_PACIFIC
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Pacific"
+  </source>
+  <dest>
+    *: "Pacific"
+  </dest>
+  <voice>
+    *: "Pacific"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_SOUTH_AMERICA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "South America"
+  </source>
+  <dest>
+    *: "South America"
+  </dest>
+  <voice>
+    *: "South America"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS
+  desc: Extras Alarms: the Alarms screen's title
+  user: core
+  <source>
+    *: "Alarms"
+  </source>
+  <dest>
+    *: "Alarms"
+  </dest>
+  <voice>
+    *: "Alarms"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_ALARM
+  desc: Extras Alarms: an alarm, its On/Off row and default label
+  user: core
+  <source>
+    *: "Alarm"
+  </source>
+  <dest>
+    *: "Alarm"
+  </dest>
+  <voice>
+    *: "Alarm"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_CREATE
+  desc: Extras Alarms: row that adds an alarm
+  user: core
+  <source>
+    *: "Create Alarm"
+  </source>
+  <dest>
+    *: "Create Alarm"
+  </dest>
+  <voice>
+    *: "Create Alarm"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_NEW
+  desc: Extras Alarms: under Create Alarm
+  user: core
+  <source>
+    *: "New Alarm"
+  </source>
+  <dest>
+    *: "New Alarm"
+  </dest>
+  <voice>
+    *: "New Alarm"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_INACTIVE
+  desc: Extras Alarms: sleep timer off
+  user: core
+  <source>
+    *: "Inactive"
+  </source>
+  <dest>
+    *: "Inactive"
+  </dest>
+  <voice>
+    *: "Inactive"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_MINUTES
+  desc: Extras Alarms: a sleep timer length, %d minutes
+  user: core
+  <source>
+    *: "%d Minutes"
+  </source>
+  <dest>
+    *: "%d Minutes"
+  </dest>
+  <voice>
+    *: "%d Minutes"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_REMAINING
+  desc: Extras Alarms: sleep timer running, %d minutes left
+  user: core
+  <source>
+    *: "%d Min Remaining"
+  </source>
+  <dest>
+    *: "%d Min Remaining"
+  </dest>
+  <voice>
+    *: "%d Min Remaining"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TIME_AM
+  desc: Extras Alarms: a morning time, hour then minute
+  user: core
+  <source>
+    *: "%d:%02d AM"
+  </source>
+  <dest>
+    *: "%d:%02d AM"
+  </dest>
+  <voice>
+    *: "%d:%02d AM"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TIME_PM
+  desc: Extras Alarms: an afternoon time, hour then minute
+  user: core
+  <source>
+    *: "%d:%02d PM"
+  </source>
+  <dest>
+    *: "%d:%02d PM"
+  </dest>
+  <voice>
+    *: "%d:%02d PM"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_AM
+  desc: Extras Alarms: the time editor's morning slot
+  user: core
+  <source>
+    *: "AM"
+  </source>
+  <dest>
+    *: "AM"
+  </dest>
+  <voice>
+    *: "AM"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PM
+  desc: Extras Alarms: the time editor's afternoon slot
+  user: core
+  <source>
+    *: "PM"
+  </source>
+  <dest>
+    *: "PM"
+  </dest>
+  <voice>
+    *: "PM"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WHEN
+  desc: Extras Alarms: day, month abbreviation, time
+  user: core
+  <source>
+    *: "%d %s %s"
+  </source>
+  <dest>
+    *: "%d %s %s"
+  </dest>
+  <voice>
+    *: "%d %s %s"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_LABEL
+  desc: Extras Alarms: editor row
+  user: core
+  <source>
+    *: "Label"
+  </source>
+  <dest>
+    *: "Label"
+  </dest>
+  <voice>
+    *: "Label"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_SOUNDS
+  desc: Extras Alarms: alarm sound menu title
+  user: core
+  <source>
+    *: "Sounds"
+  </source>
+  <dest>
+    *: "Sounds"
+  </dest>
+  <voice>
+    *: "Sounds"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TONES
+  desc: Extras Alarms: built-in alarm tones
+  user: core
+  <source>
+    *: "Tones"
+  </source>
+  <dest>
+    *: "Tones"
+  </dest>
+  <voice>
+    *: "Tones"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_NONE
+  desc: Extras Alarms: no sound
+  user: core
+  <source>
+    *: "None"
+  </source>
+  <dest>
+    *: "None"
+  </dest>
+  <voice>
+    *: "None"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_BEEP
+  desc: Extras Alarms: beep tone
+  user: core
+  <source>
+    *: "Beep"
+  </source>
+  <dest>
+    *: "Beep"
+  </dest>
+  <voice>
+    *: "Beep"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_ONCE
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Once"
+  </source>
+  <dest>
+    *: "Once"
+  </dest>
+  <voice>
+    *: "Once"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_DAY
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Day"
+  </source>
+  <dest>
+    *: "Every Day"
+  </dest>
+  <voice>
+    *: "Every Day"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WEEKDAYS
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Weekdays"
+  </source>
+  <dest>
+    *: "Weekdays"
+  </dest>
+  <voice>
+    *: "Weekdays"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WEEKENDS
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Weekends"
+  </source>
+  <dest>
+    *: "Weekends"
+  </dest>
+  <voice>
+    *: "Weekends"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_WEEK
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Week"
+  </source>
+  <dest>
+    *: "Every Week"
+  </dest>
+  <voice>
+    *: "Every Week"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_MONTH
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Month"
+  </source>
+  <dest>
+    *: "Every Month"
+  </dest>
+  <voice>
+    *: "Every Month"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_YEAR
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Year"
+  </source>
+  <dest>
+    *: "Every Year"
+  </dest>
+  <voice>
+    *: "Every Year"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WAKE_UP
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Wake up"
+  </source>
+  <dest>
+    *: "Wake up"
+  </dest>
+  <voice>
+    *: "Wake up"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WORK
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Work"
+  </source>
+  <dest>
+    *: "Work"
+  </dest>
+  <voice>
+    *: "Work"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_CLASS
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Class"
+  </source>
+  <dest>
+    *: "Class"
+  </dest>
+  <voice>
+    *: "Class"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_APPOINTMENT
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Appointment"
+  </source>
+  <dest>
+    *: "Appointment"
+  </dest>
+  <voice>
+    *: "Appointment"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PHONE_CALL
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Phone Call"
+  </source>
+  <dest>
+    *: "Phone Call"
+  </dest>
+  <voice>
+    *: "Phone Call"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_BREAKFAST
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Breakfast"
+  </source>
+  <dest>
+    *: "Breakfast"
+  </dest>
+  <voice>
+    *: "Breakfast"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_LUNCH
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Lunch"
+  </source>
+  <dest>
+    *: "Lunch"
+  </dest>
+  <voice>
+    *: "Lunch"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DINNER
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Dinner"
+  </source>
+  <dest>
+    *: "Dinner"
+  </dest>
+  <voice>
+    *: "Dinner"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_IMPORTANT
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Important"
+  </source>
+  <dest>
+    *: "Important"
+  </dest>
+  <voice>
+    *: "Important"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PRESCRIPTION
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Prescription"
+  </source>
+  <dest>
+    *: "Prescription"
+  </dest>
+  <voice>
+    *: "Prescription"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TAKE_MEDICINE
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Take Medicine"
+  </source>
+  <dest>
+    *: "Take Medicine"
+  </dest>
+  <voice>
+    *: "Take Medicine"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_RETURN_CALL
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Return Call"
+  </source>
+  <dest>
+    *: "Return Call"
+  </dest>
+  <voice>
+    *: "Return Call"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DELIVERY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Delivery"
+  </source>
+  <dest>
+    *: "Delivery"
+  </dest>
+  <voice>
+    *: "Delivery"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PICK_UP
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Pick-Up"
+  </source>
+  <dest>
+    *: "Pick-Up"
+  </dest>
+  <voice>
+    *: "Pick-Up"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_MEETING
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Meeting"
+  </source>
+  <dest>
+    *: "Meeting"
+  </dest>
+  <voice>
+    *: "Meeting"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_REMINDER
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Reminder"
+  </source>
+  <dest>
+    *: "Reminder"
+  </dest>
+  <voice>
+    *: "Reminder"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DATE
+  desc: Extras Alarms: label, a social date
+  user: core
+  <source>
+    *: "Date"
+  </source>
+  <dest>
+    *: "Date"
+  </dest>
+  <voice>
+    *: "Date"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_ANNIVERSARY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Anniversary"
+  </source>
+  <dest>
+    *: "Anniversary"
+  </dest>
+  <voice>
+    *: "Anniversary"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_BIRTHDAY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Birthday"
+  </source>
+  <dest>
+    *: "Birthday"
+  </dest>
+  <voice>
+    *: "Birthday"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_HOLIDAY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Holiday"
+  </source>
+  <dest>
+    *: "Holiday"
+  </dest>
+  <voice>
+    *: "Holiday"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_GO_HOME
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Go Home"
+  </source>
+  <dest>
+    *: "Go Home"
+  </dest>
+  <voice>
+    *: "Go Home"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PARTY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Party"
+  </source>
+  <dest>
+    *: "Party"
+  </dest>
+  <voice>
+    *: "Party"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DISMISS
+  desc: Extras Alarms: alert option
+  user: core
+  <source>
+    *: "Dismiss"
+  </source>
+  <dest>
+    *: "Dismiss"
+  </dest>
+  <voice>
+    *: "Dismiss"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_SNOOZE
+  desc: Extras Alarms: alert option
+  user: core
+  <source>
+    *: "Snooze"
+  </source>
+  <dest>
+    *: "Snooze"
+  </dest>
+  <voice>
+    *: "Snooze"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_WAKE_UP
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time to wake up."
+  </source>
+  <dest>
+    *: "It's time to wake up."
+  </dest>
+  <voice>
+    *: "It's time to wake up."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_WORK
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have work to do."
+  </source>
+  <dest>
+    *: "You have work to do."
+  </dest>
+  <voice>
+    *: "You have work to do."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_CLASS
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a class to attend."
+  </source>
+  <dest>
+    *: "You have a class to attend."
+  </dest>
+  <voice>
+    *: "You have a class to attend."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_ALARM
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an alarm."
+  </source>
+  <dest>
+    *: "You have an alarm."
+  </dest>
+  <voice>
+    *: "You have an alarm."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_APPOINTMENT
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming appointment."
+  </source>
+  <dest>
+    *: "You have an upcoming appointment."
+  </dest>
+  <voice>
+    *: "You have an upcoming appointment."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PHONE_CALL
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a phone call to make."
+  </source>
+  <dest>
+    *: "You have a phone call to make."
+  </dest>
+  <voice>
+    *: "You have a phone call to make."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_BREAKFAST
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time for breakfast."
+  </source>
+  <dest>
+    *: "It's time for breakfast."
+  </dest>
+  <voice>
+    *: "It's time for breakfast."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_LUNCH
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time for lunch."
+  </source>
+  <dest>
+    *: "It's time for lunch."
+  </dest>
+  <voice>
+    *: "It's time for lunch."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_DINNER
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time for dinner."
+  </source>
+  <dest>
+    *: "It's time for dinner."
+  </dest>
+  <voice>
+    *: "It's time for dinner."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_IMPORTANT
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "An important event is about to occur."
+  </source>
+  <dest>
+    *: "An important event is about to occur."
+  </dest>
+  <voice>
+    *: "An important event is about to occur."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PRESCRIPTION
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a prescription to pick up or refill."
+  </source>
+  <dest>
+    *: "You have a prescription to pick up or refill."
+  </dest>
+  <voice>
+    *: "You have a prescription to pick up or refill."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_TAKE_MEDICINE
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time to take your medicine."
+  </source>
+  <dest>
+    *: "It's time to take your medicine."
+  </dest>
+  <voice>
+    *: "It's time to take your medicine."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_RETURN_CALL
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a phone call to return."
+  </source>
+  <dest>
+    *: "You have a phone call to return."
+  </dest>
+  <voice>
+    *: "You have a phone call to return."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_DELIVERY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You need to make a delivery."
+  </source>
+  <dest>
+    *: "You need to make a delivery."
+  </dest>
+  <voice>
+    *: "You need to make a delivery."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PICK_UP
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You need to pick up a delivery."
+  </source>
+  <dest>
+    *: "You need to pick up a delivery."
+  </dest>
+  <voice>
+    *: "You need to pick up a delivery."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_MEETING
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a meeting to attend."
+  </source>
+  <dest>
+    *: "You have a meeting to attend."
+  </dest>
+  <voice>
+    *: "You have a meeting to attend."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_REMINDER
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "There is something you should be doing right now."
+  </source>
+  <dest>
+    *: "There is something you should be doing right now."
+  </dest>
+  <voice>
+    *: "There is something you should be doing right now."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_DATE
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "An important date is about to occur."
+  </source>
+  <dest>
+    *: "An important date is about to occur."
+  </dest>
+  <voice>
+    *: "An important date is about to occur."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_ANNIVERSARY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming anniversary to celebrate."
+  </source>
+  <dest>
+    *: "You have an upcoming anniversary to celebrate."
+  </dest>
+  <voice>
+    *: "You have an upcoming anniversary to celebrate."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_BIRTHDAY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming birthday to celebrate."
+  </source>
+  <dest>
+    *: "You have an upcoming birthday to celebrate."
+  </dest>
+  <voice>
+    *: "You have an upcoming birthday to celebrate."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_HOLIDAY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming holiday to celebrate."
+  </source>
+  <dest>
+    *: "You have an upcoming holiday to celebrate."
+  </dest>
+  <voice>
+    *: "You have an upcoming holiday to celebrate."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_GO_HOME
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You should be going home soon."
+  </source>
+  <dest>
+    *: "You should be going home soon."
+  </dest>
+  <voice>
+    *: "You should be going home soon."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PARTY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a party to attend."
+  </source>
+  <dest>
+    *: "You have a party to attend."
+  </dest>
+  <voice>
+    *: "You have a party to attend."
+  </voice>
+</phrase>

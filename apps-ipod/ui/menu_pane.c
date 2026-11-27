@@ -110,6 +110,7 @@ static struct {
 } show = { .album = -1 };
 
 static struct menu_pane_content shown, pending, under;
+static struct menu_pane_content picture;
 static unsigned identity;
 static bool has_pending;
 static uint32_t pending_at, slide_started, stepped_at;
@@ -588,6 +589,12 @@ static void compose_still(struct stock_canvas *band,
             stock_art_mask(band, STOCK_ART_MAINMENU_SHUFFLE, SHUFFLE_X,
                            SHUFFLE_Y, WHITE);
             break;
+        case LIST_PANE_PICTURE:
+            if (c->paint)
+                c->paint(band);
+            if (c->art >= 0)
+                stock_art_put(band, c->art, c->x, c->y);
+            break;
         default:
             if (c->art >= 0)
                 put_picture(band, c->art);
@@ -660,6 +667,10 @@ static void still_lines(struct pane_lines *lines,
             pane_line(lines, c->title, fonts.title, 34);
             songs_line(lines);
             break;
+        case LIST_PANE_PICTURE:
+            pane_line(lines, c->title, fonts.title, c->baseline);
+            pane_line(lines, c->caption, fonts.title, c->baseline + 21);
+            break;
         default:
             pane_line(lines, c->title, fonts.title, 179);
             break;
@@ -724,12 +735,16 @@ static bool same_content(const struct menu_pane_content *a,
                          const struct menu_pane_content *b)
 {
     return a->kind == b->kind && a->art == b->art &&
-           !strcmp(a->title, b->title) && !strcmp(a->caption, b->caption);
+           !strcmp(a->title, b->title) && !strcmp(a->caption, b->caption) &&
+           a->x == b->x && a->y == b->y && a->baseline == b->baseline &&
+           a->paint == b->paint && a->stamp == b->stamp;
 }
 
 void menu_pane_select(const struct menu_pane_content *content,
                       unsigned list_identity)
 {
+    if (content->kind == LIST_PANE_PICTURE)
+        content = &picture;
     bool new_list = list_identity != identity;
     identity = list_identity;
     if (new_list)
@@ -751,6 +766,12 @@ void menu_pane_select(const struct menu_pane_content *content,
     }
     if (shown.kind == LIST_PANE_ART && show.state == SHOW_EMPTY)
         show_request();
+}
+
+void menu_pane_set_picture(const struct menu_pane_content *content)
+{
+    picture = *content;
+    picture.kind = LIST_PANE_PICTURE;
 }
 
 /* ---- motion ---- */

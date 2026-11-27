@@ -206,6 +206,16 @@ sim/rock_host.c
 #endif
 #endif
 screens/browse/browser_flat.c
+screens/extras/extras_alarm_ring.c
+screens/extras/extras_alarms.c
+screens/extras/extras_bar.c
+screens/extras/extras_calendars.c
+screens/extras/extras_clock.c
+screens/extras/extras_contacts.c
+screens/extras/extras_font.c
+screens/extras/extras_notes.c
+screens/extras/extras_screen_lock.c
+screens/extras/extras_stopwatch.c
 screens/context_menu.c
 screens/system/about.c
 screens/system/fruit_about.c

@@ -75,3 +75,11 @@
   holds a picture track, in **Files**, a search result or a shortcut, and
   it plays in the video player; music that was playing stops. An `.mp4` or
   `.m4a` with only sound plays as music, as before.
+
+- **Under Fruit Company, Extras** (Clocks, Calendars, Contacts, Alarms,
+  Notes, Screen Lock and Stopwatch) look and work like the original
+  iPod's. An alarm rings while the player is on, over any screen but a
+  game or plugin, and pauses the music until you answer it. Nothing wakes a player that is off or asleep
+  for an alarm. Alarms, clocks and the Screen Lock combination are kept in
+  `.rockbox/`; Notes reads the `.txt` files in `/Notes`. Update from the
+  whole zip: the Extras need its new fonts and `stock-art.bin`.

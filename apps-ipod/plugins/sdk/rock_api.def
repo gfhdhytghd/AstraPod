@@ -454,3 +454,9 @@ ROCK_SLOT(bool (*app_background_schedule)(const struct rock_tray_rule *, unsigne
           app_background_schedule, rock_app_background_schedule)
 ROCK_SLOT(bool (*app_tray_register12)(const struct rock_tray_icon12 *, unsigned),
           app_tray_register12, rock_app_tray_register12)
+
+/* Animation frames on every second panel refresh. Start before drawing the
+ * first frame; next sleeps until the following one is due and returns its
+ * number in refreshes since the start. */
+ROCK_SLOT(void (*frame_start)(void), frame_start, rock_frame_start)
+ROCK_SLOT(unsigned int (*frame_next)(void), frame_next, rock_frame_next)

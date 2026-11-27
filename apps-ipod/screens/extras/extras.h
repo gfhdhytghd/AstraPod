@@ -24,6 +24,8 @@ int extras_stopwatch(void);
 /* Whether /Contacts holds a .vcf file: the Extras pane reads "Contacts"
  * when it does, "No Contacts" when not. */
 bool extras_contacts_any(void);
+/* Number of vCard contacts across /Contacts .vcf files (for About). */
+int extras_contacts_count(void);
 
 /* Whether Screen Lock has a combination saved: the Extras pane reads
  * "Combination Set" when it has, "No Combination" when not. */

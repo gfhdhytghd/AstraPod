@@ -33574,3 +33574,339 @@
     *: "无名称"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_CONTACTS_CAR
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a car phone number
+  user: core
+  <source>
+    *: "Car"
+  </source>
+  <dest>
+    *: "车载"
+  </dest>
+  <voice>
+    *: "车载"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_WEB
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a website URL
+  user: core
+  <source>
+    *: "Web"
+  </source>
+  <dest>
+    *: "网页"
+  </dest>
+  <voice>
+    *: "网页"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_GAMES
+  desc: Fruit Company: Extras side pane beside Games when none are installed
+  user: core
+  <source>
+    *: "No Games"
+  </source>
+  <dest>
+    *: "无游戏"
+  </dest>
+  <voice>
+    *: "无游戏"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_NEVER_PLAYED
+  desc: Fruit Company: Extras > Games row subline when a game has not been played
+  user: core
+  <source>
+    *: "Never Played"
+  </source>
+  <dest>
+    *: "从未玩过"
+  </dest>
+  <voice>
+    *: "从未玩过"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_PLAYED_ONCE
+  desc: Fruit Company: Extras > Games row subline when a game has been played once
+  user: core
+  <source>
+    *: "Played Once"
+  </source>
+  <dest>
+    *: "玩过 1 次"
+  </dest>
+  <voice>
+    *: "玩过 1 次"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_PLAYED_TIMES
+  desc: Fruit Company: Extras > Games row subline when a game has been played multiple times; keep %d
+  user: core
+  <source>
+    *: "Played %d Times"
+  </source>
+  <dest>
+    *: "玩过 %d 次"
+  </dest>
+  <voice>
+    *: "玩过 %d 次"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_ERROR
+  desc: Fruit Company: Extras > Games launch error screen title bar
+  user: core
+  <source>
+    *: "Error"
+  </source>
+  <dest>
+    *: "错误"
+  </dest>
+  <voice>
+    *: "错误"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_LAUNCH_ERROR
+  desc: Fruit Company: Extras > Games launch error screen heading
+  user: core
+  <source>
+    *: "This game cannot be launched."
+  </source>
+  <dest>
+    *: "无法启动此游戏。"
+  </dest>
+  <voice>
+    *: "无法启动此游戏。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_LAUNCH_ERROR_BODY
+  desc: Fruit Company: Extras > Games launch error screen recovery guidance
+  user: core
+  <source>
+    *: "Check that the game file is installed and intact, then try again."
+  </source>
+  <dest>
+    *: "请检查游戏文件是否已完整安装，然后重试。"
+  </dest>
+  <voice>
+    *: "请检查游戏文件是否已完整安装，然后重试。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TODO_LIST
+  desc: Fruit Company: Extras > Calendars > To Do's list title bar
+  user: core
+  <source>
+    *: "List of To Do's"
+  </source>
+  <dest>
+    *: "待办事项列表"
+  </dest>
+  <voice>
+    *: "待办事项列表"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_SUMMARY
+  desc: Fruit Company: Extras > Calendars detail label before summary
+  user: core
+  <source>
+    *: "Summary"
+  </source>
+  <dest>
+    *: "摘要"
+  </dest>
+  <voice>
+    *: "摘要"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_DATE
+  desc: Fruit Company: Extras > Calendars detail label before date
+  user: core
+  <source>
+    *: "Date"
+  </source>
+  <dest>
+    *: "日期"
+  </dest>
+  <voice>
+    *: "日期"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TIME
+  desc: Fruit Company: Extras > Calendars detail label before time
+  user: core
+  <source>
+    *: "Time"
+  </source>
+  <dest>
+    *: "时间"
+  </dest>
+  <voice>
+    *: "时间"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_LOCATION
+  desc: Fruit Company: Extras > Calendars detail label before location
+  user: core
+  <source>
+    *: "Location"
+  </source>
+  <dest>
+    *: "地点"
+  </dest>
+  <voice>
+    *: "地点"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_ATTENDEES
+  desc: Fruit Company: Extras > Calendars detail label before attendees
+  user: core
+  <source>
+    *: "Attendees"
+  </source>
+  <dest>
+    *: "参与者"
+  </dest>
+  <voice>
+    *: "参与者"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NOTES
+  desc: Fruit Company: Extras > Calendars detail label before notes
+  user: core
+  <source>
+    *: "Notes"
+  </source>
+  <dest>
+    *: "备注"
+  </dest>
+  <voice>
+    *: "备注"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_DUE
+  desc: Fruit Company: Extras > Calendars To Do detail label before due date
+  user: core
+  <source>
+    *: "Due"
+  </source>
+  <dest>
+    *: "截止日期"
+  </dest>
+  <voice>
+    *: "截止日期"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_STATUS
+  desc: Fruit Company: Extras > Calendars To Do detail label before status
+  user: core
+  <source>
+    *: "Status"
+  </source>
+  <dest>
+    *: "状态"
+  </dest>
+  <voice>
+    *: "状态"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_PRIORITY
+  desc: Fruit Company: Extras > Calendars To Do detail label before priority
+  user: core
+  <source>
+    *: "Priority"
+  </source>
+  <dest>
+    *: "优先级"
+  </dest>
+  <voice>
+    *: "优先级"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NEEDS_ACTION
+  desc: Fruit Company: Extras > Calendars To Do status value
+  user: core
+  <source>
+    *: "Needs Action"
+  </source>
+  <dest>
+    *: "待处理"
+  </dest>
+  <voice>
+    *: "待处理"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_COMPLETED
+  desc: Fruit Company: Extras > Calendars To Do status value
+  user: core
+  <source>
+    *: "Completed"
+  </source>
+  <dest>
+    *: "已完成"
+  </dest>
+  <voice>
+    *: "已完成"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_IN_PROCESS
+  desc: Fruit Company: Extras > Calendars To Do status value
+  user: core
+  <source>
+    *: "In-Process"
+  </source>
+  <dest>
+    *: "进行中"
+  </dest>
+  <voice>
+    *: "进行中"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_CANCELLED
+  desc: Fruit Company: Extras > Calendars To Do status value
+  user: core
+  <source>
+    *: "Cancelled"
+  </source>
+  <dest>
+    *: "已取消"
+  </dest>
+  <voice>
+    *: "已取消"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_ALL_DAY
+  desc: Fruit Company: Extras > Calendars event detail time for an all-day event
+  user: core
+  <source>
+    *: "All Day"
+  </source>
+  <dest>
+    *: "全天"
+  </dest>
+  <voice>
+    *: "全天"
+  </voice>
+</phrase>

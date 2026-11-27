@@ -1224,7 +1224,8 @@ unload:
     return result;
 }
 
-static int rock_open_foreground(const char *path, const char *file, bool shell)
+static int rock_open_foreground(const char *path, const char *file, bool shell,
+                                bool quiet)
 {
 #ifdef HAVE_PODLINK_PLUGIN_TEST
     if (!podlink_plugin_test_claim(shell))
@@ -1285,10 +1286,10 @@ static int rock_open_foreground(const char *path, const char *file, bool shell)
                      native == GO_TO_WPS ? PLUGIN_GOTO_WPS : PLUGIN_OK;
         }
         rock_clear_handoff();
-        if (result == PLUGIN_ERROR && !shell)
+        if (result == PLUGIN_ERROR && !quiet)
             splash(HZ, ID2P(LANG_PLUGIN_ERROR));
     }
-    else if (!shell)
+    else if (!quiet)
         splash(HZ, ID2P(LANG_PLUGIN_CANT_OPEN));
 
 #ifdef HAVE_PODLINK_PLUGIN_TEST
@@ -1300,14 +1301,13 @@ static int rock_open_foreground(const char *path, const char *file, bool shell)
 int rock_run_from_shell(const char *path)
 {
     bool previous = action_set_menu_back(true);
-    int result = rock_open_foreground(path, NULL, true);
+    int result = rock_open_foreground(path, NULL, true, true);
     action_set_menu_back(previous);
     return result;
 }
 
-int rock_open_from_browser(const char *path, const char *file)
+static int rock_map_browser_result(int result)
 {
-    int result = rock_open_foreground(path, file, false);
     if (result == PLUGIN_USB_CONNECTED || result == PLUGIN_GOTO_ROOT)
         return GO_TO_ROOT;
     if (result == PLUGIN_GOTO_WPS)
@@ -1315,4 +1315,19 @@ int rock_open_from_browser(const char *path, const char *file)
     if (result == PLUGIN_GOTO_FILEBROWSER)
         return GO_TO_FILEBROWSER;
     return GO_TO_PREVIOUS;
+}
+
+int rock_open_from_browser(const char *path, const char *file)
+{
+    return rock_map_browser_result(
+        rock_open_foreground(path, file, false, false));
+}
+
+int rock_open_from_browser_quiet(const char *path, const char *file,
+                                 bool *failed)
+{
+    int result = rock_open_foreground(path, file, false, true);
+    if (failed)
+        *failed = (result == PLUGIN_ERROR);
+    return rock_map_browser_result(result);
 }

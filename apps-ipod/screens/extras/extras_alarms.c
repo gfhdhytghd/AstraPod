@@ -15,8 +15,10 @@
 #include "config.h"
 #include "system.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "string-extra.h"
+#include "dir.h"
 #include "fixedpoint.h"
 #include "font.h"
 #include "kernel.h"
@@ -27,6 +29,7 @@
 #include "timefuncs.h"
 #include "input/action.h"
 #include "draw/viewport.h"
+#include "playlist/catalog.h"
 #include "settings/settings.h"
 #include "system/activity.h"
 #include "system/shutdown.h"
@@ -157,7 +160,7 @@ static bool clock_24h(void)
 static char *format_time(char *buffer, size_t size, int hour, int minute)
 {
     if (clock_24h())
-        snprintf(buffer, size, "%d:%02d", hour, minute);
+        snprintf(buffer, size, "%02d:%02d", hour, minute);
     else
         snprintf(buffer, size, str(hour < 12 ? LANG_EXTRAS_ALARMS_TIME_AM :
                                                LANG_EXTRAS_ALARMS_TIME_PM),
@@ -373,7 +376,7 @@ static int show_page(struct page *page)
     gui_synclist_draw_settled(&list);
     while (true)
     {
-        list_do_action(CONTEXT_TREE, HZ, &list, &action);
+        extras_list_do_action(HZ, &list, &action);
         if (action == ACTION_STD_OK)
         {
             page->selection = gui_synclist_get_sel_pos(&list);
@@ -471,11 +474,73 @@ static const char *sound_name(int item, void *data, char *buf, size_t size)
     return name_lang(sound_names, item);
 }
 
-/* Sounds > Playlists: no playlist can sound an alarm here. */
-static const char *none_name(int item, void *data, char *buf, size_t size)
+/* Sounds > Playlists: None followed by user playlists in the catalog dir. */
+#define ALARM_PLAYLIST_MAX 64
+static char alarm_playlists[ALARM_PLAYLIST_MAX][ALARM_PLAYLIST_LEN];
+static int alarm_playlist_count;
+
+static int cmp_playlist(const void *a, const void *b)
 {
-    (void)item; (void)data; (void)buf; (void)size;
-    return str(LANG_EXTRAS_ALARMS_NONE);
+    return strcasecmp((const char *)a, (const char *)b);
+}
+
+static bool has_playlist_stem(const char *stem)
+{
+    for (int i = 0; i < alarm_playlist_count; i++)
+        if (strcasecmp(alarm_playlists[i], stem) == 0)
+            return true;
+    return false;
+}
+
+static void scan_alarm_playlists(void)
+{
+    char dir[MAX_PATH];
+    alarm_playlist_count = 0;
+    catalog_get_directory(dir, sizeof(dir));
+    if (!dir[0])
+        return;
+    DIR *d = opendir(dir);
+    if (!d)
+        return;
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL &&
+           alarm_playlist_count < ALARM_PLAYLIST_MAX)
+    {
+        if (entry->d_name[0] == '.')
+            continue;
+        struct dirinfo info = dir_get_info(d, entry);
+        if (info.attribute & ATTR_DIRECTORY)
+            continue;
+        size_t len = strlen(entry->d_name);
+        size_t stem_len = 0;
+        if (len > 5 && strcasecmp(entry->d_name + len - 5, ".m3u8") == 0)
+            stem_len = len - 5;
+        else if (len > 4 && strcasecmp(entry->d_name + len - 4, ".m3u") == 0)
+            stem_len = len - 4;
+        else
+            continue;
+        char stem[ALARM_PLAYLIST_LEN];
+        size_t copy = MIN(stem_len, sizeof(stem) - 1);
+        memcpy(stem, entry->d_name, copy);
+        stem[copy] = '\0';
+        if (!stem[0] || has_playlist_stem(stem))
+            continue;
+        strlcpy(alarm_playlists[alarm_playlist_count++], stem,
+                sizeof(alarm_playlists[0]));
+    }
+    closedir(d);
+    if (alarm_playlist_count > 1)
+        qsort(alarm_playlists, alarm_playlist_count, sizeof(alarm_playlists[0]),
+              cmp_playlist);
+}
+
+static const char *playlist_row_name(int item, void *data, char *buf,
+                                     size_t size)
+{
+    (void)data; (void)buf; (void)size;
+    if (item == 0)
+        return str(LANG_EXTRAS_ALARMS_NONE);
+    return alarm_playlists[item - 1];
 }
 
 /* A tone or playlist chosen goes back to the alarm. */
@@ -483,14 +548,50 @@ static int choose_sounds(struct page *page, int row)
 {
     (void)page;
     struct alarm *a = &alarm_table.list[editing];
-    uint8_t none = 0;
-    int result = row == 0 ?
-        show_choice(LANG_EXTRAS_ALARMS_SOUNDS, sound_name,
-                    ARRAYLEN(sound_names), a->sound, &a->sound) :
-        show_choice(LANG_EXTRAS_ALARMS_SOUNDS, none_name, 1, 0, &none);
-    if (row != 0 && result >= 0)
+    if (row == 0)
     {
-        a->sound = 0;
+        uint8_t cur = a->sound < ARRAYLEN(sound_names) ? a->sound : 0;
+        int result = show_choice(LANG_EXTRAS_ALARMS_SOUNDS, sound_name,
+                                 ARRAYLEN(sound_names), cur, &cur);
+        if (result >= 0)
+        {
+            a->sound = cur;
+            a->playlist[0] = '\0';
+            alarm_table_save();
+        }
+        return result == LEFT ? LEFT : result >= 0 ? BACK : STAY;
+    }
+    scan_alarm_playlists();
+    int start = 0;
+    if (a->sound == ALARM_SOUND_PLAYLIST && a->playlist[0])
+    {
+        for (int i = 0; i < alarm_playlist_count; i++)
+            if (strcasecmp(alarm_playlists[i], a->playlist) == 0)
+            {
+                start = i + 1;
+                break;
+            }
+    }
+    struct page pl_page = {
+        .title = LANG_EXTRAS_ALARMS_SOUNDS,
+        .count = 1 + alarm_playlist_count,
+        .selection = start,
+        .name = playlist_row_name,
+        .kind = kind_option,
+        .choose = choose_row,
+        .pane = PANE_ALARM,
+    };
+    int result = show_page(&pl_page);
+    if (result == 0)
+    {
+        a->sound = ALARM_SOUND_NONE;
+        a->playlist[0] = '\0';
+        alarm_table_save();
+    }
+    else if (result > 0 && result <= alarm_playlist_count)
+    {
+        a->sound = ALARM_SOUND_PLAYLIST;
+        strlcpy(a->playlist, alarm_playlists[result - 1], sizeof(a->playlist));
         alarm_table_save();
     }
     return result == LEFT ? LEFT : result >= 0 ? BACK : STAY;
@@ -581,7 +682,7 @@ static void slot_text(const struct editor *e, int slot, char *buf,
     if (e->date)
         snprintf(buf, size, "%d", slot == 2 ? v % 100 : v);
     else if (slot == 0)
-        snprintf(buf, size, "%d", clock_24h() ? v : (v + 11) % 12 + 1);
+        snprintf(buf, size, "%d", (v + 11) % 12 + 1);
     else if (slot == 1)
         snprintf(buf, size, "%02d", v);
     else
@@ -604,7 +705,8 @@ static void compose_editor(struct stock_canvas *band, const struct editor *e)
         put_hand(band, a->minute * 6, 29, 32, 8);
         put_cap(band);
     }
-    int slots = e->date || !clock_24h() ? 3 : 2;
+    /* Stock 2.0.5 always shows 3 wells (H/M/AM-PM) even in 24-hour mode. */
+    const int slots = 3;
     put_picker(band, slots, e->field);
     for (int i = 0; i < slots; i++)
     {
@@ -647,8 +749,7 @@ static void store_editor(const struct editor *e)
     }
     else
     {
-        a->hour = clock_24h() ? e->value[0] :
-                  e->value[0] % 12 + (e->value[2] ? 12 : 0);
+        a->hour = e->value[0] % 12 + (e->value[2] ? 12 : 0);
         a->minute = e->value[1];
     }
 }
@@ -671,7 +772,7 @@ static void step_field(struct editor *e, int delta)
                                                      e->value[2]));
     }
     else if (e->field == 0)
-        *v = (*v + (clock_24h() ? 24 : 12) + delta) % (clock_24h() ? 24 : 12);
+        *v = (*v + 12 + delta) % 12;
     else if (e->field == 1)
         *v = (*v + 60 + delta) % 60;
     else
@@ -691,11 +792,11 @@ static int show_editor(bool date)
     }
     else
     {
-        e.value[0] = clock_24h() ? a->hour : a->hour % 12;
+        e.value[0] = a->hour % 12;
         e.value[1] = a->minute;
         e.value[2] = a->hour >= 12;
     }
-    int fields = date || !clock_24h() ? 3 : 2;
+    const int fields = 3;
     int result = BACK;
     struct ui_scene scene = {0};
     ui_scene_open_page(&scene, "alarms-editor-push");
@@ -704,7 +805,7 @@ static int show_editor(bool date)
     paint_editor(&e);
     while (true)
     {
-        int action = get_action(CONTEXT_STD, HZ);
+        int action = extras_get_action(HZ, true);
         if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT ||
             action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT)
         {

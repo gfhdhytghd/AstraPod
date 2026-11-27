@@ -61,25 +61,45 @@
 
 /* ---- the combination file ---- */
 
-static bool sl_load(char code[SL_DIGITS])
+static bool sl_load_ex(char code[SL_DIGITS], bool *locked)
 {
+    char buf[SL_DIGITS + 1];
     int fd = open(SL_FILE, O_RDONLY);
     if (fd < 0)
         return false;
-    bool ok = read(fd, code, SL_DIGITS) == SL_DIGITS;
+    ssize_t n = read(fd, buf, sizeof(buf));
     close(fd);
+    bool ok = n >= SL_DIGITS;
     for (int i = 0; ok && i < SL_DIGITS; i++)
+    {
+        code[i] = buf[i];
         ok = code[i] >= '0' && code[i] <= '9';
+    }
+    if (locked)
+        *locked = ok && n > SL_DIGITS && buf[SL_DIGITS] == 'L';
     return ok;
+}
+
+static bool sl_load(char code[SL_DIGITS])
+{
+    return sl_load_ex(code, NULL);
+}
+
+static void sl_save_state(const char code[SL_DIGITS], bool locked)
+{
+    char buf[SL_DIGITS + 1];
+    memcpy(buf, code, SL_DIGITS);
+    buf[SL_DIGITS] = 'L';
+    int fd = open(SL_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0)
+        return;
+    write(fd, buf, locked ? SL_DIGITS + 1 : SL_DIGITS);
+    close(fd);
 }
 
 static void sl_save(const char code[SL_DIGITS])
 {
-    int fd = open(SL_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (fd < 0)
-        return;
-    write(fd, code, SL_DIGITS);
-    close(fd);
+    sl_save_state(code, false);
 }
 
 bool extras_screen_lock_set(void)
@@ -398,16 +418,17 @@ static void paint(void)
 enum sl_result { SL_DONE, SL_MENU, SL_USB };
 
 /* The next action, or -1 when USB has come and gone. */
-static int next_action(int timeout)
+static int next_action(int timeout, bool locked)
 {
-    int action = get_action(CONTEXT_SETTINGS, timeout);
+    int action = locked ? extras_get_action_locked(timeout)
+                        : extras_get_action(timeout, true);
     if (default_event_handler(action) == SYS_USB_CONNECTED)
         return -1;
     return action;
 }
 
-/* Four digits from the wheel under `caption`, into sl.digit. Select and
- * Next move to the next digit, Previous back; Menu gives up. */
+/* Four digits from the wheel under `caption`, into sl.digit. Wheel changes
+ * the focused digit, Select advances, Menu steps back a digit or cancels. */
 static enum sl_result sl_enter(int caption)
 {
     sl.view = SL_TUMBLER;
@@ -417,30 +438,29 @@ static enum sl_result sl_enter(int caption)
     paint();
     while (1)
     {
-        int action = next_action(TIMEOUT_BLOCK);
+        int action = next_action(TIMEOUT_BLOCK, false);
         char *d = &sl.digit[sl.focus];
         switch (action)
         {
             case -1:
                 return SL_USB;
             case ACTION_STD_CANCEL:
-                return SL_MENU;
-            case ACTION_SETTINGS_INC:
-            case ACTION_SETTINGS_INCREPEAT:
+                if (sl.focus > 0)
+                    sl.focus--;
+                else
+                    return SL_MENU;
+                break;
+            case ACTION_STD_NEXT:
+            case ACTION_STD_NEXTREPEAT:
                 *d = *d == '9' ? '0' : *d + 1;
                 break;
-            case ACTION_SETTINGS_DEC:
-            case ACTION_SETTINGS_DECREPEAT:
+            case ACTION_STD_PREV:
+            case ACTION_STD_PREVREPEAT:
                 *d = *d == '0' ? '9' : *d - 1;
                 break;
             case ACTION_STD_OK:
-            case ACTION_STD_NEXT:
                 if (++sl.focus == SL_DIGITS)
                     return SL_DONE;
-                break;
-            case ACTION_STD_PREV:
-                if (sl.focus > 0)
-                    sl.focus--;
                 break;
             default:
                 continue;
@@ -457,7 +477,7 @@ static enum sl_result sl_incorrect(long ticks)
     paint();
     long until = current_tick + ticks;
     while (TIME_BEFORE(current_tick, until))
-        if (next_action(until - current_tick) == -1)
+        if (next_action(until - current_tick, true) == -1)
             return SL_USB;
     return SL_DONE;
 }
@@ -495,26 +515,34 @@ static enum sl_result sl_check(const char code[SL_DIGITS])
 
 /* ---- the screen ---- */
 
-/* Every button but Menu asks for the combination; Menu and Play do
- * nothing. USB is served and the lock stays. */
-static void sl_locked(const char code[SL_DIGITS])
+/* Wheel or Select asks for the combination; Menu, Play, Left and Right do
+ * nothing. USB clears the lock (as stock does on sync) and returns. */
+static enum sl_result sl_locked(const char code[SL_DIGITS])
 {
+    sl_save_state(code, true);
     while (1)
     {
         sl.view = SL_LOCKED;
         paint();
         int action;
         do
-            action = next_action(TIMEOUT_BLOCK);
-        while (action != ACTION_STD_OK && action != ACTION_STD_NEXT &&
-               action != ACTION_STD_PREV && action != ACTION_SETTINGS_INC &&
-               action != ACTION_SETTINGS_DEC && action != -1);
-        if (action != -1 && sl_check(code) == SL_DONE)
-            return;
+            action = next_action(TIMEOUT_BLOCK, true);
+        while (action != ACTION_STD_OK && action != -1);
+        if (action == -1)
+        {
+            sl_save_state(code, false);
+            return SL_USB;
+        }
+        enum sl_result r = sl_check(code);
+        if (r == SL_DONE || r == SL_USB)
+        {
+            sl_save_state(code, false);
+            return r;
+        }
     }
 }
 
-/* Lock or Reset, Next and Previous moving between them. */
+/* Lock or Reset, wheel moving between them. */
 static enum sl_result sl_choice(char code[SL_DIGITS], bool *locked)
 {
     sl.button = 0;
@@ -522,18 +550,20 @@ static enum sl_result sl_choice(char code[SL_DIGITS], bool *locked)
     {
         sl.view = SL_CHOICE;
         paint();
-        int action = next_action(TIMEOUT_BLOCK);
+        int action = next_action(TIMEOUT_BLOCK, false);
         if (action == -1)
             return SL_USB;
         if (action == ACTION_STD_CANCEL)
             return SL_MENU;
-        if (action == ACTION_STD_NEXT || action == ACTION_STD_PREV)
-            sl.button = action == ACTION_STD_NEXT;
+        if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
+            sl.button = 1;
+        else if (action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT)
+            sl.button = 0;
         else if (action == ACTION_STD_OK && sl.button == 0)
         {
-            sl_locked(code);
+            enum sl_result r = sl_locked(code);
             *locked = true;
-            return SL_DONE;
+            return r;
         }
         else if (action == ACTION_STD_OK)
         {
@@ -564,9 +594,15 @@ int extras_screen_lock(void)
     sl.caption_font = font_load_ex(CAPTION_FONT, 0, 32);
     sl.label_font = font_load_ex(LABEL_FONT, 0, 16);
 
-    if (!sl_load(code))
+    bool was_locked = false;
+    if (!sl_load_ex(code, &was_locked))
         r = sl_choose(code);
-    if (r == SL_DONE)
+    if (r == SL_DONE && was_locked)
+    {
+        r = sl_locked(code);
+        locked = true;
+    }
+    else if (r == SL_DONE)
         r = sl_choice(code, &locked);
 
     ui_scene_close_modal(&scene, r != SL_USB, "screen-lock-pop");

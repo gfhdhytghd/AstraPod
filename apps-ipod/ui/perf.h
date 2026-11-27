@@ -17,6 +17,10 @@ void ui_perf_wps_target(char route, const struct ui_rect *rect,
 /* Which way Cover Flow was entered and left, and why. */
 void ui_perf_flow_path(const char *enter, const char *enter_why,
                        const char *leave, const char *leave_why);
+void ui_perf_album_open(const char *path, bool remote, bool cached,
+                        const char *art, bool scene, const char *result,
+                        const char *reason, const char *back, unsigned frames,
+                        bool traced);
 unsigned ui_perf_begin(const char *route);
 /* Ancillary animation. Foreground motion can claim the recorder immediately
  * and discard an overlapping passive trace without writing on its hot path. */

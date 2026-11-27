@@ -28017,3 +28017,31 @@
     *: "直前の画面"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_USB_STOCK_CONNECTED
+  desc: first line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Connected"
+  </source>
+  <dest>
+    *: "接続されています"
+  </dest>
+  <voice>
+    *: "接続されています"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_USB_STOCK_EJECT_BEFORE_DISCONNECT
+  desc: second line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Eject before disconnecting."
+  </source>
+  <dest>
+    *: "接続を解除する前に、取り出してください"
+  </dest>
+  <voice>
+    *: "接続を解除する前に、取り出してください"
+  </voice>
+</phrase>

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """The USB Connected screen in each built-in theme, from a headless simulator.
 
-Arguments: ROCKBOXUI SIMDISK OUTPUT_DIRECTORY [THEME...]
+Arguments: ROCKBOXUI SIMDISK OUTPUT_DIRECTORY [THEME...] [--language LANGUAGE]
 SIMDISK is a simulator root with .rockbox in it, as build-sim.sh leaves; it
 is copied, not changed. THEME defaults to all four built-in themes.
+LANGUAGE is a bundled language name such as english or chinese-simp.
 
 The simulator runs with SDL's dummy video driver: no window opens. For each
 theme it plugs USB in, accepts Disk Mode and saves the screen as
@@ -14,6 +15,7 @@ top, the orange sphere and white text. Scrim and Light must not.
 Writes result.json beside the screens and exits non-zero on a failure.
 """
 
+import argparse
 import json
 import mmap
 import os
@@ -97,7 +99,7 @@ class Sim:
         self.log.close()
 
 
-def prepare(simdisk, root, theme):
+def prepare(simdisk, root, theme, language):
     shutil.copytree(simdisk, root)
     cfg = root / ".rockbox/config.cfg"
     if not cfg.exists():
@@ -107,13 +109,16 @@ def prepare(simdisk, root, theme):
     lines = [line for line in lines if not line.startswith("native theme:")]
     lines += ["native theme: " + theme, "idle poweroff: off",
               "sleep timer on startup: off"]
+    if language:
+        lines = [line for line in lines if not line.startswith("lang:")]
+        lines.append(f"lang: /.rockbox/langs/{language}.lng")
     cfg.write_text("\n".join(lines) + "\n")
 
 
-def capture(rockboxui, simdisk, out, theme):
+def capture(rockboxui, simdisk, out, theme, language):
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "disk"
-        prepare(simdisk, root, theme)
+        prepare(simdisk, root, theme, language)
         work = out / ("run-" + theme)
         work.mkdir(parents=True, exist_ok=True)
         sim = Sim(rockboxui, root, work)
@@ -159,18 +164,27 @@ def check(theme, frame, backdrop):
 
 
 def main():
-    if len(sys.argv) < 4:
-        sys.exit(__doc__)
-    rockboxui = Path(sys.argv[1]).resolve()
-    simdisk = Path(sys.argv[2]).resolve()
-    out = Path(sys.argv[3]).resolve()
-    themes = sys.argv[4:] or ["classic", "fruit-company", "scrim", "light"]
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("rockboxui", type=Path)
+    parser.add_argument("simdisk", type=Path)
+    parser.add_argument("output_directory", type=Path)
+    parser.add_argument("themes", nargs="*")
+    parser.add_argument("--language", help="bundled language name")
+    args = parser.parse_intermixed_args()
+    rockboxui = args.rockboxui.resolve()
+    simdisk = args.simdisk.resolve()
+    out = args.output_directory.resolve()
+    themes = args.themes or ["classic", "fruit-company", "scrim", "light"]
+    if args.language:
+        languages = {p.stem for p in (simdisk / ".rockbox/langs").glob("*.lng")}
+        if args.language not in languages:
+            parser.error(f"language {args.language!r} is not bundled in {simdisk}")
     out.mkdir(parents=True, exist_ok=True)
     backdrop = Image.open(BACKGROUND).convert("RGB")
     result = {}
     for theme in themes:
-        result[theme] = check(theme, capture(rockboxui, simdisk, out, theme),
-                              backdrop)
+        frame = capture(rockboxui, simdisk, out, theme, args.language)
+        result[theme] = check(theme, frame, backdrop)
         print(theme, result[theme])
     (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     sys.exit(0 if all(r["ok"] for r in result.values()) else 1)

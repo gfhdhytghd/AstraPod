@@ -7,8 +7,8 @@
  * and DiskMode_View -- the orange sphere with the dock connector over it,
  * and two white lines of text centred between x 10 and 310. Stock writes
  * each line with the top of its line box at the y below, which the theme's
- * fonts reproduce, their ascent being stock's rounded up. The bar's title is
- * the player's name, as on the locked Screen Lock page.
+ * fonts reproduce, their ascent being stock's rounded up. The Disk Mode
+ * layout overrides the status bar's title with the fixed string "iPod".
  *
  * Everything is composed at 8 bits a channel in bands and truncated once.
  ****************************************************************************/
@@ -93,10 +93,11 @@ bool usb_stock_draw(void)
         stock_art_put(&band, STOCK_ART_BACKGROUND_LIGHTBLUE, 0, 0);
         put_centred(&band, STOCK_ART_DISKMODEIMAGE_SYNCICON, SPHERE_Y);
         put_centred(&band, STOCK_ART_DISKMODEIMAGE_CONNECTEDICON, SPHERE_Y);
-        put_text_line(&band, title_font, str(LANG_USB_CONNECTED), TITLE_Y);
+        put_text_line(&band, title_font, str(LANG_USB_STOCK_CONNECTED),
+                      TITLE_Y);
         put_text_line(&band, detail_font,
-                      str(LANG_USB_EJECT_BEFORE_DISCONNECT), DETAIL_Y);
-        extras_bar_put(&band, str(LANG_ROCKBOX_TITLE));
+                      str(LANG_USB_STOCK_EJECT_BEFORE_DISCONNECT), DETAIL_Y);
+        extras_bar_put(&band, "iPod");
         stock_canvas_show(&band, (struct ui_rect){ 0, y, LCD_WIDTH,
                                                    band.height });
         /* The host may be waiting on SET_ADDRESS (usb_screen.c). */

@@ -17030,3 +17030,31 @@
     *: "Все трэки сортируются по альбому"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_USB_STOCK_CONNECTED
+  desc: first line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Connected"
+  </source>
+  <dest>
+    *: "Подключен"
+  </dest>
+  <voice>
+    *: "Подключен"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_USB_STOCK_EJECT_BEFORE_DISCONNECT
+  desc: second line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Eject before disconnecting."
+  </source>
+  <dest>
+    *: "Извлеките перед отключением"
+  </dest>
+  <voice>
+    *: "Извлеките перед отключением"
+  </voice>
+</phrase>

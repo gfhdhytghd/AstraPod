@@ -17005,3 +17005,31 @@
     *: "상태 발표"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_USB_STOCK_CONNECTED
+  desc: first line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Connected"
+  </source>
+  <dest>
+    *: "연결됨"
+  </dest>
+  <voice>
+    *: "연결됨"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_USB_STOCK_EJECT_BEFORE_DISCONNECT
+  desc: second line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Eject before disconnecting."
+  </source>
+  <dest>
+    *: "연결 해제하기 전에 추출하십시오"
+  </dest>
+  <voice>
+    *: "연결 해제하기 전에 추출하십시오"
+  </voice>
+</phrase>

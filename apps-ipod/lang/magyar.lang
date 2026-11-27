@@ -16993,3 +16993,31 @@
     *: "Állapot bejelentése"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_USB_STOCK_CONNECTED
+  desc: first line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Connected"
+  </source>
+  <dest>
+    *: "Csatlakoztatva"
+  </dest>
+  <voice>
+    *: "Csatlakoztatva"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_USB_STOCK_EJECT_BEFORE_DISCONNECT
+  desc: second line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Eject before disconnecting."
+  </source>
+  <dest>
+    *: "Lecsatolás előtt vesse ki."
+  </dest>
+  <voice>
+    *: "Lecsatolás előtt vesse ki."
+  </voice>
+</phrase>

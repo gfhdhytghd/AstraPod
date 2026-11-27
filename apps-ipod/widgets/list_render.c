@@ -131,7 +131,7 @@ struct native_list {
     unsigned int colors[UI_COLOR_COUNT];
     unsigned theme_generation, palette_generation;
     bool colors_current;
-    int text_font, title_font, icon_font, value_font;
+    int text_font, title_font, icon_font, value_font, subtitle_font;
     struct ui_view root, title, header, rows, notes, art, index_view, pane;
     struct ui_page page;
     struct ui_layer backdrop;
@@ -230,7 +230,7 @@ void list_render_init(void)
         for (unsigned i = 0; i < ARRAYLEN(render->index_faces); i++)
             render->index_faces[i] = -1;
         render->text_font = render->title_font = render->icon_font = -1;
-        render->value_font = -1;
+        render->value_font = render->subtitle_font = -1;
         render->theme_generation = (unsigned)-1;
         core_put_data_pinned(render);
         ui_scene_set_backdrop_source(backdrop_handle);
@@ -251,6 +251,7 @@ static void refresh_tokens(struct native_list *render)
     font_unload(render->title_font);
     font_unload(render->icon_font);
     font_unload(render->value_font);
+    font_unload(render->subtitle_font);
     int glyphs = global_settings.glyphs_to_cache;
     render->text_font = ui_theme_font_load(&render->theme, UI_FONT_LIST, glyphs);
     render->title_font = ui_theme_font_load(&render->theme, UI_FONT_TITLE, glyphs);
@@ -259,6 +260,9 @@ static void refresh_tokens(struct native_list *render)
     render->value_font = render->theme.style[UI_STYLE_ACCESSORY] ==
                          UI_ACCESSORY_SELECTED ?
         ui_theme_font_load(&render->theme, UI_FONT_LIST_VALUE, glyphs) : -1;
+    render->subtitle_font = render->theme.style[UI_STYLE_MENU_TREE] ==
+                            UI_MENU_TREE_STOCK ?
+        ui_theme_font_load(&render->theme, UI_FONT_BODY, glyphs) : -1;
     round_rect_build_mask(render->mark_mask, 1,
                           render->theme.metric[UI_METRIC_LIST_SELECTION_ALPHA]);
 }
@@ -1289,8 +1293,12 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     if (agents && value && value[0] == 'r' && value[1] && value[2])
         ready &= list_text_ready(text_font, value + 2);
     int value_font = render->value_font >= 0 ? render->value_font : text_font;
+    int subtitle_font = render->subtitle_font >= 0 ? render->subtitle_font :
+                                                     value_font;
     if (value_text)
         ready &= list_text_ready(value_font, value);
+    if (list->value_below && value)
+        ready &= list_text_ready(subtitle_font, value);
     if (!ready)
         return;
 
@@ -1307,9 +1315,16 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
                                         cover_size, cover_size, rtl);
         if (cover)
             draw_bitmap(clip, tile, cover);
+        else if (list->value_below)
+        {
+            int id = equals_lang(label, LANG_FRUIT_ALL_SONGS) ?
+                     STOCK_ART_ALBUMLIST_ALLSONGS : STOCK_ART_ALBUMLIST_PLACEHOLDER;
+            stock_art_draw(id, tile.x, tile.y, intersection(clip, tile));
+        }
         else if (list->callback_prefetch_art)
             fill(clip, tile, LCD_RGBPACK(45, 45, 45));
-        if (!cover && !list->callback_prefetch_art && render->icon_font >= 0)
+        if (!cover && !list->value_below && !list->callback_prefetch_art &&
+            render->icon_font >= 0)
             draw_text(render, clip, icon_cell, render->icon_font, fg,
                       row_icon(icon, kind, icon_label, files, activity, true),
                       false, 0, false);
@@ -1354,6 +1369,8 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     int arrow = right - icon_size;
     int text_height = MIN(row.height, m[UI_METRIC_LIST_TEXT_HEIGHT]);
     int text_y = (row.height - text_height) / 2;
+    if (list->value_below)
+        text_y = (row.height - 40) / 2 - 1;
     /* With stock accessories a row's text keeps the text padding clear at
      * its right end, or stops short of the chevron, which keeps 6 columns
      * clear of the list's right edge, the scroll indicator's included. */
@@ -1403,6 +1420,16 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     draw_text(render, clip, row_cell(row, text_x, text_y,
               text_right - text_x, text_height, rtl), text_font, fg, label,
               scroll, list->offset_position[SCREEN_MAIN], false);
+    if (list->value_below)
+    {
+        if (!lit)
+            fill(clip, (struct ui_rect){ row.x, row.y + row.height - 1,
+                 row.width, 1 }, LCD_RGBPACK(218, 218, 218));
+        if (value)
+            draw_text(render, clip, row_cell(row, text_x, text_y + 21,
+                      text_right - text_x, 15, rtl), subtitle_font,
+                      lit ? fg : LCD_RGBPACK(96, 96, 96), value, false, 0, false);
+    }
     if (art_chevron)
     {
         struct ui_rect cell = row_cell(row, chevron_x,

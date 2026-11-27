@@ -2015,6 +2015,8 @@ const struct settings_list settings[] = {
     INT_SETTING(F_BANFROMQS, fruit_main_menu, LANG_MAIN_MENU, 0x20107081,
                 "fruit main menu", UNIT_INT, -0x7fffffff - 1, 0x7fffffff, 1,
                 NULL, NULL, NULL),
+    OFFON_SETTING(F_BANFROMQS, fruit_home_itunes_u, LANG_FRUIT_ITUNES_U,
+                  true, "fruit home itunes u", NULL),
     INT_SETTING(F_BANFROMQS, fruit_music_menu, LANG_FRUIT_MUSIC_MENU, 0x7ff,
                 "fruit music menu", UNIT_INT, 0, 0x7fffffff, 1,
                 NULL, NULL, NULL),

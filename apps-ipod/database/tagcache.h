@@ -221,6 +221,9 @@ bool tagcache_search_set_ids(struct tagcache_search *tcs,
 bool tagcache_search_add_clause(struct tagcache_search *tcs,
                                 struct tagcache_search_clause *clause);
 bool tagcache_get_next(struct tagcache_search *tcs, char *buf, long size);
+/* A track matching the filters of the last tagcache_get_next() result.
+ * A group read directly from a tag file can have no representative (-1). */
+int tagcache_match_index(const struct tagcache_search *tcs);
 /* Restart a whole-library search using its initial entry_count. */
 void tagcache_search_rewind(struct tagcache_search *tcs, int entry_count);
 /* Read a nonnumeric result at a seek obtained from this tag and DB commit. */

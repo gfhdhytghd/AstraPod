@@ -199,6 +199,7 @@ void gui_synclist_init(struct gui_synclist * gui_list,
     gui_list->selection_color = NULL;
     gui_list->callback_get_item_kind = NULL;
     gui_list->callback_get_item_value = NULL;
+    gui_list->value_below = false;
     gui_list->callback_get_item_range = NULL;
     gui_list->callback_item_is_playing = NULL;
     gui_list->callback_get_item_description = NULL;

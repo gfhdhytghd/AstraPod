@@ -420,6 +420,12 @@ itself when ejected, to load the new database. **Update Art Cache** and
 **Rebuild Art Cache** have `artcache_pb.exe` beside it, run the same way;
 after new music, run it after `database_pb.exe`.
 
+### Fruit Company — Main Menu
+
+| Setting | What it does | Default | |
+|---|---|---|---|
+| iTunes U | Shows iTunes U on the Fruit Company main menu when the library contains a course. | Yes | |
+
 ### Theme Settings
 
 | Setting | What it does | Default | |

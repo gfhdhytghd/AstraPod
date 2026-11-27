@@ -6,6 +6,7 @@ Light), every distinct frame the simulator presents is recorded, and:
 
   play      Play starts the centred album and raises Now Playing.
   flip-back MENU returns to the playing album with a cover turn.
+  pause-same and restart-same exercise Play on the current album.
   rise      Play pauses the current track and raises Now Playing even when
             another album is centred.
   sink      MENU sinks the page, revealing the same stationary covers.
@@ -13,6 +14,9 @@ Light), every distinct frame the simulator presents is recorded, and:
             Now Playing.
   caption   The cover turn and the sink leave the cover visible through
             caption glyphs.
+
+Fruit Company also checks the flat view, the open album panel, motion off,
+and simulated Cider playback with delayed track state or held LCD updates.
 
 Arguments: ROCKBOXUI ZIP OUTPUT_DIRECTORY [--fixture DIRECTORY]
 ZIP is the simulator build's rockbox.zip after the bundle steps. Writes
@@ -26,6 +30,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
@@ -36,9 +41,14 @@ from ui_stock_transitions_sim import CLASSIC, FPS, H, W, difference, \
 
 # A frame is a sheet when some offset explains its moving rows this well.
 SHEET_ERROR = 2.5
+RISE_MIN_FRAMES = 6
+# Measure from the first moving pose to the landing. The initial pose is
+# identical to the underlay and may be deduplicated.
+RISE_MIN_MS = 200
 # Glyph stems fill a few columns of a line edge to edge; a band fills many.
 CAPTION_BOX = 12
 STOCK_BAR = 17
+LOCAL_RISES = ("play", "pause-same", "restart-same", "rise", "restart")
 
 
 def record(sim, frames, events):
@@ -96,7 +106,9 @@ def sheet_motion(shots, page, under, rising):
                  if track[i][1] == finish), len(track) - 1)
     window = track[first:last + 1]
     return {"frames": len(interior), "ms": [ms for ms, _, _ in interior],
-            "offsets": offsets, "worst_error": round(max(
+            "offsets": offsets, "motion_ms": window[-1][0] - window[0][0],
+            "landed": window[-1][1] == finish,
+            "worst_error": round(max(
                 (e for _, _, e in window), default=255), 2),
             "max_gap_ms": max((b[0] - a[0] for a, b in
                                zip(window, window[1:])), default=0),
@@ -111,8 +123,11 @@ def playback_page(shots):
         page = shots[i][1]
         before = [sheet_fit(image, page, under)
                   for _, image in shots[i - 2:i]]
-        if all(0 < offset < H and error < SHEET_ERROR
-               for offset, error in before) and before[0][0] > before[1][0]:
+        # A still-shifted page can explain the previous two poses as well.
+        # The last pose before landing is within a few pixels of the top.
+        if (all(0 < offset < H and error < SHEET_ERROR
+                for offset, error in before) and
+                before[0][0] > before[1][0] and before[1][0] <= 5):
             return shots[:i + 1], page
     return shots, shots[-1][1]
 
@@ -180,10 +195,14 @@ def flow(enter):
         enter(sim)
         sim.wait(120)
         out = {}
-        out["play"] = record(sim, 90, press("play"))
+        out["play"] = record(sim, 205, press("play"))
         sim.wait(50)
         out["flip-back"] = record(sim, 120, press("menu"))
         sim.wait(45)
+        out["pause-same"] = record(sim, 65, press("play"))
+        sim.tap("menu", 120)
+        out["restart-same"] = record(sim, 135, press("play"))
+        sim.tap("menu", 120)
         for _ in range(4):
             sim.tap("down", 16)
         sim.wait(55)
@@ -191,11 +210,46 @@ def flow(enter):
         sim.wait(30)
         out["sink"] = record(sim, 85, press("menu"))
         sim.wait(30)
-        out["restart"] = record(sim, 80, press("play"))
-        perf = sim.out / "disk/.rockbox/ui-perf.txt"
-        if perf.exists():
-            shutil.copyfile(perf, sim.out / perf.name)
+        out["restart"] = record(sim, 150, press("play"))
+        save_perf(sim)
         return out
+    return script
+
+
+def save_perf(sim):
+    perf = sim.out / "disk/.rockbox/ui-perf.txt"
+    target = sim.out / perf.name
+    target.unlink(missing_ok=True)
+    if perf.exists():
+        shutil.copyfile(perf, target)
+
+
+def routes(out):
+    return [dict(field.split("=", 1) for field in line.split()[1:])
+            for line in (out / "ui-perf.txt").read_text().splitlines()
+            if line.startswith("cover-flow-wps-path ")]
+
+
+def remote_flow(sim):
+    fruit_enter(sim)
+    shots = {"play": record(sim, 120, press("play"))}
+    sim.tap("menu", 120)
+    shots["pause-same"] = record(sim, 65, press("play"))
+    sim.tap("menu", 120)
+    shots["restart-same"] = record(sim, 120, press("play"))
+    save_perf(sim)
+    return shots
+
+
+def open_wps_flow(enter, before_play=(), settle=0):
+    def script(sim):
+        enter(sim)
+        for key, wait in before_play:
+            sim.tap(key, wait)
+        sim.wait(settle)
+        shots = {"play": record(sim, 180, press("play"))}
+        save_perf(sim)
+        return shots
     return script
 
 
@@ -216,16 +270,29 @@ THEMES = {
 }
 
 
-def check(shots, top):
+def rise_motion(shots):
+    moving, page = playback_page(shots)
+    return sheet_motion(moving, page, moving[0][1], True)
+
+
+def good_rise(motion):
+    # Host scheduling can stretch the intervals. The minimum span and
+    # ordered, distinct poses catch a snap even when an interval runs late.
+    return (motion["frames"] >= RISE_MIN_FRAMES and
+            motion["motion_ms"] >= RISE_MIN_MS and motion["landed"] and
+            motion["ordered"] and motion["worst_error"] <= SHEET_ERROR)
+
+
+def distinct(shots):
     # Repeated submissions matter to the raw timeline, while the geometry
     # checks count each distinct pose once.
-    shots = {name: [shot for i, shot in enumerate(frames)
-                    if i == 0 or frames[i - 1][1] != shot[1]]
-             for name, frames in shots.items()}
-    result = {}
-    for name in ("play", "rise", "restart"):
-        moving, page = playback_page(shots[name])
-        result[name] = sheet_motion(moving, page, moving[0][1], True)
+    return [shot for i, shot in enumerate(shots)
+            if i == 0 or shots[i - 1][1] != shot[1]]
+
+
+def check(shots, top):
+    shots = {name: distinct(frames) for name, frames in shots.items()}
+    result = {name: rise_motion(shots[name]) for name in LOCAL_RISES}
     result["sink"] = sheet_motion(shots["sink"], shots["sink"][0][1],
                                   shots["sink"][-1][1], False)
     result["flip_turning_frames"] = turning_frames(shots["flip-back"])
@@ -238,15 +305,16 @@ def check(shots, top):
         for _, image in shots["flip-back"])
     result["restart_body_delta"] = round(difference(
         shots["rise"][-1][1], shots["restart"][-1][1], (0, top, W, H - 20)), 2)
+    # The native themes' spectrum can still decay while playback is paused.
+    body_bottom = H if top else H - 12
     result["paused_body_delta"] = round(difference(
-        shots["rise"][-1][1], shots["sink"][0][1], (0, top, W, H)), 2)
-    failed = []
-    for key in ("play", "rise", "restart", "sink"):
-        motion = result[key]
-        if (motion["frames"] < 2 or not motion["ordered"] or
-                motion["worst_error"] > SHEET_ERROR or
-                motion["max_gap_ms"] > 65):
-            failed.append(key)
+        shots["rise"][-1][1], shots["sink"][0][1],
+        (0, top, W, body_bottom)), 2)
+    failed = [name for name in LOCAL_RISES if not good_rise(result[name])]
+    sink = result["sink"]
+    if (sink["frames"] < 2 or not sink["landed"] or not sink["ordered"] or
+            sink["worst_error"] > SHEET_ERROR or sink["max_gap_ms"] > 65):
+        failed.append("sink")
     if result["flip_turning_frames"] < 3:
         failed.append("flip_turning_frames")
     if result["sink_rest_change"] > 1.5:
@@ -258,6 +326,13 @@ def check(shots, top):
     if result["restart_body_delta"] < 2:
         failed.append("restart_body_delta")
     return result, failed
+
+
+def check_paths(out, expected):
+    paths = routes(out)
+    assert [(p["path"], p["centre"], p["result"]) for p in paths] == [
+        (*pair, "rise") for pair in expected], paths
+    return paths
 
 
 def main():
@@ -287,12 +362,58 @@ def main():
     results, failures = {}, []
     for name in args.themes.split(","):
         enter, extra, top = THEMES[name]
-        shots = session(args.binary, fixture, args.output / name, name,
+        out = args.output / name
+        shots = session(args.binary, fixture, out, name,
                         extra + "scrolling enabled: off\n", flow(enter))
         if args.record_only:
             continue
         results[name], failed = check(shots, top)
         failures += [(name, key) for key in failed]
+        results[name]["paths"] = check_paths(out, [
+            ("local-stopped", "none"), ("local-playing", "same"),
+            ("local-paused", "same"), ("local-playing", "different"),
+            ("local-paused", "different"),
+        ])
+    if "fruit-company" in args.themes.split(","):
+        extra = "scrolling enabled: off\n"
+        for name, config, script, expected, env in (
+            ("remote", "", remote_flow, [
+                ("cider-stopped", "none"), ("cider-playing", "same"),
+                ("cider-paused", "same"),
+            ], {"PODBOX_SIM_CIDER": "180", "PODBOX_SIM_CIDER_PLAY_MS": "350",
+                "PODBOX_SIM_CIDER_TRACK_MS": "1200"}),
+            ("scene-held", "", open_wps_flow(fruit_enter, settle=120),
+             [("cider-stopped", "none")],
+             {"PODBOX_SIM_CIDER": "180", "PODBOX_SIM_CIDER_PLAY_MS": "350",
+              "PODBOX_SIM_CIDER_HOLD_LCD": "1"}),
+            ("motion-off", "animations: off\n", open_wps_flow(fruit_enter),
+             [("local-stopped", "none")], {}),
+            ("panel", "", open_wps_flow(fruit_enter, [
+                ("play", 180), ("menu", 120), ("select", 95),
+             ]), [("local-stopped", "none"), ("panel-open-wps", "same")], {}),
+            ("flat", "album covers view mode: flat\n",
+             open_wps_flow(fruit_enter, [
+                 ("select", 95), ("select", 85), ("menu", 120), ("menu", 100),
+             ]), [("flat-open-wps", "same")], {}),
+        ):
+            out = args.output / name
+            with patch.dict("os.environ", env):
+                shots = session(args.binary, fixture, out, "fruit-company",
+                                extra + config, script)
+            if args.record_only:
+                continue
+            results[name] = {key: rise_motion(distinct(frames))
+                             for key, frames in shots.items()}
+            failures += [(name, key) for key, motion in results[name].items()
+                         if not good_rise(motion)]
+            paths = check_paths(out, expected)
+            if name == "remote":
+                for path in (paths[0], paths[2]):
+                    assert int(path["start_us"]) >= 300000, path
+                    assert path["reason"] == "track-pending", path
+            elif name == "scene-held":
+                assert paths[0]["reason"] == "scene-held", paths[0]
+            results[name]["paths"] = paths
     if args.record_only:
         return
     (args.output / "result.json").write_text(json.dumps(results, indent=1) +

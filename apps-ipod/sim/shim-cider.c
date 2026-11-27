@@ -12,9 +12,15 @@
 #include "podlink.h"
 #include "file.h"
 #include "kernel.h"
+#include "lcd.h"
 #include "rbpaths.h"
+#include "root_menu.h"
 #include "screens/playback/cider.h"
+#include "screens/playback/cider_controls.h"
 #include "screens/playback/cider_library.h"
+#include "screens/playback/cider_wps.h"
+#include "screens/playback/wps.h"
+#include "metadata.h"
 #include "sim/shim-cider.h"
 #include "screens/covers/panel_perf.h"
 #include "system/hash.h"
@@ -43,6 +49,9 @@ static long decode_ticks;
 static int active_art = -1, active_tier;
 static unsigned use_clock;
 static long issued_at;
+static struct cider_state playback;
+static long play_at, track_at, track_delay;
+static bool play_pending;
 
 static void __attribute__((constructor)) init_art_fixture(void)
 {
@@ -149,10 +158,83 @@ bool cider_track_page_row(int index, struct cider_row *row)
 bool cider_play_in(const char *route, const char *context, int index)
 {
     DEBUGF("sim Cider: play %s %s %d\n", route, context, index);
-    return false; /* No streaming service in a simulator. */
+    const char *delay = getenv("PODBOX_SIM_CIDER_PLAY_MS");
+    if (!delay)
+        return false;
+    unsigned album = 0;
+    sscanf(context, "album/sim/%u", &album);
+    struct cider_row row;
+    if (!cider_page_peek(album, &row))
+        return false;
+    strlcpy(playback.album, row.title, sizeof(playback.album));
+    strlcpy(playback.artist, row.subtitle, sizeof(playback.artist));
+    strlcpy(playback.art, row.art, sizeof(playback.art));
+    snprintf(playback.title, sizeof(playback.title), "Remote song %02d", index + 1);
+    play_at = current_tick + atol(delay) * HZ / 1000;
+    const char *track_ms = getenv("PODBOX_SIM_CIDER_TRACK_MS");
+    track_delay = track_ms ? atol(track_ms) * HZ / 1000 : 0;
+    play_pending = true;
+    return true;
 }
 
-int cider_play_status(void) { return -1; }
+int cider_play_status(void)
+{
+    if (play_pending)
+    {
+        if (TIME_BEFORE(current_tick, play_at))
+            return 0;
+        play_pending = false;
+        track_at = current_tick + track_delay;
+        playback.have = playback.available = true;
+        playback.rate = 1;
+        if (getenv("PODBOX_SIM_CIDER_HOLD_LCD"))
+            lcd_hold_updates(true);
+    }
+    return playback.have ? 1 : -1;
+}
+
+bool cider_active(void) { return playback.have; }
+
+void cider_snapshot(struct cider_state *state) { *state = playback; }
+
+void cider_status(struct cider_status *status)
+{
+    *status = (struct cider_status){
+        .available = playback.available, .rate = playback.rate,
+        .loading = playback.have && TIME_BEFORE(current_tick, track_at),
+    };
+}
+
+void cider_control(const char *command, int value)
+{
+    (void)value;
+    if (playback.have && !strcmp(command, "toggle"))
+        playback.rate = !playback.rate;
+}
+
+void cider_wps_update(struct wps_state *state)
+{
+    static struct mp3entry track;
+    if (!cider_active())
+        return;
+    track.title = playback.title;
+    track.artist = playback.artist;
+    track.album = playback.album;
+    track.length = 123000;
+    strlcpy(track.path, "cider/sim", sizeof(track.path));
+    state->id3 = &track;
+    state->nid3 = NULL;
+    state->paused = !playback.rate;
+}
+
+int cider_browse_covers(bool home)
+{
+    (void)home;
+    return GO_TO_ALBUM_COVERS;
+}
+
+bool cider_context_show(void) { return false; }
+int cider_context_destination(void) { return GO_TO_PREVIOUS; }
 
 static int store_open(const char *path, int mode)
 {

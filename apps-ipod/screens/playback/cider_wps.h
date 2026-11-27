@@ -29,10 +29,14 @@ static inline void cider_wps_alloc(void) {}
 #include "audio/playback.h"
 #include "audio/buffering.h"
 static inline void cider_wps_enter(void) {}
+#ifdef SIMULATOR
+void cider_wps_update(struct wps_state *state);
+#else
 static inline void cider_wps_update(struct wps_state *s)
 {
     (void)s;
 }
+#endif
 static inline bool cider_wps_action(int action)
 {
     (void)action;

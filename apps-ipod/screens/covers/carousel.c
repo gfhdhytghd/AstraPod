@@ -87,6 +87,7 @@
 #include "screens/playback/track_info.h"          /* browse_id3 */
 #include "audio.h"            /* audio_status, audio_current_track */
 #include "screens/playback/quick_screen.h"
+#include "screens/playback/cider_wps.h"
 #include "lcd.h"
 #include "font.h"
 #include "bidi.h"
@@ -499,6 +500,9 @@ static bool pf_left_key_valid;
 static void close_album_panel(void);
 static void release_playback_scene(void);
 static bool playback_panel_return(void);
+static bool playback_rise_pending(void);
+static void finish_wps_rise(const char *result, const char *reason,
+                            uint32_t prepare_start, uint32_t prepare_us);
 
 void carousel_prepare_transition(void)
 {
@@ -587,7 +591,10 @@ bool carousel_wps_returning(void)
 void carousel_wps_begin(void)
 {
     if (flat_view())
-        ui_scene_show_modal(&wps_handover.sheet, "covers-wps-up");
+    {
+        if (!playback_rise_pending())
+            ui_scene_show_modal(&wps_handover.sheet, "covers-wps-up");
+    }
     else if (wps_handover.panel_open && !playback_panel_return())
     {
         /* A failed local play returns to the panel before WPS starts. */
@@ -601,7 +608,11 @@ int carousel_wps_back(void)
     if (!wps_handover.model)
         return GO_TO_PREVIOUS;
     wps_handover.returning = true;
+#ifdef HAVE_USB_PODLINK
     return wps_handover.model->external ? GO_TO_CIDER : GO_TO_ALBUM_COVERS;
+#else
+    return GO_TO_ALBUM_COVERS;
+#endif
 }
 
 void carousel_wps_end(bool back)
@@ -615,6 +626,7 @@ void carousel_wps_end(bool back)
             pf_wps_entry = true;
         return;
     }
+    finish_wps_rise("skipped", "wps-not-entered", USEC_TIMER, 0);
     release_playback_scene();
     if (wps_handover.model)
     {
@@ -7129,14 +7141,15 @@ static struct {
     struct ui_rect slot;
     struct album_blur_source source;
     uint32_t action_us, playlist_us;
+    const char *rise_path, *rise_centre;
     /* Under the stock look, the frame Now Playing's chrome fades in over,
      * or that chrome and its mask as it fades out; and the status bar
      * Cover Flow showed, which the turn back fades to. */
     int chrome, bar;
-    /* The full page that was visible before the handoff. */
-    int sheet;
+    /* The page visible before the handoff and the reserved rise target. */
+    int sheet, sheet_front;
     pix_t bg;
-    bool pending, from_panel, returning, rising, sinking;
+    bool pending, from_panel, returning, sinking, rise_from_play;
 } playback_scene;
 
 static void drop_playback_bitmap(int *handle)
@@ -7154,6 +7167,7 @@ static void release_playback_scene(void)
     drop_playback_bitmap(&playback_scene.chrome);
     drop_playback_bitmap(&playback_scene.bar);
     drop_playback_bitmap(&playback_scene.sheet);
+    drop_playback_bitmap(&playback_scene.sheet_front);
     memset(&playback_scene, 0, sizeof(playback_scene));
 }
 
@@ -7165,6 +7179,24 @@ static bool playback_panel_return(void)
 bool carousel_wps_present_pending(void)
 {
     return playback_scene.pending;
+}
+
+static bool playback_rise_pending(void)
+{
+    return playback_scene.pending && playback_scene.rise_path;
+}
+
+static void finish_wps_rise(const char *result, const char *reason,
+                            uint32_t prepare_start, uint32_t prepare_us)
+{
+    if (playback_scene.rise_path)
+    {
+        ui_perf_flow_wps_path(playback_scene.rise_path,
+                             playback_scene.rise_centre, result, reason,
+                             prepare_start - playback_scene.action_us,
+                             prepare_us);
+        playback_scene.rise_path = NULL;
+    }
 }
 
 static struct playback_texture *playback_cover(int album)
@@ -7499,7 +7531,6 @@ static bool album_key_playing(const struct carousel_album_key *key)
 {
     if (key->remote)
     {
-#ifdef HAVE_USB_PODLINK
         static struct cider_state state;
         if (!cider_active())
             return false;
@@ -7508,9 +7539,6 @@ static bool album_key_playing(const struct carousel_album_key *key)
             return false;
         return (*key->art && !strcmp(key->art, state.art)) ||
                (*state.artist && !strcasecmp(key->artist, state.artist));
-#else
-        return false;
-#endif
     }
     const struct mp3entry *id3 = !cider_active() && audio_status() ?
                                  audio_current_track() : NULL;
@@ -7547,17 +7575,15 @@ static int capture_page(void)
 }
 
 /* Use the vertical entry and exit durations on the half-rate LCD clock. */
-#define WPS_RISE_FRAMES 6
-#define WPS_SINK_FRAMES 18
+#define WPS_SHEET_FRAMES 18
 
-static void play_wps_sheet(int front_handle, int back_handle, bool rising)
+static bool play_wps_sheet(const pix_t *front, const pix_t *back, bool rising)
 {
-    const pix_t *front = core_get_data_pinned(front_handle);
-    const pix_t *back = core_get_data_pinned(back_handle);
+    bool held = lcd_updates_held();
     wps_pace = (struct ui_pace){.half_rate = true};
-    unsigned frames = rising
-        ? ui_theme_motion(UI_MOTION_SHEET_IN, WPS_RISE_FRAMES, WPS_RISE_FRAMES)
-        : ui_theme_motion(UI_MOTION_SHEET_OUT, WPS_SINK_FRAMES, WPS_SINK_FRAMES);
+    unsigned frames = rising ? WPS_SHEET_FRAMES :
+        ui_theme_motion(UI_MOTION_SHEET_OUT, WPS_SHEET_FRAMES,
+                        WPS_SHEET_FRAMES);
     struct ui_tween tween = {
         .from = rising ? LCD_HEIGHT : 0,
         .to = rising ? 0 : LCD_HEIGHT,
@@ -7571,52 +7597,112 @@ static void play_wps_sheet(int front_handle, int back_handle, bool rising)
     uint32_t start = ui_clock_start();
     unsigned frame = 0;
     uint32_t due = ui_pace_next(&wps_pace, start);
-    for (;;)
+    bool landed = false;
+    while (lcd_active())
     {
-        uint32_t rendering = trace ? USEC_TIMER : 0;
+        uint32_t rendering = (trace || rising) ? USEC_TIMER : 0;
         ui_scene_compose_sheet(LCD_BUF, back, front,
                                ui_tween_sample(&tween, frame));
-        uint32_t submitting = trace ? USEC_TIMER : 0;
-        lcd_update();
+        uint32_t submitting = (trace || held) ? USEC_TIMER : 0;
+        bool shown = true;
+        if (held)
+        {
+            /* Another scene can hold normal updates. Submit the composed
+             * pixels directly once its outstanding transfer clears. */
+            while (!(shown = lcd_present_scene(LCD_BUF)) && lcd_active() &&
+                   (uint32_t)(USEC_TIMER - submitting) < 2 * ui_frame_period())
+                sleep(1);
+        }
+        else
+            lcd_update();
         if (trace)
         {
             ui_perf_note_render(submitting - rendering);
             ui_perf_note_submit((uint32_t)USEC_TIMER - submitting);
         }
-        if (!lcd_active() || frame >= frames)
+        if (frame >= frames)
+        {
+            landed = shown && lcd_active();
             break;
+        }
+        if (rising)
+        {
+            uint32_t next_pose = rendering + ui_frame_clock(wps_pace.divisor);
+            if ((int32_t)(due - next_pose) < 0)
+                due = next_pose;
+        }
         ui_clock_sleep_until(due);
-        frame = ui_pace_frame(&wps_pace);
+        /* A late wake delays the rise by a refresh instead of losing poses. */
+        frame = rising ? frame + wps_pace.divisor : ui_pace_frame(&wps_pace);
         due = ui_pace_next(&wps_pace, start);
     }
     ui_perf_end(trace);
     cpu_boost(false);
-    core_put_data_pinned((void *)back);
-    core_put_data_pinned((void *)front);
+    return landed;
 }
 
-static void rise_to_playback(const struct wps_state *state)
+static bool wps_track_ready(const struct wps_state *state)
 {
-    playback_scene.pending = playback_scene.rising = false;
-    if (lcd_active())
+    if (cider_active())
     {
-        /* Scrim's blur is produced off-thread. Submit the first sheet
-         * with the same backdrop that the live page will use. */
-        long until = current_tick + HZ / 8;
+        struct cider_status source;
+        cider_status(&source);
+        if (!source.available || source.loading)
+            return false;
+    }
+    const struct mp3entry *track = state->id3;
+    return track && track->path[0];
+}
+
+static void rise_to_playback(struct wps_state *state)
+{
+    playback_scene.pending = false;
+    uint32_t start = USEC_TIMER;
+    uint32_t prepare_us = 0;
+    const char *reason = "lcd-off";
+    bool landed = false;
+    if (lcd_active() && native_wps_active())
+    {
+        bool held = lcd_updates_held();
+        lcd_hold_updates(true);
+        /* Give the first track and Scrim's blur time to reach the page.
+         * The cover layer stays visible even if either worker is late. */
+        long until = current_tick + HZ / 4;
         native_wps_render(state, false);
-        while (!native_wps_sheet_ready() && TIME_BEFORE(current_tick, until))
+        while (lcd_active() && TIME_BEFORE(current_tick, until) &&
+               (!wps_track_ready(state) || !native_wps_sheet_ready()))
         {
             sleep(1);
+            if (cider_active())
+                cider_wps_update(state);
+            else if (!wps_track_ready(state) && audio_status())
+                state->id3 = audio_current_track();
             native_wps_render(state, false);
         }
-        int page = capture_page();
-        if (page > 0)
-            play_wps_sheet(page, playback_scene.sheet, true);
-        else
-            lcd_update();
-        drop_playback_bitmap(&page);
+        lcd_hold_updates(held);
+        reason = !wps_track_ready(state) ? "track-pending" :
+                 !native_wps_sheet_ready() ? "backdrop-pending" :
+                 held ? "scene-held" : "ready";
+        pix_t *back = core_get_data_pinned(playback_scene.sheet);
+        pix_t *front = core_get_data_pinned(playback_scene.sheet_front);
+        memcpy(front, LCD_BUF, CHROME_FRAME * sizeof(*front));
+        prepare_us = (uint32_t)USEC_TIMER - start;
+        landed = play_wps_sheet(front, back, true);
+        memcpy(LCD_BUF, front, CHROME_FRAME * sizeof(*front));
+        core_put_data_pinned(front);
+        core_put_data_pinned(back);
+        if (!landed)
+        {
+            reason = lcd_active() ? "lcd-busy" : "lcd-off";
+            native_wps_invalidate();
+        }
     }
+    else if (lcd_active())
+        reason = "wps-unavailable";
     drop_playback_bitmap(&playback_scene.sheet);
+    drop_playback_bitmap(&playback_scene.sheet_front);
+    finish_wps_rise(landed ? "rise" : prepare_us ? "interrupted" : "skipped",
+                    reason, start, prepare_us);
 }
 
 void carousel_wps_capture_return(uint32_t action_us)
@@ -7659,14 +7745,16 @@ static struct stock_flip playback_turn(void)
     return flip;
 }
 
-void carousel_wps_note_playlist(uint32_t elapsed)
+void carousel_wps_note_playlist(uint32_t elapsed, bool started)
 {
     playback_scene.playlist_us = elapsed;
+    if (!started)
+        finish_wps_rise("skipped", "local-play-failed", USEC_TIMER, 0);
 }
 
-void carousel_wps_present(const struct wps_state *state)
+void carousel_wps_present(struct wps_state *state)
 {
-    if (playback_scene.rising)
+    if (playback_rise_pending())
     {
         rise_to_playback(state);
         return;
@@ -7825,7 +7913,13 @@ static void sink_to_covers(void)
         sb_update(SCREEN_MAIN, true);
     int covers = capture_page();
     if (covers > 0)
-        play_wps_sheet(playback_scene.sheet, covers, false);
+    {
+        pix_t *front = core_get_data_pinned(playback_scene.sheet);
+        pix_t *back = core_get_data_pinned(covers);
+        play_wps_sheet(front, back, false);
+        core_put_data_pinned(back);
+        core_put_data_pinned(front);
+    }
     else
         lcd_update();
     drop_playback_bitmap(&covers);
@@ -8004,9 +8098,12 @@ static int album_to_wps(int album, bool from_panel, int destination, uint32_t ac
         return destination;
     if (flat_view() && destination != CAROUSEL_PLAY_PENDING)
         return destination;
-    release_playback_scene();
-    playback_scene.from_panel = from_panel;
-    playback_scene.action_us = action_us;
+    if (from_panel)
+    {
+        release_playback_scene();
+        playback_scene.from_panel = true;
+        playback_scene.action_us = action_us;
+    }
     while (destination == CAROUSEL_PLAY_PENDING)
     {
         int status = model->panel_play_status();
@@ -8016,12 +8113,14 @@ static int album_to_wps(int album, bool from_panel, int destination, uint32_t ac
         {
             if (from_panel)
                 panel.play_failed = panel.dirty = true;
+            finish_wps_rise("skipped", "remote-play-failed", USEC_TIMER, 0);
             release_playback_scene();
             return CAROUSEL_MENU_STAY;
         }
         else if (default_event_handler(get_custom_action(CONTEXT_PLUGIN,
                      MAX(1, HZ / 20), get_context_map)) == SYS_USB_CONNECTED)
         {
+            finish_wps_rise("skipped", "usb-connected", USEC_TIMER, 0);
             release_playback_scene();
             return GO_TO_ROOT;
         }
@@ -8033,9 +8132,23 @@ static int album_to_wps(int album, bool from_panel, int destination, uint32_t ac
         move_center(album);
         playback_scene.pending = true;
     }
-    else
-        playback_scene.rising = true;
     return destination;
+}
+
+static void request_wps_rise(const char *path, bool play, uint32_t action_us)
+{
+    release_playback_scene();
+    playback_scene.rise_path = path;
+    playback_scene.rise_centre = "unknown";
+    playback_scene.rise_from_play = play;
+    playback_scene.action_us = action_us;
+    if (play && ui_perf_enabled() && model->album_key)
+    {
+        static struct carousel_album_key key;
+        if (model->album_key(center_index, &key))
+            playback_scene.rise_centre = album_key_playing(&key) ? "same" :
+                (audio_status() || cider_active()) ? "different" : "none";
+    }
 }
 
 static int album_covers_loop(unsigned *trace, bool restored_pixels)
@@ -9063,7 +9176,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         else if (nav == AGENTS_NAV_AGENTS) return GO_TO_AGENTS;
         else if (nav == AGENTS_NAV_WPS)
         {
-            playback_scene.rising = !flat_view() && !panel.live;
+            if (!flat_view() && !panel.live)
+                request_wps_rise("agents-wps", false, action_us);
             return GO_TO_WPS;
         }
         switch (button) {
@@ -9072,7 +9186,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         case ACTION_AGENTS_SWITCH:
             return GO_TO_AGENTS;
         case ACTION_REMOTE_WPS:
-            playback_scene.rising = !flat_view() && !panel.live;
+            if (!flat_view() && !panel.live)
+                request_wps_rise("remote-wps", false, action_us);
             return GO_TO_WPS;
         case ACTION_AGENTS_REMOTE_COVERS:
         case ACTION_AGENTS_COVERS:
@@ -9081,34 +9196,41 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 #endif
         case PF_WPS:
         {
+            if (model->panel_request)
+                request_wps_rise(panel.live ? "panel-open-wps" : "flat-open-wps",
+                                 true, action_us);
             if (flat_view() || panel.live || !model->play_album)
                 return GO_TO_WPS;
             /* While playing, match stock's pause. A stopped or paused
              * player starts the album under the centre cover. */
-            bool playing = (audio_status() & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE))
+            int status = audio_status();
+            bool playing = (status & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE))
                            == AUDIO_STATUS_PLAY;
-#ifdef HAVE_USB_PODLINK
             if (cider_active())
             {
                 struct cider_status source;
                 cider_status(&source);
                 playing = source.available && source.rate;
+                playback_scene.rise_path = playing ? "cider-playing" :
+                    source.available ? "cider-paused" : "cider-stopped";
                 if (playing)
                     cider_control("toggle", 0);
             }
             else
-#endif
-            if (playing)
-                pause_action(false);
-            if (playing)
             {
-                playback_scene.rising = true;
-                return GO_TO_WPS;
+                playback_scene.rise_path = playing ? "local-playing" :
+                    model->external ? "cider-stopped" :
+                    (status & AUDIO_STATUS_PAUSE) ? "local-paused" : "local-stopped";
+                if (playing)
+                    pause_action(false);
             }
+            if (playing)
+                return GO_TO_WPS;
             int result = album_to_wps(center_index, false,
                                       model->play_album(center_index), action_us);
             if (result != CAROUSEL_MENU_STAY)
                 return result;
+            finish_wps_rise("skipped", "album-unavailable", USEC_TIMER, 0);
             art_owed = caption_owed = full_repaint_owed = true;
             break;
         }
@@ -9337,7 +9459,12 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
         result = CAROUSEL_REMOTE_RETURN;
     }
     else if (nav == AGENTS_NAV_AGENTS) result = GO_TO_AGENTS;
-    else if (nav == AGENTS_NAV_WPS) result = GO_TO_WPS;
+    else if (nav == AGENTS_NAV_WPS)
+    {
+        if (!playback_scene.rise_path && !flat_view() && !panel.live)
+            request_wps_rise("agents-wps", false, USEC_TIMER);
+        result = GO_TO_WPS;
+    }
     else if (nav == AGENTS_NAV_COVERS) agents_nav_take(nav);
     if (m->panel_request && (result == GO_TO_WPS || result == CAROUSEL_PLAY_ALBUM))
     {
@@ -9357,12 +9484,31 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
             close_album_panel();
         if (flat_view())
             ui_scene_capture_modal(&wps_handover.sheet);
-        else if (playback_scene.rising && pf_motion_scale && lcd_active())
+        if (playback_scene.rise_path)
         {
-            release_playback_scene();
-            playback_scene.sheet = capture_page();
-            playback_scene.rising = playback_scene.pending =
-                playback_scene.sheet > 0;
+            /* Play owns its sheet even when navigation motion is off. */
+            const char *skip = !lcd_active() ? "lcd-off" :
+                (!playback_scene.rise_from_play && !pf_motion_scale)
+                ? "motion-off" : NULL;
+            if (!skip)
+            {
+                ui_scene_interrupt();
+                /* Reserve the front before the new playlist takes its audio
+                 * buffer. The back remains the last Cover Flow frame. */
+                playback_scene.sheet = capture_page();
+                if (playback_scene.sheet > 0)
+                    playback_scene.sheet_front =
+                        core_alloc_free_space(CHROME_FRAME * sizeof(pix_t));
+                if (playback_scene.sheet_front > 0)
+                    playback_scene.pending = true;
+                else
+                {
+                    drop_playback_bitmap(&playback_scene.sheet);
+                    skip = "no-memory";
+                }
+            }
+            if (skip)
+                finish_wps_rise("skipped", skip, USEC_TIMER, 0);
         }
         /* The Cover Flow pixels are fullscreen. Its viewport stack has
          * already unwound to Home so that playback can take over. */

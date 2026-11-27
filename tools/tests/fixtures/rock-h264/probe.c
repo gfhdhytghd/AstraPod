@@ -274,10 +274,6 @@ int main(int argc, char **argv)
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 1);
     assert(opens == 2 && configured == 2 && closes == 2 && seeks == 1);
 
-    reset(SCRUB_MENU);
-    assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 1);
-    assert(opens == 2 && closes == 2 && seeks == 1);
-
     reset(FINISH);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 0);
     assert(decoded == 96 && drawn == 93);
@@ -285,6 +281,10 @@ int main(int argc, char **argv)
     reset(FINISH);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 0);
     assert(decoded == 336);
+
+    reset(SCRUB_MENU);
+    assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 1);
+    assert(opens == 2 && closes == 2 && seeks == 1);
 
     reset(USB_EXIT);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 2);

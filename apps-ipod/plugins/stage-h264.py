@@ -76,12 +76,6 @@ elif src.name == "video_playback.c":
         """    if (action == ACTION_WPS_MENU || action == ACTION_STD_CANCEL ||
         action == ACTION_WPS_STOP)
         return VIDEO_INPUT_EXIT;
-    if (action == ACTION_WPS_BROWSE)
-    {
-        *overlay_until = *rb->current_tick + VIDEO_OSD_SHOW_TICKS;
-        *redraw = true;
-        return VIDEO_INPUT_NONE;
-    }
 """)
 
     replace("int action = rb->get_action(CONTEXT_WPS, TIMEOUT_NOBLOCK);",

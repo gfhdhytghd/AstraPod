@@ -1183,8 +1183,16 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             action = ACTION_STD_CANCEL;
         if (action == ACTION_STD_QUICKSCREEN)
         {
-            if (global_settings.shortcuts_replaces_qs ||
-                quick_screen_current(action, NULL) == QUICKSCREEN_GOTO_SHORTCUTS_MENU)
+            int qs_result = global_settings.shortcuts_replaces_qs
+                ? QUICKSCREEN_GOTO_SHORTCUTS_MENU : quick_screen_current(action, NULL);
+            if (qs_result == QUICKSCREEN_RESTORED && !redraw_lists)
+            {
+                /* The HUD put the existing list and pane back on screen. */
+                sb_set_title_text(lists.title, lists.title_icon, SCREEN_MAIN);
+                gui_synclist_speak_item(&lists);
+                continue;
+            }
+            if (qs_result == QUICKSCREEN_GOTO_SHORTCUTS_MENU)
             {
                 int last_screen = global_status.last_screen;
                 global_status.last_screen = GO_TO_SHORTCUTMENU;

@@ -17,6 +17,8 @@ int native_wps_art_slot(void);
 int native_wps_background(int art, unsigned generation, enum ui_bg_kind mode, unsigned fg);
 void native_wps_paint_background(const struct viewport *vp, int background, unsigned bg);
 void native_wps_open(const struct wps_state *state);
+/* Hand the LCD to an overlay while keeping the page and its damage state. */
+void native_wps_suspend(bool suspend);
 bool native_wps_active(void);
 bool native_wps_animating(void);
 void native_wps_render(const struct wps_state *state, bool submit);

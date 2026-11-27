@@ -1542,7 +1542,7 @@ static void setup_classic(void)
 void native_wps_open(const struct wps_state *state)
 {
     (void)state;
-    if (wps_handle <= 0 || active)
+    if (wps_handle <= 0 || wps)
         return;
     painted_art = false;
     wps = core_get_data_pinned(wps_handle);
@@ -1590,6 +1590,11 @@ void native_wps_open(const struct wps_state *state)
     cider_wps_enter();
     repaint = true;
     active = true;
+}
+
+void native_wps_suspend(bool suspend)
+{
+    active = wps && !suspend;
 }
 
 bool native_wps_active(void)
@@ -1739,7 +1744,7 @@ void native_wps_invalidate(void)
 
 void native_wps_close(void)
 {
-    if (!active)
+    if (!wps)
         return;
     active = false;
     wps->landing = NULL;

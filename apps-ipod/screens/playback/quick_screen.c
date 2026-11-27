@@ -735,6 +735,11 @@ static bool gui_quickscreen_do_button(struct gui_quickscreen * qs, int button,
 }
 
 
+bool quick_screen_uses_hud(void)
+{
+    return ui_theme_style(UI_STYLE_QUICK_SCREEN) == UI_QUICK_SCREEN_HUD;
+}
+
 static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter, bool *usb)
 {
     int button;
@@ -753,7 +758,7 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
     struct quickscreen_page *view = core_get_data_pinned(qs->view_handle);
     qs->view = view;
     *view = (struct quickscreen_page){ .paint_target = &lcd_framebuffer_default };
-    view->hud = ui_theme_style(UI_STYLE_QUICK_SCREEN) == UI_QUICK_SCREEN_HUD;
+    view->hud = quick_screen_uses_hud();
     view->sheet.zoom = view->hud;
     ui_scene_interrupt();
     /* The HUD dims the screen it opens over, so it keeps a copy even when
@@ -892,6 +897,9 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
                 ui_mark_dirty(SCREEN_MAIN);
                 ui_flush_dirty();
             }
+            if (view->hud && lcd_active() && !lcd_updates_held() &&
+                !ui_flush_inhibited())
+                qs->result |= QUICKSCREEN_RESTORED;
         }
     }
     /* Notify that we're exiting this screen */
@@ -948,8 +956,11 @@ static int quick_screen_run(int button_enter, bool cider, void (*poll)(void))
     }
     if (usb)
         return QUICKSCREEN_IN_USB;
-    return ret & QUICKSCREEN_GOTO_SHORTCUTS_MENU ? QUICKSCREEN_GOTO_SHORTCUTS_MENU :
-                                                   QUICKSCREEN_OK;
+    if (ret & QUICKSCREEN_GOTO_SHORTCUTS_MENU)
+        return QUICKSCREEN_GOTO_SHORTCUTS_MENU;
+    if (ret & QUICKSCREEN_RESTORED)
+        return ret & (QUICKSCREEN_RESTORED | QUICKSCREEN_CHANGED);
+    return QUICKSCREEN_OK;
 }
 
 int quick_screen_quick(int button_enter)

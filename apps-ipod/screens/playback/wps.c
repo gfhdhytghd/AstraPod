@@ -551,10 +551,13 @@ static void wps_lcd_activation_hook(unsigned short id, void *param)
     button_queue_post(BUTTON_NONE, 0);
 }
 
-static void leave_playback(void)
+static void suspend_playback(bool keep_page)
 {
     cider_spectrum_wps(false);
-    native_wps_close();
+    if (keep_page)
+        native_wps_suspend(true);
+    else
+        native_wps_close();
     if (wps_fullscreen)
     {
         viewportmanager_theme_undo(SCREEN_MAIN, false);
@@ -563,13 +566,25 @@ static void leave_playback(void)
     remove_event(LCD_EVENT_ACTIVATION, wps_lcd_activation_hook);
 }
 
-static void enter_playback(const struct wps_state *state)
+static void leave_playback(void)
+{
+    suspend_playback(false);
+}
+
+static void resume_playback(void)
 {
     if (!wps_fullscreen)
     {
         viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
         wps_fullscreen = true;
     }
+    native_wps_suspend(false);
+    add_event(LCD_EVENT_ACTIVATION, wps_lcd_activation_hook);
+}
+
+static void enter_playback(const struct wps_state *state)
+{
+    resume_playback();
     if (!native_wps_active())
         native_wps_open(state);
     native_wps_invalidate();
@@ -819,7 +834,6 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
         if (restore)
         {
             restore = false;
-            add_event(LCD_EVENT_ACTIVATION, wps_lcd_activation_hook);
             enter_playback(state);
         }
         else
@@ -1111,29 +1125,30 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
 
             case ACTION_WPS_QUICKSCREEN:
             {
-                if (cider_active())
-                {
-                    if (!cider_available()) break;
-                    leave_playback();
-                    if (quick_screen_cider(button) == QUICKSCREEN_IN_USB)
-                        return GO_TO_ROOT;
-                    restore = true;
+                bool cider = cider_active();
+                if (cider && !cider_available())
                     break;
-                }
-                leave_playback();
-                bool enter_shortcuts_menu = global_settings.shortcuts_replaces_qs;
+
+                bool enter_shortcuts_menu = !cider && global_settings.shortcuts_replaces_qs;
+                /* Keep the retained page while the HUD owns the LCD. Its
+                 * restored pixels are still the page's last frame. */
+                suspend_playback(!enter_shortcuts_menu && quick_screen_uses_hud());
                 if (!enter_shortcuts_menu)
                 {
-                    int ret = quick_screen_quick(button);
+                    int ret = cider ? quick_screen_cider(button) : quick_screen_quick(button);
+                    if (ret & QUICKSCREEN_RESTORED)
+                    {
+                        resume_playback();
+                        break;
+                    }
+                    native_wps_close();
                     if (ret == QUICKSCREEN_IN_USB)
                         return GO_TO_ROOT;
-                    else if (ret == QUICKSCREEN_GOTO_SHORTCUTS_MENU)
-                        enter_shortcuts_menu = true;
-                    else
-                        restore = true;
+                    enter_shortcuts_menu = ret == QUICKSCREEN_GOTO_SHORTCUTS_MENU;
+                    restore = !enter_shortcuts_menu;
                 }
 
-                if (enter_shortcuts_menu) /* enter_shortcuts_menu */
+                if (enter_shortcuts_menu)
                 {
                     global_status.last_screen = GO_TO_SHORTCUTMENU;
                     int ret = do_shortcut_menu(NULL);

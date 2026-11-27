@@ -13,7 +13,7 @@ the window going from one page to the next with no such picture between.
 
 Arguments: ROCKBOXUI FIXTURE OUTPUT_DIRECTORY [--theme NAME] [--only PATH]
 FIXTURE is a simulator root with a built database, as ui_music_fixture
-makes, plus the bundle's .rockbox/themes. No window opens: SDL draws to its
+makes, plus the bundle's .rockbox/themes, sample photos and a movie. No window opens: SDL draws to its
 dummy driver. Writes result.json and, per step, a strip of what the panel
 showed to the output directory.
 """
@@ -515,16 +515,18 @@ def games(fixture):
     quiz = english["LANG_MUSIC_QUIZ"]
     modules[quiz] = None
     rows = []
-    for name, module in sorted(modules.items(), key=lambda item: item[0].casefold()):
-        # Each walk installs only its target. The native Quiz is always shown.
-        pre = down(int(module is not None and quiz.casefold() < name.casefold()))
+    quit_at_end = {"Amaze", "Blackjack", "Brickmania", "Bubbles",
+                   "Chopper", "Clix", "Jewels"}
+    for name, module in sorted(modules.items(),
+                               key=lambda item: item[0].casefold()):
         if name == "2048":
-            rows.append(row(name, inner=down(4), back="select", pre=pre))
-        elif module and module.startswith("games/sgt_puzzles/"):
+            rows.append(row(name, inner=down(4), back="select", pre=[]))
+        elif (name in quit_at_end or
+              (module and module.startswith("games/sgt_puzzles/"))):
             rows.append(row(name, inner=[("nav", "up", "")],
-                            back="select", pre=pre))
+                            back="select", pre=[]))
         else:
-            rows.append(row(name, pre=pre))
+            rows.append(row(name, pre=[]))
     return rows, modules
 
 
@@ -613,6 +615,13 @@ def walk_segment(binary, fixture, out, theme, index, steps, game=None):
             # modules from this private copy so wheel counts cannot skip a row.
             rocks = root / ".rockbox/rocks"
             target = rocks / (game + ".rock")
+            if game != "@quiz":
+                # The built-in quiz cannot be omitted. Sort it after every
+                # installed game so the target always starts selected.
+                langs = root / ".rockbox/langs"
+                langs.mkdir(exist_ok=True)
+                (langs / "overrides.cfg").write_text(
+                    "Music Quiz: ~ Music Quiz\n", encoding="utf-8")
             for other in (rocks / "games").rglob("*.rock"):
                 if other != target:
                     other.unlink()

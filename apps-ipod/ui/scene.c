@@ -274,7 +274,7 @@ static void put_span(fb_data *out, const fb_data *src, int at, int width,
         memcpy(out + x0, src + (x0 - at), (x1 - x0) * sizeof(*out));
 }
 
-/* The stock tree slides changing panes with the rows in their own half.
+/* The rows slide within their own half, with the preview at its rest position.
  * A full list slides over the split pane and pushes the rows once its
  * leading edge reaches them. The same geometry runs in reverse on a pop. */
 static void compose_split(const struct ui_scene *scene, fb_data *out,
@@ -294,10 +294,13 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
     int p = front_right ? offset : LCD_WIDTH + offset;
     bool both = left_split && right_split && !scene->full_screen;
     bool stock = ui_theme_style(UI_STYLE_MENU_TREE) == UI_MENU_TREE_STOCK;
-    bool moving_pane = stock && both && scene->back_pane != scene->front_pane;
     int top = both ? scene->pan_top : 0;
     memcpy(out, lcd_framebuffer_default.fb_ptr, top * LCD_WIDTH * sizeof(*out));
-    for (int y = moving_pane ? 0 : top; y < LCD_HEIGHT; y++)
+    for (int y = 0; y < top; y++)
+        memcpy(out + y * LCD_WIDTH + half,
+               (target_right ? right : left) + y * LCD_WIDTH + half,
+               (LCD_WIDTH - half) * sizeof(*out));
+    for (int y = top; y < LCD_HEIGHT; y++)
     {
         int i = y * LCD_WIDTH;
         fb_data *row = out + i;
@@ -312,22 +315,11 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
         {
             /* The rows travel half as far as the pages. */
             int a = (p - LCD_WIDTH) / 2;
-            if (y >= top)
-            {
-                put_span(row, l, a, half, 0, half);
-                put_span(row, r, a + half, half, 0, half);
-                menu_pane_shadow(row, y, a + half, half);
-            }
-            if (moving_pane)
-            {
-                put_span(row, l + half, half + a, LCD_WIDTH - half,
-                         half, LCD_WIDTH);
-                put_span(row, r + half, LCD_WIDTH + a, LCD_WIDTH - half,
-                         half, LCD_WIDTH);
-            }
-            else
-                memcpy(row + half, (target_right ? r : l) + half,
-                       (LCD_WIDTH - half) * sizeof(*row));
+            put_span(row, l, a, half, 0, half);
+            put_span(row, r, a + half, half, 0, half);
+            menu_pane_shadow(row, y, a + half, half);
+            memcpy(row + half, (target_right ? r : l) + half,
+                   (LCD_WIDTH - half) * sizeof(*row));
         }
         else if (stock && left_split)
         {
@@ -793,12 +785,10 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
         if (push)
         {
             scene->back_split = split;
-            scene->back_pane = menu_pane_content_revision();
         }
         else
         {
             scene->front_split = split;
-            scene->front_pane = menu_pane_content_revision();
         }
         core_put_data_pinned(data);
         scene->back_page = push ? from : to;
@@ -1057,6 +1047,79 @@ bool ui_scene_present_split(struct ui_scene *scene, int list_x, int pane_x)
     bool shown = present(out);
     core_put_data_pinned((void *)back);
     core_put_data_pinned(out);
+    return shown;
+}
+
+/* The split menu's rows and artwork move independently. Fill only the
+ * uncovered spans with the wall, leaving the retained images read-only. */
+bool ui_scene_present_cover_split(struct ui_scene *scene, int away,
+                                  bool wall_dirty, bool *clear)
+{
+    if (scene->backdrop_handle <= 0 || owner || !lcd_active())
+        return false;
+
+    const int half = MENU_PANE_X;
+    struct ui_rect area = { half, 0, LCD_WIDTH - half, LCD_HEIGHT };
+    int stride;
+    const fb_data *cover = menu_pane_pin_cover(&area, &stride);
+    int hidden_at = MAX(half, LCD_WIDTH - area.x);
+    away = MIN(away, hidden_at);
+    *clear = away == hidden_at;
+    if (!wall_dirty && scene->last_offset == away)
+    {
+        if (cover)
+            core_put_data_pinned((void *)cover);
+        return true;
+    }
+
+    const fb_data *front = lcd_framebuffer_default.fb_ptr;
+    const fb_data *back = core_get_data_pinned(scene->backdrop_handle);
+    bool shown = false;
+    if (*clear || !away)
+    {
+        release_workspace(scene);
+        shown = present(*clear ? front : back);
+    }
+    else
+    {
+        if (scene->handle <= 0)
+            scene->handle = scene_workspace(FRAMEBUFFER_SIZE);
+        if (scene->handle > 0)
+        {
+            fb_data *out = core_get_data_pinned(scene->handle);
+            const int edge = MAX(0, half - away);
+            const int art_x = area.x + away;
+            const int art_start = MIN(MAX(art_x, edge), LCD_WIDTH);
+            const int art_end = MIN(MAX(art_x + area.width, art_start), LCD_WIDTH);
+            for (int y = 0; y < LCD_HEIGHT; y++)
+            {
+                int i = y * LCD_WIDTH;
+                fb_data *row = out + i;
+                if (edge)
+                    memcpy(row, back + i + away, edge * sizeof(*row));
+                memcpy(row + edge, front + i + edge,
+                       (art_start - edge) * sizeof(*row));
+                if (art_end > art_start)
+                {
+                    const fb_data *src = cover ?
+                        cover + (y - area.y) * stride : back + i + half;
+                    memcpy(row + art_start, src + (art_start - art_x),
+                           (art_end - art_start) * sizeof(*row));
+                }
+                memcpy(row + art_end, front + i + art_end,
+                       (LCD_WIDTH - art_end) * sizeof(*row));
+                if (edge)
+                    menu_pane_shadow(row, y, edge, LCD_WIDTH);
+            }
+            shown = present(out);
+            core_put_data_pinned(out);
+        }
+    }
+    core_put_data_pinned((void *)back);
+    if (cover)
+        core_put_data_pinned((void *)cover);
+    if (shown)
+        scene->last_offset = away;
     return shown;
 }
 
@@ -1319,12 +1382,10 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
             if (scene->target_front)
             {
                 scene->front_split = split;
-                scene->front_pane = menu_pane_content_revision();
             }
             else
             {
                 scene->back_split = split;
-                scene->back_pane = menu_pane_content_revision();
             }
             /* A full page passes a menu at constant speed. */
             if (scene->slide && !scene->full_screen)

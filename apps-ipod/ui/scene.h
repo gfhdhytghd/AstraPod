@@ -20,7 +20,6 @@ struct ui_scene {
     /* A split menu on each surface, a root page without menu chrome, and
      * an outgoing page that stays still under the incoming one. */
     bool back_split, front_split, full_screen, back_still;
-    unsigned back_pane, front_pane;
     /* Both pages are painted on the list backdrop, which stays still under
      * them. */
     bool still_backdrop;
@@ -66,6 +65,10 @@ bool ui_scene_present_fade(struct ui_scene *scene, unsigned opacity,
 /* Present the retained split menu over the page: its rows at list_x and its
  * pane pane_x right of the pane's own place. Neither changes the page. */
 bool ui_scene_present_split(struct ui_scene *scene, int list_x, int pane_x);
+/* Fruit Cover Flow keeps the full slideshow texture behind the departing
+ * rows. 'clear' is true once both layers are offscreen. */
+bool ui_scene_present_cover_split(struct ui_scene *scene, int away,
+                                  bool wall_dirty, bool *clear);
 bool ui_scene_restore_modal(struct ui_scene *scene);
 /* Draw the retained parent page afresh, off screen. The painter is given the
  * parent's page key and returns false, having drawn nothing, for a page it

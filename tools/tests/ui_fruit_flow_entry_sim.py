@@ -34,17 +34,25 @@ import argparse
 import json
 import os
 import shutil
+import struct
 import sys
 from pathlib import Path
 
 import numpy
+from PIL import Image
 
 sys.dont_write_bytecode = True
 from ui_stock_transitions_sim import (  # noqa: E402
-    CF_ENTRY_CAPTURE_FRAMES, W, make_fixture, session,
+    CF_ENTRY_CAPTURE_FRAMES, H, W, make_fixture, session,
 )
 
+from ui_music_fixture import MUSIC_ALBUMS
+
 HALF = W // 2
+SHADOW = 26
+STOCK_FRAME_MS = 34.2
+# Allow polling jitter without accepting a skipped 34 ms stock frame.
+MAX_FRAME_MS = STOCK_FRAME_MS + 10
 SLIDE_MS = 270.0
 BAR_MS = 90.0
 TOLERANCE = 12
@@ -90,10 +98,10 @@ def pane_return(image, rest, top=40, bottom=232):
     """How far right of home the returning pane still is, 0..HALF."""
     now, then = gray(image), gray(rest)
     best = (HALF, 1e9)
-    for dx in range(HALF - 8):
-        width = HALF - dx
-        error = numpy.abs(now[top:bottom, HALF + dx:] -
-                          then[top:bottom, HALF:HALF + width]).mean()
+    for dx in range(HALF - SHADOW - 8):
+        left = HALF + SHADOW
+        error = numpy.abs(now[top:bottom, left + dx:] -
+                          then[top:bottom, left:W - dx]).mean()
         if error < best[1]:
             best = (dx, error)
     return best[0] if best[1] < 2 else HALF
@@ -172,7 +180,18 @@ def measure_entry(shots):
                       if numpy.abs(gray(image)[CAPTION] -
                                    gray(final)[CAPTION]).mean() < 2)
     bar_first = next((ms for ms, rows in bars if rows), None)
+    visible = [ms for ms, dx in moving if 0 < dx < HALF]
+    frame_gaps = [round(b - a, 2) for a, b in zip(visible, visible[1:])]
+    # The old viewport crop left the wall exposed before the translated seam.
+    # Measure inside that gap, leaving out the moving seam's shadow.
+    revealed = []
+    for (ms, dx), (_, image) in zip(moving, shots):
+        if 30 <= dx < WIDE:
+            cols = slice(HALF - dx + SHADOW, HALF + dx - 2)
+            revealed.append(float(numpy.abs(
+                gray(image)[COVERS, cols] - gray(final)[COVERS, cols]).mean()))
     return {"track": track, "fit_start_ms": start, "worst_px": worst,
+            "frame_gaps_ms": frame_gaps, "revealed": revealed,
             "gone_ms": round(gone - first), "pane": pane,
             "pane_gap_px": max(paired, default=HALF), "bar_height": height,
             "bar": arrived, "bar_start_ms": bar_start,
@@ -222,10 +241,83 @@ def from_home(sim):
     return {"enter": enter, "exit": sim.record(50, "menu")}
 
 
+def install_preview_art(root):
+    """
+    Seed the row-major RGB565 WPS cache with distinctive 272 px test covers.
+    This avoids depending on when the background worker scans the fixture.
+    """
+    target = root / ".rockbox/library/cache/art/wps"
+    target.mkdir(parents=True, exist_ok=True)
+    edge = 272
+    y, x = numpy.indices((edge, edge))
+    for index, (album, artist, _, _) in enumerate(MUSIC_ALBUMS[:6]):
+        # art_name_album_hash(), for the ASCII and CJK names in this fixture.
+        name = "/".join("".join(c for c in word.lower() if c.isalnum())
+                        for word in (album, artist))
+        key = 0x811C9DC5 ^ 0xA5A5A5A5
+        for char in name:
+            key = ((key ^ ord(char)) * 16777619) & 0xffffffff
+        rgb565 = (((x // 5 + y // 19) % 32) << 11 |
+                  ((y // 4 + x // 23) % 64) << 5 | (7 + 3 * index))
+        header = struct.pack("<6H", 0x5441, 8, edge, edge, 0, 0)
+        (target / f"{key:08x}.aat").write_bytes(
+            header + rgb565.astype("<u2").tobytes())
+
+
+def preview_shift(image, rest):
+    """Match a patch of the album to its landed reference in both axes."""
+    now, then = gray(image), gray(rest)
+    patch = then[48:168:3, 207:276:3]
+    return min((round(float(numpy.abs(
+                now[48 + dy:168 + dy:3, 207 + dx:276 + dx:3] - patch).mean()), 2),
+                dx, dy)
+               for dx in range(-14, 15) for dy in range(-14, 15))
+
+
+def repeated_handoff(sim):
+    sim.tap("select", 90)
+    recordings = {}
+    for i in range(20):
+        # Let the slideshow cross its 30 s idle dwell once. This makes the
+        # second batch exercise a different cached cover, even with disk idle.
+        sim.wait(32 * 60 if i == 10 else 42)
+        _, pixels = sim.frames_since(0)
+        reference = Image.frombytes("RGB", (W, H), pixels[-1])
+        if i % 2:
+            sim.tap("select", 45)
+            sim.tap("down", 20)
+            frames = sim.record(55, "menu")
+        else:
+            frames = sim.record(CF_ENTRY_CAPTURE_FRAMES + 20, "select", "menu",
+                                at_ms=105, second_when=lambda im, _:
+                                0 < column_offset(im, reference) < 75)
+        recordings[f"return-{i:02d}"] = [(0, reference)] + frames
+    return recordings
+
+
+def measure_handoff(shots):
+    reference = shots[0][1]
+    row_offsets = [column_offset(im, reference) for _, im in shots]
+    away = [n for n, dx in enumerate(row_offsets) if dx > 8]
+    if not away:
+        return {"poses": [], "color": 0}
+    landed = []
+    for (ms, im), row in zip(shots[away[-1] + 1:], row_offsets[away[-1] + 1:]):
+        error, x, y = preview_shift(im, reference)
+        # Subtract the last few pixels of the slide. The row and the preview
+        # travel the same distance in opposite directions up to arrival.
+        landed.append((round(ms, 1), error, x - row, y, row))
+    return {"poses": landed,
+            "color": int(numpy.median(
+                numpy.asarray(reference)[40:180, 200:300, 2]))}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("binary", "resource", "output"):
         parser.add_argument(name, type=lambda arg: Path(arg).resolve())
+    parser.add_argument("--handoff", action="store_true",
+                        help="also record twenty Cover Flow returns")
     parser.add_argument("--fixture", type=lambda arg: Path(arg).resolve())
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
@@ -239,17 +331,26 @@ def main():
             ("music", "", from_music, False),
             ("home", HOME_WITH_FLOW, from_home, False),
             ("remote-music", "", from_music, True),
-            ("remote-home", HOME_WITH_FLOW, from_home, True)):
+            ("remote-home", HOME_WITH_FLOW, from_home, True),
+            ("slideshow", "", from_music, False)):
         if remote:
             os.environ["PODBOX_SIM_CIDER"] = "60000"
         try:
             shots = session(args.binary, fixture, args.output / name,
-                            "fruit-company", extra, script)
+                            "fruit-company", extra, script,
+                            prepare=install_preview_art
+                            if name == "slideshow" else None)
         finally:
             os.environ.pop("PODBOX_SIM_CIDER", None)
         result[name] = {"enter": measure_entry(shots["enter"]),
                         "exit": measure_exit(shots["exit"])}
-    (args.output / "result.json").write_text(json.dumps(result, indent=1) +
+    handoffs = {}
+    if args.handoff:
+        shots = session(args.binary, fixture, args.output / "handoff",
+                        "fruit-company", "", repeated_handoff,
+                        prepare=install_preview_art)
+        handoffs = {key: measure_handoff(frames) for key, frames in shots.items()}
+    (args.output / "result.json").write_text(json.dumps({**result, "handoffs": handoffs}, indent=1) +
                                              "\n")
 
     failed = []
@@ -258,6 +359,13 @@ def main():
         if len(enter["track"]) < 3 or enter["worst_px"] > TOLERANCE:
             failed.append((name, "rows leave", enter["worst_px"],
                            enter["track"]))
+        gaps = enter["frame_gaps_ms"]
+        if len(gaps) < 3 or max(gaps) > MAX_FRAME_MS:
+            failed.append((name, "entry frame interval", gaps))
+        if name == "slideshow" and (len(enter["revealed"]) < 2 or
+                                     min(enter["revealed"]) < 12):
+            failed.append((name, "hidden square becomes visible",
+                           enter["revealed"]))
         if len(enter["pane"]) < 3 or enter["pane_gap_px"] > 3:
             failed.append((name, "pane leaves with rows", enter["pane_gap_px"],
                            enter["pane"]))
@@ -280,6 +388,33 @@ def main():
             elif abs(leave[part + "_fit_start_ms"]) > FRAME_MS:
                 failed.append((name, part + " return with the chrome",
                                leave[part + "_fit_start_ms"]))
+    moving_returns = 0
+    for name, handoff in handoffs.items():
+        poses = handoff["poses"]
+        first = next((index for index, pose in enumerate(poses)
+                      if pose[4] == 0), None)
+        if first is None:
+            failed.append((name, "menu never landed", poses))
+            continue
+        end = poses[first][0] + 400
+        settled = [pose for pose in poses[first:] if pose[0] <= end]
+        if any(error > 2 or max(abs(x), abs(y)) > 4
+               for _, error, x, y, _ in settled):
+            failed.append((name, "landed artwork differs from entry pose", settled))
+        if max(map(abs, settled[0][2:4])) > 2:
+            failed.append((name, "jump at slide endpoint", settled))
+        visible = [pose for pose in poses[:first] if pose[1] <= 2][-1:]
+        trajectory = visible + settled
+        jumps = [(a[0], b[0], b[2] - a[2], b[3] - a[3])
+                 for a, b in zip(trajectory, trajectory[1:])]
+        if any(max(abs(x), abs(y)) > 1 + (b - a) / 135
+               for a, b, x, y in jumps):
+            failed.append((name, "artwork jumps after landing", trajectory))
+        moving_returns += any(x or y for _, _, x, y in jumps)
+    if args.handoff and moving_returns < 3:
+        failed.append(("handoffs", "fewer than three returns with measured drift"))
+    if args.handoff and len({h["color"] for h in handoffs.values()}) < 2:
+        failed.append(("handoffs", "fewer than two slideshow albums"))
     for failure in failed:
         print("FAIL", *failure)
     if failed:

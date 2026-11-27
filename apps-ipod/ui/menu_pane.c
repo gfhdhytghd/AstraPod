@@ -122,6 +122,13 @@ static int slide_dir;
 static char playing_key[300];
 static long playing_polled;
 
+static struct {
+    unsigned requests, alloc_failures, work, yielded;
+    unsigned no_key, no_file, fallback, open_failures, decode_failures, loads;
+    unsigned cover_paints, fallback_paints, steps, held_steps;
+    size_t available, allocatable;
+} probe;
+
 /* A still pane is composed a band of rows at a time: the whole pane at 8
  * bits a channel would take 150 KiB the firmware image has no room for. */
 #define BAND_ROWS 16
@@ -204,19 +211,37 @@ static int load_cover(fb_data *pixels, int album)
     char path[MAX_PATH];
     bool fallback;
     int size = art_cache_size_index("wps");
-    if (size < 0 || !tagcache_album_get(album, &al) || !al.art_hash ||
-        !art_cache_lookup_hash(al.art_hash, size, path, sizeof(path),
-                               &fallback) || fallback)
+    if (size < 0 || !tagcache_album_get(album, &al) || !al.art_hash)
+    {
+        probe.no_key++;
         return -1;
+    }
+    if (!art_cache_lookup_hash(al.art_hash, size, path, sizeof(path), &fallback))
+    {
+        probe.no_file++;
+        return -1;
+    }
+    if (fallback)
+    {
+        probe.fallback++;
+        return -1;
+    }
     int fd = open(path, O_RDONLY);
     if (fd < 0)
+    {
+        probe.open_failures++;
         return -1;
+    }
     struct bitmap bitmap = {
         .width = SHOW_EDGE, .height = SHOW_EDGE,
         .format = FORMAT_NATIVE, .data = (unsigned char *)pixels,
     };
     int result = art_cache_load_aat(fd, &bitmap, SHOW_BYTES, NULL);
     close(fd);
+    if (result > 0)
+        probe.loads++;
+    else
+        probe.decode_failures++;
     return result;
 }
 
@@ -239,6 +264,7 @@ static void show_work(const struct queue_event *ev)
         return;
     }
     show.state = SHOW_LOADING;
+    probe.work++;
     int count = tagcache_album_count();
     bool loaded = false, yielded = false;
     fb_data *pixels = core_get_data_pinned(show.handle);
@@ -263,6 +289,7 @@ static void show_work(const struct queue_event *ev)
     core_put_data_pinned(pixels);
     if (yielded && !show.release)
     {
+        probe.yielded++;
         show.state = SHOW_REQUESTED;
         bg_task_post(&show_task, SHOW_EVENT);
         return;
@@ -282,11 +309,17 @@ static void show_work(const struct queue_event *ev)
 
 static void show_request(void)
 {
+    probe.requests++;
     if (show.handle <= 0)
     {
         show.handle = core_alloc_free_space(SHOW_BYTES);
         if (show.handle <= 0)
+        {
+            probe.alloc_failures++;
+            probe.available = core_available();
+            probe.allocatable = core_allocatable();
             return;
+        }
         show.album = -1;
     }
     show.state = SHOW_REQUESTED;
@@ -646,7 +679,7 @@ static void songs_line(struct pane_lines *lines)
     tagcache_get_marks(&marks);
     char text[48];
     snprintf(text, sizeof(text), "%d %s",
-             MAX(0, tagcache_get_stat()->total_entries - marks.deleted_ct),
+             MAX(0, tagcache_get_stat()->total_entries - (int)marks.deleted_ct),
              str(LANG_PV_K_SONGS));
     pane_line(lines, text, fonts.title, 206);
 }
@@ -711,6 +744,8 @@ static void paint_content(struct ui_rect clip, uint32_t now)
         show_begin(now);
     if (!art || !show_drawable())
     {
+        if (art)
+            probe.fallback_paints++;
         paint_still(clip, slide_dir ? &under : &shown);
         return;
     }
@@ -722,6 +757,7 @@ static void paint_content(struct ui_rect clip, uint32_t now)
                                                     left - MENU_PANE_X,
                                                     LCD_HEIGHT }), &under);
     paint_cover(clip, x, y, left);
+    probe.cover_paints++;
     shade(clip_to(clip, (struct ui_rect){ left, 0, LCD_WIDTH - left,
                                           LCD_HEIGHT }));
     show.drawn_x = x;
@@ -855,8 +891,14 @@ static bool playing_changed(void)
 struct ui_rect menu_pane_step(void)
 {
     struct ui_rect damage = { 0 };
-    if (!menu_pane_split() || lcd_updates_held())
+    if (!menu_pane_split())
         return damage;
+    if (lcd_updates_held())
+    {
+        probe.held_steps++;
+        return damage;
+    }
+    probe.steps++;
     load_fonts();
     uint32_t now = USEC_TIMER;
     bool repaint = false;
@@ -895,6 +937,36 @@ struct ui_rect menu_pane_step(void)
     stepped_at = now;
     return damage;
 }
+
+#if defined(HAVE_USBSTACK)
+void menu_pane_status(char *out, size_t size)
+{
+    struct tagcache_marks marks;
+    tagcache_get_marks(&marks);
+    const struct bg_marks *done = &art_cache_task.done_marks;
+    struct art_cache_counts counts;
+    art_cache_get_counts(&counts);
+    snprintf(out, size,
+             "split=%d row=%d art=%d state=%d handle=%d album=%d "
+             "db_ram=%d db_albums=%d db_marks=%d/%d/%d "
+             "cache_busy=%d cache_marks=%d/%d/%d pass_covers=%d/%d "
+             "requests=%u alloc_failures=%u alloc_free=%lu alloc_max=%lu "
+             "work=%u yielded=%u no_key=%u no_file=%u fallback=%u "
+             "open_failures=%u decode_failures=%u loads=%u "
+             "cover_paints=%u fallback_paints=%u steps=%u held_steps=%u",
+             menu_pane_split(), shown.kind, shown.kind == LIST_PANE_ART,
+             show.state, show.handle, show.album, tagcache_is_in_ram(),
+             tagcache_album_count(), tagcache_get_stat()->total_entries,
+             (int)marks.commitid, (int)marks.deleted_ct, art_cache_is_busy(),
+             done->entries, done->commitid,
+             done->deleted, counts.album_art, counts.albums, probe.requests,
+             probe.alloc_failures, (unsigned long)probe.available,
+             (unsigned long)probe.allocatable, probe.work, probe.yielded,
+             probe.no_key, probe.no_file, probe.fallback, probe.open_failures,
+             probe.decode_failures, probe.loads, probe.cover_paints,
+             probe.fallback_paints, probe.steps, probe.held_steps);
+}
+#endif
 
 int menu_pane_deadline(void)
 {

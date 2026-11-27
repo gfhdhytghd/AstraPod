@@ -12,6 +12,7 @@
 #include "settings/shell_menu.h"
 #include "settings/shell_value.h"
 #include "system/strutil.h"
+#include "ui/menu_pane.h"
 
 static char json[SHELL_SETTINGS_REPLY_SIZE];
 static size_t used;
@@ -184,6 +185,18 @@ long shell_settings_dispatch(void)
             return shell_menu_run_action(&row);
         }
     }
+#if defined(HAVE_USBSTACK)
+    else if (operation == SHELL_SETTINGS_GET && !strcmp(name, "pane-status"))
+    {
+        char status[640];
+        menu_pane_status(status, sizeof(status));
+        append("{\"kind\":\"setting\",\"cfg\":\"pane-status\","
+               "\"id\":\"pane-status\",\"label\":\"Pane status\","
+               "\"path\":[\"Pane status\"],\"type\":\"text\"");
+        named_string("value", status);
+        append(",\"writable\":false}");
+    }
+#endif
     else if (operation == SHELL_SETTINGS_SET &&
              !settings_parseline(name, &name, &value))
         error_reply("Expected cfg-name: value");

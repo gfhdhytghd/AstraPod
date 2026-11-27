@@ -29,6 +29,9 @@ struct menu_pane_content {
 
 /* Whether the current theme splits menus. */
 bool menu_pane_themed(void);
+#if defined(HAVE_USBSTACK)
+void menu_pane_status(char *out, size_t size);
+#endif
 /* Show `content` for a list. A new `identity` (a list generation) shows it
  * at once; a new row of the same list changes the pane after a pause. */
 void menu_pane_select(const struct menu_pane_content *content,

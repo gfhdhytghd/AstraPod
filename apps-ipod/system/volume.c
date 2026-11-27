@@ -28,6 +28,9 @@
 #include "iap.h"
 #endif
 #include "volume.h"
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+#include "ghost-volume-trace.h"
+#endif
 
 static uint32_t volume_change_clock;
 
@@ -66,6 +69,10 @@ void setvol(void)
     if (volume > global_settings.volume_limit)
         volume = global_settings.volume_limit;
 
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+    ghost_volume_trace(GHOST_VOLUME_SET, global_status.volume, volume,
+                       (uintptr_t)__builtin_return_address(0));
+#endif
     sound_set_volume(volume);
 #ifdef IPOD_ACCESSORY_PROTOCOL
     iap_volume_set();

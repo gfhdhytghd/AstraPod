@@ -60,6 +60,9 @@
 #include "app_util.h"
 #include "shutdown.h"
 #include "output_pause.h"
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+#include "ghost-volume-trace.h"
+#endif
 #include "ui/scene.h"
 
 #ifdef BOOTFILE
@@ -97,6 +100,11 @@ static bool clean_shutdown(enum shutdown_type sd_type,
 #endif
     {
         bool batt_safe = battery_level_safe();
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+        ghost_volume_trace(GHOST_CLEAN_SHUTDOWN, sd_type, battery_voltage(),
+                           battery_level());
+        ghost_volume_trace_flush();
+#endif
 
         if (batt_safe)
         {
@@ -593,10 +601,18 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
             return event;
         case BUTTON_MULTIMEDIA_VOLUME_UP:
         case BUTTON_MULTIMEDIA_VOLUME_UP|BUTTON_REPEAT:
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+            ghost_volume_trace(GHOST_VOLUME_EVENT, event, event,
+                               global_status.volume);
+#endif
             adjust_volume(1);
             return event;
         case BUTTON_MULTIMEDIA_VOLUME_DOWN:
         case BUTTON_MULTIMEDIA_VOLUME_DOWN|BUTTON_REPEAT:
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+            ghost_volume_trace(GHOST_VOLUME_EVENT, event, event,
+                               global_status.volume);
+#endif
             adjust_volume(-1);
             return event;
         case BUTTON_MULTIMEDIA_REW:

@@ -59,6 +59,9 @@
 #include "button.h"
 #include "i2c-s5l8702.h"
 #include "mikey-target.h"
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+#include "ghost-volume-trace.h"
+#endif
 
 extern int rec_hw_ver;   /* capture hardware version, gpio-s5l8702.c */
 
@@ -606,7 +609,12 @@ static void mikey_thread(void)
             scope.regs[MIKEY_REG_EVT] = evt;
             scope.regs[MIKEY_REG_BTN] = btn;
         }
-        mikey_report(mikey_decode_poll(&decode, btn, evt));
+        int decoded = mikey_decode_poll(&decode, btn, evt);
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+        if (evt & (MIKEY_EVT_VOLUP | MIKEY_EVT_VOLDN))
+            ghost_volume_trace(GHOST_MIKEY_VOLUME_EDGE, btn, evt, decoded);
+#endif
+        mikey_report(decoded);
 
         /* volume edge events stay readable for under 60ms, so the poll
          * has to come round inside that */

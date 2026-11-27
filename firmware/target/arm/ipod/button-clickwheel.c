@@ -38,6 +38,9 @@
 #include "serial.h"
 #include "power.h"
 #include "powermgmt.h"
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+#include "ghost-volume-trace.h"
+#endif
 #ifdef IPOD_NANO2G
 #include "pmu-target.h"
 #endif
@@ -567,6 +570,10 @@ int button_read_device(void)
     /* not gated by the hold switch, matching the OF: the inline remote
      * keeps working while the device is locked */
     int remote = mikey_button_read();
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+    ghost_volume_button_sources(btn & BUTTON_MAIN, btn & BUTTON_REMOTE,
+                                remote);
+#endif
     /* A multimedia code reuses the wheel buttons' bits (PLAYPAUSE carries
      * SELECT's, VOLUME_UP PLAY's), so it replaces them rather than mixing
      * into a code that means neither. */

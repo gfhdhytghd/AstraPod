@@ -246,10 +246,20 @@ static unsigned int next_query(struct library_query *query, char *out,
     return n;
 }
 
+unsigned int cider_library_next_list(char *out, unsigned int size, uint32_t gen)
+{
+    return library_open ? next_query(library_query, out, size, gen) : 0;
+}
+
+unsigned int cider_library_next_tracks(char *out, unsigned int size, uint32_t gen)
+{
+    return next_query(&track_query, out, size, gen);
+}
+
 unsigned int cider_library_next(char *out, unsigned int size, uint32_t gen)
 {
-    unsigned int n = next_query(&track_query, out, size, gen);
-    return n || !library_open ? n : next_query(library_query, out, size, gen);
+    unsigned int n = cider_library_next_tracks(out, size, gen);
+    return n ? n : cider_library_next_list(out, size, gen);
 }
 
 static bool field(const char **p, const char *end, char *out, unsigned int size)

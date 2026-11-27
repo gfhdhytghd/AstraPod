@@ -22,6 +22,8 @@
 #include "remote_log.h"
 #include "database/tagcache.h"
 #include "metadata/album_blur.h"
+#include "screens/covers/panel_perf.h"
+#include "system/hash.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +42,8 @@ static struct mutex cider_mutex;
 static struct cider_state state;
 static struct cider_cache cache;
 static struct cider_transfer transfer;
+static uint32_t cover_sent_us;
+static long track_sent_at;
 static bool initialized, active, disk_lookup, request_ready, disk_running;
 static volatile bool sleep_pause_due;
 static bool source_seen;
@@ -153,8 +157,24 @@ static bool valid_key(const char *key)
     return true;
 }
 
+static void cover_event(enum panel_perf_event event, const char *key,
+                        const char *tier, uint32_t elapsed)
+{
+    int t = cs_tier(tier);
+    if (t >= 0)
+        panel_perf_record(event, elapsed, fnv1a_str(key) & 0x3fffffffu, t);
+}
+
+static void cover_cancelled(void)
+{
+    if (transfer.active && !transfer.fill && request_tries)
+        cover_event(PP_ART_CANCEL, transfer.key, transfer.tier,
+                    clock_us() - cover_sent_us);
+}
+
 static void fail_art(void)
 {
+    cover_cancelled();
     cider_cache_fail(&cache, transfer.key, transfer.tier, current_tick, HZ);
     transfer.active = disk_lookup = request_ready = false;
     if (!strcmp(transfer.key, state.art) && !strcmp(transfer.tier, "L"))
@@ -183,6 +203,7 @@ static void reset(void)
     cider_library_reset();
     state.generation = state.library_generation = 0;
     host_live = live_reply = host_palette = false;
+    cover_cancelled();
     transfer.active = false;
     disk_lookup = request_ready = false;
     ncommands = grant = granted = cancel_request = 0;
@@ -237,6 +258,7 @@ static bool receive(const struct podlink_message *m)
         /* Bytes are returned only after the dedicated sink consumes them. */
         if (m->length > granted)
         {
+            cover_cancelled();
             transfer.active = false;
             cider_log("CIDER credit violation tick=%ld bytes=%lu credit=%lu",
                        current_tick, (unsigned long)m->length,
@@ -266,6 +288,9 @@ static bool receive(const struct podlink_message *m)
                               (unsigned long)m->length - 28, result);
                 if (result > 0)
                 {
+                    if (!transfer.fill)
+                        cover_event(PP_ART_DONE, transfer.key, transfer.tier,
+                                    clock_us() - cover_sent_us);
                     if (host_diag) { art_ack_request = transfer.request; art_ack_bytes = transfer.total; }
                     /* Palette pixels are transient and do not wake the store. */
                     bool persist = strcmp(transfer.tier, "P") != 0;
@@ -381,6 +406,7 @@ static bool receive(const struct podlink_message *m)
             host_store = host_diag = false;
             diag.build_state = 0;
             if (play_request) play_reply = -1;
+            cover_cancelled();
             transfer.active = false; ncommands = 0;
             xs_count = 0;
             memset(&modes, 0, sizeof modes);
@@ -476,7 +502,7 @@ static unsigned int next(char *record, unsigned int size)
                      cancel_all ? 0ul : (unsigned long)cancel_request);
         cancel_request = 0; cancel_all = false;
     }
-    else if ((n = cider_library_next(record, size, state.generation)))
+    else if ((n = cider_library_next_list(record, size, state.generation)))
     {
         if (!granted) grant = CIDER_CREDIT;
         cider_log("page request tick=%ld %s", current_tick, record);
@@ -506,6 +532,11 @@ static unsigned int next(char *record, unsigned int size)
     {
         if (request_tries++ < 3)
         {
+            if (request_tries == 1 && !transfer.fill)
+            {
+                cover_sent_us = clock_us();
+                cover_event(PP_ART_ISSUE, transfer.key, transfer.tier, 0);
+            }
             n = snprintf(record, size,
                          "cr\t%lu\t%lu\t%s\t%s\t%lu\t%d\t0",
                          (unsigned long)state.generation,
@@ -525,6 +556,17 @@ static unsigned int next(char *record, unsigned int size)
             cancel_request = transfer.request;
             fail_art();
         }
+    }
+    /* Keep the artwork lane ahead of album-track read-ahead. Give the
+     * panel one track request per second during a run of thumbnails. */
+    if (!n && state.generation &&
+        (!transfer.active || strcmp(transfer.tier, "XS") ||
+         TIME_AFTER(current_tick, track_sent_at + HZ)) &&
+        (n = cider_library_next_tracks(record, size, state.generation)))
+    {
+        track_sent_at = current_tick;
+        if (!granted) grant = CIDER_CREDIT;
+        cider_log("page request tick=%ld %s", current_tick, record);
     }
     if (!n && warm_ready && state.generation)
     {
@@ -605,7 +647,8 @@ static void fill_add(const char *key, const char *tier)
         if (!strcmp(fills[i].key, key) && fills[i].tier == cs_tier(tier)) return;
     snprintf(fills[nfills].key, sizeof fills[0].key, "%s", key);
     fills[nfills++].tier = cs_tier(tier);
-    queue_post(&disk_queue, 1, 0);
+    if (queue_empty(&disk_queue))
+        queue_post(&disk_queue, 1, 0);
 }
 static const char *tier_name(unsigned int t)
 {
@@ -706,6 +749,7 @@ static bool begin_transfer(const char *key, const char *tier, bool fill)
     if (cider_cache_backoff(&cache, key, tier, current_tick)) return false;
     if (transfer.active)
     {
+        cover_cancelled();
         cancel_all |= cancel_request != 0;
         cancel_request = transfer.request;
     }
@@ -897,6 +941,7 @@ static bool read_store(const char *key, const char *tier, bool transfer_job,
     bool ok = r == CS_OK && cider_cache_put(&cache, key, tier, payload, length, false);
     if (ok)
     {
+        cover_event(PP_ART_HIT, key, tier, us);
         diag.hits++; art_revision++; pin_apply(); button_queue_post(BUTTON_REDRAW, 0);
         if (!strcmp(key, state.art))
             album_blur_request_wps();
@@ -906,7 +951,11 @@ static bool read_store(const char *key, const char *tier, bool transfer_job,
     {
         if (ok)
         {
-            if (request_tries) cancel_request = transfer.request;
+            if (request_tries)
+            {
+                cover_cancelled();
+                cancel_request = transfer.request;
+            }
             transfer.active = false;
         }
         else if (!request_tries) { request_ready = true; art_local_miss = true; }
@@ -1432,6 +1481,7 @@ void cider_cancel_art(void)
     xs_count = 0;
     if (transfer.active)
     {
+        cover_cancelled();
         cancel_all |= cancel_request != 0;
         cancel_request = transfer.request;
     }
@@ -1842,6 +1892,7 @@ void cider_retain_art(const char *const *keys, unsigned int count,
     if (transfer.active && !keep_palette &&
         (!keep || strcmp(tier, transfer.tier)))
     {
+        cover_cancelled();
         cancel_all |= cancel_request != 0;
         cancel_request = transfer.request;
         transfer.active = disk_lookup = request_ready = false;
@@ -1883,6 +1934,82 @@ void cider_read_ahead(const char *const *keys, unsigned int count, const char *t
             store_local(keys[i], tier)) fill_add(keys[i], tier);
     mutex_unlock(&cider_mutex);
 }
+/* Both tiers must be enqueued together: a redraw replaces the window.
+ * Cache previews before large images so a disk hit can be drawn promptly. */
+static const char *const cover_previews[] = {"XS", "S", "L"};
+
+void cider_cover_read_ahead(const char *const *keys, unsigned count, unsigned full)
+{
+    mutex_lock(&cider_mutex);
+    nfills = 0;
+    for (unsigned i = 0; i < count; i++)
+    {
+        const char *key = keys[i];
+        if (!valid_key(key) || cider_cache_find(&cache, key, "M") >= 0)
+            continue;
+        bool ready = false, queued = false;
+        for (unsigned t = 0; t < ARRAYLEN(cover_previews); t++)
+        {
+            const char *tier = cover_previews[t];
+            ready = cider_cache_find(&cache, key, tier) >= 0;
+            if (ready)
+                break;
+            if (store_local(key, tier))
+            {
+                fill_add(key, tier);
+                queued = true;
+                break;
+            }
+        }
+        /* A disk M is useful past the M window if it is the only copy. */
+        if (!queued && (i < full || !ready) && store_local(key, "M"))
+            fill_add(key, "M");
+    }
+    if (!store.loaded && disk_running)
+    {
+        load_requested = true;
+        if (queue_empty(&disk_queue))
+            queue_post(&disk_queue, 1, 0);
+    }
+    mutex_unlock(&cider_mutex);
+}
+
+bool cider_cover_preview_local(const char *key)
+{
+    bool local = false;
+    mutex_lock(&cider_mutex);
+    for (unsigned t = 0; t < ARRAYLEN(cover_previews) && !local; t++)
+        local = cider_cache_find(&cache, key, cover_previews[t]) >= 0 ||
+                store_local(key, cover_previews[t]);
+    mutex_unlock(&cider_mutex);
+    return local;
+}
+
+bool cider_copy_cover_preview(const char *key, uint16_t pixels[32 * 32])
+{
+    bool found = false;
+    mutex_lock(&cider_mutex);
+    for (unsigned t = 0; t < ARRAYLEN(cover_previews); t++)
+    {
+        int slot = cider_cache_find(&cache, key, cover_previews[t]);
+        if (slot < 0)
+            continue;
+        unsigned dim = t == 0 ? 32 : t == 1 ? 56 : 240;
+        const unsigned char *src = cache.data + cache.slot[slot].offset + 12;
+        for (unsigned y = 0; y < 32; y++)
+            for (unsigned x = 0; x < 32; x++)
+            {
+                unsigned at = 2 * ((y * dim / 32) * dim + x * dim / 32);
+                pixels[y * 32 + x] = src[at] | src[at + 1] << 8;
+            }
+        cover_event(PP_ART_RAM, key, cover_previews[t], 0);
+        found = true;
+        break;
+    }
+    mutex_unlock(&cider_mutex);
+    return found;
+}
+
 unsigned int cider_read_ahead_count(unsigned int speed, unsigned int visible)
 {
     /* At least two frames of I/O coverage, and the measured worst read. Bound

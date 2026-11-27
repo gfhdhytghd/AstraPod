@@ -28,6 +28,9 @@ bool cider_page_peek(int index, struct cider_row *row);
 bool cider_play_in(const char *route, const char *context, int index);
 int cider_play_status(void);
 bool cider_art_local(const char *key, const char *tier);
+void cider_cover_read_ahead(const char *const *keys, unsigned count, unsigned full);
+bool cider_cover_preview_local(const char *key);
+bool cider_copy_cover_preview(const char *key, uint16_t pixels[32 * 32]);
 void cider_read_ahead(const char *const *keys, unsigned count, const char *tier);
 unsigned cider_read_ahead_count(unsigned speed, unsigned visible);
 /* True when this call starts a new artwork transfer. */

@@ -196,17 +196,80 @@ def remote_scroll(binary, fixture, out):
             os.environ.pop("PODBOX_SIM_CIDER_ART_MS", None)
 
 
+def device_like_scroll(binary, fixture, out, baseline):
+    out.mkdir()
+    for phase in ("cold", "xs-disk"):
+        session = out / phase
+        session.mkdir()
+        root = session / "disk"
+        shutil.copytree(fixture, root)
+        rockbox = reset_config(root, "fruit-company")
+        # Cover telemetry must create its log without the panel marker.
+        (rockbox / "podbox/perf.enable").unlink()
+        (rockbox / "podbox").rmdir()
+        env = {"PODBOX_SIM_CIDER": "60000", "PODBOX_SIM_CIDER_ART_MS": "280",
+               "PODBOX_SIM_CIDER_SERIAL": "1"}
+        if phase == "xs-disk":
+            env["PODBOX_SIM_CIDER_XS_ONLY"] = "1"
+        os.environ.update(env)
+        sim = Sim(binary, root, session)
+        try:
+            sim.wait(150)
+            sim.tap("select", 45)
+            log = session / "firmware.log"
+            if not visible_covers(read(log)):
+                sim.tap("select", 225)
+            else:
+                sim.wait(180)
+            initial = visible_covers(read(log))
+            assert initial, "Cover Flow did not enter"
+            for _ in range(16):
+                sim.tap("down", 25)
+            sim.wait(65)
+            scrolling = visible_covers(read(log))[len(initial):]
+            first = {}
+            initial_ids = {index for index, _, _ in initial}
+            for index, quality, pixel in scrolling:
+                if index not in initial_ids:
+                    first.setdefault(index, (quality, pixel))
+            assert len(first) >= 12, first
+            ready = sum(quality >= 2 for quality, _ in first.values())
+            print(phase, "first visible:", ready, "/", len(first), first, flush=True)
+            if not baseline:
+                assert all(pixel for _, pixel in first.values()), first
+                assert ready >= len(first) - (2 if phase == "cold" else 0), first
+                perf = read(rockbox / "podbox/perf.log")
+                assert "panel cover-begin " in perf and "panel cover-draw " in perf, perf
+                frames = [line.split() for line in perf.splitlines()
+                          if line.startswith("panel cover-frames ")]
+                assert frames and all(int(line[5]) == 0 for line in frames), frames
+                if phase == "xs-disk":
+                    assert "panel cover-hit " in perf and "panel cover-issue " not in perf, perf
+                else:
+                    assert "panel cover-issue " in perf and "panel cover-done " in perf, perf
+                    assert any(int(line.split()[3]) > 0 for line in perf.splitlines()
+                               if line.startswith("panel cover-draw ")), perf
+        finally:
+            sim.close()
+            for key in env:
+                os.environ.pop(key, None)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("binary", "resource", "output"):
         parser.add_argument(name, type=lambda value: Path(value).resolve())
     parser.add_argument("--fixture", type=lambda value: Path(value).resolve())
     parser.add_argument("--baseline", action="store_true")
+    parser.add_argument("--device-like", action="store_true")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     fixture = args.fixture or args.output / "fixture"
     if not args.fixture:
         make_fixture(args.binary, args.resource, fixture)
+    if args.device_like:
+        device_like_scroll(args.binary, fixture, args.output / "device-like", args.baseline)
+        return
     for theme in ("fruit-company", "scrim"):
         cold_play(args.binary, fixture, args.output / theme, theme, args.baseline)
     if not args.baseline:

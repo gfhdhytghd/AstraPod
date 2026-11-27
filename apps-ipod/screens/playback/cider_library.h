@@ -33,6 +33,8 @@ bool cider_library_receive(const void *data, unsigned int size,
                            uint32_t generation, uint32_t library);
 unsigned int cider_library_next(char *out, unsigned int size,
                                 uint32_t generation);
+unsigned int cider_library_next_list(char *out, unsigned int size, uint32_t gen);
+unsigned int cider_library_next_tracks(char *out, unsigned int size, uint32_t gen);
 void cider_library_reset(void);
 void cider_library_invalidate(uint32_t generation);
 int cider_browse(void);

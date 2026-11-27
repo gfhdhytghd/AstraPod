@@ -3194,6 +3194,27 @@ static inline void cover_half(struct pf_col *col, struct pf_extent span,
 
 #define LCDADDR(x, y) (&buffer[(y)*BUFFER_WIDTH + (x)])
 
+static bool art_frame_fallback, art_frame_black;
+
+static void observe_cover(const struct slide_data *slide, const struct dim *bmp)
+{
+    if (!model->external)
+        return;
+    int slot = slide->cached_slot;
+    unsigned version = (unsigned)slot < SLIDE_CACHE_SIZE &&
+                       pf_sldcache.cache[slot].index == slide->slide_index ?
+                       pf_sldcache.cache[slot].version : 0;
+    unsigned quality = bmp == get_slide(empty_slide_hid) ? 0 : version & 3;
+    unsigned pixel = ((const pix_t *)(bmp + 1))[0];
+    art_frame_fallback |= quality < 2;
+    art_frame_black |= quality < 2 && !pixel;
+    if (quality >= 2)
+        panel_perf_art_drawn(version, quality);
+#ifdef SIMULATOR
+    sim_cider_visible(slide->slide_index, quality, pixel);
+#endif
+}
+
 /* Flat cards translate at their native bitmap size. */
 static void render_slide(struct slide_data *slide, int alpha)
 {
@@ -3208,6 +3229,8 @@ static void render_slide(struct slide_data *slide, int alpha)
     int rows = MIN(top + bmp->height, pf_half_height + pf_lower_half) - y;
     if (rows <= 0)
         return;
+    if (left < LCD_WIDTH && left + bmp->width > 0)
+        observe_cover(slide, bmp);
     struct pf_fade fade;
     fade_prepare(&fade, alpha);
     for (int x = MAX(0, left); x < MIN(LCD_WIDTH, left + bmp->width); x++)
@@ -3574,11 +3597,14 @@ static void flat_render(bool center)
 {
     struct slide_data *pile_near, *pile_next, *arriving;
 
+    art_frame_fallback = art_frame_black = false;
     if (!pf_flat_moving) {
         flat_draw(&left_slides[0]);
         flat_draw(&right_slides[0]);
         if (center)
             flat_draw(&center_slide);   /* overlaps both, so it goes last */
+        if (model->external)
+            panel_perf_art_frame(art_frame_fallback, art_frame_black);
         return;
     }
 
@@ -3595,6 +3621,8 @@ static void flat_render(bool center)
         flat_draw(arriving);
         flat_draw(&center_slide);
     }
+    if (model->external)
+        panel_perf_art_frame(art_frame_fallback, art_frame_black);
 }
 
 /* stock_sample emits outer covers first and the front cover last. */
@@ -3750,15 +3778,7 @@ static void flow_cover_columns(const struct flow_card *card, int slot,
     const struct dim *bmp = surface(slide);
     if (!bmp)
         return;
-#ifdef SIMULATOR
-    if (model->external)
-    {
-        int slot = slide->cached_slot;
-        unsigned quality = slot >= 0 ? pf_sldcache.cache[slot].version & 3 : 0;
-        sim_cider_visible(card->id, bmp != get_slide(empty_slide_hid) ? quality : 0,
-                          ((const pix_t *)(bmp + 1))[0]);
-    }
-#endif
+    observe_cover(slide, bmp);
     /* Interpolate in Q30: a rounded Q16 step accumulates enough error
      * across a face to exchange nearly coincident depth samples. */
     int offset = MAX(0, MIN(width, (first << 16) + 32768 - left));
@@ -4167,11 +4187,14 @@ static void flow_paint(bool center, int spread, int clear_y, int clear_h)
         flow_end[x] = 0;
     }
     const bool stock = stock_look();
+    art_frame_fallback = art_frame_black = false;
     for (int i = 0; i < flow_count; i++)
         if (center || flow_cards[i].id != center_index)
             flow_cover_columns(&flow_cards[i], i, spread, stock);
         else
             flow_faces[i].end = 0;
+    if (model->external)
+        panel_perf_art_frame(art_frame_fallback, art_frame_black);
     if (flow_stages)
     {
         uint32_t now = USEC_TIMER;
@@ -4779,6 +4802,14 @@ static bool init(void)
     {
         error_wait(str(LANG_CAROUSEL_NO_PLACEHOLDER));
         return false;
+    }
+
+    if (model->external)
+    {
+        struct dim *placeholder = get_slide(empty_slide_hid);
+        memset16((pix_t *)(placeholder + 1), G_BRIGHT(56),
+                 placeholder->width * placeholder->height);
+        make_reflection(placeholder);
     }
 
     buffer = LCD_BUF;

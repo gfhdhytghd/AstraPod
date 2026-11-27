@@ -7,6 +7,7 @@
 #include <string.h>
 #include "dir.h"
 #include "debug.h"
+#include "button.h"
 #include "crc32.h"
 #include "podlink.h"
 #include "file.h"
@@ -15,10 +16,12 @@
 #include "screens/playback/cider.h"
 #include "screens/playback/cider_library.h"
 #include "sim/shim-cider.h"
+#include "screens/covers/panel_perf.h"
+#include "system/hash.h"
 #include "system/bg_task.h"
 
 #define TRACKS 40
-#define ART_ALBUMS 24
+#define ART_ALBUMS 160
 #define SIM_ART_EVENT 0x1187
 static const char art_key[] = "1234567812345678123456781234567812345678123456781234567812345678";
 static long reply_at;
@@ -29,18 +32,26 @@ static struct {
     long warmed;
     long due[2];
     bool stored[2], resident[2];
-    unsigned last_visible;
+    unsigned last_visible, used[2];
 } art[ART_ALBUMS];
 static unsigned art_revision = 1;
 static bool scanned;
 static struct bg_task art_task;
 static long art_delay;
+static bool serial_art, xs_only;
+static long decode_ticks;
+static int active_art = -1, active_tier;
+static unsigned use_clock;
+static long issued_at;
 
 static void __attribute__((constructor)) init_art_fixture(void)
 {
     const char *ms = getenv("PODBOX_SIM_CIDER_ART_MS");
     if (ms)
         art_delay = MAX(1, atol(ms) * HZ / 1000);
+    serial_art = getenv("PODBOX_SIM_CIDER_SERIAL") != NULL;
+    xs_only = getenv("PODBOX_SIM_CIDER_XS_ONLY") != NULL;
+    decode_ticks = serial_art ? 4 : 0;
 }
 
 static void fixture_art_key(int index, char key[65])
@@ -198,6 +209,28 @@ static int art_tier(const char *tier) { return !strcmp(tier, "XS"); }
 static unsigned pack_tier(int tier) { return tier ? CS_XS : CS_M; }
 static unsigned cover_pixel(int index) { return 0x6c24 + 32 * index; }
 
+static bool trim_sim_arena(void)
+{
+    unsigned slots = 0, bytes = 0;
+    int oldest = -1, tier = 0;
+    for (int i = 0; i < ART_ALBUMS; i++)
+        for (int t = 0; t < 2; t++)
+            if (art[i].resident[t])
+            {
+                slots++;
+                bytes += cs_payload_size(pack_tier(t));
+                if (oldest < 0 || art[i].used[t] < art[oldest].used[tier])
+                {
+                    oldest = i;
+                    tier = t;
+                }
+            }
+    if (slots <= CIDER_SLOTS && bytes <= CIDER_RAM_BYTES)
+        return false;
+    art[oldest].resident[tier] = false;
+    return true;
+}
+
 static void service_art(const struct queue_event *event)
 {
     (void)event;
@@ -214,6 +247,8 @@ static void service_art(const struct queue_event *event)
             unsigned tier = pack_tier(t);
             if (!scanned)
                 art[i].stored[t] = cs_maybe(&store, bytes, tier);
+            if (!scanned && xs_only && t == 1 && !art[i].stored[t])
+                art[i].due[t] = current_tick;
             if (!art[i].due[t] || TIME_BEFORE(current_tick, art[i].due[t]))
                 continue;
             bool disk = art[i].stored[t];
@@ -235,12 +270,24 @@ static void service_art(const struct queue_event *event)
                     out[6 + j] = cover_pixel(i);
                 art[i].stored[t] = cs_put(&store, bytes, tier, out, length,
                                          record, sizeof record, NULL) >= 0;
-                art[i].resident[t] = true;
+                art[i].resident[t] = scanned || !xs_only;
+            }
+            if (active_art == i && active_tier == t)
+            {
+                active_art = -1;
+                panel_perf_record(PP_ART_DONE, (current_tick - issued_at) * (1000000 / HZ),
+                                  fnv1a_str(key) & 0x3fffffffu, tier);
             }
             art[i].due[t] = 0;
             if (art[i].resident[t])
             {
+                art[i].used[t] = ++use_clock;
+                if (serial_art)
+                    while (trim_sim_arena()) {}
+                if (disk)
+                    panel_perf_record(PP_ART_HIT, 0, fnv1a_str(key) & 0x3fffffffu, tier);
                 art_revision++;
+                button_queue_post(BUTTON_REDRAW, 0);
                 DEBUGF("sim Cider art %d %s %s\n", i, t ? "XS" : "M",
                        disk ? "disk" : "host");
             }
@@ -260,14 +307,23 @@ bool cider_art_local(const char *key, const char *tier)
 bool cider_has_art(const char *key, const char *tier)
 {
     int i = art_index(key);
-    return art_delay ? i >= 0 && art[i].resident[art_tier(tier)] :
-                       cider_art_local(key, tier);
+    if (!art_delay)
+        return cider_art_local(key, tier);
+    if (i < 0 || (strcmp(tier, "M") && strcmp(tier, "XS")))
+        return false;
+    int t = art_tier(tier);
+    if (!art[i].resident[t])
+        return false;
+    art[i].used[t] = ++use_clock;
+    return true;
 }
 
 bool cider_copy_art(const char *key, const char *tier, void *pixels, unsigned size)
 {
     if (!cider_has_art(key, tier))
         return false;
+    if (decode_ticks)
+        sleep(!strcmp(tier, "M") ? decode_ticks : 1);
     uint16_t *out = pixels;
     unsigned color = art_delay ? cover_pixel(art_index(key)) : 0x6c6c;
     for (unsigned i = 0; i < size / sizeof(*out); i++)
@@ -289,9 +345,13 @@ static void schedule_art(int i, int tier)
 {
     if (i < 0 || art[i].resident[tier] || art[i].due[tier])
         return;
-    long ready = art[i].warmed ? art[i].warmed + art_delay : current_tick + art_delay;
-    art[i].due[tier] = art[i].stored[tier] ? current_tick :
-                       MAX(ready, current_tick + HZ / 20);
+    long ready = !serial_art && art[i].warmed ? art[i].warmed + art_delay :
+                                                current_tick + art_delay;
+    /* Represent 48 KiB/s application throughput and one foreground worker.
+     * Host preparation and the payload transfer charge separate time. */
+    long wire = serial_art ? (cs_payload_size(pack_tier(tier)) * HZ + 49151) / 49152 : 0;
+    art[i].due[tier] = art[i].stored[tier] ? current_tick + (serial_art ? 4 : 0) :
+                       MAX(ready, current_tick + HZ / 20) + wire;
 }
 
 bool cider_prefetch_art(const char *key, const char *tier)
@@ -299,6 +359,18 @@ bool cider_prefetch_art(const char *key, const char *tier)
     if (!art_delay || !scanned)
         return false;
     int t = art_tier(tier);
+    if (serial_art)
+    {
+        int i = art_index(key);
+        if (i < 0 || active_art >= 0 || xs_only || art[i].resident[t])
+            return false;
+        schedule_art(i, t);
+        active_art = i;
+        active_tier = t;
+        issued_at = current_tick;
+        panel_perf_record(PP_ART_ISSUE, 0, fnv1a_str(key) & 0x3fffffffu, pack_tier(t));
+        return true;
+    }
     for (int i = 0; i < ART_ALBUMS; i++)
         if (art[i].due[t] && !art[i].stored[t])
             return false;
@@ -310,9 +382,39 @@ void cider_read_ahead(const char *const *keys, unsigned count, const char *tier)
 {
     if (!art_delay)
         return;
+    if (serial_art)
+        for (int i = 0; i < ART_ALBUMS; i++)
+            if (art[i].stored[1])
+                art[i].due[1] = 0;
     for (unsigned n = 0; n < count; n++)
         if (cider_art_local(keys[n], tier))
             schedule_art(art_index(keys[n]), art_tier(tier));
+}
+
+void cider_cover_read_ahead(const char *const *keys, unsigned count, unsigned full)
+{
+    if (!art_delay)
+        return;
+    for (unsigned i = 0; i < count; i++)
+    {
+        int at = art_index(keys[i]);
+        if (at < 0)
+            continue;
+        if (art[at].stored[1])
+            schedule_art(at, 1);
+        if (art[at].stored[0] && (i < full || !art[at].stored[1]))
+            schedule_art(at, 0);
+    }
+}
+
+bool cider_cover_preview_local(const char *key)
+{
+    return cider_art_local(key, "XS") || cider_has_art(key, "XS");
+}
+
+bool cider_copy_cover_preview(const char *key, uint16_t pixels[32 * 32])
+{
+    return cider_copy_art(key, "XS", pixels, 32 * 32 * sizeof(*pixels));
 }
 
 void cider_warm_art(const char *const *keys, unsigned count, const char *tier)
@@ -329,12 +431,32 @@ void cider_warm_art(const char *const *keys, unsigned count, const char *tier)
 }
 
 void cider_retain_art(const char *const *keys, unsigned count, const char *tier)
-{ (void)keys; (void)count; (void)tier; }
+{
+    (void)tier;
+    if (!serial_art || active_art < 0)
+        return;
+    char key[65];
+    fixture_art_key(active_art, key);
+    for (unsigned i = 0; i < count; i++)
+        if (!strcmp(keys[i], key))
+            return;
+    DEBUGF("sim Cider cancelled %d\n", active_art);
+    art[active_art].due[active_tier] = 0;
+    active_art = -1;
+}
 
 void cider_request_xs(const char *const *keys, unsigned count)
 {
     if (!art_delay || !scanned)
         return;
+    if (serial_art && count)
+    {
+        if (cider_art_local(keys[0], "XS"))
+            schedule_art(art_index(keys[0]), 1);
+        else
+            cider_prefetch_art(keys[0], "XS");
+        return;
+    }
     for (int i = 0; i < ART_ALBUMS; i++)
         if (art[i].due[1] && !art[i].stored[1])
             return;

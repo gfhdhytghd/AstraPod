@@ -2,6 +2,8 @@
 #include "metadata/album_blur.h"
 #include "config.h"
 #include "carousel.h"
+#include "album_covers.h"
+#include "panel_perf.h"
 #include "core_alloc.h"
 #include "screens/playback/quick_screen.h"
 #include "screens/playback/cider.h"
@@ -27,7 +29,7 @@ static bool flicking;
 static int first_track_album = -1;
 static long first_track_deadline;
 static struct panel_request first_track_request;
-static long moved_at;
+static long moved_at, prefetch_at;
 static unsigned int revision;
 static fb_data *surface;
 _Static_assert(sizeof *surface == sizeof(uint16_t), "Remote RGB565 art");
@@ -59,6 +61,7 @@ static void initial(const char *file)
     set_current_slide(MAX(0, MIN(count() - 1, resume_index)));
     previous_center = center_index;
     moved_at = current_tick - HZ;
+    prefetch_at = current_tick;
     flicking = false;
 }
 
@@ -166,10 +169,7 @@ static int play_status(void)
 
 static unsigned int cover_version(const struct cider_row *row, unsigned int quality)
 {
-    uint32_t hash = fnv1a_str(row->id);
-    for (const char *p = row->art; *p; p++)
-        hash = fnv1a_byte(hash, *p);
-    return (hash << 2) | quality;
+    return (fnv1a_str(*row->art ? row->art : row->id) << 2) | quality;
 }
 
 static bool art(int index, struct bitmap *bitmap, unsigned int *version)
@@ -182,7 +182,7 @@ static bool art(int index, struct bitmap *bitmap, unsigned int *version)
     unsigned int quality = 3;
     if (!known || !cider_copy_art(row.art, "M", surface, CIDER_COVER_SCRATCH_BYTES))
     {
-        if (known && cider_copy_art(row.art, "XS", surface, 32 * 32 * sizeof(*surface)))
+        if (known && cider_copy_cover_preview(row.art, (uint16_t *)surface))
         {
             quality = 2;
             /* Convert rows to columns in place before expanding. In column
@@ -194,9 +194,12 @@ static bool art(int index, struct bitmap *bitmap, unsigned int *version)
                     surface[x * 32 + y] = surface[y * 32 + x];
                     surface[y * 32 + x] = pixel;
                 }
-            for (int x = dim - 1; x >= 0; x--)
-                for (int y = dim - 1; y >= 0; y--)
-                    surface[x * dim + y] = surface[(x / 4) * 32 + y / 4];
+            if (global_settings.album_covers_view_mode == CAROUSEL_VIEW_FLAT)
+                for (int x = dim - 1; x >= 0; x--)
+                    for (int y = dim - 1; y >= 0; y--)
+                        surface[x * dim + y] = surface[(x / 4) * 32 + y / 4];
+            else
+                dim = 32;
         }
         else
         {
@@ -205,11 +208,15 @@ static bool art(int index, struct bitmap *bitmap, unsigned int *version)
              * providers. Keep the card visible during the fetch. */
             uint32_t rgb = row.bg ? row.bg : 0x383838;
             fb_data color = LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
+            if (!color)
+                color = LCD_RGBPACK(56, 56, 56);
             for (int i = 0; i < dim * dim; i++)
                 surface[i] = color;
         }
     }
     *version = known ? cover_version(&row, quality) : 0;
+    if (quality == 3)
+        panel_perf_record(PP_ART_RAM, 0, *version >> 2, CS_M);
     bitmap->width = bitmap->height = dim;
     bitmap->format = FORMAT_NATIVE;
     bitmap->data = (unsigned char *)surface;
@@ -217,7 +224,12 @@ static bool art(int index, struct bitmap *bitmap, unsigned int *version)
 }
 static void tick(void)
 {
-    if (center_index != previous_center)
+    unsigned next = cider_art_revision();
+    bool moved = center_index != previous_center;
+    if (!moved && next == revision && TIME_BEFORE(current_tick, prefetch_at))
+        return;
+    prefetch_at = current_tick + MAX(1, HZ / 20);
+    if (moved)
     {
         long elapsed = current_tick - moved_at;
         int distance = center_index - previous_center;
@@ -242,10 +254,10 @@ static void tick(void)
         window[n++] = center_index + travel * d;
 
     static char keys[WINDOW][65];
-    const char *ahead[WINDOW], *xs[5], *warm[7];
+    const char *ahead[WINDOW], *warm[7];
     int offsets[WINDOW];
-    bool missing_xs[WINDOW] = {0}, host_miss[WINDOW] = {0};
-    unsigned total = 0, visible = 0, nxs = 0, nwarm = 0;
+    bool host_miss[WINDOW] = {0};
+    unsigned total = 0, visible = 0, nwarm = 0;
     int demand = -1;
     int albums = count();
     for (int i = 0; i < n; i++)
@@ -277,49 +289,39 @@ static void tick(void)
     /* Full covers share the same arena as the artwork for Now Playing.
      * Use the disk worker's budget for M and keep a small XS lead beyond it. */
     unsigned full = MIN(total, visible + cider_read_ahead_count(61, visible));
-    cider_read_ahead(ahead, full, "M");
-    cider_retain_art(ahead, total, "M");
-    bool full_requested = false;
+    cider_cover_read_ahead(ahead, total, full);
+    bool requested = false, preview_needed = false;
+    unsigned order[WINDOW], ordered = 0;
     for (unsigned i = 0; i < total; i++)
+        if (offsets[i] >= 0)
+            order[ordered++] = i;
+    for (unsigned i = 0; i < total; i++)
+        if (offsets[i] < 0)
+            order[ordered++] = i;
+    for (unsigned pos = 0; pos < ordered; pos++)
     {
+        unsigned i = order[pos];
         const char *key = ahead[i];
         if (cider_has_art(key, "M"))
             continue;
         bool local = cider_art_local(key, "M");
         host_miss[i] = !local;
-        missing_xs[i] = !cider_has_art(key, "XS");
-        if (!local && !full_requested && i < full &&
-            (!flicking || !offsets[i]))
-            full_requested = cider_prefetch_art(key, "M");
-        /* Three XS requests cover visible holes. Reserve the rest of the
-         * batch for the approaching side before it reaches the viewport. */
-        if (missing_xs[i] && nxs < 3 && abs(offsets[i]) <= INNER)
+        if (!local && !cider_cover_preview_local(key))
         {
-            xs[nxs++] = key;
-            missing_xs[i] = false;
+            preview_needed = true;
+            if (!requested)
+                requested = cider_prefetch_art(key, "XS");
         }
-        if (!local && (offsets[i] == 0 || offsets[i] > INNER) && nwarm < 5)
-        {
+        if (!local && nwarm < ARRAYLEN(warm))
             warm[nwarm++] = key;
-            host_miss[i] = false;
-        }
     }
-    for (unsigned i = 0; i < total && nxs < ARRAYLEN(xs); i++)
-        if (missing_xs[i] && offsets[i] > INNER)
-        {
-            xs[nxs++] = ahead[i];
-            missing_xs[i] = false;
-        }
-    for (unsigned i = 0; i < total && nxs < ARRAYLEN(xs); i++)
-        if (missing_xs[i])
-            xs[nxs++] = ahead[i];
-    for (unsigned i = 0; i < total && nwarm < ARRAYLEN(warm); i++)
-        if (host_miss[i])
-            warm[nwarm++] = ahead[i];
-    cider_warm_art(warm, nwarm, "M");
-    if (nxs)
-        cider_request_xs(xs, nxs);
-    unsigned int next = cider_art_revision();
+    /* Keep one foreground request alive across wheel steps. Short XS
+     * transfers fill holes before any 32 KiB medium image uses the link. */
+    if (!requested && !preview_needed && !flicking)
+        for (unsigned i = 0; i < full; i++)
+            if (host_miss[i] && cider_prefetch_art(ahead[i], "M"))
+                break;
+    cider_warm_art(warm, nwarm, "XS");
     if (revision != next)
     {
         revision = next;
@@ -353,7 +355,8 @@ static unsigned int version(int index)
     if (!cider_page_peek(index, &row))
         return 0;
     unsigned int quality = cider_has_art(row.art, "M") ? 3 :
-                           cider_has_art(row.art, "XS") ? 2 : 1;
+                           cider_has_art(row.art, "XS") || cider_has_art(row.art, "S") ||
+                           cider_has_art(row.art, "L") ? 2 : 1;
     return cover_version(&row, quality);
 }
 static const struct carousel_model model = {
@@ -464,13 +467,16 @@ int cider_covers(void)
         return GO_TO_PREVIOUS;
     }
     surface = core_get_data_pinned(scratch);
+    cider_cancel_art();
     revision = cider_art_revision();
     /* carousel_run joins the loader before it returns. Until then the handle
      * stays pinned across cache mutex waits and slide-buffer allocations. */
+    panel_perf_art_session(true);
     int ret = carousel_run(&model, NULL);
     surface = NULL;
     core_unpin(scratch);
     core_free(scratch);
     cider_cancel_art();
+    panel_perf_art_session(false);
     return ret == CAROUSEL_REMOTE_RETURN ? CIDER_COVERS_REMOTE_RETURN : ret;
 }

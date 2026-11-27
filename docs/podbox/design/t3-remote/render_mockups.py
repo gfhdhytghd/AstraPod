@@ -288,10 +288,10 @@ def draw_reply_glyph(draw: ImageDraw.ImageDraw, x: int, cy: int, color: Tuple[in
     draw.polygon([(x + 9, cy + 1), (x + 5, cy - 2), (x + 5, cy + 4)], fill=color)
 
 
-def draw_pencil_glyph(draw: ImageDraw.ImageDraw, cx: int, cy: int, color: Tuple[int, int, int]) -> None:
-    """Crisp vector pencil glyph inside option badge box."""
-    draw.line([(cx - 3, cy + 3), (cx + 3, cy - 3)], fill=color, width=2)
-    draw.polygon([(cx - 4, cy + 4), (cx - 4, cy + 1), (cx - 1, cy + 4)], fill=color)
+def draw_dismiss_glyph(draw: ImageDraw.ImageDraw, cx: int, cy: int, color: Tuple[int, int, int]) -> None:
+    """Crisp vector X glyph inside option badge box for explicit Dismiss row."""
+    draw.line([(cx - 3, cy - 3), (cx + 3, cy + 3)], fill=color, width=2)
+    draw.line([(cx + 3, cy - 3), (cx - 3, cy + 3)], fill=color, width=2)
 
 
 def draw_play_icon(draw: ImageDraw.ImageDraw, x: int, y: int, color: Tuple[int, int, int], h: int = 10) -> None:
@@ -523,6 +523,7 @@ class Theme:
         x0: int = 0,
         width: int = W,
         sheet_mode: bool = False,
+        draw_divider: bool = True,
     ) -> None:
         draw = ImageDraw.Draw(img)
         lbl_f = font_med(14) if (selected and self.fruit) else font_reg(14)
@@ -537,7 +538,8 @@ class Theme:
             else:
                 if alert_row:
                     draw.rectangle((x0, y, x0 + width, y + h - 1), fill=self.alert_tint)
-                draw.line([(x0 + 8, y + h - 1), (x0 + width - 8, y + h - 1)], fill=self.divider)
+                if draw_divider:
+                    draw.line([(x0 + 8, y + h - 1), (x0 + width - 8, y + h - 1)], fill=self.divider)
                 fg = self.alert_fg if alert_row else self.fg
                 rfg = self.alert_fg if alert_row else self.muted
 
@@ -552,8 +554,8 @@ class Theme:
                 else:
                     box_col = (255, 255, 255) if selected else (142, 150, 164)
                     draw.rounded_rectangle((x0 + 10, y + h // 2 - 8, x0 + 26, y + h // 2 + 8), radius=3, outline=box_col, width=1)
-                    if badge_char == "pencil":
-                        draw_pencil_glyph(draw, x0 + 18, y + h // 2, fg)
+                    if badge_char == "dismiss":
+                        draw_dismiss_glyph(draw, x0 + 18, y + h // 2, fg)
                     else:
                         draw_centered(draw, x0 + 18, y + h // 2, badge_char, font_med(11), fg)
                 tx = x0 + 33
@@ -601,8 +603,8 @@ class Theme:
                 else:
                     bc = self.accent if selected else (112, 138, 152)
                     draw.rectangle((icon_x - 8, y + h // 2 - 8, icon_x + 8, y + h // 2 + 8), outline=bc, width=1)
-                    if badge_char == "pencil":
-                        draw_pencil_glyph(draw, icon_x, y + h // 2, fg)
+                    if badge_char == "dismiss":
+                        draw_dismiss_glyph(draw, icon_x, y + h // 2, fg)
                     else:
                         draw_centered(draw, icon_x, y + h // 2, badge_char, font_med(11), fg)
 
@@ -624,7 +626,7 @@ class Theme:
 
 
 # ---------------------------------------------------------------------------
-# Screen Generators (10 key screens x 2 themes)
+# Screen Generators (9 screens x 2 themes)
 # ---------------------------------------------------------------------------
 
 def render_01_projects(t: Theme) -> Image.Image:
@@ -643,17 +645,16 @@ def render_01_projects(t: Theme) -> Image.Image:
         t.draw_list_row(img, y, t.row_h, label, right=right, dot=dot, selected=sel, chevron=chev, badge_char=badge, alert_row=alert)
         y += t.row_h
 
-    # Subtle bottom page hint (LEFT -> Usage, Hold SEL -> New thread)
+    # Subtle bottom hint (LEFT -> Usage, Hold PLAY -> Voice)
     draw = ImageDraw.Draw(img)
     hy = H - 20
     if t.fruit:
         draw.line([(0, hy), (W, hy)], fill=t.keybar_border)
         draw.rectangle((0, hy + 1, W, H), fill=t.keybar_bg)
-    x = 26
+    x = 14
     draw_tri_left(draw, x, hy + 10, t.accent, w=5, h=7)
     draw.text((x + 9, hy + 3), "Usage", font=font_reg(11), fill=t.muted)
-    draw.text((104, hy + 3), "·", font=font_bold(11), fill=t.faint)
-    draw_key_pair(draw, 122, hy + 3, "Hold SEL", "New thread", t.accent, t.muted)
+    draw_key_pair(draw, W - 104, hy + 3, "Hold PLAY", "Voice", t.accent, t.muted, size=11, gap=4)
     return img
 
 
@@ -671,7 +672,6 @@ def render_02_threads(t: Theme) -> Image.Image:
         draw.rounded_rectangle((8, y + 2, 60, y + bar_h - 3), radius=3, fill=t.accent)
         draw_centered(draw, 34, y + bar_h // 2, "Active", font_bold(11), (255, 255, 255))
         draw_centered(draw, 78, y + bar_h // 2, "All", font_med(11), t.muted)
-        # Clean vector L/R hint
         draw_tri_left(draw, W - 36, y + bar_h // 2, t.faint, w=5, h=6)
         draw.text((W - 27, y + 3), "/", font=font_reg(11), fill=t.faint)
         draw_tri_right(draw, W - 18, y + bar_h // 2, t.faint, w=5, h=6)
@@ -708,7 +708,7 @@ def render_02_threads(t: Theme) -> Image.Image:
     body_f = font_reg(13)
     meta = "claude-4.5 · t3/t3-remote-design"
     draw.text((px, ny + 6), fit_text(draw, meta, meta_f, pw), font=meta_f, fill=t.accent if t.scrim else t.muted)
-    summary = "Drafting button map and 320x240 theme tokens for Fruit Company and Scrim."
+    summary = "Updating pocket remote spec and 320x240 mockups for Fruit Company and Scrim."
     for idx, ln in enumerate(wrap_lines(draw, summary, body_f, pw, max_lines=2)):
         draw.text((px, ny + 22 + idx * 17), ln, font=body_f, fill=t.fg)
     return img
@@ -745,8 +745,8 @@ def render_03_detail(t: Theme) -> Image.Image:
     # Summary-first wrapped assistant message
     body_f = font_reg(13)
     msg = (
-        "Finished the screen hierarchy and click-wheel button map. "
-        "LEFT/RIGHT now page long replies in Detail, while SELECT opens the Actions sheet.\n"
+        "Updated the pocket remote screens and button map. "
+        "SELECT opens Actions; hold PLAY triggers voice input on the computer.\n"
         "Next: generating 320x240 Fruit Company and Scrim mockups."
     )
     body_top = y
@@ -761,8 +761,8 @@ def render_03_detail(t: Theme) -> Image.Image:
     y += 2
     step_f = font_reg(11)
     steps = [
-        "› Wrote docs/podbox/design/t3-remote/t3-remote-design.md",
-        "› Verified HerdRemote v1 + tc 1 frame budgets",
+        "› Updated docs/podbox/design/t3-remote/t3-remote-design.md",
+        "› Checked agents_screen.c button bindings",
     ]
     for st in steps:
         if y + 14 < H - 22:
@@ -774,22 +774,20 @@ def render_03_detail(t: Theme) -> Image.Image:
     track_top = body_top
     track_bot = H - 24
     draw.rectangle((track_x, track_top, track_x + 2, track_bot), fill=t.divider)
-    thumb_h = max(18, (track_bot - track_top) // 3)
+    thumb_h = max(20, (track_bot - track_top) // 2)
     draw.rectangle((track_x, track_top, track_x + 2, track_top + thumb_h), fill=t.accent)
 
-    # Bottom bar: page indicator & actions affordance
+    # Bottom bar: Actions, local Page, Hold PLAY Voice
     bar_y = H - 20
     draw.line([(0, bar_y), (W, bar_y)], fill=t.keybar_border)
     draw.rectangle((0, bar_y + 1, W, H), fill=t.keybar_bg)
-    x_after = draw_key_pair(draw, 10, bar_y + 3, "SEL", "Actions", t.accent, t.muted)
-    px_lr = x_after + 18
+    x1 = draw_key_pair(draw, 10, bar_y + 3, "SEL", "Actions", t.accent, t.muted, size=11, gap=4)
+    px_lr = x1 + 14
     draw_tri_left(draw, px_lr, bar_y + 10, t.accent, w=5, h=7)
     draw.text((px_lr + 7, bar_y + 3), "/", font=font_reg(11), fill=t.faint)
-    draw_tri_right(draw, px_lr + 14, bar_y + 10, t.accent, w=5, h=7)
-    draw.text((px_lr + 24, bar_y + 3), "Page", font=font_reg(11), fill=t.muted)
-    pg_txt = "1/3"
-    pw2, _ = text_size(draw, pg_txt, font_med(11))
-    draw.text((W - 10 - pw2, bar_y + 3), pg_txt, font=font_med(11), fill=t.muted)
+    draw_tri_right(draw, px_lr + 13, bar_y + 10, t.accent, w=5, h=7)
+    draw.text((px_lr + 22, bar_y + 3), "Page", font=font_reg(11), fill=t.muted)
+    draw_key_pair(draw, W - 102, bar_y + 3, "Hold PLAY", "Voice", t.accent, t.muted, size=11, gap=4)
     return img
 
 
@@ -802,12 +800,10 @@ def render_04_approval(t: Theme) -> Image.Image:
     radius = 6 if t.fruit else 0
     if radius:
         draw.rounded_rectangle((mx, my, mx + mw, my + mh), radius=radius, fill=t.sheet_bg, outline=t.sheet_border, width=1)
-        # Bottom keybar band cleanly respecting rounded card corners
         ky = my + mh - 24
         draw.rounded_rectangle((mx + 1, ky - 4, mx + mw - 1, my + mh - 1), radius=radius - 1, fill=t.keybar_bg)
         draw.rectangle((mx + 1, ky - 4, mx + mw - 1, ky + 1), fill=t.sheet_bg)
         draw.line([(mx + 1, ky), (mx + mw - 1, ky)], fill=t.keybar_border)
-        # Top crimson accent stripe (inset from rounded corners)
         draw.rectangle((mx + 4, my + 1, mx + mw - 4, my + 4), fill=DOT_RED)
     else:
         draw.rectangle((mx, my, mx + mw, my + mh), fill=t.sheet_bg, outline=t.sheet_border, width=2)
@@ -865,7 +861,7 @@ def render_04_approval(t: Theme) -> Image.Image:
     draw_centered(draw, dx0 + dw // 2, by + bh // 2, "Deny", btn_f, t.no_fg)
     draw_tri_right(draw, dx0 + dw + 8, by + bh // 2, t.no_fg, w=7, h=10)
 
-    # Bottom key bar labels (dynamically spaced)
+    # Bottom key bar labels
     draw_key_pair(draw, mx + 14, ky + 4, "SELECT", "All options", t.accent, t.muted)
     draw_key_pair(draw, mx + mw - 92, ky + 4, "MENU", "Later", t.accent, t.muted)
     return img
@@ -873,7 +869,7 @@ def render_04_approval(t: Theme) -> Image.Image:
 
 def render_05_question(t: Theme) -> Image.Image:
     img = t.canvas()
-    t.draw_statusbar(img, "Q 1/2 · podbox", clock="9:42 AM", playing=True, agent_badge=("b", 1))
+    t.draw_statusbar(img, "T3 · podbox", clock="9:42 AM", playing=True, agent_badge=("b", 1))
     draw = ImageDraw.Draw(img)
 
     y = t.status_h + 6
@@ -892,7 +888,7 @@ def render_05_question(t: Theme) -> Image.Image:
         ("1", "Static 16-byte summary", "Recommended", True),
         ("2", "Core allocator ring", "4 KB", False),
         ("3", "Persist to config.cfg", "", False),
-        ("pencil", "Other (custom reply)…", "", False),
+        ("dismiss", "Dismiss", "skip on T3", False),
     ]
     rh = 30
     for badge, label, right, sel in opts:
@@ -904,7 +900,7 @@ def render_05_question(t: Theme) -> Image.Image:
     draw.rectangle((0, ky + 1, W, H), fill=t.keybar_bg)
     x1 = draw_key_pair(draw, 10, ky + 3, "SEL", "Choose", t.accent, t.muted)
     draw_key_pair(draw, x1 + 16, ky + 3, "Wheel", "Scroll", t.accent, t.muted)
-    draw_key_pair(draw, W - 76, ky + 3, "MENU", "Back", t.accent, t.muted)
+    draw_key_pair(draw, W - 80, ky + 3, "MENU", "Later", t.accent, t.muted)
     return img
 
 
@@ -913,7 +909,7 @@ def render_06_actions(t: Theme) -> Image.Image:
     img = dim_image(base, dim_alpha=100 if t.fruit else 130)
     draw = ImageDraw.Draw(img)
 
-    sh = 186
+    sh = 192
     sy = H - sh
     mx = 6 if t.fruit else 0
     mw = W - 2 * mx
@@ -929,26 +925,27 @@ def render_06_actions(t: Theme) -> Image.Image:
     draw.line([(mx + 2, sy + 26), (mx + mw - 2, sy + 26)], fill=t.divider)
 
     y = sy + 28
-    rh = 25
+    rh = 24
     controls = [
-        ("Interrupt turn", "confirm", False),
-        ("Compose reply…", "queue", False),
-        ("Open on desktop", "", False),
+        ("Interrupt turn", "confirm", False, True),
+        ("Open on computer", "", False, False),
     ]
-    for label, right, sel in controls:
-        t.draw_list_row(img, y, rh, label, right=right, selected=sel, x0=mx + 2, width=mw - 4, sheet_mode=True)
+    for label, right, sel, div in controls:
+        t.draw_list_row(img, y, rh, label, right=right, selected=sel, x0=mx + 2, width=mw - 4, sheet_mode=True, draw_divider=div)
         y += rh
 
-    draw.line([(mx + 12, y + 1), (mx + mw - 12, y + 1)], fill=t.divider)
-    y += 4
+    sep_col = t.notes_border if t.fruit else t.divider
+    draw.line([(mx + 10, y + 3), (mx + mw - 10, y + 3)], fill=sep_col)
+    y += 7
 
     replies = [
-        ("Run unit tests", "", True),
-        ("Continue", "", False),
-        ("Summarize changes", "", False),
+        ("Run unit tests", "", True, True),
+        ("Continue", "", False, True),
+        ("Fix the failing test", "", False, True),
+        ("Summarize changes", "", False, False),
     ]
-    for label, right, sel in replies:
-        t.draw_list_row(img, y, rh, label, right=right, selected=sel, reply_row=True, x0=mx + 2, width=mw - 4, sheet_mode=True)
+    for label, right, sel, div in replies:
+        t.draw_list_row(img, y, rh, label, right=right, selected=sel, reply_row=True, x0=mx + 2, width=mw - 4, sheet_mode=True, draw_divider=div)
         y += rh
     return img
 
@@ -958,80 +955,52 @@ def render_07_confirm(t: Theme) -> Image.Image:
     img = dim_image(base, dim_alpha=95 if t.fruit else 115)
     draw = ImageDraw.Draw(img)
 
-    mw, mh = 276, 118
+    mw, mh = 276, 132
     mx = (W - mw) // 2
     my = (H - mh) // 2
-    if t.fruit:
-        draw.rounded_rectangle((mx, my, mx + mw, my + mh), radius=6, fill=t.sheet_bg, outline=t.sheet_border, width=1)
-        draw.rectangle((mx + 4, my + 1, mx + mw - 4, my + 4), fill=DOT_FAIL)
-    else:
-        draw.rectangle((mx, my, mx + mw, my + mh), fill=t.sheet_bg, outline=t.sheet_border, width=2)
-        draw.rectangle((mx + 2, my + 2, mx + mw - 2, my + 5), fill=DOT_FAIL)
-
-    draw.text((mx + 14, my + 14), "Interrupt turn?", font=font_bold(15), fill=t.fg)
-    draw.text((mx + 14, my + 36), fit_text(draw, "T3 remote UI design · podbox", font_reg(12), mw - 28), font=font_reg(12), fill=t.muted)
-
-    by = my + mh - 46
-    bh = 34
-    bw = (mw - 28 - 10) // 2
-    draw.rounded_rectangle((mx + 14, by, mx + 14 + bw, by + bh), radius=4 if t.fruit else 0, fill=t.code_bg, outline=t.sheet_border, width=1)
-    draw_centered(draw, mx + 14 + bw // 2, by + bh // 2, "Cancel", font_med(13), t.fg)
-
-    rx = mx + 14 + bw + 10
-    draw.rounded_rectangle((rx, by, rx + bw, by + bh), radius=4 if t.fruit else 0, fill=DOT_RED, outline=(255, 255, 255) if t.scrim else (164, 14, 44), width=1)
-    draw_centered(draw, rx + bw // 2, by + bh // 2, "Interrupt", font_bold(13), (255, 255, 255))
-    return img
-
-
-def render_08_compose_review(t: Theme) -> Image.Image:
-    base = render_03_detail(t)
-    img = dim_image(base, dim_alpha=110 if t.fruit else 135)
-    draw = ImageDraw.Draw(img)
-
-    mx, my, mw, mh = 10, 14, W - 20, H - 28
-    ky = my + mh - 24
+    ky = my + mh - 22
     if t.fruit:
         draw.rounded_rectangle((mx, my, mx + mw, my + mh), radius=6, fill=t.sheet_bg, outline=t.sheet_border, width=1)
         draw.rounded_rectangle((mx + 1, ky - 4, mx + mw - 1, my + mh - 1), radius=5, fill=t.keybar_bg)
         draw.rectangle((mx + 1, ky - 4, mx + mw - 1, ky + 1), fill=t.sheet_bg)
         draw.line([(mx + 1, ky), (mx + mw - 1, ky)], fill=t.keybar_border)
-        draw.rectangle((mx + 4, my + 1, mx + mw - 4, my + 4), fill=t.accent)
+        draw.rectangle((mx + 4, my + 1, mx + mw - 4, my + 4), fill=DOT_FAIL)
     else:
         draw.rectangle((mx, my, mx + mw, my + mh), fill=t.sheet_bg, outline=t.sheet_border, width=2)
         draw.line([(mx + 2, ky), (mx + mw - 2, ky)], fill=t.keybar_border)
         draw.rectangle((mx + 2, ky + 1, mx + mw - 2, my + mh - 2), fill=t.keybar_bg)
-        draw.rectangle((mx + 2, my + 2, mx + mw - 2, my + 5), fill=t.accent)
+        draw.rectangle((mx + 2, my + 2, mx + mw - 2, my + 5), fill=DOT_FAIL)
 
-    hx, hy = mx + 12, my + 12
-    draw.text((hx, hy), "Review reply", font=font_bold(13), fill=t.fg)
-    cnt = "48 chars"
-    cw, _ = text_size(draw, cnt, font_reg(11))
-    draw.text((mx + mw - 12 - cw, hy + 2), cnt, font=font_reg(11), fill=t.muted)
+    draw.text((mx + 14, my + 13), "Interrupt turn?", font=font_bold(15), fill=t.fg)
+    draw.text((mx + 14, my + 35), fit_text(draw, "T3 remote UI design · podbox", font_reg(12), mw - 28), font=font_reg(12), fill=t.muted)
 
-    sub = "To: T3 remote UI design (podbox)"
-    draw.text((hx, hy + 20), fit_text(draw, sub, font_reg(11), mw - 24), font=font_reg(11), fill=t.muted)
+    # Cancel focused by default (safe default); Interrupt secondary until stepped to
+    by = my + 62
+    bh = 36
+    bw = (mw - 28 - 10) // 2
+    if t.fruit:
+        draw.rounded_rectangle((mx + 14, by, mx + 14 + bw, by + bh), radius=4, fill=t.accent, outline=t.sel_edge, width=2)
+        draw_centered(draw, mx + 14 + bw // 2, by + bh // 2, "Cancel", font_bold(13), (255, 255, 255))
+    else:
+        draw.rectangle((mx + 14, by, mx + 14 + bw, by + bh), fill=(26, 56, 72), outline=t.accent, width=2)
+        draw_centered(draw, mx + 14 + bw // 2, by + bh // 2, "Cancel", font_bold(13), (255, 255, 255))
 
-    bx, by, bw, bh = hx, hy + 38, mw - 24, 96
-    draw.rounded_rectangle((bx, by, bx + bw, by + bh), radius=3 if t.fruit else 0, fill=t.code_bg, outline=t.accent, width=1)
-    bf = font_reg(13)
-    draft = "USE STATIC 16-BYTE SUMMARY AND KEEP AUDIO BUFFER UNTOUCHED"
-    lines = wrap_lines(draw, draft, bf, bw - 14, max_lines=5)
-    for i, ln in enumerate(lines):
-        draw.text((bx + 7, by + 7 + i * 17), ln, font=bf, fill=t.fg)
-    if lines:
-        last_w, _ = text_size(draw, lines[-1], bf)
-        cy = by + 7 + (len(lines) - 1) * 17
-        draw.line([(bx + 9 + last_w, cy + 1), (bx + 9 + last_w, cy + 15)], fill=t.accent, width=2)
+    rx = mx + 14 + bw + 10
+    draw.rounded_rectangle((rx, by, rx + bw, by + bh), radius=4 if t.fruit else 0, fill=t.no_bg, outline=t.no_border, width=1)
+    draw_centered(draw, rx + bw // 2, by + bh // 2, "Interrupt", font_med(13), t.no_fg)
 
-    ey = by + bh + 9
-    draw_key_pair(draw, hx, ey, "RIGHT", "Edit with wheel", t.accent, t.muted)
-
-    draw_key_pair(draw, mx + 14, ky + 4, "SELECT", "Send", t.accent, t.fg)
-    draw_key_pair(draw, mx + mw - 98, ky + 4, "MENU", "Cancel", t.accent, t.muted)
+    # Card footer hint
+    hx = mx + 12
+    draw_tri_left(draw, hx, ky + 11, t.accent, w=4, h=6)
+    draw.text((hx + 6, ky + 4), "/", font=font_reg(10), fill=t.faint)
+    draw_tri_right(draw, hx + 11, ky + 11, t.accent, w=4, h=6)
+    draw.text((hx + 19, ky + 4), "Select", font=font_reg(10), fill=t.muted)
+    x2 = draw_key_pair(draw, mx + 88, ky + 4, "SEL", "Confirm", t.accent, t.muted, size=10, gap=4)
+    draw_key_pair(draw, x2 + 12, ky + 4, "MENU", "Cancel", t.accent, t.muted, size=10, gap=4)
     return img
 
 
-def render_09_now_playing_toast(t: Theme) -> Image.Image:
+def render_08_now_playing_toast(t: Theme) -> Image.Image:
     if t.fruit:
         img = Image.new("RGB", (W, H), (255, 255, 255))
         t.draw_statusbar(img, "Now Playing", clock="9:43 AM", playing=True, agent_badge=("b", 1))
@@ -1103,13 +1072,13 @@ def render_09_now_playing_toast(t: Theme) -> Image.Image:
         return img.convert("RGB")
 
 
-def render_10_offline(t: Theme) -> Image.Image:
+def render_09_offline(t: Theme) -> Image.Image:
     img = t.canvas()
     t.draw_statusbar(img, "Agents", clock="9:44 AM", playing=False, agent_badge=None)
     draw = ImageDraw.Draw(img)
 
     py = t.status_h + 10
-    pill_txt = "USB: Connected  ·  HerdRemote: Ready"
+    pill_txt = "USB: Connected  ·  Computer: Ready"
     pf = font_reg(11)
     pw, _ = text_size(draw, pill_txt, pf)
     px = (W - pw - 20) // 2
@@ -1126,8 +1095,8 @@ def render_10_offline(t: Theme) -> Image.Image:
     draw_status_dot(img, cx + 15, cy + 15, "f", radius=5, halo=t.bg if t.fruit else (16, 28, 38))
     draw = ImageDraw.Draw(img)
 
-    draw_centered(draw, W // 2, 150, "T3 Code is not running", font_bold(15), t.fg)
-    draw_centered(draw, W // 2, 172, "Launch T3 Code on your computer", font_reg(12), t.muted)
+    draw_centered(draw, W // 2, 150, "T3 Code not running", font_bold(15), t.fg)
+    draw_centered(draw, W // 2, 172, "Open T3 Code on your computer", font_reg(12), t.muted)
     draw_centered(draw, W // 2, 190, "Projects will appear automatically.", font_reg(11), t.faint)
 
     ky = H - 22
@@ -1147,9 +1116,8 @@ SCREENS = [
     ("05_question.png", render_05_question),
     ("06_actions.png", render_06_actions),
     ("07_confirm.png", render_07_confirm),
-    ("08_compose_review.png", render_08_compose_review),
-    ("09_now_playing_toast.png", render_09_now_playing_toast),
-    ("10_offline.png", render_10_offline),
+    ("08_now_playing_toast.png", render_08_now_playing_toast),
+    ("09_offline.png", render_09_offline),
 ]
 
 

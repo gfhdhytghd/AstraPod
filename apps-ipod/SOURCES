@@ -272,6 +272,7 @@ screens/system/time_set.c
 screens/playback/sound_props.c
 screens/playback/track_info.c
 screens/playback/wps.c
+screens/playback/stock_wps.c
 
 #ifdef ROCKBOX_HAS_LOGF
 screens/system/log_viewer.c

@@ -9,6 +9,7 @@
 struct viewport;
 struct ui_rect;
 struct wps_state;
+struct stock_wps_controls;
 struct album_blur_source;
 
 void native_wps_alloc(void);
@@ -19,6 +20,7 @@ void native_wps_paint_background(const struct viewport *vp, int background, unsi
 void native_wps_open(const struct wps_state *state);
 bool native_wps_active(void);
 bool native_wps_animating(void);
+void native_wps_stock_controls(const struct stock_wps_controls *controls);
 void native_wps_render(const struct wps_state *state, bool submit);
 /* Paint the first frame using the selected album's backdrop. */
 void native_wps_paint_handoff(const struct wps_state *state,

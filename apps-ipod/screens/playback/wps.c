@@ -78,6 +78,8 @@
 #include "playlist/viewer.h"
 #include "wps.h"
 #include "ui/native_wps.h"
+#include "ui/native_theme_runtime.h"
+#include "stock_wps.h"
 #include "ui/scene.h"
 #include "viewers/lyric_viewer/lyric_viewer.h"
 #include "cider.h"
@@ -101,6 +103,7 @@
 
 static struct wps_state wps_state;
 static bool wps_fullscreen;
+static unsigned wps_track_serial;
 
 /* initial setup of wps_data  */
 static void wps_state_init(void);
@@ -766,6 +769,10 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
     long last_left = 0, last_right = 0;
     struct wps_state *state = get_wps_state();
 
+    struct stock_wps stock = {0};
+    bool fruit = ui_theme_style(UI_STYLE_MENU_TREE) == UI_MENU_TREE_STOCK &&
+                 ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC;
+
     ab_reset_markers();
 
     wps_state_init();
@@ -819,11 +826,17 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
         if (restore)
         {
             restore = false;
+            stock = (struct stock_wps){0};
             add_event(LCD_EVENT_ACTIVATION, wps_lcd_activation_hook);
             enter_playback(state);
         }
         else
             gwps_caption_backlight(state);
+        if (fruit)
+        {
+            stock_wps_update(&stock, state, wps_track_serial);
+            native_wps_stock_controls(&stock.controls);
+        }
         if (carousel_wps_present_pending())
             carousel_wps_present(state);
         else
@@ -857,9 +870,21 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
            playlist or if using the sleep timer. */
         if (!cider_active() && !(audio_status() & AUDIO_STATUS_PLAY))
             exit = true;
-        /* SELECT owns the one lyrics page on both playback sources. Keep
-         * the WPS pixels until that page captures its animated underlay. */
-        if (button == ACTION_WPS_BROWSE || button == ACTION_WPS_LYRICS)
+        if (fruit && !exit)
+        {
+            int raw;
+            get_action_statuscode(&raw);
+            /* The generic WPS keymap also opens the context on held PLAY. */
+            if ((button == ACTION_WPS_CONTEXT && (raw & BUTTON_PLAY)) ||
+                button == ACTION_WPS_HOTKEY)
+                continue;
+            stock_wps_update(&stock, state, wps_track_serial);
+            if (stock_wps_action(&stock, state, button))
+                continue;
+        }
+        /* Keep the WPS pixels until Lyrics captures its animated underlay. */
+        if ((!fruit && button == ACTION_WPS_BROWSE) ||
+            button == ACTION_WPS_LYRICS)
         {
             /* A pending volume or seek value belongs to the playback page.
              * Close its trace and view before handing over the same pixels. */
@@ -1254,6 +1279,8 @@ static void track_info_callback(unsigned short id, void *param)
     if (cider_active()) return;
     struct wps_state *state = &wps_state;
 
+    if (id == PLAYBACK_EVENT_TRACK_CHANGE)
+        ++wps_track_serial;
     if (id == PLAYBACK_EVENT_TRACK_CHANGE || id == PLAYBACK_EVENT_CUR_TRACK_READY)
     {
         state->id3 = ((struct track_event *)param)->id3;

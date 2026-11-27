@@ -210,6 +210,8 @@ static void draw(unsigned char * const src[3], int sx, int sy, int stride,
     drawn++;
 }
 
+static void adjust_volume(int delta) { (void)delta; }
+
 static const struct settings settings = {
     .backlight_timeout = 17, .video_fit = true,
 };
@@ -240,6 +242,8 @@ static const struct plugin_api api = {
     .lcd_clear_display = no_op,
     .lcd_update = no_op,
     .lcd_set_foreground = color,
+    .lcd_set_background = color,
+    .adjust_volume = adjust_volume,
     .lcd_blit_yuv = draw,
     .font_get = font,
     .snprintf = snprintf,

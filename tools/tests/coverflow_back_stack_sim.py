@@ -17,6 +17,7 @@ import sys
 sys.dont_write_bytecode = True
 from PIL import Image
 from ui_music_fixture import TRACK_COUNT
+from ui_quickscreen_sim import ULTRA_FALLBACK_THEME
 from ui_stock_transitions_sim import CLASSIC, H, W, make_fixture, session
 
 
@@ -33,6 +34,14 @@ def prepare_fixture(binary, resource, out):
     finally:
         config.write_bytes(saved)
     return fixture
+
+
+def prepare_ultra(root):
+    themes = root / ".rockbox/native-themes"
+    themes.mkdir(exist_ok=True)
+    fallback = themes / "fruit-company-ultra.podtheme"
+    if not fallback.exists():
+        fallback.write_text(ULTRA_FALLBACK_THEME)
 
 
 def walk(sim, has_music, visit_settings):
@@ -139,7 +148,8 @@ def main():
             name = theme + ("-after-settings" if visit_settings else "")
             frames = session(args.binary, fixture, args.output / name, theme,
                              "" if has_music else CLASSIC,
-                             lambda sim: walk(sim, has_music, visit_settings))
+                             lambda sim: walk(sim, has_music, visit_settings),
+                             prepare_ultra if theme == "fruit-company-ultra" else None)
             failures.extend(check(frames, name, has_music, visit_settings))
     if failures:
         raise SystemExit("\n".join(failures))

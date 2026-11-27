@@ -887,9 +887,9 @@ static void paint_stock_scrub(const struct ui_view *view,
                               const struct ui_view_frame *frame)
 {
     (void)view;
-    struct ui_rect bar = { frame->bounds.x + CLASSIC_PROGRESS_X,
-                           frame->bounds.y + CLASSIC_BAR_Y,
-                           CLASSIC_PROGRESS_WIDTH, CLASSIC_BAR_VIEW };
+    struct ui_rect bar = { frame->bounds.x + WPS_CLASSIC_PROGRESS_X,
+                           frame->bounds.y + WPS_CLASSIC_BAR_Y,
+                           WPS_CLASSIC_PROGRESS_WIDTH, CLASSIC_BAR_VIEW };
     struct ui_rect clip = frame->clip;
     int left = MAX(bar.x, clip.x);
     int right = MIN(bar.x + bar.width, clip.x + clip.width);
@@ -916,12 +916,12 @@ static void paint_stock_scrub(const struct ui_view *view,
     format_time(remaining + 1, sizeof(remaining) - 1,
                 MIN(wps->stock.length - wps->stock.position, LONG_MAX));
     int x = frame->bounds.x - frame->clip.x;
-    int y = frame->bounds.y - frame->clip.y + CLASSIC_TIME_Y;
+    int y = frame->bounds.y - frame->clip.y + WPS_CLASSIC_TIME_Y;
     int width = font_getstringsize((const unsigned char *)remaining, NULL,
                                    NULL, viewport.font);
     over_cover(true);
-    lcd_putsxy(x + CLASSIC_ELAPSED_X, y, (const unsigned char *)elapsed);
-    lcd_putsxy(x + CLASSIC_REMAINING_RIGHT - width, y,
+    lcd_putsxy(x + WPS_CLASSIC_ELAPSED_X, y, (const unsigned char *)elapsed);
+    lcd_putsxy(x + WPS_CLASSIC_REMAINING_RIGHT - width, y,
                (const unsigned char *)remaining);
     over_cover(false);
     lcd_set_viewport(previous);

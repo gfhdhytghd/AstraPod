@@ -31,7 +31,7 @@ enum {
     ACTION_NONE, ACTION_WPS_MENU, ACTION_STD_CANCEL, ACTION_WPS_STOP,
     ACTION_WPS_SKIPPREV, ACTION_WPS_SEEKBACK, ACTION_WPS_SKIPNEXT,
     ACTION_WPS_SEEKFWD, ACTION_WPS_PLAY, ACTION_WPS_BROWSE,
-    ACTION_WPS_VOLUP, ACTION_WPS_VOLDOWN
+    ACTION_WPS_VOLUP, ACTION_WPS_VOLDOWN, ACTION_WPS_STOPSEEK
 };
 struct font { unsigned int depth, height; };
 struct settings { int backlight_timeout; bool video_fit; };
@@ -61,6 +61,8 @@ struct plugin_api {
     void (*lcd_clear_display)(void);
     void (*lcd_update)(void);
     void (*lcd_set_foreground)(unsigned int);
+    void (*lcd_set_background)(unsigned int);
+    void (*adjust_volume)(int);
     void (*lcd_blit_yuv)(unsigned char * const[3], int, int, int,
                          int, int, int, int);
     struct font *(*font_get)(int);

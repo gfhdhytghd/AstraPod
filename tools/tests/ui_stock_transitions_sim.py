@@ -63,7 +63,7 @@ CLASSIC = ("root menu order: pictureflow,database,tagnavi8,images,podcasts,"
 class Sim:
     """One simulator with no window, driven by key lines on stdin."""
 
-    def __init__(self, binary, root, out):
+    def __init__(self, binary, root, out, extra_env=None):
         self.root = root
         self.out = out
         self.handle = (out / "state.bin").open("w+b")
@@ -74,6 +74,7 @@ class Sim:
                    SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software",
                    PODBOX_UI_WALK_STATE=str(out / "state.bin"))
         env.pop("LD_PRELOAD", None)
+        env.update(extra_env or {})
         self.log = (out / "firmware.log").open("wb")
         self.process = subprocess.Popen(
             [str(binary), "--root", ".", "--nobackground", "--zoom", "1",

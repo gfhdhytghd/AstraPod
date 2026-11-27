@@ -19,7 +19,7 @@ void ui_sheet_cancel(struct ui_sheet *sheet)
 {
     if (!sheet->active)
         return;
-    sheet->active = false;
+    sheet->active = sheet->starting = false;
     sheet->tween.frames = 0;
     cpu_boost(false);
     ui_perf_end(sheet->trace);
@@ -30,11 +30,12 @@ void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route)
 {
     uint32_t now = USEC_TIMER;
     sheet->tint = ui_theme_rgb565(UI_COLOR_DIM);
-    int from = ui_tween_sample(&sheet->tween, ui_clock_frame(now - sheet->tween.start_clock));
+    int from = sheet->starting ? sheet->tween.from :
+        ui_tween_sample(&sheet->tween, ui_clock_frame(now - sheet->tween.start_clock));
     int to = open ? SHEET_PROGRESS : 0;
     ui_sheet_cancel(sheet);
     sheet->tween = (struct ui_tween){
-        .start_clock = ui_clock_start(), .from = from, .to = to,
+        .from = from, .to = to,
         .frames = lcd_active() && from != to
                     ? open ? ui_theme_motion(UI_MOTION_SHEET_IN,
                                              SHEET_OPEN_FRAMES,
@@ -47,7 +48,8 @@ void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route)
     };
     if (sheet->tween.frames)
     {
-        sheet->active = true;
+        sheet->active = sheet->starting = true;
+        sheet->requested_at = now;
         cpu_boost(true);
         char trace_route[32];
         snprintf(trace_route, sizeof(trace_route), "%s-%s", route, open ? "up" : "down");
@@ -59,6 +61,8 @@ int ui_sheet_timeout(const struct ui_sheet *sheet, int timeout)
 {
     if (!sheet->active || timeout == TIMEOUT_NOBLOCK)
         return timeout;
+    if (sheet->starting)
+        return TIMEOUT_NOBLOCK;
     int next = ui_clock_poll_timeout((uint32_t)USEC_TIMER - sheet->tween.start_clock,
                                 sheet->tween.frames, HZ);
     return timeout == TIMEOUT_BLOCK ? next : MIN(timeout, next);
@@ -109,9 +113,6 @@ void ui_sheet_paint_in(struct ui_sheet *sheet, const fb_data *backdrop,
                        const fb_data *body, struct ui_rect bounds, bool changed,
                        fb_data *output, int width, int height, void (*present)(void))
 {
-    uint32_t start = USEC_TIMER;
-    unsigned frame = ui_clock_frame(start - sheet->tween.start_clock);
-    int progress = ui_tween_sample(&sheet->tween, frame);
     if (ui_flush_inhibited())
         return;
     if (!lcd_active())
@@ -120,6 +121,16 @@ void ui_sheet_paint_in(struct ui_sheet *sheet, const fb_data *backdrop,
         return;
     }
 
+    if (sheet->starting)
+    {
+        ui_perf_ready(sheet->trace, sheet->requested_at);
+        sheet->starting = false;
+        sheet->tween.start_clock = ui_clock_start();
+    }
+    uint32_t start = USEC_TIMER;
+    unsigned frame = sheet->active
+                   ? ui_clock_frame(start - sheet->tween.start_clock) : 0;
+    int progress = ui_tween_sample(&sheet->tween, frame);
     bounds.y += (height - bounds.y) * (SHEET_PROGRESS - progress) / SHEET_PROGRESS;
     struct ui_rect visible = clip(bounds, width, height);
     int light = UI_FULL_OPACITY - SHEET_DIM * progress / SHEET_PROGRESS;

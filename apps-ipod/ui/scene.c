@@ -37,6 +37,7 @@
 
 static struct ui_scene *owner;
 static unsigned int owner_thread;
+static int warm_workspace;
 static const void *root_page, *restored_page;
 static bool (*parent_painter)(const void *page);
 static int (*backdrop_source)(void);
@@ -44,7 +45,29 @@ static int (*backdrop_source)(void);
 size_t ui_scene_reserve_size(void)
 {
     /* One settled backdrop under a nested panel that is still moving. */
-    return 4 * FRAMEBUFFER_SIZE + 3 * (BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t));
+    size_t overhead = BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t);
+    return warm_workspace > 0 ? 2 * (FRAMEBUFFER_SIZE + overhead)
+                              : 4 * FRAMEBUFFER_SIZE + 3 * overhead;
+}
+
+void ui_scene_warm_workspace(void)
+{
+    if (warm_workspace <= 0)
+        warm_workspace = core_alloc_free_space(SCENE_BYTES);
+}
+
+/* Only the owning scene uses the shared workspace. Settled sheets retain
+ * their separate backdrops, leaving this free for a nested scene. */
+static int scene_workspace(size_t size)
+{
+    return warm_workspace > 0 ? warm_workspace : core_alloc_free_space(size);
+}
+
+static void release_workspace(struct ui_scene *scene)
+{
+    if (scene->handle > 0 && scene->handle != warm_workspace)
+        core_free(scene->handle);
+    scene->handle = 0;
 }
 
 static fb_data *surface(fb_data *data, bool front)
@@ -512,15 +535,14 @@ static void complete_transition(struct ui_scene *scene)
 static void settle_panel(struct ui_scene *scene)
 {
     complete_transition(scene);
-    scene->handle = core_free(scene->handle);
+    release_workspace(scene);
 }
 
 static void release_scene(struct ui_scene *scene)
 {
     complete_transition(scene);
     scene->root_entry = false;
-    if (scene->handle > 0)
-        scene->handle = core_free(scene->handle);
+    release_workspace(scene);
     if (scene->backdrop_handle > 0)
         scene->backdrop_handle = core_free(scene->backdrop_handle);
 }
@@ -677,6 +699,7 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
                           bool push, const char *route, int pan_top,
                           int pan_dir, bool slide)
 {
+    scene->requested_at = USEC_TIMER;
     bool panning = pan_top || slide;
     bool staggered = push && !panning;
     unsigned frames = slide ? page_frames(pan_dir > 0)
@@ -689,7 +712,7 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     bool active = scene->handle > 0;
     if (!active)
     {
-        int handle = core_alloc_free_space(SCENE_BYTES);
+        int handle = scene_workspace(SCENE_BYTES);
         if (handle <= 0)
             return false;
         scene->handle = handle;
@@ -848,6 +871,7 @@ const char *ui_scene_capture_failure(void)
 
 static bool capture_panel(struct ui_scene *scene, bool vertical)
 {
+    scene->requested_at = USEC_TIMER;
     bool slide = !vertical && slide_motion();
     unsigned frames = vertical
         ? ui_theme_motion(UI_MOTION_SHEET_IN, MODAL_UP_FRAMES, MODAL_UP_FRAMES)
@@ -901,7 +925,7 @@ void ui_scene_show_modal(struct ui_scene *scene, const char *route)
         release_scene(scene);
         return;
     }
-    scene->handle = core_alloc_free_space(PANEL_WORKSPACE_BYTES);
+    scene->handle = scene_workspace(PANEL_WORKSPACE_BYTES);
     if (scene->handle <= 0)
     {
         release_scene(scene);
@@ -970,12 +994,11 @@ bool ui_scene_present_fade(struct ui_scene *scene, unsigned opacity,
     const fb_data *front = lcd_framebuffer_default.fb_ptr;
     if (opacity >= UI_FULL_OPACITY)
     {
-        if (scene->handle > 0)
-            scene->handle = core_free(scene->handle);
+        release_workspace(scene);
         return present(front);
     }
     if (scene->handle <= 0)
-        scene->handle = core_alloc_free_space(FRAMEBUFFER_SIZE);
+        scene->handle = scene_workspace(FRAMEBUFFER_SIZE);
     if (scene->handle <= 0)
         return false;
     fb_data *out = core_get_data_pinned(scene->handle);
@@ -992,7 +1015,7 @@ bool ui_scene_present_split(struct ui_scene *scene, int list_x, int pane_x)
     if (scene->backdrop_handle <= 0 || owner || !lcd_active())
         return false;
     if (scene->handle <= 0)
-        scene->handle = core_alloc_free_space(FRAMEBUFFER_SIZE);
+        scene->handle = scene_workspace(FRAMEBUFFER_SIZE);
     if (scene->handle <= 0)
         return false;
     const int half = MENU_PANE_X;
@@ -1094,6 +1117,7 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
 {
     if (scene->backdrop_handle <= 0)
         return false;
+    uint32_t requested_at = USEC_TIMER;
     unsigned frames = !animate ? 0 : scene->vertical
         ? ui_theme_motion(UI_MOTION_SHEET_OUT, MODAL_DOWN_FRAMES,
                           MODAL_DOWN_FRAMES)
@@ -1109,7 +1133,7 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     int offset = was_opening
         ? (scene->last_offset >= 0 ? scene->last_offset : scene->tween.from) : 0;
     if (scene->handle <= 0)
-        scene->handle = core_alloc_free_space(PANEL_WORKSPACE_BYTES);
+        scene->handle = scene_workspace(PANEL_WORKSPACE_BYTES);
     if (scene->handle <= 0)
     {
         release_scene(scene);
@@ -1128,6 +1152,7 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     core_put_data_pinned(front);
     scene->target_front = false;
     scene->last_offset = scene->composed_offset = -1;
+    ui_perf_ready(scene->trace, requested_at);
     scene->tween = (struct ui_tween){
         .start_clock = ui_clock_start(), .from = offset,
         .to = scene->vertical ? LCD_HEIGHT : LCD_WIDTH, .frames = frames,
@@ -1196,6 +1221,11 @@ int ui_scene_poll(int timeout)
     return ui_scene_timeout(scene, timeout);
 }
 
+bool ui_scene_preparing(void)
+{
+    return owner && owner->capturing && owner_thread == thread_self();
+}
+
 void ui_scene_start(struct ui_scene *scene)
 {
     if (!scene->capturing)
@@ -1208,6 +1238,7 @@ void ui_scene_start(struct ui_scene *scene)
         set_push_duration(scene);
     }
     scene->capturing = false;
+    ui_perf_ready(scene->trace, scene->requested_at);
     scene->tween.start_clock = ui_clock_start();
     /* The first frame of a reversed pan is the pose already on screen. */
     ui_scene_update(scene, !scene->reuse_target);

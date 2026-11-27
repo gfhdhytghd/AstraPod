@@ -14,6 +14,7 @@ struct ui_scene {
     int handle, backdrop_handle, composed_offset, last_offset, pan_top;
     int status_height, push_top, row_y, row_pitch, row_count;
     unsigned trace, dim_color, push_half_frames;
+    uint32_t requested_at;
     bool target_front, capturing, automatic, vertical, root_entry;
     bool staggered, rows_changed, reuse_target, slide;
     /* A split menu on each surface, a root page without menu chrome, and
@@ -37,6 +38,7 @@ bool ui_scene_capture_pan(struct ui_scene *scene, const void *from, const void *
 /* The incoming list reports the already-painted visible row bands. */
 void ui_scene_push_rows(int y, int pitch, int count);
 void ui_scene_snap_push(void);
+bool ui_scene_preparing(void);
 void ui_scene_start(struct ui_scene *scene);
 void ui_scene_update(struct ui_scene *scene, bool target_changed);
 int ui_scene_timeout(const struct ui_scene *scene, int timeout);
@@ -88,5 +90,6 @@ void ui_scene_compose_sheet(fb_data *out, const fb_data *back,
 int ui_scene_poll(int timeout);
 /* Space to leave free when laying out a new playback buffer. */
 size_t ui_scene_reserve_size(void);
+void ui_scene_warm_workspace(void);
 
 #endif

@@ -25,6 +25,8 @@ unsigned ui_perf_begin(const char *route);
 /* Ancillary animation. Foreground motion can claim the recorder immediately
  * and discard an overlapping passive trace without writing on its hot path. */
 unsigned ui_perf_begin_passive(const char *route);
+/* Monotonic timestamp of the request, before destination preparation. */
+void ui_perf_ready(unsigned capture, uint32_t requested_at);
 void ui_perf_end(unsigned capture);
 
 enum ui_cover_stage {

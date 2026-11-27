@@ -384,18 +384,6 @@ static int audiobook_speed(void)
     return pick(&global_settings.spoken_speed, LANG_AUDIOBOOKS);
 }
 
-/* Pickers for settings whose values are too long to stand beside the name */
-static int sound_check(void)
-{
-    return pick(&global_settings.replaygain_settings.type,
-                LANG_FRUIT_SOUND_CHECK);
-}
-
-static int clock_24(void)
-{
-    return pick(&global_settings.timeformat, LANG_FRUIT_24_HOUR_CLOCK);
-}
-
 /* Leaving a screen for Home, as AstraPod's Menu does, is back to the row
  * here, as stock's Menu is. */
 static int set_date_time(void)
@@ -525,9 +513,12 @@ MENUITEM_SETTING_W_LABEL(repeat_row, &global_settings.repeat_mode,
                          ID2P(LANG_REPEAT), NULL);
 MENUITEM_SETTING_W_LABEL(clicker_row, &global_settings.keyclick_hardware,
                          ID2P(LANG_FRUIT_CLICKER), NULL);
+MENUITEM_SETTING_W_LABEL(sound_check_row,
+                         &global_settings.replaygain_settings.type,
+                         ID2P(LANG_FRUIT_SOUND_CHECK), NULL);
+MENUITEM_SETTING_W_LABEL(clock_24_row, &global_settings.timeformat,
+                         ID2P(LANG_FRUIT_24_HOUR_CLOCK), NULL);
 
-ROW(sound_check_row, LANG_FRUIT_SOUND_CHECK, sound_check, NULL);
-ROW(clock_24_row, LANG_FRUIT_24_HOUR_CLOCK, clock_24, NULL);
 ROW(date_row, LANG_FRUIT_DATE, set_date_time, NULL);
 ROW(time_row, LANG_FRUIT_TIME, set_date_time, NULL);
 ROW(time_zone_row, LANG_FRUIT_TIME_ZONE, not_available, NULL);
@@ -561,6 +552,102 @@ static const struct menu_item_ex *const settings_rows[] = {
 };
 
 MENU(settings_menu, LANG_SETTINGS, NULL, settings_rows);
+
+/* Sets a bool or choice setting to `value` and runs its callback, as its
+ * picker does when the value changes */
+static void set_value(const void *variable, int value)
+{
+    const struct settings_list *setting = find_setting(variable);
+    if (value == option_value_as_int(setting))
+        return;
+    if ((setting->flags & F_T_MASK) == F_T_BOOL)
+    {
+        *(bool *)setting->setting = value;
+        if (setting->bool_setting->option_callback)
+            setting->bool_setting->option_callback(value);
+    }
+    else
+    {
+        *(int *)setting->setting = value;
+        if (setting->choice_setting->option_callback)
+            setting->choice_setting->option_callback(value);
+    }
+    settings_save();
+}
+
+/* Stock's in-place rows. The word `item` shows for its value, or -1 for a
+ * row of any other kind; with `step`, Select's next value in stock's order
+ * is set first. A value stock has no word for, set in Advanced Settings,
+ * shows AstraPod's and steps to the first of stock's. */
+static int in_place(const struct menu_item_ex *item, bool step)
+{
+    struct user_settings *g = &global_settings;
+    if (item == &shuffle_row)
+    {
+        /* Stock's third value, Albums, needs album shuffle */
+        if (step)
+            set_value(&g->playlist_shuffle, !g->playlist_shuffle);
+        return g->playlist_shuffle ? LANG_FRUIT_SONGS : LANG_OFF;
+    }
+    if (item == &repeat_row)
+    {
+        if (step)
+            set_value(&g->repeat_mode, g->repeat_mode == REPEAT_OFF ?
+                      REPEAT_ONE : g->repeat_mode == REPEAT_ONE ?
+                      REPEAT_ALL : REPEAT_OFF);
+        switch (g->repeat_mode)
+        {
+            case REPEAT_OFF: return LANG_OFF;
+            case REPEAT_ONE: return LANG_REPEAT_ONE;
+            case REPEAT_ALL: return LANG_ALL;
+            case REPEAT_SHUFFLE: return LANG_SHUFFLE;
+            default: return LANG_REPEAT_AB;
+        }
+    }
+    if (item == &sound_check_row)
+    {
+        /* On is the setting's default, track gain in shuffle and album
+         * gain otherwise; Track or Album gain also show as On */
+        int *type = &g->replaygain_settings.type;
+        if (step)
+        {
+            set_value(type, *type == REPLAYGAIN_OFF ? REPLAYGAIN_SHUFFLE :
+                      REPLAYGAIN_OFF);
+            replaygain_update();
+        }
+        return *type == REPLAYGAIN_OFF ? LANG_OFF : LANG_ON;
+    }
+    if (item == &clicker_row)
+    {
+        if (step)
+            set_value(&g->keyclick_hardware, !g->keyclick_hardware);
+        return g->keyclick_hardware ? LANG_ON : LANG_OFF;
+    }
+    if (item == &clock_24_row)
+    {
+        /* timeformat 0 is the 24-hour clock */
+        if (step)
+            set_value(&g->timeformat, !g->timeformat);
+        return g->timeformat == 0 ? LANG_ON : LANG_OFF;
+    }
+    return -1;
+}
+
+bool fruit_menu_describe(const struct menu_item_ex *item,
+                         enum list_row_kind *kind, const char **value)
+{
+    int word = in_place(item, false);
+    if (word < 0)
+        return false;
+    *kind = LIST_ROW_SETTING;
+    *value = str(word);
+    return true;
+}
+
+bool fruit_menu_step(const struct menu_item_ex *item)
+{
+    return in_place(item, true) >= 0;
+}
 
 /** The main menu **/
 

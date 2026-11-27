@@ -24,5 +24,11 @@ bool fruit_menu_is_stock(const struct menu_item_ex *menu);
 enum list_pane_kind fruit_menu_item_pane(const struct menu_item_ex *menu,
                                          const struct menu_item_ex *item,
                                          int *art);
+/* For a Settings row stock changes in place: the row's kind and the value
+ * it shows, and, on Select, stepping it to its next value. False for any
+ * other row. */
+bool fruit_menu_describe(const struct menu_item_ex *item,
+                         enum list_row_kind *kind, const char **value);
+bool fruit_menu_step(const struct menu_item_ex *item);
 
 #endif

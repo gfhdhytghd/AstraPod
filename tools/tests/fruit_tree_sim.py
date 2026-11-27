@@ -7,6 +7,8 @@ Xvfb is private to this process. For every row of every menu the walk
 selects the row, keeps a screenshot of what opened, and goes back. A row
 passes when Select changes the screen and Back returns to the same menu
 frame, or, for the rows stock leaves empty, when Select changes nothing.
+A row stock changes in place passes when every Select changes the list
+and as many Selects as it has values bring the list back.
 Writes one PNG per row and result.json to the output directory.
 """
 
@@ -26,6 +28,7 @@ from ui_menu_sim import FPS, Screen, process
 # (label, kind): "open" must change the screen, "empty" must not, "menu"
 # is walked as its own entry, "play" starts playback, after which the main
 # menu gains Now Playing and so is not the frame it was: it comes last.
+# "cycle:N" steps the row's value in place through N values.
 TREE = [
     ("music", [("Cover Flow", "open"), ("Playlists", "open"),
                ("Artists", "open"), ("Albums", "open"),
@@ -42,17 +45,18 @@ TREE = [
                 ("Stopwatch", "open"), ("Other Apps", "open"),
                 ("Demos", "open"), ("Files", "open"), ("System", "open")],
      [4]),
-    ("settings", [("About", "open"), ("Shuffle", "open"), ("Repeat", "open"),
+    ("settings", [("About", "open"), ("Shuffle", "cycle:2"),
+                  ("Repeat", "cycle:3"),
                   ("Main Menu", "open"), ("Music Menu", "open"),
                   ("Volume Limit", "open"), ("Backlight", "open"),
                   ("Brightness", "open"), ("Audiobooks", "open"),
-                  ("EQ", "open"), ("Sound Check", "open"),
-                  ("Clicker", "open"), ("Date & Time", "menu"),
+                  ("EQ", "open"), ("Sound Check", "cycle:2"),
+                  ("Clicker", "cycle:2"), ("Date & Time", "menu"),
                   ("Sort By", "open"), ("Language", "open"),
                   ("Legal", "open"), ("Reset Settings", "open"),
                   ("Advanced Settings", "open")], [5]),
     ("date_time", [("Date", "open"), ("Time", "open"), ("Time Zone", "open"),
-                   ("24 Hour Clock", "open"), ("Time in Title", "open")],
+                   ("24 Hour Clock", "cycle:2"), ("Time in Title", "open")],
      [5, 12]),
     ("main", [("Music", "menu"), ("Videos", "menu"), ("Photos", "menu"),
               ("Podcasts", "open"), ("Extras", "menu"), ("Settings", "menu"),
@@ -137,6 +141,15 @@ def walk(s, out, result):
             if kind == "menu":
                 menu.save(shot)
                 result[key] = "menu"
+                continue
+            if kind.startswith("cycle:"):
+                steps = [press(s, "Return")
+                         for _ in range(int(kind.split(":")[1]))]
+                steps[0].save(shot)
+                returned = same(steps[-1], menu)
+                ok = returned and not any(same(f, menu) for f in steps[:-1])
+                result[key] = {"kind": kind, "returned": returned, "ok": ok}
+                (out / "result.json").write_text(json.dumps(result, indent=1))
                 continue
             s.tap("Return")
             for _ in range(20):

@@ -47,6 +47,7 @@
 #include "ui/native_theme.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/stock_art_ids.h"
+#include "speech/language.h"
 #include "fruit_menu.h"
 
 bool fruit_menu_active(void)
@@ -83,11 +84,21 @@ static int pick(const void *variable, int title)
 
 /** Leaves **/
 
+/* A tagnavi.config label as its row shows it: the browser names a row in the
+ * current language wherever its English label is a lang string, so a row is
+ * found by this rather than by the English. */
+static const char *row_label(const char *english)
+{
+    int id = lang_english_to_id(english);
+    return id >= 0 ? (const char *)str(id) : english;
+}
+
 /* A row of the Music menu tagnavi.config names `label`. Customised away, the
  * Music menu opens in its place. */
 static int library_row(const char *label)
 {
     const unsigned char *name;
+    label = row_label(label);
     for (int slot = 0; slot < TAGNAVI_MAIN_MENU_SLOTS; slot++)
         if (browser_db_get_main_menu_row(slot, &name) &&
             !strcmp((const char *)P2STR((unsigned char *)name), label))
@@ -102,7 +113,10 @@ static int albums(void)       { return library_row("Album"); }
 static int genres(void)       { return library_row("Genre"); }
 static int composers(void)    { return library_row("Composer"); }
 static int audiobooks(void)   { return library_row("Audiobooks"); }
-static int songs(void)        { return root_menu_library_row("track", "Title"); }
+static int songs(void)
+{
+    return root_menu_library_row("track", row_label("Title"));
+}
 static int search(void)       { return run(GO_TO_DB_SEARCH); }
 static int photos(void)       { return run(GO_TO_IMAGES); }
 static int podcasts(void)     { return run(GO_TO_PODCASTS); }
@@ -703,7 +717,9 @@ static bool extras_pane(const struct menu_item_ex *item)
     struct menu_pane_content c = {
         .kind = LIST_PANE_PICTURE, .art = -1, .baseline = 221,
     };
-    if (item == &extras_clocks_row || item == &home_clocks)
+    /* Stock shows the Clocks picture beside Extras itself too */
+    if (item == &extras_clocks_row || item == &home_clocks ||
+        item == &extras_menu)
     {
         struct tm *tm = get_time();
         c.paint = extras_clock_pane_paint;

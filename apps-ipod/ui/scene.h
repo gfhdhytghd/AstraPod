@@ -20,6 +20,7 @@ struct ui_scene {
     /* A split menu on each surface, a root page without menu chrome, and
      * an outgoing page that stays still under the incoming one. */
     bool back_split, front_split, full_screen, back_still;
+    bool split_return;
     /* Both pages are painted on the list backdrop, which stays still under
      * them. */
     bool still_backdrop;
@@ -50,6 +51,10 @@ void ui_scene_fade_out(void);
  * full_screen marks a page that does not keep the menu chrome. */
 void ui_scene_enter(struct ui_scene *, const void *from, const void *to, bool push,
                     bool full_screen);
+/* Return to a split menu that travels whole and pushes the outgoing page
+ * only once its rows reach the display. */
+void ui_scene_enter_split_return(struct ui_scene *, const void *from,
+                                 const void *to);
 void ui_scene_boot(struct ui_scene *scene);
 /* A full-page picker retains its underlying page until dismissal. */
 void ui_scene_open_modal(struct ui_scene *scene, const char *route);

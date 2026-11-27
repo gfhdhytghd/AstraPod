@@ -295,6 +295,13 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
     int p = front_right ? offset : LCD_WIDTH + offset;
     bool both = left_split && right_split && !scene->full_screen;
     int top = both ? scene->pan_top : 0;
+    int right_x = p;
+    if (scene->split_return && left_split && !right_split)
+    {
+        /* The incoming preview covers the stationary page. Once the menu
+         * rows reach the left edge, they push the page at the same speed. */
+        right_x = MAX(0, p - half);
+    }
     memcpy(out, lcd_framebuffer_default.fb_ptr, top * LCD_WIDTH * sizeof(*out));
     for (int y = top; y < LCD_HEIGHT; y++)
     {
@@ -305,7 +312,7 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
         {
             put_span(row, l, scene->back_still ? 0 : p - LCD_WIDTH, LCD_WIDTH,
                      0, LCD_WIDTH);
-            put_span(row, r, p, LCD_WIDTH, 0, LCD_WIDTH);
+            put_span(row, r, right_x, LCD_WIDTH, p, LCD_WIDTH);
         }
         else if (both)
         {
@@ -783,7 +790,7 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     scene->target_front = push;
     scene->pan_top = pan_top;
     scene->slide = slide;
-    scene->full_screen = scene->back_still = false;
+    scene->full_screen = scene->back_still = scene->split_return = false;
     if (!reverse_pan)
         scene->still_backdrop = false;
     scene->staggered = staggered;
@@ -822,8 +829,8 @@ void ui_scene_boot(struct ui_scene *scene)
         scene->automatic = true;
 }
 
-void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bool push,
-                    bool full_screen)
+static void enter_scene(struct ui_scene *scene, const void *from, const void *to,
+                        bool push, bool full_screen, bool split_return)
 {
     const void *restored = restored_page;
     restored_page = NULL;
@@ -838,6 +845,7 @@ void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bo
         if (full_screen && scene->slide)
             scene->tween.easing = UI_EASE_LINEAR;
         scene->full_screen = full_screen;
+        scene->split_return = split_return;
         /* Now Playing slides in over the pane's backdrop, spread across the
          * screen in place of the menu. */
         if (full_screen && push && scene->slide && scene->back_split)
@@ -848,6 +856,18 @@ void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to, bo
             scene->back_still = true;
         }
     }
+}
+
+void ui_scene_enter(struct ui_scene *scene, const void *from, const void *to,
+                    bool push, bool full_screen)
+{
+    enter_scene(scene, from, to, push, full_screen, false);
+}
+
+void ui_scene_enter_split_return(struct ui_scene *scene, const void *from,
+                                 const void *to)
+{
+    enter_scene(scene, from, to, false, true, true);
 }
 
 const void *ui_scene_modal_parent(void)

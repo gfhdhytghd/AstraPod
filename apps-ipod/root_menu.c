@@ -2727,8 +2727,11 @@ static void scene_enter(struct ui_scene *scene, int from, int to, bool push,
         from_key = home;
     if (home && to == GO_TO_ROOT)
         to_key = home;
-    ui_scene_enter(scene, from_key, to_key, push,
-                   from == GO_TO_WPS || to == GO_TO_WPS);
+    if (!push && from == GO_TO_WPS && to == GO_TO_ROOT && fruit_menu_active())
+        ui_scene_enter_split_return(scene, from_key, to_key);
+    else
+        ui_scene_enter(scene, from_key, to_key, push,
+                       from == GO_TO_WPS || to == GO_TO_WPS);
 }
 
 static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push)

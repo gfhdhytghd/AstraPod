@@ -3656,7 +3656,9 @@ static int fruit_music_context(const char *path, const char *title,
     int count = 0;
 
     rows[count++] = LANG_FRUIT_OTG_ADD;
-    if (!group && !wps)
+    if (wps)
+        rows[count++] = LANG_LYRICS;
+    else if (!group)
         rows[count++] = LANG_FRUIT_GENIUS_START;
     if (browse && tagcache_seek_string(tag_album, album.album_seek,
                                        name, sizeof(name)))
@@ -3694,6 +3696,8 @@ static int fruit_music_context(const char *path, const char *title,
                 return fruit_browse_track(&album,
                     rows[list.selection] == LANG_FRUIT_BROWSE_ARTIST);
             break;
+        case LANG_LYRICS:
+            return ONPLAY_LYRICS;
         case LANG_FRUIT_GENIUS_START:
             if (fruit_genius_unavailable() == GO_TO_ROOT)
                 return ONPLAY_MAINMENU;

@@ -84,8 +84,6 @@ bool usb_podlink_active(void) { return false; }
 void usb_confirm_reopen(void) {}
 bool usb_disk_take_warning(void) { return false; }
 void podlink_wake(void) {}
-uint32_t podlink_crc32(const unsigned char *bytes, unsigned int length)
-{ return crc_32r(bytes, length, 0xffffffffu) ^ 0xffffffffu; }
 uint32_t podlink_bulk_crc(const unsigned char *data, unsigned int length,
                           uint32_t previous, uint32_t *raw)
 {
@@ -132,3 +130,6 @@ void t3_test_seek(long time)
     if (track)
         t3_test_observe(time > (long)track->elapsed ? "seek\tffwd" : "seek\trew");
 }
+
+/* The synthetic transport does not expose the hardware LCD shell. */
+void shell_lcd_dispatch(void) {}

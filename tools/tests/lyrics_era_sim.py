@@ -164,6 +164,15 @@ def run_case(build, out, theme, case, track, clip):
                 screen.tap("Return")
                 time.sleep(1.2)
                 screen.frame().save(directory / "wps.png")
+                if theme.startswith("fruit-company"):
+                    # Short SELECT cycles playback controls. Open Lyrics from
+                    # the held-SELECT context menu, below Add to On-The-Go.
+                    screen.key("keydown", "Return")
+                    time.sleep(.9)
+                    screen.key("keyup", "Return")
+                    time.sleep(.5)
+                    screen.tap("Down")
+                    time.sleep(.25)
                 stamps = {"entry": burst(screen, 1.0, directory, "entry",
                                          [(0.05, "Return")])}
                 screen.frame().save(directory / "lyrics.png")

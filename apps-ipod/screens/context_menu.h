@@ -31,6 +31,7 @@ enum {
     ONPLAY_FUNC_RETURN, /* for use in hotkey_assignment only */
     ONPLAY_SELECT,      /* Select...: the list turns into a selecting one */
     ONPLAY_LEAVE,       /* Now Playing leaves for context_menu_leave_for() */
+    ONPLAY_LYRICS,      /* Now Playing opens Lyrics with its page transition. */
 };
 
 /* Runs Now Playing's button action 'act' on the playing 'file': the

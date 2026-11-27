@@ -49,6 +49,7 @@ def instrument(source):
             "void usb_storage_ejected(void);\n#else\n"
             "static inline bool usb_exclusive_storage(void) { return false; }\n"
             "#endif /* HAVE_USBSTACK */")
+    replace(source, "apps-ipod/SOURCES", "system/podlink_shell_lcd.c\n", "")
     replace(source, "apps-ipod/SOURCES", "sim/shim-usb.c\n",
             "sim/shim-usb.c\nsim/t3-test-podlink.c\n")
     replace(source, "apps-ipod/root_menu.c", "    next_screen = root_menu_setup_screens();",

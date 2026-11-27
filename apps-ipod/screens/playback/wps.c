@@ -896,6 +896,7 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
     long button = 0;
     bool restore = true;
     bool exit = false;
+    bool lyrics_requested = false;
     long last_left = 0, last_right = 0;
     struct wps_state *state = get_wps_state();
 
@@ -985,8 +986,9 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
         if (button && !IS_SYSEVENT(button) )
             storage_spin();
 
-        button = get_action(CONTEXT_WPS | ALLOW_SOFTLOCK,
-                            native_wps_timeout());
+        button = lyrics_requested ? ACTION_WPS_LYRICS :
+                 get_action(CONTEXT_WPS | ALLOW_SOFTLOCK, native_wps_timeout());
+        lyrics_requested = false;
         uint32_t action_us = USEC_TIMER;
 
 #ifdef HAVE_USB_PODLINK
@@ -1088,10 +1090,12 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
                 }
                 if (!track) break;
                 leave_playback();
-                if (context_go_to(context_menu_show(track->path,
-                                      FILE_ATTR_AUDIO, CONTEXT_WPS, false,
-                                      ONPLAY_NO_CUSTOMACTION), &go_to))
+                int result = context_menu_show(track->path, FILE_ATTR_AUDIO,
+                                               CONTEXT_WPS, false,
+                                               ONPLAY_NO_CUSTOMACTION);
+                if (context_go_to(result, &go_to))
                     return go_to;
+                lyrics_requested = result == ONPLAY_LYRICS;
                 restore = true;
             }
             break;

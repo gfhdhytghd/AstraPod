@@ -152,7 +152,7 @@ def run_theme(binary, simdisk, env, out, theme):
                 prose_lrp = settle(s)
                 res["prose_fruit_ignores_lrp"] = not differ(prose, prose_lrp)
                 s.tap("Return"); settle(s)  # OK returns to Sound Settings
-                s.tap("Left"); settle(s)    # back one level to Advanced Settings (on Sound Settings)
+                s.tap("Escape"); settle(s)  # back one level to Advanced Settings (on Sound Settings)
 
                 # 5. Search Settings (index 0, one Up above Sound Settings)
                 s.tap("Up"); time.sleep(0.15)

@@ -33574,3 +33574,57 @@
     *: "无名称"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_REC_FORMAT
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Recording Format"
+  </source>
+  <dest>
+    *: none
+    recording: "录音格式"
+  </dest>
+  <voice>
+    *: none
+    recording: "录音格式"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_FREQUENCY
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Recording Sample Rate"
+  </source>
+  <dest>
+    *: none
+    recording: "录音采样率"
+  </dest>
+  <voice>
+    *: none
+    recording: "录音采样率"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_REC_CHANNELS
+  desc: Recording screen and settings
+  user: core
+  <source>
+    *: none
+    recording: "Recording Channels"
+  </source>
+  <dest>
+    *: none
+    recording: "录音声道"
+  </dest>
+  <voice>
+    *: none
+    recording: "录音声道"
+  </voice>
+</phrase>

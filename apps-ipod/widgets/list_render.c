@@ -3274,3 +3274,39 @@ int list_render_timeout(const struct gui_synclist *list, int timeout)
         return delay;
     return timeout;
 }
+
+#ifdef SIMULATOR
+/* Read the selected row's icon cell from the settled LCD framebuffer.
+ * The audit runs Scrim with a solid background, no scrollbar and LTR text. */
+int list_render_sim_icon_ink(void)
+{
+    struct native_list *render = core_get_data_pinned(renderer_handle);
+    const struct list_shown *shown = &render->shown;
+    int size = render->theme.metric[UI_METRIC_LIST_ICON_SIZE];
+    int left = shown->rows.x + render->theme.metric[UI_METRIC_LIST_ICON_MARGIN];
+    int top = shown->cursor_y + (shown->cursor_height - size) / 2;
+    int slot = shown->selected - shown->top;
+    if (slot < 0 || slot >= MIN(shown->slots, SHOWN_ROWS) ||
+        shown->skipped[slot] || top < 0 || top + size > LCD_HEIGHT ||
+        left < 0 || left + size > LCD_WIDTH)
+    {
+        core_put_data_pinned(render);
+        return -2;
+    }
+    /* If the icon column disappeared, reject text that moved into its cell. */
+    if (shown->marker.x < left + size || !shown->marker.width)
+    {
+        core_put_data_pinned(render);
+        return 0;
+    }
+    int ink = 0;
+    for (int y = top; y < top + size; ++y)
+    {
+        const fb_data *row = lcd_framebuffer_default.fb_ptr + y * LCD_WIDTH;
+        for (int x = left; x < left + size; ++x)
+            ink += row[x] != row[0];
+    }
+    core_put_data_pinned(render);
+    return ink;
+}
+#endif

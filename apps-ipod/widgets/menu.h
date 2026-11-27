@@ -188,6 +188,9 @@ int do_menu(const struct menu_item_ex *menu, int *start_selected,
 
 /* Draw the menu's first frame as do_menu() would, without running it. */
 void menu_paint(const struct menu_item_ex *menu, int selected);
+#ifdef SIMULATOR
+int menu_sim_row_ink(const struct menu_item_ex *menu, int item);
+#endif
 
 struct ui_scene;
 /* Link the next top-level menu call to its peer across root dispatch. */

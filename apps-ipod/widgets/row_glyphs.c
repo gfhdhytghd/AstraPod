@@ -132,6 +132,7 @@ static const struct
     /* Settings > Recording Settings */
     { LANG_REC_FORMAT, 0x0183 }, /* audio_file */
     { LANG_ENCODER_SETTINGS, 0x01A4 }, /* compress */
+    { LANG_BITRATE, 0x01D7 }, /* linear_scale */
     { LANG_REC_FREQUENCY, 0x01B8 }, /* waves */
     { LANG_RECORDING_SOURCE, 0x01CD }, /* input */
     { LANG_REC_CHANNELS, 0x019F }, /* surround_sound */

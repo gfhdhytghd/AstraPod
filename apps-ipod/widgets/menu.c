@@ -76,6 +76,9 @@
 
 /* gui api */
 #include "list.h"
+#ifdef SIMULATOR
+#include "list_render.h"
+#endif
 #include "row_glyphs.h"
 #include "ui/scene.h"
 #include "ui/stock_art_ids.h"
@@ -1037,6 +1040,25 @@ void menu_paint(const struct menu_item_ex *menu, int selected)
     FOR_NB_SCREENS(i)
         viewportmanager_theme_undo(i, false);
 }
+
+#ifdef SIMULATOR
+/* The audit uses the same visibility callbacks and painter as a real page. */
+int menu_sim_row_ink(const struct menu_item_ex *menu, int item)
+{
+    for (int attempt = 0; attempt < 20; ++attempt)
+    {
+        menu_paint(menu, item);
+        if (get_menu_selection(find_menu_selection(item), menu) != item ||
+            !current_subitems_count)
+            return -1;
+        int ink = list_render_sim_icon_ink();
+        if (ink >= 0)
+            return ink;
+        sleep(1);
+    }
+    return -2;
+}
+#endif
 
 int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             struct viewport parent[NB_SCREENS], bool hide_theme)

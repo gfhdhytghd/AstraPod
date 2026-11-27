@@ -546,6 +546,7 @@ static const struct button_mapping* get_context_mapping_remote( int context )
     {
         case CONTEXT_AGENTS:
             return remote_button_context_agents;
+        case CONTEXT_VIDEO_PLAYBACK:
         case CONTEXT_WPS:
             return remote_button_context_wps;
         case CONTEXT_TREE:
@@ -627,6 +628,7 @@ const struct button_mapping* get_context_mapping(int context)
     {
         case CONTEXT_STD:
             return button_context_standard;
+        case CONTEXT_VIDEO_PLAYBACK:
         case CONTEXT_WPS:
             return button_context_wps;
 

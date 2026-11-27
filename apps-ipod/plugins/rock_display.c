@@ -73,10 +73,11 @@ void rock_display_init(void)
     rock_main_screen.update_viewport_rect = rock_screen_update_viewport_rect;
 }
 
-void rock_display_start(fb_data *caller_pixels, fb_data *widget_pixels)
+void rock_display_start(fb_data *caller_pixels, fb_data *widget_pixels,
+                        bool video)
 {
     ui_scene_interrupt();
-    app_first_frame = get_current_activity() == ACTIVITY_PLUGINBROWSER &&
+    app_first_frame = (video || get_current_activity() == ACTIVITY_PLUGINBROWSER) &&
                       ui_scene_capture_page(&app_scene);
     lcd_scroll_stop();
     save_display(&caller);

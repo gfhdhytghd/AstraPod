@@ -17,6 +17,7 @@
 #include "root_menu.h"
 #include "settings/settings.h"
 #include "files/filetypes.h"
+#include "plugins/rock_compat.h"
 #include "input/action.h"
 #include "ui/scene.h"
 #include "widgets/list.h"
@@ -347,15 +348,31 @@ static int show_tracks(struct videos *v, char *title)
                 return MENU_ATTACHED_USB;
             continue;
         }
-        char path[MAX_PATH];
-        int rc = GO_TO_PREVIOUS;
-        if (text_at(v, v->tracks[v->rows[sel]].path, path, sizeof(path)) &&
-            stock_video_path(path) && file_exists(path))
-            filetype_open_core_viewer(FILE_ATTR_VIDEO, path, &rc);
-        else
-            splash(HZ, ID2P(LANG_FILE_NOT_FOUND));
-        if (rc == GO_TO_ROOT)
-            return MENU_ATTACHED_USB;
+#ifdef HAVE_VIDEO_PLAYER
+        while (sel >= 0 && sel < v->row_count)
+        {
+            char path[MAX_PATH], label[MAX_PATH];
+            const struct video_track *track = &v->tracks[v->rows[sel]];
+            if (!text_at(v, track->path, path, sizeof(path)) ||
+                !stock_video_path(path) || !file_exists(path))
+            {
+                splash(HZ, ID2P(LANG_FILE_NOT_FOUND));
+                break;
+            }
+            const char *name = text_at(v, track->title, label, sizeof(label)) ?
+                               label : NULL;
+            info.selection = sel;
+            int result = rock_open_video(path, name, sel > 0);
+            if (result == ROCK_VIDEO_USB)
+                return MENU_ATTACHED_USB;
+            if (result == ROCK_VIDEO_PREVIOUS)
+                sel--;
+            else if (result == ROCK_VIDEO_FINISHED || result == ROCK_VIDEO_NEXT)
+                sel++;
+            else
+                break;
+        }
+#endif
     }
 }
 

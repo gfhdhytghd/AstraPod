@@ -17,6 +17,7 @@ struct native_chrome_state {
     uint8_t charging, numeric, clock_24h, busy, volume_visible, volume_percent;
     uint8_t playmode, stock_battery_frame;
 #ifdef ASTRAPOD_ROCK_COMPAT
+    uint8_t reserved; /* Align the tray without implicit padding for memcmp. */
     struct app_tray_view tray;
 #endif
 };

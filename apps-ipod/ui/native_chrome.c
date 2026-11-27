@@ -111,7 +111,7 @@ bool native_chrome_poll(struct native_chrome *chrome)
 #ifdef ASTRAPOD_ROCK_COMPAT
     app_tray_snapshot(now, &next.tray);
 #endif
-    /* The sample has byte alignment and no padding. Compare it to
+    /* The sample has no padding. Compare it to
      * invalidate only the status bar when list geometry is unchanged. */
     bool changed = memcmp(&chrome->state, &next, sizeof(next)) != 0;
     chrome->state = next;
@@ -179,11 +179,11 @@ struct status_layout {
 #define ART_BUSY_INK 12
 
 #ifdef ASTRAPOD_ROCK_COMPAT
-static int tray_ink(const struct rock_tray_bitmap *icon, int *first)
+static int tray_ink(const struct rock_tray_icon12 *icon, int *first)
 {
     int last = -1;
     *first = 0;
-    for (int c = 0; c < ROCK_TRAY_ICON_SIZE; ++c)
+    for (int c = 0; c < ROCK_TRAY_ICON12_SIZE; ++c)
         if (icon->columns[c])
         {
             if (last < 0)
@@ -284,7 +284,7 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
     int tray_x = busy_x;
     int tray_count = 0;
 #ifdef ASTRAPOD_ROCK_COMPAT
-    int tray_pitch = ROCK_TRAY_ICON_SIZE + gap;
+    int tray_pitch = ROCK_TRAY_ICON12_SIZE + gap;
     int tray_room = busy_x - group_gap - left - clock_width;
     tray_count = MIN(chrome->state.tray.count, MAX(0, tray_room) / tray_pitch);
     tray_x -= tray_count * tray_pitch;
@@ -414,17 +414,24 @@ static void fill_art(const struct viewport *damage, int top)
                                      damage->height });
 }
 
+/* The ARGB of image `id` at (x, y); the pack must be loaded. */
+static uint32_t art_pixel(enum stock_art_id id, int x, int y)
+{
+    const struct stock_art *art = &stock_art[id];
+    int i = y * art->width + x;
+    unsigned n = art->colors <= 256 ? ((const uint8_t *)art->pixels)[i] :
+                                      ((const uint16_t *)art->pixels)[i];
+    return art->palette[n];
+}
+
 /* The bar's colour at row `y` of its `height`, as 0xRRGGBB. */
 static uint32_t bar_rgb(const struct ui_theme *theme, int y, int height)
 {
     if (ui_theme_art(theme) && stock_art_ready())
     {
-        const struct stock_art *art =
-            &stock_art[STOCK_ART_STATUSBARWHITE_BACKGROUND];
-        int i = MIN(MAX(y, 0), art->height - 1) * art->width;
-        unsigned n = art->colors <= 256 ? ((const uint8_t *)art->pixels)[i] :
-                                          ((const uint16_t *)art->pixels)[i];
-        return art->palette[n] & 0xffffff;
+        int last = stock_art[STOCK_ART_STATUSBARWHITE_BACKGROUND].height - 1;
+        return art_pixel(STOCK_ART_STATUSBARWHITE_BACKGROUND, 0,
+                         MIN(MAX(y, 0), last)) & 0xffffff;
     }
     return ui_theme_gradient_at(&theme->gradient[UI_GRADIENT_STATUS], y,
                                 height, 0);
@@ -578,6 +585,81 @@ static void draw_art_indicators(const struct native_chrome *chrome,
         stock_art_draw(play, x + layout.play_x + size - stock_art[play].width,
                        y + 2, clip);
 }
+
+#ifdef ASTRAPOD_ROCK_COMPAT
+/* Stock's pause art is two bars of 12 rows of ink, from its row 1: a blue
+ * lit brightest at the middle row, darker on the outline, over a row of
+ * white highlight. A tray icon on the art bar takes each pixel from the
+ * pause pixel on the same row, so it shares the line and the shading. */
+#define ART_TRAY_ROW 1
+#define ART_TRAY_OUTLINE 1
+#define ART_TRAY_INSIDE 2
+#define ART_TRAY_HIGHLIGHT 13
+
+static void draw_art_tray(const struct rock_tray_icon12 *icon, int x, int y,
+                          int bar_top, struct ui_rect clip)
+{
+    enum { SIZE = ROCK_TRAY_ICON12_SIZE };
+    const enum stock_art_id pause = STOCK_ART_NOWPLAYING_WHITE_PAUSE;
+    uint32_t pixels[SIZE * (SIZE + 1)];
+    struct stock_canvas canvas = { pixels, x, y, SIZE, SIZE + 1 };
+    stock_art_put_part(&canvas, STOCK_ART_STATUSBARWHITE_BACKGROUND, 0,
+                       y - bar_top, SIZE, SIZE + 1, x, y);
+    for (int c = 0; c < SIZE; ++c)
+    {
+        unsigned ink = icon->columns[c];
+        unsigned left = c > 0 ? icon->columns[c - 1] : 0;
+        unsigned right = c + 1 < SIZE ? icon->columns[c + 1] : 0;
+        unsigned inside = ink & left & right & ink << 1 & ink >> 1;
+        for (int r = 0; r < SIZE; ++r)
+        {
+            if (!(ink >> r & 1))
+                continue;
+            int sx = inside >> r & 1 ? ART_TRAY_INSIDE : ART_TRAY_OUTLINE;
+            uint32_t argb = art_pixel(pause, sx, ART_TRAY_ROW + r);
+            stock_canvas_blend(&canvas, x + c, y + r, argb, argb >> 24);
+        }
+        if (ink)
+        {
+            uint32_t argb = art_pixel(pause, ART_TRAY_INSIDE,
+                                      ART_TRAY_HIGHLIGHT);
+            int bottom = 31 - __builtin_clz(ink);
+            stock_canvas_blend(&canvas, x + c, y + bottom + 1, argb,
+                               argb >> 24);
+        }
+    }
+    stock_canvas_show(&canvas, clip);
+}
+
+/* Shaded on the art bar; elsewhere a mask in the status foreground, centred
+ * on the bar. */
+static void draw_tray(const struct native_chrome *chrome,
+                      struct viewport *damage, struct status_layout layout,
+                      struct ui_rect bounds, int icon_y)
+{
+    const struct app_tray_view *tray = &chrome->state.tray;
+    bool art = ui_theme_art(chrome->theme) && stock_art_ready();
+    /* The pause art's ink rows start 2 + ART_TRAY_ROW below the icon row. */
+    int y = art ? icon_y + 2 + ART_TRAY_ROW :
+            bounds.y + (bounds.height - ROCK_TRAY_ICON12_SIZE) / 2;
+    struct ui_rect clip = { damage->x, damage->y, damage->width,
+                            damage->height };
+    for (int i = 0; i < layout.tray_count; ++i)
+    {
+        const struct rock_tray_icon12 *icon = &tray->icons[i];
+        int x = bounds.x + layout.tray_icon_x[i];
+        if (art)
+        {
+            draw_art_tray(icon, x, y, bounds.y, clip);
+            continue;
+        }
+        for (int c = 0; c < ROCK_TRAY_ICON12_SIZE; ++c)
+            for (int r = 0; r < ROCK_TRAY_ICON12_SIZE; ++r)
+                if (icon->columns[c] >> r & 1)
+                    lcd_drawpixel(x + c - damage->x, y + r - damage->y);
+    }
+}
+#endif
 
 static void draw_indicators(const struct native_chrome *chrome, struct viewport *damage,
                             const struct native_chrome_indicators *icons,
@@ -735,11 +817,7 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
     draw_indicators(chrome, &damage, indicators, layout, bounds.x, icon_y,
                     icon_size, background, foreground);
 #ifdef ASTRAPOD_ROCK_COMPAT
-    int tray_y = bounds.y + (bounds.height - ROCK_TRAY_ICON_SIZE) / 2 - damage.y;
-    for (int i = 0; i < layout.tray_count; ++i)
-        lcd_mono_bitmap(state->tray.icons[i].columns,
-                        bounds.x + layout.tray_icon_x[i] - damage.x, tray_y,
-                        ROCK_TRAY_ICON_SIZE, ROCK_TRAY_ICON_SIZE);
+    draw_tray(chrome, &damage, layout, bounds, icon_y);
 #endif
     lcd_set_viewport(previous);
 }

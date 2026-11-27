@@ -1,5 +1,6 @@
 /* AstraPod app reminder scheduler and disk store tests. GPL v2+. */
 #include "plugins/app_tray.h"
+#include "crc32.h"
 
 #include <assert.h>
 #include <fcntl.h>
@@ -9,8 +10,9 @@
 #include <unistd.h>
 
 static const char app[] = "/rocks/games/Game.rock";
-static const struct rock_tray_bitmap frames[] = {{{0x11}}, {{0x22}}, {{0x44}}};
-static const struct rock_tray_bitmap changed[] = {{{0x88}}, {{0x99}}, {{0xaa}}};
+static const struct rock_tray_icon12 frames[] = {{{0x11}}, {{0x22}}, {{0x44}}};
+static const struct rock_tray_icon12 changed[] = {{{0x88}}, {{0x99}}, {{0xaa}}};
+static const struct rock_tray_bitmap small[] = {{{0xff, 0, 0, 0, 0, 0, 0, 0x81}}};
 static const struct rock_tray_rule schedule[] = {
     {30, 1}, {60, 2}, {90, ROCK_TRAY_HIDDEN},
 };
@@ -107,5 +109,52 @@ int main(void)
     assert(truncate("app-tray.dat", 10) == 0);
     app_tray_init();
     assert(app_tray_get(app, &end) == -1);
-    puts("PASS tray deadlines, snapshots, slot limits, reload, failed saves");
+
+    /* An 8 x 8 frame is centred in 12 x 12. */
+    assert(!app_tray_register8(app, small, ROCK_TRAY_MAX_FRAMES + 1));
+    assert(app_tray_register8(app, small, 1) && app_tray_set(app, 0));
+    app_tray_snapshot(&end, &view);
+    assert(view.count == 1 && view.icons[0].columns[0] == 0 &&
+           view.icons[0].columns[2] == 0x3fc &&
+           view.icons[0].columns[9] == 0x204 &&
+           view.icons[0].columns[11] == 0);
+    assert(app_tray_register8(app, NULL, 0));
+
+    /* Bits past the 12th row are dropped. */
+    const struct rock_tray_icon12 tall[] = {{{0xf801}}};
+    assert(app_tray_register(app, tall, 1) && app_tray_set(app, 0));
+    app_tray_snapshot(&end, &view);
+    assert(view.count == 1 && view.icons[0].columns[0] == 0x801);
+    assert(app_tray_register(app, NULL, 0));
+
+    /* A V1 file, 8 x 8 frames, is read and widened. */
+    unsigned char v1[380] = "ASTRY01";
+    unsigned char *slot = v1 + 8;
+    memcpy(slot, "old", 3);
+    slot[32 + 4 + 16] = 0x0f;            /* frames[0].columns[0] */
+    slot[32 + 4 + 16 + 8 + 7] = 0x80;    /* frames[1].columns[7] */
+    slot[32 + 4 + 16 + 32 + 4] = 2;      /* count */
+    slot[32 + 4 + 16 + 32 + 4 + 1] = 1;  /* frame */
+    uint32_t crc = crc_32(v1, sizeof(v1) - 4, 0xffffffffu);
+    memcpy(v1 + sizeof(v1) - 4, &crc, 4);
+    fd = open("app-tray.dat", O_WRONLY | O_TRUNC);
+    assert(fd >= 0 && write(fd, v1, sizeof(v1)) == sizeof(v1) &&
+           close(fd) == 0);
+    app_tray_init();
+    assert(app_tray_get("old.rock", &end) == 1);
+    app_tray_snapshot(&end, &view);
+    assert(view.count == 1 && view.icons[0].columns[9] == 0x200 &&
+           view.icons[0].columns[2] == 0);
+    assert(app_tray_set("old.rock", 0));
+    app_tray_init();
+    app_tray_snapshot(&end, &view);
+    assert(view.count == 1 && view.icons[0].columns[2] == 0x3c);
+    v1[20] ^= 1;
+    fd = open("app-tray.dat", O_WRONLY | O_TRUNC);
+    assert(fd >= 0 && write(fd, v1, sizeof(v1)) == sizeof(v1) &&
+           close(fd) == 0);
+    app_tray_init();
+    assert(app_tray_get("old.rock", &end) == -1);
+    puts("PASS tray deadlines, snapshots, slot limits, reload, failed saves, "
+         "8 x 8 frames, V1 files");
 }

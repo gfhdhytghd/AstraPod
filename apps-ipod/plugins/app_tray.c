@@ -16,14 +16,14 @@
 #define TRAY_SLOTS 4
 #define TRAY_OWNER_SIZE 32
 
-/* V1 disk layout for little-endian AstraPod targets. Zero is an invalid RTC
+/* V2 disk layout for little-endian AstraPod targets. Zero is an invalid RTC
  * stamp. The schedule is pure data so it can outlive the plugin arena. */
-static const char signature[8] = "ASTRY01";
+static const char signature[8] = "ASTRY02";
 
 struct tray_slot {
     char owner[TRAY_OWNER_SIZE];
     uint32_t start, delays[ROCK_TRAY_MAX_RULES];
-    struct rock_tray_bitmap frames[ROCK_TRAY_MAX_FRAMES];
+    struct rock_tray_icon12 frames[ROCK_TRAY_MAX_FRAMES];
     uint8_t targets[ROCK_TRAY_MAX_RULES];
     uint8_t count, frame, steps, reserved;
 };
@@ -34,7 +34,26 @@ struct tray_store {
     uint32_t crc;
 };
 
-_Static_assert(sizeof(struct tray_store) == 380, "tray file layout");
+_Static_assert(sizeof(struct tray_store) == 636, "tray file layout");
+
+/* V1 is V2 with 8 x 8 frames; it is read once and widened. */
+static const char signature_v1[8] = "ASTRY01";
+
+struct tray_slot_v1 {
+    char owner[TRAY_OWNER_SIZE];
+    uint32_t start, delays[ROCK_TRAY_MAX_RULES];
+    struct rock_tray_bitmap frames[ROCK_TRAY_MAX_FRAMES];
+    uint8_t targets[ROCK_TRAY_MAX_RULES];
+    uint8_t count, frame, steps, reserved;
+};
+
+struct tray_store_v1 {
+    char magic[sizeof(signature_v1)];
+    struct tray_slot_v1 slots[TRAY_SLOTS];
+    uint32_t crc;
+};
+
+_Static_assert(sizeof(struct tray_store_v1) == 380, "V1 tray file layout");
 
 static struct tray_store store;
 static struct mutex store_lock;
@@ -147,6 +166,47 @@ static bool store_valid(const struct tray_store *data)
     return true;
 }
 
+static void widen(const struct rock_tray_bitmap *in, unsigned count,
+                  struct rock_tray_icon12 *out)
+{
+    const int pad = (ROCK_TRAY_ICON12_SIZE - ROCK_TRAY_ICON_SIZE) / 2;
+    memset(out, 0, count * sizeof(*out));
+    for (unsigned i = 0; i < count; ++i)
+        for (int c = 0; c < ROCK_TRAY_ICON_SIZE; ++c)
+            out[i].columns[pad + c] = in[i].columns[c] << pad;
+}
+
+/* Widen a V1 file read into `store`, if it is one. */
+static bool upgrade_v1(ssize_t length)
+{
+    struct tray_store_v1 old;
+    if (length != sizeof(old))
+        return false;
+    memcpy(&old, &store, sizeof(old));
+    if (memcmp(old.magic, signature_v1, sizeof(signature_v1)) ||
+        old.crc != crc_32(&old, offsetof(struct tray_store_v1, crc),
+                          0xffffffffu))
+        return false;
+
+    memset(&store, 0, sizeof(store));
+    memcpy(store.magic, signature, sizeof(signature));
+    for (unsigned i = 0; i < TRAY_SLOTS; ++i)
+    {
+        const struct tray_slot_v1 *from = &old.slots[i];
+        struct tray_slot *to = &store.slots[i];
+        memcpy(to->owner, from->owner, sizeof(to->owner));
+        to->start = from->start;
+        memcpy(to->delays, from->delays, sizeof(to->delays));
+        widen(from->frames, ROCK_TRAY_MAX_FRAMES, to->frames);
+        memcpy(to->targets, from->targets, sizeof(to->targets));
+        to->count = from->count;
+        to->frame = from->frame;
+        to->steps = from->steps;
+    }
+    store.crc = checksum(&store);
+    return true;
+}
+
 void app_tray_init(void)
 {
     mutex_init(&store_lock);
@@ -163,7 +223,9 @@ void app_tray_init(void)
     ssize_t tail = length == sizeof(store) ? read(fd, &extra, 1) : 0;
     int closed = close(fd);
     ready = length >= 0 && tail >= 0 && closed == 0;
-    if (!ready || length != sizeof(store) || tail || !store_valid(&store))
+    bool loaded = ready && !tail &&
+                  (length == sizeof(store) || upgrade_v1(length));
+    if (!loaded || !store_valid(&store))
         memset(&store, 0, sizeof(store));
 }
 
@@ -207,7 +269,7 @@ static struct tray_slot *find_slot(struct tray_store *data, const char *owner,
     return allocate ? empty : NULL;
 }
 
-bool app_tray_register(const char *path, const struct rock_tray_bitmap *frames,
+bool app_tray_register(const char *path, const struct rock_tray_icon12 *frames,
                        unsigned count)
 {
     char owner[TRAY_OWNER_SIZE];
@@ -234,9 +296,22 @@ bool app_tray_register(const char *path, const struct rock_tray_bitmap *frames,
             return false;
 
         memset(slot->frames, 0, sizeof(slot->frames));
-        memcpy(slot->frames, frames, count * sizeof(*frames));
+        for (unsigned i = 0; i < count; ++i)
+            for (int c = 0; c < ROCK_TRAY_ICON12_SIZE; ++c)
+                slot->frames[i].columns[c] = frames[i].columns[c] &
+                    ((1u << ROCK_TRAY_ICON12_SIZE) - 1);
     }
     return save_store(&next);
+}
+
+bool app_tray_register8(const char *path, const struct rock_tray_bitmap *frames,
+                        unsigned count)
+{
+    struct rock_tray_icon12 wide[ROCK_TRAY_MAX_FRAMES];
+    if (count > ROCK_TRAY_MAX_FRAMES || (count && !frames))
+        return false;
+    widen(frames, count, wide);
+    return app_tray_register(path, count ? wide : NULL, count);
 }
 
 bool app_tray_set(const char *path, unsigned frame)

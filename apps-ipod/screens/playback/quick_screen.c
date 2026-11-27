@@ -4,8 +4,8 @@
  * Copyright (C) 2008 by Jonathan Gordon
  * GNU General Public License (version 2+)
  *
- * The quick screen: four settings bound to the directional buttons, edited
- * in place without leaving playback.
+ * The quick screen: up to four settings edited in place without leaving
+ * playback. The wheel HUD shows which setting SELECT will step.
  ****************************************************************************/
 
 #include <stdio.h>
@@ -73,6 +73,7 @@ struct quickscreen_page {
     enum themable_icons saved_icon;
     bool has_saved_title;
     bool hud;               /* style.quick_screen=hud */
+    bool wheel_hud;
 };
 
 struct gui_quickscreen
@@ -85,6 +86,11 @@ struct gui_quickscreen
     enum quickscreen_item focus;
     bool cider;
     void (*poll)(void);  /* Keep a caller's foreground inbox flowing. */
+};
+
+/* HUD tiles in reading order. */
+static const enum quickscreen_item hud_order[] = {
+    QUICKSCREEN_LEFT, QUICKSCREEN_TOP, QUICKSCREEN_RIGHT, QUICKSCREEN_BOTTOM,
 };
 
 /* Cider mode shown in a slot of a Cider quick screen */
@@ -436,23 +442,33 @@ static void hud_paint_card(const struct ui_view *node,
     int ty = box->y + gap;
     struct ui_rect inner = hud_intersect(frame->clip, (struct ui_rect){
         box->x + HUD_PAD, box->y, box->width - 2 * HUD_PAD, box->height });
-    int arrow_x = box->x + box->width - HUD_PAD - HUD_ARROW;
-    int arrow_y = ty + line / 2;
-
-    /* The direction that steps this setting, and its name. */
-    struct viewport vp = quickscreen_viewport(view, &frame->clip, title_font);
-    struct viewport *previous = lcd_set_viewport(&vp);
-    lcd_set_foreground(LCD_RGBPACK(0, 0, 0));
-    quickscreen_paint_arrow(card->item, arrow_x - vp.x, arrow_y - 1 - vp.y,
-                            HUD_ARROW);
-    lcd_set_foreground(LCD_RGBPACK(255, 255, 255));
-    quickscreen_paint_arrow(card->item, arrow_x - vp.x, arrow_y - vp.y,
-                            HUD_ARROW);
-    lcd_set_viewport(previous);
-
     struct ui_rect title = inner;
-    title.width = MAX(0, MIN(title.x + title.width,
-                             arrow_x - HUD_ARROW - 4) - title.x);
+    int value_right = box->x + box->width - HUD_PAD;
+    if (view->wheel_hud)
+    {
+        if (card->item == qs->focus)
+            gloss_outline(&s, box->x, box->y, box->width, box->height,
+                          HUD_CELL_RADIUS, 0xff000000 |
+                          ui_theme_color(&view->theme, UI_COLOR_ACCENT,
+                                         &view->palette));
+    }
+    else
+    {
+        /* The direction that steps this setting. */
+        int arrow_x = value_right - HUD_ARROW;
+        int arrow_y = ty + line / 2;
+        struct viewport vp = quickscreen_viewport(view, &frame->clip, title_font);
+        struct viewport *previous = lcd_set_viewport(&vp);
+        lcd_set_foreground(LCD_RGBPACK(0, 0, 0));
+        quickscreen_paint_arrow(card->item, arrow_x - vp.x, arrow_y - 1 - vp.y,
+                                HUD_ARROW);
+        lcd_set_foreground(LCD_RGBPACK(255, 255, 255));
+        quickscreen_paint_arrow(card->item, arrow_x - vp.x, arrow_y - vp.y,
+                                HUD_ARROW);
+        lcd_set_viewport(previous);
+        value_right = arrow_x - HUD_ARROW - 6;
+        title.width = MAX(0, MIN(title.x + title.width, value_right + 2) - title.x);
+    }
     hud_text(view, title, title_font, box->x + HUD_PAD, ty,
              quickscreen_title(qs, card->item), HUD_TEXT, HUD_TEXT_SHADOW, -1);
 
@@ -471,9 +487,9 @@ static void hud_paint_card(const struct ui_view *node,
              get_setting_info_for_bar(setting, 0, &count, &position) &&
              count > 2)
     {
-        /* A number beside its name, right-aligned short of the arrow. */
+        /* A number beside its name, right-aligned within the title. */
         int vw = hud_text_width(value, body_font);
-        int vx = arrow_x - HUD_ARROW - 6 - vw;
+        int vx = value_right - vw;
         hud_text(view, title, body_font, vx, ty, value, HUD_VALUE,
                  HUD_TEXT_SHADOW, -1);
         hud_slider(view, &s, control, position, count);
@@ -696,6 +712,12 @@ static bool gui_quickscreen_do_button(struct gui_quickscreen * qs, int button,
     bool previous = false;
     switch(button)
     {
+        case ACTION_STD_OK:
+            if (!qs->view->wheel_hud || qs->focus == QUICKSCREEN_ITEM_COUNT)
+                return false;
+            item = qs->focus;
+            break;
+
         case ACTION_QS_TOP:
             item = QUICKSCREEN_TOP;
             break;
@@ -753,13 +775,6 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
     bool can_quit = false;
     qs->result = QUICKSCREEN_OK;
     qs->focus = QUICKSCREEN_ITEM_COUNT;
-    if (ui_wheel_navigation())
-        for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
-            if (qs->items[i])
-            {
-                qs->focus = i;
-                break;
-            }
     *usb = false;
     qs->view_handle = core_alloc_free_space(sizeof(*qs->view));
     if (qs->view_handle <= 0)
@@ -769,6 +784,20 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
     qs->view = view;
     *view = (struct quickscreen_page){ .paint_target = &lcd_framebuffer_default };
     view->hud = quick_screen_uses_hud();
+    const bool wheel_navigation = ui_wheel_navigation();
+    view->wheel_hud = view->hud && wheel_navigation;
+    int focus_index = 0;
+    if (wheel_navigation)
+        for (; focus_index < QUICKSCREEN_ITEM_COUNT; ++focus_index)
+        {
+            enum quickscreen_item item = view->wheel_hud ?
+                hud_order[focus_index] : (enum quickscreen_item)focus_index;
+            if (qs->items[item])
+            {
+                qs->focus = item;
+                break;
+            }
+        }
     view->sheet.zoom = view->hud;
     ui_scene_interrupt();
     /* The HUD dims the screen it opens over, so it keeps a copy even when
@@ -843,7 +872,7 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
             return qs->result | QUICKSCREEN_IN_USB;
         }
         default_event_handler(button);
-        if (ui_wheel_navigation())
+        if (wheel_navigation)
         {
             static const int slot_actions[] = {
                 [QUICKSCREEN_TOP] = ACTION_QS_TOP,
@@ -859,13 +888,16 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
                 int dir = button == ACTION_STD_NEXT ||
                           button == ACTION_STD_NEXTREPEAT ? 1 : -1;
                 do
-                    qs->focus = (qs->focus + dir + QUICKSCREEN_ITEM_COUNT) %
-                                QUICKSCREEN_ITEM_COUNT;
-                while (!qs->items[qs->focus]);
+                {
+                    focus_index = (focus_index + dir + QUICKSCREEN_ITEM_COUNT) %
+                                  QUICKSCREEN_ITEM_COUNT;
+                    qs->focus = view->wheel_hud ?
+                        hud_order[focus_index] : (enum quickscreen_item)focus_index;
+                } while (!qs->items[qs->focus]);
                 talk_qs_option(qs, qs->focus, false);
                 quickscreen_update(qs, QUICKSCREEN_ITEM_COUNT);
             }
-            else if (button == ACTION_STD_OK &&
+            else if (!view->wheel_hud && button == ACTION_STD_OK &&
                      qs->focus != QUICKSCREEN_ITEM_COUNT)
                 button = slot_actions[qs->focus];
         }
@@ -894,7 +926,7 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
             if (qs->volume_item < QUICKSCREEN_ITEM_COUNT)
                 quickscreen_update(qs, qs->volume_item);
         }
-        else if (button == ACTION_STD_CONTEXT && !qs->cider)
+        else if (button == ACTION_STD_CONTEXT && !qs->cider && !view->wheel_hud)
         {
             qs->result |= QUICKSCREEN_GOTO_SHORTCUTS_MENU;
             break;

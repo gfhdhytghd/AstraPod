@@ -21,6 +21,7 @@ from zipfile import ZipFile
 import numpy as np
 from PIL import Image
 
+from ui_quickscreen_sim import wheel_hud_steps
 from ui_music_fixture import build_tagcache, create_fixture, install_sim_codecs
 from ui_stock_walk_sim import CONFIG, Sim
 
@@ -221,7 +222,13 @@ def walk(sim, playback, sim_binary):
     probe(sim, playback, "settings", region=(22, 240, 0, 142))
     press(sim, "menu")
     press(sim, "menu", hold=45)
-    probe(sim, playback, "control-centre")
+    probe(sim, playback, "control-centre", hold_seek=True)
+    checks = wheel_hud_steps(lambda: Image.fromarray(frame(sim)),
+                             lambda key: press(sim, key))
+    assert all(checks.values()), checks
+    press(sim, "menu")
+    assert playback.activity() != playback.activities["ACTIVITY_QUICKSCREEN"]
+    print("PASS control-centre focus, settings and close", flush=True)
 
 
 def main():
@@ -236,6 +243,8 @@ def main():
 native theme: fruit-company
 animations: off
 repeat: all
+qs top: keyclick repeats
+qs bottom: hardware keyclick
 """)
         with ZipFile(args.zip) as resources:
             resources.extract(".rockbox/themes/stock-art.bin", root)

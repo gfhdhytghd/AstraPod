@@ -59,7 +59,7 @@ static bool pack_bind(const char *base, size_t size)
         size_t texel = !art->colors || art->colors <= 256 ? 1 : 2;
         size_t pal = offsets[2 * i], pix = offsets[2 * i + 1];
         if ((art->colors && (!pal || pal + 4u * art->colors > size)) ||
-            !pix || pix + texel * art->width * art->height > size)
+            !pix || pix + texel * art->ink_w * art->ink_h > size)
             return false;
         art->palette = art->colors ? (const uint32_t *)(base + pal) : NULL;
         art->pixels = base + pix;
@@ -121,7 +121,7 @@ static inline uint32_t blend(uint32_t d, uint32_t s, unsigned a)
     return (rb & 0xff00ff) | (g & 0x00ff00);
 }
 
-/* The pixel's colour and alpha, as ARGB8888. */
+/* The pixel's colour and alpha, as ARGB8888; `i` counts within the ink. */
 static inline uint32_t texel(const struct stock_art *art, int i)
 {
     if (!art->colors)
@@ -153,19 +153,37 @@ static bool span(int *x0, int *y0, int *x1, int *y1, int x, int y, int width,
     return *x0 < *x1 && *y0 < *y1;
 }
 
+/* Narrow the `*width` x `*height` part of `art` at source (*sx, *sy), drawn
+ * at screen (*x, *y), to its ink: the rest is clear and draws nothing. */
+static bool ink_part(const struct stock_art *art, int *sx, int *sy,
+                     int *width, int *height, int *x, int *y)
+{
+    int left = MAX(*sx, art->ink_x), top = MAX(*sy, art->ink_y);
+    int right = MIN(*sx + *width, art->ink_x + art->ink_w);
+    int bottom = MIN(*sy + *height, art->ink_y + art->ink_h);
+    *x += left - *sx;
+    *y += top - *sy;
+    *sx = left - art->ink_x;
+    *sy = top - art->ink_y;
+    *width = right - left;
+    *height = bottom - top;
+    return *width > 0 && *height > 0;
+}
+
 static void put(struct stock_canvas *c, const struct stock_art *art,
                 int sx, int sy, int width, int height, int x, int y,
                 bool mask, uint32_t rgb)
 {
     int x0, y0, x1, y1;
     if (!stock_art_ready() ||
+        !ink_part(art, &sx, &sy, &width, &height, &x, &y) ||
         !span(&x0, &y0, &x1, &y1, x, y, width, height,
               (struct ui_rect){ c->x, c->y, c->width, c->height }))
         return;
     for (int row = y0; row < y1; row++)
     {
         uint32_t *out = c->pixels + (row - c->y) * c->width + (x0 - c->x);
-        int at = (row - y + sy) * art->width + (x0 - x + sx);
+        int at = (row - y + sy) * art->ink_w + (x0 - x + sx);
         for (int col = x0; col < x1; col++, out++, at++)
         {
             uint32_t t = texel(art, at);
@@ -304,12 +322,14 @@ static void draw(enum stock_art_id id, int x, int y, bool mask, uint32_t rgb,
                  struct ui_rect clip)
 {
     const struct stock_art *art = &stock_art[id];
+    int sx = 0, sy = 0, width = art->width, height = art->height;
     int x0, y0, x1, y1;
     if (!stock_art_ready() ||
-        !span(&x0, &y0, &x1, &y1, x, y, art->width, art->height, clip))
+        !ink_part(art, &sx, &sy, &width, &height, &x, &y) ||
+        !span(&x0, &y0, &x1, &y1, x, y, width, height, clip))
         return;
     for (int row = y0; row < y1; row++)
-        blend_span(art, (row - y) * art->width + (x0 - x),
+        blend_span(art, (row - y + sy) * art->ink_w + (x0 - x + sx),
                    lcd_framebuffer_default.fb_ptr + row * LCD_WIDTH + x0,
                    x1 - x0, mask, rgb);
 }
@@ -318,8 +338,10 @@ void stock_art_row(enum stock_art_id id, int sx, int sy, fb_data *out,
                    int count)
 {
     const struct stock_art *art = &stock_art[id];
-    if (stock_art_ready())
-        blend_span(art, sy * art->width + sx, out, count, false, 0);
+    int x = 0, y = 0, height = 1;
+    if (stock_art_ready() &&
+        ink_part(art, &sx, &sy, &count, &height, &x, &y))
+        blend_span(art, sy * art->ink_w + sx, out + x, count, false, 0);
 }
 
 void stock_art_draw(enum stock_art_id id, int x, int y, struct ui_rect clip)

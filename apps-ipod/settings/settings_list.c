@@ -2015,6 +2015,16 @@ const struct settings_list settings[] = {
     INT_SETTING(F_BANFROMQS, music_menu_sig, LANG_MUSIC_BROWSER, 0,
                 "music menu signature", UNIT_INT, 0, 0x7fffffff, 1,
                 NULL, NULL, NULL),
+    /* Fruit Company's own main menu and Music menu rows: Music, Radio,
+     * Photos, Podcasts, Videos, Extras and Shuffle Songs on the main menu,
+     * all of Music, as the stock firmware starts. Their checklists are the UI.
+     * Every bit of the main menu's is a row, the sign bit Playback Report. */
+    INT_SETTING(F_BANFROMQS, fruit_main_menu, LANG_MAIN_MENU, 0x20107081,
+                "fruit main menu", UNIT_INT, -0x7fffffff - 1, 0x7fffffff, 1,
+                NULL, NULL, NULL),
+    INT_SETTING(F_BANFROMQS, fruit_music_menu, LANG_FRUIT_MUSIC_MENU, 0x7ff,
+                "fruit music menu", UNIT_INT, 0, 0x7fffffff, 1,
+                NULL, NULL, NULL),
     /* Guest credits, mined out of the title and per-track artist tags. Off by
      * default: reading them is a guess at what a tag meant, and a library
      * whose owner did not ask for it should not grow rows out of one. Off,

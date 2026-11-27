@@ -214,7 +214,7 @@ static void check_palette(void)
     assert(ui_theme_color(&theme, UI_COLOR_ACCENT, &palette) == 0xffffff);
 }
 
-/* Classic and Plastic draw with stock's bitmaps. Their selection bar is
+/* Classic draws with stock's bitmaps. Its selection bar is
  * stock's rows, whatever the theme file sets:
  * exact at their own height, and with the edge lines kept when a row is
  * shorter. */
@@ -223,8 +223,18 @@ static void check_plastic(void)
     struct ui_theme theme;
     ui_theme_builtin(&theme, UI_THEME_CLASSIC);
     assert(theme.style[UI_STYLE_ART] == UI_ART_PLASTIC);
-    ui_theme_builtin(&theme, UI_THEME_PLASTIC);
-    assert(theme.style[UI_STYLE_ART] == UI_ART_PLASTIC);
+    assert(UI_THEME_BUILTIN_COUNT == 4);
+    assert(!strcmp(ui_theme_builtin_name(UI_THEME_CLASSIC), "classic"));
+    assert(theme.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_ASTRAPOD);
+
+    /* Fruit Company is Classic with the stock menu tree */
+    struct ui_theme fruit;
+    ui_theme_builtin(&fruit, UI_THEME_FRUIT_COMPANY);
+    assert(!strcmp(ui_theme_builtin_name(UI_THEME_FRUIT_COMPANY),
+                   "fruit-company"));
+    assert(fruit.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_STOCK);
+    fruit.style[UI_STYLE_MENU_TREE] = UI_MENU_TREE_ASTRAPOD;
+    assert(!memcmp(&fruit, &theme, sizeof(theme)));
     assert(!strcmp(theme.font[UI_FONT_WPS_TIME], "14-helvetica-bold"));
     const struct ui_theme_gradient *bar = &theme.gradient[UI_GRADIENT_SELECTION];
     assert(ui_theme_gradient_at(bar, 0, 25, 0) == 0x96c5da);
@@ -241,7 +251,7 @@ static void check_plastic(void)
                                 0) == 0x004386);
 }
 
-/* Only Classic and its Plastic split their menus, in the pane's own fonts. */
+/* Only Classic splits its menus, in the pane's own fonts. */
 static void check_menu_pane(void)
 {
     struct ui_theme theme;
@@ -253,8 +263,6 @@ static void check_menu_pane(void)
     assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_SPLIT);
     assert(!strcmp(theme.font[UI_FONT_PANE_TITLE], "17-helvetica-bold-pane"));
     assert(!strcmp(theme.font[UI_FONT_PANE_TEXT], "13-helvetica-bold"));
-    ui_theme_builtin(&theme, UI_THEME_PLASTIC);
-    assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_SPLIT);
 
     static const char file[] = VERSION "style.menu_pane=split\n"
         "font.pane_title=Local_20-Bold\nfont.pane_text=Local_12\n";
@@ -264,8 +272,8 @@ static void check_menu_pane(void)
     assert(!strcmp(theme.font[UI_FONT_PANE_TEXT], "Local_12"));
 }
 
-/* Classic and Plastic share out the list's spare height among the rows and
- * show a setting's value in the smaller stock face; Scrim and Light do not. */
+/* Classic shares out the list's spare height among the rows and
+ * shows a setting's value in the smaller stock face; Scrim and Light do not. */
 static void check_list_rows(void)
 {
     struct ui_theme theme;
@@ -276,8 +284,6 @@ static void check_list_rows(void)
     ui_theme_builtin(&theme, UI_THEME_CLASSIC);
     assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_FILL);
     assert(!strcmp(theme.font[UI_FONT_LIST_VALUE], "13-helvetica-bold"));
-    ui_theme_builtin(&theme, UI_THEME_PLASTIC);
-    assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_FILL);
 
     static const char file[] = VERSION "style.list_rows=fill\n"
         "font.list_value=Local_12\n";

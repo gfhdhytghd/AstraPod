@@ -63,6 +63,7 @@
 #define LIB_REPORT_SOURCE_FILE LIB_CACHE_DIR "/report_source.dat"
 #define LIB_DOCUMENTS_FILE  LIB_CACHE_DIR "/documents.dat"
 #define LIB_IMAGES_FILE     LIB_CACHE_DIR "/images.dat"
+#define LIB_VIDEOS_FILE     LIB_CACHE_DIR "/videos.dat"
 #define LIB_BOOK_INDEX_FILE LIB_CACHE_DIR "/books.dat"
 #define LIB_SPIKE_RUN_FILE  LIB_CACHE_DIR "/spike_run.dat"
 #define LIB_UNREADABLE_FILE LIB_CACHE_DIR "/unreadable.dat"

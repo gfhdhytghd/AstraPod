@@ -12,11 +12,19 @@
  * last columns of the rows. */
 #define MENU_PANE_X (LCD_WIDTH / 2)
 
+struct stock_canvas;
+
 struct menu_pane_content {
     enum list_pane_kind kind;
     int art;                    /* enum stock_art_id, or -1 */
     char title[96];
     char caption[96];
+    /* LIST_PANE_PICTURE: the art's top-left on screen and the title's
+     * baseline; the caption's lies 21 rows lower. */
+    int x, y, baseline;
+    /* LIST_PANE_PICTURE: drawn over the backdrop before the art, or NULL. */
+    void (*paint)(struct stock_canvas *band);
+    int stamp;                  /* a new value repaints the pane */
 };
 
 /* Whether the current theme splits menus. */
@@ -25,6 +33,10 @@ bool menu_pane_themed(void);
  * at once; a new row of the same list changes the pane after a pause. */
 void menu_pane_select(const struct menu_pane_content *content,
                       unsigned identity);
+/* What a LIST_PANE_PICTURE row shows: `art` at (x, y), then `title` and
+ * `caption` centred in the title font. A list's pane callback sets it for
+ * the row it is asked about before returning LIST_PANE_PICTURE. */
+void menu_pane_set_picture(const struct menu_pane_content *content);
 /* The pane and its shadow in screen coordinates. */
 struct ui_rect menu_pane_rect(void);
 /* Draw the part of the pane in `clip` to the default framebuffer. */

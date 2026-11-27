@@ -147,7 +147,7 @@ def check_compiler(first, second, lang):
             required = (compiler.index_subset(mapping, compiler.INDEX_GLYPHS)
                         if size == 56 else
                         compiler.index_subset(mapping, stock_sets[name].glyphs)
-                        if name.endswith("-index") else mapping).keys()
+                        if compiler.own_glyphs_only(name) else mapping).keys()
             assert set(bitmap.index) == set(required)
             bitmap.check_fixed_cells(face_info)
             for face in fonts:
@@ -186,6 +186,8 @@ def check_compiler(first, second, lang):
                         assert alpha == expected
             for a, b in ("AV", "WA", "To", "ク。", "ガ、"):
                 cp = ord(a), ord(b)
+                if size == 56 and compiler.cjk(cp[0]):
+                    continue  # the index face holds no kana
                 source = 2 if compiler.cjk(cp[0]) else 0
                 script = int.from_bytes(b"Hani", "big") if source == 2 else 0
                 ref = fonts[source].layout(cp, script)

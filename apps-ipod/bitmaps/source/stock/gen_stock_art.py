@@ -5,7 +5,9 @@ Each PNG is one bitmap from the stock iPod Classic 1.1.2 firmware's resource
 bank, decoded without change and named after its resource (AstraPod_* are
 ours, drawn in the same style). A greyscale PNG is a mask: its levels are
 the alpha of a colour the caller picks. Any other PNG is an image with its
-own alpha, kept as a palette and indices.
+own alpha, kept as a palette and indices. A mask keeps only the rectangle
+that holds its ink: the table records where it lies, and outside it the mask
+reads as clear, so a hand frame costs its hand and not its whole dial.
 
     gen_stock_art.py              write apps-ipod/ui/stock_art_ids.h and
                                   stock_art_table.c; run after adding,
@@ -101,12 +103,27 @@ def ident(path):
     return 'STOCK_ART_' + name.upper()
 
 
+def ink(width, height, px):
+    """(x, y, width, height) of the smallest rectangle holding every
+    non-zero pixel of a mask; one clear pixel when there is none."""
+    rows = [y for y in range(height) if any(px[y * width:(y + 1) * width])]
+    cols = [x for x in range(width)
+            if any(px[y * width + x] for y in rows)]
+    if not rows:
+        return 0, 0, 1, 1
+    return cols[0], rows[0], cols[-1] + 1 - cols[0], rows[-1] + 1 - rows[0]
+
+
 def art():
     out = []
     for f in sorted(HERE.glob('*.png')):
         width, height, grey, px = read_png(f)
         if grey:
-            out.append((ident(f), width, height, 0, b'', bytes(px)))
+            x, y, w, h = ink(width, height, px)
+            pixels = b''.join(px[(y + r) * width + x:(y + r) * width + x + w]
+                              for r in range(h))
+            out.append((ident(f), width, height, 0, b'', pixels,
+                        x, y, w, h))
             continue
         palette = list(dict.fromkeys(px))
         index = {c: n for n, c in enumerate(palette)}
@@ -114,13 +131,15 @@ def art():
         pixels = b''.join(struct.pack(code, index[c]) for c in px)
         pal = b''.join(struct.pack('<I', a << 24 | r << 16 | g << 8 | b)
                        for r, g, b, a in palette)
-        out.append((ident(f), width, height, len(palette), pal, pixels))
+        out.append((ident(f), width, height, len(palette), pal, pixels,
+                    0, 0, width, height))
     return out
 
 
 def fingerprint(items):
     """Ties a pack to the firmware built from the same PNGs."""
-    key = ';'.join('%s %d %d %d' % i[:4] for i in items).encode()
+    key = ';'.join('%s %d %d %d' % i[:4] + ' %d %d %d %d' % i[6:]
+                   for i in items).encode()
     return zlib.crc32(key)
 
 
@@ -134,7 +153,8 @@ def tables(items):
     table = [HEADER, '#include "stock_art.h"\n',
              '/* The pixels arrive from the pack, see stock_art.c. */',
              'struct stock_art stock_art[STOCK_ART_COUNT] = {']
-    table += ['    [%s] = { %d, %d, %d, NULL, NULL },' % i[:4] for i in items]
+    table += ['    [%s] = { %d, %d, %d, NULL, NULL, %d, %d, %d, %d },'
+              % (i[:4] + i[6:]) for i in items]
     table += ['};']
     (UI / 'stock_art_table.c').write_text('\n'.join(table) + '\n')
 
@@ -146,7 +166,7 @@ def pack(items, path):
                        fingerprint(items))
     at = len(head) + 8 * len(items)
     blocks, offsets = [], []
-    for _, _, _, _, pal, pixels in items:
+    for _, _, _, _, pal, pixels, *_ in items:
         entry = []
         for block in (pal, pixels):
             entry.append(at if block else 0)

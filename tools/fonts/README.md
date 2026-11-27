@@ -16,7 +16,7 @@ each load a separate native size. The UI reads alpha samples at 1:1.
 
 ## Stock firmware fonts
 
-The `NN-helvetica*` fonts of the Classic and Plastic themes start from
+The `NN-helvetica*` fonts of the Classic theme start from
 Apple's Helvetica and its CJK bitmap strikes in the stock iPod Classic
 firmware. `python3 tools/fonts/stock.py FONT_DIR` converts the stock Fonts
 folder into the SGL1 glyph sets in `apps-ipod/fonts/stock/`, which are
@@ -25,6 +25,11 @@ PBF1 font per set: the stock Helvetica glyphs first, then the CJK strike
 named in the set, then the faces above at the set's whole pixel size. Every
 glyph of these fonts has one phase and a whole-pixel advance, and none is
 kerned, as on the stock firmware.
+
+The sets named in `stock.py`'s `LATIN_ONLY` compile to their stock glyphs
+alone, with no CJK strike and no fallback faces, so each is a few hundred
+kilobytes instead of several megabytes. Text drawn in one of them falls back
+to a theme font for any character it lacks.
 
 The stock firmware renders Helvetica with FreeType 2.3.5: unhinted, 8-bit
 grey coverage at whole-pixel origins, each advance FreeType's own rounded to
@@ -45,9 +50,15 @@ record size), then the PBF1 bitmap records in the same order.
 | `13-helvetica` | Helvetica | 13.125 px |
 | `13-helvetica-bold` | Helvetica Bold | 13.125 px |
 | `14-helvetica-bold` | Helvetica Bold | 13.796875 px |
+| `14-helvetica-bold-calendar` | Helvetica Bold | 14.25 px |
 | `16-helvetica-bold` | Helvetica Bold | 16.265625 px |
 | `17-helvetica-bold` | Helvetica Bold | 16.984375 px |
 | `17-helvetica-bold-pane` | Helvetica Bold | 17.40625 px |
+| `18-helvetica-bold` | Helvetica Bold | 17.96875 px |
+| `21-helvetica-bold` | Helvetica Bold | 21.9375 px |
+| `21-helvetica-bold-stopwatch` | Helvetica Bold | 21.25 px |
+| `23-helvetica-bold` | Helvetica Bold | 22.875 px |
+| `29-helvetica-bold` | Helvetica Bold | 29.4375 px |
 
 The scale is `FT_Set_Char_Size`'s, in 1/64 px at 72 dpi.
 

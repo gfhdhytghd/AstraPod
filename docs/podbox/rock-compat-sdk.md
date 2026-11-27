@@ -618,7 +618,9 @@ the button viewer with Menu.
 
 ## H.264 video on iPod Classic
 
-Open **Plugins > Applications > h264_player** and choose an MP4 or M4V.
+Select a film in **Videos** or in **Files**, or open **Plugins >
+Applications > h264_player** and choose an MP4 or M4V. An MP4 with only
+sound plays as music instead.
 Use progressive H.264 Baseline up to Level 3.0, at most 30 fps and a
 maximum of 640×480. The video tables and decoder must fit the available
 plugin scratch space. A 320×240 clip leaves room for the index. Use Play

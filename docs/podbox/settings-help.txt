@@ -1720,8 +1720,8 @@ Slow. Use it after changing Fast Build, which only affects thumbnails made from
 then on, or if the cached images themselves look wrong.
 
 [action: Rescan Books, Documents & Images]
-Rebuilds the Books lists and the flat Documents and Images lists from a walk
-of the disk.
+Rebuilds the Books lists and the flat Documents, Images and Videos lists from
+a walk of the disk.
 
 It reruns itself after a USB session, which is when files normally change, so
 this is for when they changed some other way.
@@ -2307,3 +2307,11 @@ folder.
 
 [action: Save Recording Preset]
 Saves the current recording settings in a file you can load again.
+
+[action: Music Menu]
+Under Fruit Company, the rows of the Music menu: Select ticks or clears one.
+Reset Menu puts back the original iPod's, which is all of them.
+
+[action: Advanced Settings]
+Under Fruit Company, AstraPod's own settings: every setting the other themes
+show under Settings, Theme Settings among them.

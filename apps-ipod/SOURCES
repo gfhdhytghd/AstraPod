@@ -168,6 +168,7 @@ widgets/mask_select.c
 
 screens/browse/browser.c
 screens/browse/browser_disk.c
+screens/browse/app_list.c
 #ifdef ASTRAPOD_ROCK_COMPAT
 plugins/rock_browser.c
 plugins/rock_files.c
@@ -207,8 +208,19 @@ sim/rock_host.c
 #endif
 #endif
 screens/browse/browser_flat.c
+screens/extras/extras_alarm_ring.c
+screens/extras/extras_alarms.c
+screens/extras/extras_bar.c
+screens/extras/extras_calendars.c
+screens/extras/extras_clock.c
+screens/extras/extras_contacts.c
+screens/extras/extras_font.c
+screens/extras/extras_notes.c
+screens/extras/extras_screen_lock.c
+screens/extras/extras_stopwatch.c
 screens/context_menu.c
 screens/system/about.c
+screens/system/fruit_about.c
 screens/system/art_health.c
 screens/system/art_check.c
 screens/system/bg_task_info.c
@@ -339,6 +351,7 @@ screens/settings/eq_editor.c
 screens/settings/eq_curve.c
 screens/main_menu.c
 screens/main_menu_config.c
+screens/fruit_menu.c
 screens/context_menu_config.c
 screens/music_menu_config.c
 screens/settings/common_settings.c

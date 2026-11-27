@@ -120,8 +120,16 @@ def index_subset(mapping, codepoints):
     """An overlay face holds only what it shows, so a glyph cache entry stays
     small enough to keep every letter at once; also a space, and the one
     ideograph the format's fixed cells need."""
-    return {cp: mapping[cp] for cp in (*codepoints, 0x20, 0x4e00, REPLACEMENT)
+    return {cp: mapping[cp] for cp in sorted({*codepoints, 0x20, 0x4e00, REPLACEMENT})
             if cp in mapping}
+
+
+def own_glyphs_only(name):
+    """Whether a stock face holds only its own glyphs (index_subset): the
+    letter overlays, and stock.py's LATIN_ONLY faces, whose screens draw
+    anything else in a theme font."""
+    from stock import LATIN_ONLY
+    return name.endswith("-index") or name in LATIN_ONLY
 
 
 def ideograph(cp):
@@ -606,7 +614,7 @@ def main():
             for name, stock in stock_glyph_sets(args.stock_dir).items():
                 path = args.output / (name + ".pbf")
                 own = (index_subset(mapping, stock.glyphs)
-                       if name.endswith("-index") else mapping)
+                       if own_glyphs_only(name) else mapping)
                 info = compile_font(path, fonts, own, pairs, stock.size, stock.weight,
                                     stock=stock)
                 info["stock_size64"] = stock.size64

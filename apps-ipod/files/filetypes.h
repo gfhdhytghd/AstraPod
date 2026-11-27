@@ -58,6 +58,9 @@
 #ifdef ASTRAPOD_ROCK_COMPAT
 #define FILE_ATTR_ROCK_VIEWER 0x1e00 /* input to a compatibility viewer */
 #endif
+/* An .m4v, played by the hardware H.264 player where there is one. An .mp4
+ * keeps FILE_ATTR_AUDIO: filetype_is_video() says which of them are videos. */
+#define FILE_ATTR_VIDEO    0x1f00
 #define FILE_ATTR_MASK  0xFF00 /* which bits tree.c uses for file types */
 
 /* The rows the browser invents rather than reads off the disk. They name an
@@ -86,6 +89,19 @@ int filetype_get_icon(int attr);
 
 /* returns true if the attr is supported */
 bool  filetype_supported(int attr);
+
+/* The hardware H.264 player, a compatibility module, plays videos. The
+ * simulator has the module but not the decoder: the player opens and says
+ * so, which is enough to try everything that leads to it. */
+#if defined(ASTRAPOD_ROCK_COMPAT) && \
+    (defined(HAVE_HW_H264) || defined(SIMULATOR))
+#define HAVE_VIDEO_PLAYER
+#endif
+
+/* Whether the video player opens `file`, of attribute `attr`: an .m4v, or an
+ * .mp4 with a track of moving video in it. Opens an .mp4 to look; any other
+ * file is judged by its attribute alone. False without a video player. */
+bool  filetype_is_video(const char *file, int attr);
 
 /* Runs the native file handler on `file`, stores its GO_TO_* code in *rc
  * and returns true. Returns false when the type has no handler here. */

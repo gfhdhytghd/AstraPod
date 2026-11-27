@@ -1058,6 +1058,45 @@ static bool read_mp4_container(int fd, struct mp3entry* id3,
     return rc;
 }
 
+bool mp4_has_video(int fd)
+{
+    off_t moov_end = ffilesize(fd);
+
+    errno = 0;
+    if (moov_end < 8 || lseek(fd, 0, SEEK_SET) < 0
+        || !find_mp4_child(fd, &moov_end, MP4_moov))
+        return false;
+
+    while (1)
+    {
+        off_t trak_end = moov_end, mdia_end, end, mdia;
+        uint32_t handler = 0;
+
+        if (!find_mp4_child(fd, &trak_end, MP4_trak))
+            return false;
+        mdia_end = trak_end;
+        if (find_mp4_child(fd, &mdia_end, MP4_mdia)
+            && (mdia = lseek(fd, 0, SEEK_CUR)) >= 0)
+        {
+            /* hdlr: version and flags, pre_defined, then the handler */
+            end = mdia_end;
+            if (find_mp4_child(fd, &end, MP4_hdlr)
+                && end - lseek(fd, 0, SEEK_CUR) >= 12
+                && lseek(fd, 8, SEEK_CUR) >= 0
+                && read_uint32be(fd, &handler) == 4 && handler == MP4_vide
+                && lseek(fd, mdia, SEEK_SET) >= 0)
+            {
+                end = mdia_end;
+                if (find_mp4_child(fd, &end, MP4_minf)
+                    && read_mp4_video_minf(fd, end - lseek(fd, 0, SEEK_CUR)))
+                    return true;
+            }
+        }
+        if (lseek(fd, trak_end, SEEK_SET) < 0)
+            return false;
+    }
+}
+
 static uint32_t read_uint32be_at(int fd, off_t pos)
 {
     uint32_t value = 0;

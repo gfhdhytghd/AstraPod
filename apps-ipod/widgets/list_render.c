@@ -871,6 +871,7 @@ static const char *row_icon(enum themable_icons icon, enum list_row_kind kind,
             case Icon_Image: return "§";
             case Icon_Book: return "Ę";
             case Icon_Lyrics: return "ė";
+            case Icon_Video: return "ĉ";
             case Icon_Plugin: return "Ĥ";
             /* A plugin's own menu runs in a file-row activity. */
             case Icon_Menu_setting:
@@ -914,7 +915,8 @@ static const char *row_icon(enum themable_icons icon, enum list_row_kind kind,
         { LANG_SHORTCUTS, "Ó" }, { LANG_RANDOM_ALBUM, "V" },
         { LANG_SPUN, "µ" }, { LANG_PLAYBACK_HISTORY, "µ" },
         { LANG_SHUFFLE_SONGS, "H" }, { LANG_DOCUMENTS, "w" },
-        { LANG_IMAGES, "x" }, { LANG_FEATURED_ARTISTS, "é" },
+        { LANG_IMAGES, "x" }, { LANG_VIDEOS, "Ė" },
+        { LANG_FEATURED_ARTISTS, "é" },
         { LANG_AUDIOBOOKS, "ê" }, { LANG_PODCASTS, "Ď" },
         { LANG_EBOOKS, "Č" }, { LANG_CUSTOM_MENU, "Ċ" },
         { LANG_ABOUT, "»" }, { LANG_ROCKBOX_INFO, "ñ" },
@@ -1019,6 +1021,7 @@ static bool file_rows(enum current_activity activity)
 {
     return activity == ACTIVITY_FILEBROWSER || activity == ACTIVITY_PLAYLISTBROWSER ||
            activity == ACTIVITY_DOCUMENTBROWSER || activity == ACTIVITY_IMAGEBROWSER ||
+           activity == ACTIVITY_VIDEOBROWSER ||
            activity == ACTIVITY_PLUGINBROWSER || activity == ACTIVITY_PLUGIN ||
            activity == ACTIVITY_FILE_SEARCH ||
            activity == ACTIVITY_FOLDERSELECT;

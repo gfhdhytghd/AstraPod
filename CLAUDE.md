@@ -207,17 +207,22 @@ make clean / make veryclean
 ```
 
 **Theme bundling — `make zip` is not enough.** Scrim is the default native
-theme; Light, Classic and Plastic are built in too. Choose between them under
-**Appearance > Native theme**. See [the native theme format](docs/podbox/native-theme-format.md)
+theme; Light, Classic and Fruit Company (Classic with the stock firmware's
+menu tree) are built in too. Choose between them under
+**Settings > Theme Settings > Native theme**. See [the native theme format](docs/podbox/native-theme-format.md)
 to add a custom theme.
 
 Run `../bundle-theme.sh` after `make zip` to add the native fonts,
 `.rockbox/default-config.cfg` and `.rockbox/themes/stock-art.bin`, the stock
-firmware bitmaps Classic and Plastic draw (written from
+firmware bitmaps Classic draws (written from
 `apps-ipod/bitmaps/source/stock/`; without it those themes lose their art
-and their split-menu pane, silently). On first boot, the config selects Scrim and
-sets the default fonts and other settings. Keep the player's own
-`config.cfg` when updating.
+and their split-menu pane, silently), and `.rockbox/themes/app-icons.bin`,
+the icons of the Games, Other Apps and Demos lists (written from
+`apps-ipod/bitmaps/source/apps/`; without it every row shows a glyph instead).
+To bring in new icon art, run `gen_app_icons.py --import <dir>` in that
+directory and commit the 55x55 PNGs it writes. On first boot, the config
+selects Scrim and sets the default fonts and other settings. Keep the
+player's own `config.cfg` when updating.
 
 Follow with `../bundle-rocks.sh` for the ipod6g compatibility plugins, then
 `../bundle-help.sh`, `../bundle-trim.sh`, `../bundle-speech.sh` and

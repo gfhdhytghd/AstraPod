@@ -13,6 +13,7 @@
 #include "metadata/album_palette.h"
 #include "settings/settings.h"
 #include "widgets/list.h"
+#include "widgets/yesno.h"
 #include "native_theme_runtime.h"
 #include <limits.h>
 #include <stdio.h>
@@ -38,9 +39,12 @@ static bool valid_name(const char *name, size_t len)
     return true;
 }
 
-/* The built-in theme called `name`, or -1. */
+/* The built-in theme called `name`, or -1. "plastic" is a saved name for
+ * Classic. */
 static int builtin_id(const char *name, size_t len)
 {
+    if (len == 7 && !memcmp(name, "plastic", 7))
+        return UI_THEME_CLASSIC;
     for (int id = 0; id < UI_THEME_BUILTIN_COUNT; ++id)
     {
         const char *builtin = ui_theme_builtin_name(id);
@@ -144,13 +148,22 @@ static bool select_theme(const char *name, bool fallback)
     return valid;
 }
 
+/* Plastic was Classic under a name of its own. */
+static const char *current_name(const char *name)
+{
+    return strcmp(name, "plastic") ? name : "classic";
+}
+
 void ui_theme_apply_settings(void)
 {
+    if (!strcmp(global_settings.native_theme, "plastic"))
+        strcpy(global_settings.native_theme, current_name("plastic"));
     select_theme(global_settings.native_theme, true);
 }
 
 bool ui_theme_set(const char *name, bool fallback)
 {
+    name = current_name(name);
     bool applied = select_theme(name, fallback);
 
     if (applied || fallback)
@@ -326,7 +339,7 @@ static const char *theme_name(int item, void *data, char *buf, size_t len)
     (void)len;
     char (*files)[UI_THEME_NAME_MAX] = data;
     static const char *const builtins[UI_THEME_BUILTIN_COUNT] = {
-        "Scrim", "Light", "Classic", "Plastic"
+        "Scrim", "Light", "Classic", "Fruit Company"
     };
     return item < UI_THEME_BUILTIN_COUNT ? builtins[item] :
            files[item - UI_THEME_BUILTIN_COUNT];
@@ -363,7 +376,24 @@ int ui_theme_choose(void)
         const char *name = info.selection < UI_THEME_BUILTIN_COUNT ?
                            ui_theme_builtin_name(info.selection) :
                            files[info.selection - UI_THEME_BUILTIN_COUNT];
+        char previous[sizeof(global_settings.native_theme)];
+        strcpy(previous, global_settings.native_theme);
+        unsigned tree = ui_theme_style(UI_STYLE_MENU_TREE);
         ui_theme_set(name, true);
+        /* The menu this list was opened from is no longer the theme's */
+        to_root = ui_theme_style(UI_STYLE_MENU_TREE) != tree;
+        /* Asked with the new theme showing, which is what Yes keeps */
+        if (to_root && tree == UI_MENU_TREE_ASTRAPOD)
+        {
+            const char *lines[] = { ID2P(LANG_FRUIT_THEME_WARNING),
+                                    ID2P(LANG_FRUIT_THEME_WARNING_DETAIL) };
+            const struct text_message message = { lines, 2 };
+            if (gui_syncyesno_run(&message, NULL, NULL) != YESNO_YES)
+            {
+                ui_theme_set(previous, true);
+                to_root = false;
+            }
+        }
     }
     if (files)
     {

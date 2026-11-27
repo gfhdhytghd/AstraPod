@@ -1,7 +1,7 @@
 /***************************************************************************
  * GNU General Public License (version 2+)
  *
- * Every document, or every image, in one list.
+ * Every document, every image or every video, in one list.
  *
  * The file browser shows what is in a folder. These show what is on the
  * player, whichever folder it happens to sit in -- which for a handful of
@@ -12,11 +12,13 @@
  * the names, and the files of one type -- EPUB, PNG -- in a list of their own.
  * Every list is in the order Sort Documents or Sort Images sets: by name
  * either way, or the newest first by the time each line of the list carries.
+ * Videos are by name.
  *
  * The list comes from the background walk in files/file_index.c; nothing is
  * scanned here. Opening is left to the core viewers, through the same
  * filetype dispatch the file browser uses, so a document opens exactly as it
- * would from anywhere else -- including resuming where it was left.
+ * would from anywhere else -- including resuming where it was left -- and a
+ * video in the video player.
  *
  * Parts, in order:
  *   - the list, and a file's type
@@ -54,7 +56,7 @@
  * ------------------------------------------------------------------ */
 
 static struct path_list list;
-static bool flat_images;
+static enum flat_kind flat_kind;
 
 /* The rows above the whole list */
 enum { ROW_SEARCH, ROW_BY_TYPE, HEAD_ROWS };
@@ -83,8 +85,9 @@ static unsigned long flat_time(int i)
 static int compare_files(const void *a, const void *b)
 {
     int x = *(const int *)a, y = *(const int *)b;
-    int order = flat_images ? global_settings.sort_images
-                            : global_settings.sort_documents;
+    int order = flat_kind == FLAT_DOCUMENTS ? global_settings.sort_documents
+              : flat_kind == FLAT_IMAGES ? global_settings.sort_images
+              : FLAT_SORT_NAME;
     int by_name = strnatcasecmp(path_list_leaf(&list, x),
                                 path_list_leaf(&list, y));
 
@@ -133,9 +136,25 @@ static void fill_shown(const char *type)
     qsort(shown, shown_ct, sizeof(shown[0]), compare_files);
 }
 
+static const char *flat_title(void)
+{
+    static const int titles[] = { LANG_DOCUMENTS, LANG_IMAGES, LANG_VIDEOS };
+
+    return str(titles[flat_kind]);
+}
+
+/* An .mp4 is audio by its extension; in this list it is a film */
+static enum themable_icons flat_icon(const char *path)
+{
+    int attr = flat_kind == FLAT_VIDEOS ? FILE_ATTR_VIDEO
+                                        : filetype_get_attr(path);
+
+    return filetype_get_icon(attr);
+}
+
 static bool load(void)
 {
-    return path_list_load(&list, file_index_list(flat_images), PATH_LIST_MAX);
+    return path_list_load(&list, file_index_list(flat_kind), PATH_LIST_MAX);
 }
 
 /* ------------------------------------------------------------------ *
@@ -219,7 +238,7 @@ static int search_run(void)
     struct search_provider p = provider;
     int chosen;
 
-    p.title = str(flat_images ? LANG_IMAGES : LANG_DOCUMENTS);
+    p.title = flat_title();
     chosen = search_dialog_run(&p, NULL, query, sizeof(query));
     if (chosen == SEARCH_USB)
         return GO_TO_ROOT;
@@ -282,7 +301,7 @@ static const char *type_name(int i, void *data, char *buf, size_t size)
 static enum themable_icons type_icon(int i, void *data)
 {
     (void)data;
-    return filetype_get_icon(filetype_get_attr(flat_path(types[i].file)));
+    return flat_icon(flat_path(types[i].file));
 }
 
 static enum list_row_kind type_kind(int i, void *data)
@@ -343,8 +362,7 @@ static enum themable_icons flat_get_icon(int selected_item, void *data)
     (void)data;
     if (selected_item < heads)
         return Icon_NOICON;
-    return filetype_get_icon(filetype_get_attr(
-                flat_path(shown[selected_item - heads])));
+    return flat_icon(flat_path(shown[selected_item - heads]));
 }
 
 static enum list_row_kind flat_get_kind(int selected_item, void *data)
@@ -367,7 +385,7 @@ static int show_list(const char *type, char *title)
         if (!type)
         {
             snprintf(all, sizeof(all), "%s (%d%s)",
-                     str(flat_images ? LANG_IMAGES : LANG_DOCUMENTS),
+                     flat_title(),
                      list.count, list.truncated ? "+" : "");
             title = all;
         }
@@ -413,11 +431,14 @@ static int show_list(const char *type, char *title)
     return ret;
 }
 
-int browser_flat(bool images)
+int browser_flat(enum flat_kind kind)
 {
+    static const enum current_activity activities[] = {
+        ACTIVITY_DOCUMENTBROWSER, ACTIVITY_IMAGEBROWSER, ACTIVITY_VIDEOBROWSER,
+    };
     int ret;
 
-    flat_images = images;
+    flat_kind = kind;
     if (!load())
     {
         /* No list yet and an empty one look the same from here: the walk runs
@@ -432,8 +453,7 @@ int browser_flat(bool images)
         return GO_TO_PREVIOUS;
     }
 
-    push_current_activity(images ? ACTIVITY_IMAGEBROWSER
-                                 : ACTIVITY_DOCUMENTBROWSER);
+    push_current_activity(activities[kind]);
     ret = show_list(NULL, NULL);
     pop_current_activity();
     path_list_free(&list);

@@ -28276,3 +28276,5090 @@
     *: "已转换 %d 首，已有 %d 首，不支持 %d 首，失败 %d 首"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_FRUIT_NOT_AVAILABLE
+  desc: Fruit Company: splash for a stock row AstraPod has nothing behind
+  user: core
+  <source>
+    *: "Not available on AstraPod"
+  </source>
+  <dest>
+    *: "AstraPod 暂不支持此项目"
+  </dest>
+  <voice>
+    *: "AstraPod 暂不支持此项目"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_EXTRAS
+  desc: Fruit Company: the main menu's Extras
+  user: core
+  <source>
+    *: "Extras"
+  </source>
+  <dest>
+    *: "附加功能"
+  </dest>
+  <voice>
+    *: "附加功能"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_VIDEOS
+  desc: Fruit Company: the main menu's Videos
+  user: core
+  <source>
+    *: "Videos"
+  </source>
+  <dest>
+    *: "视频"
+  </dest>
+  <voice>
+    *: "视频"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_PHOTOS
+  desc: Fruit Company: the main menu's Photos
+  user: core
+  <source>
+    *: "Photos"
+  </source>
+  <dest>
+    *: "照片"
+  </dest>
+  <voice>
+    *: "照片"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_COMPILATIONS
+  desc: Fruit Company: Music > Compilations
+  user: core
+  <source>
+    *: "Compilations"
+  </source>
+  <dest>
+    *: "合辑"
+  </dest>
+  <voice>
+    *: "合辑"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_SONGS
+  desc: Fruit Company: Music > Songs
+  user: core
+  <source>
+    *: "Songs"
+  </source>
+  <dest>
+    *: "歌曲"
+  </dest>
+  <voice>
+    *: "歌曲"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_GENRES
+  desc: Fruit Company: Music > Genres
+  user: core
+  <source>
+    *: "Genres"
+  </source>
+  <dest>
+    *: "风格"
+  </dest>
+  <voice>
+    *: "风格"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_COMPOSERS
+  desc: Fruit Company: Music > Composers
+  user: core
+  <source>
+    *: "Composers"
+  </source>
+  <dest>
+    *: "作曲者"
+  </dest>
+  <voice>
+    *: "作曲者"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_ALARMS
+  desc: Fruit Company: Extras > Alarms
+  user: core
+  <source>
+    *: "Alarms"
+  </source>
+  <dest>
+    *: "闹钟"
+  </dest>
+  <voice>
+    *: "闹钟"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_CALENDARS
+  desc: Fruit Company: Extras > Calendars
+  user: core
+  <source>
+    *: "Calendars"
+  </source>
+  <dest>
+    *: "日历"
+  </dest>
+  <voice>
+    *: "日历"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_CLOCKS
+  desc: Fruit Company: Settings > Main Menu's row for the clocks
+  user: core
+  <source>
+    *: "Clocks"
+  </source>
+  <dest>
+    *: "时钟"
+  </dest>
+  <voice>
+    *: "时钟"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_CONTACTS
+  desc: Fruit Company: Extras > Contacts
+  user: core
+  <source>
+    *: "Contacts"
+  </source>
+  <dest>
+    *: "通讯录"
+  </dest>
+  <voice>
+    *: "通讯录"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_NOTES
+  desc: Fruit Company: Extras > Notes
+  user: core
+  <source>
+    *: "Notes"
+  </source>
+  <dest>
+    *: "备忘录"
+  </dest>
+  <voice>
+    *: "备忘录"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_SCREEN_LOCK
+  desc: Fruit Company: Extras > Screen Lock
+  user: core
+  <source>
+    *: "Screen Lock"
+  </source>
+  <dest>
+    *: "屏幕锁"
+  </dest>
+  <voice>
+    *: "屏幕锁"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_STOPWATCH
+  desc: Fruit Company: Extras > Stopwatch
+  user: core
+  <source>
+    *: "Stopwatch"
+  </source>
+  <dest>
+    *: "秒表"
+  </dest>
+  <voice>
+    *: "秒表"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_SLEEP
+  desc: Fruit Company: Settings > Main Menu's Sleep row
+  user: core
+  <source>
+    *: "Sleep"
+  </source>
+  <dest>
+    *: "睡眠"
+  </dest>
+  <voice>
+    *: "睡眠"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_MUSIC_MENU
+  desc: Fruit Company: Settings > Music Menu
+  user: core
+  <source>
+    *: "Music Menu"
+  </source>
+  <dest>
+    *: "音乐菜单"
+  </dest>
+  <voice>
+    *: "音乐菜单"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_VOLUME_LIMIT
+  desc: Fruit Company: Settings > Volume Limit
+  user: core
+  <source>
+    *: "Volume Limit"
+  </source>
+  <dest>
+    *: "音量限制"
+  </dest>
+  <voice>
+    *: "音量限制"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_EQ
+  desc: Fruit Company: Settings > EQ
+  user: core
+  <source>
+    *: "EQ"
+  </source>
+  <dest>
+    *: "均衡器"
+  </dest>
+  <voice>
+    *: "均衡器"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_SOUND_CHECK
+  desc: Fruit Company: Settings > Sound Check, the ReplayGain setting
+  user: core
+  <source>
+    *: "Sound Check"
+  </source>
+  <dest>
+    *: "音量平衡"
+  </dest>
+  <voice>
+    *: "音量平衡"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_CLICKER
+  desc: Fruit Company: Settings > Clicker, the piezo click
+  user: core
+  <source>
+    *: "Clicker"
+  </source>
+  <dest>
+    *: "点按声"
+  </dest>
+  <voice>
+    *: "点按声"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_DATE_TIME
+  desc: Fruit Company: Settings > Date & Time
+  user: core
+  <source>
+    *: "Date & Time"
+  </source>
+  <dest>
+    *: "日期与时间"
+  </dest>
+  <voice>
+    *: "日期与时间"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_SORT_BY
+  desc: Fruit Company: Settings > Sort By
+  user: core
+  <source>
+    *: "Sort By"
+  </source>
+  <dest>
+    *: "排序方式"
+  </dest>
+  <voice>
+    *: "排序方式"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_LEGAL
+  desc: Fruit Company: Settings > Legal, the licence
+  user: core
+  <source>
+    *: "Legal"
+  </source>
+  <dest>
+    *: "法律信息"
+  </dest>
+  <voice>
+    *: "法律信息"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_ADVANCED_SETTINGS
+  desc: Fruit Company: Settings > Advanced Settings, AstraPod's own Settings
+  user: core
+  <source>
+    *: "Advanced Settings"
+  </source>
+  <dest>
+    *: "高级设置"
+  </dest>
+  <voice>
+    *: "高级设置"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RADIO
+  desc: Fruit Company: Settings > Main Menu and Music Menu's Radio row
+  user: core
+  <source>
+    *: "Radio"
+  </source>
+  <dest>
+    *: "收音机"
+  </dest>
+  <voice>
+    *: "收音机"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_MOVIES
+  desc: Fruit Company: Videos > Movies
+  user: core
+  <source>
+    *: "Movies"
+  </source>
+  <dest>
+    *: "影片"
+  </dest>
+  <voice>
+    *: "影片"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RENTALS
+  desc: Fruit Company: Videos > Rentals
+  user: core
+  <source>
+    *: "Rentals"
+  </source>
+  <dest>
+    *: "租借影片"
+  </dest>
+  <voice>
+    *: "租借影片"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_TV_SHOWS
+  desc: Fruit Company: Videos > TV Shows
+  user: core
+  <source>
+    *: "TV Shows"
+  </source>
+  <dest>
+    *: "电视节目"
+  </dest>
+  <voice>
+    *: "电视节目"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_MUSIC_VIDEOS
+  desc: Fruit Company: Videos > Music Videos
+  user: core
+  <source>
+    *: "Music Videos"
+  </source>
+  <dest>
+    *: "音乐视频"
+  </dest>
+  <voice>
+    *: "音乐视频"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_VIDEO_PLAYLISTS
+  desc: Fruit Company: Videos > Video Playlists
+  user: core
+  <source>
+    *: "Video Playlists"
+  </source>
+  <dest>
+    *: "视频播放列表"
+  </dest>
+  <voice>
+    *: "视频播放列表"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_ALL_PHOTOS
+  desc: Fruit Company: Photos > All Photos
+  user: core
+  <source>
+    *: "All Photos"
+  </source>
+  <dest>
+    *: "所有照片"
+  </dest>
+  <voice>
+    *: "所有照片"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RESET_MENU
+  desc: Fruit Company: last row of Settings > Main Menu and Music Menu
+  user: core
+  <source>
+    *: "Reset Menu"
+  </source>
+  <dest>
+    *: "还原菜单"
+  </dest>
+  <voice>
+    *: "还原菜单"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RESET_MAIN_MENU
+  desc: Fruit Company: Settings > Main Menu > Reset Menu's question
+  user: core
+  <source>
+    *: "Do you want to reset the main menu?"
+  </source>
+  <dest>
+    *: "要还原主菜单吗？"
+  </dest>
+  <voice>
+    *: "要还原主菜单吗？"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RESET_MUSIC_MENU
+  desc: Fruit Company: Settings > Music Menu > Reset Menu's question
+  user: core
+  <source>
+    *: "Do you want to reset the music menu?"
+  </source>
+  <dest>
+    *: "要还原音乐菜单吗？"
+  </dest>
+  <voice>
+    *: "要还原音乐菜单吗？"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RESET_MENU_DETAIL
+  desc: Fruit Company: Reset Menu's second line
+  user: core
+  <source>
+    *: "This will restore the menu to its original state."
+  </source>
+  <dest>
+    *: "菜单将恢复为原始状态。"
+  </dest>
+  <voice>
+    *: "菜单将恢复为原始状态。"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_DATE
+  desc: Fruit Company: Settings > Date & Time > Date
+  user: core
+  <source>
+    *: "Date"
+  </source>
+  <dest>
+    *: "日期"
+  </dest>
+  <voice>
+    *: "日期"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_TIME
+  desc: Fruit Company: Settings > Date & Time > Time
+  user: core
+  <source>
+    *: "Time"
+  </source>
+  <dest>
+    *: "时间"
+  </dest>
+  <voice>
+    *: "时间"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_TIME_ZONE
+  desc: Fruit Company: Settings > Date & Time > Time Zone
+  user: core
+  <source>
+    *: "Time Zone"
+  </source>
+  <dest>
+    *: "时区"
+  </dest>
+  <voice>
+    *: "时区"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_24_HOUR_CLOCK
+  desc: Fruit Company: Settings > Date & Time > 24 Hour Clock
+  user: core
+  <source>
+    *: "24 Hour Clock"
+  </source>
+  <dest>
+    *: "24 小时制"
+  </dest>
+  <voice>
+    *: "24 小时制"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_TIME_IN_TITLE
+  desc: Fruit Company: Settings > Date & Time > Time in Title
+  user: core
+  <source>
+    *: "Time in Title"
+  </source>
+  <dest>
+    *: "标题中显示时间"
+  </dest>
+  <voice>
+    *: "标题中显示时间"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_THEME_WARNING
+  desc: Native theme: the question asked before a theme that changes the menus to the stock iPod's
+  user: core
+  <source>
+    *: "This theme changes the menus to the iPod's own layout."
+  </source>
+  <dest>
+    *: "这个主题把菜单改为 iPod 原版的结构。"
+  </dest>
+  <voice>
+    *: "这个主题把菜单改为 iPod 原版的结构。"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_THEME_WARNING_DETAIL
+  desc: Native theme: the second line of LANG_FRUIT_THEME_WARNING
+  user: core
+  <source>
+    *: "AstraPod's settings move to Settings > Advanced Settings. To switch back, choose another theme in Settings > Advanced Settings > Theme Settings > Native theme."
+  </source>
+  <dest>
+    *: "AstraPod 的设置移到 设置 > 高级设置。要切换回来，在 设置 > 高级设置 > 主题设置 > 原生主题 中选择其他主题。"
+  </dest>
+  <voice>
+    *: "AstraPod 的设置移到 设置 > 高级设置。要切换回来，在 设置 > 高级设置 > 主题设置 > 原生主题 中选择其他主题。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_USED
+  desc: Settings > About under Fruit Company: the used space, %s the amount
+  user: core
+  <source>
+    *: "%s Used"
+  </source>
+  <dest>
+    *: "已用 %s"
+  </dest>
+  <voice>
+    *: "已用"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_FREE
+  desc: Settings > About under Fruit Company: the free space, %s the amount
+  user: core
+  <source>
+    *: "%s Free"
+  </source>
+  <dest>
+    *: "可用 %s"
+  </dest>
+  <voice>
+    *: "可用"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_AUDIO
+  desc: Settings > About under Fruit Company: the capacity bar's key: audio files
+  user: core
+  <source>
+    *: "Audio"
+  </source>
+  <dest>
+    *: "音频"
+  </dest>
+  <voice>
+    *: "音频"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_VIDEO
+  desc: Settings > About under Fruit Company: the capacity bar's key: video files
+  user: core
+  <source>
+    *: "Video"
+  </source>
+  <dest>
+    *: "视频"
+  </dest>
+  <voice>
+    *: "视频"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_PHOTOS
+  desc: Settings > About under Fruit Company: the capacity bar's key, and the count of photos
+  user: core
+  <source>
+    *: "Photos"
+  </source>
+  <dest>
+    *: "照片"
+  </dest>
+  <voice>
+    *: "照片"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_OTHER
+  desc: Settings > About under Fruit Company: the capacity bar's key: everything else
+  user: core
+  <source>
+    *: "Other"
+  </source>
+  <dest>
+    *: "其他"
+  </dest>
+  <voice>
+    *: "其他"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_SONGS
+  desc: Settings > About under Fruit Company: the count of songs
+  user: core
+  <source>
+    *: "Songs"
+  </source>
+  <dest>
+    *: "歌曲"
+  </dest>
+  <voice>
+    *: "歌曲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_VIDEOS
+  desc: Settings > About under Fruit Company: the count of videos
+  user: core
+  <source>
+    *: "Videos"
+  </source>
+  <dest>
+    *: "视频"
+  </dest>
+  <voice>
+    *: "视频"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_PODCASTS
+  desc: Settings > About under Fruit Company: the count of podcast episodes
+  user: core
+  <source>
+    *: "Podcasts"
+  </source>
+  <dest>
+    *: "播客"
+  </dest>
+  <voice>
+    *: "播客"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_GAMES
+  desc: Settings > About under Fruit Company: the count of games
+  user: core
+  <source>
+    *: "Games"
+  </source>
+  <dest>
+    *: "游戏"
+  </dest>
+  <voice>
+    *: "游戏"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_CONTACTS
+  desc: Settings > About under Fruit Company: the count of contacts
+  user: core
+  <source>
+    *: "Contacts"
+  </source>
+  <dest>
+    *: "联系人"
+  </dest>
+  <voice>
+    *: "联系人"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_SERIAL_NUMBER
+  desc: Settings > About under Fruit Company: the player's serial number
+  user: core
+  <source>
+    *: "Serial Number"
+  </source>
+  <dest>
+    *: "序列号"
+  </dest>
+  <voice>
+    *: "序列号"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_MODEL
+  desc: Settings > About under Fruit Company: the player's model number
+  user: core
+  <source>
+    *: "Model"
+  </source>
+  <dest>
+    *: "型号"
+  </dest>
+  <voice>
+    *: "型号"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_VERSION
+  desc: Settings > About under Fruit Company: the firmware version
+  user: core
+  <source>
+    *: "Version"
+  </source>
+  <dest>
+    *: "版本"
+  </dest>
+  <voice>
+    *: "版本"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ABOUT_WINDOWS_FORMAT
+  desc: Settings > About under Fruit Company: after the version: the disk is formatted for Windows (FAT32)
+  user: core
+  <source>
+    *: "PC"
+  </source>
+  <dest>
+    *: "PC"
+  </dest>
+  <voice>
+    *: "PC"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_VIDEOS
+  desc: main menu, every video on the player in one list
+  user: core
+  <source>
+    *: "Videos"
+  </source>
+  <dest>
+    *: "视频"
+  </dest>
+  <voice>
+    *: "视频"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LIST_OTHER
+  desc: Extras: the folder of apps that are neither games nor demos, and its title
+  user: core
+  <source>
+    *: "Other Apps"
+  </source>
+  <dest>
+    *: "其他应用"
+  </dest>
+  <voice>
+    *: "其他应用"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_2048
+  desc: Games, Other Apps and Demos lists: 2048 game
+  user: core
+  <source>
+    *: "2048"
+  </source>
+  <dest>
+    *: "2048"
+  </dest>
+  <voice>
+    *: "2048"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_AMAZE
+  desc: Games, Other Apps and Demos lists: Amaze game
+  user: core
+  <source>
+    *: "Amaze"
+  </source>
+  <dest>
+    *: "3D 迷宫"
+  </dest>
+  <voice>
+    *: "3D 迷宫"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BLACKJACK
+  desc: Games, Other Apps and Demos lists: Blackjack game
+  user: core
+  <source>
+    *: "Blackjack"
+  </source>
+  <dest>
+    *: "二十一点"
+  </dest>
+  <voice>
+    *: "二十一点"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BRICKMANIA
+  desc: Games, Other Apps and Demos lists: Brickmania game
+  user: core
+  <source>
+    *: "Brickmania"
+  </source>
+  <dest>
+    *: "打砖块"
+  </dest>
+  <voice>
+    *: "打砖块"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BUBBLES
+  desc: Games, Other Apps and Demos lists: Bubbles game
+  user: core
+  <source>
+    *: "Bubbles"
+  </source>
+  <dest>
+    *: "泡泡龙"
+  </dest>
+  <voice>
+    *: "泡泡龙"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CHESSBOX
+  desc: Games, Other Apps and Demos lists: Chess game
+  user: core
+  <source>
+    *: "Chess"
+  </source>
+  <dest>
+    *: "国际象棋"
+  </dest>
+  <voice>
+    *: "国际象棋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CHOPPER
+  desc: Games, Other Apps and Demos lists: Chopper game
+  user: core
+  <source>
+    *: "Chopper"
+  </source>
+  <dest>
+    *: "直升机"
+  </dest>
+  <voice>
+    *: "直升机"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CLIX
+  desc: Games, Other Apps and Demos lists: Clix game
+  user: core
+  <source>
+    *: "Clix"
+  </source>
+  <dest>
+    *: "消色块"
+  </dest>
+  <voice>
+    *: "消色块"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CODEBUSTER
+  desc: Games, Other Apps and Demos lists: Codebuster game
+  user: core
+  <source>
+    *: "Codebuster"
+  </source>
+  <dest>
+    *: "猜密码"
+  </dest>
+  <voice>
+    *: "猜密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DICE
+  desc: Games, Other Apps and Demos lists: Dice game
+  user: core
+  <source>
+    *: "Dice"
+  </source>
+  <dest>
+    *: "骰子"
+  </dest>
+  <voice>
+    *: "骰子"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DOOM
+  desc: Games, Other Apps and Demos lists: Doom game
+  user: core
+  <source>
+    *: "Doom"
+  </source>
+  <dest>
+    *: "毁灭战士"
+  </dest>
+  <voice>
+    *: "毁灭战士"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DUKE3D
+  desc: Games, Other Apps and Demos lists: Duke Nukem 3D game
+  user: core
+  <source>
+    *: "Duke Nukem 3D"
+  </source>
+  <dest>
+    *: "毁灭公爵 3D"
+  </dest>
+  <voice>
+    *: "毁灭公爵 3D"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FLIPIT
+  desc: Games, Other Apps and Demos lists: Flip It game
+  user: core
+  <source>
+    *: "Flip It"
+  </source>
+  <dest>
+    *: "翻转"
+  </dest>
+  <voice>
+    *: "翻转"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_GOBAN
+  desc: Games, Other Apps and Demos lists: Go game
+  user: core
+  <source>
+    *: "Go"
+  </source>
+  <dest>
+    *: "围棋"
+  </dest>
+  <voice>
+    *: "围棋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_INVADROX
+  desc: Games, Other Apps and Demos lists: Invaders game
+  user: core
+  <source>
+    *: "Invaders"
+  </source>
+  <dest>
+    *: "太空入侵者"
+  </dest>
+  <voice>
+    *: "太空入侵者"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_JACKPOT
+  desc: Games, Other Apps and Demos lists: Jackpot game
+  user: core
+  <source>
+    *: "Jackpot"
+  </source>
+  <dest>
+    *: "老虎机"
+  </dest>
+  <voice>
+    *: "老虎机"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_JEWELS
+  desc: Games, Other Apps and Demos lists: Jewels game
+  user: core
+  <source>
+    *: "Jewels"
+  </source>
+  <dest>
+    *: "宝石"
+  </dest>
+  <voice>
+    *: "宝石"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MAZE
+  desc: Games, Other Apps and Demos lists: Maze game
+  user: core
+  <source>
+    *: "Maze"
+  </source>
+  <dest>
+    *: "迷宫"
+  </dest>
+  <voice>
+    *: "迷宫"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MAZEZAM
+  desc: Games, Other Apps and Demos lists: MazezaM game
+  user: core
+  <source>
+    *: "MazezaM"
+  </source>
+  <dest>
+    *: "推箱迷宫"
+  </dest>
+  <voice>
+    *: "推箱迷宫"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MINESWEEPER
+  desc: Games, Other Apps and Demos lists: Minesweeper game
+  user: core
+  <source>
+    *: "Minesweeper"
+  </source>
+  <dest>
+    *: "扫雷"
+  </dest>
+  <voice>
+    *: "扫雷"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MOCHIPOD
+  desc: Games, Other Apps and Demos lists: MochiPod game
+  user: core
+  <source>
+    *: "MochiPod"
+  </source>
+  <dest>
+    *: "MochiPod"
+  </dest>
+  <voice>
+    *: "MochiPod"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PACBOX
+  desc: Games, Other Apps and Demos lists: Pac-Box game
+  user: core
+  <source>
+    *: "Pac-Box"
+  </source>
+  <dest>
+    *: "吃豆"
+  </dest>
+  <voice>
+    *: "吃豆"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PEGBOX
+  desc: Games, Other Apps and Demos lists: Pegbox game
+  user: core
+  <source>
+    *: "Pegbox"
+  </source>
+  <dest>
+    *: "推钉"
+  </dest>
+  <voice>
+    *: "推钉"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PONG
+  desc: Games, Other Apps and Demos lists: Pong game
+  user: core
+  <source>
+    *: "Pong"
+  </source>
+  <dest>
+    *: "乒乓"
+  </dest>
+  <voice>
+    *: "乒乓"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_QUAKE
+  desc: Games, Other Apps and Demos lists: Quake game
+  user: core
+  <source>
+    *: "Quake"
+  </source>
+  <dest>
+    *: "雷神之锤"
+  </dest>
+  <voice>
+    *: "雷神之锤"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_REVERSI
+  desc: Games, Other Apps and Demos lists: Reversi game
+  user: core
+  <source>
+    *: "Reversi"
+  </source>
+  <dest>
+    *: "黑白棋"
+  </dest>
+  <voice>
+    *: "黑白棋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROBOTFINDSKITTEN
+  desc: Games, Other Apps and Demos lists: robotfindskitten game
+  user: core
+  <source>
+    *: "robotfindskitten"
+  </source>
+  <dest>
+    *: "机器人找小猫"
+  </dest>
+  <voice>
+    *: "机器人找小猫"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKBLOX
+  desc: Games, Other Apps and Demos lists: Blocks game
+  user: core
+  <source>
+    *: "Blocks"
+  </source>
+  <dest>
+    *: "方块"
+  </dest>
+  <voice>
+    *: "方块"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKBLOX1D
+  desc: Games, Other Apps and Demos lists: Blocks 1D game
+  user: core
+  <source>
+    *: "Blocks 1D"
+  </source>
+  <dest>
+    *: "一维方块"
+  </dest>
+  <voice>
+    *: "一维方块"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKBOY
+  desc: Games, Other Apps and Demos lists: Game Boy game
+  user: core
+  <source>
+    *: "Game Boy"
+  </source>
+  <dest>
+    *: "Game Boy 模拟器"
+  </dest>
+  <voice>
+    *: "Game Boy 模拟器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_BLACKBOX
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Black Box
+  user: core
+  <source>
+    *: "Black Box"
+  </source>
+  <dest>
+    *: "黑盒"
+  </dest>
+  <voice>
+    *: "黑盒"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_BRIDGES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Bridges
+  user: core
+  <source>
+    *: "Bridges"
+  </source>
+  <dest>
+    *: "搭桥"
+  </dest>
+  <voice>
+    *: "搭桥"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_CUBE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Cube
+  user: core
+  <source>
+    *: "Cube"
+  </source>
+  <dest>
+    *: "滚立方"
+  </dest>
+  <voice>
+    *: "滚立方"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_DOMINOSA
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Dominosa
+  user: core
+  <source>
+    *: "Dominosa"
+  </source>
+  <dest>
+    *: "多米诺"
+  </dest>
+  <voice>
+    *: "多米诺"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FIFTEEN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Fifteen
+  user: core
+  <source>
+    *: "Fifteen"
+  </source>
+  <dest>
+    *: "十五数码"
+  </dest>
+  <voice>
+    *: "十五数码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FILLING
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Filling
+  user: core
+  <source>
+    *: "Filling"
+  </source>
+  <dest>
+    *: "填充"
+  </dest>
+  <voice>
+    *: "填充"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FLIP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Flip
+  user: core
+  <source>
+    *: "Flip"
+  </source>
+  <dest>
+    *: "翻转灯"
+  </dest>
+  <voice>
+    *: "翻转灯"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_FLOOD
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Flood
+  user: core
+  <source>
+    *: "Flood"
+  </source>
+  <dest>
+    *: "洪水"
+  </dest>
+  <voice>
+    *: "洪水"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_GALAXIES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Galaxies
+  user: core
+  <source>
+    *: "Galaxies"
+  </source>
+  <dest>
+    *: "星系"
+  </dest>
+  <voice>
+    *: "星系"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_GROUP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Group
+  user: core
+  <source>
+    *: "Group"
+  </source>
+  <dest>
+    *: "群"
+  </dest>
+  <voice>
+    *: "群"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_GUESS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Guess
+  user: core
+  <source>
+    *: "Guess"
+  </source>
+  <dest>
+    *: "猜颜色"
+  </dest>
+  <voice>
+    *: "猜颜色"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_INERTIA
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Inertia
+  user: core
+  <source>
+    *: "Inertia"
+  </source>
+  <dest>
+    *: "惯性"
+  </dest>
+  <voice>
+    *: "惯性"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_KEEN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Keen
+  user: core
+  <source>
+    *: "Keen"
+  </source>
+  <dest>
+    *: "算独"
+  </dest>
+  <voice>
+    *: "算独"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_LIGHTUP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Light Up
+  user: core
+  <source>
+    *: "Light Up"
+  </source>
+  <dest>
+    *: "点灯"
+  </dest>
+  <voice>
+    *: "点灯"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_LOOPY
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Loopy
+  user: core
+  <source>
+    *: "Loopy"
+  </source>
+  <dest>
+    *: "回路"
+  </dest>
+  <voice>
+    *: "回路"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MAGNETS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Magnets
+  user: core
+  <source>
+    *: "Magnets"
+  </source>
+  <dest>
+    *: "磁铁"
+  </dest>
+  <voice>
+    *: "磁铁"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MAP
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Map
+  user: core
+  <source>
+    *: "Map"
+  </source>
+  <dest>
+    *: "四色地图"
+  </dest>
+  <voice>
+    *: "四色地图"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MINES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Mines
+  user: core
+  <source>
+    *: "Mines"
+  </source>
+  <dest>
+    *: "地雷"
+  </dest>
+  <voice>
+    *: "地雷"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_MOSAIC
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Mosaic
+  user: core
+  <source>
+    *: "Mosaic"
+  </source>
+  <dest>
+    *: "马赛克"
+  </dest>
+  <voice>
+    *: "马赛克"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_NET
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Net
+  user: core
+  <source>
+    *: "Net"
+  </source>
+  <dest>
+    *: "网络"
+  </dest>
+  <voice>
+    *: "网络"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_NETSLIDE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Netslide
+  user: core
+  <source>
+    *: "Netslide"
+  </source>
+  <dest>
+    *: "滑动网络"
+  </dest>
+  <voice>
+    *: "滑动网络"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PALISADE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Palisade
+  user: core
+  <source>
+    *: "Palisade"
+  </source>
+  <dest>
+    *: "栅栏"
+  </dest>
+  <voice>
+    *: "栅栏"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PATTERN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Pattern
+  user: core
+  <source>
+    *: "Pattern"
+  </source>
+  <dest>
+    *: "数织"
+  </dest>
+  <voice>
+    *: "数织"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PEARL
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Pearl
+  user: core
+  <source>
+    *: "Pearl"
+  </source>
+  <dest>
+    *: "珍珠"
+  </dest>
+  <voice>
+    *: "珍珠"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_PEGS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Pegs
+  user: core
+  <source>
+    *: "Pegs"
+  </source>
+  <dest>
+    *: "孔明棋"
+  </dest>
+  <voice>
+    *: "孔明棋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_RANGE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Range
+  user: core
+  <source>
+    *: "Range"
+  </source>
+  <dest>
+    *: "视野"
+  </dest>
+  <voice>
+    *: "视野"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_RECT
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Rectangles
+  user: core
+  <source>
+    *: "Rectangles"
+  </source>
+  <dest>
+    *: "矩形"
+  </dest>
+  <voice>
+    *: "矩形"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SAMEGAME
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Same Game
+  user: core
+  <source>
+    *: "Same Game"
+  </source>
+  <dest>
+    *: "消消乐"
+  </dest>
+  <voice>
+    *: "消消乐"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SIGNPOST
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Signpost
+  user: core
+  <source>
+    *: "Signpost"
+  </source>
+  <dest>
+    *: "路标"
+  </dest>
+  <voice>
+    *: "路标"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SINGLES
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Singles
+  user: core
+  <source>
+    *: "Singles"
+  </source>
+  <dest>
+    *: "单一"
+  </dest>
+  <voice>
+    *: "单一"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SIXTEEN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Sixteen
+  user: core
+  <source>
+    *: "Sixteen"
+  </source>
+  <dest>
+    *: "十六"
+  </dest>
+  <voice>
+    *: "十六"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SLANT
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Slant
+  user: core
+  <source>
+    *: "Slant"
+  </source>
+  <dest>
+    *: "斜线"
+  </dest>
+  <voice>
+    *: "斜线"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SLIDE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Slide
+  user: core
+  <source>
+    *: "Slide"
+  </source>
+  <dest>
+    *: "滑块"
+  </dest>
+  <voice>
+    *: "滑块"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SOKOBAN
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Sokoban
+  user: core
+  <source>
+    *: "Random Sokoban"
+  </source>
+  <dest>
+    *: "随机推箱子"
+  </dest>
+  <voice>
+    *: "随机推箱子"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_SOLO
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Solo
+  user: core
+  <source>
+    *: "Solo"
+  </source>
+  <dest>
+    *: "变体数独"
+  </dest>
+  <voice>
+    *: "变体数独"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TENTS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Tents
+  user: core
+  <source>
+    *: "Tents"
+  </source>
+  <dest>
+    *: "帐篷"
+  </dest>
+  <voice>
+    *: "帐篷"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TOWERS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Towers
+  user: core
+  <source>
+    *: "Towers"
+  </source>
+  <dest>
+    *: "高楼"
+  </dest>
+  <voice>
+    *: "高楼"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TRACKS
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Tracks
+  user: core
+  <source>
+    *: "Tracks"
+  </source>
+  <dest>
+    *: "轨道"
+  </dest>
+  <voice>
+    *: "轨道"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_TWIDDLE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Twiddle
+  user: core
+  <source>
+    *: "Twiddle"
+  </source>
+  <dest>
+    *: "旋转"
+  </dest>
+  <voice>
+    *: "旋转"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNDEAD
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Undead
+  user: core
+  <source>
+    *: "Undead"
+  </source>
+  <dest>
+    *: "亡灵"
+  </dest>
+  <voice>
+    *: "亡灵"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNEQUAL
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Unequal
+  user: core
+  <source>
+    *: "Unequal"
+  </source>
+  <dest>
+    *: "不等式"
+  </dest>
+  <voice>
+    *: "不等式"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNRULY
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Unruly
+  user: core
+  <source>
+    *: "Unruly"
+  </source>
+  <dest>
+    *: "黑白格"
+  </dest>
+  <voice>
+    *: "黑白格"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SGT_UNTANGLE
+  desc: Games, Other Apps and Demos lists: Simon Tatham puzzle: Untangle
+  user: core
+  <source>
+    *: "Untangle"
+  </source>
+  <dest>
+    *: "解结"
+  </dest>
+  <voice>
+    *: "解结"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SLIDING_PUZZLE
+  desc: Games, Other Apps and Demos lists: Sliding Puzzle game
+  user: core
+  <source>
+    *: "Sliding Puzzle"
+  </source>
+  <dest>
+    *: "拼图"
+  </dest>
+  <voice>
+    *: "拼图"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SNAKE
+  desc: Games, Other Apps and Demos lists: Snake game
+  user: core
+  <source>
+    *: "Snake"
+  </source>
+  <dest>
+    *: "贪吃蛇"
+  </dest>
+  <voice>
+    *: "贪吃蛇"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SNAKE2
+  desc: Games, Other Apps and Demos lists: Snake 2 game
+  user: core
+  <source>
+    *: "Snake 2"
+  </source>
+  <dest>
+    *: "贪吃蛇 2"
+  </dest>
+  <voice>
+    *: "贪吃蛇 2"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SOKOBAN
+  desc: Games, Other Apps and Demos lists: Sokoban game
+  user: core
+  <source>
+    *: "Sokoban"
+  </source>
+  <dest>
+    *: "推箱子"
+  </dest>
+  <voice>
+    *: "推箱子"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SOLITAIRE
+  desc: Games, Other Apps and Demos lists: Solitaire game
+  user: core
+  <source>
+    *: "Solitaire"
+  </source>
+  <dest>
+    *: "纸牌"
+  </dest>
+  <voice>
+    *: "纸牌"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SPACEROCKS
+  desc: Games, Other Apps and Demos lists: Space Rocks game
+  user: core
+  <source>
+    *: "Space Rocks"
+  </source>
+  <dest>
+    *: "太空陨石"
+  </dest>
+  <voice>
+    *: "太空陨石"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_STAR
+  desc: Games, Other Apps and Demos lists: Star game
+  user: core
+  <source>
+    *: "Star"
+  </source>
+  <dest>
+    *: "星星"
+  </dest>
+  <voice>
+    *: "星星"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SUDOKU
+  desc: Games, Other Apps and Demos lists: Sudoku game
+  user: core
+  <source>
+    *: "Sudoku"
+  </source>
+  <dest>
+    *: "数独"
+  </dest>
+  <voice>
+    *: "数独"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SUPERDOM
+  desc: Games, Other Apps and Demos lists: Super Domination game
+  user: core
+  <source>
+    *: "Super Domination"
+  </source>
+  <dest>
+    *: "超级霸权"
+  </dest>
+  <voice>
+    *: "超级霸权"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_WOLF3D
+  desc: Games, Other Apps and Demos lists: Wolfenstein 3D game
+  user: core
+  <source>
+    *: "Wolfenstein 3D"
+  </source>
+  <dest>
+    *: "德军总部 3D"
+  </dest>
+  <voice>
+    *: "德军总部 3D"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_WORMLET
+  desc: Games, Other Apps and Demos lists: Wormlet game
+  user: core
+  <source>
+    *: "Wormlet"
+  </source>
+  <dest>
+    *: "蠕虫"
+  </dest>
+  <voice>
+    *: "蠕虫"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_XOBOX
+  desc: Games, Other Apps and Demos lists: Xobox game
+  user: core
+  <source>
+    *: "Xobox"
+  </source>
+  <dest>
+    *: "圈地"
+  </dest>
+  <voice>
+    *: "圈地"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_XRICK
+  desc: Games, Other Apps and Demos lists: Rick Dangerous game
+  user: core
+  <source>
+    *: "Rick Dangerous"
+  </source>
+  <dest>
+    *: "瑞克历险记"
+  </dest>
+  <voice>
+    *: "瑞克历险记"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_XWORLD
+  desc: Games, Other Apps and Demos lists: Another World game
+  user: core
+  <source>
+    *: "Another World"
+  </source>
+  <dest>
+    *: "另一个世界"
+  </dest>
+  <voice>
+    *: "另一个世界"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ZXBOX
+  desc: Games, Other Apps and Demos lists: ZX Spectrum game
+  user: core
+  <source>
+    *: "ZX Spectrum"
+  </source>
+  <dest>
+    *: "ZX Spectrum 模拟器"
+  </dest>
+  <voice>
+    *: "ZX Spectrum 模拟器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ANNOUNCE_STATUS
+  desc: Games, Other Apps and Demos lists: Speaks time, battery and track info aloud
+  user: core
+  <source>
+    *: "Announce Status"
+  </source>
+  <dest>
+    *: "状态播报"
+  </dest>
+  <voice>
+    *: "状态播报"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CALCULATOR
+  desc: Games, Other Apps and Demos lists: Pocket calculator
+  user: core
+  <source>
+    *: "Calculator"
+  </source>
+  <dest>
+    *: "计算器"
+  </dest>
+  <voice>
+    *: "计算器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CHESSCLOCK
+  desc: Games, Other Apps and Demos lists: Two-player game clock
+  user: core
+  <source>
+    *: "Chess Clock"
+  </source>
+  <dest>
+    *: "棋钟"
+  </dest>
+  <voice>
+    *: "棋钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_COUNTDOWN_TIMER
+  desc: Games, Other Apps and Demos lists: Countdown timer
+  user: core
+  <source>
+    *: "Timer"
+  </source>
+  <dest>
+    *: "倒计时"
+  </dest>
+  <voice>
+    *: "倒计时"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CUE_PLAYLIST
+  desc: Games, Other Apps and Demos lists: Plays tracks from a .cue sheet
+  user: core
+  <source>
+    *: "Cue Playlist"
+  </source>
+  <dest>
+    *: "CUE 播放列表"
+  </dest>
+  <voice>
+    *: "CUE 播放列表"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DART_SCORER
+  desc: Games, Other Apps and Demos lists: Darts score keeper
+  user: core
+  <source>
+    *: "Dart Scorer"
+  </source>
+  <dest>
+    *: "飞镖计分"
+  </dest>
+  <voice>
+    *: "飞镖计分"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DB_FOLDER_SELECT
+  desc: Games, Other Apps and Demos lists: Chooses which folders the music database scans
+  user: core
+  <source>
+    *: "Database Folders"
+  </source>
+  <dest>
+    *: "数据库文件夹"
+  </dest>
+  <voice>
+    *: "数据库文件夹"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DICT
+  desc: Games, Other Apps and Demos lists: English dictionary (WordNet)
+  user: core
+  <source>
+    *: "Dictionary"
+  </source>
+  <dest>
+    *: "词典"
+  </dest>
+  <voice>
+    *: "词典"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DISKTIDY
+  desc: Games, Other Apps and Demos lists: Deletes junk files left by computers
+  user: core
+  <source>
+    *: "Disk Tidy"
+  </source>
+  <dest>
+    *: "磁盘清理"
+  </dest>
+  <voice>
+    *: "磁盘清理"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_EQ_OPTIMIZER
+  desc: Games, Other Apps and Demos lists: Tunes the equalizer for headphones
+  user: core
+  <source>
+    *: "EQ Optimizer"
+  </source>
+  <dest>
+    *: "均衡器优化"
+  </dest>
+  <voice>
+    *: "均衡器优化"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_H264_PLAYER
+  desc: Games, Other Apps and Demos lists: Plays H.264 MP4 videos
+  user: core
+  <source>
+    *: "Video Player"
+  </source>
+  <dest>
+    *: "视频播放器"
+  </dest>
+  <voice>
+    *: "视频播放器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_IMAGEVIEWER
+  desc: Games, Other Apps and Demos lists: Views JPEG/PNG/BMP/GIF pictures
+  user: core
+  <source>
+    *: "Image Viewer"
+  </source>
+  <dest>
+    *: "图片查看器"
+  </dest>
+  <voice>
+    *: "图片查看器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_IMAGEVIEWER_COMPAT
+  desc: Games, Other Apps and Demos lists: Rockbox image viewer
+  user: core
+  <source>
+    *: "Image Viewer (Classic)"
+  </source>
+  <dest>
+    *: "图片查看器（经典）"
+  </dest>
+  <voice>
+    *: "图片查看器（经典）"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_KEYBOX
+  desc: Games, Other Apps and Demos lists: Encrypted password store
+  user: core
+  <source>
+    *: "Keybox"
+  </source>
+  <dest>
+    *: "密码箱"
+  </dest>
+  <voice>
+    *: "密码箱"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_KEYREMAP
+  desc: Games, Other Apps and Demos lists: Remaps buttons
+  user: core
+  <source>
+    *: "Key Remap"
+  </source>
+  <dest>
+    *: "按键映射"
+  </dest>
+  <voice>
+    *: "按键映射"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LAMP
+  desc: Games, Other Apps and Demos lists: Turns the screen into a light
+  user: core
+  <source>
+    *: "Lamp"
+  </source>
+  <dest>
+    *: "手电筒"
+  </dest>
+  <voice>
+    *: "手电筒"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LASTFM_SCROBBLER
+  desc: Games, Other Apps and Demos lists: Logs plays for Last.fm
+  user: core
+  <source>
+    *: "Last.fm Scrobbler"
+  </source>
+  <dest>
+    *: "Last.fm 记录"
+  </dest>
+  <voice>
+    *: "Last.fm 记录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LASTFM_SCROBBLER_VIEWER
+  desc: Games, Other Apps and Demos lists: Views the Last.fm play log
+  user: core
+  <source>
+    *: "Scrobble Log"
+  </source>
+  <dest>
+    *: "播放记录查看"
+  </dest>
+  <voice>
+    *: "播放记录查看"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LRCPLAYER
+  desc: Games, Other Apps and Demos lists: Shows synced .lrc lyrics
+  user: core
+  <source>
+    *: "Lyrics Player"
+  </source>
+  <dest>
+    *: "歌词播放器"
+  </dest>
+  <voice>
+    *: "歌词播放器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MAIN_MENU_CONFIG
+  desc: Games, Other Apps and Demos lists: Edits the main menu
+  user: core
+  <source>
+    *: "Main Menu Setup"
+  </source>
+  <dest>
+    *: "主菜单设置"
+  </dest>
+  <voice>
+    *: "主菜单设置"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MD5SUM
+  desc: Games, Other Apps and Demos lists: Computes file checksums
+  user: core
+  <source>
+    *: "MD5 Sum"
+  </source>
+  <dest>
+    *: "MD5 校验"
+  </dest>
+  <voice>
+    *: "MD5 校验"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_METRONOME
+  desc: Games, Other Apps and Demos lists: Metronome with tap tempo
+  user: core
+  <source>
+    *: "Metronome"
+  </source>
+  <dest>
+    *: "节拍器"
+  </dest>
+  <voice>
+    *: "节拍器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MIDI
+  desc: Games, Other Apps and Demos lists: Plays MIDI files
+  user: core
+  <source>
+    *: "MIDI Player"
+  </source>
+  <dest>
+    *: "MIDI 播放器"
+  </dest>
+  <voice>
+    *: "MIDI 播放器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MIKMOD
+  desc: Games, Other Apps and Demos lists: Plays MOD/XM/S3M/IT tracker music
+  user: core
+  <source>
+    *: "Module Player"
+  </source>
+  <dest>
+    *: "模块音乐播放器"
+  </dest>
+  <voice>
+    *: "模块音乐播放器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MPEGPLAYER
+  desc: Games, Other Apps and Demos lists: Plays MPEG-1/2 video
+  user: core
+  <source>
+    *: "MPEG Player"
+  </source>
+  <dest>
+    *: "MPEG 播放器"
+  </dest>
+  <voice>
+    *: "MPEG 播放器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_OPEN_PLUGINS
+  desc: Games, Other Apps and Demos lists: Assigns apps to file types
+  user: core
+  <source>
+    *: "Open With"
+  </source>
+  <dest>
+    *: "打开方式"
+  </dest>
+  <voice>
+    *: "打开方式"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_OTP
+  desc: Games, Other Apps and Demos lists: TOTP/HOTP code generator
+  user: core
+  <source>
+    *: "One-Time Passwords"
+  </source>
+  <dest>
+    *: "一次性密码"
+  </dest>
+  <voice>
+    *: "一次性密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PDBOX
+  desc: Games, Other Apps and Demos lists: Pure Data patch player
+  user: core
+  <source>
+    *: "Pure Data"
+  </source>
+  <dest>
+    *: "Pure Data"
+  </dest>
+  <voice>
+    *: "Pure Data"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PERIODIC_TABLE
+  desc: Games, Other Apps and Demos lists: Periodic table of elements
+  user: core
+  <source>
+    *: "Periodic Table"
+  </source>
+  <dest>
+    *: "元素周期表"
+  </dest>
+  <voice>
+    *: "元素周期表"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PITCH_DETECTOR
+  desc: Games, Other Apps and Demos lists: Instrument tuner using the microphone
+  user: core
+  <source>
+    *: "Tuner"
+  </source>
+  <dest>
+    *: "调音器"
+  </dest>
+  <voice>
+    *: "调音器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PITCH_SCREEN
+  desc: Games, Other Apps and Demos lists: Changes playback pitch and speed
+  user: core
+  <source>
+    *: "Pitch"
+  </source>
+  <dest>
+    *: "变调"
+  </dest>
+  <voice>
+    *: "变调"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PLAYING_TIME
+  desc: Games, Other Apps and Demos lists: Total time of the playlist
+  user: core
+  <source>
+    *: "Playing Time"
+  </source>
+  <dest>
+    *: "播放时长"
+  </dest>
+  <voice>
+    *: "播放时长"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PROPERTIES
+  desc: Games, Other Apps and Demos lists: File details
+  user: core
+  <source>
+    *: "Properties"
+  </source>
+  <dest>
+    *: "属性"
+  </dest>
+  <voice>
+    *: "属性"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_RANDOM_FOLDER_ADVANCE_CONFIG
+  desc: Games, Other Apps and Demos lists: Sets up random folder advance
+  user: core
+  <source>
+    *: "Random Folder"
+  </source>
+  <dest>
+    *: "随机文件夹"
+  </dest>
+  <voice>
+    *: "随机文件夹"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_RB_INFO
+  desc: Games, Other Apps and Demos lists: Diagnostic pages for developers
+  user: core
+  <source>
+    *: "System Info"
+  </source>
+  <dest>
+    *: "系统信息"
+  </dest>
+  <voice>
+    *: "系统信息"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_REMOTE_CONTROL
+  desc: Games, Other Apps and Demos lists: Uses the iPod as a computer remote
+  user: core
+  <source>
+    *: "Remote Control"
+  </source>
+  <dest>
+    *: "遥控器"
+  </dest>
+  <voice>
+    *: "遥控器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_RESISTOR
+  desc: Games, Other Apps and Demos lists: Resistor colour code calculator
+  user: core
+  <source>
+    *: "Resistor Codes"
+  </source>
+  <dest>
+    *: "电阻色环"
+  </dest>
+  <voice>
+    *: "电阻色环"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKPAINT
+  desc: Games, Other Apps and Demos lists: Drawing program
+  user: core
+  <source>
+    *: "Paint"
+  </source>
+  <dest>
+    *: "画板"
+  </dest>
+  <voice>
+    *: "画板"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SETTINGS_DUMPER
+  desc: Games, Other Apps and Demos lists: Writes all settings to a file
+  user: core
+  <source>
+    *: "Settings Dump"
+  </source>
+  <dest>
+    *: "导出设置"
+  </dest>
+  <voice>
+    *: "导出设置"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SHORTCUTS_APPEND
+  desc: Games, Other Apps and Demos lists: Adds a file to Shortcuts
+  user: core
+  <source>
+    *: "Add Shortcut"
+  </source>
+  <dest>
+    *: "添加快捷方式"
+  </dest>
+  <voice>
+    *: "添加快捷方式"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SHORTCUTS_VIEW
+  desc: Games, Other Apps and Demos lists: Lists shortcuts
+  user: core
+  <source>
+    *: "Shortcuts"
+  </source>
+  <dest>
+    *: "快捷方式"
+  </dest>
+  <voice>
+    *: "快捷方式"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SORT
+  desc: Games, Other Apps and Demos lists: Sorts a text file's lines
+  user: core
+  <source>
+    *: "Sort Lines"
+  </source>
+  <dest>
+    *: "排序"
+  </dest>
+  <voice>
+    *: "排序"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SPEEDREAD
+  desc: Games, Other Apps and Demos lists: Shows text one word at a time
+  user: core
+  <source>
+    *: "Speed Reader"
+  </source>
+  <dest>
+    *: "速读"
+  </dest>
+  <voice>
+    *: "速读"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_STATS
+  desc: Games, Other Apps and Demos lists: Counts files and folders on the disk
+  user: core
+  <source>
+    *: "File Stats"
+  </source>
+  <dest>
+    *: "文件统计"
+  </dest>
+  <voice>
+    *: "文件统计"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TAGNAVI_EDIT
+  desc: Games, Other Apps and Demos lists: Edits the music database menu
+  user: core
+  <source>
+    *: "Database Menu Editor"
+  </source>
+  <dest>
+    *: "数据库菜单编辑"
+  </dest>
+  <voice>
+    *: "数据库菜单编辑"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TEXT_EDITOR
+  desc: Games, Other Apps and Demos lists: Edits text files
+  user: core
+  <source>
+    *: "Text Editor"
+  </source>
+  <dest>
+    *: "文本编辑器"
+  </dest>
+  <voice>
+    *: "文本编辑器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TEXT_VIEWER
+  desc: Games, Other Apps and Demos lists: Reads text files
+  user: core
+  <source>
+    *: "Text Viewer"
+  </source>
+  <dest>
+    *: "文本查看器"
+  </dest>
+  <voice>
+    *: "文本查看器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_THEME_REMOVE
+  desc: Games, Other Apps and Demos lists: Removes installed themes
+  user: core
+  <source>
+    *: "Theme Remover"
+  </source>
+  <dest>
+    *: "主题卸载"
+  </dest>
+  <voice>
+    *: "主题卸载"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BATTERY_BENCH
+  desc: Games, Other Apps and Demos lists: Logs battery drain over time
+  user: core
+  <source>
+    *: "Battery Bench"
+  </source>
+  <dest>
+    *: "电池测试"
+  </dest>
+  <voice>
+    *: "电池测试"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_BOUNCE
+  desc: Games, Other Apps and Demos lists: Bouncing text demo
+  user: core
+  <source>
+    *: "Bounce"
+  </source>
+  <dest>
+    *: "弹跳"
+  </dest>
+  <voice>
+    *: "弹跳"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CREDITS
+  desc: Games, Other Apps and Demos lists: Scrolling credits
+  user: core
+  <source>
+    *: "Credits"
+  </source>
+  <dest>
+    *: "致谢"
+  </dest>
+  <voice>
+    *: "致谢"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_CUBE
+  desc: Games, Other Apps and Demos lists: Rotating 3D cube
+  user: core
+  <source>
+    *: "Cube"
+  </source>
+  <dest>
+    *: "立方体"
+  </dest>
+  <voice>
+    *: "立方体"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_DEMYSTIFY
+  desc: Games, Other Apps and Demos lists: Line-pattern screensaver
+  user: core
+  <source>
+    *: "Demystify"
+  </source>
+  <dest>
+    *: "迷幻线条"
+  </dest>
+  <voice>
+    *: "迷幻线条"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FFT
+  desc: Games, Other Apps and Demos lists: Audio spectrum analyser
+  user: core
+  <source>
+    *: "Spectrum"
+  </source>
+  <dest>
+    *: "频谱"
+  </dest>
+  <voice>
+    *: "频谱"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FIRE
+  desc: Games, Other Apps and Demos lists: Fire effect
+  user: core
+  <source>
+    *: "Fire"
+  </source>
+  <dest>
+    *: "火焰"
+  </dest>
+  <voice>
+    *: "火焰"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FIREWORKS
+  desc: Games, Other Apps and Demos lists: Fireworks display
+  user: core
+  <source>
+    *: "Fireworks"
+  </source>
+  <dest>
+    *: "烟花"
+  </dest>
+  <voice>
+    *: "烟花"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_FRACTALS
+  desc: Games, Other Apps and Demos lists: Mandelbrot explorer
+  user: core
+  <source>
+    *: "Fractals"
+  </source>
+  <dest>
+    *: "分形"
+  </dest>
+  <voice>
+    *: "分形"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_LOGO
+  desc: Games, Other Apps and Demos lists: Bouncing logo
+  user: core
+  <source>
+    *: "Logo"
+  </source>
+  <dest>
+    *: "标志"
+  </dest>
+  <voice>
+    *: "标志"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MATRIX
+  desc: Games, Other Apps and Demos lists: Falling green code
+  user: core
+  <source>
+    *: "Matrix"
+  </source>
+  <dest>
+    *: "代码雨"
+  </dest>
+  <voice>
+    *: "代码雨"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_MOSAIQUE
+  desc: Games, Other Apps and Demos lists: Screen mosaic effect
+  user: core
+  <source>
+    *: "Mosaique"
+  </source>
+  <dest>
+    *: "马赛克"
+  </dest>
+  <voice>
+    *: "马赛克"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_OSCILLOSCOPE
+  desc: Games, Other Apps and Demos lists: Audio waveform display
+  user: core
+  <source>
+    *: "Oscilloscope"
+  </source>
+  <dest>
+    *: "示波器"
+  </dest>
+  <voice>
+    *: "示波器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PICTUREFLOW
+  desc: Games, Other Apps and Demos lists: Album cover flow
+  user: core
+  <source>
+    *: "PictureFlow"
+  </source>
+  <dest>
+    *: "封面流"
+  </dest>
+  <voice>
+    *: "封面流"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PLASMA
+  desc: Games, Other Apps and Demos lists: Plasma colour effect
+  user: core
+  <source>
+    *: "Plasma"
+  </source>
+  <dest>
+    *: "等离子"
+  </dest>
+  <voice>
+    *: "等离子"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_PODLINK_ECHO
+  desc: Games, Other Apps and Demos lists: PodLink connection test
+  user: core
+  <source>
+    *: "PodLink Echo"
+  </source>
+  <dest>
+    *: "PodLink 回声"
+  </dest>
+  <voice>
+    *: "PodLink 回声"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_ROCKLIFE
+  desc: Games, Other Apps and Demos lists: Conway's Game of Life
+  user: core
+  <source>
+    *: "Life"
+  </source>
+  <dest>
+    *: "生命游戏"
+  </dest>
+  <voice>
+    *: "生命游戏"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_SNOW
+  desc: Games, Other Apps and Demos lists: Falling snow
+  user: core
+  <source>
+    *: "Snow"
+  </source>
+  <dest>
+    *: "雪花"
+  </dest>
+  <voice>
+    *: "雪花"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_STARFIELD
+  desc: Games, Other Apps and Demos lists: Flying through stars
+  user: core
+  <source>
+    *: "Starfield"
+  </source>
+  <dest>
+    *: "星空"
+  </dest>
+  <voice>
+    *: "星空"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_TEST_KBD
+  desc: Games, Other Apps and Demos lists: On-screen keyboard test
+  user: core
+  <source>
+    *: "Keyboard Test"
+  </source>
+  <dest>
+    *: "键盘测试"
+  </dest>
+  <voice>
+    *: "键盘测试"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_APP_VU_METER
+  desc: Games, Other Apps and Demos lists: Analog VU meters
+  user: core
+  <source>
+    *: "VU Meter"
+  </source>
+  <dest>
+    *: "音量表"
+  </dest>
+  <voice>
+    *: "音量表"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES
+  desc: Extras > Notes: the screen's title
+  user: core
+  <source>
+    *: "Notes"
+  </source>
+  <dest>
+    *: "备忘录"
+  </dest>
+  <voice>
+    *: "备忘录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_INSTRUCTIONS
+  desc: Extras > Notes: the built-in note on how to add notes, its row and title
+  user: core
+  <source>
+    *: "Instructions"
+  </source>
+  <dest>
+    *: "说明"
+  </dest>
+  <voice>
+    *: "说明"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_HOWTO
+  desc: Extras > Notes > Instructions: the heading
+  user: core
+  <source>
+    *: "How to view and create notes:"
+  </source>
+  <dest>
+    *: "如何查看和创建备忘录："
+  </dest>
+  <voice>
+    *: "如何查看和创建备忘录："
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_HOWTO_TEXT
+  desc: Extras > Notes > Instructions: the first paragraph
+  user: core
+  <source>
+    *: "To view text files here, enable your iPod for disk use in iTunes, then simply drag text files to the Notes folder on your iPod."
+  </source>
+  <dest>
+    *: "要在此处查看文本文件，请在 iTunes 中启用 iPod 的磁盘使用功能，然后将文本文件拖到 iPod 上的 Notes 文件夹中。"
+  </dest>
+  <voice>
+    *: "要在此处查看文本文件，请在 iTunes 中启用 iPod 的磁盘使用功能，然后将文本文件拖到 iPod 上的 Notes 文件夹中。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_HOWTO_MORE
+  desc: Extras > Notes > Instructions: the second paragraph
+  user: core
+  <source>
+    *: "See the iPod Features Guide or visit www.apple.com/support/ipod for additional information."
+  </source>
+  <dest>
+    *: "请参阅《iPod 功能指南》或访问 www.apple.com.cn/support/ipod 以获得更多信息。"
+  </dest>
+  <voice>
+    *: "请参阅《iPod 功能指南》或访问 www.apple.com.cn/support/ipod 以获得更多信息。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS
+  desc: Extras > Calendars: the menu's title
+  user: core
+  <source>
+    *: "Calendars"
+  </source>
+  <dest>
+    *: "日历"
+  </dest>
+  <voice>
+    *: "日历"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_ALL
+  desc: Extras > Calendars: the row that opens the month view
+  user: core
+  <source>
+    *: "All Calendars"
+  </source>
+  <dest>
+    *: "所有日历"
+  </dest>
+  <voice>
+    *: "所有日历"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TODOS
+  desc: Extras > Calendars: the row that opens the To Do items
+  user: core
+  <source>
+    *: "To Do's"
+  </source>
+  <dest>
+    *: "待办事项"
+  </dest>
+  <voice>
+    *: "待办事项"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_ALARMS
+  desc: Extras > Calendars: the row that sets how event alarms sound
+  user: core
+  <source>
+    *: "Alarms"
+  </source>
+  <dest>
+    *: "闹钟"
+  </dest>
+  <voice>
+    *: "闹钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_BEEP
+  desc: Extras > Calendars > Alarms: event alarms beep
+  user: core
+  <source>
+    *: "Beep"
+  </source>
+  <dest>
+    *: "嘟声"
+  </dest>
+  <voice>
+    *: "嘟声"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NONE
+  desc: Extras > Calendars > Alarms: event alarms show without a sound
+  user: core
+  <source>
+    *: "None"
+  </source>
+  <dest>
+    *: "无"
+  </dest>
+  <voice>
+    *: "无"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TODO_HOWTO
+  desc: Extras > Calendars > To Do's: the heading
+  user: core
+  <source>
+    *: "How to view To Do items:"
+  </source>
+  <dest>
+    *: "如何查看待办事项："
+  </dest>
+  <voice>
+    *: "如何查看待办事项："
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TODO_TEXT
+  desc: Extras > Calendars > To Do's: the first paragraph
+  user: core
+  <source>
+    *: "To view your To Do items here, enable syncing from iTunes under the Calendar section of the Contacts tab."
+  </source>
+  <dest>
+    *: "若要在此处查看待办事项，请在 iTunes 中“通讯录”标签的“日历”部分启用同步。"
+  </dest>
+  <voice>
+    *: "若要在此处查看待办事项，请在 iTunes 中“通讯录”标签的“日历”部分启用同步。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NO_EVENTS
+  desc: Extras > Calendars: a day without events
+  user: core
+  <source>
+    *: "No events for this day"
+  </source>
+  <dest>
+    *: "这一天没有事件"
+  </dest>
+  <voice>
+    *: "这一天没有事件"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MONTH_TITLE
+  desc: Extras > Calendars: the month view's title; M is replaced by the short month name, Y by the year
+  user: core
+  <source>
+    *: "M Y"
+  </source>
+  <dest>
+    *: "Y年M"
+  </dest>
+  <voice>
+    *: "Y年M"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_DAY_TITLE
+  desc: Extras > Calendars: a day's title; M is replaced by the full month name, D by the day, Y by the year
+  user: core
+  <source>
+    *: "M D, Y"
+  </source>
+  <dest>
+    *: "Y年M月D日"
+  </dest>
+  <voice>
+    *: "Y年M月D日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_JANUARY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "January"
+  </source>
+  <dest>
+    *: "1"
+  </dest>
+  <voice>
+    *: "1"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_FEBRUARY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "February"
+  </source>
+  <dest>
+    *: "2"
+  </dest>
+  <voice>
+    *: "2"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MARCH
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "March"
+  </source>
+  <dest>
+    *: "3"
+  </dest>
+  <voice>
+    *: "3"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_APRIL
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "April"
+  </source>
+  <dest>
+    *: "4"
+  </dest>
+  <voice>
+    *: "4"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MAY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "May"
+  </source>
+  <dest>
+    *: "5"
+  </dest>
+  <voice>
+    *: "5"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_JUNE
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "June"
+  </source>
+  <dest>
+    *: "6"
+  </dest>
+  <voice>
+    *: "6"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_JULY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "July"
+  </source>
+  <dest>
+    *: "7"
+  </dest>
+  <voice>
+    *: "7"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_AUGUST
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "August"
+  </source>
+  <dest>
+    *: "8"
+  </dest>
+  <voice>
+    *: "8"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_SEPTEMBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "September"
+  </source>
+  <dest>
+    *: "9"
+  </dest>
+  <voice>
+    *: "9"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_OCTOBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "October"
+  </source>
+  <dest>
+    *: "10"
+  </dest>
+  <voice>
+    *: "10"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NOVEMBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "November"
+  </source>
+  <dest>
+    *: "11"
+  </dest>
+  <voice>
+    *: "11"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_DECEMBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "December"
+  </source>
+  <dest>
+    *: "12"
+  </dest>
+  <voice>
+    *: "12"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_SUNDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Sunday"
+  </source>
+  <dest>
+    *: "星期日"
+  </dest>
+  <voice>
+    *: "星期日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MONDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Monday"
+  </source>
+  <dest>
+    *: "星期一"
+  </dest>
+  <voice>
+    *: "星期一"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TUESDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Tuesday"
+  </source>
+  <dest>
+    *: "星期二"
+  </dest>
+  <voice>
+    *: "星期二"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_WEDNESDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Wednesday"
+  </source>
+  <dest>
+    *: "星期三"
+  </dest>
+  <voice>
+    *: "星期三"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_THURSDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Thursday"
+  </source>
+  <dest>
+    *: "星期四"
+  </dest>
+  <voice>
+    *: "星期四"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_FRIDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Friday"
+  </source>
+  <dest>
+    *: "星期五"
+  </dest>
+  <voice>
+    *: "星期五"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_SATURDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Saturday"
+  </source>
+  <dest>
+    *: "星期六"
+  </dest>
+  <voice>
+    *: "星期六"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK
+  desc: Extras > Screen Lock: the item and its screen title
+  user: core
+  <source>
+    *: "Screen Lock"
+  </source>
+  <dest>
+    *: "屏幕锁定"
+  </dest>
+  <voice>
+    *: "屏幕锁定"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_NEW
+  desc: Extras > Screen Lock: choosing a new four-digit combination
+  user: core
+  <source>
+    *: "New Combination"
+  </source>
+  <dest>
+    *: "新密码"
+  </dest>
+  <voice>
+    *: "新密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_CONFIRM
+  desc: Extras > Screen Lock: entering the new combination again
+  user: core
+  <source>
+    *: "Confirm Combination"
+  </source>
+  <dest>
+    *: "确认密码"
+  </dest>
+  <voice>
+    *: "确认密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_ENTER
+  desc: Extras > Screen Lock: entering the combination to unlock or reset
+  user: core
+  <source>
+    *: "Enter Combination"
+  </source>
+  <dest>
+    *: "输入密码"
+  </dest>
+  <voice>
+    *: "输入密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_INCORRECT
+  desc: Extras > Screen Lock: the combination entered was wrong
+  user: core
+  <source>
+    *: "Incorrect Combination"
+  </source>
+  <dest>
+    *: "密码不正确"
+  </dest>
+  <voice>
+    *: "密码不正确"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_LOCK
+  desc: Extras > Screen Lock: button that locks the screen
+  user: core
+  <source>
+    *: "Lock"
+  </source>
+  <dest>
+    *: "锁定"
+  </dest>
+  <voice>
+    *: "锁定"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_RESET
+  desc: Extras > Screen Lock: button that changes the combination
+  user: core
+  <source>
+    *: "Reset"
+  </source>
+  <dest>
+    *: "重设"
+  </dest>
+  <voice>
+    *: "重设"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_NONE
+  desc: Extras menu side pane: no screen lock combination is set
+  user: core
+  <source>
+    *: "No Combination"
+  </source>
+  <dest>
+    *: "未设定密码"
+  </dest>
+  <voice>
+    *: "未设定密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_SET
+  desc: Extras menu side pane: a screen lock combination is set
+  user: core
+  <source>
+    *: "Combination Set"
+  </source>
+  <dest>
+    *: "已设定密码"
+  </dest>
+  <voice>
+    *: "已设定密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH
+  desc: Extras > Stopwatch: its title and menu row
+  user: core
+  <source>
+    *: "Stopwatch"
+  </source>
+  <dest>
+    *: "秒表"
+  </dest>
+  <voice>
+    *: "秒表"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_NEW_TIMER
+  desc: Stopwatch menu: start a fresh session
+  user: core
+  <source>
+    *: "New Timer"
+  </source>
+  <dest>
+    *: "新计时器"
+  </dest>
+  <voice>
+    *: "新计时器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_CLEAR_LOGS
+  desc: Stopwatch menu: delete every session
+  user: core
+  <source>
+    *: "Clear Logs"
+  </source>
+  <dest>
+    *: "清除记录"
+  </dest>
+  <voice>
+    *: "清除记录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_CURRENT_LOG
+  desc: Stopwatch menu: the running session's log
+  user: core
+  <source>
+    *: "Current Log"
+  </source>
+  <dest>
+    *: "当前记录"
+  </dest>
+  <voice>
+    *: "当前记录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_LOG
+  desc: Stopwatch: title of a session's log
+  user: core
+  <source>
+    *: "Stopwatch Log"
+  </source>
+  <dest>
+    *: "秒表记录"
+  </dest>
+  <voice>
+    *: "秒表记录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_TOTAL
+  desc: Stopwatch log: the session's whole time
+  user: core
+  <source>
+    *: "Total"
+  </source>
+  <dest>
+    *: "总计"
+  </dest>
+  <voice>
+    *: "总计"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_SHORTEST
+  desc: Stopwatch log: the shortest lap
+  user: core
+  <source>
+    *: "Shortest"
+  </source>
+  <dest>
+    *: "最短"
+  </dest>
+  <voice>
+    *: "最短"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_LONGEST
+  desc: Stopwatch log: the longest lap
+  user: core
+  <source>
+    *: "Longest"
+  </source>
+  <dest>
+    *: "最长"
+  </dest>
+  <voice>
+    *: "最长"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_AVERAGE
+  desc: Stopwatch log: the mean lap
+  user: core
+  <source>
+    *: "Average"
+  </source>
+  <dest>
+    *: "平均"
+  </dest>
+  <voice>
+    *: "平均"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_LAP
+  desc: Stopwatch log: one lap's row, %d is its number
+  user: core
+  <source>
+    *: "Lap %d"
+  </source>
+  <dest>
+    *: "第 %d 圈"
+  </dest>
+  <voice>
+    *: "第 %d 圈"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_DELETE_LOG
+  desc: Stopwatch log: delete this session
+  user: core
+  <source>
+    *: "Delete Log"
+  </source>
+  <dest>
+    *: "删除记录"
+  </dest>
+  <voice>
+    *: "删除记录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_ADD
+  desc: Clocks: button that adds a clock
+  user: core
+  <source>
+    *: "Add"
+  </source>
+  <dest>
+    *: "添加"
+  </dest>
+  <voice>
+    *: "添加"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_REGION
+  desc: Clocks: title of the region list
+  user: core
+  <source>
+    *: "Region"
+  </source>
+  <dest>
+    *: "地区"
+  </dest>
+  <voice>
+    *: "地区"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_CITY
+  desc: Clocks: title of the city list
+  user: core
+  <source>
+    *: "City"
+  </source>
+  <dest>
+    *: "城市"
+  </dest>
+  <voice>
+    *: "城市"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_TODAY
+  desc: Clocks: a clock's day is the player's day
+  user: core
+  <source>
+    *: "Today"
+  </source>
+  <dest>
+    *: "今天"
+  </dest>
+  <voice>
+    *: "今天"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_TOMORROW
+  desc: Clocks: a clock's day is the player's next day
+  user: core
+  <source>
+    *: "Tomorrow"
+  </source>
+  <dest>
+    *: "明天"
+  </dest>
+  <voice>
+    *: "明天"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_YESTERDAY
+  desc: Clocks: a clock's day is the player's previous day
+  user: core
+  <source>
+    *: "Yesterday"
+  </source>
+  <dest>
+    *: "昨天"
+  </dest>
+  <voice>
+    *: "昨天"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_AFRICA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Africa"
+  </source>
+  <dest>
+    *: "非洲"
+  </dest>
+  <voice>
+    *: "非洲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_ASIA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Asia"
+  </source>
+  <dest>
+    *: "亚洲"
+  </dest>
+  <voice>
+    *: "亚洲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_ATLANTIC
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Atlantic"
+  </source>
+  <dest>
+    *: "大西洋"
+  </dest>
+  <voice>
+    *: "大西洋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_AUSTRALIA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Australia"
+  </source>
+  <dest>
+    *: "澳大利亚"
+  </dest>
+  <voice>
+    *: "澳大利亚"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_EUROPE
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Europe"
+  </source>
+  <dest>
+    *: "欧洲"
+  </dest>
+  <voice>
+    *: "欧洲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_NORTH_AMERICA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "North America"
+  </source>
+  <dest>
+    *: "北美洲"
+  </dest>
+  <voice>
+    *: "北美洲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_PACIFIC
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Pacific"
+  </source>
+  <dest>
+    *: "太平洋"
+  </dest>
+  <voice>
+    *: "太平洋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_SOUTH_AMERICA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "South America"
+  </source>
+  <dest>
+    *: "南美洲"
+  </dest>
+  <voice>
+    *: "南美洲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS
+  desc: Extras Alarms: the Alarms screen's title
+  user: core
+  <source>
+    *: "Alarms"
+  </source>
+  <dest>
+    *: "闹钟"
+  </dest>
+  <voice>
+    *: "闹钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_ALARM
+  desc: Extras Alarms: an alarm, its On/Off row and default label
+  user: core
+  <source>
+    *: "Alarm"
+  </source>
+  <dest>
+    *: "闹钟"
+  </dest>
+  <voice>
+    *: "闹钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_CREATE
+  desc: Extras Alarms: row that adds an alarm
+  user: core
+  <source>
+    *: "Create Alarm"
+  </source>
+  <dest>
+    *: "创建闹钟"
+  </dest>
+  <voice>
+    *: "创建闹钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_NEW
+  desc: Extras Alarms: under Create Alarm
+  user: core
+  <source>
+    *: "New Alarm"
+  </source>
+  <dest>
+    *: "新闹钟"
+  </dest>
+  <voice>
+    *: "新闹钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_INACTIVE
+  desc: Extras Alarms: sleep timer off
+  user: core
+  <source>
+    *: "Inactive"
+  </source>
+  <dest>
+    *: "未启用"
+  </dest>
+  <voice>
+    *: "未启用"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_MINUTES
+  desc: Extras Alarms: a sleep timer length, %d minutes
+  user: core
+  <source>
+    *: "%d Minutes"
+  </source>
+  <dest>
+    *: "%d 分钟"
+  </dest>
+  <voice>
+    *: "%d 分钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_REMAINING
+  desc: Extras Alarms: sleep timer running, %d minutes left
+  user: core
+  <source>
+    *: "%d Min Remaining"
+  </source>
+  <dest>
+    *: "剩余 %d 分钟"
+  </dest>
+  <voice>
+    *: "剩余 %d 分钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TIME_AM
+  desc: Extras Alarms: a morning time, hour then minute
+  user: core
+  <source>
+    *: "%d:%02d AM"
+  </source>
+  <dest>
+    *: "上午%d:%02d"
+  </dest>
+  <voice>
+    *: "上午%d:%02d"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TIME_PM
+  desc: Extras Alarms: an afternoon time, hour then minute
+  user: core
+  <source>
+    *: "%d:%02d PM"
+  </source>
+  <dest>
+    *: "下午%d:%02d"
+  </dest>
+  <voice>
+    *: "下午%d:%02d"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_AM
+  desc: Extras Alarms: the time editor's morning slot
+  user: core
+  <source>
+    *: "AM"
+  </source>
+  <dest>
+    *: "上午"
+  </dest>
+  <voice>
+    *: "上午"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PM
+  desc: Extras Alarms: the time editor's afternoon slot
+  user: core
+  <source>
+    *: "PM"
+  </source>
+  <dest>
+    *: "下午"
+  </dest>
+  <voice>
+    *: "下午"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WHEN
+  desc: Extras Alarms: day, month abbreviation, time
+  user: core
+  <source>
+    *: "%d %s %s"
+  </source>
+  <dest>
+    *: "%d日 %s %s"
+  </dest>
+  <voice>
+    *: "%d日 %s %s"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_LABEL
+  desc: Extras Alarms: editor row
+  user: core
+  <source>
+    *: "Label"
+  </source>
+  <dest>
+    *: "标签"
+  </dest>
+  <voice>
+    *: "标签"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_SOUNDS
+  desc: Extras Alarms: alarm sound menu title
+  user: core
+  <source>
+    *: "Sounds"
+  </source>
+  <dest>
+    *: "声音"
+  </dest>
+  <voice>
+    *: "声音"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TONES
+  desc: Extras Alarms: built-in alarm tones
+  user: core
+  <source>
+    *: "Tones"
+  </source>
+  <dest>
+    *: "铃声"
+  </dest>
+  <voice>
+    *: "铃声"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_NONE
+  desc: Extras Alarms: no sound
+  user: core
+  <source>
+    *: "None"
+  </source>
+  <dest>
+    *: "无"
+  </dest>
+  <voice>
+    *: "无"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_BEEP
+  desc: Extras Alarms: beep tone
+  user: core
+  <source>
+    *: "Beep"
+  </source>
+  <dest>
+    *: "嘟声"
+  </dest>
+  <voice>
+    *: "嘟声"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_ONCE
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Once"
+  </source>
+  <dest>
+    *: "一次"
+  </dest>
+  <voice>
+    *: "一次"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_DAY
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Day"
+  </source>
+  <dest>
+    *: "每天"
+  </dest>
+  <voice>
+    *: "每天"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WEEKDAYS
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Weekdays"
+  </source>
+  <dest>
+    *: "工作日"
+  </dest>
+  <voice>
+    *: "工作日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WEEKENDS
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Weekends"
+  </source>
+  <dest>
+    *: "周末"
+  </dest>
+  <voice>
+    *: "周末"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_WEEK
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Week"
+  </source>
+  <dest>
+    *: "每周"
+  </dest>
+  <voice>
+    *: "每周"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_MONTH
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Month"
+  </source>
+  <dest>
+    *: "每月"
+  </dest>
+  <voice>
+    *: "每月"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_YEAR
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Year"
+  </source>
+  <dest>
+    *: "每年"
+  </dest>
+  <voice>
+    *: "每年"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WAKE_UP
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Wake up"
+  </source>
+  <dest>
+    *: "起床"
+  </dest>
+  <voice>
+    *: "起床"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WORK
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Work"
+  </source>
+  <dest>
+    *: "工作"
+  </dest>
+  <voice>
+    *: "工作"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_CLASS
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Class"
+  </source>
+  <dest>
+    *: "上课"
+  </dest>
+  <voice>
+    *: "上课"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_APPOINTMENT
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Appointment"
+  </source>
+  <dest>
+    *: "预约"
+  </dest>
+  <voice>
+    *: "预约"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PHONE_CALL
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Phone Call"
+  </source>
+  <dest>
+    *: "电话"
+  </dest>
+  <voice>
+    *: "电话"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_BREAKFAST
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Breakfast"
+  </source>
+  <dest>
+    *: "早餐"
+  </dest>
+  <voice>
+    *: "早餐"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_LUNCH
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Lunch"
+  </source>
+  <dest>
+    *: "午餐"
+  </dest>
+  <voice>
+    *: "午餐"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DINNER
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Dinner"
+  </source>
+  <dest>
+    *: "晚餐"
+  </dest>
+  <voice>
+    *: "晚餐"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_IMPORTANT
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Important"
+  </source>
+  <dest>
+    *: "重要"
+  </dest>
+  <voice>
+    *: "重要"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PRESCRIPTION
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Prescription"
+  </source>
+  <dest>
+    *: "处方"
+  </dest>
+  <voice>
+    *: "处方"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TAKE_MEDICINE
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Take Medicine"
+  </source>
+  <dest>
+    *: "吃药"
+  </dest>
+  <voice>
+    *: "吃药"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_RETURN_CALL
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Return Call"
+  </source>
+  <dest>
+    *: "回电话"
+  </dest>
+  <voice>
+    *: "回电话"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DELIVERY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Delivery"
+  </source>
+  <dest>
+    *: "送货"
+  </dest>
+  <voice>
+    *: "送货"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PICK_UP
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Pick-Up"
+  </source>
+  <dest>
+    *: "接人"
+  </dest>
+  <voice>
+    *: "接人"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_MEETING
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Meeting"
+  </source>
+  <dest>
+    *: "会议"
+  </dest>
+  <voice>
+    *: "会议"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_REMINDER
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Reminder"
+  </source>
+  <dest>
+    *: "提醒"
+  </dest>
+  <voice>
+    *: "提醒"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DATE
+  desc: Extras Alarms: label, a social date
+  user: core
+  <source>
+    *: "Date"
+  </source>
+  <dest>
+    *: "约会"
+  </dest>
+  <voice>
+    *: "约会"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_ANNIVERSARY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Anniversary"
+  </source>
+  <dest>
+    *: "纪念日"
+  </dest>
+  <voice>
+    *: "纪念日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_BIRTHDAY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Birthday"
+  </source>
+  <dest>
+    *: "生日"
+  </dest>
+  <voice>
+    *: "生日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_HOLIDAY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Holiday"
+  </source>
+  <dest>
+    *: "假日"
+  </dest>
+  <voice>
+    *: "假日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_GO_HOME
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Go Home"
+  </source>
+  <dest>
+    *: "回家"
+  </dest>
+  <voice>
+    *: "回家"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PARTY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Party"
+  </source>
+  <dest>
+    *: "聚会"
+  </dest>
+  <voice>
+    *: "聚会"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DISMISS
+  desc: Extras Alarms: alert option
+  user: core
+  <source>
+    *: "Dismiss"
+  </source>
+  <dest>
+    *: "关闭"
+  </dest>
+  <voice>
+    *: "关闭"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_SNOOZE
+  desc: Extras Alarms: alert option
+  user: core
+  <source>
+    *: "Snooze"
+  </source>
+  <dest>
+    *: "稍后提醒"
+  </dest>
+  <voice>
+    *: "稍后提醒"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_WAKE_UP
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time to wake up."
+  </source>
+  <dest>
+    *: "该起床了。"
+  </dest>
+  <voice>
+    *: "该起床了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_WORK
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have work to do."
+  </source>
+  <dest>
+    *: "你有工作要做。"
+  </dest>
+  <voice>
+    *: "你有工作要做。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_CLASS
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a class to attend."
+  </source>
+  <dest>
+    *: "你有一节课要上。"
+  </dest>
+  <voice>
+    *: "你有一节课要上。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_ALARM
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an alarm."
+  </source>
+  <dest>
+    *: "你有一个闹钟。"
+  </dest>
+  <voice>
+    *: "你有一个闹钟。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_APPOINTMENT
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming appointment."
+  </source>
+  <dest>
+    *: "你有一个预约即将开始。"
+  </dest>
+  <voice>
+    *: "你有一个预约即将开始。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PHONE_CALL
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a phone call to make."
+  </source>
+  <dest>
+    *: "你需要打一个电话。"
+  </dest>
+  <voice>
+    *: "你需要打一个电话。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_BREAKFAST
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time for breakfast."
+  </source>
+  <dest>
+    *: "该吃早餐了。"
+  </dest>
+  <voice>
+    *: "该吃早餐了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_LUNCH
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time for lunch."
+  </source>
+  <dest>
+    *: "该吃午餐了。"
+  </dest>
+  <voice>
+    *: "该吃午餐了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_DINNER
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time for dinner."
+  </source>
+  <dest>
+    *: "该吃晚餐了。"
+  </dest>
+  <voice>
+    *: "该吃晚餐了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_IMPORTANT
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "An important event is about to occur."
+  </source>
+  <dest>
+    *: "一件重要的事即将发生。"
+  </dest>
+  <voice>
+    *: "一件重要的事即将发生。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PRESCRIPTION
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a prescription to pick up or refill."
+  </source>
+  <dest>
+    *: "你需要取药或续药。"
+  </dest>
+  <voice>
+    *: "你需要取药或续药。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_TAKE_MEDICINE
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time to take your medicine."
+  </source>
+  <dest>
+    *: "该吃药了。"
+  </dest>
+  <voice>
+    *: "该吃药了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_RETURN_CALL
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a phone call to return."
+  </source>
+  <dest>
+    *: "你需要回一个电话。"
+  </dest>
+  <voice>
+    *: "你需要回一个电话。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_DELIVERY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You need to make a delivery."
+  </source>
+  <dest>
+    *: "你需要送一件东西。"
+  </dest>
+  <voice>
+    *: "你需要送一件东西。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PICK_UP
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You need to pick up a delivery."
+  </source>
+  <dest>
+    *: "你需要取一件东西。"
+  </dest>
+  <voice>
+    *: "你需要取一件东西。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_MEETING
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a meeting to attend."
+  </source>
+  <dest>
+    *: "你有一个会议要参加。"
+  </dest>
+  <voice>
+    *: "你有一个会议要参加。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_REMINDER
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "There is something you should be doing right now."
+  </source>
+  <dest>
+    *: "现在有件事你该去做了。"
+  </dest>
+  <voice>
+    *: "现在有件事你该去做了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_DATE
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "An important date is about to occur."
+  </source>
+  <dest>
+    *: "一个重要的日子即将到来。"
+  </dest>
+  <voice>
+    *: "一个重要的日子即将到来。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_ANNIVERSARY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming anniversary to celebrate."
+  </source>
+  <dest>
+    *: "你有一个纪念日即将到来。"
+  </dest>
+  <voice>
+    *: "你有一个纪念日即将到来。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_BIRTHDAY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming birthday to celebrate."
+  </source>
+  <dest>
+    *: "你有一个生日即将到来。"
+  </dest>
+  <voice>
+    *: "你有一个生日即将到来。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_HOLIDAY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming holiday to celebrate."
+  </source>
+  <dest>
+    *: "你有一个节日即将到来。"
+  </dest>
+  <voice>
+    *: "你有一个节日即将到来。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_GO_HOME
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You should be going home soon."
+  </source>
+  <dest>
+    *: "你该准备回家了。"
+  </dest>
+  <voice>
+    *: "你该准备回家了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PARTY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a party to attend."
+  </source>
+  <dest>
+    *: "你有一个聚会要参加。"
+  </dest>
+  <voice>
+    *: "你有一个聚会要参加。"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_NO_CONTACTS
+  desc: Fruit Company: Extras side pane beside Contacts, which lists none
+  user: core
+  <source>
+    *: "No Contacts"
+  </source>
+  <dest>
+    *: "无联系人"
+  </dest>
+  <voice>
+    *: "无联系人"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_GAMES_COUNT
+  desc: Fruit Company: Extras side pane beside Games, the number of games; keep %d
+  user: core
+  <source>
+    *: "%d Games"
+  </source>
+  <dest>
+    *: "%d 个游戏"
+  </dest>
+  <voice>
+    *: "%d 个游戏"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_ONE_GAME
+  desc: Fruit Company: Extras side pane beside Games when there is one
+  user: core
+  <source>
+    *: "1 Game"
+  </source>
+  <dest>
+    *: "1 个游戏"
+  </dest>
+  <voice>
+    *: "1 个游戏"
+  </voice>
+</phrase>

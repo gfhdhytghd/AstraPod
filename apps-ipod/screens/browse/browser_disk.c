@@ -640,6 +640,11 @@ int browser_disk_enter(struct browser_context* c)
         bool play = false;
         int start_index=0;
 
+        /* An .mp4 with moving video in it opens in the video player, as an
+         * .m4v does, rather than playing as a song */
+        if (filetype_is_video(buf, file_attr))
+            file_attr = FILE_ATTR_VIDEO;
+
         switch ( file_attr & FILE_ATTR_MASK ) {
             /* The synthetic Search row. Which box it opens is the browse's,
              * not the row's: the playlist catalogue searches playlist names,
@@ -767,7 +772,7 @@ int browser_disk_enter(struct browser_context* c)
                     return rc;
                 }
 
-                filetype_open_core_viewer(file->attr, buf, &rc);
+                filetype_open_core_viewer(file_attr, buf, &rc);
                 break;
             }
         }

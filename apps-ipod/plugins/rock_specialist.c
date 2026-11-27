@@ -166,6 +166,7 @@ int rock_remove_theme_file(const char *path)
                          !strncasecmp(name, "light", length))) ||
         (length == 7 && (!strncasecmp(name, "classic", length) ||
                          !strncasecmp(name, "plastic", length))) ||
+        (length == 13 && !strncasecmp(name, "fruit-company", length)) ||
         (native && strlen(active) == length &&
          !strncasecmp(name, active, length)))
         return -1;

@@ -30,6 +30,7 @@
  *     flush/restore
  ****************************************************************************/
 #include <stdio.h>
+#include "ui/idle.h"
 #include <stdlib.h>
 #include <stdbool.h>
 #include "string-extra.h"
@@ -1580,7 +1581,7 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
             button = ACTION_STD_CANCEL;
         ui_scene_update(scene, redrew);
         if (button == ACTION_NONE && !gui_synclist_moving(&browser_lists))
-            lcd_update();
+            ui_idle_list_present();
         tc.selected_item = gui_synclist_get_sel_pos(&browser_lists);
 
         if (list_select_active() && select_unsafe())

@@ -843,9 +843,8 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
         if (button && !IS_SYSEVENT(button) )
             storage_spin();
 
-        /* Poll PCM while the display is visible. Each retained node damages
-         * only the region it actually changed. */
-        button = get_action(CONTEXT_WPS|ALLOW_SOFTLOCK, lcd_active() ? 1 : HZ/5);
+        button = get_action(CONTEXT_WPS | ALLOW_SOFTLOCK,
+                            native_wps_timeout());
         uint32_t action_us = USEC_TIMER;
 
 #ifdef HAVE_USB_PODLINK

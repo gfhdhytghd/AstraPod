@@ -31,6 +31,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include "config.h"
+#include "ui/idle.h"
 #include "lcd.h"
 #include "font.h"
 #include "button.h"
@@ -947,14 +948,12 @@ bool list_do_action(int context, int timeout,
      * during get_action, and its dirty rectangles must reach the LCD. */
     if (!inhibited)
         ui_flush_dirty();
-    /* A settled list does not dirty the LCD. Submit the last frame so a
-     * wait for input still refreshes the panel. */
     if (*action == ACTION_NONE)
     {
         if (list_render_motion_due(lists))
             draw_due(lists);
         if (!gui_synclist_moving(lists))
-            lcd_update();
+            ui_idle_list_present();
     }
     return handled;
 }

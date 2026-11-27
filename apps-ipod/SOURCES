@@ -449,6 +449,7 @@ viewers/image_viewer/decoders/ppm_decoder.c
 #endif
 
 ui/frame.c
+ui/idle.c
 ui/statusbar.c
 #if defined(HAVE_LCD_COLOR) && defined(HAVE_ALBUMART)
 metadata/album_palette.c
@@ -561,6 +562,9 @@ sim/shim-dircache.c
 sim/shim-fs.c
 sim/shim-glyphs.c
 sim/shim-hwscroll.c
+#ifdef PODBOX_POWER_PROBE
+sim/power-probe.c
+#endif
 sim/shim-usb.c
 /* Not a shim: tools/tests/row_glyphs_test.py's menu-row dump. */
 sim/menu-dump.c

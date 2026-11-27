@@ -44,7 +44,7 @@ static inline bool button_frame_wait(struct queue_event *ev, int ticks)
 #define button_discard_frame_wake() ((void)0)
 #endif
 
-#ifdef HAVE_ADJUSTABLE_CPU_FREQ
+#if defined(HAVE_ADJUSTABLE_CPU_FREQ) || defined(PODBOX_POWER_PROBE)
 static bool button_boosted = false;
 static long button_unboost_tick;
 #define BUTTON_UNBOOST_TMO HZ
@@ -68,6 +68,10 @@ static void button_boost(bool state)
         cpu_boost(false);
     }
 }
+
+#ifdef IPOD_6G
+#include "../target/arm/s5l8702/ipod6g/button-idle-boost.h"
+#endif
 
 static void button_queue_wait(struct queue_event *evp, int timeout)
 {
@@ -94,6 +98,10 @@ static void button_queue_wait(struct queue_event *evp, int timeout)
         button_frame_wait(evp, ticks);
         if (evp->id != SYS_TIMEOUT)
         {
+#ifdef IPOD_6G
+            if (button_idle_boost_wake(evp->id))
+                break;
+#endif
             /* GUI boost build gets immediate kick, otherwise at least 3
                messages had to be there */
         #ifndef HAVE_GUI_BOOST

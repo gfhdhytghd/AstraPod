@@ -38,6 +38,10 @@ INCLUDES += -I$(APPSDIR)/api -I$(APPSDIR)
 # Gated on APP_TYPE so a hardware build sees no new flag at all.
 ifeq ($(APP_TYPE),sdl-sim)
 INCLUDES := -I$(APPSDIR)/sim/include $(INCLUDES)
+ifeq ($(PODBOX_POWER_PROBE),1)
+override GCCOPTS += -DPODBOX_POWER_PROBE
+GLOBAL_LDOPTS += -Wl,--wrap=get_action,--wrap=get_custom_action,--wrap=sdl_gui_update
+endif
 endif
 
 SRC += $(call preprocess, $(APPSDIR)/SOURCES)

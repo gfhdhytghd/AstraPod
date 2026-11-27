@@ -31,6 +31,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include "config.h"
+#include "ui/idle.h"
 #include "system.h"
 
 #include "system/appevents.h"
@@ -1118,7 +1119,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                                 ui_scene_timeout(&modal, ui_scene_timeout(scene, list_do_action_timeout(&lists, HZ))));
         }
         if (action == ACTION_NONE && !gui_synclist_moving(&lists))
-            lcd_update();
+            ui_idle_list_present();
 
 #ifdef HAVE_WHEEL_WPS_CHORD
         /* Root CANCEL normally stays at Home. A deferred screen shortcut

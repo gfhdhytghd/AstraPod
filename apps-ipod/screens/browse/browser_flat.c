@@ -44,12 +44,14 @@
 #include "input/action.h"
 #include "system/activity.h"
 #include "files/file_index.h"
+#include "files/stock_db.h"
 #include "files/path_list.h"
 #include "files/filetypes.h"
 #include "system/bg_task.h"         /* a file gone: the walk again */
 #include "strnatcmp.h"
 #include "root_menu.h"
 #include "browser_flat.h"
+#include "stock_media.h"
 #include "ui/scene.h"
 
 /* ------------------------------------------------------------------ *
@@ -58,6 +60,7 @@
 
 static struct path_list list;
 static enum flat_kind flat_kind;
+static bool loose_videos_only;
 
 /* The rows above the whole list */
 enum { ROW_SEARCH, ROW_BY_TYPE, HEAD_ROWS };
@@ -155,7 +158,22 @@ static enum themable_icons flat_icon(const char *path)
 
 static bool load(void)
 {
-    return path_list_load(&list, file_index_list(flat_kind), PATH_LIST_MAX);
+    if (!path_list_load(&list, file_index_list(flat_kind), PATH_LIST_MAX))
+        return false;
+    if (loose_videos_only)
+    {
+        int count = 0;
+        for (int i = 0; i < list.count; i++)
+            if (strncasecmp(flat_path(i), STOCK_VIDEO_PATH, sizeof(STOCK_VIDEO_PATH) - 1))
+                list.line[count++] = list.line[i];
+        list.count = count;
+        if (!count)
+        {
+            path_list_free(&list);
+            return false;
+        }
+    }
+    return true;
 }
 
 /* ------------------------------------------------------------------ *
@@ -325,7 +343,9 @@ static int types_run(void)
         info.get_icon = type_icon;
         info.get_kind = type_kind;
         info.selection = MIN(sel, type_ct - 1);
-        info.wps_on_play = true;
+        info.wps_on_play = !loose_videos_only;
+        if (loose_videos_only)
+            info.action_callback = stock_media_list_action;
         if (simplelist_show_list(&info))
             return GO_TO_ROOT;
         if (info.selection == -2)
@@ -407,7 +427,9 @@ static int show_list(const char *type, char *title)
             info.top_item = heads;
         }
         info.selection = MIN(sel, heads + shown_ct - 1);
-        info.wps_on_play = true;
+        info.wps_on_play = !loose_videos_only;
+        if (loose_videos_only)
+            info.action_callback = stock_media_list_action;
 
         if (simplelist_show_list(&info))
         {
@@ -468,4 +490,12 @@ int browser_flat(enum flat_kind kind)
     pop_current_activity();
     path_list_free(&list);
     return ret;
+}
+
+int browser_flat_loose_videos(void)
+{
+    loose_videos_only = true;
+    int result = browser_flat(FLAT_VIDEOS);
+    loose_videos_only = false;
+    return result;
 }

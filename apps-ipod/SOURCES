@@ -212,6 +212,8 @@ sim/rock_host.c
 #endif
 #endif
 screens/browse/browser_flat.c
+screens/browse/stock_videos.c
+screens/browse/stock_photos.c
 screens/extras/extras_alarm_ring.c
 screens/extras/extras_alarms.c
 screens/extras/extras_bar.c
@@ -259,6 +261,7 @@ screens/system/lcd_te_debug.c
 #endif
 files/file_ops.c
 files/file_index.c
+files/stock_db.c
 files/book_index.c
 files/zip_member.c
 files/filetypes.c

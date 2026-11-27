@@ -1156,6 +1156,15 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             }
         }
 
+        if (fruit_menu_is_stock(menu) &&
+            (action == ACTION_STD_OK || action == ACTION_STD_CANCEL))
+        {
+            int button;
+            get_action_statuscode(&button);
+            if (button & (BUTTON_LEFT | BUTTON_RIGHT))
+                action = ACTION_NONE;
+        }
+
         int new_action = menu_callback(action, menu, &lists);
         if (new_action == ACTION_EXIT_AFTER_THIS_MENUITEM)
             ret = MENU_SELECTED_EXIT; /* exit after return from selection */

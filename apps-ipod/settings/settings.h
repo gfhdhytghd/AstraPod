@@ -838,6 +838,18 @@ struct user_settings
     /* FLAT_SORT_*: how Documents and Images order their files */
     int  sort_documents;
     int  sort_images;
+    int photo_duration;
+    int photo_transition;
+    bool photo_repeat;
+    int photo_music;
+    bool photo_shuffle;
+    int media_tv_out;
+    int media_tv_signal;
+    int video_tv_screen;
+    bool video_fit;
+    bool video_alt_audio;
+    bool video_captions;
+    bool video_subtitles;
     /* Per-context overrides of the line above: three bits for each
      * DB_ALBUM_CTX_*, holding DB_SORT_ALBUMS_* + 1, or 0 for "follow
      * database_sort_albums_by". A context is the level an album list hangs

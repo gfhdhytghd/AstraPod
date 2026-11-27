@@ -528,6 +528,51 @@ order.
 The order of the Documents list: by name either way, or the newest file
 first. Newest goes by when a file was last changed.
 
+[photo duration]
+Sets the time between pictures. Choose Manual to advance with the wheel.
+
+[photo repeat]
+Starts the photo slideshow again after the final picture.
+
+[photo transition]
+Changes how the next picture appears. Choose None, Cross Fade, Fade To
+Black, Zoom Out, Wipe Across, or Wipe Center.
+
+[photo music]
+Off pauses music during the slideshow. Now Playing uses the
+current queue. On-The-Go reads the queue saved by the stock firmware.
+
+[photo shuffle]
+Shows pictures in random order during a slideshow.
+
+[media tv out]
+Stores the TV Out preference. This firmware displays media on the iPod
+screen.
+
+[media tv signal]
+Stores the preferred TV signal format. This firmware displays media on
+the iPod screen.
+
+[video tv screen]
+Stores the preferred TV aspect ratio. This firmware displays media on
+the iPod screen.
+
+[video fit]
+Scales the whole picture to fit the iPod screen. Turn it off to use
+native size and center the picture.
+
+[video alternate audio]
+Stores the alternate audio preference. The player uses the first
+supported audio track.
+
+[video captions]
+Stores the captions preference. The player cannot render closed
+captions.
+
+[video subtitles]
+Stores the subtitle preference. The player cannot render subtitle
+tracks.
+
 [sort images]
 The order of the Images list: by name either way, or the newest picture
 first. Newest goes by when a file was last changed.

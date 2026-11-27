@@ -577,12 +577,6 @@ static const struct button_mapping wheel_recording[] = {
 };
 #endif
 
-static const struct button_mapping wheel_quickscreen[] = {
-    { ACTION_STD_CANCEL,  BUTTON_MENU|BUTTON_REL,        BUTTON_MENU },
-    { ACTION_STD_OK,      BUTTON_SELECT|BUTTON_REL,      BUTTON_SELECT },
-    LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_STD)
-};
-
 static const struct button_mapping wheel_list_select[] = {
     { ACTION_LS_TOGGLE,   BUTTON_SELECT|BUTTON_REL,      BUTTON_SELECT },
     { ACTION_NONE,        BUTTON_SELECT|BUTTON_REPEAT,   BUTTON_NONE },
@@ -676,8 +670,7 @@ const struct button_mapping* get_context_mapping(int context)
         case CONTEXT_BOOKMARKSCREEN:
             return button_context_bmark;
         case CONTEXT_QUICKSCREEN:
-            return !rock_ui_raw() && ui_wheel_navigation() ? wheel_quickscreen :
-                   button_context_quickscreen;
+            return button_context_quickscreen;
 #ifdef HAVE_RECORDING
         case CONTEXT_RECSCREEN:
             return !rock_ui_raw() && ui_wheel_navigation() ? wheel_recording :

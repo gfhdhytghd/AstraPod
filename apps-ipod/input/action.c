@@ -63,7 +63,8 @@ static bool wheel_transport(int button)
 
     enum current_activity activity = get_current_activity();
     if (activity == ACTIVITY_ARCADE || activity == ACTIVITY_SPIKE ||
-        activity == ACTIVITY_MUSICQUIZ || activity == ACTIVITY_USBSCREEN)
+        activity == ACTIVITY_MUSICQUIZ || activity == ACTIVITY_USBSCREEN ||
+        activity == ACTIVITY_QUICKSCREEN)
         return false;
 
     int keys = button & BUTTON_MAIN;
@@ -700,6 +701,7 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
     ui_polling = false;
 #endif
     if (cur->context != CONTEXT_SPIKE && cur->context != CONTEXT_MUSIC_QUIZ &&
+        cur->context != CONTEXT_QUICKSCREEN &&
         wheel_transport(*button))
     {
         cur->action = ACTION_NONE;

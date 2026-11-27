@@ -10,7 +10,7 @@ def fn(s,n):
 q=(S/'apps-ipod/screens/playback/quick_screen.c').read_text();a=(S/'apps-ipod/input/action.c').read_text();k=(S/'apps-ipod/input/keymap_ipod.c').read_text()
 names=['button_context_standard','button_context_wps','button_context_quickscreen','remote_button_context_standard','remote_button_context_wps','remote_button_context_quickscreen']
 tables='\n'.join(re.search(r'static const struct button_mapping '+n+r'\[\].*?\n};',k,re.S).group() for n in names)
-actions=sorted(set(re.findall(r'\bACTION_\w+',tables+fn(q,'gui_syncquickscreen_run')+fn(q,'gui_quickscreen_do_button')))|{'ACTION_UNKNOWN'})
+actions=sorted((set(re.findall(r'\bACTION_\w+',tables+fn(q,'gui_syncquickscreen_run')+fn(q,'gui_quickscreen_do_button')))|{'ACTION_UNKNOWN'})-{'ACTION_REPEAT'})
 pre=r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -57,6 +57,7 @@ pre=r'''
 #define QUICKSCREEN_OK 0
 #define QUICKSCREEN_IN_USB 1
 #define QUICKSCREEN_CHANGED 4
+#define QUICKSCREEN_RESTORED 8
 #define QUICKSCREEN_GOTO_SHORTCUTS_MENU 2
 #define QUICKSCREEN_TOP 0
 #define QUICKSCREEN_LEFT 1
@@ -64,6 +65,7 @@ pre=r'''
 #define QUICKSCREEN_BOTTOM 3
 #define QUICKSCREEN_ITEM_COUNT 4
 #define LANG_VOLUME 3
+#define LANG_BRIGHTNESS 99
 struct viewport{int dummy;};
 enum screen_type{SCREEN_MAIN};enum quickscreen_item{dummy_item};
 #define F_BOOL_SETTING 1
@@ -91,7 +93,8 @@ static void backlight_set_brightness(int v){applied=v;}
 static bool is_setting_quickscreenable(const struct settings_list*s){(void)s;return true;}
 static void settings_mark_user_tweak(const struct settings_list*s){assert(s);tweaks++;}
 static void settings_save(void){saves++;}
-static struct {bool talk_menu;int playlist_shuffle,repeat_mode;const struct settings_list*qs_items[4];}global_settings;
+static struct {bool talk_menu;int shuffle_mode,repeat_mode;const struct settings_list*qs_items[4];}global_settings;
+#define playlist_shuffle shuffle_mode
 static struct {int volume;}global_status;
 static int modes[2],cvol,localsteps;
 static bool source_cider;
@@ -136,9 +139,10 @@ pre+=tables+fn(a,'action_code_worker')+fn(a,'remote_context')+fn(a,'remote_volum
 pre+=re.sub(r'^#include .*\n','',(S/'apps-ipod/input/agents_remote.c').read_text(),flags=re.M)
 pre+=fn(q,'cider_slot_mode')+fn(q,'cider_slot')+fn(q,'quickscreen_title')+fn(q,'quickscreen_value')
 pre+=r'''
-struct quickscreen_page { struct { bool active; } sheet; int sheet_handle; };
+struct quickscreen_page { struct { bool active; } sheet; int sheet_handle; bool hud; };
 static bool ui_flush_inhibited(void){return false;}
 static void ui_inhibit_flush(bool on){assert(!on);}
+static void ui_flush_dirty(void){}
 static int ui_sheet_timeout(void *sheet,int timeout){(void)sheet;return timeout;}
 static void default_event_handler(int action){(void)action;}
 static bool album_palette_needs_repaint(void){return false;}

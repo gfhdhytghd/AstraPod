@@ -1,12 +1,28 @@
 #!/usr/bin/env python3
-"""The quick screen (MENU held) in each theme, headless, frame by frame.
+"""The Control Centre (MENU held) in each theme, headless, frame by frame.
 
-Arguments: ROCKBOXUI SIMDISK OUTPUT_DIRECTORY [--themes classic,...] [--hud]
+Arguments: ROCKBOXUI SIMDISK OUTPUT_DIRECTORY [--themes classic,...]
 SIMDISK is a simulator root with .rockbox in it, as build-sim.sh leaves.
-The simulator uses SDL dummy video. Classic and Scrim use their original
-keys. With --hud, exercise Fruit's wheel focus, SELECT and MENU, and verify
-that the HUD dims and restores the caller. Writes PNGs, GIFs, per-theme
-ui-perf.txt and result.json to the output directory.
+Runs headless under SDL dummy video.
+
+Tests all four themes by default: classic, fruit-company, fruit-company-ultra,
+and scrim.
+
+For Classic, Fruit Company, and Fruit Company Ultra:
+- Full-screen four-tile skeuomorphic page under the 20 px white status bar
+  (Shuffle, vertical Brightness slider, Repeat, Enable EQ)
+- Horizontal 320 px push/pop slide matching stock timing (~270 ms, quadratic)
+- Click wheel adjusts Volume and shows only the status-bar volume overlay
+  without altering the four-tile page body
+- MENU, LEFT, RIGHT, and PLAY each operate only their own tile
+- SELECT closes with pop slide and restores the caller menu with no flash
+
+For Scrim:
+- Keeps its existing tiles and vertical sheet slide unchanged
+- Wheel shows status-bar volume overlay; MENU/LEFT/RIGHT/PLAY step tiles;
+  SELECT closes and restores the caller menu.
+
+Writes PNGs, GIFs, per-theme ui-perf.txt and result.json to OUTPUT_DIRECTORY.
 """
 
 import argparse
@@ -19,33 +35,84 @@ from PIL import Image, ImageChops
 
 from ui_stock_walk_sim import Sim
 
-WHEEL_HUD_THEMES = ("fruit-company", "stock-hud")
-HUD_THEMES = ("classic", *WHEEL_HUD_THEMES)
-STATUS = 20
-HUD_SLOTS = ((0, 56, 160, 119), (160, 56, 320, 119),
-             (0, 150, 160, 209), (160, 150, 320, 209))
+PAGE_THEMES = ("classic", "fruit-company", "fruit-company-ultra")
+DEFAULT_THEMES = (*PAGE_THEMES, "scrim")
+STOCK_STATUS = 20
+SCRIM_STATUS = 35
 
+# Four 148x96 tile boxes on the 320x240 Control Centre page:
+# 0: Top-Left (LEFT -> Shuffle), 1: Top-Right (MENU -> Brightness),
+# 2: Bottom-Left (RIGHT -> Repeat), 3: Bottom-Right (PLAY -> Enable EQ).
+TILE_BOXES = (
+    (8, 30, 156, 126),
+    (164, 30, 312, 126),
+    (8, 134, 156, 230),
+    (164, 134, 312, 230),
+)
 
-def wheel_hud_steps(snapshot, tap):
-    """Verify that only the old/new focus or the activated tile changes."""
-    def check(key, *tiles):
-        before = snapshot()
-        tap(key)
-        after = snapshot()
-        return tuple(i for i, box in enumerate(HUD_SLOTS)
-                     if differ(before, after, box)) == tiles
-
-    return {
-        "select_initial_left": check("select", 0),
-        "wheel_to_top": check("down", 0, 1),
-        "select_top": check("select", 1),
-        "wheel_to_right": check("down", 1, 2),
-        "select_right": check("select", 2),
-        "wheel_to_bottom": check("down", 2, 3),
-        "select_bottom": check("select", 3),
-        "wheel_wraps": check("down", 0, 3),
-        "reverse_wheel_wraps": check("up", 0, 3),
-    }
+# Fallback theme file used when running against a branch that does not yet
+# carry built-in Fruit Company Ultra; built-in names take precedence once
+# merged.
+ULTRA_FALLBACK_THEME = """\
+podbox-theme=1
+color.background=ffffff
+color.foreground=000000
+color.muted=000000
+color.accent=3185d0
+color.selection=0089de
+color.selected_text=ffffff
+color.status_bg=cecfce
+color.status_fg=000000
+color.wps_muted=3d3d3d
+gradient.selection=96c5da,09a4e1,0065d3,004386
+gradient.status=fcfcfc,f8f8f8,9f9e9e,5b5b5b
+gradient.progress=6483f0,6789f2,56aeff,4e8fce
+gradient.progress_track=dbdbdb,fdfdfd,e2e2e2,bababa
+font.list=16-helvetica-bold
+font.title=17-helvetica-bold
+font.body=13-helvetica
+font.status=13-helvetica-bold
+font.status_title=13-helvetica-bold
+font.wps_title=17-helvetica-bold
+font.wps_meta=13-helvetica-bold
+font.wps_time=14-helvetica-bold
+font.pane_title=17-helvetica-bold-pane
+font.pane_text=13-helvetica-bold
+font.list_value=13-helvetica-bold
+metric.row_height=24
+metric.list_x=0
+metric.list_y=20
+metric.list_bottom=0
+metric.status_height=20
+metric.status_pad_left=6
+metric.status_pad_right=5
+metric.status_text_y=3
+metric.status_title_height=17
+metric.status_icon_y=0
+metric.status_icon_size=20
+metric.status_icon_gap=5
+metric.wps_volume_y=14
+background.list=solid
+background.wps=solid
+background.lyrics=solid
+background.status=solid
+motion.push=18
+motion.pop=18
+motion.list=0
+motion_easing=quad
+style.selection=bar
+style.list_icons=off
+style.accessory=selected
+style.status_clock=off
+style.page_motion=slide
+style.wps_layout=classic
+style.scrollbar=classic
+style.art=plastic
+style.menu_pane=split
+style.list_rows=fill
+style.menu_tree=stock
+style.quick_screen=hud
+"""
 
 
 def differ(a, b, box=None):
@@ -81,10 +148,10 @@ def record(sim, out, name, key, hold):
     return frames, stamps
 
 
-def run_theme(binary, simdisk, out, theme, hud):
+def run_theme(binary, simdisk, out, theme):
     result = {}
-    wheel_hud = theme in WHEEL_HUD_THEMES
-    close = "menu" if wheel_hud else "select"
+    is_page = theme in PAGE_THEMES
+    status_h = STOCK_STATUS if is_page else SCRIM_STATUS
     with tempfile.TemporaryDirectory(prefix="qs-sim-") as temp:
         root = Path(temp)
         rockbox = root / ".rockbox"
@@ -93,39 +160,44 @@ def run_theme(binary, simdisk, out, theme, hud):
             if entry.name not in ("config.cfg", "ui-perf.txt", "ui-perf.enable",
                                   "native-themes"):
                 (rockbox / entry.name).symlink_to(entry)
-        if theme == "stock-hud":
-            # Exercise the same style combination used by the Ultra HUD.
-            # Ultra itself is not a built-in theme on this integration branch.
+        if theme == "fruit-company-ultra":
             themes = rockbox / "native-themes"
             themes.mkdir()
-            (themes / "stock-hud.podtheme").write_text(
-                "podbox-theme=1\nstyle.menu_tree=stock\nstyle.quick_screen=hud\n"
-                "background.list=solid\ncolor.background=303030\n"
-                "palette.background=none\n")
-        start = "root" if wheel_hud else "menu"
-        slots = ("qs top: keyclick repeats\nqs bottom: hardware keyclick\n"
-                 if wheel_hud else "")
+            (themes / "fruit-company-ultra.podtheme").write_text(
+                ULTRA_FALLBACK_THEME)
+        start = "root" if theme in ("fruit-company", "fruit-company-ultra") else "menu"
         (rockbox / "config.cfg").write_text(
             (simdisk / ".rockbox/default-config.cfg").read_text() +
             f"\nnative theme: {theme}\nstart in screen: {start}\n"
+            "brightness: 32\n"
             "backlight timeout: off\nvoice menus: off\nanimations: on\n"
-            "show background tasks: off\nshow disk activity: off\n" + slots)
+            "show background tasks: off\nshow disk activity: off\n")
         (rockbox / "ui-perf.enable").touch()
         sim = Sim(binary, root, out, theme, theme)
         try:
             time.sleep(2)
             settle(sim)
-            # Warm up the caller so its list has settled before capture.
+            # Warm up the caller so its list has settled after a setting change
+            # before capturing the baseline menu layout.
             sim.key("menu", hold=72)
             settle(sim)
-            if not wheel_hud:
-                # A value change lets the caller redraw its list. Compare the
-                # next close against that settled layout.
-                sim.key("right", hold=6)
-                settle(sim)
-            sim.key(close, hold=6)
+            sim.key("right", hold=6)
+            settle(sim)
+            sim.key("select", hold=6)
             menu = settle(sim)
             menu.save(out / f"{theme}-menu.png")
+
+            # Verify unchanged open -> close restores the caller with no flash.
+            sim.key("menu", hold=72)
+            settle(sim)
+            u_frames, _ = record(sim, out, f"{theme}-close-unchanged", "select", 6)
+            u_closed = settle(sim)
+            compare_box = (0, status_h, 160, 240) if is_page else (0, status_h, 320, 240)
+            result["unchanged_close_no_flash"] = (
+                len(u_frames) >= 2 and
+                not differ(menu, u_closed, compare_box) and
+                not differ(u_frames[-1], u_closed, compare_box)
+            )
 
             frames, stamps = record(sim, out, f"{theme}-open", "menu", 72)
             shown = settle(sim)
@@ -133,41 +205,94 @@ def run_theme(binary, simdisk, out, theme, hud):
             result["open_frames"] = len(frames)
             result["open_ms"] = stamps
             result["opened"] = differ(menu, shown)
+            result["open_animated"] = len(frames) >= 3
 
             def tap(key):
                 sim.key(key, hold=6)
                 settle(sim)
 
-            if wheel_hud:
-                result["steps_change"] = wheel_hud_steps(lambda: frame(sim), tap)
-                before = frame(sim)
-                for key in ("right", "back", "play"):
-                    tap(key)
-                    result["steps_change"][f"{key}_leaves_hud"] = not differ(
-                        before, frame(sim), (0, STATUS, 320, 240))
-            else:
+            # 1. Wheel adjusts Volume and shows ONLY the status-bar volume
+            # overlay without changing the page body.
+            before_vol = frame(sim)
+            tap("down")
+            after_vol1 = frame(sim)
+            for _ in range(5):
+                tap("down")
+            after_vol2 = frame(sim)
+            after_vol2.save(out / f"{theme}-volume.png")
+            status_box = (0, 0, 320, status_h)
+            body_box = (0, status_h, 320, 240)
+            result["wheel_shows_status_volume"] = (
+                differ(before_vol, after_vol1, status_box) and
+                differ(after_vol1, after_vol2, status_box)
+            )
+            result["wheel_leaves_body_unchanged"] = (
+                not differ(before_vol, after_vol1, body_box) and
+                not differ(before_vol, after_vol2, body_box)
+            )
+
+            # 2. Directional keys operate their four tiles.
+            if is_page:
                 steps = {}
-                for key in ("right", "back", "play"):
+                key_tile = (
+                    ("back", 0),   # LEFT -> Shuffle (Top-Left)
+                    ("menu", 1),   # MENU -> Brightness vertical slider (Top-Right)
+                    ("right", 2),  # RIGHT -> Repeat (Bottom-Left)
+                    ("play", 3),   # PLAY -> Enable EQ (Bottom-Right)
+                )
+                for key, expected_tile in key_tile:
                     before = frame(sim)
                     tap(key)
                     after = frame(sim)
-                    after.save(out / f"{theme}-{key}.png")
-                    steps[key] = differ(before, after)
+                    changed = tuple(
+                        i for i, box in enumerate(TILE_BOXES)
+                        if differ(before, after, box)
+                    )
+                    steps[key] = (changed == (expected_tile,))
+                frame(sim).save(out / f"{theme}-stepped.png")
+                # Verify brightness wraps cleanly back around after stepping to max.
+                before_wrap = frame(sim)
+                for _ in range(5):
+                    tap("menu")
+                after_wrap = frame(sim)
+                steps["brightness_cycles"] = not differ(
+                    before_wrap, after_wrap, TILE_BOXES[1])
                 result["steps_change"] = steps
-                # Restore the brightness stepped down via the bottom tile.
-                tap("menu")
+            else:
+                steps = {}
+                for key in ("back", "menu", "right", "play"):
+                    before = frame(sim)
+                    tap(key)
+                    after = frame(sim)
+                    steps[key] = differ(before, after, body_box)
+                frame(sim).save(out / f"{theme}-stepped.png")
+                result["steps_change"] = steps
 
-            frames, stamps = record(sim, out, f"{theme}-close", close, 6)
+            # Wait for the 3 s status-bar volume overlay to clear so the close
+            # comparison against `menu` checks a settled status bar too.
+            time.sleep(3.2)
+            settle(sim)
+
+            # 3. SELECT closes with pop slide and restores caller with no flash.
+            frames, stamps = record(sim, out, f"{theme}-close", "select", 6)
             closed = settle(sim)
             closed.save(out / f"{theme}-closed.png")
             result["close_frames"] = len(frames)
             result["close_ms"] = stamps
+            result["close_animated"] = len(frames) >= 3
+            compare_box = (0, status_h, 160, 240) if is_page else (0, status_h, 320, 240)
             result["closed_restores_menu"] = not differ(
-                menu, closed, (0, STATUS, 160, 240))
-            if hud and theme in HUD_THEMES:
-                corner = (2, 236)
-                result["dimmed_backdrop"] = (
-                    0 < sum(shown.getpixel(corner)) < sum(menu.getpixel(corner)))
+                menu, closed, compare_box)
+            # Check no extra redraw/flash right after the close slide finishes.
+            result["close_no_flash"] = (
+                len(frames) >= 2 and
+                not differ(frames[-1], closed, compare_box)
+            )
+            if is_page:
+                # Full-screen steel-blue backdrop at bottom-left corner, not
+                # a dimmed menu background.
+                r, g, b = shown.getpixel((2, 236))
+                result["full_screen_backdrop"] = (b > r and g > r and b >= 60)
         finally:
             sim.close()
         perf = rockbox / "ui-perf.txt"
@@ -181,21 +306,27 @@ def main():
     for name in ("binary", "simdisk", "out"):
         parser.add_argument(name, type=lambda p: Path(p).resolve())
     parser.add_argument("--themes", help="comma-separated list of native themes")
-    parser.add_argument("--hud", action="store_true")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    themes = (args.themes.split(",") if args.themes else
-              ("classic", "fruit-company", "scrim"))
-    if args.hud and args.themes is None:
-        themes += ("stock-hud",)
+    themes = tuple(args.themes.split(",")) if args.themes else DEFAULT_THEMES
     result = {}
     for theme in themes:
-        result[theme] = run_theme(args.binary, args.simdisk, args.out, theme, args.hud)
+        result[theme] = run_theme(args.binary, args.simdisk, args.out, theme)
         (args.out / "result.json").write_text(json.dumps(result, indent=1))
     failed = []
     for theme, r in result.items():
-        checks = [r["opened"], r["closed_restores_menu"],
-                  *r["steps_change"].values(), r.get("dimmed_backdrop", True)]
+        checks = [
+            r["opened"],
+            r["open_animated"],
+            r["wheel_shows_status_volume"],
+            r["wheel_leaves_body_unchanged"],
+            r["closed_restores_menu"],
+            r["close_animated"],
+            r["close_no_flash"],
+            r["unchanged_close_no_flash"],
+            *r["steps_change"].values(),
+            r.get("full_screen_backdrop", True),
+        ]
         if not all(checks):
             failed.append(theme)
             print("FAIL", theme, json.dumps(r))

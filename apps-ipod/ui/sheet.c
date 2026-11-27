@@ -14,12 +14,8 @@
 #define SHEET_CLOSE_FRAMES ANIM_F(12)
 #define SHEET_PROGRESS 1024
 #define SHEET_DIM (UI_FULL_OPACITY * 35 / 100)
-/* The HUD fades in over 180 ms while it grows from 88% of its size, and
- * out over 135 ms while it shrinks to 94%. */
-#define ZOOM_OPEN_FRAMES ANIM_F(12)
-#define ZOOM_CLOSE_FRAMES ANIM_F(9)
-#define ZOOM_OPEN_FROM 901
-#define ZOOM_CLOSE_TO 963
+/* Stock page slides run ~270 ms (18 refreshes on the 67 Hz panel). */
+#define PAGE_SLIDE_FRAMES ANIM_F(18)
 
 void ui_sheet_cancel(struct ui_sheet *sheet)
 {
@@ -40,20 +36,27 @@ void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route)
         ui_tween_sample(&sheet->tween, ui_clock_frame(now - sheet->tween.start_clock));
     int to = open ? SHEET_PROGRESS : 0;
     ui_sheet_cancel(sheet);
+    unsigned frames = 0;
+    if (lcd_active() && from != to)
+    {
+        if (sheet->slide)
+            frames = open ? ui_theme_motion(UI_MOTION_PUSH, PAGE_SLIDE_FRAMES,
+                                            PAGE_SLIDE_FRAMES)
+                          : ui_theme_motion(UI_MOTION_POP, PAGE_SLIDE_FRAMES,
+                                            PAGE_SLIDE_FRAMES);
+        else
+            frames = open ? ui_theme_motion(UI_MOTION_SHEET_IN,
+                                            SHEET_OPEN_FRAMES, SHEET_OPEN_FRAMES)
+                          : ui_theme_motion(UI_MOTION_SHEET_OUT,
+                                            SHEET_CLOSE_FRAMES, SHEET_CLOSE_FRAMES);
+    }
     sheet->tween = (struct ui_tween){
-        .from = from, .to = to,
-        .frames = lcd_active() && from != to
-                    ? open ? ui_theme_motion(UI_MOTION_SHEET_IN,
-                                             sheet->zoom ? ZOOM_OPEN_FRAMES
-                                                         : SHEET_OPEN_FRAMES,
-                                             SHEET_OPEN_FRAMES)
-                           : ui_theme_motion(UI_MOTION_SHEET_OUT,
-                                             sheet->zoom ? ZOOM_CLOSE_FRAMES
-                                                         : SHEET_CLOSE_FRAMES,
-                                             SHEET_CLOSE_FRAMES)
-                    : 0,
-        .ease_in = !open,
+        .from = from, .to = to, .frames = frames,
+        .ease_in = !open && !sheet->slide,
+        .easing = sheet->slide ? ui_theme_easing() : 0,
     };
+    if (sheet->slide)
+        sheet->light = -1;
     if (sheet->tween.frames)
     {
         sheet->active = sheet->starting = true;
@@ -189,14 +192,8 @@ void ui_sheet_paint_in(struct ui_sheet *sheet, const fb_data *backdrop,
         ui_sheet_cancel(sheet);
 }
 
-void ui_sheet_dim(fb_data *dst, const fb_data *src, int pixels)
-{
-    ui_blit_tint(dst, src, pixels, UI_FULL_OPACITY - SHEET_DIM,
-                 ui_theme_rgb565(UI_COLOR_DIM));
-}
-
-void ui_sheet_paint_zoom(struct ui_sheet *sheet, const fb_data *backdrop,
-                         const fb_data *body, struct ui_rect bounds, int top)
+void ui_sheet_paint_slide(struct ui_sheet *sheet, const fb_data *backdrop,
+                          const fb_data *body, bool changed)
 {
     if (ui_flush_inhibited())
         return;
@@ -215,11 +212,16 @@ void ui_sheet_paint_zoom(struct ui_sheet *sheet, const fb_data *backdrop,
     unsigned frame = sheet->active
                    ? ui_clock_frame(start - sheet->tween.start_clock) : 0;
     int progress = ui_tween_sample(&sheet->tween, frame);
-    int from = sheet->tween.to ? ZOOM_OPEN_FROM : ZOOM_CLOSE_TO;
-    int scale = from + (SHEET_PROGRESS - from) * progress / SHEET_PROGRESS;
-    unsigned ink = UI_FULL_OPACITY * progress / SHEET_PROGRESS;
-    unsigned light = UI_FULL_OPACITY - SHEET_DIM * progress / SHEET_PROGRESS;
-    if ((int)light == sheet->light)
+    int offset = LCD_WIDTH * (SHEET_PROGRESS - progress) / SHEET_PROGRESS;
+    offset &= ~1;
+    if (sheet->active && frame < sheet->tween.frames)
+    {
+        if (offset <= 0 && sheet->tween.to == SHEET_PROGRESS)
+            offset = 2;
+        else if (offset >= LCD_WIDTH && sheet->tween.to == 0)
+            offset = LCD_WIDTH - 2;
+    }
+    if (offset == sheet->light && !changed)
     {
         /* This frame is on screen already. */
         if (frame >= sheet->tween.frames)
@@ -227,42 +229,24 @@ void ui_sheet_paint_zoom(struct ui_sheet *sheet, const fb_data *backdrop,
         return;
     }
 
-    /* The panel at this scale about its centre, and the source column of
-     * each of its screen columns. */
-    int width = bounds.width * scale / SHEET_PROGRESS;
-    int height = bounds.height * scale / SHEET_PROGRESS;
-    struct ui_rect panel = { bounds.x + (bounds.width - width) / 2,
-                             bounds.y + (bounds.height - height) / 2,
-                             width, height };
-    struct ui_rect visible = clip(panel, LCD_WIDTH, LCD_HEIGHT);
-    static uint16_t column[LCD_WIDTH];
-    static fb_data sampled[LCD_WIDTH];
-    for (int x = 0; x < visible.width; x++)
-        column[x] = bounds.x +
-            (visible.x - panel.x + x) * bounds.width / MAX(1, width);
-
     fb_data *output = lcd_framebuffer_default.fb_ptr;
-    for (int y = 0; y < LCD_HEIGHT; y++)
+    if (offset <= 0)
+        memcpy(output, body, FRAMEBUFFER_SIZE);
+    else if (offset >= LCD_WIDTH)
+        memcpy(output, backdrop, FRAMEBUFFER_SIZE);
+    else
     {
-        fb_data *dst = output + y * LCD_WIDTH;
-        const fb_data *under = backdrop + y * LCD_WIDTH;
-        if (y < top)
+        int shift = LCD_WIDTH - offset;
+        for (int y = 0; y < LCD_HEIGHT; y++)
         {
-            ui_blit_mix(dst, body + y * LCD_WIDTH, under, LCD_WIDTH, ink,
-                        UI_FULL_OPACITY - ink);
-            continue;
+            fb_data *dst = output + y * LCD_WIDTH;
+            const fb_data *under = backdrop + y * LCD_WIDTH;
+            const fb_data *src = body + y * LCD_WIDTH;
+            memcpy(dst, under + shift, offset * sizeof(*dst));
+            memcpy(dst + offset, src, shift * sizeof(*dst));
         }
-        ui_blit_tint(dst, under, LCD_WIDTH, light, sheet->tint);
-        if (y < visible.y || y >= visible.y + visible.height || !ink)
-            continue;
-        int source = bounds.y + (y - panel.y) * bounds.height / MAX(1, height);
-        const fb_data *row = body + source * LCD_WIDTH;
-        for (int x = 0; x < visible.width; x++)
-            sampled[x] = row[column[x]];
-        ui_blit_mix(dst + visible.x, sampled, dst + visible.x, visible.width,
-                    ink, UI_FULL_OPACITY - ink);
     }
-    sheet->light = light;
+    sheet->light = offset;
     ui_note_render((uint32_t)USEC_TIMER - start);
     ui_mark_dirty(SCREEN_MAIN);
     ui_flush_dirty();

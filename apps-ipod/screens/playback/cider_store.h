@@ -21,7 +21,10 @@
 #define CS_SCAN_BUCKETS 128u          /* 64 KiB per table pass */
 #define CS_DEFAULT_CAP (1024u << 20)
 
-enum { CS_L, CS_M, CS_S, CS_XS, CS_TIERS };
+/* Local album pages use the same packs and cap as the wire artwork tiers. */
+#define CS_TRACK_BYTES (21u * 1024)
+enum { CS_L, CS_M, CS_S, CS_XS, CS_COVER_TIERS,
+       CS_TRACKS = CS_COVER_TIERS, CS_TIERS };
 enum { CS_OK = 0, CS_DUP = 1, CS_MISS = -1, CS_ERR = -2, CS_BUSY = -3,
        CS_BAD = -4, CS_NOTREADY = -5 };
 #define CS_O_READ 1
@@ -57,7 +60,7 @@ struct cider_store
     char dir[40], path[64];
     bool loaded;
     int ifd, pfd, pfd_index;          /* cached descriptors, -1 closed */
-    uint32_t epoch, session, seq, count, digest, cap, total;
+    uint32_t epoch, session, seq, count, track_count, digest, cap, total;
     struct cs_pack
     {
         uint32_t size, live, session0, seq0;

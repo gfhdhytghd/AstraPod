@@ -46,6 +46,12 @@
   light panel. Each album's blurred background, on Now Playing and in the
   panel, is built again the first time it is shown.
 
+- **Remote Cover Flow** saves track lists with the artwork cache. When you
+  return to a cached album, its tracks can open while the remote library
+  is still responding. The first visit after upgrading fills the new track
+  cache. Existing covers stay cached. If you
+  downgrade and see missing covers, let the remote library fetch them again.
+
 - **Scrim's lists glide again**, at every refresh of the screen. The wheel
   can pull a list half a row past either end, and it settles back when you
   stop. For lists that jump a whole row, set `style.list_scroll=snap` in a

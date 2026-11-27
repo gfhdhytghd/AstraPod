@@ -318,6 +318,25 @@ void ui_clock_sleep(int ticks)
         yield();
 }
 
+void ui_clock_sleep_until(uint32_t deadline)
+{
+#ifdef SIMULATOR
+    /* A simulator has no panel wake interrupt. Yield through the last
+     * partial tick so presentation tests can measure individual refreshes. */
+    int32_t left;
+    while ((left = deadline - (uint32_t)USEC_TIMER) > 0)
+    {
+        long ticks = left / (CLOCK_HZ / HZ);
+        if (ticks >= 2)
+            sleep(ticks - 1);
+        else
+            yield();
+    }
+#else
+    ui_clock_sleep(ui_clock_wait_until(deadline));
+#endif
+}
+
 static struct ui_pace *site_pace(const void *site)
 {
     for (unsigned i = 0; i < PACE_SITES; ++i)

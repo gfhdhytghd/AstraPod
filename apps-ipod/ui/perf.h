@@ -11,7 +11,9 @@ void ui_perf_init(void);
 bool ui_perf_enabled(void);
 struct ui_rect;
 void ui_perf_wps_target(char route, const struct ui_rect *rect,
-                        const char *reason, const char *bitmap);
+                        const char *reason, const char *bitmap,
+                        uint32_t handoff_us, uint32_t playlist_us,
+                        uint32_t wps_setup_us);
 unsigned ui_perf_begin(const char *route);
 /* Ancillary animation. Foreground motion can claim the recorder immediately
  * and discard an overlapping passive trace without writing on its hot path. */

@@ -23,6 +23,7 @@ void native_wps_render(const struct wps_state *state, bool submit);
 /* Paint the first frame using the selected album's backdrop. */
 void native_wps_paint_handoff(const struct wps_state *state,
                               const struct album_blur_source *source);
+void native_wps_paint_prepared(void);
 /* The theme slot is available before the page opens. An empty rectangle
  * means no slot. True means the live page has confirmed the layout. */
 bool native_wps_art_layout(struct ui_rect *bounds);

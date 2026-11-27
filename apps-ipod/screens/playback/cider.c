@@ -80,6 +80,10 @@ static char warm_keys[7 * 65], warm_tier[3];
 static bool warm_ready;
 static char commands[12][384];
 static struct cider_store store;
+static struct {
+    enum { TRACK_IDLE, TRACK_READ, TRACK_HIT, TRACK_MISS, TRACK_WRITE } state;
+    uint8_t key[32], data[CS_TRACK_BYTES];
+} track_cache;
 static bool host_store, host_diag, ls_due, want_ready, list_req, list_ready, pin_on;
 static long hold_until, want_at, pin_at;
 static uint32_t list_cursor;
@@ -103,7 +107,7 @@ static struct event_queue disk_queue;
 static volatile uint32_t status_word;
 _Static_assert(sizeof cache + sizeof transfer + sizeof disk_data +
                sizeof disk_stack + sizeof state + sizeof commands +
-               sizeof store + sizeof list_page + sizeof fills +
+               sizeof store + sizeof track_cache + sizeof list_page + sizeof fills +
                sizeof offers + sizeof acks + sizeof missed +
                sizeof list_items + sizeof modes + sizeof status_word + sizeof loading_request +
                sizeof diag + 4 * 1024 +
@@ -983,6 +987,38 @@ static bool store_write_batch(void)
     return more;
 }
 
+/* Pack I/O runs outside cider_mutex. The mailbox holds one bounded page
+ * and keeps its buffers stable until the worker publishes the result. */
+static bool service_track_cache(void)
+{
+    mutex_lock(&cider_mutex);
+    int operation = track_cache.state;
+    mutex_unlock(&cider_mutex);
+    if (operation != TRACK_READ && operation != TRACK_WRITE)
+        return false;
+    int result;
+    if (operation == TRACK_READ)
+    {
+        const uint8_t *payload;
+        unsigned length;
+        result = cs_maybe(&store, track_cache.key, CS_TRACKS) ?
+            cs_get(&store, track_cache.key, CS_TRACKS, disk_data, sizeof disk_data,
+                   &payload, &length) : CS_MISS;
+        if (result == CS_OK)
+            memcpy(track_cache.data, payload, length);
+    }
+    else
+        result = cs_put(&store, track_cache.key, CS_TRACKS, track_cache.data,
+                        sizeof track_cache.data, disk_data, sizeof disk_data, NULL);
+    if (operation == TRACK_WRITE && result == CS_BUSY && cs_busy(&store))
+        return true;
+    mutex_lock(&cider_mutex);
+    track_cache.state = operation == TRACK_WRITE ? TRACK_IDLE :
+                        result == CS_OK ? TRACK_HIT : TRACK_MISS;
+    mutex_unlock(&cider_mutex);
+    return false;
+}
+
 static void disk_worker(void)
 {
     bool more = false, was_busy = false;
@@ -1003,6 +1039,7 @@ static void disk_worker(void)
             while (ev.id != SYS_USB_DISCONNECTED);
             mutex_lock(&cider_mutex);
             list_req = list_ready = false;
+            track_cache.state = TRACK_IDLE;
             mutex_unlock(&cider_mutex);
             more = was_busy = false;
             load_at = current_tick - 30 * HZ;
@@ -1030,7 +1067,8 @@ static void disk_worker(void)
         bool dirty = false;
         for (int i = 0; i < CIDER_SLOTS; i++)
             dirty |= cache.slot[i].length && cache.slot[i].dirty;
-        bool wanted = lookup || nfills || load_requested || build_on || dirty;
+        bool tracks = track_cache.state == TRACK_READ || track_cache.state == TRACK_WRITE;
+        bool wanted = lookup || nfills || load_requested || build_on || dirty || tracks;
         if (dirty && !active) diag.deferrals++;
         /* Foreground USB covers must eventually reach disk even when Cider
          * is the only source (no local music to keep the disk spinning). */
@@ -1040,8 +1078,9 @@ static void disk_worker(void)
         mutex_unlock(&cider_mutex);
         /* Load when the disk already spins, or when the user's browsing
          * needs it (that spin-up is theirs, not a background wake). */
-        if (!store.loaded && (active || wanted) &&
-            !TIME_BEFORE(current_tick, load_at + HZ))
+        bool load = !store.loaded && (active || wanted) &&
+                    !TIME_BEFORE(current_tick, load_at + HZ);
+        if (load)
         {
             load_at = current_tick;
             diag.loads++;
@@ -1077,10 +1116,10 @@ static void disk_worker(void)
         active = storage_disk_is_active();
         if (answer && store.loaded) build_list();
         if (disk_usb_pending()) continue;
-        more = false;
-        if ((active || flush || build) && !busy && store.loaded)
+        more = tracks && ((!store.loaded && !load) || service_track_cache());
+        if ((active || flush || build || more) && !busy && store.loaded)
         {
-            more = store_write_batch();
+            more |= store_write_batch();
             bool idle = TIME_AFTER(current_tick, art_used_at + 5 * HZ);
             if (!queue_empty(&disk_queue)) continue;
             more |= cs_maintain(&store, disk_data, sizeof disk_data, idle);
@@ -1666,6 +1705,56 @@ bool cider_panel_album(int index, struct cider_row *row, uint32_t *revision)
     bool have = *revision && cider_connected() && cider_library_row(index, row);
     mutex_unlock(&cider_mutex);
     return have;
+}
+
+int cider_track_cache_read(const uint8_t key[32], void *page, size_t bytes)
+{
+    if (!disk_running || bytes > sizeof track_cache.data)
+        return -1;
+    int result = 0;
+    mutex_lock(&cider_mutex);
+    switch (track_cache.state)
+    {
+    case TRACK_HIT:
+    case TRACK_MISS:
+        if (!memcmp(track_cache.key, key, sizeof track_cache.key))
+        {
+            result = track_cache.state == TRACK_HIT ? 1 : -1;
+            if (result > 0)
+                memcpy(page, track_cache.data, bytes);
+            track_cache.state = TRACK_IDLE;
+            break;
+        }
+        /* The centre changed while the old page was on disk. */
+        /* fall through */
+    case TRACK_IDLE:
+        memcpy(track_cache.key, key, sizeof track_cache.key);
+        track_cache.state = TRACK_READ;
+        queue_post(&disk_queue, 1, 0);
+        break;
+    default:
+        break;
+    }
+    mutex_unlock(&cider_mutex);
+    return result;
+}
+
+bool cider_track_cache_write(const uint8_t key[32], const void *page, size_t bytes)
+{
+    if (!disk_running || bytes > sizeof track_cache.data)
+        return true;
+    mutex_lock(&cider_mutex);
+    bool queued = track_cache.state != TRACK_READ && track_cache.state != TRACK_WRITE;
+    if (queued)
+    {
+        memcpy(track_cache.key, key, sizeof track_cache.key);
+        memcpy(track_cache.data, page, bytes);
+        memset(track_cache.data + bytes, 0, sizeof track_cache.data - bytes);
+        track_cache.state = TRACK_WRITE;
+        queue_post(&disk_queue, 1, 0);
+    }
+    mutex_unlock(&cider_mutex);
+    return queued;
 }
 
 void cider_track_page_open(const char *route)

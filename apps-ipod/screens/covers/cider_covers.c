@@ -29,7 +29,6 @@ static long first_track_deadline;
 static struct panel_request first_track_request;
 static long moved_at;
 static unsigned int revision;
-static struct cider_row row_ahead;
 static fb_data *surface;
 _Static_assert(sizeof *surface == sizeof(uint16_t), "Remote RGB565 art");
 
@@ -105,6 +104,7 @@ static bool panel_request(int index, struct panel_request *request)
     }
     strlcpy(request->route, album.route, sizeof(request->route));
     request->key = panel_cache_identity(cider_remote_name(), album.id, request->route);
+    request->artwork = panel_cache_identity(album.art, "", "");
     return true;
 }
 
@@ -164,19 +164,27 @@ static int play_status(void)
     return result == CAROUSEL_PLAY_PENDING ? 0 : -1;
 }
 
-static bool art(int index, struct bitmap *bitmap)
+static unsigned int cover_version(const struct cider_row *row, unsigned int quality)
 {
-    struct cider_row row;
-    if (!cider_page_peek(index, &row))
+    uint32_t hash = fnv1a_str(row->id);
+    for (const char *p = row->art; *p; p++)
+        hash = fnv1a_byte(hash, *p);
+    return (hash << 2) | quality;
+}
+
+static bool art(int index, struct bitmap *bitmap, unsigned int *version)
+{
+    struct cider_row row = {0};
+    bool known = cider_page_peek(index, &row);
+    if (!known && abs(index - center_index) > ALBUM_COVERS_NUM_SLIDES)
         return false;
     int dim = CIDER_COVER_DIM;
-    if (!cider_copy_art(row.art, "M", surface, CIDER_COVER_SCRATCH_BYTES))
+    unsigned int quality = 3;
+    if (!known || !cider_copy_art(row.art, "M", surface, CIDER_COVER_SCRATCH_BYTES))
     {
-        /* A stored final tier must never be replaced with a blurred XS.
-         * read-ahead owns its disk request; keep the native slide pending. */
-        if (cider_art_local(row.art, "M")) return false;
-        if (cider_copy_art(row.art, "XS", surface, 32 * 32 * sizeof(*surface)))
+        if (known && cider_copy_art(row.art, "XS", surface, 32 * 32 * sizeof(*surface)))
         {
+            quality = 2;
             /* Convert rows to columns in place before expanding. In column
              * order every source index is at or below its destination. */
             for (int x = 1; x < 32; x++)
@@ -192,12 +200,16 @@ static bool art(int index, struct bitmap *bitmap)
         }
         else
         {
-            fb_data color =
-                LCD_RGBPACK(row.bg >> 16, (row.bg >> 8) & 255, row.bg & 255);
+            quality = 1;
+            /* A page has no palette until its artwork arrives on some
+             * providers. Keep the card visible during the fetch. */
+            uint32_t rgb = row.bg ? row.bg : 0x383838;
+            fb_data color = LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
             for (int i = 0; i < dim * dim; i++)
                 surface[i] = color;
         }
     }
+    *version = known ? cover_version(&row, quality) : 0;
     bitmap->width = bitmap->height = dim;
     bitmap->format = FORMAT_NATIVE;
     bitmap->data = (unsigned char *)surface;
@@ -216,74 +228,97 @@ static void tick(void)
     }
     else if (!TIME_BEFORE(current_tick, moved_at + HZ / 3))
         flicking = false;
-    bool fast = flicking;
-    int window[9];
+    enum { INNER = 4, NEAR = ALBUM_COVERS_NUM_SLIDES, REACH = NEAR + CIDER_COVER_LEAD,
+           WINDOW = 2 * NEAR + 1 + CIDER_COVER_LEAD };
+    int window[WINDOW];
     int n = cider_window(center_index, travel, window);
-    const char *visible[9];
-    char visible_keys[9][65];
-    unsigned int visible_count = 0;
-    bool page_needed = false;
+    int inner = n;
+    for (int d = INNER + 1; d <= NEAR; d++)
+    {
+        window[n++] = center_index + travel * d;
+        window[n++] = center_index - travel * d;
+    }
+    for (int d = NEAR + 1; d <= REACH; d++)
+        window[n++] = center_index + travel * d;
+
+    static char keys[WINDOW][65];
+    const char *ahead[WINDOW], *xs[5], *warm[7];
+    int offsets[WINDOW];
+    bool missing_xs[WINDOW] = {0}, host_miss[WINDOW] = {0};
+    unsigned total = 0, visible = 0, nxs = 0, nwarm = 0;
+    int demand = -1;
+    int albums = count();
     for (int i = 0; i < n; i++)
     {
-        struct cider_row row;
-        if (window[i] >= count())
+        int at = window[i];
+        if (at < 0 || at >= albums)
             continue;
-        /* The center and the first visible miss drive paging. The slide
-         * loader and read-ahead inspect whatever is already cached. */
-        bool have = i ? cider_page_peek(window[i], &row)
-                      : cider_page_row(window[i], &row);
-        if (i && !have && !page_needed)
-            have = cider_page_row(window[i], &row);
-        if (!have)
+        struct cider_row row;
+        if (!cider_page_peek(at, &row))
         {
-            page_needed = true;
+            if (demand < 0)
+                demand = at;
             continue;
         }
-        snprintf(visible_keys[visible_count], sizeof visible_keys[0], "%s",
-                 row.art);
-        visible[visible_count] = visible_keys[visible_count];
-        visible_count++;
+        if (strlen(row.art) != 64)
+            continue;
+        memcpy(keys[total], row.art, sizeof keys[0]);
+        ahead[total] = keys[total];
+        offsets[total] = (at - center_index) * travel;
+        total++;
+        visible += i < inner;
     }
-    if (visible_count)
+    if (demand >= 0)
     {
-        cider_warm_art(visible, MIN(visible_count, 7), "M");
-        cider_retain_art(visible, visible_count, "M");
+        struct cider_row row;
+        cider_page_row(demand, &row);
     }
-    /* Six M records fit ahead of nine visible covers in the art arena.
-     * The measured read bound sizes the window; the benchmark reports the
-     * throughput limit independently of this latency window. */
-    static char ahead_keys[16][65];
-    const char *ahead[16];
-    unsigned int nahead = 0;
-    for (unsigned int i = 0; i < visible_count; i++)
-    {
-        snprintf(ahead_keys[nahead], sizeof ahead_keys[0], "%s", visible[i]);
-        ahead[nahead] = ahead_keys[nahead]; nahead++;
-    }
-    unsigned int extra = cider_read_ahead_count(61, visible_count);
-    for (unsigned int i = 0; i < extra && nahead < ARRAYLEN(ahead); i++)
-    {
-        int at = center_index + travel * (5 + i);
-        if (at < 0 || at >= count() || !cider_page_peek(at, &row_ahead)) continue;
-        snprintf(ahead_keys[nahead], sizeof ahead_keys[0], "%s", row_ahead.art);
-        ahead[nahead] = ahead_keys[nahead]; nahead++;
-    }
-    cider_read_ahead(ahead, nahead, "M");
-    const char *xs[5];
-    unsigned int missing = 0;
+
+    /* Full covers share the same arena as the artwork for Now Playing.
+     * Use the disk worker's budget for M and keep a small XS lead beyond it. */
+    unsigned full = MIN(total, visible + cider_read_ahead_count(61, visible));
+    cider_read_ahead(ahead, full, "M");
+    cider_retain_art(ahead, total, "M");
     bool full_requested = false;
-    for (unsigned int i = 0; i < nahead; i++)
+    for (unsigned i = 0; i < total; i++)
     {
-        const char *art_key = ahead[i];
-        if (cider_has_art(art_key, "M")) continue;
-        if (missing < ARRAYLEN(xs) && !cider_art_local(art_key, "M") &&
-            !cider_has_art(art_key, "XS"))
-            xs[missing++] = art_key;
-        if (!full_requested && i < visible_count && (!fast || !i))
-            full_requested = cider_prefetch_art(art_key, "M");
+        const char *key = ahead[i];
+        if (cider_has_art(key, "M"))
+            continue;
+        bool local = cider_art_local(key, "M");
+        host_miss[i] = !local;
+        missing_xs[i] = !cider_has_art(key, "XS");
+        if (!local && !full_requested && i < full &&
+            (!flicking || !offsets[i]))
+            full_requested = cider_prefetch_art(key, "M");
+        /* Three XS requests cover visible holes. Reserve the rest of the
+         * batch for the approaching side before it reaches the viewport. */
+        if (missing_xs[i] && nxs < 3 && abs(offsets[i]) <= INNER)
+        {
+            xs[nxs++] = key;
+            missing_xs[i] = false;
+        }
+        if (!local && (offsets[i] == 0 || offsets[i] > INNER) && nwarm < 5)
+        {
+            warm[nwarm++] = key;
+            host_miss[i] = false;
+        }
     }
-    if (missing)
-        cider_request_xs(xs, missing);
+    for (unsigned i = 0; i < total && nxs < ARRAYLEN(xs); i++)
+        if (missing_xs[i] && offsets[i] > INNER)
+        {
+            xs[nxs++] = ahead[i];
+            missing_xs[i] = false;
+        }
+    for (unsigned i = 0; i < total && nxs < ARRAYLEN(xs); i++)
+        if (missing_xs[i])
+            xs[nxs++] = ahead[i];
+    for (unsigned i = 0; i < total && nwarm < ARRAYLEN(warm); i++)
+        if (host_miss[i])
+            warm[nwarm++] = ahead[i];
+    cider_warm_art(warm, nwarm, "M");
+    if (nxs)
+        cider_request_xs(xs, nxs);
     unsigned int next = cider_art_revision();
     if (revision != next)
     {
@@ -317,14 +352,9 @@ static unsigned int version(int index)
     struct cider_row row;
     if (!cider_page_peek(index, &row))
         return 0;
-    uint32_t hash = 2166136261u;
-    for (const char *p = row.id; *p; p++)
-        hash = (hash ^ (unsigned char)*p) * 16777619u;
-    for (const char *p = row.art; *p; p++)
-        hash = (hash ^ (unsigned char)*p) * 16777619u;
-    return (hash << 2) | (cider_has_art(row.art, "M") ? 3
-                          : cider_has_art(row.art, "XS") ? 2
-                                                         : 1);
+    unsigned int quality = cider_has_art(row.art, "M") ? 3 :
+                           cider_has_art(row.art, "XS") ? 2 : 1;
+    return cover_version(&row, quality);
 }
 static const struct carousel_model model = {
     .build_index = build,

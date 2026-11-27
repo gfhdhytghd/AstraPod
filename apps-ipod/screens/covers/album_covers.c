@@ -39,6 +39,10 @@
 #include <stddef.h>
 #include "string-extra.h"
 #include "config.h"
+#ifdef SIMULATOR
+#include "screens/playback/cider.h"
+#include "screens/playback/cider_library.h"
+#endif
 #include "system.h"          /* MIN/MAX/ALIGN_BUFFER/ALIGN_DOWN */
 #include "rbpaths.h"
 #include "input/action.h"           /* get_action/get_custom_action/button_mapping */
@@ -987,6 +991,10 @@ int album_covers(const char *selected_file)
 int album_covers_return(const char *selected_file, bool *remote_return)
 {
     int ret;
+#ifdef SIMULATOR
+    if (cider_available())
+        return cider_covers();
+#endif
     if (remote_return) *remote_return = false;
     if (!cover_nav_active())
         cover_nav_begin(agents_nav_has(AGENTS_NAV_WPS) ? GO_TO_WPS : GO_TO_PREVIOUS);
@@ -1004,7 +1012,9 @@ int album_covers_return(const char *selected_file, bool *remote_return)
          * escaping to them. The context menu is here for the same reason. */
         if (ret == CAROUSEL_PLAY_ALBUM)
         {
+            uint32_t start = USEC_TIMER;
             int played = db_summary_play_pending();
+            carousel_wps_note_playlist((uint32_t)USEC_TIMER - start);
             if (played > 0)
                 ret = GO_TO_WPS;
             else if (played == DB_ALBUM_PLAY_USB)

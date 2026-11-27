@@ -551,6 +551,10 @@ iap/iap-library.c
 #ifdef SIMULATOR
 sim/shim-board.c
 sim/shim-buffer.c
+sim/shim-cider.c
+screens/playback/cider_model.c
+screens/playback/cider_store.c
+screens/covers/cider_covers.c
 sim/shim-dircache.c
 sim/shim-fs.c
 sim/shim-glyphs.c

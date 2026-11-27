@@ -140,6 +140,9 @@ widgets/list_ultra.c
 ui/ultra_pane.c
 ui/ultra_scene.c
 screens/covers/ultra_flow.c
+ui/ultra_sheet.c
+ui/ultra_wps.c
+screens/system/usb_ultra.c
 widgets/option_select.c
 widgets/rating_dialog.c
 #ifdef HAVE_RECORDING

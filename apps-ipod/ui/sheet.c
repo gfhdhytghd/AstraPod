@@ -6,6 +6,7 @@
 #include "perf.h"
 #include "native_theme_runtime.h"
 #include "sheet.h"
+#include "ultra_sheet.h"
 #include "system.h"
 #include <stdio.h>
 #include <string.h>
@@ -28,6 +29,12 @@ void ui_sheet_cancel(struct ui_sheet *sheet)
 
 void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route)
 {
+    sheet->ultra = ui_theme_ultra();
+    if (sheet->ultra)
+    {
+        ultra_sheet_begin(sheet, open, route);
+        return;
+    }
     uint32_t now = USEC_TIMER;
     sheet->tint = ui_theme_rgb565(UI_COLOR_DIM);
     int from = sheet->starting ? sheet->tween.from :
@@ -130,6 +137,10 @@ void ui_sheet_paint_in(struct ui_sheet *sheet, const fb_data *backdrop,
     uint32_t start = USEC_TIMER;
     unsigned frame = sheet->active
                    ? ui_clock_frame(start - sheet->tween.start_clock) : 0;
+    if (sheet->ultra && frame < sheet->tween.frames &&
+        ultra_sheet_paint(sheet, backdrop, body, bounds, changed, output,
+                          width, height, present, frame))
+        return;
     int progress = ui_tween_sample(&sheet->tween, frame);
     bounds.y += (height - bounds.y) * (SHEET_PROGRESS - progress) / SHEET_PROGRESS;
     struct ui_rect visible = clip(bounds, width, height);

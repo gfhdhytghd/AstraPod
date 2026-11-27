@@ -39,6 +39,7 @@
 #include "perf.h"
 #include "retained.h"
 #include "theme_art.h"
+#include "ultra_wps.h"
 
 #define COVER_EDGE 240
 #define BANDS 8
@@ -97,6 +98,11 @@
 /* 4.0 s and 270 ms at the panel's 66.96 Hz. */
 #define CLASSIC_VOLUME_HOLD ANIM_F(268)
 #define CLASSIC_SLIDE_FRAMES ANIM_F(18)
+/* Fruit Company Ultra's dissolves on a track change: the title block's
+ * changed lines arrive ULTRA_SLIDE px from the right. */
+#define ULTRA_SLIDE 16
+#define ULTRA_TEXT_FRAMES ANIM_F(22)
+#define ULTRA_COVER_FRAMES ANIM_F(26)
 
 enum wps_view {
     WPS_ROOT, WPS_COVER, WPS_PANEL, WPS_TITLE, WPS_ARTIST,
@@ -144,6 +150,7 @@ struct native_wps {
     bool volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
     bool current_art_only, cover_backdrop, wait_for_blur, labels_frozen;
     bool classic, chrome_ready;
+    struct ultra_wps ultra;
     void (*landing)(const struct ui_rect *clip);
     unsigned reveal_base;
     char cover_remote_key[65];
@@ -703,7 +710,6 @@ static void paint_track(const struct ui_view *view,
 static void paint_fill(const struct ui_view *view,
                        const struct ui_view_frame *frame)
 {
-    (void)view;
     if (ui_theme_art(&wps->theme))
     {
         over_cover(true);
@@ -711,6 +717,8 @@ static void paint_fill(const struct ui_view *view,
                     frame->bounds.x, frame->bounds.y, frame->bounds.width,
                     false, frame->clip);
         over_cover(false);
+        if (view == &wps->view[WPS_PROGRESS_FILL])
+            ultra_wps_paint_gloss(&wps->ultra, frame->bounds, frame->clip);
         return;
     }
     paint_bar(frame, &wps->theme.gradient[UI_GRADIENT_PROGRESS],
@@ -1137,6 +1145,20 @@ static void refresh_progress(const struct wps_state *state, bool remote, uint32_
     /* Stock shows no fill at 0:00. */
     int width = length ? MAX(!wps->classic,
                              (int)(position * track_width / length)) : 0;
+    if (wps->ultra.on)
+    {
+        /* Letting go of a seek key lands where the preview shows. */
+        bool land = same_track &&
+                    (landed || (wps->ultra.seeking && !preview));
+        wps->ultra.seeking = preview;
+        if (!same_track || width != progress->target || land)
+            ultra_wps_fill(&wps->ultra, &wps->page, fill, width,
+                           !same_track ? ULTRA_FILL_TRACK :
+                           land ? ULTRA_FILL_LAND :
+                           preview ? ULTRA_FILL_SEEK : ULTRA_FILL_PLAY, now);
+        progress->target = width;
+        return;
+    }
     if (!same_track)
     {
         ui_page_set(&wps->page, fill, UI_WIDTH, width);
@@ -1362,9 +1384,14 @@ static void refresh_volume(const struct cider_status *source, bool remote, uint3
         ui_page_set(&wps->page, visible ? timeline : overlay, UI_X, 0);
         ui_page_set(&wps->page, visible ? overlay : timeline, UI_X, LCD_WIDTH);
         ui_page_set(&wps->page, row, UI_OFFSET_X, 0);
-        ui_page_tween(&wps->page, &wps->volume_reveal, row, UI_OFFSET_X,
-                      -LCD_WIDTH, CLASSIC_SLIDE_FRAMES, false, now);
-        wps->volume_reveal.tween.easing = UI_EASE_QUAD;
+        if (wps->ultra.on)
+            ultra_wps_row(&wps->ultra, &wps->page, row, visible, now);
+        else
+        {
+            ui_page_tween(&wps->page, &wps->volume_reveal, row, UI_OFFSET_X,
+                          -LCD_WIDTH, CLASSIC_SLIDE_FRAMES, false, now);
+            wps->volume_reveal.tween.easing = UI_EASE_QUAD;
+        }
         wps->volume_visible = visible;
     }
     else if (wps->volume_visible != visible)
@@ -1557,6 +1584,10 @@ void native_wps_open(const struct wps_state *state)
         /* Time in Title shows "Now Playing" for 2 s, as the lists do */
         wps->chrome.title_until = current_tick + 2 * HZ;
         setup_classic();
+        wps->ultra.on = ui_theme_ultra();
+        wps->ultra.gloss_box = (struct ui_rect){ CLASSIC_PROGRESS_X,
+            CLASSIC_ROW_Y + CLASSIC_BAR_Y, CLASSIC_PROGRESS_WIDTH,
+            CLASSIC_BAR_VIEW };
     }
     else
         setup_page();
@@ -1572,7 +1603,34 @@ bool native_wps_active(void)
 
 bool native_wps_animating(void)
 {
-    return active && wps->page.tracks;
+    return active && (wps->page.tracks || ultra_wps_busy(&wps->ultra));
+}
+
+/* Fruit Company Ultra dissolves the title block and the cover from the
+ * pixels on screen, which are still the old track's. */
+static void ultra_capture(const struct wps_state *state, bool submit)
+{
+    if (!submit || !wps->ultra.live || wps->landing ||
+        wps->current_art_only || wps->cover_backdrop)
+        return;
+    static const struct ui_rect none, text = { CLASSIC_TEXT_X,
+        CLASSIC_TITLE_Y, CLASSIC_TEXT_WIDTH,
+        CLASSIC_INDEX_Y + CLASSIC_LINE - CLASSIC_TITLE_Y };
+    static const struct ui_rect cover = { CLASSIC_ART_X, CLASSIC_ART_Y,
+        CLASSIC_ART_WIDTH, CLASSIC_ART_NEAR + 1 + CLASSIC_REFLECTION };
+    /* The progress bar over the reflection keeps its own motion. */
+    static const struct ui_rect bar = { CLASSIC_PROGRESS_X, CLASSIC_ROW_Y,
+        CLASSIC_ART_X + CLASSIC_ART_WIDTH - CLASSIC_PROGRESS_X,
+        LCD_HEIGHT - CLASSIC_ROW_Y };
+    const struct mp3entry *track = state->id3;
+    if (track && *track->path && *wps->progress.path &&
+        strcmp(track->path, wps->progress.path))
+        ultra_wps_fade(&wps->ultra, ULTRA_FADE_TEXT, text, none, ULTRA_SLIDE,
+                       ULTRA_TEXT_FRAMES);
+    if (album_art_current() != wps->art_handle ||
+        album_art_generation() != wps->art_generation)
+        ultra_wps_fade(&wps->ultra, ULTRA_FADE_COVER, cover, bar, 0,
+                       ULTRA_COVER_FRAMES);
 }
 
 void native_wps_render(const struct wps_state *state, bool submit)
@@ -1618,6 +1676,8 @@ void native_wps_render(const struct wps_state *state, bool submit)
             wps->blur_generation = (unsigned)-1;
         }
     }
+    if (wps->ultra.on)
+        ultra_capture(state, submit);
     refresh_art();
     uint32_t now = USEC_TIMER;
     refresh_labels(state, remote, now);
@@ -1638,6 +1698,8 @@ void native_wps_render(const struct wps_state *state, bool submit)
         wps->motion_tried = true;
     }
     ui_page_step(&wps->page, now);
+    if (wps->ultra.on)
+        ultra_wps_step(&wps->ultra, &wps->page, now);
     if (!wps->classic)
         refresh_meter(remote);
     if (repaint || !submit)
@@ -1645,7 +1707,9 @@ void native_wps_render(const struct wps_state *state, bool submit)
         repaint = false;
         ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
     }
-    if (submit)
+    if (wps->ultra.on)
+        ultra_wps_draw(&wps->ultra, &wps->page, submit);
+    else if (submit)
         ui_page_draw(&wps->page);
     else
         ui_page_paint(&wps->page);
@@ -1712,6 +1776,7 @@ void native_wps_close(void)
     wps->landing = NULL;
     ui_perf_end(wps->motion_trace);
     ui_page_cancel_tracks(&wps->page);
+    ultra_wps_close(&wps->ultra);
     if (wps->title.font >= 0)
         font_unload(wps->title.font);
     if (wps->artist.font >= 0)

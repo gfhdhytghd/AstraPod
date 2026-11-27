@@ -30,6 +30,8 @@
 #include "api/misc.h"
 #include "settings/settings.h"
 #include "speech/talk.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/statusbar.h"
 #include "lang.h"
 
 /* Wrapped lines held at once. Longer than any explanation worth reading on a
@@ -58,6 +60,7 @@ struct prose
 
     enum prose_focus focus;
     int  sel;           /* 0 = cancel, 1 = accept */
+    int  btn_font;
 };
 
 static int prose_wrap(const char *body, int w, int font);
@@ -78,6 +81,19 @@ static void prose_measure(struct dialog *d, struct screen *s,
     int fh = font_get(box->font)->height, lines, fixed, max;
     int sw = d->fb ? d->fb_w : s->lcdwidth;
     int sh = d->fb ? d->fb_h : s->lcdheight;
+
+    if (dialog_is_classic() && !d->fb)
+    {
+        int bar_h = sb_visible_height();
+        if (bar_h <= 0)
+            bar_h = (int)ui_theme_metric(UI_METRIC_STATUS_HEIGHT);
+        d->style.box_margin = 0;
+        box->x = 0;
+        box->y = bar_h;
+        box->width = sw;
+        box->height = MAX(1, sh - bar_h);
+        return;
+    }
 
     dialog_get_insets(&d->style, &in);
     box->width  = sw * PROSE_W_PCT / 100;
@@ -127,6 +143,64 @@ static void prose_draw(struct dialog *d, struct screen *s,
 {
     struct prose *p = data;
     int fh = font_get(content->font)->height;
+    if (dialog_is_classic() && !d->fb)
+    {
+        const int pad_x = 16;
+        const int pad_top = 12;
+        const int dock_h = 48;
+        int dock_y = content->height - dock_h - 10;
+        int body_h = dock_y - pad_top - 8;
+        if (body_h < fh)
+            body_h = fh;
+        int text_w = content->width - 2 * pad_x - PROSE_BAR_W - PROSE_BAR_GAP;
+        p->visible = MAX(1, body_h / fh);
+        p->lines = prose_wrap(p->body, text_w, content->font);
+        if (p->scroll > p->lines - p->visible)
+            p->scroll = p->lines - p->visible;
+        if (p->scroll < 0)
+            p->scroll = 0;
+
+        s->set_drawmode(DRMODE_FG);
+        s->set_foreground(LCD_RGBPACK(0, 0, 0));
+        int y = pad_top;
+        for (int i = 0; i < p->visible; i++)
+        {
+            int n = p->scroll + i;
+            if (n >= p->lines)
+                break;
+            s->putsxyf(pad_x, y, "%.*s", prose_lines[n].len, prose_lines[n].str);
+            y += fh;
+        }
+        s->set_drawmode(DRMODE_SOLID);
+        if (p->lines > p->visible)
+            gui_scrollbar_draw(s, content->width - pad_x - PROSE_BAR_W, pad_top,
+                               PROSE_BAR_W, body_h, p->lines,
+                               p->scroll, p->scroll + p->visible,
+                               VERTICAL | FOREGROUND | INNER_BGFILL);
+
+        dialog_draw_silver_dock(s, 16, dock_y, content->width - 32, dock_h);
+        int bfont = p->btn_font >= 0 ? p->btn_font : content->font;
+        if (!p->cancel)
+        {
+            const char *labels[1] = { p->accept };
+            int bar_w = 120;
+            dialog_draw_segmented(s, (content->width - bar_w) / 2, dock_y + 11,
+                                  bar_w, 27, labels, 1, 0, true, bfont);
+        }
+        else
+        {
+            const char *labels[2] = { p->cancel, p->accept };
+            int w0 = 0, w1 = 0;
+            font_getstringsize((const unsigned char *)p->cancel, &w0, NULL, bfont);
+            font_getstringsize((const unsigned char *)p->accept, &w1, NULL, bfont);
+            int bar_w = MAX(160, MIN(content->width - 56, MAX(w0, w1) * 2 + 48));
+            int sel = p->focus == PROSE_BUTTONS ? p->sel : -1;
+            dialog_draw_segmented(s, (content->width - bar_w) / 2, dock_y + 11,
+                                  bar_w, 27, labels, 2, sel, true, bfont);
+        }
+        return;
+    }
+
     int bh = fh + 8;
     int top = prose_title_h(p);
     /* Room for the scrollbar whether or not one is drawn. Measuring against
@@ -335,6 +409,8 @@ static int prose_run(const char *title, const char *body,
     p.accept = accept_label;
     p.cancel = cancel_label;
     p.sel    = accept_default ? 1 : 0;  /* once the buttons are reached */
+    p.btn_font = (dialog_is_classic() && !fb)
+               ? ui_theme_current_font_load(UI_FONT_LIST_VALUE, 32) : -1;
 
     dialog_init(&d, CONTEXT_STD, title, NULL, &prose_cb, &p);
     d.motion_route = fb ? "rotated-prose" : "prose";
@@ -350,7 +426,9 @@ static int prose_run(const char *title, const char *body,
         talk_string(body, true);
     }
 
-    return dialog_run(&d, TIMEOUT_BLOCK);
+    int res = dialog_run(&d, TIMEOUT_BLOCK);
+    font_unload(p.btn_font);
+    return res;
 }
 
 bool dialog_prose_confirm(const char *title, const char *body,

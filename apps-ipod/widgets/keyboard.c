@@ -27,17 +27,22 @@
 #include "input/action.h"
 #include "lang.h"
 #include "keyboard.h"
+#include "draw/gloss.h"
 #include "draw/viewport.h"
+#include "font.h"
 #include "yesno.h"
 #include "dialog.h"
 #include "edit_line.h"
 #include "speech/talk.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/statusbar.h"
 
 struct kbd_edit {
     struct edit_line ed;
     bool on_buttons;     /* focus is on the Cancel/OK button row, not the input */
     bool btn_ok;         /* on the button row, OK is selected (else Cancel) */
     bool dirty;          /* text changed since the editor opened */
+    int  btn_font;
 };
 
 /* The dialog is centred in display coordinates. */
@@ -45,6 +50,19 @@ static void kbd_measure(struct dialog *d, struct screen *display,
                         struct viewport *box, void *data)
 {
     (void)data;
+    if (dialog_is_classic())
+    {
+        int sh = sb_visible_height();
+        if (sh <= 0)
+            sh = (int)ui_theme_metric(UI_METRIC_STATUS_HEIGHT);
+        d->style.box_margin = 0;
+        box->x = 0;
+        box->y = sh;
+        box->width = display->lcdwidth;
+        box->height = MAX(1, display->lcdheight - sh);
+        return;
+    }
+
     struct dialog_insets in;
     int area_h = display->lcdheight;
     int sw = display->lcdwidth;
@@ -69,6 +87,45 @@ static void kbd_draw(struct dialog *d, struct screen *display,
 {
     struct kbd_edit *s = data;
     int ch_h = display->getcharheight();
+    if (dialog_is_classic())
+    {
+        int line_h = edit_line_height(display);
+        int fx = 16, fy = 44, fw = content->width - 32, fh = line_h + 12;
+        struct frame_buffer_t *fb = content->buffer ? content->buffer : &lcd_framebuffer_default;
+        int stride = fb->stride > 0 ? fb->stride : LCD_WIDTH;
+        int fb_h = stride > 0 ? (int)(fb->elems / (size_t)stride) : LCD_HEIGHT;
+        struct gloss_surface gs = {
+            .pixels = fb->fb_ptr, .stride = stride,
+            .clip_x = 0, .clip_y = 0, .clip_w = stride, .clip_h = fb_h,
+        };
+        static const struct gloss_fill field_fill = {
+            0xfff4f5f7, 0xffffffff, 0xffffffff, 0xffffffff
+        };
+        gloss_rect(&gs, content->x + fx, content->y + fy, fw, fh, 5, 5, &field_fill);
+        gloss_outline(&gs, content->x + fx, content->y + fy, fw, fh, 5, 0xffa4a8ae);
+
+        struct viewport tvp = *content;
+        tvp.x = content->x + fx + 8;
+        tvp.y = content->y + fy + 6;
+        tvp.width = MAX(1, fw - 16);
+        tvp.height = line_h;
+        display->set_viewport(&tvp);
+        edit_line_draw(display, &s->ed, tvp.width);
+
+        display->set_viewport(content);
+        int dock_h = 48;
+        int dock_y = content->height - dock_h - 14;
+        dialog_draw_silver_dock(display, 16, dock_y, content->width - 32, dock_h);
+        const char *labels[2] = { str(LANG_DIAG_CANCEL), str(LANG_DIAG_OK) };
+        int bfont = s->btn_font >= 0 ? s->btn_font : content->font;
+        int bar_w = 176;
+        int sel = s->on_buttons ? (s->btn_ok ? 1 : 0) : -1;
+        dialog_draw_segmented(display, (content->width - bar_w) / 2, dock_y + 11,
+                              bar_w, 27, labels, 2, sel, true, bfont);
+        display->set_drawmode(DRMODE_SOLID);
+        return;
+    }
+
     int bh = ch_h + 2 * d->style.button_pad_y;      /* button height */
 
     /* --- edit line in a clipped sub-viewport so long text can scroll --- */
@@ -204,7 +261,11 @@ static int dialog_input_mode(char* text, int buflen, bool trim)
         return -1;
 
     struct kbd_edit *state = core_get_data_pinned(handle);
-    *state = (struct kbd_edit){.btn_ok = true};
+    *state = (struct kbd_edit){
+        .btn_ok = true,
+        .btn_font = dialog_is_classic()
+                  ? ui_theme_current_font_load(UI_FONT_LIST_VALUE, 32) : -1,
+    };
     edit_line_init(&state->ed, text, buflen - 1);
 
     dialog_init(&d, CONTEXT_KEYBOARD, NULL, NULL, &cb, state);
@@ -213,6 +274,7 @@ static int dialog_input_mode(char* text, int buflen, bool trim)
     if (accepted)
         edit_line_get(&state->ed, text, buflen, trim);
 
+    font_unload(state->btn_font);
     core_put_data_pinned(state);
     core_free(handle);
     return accepted ? 0 : -1;

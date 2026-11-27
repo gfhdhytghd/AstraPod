@@ -22,11 +22,14 @@
 #include "input/action.h"
 #include "widgets/dialog.h"
 #include "widgets/edit_line.h"
+#include "draw/gloss.h"
 #include "draw/screen_access.h"
 #include "system/activity.h"
 #include "system/shutdown.h"      /* default_event_handler */
 #include "settings/settings.h"
 #include "speech/talk.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/statusbar.h"
 #include "search_dialog.h"
 
 /* How long the query must stand still before the provider is asked to scan. */
@@ -118,6 +121,25 @@ static void search_measure(struct dialog *d, struct screen *display,
 {
     struct search_dlg *s = data;
     struct dialog_insets in;
+
+    if (dialog_is_classic())
+    {
+        int sh = sb_visible_height();
+        if (sh <= 0)
+            sh = (int)ui_theme_metric(UI_METRIC_STATUS_HEIGHT);
+        int row_h = (int)ui_theme_metric(UI_METRIC_ROW_HEIGHT);
+        if (row_h < 20)
+            row_h = 24;
+        d->style.box_margin = 0;
+        box->x = 0;
+        box->y = sh;
+        box->width = display->lcdwidth;
+        box->height = MAX(1, display->lcdheight - sh);
+        int header_h = MAX(34, edit_line_height(display) + 14);
+        s->visible_rows = MAX(1, (box->height - header_h) / row_h);
+        return;
+    }
+
     int row_h = row_height(display);
     int chrome, limit, rows, box_h;
 
@@ -154,24 +176,64 @@ static void search_draw(struct dialog *d, struct screen *display,
                         struct viewport *content, void *data)
 {
     struct search_dlg *s = data;
-    int row_h = row_height(display);
+    bool classic = dialog_is_classic();
+    int row_h = classic ? (int)ui_theme_metric(UI_METRIC_ROW_HEIGHT) : row_height(display);
+    if (classic && row_h < 20)
+        row_h = 24;
+    int row_gap = classic ? 0 : ROW_GAP;
     int line_h = edit_line_height(display);
+    int rows_y;
 
-    /* --- the query, in a clipped sub-viewport so long text can scroll --- */
-    struct viewport tvp = *content;
-    tvp.height = line_h;
-    display->set_viewport(&tvp);
-    edit_line_draw(display, &s->ed, tvp.width);
+    if (classic)
+    {
+        int header_h = MAX(34, line_h + 14);
+        struct frame_buffer_t *fb = content->buffer ? content->buffer : &lcd_framebuffer_default;
+        int stride = fb->stride > 0 ? fb->stride : LCD_WIDTH;
+        int fb_h = stride > 0 ? (int)(fb->elems / (size_t)stride) : LCD_HEIGHT;
+        struct gloss_surface gs = {
+            .pixels = fb->fb_ptr, .stride = stride,
+            .clip_x = 0, .clip_y = 0, .clip_w = stride, .clip_h = fb_h,
+        };
+        static const struct gloss_fill bar_fill = {
+            0xfff2f4f7, 0xffeef0f3, 0xffe2e5e9, 0xffb8bcc0
+        };
+        static const struct gloss_fill field_fill = {
+            0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
+        };
+        gloss_rect(&gs, content->x, content->y, content->width, header_h, 0, 0, &bar_fill);
+        int fx = 10, fy = (header_h - (line_h + 6)) / 2;
+        int fw = content->width - 20, fh = line_h + 6;
+        gloss_rect(&gs, content->x + fx, content->y + fy, fw, fh, 5, 5, &field_fill);
+        gloss_outline(&gs, content->x + fx, content->y + fy, fw, fh, 5, 0xffa4a8ae);
 
-    /* --- a rule between the query and what it found --- */
-    display->set_viewport(content);
-    display->set_drawmode(DRMODE_FG);
-    display->hline(0, content->width - 1, rule_offset(display));
-    display->set_drawmode(DRMODE_SOLID);
+        struct viewport tvp = *content;
+        tvp.x = content->x + fx + 6;
+        tvp.y = content->y + fy + 3;
+        tvp.width = MAX(1, fw - 12);
+        tvp.height = line_h;
+        display->set_viewport(&tvp);
+        edit_line_draw(display, &s->ed, tvp.width);
+        display->set_viewport(content);
+        rows_y = header_h;
+    }
+    else
+    {
+        /* --- the query, in a clipped sub-viewport so long text can scroll --- */
+        struct viewport tvp = *content;
+        tvp.height = line_h;
+        display->set_viewport(&tvp);
+        edit_line_draw(display, &s->ed, tvp.width);
 
-    /* --- the results, each row a button so the selection carries the accent
-     * colour the rest of the dialog world uses --- */
-    int rows_y = head_height(display);
+        /* --- a rule between the query and what it found --- */
+        display->set_viewport(content);
+        display->set_drawmode(DRMODE_FG);
+        display->hline(0, content->width - 1, rule_offset(display));
+        display->set_drawmode(DRMODE_SOLID);
+
+        /* --- the results, each row a button so the selection carries the accent
+         * colour the rest of the dialog world uses --- */
+        rows_y = head_height(display);
+    }
 
     if (s->selected >= 0)
     {
@@ -208,7 +270,7 @@ static void search_draw(struct dialog *d, struct screen *display,
         sel = (item == s->selected);
 
         dialog_draw_button_ex(display, &d->style, 0,
-                              rows_y + r * (row_h + ROW_GAP),
+                              rows_y + r * (row_h + row_gap),
                               content->width, row_h,
                               s->p->row_text(item, s->ctx), sel,
                               DIALOG_BTN_LEFT,

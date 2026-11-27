@@ -13,9 +13,10 @@ struct ui_sheet {
     int light;
     fb_data tint;
     bool active, starting;
-    /* Set before ui_sheet_begin() for the HUD's fade and scale instead of
-     * the slide. */
+    /* Set before ui_sheet_begin() for the HUD/dialog fade and scale, or a
+     * full-screen horizontal stock page push/pop, instead of the slide up. */
     bool zoom;
+    bool slide;
 };
 
 void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route);
@@ -34,6 +35,10 @@ void ui_sheet_paint_in(struct ui_sheet *sheet, const fb_data *backdrop,
  * panel must be the backdrop as ui_sheet_dim() leaves it. */
 void ui_sheet_paint_zoom(struct ui_sheet *sheet, const fb_data *backdrop,
                          const fb_data *body, struct ui_rect bounds, int top);
+/* Full-screen horizontal stock push/pop below `top`, cross-fading the status
+ * bar above `top`. Both `backdrop` and `body` are whole-screen panels. */
+void ui_sheet_paint_slide(struct ui_sheet *sheet, const fb_data *backdrop,
+                          const fb_data *body, int top);
 /* The backdrop of a finished sheet: `pixels` of `src`, dimmed, to `dst`. */
 void ui_sheet_dim(fb_data *dst, const fb_data *src, int pixels);
 int ui_sheet_timeout(const struct ui_sheet *sheet, int timeout);

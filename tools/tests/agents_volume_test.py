@@ -26,7 +26,8 @@ case += '\n'+s[a+m.start():en]
 def body(p):return re.sub(r'^#include .*$', '',p.read_text(),flags=re.M)
 core=(S/'apps-ipod/iap/iap-core.c').read_text()
 def function(text,name,return_type='void'):
- a=text.index(return_type+' '+name+'(');br=text.index('{',a);en=br+1;depth=1
+ a=re.search(r'\b'+return_type+' '+name+r'\([^;{}]*\)\s*\{',text).start()
+ br=text.index('{',a);en=br+1;depth=1
  while depth:
   depth+=(text[en]=='{')-(text[en]=='}');en+=1
  return text[a:en]
@@ -120,6 +121,10 @@ screen=(S/'apps-ipod/screens/system/agents_screen.c').read_text()
 policy=function(screen,'update_volume_mode') if 'static void update_volume_mode' in screen else 'static void update_volume_mode(void){iap_agents_volume_enable(true);}'
 pre+='\nstatic int view;static bool volume_paging __attribute__((unused));\n'
 pre+='static char detail_pane[16]="p1";\n#define VIEW_DETAIL 3\n#define VIEW_USAGE 4\n'
+pre+='''
+static bool __attribute__((unused)) agents_fruit_nav(void){return false;}
+static bool __attribute__((unused)) usage_legacy_keys(void){return true;}
+'''
 pre+=(function(screen,'is_t3','bool') if 'static bool is_t3(' in screen else '')+policy
 trace=[]
 for line in (R/'tools/tests/fixtures/remote-volume/2026-11-13.txt').read_text().splitlines():

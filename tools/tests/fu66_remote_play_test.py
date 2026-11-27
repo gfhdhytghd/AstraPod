@@ -38,6 +38,7 @@ header = r'''
 #define BUTTON_REL 0x02000000
 #define BUTTON_REPEAT 0x04000000
 #define BUTTON_REDRAW 0x20000000
+#define BUTTON_MULTIMEDIA_PLAYPAUSE 0x10000001
 #define HZ 100
 #include "firmware/export/remote_log.h"
 #include "apps-ipod/input/agents_remote.h"
@@ -53,6 +54,7 @@ enum {
 static int activity, pending;
 static bool native;
 static int get_current_activity(void) { return activity; }
+static bool agents_fruit_nav(void) { return false; }
 static bool agents_nav_has(int target) { (void)target; return false; }
 static void agents_nav_request(int target, bool remote)
 {

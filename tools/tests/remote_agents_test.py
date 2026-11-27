@@ -37,7 +37,7 @@ if helper.exists():
     extra=helper.read_text()
     extra=re.sub(r'^#include .*$', '', extra, flags=re.M)
     preamble+='\n#include "apps-ipod/input/agents_remote.h"\n#define HZ 100\n'
-    preamble+='\n#define HAVE_USB_PODLINK\n#define SYS_EVENT 0x80000000u\n#define BUTTON_MULTIMEDIA 0x10000000\n#define BUTTON_REDRAW 0x20000000\n#include "apps-ipod/input/agents_shortcut.h"\n'
+    preamble+='\n#define HAVE_USB_PODLINK\n#define SYS_EVENT 0x80000000u\n#define BUTTON_MULTIMEDIA 0x10000000\n#define BUTTON_MULTIMEDIA_PLAYPAUSE (BUTTON_MULTIMEDIA|1)\n#define BUTTON_REDRAW 0x20000000\n#include "apps-ipod/input/agents_shortcut.h"\n'
     for path in ['firmware/export/button_chord.h', 'apps-ipod/input/agents_shortcut.c']:
         extra += re.sub(r'^#include .*$', '', (ROOT/path).read_text(), flags=re.M)
 lookup='''
@@ -77,7 +77,7 @@ int main(void) {
     assert(!agents_remote_button(&st,REMOTE_AGENTS,0,BUTTON_RC_MENU,460));
     assert(agents_remote_button(&st,REMOTE_AGENTS,BUTTON_RC_MENU|BUTTON_REL,0,470)==(BUTTON_RC_MENU|BUTTON_REL));
     assert(lookup(CONTEXT_AGENTS,BUTTON_RC_MENU|BUTTON_REL,BUTTON_RC_MENU)==ACTION_STD_MENU);
-    assert(lookup(CONTEXT_AGENTS,BUTTON_RC_SELECT|BUTTON_REL,0)==ACTION_STD_OK);
+    assert(lookup(CONTEXT_AGENTS,BUTTON_RC_SELECT|BUTTON_REL,0)==ACTION_AGENTS_SELECT_UP);
     st=(struct agents_remote_state){0};
     for(int f=0;f<3;f++) {
         int flag=f==1?BUTTON_REPEAT:f==2?BUTTON_REL:0;
@@ -96,9 +96,9 @@ int main(void) {
     assert(lookup(CONTEXT_WPS,BUTTON_RC_PLAY|BUTTON_REPEAT,BUTTON_RC_PLAY)==ACTION_WPS_LYRICS);
     struct agents_shortcut_state cs={0};bool fire=false;
     int b=agents_shortcut_button(&cs,BUTTON_SELECT,BUTTON_SELECT,false,&fire);
-    assert(lookup(CONTEXT_AGENTS,b,0)==ACTION_NONE);
+    assert(lookup(CONTEXT_AGENTS,b,0)==ACTION_AGENTS_SELECT_DOWN);
     b=agents_shortcut_button(&cs,BUTTON_SELECT|BUTTON_REPEAT,BUTTON_SELECT,false,&fire);
-    assert(!fire&&lookup(CONTEXT_AGENTS,b,BUTTON_SELECT)==ACTION_STD_CONTEXT);
+    assert(!fire&&lookup(CONTEXT_AGENTS,b,BUTTON_SELECT)==ACTION_AGENTS_SELECT_REPEAT);
     b=agents_shortcut_button(&cs,BUTTON_SELECT|BUTTON_PLAY,BUTTON_SELECT|BUTTON_PLAY,false,&fire);
     assert(!fire&&lookup(CONTEXT_WPS,b,BUTTON_SELECT|BUTTON_REPEAT)==ACTION_WPS_HOTKEY);
     puts("plain Left/Right press+repeat+release everywhere; host Menu/Select; Play scopes; native keys PASS");

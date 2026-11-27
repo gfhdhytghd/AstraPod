@@ -36,7 +36,7 @@ static int album_covers_return(void*p,void*q){(void)p;(void)q;local_calls++;retu
 static int cider_browse_covers(bool b){(void)b;cider_calls++;return GO_TO_CIDER;}
 '''
 pre='enum agents_nav_screen {'+','.join(sorted(set(tokens)|{'GO_TO_CIDER','AGENTS_NAV_COVERS','AGENTS_NAV_BACK'}))+'};\n'+pre
-pre+='\nstatic bool shortcut_screen_context(int context){return context==1;}static void root_menu_agents_shortcut(void){}\n'
+pre+='\n#define CONTEXT_AGENTS 2\nstatic void agents_screen_shortcut_entry(void){}\nstatic bool shortcut_screen_context(int context){return context==1;}static void root_menu_agents_shortcut(void){}\n'
 pre+=fn(c,'cider_remote_source')+functions+route
 post=r'''
 int main(void){for(int available=0;available<2;available++){

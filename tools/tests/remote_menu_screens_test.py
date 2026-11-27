@@ -40,6 +40,7 @@ pre = r'''
 #define BUTTON_REPEAT 0x04000000
 #define BUTTON_REDRAW 0x20000000
 #define BUTTON_MULTIMEDIA 0x10000000
+#define BUTTON_MULTIMEDIA_PLAYPAUSE (BUTTON_MULTIMEDIA | 0x01)
 #define SYS_EVENT 0x80000000u
 #include "firmware/target/arm/ipod/button-target.h"
 #include "apps-ipod/input/agents_shortcut.h"
@@ -52,6 +53,7 @@ static int remote_context(int c){return c==CONTEXT_AGENTS?REMOTE_AGENTS:REMOTE_O
 static int raw_volume_button(int b){return b;}
 bool ui_polling;
 void podlink_time_sync(void) {}
+static void agents_background_play_tone(void) {}
 struct agents_shortcut_state shortcut;
 static struct agents_cover_chord_state cover_chord;
 static bool shortcut_talking, remote_input_active;

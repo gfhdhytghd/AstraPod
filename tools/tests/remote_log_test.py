@@ -20,6 +20,8 @@ O.mkdir(parents=True, exist_ok=True)
 #define BUTTON_REL 0x02000000
 #define BUTTON_REPEAT 0x04000000
 #define BUTTON_REDRAW 0x20000000
+#define BUTTON_MULTIMEDIA 0x10000000
+#define BUTTON_MULTIMEDIA_PLAYPAUSE (BUTTON_MULTIMEDIA | 0x01)
 ''')
 cmd = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-g',
        '-fsanitize=address,undefined', '-fno-sanitize-recover=all',

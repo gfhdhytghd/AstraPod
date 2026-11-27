@@ -127,6 +127,10 @@ typedef int (*menu_callback_type)(int action,
 struct settings_list;
 bool menu_explain_setting(const struct settings_list *setting);
 int menu_item_event(int action, const struct menu_item_ex *item);
+int menu_item_glyph(const struct menu_item_ex *item, int index);
+/* Whether `list` is a menu shown as a page, not a sheet or a plugin's: every
+ * row has the icon column, and a row with no glyph leaves it blank. */
+bool menu_page_list(const struct gui_synclist *list);
 bool menu_item_in_settings_mode(const struct menu_item_ex *item);
 
 void do_setting_from_menu(const struct menu_item_ex *temp,

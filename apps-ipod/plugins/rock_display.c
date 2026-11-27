@@ -13,6 +13,9 @@
 #include "system/appevents.h"
 #include "system/activity.h"
 #include "ui/frame.h"
+#include "ui/hwscroll.h"
+#include "ui/animation.h"
+#include "ui/pace.h"
 #include "ui/native_wps.h"
 #include "ui/retained.h"
 #include "ui/scene.h"
@@ -238,28 +241,55 @@ void rock_raw_lcd_update(void)
 {
     rock_list_release(false);
     rock_present_first_page();
+    ui_hwscroll_note_update();
     lcd_update();
+    ui_hwscroll_flushed();
 }
 
 void rock_raw_lcd_update_rect(int x, int y, int w, int h)
 {
     rock_list_release(false);
     rock_present_first_page();
+    ui_hwscroll_note_update();
     lcd_update_rect(x, y, w, h);
+    ui_hwscroll_flushed();
 }
 
 static void rock_screen_update_viewport(void)
 {
     rock_list_release(false);
     rock_present_first_page();
+    ui_hwscroll_note_update();
     lcd_update_viewport();
+    ui_hwscroll_flushed();
 }
 
 static void rock_screen_update_viewport_rect(int x, int y, int w, int h)
 {
     rock_list_release(false);
     rock_present_first_page();
+    ui_hwscroll_note_update();
     lcd_update_viewport_rect(x, y, w, h);
+    ui_hwscroll_flushed();
+}
+
+/* An animation's frames on every second panel refresh, numbered in
+ * refreshes since rock_frame_start(). */
+static struct ui_pace frame_pace = {.half_rate = true};
+static uint32_t frame_begin, frame_due;
+
+void rock_frame_start(void)
+{
+    frame_begin = ui_clock_start();
+    frame_due = ui_pace_next(&frame_pace, frame_begin);
+}
+
+unsigned int rock_frame_next(void)
+{
+    ui_clock_sleep_until(frame_due);
+    unsigned int frame = ui_pace_frame(&frame_pace);
+    frame_due = ui_pace_next(&frame_pace, frame_begin);
+    return frame;
 }
 
 /* A raw call reclaims the framebuffer before it writes any pixels. */

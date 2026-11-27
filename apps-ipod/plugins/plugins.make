@@ -183,6 +183,12 @@ $(ROCK_OUT)/staged/remote_control.c: $(ROCK_SRC)/remote_control.c $(APPSDIR)/plu
 	$(SILENT)mkdir -p $(@D)
 	$(SILENT)python3 $(word 2,$^) $< $@
 
+$(ROCK_OUT)/staged/2048.c: $(ROCK_SRC)/2048.c $(ROCK_TOOLS)/stage-usb.py \
+    $(APPSDIR)/plugins/stage-2048.py $(APPSDIR)/plugins/2048-board.inc
+	$(SILENT)mkdir -p $(@D)
+	$(SILENT)python3 $(ROCK_TOOLS)/stage-usb.py $< $@.usb
+	$(SILENT)python3 $(word 3,$^) $@.usb $(word 4,$^) $@
+
 ROCK_STAGED := 2048 amaze brickmania chopper dice fireworks flipit jackpot metronome \
     minesweeper oscilloscope periodic_table pitch_detector playing_time pong rb_info robotfindskitten snake snake2 star stopwatch \
     lib/highscore keybox remote_control search stats vu_meter wavview $(ROCK_UTILITIES) $(ROCK_GAME_ADAPTERS)

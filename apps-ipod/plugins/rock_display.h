@@ -34,6 +34,8 @@ void rock_theme_undo(enum screen_type screen, bool force);
 bool rock_set_title(const char *title, enum themable_icons icon,
                     enum screen_type screen);
 void rock_send_event(unsigned short id, void *data);
+void rock_frame_start(void);
+unsigned int rock_frame_next(void);
 
 struct rock_native_scope rock_display_native_begin(void);
 enum rock_display_resume {

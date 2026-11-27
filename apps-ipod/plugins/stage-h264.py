@@ -52,10 +52,23 @@ elif src.name == "video_playback.c":
                    "pcmbuf.h", "rbpaths.h", "settings.h", "sound.h", "splash.h",
                    "system.h", "video_pcm.h"):
         replace(f'#include "{header}"\n', "")
-    cut("#define VIDEO_RESUME_MAGIC", "enum video_input_action")
     replace("    VIDEO_INPUT_MENU,\n", "")
-    cut("struct video_resume_record", "struct video_pool")
-    cut("static void video_resume_filename", "static void video_set_paused")
+    replace("    uint32_t crc = rb->crc_32(path, rb->strlen(path), 0xffffffff);",
+            """    uint32_t crc = 2166136261u;
+    for (const unsigned char *p = (const unsigned char *)path; *p; ++p)
+        crc = (crc ^ *p) * 16777619u;""")
+    cut("static void video_volume_change", "static void video_set_paused")
+    replace("        video_volume_change(1);", "        rb->adjust_volume(1);")
+    replace("        video_volume_change(-1);", "        rb->adjust_volume(-1);")
+    replace("    fd = rb->open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0666);",
+            """    char temporary[MAX_PATH];
+    rb->snprintf(temporary, sizeof(temporary), "%s.tmp", filename);
+    fd = rb->open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0666);""")
+    replace("    (void)rb->write(fd, &record, sizeof(record));\n    rb->close(fd);",
+            """    bool complete = rb->write(fd, &record, sizeof(record)) == sizeof(record);
+    if (rb->close(fd) == 0 && complete)
+        rb->rename(temporary, filename);
+    rb->remove(temporary);""")
     cut("enum video_menu_item", "static void video_scale_plane")
     replace("            video_pcm_pause(true);\n", "")
     replace("            video_pcm_pause(false);\n", "")
@@ -63,20 +76,23 @@ elif src.name == "video_playback.c":
         """    if (action == ACTION_WPS_MENU || action == ACTION_STD_CANCEL ||
         action == ACTION_WPS_STOP)
         return VIDEO_INPUT_EXIT;
+    if (action == ACTION_WPS_BROWSE)
+    {
+        *overlay_until = *rb->current_tick + VIDEO_OSD_SHOW_TICKS;
+        *redraw = true;
+        return VIDEO_INPUT_NONE;
+    }
 """)
 
     for line in (
-        "    uint32_t last_sample = 0;",
         "    rb->pcmbuf_fade(false, true);", "    rb->pcmbuf_fade(false, false);",
         "    rb->sound_set(SOUND_VOLUME, rb->global_status->volume);",
-        "        last_sample = sample;",
     ):
         replace(line + "\n", "")
     replace("""        scale_buffer == NULL ||
         (demux.audio_num_samples > 0 &&
          (audio_codec_workspace == NULL || pcm_buffer == NULL)))""",
             """        scale_buffer == NULL || decoder_size == 0)""")
-    cut("    sample = video_resume_load", "    video_timing_for_sample")
     replace("demux->timescale > 0;", "demux->timescale > 0 && demux->mdat_len > 0;")
     replace("    return (uint32_t)(ticks * 1000u / demux->timescale);",
             """    uint64_t elapsed = ticks * 1000u / demux->timescale;
@@ -97,6 +113,9 @@ elif src.name == "video_playback.c":
     {
         have_audio = audio_master = true;
         video_audio_play();
+        uint32_t position = video_pts_ms(&demux, &timing);
+        if (position)
+            video_audio_seek(position);
     }
 
 """)
@@ -118,7 +137,30 @@ elif src.name == "video_playback.c":
                     ((*rb->current_tick) - start_tick) * 1000 / HZ);""")
     replace("(!video_audio_is_active() && video_pcm_empty())",
             "(!video_audio_is_active() && rb->h264_audio->buffered() == 0)")
-    cut("    if (result == 0)", "cleanup:", "\n")
+    replace("    else\n        video_resume_save(filepath, last_sample, demux.num_samples);",
+            "    else if (result == 1)\n        video_resume_save(filepath, last_sample, demux.num_samples);")
+    cut("    char volume[20];", "    if (!visible)",
+        """    int top = LCD_HEIGHT - 29;
+    int bar_x = 10;
+    int bar_y = top + 17;
+    int bar_width = LCD_WIDTH - 2 * bar_x;
+    int fill_width, duration_width;
+
+""")
+    cut("    rb->snprintf(volume, sizeof(volume)", "    fill_width =")
+    replace("video_time_text(duration_ms, duration, sizeof(duration));",
+            """video_time_text(duration_ms > position_ms ? duration_ms - position_ms : 0,
+                    duration, sizeof(duration));""")
+    cut("    /* Match MPEG player's raised purple OSD", "    video_yuv_text(planes, bar_x, top + 6",
+        """    video_yuv_rect(planes, 0, top, LCD_WIDTH, 29, 23, 128, 128);
+    video_yuv_rect(planes, 0, top, LCD_WIDTH, 1, 78, 128, 128);
+""")
+    replace("bar_width, bar_height,\n                   255, 255, 255);",
+            "bar_width, 5,\n                   72, 128, 128);")
+    cut("    video_yuv_rect(planes, bar_x + 1, bar_y + 1,", "}\n\nstatic void video_draw_frame",
+        """    video_yuv_rect(planes, bar_x + 1, bar_y + 1,
+                   fill_width, 3, 160, 160, 92);
+""")
     replace("            size == 0 || size > VIDEO_READ_BUFFER ||",
             """            size == 0 || size > VIDEO_READ_BUFFER ||
             offset < demux.mdat_offset ||

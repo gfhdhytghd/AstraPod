@@ -528,6 +528,15 @@ order.
 The order of the Documents list: by name either way, or the newest file
 first. Newest goes by when a file was last changed.
 
+[photo duration]
+Sets how many seconds each picture stays on screen during a photo slideshow.
+
+[photo transition]
+Changes how the next slideshow picture appears. Choose Off, Fade, or Slide.
+
+[photo repeat]
+Starts the photo slideshow again after the final picture.
+
 [sort images]
 The order of the Images list: by name either way, or the newest picture
 first. Newest goes by when a file was last changed.

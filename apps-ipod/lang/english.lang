@@ -33917,3 +33917,63 @@
     *: "No Name"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_PHOTO_TRANSITION
+  desc: Photo slideshow setting
+  user: core
+  <source>
+    *: "Photo Transition"
+  </source>
+  <dest>
+    *: "Photo Transition"
+  </dest>
+  <voice>
+    *: "Photo Transition"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_REPEAT
+  desc: Photo slideshow setting
+  user: core
+  <source>
+    *: "Repeat Slideshow"
+  </source>
+  <dest>
+    *: "Repeat Slideshow"
+  </dest>
+  <voice>
+    *: "Repeat Slideshow"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_FADE
+  desc: Photo slideshow setting
+  user: core
+  <source>
+    *: "Fade"
+  </source>
+  <dest>
+    *: "Fade"
+  </dest>
+  <voice>
+    *: "Fade"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_SLIDE
+  desc: Photo slideshow setting
+  user: core
+  <source>
+    *: "Slide"
+  </source>
+  <dest>
+    *: "Slide"
+  </dest>
+  <voice>
+    *: "Slide"
+  </voice>
+</phrase>

@@ -37,6 +37,7 @@
 #include "ui/menu_pane.h"
 #include "timefuncs.h"
 #include "screens/browse/browser_db.h"
+#include "screens/browse/stock_media.h"
 #include "screens/settings/exported_settings.h"
 #include "screens/settings/sound_settings.h"
 #include "screens/system/fruit_about.h"
@@ -119,10 +120,16 @@ static int songs(void)
     return root_menu_library_row("track", row_label("Title"));
 }
 static int search(void)       { return run(GO_TO_DB_SEARCH); }
-static int photos(void)       { return run(GO_TO_IMAGES); }
+static int photos(void)       { return stock_photos_screen(); }
 static int podcasts(void)     { return run(GO_TO_PODCASTS); }
 static int now_playing(void)  { return run(GO_TO_WPS); }
-static int movies(void)       { return run(GO_TO_VIDEOS); }
+static int movies(void)       { return stock_videos_screen(STOCK_MOVIE, LANG_FRUIT_MOVIES); }
+static int tv_shows(void)     { return stock_videos_screen(STOCK_TV_SHOW, LANG_FRUIT_TV_SHOWS); }
+static int music_videos(void) { return stock_videos_screen(STOCK_MUSIC_VIDEO, LANG_FRUIT_MUSIC_VIDEOS); }
+static int video_playlists(void)
+{
+    return stock_videos_screen(STOCK_VIDEO_PLAYLISTS, LANG_FRUIT_VIDEO_PLAYLISTS);
+}
 
 /* Music Quiz is a screen of the main menu's, not a plugin: the list leaves
  * for it, and comes back once it is done */
@@ -289,9 +296,9 @@ MENU(music_menu_fruit, LANG_MUSIC_BROWSER, home_callback, music_rows);
 
 ROW(movies_row, LANG_FRUIT_MOVIES, movies, NULL);
 ROW(rentals_row, LANG_FRUIT_RENTALS, empty, NULL);
-ROW(tv_shows_row, LANG_FRUIT_TV_SHOWS, empty, NULL);
-ROW(music_videos_row, LANG_FRUIT_MUSIC_VIDEOS, empty, NULL);
-ROW(video_playlists_row, LANG_FRUIT_VIDEO_PLAYLISTS, empty, NULL);
+ROW(tv_shows_row, LANG_FRUIT_TV_SHOWS, tv_shows, NULL);
+ROW(music_videos_row, LANG_FRUIT_MUSIC_VIDEOS, music_videos, NULL);
+ROW(video_playlists_row, LANG_FRUIT_VIDEO_PLAYLISTS, video_playlists, NULL);
 ROW(video_settings_row, LANG_SETTINGS, not_available, NULL);
 
 static const struct menu_item_ex *const videos_rows[] = {
@@ -303,14 +310,7 @@ MENU(videos_menu, LANG_FRUIT_VIDEOS, home_callback, videos_rows);
 
 /** Photos **/
 
-ROW(all_photos_row, LANG_FRUIT_ALL_PHOTOS, photos, NULL);
-ROW(photo_settings_row, LANG_SETTINGS, not_available, NULL);
-
-static const struct menu_item_ex *const photos_rows[] = {
-    &all_photos_row, &photo_settings_row,
-};
-
-MENU(photos_menu, LANG_FRUIT_PHOTOS, home_callback, photos_rows);
+ROW(photos_menu, LANG_FRUIT_PHOTOS, photos, home_callback);
 
 /** Extras **/
 
@@ -730,9 +730,9 @@ ROW(home_audiobooks, LANG_AUDIOBOOKS, audiobooks, home_callback);
 ROW(home_search, LANG_SEARCH, search, home_callback);
 ROW(home_movies, LANG_FRUIT_MOVIES, movies, home_callback);
 ROW(home_rentals, LANG_FRUIT_RENTALS, empty, home_callback);
-ROW(home_tv_shows, LANG_FRUIT_TV_SHOWS, empty, home_callback);
-ROW(home_music_videos, LANG_FRUIT_MUSIC_VIDEOS, empty, home_callback);
-ROW(home_video_playlists, LANG_FRUIT_VIDEO_PLAYLISTS, empty, home_callback);
+ROW(home_tv_shows, LANG_FRUIT_TV_SHOWS, tv_shows, home_callback);
+ROW(home_music_videos, LANG_FRUIT_MUSIC_VIDEOS, music_videos, home_callback);
+ROW(home_video_playlists, LANG_FRUIT_VIDEO_PLAYLISTS, video_playlists, home_callback);
 ROW(home_podcasts, LANG_PODCASTS, podcasts, home_callback);
 ROW(home_clocks, LANG_FRUIT_CLOCKS, clocks, home_callback);
 ROW(home_calendars, LANG_FRUIT_CALENDARS, calendars, home_callback);

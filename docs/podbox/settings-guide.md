@@ -274,6 +274,14 @@ Hold Select on the recorder to open its settings.
 | Directory Cache | Keeps the layout of the disk in memory so the file browser does not have to read it each time. Makes browsing much faster and costs a little memory. Takes effect when you leave the setting. | Yes |  |
 | Hotkey | What the hotkey button does in the file browser. | Off | **Adv** |
 
+### Library — Photos
+
+| Setting | What it does | Default | |
+|---|---|---|---|
+| Slideshow Time | Sets how many seconds each picture stays on screen during a photo slideshow. | 5 seconds | |
+| Photo Transition | Changes how the next slideshow picture appears. Choose Off, Fade, or Slide. | Off | |
+| Repeat Slideshow | Starts the photo slideshow again after the final picture. | Off | |
+
 ### Library — Music
 
 | Setting | What it does | Default | |

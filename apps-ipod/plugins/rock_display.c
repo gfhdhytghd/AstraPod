@@ -202,15 +202,20 @@ void rock_send_event(unsigned short id, void *data)
     send_event(id, data);
 }
 
-/* Some games render directly and never pump the native action loop.
- * Start only when the game submits its first complete framebuffer. */
-static void rock_present_first_page(void)
+bool rock_display_first_page(void)
 {
     if (!app_first_frame)
-        return;
+        return false;
     app_first_frame = false;
     ui_scene_show_modal(&app_scene, "app-push");
-    ui_scene_finish_page(&app_scene);
+    return app_scene.capturing;
+}
+
+/* Raw LCD calls do not pump the native action loop. */
+static void rock_present_first_page(void)
+{
+    if (rock_display_first_page())
+        ui_scene_finish_page(&app_scene);
 }
 
 void rock_raw_lcd_update(void)

@@ -1113,10 +1113,11 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
 
         /* Only stack movement and normal list updates share the snapshots.
          * Other actions can hand the LCD to an unrelated screen. */
-        bool top_settings = peer == &root_menu_ && stack_top == 0;
+        bool settings_to_home = peer == &root_menu_;
+        bool top_settings = settings_to_home && stack_top == 0;
         if (action != ACTION_NONE && action != ACTION_UNKNOWN && action != ACTION_REDRAW &&
             action != ACTION_STD_OK && action != ACTION_STD_CANCEL &&
-            !(top_settings && action == ACTION_STD_MENU))
+            !(settings_to_home && action == ACTION_STD_MENU))
             ui_scene_cancel(scene);
         /* In the stock tree Menu goes back one level, as stock's does */
         if (action == ACTION_STD_MENU && start_menu == fruit_menu_root())
@@ -1317,7 +1318,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             if (menu != &root_menu_)
             {
                 ret = GO_TO_ROOT;
-                if (top_settings)
+                if (settings_to_home)
                     scene_handoff = ui_scene_capture(scene, menu, peer, false);
             }
             else

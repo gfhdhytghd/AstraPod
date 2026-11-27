@@ -431,7 +431,7 @@ EXTRAS = [
         ]),
         row("Sleep Timer"),
     ]),
-    row("Games", "menu", [row("2048")]),
+    row("Games", "menu", [row("2048", inner=down(4), back="select")]),
     row("Notes", inner=levels("Extras/Notes", ["Instructions"], "menu")),
     row("Screen Lock"), row("Stopwatch"), row("Other Apps"), row("Demos"),
     row("Files"), row("System", "menu", [
@@ -463,12 +463,15 @@ SYSTEM_SETTINGS = [
 ]
 
 NATIVE_SETTINGS = [
-    row("Search", pre=[("nav", "up", "")]), row("Sound", pre=[]),
-    row("Playback", pre=down(1)), row("Recording", pre=down(2)),
+    row("Search", pre=[("nav", "up", "")]), row("Sound", back="back", pre=[]),
+    row("Sound, Menu to Home", pre=[]),
+    row("Playback", back="back", pre=down(1)),
+    row("Recording", back="back", pre=down(2)),
     row("Library", "menu", [
-        row("Files"), row("Music"), row("Search"), row("Album Covers"),
-        row("Database"), row("Artwork Cache"), row("Playlist Engine"),
-        row("Viewers"), row("Maintenance"),
+        row("Files", back="back"), row("Music", back="back"),
+        row("Search", back="back"), row("Album Covers", back="back"),
+        row("Database", back="back"), row("Artwork Cache", back="back"), row("Playlist Engine", back="back"),
+        row("Viewers", back="back"), row("Maintenance", back="back"),
     ], back="back", pre=down(3)),
     row("Theme", pre=down(4)), row("Appearance", pre=down(5)),
     row("Battery & Power", pre=down(6)),
@@ -482,7 +485,7 @@ NATIVE_TREE = [
     row("Music", back="back"),
     row("Audiobooks", back="back"),
     row("Podcasts", inner=levels("Podcasts", ["show"]), back="back"),
-    row("Cover Flow", back="back"),
+    row("Cover Flow"),
     row("Playlists", inner=levels("Playlists", ["playlist"]), back="back"),
     row("Files"), row("Photos", back="back"),
     row("Videos", "any", back="back"),
@@ -510,7 +513,8 @@ def games(fixture):
     names = [english[lang] for module, lang in table
              if (fixture / ".rockbox/rocks" / (module + ".rock")).is_file()]
     names.append(english["LANG_MUSIC_QUIZ"])
-    return [row(name) for name in sorted(names, key=str.casefold)]
+    return [row(name, inner=down(4), back="select") if name == "2048"
+            else row(name) for name in sorted(names, key=str.casefold)]
 
 
 def run_walk(sim, out, walk, stem):
@@ -522,7 +526,7 @@ def run_walk(sim, out, walk, stem):
             if key in ("up", "down"):
                 sim.settle(quiet=0.08, limit=0.22)
             else:
-                sim.settle()
+                sim.settle(quiet=0.45)
             continue
         start = sim.settle()
         _, perf = sim.routes(perf)

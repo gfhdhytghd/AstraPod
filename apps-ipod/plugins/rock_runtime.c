@@ -603,10 +603,12 @@ static int rock_do_menu(const struct menu_item_ex *menu, int *selected,
     if (usb_taken)
         return MENU_ATTACHED_USB;
     struct rock_native_scope scope = rock_modal_begin();
+    bool first_page = rock_display_first_page();
     int result = do_menu(menu, selected, parent, hide_theme);
     if (result == MENU_ATTACHED_USB)
         rock_usb_takeover();
-    rock_modal_end(&scope);
+    rock_modal_end_with_resume(&scope, first_page ? ROCK_RESUME_DISCARD
+                                                 : ROCK_RESUME_PRESENT);
     return result;
 }
 

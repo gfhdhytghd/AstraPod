@@ -59,6 +59,8 @@ struct frame_capture {
     uint32_t worst_render, worst_work, worst_interval, skipped;
     uint32_t render_pending, last_submission, period_q8;
     uint32_t last_start, last_phase, last_present;
+    uint32_t ready_wait_us;
+    bool first_run, readiness_measured;
     unsigned te_gaps, te_repeats, present_gaps, present_repeats;
     bool presented;
     int32_t slot_phase;
@@ -76,6 +78,9 @@ static bool enabled;
 static bool active_passive;
 static int active_handle;
 static unsigned serial, owner;
+/* Store the route names, including routes assembled on a caller's stack. */
+static char seen_routes[128][sizeof(((struct frame_capture *)0)->route)];
+static unsigned route_count;
 
 static uint32_t add_time(uint32_t a, uint32_t b)
 {
@@ -173,6 +178,26 @@ static unsigned begin_capture(const char *route, bool passive)
 
 unsigned ui_perf_begin(const char *route) { return begin_capture(route, false); }
 unsigned ui_perf_begin_passive(const char *route) { return begin_capture(route, true); }
+
+void ui_perf_ready(unsigned trace, uint32_t requested_at)
+{
+    if (!trace || trace != serial || active_handle <= 0 || owner != thread_self())
+        return;
+    uint32_t wait = (uint32_t)USEC_TIMER - requested_at;
+    struct frame_capture *capture = core_get_data_pinned(active_handle);
+    unsigned i = 0;
+    while (i < route_count && strcmp(seen_routes[i], capture->route))
+        ++i;
+    if (!capture->readiness_measured && i < ARRAYLEN(seen_routes))
+    {
+        capture->readiness_measured = true;
+        capture->ready_wait_us = wait;
+        capture->first_run = i == route_count;
+        if (capture->first_run)
+            strlcpy(seen_routes[route_count++], capture->route, sizeof(seen_routes[0]));
+    }
+    core_put_data_pinned(capture);
+}
 
 void ui_perf_note_cover_work(unsigned changes, uint32_t cache_wait_us,
                              uint32_t caption_us, const uint32_t stages[UI_COVER_STAGE_COUNT])
@@ -484,7 +509,10 @@ void ui_perf_end(unsigned token)
         rows = core_get_data_pinned(rows_handle);
         rows_used = format_rows(capture, first, rows, rows_size);
     }
-    char summary[640];
+    char summary[704], readiness[64] = "";
+    if (capture->readiness_measured)
+        snprintf(readiness, sizeof(readiness), " ready_wait_us=%lu first_run=%u",
+                 (unsigned long)capture->ready_wait_us, capture->first_run ? 1u : 0u);
     unsigned render_worst = as_frames(capture->worst_render, period_q8);
     const char *te = !capture->enabled ? "off" :
                      capture->measured ? "measured" : "nominal";
@@ -498,7 +526,7 @@ void ui_perf_end(unsigned token)
         "render_worst_f=" FRAME_FORMAT " render_misses=%u "
         "period_us=%u te=%s async=%s rate=%s half_frames=%u "
         "phase_p50_us=%d phase_p99_us=%d te_gaps=%u te_repeats=%u "
-        "present_gaps=%u present_repeats=%u\n",
+        "present_gaps=%u present_repeats=%u%s\n",
         capture->route, capture->seen, retained, first, rows ? retained : 0,
         FRAME_ARG(work_p99), FRAME_ARG(interval_p99),
         FRAME_ARG(work_worst), FRAME_ARG(interval_worst),
@@ -507,7 +535,7 @@ void ui_perf_end(unsigned token)
         (unsigned)((period_q8 + 128) >> 8), te,
         capture->async ? "on" : "off", rate, capture->half_frames,
         phase_p50, phase_p99, capture->te_gaps, capture->te_repeats,
-        capture->present_gaps, capture->present_repeats);
+        capture->present_gaps, capture->present_repeats, readiness);
     core_put_data_pinned(capture);
     core_free(handle);
     if (n > 0 && (size_t)n < sizeof(summary))

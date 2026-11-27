@@ -5,6 +5,7 @@
 #include "list.h"
 
 void list_render_init(void);
+void list_render_warm(void);
 /* A wheel event of `positions` raw wheel positions, signed. True when the
  * letter jump moved the selection and drew the list; otherwise *rows is how
  * far the selection moves, 0 for not at all. */

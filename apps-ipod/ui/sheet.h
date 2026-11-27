@@ -9,9 +9,10 @@ struct ui_sheet {
     struct ui_tween tween;
     struct ui_rect previous;
     unsigned trace;
+    uint32_t requested_at;
     int light;
     fb_data tint;
-    bool active;
+    bool active, starting;
 };
 
 void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route);

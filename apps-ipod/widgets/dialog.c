@@ -533,7 +533,8 @@ static void dialog_view_draw(struct dialog_view *view, struct dialog *d, bool re
         box.x = box.y = 0;
         box.buffer = &buffer;
         dialog_draw_content(d, &screens[SCREEN_MAIN], &box);
-        ui_note_render((uint32_t)USEC_TIMER - start);
+        if (!view->sheet.starting)
+            ui_note_render((uint32_t)USEC_TIMER - start);
     }
     if (d->fb)
         ui_sheet_paint_in(&view->sheet, view->pixels, view->pixels + PANEL_PIXELS,
@@ -557,6 +558,7 @@ static void dialog_view_dismiss(struct dialog_view *view, struct dialog *d)
 
 int dialog_run(struct dialog *d, int poll_ticks)
 {
+    uint32_t requested_at = USEC_TIMER;
     int disp = DIALOG_CONTINUE;
     int font = -1;
     bool outer_inhibit = ui_flush_inhibited();
@@ -593,7 +595,10 @@ int dialog_run(struct dialog *d, int poll_ticks)
     if (!d->motion_route)
         d->motion_route = d->context == CONTEXT_KEYBOARD ? "keyboard" : "dialog";
     if (view)
+    {
         ui_sheet_begin(&view->sheet, true, d->motion_route);
+        view->sheet.requested_at = requested_at;
+    }
 
     bool redraw = true;
     int ticks = d->poll_ticks;

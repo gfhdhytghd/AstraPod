@@ -263,6 +263,28 @@ static void refresh_tokens(struct native_list *render)
                           render->theme.metric[UI_METRIC_LIST_SELECTION_ALPHA]);
 }
 
+void list_render_warm(void)
+{
+    list_render_init();
+    if (renderer_handle <= 0)
+        return;
+    struct native_list *render = core_get_data_pinned(renderer_handle);
+    refresh_tokens(render);
+    static const int labels[] = {
+        LANG_MUSIC_BROWSER, LANG_SETTINGS, LANG_NOW_PLAYING,
+        LANG_DIR_BROWSER, LANG_PLAYLISTS,
+    };
+    font_prefetch_begin();
+    for (unsigned i = 0; i < ARRAYLEN(labels); ++i)
+    {
+        const char *label = (const char *)str(labels[i]);
+        font_prefetch_text(render->text_font, label);
+        font_prefetch_text(render->title_font, label);
+    }
+    font_prefetch_end();
+    core_put_data_pinned(render);
+}
+
 static int row_pitch(const struct gui_synclist *list, enum screen_type screen,
                      const uint16_t *metric)
 {
@@ -2715,7 +2737,8 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     }
     /* A scene snapshot and a scrolling library must both contain the text
      * of the visible rows. Let the font renderer fill any misses directly. */
-    bool prefetch = !rock_ui_native() && !list->require_row_glyphs;
+    bool preparing = ui_scene_preparing();
+    bool prefetch = !rock_ui_native() && !list->require_row_glyphs && !preparing;
     if (prefetch)
         font_prefetch_begin();
     unsigned epoch = font_prefetch_epoch();
@@ -2950,7 +2973,7 @@ static void draw_list(struct gui_synclist *list, bool status_only,
 #endif
     if (prefetch)
         font_prefetch_end();
-    else if (list->require_row_glyphs && !rock_ui_native() && !status_only)
+    else if (list->require_row_glyphs && !rock_ui_native() && !status_only && !preparing)
         prefetch_list_page(render, &g);
 
 done:

@@ -96,6 +96,9 @@
 #include "ui/scene.h"
 #include "ui/native_wps.h"
 #include "ui/statusbar.h"
+#include "ui/stock_art.h"
+#include "ui/theme_art.h"
+#include "widgets/list_render.h"
 #ifdef ASTRAPOD_ROCK_COMPAT
 #include "plugins/app_tray.h"
 #endif
@@ -942,6 +945,14 @@ static void init(void)
     CHART(">init_tagcache");
     init_tagcache();
     CHART("<init_tagcache");
+
+    /* Warm UI resources while startup already has the disk active. */
+    ui_scene_warm_workspace();
+    list_render_warm();
+    struct ui_theme theme;
+    ui_theme_snapshot(&theme);
+    if (ui_theme_art(&theme))
+        stock_art_ready();
 
     playlist_init();
     browser_mem_init();

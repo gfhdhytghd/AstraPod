@@ -8585,7 +8585,12 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             remembered_index = center_index;
         }
 
-        if (model->panel_request)
+        /* Remote track and blur prefetch can block frame delivery after
+         * the covers settle. Wait until the split entry's chrome lands. */
+        bool defer_prefetch = model->external && !dark && !leaving &&
+                              !panel.live &&
+                              (bar_drop_waiting() || caption_waits);
+        if (model->panel_request && !defer_prefetch)
         {
             if (pf_state == pf_idle && (requested_center != center_index ||
                 !panel_settled || !TIME_BEFORE(current_tick, request_panel_at)))
@@ -8605,7 +8610,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             panel_waiting = panel_cache_pump();
         }
 
-        if (model->panel_request && pf_state == pf_idle &&
+        if (model->panel_request && !defer_prefetch && pf_state == pf_idle &&
             (blur_index != center_index || blur_slide_revision != pf_slides_loaded ||
              blur_art_revision != art_cache_generation() ||
              blur_theme_revision != ui_theme_generation()))

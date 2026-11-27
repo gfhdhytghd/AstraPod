@@ -15,6 +15,7 @@
 #include "draw/viewport.h"
 #include "files/file_index.h"
 #include "frame.h"
+#include "idle.h"
 #include "input/action.h"
 #include "kernel.h"
 #include "lcd.h"
@@ -164,7 +165,7 @@ int sb_motion_timeout(int timeout)
     if (rock_ui_raw() || !indicators_moving || !lcd_active() || ui_flush_inhibited() ||
         lcd_updates_held() || !viewportmanager_theme_enabled(SCREEN_MAIN))
         return timeout;
-    int next = ui_clock_poll_timeout(USEC_TIMER - motion_start, motion_duration, HZ);
+    int next = ui_idle_status_timeout(motion_start, motion_duration);
     return timeout < 0 || next < timeout ? next : timeout;
 }
 

@@ -59,4 +59,10 @@ void usb_set_hid(bool enable);
 void filesystem_init(void);
 bool ns_volume_is_visible(IF_MV_NONVOID(int volume));
 
+#ifdef PODBOX_POWER_PROBE
+#undef cpu_boost
+void sim_power_boost(bool on);
+#define cpu_boost(on) sim_power_boost(on)
+#endif
+
 #endif /* PODBOX_SIM_SYSTEM_SIM_H */

@@ -21,6 +21,7 @@ void native_wps_open(const struct wps_state *state);
 void native_wps_suspend(bool suspend);
 bool native_wps_active(void);
 bool native_wps_animating(void);
+int native_wps_timeout(void);
 void native_wps_render(const struct wps_state *state, bool submit);
 /* Paint the first frame using the selected album's backdrop. */
 void native_wps_paint_handoff(const struct wps_state *state,

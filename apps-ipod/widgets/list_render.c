@@ -2760,7 +2760,7 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     if (animate)
     {
         status_only = false;
-#ifdef HAVE_ADJUSTABLE_CPU_FREQ
+#if defined(HAVE_ADJUSTABLE_CPU_FREQ) || defined(PODBOX_POWER_PROBE)
         cpu_boost(true);
 #endif
     }
@@ -2967,7 +2967,7 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     }
     if (motion_finished)
         motion_stop(&render->motion);
-#ifdef HAVE_ADJUSTABLE_CPU_FREQ
+#if defined(HAVE_ADJUSTABLE_CPU_FREQ) || defined(PODBOX_POWER_PROBE)
     if (animate)
         cpu_boost(false);
 #endif

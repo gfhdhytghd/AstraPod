@@ -42,6 +42,7 @@
 #include "string-extra.h"
 #include "system/library_files.h"
 #include "config.h"
+#include "ui/idle.h"
 #ifdef SIMULATOR
 #include "sim/shim-cider.h"
 #endif
@@ -5002,6 +5003,13 @@ static int frame_wait(uint32_t deadline)
     return timeout == TIMEOUT_NOBLOCK && !frame_due(deadline) ? 1 : timeout;
 }
 
+/* The entrance chrome waits longer than PF_DEADLINE_AHEAD_US. */
+#ifdef IPOD_6G
+#define COVER_CHROME_WAIT ui_clock_wait_until
+#else
+#define COVER_CHROME_WAIT frame_wait
+#endif
+
 #define ALBUM_PANEL_WIDTH ALBUM_BLUR_PANEL_W
 #define ALBUM_PANEL_HEIGHT ALBUM_BLUR_PANEL_H
 #define ALBUM_PANEL_X ((LCD_WIDTH - ALBUM_PANEL_WIDTH) / 2)
@@ -8366,7 +8374,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
     flow_path.enter_why = flow_path.leave_why = "-";
     int leave_result = GO_TO_PREVIOUS;
     unsigned int seen_slides_loaded = pf_slides_loaded;
-    long boost_until = current_tick + HZ;
+    long boost_until = current_tick + ui_idle_cover_boost_tail();
     int spoken_index = -1;
     long speak_due = 0;         /* when the slide at rest is said; 0 none */
     long provider_at = current_tick;
@@ -8456,7 +8464,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             timeout = frame_wait(due);
         }
         else
-            timeout = (quiescent || dark) ? HZ/2 : HZ/16;
+            timeout = ui_idle_cover_timeout((quiescent || dark) ? HZ/2 : HZ/16,
+                                            boost_until, pf_boosted);
 
         if (speak_due)
         {
@@ -8470,12 +8479,12 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                                                : MIN(timeout, MAX(1, HZ / 25));
         if (!dark && !panel.live && bar_drop_waiting())
         {
-            int wait = frame_wait(bar_drop_due(USEC_TIMER));
+            int wait = COVER_CHROME_WAIT(bar_drop_due(USEC_TIMER));
             timeout = timeout == TIMEOUT_BLOCK ? wait : MIN(timeout, wait);
         }
         if (!dark && caption_waits)
         {
-            int wait = frame_wait(caption_reveal);
+            int wait = COVER_CHROME_WAIT(caption_reveal);
             timeout = timeout == TIMEOUT_BLOCK ? wait : MIN(timeout, wait);
         }
         if (font_prefetch_busy())
@@ -8730,7 +8739,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                 }
             }
             if (!dark && (panel.moving || panel.dirty))
-                boost_until = current_tick + HZ;
+                boost_until = current_tick + ui_idle_cover_boost_tail();
             if (TIME_BEFORE(current_tick, boost_until) != pf_boosted)
             {
                 pf_boosted = !pf_boosted;
@@ -8883,9 +8892,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
          * Moving covers present on flow_pace's deadlines: one frame a panel
          * refresh while a frame fits in one, otherwise every second refresh.
          * Any other change draws at the next refresh at most. */
-        /* Boosted while there is drawing to do and for a second after, so a
-         * caption step or a slide arriving does not switch the clock each
-         * time; an idle screen gives the boost back. */
+        /* Keep the boost through the frame and across adjacent paint work. */
         dark = !lcd_active();
         bool motion = !dark && (pf_state == pf_scrolling || fade);
         if (!motion && trace_attempted)
@@ -8896,7 +8903,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
         }
         if (!dark && (pf_state == pf_scrolling || art_owed || caption_owed
                       || caption_scrolling))
-            boost_until = current_tick + HZ;
+            boost_until = current_tick + ui_idle_cover_boost_tail();
         if (TIME_BEFORE(current_tick, boost_until) != pf_boosted)
         {
             pf_boosted = !pf_boosted;

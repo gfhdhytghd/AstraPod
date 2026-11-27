@@ -33,6 +33,7 @@
 #include "system/format_time.h"
 #include "system/volume.h"
 
+#include "idle.h"
 #include "native_chrome.h"
 #include "native_theme_runtime.h"
 #include "native_wps.h"
@@ -1605,6 +1606,29 @@ bool native_wps_active(void)
 bool native_wps_animating(void)
 {
     return active && wps->page.tracks;
+}
+
+int native_wps_timeout(void)
+{
+    bool settled = false;
+    int meter_ticks = 0;
+#ifdef IPOD_6G
+    if (active && lcd_active() && !rock_ui_raw())
+    {
+        settled = !wps->page.tracks && !wps->volume_visible && !repaint &&
+                  !wps->wait_for_blur && !wps->labels_frozen;
+        if (settled && global_settings.scrolling_enabled)
+        {
+            settled = wps->title.width <= view_bounds(WPS_TITLE).width &&
+                      wps->artist.width <= view_bounds(WPS_ARTIST).width &&
+                      (!wps->classic ||
+                       wps->album.width <= view_bounds(WPS_ALBUM).width);
+        }
+        if (!wps->classic)
+            meter_ticks = MAX(1, wps->meter_due - current_tick);
+    }
+#endif
+    return ui_idle_wps_timeout(cider_active(), settled, meter_ticks);
 }
 
 void native_wps_render(const struct wps_state *state, bool submit)

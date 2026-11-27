@@ -28,6 +28,7 @@
  ****************************************************************************/
 
 #include "config.h"
+#include "playback_priority.h"
 #include "system.h"
 #include "kernel.h"
 #include "crumbs.h"
@@ -706,7 +707,7 @@ void INIT_ATTR codec_thread_init(void)
     queue_init(&codec_queue, false);
     codec_thread_id = create_thread(
             codec_thread, codec_stack, sizeof(codec_stack), 0,
-            codec_thread_name IF_PRIO(, PRIORITY_PLAYBACK)
+            codec_thread_name IF_PRIO(, PRIORITY_PLAYBACK_READY)
             IF_COP(, CPU));
     queue_enable_queue_send(&codec_queue, &codec_queue_sender_list,
                             codec_thread_id);

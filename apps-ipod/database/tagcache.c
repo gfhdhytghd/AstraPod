@@ -80,6 +80,9 @@
 #include <limits.h>
 #include <ctype.h>
 #include "config.h"
+#ifndef DBTOOL
+#include "ui/motion_schedule.h"
+#endif
 #include "system/library_files.h"
 #include "database/libfile.h"
 #include "ata_idle_notify.h"
@@ -806,12 +809,30 @@ static bool update_master_header(void)
     return true;
 }
 
+#ifndef DBTOOL
+static unsigned tagcache_thread_id;
+static bool check_event_queue(void);
+
+static void tagcache_pause_for_motion(void)
+{
+    /* A commit can hold the read gate while other threads need the database.
+     * Let it drain, and always let storage handover and stop events through. */
+    while (!read_lock && !write_lock && ui_motion_active() &&
+           !check_event_queue())
+        sleep(1);
+}
+#endif
+
 static bool do_timed_yield(void)
 {
     /* Sorting can lock up for quite a while, so yield occasionally */
     static long wakeup_tick = 0;
     if (TIME_AFTER(current_tick, wakeup_tick))
     {
+#ifndef DBTOOL
+        if (thread_self() == tagcache_thread_id)
+            tagcache_pause_for_motion();
+#endif
         yield();
         wakeup_tick = current_tick + (HZ/25);
         return true;
@@ -7294,6 +7315,9 @@ static void tagcache_thread(void)
                 break;
 
             case Q_REBUILD:
+#ifndef DBTOOL
+                tagcache_pause_for_motion();
+#endif
                 /* The master is the only copy of the figures; a save that
                  * could not write keeps it. Splashed from this thread, as
                  * playlist.c reports its control-file errors. */
@@ -7323,6 +7347,9 @@ static void tagcache_thread(void)
                 break;
 
             case Q_UPDATE:
+#ifndef DBTOOL
+                tagcache_pause_for_motion();
+#endif
                 /* Deletions first: a moved file keeps its play counts only
                  * if its old entry is already deleted when the commit adds
                  * it again. The walk does that itself where it can. */
@@ -7353,6 +7380,10 @@ static void tagcache_thread(void)
                  * starting costs nothing; stopping costs the RAM copy. */
                 if (usb_host_wants_storage())
                     break ;
+#ifndef DBTOOL
+                if (ui_motion_active())
+                    break;
+#endif
 
                 /* Two different questions, so two different settings.
                  * Something asked for a scan (a USB session wrote to us, or a
@@ -7656,6 +7687,9 @@ void tagcache_init(void)
     mutex_init(&command_queue_mutex);
     sound_index_genre_of = genre_by_key;
     queue_init(&tagcache_queue, true);
+#ifndef DBTOOL
+    tagcache_thread_id =
+#endif
     create_thread(tagcache_thread, tagcache_stack,
                   sizeof(tagcache_stack), 0, tagcache_thread_name
                   IF_PRIO(, PRIORITY_BACKGROUND)

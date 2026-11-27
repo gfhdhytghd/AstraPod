@@ -32,6 +32,7 @@
  *   - handle queries, watermark settings, and the buffering thread itself
  ****************************************************************************/
 #include "config.h"
+#include "playback_priority.h"
 #include "logfile.h"
 #include "system/library_files.h"
 #include <string.h>
@@ -1869,7 +1870,7 @@ void INIT_ATTR buffering_init(void)
     queue_init(&buffering_queue, false);
     buffering_thread_id = create_thread( buffering_thread, buffering_stack,
             sizeof(buffering_stack), CREATE_THREAD_FROZEN,
-            buffering_thread_name IF_PRIO(, PRIORITY_BUFFERING)
+            buffering_thread_name IF_PRIO(, PRIORITY_PLAYBACK_REFILL)
             IF_COP(, CPU));
 
     queue_enable_queue_send(&buffering_queue, &buffering_queue_sender_list,

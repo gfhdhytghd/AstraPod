@@ -27,6 +27,7 @@
 #include "ui/animation.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/native_wps.h"
+#include "ui/motion_schedule.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
 #include "ui/scene.h"
@@ -68,7 +69,7 @@ struct sheet_presentation {
     int handle, offset, status_height;
     const void *parent_page;
     unsigned open_frames, close_frames;
-    unsigned open_trace;
+    struct ui_motion open_trace;
     bool inhibited, boosted, interrupted, closing;
     struct retained_sheet *retained;
 };
@@ -627,7 +628,7 @@ static void close_native_sheet(struct sheet_presentation *p)
 {
     if (!p->card || p->offset == LCD_HEIGHT)
         return;
-    unsigned trace = ui_perf_begin("handoff-close");
+    struct ui_motion trace = ui_motion_begin("handoff-close");
     set_boost(p, true);
     p->closing = true;
     present_sheet(p, p->offset, false);
@@ -658,7 +659,7 @@ static void close_native_sheet(struct sheet_presentation *p)
         else if (!ticks)
             yield();
     }
-    ui_perf_end(trace);
+    ui_motion_end(&trace);
     ui_scene_modal_restored(p->parent_page);
 }
 
@@ -706,8 +707,7 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
         }
         if (!p->offset)
         {
-            ui_perf_end(p->open_trace);
-            p->open_trace = 0;
+            ui_motion_end(&p->open_trace);
             set_boost(p, false);
             if (!view->reason)
                 painted = draw_progress(view, p, layout, painted);
@@ -746,8 +746,7 @@ static int run_sheet(struct handoff_sheet *view, struct sheet_ui *ui,
         int result = advance(p->retained->disposition);
         if (result != DIALOG_CONTINUE)
         {
-            ui_perf_end(p->open_trace);
-            p->open_trace = 0;
+            ui_motion_end(&p->open_trace);
             if (result == DIALOG_ACCEPT)
             {
                 uint32_t accepted = USEC_TIMER;
@@ -776,9 +775,9 @@ static NO_INLINE int run_retained_sheet(struct handoff_sheet *view, struct sheet
     p->retained = &retained;
     retained_sheet_init(&retained, p, view, ui, layout);
     if (p->card && p->open_frames)
-        p->open_trace = ui_perf_begin("handoff-open");
+        p->open_trace = ui_motion_begin("handoff-open");
     int answer = run_sheet(view, ui, p, advance, layout);
-    ui_perf_end(p->open_trace);
+    ui_motion_end(&p->open_trace);
     if (!p->interrupted)
         ui_nav_pop(&retained.nav);
     p->retained = NULL;

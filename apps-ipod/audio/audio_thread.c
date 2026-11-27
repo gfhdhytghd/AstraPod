@@ -10,6 +10,7 @@
  * dispatches them into playback.c; owns the audio status.
  ****************************************************************************/
 #include "config.h"
+#include "playback_priority.h"
 #include "system.h"
 #include "kernel.h"
 #include "logf.h"
@@ -166,7 +167,7 @@ void INIT_ATTR audio_init(void)
     /* This thread does buffer, so match its priority */
     audio_thread_id = create_thread(audio_thread, audio_stack,
                   sizeof(audio_stack), 0, audio_thread_name
-                  IF_PRIO(, MIN(PRIORITY_BUFFERING, PRIORITY_USER_INTERFACE))
+                  IF_PRIO(, PRIORITY_PLAYBACK_REFILL)
                   IF_COP(, CPU));
 
     queue_enable_queue_send(&audio_queue, &audio_queue_sender_list,

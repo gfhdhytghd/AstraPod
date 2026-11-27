@@ -1,5 +1,6 @@
 /* Resident Cider receiver and bounded cache. Disk I/O stays on its worker. */
 #include "config.h"
+#include "ui/motion_schedule.h"
 #include "screens/playback/cider.h"
 #include "screens/playback/handoff.h"
 #include "screens/playback/cider_library.h"
@@ -1166,7 +1167,8 @@ static void disk_worker(void)
         if (answer && store.loaded) build_list();
         if (disk_usb_pending()) continue;
         more = tracks && ((!store.loaded && !load) || service_track_cache());
-        if ((active || flush || build || more) && !busy && store.loaded)
+        if ((active || flush || build || more) && !busy && store.loaded &&
+            !ui_motion_active())
         {
             more |= store_write_batch();
             bool idle = TIME_AFTER(current_tick, art_used_at + 5 * HZ);

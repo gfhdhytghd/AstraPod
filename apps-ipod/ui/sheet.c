@@ -24,8 +24,7 @@ void ui_sheet_cancel(struct ui_sheet *sheet)
     sheet->active = sheet->starting = false;
     sheet->tween.frames = 0;
     cpu_boost(false);
-    ui_perf_end(sheet->trace);
-    sheet->trace = 0;
+    ui_motion_end(&sheet->trace);
 }
 
 void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route)
@@ -64,7 +63,7 @@ void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route)
         cpu_boost(true);
         char trace_route[32];
         snprintf(trace_route, sizeof(trace_route), "%s-%s", route, open ? "up" : "down");
-        sheet->trace = ui_perf_begin(trace_route);
+        sheet->trace = ui_motion_begin(trace_route);
     }
 }
 
@@ -134,7 +133,7 @@ void ui_sheet_paint_in(struct ui_sheet *sheet, const fb_data *backdrop,
 
     if (sheet->starting)
     {
-        ui_perf_ready(sheet->trace, sheet->requested_at);
+        ui_perf_ready(sheet->trace.trace, sheet->requested_at);
         sheet->starting = false;
         sheet->tween.start_clock = ui_clock_start();
     }
@@ -204,7 +203,7 @@ void ui_sheet_paint_slide(struct ui_sheet *sheet, const fb_data *backdrop,
     }
     if (sheet->starting)
     {
-        ui_perf_ready(sheet->trace, sheet->requested_at);
+        ui_perf_ready(sheet->trace.trace, sheet->requested_at);
         sheet->starting = false;
         sheet->tween.start_clock = ui_clock_start();
     }

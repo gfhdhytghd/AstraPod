@@ -52,6 +52,9 @@
 #include "system/debug_log.h"
 #include "database/tagcache.h"
 #include "database/db_spoken.h"   /* which albums are books */
+#ifndef DBTOOL
+#include "ui/motion_schedule.h"
+#endif
 #include "system/bg_task.h"         /* the caching pass runs as one */
 #include "files/book_index.h"       /* the books the pass visits */
 #include "files/zip_member.h"       /* a deflated cover, inflated */
@@ -1534,9 +1537,18 @@ static void aa_ensure_fallback(void *workbuf, size_t workbuf_sz)
  * pending, or a task that outranks this one is waiting to start. Standing
  * down costs nothing: the pass resumes from where the thumbnails on disk
  * leave it. */
+static bool aa_motion_deferred;
+
 static bool aa_check_abort(void)
 {
-    return bg_task_should_stop(&art_cache_task);
+    if (bg_task_should_stop(&art_cache_task))
+        return true;
+#ifndef DBTOOL
+    /* Leave the shared worker free to serve glyphs for the foreground. */
+    if (art_cache_task.running && ui_motion_active())
+        aa_motion_deferred = true;
+#endif
+    return art_cache_task.running && aa_motion_deferred;
 }
 
 /* Whether this pass looks up every folder's image. Off the directory cache
@@ -2829,7 +2841,7 @@ static enum bg_result aa_run_pass(void)
     bool completed;
     int since_yield = 0;
 
-    aa_io_failed = false;
+    aa_io_failed = aa_motion_deferred = false;
     worksz = aa_work_bytes();
     wh = aa_pass_alloc(worksz);
     if (wh <= 0)
@@ -2867,7 +2879,7 @@ static enum bg_result aa_run_pass(void)
         core_free(sh);
         core_free(wh);
         cache_busy = false;
-        return BG_INTERRUPTED;
+        return aa_motion_deferred ? BG_DEFERRED : BG_INTERRUPTED;
     }
     aa_itunes_state = AA_ITUNES_UNTRIED;
     aa_unreached = aa_libdirs.full = aa_bookdirs.full = false;
@@ -3055,6 +3067,8 @@ out:
     cache_busy = false;
     if (failed || aa_io_failed)
         return BG_FAILED;
+    if (aborted && aa_motion_deferred)
+        return BG_DEFERRED;
     return aborted ? BG_INTERRUPTED : BG_DONE;
 }
 
@@ -3124,6 +3138,13 @@ static void aa_handle_offer(void)
         timeout_register(&aa_offer_tmo, aa_offer_poll, HZ, 0);
         return;
     }
+#ifndef DBTOOL
+    if (ui_motion_active())
+    {
+        timeout_register(&aa_offer_tmo, aa_offer_poll, MAX(1, HZ / 10), 0);
+        return;
+    }
+#endif
 
     /* Copy the path out before any yield so a newer offer can't move it. */
     strlcpy(path, aa_offer.path, sizeof(path));
@@ -3174,6 +3195,13 @@ static void aa_handle_offer(void)
 
     for (i = 0; i < ART_CACHE_NUM_SIZES; i++)
     {
+#ifndef DBTOOL
+        if (ui_motion_active())
+        {
+            timeout_register(&aa_offer_tmo, aa_offer_poll, MAX(1, HZ / 10), 0);
+            break;
+        }
+#endif
         if (aa_check_abort())
             break;
         s = order[i];

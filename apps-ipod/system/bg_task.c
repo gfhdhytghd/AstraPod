@@ -17,6 +17,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "config.h"
+#include "ui/motion_schedule.h"
 #include "kernel.h"
 #include "thread.h"
 #include "file.h"
@@ -420,7 +421,7 @@ static void bg_task_tick(struct bg_task *task)
     task->running = false;
     debug_log(DEBUG_LOG_TASKS, "%s: pass %s after %ld s", task->name,
               result == BG_DONE ? "done" : result == BG_FAILED ? "FAILED"
-                                                             : "interrupted",
+              : result == BG_DEFERRED ? "deferred for motion" : "interrupted",
               (long)(current_tick - started) / HZ);
 
     if (result == BG_DONE)
@@ -441,6 +442,12 @@ static void bg_task_tick(struct bg_task *task)
         task->fails = 0;
         task->failed = true;
         task->failed_marks = covered;
+        return;
+    }
+
+    if (result == BG_DEFERRED)
+    {
+        task->retry_at = current_tick + MAX(1, HZ / 10);
         return;
     }
 
@@ -469,10 +476,11 @@ static void bg_thread(void)
 {
     struct queue_event ev;
     int i;
+    int timeout = BG_TICK_PERIOD;
 
     while (1)
     {
-        queue_wait_w_tmo(&bg_queue, &ev, BG_TICK_PERIOD);
+        queue_wait_w_tmo(&bg_queue, &ev, timeout);
 
         switch (ev.id)
         {
@@ -501,13 +509,22 @@ static void bg_thread(void)
 #endif
 
             case SYS_TIMEOUT:
+                /* The queue still serves glyph requests and USB handover. */
+                if (ui_motion_active())
+                {
+                    timeout = MAX(1, HZ / 10);
+                    break;
+                }
+                timeout = BG_TICK_PERIOD;
 #if defined(IPOD_6G) && !defined(SIMULATOR)
                 battery_calibration_poll();
 #endif
-                for (i = 0; i < bg_tasks_count; i++)
+                for (i = 0; i < bg_tasks_count && !ui_motion_active(); i++)
                     bg_task_tick(bg_tasks[i]);
-                for (i = 0; i < bg_steps_count; i++)
+                for (i = 0; i < bg_steps_count && !ui_motion_active(); i++)
                     bg_steps[i]->tick();
+                if (ui_motion_active())
+                    timeout = MAX(1, HZ / 10);
                 break;
 
             default:

@@ -52,6 +52,7 @@ struct bg_marks
 /* How a pass ended. */
 enum bg_result
 {
+    BG_DEFERRED,    /* foreground motion: keep the pending pass */
     BG_INTERRUPTED, /* stopped early or lacked memory: tried again later */
     BG_DONE,        /* covered the library: the marker is written */
     BG_FAILED,      /* could not read what it needed: shown as Failed, and

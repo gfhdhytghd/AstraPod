@@ -28,6 +28,7 @@
  ****************************************************************************/
 #include <stdio.h>
 #include "config.h"
+#include "playback_priority.h"
 #include "system.h"
 #include "debug.h"
 #include <kernel.h>
@@ -199,7 +200,7 @@ static void write_to_crossfade(size_t size, unsigned long elapsed,
 static void pcmbuf_finish_crossfade_enable(void);
 
 /* Thread */
-static int codec_thread_priority = PRIORITY_PLAYBACK;
+static int codec_thread_priority = PRIORITY_PLAYBACK_READY;
 
 /* Callbacks into playback.c */
 extern void audio_pcmbuf_position_callback(unsigned long elapsed,
@@ -410,7 +411,7 @@ static void boost_codec_thread(int pcm_fill_state)
         PRIORITY_PLAYBACK,          /*      100% */
     };
 
-    int new_prio = prios[pcm_fill_state];
+    int new_prio = MIN(prios[pcm_fill_state], PRIORITY_PLAYBACK_READY);
 
     /* Keep voice and codec threads at the same priority or else voice
      * will starve if the codec thread's priority is boosted. */

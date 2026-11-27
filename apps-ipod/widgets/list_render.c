@@ -38,6 +38,7 @@
 #include "ui/native_chrome.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/pace.h"
+#include "ui/motion_schedule.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
 #include "ui/statusbar.h"
@@ -83,7 +84,8 @@ struct list_pose {
 struct list_motion {
     struct list_pose from, live, rest;
     uint32_t started;
-    unsigned painted, trace;
+    unsigned painted;
+    struct ui_motion trace;
     unsigned glide_frames, spring_frames;
     int visible, count, span;
     struct ui_rect bounds;
@@ -426,8 +428,7 @@ static bool motion_owner(const struct native_list *render, const struct gui_sync
 
 static void motion_stop(struct list_motion *motion)
 {
-    ui_perf_end(motion->trace);
-    motion->trace = 0;
+    ui_motion_end(&motion->trace);
     motion->visible = 0;
 }
 
@@ -603,9 +604,11 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     /* A snapped jump costs a whole-list frame; the marker's own frames
      * that follow are cheap enough for every refresh again. */
     glide_pace.recover_full_rate = snap;
-    unsigned trace = motion->trace;
-    if (!trace)
-        trace = ui_perf_begin("list-glide");
+    struct ui_motion trace = motion->trace;
+    if (!trace.lease && !trace.trace)
+        trace = ui_motion_begin("list-glide");
+    else
+        ui_motion_renew(&trace);
     *motion = (struct list_motion) {
         .from = from, .live = live, .rest = rest,
         .started = continuing ? now : ui_clock_start(),

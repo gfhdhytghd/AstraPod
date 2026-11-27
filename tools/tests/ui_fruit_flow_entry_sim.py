@@ -34,6 +34,7 @@ import argparse
 import json
 import os
 import shutil
+import struct
 import sys
 from pathlib import Path
 
@@ -44,7 +45,13 @@ from ui_stock_transitions_sim import (  # noqa: E402
     CF_ENTRY_CAPTURE_FRAMES, W, make_fixture, session,
 )
 
+from ui_music_fixture import MUSIC_ALBUMS
+
 HALF = W // 2
+SHADOW = 26
+STOCK_FRAME_MS = 34.2
+# Allow polling jitter without accepting a skipped 34 ms stock frame.
+MAX_FRAME_MS = STOCK_FRAME_MS + 10
 SLIDE_MS = 270.0
 BAR_MS = 90.0
 TOLERANCE = 12
@@ -90,10 +97,10 @@ def pane_return(image, rest, top=40, bottom=232):
     """How far right of home the returning pane still is, 0..HALF."""
     now, then = gray(image), gray(rest)
     best = (HALF, 1e9)
-    for dx in range(HALF - 8):
-        width = HALF - dx
-        error = numpy.abs(now[top:bottom, HALF + dx:] -
-                          then[top:bottom, HALF:HALF + width]).mean()
+    for dx in range(HALF - SHADOW - 8):
+        left = HALF + SHADOW
+        error = numpy.abs(now[top:bottom, left + dx:] -
+                          then[top:bottom, left:W - dx]).mean()
         if error < best[1]:
             best = (dx, error)
     return best[0] if best[1] < 2 else HALF
@@ -172,7 +179,18 @@ def measure_entry(shots):
                       if numpy.abs(gray(image)[CAPTION] -
                                    gray(final)[CAPTION]).mean() < 2)
     bar_first = next((ms for ms, rows in bars if rows), None)
+    visible = [ms for ms, dx in moving if 0 < dx < HALF]
+    frame_gaps = [round(b - a, 2) for a, b in zip(visible, visible[1:])]
+    # The old viewport crop left the wall exposed before the translated seam.
+    # Measure inside that gap, leaving out the moving seam's shadow.
+    revealed = []
+    for (ms, dx), (_, image) in zip(moving, shots):
+        if 30 <= dx < WIDE:
+            cols = slice(HALF - dx + SHADOW, HALF + dx - 2)
+            revealed.append(float(numpy.abs(
+                gray(image)[COVERS, cols] - gray(final)[COVERS, cols]).mean()))
     return {"track": track, "fit_start_ms": start, "worst_px": worst,
+            "frame_gaps_ms": frame_gaps, "revealed": revealed,
             "gone_ms": round(gone - first), "pane": pane,
             "pane_gap_px": max(paired, default=HALF), "bar_height": height,
             "bar": arrived, "bar_start_ms": bar_start,
@@ -222,6 +240,29 @@ def from_home(sim):
     return {"enter": enter, "exit": sim.record(50, "menu")}
 
 
+def install_preview_art(root):
+    """
+    Seed the row-major RGB565 WPS cache with distinctive 272 px test covers.
+    This avoids depending on when the background worker scans the fixture.
+    """
+    target = root / ".rockbox/library/cache/art/wps"
+    target.mkdir(parents=True, exist_ok=True)
+    edge = 272
+    y, x = numpy.indices((edge, edge))
+    for index, (album, artist, _, _) in enumerate(MUSIC_ALBUMS[:6]):
+        # art_name_album_hash(), for the ASCII and CJK names in this fixture.
+        name = "/".join("".join(c for c in word.lower() if c.isalnum())
+                        for word in (album, artist))
+        key = 0x811C9DC5 ^ 0xA5A5A5A5
+        for char in name:
+            key = ((key ^ ord(char)) * 16777619) & 0xffffffff
+        rgb565 = (((x // 5 + y // 19) % 32) << 11 |
+                  ((y // 4 + x // 23) % 64) << 5 | (7 + 3 * index))
+        header = struct.pack("<6H", 0x5441, 8, edge, edge, 0, 0)
+        (target / f"{key:08x}.aat").write_bytes(
+            header + rgb565.astype("<u2").tobytes())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("binary", "resource", "output"):
@@ -239,12 +280,15 @@ def main():
             ("music", "", from_music, False),
             ("home", HOME_WITH_FLOW, from_home, False),
             ("remote-music", "", from_music, True),
-            ("remote-home", HOME_WITH_FLOW, from_home, True)):
+            ("remote-home", HOME_WITH_FLOW, from_home, True),
+            ("slideshow", "", from_music, False)):
         if remote:
             os.environ["PODBOX_SIM_CIDER"] = "60000"
         try:
             shots = session(args.binary, fixture, args.output / name,
-                            "fruit-company", extra, script)
+                            "fruit-company", extra, script,
+                            prepare=install_preview_art
+                            if name == "slideshow" else None)
         finally:
             os.environ.pop("PODBOX_SIM_CIDER", None)
         result[name] = {"enter": measure_entry(shots["enter"]),
@@ -258,6 +302,13 @@ def main():
         if len(enter["track"]) < 3 or enter["worst_px"] > TOLERANCE:
             failed.append((name, "rows leave", enter["worst_px"],
                            enter["track"]))
+        gaps = enter["frame_gaps_ms"]
+        if len(gaps) < 3 or max(gaps) > MAX_FRAME_MS:
+            failed.append((name, "entry frame interval", gaps))
+        if name == "slideshow" and (len(enter["revealed"]) < 2 or
+                                     min(enter["revealed"]) < 12):
+            failed.append((name, "hidden square becomes visible",
+                           enter["revealed"]))
         if len(enter["pane"]) < 3 or enter["pane_gap_px"] > 3:
             failed.append((name, "pane leaves with rows", enter["pane_gap_px"],
                            enter["pane"]))

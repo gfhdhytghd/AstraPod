@@ -107,7 +107,7 @@ static struct {
     int x0, y0;             /* the window over the cover when it began */
     int dx, dy;             /* the window's step per pan tick */
     int drawn_x, drawn_y;
-    bool fading;
+    bool fading, held;
     uint32_t none_at;       /* when a load last ended without a cover */
 } show = { .album = -1 };
 
@@ -358,6 +358,29 @@ static void show_window(uint32_t now, int *x, int *y)
     int ticks = (int)MIN((now - show.started) / PAN_US_PER_PX, 1000u);
     *x = MAX(0, MIN(PAN_X_RANGE, show.x0 + show.dx * ticks));
     *y = MAX(0, MIN(PAN_Y_RANGE, show.y0 + show.dy * ticks));
+}
+
+/* Keep the cached texture stable while Cover Flow owns the screen. */
+void menu_pane_hold_cover(void)
+{
+    show.held = shown.kind == LIST_PANE_ART && !slide_dir &&
+                show.state == SHOW_READY && !show.fading;
+}
+
+const fb_data *menu_pane_pin_cover(struct ui_rect *area, int *stride)
+{
+    if (!show.held || show.state != SHOW_READY ||
+        show.handle <= 0)
+        return NULL;
+    *area = (struct ui_rect){ MENU_PANE_X - show.drawn_x, -show.drawn_y,
+                              SHOW_EDGE, SHOW_EDGE };
+    *stride = SHOW_EDGE;
+    return core_get_data_pinned(show.handle);
+}
+
+void menu_pane_resume_cover(void)
+{
+    show.held = false;
 }
 
 /* The cover's left edge on screen, with the window's column `x` at the
@@ -884,7 +907,7 @@ static bool playing_changed(void)
 struct ui_rect menu_pane_step(void)
 {
     struct ui_rect damage = { 0 };
-    if (!menu_pane_split())
+    if (!menu_pane_split() || show.held)
         return damage;
     if (lcd_updates_held())
     {
@@ -963,7 +986,7 @@ void menu_pane_status(char *out, size_t size)
 
 int menu_pane_deadline(void)
 {
-    if (!menu_pane_split())
+    if (!menu_pane_split() || show.held)
         return TIMEOUT_BLOCK;
     uint32_t now = USEC_TIMER;
     uint32_t wait = UINT32_MAX;

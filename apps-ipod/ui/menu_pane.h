@@ -60,6 +60,12 @@ void menu_pane_viewport_left(int depth);
 /* Whether the framebuffer shows a split page, for a transition taking it
  * as its outgoing page. The next page painted answers the next call. */
 bool menu_pane_take_screen(void);
+/* Retain the last slideshow pose during Cover Flow. Pin returns the entire
+ * texture with its screen-space bounds, or NULL for a still preview or a
+ * blend. The caller must put the returned pointer after compositing. */
+void menu_pane_hold_cover(void);
+const fb_data *menu_pane_pin_cover(struct ui_rect *area, int *stride);
+void menu_pane_resume_cover(void);
 /* The whole of the pane's backdrop in a screen-sized buffer, the first
  * frame of Now Playing entered from a split menu. */
 void menu_pane_backdrop(fb_data *buffer);

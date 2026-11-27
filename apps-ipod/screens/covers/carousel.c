@@ -505,18 +505,28 @@ static bool playback_rise_pending(void);
 static void finish_wps_rise(const char *result, const char *reason,
                             uint32_t prepare_start, uint32_t prepare_us);
 
+static void discard_menu_scene(void)
+{
+    ui_scene_discard(&pf_scene);
+    menu_pane_resume_cover();
+}
+
 void carousel_prepare_transition(void)
 {
     if (pf_entry_prepared || wps_handover.returning)
         return;
     pf_entry_requested = USEC_TIMER;
-    ui_scene_discard(&pf_scene);
+    discard_menu_scene();
     memset(&pf_scene, 0, sizeof(pf_scene));
     ui_scene_capture_modal(&pf_scene);
     pf_scene_failure = ui_scene_capture_failure();
     /* Whether the page taken is a split menu, whichever library, local or
      * remote, the covers come from. */
     pf_scene_split = menu_pane_themed() && menu_pane_take_screen();
+    if (pf_scene_split && pf_scene.backdrop_handle > 0 && fruit_menu_active() &&
+        ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC &&
+        !flat_view())
+        menu_pane_hold_cover();
     pf_scene_palette = album_palette_generation();
     pf_scene_art = album_art_generation();
     pf_scene_theme = ui_theme_generation();
@@ -564,7 +574,7 @@ void carousel_cancel_transition(void)
 {
     if (pf_entry_prepared)
     {
-        ui_scene_discard(&pf_scene);
+        discard_menu_scene();
         pf_entry_prepared = false;
     }
 }
@@ -635,7 +645,7 @@ void carousel_wps_end(bool back)
         if (wps_handover.panel_open)
             close_album_panel();
         ui_scene_discard(&wps_handover.sheet);
-        ui_scene_discard(&pf_scene);
+        discard_menu_scene();
         pf_wps_entry = false;
         wps_handover.model = NULL;
         wps_handover.returning = false;
@@ -7072,12 +7082,6 @@ static int flow_stock_offset(uint32_t age, bool back)
     return LCD_WIDTH * u * u / 65536;
 }
 
-static bool flow_present_stock(struct ui_scene *source, uint32_t age, bool back)
-{
-    int away = flow_stock_offset(age, back);
-    return ui_scene_present_split(source, -away, away);
-}
-
 /* The path an entry or leave takes, as flow_path records it. */
 static void flow_path_note(bool leave, const struct ui_scene *fade,
                            bool still_covers)
@@ -8841,7 +8845,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             pf_caption_hidden = caption_waits = false;
             caption_owed = true;
         }
-        if (pf_state == pf_scrolling || fade || bar_drop_owed(USEC_TIMER))
+        if (pf_state == pf_scrolling ||
+            (!stock_slide && (fade || bar_drop_owed(USEC_TIMER))))
             art_owed = true;
 
         if (seen_slides_loaded != pf_slides_loaded)
@@ -8957,11 +8962,13 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                                    : ui_clock_start() + ui_frame_period();
             yield();
         }
-        else if (!dark && (art_owed || caption_owed) && frame_due(flow_due) &&
+        else if (!dark && (art_owed || caption_owed ||
+                           (stock_slide && (fade || bar_drop_owed(USEC_TIMER)))) &&
+                 frame_due(flow_due) &&
                  !dispatch_first)
         {
             show_carousel_entry();
-            if (fade)
+            if (fade && !stock_slide)
                 full_flush_owed = true;
             if (motion && !trace_attempted)
             {
@@ -9185,21 +9192,29 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                 }
             }
             int rows = MAX(0, dirty_end - dirty_top);
-            if (rows)
+            if (rows || (stock_slide && fade))
             {
                 uint32_t start = *trace ? USEC_TIMER : 0;
-                if (fade)
+                if (stock_slide && fade)
                 {
                     uint32_t age = (uint32_t)USEC_TIMER - fade_start;
-                    unsigned duration = stock_slide ?
-                        FLOW_STOCK_SLIDE_US - (leaving ? leave_skip : 0) :
-                        leaving ? FLOW_LEAVE_FADE_US : FLOW_MENU_FADE_US;
+                    int away = flow_stock_offset(age + (leaving ? leave_skip : 0),
+                                                 leaving);
+                    bool clear = false;
+                    if (ui_scene_present_cover_split(fade, away, rows > 0, &clear)
+                        && clear && !leaving)
+                    {
+                        fade = NULL;
+                        opacity = 256;
+                    }
+                }
+                else if (fade)
+                {
+                    uint32_t age = (uint32_t)USEC_TIMER - fade_start;
+                    unsigned duration = leaving ? FLOW_LEAVE_FADE_US : FLOW_MENU_FADE_US;
                     unsigned phase = MIN(age, duration) * 256 / duration;
                     unsigned alpha = leaving ? leave_from * (256 - phase) / 256 : phase;
-                    bool shown = stock_slide
-                        ? flow_present_stock(fade, age + (leaving ? leave_skip : 0),
-                                             leaving)
-                        : stock_look() && pf_scene_split
+                    bool shown = stock_look() && pf_scene_split
                         ? flow_present_split(fade, age, leaving, leave_rows)
                         : flow_present_fade(fade, alpha);
                     if (shown)
@@ -9689,14 +9704,17 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
     {
         close_album_panel();
         if (!pf_scene_refresh())
-            ui_scene_discard(&pf_scene);
+            discard_menu_scene();
         if (pf_scene.backdrop_handle > 0 && flat_view())
             ui_scene_close_modal(&pf_scene, pf_shown, "covers-down");
         else if (pf_scene.backdrop_handle > 0 && pf_shown &&
                  (result == GO_TO_PREVIOUS || result == CAROUSEL_REMOTE_RETURN))
+        {
             ui_scene_restore_modal(&pf_scene);
+            menu_pane_resume_cover();
+        }
         else
-            ui_scene_discard(&pf_scene);
+            discard_menu_scene();
         carousel_wps_end(false);
     }
     agents_nav_leave(AGENTS_NAV_COVERS);

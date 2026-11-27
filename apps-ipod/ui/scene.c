@@ -1050,6 +1050,79 @@ bool ui_scene_present_split(struct ui_scene *scene, int list_x, int pane_x)
     return shown;
 }
 
+/* The split menu's rows and artwork move independently. Fill only the
+ * uncovered spans with the wall, leaving the retained images read-only. */
+bool ui_scene_present_cover_split(struct ui_scene *scene, int away,
+                                  bool wall_dirty, bool *clear)
+{
+    if (scene->backdrop_handle <= 0 || owner || !lcd_active())
+        return false;
+
+    const int half = MENU_PANE_X;
+    struct ui_rect area = { half, 0, LCD_WIDTH - half, LCD_HEIGHT };
+    int stride;
+    const fb_data *cover = menu_pane_pin_cover(&area, &stride);
+    int hidden_at = MAX(half, LCD_WIDTH - area.x);
+    away = MIN(away, hidden_at);
+    *clear = away == hidden_at;
+    if (!wall_dirty && scene->last_offset == away)
+    {
+        if (cover)
+            core_put_data_pinned((void *)cover);
+        return true;
+    }
+
+    const fb_data *front = lcd_framebuffer_default.fb_ptr;
+    const fb_data *back = core_get_data_pinned(scene->backdrop_handle);
+    bool shown = false;
+    if (*clear || !away)
+    {
+        release_workspace(scene);
+        shown = present(*clear ? front : back);
+    }
+    else
+    {
+        if (scene->handle <= 0)
+            scene->handle = scene_workspace(FRAMEBUFFER_SIZE);
+        if (scene->handle > 0)
+        {
+            fb_data *out = core_get_data_pinned(scene->handle);
+            const int edge = MAX(0, half - away);
+            const int art_x = area.x + away;
+            const int art_start = MIN(MAX(art_x, edge), LCD_WIDTH);
+            const int art_end = MIN(MAX(art_x + area.width, art_start), LCD_WIDTH);
+            for (int y = 0; y < LCD_HEIGHT; y++)
+            {
+                int i = y * LCD_WIDTH;
+                fb_data *row = out + i;
+                if (edge)
+                    memcpy(row, back + i + away, edge * sizeof(*row));
+                memcpy(row + edge, front + i + edge,
+                       (art_start - edge) * sizeof(*row));
+                if (art_end > art_start)
+                {
+                    const fb_data *src = cover ?
+                        cover + (y - area.y) * stride : back + i + half;
+                    memcpy(row + art_start, src + (art_start - art_x),
+                           (art_end - art_start) * sizeof(*row));
+                }
+                memcpy(row + art_end, front + i + art_end,
+                       (LCD_WIDTH - art_end) * sizeof(*row));
+                if (edge)
+                    menu_pane_shadow(row, y, edge, LCD_WIDTH);
+            }
+            shown = present(out);
+            core_put_data_pinned(out);
+        }
+    }
+    core_put_data_pinned((void *)back);
+    if (cover)
+        core_put_data_pinned((void *)cover);
+    if (shown)
+        scene->last_offset = away;
+    return shown;
+}
+
 bool ui_scene_restore_modal(struct ui_scene *scene)
 {
     if (scene->backdrop_handle <= 0 || (owner && owner != scene))

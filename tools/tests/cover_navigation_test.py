@@ -73,6 +73,33 @@ int main(void){
  assert(!shortcut.latched&&agents_nav_take(AGENTS_NAV_WPS));
  assert(raw_ui_filter(BUTTON_SELECT)==BUTTON_SELECT);
  #endif
+ #ifdef TEST_FRUIT_TRANSPORT
+ wheel_navigation=true;
+ connected=true;
+ held=BUTTON_PLAY;
+ assert(raw_ui_filter(BUTTON_PLAY)==BUTTON_REDRAW);
+ held=wps;
+ assert(raw_ui_filter(wps)&BUTTON_MENU);
+ assert(agents_nav_pending()==AGENTS_NAV_WPS);
+ held=0;
+ raw_ui_filter(BUTTON_PLAY|BUTTON_REL);
+ raw_ui_filter(BUTTON_SELECT|BUTTON_REL);
+ assert(!shortcut.latched&&agents_nav_take(AGENTS_NAV_WPS));
+ assert(play_toggles==0);
+ held=BUTTON_PLAY;
+ assert(raw_ui_filter(BUTTON_PLAY)==BUTTON_REDRAW);
+ held=0;
+ assert(raw_ui_filter(BUTTON_PLAY|BUTTON_REL)==BUTTON_REDRAW&&play_toggles==1);
+ held=chord;
+ assert(raw_ui_filter(chord)==BUTTON_MENU&&agents_nav_take(AGENTS_NAV_COVERS));
+ held=0;
+ raw_ui_filter(chord|BUTTON_REL);
+ assert(!cover_chord.latched);
+ activity=ACTIVITY_USBSCREEN;
+ held=wps;
+ assert(raw_ui_filter(wps)==wps&&agents_nav_pending()==AGENTS_NAV_NONE);
+ puts("Fruit raw chords: local WPS with a connected host, single PLAY, Cover Flow and USB passthrough PASS");
+ #endif
  puts("any-screen UI/raw SELECT+MENU: thread isolation, release suppression, repeat reuse, modal down/release cancellation PASS");
 }
 '''
@@ -90,6 +117,25 @@ static bool connected;
 static bool podlink_host_connected(void){return connected;}
 '''
  wheel = fn(source,'wheel_shortcut_button')
+if 'static bool wheel_transport(' in source:
+ pre += """
+#include "apps-ipod/system/activity.h"
+#define TEST_FRUIT_TRANSPORT
+static bool wheel_navigation;
+static enum current_activity activity=ACTIVITY_MAINMENU;
+static bool ui_wheel_navigation(void){return wheel_navigation;}
+enum current_activity get_current_activity(void){return activity;}
+enum { ACTION_WPS_PLAY=1, ACTION_WPS_SKIPPREV, ACTION_WPS_SKIPNEXT,
+       ACTION_WPS_SEEKBACK, ACTION_WPS_SEEKFWD, ACTION_WPS_STOPSEEK };
+static int play_toggles;
+static void wps_wheel_transport(int action){play_toggles+=action==ACTION_WPS_PLAY;}
+"""
+ transport = fn(source,'wheel_transport')
+ if 'static int wheel_transport_keys(' in source:
+  pre += '\nstatic int wheel_transport_pressed;\n'
+  transport = fn(source,'wheel_transport_keys') + transport
+  transport += fn(source,'wheel_cover_button')
+ wheel = transport + wheel
 raw = fn(source,'raw_ui_filter')
 if 'ui_scene_snap_push();' in raw:
  pre += '''

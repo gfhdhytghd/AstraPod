@@ -99,6 +99,9 @@ bool native_chrome_poll(struct native_chrome *chrome)
         .busy = busy_state(),
         .volume_visible = native_chrome_volume_visible(),
         .hold = fruit_menu_active() && button_hold(),
+#ifdef HAVE_USB_PODLINK
+        .agents = agents_background_badge(),
+#endif
     };
     if (battery >= 0 && ui_theme_art(chrome->theme))
         next.stock_battery_frame = ui_art_battery_index(battery);
@@ -163,7 +166,7 @@ bool native_chrome_volume_visible(void)
 }
 
 struct status_layout {
-    int battery_x, percent_x, percent_width, play_x, busy_x;
+    int battery_x, percent_x, percent_width, play_x, busy_x, agents_x;
     int clock_x, clock_width, title_width;
     int tray_x, tray_count;
 #ifdef ASTRAPOD_ROCK_COMPAT
@@ -264,6 +267,11 @@ static struct status_layout art_layout(const struct native_chrome *chrome,
         edge -= last + 1 - first;
     }
 #endif
+#ifdef HAVE_USB_PODLINK
+    int agents_width = agents_background_badge_width(chrome->state.agents);
+    edge -= agents_width;
+    out.agents_x = edge;
+#endif
     out.tray_x = edge;
     int clock_right = edge - group_gap;
     out.clock_width = MIN(clock_width, MAX(0, clock_right - left));
@@ -288,14 +296,18 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
          stock_art[STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_0].width : icon_size);
     int play_x = battery_x - gap - icon_size;
     /* Keep the playback slot even when stopped so the busy icon stays put. */
-    int busy_x = play_x - gap - icon_size;
+    int agents_width = 0;
+#ifdef HAVE_USB_PODLINK
+    agents_width = agents_background_badge_width(chrome->state.agents);
+#endif
+    int busy_x = play_x - agents_width - gap - icon_size;
     int percent_limit = busy_x - gap - group_gap - left - clock_width;
     percent_width = MIN(percent_width, MAX(0, percent_limit));
     int percent_x = battery_x - gap - percent_width;
     if (percent_width)
     {
         play_x = percent_x - gap - icon_size;
-        busy_x = play_x - gap - icon_size;
+        busy_x = play_x - agents_width - gap - icon_size;
     }
 
     struct status_layout out = {
@@ -331,6 +343,7 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
         if (pause_width > icon_size || pause_height > icon_size)
             edge += (icon_size - pause_width) / 2;
     }
+    edge -= agents_width;
     for (int i = out.tray_count, first; i-- > 0; )
     {
         int last = tray_ink(&tray->icons[i], &first);
@@ -352,6 +365,7 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
         clock_x = clock_right - clock_width;
 
     out.play_x = play_x;
+    out.agents_x = play_x - agents_width;
     out.busy_x = busy_x;
     out.tray_x = busy_x;
     out.clock_x = clock_x;
@@ -905,6 +919,11 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
                     icon_size, background, foreground);
 #ifdef ASTRAPOD_ROCK_COMPAT
     draw_tray(chrome, &damage, layout, bounds, icon_y);
+#endif
+#ifdef HAVE_USB_PODLINK
+    agents_background_draw_badge(&damage, state->agents, bounds.x + layout.agents_x,
+                                 icon_y + (icon_size - 7) / 2, chrome->status_font,
+                                 background);
 #endif
     lcd_set_viewport(previous);
 }

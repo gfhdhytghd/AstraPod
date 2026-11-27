@@ -101,7 +101,7 @@ static void show(struct gui_synclist*l,int s){show_at(l,s,0);}
 static void build_rows(struct gui_synclist*l){(void)l;}
 static void draw_usage(struct gui_synclist*l){(void)l;}
 static void draw_detail(struct gui_synclist*l){(void)l;}
-static void draw_question_overlay(void){}
+static void draw_question_overlay(struct gui_synclist*l,int motion){(void)l;(void)motion;}
 static void send_key(const char*k){(void)k;assert(0);}
 const char*hr_wheel_step(struct hr_wheel*w,long t,int dir,long fast){(void)w;(void)t;(void)dir;(void)fast;assert(0);return NULL;}
 #define WHEEL_FAST 1
@@ -110,8 +110,8 @@ const char*hr_wheel_step(struct hr_wheel*w,long t,int dir,long fast){(void)w;(vo
 static struct hr_wheel wheel;
 static bool volume_paging,host_keys,volume_enabled,native_play_pending;
 static unsigned long native_play_at;
-static long pending_until;
-static bool pending_answer,question_custom,question_closing,detail_ready=true,talk_held;
+static long pending_until,question_next_until;
+static bool pending_answer,question_custom,question_closing,question_resolving,detail_ready=true,talk_held;
 static char pending_req[8],focus_req[8],talk_req[8],question_id[12],detail_pane[16],space_id[16],space_tab[16],question_pane[16],t3_input[80];
 static struct scene { int handle; bool capturing; } page_scene;
 static void ui_scene_cancel(struct scene*s){assert(!s->handle);}
@@ -119,7 +119,7 @@ static void ui_scene_start(struct scene*s){assert(!s->handle);}
 static void ui_scene_update(struct scene*s,bool redraw){(void)redraw;assert(!s->handle);}
 static int ui_scene_timeout(struct scene*s,int timeout){assert(!s->handle);return timeout;}
 #define ROW_T3_HEADER 200
-static int action_choice, menu_back_calls;
+static int action_row, menu_back_calls;
 static bool menu_fixture;
 static void edit_t3_input(struct gui_synclist*l){(void)l;assert(0);}
 static void close_usage(struct gui_synclist*l){(void)l;assert(menu_fixture);menu_back_calls++;}
@@ -141,7 +141,7 @@ static bool poll_link(void){
  else if(fixture_result==2){model.result_new=true;model.result_ok=false;strcpy(model.result_req,"other");strcpy(model.result_text,"unrelated");fixture_result=3;}
  return false;
 }
-static void splash(int t,const char*s){(void)t;(void)s;assert(0);}
+static void talk_result(const char*s,bool failed){assert(s&&!failed);}
 static void splashf(int t,const char*s,...){(void)t;(void)s;assert(0);}
 static void leave_question(struct gui_synclist*l){(void)l;question_closing=false;if(menu_fixture)menu_back_calls++;}
 static void dismiss_question(struct gui_synclist*l){leave_question(l);}
@@ -150,7 +150,7 @@ static void answer_number(int n){(void)n;assert(0);}
 static void close_input(bool b){assert(menu_fixture&&!b);menu_back_calls++;}
 static void start_talk(struct gui_synclist*l,bool r){(void)l;(void)r;assert(0);}
 static const struct hr_question*current_question(void){return NULL;}
-static bool question_binary_page(void){return false;}
+static bool usage_legacy_keys(void){return true;}
 static void want_focus(struct gui_synclist*l){(void)l;assert(0);}
 static bool list_do_action(int ctx,int ticks,struct gui_synclist*l,int*a){(void)l;*a=get_action(ctx,ticks);return false;}
 #define ANIM_TICKS 5
@@ -159,15 +159,15 @@ static bool list_do_action(int ctx,int ticks,struct gui_synclist*l,int*a){(void)
 base=base.replace('struct viewport{int dummy;};','struct viewport{int height;};')
 pre+=re.search(r'enum view \{[^}]*\};',agents).group()+'\nstatic enum view view;static int input_top;\n'
 pre+=(fn(agents,'agents_usb_exit') if 'static void agents_usb_exit(' in agents else 'static void agents_usb_exit(int result){(void)result;}')
-pre+=fn(agents,'is_t3')+fn(agents,'show_same')+fn(agents,'update_volume_mode')+fn(agents,'take_result')+fn(agents,'question_action')+fn(agents,'agents_menu_exit')
+pre+=fn(agents,'is_t3')+fn(agents,'show_same')+fn(agents,'update_volume_mode')+fn(agents,'take_result')+fn(agents,'agents_menu_exit')
 a=agents.index('static struct\n{\n    bool ready, ok;')
 b=agents.index('static bool agents_play_down',a)
 pre+=agents[a:b]
-# Keep production input and early dispatch, including the two input paths.
-a=agents.index('        int before = gui_synclist_get_sel_pos(&list);',agents.index('static int agents_run(void)\n{'))
+# The wheel movement and playback cases are outside this MENU fixture.
+a=agents.index('        if (action == ACTION_STD_QUICKSCREEN',agents.index('static int agents_run(void)\n{'))
 b=agents.index('        switch (action)',a)
 cleanup=agents[agents.rindex('    FOR_NB_SCREENS(i)'):agents.rindex('    return ret;')]
-pre+='static bool expect_menu_exit;static void run_agents_entry(void){struct gui_synclist list={.selected_item=selected,.start_item={top_item}};int action,ret=0;bool done=false;while(entry_at<entry_count&&!done){\n'+agents[a:b]+'\n}\nassert(done==expect_menu_exit&&!ret);if(done){'+cleanup+'}assert(list.selected_item==selected&&list.start_item[0]==top_item);}\n'
+pre+='static bool expect_menu_exit;static void run_agents_entry(void){struct gui_synclist list={.selected_item=selected,.start_item={top_item}};int action,ret=0;bool done=false;while(entry_at<entry_count&&!done){action=get_action(CONTEXT_AGENTS,ANIM_TICKS);\n'+agents[a:b]+'\n}\nassert(done==expect_menu_exit&&!ret);if(done){'+cleanup+'}assert(list.selected_item==selected&&list.start_item[0]==top_item);}\n'
 # Native grid browser's actual quickscreen case, with its display/filesystem
 # work represented by the caller's restore flag.
 case=browser[browser.index('            case ACTION_STD_QUICKSCREEN:'):browser.index('            case ACTION_TREE_HOTKEY:',browser.index('            case ACTION_STD_QUICKSCREEN:'))]

@@ -30,7 +30,9 @@ static void play_tap(struct agents_remote_state *s, unsigned long now)
 {
     remote_log_event(REMOTE_LOG_TAP, now, s->play_context, 0, NULL, 0);
     /* Agents already discarded the short recording on physical release. */
-    if (s->play_context == REMOTE_AGENTS || s->play_context == REMOTE_COVERS ||
+    if (s->play_context == REMOTE_AGENTS_FRUIT)
+        emit(s, BUTTON_MULTIMEDIA_PLAYPAUSE);
+    else if (s->play_context == REMOTE_AGENTS || s->play_context == REMOTE_COVERS ||
         s->play_context == REMOTE_ALBUM_LIST)
     {
         emit(s, BUTTON_SELECT);
@@ -59,7 +61,8 @@ static void play_taps(struct agents_remote_state *s, unsigned long now)
 
 static unsigned long play_hold_ticks(int context)
 {
-    return context == REMOTE_AGENTS || context == REMOTE_WPS ?
+    return context == REMOTE_AGENTS || context == REMOTE_AGENTS_FRUIT ||
+           context == REMOTE_WPS ?
            (3 * HZ + 9) / 10 : (3 * HZ + 4) / 5;
 }
 
@@ -102,7 +105,7 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
             /* WPS and Lyrics share one gesture state across the transition. */
             if (context == REMOTE_WPS)
                 emit(s, REMOTE_LYRICS_BUTTON);
-            else if (context != REMOTE_AGENTS)
+            else if (context != REMOTE_AGENTS && context != REMOTE_AGENTS_FRUIT)
             {
                 emit(s, BUTTON_PLAY);
                 emit(s, BUTTON_PLAY | BUTTON_REPEAT);
@@ -110,7 +113,7 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
         }
         if (h->fired && event && !release && (button & BUTTON_REPEAT) &&
             context == s->play_context && context != REMOTE_AGENTS &&
-            context != REMOTE_WPS && !s->queued)
+            context != REMOTE_AGENTS_FRUIT && context != REMOTE_WPS && !s->queued)
             emit(s, BUTTON_PLAY | BUTTON_REPEAT);
         if (ended)
         {
@@ -136,7 +139,8 @@ static bool play_button(struct agents_remote_state *s, int context, int button,
                 }
             }
             else if (context == s->play_context && context != REMOTE_WPS)
-                emit(s, BUTTON_PLAY | BUTTON_REL);
+                emit(s, context == REMOTE_AGENTS_FRUIT ?
+                        BUTTON_MULTIMEDIA_PLAYPAUSE : BUTTON_PLAY | BUTTON_REL);
         }
     }
     if (event && (button & BUTTON_MAIN))
@@ -199,6 +203,12 @@ int agents_remote_button(struct agents_remote_state *s, int context,
         ((button & BUTTON_REMOTE) == BUTTON_RC_PLAY ||
          (button & BUTTON_REMOTE) == BUTTON_RC_SELECT))
         return BUTTON_RC_SELECT | (button & (BUTTON_REL | BUTTON_REPEAT));
+    if ((button & BUTTON_REMOTE) == BUTTON_RC_SELECT && context == REMOTE_AGENTS_FRUIT)
+    {
+        /* Queue behind any gesture emitted by the Play classifier. */
+        emit(s, button);
+        return take(s);
+    }
     if ((button & BUTTON_REMOTE) == BUTTON_RC_SELECT)
     {
         struct agents_remote_hold *h = &s->hold[0];
@@ -219,7 +229,7 @@ int agents_remote_button(struct agents_remote_state *s, int context,
     if (play_button(s, context, button, held, now)) return take(s);
     /* Menu/Select retain their native press/repeat/release meanings. Direction
      * keys retain their normal press/repeat/release meanings everywhere. */
-    if (context == REMOTE_AGENTS &&
+    if ((context == REMOTE_AGENTS || context == REMOTE_AGENTS_FRUIT) &&
         ((button & BUTTON_REMOTE) == BUTTON_RC_LEFT ||
          (button & BUTTON_REMOTE) == BUTTON_RC_RIGHT))
         button = (button & (BUTTON_REL | BUTTON_REPEAT)) |

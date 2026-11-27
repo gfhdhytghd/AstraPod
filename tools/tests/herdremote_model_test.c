@@ -104,11 +104,59 @@ static int replay(const char *path)
     return 0;
 }
 
+static void test_t3_events(void)
+{
+    hr_model_reset(&m);
+    assert(apply("T\t7\t1") == 'T' && !m.t3_health_known);
+    assert(apply("T\t8\t0\t1") == 'T');
+    assert(m.herdr_age == 8 && !m.herdr_ok && m.t3_health_known && m.t3_ok);
+    assert(apply("T\t3\t1\t2") == 0);
+    assert(apply("T\t-\t1\t0") == 0);
+    assert(apply("T\t3\t0\t0\nextra") == 0);
+    assert(m.herdr_age == 8 && !m.herdr_ok && m.t3_ok);
+    assert(apply("T\t9\t1\t0") == 'T');
+    assert(m.herdr_ok && m.t3_health_known && !m.t3_ok);
+    assert(apply("T\t0\t1") == 'T' && !m.t3_health_known);
+
+    assert(apply("W\t1\n#\tT3\nt3p1\t-\t0\t0\t0\t0\tExample") == 'W');
+    assert(apply("S\t1\nt3p1\tf\tf") == 'S');
+    assert(m.ws_shown_changed && m.ws[0].tab1 == 'f' && m.ws[0].other == 'f');
+    assert(apply("T\tt3p1\t1\t0\tall\tAll\tf") == 'B');
+    assert(m.tabs[0].status == 'f');
+    assert(apply("A\tt3p1\t1\nt3t2\tt3\tf\t0\tTitle\tModel\tError") == 'A');
+    assert(m.agents[0].status == 'f');
+
+    assert(apply("E\tfail\tt3p1\tt3t2\tExample\tTitle\tError") == 'E');
+    assert(m.event.kind == HR_EVENT_FAIL);
+    assert(!strcmp(m.event.project, "t3p1") && !strcmp(m.event.thread, "t3t2"));
+    assert(!strcmp(m.event.project_label, "Example"));
+    assert(!strcmp(m.event.thread_title, "Title"));
+    assert(!strcmp(m.event.summary, "Error"));
+
+    assert(apply("E\tprogress\tt3p1\tt3t2\tExample\tTitle\tError") == 0);
+    assert(apply("E\tdone\tw1\tt3t2\tExample\tTitle\tError") == 0);
+    assert(apply("E\tdone\tt3p1\tt3t\tExample\tTitle\tError") == 0);
+    assert(apply("E\tdone\tt3p1\tt3t1234567890123\tExample\tTitle\tError") == 0);
+    assert(apply("E\tdone\tt3p1\tt3t2\tExample\tTitle") == 0);
+    assert(apply("E\tdone\tt3p1\tt3t2\tExample\tTitle\tError\r") == 0);
+    assert(apply("E\tdone\tt3p1\tt3t2\tExample\tTitle\tError\nextra") == 0);
+    assert(m.event.kind == HR_EVENT_FAIL && !strcmp(m.event.summary, "Error"));
+
+    const char label[] = "123456789012345678901234567890123456789";
+    char frame[160];
+    snprintf(frame, sizeof frame, "E\tdone\tt3p1\tt3t3\t%s中\tTitle\t", label);
+    assert(apply(frame) == 'E' && m.event.kind == HR_EVENT_DONE);
+    assert(!strcmp(m.event.project_label, label) && !m.event.summary[0]);
+    hr_model_reset(&m);
+    assert(!m.t3_health_known && !m.event.thread[0]);
+}
+
 int main(int argc, char **argv)
 {
     clock_old_peer();
     if (argc == 2)
         return replay(argv[1]);
+    test_t3_events();
 
     assert(apply("HR\t1\therdremote-1") == 'H' && m.hello);
     assert(apply("HR\t2\tfuture") == 0);

@@ -20,6 +20,8 @@ pre=r'''
 #define SCREEN_MAIN 0
 #define INPUT_LINES 3
 #define USE_LINE 10
+#define KEYBAR 20
+#define UI_COLOR_LIST_TINT 0
 #define DET_GAP 2
 #define DET_DOT 3
 #define USE_DIM 1
@@ -31,6 +33,7 @@ pre=r'''
 #define DOT_GREEN 2
 #define DOT_TEAL 3
 #define DOT_GREY 4
+#define DOT_CORAL 5
 #define TASK_REST 100
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
@@ -47,18 +50,20 @@ static int font_getstringnsize(const char*s,int n,int*w,int*h,int font)
 {(void)s;(void)w;(void)h;(void)font;return n*6;}
 
 struct viewport {int font,width,height;unsigned fg_pattern;};
-struct screen {struct viewport *(*set_viewport)(struct viewport*);void (*clear_viewport)(void);void (*set_foreground)(unsigned);void (*update_viewport)(void);void(*hline)(int,int,int);};
+struct screen {struct viewport *(*set_viewport)(struct viewport*);void (*clear_viewport)(void);void (*set_foreground)(unsigned);void (*update_viewport)(void);void(*hline)(int,int,int);void(*fillrect)(int,int,int,int);};
 static char rows[180][200];
 static struct viewport *setvp(struct viewport*v){(void)v;return NULL;}static void clear(void){memset(rows,0,sizeof rows);}
 static void fg(unsigned n){(void)n;}static void update(void){}static void hline(int a,int b,int c){(void)a;(void)b;(void)c;}
-static struct screen screens[]={{setvp,clear,fg,update,hline}};
+static void fillrect(int x,int y,int w,int h){(void)x;(void)y;(void)w;(void)h;}
+static struct screen screens[]={{setvp,clear,fg,update,hline,fillrect}};
+static unsigned ui_theme_rgb565(int color){return color;}
 struct gui_synclist {struct viewport *parent[1];};
 struct panel_ink {unsigned text,muted,warn;};
 static struct panel_ink list_panel_ink(void){return (struct panel_ink){USE_TEXT,USE_DIM,USE_WARN};}
 static struct viewport panel_viewport(struct gui_synclist*l){return *l->parent[0];}
 static void ui_flush_dirty(void){}
 static struct hr_model model;static struct hr_agent detail_agent={.kind="codex",.name="test"};
-static struct detail_layout detail_layout;
+static struct detail_layout detail_layout;static bool detail_follow;
 static int detail_body_y,detail_body_avail,detail_scroll,detail_scroll_max,detail_page_lines,detail_shown_age;
 static char detail_pane[16]="p1",task_text[244];static int task_w,task_x,task_y,task_next,current_tick;static bool task_at_end;
 static const struct hr_agent *find_agent(const char*p){(void)p;return &detail_agent;}
@@ -72,8 +77,9 @@ static void text_at(struct screen*d,int x,int y,unsigned c,const char*s){(void)d
 static void draw_disc(struct screen*d,int x,int y,unsigned c){(void)d;(void)x;(void)y;(void)c;}
 static const char *fit(char*b,size_t n,const char*s,int w){(void)b;(void)n;(void)w;return s;}
 static void draw_task(struct gui_synclist*l,struct viewport*v,unsigned c,bool d){(void)l;(void)v;(void)c;(void)d;}
-static void draw_t3_body(struct screen*d,struct viewport*v,int y,unsigned c)
-{(void)d;(void)v;(void)y;(void)c;assert(!"unexpected T3 detail");}
+static void detail_keybar(struct screen*d,const struct viewport*v){(void)d;(void)v;}
+static void draw_t3_body(struct screen*d,struct viewport*v,int y,unsigned c,unsigned muted)
+{(void)d;(void)v;(void)y;(void)c;(void)muted;assert(!"unexpected T3 detail");}
 static int draw_input(struct screen*d,struct viewport*v,int y,const char *text,
                       const char *cursor,unsigned c,unsigned b)
 {(void)d;(void)v;(void)text;(void)cursor;(void)c;(void)b;return y;}

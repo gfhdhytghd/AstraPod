@@ -238,6 +238,7 @@ screens/system/podlink_media.c
 screens/system/podlink_library.c
 screens/system/podlink_screen_ui.c
 screens/system/agents_screen.c
+screens/system/agents_background.c
 screens/playback/cider.c
 screens/playback/cider_model.c
 screens/playback/cider_store.c

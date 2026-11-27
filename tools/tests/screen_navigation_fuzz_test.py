@@ -98,6 +98,9 @@ static int carousel_wps_back(void){return GO_TO_PREVIOUS;}
 static void carousel_prepare_transition(void){}
 static void carousel_cancel_transition(void){}
 static void finish_talk(bool discard){assert(discard);}
+static bool t3_mode(void){return false;}
+static bool agents_fruit_nav(void){return false;}
+static void __attribute__((unused)) agents_screen_shortcut_entry(void){}
 static bool native_play_pending;
 static bool tracks_valid=true;
 static void album_covers_cancel_resume(void){tracks_valid=false;}

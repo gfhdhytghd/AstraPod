@@ -8,6 +8,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
 #include "herdremote_model.h"
 
 /* PodLink's largest message with this firmware; D's input needs it */
@@ -151,7 +152,7 @@ static int apply_workspaces(struct hr_model *m, const char *count_text,
 /* A state letter as S sends it, or '-' */
 static char state(const char *s)
 {
-    return s[0] && strchr("bwdiu", s[0]) && !s[1] ? s[0] : '-';
+    return s[0] && strchr("bfwdiu", s[0]) && !s[1] ? s[0] : '-';
 }
 
 /* S refers to W's workspaces by id; one W does not name is left out. The
@@ -367,14 +368,17 @@ static bool small_count(const char *s, int max, bool clamp, int *out)
     return true;
 }
 
-static bool action_field(const char *s, size_t size)
+static bool field_text(const char *s)
 {
-    if (!s[0] || strlen(s) >= size)
-        return false;
     for (const unsigned char *p = (const unsigned char *)s; *p; p++)
         if (*p < ' ' || *p == 127)
             return false;
     return true;
+}
+
+static bool action_field(const char *s, size_t size)
+{
+    return s[0] && strlen(s) < size && field_text(s);
 }
 
 static int apply_actions(struct hr_model *m, const char *target,
@@ -576,6 +580,41 @@ static int apply_usage(struct hr_model *m, char **head, int nhead,
     return 'U';
 }
 
+static bool t3_event_id(const char *s, char kind, size_t size)
+{
+    size_t len = strlen(s);
+    /* Never cut a deep-link ID: its prefix can name another target. */
+    if (len <= 3 || len >= size || s[0] != 't' || s[1] != '3' || s[2] != kind)
+        return false;
+    for (const char *p = s + 3; *p; p++)
+        if (*p < '0' || *p > '9')
+            return false;
+    return true;
+}
+
+static int apply_event(struct hr_model *m, char **f)
+{
+    enum hr_event_kind kind;
+    if (!strcmp(f[1], "fail"))
+        kind = HR_EVENT_FAIL;
+    else if (!strcmp(f[1], "done"))
+        kind = HR_EVENT_DONE;
+    else
+        return 0;
+    struct hr_event *e = &m->event;
+    if (!t3_event_id(f[2], 'p', sizeof e->project) ||
+        !t3_event_id(f[3], 't', sizeof e->thread) ||
+        !field_text(f[4]) || !field_text(f[5]) || !field_text(f[6]))
+        return 0;
+    e->kind = kind;
+    strcpy(e->project, f[2]);
+    strcpy(e->thread, f[3]);
+    hr_copy(e->project_label, f[4], sizeof e->project_label);
+    hr_copy(e->thread_title, f[5], sizeof e->thread_title);
+    hr_copy(e->summary, f[6], sizeof e->summary);
+    return 'E';
+}
+
 int hr_model_apply(struct hr_model *m, const char *data, unsigned int length)
 {
     char *f[HR_MAX_FIELDS];
@@ -635,16 +674,28 @@ int hr_model_apply(struct hr_model *m, const char *data, unsigned int length)
         m->voice = f[1][0];
         return 'V';
     }
-    if (!strcmp(type, "T") && n == 3)
+    if (!strcmp(type, "T") && (n == 3 || n == 4))
     {
-        m->herdr_age = number(f[1]);
+        int age;
+        if (n == 3)
+            age = number(f[1]);
+        else if ((cursor && *cursor) ||
+                 !small_count(f[1], INT_MAX, false, &age) || age < 0 ||
+                 (strcmp(f[2], "0") && strcmp(f[2], "1")) ||
+                 (strcmp(f[3], "0") && strcmp(f[3], "1")))
+            return 0;
+        m->herdr_age = age;
         m->herdr_ok = f[2][0] == '1';
+        m->t3_health_known = n == 4;
+        m->t3_ok = n == 4 && f[3][0] == '1';
         return 'T';
     }
     if (!strcmp(type, "T") && n == 7)
         return apply_tabs(m, f, n, &cursor);
     if (!strcmp(type, "D") && (!cursor || !*cursor))
         return apply_detail(m, f, n);
+    if (!strcmp(type, "E") && n == 7 && (!cursor || !*cursor))
+        return apply_event(m, f);
     return 0;
 }
 

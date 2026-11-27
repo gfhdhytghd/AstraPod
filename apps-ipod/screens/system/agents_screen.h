@@ -12,4 +12,5 @@
 #define AGENTS_SWITCH_COVERS 3
 #define AGENTS_SWITCH_REMOTE_WPS 4
 int agents_screen(void);
+void agents_screen_shortcut_entry(void);
 #endif

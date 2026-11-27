@@ -27,6 +27,8 @@ static int __attribute__((unused)) cider_wps_poll(void){return 1;}
 #define BUTTON_REL 0x02000000
 #define BUTTON_REPEAT 0x04000000
 #define BUTTON_REDRAW 0x20000000
+#define BUTTON_MULTIMEDIA 0x10000000
+#define BUTTON_MULTIMEDIA_PLAYPAUSE (BUTTON_MULTIMEDIA | 0x01)
 #define HZ 100
 #include "apps-ipod/input/agents_remote.h"
 static struct agents_remote_state state;

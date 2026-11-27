@@ -35,6 +35,7 @@
 #include "widgets/list.h"
 #include "root_menu.h"
 #include "extras_bar.h"
+#include "system/activity.h"
 #include "extras.h"
 #include "ui/scene.h"
 
@@ -432,6 +433,7 @@ static enum sw_next sw_timer(void)
     paint(all, compose_page);
     long shown = current ? sw_elapsed(&logs[0]) : 0;
     enum sw_next next;
+    push_activity_without_refresh(ACTIVITY_STOPWATCH);
     while (1)
     {
         int action = extras_get_action(sw_running() ? HZ / 25 :
@@ -472,6 +474,7 @@ static enum sw_next sw_timer(void)
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     extras_bar_release();
     sw_fonts_release();
+    pop_current_activity_without_refresh();
     return next;
 }
 

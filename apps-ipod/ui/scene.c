@@ -716,12 +716,13 @@ static unsigned page_frames(bool push)
 /* A pan with slide set is a theme's page push (pan_dir 1) or pop (-1). */
 static bool capture_scene(struct ui_scene *scene, const void *from, const void *to,
                           bool push, const char *route, int pan_top,
-                          int pan_dir, bool slide)
+                          int pan_dir, bool slide, unsigned duration)
 {
     scene->requested_at = USEC_TIMER;
     bool panning = pan_top || slide;
-    bool staggered = push && !panning;
-    unsigned frames = slide ? page_frames(pan_dir > 0)
+    bool staggered = push && !panning && !duration;
+    unsigned frames = duration ? ui_theme_duration(duration)
+                    : slide ? page_frames(pan_dir > 0)
                     : pan_top ? ui_theme_duration(PAN_FRAMES)
                     : page_frames(push);
     ui_scene_snap_push();
@@ -831,19 +832,28 @@ bool ui_scene_capture(struct ui_scene *scene, const void *from, const void *to,
     const char *route = push ? "push" : "pop";
     if (slide_motion())
         return capture_scene(scene, from, to, true, route, slide_top(),
-                             push ? 1 : -1, true);
-    return capture_scene(scene, from, to, push, route, 0, 0, false);
+                             push ? 1 : -1, true, 0);
+    return capture_scene(scene, from, to, push, route, 0, 0, false, 0);
 }
 
 bool ui_scene_capture_pan(struct ui_scene *scene, const void *from, const void *to,
                           int direction, int top)
 {
-    return capture_scene(scene, from, to, true, "pan", top, direction, false);
+    return capture_scene(scene, from, to, true, "pan", top, direction, false, 0);
+}
+
+bool ui_scene_capture_timed_page(struct ui_scene *scene, const void *from,
+                                 const void *to, bool push, int direction,
+                                 int status_height, unsigned frames)
+{
+    return capture_scene(scene, from, to, push,
+                         direction ? "pan" : push ? "push" : "pop",
+                         status_height, direction, false, frames);
 }
 
 void ui_scene_boot(struct ui_scene *scene)
 {
-    if (capture_scene(scene, scene, NULL, true, "boot", 0, 0, false))
+    if (capture_scene(scene, scene, NULL, true, "boot", 0, 0, false, 0))
         scene->automatic = true;
 }
 

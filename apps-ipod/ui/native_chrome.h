@@ -2,10 +2,15 @@
 #ifndef PODBOX_NATIVE_CHROME_H
 #define PODBOX_NATIVE_CHROME_H
 
+#include "config.h"
 #include <stdbool.h>
 #include <stdint.h>
 #ifdef ASTRAPOD_ROCK_COMPAT
 #include "plugins/app_tray.h"
+#endif
+
+#ifdef HAVE_USB_PODLINK
+#include "screens/system/agents_background.h"
 #endif
 
 struct ui_theme;
@@ -22,6 +27,9 @@ struct native_chrome_state {
     uint8_t hold, pad[3];
 #ifdef ASTRAPOD_ROCK_COMPAT
     struct app_tray_view tray;
+#endif
+#ifdef HAVE_USB_PODLINK
+    struct agents_badge agents;
 #endif
 };
 

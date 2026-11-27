@@ -7,7 +7,7 @@ start=s.index('static void background_link(');end=s.index('/* A free outbox slot
 talk_start=s.index('static bool take_talk_result(void)\n{')
 action_start=s.index('static bool take_action_result(void)\n{')
 background=s[talk_start:s.index('\n}',talk_start)+2]+s[action_start:end]
-a=s.index('    bool resume =',s.index('int agents_screen(void)'))
+a=s.index('    bool preloaded =',s.index('int agents_screen(void)'))
 b=s.index('    FOR_NB_SCREENS(i)',a);initial=s[a:b]
 a=s.index('    if (resume)',b);b=s.index('    long frame_at',a);render=s[a:b]
 pre=r'''
@@ -17,6 +17,7 @@ pre=r'''
 #include <string.h>
 #include "herdremote_model.h"
 #include "detail_layout.h"
+#include "agents_background.h"
 #define PODLINK_CONNECTED 3
 #define PODLINK_CLOSE 6
 #define PODLINK_TEXT 2
@@ -24,10 +25,11 @@ struct podlink_message {int type;unsigned int length;const unsigned char *data;}
 #define SCREEN_MAIN 0
 #define HZ 100
 #define TIME_BEFORE(a,b) ((a)<(b))
-enum view {VIEW_SPACES,VIEW_DETAIL,VIEW_USAGE,VIEW_CONFIRM,VIEW_ALERT,VIEW_INPUT};
+enum view {VIEW_SPACES,VIEW_DETAIL,VIEW_USAGE,VIEW_CONFIRM,VIEW_ALERT,VIEW_INPUT,VIEW_QUESTION};
 static enum view view;
 static char question_id[12];static int question_choice;
-static bool question_custom,question_closing;
+static bool question_custom,question_closing,question_resolving;
+static long question_next_until;
 static struct hr_model model;
 static struct detail_layout detail_layout;static int detail_body_avail;
 struct row {int kind;char id[16];};
@@ -36,7 +38,10 @@ static struct row cache_row;
 static int cache_top=4,frames,round_trips,resets;
 static uint32_t cache_generation=7,generation=7;
 static bool cache_valid=true,pending_answer,was_connected,detail_ready;
+static bool agents_visited=true,agents_foreground,received_projects,select_held,select_down;
+static int page_scene;
 static bool talk_held,talk_shown,talk_discarded,talk_req_up,talk_failed,talk_t3,focus_for_detail;
+static bool talk_select,talk_toggle;
 static char key_req[8],action_req[8],t3_talk_start[8];
 static char space_id[16],space_tab[16],detail_pane[16],question_pane[16];
 static char pending_req[8],focus_req[8],talk_req[8],talk_note[64],task_text[244];
@@ -50,13 +55,29 @@ static void agents_shortcut_talking(bool b){(void)b;}
 static void show_row(struct gui_synclist*l,const struct row*r){(void)l;assert(!strcmp(r->id,"p1"));frames++;assert(!round_trips);}
 static void gui_synclist_set_top_item(struct gui_synclist*l,int top){l->start_item[0]=top;}
 static void show_same(struct gui_synclist*l){(void)l;frames++;}
-static void draw_question_overlay(void){frames++;}
+void agents_background_disconnected(void){}
+void agents_background_update(const struct hr_model *m,int type,bool foreground)
+{assert(m==&model&&type&&!foreground);}
+bool agents_background_handshake_complete(void){return true;}
+bool agents_background_take_target(struct agents_background_target *target)
+{(void)target;assert(!"unexpected shortcut");return false;}
+void agents_background_enter(void){}
+static void leave_question(struct gui_synclist *l){(void)l;assert(!"unexpected shortcut");}
+static void open_question(struct gui_synclist *l,const struct hr_question *q)
+{(void)l;(void)q;assert(!"unexpected shortcut");}
+static void close_usage(struct gui_synclist *l){(void)l;assert(!"unexpected shortcut");}
+static void enter_space(struct gui_synclist *l,const char *id)
+{(void)l;(void)id;assert(!"unexpected shortcut");}
+static void open_detail(struct gui_synclist *l,const struct hr_agent *a)
+{(void)l;(void)a;assert(!"unexpected shortcut");}
+static void ui_scene_cancel(void *scene){(void)scene;assert(!"unexpected shortcut");}
+
 static void draw_usage(struct gui_synclist*l){(void)l;frames++;}
 static void draw_detail(struct gui_synclist*l){(void)l;assert(model.detail_valid);assert(!strcmp(model.detail.say,"cached message"));assert(detail_scroll==3);frames++;}
-static void show(struct gui_synclist*l,int row){(void)l;assert(row==0);frames++;}
+static void show(struct gui_synclist*l,int row){(void)l;assert(row==-1);frames++;}
 static void talk_result(const char *text,bool failed){snprintf(talk_note,sizeof talk_note,"%s",text);talk_failed=failed;}
 BACKGROUND
-static void enter(void){struct gui_synclist list={0};
+static void enter(void){struct gui_synclist list={0};bool from_shortcut=false;
 '''
 post=r'''
  assert(list.start_item[0]==(resume?cache_top:0));

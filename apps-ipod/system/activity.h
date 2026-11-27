@@ -65,7 +65,8 @@ enum current_activity {
     ACTIVITY_MUSICQUIZ,
     ACTIVITY_AGENTS,
     ACTIVITY_VIDEOBROWSER,
-    ACTIVITY_ARCADE
+    ACTIVITY_ARCADE,
+    ACTIVITY_STOPWATCH
 };
 
 /* custom string representation of activity */

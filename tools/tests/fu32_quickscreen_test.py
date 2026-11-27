@@ -36,6 +36,7 @@ pre=r'''
 #define ID2P(n) ((const unsigned char*)((n)==1?"Shuffle":(n)==2?"Repeat":"Brightness"))
 #define SYS_EVENT 0x80000000u
 #define BUTTON_MULTIMEDIA 0x10000000
+#define BUTTON_MULTIMEDIA_PLAYPAUSE (BUTTON_MULTIMEDIA|1)
 #define CONTEXT_STD 1
 #define CONTEXT_WPS 2
 #define CONTEXT_QUICKSCREEN 3
@@ -99,6 +100,7 @@ static struct {int volume;}global_status;
 static int modes[2],cvol,localsteps;
 static bool source_cider;
 static bool cider_active(void){return source_cider;}
+static bool agents_fruit_nav(void){return false;}
 static int get_current_activity(void){return ACTIVITY_QUICKSCREEN;}
 static bool agents_nav_has(int n){(void)n;return false;}
 static int cider_mode_get(int m){return modes[m];}

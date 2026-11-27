@@ -21,7 +21,7 @@ agents = (R/'apps-ipod/screens/system/agents_screen.c').read_text()
 action = (R/'apps-ipod/input/action.c').read_text()
 remote = re.sub(r'^#include .*$', '', (R/'apps-ipod/input/agents_remote.c').read_text(), flags=re.M)
 chord = re.sub(r'^#include .*$', '', (R/'apps-ipod/input/agents_shortcut.c').read_text(), flags=re.M)
-arms = agents[agents.index('            case ACTION_AGENTS_TALK:'):agents.index('            case ACTION_STD_CONTEXT:',agents.index('            case ACTION_AGENTS_TALK:'))]
+arms = agents[agents.index('            case ACTION_AGENTS_TALK:'):agents.index('            case ACTION_NONE:',agents.index('            case ACTION_AGENTS_TALK:'))]
 events = []
 down = False
 for line in (R/'tools/tests/fixtures/remote-play/remote-log-3-new.txt').read_text().splitlines():
@@ -67,13 +67,13 @@ pre = r'''
 #define AGENTS_SWITCH_COVERS 3
 #define AGENTS_SWITCH_REMOTE_WPS 4
 static unsigned long current_tick,shortcut_talking_at;
-static bool shortcut_talking,talk_held,talk_remote,talk_discarded,talk_req_up,talk_failed,talk_t3;
-static enum { VIEW_SPACES, VIEW_ACTIONS, VIEW_CONFIRM } view;
+static bool shortcut_talking,talk_held,talk_remote,talk_discarded,talk_req_up,talk_failed,talk_t3,talk_select,talk_toggle;
+static enum { VIEW_SPACES, VIEW_ACTIONS, VIEW_CONFIRM, VIEW_INPUT } view;
 static char t3_talk_start[8];
 static long talk_since,talk_until;
 static char talk_req[8],talk_note[64],outbox[OUTBOX][96];
 static int music;
-#define BUTTON_MULTIMEDIA_PLAYPAUSE 0x10000100
+#define BUTTON_MULTIMEDIA_PLAYPAUSE (BUTTON_MULTIMEDIA|0x01)
 static void __attribute__((unused)) default_event_handler(int b){assert(b==BUTTON_MULTIMEDIA_PLAYPAUSE);music++;}
 static bool native_play_pending;static unsigned long native_play_at __attribute__((unused));
 static int nout,ret,switches;static bool done;
@@ -81,6 +81,12 @@ static unsigned int next_req=1;
 static struct {bool hello,result_new,result_ok;int voice;char result_req[8],result_text[64];}model;
 struct gui_synclist {int unused;};
 static int podlink_state(void){return PODLINK_CONNECTED;}
+static bool mutating_ready(void){return model.hello;}
+static bool t3_mode(void){return false;}
+static bool agents_fruit_nav(void){return false;}
+static bool voice_view(void){return view==VIEW_SPACES;}
+static unsigned long get_action_tick(void){return current_tick;}
+static bool cider_wps_action(int button){(void)button;return false;}
 static void talk_target(struct gui_synclist*l,char*b,size_t n){(void)l;snprintf(b,n,"-");}
 static char commands[64][96];static int ncommands;
 static unsigned long sent_at[64];
@@ -88,7 +94,7 @@ static void flush(void){for(int i=0;i<nout;i++){assert(ncommands<64);strcpy(comm
 '''
 code = re.sub(r'^#include .*$', '', (R/'firmware/export/button_chord.h').read_text(), flags=re.M)
 code += function(action,'agents_shortcut_talking') + chord + remote
-for name in ['is_t3','outbox_slot','take_req','talk_result','start_talk','finish_talk','talk_is_short','talk_wanted','take_talk_result']:
+for name in ['is_t3','outbox_slot','take_req','talk_result','start_talk','finish_talk','talk_is_short','talk_wanted','take_talk_result','agents_playback']:
     code += '\n'+function(agents,name)
 if 'static void finish_native_play' in agents:code += '\n'+function(agents,'finish_native_play')
 code += '\nstatic void perform(int button) {struct gui_synclist list={0};int action=0;\n'

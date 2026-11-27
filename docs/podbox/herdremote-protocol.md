@@ -187,7 +187,8 @@ T <age> <herdr_ok>
 ```
 
 `age` is how many seconds old the computer's picture of herdr is. `herdr_ok`
-is `0` while herdr cannot be reached.
+is `0` while herdr cannot be reached. See [T3 pocket remote capability](#t3-pocket-remote-capability)
+for the four-field tick.
 
 ### Navigation v2 — PROTOCOL READY
 
@@ -1098,30 +1099,17 @@ metadata or backend error bodies.
 
 ## Player controls for T3 and actions
 
-With `AGENT_CONTROL=t3`, **System > Agents** lists only T3 projects. The wheel selects a project without changing desktop focus.
-
-| View | Wheel | SELECT | LEFT / RIGHT | MENU |
-|---|---|---|---|---|
-| T3 project | Select a thread and request focus | Request focus and open thread detail | Switch between **Active** and **All**, without wrapping | Spaces |
-| T3 detail | Scroll thread text | Open **Actions** | — | Project |
-| herdr detail | Existing desktop arrow keys | Existing Enter key | Backspace / Open **Actions** | Space |
-| Actions | Select an action | Run it or open confirmation | — | Detail |
-| Interrupt confirmation | — | Confirm | — | Cancel and return to **Actions** |
-
-Hold Play in T3 detail to dictate to the selected thread. The player shows
-the computer's result in the message band. Running an action returns to
-detail and shows the result in the same band.
-If the computer does not return an action list, detail stays open.
-
-For a T3 question with a custom text option, use the click-wheel keyboard.
-On the review screen, RIGHT reopens the keyboard, SELECT sends the text,
-and MENU cancels editing.
+With `AGENT_CONTROL=t3`, **System > Agents** lists only T3 projects. See the
+[T3 pocket remote design](design/t3-remote/t3-remote-design.md#5-complete-button-maps-per-theme-profile)
+for the button maps. The pocket remote sends choice answers, preset replies,
+and voice controls. Custom text options remain available to computer clients.
 
 ## T3 spaces and agent actions
 
-After `hr<TAB>1`, send `tc<TAB>1` to receive T3 projects, threads and
-questions. Send `qx<TAB>1` for the FU21 option records. All records below
-use tabs between fields and newlines between records.
+After `hr<TAB>1`, send `tc<TAB>1` for baseline T3 projects, threads and
+questions. Send `qx<TAB>1` for the FU21 option records. See
+[T3 pocket remote capability](#t3-pocket-remote-capability) for `tc<TAB>2`.
+All records below use tabs between fields and newlines between records.
 
 In `herdr` mode (the default), `W` and `Q` contain only herdr records.
 In `t3` mode, a capable player receives only T3 records. A nonempty T3
@@ -1141,8 +1129,8 @@ rows. The name is the thread title, the title field is the model and
 branch, and the last field is the first line of the latest assistant
 message. `det <thread>` uses the existing typed `D` record, with the
 thread's title, status and model, latest assistant text, up to three
-recent messages and the oldest pending request. `vd <req> <thread>`
-returns `R <req> err Voice cannot reach T3`.
+recent messages and the oldest pending request. Baseline daemons reply to
+`vd <req> <thread>` with `R <req> err Voice cannot reach T3`.
 
 Send `fp <req> <thread>` to request T3 thread focus. The daemon also
 accepts `fw <req> <thread>`. With `T3_FOLLOW_IPOD=on` (the default),
@@ -1165,8 +1153,8 @@ For a multi-select Q, positive numbers toggle options and zero submits.
 When a request has several questions, each answer advances to a new Q
 ID until the daemon has the complete response.
 
-An FU21 custom row on T3 returns `Input ready` after the client chooses
-it. Collect and review the answer locally. Send
+An FU21 custom row on T3 returns `Input ready` after a legacy client chooses
+it. Send
 `qi <req> <qid> enter <text>` to submit a single text field of 1–1024 UTF-8
 bytes with no controls. Send `qi <req> <qid> esc` to cancel local editing
 and leave the request pending.
@@ -1188,3 +1176,43 @@ A quick reply can be up to 60 bytes even if its label is truncated.
 herdr sheets show up to eight quick replies. T3 sheets show up to seven
 after their five thread actions. A T3 quick reply returns `Queued` when
 there was an active turn at dispatch time.
+
+### T3 pocket remote capability
+
+The wire version is still `1`. The player advertises `tc<TAB>1` and then
+`tc<TAB>2` after `hr<TAB>1`. A daemon that supports `tc<TAB>2` upgrades
+the session capability. Older daemons continue to serve baseline T3
+records.
+
+For `tc<TAB>2`, the daemon appends T3 reachability to every tick:
+
+```text
+T <age> <herdr_ok> <t3_ok>
+```
+
+Both flags are `0` or `1`. `t3_ok` reports whether the daemon has a live
+T3 connection. A legacy three-field tick leaves T3 reachability unknown.
+The seven-field tab `T` retains its shape. Under `tc<TAB>2`, `S`, tab
+`T` and `A` can carry `f` for failed. The state priority is
+`b > f > w > d > i > u > -`.
+
+While Agents is in the background, send one `E` per newly failed or
+completed thread:
+
+```text
+E <fail|done> <project> <thread> <project_label> <thread_title> <summary>
+```
+
+The project and thread must be `t3p<n>` and `t3t<n>`, up to 15 bytes each.
+The three display fields have UTF-8 budgets of 40, 60 and 90 bytes.
+
+Use the existing `vd <req> <target>`, `vu <req>` and `vc <req>` for T3
+voice. A T3 target is a thread ID, `w:<project>`, or `-` for the current
+computer target. Return the existing `R` for each request.
+
+For a T3 `K`, publish `interrupt` with `confirm=1` when a turn is active
+and the configured preset replies with IDs `reply1` through `reply7`.
+The player uses `fp` for **Open on computer**. For approval shortcuts,
+send the Allow and Deny option numbers in the `yes` and `no` fields of
+`Q`. With the baseline approval labels, the player also recognizes
+`Approve` / `Allow once` / `Allow` and `Decline` / `Deny`.

@@ -36,6 +36,7 @@
 
 #include "idle.h"
 #include "native_chrome.h"
+#include "frame.h"
 #include "native_theme_runtime.h"
 #include "native_wps.h"
 #include "perf.h"
@@ -1940,10 +1941,12 @@ void native_wps_render(const struct wps_state *state, bool submit)
         repaint = false;
         ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
     }
+    struct ui_rect damage = ui_page_paint(&wps->page);
     if (submit)
-        ui_page_draw(&wps->page);
-    else
-        ui_page_paint(&wps->page);
+    {
+        ui_mark_dirty_rect(SCREEN_MAIN, damage.x, damage.y, damage.width, damage.height);
+        ui_flush_dirty();
+    }
     if (!wps->page.tracks && wps->motion_tried)
     {
         ui_perf_end(wps->motion_trace);

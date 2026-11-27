@@ -6,10 +6,10 @@ R=Path(__file__).resolve().parents[2]
 O=Path(sys.argv[1]).resolve();O.mkdir(parents=True,exist_ok=True)
 s=(R/'apps-ipod/screens/system/agents_screen.c').read_text()
 a=s.index('#define USAGE_VIEW_SIGNAL_TICKS');b=s.index('\nstatic const struct hr_question',a)
-helper=s.index('static bool is_t3(')
+helper=s.index('static bool is_t3(const char *id)\n{')
 lease=s[helper:s.index('\n}',helper)+2]+'\n'+s[a:b]
 assert 'signal_usage_view(view == VIEW_USAGE ? 1 : view == VIEW_DETAIL ? 2 : 0, false);' in s
-assert 'signal_usage_view(false, true);\n    finish_talk(false);' in s
+assert 'signal_usage_view(false, true);\n    finish_talk(true);' in s
 pre=r'''
 #include <assert.h>
 #include <stdbool.h>

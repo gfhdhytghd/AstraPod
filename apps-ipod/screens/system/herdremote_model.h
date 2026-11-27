@@ -69,7 +69,7 @@ struct hr_agent {
     char pane[16];
     char kind[12];
     char name[32];
-    char status;    /* w working, b waiting, d done, i idle, u unknown */
+    char status;    /* w working, b waiting, f failed, d done, i idle, u unknown */
     bool question;
     char title[64];
     char last[96];
@@ -122,9 +122,20 @@ struct hr_usage {
     long long tokens, usd_milli;
 };
 
+enum hr_event_kind { HR_EVENT_FAIL, HR_EVENT_DONE };
+
+/* The newest T3 background event, valid after hr_model_apply returns 'E'. */
+struct hr_event {
+    enum hr_event_kind kind;
+    char project[16], thread[16];
+    char project_label[41], thread_title[61], summary[91];
+};
+
 struct hr_model {
     bool hello;             /* the daemon has introduced itself */
     bool herdr_ok;
+    bool t3_health_known;   /* the last tick carried T3 health */
+    bool t3_ok;
     int herdr_age;          /* seconds, as the last tick said */
     int nws;
     struct hr_workspace ws[HR_MAX_WS];
@@ -159,12 +170,13 @@ struct hr_model {
     struct hr_usage usage;
     /* The voice input's state from V: 't' recording, 'i' not, 0 unknown */
     char voice;
+    struct hr_event event;
 };
 
 /* Apply one message. Returns its type letter ('W', 'S', 'A', 'Q', 'X', 'R',
- * 'T', 'U', 'V', 'D', 'K', 'H' for the hello, 'B' for the seven-field T that
- * lists tabs), or 0 if it was not a HerdRemote v1 message, in which case
- * the model is unchanged. */
+ * 'T', 'U', 'V', 'D', 'K', 'E', 'H' for the hello, 'B' for the seven-field T
+ * that lists tabs), or 0 if it was not a HerdRemote v1 message, in which
+ * case the model is unchanged. */
 int hr_detail_scroll(int position, int old_max, int new_max);
 int hr_model_apply(struct hr_model *m, const char *data, unsigned int length);
 

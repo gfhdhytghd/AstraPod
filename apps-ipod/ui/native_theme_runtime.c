@@ -23,6 +23,7 @@
 #define NATIVE_THEME_EXT ".podtheme"
 
 static int current_theme;
+static char current_name[UI_THEME_NAME_MAX] = "scrim";
 static unsigned generation;
 
 static bool valid_name(const char *name, size_t len)
@@ -135,6 +136,7 @@ static bool select_theme(const char *name, bool fallback)
     if (current_theme > 0)
         core_free(current_theme);
     current_theme = replacement > 0 ? replacement : 0;
+    snprintf(current_name, sizeof current_name, "%s", valid ? name : "scrim");
     ++generation;
 
     if (!valid)
@@ -150,7 +152,7 @@ static bool select_theme(const char *name, bool fallback)
     return valid;
 }
 
-static const char *current_name(const char *name)
+static const char *canonical_theme_name(const char *name)
 {
     int id = builtin_id(name, strlen(name));
     return id < 0 ? name : ui_theme_builtin_name(id);
@@ -159,7 +161,7 @@ static const char *current_name(const char *name)
 void ui_theme_apply_settings(void)
 {
     const char *saved = global_settings.native_theme;
-    const char *name = current_name(saved);
+    const char *name = canonical_theme_name(saved);
     if (strcmp(saved, name))
     {
         strcpy(global_settings.native_theme, name);
@@ -170,7 +172,7 @@ void ui_theme_apply_settings(void)
 
 bool ui_theme_set(const char *name, bool fallback)
 {
-    name = current_name(name);
+    name = canonical_theme_name(name);
     bool applied = select_theme(name, fallback);
 
     if (applied || fallback)
@@ -183,6 +185,11 @@ bool ui_theme_set(const char *name, bool fallback)
         settings_save();
     }
     return applied;
+}
+
+const char *ui_theme_active_name(void)
+{
+    return current_name;
 }
 
 void ui_theme_snapshot(struct ui_theme *out)

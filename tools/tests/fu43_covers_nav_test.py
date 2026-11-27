@@ -44,6 +44,7 @@ prefix='''#define HAVE_USB_PODLINK
 #define BUTTON_REDRAW 0x20000000
 #define SYS_EVENT 0x80000000u
 #define BUTTON_MULTIMEDIA 0x10000000
+#define BUTTON_MULTIMEDIA_PLAYPAUSE (BUTTON_MULTIMEDIA|1)
 #include "firmware/export/remote_log.h"
 #include "apps-ipod/input/agents_shortcut.h"
 #define TAGNAVI_MAIN_MENU_SLOTS 20
@@ -78,6 +79,7 @@ static int script,first_browser_depth=-1,opened_album,overlay_open,overlay_close
 static int agent_view=41,wps_view=73,expected_agent_view,expected_wps_view;
 static int action_budget;
 static int route_screen_shortcut(int,int);
+static void agents_screen_shortcut_entry(void){}
 static int album_covers_scrn(void*);static int cider_scrn(void*);static int cover_tracks_scrn(void*);
 static int agents_screen(void);static long gui_wps_show(bool,bool);
 static int album_covers_return(const char*,bool*);

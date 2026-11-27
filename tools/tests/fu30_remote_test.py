@@ -27,6 +27,7 @@ pre=r'''
 #define BUTTON_REPEAT 0x04000000
 #define BUTTON_REDRAW 0x20000000
 #define BUTTON_MULTIMEDIA 0x10000000
+#define BUTTON_MULTIMEDIA_PLAYPAUSE (BUTTON_MULTIMEDIA | 0x01)
 #define SYS_EVENT 0x80000000u
 #define HZ 100
 #include "apps-ipod/input/agents_remote.h"

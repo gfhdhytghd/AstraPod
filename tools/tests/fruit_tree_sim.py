@@ -30,7 +30,8 @@ from ui_menu_sim import FPS, Screen, process
 # menu gains Now Playing and so is not the frame it was: it comes last.
 # "cycle:N" steps the row's value in place through N values.
 TREE = [
-    ("music", [("Cover Flow", "open"), ("Playlists", "open"),
+    ("music", [("Cover Flow", "open"), ("Genius Mixes", "open"),
+               ("Playlists", "open"),
                ("Artists", "open"), ("Albums", "open"),
                ("Compilations", "empty"), ("Songs", "open"),
                ("Genres", "open"), ("Composers", "open"),
@@ -45,7 +46,7 @@ TREE = [
                 ("Stopwatch", "open"), ("Other Apps", "open"),
                 ("Demos", "open"), ("Files", "open"), ("System", "open")],
      [4]),
-    ("settings", [("About", "open"), ("Shuffle", "cycle:2"),
+    ("settings", [("About", "open"), ("Shuffle", "cycle:3"),
                   ("Repeat", "cycle:3"),
                   ("Main Menu", "open"), ("Music Menu", "open"),
                   ("Volume Limit", "open"), ("Backlight", "open"),

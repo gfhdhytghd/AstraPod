@@ -212,6 +212,9 @@ void gui_synclist_init(struct gui_synclist * gui_list,
     gui_list->show_notes = false;
     gui_list->header = NULL;
     gui_list->callback_child_texts = NULL;
+    gui_list->footer = NULL;
+    gui_list->empty_title = NULL;
+    gui_list->empty_hint = NULL;
     gui_list->generation = ++last_generation;
 }
 

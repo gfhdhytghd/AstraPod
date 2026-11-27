@@ -111,10 +111,15 @@ void __wrap_root_menu(void)
 {
     const char *path = "/probe.mp4";
     static struct mp4v_demux_res demux;
-    static uint32_t samples[512], chunks[512], sync[512];
-    static struct mp4v_stsc_entry stsc[512];
-    if (mp4v_demux_open(path, &demux, samples, 512,
-                       chunks, 512, stsc, 512, sync, 512) < 0)
+    int fd = rock_open(path, O_RDONLY);
+    if (fd < 0)
+    {
+        fputs("MP4 open failed\n", stderr);
+        exit(1);
+    }
+    int result = mp4v_demux_read(fd, &demux);
+    rock_close(fd);
+    if (result < 0)
     {
         fputs("MP4 demux failed\n", stderr);
         exit(1);

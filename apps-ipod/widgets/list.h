@@ -218,6 +218,8 @@ struct gui_synclist
     bool talk_menu;
     bool wraparound;
     bool scroll_paginated;
+    /* Load missing visible glyphs before the frame can reach the panel. */
+    bool require_row_glyphs;
     /* whether the text of the whole items of the list have to be
      * scrolled or only for the selected item */
     bool scroll_all;

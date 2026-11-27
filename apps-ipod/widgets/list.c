@@ -186,6 +186,7 @@ void gui_synclist_init(struct gui_synclist * gui_list,
         list_init_item_height(gui_list, i);
     gui_list->data = data;
     gui_list->scroll_all = scroll_all;
+    gui_list->require_row_glyphs = false;
     gui_list->selected_size = selected_size;
     gui_list->title = NULL;
     gui_list->title_icon = Icon_NOICON;

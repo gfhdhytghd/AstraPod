@@ -19,6 +19,9 @@
 #include "draw/resize.h"
 #include "plugins/quake/quake_heap.h"
 #include "files/filetypes.h"
+#include "metadata/chapters.h"
+#include "metadata/cuesheet.h"
+#include "metadata/mp4_chapters.h"
 #include "root_menu.h"
 #include "pcm_waveform.h"
 #include "sound.h"
@@ -50,6 +53,7 @@ bool rock_host_header_valid(const struct plugin_header *header);
 #endif
 
 #define ROCK_BUFFER_ALIGNMENT 8
+#define ROCK_VIDEO_MODULE PLUGIN_APPS_DIR "/h264_player.rock"
 #define ROCK_HEAP_LIMIT (2 * 1024 * 1024)
 
 static const unsigned char fingerprint[] = ROCK_FINGERPRINT;
@@ -489,11 +493,7 @@ static int rock_get_action(int context, int timeout)
 {
     if (usb_taken)
         return SYS_USB_CONNECTED;
-    bool video = context == CONTEXT_VIDEO_PLAYBACK;
-    int action = get_action(video ? CONTEXT_WPS : context, timeout);
-    if (video && action == ACTION_WPS_BROWSE && !ui_wheel_navigation())
-        return ACTION_NONE;
-    return rock_iram_button_event(action);
+    return rock_iram_button_event(get_action(context, timeout));
 }
 
 static int rock_get_custom_action(int context, int timeout,
@@ -532,14 +532,46 @@ static void *rock_get_buffer(size_t *size)
     return tail_size ? tail : NULL;
 }
 
+#ifdef HAVE_HW_H264
+static void *rock_claim_video_scratch(size_t bytes)
+{
+    /* The module's VPU, AAC and PCM buffers share one pinned allocation. */
+    if (foreground_owner != thread_self() || engine_heap ||
+        !bytes || bytes > 10 * 1024 * 1024)
+        return NULL;
+
+    int handle = core_alloc(bytes);
+    if (handle <= 0)
+        return NULL;
+    void *scratch = core_get_data_pinned(handle);
+    engine_heap = handle;
+    if (usb_taken)
+        return NULL;
+    rock_h264_begin(scratch, bytes);
+    rock_h264_audio_begin(scratch, bytes);
+    return scratch;
+}
+#endif
+
 static void *rock_claim_scratch(size_t minimum, size_t preferred,
                                 size_t *granted)
 {
     if (!granted)
         return NULL;
     *granted = 0;
+    if (usb_taken)
+        return NULL;
+#ifdef HAVE_HW_H264
+    if (filename && !strcmp(filename, ROCK_VIDEO_MODULE))
+    {
+        void *scratch = rock_claim_video_scratch(minimum);
+        if (scratch)
+            *granted = minimum;
+        return scratch;
+    }
+#endif
     size_t bytes = MIN(preferred, tail_size) & ~(ROCK_BUFFER_ALIGNMENT - 1);
-    if (usb_taken || !bytes || bytes < minimum)
+    if (!bytes || bytes < minimum)
         return NULL;
     void *result = tail;
     tail += bytes;
@@ -1035,6 +1067,7 @@ struct rock_invocation {
     struct plugin_header *module;
     const char *path;
     const char *file;
+    struct rock_video_request *video;
     fb_data *saved_pixels;
     fb_data *widget_pixels;
     bool shell;
@@ -1068,7 +1101,8 @@ static int invoke_module(void *opaque)
     rock_h264_begin(tail, tail_size);
     rock_h264_audio_begin(tail, tail_size);
     rock_begin_settings();
-    rock_display_start(call->saved_pixels, call->widget_pixels);
+    bool video = !strcmp(call->path, ROCK_VIDEO_MODULE);
+    rock_display_start(call->saved_pixels, call->widget_pixels, video);
     button_clear_pressed();
     rock_action_reset();
 
@@ -1079,7 +1113,15 @@ static int invoke_module(void *opaque)
     (void)call->shell;
 #endif
     push_activity_without_refresh(ACTIVITY_PLUGIN);
-    int result = call->module->entry_point(call->file);
+    struct rock_video_request fallback = {
+        .path = call->file,
+        .battery_level = battery_level,
+        .result = ROCK_VIDEO_FAILED,
+    };
+    const void *parameter = call->file;
+    if (video)
+        parameter = call->video ? call->video : &fallback;
+    int result = call->module->entry_point(parameter);
     if (get_current_activity() == ACTIVITY_PLUGIN)
         pop_current_activity_without_refresh();
 #ifdef HAVE_PODLINK_PLUGIN_TEST
@@ -1122,7 +1164,7 @@ static int invoke_module(void *opaque)
 static int run_rock(const char *path, const char *file,
                     unsigned char *arena, size_t capacity,
                     fb_data *saved_pixels, fb_data *widget_pixels, bool shell,
-                    bool overlay)
+                    bool overlay, struct rock_video_request *video)
 {
 #ifdef HAVE_USBSTACK
     if (usb_exclusive_storage())
@@ -1199,7 +1241,9 @@ static int run_rock(const char *path, const char *file,
     *module->api = &api;
 
     struct rock_invocation call = {
-        module, path, file, saved_pixels, widget_pixels, shell
+        .module = module, .path = path, .file = file, .video = video,
+        .saved_pixels = saved_pixels, .widget_pixels = widget_pixels,
+        .shell = shell,
     };
     if (resident)
         rock_tsr_begin(handle, module);
@@ -1231,7 +1275,7 @@ unload:
 }
 
 static int rock_open_foreground(const char *path, const char *file, bool shell,
-                                bool quiet)
+                                bool quiet, struct rock_video_request *video)
 {
 #ifdef HAVE_PODLINK_PLUGIN_TEST
     if (!podlink_plugin_test_claim(shell))
@@ -1248,7 +1292,7 @@ static int rock_open_foreground(const char *path, const char *file, bool shell,
         rock_overlay_begin();
         rock_clear_handoff();
         result = run_rock(path, file, arena, capacity, caller_pixels,
-                          widget_pixels, shell, false);
+                          widget_pixels, shell, false, video);
         const struct rock_handoff *next = NULL;
         if (result == PLUGIN_CHAIN_OVERLAY)
         {
@@ -1257,7 +1301,7 @@ static int rock_open_foreground(const char *path, const char *file, bool shell,
                 result = run_rock(launch.path,
                                   launch.has_parameter ? launch.parameter : NULL,
                                   arena, capacity, caller_pixels, widget_pixels,
-                                  shell, true);
+                                  shell, true, NULL);
             if (result == PLUGIN_CHAIN_OVERLAY)
                 result = PLUGIN_ERROR;
         }
@@ -1271,7 +1315,8 @@ static int rock_open_foreground(const char *path, const char *file, bool shell,
             {
                 result = run_rock(next->module, next->path[0] ? next->path : NULL,
                                   arena, capacity,
-                                  caller_pixels, widget_pixels, false, false);
+                                  caller_pixels, widget_pixels,
+                                  false, false, NULL);
                 if (result == PLUGIN_GOTO_PLUGIN ||
                     result == PLUGIN_CHAIN_OVERLAY)
                     result = PLUGIN_ERROR;
@@ -1307,9 +1352,44 @@ static int rock_open_foreground(const char *path, const char *file, bool shell,
 int rock_run_from_shell(const char *path)
 {
     bool previous = action_set_menu_back(true);
-    int result = rock_open_foreground(path, NULL, true, true);
+    int result = rock_open_foreground(path, NULL, true, true, NULL);
     action_set_menu_back(previous);
     return result;
+}
+
+static size_t rock_video_chapters(const char *path, uint32_t *offsets)
+{
+    int handle = core_alloc(sizeof(struct cuesheet));
+    if (handle <= 0)
+        return 0;
+    struct cuesheet *cue = core_get_data_pinned(handle);
+    int count = read_mp4_chapters(path, cue);
+    for (int i = 0; i < count; i++)
+        offsets[i] = cue->tracks[i].offset;
+    core_unpin(handle);
+    core_free(handle);
+    return count >= MIN_CHAPTERS ? count : 0;
+}
+
+int rock_open_video(const char *path, const char *title, bool has_previous)
+{
+    uint32_t chapters[MAX_TRACKS];
+    if (audio_status())
+        audio_stop();
+    struct rock_video_request request = {
+        .path = path,
+        .title = title,
+        .battery_level = battery_level,
+        .chapters = chapters,
+        .chapter_count = rock_video_chapters(path, chapters),
+        .has_previous = has_previous,
+        .result = ROCK_VIDEO_FAILED,
+    };
+    int result = rock_open_foreground(ROCK_VIDEO_MODULE, path, false, false,
+                                      &request);
+    if (result == PLUGIN_USB_CONNECTED || result == PLUGIN_GOTO_ROOT)
+        return ROCK_VIDEO_USB;
+    return request.result;
 }
 
 static int rock_map_browser_result(int result)
@@ -1326,13 +1406,13 @@ static int rock_map_browser_result(int result)
 int rock_open_from_browser(const char *path, const char *file)
 {
     return rock_map_browser_result(
-        rock_open_foreground(path, file, false, false));
+        rock_open_foreground(path, file, false, false, NULL));
 }
 
 int rock_open_from_browser_quiet(const char *path, const char *file,
                                  bool *failed)
 {
-    int result = rock_open_foreground(path, file, false, true);
+    int result = rock_open_foreground(path, file, false, true, NULL);
     if (failed)
         *failed = (result == PLUGIN_ERROR);
     return rock_map_browser_result(result);

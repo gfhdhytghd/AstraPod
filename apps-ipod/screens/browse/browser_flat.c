@@ -47,6 +47,7 @@
 #include "files/stock_db.h"
 #include "files/path_list.h"
 #include "files/filetypes.h"
+#include "plugins/rock_compat.h"
 #include "system/bg_task.h"         /* a file gone: the walk again */
 #include "strnatcmp.h"
 #include "root_menu.h"
@@ -396,6 +397,47 @@ static enum list_row_kind flat_get_kind(int selected_item, void *data)
 }
 
 /* The files of `type`, or for NULL every file with the rows above them */
+#ifdef HAVE_VIDEO_PLAYER
+static int play_video_rows(const char *type, int *selection)
+{
+    int row = *selection - heads;
+    while (row >= 0 && row < shown_ct)
+    {
+        char path[MAX_PATH];
+        strlcpy(path, flat_path(shown[row]), sizeof(path));
+        if (!file_exists(path))
+        {
+            splash(HZ, ID2P(LANG_FILE_NOT_FOUND));
+            bg_task_update(&file_index_task);
+            break;
+        }
+        *selection = heads + row;
+        bool has_previous = row > 0;
+        path_list_free(&list);
+        int result = rock_open_video(path, NULL, has_previous);
+        if (result == ROCK_VIDEO_USB)
+            return GO_TO_ROOT;
+        if (!load())
+            break;
+        fill_shown(type);
+        /* The index can change during playback. Find the same file first. */
+        for (row = 0; row < shown_ct; row++)
+            if (!strcmp(flat_path(shown[row]), path))
+                break;
+        if (row == shown_ct)
+            break;
+        *selection = heads + row;
+        if (result == ROCK_VIDEO_PREVIOUS)
+            row--;
+        else if (result == ROCK_VIDEO_FINISHED || result == ROCK_VIDEO_NEXT)
+            row++;
+        else
+            break;
+    }
+    return GO_TO_PREVIOUS;
+}
+#endif
+
 static int show_list(const char *type, char *title)
 {
     struct simplelist_info info;
@@ -455,6 +497,10 @@ static int show_list(const char *type, char *title)
             ui_scene_close_modal(&scene, ret == GO_TO_PREVIOUS,
                                  "file-types-pop");
         }
+#ifdef HAVE_VIDEO_PLAYER
+        else if (flat_kind == FLAT_VIDEOS)
+            ret = play_video_rows(type, &sel);
+#endif
         else
             ret = open_file(shown[choice - heads]);
         if (ret != GO_TO_PREVIOUS)

@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include "plugins/rock_compat.h"
+#include "root_menu.h"
 #include "rbpaths.h"  /* THEME_DIR, ICON_DIR */
 #include "string.h"
 
@@ -354,12 +355,8 @@ bool filetype_open_core_viewer(int attr, const char *file, int *rc)
                 return false;
             /* fall through */
         case FILE_ATTR_VIDEO:
-            /* The player takes the codec for the film's sound only while
-             * nothing else plays; otherwise the film is silent */
-            if (audio_status())
-                audio_stop();
-            *rc = rock_open_from_browser(PLUGIN_APPS_DIR "/h264_player.rock",
-                                         file);
+            *rc = rock_open_video(file, NULL, false) == ROCK_VIDEO_USB ?
+                GO_TO_ROOT : GO_TO_PREVIOUS;
             return true;
 #endif
 #ifdef ASTRAPOD_ROCK_COMPAT

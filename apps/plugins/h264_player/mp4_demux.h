@@ -45,10 +45,15 @@ struct mp4v_stts_entry {
     uint32_t sample_delta;
 };
 
-struct mp4v_stsc_entry {
-    uint32_t first_chunk;
-    uint32_t samples_per_chunk;
-    uint32_t sample_desc_index;
+/* Each table has its own window: reading one must not evict the others. */
+#define MP4V_WINDOW_WORDS  256
+
+struct mp4v_table {
+    uint32_t offset;
+    uint32_t words;
+    uint32_t first;
+    uint32_t count;
+    uint32_t window[MP4V_WINDOW_WORDS];
 };
 
 struct mp4v_demux_res {
@@ -71,8 +76,8 @@ struct mp4v_demux_res {
 
     /* Sample sizes (stsz) */
     uint32_t num_samples;
-    uint32_t *sample_sizes;  /* caller-provided buffer */
-    uint32_t sample_sizes_cap;
+    uint32_t default_sample_size;
+    struct mp4v_table sample_sizes;
 
     /* Time-to-sample (stts) */
     uint32_t num_stts;
@@ -80,21 +85,25 @@ struct mp4v_demux_res {
 
     /* Sample-to-chunk (stsc) */
     uint32_t num_stsc;
-    struct mp4v_stsc_entry *stsc;    /* caller-provided buffer */
-    uint32_t stsc_cap;
+    struct mp4v_table stsc;
 
     /* Chunk offsets (stco) */
     uint32_t num_stco;
-    uint32_t *chunk_offsets;  /* caller-provided buffer */
-    uint32_t chunk_offsets_cap;
+    uint32_t chunk_words;
+    struct mp4v_table chunk_offsets;
 
     /* Sync samples / keyframes (stss) */
     uint32_t num_stss;
-    uint32_t *sync_samples;  /* caller-provided buffer */
-    uint32_t sync_samples_cap;
+    struct mp4v_table sync_samples;
+
+    /* Mapping cursor for sequential playback. Reset on a backward seek. */
+    uint32_t map_run;
+    uint32_t map_run_sample;
+    uint32_t next_sample;
+    uint32_t chunk_end_sample;
+    uint64_t next_offset;
 
     /* File and mdat location */
-    uint32_t file_size;
     uint32_t mdat_offset;
     uint32_t mdat_len;
 
@@ -112,39 +121,19 @@ struct mp4v_demux_res {
     uint32_t audio_num_stco;
 };
 
-/* Open and parse an MP4 file, extracting video and audio tracks.
- *
- * filepath:         path to the .mp4/.m4v file
- * res:              output struct (caller allocates)
- * sample_buf:       buffer for video sample_sizes array
- * sample_cap:       number of uint32_t entries in sample_buf
- * chunk_buf:        buffer for video chunk_offsets array
- * chunk_cap:        number of uint32_t entries in chunk_buf
- * stsc_buf:         buffer for video sample-to-chunk entries
- * stsc_cap:         number of entries in stsc_buf
- * sync_buf:         buffer for video sync-sample entries
- * sync_cap:         number of entries in sync_buf
- *
- * Returns 0 on success (video found), -1 on error.
- * Audio track is optional; check res->audio_format != 0. */
-int mp4v_demux_open(const char *filepath,
-                    struct mp4v_demux_res *res,
-                    uint32_t *sample_buf, uint32_t sample_cap,
-                    uint32_t *chunk_buf, uint32_t chunk_cap,
-                    struct mp4v_stsc_entry *stsc_buf, uint32_t stsc_cap,
-                    uint32_t *sync_buf, uint32_t sync_cap);
+/* Parse the caller-owned fd. The same fd backs the sample table windows. */
+int mp4v_demux_read(int fd, struct mp4v_demux_res *res);
 
-/* Get the file offset and size of video sample N (0-based).
- * Returns 0 on success, -1 on error. */
-int mp4v_get_sample_offset(const struct mp4v_demux_res *res,
+/* Validate the chunk mapping and ordered sync sample numbers. */
+bool mp4v_validate_index(int fd, struct mp4v_demux_res *res);
+
+/* Get the file offset and size of video sample N (0-based). */
+int mp4v_get_sample_offset(int fd, struct mp4v_demux_res *res,
                            uint32_t sample_index,
-                           uint32_t *offset_out,
-                           uint32_t *size_out);
+                           uint32_t *offset_out, uint32_t *size_out);
 
-/* Check if video sample N is a keyframe (sync sample).
- * Returns true if it's a keyframe or if no stss table exists
- * (meaning all samples are sync samples). */
-bool mp4v_is_keyframe(const struct mp4v_demux_res *res,
-                      uint32_t sample_index);
+/* Find the last sync sample at or before sample. */
+bool mp4v_find_keyframe(int fd, struct mp4v_demux_res *res,
+                       uint32_t sample, uint32_t *keyframe);
 
 #endif /* MP4_DEMUX_H */

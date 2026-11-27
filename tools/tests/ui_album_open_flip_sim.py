@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ui_album_open_glyphs_sim import glyph_ink
+from ui_fruit_flow_entry_sim import WIDE, column_offset
 from ui_stock_transitions_sim import difference, make_fixture, session
 
 
@@ -39,7 +40,9 @@ def covers(sim, wait=145):
 
 def local(sim):
     music(sim)
-    shots = {"entry": sim.record(158, "select", "select", 180)}
+    shots = {"entry": sim.record(
+        360, "select", "select", 30,
+        second_when=lambda image, before: 8 <= column_offset(image, before) < WIDE)}
     sim.tap("menu", 82)
     shots["reopen"] = sim.record(135, "select")
     shots["reverse-close"] = sim.record(130, "menu", "select", 390)

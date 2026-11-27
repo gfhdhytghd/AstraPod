@@ -40,7 +40,9 @@ from pathlib import Path
 import numpy
 
 sys.dont_write_bytecode = True
-from ui_stock_transitions_sim import W, make_fixture, session  # noqa: E402
+from ui_stock_transitions_sim import (  # noqa: E402
+    CF_ENTRY_CAPTURE_FRAMES, W, make_fixture, session,
+)
 
 HALF = W // 2
 SLIDE_MS = 270.0
@@ -201,7 +203,7 @@ def measure_exit(shots):
 def from_music(sim):
     sim.wait(200)
     sim.tap("select", 90)
-    enter = sim.record(90, "select")
+    enter = sim.record(CF_ENTRY_CAPTURE_FRAMES, "select")
     sim.wait(90)
     return {"enter": enter, "exit": sim.record(50, "menu")}
 
@@ -209,7 +211,7 @@ def from_music(sim):
 def from_home(sim):
     sim.wait(200)
     sim.tap("down", 60)
-    enter = sim.record(90, "select")
+    enter = sim.record(CF_ENTRY_CAPTURE_FRAMES, "select")
     sim.wait(90)
     return {"enter": enter, "exit": sim.record(50, "menu")}
 

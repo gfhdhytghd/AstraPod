@@ -48,6 +48,8 @@ HEADER = struct.Struct("=III")
 WORD = struct.Struct("=I")
 STATE = HEADER.size + RING * (WORD.size + PIXELS)
 FPS = 60
+# Record the whole entry after up to two seconds of cover readiness.
+CF_ENTRY_CAPTURE_FRAMES = 210
 BAR = (0, 0, W, 17)
 BAR_DELAY_MS = 300
 JUMP = 96
@@ -107,17 +109,19 @@ class Sim:
         self.send("up " + key)
         self.wait(wait)
 
-    def record(self, frames, key, second=None, at_ms=0):
-        """Press KEY, and SECOND AT_MS later, recording every distinct frame
-        for FRAMES 60ths of a second. Returns (ms, image) pairs, the first
-        being the screen before KEY."""
+    def record(self, frames, key, second=None, at_ms=0, second_when=None):
+        """Record distinct frames after KEY. Send SECOND after AT_MS.
+
+        With SECOND_WHEN, measure the delay from the first matching frame.
+        The predicate receives the image and the image before KEY.
+        """
         seen, _ = self.frames_since(1 << 30)
         shots = []
         previous = None
         start = time.monotonic()
         self.send("down " + key)
         pending = [(2 / FPS, "up " + key)]
-        if second:
+        if second and second_when is None:
             pending += [(at_ms / 1000, "down " + second),
                         (at_ms / 1000 + 2 / FPS, "up " + second)]
         while time.monotonic() - start < frames / FPS:
@@ -127,13 +131,19 @@ class Sim:
             seen, got = self.frames_since(seen)
             for pixels in got:
                 if pixels != previous:
-                    shots.append((now * 1000, Image.frombytes(
-                        "RGB", (W, H), pixels)))
+                    image = Image.frombytes("RGB", (W, H), pixels)
+                    if second_when and shots and second_when(image, shots[0][1]):
+                        at = now + at_ms / 1000
+                        pending += [(at, "down " + second),
+                                    (at + 2 / FPS, "up " + second)]
+                        second_when = None
+                    shots.append((now * 1000, image))
                     previous = pixels
             time.sleep(0.002)
         for _, line in pending:
             self.send(line)
         assert shots, "no frame reached the panel"
+        assert second_when is None, "second key's trigger was not visible"
         return shots
 
     def close(self):
@@ -293,7 +303,7 @@ def flying_frames(shots, rest):
 
 def classic_flow(sim):
     sim.wait(200)
-    enter = sim.record(70, "select")
+    enter = sim.record(CF_ENTRY_CAPTURE_FRAMES, "select")
     sim.wait(60)
     leave = sim.record(40, "menu")
     sim.wait(60)
@@ -325,7 +335,7 @@ def classic_now_playing(sim):
 def fruit_flow(sim):
     sim.wait(200)
     sim.tap("select", 60)
-    enter = sim.record(70, "select")
+    enter = sim.record(CF_ENTRY_CAPTURE_FRAMES, "select")
     sim.wait(60)
     return {"cf-enter": enter, "cf-exit": sim.record(40, "menu")}
 

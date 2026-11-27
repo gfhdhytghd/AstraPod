@@ -239,13 +239,22 @@ const struct menu_row_presenter *menu_set_row_presenter(const struct menu_row_pr
     return previous;
 }
 
+/* A row presented other than by its setting: by the installed presenter, or
+ * as one of Fruit Company's in-place Settings rows. */
+static bool present_row(const struct menu_item_ex *item,
+                        enum list_row_kind *kind, const char **value)
+{
+    return (row_presenter && row_presenter->describe(item, kind, value)) ||
+           fruit_menu_describe(item, kind, value);
+}
+
 static enum list_row_kind menu_get_kind(int selected_item, void * data)
 {
     const struct menu_item_ex *menu = (const struct menu_item_ex *)data;
     const struct settings_list *setting;
     enum list_row_kind kind;
     const char *value;
-    if (row_presenter && row_presenter->describe(menu_row_item(selected_item, menu), &kind, &value))
+    if (present_row(menu_row_item(selected_item, menu), &kind, &value))
         return kind;
 
     if ((menu->flags&MENU_TYPE_MASK) == MT_RETURN_ID)
@@ -273,7 +282,7 @@ static const char* menu_get_value(int selected_item, void * data,
 {
     enum list_row_kind kind;
     const char *value;
-    if (row_presenter && row_presenter->describe(menu_row_item(selected_item, data), &kind, &value))
+    if (present_row(menu_row_item(selected_item, data), &kind, &value))
         return value;
     const struct settings_list *setting =
         menu_row_setting(selected_item, (const struct menu_item_ex *)data);
@@ -1448,7 +1457,8 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                 case MT_SETTING:
                 case MT_SETTING_W_TEXT:
                 {
-                    do_setting_from_menu(temp, vps);
+                    if (!fruit_menu_step(temp))
+                        do_setting_from_menu(temp, vps);
                     init_menu_lists(menu, &lists, selected, false, vps, buf, sizeof buf);
                     redraw_lists = true;
 

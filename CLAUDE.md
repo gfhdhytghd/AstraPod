@@ -207,7 +207,7 @@ make clean / make veryclean
 ```
 
 **Theme bundling — `make zip` is not enough.** Scrim is the default native
-theme; Light, Classic and Fruit Company (Classic with the stock firmware's
+theme. Classic and Fruit Company (Classic with the stock firmware's
 menu tree) are built in too. Choose between them under
 **Settings > Theme Settings > Native theme**. See [the native theme format](docs/podbox/native-theme-format.md)
 to add a custom theme.

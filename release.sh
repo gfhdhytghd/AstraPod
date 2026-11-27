@@ -272,7 +272,7 @@ trap 'rm -f "$NOTES" "$SIM_NOTES" "$BOOT_NOTES" "$VOICES_NOTES"' EXIT
     printf '`%s` or `%s` instead: the same\n' \
         "$(notools_asset_name ipod6g)" "$(notools_asset_name ipodvideo)"
     printf 'firmware without the Windows desktop tools in `.rockbox/tools/`.\n\n'
-    printf 'Scrim and Light are built into the firmware.\n\n'
+    printf 'Scrim is the default built-in theme.\n\n'
     # What an owner should know before updating, written by hand and emptied
     # once it has gone out
     if grep -q '[^[:space:]]' "$UPGRADE_NOTES" 2>/dev/null; then

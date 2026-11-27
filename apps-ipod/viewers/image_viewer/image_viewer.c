@@ -64,7 +64,7 @@
 #include "widgets/splash.h"
 #include "draw/viewport.h"        /* viewportmanager_theme_* */
 #include "draw/screen_access.h"   /* screens[] */
-#include "widgets/menu.h"            /* do_menu, MENUITEM_STRINGLIST */
+#include "widgets/menu.h"            /* do_menu, MENUITEM_FUNCTION */
 #include "system/activity.h"
 #include "system/shutdown.h"
 #include "ui/retained.h"
@@ -1265,50 +1265,76 @@ static void iv_menu_end(void)
     lcd_set_background(LCD_BLACK);
 }
 
+/* Zoom leaves the menu for its list, which the decode loop answers. Pan and
+ * Slideshow change in place, and Slideshow Time opens its picker; the menu
+ * stays up until Menu leaves it. */
+static int iv_menu_zoom(void)
+{
+    return IV_MENU_ZOOM;
+}
+
+static int iv_menu_pan(void)
+{
+    iv_pan_mode = !iv_pan_mode;
+    return 0;
+}
+
+static int iv_menu_slideshow(void)
+{
+    iv_slideshow_enabled = !iv_slideshow_enabled;
+    return 0;
+}
+
+static const char *iv_on_off(bool on, int *voice)
+{
+    *voice = on ? LANG_ON : LANG_OFF;
+    return str(*voice);
+}
+
+static const char *iv_pan_value(void *param, int *voice)
+{
+    (void)param;
+    return iv_on_off(iv_pan_mode, voice);
+}
+
+static const char *iv_slideshow_value(void *param, int *voice)
+{
+    (void)param;
+    return iv_on_off(iv_slideshow_enabled, voice);
+}
+
+static int iv_menu_slideshow_time(void)
+{
+    /* true when USB took over the screen */
+    return set_int(str(LANG_SLIDESHOW_TIME), "s", UNIT_SEC,
+                   &iv_settings.ss_timeout, NULL, 1,
+                   SS_MIN_TIMEOUT, SS_MAX_TIMEOUT, NULL)
+           ? MENU_ATTACHED_USB : 0;
+}
+
+MENUITEM_FUNCTION(iv_zoom_item, MENU_FUNC_CHECK_RETVAL, ID2P(LANG_ZOOM),
+                  iv_menu_zoom, NULL, Icon_NOICON);
+MENUITEM_FUNCTION(iv_pan_item, 0, ID2P(LANG_IV_PAN),
+                  iv_menu_pan, NULL, Icon_NOICON,
+                  .settings = {.value = iv_pan_value});
+MENUITEM_FUNCTION(iv_slideshow_item, 0, ID2P(LANG_SLIDESHOW_MODE),
+                  iv_menu_slideshow, NULL, Icon_NOICON,
+                  .settings = {.value = iv_slideshow_value});
+MENUITEM_FUNCTION(iv_slideshow_time_item, MENU_FUNC_CHECK_RETVAL,
+                  ID2P(LANG_SLIDESHOW_TIME), iv_menu_slideshow_time, NULL,
+                  Icon_NOICON);
+MAKE_MENU(iv_menu, ID2P(LANG_IMAGE_VIEWER), NULL, Icon_NOICON,
+          &iv_zoom_item, &iv_pan_item, &iv_slideshow_item,
+          &iv_slideshow_time_item);
+
 /* Returns MENU_ATTACHED_USB if the viewer must leave, IV_MENU_ZOOM for the
  * Zoom row, otherwise 0. */
 static int show_menu(void)
 {
     int result;
 
-    enum menu_id
-    {
-        MIID_ZOOM = 0,
-        MIID_PAN,
-        MIID_TOGGLE_SS_MODE,
-        MIID_CHANGE_SS_MODE,
-    };
-
-    MENUITEM_STRINGLIST(menu, ID2P(LANG_IMAGE_VIEWER), NULL,
-                        ID2P(LANG_ZOOM),
-                        ID2P(LANG_IV_PAN),
-                        ID2P(LANG_SLIDESHOW_MODE),
-                        ID2P(LANG_SLIDESHOW_TIME));
-
-    static const struct opt_items off_on[2] = {
-        { STR(LANG_OFF) },
-        { STR(LANG_ON) },
-    };
-
     iv_menu_begin();
-    result = do_menu(&menu, NULL, NULL, false);
-
-    switch (result)
-    {
-        case MIID_PAN:
-            set_option(str(LANG_IV_PAN), &iv_pan_mode, RB_BOOL,
-                       off_on, 2, NULL);
-            break;
-        case MIID_TOGGLE_SS_MODE:
-            set_option(str(LANG_SLIDESHOW_MODE), &iv_slideshow_enabled, RB_BOOL,
-                       off_on, 2, NULL);
-            break;
-        case MIID_CHANGE_SS_MODE:
-            set_int(str(LANG_SLIDESHOW_TIME), "s", UNIT_SEC,
-                    &iv_settings.ss_timeout, NULL, 1,
-                    SS_MIN_TIMEOUT, SS_MAX_TIMEOUT, NULL);
-            break;
-    }
+    result = do_menu(&iv_menu, NULL, NULL, false);
     iv_menu_end();
 
     /* USB arriving while the menu was up has freed the buffer, so the caller
@@ -1316,7 +1342,7 @@ static int show_menu(void)
      * caller has to act on; everything else is a setting it redraws for. */
     if (result == MENU_ATTACHED_USB)
         return MENU_ATTACHED_USB;
-    return (result == MIID_ZOOM) ? IV_MENU_ZOOM : 0;
+    return (result == IV_MENU_ZOOM) ? IV_MENU_ZOOM : 0;
 }
 
 /* The Zoom list: the whole picture first, then each integer rung from the

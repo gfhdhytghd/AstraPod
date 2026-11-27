@@ -237,6 +237,29 @@ static const struct settings_list *menu_row_setting(int selected_item,
     return find_setting(menu->variable);
 }
 
+/* A function row's in-place value (see struct menu_function_settings), or
+ * NULL for a row whose function opens a screen. */
+static const char *function_value(const struct menu_item_ex *item, int *voice)
+{
+    const struct menu_function_settings *settings;
+    void *param = NULL;
+
+    switch (item->flags & MENU_TYPE_MASK)
+    {
+        case MT_FUNCTION_CALL:
+            settings = &item->function->settings;
+            break;
+        case MT_FUNCTION_CALL_W_PARAM:
+            settings = &item->function_param->settings;
+            param = item->function_param->param;
+            break;
+        default:
+            return NULL;
+    }
+    *voice = -1;
+    return settings->value ? settings->value(param, voice) : NULL;
+}
+
 static const struct menu_row_presenter *row_presenter;
 const struct menu_row_presenter *menu_set_row_presenter(const struct menu_row_presenter *presenter)
 {
@@ -260,6 +283,7 @@ static enum list_row_kind menu_get_kind(int selected_item, void * data)
     const struct settings_list *setting;
     enum list_row_kind kind;
     const char *value;
+    int voice;
     if (present_row(menu_row_item(selected_item, menu), &kind, &value))
         return kind;
 
@@ -273,9 +297,11 @@ static enum list_row_kind menu_get_kind(int selected_item, void * data)
         case MT_SETTING:
         case MT_SETTING_W_TEXT:
             setting = menu_row_setting(selected_item, menu);
-            return setting && (setting->flags&F_T_MASK) == F_T_BOOL
+            return option_steps_in_place(setting)
                    ? LIST_ROW_TOGGLE : LIST_ROW_SETTING;
         default:
+            if (function_value(menu_row_item(selected_item, menu), &voice))
+                return LIST_ROW_TOGGLE;
             return root_menu_item_kind(menu_row_item(selected_item, menu));
     }
 }
@@ -292,9 +318,10 @@ static const char* menu_get_value(int selected_item, void * data,
         return value;
     const struct settings_list *setting =
         menu_row_setting(selected_item, (const struct menu_item_ex *)data);
+    int voice;
 
     if (!setting)
-        return NULL;
+        return function_value(menu_row_item(selected_item, data), &voice);
     switch (setting->flags&F_T_MASK)
     {
         case F_T_BOOL:
@@ -1095,6 +1122,10 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
 
     bool in_stringlist, done = false;
     bool redraw_lists;
+    /* A setting, or a function row, Select stepped in place, whose new
+     * value the redraw says */
+    const struct settings_list *stepped = NULL;
+    const struct menu_item_ex *stepped_row = NULL;
 
     int old_audio_status = audio_status();
 
@@ -1532,8 +1563,10 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                 case MT_FUNCTION_CALL_W_PARAM:
                 case MT_FUNCTION_CALL:
                 {
-                    int return_value;
+                    int return_value, voice;
                     enum current_activity parent_activity = get_current_activity();
+                    if (function_value(temp, &voice))
+                        stepped_row = temp;
                     if (type == MT_FUNCTION_CALL_W_PARAM)
                     {
                         return_value = temp->function_param->function_w_param(
@@ -1567,7 +1600,16 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                 case MT_SETTING:
                 case MT_SETTING_W_TEXT:
                 {
-                    if (!fruit_menu_step(temp))
+                    const struct settings_list *setting =
+                        find_setting(temp->variable);
+                    if (fruit_menu_step(temp))
+                        ;
+                    else if (option_steps_in_place(setting))
+                    {
+                        option_step_in_place(setting);
+                        stepped = setting;
+                    }
+                    else
                         do_setting_from_menu(temp, vps);
                     init_menu_lists(menu, &lists, selected, false, vps, buf, sizeof buf);
                     redraw_lists = true;
@@ -1647,6 +1689,10 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
 
         if (redraw_lists && !done)
         {
+            const struct settings_list *spoken = stepped;
+            const struct menu_item_ex *spoken_row = stepped_row;
+            stepped = NULL;
+            stepped_row = NULL;
             if (menu_callback(ACTION_REDRAW, menu, &lists) != ACTION_REDRAW)
             {
                 ui_scene_cancel(scene);
@@ -1661,7 +1707,19 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             else
                 ui_scene_update(scene, true);
             ui_scene_update(&modal, true);
-            gui_synclist_speak_item(&lists);
+            if (spoken && global_settings.talk_menu)
+                option_talk_value(spoken, option_value_as_int(spoken), false);
+            else if (spoken_row && global_settings.talk_menu)
+            {
+                int voice;
+                const char *value = function_value(spoken_row, &voice);
+                if (value && voice >= 0)
+                    talk_id(voice, false);
+                else if (value)
+                    talk_text(value, false);
+            }
+            else if (!spoken && !spoken_row)
+                gui_synclist_speak_item(&lists);
         }
         else if (!scene_handoff)
         {

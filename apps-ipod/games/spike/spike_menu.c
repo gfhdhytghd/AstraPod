@@ -13,7 +13,7 @@
 #include <stdio.h>
 #include "config.h"
 #include "lang.h"
-#include "settings/settings.h"      /* set_int, set_option */
+#include "settings/settings.h"      /* global_settings */
 #include "speech/talk.h"            /* STR, UNIT_MS */
 #include "widgets/menu.h"
 #include "widgets/list.h"
@@ -120,24 +120,17 @@ static int spk_info_screen(void)
 
 /** The menu **/
 
+/* Half, as heard and double, by shift -1, 0 and 1 */
+static const int tempo_names[] = {
+    LANG_SPIKE_TEMPO_HALF, LANG_SPIKE_TEMPO_HEARD, LANG_SPIKE_TEMPO_DOUBLE,
+};
+static int entry_shift;
+
+/* Select steps the tempo in place, as a setting row's choice steps */
 static int spk_tempo_setting(void)
 {
-    static const struct opt_items names[] = {
-        { STR(LANG_SPIKE_TEMPO_HALF) },
-        { STR(LANG_SPIKE_TEMPO_HEARD) },
-        { STR(LANG_SPIKE_TEMPO_DOUBLE) },
-    };
-    int shift = *state->shift + 1;
-
-    set_option(str(LANG_SPIKE_TEMPO), &shift, RB_INT, names,
-               ARRAYLEN(names), NULL);
-
-    if (shift - 1 != *state->shift)
-    {
-        *state->shift = shift - 1;
-        state->tempo_changed = true;
-    }
-
+    *state->shift = *state->shift < 1 ? *state->shift + 1 : -1;
+    state->tempo_changed = *state->shift != entry_shift;
     return 0;
 }
 
@@ -161,15 +154,31 @@ MAKE_MENU(spike_menu, ID2P(LANG_SPIKE), NULL, Icon_NOICON,
           &spk_scores_item, &spk_caption_item, &spk_scroll_item,
           &spk_tempo_item, &spk_info_item);
 
+/* The Tempo row shows its value, as a setting row does */
+static bool spk_describe(const struct menu_item_ex *item,
+                         enum list_row_kind *kind, const char **value)
+{
+    if (item != &spk_tempo_item)
+        return false;
+    *kind = LIST_ROW_TOGGLE;
+    *value = str(tempo_names[*state->shift + 1]);
+    return true;
+}
+static const struct menu_row_presenter spk_presenter = {spk_describe};
+
 bool spike_menu_show(struct spk_menu *m)
 {
     int result;
 
     state = m;
     m->tempo_changed = false;
+    entry_shift = *m->shift;
 
     push_current_activity(ACTIVITY_CONTEXTMENU);
+    const struct menu_row_presenter *previous =
+        menu_set_row_presenter(&spk_presenter);
     result = do_menu(&spike_menu, NULL, NULL, false);
+    menu_set_row_presenter(previous);
     if (get_current_activity() == ACTIVITY_CONTEXTMENU)
         pop_current_activity();
 

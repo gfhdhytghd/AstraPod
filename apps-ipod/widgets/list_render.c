@@ -1261,9 +1261,13 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         !equals_lang(label, LANG_SHUFFLE_SONGS) &&
         !equals_lang(label, LANG_RANDOM_ALBUM))
         aux = chevron;
-    /* With stock accessories a setting shows its value in words instead. */
-    bool value_text = chevron_selected && value && *value &&
-                      (kind == LIST_ROW_SETTING || kind == LIST_ROW_TOGGLE);
+    /* With stock accessories a setting shows its value in words instead;
+     * otherwise a row Select changes in place does, where no glyph shows
+     * the value. */
+    bool value_text = value && *value &&
+                      (chevron_selected ? (kind == LIST_ROW_SETTING ||
+                                           kind == LIST_ROW_TOGGLE)
+                                        : (kind == LIST_ROW_TOGGLE && !aux));
     if (value_text)
         aux = NULL;
 

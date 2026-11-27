@@ -257,13 +257,18 @@ void peak_meter_apply_scale(bool use_dbfs)
     }
 }
 
+/* Select flips the scale in place */
 static int peak_meter_scale(void)
 {
-    bool use_dbfs = global_settings.peak_meter_dbfs;
-    bool usb = set_bool_options(str(LANG_PM_SCALE), &use_dbfs,
-                               STR(LANG_PM_DBFS), STR(LANG_PM_LINEAR), NULL);
-    peak_meter_apply_scale(use_dbfs);
-    return usb;
+    peak_meter_apply_scale(!global_settings.peak_meter_dbfs);
+    settings_save();
+    return 0;
+}
+static const char *pm_scale_value(void *param, int *voice)
+{
+    (void)param;
+    *voice = global_settings.peak_meter_dbfs ? LANG_PM_DBFS : LANG_PM_LINEAR;
+    return str(*voice);
 }
 
 /**
@@ -341,7 +346,8 @@ static int peak_meter_max(void) {
    is meant to disappear in Standard, stays put. */
 MENUITEM_FUNCTION(peak_meter_scale_item, MENU_ADVANCED, ID2P(LANG_PM_SCALE),
                   peak_meter_scale, NULL, Icon_NOICON,
-                  .settings = {.variable = &global_settings.peak_meter_dbfs});
+                  .settings = {.variable = &global_settings.peak_meter_dbfs,
+                               .value = pm_scale_value});
 MENUITEM_FUNCTION(peak_meter_min_item, MENU_ADVANCED, ID2P(LANG_PM_MIN),
                   peak_meter_min, NULL, Icon_NOICON,
                   .settings = {.variable = &global_settings.peak_meter_min});

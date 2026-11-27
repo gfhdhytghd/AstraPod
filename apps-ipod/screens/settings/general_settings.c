@@ -57,6 +57,7 @@
 #include "screens/system/sound_library.h"
 #include "screens/system/sound_scan.h"
 #include "database/sound_index.h"
+#include "widgets/option_select.h"      /* OPTION_IN_PLACE_MAX */
 #include "viewers/playback_viewer/pv_index.h"  /* the Playback Report's two */
 #include "viewers/playback_viewer/pv_names.h"  /* caches, cleared together */
 
@@ -1081,21 +1082,21 @@ static const int album_sort_ctx_lang[DB_ALBUM_CTX_COUNT] = {
     [DB_ALBUM_CTX_COMPOSER]    = LANG_ID3_COMPOSER,
 };
 
-static int album_sort_ctx_option(void *param)
+static const struct opt_items album_sort_orders[] = {
+    { STR(LANG_SORT_USE_DEFAULT) },
+    { STR(LANG_NAME) },
+    { STR(LANG_SORT_BY_YEAR_ASC) },
+    { STR(LANG_SORT_BY_YEAR_DESC) },
+    { STR(LANG_ARTIST_PLUS_NAME) },
+    { STR(LANG_ARTIST_PLUS_YEAR) },
+    { STR(LANG_ARTIST_PLUS_YEAR_DESC) },
+};
+
+/* How many of album_sort_orders `ctx` offers, and which one it has */
+static int album_sort_ctx_choice(int ctx, int *choice)
 {
-    static const struct opt_items orders[] = {
-        { STR(LANG_SORT_USE_DEFAULT) },
-        { STR(LANG_NAME) },
-        { STR(LANG_SORT_BY_YEAR_ASC) },
-        { STR(LANG_SORT_BY_YEAR_DESC) },
-        { STR(LANG_ARTIST_PLUS_NAME) },
-        { STR(LANG_ARTIST_PLUS_YEAR) },
-        { STR(LANG_ARTIST_PLUS_YEAR_DESC) },
-    };
-    int ctx = (int)(intptr_t)param;
     int order = browser_db_album_sort_get(ctx);
-    int count = ARRAYLEN(orders);
-    int choice;
+    int count = ARRAYLEN(album_sort_orders);
 
     /* Default, Name and the two year orders: see
      * browser_db_album_sort_artist_first_moot(). */
@@ -1108,36 +1109,61 @@ static int album_sort_ctx_option(void *param)
     /* a hand-edited slot past the last order shows as Default */
     if (order + 1 >= count)
         order = -1;
-    choice = order + 1;
+    *choice = order + 1;
+    return count;
+}
 
+/* A context with few enough orders steps in place; the others open the
+ * option screen. */
+static int album_sort_ctx_option(void *param)
+{
+    int ctx = (int)(intptr_t)param;
+    int choice;
+    int count = album_sort_ctx_choice(ctx, &choice);
+
+    if (count <= OPTION_IN_PLACE_MAX)
+        choice = (choice + 1) % count;
     /* set_option() returns true only when USB took over the screen. */
-    if (!set_option(str(album_sort_ctx_lang[ctx]), &choice, RB_INT,
-                    orders, count, NULL))
-    {
-        browser_db_album_sort_set(ctx, choice - 1);
-        settings_save();
-    }
+    else if (set_option(str(album_sort_ctx_lang[ctx]), &choice, RB_INT,
+                        album_sort_orders, count, NULL))
+        return 0;
+    browser_db_album_sort_set(ctx, choice - 1);
+    settings_save();
     return 0;
+}
+
+static const char *album_sort_ctx_value(void *param, int *voice)
+{
+    int choice;
+    if (album_sort_ctx_choice((int)(intptr_t)param, &choice) >
+        OPTION_IN_PLACE_MAX)
+        return NULL;
+    *voice = album_sort_orders[choice].voice_id;
+    return (const char *)P2STR(album_sort_orders[choice].string);
 }
 
 MENUITEM_FUNCTION_W_PARAM(album_sort_root, 0, ID2P(LANG_ALL_ALBUMS),
                           album_sort_ctx_option,
                           (void*)(intptr_t)DB_ALBUM_CTX_ROOT, NULL, Icon_NOICON,
-                  .settings = {.variable = &global_settings.database_album_sort_ctx});
+                  .settings = {.variable = &global_settings.database_album_sort_ctx,
+                               .value = album_sort_ctx_value});
 MENUITEM_FUNCTION_W_PARAM(album_sort_artist, 0, ID2P(LANG_ID3_ARTIST),
                           album_sort_ctx_option,
                           (void*)(intptr_t)DB_ALBUM_CTX_ARTIST, NULL, Icon_NOICON,
-                  .settings = {.variable = &global_settings.database_album_sort_ctx});
+                  .settings = {.variable = &global_settings.database_album_sort_ctx,
+                               .value = album_sort_ctx_value});
 MENUITEM_FUNCTION_W_PARAM(album_sort_albumartist, 0, ID2P(LANG_ID3_ALBUMARTIST),
                           album_sort_ctx_option,
                           (void*)(intptr_t)DB_ALBUM_CTX_ALBUMARTIST, NULL,
                           Icon_NOICON,
-                  .settings = {.variable = &global_settings.database_album_sort_ctx});
+                  .settings = {.variable = &global_settings.database_album_sort_ctx,
+                               .value = album_sort_ctx_value});
 MENUITEM_FUNCTION_W_PARAM(album_sort_composer, 0, ID2P(LANG_ID3_COMPOSER),
                           album_sort_ctx_option,
                           (void*)(intptr_t)DB_ALBUM_CTX_COMPOSER, NULL,
                           Icon_NOICON,
-                  .settings = {.variable = &global_settings.database_album_sort_ctx});
+                  .settings = {.variable = &global_settings.database_album_sort_ctx,
+                               .value = album_sort_ctx_value});
 MENUITEM_SETTING(database_sort_albums_by,
                  &global_settings.database_sort_albums_by, NULL);
 MAKE_MENU(album_sort_menu, ID2P(LANG_SORT_ALBUMS_BY_SHORT), 0, Icon_NOICON,

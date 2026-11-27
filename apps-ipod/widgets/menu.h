@@ -34,10 +34,15 @@ enum menu_item_type {
 
 struct menu_item_ex;
 
-/* Cfg entry and submenu provided by a function outside do_menu(). */
+/* Cfg entry and submenu provided by a function outside do_menu(). A row
+ * with `value` is one Select changes in place, as a setting row of a few
+ * values is: `value` gives the words its row shows and sets *voice to their
+ * talk id, or -1 to have them read as text; NULL from it leaves an ordinary
+ * row, whose function opens a picker. `param` is the row's, or NULL. */
 struct menu_function_settings {
     const void *variable;
     const struct menu_item_ex *(*child_menu)(void);
+    const char *(*value)(void *param, int *voice);
 };
 
 struct menu_func_param {
@@ -206,8 +211,9 @@ void menu_link_scene(struct ui_scene *scene, const struct menu_item_ex *menu,
 /*  Use this to put a setting into a menu.
     The setting must appear in settings_list.c.
     If the setting is not configured properly, the menu will display "Not Done yet!"
-    When the user selects this item the setting select screen will load,
-    when that screen exits the user wll be back in the menu */
+    Selecting a bool, or a choice of up to OPTION_IN_PLACE_MAX values,
+    steps it to its next value in place; any other setting loads its select
+    screen, and when that screen exits the user is back in the menu */
 #define MENUITEM_SETTING(name,var,callback)                  \
     static const struct menu_item_ex name =                  \
         {MT_SETTING, {.variable = (void*)var},{callback}};

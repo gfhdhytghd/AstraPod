@@ -317,6 +317,40 @@ void option_select_next_val(const struct settings_list *setting,
     }
 }
 
+bool option_steps_in_place(const struct settings_list *setting)
+{
+    if (!setting)
+        return false;
+    if (HASFLAG(setting, F_BOOL_SETTING))
+        return true;
+    return HASFLAG(setting, F_CHOICE_SETTING) &&
+           setting->choice_setting->count <= OPTION_IN_PLACE_MAX;
+}
+
+/* The picker's OK with the next value chosen: stored, saved, then the
+ * callback, which a changed value always runs whatever the setting's
+ * F_CB_* flags say */
+void option_step_in_place(const struct settings_list *setting)
+{
+    if (HASFLAG(setting, F_BOOL_SETTING))
+    {
+        bool *value = setting->setting;
+        *value = !*value;
+        settings_save();
+        if (setting->bool_setting->option_callback)
+            setting->bool_setting->option_callback(*value);
+    }
+    else
+    {
+        const struct choice_setting *info = setting->choice_setting;
+        int *value = setting->setting;
+        *value = (*value < 0 || *value + 1 >= info->count) ? 0 : *value + 1;
+        settings_save();
+        if (info->option_callback)
+            info->option_callback(*value);
+    }
+}
+
 static int selection_to_val(const struct settings_list *setting, int selection)
 {
     /* rockbox: comment 'set but unused' variables

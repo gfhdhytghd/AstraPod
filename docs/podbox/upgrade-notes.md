@@ -134,7 +134,13 @@
 
 - **Under Fruit Company, use the wheel, Select and Menu to navigate.**
   Previous and Next skip or seek in the current playback. Play/Pause
-  toggles playback without opening Now Playing. In Control Centre, turn
-  the wheel to highlight a setting and press Select to change it. In
-  Photos, turn the wheel to move between pictures. Games keep their
-  own controls.
+  toggles playback without opening Now Playing. In Control Centre, Menu,
+  Previous, Next and Play/Pause operate their tiles. The wheel adjusts
+  volume and Select closes the page. In Photos, turn the wheel to move
+  between pictures. Games keep their own controls.
+
+- **Select changes a short setting in place.** On an on/off row, or a row
+  with up to four values, Select now moves to the next value without
+  opening a list, as Shuffle and Repeat do on the original iPod. A row with
+  more values, or a number, still opens its list. Hold Select for the
+  row's menu and **Explain**, as before.

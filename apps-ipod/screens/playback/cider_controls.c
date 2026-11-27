@@ -140,6 +140,12 @@ static int mode_choose(void *data)
 {
     int mode = (intptr_t)data;
     struct simplelist_info info;
+    /* Shuffle's two values flip in place, as a setting row's do */
+    if (mode == CIDER_MODE_SHUFFLE)
+    {
+        cider_mode_set(mode, !cider_mode_get(mode));
+        return 0;
+    }
     /* A native list of the exact FU26 values. A tap selects an explicit value. */
     simplelist_info_init(&info, (char *)cider_mode_title(mode), mode ? 5 : 2, data);
     info.selection = cider_mode_get(mode);

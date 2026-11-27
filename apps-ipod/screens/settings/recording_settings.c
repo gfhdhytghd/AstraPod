@@ -79,20 +79,32 @@ static int recmenu_callback(int action,
                              const struct menu_item_ex *this_item,
                              struct gui_synclist *this_list);
 
+/* The rows below are Recording's settings of a few values: Select steps
+ * each to its next value in place, among the values the hardware and the
+ * format offer, and the row shows the value. Sample Rate keeps its picker
+ * when more than OPTION_IN_PLACE_MAX rates are offered. */
+
+/* An option's words for a row, and their talk id */
+static const char *option_words(const struct opt_items *item, int *voice)
+{
+    *voice = item->voice_id;
+    return (const char *)P2STR(item->string);
+}
+
+static const struct opt_items source_names[AUDIO_NUM_SOURCES] = {
+    HAVE_MIC_REC_([AUDIO_SRC_MIC]
+        = { STR(LANG_RECORDING_SRC_MIC) },)
+    HAVE_LINE_REC_([AUDIO_SRC_LINEIN]
+        = { STR(LANG_LINE_IN) },)
+    HAVE_SPDIF_REC_([AUDIO_SRC_SPDIF]
+        = { STR(LANG_RECORDING_SRC_DIGITAL) },)
+    HAVE_FMRADIO_REC_([AUDIO_SRC_FMRADIO]
+        = { STR(LANG_FM_RADIO) },)
+};
+
 static int recsource_func(void)
 {
     int n_opts = REC_NUM_SOURCES;
-
-    static const struct opt_items names[AUDIO_NUM_SOURCES] = {
-        HAVE_MIC_REC_([AUDIO_SRC_MIC]
-            = { STR(LANG_RECORDING_SRC_MIC) },)
-        HAVE_LINE_REC_([AUDIO_SRC_LINEIN]
-            = { STR(LANG_LINE_IN) },)
-        HAVE_SPDIF_REC_([AUDIO_SRC_SPDIF]
-            = { STR(LANG_RECORDING_SRC_DIGITAL) },)
-        HAVE_FMRADIO_REC_([AUDIO_SRC_FMRADIO]
-            = { STR(LANG_FM_RADIO) },)
-    };
 
     if (!mikey_supported())
         return 0; /* Only the dock input is wired on this revision. */
@@ -103,15 +115,23 @@ static int recsource_func(void)
         n_opts--;
 #endif
 
-    bool usb = set_option(str(LANG_RECORDING_SOURCE),
-                          &global_settings.rec_source, RB_INT, names,
-                          n_opts, NULL);
+    int next = global_settings.rec_source + 1;
+    global_settings.rec_source = next < n_opts && next > 0 ? next : 0;
     settings_save();
-    return usb;
+    return 0;
+}
+static const char *recsource_value(void *param, int *voice)
+{
+    (void)param;
+    int source = global_settings.rec_source;
+    if (source < 0 || source >= REC_NUM_SOURCES)
+        source = 0;
+    return option_words(&source_names[source], voice);
 }
 MENUITEM_FUNCTION(recsource, 0, ID2P(LANG_RECORDING_SOURCE),
                   recsource_func, recmenu_callback, Icon_Menu_setting,
-                  .settings = {.variable = &global_settings.rec_source});
+                  .settings = {.variable = &global_settings.rec_source,
+                               .value = recsource_value});
 
 /* Makes an options list from a source list of options and indexes */
 static void make_options_from_indexes(const struct opt_items *src_names,
@@ -123,107 +143,132 @@ static void make_options_from_indexes(const struct opt_items *src_names,
         dst_names[n_indexes] = src_names[src_indexes[n_indexes]];
 } /* make_options_from_indexes */
 
-static int recfrequency_func(void)
+static const struct opt_items frequency_names[REC_NUM_FREQ] = {
+    REC_HAVE_96_([REC_FREQ_96] = { "96kHz",     TALK_ID(96, UNIT_KHZ) },)
+    REC_HAVE_88_([REC_FREQ_88] = { "88.2kHz",   TALK_ID(88, UNIT_KHZ) },)
+    REC_HAVE_64_([REC_FREQ_64] = { "64kHz",     TALK_ID(64, UNIT_KHZ) },)
+    REC_HAVE_48_([REC_FREQ_48] = { "48kHz",     TALK_ID(48, UNIT_KHZ) },)
+    REC_HAVE_44_([REC_FREQ_44] = { "44.1kHz",   TALK_ID(44, UNIT_KHZ) },)
+    REC_HAVE_32_([REC_FREQ_32] = { "32kHz",     TALK_ID(32, UNIT_KHZ) },)
+    REC_HAVE_24_([REC_FREQ_24] = { "24kHz",     TALK_ID(24, UNIT_KHZ) },)
+    REC_HAVE_22_([REC_FREQ_22] = { "22.05kHz",  TALK_ID(22, UNIT_KHZ) },)
+    REC_HAVE_16_([REC_FREQ_16] = { "16kHz",     TALK_ID(16, UNIT_KHZ) },)
+    REC_HAVE_12_([REC_FREQ_12] = { "12kHz",     TALK_ID(12, UNIT_KHZ) },)
+    REC_HAVE_11_([REC_FREQ_11] = { "11.025kHz", TALK_ID(11, UNIT_KHZ) },)
+    REC_HAVE_8_( [REC_FREQ_8 ] = { "8kHz",      TALK_ID( 8, UNIT_KHZ) },)
+};
+
+/* The rates the format offers, as rec_freq_sampr indexes in `table`, and
+ * which of them is nearest the setting's; 0 when there are none. With
+ * S/PDIF the rate follows the source, and there is one option, n_opts 1
+ * with `*source` set. */
+static int frequency_list(unsigned long *table, int *current, bool *source)
 {
-    static const struct opt_items names[REC_NUM_FREQ] = {
-        REC_HAVE_96_([REC_FREQ_96] = { "96kHz",     TALK_ID(96, UNIT_KHZ) },)
-        REC_HAVE_88_([REC_FREQ_88] = { "88.2kHz",   TALK_ID(88, UNIT_KHZ) },)
-        REC_HAVE_64_([REC_FREQ_64] = { "64kHz",     TALK_ID(64, UNIT_KHZ) },)
-        REC_HAVE_48_([REC_FREQ_48] = { "48kHz",     TALK_ID(48, UNIT_KHZ) },)
-        REC_HAVE_44_([REC_FREQ_44] = { "44.1kHz",   TALK_ID(44, UNIT_KHZ) },)
-        REC_HAVE_32_([REC_FREQ_32] = { "32kHz",     TALK_ID(32, UNIT_KHZ) },)
-        REC_HAVE_24_([REC_FREQ_24] = { "24kHz",     TALK_ID(24, UNIT_KHZ) },)
-        REC_HAVE_22_([REC_FREQ_22] = { "22.05kHz",  TALK_ID(22, UNIT_KHZ) },)
-        REC_HAVE_16_([REC_FREQ_16] = { "16kHz",     TALK_ID(16, UNIT_KHZ) },)
-        REC_HAVE_12_([REC_FREQ_12] = { "12kHz",     TALK_ID(12, UNIT_KHZ) },)
-        REC_HAVE_11_([REC_FREQ_11] = { "11.025kHz", TALK_ID(11, UNIT_KHZ) },)
-        REC_HAVE_8_( [REC_FREQ_8 ] = { "8kHz",      TALK_ID( 8, UNIT_KHZ) },)
-    };
-
-    struct opt_items opts[REC_NUM_FREQ];
-    unsigned long    table[REC_NUM_FREQ];
-    int              n_opts;
-    int              rec_frequency;
-    bool             ret;
-
+    *source = false;
 #ifdef HAVE_SPDIF_REC
     if (global_settings.rec_source == REC_SRC_SPDIF)
+    {
+        *source = true;
+        *current = 0;
+        return 1;
+    }
+#endif
+    struct encoder_caps caps;
+    struct encoder_config cfg;
+
+    cfg.rec_format = global_settings.rec_format;
+    global_to_encoder_config(&cfg);
+
+    if (!enc_get_caps(&cfg, &caps, true))
+        return 0;
+
+    /* Construct samplerate menu based upon encoder settings */
+    int n_opts = make_list_from_caps32(REC_SAMPR_CAPS, NULL,
+                                       caps.samplerate_caps, table);
+    if (n_opts == 0)
+        return 0; /* No common flags...?? */
+
+    /* Find closest rate that the potentially restricted list comes to */
+    unsigned long rates[REC_NUM_FREQ];
+    make_list_from_caps32(REC_SAMPR_CAPS, rec_freq_sampr,
+                          caps.samplerate_caps, rates);
+    *current = round_value_to_list32(
+            rec_freq_sampr[global_settings.rec_frequency],
+            rates, n_opts, false);
+    return n_opts;
+}
+
+static int recfrequency_func(void)
+{
+    struct opt_items opts[REC_NUM_FREQ];
+    unsigned long    table[REC_NUM_FREQ];
+    int              rec_frequency;
+    bool             source;
+    bool             ret = false;
+    int n_opts = frequency_list(table, &rec_frequency, &source);
+
+    if (n_opts == 0)
+        return false;
+
+    if (source)
     {
         /* Inform user that frequency follows the source's frequency */
         opts[0].string    = ID2P(LANG_SOURCE_FREQUENCY);
         opts[0].voice_id  = LANG_SOURCE_FREQUENCY;
-        n_opts            = 1;
-        rec_frequency     = 0;
+        ret = set_option(str(LANG_REC_FREQUENCY),
+                         &rec_frequency, RB_INT, opts, 1, NULL);
+        if (!ret)
+            settings_save();
+        return ret;
     }
+
+    if (n_opts <= OPTION_IN_PLACE_MAX)
+        rec_frequency = (rec_frequency + 1) % n_opts;
     else
-#endif
     {
-        struct encoder_caps caps;
-        struct encoder_config cfg;
-
-        cfg.rec_format = global_settings.rec_format;
-        global_to_encoder_config(&cfg);
-
-        if (!enc_get_caps(&cfg, &caps, true))
-            return false;
-
-        /* Construct samplerate menu based upon encoder settings */
-        n_opts = make_list_from_caps32(REC_SAMPR_CAPS, NULL,
-                                       caps.samplerate_caps, table);
-
-        if (n_opts == 0)
-            return false; /* No common flags...?? */
-
-        make_options_from_indexes(names, table, n_opts, opts);
-
-        /* Find closest rate that the potentially restricted list
-           comes to */
-        make_list_from_caps32(REC_SAMPR_CAPS, rec_freq_sampr,
-                              caps.samplerate_caps, table);
-
-        rec_frequency = round_value_to_list32(
-                rec_freq_sampr[global_settings.rec_frequency],
-                table, n_opts, false);
-    }
-
-    ret = set_option(str(LANG_REC_FREQUENCY),
-                     &rec_frequency, RB_INT, opts, n_opts, NULL );
-
-    if (!ret
-        HAVE_SPDIF_REC_( && global_settings.rec_source != REC_SRC_SPDIF)
-    )
-    {
-        /* Translate back to full index */
-        global_settings.rec_frequency =
-                    round_value_to_list32(table[rec_frequency],
-                                          rec_freq_sampr,
-                                          REC_NUM_FREQ,
-                                          false);
+        make_options_from_indexes(frequency_names, (const long *)table,
+                                  n_opts, opts);
+        ret = set_option(str(LANG_REC_FREQUENCY),
+                         &rec_frequency, RB_INT, opts, n_opts, NULL );
     }
 
     if (!ret)
+    {
+        /* table holds full indexes */
+        global_settings.rec_frequency = table[rec_frequency];
         settings_save();
+    }
     return ret;
 } /* recfrequency */
+static const char *recfrequency_value(void *param, int *voice)
+{
+    unsigned long table[REC_NUM_FREQ];
+    int current;
+    bool source;
+    int n_opts = frequency_list(table, &current, &source);
+
+    (void)param;
+    if (source || n_opts == 0 || n_opts > OPTION_IN_PLACE_MAX)
+        return NULL;
+    return option_words(&frequency_names[table[current]], voice);
+}
 MENUITEM_FUNCTION(recfrequency, 0, ID2P(LANG_REC_FREQUENCY),
                   recfrequency_func, NULL, Icon_Menu_setting,
-                  .settings = {.variable = &global_settings.rec_frequency});
+                  .settings = {.variable = &global_settings.rec_frequency,
+                               .value = recfrequency_value});
 
+static const struct opt_items channel_names[CHN_NUM_MODES] = {
+    [CHN_MODE_STEREO] = { STR(LANG_CHANNEL_STEREO) },
+    [CHN_MODE_MONO]   = { STR(LANG_CHANNEL_MONO)   }
+};
 
 static int recchannels_func(void)
 {
-    static const struct opt_items names[CHN_NUM_MODES] = {
-        [CHN_MODE_STEREO] = { STR(LANG_CHANNEL_STEREO) },
-        [CHN_MODE_MONO]   = { STR(LANG_CHANNEL_MONO)   }
-    };
-
-    struct opt_items    opts[CHN_NUM_MODES];
     long                table[CHN_NUM_MODES];
     struct encoder_caps caps;
     struct encoder_config cfg;
     int                 n_opts;
     int                 rec_channels;
-    bool                ret;
 
     cfg.rec_format = global_settings.rec_format;
     global_to_encoder_config(&cfg);
@@ -233,75 +278,82 @@ static int recchannels_func(void)
 
     n_opts = make_list_from_caps32(CHN_CAP_ALL, NULL,
                                    caps.channel_caps, table);
+    if (n_opts == 0)
+        return false;
 
     rec_channels = round_value_to_list32(global_settings.rec_channels,
                                          table, n_opts, false);
-
-    make_options_from_indexes(names, table, n_opts, opts);
-
-    ret = set_option(str(LANG_REC_CHANNELS), &rec_channels,
-                     RB_INT, opts, n_opts, NULL );
-
-    if (!ret)
-        global_settings.rec_channels = table[rec_channels];
-
-    if (!ret)
-        settings_save();
-    return ret;
+    global_settings.rec_channels = table[(rec_channels + 1) % n_opts];
+    settings_save();
+    return false;
+}
+static const char *recchannels_value(void *param, int *voice)
+{
+    (void)param;
+    int channels = global_settings.rec_channels;
+    if (channels < 0 || channels >= CHN_NUM_MODES)
+        channels = CHN_MODE_STEREO;
+    return option_words(&channel_names[channels], voice);
 }
 MENUITEM_FUNCTION(recchannels, 0, ID2P(LANG_REC_CHANNELS),
                   recchannels_func, recmenu_callback, Icon_Menu_setting,
-                  .settings = {.variable = &global_settings.rec_channels});
+                  .settings = {.variable = &global_settings.rec_channels,
+                               .value = recchannels_value});
+
+static const struct opt_items mono_mode_names[3] = {
+    [0] = { STR(LANG_CHANNEL_LEFTRIGHT) },
+    [1] = { STR(LANG_CHANNEL_LEFT) },
+    [2] = { STR(LANG_CHANNEL_RIGHT) },
+};
 
 static int recmonomode_func(void)
 {
-    static const struct opt_items names[3] = {
-        [0] = { STR(LANG_CHANNEL_LEFTRIGHT) },
-        [1] = { STR(LANG_CHANNEL_LEFT) },
-        [2] = { STR(LANG_CHANNEL_RIGHT) },
-    };
-
-    int rec_mono_mode = global_settings.rec_mono_mode;
-    bool ret = set_option(str(LANG_RECORDING_MONO_MODE), &rec_mono_mode,
-                     RB_INT, names, 3, NULL );
-
-    if (rec_mono_mode != global_settings.rec_mono_mode)
-        global_settings.rec_mono_mode = rec_mono_mode;
-
-    if (!ret)
-        settings_save();
-    return ret;
+    int next = global_settings.rec_mono_mode + 1;
+    global_settings.rec_mono_mode =
+        next > 0 && next < (int)ARRAYLEN(mono_mode_names) ? next : 0;
+    settings_save();
+    return false;
+}
+static const char *recmonomode_value(void *param, int *voice)
+{
+    (void)param;
+    int mode = global_settings.rec_mono_mode;
+    if (mode < 0 || mode >= (int)ARRAYLEN(mono_mode_names))
+        mode = 0;
+    return option_words(&mono_mode_names[mode], voice);
 }
 MENUITEM_FUNCTION(recmonomode, 0, ID2P(LANG_RECORDING_MONO_MODE),
                   recmonomode_func, recmenu_callback, Icon_Menu_setting,
-                  .settings = {.variable = &global_settings.rec_mono_mode});
+                  .settings = {.variable = &global_settings.rec_mono_mode,
+                               .value = recmonomode_value});
+
+static const struct opt_items format_names[REC_NUM_FORMATS] = {
+    [REC_FORMAT_AIFF]    = { STR(LANG_AFMT_AIFF)    },
+    [REC_FORMAT_MPA_L3]  = { STR(LANG_AFMT_MPA_L3)  },
+    [REC_FORMAT_WAVPACK] = { STR(LANG_AFMT_WAVPACK) },
+    [REC_FORMAT_PCM_WAV] = { STR(LANG_AFMT_PCM_WAV) },
+};
 
 static int recformat_func(void)
 {
-    static const struct opt_items names[REC_NUM_FORMATS] = {
-        [REC_FORMAT_AIFF]    = { STR(LANG_AFMT_AIFF)    },
-        [REC_FORMAT_MPA_L3]  = { STR(LANG_AFMT_MPA_L3)  },
-        [REC_FORMAT_WAVPACK] = { STR(LANG_AFMT_WAVPACK) },
-        [REC_FORMAT_PCM_WAV] = { STR(LANG_AFMT_PCM_WAV) },
-    };
-
-    int rec_format = global_settings.rec_format;
-    bool res = set_option(str(LANG_REC_FORMAT), &rec_format, RB_INT,
-                          names, REC_NUM_FORMATS, NULL );
-
-    if (rec_format != global_settings.rec_format)
-    {
-        global_settings.rec_format = rec_format;
-        enc_global_settings_apply();
-    }
-
-    if (!res)
-        settings_save();
-    return res;
+    int next = global_settings.rec_format + 1;
+    global_settings.rec_format = next > 0 && next < REC_NUM_FORMATS ? next : 0;
+    enc_global_settings_apply();
+    settings_save();
+    return false;
 } /* recformat */
+static const char *recformat_value(void *param, int *voice)
+{
+    (void)param;
+    int format = global_settings.rec_format;
+    if (format < 0 || format >= REC_NUM_FORMATS)
+        format = 0;
+    return option_words(&format_names[format], voice);
+}
 MENUITEM_FUNCTION(recformat, 0, ID2P(LANG_REC_FORMAT),
                   recformat_func, NULL, Icon_Menu_setting,
-                  .settings = {.variable = &global_settings.rec_format});
+                  .settings = {.variable = &global_settings.rec_format,
+                               .value = recformat_value});
 
 MENUITEM_FUNCTION(enc_global_config_menu_item, 0, ID2P(LANG_ENCODER_SETTINGS),
                   enc_global_config_menu, NULL, Icon_Submenu,

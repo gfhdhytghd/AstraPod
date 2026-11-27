@@ -120,6 +120,7 @@
 #endif
 #include "ui/scene.h"
 #include "ui/menu_pane.h"
+#include "screens/fruit_menu.h"
 
 /******************************* Globals ***********************************/
 static fb_data *lcd_fb;
@@ -468,6 +469,7 @@ static struct ui_scene pf_scene;
 static unsigned pf_scene_palette, pf_scene_art, pf_scene_theme;
 /* pf_scene holds Home's split menu, which the stock look slides aside. */
 static bool pf_scene_redrawn, pf_scene_split;
+static void bar_drop_free(void);
 static bool pf_wps_entry;
 static bool flat_view(void);
 static bool pf_shown, pf_entry_prepared, cover_resume_dirty;
@@ -4382,6 +4384,7 @@ static void cleanup(void)
     /* Join before theme callbacks, provider changes or scratch release. */
     end_pf_thread();
     wants_to_quit = true;
+    bar_drop_free();
 
     /* Give the theme back. Whatever comes next draws itself, so no forced
      * redraw from here. */
@@ -6682,19 +6685,140 @@ static bool flow_present_fade(struct ui_scene *source, unsigned opacity)
  * rows leave to the left with quadratic ease-in while the covers show at
  * once in the pane's place; on the way out, after the first 50 ms, the rows
  * return from the left and the pane from the right with quadratic ease-out
- * in 200 ms. */
+ * in 200 ms. A leave that interrupts the entry brings the rows back from
+ * where they had reached. */
 #define FLOW_SPLIT_LEAVE_DELAY_US 50000u
-static bool flow_present_split(struct ui_scene *source, uint32_t age, bool leave)
+static int flow_split_entered(uint32_t age)
+{
+    int u = MIN(age, FLOW_MENU_FADE_US) * 256 / FLOW_MENU_FADE_US;
+    return MENU_PANE_X * u * u / 65536;
+}
+
+static bool flow_present_split(struct ui_scene *source, uint32_t age, bool leave,
+                               int rows_from)
 {
     const int half = MENU_PANE_X;
-    uint32_t duration = leave ? FLOW_LEAVE_FADE_US - FLOW_SPLIT_LEAVE_DELAY_US
-                              : FLOW_MENU_FADE_US;
-    if (leave)
-        age = age > FLOW_SPLIT_LEAVE_DELAY_US ? age - FLOW_SPLIT_LEAVE_DELAY_US : 0;
+    if (!leave)
+        return ui_scene_present_split(source, -flow_split_entered(age), half);
+    const uint32_t duration = FLOW_LEAVE_FADE_US - FLOW_SPLIT_LEAVE_DELAY_US;
+    age = age > FLOW_SPLIT_LEAVE_DELAY_US ? age - FLOW_SPLIT_LEAVE_DELAY_US : 0;
     int u = MIN(age, duration) * 256 / duration;
-    int away = leave ? half * (256 - u) * (256 - u) / 65536
-                     : half * u * u / 65536;
-    return ui_scene_present_split(source, -away, leave ? away : half);
+    int rest = (256 - u) * (256 - u);
+    return ui_scene_present_split(source, -(rows_from * rest / 65536),
+                                  half * rest / 65536);
+}
+
+/* The stock look enters from a menu without a status bar of its own: the
+ * menu's leaves with its rows, and Cover Flow's drops in from the top with
+ * quadratic ease-out in 100 ms, 363 ms after the rows begin to move. Until
+ * it is down, the bar waits in `handle`, taken again whenever the status bar
+ * redraws, and the rows it has not reached show the ground. A leave stops
+ * it where it is. */
+#define BAR_DROP_DELAY_US 363000u
+#define BAR_DROP_US 100000u
+static struct {
+    int handle;
+    uint32_t start;
+    int rows;           /* the bar's rows on screen */
+    bool stale, frozen;
+} bar_drop;
+
+static void bar_drop_free(void)
+{
+    if (bar_drop.handle > 0)
+        bar_drop.handle = core_free(bar_drop.handle);
+    bar_drop.handle = 0;
+}
+
+/* The status bar has drawn itself over the rows it is held out of. */
+static void bar_drop_take(void)
+{
+    if (bar_drop.handle <= 0)
+        return;
+    pix_t *bar = core_get_data_pinned(bar_drop.handle);
+    memcpy(bar, LCD_BUF, pf_chrome_h * LCD_WIDTH * sizeof(*bar));
+    core_put_data_pinned(bar);
+    bar_drop.stale = true;
+}
+
+static void bar_drop_begin(uint32_t now)
+{
+    bar_drop_free();
+    if (pf_chrome_h <= 0)
+        return;
+    bar_drop.handle = core_alloc_free_space(pf_chrome_h * LCD_WIDTH *
+                                            sizeof(pix_t));
+    if (bar_drop.handle <= 0)
+        return;
+    sb_update(SCREEN_MAIN, true);
+    bar_drop_take();
+    bar_drop.start = now + BAR_DROP_DELAY_US;
+    bar_drop.rows = 0;
+    bar_drop.frozen = false;
+}
+
+static bool bar_drop_waiting(void)
+{
+    return bar_drop.handle > 0 && !bar_drop.frozen;
+}
+
+static int bar_drop_rows(uint32_t now)
+{
+    if (bar_drop.frozen)
+        return bar_drop.rows;
+    int32_t t = now - bar_drop.start;
+    if (t <= 0)
+        return 0;
+    int u = 256 - (int)(MIN((uint32_t)t, BAR_DROP_US) * 256 / BAR_DROP_US);
+    return pf_chrome_h - pf_chrome_h * u * u / 65536;
+}
+
+/* When the bar next moves. */
+static uint32_t bar_drop_due(uint32_t now)
+{
+    return (int32_t)(now - bar_drop.start) < 0 ? bar_drop.start
+                                                 : ui_clock_start() + ui_frame_period();
+}
+
+static bool bar_drop_owed(uint32_t now)
+{
+    return bar_drop.handle > 0 &&
+           (bar_drop.stale || bar_drop_rows(now) != bar_drop.rows);
+}
+
+/* Lay the bar's rows for `now` into the framebuffer. True when they
+ * changed there. */
+static bool bar_drop_compose(uint32_t now)
+{
+    if (!bar_drop_owed(now))
+        return false;
+    int rows = bar_drop_rows(now);
+    const pix_t *bar = core_get_data_pinned(bar_drop.handle);
+    for (int y = 0; y < pf_chrome_h; y++)
+    {
+        pix_t *row = LCD_BUF + y * LCD_WIDTH;
+        if (y < rows)
+            memcpy(row, bar + (pf_chrome_h - rows + y) * LCD_WIDTH,
+                   LCD_WIDTH * sizeof(*row));
+        else
+            memset16(row, pf_bg_color, LCD_WIDTH);
+    }
+    core_put_data_pinned((void *)bar);
+    bar_drop.rows = rows;
+    bar_drop.stale = false;
+    if (rows == pf_chrome_h && !bar_drop.frozen)
+        bar_drop_free();
+    return true;
+}
+
+/* The album panel puts the whole bar down at once. */
+static void bar_drop_finish(void)
+{
+    if (!bar_drop_waiting())
+        return;
+    bar_drop.start = USEC_TIMER - BAR_DROP_US;
+    bar_drop_compose(USEC_TIMER);
+    lcd_update_rect(0, 0, LCD_WIDTH, pf_vp_y + pf_chrome_h);
 }
 
 /* The local playlist needs the carousel's scratch arena before WPS can read
@@ -7420,6 +7544,10 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
     struct ui_scene *fade = NULL;
     uint32_t fade_start = 0;
     unsigned opacity = 256, leave_from = 256;
+    /* How far the rows were from home when the leave began. */
+    int leave_rows = MENU_PANE_X;
+    /* Fruit Company keeps the covers still on the way in and out. */
+    bool still_covers = false;
     int leave_result = GO_TO_PREVIOUS;
     unsigned int seen_slides_loaded = pf_slides_loaded;
     long boost_until = current_tick + HZ;
@@ -7498,7 +7626,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                                   MAX(1, panel.marquee_start - current_tick));
             }
         }
-        else if (!dark && (pf_state == pf_scrolling || art_owed ||
+        else if (!dark && (pf_state == pf_scrolling || fade || art_owed ||
                            caption_owed || caption_flush_owed))
         {
             /* There is a frame coming, so wait for its deadline rather than
@@ -7521,6 +7649,11 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         if (panel_waiting)
             timeout = timeout == TIMEOUT_BLOCK ? MAX(1, HZ / 25)
                                                : MIN(timeout, MAX(1, HZ / 25));
+        if (!dark && !panel.live && bar_drop_waiting())
+        {
+            int wait = frame_wait(bar_drop_due(USEC_TIMER));
+            timeout = timeout == TIMEOUT_BLOCK ? wait : MIN(timeout, wait);
+        }
         if (font_prefetch_busy())
             timeout = timeout == TIMEOUT_BLOCK ? 1 : MIN(timeout, 1);
         bool inherited_inhibit = ui_flush_inhibited();
@@ -7622,7 +7755,15 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 fade_start = USEC_TIMER;
                 fade = !pf_wps_entry && entry_source->backdrop_handle > 0 ? entry_source : NULL;
                 opacity = fade ? 0 : 256;
-                stock_enter(&flow_row, number_of_slides, center_index, fade_start, pf_wps_entry);
+                still_covers = !pf_wps_entry && stock_look() && fruit_menu_active();
+                if (still_covers)
+                    stock_init(&flow_row, number_of_slides, center_index,
+                               fade_start, false);
+                else
+                    stock_enter(&flow_row, number_of_slides, center_index,
+                                fade_start, pf_wps_entry);
+                if (fade && stock_look() && pf_scene_split)
+                    bar_drop_begin(fade_start);
                 step = 1;
                 pf_state = pf_scrolling;
             }
@@ -7683,6 +7824,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
             for (i = 0; i < n; i++)
             {
+                if (dirty[i].y < pf_vp_y + pf_chrome_h)
+                    bar_drop_take();
                 /* The stock look's status bar is no part of the covers'. */
                 if (dirty[i].y < pf_vp_y + pf_height
                     && dirty[i].y + dirty[i].h > pf_vp_y + pf_chrome_h)
@@ -7706,6 +7849,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
         if (panel.live && agents_nav_pending() == AGENTS_NAV_NONE)
         {
+            bar_drop_finish();
             int result = album_panel_action(button);
             if (result != CAROUSEL_MENU_STAY)
             {
@@ -7829,7 +7973,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             caption_owed = true;
         }
 
-        if (pf_state == pf_scrolling || fade)
+        if (pf_state == pf_scrolling || fade || bar_drop_owed(USEC_TIMER))
             art_owed = true;
 
         if (seen_slides_loaded != pf_slides_loaded)
@@ -8130,6 +8274,11 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 dirty_end = LCD_HEIGHT;
                 full_flush_owed = false;
             }
+            if (bar_drop_compose(USEC_TIMER))
+            {
+                dirty_top = 0;
+                dirty_end = MAX(dirty_end, pf_vp_y + pf_chrome_h);
+            }
             unsigned parts = UI_PERF_ART, caption_rows = 0;
             if (caption_flush_owed)
             {
@@ -8173,7 +8322,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                     unsigned phase = MIN(age, duration) * 256 / duration;
                     unsigned alpha = leaving ? leave_from * (256 - phase) / 256 : phase;
                     bool shown = stock_look() && pf_scene_split
-                        ? flow_present_split(fade, age, leaving)
+                        ? flow_present_split(fade, age, leaving, leave_rows)
                         : flow_present_fade(fade, alpha);
                     if (shown)
                         opacity = alpha;
@@ -8203,6 +8352,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 uint32_t late = stock_rebase(&flow_start);
                 flow_row.start_us += late;
                 fade_start += late;
+                bar_drop.start += late;
             }
             /* Set the art deadline from the art DMA. A second, narrow DMA can
              * use the remaining bandwidth without reserving another art TE. */
@@ -8289,7 +8439,11 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 full_repaint_owed = true;
         }
 
-        if (leaving && (pf_state == pf_idle || dark))
+        /* Still covers have no motion of their own to wait for, so the
+         * leave lasts as long as the menu's return. */
+        if (leaving && (pf_state == pf_idle || dark) &&
+            !(still_covers && fade && !dark &&
+              (uint32_t)USEC_TIMER - fade_start < FLOW_LEAVE_FADE_US))
             return leave_result;
 
         enum agents_nav_screen nav = agents_nav_pending();
@@ -8343,10 +8497,15 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 lcd_set_foreground(pf_fg_color);
                 lcd_set_drawmode(DRMODE_FG);
             }
+            leave_rows = fade && !leaving
+                ? flow_split_entered((uint32_t)USEC_TIMER - fade_start)
+                : MENU_PANE_X;
             fade_start = USEC_TIMER;
             leave_from = opacity;
             fade = pf_scene.backdrop_handle > 0 ? &pf_scene : NULL;
-            stock_leave(&flow_row, fade_start);
+            bar_drop.frozen = true;
+            if (!still_covers)
+                stock_leave(&flow_row, fade_start);
             step = 1;
             pf_state = pf_scrolling;
             leaving = true;

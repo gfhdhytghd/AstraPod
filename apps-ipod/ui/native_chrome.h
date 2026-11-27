@@ -19,6 +19,7 @@ struct native_chrome_state {
     /* The time in place of the title. Also aligns the tray without
      * implicit padding for memcmp. */
     uint8_t clock_title;
+    uint8_t hold, pad[3];
 #ifdef ASTRAPOD_ROCK_COMPAT
     struct app_tray_view tray;
 #endif

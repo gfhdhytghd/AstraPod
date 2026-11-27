@@ -224,6 +224,7 @@ screens/extras/extras_stopwatch.c
 screens/context_menu.c
 screens/system/about.c
 screens/system/fruit_about.c
+screens/system/power_stock.c
 screens/system/art_health.c
 screens/system/art_check.c
 screens/system/bg_task_info.c

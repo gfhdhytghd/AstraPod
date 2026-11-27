@@ -6,10 +6,13 @@
 #include "config.h"
 #include "core_alloc.h"
 #include "system.h"
+#include "button.h"
 #include "font.h"
 #include "power.h"
 #include "powermgmt.h"
 #include "rbpaths.h"
+#include "audio/play_status.h"
+#include "screens/fruit_menu.h"
 #include "settings/settings.h"
 #include "ui/theme_art.h"
 #include "extras_bar.h"
@@ -35,6 +38,10 @@ uint32_t *extras_band(int i)
 #define TITLE_BASELINE 15
 #define BATTERY_X 289
 #define BATTERY_Y 4
+#define PLAY_X 271
+#define PLAY_Y 5
+#define HOLD_X 7
+#define HOLD_Y 4
 #define TITLE_GREY 0xd2d2d2 /* stock's title is not quite white */
 
 /* Stock lays the bar more opaque than its bitmap's alpha: each row
@@ -83,11 +90,71 @@ static void put_battery(struct stock_canvas *canvas)
 #endif
 }
 
-void extras_bar_put(struct stock_canvas *canvas, const char *title)
+/* White play triangle or pause bars in stock's black bar slot (x 271..281). */
+static void put_play(struct stock_canvas *canvas)
+{
+    int mode = current_playmode();
+    if (mode == STATUS_PLAY || mode == STATUS_FASTFORWARD ||
+        mode == STATUS_FASTBACKWARD)
+    {
+        for (int r = 0; r < 10; r++)
+        {
+            int w = r < 5 ? (r * 2 + 2) : ((9 - r) * 2 + 2);
+            if (w > 11)
+                w = 11;
+            for (int c = 0; c < w; c++)
+                stock_canvas_blend(canvas, PLAY_X + c, PLAY_Y + r,
+                                   TITLE_GREY, 255);
+        }
+    }
+    else if (mode == STATUS_PAUSE)
+    {
+        for (int r = 0; r < 10; r++)
+        {
+            for (int c = 0; c < 3; c++)
+            {
+                stock_canvas_blend(canvas, PLAY_X + 2 + c, PLAY_Y + r,
+                                   TITLE_GREY, 255);
+                stock_canvas_blend(canvas, PLAY_X + 7 + c, PLAY_Y + r,
+                                   TITLE_GREY, 255);
+            }
+        }
+    }
+}
+
+/* Miniature padlock for Hold in the black status bar. */
+static void put_hold(struct stock_canvas *canvas)
+{
+    static const uint16_t rows[12] = {
+        0x078, /* ...####... */
+        0x0cc, /* ..##..##.. */
+        0x084, /* ..#....#.. */
+        0x084, /* ..#....#.. */
+        0x084, /* ..#....#.. */
+        0x3ff, /* ########## */
+        0x3ff, /* ########## */
+        0x3ff, /* ########## */
+        0x3ff, /* ########## */
+        0x3ff, /* ########## */
+        0x3ff, /* ########## */
+        0x1fe, /* .########. */
+    };
+    if (!fruit_menu_active() || !button_hold())
+        return;
+    for (int r = 0; r < 12; r++)
+        for (int c = 0; c < 10; c++)
+            if (rows[r] & (1u << (9 - c)))
+                stock_canvas_blend(canvas, HOLD_X + c, HOLD_Y + r,
+                                   TITLE_GREY, 240);
+}
+
+void extras_bar_put_ex(struct stock_canvas *canvas, const char *title,
+                       bool show_battery, bool show_play)
 {
     if (canvas->y >= EXTRAS_BAR_HEIGHT || !stock_art_ready())
         return;
     put_background(canvas);
+    put_hold(canvas);
     if (title_font < 0)
         title_font = font_load_ex(TITLE_FONT, 0,
                                   global_settings.glyphs_to_cache);
@@ -101,7 +168,15 @@ void extras_bar_put(struct stock_canvas *canvas, const char *title)
                           TITLE_BASELINE - font_get(title_font)->ascent,
                           TITLE_GREY);
     }
-    put_battery(canvas);
+    if (show_play)
+        put_play(canvas);
+    if (show_battery)
+        put_battery(canvas);
+}
+
+void extras_bar_put(struct stock_canvas *canvas, const char *title)
+{
+    extras_bar_put_ex(canvas, title, true, false);
 }
 
 void extras_bar_draw(const char *title)

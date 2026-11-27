@@ -51,6 +51,8 @@
 #include "playlist/playlist.h"
 #include "database/tagcache.h"
 #include "screens/system/usb_screen.h"
+#include "screens/system/power_stock.h"
+#include "screens/fruit_menu.h"
 #include "metadata/book_resume.h"
 #include "screens/playback/wps.h"      /* pause_action, unpause_action */
 #include "screens/browse/browser.h"  /* browser_flush, browser_restore */
@@ -110,21 +112,28 @@ static bool clean_shutdown(enum shutdown_type sd_type,
             level = battery_level();
             if (level > 10 || level < 0)
             {
-                if (global_settings.show_shutdown_message)
+                if (global_settings.show_shutdown_message &&
+                    !fruit_menu_active())
                     splash(0, str(LANG_SHUTTINGDOWN));
             }
             else
             {
                 msg_id = LANG_WARNING_BATTERY_LOW;
-                splashf(0, "%s %s", str(LANG_WARNING_BATTERY_LOW),
-                                    str(LANG_SHUTTINGDOWN));
+                if (fruit_menu_active())
+                    power_stock_low_battery_screen(false);
+                else
+                    splashf(0, "%s %s", str(LANG_WARNING_BATTERY_LOW),
+                                        str(LANG_SHUTTINGDOWN));
             }
         }
         else
         {
             msg_id = LANG_WARNING_BATTERY_EMPTY;
-            splashf(0, "%s %s", str(LANG_WARNING_BATTERY_EMPTY),
-                                str(LANG_SHUTTINGDOWN));
+            if (fruit_menu_active())
+                power_stock_low_battery_screen(true);
+            else
+                splashf(0, "%s %s", str(LANG_WARNING_BATTERY_EMPTY),
+                                    str(LANG_SHUTTINGDOWN));
         }
 
         rock_resident_shutdown(batt_safe);
@@ -513,6 +522,14 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
             else
                 sd_type = SHUTDOWN_REBOOT;
 
+            if (sd_type == SHUTDOWN_POWER_OFF && fruit_menu_active() &&
+                charger_inserted() && battery_level_safe())
+            {
+                long ev = power_stock_charging_screen();
+                if (ev)
+                    return default_event_handler_ex(ev, callback, parameter);
+                return 0;
+            }
             if (!clean_shutdown(sd_type, callback, parameter))
                 return event;
         }

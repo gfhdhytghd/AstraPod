@@ -33917,3 +33917,101 @@
     *: "No Name"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_ABOUT_ITUNES_U
+  desc: Settings > About under Fruit Company: the count of iTunes U items
+  user: core
+  <source>
+    *: "iTunes U"
+  </source>
+  <dest>
+    *: "iTunes U"
+  </dest>
+  <voice>
+    *: "iTunes U"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_USB_STOCK_DO_NOT_DISCONNECT
+  desc: first line of the stock USB screen while the host accesses storage
+  user: core
+  <source>
+    *: "Do not disconnect."
+  </source>
+  <dest>
+    *: "Do not disconnect."
+  </dest>
+  <voice>
+    *: "Do not disconnect."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_USB_STOCK_OK_TO_DISCONNECT
+  desc: first line of the stock USB screen once the host has ejected the disk
+  user: core
+  <source>
+    *: "OK to disconnect."
+  </source>
+  <dest>
+    *: "OK to disconnect."
+  </dest>
+  <voice>
+    *: "OK to disconnect."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_POWER_STOCK_CHARGING
+  desc: title of the stock charging standby screen
+  user: core
+  <source>
+    *: "Charging"
+  </source>
+  <dest>
+    *: "Charging"
+  </dest>
+  <voice>
+    *: "Charging"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_POWER_STOCK_CHARGED
+  desc: title of the stock charging standby screen when the battery is full
+  user: core
+  <source>
+    *: "Charged"
+  </source>
+  <dest>
+    *: "Charged"
+  </dest>
+  <voice>
+    *: "Charged"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_POWER_STOCK_LOW_BATTERY
+  desc: title of the stock low-battery shutdown screen
+  user: core
+  <source>
+    *: "Low Battery"
+  </source>
+  <dest>
+    *: "Low Battery"
+  </dest>
+  <voice>
+    *: "Low Battery"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_POWER_STOCK_CONNECT_POWER
+  desc: detail line of the stock low-battery screen when the battery is empty
+  user: core
+  <source>
+    *: "Please Connect to Power"
+  </source>
+  <dest>
+    *: "Please Connect to Power"
+  </dest>
+  <voice>
+    *: "Please Connect to Power"
+  </voice>
+</phrase>

@@ -8480,7 +8480,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             }
         }
         /* A hold of Play from now on is the random spin */
-        if (!(button_status() & BUTTON_PLAY))
+        if (!ui_wheel_navigation() && !(button_status() & BUTTON_PLAY))
             button_set_sw_poweroff_state(false);
 
         if (model->tick && (!panel.live || !TIME_BEFORE(current_tick, provider_at)))
@@ -9779,7 +9779,8 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
     /* Play held is the random spin here, and held long enough it would power
      * off. Held Play on the playing screen opens this, and that hold still
      * powers off, until Play is let go: see album_covers_loop(). */
-    button_set_sw_poweroff_state(button_status() & BUTTON_PLAY);
+    if (!ui_wheel_navigation())
+        button_set_sw_poweroff_state(button_status() & BUTTON_PLAY);
     unsigned trace = 0;
     cover_resume_dirty = false;
     ret = album_covers_loop(&trace, restored_pixels || pf_entry_prepared,

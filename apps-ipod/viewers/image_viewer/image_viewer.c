@@ -25,9 +25,9 @@
  *     the retained image rather than blanking the screen.
  *
  * Memory: one block holds both the file-name list and the decoded image,
- * carved up by get_pic_list() advancing `buf` past the list. Album art tries
- * the app buffer first, which leaves playback alone; a file, or a cover too
- * large for it, takes a core_alloc_maximum() block. That is pinned for the
+ * carved up by get_pic_list() advancing `buf` past the list. Album art and
+ * wheel-navigation photos try the app buffer first to keep audio playing.
+ * Other files and images too large for that use a core_alloc_maximum() block. That is pinned for the
  * whole session, so a USB connect would deadlock on it -- iv_usb_inserted()
  * drops it from the USB thread before that can happen, and the viewer takes
  * it back if no USB session follows (a charger).
@@ -47,6 +47,7 @@
 #include "string-extra.h"   /* strlcpy */
 #include <stdlib.h>
 #include "config.h"
+#include "ui/native_theme_runtime.h"
 #include "system.h"          /* MIN, MAX */
 #include "dir.h"             /* the folder read when the browser cache is not it */
 #include "lcd.h"
@@ -622,6 +623,7 @@ static void set_pan_mode(struct image_info *info, bool on)
 static int scroll_bmp(struct image_info *info, struct ui_scene *scene)
 {
     static long ss_timeout = 0;
+    bool pan_horizontal = false;
 
     int button;
 
@@ -685,6 +687,22 @@ static int scroll_bmp(struct image_info *info, struct ui_scene *scene)
         }
 
         iv_running_slideshow = false;
+
+        if (ui_wheel_navigation())
+        {
+            int key = button & ~BUTTON_REPEAT;
+            if (key == IMGVIEW_PAN_UP || key == IMGVIEW_PAN_DOWN)
+            {
+                if (!iv_pan_mode)
+                    button = key == IMGVIEW_PAN_UP ? IMGVIEW_LEFT : IMGVIEW_RIGHT;
+                else if (pan_horizontal)
+                    button = (key == IMGVIEW_PAN_UP ? IMGVIEW_LEFT : IMGVIEW_RIGHT)
+                             | (button & BUTTON_REPEAT);
+            }
+            else if (iv_pan_mode && button == (BUTTON_SELECT | BUTTON_REL) &&
+                     iv_lastbutton == BUTTON_SELECT)
+                pan_horizontal = !pan_horizontal;
+        }
 
         switch(button)
         {
@@ -1430,9 +1448,8 @@ int image_viewer(const char *file)
     ui_scene_open_page(&scene, "image-viewer-push");
     splashf(0, "%s", str(LANG_WAIT));
 
-    /* A cover is small enough for the app buffer, and that keeps the music
-     * playing. */
-    if (!iv_take_buffer(is_album_art))
+    /* Use the app buffer to leave the playback queue alive behind photos. */
+    if (!iv_take_buffer(is_album_art || ui_wheel_navigation()))
     {
         ui_scene_cancel(&scene);
         splash(HZ * 2, "Out of memory");
@@ -1487,7 +1504,14 @@ int image_viewer(const char *file)
                 condition = PLUGIN_ERROR;
                 break;
             }
-            get_pic_list(true);
+            curfile = -1;
+            entries = 0;
+            get_pic_list(is_album_art);
+            if (entries == 0)
+            {
+                condition = PLUGIN_ERROR;
+                break;
+            }
             continue;
         }
         if (condition == IV_RELOAD)
@@ -1496,7 +1520,7 @@ int image_viewer(const char *file)
              * another and show the same picture again. The file list lived
              * in the old one. */
             iv_usb_dropped = false;
-            if (!iv_take_buffer(false))
+            if (!iv_take_buffer(ui_wheel_navigation()))
             {
                 splash(HZ * 2, "Out of memory");
                 condition = PLUGIN_ERROR;

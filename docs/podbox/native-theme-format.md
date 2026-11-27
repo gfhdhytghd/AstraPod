@@ -190,7 +190,10 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 
 Light keeps Scrim's styles.
 Classic sets the second keyword of every style except `list_scroll` and
-`menu_tree`. Fruit Company is Classic with `style.menu_tree=stock`. To
+`menu_tree`. Fruit Company is Classic with `style.menu_tree=stock`. In a stock menu
+tree, Previous, Next and Play/Pause control playback. Use the wheel to
+move, Select to act, and Menu to go back. Games and plugins own their
+controls. To
 start a custom theme from Classic, copy its values from the table below.
 
 ### The Classic theme

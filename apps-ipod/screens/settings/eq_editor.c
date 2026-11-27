@@ -1200,7 +1200,9 @@ int eq_editor_screen(void)
     cpu_boost(true);
 #endif
     /* Play held is Compare here, and held long enough it would power off */
-    button_set_sw_poweroff_state(false);
+    bool wheel_band = true;
+    if (!ui_wheel_navigation())
+        button_set_sw_poweroff_state(false);
     speak_band();
 
     while (true)
@@ -1219,6 +1221,23 @@ int eq_editor_screen(void)
         redraw = true;
 
         action = get_action(CONTEXT_SETTINGS_EQ, HZ / 4);
+
+        if (ui_wheel_navigation())
+        {
+            if (action == ACTION_TIME_DOWN)
+            {
+                wheel_band = !wheel_band;
+                action = ACTION_REDRAW;
+            }
+            else if (wheel_band &&
+                     (action == ACTION_SETTINGS_INC ||
+                      action == ACTION_SETTINGS_INCREPEAT))
+                action = ACTION_STD_NEXT;
+            else if (wheel_band &&
+                     (action == ACTION_SETTINGS_DEC ||
+                      action == ACTION_SETTINGS_DECREPEAT))
+                action = ACTION_STD_PREV;
+        }
 
         if (action == ACTION_NONE)
         {

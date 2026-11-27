@@ -622,6 +622,118 @@ static long do_party_mode(long action)
     return action;
 }
 
+/* A wheel seek accumulates while the key repeats. Only release commits it,
+ * so the current page keeps polling input and system events during the hold. */
+void wps_wheel_transport(int action)
+{
+    static struct cider_state source;
+    static char seek_id[sizeof(source.id)];
+    static uint32_t seek_generation;
+    static char seek_path[MAX_PATH];
+    static int seek_index;
+    static bool seek_remote;
+    static int seek_direction;
+    static long seek_position, seek_step;
+    bool remote = cider_active();
+    if (audio_status() & AUDIO_STATUS_RECORD)
+    {
+        seek_direction = 0;
+        return;
+    }
+
+    if (action == ACTION_WPS_PLAY || action == ACTION_WPS_SKIPPREV ||
+        action == ACTION_WPS_SKIPNEXT)
+    {
+        seek_direction = 0;
+        if (remote)
+        {
+            cider_wps_action(action);
+            return;
+        }
+        if (do_party_mode(action) == ACTION_NONE)
+            return;
+        const struct mp3entry *track = audio_current_track();
+        if (action == ACTION_WPS_PLAY)
+        {
+            int status = audio_status();
+            if (status & AUDIO_STATUS_PLAY)
+                wps_do_action(status & AUDIO_STATUS_PAUSE ?
+                              WPS_PLAY : WPS_PAUSE, true);
+            else if (playlist_amount() > 0)
+                playlist_resume_track(MAX(0, global_status.resume_index),
+                                      global_status.resume_crc32,
+                                      global_status.resume_elapsed,
+                                      global_status.resume_offset);
+        }
+        else if (track && action == ACTION_WPS_SKIPNEXT)
+            next_track(track);
+        else if (track)
+            prev_track(track, DEFAULT_SKIP_THRESH);
+        return;
+    }
+
+    const struct mp3entry *track = remote ? NULL : audio_current_track();
+    if (remote)
+        cider_snapshot(&source);
+    int index = remote ? 0 : playlist_get_display_index();
+    bool same = remote == seek_remote &&
+        (remote ? source.generation == seek_generation &&
+                  !strcmp(source.id, seek_id) :
+                  track && index == seek_index && !strcmp(track->path, seek_path));
+    if ((!remote && global_settings.party_mode) ||
+        (remote && (!source.available || !source.have)) || (!remote && !track))
+    {
+        seek_direction = 0;
+        return;
+    }
+
+    if (action == ACTION_WPS_STOPSEEK)
+    {
+        if (seek_direction && same)
+        {
+            if (remote)
+                cider_control("seek", seek_position);
+            else
+            {
+                audio_pre_ff_rewind();
+                audio_ff_rewind(seek_position);
+            }
+        }
+        seek_direction = 0;
+        return;
+    }
+
+    long length = remote ? source.duration : track->length;
+    if (length <= 0)
+        return;
+    int direction = action == ACTION_WPS_SEEKFWD ? 1 : -1;
+    if (!same || direction != seek_direction)
+    {
+        seek_remote = remote;
+        if (remote)
+        {
+            strlcpy(seek_id, source.id, sizeof(seek_id));
+            seek_generation = source.generation;
+        }
+        else
+        {
+            seek_index = index;
+            strlcpy(seek_path, track->path, sizeof(seek_path));
+        }
+        seek_position = remote ? cider_position(&source, current_tick, HZ) :
+                                 track->elapsed;
+        seek_step = 1000L * global_settings.ff_rewind_min_step;
+        seek_direction = direction;
+    }
+    else
+        seek_step += seek_step >> (global_settings.ff_rewind_accel + 3);
+
+    long remaining = direction > 0 ? length - seek_position : seek_position;
+    seek_step = MIN(seek_step, MAX(remaining * FF_REWIND_MAX_PERCENT / 100,
+                                  MIN_FF_REWIND_STEP));
+    seek_position = MAX(0L, MIN(length, seek_position + direction * seek_step));
+}
+
 /* Album covers takes ownership of the display. True when the WPS
  * is to be left, for the screen in *go_to. */
 static bool show_album_covers(long *go_to, bool return_agents, uint32_t action_us)

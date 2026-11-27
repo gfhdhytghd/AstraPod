@@ -101,6 +101,7 @@ enum {
     CONTEXT_MUSIC_QUIZ, /* uses the ACTION_QUIZ_ defines below */
     CONTEXT_LIST_SELECT, /* a list in selecting mode: ACTION_LS_ */
     CONTEXT_AGENTS, /* System > Agents: a list with ACTION_AGENTS_TALK */
+    CONTEXT_VIDEO_PLAYBACK, /* Native movie player, uses the WPS keymap. */
     LAST_CONTEXT_PLACEHOLDER,
 };
 

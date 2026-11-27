@@ -43,9 +43,73 @@
 
 #include "system/appevents.h"
 #include "button.h"
+#include "kernel.h"
+#include "system/activity.h"
 #include "button_chord.h"
 #include "action.h"
 #include "ui/scene.h"
+#include "ui/native_theme_runtime.h"
+#include "screens/playback/wps.h"
+
+/* Claim physical transport keys before context lookup and wheel chords. */
+static bool wheel_transport(int button)
+{
+    static int pressed;
+    static bool repeated;
+    const int transport = BUTTON_LEFT | BUTTON_RIGHT | BUTTON_PLAY;
+    if (!ui_wheel_navigation() ||
+        (button & (SYS_EVENT | BUTTON_MULTIMEDIA | BUTTON_REDRAW | BUTTON_REMOTE)))
+        return false;
+
+    enum current_activity activity = get_current_activity();
+    if (activity == ACTIVITY_ARCADE || activity == ACTIVITY_SPIKE ||
+        activity == ACTIVITY_MUSICQUIZ || activity == ACTIVITY_USBSCREEN)
+        return false;
+
+    int keys = button & BUTTON_MAIN;
+    if (!(keys & transport))
+        return false;
+    if (keys != BUTTON_LEFT && keys != BUTTON_RIGHT && keys != BUTTON_PLAY)
+    {
+        if (repeated && pressed != BUTTON_PLAY)
+            wps_wheel_transport(ACTION_WPS_STOPSEEK);
+        pressed = BUTTON_NONE;
+        return true;
+    }
+
+    if (button & BUTTON_REL)
+    {
+        if (keys == pressed)
+        {
+            if (keys == BUTTON_PLAY)
+            {
+                if (!repeated)
+                    wps_wheel_transport(ACTION_WPS_PLAY);
+            }
+            else
+                wps_wheel_transport(repeated ? ACTION_WPS_STOPSEEK :
+                        keys == BUTTON_LEFT ? ACTION_WPS_SKIPPREV :
+                                             ACTION_WPS_SKIPNEXT);
+            pressed = BUTTON_NONE;
+        }
+    }
+    else if (button & BUTTON_REPEAT)
+    {
+        if (keys == pressed)
+        {
+            repeated = true;
+            if (keys != BUTTON_PLAY)
+                wps_wheel_transport(keys == BUTTON_LEFT ? ACTION_WPS_SEEKBACK :
+                                                          ACTION_WPS_SEEKFWD);
+        }
+    }
+    else
+    {
+        pressed = keys;
+        repeated = false;
+    }
+    return true;
+}
 #ifdef HAVE_WHEEL_WPS_CHORD
 #include "input/agents_shortcut.h"
 #include "system/activity.h"
@@ -93,6 +157,10 @@ static int wheel_shortcut_button(int button, bool talking, bool raw, int *action
 #ifdef HAVE_USB_PODLINK
     connected = podlink_host_connected();
 #endif
+    if (ui_wheel_navigation() && get_current_activity() != ACTIVITY_ARCADE &&
+        get_current_activity() != ACTIVITY_SPIKE &&
+        get_current_activity() != ACTIVITY_MUSICQUIZ)
+        return button;
     if (raw && connected && !shortcut.latched && !shortcut.ignored)
         return button;
     bool fire;
@@ -138,6 +206,7 @@ static long raw_ui_filter(long button)
     cider_source_poll();
 #endif
     if (ui_polling) return button;
+    if (wheel_transport(button)) return BUTTON_REDRAW;
 #ifdef HAVE_USB_PODLINK
     podlink_time_sync();
 #endif
@@ -523,6 +592,7 @@ int agents_shortcut_get_button(int timeout)
 #endif
     ui_polling = false;
     podlink_time_sync();
+    if (wheel_transport(button)) return BUTTON_REDRAW;
     bool fire;
     button = agents_cover_chord_button(&cover_chord, button, button_status(),
         true, &fire);
@@ -628,6 +698,14 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
 #endif
 #ifdef HAVE_WHEEL_WPS_CHORD
     ui_polling = false;
+#endif
+    if (cur->context != CONTEXT_SPIKE && cur->context != CONTEXT_MUSIC_QUIZ &&
+        wheel_transport(*button))
+    {
+        cur->action = ACTION_NONE;
+        return true;
+    }
+#ifdef HAVE_WHEEL_WPS_CHORD
 #ifdef HAVE_USB_PODLINK
     podlink_time_sync();
     bool fire;

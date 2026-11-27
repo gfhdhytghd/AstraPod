@@ -65,6 +65,33 @@ elif src.name == "video_playback.c":
         return VIDEO_INPUT_EXIT;
 """)
 
+    replace("int action = rb->get_action(CONTEXT_WPS, TIMEOUT_NOBLOCK);",
+            "int action = rb->get_action(CONTEXT_VIDEO_PLAYBACK, TIMEOUT_NOBLOCK);")
+    replace("                                           bool *redraw)",
+            "                                           bool *scrub, bool *redraw)")
+    replace("    if (action == ACTION_WPS_SKIPPREV",
+            """    if (action == ACTION_WPS_BROWSE)
+    {
+        *scrub = !*scrub;
+        *overlay_until = *rb->current_tick + VIDEO_OSD_SHOW_TICKS;
+        *redraw = true;
+        return VIDEO_INPUT_NONE;
+    }
+    if (*scrub && action == ACTION_WPS_VOLUP)
+        return VIDEO_INPUT_SEEK_FORWARD;
+    if (*scrub && action == ACTION_WPS_VOLDOWN)
+        return VIDEO_INPUT_SEEK_BACK;
+    if (action == ACTION_WPS_SKIPPREV""")
+    replace("    bool paused = false;", "    bool paused = false, scrub = false;")
+    replace("""                                 &pause_started, have_audio, &cpu_boosted,
+                                 &overlay_until, &redraw_requested);""",
+            """                                 &pause_started, have_audio, &cpu_boosted,
+                                 &overlay_until, &scrub, &redraw_requested);""")
+    replace("                if (overlay_drawn &&",
+            "                if (overlay_drawn && !scrub &&")
+    replace("            bool overlay_visible =",
+            "            bool overlay_visible = scrub ||")
+
     for line in (
         "    uint32_t last_sample = 0;",
         "    rb->pcmbuf_fade(false, true);", "    rb->pcmbuf_fade(false, false);",

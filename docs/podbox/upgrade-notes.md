@@ -116,3 +116,10 @@
   both change in place on Select. Classic shows the time too, and the
   setting is also under Settings > System > Time & Date Settings. Update
   from the whole zip: a contact's page needs the new `stock-art.bin`.
+
+- **Under Fruit Company, use the wheel, Select and Menu to navigate.**
+  Previous and Next skip or seek in the current playback. Play/Pause
+  toggles playback without opening Now Playing. In Control Centre, turn
+  the wheel to highlight a setting and press Select to change it. In
+  Photos, turn the wheel to move between pictures. Games keep their
+  own controls.

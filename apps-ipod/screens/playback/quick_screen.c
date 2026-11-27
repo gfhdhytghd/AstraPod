@@ -79,6 +79,7 @@ struct gui_quickscreen
     int view_handle;
     int result;
     int volume_item;
+    enum quickscreen_item focus;
     bool cider;
     void (*poll)(void);  /* Keep a caller's foreground inbox flowing. */
 };
@@ -169,7 +170,8 @@ static void quickscreen_paint_card(const struct ui_view *node,
     struct viewport *previous = lcd_set_viewport(&vp);
     lcd_set_foreground(quickscreen_color(view, UI_COLOR_MODAL_BG));
     lcd_fillrect(0, 0, vp.width, vp.height);
-    lcd_set_foreground(quickscreen_color(view, UI_COLOR_SEPARATOR));
+    lcd_set_foreground(quickscreen_color(view,
+        card->item == card->qs->focus ? UI_COLOR_ACCENT : UI_COLOR_SEPARATOR));
     lcd_drawrect(x, y, box->width, box->height);
     lcd_set_foreground(quickscreen_color(view, UI_COLOR_ACCENT));
     quickscreen_paint_arrow(card->item, x + box->width - arrow_space / 2,
@@ -428,6 +430,14 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
      *    then release the enter button*/
     bool can_quit = false;
     qs->result = QUICKSCREEN_OK;
+    qs->focus = QUICKSCREEN_ITEM_COUNT;
+    if (ui_wheel_navigation())
+        for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
+            if (qs->items[i])
+            {
+                qs->focus = i;
+                break;
+            }
     *usb = false;
     qs->view_handle = core_alloc_free_space(sizeof(*qs->view));
     if (qs->view_handle <= 0)
@@ -505,6 +515,32 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
             return qs->result | QUICKSCREEN_IN_USB;
         }
         default_event_handler(button);
+        if (ui_wheel_navigation())
+        {
+            static const int slot_actions[] = {
+                [QUICKSCREEN_TOP] = ACTION_QS_TOP,
+                [QUICKSCREEN_BOTTOM] = ACTION_QS_DOWN,
+                [QUICKSCREEN_LEFT] = ACTION_QS_LEFT,
+                [QUICKSCREEN_RIGHT] = ACTION_QS_RIGHT,
+            };
+            if (qs->focus != QUICKSCREEN_ITEM_COUNT &&
+                (button == ACTION_STD_NEXT || button == ACTION_STD_PREV ||
+                 button == ACTION_STD_NEXTREPEAT ||
+                 button == ACTION_STD_PREVREPEAT))
+            {
+                int dir = button == ACTION_STD_NEXT ||
+                          button == ACTION_STD_NEXTREPEAT ? 1 : -1;
+                do
+                    qs->focus = (qs->focus + dir + QUICKSCREEN_ITEM_COUNT) %
+                                QUICKSCREEN_ITEM_COUNT;
+                while (!qs->items[qs->focus]);
+                talk_qs_option(qs, qs->focus, false);
+                quickscreen_update(qs, QUICKSCREEN_ITEM_COUNT);
+            }
+            else if (button == ACTION_STD_OK &&
+                     qs->focus != QUICKSCREEN_ITEM_COUNT)
+                button = slot_actions[qs->focus];
+        }
         if (gui_quickscreen_do_button(qs, button, &changed))
         {
             qs->result |= QUICKSCREEN_CHANGED;

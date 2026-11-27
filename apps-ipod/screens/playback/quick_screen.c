@@ -27,6 +27,7 @@
 #include "quick_screen.h"
 #include "cider.h"
 #include "cider_controls.h"
+#include "cider_wps.h"
 #include "speech/talk.h"
 #include "widgets/list.h"
 #include "widgets/option_select.h"
@@ -40,12 +41,15 @@
 #include "ui/scene.h"
 #include "ui/sheet.h"
 #include "ui/statusbar.h"
+#include "ui/stock_art.h"
 #include <string.h>
 #ifdef HAVE_WHEEL_WPS_CHORD
 #include "input/agents_shortcut.h"
 #endif
 
 #define QUICK_PIXELS (LCD_WIDTH * LCD_HEIGHT)
+#define CC_MAX_ROWS (1 + QUICKSCREEN_ITEM_COUNT)
+#define CC_FOCUS_TIMEOUT (4 * HZ)
 
 struct gui_quickscreen;
 struct quickscreen_card {
@@ -54,25 +58,35 @@ struct quickscreen_card {
     enum quickscreen_item item;
 };
 
+struct cc_row {
+    struct ui_view view;
+    struct gui_quickscreen *qs;
+    int index;
+    enum quickscreen_item item; /* QUICKSCREEN_ITEM_COUNT for Volume hero */
+    uint8_t key_mask;
+};
+
 struct quickscreen_page {
     struct ui_theme theme;
     struct ui_album_palette palette;
     struct ui_nav nav;
     struct ui_page page;
     struct ui_view background;
-    struct ui_view panel;   /* The HUD's glass, behind the cards. */
     struct ui_sheet sheet;
     struct frame_buffer_t tile;
     struct frame_buffer_t *paint_target;
     fb_data *underneath;
     int sheet_handle;
     struct quickscreen_card cards[QUICKSCREEN_ITEM_COUNT];
+    struct cc_row rows[CC_MAX_ROWS];
+    int row_count;
     unsigned palette_generation;
     int title_font, body_font, fallback_font;
     char saved_title[MAX_PATH];
     enum themable_icons saved_icon;
     bool has_saved_title;
-    bool hud;               /* style.quick_screen=hud */
+    bool full_page;         /* style.quick_screen=page */
+    bool wheel;             /* ui_wheel_navigation(): wheel/SELECT/MENU */
 };
 
 struct gui_quickscreen
@@ -82,6 +96,8 @@ struct gui_quickscreen
     int view_handle;
     int result;
     int volume_item;
+    int focus_row;
+    long focus_tick;
     bool cider;
     void (*poll)(void);  /* Keep a caller's foreground inbox flowing. */
 };
@@ -198,37 +214,56 @@ static void quickscreen_paint_card(const struct ui_view *node,
     lcd_set_viewport(previous);
 }
 
-/* The HUD: a pane of dark glass over the dimmed screen, each setting in an
- * etched well, drawn as an iPhone OS switch, slider or pop-up button. */
-#define HUD_INSET 8         /* glass around the wells */
-#define HUD_RADIUS 10
-#define HUD_SHADOW 4
-#define HUD_DROP 2
-#define HUD_CELL_RADIUS 6
-#define HUD_PAD 8           /* inside a well */
-#define HUD_CONTROL 22      /* control height */
-#define HUD_KNOB 18         /* slider knob */
-#define HUD_TRACK 7         /* slider track */
-#define HUD_ARROW 3
-#define HUD_TEXT 0xffffff
-#define HUD_TEXT_SHADOW 0x000000
-#define HUD_VALUE 0xc4cad2
+/* Full-screen Control Centre page: Volume hero at top followed by the
+ * configured settings as full-width skeuomorphic rows under the stock status
+ * bar, with glossy sliders, iPhone OS switches, Aqua stepper pills, and
+ * Classic's brushed-chrome directional key caps. */
+#define CC_PAD          14
+#define CC_KEY_X        10
+#define CC_SWITCH_W     90
+#define CC_SWITCH_KNOB  34
+#define CC_SWITCH_R     6
+#define CC_PILL_MIN_W   92
+#define CC_PILL_MAX_W   148
 
-static const struct gloss_fill hud_glass = {
-    0xf0767b82, 0xee3a3e44, 0xf2141618, 0xf4000000 };
-static const struct gloss_fill hud_gloss = {
-    0x70ffffff, 0x30ffffff, 0x10ffffff, 0x10ffffff };
-static const struct gloss_fill hud_well = {
-    0x80000000, 0x48000000, 0x28000000, 0x24ffffff };
-static const struct gloss_fill hud_knob_fill = {
-    0xffffffff, 0xfff6f6f6, 0xffc6c8cc, 0xff9a9ca0 };
-static const struct gloss_fill hud_track_off = {
-    0xff8a8a8a, 0xffd4d4d4, 0xfffafafa, 0xffffffff };
-static const struct gloss_fill hud_button_fill = {
-    0xff7e8287, 0xff5a5e63, 0xff2a2c2f, 0xff1c1d1f };
+#define CC_LABEL_RGB        0x111418
+#define CC_LABEL_SEL_RGB    0xffffff
+#define CC_VALUE_RGB        0x0060c8
+#define CC_SHADOW_SEL_RGB   0x003670
+#define CC_SHADOW_LIGHT_RGB 0xffffff
+#define CC_ROW_SHADE_RGB    0xcfd5dd
 
-static struct gloss_surface hud_surface(const struct quickscreen_page *view,
-                                        const struct ui_rect *clip)
+static const struct gloss_fill cc_backdrop_fill = {
+    0xff92a2b2, 0xff8c9dad, 0xff525f6d, 0xff46525e };
+static const struct gloss_fill cc_row_fill = {
+    0xffffffff, 0xfffcfdff, 0xffeaeef3, 0xffaeb6c0 };
+static const struct gloss_fill cc_key_fill = {
+    0xffffffff, 0xfff3f5f8, 0xffcfd5dd, 0xffb4bcc6 };
+static const struct gloss_fill cc_key_gloss = {
+    0x60ffffff, 0x38ffffff, 0x10ffffff, 0x00ffffff };
+static const struct gloss_fill cc_knob_fill = {
+    0xffffffff, 0xfff8f9fb, 0xffc4c9d0, 0xff949aa4 };
+static const struct gloss_fill cc_slider_off = {
+    0xff8c939d, 0xffcfd4dc, 0xffeef1f4, 0xffffffff };
+static const struct gloss_fill cc_slider_on_sel = {
+    0xffffffff, 0xffdcf3ff, 0xff92d3ff, 0xff5eaee8 };
+static const struct gloss_fill cc_slider_off_sel = {
+    0xff002757, 0xff003c7d, 0xff0658a8, 0xff3b93dc };
+static const struct gloss_fill cc_switch_on_sel = {
+    0xff002a5c, 0xff004696, 0xff005fc4, 0xff1c7ee0 };
+static const struct gloss_fill cc_switch_off = {
+    0xff8a9099, 0xffd2d6dc, 0xfff3f5f8, 0xffffffff };
+static const struct gloss_fill cc_switch_gloss = {
+    0x48ffffff, 0x24ffffff, 0x08ffffff, 0x00ffffff };
+static const struct gloss_fill cc_pill_fill = {
+    0xffffffff, 0xfff5f7fa, 0xffd0d6df, 0xffadb5c0 };
+static const struct gloss_fill cc_pill_sel = {
+    0xffffffff, 0xfff8fbff, 0xffd2e2f4, 0xffa6c2df };
+static const struct gloss_fill cc_pill_gloss = {
+    0x55ffffff, 0x28ffffff, 0x08ffffff, 0x00ffffff };
+
+static struct gloss_surface cc_surface(const struct quickscreen_page *view,
+                                       const struct ui_rect *clip)
 {
     return (struct gloss_surface){
         .pixels = view->paint_target->fb_ptr, .stride = LCD_WIDTH,
@@ -236,8 +271,13 @@ static struct gloss_surface hud_surface(const struct quickscreen_page *view,
         .clip_w = clip->width, .clip_h = clip->height };
 }
 
+static unsigned cc_pack(uint32_t rgb)
+{
+    return LCD_RGBPACK((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+}
+
 /* The stock selection bar's blue, as the theme sets its four stops. */
-static struct gloss_fill hud_blue(const struct quickscreen_page *view)
+static struct gloss_fill cc_blue(const struct quickscreen_page *view)
 {
     const uint32_t *c = view->theme.gradient[UI_GRADIENT_SELECTION].color;
     if (!view->theme.gradient[UI_GRADIENT_SELECTION].stops)
@@ -251,7 +291,7 @@ static struct gloss_fill hud_blue(const struct quickscreen_page *view)
                                 0xff000000 | c[2], 0xff000000 | c[3] };
 }
 
-static struct ui_rect hud_intersect(struct ui_rect a, struct ui_rect b)
+static struct ui_rect cc_intersect(struct ui_rect a, struct ui_rect b)
 {
     int x = MAX(a.x, b.x), y = MAX(a.y, b.y);
     return (struct ui_rect){ x, y,
@@ -261,223 +301,487 @@ static struct ui_rect hud_intersect(struct ui_rect a, struct ui_rect b)
 
 /* `text` with its line's top-left at screen (x, y), over a one-pixel shadow
  * `dy` rows away, clipped to `clip`. */
-static void hud_text(const struct quickscreen_page *view, struct ui_rect clip,
-                     int font, int x, int y, const char *text, uint32_t rgb,
-                     uint32_t shadow, int dy)
+static void cc_text(const struct quickscreen_page *view, struct ui_rect clip,
+                    int font, int x, int y, const char *text, uint32_t rgb,
+                    uint32_t shadow, int dy)
 {
     if (clip.width <= 0 || clip.height <= 0)
         return;
     struct viewport vp = quickscreen_viewport(view, &clip, font);
     struct viewport *previous = lcd_set_viewport(&vp);
-    lcd_set_foreground(LCD_RGBPACK(shadow >> 16, (shadow >> 8) & 255,
-                                   shadow & 255));
+    lcd_set_foreground(cc_pack(shadow));
     lcd_putsxy(x - vp.x, y - vp.y + dy, text);
-    lcd_set_foreground(LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255));
+    lcd_set_foreground(cc_pack(rgb));
     lcd_putsxy(x - vp.x, y - vp.y, text);
     lcd_set_viewport(previous);
 }
 
-static int hud_text_width(const char *text, int font)
+static int cc_text_width(const char *text, int font)
 {
     int w = 0, h = 0;
     font_getstringsize(text, &w, &h, font);
     return w;
 }
 
-static void hud_paint_background(const struct ui_view *node,
-                                 const struct ui_view_frame *frame)
+/* Exposed only when fewer than four rows are shown. */
+static void cc_paint_background(const struct ui_view *node,
+                                const struct ui_view_frame *frame)
 {
     const struct quickscreen_page *view = node->data;
     const struct ui_rect *c = &frame->clip;
-    fb_data *fb = view->paint_target->fb_ptr;
-    for (int y = c->y; y < c->y + c->height; y++)
+    if (view->theme.style[UI_STYLE_ART] == UI_ART_PLASTIC && stock_art_ready())
     {
-        fb_data *row = fb + y * LCD_WIDTH + c->x;
-        if (view->underneath)
-            ui_sheet_dim(row, view->underneath + y * LCD_WIDTH + c->x,
-                         c->width);
-        else
-            for (int x = 0; x < c->width; x++)
-                row[x] = LCD_RGBPACK(64, 64, 64);
+        fb_data *fb = view->paint_target->fb_ptr;
+        for (int y = c->y; y < c->y + c->height; y++)
+            stock_art_row(STOCK_ART_BACKGROUND_LIGHTBLUE, c->x, y,
+                          fb + y * LCD_WIDTH + c->x, c->width);
+        return;
+    }
+    struct gloss_surface s = cc_surface(view, c);
+    gloss_rect(&s, frame->bounds.x, frame->bounds.y,
+               frame->bounds.width, frame->bounds.height,
+               0, 0, &cc_backdrop_fill);
+}
+
+static void cc_paint_row_bg(const struct quickscreen_page *view,
+                            const struct ui_rect *box,
+                            const struct ui_rect *clip, bool selected)
+{
+    if (selected)
+    {
+        const struct ui_theme_gradient *g =
+            &view->theme.gradient[UI_GRADIENT_SELECTION];
+        uint32_t fallback = ui_theme_color(&view->theme, UI_COLOR_SELECTION,
+                                           &view->palette);
+        fb_data *fb = view->paint_target->fb_ptr;
+        int y0 = MAX(box->y, clip->y);
+        int y1 = MIN(box->y + box->height, clip->y + clip->height);
+        int x0 = MAX(box->x, clip->x);
+        int x1 = MIN(box->x + box->width, clip->x + clip->width);
+        for (int y = y0; y < y1; y++)
+        {
+            fb_data color = cc_pack(ui_theme_gradient_at(g, y - box->y,
+                                                         box->height, fallback));
+            fb_data *row = fb + y * LCD_WIDTH;
+            for (int x = x0; x < x1; x++)
+                row[x] = color;
+        }
+        return;
+    }
+    struct gloss_surface s = cc_surface(view, clip);
+    gloss_rect(&s, box->x, box->y, box->width, box->height, 0, 0, &cc_row_fill);
+    int shade_y = box->y + box->height - 2;
+    if (shade_y >= clip->y && shade_y < clip->y + clip->height)
+    {
+        int x0 = MAX(box->x, clip->x);
+        int x1 = MIN(box->x + box->width, clip->x + clip->width);
+        fb_data *row = view->paint_target->fb_ptr + shade_y * LCD_WIDTH;
+        fb_data shade = cc_pack(CC_ROW_SHADE_RGB);
+        for (int x = x0; x < x1; x++)
+            row[x] = shade;
     }
 }
 
-static void hud_paint_panel(const struct ui_view *node,
-                            const struct ui_view_frame *frame)
+static void cc_paint_speaker_one(int ox, int cy, int waves)
 {
-    const struct quickscreen_page *view = node->data;
-    const struct ui_rect *b = &frame->bounds;
-    struct gloss_surface s = hud_surface(view, &frame->clip);
-    gloss_shadow(&s, b->x, b->y, b->width, b->height, HUD_RADIUS,
-                 HUD_SHADOW, HUD_DROP, 120);
-    gloss_rect(&s, b->x, b->y, b->width, b->height, HUD_RADIUS, HUD_RADIUS,
-               &hud_glass);
-    /* The highlight band over the top of the glass, ending in a hard line
-     * as the era's gloss does. */
-    gloss_rect(&s, b->x + 1, b->y + 1, b->width - 2, b->height * 2 / 5,
-               HUD_RADIUS - 1, 0, &hud_gloss);
-    gloss_outline(&s, b->x, b->y, b->width, b->height, HUD_RADIUS,
-                  0x58ffffff);
+    lcd_fillrect(ox, cy - 2, 3, 5);
+    for (int i = 0; i < 4; i++)
+        lcd_vline(ox + 3 + i, cy - (2 + i), cy + 2 + i);
+    if (waves >= 1)
+        for (int yy = -3; yy <= 3; yy++)
+            lcd_drawpixel(ox + 9 + (abs(yy) <= 1 ? 1 : 0), cy + yy);
+    if (waves >= 2)
+        for (int yy = -5; yy <= 5; yy++)
+            lcd_drawpixel(ox + 12 + (abs(yy) <= 2 ? 1 : 0), cy + yy);
 }
 
-static void hud_knob(struct gloss_surface *s, int x, int y, int w, int h,
-                     int r)
+static void cc_paint_speaker(const struct quickscreen_page *view,
+                             struct ui_rect clip, int x, int cy, int waves,
+                             uint32_t rgb, uint32_t shadow, int dy)
 {
-    gloss_shadow(s, x, y, w, h, r, 2, 1, 110);
-    gloss_rect(s, x, y, w, h, r, r, &hud_knob_fill);
-    gloss_outline(s, x, y, w, h, r, 0xff5e6066);
-}
-
-static void hud_slider(const struct quickscreen_page *view,
-                       struct gloss_surface *s, struct ui_rect area,
-                       int position, int count)
-{
-    int left = area.x + HUD_KNOB / 2;
-    int right = area.x + area.width - HUD_KNOB / 2;
-    int knob = left + (count > 1 ? (right - left) * position / (count - 1) : 0);
-    int ty = area.y + (area.height - HUD_TRACK) / 2;
-    struct gloss_fill blue = hud_blue(view);
-    struct gloss_surface fill = *s;
-    /* The filled part is blue up to the knob, the rest the light track. */
-    fill.clip_w = MAX(0, MIN(s->clip_x + s->clip_w, knob) - s->clip_x);
-    gloss_rect(&fill, left - 2, ty, right - left + 4, HUD_TRACK,
-               HUD_TRACK / 2, HUD_TRACK / 2, &blue);
-    fill = *s;
-    fill.clip_x = MAX(s->clip_x, knob);
-    fill.clip_w = MAX(0, s->clip_x + s->clip_w - fill.clip_x);
-    gloss_rect(&fill, left - 2, ty, right - left + 4, HUD_TRACK,
-               HUD_TRACK / 2, HUD_TRACK / 2, &hud_track_off);
-    gloss_outline(s, left - 2, ty, right - left + 4, HUD_TRACK, HUD_TRACK / 2,
-                  0xc0000000);
-    int ky = area.y + (area.height - HUD_KNOB) / 2;
-    hud_knob(s, knob - HUD_KNOB / 2, ky, HUD_KNOB, HUD_KNOB, HUD_KNOB / 2);
-}
-
-static void hud_switch(const struct quickscreen_page *view,
-                       struct gloss_surface *s, struct ui_rect clip,
-                       struct ui_rect area, bool on)
-{
-    int w = MIN(area.width, 72), h = area.height, r = 5;
-    int knob = w * 2 / 5;
-    struct gloss_fill blue = hud_blue(view);
-    gloss_rect(s, area.x, area.y, w, h, r, r, on ? &blue : &hud_track_off);
-    gloss_outline(s, area.x, area.y, w, h, r, 0xff3c3e42);
-    const char *label = str(on ? LANG_ON : LANG_OFF);
-    int font = view->title_font >= 0 ? view->title_font : view->fallback_font;
-    int lx = on ? area.x : area.x + knob;
-    int tw = hud_text_width(label, font);
-    int ty = area.y + (h - font_get(font)->height) / 2;
-    struct ui_rect text = hud_intersect(clip, (struct ui_rect){
-        lx, area.y, w - knob, h });
-    if (on)
-        hud_text(view, text, font, lx + (w - knob - tw) / 2, ty, label,
-                 0xffffff, 0x10306a, -1);
-    else
-        hud_text(view, text, font, lx + (w - knob - tw) / 2, ty, label,
-                 0x7a7a7a, 0xffffff, 1);
-    hud_knob(s, on ? area.x + w - knob : area.x, area.y, knob, h, r);
-}
-
-/* A Leopard HUD pop-up button: the value, and the up and down marks. */
-static void hud_button(const struct quickscreen_page *view,
-                       struct gloss_surface *s, struct ui_rect clip,
-                       struct ui_rect area, const char *value)
-{
-    int r = 5;
-    gloss_rect(s, area.x, area.y, area.width, area.height, r, r,
-               &hud_button_fill);
-    gloss_rect(s, area.x + 1, area.y + 1, area.width - 2, area.height / 2,
-               r - 1, 0, &hud_gloss);
-    gloss_outline(s, area.x, area.y, area.width, area.height, r, 0x78ffffff);
-
-    int mark = area.x + area.width - 10, my = area.y + area.height / 2;
     struct viewport vp = quickscreen_viewport(view, &clip, view->fallback_font);
     struct viewport *previous = lcd_set_viewport(&vp);
-    lcd_set_foreground(LCD_RGBPACK(255, 255, 255));
-    for (int i = 0; i < 3; i++)
+    lcd_set_foreground(cc_pack(shadow));
+    cc_paint_speaker_one(x - vp.x, cy - vp.y + dy, waves);
+    lcd_set_foreground(cc_pack(rgb));
+    cc_paint_speaker_one(x - vp.x, cy - vp.y, waves);
+    lcd_set_viewport(previous);
+}
+
+static void cc_paint_key_glyph(uint8_t mask, enum quickscreen_item item,
+                               int cx, int cy)
+{
+    const uint8_t both_tb = (1u << QUICKSCREEN_TOP) | (1u << QUICKSCREEN_BOTTOM);
+    if ((mask & both_tb) == both_tb)
     {
-        lcd_hline(mark - i - vp.x, mark + i - vp.x, my - 4 + i - vp.y);
-        lcd_hline(mark - i - vp.x, mark + i - vp.x, my + 4 - i - vp.y);
+        for (int i = 0; i < 5; i++)
+        {
+            lcd_hline(cx - i, cx + i, cy - 6 + i);
+            lcd_hline(cx - i, cx + i, cy + 6 - i);
+        }
+        return;
+    }
+    for (int i = 0; i < 6; i++)
+    {
+        if (item == QUICKSCREEN_TOP)
+            lcd_hline(cx - i, cx + i, cy - 3 + i);
+        else if (item == QUICKSCREEN_BOTTOM)
+            lcd_hline(cx - i, cx + i, cy + 3 - i);
+        else if (item == QUICKSCREEN_LEFT)
+            lcd_vline(cx - 3 + i, cy - i, cy + i);
+        else
+            lcd_vline(cx + 3 - i, cy - i, cy + i);
+    }
+}
+
+static void cc_paint_key_badge(const struct quickscreen_page *view,
+                               struct gloss_surface *s, struct ui_rect clip,
+                               int x, int y, int size, uint8_t mask,
+                               enum quickscreen_item item)
+{
+    int r = size < 26 ? 6 : 7;
+    gloss_shadow(s, x, y, size, size, r, 2, 1, 70);
+    gloss_rect(s, x, y, size, size, r, r, &cc_key_fill);
+    gloss_rect(s, x + 1, y + 1, size - 2, size / 2 - 1, r - 1, 0,
+               &cc_key_gloss);
+    gloss_outline(s, x, y, size, size, r, 0xff8b94a0);
+
+    struct viewport vp = quickscreen_viewport(view, &clip, view->fallback_font);
+    struct viewport *previous = lcd_set_viewport(&vp);
+    int cx = x + size / 2 - vp.x;
+    int cy = y + size / 2 - vp.y;
+    lcd_set_foreground(cc_pack(0xffffff));
+    cc_paint_key_glyph(mask, item, cx, cy + 1);
+    lcd_set_foreground(cc_pack(0x204b7c));
+    cc_paint_key_glyph(mask, item, cx, cy);
+    lcd_set_viewport(previous);
+}
+
+static void cc_knob(struct gloss_surface *s, int x, int y, int w, int h,
+                    int r, bool selected)
+{
+    gloss_shadow(s, x, y, w, h, r, 2, 1, 100);
+    gloss_rect(s, x, y, w, h, r, r, &cc_knob_fill);
+    gloss_outline(s, x, y, w, h, r, selected ? 0xff003064 : 0xff5a616b);
+}
+
+static void cc_slider(const struct quickscreen_page *view,
+                      struct gloss_surface *s, int left_x, int right_x,
+                      int track_y, int track_h, int knob_d, int position,
+                      int count, bool selected)
+{
+    int left_k = left_x + knob_d / 2;
+    int right_k = right_x - knob_d / 2;
+    int kx = left_k + (count > 1 ? (right_k - left_k) * position / (count - 1)
+                                 : 0);
+    int tw = right_x - left_x;
+    struct gloss_fill on_fill = selected ? cc_slider_on_sel : cc_blue(view);
+    const struct gloss_fill *off_fill =
+        selected ? &cc_slider_off_sel : &cc_slider_off;
+
+    struct gloss_surface half = *s;
+    half.clip_w = MAX(0, MIN(s->clip_x + s->clip_w, kx) - s->clip_x);
+    gloss_rect(&half, left_x, track_y, tw, track_h, track_h / 2, track_h / 2,
+               &on_fill);
+    half = *s;
+    half.clip_x = MAX(s->clip_x, kx);
+    half.clip_w = MAX(0, s->clip_x + s->clip_w - half.clip_x);
+    gloss_rect(&half, left_x, track_y, tw, track_h, track_h / 2, track_h / 2,
+               off_fill);
+    gloss_outline(s, left_x, track_y, tw, track_h, track_h / 2,
+                  selected ? 0xff002a5c : 0xff6e7782);
+
+    int ky = track_y + track_h / 2 - knob_d / 2;
+    cc_knob(s, kx - knob_d / 2, ky, knob_d, knob_d, knob_d / 2, selected);
+}
+
+static void cc_switch(const struct quickscreen_page *view,
+                      struct gloss_surface *s, struct ui_rect clip,
+                      int sx, int sy, int sw_h, bool on, bool selected)
+{
+    int font = view->body_font >= 0 ? view->body_font : view->fallback_font;
+    int fh = font_get(font)->height;
+    int ty = sy + (sw_h - fh) / 2 - 1;
+    const char *label = str(on ? LANG_ON : LANG_OFF);
+    int tw = cc_text_width(label, font);
+
+    if (on)
+    {
+        struct gloss_fill blue = cc_blue(view);
+        gloss_rect(s, sx, sy, CC_SWITCH_W, sw_h, CC_SWITCH_R,
+                   CC_SWITCH_R, selected ? &cc_switch_on_sel : &blue);
+        gloss_rect(s, sx + 1, sy + 1, CC_SWITCH_W - 2, sw_h / 2 - 1,
+                   CC_SWITCH_R - 1, 0, &cc_switch_gloss);
+        gloss_outline(s, sx, sy, CC_SWITCH_W, sw_h, CC_SWITCH_R,
+                      selected ? 0xc8ffffff : 0xff284f7a);
+        struct ui_rect text = cc_intersect(clip, (struct ui_rect){
+            sx, sy, CC_SWITCH_W - CC_SWITCH_KNOB, sw_h });
+        cc_text(view, text, font,
+                sx + (CC_SWITCH_W - CC_SWITCH_KNOB - tw) / 2, ty, label,
+                0xffffff, 0x002d64, -1);
+        cc_knob(s, sx + CC_SWITCH_W - CC_SWITCH_KNOB, sy, CC_SWITCH_KNOB,
+                sw_h, CC_SWITCH_R, selected);
+    }
+    else
+    {
+        gloss_rect(s, sx, sy, CC_SWITCH_W, sw_h, CC_SWITCH_R,
+                   CC_SWITCH_R, &cc_switch_off);
+        gloss_outline(s, sx, sy, CC_SWITCH_W, sw_h, CC_SWITCH_R,
+                      selected ? 0xff003064 : 0xff78808a);
+        struct ui_rect text = cc_intersect(clip, (struct ui_rect){
+            sx + CC_SWITCH_KNOB, sy, CC_SWITCH_W - CC_SWITCH_KNOB, sw_h });
+        cc_text(view, text, font,
+                sx + CC_SWITCH_KNOB + (CC_SWITCH_W - CC_SWITCH_KNOB - tw) / 2,
+                ty, label, 0x525860, 0xffffff, 1);
+        cc_knob(s, sx, sy, CC_SWITCH_KNOB, sw_h, CC_SWITCH_R, selected);
+    }
+}
+
+static void cc_pill(const struct quickscreen_page *view,
+                    struct gloss_surface *s, struct ui_rect clip,
+                    int px, int py, int pw, int ph, const char *value,
+                    bool selected)
+{
+    int font = view->body_font >= 0 ? view->body_font : view->fallback_font;
+    int fh = font_get(font)->height;
+    int r = ph < 32 ? 6 : 7;
+    gloss_shadow(s, px, py, pw, ph, r, selected ? 2 : 1, 1,
+                 selected ? 95 : 55);
+    gloss_rect(s, px, py, pw, ph, r, r,
+               selected ? &cc_pill_sel : &cc_pill_fill);
+    gloss_rect(s, px + 1, py + 1, pw - 2, ph / 2 - 1, r - 1, 0,
+               &cc_pill_gloss);
+    gloss_outline(s, px, py, pw, ph, r,
+                  selected ? 0xff003a7a : 0xff828c98);
+
+    int mx = px + pw - 13, my = py + ph / 2;
+    struct viewport vp = quickscreen_viewport(view, &clip, view->fallback_font);
+    struct viewport *previous = lcd_set_viewport(&vp);
+    lcd_set_foreground(cc_pack(selected ? 0x004a99 : 0x3b4858));
+    for (int i = 0; i < 4; i++)
+    {
+        lcd_hline(mx - i - vp.x, mx + i - vp.x, my - 5 + i - vp.y);
+        lcd_hline(mx - i - vp.x, mx + i - vp.x, my + 5 - i - vp.y);
     }
     lcd_set_viewport(previous);
 
-    int font = view->title_font >= 0 ? view->title_font : view->fallback_font;
-    int room = area.width - 24;
-    int tw = MIN(hud_text_width(value, font), room);
-    struct ui_rect text = hud_intersect(clip, (struct ui_rect){
-        area.x + 6, area.y, room + 2, area.height });
-    hud_text(view, text, font, area.x + 7 + (room - tw) / 2,
-             area.y + (area.height - font_get(font)->height) / 2, value,
-             HUD_TEXT, HUD_TEXT_SHADOW, -1);
+    int room = pw - 24;
+    int vw = cc_text_width(value, font);
+    struct ui_rect text = cc_intersect(clip, (struct ui_rect){
+        px + 6, py, room, ph });
+    cc_text(view, text, font, px + 7 + (room - MIN(vw, room)) / 2,
+            py + (ph - fh) / 2 - 1, value,
+            selected ? 0x004a99 : 0x124580, 0xffffff, 1);
 }
 
-static void hud_paint_card(const struct ui_view *node,
-                           const struct ui_view_frame *frame)
+static void cc_paint_volume_hero(const struct cc_row *row,
+                                 const struct ui_view_frame *frame,
+                                 bool selected)
 {
-    struct quickscreen_card *card = node->data;
-    struct gui_quickscreen *qs = card->qs;
+    struct gui_quickscreen *qs = row->qs;
     struct quickscreen_page *view = qs->view;
     const struct ui_rect *box = &frame->bounds;
-    struct gloss_surface s = hud_surface(view, &frame->clip);
+    struct gloss_surface s = cc_surface(view, &frame->clip);
     int title_font = view->title_font >= 0 ? view->title_font
                                            : view->fallback_font;
     int body_font = view->body_font >= 0 ? view->body_font
                                          : view->fallback_font;
-    int line = font_get(title_font)->height;
-    char buffer[MAX_PATH];
-
-    gloss_rect(&s, box->x, box->y, box->width, box->height, HUD_CELL_RADIUS,
-               HUD_CELL_RADIUS, &hud_well);
-
-    int control_h = MIN(HUD_CONTROL, box->height - line - HUD_PAD);
-    int gap = MAX(0, (box->height - line - control_h) / 3);
-    int ty = box->y + gap;
-    struct ui_rect inner = hud_intersect(frame->clip, (struct ui_rect){
-        box->x + HUD_PAD, box->y, box->width - 2 * HUD_PAD, box->height });
-    int arrow_x = box->x + box->width - HUD_PAD - HUD_ARROW;
-    int arrow_y = ty + line / 2;
-
-    /* The direction that steps this setting, and its name. */
-    struct viewport vp = quickscreen_viewport(view, &frame->clip, title_font);
-    struct viewport *previous = lcd_set_viewport(&vp);
-    lcd_set_foreground(LCD_RGBPACK(0, 0, 0));
-    quickscreen_paint_arrow(card->item, arrow_x - vp.x, arrow_y - 1 - vp.y,
-                            HUD_ARROW);
-    lcd_set_foreground(LCD_RGBPACK(255, 255, 255));
-    quickscreen_paint_arrow(card->item, arrow_x - vp.x, arrow_y - vp.y,
-                            HUD_ARROW);
-    lcd_set_viewport(previous);
-
-    struct ui_rect title = inner;
-    title.width = MAX(0, MIN(title.x + title.width,
-                             arrow_x - HUD_ARROW - 4) - title.x);
-    hud_text(view, title, title_font, box->x + HUD_PAD, ty,
-             quickscreen_title(qs, card->item), HUD_TEXT, HUD_TEXT_SHADOW, -1);
-
-    struct ui_rect control = { box->x + HUD_PAD, ty + line + gap,
-                               box->width - 2 * HUD_PAD, control_h };
-    const struct settings_list *setting = qs->items[card->item];
-    const char *value = quickscreen_value(qs, card->item, buffer,
-                                          sizeof(buffer));
-    int count = 0, position = 0;
-    if (cider_slot(qs, card->item))
-        hud_button(view, &s, frame->clip, control, value);
-    else if ((setting->flags & F_T_MASK) == F_T_BOOL)
-        hud_switch(view, &s, frame->clip, control,
-                   option_value_as_int(setting));
-    else if ((setting->flags & (F_INT_SETTING | F_T_SOUND)) &&
-             get_setting_info_for_bar(setting, 0, &count, &position) &&
-             count > 2)
+    char buffer[32];
+    int position = 0, count = 101;
+    if (qs->cider)
     {
-        /* A number beside its name, right-aligned short of the arrow. */
-        int vw = hud_text_width(value, body_font);
-        int vx = arrow_x - HUD_ARROW - 6 - vw;
-        hud_text(view, title, body_font, vx, ty, value, HUD_VALUE,
-                 HUD_TEXT_SHADOW, -1);
-        hud_slider(view, &s, control, position, count);
+        struct cider_status st;
+        cider_status(&st);
+        position = MIN(MAX(st.volume, 0), 100);
+        snprintf(buffer, sizeof(buffer), "%d%%", position);
     }
     else
-        hud_button(view, &s, frame->clip, control, value);
+    {
+        int min = sound_min(SOUND_VOLUME), max = sound_max(SOUND_VOLUME);
+        int cur = MIN(MAX(global_status.volume, min), max);
+        count = MAX(2, max - min + 1);
+        position = cur - min;
+        format_sound_value(buffer, sizeof(buffer), SOUND_VOLUME, cur);
+    }
+
+    uint32_t lbl_rgb = selected ? CC_LABEL_SEL_RGB : CC_LABEL_RGB;
+    uint32_t lbl_shd = selected ? CC_SHADOW_SEL_RGB : CC_SHADOW_LIGHT_RGB;
+    int lbl_dy = selected ? -1 : 1;
+    int top_y = box->y + (box->height >= 60 ? 8 : 4);
+    int right = box->x + box->width - CC_PAD;
+    int vw = cc_text_width(buffer, body_font);
+    int vx = right - vw;
+    struct ui_rect lbl_clip = cc_intersect(frame->clip, (struct ui_rect){
+        box->x + CC_PAD, box->y, MAX(0, vx - 8 - (box->x + CC_PAD)),
+        box->height });
+    cc_text(view, lbl_clip, title_font, box->x + CC_PAD, top_y,
+            str(LANG_VOLUME), lbl_rgb, lbl_shd, lbl_dy);
+    struct ui_rect val_clip = cc_intersect(frame->clip, (struct ui_rect){
+        vx - 2, box->y, right - vx + 4, box->height });
+    cc_text(view, val_clip, body_font, vx, top_y - 2, buffer,
+            selected ? CC_LABEL_SEL_RGB : CC_VALUE_RGB, lbl_shd, lbl_dy);
+
+    int track_h = box->height >= 60 ? 11 : 9;
+    int knob_d = box->height >= 60 ? 20 : 18;
+    int track_y = box->y + box->height - (box->height >= 60 ? 24 : 20);
+    int cy = track_y + track_h / 2;
+    uint32_t ico_rgb = selected ? 0xffffff : 0x204b7c;
+    cc_paint_speaker(view, frame->clip, box->x + CC_PAD, cy, 0,
+                     ico_rgb, lbl_shd, lbl_dy);
+    cc_paint_speaker(view, frame->clip, right - 14, cy, 2,
+                     ico_rgb, lbl_shd, lbl_dy);
+    cc_slider(view, &s, box->x + 28, box->x + box->width - 34,
+              track_y, track_h, knob_d, position, count, selected);
+}
+
+static void cc_paint_row(const struct ui_view *node,
+                         const struct ui_view_frame *frame)
+{
+    struct cc_row *row = node->data;
+    struct gui_quickscreen *qs = row->qs;
+    struct quickscreen_page *view = qs->view;
+    const struct ui_rect *box = &frame->bounds;
+    bool selected = row->index == qs->focus_row;
+
+    cc_paint_row_bg(view, box, &frame->clip, selected);
+    if (row->item == QUICKSCREEN_ITEM_COUNT)
+    {
+        cc_paint_volume_hero(row, frame, selected);
+        return;
+    }
+
+    struct gloss_surface s = cc_surface(view, &frame->clip);
+    int title_font = view->title_font >= 0 ? view->title_font
+                                           : view->fallback_font;
+    int body_font = view->body_font >= 0 ? view->body_font
+                                         : view->fallback_font;
+    int title_h = font_get(title_font)->height;
+    char buffer[MAX_PATH];
+
+    int tx = CC_PAD;
+    if (!view->wheel)
+    {
+        int ksz = box->height >= 48 ? 26 : 24;
+        cc_paint_key_badge(view, &s, frame->clip, box->x + CC_KEY_X,
+                           box->y + (box->height - ksz) / 2, ksz,
+                           row->key_mask, row->item);
+        tx = ksz == 26 ? 46 : 44;
+    }
+
+    int right = box->x + box->width - CC_PAD;
+    uint32_t lbl_rgb = selected ? CC_LABEL_SEL_RGB : CC_LABEL_RGB;
+    uint32_t lbl_shd = selected ? CC_SHADOW_SEL_RGB : CC_SHADOW_LIGHT_RGB;
+    int lbl_dy = selected ? -1 : 1;
+
+    const struct settings_list *setting = qs->items[row->item];
+    const char *title = quickscreen_title(qs, row->item);
+    const char *value = quickscreen_value(qs, row->item, buffer,
+                                          sizeof(buffer));
+    int count = 0, position = 0;
+
+    if (!cider_slot(qs, row->item) &&
+        (setting->flags & (F_INT_SETTING | F_T_SOUND)) &&
+        get_setting_info_for_bar(setting, 0, &count, &position) && count > 2)
+    {
+        int vw = cc_text_width(value, body_font);
+        int vx = right - vw;
+        int top_y = box->y + (box->height >= 48 ? 5 : 3);
+        struct ui_rect lbl_clip = cc_intersect(frame->clip, (struct ui_rect){
+            box->x + tx, box->y, MAX(0, vx - 8 - (box->x + tx)), box->height });
+        cc_text(view, lbl_clip, title_font, box->x + tx, top_y, title,
+                lbl_rgb, lbl_shd, lbl_dy);
+        struct ui_rect val_clip = cc_intersect(frame->clip, (struct ui_rect){
+            vx - 2, box->y, right - vx + 4, box->height });
+        cc_text(view, val_clip, body_font, vx, top_y - 2, value,
+                selected ? CC_LABEL_SEL_RGB : CC_VALUE_RGB, lbl_shd, lbl_dy);
+        int track_h = box->height >= 48 ? 9 : 8;
+        int knob_d = box->height >= 48 ? 18 : 16;
+        int track_y = box->y + box->height - (box->height >= 48 ? 20 : 16);
+        cc_slider(view, &s, box->x + tx, right, track_y, track_h, knob_d,
+                  position, count, selected);
+        return;
+    }
+
+    int ty = box->y + (box->height - title_h) / 2;
+    if (!cider_slot(qs, row->item) && (setting->flags & F_T_MASK) == F_T_BOOL)
+    {
+        int sw_h = box->height < 48 ? 28 : 30;
+        int sx = right - CC_SWITCH_W;
+        int sy = box->y + (box->height - sw_h) / 2;
+        struct ui_rect lbl_clip = cc_intersect(frame->clip, (struct ui_rect){
+            box->x + tx, box->y, MAX(0, sx - 8 - (box->x + tx)), box->height });
+        cc_text(view, lbl_clip, title_font, box->x + tx, ty, title,
+                lbl_rgb, lbl_shd, lbl_dy);
+        cc_switch(view, &s, frame->clip, sx, sy, sw_h,
+                  option_value_as_int(setting), selected);
+        return;
+    }
+
+    int vw = cc_text_width(value, body_font);
+    int pw = MAX(CC_PILL_MIN_W, MIN(CC_PILL_MAX_W, vw + 36));
+    int ph = box->height < 48 ? 28 : 32;
+    int px = right - pw;
+    int py = box->y + (box->height - ph) / 2;
+    struct ui_rect lbl_clip = cc_intersect(frame->clip, (struct ui_rect){
+        box->x + tx, box->y, MAX(0, px - 8 - (box->x + tx)), box->height });
+    cc_text(view, lbl_clip, title_font, box->x + tx, ty, title,
+            lbl_rgb, lbl_shd, lbl_dy);
+    cc_pill(view, &s, frame->clip, px, py, pw, ph, value, selected);
+}
+
+static void cc_build_rows(struct gui_quickscreen *qs, const struct viewport *vp)
+{
+    struct quickscreen_page *view = qs->view;
+    static const struct ui_view_ops cc_row_ops = {.paint = cc_paint_row};
+
+    view->row_count = 1;
+    view->rows[0] = (struct cc_row){
+        .qs = qs, .index = 0, .item = QUICKSCREEN_ITEM_COUNT, .key_mask = 0,
+    };
+
+    for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
+    {
+        if (!qs->items[i])
+            continue;
+        if (!cider_slot(qs, i) && qs->items[i]->lang_id == LANG_VOLUME)
+        {
+            view->rows[0].key_mask |= 1u << i;
+            continue;
+        }
+        int dup = -1;
+        if (!cider_slot(qs, i))
+            for (int r = 1; r < view->row_count; ++r)
+                if (!cider_slot(qs, view->rows[r].item) &&
+                    qs->items[view->rows[r].item] == qs->items[i])
+                {
+                    dup = r;
+                    break;
+                }
+        if (dup >= 0)
+        {
+            view->rows[dup].key_mask |= 1u << i;
+            continue;
+        }
+        int idx = view->row_count++;
+        view->rows[idx] = (struct cc_row){
+            .qs = qs, .index = idx, .item = i, .key_mask = 1u << i,
+        };
+    }
+
+    int sec_h = view->row_count == CC_MAX_ROWS ? (vp->height - 10) / 5
+                                               : MIN(52, (vp->height - 12) / 4);
+    int hero_h = view->row_count == CC_MAX_ROWS
+                 ? vp->height - 4 * sec_h
+                 : MIN(64, vp->height - 3 * sec_h);
+    int ry = 0;
+    for (int r = 0; r < view->row_count; ++r)
+    {
+        int rh = r == 0 ? hero_h : sec_h;
+        ui_view_init(&view->rows[r].view, (struct ui_rect){0, ry, vp->width, rh},
+                     &cc_row_ops, &view->rows[r]);
+        ui_view_append(&view->background, &view->rows[r].view);
+        ry += rh;
+    }
 }
 
 static void quickscreen_layout(struct gui_quickscreen *qs, const struct viewport *vp)
@@ -487,13 +791,20 @@ static void quickscreen_layout(struct gui_quickscreen *qs, const struct viewport
     static const struct ui_view_ops card_ops = {.paint = quickscreen_paint_card};
     static const uint8_t slots[QUICKSCREEN_ITEM_COUNT] = {1, 0, 2, 3};
 
-    static const struct ui_view_ops hud_background_ops = {
-        .paint = hud_paint_background};
-    static const struct ui_view_ops hud_panel_ops = {.paint = hud_paint_panel};
-    static const struct ui_view_ops hud_card_ops = {.paint = hud_paint_card};
-    int inset = view->hud ? HUD_INSET : 0;
+    static const struct ui_view_ops cc_background_ops = {
+        .paint = cc_paint_background};
 
-    int margin = MIN(view->theme.metric[UI_METRIC_MODAL_EDGE_MARGIN] + inset,
+    ui_view_init(&view->background, (struct ui_rect){vp->x, vp->y, vp->width, vp->height},
+                 view->full_page ? &cc_background_ops : &background_ops, view);
+    if (view->full_page)
+    {
+        cc_build_rows(qs, vp);
+        ui_page_init(&view->page, &view->background);
+        ui_nav_push(&view->nav, &view->page, UI_SHEET);
+        return;
+    }
+
+    int margin = MIN(view->theme.metric[UI_METRIC_MODAL_EDGE_MARGIN],
                      vp->width / 8);
     int gap = MIN(MAX(4, margin * 2 / 3), vp->height / 8);
     int width = MAX(1, (vp->width - 2 * margin - gap) / 2);
@@ -502,19 +813,6 @@ static void quickscreen_layout(struct gui_quickscreen *qs, const struct viewport
     int x = (vp->width - (2 * width + gap)) / 2;
     int y = (vp->height - (2 * height + gap)) / 2;
 
-    ui_view_init(&view->background, (struct ui_rect){vp->x, vp->y, vp->width, vp->height},
-                 view->hud ? &hud_background_ops : &background_ops, view);
-    struct ui_view *parent = &view->background;
-    if (view->hud)
-    {
-        /* The glass, and the cards placed within it. */
-        ui_view_init(&view->panel, (struct ui_rect){x - inset, y - inset,
-                     2 * width + gap + 2 * inset, 2 * height + gap + 2 * inset},
-                     &hud_panel_ops, view);
-        ui_view_append(&view->background, &view->panel);
-        parent = &view->panel;
-        x = y = inset;
-    }
     for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
     {
         if (!qs->items[i])
@@ -525,8 +823,8 @@ static void quickscreen_layout(struct gui_quickscreen *qs, const struct viewport
         ui_view_init(&card->view, (struct ui_rect){
                      x + (slots[i] % 2) * (width + gap),
                      y + (slots[i] / 2) * (height + gap), width, height},
-                     view->hud ? &hud_card_ops : &card_ops, card);
-        ui_view_append(parent, &card->view);
+                     &card_ops, card);
+        ui_view_append(&view->background, &card->view);
     }
 
     ui_page_init(&view->page, &view->background);
@@ -535,16 +833,10 @@ static void quickscreen_layout(struct gui_quickscreen *qs, const struct viewport
 
 static void quickscreen_present(struct quickscreen_page *view, bool changed)
 {
-    if (view->hud)
+    if (view->full_page)
     {
-        /* The glass with its shadow, in screen coordinates. */
-        const int *b = view->background.value, *p = view->panel.value;
-        struct ui_rect panel = {
-            b[UI_X] + p[UI_X] - HUD_SHADOW, b[UI_Y] + p[UI_Y] - HUD_SHADOW,
-            p[UI_WIDTH] + 2 * HUD_SHADOW,
-            p[UI_HEIGHT] + 2 * HUD_SHADOW + HUD_DROP };
-        ui_sheet_paint_zoom(&view->sheet, view->underneath, view->tile.fb_ptr,
-                            panel, b[UI_Y]);
+        ui_sheet_paint_slide(&view->sheet, view->underneath, view->tile.fb_ptr,
+                             changed);
         return;
     }
     ui_sheet_paint(&view->sheet, view->underneath, view->tile.fb_ptr,
@@ -576,7 +868,54 @@ static void quickscreen_chrome(struct quickscreen_page *view)
         memcpy(view->tile.fb_ptr, lcd_framebuffer_default.fb_ptr,
                LCD_WIDTH * height * sizeof(fb_data));
         if (view->sheet.active)
-            view->sheet.light = 0; /* Status rendering wrote to the canonical panel. */
+            view->sheet.light = view->full_page ? -1 : 0;
+    }
+}
+
+static void quickscreen_invalidate_row(struct gui_quickscreen *qs, int row)
+{
+    struct quickscreen_page *view = qs->view;
+    if (row < 0 || row >= view->row_count)
+        return;
+    const int *b = view->background.value;
+    const int *p = view->rows[row].view.value;
+    ui_page_invalidate(&view->page, (struct ui_rect){
+        b[UI_X] + p[UI_X], b[UI_Y] + p[UI_Y], p[UI_WIDTH], p[UI_HEIGHT]});
+}
+
+static void quickscreen_invalidate_card(struct gui_quickscreen *qs,
+                                        enum quickscreen_item item)
+{
+    struct quickscreen_page *view = qs->view;
+    if (item >= QUICKSCREEN_ITEM_COUNT || !qs->items[item])
+        return;
+    const int *b = view->background.value;
+    const int *p = view->cards[item].view.value;
+    ui_page_invalidate(&view->page, (struct ui_rect){
+        b[UI_X] + p[UI_X], b[UI_Y] + p[UI_Y], p[UI_WIDTH], p[UI_HEIGHT]});
+}
+
+static void quickscreen_flush(struct quickscreen_page *view)
+{
+    if (view->sheet_handle > 0)
+    {
+        struct ui_rect damage = ui_page_paint(&view->page);
+        if (view->sheet.active)
+            quickscreen_present(view, damage.width > 0 && damage.height > 0);
+        else
+            quickscreen_copy_tile(view, damage);
+        return;
+    }
+    if (ui_flush_inhibited())
+    {
+        struct ui_rect damage = ui_page_paint(&view->page);
+        if (damage.width > 0 && damage.height > 0)
+            ui_mark_dirty_rect(SCREEN_MAIN, damage.x, damage.y, damage.width, damage.height);
+    }
+    else
+    {
+        ui_nav_draw(&view->nav);
+        ui_flush_dirty();
     }
 }
 
@@ -595,6 +934,20 @@ static void quickscreen_update(struct gui_quickscreen *qs, enum quickscreen_item
             background->value[UI_X], background->value[UI_Y],
             background->value[UI_WIDTH], background->value[UI_HEIGHT]});
     }
+    else if (view->full_page)
+    {
+        for (int r = 0; r < view->row_count; ++r)
+        {
+            enum quickscreen_item ri = view->rows[r].item;
+            bool match = (view->rows[r].key_mask & (1u << item)) != 0;
+            if (!match && ri < QUICKSCREEN_ITEM_COUNT && qs->items[ri] &&
+                !cider_slot(qs, ri) && !cider_slot(qs, item) &&
+                qs->items[ri] == qs->items[item])
+                match = true;
+            if (match)
+                quickscreen_invalidate_row(qs, r);
+        }
+    }
     else
     {
         for (enum quickscreen_item i = QUICKSCREEN_TOP; i < QUICKSCREEN_ITEM_COUNT; ++i)
@@ -604,35 +957,172 @@ static void quickscreen_update(struct gui_quickscreen *qs, enum quickscreen_item
             if (!qs->items[i] || (i != item && (cider_slot(qs, i) || cider_slot(qs, item) ||
                                               qs->items[i] != qs->items[item])))
                 continue;
-            const int *p = view->cards[i].view.value;
-            const int *o = view->panel.value;  /* zero without the HUD */
-            ui_page_invalidate(&view->page, (struct ui_rect){
-                background->value[UI_X] + o[UI_X] + p[UI_X],
-                background->value[UI_Y] + o[UI_Y] + p[UI_Y],
-                p[UI_WIDTH], p[UI_HEIGHT]});
+            quickscreen_invalidate_card(qs, i);
         }
     }
-    if (view->sheet_handle > 0)
+    quickscreen_flush(view);
+}
+
+static void quickscreen_update_row(struct gui_quickscreen *qs, int row)
+{
+    quickscreen_invalidate_row(qs, row);
+    quickscreen_flush(qs->view);
+}
+
+static void quickscreen_update_focus(struct gui_quickscreen *qs,
+                                     int prev, int next)
+{
+    quickscreen_invalidate_row(qs, prev);
+    quickscreen_invalidate_row(qs, next);
+    quickscreen_flush(qs->view);
+}
+
+static bool quickscreen_wheel_transport(const struct gui_quickscreen *qs,
+                                        int button)
+{
+    if (button != ACTION_WPS_PLAY && button != ACTION_WPS_SKIPPREV &&
+        button != ACTION_WPS_SKIPNEXT)
+        return false;
+    if (qs->cider)
     {
-        struct ui_rect damage = ui_page_paint(&view->page);
-        if (view->sheet.active)
+        cider_wps_action(button);
+        return true;
+    }
+    int status = audio_status();
+    if (button == ACTION_WPS_PLAY)
+    {
+        if (status & AUDIO_STATUS_PLAY)
         {
-            quickscreen_present(view, damage.width > 0 && damage.height > 0);
+            if (status & AUDIO_STATUS_PAUSE)
+                audio_resume();
+            else
+                audio_pause();
         }
+        else if (playlist_amount() > 0)
+            playlist_resume_track(MAX(0, global_status.resume_index),
+                                  global_status.resume_crc32,
+                                  global_status.resume_elapsed,
+                                  global_status.resume_offset);
+    }
+    else if (status & AUDIO_STATUS_PLAY)
+    {
+        if (button == ACTION_WPS_SKIPNEXT)
+            audio_next();
         else
-            quickscreen_copy_tile(view, damage);
+            audio_prev();
+    }
+    return true;
+}
+
+static void quickscreen_step_volume(struct gui_quickscreen *qs, int dir)
+{
+    if (qs->cider)
+    {
+        cider_control("volume-step", dir);
+        if (qs->view->full_page)
+            quickscreen_update_row(qs, 0);
         return;
     }
-    if (ui_flush_inhibited())
+    adjust_volume(dir);
+    if (qs->view->full_page)
+        global_status.last_volume_change = 0;
+    talk_settle();
+    if (global_settings.talk_menu)
+        talk_value_decimal(sound_val2phys(SOUND_VOLUME, global_status.volume),
+                           UNIT_DB, sound_numdecimals(SOUND_VOLUME), false);
+    if (qs->view->full_page)
+        quickscreen_update_row(qs, 0);
+    else if (qs->volume_item < QUICKSCREEN_ITEM_COUNT)
+        quickscreen_update(qs, qs->volume_item);
+}
+
+static void talk_qs_option(struct gui_quickscreen *qs,
+                           enum quickscreen_item item, bool enqueue);
+
+static void quickscreen_wheel_step(struct gui_quickscreen *qs, int button)
+{
+    struct quickscreen_page *view = qs->view;
+    if (button == ACTION_STD_OK)
     {
-        struct ui_rect damage = ui_page_paint(&view->page);
-        if (damage.width > 0 && damage.height > 0)
-            ui_mark_dirty_rect(SCREEN_MAIN, damage.x, damage.y, damage.width, damage.height);
+        if (view->row_count > 1)
+        {
+            int prev = qs->focus_row;
+            qs->focus_row = (qs->focus_row + 1) % view->row_count;
+            qs->focus_tick = current_tick;
+            if (qs->focus_row == 0)
+                cond_talk_ids(LANG_VOLUME);
+            else
+                talk_qs_option(qs, view->rows[qs->focus_row].item, true);
+            quickscreen_update_focus(qs, prev, qs->focus_row);
+        }
+        return;
+    }
+
+    bool fwd = (button == ACTION_STD_NEXT || button == ACTION_STD_NEXTREPEAT);
+    if (qs->focus_row == 0)
+    {
+        quickscreen_step_volume(qs, fwd ? 1 : -1);
+        return;
+    }
+
+    qs->focus_tick = current_tick;
+    enum quickscreen_item item = view->rows[qs->focus_row].item;
+    if (item >= QUICKSCREEN_ITEM_COUNT || !qs->items[item])
+        return;
+
+    bool changed = false;
+#ifdef HAVE_USB_PODLINK
+    if (cider_slot(qs, item))
+    {
+        int mode = cider_slot_mode(item);
+        cider_mode_set(mode, cider_mode_step(mode, cider_mode_get(mode), !fwd));
+        changed = true;
     }
     else
+#endif
     {
-        ui_nav_draw(&view->nav);
-        ui_flush_dirty();
+        const struct settings_list *setting = qs->items[item];
+        int count = 0, position = 0;
+        if ((setting->flags & F_T_MASK) == F_T_BOOL)
+        {
+            if (option_value_as_int(setting) != (fwd ? 1 : 0))
+            {
+                option_select_next_val(setting, false, true);
+                changed = true;
+            }
+        }
+        else if ((setting->flags & (F_INT_SETTING | F_T_SOUND)) &&
+                 get_setting_info_for_bar(setting, 0, &count, &position) &&
+                 count > 2)
+        {
+            if ((fwd && position < count - 1) || (!fwd && position > 0))
+            {
+                option_select_next_val(setting, !fwd, true);
+                changed = true;
+            }
+        }
+        else
+        {
+            option_select_next_val(setting, !fwd, true);
+            changed = true;
+        }
+    }
+    if (changed)
+    {
+        qs->result |= QUICKSCREEN_CHANGED;
+        talk_qs_option(qs, item, false);
+        quickscreen_update_row(qs, qs->focus_row);
+    }
+}
+
+static void quickscreen_wheel_idle(struct gui_quickscreen *qs)
+{
+    if (qs->view->wheel && qs->focus_row != 0 &&
+        TIME_AFTER(current_tick, qs->focus_tick + CC_FOCUS_TIMEOUT))
+    {
+        int prev = qs->focus_row;
+        qs->focus_row = 0;
+        quickscreen_update_focus(qs, prev, 0);
     }
 }
 
@@ -737,7 +1227,7 @@ static bool gui_quickscreen_do_button(struct gui_quickscreen * qs, int button,
 
 bool quick_screen_uses_hud(void)
 {
-    return ui_theme_style(UI_STYLE_QUICK_SCREEN) == UI_QUICK_SCREEN_HUD;
+    return ui_theme_style(UI_STYLE_QUICK_SCREEN) != UI_QUICK_SCREEN_TILES;
 }
 
 static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter, bool *usb)
@@ -750,6 +1240,8 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
      *    then release the enter button*/
     bool can_quit = false;
     qs->result = QUICKSCREEN_OK;
+    qs->focus_row = 0;
+    qs->focus_tick = current_tick;
     *usb = false;
     qs->view_handle = core_alloc_free_space(sizeof(*qs->view));
     if (qs->view_handle <= 0)
@@ -758,12 +1250,12 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
     struct quickscreen_page *view = core_get_data_pinned(qs->view_handle);
     qs->view = view;
     *view = (struct quickscreen_page){ .paint_target = &lcd_framebuffer_default };
-    view->hud = quick_screen_uses_hud();
-    view->sheet.zoom = view->hud;
+    view->full_page = quick_screen_uses_hud();
+    view->wheel = ui_wheel_navigation();
+    view->sheet.slide = view->full_page;
     ui_scene_interrupt();
-    /* The HUD dims the screen it opens over, so it keeps a copy even when
-     * it does not animate. */
-    if ((global_settings.animations || view->hud) && lcd_active())
+    /* Keep the caller's frame so closing restores it without an extra repaint. */
+    if ((global_settings.animations || view->full_page) && lcd_active())
         view->sheet_handle = core_alloc_free_space(2 * FRAMEBUFFER_SIZE);
     if (view->sheet_handle > 0)
     {
@@ -777,10 +1269,10 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
     view->has_saved_title = sb_get_persistent_title(SCREEN_MAIN, view->saved_title,
                                                    sizeof(view->saved_title), &view->saved_icon);
     ui_theme_snapshot(&view->theme);
-    view->title_font = ui_theme_font_load(&view->theme,
-                                          view->hud ? UI_FONT_LIST_VALUE
-                                                    : UI_FONT_TITLE, 48);
-    view->body_font = ui_theme_font_load(&view->theme, UI_FONT_BODY, 64);
+    view->title_font = ui_theme_font_load(&view->theme, UI_FONT_TITLE, 48);
+    view->body_font = ui_theme_font_load(&view->theme,
+                                         view->full_page ? UI_FONT_LIST
+                                                         : UI_FONT_BODY, 64);
 
     push_current_activity(ACTIVITY_QUICKSCREEN);
     sb_set_persistent_title(str(LANG_QUICK_SETTINGS), Icon_NOICON, SCREEN_MAIN);
@@ -798,7 +1290,7 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
             int top = view->background.value[UI_Y];
             memcpy(lcd_framebuffer_default.fb_ptr, view->underneath, LCD_WIDTH * top * sizeof(fb_data));
             ui_take_dirty(SCREEN_MAIN);
-            view->sheet.light = UI_FULL_OPACITY;
+            view->sheet.light = view->full_page ? -1 : UI_FULL_OPACITY;
         }
     }
     quickscreen_update(qs, QUICKSCREEN_ITEM_COUNT);
@@ -833,6 +1325,21 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
             return qs->result | QUICKSCREEN_IN_USB;
         }
         default_event_handler(button);
+        if (view->wheel)
+        {
+            if (quickscreen_wheel_transport(qs, button))
+                button = ACTION_NONE;
+            else if (button == ACTION_STD_OK ||
+                     button == ACTION_STD_NEXT || button == ACTION_STD_PREV ||
+                     button == ACTION_STD_NEXTREPEAT ||
+                     button == ACTION_STD_PREVREPEAT)
+            {
+                quickscreen_wheel_step(qs, button);
+                button = ACTION_NONE;
+            }
+            else
+                quickscreen_wheel_idle(qs);
+        }
         if (gui_quickscreen_do_button(qs, button, &changed))
         {
             qs->result |= QUICKSCREEN_CHANGED;
@@ -843,10 +1350,16 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
             can_quit = true;
         else if (qs->cider && (button == ACTION_QS_VOLUP ||
                                button == ACTION_QS_VOLDOWN))
+        {
             cider_control("volume-step", button == ACTION_QS_VOLUP ? 1 : -1);
+            if (view->full_page)
+                quickscreen_update_row(qs, 0);
+        }
         else if (button == ACTION_QS_VOLUP || button == ACTION_QS_VOLDOWN)
         {
             adjust_volume(button == ACTION_QS_VOLUP ? 1 : -1);
+            if (view->full_page)
+                global_status.last_volume_change = 0;
             talk_settle();
             if (global_settings.talk_menu)
                 talk_value_decimal(sound_val2phys(SOUND_VOLUME,
@@ -854,8 +1367,9 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
                                    UNIT_DB, sound_numdecimals(SOUND_VOLUME),
                                    false);
 
-            /* Volume changes repaint its card only when it is configured. */
-            if (qs->volume_item < QUICKSCREEN_ITEM_COUNT)
+            if (view->full_page)
+                quickscreen_update_row(qs, 0);
+            else if (qs->volume_item < QUICKSCREEN_ITEM_COUNT)
                 quickscreen_update(qs, qs->volume_item);
         }
         else if (button == ACTION_STD_CONTEXT && !qs->cider)
@@ -888,6 +1402,8 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
         if (!takeover)
         {
             ui_sheet_begin(&view->sheet, false, "quick-settings");
+            if (view->full_page)
+                view->sheet.light = -1;
             do {
                 quickscreen_present(view, false);
             } while (ui_sheet_wait(&view->sheet));
@@ -897,7 +1413,7 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
                 ui_mark_dirty(SCREEN_MAIN);
                 ui_flush_dirty();
             }
-            if (view->hud && lcd_active() && !lcd_updates_held() &&
+            if (view->full_page && lcd_active() && !lcd_updates_held() &&
                 !ui_flush_inhibited())
                 qs->result |= QUICKSCREEN_RESTORED;
         }

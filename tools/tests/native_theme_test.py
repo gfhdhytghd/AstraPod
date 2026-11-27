@@ -226,7 +226,14 @@ static void check_plastic(void)
     assert(UI_THEME_BUILTIN_COUNT == 4);
     assert(!strcmp(ui_theme_builtin_name(UI_THEME_CLASSIC), "classic"));
     assert(theme.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_ASTRAPOD);
-    assert(theme.style[UI_STYLE_QUICK_SCREEN] == UI_QUICK_SCREEN_HUD);
+    assert(theme.style[UI_STYLE_QUICK_SCREEN] == UI_QUICK_SCREEN_PAGE);
+    static const char page_file[] = VERSION "style.quick_screen=page\n";
+    static const char hud_file[] = VERSION "style.quick_screen=hud\n";
+    struct ui_theme parsed;
+    assert(ui_theme_parse(&parsed, page_file, sizeof(page_file) - 1));
+    assert(parsed.style[UI_STYLE_QUICK_SCREEN] == UI_QUICK_SCREEN_PAGE);
+    assert(ui_theme_parse(&parsed, hud_file, sizeof(hud_file) - 1));
+    assert(parsed.style[UI_STYLE_QUICK_SCREEN] == UI_QUICK_SCREEN_PAGE);
 
     /* Fruit Company is Classic with the stock menu tree */
     struct ui_theme fruit;

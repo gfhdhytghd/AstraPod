@@ -13,7 +13,9 @@
 #include "config.h"
 #include "action.h"
 #include "button.h"
+#include "plugins/rock_compat.h"
 #include "settings/settings.h"
+#include "ui/native_theme_runtime.h"
 
 /*
  * The format of the list is as follows
@@ -293,6 +295,24 @@ static const struct button_mapping button_context_quickscreen[]  = {
 
     LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_STD)
 }; /* button_context_quickscreen */
+
+static const struct button_mapping wheel_quickscreen[] = {
+    { ACTION_STD_PREV,       BUTTON_SCROLL_BACK,                BUTTON_NONE },
+    { ACTION_STD_PREVREPEAT, BUTTON_SCROLL_BACK|BUTTON_REPEAT,  BUTTON_NONE },
+    { ACTION_STD_NEXT,       BUTTON_SCROLL_FWD,                 BUTTON_NONE },
+    { ACTION_STD_NEXTREPEAT, BUTTON_SCROLL_FWD|BUTTON_REPEAT,   BUTTON_NONE },
+    { ACTION_STD_OK,         BUTTON_SELECT|BUTTON_REL,          BUTTON_SELECT },
+    { ACTION_STD_CONTEXT,    BUTTON_SELECT|BUTTON_REPEAT,       BUTTON_SELECT },
+    { ACTION_STD_CANCEL,     BUTTON_MENU|BUTTON_REL,            BUTTON_MENU },
+    { ACTION_NONE,           BUTTON_MENU|BUTTON_REPEAT,         BUTTON_NONE },
+    { ACTION_WPS_PLAY,       BUTTON_PLAY|BUTTON_REL,            BUTTON_PLAY },
+    { ACTION_NONE,           BUTTON_PLAY|BUTTON_REPEAT,         BUTTON_NONE },
+    { ACTION_WPS_SKIPPREV,   BUTTON_LEFT|BUTTON_REL,            BUTTON_LEFT },
+    { ACTION_NONE,           BUTTON_LEFT|BUTTON_REPEAT,         BUTTON_NONE },
+    { ACTION_WPS_SKIPNEXT,   BUTTON_RIGHT|BUTTON_REL,           BUTTON_RIGHT },
+    { ACTION_NONE,           BUTTON_RIGHT|BUTTON_REPEAT,        BUTTON_NONE },
+    LAST_ITEM_IN_LIST
+};
 
 static const struct button_mapping button_context_keyboard[]  = {
     /* Click-wheel text editor: wheel cycles the character under the caret,
@@ -616,7 +636,8 @@ const struct button_mapping* get_context_mapping(int context)
         case CONTEXT_BOOKMARKSCREEN:
             return button_context_bmark;
         case CONTEXT_QUICKSCREEN:
-            return button_context_quickscreen;
+            return !rock_ui_raw() && ui_wheel_navigation() ? wheel_quickscreen :
+                   button_context_quickscreen;
 #ifdef HAVE_RECORDING
         case CONTEXT_RECSCREEN:
             return button_context_recscreen;

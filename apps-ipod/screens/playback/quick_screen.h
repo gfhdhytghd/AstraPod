@@ -30,7 +30,7 @@ enum quickscreen_return {
     QUICKSCREEN_IN_USB = 0x1,
     QUICKSCREEN_GOTO_SHORTCUTS_MENU = 0x2,
     QUICKSCREEN_CHANGED = 0x4,
-    QUICKSCREEN_RESTORED = 0x8, /* The HUD restored the caller's framebuffer. */
+    QUICKSCREEN_RESTORED = 0x8, /* The page restored the caller's framebuffer. */
 };
 
 bool quick_screen_uses_hud(void);

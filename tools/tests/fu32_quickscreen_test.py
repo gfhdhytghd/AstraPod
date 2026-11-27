@@ -57,6 +57,7 @@ pre=r'''
 #define QUICKSCREEN_OK 0
 #define QUICKSCREEN_IN_USB 1
 #define QUICKSCREEN_CHANGED 4
+#define QUICKSCREEN_RESTORED 8
 #define QUICKSCREEN_GOTO_SHORTCUTS_MENU 2
 #define QUICKSCREEN_TOP 0
 #define QUICKSCREEN_LEFT 1
@@ -91,8 +92,9 @@ static void backlight_set_brightness(int v){applied=v;}
 static bool is_setting_quickscreenable(const struct settings_list*s){(void)s;return true;}
 static void settings_mark_user_tweak(const struct settings_list*s){assert(s);tweaks++;}
 static void settings_save(void){saves++;}
-static struct {bool talk_menu;int playlist_shuffle,repeat_mode;const struct settings_list*qs_items[4];}global_settings;
-static struct {int volume;}global_status;
+static struct {bool talk_menu;int shuffle_mode,repeat_mode;const struct settings_list*qs_items[4];}global_settings;
+#define playlist_shuffle shuffle_mode
+static struct {int volume;long last_volume_change;}global_status;
 static int modes[2],cvol,localsteps;
 static bool source_cider;
 static bool cider_active(void){return source_cider;}
@@ -136,7 +138,11 @@ pre+=tables+fn(a,'action_code_worker')+fn(a,'remote_context')+fn(a,'remote_volum
 pre+=re.sub(r'^#include .*\n','',(S/'apps-ipod/input/agents_remote.c').read_text(),flags=re.M)
 pre+=fn(q,'cider_slot_mode')+fn(q,'cider_slot')+fn(q,'quickscreen_title')+fn(q,'quickscreen_value')
 pre+=r'''
-struct quickscreen_page { struct { bool active; } sheet; int sheet_handle; };
+struct quickscreen_page { struct { bool active; } sheet; int sheet_handle; bool wheel, full_page; };
+static void quickscreen_update_row(struct gui_quickscreen*q,int row){(void)q;(void)row;draws++;}
+static void quickscreen_wheel_step(struct gui_quickscreen*q,int b){(void)q;(void)b;}
+static void quickscreen_wheel_idle(struct gui_quickscreen*q){(void)q;}
+static bool quickscreen_wheel_transport(const struct gui_quickscreen*q,int b){(void)q;(void)b;return false;}
 static bool ui_flush_inhibited(void){return false;}
 static void ui_inhibit_flush(bool on){assert(!on);}
 static int ui_sheet_timeout(void *sheet,int timeout){(void)sheet;return timeout;}

@@ -770,10 +770,10 @@ void pcmbuf_start_track_change(enum pcm_track_change_type type)
                 crossfade = !auto_skip;
                 break;
             case CROSSFADE_ENABLE_SHUFFLE:
-                crossfade = global_settings.playlist_shuffle;
+                crossfade = global_settings.shuffle_mode;
                 break;
             case CROSSFADE_ENABLE_SHUFFLE_OR_MANSKIP:
-                crossfade = global_settings.playlist_shuffle || !auto_skip;
+                crossfade = global_settings.shuffle_mode || !auto_skip;
                 break;
             case CROSSFADE_ENABLE_ALWAYS:
                 crossfade = true;

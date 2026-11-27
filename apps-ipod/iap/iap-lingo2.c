@@ -172,7 +172,8 @@ void iap_handlepkt_mode2(const unsigned int len, const unsigned char *buf)
                 {
                     if (!iap_btnshuffle)
                     {
-                        iap_shuffle_state(!global_settings.playlist_shuffle);
+                        iap_shuffle_state((global_settings.shuffle_mode + 1) %
+                                  NUM_SHUFFLE_MODES);
                         iap_btnshuffle = true;
                     }
                 }

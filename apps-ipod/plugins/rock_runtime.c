@@ -400,7 +400,13 @@ void rock_flush_settings(void)
 {
 #ifdef ROCK_COMPAT_GENERATED
     if (!usb_taken)
+    {
+        bool was_shuffled = global_settings.playlist_shuffle;
         rock_compat_flush(&settings_view, &settings_baseline, &global_settings);
+        if (global_settings.playlist_shuffle != was_shuffled)
+            global_settings.shuffle_mode = global_settings.playlist_shuffle ?
+                                           SHUFFLE_SONGS : SHUFFLE_OFF;
+    }
 #endif
 }
 
@@ -673,7 +679,8 @@ static const struct settings_list *rock_find_setting(const void *variable)
 #define ROCK_FIND_MEMBER(member) \
     if (variable == &settings_view.member) \
         return find_setting(&global_settings.member)
-    ROCK_FIND_MEMBER(playlist_shuffle);
+    if (variable == &settings_view.playlist_shuffle)
+        return find_setting(&global_settings.shuffle_mode);
     ROCK_FIND_MEMBER(repeat_mode);
     ROCK_FIND_MEMBER(brightness);
     ROCK_FIND_MEMBER(backlight_timeout);
@@ -681,6 +688,8 @@ static const struct settings_list *rock_find_setting(const void *variable)
     ROCK_FIND_MEMBER(backlight_on_button_hold);
 #undef ROCK_FIND_MEMBER
 #endif
+    if (variable == &global_settings.playlist_shuffle)
+        return find_setting(&global_settings.shuffle_mode);
     return find_setting(variable);
 }
 

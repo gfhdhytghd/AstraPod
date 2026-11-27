@@ -6762,7 +6762,7 @@ static int browser_db_play_folder(struct browser_context* c)
         start_index = percentage_start_index * playlist_get_current()->amount / 100;
     }
 
-    if (global_settings.playlist_shuffle && !book)
+    if (global_settings.shuffle_mode && !book)
     {
         start_index = playlist_shuffle(current_tick, start_index);
         if (!global_settings.play_selected)

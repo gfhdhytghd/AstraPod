@@ -1,3 +1,8 @@
+- **Shuffle** now offers Off, Songs and Albums. In `config.cfg`,
+  `shuffle: on` still selects Songs. Use `shuffle: albums` for Albums.
+  Older firmware cannot resume a queue after an Albums shuffle. Save it
+  as a playlist first if you plan to return to older firmware.
+
 - **Battery percentage** on your iPod Classic now follows the original iPod
   curve and starts out showing full at 4.01 V. After a long charge, the player
   can learn your battery's full voltage. Leave it idle for three minutes

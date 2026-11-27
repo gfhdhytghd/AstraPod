@@ -16752,7 +16752,7 @@
 </phrase>
 <phrase>
   id: LANG_ALBUMS
-  desc: Database menu
+  desc: Albums in Music and Shuffle
   user: core
   <source>
     *: "Albums"
@@ -28739,7 +28739,7 @@
 </phrase>
 <phrase>
   id: LANG_FRUIT_SONGS
-  desc: Fruit Company: Music > Songs
+  desc: Songs in Music and Shuffle
   user: core
   <source>
     *: "Songs"

@@ -159,7 +159,7 @@ bool browser_disk_play_playlist(char* dirname, char* filename)
 
     if (playlist_create(dirname, filename) != -1)
     {
-        if (global_settings.playlist_shuffle)
+        if (global_settings.shuffle_mode)
             playlist_shuffle(current_tick, -1);
 
         playlist_start(0, 0, 0);
@@ -858,7 +858,7 @@ int browser_disk_enter(struct browser_context* c)
                     if (playlist_create(buf, NULL) != -1)
                     {
                         start_index = browser_disk_build_playlist(c, c->selected_item);
-                        if (global_settings.playlist_shuffle)
+                        if (global_settings.shuffle_mode)
                         {
                             start_index = playlist_shuffle(seed, start_index);
                             /* when shuffling dir.: play all files

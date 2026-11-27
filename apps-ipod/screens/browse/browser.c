@@ -2182,7 +2182,7 @@ bool bookmark_play(char *resume_file, int index, unsigned long elapsed,
 
             if (playlist_create(cp, slash+1) != -1)
             {
-                if (global_settings.playlist_shuffle)
+                if (global_settings.shuffle_mode)
                     playlist_shuffle(seed, -1);
                 started = true;
             }
@@ -2198,7 +2198,7 @@ bool bookmark_play(char *resume_file, int index, unsigned long elapsed,
             char filename_buf[MAX_PATH + 1];
             const char* peek_filename;
             resume_directory(resume_file);
-            if (global_settings.playlist_shuffle)
+            if (global_settings.shuffle_mode)
                 playlist_shuffle(seed, -1);
 
             /* Check if the file is at the same spot in the directory,

@@ -55,6 +55,7 @@
 #include "system/debug_log.h"
 #include "audio/playback.h"
 #include "widgets/list.h"
+#include "widgets/splash.h"
 #include "rbunicode.h"
 #include "audio/pcm_record.h"
 #include "audio/peak_meter.h"
@@ -716,26 +717,14 @@ static void debug_log_callback(bool on)
     debug_log_apply();
 }
 
-/* perform shuffle/unshuffle of the current playlist based on the boolean provided */
-static void shuffle_playlist_callback(bool shuffle)
+static void shuffle_playlist_callback(int mode)
 {
-    struct playlist_info *playlist = playlist_get_current();
-    if (playlist->started)
+    if (!playlist_set_shuffle_mode(mode))
     {
-        if ((audio_status() & AUDIO_STATUS_PLAY) == AUDIO_STATUS_PLAY)
-        {
-            replaygain_update();
-            if (shuffle)
-            {
-                playlist_randomise(playlist, current_tick, true);
-            }
-            else
-            {
-                playlist_sort(playlist, true);
-            }
-        }
+        global_settings.shuffle_mode = playlist_get_current()->shuffle_mode;
+        splash(HZ, ID2P(LANG_PLAYLIST_CONTROL_ACCESS_ERROR));
     }
-    iap_on_shuffle_state(shuffle);
+    settings_save();
 }
 
 static void repeat_mode_callback(int repeat)
@@ -873,8 +862,10 @@ const struct settings_list settings[] = {
 
 
     /* playback */
-    OFFON_SETTING(F_CB_ON_SELECT_ONLY|F_CB_ONLY_IF_CHANGED, playlist_shuffle,
-                  LANG_SHUFFLE, false, "shuffle", shuffle_playlist_callback),
+    CHOICE_SETTING(F_CB_ON_SELECT_ONLY|F_CB_ONLY_IF_CHANGED, shuffle_mode,
+                   LANG_SHUFFLE, SHUFFLE_OFF, "shuffle", "off,on,albums",
+                   shuffle_playlist_callback, NUM_SHUFFLE_MODES,
+                   ID2P(LANG_OFF), ID2P(LANG_FRUIT_SONGS), ID2P(LANG_ALBUMS)),
 
     CHOICE_SETTING(F_CB_ON_SELECT_ONLY|F_CB_ONLY_IF_CHANGED, repeat_mode,
                    LANG_REPEAT, REPEAT_OFF, "repeat", "off,all,one,shuffle"
@@ -2217,7 +2208,7 @@ const struct settings_list settings[] = {
                   qs_load_from_cfg, qs_write_to_cfg,
                   qs_is_changed, qs_set_default),
    CUSTOM_SETTING(0, qs_items[QUICKSCREEN_LEFT], LANG_LEFT_QS_ITEM,
-                  &global_settings.playlist_shuffle, "qs left",
+                  &global_settings.shuffle_mode, "qs left",
                   qs_load_from_cfg, qs_write_to_cfg,
                   qs_is_changed, qs_set_default),
    CUSTOM_SETTING(0, qs_items[QUICKSCREEN_RIGHT], LANG_RIGHT_QS_ITEM,

@@ -1284,23 +1284,6 @@ static void iap_send_pb(unsigned char type, int size, uint32_t value)
     iap_send_tx();
 }
 
-static void apply_shuffle(bool shuffle)
-{
-    if (global_settings.playlist_shuffle == shuffle)
-        return;
-
-    global_settings.playlist_shuffle = shuffle;
-    /* A loaded playlist is saved in its play order, so it is reordered
-     * even while stopped */
-    if (playlist_amount() > 0)
-    {
-        if (shuffle)
-            playlist_randomise(NULL, current_tick, true);
-        else
-            playlist_sort(NULL, true);
-    }
-}
-
 static void apply_repeat(int mode)
 {
     if (global_settings.repeat_mode == mode)
@@ -1322,7 +1305,7 @@ static void iap_restore_modes(void)
     if (iap_saved_shuffle < 0 && iap_saved_repeat < 0)
         return;
     if (iap_saved_shuffle >= 0)
-        apply_shuffle(iap_saved_shuffle);
+        playlist_set_shuffle_mode(iap_saved_shuffle);
     if (iap_saved_repeat >= 0)
         apply_repeat(iap_saved_repeat);
     iap_saved_shuffle = -1;
@@ -1342,12 +1325,12 @@ void iap_prepare_shutdown(bool save_playlist)
     if (!save_playlist)
     {
         if (iap_saved_shuffle >= 0)
-            global_settings.playlist_shuffle = iap_saved_shuffle;
+            global_settings.shuffle_mode = iap_saved_shuffle;
     }
     else if (iap_saved_shuffle >= 0 &&
-             iap_saved_shuffle != global_settings.playlist_shuffle)
+             iap_saved_shuffle != global_settings.shuffle_mode)
     {
-        apply_shuffle(iap_saved_shuffle);
+        playlist_set_shuffle_mode(iap_saved_shuffle);
         /* resume from the track's place in the new order */
         if (global_status.resume_index != -1 && playlist_amount() > 0)
             global_status.resume_index = playlist_get_current()->index;
@@ -1361,30 +1344,29 @@ void iap_prepare_shutdown(bool save_playlist)
 /* SetShuffle. With restore set the change lasts until the accessory
  * detaches and is not saved; otherwise it is kept, as a change made on the
  * player is. */
-void iap_set_shuffle(bool shuffle, bool restore)
+bool iap_set_shuffle(int mode, bool restore)
 {
-    if (iap_modes_final)
-        return;
-    /* a previous session's restore comes first */
+    if (iap_modes_final || iap_library_queue_lent())
+        return false;
+
+    /* A previous session's restore comes first. */
     iap_restore_modes();
+
+    int previous = global_settings.shuffle_mode;
+    if (!playlist_set_shuffle_mode(mode))
+        return false;
 
     if (restore)
     {
         if (iap_saved_shuffle < 0)
-            iap_saved_shuffle = global_settings.playlist_shuffle;
-        apply_shuffle(shuffle);
+            iap_saved_shuffle = previous;
     }
     else
     {
-        bool was_temporary = iap_saved_shuffle >= 0;
-
         iap_saved_shuffle = -1;
-        if (was_temporary || global_settings.playlist_shuffle != shuffle)
-        {
-            apply_shuffle(shuffle);
-            settings_save();
-        }
+        settings_save();
     }
+    return true;
 }
 
 /* SetRepeat, as iap_set_shuffle() */
@@ -1883,13 +1865,13 @@ void iap_periodic(void)
     {
         unsigned char shuffle;
 
-        shuffle = global_settings.playlist_shuffle;
+        shuffle = global_settings.shuffle_mode;
 
         if (device.shuffle != shuffle)
         {
             IAP_TX_INIT(0x03, 0x09);
             IAP_TX_PUT(0x07);
-            IAP_TX_PUT(shuffle?0x01:0x00);
+            IAP_TX_PUT(shuffle);
             device.changed_notifications |= BIT_N(7);
 
             iap_send_tx();
@@ -2223,27 +2205,14 @@ static int iap_move_callback(int handle, void* current, void* new)
 }
 #endif
 
-/* Change the shuffle state */
-void iap_shuffle_state(const bool state)
+/* Change the shuffle state persistently. */
+bool iap_shuffle_state(int mode)
 {
-    if (iap_library_queue_lent())
-        return;
-    /* Set shuffle to enabled */
-    if(state && !global_settings.playlist_shuffle)
-    {
-        global_settings.playlist_shuffle = 1;
-        settings_save();
-        if (audio_status() & AUDIO_STATUS_PLAY)
-            playlist_randomise(NULL, current_tick, true);
-    }
-    /* Set shuffle to disabled */
-    else if(!state && global_settings.playlist_shuffle)
-    {
-        global_settings.playlist_shuffle = 0;
-        settings_save();
-        if (audio_status() & AUDIO_STATUS_PLAY)
-            playlist_sort(NULL, true);
-    }
+    if (iap_library_queue_lent() || !playlist_set_shuffle_mode(mode))
+        return false;
+
+    settings_save();
+    return true;
 }
 
 /* Change the repeat state */

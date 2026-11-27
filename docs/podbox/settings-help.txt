@@ -297,8 +297,10 @@ How many steps Perceptual mode divides the range into. More steps mean finer
 control and more presses to cross the range. Used only in Perceptual mode.
 
 [shuffle]
-Plays the current list in a random order. Changing it reshuffles what is
-already playing rather than waiting for the next list.
+Off plays the queue in its original order. Songs mixes individual tracks.
+Albums mixes albums and plays their tracks in disc and track order. Changing
+this setting reorders the current queue. Repeat All mixes the albums again
+when the queue wraps.
 
 [repeat]
 What happens at the end of the list: stop, start again, repeat the one track,

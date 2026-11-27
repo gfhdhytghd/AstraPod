@@ -260,7 +260,8 @@ static void worker(void)
             if (leaving)
                 continue;
             if (ev.id == EV_SHUFFLE)
-                iap_shuffle_state(!global_settings.playlist_shuffle);
+                iap_shuffle_state((global_settings.shuffle_mode + 1) %
+                                  NUM_SHUFFLE_MODES);
             else
                 iap_repeat_next();
             continue;
@@ -700,7 +701,7 @@ static void play_tracks(uint32_t start)
 
     /* A shuffle needs every song, and a book its resume track found, before
      * either can start */
-    if (!resume && (play_book || !global_settings.playlist_shuffle))
+    if (!resume && (play_book || !global_settings.shuffle_mode))
     {
         play_tracks_now(start);
         tagcache_search_finish(tcs);
@@ -740,7 +741,7 @@ static void play_tracks(uint32_t start)
         elapsed = block->resume.elapsed;
         offset = block->resume.offset;
     }
-    else if (!play_book && global_settings.playlist_shuffle)
+    else if (!play_book && global_settings.shuffle_mode)
     {
         index = playlist_shuffle(current_tick, index);
         if (!global_settings.play_selected)
@@ -950,7 +951,7 @@ static bool play_catalog_playlist(uint32_t nth)
     if (playlist_create(global_settings.playlist_catalog_dir, file) == -1 ||
         playlist_amount() == 0)
         return false;
-    if (global_settings.playlist_shuffle)
+    if (global_settings.shuffle_mode)
         playlist_shuffle(current_tick, -1);
     playlist_start(0, 0, 0);
     return true;

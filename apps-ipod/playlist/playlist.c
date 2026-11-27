@@ -70,10 +70,13 @@
             - Shuffle entire playlist with specified seed.  The index
               identifies the first index in the newly shuffled playlist
               (needed for repeat mode).
-        e. Unshuffle playlist (U:<index>)
+        e. Album shuffle (B:<seed>:<offset>)
+            - Apply the permutation in the comment lines at that offset.
+              This records the order even when the tags later change.
+        f. Unshuffle playlist (U:<index>)
             - Unshuffle entire playlist.  The index identifies the first index
               in the newly unshuffled playlist.
-        f. Reset last insert position (R)
+        g. Reset last insert position (R)
             - Needed so that insertions work properly after resume
 
   Resume:
@@ -102,6 +105,9 @@
 #include "kernel.h"
 #include "settings/settings.h"
 #include "database/sound_mix.h"
+#include "database/tagcache.h"
+#include "playlist/album_shuffle.h"
+#include "system/volume.h"
 #include "audio/play_status.h"
 #include "system/applimits.h"
 #include "core_alloc.h"
@@ -198,6 +204,13 @@
 
 static struct playlist_info current_playlist;
 static struct playlist_info on_disk_playlist;
+/* Reserved before audio claims the core pool. Allocating under the playlist
+ * lock could make buflib stop playback to shrink the audio buffer. */
+static int album_shuffle_handle;
+static unsigned int album_shuffle_generation;
+static bool album_shuffle_cache_valid;
+#define ALBUM_WORK_ALIGNMENT MAX(_Alignof(struct album_shuffle_track), \
+                                 _Alignof(struct mp3entry))
 
 /* REPEAT_ONE support function from playback.c */
 extern bool audio_pending_track_skip_is_manual(void);
@@ -492,6 +505,7 @@ static void empty_playlist_unlocked(struct playlist_info* playlist, bool resume)
     playlist->filename[0] = '\0';
 
     playlist->seed = 0;
+    playlist->shuffle_mode = SHUFFLE_OFF;
 
     playlist->utf8 = true;
     playlist->control_created = false;
@@ -1216,7 +1230,7 @@ static int create_and_play_dir(int direction, bool play_last)
     {
         browser_disk_build_playlist(browser_get_context(), 0);
 
-        if (global_settings.playlist_shuffle)
+        if (global_settings.shuffle_mode)
              playlist_shuffle(current_tick, -1);
 
         if (play_last && direction <= 0)
@@ -1275,6 +1289,8 @@ static int remove_all_tracks_unlocked(struct playlist_info *playlist)
     playlist->first_index = 0;
     playlist->index = 0;
     playlist->amount = 1;
+    playlist->seed = 0;
+    playlist->shuffle_mode = SHUFFLE_OFF;
     playlist->changes++;
     if (playlist == &current_playlist)
         iap_on_tracks_count(playlist->amount);
@@ -1633,6 +1649,7 @@ static int randomise_playlist_unlocked(struct playlist_info* playlist,
     playlist->last_insert_pos = -1;
 
     playlist->seed = seed;
+    playlist->shuffle_mode = SHUFFLE_SONGS;
     playlist->changes++;
 
     if (write)
@@ -1695,6 +1712,8 @@ static int sort_playlist_unlocked(struct playlist_info* playlist,
 
     /* indices have been moved so last insert position is no longer valid */
     playlist->last_insert_pos = -1;
+    playlist->seed = 0;
+    playlist->shuffle_mode = SHUFFLE_OFF;
     playlist->changes++;
 
     if (write && playlist->control_fd >= 0)
@@ -1705,6 +1724,112 @@ static int sort_playlist_unlocked(struct playlist_info* playlist,
     }
 
     return 0;
+}
+
+struct album_source {
+    struct playlist_info *playlist;
+    struct mp3entry *id3;
+};
+
+static void album_filename(void *data, int index, char *path, int size)
+{
+    struct album_source *source = data;
+    if (get_track_filename(source->playlist, index, path, size) < 0)
+        path[0] = '\0';
+}
+
+static void album_tags(void *data, const char *path, const char **album,
+                       const char **artist, int *disc, int *track)
+{
+    struct album_source *source = data;
+    struct mp3entry *id3 = source->id3;
+    if (!path[0])
+        return;
+
+    /* Tagcache synthesizes album artist from the track artist. If they
+     * match, read the file to tell a real album artist from that fallback. */
+    bool cached = tagcache_fill_tags(id3, path) &&
+        (!id3->album || (id3->albumartist &&
+         (!id3->artist || strcasecmp(id3->albumartist, id3->artist))));
+    if (cached || get_metadata(id3, -1, path))
+    {
+        *album = id3->album;
+        *artist = id3->albumartist;
+        *disc = id3->discnum;
+        *track = id3->tracknum;
+    }
+}
+
+static void apply_album_order_unlocked(struct playlist_info *playlist,
+                                       uint16_t *order, unsigned seed)
+{
+    /* Follow each permutation cycle, marking processed positions in place. */
+    for (int i = 0; i < playlist->amount; i++)
+    {
+        unsigned long index = playlist->indices[i];
+        int entry = i;
+        while (order[entry] != entry)
+        {
+            int next = order[entry];
+            playlist->indices[entry] = next == i ? index :
+                                                    playlist->indices[next];
+            order[entry] = entry;
+            entry = next;
+        }
+    }
+
+    dc_init_filerefs(playlist, 0, playlist->amount);
+    playlist->index = playlist->first_index = 0;
+    playlist->last_insert_pos = -1;
+    playlist->seed = seed;
+    playlist->shuffle_mode = SHUFFLE_ALBUMS;
+    playlist->changes++;
+}
+
+/* Only the live queue uses this workspace, under its playlist mutex. */
+static bool shuffle_albums_unlocked(struct playlist_info *playlist,
+                                    unsigned seed, int keep)
+{
+    int count = playlist->amount;
+    if (count <= 0)
+        return true;
+    if (check_control(playlist) < 0)
+        return false;
+
+    if (album_shuffle_handle <= 0)
+        return false;
+
+    void *workspace = core_get_data_pinned(album_shuffle_handle);
+    struct mp3entry *id3 = (void *)ALIGN_UP((uintptr_t)workspace,
+                                            ALBUM_WORK_ALIGNMENT);
+    struct album_shuffle_track *tracks =
+        (void *)((char *)id3 + ALIGN_UP(sizeof(*id3), ALBUM_WORK_ALIGNMENT));
+    uint16_t *groups = (void *)(tracks + count);
+    uint16_t *order = groups + count;
+    if (!album_shuffle_cache_valid ||
+        album_shuffle_generation != playlist->changes)
+    {
+        struct album_source data = { playlist, id3 };
+        const struct album_shuffle_source source = {
+            &data, album_filename, album_tags
+        };
+        album_shuffle_read(&source, count, tracks);
+        album_shuffle_generation = playlist->changes;
+        album_shuffle_cache_valid = true;
+    }
+
+    if (!seed)
+        seed = 1;
+    album_shuffle_order(tracks, count, keep, seed, groups, order);
+    bool saved = album_shuffle_save(playlist->control_fd, order, count, seed);
+    if (saved)
+    {
+        album_shuffle_reindex(tracks, count, groups, order);
+        apply_album_order_unlocked(playlist, order, seed);
+        album_shuffle_generation = playlist->changes;
+    }
+    core_put_data_pinned(workspace);
+    return saved;
 }
 
 /* Calculate how many steps we have to really step when skipping entries
@@ -1757,8 +1882,8 @@ static int calculate_step_count(const struct playlist_info *playlist, int steps)
  * returns the index of the track that is "steps" away from current playing
  * track.
  */
-static int get_next_index(const struct playlist_info* playlist, int steps,
-                          int repeat_mode)
+static int get_next_index_impl(const struct playlist_info* playlist, int steps,
+                               int repeat_mode, bool album_wrap)
 {
     int current_index = playlist->index;
     int next_index    = -1;
@@ -1768,6 +1893,13 @@ static int get_next_index(const struct playlist_info* playlist, int steps,
 
     if (repeat_mode == -1)
         repeat_mode = global_settings.repeat_mode;
+
+    if (album_wrap && repeat_mode == REPEAT_ALL && steps > 0 &&
+        playlist->amount > 1 &&
+        playlist->shuffle_mode == SHUFFLE_ALBUMS)
+    {
+        repeat_mode = REPEAT_SHUFFLE;
+    }
 
     if (repeat_mode == REPEAT_SHUFFLE && playlist->amount <= 1)
     {
@@ -1835,6 +1967,13 @@ static int get_next_index(const struct playlist_info* playlist, int steps,
 
     return next_index;
 }
+
+static int get_next_index(const struct playlist_info *playlist, int steps,
+                          int repeat_mode)
+{
+    return get_next_index_impl(playlist, steps, repeat_mode, true);
+}
+
 
 /**
  * Thread to update filename pointers to dircache on background
@@ -2040,6 +2179,11 @@ void playlist_init(void)
     playlist->dcfrefs_handle = core_alloc(
         playlist->max_playlist_size * sizeof(struct dircache_fileref));
     dc_init_filerefs(playlist, 0, playlist->max_playlist_size);
+
+    album_shuffle_handle = core_alloc(ALBUM_WORK_ALIGNMENT - 1 +
+        ALIGN_UP(sizeof(struct mp3entry), ALBUM_WORK_ALIGNMENT) +
+        playlist->max_playlist_size * (sizeof(struct album_shuffle_track) +
+                                       2 * sizeof(uint16_t)));
 
     unsigned int playlist_thread_id =
         create_thread(dc_thread_playlist, playlist_stack, sizeof(playlist_stack),
@@ -2269,8 +2413,11 @@ bool playlist_check(int steps)
 
     int index = get_next_index(playlist, steps, -1);
 
-    if (index < 0 && steps >= 0 && global_settings.repeat_mode == REPEAT_SHUFFLE)
-        index = get_next_index(playlist, steps, REPEAT_ALL);
+    if (index < 0 && steps >= 0 &&
+        (global_settings.repeat_mode == REPEAT_SHUFFLE ||
+         (global_settings.repeat_mode == REPEAT_ALL &&
+          playlist->shuffle_mode == SHUFFLE_ALBUMS)))
+        index = get_next_index_impl(playlist, steps, REPEAT_ALL, false);
 
     return (index >= 0);
 }
@@ -3326,14 +3473,32 @@ int playlist_next(int steps)
     if (index < 0)
     {
         /* end of playlist... or is it */
-        if (repeat_mode == REPEAT_SHUFFLE && playlist->amount > 1)
+        if (steps > 0 && playlist->amount > 1 &&
+            playlist->shuffle_mode == SHUFFLE_ALBUMS &&
+            (repeat_mode == REPEAT_ALL || repeat_mode == REPEAT_SHUFFLE))
+        {
+            /* A peek stops at this boundary, so no old next track is
+             * buffered when the audio thread starts a fresh album order. */
+            int wrapped = get_next_index_impl(playlist, steps,
+                                              REPEAT_ALL, false);
+            if (wrapped >= 0 &&
+                shuffle_albums_unlocked(playlist, current_tick, -1))
+            {
+                sync_control_unlocked(playlist);
+                wrapped = get_next_index(playlist, 0, REPEAT_OFF);
+            }
+            playlist->index = MAX(0, wrapped);
+            index = wrapped;
+        }
+        else if (repeat_mode == REPEAT_SHUFFLE && playlist->amount > 1)
         {
             /* Repeat shuffle mode.  Re-shuffle playlist and resume play */
             playlist->first_index = 0;
             sort_playlist_unlocked(playlist, false, false);
             randomise_playlist_unlocked(playlist, current_tick, false, true);
+            global_settings.shuffle_mode = SHUFFLE_SONGS;
             global_settings.playlist_shuffle = true;
-            iap_on_shuffle_state(global_settings.playlist_shuffle);
+            iap_on_shuffle_state(global_settings.shuffle_mode);
 
             playlist->started = true;
             playlist->index = 0;
@@ -3455,6 +3620,8 @@ int playlist_randomise(struct playlist_info* playlist, unsigned int seed,
 
     check_control(playlist);
 
+    if (playlist->shuffle_mode == SHUFFLE_ALBUMS)
+        sort_playlist_unlocked(playlist, start_current, false);
     result = randomise_playlist_unlocked(playlist, seed, start_current, true);
     if (result != -1 && (audio_status() & AUDIO_STATUS_PLAY) &&
         playlist->started)
@@ -3515,6 +3682,8 @@ static enum playlist_command pl_cmds_run(char cmd)
             return PLAYLIST_COMMAND_DELETE;
         case 'S':
             return PLAYLIST_COMMAND_SHUFFLE;
+        case 'B':
+            return PLAYLIST_COMMAND_ALBUM_SHUFFLE;
         case 'U':
             return PLAYLIST_COMMAND_UNSHUFFLE;
         case 'R':
@@ -3791,6 +3960,36 @@ int playlist_resume(void)
 
                         break;
                     }
+                    case PLAYLIST_COMMAND_ALBUM_SHUFFLE:
+                    {
+                        result = -16;
+                        if (!strp[0] || !strp[1] || playlist->amount <= 0)
+                            goto out;
+
+                        if (album_shuffle_handle <= 0)
+                            goto out;
+
+                        /* Replay uses the same workspace for the saved order. */
+                        album_shuffle_cache_valid = false;
+                        uint16_t *order = core_get_data_pinned(
+                            album_shuffle_handle);
+                        off_t command = total_read + (strp[0] - buffer) - 2;
+                        bool loaded = album_shuffle_load(
+                            playlist->control_fd, atoi(strp[1]), command,
+                            order, playlist->amount);
+                        if (loaded)
+                        {
+                            unsigned seed = strtoul(strp[0], NULL, 10);
+                            apply_album_order_unlocked(playlist, order, seed);
+                        }
+                        core_put_data_pinned(order);
+                        if (!loaded)
+                            goto out;
+
+                        sorted = false;
+                        result = 0;
+                        break;
+                    }
                     case PLAYLIST_COMMAND_UNSHUFFLE:
                     {
                         /* strp[0]=first_index */
@@ -4032,6 +4231,7 @@ int playlist_set_current(struct playlist_info* playlist)
     current_playlist.amount = playlist->amount;
     current_playlist.last_insert_pos = playlist->last_insert_pos;
     current_playlist.seed = playlist->seed;
+    current_playlist.shuffle_mode = playlist->shuffle_mode;
     current_playlist.flags = playlist->flags;
     current_playlist.changes++;
 
@@ -4075,8 +4275,8 @@ void playlist_forget_inserts(void)
     playlist_write_unlock(playlist);
 }
 
-/* shuffle newly created playlist using random seed. */
-int playlist_shuffle(int random_seed, int start_index)
+/* Shuffle a newly created playlist using the requested mode. */
+static int shuffle_new_playlist(int random_seed, int start_index, int mode)
 {
     struct playlist_info* playlist = &current_playlist;
     bool start_current = false;
@@ -4084,19 +4284,105 @@ int playlist_shuffle(int random_seed, int start_index)
     dc_thread_stop(playlist);
     playlist_write_lock(playlist);
 
-    if (start_index >= 0 && global_settings.play_selected)
-    {
-        /* store the seek position before the shuffle */
-        playlist->index = playlist->first_index = start_index;
+    if (start_index >= 0 && start_index < playlist->amount &&
+        global_settings.play_selected)
         start_current = true;
-    }
 
-    randomise_playlist_unlocked(playlist, random_seed, start_current, true);
+    if (mode == SHUFFLE_ALBUMS)
+    {
+        if (!shuffle_albums_unlocked(playlist, random_seed,
+                                     start_current ? start_index : -1))
+            playlist->index = start_current ? start_index : 0;
+    }
+    else
+    {
+        if (start_current)
+            playlist->index = playlist->first_index = start_index;
+        randomise_playlist_unlocked(playlist, random_seed, start_current, true);
+    }
 
     playlist_write_unlock(playlist);
     dc_thread_start(playlist, true);
 
     return playlist->index;
+}
+
+int playlist_shuffle(int random_seed, int start_index)
+{
+    return shuffle_new_playlist(random_seed, start_index,
+                               global_settings.shuffle_mode);
+}
+
+int playlist_shuffle_songs(int random_seed, int start_index)
+{
+    return shuffle_new_playlist(random_seed, start_index, SHUFFLE_SONGS);
+}
+
+/* Change the live queue and the setting together. Used by local settings and
+ * accessory transports, including an accessory's temporary override. */
+bool playlist_set_shuffle_mode(int mode)
+{
+    struct playlist_info *playlist = &current_playlist;
+    if ((unsigned)mode >= NUM_SHUFFLE_MODES)
+        return false;
+
+    dc_thread_stop(playlist);
+    playlist_write_lock(playlist);
+
+    bool changed = true;
+    bool reordered = playlist->amount > 0 && playlist->shuffle_mode != mode;
+    if (reordered)
+    {
+        switch (mode)
+        {
+            case SHUFFLE_OFF:
+                changed = check_control(playlist) >= 0 &&
+                    update_control_unlocked(playlist, PLAYLIST_COMMAND_UNSHUFFLE,
+                                            0, -1, NULL, NULL, NULL) >= 0;
+                if (changed)
+                {
+                    sort_playlist_unlocked(playlist, true, false);
+                    playlist->first_index = 0;
+                }
+                break;
+            case SHUFFLE_SONGS:
+                if (playlist->shuffle_mode == SHUFFLE_ALBUMS)
+                    sort_playlist_unlocked(playlist, true, false);
+                changed = randomise_playlist_unlocked(
+                    playlist, current_tick, true, true) == 0;
+                break;
+            case SHUFFLE_ALBUMS:
+                changed = shuffle_albums_unlocked(playlist, current_tick,
+                                                  playlist->index);
+                break;
+        }
+        if (changed)
+        {
+            sync_control_unlocked(playlist);
+            iap_on_track_playback_index(rotate_index(playlist, playlist->index),
+                                        true);
+        }
+    }
+    if (changed)
+    {
+        global_settings.shuffle_mode = mode;
+        global_settings.playlist_shuffle = mode != SHUFFLE_OFF;
+    }
+
+    playlist_write_unlock(playlist);
+    dc_thread_start(playlist, true);
+
+    if (changed)
+    {
+        if (audio_status() & AUDIO_STATUS_PLAY)
+        {
+            replaygain_update();
+            if (reordered)
+                audio_flush_and_reload_tracks();
+        }
+        iap_on_shuffle_state(mode);
+    }
+    return changed;
 }
 
 /* Marks the index of the track to be skipped that is "steps" away from
@@ -4480,12 +4766,14 @@ static int pl_save_update_control(struct playlist_info* playlist,
     /* Clear dirplay flag, since we now point at a playlist */
     playlist->flags &= ~PLAYLIST_FLAG_DIRPLAY;
 
-    /* Reset shuffle seed */
+    /* The saved order is the new base order. */
     playlist->seed = 0;
+    playlist->shuffle_mode = SHUFFLE_OFF;
     if (playlist == &current_playlist)
     {
+        global_settings.shuffle_mode = SHUFFLE_OFF;
         global_settings.playlist_shuffle = false;
-        iap_on_shuffle_state(global_settings.playlist_shuffle);
+        iap_on_shuffle_state(global_settings.shuffle_mode);
     }
 
     pl_close_control(playlist);

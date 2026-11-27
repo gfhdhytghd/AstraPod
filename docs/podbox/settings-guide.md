@@ -114,7 +114,7 @@ Settings
 
 | Setting | What it does | Default | |
 |---|---|---|---|
-| Shuffle | Plays the current list in a random order. Changing it reshuffles what is already playing rather than waiting for the next list. | No |  |
+| Shuffle | Off plays the queue in its original order. Songs mixes individual tracks. Albums mixes albums and plays their tracks in disc and track order. Changing this setting reorders the current queue. Repeat All mixes the albums again when the queue wraps. | Off |  |
 | Repeat | What happens at the end of the list: stop, start again, repeat the one track, reshuffle and go again, or loop between two marks you set. | Off |  |
 | Play Selected First | Choosing a track starts from that track rather than from the top of the folder, with the rest of the folder queued behind it. | Yes |  |
 | Anti-Skip Buffer | How much audio is read ahead and held in memory before the disk is allowed to stop. Raise it if playback stutters when the player is jostled. The cost is battery: a bigger buffer means longer reads, but fewer of them. | 5 s | **Adv** |

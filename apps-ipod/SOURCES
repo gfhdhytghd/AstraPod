@@ -58,6 +58,7 @@ screens/browse/ebook_shelf.c
 
 playlist/catalog.c
 playlist/playlist.c
+playlist/album_shuffle.c
 playlist/viewer.c
 
 metadata/chapters.c

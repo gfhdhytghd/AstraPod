@@ -85,6 +85,14 @@ fork's USB work; the `tools/` changes are this fork's.
 
 The player as a disk, a keyboard, a sound card or an iAP accessory's host.
 
+### Accessory shuffle
+
+| File | What changed | Why |
+|---|---|---|
+| `usbstack/iap/shuffle_mode.h` (new), `usbstack/iap/platform.c`, `usbstack/iap/platform.h`, `usbstack/iap/notification.c` | Read and set all three shuffle modes through the application queue and report their full wire values. | USB iAP can use album shuffle and its notifications describe the selected mode. |
+| `usbstack/iap/libiap/iap.c` | Pass Albums through both set commands and include it when cycling. Lingo 4 accepts the one-byte form of SetShuffle. | The accessory protocol has three modes and an optional second byte. |
+| `usbstack/usb_iap2_control.c` | Use the full shuffle mode in Now Playing updates and in their change detector. | The car can distinguish Tracks and Albums. Its Random Play button cycles the three modes on the library worker. |
+
 ### PodLink
 
 | File | What changed | Why |

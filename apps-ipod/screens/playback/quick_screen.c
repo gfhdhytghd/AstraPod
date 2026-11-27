@@ -605,7 +605,7 @@ static int quick_screen_run(int button_enter, bool cider, void (*poll)(void))
     if (cider)
     {
         /* Only horizontal directions change Cider settings. */
-        qs.items[QUICKSCREEN_LEFT] = find_setting(&global_settings.playlist_shuffle);
+        qs.items[QUICKSCREEN_LEFT] = find_setting(&global_settings.shuffle_mode);
         qs.items[QUICKSCREEN_RIGHT] = find_setting(&global_settings.repeat_mode);
     }
 

@@ -181,7 +181,7 @@ struct status_layout {
 /* Every busy frame of the stock icon font inks the middle 12 columns. */
 #define ART_BUSY_INK 12
 
-/* Scrim and Light draw the battery glyph right-aligned in its slot, inked
+/* Scrim draws the battery glyph right-aligned in its slot, inked
  * from its second column, and end the pause icon 9 clear columns short of
  * that ink. The app tray packs right to left from the playback icon, or from
  * the battery when stopped, with the same 9 between drawn pixels; the busy

@@ -2343,6 +2343,7 @@ const struct settings_list settings[] = {
     OFFON_SETTING(0, spike_caption_scroll, LANG_SPIKE_CAPTION_SCROLL, false,
                   "spike caption scroll", NULL),
     OFFON_SETTING(0, animations, LANG_UI_ANIMATIONS, true, "animations", NULL),
+    /* The Native theme picker accepts built-in and custom names. */
     TEXT_SETTING(0, native_theme, "native theme", "scrim", NULL, NULL),
 };
 

@@ -46,7 +46,13 @@ def push(binary, resource, root, output, env, delay):
         "start in screen: files\nstart directory: /Parent\n"
         "show files: supported\nlist wraparound: off\nbacklight timeout: off\n"
         "voice menus: off\nkeyclick: off\nanimations: on\n"
-        "settings mode: everything\nbeep: off\nnative theme: light\n")
+        "settings mode: everything\nbeep: off\nnative theme: glyph-probe\n")
+    themes = root / ".rockbox/native-themes"
+    themes.mkdir()
+    (themes / "glyph-probe.podtheme").write_text(
+        "podbox-theme=1\nbackground.list=solid\n"
+        "color.background=f6f5f2\ncolor.foreground=181818\n"
+        "color.selected_text=181818\ncolor.selection=12588e\n")
     for folder, prefix in (("A", "日月星辰"), ("B", "春夏秋冬")):
         for i in range(8):
             # Four distinct CJK glyphs at the start of each name. The ASCII
@@ -83,7 +89,7 @@ def push(binary, resource, root, output, env, delay):
 
 
 def marker_x(image):
-    # The incoming Light selection is blue. The parent selection is on
+    # The incoming selection is blue. The parent selection is on
     # row two, so only the incoming row has blue at this height.
     for x in range(320):
         r, g, b = image.getpixel((x, 56))

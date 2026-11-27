@@ -47,46 +47,40 @@ static void reject(struct ui_theme *theme, const char *buffer, size_t length)
 
 static void check_builtins(void)
 {
-    struct ui_theme dark, light;
-    ui_theme_builtin(&dark, false);
-    ui_theme_builtin(&light, true);
-    assert(dark.color[UI_COLOR_BACKGROUND] == 0);
-    assert(dark.color[UI_COLOR_FOREGROUND] == 0xffffff);
-    assert(dark.color[UI_COLOR_MUTED] == 0xbdbdbd);
-    assert(dark.color[UI_COLOR_STATUS_BG] == 0xcecece);
-    assert(dark.color[UI_COLOR_STATUS_FG] == 0);
-    assert(dark.metric[UI_METRIC_ROW_HEIGHT] == 30);
-    assert(dark.metric[UI_METRIC_LIST_X] == 10);
-    assert(dark.metric[UI_METRIC_LIST_Y] == 46);
-    assert(dark.metric[UI_METRIC_LIST_BOTTOM] == 10);
-    assert(dark.metric[UI_METRIC_STATUS_HEIGHT] == 35);
-    assert(dark.metric[UI_METRIC_STATUS_TEXT_Y] == 8);
-    assert(dark.metric[UI_METRIC_STATUS_ICON_Y] == 5);
-    assert(!strcmp(dark.font[UI_FONT_LIST], "18-noto-sans"));
-    assert(!strcmp(dark.font[UI_FONT_TITLE], "18-noto-sans-bold"));
-    assert(!strcmp(dark.font[UI_FONT_ICON], "24x24-icons"));
-    assert(!strcmp(dark.font[UI_FONT_WPS_TIME], "12-noto-sans"));
-    assert(dark.background[UI_BG_LIST] == UI_BG_BLURRED_COVER);
-    assert(dark.background[UI_BG_WPS] == UI_BG_COVER_SCRIM);
-    assert(dark.background[UI_BG_HANDOFF] == UI_BG_COVER_SCRIM);
-    assert(dark.background[UI_BG_STATUS] == UI_BG_COVER_TINT);
-    assert(dark.color[UI_COLOR_HANDOFF_MUTED] == 0x999999);
-    assert(dark.metric[UI_METRIC_HANDOFF_COVER_SIZE] == 96);
-    assert(dark.metric[UI_METRIC_SPLASH_PROGRESS_GAP] == 4);
-    assert(light.background[UI_BG_LIST] == UI_BG_SOLID);
-    assert(light.background[UI_BG_WPS] == UI_BG_SOLID);
-    assert(light.background[UI_BG_STATUS] == UI_BG_COVER_TINT);
-    assert(light.color[UI_COLOR_BACKGROUND] != dark.color[UI_COLOR_BACKGROUND]);
-    assert(light.color[UI_COLOR_FOREGROUND] != dark.color[UI_COLOR_FOREGROUND]);
-    assert(dark.motion_scale == 100 && light.motion_scale == 100);
-    for (int i = 0; i < UI_COLOR_COUNT; i++)
-        assert(light.dynamic[i].source == UI_PALETTE_NONE);
+    struct ui_theme scrim;
+    ui_theme_builtin(&scrim, UI_THEME_SCRIM);
+    assert(UI_THEME_BUILTIN_COUNT == 3);
+    assert(!strcmp(ui_theme_builtin_name(UI_THEME_SCRIM), "scrim"));
+    assert(scrim.color[UI_COLOR_BACKGROUND] == 0);
+    assert(scrim.color[UI_COLOR_FOREGROUND] == 0xffffff);
+    assert(scrim.color[UI_COLOR_MUTED] == 0xbdbdbd);
+    assert(scrim.color[UI_COLOR_STATUS_BG] == 0xcecece);
+    assert(scrim.color[UI_COLOR_STATUS_FG] == 0);
+    assert(scrim.metric[UI_METRIC_ROW_HEIGHT] == 30);
+    assert(scrim.metric[UI_METRIC_LIST_X] == 10);
+    assert(scrim.metric[UI_METRIC_LIST_Y] == 46);
+    assert(scrim.metric[UI_METRIC_LIST_BOTTOM] == 10);
+    assert(scrim.metric[UI_METRIC_STATUS_HEIGHT] == 35);
+    assert(scrim.metric[UI_METRIC_STATUS_TEXT_Y] == 8);
+    assert(scrim.metric[UI_METRIC_STATUS_ICON_Y] == 5);
+    assert(!strcmp(scrim.font[UI_FONT_LIST], "18-noto-sans"));
+    assert(!strcmp(scrim.font[UI_FONT_TITLE], "18-noto-sans-bold"));
+    assert(!strcmp(scrim.font[UI_FONT_ICON], "24x24-icons"));
+    assert(!strcmp(scrim.font[UI_FONT_WPS_TIME], "12-noto-sans"));
+    assert(scrim.background[UI_BG_LIST] == UI_BG_BLURRED_COVER);
+    assert(scrim.background[UI_BG_WPS] == UI_BG_COVER_SCRIM);
+    assert(scrim.background[UI_BG_HANDOFF] == UI_BG_COVER_SCRIM);
+    assert(scrim.background[UI_BG_STATUS] == UI_BG_COVER_TINT);
+    assert(scrim.color[UI_COLOR_HANDOFF_MUTED] == 0x999999);
+    assert(scrim.metric[UI_METRIC_HANDOFF_COVER_SIZE] == 96);
+    assert(scrim.metric[UI_METRIC_SPLASH_PROGRESS_GAP] == 4);
+    assert(scrim.motion_scale == 100);
 }
 
 static void check_parser(void)
 {
     struct ui_theme theme;
-    ui_theme_builtin(&theme, true);
+    ui_theme_builtin(&theme, UI_THEME_SCRIM);
 
     static const char overrides[] =
         "  # 中文主题\r\n\r\n podbox-theme = 1 \r\n"
@@ -223,7 +217,11 @@ static void check_plastic(void)
     struct ui_theme theme;
     ui_theme_builtin(&theme, UI_THEME_CLASSIC);
     assert(theme.style[UI_STYLE_ART] == UI_ART_PLASTIC);
-    assert(UI_THEME_BUILTIN_COUNT == 4);
+    assert(theme.background[UI_BG_LIST] == UI_BG_SOLID);
+    assert(theme.background[UI_BG_WPS] == UI_BG_SOLID);
+    assert(theme.background[UI_BG_STATUS] == UI_BG_SOLID);
+    for (int i = 0; i < UI_COLOR_COUNT; i++)
+        assert(theme.dynamic[i].source == UI_PALETTE_NONE);
     assert(!strcmp(ui_theme_builtin_name(UI_THEME_CLASSIC), "classic"));
     assert(theme.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_ASTRAPOD);
 
@@ -257,8 +255,6 @@ static void check_menu_pane(void)
     struct ui_theme theme;
     ui_theme_builtin(&theme, UI_THEME_SCRIM);
     assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_NONE);
-    ui_theme_builtin(&theme, UI_THEME_LIGHT);
-    assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_NONE);
     ui_theme_builtin(&theme, UI_THEME_CLASSIC);
     assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_SPLIT);
     assert(!strcmp(theme.font[UI_FONT_PANE_TITLE], "17-helvetica-bold-pane"));
@@ -273,13 +269,11 @@ static void check_menu_pane(void)
 }
 
 /* Classic shares out the list's spare height among the rows and
- * shows a setting's value in the smaller stock face; Scrim and Light do not. */
+ * shows a setting's value in the smaller stock face; Scrim uses its list face. */
 static void check_list_rows(void)
 {
     struct ui_theme theme;
     ui_theme_builtin(&theme, UI_THEME_SCRIM);
-    assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_PITCH);
-    ui_theme_builtin(&theme, UI_THEME_LIGHT);
     assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_PITCH);
     ui_theme_builtin(&theme, UI_THEME_CLASSIC);
     assert(theme.style[UI_STYLE_LIST_ROWS] == UI_LIST_ROWS_FILL);

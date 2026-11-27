@@ -873,7 +873,7 @@ bool native_wps_art_turned(void)
         ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC;
 }
 
-/* Scrim's square or the turned cover. Light has neither. */
+/* Scrim's square or the turned cover. A solid custom page can omit both. */
 static bool has_art_slot(void)
 {
     return wps->classic ||
@@ -941,9 +941,8 @@ void native_wps_copy_art(fb_data *dst, int side)
 }
 
 /* The page slides under Scrim's stationary artwork and its controls pass
- * over it. Light's opaque page covers the original scene from the left. The
- * turned cover stays where it is too; the page brings its reflection, and
- * the landing draws the part of the cover the page has not reached. */
+ * over it. The turned cover stays where it is too; the page brings its
+ * reflection, and the landing draws the part the page has not reached. */
 void native_wps_paint_slide(int hidden, fb_data base)
 {
     if (!active || rock_ui_raw())

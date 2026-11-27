@@ -222,7 +222,7 @@ def main():
     parser.add_argument("evidence", type=Path)
     parser.add_argument("--module", type=Path, help="module override for dev builds")
     args = parser.parse_args()
-    for theme in ("scrim", "light"):
+    for theme in ("scrim",):
         exercise(args.simulator.resolve(), args.archive.resolve(), args.module,
                  args.evidence.resolve() / theme, theme)
 

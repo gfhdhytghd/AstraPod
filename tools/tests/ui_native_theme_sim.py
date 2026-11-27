@@ -81,10 +81,10 @@ def main():
                     nonlocal counter
                     counter += 1
                     if first:
-                        for _ in range(3):
+                        for _ in range(4):
                             click("Down")
-                    click("Right")  # Appearance from Settings
-                    snap(f"{counter}-appearance")
+                    click("Right")  # Theme Settings from Settings
+                    snap(f"{counter}-theme-settings")
                     click("Right")  # Native theme is the first row
                     snap(f"{counter}-selector")
                     for _ in range(index):
@@ -96,26 +96,23 @@ def main():
                     return image
 
                 black = (0, 0, 0)
-                # Built-in Light, followed by an external theme and a rejected file.
+                # The custom theme follows the three built-in themes.
                 before = snap("scrim")
-                light = choose(1, (247, 247, 247), first=True)
-                assert ImageChops.difference(before, light).getbbox()
-                retained_light = choose(0, (247, 247, 247))
-                assert ImageChops.difference(retained_light, light).getbbox() is None
                 path.write_text("podbox-theme=1\ncolor.background=204060\n")
-                custom = choose(1, (33, 65, 99))
-                assert ImageChops.difference(light, custom).getbbox()
+                custom = choose(3, (33, 65, 99), first=True)
+                assert ImageChops.difference(before, custom).getbbox()
+                retained_custom = choose(0, (33, 65, 99))
+                assert ImageChops.difference(retained_custom, custom).getbbox() is None
                 path.write_text("podbox-theme=1\nmetric.row_height=99999\n")
                 scrim = choose(0, black)
                 assert ImageChops.difference(custom, scrim).getbbox()
                 assert "Native theme rejected, using Scrim (fixture)" in (
                     rockbox / "native-theme.log").read_text()
                 result = {"same_process": firmware.poll() is None,
-                          "light": light.getpixel((0, 230)),
                           "custom": custom.getpixel((0, 230)),
                           "invalid_reverted_to_scrim": scrim.getpixel((0, 230)) == black}
     (args.evidence / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    print("PASS runtime native Light, custom theme, and invalid-file Scrim fallback")
+    print("PASS three built-in themes, custom theme, and invalid-file Scrim fallback")
 
 
 if __name__ == "__main__":

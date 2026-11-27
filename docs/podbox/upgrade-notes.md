@@ -1,3 +1,6 @@
+- **Light is gone.** If your player uses Light, it switches to Scrim when
+  it starts after the update.
+
 - **Shuffle** now offers Off, Songs and Albums. In `config.cfg`,
   `shuffle: on` still selects Songs. Use `shuffle: albums` for Albums.
   Older firmware cannot resume a queue after an Albums shuffle. Save it
@@ -47,9 +50,9 @@
   of the screen, seven track rows with the times in a column, and a long
   selected title that scrolls. Its rows look like the theme's lists, with the
   same marker beside the selected track, and the header adds the album's
-  year. On Scrim the card shows the album's blurred cover; Light shows a
-  light panel. Each album's blurred background, on Now Playing and in the
-  panel, is built again the first time it is shown.
+  year. On Scrim the card shows the album's blurred cover. Each album's
+  blurred background, on Now Playing and in the panel, is built again the
+  first time it is shown.
 
 - **Remote Cover Flow** saves track lists with the artwork cache. When you
   return to a cached album, its tracks can open while the remote library
@@ -76,8 +79,8 @@
   original's does, starting a little later than before. A fast spin that
   leaves the letter you started on jumps a letter a click, with the letter
   in the middle of the screen until you lift your finger. Classic shows
-  the original iPod's letter tile; Scrim and Light show a square of their
-  own. Genre lists have no letter jump.
+  the original iPod's letter tile; Scrim shows a square of its own.
+  Genre lists have no letter jump.
 
 - **Fruit Company** is a new built-in theme: Classic's look with the
   original iPod's menus. Music, Videos, Photos, Podcasts, Extras, Settings

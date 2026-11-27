@@ -107,7 +107,7 @@ a farewell.
 ## App reminders and tray icons
 
 The tray shows passive reminders wherever a native status bar is visible.
-This includes the Classic Now Playing header. Scrim and Light omit the
+This includes the Classic Now Playing header. Scrim omits the
 status bar on Now Playing. The firmware evaluates time thresholds from data
 copied out of the foreground module. This lets reminders survive plugin
 unload and reboot, with no resident plugin code, scheduler thread, or disk
@@ -153,7 +153,7 @@ Classic and Fruit Company shade the ink like the playback icon beside it:
 blue, brightest on the middle rows, with a white highlight under each
 column. Ink with a clear pixel on any side takes the darker outline shade,
 so filled shapes with details cut out of them read best, and one- or
-two-pixel strokes come out dark. Scrim and Light draw the ink in the status
+two-pixel strokes come out dark. Scrim draws the ink in the status
 foreground color.
 
 The firmware keeps four slots. It shows up to two visible icons by

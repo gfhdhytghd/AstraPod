@@ -39,10 +39,12 @@ static bool valid_name(const char *name, size_t len)
     return true;
 }
 
-/* The built-in theme called `name`, or -1. "plastic" is a saved name for
- * Classic. */
+/* The built-in theme called `name`, or -1. Retired names are reserved so
+ * a theme file cannot take over an upgraded player's saved selection. */
 static int builtin_id(const char *name, size_t len)
 {
+    if (len == 5 && !strncasecmp(name, "light", len))
+        return UI_THEME_SCRIM;
     if (len == 7 && !memcmp(name, "plastic", 7))
         return UI_THEME_CLASSIC;
     for (int id = 0; id < UI_THEME_BUILTIN_COUNT; ++id)
@@ -148,16 +150,21 @@ static bool select_theme(const char *name, bool fallback)
     return valid;
 }
 
-/* Plastic was Classic under a name of its own. */
 static const char *current_name(const char *name)
 {
-    return strcmp(name, "plastic") ? name : "classic";
+    int id = builtin_id(name, strlen(name));
+    return id < 0 ? name : ui_theme_builtin_name(id);
 }
 
 void ui_theme_apply_settings(void)
 {
-    if (!strcmp(global_settings.native_theme, "plastic"))
-        strcpy(global_settings.native_theme, current_name("plastic"));
+    const char *saved = global_settings.native_theme;
+    const char *name = current_name(saved);
+    if (strcmp(saved, name))
+    {
+        strcpy(global_settings.native_theme, name);
+        settings_save();
+    }
     select_theme(global_settings.native_theme, true);
 }
 
@@ -339,7 +346,9 @@ static const char *theme_name(int item, void *data, char *buf, size_t len)
     (void)len;
     char (*files)[UI_THEME_NAME_MAX] = data;
     static const char *const builtins[UI_THEME_BUILTIN_COUNT] = {
-        "Scrim", "Light", "Classic", "Fruit Company"
+        [UI_THEME_SCRIM] = "Scrim",
+        [UI_THEME_CLASSIC] = "Classic",
+        [UI_THEME_FRUIT_COMPANY] = "Fruit Company",
     };
     return item < UI_THEME_BUILTIN_COUNT ? builtins[item] :
            files[item - UI_THEME_BUILTIN_COUNT];

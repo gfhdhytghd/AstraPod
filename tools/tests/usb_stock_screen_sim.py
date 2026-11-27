@@ -10,7 +10,7 @@ The simulator runs with SDL's dummy video driver: no window opens. For each
 theme it plugs USB in, accepts Disk Mode and saves the screen as
 usb-<theme>.png. Classic and Fruit Company must show the stock disk-mode
 screen: Background_LightBlue_Image behind it, the black status bar at the
-top, the orange sphere and white text. Scrim and Light must not.
+top, the orange sphere and white text. Scrim must not.
 
 Writes result.json beside the screens and exits non-zero on a failure.
 """
@@ -174,7 +174,7 @@ def main():
     rockboxui = args.rockboxui.resolve()
     simdisk = args.simdisk.resolve()
     out = args.output_directory.resolve()
-    themes = args.themes or ["classic", "fruit-company", "scrim", "light"]
+    themes = args.themes or ["classic", "fruit-company", "scrim"]
     if args.language:
         languages = {p.stem for p in (simdisk / ".rockbox/langs").glob("*.lng")}
         if args.language not in languages:

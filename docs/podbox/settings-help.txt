@@ -1403,7 +1403,7 @@ Whether times are shown on a 12- or 24-hour clock.
 Shows the time in the status bar in place of the screen's title. The title
 still shows for two seconds when a screen opens, and for a few seconds after
 the wheel turns. Changes nothing on a theme whose bar has a clock of its own,
-such as Scrim and Light.
+such as Scrim.
 
 [contacts sort]
 Under Fruit Company, the order of Extras > Contacts. First lists a contact as
@@ -2157,6 +2157,10 @@ The clock is what timestamps play counts and what the status bar reads from.
 
 [animations]
 Enables animated transitions between screens and pages.
+
+[native theme]
+Chooses the built-in interface theme: Scrim, Classic or Fruit Company.
+Custom themes in .rockbox/native-themes also appear here.
 
 [status bar cover tint]
 Uses colours from the playing track’s cover in the status bar.

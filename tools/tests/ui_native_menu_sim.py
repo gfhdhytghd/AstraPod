@@ -96,17 +96,12 @@ def main():
                              runtime, args.out, "scrim", args.home, legacy=True)
             native = capture(args.new, args.resources, root / "scrim", display_name,
                              runtime, args.out, "scrim", args.home)
-            light = capture(args.new, args.resources, root / "light", display_name,
-                            runtime, args.out, "light", args.home)
     pixels = {name: image_diff(legacy[name], frame, f"scrim-{name}", args.out)
               for name, frame in native.items()}
-    for name, frame in light.items():
-        assert frame.getpixel((0, 0)) == (222, 223, 214), name
-        assert frame.getpixel((0, 239)) == (247, 247, 247), name
-    result = {"scrim_pixels_changed": pixels, "light_surface_tokens": True,
+    result = {"scrim_pixels_changed": pixels,
               "no_legacy_assets": True, "captures": list(native)}
     (args.out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    print("PASS native menu entry, wheel selection and return with Scrim and Light")
+    print("PASS native menu entry, wheel selection and return with Scrim")
 
 
 if __name__ == "__main__":

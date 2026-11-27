@@ -191,7 +191,7 @@ def run_case(binary, archive, out, mode, env):
                 package.extract(n, disk)
     rockbox = disk / ".rockbox"
     config = (rockbox / "themes/scrim.cfg").read_text()
-    theme = mode if mode in ("light", "custom") else "scrim"
+    theme = mode if mode == "custom" else "scrim"
     (rockbox / "config.cfg").write_text(
         config + "\nvoice menus: off\nbacklight timeout: off\n"
         f"native ui: {'on' if mode != 'off' else 'off'}\n"
@@ -256,13 +256,7 @@ def bounds(pixels, color):
     return left, top, right, bottom
 
 
-def verify_theme(old, light, custom, archive):
-    scrim_box = bounds(pixel_values(old["timed"]), pack(0x63, 0x65, 0x63))
-    light_box = bounds(pixel_values(light["timed"]), pack(0x73, 0x70, 0x6C))
-    assert scrim_box == light_box
-    assert pack(0xFF, 0xFF, 0xFF) in pixel_values(light["timed"])
-    assert pack(0x18, 0x18, 0x18) in pixel_values(light["timed"])
-
+def verify_theme(old, custom, archive):
     with zipfile.ZipFile(archive) as package:
         font = package.read(".rockbox/fonts/12-noto-sans.fnt")
     body_height = struct.unpack_from("<H", font, 6)[0]
@@ -283,8 +277,8 @@ def verify_theme(old, light, custom, archive):
     assert bottom - y == body_height * 2 + 2 * 18 + 12
     meter_y = bottom - 18 - body_height
     assert progress[meter_y * SIZE[0] + x + 18] == foreground  # square corner
-    assert custom["underlay"] == light["underlay"] == old["underlay"]
-    return {"light_same_geometry": True, "custom_body_font_height": body_height,
+    assert custom["underlay"] == old["underlay"]
+    return {"custom_body_font_height": body_height,
             "custom_popup_colors_metrics": True}
 
 
@@ -296,7 +290,6 @@ def compare(old_binary, new_binary, archive, out):
         old, old_events = run_case(old_binary, archive, out, "old", env)
         off, off_events = run_case(new_binary, archive, out, "off", env)
         on, on_events = run_case(new_binary, archive, out, "on", env)
-        light, light_events = run_case(new_binary, archive, out, "light", env)
         custom, custom_events = run_case(new_binary, archive, out, "custom", env)
     mismatches = {
         mode: [name for name in CASES if old[name] != images[name]]
@@ -304,13 +297,13 @@ def compare(old_binary, new_binary, archive, out):
     }
     result = {"size": SIZE, "cases": CASES, "mismatches": mismatches,
               "popup_nav_pushes": {"old": old_events, "off": off_events, "on": on_events,
-                                   "light": light_events, "custom": custom_events}}
+                                   "custom": custom_events}}
     (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     assert not any(mismatches.values()), mismatches
     assert {name for name, value in on_events.items() if value} == NATIVE
-    result["theme_checks"] = verify_theme(old, light, custom, archive)
+    result["theme_checks"] = verify_theme(old, custom, archive)
     (out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    print(f"PASS {len(CASES)} splash cases match legacy; Light and custom token checks passed")
+    print(f"PASS {len(CASES)} splash cases match legacy; custom token checks passed")
 
 
 if __name__ == "__main__":

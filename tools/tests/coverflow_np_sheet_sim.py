@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Check how Now Playing and Cover Flow give way to each other, in SDL.
 
-For each theme with the 3D Cover Flow (Fruit Company, Classic, Scrim,
-Light), every distinct frame the simulator presents is recorded, and:
+For each theme with the 3D Cover Flow (Fruit Company, Classic and Scrim), every distinct frame the simulator presents is recorded, and:
 
   play      Play starts the centred album and raises Now Playing.
   flip-back MENU returns to the playing album with a cover turn.
@@ -266,7 +265,6 @@ THEMES = {
     "fruit-company": (fruit_enter, "", STOCK_BAR),
     "classic": (classic_enter, CLASSIC, STOCK_BAR),
     "scrim": (classic_enter, CLASSIC, 0),
-    "light": (classic_enter, CLASSIC, 0),
 }
 
 

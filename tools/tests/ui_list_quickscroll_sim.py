@@ -3,7 +3,7 @@
 
 A folder list of 1040 names, 40 to a letter, is spun slowly, then fast
 until the letter jump starts, then a detent at a time, then left alone.
-Under Classic the overlay is stock's tile; under Scrim and Light a square
+Under Classic the overlay is stock's tile; under Scrim a square
 twice the letter face's line height. Checks that the jump starts, that every
 frame while it runs shows the overlay at one size, that letters follow one
 another with no frame between them, and that the overlay goes with the
@@ -46,8 +46,8 @@ def edge(frame, outer, inner, span):
 
 
 def overlay_box(frame, theme, list_box):
-    """The overlay's bounding box, centred on the list, or None. Scrim's and
-    Light's square has a one-pixel border brighter than the dimmed inside:
+    """The overlay's bounding box, centred on the list, or None. Scrim's
+    square has a one-pixel border brighter than the dimmed inside:
     each side is where that step runs unbroken, away from the letter. Stock's
     tile is a grey box over a light list."""
     x0, y0, x1, y1 = list_box
@@ -193,7 +193,7 @@ def main():
             env = dict(os.environ, DISPLAY=":" + number, XDG_RUNTIME_DIR=str(runtime),
                        SDL_VIDEODRIVER="x11", SDL_AUDIODRIVER="dummy",
                        SDL_RENDER_DRIVER="software", LIBGL_ALWAYS_SOFTWARE="1")
-            for theme in ("classic", "scrim", "light"):
+            for theme in ("classic", "scrim"):
                 frames, stamps = run(args.binary, args.resource, root / theme,
                                      theme, args.output, env)
                 try:

@@ -4747,7 +4747,8 @@ void browser_db_enter_artist_albums_on_next_load(long albumartist_seek,
 
 /* A contextual browse starts at a different root. Preserve the parent
  * path's history while the nested browser uses the same caches. */
-int browser_db_browse_from_context(void)
+int browser_db_browse_from_context(long album_seek, long artist_seek,
+                                   const char *title)
 {
     struct browse_history {
         int items[MAX_DIR_LEVELS];
@@ -4755,8 +4756,14 @@ int browser_db_browse_from_context(void)
         int extras[MAX_DIR_LEVELS];
         int seeks[MAX_TAGS];
         char titles[MAX_TAGS][sizeof(current_title[0])];
+        struct search_instruction fruit;
+        enum fruit_browse_kind kind;
+        long fruit_artist;
         int base_level;
         int max_level;
+        bool is_fruit;
+        bool try_skip_album;
+        bool picked_by_name;
         bool album_via_artist;
         ptrdiff_t menu_offset;
         ptrdiff_t instruction_offset;
@@ -4764,18 +4771,24 @@ int browser_db_browse_from_context(void)
 
     int handle = core_alloc_free_space(sizeof(struct browse_history));
     if (handle <= 0)
-    {
-        pending_root_shortcut_tag = -1;
-        pending_album_seek = pending_artist_seek = -1;
         return GO_TO_PREVIOUS;
-    }
     struct browse_history *saved = core_get_data_pinned(handle);
 
     int config = browser_db_handle;
     const char *base = config > 0 ? core_get_data(config) : NULL;
+    /* Fruit's instruction is static, outside the movable tag menu buffer. */
+    saved->is_fruit = csi == &fruit_instruction;
     saved->menu_offset = base && menu ? (const char *)menu - base : -1;
-    saved->instruction_offset = base && csi ? (const char *)csi - base : -1;
-    if (csi)
+    saved->instruction_offset = base && csi && !saved->is_fruit ?
+        (const char *)csi - base : -1;
+    if (saved->is_fruit)
+    {
+        saved->fruit = fruit_instruction;
+        saved->kind = fruit_kind;
+        saved->fruit_artist = fruit_album_artist;
+        saved->try_skip_album = fruit_try_skip_album;
+    }
+    else if (csi)
         memcpy(saved->seeks, csi->result_seek, sizeof(saved->seeks));
     memcpy(saved->titles, current_title, sizeof(saved->titles));
     memcpy(saved->items, selected_item_history, sizeof(saved->items));
@@ -4783,7 +4796,14 @@ int browser_db_browse_from_context(void)
     memcpy(saved->extras, extra_history, sizeof(saved->extras));
     saved->base_level = shortcut_base_level;
     saved->max_level = max_history_level;
+    saved->picked_by_name = browse_picked_by_name;
     saved->album_via_artist = album_via_artist_row;
+
+    if (album_seek < 0)
+        browser_db_enter_artist_albums_on_next_load(artist_seek, title);
+    else
+        browser_db_enter_artist_album_tracks_on_next_load(album_seek,
+                                                          artist_seek, title);
 
     struct browse_context browse = {
         .dirfilter = SHOW_ID3DB,
@@ -4799,17 +4819,29 @@ int browser_db_browse_from_context(void)
         base = core_get_data(config);
         menu = saved->menu_offset >= 0 ?
             (struct menu_root *)(base + saved->menu_offset) : NULL;
-        csi = saved->instruction_offset >= 0 ?
-            (struct search_instruction *)(base + saved->instruction_offset) :
-            NULL;
-        if (csi)
-            memcpy(csi->result_seek, saved->seeks, sizeof(saved->seeks));
+        if (saved->is_fruit)
+        {
+            fruit_instruction = saved->fruit;
+            fruit_kind = saved->kind;
+            fruit_album_artist = saved->fruit_artist;
+            fruit_try_skip_album = saved->try_skip_album;
+            csi = &fruit_instruction;
+        }
+        else
+        {
+            csi = saved->instruction_offset >= 0 ?
+                (struct search_instruction *)(base + saved->instruction_offset) :
+                NULL;
+            if (csi)
+                memcpy(csi->result_seek, saved->seeks, sizeof(saved->seeks));
+        }
         memcpy(current_title, saved->titles, sizeof(saved->titles));
         memcpy(selected_item_history, saved->items, sizeof(saved->items));
         memcpy(table_history, saved->tables, sizeof(saved->tables));
         memcpy(extra_history, saved->extras, sizeof(saved->extras));
         shortcut_base_level = saved->base_level;
         max_history_level = saved->max_level;
+        browse_picked_by_name = saved->picked_by_name;
         album_via_artist_row = saved->album_via_artist;
         loaded_entries_crc = 0;
     }

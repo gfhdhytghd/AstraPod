@@ -3631,16 +3631,10 @@ static int fruit_browse_track(const struct tagcache_album *album, bool artist)
     long seek = artist ? album->artist_seek : album->album_seek;
     if (!tagcache_seek_string(tag, seek, name, sizeof(name)))
         return ONPLAY_OK;
-    if (artist)
-        browser_db_enter_artist_albums_on_next_load(seek, name);
-    else
-        browser_db_enter_artist_album_tracks_on_next_load(seek,
-                                                          album->artist_seek,
-                                                          name);
-
     bool back = action_set_menu_back(true);
     push_current_activity(ACTIVITY_DATABASEBROWSER);
-    int result = browser_db_browse_from_context();
+    int result = browser_db_browse_from_context(artist ? -1 : seek,
+                                                album->artist_seek, name);
     pop_current_activity();
     action_set_menu_back(back);
     if (result == GO_TO_ROOT)

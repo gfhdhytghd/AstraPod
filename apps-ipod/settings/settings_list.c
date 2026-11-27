@@ -750,6 +750,10 @@ static void qs_load_from_cfg(void *var, char *value)
         *item = NULL;
     else
     {
+        /* Enable EQ is no longer offered here; a slot that held it shows
+         * Brightness, so the Control Centre keeps its one tall column */
+        if (!strcmp(value, "eq enabled"))
+            value = "brightness";
         /* Only what the menu could have put there: the quick-setting skin
          * tokens read a slot without checking it again */
         *item = find_setting_by_cfgname(value);

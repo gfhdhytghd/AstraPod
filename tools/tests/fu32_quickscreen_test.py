@@ -200,6 +200,11 @@ start=loop.index('    if (view->sheet_handle > 0)')
 end=loop.index('    /* Notify that',start)
 loop=loop[:start]+loop[end:]
 pre+=fn(q,'qs_tall_range')+fn(q,'gui_quickscreen_do_button')+loop
+pre+=r'''
+static const char*cfg_names[]={"brightness","eq enabled"};
+static const struct settings_list*cfg_settings[2];
+static const struct settings_list*find_setting_by_cfgname(const char*n){for(int i=0;i<2;i++)if(!strcmp(n,cfg_names[i]))return cfg_settings[i];return NULL;}
+'''+fn((S/'apps-ipod/settings/settings_list.c').read_text(),'qs_load_from_cfg')
 if 'static int quick_screen_run(' in q:
  pre+=fn(q,'quick_screen_run')+fn(q,'quick_screen_quick')+fn(q,'quick_screen_cider')+fn(q,'quick_screen_current')
 else:
@@ -304,6 +309,14 @@ int main(void){
  add(BUTTON_SELECT,0,0,0);add(BUTTON_SELECT|BUTTON_REL,0,0,0);
  quick_screen_current(ACTION_STD_QUICKSCREEN,NULL);assert(brightness==1&&applied==1);
  hud_mode=false;
+ /* A slot saved as Enable EQ, as the four-tile page wrote it, loads as
+  * Brightness, so the right column is one tall item again. */
+ {struct settings_list eq={.lang_id=5};cfg_settings[0]=&bright;cfg_settings[1]=&eq;
+  const struct settings_list*slot=&left;char eqname[]="eq enabled",name[]="brightness",none[]="-";
+  qs_load_from_cfg(&slot,eqname);assert(slot==&bright);
+  slot=NULL;qs_load_from_cfg(&slot,name);assert(slot==&bright);
+  qs_load_from_cfg(&slot,none);assert(!slot);}
+ puts("Legacy slot: eq enabled loads as brightness PASS");
  puts("Page brightness: MENU raises, PLAY lowers, a sixteenth of the range a step, clamped; LEFT/RIGHT untouched PASS");
  puts("FU34 local/Cider brightness: body MENU/PLAY, remote Up/Down, native step/callback/limits/persistence, native TOP/BOTTOM; remote Menu/Play and body Select exit PASS");
 

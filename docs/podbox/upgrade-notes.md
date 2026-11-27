@@ -130,4 +130,5 @@
   Repeat on the left, Brightness on the right. Previous steps Shuffle, Next
   steps Repeat, Menu raises Brightness and Play/Pause lowers it. Turn the
   wheel for volume. Select closes the page, and holding Select opens
-  Shortcuts.
+  Shortcuts. Enable EQ is no longer a Control Centre item: a slot that
+  held it shows Brightness.

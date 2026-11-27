@@ -7,8 +7,8 @@
  * and DiskMode_View -- the orange sphere with the dock connector over it,
  * and two white lines of text centred between x 10 and 310. Stock writes
  * each line with the top of its line box at the y below, which the theme's
- * fonts reproduce, their ascent being stock's rounded up. The Disk Mode
- * layout overrides the status bar's title with the fixed string "iPod".
+ * fonts reproduce, their ascent being stock's rounded up. Stock fixes the
+ * bar's title to the player's model name; ours shows the firmware's name.
  *
  * Everything is composed at 8 bits a channel in bands and truncated once.
  ****************************************************************************/
@@ -97,7 +97,7 @@ bool usb_stock_draw(void)
                       TITLE_Y);
         put_text_line(&band, detail_font,
                       str(LANG_USB_STOCK_EJECT_BEFORE_DISCONNECT), DETAIL_Y);
-        extras_bar_put(&band, "iPod");
+        extras_bar_put(&band, str(LANG_ROCKBOX_TITLE));
         stock_canvas_show(&band, (struct ui_rect){ 0, y, LCD_WIDTH,
                                                    band.height });
         /* The host may be waiting on SET_ADDRESS (usb_screen.c). */

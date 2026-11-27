@@ -39,6 +39,8 @@ bool native_wps_has_art(void);
 /* Borrow the carousel's selected cover until native art or a different track arrives. */
 void native_wps_set_landing(void (*paint)(const struct ui_rect *clip));
 void native_wps_pick_up_art(void);
+/* Borrow a column-major texture from the turn while this track is current. */
+void native_wps_prepare_turn_art(int thumbnail, int side);
 void native_wps_paint_slide(int hidden, fb_data base);
 /* The page's status bar, text and controls over what the frame buffer holds,
  * without its background or cover. */

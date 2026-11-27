@@ -706,7 +706,7 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
 #endif
     if (cur->context != CONTEXT_SPIKE && cur->context != CONTEXT_MUSIC_QUIZ &&
         cur->context != CONTEXT_QUICKSCREEN && cur->context != CONTEXT_WPS &&
-        cur->context != CONTEXT_VIDEO_PLAYBACK &&
+        cur->context != CONTEXT_VIDEO_PLAYBACK && cur->context != CONTEXT_AGENTS &&
         cur->context != (CONTEXT_PLUGIN | CONTEXT_CUSTOM2) &&
         !(cur->context == (CONTEXT_PLUGIN | CONTEXT_CUSTOM) &&
           get_current_activity() == ACTIVITY_STOPWATCH &&

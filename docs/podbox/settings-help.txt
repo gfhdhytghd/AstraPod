@@ -1263,6 +1263,9 @@ the list too.
 Whether the lyrics screen follows the theme, inverts it, or uses plain black on
 white or white on black.
 
+Under Classic and Fruit Company, any mode but Theme also drops the status bar,
+the progress bar and the blue bar on the current line.
+
 [lyric align]
 Whether lyric lines are aligned left, centred or right.
 

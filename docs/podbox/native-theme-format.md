@@ -60,12 +60,14 @@ Use `font.<role>=<basename>` to reference a font. The basename can contain 1–3
 | `list` | `18-noto-sans` | `16-helvetica-bold` |
 | `title` | `18-noto-sans-bold` | `17-helvetica-bold` |
 | `body` | `18-noto-sans` | `13-helvetica` |
-| `lyrics` | `18-noto-sans` | `18-noto-sans` |
+| `lyrics` | `18-noto-sans` | `16-helvetica-bold` |
 | `status` | `18-noto-sans` | `13-helvetica-bold` |
 | `status_title` | `18-noto-sans-bold` | `13-helvetica-bold` |
 | `icon` | `24x24-icons` | `24x24-icons` |
 | `wps_title` | `26-noto-sans-medium` | `17-helvetica-bold` |
-| `handoff_title`, `lyrics_focus` | `26-noto-sans-medium` | `26-noto-sans-medium` |
+| `lyrics_focus` | `20-noto-sans` | `16-helvetica-bold` |
+| `lyrics_background` | `14-noto-sans` | `13-helvetica-bold` |
+| `handoff_title` | `26-noto-sans-medium` | `26-noto-sans-medium` |
 | `wps_meta` | `12-noto-sans` | `13-helvetica-bold` |
 | `wps_time` | `12-noto-sans` | `14-helvetica-bold` |
 | `handoff_caption` | `12-noto-sans` | `12-noto-sans` |
@@ -85,7 +87,11 @@ used only with `style.menu_pane=split`. `list_value` is a setting row's value,
 shown only with `style.accessory=selected`, on the label's baseline.
 
 `wps_time` is the elapsed and remaining time beside the progress bar, used
-only with `style.wps_layout=classic`.
+only with `style.wps_layout=classic` and `style.lyrics=classic`.
+
+`lyrics_focus` is the current line and `lyrics_background` a duet's second
+voice. With `style.lyrics=classic`, lines are one `lyrics` cell plus 4
+pixels apart, so the 16 px Helvetica gives the list's 24-pixel rows.
 
 ### Cover Flow album panel
 
@@ -132,7 +138,8 @@ edges without shadows.
 
 `background.list`, `background.wps` and `background.lyrics` accept `solid`,
 `blurred_cover` or `cover_scrim`. Scrim uses `blurred_cover` for lists and
-lyrics. Its Now Playing mode is `cover_scrim`, which draws the sharp cover
+lyrics. With `style.lyrics=classic` the lyrics page uses `gradient.lyrics`
+instead of `background.lyrics`. Its Now Playing mode is `cover_scrim`, which draws the sharp cover
 over the blurred background. Light uses `solid` throughout.
 
 Handoff inherits the Now Playing backdrop, its `wps_bg` fallback and its
@@ -167,6 +174,7 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 | `progress` | the Now Playing progress and volume fill, with `style.wps_layout=classic` | `color.wps_accent` |
 | `progress_track` | the track behind that fill | |
 | `scrollbar` | the scroll thumb, with `style.scrollbar=classic`, shaded left to right | the darkened thumb |
+| `lyrics` | the lyrics page below the status bar, with `style.lyrics=classic` | `color.background` |
 
 ### Styles
 
@@ -186,6 +194,7 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 | `art` | `none`, `plastic` | Apple's bitmaps from the stock firmware replace the drawn status bar, battery, play and pause icons, the selected row's chevron, the scrollbar, the Now Playing progress and volume bars, its shuffle icon and its speakers. The selection gradient becomes Apple's exact rows, whatever the theme sets for it. A long selected row scrolls as on the original iPod: after about 1.3 s it moves left 2 pixels every 34 ms and loops round, and the scroll settings do not apply. The status bar's playback icon, busy spinner and app tray icons sit against the battery, right to left, 7 pixels apart as stock spaces its playback icon. The bitmaps are sized for the Classic layout and come from `.rockbox/themes/stock-art.bin`; without that file they are not drawn. |
 | `list_scroll` | `glide`, `snap` | The rows jump a whole row at a time and only the selection marker moves; the ends of the list do not stretch. See *Native rendering and animation*. |
 | `list_rows` | `pitch`, `fill` | The rows fill the list's height: the pixels left below the last whole row go one each to the top rows, so nine 24-pixel rows in 220 pixels become four of 25 and five of 24. |
+| `lyrics` | `full`, `classic` | The lyrics page keeps a status bar at the top and Now Playing's progress bar and times at the bottom, where `style.wps_layout=classic` puts them. The current line sits in the list's selection bar in `selected_text`, and lines passing through the bar take that colour. Other lines are `foreground`, fading with distance. Untimed lyrics are a page of `foreground` text without the bar. With **Lyrics Viewer ▸ Colour Mode** set to anything but Theme, the page keeps the first layout. |
 | `menu_tree` | `astrapod`, `stock` | The main menu and everything under it are the original iPod Classic's: Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle Songs, with Menu going back one level. AstraPod's own settings are under **Settings → Advanced Settings**, its Games, Other Apps, Demos, Files and System menu under **Extras**, and its Playback Report is a main menu row that **Settings → Main Menu** starts with off. A row the original firmware has and AstraPod does not either does nothing, as an empty list does there, or says it is not available. Choosing a theme with `stock` asks first, and choosing a theme that changes this goes back to the main menu. |
 
 Light keeps Scrim's styles.
@@ -211,6 +220,7 @@ gradient.selection = 96c5da,09a4e1,0065d3,004386
 gradient.status = fcfcfc,f8f8f8,9f9e9e,5b5b5b
 gradient.progress = 6483f0,6789f2,56aeff,4e8fce
 gradient.progress_track = dbdbdb,fdfdfd,e2e2e2,bababa
+gradient.lyrics = ffffff,d8dfe9
 font.list = 16-helvetica-bold
 font.title = 17-helvetica-bold
 font.body = 13-helvetica
@@ -222,6 +232,9 @@ font.wps_time = 14-helvetica-bold
 font.pane_title = 17-helvetica-bold-pane
 font.pane_text = 13-helvetica-bold
 font.list_value = 13-helvetica-bold
+font.lyrics = 16-helvetica-bold
+font.lyrics_focus = 16-helvetica-bold
+font.lyrics_background = 13-helvetica-bold
 metric.row_height = 24
 metric.list_x = 0
 metric.list_y = 20
@@ -233,6 +246,7 @@ motion.pop = 18
 motion.list = 0
 motion_easing = quad
 style.art = plastic
+style.lyrics = classic
 metric.status_pad_right = 5
 metric.status_icon_gap = 5
 ```

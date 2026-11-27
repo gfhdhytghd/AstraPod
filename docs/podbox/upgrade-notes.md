@@ -100,6 +100,13 @@
   it plays in the video player; music that was playing stops. An `.mp4` or
   `.m4a` with only sound plays as music, as before.
 
+- **Under Classic and Fruit Company, the lyrics page** looks like the
+  original iPod's lists. The status bar stays at the top, Now Playing's
+  progress bar and times stay at the bottom, and the line being sung sits
+  in the blue selection bar. Untimed lyrics read as a page of black text.
+  Set **Lyrics Viewer > Colour Mode** to anything but Theme for the
+  previous full-screen page.
+
 - **Under Fruit Company, Extras** (Clocks, Calendars, Contacts, Alarms,
   Notes, Screen Lock and Stopwatch) look and work like the original
   iPod's. An alarm rings while the player is on, over any screen but a

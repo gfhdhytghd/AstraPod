@@ -296,6 +296,25 @@ static void ui_theme_snapshot(struct ui_theme *theme)
     theme->background[UI_BG_LYRICS] = UI_BG_BLURRED_COVER;
     theme->color[UI_COLOR_FOREGROUND] = theme->color[UI_COLOR_ACCENT] = 0xffffff;
 }
+/* The snapshot above never selects style.lyrics=classic. */
+#define LYRICS_CHROME_STRIP 203
+struct lyrics_chrome { fb_data rows[LCD_HEIGHT]; int status_height; };
+static void lyrics_chrome_open(struct lyrics_chrome *c, const struct ui_theme *t)
+{(void)c;(void)t;abort();}
+static void lyrics_chrome_close(struct lyrics_chrome *c){(void)c;abort();}
+static fb_data lyrics_chrome_row(const struct lyrics_chrome *c, int y)
+{(void)c;(void)y;abort();}
+static bool lyrics_chrome_poll(struct lyrics_chrome *c){(void)c;abort();}
+static void lyrics_chrome_status(struct lyrics_chrome *c, struct ui_rect r)
+{(void)c;(void)r;abort();}
+static bool lyrics_chrome_times(struct lyrics_chrome *c, long e, long l)
+{(void)c;(void)e;(void)l;abort();}
+static int lyrics_chrome_fill(long e, long l){(void)e;(void)l;abort();}
+static long lyrics_chrome_next_ms(long e, long l){(void)e;(void)l;abort();}
+static void lyrics_chrome_strip(struct lyrics_chrome *c, int f, struct ui_rect r)
+{(void)c;(void)f;(void)r;abort();}
+static void lyrics_chrome_band(const struct lyrics_chrome *c, int t, int h, int a, int b)
+{(void)c;(void)t;(void)h;(void)a;(void)b;abort();}
 uint32_t ui_theme_color(const struct ui_theme *theme, enum ui_color_role role,
                         const struct ui_album_palette *palette)
 {

@@ -13,6 +13,7 @@
 #include "podlink-plugin-test.h"
 #include "podlink-shell-settings.h"
 #include "podlink-shell-playback.h"
+#include "podlink-shell-lcd.h"
 #include "button_usb_remote.h"
 #include "button-target.h"
 #include "sm1-test-control.h"
@@ -85,6 +86,14 @@ void shell_playback_request(const struct usb_ctrlrequest *req,
     (void)req;
     (void)buffer;
     (void)capacity;
+    (void)allowed;
+    assert(0);
+}
+void shell_lcd_request(const struct usb_ctrlrequest *req, uint8_t *buffer,
+                       bool allowed)
+{
+    (void)req;
+    (void)buffer;
     (void)allowed;
     assert(0);
 }
@@ -235,6 +244,38 @@ typedef uint16_t fb_data;
 static fb_data framebuffer[LCD_HEIGHT][LCD_WIDTH], lcd_dblbuf[LCD_HEIGHT][LCD_WIDTH];
 #define FRAMEBUFFER_SIZE sizeof(framebuffer)
 #define FBADDR(x, y) (&framebuffer[(y)][(x)])
+static fb_data capture_storage[2][LCD_HEIGHT][LCD_WIDTH];
+static bool alloc_fails, alloc_live, alloc_pinned;
+
+static int core_alloc_free_space(size_t size)
+{
+    assert(size == sizeof(capture_storage) && !alloc_live);
+    if (alloc_fails)
+        return -1;
+    alloc_live = true;
+    return 1;
+}
+
+static void *core_get_data_pinned(int handle)
+{
+    assert(handle == 1 && alloc_live && !alloc_pinned);
+    alloc_pinned = true;
+    return capture_storage;
+}
+
+static void core_put_data_pinned(void *data)
+{
+    assert(data == capture_storage && alloc_pinned);
+    alloc_pinned = false;
+}
+
+static int core_free(int handle)
+{
+    assert(handle == 1 && alloc_live && !alloc_pinned);
+    alloc_live = false;
+    return 0;
+}
+
 static bool lcd_ispowered = true, held;
 static int lcd_dma_ch;
 static struct { struct { bool thread; } blocker; } lcd_mutex;
@@ -248,8 +289,8 @@ static bool is_thread_context(void) { return true; }
 static bool irq_enabled(void) { return irq_depth == 0; }
 static void displaylcd_setup(int x, int y, int width, int height)
 { assert(x >= 0 && y >= 0 && width > 0 && height > 0); }
-static void displaylcd_dma(int count)
-{ assert(lcd_mutex.blocker.thread && count > 0); lcd_dma_ch = 1; }
+static void displaylcd_dma(int width, int height)
+{ assert(lcd_mutex.blocker.thread && width > 0 && height > 0); lcd_dma_ch = 1; }
 static void displaylcd_wait_dma(void)
 { assert(lcd_mutex.blocker.thread); lcd_dma_ch = 0; }
 static void lcd_write_yuv420_lines(const unsigned char *const src[3],
@@ -345,9 +386,24 @@ static unsigned pixel(unsigned x, unsigned y)
     return read16(offset % 256);
 }
 
+static void test_lcd_no_memory(void)
+{
+    alloc_fails = true;
+    podlink_plugin_test_lcd_init();
+    assert(!worker && !alloc_live);
+    snapshot_info(0, 0);
+    lcd_update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT);
+    assert(shell_out(11, NULL, 0) == USB_CONTROL_STALL);
+    assert(SHELL_IN(0x100, 256) == USB_CONTROL_STALL);
+    alloc_fails = false;
+    puts("PASS: LCD updates and USB status when snapshot allocation fails");
+}
+
 static void test_lcd(void)
 {
+    memset(capture_storage, 0xff, sizeof(capture_storage));
     podlink_plugin_test_lcd_init();
+    assert(alloc_live && alloc_pinned);
     snapshot_info(0, 0);
     assert(SHELL_IN(0x100, 256) == USB_CONTROL_STALL);
     assert(shell_out(11, "x", 1) == USB_CONTROL_STALL);
@@ -395,5 +451,6 @@ static void test_lcd(void)
 int main(void)
 {
     test_commands();
+    test_lcd_no_memory();
     test_lcd();
 }

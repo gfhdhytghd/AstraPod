@@ -43,6 +43,7 @@ struct gui_synclist {
     const int *parent[1];
     unsigned generation;
     void (*callback_prefetch_art)(int,void*,int);
+    void (*callback_child_texts)(void);
 };
 struct list_motion {
     int visible;
@@ -102,6 +103,15 @@ static void gui_synclist_layout(struct gui_synclist *list)
 { assert(list->parent[0]); laid_out++; }
 static bool split_list(const struct gui_synclist *list) { (void)list; return false; }
 static int menu_pane_deadline(void) { return TIMEOUT_BLOCK; }
+static void child_reset(struct native_list *render)
+{ assert(render == &state && render->owner->callback_child_texts); }
+static int child_deadline(const struct native_list *render,
+                          const struct gui_synclist *list, bool poll)
+{
+    (void)poll;
+    assert(render == &state && !list->callback_child_texts);
+    return TIMEOUT_BLOCK;
+}
 
 @MOTION_OWNER@
 @MOTION_STOP@

@@ -77,8 +77,9 @@ void rock_display_start(fb_data *caller_pixels, fb_data *widget_pixels,
                         bool video)
 {
     ui_scene_interrupt();
-    app_first_frame = (video || get_current_activity() == ACTIVITY_PLUGINBROWSER) &&
-                      ui_scene_capture_page(&app_scene);
+    bool animate_entry = video ||
+        get_current_activity() == ACTIVITY_PLUGINBROWSER;
+    app_first_frame = animate_entry && ui_scene_capture_page(&app_scene);
     lcd_scroll_stop();
     save_display(&caller);
     saved_pixels = caller_pixels;

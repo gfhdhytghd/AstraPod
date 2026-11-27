@@ -96,7 +96,7 @@ struct mp4v_demux_res {
     uint32_t num_stss;
     struct mp4v_table sync_samples;
 
-    /* Mapping cursor for sequential playback. On a backward seek, start over. */
+    /* Mapping cursor for sequential playback. Reset on a backward seek. */
     uint32_t map_run;
     uint32_t map_run_sample;
     uint32_t next_sample;

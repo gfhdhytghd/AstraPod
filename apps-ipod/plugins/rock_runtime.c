@@ -1315,7 +1315,8 @@ static int rock_open_foreground(const char *path, const char *file, bool shell,
             {
                 result = run_rock(next->module, next->path[0] ? next->path : NULL,
                                   arena, capacity,
-                                  caller_pixels, widget_pixels, false, false, NULL);
+                                  caller_pixels, widget_pixels,
+                                  false, false, NULL);
                 if (result == PLUGIN_GOTO_PLUGIN ||
                     result == PLUGIN_CHAIN_OVERLAY)
                     result = PLUGIN_ERROR;

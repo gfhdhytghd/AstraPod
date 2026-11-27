@@ -809,7 +809,8 @@ static void video_draw_overlay(uint8_t * const *planes, bool paused,
         int max = osd->options ? osd->options->max_volume : 0;
         int volume = MAX(min, MIN(max, rb->global_status->volume));
         fill = max > min ? (volume - min) * bar_width / (max - min) : 0;
-        video_yuv_text(planes, left, bottom + 7, right, "Volume", 241, 245, 245);
+        video_yuv_text(planes, left, bottom + 7, right, "Volume",
+                       241, 245, 245);
     }
     else
     {
@@ -879,7 +880,8 @@ static void video_draw_frame(const uint8_t *y, const uint8_t *cb,
 
 static void video_redraw_frame(struct vpu_h264 *decoder, uint8_t *scaled,
                                bool paused, uint32_t position_ms,
-                               uint32_t duration_ms, const struct video_osd *osd)
+                               uint32_t duration_ms,
+                               const struct video_osd *osd)
 {
     const uint8_t *frame_y;
     const uint8_t *frame_cb;
@@ -922,7 +924,7 @@ size_t video_h264_scratch_size(const char *path)
                                           (demux.height + 15) & ~15);
     if (!decoder)
         return 0;
-    /* Worst-case alignment before the decoder and the four following buffers. */
+    /* Worst-case alignment for the decoder and four following buffers. */
     size_t bytes = 4095 + decoder + VIDEO_READ_BUFFER + VIDEO_OUTPUT_BUFFER +
                    2 * 31;
     if (demux.audio_format == MAKEFOURCC('m', 'p', '4', 'a'))
@@ -931,7 +933,8 @@ size_t video_h264_scratch_size(const char *path)
     return (bytes + 7) & ~(size_t)7;
 }
 
-int video_h264_play_named(const char *filepath, void *buffer, size_t buffer_size,
+int video_h264_play_named(const char *filepath, void *buffer,
+                          size_t buffer_size,
                           const struct video_play_options *options)
 {
     struct video_pool pool;
@@ -1225,7 +1228,8 @@ int video_h264_play_named(const char *filepath, void *buffer, size_t buffer_size
             continue;
         if (sample >= demux.num_samples)
             break;
-        if (mp4v_get_sample_offset(video_fd, &demux, sample, &offset, &size) < 0 ||
+        if (mp4v_get_sample_offset(video_fd, &demux, sample, &offset,
+                                   &size) < 0 ||
             size == 0 || size > VIDEO_READ_BUFFER ||
             rb->lseek(video_fd, offset, SEEK_SET) < 0 ||
             rb->read(video_fd, read_buffer, size) != (ssize_t)size)

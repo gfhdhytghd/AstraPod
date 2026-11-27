@@ -398,7 +398,7 @@ static enum list_row_kind flat_get_kind(int selected_item, void *data)
 
 /* The files of `type`, or for NULL every file with the rows above them */
 #ifdef HAVE_VIDEO_PLAYER
-static int play_video_rows(int *selection)
+static int play_video_rows(const char *type, int *selection)
 {
     int row = *selection - heads;
     while (row >= 0 && row < shown_ct)
@@ -412,9 +412,21 @@ static int play_video_rows(int *selection)
             break;
         }
         *selection = heads + row;
-        int result = rock_open_video(path, NULL, row > 0);
+        bool has_previous = row > 0;
+        path_list_free(&list);
+        int result = rock_open_video(path, NULL, has_previous);
         if (result == ROCK_VIDEO_USB)
             return GO_TO_ROOT;
+        if (!load())
+            break;
+        fill_shown(type);
+        /* The index can change during playback. Find the same file first. */
+        for (row = 0; row < shown_ct; row++)
+            if (!strcmp(flat_path(shown[row]), path))
+                break;
+        if (row == shown_ct)
+            break;
+        *selection = heads + row;
         if (result == ROCK_VIDEO_PREVIOUS)
             row--;
         else if (result == ROCK_VIDEO_FINISHED || result == ROCK_VIDEO_NEXT)
@@ -487,7 +499,7 @@ static int show_list(const char *type, char *title)
         }
 #ifdef HAVE_VIDEO_PLAYER
         else if (flat_kind == FLAT_VIDEOS)
-            ret = play_video_rows(&sel);
+            ret = play_video_rows(type, &sel);
 #endif
         else
             ret = open_file(shown[choice - heads]);

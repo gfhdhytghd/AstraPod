@@ -259,6 +259,9 @@ static void put_time(struct stock_canvas *c, long cs, int x, int baseline,
 /* The dial with its hands at `cs`, at x + `left`. */
 static void put_dial(struct stock_canvas *c, int left, long cs)
 {
+    if (!stock_art_ready())
+        return;
+
     stock_art_put(c, STOCK_ART_STOPWATCH_CLOCK, CLOCK_X + left, CLOCK_Y);
     put_hand(c, STOCK_ART_STOPWATCH_SECS_IMAGE_0, SECS_EDGE, cs / 50,
              SECS_X + left, SECS_Y);

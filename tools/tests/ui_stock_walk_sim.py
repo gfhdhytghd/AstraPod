@@ -24,6 +24,7 @@ import mmap
 import os
 import re
 import shutil
+import signal
 import struct
 import subprocess
 import tempfile
@@ -74,7 +75,9 @@ class Sim:
     """The simulator, every picture the panel was sent, and every distinct
     picture its window showed."""
 
-    def __init__(self, binary, root, out, stem):
+    def __init__(self, binary, root, out, stem, row):
+        self.row = row
+        self.step = "startup"
         path = root / "walk.state"
         with path.open("w+b") as handle:
             handle.truncate(STATE)
@@ -147,18 +150,26 @@ class Sim:
         return [(name, int(seen)) for name, seen in found], len(text)
 
     def alive(self):
-        if self.process.poll() is not None:
-            raise RuntimeError("the simulator stopped")
+        status = self.process.poll()
+        if status is not None:
+            reason = signal.Signals(-status).name if status < 0 else f"exit {status}"
+            raise RuntimeError(f"{self.row}, {self.step}: the simulator stopped "
+                               f"({reason}); see {self.log.name}")
 
     def key(self, name, hold=2):
         """Press and release. The script's own `wait` counts presents, and
         a still page presents nothing, so the host times the release."""
         self.alive()
-        self.process.stdin.write(f"down {name}\n".encode())
-        self.process.stdin.flush()
-        time.sleep(hold / 60)
-        self.process.stdin.write(f"up {name}\n".encode())
-        self.process.stdin.flush()
+        try:
+            self.process.stdin.write(f"down {name}\n".encode())
+            self.process.stdin.flush()
+            time.sleep(hold / 60)
+            self.process.stdin.write(f"up {name}\n".encode())
+            self.process.stdin.flush()
+        except BrokenPipeError as err:
+            self.alive()
+            raise RuntimeError(f"{self.row}, {self.step}: simulator key pipe "
+                               f"closed; see {self.log.name}") from err
 
     def settle(self, quiet=QUIET, limit=SETTLE_LIMIT):
         """Wait until the window has shown nothing new for `quiet`
@@ -533,7 +544,8 @@ def games(fixture):
 def run_walk(sim, out, walk, stem):
     results = []
     perf = 0
-    for kind, key, name in walk:
+    for index, (kind, key, name) in enumerate(walk, start=1):
+        sim.step = f"step {index} ({name or kind}, key={key})"
         if kind == "nav":
             sim.key(key)
             if key in ("up", "down"):
@@ -603,7 +615,7 @@ def contact(out, theme, results):
     sheet.save(out / f"{theme}-walk.png")
 
 
-def walk_segment(binary, fixture, out, theme, index, steps, game=None):
+def walk_segment(binary, fixture, out, theme, index, name, steps, game=None):
     with tempfile.TemporaryDirectory(prefix="stock-slide-") as temp:
         root = Path(temp) / "root"
         shutil.copytree(fixture, root, symlinks=True,
@@ -630,7 +642,7 @@ def walk_segment(binary, fixture, out, theme, index, steps, game=None):
             CONFIG + f"native theme: {theme}\n" + extra)
         (root / ".rockbox/ui-perf.enable").touch()
         stem = f"{theme}-{index:02d}"
-        sim = Sim(binary, root, out, stem)
+        sim = Sim(binary, root, out, stem, name)
         try:
             time.sleep(2)
             sim.settle(quiet=1.5, limit=20)
@@ -672,7 +684,7 @@ def main():
             runs = pool.map(
                 lambda job: walk_segment(args.binary, args.fixture, args.out,
                                          theme, *job),
-                [(i, steps, module_for(name))
+                [(i, name, steps, module_for(name))
                  for i, (name, steps) in enumerate(walks)])
             for rows in runs:
                 result[theme].extend(rows)

@@ -24,14 +24,25 @@ struct stock_pose {
 struct stock_edge { int32_t x, top, bottom, depth; };
 struct stock_visible { int album; struct stock_pose pose; bool linear; };
 
-enum stock_phase { STOCK_REST, STOCK_ENTER, STOCK_MENU_ENTER, STOCK_SCROLL, STOCK_LEAVE };
+/* The two ULTRA phases are Fruit Company Ultra's flight, in ultra_flow.c. */
+enum stock_phase { STOCK_REST, STOCK_ENTER, STOCK_MENU_ENTER, STOCK_SCROLL, STOCK_LEAVE,
+                   STOCK_ULTRA_ENTER, STOCK_ULTRA_LEAVE };
 struct stock_flow {
     int count, selected, first, length;
     uint32_t start_us;
     enum stock_phase phase;
     bool playback_walls, reverse_walls;
+    /* Scrolls land on ultra_flow_scroll() instead of stock's quintic. */
+    bool spring;
     struct stock_pose start[STOCK_MAX_VISIBLE];
 };
+
+/* A multiple of 32, as stock_progress() needs. */
+#define STOCK_ULTRA_SCROLL_US 704000u
+struct stock_pose ultra_flow_pose(bool leave, int rel, struct stock_pose rest,
+                                  uint32_t elapsed);
+uint32_t ultra_flow_length(bool leave);
+int ultra_flow_scroll(uint32_t elapsed);
 
 static inline int stock_abs(int n)
 {
@@ -115,15 +126,26 @@ static inline void stock_enter(struct stock_flow *f, int count, int selected,
     }
 }
 
+/* Every cover takes its resting place from flight. */
+static inline void stock_ultra_enter(struct stock_flow *f, int count,
+                                     int selected, uint32_t now)
+{
+    stock_init(f, count, selected, now, false);
+    f->phase = STOCK_ULTRA_ENTER;
+}
+
 static inline bool stock_entering(const struct stock_flow *f)
 {
-    return f->phase == STOCK_ENTER || f->phase == STOCK_MENU_ENTER;
+    return f->phase == STOCK_ENTER || f->phase == STOCK_MENU_ENTER ||
+           f->phase == STOCK_ULTRA_ENTER;
 }
 
 static inline int stock_scroll_progress(const struct stock_flow *f, uint32_t now)
 {
-    return f->phase == STOCK_SCROLL ?
-           stock_progress(now - f->start_us, STOCK_SCROLL_US, false) : STOCK_ONE;
+    if (f->phase != STOCK_SCROLL)
+        return STOCK_ONE;
+    return f->spring ? ultra_flow_scroll(now - f->start_us) :
+           stock_progress(now - f->start_us, STOCK_SCROLL_US, false);
 }
 
 static inline struct stock_visible stock_current(const struct stock_flow *f,
@@ -135,6 +157,11 @@ static inline struct stock_visible stock_current(const struct stock_flow *f,
     struct stock_pose a = f->start[anchor], b = stock_slot_base(rel);
     int64_t from_slots = i - anchor, to_slots = rel;
     uint32_t elapsed = now - f->start_us;
+    if (f->phase == STOCK_ULTRA_ENTER || f->phase == STOCK_ULTRA_LEAVE)
+        return (struct stock_visible){album,
+            ultra_flow_pose(f->phase == STOCK_ULTRA_LEAVE, rel, a, elapsed),
+            f->phase == STOCK_ULTRA_ENTER &&
+                elapsed >= ultra_flow_length(false)};
     /* The menu runs its authored poses on a clock compressed to 3/8 time.
      * Clamp before rescaling so a late sample cannot wrap the clock. */
     if (f->phase == STOCK_MENU_ENTER)
@@ -173,12 +200,19 @@ static inline struct stock_visible stock_current(const struct stock_flow *f,
     }
     int64_t x = entry_offset + a.x + stock_mul(b.x - a.x, e) +
                 STOCK_SPACING * (from_slots * (STOCK_ONE - e) + to_slots * e);
+    /* A spring's overshoot carries on past the centre's turn, never past
+     * a wall's edge-on stop. */
+    int32_t yaw = a.yaw + stock_mul(b.yaw - a.yaw, e);
+    if (f->spring && yaw > 90 * STOCK_ONE)
+        yaw = 90 * STOCK_ONE;
+    else if (f->spring && yaw < -90 * STOCK_ONE)
+        yaw = -90 * STOCK_ONE;
     struct stock_visible v = {
         .album = album,
         .pose = { x < INT32_MIN ? INT32_MIN : x > INT32_MAX ? INT32_MAX : (int32_t)x,
                   a.y + stock_mul(b.y - a.y, e),
                   a.z + stock_mul(b.z - a.z, e),
-                  a.yaw + stock_mul(b.yaw - a.yaw, e),
+                  yaw,
                   a.width_delta ? stock_mul(a.width_delta, STOCK_ONE - e) : 0,
                   a.height_delta ? stock_mul(a.height_delta, STOCK_ONE - e) : 0 },
         .linear = e >= 65209  /* ceil(0.995 * 65536) */
@@ -228,7 +262,7 @@ static inline void stock_snapshot(struct stock_flow *f, uint32_t now)
 
 static inline void stock_scroll(struct stock_flow *f, int steps, uint32_t now)
 {
-    if (!f->count || f->phase == STOCK_LEAVE)
+    if (!f->count || f->phase == STOCK_LEAVE || f->phase == STOCK_ULTRA_LEAVE)
         return;
     if (steps < -f->selected)
         steps = -f->selected;
@@ -249,12 +283,23 @@ static inline void stock_leave(struct stock_flow *f, uint32_t now)
     f->reverse_walls = false;
 }
 
+/* Every cover recedes into flight from where it is. */
+static inline void stock_ultra_leave(struct stock_flow *f, uint32_t now)
+{
+    stock_snapshot(f, now);
+    f->phase = STOCK_ULTRA_LEAVE;
+}
+
 static inline bool stock_animating(const struct stock_flow *f, uint32_t now)
 {
     uint32_t duration = STOCK_SCROLL_US;
     if (f->phase == STOCK_REST || !f->count)
         return false;
-    if (f->phase == STOCK_LEAVE)
+    if (f->phase == STOCK_ULTRA_ENTER || f->phase == STOCK_ULTRA_LEAVE)
+        duration = ultra_flow_length(f->phase == STOCK_ULTRA_LEAVE);
+    else if (f->phase == STOCK_SCROLL && f->spring)
+        duration = STOCK_ULTRA_SCROLL_US;
+    else if (f->phase == STOCK_LEAVE)
         duration = f->reverse_walls ? STOCK_LEAVE_US : 250000;
     else if (f->phase == STOCK_MENU_ENTER)
         duration = STOCK_MENU_TIME(STOCK_MENU_AUTHORED_US);
@@ -276,6 +321,7 @@ static inline int stock_sample(const struct stock_flow *f, uint32_t now,
         /* Playback and entry walls remain visible until their last pixels
          * cross the viewport edge. Scrolling recycles at the world band. */
         if (!stock_entering(f) && !f->playback_walls &&
+            f->phase != STOCK_ULTRA_LEAVE &&
             (v.pose.x <= -STOCK_BAND * STOCK_ONE || v.pose.x >= STOCK_BAND * STOCK_ONE))
             continue;
         int pos = n++;

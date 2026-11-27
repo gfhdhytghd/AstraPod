@@ -114,6 +114,7 @@
 #include "stock_motion.h"
 #include "stock_color.h"
 #include "reflection.h"
+#include "ultra_flow.h"
 #include "database/path_key.h"     /* the shared engine: carousel_idx, the model */
 #include "screens/playback/cider.h"
 #include "screens/playback/cider_library.h"
@@ -2072,8 +2073,8 @@ static void make_reflection(struct dim *bmp)
     int size = MIN(bmp->width, bmp->height);
     const pix_t *crop = (const pix_t *)(bmp + 1) +
         (bmp->width - size) / 2 * bmp->height + (bmp->height - size) / 2;
-    reflection_build((pix_t *)slide_reflection(bmp), crop, size, bmp->height,
-                     pf_bg_color);
+    (ultra_flow_on ? ultra_reflection_build : reflection_build)(
+        (pix_t *)slide_reflection(bmp), crop, size, bmp->height, pf_bg_color);
 }
 
 /* Read a pfraw image into the slide cache; a buflib handle, or -1.
@@ -2742,6 +2743,7 @@ static void flat_note_scroll(void)
 static uint32_t *flow_stages;
 struct flow_card {
     int id;
+    int fog;    /* Ultra's depth light, Q8 */
     bool linear;
     struct stock_edge edge[2];
 };
@@ -2765,6 +2767,8 @@ static void coverflow_place(uint32_t now)
     {
         flow_cards[i].id = flow_visible[i].album;
         flow_cards[i].linear = flow_visible[i].linear;
+        flow_cards[i].fog = ultra_flow_on ? ultra_flow_fog(&flow_row,
+            flow_visible[i].album, now, flow_visible[i].pose.x) : 0;
         stock_project(flow_visible[i].pose, flow_cards[i].edge);
     }
     if (flow_stages)
@@ -3498,7 +3502,8 @@ static void reverse_animation(int direction)
 static void flow_click(int direction)
 {
     int to = fbound(0, target + direction, number_of_slides - 1);
-    if (to == target || flow_row.phase == STOCK_LEAVE)
+    if (to == target || flow_row.phase == STOCK_LEAVE ||
+        flow_row.phase == STOCK_ULTRA_LEAVE)
         return;
     if (pf_state == pf_scrolling)
         stock_scroll(&flow_row, to - target, USEC_TIMER);
@@ -3694,6 +3699,7 @@ struct flow_face
     int stride, size, crop;
     int first, end, t0, dt, start_height;
     bool linear, stock_side;
+    int fog;    /* Ultra's depth light, Q8 */
     const struct flow_seams *seams;
     int top, top_delta, end_height; /* Q16 projected edge coordinates */
 };
@@ -3829,7 +3835,7 @@ static void flow_cover_columns(const struct flow_card *card, int slot,
         .pixels = (const pix_t *)(bmp+1) + (bmp->height-size)/2,
         .refl = refl, .rows = refl ? reflection_rows(size) : 0,
         .stride = bmp->height, .size = size, .crop = (bmp->width-size)/2,
-        .linear = card->linear,
+        .linear = card->linear, .fog = card->fog,
         .stock_side = stock_side, .seams = seams, .top = card->edge[0].top,
         .top_delta = card->edge[1].top - card->edge[0].top,
         .start_height = h0, .end_height = h1, .first = first, .end = end
@@ -3951,7 +3957,8 @@ static inline void flow_linear_texels(uint32_t *at, const pix_t *src,
 
 static inline void flow_linear_run(uint32_t *at, int rows, pix_t *dst,
                                    int stride, int n, int p, int dy,
-                                   const struct pf_fade *ink)
+                                   const struct pf_fade *ink,
+                                   const struct ultra_lit *lit)
 {
     /* Clamp the bilinear footprint at both ends of this texture. */
     at[-1] = at[0];
@@ -3962,6 +3969,8 @@ static inline void flow_linear_run(uint32_t *at, int rows, pix_t *dst,
         int j = p >> PFREAL_SHIFT;
         unsigned v = (p >> (PFREAL_SHIFT - 5)) & 31;
         uint32_t c = flow_mix(at[j], at[j + 1], v);
+        if (lit)
+            c = ultra_lit_lanes(c, lit);
         pix_t color = c | (c >> 16);
         *dst = ink ? fade_color(color, ink->a, ink->rb, ink->g) : color;
     }
@@ -3976,7 +3985,8 @@ static int flow_reflection_split(const struct flow_sample *sample, int n)
 
 static __attribute__((noinline, optimize("O3"))) void
 flow_draw_linear(const struct flow_sample *sample, int src_stride,
-                 pix_t *dst, int stride, const struct pf_fade *ink)
+                 pix_t *dst, int stride, const struct pf_fade *ink,
+                 const struct ultra_lit *lit)
 {
     static uint32_t texels[DISPLAY_HEIGHT + 2];
     uint32_t *at = texels + 1;
@@ -3986,7 +3996,8 @@ flow_draw_linear(const struct flow_sample *sample, int src_stride,
     if (split)
     {
         flow_linear_texels(at, sample->src, src_stride, size, sample->x_weight);
-        flow_linear_run(at, size, dst, stride, split, sample->p, sample->dy, ink);
+        flow_linear_run(at, size, dst, stride, split, sample->p, sample->dy,
+                        ink, lit);
     }
     /* The cover and reflection are separate textures. Filtering clamps at
      * their seam, where the edge pass mixes the resulting screen pixels. */
@@ -3995,13 +4006,14 @@ flow_draw_linear(const struct flow_sample *sample, int src_stride,
         int p = sample->p + split * sample->dy - (size << PFREAL_SHIFT);
         flow_linear_texels(at, sample->refl, rows, rows, sample->x_weight);
         flow_linear_run(at, rows, dst + split * stride, stride, n - split,
-                        p, sample->dy, ink);
+                        p, sample->dy, ink, lit);
     }
 }
 
 /* Rows whose texel lies past the cover read on in its reflection. */
 static void flow_draw_nearest(const struct flow_sample *sample, pix_t *dst,
-                              int stride, const struct pf_fade *ink)
+                              int stride, const struct pf_fade *ink,
+                              const struct ultra_lit *lit)
 {
     int n = sample->last - sample->first;
     int limit = sample->size << PFREAL_SHIFT;
@@ -4011,7 +4023,13 @@ static void flow_draw_nearest(const struct flow_sample *sample, pix_t *dst,
     {
         if (run.n > 0)
         {
-            if (ink)
+            if (lit)
+            {
+                run.p = ultra_lit_run(run.src, run.px, stride, run.n, run.p,
+                                      run.dp, lit);
+                run.px += run.n * stride;
+            }
+            else if (ink)
                 draw_run_faded(&run, run.n, stride, ink);
             else
                 draw_run(&run, run.n, stride);
@@ -4025,18 +4043,30 @@ static void flow_draw_nearest(const struct flow_sample *sample, pix_t *dst,
 #endif
 }
 
+static int flow_centre_h;
+
 static void flow_draw_span(const struct flow_column *col, int top, int end,
                            pix_t *pixels, int stride, const struct pf_fade *ink)
 {
+    struct ultra_lit light;
+    const struct ultra_lit *lit = NULL;
+    if (ultra_flow_on && !ink)
+    {
+        unsigned a = ultra_flow_light(col->face->fog, col->height >> 16,
+                                      flow_centre_h);
+        light = ultra_lit(a, pf_bg_color);
+        lit = light.a < 32 ? &light : NULL;
+    }
     struct flow_sample sample;
     flow_sample_column(col, top, end, &sample);
     const pix_t *src = sample.src;
     int size = sample.size, y0 = sample.y0, y1 = sample.y1;
     int first = sample.first, last = sample.last;
     if (first < last && col->face->linear)
-        flow_draw_linear(&sample, col->face->stride, pixels + first * stride, stride, ink);
+        flow_draw_linear(&sample, col->face->stride, pixels + first * stride,
+                         stride, ink, lit);
     else if (first < last)
-        flow_draw_nearest(&sample, pixels + first * stride, stride, ink);
+        flow_draw_nearest(&sample, pixels + first * stride, stride, ink, lit);
     if (col->face->stock_side)
         return;
     /* Only the outer row on each silhouette has fractional coverage. */
@@ -4049,7 +4079,9 @@ static void flow_draw_span(const struct flow_column *col, int top, int end,
         unsigned a = ((amount + 512) >> 10) * 4;
         pix_t pixel = !edge ? src[0] : sample.refl ? sample.refl[sample.rows - 1]
                                                    : src[size - 1];
-        if (ink)
+        if (lit)
+            pixel = ultra_lit_pixel(pixel, lit);
+        else if (ink)
             pixel = fade_color(pixel, ink->a, ink->rb, ink->g);
         pix_t *dest = pixels + y * stride;
         *dest = fade_color(pixel, a, fade_red_blue(*dest) * (256 - a),
@@ -4208,6 +4240,12 @@ static void flow_paint(bool center, int spread, int clear_y, int clear_h)
         flow_end[x] = 0;
     }
     const bool stock = stock_look();
+    if (ultra_flow_on)
+    {
+        struct stock_edge centre[2];
+        stock_project(stock_slot_base(0), centre);
+        flow_centre_h = (centre[0].bottom - centre[0].top) >> 16;
+    }
     art_frame_fallback = art_frame_black = false;
     for (int i = 0; i < flow_count; i++)
         if (center || flow_cards[i].id != center_index)
@@ -4466,7 +4504,8 @@ static void flow_update(void)
     if (!stock_animating(&flow_row, now))
     {
         move_center(target);
-        if (flow_row.phase != STOCK_LEAVE)
+        if (flow_row.phase != STOCK_LEAVE &&
+            flow_row.phase != STOCK_ULTRA_LEAVE)
             stock_init(&flow_row, number_of_slides, target, now, false);
         land();
     }
@@ -4548,6 +4587,7 @@ static void cleanup(void)
     end_pf_thread();
     wants_to_quit = true;
     bar_drop_free();
+    ultra_still_drop();
 
     /* Give the theme back. Whatever comes next draws itself, so no forced
      * redraw from here. */
@@ -4619,6 +4659,8 @@ static bool init(void)
     pf_config_load();
 
     pf_stock = ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC;
+    ultra_flow_sync();
+    flow_row.spring = ultra_flow_on;
     pf_show_statusbar = pf_stock;
     pf_chrome_h = pf_stock ? ui_theme_metric(UI_METRIC_STATUS_HEIGHT) : 0;
     pf_theme_pushed = true;
@@ -6209,6 +6251,9 @@ static void prepare_stock_back(void)
     panel.back_ready = true;
 }
 
+/* Lights the quads stock_draw_part() maps while set: Ultra's album turn. */
+static struct ultra_lamp *stock_lamp;
+
 /* Map a column-major square onto the two projected vertical edges.
  * The panel reads left to right when the back faces the viewer. With
  * `reflection`, map instead the quad half as tall directly below the face,
@@ -6228,6 +6273,8 @@ static void stock_draw_part(pix_t *dst, struct stock_pose pose, const pix_t *tex
         return;
     int hl = left.bottom - left.top, hr = right.bottom - right.top;
     bool mirror = reverse != stock_back_face(pose);
+    if (stock_lamp)
+        ultra_lamp_aim(stock_lamp, pose, edge);
     for (int x = first; x < end; x++)
     {
         int t = ((int64_t)((x << 16) + 32768 - left.x) << 16) / width;
@@ -6251,7 +6298,12 @@ static void stock_draw_part(pix_t *dst, struct stock_pose pose, const pix_t *tex
         int v = ((int64_t)((y << 16) + 32768 - top) * dy) >> 16;
         struct pf_col col = {texture + u * stride, dst + y * BUFFER_WIDTH + x,
                              v, dy, bottom - y};
-        draw_run(&col, col.n, BUFFER_WIDTH);
+        struct ultra_lit lit;
+        if (stock_lamp && ultra_lamp_column(stock_lamp, t, &lit))
+            ultra_lit_run(col.src, col.px, BUFFER_WIDTH, col.n, col.p, col.dp,
+                          &lit);
+        else
+            draw_run(&col, col.n, BUFFER_WIDTH);
     }
 }
 
@@ -6278,13 +6330,31 @@ static void stock_draw_quad(pix_t *dst, struct stock_pose pose, const pix_t *tex
     stock_draw_clipped_quad(dst, pose, texture, tex_w, tex_h, stride, &screen);
 }
 
+/* The covers behind the turn; Ultra draws them once while the row holds
+ * still and copies them back after. */
+static void flip_backdrop(uint32_t now)
+{
+    pix_t *rows = buffer + (pf_chrome_h - pf_draw_y_shift) * BUFFER_WIDTH;
+    size_t pixels = (size_t)(pf_height - pf_chrome_h) * BUFFER_WIDTH;
+    uint32_t key = panel.flip.start_us + center_index +
+                   pf_slides_loaded * 2654435761u;
+    bool still = ultra_flow_on && !stock_animating(&flow_row, now);
+    if (still && ultra_still_restore(rows, pixels, key))
+        return;
+    flow_paint(false, 0, 0, pf_height);
+    if (still)
+        ultra_still_keep(rows, pixels, key);
+}
+
 static void render_stock_flip(struct stock_pose pose, int album, uint32_t now,
                               bool show_label)
 {
     coverflow_place(now);
     bool visible = pose.x > -STOCK_BAND * STOCK_ONE && pose.x < STOCK_BAND * STOCK_ONE;
     bool back = stock_back_face(pose);
-    flow_paint(false, 0, 0, pf_height);
+    flip_backdrop(now);
+    struct ultra_lamp lamp;
+    stock_lamp = ultra_flow_on ? &lamp : NULL;
     if (visible && back && panel.back_ready && panel.back_handle > 0)
     {
         const pix_t *tex = core_get_data_pinned(panel.back_handle);
@@ -6310,6 +6380,7 @@ static void render_stock_flip(struct stock_pose pose, int album, uint32_t now,
                 stock_draw_reflection(LCD_BUF, pose, slide_reflection(bmp), size);
         }
     }
+    stock_lamp = NULL;
     if (show_label)
         model->draw_text();
 }
@@ -6366,6 +6437,7 @@ static void draw_album_flip(bool present)
         uint32_t now = USEC_TIMER;
         if (flow_row.phase != STOCK_REST && !stock_animating(&flow_row, now))
             stock_init(&flow_row, number_of_slides, center_index, now, false);
+        ultra_still_drop();
         coverflow_place(now);
         flow_paint(!panel.position, 0, 0, pf_height);
         if (!panel.position)
@@ -7718,8 +7790,11 @@ static bool play_wps_sheet(const pix_t *front, const pix_t *back, bool rising,
     while (lcd_active())
     {
         uint32_t rendering = (trace || rising) ? USEC_TIMER : 0;
-        ui_scene_compose_sheet(LCD_BUF, back, front,
-                               ui_tween_sample(&tween, frame));
+        if (ultra_flow_on)
+            ultra_sheet_compose(LCD_BUF, back, front, frame, frames, rising);
+        else
+            ui_scene_compose_sheet(LCD_BUF, back, front,
+                                   ui_tween_sample(&tween, frame));
         uint32_t submitting = (trace || held) ? USEC_TIMER : 0;
         bool shown = true;
         if (held)
@@ -8367,6 +8442,12 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
          * the centre slide included: it is the one being looked at, and the
          * loader reloads it first. */
         unsigned art_generation = art_cache_generation();
+        if (ultra_flow_sync())
+        {
+            /* Every reflection was built for the other look. */
+            flow_row.spring = ultra_flow_on;
+            art_seen_generation = ~art_generation;
+        }
         if (art_seen_generation != art_generation && !art_cache_is_busy())
         {
             buf_ctx_lock();
@@ -8562,7 +8643,10 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                 fade = !pf_wps_entry && entry_source->backdrop_handle > 0 ? entry_source : NULL;
                 opacity = fade ? 0 : 256;
                 still_covers = !pf_wps_entry && stock_look() && fruit_menu_active();
-                if (still_covers)
+                if (still_covers && ultra_flow_on)
+                    stock_ultra_enter(&flow_row, number_of_slides, center_index,
+                                      fade_start);
+                else if (still_covers)
                     stock_init(&flow_row, number_of_slides, center_index,
                                fade_start, false);
                 else
@@ -9410,6 +9494,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             }
             if (!still_covers)
                 stock_leave(&flow_row, fade_start);
+            else if (ultra_flow_on)
+                stock_ultra_leave(&flow_row, fade_start);
             step = 1;
             pf_state = pf_scrolling;
             leaving = true;

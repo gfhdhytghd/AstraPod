@@ -226,6 +226,7 @@ static void check_plastic(void)
     assert(UI_THEME_BUILTIN_COUNT == 4);
     assert(!strcmp(ui_theme_builtin_name(UI_THEME_CLASSIC), "classic"));
     assert(theme.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_ASTRAPOD);
+    assert(theme.style[UI_STYLE_QUICK_SCREEN] == UI_QUICK_SCREEN_HUD);
 
     /* Fruit Company is Classic with the stock menu tree */
     struct ui_theme fruit;
@@ -257,6 +258,7 @@ static void check_menu_pane(void)
     struct ui_theme theme;
     ui_theme_builtin(&theme, UI_THEME_SCRIM);
     assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_NONE);
+    assert(theme.style[UI_STYLE_QUICK_SCREEN] == UI_QUICK_SCREEN_TILES);
     ui_theme_builtin(&theme, UI_THEME_LIGHT);
     assert(theme.style[UI_STYLE_MENU_PANE] == UI_MENU_PANE_NONE);
     ui_theme_builtin(&theme, UI_THEME_CLASSIC);

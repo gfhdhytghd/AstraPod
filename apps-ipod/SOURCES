@@ -81,6 +81,7 @@ draw/bmp.c
 draw/card_paint.c
 draw/card_row.c
 draw/card_text.c
+draw/gloss.c
 draw/icon.c
 draw/icon_bitmaps.c
 draw/img_filter.c

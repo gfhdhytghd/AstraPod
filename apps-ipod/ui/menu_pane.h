@@ -65,7 +65,7 @@ bool menu_pane_take_screen(void);
  * blend. The caller must put the returned pointer after compositing. */
 void menu_pane_hold_cover(void);
 const fb_data *menu_pane_pin_cover(struct ui_rect *area, int *stride);
-void menu_pane_resume_cover(void);
+void menu_pane_resume_cover(bool restored);
 /* The whole of the pane's backdrop in a screen-sized buffer, the first
  * frame of Now Playing entered from a split menu. */
 void menu_pane_backdrop(fb_data *buffer);

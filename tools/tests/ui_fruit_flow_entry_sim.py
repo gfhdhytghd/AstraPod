@@ -39,10 +39,11 @@ import sys
 from pathlib import Path
 
 import numpy
+from PIL import Image
 
 sys.dont_write_bytecode = True
 from ui_stock_transitions_sim import (  # noqa: E402
-    CF_ENTRY_CAPTURE_FRAMES, W, make_fixture, session,
+    CF_ENTRY_CAPTURE_FRAMES, H, W, make_fixture, session,
 )
 
 from ui_music_fixture import MUSIC_ALBUMS
@@ -263,10 +264,60 @@ def install_preview_art(root):
             header + rgb565.astype("<u2").tobytes())
 
 
+def preview_shift(image, rest):
+    """Match a patch of the album to its landed reference in both axes."""
+    now, then = gray(image), gray(rest)
+    patch = then[48:168:3, 207:276:3]
+    return min((round(float(numpy.abs(
+                now[48 + dy:168 + dy:3, 207 + dx:276 + dx:3] - patch).mean()), 2),
+                dx, dy)
+               for dx in range(-14, 15) for dy in range(-14, 15))
+
+
+def repeated_handoff(sim):
+    sim.tap("select", 90)
+    recordings = {}
+    for i in range(20):
+        # Let the slideshow cross its 30 s idle dwell once. This makes the
+        # second batch exercise a different cached cover, even with disk idle.
+        sim.wait(32 * 60 if i == 10 else 42)
+        _, pixels = sim.frames_since(0)
+        reference = Image.frombytes("RGB", (W, H), pixels[-1])
+        if i % 2:
+            sim.tap("select", 45)
+            sim.tap("down", 20)
+            frames = sim.record(55, "menu")
+        else:
+            frames = sim.record(CF_ENTRY_CAPTURE_FRAMES + 20, "select", "menu",
+                                at_ms=105, second_when=lambda im, _:
+                                0 < column_offset(im, reference) < 75)
+        recordings[f"return-{i:02d}"] = [(0, reference)] + frames
+    return recordings
+
+
+def measure_handoff(shots):
+    reference = shots[0][1]
+    row_offsets = [column_offset(im, reference) for _, im in shots]
+    away = [n for n, dx in enumerate(row_offsets) if dx > 8]
+    if not away:
+        return {"poses": [], "color": 0}
+    landed = []
+    for (ms, im), row in zip(shots[away[-1] + 1:], row_offsets[away[-1] + 1:]):
+        error, x, y = preview_shift(im, reference)
+        # Subtract the last few pixels of the slide. The row and the preview
+        # travel the same distance in opposite directions up to arrival.
+        landed.append((round(ms, 1), error, x - row, y, row))
+    return {"poses": landed,
+            "color": int(numpy.median(
+                numpy.asarray(reference)[40:180, 200:300, 2]))}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("binary", "resource", "output"):
         parser.add_argument(name, type=lambda arg: Path(arg).resolve())
+    parser.add_argument("--handoff", action="store_true",
+                        help="also record twenty Cover Flow returns")
     parser.add_argument("--fixture", type=lambda arg: Path(arg).resolve())
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
@@ -293,7 +344,13 @@ def main():
             os.environ.pop("PODBOX_SIM_CIDER", None)
         result[name] = {"enter": measure_entry(shots["enter"]),
                         "exit": measure_exit(shots["exit"])}
-    (args.output / "result.json").write_text(json.dumps(result, indent=1) +
+    handoffs = {}
+    if args.handoff:
+        shots = session(args.binary, fixture, args.output / "handoff",
+                        "fruit-company", "", repeated_handoff,
+                        prepare=install_preview_art)
+        handoffs = {key: measure_handoff(frames) for key, frames in shots.items()}
+    (args.output / "result.json").write_text(json.dumps({**result, "handoffs": handoffs}, indent=1) +
                                              "\n")
 
     failed = []
@@ -331,6 +388,33 @@ def main():
             elif abs(leave[part + "_fit_start_ms"]) > FRAME_MS:
                 failed.append((name, part + " return with the chrome",
                                leave[part + "_fit_start_ms"]))
+    moving_returns = 0
+    for name, handoff in handoffs.items():
+        poses = handoff["poses"]
+        first = next((index for index, pose in enumerate(poses)
+                      if pose[4] == 0), None)
+        if first is None:
+            failed.append((name, "menu never landed", poses))
+            continue
+        end = poses[first][0] + 400
+        settled = [pose for pose in poses[first:] if pose[0] <= end]
+        if any(error > 2 or max(abs(x), abs(y)) > 4
+               for _, error, x, y, _ in settled):
+            failed.append((name, "landed artwork differs from entry pose", settled))
+        if max(map(abs, settled[0][2:4])) > 2:
+            failed.append((name, "jump at slide endpoint", settled))
+        visible = [pose for pose in poses[:first] if pose[1] <= 2][-1:]
+        trajectory = visible + settled
+        jumps = [(a[0], b[0], b[2] - a[2], b[3] - a[3])
+                 for a, b in zip(trajectory, trajectory[1:])]
+        if any(max(abs(x), abs(y)) > 1 + (b - a) / 135
+               for a, b, x, y in jumps):
+            failed.append((name, "artwork jumps after landing", trajectory))
+        moving_returns += any(x or y for _, _, x, y in jumps)
+    if args.handoff and moving_returns < 3:
+        failed.append(("handoffs", "fewer than three returns with measured drift"))
+    if args.handoff and len({h["color"] for h in handoffs.values()}) < 2:
+        failed.append(("handoffs", "fewer than two slideshow albums"))
     for failure in failed:
         print("FAIL", *failure)
     if failed:

@@ -107,7 +107,9 @@ static struct {
     int x0, y0;             /* the window over the cover when it began */
     int dx, dy;             /* the window's step per pan tick */
     int drawn_x, drawn_y;
-    bool fading, held;
+    uint32_t drawn_at, held_at;
+    bool held, held_ready, keep_pixels;
+    bool fading;
     uint32_t none_at;       /* when a load last ended without a cover */
 } show = { .album = -1 };
 
@@ -152,12 +154,15 @@ static void show_free(void)
         show.handle = core_free(show.handle);
     show.state = SHOW_EMPTY;
     show.album = -1;
+    show.keep_pixels = false;
 }
 
 void menu_pane_page(bool split)
 {
     page.split = page.on_screen = split;
     page.depth = viewportmanager_depth(SCREEN_MAIN);
+    if (!split && !show.held)
+        show.keep_pixels = false;
     if (!menu_pane_themed())
         show_free();
 }
@@ -349,7 +354,7 @@ static void show_begin(uint32_t now)
 /* The window over the cover at `now`. */
 static void show_window(uint32_t now, int *x, int *y)
 {
-    if (show.state != SHOW_READY)
+    if (show.held || show.state != SHOW_READY)
     {
         *x = show.drawn_x;
         *y = show.drawn_y;
@@ -360,16 +365,21 @@ static void show_window(uint32_t now, int *x, int *y)
     *y = MAX(0, MIN(PAN_Y_RANGE, show.y0 + show.dy * ticks));
 }
 
-/* Keep the cached texture stable while Cover Flow owns the screen. */
+/* Keep the last painted pose while Cover Flow owns the screen. The cache
+ * worker only replaces the texture after the UI asks for a new cover. */
 void menu_pane_hold_cover(void)
 {
-    show.held = shown.kind == LIST_PANE_ART && !slide_dir &&
-                show.state == SHOW_READY && !show.fading;
+    if (shown.kind != LIST_PANE_ART || slide_dir)
+        return;
+    show.held = true;
+    show.held_ready = show.state == SHOW_READY;
+    show.keep_pixels = !show.held_ready || show.fading;
+    show.held_at = show.keep_pixels ? USEC_TIMER : show.drawn_at;
 }
 
 const fb_data *menu_pane_pin_cover(struct ui_rect *area, int *stride)
 {
-    if (!show.held || show.state != SHOW_READY ||
+    if (!show.held || show.keep_pixels || show.state != SHOW_READY ||
         show.handle <= 0)
         return NULL;
     *area = (struct ui_rect){ MENU_PANE_X - show.drawn_x, -show.drawn_y,
@@ -378,9 +388,22 @@ const fb_data *menu_pane_pin_cover(struct ui_rect *area, int *stride)
     return core_get_data_pinned(show.handle);
 }
 
-void menu_pane_resume_cover(void)
+void menu_pane_resume_cover(bool restored)
 {
+    if (!show.held)
+        return;
+    uint32_t now = USEC_TIMER;
     show.held = false;
+    if (show.held_ready && show.state == SHOW_READY)
+    {
+        uint32_t pause = now - show.held_at;
+        show.started += pause;
+        show.fade_started += pause;
+        show.drawn_at += pause;
+    }
+    if (restored && has_pending)
+        pending_at = now;
+    show.keep_pixels &= restored;
 }
 
 /* The cover's left edge on screen, with the window's column `x` at the
@@ -779,10 +802,16 @@ static void paint_content(struct ui_rect clip, uint32_t now)
                                           LCD_HEIGHT }));
     show.drawn_x = x;
     show.drawn_y = y;
+    if (!show.held)
+        show.drawn_at = now;
 }
 
 void menu_pane_paint(struct ui_rect clip)
 {
+    /* The retained pane is already in the framebuffer. Resume an in-flight
+     * blend on its pixels, including when the list repaints on return. */
+    if (shown.kind == LIST_PANE_ART && show.keep_pixels)
+        return;
     load_fonts();
     paint_content(clip, USEC_TIMER);
 }
@@ -807,6 +836,8 @@ void menu_pane_select(const struct menu_pane_content *content,
     identity = list_identity;
     if (new_list)
     {
+        if (content->kind != shown.kind)
+            show.keep_pixels = false;
         shown = *content;
         has_pending = false;
         slide_dir = 0;
@@ -867,10 +898,11 @@ static void cover_step(uint32_t now, struct ui_rect *damage)
             show.fade_level = level;
             show.drawn_x = x;
             show.drawn_y = y;
+            show.drawn_at = now;
             *damage = pane;
         }
         if (level >= 32)
-            show.fading = false;
+            show.fading = show.keep_pixels = false;
         return;
     }
     if (x != show.drawn_x || y != show.drawn_y)
@@ -879,6 +911,7 @@ static void cover_step(uint32_t now, struct ui_rect *damage)
         shade(pane);
         show.drawn_x = x;
         show.drawn_y = y;
+        show.drawn_at = now;
         *damage = pane;
     }
     uint32_t age = now - show.started;
@@ -924,6 +957,8 @@ struct ui_rect menu_pane_step(void)
         bool to_art = pending.kind == LIST_PANE_ART;
         under = from_art ? pending : shown;
         shown = pending;
+        if (from_art != to_art)
+            show.keep_pixels = false;
         has_pending = false;
         if (to_art && show.state == SHOW_EMPTY)
             show_request();

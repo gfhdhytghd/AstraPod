@@ -508,7 +508,7 @@ static void finish_wps_rise(const char *result, const char *reason,
 static void discard_menu_scene(void)
 {
     ui_scene_discard(&pf_scene);
-    menu_pane_resume_cover();
+    menu_pane_resume_cover(false);
 }
 
 void carousel_prepare_transition(void)
@@ -9709,10 +9709,7 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
             ui_scene_close_modal(&pf_scene, pf_shown, "covers-down");
         else if (pf_scene.backdrop_handle > 0 && pf_shown &&
                  (result == GO_TO_PREVIOUS || result == CAROUSEL_REMOTE_RETURN))
-        {
-            ui_scene_restore_modal(&pf_scene);
-            menu_pane_resume_cover();
-        }
+            menu_pane_resume_cover(ui_scene_restore_modal(&pf_scene));
         else
             discard_menu_scene();
         carousel_wps_end(false);

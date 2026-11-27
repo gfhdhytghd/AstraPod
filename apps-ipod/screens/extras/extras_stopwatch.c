@@ -35,6 +35,7 @@
 #include "root_menu.h"
 #include "extras_bar.h"
 #include "extras.h"
+#include "ui/scene.h"
 
 #define SW_LOGS 10
 #define SW_LAPS 64
@@ -491,9 +492,11 @@ static void log_paint(const struct sw_log *log, int scroll)
 
 static enum sw_next sw_log_page(const struct sw_log *log)
 {
+    struct ui_scene scene = {0};
     int scroll = 0;
     int laps = sw_lap_count(log);
     int most = MAX(0, laps * LOG_PITCH - (LCD_HEIGHT - LOG_LAPS_Y));
+    ui_scene_open_page(&scene, "stopwatch-log-push");
     sb_set_persistent_title(str(LANG_EXTRAS_STOPWATCH_LOG), Icon_NOICON,
                             SCREEN_MAIN);
     viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
@@ -519,6 +522,7 @@ static enum sw_next sw_log_page(const struct sw_log *log)
     }
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     sw_fonts_release();
+    ui_scene_close_modal(&scene, next != SW_USB, "stopwatch-log-pop");
     return next;
 }
 
@@ -684,8 +688,14 @@ static enum sw_next sw_menu(void)
 
 int extras_stopwatch(void)
 {
-    enum sw_next next = sw_running() || (!current && !log_count) ?
-                        sw_timer() : SW_MENU;
+    static const char timer_page, menu_page;
+    struct ui_scene entry = {0}, route = {0};
+    bool timer_first = sw_running() || (!current && !log_count);
+    ui_scene_open_page(&entry, "stopwatch-push");
+    enum sw_next next = timer_first ? sw_timer() : SW_MENU;
+
+    if (timer_first && next == SW_MENU)
+        ui_scene_enter(&route, &timer_page, &menu_page, false, true);
     while (next == SW_MENU)
     {
         next = sw_menu();
@@ -695,13 +705,19 @@ int extras_stopwatch(void)
         {
             case ROW_RESUME:
                 sw_run(&logs[0]);
+                ui_scene_enter(&route, &menu_page, &timer_page, true, true);
                 next = sw_timer();
+                if (next == SW_MENU)
+                    ui_scene_enter(&route, &timer_page, &menu_page, false, true);
                 break;
             case ROW_NEW:
                 if (current)
                     sw_stop(&logs[0]);
                 current = false;
+                ui_scene_enter(&route, &menu_page, &timer_page, true, true);
                 next = sw_timer();
+                if (next == SW_MENU)
+                    ui_scene_enter(&route, &timer_page, &menu_page, false, true);
                 break;
             case ROW_CLEAR:
                 log_count = 0;
@@ -715,5 +731,7 @@ int extras_stopwatch(void)
                 break;
         }
     }
+    ui_scene_discard(&route);
+    ui_scene_close_modal(&entry, next != SW_USB, "stopwatch-pop");
     return next == SW_USB ? MENU_ATTACHED_USB : 0;
 }

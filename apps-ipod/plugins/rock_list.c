@@ -63,6 +63,7 @@ void rock_list_draw(struct gui_synclist *list)
         return;
 
     activate(list);
+    rock_display_first_page();
     gui_synclist_draw(list);
 }
 

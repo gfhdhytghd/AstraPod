@@ -256,7 +256,10 @@ int eq_presets_screen(void)
     if (global_settings.talk_menu)
         info.speak_onshow = true;
 
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "eq-presets-push");
     usb = simplelist_show_list(&info);
+    ui_scene_close_modal(&scene, !usb, "eq-presets-pop");
     if (usb || info.selection < 0)
     {
         restore_saved();

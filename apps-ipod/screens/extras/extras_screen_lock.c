@@ -27,6 +27,7 @@
 #include "root_menu.h"
 #include "extras_bar.h"
 #include "extras.h"
+#include "ui/scene.h"
 
 #define SL_FILE        ROCKBOX_DIR "/screen_lock.dat"
 #define SL_DIGITS      4
@@ -556,6 +557,8 @@ int extras_screen_lock(void)
     char code[SL_DIGITS];
     bool locked = false;
     enum sl_result r = SL_DONE;
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "screen-lock-push");
     viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
     sl.digit_font = font_load_ex(DIGIT_FONT, 0, 10);
     sl.caption_font = font_load_ex(CAPTION_FONT, 0, 32);
@@ -566,6 +569,7 @@ int extras_screen_lock(void)
     if (r == SL_DONE)
         r = sl_choice(code, &locked);
 
+    ui_scene_close_modal(&scene, r != SL_USB, "screen-lock-pop");
     unload(sl.digit_font);
     unload(sl.caption_font);
     unload(sl.label_font);

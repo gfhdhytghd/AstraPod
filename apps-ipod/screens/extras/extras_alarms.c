@@ -38,6 +38,7 @@
 #include "widgets/list.h"
 #include "root_menu.h"
 #include "extras.h"
+#include "ui/scene.h"
 #include "extras_alarm_ring.h"
 #include "extras_bar.h"
 #include "extras_font.h"
@@ -362,8 +363,10 @@ static void init_list(struct gui_synclist *list, struct page *page)
 static int show_page(struct page *page)
 {
     struct gui_synclist list;
+    struct ui_scene scene = {0};
     int action, result = BACK;
     long refreshed = current_tick;
+    ui_scene_open_page(&scene, "alarms-list-push");
     open_page_chrome(page);
     viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
     init_list(&list, page);
@@ -401,6 +404,7 @@ static int show_page(struct page *page)
     }
     page->selection = gui_synclist_get_sel_pos(&list);
     gui_synclist_scroll_stop(&list);
+    ui_scene_close_modal(&scene, result != LEFT, "alarms-list-pop");
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     return result;
 }
@@ -693,6 +697,8 @@ static int show_editor(bool date)
     }
     int fields = date || !clock_24h() ? 3 : 2;
     int result = BACK;
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "alarms-editor-push");
     viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
     digit_font = font_load_ex(DIGIT_FONT, 0, global_settings.glyphs_to_cache);
     paint_editor(&e);
@@ -723,6 +729,7 @@ static int show_editor(bool date)
         }
     }
     alarm_table_save();
+    ui_scene_close_modal(&scene, result != LEFT, "alarms-editor-pop");
     font_unload(digit_font);
     digit_font = -1;
     extras_bar_release();

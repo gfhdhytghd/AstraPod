@@ -708,7 +708,10 @@ int extras_calendars(void)
     static int selected;
     struct gui_synclist list;
     struct menu_pane_content pane;
+    struct ui_scene scene = {0};
     int action, ret = 0;
+
+    ui_scene_open_page(&scene, "calendars-list-push");
 
     gui_synclist_init(&list, row_name, NULL, false, 1, NULL);
     gui_synclist_set_title(&list, str(LANG_EXTRAS_CALENDARS), Icon_NOICON);
@@ -749,6 +752,7 @@ int extras_calendars(void)
         }
     }
     gui_synclist_scroll_stop(&list);
+    ui_scene_close_modal(&scene, ret == 0, "calendars-list-pop");
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     return ret;
 }

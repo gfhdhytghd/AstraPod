@@ -21,8 +21,14 @@ struct rock_native_scope {
     unsigned previous_floor;
 };
 
+extern struct screen rock_main_screen;
+
+void rock_display_init(void);
 void rock_display_start(fb_data *caller_pixels, fb_data *widget_pixels);
-void rock_display_stop(void);
+void rock_display_stop(bool back_to_browser);
+bool rock_display_first_page(void);
+void rock_raw_lcd_update(void);
+void rock_raw_lcd_update_rect(int x, int y, int w, int h);
 void rock_theme_enable(enum screen_type screen, bool enable, struct viewport *vp);
 void rock_theme_undo(enum screen_type screen, bool force);
 bool rock_set_title(const char *title, enum themable_icons icon,

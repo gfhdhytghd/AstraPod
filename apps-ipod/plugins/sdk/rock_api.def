@@ -178,7 +178,7 @@ ROCK_SLOT(void *(*plugin_claim_scratch)(size_t, size_t, size_t *),
 ROCK_SLOT(const char *(*plugin_get_current_filename)(void),
           plugin_get_current_filename, rock_get_current_filename)
 ROCK_SLOT(volatile const long *current_tick, current_tick, &current_tick)
-ROCK_SLOT(struct screen *screens[NB_SCREENS], screens, { &screens[SCREEN_MAIN] })
+ROCK_SLOT(struct screen *screens[NB_SCREENS], screens, { &rock_main_screen })
 ROCK_SLOT(ROCK_SETTINGS_TYPE *global_settings, global_settings, ROCK_SETTINGS_VIEW)
 ROCK_SLOT(struct system_status *global_status, global_status, &global_status)
 ROCK_SLOT(unsigned char **language_strings, language_strings, ROCK_LANGUAGE_VIEW)

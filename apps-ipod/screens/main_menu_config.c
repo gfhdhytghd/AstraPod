@@ -24,6 +24,7 @@
 #include "draw/screen_access.h"
 #include "draw/viewport.h"
 #include "widgets/list.h"
+#include "ui/scene.h"
 #include "root_menu.h"
 #include "screens/settings/exported_settings.h"
 
@@ -507,7 +508,11 @@ static int config_screen(const struct menu_item_ex *carry)
 
 int main_menu_config(void)
 {
-    return config_screen(NULL);
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "home-editor-push");
+    int ret = config_screen(NULL);
+    ui_scene_close_modal(&scene, ret != MENU_ATTACHED_USB, "home-editor-pop");
+    return ret;
 }
 
 int main_menu_move_item(const struct menu_item_ex *item)

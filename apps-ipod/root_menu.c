@@ -324,8 +324,8 @@ static int browser(void* param)
     static int last_db_dirlevel = 0, last_db_selection = 0, last_ft_dirlevel = 0;
     /* A main-menu row's browse left for a screen one of its rows opens, kept
      * so BACK from that screen lands on the list it was opened from: a
-     * tagnavi row's slot, or ROW_SLOT_PODCASTS */
-    enum { ROW_SLOT_PODCASTS = -2 };
+     * tagnavi row's slot or one of the named shortcut slots */
+    enum { ROW_SLOT_LIBRARY = -3, ROW_SLOT_PODCASTS = -2 };
     static int row_slot = -1, row_dirlevel, row_selection, row_table;
     bool from_home = last_screen == GO_TO_ROOT && !came_back;
 
@@ -459,6 +459,16 @@ static int browser(void* param)
             last_ft_dirlevel = tc->dirlevel;
             tc->dirlevel = 0;
             tc->currtable = 0;
+            if (came_back && row_slot == ROW_SLOT_LIBRARY)
+            {
+                tc->dirlevel = row_dirlevel;
+                tc->selected_item = row_selection;
+                tc->currtable = row_table;
+                row_slot = -1;
+                push_current_activity(ACTIVITY_DATABASEBROWSER);
+                break;
+            }
+            row_slot = -1;
             browser_db_clear_shortcut_base();
             browser_db_enter_menu_row_on_next_load(library_menu_id,
                                                    library_label);
@@ -593,6 +603,13 @@ static int browser(void* param)
         break;
 
         case GO_TO_LIBRARY_ROW:
+            if (ret_val == GO_TO_WPS)
+            {
+                row_slot = ROW_SLOT_LIBRARY;
+                row_dirlevel = tc->dirlevel;
+                row_selection = tc->selected_item;
+                row_table = tc->currtable;
+            }
             tc->dirlevel = last_ft_dirlevel;
             tc->currtable = 0;
             last_db_dirlevel = 0;
@@ -832,6 +849,7 @@ static int wps_back_to(int screen)
     {
         case GO_TO_FILEBROWSER:
         case GO_TO_DBBROWSER:
+        case GO_TO_LIBRARY_ROW:
         case GO_TO_PODCASTS:
         case GO_TO_PLAYLISTS_SCREEN:
         case GO_TO_PLAYLIST_VIEWER:
@@ -2456,9 +2474,46 @@ static inline int load_screen(int screen)
     return ret_val;
 }
 
+static void scene_enter(struct ui_scene *scene, int from, int to, bool push,
+                        const void *home);
+
 int root_menu_run_screen(int screen)
 {
+    /* The screen slides over the menu that opened it and back, as one run
+     * from Home does. The menu has a key of its own: Home's would have the
+     * parent painter draw Home in its place. */
+    static struct ui_scene row_scene;
+    static const char row_menu;
+    ui_scene_cancel(&row_scene);
+    scene_enter(&row_scene, GO_TO_ROOT, screen, true, &row_menu);
     int ret = load_screen(screen);
+    if (row_scene.capturing)
+        ui_scene_cancel(&row_scene);
+
+    /* Keep a stock browser row's owning menu on the stack when a track
+     * opens Now Playing. The root dispatcher's history only contains Home. */
+    while (ret == GO_TO_WPS && wps_back_to(screen) == screen &&
+           !cover_nav_active())
+    {
+        scene_enter(&row_scene, screen, GO_TO_WPS, true, &row_menu);
+        ret = load_screen(GO_TO_WPS);
+        if (row_scene.capturing)
+            ui_scene_cancel(&row_scene);
+        if (ret != GO_TO_PREVIOUS)
+        {
+            screen = GO_TO_WPS;
+            break;
+        }
+        back_from_wps = false;
+        scene_enter(&row_scene, GO_TO_WPS, screen, false, &row_menu);
+        came_back = true;
+        ret = load_screen(screen);
+        came_back = false;
+        if (row_scene.capturing)
+            ui_scene_cancel(&row_scene);
+    }
+    if (screen == GO_TO_WPS && ret == GO_TO_PREVIOUS)
+        back_from_wps = false;
     if (ret == GO_TO_FILEBROWSER)
     {
         fruit_files_next = true;
@@ -2466,7 +2521,10 @@ int root_menu_run_screen(int screen)
     }
     /* A screen's own way out is GO_TO_ROOT, its parent being Home in
      * AstraPod's tree: here the menu that opened it is the parent. */
-    return ret == GO_TO_PREVIOUS || ret == GO_TO_ROOT ? 0 : ret;
+    if (ret != GO_TO_PREVIOUS && ret != GO_TO_ROOT)
+        return ret;
+    scene_enter(&row_scene, screen, GO_TO_ROOT, false, &row_menu);
+    return 0;
 }
 
 int root_menu_library_row(const char *menu_id, const char *label)
@@ -2640,7 +2698,9 @@ static int browser_default(void)
     }
 }
 
-static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push)
+/* `home`, when given, is the key of the page standing where Home does. */
+static void scene_enter(struct ui_scene *scene, int from, int to, bool push,
+                        const void *home)
 {
     if (from < GO_TO_ROOT || to < GO_TO_ROOT)
         return;
@@ -2657,9 +2717,19 @@ static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push
             from = to;
     }
     /* Identity keys are used only for comparing endpoints. */
-    ui_scene_enter(scene, (const void *)(intptr_t)(from + 16),
-                    (const void *)(intptr_t)(to + 16), push,
-                    from == GO_TO_WPS || to == GO_TO_WPS);
+    const void *from_key = (const void *)(intptr_t)(from + 16);
+    const void *to_key = (const void *)(intptr_t)(to + 16);
+    if (home && from == GO_TO_ROOT)
+        from_key = home;
+    if (home && to == GO_TO_ROOT)
+        to_key = home;
+    ui_scene_enter(scene, from_key, to_key, push,
+                   from == GO_TO_WPS || to == GO_TO_WPS);
+}
+
+static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push)
+{
+    scene_enter(scene, from, to, push, NULL);
 }
 
 /* Where the stock tree's main menu was left */
@@ -2768,7 +2838,7 @@ void root_menu(void)
                 {
                     global_status.last_screen = GO_TO_ROOT;
                     ignore_back_button_stub(true);
-                    if (presented != GO_TO_MAINMENU)
+                    if (presented != GO_TO_MAINMENU || !menu_scene.capturing)
                         root_scene_enter(&route_scene, presented, GO_TO_ROOT,
                                          false);
                     next_screen = do_menu(fruit_menu_root(), &fruit_selected,
@@ -2789,7 +2859,7 @@ void root_menu(void)
                  * button to be handled by HOST instead of rockbox */
                 ignore_back_button_stub(true);
 
-                if (presented != GO_TO_MAINMENU)
+                if (presented != GO_TO_MAINMENU || !menu_scene.capturing)
                     root_scene_enter(&route_scene, presented, GO_TO_ROOT, false);
                 if (global_settings.animations)
                     menu_link_scene(&menu_scene, &root_menu_, &main_menu_);

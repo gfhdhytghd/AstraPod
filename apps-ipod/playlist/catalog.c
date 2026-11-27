@@ -37,6 +37,7 @@
 #include "screens/system/playlist_search.h"
 #include "root_menu.h"
 #include "general.h"
+#include "ui/scene.h"
 
 /* Use for recursive directory search */
 struct add_track_context {
@@ -134,6 +135,11 @@ void catalog_get_directory(char* dirbuf, size_t dirbuf_sz)
     }
 }
 
+/* The playlist viewer slides over the catalogue and back. The keys only
+ * compare. */
+static struct ui_scene viewer_scene;
+static const char catalog_page, viewer_page;
+
 /* Display all playlists in catalog.  Selected "playlist" is returned.
  * If status is CATBROWSE_CATVIEW then we're not adding anything into playlist */
 static int display_playlists(char* playlist, enum catbrowse_status_flags status)
@@ -180,6 +186,8 @@ restart:
             case PLAYLIST_VIEWER_CANCEL:
             {
                 reopen_last_playlist = false;
+                ui_scene_enter(&viewer_scene, &viewer_page, &catalog_page,
+                               false, false);
                 goto restart;
             }
             case PLAYLIST_VIEWER_USB:
@@ -221,6 +229,8 @@ restart:
 
         if (view) /* display playlist contents */
         {
+            ui_scene_enter(&viewer_scene, &catalog_page, &viewer_page, true,
+                           false);
             switch (playlist_viewer_ex(selected_playlist, &most_recent_selection)) {
                 case PLAYLIST_VIEWER_OK:
                 {
@@ -230,6 +240,8 @@ restart:
                 }
                 case PLAYLIST_VIEWER_CANCEL:
                 {
+                    ui_scene_enter(&viewer_scene, &viewer_page, &catalog_page,
+                                   false, false);
                     goto restart;
                 }
                 case PLAYLIST_VIEWER_USB:

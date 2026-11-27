@@ -22,6 +22,7 @@
 #include "settings/settings.h"
 #include "input/action.h"
 #include "widgets/list.h"
+#include "ui/scene.h"
 #include "widgets/splash.h"
 #include "browse/browser_db.h"
 #include "root_menu.h"          /* MENU_ATTACHED_USB */
@@ -184,7 +185,10 @@ int music_menu_config(void)
     info.get_icon = row_get_icon;
     info.action_callback = row_action_callback;
 
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "music-editor-push");
     to_root = simplelist_show_list(&info);
+    ui_scene_close_modal(&scene, !to_root, "music-editor-pop");
 
     save_rows();
     return to_root ? MENU_ATTACHED_USB : 0;

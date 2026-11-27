@@ -35,6 +35,7 @@
 #include "ui/stock_art.h"
 #include "root_menu.h"
 #include "fruit_about.h"
+#include "ui/scene.h"
 #if defined(IPOD_6G) && !defined(SIMULATOR)
 #include "norboot-target.h"
 #endif
@@ -431,6 +432,8 @@ int fruit_about_screen(void)
                                              sizeof(saved_title), &saved_icon);
     int ret = 0;
 
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "fruit-about-push");
     about.page = 0;
     about.bold = load_font("13-helvetica-bold");
     about.regular = load_font("13-helvetica");
@@ -466,6 +469,7 @@ int fruit_about_screen(void)
     }
 
     talk_shutup();
+    ui_scene_close_modal(&scene, ret == 0, "fruit-about-pop");
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     sb_set_persistent_title(has_saved ? saved_title : NULL, saved_icon,
                             SCREEN_MAIN);

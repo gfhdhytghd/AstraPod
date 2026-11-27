@@ -33,6 +33,7 @@
 #include "lang.h"
 #include "strnatcmp.h"
 #include "widgets/list.h"
+#include "ui/scene.h"
 #include "widgets/splash.h"
 #include "input/action.h"
 #include "system/activity.h"
@@ -533,7 +534,11 @@ int featured_artists_show(void)
         /* Come back to the guest that was chosen, not to the top. */
         selection = info.selection;
 
+        struct ui_scene scene = {0};
+        ui_scene_open_page(&scene, "featured-tracks-push");
         ret = show_tracks(order[selection]);
+        ui_scene_close_modal(&scene, ret == GO_TO_PREVIOUS,
+                             "featured-tracks-pop");
         if (ret != GO_TO_PREVIOUS)
             break;
     }

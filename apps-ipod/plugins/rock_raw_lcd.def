@@ -1,6 +1,4 @@
 /* LCD calls that resume raw drawing. GNU GPL version 2 or later. */
-ROCK_RAW_VOID(lcd_update, (void), ())
-ROCK_RAW_VOID(lcd_update_rect, (int x, int y, int w, int h), (x, y, w, h))
 ROCK_RAW_VOID(lcd_clear_display, (void), ())
 ROCK_RAW_VOID(lcd_clear_viewport, (void), ())
 ROCK_RAW_VOID(lcd_puts, (int x, int y, const unsigned char *s), (x, y, s))

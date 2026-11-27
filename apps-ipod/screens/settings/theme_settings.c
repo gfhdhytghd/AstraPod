@@ -21,6 +21,7 @@
 #include "screens/browse/browser.h"
 #include "exported_settings.h"
 #include "widgets/splash.h"
+#include "ui/scene.h"
 #include "screens/context_menu.h"
 #include "screens/context_menu_config.h"
 
@@ -92,7 +93,12 @@ int browse_folder(void *param)
     }
 
     browser_get_context()->browse = NULL;  /*bugfix - force root dir reload */
-    return rockbox_browse(&browse);
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "settings-files-push");
+    int ret = rockbox_browse(&browse);
+    ui_scene_close_modal(&scene, ret == GO_TO_PREVIOUS || ret == GO_TO_ROOT,
+                         "settings-files-pop");
+    return ret;
 }
 
 MENUITEM_FUNCTION_W_PARAM(browse_fonts, 0, ID2P(LANG_CUSTOM_FONT),

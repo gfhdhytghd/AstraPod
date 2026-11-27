@@ -73,6 +73,8 @@ void ui_scene_set_parent_painter(bool (*paint)(const void *page));
  * pages painted on it moves only what is drawn over it. */
 void ui_scene_set_backdrop_source(int (*source)(void));
 bool ui_scene_repaint_backdrop(struct ui_scene *scene);
+bool ui_scene_capture_page(struct ui_scene *scene);
+void ui_scene_finish_page(struct ui_scene *scene);
 void ui_scene_open_page(struct ui_scene *scene, const char *route);
 const void *ui_scene_modal_parent(void);
 void ui_scene_modal_restored(const void *page);

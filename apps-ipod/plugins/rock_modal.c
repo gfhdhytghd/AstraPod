@@ -11,12 +11,18 @@ struct rock_native_scope rock_modal_begin(void)
     return rock_display_native_begin();
 }
 
-void rock_modal_end(const struct rock_native_scope *scope)
+void rock_modal_end_with_resume(const struct rock_native_scope *scope,
+                                enum rock_display_resume resume)
 {
     rock_list_release(false);
-    rock_display_native_end(scope, ROCK_RESUME_PRESENT);
+    rock_display_native_end(scope, resume);
     if (!rock_usb_taken())
         rock_begin_settings();
+}
+
+void rock_modal_end(const struct rock_native_scope *scope)
+{
+    rock_modal_end_with_resume(scope, ROCK_RESUME_PRESENT);
 }
 
 enum yesno_res rock_yesno(const struct text_message *message,

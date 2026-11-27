@@ -609,10 +609,12 @@ static int rock_do_menu(const struct menu_item_ex *menu, int *selected,
     if (usb_taken)
         return MENU_ATTACHED_USB;
     struct rock_native_scope scope = rock_modal_begin();
+    bool first_page = rock_display_first_page();
     int result = do_menu(menu, selected, parent, hide_theme);
     if (result == MENU_ATTACHED_USB)
         rock_usb_takeover();
-    rock_modal_end(&scope);
+    rock_modal_end_with_resume(&scope, first_page ? ROCK_RESUME_DISCARD
+                                                 : ROCK_RESUME_PRESENT);
     return result;
 }
 
@@ -1095,7 +1097,7 @@ static int invoke_module(void *opaque)
     rock_quake_heap_release();
     rock_list_discard();
     button_clear_pressed();
-    rock_display_stop();
+    rock_display_stop(result == PLUGIN_OK);
     if (engine_heap)
     {
         core_unpin(engine_heap);
@@ -1187,6 +1189,7 @@ static int run_rock(const char *path, const char *file,
         decoder_capacity = capacity - ROCK_IMAGE_DECODER_OFFSET;
         tail_size = decoder_base - tail;
     }
+    rock_display_init();
     *module->api = &api;
 
     struct rock_invocation call = {

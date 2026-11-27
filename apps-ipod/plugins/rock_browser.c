@@ -10,6 +10,7 @@
 #include "lang.h"
 #include "lang_enum.h"
 #include "widgets/menu.h"
+#include "ui/scene.h"
 
 int rock_browser(void *unused)
 {
@@ -38,7 +39,11 @@ int rock_browser(void *unused)
             .icon = Icon_Plugin,
         };
         bool previous = action_set_menu_back(true);
+        struct ui_scene scene = {0};
+        ui_scene_open_page(&scene, "plugin-category-push");
         int result = rockbox_browse(&browse);
+        ui_scene_close_modal(&scene, result == GO_TO_PREVIOUS,
+                             "plugin-category-pop");
         action_set_menu_back(previous);
         if (result != GO_TO_PREVIOUS)
             return result;

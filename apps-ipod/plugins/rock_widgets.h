@@ -14,6 +14,8 @@ void rock_begin_settings(void);
 
 struct rock_native_scope rock_modal_begin(void);
 void rock_modal_end(const struct rock_native_scope *scope);
+void rock_modal_end_with_resume(const struct rock_native_scope *scope,
+                                enum rock_display_resume resume);
 
 __typeof__(kbd_input) rock_kbd_input;
 int rock_kbd_input_raw(char *buffer, int buflen);

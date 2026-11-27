@@ -41,6 +41,7 @@
 #include "screens/system/agents_screen.h"
 #endif
 #include "screens/system/about.h"
+#include "screens/fruit_menu.h"
 #include "version.h"
 #include "time.h"
 #include "screens/playback/wps.h"
@@ -416,7 +417,14 @@ static int show_info(void)
     if(global_settings.talk_menu)
          info.get_talk = info_speak_item;
     info.action_callback = info_action_callback;
-    return simplelist_show_list(&info) ? MENU_ATTACHED_USB : 0;
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "system-info-push");
+    bool menu_back = action_set_menu_back(action_menu_back() ||
+                                         fruit_menu_active());
+    bool usb = simplelist_show_list(&info);
+    action_set_menu_back(menu_back);
+    ui_scene_close_modal(&scene, !usb, "system-info-pop");
+    return usb ? MENU_ATTACHED_USB : 0;
 }
 
 
@@ -462,7 +470,14 @@ MENUITEM_FUNCTION(show_license_item, MENU_FUNC_CHECK_RETVAL,
  * redrawing. */
 static int bg_task_info_item(void)
 {
-    return bg_task_info_screen() ? MENU_ATTACHED_USB : 0;
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "background-tasks-push");
+    bool menu_back = action_set_menu_back(action_menu_back() ||
+                                         fruit_menu_active());
+    bool usb = bg_task_info_screen();
+    action_set_menu_back(menu_back);
+    ui_scene_close_modal(&scene, !usb, "background-tasks-pop");
+    return usb ? MENU_ATTACHED_USB : 0;
 }
 
 MENUITEM_FUNCTION(bg_task_info, MENU_FUNC_CHECK_RETVAL,
@@ -501,7 +516,11 @@ MENUITEM_FUNCTION(settings_search_item, MENU_FUNC_CHECK_RETVAL,
  * unwinds rather than redrawing over the USB screen. */
 static int settings_changed_item_fn(void)
 {
-    return settings_changed_screen() ? MENU_ATTACHED_USB : 0;
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "changed-settings-push");
+    bool usb = settings_changed_screen();
+    ui_scene_close_modal(&scene, !usb, "changed-settings-pop");
+    return usb ? MENU_ATTACHED_USB : 0;
 }
 
 MENUITEM_FUNCTION(settings_changed_item, MENU_FUNC_CHECK_RETVAL,

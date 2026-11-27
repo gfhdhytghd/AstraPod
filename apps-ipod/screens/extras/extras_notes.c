@@ -299,6 +299,7 @@ int extras_notes(void)
 {
     int handle = core_alloc_free_space(sizeof(struct notes));
     struct simplelist_info info;
+    struct ui_scene scene = {0};
     int ret = 0, selection = 0;
 
     if (handle <= 0)
@@ -309,6 +310,7 @@ int extras_notes(void)
      * do not. */
     push_current_activity(ACTIVITY_TEXTVIEWER);
 
+    ui_scene_open_page(&scene, "notes-list-push");
     while (ret == 0)
     {
         simplelist_info_init(&info, str(LANG_EXTRAS_NOTES), n->count, n);
@@ -325,6 +327,7 @@ int extras_notes(void)
         }
     }
 
+    ui_scene_close_modal(&scene, ret == 0, "notes-list-pop");
     pop_current_activity();
     core_put_data_pinned(n);
     core_free(handle);

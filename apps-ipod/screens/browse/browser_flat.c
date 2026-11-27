@@ -50,6 +50,7 @@
 #include "strnatcmp.h"
 #include "root_menu.h"
 #include "browser_flat.h"
+#include "ui/scene.h"
 
 /* ------------------------------------------------------------------ *
  * the list, and a file's type                                        *
@@ -334,7 +335,10 @@ static int types_run(void)
         sel = info.selection;
         snprintf(title, sizeof(title), "%s (%d)", types[sel].name,
                  types[sel].count);
+        struct ui_scene scene = {0};
+        ui_scene_open_page(&scene, "file-type-push");
         ret = show_list(types[sel].name, title);
+        ui_scene_close_modal(&scene, ret == GO_TO_PREVIOUS, "file-type-pop");
         if (ret != GO_TO_PREVIOUS)
             return ret;
     }
@@ -422,7 +426,13 @@ static int show_list(const char *type, char *title)
         if (heads && choice == ROW_SEARCH)
             ret = search_run();
         else if (heads && choice == ROW_BY_TYPE)
+        {
+            struct ui_scene scene = {0};
+            ui_scene_open_page(&scene, "file-types-push");
             ret = types_run();
+            ui_scene_close_modal(&scene, ret == GO_TO_PREVIOUS,
+                                 "file-types-pop");
+        }
         else
             ret = open_file(shown[choice - heads]);
         if (ret != GO_TO_PREVIOUS)

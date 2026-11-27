@@ -29,6 +29,7 @@
 #include "screens/playback/cider.h"
 #include "screens/playback/cider_wps.h"
 #include "screens/playback/wps.h"
+#include "screens/playback/stock_wps.h"
 #include "settings/settings.h"
 #include "system/format_time.h"
 #include "system/volume.h"
@@ -103,7 +104,8 @@ enum wps_view {
     WPS_ROOT, WPS_COVER, WPS_PANEL, WPS_TITLE, WPS_ARTIST,
     WPS_PROGRESS, WPS_PROGRESS_FILL, WPS_INDEX, WPS_REMAINING, WPS_SPECTRUM,
     WPS_VOLUME, WPS_VOLUME_FILL, WPS_HEADER, WPS_ALBUM, WPS_ELAPSED,
-    WPS_ROW, WPS_TIMELINE, WPS_SHUFFLE, WPS_VIEW_COUNT,
+    WPS_ROW, WPS_TIMELINE, WPS_SHUFFLE, WPS_STOCK_SCRUB, WPS_STOCK_RATING,
+    WPS_STOCK_SHUFFLE, WPS_STOCK_REPEAT, WPS_VIEW_COUNT,
 };
 
 struct wps_label {
@@ -130,6 +132,9 @@ struct native_wps {
     struct ui_theme theme;
     struct wps_label title, artist, album, index, elapsed, remaining;
     struct wps_progress progress;
+    struct stock_wps_controls stock;
+    enum stock_wps_mode stock_row;
+    int repeat_mode;
     struct ui_track volume_width, volume_reveal, blur_reveal;
     struct native_chrome chrome;
     char title_text[MAX_PATH], artist_text[MAX_PATH], album_text[MAX_PATH];
@@ -144,7 +149,7 @@ struct native_wps {
     unsigned motion_trace;
     bool volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
     bool current_art_only, cover_backdrop, wait_for_blur, labels_frozen;
-    bool classic, chrome_ready;
+    bool classic, chrome_ready, stock_controls;
     void (*landing)(const struct ui_rect *clip);
     int turn_cover, turn_cover_side;
     unsigned reveal_base;
@@ -828,6 +833,126 @@ static void paint_classic_volume(const struct ui_view *view,
     }
 }
 
+static void paint_stock_scrub(const struct ui_view *view,
+                              const struct ui_view_frame *frame)
+{
+    (void)view;
+    struct ui_rect bar = { frame->bounds.x + CLASSIC_PROGRESS_X,
+                           frame->bounds.y + CLASSIC_BAR_Y,
+                           CLASSIC_PROGRESS_WIDTH, CLASSIC_BAR_VIEW };
+    struct ui_rect clip = frame->clip;
+    int left = MAX(bar.x, clip.x);
+    int right = MIN(bar.x + bar.width, clip.x + clip.width);
+    if (left < right)
+    {
+        clip.x = left;
+        clip.width = right - left;
+        unsigned long length = wps->stock.length;
+        int offset = length ? (uint64_t)wps->stock.position *
+                              (bar.width - 1) / length : 0;
+        over_cover(true);
+        ui_art_tile(STOCK_ART_NOWPLAYING_PROGRESSBAR_ACTIVE_BACKGROUND,
+                    bar.x, bar.y, bar.width, true, clip);
+        stock_art_draw(STOCK_ART_NOWPLAYING_PROGRESSBAR_SCRUB,
+                       bar.x + offset - 6, bar.y, clip);
+        over_cover(false);
+    }
+
+    struct viewport viewport;
+    struct viewport *previous = paint_viewport(&viewport, frame,
+                                               wps->elapsed.font);
+    char elapsed[24], remaining[24] = "-";
+    format_time(elapsed, sizeof(elapsed), MIN(wps->stock.position, LONG_MAX));
+    format_time(remaining + 1, sizeof(remaining) - 1,
+                MIN(wps->stock.length - wps->stock.position, LONG_MAX));
+    int x = frame->bounds.x - frame->clip.x;
+    int y = frame->bounds.y - frame->clip.y + CLASSIC_TIME_Y;
+    int width = font_getstringsize((const unsigned char *)remaining, NULL,
+                                   NULL, viewport.font);
+    over_cover(true);
+    lcd_putsxy(x + CLASSIC_ELAPSED_X, y, (const unsigned char *)elapsed);
+    lcd_putsxy(x + CLASSIC_REMAINING_RIGHT - width, y,
+               (const unsigned char *)remaining);
+    over_cover(false);
+    lcd_set_viewport(previous);
+}
+
+static void paint_stock_rating(const struct ui_view *view,
+                                const struct ui_view_frame *frame)
+{
+    (void)view;
+    int x = frame->bounds.x + (LCD_WIDTH - 5 * 22) / 2;
+    over_cover(true);
+    for (int i = 0; i < 5; ++i)
+        stock_art_draw(i < wps->stock.stars ?
+                       STOCK_ART_NOWPLAYING_LARGE_BLUE_STAR :
+                       STOCK_ART_NOWPLAYING_DOT,
+                       x + 22 * i, frame->bounds.y, frame->clip);
+    over_cover(false);
+}
+
+static void paint_stock_shuffle(const struct ui_view *view,
+                                 const struct ui_view_frame *frame)
+{
+    (void)view;
+    static const int labels[] = { LANG_OFF, LANG_FRUIT_SONGS, LANG_ALBUMS };
+    static const int widths[] = { 51, 70, 81 };
+    int count = wps->stock.remote ? 2 : 3;
+    int x = frame->bounds.x + 69, y = frame->bounds.y;
+    int width = wps->stock.remote ? widths[0] + widths[1] : 202;
+    if (wps->stock.remote)
+        x += (202 - width) / 2;
+    int selected = wps->stock.shuffle;
+    int left = x;
+    for (int i = 0; i < selected && i < count; ++i)
+        left += widths[i];
+
+    over_cover(true);
+    stock_art_draw(STOCK_ART_NOWPLAYING_LARGE_SHUFFLE, x - 39, y + 5,
+                   frame->clip);
+    stock_art_draw(STOCK_ART_OPTIONBAR_NOWPLAYING_WELL_LEFTCAP, x, y,
+                   frame->clip);
+    ui_art_tile(STOCK_ART_OPTIONBAR_NOWPLAYING_WELL_CENTER, x + 8, y,
+                width - 16, false, frame->clip);
+    stock_art_draw(STOCK_ART_OPTIONBAR_NOWPLAYING_WELL_RIGHTCAP,
+                   x + width - 8, y, frame->clip);
+    if ((unsigned)selected < (unsigned)count)
+    {
+        stock_art_draw(STOCK_ART_OPTIONBAR_NOWPLAYING_THUMB_LEFTCAP,
+                       left, y, frame->clip);
+        ui_art_tile(STOCK_ART_OPTIONBAR_NOWPLAYING_THUMB_CENTER, left + 8, y,
+                    widths[selected] - 16, false, frame->clip);
+        stock_art_draw(STOCK_ART_OPTIONBAR_NOWPLAYING_THUMB_RIGHTCAP,
+                       left + widths[selected] - 8, y, frame->clip);
+    }
+
+    struct viewport viewport;
+    struct viewport *previous = paint_viewport(&viewport, frame, wps->index.font);
+    for (int i = 0; i < count; ++i)
+    {
+        const unsigned char *text = (const unsigned char *)str(labels[i]);
+        int tw = font_getstringsize(text, NULL, NULL, viewport.font);
+        lcd_set_foreground(i == selected ? LCD_RGBPACK(0, 121, 206) : wps->fg);
+        lcd_putsxy(x + (widths[i] - tw) / 2 - frame->clip.x,
+                   y + 7 - frame->clip.y, text);
+        x += widths[i];
+    }
+    lcd_set_viewport(previous);
+    over_cover(false);
+}
+
+static void paint_stock_repeat(const struct ui_view *view,
+                                const struct ui_view_frame *frame)
+{
+    (void)view;
+    over_cover(true);
+    stock_art_draw(wps->repeat_mode == REPEAT_ONE ?
+                   STOCK_ART_NOWPLAYING_CLASSIC_REPEAT_ONCE :
+                   STOCK_ART_NOWPLAYING_CLASSIC_REPEAT, frame->bounds.x,
+                   frame->bounds.y, frame->clip);
+    over_cover(false);
+}
+
 static const struct ui_view_ops background_ops = { .paint = paint_background };
 static const struct ui_view_ops cover_ops = { .paint = paint_cover };
 static const struct ui_view_ops panel_ops = { .paint = paint_panel };
@@ -844,6 +969,12 @@ static const struct ui_view_ops art_ops = { .paint = paint_art };
 static const struct ui_view_ops track_ops = { .paint = paint_track };
 static const struct ui_view_ops fill_ops = { .paint = paint_fill };
 static const struct ui_view_ops shuffle_ops = { .paint = paint_shuffle };
+static const struct ui_view_ops stock_scrub_ops = { .paint = paint_stock_scrub };
+static const struct ui_view_ops stock_rating_ops = { .paint = paint_stock_rating };
+static const struct ui_view_ops stock_shuffle_ops = {
+    .paint = paint_stock_shuffle
+};
+static const struct ui_view_ops stock_repeat_ops = { .paint = paint_stock_repeat };
 static const struct ui_view_ops classic_volume_ops = {
     .paint = paint_classic_volume
 };
@@ -1361,8 +1492,9 @@ void native_wps_prepare_turn_art(int thumbnail, int side)
 
 static void refresh_volume(const struct cider_status *source, bool remote, uint32_t now)
 {
-    bool visible = volume_changed_within(now, ui_frame_clock(
-        wps->classic ? CLASSIC_VOLUME_HOLD : VOLUME_HOLD_FRAMES));
+    bool visible = wps->stock_controls ? wps->stock.mode == STOCK_WPS_VOLUME :
+        volume_changed_within(now, ui_frame_clock(
+            wps->classic ? CLASSIC_VOLUME_HOLD : VOLUME_HOLD_FRAMES));
     int min = sound_min(SOUND_VOLUME);
     int max = sound_max(SOUND_VOLUME);
     int percent = remote ? source->volume :
@@ -1382,7 +1514,9 @@ static void refresh_volume(const struct cider_status *source, bool remote, uint3
         wps->volume_target = target;
         wps->volume_known = true;
     }
-    if (wps->volume_visible != visible && wps->classic)
+    if (wps->stock_controls)
+        wps->volume_visible = visible;
+    else if (wps->volume_visible != visible && wps->classic)
     {
         /* The incoming row enters from the right as the other leaves left. */
         struct ui_view *row = &wps->view[WPS_ROW];
@@ -1537,7 +1671,90 @@ static void setup_classic(void)
     wps->view[WPS_SHUFFLE].value[UI_OPACITY] = 0;
     wps->progress_span = CLASSIC_PROGRESS_WIDTH;
     wps->volume_span = CLASSIC_VOLUME_WIDTH;
+    if (wps->stock_controls)
+    {
+        static const struct {
+            enum wps_view id;
+            const struct ui_view_ops *ops;
+        } controls[] = {
+            { WPS_STOCK_SCRUB, &stock_scrub_ops },
+            { WPS_STOCK_RATING, &stock_rating_ops },
+            { WPS_STOCK_SHUFFLE, &stock_shuffle_ops },
+        };
+        /* The star points start four pixels above the progress strip. */
+        struct ui_view *row = &wps->view[WPS_ROW];
+        row->value[UI_Y] -= 4;
+        row->value[UI_HEIGHT] += 4;
+        wps->view[WPS_TIMELINE].value[UI_Y] += 4;
+        wps->view[WPS_VOLUME].value[UI_Y] += 4;
+        for (size_t i = 0; i < ARRAYLEN(controls); ++i)
+        {
+            struct ui_view *view = &wps->view[controls[i].id];
+            int y = controls[i].id == WPS_STOCK_RATING ? 0 : 4;
+            ui_view_init(view, (struct ui_rect){
+                2 * LCD_WIDTH, y, LCD_WIDTH, CLASSIC_ROW_HEIGHT
+            }, controls[i].ops, NULL);
+            ui_view_append(&wps->view[WPS_ROW], view);
+        }
+        ui_view_init(&wps->view[WPS_STOCK_REPEAT],
+                     (struct ui_rect){ 268, CLASSIC_SHUFFLE_Y, 19, 15 },
+                     &stock_repeat_ops, NULL);
+        wps->view[WPS_STOCK_REPEAT].value[UI_OPACITY] = 0;
+        ui_view_append(&wps->view[WPS_ROOT], &wps->view[WPS_STOCK_REPEAT]);
+    }
     ui_page_init(&wps->page, &wps->view[WPS_ROOT]);
+}
+
+void native_wps_stock_controls(const struct stock_wps_controls *controls)
+{
+    if (!active || !wps->stock_controls)
+        return;
+    if (controls->mode == STOCK_WPS_SCRUB &&
+        (wps->stock.position != controls->position ||
+         wps->stock.length != controls->length))
+    {
+        wps->stock.position = controls->position;
+        wps->stock.length = controls->length;
+        ui_page_invalidate(&wps->page, view_bounds(WPS_STOCK_SCRUB));
+    }
+    if (controls->mode == STOCK_WPS_RATING && wps->stock.stars != controls->stars)
+    {
+        wps->stock.stars = controls->stars;
+        ui_page_invalidate(&wps->page, view_bounds(WPS_STOCK_RATING));
+    }
+    if (wps->stock.shuffle != controls->shuffle ||
+        wps->stock.remote != controls->remote)
+    {
+        wps->stock.shuffle = controls->shuffle;
+        wps->stock.remote = controls->remote;
+        ui_page_invalidate(&wps->page, view_bounds(WPS_STOCK_SHUFFLE));
+    }
+    wps->stock.mode = controls->mode;
+}
+
+static void refresh_stock_row(uint32_t now)
+{
+    static const enum wps_view panel[] = {
+        [STOCK_WPS_PROGRESS] = WPS_TIMELINE,
+        [STOCK_WPS_SCRUB] = WPS_STOCK_SCRUB,
+        [STOCK_WPS_RATING] = WPS_STOCK_RATING,
+        [STOCK_WPS_SHUFFLE] = WPS_STOCK_SHUFFLE,
+        [STOCK_WPS_VOLUME] = WPS_VOLUME,
+    };
+    if (wps->stock.mode == wps->stock_row)
+        return;
+    struct ui_view *row = &wps->view[WPS_ROW];
+    for (size_t i = 0; i < ARRAYLEN(panel); ++i)
+    {
+        int x = i == (unsigned)wps->stock_row ? 0 :
+                i == (unsigned)wps->stock.mode ? LCD_WIDTH : 2 * LCD_WIDTH;
+        ui_page_set(&wps->page, &wps->view[panel[i]], UI_X, x);
+    }
+    ui_page_set(&wps->page, row, UI_OFFSET_X, 0);
+    ui_page_tween(&wps->page, &wps->volume_reveal, row, UI_OFFSET_X,
+                  -LCD_WIDTH, CLASSIC_SLIDE_FRAMES, false, now);
+    wps->volume_reveal.tween.easing = UI_EASE_QUAD;
+    wps->stock_row = wps->stock.mode;
 }
 
 void native_wps_open(const struct wps_state *state)
@@ -1555,6 +1772,8 @@ void native_wps_open(const struct wps_state *state)
 
     wps->classic =
         wps->theme.style[UI_STYLE_WPS_LAYOUT] == UI_WPS_LAYOUT_CLASSIC;
+    wps->stock_controls = wps->classic &&
+        wps->theme.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_STOCK;
     label_set(&wps->title, ui_theme_font_load(&wps->theme, UI_FONT_WPS_TITLE, 48),
               wps->title_text, sizeof(wps->title_text));
     label_set(&wps->artist, ui_theme_font_load(&wps->theme,
@@ -1688,6 +1907,20 @@ void native_wps_render(const struct wps_state *state, bool submit)
                   playlist_get_current()->shuffle_mode;
     ui_page_set(&wps->page, &wps->view[WPS_SHUFFLE], UI_OPACITY,
                 shuffle != SHUFFLE_OFF ? UI_FULL_OPACITY : 0);
+    if (wps->stock_controls)
+    {
+        refresh_stock_row(now);
+        int repeat = remote ? cider_mode_get(CIDER_MODE_REPEAT) :
+                     global_settings.repeat_mode;
+        if (repeat != wps->repeat_mode)
+        {
+            wps->repeat_mode = repeat;
+            ui_page_invalidate(&wps->page, view_bounds(WPS_STOCK_REPEAT));
+        }
+        ui_page_set(&wps->page, &wps->view[WPS_STOCK_REPEAT], UI_OPACITY,
+                    repeat == REPEAT_ALL || repeat == REPEAT_ONE ?
+                    UI_FULL_OPACITY : 0);
+    }
     if (wps->chrome_ready && native_chrome_poll(&wps->chrome))
         ui_page_invalidate(&wps->page, view_bounds(WPS_HEADER));
     if (wps->page.tracks && !wps->motion_tried)

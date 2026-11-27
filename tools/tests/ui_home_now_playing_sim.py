@@ -2,8 +2,9 @@
 """Measure Fruit Company's Home ↔ Now Playing transition on the SDL panel.
 
 Press SELECT on Home's Now Playing row twice, returning with MENU each time.
-The stock return moves Home's preview across the left half before it starts
-pushing Now Playing right. Save each transfer and its timestamp for inspection.
+Stock 2.0.5 QEMU supplies the timing. The stock iPod video supplies the
+layer order: Now Playing crosses a fixed preview, pushing the menu rows
+only while it overlaps their half. Play/Pause stays on Home.
 
 Arguments: ROCKBOXUI ZIP OUTPUT_DIRECTORY [--fixture DIRECTORY]
 """
@@ -44,8 +45,9 @@ def record(sim, name, key, wait=48):
             image = Image.frombytes("RGB", (W, H), pixels, "raw", "BGR;16")
             name = f"f{index:03d}.png"
             image.save(folder / name)
-            writer.writerow([name, ((clock - first) & 0xffffffff) / 1000])
-            frames.append(image)
+            t_ms = ((clock - first) & 0xffffffff) / 1000
+            writer.writerow([name, t_ms])
+            frames.append((t_ms, image))
     return frames
 
 
@@ -53,31 +55,58 @@ def same(a, b):
     return ImageChops.difference(a, b).getbbox() is None
 
 
-def check_return(shots):
-    playback, home = shots[0], shots[-1]
-    # The right quarter of Home's preview is dark at the bottom. The white
-    # playback page immediately after it locates the moving edge.
-    y = H - 4
-    assert min(playback.getpixel((W - 1, y))) > 220, "expected Now Playing"
-    assert max(home.getpixel((W - 1, y))) < 180, "expected a split Home menu"
-    early, late = set(), set()
-    for image in shots[1:-1]:
-        edge = max((x + 1 for x in range(W)
-                    if max(image.getpixel((x, y))) < 180), default=0)
-        if not 24 <= edge <= W - 48:
-            continue
-        # Match the translated preview, including the icon or cover. Match
-        # the playback page separately, excluding the progress and title
-        # marquee, which can update on the last frame before MENU.
-        pane = min(edge, W // 2)
-        if not same(image.crop((edge - pane, 35, edge, 150)),
-                    home.crop((W - pane, 35, W, 150))):
-            continue
-        shift = max(0, edge - W // 2)
-        if same(image.crop((edge, 87, W, 128)),
-                playback.crop((edge - shift, 87, W - shift, 128))):
-            (early if edge < W // 2 else late).add(edge)
-    return len(early), len(late)
+def check_slide(shots, entering, home):
+    playback = shots[-1 if entering else 0][1]
+    half = W // 2
+    assert min(playback.getpixel((W - 1, H - 4))) > 220, "expected Now Playing"
+    assert max(home.getpixel((W - 1, H - 4))) < 180, "expected a split Home menu"
+    # The left side of the album art identifies the moving page without
+    # depending on the track title, marquee or elapsed playback time.
+    art = playback.crop((8, 75, 36, 105))
+    poses = {}
+    for t_ms, image in shots[1:-1]:
+        for edge in range(18, W - 48):
+            if not same(image.crop((edge + 8, 75, edge + 36, 105)), art):
+                continue
+            if not same(image.crop((edge, 0, edge + 48, 16)),
+                        playback.crop((0, 0, 48, 16))):
+                continue
+            width = min(edge, half)
+            if not same(image.crop((0, 0, width, 150)),
+                        home.crop((half - width, 0, half, 150))):
+                continue
+            if edge > half and not same(image.crop((half, 35, edge, 150)),
+                                        home.crop((half, 35, edge, 150))):
+                continue
+            poses.setdefault(edge, t_ms)
+            break
+    direction = "entry" if entering else "return"
+    assert sum(edge < half for edge in poses) >= 3, (direction, poses)
+    assert sum(edge > half for edge in poses) >= 3, (direction, poses)
+    assert list(poses) == sorted(poses, reverse=entering), (direction, poses)
+    first_edge, first_ms = next(iter(poses.items()))
+    last_edge, last_ms = next(reversed(poses.items()))
+    # Both 2.0.5 directions travel 320 px in about 275 ms. Estimate the
+    # duration from the sampled movement to exclude input handling time.
+    speed = (last_edge - first_edge) / (last_ms - first_ms)
+    duration = W / abs(speed)
+    assert 240 <= duration <= 330, (direction, duration, poses)
+    # Allow one dropped panel transfer when checking constant speed.
+    for edge, t_ms in poses.items():
+        assert abs(edge - first_edge - speed * (t_ms - first_ms)) <= 24, (
+            direction, edge, duration, poses)
+    return round(duration)
+
+
+def check_play_pause(paused, resumed):
+    playing, pause = paused[0][1], paused[-1][1]
+    for _, image in paused + resumed:
+        assert same(image.crop((0, 20, W, H)), playing.crop((0, 20, W, H))), (
+            "Play/Pause moved away from Home")
+    icon = (104, 0, 127, 16)
+    assert not same(playing.crop(icon), pause.crop(icon)), "missing pause icon"
+    assert same(playing.crop(icon), resumed[-1][1].crop(icon)), (
+        "missing playing icon")
 
 
 def main():
@@ -113,19 +142,21 @@ def main():
         sim.tap("menu", 45)
         sim.tap("down", 30)  # Home's newly visible Now Playing row.
         for visit in range(2):
-            record(sim, f"entry-{visit}", "select")
-            results.append(check_return(record(sim, f"exit-{visit}", "menu")))
-        record(sim, "play", "play")
+            entry = record(sim, f"entry-{visit}", "select")
+            returned = record(sim, f"exit-{visit}", "menu")
+            home = returned[-1][1]
+            results.append((check_slide(entry, True, home),
+                            check_slide(returned, False, home)))
+        paused = record(sim, "pause", "play", wait=84)
+        resumed = record(sim, "resume", "play", wait=84)
+        check_play_pause(paused, resumed)
     finally:
         sim.close()
         perf = rockbox / "ui-perf.txt"
         if perf.exists():
             shutil.copyfile(perf, out / perf.name)
         shutil.rmtree(disk)
-    assert all(early >= 2 and late >= 2 for early, late in results), (
-        f"expected a stationary then pushed playback page, "
-        f"got early/late matches {results}")
-    print(f"PASS Fruit Company Home ← Now Playing: early/late matches {results}")
+    print(f"PASS Fruit Company Home ↔ Now Playing (ms): {results}; Play/Pause")
 
 
 if __name__ == "__main__":

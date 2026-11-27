@@ -69,6 +69,7 @@
 #include "screens/settings/settings_help.h"
 #include "screens/settings/sound_settings.h"
 #include "screens/playback/quick_screen.h"
+#include "screens/playback/wps.h"
 #include "screens/shortcuts.h"
 #include "ui/statusbar.h"
 
@@ -1203,8 +1204,18 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         }
         else if (action == ACTION_TREE_WPS)
         {
-            ret = GO_TO_PREVIOUS_MUSIC;
-            done = true;
+            int status = audio_status();
+            if (menu == fruit_menu_root() && (status & AUDIO_STATUS_PLAY))
+            {
+                wps_do_action(status & AUDIO_STATUS_PAUSE ? WPS_PLAY : WPS_PAUSE,
+                              false);
+                redraw_lists = true;
+            }
+            else
+            {
+                ret = GO_TO_PREVIOUS_MUSIC;
+                done = true;
+            }
         }
         else if (action == ACTION_TREE_STOP)
         {

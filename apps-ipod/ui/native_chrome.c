@@ -99,6 +99,9 @@ bool native_chrome_poll(struct native_chrome *chrome)
     };
     if (battery >= 0 && ui_theme_art(chrome->theme))
         next.stock_battery_frame = ui_art_battery_index(battery);
+    next.clock_title = clock_valid && global_settings.time_in_title &&
+        chrome->theme->style[UI_STYLE_STATUS_CLOCK] != UI_STATUS_CLOCK_ON &&
+        !TIME_BEFORE(current_tick, chrome->title_until);
     if (next.volume_visible)
     {
         int minimum = sound_min(SOUND_VOLUME);
@@ -805,7 +808,7 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
     int text_y = bounds.y + metric[UI_METRIC_STATUS_TEXT_Y];
     int icon_size = metric[UI_METRIC_STATUS_ICON_SIZE];
     int left_x = bounds.x + metric[UI_METRIC_STATUS_PAD_LEFT];
-    const char *title = native_chrome_title(left);
+    const char *title = state->clock_title ? clock : native_chrome_title(left);
     int title_width = 0;
     if (!playback_modes)
         font_getstringsize((const unsigned char *)title, &title_width, NULL,

@@ -21,6 +21,10 @@ int extras_notes(void);
 int extras_screen_lock(void);
 int extras_stopwatch(void);
 
+/* Whether /Contacts holds a .vcf file: the Extras pane reads "Contacts"
+ * when it does, "No Contacts" when not. */
+bool extras_contacts_any(void);
+
 /* Whether Screen Lock has a combination saved: the Extras pane reads
  * "Combination Set" when it has, "No Combination" when not. */
 bool extras_screen_lock_set(void);

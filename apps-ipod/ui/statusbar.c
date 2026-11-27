@@ -15,6 +15,7 @@
 #include "draw/viewport.h"
 #include "files/file_index.h"
 #include "frame.h"
+#include "input/action.h"
 #include "kernel.h"
 #include "lcd.h"
 #include "led.h"
@@ -34,12 +35,18 @@
 #define BUSY_REDRAW_FRAMES ANIM_F(8)
 #define IDLE_REDRAW_FRAMES ANIM_F(60)
 #define INDICATOR_FRAMES ANIM_F(8)
+/* Time in Title, as stock: a screen's title shows for 2 s once the screen
+ * opens, and again until 3.5 s after the last turn or press within it;
+ * then the time. */
+#define TITLE_OPEN_HOLD (2 * HZ)
+#define TITLE_INPUT_HOLD (7 * HZ / 2)
 
 struct status_title {
     char text[260];
     enum themable_icons icon;
     bool persistent;
     bool dirty;
+    long shown;                 /* the tick the text last changed */
 };
 
 struct indicator_motion {
@@ -188,6 +195,7 @@ static bool set_title(const char *title, enum themable_icons icon,
         {
             strlcpy(state->text, title, sizeof(state->text));
             state->dirty = true;
+            state->shown = current_tick;
         }
         state->icon = icon;
         state->persistent = persistent;
@@ -341,6 +349,17 @@ int sb_visible_height(void)
     return height;
 }
 
+/* The tick from which Time in Title shows the time in place of `title` */
+static long title_until(const struct status_title *title)
+{
+    long input = get_action_tick();
+    long until = title->shown + TITLE_OPEN_HOLD;
+    if (TIME_AFTER(input, title->shown) &&
+        TIME_AFTER(input + TITLE_INPUT_HOLD, until))
+        until = input + TITLE_INPUT_HOLD;
+    return until;
+}
+
 void sb_update(enum screen_type screen, bool force)
 {
     if (rock_ui_raw() || status_handle <= 0 || screen != SCREEN_MAIN)
@@ -375,6 +394,7 @@ void sb_update(enum screen_type screen, bool force)
     {
         /* The store is movable between pins. */
         bar->chrome.theme = &bar->theme;
+        bar->chrome.title_until = title_until(title);
         bool changed = poll && native_chrome_poll(&bar->chrome);
         struct native_chrome_indicators target;
         native_chrome_indicators(&bar->chrome.state, &target);

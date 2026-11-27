@@ -429,6 +429,8 @@ static const struct tag_row tag_rows[] = {
 { "settings mode",       TAG_SYSTEM,                             "basic advanced" },
 { "sync time from computer", TAG_SYSTEM|TAG_USB,                  "clock date rtc podlink herdremote sync" },
 { "time format",         TAG_SYSTEM,                             "clock 12 24 hour" },
+{ "time in title",       TAG_SYSTEM|TAG_APPEARANCE,              "clock status bar title fruit company classic" },
+{ "contacts sort",       TAG_SYSTEM,                             "contacts sort by first last name vcard fruit company" },
 { "lang",                TAG_SYSTEM,                             "language" },
 { "default codepage",    TAG_ADVANCED|TAG_SYSTEM,                "codepage character set encoding" },
 { "glyphs",              TAG_ADVANCED|TAG_SYSTEM|TAG_APPEARANCE, "glyph cache font limit" },

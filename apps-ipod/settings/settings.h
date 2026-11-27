@@ -538,6 +538,8 @@ struct user_settings
 
     bool sync_time_from_computer;
     int timeformat;    /* time format: 0=24 hour clock, 1=12 hour clock */
+    bool time_in_title; /* the time in place of a screen's title, on a
+                           status bar with no clock of its own */
 
     int disk_spindown; /* time until disk spindown, in seconds (0=off) */
     int buffer_margin; /* audio buffer watermark margin, in seconds */
@@ -808,6 +810,7 @@ struct user_settings
      * them (screens/fruit_menu.c). */
     int  fruit_main_menu;
     int  fruit_music_menu;
+    int  contacts_sort; /* Extras > Contacts by 0 first or 1 last name */
     /* Rows hidden from each kind of context menu: a bit per row of the kind's
      * list in screens/context_menu.c, saved by the rows' names. */
 #define CONTEXT_MENU_KINDS 8

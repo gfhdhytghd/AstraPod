@@ -16,8 +16,10 @@ struct native_chrome_state {
     int8_t battery, hour, minute;
     uint8_t charging, numeric, clock_24h, busy, volume_visible, volume_percent;
     uint8_t playmode, stock_battery_frame;
+    /* The time in place of the title. Also aligns the tray without
+     * implicit padding for memcmp. */
+    uint8_t clock_title;
 #ifdef ASTRAPOD_ROCK_COMPAT
-    uint8_t reserved; /* Align the tray without implicit padding for memcmp. */
     struct app_tray_view tray;
 #endif
 };
@@ -45,6 +47,9 @@ struct native_chrome {
     int status_font;
     int title_font;
     int icon_font;
+    /* With Time in Title on, the tick from which the time replaces the
+     * title, on a bar that shows no clock of its own */
+    long title_until;
     struct native_chrome_state state;
 };
 

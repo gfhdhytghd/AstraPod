@@ -1542,6 +1542,8 @@ void native_wps_open(const struct wps_state *state)
                   sizeof(wps->elapsed_text));
         wps->album.scroll = true;
         wps->chrome_ready = native_chrome_open(&wps->chrome, &wps->theme);
+        /* Time in Title shows "Now Playing" for 2 s, as the lists do */
+        wps->chrome.title_until = current_tick + 2 * HZ;
         setup_classic();
     }
     else

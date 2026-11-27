@@ -102,3 +102,12 @@
   a player that is off or asleep for an alarm. Alarms, clocks and the Screen Lock combination are kept in
   `.rockbox/`; Notes reads the `.txt` files in `/Notes`. Update from the
   whole zip: the Extras need its new fonts and `stock-art.bin`.
+
+- **Under Fruit Company, Contacts lists your contacts**: the vCard (`.vcf`)
+  files in `/Contacts`, as iTunes syncs them, one contact to a file or many.
+  Select one for its numbers, emails, addresses and note. **Settings > Sort
+  By** orders them by first or last name, and **Date & Time > Time in
+  Title** shows the time in the status bar in place of the screen's title;
+  both change in place on Select. Classic shows the time too, and the
+  setting is also under Settings > System > Time & Date Settings. Update
+  from the whole zip: a contact's page needs the new `stock-art.bin`.

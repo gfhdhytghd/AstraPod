@@ -1396,6 +1396,18 @@ default. Switch off to set the date and time manually.
 [time format]
 Whether times are shown on a 12- or 24-hour clock.
 
+[time in title]
+Shows the time in the status bar in place of the screen's title. The title
+still shows for two seconds when a screen opens, and for a few seconds after
+the wheel turns. Changes nothing on a theme whose bar has a clock of its own,
+such as Scrim and Light.
+
+[contacts sort]
+Under Fruit Company, the order of Extras > Contacts. First lists a contact as
+"Anna Zimmer", by first name; Last lists "Zimmer, Anna", by last name.
+Contacts are the vCard (.vcf) files in the Contacts folder of the player's
+disk, as iTunes syncs them.
+
 [lang]
 The language of the interface. Loading one replaces the built-in English.
 

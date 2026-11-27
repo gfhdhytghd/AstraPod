@@ -72,6 +72,7 @@ MENUITEM_FUNCTION(time_set, 0, ID2P(LANG_SET_TIME),
 MENUITEM_SETTING(sync_computer_time, &global_settings.sync_time_from_computer, NULL);
 #endif
 MENUITEM_SETTING(timeformat, &global_settings.timeformat, NULL);
+MENUITEM_SETTING(time_in_title, &global_settings.time_in_title, NULL);
 
 static void draw_timedate(struct viewport *vp, struct screen *display)
 {
@@ -168,7 +169,7 @@ MAKE_MENU(time_menu, ID2P(LANG_TIME_MENU), time_menu_callback, Icon_NOICON,
 #ifdef HAVE_USB_PODLINK
           &sync_computer_time,
 #endif
-          &timeformat);
+          &timeformat, &time_in_title);
 
 const struct menu_item_ex *time_settings_menu(void)
 {

@@ -51,10 +51,35 @@ struct dialog_style
     int      button_border_radius;
     int      button_font;
     int      button_gap, button_pad_x, button_pad_y; /* confirmation layout */
+    bool     glass;                 /* Classic dark glossy panel (vs page)  */
 };
 
-/* Resolve the active native modal tokens. */
+/* Whether the active native theme uses Classic / Fruit 2.0.5 dialogs. */
+bool dialog_is_classic(void);
+
+/* Resolve the active native modal tokens (white page under Classic). */
 void dialog_style_default(struct dialog_style *s);
+
+/* Resolve modal tokens for a brief dark glossy glass overlay under Classic;
+ * identical to dialog_style_default() under Scrim. */
+void dialog_style_glass(struct dialog_style *s);
+
+/* Classic 2.0.5 shared chrome helpers (no-op or fallback under Scrim). */
+void dialog_draw_glass_panel(struct screen *screen, int x, int y,
+                             int w, int h, int r, bool opaque);
+void dialog_draw_silver_dock(struct screen *screen, int x, int y,
+                             int w, int h);
+void dialog_draw_segmented(struct screen *screen, int x, int y, int w, int h,
+                           const char *const *labels, int count, int selected,
+                           bool light_dock, int font);
+void dialog_draw_stock_row(struct screen *screen, int x, int y, int w, int h,
+                           const char *label, bool selected, bool chevron,
+                           int font);
+void dialog_draw_progress(struct screen *screen, int x, int y, int w, int h,
+                          int current, int total);
+void dialog_draw_shadow_text(struct screen *screen, int x, int y,
+                             const char *text, unsigned fg, unsigned shadow,
+                             int dy);
 
 /* How much `style` takes out of the box on each side (the margin). Sizing code
  * (a measure() callback) uses this to convert a content size into a box size. */
@@ -220,6 +245,9 @@ struct dialog
 
     /* --- optional, set after dialog_init() --- */
     const char *motion_route; /* literal name in the frame-time trace */
+    /* Under Classic / Fruit themes, draw as a centred dark glossy panel with
+     * fade+zoom instead of a full-screen white stock page. */
+    bool  glass;
     /* Drawn into `fb`, fb_w by fb_h, over whatever it holds, and shown by
      * present() after each repaint, instead of on the screen: for a page
      * the text viewer has turned sideways. NULL draws on the screen. */

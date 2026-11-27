@@ -15,6 +15,9 @@ struct ui_sheet {
     bool active, starting;
     /* Set before ui_sheet_begin() for a full-screen horizontal page push/pop
      * instead of the vertical sheet slide. */
+    /* Set before ui_sheet_begin() for the HUD/dialog fade and scale, or a
+     * full-screen horizontal stock page push/pop, instead of the slide up. */
+    bool zoom;
     bool slide;
 };
 
@@ -32,6 +35,18 @@ void ui_sheet_paint_in(struct ui_sheet *sheet, const fb_data *backdrop,
  * (the opened page), sliding side by side across LCD_WIDTH. */
 void ui_sheet_paint_slide(struct ui_sheet *sheet, const fb_data *backdrop,
                           const fb_data *body, bool changed);
+/* The HUD transition. `body` is the whole finished screen; its rows above
+ * `top` cross-fade, and the panel at `bounds` fades in while it grows to
+ * full size over the backdrop as it dims. Below `top`, `body` outside the
+ * panel must be the backdrop as ui_sheet_dim() leaves it. */
+void ui_sheet_paint_zoom(struct ui_sheet *sheet, const fb_data *backdrop,
+                         const fb_data *body, struct ui_rect bounds, int top);
+/* Full-screen horizontal stock push/pop below `top`, cross-fading the status
+ * bar above `top`. Both `backdrop` and `body` are whole-screen panels. */
+void ui_sheet_paint_dialog_slide(struct ui_sheet *sheet, const fb_data *backdrop,
+                          const fb_data *body, int top);
+/* The backdrop of a finished sheet: `pixels` of `src`, dimmed, to `dst`. */
+void ui_sheet_dim(fb_data *dst, const fb_data *src, int pixels);
 int ui_sheet_timeout(const struct ui_sheet *sheet, int timeout);
 /* Preserve any queued event for the screen that owns the next action. */
 bool ui_sheet_wait(const struct ui_sheet *sheet);

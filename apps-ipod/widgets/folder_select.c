@@ -43,6 +43,8 @@
 #include "yesno.h"
 #include "dialog.h"
 #include "input/action.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/statusbar.h"
 #include "draw/screen_access.h"
 #include "system/activity.h"  /* push/pop the folder-picker activity (%cs) */
 #include "system/shutdown.h"  /* default_event_handler */
@@ -656,6 +658,24 @@ static void folder_measure(struct dialog *d, struct screen *display,
 {
     struct folder_dlg *s = data;
     struct dialog_insets in;
+
+    if (dialog_is_classic())
+    {
+        int sh = sb_visible_height();
+        if (sh <= 0)
+            sh = (int)ui_theme_metric(UI_METRIC_STATUS_HEIGHT);
+        int row_h = (int)ui_theme_metric(UI_METRIC_ROW_HEIGHT);
+        if (row_h < 20)
+            row_h = 24;
+        d->style.box_margin = 0;
+        box->x = 0;
+        box->y = sh;
+        box->width = display->lcdwidth;
+        box->height = MAX(1, display->lcdheight - sh);
+        s->visible_rows = MAX(1, box->height / row_h);
+        return;
+    }
+
     int row_h = row_height(display);
     int chrome, limit, rows, box_h;
 
@@ -689,7 +709,12 @@ static void folder_draw(struct dialog *d, struct screen *display,
                         struct viewport *content, void *data)
 {
     struct folder_dlg *s = data;
-    int row_h = row_height(display);
+    bool classic = dialog_is_classic();
+    int row_h = classic ? (int)ui_theme_metric(UI_METRIC_ROW_HEIGHT)
+                        : row_height(display);
+    if (classic && row_h < 20)
+        row_h = 24;
+    int row_gap = classic ? 0 : ROW_GAP;
     int nb_items = count_items(s->root);
     char buf[MAX_PATH];
 
@@ -741,7 +766,7 @@ static void folder_draw(struct dialog *d, struct screen *display,
         row_text(this, buf, sizeof(buf));
 
         dialog_draw_button_ex(display, &d->style, indent,
-                              r * (row_h + ROW_GAP),
+                              r * (row_h + row_gap),
                               content->width - indent, row_h, buf, sel,
                               DIALOG_BTN_LEFT, row_icon(this, parent),
                               sel ? s->scroll_px : 0,

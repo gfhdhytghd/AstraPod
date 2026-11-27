@@ -95,10 +95,16 @@ static void ss_close_panel(struct scan_panel *panel, bool animate)
     if (animate && panel->bounds.width > 0)
     {
         fb_data *pixels = core_get_data_pinned(panel->handle);
+        bool classic = dialog_is_classic();
+        panel->sheet.zoom = classic;
         ui_sheet_begin(&panel->sheet, false, "sound-scan-progress");
         do {
-            ui_sheet_paint(&panel->sheet, pixels, pixels + SCAN_PANEL_PIXELS,
-                           panel->bounds, false);
+            if (classic)
+                ui_sheet_paint_zoom(&panel->sheet, pixels,
+                                    pixels + SCAN_PANEL_PIXELS, panel->bounds, 0);
+            else
+                ui_sheet_paint(&panel->sheet, pixels, pixels + SCAN_PANEL_PIXELS,
+                               panel->bounds, false);
         } while (ui_sheet_wait(&panel->sheet));
         if (panel->sheet.light != UI_FULL_OPACITY || panel->sheet.previous.height > 0)
         {
@@ -225,7 +231,8 @@ static void ss_draw(struct scan_panel *panel, const char *paused)
 {
     struct screen *lcd = &screens[SCREEN_MAIN];
     struct dialog_style style;
-    dialog_style_default(&style);
+    dialog_style_glass(&style);
+    bool classic = dialog_is_classic();
     struct viewport vp, content, *last_vp;
     char line[64];
     int fh, bh;
@@ -250,11 +257,29 @@ static void ss_draw(struct scan_panel *panel, const char *paused)
     if (panel->handle > 0)
     {
         pixels = core_get_data_pinned(panel->handle);
-        panel->bounds = (struct ui_rect){vp.x, vp.y, vp.width, vp.height};
-        tile = (struct frame_buffer_t){ .fb_ptr = pixels + SCAN_PANEL_PIXELS,
-                                        .stride = vp.width,
-                                        .elems = (size_t)vp.width * vp.height };
-        vp.x = vp.y = 0;
+        if (classic)
+        {
+            ui_sheet_dim(pixels + SCAN_PANEL_PIXELS, pixels, SCAN_PANEL_PIXELS);
+            int sx = MAX(0, vp.x - 8), sy = MAX(0, vp.y - 6);
+            int sx2 = MIN(LCD_WIDTH, vp.x + vp.width + 8);
+            int sy2 = MIN(LCD_HEIGHT, vp.y + vp.height + 10);
+            panel->bounds = (struct ui_rect){
+                sx, sy, MAX(0, sx2 - sx), MAX(0, sy2 - sy)
+            };
+            tile = (struct frame_buffer_t){
+                .fb_ptr = pixels + SCAN_PANEL_PIXELS,
+                .stride = LCD_WIDTH,
+                .elems = SCAN_PANEL_PIXELS,
+            };
+        }
+        else
+        {
+            panel->bounds = (struct ui_rect){vp.x, vp.y, vp.width, vp.height};
+            tile = (struct frame_buffer_t){ .fb_ptr = pixels + SCAN_PANEL_PIXELS,
+                                            .stride = vp.width,
+                                            .elems = (size_t)vp.width * vp.height };
+            vp.x = vp.y = 0;
+        }
         vp.buffer = &tile;
         lcd->set_viewport(&vp);
     }
@@ -321,10 +346,16 @@ static void ss_draw(struct scan_panel *panel, const char *paused)
     /* The bar is the one thing readable at arm's length, and it keeps
      * running through a pause -- what has been done is still done. */
     w = content.width;
-    bar = ss_total > 0 ? (ss_done + ss_skipped) * w / ss_total : 0;
-    lcd->set_drawmode(DRMODE_SOLID);
-    lcd->drawrect(0, y, w, fh - 2);
-    lcd->fillrect(1, y + 1, bar > 2 ? bar - 2 : 0, fh - 4);
+    if (classic)
+        dialog_draw_progress(lcd, 0, y, w, MIN(fh - 2, 14),
+                             ss_done + ss_skipped, ss_total);
+    else
+    {
+        bar = ss_total > 0 ? (ss_done + ss_skipped) * w / ss_total : 0;
+        lcd->set_drawmode(DRMODE_SOLID);
+        lcd->drawrect(0, y, w, fh - 2);
+        lcd->fillrect(1, y + 1, bar > 2 ? bar - 2 : 0, fh - 4);
+    }
 
     /* One button, and it is the only thing this screen does. */
     dialog_draw_button(lcd, &style, content.width / 4,
@@ -335,14 +366,36 @@ static void ss_draw(struct scan_panel *panel, const char *paused)
     if (pixels)
     {
         if (opening)
-            ui_sheet_begin(&panel->sheet, true, "sound-scan-progress");
-        ui_sheet_paint(&panel->sheet, pixels, tile.fb_ptr, panel->bounds, true);
-        while (ui_sheet_wait(&panel->sheet))
-            ui_sheet_paint(&panel->sheet, pixels, tile.fb_ptr, panel->bounds, false);
-        if (panel->sheet.active)
         {
-            ui_sheet_cancel(&panel->sheet);
-            ui_sheet_paint(&panel->sheet, pixels, tile.fb_ptr, panel->bounds, false);
+            panel->sheet.zoom = classic;
+            ui_sheet_begin(&panel->sheet, true, "sound-scan-progress");
+        }
+        if (classic)
+        {
+            panel->sheet.light = -1;
+            ui_sheet_paint_zoom(&panel->sheet, pixels, tile.fb_ptr,
+                                panel->bounds, 0);
+            while (ui_sheet_wait(&panel->sheet))
+                ui_sheet_paint_zoom(&panel->sheet, pixels, tile.fb_ptr,
+                                    panel->bounds, 0);
+            if (panel->sheet.active)
+            {
+                ui_sheet_cancel(&panel->sheet);
+                panel->sheet.light = -1;
+                ui_sheet_paint_zoom(&panel->sheet, pixels, tile.fb_ptr,
+                                    panel->bounds, 0);
+            }
+        }
+        else
+        {
+            ui_sheet_paint(&panel->sheet, pixels, tile.fb_ptr, panel->bounds, true);
+            while (ui_sheet_wait(&panel->sheet))
+                ui_sheet_paint(&panel->sheet, pixels, tile.fb_ptr, panel->bounds, false);
+            if (panel->sheet.active)
+            {
+                ui_sheet_cancel(&panel->sheet);
+                ui_sheet_paint(&panel->sheet, pixels, tile.fb_ptr, panel->bounds, false);
+            }
         }
         core_put_data_pinned(pixels);
     }
@@ -655,6 +708,7 @@ static void ss_result(const char *msg)
     };
     struct dialog dialog;
     dialog_init(&dialog, CONTEXT_STD, NULL, NULL, &callbacks, (void *)msg);
+    dialog.glass = true;
     dialog.motion_route = "sound-scan-result";
     backlight_on();
     if (global_settings.talk_menu)

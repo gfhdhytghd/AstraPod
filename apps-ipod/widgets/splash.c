@@ -59,10 +59,21 @@ static void splash_draw_text(struct screen *screen, struct viewport *content,
 {
     struct viewport *prev = screen->set_viewport(content);
     screen->set_drawmode(DRMODE_FG);
+    bool classic = dialog_is_classic();
     for (int i = 0; i < message->count; i++)
+    {
+        if (classic)
+        {
+            screen->set_foreground(LCD_RGBPACK(0, 0, 0));
+            screen->putsxyf(0, i * message->line_height - 1, "%.*s",
+                           (int)message->lines[i].length,
+                           message->text + message->lines[i].offset);
+            screen->set_foreground(LCD_RGBPACK(255, 255, 255));
+        }
         screen->putsxyf(0, i * message->line_height, "%.*s",
                        (int)message->lines[i].length,
                        message->text + message->lines[i].offset);
+    }
     screen->set_drawmode(DRMODE_SOLID);
     screen->set_viewport(prev);
 }
@@ -73,6 +84,14 @@ static void splash_draw_meter(struct screen *screen, const struct viewport *box,
 {
     int size = message->line_height;
     int pad = message->style.box_margin;
+    if (dialog_is_classic())
+    {
+        int bar_h = MIN(size, 14);
+        dialog_draw_progress(screen, pad, box->height - bar_h - pad,
+                             box->width - pad * 2, bar_h,
+                             meter->current, meter->total);
+        return;
+    }
     progress_bar_draw(screen, pad, box->height - size - pad,
                       box->width - pad * 2, size, meter->current,
                       meter->total, message->meter_radius);
@@ -91,8 +110,9 @@ static bool splash_present_native(struct screen *screen, const struct viewport *
     if (!wait || wait->ticks <= 0 || ui_flush_inhibited())
         return false;
 
+    bool classic = dialog_is_classic();
     int w = box->width, h = box->height;
-    size_t body = (size_t)w * h;
+    size_t body = classic ? (size_t)LCD_WIDTH * LCD_HEIGHT : (size_t)w * h;
     int handle = core_alloc_free_space(FRAMEBUFFER_SIZE + body * sizeof(fb_data));
     if (handle <= 0)
         return false;
@@ -101,9 +121,23 @@ static bool splash_present_native(struct screen *screen, const struct viewport *
     fb_data *pixels = core_get_data_pinned(handle);
     fb_data *tile_pixels = pixels + LCD_WIDTH * LCD_HEIGHT;
     memcpy(pixels, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
-    struct frame_buffer_t buffer = {.fb_ptr = tile_pixels, .stride = w, .elems = body};
+
+    struct frame_buffer_t buffer;
     struct viewport tile = *box;
-    tile.x = tile.y = 0;
+    if (classic)
+    {
+        ui_sheet_dim(tile_pixels, pixels, LCD_WIDTH * LCD_HEIGHT);
+        buffer = (struct frame_buffer_t){
+            .fb_ptr = tile_pixels, .stride = LCD_WIDTH, .elems = body
+        };
+    }
+    else
+    {
+        buffer = (struct frame_buffer_t){
+            .fb_ptr = tile_pixels, .stride = w, .elems = body
+        };
+        tile.x = tile.y = 0;
+    }
     tile.buffer = &buffer;
     struct viewport *previous = screen->set_viewport(&tile);
     struct viewport content;
@@ -113,11 +147,24 @@ static bool splash_present_native(struct screen *screen, const struct viewport *
         splash_draw_meter(screen, &tile, message, meter);
     screen->set_viewport(wait->previous);
 
-    struct ui_sheet sheet = { .light = UI_FULL_OPACITY };
-    struct ui_rect bounds = {box->x, box->y, w, h};
+    struct ui_sheet sheet = { .light = UI_FULL_OPACITY, .zoom = classic };
+    struct ui_rect bounds;
+    if (classic)
+    {
+        int sx = MAX(0, box->x - 8);
+        int sy = MAX(0, box->y - 6);
+        int sx2 = MIN(LCD_WIDTH, box->x + w + 8);
+        int sy2 = MIN(LCD_HEIGHT, box->y + h + 10);
+        bounds = (struct ui_rect){ sx, sy, MAX(0, sx2 - sx), MAX(0, sy2 - sy) };
+    }
+    else
+        bounds = (struct ui_rect){ box->x, box->y, w, h };
     ui_sheet_begin(&sheet, true, "splash");
     do {
-        ui_sheet_paint(&sheet, pixels, tile_pixels, bounds, false);
+        if (classic)
+            ui_sheet_paint_zoom(&sheet, pixels, tile_pixels, bounds, 0);
+        else
+            ui_sheet_paint(&sheet, pixels, tile_pixels, bounds, false);
     } while (ui_sheet_wait(&sheet));
 
     bool interrupted = sheet.active;
@@ -133,7 +180,10 @@ static bool splash_present_native(struct screen *screen, const struct viewport *
     {
         ui_sheet_begin(&sheet, false, "splash");
         do {
-            ui_sheet_paint(&sheet, pixels, tile_pixels, bounds, false);
+            if (classic)
+                ui_sheet_paint_zoom(&sheet, pixels, tile_pixels, bounds, 0);
+            else
+                ui_sheet_paint(&sheet, pixels, tile_pixels, bounds, false);
         } while (ui_sheet_wait(&sheet));
         interrupted = sheet.active;
     }
@@ -179,7 +229,7 @@ static bool splash_internal(struct screen *screen, const char *fmt, va_list ap,
     if (!*next)
         return false;
 
-    dialog_style_default(&message.style);
+    dialog_style_glass(&message.style);
 
     message.meter_gap = ui_theme_metric(UI_METRIC_SPLASH_PROGRESS_GAP);
     message.meter_radius = ui_theme_metric(UI_METRIC_SPLASH_PROGRESS_RADIUS);
@@ -196,7 +246,9 @@ static bool splash_internal(struct screen *screen, const char *fmt, va_list ap,
                       talk_on_ui_thread() && lcd_active() &&
                       vp->buffer == &lcd_framebuffer_default;
     if (standalone)
-        body_font = ui_theme_current_font_load(UI_FONT_BODY, SPLASH_FONT_CACHE_GLYPHS);
+        body_font = ui_theme_current_font_load(
+            dialog_is_classic() ? UI_FONT_LIST_VALUE : UI_FONT_BODY,
+            SPLASH_FONT_CACHE_GLYPHS);
 
     int pad = message.style.box_margin;
     int fontnum = body_font >= 0 ? body_font : old_font;

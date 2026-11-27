@@ -19,6 +19,8 @@
 #include "settings/settings.h"
 #include "draw/viewport.h"
 #include "font.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/statusbar.h"
 #include "splash.h"
 #include "dialog.h"
 
@@ -46,6 +48,11 @@ struct yesno_ctx
     /* message word-wrapped to the box width, rebuilt by yesno_measure() */
     struct dialog_text_line wrap[YN_MAX_LINES];
     int wrap_count;
+    /* Classic 2.0.5 full-page layout: bold heading (line 0) and button font */
+    struct dialog_text_line head_wrap[6];
+    int head_count;
+    int head_font;
+    int btn_font;
 };
 
 static void talk_text_message(const struct text_message * message, bool enqueue)
@@ -158,14 +165,53 @@ static void yesno_measure(struct dialog *d, struct screen *s,
 {
     struct yesno_ctx *c = data;
     struct dialog_insets in;
+    int area_h = s->lcdheight;
+    int sw = s->lcdwidth;
+
+    if (dialog_is_classic())
+    {
+        int sh = sb_visible_height();
+        if (sh <= 0)
+            sh = (int)ui_theme_metric(UI_METRIC_STATUS_HEIGHT);
+        d->style.box_margin = 0;
+        box->x = 0;
+        box->y = sh;
+        box->width = sw;
+        box->height = MAX(1, area_h - sh);
+
+        int text_w = sw - 44;
+        int hfont = c->head_font >= 0 ? c->head_font : box->font;
+        c->head_count = 0;
+        c->wrap_count = 0;
+        if (c->message->nb_lines > 0)
+        {
+            const char *line = P2STR((unsigned char *)c->message->message_lines[0]);
+            c->head_count = dialog_wrap_text(line, text_w, hfont,
+                                             c->head_wrap, ARRAYLEN(c->head_wrap));
+        }
+        for (int i = 1; i < c->message->nb_lines && c->wrap_count < YN_MAX_LINES; i++)
+        {
+            const char *line = P2STR((unsigned char *)c->message->message_lines[i]);
+            int n = dialog_wrap_text(line, text_w, box->font,
+                                     &c->wrap[c->wrap_count],
+                                     YN_MAX_LINES - c->wrap_count);
+            if (n == 0)
+            {
+                c->wrap[c->wrap_count].str = "";
+                c->wrap[c->wrap_count].len = 0;
+                n = 1;
+            }
+            c->wrap_count += n;
+        }
+        return;
+    }
+
     /* Size and centre against the physical display, not the theme content
      * viewport the box arrives as. box->x/y below are absolute screen
      * coordinates, so measuring against s->getwidth()/getheight() (the theme
      * viewport, which a themed SBS can inset - e.g. %Vi(-,3,28,302,-,-)) would
      * centre the box on the viewport's size but position it from absolute 0,
      * leaving it visibly off-centre on the display. */
-    int area_h = s->lcdheight;
-    int sw = s->lcdwidth;
     int ch = s->getcharheight();
 
     dialog_get_insets(&d->style, &in);
@@ -216,6 +262,52 @@ static void yesno_draw(struct dialog *d, struct screen *s,
                        struct viewport *content, void *data)
 {
     struct yesno_ctx *c = data;
+    if (dialog_is_classic())
+    {
+        int dock_h = 48;
+        int dock_y = content->height - dock_h - 14;
+        int y = 22;
+        int hfont = c->head_font >= 0 ? c->head_font : content->font;
+        int hch = font_get(hfont)->height;
+        int bch = font_get(content->font)->height;
+
+        s->set_drawmode(DRMODE_FG);
+        s->set_foreground(LCD_RGBPACK(0, 0, 0));
+        if (c->head_count > 0)
+        {
+            int old_font = content->font;
+            s->setfont(hfont);
+            for (int i = 0; i < c->head_count && y + hch <= dock_y - 8; i++)
+            {
+                s->putsxyf(22, y, "%.*s", c->head_wrap[i].len, c->head_wrap[i].str);
+                y += hch + 2;
+            }
+            s->setfont(old_font);
+            y += 8;
+        }
+        for (int i = 0; i < c->wrap_count && y + bch <= dock_y - 8; i++)
+        {
+            s->putsxyf(22, y, "%.*s", c->wrap[i].len, c->wrap[i].str);
+            y += bch + 2;
+        }
+
+        dialog_draw_silver_dock(s, 16, dock_y, content->width - 32, dock_h);
+
+        char yes[24], no[24];
+        yesno_button_labels(c, yesno_tmo_remaining(c), yes, no, sizeof(yes));
+        const char *labels[2] = { yes, no };
+        int bfont = c->btn_font >= 0 ? c->btn_font : content->font;
+        int w_yes = 0, w_no = 0;
+        font_getstringsize((const unsigned char *)yes, &w_yes, NULL, bfont);
+        font_getstringsize((const unsigned char *)no, &w_no, NULL, bfont);
+        int bar_w = MAX(144, MIN(content->width - 56, MAX(w_yes, w_no) * 2 + 48));
+        int bar_x = (content->width - bar_w) / 2;
+        dialog_draw_segmented(s, bar_x, dock_y + 11, bar_w, 27, labels, 2,
+                              c->selection == YESNO_YES ? 0 : 1, true, bfont);
+        s->set_drawmode(DRMODE_SOLID);
+        return;
+    }
+
     int ch = s->getcharheight();
 
     /* message: centred, word-wrapped, in the area above the buttons */
@@ -379,10 +471,19 @@ static enum yesno_res yesno_run(int ticks, enum yesno_res tmo_default_res,
     c.yes_id       = yes_id;
     c.no_id        = no_id;
     c.back_cancels = no_id != LANG_SET_BOOL_NO;
+    c.head_font    = -1;
+    c.btn_font     = -1;
+    if (dialog_is_classic())
+    {
+        c.head_font = ui_theme_current_font_load(UI_FONT_TITLE, 64);
+        c.btn_font  = ui_theme_current_font_load(UI_FONT_LIST_VALUE, 32);
+    }
 
     dialog_init(&d, CONTEXT_YESNOSCREEN, title, NULL, &cb, &c);
     d.motion_route = "yesno";
     dialog_run(&d, HZ / 2); /* poll for statusbar and the timeout countdown */
+    font_unload(c.head_font);
+    font_unload(c.btn_font);
     return c.result;
 }
 
@@ -435,8 +536,9 @@ static bool yesno_pop_lines(const char *lines[], int line_cnt)
 {
     const struct text_message message={lines, line_cnt};
     bool ret = (gui_syncyesno_run(&message,NULL,NULL)== YESNO_YES);
-    FOR_NB_SCREENS(i)
-        screens[i].clear_viewport();
+    if (!dialog_is_classic())
+        FOR_NB_SCREENS(i)
+            screens[i].clear_viewport();
     return ret;
 }
 

@@ -5,6 +5,7 @@
  ****************************************************************************/
 
 #include "config.h"
+#include "audio.h"
 #include "lcd.h"
 #include "font.h"
 #include "kernel.h"
@@ -15,29 +16,108 @@
 #include "button.h"
 #include "draw/icon.h"
 #include "draw/color.h"
+#include "draw/gloss.h"
 #include "draw/round_rect.h"
 #include "draw/text_wrap.h"
 #include "metadata/album_palette.h"
+#include "screens/playback/wps.h"
 #include "settings/settings.h"
 #include "dialog.h"
 #include "core_alloc.h"
 #include "system.h"
 #include "thread.h"
 #include "ui/frame.h"
+#include "ui/menu_pane.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/sheet.h"
 #include "ui/scene.h"
 #include "ui/statusbar.h"
+#include "ui/stock_art.h"
 #include <string.h>
 #ifdef HAVE_WHEEL_WPS_CHORD
 #include "input/agents_shortcut.h"
 #endif
+
+#define DIALOG_GLASS_RADIUS 10
+#define DIALOG_SHADOW_PAD_X 8
+#define DIALOG_SHADOW_PAD_TOP 6
+#define DIALOG_SHADOW_PAD_BOT 10
+
+static const struct gloss_fill classic_glass_trans = {
+    0xdc585d64, 0xe022262c, 0xea090b0e, 0xee040507
+};
+static const struct gloss_fill classic_glass_opaque = {
+    0xff585d64, 0xff22262c, 0xff090b0e, 0xff040507
+};
+static const struct gloss_fill classic_gloss_band = {
+    0x40ffffff, 0x2affffff, 0x0affffff, 0x16ffffff
+};
+static const struct gloss_fill classic_silver_dock = {
+    0xffeeeeee, 0xfffcfcfc, 0xffd6d6d8, 0xffc2c2c4
+};
+static const struct gloss_fill classic_well_light = {
+    0xff363638, 0xff46484a, 0xff767678, 0xff68686a
+};
+static const struct gloss_fill classic_well_dark = {
+    0xf0101012, 0xf5181a1d, 0xf52e3136, 0xf03c4046
+};
+static const struct gloss_fill classic_pill_gloss = {
+    0x44ffffff, 0x24ffffff, 0x08ffffff, 0x12ffffff
+};
+static const struct gloss_fill classic_track_dark = {
+    0xff101216, 0xff1a1e24, 0xff2e343e, 0xff383e48
+};
+
+bool dialog_is_classic(void)
+{
+    return ui_theme_style(UI_STYLE_DIALOG) == UI_DIALOG_CLASSIC;
+}
 
 static unsigned theme_color(const struct ui_theme *theme, enum ui_color_role role,
                             const struct ui_album_palette *palette)
 {
     uint32_t rgb = ui_theme_color(theme, role, palette);
     return LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
+}
+
+static struct gloss_surface vp_gloss_surface(struct screen *screen,
+                                             int *ox, int *oy)
+{
+    struct viewport *vp = *screen->current_viewport;
+    struct frame_buffer_t *fb = vp->buffer ? vp->buffer : &lcd_framebuffer_default;
+    int stride = fb->stride > 0 ? fb->stride : LCD_WIDTH;
+    int fb_h = stride > 0 ? (int)(fb->elems / (size_t)stride) : LCD_HEIGHT;
+    *ox = vp->x;
+    *oy = vp->y;
+    return (struct gloss_surface){
+        .pixels = fb->fb_ptr,
+        .stride = stride,
+        .clip_x = 0,
+        .clip_y = 0,
+        .clip_w = stride,
+        .clip_h = fb_h,
+    };
+}
+
+static struct gloss_fill theme_selection_fill(const struct ui_theme *theme,
+                                              const struct ui_album_palette *palette)
+{
+    const struct ui_theme_gradient *g = &theme->gradient[UI_GRADIENT_SELECTION];
+    if (g->stops >= 4)
+        return (struct gloss_fill){
+            0xff000000u | g->color[0], 0xff000000u | g->color[1],
+            0xff000000u | g->color[2], 0xff000000u | g->color[3]
+        };
+    if (g->stops >= 2)
+        return (struct gloss_fill){
+            0xff000000u | g->color[0], 0xff000000u | g->color[0],
+            0xff000000u | g->color[1], 0xff000000u | g->color[1]
+        };
+    uint32_t rgb = ui_theme_color(theme, UI_COLOR_SELECTION, palette);
+    return (struct gloss_fill){
+        0xff000000u | rgb, 0xff000000u | rgb,
+        0xff000000u | rgb, 0xff000000u | rgb
+    };
 }
 
 void dialog_style_default(struct dialog_style *s)
@@ -52,26 +132,274 @@ void dialog_style_default(struct dialog_style *s)
     unsigned fg = theme_color(&theme, UI_COLOR_MODAL_FG, &palette);
     unsigned outline = theme_color(&theme, UI_COLOR_MODAL_BORDER, &palette);
     unsigned accent = theme_color(&theme, UI_COLOR_MODAL_ACCENT, &palette);
+    bool classic = theme.style[UI_STYLE_DIALOG] == UI_DIALOG_CLASSIC;
     *s = (struct dialog_style){
-        .box_fg = fg,
-        .box_bg = bg,
+        .box_fg = classic ? LCD_RGBPACK(0, 0, 0) : fg,
+        .box_bg = classic ? LCD_RGBPACK(255, 255, 255) : bg,
         .box_border_color = outline,
-        .box_border_width = m[UI_METRIC_MODAL_BORDER_WIDTH],
+        .box_border_width = classic ? 0 : m[UI_METRIC_MODAL_BORDER_WIDTH],
         .box_margin = m[UI_METRIC_MODAL_PADDING],
         .box_font = DIALOG_FONT_INHERIT,
         .edge_margin = m[UI_METRIC_MODAL_EDGE_MARGIN],
-        .button_fg = fg,
-        .button_bg = bg,
+        .button_fg = classic ? LCD_RGBPACK(255, 255, 255) : fg,
+        .button_bg = classic ? LCD_RGBPACK(72, 74, 76) : bg,
         .button_border_color = outline,
-        .button_fg_selected = theme_color(&theme, UI_COLOR_MODAL_SELECTED_TEXT, &palette),
+        .button_fg_selected = classic ? LCD_RGBPACK(255, 255, 255)
+            : theme_color(&theme, UI_COLOR_MODAL_SELECTED_TEXT, &palette),
         .button_bg_selected = accent,
         .button_border_color_selected = accent,
         .button_border_width = m[UI_METRIC_MODAL_BORDER_WIDTH],
+        .button_border_radius = classic ? 5 : 0,
         .button_font = DIALOG_FONT_INHERIT,
         .button_gap = m[UI_METRIC_MODAL_BUTTON_GAP],
         .button_pad_x = m[UI_METRIC_MODAL_BUTTON_PAD_X],
         .button_pad_y = m[UI_METRIC_MODAL_BUTTON_PAD_Y],
+        .glass = false,
     };
+}
+
+void dialog_style_glass(struct dialog_style *s)
+{
+    dialog_style_default(s);
+    if (!dialog_is_classic())
+        return;
+    s->box_fg = LCD_RGBPACK(255, 255, 255);
+    s->box_bg = LCD_RGBPACK(18, 21, 26);
+    s->box_border_color = LCD_RGBPACK(88, 93, 100);
+    s->box_border_width = 1;
+    s->box_margin = 12;
+    s->button_fg = LCD_RGBPACK(255, 255, 255);
+    s->button_bg = LCD_RGBPACK(30, 34, 40);
+    s->button_fg_selected = LCD_RGBPACK(255, 255, 255);
+    s->button_border_radius = 5;
+    s->glass = true;
+}
+
+void dialog_draw_glass_panel(struct screen *screen, int x, int y,
+                             int w, int h, int r, bool opaque)
+{
+    int ox, oy;
+    struct gloss_surface s = vp_gloss_surface(screen, &ox, &oy);
+    int gx = ox + x, gy = oy + y;
+    int gloss_h = MIN(36, MAX(12, h * 38 / 100));
+    if (!opaque)
+        gloss_shadow(&s, gx, gy, w, h, r, 6, 3, 128);
+    gloss_rect(&s, gx, gy, w, h, r, r,
+               opaque ? &classic_glass_opaque : &classic_glass_trans);
+    if (w > 2 && h > 4)
+        gloss_rect(&s, gx + 1, gy + 1, w - 2, gloss_h,
+                   r > 1 ? r - 1 : 0, 0, &classic_gloss_band);
+    gloss_outline(&s, gx, gy, w, h, r, 0x54ffffff);
+}
+
+void dialog_draw_silver_dock(struct screen *screen, int x, int y,
+                             int w, int h)
+{
+    int ox, oy;
+    struct gloss_surface s = vp_gloss_surface(screen, &ox, &oy);
+    int gx = ox + x, gy = oy + y;
+    gloss_shadow(&s, gx, gy, w, h, 6, 5, 2, 105);
+    gloss_rect(&s, gx, gy, w, h, 6, 6, &classic_silver_dock);
+    gloss_outline(&s, gx, gy, w, h, 6, 0xff9a9a9c);
+}
+
+void dialog_draw_shadow_text(struct screen *screen, int x, int y,
+                             const char *text, unsigned fg, unsigned shadow,
+                             int dy)
+{
+    unsigned prev = screen->get_foreground();
+    int prev_mode = (*screen->current_viewport)->drawmode;
+    screen->set_drawmode(DRMODE_FG);
+    screen->set_foreground(shadow);
+    screen->putsxy(x, y + dy, (const unsigned char *)text);
+    screen->set_foreground(fg);
+    screen->putsxy(x, y, (const unsigned char *)text);
+    screen->set_foreground(prev);
+    screen->set_drawmode(prev_mode);
+}
+
+void dialog_draw_segmented(struct screen *screen, int x, int y, int w, int h,
+                           const char *const *labels, int count, int selected,
+                           bool light_dock, int font)
+{
+    if (count <= 0 || w <= 4 || h <= 4)
+        return;
+    struct ui_theme theme;
+    struct ui_album_palette palette;
+    ui_theme_snapshot(&theme);
+    album_palette_snapshot(&palette);
+    struct gloss_fill blue = theme_selection_fill(&theme, &palette);
+    int ox, oy;
+    struct gloss_surface s = vp_gloss_surface(screen, &ox, &oy);
+    int gx = ox + x, gy = oy + y;
+    const int r = 5;
+
+    gloss_rect(&s, gx, gy, w, h, r, r,
+               light_dock ? &classic_well_light : &classic_well_dark);
+    gloss_outline(&s, gx, gy, w, h, r, light_dock ? 0xdc2c2c2e : 0x38ffffff);
+
+    int old_font = (*screen->current_viewport)->font;
+    if (font >= 0)
+        screen->setfont(font);
+
+    int seg_w = w / count;
+    for (int i = 0; i < count; i++)
+    {
+        int sx = x + i * seg_w;
+        int sw = (i == count - 1) ? (x + w - sx) : seg_w;
+        int gsx = ox + sx;
+        if (i == selected)
+        {
+            gloss_rect(&s, gsx + 1, gy + 1, sw - 2, h - 2, r - 1, r - 1, &blue);
+            if (sw > 4 && h > 6)
+                gloss_rect(&s, gsx + 2, gy + 2, sw - 4, (h - 4) / 2,
+                           r - 2, 0, &classic_pill_gloss);
+            gloss_outline(&s, gsx + 1, gy + 1, sw - 2, h - 2, r - 1, 0xff124c8e);
+        }
+        else if (i > 0 && i - 1 != selected)
+        {
+            struct gloss_fill div = { 0x60000000, 0x60000000, 0x60000000, 0x60000000 };
+            gloss_rect(&s, gsx, gy + 3, 1, h - 6, 0, 0, &div);
+        }
+        int lw = 0, lh = 0;
+        screen->getstringsize((const unsigned char *)labels[i], &lw, &lh);
+        struct viewport *cur = *screen->current_viewport;
+        struct viewport tvp = *cur;
+        tvp.x = cur->x + sx + 4;
+        tvp.y = cur->y + y + (h - lh) / 2;
+        tvp.width = MAX(1, sw - 8);
+        tvp.height = lh;
+        struct viewport *prev = screen->set_viewport(&tvp);
+        int tx = lw < tvp.width ? (tvp.width - lw) / 2 : 0;
+        unsigned sh = i == selected ? LCD_RGBPACK(16, 48, 106)
+                                    : LCD_RGBPACK(16, 16, 16);
+        dialog_draw_shadow_text(screen, tx, 0, labels[i],
+                                LCD_RGBPACK(255, 255, 255), sh, -1);
+        screen->set_viewport(prev);
+    }
+
+    if (font >= 0)
+        screen->setfont(old_font);
+}
+
+static void fill_selection_gradient(struct screen *screen, int x, int y,
+                                    int w, int h)
+{
+    struct ui_theme theme;
+    struct ui_album_palette palette;
+    ui_theme_snapshot(&theme);
+    album_palette_snapshot(&palette);
+    const struct ui_theme_gradient *grad = &theme.gradient[UI_GRADIENT_SELECTION];
+    uint32_t fallback = ui_theme_color(&theme, UI_COLOR_SELECTION, &palette);
+    unsigned prev_fg = screen->get_foreground();
+    int prev_mode = (*screen->current_viewport)->drawmode;
+    screen->set_drawmode(DRMODE_FG);
+    for (int row = 0; row < h; row++)
+    {
+        uint32_t rgb = ui_theme_gradient_at(grad, row, h, fallback);
+        screen->set_foreground(LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255));
+        screen->hline(x, x + w - 1, y + row);
+    }
+    screen->set_foreground(prev_fg);
+    screen->set_drawmode(prev_mode);
+}
+
+void dialog_draw_stock_row(struct screen *screen, int x, int y, int w, int h,
+                           const char *label, bool selected, bool chevron,
+                           int font)
+{
+    if (w <= 0 || h <= 0)
+        return;
+    int old_font = (*screen->current_viewport)->font;
+    unsigned prev_fg = screen->get_foreground();
+    int prev_mode = (*screen->current_viewport)->drawmode;
+    if (font >= 0)
+        screen->setfont(font);
+
+    if (selected)
+        fill_selection_gradient(screen, x, y, w, h);
+    else
+    {
+        screen->set_drawmode(DRMODE_FG);
+        screen->set_foreground(LCD_RGBPACK(255, 255, 255));
+        screen->fillrect(x, y, w, h);
+    }
+
+    int chev_w = 0;
+    if (selected && chevron && stock_art_ready())
+    {
+        const struct stock_art *art = &stock_art[STOCK_ART_SYSTEM_SUBMENU];
+        struct viewport *vp = *screen->current_viewport;
+        struct frame_buffer_t *fb = vp->buffer ? vp->buffer : &lcd_framebuffer_default;
+        int stride = fb->stride > 0 ? fb->stride : LCD_WIDTH;
+        int fb_h = stride > 0 ? (int)(fb->elems / (size_t)stride) : LCD_HEIGHT;
+        int cx = vp->x + x + w - art->width - 6;
+        int cy = vp->y + y + (h - art->height) / 2;
+        for (int sy = 0; sy < art->height; sy++)
+        {
+            int dy = cy + sy;
+            if (dy < 0 || dy >= fb_h || cx < 0 || cx + art->width > stride)
+                continue;
+            stock_art_row(STOCK_ART_SYSTEM_SUBMENU, 0, sy,
+                          fb->fb_ptr + dy * stride + cx, art->width);
+        }
+        chev_w = art->width + 10;
+    }
+
+    int lh = 0;
+    screen->getstringsize((const unsigned char *)label, NULL, &lh);
+    struct viewport *cur = *screen->current_viewport;
+    struct viewport tvp = *cur;
+    tvp.x = cur->x + x + 10;
+    tvp.y = cur->y + y + (h - lh) / 2;
+    tvp.width = MAX(1, w - 16 - chev_w);
+    tvp.height = lh;
+    struct viewport *prev = screen->set_viewport(&tvp);
+    screen->set_drawmode(DRMODE_FG);
+    screen->set_foreground(selected ? LCD_RGBPACK(255, 255, 255)
+                                    : LCD_RGBPACK(0, 0, 0));
+    screen->putsxy(0, 0, (const unsigned char *)label);
+    screen->set_viewport(prev);
+
+    screen->set_foreground(prev_fg);
+    screen->set_drawmode(prev_mode);
+    if (font >= 0)
+        screen->setfont(old_font);
+}
+
+void dialog_draw_progress(struct screen *screen, int x, int y, int w, int h,
+                          int current, int total)
+{
+    if (w <= 2 || h <= 2)
+        return;
+    if (total <= 0)
+        total = 1;
+    if (current < 0)
+        current = 0;
+    if (current > total)
+        current = total;
+
+    struct ui_theme theme;
+    struct ui_album_palette palette;
+    ui_theme_snapshot(&theme);
+    album_palette_snapshot(&palette);
+    struct gloss_fill fill = theme_selection_fill(&theme, &palette);
+    int ox, oy;
+    struct gloss_surface s = vp_gloss_surface(screen, &ox, &oy);
+    int gx = ox + x, gy = oy + y;
+    int r = MIN(h / 2, 6);
+
+    gloss_rect(&s, gx, gy, w, h, r, r, &classic_track_dark);
+    int fill_w = (w - 2) * current / total;
+    if (fill_w > 0)
+    {
+        struct gloss_surface clip = s;
+        clip.clip_x = MAX(s.clip_x, gx + 1);
+        clip.clip_w = MAX(0, MIN(s.clip_x + s.clip_w, gx + 1 + fill_w) - clip.clip_x);
+        gloss_rect(&clip, gx + 1, gy + 1, MAX(fill_w, 2 * r), h - 2,
+                   r > 1 ? r - 1 : 0, r > 1 ? r - 1 : 0, &fill);
+    }
+    gloss_outline(&s, gx, gy, w, h, r, 0x44ffffff);
 }
 
 void dialog_get_insets(const struct dialog_style *style,
@@ -126,13 +454,35 @@ void dialog_frame_box(struct screen *screen, struct viewport *box,
         unsigned fg = resolve_fg(screen, style->box_fg);
         unsigned bg = resolve_bg(screen, style->box_bg);
         unsigned bc = resolve_fg(screen, style->box_border_color);
-        screen->set_drawmode(DRMODE_FG);
-        screen->set_foreground(bg);          /* fill with the background colour */
-        screen->fillrect(0, 0, box->width, box->height);
-        screen->set_foreground(bc);
-        draw_box_border(screen, box->width, box->height, bw);
-        screen->set_foreground(fg);          /* interior draws in the box fg */
-        screen->set_drawmode(DRMODE_SOLID);
+        if (dialog_is_classic() && style->glass)
+        {
+            struct frame_buffer_t *fb = box->buffer ? box->buffer
+                                                    : &lcd_framebuffer_default;
+            bool opaque = fb == &lcd_framebuffer_default ||
+                          (fb->stride == box->width && box->width < LCD_WIDTH);
+            dialog_draw_glass_panel(screen, 0, 0, box->width, box->height,
+                                    DIALOG_GLASS_RADIUS, opaque);
+            screen->set_foreground(fg);
+            screen->set_drawmode(DRMODE_SOLID);
+        }
+        else if (dialog_is_classic() && bw == 0)
+        {
+            screen->set_drawmode(DRMODE_FG);
+            screen->set_foreground(bg);
+            screen->fillrect(0, 0, box->width, box->height);
+            screen->set_foreground(fg);
+            screen->set_drawmode(DRMODE_SOLID);
+        }
+        else
+        {
+            screen->set_drawmode(DRMODE_FG);
+            screen->set_foreground(bg);          /* fill with the background colour */
+            screen->fillrect(0, 0, box->width, box->height);
+            screen->set_foreground(bc);
+            draw_box_border(screen, box->width, box->height, bw);
+            screen->set_foreground(fg);          /* interior draws in the box fg */
+            screen->set_drawmode(DRMODE_SOLID);
+        }
 
         box->fg_pattern = fg;
         box->bg_pattern = bg;
@@ -260,7 +610,52 @@ void dialog_draw_button_ex(struct screen *screen,
 
     screen->getstringsize((const unsigned char *)label, &lw, &lh);
 
-    if (colour)
+    if (colour && dialog_is_classic())
+    {
+        box_fg = screen->get_foreground();
+        if (align == DIALOG_BTN_LEFT && bw == 0)
+        {
+            /* List row inside search/folder dialogs: stock Aqua selection bar. */
+            if (selected)
+                fill_selection_gradient(screen, x, y, w, h);
+            fill = selected ? resolve_fg(screen, style->button_bg_selected)
+                            : resolve_bg(screen, style->button_bg);
+            text = selected ? LCD_RGBPACK(255, 255, 255)
+                            : (style->glass ? LCD_RGBPACK(232, 237, 242)
+                                            : LCD_RGBPACK(0, 0, 0));
+        }
+        else
+        {
+            struct ui_theme theme;
+            struct ui_album_palette palette;
+            ui_theme_snapshot(&theme);
+            album_palette_snapshot(&palette);
+            struct gloss_fill blue = theme_selection_fill(&theme, &palette);
+            int ox, oy;
+            struct gloss_surface s = vp_gloss_surface(screen, &ox, &oy);
+            int gx = ox + x, gy = oy + y;
+            int cr = r > 0 ? r : 5;
+            if (selected)
+            {
+                gloss_rect(&s, gx, gy, w, h, cr, cr, &blue);
+                if (w > 4 && h > 6)
+                    gloss_rect(&s, gx + 1, gy + 1, w - 2, (h - 2) / 2,
+                               cr > 1 ? cr - 1 : 0, 0, &classic_pill_gloss);
+                gloss_outline(&s, gx, gy, w, h, cr, 0xff124c8e);
+            }
+            else
+            {
+                gloss_rect(&s, gx, gy, w, h, cr, cr,
+                           style->glass ? &classic_well_dark : &classic_well_light);
+                gloss_outline(&s, gx, gy, w, h, cr,
+                              style->glass ? 0x44ffffff : 0xdc2c2c2e);
+            }
+            fill = selected ? resolve_fg(screen, style->button_bg_selected)
+                            : LCD_RGBPACK(54, 56, 60);
+            text = LCD_RGBPACK(255, 255, 255);
+        }
+    }
+    else if (colour)
     {
         /* Inheriting reproduces the old inverse-video selector exactly: the
          * selected button takes the box's foreground as its fill and its
@@ -332,10 +727,22 @@ void dialog_draw_title(struct screen *screen, struct viewport *content,
     screen->set_drawmode(DRMODE_FG);
     content->font = font_get_ui_bold();
     screen->getstringsize(title, &w, &h);
-    screen->putsxy(MAX((content->width - w) / 2, 0), 0, title);
+    int tx = MAX((content->width - w) / 2, 0);
+    if (dialog_is_classic() && content->fg_pattern == LCD_RGBPACK(255, 255, 255))
+        dialog_draw_shadow_text(screen, tx, 0, title,
+                                LCD_RGBPACK(255, 255, 255),
+                                LCD_RGBPACK(0, 0, 0), -1);
+    else
+        screen->putsxy(tx, 0, title);
     content->font = body_font;
+    unsigned prev_fg = screen->get_foreground();
+    if (dialog_is_classic())
+        screen->set_foreground(content->fg_pattern == LCD_RGBPACK(255, 255, 255)
+                               ? LCD_RGBPACK(80, 86, 96)
+                               : LCD_RGBPACK(208, 208, 208));
     screen->hline(0, content->width - 1,
                   dialog_title_height(title) - DIALOG_TITLE_GAP - 1);
+    screen->set_foreground(prev_fg);
 }
 
 int dialog_wrap_text(const char *text, int max_width, int font,
@@ -417,6 +824,13 @@ static struct viewport dialog_measure(struct dialog *d)
 
 #define PANEL_PIXELS (LCD_WIDTH * LCD_HEIGHT)
 
+enum dialog_view_mode
+{
+    DIALOG_VIEW_FLAT = 0,
+    DIALOG_VIEW_PAGE,
+    DIALOG_VIEW_GLASS,
+};
+
 struct dialog_view
 {
     struct ui_sheet sheet;
@@ -425,6 +839,9 @@ struct dialog_view
     struct dialog_view *parent;
     unsigned int thread;
     int handle;
+    int status_h;
+    int top;
+    enum dialog_view_mode mode;
     bool interrupted;
     fb_data pixels[];
 };
@@ -440,10 +857,33 @@ static void dialog_capture(struct dialog_view *view)
 {
     memcpy(view->pixels, dialog_output(view->dialog), FRAMEBUFFER_SIZE);
     view->interrupted = false;
-    view->sheet.light = UI_FULL_OPACITY;
+    view->sheet.light = view->mode == DIALOG_VIEW_PAGE ? 0 : UI_FULL_OPACITY;
 }
 
-static struct dialog_view *dialog_view_open(struct dialog *d)
+static void dialog_capture_chrome(struct dialog_view *view,
+                                  const struct dialog *d)
+{
+    fb_data *body = view->pixels + PANEL_PIXELS;
+    int top = view->mode == DIALOG_VIEW_PAGE ? view->status_h : view->top;
+    if (top <= 0)
+        return;
+    if (d->title || view->mode == DIALOG_VIEW_PAGE)
+    {
+        if (view->mode == DIALOG_VIEW_PAGE)
+            sb_invalidate();
+        sb_settle(SCREEN_MAIN);
+        memcpy(body, lcd_framebuffer_default.fb_ptr,
+               (size_t)LCD_WIDTH * top * sizeof(fb_data));
+        memcpy(lcd_framebuffer_default.fb_ptr, view->pixels,
+               (size_t)LCD_WIDTH * top * sizeof(fb_data));
+        ui_take_dirty(SCREEN_MAIN);
+    }
+    else
+        memcpy(body, view->pixels, (size_t)LCD_WIDTH * top * sizeof(fb_data));
+}
+
+static struct dialog_view *dialog_view_open(struct dialog *d,
+                                            enum dialog_view_mode mode)
 {
     if (d->fb && (d->fb_w <= 0 || d->fb_h <= 0 || d->fb->stride != d->fb_w ||
                   d->fb_w * d->fb_h != PANEL_PIXELS || !d->present))
@@ -452,13 +892,26 @@ static struct dialog_view *dialog_view_open(struct dialog *d)
     if (handle <= 0)
         return NULL;
 
+    int sh = sb_visible_height();
+    if (sh <= 0)
+        sh = (int)ui_theme_metric(UI_METRIC_STATUS_HEIGHT);
+    if (sh > LCD_HEIGHT)
+        sh = LCD_HEIGHT;
+
     struct dialog_view *view = core_get_data_pinned(handle);
     *view = (struct dialog_view){
         .handle = handle,
         .dialog = d,
         .parent = active_dialog,
         .thread = thread_self(),
+        .mode = mode,
+        .status_h = sh,
+        .top = (mode == DIALOG_VIEW_GLASS && d->title) ? sh : 0,
     };
+    if (mode == DIALOG_VIEW_PAGE)
+        view->sheet.slide = true;
+    else if (mode == DIALOG_VIEW_GLASS)
+        view->sheet.zoom = true;
     dialog_capture(view);
     active_dialog = view;
     return view;
@@ -507,7 +960,86 @@ static void dialog_view_draw(struct dialog_view *view, struct dialog *d, bool re
     if (view->interrupted)
     {
         dialog_capture(view);
+        dialog_capture_chrome(view, d);
         redraw = true;
+    }
+    fb_data *body = view->pixels + PANEL_PIXELS;
+    if (view->mode == DIALOG_VIEW_PAGE)
+    {
+        if (redraw)
+        {
+            uint32_t start = USEC_TIMER;
+            int sh = view->status_h;
+            fb_data white = LCD_RGBPACK(255, 255, 255);
+            for (int i = sh * LCD_WIDTH; i < PANEL_PIXELS; i++)
+                body[i] = white;
+            struct viewport box = dialog_measure(d);
+            if (box.y < sh)
+            {
+                box.height -= sh - box.y;
+                box.y = sh;
+            }
+            if (box.width > 0 && box.height > 0)
+            {
+                if (box.x + box.width > LCD_WIDTH)
+                    box.width = LCD_WIDTH - box.x;
+                if (box.y + box.height > LCD_HEIGHT)
+                    box.height = LCD_HEIGHT - box.y;
+                struct frame_buffer_t buffer = {
+                    .fb_ptr = body,
+                    .stride = LCD_WIDTH,
+                    .elems = PANEL_PIXELS,
+                };
+                box.buffer = &buffer;
+                dialog_draw_content(d, &screens[SCREEN_MAIN], &box);
+            }
+            view->bounds = (struct ui_rect){ 0, sh, LCD_WIDTH, LCD_HEIGHT - sh };
+            view->sheet.light = -1;
+            if (!view->sheet.starting)
+                ui_note_render((uint32_t)USEC_TIMER - start);
+        }
+        ui_sheet_paint_dialog_slide(&view->sheet, view->pixels, body, view->status_h);
+        return;
+    }
+    if (view->mode == DIALOG_VIEW_GLASS)
+    {
+        if (redraw)
+        {
+            uint32_t start = USEC_TIMER;
+            int top = view->top;
+            ui_sheet_dim(body + top * LCD_WIDTH, view->pixels + top * LCD_WIDTH,
+                         PANEL_PIXELS - top * LCD_WIDTH);
+            struct viewport box = dialog_measure(d);
+            if (box.width <= 0 || box.height <= 0 ||
+                box.width > LCD_WIDTH || box.height > LCD_HEIGHT)
+            {
+                if (view->bounds.width > 0)
+                    dialog_view_restore(view);
+                ui_sheet_cancel(&view->sheet);
+                view->bounds = (struct ui_rect){0};
+                return;
+            }
+            struct frame_buffer_t buffer = {
+                .fb_ptr = body,
+                .stride = LCD_WIDTH,
+                .elems = PANEL_PIXELS,
+            };
+            box.buffer = &buffer;
+            dialog_draw_content(d, &screens[SCREEN_MAIN], &box);
+            int sx = MAX(0, box.x - DIALOG_SHADOW_PAD_X);
+            int sy = MAX(top, box.y - DIALOG_SHADOW_PAD_TOP);
+            int sx2 = MIN(LCD_WIDTH, box.x + box.width + DIALOG_SHADOW_PAD_X);
+            int sy2 = MIN(LCD_HEIGHT, box.y + box.height + DIALOG_SHADOW_PAD_BOT);
+            view->bounds = (struct ui_rect){
+                sx, sy, MAX(0, sx2 - sx), MAX(0, sy2 - sy)
+            };
+            view->sheet.light = -1;
+            if (!view->sheet.starting)
+                ui_note_render((uint32_t)USEC_TIMER - start);
+        }
+        ui_sheet_paint_zoom(&view->sheet, view->pixels, body, view->bounds,
+                            view->top);
+        return;
     }
     if (redraw)
     {
@@ -525,7 +1057,7 @@ static void dialog_view_draw(struct dialog_view *view, struct dialog *d, bool re
         }
 
         struct frame_buffer_t buffer = {
-            .fb_ptr = view->pixels + PANEL_PIXELS,
+            .fb_ptr = body,
             .stride = box.width,
             .elems = (size_t)box.width * box.height,
         };
@@ -537,10 +1069,10 @@ static void dialog_view_draw(struct dialog_view *view, struct dialog *d, bool re
             ui_note_render((uint32_t)USEC_TIMER - start);
     }
     if (d->fb)
-        ui_sheet_paint_in(&view->sheet, view->pixels, view->pixels + PANEL_PIXELS,
+        ui_sheet_paint_in(&view->sheet, view->pixels, body,
                           view->bounds, redraw, dialog_output(d), d->fb_w, d->fb_h, d->present);
     else
-        ui_sheet_paint(&view->sheet, view->pixels, view->pixels + PANEL_PIXELS,
+        ui_sheet_paint(&view->sheet, view->pixels, body,
                    view->bounds, redraw);
 }
 
@@ -556,12 +1088,91 @@ static void dialog_view_dismiss(struct dialog_view *view, struct dialog *d)
         dialog_view_restore(view);
 }
 
+static const struct button_mapping *dialog_fruit_yesno_keymap(int context)
+{
+#if BUTTON_REMOTE != 0
+    if (context & CONTEXT_REMOTE)
+        return get_context_mapping(CONTEXT_YESNOSCREEN | CONTEXT_REMOTE);
+#endif
+    (void)context;
+    static const struct button_mapping keys[] = {
+        { ACTION_STD_PREV,      BUTTON_SCROLL_BACK,                BUTTON_NONE },
+        { ACTION_STD_PREV,      BUTTON_SCROLL_BACK|BUTTON_REPEAT,  BUTTON_NONE },
+        { ACTION_STD_NEXT,      BUTTON_SCROLL_FWD,                 BUTTON_NONE },
+        { ACTION_STD_NEXT,      BUTTON_SCROLL_FWD|BUTTON_REPEAT,   BUTTON_NONE },
+        { ACTION_YESNO_ACCEPT,  BUTTON_SELECT|BUTTON_REL,          BUTTON_SELECT },
+        { ACTION_STD_CANCEL,    BUTTON_MENU|BUTTON_REL,            BUTTON_MENU },
+        { ACTION_WPS_PLAY,      BUTTON_PLAY|BUTTON_REL,            BUTTON_PLAY },
+        { ACTION_WPS_SKIPPREV,  BUTTON_LEFT|BUTTON_REL,            BUTTON_LEFT },
+        { ACTION_WPS_SKIPNEXT,  BUTTON_RIGHT|BUTTON_REL,           BUTTON_RIGHT },
+        LAST_ITEM_IN_LIST
+    };
+    return keys;
+}
+
+static const struct button_mapping *dialog_fruit_std_keymap(int context)
+{
+#if BUTTON_REMOTE != 0
+    if (context & CONTEXT_REMOTE)
+        return get_context_mapping(CONTEXT_STD | CONTEXT_REMOTE);
+#endif
+    (void)context;
+    static const struct button_mapping keys[] = {
+        { ACTION_STD_PREV,       BUTTON_SCROLL_BACK,                BUTTON_NONE },
+        { ACTION_STD_PREVREPEAT, BUTTON_SCROLL_BACK|BUTTON_REPEAT,  BUTTON_NONE },
+        { ACTION_STD_NEXT,       BUTTON_SCROLL_FWD,                 BUTTON_NONE },
+        { ACTION_STD_NEXTREPEAT, BUTTON_SCROLL_FWD|BUTTON_REPEAT,   BUTTON_NONE },
+        { ACTION_STD_OK,         BUTTON_SELECT|BUTTON_REL,          BUTTON_SELECT },
+        { ACTION_STD_CONTEXT,    BUTTON_SELECT|BUTTON_REPEAT,       BUTTON_SELECT },
+        { ACTION_STD_CANCEL,     BUTTON_MENU|BUTTON_REL,            BUTTON_MENU },
+        { ACTION_WPS_PLAY,       BUTTON_PLAY|BUTTON_REL,            BUTTON_PLAY },
+        { ACTION_WPS_SKIPPREV,   BUTTON_LEFT|BUTTON_REL,            BUTTON_LEFT },
+        { ACTION_WPS_SKIPNEXT,   BUTTON_RIGHT|BUTTON_REL,           BUTTON_RIGHT },
+        LAST_ITEM_IN_LIST
+    };
+    return keys;
+}
+
+static bool dialog_handle_fruit_playback(int action)
+{
+    switch (action)
+    {
+        case ACTION_WPS_PLAY:
+            if (audio_status() & AUDIO_STATUS_PLAY)
+            {
+                if (audio_status() & AUDIO_STATUS_PAUSE)
+                    unpause_action(true);
+                else
+                    pause_action(true);
+            }
+            return true;
+        case ACTION_WPS_SKIPPREV:
+            if (audio_status() & AUDIO_STATUS_PLAY)
+                audio_prev();
+            return true;
+        case ACTION_WPS_SKIPNEXT:
+            if (audio_status() & AUDIO_STATUS_PLAY)
+                audio_next();
+            return true;
+        default:
+            return false;
+    }
+}
+
 int dialog_run(struct dialog *d, int poll_ticks)
 {
     uint32_t requested_at = USEC_TIMER;
     int disp = DIALOG_CONTINUE;
     int font = -1;
     bool outer_inhibit = ui_flush_inhibited();
+    bool classic = dialog_is_classic();
+    bool fruit_keys = ui_theme_style(UI_STYLE_MENU_TREE) == UI_MENU_TREE_STOCK;
+    enum dialog_view_mode mode = DIALOG_VIEW_FLAT;
+    if (classic && !d->fb)
+        mode = d->glass ? DIALOG_VIEW_GLASS : DIALOG_VIEW_PAGE;
+
+    if (classic && (d->glass || d->fb) && d->default_style)
+        dialog_style_glass(&d->style);
 
     ui_inhibit_flush(false);
     ui_scene_interrupt();
@@ -580,12 +1191,35 @@ int dialog_run(struct dialog *d, int poll_ticks)
     char title[MAX_PATH];
     enum themable_icons icon = Icon_NOICON;
     bool has_title = sb_get_persistent_title(SCREEN_MAIN, title, sizeof(title), &icon);
-    if (d->title && !d->fb)
+    bool was_split = menu_pane_split() != 0;
+    struct dialog_view *view = NULL;
+    if (mode != DIALOG_VIEW_FLAT)
     {
-        sb_set_persistent_title(d->title, Icon_NOICON, SCREEN_MAIN);
-        sb_settle(SCREEN_MAIN);
+        /* Capture the parent screen before changing the status bar title or
+         * split mode so the transition starts from the parent's exact pixels. */
+        view = dialog_view_open(d, mode);
+        if (mode == DIALOG_VIEW_PAGE && !d->fb)
+            menu_pane_page(false);
+        if (d->title && !d->fb)
+            sb_set_persistent_title(d->title, Icon_NOICON, SCREEN_MAIN);
+        if (view)
+            dialog_capture_chrome(view, d);
+        else if ((d->title || mode == DIALOG_VIEW_PAGE) && !d->fb)
+        {
+            if (mode == DIALOG_VIEW_PAGE)
+                sb_invalidate();
+            sb_settle(SCREEN_MAIN);
+        }
     }
-    struct dialog_view *view = dialog_view_open(d);
+    else
+    {
+        if (d->title && !d->fb)
+        {
+            sb_set_persistent_title(d->title, Icon_NOICON, SCREEN_MAIN);
+            sb_settle(SCREEN_MAIN);
+        }
+        view = dialog_view_open(d, DIALOG_VIEW_FLAT);
+    }
     d->poll_ticks = poll_ticks;
     /* Wheel events have no release. A USB popup opened after turning the
      * wheel must accept the next key instead of waiting for one. */
@@ -600,6 +1234,15 @@ int dialog_run(struct dialog *d, int poll_ticks)
         view->sheet.requested_at = requested_at;
     }
 
+    const struct button_mapping *(*active_keymap)(int) = d->keymap;
+    if (!active_keymap && fruit_keys)
+    {
+        if (d->context == CONTEXT_YESNOSCREEN)
+            active_keymap = dialog_fruit_yesno_keymap;
+        else if (d->context == CONTEXT_STD || d->context == CONTEXT_LIST)
+            active_keymap = dialog_fruit_std_keymap;
+    }
+
     bool redraw = true;
     int ticks = d->poll_ticks;
     while (disp == DIALOG_CONTINUE)
@@ -608,7 +1251,12 @@ int dialog_run(struct dialog *d, int poll_ticks)
         album_palette_refresh();
         redraw |= palette_before != album_palette_generation();
         if (redraw && d->default_style)
-            dialog_style_default(&d->style);
+        {
+            if (classic && (d->glass || d->fb))
+                dialog_style_glass(&d->style);
+            else
+                dialog_style_default(&d->style);
+        }
         if (view)
             dialog_view_draw(view, d, redraw);
         else
@@ -625,12 +1273,13 @@ int dialog_run(struct dialog *d, int poll_ticks)
         long before = current_tick;
         bool was_inhibited = ui_flush_inhibited();
         ui_inhibit_flush(true);
-        int action = d->keymap ? get_custom_action(CONTEXT_PLUGIN, wake, d->keymap)
-                               : get_action(d->context, wake);
+        int action = active_keymap
+                   ? get_custom_action(CONTEXT_PLUGIN, wake, active_keymap)
+                   : get_action(d->context, wake);
         ui_inhibit_flush(was_inhibited);
 
         if (view && ui_take_dirty(SCREEN_MAIN))
-            view->sheet.light = 0;
+            view->sheet.light = -1;
         /* The animation wakes just the compositor. Preserve the dialog's
          * own poll frequency for timeouts, speech, and text scrolling. */
         long elapsed = current_tick - before;
@@ -638,6 +1287,11 @@ int dialog_run(struct dialog *d, int poll_ticks)
         {
             if (ticks > 0)
                 ticks -= elapsed;
+            redraw = false;
+            continue;
+        }
+        if (fruit_keys && !d->keymap && dialog_handle_fruit_playback(action))
+        {
             redraw = false;
             continue;
         }
@@ -667,9 +1321,15 @@ int dialog_run(struct dialog *d, int poll_ticks)
         core_put_data_pinned(view);
         core_free(handle);
     }
-    if (d->title && !d->fb)
+    if (mode == DIALOG_VIEW_PAGE && !d->fb && was_split)
     {
-        sb_set_persistent_title(has_title ? title : NULL, icon, SCREEN_MAIN);
+        menu_pane_page(true);
+        sb_invalidate();
+    }
+    if ((d->title || (mode == DIALOG_VIEW_PAGE && was_split)) && !d->fb)
+    {
+        if (d->title)
+            sb_set_persistent_title(has_title ? title : NULL, icon, SCREEN_MAIN);
         if (disp != DIALOG_ABORT)
         {
             sb_settle(SCREEN_MAIN);

@@ -300,6 +300,7 @@ bool rating_dialog(const char *title, int *rating)
     rating_speak(c.rating, true);
 
     dialog_init(&d, CONTEXT_STD, title, NULL, &cb, &c);
+    d.glass = true;
     dialog_run(&d, HZ / 2);
 
     if (c.accepted)

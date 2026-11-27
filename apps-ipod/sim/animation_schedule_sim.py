@@ -138,13 +138,13 @@ def session(binary, source, out, phase):
         if phase == "database":
             for key in ("down", "down", "down", "up", "up", "up"):
                 sim.tap(key, 4)
-            sim.wait(25)
+            sim.wait(160)
         else:
             # The background queue requires two idle ticks to settle its marks.
             sim.wait(630)
         sim.tap("up", 18)                   # Files -> Album Covers
         for _ in range(5):
-            sim.tap("select", 55)            # Home -> Cover Flow
+            sim.tap("select", 110)           # Home -> Cover Flow
             for _ in range(13):
                 sim.tap("down", 4)
             sim.wait(24)

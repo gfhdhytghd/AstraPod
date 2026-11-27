@@ -830,7 +830,7 @@ static bool do_timed_yield(void)
     if (TIME_AFTER(current_tick, wakeup_tick))
     {
 #ifndef DBTOOL
-        if (thread_self() == tagcache_thread_id)
+        if (tc_stat.scanning && thread_self() == tagcache_thread_id)
             tagcache_pause_for_motion();
 #endif
         yield();
@@ -7380,10 +7380,6 @@ static void tagcache_thread(void)
                  * starting costs nothing; stopping costs the RAM copy. */
                 if (usb_host_wants_storage())
                     break ;
-#ifndef DBTOOL
-                if (ui_motion_active())
-                    break;
-#endif
 
                 /* Two different questions, so two different settings.
                  * Something asked for a scan (a USB session wrote to us, or a
@@ -7427,6 +7423,12 @@ static void tagcache_thread(void)
 
                 if (do_update)
                 {
+#ifndef DBTOOL
+                    /* The foreground may already be waiting for the RAM
+                     * tables above. Only defer the optional directory walk. */
+                    if (ui_motion_active())
+                        break;
+#endif
                     /* Before the build, as in Q_UPDATE: the walk deletes what
                      * it does not find, where it can, and the storage check
                      * is only the fallback. */

@@ -780,6 +780,31 @@ bool ui_scene_present_fade(struct ui_scene *scene, unsigned opacity,
     return shown;
 }
 
+bool ui_scene_present_split(struct ui_scene *scene, int list_x, int pane_x)
+{
+    if (scene->backdrop_handle <= 0 || owner || !lcd_active())
+        return false;
+    if (scene->handle <= 0)
+        scene->handle = core_alloc_free_space(FRAMEBUFFER_SIZE);
+    if (scene->handle <= 0)
+        return false;
+    const int half = MENU_PANE_X;
+    fb_data *out = core_get_data_pinned(scene->handle);
+    const fb_data *back = core_get_data_pinned(scene->backdrop_handle);
+    const fb_data *front = lcd_framebuffer_default.fb_ptr;
+    for (int i = 0; i < PAGE_PIXELS; i += LCD_WIDTH)
+    {
+        memcpy(out + i, front + i, LCD_WIDTH * sizeof(*out));
+        put_span(out + i, back + i, list_x, half, 0, LCD_WIDTH);
+        put_span(out + i, back + i + half, half + pane_x, LCD_WIDTH - half,
+                 0, LCD_WIDTH);
+    }
+    bool shown = present(out);
+    core_put_data_pinned((void *)back);
+    core_put_data_pinned(out);
+    return shown;
+}
+
 bool ui_scene_restore_modal(struct ui_scene *scene)
 {
     if (scene->backdrop_handle <= 0 || (owner && owner != scene))

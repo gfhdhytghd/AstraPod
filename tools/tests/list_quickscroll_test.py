@@ -103,11 +103,15 @@ def check_rules(replay, out):
     starts = {i for i, n in enumerate(names) if n.endswith("000")}
     assert all(r[1] in starts or r[1] == len(names) - 1 for r in rows[entered + 1:])
 
-    # Release leaves the jump, and slow detents then move a row each.
+    # Keeping a finger down without motion leaves the tile up past 2 s.
     t = rows[-1][0]
-    events += [(t + 5 * ms, "release"), (t + 600 * ms, "touch"),
-               (t + 640 * ms, "step", -4), (t + 900 * ms, "step", -4)]
+    held = t + 3000 * ms
+    events += [(held, "step", 0), (held + 5 * ms, "release"),
+               (held + 600 * ms, "touch"),
+               (held + 640 * ms, "step", -4), (held + 900 * ms, "step", -4)]
     rows = run(replay, names, events, 8, out)
+    assert rows[-5][1:] == rows[-6][1:], rows[-6:]
+    # Release leaves the jump immediately. Slow detents move one row again.
     assert rows[-4][3] == 0 and rows[-4][4] == "-"
     assert rows[-2][1] == rows[-4][1] - 1 and rows[-1][1] == rows[-4][1] - 2, rows[-4:]
     print("stock rules on a made-up list: PASS")

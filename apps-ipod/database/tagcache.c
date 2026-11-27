@@ -2664,53 +2664,10 @@ static void shown_title(struct tagcache_search *tcs, char *buf)
     tcs->result_len = len + 1;
 }
 
-static bool get_next(struct tagcache_search *tcs, bool is_numeric, char *buf, long bufsz)
+static bool read_search_result(struct tagcache_search *tcs, bool is_numeric,
+                               char *buf, long bufsz)
 {
     struct tagfile_entry entry;
-
-    if (tcs->idxfd[tcs->type] < 0 && !is_numeric
-        && !tcs->ramsearch
-        )
-        return false;
-
-    /* Relative fetch. */
-    if (tcs->filter_count > 0 || tcs->clause_count > 0 || is_numeric
-        || tcs->id_list
-        /* RAM holds no filenames: the index walk reads them from disk and
-         * skips deleted entries */
-        || (tcs->ramsearch && tcs->type == tag_filename)
-        )
-    {
-        struct tagcache_seeklist_entry *seeklist;
-
-        /* Check for end of list. */
-        if (tcs->list_position == tcs->seek_list_count)
-        {
-            tcs->list_position = 0;
-
-            /* Try to fetch more. */
-            if (!build_lookup_list(tcs))
-            {
-                tcs->valid = false;
-                return false;
-            }
-        }
-
-        seeklist = &tcs->seeklist[tcs->list_position];
-        tcs->position = seeklist->seek;
-        tcs->idx_id = seeklist->idx_id;
-        tcs->list_position++;
-    }
-    else
-    {
-        if (tcs->entry_count == 0)
-        {
-            tcs->valid = false;
-            return false;
-        }
-
-        tcs->entry_count--;
-    }
 
     tcs->result_seek = tcs->position;
 
@@ -2793,6 +2750,68 @@ static bool get_next(struct tagcache_search *tcs, bool is_numeric, char *buf, lo
         shown_title(tcs, buf);
 
     return true;
+}
+
+static bool get_next(struct tagcache_search *tcs, bool is_numeric, char *buf, long bufsz)
+{
+    if (tcs->idxfd[tcs->type] < 0 && !is_numeric && !tcs->ramsearch)
+        return false;
+
+    /* RAM holds no filenames: the index walk reads them from disk and
+     * skips deleted entries. */
+    if (tcs->filter_count > 0 || tcs->clause_count > 0 || is_numeric
+        || tcs->id_list || (tcs->ramsearch && tcs->type == tag_filename))
+    {
+        if (tcs->list_position == tcs->seek_list_count)
+        {
+            tcs->list_position = 0;
+            if (!build_lookup_list(tcs))
+            {
+                tcs->valid = false;
+                return false;
+            }
+        }
+
+        const struct tagcache_seeklist_entry *entry =
+            &tcs->seeklist[tcs->list_position++];
+        tcs->position = entry->seek;
+        tcs->idx_id = entry->idx_id;
+    }
+    else
+    {
+        if (tcs->entry_count == 0)
+        {
+            tcs->valid = false;
+            return false;
+        }
+        tcs->entry_count--;
+    }
+
+    return read_search_result(tcs, is_numeric, buf, bufsz);
+}
+
+void tagcache_search_rewind(struct tagcache_search *tcs, int entry_count)
+{
+    tcs->position = sizeof(struct tagcache_header);
+    tcs->entry_count = entry_count;
+    tcs->seek_pos = 0;
+    tcs->list_position = tcs->seek_list_count = 0;
+    tcs->valid = !tcs->failed;
+    if (tcs->unique_list)
+        tagcache_search_set_uniqbuf(tcs, tcs->unique_list,
+                tcs->unique_list_capacity * sizeof(*tcs->unique_list));
+}
+
+bool tagcache_get_at_seek(struct tagcache_search *tcs, int32_t seek,
+                          char *buf, long size)
+{
+    if (!tcs->initialized || tcs->failed)
+        return false;
+    tcs->position = seek;
+    if (tagcache_is_usable() && read_search_result(tcs, false, buf, size))
+        return true;
+    tcs->failed = true;
+    return false;
 }
 
 bool tagcache_get_next(struct tagcache_search *tcs, char *buf, long size)

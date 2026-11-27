@@ -722,8 +722,9 @@ The order of the shows in Podcasts: by name, or the show with the newest
 episode first. Newest goes by when an episode's file arrived on the player.
 
 [sort ignoring articles]
-Sorts artists and albums as if a leading "The", "A" or "An" were not there, so
-The Beatles sits among the Bs. The names still show in full.
+Sorts artists, albums and the main Songs list as if a leading "The", "A" or
+"An" were not there, so The Beatles sits among the Bs. The names still show
+in full.
 
 Applies to the Music lists and By First Letter. The carousel has its own.
 

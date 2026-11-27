@@ -221,6 +221,11 @@ bool tagcache_search_set_ids(struct tagcache_search *tcs,
 bool tagcache_search_add_clause(struct tagcache_search *tcs,
                                 struct tagcache_search_clause *clause);
 bool tagcache_get_next(struct tagcache_search *tcs, char *buf, long size);
+/* Restart a whole-library search using its initial entry_count. */
+void tagcache_search_rewind(struct tagcache_search *tcs, int entry_count);
+/* Read a nonnumeric result at a seek obtained from this tag and DB commit. */
+bool tagcache_get_at_seek(struct tagcache_search *tcs, int32_t seek,
+                         char *buf, long size);
 bool tagcache_retrieve(struct tagcache_search *tcs, int idxid, 
                        int tag, char *buf, long size);
 /* Two tags of one entry, its index read once */

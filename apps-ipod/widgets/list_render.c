@@ -163,6 +163,7 @@ struct native_list {
     int row_inset;
     /* The classic indicator's strength in the last paint of the rows. */
     int indicator;
+    uint32_t indicator_started;
     struct gradient_rows bar_rows, thumb_rows;
     uint32_t marquee_started, marquee_frame;
     /* The refresh at which the last snapped or hardware-scroll frame
@@ -767,10 +768,14 @@ static bool classic_indicator(const struct native_list *render)
     return render->theme.style[UI_STYLE_SCROLLBAR] == UI_SCROLLBAR_CLASSIC;
 }
 
+static bool stock_index(const struct native_list *render);
+
 /* The indicator's strength now, INDICATOR_STEPS (full) down to 0 (gone). */
 static int indicator_level(const struct native_list *render)
 {
-    uint32_t elapsed = USEC_TIMER - render->marquee_started;
+    if (render->overlay.visible && stock_index(render))
+        return INDICATOR_STEPS;
+    uint32_t elapsed = USEC_TIMER - render->indicator_started;
     if (elapsed < INDICATOR_HOLD)
         return INDICATOR_STEPS;
     uint32_t steps = (elapsed - INDICATOR_HOLD) / INDICATOR_STEP_US;
@@ -1887,6 +1892,8 @@ static void index_refresh(struct native_list *render, struct gui_synclist *list)
 {
     struct list_index *index = &render->overlay;
     struct quickscroll_list rows = index_rows(render, list);
+    if (index->visible && !index->qs.mode && stock_index(render))
+        render->indicator_started = USEC_TIMER - INDICATOR_HOLD;
     index->visible = quickscroll_overlay(&index->qs, &rows, index->key);
     if (!index->visible)
         render->index_shown[0] = '\0';
@@ -1940,7 +1947,8 @@ bool list_render_wheel(struct gui_synclist *list, int positions, int *rows)
     quickscroll_moved(&index->qs, now, abs(positions));
     struct quickscroll_move move = quickscroll_wheel(&index->qs, &in, now,
                                                      positions, index_touched());
-    bool handled = !move.rows && (index->qs.mode || move.jumped);
+    bool handled = !move.rows &&
+                   (index->qs.mode || move.jumped || index->visible);
     *rows = move.rows;
     if (handled)
     {
@@ -2730,6 +2738,7 @@ static void draw_list(struct gui_synclist *list, bool status_only,
         render->generation = list->generation;
         render->selection = list->selected_item;
         render->marquee_started = ui_clock_start();
+        render->indicator_started = render->marquee_started;
         child_reset(render);
     }
     if (!status_only)
@@ -3169,9 +3178,10 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
             if (delay == TIMEOUT_BLOCK || ticks < delay)
                 delay = ticks;
         }
-        if (render->shown.valid && render->shown.indicator > 0)
+        if (render->shown.valid && render->shown.indicator > 0 &&
+            !(render->overlay.visible && stock_index(render)))
         {
-            uint32_t elapsed = now - render->marquee_started;
+            uint32_t elapsed = now - render->indicator_started;
             uint32_t next = INDICATOR_HOLD + INDICATOR_STEP_US;
             if (elapsed >= INDICATOR_HOLD)
                 next += (elapsed - INDICATOR_HOLD) / INDICATOR_STEP_US *

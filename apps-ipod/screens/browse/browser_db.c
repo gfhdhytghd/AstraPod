@@ -442,6 +442,22 @@ static int current_entry_count;
  * whole, where special_entry_count counts only those on the loaded page. */
 static int head_rows;
 
+struct music_order_row {
+    int32_t seek;
+    char key;
+};
+
+/* The name order of the flat Albums or Songs list, independent of the
+ * browser's page size. The seeks are valid only for this database commit. */
+static struct {
+    int handle, count, tag, keep, spoken_mask;
+    int32_t commit;
+    uint32_t generation;
+    bool ignore_articles;
+} music_order;
+static bool index_music_names;
+static bool loaded_index_music_names;
+
 static struct browser_context *tc;
 
 /* A %header_all or %header_untagged level is never a list of its own. It
@@ -1790,6 +1806,9 @@ static bool parse_menu(const char *filename)
 
 static void browser_db_unload(struct browser_context *c)
 {
+    if (music_order.handle > 0)
+        music_order.handle = core_free(music_order.handle);
+    index_music_names = loaded_index_music_names = false;
     if (browser_db_handle <= 0)
         return;     /* a failed load has unloaded already */
 
@@ -2703,6 +2722,139 @@ static bool row_kept(enum spoken_keep keep, int tag, long seek, int level,
     return true;
 }
 
+struct music_sort_row {
+    struct music_order_row order;
+    const char *name;
+};
+
+static int music_group_rank(char key)
+{
+    if (key == QUICKSCROLL_DIGITS[0])
+        return 0;
+    if (key == QUICKSCROLL_NONE[0])
+        return 27;
+    return key - 'A' + 1;
+}
+
+static int compare_music_names(const void *p1, const void *p2)
+{
+    const struct music_sort_row *a = p1, *b = p2;
+    int order = music_group_rank(a->order.key) - music_group_rank(b->order.key);
+    if (!order)
+        order = strncasecmp(a->name, b->name, TAG_MAXLEN);
+    if (!order)
+        order = a->order.seek - b->order.seek;
+    return order;
+}
+
+/* Use the same filename fallback as the Songs row. An untagged album has
+ * no name to file, so its translated placeholder takes no letter. */
+static const char *music_sort_name(struct tagcache_search *tcs, char *buf,
+                                   long size)
+{
+    if (!strcmp(tcs->result, UNTAGGED))
+    {
+        if (tcs->type != tag_title ||
+            !tagcache_retrieve(tcs, tcs->idx_id, tag_virt_basename, buf, size))
+            return "";
+    }
+    while (*buf == ' ')
+        buf++;
+    return tagcache_sort_name(buf);
+}
+
+static bool prepare_music_order(struct tagcache_search *tcs,
+                                enum spoken_keep keep, int spoken_mask,
+                                char *buf, long size)
+{
+    int tag = tcs->type;
+    int32_t commit = tagcache_commit_id();
+    uint32_t generation = tagcache_generation();
+    if (music_order.handle > 0 && music_order.tag == tag &&
+        music_order.keep == (int)keep &&
+        music_order.spoken_mask == spoken_mask &&
+        music_order.commit == commit && music_order.generation == generation &&
+        music_order.ignore_articles == global_settings.sort_ignore_articles)
+        return true;
+
+    if (music_order.handle > 0)
+        music_order.handle = core_free(music_order.handle);
+
+    int entry_count = tcs->entry_count;
+    int count = 0;
+    size_t names_size = 0;
+    while (tagcache_get_next(tcs, buf, size))
+        if (row_kept(keep, tag, tcs->result_seek, 0, tcs->idx_id))
+        {
+            names_size += strlen(music_sort_name(tcs, buf, size)) + 1;
+            count++;
+        }
+    tagcache_search_rewind(tcs, entry_count);
+    if (tcs->failed || !count)
+        return false;
+
+    int temp = core_alloc(count * sizeof(struct music_sort_row) + names_size);
+    if (temp <= 0)
+        return false;
+    int handle = core_alloc(count * sizeof(struct music_order_row));
+    if (handle <= 0)
+    {
+        core_free(temp);
+        return false;
+    }
+    struct music_sort_row *rows = core_get_data_pinned(temp);
+    char *names = (char *)(rows + count);
+    int n = 0;
+    while (tagcache_get_next(tcs, buf, size))
+    {
+        if (!row_kept(keep, tag, tcs->result_seek, 0, tcs->idx_id))
+            continue;
+        const char *name = music_sort_name(tcs, buf, size);
+        size_t len = strlen(name) + 1;
+        if (n == count || len > names_size)
+            break;
+        char key[QUICKSCROLL_KEY_SIZE];
+        quickscroll_key_of(name, key);
+        rows[n++] = (struct music_sort_row){{tcs->result_seek, key[0]}, names};
+        memcpy(names, name, len);
+        names += len;
+        names_size -= len;
+    }
+    bool ok = !tcs->valid && !tcs->failed && n == count;
+    if (ok)
+    {
+        qsort(rows, count, sizeof(*rows), compare_music_names);
+        struct music_order_row *order = core_get_data(handle);
+        for (int i = 0; i < count; i++)
+            order[i] = rows[i].order;
+        music_order.handle = handle;
+        music_order.count = count;
+        music_order.tag = tag;
+        music_order.keep = keep;
+        music_order.spoken_mask = spoken_mask;
+        music_order.commit = commit;
+        music_order.generation = generation;
+        music_order.ignore_articles = global_settings.sort_ignore_articles;
+    }
+    else
+    {
+        core_free(handle);
+        tagcache_search_rewind(tcs, entry_count);
+    }
+    core_put_data_pinned(rows);
+    core_free(temp);
+    return ok;
+}
+
+static bool next_music_name(struct tagcache_search *tcs, int row,
+                            char *buf, long size)
+{
+    if (row >= music_order.count)
+        return false;
+    const struct music_order_row *order = core_get_data(music_order.handle);
+    return tagcache_get_at_seek(tcs, order[row].seek, buf, size);
+}
+
 /* The database entries in the playing track's folder, answering a
  * `filename ^ "#directory#"` clause ANDed with the rest ("Same as currently
  * played track > Directory") from the dircache and the path index, where the
@@ -3324,6 +3476,20 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
         sort_inverse = false;
     }
 
+    /* A plain Songs list can otherwise inherit the master index's order
+     * when spoken word is filtered out. Sort the complete result, including
+     * when it does not all fit in the browser cache. */
+    bool ordered = level == 0 && c->currtable == TABLE_NAVIBROWSE &&
+                   !fmt && !order_prefix && !csi->clause_count[0] &&
+                   !csi_mentions_spoken() &&
+                   (tag == tag_album || tag == tag_title) &&
+                   prepare_music_order(&tcs, keep,
+                                       exclude ? db_spoken_apart() : 0,
+                                       tcs_buf, tcs_bufsz);
+    if (ordered)
+        sort = false;
+    index_music_names = ordered;
+
     /* lock buflib out due to possible yields */
     browser_lock_cache(c);
     struct tagentry *dptr = core_get_data(c->cache.entries_handle);
@@ -3413,12 +3579,16 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
 
     total_count += sidx;
     head_rows = sidx;
+    if (ordered)
+        total_count = MAX(total_count, offset);
 
-    while (tagcache_get_next(&tcs, tcs_buf, tcs_bufsz))
+    while (ordered ? next_music_name(&tcs, total_count - head_rows,
+                                     tcs_buf, tcs_bufsz)
+                   : tagcache_get_next(&tcs, tcs_buf, tcs_bufsz))
     {
         /* Ahead of the offset count, or a page would be short by however
          * many rows fell inside it. */
-        if (!row_kept(keep, tag, tcs.result_seek, level, tcs.idx_id))
+        if (!ordered && !row_kept(keep, tag, tcs.result_seek, level, tcs.idx_id))
             continue;
 
         if (total_count++ < offset)
@@ -3649,15 +3819,17 @@ entry_skip_formatter:
         album_years_valid = true;
     }
 
-    if (!init)
+    if (!init || (ordered && tcs.failed))
     {
         tagcache_search_finish(&tcs);
         browser_unlock_cache(c);
         core_unpin(browser_db_handle);
-        return current_entry_count;
+        return tcs.failed && ordered ? -1 : current_entry_count;
     }
 
-    while (tagcache_get_next(&tcs, tcs_buf, tcs_bufsz))
+    if (ordered)
+        total_count = head_rows + music_order.count;
+    while (!ordered && tagcache_get_next(&tcs, tcs_buf, tcs_bufsz))
     {
         if (!row_kept(keep, tag, tcs.result_seek, level, tcs.idx_id))
             continue;
@@ -4905,6 +5077,7 @@ int browser_db_load(struct browser_context* c)
                     head_rows = loaded_head_rows;
                     album_years_valid = loaded_years_valid;
                     album_order_loaded = loaded_album_order;
+                    index_music_names = loaded_index_music_names;
                     tracks_count_down = loaded_count_down;
                     tracks_unnumbered = loaded_unnumbered;
                     podcast_shows = loaded_podcast_shows;
@@ -6184,6 +6357,7 @@ static void remember_loaded(struct browser_context* c)
     loaded_head_rows = head_rows;
     loaded_years_valid = album_years_valid;
     loaded_album_order = album_order_loaded;
+    loaded_index_music_names = index_music_names;
     loaded_count_down = tracks_count_down;
     loaded_unnumbered = tracks_unnumbered;
     loaded_podcast_shows = podcast_shows;
@@ -6792,6 +6966,8 @@ static struct tagentry* browser_db_get_entry(struct browser_context *c, int id)
         }
         realid = id - current_offset;
         cpu_boost(false);
+        if (realid < 0 || realid >= current_entry_count)
+            return NULL;
     }
 
     entry = get_entries(c);
@@ -6884,6 +7060,18 @@ bool browser_db_index_key(struct browser_context *c, int id, char *buf, size_t s
     buf[0] = '\0';
     if (c->currtable == TABLE_ROOT)
         return false;
+    if (index_music_names)
+    {
+        int row = id - head_rows;
+        const struct music_order_row *order = core_get_data(music_order.handle);
+        if (size > 1)
+        {
+            buf[0] = row >= 0 && row < music_order.count ?
+                     order[row].key : QUICKSCROLL_NONE[0];
+            buf[1] = '\0';
+        }
+        return true;
+    }
     if (index_genres)
     {
         strlcpy(buf, QUICKSCROLL_NONE, size);

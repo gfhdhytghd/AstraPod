@@ -2,12 +2,12 @@
  * GNU General Public License (version 2+)
  *
  * A cart's options and help on the player. The options are rows of the
- * pause menu, drawn as the player's own settings are: an on/off or a
- * choice of up to four steps in place, a longer choice or a number opens
- * the player's picker. The owner's values are a file under
- * /.rockbox/games/options, named by the cart's id, written when one
- * changes. Help shows the cart's help text, then
- * each option's, in the box Explain uses.
+ * pause menu, drawn as the player's own settings are: an on/off, a
+ * choice of up to four or a number of up to three values steps in place,
+ * anything longer opens the player's picker. The owner's values are a
+ * file under /.rockbox/games/options, named by the cart's id, written
+ * when one changes. Help shows the cart's help text, then each option's,
+ * in the box Explain uses.
  *
  * Parts, in order:
  *   - the file
@@ -84,11 +84,18 @@ const char *shell_option_title(struct vm *vm, int i)
     return arcade_options(vm)->o[i].title;
 }
 
+static bool in_place(const struct arcade_option *o)
+{
+    if (o->type == ARCADE_OPT_CHOICE)
+        return o->nchoices <= OPTION_IN_PLACE_MAX;
+    if (o->type == ARCADE_OPT_NUMBER)
+        return (o->max - o->min) / o->step + 1 <= OPTION_NUMBER_IN_PLACE_MAX;
+    return true;
+}
+
 enum list_row_kind shell_option_kind(struct vm *vm, int i)
 {
-    const struct arcade_option *o = &arcade_options(vm)->o[i];
-    return o->type == ARCADE_OPT_ONOFF ||
-           (o->type == ARCADE_OPT_CHOICE && o->nchoices <= OPTION_IN_PLACE_MAX)
+    return in_place(&arcade_options(vm)->o[i])
         ? LIST_ROW_TOGGLE : LIST_ROW_SETTING;
 }
 
@@ -108,7 +115,7 @@ const char *shell_option_value(struct vm *vm, int i, char *buf, size_t len)
 int shell_option_range(struct vm *vm, int i)
 {
     const struct arcade_option *o = &arcade_options(vm)->o[i];
-    if (o->type != ARCADE_OPT_NUMBER)
+    if (o->type != ARCADE_OPT_NUMBER || in_place(o))
         return -1;
     return (int)(((int64_t)o->value - o->min) * 100 /
                  ((int64_t)o->max - o->min));
@@ -121,9 +128,10 @@ bool shell_option_edit(struct vm *vm, int i)
     bool usb = false;
     if (o->type == ARCADE_OPT_ONOFF) {
         v = !v;
-    } else if (o->type == ARCADE_OPT_CHOICE &&
-               o->nchoices <= OPTION_IN_PLACE_MAX) {
+    } else if (o->type == ARCADE_OPT_CHOICE && in_place(o)) {
         v = v + 1 < o->nchoices ? v + 1 : 0;
+    } else if (in_place(o)) {
+        v = v + o->step <= o->max ? v + o->step : o->min;
     } else if (o->type == ARCADE_OPT_CHOICE) {
         struct opt_items items[ARCADE_CHOICES];
         for (int k = 0; k < o->nchoices; k++) {

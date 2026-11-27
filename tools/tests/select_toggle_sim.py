@@ -17,10 +17,13 @@ Fruit Company that is Settings > Advanced Settings > Playback. There:
   unchanged list;
 - holding Select on Play Selected must open the row's context menu without
   changing the value, and Menu must close it again;
+- Select on Playback Frequency, four rows above the list's end and a number
+  of three values, must step in place as Shuffle does;
 - in Recording Settings, the menu below Playback, Select on Recording
   Format (four values, a function row rather than a settings row) must
   step in place as Shuffle does.
 
+The walk runs with every setting shown, as Playback Frequency is advanced.
 Each row is then left one step on, and the saved settings must come to
 hold the new values. Writes the frames and
 result.json to the output directory.
@@ -66,11 +69,15 @@ STEPPED = [
     ("play_selected", 2, "play selected", "off", 2),
 ]
 REPEAT_ROW = 1
+# (name, rows above Playback's last, cfg name, value after one step, values)
+FREQUENCY = ("play_frequency", 4, "playback frequency", "44100", 3)
 # The same in Recording Settings, the menu below Playback, whose rows are
 # function rows rather than settings rows
 RECORDING = [
     ("rec_format", 0, "rec format", "aiff", 4),
 ]
+# Every row left one step on, whose value config.cfg must come to hold
+SAVED = STEPPED + [FREQUENCY] + RECORDING
 # A row is shorter than this; a change taller than it is a new page
 ROW_MAX = 40
 # Where press() leaves the screen it gave up on
@@ -120,13 +127,13 @@ def hold(s, key, region, seconds=1.2):
     return settle(s, region)
 
 
-def top(s, region):
-    """Up until two taps running change nothing: the list's first row, with
-    wraparound off."""
+def end(s, region, key="Up"):
+    """`key` until two taps running change nothing: the list's first row, or
+    with Down its last, with wraparound off."""
     still = 0
     while still < 2:
         before = settle(s, region, 20)
-        s.tap("Up")
+        s.tap(key)
         time.sleep(30 / FPS)
         still = still + 1 if not changed(before, settle(s, region),
                                          region) else 0
@@ -223,9 +230,9 @@ def run_theme(args, env, theme, out):
             (args.simdisk / ".rockbox/default-config.cfg").read_text() +
             f"\nnative theme: {theme}\nstart in screen: {start}\n"
             "backlight timeout: off\nvoice menus: off\nanimations: off\n"
-            "list wraparound: off\n"
+            "list wraparound: off\nsettings mode: everything\n"
             "shuffle: off\nplay selected: on\nrepeat: off\n"
-            "rec format: wave\n")
+            "rec format: wave\nplayback frequency: auto\n")
         with (out / f"{theme}.log").open("w") as log, \
                 process([str(args.binary), "--root", str(root),
                          "--nobackground", "--zoom", "1", "--screenshot"],
@@ -249,8 +256,13 @@ def run_theme(args, env, theme, out):
             move(s, region, REPEAT_ROW - row)
             result["repeat"] = check_page(s, region, out, theme)
 
+            name, above, _, _, values = FREQUENCY
+            end(s, region, "Down")
+            move(s, region, -above)
+            result[name] = check_stepped(s, region, out, theme, name, values)
+
             walk(s, region, BACK)
-            top(s, region)
+            end(s, region)
             move(s, region, RECORDING_ROW)
             press(s, "Return", region)
             settle(s, region).save(out / f"{theme}-recording.png")
@@ -265,7 +277,7 @@ def run_theme(args, env, theme, out):
             # Settings reach config.cfg.new once storage has been idle a
             # while; the next boot renames it over config.cfg
             saved_cfg = config.with_name("config.cfg.new")
-            want = {cfg: value for _, _, cfg, value, _ in STEPPED + RECORDING}
+            want = {cfg: value for _, _, cfg, value, _ in SAVED}
             for _ in range(90):
                 if saved_cfg.exists() and all(
                         cfg_value(saved_cfg, k) == v for k, v in want.items()):
@@ -274,7 +286,7 @@ def run_theme(args, env, theme, out):
         if not saved_cfg.exists():
             saved_cfg = config
         (out / f"{theme}-config.cfg").write_text(saved_cfg.read_text())
-        for name, _, cfg, value, _ in STEPPED + RECORDING:
+        for name, _, cfg, value, _ in SAVED:
             saved = cfg_value(saved_cfg, cfg)
             result[name]["config"] = saved
             result[name]["ok"] &= saved == value

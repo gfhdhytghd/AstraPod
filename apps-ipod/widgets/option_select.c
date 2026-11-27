@@ -317,14 +317,26 @@ void option_select_next_val(const struct settings_list *setting,
     }
 }
 
+/* How many values a number setting from a table or a range has */
+static int number_count(const struct settings_list *setting)
+{
+    if (HASFLAG(setting, F_TABLE_SETTING))
+        return setting->table_setting->count;
+    const struct int_setting *info = setting->int_setting;
+    return info->step ? (info->max - info->min) / info->step + 1 : 1;
+}
+
 bool option_steps_in_place(const struct settings_list *setting)
 {
     if (!setting)
         return false;
     if (HASFLAG(setting, F_BOOL_SETTING))
         return true;
-    return HASFLAG(setting, F_CHOICE_SETTING) &&
-           setting->choice_setting->count <= OPTION_IN_PLACE_MAX;
+    if (HASFLAG(setting, F_CHOICE_SETTING))
+        return setting->choice_setting->count <= OPTION_IN_PLACE_MAX;
+    if (HASFLAG(setting, F_TABLE_SETTING) || HASFLAG(setting, F_INT_SETTING))
+        return number_count(setting) <= OPTION_NUMBER_IN_PLACE_MAX;
+    return false;
 }
 
 /* The picker's OK with the next value chosen: stored, saved, then the
@@ -340,11 +352,40 @@ void option_step_in_place(const struct settings_list *setting)
         if (setting->bool_setting->option_callback)
             setting->bool_setting->option_callback(*value);
     }
-    else
+    else if (HASFLAG(setting, F_CHOICE_SETTING))
     {
         const struct choice_setting *info = setting->choice_setting;
         int *value = setting->setting;
         *value = (*value < 0 || *value + 1 >= info->count) ? 0 : *value + 1;
+        settings_save();
+        if (info->option_callback)
+            info->option_callback(*value);
+    }
+    else if (HASFLAG(setting, F_TABLE_SETTING))
+    {
+        /* A value off the table steps to the first one above it */
+        const struct table_setting *info = setting->table_setting;
+        int *value = setting->setting;
+        int i = 0;
+        while (i < info->count && info->values[i] != *value)
+            i++;
+        if (i < info->count)
+            i++;
+        else
+            for (i = 0; i < info->count && info->values[i] < *value; i++)
+                ;
+        *value = info->values[i < info->count ? i : 0];
+        settings_save();
+        if (info->option_callback)
+            info->option_callback(*value);
+    }
+    else
+    {
+        const struct int_setting *info = setting->int_setting;
+        int *value = setting->setting;
+        int next = *value + info->step;
+        bool past = info->step < 0 ? next < info->max : next > info->max;
+        *value = past ? info->min : next;
         settings_save();
         if (info->option_callback)
             info->option_callback(*value);

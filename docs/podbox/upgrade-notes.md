@@ -139,8 +139,8 @@
   volume and Select closes the page. In Photos, turn the wheel to move
   between pictures. Games keep their own controls.
 
-- **Select changes a short setting in place.** On an on/off row, or a row
-  with up to four values, Select now moves to the next value without
-  opening a list, as Shuffle and Repeat do on the original iPod. A row with
-  more values, or a number, still opens its list. Hold Select for the
-  row's menu and **Explain**, as before.
+- **Select changes a short setting in place.** On an on/off row, a row
+  with up to four values, or a number with up to three, such as **Playback
+  Frequency**, Select now moves to the next value without opening a list,
+  as Shuffle and Repeat do on the original iPod. Any other row still opens
+  its list. Hold Select for the row's menu and **Explain**, as before.

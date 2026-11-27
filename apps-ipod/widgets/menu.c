@@ -517,7 +517,10 @@ static int menu_get_range(int selected_item, void * data)
     const struct settings_list *setting =
         menu_row_setting(selected_item, (const struct menu_item_ex *)data);
 
-    return setting ? option_value_position(setting) : -1;
+    /* A row Select steps in place shows its value in words */
+    if (!setting || option_steps_in_place(setting))
+        return -1;
+    return option_value_position(setting);
 }
 
 static enum themable_icons  menu_get_icon(int selected_item, void * data)
@@ -1583,6 +1586,10 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                     if (action_menu_back() || !(menu->flags&MENU_EXITAFTERTHISMENU) ||
                             (temp->flags&MENU_EXITAFTERTHISMENU))
                     {
+                        /* A row stepped in place leaves the list where it
+                         * was */
+                        if (stepped_row)
+                            pending_top_item = lists.start_item[SCREEN_MAIN];
                         /* Reload menu but don't run the calback again FS#8117 */
                         init_menu_lists(menu, &lists, selected, false, vps,
                                         buf, sizeof buf);
@@ -1608,6 +1615,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                     {
                         option_step_in_place(setting);
                         stepped = setting;
+                        pending_top_item = lists.start_item[SCREEN_MAIN];
                     }
                     else
                         do_setting_from_menu(temp, vps);

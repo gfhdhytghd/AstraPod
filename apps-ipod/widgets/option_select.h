@@ -25,10 +25,12 @@ bool option_screen(const struct settings_list *setting,
 void option_select_next_val(const struct settings_list *setting,
                             bool previous, bool apply);
 
-/* A bool, or a choice of at most this many values, is changed by Select on
- * its menu row stepping to the next value in place; any other setting opens
- * its picker. */
+/* A bool, a choice of at most OPTION_IN_PLACE_MAX values, or a number of at
+ * most OPTION_NUMBER_IN_PLACE_MAX values, from a table or a range, is
+ * changed by Select on its menu row stepping to the next value in place;
+ * any other setting opens its picker. */
 #define OPTION_IN_PLACE_MAX 4
+#define OPTION_NUMBER_IN_PLACE_MAX 3
 bool option_steps_in_place(const struct settings_list *setting);
 void option_step_in_place(const struct settings_list *setting);
 const char *option_get_valuestring(const struct settings_list *setting,

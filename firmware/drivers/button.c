@@ -30,6 +30,9 @@
 #ifdef HAVE_MIKEY_REMOTE
 #include "inline-remote-poweroff.h"
 #endif
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+#include "ghost-volume-trace.h"
+#endif
 #include "button_usb_remote.h"
 #include "kernel.h"
 #include "thread.h"
@@ -339,6 +342,11 @@ static void button_tick(void)
 
 #ifdef HAVE_SW_POWEROFF
                         repeat_count++;
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+                        if (enable_sw_poweroff && !chord_blocks_poweroff &&
+                            repeat_count == POWEROFF_COUNT + 1)
+                            ghost_volume_poweroff_key(btn, repeat_count);
+#endif
                         /* Send a SYS_POWEROFF event if we have a device
                            which doesn't shut down easily with the OFF
                            key */

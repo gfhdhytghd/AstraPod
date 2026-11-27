@@ -58,6 +58,9 @@
 #include "audio/sound_feedback.h"
 #include "system/shutdown.h"
 #include "system/volume.h"
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+#include "ghost-volume-trace.h"
+#endif
 #include "sound.h"
 #include "screens/context_menu.h"
 #include "audio/ab_repeat.h"
@@ -953,6 +956,14 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
 
             case ACTION_WPS_VOLUP: /* fall through */
             case ACTION_WPS_VOLDOWN:
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+            {
+                int key;
+                get_action_statuscode(&key);
+                ghost_volume_trace(GHOST_VOLUME_EVENT, key, button,
+                                   global_status.volume);
+            }
+#endif
                 if (button == ACTION_WPS_VOLUP)
                     adjust_volume(1);
                 else

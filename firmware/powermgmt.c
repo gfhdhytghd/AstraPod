@@ -36,6 +36,9 @@
 #include "lcd.h"
 #include "rtc.h"
 #include "hang_catch.h"
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+#include "ghost-volume-trace.h"
+#endif
 #if CONFIG_TUNER
 #include "fmradio.h"
 #endif
@@ -758,6 +761,9 @@ static inline void power_thread_step(void)
         shutdown_timeout -= POWER_THREAD_STEP_TICKS;
 
         if (shutdown_timeout <= 0) {
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+            ghost_volume_trace(GHOST_FORCED_POWEROFF, 0, 0, 0);
+#endif
             hang_catch_stop();
             power_off();
         }
@@ -790,6 +796,10 @@ static inline void power_thread_step(void)
          * using NiMH or Alkaline batteries.
          */
         if (!shutdown_timeout && query_force_shutdown()) {
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+            ghost_volume_trace(GHOST_BATTERY_POWEROFF_DISK,
+                               voltage_now, percent_now, 0);
+#endif
             sys_poweroff();
         }
     }
@@ -1150,6 +1160,11 @@ static void sys_shutdown_common(void)
 void sys_poweroff(void)
 {
 #ifndef BOOTLOADER
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+    if (!shutdown_timeout)
+        ghost_volume_trace(GHOST_POWEROFF_REQUEST,
+                           (uintptr_t)__builtin_return_address(0), 0, 0);
+#endif
     logf("sys_poweroff()");
     sys_shutdown_common();
     queue_broadcast(SYS_POWEROFF, 0);
@@ -1160,6 +1175,11 @@ void sys_poweroff(void)
 void sys_reboot(void)
 {
 #ifndef BOOTLOADER
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+    if (!shutdown_timeout)
+        ghost_volume_trace(GHOST_REBOOT_REQUEST,
+                           (uintptr_t)__builtin_return_address(0), 0, 0);
+#endif
     logf("sys_reboot()");
     sys_shutdown_common();
     queue_broadcast(SYS_REBOOT, 0);
@@ -1249,6 +1269,9 @@ static void handle_sleep_timer(void)
         }
         else {
             DEBUGF("Sleep timer timeout. Shutting off...\n");
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+            ghost_volume_trace(GHOST_SLEEP_POWEROFF, 0, 0, 0);
+#endif
             sys_poweroff();
         }
     }
@@ -1287,6 +1310,9 @@ void handle_auto_poweroff(void)
     }
 
     if (!shutdown_timeout && query_force_shutdown()) {
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+        ghost_volume_trace(GHOST_BATTERY_POWEROFF, voltage_now, percent_now, 0);
+#endif
         backlight_on();
         sys_poweroff();
     }
@@ -1304,6 +1330,9 @@ void handle_auto_poweroff(void)
             && TIME_AFTER(tick, storage_last_disk_activity() + timeout)
 #endif
         ) {
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+            ghost_volume_trace(GHOST_IDLE_POWEROFF, audio_stat, 0, 0);
+#endif
             sys_poweroff();
         }
     }

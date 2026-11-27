@@ -24,6 +24,10 @@
 #include "system/debug_log.h"
 #include "usb_log_file.h"
 
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+#include "ghost_volume_trace.inc"
+#endif
+
 /* ---- the entry formatter ------------------------------------------------ */
 
 static const char *usb_log_driver_name(int i)
@@ -797,6 +801,9 @@ static uint64_t widen_us(uint32_t us)
 
 void usb_log_file_write(void)
 {
+#if defined(IPOD_6G) && defined(ASTRAPOD_ROCK_COMPAT) && !defined(SIMULATOR)
+    ghost_volume_trace_flush();
+#endif
 #ifdef HAVE_USB_PODLINK
     if (usb_podlink_active()) return;
 #endif

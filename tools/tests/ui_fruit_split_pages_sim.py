@@ -4,6 +4,7 @@
 Stock 2.0.5's full list crosses the screen in 270 ms. The list on the
 split page moves only while the full list overlaps its half. The full
 list progressively covers or reveals the pane at the same time.
+A split-to-split transition leaves the preview at its resting x coordinate.
 """
 
 import argparse
@@ -12,10 +13,11 @@ import sys
 from pathlib import Path
 
 import numpy
+from PIL import Image
 
 sys.dont_write_bytecode = True
 from ui_fruit_flow_entry_sim import HALF, SLIDE_MS, gray
-from ui_stock_transitions_sim import W, make_fixture, session
+from ui_stock_transitions_sim import H, W, make_fixture, session
 
 SLIDE_SLOTS = 18
 
@@ -31,7 +33,9 @@ def albums(sim):
 
 def playlists(sim):
     sim.wait(45)
-    return {"split-push": sim.record(55, "select")}
+    _, frames = sim.frames_since(0)
+    before = Image.frombytes("RGB", (W, H), frames[-1])
+    return {"split-push": [(0, before)] + sim.record(55, "select")}
 
 
 def error(a, b):
@@ -75,11 +79,9 @@ def mixed(shots, push):
 
 
 def split_push(shots):
-    """Track the seam between two different panes against the list seam."""
+    """Measure the moving rows and compare the right pane with both endpoints."""
     before, after = (gray(im)[24:170] for _, im in (shots[0], shots[-1]))
     track = []
-    if error(before[:, HALF:], after[:, HALF:]) < 8:
-        return track
     for ms, image in shots:
         now = gray(image)[24:170]
         row_error, seam = min(
@@ -88,12 +90,11 @@ def split_push(shots):
         )
         if row_error > 3 or seam < 12:
             continue
-        pane_error, pane_seam = min(
-            (error(now[:, HALF + x:], after[:, HALF:W - x]), x)
-            for x in range(HALF - 28)
-        )
-        track.append((ms, seam, pane_seam, pane_error))
-    return track
+        right = now[:, HALF:]
+        track.append((ms, seam, error(right, before[:, HALF:]),
+                      error(right, after[:, HALF:])))
+    return {"different": error(before[:, HALF:], after[:, HALF:]),
+            "frames": track}
 
 
 def main():
@@ -112,9 +113,12 @@ def main():
     # the Music preview on Home.
     split = session(*common, args.output / "playlists", "fruit-company",
                     "fruit music menu: 2\n", playlists)
+    unchanged = session(*common, args.output / "music", "fruit-company",
+                        "", playlists)
     result = {key: mixed(frames, push=key == "push")
               for key, frames in shots.items()}
-    changing = result["split-push"] = split_push(split["split-push"])
+    result["split-push"] = split_push(split["split-push"])
+    result["same-pane"] = split_push(unchanged["split-push"])
     (args.output / "result.json").write_text(json.dumps(result, indent=1) + "\n")
     failed = []
     for key in ("push", "pop"):
@@ -125,16 +129,19 @@ def main():
             failed.append((key, "pane visible behind full list", got))
         if len(got["row_errors"]) < 2 or max(got["row_errors"]) > 7:
             failed.append((key, "split rows follow full list", got))
-    if len(changing) < 3 or any(abs(row - pane) > 2 or diff > 3
-                                for _, row, pane, diff in changing):
-        failed.append(("split-push", "the new pane travels with the rows", changing))
+    for key, changed in (("split-push", True), ("same-pane", False)):
+        pane = result[key]
+        if (pane["different"] >= 8) != changed or len(pane["frames"]) < 3:
+            failed.append((key, "missing split-menu evidence", pane))
+        if any(after > 3 for _, _, _, after in pane["frames"]):
+            failed.append((key, "right pane must cut in place", pane))
     for item in failed:
         print("FAIL", *item)
     if failed:
         sys.exit(1)
     print("PASS Fruit Company split pages: full-list curve errors "
           f"{result['push']['worst_px']:.1f}/{result['pop']['worst_px']:.1f} px, "
-          "split-push pane moves with the rows")
+          "both split pushes keep the right pane in place")
 
 
 if __name__ == "__main__":

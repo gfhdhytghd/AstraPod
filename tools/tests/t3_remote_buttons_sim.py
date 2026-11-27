@@ -16,6 +16,8 @@ import subprocess
 import time
 import wave
 
+from ui_quickscreen_sim import ULTRA_FALLBACK_THEME
+
 REPO = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parent / "fixtures/t3-remote"
 
@@ -128,10 +130,11 @@ def prepare_disk(directory, build, resources, theme):
     themes.mkdir()
     if theme != "scrim":
         original = resources / "native-themes" / f"{theme}.podtheme"
-        # Host packages may ship only the built-in themes. A minimal custom
-        # file still exercises the production loader and the real theme ID.
-        (themes / original.name).write_text(
-            original.read_text() if original.exists() else "podbox-theme=1\n")
+        # Supply the stock navigation style when Ultra is a custom theme.
+        if original.exists():
+            (themes / original.name).write_text(original.read_text())
+        elif theme == "fruit-company-ultra":
+            (themes / original.name).write_text(ULTRA_FALLBACK_THEME)
     (rockbox / "config.cfg").write_text(
         f"native theme: {theme}\nanimations: off\nbacklight timeout: off\n"
         "idle poweroff: off\nrepeat: all\n")

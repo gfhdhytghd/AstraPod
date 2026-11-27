@@ -110,7 +110,9 @@ bool ui_perf_enabled(void)
 }
 
 void ui_perf_wps_target(char route, const struct ui_rect *rect,
-                        const char *reason, const char *bitmap)
+                        const char *reason, const char *bitmap,
+                        uint32_t handoff_us, uint32_t playlist_us,
+                        uint32_t wps_setup_us)
 {
     if (!enabled)
         return;
@@ -118,9 +120,11 @@ void ui_perf_wps_target(char route, const struct ui_rect *rect,
     if (fd >= 0)
     {
         logfile_printf(fd, "cover-wps route=%c source=%s rect=%d,%d,%d,%d "
-                       "reason=%s bitmap=%s\n", route,
+                       "reason=%s bitmap=%s handoff_us=%lu playlist_us=%lu wps_setup_us=%lu\n", route,
                        rect->width ? "layout" : "fallback", rect->x, rect->y,
-                       rect->width, rect->height, reason, bitmap);
+                       rect->width, rect->height, reason, bitmap,
+                       (unsigned long)handoff_us, (unsigned long)playlist_us,
+                       (unsigned long)wps_setup_us);
         logfile_close(fd);
     }
 }

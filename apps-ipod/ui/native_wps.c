@@ -1680,6 +1680,14 @@ void native_wps_paint_handoff(const struct wps_state *state,
     }
 }
 
+/* Finish the handoff with the same snapshot as its moving frames. The
+ * regular WPS loop picks up later artwork, labels and palette changes. */
+void native_wps_paint_prepared(void)
+{
+    ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
+    ui_page_paint(&wps->page);
+}
+
 void native_wps_invalidate(void)
 {
     repaint = true;

@@ -14,7 +14,7 @@
 struct panel_request {
     char title[CAROUSEL_TRACK_TEXT], artist[CAROUSEL_TRACK_TEXT];
     struct album_data album;
-    uint64_t key;
+    uint64_t key, artwork;
     uint32_t revision, generation, locale;
     int first;
     bool remote, legacy_labels;

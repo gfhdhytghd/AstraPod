@@ -105,6 +105,7 @@ static bool panel_request(int index, struct panel_request *request)
     }
     strlcpy(request->route, album.route, sizeof(request->route));
     request->key = panel_cache_identity(cider_remote_name(), album.id, request->route);
+    request->artwork = panel_cache_identity(album.art, "", "");
     return true;
 }
 

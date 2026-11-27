@@ -39,8 +39,9 @@ static bool checkpoint(struct cider_store *cs)
 
 unsigned int cs_payload_size(unsigned int tier)
 {
-    static const unsigned int dim[CS_TIERS] = {240, 128, 56, 32};
-    return tier < CS_TIERS ? 12 + dim[tier] * dim[tier] * 2 : 0;
+    static const unsigned int dim[CS_COVER_TIERS] = {240, 128, 56, 32};
+    if (tier == CS_TRACKS) return CS_TRACK_BYTES;
+    return tier < CS_COVER_TIERS ? 12 + dim[tier] * dim[tier] * 2 : 0;
 }
 unsigned int cs_record_size(unsigned int tier)
 {
@@ -189,7 +190,7 @@ static bool sealed(const uint8_t *b) { return le32(b) == crc(b + 4, CS_SECTOR - 
 static void empty_bucket(uint8_t *b) { memset(b, 0, CS_SECTOR); seal(b); }
 static unsigned int bucket_of(uint32_t k0, uint32_t k1, unsigned int t)
 { return mix(k0, k1, t) & (CS_BUCKETS - 1); }
-static unsigned int entry_tier(const uint8_t *e) { return e[15] & 3; }
+static unsigned int entry_tier(const uint8_t *e) { return e[15] & 7; }
 
 static void item_of(const uint8_t *e, struct cs_item *it)
 {
@@ -203,7 +204,13 @@ static void account(struct cider_store *cs, const uint8_t *e, int sign)
     unsigned int p = e[14];
     if (sign > 0)
     {
-        cs->count++; cs->digest += h;
+        if (it.tier == CS_TRACKS)
+            cs->track_count++;
+        else
+        {
+            cs->count++;
+            cs->digest += h;
+        }
         if (p < CS_PACKS)
         {
             cs->pack[p].live += bytes;
@@ -214,7 +221,13 @@ static void account(struct cider_store *cs, const uint8_t *e, int sign)
     }
     else
     {
-        cs->count--; cs->digest -= h;
+        if (it.tier == CS_TRACKS)
+            cs->track_count--;
+        else
+        {
+            cs->count--;
+            cs->digest -= h;
+        }
         if (p < CS_PACKS && cs->pack[p].live >= bytes) cs->pack[p].live -= bytes;
     }
     cs->changed = true;
@@ -415,7 +428,7 @@ int cs_load(struct cider_store *cs, uint8_t *buf, unsigned int size,
             uint32_t seed)
 {
     cs_release(cs);
-    cs->loaded = false; cs->count = cs->digest = cs->total = 0;
+    cs->loaded = false; cs->count = cs->track_count = cs->digest = cs->total = 0;
     cs->rebuild = false; cs->evict = cs->compact = cs->cur = -1;
     memset(cs->bloom, 0, sizeof cs->bloom);
     memset(cs->pack, 0, sizeof cs->pack);
@@ -476,7 +489,7 @@ int cs_load(struct cider_store *cs, uint8_t *buf, unsigned int size,
             return CS_ERR;
         cs->session = keep + 1;
         header_write(cs);
-        cs->count = cs->digest = 0;
+        cs->count = cs->track_count = cs->digest = 0;
         memset(cs->bloom, 0, sizeof cs->bloom);
         for (unsigned int i = 0; i < CS_PACKS; i++) cs->pack[i].live = 0;
         rebuild_begin(cs);
@@ -576,7 +589,7 @@ int cs_put(struct cider_store *cs, const uint8_t key[32], unsigned int tier,
     if (r == CS_ERR) return CS_ERR;
     if (r == CS_OK && le32(slot(cs->bucket, i) + 8) == c) return CS_DUP;
     if (cs->total + need > cs->cap ||
-        (r == CS_MISS && cs->count >= CS_MAX_ENTRIES) ||
+        (r == CS_MISS && cs->count + cs->track_count >= CS_MAX_ENTRIES) ||
         choose_pack(cs, need) < 0)
     {
         int v = pick_victim(cs);
@@ -641,7 +654,7 @@ int cs_list(struct cider_store *cs, unsigned int cursor, struct cs_item *out,
         if (!read_at(cs, index_fd(cs), (1 + b) * CS_SECTOR, buf, CS_SECTOR) ||
             !sealed(buf)) return CS_ERR;
         for (; i < CS_SLOTS; i++)
-            if (slot_valid(slot(buf, i)))
+            if (slot_valid(slot(buf, i)) && entry_tier(slot(buf, i)) < CS_COVER_TIERS)
             {
                 if (*count == max) return b << 5 | i;
                 item_of(slot(buf, i), &out[(*count)++]);

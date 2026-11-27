@@ -33,6 +33,7 @@
 
 #define PANEL_DIR ROCKBOX_DIR "/podbox/cache/panel"
 #define PANEL_MAGIC 0x324c4e50u /* PNL2 */
+#define REMOTE_MAGIC 0x31525450u /* PTR1 */
 #define PANEL_SLOTS 4
 #define PANEL_BYTES (96 * 1024)
 #define PANEL_DISC_MARKS 256
@@ -62,10 +63,14 @@ union panel_buffer {
 
 _Static_assert(sizeof(struct panel_cached) < PANEL_BYTES, "Panel cache slot");
 
+_Static_assert(sizeof(struct panel_cached) <= CS_TRACK_BYTES, "Track store page");
+
 static struct cached_slot {
     union panel_buffer *buffer;
     struct panel_request request;
     unsigned used, refs;
+    long refresh_at;
+    bool stale;
 } slots[PANEL_SLOTS];
 
 static union panel_buffer *scratch;
@@ -75,7 +80,13 @@ static uint32_t settled_at, remote_at;
 static uint64_t remote_key, local_playing;
 static int remote_first;
 static unsigned remote_rows;
-static bool remote_stale;
+static bool remote_stale, remote_disk_miss;
+static uint64_t fill_key, fill_artwork;
+#if defined(HAVE_USB_PODLINK) || defined(SIMULATOR)
+static uint64_t remote_artwork;
+#endif
+static uint32_t fill_revision;
+static int fill_first;
 static long retry_at;
 static struct mutex lock;
 /* The faces are the theme's title, panel and metadata fonts. A theme that
@@ -107,7 +118,7 @@ uint64_t panel_cache_identity(const char *category, const char *a, const char *b
 
 bool panel_cache_same(const struct panel_request *a, const struct panel_request *b)
 {
-    return a->key == b->key && a->first == b->first &&
+    return a->key == b->key && a->artwork == b->artwork && a->first == b->first &&
            a->revision == b->revision && a->generation == b->generation && a->locale == b->locale;
 }
 
@@ -117,6 +128,7 @@ static int lookup(const struct panel_request *request, int first)
     {
         const struct panel_request *r = &slots[i].request;
         if (slots[i].used && r->first == first && request->key == r->key &&
+            request->artwork == r->artwork &&
             request->revision == r->revision && request->generation == r->generation &&
             request->locale == r->locale)
             return i;
@@ -189,6 +201,19 @@ void panel_cache_bind(const struct panel_cached *primary, const struct panel_cac
         font_pbf_pack_bind(fonts[i], pack_at(primary, i), pack_at(adjacent, i));
 }
 
+/* Stale host replies remain usable while the worker retries. */
+static bool needs_page(const struct panel_request *request)
+{
+    int slot = lookup(request, request->first);
+    return slot < 0 || (slots[slot].stale &&
+                       !TIME_BEFORE(current_tick, slots[slot].refresh_at));
+}
+
+static bool more_tracks(void)
+{
+    return pending_count && window[0].remote && fill_first > 0;
+}
+
 void panel_cache_window(const struct panel_request *requests, unsigned count)
 {
     if (!scratch)
@@ -205,7 +230,23 @@ void panel_cache_window(const struct panel_request *requests, unsigned count)
         ++serial;
         pending_count = count;
         if (count)
+        {
             memcpy(window, requests, count * sizeof(*window));
+            if (requests[0].key != fill_key || requests[0].artwork != fill_artwork ||
+                requests[0].revision != fill_revision)
+            {
+                fill_key = requests[0].key;
+                fill_artwork = requests[0].artwork;
+                fill_revision = requests[0].revision;
+                fill_first = 0;
+                int slot = lookup(requests, 0);
+                if (slot >= 0 && !slots[slot].stale)
+                {
+                    const struct panel_disk *d = &slots[slot].buffer->data.disk;
+                    fill_first = d->count < d->total ? (int)d->count : -1;
+                }
+            }
+        }
         retry_at = current_tick;
         settled_at = USEC_TIMER;
     }
@@ -227,7 +268,8 @@ bool panel_cache_pump(void)
     bool pending = false;
     mutex_lock(&lock);
     for (unsigned i = 0; i < pending_count && !pending; i++)
-        pending = lookup(&window[i], window[i].first) < 0;
+        pending = needs_page(&window[i]);
+    pending |= more_tracks();
     bool post = pending && !TIME_BEFORE(current_tick, retry_at);
     mutex_unlock(&lock);
     if (post && !bg_task_queued(&task, BG_EVENT_PANEL))
@@ -280,7 +322,7 @@ static bool fonts_ready(void)
         changed |= strcmp(faces[i], wanted[i]) != 0;
     for (unsigned i = 0; i < PANEL_SLOTS; i++)
         changed &= !slots[i].refs;
-    if (changed && !fonts_held)
+    if (changed && (!fonts_held || !*faces[0]))
     {
         for (unsigned i = 0; i < PANEL_FACES; i++)
         {
@@ -359,7 +401,7 @@ static bool cache_read_file(const char *path)
     bool valid = read(fd, d, head) == (ssize_t)head &&
                  d->magic == PANEL_MAGIC && d->key == work.key &&
                  d->revision == work.revision && d->fonts == fonts_revision &&
-                 d->locale == work.locale && d->stamp == (work.remote ? 0 : db_stamp) &&
+                 d->locale == work.locale && d->stamp == db_stamp &&
                  d->album_seek == work.album.seek && d->artist_seek == work.album.artist_seek &&
                  d->first == (unsigned)work.first && d->count <= PANEL_PAGE_ROWS &&
                  d->total <= 1000000 && d->first <= d->total &&
@@ -386,7 +428,7 @@ static bool cache_read_file(const char *path)
     }
     valid = next == d->bytes;
     if (valid)
-        panel_perf_record(PP_DISK, USEC_TIMER - start, d->bytes, work.remote);
+        panel_perf_record(PP_DISK, USEC_TIMER - start, d->bytes, 0);
     return valid;
 }
 
@@ -524,20 +566,18 @@ static bool query_local(struct panel_cached *data)
     return ready;
 }
 
-static bool query_remote(struct panel_cached *data, bool *persistable)
+#if defined(HAVE_USB_PODLINK) || defined(SIMULATOR)
+static bool query_remote(struct panel_cached *data, bool *fresh)
 {
-#ifdef HAVE_USB_PODLINK
     if (cider_panel_revision() != work.revision)
         return false;
-    if (remote_key != work.key || remote_first != work.first || !remote_at)
-    {
-        remote_key = work.key;
-        remote_first = work.first;
+    if (!remote_at)
         remote_at = USEC_TIMER;
-    }
     char route[sizeof(work.route) + sizeof("?format=panel")];
     snprintf(route, sizeof(route), "%s?format=panel", work.route);
     cider_track_page_open(route);
+    struct cider_row row;
+    cider_track_page_row(work.first + remote_rows, &row);
     bool stale;
     int count = cider_track_page_total(&stale);
     /* The host can send a stale, empty result after a transient fetch error.
@@ -545,16 +585,27 @@ static bool query_remote(struct panel_cached *data, bool *persistable)
     if (!count && stale)
     {
         cider_track_page_open("");
+        mutex_lock(&lock);
+        if (serial == working_serial)
+            retry_at = current_tick + HZ;
+        mutex_unlock(&lock);
         return false;
     }
-    if (count < work.first)
+    if (count < work.first || count > 1000000)
         return false;
     struct panel_disk *d = &data->disk;
+    unsigned rows = MIN(count - work.first, PANEL_PAGE_ROWS);
+    if (remote_rows && d->total != (unsigned)count)
+    {
+        remote_rows = 0;
+        remote_stale = false;
+        cider_track_page_open("");
+        return false;
+    }
     d->total = count;
-    d->count = MIN(count - work.first, PANEL_PAGE_ROWS);
+    d->count = rows;
     for (unsigned i = remote_rows; i < d->count; i++)
     {
-        struct cider_row row;
         if (cancelled() || !cider_track_page_row(work.first + i, &row))
             return false;
         struct panel_cache_row *out = &data->rows[i];
@@ -571,16 +622,12 @@ static bool query_remote(struct panel_cached *data, bool *persistable)
         remote_rows++;
         remote_stale |= stale;
     }
-    *persistable = !stale && !remote_stale;
+    *fresh = !stale && !remote_stale;
     panel_perf_record(PP_REMOTE, USEC_TIMER - remote_at, d->count, 0);
     remote_at = 0;
     return cider_panel_revision() == work.revision;
-#else
-    (void)data;
-    (void)persistable;
-    return false;
-#endif
 }
+#endif
 
 static bool gather_text(ucschar_t *codes, unsigned *count, const char *str)
 {
@@ -662,7 +709,7 @@ static void build_packs(struct panel_cached *data)
 
 static bool work_current(void)
 {
-#ifdef HAVE_USB_PODLINK
+#if defined(HAVE_USB_PODLINK) || defined(SIMULATOR)
     if (work.remote)
         return cider_panel_revision() == work.revision;
 #endif
@@ -671,15 +718,94 @@ static bool work_current(void)
 
 static void close_remote_query(void)
 {
-#ifdef HAVE_USB_PODLINK
+#if defined(HAVE_USB_PODLINK) || defined(SIMULATOR)
     if (remote_key)
         cider_track_page_open("");
 #endif
     remote_key = 0;
     remote_at = 0;
     remote_rows = 0;
-    remote_stale = false;
+    remote_stale = remote_disk_miss = false;
 }
+
+static void init_scratch(void)
+{
+    memset(&scratch->data, 0, sizeof(scratch->data));
+    scratch->data.disk = (struct panel_disk){
+        .magic = work.remote ? REMOTE_MAGIC : PANEL_MAGIC,
+        .key = work.key, .first = work.first,
+        .revision = work.revision, .fonts = fonts_revision, .locale = work.locale,
+        .stamp = work.remote ? 0 : db_stamp,
+        .album_seek = work.album.seek, .artist_seek = work.album.artist_seek,
+    };
+    strlcpy(scratch->data.disk.artist, work.artist, sizeof(scratch->data.disk.artist));
+}
+
+#if defined(HAVE_USB_PODLINK) || defined(SIMULATOR)
+static void track_key(uint8_t key[32])
+{
+    memset(key, 0, 32);
+    /* Tie this album page to its artwork identity. The index uses the
+     * mixed eight-byte prefix, and record reads check the full key. */
+    uint64_t hash = (work.key ^ work.artwork) +
+                    (uint64_t)work.first * UINT64_C(0x9e3779b97f4a7c15);
+    memcpy(key, &hash, sizeof(hash));
+    memcpy(key + 8, &work.key, sizeof(work.key));
+    memcpy(key + 16, &work.artwork, sizeof(work.artwork));
+    memcpy(key + 24, &work.first, sizeof(work.first));
+}
+
+static bool valid_tracks(const struct panel_cached *page)
+{
+    const struct panel_disk *d = &page->disk;
+    return d->magic == REMOTE_MAGIC && d->key == work.key &&
+           d->revision == work.revision && d->first == (unsigned)work.first &&
+           d->total <= 1000000 && d->first <= d->total &&
+           d->count == MIN(PANEL_PAGE_ROWS, d->total - d->first) &&
+           d->disc_count == 0 && strings_ok(page);
+}
+
+static bool prepare_tracks(bool *disk, bool *fresh)
+{
+    if (remote_key != work.key || remote_artwork != work.artwork ||
+        remote_first != work.first ||
+        scratch->data.disk.revision != work.revision)
+    {
+        close_remote_query();
+        remote_key = work.key;
+        remote_artwork = work.artwork;
+        remote_first = work.first;
+        init_scratch();
+    }
+
+    uint8_t key[32];
+    track_key(key);
+    if (!remote_disk_miss)
+    {
+        uint32_t start = USEC_TIMER;
+        int result = cider_track_cache_read(key, &scratch->data, sizeof(scratch->data));
+        if (!result)
+            return false;
+        if (result > 0 && valid_tracks(&scratch->data))
+        {
+            panel_perf_record(PP_DISK, USEC_TIMER - start, slot_bytes(&scratch->data.disk), 1);
+            struct panel_disk *d = &scratch->data.disk;
+            memset(d->length, 0, sizeof(d->length));
+            strlcpy(d->artist, work.artist, sizeof(d->artist));
+            *disk = *fresh = true;
+            return true;
+        }
+        remote_disk_miss = true;
+        init_scratch();
+    }
+    if (!query_remote(&scratch->data, fresh))
+        return false;
+    if (*fresh && !cancelled() &&
+        !cider_track_cache_write(key, &scratch->data, slot_bytes(&scratch->data.disk)))
+        return false;
+    return true;
+}
+#endif
 
 static void prepare(const struct queue_event *event)
 {
@@ -689,83 +815,102 @@ static void prepare(const struct queue_event *event)
     unsigned index = 0;
     uint32_t start;
     mutex_lock(&lock);
-    while (index < pending_count && lookup(&window[index], window[index].first) >= 0)
+    while (index < pending_count && !needs_page(&window[index]))
         index++;
-    if (index == pending_count)
+    bool fill = index == pending_count && more_tracks();
+    if (index == pending_count && !fill)
     {
         mutex_unlock(&lock);
         close_remote_query();
         return;
     }
-    work = window[index];
+    work = window[fill ? 0 : index];
+    if (fill)
+        work.first = fill_first;
     working_serial = serial;
     start = settled_at;
     retry_at = current_tick + MAX(1, HZ / 25);
     mutex_unlock(&lock);
 
-    const struct panel_disk *d = &scratch->data.disk;
-    if (remote_key && (!work.remote || work.key != remote_key ||
-                       work.first != remote_first || d->revision != work.revision ||
-                       d->fonts != fonts_revision || d->locale != work.locale))
-        close_remote_query();
-    if (!work_current() || !fonts_ready())
-        return;
-    if (!work.remote && (!db_stamp || db_seen_generation != work.generation ||
-                         db_seen_revision != work.revision))
-    {
-        db_stamp = tagcache_text_revision();
-        db_seen_generation = work.generation;
-        db_seen_revision = work.revision;
-    }
+    bool disk = false, fresh = false;
     char path[MAX_PATH];
-    cache_path(path);
-    bool persistable = work.remote || db_stamp;
-    bool disk = !remote_rows && persistable && cache_read_file(path);
-    if (!disk)
-    {
-        /* Retain the prepared prefix while the track slot fetches the next
-         * fragment. The scratch buffer belongs to this work until publish. */
-        if (!remote_rows)
-        {
-            memset(&scratch->data, 0, sizeof(scratch->data));
-            scratch->data.disk = (struct panel_disk){
-                .magic = PANEL_MAGIC, .key = work.key, .first = work.first,
-                .revision = work.revision, .fonts = fonts_revision, .locale = work.locale,
-                .stamp = work.remote ? 0 : db_stamp,
-                .album_seek = work.album.seek, .artist_seek = work.album.artist_seek,
-            };
-            strlcpy(scratch->data.disk.artist, work.artist, sizeof(d->artist));
-        }
-        if (!(work.remote ? query_remote(&scratch->data, &persistable) : query_local(&scratch->data)))
-            return;
-        build_packs(&scratch->data);
-    }
+    if (!work_current())
+        return;
     if (work.remote)
+    {
+#if defined(HAVE_USB_PODLINK) || defined(SIMULATOR)
+        if (!prepare_tracks(&disk, &fresh))
+            return;
         close_remote_query();
+#else
+        return;
+#endif
+    }
+    else
+    {
+        close_remote_query();
+        if (!fonts_ready())
+            return;
+        if (!db_stamp || db_seen_generation != work.generation ||
+            db_seen_revision != work.revision)
+        {
+            db_stamp = tagcache_text_revision();
+            db_seen_generation = work.generation;
+            db_seen_revision = work.revision;
+        }
+        cache_path(path);
+        disk = db_stamp && cache_read_file(path);
+        if (!disk)
+        {
+            init_scratch();
+            if (!query_local(&scratch->data))
+                return;
+        }
+    }
+
+    const struct panel_disk *d = &scratch->data.disk;
+    if (!fill && (!disk || work.remote) && (!work.remote || fonts_ready()))
+        build_packs(&scratch->data);
     if (cancelled() || !work_current())
         return;
 
-    /* Publish before persisting. The just-published slot cannot be swapped
-     * out until this worker returns, so writes can use it without the lock. */
+    /* The centre's remaining pages share the cover store. They leave the
+     * RAM slots free for the active panel and its next visible page. */
     int victim = -1;
     mutex_lock(&lock);
     if (serial == working_serial)
-        for (unsigned i = 0; i < PANEL_SLOTS; i++)
-            if (!slots[i].refs && (victim < 0 || slots[i].used < slots[victim].used))
-                victim = i;
+    {
+        if (work.remote && work.key == fill_key && work.first == fill_first)
+        {
+            int next = work.first + d->count;
+            if (fresh)
+                fill_first = next < (int)d->total ? next : -1;
+            else if (fill)
+                retry_at = current_tick + 8 * HZ;
+        }
+        if (!fill)
+            for (unsigned i = 0; i < PANEL_SLOTS; i++)
+                if (!slots[i].refs && (victim < 0 || slots[i].used < slots[victim].used))
+                    victim = i;
+    }
     union panel_buffer *ready = scratch;
     if (victim >= 0)
     {
+        int previous = lookup(&work, work.first);
+        if (previous >= 0)
+            slots[previous].used = 0;
         scratch = slots[victim].buffer;
         slots[victim] = (struct cached_slot){
             .buffer = ready, .request = work, .used = ++lru_clock,
+            .stale = work.remote && !fresh, .refresh_at = current_tick + 8 * HZ,
         };
     }
     mutex_unlock(&lock);
     if (victim >= 0)
     {
         panel_perf_record(PP_READY, USEC_TIMER - start, index, disk);
-        if (persistable && !disk && d->length[0] && d->length[1] && d->length[2] && !cancelled())
+        if (!work.remote && db_stamp && !disk && d->length[0] && d->length[1] &&
+            d->length[2] && !cancelled())
             cache_write_file(path, ready);
     }
 }

@@ -41,6 +41,7 @@ int ui_clock_poll_timeout(uint32_t elapsed, unsigned duration, unsigned ticks_pe
 int ui_clock_wait_until(uint32_t deadline);
 /* Sleeps for a timeout from the functions above, to its precise wake. */
 void ui_clock_sleep(int ticks);
+void ui_clock_sleep_until(uint32_t deadline);
 int ui_tween_sample(const struct ui_tween *tween, unsigned frame);
 
 #endif

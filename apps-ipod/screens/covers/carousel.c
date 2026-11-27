@@ -5300,7 +5300,6 @@ static void flip_to(bool open)
             buf_ctx_lock();
             prepare_stock_back();
             buf_ctx_unlock();
-            prepared = true;
         }
         if (open && !panel.moving && flow_row.length)
         {

@@ -73,7 +73,7 @@ struct quickscreen_page {
     char saved_title[MAX_PATH];
     enum themable_icons saved_icon;
     bool has_saved_title;
-    bool hud;               /* style.quick_screen=hud: full-screen 4-tile page */
+    bool hud;               /* style.quick_screen=hud: the full-screen page */
 };
 
 struct gui_quickscreen
@@ -200,66 +200,48 @@ static void quickscreen_paint_card(const struct ui_view *node,
     lcd_set_viewport(previous);
 }
 
-/* Full-screen four-tile skeuomorphic Control Centre (Classic, Fruit Company,
- * Fruit Company Ultra): four pearl-white glossy tiles over the stock
- * steel-blue backdrop, with a vertical brightness slider, Aqua choice pills,
- * iPhone OS toggle switches, and brushed-chrome directional key caps. */
-#define CC_MARGIN_X 8
-#define CC_MARGIN_Y 10
-#define CC_GUTTER 8
-#define CC_TILE_R 9
-#define CC_TILE_SHADOW 4
-#define CC_TILE_DROP 2
-#define CC_PAD 10
-#define CC_KEY_SIZE 22
-#define CC_CTRL_Y 46
-#define CC_CTRL_H 36
-#define CC_CTRL_R 7
-#define CC_PILL_CAP 24
-#define CC_SWITCH_KNOB 50
-#define CC_VSLIDER_W 24
-#define CC_VSLIDER_R 8
-#define CC_VKNOB_H 14
-#define CC_VKNOB_R 6
-#define CC_HSLIDER_TRACK 10
-#define CC_HSLIDER_KNOB 18
+/* TOP and BOTTOM name one integer setting with a range, so the page shows
+ * it as one tall item with a bar. */
+static bool qs_tall_range(const struct gui_quickscreen *qs)
+{
+    const struct settings_list *setting = qs->items[QUICKSCREEN_TOP];
+    return setting && setting == qs->items[QUICKSCREEN_BOTTOM] &&
+           (setting->flags & F_INT_SETTING) && setting->int_setting &&
+           setting->int_setting->step > 0;
+}
 
-#define CC_TITLE_RGB 0x161c24
-#define CC_EMBOSS_RGB 0xffffff
-#define CC_VALUE_ACTIVE_RGB 0x103868
-#define CC_VALUE_OFF_RGB 0x3b444e
-#define CC_KEY_ARROW_RGB 0x224c7d
-#define CC_SUN_RGB 0x3b526a
+/* The full-screen page of Classic, Fruit Company and Fruit Company Ultra, in
+ * the stock Settings preview's terms: its steel-blue backdrop, a glossy tile
+ * on its reflection for each mode, white Helvetica Bold names over values,
+ * and the Now Playing scrubber stood upright for a range. Nothing on it is a
+ * button; the faint glyphs are the click wheel's legends. LEFT and RIGHT are
+ * the left column's rows; TOP and BOTTOM share the right column, as one tall
+ * item when they name one setting. */
+#define CC_COLUMN 192           /* left column width; the right takes the rest */
+#define CC_TILE 78              /* stock Settings tile, without its reflection */
+#define CC_TILE_X 14
+#define CC_TILE_Y 12
+#define CC_REFLECTION 16        /* rows of the tile's reflection kept */
+#define CC_TEXT_X 104           /* text beside a tile */
+#define CC_TITLE_Y 26
+#define CC_VALUE_Y 48
+#define CC_KEY_Y 76
+#define CC_TRACK_W 14           /* the stock scrubber's height */
+#define CC_TRACK_TOP 64
+#define CC_TRACK_BOTTOM 178
+#define CC_KNOB 22
+
+#define CC_WHITE 0xffffff
+#define CC_VALUE_RGB 0xd6e4f2
+#define CC_SHADOW_RGB 0x34424e
+#define CC_KEY_ARGB 0xa8ffffff
+#define CC_SUN_ARGB 0xebffffff
 
 static const struct gloss_fill cc_backdrop_fill = {
-    0xff8597a4, 0xff7f919e, 0xff49545c, 0xff454f56 };
-static const struct gloss_fill cc_tile_fill = {
-    0xffffffff, 0xfff8fafc, 0xffdce3ec, 0xffc3cedb };
-static const struct gloss_fill cc_tile_gloss = {
-    0x52ffffff, 0x36ffffff, 0x0cffffff, 0x06ffffff };
-static const struct gloss_fill cc_key_fill = {
-    0xffffffff, 0xfff3f6fa, 0xffcfd7e1, 0xffb3bdc9 };
-static const struct gloss_fill cc_key_gloss = {
-    0x64ffffff, 0x48ffffff, 0x10ffffff, 0x08ffffff };
-static const struct gloss_fill cc_pill_fill = {
-    0xffffffff, 0xfffafcfd, 0xffd5dde7, 0xffb9c4d1 };
-static const struct gloss_fill cc_pill_gloss = {
-    0x68ffffff, 0x44ffffff, 0x10ffffff, 0x08ffffff };
-static const struct gloss_fill cc_switch_off = {
-    0xffa6b0bc, 0xffcdd4dd, 0xffeef2f6, 0xffffffff };
-static const struct gloss_fill cc_switch_gloss = {
-    0x5cffffff, 0x36ffffff, 0x0cffffff, 0x00ffffff };
+    0xff98abbb, 0xff92a6b6, 0xff4d5760, 0xff49545a };
+/* The round chrome knob of the stock sliders. */
 static const struct gloss_fill cc_knob_fill = {
-    0xffffffff, 0xfff6f8fa, 0xffcfd5dd, 0xff9ea6b0 };
-static const struct gloss_fill cc_trough_fill = {
-    0xff8a94a0, 0xffb8c2ce, 0xffdde3ea, 0xffedf1f6 };
-static const struct gloss_fill cc_tube_gloss = {
-    0x44ffffff, 0x30ffffff, 0x12ffffff, 0x08ffffff };
-
-static unsigned cc_pack(uint32_t rgb)
-{
-    return LCD_RGBPACK((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
-}
+    0xffffffff, 0xfff8f9fb, 0xffc4c9d0, 0xff949aa4 };
 
 static struct gloss_surface cc_surface(const struct quickscreen_page *view,
                                        const struct ui_rect *clip)
@@ -270,19 +252,34 @@ static struct gloss_surface cc_surface(const struct quickscreen_page *view,
         .clip_w = clip->width, .clip_h = clip->height };
 }
 
-/* The stock selection bar's blue, as the theme sets its four stops. */
-static struct gloss_fill cc_blue(const struct quickscreen_page *view)
+static void cc_dot(const struct gloss_surface *s, int x, int y, int w, int h,
+                   uint32_t argb)
 {
-    const uint32_t *c = view->theme.gradient[UI_GRADIENT_SELECTION].color;
-    if (!view->theme.gradient[UI_GRADIENT_SELECTION].stops)
-    {
-        uint32_t rgb = ui_theme_color(&view->theme, UI_COLOR_SELECTION,
-                                      &view->palette);
-        return (struct gloss_fill){ 0xff000000 | rgb, 0xff000000 | rgb,
-                                    0xff000000 | rgb, 0xff000000 | rgb };
-    }
-    return (struct gloss_fill){ 0xff000000 | c[0], 0xff000000 | c[1],
-                                0xff000000 | c[2], 0xff000000 | c[3] };
+    const struct gloss_fill fill = { argb, argb, argb, argb };
+    gloss_rect(s, x, y, w, h, 0, 0, &fill);
+}
+
+static int cc_font(const struct quickscreen_page *view, int font)
+{
+    return font >= 0 ? font : view->fallback_font;
+}
+
+/* `text` with its line's top-left at screen (x, y) over a shadow one row
+ * lower, clipped to `clip`. */
+static void cc_text(const struct quickscreen_page *view, struct ui_rect clip,
+                    int font, int x, int y, const char *text, uint32_t rgb)
+{
+    if (clip.width <= 0 || clip.height <= 0)
+        return;
+    struct viewport vp = quickscreen_viewport(view, &clip, font);
+    struct viewport *previous = lcd_set_viewport(&vp);
+    lcd_set_foreground(LCD_RGBPACK(CC_SHADOW_RGB >> 16,
+                                   (CC_SHADOW_RGB >> 8) & 255,
+                                   CC_SHADOW_RGB & 255));
+    lcd_putsxy(x - vp.x, y - vp.y + 1, text);
+    lcd_set_foreground(LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255));
+    lcd_putsxy(x - vp.x, y - vp.y, text);
+    lcd_set_viewport(previous);
 }
 
 static struct ui_rect cc_intersect(struct ui_rect a, struct ui_rect b)
@@ -293,355 +290,269 @@ static struct ui_rect cc_intersect(struct ui_rect a, struct ui_rect b)
         MAX(0, MIN(a.y + a.height, b.y + b.height) - y) };
 }
 
-static struct gloss_surface cc_clip_surface(const struct gloss_surface *s,
-                                            int x, int y, int w, int h)
+/* A triangle one column at a time: heights 1, 3, 5, 7 from its point. */
+static void cc_triangle(const struct gloss_surface *s, int x, int y,
+                        bool right)
 {
-    struct ui_rect r = cc_intersect(
-        (struct ui_rect){ s->clip_x, s->clip_y, s->clip_w, s->clip_h },
-        (struct ui_rect){ x, y, w, h });
-    return (struct gloss_surface){
-        .pixels = s->pixels, .stride = s->stride,
-        .clip_x = r.x, .clip_y = r.y, .clip_w = r.width, .clip_h = r.height };
+    for (int k = 0; k < 4; k++)
+        cc_dot(s, right ? x + 3 - k : x + k, y + 3 - k, 1, 2 * k + 1,
+               CC_KEY_ARGB);
 }
 
-/* `text` with its line's top-left at screen (x, y), over a one-pixel emboss
- * `dy` rows away, clipped to `clip`. */
-static void cc_text(const struct quickscreen_page *view, struct ui_rect clip,
-                    int font, int x, int y, const char *text, uint32_t rgb,
-                    uint32_t shadow, int dy)
+/* The click wheel's printed legend for `item`, its top-left at (x, y). */
+static void cc_key(const struct gloss_surface *s, enum quickscreen_item item,
+                   int x, int y)
 {
-    if (clip.width <= 0 || clip.height <= 0)
+    /* MENU in five-row capitals. */
+    static const uint8_t menu[4][5] = {
+        { 0x11, 0x1b, 0x15, 0x11, 0x11 }, { 0x0f, 0x08, 0x0e, 0x08, 0x0f },
+        { 0x11, 0x19, 0x15, 0x13, 0x11 }, { 0x11, 0x11, 0x11, 0x11, 0x0e },
+    };
+    switch (item)
+    {
+        case QUICKSCREEN_TOP:
+            for (int c = 0, gx = x; c < 4; c++)
+            {
+                int width = c == 1 ? 4 : 5;
+                for (int row = 0; row < 5; row++)
+                    for (int col = 0; col < width; col++)
+                        if (menu[c][row] & (1 << (width - 1 - col)))
+                            cc_dot(s, gx + col, y + 1 + row, 1, 1, CC_KEY_ARGB);
+                gx += width + 1;
+            }
+            break;
+        case QUICKSCREEN_LEFT:
+            cc_dot(s, x, y, 2, 7, CC_KEY_ARGB);
+            cc_triangle(s, x + 2, y, false);
+            cc_triangle(s, x + 6, y, false);
+            break;
+        case QUICKSCREEN_RIGHT:
+            cc_triangle(s, x, y, true);
+            cc_triangle(s, x + 4, y, true);
+            cc_dot(s, x + 8, y, 2, 7, CC_KEY_ARGB);
+            break;
+        default:
+            cc_triangle(s, x, y, true);
+            cc_dot(s, x + 6, y, 2, 7, CC_KEY_ARGB);
+            cc_dot(s, x + 9, y, 2, 7, CC_KEY_ARGB);
+            break;
+    }
+}
+
+/* A sun centred on the pixel corner (cx, cy): a disc of radius `r` and
+ * eight rays two pixels wide from `r0` to `r1` out. */
+static void cc_sun(const struct gloss_surface *s, int cx, int cy, int r,
+                   int r0, int r1, uint32_t argb)
+{
+    const struct gloss_fill fill = { argb, argb, argb, argb };
+    int len = r1 - r0;
+    gloss_rect(s, cx - r, cy - r, 2 * r, 2 * r, r, r, &fill);
+    cc_dot(s, cx - 1, cy - r1, 2, len, argb);
+    cc_dot(s, cx - 1, cy + r0, 2, len, argb);
+    cc_dot(s, cx - r1, cy - 1, len, 2, argb);
+    cc_dot(s, cx + r0, cy - 1, len, 2, argb);
+    /* The diagonals step a pixel at a time; 181 / 256 is cos 45. */
+    for (int t = r0 * 181 / 256 + 1; t <= r1 * 181 / 256; t++)
+    {
+        cc_dot(s, cx + t - 1, cy - t - 1, 2, 2, argb);
+        cc_dot(s, cx - t - 1, cy - t - 1, 2, 2, argb);
+        cc_dot(s, cx + t - 1, cy + t - 1, 2, 2, argb);
+        cc_dot(s, cx - t - 1, cy + t - 1, 2, 2, argb);
+    }
+}
+
+static int cc_brightness(const struct settings_list *setting)
+{
+    return setting && setting->setting == &global_settings.brightness;
+}
+
+/* The stock Settings tile that shows `item`'s value, or -1. */
+static int cc_icon(struct gui_quickscreen *qs, enum quickscreen_item item)
+{
+    const struct settings_list *setting = qs->items[item];
+    bool cider = cider_slot(qs, item);
+    int mode = cider ? cider_slot_mode(item) : -1;
+    if (mode == CIDER_MODE_SHUFFLE ||
+        (!cider && setting->setting == &global_settings.shuffle_mode))
+    {
+        int value = cider ? cider_mode_get(mode) : option_value_as_int(setting);
+        return value ? STOCK_ART_SETTINGS_SHUFFLESONGS
+                     : STOCK_ART_SETTINGS_SHUFFLEOFF;
+    }
+    if (mode == CIDER_MODE_REPEAT ||
+        (!cider && setting->setting == &global_settings.repeat_mode))
+    {
+        int value = cider ? cider_mode_get(mode) : option_value_as_int(setting);
+        return value == REPEAT_OFF ? STOCK_ART_SETTINGS_REPEATOFF :
+               value == REPEAT_ONE ? STOCK_ART_SETTINGS_REPEATONE :
+                                     STOCK_ART_SETTINGS_REPEATALL;
+    }
+    if (cc_brightness(setting))
+        return STOCK_ART_SETTINGS_BRIGHTNESS;
+    return -1;
+}
+
+static fb_data cc_mix(fb_data d, fb_data s, int a)
+{
+    int r = FB_UNPACK_RED(d), g = FB_UNPACK_GREEN(d), b = FB_UNPACK_BLUE(d);
+    r += (FB_UNPACK_RED(s) - r) * a / 256;
+    g += (FB_UNPACK_GREEN(s) - g) * a / 256;
+    b += (FB_UNPACK_BLUE(s) - b) * a / 256;
+    return FB_RGBPACK(r, g, b);
+}
+
+/* The tile `icon` at (x, y) with the top of its reflection, which fades out
+ * over CC_REFLECTION rows instead of the stock 43. */
+static void cc_tile(const struct quickscreen_page *view, struct ui_rect clip,
+                    int icon, int x, int y)
+{
+    fb_data *fb = view->paint_target->fb_ptr;
+    int x0 = MAX(x, clip.x), x1 = MIN(x + CC_TILE, clip.x + clip.width);
+    if (x1 <= x0)
         return;
-    struct viewport vp = quickscreen_viewport(view, &clip, font);
-    struct viewport *previous = lcd_set_viewport(&vp);
-    lcd_set_foreground(cc_pack(shadow));
-    lcd_putsxy(x - vp.x, y - vp.y + dy, text);
-    lcd_set_foreground(cc_pack(rgb));
-    lcd_putsxy(x - vp.x, y - vp.y, text);
-    lcd_set_viewport(previous);
+    for (int row = 0; row < CC_TILE + CC_REFLECTION; row++)
+    {
+        int sy = y + row;
+        if (sy < clip.y || sy >= clip.y + clip.height)
+            continue;
+        fb_data *out = fb + sy * LCD_WIDTH + x0;
+        fb_data under[CC_TILE];
+        memcpy(under, out, (x1 - x0) * sizeof(*out));
+        stock_art_row(STOCK_ART_SETTINGS_BASEPANEL, x0 - x, row, out, x1 - x0);
+        stock_art_mask_row(icon, x0 - x, row, out, x1 - x0, 0xeeeeee);
+        if (row < CC_TILE)
+            continue;
+        int fade = (row - CC_TILE + 1) * 256 / (CC_REFLECTION + 1);
+        for (int i = 0; i < x1 - x0; i++)
+            out[i] = cc_mix(out[i], under[i], fade);
+    }
 }
 
-static int cc_text_width(const char *text, int font)
+/* The stock scrubber's column `c` of CC_TRACK_W, filled or not. */
+static fb_data cc_track_color(const struct quickscreen_page *view, int c,
+                              bool filled)
 {
-    int w = 0, h = 0;
-    font_getstringsize(text, &w, &h, font);
-    return w;
+    fb_data pixel = 0;
+    if (stock_art_ready())
+    {
+        stock_art_row(filled ? STOCK_ART_NOWPLAYING_PROGRESSBAR_ACTIVE_FILL :
+                      STOCK_ART_NOWPLAYING_PROGRESSBAR_ACTIVE_BACKGROUND,
+                      8, c, &pixel, 1);
+        return pixel;
+    }
+    uint32_t rgb = ui_theme_gradient_at(&view->theme.gradient[filled ?
+        UI_GRADIENT_PROGRESS : UI_GRADIENT_PROGRESS_TRACK], c, CC_TRACK_W,
+        filled ? 0x3185d0 : 0xdbdbdb);
+    return FB_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
 }
 
-/* Draw the steel-blue backdrop and each tile's soft drop shadow so shadows
- * extend cleanly into gutters and never double-darken on single-tile updates. */
+/* The scrubber on its side from `top` to `bottom`, filled from the bottom
+ * up to the knob at `position` of `count`. */
+static void cc_vertical_bar(const struct quickscreen_page *view,
+                            const struct gloss_surface *s, int x, int top,
+                            int bottom, int position, int count)
+{
+    /* Rows each column loses to the round ends. */
+    static const uint8_t inset[CC_TRACK_W] = {
+        4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4 };
+    int usable = bottom - top - CC_KNOB;
+    int knob = bottom - CC_KNOB / 2 -
+               (count > 1 ? usable * position / (count - 1) : usable);
+    for (int c = 0; c < CC_TRACK_W; c++)
+    {
+        fb_data track = cc_track_color(view, c, false);
+        fb_data fill = cc_track_color(view, c, true);
+        uint32_t argb[2] = {
+            0xff000000 | FB_UNPACK_RED(track) << 16 |
+                FB_UNPACK_GREEN(track) << 8 | FB_UNPACK_BLUE(track),
+            0xff000000 | FB_UNPACK_RED(fill) << 16 |
+                FB_UNPACK_GREEN(fill) << 8 | FB_UNPACK_BLUE(fill),
+        };
+        int y0 = top + inset[c], y1 = bottom - inset[c];
+        cc_dot(s, x + c, y0, 1, MAX(0, knob - y0), argb[0]);
+        cc_dot(s, x + c, MAX(y0, knob), 1, y1 - MAX(y0, knob), argb[1]);
+    }
+    gloss_outline(s, x - 1, top - 1, CC_TRACK_W + 2, bottom - top + 2,
+                  (CC_TRACK_W + 2) / 2, 0xff3c4854);
+
+    int kx = x + CC_TRACK_W / 2 - CC_KNOB / 2, ky = knob - CC_KNOB / 2;
+    gloss_shadow(s, kx, ky, CC_KNOB, CC_KNOB, CC_KNOB / 2, 2, 1, 100);
+    gloss_rect(s, kx, ky, CC_KNOB, CC_KNOB, CC_KNOB / 2, CC_KNOB / 2,
+               &cc_knob_fill);
+    gloss_outline(s, kx, ky, CC_KNOB, CC_KNOB, CC_KNOB / 2, 0xff5a616b);
+}
+
 static void hud_paint_background(const struct ui_view *node,
                                  const struct ui_view_frame *frame)
 {
     const struct quickscreen_page *view = node->data;
     const struct ui_rect *c = &frame->clip;
-    struct gloss_surface s = cc_surface(view, c);
     if (view->theme.style[UI_STYLE_ART] == UI_ART_PLASTIC && stock_art_ready())
     {
         fb_data *fb = view->paint_target->fb_ptr;
         for (int y = c->y; y < c->y + c->height; y++)
             stock_art_row(STOCK_ART_BACKGROUND_LIGHTBLUE, c->x, y,
                           fb + y * LCD_WIDTH + c->x, c->width);
+        return;
+    }
+    struct gloss_surface s = cc_surface(view, c);
+    gloss_rect(&s, frame->bounds.x, frame->bounds.y, frame->bounds.width,
+               frame->bounds.height, 0, 0, &cc_backdrop_fill);
+}
+
+/* An item of the right column: its name, then a vertical bar for a
+ * setting with a range, or its value. */
+static void hud_paint_column(struct quickscreen_card *card,
+                             const struct ui_view_frame *frame,
+                             struct gloss_surface *s)
+{
+    struct gui_quickscreen *qs = card->qs;
+    struct quickscreen_page *view = qs->view;
+    const struct ui_rect *box = &frame->bounds;
+    const struct settings_list *setting = qs->items[card->item];
+    int title_font = cc_font(view, view->title_font);
+    int body_font = cc_font(view, view->body_font);
+    int cx = box->x + box->width / 2;
+    char buffer[MAX_PATH];
+    const char *title = quickscreen_title(qs, card->item);
+    int w = 0, h = 0;
+
+    font_getstringsize(title, &w, &h, title_font);
+    struct ui_rect text = cc_intersect(frame->clip, (struct ui_rect){
+        box->x + 4, box->y, box->width - 8, box->height });
+    cc_text(view, text, title_font, MAX(text.x, cx - w / 2), box->y + 12,
+            title, CC_WHITE);
+
+    int count = 0, position = 0;
+    bool tall = qs->items[QUICKSCREEN_TOP] == qs->items[QUICKSCREEN_BOTTOM];
+    if (qs_tall_range(qs) &&
+        get_setting_info_for_bar(setting, 0, &count, &position) && count > 2)
+    {
+        if (cc_brightness(setting))
+        {
+            cc_sun(s, cx, box->y + 46, 5, 7, 11, CC_SUN_ARGB);
+            cc_sun(s, cx, box->y + 194, 3, 5, 8, 0xc8ffffff);
+        }
+        cc_vertical_bar(view, s, cx - CC_TRACK_W / 2, box->y + CC_TRACK_TOP,
+                        box->y + CC_TRACK_BOTTOM, position, count);
+        cc_key(s, QUICKSCREEN_TOP, cx + 18, box->y + 43);
+        cc_key(s, QUICKSCREEN_BOTTOM, cx + 16, box->y + 191);
+        return;
+    }
+
+    const char *value = quickscreen_value(qs, card->item, buffer,
+                                          sizeof(buffer));
+    font_getstringsize(value, &w, &h, body_font);
+    cc_text(view, text, body_font, MAX(text.x, cx - w / 2), box->y + 34,
+            value, CC_VALUE_RGB);
+    if (tall)
+    {
+        cc_key(s, QUICKSCREEN_TOP, cx - 11, box->y + 64);
+        cc_key(s, QUICKSCREEN_BOTTOM, cx - 6, box->y + 80);
     }
     else
-    {
-        gloss_rect(&s, frame->bounds.x, frame->bounds.y,
-                   frame->bounds.width, frame->bounds.height,
-                   0, 0, &cc_backdrop_fill);
-    }
-
-    int bx = frame->bounds.x, by = frame->bounds.y;
-    for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
-    {
-        const struct quickscreen_card *card = &view->cards[i];
-        if (!card->qs)
-            continue;
-        const int *p = card->view.value;
-        gloss_shadow(&s, bx + p[UI_X], by + p[UI_Y], p[UI_WIDTH], p[UI_HEIGHT],
-                     CC_TILE_R, CC_TILE_SHADOW, CC_TILE_DROP, 95);
-    }
-}
-
-static void cc_paint_key_arrow(enum quickscreen_item item, int cx, int cy)
-{
-    for (int i = 0; i < 5; i++)
-    {
-        if (item == QUICKSCREEN_TOP)
-            lcd_hline(cx - i, cx + i, cy - 2 + i);
-        else if (item == QUICKSCREEN_BOTTOM)
-            lcd_hline(cx - i, cx + i, cy + 2 - i);
-        else if (item == QUICKSCREEN_LEFT)
-            lcd_vline(cx - 2 + i, cy - i, cy + i);
-        else
-            lcd_vline(cx + 2 - i, cy - i, cy + i);
-    }
-}
-
-static void cc_paint_key_cap(const struct quickscreen_page *view,
-                             struct gloss_surface *s, struct ui_rect clip,
-                             int x, int y, enum quickscreen_item item)
-{
-    const int size = CC_KEY_SIZE, r = 6;
-    gloss_shadow(s, x, y, size, size, r, 2, 1, 60);
-    gloss_rect(s, x, y, size, size, r, r, &cc_key_fill);
-    gloss_rect(s, x + 1, y + 1, size - 2, size / 2 - 1, r - 1, 0,
-               &cc_key_gloss);
-    gloss_outline(s, x, y, size, size, r, 0xff818d9c);
-
-    struct viewport vp = quickscreen_viewport(view, &clip, view->fallback_font);
-    struct viewport *previous = lcd_set_viewport(&vp);
-    int cx = x + size / 2 - vp.x;
-    int cy = y + size / 2 - vp.y;
-    lcd_set_foreground(cc_pack(CC_EMBOSS_RGB));
-    cc_paint_key_arrow(item, cx, cy + 1);
-    lcd_set_foreground(cc_pack(CC_KEY_ARROW_RGB));
-    cc_paint_key_arrow(item, cx, cy);
-    lcd_set_viewport(previous);
-}
-
-static void cc_paint_sun_one(int cx, int cy)
-{
-    for (int dy = -4; dy <= 4; dy++)
-        for (int dx = -4; dx <= 4; dx++)
-            if (dx * dx + dy * dy <= 16)
-                lcd_drawpixel(cx + dx, cy + dy);
-    static const int8_t dirs[8][2] = {
-        { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
-        { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 },
-    };
-    for (int d = 0; d < 8; d++)
-    {
-        int dx = dirs[d][0], dy = dirs[d][1];
-        bool diag = dx != 0 && dy != 0;
-        int s0 = diag ? 5 : 6;
-        int s1 = diag ? 7 : 8;
-        for (int k = s0; k <= s1; k++)
-            lcd_drawpixel(cx + dx * k, cy + dy * k);
-    }
-}
-
-static void cc_paint_sun(const struct quickscreen_page *view,
-                         struct ui_rect clip, int cx, int cy)
-{
-    struct viewport vp = quickscreen_viewport(view, &clip, view->fallback_font);
-    struct viewport *previous = lcd_set_viewport(&vp);
-    lcd_set_foreground(cc_pack(CC_EMBOSS_RGB));
-    cc_paint_sun_one(cx - vp.x, cy + 1 - vp.y);
-    lcd_set_foreground(cc_pack(CC_SUN_RGB));
-    cc_paint_sun_one(cx - vp.x, cy - vp.y);
-    lcd_set_viewport(previous);
-}
-
-static void cc_knob(struct gloss_surface *s, int x, int y, int w, int h, int r)
-{
-    gloss_shadow(s, x, y, w, h, r, 2, 1, 95);
-    gloss_rect(s, x, y, w, h, r, r, &cc_knob_fill);
-    gloss_outline(s, x, y, w, h, r, 0xff59626d);
-}
-
-/* Tall vertical glossy brightness slider on the right edge of its tile. */
-static void cc_vertical_brightness(const struct quickscreen_page *view,
-                                   struct gloss_surface *s, struct ui_rect clip,
-                                   const struct ui_rect *box,
-                                   enum quickscreen_item item,
-                                   const char *title, int position, int count)
-{
-    int title_font = view->title_font >= 0 ? view->title_font
-                                           : view->fallback_font;
-    int tx = box->x + box->width - CC_PAD - CC_VSLIDER_W;
-    int ty = box->y + 9;
-    int th = box->height - 18;
-    int pct = count > 1 ? (position * 100 + (count - 1) / 2) / (count - 1)
-                        : 100;
-
-    struct ui_rect left_clip = cc_intersect(clip, (struct ui_rect){
-        box->x + CC_PAD, box->y, tx - 4 - (box->x + CC_PAD), box->height });
-    cc_text(view, left_clip, title_font, box->x + CC_PAD, box->y + 11, title,
-            CC_TITLE_RGB, CC_EMBOSS_RGB, 1);
-
-    char pct_buf[8];
-    snprintf(pct_buf, sizeof(pct_buf), "%d%%", pct);
-    cc_text(view, left_clip, title_font, box->x + CC_PAD + 2, box->y + 38,
-            pct_buf, CC_VALUE_ACTIVE_RGB, CC_EMBOSS_RGB, 1);
-
-    cc_paint_key_cap(view, s, clip, box->x + CC_PAD,
-                     box->y + box->height - CC_PAD - CC_KEY_SIZE, item);
-    cc_paint_sun(view, clip, box->x + 47,
-                 box->y + box->height - CC_PAD - CC_KEY_SIZE / 2);
-
-    /* Recessed glass tube filled bottom-to-top with stock glossy blue. */
-    gloss_rect(s, tx, ty, CC_VSLIDER_W, th, CC_VSLIDER_R, CC_VSLIDER_R,
-               &cc_trough_fill);
-    int usable = MAX(1, th - CC_VKNOB_H);
-    int knob_y = ty + usable -
-                 (count > 1 ? usable * position / (count - 1) : usable);
-    int fill_top = knob_y + CC_VKNOB_H / 2;
-    struct gloss_fill blue = cc_blue(view);
-    struct gloss_surface filled = cc_clip_surface(s, tx, fill_top,
-                                                  CC_VSLIDER_W,
-                                                  ty + th - fill_top);
-    gloss_rect(&filled, tx, ty, CC_VSLIDER_W, th, CC_VSLIDER_R, CC_VSLIDER_R,
-               &blue);
-    gloss_rect(s, tx + 2, ty + 2, CC_VSLIDER_W / 2 - 2, th - 4, 4, 4,
-               &cc_tube_gloss);
-
-    /* Quartile stop ticks (25%, 50%, 75%) etched along the tube. */
-    static const struct gloss_fill tick_dark = {
-        0x38000000, 0x38000000, 0x38000000, 0x38000000 };
-    static const struct gloss_fill tick_light = {
-        0x48ffffff, 0x48ffffff, 0x48ffffff, 0x48ffffff };
-    for (int k = 1; k <= 3; k++)
-    {
-        int tick_y = ty + CC_VKNOB_H / 2 + usable * k / 4;
-        gloss_rect(s, tx + 4, tick_y, CC_VSLIDER_W - 8, 1, 0, 0, &tick_dark);
-        gloss_rect(s, tx + 4, tick_y + 1, CC_VSLIDER_W - 8, 1, 0, 0,
-                   &tick_light);
-    }
-    gloss_outline(s, tx, ty, CC_VSLIDER_W, th, CC_VSLIDER_R, 0xff5a6674);
-
-    /* 3D brushed-chrome thumb riding over the tube. */
-    int kw = CC_VSLIDER_W + 4;
-    int kx = tx - 2;
-    gloss_shadow(s, kx, knob_y, kw, CC_VKNOB_H, CC_VKNOB_R, 2, 1, 105);
-    gloss_rect(s, kx, knob_y, kw, CC_VKNOB_H, CC_VKNOB_R, CC_VKNOB_R,
-               &cc_knob_fill);
-    gloss_outline(s, kx, knob_y, kw, CC_VKNOB_H, CC_VKNOB_R, 0xff4f5965);
-    int ridge_y = knob_y + CC_VKNOB_H / 2;
-    static const struct gloss_fill ridge_dark = {
-        0x60404850, 0x60404850, 0x60404850, 0x60404850 };
-    static const struct gloss_fill ridge_light = {
-        0xa0ffffff, 0xa0ffffff, 0xa0ffffff, 0xa0ffffff };
-    gloss_rect(s, kx + 7, ridge_y - 1, kw - 14, 1, 0, 0, &ridge_dark);
-    gloss_rect(s, kx + 7, ridge_y, kw - 14, 1, 0, 0, &ridge_light);
-}
-
-/* iPhone OS-era glossy On/Off toggle switch. */
-static void cc_switch(const struct quickscreen_page *view,
-                      struct gloss_surface *s, struct ui_rect clip,
-                      struct ui_rect area, bool on)
-{
-    int sw_w = area.width, sw_h = area.height, r = CC_CTRL_R;
-    int knob_w = MIN(CC_SWITCH_KNOB, sw_w * 2 / 5);
-    struct gloss_fill blue = cc_blue(view);
-
-    gloss_shadow(s, area.x, area.y, sw_w, sw_h, r, 1, 1, 45);
-    gloss_rect(s, area.x, area.y, sw_w, sw_h, r, r,
-               on ? &blue : &cc_switch_off);
-    if (on)
-        gloss_rect(s, area.x + 1, area.y + 1, sw_w - 2, sw_h / 2 - 1,
-                   r - 1, 0, &cc_switch_gloss);
-    gloss_outline(s, area.x, area.y, sw_w, sw_h, r,
-                  on ? 0xff1e4d80 : 0xff7b8592);
-
-    const char *label = str(on ? LANG_ON : LANG_OFF);
-    int font = view->body_font >= 0 ? view->body_font : view->fallback_font;
-    int lx = on ? area.x : area.x + knob_w;
-    int tw = cc_text_width(label, font);
-    int ty = area.y + (sw_h - font_get(font)->height) / 2 - 1;
-    struct ui_rect text = cc_intersect(clip, (struct ui_rect){
-        lx, area.y, sw_w - knob_w, sw_h });
-    if (on)
-        cc_text(view, text, font, lx + (sw_w - knob_w - tw) / 2, ty, label,
-                0xffffff, 0x002d64, -1);
-    else
-        cc_text(view, text, font, lx + (sw_w - knob_w - tw) / 2, ty, label,
-                0x525c68, 0xffffff, 1);
-
-    int kx = on ? area.x + sw_w - knob_w : area.x;
-    cc_knob(s, kx, area.y, knob_w, sw_h, r);
-    /* Three vertical tactile grip grooves on the chrome thumb. */
-    int gx = kx + knob_w / 2;
-    static const struct gloss_fill grip_dark = {
-        0x50404850, 0x50404850, 0x50404850, 0x50404850 };
-    static const struct gloss_fill grip_light = {
-        0x80ffffff, 0x80ffffff, 0x80ffffff, 0x80ffffff };
-    for (int dx = -4; dx <= 4; dx += 4)
-    {
-        gloss_rect(s, gx + dx, area.y + 10, 1, sw_h - 20, 0, 0, &grip_dark);
-        gloss_rect(s, gx + dx + 1, area.y + 10, 1, sw_h - 20, 0, 0,
-                   &grip_light);
-    }
-}
-
-/* Aqua / Leopard pop-up choice pill with a glossy blue chevron cap. */
-static void cc_choice_pill(const struct quickscreen_page *view,
-                           struct gloss_surface *s, struct ui_rect clip,
-                           struct ui_rect area, const char *value, bool active)
-{
-    int px = area.x, py = area.y, pw = area.width, ph = area.height;
-    int r = CC_CTRL_R, cap_w = CC_PILL_CAP;
-    struct gloss_fill blue = cc_blue(view);
-
-    gloss_shadow(s, px, py, pw, ph, r, 2, 1, 55);
-    gloss_rect(s, px, py, pw, ph, r, r, &cc_pill_fill);
-    struct gloss_surface cap = cc_clip_surface(s, px + pw - cap_w, py,
-                                               cap_w, ph);
-    gloss_rect(&cap, px, py, pw, ph, r, r, &blue);
-    gloss_rect(s, px + 1, py + 1, pw - 2, ph / 2 - 1, r - 1, 0,
-               &cc_pill_gloss);
-
-    static const struct gloss_fill sep = {
-        0xff2b5f96, 0xff2b5f96, 0xff2b5f96, 0xff2b5f96 };
-    gloss_rect(s, px + pw - cap_w, py + 1, 1, ph - 2, 0, 0, &sep);
-    gloss_outline(s, px, py, pw, ph, r, 0xff6e7b8a);
-    gloss_outline(&cap, px, py, pw, ph, r, 0xff1c4e82);
-
-    /* Up/down arrows in the blue chevron cap. */
-    int mx = px + pw - cap_w / 2, my = py + ph / 2;
-    struct viewport vp = quickscreen_viewport(view, &clip, view->fallback_font);
-    struct viewport *previous = lcd_set_viewport(&vp);
-    lcd_set_foreground(cc_pack(0x002d64));
-    for (int i = 0; i < 4; i++)
-    {
-        lcd_hline(mx - i - vp.x, mx + i - vp.x, my - 6 + i - vp.y);
-        lcd_hline(mx - i - vp.x, mx + i - vp.x, my + 4 - i - vp.y);
-    }
-    lcd_set_foreground(cc_pack(0xffffff));
-    for (int i = 0; i < 4; i++)
-    {
-        lcd_hline(mx - i - vp.x, mx + i - vp.x, my - 5 + i - vp.y);
-        lcd_hline(mx - i - vp.x, mx + i - vp.x, my + 5 - i - vp.y);
-    }
-    lcd_set_viewport(previous);
-
-    int font = view->body_font >= 0 ? view->body_font : view->fallback_font;
-    int body_w = pw - cap_w;
-    int room = body_w - 8;
-    int tw = MIN(cc_text_width(value, font), room);
-    int tx = px + MAX(4, (body_w - tw) / 2);
-    int ty = py + (ph - font_get(font)->height) / 2 - 1;
-    struct ui_rect text = cc_intersect(clip, (struct ui_rect){
-        px + 4, py, room, ph });
-    cc_text(view, text, font, tx, ty, value,
-            active ? CC_VALUE_ACTIVE_RGB : CC_VALUE_OFF_RGB,
-            CC_EMBOSS_RGB, 1);
-}
-
-/* Horizontal glossy Aqua slider for any non-brightness numeric setting. */
-static void cc_horizontal_slider(const struct quickscreen_page *view,
-                                 struct gloss_surface *s, struct ui_rect area,
-                                 int position, int count)
-{
-    int left = area.x + CC_HSLIDER_KNOB / 2;
-    int right = area.x + area.width - CC_HSLIDER_KNOB / 2;
-    int knob = left + (count > 1 ? (right - left) * position / (count - 1) : 0);
-    int ty = area.y + (area.height - CC_HSLIDER_TRACK) / 2;
-    struct gloss_fill blue = cc_blue(view);
-
-    struct gloss_surface fill = cc_clip_surface(s, area.x, ty,
-                                                knob - area.x,
-                                                CC_HSLIDER_TRACK);
-    gloss_rect(&fill, area.x, ty, area.width, CC_HSLIDER_TRACK,
-               CC_HSLIDER_TRACK / 2, CC_HSLIDER_TRACK / 2, &blue);
-    fill = cc_clip_surface(s, knob, ty, area.x + area.width - knob,
-                           CC_HSLIDER_TRACK);
-    gloss_rect(&fill, area.x, ty, area.width, CC_HSLIDER_TRACK,
-               CC_HSLIDER_TRACK / 2, CC_HSLIDER_TRACK / 2, &cc_trough_fill);
-    gloss_outline(s, area.x, ty, area.width, CC_HSLIDER_TRACK,
-                  CC_HSLIDER_TRACK / 2, 0xff6e7782);
-    int ky = area.y + (area.height - CC_HSLIDER_KNOB) / 2;
-    cc_knob(s, knob - CC_HSLIDER_KNOB / 2, ky,
-            CC_HSLIDER_KNOB, CC_HSLIDER_KNOB, CC_HSLIDER_KNOB / 2);
+        cc_key(s, card->item, cx - (card->item == QUICKSCREEN_TOP ? 11 : 6),
+               box->y + 62);
 }
 
 static void hud_paint_card(const struct ui_view *node,
@@ -652,71 +563,51 @@ static void hud_paint_card(const struct ui_view *node,
     struct quickscreen_page *view = qs->view;
     const struct ui_rect *box = &frame->bounds;
     struct gloss_surface s = cc_surface(view, &frame->clip);
-    int title_font = view->title_font >= 0 ? view->title_font
-                                           : view->fallback_font;
-    int body_font = view->body_font >= 0 ? view->body_font
-                                         : view->fallback_font;
     char buffer[MAX_PATH];
 
-    /* Pearl-white convex tile shell with upper-half glass gloss. */
-    gloss_rect(&s, box->x, box->y, box->width, box->height,
-               CC_TILE_R, CC_TILE_R, &cc_tile_fill);
-    gloss_rect(&s, box->x + 1, box->y + 1, box->width - 2,
-               box->height * 36 / 100, CC_TILE_R - 1, 0, &cc_tile_gloss);
-    gloss_outline(&s, box->x, box->y, box->width, box->height,
-                  CC_TILE_R, 0xff5a6878);
-
-    const struct settings_list *setting = qs->items[card->item];
-    const char *title = quickscreen_title(qs, card->item);
-    const char *value = quickscreen_value(qs, card->item, buffer,
-                                          sizeof(buffer));
-    int count = 0, position = 0;
-
-    if (!cider_slot(qs, card->item) && setting->lang_id == LANG_BRIGHTNESS &&
-        get_setting_info_for_bar(setting, 0, &count, &position) && count > 1)
+    if (card->item == QUICKSCREEN_TOP || card->item == QUICKSCREEN_BOTTOM)
     {
-        cc_vertical_brightness(view, &s, frame->clip, box, card->item,
-                               title, position, count);
+        hud_paint_column(card, frame, &s);
         return;
     }
 
-    int key_x = box->x + box->width - CC_PAD - CC_KEY_SIZE;
-    struct ui_rect title_clip = cc_intersect(frame->clip, (struct ui_rect){
-        box->x + CC_PAD, box->y, key_x - 4 - (box->x + CC_PAD), box->height });
-    cc_text(view, title_clip, title_font, box->x + CC_PAD, box->y + 11, title,
-            CC_TITLE_RGB, CC_EMBOSS_RGB, 1);
-    cc_paint_key_cap(view, &s, frame->clip, key_x, box->y + 9, card->item);
+    int icon = stock_art_ready() ? cc_icon(qs, card->item) : -1;
+    int tx = box->x + (icon >= 0 ? CC_TEXT_X : CC_TILE_X);
+    if (icon >= 0)
+        cc_tile(view, frame->clip, icon, box->x + CC_TILE_X,
+                box->y + CC_TILE_Y);
+    struct ui_rect text = cc_intersect(frame->clip, (struct ui_rect){
+        tx, box->y, box->x + box->width - 6 - tx, box->height });
+    cc_text(view, text, cc_font(view, view->title_font), tx,
+            box->y + CC_TITLE_Y, quickscreen_title(qs, card->item), CC_WHITE);
+    cc_text(view, text, cc_font(view, view->body_font), tx,
+            box->y + CC_VALUE_Y,
+            quickscreen_value(qs, card->item, buffer, sizeof(buffer)),
+            CC_VALUE_RGB);
+    cc_key(&s, card->item, tx, box->y + CC_KEY_Y);
+}
 
-    struct ui_rect control = { box->x + CC_PAD, box->y + CC_CTRL_Y,
-                               box->width - 2 * CC_PAD, CC_CTRL_H };
-    if (cider_slot(qs, card->item))
+/* The page's slot for `item`, or an empty rectangle for BOTTOM when it
+ * repeats TOP and the right column is one tall item. */
+static struct ui_rect hud_slot(const struct gui_quickscreen *qs,
+                               enum quickscreen_item item,
+                               const struct viewport *vp)
+{
+    int half = vp->height / 2;
+    int right = vp->width - CC_COLUMN;
+    bool tall = qs->items[QUICKSCREEN_TOP] == qs->items[QUICKSCREEN_BOTTOM];
+    switch (item)
     {
-        bool active = cider_mode_get(cider_slot_mode(card->item)) != 0;
-        cc_choice_pill(view, &s, frame->clip, control, value, active);
-    }
-    else if ((setting->flags & F_T_MASK) == F_T_BOOL)
-    {
-        cc_switch(view, &s, frame->clip, control,
-                  option_value_as_int(setting) != 0);
-    }
-    else if ((setting->flags & (F_INT_SETTING | F_T_SOUND)) &&
-             get_setting_info_for_bar(setting, 0, &count, &position) &&
-             count > 2)
-    {
-        int vw = cc_text_width(value, body_font);
-        int vx = box->x + box->width - CC_PAD - vw;
-        struct ui_rect val_clip = cc_intersect(frame->clip, (struct ui_rect){
-            box->x + CC_PAD, box->y + 34, box->width - 2 * CC_PAD, 24 });
-        cc_text(view, val_clip, body_font, vx, box->y + 34, value,
-                CC_VALUE_ACTIVE_RGB, CC_EMBOSS_RGB, 1);
-        struct ui_rect bar = { box->x + CC_PAD, box->y + 62,
-                               box->width - 2 * CC_PAD, 22 };
-        cc_horizontal_slider(view, &s, bar, position, count);
-    }
-    else
-    {
-        bool active = option_value_as_int(setting) != 0;
-        cc_choice_pill(view, &s, frame->clip, control, value, active);
+        case QUICKSCREEN_LEFT:
+            return (struct ui_rect){ 0, 0, CC_COLUMN, half };
+        case QUICKSCREEN_RIGHT:
+            return (struct ui_rect){ 0, half, CC_COLUMN, vp->height - half };
+        case QUICKSCREEN_TOP:
+            return (struct ui_rect){ CC_COLUMN, 0, right,
+                                     tall ? vp->height : half };
+        default:
+            return tall ? (struct ui_rect){ 0 } :
+                (struct ui_rect){ CC_COLUMN, half, right, vp->height - half };
     }
 }
 
@@ -731,39 +622,29 @@ static void quickscreen_layout(struct gui_quickscreen *qs, const struct viewport
         .paint = hud_paint_background};
     static const struct ui_view_ops hud_card_ops = {.paint = hud_paint_card};
 
-    int x, y, width, height, gap;
-    if (view->hud)
-    {
-        gap = CC_GUTTER;
-        width = MAX(1, (vp->width - 2 * CC_MARGIN_X - gap) / 2);
-        height = MAX(1, (vp->height - 2 * CC_MARGIN_Y - gap) / 2);
-        x = (vp->width - (2 * width + gap)) / 2;
-        y = (vp->height - (2 * height + gap)) / 2;
-    }
-    else
-    {
-        int margin = MIN(view->theme.metric[UI_METRIC_MODAL_EDGE_MARGIN],
-                         vp->width / 8);
-        gap = MIN(MAX(4, margin * 2 / 3), vp->height / 8);
-        width = MAX(1, (vp->width - 2 * margin - gap) / 2);
-        height = MAX(1, MIN(view->theme.metric[UI_METRIC_ROW_HEIGHT] * 2 + margin,
+    int margin = MIN(view->theme.metric[UI_METRIC_MODAL_EDGE_MARGIN],
+                     vp->width / 8);
+    int gap = MIN(MAX(4, margin * 2 / 3), vp->height / 8);
+    int width = MAX(1, (vp->width - 2 * margin - gap) / 2);
+    int height = MAX(1, MIN(view->theme.metric[UI_METRIC_ROW_HEIGHT] * 2 + margin,
                             (vp->height - gap) / 2));
-        x = (vp->width - (2 * width + gap)) / 2;
-        y = (vp->height - (2 * height + gap)) / 2;
-    }
+    int x = (vp->width - (2 * width + gap)) / 2;
+    int y = (vp->height - (2 * height + gap)) / 2;
 
     ui_view_init(&view->background, (struct ui_rect){vp->x, vp->y, vp->width, vp->height},
                  view->hud ? &hud_background_ops : &background_ops, view);
     for (int i = 0; i < QUICKSCREEN_ITEM_COUNT; ++i)
     {
-        if (!qs->items[i])
+        struct ui_rect slot = view->hud ? hud_slot(qs, i, vp) :
+            (struct ui_rect){ x + (slots[i] % 2) * (width + gap),
+                              y + (slots[i] / 2) * (height + gap),
+                              width, height };
+        if (!qs->items[i] || !slot.width)
             continue;
         struct quickscreen_card *card = &view->cards[i];
         card->qs = qs;
         card->item = i;
-        ui_view_init(&card->view, (struct ui_rect){
-                     x + (slots[i] % 2) * (width + gap),
-                     y + (slots[i] / 2) * (height + gap), width, height},
+        ui_view_init(&card->view, slot,
                      view->hud ? &hud_card_ops : &card_ops, card);
         ui_view_append(&view->background, &card->view);
     }
@@ -960,40 +841,18 @@ static bool gui_quickscreen_do_button(struct gui_quickscreen * qs, int button,
     }
     else
 #endif
-    if (qs->view->hud && qs->items[item]->lang_id == LANG_BRIGHTNESS &&
-        (qs->items[item]->flags & F_INT_SETTING) &&
-        qs->items[item]->int_setting)
+    if (qs->view->hud && qs_tall_range(qs) &&
+        (item == QUICKSCREEN_TOP || item == QUICKSCREEN_BOTTOM))
     {
-        /* Single-tile vertical brightness slider: tap steps across five clean
-         * stops and wraps max->min; hold ramps smoothly up and stops at max. */
+        /* MENU raises the tall item and PLAY lowers it, a sixteenth of its
+         * range a step, stopping at the ends. */
         const struct int_setting *info = qs->items[item]->int_setting;
-        int min_v = info->min, max_v = info->max;
-        int cur = *(int *)qs->items[item]->setting;
-        int next = min_v;
-        if (get_action_statuscode(NULL) & ACTION_REPEAT)
-        {
-            int delta = (max_v - min_v) / 20;
-            if (delta < 1)
-                delta = 1;
-            next = cur + delta;
-            if (next > max_v)
-                next = max_v;
-        }
-        else
-        {
-            for (int k = 1; k <= 4; k++)
-            {
-                int stop = min_v + (max_v - min_v) * k / 4;
-                if (stop > cur)
-                {
-                    next = stop;
-                    break;
-                }
-            }
-        }
-        *(int *)qs->items[item]->setting = next;
+        int *value = qs->items[item]->setting;
+        int step = MAX(info->step, (info->max - info->min + 15) / 16);
+        int next = *value + (previous ? -step : step);
+        *value = MIN(MAX(next, info->min), info->max);
         if (info->option_callback)
-            info->option_callback(next);
+            info->option_callback(*value);
     }
     else
         option_select_next_val(qs->items[item], previous, true);
@@ -1027,21 +886,6 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
     qs->view = view;
     *view = (struct quickscreen_page){ .paint_target = &lcd_framebuffer_default };
     view->hud = quick_screen_uses_hud();
-    /* Merge a legacy duplicate top/bottom brightness pair into the single
-     * vertical brightness tile and fill the freed bottom slot with Enable EQ. */
-    if (view->hud &&
-        qs->items[QUICKSCREEN_TOP] && qs->items[QUICKSCREEN_BOTTOM] &&
-        qs->items[QUICKSCREEN_TOP] == qs->items[QUICKSCREEN_BOTTOM] &&
-        qs->items[QUICKSCREEN_TOP]->lang_id == LANG_BRIGHTNESS)
-    {
-        const struct settings_list *eq =
-            find_setting(&global_settings.eq_enabled);
-        if (eq)
-        {
-            qs->items[QUICKSCREEN_BOTTOM] = eq;
-            qs->before[QUICKSCREEN_BOTTOM] = option_value_as_int(eq);
-        }
-    }
     view->sheet.slide = view->hud;
     ui_scene_interrupt();
     /* Keep the caller's framebuffer snapshot so closing restores it without a
@@ -1066,6 +910,9 @@ static int gui_syncquickscreen_run(struct gui_quickscreen * qs, int button_enter
                                                    : UI_FONT_BODY, 64);
 
     push_current_activity(ACTIVITY_QUICKSCREEN);
+    /* MENU raises Brightness here; the hold that opened the page must not. */
+    if (view->hud)
+        action_wait_for_release_preserve_queue();
     sb_set_persistent_title(str(LANG_QUICK_SETTINGS), Icon_NOICON, SCREEN_MAIN);
     screens[SCREEN_MAIN].scroll_stop();
     struct viewport content;

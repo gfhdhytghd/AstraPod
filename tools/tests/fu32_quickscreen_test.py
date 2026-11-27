@@ -75,6 +75,8 @@ enum screen_type{SCREEN_MAIN};enum quickscreen_item{dummy_item};
 #define F_TABLE_SETTING 16
 #define F_ALLOW_ARBITRARY_VALS 32
 #define HASFLAG(s,f) (((s)->flags&(f))!=0)
+#define MIN(a,b) ((a)<(b)?(a):(b))
+#define MAX(a,b) ((a)>(b)?(a):(b))
 #define ACTION_REPEAT 128
 struct int_setting {int min,max,step;void(*option_callback)(int);};
 struct bool_setting {void(*option_callback)(bool);};
@@ -97,7 +99,7 @@ static struct {bool talk_menu;int shuffle_mode,repeat_mode;const struct settings
 #define playlist_shuffle shuffle_mode
 static struct {int volume;}global_status;
 static int modes[2],cvol,localsteps;
-static bool source_cider;
+static bool source_cider,hud_mode;
 static bool cider_active(void){return source_cider;}
 static int get_current_activity(void){return ACTIVITY_QUICKSCREEN;}
 static bool agents_nav_has(int n){(void)n;return false;}
@@ -166,6 +168,7 @@ static void quickscreen_update(struct gui_quickscreen*q,enum quickscreen_item it
 static void quickscreen_cleanup(void*p){(void)p;cleans++;cider_quickscreen=false;}
 static void quickscreen_draw_cb(unsigned short id,void*d,void*u){(void)id;(void)d;(void)u;}
 static void push_current_activity(int a){(void)a;}
+static void action_wait_for_release_preserve_queue(void){}
 static void viewportmanager_theme_enable(int i,bool b,struct viewport*p){(void)i;(void)b;(void)p;}
 static void add_event_ex(int i,bool b,void(*cb)(unsigned short,void*,void*),void*p){(void)i;(void)b;(void)cb;(void)p;}
 static int default_event_handler_ex(int b,void(*cleanup)(void*),void*p){(void)b;(void)cleanup;(void)p;return 0;}
@@ -189,14 +192,14 @@ pre=pre.replace('PRODUCTION_OPTION_STEP',fn((S/'apps-ipod/widgets/option_select.
 loop=fn(q,'gui_syncquickscreen_run')
 start=loop.index('    qs->view_handle =')
 end=loop.index('    while (true)',start)
-loop=loop[:start]+'''    struct quickscreen_page view_storage={0}, *view=&view_storage;
+loop=loop[:start]+'''    struct quickscreen_page view_storage={.hud=hud_mode}, *view=&view_storage;
     qs->view=view;
     quickscreen_update(qs, QUICKSCREEN_ITEM_COUNT);
 '''+loop[end:]
 start=loop.index('    if (view->sheet_handle > 0)')
 end=loop.index('    /* Notify that',start)
 loop=loop[:start]+loop[end:]
-pre+=fn(q,'gui_quickscreen_do_button')+loop
+pre+=fn(q,'qs_tall_range')+fn(q,'gui_quickscreen_do_button')+loop
 if 'static int quick_screen_run(' in q:
  pre+=fn(q,'quick_screen_run')+fn(q,'quick_screen_quick')+fn(q,'quick_screen_cider')+fn(q,'quick_screen_current')
 else:
@@ -282,6 +285,26 @@ int main(void){
  add(BUTTON_LEFT,1,0,0);add(BUTTON_RIGHT,1,1,0);
  add(BUTTON_RC_MENU,1,1,0);add(BUTTON_RC_MENU|BUTTON_REL,1,1,0);
  quick_screen_current(ACTION_STD_QUICKSCREEN,NULL);assert(!saves&&!tweaks&&brightness==32);
+ /* The full-screen page shows TOP/BOTTOM brightness as one tall item: MENU
+  * raises and PLAY lowers it a sixteenth of its range, stopping at the
+  * ends, while LEFT and RIGHT step only their own settings. */
+ hud_mode=true;source_cider=false;kind=1;reset();brightness=56;applied=-1;saves=0;
+ global_settings.playlist_shuffle=0;global_settings.repeat_mode=0;
+ addb(BUTTON_MENU,60);addb(BUTTON_MENU|BUTTON_REL,60);
+ addb(BUTTON_MENU|BUTTON_REPEAT,63);addb(BUTTON_MENU,63);addb(BUTTON_MENU|BUTTON_REL,63);
+ addb(BUTTON_PLAY,59);addb(BUTTON_PLAY|BUTTON_REL,59);
+ add(BUTTON_LEFT,0,0,0);add(BUTTON_LEFT|BUTTON_REL,0,0,0);
+ add(BUTTON_RIGHT,0,0,0);add(BUTTON_RIGHT|BUTTON_REL,0,0,0);
+ add(BUTTON_SELECT,0,0,0);add(BUTTON_SELECT|BUTTON_REL,0,0,0);
+ quick_screen_current(ACTION_STD_QUICKSCREEN,NULL);
+ assert(step==limit&&brightness==59&&applied==59&&saves==1);
+ assert(global_settings.playlist_shuffle==1&&global_settings.repeat_mode==1);
+ reset();brightness=5;
+ addb(BUTTON_PLAY,1);addb(BUTTON_PLAY|BUTTON_REPEAT,1);addb(BUTTON_PLAY,1);
+ add(BUTTON_SELECT,0,0,0);add(BUTTON_SELECT|BUTTON_REL,0,0,0);
+ quick_screen_current(ACTION_STD_QUICKSCREEN,NULL);assert(brightness==1&&applied==1);
+ hud_mode=false;
+ puts("Page brightness: MENU raises, PLAY lowers, a sixteenth of the range a step, clamped; LEFT/RIGHT untouched PASS");
  puts("FU34 local/Cider brightness: body MENU/PLAY, remote Up/Down, native step/callback/limits/persistence, native TOP/BOTTOM; remote Menu/Play and body Select exit PASS");
 
  puts("FU32 production key worker + quickscreen loop + native Cider values: device/remote arrows, wheel, physical MENU TOP, remote MENU/centre exit, Play-hold context PASS");

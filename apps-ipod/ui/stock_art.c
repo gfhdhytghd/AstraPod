@@ -344,6 +344,16 @@ void stock_art_row(enum stock_art_id id, int sx, int sy, fb_data *out,
         blend_span(art, sy * art->ink_w + sx, out + x, count, false, 0);
 }
 
+void stock_art_mask_row(enum stock_art_id id, int sx, int sy, fb_data *out,
+                        int count, uint32_t rgb)
+{
+    const struct stock_art *art = &stock_art[id];
+    int x = 0, y = 0, height = 1;
+    if (stock_art_ready() &&
+        ink_part(art, &sx, &sy, &count, &height, &x, &y))
+        blend_span(art, sy * art->ink_w + sx, out + x, count, true, rgb);
+}
+
 void stock_art_draw(enum stock_art_id id, int x, int y, struct ui_rect clip)
 {
     draw(id, x, y, false, 0, clip);

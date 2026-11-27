@@ -222,7 +222,7 @@ def walk(sim, playback, sim_binary):
     press(sim, "menu")
     press(sim, "menu", hold=45)
     assert playback.activity() == playback.activities["ACTIVITY_QUICKSCREEN"]
-    # Control Centre is a direct four-tile modal, not a navigation page:
+    # Control Centre is a page of controls, not a navigation page:
     # SELECT closes it cleanly back to the menu.
     press(sim, "select")
     assert playback.activity() != playback.activities["ACTIVITY_QUICKSCREEN"]

@@ -13,18 +13,20 @@
 
 #define MAX_ALARMS 8
 #define ALARM_LABELS 23
+#define ALARM_PLAYLIST_LEN 64
 
 enum alarm_repeat {
     ALARM_ONCE, ALARM_EVERY_DAY, ALARM_WEEKDAYS, ALARM_WEEKENDS,
     ALARM_EVERY_WEEK, ALARM_EVERY_MONTH, ALARM_EVERY_YEAR,
 };
-enum alarm_sound { ALARM_SOUND_NONE, ALARM_SOUND_BEEP };
+enum alarm_sound { ALARM_SOUND_NONE, ALARM_SOUND_BEEP, ALARM_SOUND_PLAYLIST };
 
 /* One alarm as the file holds it; `month` counts from 1. */
 struct alarm {
     uint8_t on, repeat, sound, label;
     uint8_t hour, minute, month, day;
     uint16_t year;
+    char playlist[ALARM_PLAYLIST_LEN];
 };
 
 struct alarm_table {

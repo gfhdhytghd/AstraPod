@@ -37,10 +37,12 @@
 #include "ui/native_theme_runtime.h"
 #include "ui/retained.h"
 #include "ui/scene.h"
+#include "ui/statusbar.h"
 #include "ui/stock_art.h"
 #include "widgets/list.h"
 #include "root_menu.h"
 #include "extras.h"
+#include "extras_bar.h"
 #include "extras_clock.h"
 
 /* ---- the cities ---- */
@@ -355,6 +357,67 @@ static void clocks_save(void)
     for (int i = 0; i < clock_count; i++)
         fdprintf(fd, "%s\n", cities[clocks[i]].name);
     close(fd);
+}
+
+static void civil_from_days(long z, int *y, int *m, int *d)
+{
+    z += 719468;
+    long era = (z >= 0 ? z : z - 146096) / 146097;
+    long doe = z - era * 146097;
+    long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    long mp = (5 * doy + 2) / 153;
+    *d = (int)(doy - (153 * mp + 2) / 5 + 1);
+    *m = (int)(mp < 10 ? mp + 3 : mp - 9);
+    *y = (int)(yoe + era * 400 + (*m <= 2));
+}
+
+int extras_clock_city_count(void)
+{
+    return (int)ARRAYLEN(cities);
+}
+
+const char *extras_clock_city_name(int city)
+{
+    if (city < 0 || city >= (int)ARRAYLEN(cities))
+        return "";
+    return cities[city].name;
+}
+
+int extras_clock_home_city(void)
+{
+    if (!clock_count)
+        clocks_load();
+    return clocks[0];
+}
+
+void extras_clock_set_home_city(int city, bool adjust_rtc)
+{
+    if (city < 0 || city >= (int)ARRAYLEN(cities))
+        return;
+    if (!clock_count)
+        clocks_load();
+    int prev = clocks[0];
+    if (adjust_rtc && city != prev)
+    {
+        struct tm tm = *get_time();
+        long local_day;
+        long utc = player_utc(prev, &local_day);
+        long local = utc + city_offset(city, utc);
+        long day = (local >= 0 ? local : local - 1439) / 1440;
+        long mins = local - day * 1440;
+        int y, m, d;
+        civil_from_days(day, &y, &m, &d);
+        tm.tm_year = y - 1900;
+        tm.tm_mon = m - 1;
+        tm.tm_mday = d;
+        tm.tm_hour = (int)(mins / 60);
+        tm.tm_min = (int)(mins % 60);
+        tm.tm_wday = (int)(((day + 4) % 7 + 7) % 7);
+        set_time(&tm);
+    }
+    clocks[0] = city;
+    clocks_save();
 }
 
 /* ---- the painters ---- */
@@ -762,74 +825,94 @@ static enum list_pane_kind city_get_pane(int item, void *data, int *art)
     return LIST_PANE_PICTURE;
 }
 
-static int list_minute = -1;
-
-/* Installs the pane, and redraws the list when the minute turns. */
-static int list_action(int action, struct gui_synclist *list,
-                       list_get_pane *pane)
+static enum list_row_kind city_get_kind(int item, void *data)
 {
-    int minute = get_time()->tm_min;
-    if (action == ACTION_REDRAW)
-        gui_synclist_set_pane_callback(list, pane);
-    else if (action == ACTION_NONE && minute != list_minute)
-        action = ACTION_REDRAW;
-    list_minute = minute;
-    return action;
+    (void)item; (void)data;
+    return LIST_ROW_OPTION;
 }
 
-static int region_action(int action, struct gui_synclist *list)
+/* Run a split-pane list with wheel-only navigation; returns chosen row,
+ * -1 on Menu, or -2 on USB. */
+static int run_pick_list(const char *title, int count, int start,
+                         list_get_name *get_name, list_get_kind *get_kind,
+                         list_get_pane *get_pane)
 {
-    return list_action(action, list, region_get_pane);
-}
+    struct gui_synclist list;
+    int action, minute = get_time()->tm_min, result = -1;
 
-static int city_action(int action, struct gui_synclist *list)
-{
-    return list_action(action, list, city_get_pane);
+    sb_set_persistent_title(title, Icon_NOICON, SCREEN_MAIN);
+    viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
+    gui_synclist_init(&list, get_name, NULL, false, 1, NULL);
+    gui_synclist_set_title(&list, (char *)title, Icon_NOICON);
+    gui_synclist_set_row_callbacks(&list, get_kind, NULL, NULL);
+    gui_synclist_set_pane_callback(&list, get_pane);
+    gui_synclist_set_nb_items(&list, count);
+    gui_synclist_select_item(&list, MIN(start, count - 1));
+    gui_synclist_draw_settled(&list);
+
+    while (1)
+    {
+        extras_list_do_action(HZ, &list, &action);
+        if (action == ACTION_STD_OK)
+        {
+            result = gui_synclist_get_sel_pos(&list);
+            break;
+        }
+        if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
+            break;
+        if (default_event_handler(action) == SYS_USB_CONNECTED)
+        {
+            result = -2;
+            break;
+        }
+        int now = get_time()->tm_min;
+        if (now != minute)
+        {
+            minute = now;
+            gui_synclist_draw(&list);
+        }
+    }
+
+    gui_synclist_scroll_stop(&list);
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
+    return result;
 }
 
 /* Pick a city, starting from `city` or, for -1, the first region. Returns
  * the city, or -1. */
 static int pick_city(int city)
 {
-    struct simplelist_info info;
     int region = city >= 0 ? city_region(city) : 0;
     struct ui_scene region_scene = {0};
     ui_scene_open_page(&region_scene, "clock-region-push");
     while (1)
     {
-        simplelist_info_init(&info, str(LANG_EXTRAS_CLOCK_REGION), REGIONS,
-                             NULL);
-        info.get_name = region_get_name;
-        info.get_kind = region_get_kind;
-        info.action_callback = region_action;
-        info.selection = region;
-        info.speak_onshow = false;
-        bool usb = simplelist_show_list(&info);
-        if (info.selection < 0)
+        int picked = run_pick_list(str(LANG_EXTRAS_CLOCK_REGION), REGIONS,
+                                   region, region_get_name, region_get_kind,
+                                   region_get_pane);
+        if (picked < 0)
         {
-            ui_scene_close_modal(&region_scene, !usb, "clock-region-pop");
+            ui_scene_close_modal(&region_scene, picked != -2,
+                                 "clock-region-pop");
             return -1;
         }
-        region = info.selection;
+        region = picked;
 
         list_region = region;
         int first = region_first[region];
-        simplelist_info_init(&info, str(LANG_EXTRAS_CLOCK_CITY),
-                             region_first[region + 1] - first, NULL);
-        info.get_name = city_get_name;
-        info.get_kind = NULL;
-        info.action_callback = city_action;
-        info.selection = city >= first && city < region_first[region + 1] ?
-                         city - first : 0;
-        info.speak_onshow = false;
+        int count = region_first[region + 1] - first;
+        int start = city >= first && city < region_first[region + 1] ?
+                    city - first : 0;
         struct ui_scene city_scene = {0};
         ui_scene_open_page(&city_scene, "clock-city-push");
-        usb = simplelist_show_list(&info);
-        ui_scene_close_modal(&city_scene, !usb, "clock-city-pop");
-        if (info.selection >= 0 || usb)
+        picked = run_pick_list(str(LANG_EXTRAS_CLOCK_CITY), count, start,
+                               city_get_name, city_get_kind, city_get_pane);
+        ui_scene_close_modal(&city_scene, picked != -2, "clock-city-pop");
+        if (picked >= 0 || picked == -2)
         {
-            ui_scene_close_modal(&region_scene, !usb, "clock-region-pop");
-            return usb ? -1 : first + info.selection;
+            ui_scene_close_modal(&region_scene, picked != -2,
+                                 "clock-region-pop");
+            return picked == -2 ? -1 : first + picked;
         }
     }
 }
@@ -913,8 +996,7 @@ int extras_clock(void)
             ui_page_invalidate(&page, bounds);
             ui_page_draw(&page);
         }
-        int action = get_action(screen.dialog ? CONTEXT_YESNOSCREEN :
-                                CONTEXT_STD, HZ / 2);
+        int action = extras_get_action(HZ / 2, true);
         if (screen.dialog)
         {
             switch (action)
@@ -929,7 +1011,7 @@ int extras_clock(void)
                     screen.button = MIN(button_count() - 1, screen.button + 1);
                     dirty = true;
                     continue;
-                case ACTION_YESNO_ACCEPT:
+                case ACTION_STD_OK:
                     screen.dialog = false;
                     choose(screen.button);
                     dirty = true;
@@ -970,9 +1052,6 @@ int extras_clock(void)
                     continue;
                 case ACTION_STD_CANCEL:
                 case ACTION_STD_MENU:
-                    break;
-                case ACTION_TREE_WPS:
-                    ret = GO_TO_WPS;
                     break;
                 default:
                     if (default_event_handler(action) == SYS_USB_CONNECTED)

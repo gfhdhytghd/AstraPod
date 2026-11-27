@@ -16,6 +16,7 @@
 #include <string.h>
 #include "string-extra.h"
 #include "config.h"
+#include "file.h"
 #include "kernel.h"
 #include "font.h"
 #include "lcd.h"
@@ -98,6 +99,75 @@ struct sw_log {
 static struct sw_log logs[SW_LOGS];
 static int log_count;
 static bool current;
+static bool logs_loaded;
+
+#define SW_LOGS_FILE ROCKBOX_DIR "/stopwatch.dat"
+#define SW_LOGS_MAGIC 0x31575341u /* "ASW1" */
+
+struct sw_disk_log {
+    struct tm start;
+    int32_t total_cs;
+    int32_t laps;
+    int32_t lap_end[SW_LAPS];
+};
+
+struct sw_disk {
+    uint32_t magic;
+    uint32_t count;
+    uint32_t has_current;
+    struct sw_disk_log list[SW_LOGS];
+};
+
+static long sw_elapsed(const struct sw_log *log);
+
+static void sw_logs_save(void)
+{
+    struct sw_disk disk;
+    memset(&disk, 0, sizeof(disk));
+    disk.magic = SW_LOGS_MAGIC;
+    disk.count = (uint32_t)MIN(log_count, SW_LOGS);
+    disk.has_current = current ? 1u : 0u;
+    for (unsigned i = 0; i < disk.count; i++)
+    {
+        disk.list[i].start = logs[i].start;
+        disk.list[i].total_cs = (int32_t)sw_elapsed(&logs[i]);
+        disk.list[i].laps = logs[i].laps;
+        for (int j = 0; j < logs[i].laps && j < SW_LAPS; j++)
+            disk.list[i].lap_end[j] = (int32_t)logs[i].lap_end[j];
+    }
+    int fd = open(SW_LOGS_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0)
+        return;
+    write(fd, &disk, sizeof(disk));
+    close(fd);
+}
+
+static void sw_logs_load(void)
+{
+    if (logs_loaded)
+        return;
+    logs_loaded = true;
+    struct sw_disk disk;
+    int fd = open(SW_LOGS_FILE, O_RDONLY);
+    if (fd < 0)
+        return;
+    bool ok = read(fd, &disk, sizeof(disk)) == (ssize_t)sizeof(disk) &&
+              disk.magic == SW_LOGS_MAGIC && disk.count <= SW_LOGS;
+    close(fd);
+    if (!ok)
+        return;
+    log_count = (int)disk.count;
+    current = disk.has_current && log_count > 0;
+    for (int i = 0; i < log_count; i++)
+    {
+        memset(&logs[i], 0, sizeof(logs[i]));
+        logs[i].start = disk.list[i].start;
+        logs[i].total = (long)disk.list[i].total_cs * HZ / 100;
+        logs[i].laps = MIN(MAX(0, (int)disk.list[i].laps), SW_LAPS);
+        for (int j = 0; j < logs[i].laps; j++)
+            logs[i].lap_end[j] = disk.list[i].lap_end[j];
+    }
+}
 
 static long sw_elapsed(const struct sw_log *log)
 {
@@ -109,6 +179,7 @@ static void sw_stop(struct sw_log *log)
     if (log->running)
         log->total += current_tick - log->since;
     log->running = false;
+    sw_logs_save();
 }
 
 static void sw_run(struct sw_log *log)
@@ -136,16 +207,15 @@ static void sw_lap(struct sw_log *log)
         log->lap_end[log->laps++] = sw_elapsed(log);
 }
 
-/* Lap `i` of a session, the one still running last; a session never lapped
- * has none. */
+/* Only explicitly recorded laps are listed and averaged, matching stock 2.0.5. */
 static int sw_lap_count(const struct sw_log *log)
 {
-    return log->laps ? log->laps + 1 : 0;
+    return log->laps;
 }
 
 static long sw_lap_time(const struct sw_log *log, int i)
 {
-    long end = i < log->laps ? log->lap_end[i] : sw_elapsed(log);
+    long end = log->lap_end[i];
     return end - (i ? log->lap_end[i - 1] : 0);
 }
 
@@ -271,6 +341,7 @@ static void put_dial(struct stock_canvas *c, int left, long cs)
 
 void extras_stopwatch_pane_paint(struct stock_canvas *band)
 {
+    sw_logs_load();
     put_dial(band, MENU_PANE_X, current ? sw_elapsed(&logs[0]) : 0);
 }
 
@@ -363,10 +434,9 @@ static enum sw_next sw_timer(void)
     enum sw_next next;
     while (1)
     {
-        int action = get_action(CONTEXT_STD, sw_running() ? HZ / 25 :
-                                TIMEOUT_BLOCK);
-        if (action == ACTION_TREE_WPS || action == ACTION_STD_OK ||
-            (ui_wheel_navigation() && action == ACTION_STD_CONTEXT))
+        int action = extras_get_action(sw_running() ? HZ / 25 :
+                                       TIMEOUT_BLOCK, false);
+        if (action == ACTION_WPS_PLAY || action == ACTION_STD_OK)
         {
             if (!current)
                 sw_start();
@@ -397,6 +467,8 @@ static enum sw_next sw_timer(void)
             paint(text, compose_page);
         shown = cs;
     }
+    if (log_count)
+        sw_logs_save();
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     extras_bar_release();
     sw_fonts_release();
@@ -451,16 +523,17 @@ static void log_paint(const struct sw_log *log, int scroll)
     log_text(&vp, text, b, 312, 40, true, LCD_BLACK);
 
     int laps = sw_lap_count(log);
-    long shortest = 0, longest = 0;
+    long shortest = 0, longest = 0, lap_sum = 0;
     for (int i = 0; i < laps; i++)
     {
         long t = sw_lap_time(log, i);
         if (!i || t < shortest)
             shortest = t;
         longest = MAX(longest, t);
+        lap_sum += t;
     }
     long stats[4] = { sw_elapsed(log), shortest, longest,
-                      laps ? sw_elapsed(log) / laps : 0 };
+                      laps ? lap_sum / laps : 0 };
     static const int label[4] = {
         LANG_EXTRAS_STOPWATCH_TOTAL, LANG_EXTRAS_STOPWATCH_SHORTEST,
         LANG_EXTRAS_STOPWATCH_LONGEST, LANG_EXTRAS_STOPWATCH_AVERAGE,
@@ -509,8 +582,8 @@ static enum sw_next sw_log_page(const struct sw_log *log)
     while (1)
     {
         log_paint(log, scroll);
-        int action = get_action(CONTEXT_STD, log->running ? HZ / 25 :
-                                HZ / 2);
+        int action = extras_get_action(log->running ? HZ / 25 :
+                                       HZ / 2, true);
         if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
             scroll = MIN(most, scroll + LOG_PITCH);
         else if (action == ACTION_STD_PREV ||
@@ -524,6 +597,8 @@ static enum sw_next sw_log_page(const struct sw_log *log)
             break;
         }
     }
+    if (log_count)
+        sw_logs_save();
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     sw_fonts_release();
     ui_scene_close_modal(&scene, next != SW_USB, "stopwatch-log-pop");
@@ -654,8 +729,8 @@ static enum sw_next sw_menu(void)
     int action;
     while (1)
     {
-        list_do_action(CONTEXT_TREE, sw_running() ? HZ / 25 : HZ / 10,
-                       &list, &action);
+        extras_list_do_action(sw_running() ? HZ / 25 : HZ / 10,
+                              &list, &action);
         int i = gui_synclist_get_sel_pos(&list);
         menu_row = row_of(i);
         menu_log = i - first_log();
@@ -683,6 +758,8 @@ static enum sw_next sw_menu(void)
         shown = cs;
     }
     gui_synclist_scroll_stop(&list);
+    if (log_count)
+        sw_logs_save();
     viewportmanager_theme_undo(SCREEN_MAIN, false);
     sw_fonts_release();
     return next;
@@ -694,6 +771,7 @@ int extras_stopwatch(void)
 {
     static const char timer_page, menu_page;
     struct ui_scene entry = {0}, route = {0};
+    sw_logs_load();
     bool timer_first = sw_running() || (!current && !log_count);
     ui_scene_open_page(&entry, "stopwatch-push");
     enum sw_next next = timer_first ? sw_timer() : SW_MENU;
@@ -718,6 +796,7 @@ int extras_stopwatch(void)
                 if (current)
                     sw_stop(&logs[0]);
                 current = false;
+                sw_logs_save();
                 ui_scene_enter(&route, &menu_page, &timer_page, true, true);
                 next = sw_timer();
                 if (next == SW_MENU)
@@ -726,6 +805,7 @@ int extras_stopwatch(void)
             case ROW_CLEAR:
                 log_count = 0;
                 current = false;
+                sw_logs_save();
                 break;
             case ROW_CURRENT:
                 next = sw_log_page(&logs[0]);
@@ -735,6 +815,7 @@ int extras_stopwatch(void)
                 break;
         }
     }
+    sw_logs_save();
     ui_scene_discard(&route);
     ui_scene_close_modal(&entry, next != SW_USB, "stopwatch-pop");
     return next == SW_USB ? MENU_ATTACHED_USB : 0;

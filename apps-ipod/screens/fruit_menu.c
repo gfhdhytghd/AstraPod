@@ -922,8 +922,11 @@ static bool extras_pane(const struct menu_item_ex *item)
         int games = app_list_count(APP_LIST_GAMES);
         c.art = STOCK_ART_EXTRAS_GAMES_PREVIEW;
         c.x = 170, c.y = 83;
-        snprintf(c.title, sizeof(c.title), str(games == 1 ?
-                 LANG_FRUIT_ONE_GAME : LANG_FRUIT_GAMES_COUNT), games);
+        if (games == 0)
+            strlcpy(c.title, str(LANG_FRUIT_NO_GAMES), sizeof(c.title));
+        else
+            snprintf(c.title, sizeof(c.title), str(games == 1 ?
+                     LANG_FRUIT_ONE_GAME : LANG_FRUIT_GAMES_COUNT), games);
     }
     else if (item == &home_sleep)
     {

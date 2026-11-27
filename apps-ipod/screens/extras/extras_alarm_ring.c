@@ -30,6 +30,8 @@
 #include "audio/beep.h"
 #include "input/action.h"
 #include "draw/viewport.h"
+#include "playlist/catalog.h"
+#include "playlist/playlist.h"
 #include "plugins/rock_compat.h"
 #include "settings/settings.h"
 #include "speech/talk.h"
@@ -42,9 +44,12 @@
 #include "widgets/dialog.h"
 #include "widgets/list.h"
 #include "extras_alarm_ring.h"
+#include "extras_bar.h"
+#include "extras_calendars.h"
 
 #define ALARMS_FILE ROCKBOX_DIR "/alarms.dat"
-#define ALARMS_MAGIC 0x314d4c41u /* "ALM1" */
+#define ALARMS_MAGIC_V1 0x314d4c41u /* "ALM1" */
+#define ALARMS_MAGIC    0x324d4c41u /* "ALM2" */
 #define SNOOZE_MINUTES 10
 /* A clock that moves this many minutes more than the ticks say was set. */
 #define CLOCK_SET 2
@@ -201,15 +206,61 @@ static void look_from_now(void)
     next_look = current_tick;
 }
 
+/* Legacy ALM1 disk format without playlist name, for seamless migration. */
+struct alarm_v1 {
+    uint8_t on, repeat, sound, label;
+    uint8_t hour, minute, month, day;
+    uint16_t year;
+};
+
+struct alarm_table_v1 {
+    uint32_t magic;
+    uint32_t count;
+    struct alarm_v1 list[MAX_ALARMS];
+};
+
 void alarm_table_load(void)
 {
     int fd = open(ALARMS_FILE, O_RDONLY);
-    bool ok = fd >= 0 &&
-        read(fd, &alarm_table, sizeof(alarm_table)) == sizeof(alarm_table) &&
-        alarm_table.magic == ALARMS_MAGIC &&
-        alarm_table.count <= MAX_ALARMS;
+    bool ok = false;
     if (fd >= 0)
+    {
+        uint32_t magic = 0;
+        if (read(fd, &magic, sizeof(magic)) == (ssize_t)sizeof(magic))
+        {
+            lseek(fd, 0, SEEK_SET);
+            if (magic == ALARMS_MAGIC)
+            {
+                ok = read(fd, &alarm_table, sizeof(alarm_table)) ==
+                     (ssize_t)sizeof(alarm_table) &&
+                     alarm_table.count <= MAX_ALARMS;
+            }
+            else if (magic == ALARMS_MAGIC_V1)
+            {
+                struct alarm_table_v1 v1;
+                if (read(fd, &v1, sizeof(v1)) == (ssize_t)sizeof(v1) &&
+                    v1.count <= MAX_ALARMS)
+                {
+                    memset(&alarm_table, 0, sizeof(alarm_table));
+                    alarm_table.count = v1.count;
+                    for (unsigned i = 0; i < v1.count; i++)
+                    {
+                        alarm_table.list[i].on = v1.list[i].on;
+                        alarm_table.list[i].repeat = v1.list[i].repeat;
+                        alarm_table.list[i].sound = v1.list[i].sound;
+                        alarm_table.list[i].label = v1.list[i].label;
+                        alarm_table.list[i].hour = v1.list[i].hour;
+                        alarm_table.list[i].minute = v1.list[i].minute;
+                        alarm_table.list[i].month = v1.list[i].month;
+                        alarm_table.list[i].day = v1.list[i].day;
+                        alarm_table.list[i].year = v1.list[i].year;
+                    }
+                    ok = true;
+                }
+            }
+        }
         close(fd);
+    }
     if (!ok)
         alarm_table.count = 0;
     alarm_table.magic = ALARMS_MAGIC;
@@ -250,7 +301,7 @@ static bool rings_at(const struct alarm *a, long minute)
 
 static bool armed(void)
 {
-    if (snooze_at >= 0)
+    if (snooze_at >= 0 || extras_calendars_alarms_armed())
         return true;
     for (unsigned i = 0; i < alarm_table.count; i++)
         if (alarm_table.list[i].on)
@@ -312,6 +363,8 @@ static bool lcd_taken(void)
 /* ---- the alert ---- */
 
 static const struct alarm *alert;
+static const char *alert_custom_title;
+static const char *alert_custom_sentence;
 static int time_font = -1, sentence_font = -1;
 
 static void centred_text(struct stock_canvas *band, int font,
@@ -329,7 +382,7 @@ static void paint_alert_text(struct stock_canvas *band)
 {
     char text[48];
     if (global_settings.timeformat == 0)
-        snprintf(text, sizeof(text), "%d:%02d", alert->hour, alert->minute);
+        snprintf(text, sizeof(text), "%02d:%02d", alert->hour, alert->minute);
     else
         snprintf(text, sizeof(text),
                  str(alert->hour < 12 ? LANG_EXTRAS_ALARMS_TIME_AM :
@@ -339,7 +392,8 @@ static void paint_alert_text(struct stock_canvas *band)
     if (sentence_font < 0)
         return;
     struct dialog_text_line lines[2];
-    const char *sentence = str(label_sentences[alert->label]);
+    const char *sentence = alert_custom_sentence ? alert_custom_sentence :
+                           (const char *)str(label_sentences[alert->label]);
     int count = dialog_wrap_text(sentence, TEXT_W, sentence_font, lines, 2);
     for (int i = 0; i < count; i++)
     {
@@ -379,13 +433,18 @@ static enum list_row_kind alert_kind(int item, void *data)
 }
 
 /* Show the alert for `a` until it is answered; true for Snooze. */
-static bool show_alert(const struct alarm *a)
+static bool show_alert(const struct alarm *a, bool allow_snooze,
+                       const char *custom_title, const char *custom_sentence,
+                       bool beep_active)
 {
     char title[64];
     enum themable_icons icon;
     bool persistent = sb_get_title(SCREEN_MAIN, title, sizeof(title), &icon);
-    const char *label = str(alarm_label_names[a->label]);
+    const char *label = custom_title ? custom_title :
+                        (const char *)str(alarm_label_names[a->label]);
     alert = a;
+    alert_custom_title = custom_title;
+    alert_custom_sentence = custom_sentence;
     time_font = font_load_ex(TIME_FONT, 0, global_settings.glyphs_to_cache);
     sentence_font = ui_theme_current_font_load(UI_FONT_BODY,
                                                global_settings.glyphs_to_cache);
@@ -395,10 +454,10 @@ static bool show_alert(const struct alarm *a)
 
     struct gui_synclist list;
     gui_synclist_init(&list, alert_name, NULL, false, 1, NULL);
-    gui_synclist_set_title(&list, label, Icon_NOICON);
+    gui_synclist_set_title(&list, (char *)label, Icon_NOICON);
     gui_synclist_set_row_callbacks(&list, alert_kind, NULL, NULL);
     gui_synclist_set_pane_callback(&list, alert_pane);
-    gui_synclist_set_nb_items(&list, 2);
+    gui_synclist_set_nb_items(&list, allow_snooze ? 2 : 1);
     gui_synclist_select_item(&list, 0);
     gui_synclist_draw_settled(&list);
 
@@ -407,17 +466,17 @@ static bool show_alert(const struct alarm *a)
     while (true)
     {
         long now = (current_tick - start) / BEAT;
-        if (a->sound == ALARM_SOUND_BEEP && now != beat)
+        if (beep_active && now != beat)
         {
             beat = now;
             if (beat % 5 == 0 || beat % 5 == 2)
                 beep_play(BEEP_FREQUENCY, BEEP_MS, BEEP_AMPLITUDE);
         }
         int action;
-        list_do_action(CONTEXT_TREE, BEAT, &list, &action);
+        extras_list_do_action(BEAT, &list, &action);
         if (action == ACTION_STD_OK)
         {
-            snooze = gui_synclist_get_sel_pos(&list) == 1;
+            snooze = allow_snooze && gui_synclist_get_sel_pos(&list) == 1;
             break;
         }
         if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
@@ -438,22 +497,77 @@ static bool show_alert(const struct alarm *a)
     pop_current_activity();
     font_unload(time_font);
     time_font = sentence_font = -1;
+    alert_custom_title = alert_custom_sentence = NULL;
     return snooze;
+}
+
+static bool start_alarm_playlist(const char *name)
+{
+    if (!name || !name[0])
+        return false;
+    char dir[MAX_PATH], leaf[ALARM_PLAYLIST_LEN + 8], full[MAX_PATH];
+    catalog_get_directory(dir, sizeof(dir));
+    if (!dir[0])
+        return false;
+    static const char *const exts[2] = { ".m3u8", ".m3u" };
+    for (int i = 0; i < 2; i++)
+    {
+        snprintf(leaf, sizeof(leaf), "%s%s", name, exts[i]);
+        snprintf(full, sizeof(full), "%s/%s", dir, leaf);
+        if (file_exists(full))
+        {
+            if (playlist_create(dir, leaf) >= 0 && playlist_amount() > 0)
+            {
+                playlist_start(0, 0, 0);
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 static void ring(const struct alarm *a)
 {
     ringing = true;
     backlight_on();
-    bool resume = (audio_status() & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE))
-                  == AUDIO_STATUS_PLAY;
-    if (resume)
-        audio_pause();
-    if (show_alert(a))
+    bool started_playlist = false;
+    bool resume = false;
+    if (a->sound == ALARM_SOUND_PLAYLIST)
+        started_playlist = start_alarm_playlist(a->playlist);
+    if (!started_playlist)
+    {
+        resume = (audio_status() & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE))
+                 == AUDIO_STATUS_PLAY;
+        if (resume)
+            audio_pause();
+    }
+    bool beep_active = (a->sound == ALARM_SOUND_BEEP) ||
+                       (a->sound == ALARM_SOUND_PLAYLIST && !started_playlist);
+    if (show_alert(a, true, NULL, NULL, beep_active))
     {
         snoozed = *a;
         snooze_at = clock_now() / 60 + SNOOZE_MINUTES;
     }
+    if (resume)
+        audio_resume();
+    ringing = false;
+}
+
+static void ring_calendar(const char *summary, int hour, int minute,
+                          int sound_mode)
+{
+    struct alarm fake;
+    memset(&fake, 0, sizeof(fake));
+    fake.hour = (uint8_t)hour;
+    fake.minute = (uint8_t)minute;
+    ringing = true;
+    backlight_on();
+    bool resume = (audio_status() & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE))
+                  == AUDIO_STATUS_PLAY;
+    if (resume)
+        audio_pause();
+    show_alert(&fake, false, str(LANG_EXTRAS_CALENDARS), summary,
+               sound_mode == 0);
     if (resume)
         audio_resume();
     ringing = false;
@@ -477,13 +591,22 @@ bool extras_alarm_ring_poll(int *timeout)
     long now = clock_now();
     next_look = current_tick + ticks_to_minute(now);
     struct alarm due;
-    if (!find_due(now / 60, &due))
+    if (find_due(now / 60, &due))
     {
-        if (*timeout == TIMEOUT_BLOCK || *timeout > next_look - current_tick)
-            *timeout = next_look - current_tick;
-        return false;
+        ring(&due);
+        next_look = current_tick;   /* another may be due in the same minute */
+        return true;
     }
-    ring(&due);
-    next_look = current_tick;   /* another may be due in the same minute */
-    return true;
+    char cal_summary[64];
+    int cal_h = 0, cal_m = 0, cal_sound = 0;
+    if (extras_calendars_due_event(now / 60, cal_summary, sizeof(cal_summary),
+                                   &cal_h, &cal_m, &cal_sound))
+    {
+        ring_calendar(cal_summary, cal_h, cal_m, cal_sound);
+        next_look = current_tick;
+        return true;
+    }
+    if (*timeout == TIMEOUT_BLOCK || *timeout > next_look - current_tick)
+        *timeout = next_look - current_tick;
+    return false;
 }

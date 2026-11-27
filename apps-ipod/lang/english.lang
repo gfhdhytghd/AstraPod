@@ -34967,3 +34967,339 @@
     *: "Please Connect to Power"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_CONTACTS_CAR
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a car phone number
+  user: core
+  <source>
+    *: "Car"
+  </source>
+  <dest>
+    *: "Car"
+  </dest>
+  <voice>
+    *: "Car"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_WEB
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a website URL
+  user: core
+  <source>
+    *: "Web"
+  </source>
+  <dest>
+    *: "Web"
+  </dest>
+  <voice>
+    *: "Web"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_GAMES
+  desc: Fruit Company: Extras side pane beside Games when none are installed
+  user: core
+  <source>
+    *: "No Games"
+  </source>
+  <dest>
+    *: "No Games"
+  </dest>
+  <voice>
+    *: "No Games"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_NEVER_PLAYED
+  desc: Fruit Company: Extras > Games row subline when a game has not been played
+  user: core
+  <source>
+    *: "Never Played"
+  </source>
+  <dest>
+    *: "Never Played"
+  </dest>
+  <voice>
+    *: "Never Played"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_PLAYED_ONCE
+  desc: Fruit Company: Extras > Games row subline when a game has been played once
+  user: core
+  <source>
+    *: "Played Once"
+  </source>
+  <dest>
+    *: "Played Once"
+  </dest>
+  <voice>
+    *: "Played Once"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_PLAYED_TIMES
+  desc: Fruit Company: Extras > Games row subline when a game has been played multiple times; keep %d
+  user: core
+  <source>
+    *: "Played %d Times"
+  </source>
+  <dest>
+    *: "Played %d Times"
+  </dest>
+  <voice>
+    *: "Played %d Times"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_ERROR
+  desc: Fruit Company: Extras > Games launch error screen title bar
+  user: core
+  <source>
+    *: "Error"
+  </source>
+  <dest>
+    *: "Error"
+  </dest>
+  <voice>
+    *: "Error"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_LAUNCH_ERROR
+  desc: Fruit Company: Extras > Games launch error screen heading
+  user: core
+  <source>
+    *: "This game cannot be launched."
+  </source>
+  <dest>
+    *: "This game cannot be launched."
+  </dest>
+  <voice>
+    *: "This game cannot be launched."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GAMES_LAUNCH_ERROR_BODY
+  desc: Fruit Company: Extras > Games launch error screen recovery guidance
+  user: core
+  <source>
+    *: "Check that the game file is installed and intact, then try again."
+  </source>
+  <dest>
+    *: "Check that the game file is installed and intact, then try again."
+  </dest>
+  <voice>
+    *: "Check that the game file is installed and intact, then try again."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TODO_LIST
+  desc: Fruit Company: Extras > Calendars > To Do's list title bar
+  user: core
+  <source>
+    *: "List of To Do's"
+  </source>
+  <dest>
+    *: "List of To Do's"
+  </dest>
+  <voice>
+    *: "List of To Do's"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_SUMMARY
+  desc: Fruit Company: Extras > Calendars detail label before summary
+  user: core
+  <source>
+    *: "Summary"
+  </source>
+  <dest>
+    *: "Summary"
+  </dest>
+  <voice>
+    *: "Summary"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_DATE
+  desc: Fruit Company: Extras > Calendars detail label before date
+  user: core
+  <source>
+    *: "Date"
+  </source>
+  <dest>
+    *: "Date"
+  </dest>
+  <voice>
+    *: "Date"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TIME
+  desc: Fruit Company: Extras > Calendars detail label before time
+  user: core
+  <source>
+    *: "Time"
+  </source>
+  <dest>
+    *: "Time"
+  </dest>
+  <voice>
+    *: "Time"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_LOCATION
+  desc: Fruit Company: Extras > Calendars detail label before location
+  user: core
+  <source>
+    *: "Location"
+  </source>
+  <dest>
+    *: "Location"
+  </dest>
+  <voice>
+    *: "Location"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_ATTENDEES
+  desc: Fruit Company: Extras > Calendars detail label before attendees
+  user: core
+  <source>
+    *: "Attendees"
+  </source>
+  <dest>
+    *: "Attendees"
+  </dest>
+  <voice>
+    *: "Attendees"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NOTES
+  desc: Fruit Company: Extras > Calendars detail label before notes
+  user: core
+  <source>
+    *: "Notes"
+  </source>
+  <dest>
+    *: "Notes"
+  </dest>
+  <voice>
+    *: "Notes"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_DUE
+  desc: Fruit Company: Extras > Calendars To Do detail label before due date
+  user: core
+  <source>
+    *: "Due"
+  </source>
+  <dest>
+    *: "Due"
+  </dest>
+  <voice>
+    *: "Due"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_STATUS
+  desc: Fruit Company: Extras > Calendars To Do detail label before status
+  user: core
+  <source>
+    *: "Status"
+  </source>
+  <dest>
+    *: "Status"
+  </dest>
+  <voice>
+    *: "Status"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_PRIORITY
+  desc: Fruit Company: Extras > Calendars To Do detail label before priority
+  user: core
+  <source>
+    *: "Priority"
+  </source>
+  <dest>
+    *: "Priority"
+  </dest>
+  <voice>
+    *: "Priority"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NEEDS_ACTION
+  desc: Fruit Company: Extras > Calendars To Do status value
+  user: core
+  <source>
+    *: "Needs Action"
+  </source>
+  <dest>
+    *: "Needs Action"
+  </dest>
+  <voice>
+    *: "Needs Action"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_COMPLETED
+  desc: Fruit Company: Extras > Calendars To Do status value
+  user: core
+  <source>
+    *: "Completed"
+  </source>
+  <dest>
+    *: "Completed"
+  </dest>
+  <voice>
+    *: "Completed"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_IN_PROCESS
+  desc: Fruit Company: Extras > Calendars To Do status value
+  user: core
+  <source>
+    *: "In-Process"
+  </source>
+  <dest>
+    *: "In-Process"
+  </dest>
+  <voice>
+    *: "In-Process"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_CANCELLED
+  desc: Fruit Company: Extras > Calendars To Do status value
+  user: core
+  <source>
+    *: "Cancelled"
+  </source>
+  <dest>
+    *: "Cancelled"
+  </dest>
+  <voice>
+    *: "Cancelled"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_ALL_DAY
+  desc: Fruit Company: Extras > Calendars event detail time for an all-day event
+  user: core
+  <source>
+    *: "All Day"
+  </source>
+  <dest>
+    *: "All Day"
+  </dest>
+  <voice>
+    *: "All Day"
+  </voice>
+</phrase>

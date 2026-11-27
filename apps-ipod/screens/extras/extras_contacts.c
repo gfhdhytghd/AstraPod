@@ -49,6 +49,7 @@
 #include "widgets/list.h"
 #include "root_menu.h"
 #include "extras.h"
+#include "extras_bar.h"
 
 #define CONTACTS_DIR   "/Contacts"
 #define MAX_FILES      256
@@ -168,7 +169,7 @@ static bool read_property(struct reader *r, char *line, uint32_t *start)
 
 enum {
     T_HOME = 1, T_WORK = 2, T_CELL = 4, T_FAX = 8, T_PAGER = 16,
-    T_MAIN = 32, T_QP = 64, T_LATIN1 = 128, T_SKIP = 256,
+    T_MAIN = 32, T_CAR = 64, T_QP = 128, T_LATIN1 = 256, T_SKIP = 512,
 };
 
 /* Splits `line` in place into its name, without a group, and its value;
@@ -178,7 +179,7 @@ static int split_property(char *line, char **name, char **value)
     static const struct { const char *word; int flag; } words[] = {
         { "HOME", T_HOME }, { "WORK", T_WORK }, { "CELL", T_CELL },
         { "IPHONE", T_CELL }, { "MOBILE", T_CELL }, { "FAX", T_FAX },
-        { "PAGER", T_PAGER }, { "MAIN", T_MAIN },
+        { "PAGER", T_PAGER }, { "MAIN", T_MAIN }, { "CAR", T_CAR },
         { "QUOTED-PRINTABLE", T_QP }, { "ISO-8859-1", T_LATIN1 },
         { "WINDOWS-1252", T_LATIN1 }, { "BASE64", T_SKIP }, { "B", T_SKIP },
     };
@@ -464,6 +465,42 @@ bool extras_contacts_any(void)
     return any;
 }
 
+int extras_contacts_count(void)
+{
+    DIR *dir = opendir(CONTACTS_DIR);
+    int total = 0;
+    if (!dir)
+        return 0;
+    while (total < MAX_CONTACTS)
+    {
+        struct dirent *entry = readdir(dir);
+        if (!entry)
+            break;
+        if ((dir_get_info(dir, entry).attribute & ATTR_DIRECTORY) ||
+            !is_vcf((const char *)entry->d_name))
+            continue;
+        char path[MAX_PATH];
+        snprintf(path, sizeof(path), CONTACTS_DIR "/%s",
+                 (const char *)entry->d_name);
+        int fd = open(path, O_RDONLY);
+        if (fd < 0)
+            continue;
+        struct reader r = { .fd = fd };
+        char line[128];
+        uint32_t start;
+        while (total < MAX_CONTACTS && read_property(&r, line, &start))
+        {
+            char *prop, *val;
+            split_property(line, &prop, &val);
+            if (!strcasecmp(prop, "BEGIN") && !strcasecmp(trim(val), "VCARD"))
+                total++;
+        }
+        close(fd);
+    }
+    closedir(dir);
+    return total;
+}
+
 /* What a card sorts by, first and then: by last name its last name, else
  * its first; by first name the other way about; with neither, its formatted
  * name or company. */
@@ -580,7 +617,7 @@ static void draw_row(struct list_putlineinfo_t *info)
 
 /** The page **/
 
-enum { G_PHONE, G_EMAIL, G_ADDRESS, G_NOTE, GROUPS };
+enum { G_PHONE, G_EMAIL, G_URL, G_ADDRESS, G_NOTE, GROUPS };
 
 struct page_item {
     uint8_t group;
@@ -590,6 +627,7 @@ struct page_item {
 
 struct page {
     char name[160];
+    char title[96];
     int count, used;
     struct page_item item[PAGE_ITEMS];
     char text[PAGE_BYTES];
@@ -611,6 +649,7 @@ static int phone_label(int flags)
 {
     return flags & T_CELL ? LANG_CONTACTS_MOBILE :
            flags & T_FAX ? LANG_CONTACTS_FAX :
+           flags & T_CAR ? LANG_CONTACTS_CAR :
            flags & T_PAGER ? LANG_CONTACTS_PAGER :
            flags & T_MAIN ? LANG_CONTACTS_MAIN :
            flags & T_HOME ? LANG_CONTACTS_HOME :
@@ -661,7 +700,7 @@ static void page_read(struct contacts *cs, const struct contact *c,
     uint32_t start;
 
     p->count = p->used = 0;
-    p->name[0] = '\0';
+    p->name[0] = p->title[0] = '\0';
     snprintf(path, sizeof(path), CONTACTS_DIR "/%s",
              text(cs, cs->file[c->file]));
     r.fd = open(path, O_RDONLY);
@@ -682,6 +721,11 @@ static void page_read(struct contacts *cs, const struct contact *c,
                 unescape(value);
                 strlcpy(p->name, trim(value), sizeof(p->name));
             }
+            else if (!strcasecmp(prop, "TITLE"))
+            {
+                unescape(value);
+                strlcpy(p->title, trim(value), sizeof(p->title));
+            }
             else if (!strcasecmp(prop, "N"))
             {
                 char *part[2];
@@ -700,6 +744,13 @@ static void page_read(struct contacts *cs, const struct contact *c,
                 /* Stock calls an email of no kind a work one */
                 unescape(value);
                 page_add(p, G_EMAIL, flags & T_HOME ? LANG_CONTACTS_HOME :
+                         LANG_CONTACTS_WORK, trim(value));
+            }
+            else if (!strcasecmp(prop, "URL"))
+            {
+                /* Stock calls an untyped URL a work one */
+                unescape(value);
+                page_add(p, G_URL, flags & T_HOME ? LANG_CONTACTS_HOME :
                          LANG_CONTACTS_WORK, trim(value));
             }
             else if (!strcasecmp(prop, "ADR"))
@@ -804,11 +855,28 @@ static void page_paint(const struct ui_view *view,
     stock_art_draw(STOCK_ART_CONTACTS_NOPHOTO, vp.x,
                    vp.y + top + PG_PHOTO_Y,
                    (struct ui_rect){ vp.x, vp.y, vp.width, vp.height });
-    d->putsxy(PG_NAME_X, top + PG_NAME_BASE - font_get(p->name_font)->ascent,
+    int name_base = p->title[0] ? PG_NAME_BASE - 2 : PG_NAME_BASE;
+    d->putsxy(PG_NAME_X, top + name_base - font_get(p->name_font)->ascent,
               (const unsigned char *)p->name);
+    if (p->title[0])
+    {
+        vp.font = p->label_font;
+        vp.fg_pattern = LCD_BLACK;
+        d->putsxy(PG_NAME_X, top + 64 - font_get(p->label_font)->ascent,
+                  (const unsigned char *)p->title);
+    }
     vp.fg_pattern = PG_RULE_RGB;
     d->hline(0, vp.width - 1, top + PG_HEAD_RULE);
     page_lay_out(d, p, top + PG_HEAD_RULE);
+    if (p->scroll_max > 0)
+    {
+        int track_h = vp.height - 8;
+        int total_h = vp.height + p->scroll_max;
+        int thumb_h = MAX(20, track_h * vp.height / total_h);
+        int thumb_y = 4 + (track_h - thumb_h) * p->scroll / p->scroll_max;
+        vp.fg_pattern = LCD_RGBPACK(140, 142, 140);
+        d->fillrect(vp.width - 5, thumb_y, 3, thumb_h);
+    }
     d->set_viewport(last);
 }
 
@@ -854,7 +922,7 @@ static int page_show(struct page *p)
             ui_page_draw(&page);
             dirty = false;
         }
-        int action = get_action(CONTEXT_LIST, TIMEOUT_BLOCK);
+        int action = extras_get_action(TIMEOUT_BLOCK, true);
         int to = p->scroll;
         if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
             to = MIN(p->scroll + PG_PITCH, p->scroll_max);
@@ -909,7 +977,7 @@ static int show_list(struct contacts *cs, struct page *p)
         gui_synclist_draw_settled(&list);
         for (;;)
         {
-            list_do_action(CONTEXT_TREE, HZ, &list, &action);
+            extras_list_do_action(HZ, &list, &action);
             if (action == ACTION_STD_OK)
             {
                 selection = gui_synclist_get_sel_pos(&list);

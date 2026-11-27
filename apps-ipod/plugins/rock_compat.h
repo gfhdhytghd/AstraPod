@@ -9,6 +9,10 @@
 int rock_browser(void *unused);
 /* The selected input path is borrowed until return. NULL starts the module. */
 int rock_open_from_browser(const char *path, const char *file);
+/* Like rock_open_from_browser(), without Rockbox's error splash; sets *failed
+ * when the module could not be loaded or returned PLUGIN_ERROR. */
+int rock_open_from_browser_quiet(const char *path, const char *file,
+                                 bool *failed);
 int rock_run_from_shell(const char *path);
 bool rock_ui_raw(void);
 bool rock_ui_native(void);

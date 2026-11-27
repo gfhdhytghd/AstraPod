@@ -8,7 +8,10 @@
 #ifndef PODBOX_SCREENS_EXTRAS_BAR_H
 #define PODBOX_SCREENS_EXTRAS_BAR_H
 
+#include <stdbool.h>
 #include "ui/stock_art.h"
+
+struct gui_synclist;
 
 #define EXTRAS_BAR_HEIGHT 24
 
@@ -30,5 +33,17 @@ void extras_bar_release(void);
  * extras_bar_release(); NULL when the buffer cannot spare them. */
 #define EXTRAS_BAND_ROWS 8
 uint32_t *extras_band(int i);
+
+/* Wheel-only navigation under Fruit themes: wheel returns STD_PREV/STD_NEXT,
+ * SELECT returns STD_OK, MENU returns STD_CANCEL; LEFT/RIGHT control playback
+ * and PLAY controls playback when `play_is_playback` is true (otherwise PLAY
+ * returns ACTION_WPS_PLAY, for Stopwatch). */
+int extras_get_action(int timeout, bool play_is_playback);
+/* Locked Screen Lock wait: swallows MENU/PLAY/LEFT/RIGHT; wheel or SELECT
+ * returns ACTION_STD_OK to open the combination tumbler. */
+int extras_get_action_locked(int timeout);
+/* list_do_action() backed by extras_get_action(timeout, true). */
+bool extras_list_do_action(int timeout, struct gui_synclist *lists,
+                           int *action);
 
 #endif

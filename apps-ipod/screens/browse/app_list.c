@@ -22,20 +22,31 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "string-extra.h"
 #include "config.h"
 #include "system.h"
 #include "file.h"
+#include "font.h"
 #include "kernel.h"
+#include "lcd.h"
 #include "core_alloc.h"
 #include "lang.h"
 #include "rbpaths.h"
 #include "root_menu.h"
 #include "screens/fruit_menu.h"
+#include "screens/extras/extras_bar.h"
 #include "settings/settings.h"
 #include "draw/bmp.h"
+#include "draw/text_wrap.h"
+#include "draw/viewport.h"
 #include "speech/talk.h"
 #include "input/action.h"
 #include "system/activity.h"
+#include "system/shutdown.h"
+#include "system/strutil.h"
+#include "ui/native_theme_runtime.h"
+#include "ui/statusbar.h"
+#include "ui/stock_art.h"
 #include "widgets/list.h"
 #include "widgets/splash.h"
 #include "plugins/rock_compat.h"
@@ -273,18 +284,77 @@ int app_list_count(enum app_list_kind kind)
     return counts[kind];
 }
 
-static int launch(const struct app *app)
+static int launch(const struct app *app, bool quiet, bool *failed)
 {
+    if (failed)
+        *failed = false;
     if (!strcmp(app->id, MUSIC_QUIZ))
         return GO_TO_MUSIC_QUIZ;
 #ifdef ASTRAPOD_ROCK_COMPAT
     char path[MAX_PATH];
 
     snprintf(path, sizeof(path), PLUGIN_DIR "/%s.rock", app->id);
+    if (quiet)
+        return rock_open_from_browser_quiet(path, NULL, failed);
     return rock_open_from_browser(path, NULL);
 #else
+    (void)quiet;
     return GO_TO_PREVIOUS;
 #endif
+}
+
+/***************************************************************************
+ * play counts (Fruit Games catalogue)
+ ****************************************************************************/
+
+#define GAMES_PLAYED_FILE ROCKBOX_DIR "/games_played.txt"
+
+static uint16_t game_plays[ARRAYLEN(apps)];
+
+static void games_stats_load(void)
+{
+    memset(game_plays, 0, sizeof(game_plays));
+    int fd = open(GAMES_PLAYED_FILE, O_RDONLY);
+    if (fd < 0)
+        return;
+    char line[96];
+    while (read_line(fd, line, sizeof(line)) > 0)
+    {
+        char *tab = strchr(line, '\t');
+        if (!tab)
+            continue;
+        *tab++ = '\0';
+        int n = atoi(tab);
+        if (n <= 0)
+            continue;
+        for (unsigned i = 0; i < ARRAYLEN(apps); i++)
+            if (!strcmp(apps[i].id, line))
+            {
+                game_plays[i] = (uint16_t)MIN(n, 65535);
+                break;
+            }
+    }
+    close(fd);
+}
+
+static void games_stats_save(void)
+{
+    int fd = open(GAMES_PLAYED_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0)
+        return;
+    for (unsigned i = 0; i < ARRAYLEN(apps); i++)
+        if (game_plays[i] > 0)
+            fdprintf(fd, "%s\t%u\n", apps[i].id, (unsigned)game_plays[i]);
+    close(fd);
+}
+
+static void games_stats_record(unsigned app_idx)
+{
+    if (app_idx < ARRAYLEN(apps) && game_plays[app_idx] < 65535)
+    {
+        game_plays[app_idx]++;
+        games_stats_save();
+    }
 }
 
 /***************************************************************************
@@ -468,6 +538,300 @@ static enum list_row_kind get_kind(int item, void *data)
     return LIST_ROW_CONTAINER;
 }
 
+/* Stock 2.0.5 Games catalogue row geometry (320x240, 4 rows of 55 px). */
+#define GAME_ROW_H      55
+#define GAME_ICON_W     55
+#define GAME_TEXT_X     65
+#define GAME_TITLE_BASE 23
+#define GAME_SUB_BASE   42
+#define GAME_CHEVRON_R  16
+#define GAME_CHEVRON_Y  20
+#define GAME_TILE_RGB   LCD_RGBPACK(239, 241, 247)
+#define GAME_SUB_RGB    LCD_RGBPACK(107, 109, 107)
+#define GAME_RULE_RGB   LCD_RGBPACK(222, 223, 222)
+
+/* Stock 2.0.5 dark launch-error page (matches game_klondike.png). */
+#define ERR_BG_RGB      0x313431
+#define ERR_WHITE       0xffffff
+#define ERR_X           25
+#define ERR_W           (LCD_WIDTH - 2 * ERR_X)
+#define ERR_HEAD_Y      51
+#define ERR_BODY_Y      89
+
+static int game_sub_font = -1;
+
+static uint32_t game_sel_rgb(int row)
+{
+    if (row == 0)
+        return 0x96c5da;
+    if (row == GAME_ROW_H - 1)
+        return 0x004386;
+    int t = row - 1, span = GAME_ROW_H - 3;
+    int r = (9 * (span - t) + 0 * t) / span;
+    int g = (164 * (span - t) + 100 * t) / span;
+    int b = (225 * (span - t) + 211 * t) / span;
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+
+static void format_play_count(unsigned plays, char *buf, size_t size)
+{
+    if (plays == 0)
+        strlcpy(buf, str(LANG_FRUIT_GAMES_NEVER_PLAYED), size);
+    else if (plays == 1)
+        strlcpy(buf, str(LANG_FRUIT_GAMES_PLAYED_ONCE), size);
+    else
+        snprintf(buf, size, str(LANG_FRUIT_GAMES_PLAYED_TIMES), plays);
+}
+
+static void draw_game_row(struct list_putlineinfo_t *info)
+{
+    struct viewport *vp = info->vp;
+    const struct viewport *parent = info->list->parent[SCREEN_MAIN];
+    int width = parent->x + parent->width - (vp->x + info->x);
+    unsigned fg = vp->fg_pattern;
+    int font = vp->font;
+    int row_idx = info->line;
+
+    /* 55x55 icon tile at the left, never covered by the blue selection bar. */
+    vp->fg_pattern = GAME_TILE_RGB;
+    lcd_fillrect(info->x, info->y, GAME_ICON_W, GAME_ROW_H);
+    struct dim sz = { GAME_ICON_W, GAME_ROW_H };
+    const struct bitmap *bmp = get_art(row_idx, NULL, &sz);
+    if (bmp)
+    {
+        int bx = info->x + MAX(0, (GAME_ICON_W - bmp->width) / 2);
+        int by = info->y + MAX(0, (GAME_ROW_H - bmp->height) / 2);
+        lcd_bmp(bmp, bx, by);
+    }
+
+    int bar_x = info->x + GAME_ICON_W;
+    int bar_w = width - GAME_ICON_W;
+    if (info->is_selected && bar_w > 0)
+    {
+        for (int r = 0; r < GAME_ROW_H; r++)
+        {
+            uint32_t rgb = game_sel_rgb(r);
+            vp->fg_pattern = LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255,
+                                         rgb & 255);
+            lcd_hline(bar_x, bar_x + bar_w - 1, info->y + r);
+        }
+    }
+    else if (bar_w > 0)
+    {
+        vp->fg_pattern = GAME_RULE_RGB;
+        lcd_hline(bar_x, bar_x + bar_w - 1, info->y + GAME_ROW_H - 1);
+    }
+
+    vp->fg_pattern = fg;
+    lcd_putsxy(info->x + GAME_TEXT_X,
+               info->y + GAME_TITLE_BASE - font_get(font)->ascent,
+               (const unsigned char *)info->dsp_text);
+
+    if (game_sub_font >= 0 && row_idx >= 0 && row_idx < rows.count)
+    {
+        char sub[48];
+        format_play_count(game_plays[rows.app[row_idx]], sub, sizeof(sub));
+        vp->font = game_sub_font;
+        vp->fg_pattern = info->is_selected ? fg : GAME_SUB_RGB;
+        lcd_putsxy(info->x + GAME_TEXT_X,
+                   info->y + GAME_SUB_BASE - font_get(game_sub_font)->ascent,
+                   (const unsigned char *)sub);
+        vp->font = font;
+    }
+
+    if (info->is_selected)
+        stock_art_draw(STOCK_ART_SYSTEM_SUBMENU,
+                       vp->x + info->x + width - GAME_CHEVRON_R,
+                       vp->y + info->y + GAME_CHEVRON_Y,
+                       (struct ui_rect){ vp->x, vp->y, vp->width,
+                                         vp->height });
+    vp->fg_pattern = fg;
+}
+
+static void paint_game_error(const char *heading, const char *body,
+                             int head_font, int body_font)
+{
+    uint32_t *band = extras_band(0);
+    if (!band)
+        return;
+    const struct ui_rect all = { 0, 0, LCD_WIDTH, LCD_HEIGHT };
+    struct font *hf = font_get(head_font);
+    struct font *bf = font_get(body_font);
+    char line[128];
+
+    for (int y = 0; y < LCD_HEIGHT; y += EXTRAS_BAND_ROWS)
+    {
+        struct stock_canvas c = { band, 0, y, LCD_WIDTH,
+                                  MIN(EXTRAS_BAND_ROWS, LCD_HEIGHT - y) };
+        int n = c.width * c.height;
+        for (int i = 0; i < n; i++)
+            c.pixels[i] = ERR_BG_RGB;
+
+        int cy = ERR_HEAD_Y;
+        if (heading && *heading && head_font >= 0)
+        {
+            font_lock(head_font, true);
+            for (const char *at = heading, *end; *at; cy += hf->height)
+            {
+                const char *next = text_wrap_next(at, ERR_W, hf, &end);
+                strlcpy(line, at, MIN((size_t)(end - at) + 1, sizeof(line)));
+                stock_canvas_text(&c, head_font, line, ERR_X, cy, ERR_WHITE);
+                at = next;
+            }
+            font_lock(head_font, false);
+        }
+
+        cy = MAX(ERR_BODY_Y, cy + 12);
+        if (body && *body && body_font >= 0)
+        {
+            font_lock(body_font, true);
+            for (const char *at = body, *end; *at; cy += bf->height)
+            {
+                const char *next = text_wrap_next(at, ERR_W, bf, &end);
+                strlcpy(line, at, MIN((size_t)(end - at) + 1, sizeof(line)));
+                stock_canvas_text(&c, body_font, line, ERR_X, cy, ERR_WHITE);
+                at = next;
+            }
+            font_lock(body_font, false);
+        }
+
+        extras_bar_put(&c, str(LANG_FRUIT_GAMES_ERROR));
+        stock_canvas_show(&c, all);
+    }
+    lcd_update();
+}
+
+static int show_game_error(const char *heading, const char *body)
+{
+    struct ui_scene scene = {0};
+    int ui = screens[SCREEN_MAIN].getuifont();
+    int head_font = ui_theme_current_font_load(UI_FONT_TITLE, 64);
+    int body_font = ui_theme_current_font_load(UI_FONT_BODY, 128);
+    if (head_font < 0)
+        head_font = ui;
+    if (body_font < 0)
+        body_font = ui;
+
+    ui_scene_open_page(&scene, "game-error-push");
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
+    paint_game_error(heading, body, head_font, body_font);
+
+    int ret = GO_TO_PREVIOUS;
+    while (true)
+    {
+        int action = extras_get_action(TIMEOUT_BLOCK, true);
+        if (action == ACTION_STD_CANCEL || action == ACTION_STD_OK)
+            break;
+        if (default_event_handler(action) == SYS_USB_CONNECTED)
+        {
+            ret = GO_TO_ROOT;
+            break;
+        }
+    }
+
+    ui_scene_close_modal(&scene, ret == GO_TO_PREVIOUS, "game-error-pop");
+    extras_bar_release();
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
+    if (head_font != ui)
+        font_unload(head_font);
+    if (body_font != ui)
+        font_unload(body_font);
+    return ret;
+}
+
+static int fruit_games_screen(void)
+{
+    struct gui_synclist list;
+    struct ui_scene scene = {0};
+    int selection = 0, ret = GO_TO_PREVIOUS, action;
+
+    games_stats_load();
+    icons.size = 0;
+    game_sub_font = ui_theme_current_font_load(UI_FONT_BODY,
+                                               global_settings.glyphs_to_cache);
+    ui_scene_open_page(&scene, "apps-list-push");
+    push_current_activity(ACTIVITY_PLUGINBROWSER);
+
+    for (bool open = true; open; )
+    {
+        sb_set_persistent_title(str(LANG_PLUGIN_GAMES), Icon_NOICON,
+                                SCREEN_MAIN);
+        viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
+        gui_synclist_init(&list, get_name, NULL, false, 1, NULL);
+        gui_synclist_set_title(&list, str(LANG_PLUGIN_GAMES), Icon_NOICON);
+        gui_synclist_set_row_callbacks(&list, get_kind, NULL, NULL);
+        gui_synclist_set_voice_callback(&list, get_talk);
+        gui_synclist_set_row_height(&list, GAME_ROW_H);
+        list.callback_draw_item = draw_game_row;
+        gui_synclist_set_nb_items(&list, rows.count);
+        gui_synclist_select_item(&list, MIN(selection, rows.count - 1));
+        gui_synclist_draw_settled(&list);
+
+        for (;;)
+        {
+            extras_list_do_action(HZ, &list, &action);
+            if (action == ACTION_STD_OK)
+            {
+                selection = gui_synclist_get_sel_pos(&list);
+                gui_synclist_scroll_stop(&list);
+                viewportmanager_theme_undo(SCREEN_MAIN, false);
+                icons_release();
+
+                unsigned app_idx = rows.app[selection];
+                bool failed = false;
+                ret = launch(&apps[app_idx], true, &failed);
+                if (ret == GO_TO_MUSIC_QUIZ)
+                {
+                    ret = root_menu_run_screen(ret);
+                    if (ret == 0 || ret == GO_TO_PREVIOUS)
+                    {
+                        games_stats_record(app_idx);
+                        ret = GO_TO_PREVIOUS;
+                    }
+                }
+                else if (failed)
+                {
+                    ret = show_game_error(
+                        str(LANG_FRUIT_GAMES_LAUNCH_ERROR),
+                        str(LANG_FRUIT_GAMES_LAUNCH_ERROR_BODY));
+                }
+                else
+                {
+                    games_stats_record(app_idx);
+                }
+
+                if (ret != GO_TO_PREVIOUS)
+                    open = false;
+                break;
+            }
+            if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
+            {
+                gui_synclist_scroll_stop(&list);
+                viewportmanager_theme_undo(SCREEN_MAIN, false);
+                ret = GO_TO_PREVIOUS;
+                open = false;
+                break;
+            }
+            if (default_event_handler(action) == SYS_USB_CONNECTED)
+            {
+                gui_synclist_scroll_stop(&list);
+                viewportmanager_theme_undo(SCREEN_MAIN, false);
+                ret = GO_TO_ROOT;
+                open = false;
+                break;
+            }
+        }
+    }
+
+    icons_release();
+    if (game_sub_font >= 0)
+        font_unload(game_sub_font);
+    game_sub_font = -1;
+    ui_scene_close_modal(&scene, ret == GO_TO_PREVIOUS, "apps-list-pop");
+    pop_current_activity();
+    return ret;
+}
+
 int app_list_screen(enum app_list_kind kind)
 {
     static const unsigned short titles[] = {
@@ -482,9 +846,12 @@ int app_list_screen(enum app_list_kind kind)
     collect(kind);
     if (!rows.count)
     {
-        splash(HZ * 2, ID2P(LANG_NO_FILES));
+        if (!fruit_menu_active())
+            splash(HZ * 2, ID2P(LANG_NO_FILES));
         return GO_TO_PREVIOUS;
     }
+    if (fruit_menu_active() && kind == APP_LIST_GAMES)
+        return fruit_games_screen();
     icons.size = 0;
     if (fruit_menu_active())
         ui_scene_open_page(&scene, "apps-list-push");
@@ -501,7 +868,7 @@ int app_list_screen(enum app_list_kind kind)
         info.get_albumart = get_art;
         info.row_height = global_settings.db_art_row_height;
         info.selection = selection;
-        info.wps_on_play = true;
+        info.wps_on_play = !fruit_menu_active();
         if (simplelist_show_list(&info))
             ret = GO_TO_ROOT;
         else if (info.selection == -2)
@@ -512,7 +879,7 @@ int app_list_screen(enum app_list_kind kind)
         {
             selection = info.selection;
             icons_release();
-            ret = launch(&apps[rows.app[selection]]);
+            ret = launch(&apps[rows.app[selection]], false, NULL);
             if (ret == GO_TO_MUSIC_QUIZ && fruit_menu_active())
             {
                 ret = root_menu_run_screen(ret);

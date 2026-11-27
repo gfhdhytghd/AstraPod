@@ -442,7 +442,7 @@ static bool photo_view(const struct albums *a, int *sel, bool playing)
     int *order = (int *)(mix + PHOTO_PIXELS);
     int position = *sel;
     enum slideshow_music music = SLIDESHOW_UNCHANGED;
-    int interval = MAX(0, global_settings.photo_duration) * HZ;
+    int interval = MIN(20, MAX(0, global_settings.photo_duration)) * HZ;
     if (playing)
     {
         music = slideshow_start(order, a->slide_count, *sel);
@@ -688,6 +688,8 @@ static const char *setting_value(int row, void *data, char *buf, size_t size)
     if (setting->setting == &global_settings.photo_duration &&
         !global_settings.photo_duration)
         return str(LANG_PHOTO_MANUAL);
+    if ((setting->flags & F_T_MASK) == F_T_BOOL)
+        return str(option_value_as_int(setting) ? LANG_ON : LANG_OFF);
     return option_get_valuestring(setting, buf, size,
                                   option_value_as_int(setting));
 }

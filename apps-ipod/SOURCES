@@ -393,6 +393,7 @@ viewers/text_reel.c
 viewers/lyric_viewer/lyrics.c
 viewers/lyric_viewer/lyric_viewer.c
 viewers/lyric_viewer/lyrics_motion.c
+viewers/lyric_viewer/lyrics_chrome.c
 
 /* Streaming text-extraction engine behind the core-linked text viewer. Turns
  * plain/markdown/html/rtf/fb2/epub/docx/pdf into a stream of UTF-8. Platform

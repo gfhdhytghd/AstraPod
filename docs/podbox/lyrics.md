@@ -65,6 +65,17 @@ app_buffer, the ready frame replaces the loading frame directly. Exit fades
 through the fallback colour in two halves, track changes fade out/in in two
 100 ms halves, and glyphs use interpolated colours.
 
+Under `style.lyrics=classic` (Classic and Fruit Company) the page keeps the
+status bar and Now Playing's progress row in place and fits the lyrics
+between them. Lines sit on 24 px rows in 16 px Helvetica. The current line
+and anything scrolling through it take the list's selection bar, fixed at
+42% of the lyrics area; its height follows the lines there. Untimed lyrics
+start below the status bar as a page of black text without the bar. With no
+lyrics, embossed grey text sits in the middle. The page background is
+`gradient.lyrics`, one colour per row, so a frame costs what the solid fill
+costs. The status bar redraws only when it changes; the progress row
+redraws when the bar gains a pixel or either time changes.
+
 The lyrics background uses the scrim theme's 320 px picture, shifted up by
 40 px, with radius 12 on the decimated cover. The page copies a compatible
 cached skin blur when available. On a miss it uses the same image filter

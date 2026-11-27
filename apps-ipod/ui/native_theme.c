@@ -197,13 +197,14 @@ static const struct {
     [UI_STYLE_LIST_ROWS]    = { "list_rows",    (const char *const[]){ "pitch", "fill", NULL } },
     [UI_STYLE_MENU_TREE]    = { "menu_tree",    (const char *const[]){ "astrapod", "stock", NULL } },
     [UI_STYLE_QUICK_SCREEN] = { "quick_screen", (const char *const[]){ "tiles", "hud", NULL } },
+    [UI_STYLE_LYRICS]       = { "lyrics",       (const char *const[]){ "full", "classic", NULL } },
 };
 
 static const char *const gradients[UI_GRADIENT_COUNT] = {
     [UI_GRADIENT_SELECTION] = "selection", [UI_GRADIENT_STATUS] = "status",
     [UI_GRADIENT_PROGRESS] = "progress",
     [UI_GRADIENT_PROGRESS_TRACK] = "progress_track",
-    [UI_GRADIENT_SCROLLBAR] = "scrollbar",
+    [UI_GRADIENT_SCROLLBAR] = "scrollbar", [UI_GRADIENT_LYRICS] = "lyrics",
 };
 
 static const char *const motions[UI_MOTION_COUNT] = {
@@ -300,6 +301,14 @@ static void classic(struct ui_theme *theme)
     theme->style[UI_STYLE_MENU_PANE] = UI_MENU_PANE_SPLIT;
     theme->style[UI_STYLE_LIST_ROWS] = UI_LIST_ROWS_FILL;
     theme->style[UI_STYLE_QUICK_SCREEN] = UI_QUICK_SCREEN_HUD;
+    /* Lyrics read as a list: its 24-pixel rows in the list's own font, the
+     * current line in the selection bar, on white shading to grey-blue. */
+    theme->style[UI_STYLE_LYRICS] = UI_LYRICS_CLASSIC;
+    strcpy(theme->font[UI_FONT_LYRICS], "16-helvetica-bold");
+    strcpy(theme->font[UI_FONT_LYRICS_FOCUS], "16-helvetica-bold");
+    strcpy(theme->font[UI_FONT_LYRICS_BACKGROUND], "13-helvetica-bold");
+    theme->gradient[UI_GRADIENT_LYRICS] = (struct ui_theme_gradient){
+        .color = { 0xffffff, 0xd8dfe9 }, .stops = 2 };
 }
 
 /* Stock's selection bar is a colour gradient, not a bitmap: its rows take

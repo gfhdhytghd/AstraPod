@@ -52,6 +52,7 @@
 #include "ui/scene.h"
 #include "lyrics.h"
 #include "lyrics_motion.h"
+#include "lyrics_chrome.h"
 #include "lyric_viewer.h"
 #if defined(IPOD_6G) && defined(HAVE_USB_PODLINK)
 #include "podlink-shell-playback.h"
@@ -82,13 +83,16 @@
 #define LV_TEXT 800
 #define LV_LAYOUTS 61
 #define LV_MASKS 127
-#define LV_BODY_TOP 35
-#define LV_BODY_BOTTOM (LCD_HEIGHT - 6)
-#define LV_EDGE_FADE 24
+#define LV_FULL_TOP 35
+#define LV_FULL_BOTTOM (LCD_HEIGHT - 6)
+#define LV_EDGE_FADE (lv.classic ? 12 : 24)
 #define LV_LINE_PAD 4
 #define LV_MIN_ROW (8 + LV_LINE_PAD)
-#define LV_POSES ((LV_BODY_BOTTOM - LV_BODY_TOP) / LV_MIN_ROW + 8)
-#define LV_ANCHOR (LCD_HEIGHT * 42 / 100)
+#define LV_POSES ((LV_FULL_BOTTOM - LV_FULL_TOP) / LV_MIN_ROW + 8)
+/* The lyrics area and the row the current line centres on, per layout. */
+#define LV_BODY_TOP (lv.body_top)
+#define LV_BODY_BOTTOM (lv.body_bottom)
+#define LV_ANCHOR (lv.anchor)
 #define LV_STRIP_WIDTH (LCD_WIDTH - 32)
 #define LV_DIM 154          /* 60% in Q8 */
 #define LV_SWEEP_EDGE 12
@@ -153,13 +157,18 @@ struct lv_state {
     struct viewport vp, mask_vp;
     struct frame_buffer_t mask_fb;
     struct ui_page page;
-    struct ui_view backdrop, body, progress;
+    struct ui_view backdrop, body, progress, status;
+    /* style.lyrics=classic: the chrome, and the selection bar's rows. */
+    struct lyrics_chrome chrome;
+    bool classic, status_dirty;
+    int body_top, body_bottom, anchor, band_top, band_bottom;
+    unsigned band_fg;
     fb_data *snapshot, *layer, *background, *raster;
     unsigned char *masks;
     struct lv_layout *layouts;
     struct lv_mask *glyphs;
     int font, font_height, raster_height, small_font, large_font;
-    int main_pitch, main_ascent;
+    int main_pitch, main_ascent, gap_height, spill;
     unsigned font_epoch;
     int font_center;
     bool font_reflow;
@@ -191,7 +200,7 @@ struct lv_state {
     enum lv_type last_type;
     struct lv_perf perf;
     int art_handle;
-    int old_progress, old_words;
+    int old_progress, old_words, fill;
     int entry_handle, entry_frame, track_frame;
     uint32_t entry_clock;
     unsigned entry_frames, track_frames;
@@ -492,6 +501,8 @@ static inline __attribute__((always_inline)) fb_data lv_mix(fb_data a, fb_data b
 }
 static unsigned lv_background(int y)
 {
+    if (lv.classic)
+        return lyrics_chrome_row(&lv.chrome, y);
     return color_blend(lv.bg, lv.bottom, y * 256 / LCD_HEIGHT);
 }
 static int lv_font(void)
@@ -515,6 +526,7 @@ static void lv_background_build(int handle)
     lv.bg = lv_color(&theme, &palette, UI_COLOR_BACKGROUND);
     lv.fg = lv_color(&theme, &palette, UI_COLOR_FOREGROUND);
     lv.accent = lv_color(&theme, &palette, UI_COLOR_ACCENT);
+    lv.band_fg = lv_color(&theme, &palette, UI_COLOR_SELECTED_TEXT);
 
     switch (global_settings.lyric_colour_mode)
     {
@@ -532,7 +544,7 @@ static void lv_background_build(int handle)
     lv.art_ready = false;
 
     enum ui_bg_kind bg = theme.background[UI_BG_LYRICS];
-    if (!lv.background || handle < 0 || bg == UI_BG_SOLID)
+    if (!lv.background || handle < 0 || bg == UI_BG_SOLID || lv.classic)
         return;
 
     uint32_t start = lv_clock();
@@ -729,7 +741,9 @@ static LV_PIXELS_ARM void lv_text(const char *text, int key, int font, int heigh
         struct viewport *previous = lcd_set_viewport(&clip);
         lcd_setfont(font);
         lcd_set_drawmode(DRMODE_FG);
-        lcd_set_foreground(color_blend(lv_background(MAX(0, y)), lv.fg, opacity));
+        bool band = y + height / 2 >= lv.band_top && y + height / 2 < lv.band_bottom;
+        lcd_set_foreground(band ? lv.band_fg :
+                           color_blend(lv_background(MAX(0, y)), lv.fg, opacity));
         lcd_putsxy(lv_text_x(width, align), y + ink_above - top, text);
         lcd_set_viewport(previous);
         return;
@@ -743,11 +757,15 @@ static LV_PIXELS_ARM void lv_text(const char *text, int key, int font, int heigh
     if (sweep >= 0) sweep = MAX(0, sweep - first);
     if (levels) levels += first;
     fb_data *frame = lv_frame() + lv_text_x(width, align);
-    uint32_t fg = lv_expand(lv.fg);
+    uint32_t ink = lv_expand(lv.fg), band = lv_expand(lv.band_fg);
     for (int r = top; r < bottom; r++)
     {
         int edge = MIN(r - LV_BODY_TOP, LV_BODY_BOTTOM - r);
         int a = key >= 0 ? opacity * MAX(0, MIN(LV_EDGE_FADE, edge)) / LV_EDGE_FADE : opacity;
+        /* Whatever passes through the selection bar reads as selected. */
+        bool selected = r >= lv.band_top && r < lv.band_bottom;
+        uint32_t fg = selected ? band : ink;
+        if (selected && a) a = 256;
         if (!a) continue;
         const unsigned char *row = mask + (r - y) * LV_STRIP_WIDTH;
         fb_data *dst = frame + r * LCD_WIDTH;
@@ -896,7 +914,8 @@ static int lv_distance_alpha(int index, int focus, int gap)
 {
     bool previous = index < (gap >= 0 ? gap : focus);
     int distance = gap >= 0 ? abs(index - (gap - previous)) + 1 : abs(index - focus);
-    if (distance == 0) return 256;
+    /* Untimed lyrics under the classic layout are a page of text. */
+    if (distance == 0 || (lv.classic && !lyrics_timed())) return 256;
     if (distance == 1)
     {
         int amount = previous ? global_settings.lyric_prev_opacity : global_settings.lyric_next_opacity;
@@ -940,7 +959,7 @@ static int lv_distance(int from, int to, int gap_row)
     int distance = 0;
     for (int i = MIN(from, to); i < MAX(from, to); i++)
         distance += (lv_height(i) + lv_height(i + 1)) / 2 +
-                    (gap_row == i + 1 ? lv.font_height + LV_LINE_PAD : 0);
+                    (gap_row == i + 1 ? lv.gap_height : 0);
     return to < from ? -distance : distance;
 }
 
@@ -986,7 +1005,7 @@ static void lv_motion(int focus, bool animate, uint32_t now)
             shift = lv_distance(from, focus, lv.pose_gap);
     }
     int first = focus, y = lv_follow_anchor(focus);
-    int gap_height = lv.font_height + LV_LINE_PAD;
+    int gap_height = lv.gap_height;
     if (lv.gap_row >= 0)
     {
         int half = (lv_height(focus) + gap_height) / 2;
@@ -1242,9 +1261,9 @@ static void lv_line(int i, struct lv_pose pose, int top, int bottom)
     int main_alpha = timed && lv_voice_lit(voice, lv.vocal_elapsed) ? 256 : pose.from_alpha;
     int bg_alpha = timed && lv_voice_lit(bg, lv.vocal_elapsed) ? 256 : pose.from_alpha;
     bool sweep = i == lv.pose_focus && !voice.text && lv.sweep >= 0 && !lv.mode.manual;
-    int text_bottom = MIN(bottom, y + height);
-    int text_top = MAX(top, y);
-    if (lv.mode.manual)
+    int text_bottom = MIN(bottom, y + height + lv.spill);
+    int text_top = MAX(top, y - lv.spill);
+    if (lv.mode.manual && !lv.classic)
         align = 0;
     if (focus < 256)
         lv_line_block(i, false, line, y, false, main_alpha * (256 - focus) / 256,
@@ -1334,7 +1353,7 @@ static void lv_browse_body(int top, int bottom)
         } while (true);
     }
     /* The margin tick stays still while glyph strips move on the grid. */
-    if (LV_ANCHOR >= top && LV_ANCHOR < bottom)
+    if (!lv.classic && LV_ANCHOR >= top && LV_ANCHOR < bottom)
         lv_frame()[LV_ANCHOR * LCD_WIDTH + 6] = lv.accent;
 }
 
@@ -1367,7 +1386,8 @@ static void lv_dots(int center, int opacity, int top, int bottom)
         { 0, 11, 45, 62, 62, 45, 11,  0},
     };
     fb_data *frame = lv_frame();
-    uint32_t fg = lv_expand(lv.fg);
+    uint32_t fg = lv_expand(center >= lv.band_top && center < lv.band_bottom ?
+                            lv.band_fg : lv.fg);
     const int center_x = lv_text_x(36, global_settings.lyric_align) + 18;
     for (int i = -1; i <= 1; i++)
     {
@@ -1403,6 +1423,64 @@ static void lv_gap_body(int top, int bottom)
         lv_dots(MAX(lo + 4, MIN(hi - 4, LV_ANCHOR)), lv.old_gap_opacity, top, bottom);
 }
 
+struct lv_band_pick { int above_y, above_h, below_y, below_h; };
+
+static void lv_band_take(struct lv_band_pick *pick, int y, int h)
+{
+    if (y <= LV_ANCHOR && y > pick->above_y)
+    {
+        pick->above_y = y;
+        pick->above_h = h;
+    }
+    else if (y > LV_ANCHOR && y < pick->below_y)
+    {
+        pick->below_y = y;
+        pick->below_h = h;
+    }
+}
+
+/* The selection bar stays on the anchor row. Its height follows the lines
+ * there, blended by how near each centre is, so it grows and shrinks as a
+ * wrapped line scrolls through it. */
+static void lv_band(void)
+{
+    lv.band_top = lv.band_bottom = 0;
+    if (!lv.classic || !lyrics_loaded() || !lyrics_timed() || !lyrics_count())
+        return;
+    /* The bar waits for its line's glyphs, so the two appear together. */
+    const char *focus = lyrics_text(lv.mode.focus);
+    if (focus && !font_prefetch_text(lv_face(false, false), focus))
+        return;
+    struct lv_band_pick pick = { INT_MIN, 0, INT_MAX, 0 };
+    if (lv.mode.manual)
+    {
+        int count = lyrics_count();
+        for (int direction = -1; direction <= 1; direction += 2)
+        {
+            int center = LV_ANCHOR + lv.wheel_offset, i = lv.mode.focus;
+            for (;;)
+            {
+                int h = lv_height(i), next = i + direction;
+                lv_band_take(&pick, center, h);
+                if (next < 0 || next >= count || (center - LV_ANCHOR) * direction > 0)
+                    break;
+                center += direction * ((h + lv_height(next)) / 2);
+                i = next;
+            }
+        }
+    }
+    else
+        for (int slot = 0; slot < lv.pose_count; slot++)
+            lv_band_take(&pick, lv_pose_at(slot, lv.motion_frame).from_y,
+                         lv_height(lv.pose_first + slot));
+    int height = pick.above_y == INT_MIN ? pick.below_h :
+                 pick.below_y == INT_MAX ? pick.above_h :
+                 lyrics_lerp(pick.above_h, pick.below_h,
+                             (LV_ANCHOR - pick.above_y) * 256 / (pick.below_y - pick.above_y));
+    lv.band_top = LV_ANCHOR - height / 2;
+    lv.band_bottom = lv.band_top + height;
+}
+
 static const char *lv_status(void)
 {
     return lv.track[0] ? "No lyrics" : "Nothing playing";
@@ -1420,6 +1498,10 @@ static LV_PIXELS_ARM void lv_restore(int top, int bottom)
 
 static void lv_body(int top, int bottom)
 {
+    lv_band();
+    if (lv.band_bottom > lv.band_top)
+        lyrics_chrome_band(&lv.chrome, lv.band_top, lv.band_bottom - lv.band_top,
+                           top, bottom);
     if (lv.mode.manual)
     {
         lv_browse_body(top, bottom);
@@ -1435,9 +1517,24 @@ static void lv_body(int top, int bottom)
     if (!lv.pose_count && !lv.pending)
     {
         const char *text = lv_status();
-        if (font_prefetch_text(lv_font(), text))
+        int ink_above = lv_ink_above(font_get(lv_font()));
+        if (!font_prefetch_text(lv_font(), text))
+            return;
+        if (lv.classic)
+        {
+            /* Grey letters pressed into the page, with a white edge below. */
+            int y = LV_ANCHOR - lv.font_height / 2;
+            unsigned fg = lv.fg;
+            lv.fg = LCD_WHITE;
+            lv_text(text, -1, lv_font(), lv.font_height, y + 1, 256, -1, 256, top, bottom, 1,
+                    NULL, ink_above);
+            lv.fg = fg;
+            lv_text(text, -1, lv_font(), lv.font_height, y, 120, -1, 256, top, bottom, 1,
+                    NULL, ink_above);
+        }
+        else
             lv_text(text, -1, lv_font(), lv.font_height, LV_ANCHOR, 256, -1, 256, top, bottom, 1,
-                    NULL, lv_ink_above(font_get(lv_font())));
+                    NULL, ink_above);
     }
 }
 
@@ -1458,6 +1555,11 @@ static void lv_paint_body(const struct ui_view *view, const struct ui_view_frame
 static void lv_paint_progress(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     (void)view;
+    if (lv.classic)
+    {
+        lyrics_chrome_strip(&lv.chrome, lv.fill, frame->clip);
+        return;
+    }
     lcd_set_viewport(&lv.vp);
     lcd_set_foreground(lv.accent);
     lcd_fillrect(frame->clip.x, frame->clip.y, frame->clip.width, frame->clip.height);
@@ -1465,7 +1567,32 @@ static void lv_paint_progress(const struct ui_view *view, const struct ui_view_f
 
 static const struct ui_view_ops lv_backdrop_ops = { .paint = lv_paint_backdrop };
 static const struct ui_view_ops lv_body_ops = { .paint = lv_paint_body };
+static void lv_paint_status(const struct ui_view *view, const struct ui_view_frame *frame)
+{
+    (void)view;
+    lyrics_chrome_status(&lv.chrome, frame->clip);
+}
+
 static const struct ui_view_ops lv_progress_ops = { .paint = lv_paint_progress };
+static const struct ui_view_ops lv_status_ops = { .paint = lv_paint_status };
+
+/* The layout comes from style.lyrics, and the anchor also from the document. */
+static void lv_geometry(void)
+{
+    if (!lv.classic)
+    {
+        lv.body_top = LV_FULL_TOP;
+        lv.body_bottom = LV_FULL_BOTTOM;
+        lv.anchor = LCD_HEIGHT * 42 / 100;
+        return;
+    }
+    lv.body_top = lv.chrome.status_height;
+    lv.body_bottom = LYRICS_CHROME_STRIP;
+    int span = lv.body_bottom - lv.body_top;
+    lv.anchor = !lyrics_loaded() ? lv.body_top + span / 2 :
+                lyrics_timed() ? lv.body_top + span * 42 / 100 :
+                lv.body_top + LV_EDGE_FADE + lv.main_pitch / 2;
+}
 
 static void lv_page_init(void)
 {
@@ -1473,10 +1600,18 @@ static void lv_page_init(void)
                  &lv_backdrop_ops, NULL);
     ui_view_init(&lv.body, (struct ui_rect){0, LV_BODY_TOP, LCD_WIDTH, LV_BODY_BOTTOM - LV_BODY_TOP},
                  &lv_body_ops, NULL);
-    ui_view_init(&lv.progress, (struct ui_rect){0, LCD_HEIGHT - 2, 0, 2},
+    int strip = lv.classic ? LYRICS_CHROME_STRIP : LCD_HEIGHT - 2;
+    ui_view_init(&lv.progress, (struct ui_rect){0, strip, lv.classic ? LCD_WIDTH : 0,
+                                                LCD_HEIGHT - strip},
                  &lv_progress_ops, NULL);
     ui_view_append(&lv.backdrop, &lv.body);
     ui_view_append(&lv.backdrop, &lv.progress);
+    if (lv.classic)
+    {
+        ui_view_init(&lv.status, (struct ui_rect){0, 0, LCD_WIDTH, lv.chrome.status_height},
+                     &lv_status_ops, NULL);
+        ui_view_append(&lv.backdrop, &lv.status);
+    }
     ui_page_init(&lv.page, &lv.backdrop);
 }
 
@@ -1504,7 +1639,10 @@ static bool lv_draw_pixels(bool force, enum lv_output output, fb_data *layer)
     uint32_t now = lv_clock();
     lv.motion_frame = lv.mode.manual ? MIN(lv_wheel_age(now), lv_wheel_duration()) : lv_motion_age(now);
     lv.wheel_offset = lv.mode.manual ? lv_wheel_at(now) : lv.wheel_offset;
-    int progress = lv.length > 0 ? (int)((int64_t)MAX(0, MIN(lv.elapsed, lv.length)) * LCD_WIDTH / lv.length) : 0;
+    int progress = lv.classic ? lyrics_chrome_fill(lv.elapsed, lv.length) :
+                   lv.length > 0 ? (int)((int64_t)MAX(0, MIN(lv.elapsed, lv.length)) * LCD_WIDTH / lv.length) : 0;
+    bool times = lv.classic && lyrics_chrome_times(&lv.chrome, lv.elapsed, lv.length);
+    bool status = lv.status_dirty;
     lv.vocal_elapsed = lv_lyric_elapsed();
     lv.sweep = lv.gap ? -1 : lyrics_ttml() ?
                (lv_vocal_active(lv.vocal_elapsed) ? lv.vocal_elapsed : -1) :
@@ -1514,10 +1652,11 @@ static bool lv_draw_pixels(bool force, enum lv_output output, fb_data *layer)
     bool full = force || !lv.painted;
     bool body = full || lv.motion_frame != lv.painted_frame ||
                 dots != lv.old_gap_opacity || manual_changed;
-    bool bar = full || progress != lv.old_progress;
+    bool bar = full || progress != lv.old_progress || times;
     bool sung = lv.sweep != lv.old_words;
-    if (!body && !bar && !sung)
+    if (!body && !bar && !sung && !status)
         return false;
+    lv.status_dirty = false;
 
     lv.old_gap_opacity = dots;
     int top = LV_BODY_TOP, bottom = LV_BODY_BOTTOM;
@@ -1553,7 +1692,9 @@ static bool lv_draw_pixels(bool force, enum lv_output output, fb_data *layer)
     if (layer && !full)
         memcpy(lv_frame(), layer, LV_FRAME);
     /* Full-width damage strips match the RGB565 background restore routine. */
-    lv.progress.value[UI_WIDTH] = progress;
+    int strip = lv.classic ? LYRICS_CHROME_STRIP : LCD_HEIGHT - 2;
+    lv.progress.value[UI_WIDTH] = lv.classic ? LCD_WIDTH : progress;
+    lv.fill = progress;
     if (full)
     {
         ui_page_invalidate(&lv.page, (struct ui_rect){0, 0, LCD_WIDTH, LCD_HEIGHT});
@@ -1570,10 +1711,19 @@ static bool lv_draw_pixels(bool force, enum lv_output output, fb_data *layer)
         }
         if (bar)
         {
-            ui_page_invalidate(&lv.page, (struct ui_rect){0, LCD_HEIGHT - 2, LCD_WIDTH, 2});
+            ui_page_invalidate(&lv.page, (struct ui_rect){0, strip, LCD_WIDTH, LCD_HEIGHT - strip});
             ui_page_paint(&lv.page);
-            top = !(body || sung) ? LCD_HEIGHT - 2 : top;
+            top = !(body || sung) ? strip : top;
             bottom = LCD_HEIGHT;
+        }
+        if (status)
+        {
+            int height = lv.chrome.status_height;
+            ui_page_invalidate(&lv.page, (struct ui_rect){0, 0, LCD_WIDTH, height});
+            ui_page_paint(&lv.page);
+            if (!(body || sung || bar))
+                bottom = height;
+            top = 0;
         }
     }
     if (output == LV_UPDATE)
@@ -2045,6 +2195,7 @@ static void lv_reload(struct mp3entry *id3, bool remote)
         lv.mode.focus = lv_follow_index(elapsed, lyrics_index_at(elapsed));
     }
     lv_invalidate_text();
+    lv_geometry();
     lv_gap_update(lv_lyric_elapsed(), lyrics_index_at(lv_lyric_elapsed()));
     lv_prefetch_document();
     lv_motion(lv.mode.focus, false, lv_clock());
@@ -2070,6 +2221,7 @@ static void lv_remote_page(void)
         lv.pending = !lyrics_loaded() && !remote_doc.done;
     }
     lv_invalidate_text();
+    lv_geometry();
     if (!lv.mode.manual && lyrics_timed())
         lv.mode.focus = MAX(0, lyrics_index_at(lv_lyric_elapsed()));
     lv_prefetch_document();
@@ -2244,12 +2396,39 @@ static bool lv_select_seek(uint32_t pressed)
     return true;
 }
 
+/* The status bar and progress row are on the first frame, as Now Playing
+ * left them. */
+static void __attribute__((noinline)) lv_first_chrome(void)
+{
+    const struct mp3entry *id3 = cider_active() ? get_wps_state()->id3 :
+        audio_status() & AUDIO_STATUS_PLAY ? audio_current_track() : NULL;
+    long elapsed = id3 ? (long)id3->elapsed : 0, length = id3 ? (long)id3->length : 0;
+    const struct ui_rect all = {0, 0, LCD_WIDTH, LCD_HEIGHT};
+    lyrics_chrome_times(&lv.chrome, elapsed, length);
+    lyrics_chrome_strip(&lv.chrome, lyrics_chrome_fill(elapsed, length), all);
+    lyrics_chrome_status(&lv.chrome, all);
+}
+
 static void lv_first_frame(uint32_t started)
 {
     lv_background_build(-1);
     lv_restore(0, LCD_HEIGHT);
+    if (lv.classic)
+        lv_first_chrome();
     lv_flush(0, 0, LCD_WIDTH, LCD_HEIGHT);
     lv_record(started, LV_ENTRY, true);
+}
+
+static void __attribute__((noinline)) lv_open_layout(void)
+{
+    struct ui_theme theme;
+    ui_theme_snapshot(&theme);
+    /* A colour mode other than the theme's keeps the full layout. */
+    lv.classic = theme.style[UI_STYLE_LYRICS] == UI_LYRICS_CLASSIC &&
+                 global_settings.lyric_colour_mode == 0;
+    if (lv.classic)
+        lyrics_chrome_open(&lv.chrome, &theme);
+    lv_geometry();
 }
 
 static void __attribute__((noinline)) lv_load_fonts(void)
@@ -2272,6 +2451,17 @@ static void __attribute__((noinline)) lv_load_fonts(void)
     lv.raster_height = MAX(MAX(lv.font_height, focus_height), lv_ink_height(bg));
     lv.main_ascent = MAX(normal_ascent, focus_ascent);
     lv.main_pitch = lv.main_ascent + MAX(lv.font_height - normal_ascent, focus_height - focus_ascent);
+    lv.gap_height = lv.font_height + LV_LINE_PAD;
+    lv.spill = 0;
+    if (lv.classic)
+    {
+        /* Rows a font cell apart, as a list's are. Ink that reaches past
+         * the cell overlaps the next row's cell instead of being cut. */
+        lv.main_ascent = normal->ascent;
+        lv.main_pitch = normal->height;
+        lv.gap_height = lv.main_pitch + LV_LINE_PAD;
+        lv.spill = lv.raster_height - normal->height;
+    }
 }
 
 int lyric_viewer(void)
@@ -2289,6 +2479,7 @@ int lyric_viewer(void)
     lv.initial = lv.first_pending = true;
     lv.entry_at = entry_at;
     lv.entry_tick = current_tick;
+    lv_open_layout();
     lv_page_init();
     perf.seek_frame_us = -1;
     lv_boost(true);
@@ -2405,6 +2596,8 @@ int lyric_viewer(void)
             }
             lv.art_gen = art_gen;
         }
+        if (lv.classic && lyrics_chrome_poll(&lv.chrome))
+            lv.status_dirty = true;
         long lyric_at = lv_lyric_elapsed();
         if (lv.returning && lv.painted_frame == lv.motion_frames)
             lv.returning = false;
@@ -2458,7 +2651,9 @@ int lyric_viewer(void)
                     change = lv_short_switch(interval);
                 if (change > lyric_at) timeout = MIN(timeout, LV_TICKS(change - lyric_at));
             }
-            timeout = MIN(timeout, lyrics_progress_ticks(lv.elapsed, lv.length, LCD_WIDTH, HZ));
+            timeout = MIN(timeout, lv.classic ?
+                          LV_TICKS(lyrics_chrome_next_ms(lv.elapsed, lv.length)) :
+                          lyrics_progress_ticks(lv.elapsed, lv.length, LCD_WIDTH, HZ));
         }
         if (animated || sweeping)
             timeout = MAX(1, timeout - (int)((uint32_t)current_tick - frame_at));
@@ -2588,6 +2783,7 @@ done:
     if (lv.font >= 0) font_unload(lv.font);
     if (lv.small_font >= 0) font_unload(lv.small_font);
     if (lv.large_font >= 0) font_unload(lv.large_font);
+    if (lv.classic) lyrics_chrome_close(&lv.chrome);
     lv_backlight(false); lcd_set_viewport(NULL);
     viewportmanager_theme_undo(SCREEN_MAIN, false); pop_current_activity();
     ui_hold_scrolling(false); ui_inhibit_flush(old_inhibit);

@@ -94,7 +94,16 @@ def prepare(build, root, theme, track):
         themes = rockbox / "native-themes"
         themes.mkdir(exist_ok=True)
         (themes / "fruit-company-ultra.podtheme").write_text(
-            ULTRA_FALLBACK_THEME + "style.lyrics=classic\n")
+            ULTRA_FALLBACK_THEME + """\
+color.wps_bg=ffffff
+color.wps_fg=000000
+color.wps_panel=ffffff
+font.lyrics=16-helvetica-bold
+font.lyrics_focus=16-helvetica-bold
+font.lyrics_background=13-helvetica-bold
+gradient.lyrics=ffffff,d8dfe9
+style.lyrics=classic
+""")
     (rockbox / "ui-perf.enable").write_text("")
     (rockbox / "config.cfg").write_text(
         f"native theme: {theme}\nstart in screen: files\nshow files: music\n"

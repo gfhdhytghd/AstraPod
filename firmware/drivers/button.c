@@ -27,6 +27,9 @@
 #include "system.h"
 #include "button.h"
 #include "button_chord.h"
+#ifdef HAVE_MIKEY_REMOTE
+#include "inline-remote-poweroff.h"
+#endif
 #include "button_usb_remote.h"
 #include "kernel.h"
 #include "thread.h"
@@ -342,6 +345,9 @@ static void button_tick(void)
 
                         if (enable_sw_poweroff &&
                             !chord_blocks_poweroff &&
+#ifdef HAVE_MIKEY_REMOTE
+                            !inline_remote_blocks_poweroff(btn) &&
+#endif
                             (btn & POWEROFF_BUTTON
 #ifdef RC_POWEROFF_BUTTON
                                     || btn == RC_POWEROFF_BUTTON

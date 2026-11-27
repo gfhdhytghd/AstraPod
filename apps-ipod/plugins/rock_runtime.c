@@ -532,14 +532,44 @@ static void *rock_get_buffer(size_t *size)
     return tail_size ? tail : NULL;
 }
 
+#ifdef HAVE_HW_H264
+static void *rock_claim_video_scratch(size_t bytes)
+{
+    /* The module's VPU, AAC and PCM buffers share one pinned allocation. */
+    if (foreground_owner != thread_self() || engine_heap ||
+        !bytes || bytes > 10 * 1024 * 1024)
+        return NULL;
+
+    int handle = core_alloc(bytes);
+    if (handle <= 0)
+        return NULL;
+    void *scratch = core_get_data_pinned(handle);
+    engine_heap = handle;
+    rock_h264_begin(scratch, bytes);
+    rock_h264_audio_begin(scratch, bytes);
+    return scratch;
+}
+#endif
+
 static void *rock_claim_scratch(size_t minimum, size_t preferred,
                                 size_t *granted)
 {
     if (!granted)
         return NULL;
     *granted = 0;
+    if (usb_taken)
+        return NULL;
+#ifdef HAVE_HW_H264
+    if (filename && !strcmp(filename, PLUGIN_APPS_DIR "/h264_player.rock"))
+    {
+        void *scratch = rock_claim_video_scratch(minimum);
+        if (scratch)
+            *granted = minimum;
+        return scratch;
+    }
+#endif
     size_t bytes = MIN(preferred, tail_size) & ~(ROCK_BUFFER_ALIGNMENT - 1);
-    if (usb_taken || !bytes || bytes < minimum)
+    if (!bytes || bytes < minimum)
         return NULL;
     void *result = tail;
     tail += bytes;

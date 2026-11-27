@@ -129,7 +129,7 @@ static bool video_tables_sane(const struct mp4v_demux_res *demux)
         demux->num_stco <= demux->num_samples &&
         demux->num_stsc > 0 &&
         demux->num_stsc <= demux->num_stco &&
-        demux->num_stts > 0 &&
+        demux->num_stts > 0 && demux->mdat_len > 0 &&
         demux->num_stss <= demux->num_samples &&
         demux->timescale > 0;
     bool audio_sane =
@@ -156,58 +156,6 @@ static bool video_tables_sane(const struct mp4v_demux_res *demux)
             return false;
     }
     return timed_samples == demux->num_samples;
-}
-
-/* Validate the actual video mapping after the second, full table pass.  The
- * old independent stco/stsc caps rejected long files authored by iTunes,
- * whose normal layout is one video sample per chunk and may therefore have
- * hundreds of thousands of chunks.  The MP4 relationships themselves give
- * tighter bounds: every chunk contains samples and every stsc run starts at
- * a real chunk. */
-static bool video_stsc_sane(const struct mp4v_demux_res *demux)
-{
-    uint64_t mapped_samples = 0;
-    uint32_t i;
-
-    if (demux->stsc == NULL || demux->num_stsc == 0 ||
-        demux->stsc_cap < demux->num_stsc ||
-        demux->sample_sizes == NULL ||
-        demux->sample_sizes_cap < demux->num_samples ||
-        demux->chunk_offsets == NULL ||
-        demux->chunk_offsets_cap < demux->num_stco ||
-        (demux->num_stss > 0 &&
-         (demux->sync_samples == NULL ||
-          demux->sync_samples_cap < demux->num_stss)))
-        return false;
-    for (i = 0; i < demux->num_stsc; i++)
-    {
-        const struct mp4v_stsc_entry *entry = &demux->stsc[i];
-        uint32_t next_chunk = i + 1 < demux->num_stsc ?
-            demux->stsc[i + 1].first_chunk : demux->num_stco + 1;
-
-        if ((i == 0 && entry->first_chunk != 1) ||
-            entry->first_chunk == 0 || entry->first_chunk > demux->num_stco ||
-            next_chunk <= entry->first_chunk ||
-            next_chunk > demux->num_stco + 1 ||
-            entry->samples_per_chunk == 0 || entry->sample_desc_index == 0)
-            return false;
-        mapped_samples +=
-            (uint64_t)(next_chunk - entry->first_chunk) *
-            entry->samples_per_chunk;
-        if (mapped_samples > demux->num_samples)
-            return false;
-    }
-    if (mapped_samples != demux->num_samples)
-        return false;
-    for (i = 0; i < demux->num_stss; i++)
-    {
-        if (demux->sync_samples[i] == 0 ||
-            demux->sync_samples[i] > demux->num_samples ||
-            (i > 0 && demux->sync_samples[i] <=
-                      demux->sync_samples[i - 1]))
-            return false;
-    }
-    return true;
 }
 
 static uint32_t video_pts_ms(const struct mp4v_demux_res *demux,
@@ -309,8 +257,6 @@ static uint32_t video_sample_for_ms(const struct mp4v_demux_res *demux,
     }
     if (sample >= demux->num_samples)
         sample = demux->num_samples - 1;
-    while (sample > 0 && !mp4v_is_keyframe(demux, sample))
-        sample--;
     video_timing_for_sample(demux, sample, timing);
     return sample;
 }
@@ -800,19 +746,47 @@ static void video_redraw_frame(struct vpu_h264 *decoder, uint8_t *scaled,
                      overlay_visible);
 }
 
+static struct mp4v_demux_res demux;
+
+static bool video_format_supported(const struct mp4v_demux_res *movie)
+{
+    return movie->format == MAKEFOURCC('a', 'v', 'c', '1') &&
+           movie->avc_profile == 66 && movie->avc_level <= VIDEO_MAX_LEVEL &&
+           movie->width > 0 && movie->height > 0 &&
+           movie->width <= VIDEO_MAX_WIDTH &&
+           movie->height <= VIDEO_MAX_HEIGHT &&
+           movie->nalu_len_size >= 1 && movie->nalu_len_size <= 4;
+}
+
+size_t video_h264_scratch_size(const char *path)
+{
+    int fd = rb->open(path, O_RDONLY);
+    if (fd < 0)
+        return 0;
+    int result = mp4v_demux_read(fd, &demux);
+    rb->close(fd);
+    if (result < 0 || !video_format_supported(&demux) ||
+        !video_tables_sane(&demux))
+        return 0;
+
+    size_t decoder = rb->hw_h264->buf_size((demux.width + 15) & ~15,
+                                          (demux.height + 15) & ~15);
+    if (!decoder)
+        return 0;
+    /* Worst-case alignment before the decoder and the four following buffers. */
+    size_t bytes = 4095 + decoder + VIDEO_READ_BUFFER + VIDEO_OUTPUT_BUFFER +
+                   2 * 31;
+    if (demux.audio_format == MAKEFOURCC('m', 'p', '4', 'a'))
+        bytes += video_audio_workspace_size(&demux) + VIDEO_PCM_BUFFER +
+                 2 * (CACHEALIGN_SIZE - 1);
+    return (bytes + 7) & ~(size_t)7;
+}
+
 int video_h264_play(const char *filepath, void *buffer, size_t buffer_size)
 {
-    static struct mp4v_demux_res demux;
-    static uint32_t probe_video_sample[1];
-    static uint32_t probe_video_chunk[1];
-    static uint32_t probe_video_sync[1];
     struct video_pool pool;
     struct video_timing timing;
     struct vpu_h264 *decoder = NULL;
-    struct mp4v_stsc_entry *video_stsc;
-    uint32_t *video_samples;
-    uint32_t *video_chunks;
-    uint32_t *video_sync;
     uint8_t *decoder_buffer;
     uint8_t *read_buffer;
     uint8_t *scale_buffer;
@@ -844,20 +818,13 @@ int video_h264_play(const char *filepath, void *buffer, size_t buffer_size)
     rb->splash(0, "Loading video...");
     rb->cpu_boost(true);
     cpu_boosted = true;
-    rb->memset(&demux, 0, sizeof(demux));
-    if (mp4v_demux_open(filepath, &demux,
-                        probe_video_sample, 1,
-                        probe_video_chunk, 1, NULL, 0,
-                        probe_video_sync, 1) < 0)
+    video_fd = rb->open(filepath, O_RDONLY);
+    if (video_fd < 0 || mp4v_demux_read(video_fd, &demux) < 0)
     {
         rb->splash(HZ * 2, "Invalid MP4/M4V file");
         goto cleanup;
     }
-    if (demux.format != MAKEFOURCC('a', 'v', 'c', '1') ||
-        demux.avc_profile != 66 || demux.avc_level > VIDEO_MAX_LEVEL ||
-        demux.width == 0 || demux.height == 0 ||
-        demux.width > VIDEO_MAX_WIDTH || demux.height > VIDEO_MAX_HEIGHT ||
-        demux.nalu_len_size < 1 || demux.nalu_len_size > 4)
+    if (!video_format_supported(&demux))
     {
         rb->splash(HZ * 3, "Need H.264 Baseline <= L3.0\nMax 640x480");
         goto cleanup;
@@ -870,14 +837,6 @@ int video_h264_play(const char *filepath, void *buffer, size_t buffer_size)
 
     pool.cursor = buffer;
     pool.end = (uint8_t *)buffer + buffer_size;
-    video_samples = video_pool_take(
-        &pool, demux.num_samples * sizeof(*video_samples), 32);
-    video_chunks = video_pool_take(
-        &pool, demux.num_stco * sizeof(*video_chunks), 32);
-    video_stsc = video_pool_take(
-        &pool, demux.num_stsc * sizeof(*video_stsc), 32);
-    video_sync = demux.num_stss > 0 ? video_pool_take(
-        &pool, demux.num_stss * sizeof(*video_sync), 32) : NULL;
     decoder_size = rb->hw_h264->buf_size(
         (demux.width + 15) & ~15, (demux.height + 15) & ~15);
     decoder_buffer = video_pool_take(&pool, decoder_size, 4096);
@@ -890,32 +849,24 @@ int video_h264_play(const char *filepath, void *buffer, size_t buffer_size)
                         CACHEALIGN_SIZE) : NULL;
     pcm_buffer = audio_codec_workspace_size > 0 ?
         video_pool_take(&pool, VIDEO_PCM_BUFFER, CACHEALIGN_SIZE) : NULL;
-    if (video_samples == NULL || video_chunks == NULL ||
-        video_stsc == NULL ||
-        (demux.num_stss > 0 && video_sync == NULL) ||
-        decoder_buffer == NULL || read_buffer == NULL ||
-        scale_buffer == NULL ||
-        (demux.audio_num_samples > 0 &&
+    if (decoder_buffer == NULL || read_buffer == NULL ||
+        scale_buffer == NULL || decoder_size == 0 ||
+        (audio_codec_workspace_size > 0 &&
          (audio_codec_workspace == NULL || pcm_buffer == NULL)))
     {
         rb->splash(HZ * 2, "Not enough video memory");
         goto cleanup;
     }
     rb->splash(0, "Loading movie index...");
-    if (mp4v_demux_open(filepath, &demux,
-                        video_samples, demux.num_samples,
-                        video_chunks, demux.num_stco,
-                        video_stsc, demux.num_stsc,
-                        video_sync, demux.num_stss) < 0 ||
-        !video_tables_sane(&demux) || !video_stsc_sane(&demux))
+    if (!mp4v_validate_index(video_fd, &demux))
     {
         rb->splash(HZ * 2, "MP4 table parse failed");
         goto cleanup;
     }
     duration_ms = video_duration_ms(&demux);
     sample = video_resume_load(filepath, demux.num_samples);
-    while (sample > 0 && !mp4v_is_keyframe(&demux, sample))
-        sample--;
+    if (!mp4v_find_keyframe(video_fd, &demux, sample, &sample))
+        goto cleanup;
     video_timing_for_sample(&demux, sample, &timing);
 
     /* Preparation, decode, and LCD presentation need the 108 MHz bus clock.
@@ -931,9 +882,6 @@ int video_h264_play(const char *filepath, void *buffer, size_t buffer_size)
         rb->splash(HZ * 2, "H.264 decoder init failed");
         goto cleanup;
     }
-    video_fd = rb->open(filepath, O_RDONLY);
-    if (video_fd < 0)
-        goto cleanup;
 
     rb->pcmbuf_fade(false, true);
     rb->sound_set(SOUND_VOLUME, rb->global_status->volume);
@@ -1021,6 +969,9 @@ int video_h264_play(const char *filepath, void *buffer, size_t buffer_size)
                     target = duration_ms - 1;
                 sample = video_sample_for_ms(&demux, (uint32_t)target,
                                              &timing);
+                if (!mp4v_find_keyframe(video_fd, &demux, sample, &sample))
+                    goto cleanup;
+                video_timing_for_sample(&demux, sample, &timing);
                 pts_ms = video_pts_ms(&demux, &timing);
                 rb->hw_h264->close(decoder);
                 decoder = rb->hw_h264->open(
@@ -1078,7 +1029,7 @@ int video_h264_play(const char *filepath, void *buffer, size_t buffer_size)
             break;
         if (seek_requested)
             continue;
-        if (mp4v_get_sample_offset(&demux, sample, &offset, &size) < 0 ||
+        if (mp4v_get_sample_offset(video_fd, &demux, sample, &offset, &size) < 0 ||
             size == 0 || size > VIDEO_READ_BUFFER ||
             rb->lseek(video_fd, offset, SEEK_SET) < 0 ||
             rb->read(video_fd, read_buffer, size) != (ssize_t)size)

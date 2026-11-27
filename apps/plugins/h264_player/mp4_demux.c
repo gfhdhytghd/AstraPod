@@ -639,239 +639,65 @@ static bool read_chunk_stts(struct mp4_parse_ctx *ctx, size_t chunk_len)
 }
 
 /* stsz - sample sizes */
+static bool read_table(struct mp4_parse_ctx *ctx, struct mp4v_table *table,
+                       uint32_t count, unsigned words_per_entry,
+                       size_t remaining)
+{
+    if (count > remaining / (words_per_entry * sizeof(uint32_t)))
+        return false;
+    table->offset = stream_tell(&ctx->stream);
+    table->words = count * words_per_entry;
+    stream_skip(&ctx->stream, remaining);
+    return !ctx->stream.eof;
+}
+
 static bool read_chunk_stsz(struct mp4_parse_ctx *ctx, size_t chunk_len)
 {
-    size_t size_remaining;
-    uint32_t default_size, numsizes, i;
-
     if (chunk_len < 20)
         return false;
-    size_remaining = chunk_len - 8;
     stream_read_uint32(&ctx->stream); /* version + flags */
-    size_remaining -= 4;
-
-    default_size = stream_read_uint32(&ctx->stream);
-    size_remaining -= 4;
-
-    numsizes = stream_read_uint32(&ctx->stream);
-    size_remaining -= 4;
-
-    if (default_size == 0 && numsizes > size_remaining / 4)
-        return false;
-    ctx->res->num_samples = numsizes;
-
-    if (default_size != 0)
-    {
-        /* All samples same size */
-        uint32_t cap = ctx->res->sample_sizes == NULL ? 0 :
-            MIN(numsizes, ctx->res->sample_sizes_cap);
-        for (i = 0; i < cap; i++)
-            ctx->res->sample_sizes[i] = default_size;
-
-        if (size_remaining > 0)
-            stream_skip(&ctx->stream, size_remaining);
-        return true;
-    }
-
-    /* Variable sample sizes */
-    {
-        uint32_t cap = ctx->res->sample_sizes == NULL ? 0 :
-            MIN(numsizes, ctx->res->sample_sizes_cap);
-        if (!stream_read_uint32_array(&ctx->stream,
-                                      ctx->res->sample_sizes, cap))
-            return false;
-        size_remaining -= (size_t)cap * 4;
-        /* Skip remaining if we hit our cap */
-        if (numsizes > cap)
-        {
-            size_t skip = (size_t)(numsizes - cap) * 4;
-
-            stream_skip(&ctx->stream, skip);
-            size_remaining -= skip;
-        }
-    }
-
-    if (size_remaining > 0)
-        stream_skip(&ctx->stream, size_remaining);
-
-    return true;
+    ctx->res->default_sample_size = stream_read_uint32(&ctx->stream);
+    ctx->res->num_samples = stream_read_uint32(&ctx->stream);
+    return read_table(ctx, &ctx->res->sample_sizes,
+                      ctx->res->default_sample_size ? 0 : ctx->res->num_samples,
+                      1, chunk_len - 20);
 }
 
-/* stsc - sample-to-chunk table */
+static bool read_counted_table(struct mp4_parse_ctx *ctx,
+                               struct mp4v_table *table, uint32_t *count,
+                               unsigned words_per_entry, size_t chunk_len)
+{
+    if (chunk_len < 16)
+        return false;
+    stream_read_uint32(&ctx->stream); /* version + flags */
+    *count = stream_read_uint32(&ctx->stream);
+    return read_table(ctx, table, *count, words_per_entry, chunk_len - 16);
+}
+
 static bool read_chunk_stsc(struct mp4_parse_ctx *ctx, size_t chunk_len)
 {
-    size_t size_remaining;
-    uint32_t numentries, i, fill;
-
-    if (chunk_len < 16)
-        return false;
-    size_remaining = chunk_len - 8;
-    stream_read_uint32(&ctx->stream); /* version + flags */
-    size_remaining -= 4;
-
-    numentries = stream_read_uint32(&ctx->stream);
-    size_remaining -= 4;
-
-    if (numentries > size_remaining / 12)
-        return false;
-    ctx->res->num_stsc = numentries;
-    fill = ctx->res->stsc == NULL ? 0 :
-        MIN(numentries, ctx->res->stsc_cap);
-
-    if (!stream_read(&ctx->stream, ctx->res->stsc,
-                     (size_t)fill * sizeof(ctx->res->stsc[0])))
-        return false;
-    size_remaining -= (size_t)fill * 12;
-    for (i = 0; i < fill; i++)
-    {
-        ctx->res->stsc[i].first_chunk =
-            betoh32(ctx->res->stsc[i].first_chunk);
-        ctx->res->stsc[i].samples_per_chunk =
-            betoh32(ctx->res->stsc[i].samples_per_chunk);
-        ctx->res->stsc[i].sample_desc_index =
-            betoh32(ctx->res->stsc[i].sample_desc_index);
-    }
-
-    if (numentries > fill)
-    {
-        size_t skip = (size_t)(numentries - fill) * 12;
-
-        stream_skip(&ctx->stream, skip);
-        size_remaining -= skip;
-    }
-
-    if (size_remaining > 0)
-        stream_skip(&ctx->stream, size_remaining);
-
-    return true;
+    return read_counted_table(ctx, &ctx->res->stsc, &ctx->res->num_stsc,
+                              3, chunk_len);
 }
 
-/* stco - chunk offset table */
 static bool read_chunk_stco(struct mp4_parse_ctx *ctx, size_t chunk_len)
 {
-    size_t size_remaining;
-    uint32_t numentries, cap;
-
-    if (chunk_len < 16)
-        return false;
-    size_remaining = chunk_len - 8;
-    stream_read_uint32(&ctx->stream); /* version + flags */
-    size_remaining -= 4;
-
-    numentries = stream_read_uint32(&ctx->stream);
-    size_remaining -= 4;
-
-    if (numentries > size_remaining / 4)
-        return false;
-    ctx->res->num_stco = numentries; /* real count from file */
-    cap = ctx->res->chunk_offsets == NULL ? 0 :
-        MIN(numentries, ctx->res->chunk_offsets_cap);
-
-    if (!stream_read_uint32_array(&ctx->stream,
-                                  ctx->res->chunk_offsets, cap))
-        return false;
-    size_remaining -= (size_t)cap * 4;
-
-    if (numentries > cap)
-    {
-        size_t skip = (size_t)(numentries - cap) * 4;
-
-        stream_skip(&ctx->stream, skip);
-        size_remaining -= skip;
-    }
-
-    if (size_remaining > 0)
-        stream_skip(&ctx->stream, size_remaining);
-
-    return true;
+    ctx->res->chunk_words = 1;
+    return read_counted_table(ctx, &ctx->res->chunk_offsets,
+                              &ctx->res->num_stco, 1, chunk_len);
 }
 
-/* co64 - 64-bit chunk offset table (for files >4GB).
- * Reads 64-bit offsets but truncates to 32-bit.
- * Files with chunk offsets >4GB are not supported. */
 static bool read_chunk_co64(struct mp4_parse_ctx *ctx, size_t chunk_len)
 {
-    size_t size_remaining;
-    uint32_t numentries, i, cap;
-
-    if (chunk_len < 16)
-        return false;
-    size_remaining = chunk_len - 8;
-    stream_read_uint32(&ctx->stream); /* version + flags */
-    size_remaining -= 4;
-
-    numentries = stream_read_uint32(&ctx->stream);
-    size_remaining -= 4;
-
-    if (numentries > size_remaining / 8)
-        return false;
-    ctx->res->num_stco = numentries; /* real count from file */
-    cap = ctx->res->chunk_offsets == NULL ? 0 :
-        MIN(numentries, ctx->res->chunk_offsets_cap);
-
-    for (i = 0; i < cap; i++)
-    {
-        uint32_t hi = stream_read_uint32(&ctx->stream);
-        uint32_t lo = stream_read_uint32(&ctx->stream);
-        if (hi != 0)
-            return false;
-        ctx->res->chunk_offsets[i] = lo;
-        size_remaining -= 8;
-    }
-
-    if (numentries > cap)
-    {
-        size_t skip = (size_t)(numentries - cap) * 8;
-
-        stream_skip(&ctx->stream, skip);
-        size_remaining -= skip;
-    }
-
-    if (size_remaining > 0)
-        stream_skip(&ctx->stream, size_remaining);
-
-    return true;
+    ctx->res->chunk_words = 2;
+    return read_counted_table(ctx, &ctx->res->chunk_offsets,
+                              &ctx->res->num_stco, 2, chunk_len);
 }
 
-/* stss - sync sample (keyframe) table */
 static bool read_chunk_stss(struct mp4_parse_ctx *ctx, size_t chunk_len)
 {
-    size_t size_remaining;
-    uint32_t numentries;
-    uint32_t cap;
-
-    if (chunk_len < 16)
-        return false;
-    size_remaining = chunk_len - 8;
-    stream_read_uint32(&ctx->stream); /* version + flags */
-    size_remaining -= 4;
-
-    numentries = stream_read_uint32(&ctx->stream);
-    size_remaining -= 4;
-
-    if (numentries > size_remaining / 4)
-        return false;
-    ctx->res->num_stss = numentries;
-    cap = ctx->res->sync_samples == NULL ? 0 :
-        MIN(numentries, ctx->res->sync_samples_cap);
-
-    if (!stream_read_uint32_array(&ctx->stream,
-                                  ctx->res->sync_samples, cap))
-        return false;
-    size_remaining -= (size_t)cap * 4;
-
-    if (numentries > cap)
-    {
-        size_t skip = (size_t)(numentries - cap) * 4;
-
-        stream_skip(&ctx->stream, skip);
-        size_remaining -= skip;
-    }
-
-    if (size_remaining > 0)
-        stream_skip(&ctx->stream, size_remaining);
-
-    return true;
+    return read_counted_table(ctx, &ctx->res->sync_samples, &ctx->res->num_stss,
+                              1, chunk_len);
 }
 
 /* stbl - sample table container */
@@ -1337,39 +1163,15 @@ static bool read_chunk_moov(struct mp4_parse_ctx *ctx, size_t chunk_len)
     return !ctx->stream.eof && size_remaining == 0;
 }
 
-int mp4v_demux_open(const char *filepath,
-                    struct mp4v_demux_res *res,
-                    uint32_t *sample_buf, uint32_t sample_cap,
-                    uint32_t *chunk_buf, uint32_t chunk_cap,
-                    struct mp4v_stsc_entry *stsc_buf, uint32_t stsc_cap,
-                    uint32_t *sync_buf, uint32_t sync_cap)
+int mp4v_demux_read(int fd, struct mp4v_demux_res *res)
 {
     struct mp4_parse_ctx ctx;
-    off_t file_size;
-    int fd;
+    off_t file_size = rb->ffilesize(fd);
 
-    if (filepath == NULL || res == NULL)
-        return -1;
-    fd = rb->open(filepath, O_RDONLY);
-    if (fd < 0)
-        return -1;
-    file_size = rb->ffilesize(fd);
     if (file_size <= 0 || (uint64_t)file_size > UINT32_MAX)
-    {
-        rb->close(fd);
         return -1;
-    }
 
     rb->memset(res, 0, sizeof(*res));
-    res->sample_sizes = sample_buf;
-    res->sample_sizes_cap = sample_cap;
-    res->chunk_offsets = chunk_buf;
-    res->chunk_offsets_cap = chunk_cap;
-    res->stsc = stsc_buf;
-    res->stsc_cap = stsc_cap;
-    res->sync_samples = sync_buf;
-    res->sync_samples_cap = sync_cap;
-    res->file_size = (uint32_t)file_size;
 
     rb->memset(&ctx, 0, sizeof(ctx));
     stream_init(&ctx.stream, fd, file_size);
@@ -1386,7 +1188,6 @@ int mp4v_demux_open(const char *filepath,
 
         if (chunk_len < 8)
         {
-            rb->close(fd);
             return -1;
         }
 
@@ -1394,7 +1195,6 @@ int mp4v_demux_open(const char *filepath,
         if (ctx.stream.eof ||
             chunk_len - 8 > (uint32_t)(file_size - ctx.stream.pos))
         {
-            rb->close(fd);
             return -1;
         }
 
@@ -1405,10 +1205,7 @@ int mp4v_demux_open(const char *filepath,
                 break;
             case MAKEFOURCC('m','o','o','v'):
                 if (!read_chunk_moov(&ctx, chunk_len))
-                {
-                    rb->close(fd);
                     return -1;
-                }
                 break;
             case MAKEFOURCC('m','d','a','t'):
                 if (chunk_len > 8)
@@ -1428,7 +1225,6 @@ int mp4v_demux_open(const char *filepath,
     }
 
 done:
-    rb->close(fd);
 
     if (ctx.stream.eof || !ctx.found_video || res->format == 0)
         return -1;
@@ -1436,113 +1232,165 @@ done:
     return 0;
 }
 
-int mp4v_get_sample_offset(const struct mp4v_demux_res *res,
-                           uint32_t sample_index,
-                           uint32_t *offset_out,
-                           uint32_t *size_out)
+static bool table_word(int fd, struct mp4v_table *table, uint32_t index,
+                       uint32_t *value)
 {
-    uint32_t chunk_index = 0;
-    uint32_t sample_in_chunk = 0;
-    uint64_t samples_so_far = 0;
-    uint64_t chunk_offset;
-    uint32_t i;
-    bool found = false;
+    if (index >= table->words)
+        return false;
+    if (index < table->first || index - table->first >= table->count)
+    {
+        struct mp4_stream stream;
+        uint32_t first = index - index % MP4V_WINDOW_WORDS;
+        uint32_t count = MIN(MP4V_WINDOW_WORDS, table->words - first);
+        off_t pos = (off_t)table->offset + (off_t)first * sizeof(uint32_t);
+        size_t bytes = count * sizeof(uint32_t);
 
-    if (res == NULL || offset_out == NULL || size_out == NULL ||
-        res->sample_sizes == NULL || res->chunk_offsets == NULL ||
-        res->stsc == NULL || sample_index >= res->num_samples ||
-        sample_index >= res->sample_sizes_cap ||
-        res->num_stsc > res->stsc_cap ||
-        res->num_stco > res->chunk_offsets_cap)
+        table->count = 0;
+        stream_init(&stream, fd, pos + bytes);
+        stream.pos = pos;
+        if (rb->lseek(fd, pos, SEEK_SET) != pos ||
+            !stream_read_uint32_array(&stream, table->window, count))
+            return false;
+        table->first = first;
+        table->count = count;
+    }
+    *value = table->window[index - table->first];
+    return true;
+}
+
+static bool chunk_run(int fd, struct mp4v_demux_res *res, uint32_t run,
+                      uint32_t *first, uint32_t *end, uint32_t *per_chunk)
+{
+    *end = res->num_stco + 1;
+    return table_word(fd, &res->stsc, 3 * run, first) &&
+           table_word(fd, &res->stsc, 3 * run + 1, per_chunk) &&
+           (run + 1 == res->num_stsc ||
+            table_word(fd, &res->stsc, 3 * (run + 1), end)) &&
+           *first > 0 && *end > *first && *end <= res->num_stco + 1 &&
+           *per_chunk > 0;
+}
+
+bool mp4v_validate_index(int fd, struct mp4v_demux_res *res)
+{
+    uint64_t samples = 0;
+    uint32_t previous = 0;
+
+    for (uint32_t i = 0; i < res->num_stsc; i++)
+    {
+        uint32_t first, end, per_chunk, description;
+        if (!chunk_run(fd, res, i, &first, &end, &per_chunk) ||
+            (i == 0 && first != 1) ||
+            !table_word(fd, &res->stsc, 3 * i + 2, &description) ||
+            !description)
+            return false;
+        samples += (uint64_t)(end - first) * per_chunk;
+        if (samples > res->num_samples)
+            return false;
+    }
+
+    for (uint32_t i = 0; i < res->num_stss; i++)
+    {
+        uint32_t sample;
+        if (!table_word(fd, &res->sync_samples, i, &sample) ||
+            sample <= previous || sample > res->num_samples)
+            return false;
+        previous = sample;
+    }
+    return samples == res->num_samples;
+}
+
+static bool sample_size(int fd, struct mp4v_demux_res *res, uint32_t sample,
+                        uint32_t *size)
+{
+    *size = res->default_sample_size;
+    return *size || table_word(fd, &res->sample_sizes, sample, size);
+}
+
+int mp4v_get_sample_offset(int fd, struct mp4v_demux_res *res,
+                           uint32_t sample_index,
+                           uint32_t *offset_out, uint32_t *size_out)
+{
+    uint64_t offset = res->next_offset;
+    if (sample_index >= res->num_samples ||
+        !sample_size(fd, res, sample_index, size_out))
         return -1;
 
-    *size_out = res->sample_sizes[sample_index];
-
-    /* Walk stsc to find which chunk contains this sample */
-    for (i = 0; i < res->num_stsc; i++)
+    if (sample_index != res->next_sample ||
+        sample_index >= res->chunk_end_sample)
     {
-        uint32_t first_chunk;
-        uint32_t spc = res->stsc[i].samples_per_chunk;
-        uint32_t next_first;
+        uint32_t run = res->map_run;
+        uint32_t sample = res->map_run_sample;
+        uint32_t first, end, per_chunk;
+        uint32_t low, high = 0;
 
-        if (res->stsc[i].first_chunk == 0 || spc == 0)
-            return -1;
-        first_chunk = res->stsc[i].first_chunk - 1;
-        if (i + 1 < res->num_stsc)
+        if (sample_index < sample)
+            run = sample = 0;
+        for (;;)
         {
-            if (res->stsc[i + 1].first_chunk == 0)
+            if (run >= res->num_stsc ||
+                !chunk_run(fd, res, run, &first, &end, &per_chunk))
                 return -1;
-            next_first = res->stsc[i + 1].first_chunk - 1;
+            uint64_t count = (uint64_t)(end - first) * per_chunk;
+            if (sample_index - sample < count)
+                break;
+            sample += count;
+            run++;
         }
+
+        uint32_t in_run = sample_index - sample;
+        uint32_t chunk = first - 1 + in_run / per_chunk;
+        uint32_t word = chunk * res->chunk_words;
+        if ((res->chunk_words == 2 &&
+             !table_word(fd, &res->chunk_offsets, word++, &high)) ||
+            high || !table_word(fd, &res->chunk_offsets, word, &low))
+            return -1;
+
+        uint32_t in_chunk = in_run % per_chunk;
+        offset = low;
+        if (res->default_sample_size)
+            offset += (uint64_t)in_chunk * res->default_sample_size;
         else
-            next_first = res->num_stco;
-
-        if (next_first <= first_chunk || next_first > res->num_stco)
-            return -1;
-        uint32_t chunks_in_run = next_first - first_chunk;
-        uint64_t samples_in_run = (uint64_t)chunks_in_run * spc;
-
-        if (samples_so_far + samples_in_run > sample_index)
         {
-            /* Sample is within this stsc run */
-            uint32_t sample_offset_in_run = sample_index - samples_so_far;
-            chunk_index = first_chunk + (sample_offset_in_run / spc);
-            sample_in_chunk = sample_offset_in_run % spc;
-            found = true;
-            break;
+            for (uint32_t i = sample_index - in_chunk; i < sample_index; i++)
+            {
+                uint32_t size;
+                if (!sample_size(fd, res, i, &size))
+                    return -1;
+                offset += size;
+            }
         }
-
-        samples_so_far += samples_in_run;
+        res->map_run = run;
+        res->map_run_sample = sample;
+        res->chunk_end_sample = sample_index - in_chunk + per_chunk;
     }
 
-    if (!found || chunk_index >= res->num_stco)
+    if (offset < res->mdat_offset ||
+        offset + *size_out > (uint64_t)res->mdat_offset + res->mdat_len)
         return -1;
-
-    /* Get the chunk's file offset */
-    chunk_offset = res->chunk_offsets[chunk_index];
-
-    /* Add offsets for preceding samples within this chunk */
-    {
-        uint32_t first_sample_in_chunk = sample_index - sample_in_chunk;
-        uint32_t j;
-
-        for (j = 0; j < sample_in_chunk; j++)
-        {
-            uint32_t index = first_sample_in_chunk + j;
-
-            if (index >= res->num_samples || index >= res->sample_sizes_cap)
-                return -1;
-            chunk_offset += res->sample_sizes[index];
-        }
-    }
-
-    if (chunk_offset > UINT32_MAX ||
-        chunk_offset + *size_out > res->file_size)
-        return -1;
-    *offset_out = (uint32_t)chunk_offset;
+    *offset_out = (uint32_t)offset;
+    res->next_offset = offset + *size_out;
+    res->next_sample = sample_index + 1;
     return 0;
 }
 
-bool mp4v_is_keyframe(const struct mp4v_demux_res *res,
-                      uint32_t sample_index)
+bool mp4v_find_keyframe(int fd, struct mp4v_demux_res *res,
+                       uint32_t sample, uint32_t *keyframe)
 {
-    uint32_t i;
-    uint32_t sample_num = sample_index + 1; /* stss is 1-based */
-
-    /* No stss table means all samples are sync samples */
-    if (res->num_stss == 0)
-        return true;
-    if (res->sync_samples == NULL ||
-        res->sync_samples_cap < res->num_stss)
-        return false;
-
-    for (i = 0; i < res->num_stss; i++)
+    uint32_t low = 0, high = res->num_stss;
+    *keyframe = high ? 0 : sample;
+    while (low < high)
     {
-        if (res->sync_samples[i] == sample_num)
-            return true;
-        if (res->sync_samples[i] > sample_num)
-            break;
+        uint32_t mid = low + (high - low) / 2;
+        uint32_t sync;
+        if (!table_word(fd, &res->sync_samples, mid, &sync))
+            return false;
+        if (sync - 1 > sample)
+            high = mid;
+        else
+        {
+            *keyframe = sync - 1;
+            low = mid + 1;
+        }
     }
-
-    return false;
+    return true;
 }

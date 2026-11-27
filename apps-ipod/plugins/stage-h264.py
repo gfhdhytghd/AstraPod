@@ -36,7 +36,17 @@ if src.name == "h264_player.c":
         return PLUGIN_OK;
     }
 
-    buffer = rb->plugin_claim_scratch(512 * 1024, SIZE_MAX, &buffer_size);
+#ifdef HAVE_HW_H264
+    size_t needed = video_h264_scratch_size(path);
+    if (!needed)
+    {
+        rb->splash(2 * HZ, "Unsupported MP4/M4V");
+        return PLUGIN_OK;
+    }
+    buffer = rb->plugin_claim_scratch(needed, needed, &buffer_size);
+#else
+    buffer = NULL;
+#endif
 """)
     replace("    rb->plugin_release_audio_buffer();\n", "")
     replace('result = video_h264_play(path, buffer, buffer_size);',
@@ -116,11 +126,6 @@ elif src.name == "video_playback.c":
         "    rb->sound_set(SOUND_VOLUME, rb->global_status->volume);",
     ):
         replace(line + "\n", "")
-    replace("""        scale_buffer == NULL ||
-        (demux.audio_num_samples > 0 &&
-         (audio_codec_workspace == NULL || pcm_buffer == NULL)))""",
-            """        scale_buffer == NULL || decoder_size == 0)""")
-    replace("demux->timescale > 0;", "demux->timescale > 0 && demux->mdat_len > 0;")
     replace("    return (uint32_t)(ticks * 1000u / demux->timescale);",
             """    uint64_t elapsed = ticks * 1000u / demux->timescale;
     return elapsed <= 24u * 60 * 60 * 1000 ? elapsed : 0;""")
@@ -131,7 +136,8 @@ elif src.name == "video_playback.c":
         rb->splash(HZ * 2, "Unsupported movie duration");
         goto cleanup;
     }""")
-    cut("    if (demux.audio_format", "    rb->lcd_set_foreground", """\
+    cut("    if (demux.audio_format == MAKEFOURCC('m', 'p', '4', 'a') &&",
+        "    rb->lcd_set_foreground", """\
     if (rb->h264_audio && audio_codec_workspace && pcm_buffer &&
         demux.audio_codecdata_len > 0 &&
         video_audio_init(filepath, &demux, audio_codec_workspace,
@@ -220,12 +226,6 @@ elif src.name == "video_playback.c":
     replace("sample >= total_samples * 95u / 100u", "sample >= total_samples")
     replace("    if (result == 0)\n        video_resume_clear(filepath);",
             "    if (result == 0 && have_frame)\n        video_resume_clear(filepath);")
-    replace("            size == 0 || size > VIDEO_READ_BUFFER ||",
-            """            size == 0 || size > VIDEO_READ_BUFFER ||
-            offset < demux.mdat_offset ||
-            (uint64_t)offset + size >
-                (uint64_t)demux.mdat_offset + demux.mdat_len ||""")
-
 elif src.name == "video_audio.c":
     for name in ("codec_thread.h", "video_pcm.h"):
         replace(f'#include "{name}"\n', "")

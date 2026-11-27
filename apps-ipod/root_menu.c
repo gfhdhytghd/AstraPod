@@ -2497,11 +2497,30 @@ int root_menu_run_screen(int screen)
      * parent painter draw Home in its place. */
     static struct ui_scene row_scene;
     static const char row_menu;
+    bool cover_row = screen == GO_TO_ALBUM_COVERS;
     ui_scene_cancel(&row_scene);
+    /* Root history can still hold the last screen run by a different row. */
+    if (cover_row)
+        cover_nav_begin(GO_TO_ROOT);
     scene_enter(&row_scene, GO_TO_ROOT, screen, true, &row_menu);
     int ret = load_screen(screen);
     if (row_scene.capturing)
         ui_scene_cancel(&row_scene);
+
+    /* Keep the row's owning menu alive through the album and playback.
+     * Returning a screen code to do_menu() would unwind its menu stack. */
+    while (cover_row && cover_nav_origin_is(GO_TO_ROOT) &&
+           (ret == GO_TO_ALBUM_COVERS || ret == GO_TO_ALBUM_COVERS_TRACKS ||
+            ret == GO_TO_WPS || ret == GO_TO_CIDER))
+    {
+        came_back = screen == GO_TO_WPS || ret == GO_TO_ALBUM_COVERS;
+        scene_enter(&row_scene, screen, ret, !came_back, &row_menu);
+        screen = ret;
+        ret = load_screen(screen);
+        came_back = false;
+        if (row_scene.capturing)
+            ui_scene_cancel(&row_scene);
+    }
 
     /* The root dispatcher's history only contains Home. Keep the owning
      * menu here and allow a stock Search result to return to Search. */

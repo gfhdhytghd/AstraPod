@@ -482,9 +482,11 @@ static int browser(void* param)
             last_ft_dirlevel = tc->dirlevel;
             if (cover_nav_active() && !album_covers_reopen_tracks())
                 return GO_TO_PREVIOUS;
-            album_tracks_from = cover_nav_active() ? GO_TO_ALBUM_COVERS : (last_screen == GO_TO_ALBUM_COVERS
-                                 || last_screen == GO_TO_ARTIST_PORTRAITS)
-                                ? last_screen : GO_TO_ROOT;
+            bool has_album_parent = last_screen == GO_TO_ALBUM_COVERS ||
+                last_screen == GO_TO_ARTIST_PORTRAITS ||
+                (fruit_menu_active() && last_screen == GO_TO_DB_SEARCH);
+            album_tracks_from = cover_nav_active() ? GO_TO_ALBUM_COVERS :
+                               has_album_parent ? last_screen : GO_TO_ROOT;
             /* browser_db_enter_album_tracks_on_next_load() was already armed by
              * album_covers.c's SELECT handler before it returned this code --
              * just need the standard ID3DB browse boilerplate here, same as
@@ -505,6 +507,8 @@ static int browser(void* param)
         browse.flags |= BROWSE_HOME_LIBRARY;
     int screen = (intptr_t)param;
     if (fruit_menu_active() && (screen == GO_TO_LIBRARY_ROW ||
+        (screen == GO_TO_ALBUM_COVERS_TRACKS &&
+         album_tracks_from == GO_TO_DB_SEARCH) ||
         (screen >= GO_TO_TAGNAVI_FIRST && screen <= GO_TO_TAGNAVI_LAST)))
         browse.flags |= BROWSE_MUSIC_PUSH;
 
@@ -865,6 +869,8 @@ static int wps_back_to(int screen)
             return screen;
         case GO_TO_ALBUM_COVERS_TRACKS:
             return album_tracks_from;
+        case GO_TO_DB_SEARCH:
+            return fruit_menu_active() ? screen : GO_TO_ROOT;
         default:
             return GO_TO_ROOT;
     }
@@ -2494,29 +2500,34 @@ int root_menu_run_screen(int screen)
     if (row_scene.capturing)
         ui_scene_cancel(&row_scene);
 
-    /* Keep a stock browser row's owning menu on the stack when a track
-     * opens Now Playing. The root dispatcher's history only contains Home. */
-    while (ret == GO_TO_WPS && wps_back_to(screen) == screen &&
-           !cover_nav_active())
+    /* The root dispatcher's history only contains Home. Keep the owning
+     * menu here and allow a stock Search result to return to Search. */
+    const bool stock_search = fruit_menu_active() && screen == GO_TO_DB_SEARCH;
+    int from = screen;
+    while ((ret == GO_TO_WPS && wps_back_to(from) == screen &&
+            !cover_nav_active()) ||
+           (stock_search && from == screen && ret == GO_TO_ALBUM_COVERS_TRACKS))
     {
-        scene_enter(&row_scene, screen, GO_TO_WPS, true, &row_menu);
-        ret = load_screen(GO_TO_WPS);
+        int child = ret;
+        scene_enter(&row_scene, from, child, true, &row_menu);
+        ret = load_screen(child);
         if (row_scene.capturing)
             ui_scene_cancel(&row_scene);
         if (ret != GO_TO_PREVIOUS)
         {
-            screen = GO_TO_WPS;
-            break;
+            from = child;
+            continue;
         }
         back_from_wps = false;
-        scene_enter(&row_scene, GO_TO_WPS, screen, false, &row_menu);
+        scene_enter(&row_scene, child, screen, false, &row_menu);
+        from = screen;
         came_back = true;
         ret = load_screen(screen);
         came_back = false;
         if (row_scene.capturing)
             ui_scene_cancel(&row_scene);
     }
-    if (screen == GO_TO_WPS && ret == GO_TO_PREVIOUS)
+    if (from == GO_TO_WPS && ret == GO_TO_PREVIOUS)
         back_from_wps = false;
     if (ret == GO_TO_FILEBROWSER)
     {
@@ -2527,7 +2538,7 @@ int root_menu_run_screen(int screen)
      * AstraPod's tree: here the menu that opened it is the parent. */
     if (ret != GO_TO_PREVIOUS && ret != GO_TO_ROOT)
         return ret;
-    scene_enter(&row_scene, screen, GO_TO_ROOT, false, &row_menu);
+    scene_enter(&row_scene, from, GO_TO_ROOT, false, &row_menu);
     return 0;
 }
 

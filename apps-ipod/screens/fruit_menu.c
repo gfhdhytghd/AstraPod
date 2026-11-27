@@ -299,7 +299,7 @@ ROW(rentals_row, LANG_FRUIT_RENTALS, empty, NULL);
 ROW(tv_shows_row, LANG_FRUIT_TV_SHOWS, tv_shows, NULL);
 ROW(music_videos_row, LANG_FRUIT_MUSIC_VIDEOS, music_videos, NULL);
 ROW(video_playlists_row, LANG_FRUIT_VIDEO_PLAYLISTS, video_playlists, NULL);
-ROW(video_settings_row, LANG_SETTINGS, not_available, NULL);
+ROW(video_settings_row, LANG_SETTINGS, stock_videos_settings, NULL);
 
 static const struct menu_item_ex *const videos_rows[] = {
     &movies_row, &rentals_row, &tv_shows_row, &music_videos_row,

@@ -34,6 +34,7 @@ struct stock_record {
     uint32_t count;
 };
 
+bool stock_artwork_open(struct stock_db *db);
 bool stock_db_open(struct stock_db *db, bool photos);
 void stock_db_close(struct stock_db *db);
 bool stock_db_list(const struct stock_db *db, unsigned section,
@@ -45,7 +46,9 @@ bool stock_db_photo_text(const struct stock_db *db, const struct stock_record *r
                          char *buf, size_t size);
 bool stock_db_music_text(const struct stock_db *db, const struct stock_record *r,
                          char *buf, size_t size);
+bool stock_music_path(char *colon_path);
 bool stock_video_path(char *colon_path);
 bool stock_photo_pixels(const struct stock_db *db, off_t at, unsigned width,
                         unsigned height, void *pixels);
+int stock_artwork_pixels(const struct stock_db *db, off_t at, void *pixels);
 #endif

@@ -278,9 +278,25 @@ Hold Select on the recorder to open its settings.
 
 | Setting | What it does | Default | |
 |---|---|---|---|
-| Slideshow Time | Sets how many seconds each picture stays on screen during a photo slideshow. | 5 seconds | |
-| Photo Transition | Changes how the next slideshow picture appears. Choose Off, Fade, or Slide. | Off | |
-| Repeat Slideshow | Starts the photo slideshow again after the final picture. | Off | |
+| Time Per Slide | Sets the time between pictures. Choose Manual to advance with the wheel. | 5 Seconds | |
+| Music | Off pauses music during the slideshow. Now Playing uses the current queue. On-The-Go reads the queue saved by the stock firmware. | Off | |
+| Repeat | Starts the photo slideshow again after the final picture. | Off | |
+| Shuffle Photos | Shows pictures in random order during a slideshow. | Off | |
+| Transitions | Changes how the next picture appears. Choose None, Cross Fade, Fade To Black, Zoom Out, Wipe Across, or Wipe Center. | None | |
+| TV Out | Stores the TV Out preference. This firmware displays media on the iPod screen. | Off | |
+| TV Signal | Stores the preferred TV signal format. This firmware displays media on the iPod screen. | NTSC | |
+
+### Library — Videos
+
+TV Out and TV Signal are shared with Photos.
+
+| Setting | What it does | Default | |
+|---|---|---|---|
+| TV Screen | Stores the preferred TV aspect ratio. This firmware displays media on the iPod screen. | Standard | |
+| Fit to Screen | Scales the whole picture to fit the iPod screen. Turn it off to use native size and center the picture. | On | |
+| Alternate Audio | Stores the alternate audio preference. The player uses the first supported audio track. | Off | |
+| Captions | Stores the captions preference. The player cannot render closed captions. | Off | |
+| Subtitles | Stores the subtitle preference. The player cannot render subtitle tracks. | Off | |
 
 ### Library — Music
 

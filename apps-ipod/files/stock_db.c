@@ -164,6 +164,22 @@ bool stock_db_open(struct stock_db *db, bool photos)
     return true;
 }
 
+bool stock_artwork_open(struct stock_db *db)
+{
+    *db = (struct stock_db){.fd = open("/iPod_Control/Artwork/ArtworkDB", O_RDONLY)};
+    if (db->fd < 0)
+        return false;
+    struct stock_record root;
+    if (!header(db, 0, ffilesize(db->fd), "mhfd", false, &root))
+    {
+        stock_db_close(db);
+        return false;
+    }
+    db->start = root.body;
+    db->end = root.end;
+    return true;
+}
+
 void stock_db_close(struct stock_db *db)
 {
     if (db->fd >= 0)
@@ -214,7 +230,7 @@ bool stock_db_photo_text(const struct stock_db *db, const struct stock_record *r
            text(db, r, le32(data), 12, data[4] == 2, buf, size);
 }
 
-bool stock_video_path(char *path)
+bool stock_music_path(char *path)
 {
     for (char *p = path; *p; p++)
     {
@@ -233,16 +249,22 @@ bool stock_video_path(char *path)
         path[prefix + 2] < '0' || path[prefix + 2] > '9')
         return false;
     const char *extension = strrchr(file, '.');
-    return extension && extension > file + 1 && !strchr(file + 1, '/') &&
-           (!strcasecmp(extension, ".m4v") || !strcasecmp(extension, ".mp4"));
+    return extension && extension > file + 1 && !strchr(file + 1, '/');
 }
 
-bool stock_photo_pixels(const struct stock_db *db, off_t at, unsigned width,
-                        unsigned height, void *pixels)
+bool stock_video_path(char *path)
+{
+    if (!stock_music_path(path))
+        return false;
+    const char *extension = strrchr(path, '.');
+    return !strcasecmp(extension, ".m4v") || !strcasecmp(extension, ".mp4");
+}
+
+static bool thumbnail_pixels(const struct stock_db *db, off_t at,
+                             unsigned format_id, unsigned size,
+                             const char *dir, void *pixels)
 {
     struct stock_record image, data, thumb, name;
-    unsigned format_id = width == 64 ? 1066 : 1024;
-    unsigned size = width * height * 2;
     if (!header(db, at, db->end, "mhii", false, &image))
         return false;
     for (off_t p = image.body; p < image.end; p = data.end)
@@ -271,7 +293,7 @@ bool stock_photo_pixels(const struct stock_db *db, off_t at, unsigned width,
         snprintf(basename, sizeof(basename), "F%u_%u.ithmb", id, shard);
         if (strcasecmp(basename, leaf + 1))
             return false;
-        snprintf(path, sizeof(path), "/Photos/Thumbs/%s", basename);
+        snprintf(path, sizeof(path), "%s/%s", dir, basename);
         int fd = open(path, O_RDONLY);
         if (fd < 0)
             return false;
@@ -281,4 +303,22 @@ bool stock_photo_pixels(const struct stock_db *db, off_t at, unsigned width,
         return ok;
     }
     return false;
+}
+
+
+bool stock_photo_pixels(const struct stock_db *db, off_t at, unsigned width,
+                        unsigned height, void *pixels)
+{
+    return thumbnail_pixels(db, at, width == 64 ? 1066 : 1024,
+                            width * height * 2, "/Photos/Thumbs", pixels);
+}
+
+int stock_artwork_pixels(const struct stock_db *db, off_t at, void *pixels)
+{
+    const char *dir = "/iPod_Control/Artwork";
+    if (thumbnail_pixels(db, at, 1061, 56 * 56 * 2, dir, pixels))
+        return 56;
+    if (thumbnail_pixels(db, at, 1055, 128 * 128 * 2, dir, pixels))
+        return 128;
+    return 0;
 }

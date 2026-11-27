@@ -140,27 +140,59 @@ elif src.name == "video_playback.c":
     replace("    else\n        video_resume_save(filepath, last_sample, demux.num_samples);",
             "    else if (result == 1)\n        video_resume_save(filepath, last_sample, demux.num_samples);")
     cut("    char volume[20];", "    if (!visible)",
-        """    int top = LCD_HEIGHT - 29;
-    int bar_x = 10;
-    int bar_y = top + 17;
+        """    int top = LCD_HEIGHT - 30;
+    int bar_x = 55;
     int bar_width = LCD_WIDTH - 2 * bar_x;
     int fill_width, duration_width;
 
 """)
     cut("    rb->snprintf(volume, sizeof(volume)", "    fill_width =")
-    replace("video_time_text(duration_ms, duration, sizeof(duration));",
-            """video_time_text(duration_ms > position_ms ? duration_ms - position_ms : 0,
-                    duration, sizeof(duration));""")
-    cut("    /* Match MPEG player's raised purple OSD", "    video_yuv_text(planes, bar_x, top + 6",
-        """    video_yuv_rect(planes, 0, top, LCD_WIDTH, 29, 23, 128, 128);
-    video_yuv_rect(planes, 0, top, LCD_WIDTH, 1, 78, 128, 128);
+    replace("    video_time_text(duration_ms, duration, sizeof(duration));",
+            """    duration[0] = '-';
+    video_time_text(duration_ms > position_ms ? duration_ms - position_ms : 0,
+                    duration + 1, sizeof(duration) - 1);""")
+    cut("    /* Match MPEG player's raised purple OSD", "}\n\nstatic void video_draw_frame",
+        """    for (int i = 0; i < 30; i++)
+        video_yuv_rect(planes, 0, top + i, LCD_WIDTH, 1,
+                       MAX(20, 68 - i * 3), 128, 128);
+    video_yuv_rect(planes, 0, top, LCD_WIDTH, 1, 160, 128, 128);
+    video_yuv_text(planes, 12, top + 9, current, 235, 128, 128);
+    video_yuv_text(planes, LCD_WIDTH - duration_width - 12, top + 9,
+                   duration, 235, 128, 128);
+    video_yuv_rect(planes, bar_x, top + 9, bar_width, 12, 89, 128, 128);
+    video_yuv_rect(planes, bar_x + 1, top + 10, bar_width - 2, 10,
+                   198, 128, 128);
+    video_yuv_rect(planes, bar_x + 1, top + 10, fill_width, 10,
+                   102, 161, 80);
+    video_draw_status_icon(planes, LCD_WIDTH / 2 - 3, top + 11, paused);
 """)
-    replace("bar_width, bar_height,\n                   255, 255, 255);",
-            "bar_width, 5,\n                   72, 128, 128);")
-    cut("    video_yuv_rect(planes, bar_x + 1, bar_y + 1,", "}\n\nstatic void video_draw_frame",
-        """    video_yuv_rect(planes, bar_x + 1, bar_y + 1,
-                   fill_width, 3, 160, 160, 92);
-""")
+    replace("    draw_width = LCD_WIDTH;", """    draw_width = rb->global_settings->video_fit ? LCD_WIDTH : MIN(width, LCD_WIDTH);""")
+    replace("    draw_height = (int)((int64_t)height * LCD_WIDTH / width);",
+            "    draw_height = (int)((int64_t)height * draw_width / width);")
+    replace("    uint32_t last_sample = 0;", "    uint32_t last_sample = 0, resume_sample, resume_ms;")
+    replace("    sample = video_resume_load(filepath, demux.num_samples);",
+            """    resume_sample = video_resume_load(filepath, demux.num_samples);
+    last_sample = resume_sample;
+    video_timing_for_sample(&demux, resume_sample, &timing);
+    resume_ms = video_pts_ms(&demux, &timing);
+    sample = resume_sample;""")
+    replace("(long)((uint64_t)video_pts_ms(&demux, &timing) * HZ / 1000u);",
+            "(long)((uint64_t)resume_ms * HZ / 1000u);")
+    replace("        uint32_t position = video_pts_ms(&demux, &timing);\n"
+            "        if (position)\n            video_audio_seek(position);",
+            "        if (resume_ms)\n            video_audio_seek(resume_ms);")
+    replace("                pts_ms = video_pts_ms(&demux, &timing);",
+            "                resume_sample = sample;\n"
+            "                pts_ms = video_pts_ms(&demux, &timing);")
+    replace("        if (decoded > 0)", "        if (decoded > 0 && sample >= resume_sample)")
+    replace("        last_sample = sample;\n        video_timing_advance",
+            "        if (sample >= resume_sample)\n            last_sample = sample;\n"
+            "        video_timing_advance")
+    replace("record.frame >= (int32_t)(total_samples * 95u / 100u)",
+            "record.frame >= (int32_t)total_samples")
+    replace("sample >= total_samples * 95u / 100u", "sample >= total_samples")
+    replace("    if (result == 0)\n        video_resume_clear(filepath);",
+            "    if (result == 0 && have_frame)\n        video_resume_clear(filepath);")
     replace("            size == 0 || size > VIDEO_READ_BUFFER ||",
             """            size == 0 || size > VIDEO_READ_BUFFER ||
             offset < demux.mdat_offset ||

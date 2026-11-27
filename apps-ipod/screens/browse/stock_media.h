@@ -11,6 +11,7 @@
 int stock_videos_screen(enum stock_video_kind kind, int title);
 int stock_photos_screen(void);
 int stock_photos_settings(void);
+int stock_videos_settings(void);
 
 struct gui_synclist;
 int stock_media_list_action(int action, struct gui_synclist *lists);

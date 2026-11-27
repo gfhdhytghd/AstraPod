@@ -67,6 +67,7 @@
 
 #include "iap/audio.h"
 #include "iap_library.h"
+#include "iap/shuffle_mode.h"
 #include "usb_iap2.h"
 
 #define REQUEST_CERTIFICATE        0xAA00
@@ -456,7 +457,7 @@ static bool now_playing;
 static uint32_t media_mask, playback_mask;
 static uint32_t np_key;           /* the track last described */
 static int np_state;
-static int np_modes;              /* shuffle << 2 | repeat, as last sent */
+static int np_modes;              /* shuffle << 3 | repeat, as last sent */
 static unsigned long np_elapsed;
 static long np_tick;
 static bool np_full;
@@ -1468,7 +1469,7 @@ static void send_now_playing(bool media)
     if (playback_mask & 1u << PB_CHAPTER_INDEX)
         param_u32(PB_CHAPTER_INDEX, 0);
     if (playback_mask & 1u << PB_SHUFFLE)
-        param_u8(PB_SHUFFLE, global_settings.playlist_shuffle ? 1 : 0);
+        param_u8(PB_SHUFFLE, usb_iap_shuffle_mode());
     if (playback_mask & 1u << PB_REPEAT)
         param_u8(PB_REPEAT, global_settings.repeat_mode == REPEAT_ONE ? 1 :
                             global_settings.repeat_mode == REPEAT_ALL ? 2 : 0);
@@ -1568,7 +1569,7 @@ static void poll_now_playing(void)
         expected += (current_tick - np_tick) * 1000 / HZ;
     const long drift = (long)elapsed - (long)expected;
     const bool track = key != np_key || np_full;
-    const int modes = global_settings.playlist_shuffle << 2
+    const int modes = usb_iap_shuffle_mode() << 3
                       | global_settings.repeat_mode;
     if (!track && state == np_state && modes == np_modes &&
         drift < 3000 && drift > -3000)

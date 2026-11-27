@@ -2164,7 +2164,7 @@ void iap_handlepkt_mode4(const unsigned int len, const unsigned char *buf)
              */
             unsigned char data[] = {0x04, 0x00, 0x2D,
                                     0x00};
-            data[3] = global_settings.playlist_shuffle ? 1 : 0;
+            data[3] = global_settings.shuffle_mode;
             iap_send_pkt(data, sizeof(data));
             break;
         }
@@ -2265,19 +2265,17 @@ void iap_handlepkt_mode4(const unsigned int len, const unsigned char *buf)
              *
              */
             CHECKLEN(4);
-            /* Off or tracks; the player has no album shuffle */
-            if(buf[3] > 0x01)
+            if (buf[3] >= NUM_SHUFFLE_MODES)
             {
                 cmd_ack(cmd, IAP_ACK_BAD_PARAM);
                 break;
             }
-            if(iap_library_queue_lent())
+            /* Byte 7, when present, is the Restore on Exit byte. */
+            if (!iap_set_shuffle(buf[3], len >= 5 && buf[4]))
             {
                 cmd_ack(cmd, IAP_ACK_CMD_FAILED);
                 break;
             }
-            /* Byte 7, when present, is the Restore on Exit byte */
-            iap_set_shuffle(buf[3] != 0, len >= 5 && buf[4]);
 
             /* respond with cmd ok packet */
             cmd_ok(cmd);

@@ -112,7 +112,7 @@ static void handle_remote_buttons(struct IAPContext* ctx, uint8_t bits[4], unsig
     if(released.shuffle_advance) {
         uint8_t current;
         if(iap_platform_get_shuffle_setting(ctx, &current)) {
-            iap_platform_set_shuffle_setting(ctx, (current + 1) % IAPIPodStateShuffleSettingState_Albums);
+            iap_platform_set_shuffle_setting(ctx, (current + 1) % (IAPIPodStateShuffleSettingState_Albums + 1));
         }
     }
     if(released.repeat_advance) {
@@ -741,10 +741,9 @@ static int32_t handle_command(struct IAPContext* ctx, uint8_t lingo, uint16_t co
                 return ipod_ack(command, request->eq_index == 0 ? IAPAckStatus_Success : IAPAckStatus_EBadParameter, response_span, IAPDisplayRemoteCommandID_IPodAck);
             } break;
             case IAPIPodStateType_ShuffleSetting: {
-                /* tracks for albums too: the player has no album shuffle */
                 read_request(IAPIPodStateShuffleSettingPayload);
                 check_ret(request->shuffle_state <= IAPIPodStateShuffleSettingState_Albums, -IAPAckStatus_EBadParameter);
-                check_ret(iap_platform_set_shuffle_setting(ctx, request->shuffle_state ? IAPIPodStateShuffleSettingState_Tracks : IAPIPodStateShuffleSettingState_Off), -IAPAckStatus_ECommandFailed);
+                check_ret(iap_platform_set_shuffle_setting(ctx, request->shuffle_state), -IAPAckStatus_ECommandFailed);
                 return ipod_ack(command, IAPAckStatus_Success, response_span, IAPDisplayRemoteCommandID_IPodAck);
             } break;
             case IAPIPodStateType_RepeatSetting: {
@@ -1246,10 +1245,9 @@ static int32_t handle_command(struct IAPContext* ctx, uint8_t lingo, uint16_t co
             return IAPExtendedInterfaceCommandID_ReturnShuffle;
         } break;
         case IAPExtendedInterfaceCommandID_SetShuffle: {
-            read_request(IAPSetShufflePayload);
-            /* off or tracks; the player has no album shuffle */
-            check_ret(request->mode <= IAPIPodStateShuffleSettingState_Tracks, -IAPAckStatus_EBadParameter);
-            check_ret(iap_platform_set_shuffle_setting(ctx, request->mode), -IAPAckStatus_ECommandFailed);
+            const uint8_t *mode = iap_span_read(request_span, 1);
+            check_ret(mode && *mode <= IAPIPodStateShuffleSettingState_Albums, -IAPAckStatus_EBadParameter);
+            check_ret(iap_platform_set_shuffle_setting(ctx, *mode), -IAPAckStatus_ECommandFailed);
             return ipod_ack_ext(command, IAPAckStatus_Success, response_span);
         } break;
         case IAPExtendedInterfaceCommandID_GetRepeat: {

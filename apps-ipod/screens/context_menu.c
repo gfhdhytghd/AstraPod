@@ -276,7 +276,7 @@ MENUITEM_FUNCTION(spike_run_item, 0, ID2P(LANG_SPIKE_PLAY),
 
 /* Shuffle and Repeat as the Playback settings have them, at the top of
  * Now Playing's menu where they are wanted most */
-MENUITEM_SETTING(wps_shuffle_item, &global_settings.playlist_shuffle, NULL);
+MENUITEM_SETTING(wps_shuffle_item, &global_settings.shuffle_mode, NULL);
 MENUITEM_SETTING(wps_repeat_item, &global_settings.repeat_mode, NULL);
 
 /* Whether a mix could be built from what is selected. Deliberately stops
@@ -878,7 +878,7 @@ static int add_to_playlist(void* arg)
     {
         /* nothing is currently playing so begin playing what we just
            inserted; a book plays in order whatever Shuffle says */
-        if (global_settings.playlist_shuffle && !ctx_in_order)
+        if (global_settings.shuffle_mode && !ctx_in_order)
             playlist_shuffle(current_tick, -1);
         playlist_start(0, 0, 0);
         context_menu_result = ONPLAY_START_PLAY;

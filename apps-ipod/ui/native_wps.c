@@ -747,7 +747,7 @@ static void paint_shuffle(const struct ui_view *view,
                                                FONT_SYSFIXED);
     int x = frame->bounds.x - frame->clip.x;
     int y = frame->bounds.y - frame->clip.y;
-    if (ui_theme_art(&wps->theme))
+    if (wps->classic && ui_theme_art(&wps->theme))
     {
         over_cover(true);
         stock_art_draw(STOCK_ART_NOWPLAYING_CLASSIC_SHUFFLE, frame->bounds.x,
@@ -1383,6 +1383,8 @@ static void setup_page(void)
     const struct ui_rect bounds[WPS_VIEW_COUNT] = {
         [WPS_ROOT] = { 0, 0, LCD_WIDTH, LCD_HEIGHT },
         [WPS_COVER] = theme_cover_bounds(&wps->theme),
+        [WPS_SHUFFLE] = { LCD_WIDTH - 28, m[UI_METRIC_STATUS_HEIGHT] + 3,
+                          18, 14 },
         [WPS_PANEL] = { 0, m[UI_METRIC_WPS_PANEL_TOP], m[UI_METRIC_WPS_PROGRESS_WIDTH],
                         MAX(0, m[UI_METRIC_WPS_PROGRESS_Y] - m[UI_METRIC_WPS_PANEL_TOP]) },
         [WPS_TITLE] = { m[UI_METRIC_WPS_TITLE_X], m[UI_METRIC_WPS_TITLE_Y],
@@ -1425,6 +1427,10 @@ static void setup_page(void)
                                i == WPS_VOLUME_FILL ? WPS_VOLUME : WPS_ROOT;
         ui_view_append(&wps->view[parent], &wps->view[i]);
     }
+    ui_view_init(&wps->view[WPS_SHUFFLE], bounds[WPS_SHUFFLE],
+                 &shuffle_ops, NULL);
+    ui_view_append(&wps->view[WPS_ROOT], &wps->view[WPS_SHUFFLE]);
+    wps->view[WPS_SHUFFLE].value[UI_OPACITY] = 0;
     ui_page_init(&wps->page, &wps->view[WPS_ROOT]);
 }
 
@@ -1610,13 +1616,10 @@ void native_wps_render(const struct wps_state *state, bool submit)
     uint32_t now = USEC_TIMER;
     refresh_labels(state, remote, now);
     refresh_volume(&source, remote, now);
-    if (wps->classic)
-    {
-        bool shuffle = remote ? source.shuffle :
-                       global_settings.playlist_shuffle;
-        ui_page_set(&wps->page, &wps->view[WPS_SHUFFLE], UI_OPACITY,
-                    shuffle ? UI_FULL_OPACITY : 0);
-    }
+    int shuffle = remote ? source.shuffle :
+                  playlist_get_current()->shuffle_mode;
+    ui_page_set(&wps->page, &wps->view[WPS_SHUFFLE], UI_OPACITY,
+                shuffle != SHUFFLE_OFF ? UI_FULL_OPACITY : 0);
     if (wps->chrome_ready && native_chrome_poll(&wps->chrome))
         ui_page_invalidate(&wps->page, view_bounds(WPS_HEADER));
     if (wps->page.tracks && !wps->motion_tried)

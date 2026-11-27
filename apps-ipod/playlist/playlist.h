@@ -39,6 +39,7 @@ enum playlist_command {
     PLAYLIST_COMMAND_QUEUE,
     PLAYLIST_COMMAND_DELETE,
     PLAYLIST_COMMAND_SHUFFLE,
+    PLAYLIST_COMMAND_ALBUM_SHUFFLE,
     PLAYLIST_COMMAND_UNSHUFFLE,
     PLAYLIST_COMMAND_RESET,
     PLAYLIST_COMMAND_FLAGS,
@@ -82,6 +83,7 @@ struct playlist_info
     int last_shuffled_start; /* number of tracks when insert last
                                     shuffled command start */
     int  seed;           /* shuffle seed                            */
+    int  shuffle_mode;   /* actual order of this playlist           */
     struct mutex mutex; /* mutex for control file access    */
     int dcfrefs_handle;
     int  dirlen;         /* Length of the path to the playlist file */
@@ -124,6 +126,8 @@ int playlist_resume(void);
 bool playlist_set_aside(void);
 bool playlist_bring_back(void);
 int playlist_shuffle(int random_seed, int start_index);
+int playlist_shuffle_songs(int random_seed, int start_index);
+bool playlist_set_shuffle_mode(int mode);
 unsigned int playlist_get_filename_crc32(struct playlist_info *playlist,
                                          int index);
 void playlist_resume_track(int start_index, unsigned int crc,

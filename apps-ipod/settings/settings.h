@@ -151,6 +151,14 @@ enum {
     FOLDER_ADVANCE_RANDOM_START,
 };
 
+/* Values also used on the accessory wire. */
+enum {
+    SHUFFLE_OFF = 0,
+    SHUFFLE_SONGS,
+    SHUFFLE_ALBUMS,
+    NUM_SHUFFLE_MODES
+};
+
 /* repeat mode options */
 enum
 {
@@ -888,7 +896,7 @@ struct user_settings
     int  next_folder; /* move to next folder */
     int  recursive_dir_insert; /* should directories be inserted recursively */
     bool fade_on_stop; /* fade on pause/unpause/stop */
-    bool playlist_shuffle;
+    bool playlist_shuffle; /* legacy plugin view of shuffle_mode */
     bool warnon_erase_dynplaylist; /* warn when erasing dynamic playlist */
     bool keep_current_track_on_replace_playlist;
     bool show_shuffled_adding_options; /* whether to display options for adding shuffled tracks to dynamic playlist */
@@ -1097,6 +1105,7 @@ struct user_settings
     bool spike_caption_scroll;  /* ...and whether it travels or is cropped */
     bool animations;
     char native_theme[32];
+    int shuffle_mode; /* SHUFFLE_* */
 };
 
 /* global settings */

@@ -363,9 +363,16 @@ static int backlight_tile(int timeout)
  * Check, Clicker and Backlight do, or -1. */
 static int value_tile(const void *variable)
 {
-    if (variable == &global_settings.playlist_shuffle)
-        return global_settings.playlist_shuffle ?
-               STOCK_ART_SETTINGS_SHUFFLESONGS : STOCK_ART_SETTINGS_SHUFFLEOFF;
+    if (variable == &global_settings.shuffle_mode)
+    {
+        switch (global_settings.shuffle_mode)
+        {
+            case SHUFFLE_OFF: return STOCK_ART_SETTINGS_SHUFFLEOFF;
+            case SHUFFLE_SONGS: return STOCK_ART_SETTINGS_SHUFFLESONGS;
+            /* The existing stock art set has no Albums tile. */
+            default: return -1;
+        }
+    }
     if (variable == &global_settings.repeat_mode)
         return global_settings.repeat_mode == REPEAT_OFF ?
                    STOCK_ART_SETTINGS_REPEATOFF :

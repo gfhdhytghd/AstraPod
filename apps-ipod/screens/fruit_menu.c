@@ -180,7 +180,7 @@ static int shuffle_songs(void)
     cpu_boost(false);
     if (!added)
         return 0;
-    playlist_shuffle(current_tick, -1);
+    playlist_shuffle_songs(current_tick, -1);
     playlist_start(0, 0, 0);
     return GO_TO_WPS;
 }
@@ -507,7 +507,7 @@ static int music_menu_rows(void)
 
 /* Stock's names for settings AstraPod's own rows name otherwise: each the
  * same setting as AstraPod's row for it. */
-MENUITEM_SETTING_W_LABEL(shuffle_row, &global_settings.playlist_shuffle,
+MENUITEM_SETTING_W_LABEL(shuffle_row, &global_settings.shuffle_mode,
                          ID2P(LANG_SHUFFLE), NULL);
 MENUITEM_SETTING_W_LABEL(repeat_row, &global_settings.repeat_mode,
                          ID2P(LANG_REPEAT), NULL);
@@ -586,10 +586,15 @@ static int in_place(const struct menu_item_ex *item, bool step)
     struct user_settings *g = &global_settings;
     if (item == &shuffle_row)
     {
-        /* Stock's third value, Albums, needs album shuffle */
+        static const int labels[] = {
+            [SHUFFLE_OFF] = LANG_OFF,
+            [SHUFFLE_SONGS] = LANG_FRUIT_SONGS,
+            [SHUFFLE_ALBUMS] = LANG_ALBUMS,
+        };
         if (step)
-            set_value(&g->playlist_shuffle, !g->playlist_shuffle);
-        return g->playlist_shuffle ? LANG_FRUIT_SONGS : LANG_OFF;
+            set_value(&g->shuffle_mode,
+                      (g->shuffle_mode + 1) % NUM_SHUFFLE_MODES);
+        return labels[g->shuffle_mode];
     }
     if (item == &repeat_row)
     {

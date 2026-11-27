@@ -44,7 +44,7 @@ static int setcrossfadeonexit_callback(int action,
 
 
 /** Playback menu **/
-MENUITEM_SETTING(shuffle_item, &global_settings.playlist_shuffle, NULL);
+MENUITEM_SETTING(shuffle_item, &global_settings.shuffle_mode, NULL);
 MENUITEM_SETTING(repeat_mode, &global_settings.repeat_mode, NULL);
 MENUITEM_SETTING(play_selected, &global_settings.play_selected, NULL);
 

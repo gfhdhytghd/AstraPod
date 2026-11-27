@@ -48,6 +48,7 @@
 #include "libiap/iap.h"
 #include "macros.h"
 #include "platform.h"
+#include "shuffle_mode.h"
 
 void* iap_platform_malloc(struct IAPContext* iap_ctx, size_t size, int flags) {
     struct Platform* plt = iap_ctx->platform;
@@ -415,30 +416,13 @@ IAPBool iap_platform_get_power_status(struct IAPContext* iap_ctx, struct IAPPlat
 
 IAPBool iap_platform_get_shuffle_setting(struct IAPContext* iap_ctx, uint8_t* status) {
     (void)iap_ctx;
-    *status = _iap_convert_shuffle_state(global_settings.playlist_shuffle);
+    *status = usb_iap_shuffle_mode();
     return iap_true;
 }
 
 IAPBool iap_platform_set_shuffle_setting(struct IAPContext* iap_ctx, uint8_t status) {
     (void)iap_ctx;
-
-    if(iap_library_queue_lent()) {
-        return iap_false;
-    }
-    if(status == IAPIPodStateShuffleSettingState_Tracks && !global_settings.playlist_shuffle) {
-        global_settings.playlist_shuffle = true;
-        settings_save();
-        if(audio_status() & AUDIO_STATUS_PLAY) {
-            playlist_randomise(NULL, current_tick, true);
-        }
-    } else if(status == IAPIPodStateShuffleSettingState_Off && global_settings.playlist_shuffle) {
-        global_settings.playlist_shuffle = false;
-        settings_save();
-        if(audio_status() & AUDIO_STATUS_PLAY) {
-            playlist_sort(NULL, true);
-        }
-    }
-    return iap_true;
+    return usb_iap_set_shuffle_mode(status) ? iap_true : iap_false;
 }
 
 IAPBool iap_platform_get_repeat_setting(struct IAPContext* iap_ctx, uint8_t* status) {
@@ -822,10 +806,6 @@ uint8_t _iap_convert_play_status(int rb_audio_status) {
 
 uint8_t _iap_convert_volume(int rb_volume) {
     return normalize_8(rb_volume, sound_min(SOUND_VOLUME), sound_max(SOUND_VOLUME));
-}
-
-uint8_t _iap_convert_shuffle_state(bool rb_state) {
-    return rb_state ? IAPIPodStateShuffleSettingState_Tracks : IAPIPodStateShuffleSettingState_Off;
 }
 
 uint8_t _iap_convert_repeat_state(int rb_state) {

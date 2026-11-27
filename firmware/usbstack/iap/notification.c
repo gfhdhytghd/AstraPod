@@ -22,6 +22,7 @@
 #include "iap-usb.h"
 #include "libiap/iap.h"
 #include "platform.h"
+#include "shuffle_mode.h"
 
 #include "macros.h"
 
@@ -95,12 +96,14 @@ void iap_on_volume(int volume) {
 }
 
 void iap_on_shuffle_state(bool state) {
+    /* The legacy boolean hook signals a change, not the wire value. */
+    (void)state;
     if(!iap_initialized) {
         return;
     }
 
     struct IAPContext* ctx = _iap_acquire_ctx(false);
-    iap_notify_shuffle_state(ctx, _iap_convert_shuffle_state(state));
+    iap_notify_shuffle_state(ctx, usb_iap_shuffle_mode());
 }
 
 void iap_on_repeat_state(int state) {

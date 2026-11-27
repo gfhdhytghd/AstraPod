@@ -277,7 +277,7 @@ void iap_handlepkt_mode3(const unsigned int len, const unsigned char *buf)
             device.battery_level = battery_level();
             /* TODO: Fix this */
             device.equalizer_index = 0;
-            device.shuffle = global_settings.playlist_shuffle;
+            device.shuffle = global_settings.shuffle_mode;
             device.repeat = global_settings.repeat_mode;
             tm = get_time();
             memcpy(&(device.datetime), tm, sizeof(struct tm));
@@ -493,7 +493,7 @@ void iap_handlepkt_mode3(const unsigned int len, const unsigned char *buf)
                  */
                 case 0x07:
                 {
-                    IAP_TX_PUT(global_settings.playlist_shuffle?0x01:0x00);
+                    IAP_TX_PUT(global_settings.shuffle_mode);
 
                     iap_send_tx();
                     break;
@@ -849,28 +849,12 @@ void iap_handlepkt_mode3(const unsigned int len, const unsigned char *buf)
                 {
                     CHECKLEN(5);
 
-                    switch(buf[0x03])
-                    {
-                        case 0x00:
-                        {
-                            iap_shuffle_state(false);
-                            cmd_ok(cmd);
-                            break;
-                        }
-                        case 0x01:
-                        case 0x02:
-                        {
-                            iap_shuffle_state(true);
-                            cmd_ok(cmd);
-                            break;
-                        }
-
-                        default:
-                        {
-                            cmd_ack(cmd, IAP_ACK_BAD_PARAM);
-                            break;
-                        }
-                    }
+                    if (buf[3] >= NUM_SHUFFLE_MODES)
+                        cmd_ack(cmd, IAP_ACK_BAD_PARAM);
+                    else if (!iap_shuffle_state(buf[3]))
+                        cmd_ack(cmd, IAP_ACK_CMD_FAILED);
+                    else
+                        cmd_ok(cmd);
                     break;
                 }
 

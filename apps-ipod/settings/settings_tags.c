@@ -127,7 +127,7 @@ static const struct tag_row tag_rows[] = {
 { "replaygain preamp",   TAG_ADVANCED|TAG_SOUND|TAG_PLAYBACK,    "replaygain" },
 
 /* --- playback ------------------------------------------------------------ */
-{ "shuffle",             TAG_PLAYBACK,                           "random" },
+{ "shuffle",             TAG_PLAYBACK,                           "random songs albums" },
 { "repeat",              TAG_PLAYBACK,                           NULL },
 { "play selected",       TAG_PLAYBACK,                           NULL },
 { "single mode",         TAG_PLAYBACK,                           "stop after" },

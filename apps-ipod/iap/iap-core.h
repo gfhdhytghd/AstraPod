@@ -269,7 +269,7 @@ void iap_reset_device(struct device_t* device);
  * handler running now returns: a long reply stops sending */
 bool iap_reset_is_pending(void);
 
-void iap_shuffle_state(bool state);
+bool iap_shuffle_state(int mode);
 void iap_repeat_state(unsigned char state);
 void iap_repeat_next(void);
 void iap_fill_power_state(void);
@@ -286,7 +286,7 @@ void iap_set_remote_volume(void);
 extern enum interface_state interface_state;
 void iap_interface_state_change(const enum interface_state new);
 bool iap_play_or_resume(void);
-void iap_set_shuffle(bool shuffle, bool restore);
+bool iap_set_shuffle(int mode, bool restore);
 void iap_set_repeat(int mode, bool restore);
 /* index below playlist_amount(): audio_skip() locks up past the end */
 bool iap_skip_to(uint32_t index);

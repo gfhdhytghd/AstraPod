@@ -1098,6 +1098,7 @@ void settings_apply(bool read_disk)
     lcd_scroll_delay(global_settings.scroll_delay);
 
     set_albumart_mode(global_settings.album_art);
+    global_settings.playlist_shuffle = global_settings.shuffle_mode != SHUFFLE_OFF;
 
     /* before crossfade */
     audio_set_playback_frequency(global_settings.play_frequency);

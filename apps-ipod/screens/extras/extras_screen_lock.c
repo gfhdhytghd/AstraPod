@@ -35,7 +35,7 @@
 #define CAPTION_FONT   FONT_DIR "/17-helvetica-bold.pbf"
 #define LABEL_FONT     FONT_DIR "/13-helvetica-bold.pbf"
 #define WHITE          0xffffff
-#define BAND_ROWS      8
+#define BAND_ROWS      EXTRAS_BAND_ROWS
 
 #define PADLOCK_X      19
 #define PADLOCK_Y      22
@@ -379,7 +379,7 @@ static void compose(struct stock_canvas *c)
 
 static void paint(void)
 {
-    static uint32_t band[LCD_WIDTH * BAND_ROWS];
+    uint32_t *band = extras_band[0];
     const struct ui_rect all = { 0, 0, LCD_WIDTH, LCD_HEIGHT };
     for (int y = 0; y < LCD_HEIGHT; y += BAND_ROWS)
     {

@@ -21,4 +21,9 @@ void extras_bar_draw(const char *title);
 /* Unload the title font; a page calls it when it leaves. */
 void extras_bar_release(void);
 
+/* The rows the full-screen Extras pages compose in, a band at a time: one
+ * page runs at once, and Stopwatch lays one band over the other. */
+#define EXTRAS_BAND_ROWS 8
+extern uint32_t extras_band[2][LCD_WIDTH * EXTRAS_BAND_ROWS];
+
 #endif

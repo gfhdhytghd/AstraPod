@@ -16,6 +16,7 @@
 #include "system.h"
 #include <stdio.h>
 #include <string.h>
+#include "string-extra.h"
 #include "fixedpoint.h"
 #include "font.h"
 #include "kernel.h"
@@ -75,7 +76,7 @@
 #define CAPTION_X 80
 #define CAPTION_BASELINE 205
 #define CAPTION_LEADING 21
-#define BAND_ROWS 8
+#define BAND_ROWS EXTRAS_BAND_ROWS
 #define WHITE 0xffffff
 
 /* What a page returns besides a chosen row: back to the page under it, stay
@@ -84,7 +85,6 @@ enum { BACK = -100, STAY = -101, LEFT = -102 };
 
 static int editing;                     /* the alarm the editor shows */
 static int sub_font = -1, digit_font = -1, caption_font = -1;
-static uint32_t band_pixels[LCD_WIDTH * BAND_ROWS];
 
 static const int sleep_minutes[] = { 0, 15, 30, 60, 90, 120 };
 static const int repeat_names[] = {
@@ -620,7 +620,7 @@ static void paint_editor(const struct editor *e)
 {
     for (int y = 0; y < LCD_HEIGHT; y += BAND_ROWS)
     {
-        struct stock_canvas band = { band_pixels, 0, y, LCD_WIDTH,
+        struct stock_canvas band = { extras_band[0], 0, y, LCD_WIDTH,
                                      BAND_ROWS };
         compose_editor(&band, e);
         stock_canvas_show(&band, (struct ui_rect){ 0, y, LCD_WIDTH,

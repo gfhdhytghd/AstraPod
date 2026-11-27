@@ -14,6 +14,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "string-extra.h"
 #include "config.h"
 #include "kernel.h"
 #include "font.h"
@@ -68,7 +69,7 @@
 #define HANDS_RECT { SECS_X, SECS_Y, SECS_EDGE, SECS_EDGE }
 #define TEXT_RECT { MENU_PANE_X, 95, LCD_WIDTH - MENU_PANE_X, \
                     LCD_HEIGHT - 95 }
-#define BAND_ROWS 8
+#define BAND_ROWS EXTRAS_BAND_ROWS
 
 /* A log page. */
 #define LOG_HEADER_Y 20
@@ -277,7 +278,7 @@ static const uint8_t lap_alpha[LAPS_SHOWN] = { 120, 54, 30 };
  * its row's alpha. */
 static void put_lap(struct stock_canvas *c, const struct sw_log *log, int i)
 {
-    static uint32_t faded[LCD_WIDTH * BAND_ROWS];
+    uint32_t *faded = extras_band[1];
     int baseline = LAP_BASELINE + i * LAP_PITCH;
     if (c->y >= baseline + 6 || c->y + c->height <= baseline - 22)
         return;
@@ -330,7 +331,7 @@ static void compose_pane(struct stock_canvas *c)
 /* Compose `clip` a band at a time and write it to the framebuffer. */
 static void paint(struct ui_rect clip, void (*compose)(struct stock_canvas *))
 {
-    static uint32_t band[LCD_WIDTH * BAND_ROWS];
+    uint32_t *band = extras_band[0];
     for (int y = clip.y; y < clip.y + clip.height; y += BAND_ROWS)
     {
         struct stock_canvas c = { band, clip.x, y, clip.width,

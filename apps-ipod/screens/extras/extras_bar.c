@@ -13,6 +13,8 @@
 #include "ui/theme_art.h"
 #include "extras_bar.h"
 
+uint32_t extras_band[2][LCD_WIDTH * EXTRAS_BAND_ROWS];
+
 #define TITLE_FONT FONT_DIR "/13-helvetica-bold.pbf"
 #define TITLE_BASELINE 15
 #define BATTERY_X 289

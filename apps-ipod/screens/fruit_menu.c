@@ -17,6 +17,7 @@
 
 #include <stdbool.h>
 #include <string.h>
+#include "string-extra.h"
 #include "config.h"
 #include "lang.h"
 #include "kernel.h"

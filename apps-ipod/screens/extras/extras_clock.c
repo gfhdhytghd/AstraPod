@@ -17,6 +17,7 @@
  ****************************************************************************/
 #include <stdio.h>
 #include <string.h>
+#include "string-extra.h"
 #include "config.h"
 #include "core_alloc.h"
 #include "file.h"

@@ -34,10 +34,15 @@ enum menu_item_type {
 
 struct menu_item_ex;
 
-/* Cfg entry and submenu provided by a function outside do_menu(). */
+/* Cfg entry and submenu provided by a function outside do_menu(). A row
+ * with `value` is one Select changes in place, as a setting row of a few
+ * values is: `value` gives the words its row shows and sets *voice to their
+ * talk id, or -1 to have them read as text; NULL from it leaves an ordinary
+ * row, whose function opens a picker. `param` is the row's, or NULL. */
 struct menu_function_settings {
     const void *variable;
     const struct menu_item_ex *(*child_menu)(void);
+    const char *(*value)(void *param, int *voice);
 };
 
 struct menu_func_param {

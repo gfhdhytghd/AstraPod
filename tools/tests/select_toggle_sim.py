@@ -16,10 +16,13 @@ Fruit Company that is Settings > Advanced Settings > Playback. There:
 - Select on Repeat must open its page, which Menu closes again onto the
   unchanged list;
 - holding Select on Play Selected must open the row's context menu without
-  changing the value, and Menu must close it again.
+  changing the value, and Menu must close it again;
+- in Recording Settings, the menu below Playback, Select on Recording
+  Format (four values, a function row rather than a settings row) must
+  step in place as Shuffle does.
 
-Each row is then left one step on, and the saved settings, once the
-simulator has stopped, must hold the new values. Writes the frames and
+Each row is then left one step on, and the saved settings must come to
+hold the new values. Writes the frames and
 result.json to the output directory.
 """
 
@@ -47,6 +50,13 @@ THEMES = {
                       [("Down", 5), ("Return", 1), ("Down", 17),
                        ("Return", 1), ("Down", 1), ("Return", 1)]),
 }
+# From Playback back into the settings tree's top level. The tree is a
+# screen of its own -- Settings started in, or Fruit Company's Advanced
+# Settings -- which Menu leaves, with its row still selected.
+BACK = [("Escape", 1), ("Return", 1)]
+# Recording Settings' row in the settings tree's top level, below Search,
+# Sound and Playback. The tree opens on Sound.
+RECORDING_ROW = 3
 
 # (name, row in Playback, cfg name, value after one step, values)
 STEPPED = [
@@ -54,6 +64,11 @@ STEPPED = [
     ("play_selected", 2, "play selected", "off", 2),
 ]
 REPEAT_ROW = 1
+# The same in Recording Settings, the menu below Playback, whose rows are
+# function rows rather than settings rows
+RECORDING = [
+    ("rec_format", 0, "rec format", "aiff", 4),
+]
 # A row is shorter than this; a change taller than it is a new page
 ROW_MAX = 40
 # Where press() leaves the screen it gave up on
@@ -103,9 +118,27 @@ def hold(s, key, region, seconds=1.2):
     return settle(s, region)
 
 
+def top(s, region):
+    """Up until two taps running change nothing: the list's first row, with
+    wraparound off."""
+    still = 0
+    while still < 2:
+        before = settle(s, region, 20)
+        s.tap("Up")
+        time.sleep(30 / FPS)
+        still = still + 1 if not changed(before, settle(s, region),
+                                         region) else 0
+
+
 def move(s, region, rows):
     for _ in range(abs(rows)):
         press(s, "Down" if rows > 0 else "Up", region)
+
+
+def walk(s, region, path):
+    for key, times in path:
+        for _ in range(times):
+            press(s, key, region)
 
 
 def band(box):
@@ -181,7 +214,9 @@ def run_theme(args, env, theme, out):
             (args.simdisk / ".rockbox/default-config.cfg").read_text() +
             f"\nnative theme: {theme}\nstart in screen: {start}\n"
             "backlight timeout: off\nvoice menus: off\nanimations: off\n"
-            "shuffle: off\nplay selected: on\nrepeat: off\n")
+            "list wraparound: off\n"
+            "shuffle: off\nplay selected: on\nrepeat: off\n"
+            "rec format: wave\n")
         with (out / f"{theme}.log").open("w") as log, \
                 process([str(args.binary), "--root", str(root),
                          "--nobackground", "--zoom", "1", "--screenshot"],
@@ -190,9 +225,7 @@ def run_theme(args, env, theme, out):
             s = Screen(env, firmware)
             time.sleep(5)
             settle(s, region)
-            for key, times in path:
-                for _ in range(times):
-                    press(s, key, region)
+            walk(s, region, path)
             settle(s, region).save(out / f"{theme}-playback.png")
 
             row = 0
@@ -207,15 +240,32 @@ def run_theme(args, env, theme, out):
             move(s, region, REPEAT_ROW - row)
             result["repeat"] = check_page(s, region, out, theme)
 
+            walk(s, region, BACK)
+            top(s, region)
+            move(s, region, RECORDING_ROW)
+            press(s, "Return", region)
+            settle(s, region).save(out / f"{theme}-recording.png")
+            row = 0
+            for name, at, _, _, values in RECORDING:
+                move(s, region, at - row)
+                row = at
+                result[name] = check_stepped(s, region, out, theme, name,
+                                             values)
+
             assert firmware.poll() is None, "simulator exited"
-        # Settings are saved to config.cfg.new once storage has been idle a
-        # while, and at the latest as the simulator stops; the next boot
-        # renames it over config.cfg
-        saved_cfg = config.with_name("config.cfg.new")
+            # Settings reach config.cfg.new once storage has been idle a
+            # while; the next boot renames it over config.cfg
+            saved_cfg = config.with_name("config.cfg.new")
+            want = {cfg: value for _, _, cfg, value, _ in STEPPED + RECORDING}
+            for _ in range(90):
+                if saved_cfg.exists() and all(
+                        cfg_value(saved_cfg, k) == v for k, v in want.items()):
+                    break
+                time.sleep(1)
         if not saved_cfg.exists():
             saved_cfg = config
         (out / f"{theme}-config.cfg").write_text(saved_cfg.read_text())
-        for name, _, cfg, value, _ in STEPPED:
+        for name, _, cfg, value, _ in STEPPED + RECORDING:
             saved = cfg_value(saved_cfg, cfg)
             result[name]["config"] = saved
             result[name]["ok"] &= saved == value

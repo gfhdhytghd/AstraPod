@@ -2838,7 +2838,7 @@ void root_menu(void)
                 {
                     global_status.last_screen = GO_TO_ROOT;
                     ignore_back_button_stub(true);
-                    if (presented != GO_TO_MAINMENU)
+                    if (presented != GO_TO_MAINMENU || !menu_scene.capturing)
                         root_scene_enter(&route_scene, presented, GO_TO_ROOT,
                                          false);
                     next_screen = do_menu(fruit_menu_root(), &fruit_selected,
@@ -2859,7 +2859,7 @@ void root_menu(void)
                  * button to be handled by HOST instead of rockbox */
                 ignore_back_button_stub(true);
 
-                if (presented != GO_TO_MAINMENU)
+                if (presented != GO_TO_MAINMENU || !menu_scene.capturing)
                     root_scene_enter(&route_scene, presented, GO_TO_ROOT, false);
                 if (global_settings.animations)
                     menu_link_scene(&menu_scene, &root_menu_, &main_menu_);

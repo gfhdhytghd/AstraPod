@@ -506,15 +506,26 @@ TREES = {"fruit-company": FRUIT_TREE, "classic": NATIVE_TREE,
 
 
 def games(fixture):
-    """Order the installed rows as the game browser does."""
+    """Map each installed game's display name to the module the row runs."""
     english = phrases("english.lang")
     table = re.findall(r'\{ "([^"]+)",\s*(LANG_\w+), APP_LIST_GAMES \}',
                        APP_LIST.read_text())
-    names = [english[lang] for module, lang in table
-             if (fixture / ".rockbox/rocks" / (module + ".rock")).is_file()]
-    names.append(english["LANG_MUSIC_QUIZ"])
-    return [row(name, inner=down(4), back="select") if name == "2048"
-            else row(name) for name in sorted(names, key=str.casefold)]
+    modules = {english[lang]: module for module, lang in table
+               if (fixture / ".rockbox/rocks" / (module + ".rock")).is_file()}
+    quiz = english["LANG_MUSIC_QUIZ"]
+    modules[quiz] = None
+    rows = []
+    for name, module in sorted(modules.items(), key=lambda item: item[0].casefold()):
+        # Each walk installs only its target. The native Quiz is always shown.
+        pre = down(int(module is not None and quiz.casefold() < name.casefold()))
+        if name == "2048":
+            rows.append(row(name, inner=down(4), back="select", pre=pre))
+        elif module and module.startswith("games/sgt_puzzles/"):
+            rows.append(row(name, inner=[("nav", "up", "")],
+                            back="select", pre=pre))
+        else:
+            rows.append(row(name, pre=pre))
+    return rows, modules
 
 
 def run_walk(sim, out, walk, stem):
@@ -552,7 +563,20 @@ def run_walk(sim, out, walk, stem):
         strip([before] + [f for _, f in frames], out / f"{shot}.png")
         image(frames[-1][1] if frames else before).save(
             out / f"{shot}-end.png")
-        ok = kind != "slide" or verdict in ("slide", "sheet")
+        # A panel submission is stronger evidence than pixel matching when
+        # a page has few distinct pixels or its overlay exactly restores it.
+        scene_frames = max((seen for route, seen in routes
+                            if route in ("push", "pop") or
+                            route.endswith(("-push", "-pop")) or
+                            route.startswith(("picker-", "keyboard-",
+                                              "dialog-"))), default=0)
+        if verdict in ("same", "cut") and scene_frames >= MOVING:
+            verdict = "scene"
+        ok = kind != "slide" or verdict in ("slide", "sheet", "scene")
+        if name.startswith("Extras/Games/") and "Music Quiz" not in name:
+            game_route = "app-push" if name.endswith(" >") else "app-pop"
+            ok = any(route == game_route and seen >= MOVING
+                     for route, seen in routes)
         results.append({"step": name, "key": key, "expect": kind,
                         "verdict": verdict, "between": between,
                         "ms": span, "frames": len(frames), "ok": ok,
@@ -577,13 +601,21 @@ def contact(out, theme, results):
     sheet.save(out / f"{theme}-walk.png")
 
 
-def walk_segment(binary, fixture, out, theme, index, steps):
+def walk_segment(binary, fixture, out, theme, index, steps, game=None):
     with tempfile.TemporaryDirectory(prefix="stock-slide-") as temp:
         root = Path(temp) / "root"
         shutil.copytree(fixture, root, symlinks=True,
                         ignore=shutil.ignore_patterns(
                             "panel.rec", "walk.state", "ui-perf.txt",
                             ".resume.cfg*", "config.cfg.old", "config.cfg.new"))
+        if game is not None:
+            # Leave assets and overlays available. Omit other foreground
+            # modules from this private copy so wheel counts cannot skip a row.
+            rocks = root / ".rockbox/rocks"
+            target = rocks / (game + ".rock")
+            for other in (rocks / "games").rglob("*.rock"):
+                if other != target:
+                    other.unlink()
         extra = "" if theme == "fruit-company" else NATIVE_ORDER
         (root / ".rockbox/config.cfg").write_text(
             CONFIG + f"native theme: {theme}\n" + extra)
@@ -607,14 +639,21 @@ def main():
     parser.add_argument("--only", help="walk only rows whose name has this")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--all-games", action="store_true",
-                        help="try Select and Menu on every installed game")
+                        help="walk every installed game in an isolated fixture")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    game_modules = {}
     if args.all_games:
-        game_rows = games(args.fixture)
+        game_rows, game_modules = games(args.fixture)
         EXTRAS[:] = [row("Games", "menu", game_rows) if item[0] == "Games"
                      else item for item in EXTRAS]
         FRUIT_TREE[-2] = row("Extras", "menu", EXTRAS, pre=down(4))
+    def module_for(name):
+        parent, _, label = name.rpartition("/")
+        if parent == "Extras/Games" and label in game_modules:
+            return game_modules[label] or "@quiz"
+        return None
+
     result = {}
     for theme in args.theme or list(TREES):
         walks = [(name, steps) for name, steps in segments(TREES[theme])
@@ -624,7 +663,8 @@ def main():
             runs = pool.map(
                 lambda job: walk_segment(args.binary, args.fixture, args.out,
                                          theme, *job),
-                enumerate(steps for _, steps in walks))
+                [(i, steps, module_for(name))
+                 for i, (name, steps) in enumerate(walks)])
             for rows in runs:
                 result[theme].extend(rows)
                 for r in rows:

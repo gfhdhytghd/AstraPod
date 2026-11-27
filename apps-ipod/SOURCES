@@ -57,6 +57,7 @@ screens/browse/ebook_shelf.c
 #endif
 
 playlist/catalog.c
+playlist/fruit_otg.c
 playlist/playlist.c
 playlist/album_shuffle.c
 playlist/viewer.c

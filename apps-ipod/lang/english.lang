@@ -34197,3 +34197,269 @@
     *: ""
   </voice>
 </phrase>
+<phrase>
+  id: LANG_FRUIT_OTG
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "On-The-Go"
+  </source>
+  <dest>
+    *: "On-The-Go"
+  </dest>
+  <voice>
+    *: "On-The-Go"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_OTG_ADD
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Add to On-The-Go"
+  </source>
+  <dest>
+    *: "Add to On-The-Go"
+  </dest>
+  <voice>
+    *: "Add to On-The-Go"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_OTG_SAVE
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Save Playlist"
+  </source>
+  <dest>
+    *: "Save Playlist"
+  </dest>
+  <voice>
+    *: "Save Playlist"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_OTG_CLEAR
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Clear Playlist"
+  </source>
+  <dest>
+    *: "Clear Playlist"
+  </dest>
+  <voice>
+    *: "Clear Playlist"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_OTG_NEW_PLAYLIST
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "New Playlist %d"
+  </source>
+  <dest>
+    *: "New Playlist %d"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_OTG_ONE_SONG
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "%d Song"
+  </source>
+  <dest>
+    *: "%d Song"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_OTG_MANY_SONGS
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "%d Songs"
+  </source>
+  <dest>
+    *: "%d Songs"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_OTG_REMOVE_ONE
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Remove %d Song"
+  </source>
+  <dest>
+    *: "Remove %d Song"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_OTG_REMOVE_MANY
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Remove %d Songs"
+  </source>
+  <dest>
+    *: "Remove %d Songs"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_BROWSE_ALBUM
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Browse Album"
+  </source>
+  <dest>
+    *: "Browse Album"
+  </dest>
+  <voice>
+    *: "Browse Album"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_BROWSE_ARTIST
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Browse Artist"
+  </source>
+  <dest>
+    *: "Browse Artist"
+  </dest>
+  <voice>
+    *: "Browse Artist"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GENIUS
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Genius"
+  </source>
+  <dest>
+    *: "Genius"
+  </dest>
+  <voice>
+    *: "Genius"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GENIUS_MIXES
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Genius Mixes"
+  </source>
+  <dest>
+    *: "Genius Mixes"
+  </dest>
+  <voice>
+    *: "Genius Mixes"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GENIUS_START
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Start Genius"
+  </source>
+  <dest>
+    *: "Start Genius"
+  </dest>
+  <voice>
+    *: "Start Genius"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GENIUS_UNAVAILABLE
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Connect to iTunes to activate Genius."
+  </source>
+  <dest>
+    *: "Connect to iTunes to activate Genius."
+  </dest>
+  <voice>
+    *: "Connect to iTunes to activate Genius."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GENIUS_HELP
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Genius plays songs on your iPod that go great together. You can start from the Now Playing screen, or choose a song you like and hold down the center button to bring up the Genius option."
+  </source>
+  <dest>
+    *: "Genius plays songs on your iPod that go great together. You can start from the Now Playing screen, or choose a song you like and hold down the center button to bring up the Genius option."
+  </dest>
+  <voice>
+    *: "Genius plays songs on your iPod that go great together. You can start from the Now Playing screen, or choose a song you like and hold down the center button to bring up the Genius option."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_OTG_HELP
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "When a song is selected, press and hold the center button to add it to the On-The-Go playlist. Press and hold on a playlist, artist, or album to add all of its songs to the On-The-Go playlist."
+  </source>
+  <dest>
+    *: "When a song is selected, press and hold the center button to add it to the On-The-Go playlist. Press and hold on a playlist, artist, or album to add all of its songs to the On-The-Go playlist."
+  </dest>
+  <voice>
+    *: "When a song is selected, press and hold the center button to add it to the On-The-Go playlist. Press and hold on a playlist, artist, or album to add all of its songs to the On-The-Go playlist."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_GENIUS_MIXES_HELP
+  desc: Fruit Company playlist or music context menu
+  user: core
+  <source>
+    *: "Genius Mixes are created for you by iTunes and play songs from your library that go great together. To use Genius Mixes, turn on Genius in iTunes."
+  </source>
+  <dest>
+    *: "Genius Mixes are created for you by iTunes and play songs from your library that go great together. To use Genius Mixes, turn on Genius in iTunes."
+  </dest>
+  <voice>
+    *: "Genius Mixes are created for you by iTunes and play songs from your library that go great together. To use Genius Mixes, turn on Genius in iTunes."
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_OTG_CONFIRM_CLEAR
+  desc: Confirm clearing the On-The-Go playlist
+  user: core
+  <source>
+    *: "Clear"
+  </source>
+  <dest>
+    *: "Clear"
+  </dest>
+  <voice>
+    *: "Clear"
+  </voice>
+</phrase>

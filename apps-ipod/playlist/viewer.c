@@ -38,6 +38,8 @@
 
 #include "viewer.h"
 #include "catalog.h"
+#include "fruit_otg.h"
+#include "ui/native_theme_runtime.h"
 #include "database/sound_mix.h"
 #include "database/sound_index.h"
 #include "draw/icon.h"
@@ -122,6 +124,8 @@ struct playlist_viewer {
     struct mp3entry *id3;
     unsigned long loading_tick; /* when to next splash while entries load    */
     bool is_open;               /* false until the viewer is on screen       */
+    bool fruit_saved;
+    char fruit_title[MAX_PATH];
     /* The playlist the buffer was loaded from; see playlist_changed()       */
     unsigned int loaded_changes;
 };
@@ -445,6 +449,8 @@ static bool playlist_viewer_init(struct playlist_viewer * viewer,
     buffer += id3_size;
     buffer_size -= id3_size;
 
+    viewer->fruit_saved = filename &&
+        ui_theme_style(UI_STYLE_MENU_TREE) == UI_MENU_TREE_STOCK;
     if (!filename)
     {
         viewer->playlist = NULL;
@@ -469,7 +475,9 @@ static bool playlist_viewer_init(struct playlist_viewer * viewer,
             dir = "/";
             file = filename+1;
         }
-        viewer->title = file;
+        viewer->title = viewer->fruit_saved ?
+            strip_extension(viewer->fruit_title, sizeof(viewer->fruit_title),
+                            file) : file;
 
         if (require_index_buffer)
         {
@@ -1132,13 +1140,29 @@ static const char* playlist_callback_name(int selected_item,
                                           char *buffer,
                                           size_t buffer_len)
 {
-    struct playlist_entry *track = pv_get_track(data, selected_item);
+    struct playlist_viewer *pv = data;
+    struct playlist_entry *track = pv_get_track(pv, selected_item);
 
-    format_line(track, buffer, buffer_len);
+    if (pv->fruit_saved)
+    {
+        if (!tagcache_entry_string(tagcache_find_path(track->name), tag_title,
+                                   buffer, buffer_len))
+            format_name(buffer, track->name, buffer_len);
+    }
+    else
+        format_line(track, buffer, buffer_len);
 
     return(buffer);
 }
 
+
+static const char *fruit_saved_artist(int item, void *data, char *buf,
+                                      size_t size)
+{
+    struct playlist_entry *track = pv_get_track(data, item);
+    return tagcache_entry_string(tagcache_find_path(track->name), tag_artist,
+                                 buf, size) ? buf : NULL;
+}
 
 static enum themable_icons playlist_callback_icons(int selected_item,
                                                    void *data)
@@ -1240,6 +1264,12 @@ static void update_gui(struct gui_synclist * playlist_lists, bool init)
     gui_synclist_set_row_callbacks(playlist_lists, playlist_callback_kind,
                                    NULL, playlist_callback_playing);
     gui_synclist_set_title(playlist_lists, viewer.title, Icon_Playlist);
+    if (viewer.fruit_saved)
+    {
+        playlist_lists->callback_get_item_subtitle = fruit_saved_artist;
+        gui_synclist_set_row_height(playlist_lists, 44);
+        gui_synclist_set_unnumbered(playlist_lists, true);
+    }
     gui_synclist_select_item(playlist_lists, viewer.selected_track);
     /* init marks the passes that open the screen; the rest are redraws of a
        list already on screen, which need no settling. */
@@ -1347,8 +1377,16 @@ enum playlist_viewer_result playlist_viewer_ex(const char* filename,
         }
 
         /* Timeout so we can determine if play status has changed */
-        bool res = list_do_action(list_select_context(CONTEXT_TREE), HZ/2,
-                                  &playlist_lists, &button);
+        bool res;
+        if (viewer.fruit_saved)
+        {
+            int timeout = list_do_action_timeout(&playlist_lists, HZ / 2);
+            button = fruit_list_action(get_action(CONTEXT_TREE, timeout), NULL);
+            res = gui_synclist_do_button(&playlist_lists, &button);
+        }
+        else
+            res = list_do_action(list_select_context(CONTEXT_TREE), HZ/2,
+                                 &playlist_lists, &button);
         /* during moving, another redraw is going to be needed,
          * since viewer.selected_track is updated too late (after the first draw)
          * drawing the moving item needs it */
@@ -1451,7 +1489,7 @@ enum playlist_viewer_result playlist_viewer_ex(const char* filename,
                     playlist_start(current_track->index, 0, 0);
                     update_playlist(false);
                 }
-                else if (warn_on_pl_erase())
+                else if (viewer.fruit_saved || warn_on_pl_erase())
                 {
                     /* Turn it into the current playlist */
                     ret_val = playlist_set_current(viewer.playlist);
@@ -1480,6 +1518,24 @@ enum playlist_viewer_result playlist_viewer_ex(const char* filename,
             }
             case ACTION_STD_CONTEXT:
             {
+                if (viewer.fruit_saved)
+                {
+                    char title[MAX_PATH];
+                    struct playlist_entry *track =
+                        pv_get_track(&viewer, viewer.selected_track);
+                    playlist_callback_name(viewer.selected_track, &viewer,
+                                           title, sizeof(title));
+                    int action =
+                        context_menu_show_fruit_track(track->name, title);
+                    if (action == ONPLAY_MAINMENU || action == ONPLAY_START_PLAY)
+                    {
+                        ret = action == ONPLAY_START_PLAY ? PLAYLIST_VIEWER_OK
+                                                          : PLAYLIST_VIEWER_USB;
+                        goto exit;
+                    }
+                    update_gui(&playlist_lists, false);
+                    break;
+                }
                 int pv_context_result = context_menu(viewer.selected_track);
 
                 if (pv_context_result == PV_CONTEXT_USB)

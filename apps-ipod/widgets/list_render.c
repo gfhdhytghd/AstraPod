@@ -156,6 +156,7 @@ struct native_list {
     union {
         struct {
             char name[MAX_PATH], value[96], playing[MAX_PATH], home[MAX_PATH];
+            char subtitle[MAX_PATH];
         } row;
         char notes[2 * MAX_PATH];
     } scratch;
@@ -1208,6 +1209,9 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     if (render->theme.style[UI_STYLE_LIST_ICONS] == UI_LIST_ICONS_OFF &&
         !agents)
         icon_column = false;
+    bool file_status = files && list->callback_draw_status;
+    if (file_status)
+        icon_column = true;
 
     if (marker_only)
     {
@@ -1333,7 +1337,7 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     else if (icon_column || marked >= 0)
     {
         text_x += icon_size + m[UI_METRIC_LIST_ICON_GAP];
-        if (render->icon_font >= 0)
+        if (render->icon_font >= 0 && !file_status)
         {
             const char *glyph = marked >= 0 ? (marked ? "×" : "Ö") :
                                 *own_glyph ? own_glyph :
@@ -1365,10 +1369,15 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         }
     }
 
+    char *subtext = render->scratch.row.subtitle;
+    const char *subtitle = list->callback_get_item_subtitle ?
+        list->callback_get_item_subtitle(item, list->data, subtext,
+                                         sizeof(render->scratch.row.subtitle)) : NULL;
+    int subheight = subtitle && *subtitle ? font_get(value_font)->height : 0;
     int right = row.width - m[UI_METRIC_LIST_RIGHT_PADDING];
     int arrow = right - icon_size;
     int text_height = MIN(row.height, m[UI_METRIC_LIST_TEXT_HEIGHT]);
-    int text_y = (row.height - text_height) / 2;
+    int text_y = MAX(0, (row.height - text_height - subheight) / 2);
     if (list->value_below)
         text_y = (row.height - 40) / 2 - 1;
     /* With stock accessories a row's text keeps the text padding clear at
@@ -1430,6 +1439,14 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
                       text_right - text_x, 15, rtl), subtitle_font,
                       lit ? fg : LCD_RGBPACK(96, 96, 96), value, false, 0, false);
     }
+    if (subheight && list_text_ready(value_font, subtitle))
+        draw_text(render, clip, row_cell(row, text_x, text_y + text_height - 1,
+                  text_right - text_x, subheight, rtl), value_font,
+                  lit ? fg : LCD_RGBPACK(104, 104, 104), subtitle,
+                  false, 0, false);
+    if (list->callback_get_item_subtitle && !lit)
+        fill(clip, (struct ui_rect){row.x, row.y + row.height - 1, row.width, 1},
+             LCD_RGBPACK(217, 217, 217));
     if (art_chevron)
     {
         struct ui_rect cell = row_cell(row, chevron_x,
@@ -2708,6 +2725,17 @@ static void prefetch_list_rows(struct native_list *render, int first, int end,
             i, list->data, render->scratch.row.name, sizeof(render->scratch.row.name));
         if (label && P2ID(label) <= VOICEONLY_DELIMITER)
             font_prefetch_text(font, P2STR(label));
+        if (list->callback_get_item_subtitle)
+        {
+            const char *subtitle =
+                list->callback_get_item_subtitle(i, list->data,
+                    render->scratch.row.subtitle,
+                    sizeof(render->scratch.row.subtitle));
+            if (subtitle)
+                font_prefetch_text(render->value_font >= 0 ?
+                                   render->value_font : font,
+                                   (const unsigned char *)subtitle);
+        }
     }
 }
 

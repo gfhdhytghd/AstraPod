@@ -4745,6 +4745,79 @@ void browser_db_enter_artist_albums_on_next_load(long albumartist_seek,
     browser_db_enter_by_tag_on_next_load(tag_albumartist);
 }
 
+/* A contextual browse starts at a different root. Preserve the parent
+ * path's history while the nested browser uses the same caches. */
+int browser_db_browse_from_context(void)
+{
+    struct browse_history {
+        int items[MAX_DIR_LEVELS];
+        int tables[MAX_DIR_LEVELS];
+        int extras[MAX_DIR_LEVELS];
+        int seeks[MAX_TAGS];
+        char titles[MAX_TAGS][sizeof(current_title[0])];
+        int base_level;
+        int max_level;
+        bool album_via_artist;
+        ptrdiff_t menu_offset;
+        ptrdiff_t instruction_offset;
+    };
+
+    int handle = core_alloc_free_space(sizeof(struct browse_history));
+    if (handle <= 0)
+    {
+        pending_root_shortcut_tag = -1;
+        pending_album_seek = pending_artist_seek = -1;
+        return GO_TO_PREVIOUS;
+    }
+    struct browse_history *saved = core_get_data_pinned(handle);
+
+    int config = browser_db_handle;
+    const char *base = config > 0 ? core_get_data(config) : NULL;
+    saved->menu_offset = base && menu ? (const char *)menu - base : -1;
+    saved->instruction_offset = base && csi ? (const char *)csi - base : -1;
+    if (csi)
+        memcpy(saved->seeks, csi->result_seek, sizeof(saved->seeks));
+    memcpy(saved->titles, current_title, sizeof(saved->titles));
+    memcpy(saved->items, selected_item_history, sizeof(saved->items));
+    memcpy(saved->tables, table_history, sizeof(saved->tables));
+    memcpy(saved->extras, extra_history, sizeof(saved->extras));
+    saved->base_level = shortcut_base_level;
+    saved->max_level = max_history_level;
+    saved->album_via_artist = album_via_artist_row;
+
+    struct browse_context browse = {
+        .dirfilter = SHOW_ID3DB,
+        .flags = BROWSE_DIRFILTER | BROWSE_CONTEXT_ROOT,
+        .root = "/",
+    };
+    int result = rockbox_browse(&browse);
+    pending_root_shortcut_tag = -1;
+    pending_album_seek = pending_artist_seek = -1;
+
+    if (config > 0 && config == browser_db_handle)
+    {
+        base = core_get_data(config);
+        menu = saved->menu_offset >= 0 ?
+            (struct menu_root *)(base + saved->menu_offset) : NULL;
+        csi = saved->instruction_offset >= 0 ?
+            (struct search_instruction *)(base + saved->instruction_offset) :
+            NULL;
+        if (csi)
+            memcpy(csi->result_seek, saved->seeks, sizeof(saved->seeks));
+        memcpy(current_title, saved->titles, sizeof(saved->titles));
+        memcpy(selected_item_history, saved->items, sizeof(saved->items));
+        memcpy(table_history, saved->tables, sizeof(saved->tables));
+        memcpy(extra_history, saved->extras, sizeof(saved->extras));
+        shortcut_base_level = saved->base_level;
+        max_history_level = saved->max_level;
+        album_via_artist_row = saved->album_via_artist;
+        loaded_entries_crc = 0;
+    }
+    core_put_data_pinned(saved);
+    core_free(handle);
+    return result;
+}
+
 /* Finds the row in the currently-loaded root ("main") menu whose first tag
  * matches 'tag' (e.g. tag_album), independent of tagnavi.config's row order.
  * Returns the row index, or -1 if not found. Must be called after load_root()
@@ -6499,9 +6572,9 @@ static bool browser_db_insert_selection(int position, bool queue,
  * the stack underneath splash_progress() and the callback, which is deep
  * enough already to overflow.
  */
-bool browser_db_subentries_do_action(struct tagcache_search *tcs,
-                                     bool (*action_cb)(const char *file_name),
-                                     char *buf, size_t buf_sz)
+static bool visit_subentries(struct tagcache_search *tcs,
+                             bool (*action_cb)(const char *file_name),
+                             char *buf, size_t buf_sz, bool require_all)
 {
     int i, n;
     unsigned long last_tick;
@@ -6525,13 +6598,19 @@ bool browser_db_subentries_do_action(struct tagcache_search *tcs,
             if (TIME_AFTER(current_tick, last_tick + HZ/4))
             {
                 if (action_userabort(TIMEOUT_NOBLOCK))
+                {
+                    ret = !require_all;
                     break;
+                }
                 last_tick = current_tick;
             }
 
             struct tagentry *entry = browser_db_get_entry(tc, i);
             if (!entry)
+            {
+                ret = !require_all;
                 break;
+            }
             if (entry->newtable != TABLE_PLAYTRACK)
                 continue;
             if (!action_cb(tagcache_retrieve(tcs, entry->extraseek,
@@ -6553,6 +6632,20 @@ bool browser_db_subentries_do_action(struct tagcache_search *tcs,
     reset_tc_to_prev(dirlevel, selected_item);
     cpu_boost(false);
     return ret;
+}
+
+bool browser_db_subentries_do_action(struct tagcache_search *tcs,
+                                      bool (*action_cb)(const char *file_name),
+                                      char *buf, size_t size)
+{
+    return visit_subentries(tcs, action_cb, buf, size, false);
+}
+
+bool browser_db_visit_selection(struct tagcache_search *tcs,
+                                bool (*action_cb)(const char *file_name),
+                                char *buf, size_t size)
+{
+    return visit_subentries(tcs, action_cb, buf, size, true);
 }
 
 long browser_db_selected_track_idx(void)

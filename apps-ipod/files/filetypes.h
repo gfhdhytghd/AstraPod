@@ -61,6 +61,9 @@
 /* An .m4v, played by the hardware H.264 player where there is one. An .mp4
  * keeps FILE_ATTR_AUDIO: filetype_is_video() says which of them are videos. */
 #define FILE_ATTR_VIDEO    0x1f00
+/* Built-in rows of the stock playlist catalogue. */
+#define FILE_ATTR_GENIUS   0x2000
+#define FILE_ATTR_OTG      0x2100
 #define FILE_ATTR_MASK  0xFF00 /* which bits tree.c uses for file types */
 
 /* The rows the browser invents rather than reads off the disk. They name an
@@ -73,7 +76,8 @@
 static inline bool file_attr_is_row(int masked)
 {
     return masked == FILE_ATTR_SEARCH || masked == FILE_ATTR_MOODS ||
-           masked == FILE_ATTR_JOURNEYS;
+           masked == FILE_ATTR_JOURNEYS || masked == FILE_ATTR_GENIUS ||
+           masked == FILE_ATTR_OTG;
 }
 
 long filetype_get_voiceclip(int attr);

@@ -264,6 +264,7 @@ struct gui_synclist
     list_get_range *callback_get_item_range;    /* ...and where it sits */
     list_is_playing *callback_item_is_playing;
     list_get_name *callback_get_item_description;
+    list_get_name *callback_get_item_subtitle;
     list_get_name *callback_get_index_key;
     list_draw_status *callback_draw_status;
     list_get_pane *callback_get_item_pane;
@@ -434,6 +435,7 @@ struct simplelist_info {
     list_get_color *get_color;
     list_get_kind *get_kind; /* can be NULL; every row is then plain */
     list_get_name *get_value; /* can be NULL; a setting row's value */
+    list_get_name *get_subtitle; /* a second line below the row label */
     list_get_range *get_range; /* can be NULL; a setting row's percentage */
     list_get_albumart *get_albumart; /* can be NULL for no art */
     int row_height; /* 0 uses the theme */

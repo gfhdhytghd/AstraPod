@@ -360,6 +360,10 @@ int browser_db_selected_root_row(void);
 int browser_db_get_filename(struct browser_context* c, char *buf, int buflen);
 int browser_db_get_custom_action(struct browser_context* c);
 bool browser_db_get_subentry_filename(char *buf, size_t bufsize);
+int browser_db_browse_from_context(void);
+bool browser_db_visit_selection(struct tagcache_search *tcs,
+                                bool (*action_cb)(const char *file_name),
+                                char *buf, size_t size);
 bool browser_db_subentries_do_action(struct tagcache_search *tcs,
                                      bool (*action_cb)(const char *file_name),
                                      char *buf, size_t buf_sz);

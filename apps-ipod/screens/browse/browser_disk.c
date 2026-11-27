@@ -346,20 +346,31 @@ int browser_disk_load(struct browser_context* c, const char* tempdir)
      * it has no directory entry behind it, and every filter in that loop is
      * about what a real one contains. */
     c->special_entry_count = 0;
-    if (!tempdir && c->dirlevel == 0 && c->browse
-        && (c->browse->flags & BROWSE_SEARCH_ROW))
+    if (!tempdir && c->dirlevel == 0 && c->browse &&
+        (c->browse->flags & (BROWSE_SEARCH_ROW | BROWSE_FRUIT_PLAYLISTS)))
     {
         struct { int attr; int lang; } rows[3];
         int nrows = 0, n;
 
-        rows[nrows].attr = FILE_ATTR_SEARCH;
-        rows[nrows++].lang = LANG_DB_SEARCH;
+        bool fruit = c->browse->flags & BROWSE_FRUIT_PLAYLISTS;
+        if (fruit)
+        {
+            rows[nrows].attr = FILE_ATTR_GENIUS;
+            rows[nrows++].lang = LANG_FRUIT_GENIUS;
+            rows[nrows].attr = FILE_ATTR_OTG;
+            rows[nrows++].lang = LANG_FRUIT_OTG;
+        }
+        else
+        {
+            rows[nrows].attr = FILE_ATTR_SEARCH;
+            rows[nrows++].lang = LANG_DB_SEARCH;
+        }
 
         /* The playlist catalogue gets two more, because what they build is a
          * playlist and this is where the playlists are. Only with an engine
          * switched on and an index to read: without both they would open on
          * an apology. */
-        if (*c->dirfilter == SHOW_M3U && global_settings.playlist_engine
+        if (!fruit && *c->dirfilter == SHOW_M3U && global_settings.playlist_engine
             && sound_index_exists())
         {
             rows[nrows].attr = FILE_ATTR_MOODS;
@@ -505,6 +516,16 @@ int browser_disk_load(struct browser_context* c, const char* tempdir)
     qsort(browser_get_entries(c) + c->special_entry_count,
           files_in_dir - c->special_entry_count, sizeof(struct entry), compare);
 
+    if (c->special_entry_count == 2 && c->browse &&
+        (c->browse->flags & BROWSE_FRUIT_PLAYLISTS))
+    {
+        struct entry *rows = browser_get_entries(c);
+        struct entry otg = rows[1];
+        memmove(&rows[1], &rows[2], (files_in_dir - 2) * sizeof(*rows));
+        rows[files_in_dir - 1] = otg;
+        c->special_entry_count = 1;
+    }
+
     /* If thumbnail talking is enabled, make an extra run to mark files with
        associated thumbnails, so we don't do unsuccessful spinups later. */
     if (global_settings.talk_file_clip)
@@ -516,6 +537,7 @@ int browser_disk_load(struct browser_context* c, const char* tempdir)
      * back. selected_item == 0 is what tells a list opening at the top from
      * one restoring a position, exactly as it does in browser_db.c. */
     if (c->special_entry_count > 0 && c->selected_item == 0
+        && !(c->browse && (c->browse->flags & BROWSE_FRUIT_PLAYLISTS))
         && files_in_dir > c->special_entry_count)
     {
         c->selected_item = c->special_entry_count;
@@ -815,6 +837,10 @@ int browser_disk_enter(struct browser_context* c)
             /* Returned rather than broken out of, for the reason given on the
              * Search row above: the catalogue is one of the browses the tail
              * of this function would otherwise send to the root. */
+            case FILE_ATTR_GENIUS:
+                return GO_TO_FRUIT_GENIUS;
+            case FILE_ATTR_OTG:
+                return GO_TO_FRUIT_OTG;
             case FILE_ATTR_MOODS:
             case FILE_ATTR_JOURNEYS:
                 return mood_screen_pick((file_attr & FILE_ATTR_MASK)

@@ -36,6 +36,8 @@ struct entry {
 #define BROWSE_HOME_LIBRARY    0x0400  /* Home's Files or Music hierarchy */
 #define BROWSE_PLUGIN_PICKER    0x0800  /* keep the picker inside its start root */
 #define BROWSE_MUSIC_PUSH       0x1000  /* slide into albums or tracks */
+#define BROWSE_FRUIT_PLAYLISTS  0x2000  /* stock playlist catalogue */
+#define BROWSE_CONTEXT_ROOT     0x4000  /* fresh DB root within a context menu */
 
 
 struct browser_context;

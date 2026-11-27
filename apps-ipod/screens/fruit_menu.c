@@ -19,6 +19,7 @@
 #include <string.h>
 #include "string-extra.h"
 #include "config.h"
+#include "playlist/fruit_otg.h"
 #include "lang.h"
 #include "kernel.h"
 #include "audio.h"
@@ -253,7 +254,13 @@ static const struct check_row music_checks[MUSIC_ROWS] = {
 static int music_callback(int action, const struct menu_item_ex *this_item,
                           struct gui_synclist *this_list);
 
+static int genius_mixes(void)
+{
+    return fruit_genius_show(true) == GO_TO_ROOT ? GO_TO_ROOT : 0;
+}
+
 ROW(music_cover_flow, LANG_COVER_FLOW_TITLE, cover_flow, music_callback);
+ROW(music_genius_mixes, LANG_FRUIT_GENIUS_MIXES, genius_mixes, music_callback);
 ROW(music_playlists, LANG_PLAYLISTS, playlists, music_callback);
 ROW(music_artists, LANG_ARTISTS, artists, music_callback);
 ROW(music_albums, LANG_ALBUMS, albums, music_callback);
@@ -287,7 +294,8 @@ static int music_callback(int action, const struct menu_item_ex *this_item,
 }
 
 static const struct menu_item_ex *const music_rows[] = {
-    &music_cover_flow, &music_playlists, &music_artists, &music_albums,
+    &music_cover_flow, &music_genius_mixes, &music_playlists,
+    &music_artists, &music_albums,
     &music_compilations, &music_songs, &music_genres, &music_composers,
     &music_audiobooks, &music_search,
 };

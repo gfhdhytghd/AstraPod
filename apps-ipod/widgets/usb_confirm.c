@@ -151,7 +151,8 @@ struct usb_classic_ctx {
     int label_font;
 };
 
-#define USB_POPUP_ROW_H 26
+#define USB_POPUP_ROW_H   28
+#define USB_POPUP_ROW_GAP 6
 
 static void confirm_classic_measure(struct dialog *d, struct screen *s,
                                     struct viewport *box, void *data)
@@ -161,11 +162,11 @@ static void confirm_classic_measure(struct dialog *d, struct screen *s,
     int hch = font_get(hfont)->height;
     int bch = font_get(box->font)->height;
     int count = remote_choice() ? 3 : 2;
-    int foot_h = count * USB_POPUP_ROW_H;
-    int box_w = MIN(s->lcdwidth - 40, 264);
-    int box_h = 1 + 14 + hch + 5 + 2 * bch + 2 + 12 + foot_h + 1;
-    if (box_h > s->lcdheight - 24)
-        box_h = s->lcdheight - 24;
+    int rows_h = count * USB_POPUP_ROW_H + (count - 1) * USB_POPUP_ROW_GAP;
+    int box_w = MIN(s->lcdwidth - 40, 272);
+    int box_h = 14 + hch + 6 + 2 * bch + 2 + 12 + rows_h + 12;
+    if (box_h > s->lcdheight - 20)
+        box_h = s->lcdheight - 20;
 
     d->style.box_margin = 0;
     box->width = box_w;
@@ -187,34 +188,44 @@ static void confirm_classic_draw(struct dialog *d, struct screen *s,
     int hch = font_get(hfont)->height;
     int bch = font_get(content->font)->height;
     int old_font = content->font;
-    int foot_h = count * USB_POPUP_ROW_H;
-    int foot_y = content->height - foot_h - 1;
+    int rows_h = count * USB_POPUP_ROW_H + (count - 1) * USB_POPUP_ROW_GAP;
+    int ry = content->height - 12 - rows_h;
+    unsigned shadow = LCD_RGBPACK(4, 10, 24);
+    unsigned body_fg = LCD_RGBPACK(234, 240, 250);
+    const char *title = "Computer Connected";
+    const char *sub1 = "Connect as a USB disk to transfer files,";
+    const char *sub2 = "or charge while keeping playback.";
+    int tw = 0;
 
     s->set_drawmode(DRMODE_FG);
-    s->set_foreground(LCD_RGBPACK(0, 0, 0));
     s->setfont(hfont);
-    s->putsxy(16, 15, (const unsigned char *)"Computer Connected");
+    s->getstringsize((const unsigned char *)title, &tw, NULL);
+    dialog_draw_shadow_text(s, MAX(12, (content->width - tw) / 2), 14,
+                            title, LCD_RGBPACK(255, 255, 255), shadow, -1);
     s->setfont(old_font);
 
-    s->set_foreground(LCD_RGBPACK(56, 60, 66));
-    s->putsxy(16, 15 + hch + 5,
-              (const unsigned char *)"Transfer files as a USB disk, or keep");
-    s->putsxy(16, 15 + hch + 5 + bch + 2,
-              (const unsigned char *)"playing while charging.");
+    s->getstringsize((const unsigned char *)sub1, &tw, NULL);
+    dialog_draw_shadow_text(s, MAX(12, (content->width - tw) / 2),
+                            14 + hch + 6, sub1, body_fg, shadow, -1);
+    s->getstringsize((const unsigned char *)sub2, &tw, NULL);
+    dialog_draw_shadow_text(s, MAX(12, (content->width - tw) / 2),
+                            14 + hch + 6 + bch + 2, sub2, body_fg, shadow, -1);
 
-    dialog_draw_popup_footer_bg(s, 1, foot_y, content->width - 2, foot_h);
-    dialog_draw_popup_action_row(s, 1, foot_y, content->width - 2,
-                                 USB_POPUP_ROW_H, "SELECT", false,
-                                 "Connect", true, false, kfont, lfont);
-    dialog_draw_popup_action_row(s, 1, foot_y + USB_POPUP_ROW_H,
-                                 content->width - 2, USB_POPUP_ROW_H,
-                                 "MENU", false, "Charge Only", false, true,
+    int row_w = content->width - 24;
+    dialog_draw_popup_action_row(s, 12, ry, row_w, USB_POPUP_ROW_H,
+                                 "SELECT", false, "Connect", true,
+                                 kfont, lfont);
+    ry += USB_POPUP_ROW_H + USB_POPUP_ROW_GAP;
+    dialog_draw_popup_action_row(s, 12, ry, row_w, USB_POPUP_ROW_H,
+                                 "MENU", false, "Charge Only", false,
                                  kfont, lfont);
     if (remote)
-        dialog_draw_popup_action_row(s, 1, foot_y + 2 * USB_POPUP_ROW_H,
-                                     content->width - 2, USB_POPUP_ROW_H,
+    {
+        ry += USB_POPUP_ROW_H + USB_POPUP_ROW_GAP;
+        dialog_draw_popup_action_row(s, 12, ry, row_w, USB_POPUP_ROW_H,
                                      "RIGHT", true, "Remote Control", false,
-                                     true, kfont, lfont);
+                                     kfont, lfont);
+    }
     s->set_drawmode(DRMODE_SOLID);
 }
 

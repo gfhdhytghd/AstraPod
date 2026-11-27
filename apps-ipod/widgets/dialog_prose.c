@@ -59,6 +59,7 @@ struct prose
 
     enum prose_focus focus;
     int  sel;           /* 0 = cancel, 1 = accept */
+    int  head_font;
     int  btn_font;
 };
 
@@ -84,16 +85,17 @@ static void prose_measure(struct dialog *d, struct screen *s,
     if (dialog_is_classic() && !d->fb)
     {
         const int pad_x = 14;
-        const int pad_top = 10;
+        const int pad_top = 12;
         const int pad_bot = 10;
-        int hdr_h = p->title ? 24 : 0;
-        int foot_h = p->cancel ? 42 : 28;
+        int hfont = p->head_font >= 0 ? p->head_font : box->font;
+        int hdr_h = p->title ? (font_get(hfont)->height + 8) : 0;
+        int foot_h = 28 + 4 + fh + 8;
         int box_w = MIN(sw - 32, 282);
         int text_w = box_w - 2 * pad_x - PROSE_BAR_W - PROSE_BAR_GAP;
         d->style.box_margin = 0;
         lines = prose_wrap(p->body, text_w, box->font);
-        fixed = 1 + hdr_h + pad_top + pad_bot + foot_h + 1;
-        max = sh * 84 / 100;
+        fixed = pad_top + hdr_h + pad_bot + foot_h;
+        max = sh * 86 / 100;
         if (fixed + lines * fh > max)
             lines = MAX((max - fixed) / fh, 1);
         box->width = box_w;
@@ -154,15 +156,18 @@ static void prose_draw(struct dialog *d, struct screen *s,
     if (dialog_is_classic() && !d->fb)
     {
         const int pad_x = 14;
-        const int pad_top = 10;
+        const int pad_top = 12;
         const int pad_bot = 10;
-        int hdr_h = p->title ? 24 : 0;
-        int foot_h = p->cancel ? 42 : 28;
+        int hfont = p->head_font >= 0 ? p->head_font : content->font;
         int bfont = p->btn_font >= 0 ? p->btn_font : content->font;
         int kfont = content->font;
-        int foot_y = content->height - foot_h - 1;
-        int body_top = 1 + hdr_h + pad_top;
+        int hch = font_get(hfont)->height;
+        int hdr_h = p->title ? (hch + 8) : 0;
+        int foot_h = 28 + 4 + fh + 8;
+        int foot_y = content->height - foot_h;
+        int body_top = pad_top + hdr_h;
         int body_h = foot_y - body_top - pad_bot;
+        unsigned shadow = LCD_RGBPACK(4, 10, 24);
         if (body_h < fh)
             body_h = fh;
         int text_w = content->width - 2 * pad_x - PROSE_BAR_W - PROSE_BAR_GAP;
@@ -174,33 +179,59 @@ static void prose_draw(struct dialog *d, struct screen *s,
             p->scroll = 0;
 
         if (p->title)
-            dialog_draw_popup_header(s, 1, 1, content->width - 2, hdr_h,
-                                     p->title, bfont);
+        {
+            int old_font = content->font;
+            s->setfont(hfont);
+            int tw = 0;
+            s->getstringsize((const unsigned char *)p->title, &tw, NULL);
+            struct viewport tvp = *content;
+            tvp.x = content->x + pad_x;
+            tvp.y = content->y + pad_top - 1;
+            tvp.width = MAX(1, content->width - 2 * pad_x);
+            tvp.height = hch + 1;
+            struct viewport *prev = s->set_viewport(&tvp);
+            int tx = tw < tvp.width ? (tvp.width - tw) / 2 : 0;
+            dialog_draw_shadow_text(s, tx, 1, p->title,
+                                    LCD_RGBPACK(255, 255, 255), shadow, -1);
+            s->set_viewport(prev);
+            s->setfont(old_font);
+        }
 
         s->set_drawmode(DRMODE_FG);
-        s->set_foreground(LCD_RGBPACK(24, 26, 30));
         int y = body_top;
         for (int i = 0; i < p->visible; i++)
         {
             int n = p->scroll + i;
             if (n >= p->lines)
                 break;
-            s->putsxyf(pad_x, y, "%.*s", prose_lines[n].len, prose_lines[n].str);
+            s->set_foreground(shadow);
+            s->putsxyf(pad_x, y - 1, "%.*s",
+                       prose_lines[n].len, prose_lines[n].str);
+            s->set_foreground(LCD_RGBPACK(234, 240, 250));
+            s->putsxyf(pad_x, y, "%.*s",
+                       prose_lines[n].len, prose_lines[n].str);
             y += fh;
         }
         s->set_drawmode(DRMODE_SOLID);
         if (p->lines > p->visible)
-            gui_scrollbar_draw(s, content->width - pad_x - PROSE_BAR_W + 4,
-                               body_top, PROSE_BAR_W, body_h, p->lines,
-                               p->scroll, p->scroll + p->visible,
-                               VERTICAL | FOREGROUND | INNER_BGFILL);
+        {
+            int sx = content->width - pad_x - PROSE_BAR_W + 4;
+            int thumb_h = MAX(12, body_h * p->visible / p->lines);
+            int max_scroll = p->lines - p->visible;
+            int thumb_y = body_top + (max_scroll > 0
+                ? (body_h - thumb_h) * p->scroll / max_scroll : 0);
+            s->set_foreground(LCD_RGBPACK(26, 48, 86));
+            s->fillrect(sx, body_top, PROSE_BAR_W, body_h);
+            s->set_foreground(LCD_RGBPACK(176, 200, 232));
+            s->fillrect(sx, thumb_y, PROSE_BAR_W, thumb_h);
+        }
 
         if (!p->cancel)
-            dialog_draw_popup_single_footer(s, 1, foot_y, content->width - 2,
+            dialog_draw_popup_single_footer(s, 0, foot_y, content->width,
                                             foot_h, p->accept, "SELECT / MENU",
                                             p->lines > p->visible, bfont, kfont);
         else
-            dialog_draw_popup_pair_footer(s, 1, foot_y, content->width - 2,
+            dialog_draw_popup_pair_footer(s, 0, foot_y, content->width,
                                           foot_h, p->cancel, "/ MENU", true,
                                           p->accept, "SELECT /", true,
                                           bfont, kfont);
@@ -469,6 +500,8 @@ static int prose_run(const char *title, const char *body,
     p.accept = accept_label;
     p.cancel = cancel_label;
     p.sel    = accept_default ? 1 : 0;  /* once the buttons are reached */
+    p.head_font = (dialog_is_classic() && !fb)
+                ? ui_theme_current_font_load(UI_FONT_TITLE, 48) : -1;
     p.btn_font = (dialog_is_classic() && !fb)
                ? ui_theme_current_font_load(UI_FONT_LIST_VALUE, 32) : -1;
 
@@ -488,6 +521,7 @@ static int prose_run(const char *title, const char *body,
     }
 
     int res = dialog_run(&d, TIMEOUT_BLOCK);
+    font_unload(p.head_font);
     font_unload(p.btn_font);
     return res;
 }

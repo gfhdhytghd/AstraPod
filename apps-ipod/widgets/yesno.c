@@ -171,27 +171,34 @@ static void yesno_measure(struct dialog *d, struct screen *s,
     {
         const int pad_x = 16;
         const int pad_top = 14;
-        const int pad_bot = 14;
-        const int hdr_h = d->title ? 24 : 0;
-        const int foot_h = 42;
-        int box_w = MIN(sw - 36, 268);
+        const int pad_mid = 14;
+        int box_w = MIN(sw - 40, 272);
         int text_w = box_w - 2 * pad_x;
         int hfont = c->head_font >= 0 ? c->head_font : box->font;
         int hch = font_get(hfont)->height;
         int bch = font_get(box->font)->height;
+        int foot_h = 28 + 4 + bch + 8;
 
         d->style.box_margin = 0;
         c->head_count = 0;
         c->wrap_count = 0;
         int body_start = 0;
-        if (!d->title && c->message->nb_lines > 0)
+        if (d->title)
+        {
+            c->head_count = dialog_wrap_text(d->title, text_w, hfont,
+                                             c->head_wrap,
+                                             ARRAYLEN(c->head_wrap));
+        }
+        else if (c->message->nb_lines > 0)
         {
             const char *line = P2STR((unsigned char *)c->message->message_lines[0]);
             c->head_count = dialog_wrap_text(line, text_w, hfont,
-                                             c->head_wrap, ARRAYLEN(c->head_wrap));
+                                             c->head_wrap,
+                                             ARRAYLEN(c->head_wrap));
             body_start = 1;
         }
-        for (int i = body_start; i < c->message->nb_lines && c->wrap_count < YN_MAX_LINES; i++)
+        for (int i = body_start; i < c->message->nb_lines &&
+                                 c->wrap_count < YN_MAX_LINES; i++)
         {
             const char *line = P2STR((unsigned char *)c->message->message_lines[i]);
             int n = dialog_wrap_text(line, text_w, box->font,
@@ -215,8 +222,8 @@ static void yesno_measure(struct dialog *d, struct screen *s,
                 text_h += 6;
             text_h += c->wrap_count * (bch + 2) - 2;
         }
-        int box_h = 1 + hdr_h + pad_top + text_h + pad_bot + foot_h + 1;
-        box_h = MIN(area_h - 32, MAX(108, box_h));
+        int box_h = pad_top + text_h + pad_mid + foot_h;
+        box_h = MIN(area_h - 24, MAX(120, box_h));
 
         box->width = box_w;
         box->height = box_h;
@@ -283,47 +290,69 @@ static void yesno_draw(struct dialog *d, struct screen *s,
     struct yesno_ctx *c = data;
     if (dialog_is_classic())
     {
-        const int pad_x = 16;
-        const int hdr_h = d->title ? 24 : 0;
-        const int foot_h = 42;
-        int foot_y = content->height - foot_h - 1;
+        const int pad_top = 14;
         int bfont = c->btn_font >= 0 ? c->btn_font : content->font;
         int hfont = c->head_font >= 0 ? c->head_font : content->font;
         int kfont = content->font;
         int hch = font_get(hfont)->height;
         int bch = font_get(content->font)->height;
+        int foot_h = 28 + 4 + bch + 8;
+        int foot_y = content->height - foot_h;
+        unsigned shadow = LCD_RGBPACK(4, 10, 24);
 
-        if (d->title)
-            dialog_draw_popup_header(s, 1, 1, content->width - 2, hdr_h,
-                                     d->title, bfont);
+        int text_h = 0;
+        if (c->head_count > 0)
+            text_h += c->head_count * (hch + 2) - 2;
+        if (c->wrap_count > 0)
+        {
+            if (text_h > 0)
+                text_h += 6;
+            text_h += c->wrap_count * (bch + 2) - 2;
+        }
+        int avail = foot_y - pad_top - 10;
+        int y = pad_top + (avail > text_h ? (avail - text_h) / 2 : 0);
 
-        int y = 1 + hdr_h + 14;
         s->set_drawmode(DRMODE_FG);
         if (c->head_count > 0)
         {
             int old_font = content->font;
             s->setfont(hfont);
-            s->set_foreground(LCD_RGBPACK(0, 0, 0));
             for (int i = 0; i < c->head_count && y + hch <= foot_y - 6; i++)
             {
-                s->putsxyf(pad_x, y, "%.*s", c->head_wrap[i].len, c->head_wrap[i].str);
+                int lw = font_getstringnsize(
+                    (const unsigned char *)c->head_wrap[i].str,
+                    c->head_wrap[i].len, NULL, NULL, hfont);
+                int tx = MAX(12, (content->width - lw) / 2);
+                s->set_foreground(shadow);
+                s->putsxyf(tx, y - 1, "%.*s",
+                           c->head_wrap[i].len, c->head_wrap[i].str);
+                s->set_foreground(LCD_RGBPACK(255, 255, 255));
+                s->putsxyf(tx, y, "%.*s",
+                           c->head_wrap[i].len, c->head_wrap[i].str);
                 y += hch + 2;
             }
             s->setfont(old_font);
             y += 4;
         }
-        s->set_foreground(LCD_RGBPACK(52, 56, 62));
         for (int i = 0; i < c->wrap_count && y + bch <= foot_y - 6; i++)
         {
-            s->putsxyf(pad_x, y, "%.*s", c->wrap[i].len, c->wrap[i].str);
+            int lw = font_getstringnsize(
+                (const unsigned char *)c->wrap[i].str,
+                c->wrap[i].len, NULL, NULL, content->font);
+            int tx = MAX(12, (content->width - lw) / 2);
+            s->set_foreground(shadow);
+            s->putsxyf(tx, y - 1, "%.*s", c->wrap[i].len, c->wrap[i].str);
+            s->set_foreground(LCD_RGBPACK(234, 240, 250));
+            s->putsxyf(tx, y, "%.*s", c->wrap[i].len, c->wrap[i].str);
             y += bch + 2;
         }
 
         char yes[24], no[24];
         yesno_button_labels(c, yesno_tmo_remaining(c), yes, no, sizeof(yes));
-        dialog_draw_popup_pair_footer(s, 1, foot_y, content->width - 2, foot_h,
-                                      no, c->back_cancels ? "LEFT" : "/ MENU", true,
-                                      yes, "SELECT /", true, bfont, kfont);
+        dialog_draw_popup_pair_footer(s, 0, foot_y, content->width, foot_h,
+                                      no, c->back_cancels ? "LEFT" : "/ MENU",
+                                      true, yes, "SELECT /", true,
+                                      bfont, kfont);
         s->set_drawmode(DRMODE_SOLID);
         return;
     }

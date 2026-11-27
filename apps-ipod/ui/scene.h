@@ -51,6 +51,9 @@ void ui_scene_boot(struct ui_scene *scene);
 /* A full-page picker retains its underlying page until dismissal. */
 void ui_scene_open_modal(struct ui_scene *scene, const char *route);
 bool ui_scene_capture_modal(struct ui_scene *scene);
+/* Why the last capture failed: "motion-off", "lcd-off", "busy" or
+ * "no-memory"; "-" after one that worked. */
+const char *ui_scene_capture_failure(void);
 void ui_scene_show_modal(struct ui_scene *scene, const char *route);
 /* Present a crossfade without modifying the page framebuffer. Optional
  * screen-space column spans keep moving artwork opaque (end exclusive). */

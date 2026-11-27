@@ -14,6 +14,9 @@ void ui_perf_wps_target(char route, const struct ui_rect *rect,
                         const char *reason, const char *bitmap,
                         uint32_t handoff_us, uint32_t playlist_us,
                         uint32_t wps_setup_us);
+/* Which way Cover Flow was entered and left, and why. */
+void ui_perf_flow_path(const char *enter, const char *enter_why,
+                       const char *leave, const char *leave_why);
 unsigned ui_perf_begin(const char *route);
 /* Ancillary animation. Foreground motion can claim the recorder immediately
  * and discard an overlapping passive trace without writing on its hot path. */

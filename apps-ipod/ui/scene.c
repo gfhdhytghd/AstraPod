@@ -839,12 +839,20 @@ void ui_scene_modal_restored(const void *page)
     restored_page = page;
 }
 
+static const char *capture_failure = "-";
+
+const char *ui_scene_capture_failure(void)
+{
+    return capture_failure;
+}
+
 static bool capture_panel(struct ui_scene *scene, bool vertical)
 {
     bool slide = !vertical && slide_motion();
     unsigned frames = vertical
         ? ui_theme_motion(UI_MOTION_SHEET_IN, MODAL_UP_FRAMES, MODAL_UP_FRAMES)
         : page_frames(true);
+    capture_failure = !frames ? "motion-off" : !lcd_active() ? "lcd-off" : "-";
     if (!frames || !lcd_active())
         return false;
 
@@ -854,11 +862,13 @@ static bool capture_panel(struct ui_scene *scene, bool vertical)
         settle_panel(owner);
     else
         ui_scene_interrupt();
+    capture_failure = owner ? "busy" : "no-memory";
     if (owner)
         return false;
     scene->backdrop_handle = core_alloc_free_space(FRAMEBUFFER_SIZE);
     if (scene->backdrop_handle <= 0)
         return false;
+    capture_failure = "-";
 
     fb_data *backdrop = core_get_data_pinned(scene->backdrop_handle);
     memcpy(backdrop, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);

@@ -17,6 +17,10 @@ Leaving, the bar and the caption go at once, and at the same moment the
 rows start back from the left and the pane from the right, each
 320 * (1 - t/270)^2 px from home, so neither shows until 79 ms in.
 
+The same runs again against the simulator's remote library
+(PODBOX_SIM_CIDER), whose Cover Flow comes from a host as it does on a
+player connected to one.
+
 Each session presses the key and records every distinct frame; each check
 fits the start time and compares every frame's measured offset with the
 model, within TOLERANCE px. A frame two refreshes late shifts a whole
@@ -28,6 +32,7 @@ Writes result.json and every recording's frames.
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -222,10 +227,18 @@ def main():
         make_fixture(args.binary, args.resource, fixture)
 
     result = {}
-    for name, extra, script in (("music", "", from_music),
-                                ("home", HOME_WITH_FLOW, from_home)):
-        shots = session(args.binary, fixture, args.output / name,
-                        "fruit-company", extra, script)
+    for name, extra, script, remote in (
+            ("music", "", from_music, False),
+            ("home", HOME_WITH_FLOW, from_home, False),
+            ("remote-music", "", from_music, True),
+            ("remote-home", HOME_WITH_FLOW, from_home, True)):
+        if remote:
+            os.environ["PODBOX_SIM_CIDER"] = "60000"
+        try:
+            shots = session(args.binary, fixture, args.output / name,
+                            "fruit-company", extra, script)
+        finally:
+            os.environ.pop("PODBOX_SIM_CIDER", None)
         result[name] = {"enter": measure_entry(shots["enter"]),
                         "exit": measure_exit(shots["exit"])}
     (args.output / "result.json").write_text(json.dumps(result, indent=1) +

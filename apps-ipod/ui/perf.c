@@ -129,6 +129,21 @@ void ui_perf_wps_target(char route, const struct ui_rect *rect,
     }
 }
 
+void ui_perf_flow_path(const char *enter, const char *enter_why,
+                       const char *leave, const char *leave_why)
+{
+    if (!enabled)
+        return;
+    int fd = logfile_open(PERF_LOG);
+    if (fd >= 0)
+    {
+        logfile_printf(fd, "cover-flow-path enter=%s enter_why=%s "
+                       "leave=%s leave_why=%s\n", enter, enter_why, leave,
+                       leave_why);
+        logfile_close(fd);
+    }
+}
+
 static unsigned begin_capture(const char *route, bool passive)
 {
     if (!enabled)

@@ -478,6 +478,10 @@ static bool pf_wps_entry;
  * waits with its status bar until `caption_reveal`. */
 static bool pf_caption_hidden, caption_waits;
 static uint32_t caption_reveal;
+/* How the last entry and leave ran, and the first condition that kept
+ * them from Fruit Company's slide; ui-perf.txt gets it on return. */
+static struct { const char *enter, *enter_why, *leave, *leave_why; } flow_path;
+static const char *pf_scene_failure = "-";
 static bool flat_view(void);
 static bool pf_shown, pf_entry_prepared, cover_resume_dirty;
 static int pf_neighbor_light = 256;
@@ -499,7 +503,10 @@ void carousel_prepare_transition(void)
     ui_scene_discard(&pf_scene);
     memset(&pf_scene, 0, sizeof(pf_scene));
     ui_scene_capture_modal(&pf_scene);
-    pf_scene_split = menu_pane_themed() && !cider_active();
+    pf_scene_failure = ui_scene_capture_failure();
+    /* Whether the page taken is a split menu, whichever library, local or
+     * remote, the covers come from. */
+    pf_scene_split = menu_pane_themed() && menu_pane_take_screen();
     pf_scene_palette = album_palette_generation();
     pf_scene_art = album_art_generation();
     pf_scene_theme = ui_theme_generation();
@@ -6951,6 +6958,31 @@ static bool flow_present_stock(struct ui_scene *source, uint32_t age, bool back)
     return ui_scene_present_split(source, -away, back ? away : MENU_PANE_X);
 }
 
+/* The path an entry or leave takes, as flow_path records it. */
+static void flow_path_note(bool leave, const struct ui_scene *fade,
+                           bool still_covers)
+{
+    const char *path = !fade ? "cut"
+                     : still_covers && pf_scene_split ? "slide"
+                     : stock_look() && pf_scene_split ? "split" : "fade";
+    const char *why = pf_wps_entry ? "now-playing"
+                    : !fade ? pf_scene_failure
+                    : !stock_look() ? "not-stock-look"
+                    : !still_covers ? "not-fruit-menu"
+                    : !menu_pane_themed() ? "theme-not-split"
+                    : !pf_scene_split ? "no-split-page" : "ok";
+    if (leave)
+    {
+        flow_path.leave = path;
+        flow_path.leave_why = why;
+    }
+    else
+    {
+        flow_path.enter = path;
+        flow_path.enter_why = why;
+    }
+}
+
 /* The stock look enters from a menu without a status bar of its own: the
  * menu's leaves with its rows, and Cover Flow's drops in from the top with
  * quadratic ease-out, 100 ms long 363 ms after the rows begin to move.
@@ -7814,6 +7846,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
     bool still_covers = false, stock_slide = false;
     uint32_t leave_skip = 0;
     pf_caption_hidden = caption_waits = false;
+    flow_path.enter = flow_path.leave = "none";
+    flow_path.enter_why = flow_path.leave_why = "-";
     int leave_result = GO_TO_PREVIOUS;
     unsigned int seen_slides_loaded = pf_slides_loaded;
     long boost_until = current_tick + HZ;
@@ -8023,6 +8057,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
         if (!flat_view() && (pf_entry_prepared || (pf_wps_entry && !pf_shown)))
         {
             show_carousel_entry();
+            flow_path.enter = "cut";
+            flow_path.enter_why = !pf_motion_scale ? "motion-off" : "panel-open";
             if (pf_motion_scale && !panel.live)
             {
                 fade_start = USEC_TIMER;
@@ -8036,6 +8072,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                     stock_enter(&flow_row, number_of_slides, center_index,
                                 fade_start, pf_wps_entry);
                 stock_slide = still_covers && fade && pf_scene_split;
+                flow_path_note(false, fade, still_covers);
                 if (fade && stock_look() && pf_scene_split)
                     bar_drop_begin(fade_start, stock_slide);
                 pf_caption_hidden = caption_waits = stock_slide;
@@ -8815,6 +8852,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             leave_from = opacity;
             fade = pf_scene.backdrop_handle > 0 ? &pf_scene : NULL;
             stock_slide = still_covers && fade && pf_scene_split;
+            flow_path_note(true, fade, still_covers);
             bar_drop.frozen = true;
             if (stock_slide)
             {
@@ -9151,6 +9189,8 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
         status_save(true);
     cleanup();
     ui_perf_end(trace);
+    ui_perf_flow_path(flow_path.enter, flow_path.enter_why,
+                      flow_path.leave, flow_path.leave_why);
 
     /* CAROUSEL_PLAY_ALBUM belongs with these: album_covers() turns it into
      * GO_TO_WPS, so the screen underneath is about to be replaced either way

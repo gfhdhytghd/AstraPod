@@ -1,10 +1,10 @@
 # Native PodBox theme format
 
-The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica and with its own bitmaps. The built-in Fruit Company theme looks like Classic and replaces AstraPod's menus with the original firmware's: Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle Songs.
+The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica and with its own bitmaps. The built-in Fruit Company theme looks like Classic and replaces AstraPod's menus with the original firmware's: Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle Songs. The built-in Fruit Company Ultra theme looks exactly like Fruit Company when nothing moves, and gives every motion more depth and physics.
 
 ## Installing and choosing a theme
 
-Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Settings → Theme Settings → Native theme**; under Fruit Company that is **Settings → Advanced Settings → Theme Settings → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim`, `light`, `classic` and `fruit-company`. A saved `plastic` selects Classic. The default is `scrim`.
+Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Settings → Theme Settings → Native theme**; under Fruit Company and Fruit Company Ultra that is **Settings → Advanced Settings → Theme Settings → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim`, `light`, `classic`, `fruit-company` and `fruit-company-ultra`. A saved `plastic` selects Classic. The default is `scrim`.
 
 Place referenced font files in `.rockbox/fonts/`. Use PBF1 `.pbf` files for text and an RB12 `.fnt` file for icons. Firmware falls back to Scrim if a theme file is missing or malformed, or if it references an unsupported font. It records the failure in `.rockbox/native-theme.log`.
 
@@ -187,10 +187,12 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 | `list_scroll` | `glide`, `snap` | The rows jump a whole row at a time and only the selection marker moves; the ends of the list do not stretch. See *Native rendering and animation*. |
 | `list_rows` | `pitch`, `fill` | The rows fill the list's height: the pixels left below the last whole row go one each to the top rows, so nine 24-pixel rows in 220 pixels become four of 25 and five of 24. |
 | `menu_tree` | `astrapod`, `stock` | The main menu and everything under it are the original iPod Classic's: Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle Songs, with Menu going back one level. AstraPod's own settings are under **Settings → Advanced Settings**, its Games, Other Apps, Demos, Files and System menu under **Extras**, and its Playback Report is a main menu row that **Settings → Main Menu** starts with off. A row the original firmware has and AstraPod does not either does nothing, as an empty list does there, or says it is not available. Choosing a theme with `stock` asks first, and choosing a theme that changes this goes back to the main menu. |
+| `motion` | `standard`, `ultra` | Richer motion wherever something moves; still frames are unchanged, except in Cover Flow. The selection bar springs to its row, rows glide with a soft pull past the ends, a glint crosses the bar when it settles, and long titles scroll a pixel a refresh. Pages stack: the page behind moves slower and darkens, and the page on top casts a shadow. The status title and the split menu's pane dissolve into the next. Cover Flow's covers fly in and out, land with a short overshoot, darken with distance, reflect with a gloss, and catch the light as an album turns. Now Playing rises over a dimmed Cover Flow, its track text and cover dissolve on a track change, its progress bar glides with a travelling gloss, and its volume bar springs in. Sheets rise on a spring, and the USB screen's artwork grows in. With Animations off, or `motion_scale=0`, the theme draws as with `standard`. |
 
 Light keeps Scrim's styles.
 Classic sets the second keyword of every style except `list_scroll` and
-`menu_tree`. Fruit Company is Classic with `style.menu_tree=stock`. To
+`menu_tree`. Fruit Company is Classic with `style.menu_tree=stock`, and Fruit
+Company Ultra is Fruit Company with `style.motion=ultra`. To
 start a custom theme from Classic, copy its values from the table below.
 
 ### The Classic theme

@@ -116,3 +116,11 @@
   both change in place on Select. Classic shows the time too, and the
   setting is also under Settings > System > Time & Date Settings. Update
   from the whole zip: a contact's page needs the new `stock-art.bin`.
+
+- **Fruit Company Ultra** is a new built-in theme: Fruit Company's look and
+  menus, with richer motion. Lists spring and glide, pages slide in depth
+  with shadows, Cover Flow's covers fly in and catch the light, and Now
+  Playing, sheets and the USB screen animate their changes. Choose it in
+  Theme Settings > Native theme; under Fruit Company that is under
+  Settings > Advanced Settings. With Animations off it looks and behaves
+  like Fruit Company.

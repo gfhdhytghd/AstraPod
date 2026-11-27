@@ -817,6 +817,7 @@ struct user_settings
      * row of each, in the order Settings > Main Menu and Music Menu list
      * them (screens/fruit_menu.c). */
     int  fruit_main_menu;
+    bool fruit_home_itunes_u;
     int  fruit_music_menu;
     int  contacts_sort; /* Extras > Contacts by 0 first or 1 last name */
     /* Rows hidden from each kind of context menu: a bit per row of the kind's

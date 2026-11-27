@@ -1,3 +1,8 @@
+- **Fruit Company music browsing** keeps your existing library. Put
+  `Various Artists` in a compilation’s album artist tag to show it under
+  Compilations. Use the `iTunes U` genre for courses and episodes. The
+  Fruit Company **Main Menu** checklist can hide the iTunes U row.
+
 - **Light is gone.** If your player uses Light, it switches to Scrim when
   it starts after the update.
 

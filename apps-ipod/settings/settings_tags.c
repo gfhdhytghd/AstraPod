@@ -231,6 +231,7 @@ static const struct tag_row tag_rows[] = {
 { "database sort artists by",  TAG_LIBRARY,                      "sorting artists most played" },
 { "audiobook sort books by", TAG_ADVANCED|TAG_LIBRARY,           "sorting audiobooks books order author title" },
 { "podcast sort shows by",  TAG_ADVANCED|TAG_LIBRARY,            "sorting podcasts shows newest episode latest" },
+{ "fruit home itunes u", TAG_LIBRARY|TAG_APPEARANCE, "fruit main menu course" },
 { "sort ignoring articles",    TAG_LIBRARY,                      "sorting ignore the a an artists albums songs" },
 { "album show year",           TAG_LIBRARY,                      "albums release date" },
 { "show all tracks row",       TAG_LIBRARY,                      "extra rows hide all tracks list top" },

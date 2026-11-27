@@ -2158,6 +2158,9 @@ The clock is what timestamps play counts and what the status bar reads from.
 [animations]
 Enables animated transitions between screens and pages.
 
+[fruit home itunes u]
+Shows iTunes U on the Fruit Company main menu when the library contains a course.
+
 [native theme]
 Chooses the built-in interface theme: Scrim, Classic or Fruit Company.
 Custom themes in .rockbox/native-themes also appear here.

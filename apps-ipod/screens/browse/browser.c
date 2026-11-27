@@ -292,6 +292,11 @@ static bool browser_child_texts(int item, void *data, int rows,
     return true;
 }
 
+static const char *browser_get_subtitle(int item, void *data, char *buf, size_t size)
+{
+    return browser_db_fruit_subtitle(data, item, buf, size);
+}
+
 static const char *browser_get_description(int selected_item, void *data,
                                            char *buf, size_t size)
 {
@@ -506,9 +511,9 @@ static bool browser_aa_load(const char *path, int slot)
     return ok;
 }
 
-const struct bitmap *browser_art_row(int selected_item, void *data,
-                                     browser_art_hash_fn *get_hash,
-                                     struct dim *size)
+static const struct bitmap *browser_art(int selected_item, void *data,
+                                         browser_art_hash_fn *get_hash,
+                                         struct dim *size, bool stock)
 {
     char aat[MAX_PATH];
     unsigned int hash;
@@ -551,7 +556,9 @@ const struct bitmap *browser_art_row(int selected_item, void *data,
 
     /* Both kinds of row want the placeholder returned transparently, so a row
      * with no art still fills its viewport; album and artist rows share one. */
-    if (!art_cache_lookup_hash(hash, browser_aa_size_idx, aat, sizeof(aat), NULL))
+    bool fallback;
+    if (!art_cache_lookup_hash(hash, browser_aa_size_idx, aat, sizeof(aat),
+                               &fallback) || (stock && fallback))
         return NULL;    /* no art and no placeholder generated yet */
 
     slot = browser_aa_victim;
@@ -601,6 +608,13 @@ static void browser_prefetch_artist(int item, void *data, int dim)
     browser_artist_tile(item, data, dim, false);
 }
 
+const struct bitmap *browser_art_row(int selected_item, void *data,
+                                     browser_art_hash_fn *get_hash,
+                                     struct dim *size)
+{
+    return browser_art(selected_item, data, get_hash, size, false);
+}
+
 static const struct bitmap *browser_get_albumart(int selected_item, void * data,
                                               struct dim *size)
 {
@@ -608,7 +622,8 @@ static const struct bitmap *browser_get_albumart(int selected_item, void * data,
 
     if (selected_item < local_tc->special_entry_count)
         return NULL;
-    return browser_art_row(selected_item, data, browser_row_art_hash, size);
+    return browser_art(selected_item, data, browser_row_art_hash, size,
+                       browser_db_fruit_active(local_tc));
 }
 
 
@@ -890,7 +905,8 @@ static int update_dir(struct browser_album_panel *panel,
         }
     }
 
-    if (id3db && panel && browser_db_album_header(&tc, &panel->album))
+    bool fruit = id3db && browser_db_fruit_active(&tc);
+    if (id3db && !fruit && panel && browser_db_album_header(&tc, &panel->album))
     {
         browser_album_details(&panel->album, panel->detail, sizeof(panel->detail));
         panel->view = (struct list_header) {
@@ -917,7 +933,7 @@ static int update_dir(struct browser_album_panel *panel,
     }
     else if (id3db)
     {
-        if (show_path_in_browser == SHOW_PATH_FULL
+        if (fruit || show_path_in_browser == SHOW_PATH_FULL
             || show_path_in_browser == SHOW_PATH_CURRENT)
         {
             title = browser_db_get_title(&tc);
@@ -973,11 +989,21 @@ static int update_dir(struct browser_album_panel *panel,
     gui_synclist_set_nb_items(list, tc.filesindir);
     gui_synclist_set_icon_callback(list,
                             global_settings.show_icons?browser_get_fileicon:NULL);
-    gui_synclist_set_row_callbacks(list, browser_get_kind, browser_get_value,
+    int fruit_height = fruit ? browser_db_fruit_row_height(&tc) : 0;
+    gui_synclist_set_row_callbacks(list, browser_get_kind,
+                                   fruit_height ? browser_get_subtitle :
+                                                  browser_get_value,
                                    browser_is_playing);
+    list->value_below = fruit_height > 0;
+    if (fruit)
+    {
+        gui_synclist_set_icon_callback(list, NULL);
+        list->show_icons = false;
+    }
     gui_synclist_set_range_callback(list, browser_get_range);
     gui_synclist_set_count_down(list, id3db && browser_db_counts_down(&tc));
-    gui_synclist_set_unnumbered(list, id3db && browser_db_unnumbered(&tc));
+    gui_synclist_set_unnumbered(list, fruit ||
+                               (id3db && browser_db_unnumbered(&tc)));
     gui_synclist_set_description_callback(list, browser_get_description);
     gui_synclist_set_index_key_callback(list, browser_get_index_key);
     if (tc.browse && !(tc.browse->flags & BROWSE_SELECTONLY))
@@ -1014,7 +1040,9 @@ static int update_dir(struct browser_album_panel *panel,
         {
             bool artist = !album && browser_db_is_artist_list(&tc);
 
-            if (browser_db_list_spoken_kind(&tc) == 2)
+            if (fruit)
+                tall_rows = album;
+            else if (browser_db_list_spoken_kind(&tc) == 2)
                 tall_rows = album && global_settings.db_podcastart;
             else if (browser_db_is_spoken_list(&tc))
                 tall_rows = album ? global_settings.db_bookart
@@ -1024,7 +1052,7 @@ static int update_dir(struct browser_album_panel *panel,
             else if (artist)
                 tall_rows = artist_tiles = global_settings.db_artistart;
         }
-        gui_synclist_set_notes(list, id3db && browser_db_shows_episodes(&tc) &&
+        gui_synclist_set_notes(list, id3db && !fruit && browser_db_shows_episodes(&tc) &&
                                            browser_db_episodes_have_notes(&tc));
         gui_synclist_set_albumart_callback(list,
                                     artist_tiles ? browser_get_artist :
@@ -1032,6 +1060,7 @@ static int update_dir(struct browser_album_panel *panel,
         list->callback_prefetch_art = artist_tiles ? browser_prefetch_artist : NULL;
         /* Give every row enough room for a cover, including special rows. */
         gui_synclist_set_row_height(list,
+                                    fruit ? fruit_height :
                                     tall_rows ? global_settings.db_art_row_height : 0);
     }
     /* In the database the letter menus voice themselves through this callback,
@@ -1576,7 +1605,8 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
         bool home_library = tc.browse->flags & BROWSE_HOME_LIBRARY;
         oldbutton = button;
         bool redrew = gui_synclist_do_button(&browser_lists, &button);
-        if (home_library && button == ACTION_STD_MENU)
+        if ((home_library || (id3db && browser_db_fruit_active(&tc))) &&
+            button == ACTION_STD_MENU)
             button = ACTION_STD_CANCEL;
         ui_scene_update(scene, redrew);
         if (button == ACTION_NONE && !gui_synclist_moving(&browser_lists))

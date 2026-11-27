@@ -2835,6 +2835,12 @@ bool tagcache_get_next(struct tagcache_search *tcs, char *buf, long size)
     return false;
 }
 
+int tagcache_match_index(const struct tagcache_search *tcs)
+{
+    return tcs->list_position > 0 ?
+           tcs->seeklist[tcs->list_position - 1].idx_id : tcs->idx_id;
+}
+
 bool tagcache_retrieve(struct tagcache_search *tcs, int idxid,
                        int tag, char *buf, long size)
 {

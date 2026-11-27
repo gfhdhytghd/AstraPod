@@ -241,6 +241,7 @@ struct gui_synclist
      * Lets a list (e.g. the database album list) ask for taller rows without a
      * per-item callback -- every row is this height. */
     int line_height_override;
+    bool value_below;                  /* two-line row with a subtitle */
     list_get_name *callback_get_item_name;
     list_speak_item *callback_speak_item;
     list_draw_item *callback_draw_item;

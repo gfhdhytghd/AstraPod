@@ -47,7 +47,6 @@
 #include "ui/native_theme.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/stock_art_ids.h"
-#include "speech/language.h"
 #include "fruit_menu.h"
 #include "ui/scene.h"
 
@@ -85,42 +84,54 @@ static int pick(const void *variable, int title)
 
 /** Leaves **/
 
-/* A tagnavi.config label as its row shows it: the browser names a row in the
- * current language wherever its English label is a lang string, so a row is
- * found by this rather than by the English. */
-static const char *row_label(const char *english)
+static int fruit_library(enum fruit_browse_kind kind, int title)
 {
-    int id = lang_english_to_id(english);
-    return id >= 0 ? (const char *)str(id) : english;
+    if (browser_db_fruit_count(kind) == 0)
+        return 0;
+    return root_menu_library_row(BROWSER_DB_MENU_FRUIT, str(title));
 }
 
-/* A row of the Music menu tagnavi.config names `label`. Customised away, the
- * Music menu opens in its place. */
-static int library_row(const char *label)
+static int artists(void)
 {
-    const unsigned char *name;
-    label = row_label(label);
-    for (int slot = 0; slot < TAGNAVI_MAIN_MENU_SLOTS; slot++)
-        if (browser_db_get_main_menu_row(slot, &name) &&
-            !strcmp((const char *)P2STR((unsigned char *)name), label))
-            return run(GO_TO_TAGNAVI_FIRST + slot);
-    return run(GO_TO_DBBROWSER);
+    return fruit_library(FRUIT_BROWSE_ARTISTS, LANG_ARTISTS);
+}
+static int albums(void)
+{
+    return fruit_library(FRUIT_BROWSE_ALBUMS, LANG_ALBUMS);
+}
+static int genres(void)
+{
+    return fruit_library(FRUIT_BROWSE_GENRES, LANG_FRUIT_GENRES);
+}
+static int composers(void)
+{
+    return fruit_library(FRUIT_BROWSE_COMPOSERS, LANG_FRUIT_COMPOSERS);
+}
+static int compilations(void)
+{
+    return fruit_library(FRUIT_BROWSE_COMPILATIONS, LANG_FRUIT_COMPILATIONS);
+}
+static int audiobooks(void)
+{
+    return fruit_library(FRUIT_BROWSE_AUDIOBOOKS, LANG_AUDIOBOOKS);
+}
+static int songs(void)
+{
+    return fruit_library(FRUIT_BROWSE_SONGS, LANG_FRUIT_SONGS);
+}
+static int podcasts(void)
+{
+    return fruit_library(FRUIT_BROWSE_PODCASTS, LANG_PODCASTS);
+}
+static int itunes_u(void)
+{
+    return fruit_library(FRUIT_BROWSE_ITUNES_U, LANG_FRUIT_ITUNES_U);
 }
 
 static int cover_flow(void)   { return run(GO_TO_ALBUM_COVERS); }
 static int playlists(void)    { return run(GO_TO_PLAYLISTS_SCREEN); }
-static int artists(void)      { return library_row("Artist"); }
-static int albums(void)       { return library_row("Album"); }
-static int genres(void)       { return library_row("Genre"); }
-static int composers(void)    { return library_row("Composer"); }
-static int audiobooks(void)   { return library_row("Audiobooks"); }
-static int songs(void)
-{
-    return root_menu_library_row("track", row_label("Title"));
-}
 static int search(void)       { return run(GO_TO_DB_SEARCH); }
 static int photos(void)       { return run(GO_TO_IMAGES); }
-static int podcasts(void)     { return run(GO_TO_PODCASTS); }
 static int now_playing(void)  { return run(GO_TO_WPS); }
 static int movies(void)       { return run(GO_TO_VIDEOS); }
 
@@ -166,6 +177,7 @@ static int shuffle_songs(void)
         splash(HZ, ID2P(LANG_TAGCACHE_BUSY));
         return 0;
     }
+    browser_db_fruit_music_filter(&tcs);
     if (playlist_create(NULL, NULL) < 0 ||
         playlist_insert_context_create(NULL, &context, PLAYLIST_INSERT_LAST,
                                        false, false) < 0)
@@ -245,7 +257,7 @@ ROW(music_cover_flow, LANG_COVER_FLOW_TITLE, cover_flow, music_callback);
 ROW(music_playlists, LANG_PLAYLISTS, playlists, music_callback);
 ROW(music_artists, LANG_ARTISTS, artists, music_callback);
 ROW(music_albums, LANG_ALBUMS, albums, music_callback);
-ROW(music_compilations, LANG_FRUIT_COMPILATIONS, empty, music_callback);
+ROW(music_compilations, LANG_FRUIT_COMPILATIONS, compilations, music_callback);
 ROW(music_songs, LANG_FRUIT_SONGS, songs, music_callback);
 ROW(music_genres, LANG_FRUIT_GENRES, genres, music_callback);
 ROW(music_composers, LANG_FRUIT_COMPOSERS, composers, music_callback);
@@ -425,15 +437,17 @@ static int language(void)
     return 0;
 }
 
-/* A checklist, bit n of `*mask` its row n, and a last row Reset Menu that
- * puts `*mask` back to `defaults` */
+/* A checklist of the menu-mask bits with an optional independent row. */
 struct checklist {
     const struct check_row *rows;
     int count;
     int *mask;
     int defaults;
     int question;
+    bool *extra;
+    int extra_index;
 };
+
 
 static const char *checklist_name(int item, void *data, char *buf, size_t len)
 {
@@ -452,8 +466,17 @@ static const char *checklist_value(int item, void *data, char *buf,
     struct checklist *list = data;
     (void)buf;
     (void)len;
-    return item < list->count && (*list->mask & (1u << item)) ?
-           "\xe2\x9c\x93" : NULL;
+    if (item >= list->count)
+        return NULL;
+    bool checked;
+    if (list->extra && item == list->extra_index)
+        checked = *list->extra;
+    else
+    {
+        int bit = item - (list->extra && item > list->extra_index);
+        checked = *list->mask & (1u << bit);
+    }
+    return checked ? "\xe2\x9c\x93" : NULL;
 }
 
 /* A ticked row shows its tick as a value; Reset Menu opens a question */
@@ -469,15 +492,24 @@ static int checklist_action(int action, struct gui_synclist *lists)
     if (action != ACTION_STD_OK)
         return action;
     int sel = gui_synclist_get_sel_pos(lists);
-    if (sel < list->count)
-        *list->mask ^= 1u << sel;
+    if (list->extra && sel == list->extra_index)
+        *list->extra = !*list->extra;
+    else if (sel < list->count)
+    {
+        int bit = sel - (list->extra && sel > list->extra_index);
+        *list->mask ^= 1u << bit;
+    }
     else
     {
         const char *lines[] = { ID2P(list->question),
                                 ID2P(LANG_FRUIT_RESET_MENU_DETAIL) };
         const struct text_message message = { lines, 2 };
         if (gui_syncyesno_run(&message, NULL, NULL) == YESNO_YES)
+        {
             *list->mask = list->defaults;
+            if (list->extra)
+                *list->extra = find_setting(list->extra)->default_val.bool_;
+        }
     }
     settings_save();
     return ACTION_REDRAW;
@@ -508,7 +540,7 @@ static int music_menu_rows(void)
     struct checklist list = {
         music_checks, MUSIC_ROWS, &global_settings.fruit_music_menu,
         find_setting(&global_settings.fruit_music_menu)->default_val.int_,
-        LANG_FRUIT_RESET_MUSIC_MENU };
+        LANG_FRUIT_RESET_MUSIC_MENU, NULL, 0 };
     return checklist_show(LANG_FRUIT_MUSIC_MENU, &list);
 }
 
@@ -688,14 +720,15 @@ enum {
 };
 
 /* Settings > Main Menu, as stock lists it: a row's sub-items indented */
-static const struct check_row home_checks[HOME_ROWS] = {
+static const struct check_row home_checks[HOME_ROWS + 1] = {
     { LANG_MUSIC_BROWSER, false }, { LANG_COVER_FLOW_TITLE, true },
     { LANG_PLAYLISTS, true }, { LANG_ARTISTS, true }, { LANG_ALBUMS, true },
     { LANG_FRUIT_COMPILATIONS, true }, { LANG_FRUIT_SONGS, true },
     { LANG_FRUIT_RADIO, true }, { LANG_FRUIT_GENRES, true },
     { LANG_FRUIT_COMPOSERS, true }, { LANG_AUDIOBOOKS, true },
     { LANG_SEARCH, true }, { LANG_FRUIT_PHOTOS, false },
-    { LANG_PODCASTS, false }, { LANG_FRUIT_VIDEOS, false },
+    { LANG_PODCASTS, false }, { LANG_FRUIT_ITUNES_U, false },
+    { LANG_FRUIT_VIDEOS, false },
     { LANG_FRUIT_VIDEO_PLAYLISTS, true }, { LANG_FRUIT_MOVIES, true },
     { LANG_FRUIT_TV_SHOWS, true }, { LANG_FRUIT_MUSIC_VIDEOS, true },
     { LANG_FRUIT_RENTALS, true }, { LANG_FRUIT_EXTRAS, false },
@@ -710,9 +743,10 @@ static const struct check_row home_checks[HOME_ROWS] = {
 static int main_menu_rows(void)
 {
     struct checklist list = {
-        home_checks, HOME_ROWS, &global_settings.fruit_main_menu,
+        home_checks, ARRAYLEN(home_checks), &global_settings.fruit_main_menu,
         find_setting(&global_settings.fruit_main_menu)->default_val.int_,
-        LANG_FRUIT_RESET_MAIN_MENU };
+        LANG_FRUIT_RESET_MAIN_MENU, &global_settings.fruit_home_itunes_u,
+        HOME_VIDEOS };
     return checklist_show(LANG_MAIN_MENU, &list);
 }
 
@@ -722,7 +756,7 @@ ROW(home_cover_flow, LANG_COVER_FLOW_TITLE, cover_flow, home_callback);
 ROW(home_playlists, LANG_PLAYLISTS, playlists, home_callback);
 ROW(home_artists, LANG_ARTISTS, artists, home_callback);
 ROW(home_albums, LANG_ALBUMS, albums, home_callback);
-ROW(home_compilations, LANG_FRUIT_COMPILATIONS, empty, home_callback);
+ROW(home_compilations, LANG_FRUIT_COMPILATIONS, compilations, home_callback);
 ROW(home_songs, LANG_FRUIT_SONGS, songs, home_callback);
 ROW(home_genres, LANG_FRUIT_GENRES, genres, home_callback);
 ROW(home_composers, LANG_FRUIT_COMPOSERS, composers, home_callback);
@@ -734,6 +768,7 @@ ROW(home_tv_shows, LANG_FRUIT_TV_SHOWS, empty, home_callback);
 ROW(home_music_videos, LANG_FRUIT_MUSIC_VIDEOS, empty, home_callback);
 ROW(home_video_playlists, LANG_FRUIT_VIDEO_PLAYLISTS, empty, home_callback);
 ROW(home_podcasts, LANG_PODCASTS, podcasts, home_callback);
+ROW(home_itunes_u, LANG_FRUIT_ITUNES_U, itunes_u, home_callback);
 ROW(home_clocks, LANG_FRUIT_CLOCKS, clocks, home_callback);
 ROW(home_calendars, LANG_FRUIT_CALENDARS, calendars, home_callback);
 ROW(home_contacts, LANG_FRUIT_CONTACTS, contacts, home_callback);
@@ -776,6 +811,10 @@ static int home_callback(int action, const struct menu_item_ex *this_item,
     (void)this_list;
     if (action != ACTION_REQUEST_MENUITEM)
         return action;
+    if (this_item == &home_itunes_u)
+        return global_settings.fruit_home_itunes_u &&
+               browser_db_fruit_count(FRUIT_BROWSE_ITUNES_U) > 0 ?
+               action : ACTION_EXIT_MENUITEM;
     if (this_item == &home_now_playing)
         return audio_status() ? action : ACTION_EXIT_MENUITEM;
     int bit = bit_of(home_bits, ARRAYLEN(home_bits), this_item);
@@ -793,7 +832,7 @@ static const struct menu_item_ex *const home_rows[] = {
     &home_composers, &home_audiobooks, &home_search,
     &videos_menu, &home_video_playlists, &home_movies, &home_tv_shows,
     &home_music_videos, &home_rentals,
-    &photos_menu, &home_podcasts,
+    &photos_menu, &home_podcasts, &home_itunes_u,
     &extras_menu, &home_clocks, &home_alarms, &home_calendars,
     &home_contacts, &home_games, &home_notes, &home_screen_lock,
     &home_stopwatch,
@@ -882,11 +921,53 @@ static bool extras_pane(const struct menu_item_ex *item)
     return true;
 }
 
+static bool fruit_media_pane(const struct menu_item_ex *item)
+{
+    static const struct {
+        const struct menu_item_ex *music, *home;
+        enum fruit_browse_kind kind;
+        int art, empty, one, many;
+    } rows[] = {
+        { &music_compilations, &home_compilations, FRUIT_BROWSE_COMPILATIONS,
+          STOCK_ART_NO_CONTENT_MUSIC_PREVIEW, LANG_FRUIT_NO_COMPILATIONS, 0, 0 },
+        { &music_composers, &home_composers, FRUIT_BROWSE_COMPOSERS,
+          STOCK_ART_NO_CONTENT_MUSIC_PREVIEW, LANG_FRUIT_NO_COMPOSERS, 0, 0 },
+        { &music_audiobooks, &home_audiobooks, FRUIT_BROWSE_AUDIOBOOKS,
+          STOCK_ART_NO_CONTENT_AUDIOBOOKS_PREVIEW, LANG_FRUIT_NO_AUDIOBOOKS,
+          LANG_FRUIT_ONE_AUDIOBOOK, LANG_FRUIT_AUDIOBOOK_COUNT },
+        { NULL, &home_podcasts, FRUIT_BROWSE_PODCASTS,
+          STOCK_ART_NO_CONTENT_PODCAST_PREVIEW, LANG_FRUIT_NO_PODCASTS,
+          LANG_FRUIT_ONE_PODCAST, LANG_FRUIT_PODCAST_COUNT },
+        { NULL, &home_itunes_u, FRUIT_BROWSE_ITUNES_U,
+          STOCK_ART_NO_CONTENT_PODCAST_PREVIEW, LANG_FRUIT_ITUNES_U, 0, 0 },
+    };
+    for (unsigned i = 0; i < ARRAYLEN(rows); i++)
+    {
+        if (item != rows[i].home && item != rows[i].music)
+            continue;
+        int count = browser_db_fruit_count(rows[i].kind);
+        if (count != 0 && !rows[i].many && rows[i].kind != FRUIT_BROWSE_ITUNES_U)
+            return false;
+
+        struct menu_pane_content c = {
+            .art = rows[i].art, .x = 180, .y = 44, .baseline = 163,
+        };
+        if (count > 0 && rows[i].many)
+            snprintf(c.title, sizeof(c.title),
+                     str(count == 1 ? rows[i].one : rows[i].many), count);
+        else
+            strlcpy(c.title, str(rows[i].empty), sizeof(c.title));
+        menu_pane_set_picture(&c);
+        return true;
+    }
+    return false;
+}
+
 enum list_pane_kind fruit_menu_item_pane(const struct menu_item_ex *menu,
                                          const struct menu_item_ex *item,
                                          int *art)
 {
-    if (extras_pane(item))
+    if (extras_pane(item) || fruit_media_pane(item))
         return LIST_PANE_PICTURE;
     int bit = bit_of(home_bits, ARRAYLEN(home_bits), item);
     if (bit < 0)

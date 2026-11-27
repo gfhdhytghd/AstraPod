@@ -431,6 +431,87 @@ static char current_title[MAX_TAGS][128];
 static struct menu_root * menus[TAGMENU_MAX_MENUS];
 static struct menu_root * menu;
 static struct search_instruction *csi;
+static struct search_instruction fruit_instruction;
+static enum fruit_browse_kind fruit_kind;
+static long fruit_album_artist = -1;
+static const struct fruit_path {
+    int title;
+    int levels;
+    int tags[4];
+} fruit_paths[] = {
+    [FRUIT_BROWSE_ARTISTS] = {LANG_ARTISTS, 3,
+                             {tag_albumartist, tag_album, tag_title}},
+    [FRUIT_BROWSE_ALBUMS] = {LANG_ALBUMS, 2, {tag_album, tag_title}},
+    [FRUIT_BROWSE_SONGS] = {LANG_FRUIT_SONGS, 1, {tag_title}},
+    [FRUIT_BROWSE_GENRES] = {LANG_FRUIT_GENRES, 4,
+                            {tag_genre, tag_albumartist, tag_album, tag_title}},
+    [FRUIT_BROWSE_COMPOSERS] = {LANG_FRUIT_COMPOSERS, 3,
+                               {tag_composer, tag_album, tag_title}},
+    [FRUIT_BROWSE_COMPILATIONS] = {LANG_FRUIT_COMPILATIONS, 2,
+                                   {tag_album, tag_title}},
+    [FRUIT_BROWSE_AUDIOBOOKS] = {LANG_AUDIOBOOKS, 2, {tag_album, tag_title}},
+    [FRUIT_BROWSE_PODCASTS] = {LANG_PODCASTS, 2, {tag_album, tag_title}},
+    [FRUIT_BROWSE_ITUNES_U] = {LANG_FRUIT_ITUNES_U, 2, {tag_album, tag_title}},
+};
+
+static struct tagcache_search_clause fruit_music = {
+    .tag = tag_virt_spoken, .type = clause_is, .numeric = true,
+};
+static struct tagcache_search_clause fruit_book = {
+    .tag = tag_virt_spoken, .type = clause_is, .numeric = true,
+    .numeric_data = 1,
+};
+static struct tagcache_search_clause fruit_podcast = {
+    .tag = tag_virt_spoken, .type = clause_is, .numeric = true,
+    .numeric_data = 2,
+};
+static struct tagcache_search_clause fruit_course = {
+    .tag = tag_genre, .type = clause_oneof, .str = "iTunes U|iTunesU",
+};
+static struct tagcache_search_clause fruit_no_course = {
+    .tag = tag_genre, .type = clause_not_oneof, .str = "iTunes U|iTunesU",
+};
+static struct tagcache_search_clause fruit_compilation = {
+    .tag = tag_albumartist, .type = clause_oneof,
+    .str = "Various Artists|Various|VA",
+};
+static struct tagcache_search_clause fruit_composer = {
+    .tag = tag_composer, .type = clause_is_not, .str = UNTAGGED,
+};
+
+void browser_db_fruit_music_filter(struct tagcache_search *tcs)
+{
+    tagcache_search_add_clause(tcs, &fruit_music);
+    tagcache_search_add_clause(tcs, &fruit_no_course);
+}
+
+static int fruit_clauses(enum fruit_browse_kind kind,
+                         struct tagcache_search_clause **clauses)
+{
+    switch (kind)
+    {
+        case FRUIT_BROWSE_AUDIOBOOKS:
+            clauses[0] = &fruit_book;
+            return 1;
+        case FRUIT_BROWSE_PODCASTS:
+            clauses[0] = &fruit_podcast;
+            return 1;
+        case FRUIT_BROWSE_ITUNES_U:
+            clauses[0] = &fruit_course;
+            return 1;
+        default:
+            clauses[0] = &fruit_music;
+            clauses[1] = &fruit_no_course;
+            if (kind == FRUIT_BROWSE_COMPILATIONS)
+                clauses[2] = &fruit_compilation;
+            else if (kind == FRUIT_BROWSE_COMPOSERS)
+                clauses[2] = &fruit_composer;
+            else
+                return 2;
+            return 3;
+    }
+}
+
 static const char *strp;
 static int menu_count;
 static int rootmenu;
@@ -443,7 +524,7 @@ static int current_entry_count;
 static int head_rows;
 
 struct music_order_row {
-    int32_t seek;
+    int32_t seek, idx_id;
     char key;
 };
 
@@ -451,12 +532,14 @@ struct music_order_row {
  * browser's page size. The seeks are valid only for this database commit. */
 static struct {
     int handle, count, tag, keep, spoken_mask;
+    int fruit_kind, level, filters[MAX_TAGS];
     int32_t commit;
     uint32_t generation;
-    bool ignore_articles;
+    bool ignore_articles, distinct_albums;
 } music_order;
 static bool index_music_names;
 static bool loaded_index_music_names;
+static bool fruit_try_skip_album;
 
 static struct browser_context *tc;
 
@@ -512,7 +595,7 @@ static int move_callback(int handle, void* current, void* new)
         UPDATE(menu, diff);
     }
 
-    if (csi)
+    if (csi && csi != &fruit_instruction)
         UPDATE(csi, diff);
 
     /* loop over menus */
@@ -571,6 +654,15 @@ static uint32_t browser_db_data_crc(struct browser_context* c)
     uint32_t crc;
     buf = core_get_data(browser_db_handle); /* data for the search clauses etc */
     crc = crc_32(buf, browser_db_buf_used, c->dirlength);
+    if (csi == &fruit_instruction)
+    {
+        crc = crc_32(&fruit_kind, sizeof(fruit_kind), crc);
+        crc = crc_32(&fruit_album_artist, sizeof(fruit_album_artist), crc);
+        crc = crc_32(&c->currtable, sizeof(c->currtable), crc);
+        crc = crc_32(&c->currextra, sizeof(c->currextra), crc);
+        crc = crc_32(fruit_instruction.result_seek,
+                     c->currextra * sizeof(fruit_instruction.result_seek[0]), crc);
+    }
     buf = core_get_data(c->cache.name_buffer_handle); /* names */
     crc = crc_32(buf, c->cache.name_buffer_size, crc);
     buf = core_get_data(c->cache.entries_handle); /* tagentries */
@@ -2468,6 +2560,9 @@ static int featured_row_count(int level)
  * would silently lose both the art and the exclusion. */
 static bool csi_mentions_spoken(void)
 {
+    if (csi == &fruit_instruction)
+        return fruit_kind == FRUIT_BROWSE_AUDIOBOOKS ||
+               fruit_kind == FRUIT_BROWSE_PODCASTS;
     int i, j;
 
     if (!csi)
@@ -2573,7 +2668,7 @@ static bool exclude_spoken_possible(void)
 static bool exclude_spoken_wanted(void)
 {
     return db_spoken_apart()
-        && csi
+        && csi && csi != &fruit_instruction
         && !browse_picked_by_name
         && !csi_mentions_spoken()
         && exclude_spoken_possible();
@@ -2658,7 +2753,8 @@ static int table_album_row(int level, long seek)
     int i, n;
 
     for (i = 0; i < level; i++)
-        if (csi->tagorder[i] == tag_albumartist)
+        if (csi->tagorder[i] == tag_albumartist &&
+            csi->result_seek[i] != SEEK_NO_FILTER)
             return tagcache_album_find(seek, csi->result_seek[i]);
     n = tagcache_album_find_name(seek);
     if (tagcache_album_get(n + 1, &al) && al.album_seek == seek)
@@ -2744,6 +2840,8 @@ static int compare_music_names(const void *p1, const void *p2)
         order = strncasecmp(a->name, b->name, TAG_MAXLEN);
     if (!order)
         order = a->order.seek - b->order.seek;
+    if (!order)
+        order = a->order.idx_id - b->order.idx_id;
     return order;
 }
 
@@ -2763,16 +2861,42 @@ static const char *music_sort_name(struct tagcache_search *tcs, char *buf,
     return tagcache_sort_name(buf);
 }
 
+/* The album table identifies releases by album AND album artist. A tag
+ * search deduplicates by one tag only, so use its scratch as an album bitset. */
+static size_t fruit_album_bits(const struct tagcache_search *tcs)
+{
+    if (tcs->type != tag_album || !tcs->ramsearch)
+        return 0;
+    size_t bytes = (tagcache_album_count() + 7u) / 8;
+    return bytes <= sizeof(uniqbuf) ? bytes : 0;
+}
+
+static bool fruit_first_album(const struct tagcache_search *tcs, size_t bytes)
+{
+    int row = tagcache_album_of(tagcache_match_index(tcs));
+    if (row < 0 || (size_t)row / 8 >= bytes)
+        return false;
+    unsigned char *bits = (unsigned char *)uniqbuf;
+    unsigned char mask = 1u << (row % 8);
+    bool first = !(bits[row / 8] & mask);
+    bits[row / 8] |= mask;
+    return first;
+}
+
 static bool prepare_music_order(struct tagcache_search *tcs,
                                 enum spoken_keep keep, int spoken_mask,
-                                char *buf, long size)
+                                int level, char *buf, long size)
 {
     int tag = tcs->type;
     int32_t commit = tagcache_commit_id();
     uint32_t generation = tagcache_generation();
+    int kind = csi == &fruit_instruction ? (int)fruit_kind : -1;
+    size_t filters = level * sizeof(csi->result_seek[0]);
     if (music_order.handle > 0 && music_order.tag == tag &&
         music_order.keep == (int)keep &&
         music_order.spoken_mask == spoken_mask &&
+        music_order.fruit_kind == kind && music_order.level == level &&
+        !memcmp(music_order.filters, csi->result_seek, filters) &&
         music_order.commit == commit && music_order.generation == generation &&
         music_order.ignore_articles == global_settings.sort_ignore_articles)
         return true;
@@ -2780,34 +2904,40 @@ static bool prepare_music_order(struct tagcache_search *tcs,
     if (music_order.handle > 0)
         music_order.handle = core_free(music_order.handle);
 
+    size_t album_bits = kind >= 0 ? fruit_album_bits(tcs) : 0;
+    if (album_bits)
+        tagcache_search_set_uniqbuf(tcs, uniqbuf, 0);
     int entry_count = tcs->entry_count;
     int count = 0;
     size_t names_size = 0;
     while (tagcache_get_next(tcs, buf, size))
-        if (row_kept(keep, tag, tcs->result_seek, 0, tcs->idx_id))
+        if (row_kept(keep, tag, tcs->result_seek, level, tcs->idx_id)
+            && (!album_bits || fruit_first_album(tcs, album_bits)))
         {
             names_size += strlen(music_sort_name(tcs, buf, size)) + 1;
             count++;
         }
     tagcache_search_rewind(tcs, entry_count);
     if (tcs->failed || !count)
-        return false;
+        goto fallback;
 
     int temp = core_alloc(count * sizeof(struct music_sort_row) + names_size);
     if (temp <= 0)
-        return false;
+        goto fallback;
     int handle = core_alloc(count * sizeof(struct music_order_row));
     if (handle <= 0)
     {
         core_free(temp);
-        return false;
+        goto fallback;
     }
+    memset(uniqbuf, 0, album_bits);
     struct music_sort_row *rows = core_get_data_pinned(temp);
     char *names = (char *)(rows + count);
     int n = 0;
     while (tagcache_get_next(tcs, buf, size))
     {
-        if (!row_kept(keep, tag, tcs->result_seek, 0, tcs->idx_id))
+        if (!row_kept(keep, tag, tcs->result_seek, level, tcs->idx_id)
+            || (album_bits && !fruit_first_album(tcs, album_bits)))
             continue;
         const char *name = music_sort_name(tcs, buf, size);
         size_t len = strlen(name) + 1;
@@ -2815,7 +2945,11 @@ static bool prepare_music_order(struct tagcache_search *tcs,
             break;
         char key[QUICKSCROLL_KEY_SIZE];
         quickscroll_key_of(name, key);
-        rows[n++] = (struct music_sort_row){{tcs->result_seek, key[0]}, names};
+        rows[n++] = (struct music_sort_row){
+            {tcs->result_seek,
+             kind >= 0 ? tagcache_match_index(tcs) : tcs->idx_id, key[0]},
+            names
+        };
         memcpy(names, name, len);
         names += len;
         names_size -= len;
@@ -2832,6 +2966,10 @@ static bool prepare_music_order(struct tagcache_search *tcs,
         music_order.tag = tag;
         music_order.keep = keep;
         music_order.spoken_mask = spoken_mask;
+        music_order.fruit_kind = kind;
+        music_order.distinct_albums = album_bits != 0;
+        music_order.level = level;
+        memcpy(music_order.filters, csi->result_seek, filters);
         music_order.commit = commit;
         music_order.generation = generation;
         music_order.ignore_articles = global_settings.sort_ignore_articles;
@@ -2843,7 +2981,13 @@ static bool prepare_music_order(struct tagcache_search *tcs,
     }
     core_put_data_pinned(rows);
     core_free(temp);
-    return ok;
+    if (ok)
+        return true;
+
+fallback:
+    if (album_bits)
+        tagcache_search_set_uniqbuf(tcs, uniqbuf, UNIQBUF_SIZE);
+    return false;
 }
 
 static bool next_music_name(struct tagcache_search *tcs, int row,
@@ -2852,7 +2996,11 @@ static bool next_music_name(struct tagcache_search *tcs, int row,
     if (row >= music_order.count)
         return false;
     const struct music_order_row *order = core_get_data(music_order.handle);
-    return tagcache_get_at_seek(tcs, order[row].seek, buf, size);
+    struct music_order_row entry = order[row];
+    if (!tagcache_get_at_seek(tcs, entry.seek, buf, size))
+        return false;
+    tcs->idx_id = entry.idx_id;
+    return true;
 }
 
 /* The database entries in the playing track's folder, answering a
@@ -2942,6 +3090,69 @@ static void add_level_filters(struct tagcache_search *tcs, int level)
                                        csi->result_seek[i]);
         }
     }
+
+    if (csi == &fruit_instruction && level > 0 &&
+        csi->tagorder[level - 1] == tag_album && fruit_album_artist >= 0)
+        tagcache_search_add_filter(tcs, tag_albumartist, fruit_album_artist);
+}
+
+static int fruit_count_tag(enum fruit_browse_kind kind, int tag, int level,
+                           int filter_tag, long filter_seek)
+{
+    struct tagcache_search tcs;
+    char buf[TAGCACHE_BUFSZ];
+    struct tagcache_search_clause *clauses[3];
+    if (!tagcache_search(&tcs, tag))
+        return -1;
+
+    if (level > 0)
+        add_level_filters(&tcs, level);
+    if (filter_tag >= 0)
+        tagcache_search_add_filter(&tcs, filter_tag, filter_seek);
+    int n = fruit_clauses(kind, clauses);
+    for (int i = 0; i < n; i++)
+        tagcache_search_add_clause(&tcs, clauses[i]);
+    size_t album_bits = fruit_album_bits(&tcs);
+    if (album_bits)
+        memset(uniqbuf, 0, album_bits);
+    else if (tag != tag_title)
+        tagcache_search_set_uniqbuf(&tcs, uniqbuf, UNIQBUF_SIZE);
+
+    int count = 0;
+    while (tagcache_get_next(&tcs, buf, sizeof(buf)))
+        if (!album_bits || fruit_first_album(&tcs, album_bits))
+            count++;
+    int result = tcs.failed ? -1 : count;
+    tagcache_search_finish(&tcs);
+    return result;
+}
+
+int browser_db_fruit_count(enum fruit_browse_kind kind)
+{
+    static uint32_t generation;
+    static int32_t commit = -1;
+    static int counts[FRUIT_BROWSE_COUNT];
+    if ((unsigned)kind >= FRUIT_BROWSE_COUNT || !tagcache_is_usable())
+        return -1;
+
+    uint32_t current_generation = tagcache_generation();
+    int32_t current_commit = tagcache_commit_id();
+    if (generation != current_generation || commit != current_commit)
+    {
+        for (unsigned i = 0; i < ARRAYLEN(counts); i++)
+            counts[i] = -1;
+        generation = current_generation;
+        commit = current_commit;
+    }
+
+    if (counts[kind] < 0)
+    {
+        int tag = fruit_paths[kind].tags[0];
+        if (kind == FRUIT_BROWSE_PODCASTS || kind == FRUIT_BROWSE_ITUNES_U)
+            tag = tag_title;
+        counts[kind] = fruit_count_tag(kind, tag, 0, -1, 0);
+    }
+    return counts[kind];
 }
 
 /* Keeps a %header_untagged level's list to the rows no header row holds. Its
@@ -3271,9 +3482,10 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
     {
         header_count = header ? header_rows_fill(level - 1, tcs_buf, tcs_bufsz)
                               : 0;
-        resume_row = book_resume_row(c, level, tag);
-        podcast_shows = is_podcast_shows(c, tag, level);
-        show_unplayed = c->currtable == TABLE_NAVIBROWSE && tag == tag_title
+        resume_row = csi != &fruit_instruction && book_resume_row(c, level, tag);
+        podcast_shows = csi != &fruit_instruction && is_podcast_shows(c, tag, level);
+        show_unplayed = csi != &fruit_instruction &&
+                        c->currtable == TABLE_NAVIBROWSE && tag == tag_title
                         && csi_spoken_kind() == 2 && show_has_unplayed(level);
     }
 
@@ -3290,12 +3502,12 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
     if (exclude && db_spoken_group_ensure(tag))
         keep = KEEP_MUSIC;
     else if ((tag == tag_album || tag == tag_albumartist)
-             && csi_mentions_spoken() && !browse_picked_by_name
+             && csi != &fruit_instruction && csi_mentions_spoken() && !browse_picked_by_name
              && tagcache_album_count() > 0)
         keep = KEEP_BOOKS;
     else if (tag == tag_title && c->currtable != TABLE_NAVIBROWSE
-             && csi_mentions_spoken() && !browse_picked_by_name
-             && tagcache_album_count() > 0)
+             && csi != &fruit_instruction && csi_mentions_spoken()
+             && !browse_picked_by_name && tagcache_album_count() > 0)
         keep = KEEP_BOOK_TRACKS;
 
     int dir_count = dir_ids_fill(level);
@@ -3428,10 +3640,11 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
      * outright when the saved index predates the current database commit,
      * because its seeks would then match the wrong albums -- so a stale index
      * leaves the list in name order rather than a wrong one. */
-    int album_order = tag == tag_album ? album_sort_order(level)
+    bool fruit = csi == &fruit_instruction;
+    int album_order = tag == tag_album && !fruit ? album_sort_order(level)
                                        : DB_SORT_ALBUMS_NAME;
     album_order_loaded = album_order;
-    bool show_year = tag == tag_album
+    bool show_year = tag == tag_album && !fruit
                      && global_settings.album_show_year != ALBUM_YEAR_OFF;
 
     album_years_valid = false;
@@ -3463,7 +3676,7 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
      * played sorts first and a tie keeps name order. Without the RAM copy there
      * are no figures, and the list stays in name order. An audiobook author
      * list is not a Music list and keeps name order too. */
-    bool artist_by_plays = !fmt && keep != KEEP_BOOKS
+    bool artist_by_plays = !fruit && !fmt && keep != KEEP_BOOKS
         && global_settings.database_sort_artists_by == DB_SORT_ARTISTS_PLAYS
         && is_artist_tag(tag)
         && tagcache_artist_count() > 0;
@@ -3479,13 +3692,13 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
     /* A plain Songs list can otherwise inherit the master index's order
      * when spoken word is filtered out. Sort the complete result, including
      * when it does not all fit in the browser cache. */
-    bool ordered = level == 0 && c->currtable == TABLE_NAVIBROWSE &&
-                   !fmt && !order_prefix && !csi->clause_count[0] &&
-                   !csi_mentions_spoken() &&
-                   (tag == tag_album || tag == tag_title) &&
+    bool ordered = !fmt && !order_prefix &&
+                   (fruit || (level == 0 && c->currtable == TABLE_NAVIBROWSE &&
+                              !csi->clause_count[0] && !csi_mentions_spoken() &&
+                              (tag == tag_album || tag == tag_title))) &&
                    prepare_music_order(&tcs, keep,
                                        exclude ? db_spoken_apart() : 0,
-                                       tcs_buf, tcs_bufsz);
+                                       level, tcs_buf, tcs_bufsz);
     if (ordered)
         sort = false;
     index_music_names = ordered;
@@ -3527,6 +3740,18 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
      * sorted by album with the title level's disc and track, so each book
      * is inserted whole and in order -- and whatever Extra Rows says, since
      * without it the descent reaches only the first album. */
+    if (fruit && !loading_hidden && fruit_kind < FRUIT_BROWSE_AUDIOBOOKS)
+    {
+        if (tag == tag_genre || is_artist_tag(tag) || tag == tag_composer)
+        {
+            int label = tag == tag_genre ? LANG_FRUIT_ALL_ARTISTS : LANG_ALL_ALBUMS;
+            dptr = add_head_row(c, dptr, offset, &sidx, TABLE_NAVIBROWSE,
+                                ID2P(label), SEEK_NO_FILTER);
+        }
+        else if (tag == tag_album)
+            dptr = add_head_row(c, dptr, offset, &sidx, TABLE_ALLSUBENTRIES,
+                                ID2P(LANG_FRUIT_ALL_SONGS), SEEK_NO_FILTER);
+    }
     if (tag != tag_title && tag != tag_filename
         && (loading_hidden
             || (!csi->hide_special && !csi_mentions_spoken()
@@ -3568,7 +3793,7 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
     if (show_unplayed)
         dptr = add_head_row(c, dptr, offset, &sidx, TABLE_PLAY_UNPLAYED,
                             ID2P(LANG_PODCAST_PLAY_UNPLAYED), -1);
-    if (tag == tag_album && featured_row_count(level) > 0)
+    if (!fruit && tag == tag_album && featured_row_count(level) > 0)
         dptr = add_head_row(c, dptr, offset, &sidx, TABLE_FEATURED_TRACKS,
                             ID2P(LANG_FEATURED_IN), -1);
     /* Last, so a header level's other special rows keep their places. */
@@ -3603,7 +3828,8 @@ static int retrieve_entries(struct browser_context *c, int offset, bool init)
         else
             dptr->extraseek = tcs.result_seek;
         dptr->customaction = ONPLAY_NO_CUSTOMACTION;
-        dptr->idx_id = tcs.idx_id;
+        dptr->idx_id = fruit && !ordered ?
+                       tagcache_match_index(&tcs) : tcs.idx_id;
 
         fmt = NULL;
         /* Check the format */
@@ -4254,6 +4480,7 @@ static char pending_root_shortcut_label[MENUENTRY_MAX_NAME];
 /* With a submenu's row, the value picked on its first level, and the title
  * that value's list takes; -1 for the row itself. */
 static long pending_row_seek = -1;
+static long pending_fruit_album_artist = -1;
 static char pending_row_title[MENUENTRY_MAX_NAME];
 
 /* Arm by the first tag the root row browses (e.g. tag_album): identity rather
@@ -4303,6 +4530,7 @@ void browser_db_enter_menu_row_on_next_load(const char *menu_id,
     strmemccpy(pending_root_shortcut_label, label,
                sizeof(pending_root_shortcut_label));
     pending_row_seek = -1;
+    pending_fruit_album_artist = -1;
 }
 
 void browser_db_enter_menu_row_value_on_next_load(const char *menu_id,
@@ -4313,6 +4541,16 @@ void browser_db_enter_menu_row_value_on_next_load(const char *menu_id,
     pending_row_seek = seek;
     strmemccpy(pending_row_title, title ? title : "",
                sizeof(pending_row_title));
+}
+
+void browser_db_enter_fruit_match_on_next_load(int tag, long seek,
+                                               long artist_seek,
+                                               const char *title)
+{
+    int lang = tag == tag_album ? LANG_ALBUMS : LANG_ARTISTS;
+    browser_db_enter_menu_row_value_on_next_load(BROWSER_DB_MENU_FRUIT,
+                                                str(lang), seek, title);
+    pending_fruit_album_artist = artist_seek;
 }
 
 /* Finding a row to select, among the rows actually on screen.
@@ -4962,6 +5200,54 @@ int browser_db_load(struct browser_context* c)
         pending_root_shortcut_label[0] = '\0';
         pending_row_seek = -1;
 
+        if (!strcmp(target, BROWSER_DB_MENU_FRUIT))
+        {
+            for (unsigned i = 0; i < ARRAYLEN(fruit_paths); i++)
+            {
+                const struct fruit_path *path = &fruit_paths[i];
+                if (strcmp(row, str(path->title)))
+                    continue;
+
+                fruit_kind = i;
+                fruit_try_skip_album = false;
+                fruit_album_artist = pending_fruit_album_artist;
+                pending_fruit_album_artist = -1;
+                fruit_instruction = (struct search_instruction){
+                    .tagorder_count = path->levels, .hide_special = true,
+                };
+                memcpy(fruit_instruction.tagorder, path->tags,
+                       path->levels * sizeof(path->tags[0]));
+                fruit_instruction.clause_count[0] =
+                    fruit_clauses(i, fruit_instruction.clause[0]);
+                for (int j = 0; j < MAX_TAGS; j++)
+                    fruit_instruction.format_id[j] = -1;
+
+                if (path->levels > 1)
+                {
+                    const char *name = i == FRUIT_BROWSE_PODCASTS ?
+                                       "fmt_episode" : "fmt_title";
+                    for (int j = 0; j < format_count; j++)
+                        if (!strcmp(formats[j]->name, name))
+                            fruit_instruction.format_id[path->levels - 1] =
+                                formats[j]->group_id;
+                }
+                csi = &fruit_instruction;
+                c->currtable = TABLE_NAVIBROWSE;
+                c->currextra = 0;
+                strlcpy(current_title[0], row, sizeof(current_title[0]));
+                if (seek >= 0 && path->levels > 1)
+                {
+                    fruit_instruction.result_seek[0] = seek;
+                    c->currextra = 1;
+                    strlcpy(current_title[1], pending_row_title,
+                            sizeof(current_title[1]));
+                    fruit_try_skip_album = i == FRUIT_BROWSE_ARTISTS;
+                }
+                enter_as_root_shortcut(c);
+                return browser_db_load(c);
+            }
+        }
+
         rows = load_root_for_shortcut(c);
 
         idx = loaded_row_for_menu_id(c, rows, target);
@@ -5157,6 +5443,29 @@ int browser_db_load(struct browser_context* c)
      * Except the cursor on a book already started: its Resume row is what the
      * list is for, and moving off it would hide the only row that plays the
      * book rather than a chapter of it. */
+    if (table != TABLE_ROOT && csi == &fruit_instruction)
+    {
+        if (fruit_try_skip_album)
+        {
+            fruit_try_skip_album = false;
+            if (count == head_rows + 1)
+            {
+                int depth = c->dirlevel;
+                char title[sizeof(current_title[0])];
+                strlcpy(title, current_title[c->currextra], sizeof(title));
+                c->selected_item = fruit_kind == FRUIT_BROWSE_COMPOSERS ?
+                                   0 : head_rows;
+                browser_db_enter(c, false);
+                c->dirlevel = depth;
+                strlcpy(current_title[c->currextra], title, sizeof(title));
+                return browser_db_load(c);
+            }
+        }
+        if (count <= head_rows)
+            c->dirlength = c->filesindir = 0;
+        return c->filesindir;
+    }
+
     if (c->special_entry_count > 0 && count > c->special_entry_count)
     {
         int first = c->special_entry_count;
@@ -5592,6 +5901,24 @@ int browser_db_enter(struct browser_context* c, bool is_visible)
             return open_single_book(path, book[0] ? book : NULL,
                                     name[0] ? name : NULL);
         }
+    }
+
+    if (is_visible && csi == &fruit_instruction &&
+        c->currtable == TABLE_NAVIBROWSE && newextra == TABLE_NAVIBROWSE &&
+        seek != SEEK_NO_FILTER)
+    {
+        int tag = csi->tagorder[c->currextra];
+        fruit_try_skip_album = is_artist_tag(tag) || tag == tag_composer;
+    }
+
+    if (csi == &fruit_instruction && c->currtable == TABLE_NAVIBROWSE &&
+        csi->tagorder[c->currextra] == tag_album && newextra != TABLE_PLAYTRACK)
+    {
+        struct tagcache_album album;
+        fruit_album_artist = newextra == TABLE_NAVIBROWSE &&
+            index_music_names && music_order.distinct_albums &&
+            tagcache_album_get(tagcache_album_of(dptr->idx_id), &album) ?
+            album.artist_seek : -1;
     }
 
     if (c->dirlevel >= MAX_DIR_LEVELS)
@@ -7060,6 +7387,11 @@ bool browser_db_index_key(struct browser_context *c, int id, char *buf, size_t s
     buf[0] = '\0';
     if (c->currtable == TABLE_ROOT)
         return false;
+    if (index_genres)
+    {
+        strlcpy(buf, QUICKSCROLL_NONE, size);
+        return true;
+    }
     if (index_music_names)
     {
         int row = id - head_rows;
@@ -7072,7 +7404,8 @@ bool browser_db_index_key(struct browser_context *c, int id, char *buf, size_t s
         }
         return true;
     }
-    if (index_genres)
+    if (browser_db_fruit_active(c) &&
+        browser_db_get_attr(c) == FILE_ATTR_AUDIO)
     {
         strlcpy(buf, QUICKSCROLL_NONE, size);
         return true;
@@ -7195,6 +7528,129 @@ bool browser_db_is_album_list(struct browser_context* c)
     if (c->currextra < 0 || c->currextra >= csi->tagorder_count)
         return false;
     return csi->tagorder[shown_level(c->currextra)] == tag_album;
+}
+
+bool browser_db_fruit_active(const struct browser_context *c)
+{
+    return c->currtable != TABLE_ROOT && csi == &fruit_instruction;
+}
+
+int browser_db_fruit_row_height(const struct browser_context *c)
+{
+    if (!browser_db_fruit_active(c))
+        return 0;
+    int level = c->currextra;
+    if (c->currtable == TABLE_ALLSUBENTRIES)
+        return 44;
+    switch (csi->tagorder[level])
+    {
+        case tag_album:
+            return 55;
+        case tag_title:
+            return level == 0 ? 44 : 0;
+        case tag_genre:
+            return 44;
+        default:
+            return 0;
+    }
+}
+
+struct fruit_subtitle_count {
+    uint32_t generation;
+    int32_t commit;
+    int kind, level, seek, tag;
+    int filters[MAX_TAGS];
+    int count;
+};
+
+static int fruit_cached_count(int tag, int level, int seek)
+{
+    static struct fruit_subtitle_count cache[16];
+    static unsigned victim;
+    uint32_t generation = tagcache_generation();
+    int32_t commit = tagcache_commit_id();
+    size_t filter_bytes = level * sizeof(csi->result_seek[0]);
+
+    for (unsigned i = 0; i < ARRAYLEN(cache); i++)
+    {
+        const struct fruit_subtitle_count *e = &cache[i];
+        if (e->generation == generation && e->commit == commit &&
+            e->kind == (int)fruit_kind && e->level == level && e->tag == tag &&
+            e->seek == seek && !memcmp(e->filters, csi->result_seek, filter_bytes))
+            return e->count;
+    }
+
+    int filter = seek == SEEK_NO_FILTER ? -1 : tag_genre;
+    int count = fruit_count_tag(fruit_kind, tag, level, filter, seek);
+    if (count >= 0)
+    {
+        struct fruit_subtitle_count *e = &cache[victim++ % ARRAYLEN(cache)];
+        *e = (struct fruit_subtitle_count){
+            .generation = generation, .commit = commit, .kind = fruit_kind,
+            .level = level, .seek = seek, .tag = tag, .count = count,
+        };
+        memcpy(e->filters, csi->result_seek, filter_bytes);
+    }
+    return count;
+}
+
+const char *browser_db_fruit_subtitle(struct browser_context *c, int item,
+                                      char *buf, size_t size)
+{
+    if (!browser_db_fruit_row_height(c))
+        return NULL;
+
+    int level = c->currextra;
+    int tag = c->currtable == TABLE_ALLSUBENTRIES ?
+              tag_title : csi->tagorder[level];
+    bool all = item < head_rows;
+    if (tag == tag_genre || (tag == tag_album && all))
+    {
+        struct tagentry *entry = browser_db_get_entry(c, item);
+        if (!entry)
+            return NULL;
+        int seek = all ? SEEK_NO_FILTER : entry->extraseek;
+        int count = fruit_cached_count(tag == tag_genre ? tag_album : tag_title,
+                                       level, seek);
+        if (count < 0)
+            return NULL;
+        int lang = tag == tag_genre ?
+                   (count == 1 ? LANG_FRUIT_ONE_ALBUM : LANG_FRUIT_ALBUM_COUNT) :
+                   (count == 1 ? LANG_FRUIT_ONE_SONG : LANG_FRUIT_SONG_COUNT);
+        if (tag == tag_genre && !all)
+        {
+            int artists = fruit_cached_count(tag_albumartist, level, seek);
+            if (artists >= 0)
+            {
+                char albums[48], names[48];
+                snprintf(albums, sizeof(albums), str(lang), count);
+                snprintf(names, sizeof(names), str(artists == 1 ?
+                         LANG_FRUIT_ONE_ARTIST : LANG_FRUIT_ARTIST_COUNT), artists);
+                snprintf(buf, size, "%s, %s", names, albums);
+                return buf;
+            }
+        }
+        snprintf(buf, size, str(lang), count);
+        return buf;
+    }
+
+    struct tagentry *entry = browser_db_get_entry(c, item);
+    if (!entry)
+        return NULL;
+    int field = tag == tag_album && fruit_kind != FRUIT_BROWSE_COMPILATIONS ?
+                tag_albumartist : tag_artist;
+    int id = entry->idx_id;
+    if (!tagcache_entry_string(id, field, buf, size))
+    {
+        struct tagcache_search tcs;
+        if (!tagcache_search(&tcs, field))
+            return NULL;
+        bool ok = tagcache_retrieve(&tcs, id, field, buf, size);
+        tagcache_search_finish(&tcs);
+        if (!ok)
+            return NULL;
+    }
+    return strcmp(buf, UNTAGGED) ? buf : NULL;
 }
 
 bool browser_db_is_spoken_list(struct browser_context* c)
@@ -7423,7 +7879,8 @@ static unsigned int table_art_hash(struct browser_context* c,
     if (tag == tag_album)
     {
         struct tagcache_album al;
-        n = table_album_row(level, entry->extraseek);
+        n = csi == &fruit_instruction ? tagcache_album_of(entry->idx_id) :
+                                        table_album_row(level, entry->extraseek);
         return tagcache_album_get(n, &al) ? al.art_hash : 0;
     }
     return 0;
@@ -7594,7 +8051,7 @@ enum list_row_kind browser_db_get_entry_kind(struct browser_context *c, int id)
     struct tagentry *entry;
 
     if (id < head_rows)
-        return LIST_ROW_COMMAND;
+        return browser_db_fruit_active(c) ? LIST_ROW_CONTAINER : LIST_ROW_COMMAND;
 
     if (c->currtable != TABLE_ROOT)
         return browser_db_get_attr(c) == FILE_ATTR_AUDIO ? LIST_ROW_TRACK

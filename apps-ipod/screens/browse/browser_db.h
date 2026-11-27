@@ -103,6 +103,25 @@ char *browser_db_get_title(struct browser_context* c);
 int browser_db_get_attr(struct browser_context* c);
 bool browser_db_is_album_list(struct browser_context* c);
 bool browser_db_is_artist_list(struct browser_context* c);
+/* Private browse instructions reached from the stock Music and Home rows. */
+#define BROWSER_DB_MENU_FRUIT "fruit"
+enum fruit_browse_kind {
+    FRUIT_BROWSE_ARTISTS, FRUIT_BROWSE_ALBUMS, FRUIT_BROWSE_SONGS,
+    FRUIT_BROWSE_GENRES, FRUIT_BROWSE_COMPOSERS, FRUIT_BROWSE_COMPILATIONS,
+    FRUIT_BROWSE_AUDIOBOOKS, FRUIT_BROWSE_PODCASTS, FRUIT_BROWSE_ITUNES_U,
+    FRUIT_BROWSE_COUNT
+};
+int browser_db_fruit_count(enum fruit_browse_kind kind);
+struct tagcache_search;
+void browser_db_fruit_music_filter(struct tagcache_search *tcs);
+void browser_db_enter_fruit_match_on_next_load(int tag, long seek,
+                                               long artist_seek,
+                                               const char *title);
+bool browser_db_fruit_active(const struct browser_context *c);
+int browser_db_fruit_row_height(const struct browser_context *c);
+const char *browser_db_fruit_subtitle(struct browser_context *c, int item,
+                                      char *buf, size_t size);
+
 /* True when this browse was reached through a menu row asking about the
  * `spoken` tag -- an audiobook list, at any of its levels. */
 bool browser_db_is_spoken_list(struct browser_context* c);

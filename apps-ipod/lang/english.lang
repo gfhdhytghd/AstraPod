@@ -33917,3 +33917,283 @@
     *: "No Name"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_FRUIT_ITUNES_U
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "iTunes U"
+  </source>
+  <dest>
+    *: "iTunes U"
+  </dest>
+  <voice>
+    *: "iTunes U"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ALL_ARTISTS
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "All Artists"
+  </source>
+  <dest>
+    *: "All Artists"
+  </dest>
+  <voice>
+    *: "All Artists"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ALL_SONGS
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "All Songs"
+  </source>
+  <dest>
+    *: "All Songs"
+  </dest>
+  <voice>
+    *: "All Songs"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ONE_ALBUM
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "%d Album"
+  </source>
+  <dest>
+    *: "%d Album"
+  </dest>
+  <voice>
+    *: "%d Album"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ALBUM_COUNT
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "%d Albums"
+  </source>
+  <dest>
+    *: "%d Albums"
+  </dest>
+  <voice>
+    *: "%d Albums"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ONE_ARTIST
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "%d Artist"
+  </source>
+  <dest>
+    *: "%d Artist"
+  </dest>
+  <voice>
+    *: "%d Artist"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ARTIST_COUNT
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "%d Artists"
+  </source>
+  <dest>
+    *: "%d Artists"
+  </dest>
+  <voice>
+    *: "%d Artists"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ONE_SONG
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "%d Song"
+  </source>
+  <dest>
+    *: "%d Song"
+  </dest>
+  <voice>
+    *: "%d Song"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_SONG_COUNT
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "%d Songs"
+  </source>
+  <dest>
+    *: "%d Songs"
+  </dest>
+  <voice>
+    *: "%d Songs"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_COMPILATIONS
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "No Compilations"
+  </source>
+  <dest>
+    *: "No Compilations"
+  </dest>
+  <voice>
+    *: "No Compilations"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_COMPOSERS
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "No Composers"
+  </source>
+  <dest>
+    *: "No Composers"
+  </dest>
+  <voice>
+    *: "No Composers"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_AUDIOBOOKS
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "No Audiobooks"
+  </source>
+  <dest>
+    *: "No Audiobooks"
+  </dest>
+  <voice>
+    *: "No Audiobooks"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_PODCASTS
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "No Podcasts"
+  </source>
+  <dest>
+    *: "No Podcasts"
+  </dest>
+  <voice>
+    *: "No Podcasts"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ONE_PODCAST
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "%d Podcast"
+  </source>
+  <dest>
+    *: "%d Podcast"
+  </dest>
+  <voice>
+    *: "%d Podcast"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_PODCAST_COUNT
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "%d Podcasts"
+  </source>
+  <dest>
+    *: "%d Podcasts"
+  </dest>
+  <voice>
+    *: "%d Podcasts"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_ONE_AUDIOBOOK
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "%d Audiobook"
+  </source>
+  <dest>
+    *: "%d Audiobook"
+  </dest>
+  <voice>
+    *: "%d Audiobook"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_AUDIOBOOK_COUNT
+  desc: Stock music browser
+  user: core
+  <source>
+    *: "%d Audiobooks"
+  </source>
+  <dest>
+    *: "%d Audiobooks"
+  </dest>
+  <voice>
+    *: "%d Audiobooks"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_SEARCH_QUERY
+  desc: search query shown in the stock results list
+  user: core
+  <source>
+    *: "Results for: %s"
+  </source>
+  <dest>
+    *: "Results for: %s"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_SEARCH_EMPTY
+  desc: stock Search before entering a query
+  user: core
+  <source>
+    *: "No Search Results"
+  </source>
+  <dest>
+    *: "No Search Results"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_SEARCH_COUNT
+  desc: stock Search title with result count
+  user: core
+  <source>
+    *: "Search Results: %d"
+  </source>
+  <dest>
+    *: "Search Results: %d"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>

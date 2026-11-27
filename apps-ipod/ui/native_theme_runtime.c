@@ -288,11 +288,22 @@ unsigned ui_theme_easing(void)
     return easing;
 }
 
+static int load_theme_font(const char *path, enum ui_font_role role, int glyphs)
+{
+    /* The bundled RB12 icon face has 460 slots. Keep its complete bitmap
+     * table resident so menu and chrome glyphs need no storage reads after
+     * a theme switch or a font-cache miss. Other faces keep their own budget. */
+    if (role == UI_FONT_ICON &&
+        !strcmp(path, FONT_DIR "/24x24-icons.fnt") && glyphs < 460)
+        glyphs = 460;
+    return font_load_ex(path, 0, glyphs);
+}
+
 int ui_theme_font_load(const struct ui_theme *theme, enum ui_font_role role, int glyphs)
 {
     char path[sizeof(FONT_DIR "/.pbf") + UI_THEME_FONT_NAME_MAX];
     theme_font_path(path, sizeof(path), theme->font[role], role);
-    return font_load_ex(path, 0, glyphs);
+    return load_theme_font(path, role, glyphs);
 }
 
 void ui_theme_current_font_path(enum ui_font_role role, char *path, size_t size)
@@ -311,7 +322,7 @@ int ui_theme_current_font_load(enum ui_font_role role, int glyphs)
 {
     char path[UI_THEME_FONT_PATH_MAX];
     ui_theme_current_font_path(role, path, sizeof(path));
-    return font_load_ex(path, 0, glyphs);
+    return load_theme_font(path, role, glyphs);
 }
 
 static size_t file_theme_name(const char *file)

@@ -25,6 +25,9 @@
 #include "ui/statusbar.h"
 #include "ui/stock_art_ids.h"
 #include "root_menu.h"
+#ifdef SIMULATOR
+#include "sim/menu-dump.h"
+#endif
 #include "screens/playback/cider.h"
 #include "screens/covers/carousel.h"
 #ifdef HAVE_USB_PODLINK
@@ -2792,6 +2795,9 @@ void root_menu(void)
     podcasts_row(global_settings.segregate_podcasts, false);
     push_current_activity(ACTIVITY_MAINMENU);
     next_screen = root_menu_setup_screens();
+#ifdef SIMULATOR
+    sim_menu_pixels();
+#endif
     debug_log_notice(true);
 
     while (true)

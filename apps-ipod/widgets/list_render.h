@@ -27,4 +27,8 @@ bool list_render_motion_due(const struct gui_synclist *list);
 void list_render_draw_due(struct gui_synclist *list);
 int list_render_timeout(const struct gui_synclist *list, int timeout);
 
+#ifdef SIMULATOR
+int list_render_sim_icon_ink(void);
+#endif
+
 #endif

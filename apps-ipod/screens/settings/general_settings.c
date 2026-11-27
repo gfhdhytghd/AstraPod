@@ -699,9 +699,9 @@ static int debug_log_all_off_item(void)
 }
 
 MENUITEM_FUNCTION_DYNTEXT(debug_log_left, 0, debug_log_nothing,
-                          debug_log_left_name, NULL, NULL, NULL, Icon_NOICON);
+                          debug_log_left_name, NULL, NULL, NULL, ICON_GLYPH(0x016B));
 MENUITEM_FUNCTION_DYNTEXT(debug_log_files, 0, debug_log_nothing,
-                          debug_log_files_name, NULL, NULL, NULL, Icon_NOICON);
+                          debug_log_files_name, NULL, NULL, NULL, ICON_GLYPH(0x016C));
 MENUITEM_FUNCTION(debug_log_all_off_func, 0, ID2P(LANG_DEBUG_LOG_ALL_OFF),
                   debug_log_all_off_item, NULL, Icon_NOICON);
 

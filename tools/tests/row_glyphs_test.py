@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Check that every row of the page menus draws a glyph of its own.
+"""Check page-menu glyph definitions and the actual Scrim icon-cell pixels.
 
-Argument: a simulator build directory (build-sim-ipod6g), with rockboxui
-and lang_enum.h. The simulator writes its menu rows through
-PODBOX_MENU_DUMP and exits. A row passes when its definition or
-row_glyphs.c gives it a glyph, or when list_render.c's label table names its
-label. Every glyph row_glyphs.c names must be in 24x24-icons.fnt. Silence
-and exit 0 mean all is well.
+Pass an ipod6g simulator build directory made with build-sim.sh. The simulator
+walks menus with animations off and a private disk. It draws each visible
+row through the native list renderer, including rows below the viewport.
 """
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -21,72 +19,117 @@ FONT = ROOT / 'apps-ipod/fonts/24x24-icons.fnt'
 GLYPHS = ROOT / 'apps-ipod/widgets/row_glyphs.c'
 RENDER = ROOT / 'apps-ipod/widgets/list_render.c'
 
-# Rows whose label is made at run time and has no glyph: the Equalizer's
-# bands, named by their frequency, and Debug Logs' two status lines.
-NO_GLYPH_CFG = {'eq low shelf filter', 'eq high shelf filter'} | {
+# The equalizer band records represent the graphical EQ editor in the settings
+# service. They aren't rows that the editor draws through the page-menu painter.
+EQ_BAND_RECORDS = {'eq low shelf filter', 'eq high shelf filter'} | {
     f'eq peak filter {n}' for n in range(1, 9)}
-NO_GLYPH_ROOTS = {'Debug Logs'}
+RECORDING_ROWS = {'LANG_REC_FORMAT', 'LANG_ENCODER_SETTINGS',
+                  'LANG_REC_FREQUENCY', 'LANG_RECORDING_SOURCE',
+                  'LANG_REC_CHANNELS', 'LANG_RECORDING_MONO_MODE',
+                  'LANG_BITRATE'}
 
 
-def lang_ids(build):
-    text = (build / 'lang_enum.h').read_text()
-    return {int(n): name for name, n in
-            re.findall(r'(LANG_\w+|VOICE_\w+), /\* (\d+) \*/', text)}
-
-
-def font_range():
+def font_errors():
     data = FONT.read_bytes()
-    first, size = struct.unpack_from('<II', data, 12)[0], \
-        struct.unpack_from('<I', data, 20)[0]
-    return first, first + size - 1
+    first, _, count = struct.unpack_from('<III', data, 12)
+    table = re.findall(r'\{ (LANG_\w+), 0x([0-9A-F]{4}) \}',
+                       GLYPHS.read_text())
+    errors = []
+    seen = set()
+    for name, cp in table:
+        if name in seen:
+            errors.append(f'{name}: duplicate glyph assignment')
+        seen.add(name)
+        if not first <= int(cp, 16) < first + count:
+            errors.append(f'{name}: U+{cp} is not in {FONT.name}')
+    return errors
+
+
+def read_rows(path):
+    return [line.split('\t') for line in path.read_text().splitlines()]
+
+
+def definitions_errors(build, disk, names):
+    dump = disk / 'definitions.tsv'
+    env = dict(os.environ, PODBOX_MENU_DUMP=str(dump),
+               SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy')
+    subprocess.run([str(build / 'rockboxui')], env=env, cwd=disk,
+                   check=True, timeout=60)
+    labelled = set(re.findall(r'\{\s*(LANG_\w+),\s*"[^"]+"\s*\}',
+                              RENDER.read_text()))
+    errors = []
+    for path, root, _, lang, cfg, glyph, *_ in read_rows(dump):
+        name = names.get(int(lang), '')
+        if int(glyph) or name in labelled or cfg in EQ_BAND_RECORDS:
+            continue
+        errors.append(f'{root}{path}: {name or cfg} has no assigned glyph')
+    return errors
+
+
+def render_rows(build, disk, theme, chinese=False):
+    rockbox = disk / '.rockbox'
+    rockbox.mkdir(parents=True)
+    resources = build / 'simdisk/.rockbox'
+    for name in ('fonts', 'codepages'):
+        shutil.copytree(resources / name, rockbox / name)
+    shutil.copyfile(resources / 'tagnavi.config', rockbox / 'tagnavi.config')
+    if chinese:
+        (rockbox / 'langs').mkdir()
+        shutil.copyfile(build / 'apps-ipod/lang/chinese-simp.lng',
+                        rockbox / 'langs/chinese-simp.lng')
+    (rockbox / 'config.cfg').write_text(
+        'start in screen: root\nsettings mode: everything\n'
+        'root menu order: settings,database,system_menu,files,plugins\n'
+        'backlight timeout: off\nvoice menus: off\nanimations: off\n'
+        'scrollbar: off\nshow icons: on\n'
+        f'native theme: {theme}\n' +
+        ('lang: /.rockbox/langs/chinese-simp.lng\n' if chinese else ''))
+    output = disk / 'pixels.tsv'
+    env = dict(os.environ, PODBOX_MENU_PIXELS=str(output),
+               SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy')
+    subprocess.run([str(build / 'rockboxui'), '--root', str(disk),
+                    '--nobackground'], env=env, cwd=disk,
+                   check=True, timeout=90)
+    return read_rows(output)
 
 
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     build = Path(sys.argv[1]).resolve()
-    names = lang_ids(build)
-    labelled = set(re.findall(r'\{\s*(LANG_\w+),\s*"[^"]+"\s*\}',
-                              RENDER.read_text()))
-    errors = []
-
-    first, last = font_range()
-    table = re.findall(r'\{ (LANG_\w+), 0x([0-9A-F]{4}) \}',
-                       GLYPHS.read_text())
-    seen = set()
-    for name, cp in table:
-        if name in seen:
-            errors.append(f'row_glyphs.c lists {name} twice')
-        seen.add(name)
-        if not first <= int(cp, 16) <= last:
-            errors.append(f'{name}: U+{cp} is not in {FONT.name}')
-
-    with tempfile.TemporaryDirectory() as temp:
-        dump = Path(temp) / 'rows.tsv'
-        env = dict(os.environ, PODBOX_MENU_DUMP=str(dump),
-                   SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy')
-        subprocess.run([str(build / 'rockboxui')], env=env, cwd=temp,
-                       check=True, timeout=60)
-        rows = [line.split('\t') for line in
-                dump.read_text().splitlines()]
-
-    titles = {}
-    for path, root, _, lang, cfg, glyph, _ in rows:
-        titles[(root, path)] = names.get(int(lang), '')
-    for path, root, kind, lang, cfg, glyph, _ in rows:
-        name = names.get(int(lang), '')
-        if int(glyph) or name in labelled or cfg in NO_GLYPH_CFG:
-            continue
-        parts = path.split('/')
-        parents = [titles.get((root, '/'.join(parts[:i])), '')
-                   for i in range(2, len(parts))]
-        if 'LANG_DEBUG_LOG' in parents:
-            continue
-        errors.append(f'{root}{path}: {name or cfg or "dynamic row"} '
-                      'has no glyph')
-
+    names = {int(n): name for name, n in re.findall(
+        r'(LANG_\w+), /\* (\d+) \*/', (build / 'lang_enum.h').read_text())}
+    errors = font_errors()
+    with tempfile.TemporaryDirectory(prefix='podbox-row-glyphs-') as tmp:
+        disk = Path(tmp)
+        errors.extend(definitions_errors(build, disk, names))
+        expected_rows = None
+        for theme, chinese in (('scrim', False), ('classic', False),
+                               ('fruit-company', False), ('scrim', True)):
+            case = theme + ('-zh' if chinese else '')
+            rows = render_rows(build, disk / case, theme, chinese)
+            ink = {}
+            recording = set()
+            for path, root, _, lang, cfg, _, _, count in rows:
+                if cfg in EQ_BAND_RECORDS:
+                    continue
+                name = names.get(int(lang), '')
+                if root == 'settings':
+                    recording.add(name)
+                ink[(root, path)] = int(count)
+                if int(count) <= 0:
+                    errors.append(f'{case} {root}{path} ({name or cfg}): '
+                                  f'no icon pixels ({count})')
+            if not RECORDING_ROWS <= recording:
+                errors.append(f'{case}: missing Recording coverage: '
+                              f'{sorted(RECORDING_ROWS - recording)}')
+            if expected_rows is None:
+                expected_rows = ink
+            elif not chinese and ink != expected_rows:
+                errors.append(f'{case}: live Scrim icon cells differ from cold Scrim')
+            print(f'{case}: checked {len(ink)} visible menu rows')
     for error in errors:
-        print(error)
+        print(error, file=sys.stderr)
     return 1 if errors else 0
 
 

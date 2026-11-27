@@ -35,6 +35,7 @@
 #include "metadata/album_palette.h"
 #include "metadata/art_cache.h"
 #include "system/bg_task.h"
+#include "string-extra.h"
 #include "animation.h"
 #include "menu_pane.h"
 #include "retained.h"
@@ -916,6 +917,11 @@ int menu_pane_deadline(void)
             wait = 0;
         else if (show.fading)
             wait = MIN(wait, frame);
+        else if (show.state == SHOW_NONE)
+        {
+            uint32_t age = now - show.none_at;
+            wait = MIN(wait, age >= SHOW_LIFE_US ? 0 : SHOW_LIFE_US - age);
+        }
         else if (show.state == SHOW_READY)
         {
             uint32_t age = now - show.started;

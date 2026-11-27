@@ -51,36 +51,44 @@
 #include "ui/native_theme_runtime.h"
 #include "screens/playback/wps.h"
 
-/* Claim physical transport keys before context lookup and wheel chords. */
-static bool wheel_transport(int button)
+static int wheel_transport_pressed;
+
+static int wheel_transport_keys(int button)
 {
-    static int pressed;
-    static bool repeated;
     const int transport = BUTTON_LEFT | BUTTON_RIGHT | BUTTON_PLAY;
-    if (!ui_wheel_navigation() ||
-        (button & (SYS_EVENT | BUTTON_MULTIMEDIA | BUTTON_REDRAW | BUTTON_REMOTE)))
-        return false;
+    if (!(button & transport) ||
+        (button & (SYS_EVENT | BUTTON_MULTIMEDIA | BUTTON_REDRAW | BUTTON_REMOTE)) ||
+        !ui_wheel_navigation())
+        return BUTTON_NONE;
 
     enum current_activity activity = get_current_activity();
     if (activity == ACTIVITY_ARCADE || activity == ACTIVITY_SPIKE ||
         activity == ACTIVITY_MUSICQUIZ || activity == ACTIVITY_USBSCREEN ||
         activity == ACTIVITY_QUICKSCREEN)
-        return false;
+        return BUTTON_NONE;
 
-    int keys = button & BUTTON_MAIN;
-    if (!(keys & transport))
+    return button & BUTTON_MAIN;
+}
+
+/* Claim physical transport keys after the Now Playing chord. */
+static bool wheel_transport(int button)
+{
+    static bool repeated;
+    int keys = wheel_transport_keys(button);
+    if (keys == BUTTON_NONE)
         return false;
     if (keys != BUTTON_LEFT && keys != BUTTON_RIGHT && keys != BUTTON_PLAY)
     {
-        if (repeated && pressed != BUTTON_PLAY)
+        if (repeated &&
+            (wheel_transport_pressed & (BUTTON_LEFT | BUTTON_RIGHT)))
             wps_wheel_transport(ACTION_WPS_STOPSEEK);
-        pressed = BUTTON_NONE;
+        wheel_transport_pressed = BUTTON_NONE;
         return true;
     }
 
     if (button & BUTTON_REL)
     {
-        if (keys == pressed)
+        if (keys == wheel_transport_pressed)
         {
             if (keys == BUTTON_PLAY)
             {
@@ -91,12 +99,12 @@ static bool wheel_transport(int button)
                 wps_wheel_transport(repeated ? ACTION_WPS_STOPSEEK :
                         keys == BUTTON_LEFT ? ACTION_WPS_SKIPPREV :
                                              ACTION_WPS_SKIPNEXT);
-            pressed = BUTTON_NONE;
+            wheel_transport_pressed = BUTTON_NONE;
         }
     }
     else if (button & BUTTON_REPEAT)
     {
-        if (keys == pressed)
+        if (keys == wheel_transport_pressed)
         {
             repeated = true;
             if (keys != BUTTON_PLAY)
@@ -106,7 +114,7 @@ static bool wheel_transport(int button)
     }
     else
     {
-        pressed = keys;
+        wheel_transport_pressed = keys;
         repeated = false;
     }
     return true;
@@ -139,6 +147,18 @@ void agents_shortcut_commit_select(void)
 #include "iap/remote_capture.h"
 #endif
 static struct agents_cover_chord_state cover_chord;
+
+static int wheel_cover_button(int button, bool transport, bool *fire)
+{
+    /* Keep transport combinations out of the Cover Flow chord. */
+    if (transport && wheel_transport_keys(button))
+    {
+        *fire = false;
+        return button;
+    }
+    return agents_cover_chord_button(&cover_chord, button, button_status(),
+                                    true, fire);
+}
 #ifdef IPOD_ACCESSORY_PROTOCOL
 static long raw_remote_filter(long button);
 static int raw_ui_timeout(int timeout);
@@ -151,29 +171,32 @@ static long raw_ui_cancel(void)
     return BUTTON_MENU | (release ? 0 : BUTTON_REL);
 }
 
-/* The existing Agents gesture remains in the action path with a live host.
- * With no host, raw viewers can request the same WPS transition. */
+/* Fruit opens Now Playing from the menu. With a live host, the chord
+ * also switches between the T3 Agents and Now Playing screens. */
 static int wheel_shortcut_button(int button, bool talking, bool raw, int *action)
 {
     *action = ACTION_NONE;
+    enum current_activity activity = get_current_activity();
+    bool fruit_playback = ui_wheel_navigation() && activity != ACTIVITY_ARCADE &&
+                          activity != ACTIVITY_SPIKE &&
+                          activity != ACTIVITY_MUSICQUIZ;
+    if (fruit_playback && activity == ACTIVITY_USBSCREEN && !shortcut.latched)
+        return button;
     bool connected = false;
 #ifdef HAVE_USB_PODLINK
-    connected = podlink_host_connected();
+    connected = podlink_host_connected() &&
+                (!fruit_playback || activity == ACTIVITY_AGENTS ||
+                 activity == ACTIVITY_WPS);
 #endif
-    enum current_activity activity = get_current_activity();
-    /* T3 keeps its explicit SELECT+PLAY chord between Agents and Now Playing.
-     * The ordinary transport buttons still belong to playback. */
-    bool agents_wps_chord = connected &&
-                           (activity == ACTIVITY_AGENTS || activity == ACTIVITY_WPS);
-    if (ui_wheel_navigation() && !agents_wps_chord &&
-        activity != ACTIVITY_ARCADE && activity != ACTIVITY_SPIKE &&
-        activity != ACTIVITY_MUSICQUIZ)
-        return button;
     if (raw && connected && !shortcut.latched && !shortcut.ignored)
         return button;
     bool fire;
     button = agents_shortcut_button(&shortcut, button, button_status(),
                                     connected && talking, &fire);
+    /* PLAY may have reached transport before SELECT joined the chord. */
+    if (fruit_playback && shortcut.latched &&
+        wheel_transport_pressed == BUTTON_PLAY)
+        wheel_transport_pressed = BUTTON_NONE;
     if (fire)
     {
         if (connected)
@@ -214,7 +237,6 @@ static long raw_ui_filter(long button)
     cider_source_poll();
 #endif
     if (ui_polling) return button;
-    if (wheel_transport(button)) return BUTTON_REDRAW;
 #ifdef HAVE_USB_PODLINK
     podlink_time_sync();
 #endif
@@ -228,7 +250,7 @@ static long raw_ui_filter(long button)
 #endif
     if (button & SYS_EVENT) return button;
     bool fire;
-    button = agents_cover_chord_button(&cover_chord, button, button_status(), true, &fire);
+    button = wheel_cover_button(button, true, &fire);
     if (fire && agents_nav_pending() == AGENTS_NAV_NONE)
     {
         agents_nav_request(agents_cover_toggle_target(), false);
@@ -238,6 +260,7 @@ static long raw_ui_filter(long button)
     int action;
     if (shortcut.latched || agents_nav_pending() == AGENTS_NAV_NONE)
         button = wheel_shortcut_button(button, false, true, &action);
+    if (wheel_transport(button)) return BUTTON_REDRAW;
     if (agents_nav_pending() != AGENTS_NAV_NONE) return raw_ui_cancel();
 #ifdef IPOD_ACCESSORY_PROTOCOL
     button = raw_remote_filter(button);
@@ -602,10 +625,8 @@ int agents_shortcut_get_button(int timeout)
     ui_polling = false;
     podlink_time_sync();
     agents_background_play_tone();
-    if (wheel_transport(button)) return BUTTON_REDRAW;
     bool fire;
-    button = agents_cover_chord_button(&cover_chord, button, button_status(),
-        true, &fire);
+    button = wheel_cover_button(button, true, &fire);
     if (fire || button == REMOTE_COVERS_BUTTON)
     {
         agents_nav_request(agents_cover_toggle_target(), !fire);
@@ -619,6 +640,7 @@ int agents_shortcut_get_button(int timeout)
                                     false, &action);
     if (action == ACTION_TREE_WPS) return raw_ui_cancel();
     if (action == ACTION_AGENTS_SWITCH) return AGENTS_SHORTCUT_BUTTON;
+    if (wheel_transport(button)) return BUTTON_REDRAW;
 #ifdef IPOD_ACCESSORY_PROTOCOL
     if (!remote_input_active)
         button = agents_remote_button(&remote, context, button, button_status(),
@@ -709,26 +731,21 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
 #ifdef HAVE_WHEEL_WPS_CHORD
     ui_polling = false;
 #endif
-    if (cur->context != CONTEXT_SPIKE && cur->context != CONTEXT_MUSIC_QUIZ &&
+    bool transport =
+        cur->context != CONTEXT_SPIKE && cur->context != CONTEXT_MUSIC_QUIZ &&
         cur->context != CONTEXT_QUICKSCREEN && cur->context != CONTEXT_WPS &&
         cur->context != CONTEXT_VIDEO_PLAYBACK && cur->context != CONTEXT_AGENTS &&
         cur->context != (CONTEXT_PLUGIN | CONTEXT_DIALOG) &&
         cur->context != (CONTEXT_PLUGIN | CONTEXT_CUSTOM2) &&
         !(cur->context == (CONTEXT_PLUGIN | CONTEXT_CUSTOM) &&
           get_current_activity() == ACTIVITY_STOPWATCH &&
-          (*button & BUTTON_MAIN) == BUTTON_PLAY) &&
-        wheel_transport(*button))
-    {
-        cur->action = ACTION_NONE;
-        return true;
-    }
+          (*button & BUTTON_MAIN) == BUTTON_PLAY);
 #ifdef HAVE_WHEEL_WPS_CHORD
 #ifdef HAVE_USB_PODLINK
     podlink_time_sync();
     agents_background_play_tone();
     bool fire;
-    *button = agents_cover_chord_button(&cover_chord, *button, button_status(),
-        true, &fire);
+    *button = wheel_cover_button(*button, transport, &fire);
     if (fire)
     {
         last->button = BUTTON_REL;
@@ -759,6 +776,12 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
         return true;
     }
 #endif
+
+    if (transport && wheel_transport(*button))
+    {
+        cur->action = ACTION_NONE;
+        return true;
+    }
 
 #if defined(IPOD_ACCESSORY_PROTOCOL) && defined(HAVE_USB_PODLINK)
     if (!remote_input_active)

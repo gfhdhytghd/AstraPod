@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Walk Fruit Company in SDL dummy video and verify physical transport keys.
+"""Walk Fruit Company in SDL dummy video and verify transport and Now Playing chords.
 
 Usage: fruit_wheel_transport_sim.py ROCKBOXUI ROCKBOX_ZIP OUTPUT_DIR
 Requires Linux, GDB, ffmpeg and the simulator's debug symbols. The test reads
@@ -11,6 +11,7 @@ LCD frames independently check the selected row and visible page.
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,10 +23,14 @@ import numpy as np
 from PIL import Image
 
 from ui_music_fixture import build_tagcache, create_fixture, install_sim_codecs
+from ui_quickscreen_sim import ULTRA_FALLBACK_THEME
 from ui_stock_walk_sim import CONFIG, Sim
 
 
+CHORD_THEMES = ("fruit-company", "fruit-company-ultra", "classic", "scrim")
 SCREEN_ACTIVITY = {
+    "main-menu": "ACTIVITY_MAINMENU",
+    "files": "ACTIVITY_FILEBROWSER",
     "now-playing": "ACTIVITY_WPS",
     "cover-flow": "ACTIVITY_ALBUMCOVERS",
     "album-panel": "ACTIVITY_ALBUMCOVERS",
@@ -229,39 +234,106 @@ def walk(sim, playback, sim_binary):
     print("PASS control-centre open and close", flush=True)
 
 
+def probe_chord(sim, playback, theme):
+    menu = playback.activities["ACTIVITY_MAINMENU"]
+    wps = playback.activities["ACTIVITY_WPS"]
+    press(sim, "select")  # Enter the highlighted /Playlists folder.
+    press(sim, "select")  # Start the first playlist.
+    wait_for(lambda: playback.get("status") == 1 and playback.activity() == wps,
+             f"{theme}: could not start fixture playlist")
+    press(sim, "menu")
+    wait_for(lambda: playback.activity() == playback.activities["ACTIVITY_FILEBROWSER"],
+             f"{theme}: could not return to Files")
+    press(sim, "menu")
+    wait_for(lambda: playback.activity() == menu, f"{theme}: could not open menu")
+
+    fruit = theme.startswith("fruit-company")
+    expected = 1
+    if fruit:
+        press(sim, "play")
+        wait_for(lambda: playback.get("status") == 3, f"{theme}: PLAY did not pause")
+        assert playback.activity() == menu, (theme, "PLAY left menu")
+        expected = 3
+
+    # Let the first down clear the driver's chord window. In PLAY-first
+    # order, transport can already have remembered a pending PLAY press.
+    for first, second in (("play", "select"), ("select", "play")):
+        sim.process.stdin.write(f"down {first}\n".encode())
+        time.sleep(.12)
+        assert playback.activity() == menu and playback.get("status") == expected, (
+            theme, first, "first key acted before the chord")
+        sim.process.stdin.write(f"down {second}\n".encode())
+        wait_for(lambda: playback.activity() == wps,
+                 f"{theme}: {first}+{second} did not open Now Playing")
+        for key in (first, second):
+            sim.process.stdin.write(f"up {key}\n".encode())
+            sim.settle(quiet=.15, limit=.65)
+            assert playback.get("status") == expected, (theme, first, key, "chord toggled playback")
+            assert playback.activity() == wps, (theme, first, key, "chord left Now Playing")
+        press(sim, "menu")
+        wait_for(lambda: playback.activity() == menu, f"{theme}: could not return to menu")
+
+    if fruit:
+        press(sim, "play")
+        wait_for(lambda: playback.get("status") == 1, f"{theme}: PLAY did not resume")
+        assert playback.activity() == menu, (theme, "PLAY left menu")
+    print(f"PASS {theme} Now Playing chord in both orders", flush=True)
+
+
+def run_sim(binary, root, output, name, test):
+    sim = Sim(binary, root, output, name, name)
+    try:
+        wait_for(lambda: bool(sim.seen), "simulator did not present", limit=10)
+        time.sleep(1.5)
+        playback = Playback(binary, sim.process.pid)
+        try:
+            test(sim, playback)
+        finally:
+            playback.close()
+    finally:
+        sim.close()
+        sim.process.wait()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for argument in ("binary", "zip", "output"):
         parser.add_argument(argument, type=lambda p: Path(p).resolve())
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="fruit-transport-") as temporary:
-        root = Path(temporary) / "simdisk"
-        create_fixture(root, args.zip, CONFIG + """
-native theme: fruit-company
+    config = CONFIG + """\
 animations: off
 repeat: all
 qs top: keyclick repeats
 qs bottom: hardware keyclick
-""")
+"""
+    with tempfile.TemporaryDirectory(prefix="fruit-transport-") as temporary:
+        fixture = Path(temporary) / "fixture"
+        create_fixture(fixture, args.zip, config + "native theme: fruit-company\n")
         with ZipFile(args.zip) as resources:
-            resources.extract(".rockbox/themes/stock-art.bin", root)
-        Image.new("RGB", (192, 192), (24, 180, 98)).save(root / "Images/Other.jpg")
-        install_sim_codecs(args.binary, root)
-        build_tagcache(args.binary, root, args.output / "tagcache.log")
+            resources.extract(".rockbox/themes/stock-art.bin", fixture)
+        Image.new("RGB", (192, 192), (24, 180, 98)).save(fixture / "Images/Other.jpg")
+        install_sim_codecs(args.binary, fixture)
+        build_tagcache(args.binary, fixture, args.output / "tagcache.log")
         # A database build can leave its temporary startup config behind.
-        (root / ".rockbox/config.cfg.new").unlink(missing_ok=True)
-        sim = Sim(args.binary, root, args.output, "transport", "Fruit Company")
-        try:
-            wait_for(lambda: bool(sim.seen), "simulator did not present", limit=10)
-            time.sleep(1.5)
-            playback = Playback(args.binary, sim.process.pid)
-            try:
-                walk(sim, playback, args.binary)
-            finally:
-                playback.close()
-        finally:
-            sim.close()
+        (fixture / ".rockbox/config.cfg.new").unlink(missing_ok=True)
+        themes = fixture / ".rockbox/native-themes"
+        themes.mkdir()
+        (themes / "fruit-company-ultra.podtheme").write_text(ULTRA_FALLBACK_THEME)
+        for theme in CHORD_THEMES:
+            root = Path(temporary) / theme
+            shutil.copytree(fixture, root)
+            (root / ".rockbox/config.cfg").write_text(config + f"""\
+native theme: {theme}
+start in screen: files
+start directory: /Playlists
+""", encoding="utf-8")
+            run_sim(args.binary, root, args.output, theme,
+                    lambda sim, playback: probe_chord(sim, playback, theme))
+            assert not (root / ".rockbox/native-theme.log").exists(), (
+                theme, "native theme rejected")
+        run_sim(args.binary, fixture, args.output, "transport",
+                lambda sim, playback: walk(sim, playback, args.binary))
 
 
 if __name__ == "__main__":

@@ -7058,12 +7058,10 @@ static bool flow_present_split(struct ui_scene *source, uint32_t age, bool leave
                                   half * rest / 65536);
 }
 
-/* Fruit Company runs stock 1.1.2's page slide: the menu's page moves its
- * own width in 270 ms, quadratic both ways. Leaving the menu, its rows and
- * their status bar accelerate away left and the pane is covers at once;
- * returning, the rows come from the left and the pane from the right, the
- * same distance from home, slowing to rest. A return that interrupts the
- * entry starts where the curves meet, `leave_skip` into it. */
+/* Fruit Company runs the stock page slide: the menu's page moves its
+ * own width in 270 ms, quadratic both ways. The rows and their status bar
+ * move left of home, the pane the same distance to the right. A return that
+ * interrupts the entry starts where the curves meet, `leave_skip` into it. */
 #define FLOW_STOCK_SLIDE_US 270000u
 
 static int flow_stock_offset(uint32_t age, bool back)
@@ -7077,7 +7075,7 @@ static int flow_stock_offset(uint32_t age, bool back)
 static bool flow_present_stock(struct ui_scene *source, uint32_t age, bool back)
 {
     int away = flow_stock_offset(age, back);
-    return ui_scene_present_split(source, -away, back ? away : MENU_PANE_X);
+    return ui_scene_present_split(source, -away, away);
 }
 
 /* The path an entry or leave takes, as flow_path records it. */

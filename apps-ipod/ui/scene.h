@@ -20,6 +20,7 @@ struct ui_scene {
     /* A split menu on each surface, a root page without menu chrome, and
      * an outgoing page that stays still under the incoming one. */
     bool back_split, front_split, full_screen, back_still;
+    unsigned back_pane, front_pane;
     /* Both pages are painted on the list backdrop, which stays still under
      * them. */
     bool still_backdrop;

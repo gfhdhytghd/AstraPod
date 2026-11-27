@@ -167,9 +167,17 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
         {
             const fb_data *split = left_split ? l : r;
             const fb_data *full = left_split ? r : l;
+            bool full_over = left_split == target_right;
             int full_x = left_split ? p : p - LCD_WIDTH;
             int rows_x = left_split ? MIN(0, p - half) : MAX(0, p);
-            bool full_over = left_split == target_right;
+            /* The stock menu returning over a full page travels as a whole
+             * page from off screen, so it shows only in the second half and
+             * then pushes the full page aside. */
+            if (left_split && !full_over && !scene->reversed)
+            {
+                rows_x = p - LCD_WIDTH;
+                full_x = MAX(0, p - half);
+            }
             memcpy(row + half, split + half, (LCD_WIDTH - half) * sizeof(*row));
             put_span(row, split, rows_x, half, 0, half);
             put_span(row, full, full_x, LCD_WIDTH, 0,
@@ -561,6 +569,7 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     scene->full_screen = scene->back_still = false;
     scene->staggered = staggered;
     scene->reuse_target = reverse_pan;
+    scene->reversed = reverse_pan;
     scene->row_y = scene->row_count = 0;
     scene->tween = (struct ui_tween){
         .from = offset, .to = end, .frames = frames,

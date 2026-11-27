@@ -18,6 +18,8 @@ struct ui_scene {
     /* A split menu on each surface, a root page without menu chrome, and
      * an outgoing page that stays still under the incoming one. */
     bool back_split, front_split, full_screen, back_still;
+    /* The motion turned back part way, so keeps the geometry it began with. */
+    bool reversed;
 };
 
 /* The UI thread owns a scene from capture through the end of its transition.

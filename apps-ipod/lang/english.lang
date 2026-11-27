@@ -28297,7 +28297,7 @@
 
 <phrase>
   id: LANG_NATIVE_THEME
-  desc: Name of the native theme picker in Appearance settings
+  desc: Picker for built-in and custom native themes in Theme Settings
   user: core
   <source>
     *: "Native theme"

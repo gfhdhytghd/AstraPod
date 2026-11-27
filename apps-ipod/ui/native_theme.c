@@ -12,39 +12,39 @@
 
 static const struct {
     const char *key;
-    uint32_t scrim, light;
+    uint32_t scrim;
     struct ui_theme_dynamic palette;
 } colors[UI_COLOR_COUNT] = {
-    [UI_COLOR_BACKGROUND]         = { "background",         0x000000, 0xf6f5f2, {UI_PALETTE_DOMINANT, 0, 15} },
-    [UI_COLOR_FOREGROUND]         = { "foreground",         0xffffff, 0x181818, {0} },
-    [UI_COLOR_MUTED]              = { "muted",              0xbdbdbd, 0x505050, {UI_PALETTE_VIVID, 85, 100} },
-    [UI_COLOR_ACCENT]             = { "accent",             0xffffff, 0x12588e, {UI_PALETTE_VIVID, 60, 100} },
-    [UI_COLOR_SELECTION]          = { "selection",          0xffffff, 0x12588e, {UI_PALETTE_VIVID, 60, 100} },
-    [UI_COLOR_SELECTED_SECONDARY] = { "selected_secondary", 0xd6d6d6, 0x505050, {0} },
-    [UI_COLOR_SELECTED_TEXT]      = { "selected_text",      0xffffff, 0x181818, {0} },
-    [UI_COLOR_SEPARATOR]          = { "separator",          0x333333, 0xc7c5bf, {0} },
-    [UI_COLOR_DIM]                = { "dim",                0x000000, 0x000000, {0} },
-    [UI_COLOR_STATUS_BG]          = { "status_bg",          0xcecece, 0xdddcd7, {0} },
-    [UI_COLOR_STATUS_FG]          = { "status_fg",          0x000000, 0x181818, {0} },
-    [UI_COLOR_MODAL_BG]           = { "modal_bg",           0x101010, 0xffffff, {0} },
-    [UI_COLOR_MODAL_FG]           = { "modal_fg",           0xffffff, 0x181818, {0} },
-    [UI_COLOR_MODAL_BORDER]       = { "modal_border",       0x636563, 0x73706c, {0} },
-    [UI_COLOR_MODAL_ACCENT]       = { "modal_accent",       0xd6d3d6, 0x12588e, {0} },
-    [UI_COLOR_MODAL_SELECTED_TEXT] = { "modal_selected_text", 0x101010, 0xffffff, {0} },
-    [UI_COLOR_MODAL_SHADOW]       = { "modal_shadow",       0x000000, 0x73706c, {0} },
-    [UI_COLOR_WPS_BG]             = { "wps_bg",             0x000000, 0xf6f5f2, {0} },
-    [UI_COLOR_WPS_FG]             = { "wps_fg",             0xffffff, 0x181818, {0} },
-    [UI_COLOR_WPS_MUTED]          = { "wps_muted",          0x333333, 0x505050, {0} },
-    [UI_COLOR_WPS_ACCENT]         = { "wps_accent",         0xffffff, 0x12588e, {UI_PALETTE_VIVID, 60, 100} },
-    [UI_COLOR_WPS_METER]          = { "wps_meter",          0xffffff, 0x181818, {0} },
-    [UI_COLOR_WPS_PANEL]          = { "wps_panel",          0x000000, 0xdddcd7, {UI_PALETTE_DOMINANT, 0, 30} },
-    [UI_COLOR_LIST_TINT]          = { "list_tint",          0x000000, 0xdddcd7, {UI_PALETTE_DOMINANT, 0, 40} },
-    [UI_COLOR_HANDOFF_BG]          = { "handoff_bg",         0x000000, 0xf6f5f2, {0} },
-    [UI_COLOR_HANDOFF_FG]          = { "handoff_fg",         0xffffff, 0x181818, {0} },
-    [UI_COLOR_HANDOFF_MUTED]       = { "handoff_muted",      0x999999, 0x505050, {0} },
-    [UI_COLOR_HANDOFF_UNSELECTED_TEXT] = { "handoff_unselected_text", 0xcccccc, 0x181818, {0} },
-    [UI_COLOR_HANDOFF_SELECTED_TEXT]   = { "handoff_selected_text",   0x000000, 0xffffff, {0} },
-    [UI_COLOR_HANDOFF_COVER_PLACEHOLDER] = { "handoff_cover_placeholder", 0x181818, 0xdddcd7, {0} },
+    [UI_COLOR_BACKGROUND]         = { "background",         0x000000, {UI_PALETTE_DOMINANT, 0, 15} },
+    [UI_COLOR_FOREGROUND]         = { "foreground",         0xffffff, {0} },
+    [UI_COLOR_MUTED]              = { "muted",              0xbdbdbd, {UI_PALETTE_VIVID, 85, 100} },
+    [UI_COLOR_ACCENT]             = { "accent",             0xffffff, {UI_PALETTE_VIVID, 60, 100} },
+    [UI_COLOR_SELECTION]          = { "selection",          0xffffff, {UI_PALETTE_VIVID, 60, 100} },
+    [UI_COLOR_SELECTED_SECONDARY] = { "selected_secondary", 0xd6d6d6, {0} },
+    [UI_COLOR_SELECTED_TEXT]      = { "selected_text",      0xffffff, {0} },
+    [UI_COLOR_SEPARATOR]          = { "separator",          0x333333, {0} },
+    [UI_COLOR_DIM]                = { "dim",                0x000000, {0} },
+    [UI_COLOR_STATUS_BG]          = { "status_bg",          0xcecece, {0} },
+    [UI_COLOR_STATUS_FG]          = { "status_fg",          0x000000, {0} },
+    [UI_COLOR_MODAL_BG]           = { "modal_bg",           0x101010, {0} },
+    [UI_COLOR_MODAL_FG]           = { "modal_fg",           0xffffff, {0} },
+    [UI_COLOR_MODAL_BORDER]       = { "modal_border",       0x636563, {0} },
+    [UI_COLOR_MODAL_ACCENT]       = { "modal_accent",       0xd6d3d6, {0} },
+    [UI_COLOR_MODAL_SELECTED_TEXT] = { "modal_selected_text", 0x101010, {0} },
+    [UI_COLOR_MODAL_SHADOW]       = { "modal_shadow",       0x000000, {0} },
+    [UI_COLOR_WPS_BG]             = { "wps_bg",             0x000000, {0} },
+    [UI_COLOR_WPS_FG]             = { "wps_fg",             0xffffff, {0} },
+    [UI_COLOR_WPS_MUTED]          = { "wps_muted",          0x333333, {0} },
+    [UI_COLOR_WPS_ACCENT]         = { "wps_accent",         0xffffff, {UI_PALETTE_VIVID, 60, 100} },
+    [UI_COLOR_WPS_METER]          = { "wps_meter",          0xffffff, {0} },
+    [UI_COLOR_WPS_PANEL]          = { "wps_panel",          0x000000, {UI_PALETTE_DOMINANT, 0, 30} },
+    [UI_COLOR_LIST_TINT]          = { "list_tint",          0x000000, {UI_PALETTE_DOMINANT, 0, 40} },
+    [UI_COLOR_HANDOFF_BG]          = { "handoff_bg",         0x000000, {0} },
+    [UI_COLOR_HANDOFF_FG]          = { "handoff_fg",         0xffffff, {0} },
+    [UI_COLOR_HANDOFF_MUTED]       = { "handoff_muted",      0x999999, {0} },
+    [UI_COLOR_HANDOFF_UNSELECTED_TEXT] = { "handoff_unselected_text", 0xcccccc, {0} },
+    [UI_COLOR_HANDOFF_SELECTED_TEXT]   = { "handoff_selected_text",   0x000000, {0} },
+    [UI_COLOR_HANDOFF_COVER_PLACEHOLDER] = { "handoff_cover_placeholder", 0x181818, {0} },
 };
 
 static const struct {
@@ -175,7 +175,7 @@ static const struct {
 };
 
 static const char *const builtin_names[UI_THEME_BUILTIN_COUNT] = {
-    [UI_THEME_SCRIM] = "scrim", [UI_THEME_LIGHT] = "light",
+    [UI_THEME_SCRIM] = "scrim",
     [UI_THEME_CLASSIC] = "classic", [UI_THEME_FRUIT_COMPANY] = "fruit-company",
 };
 
@@ -217,7 +217,7 @@ static const char *const easings[] = {
     [UI_EASE_LINEAR] = "linear", NULL
 };
 
-/* Classic: the look of the stock iPod Classic firmware, on Light's base. */
+/* Classic: the look of the stock iPod Classic firmware. */
 static void classic(struct ui_theme *theme)
 {
     static const struct { uint8_t role; uint32_t rgb; } color_set[] = {
@@ -236,6 +236,10 @@ static void classic(struct ui_theme *theme)
         { UI_COLOR_WPS_METER, 0x0071d6 }, { UI_COLOR_WPS_PANEL, 0xffffff },
         { UI_COLOR_HANDOFF_BG, 0xffffff }, { UI_COLOR_HANDOFF_FG, 0x000000 },
         { UI_COLOR_HANDOFF_COVER_PLACEHOLDER, 0xdedfde },
+        { UI_COLOR_MODAL_SHADOW, 0x73706c },
+        { UI_COLOR_HANDOFF_MUTED, 0x505050 },
+        { UI_COLOR_HANDOFF_UNSELECTED_TEXT, 0x181818 },
+        { UI_COLOR_HANDOFF_SELECTED_TEXT, 0xffffff },
     };
     static const struct { uint8_t role; uint16_t value; } metric_set[] = {
         { UI_METRIC_ROW_HEIGHT, 24 }, { UI_METRIC_LIST_X, 0 },
@@ -254,6 +258,9 @@ static void classic(struct ui_theme *theme)
     };
     for (size_t i = 0; i < ARRAY_COUNT(color_set); i++)
         theme->color[color_set[i].role] = color_set[i].rgb;
+    memset(theme->dynamic, 0, sizeof(theme->dynamic));
+    for (size_t i = 0; i < ARRAY_COUNT(backgrounds); i++)
+        theme->background[i] = UI_BG_SOLID;
     for (size_t i = 0; i < ARRAY_COUNT(metric_set); i++)
         theme->metric[metric_set[i].role] = metric_set[i].value;
     strcpy(theme->font[UI_FONT_LIST], "16-helvetica-bold");
@@ -316,20 +323,18 @@ static void plastic(struct ui_theme *theme)
 
 void ui_theme_builtin(struct ui_theme *theme, enum ui_theme_builtin_id id)
 {
-    bool light = id != UI_THEME_SCRIM;
     memset(theme, 0, sizeof(*theme));
     for (size_t i = 0; i < ARRAY_COUNT(colors); i++)
     {
-        theme->color[i] = light ? colors[i].light : colors[i].scrim;
-        if (!light)
-            theme->dynamic[i] = colors[i].palette;
+        theme->color[i] = colors[i].scrim;
+        theme->dynamic[i] = colors[i].palette;
     }
     for (size_t i = 0; i < ARRAY_COUNT(fonts); i++)
         strcpy(theme->font[i], fonts[i].name);
     for (size_t i = 0; i < ARRAY_COUNT(metrics); i++)
         theme->metric[i] = metrics[i].value;
     for (size_t i = 0; i < ARRAY_COUNT(backgrounds); i++)
-        theme->background[i] = light ? UI_BG_SOLID : backgrounds[i].scrim;
+        theme->background[i] = backgrounds[i].scrim;
     theme->background[UI_BG_STATUS] = UI_BG_COVER_TINT;
     theme->motion_scale = UI_THEME_MOTION_ONE;
     for (size_t i = 0; i < UI_MOTION_COUNT; i++)

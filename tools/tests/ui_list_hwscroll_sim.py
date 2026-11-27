@@ -4,7 +4,7 @@
 The simulator emulates the iPod Classic panel: each frame is the last one
 moved by its shift with its bands laid over, compared with the framebuffer.
 With PODBOX_HWSCROLL_LOG set it prints one line per frame. Under Scrim (no
-album art), Light and Classic this drives a slow scroll, a fast spin and
+album art) and Classic this drives a slow scroll, a fast spin and
 both ends of the list, and checks that frames went this way and that no
 pixel of any of them differed. Classic's rows fill the list unevenly, so
 there only the frames that leave the rows standing may go this way. Last
@@ -212,7 +212,7 @@ def main():
             env = dict(os.environ, DISPLAY=":" + number, XDG_RUNTIME_DIR=str(runtime),
                        SDL_VIDEODRIVER="x11", SDL_AUDIODRIVER="dummy",
                        SDL_RENDER_DRIVER="software", LIBGL_ALWAYS_SOFTWARE="1")
-            for theme in ("scrim", "light", "classic"):
+            for theme in ("scrim", "classic"):
                 result[theme] = run(args.binary, args.resource, root / theme,
                                     theme, args.output, strips, env)
     (args.output / "result.json").write_text(json.dumps(result, indent=2) + "\n")

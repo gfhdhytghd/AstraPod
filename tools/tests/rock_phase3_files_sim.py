@@ -247,9 +247,9 @@ def main():
     parser.add_argument("evidence", type=lambda value: Path(value).resolve())
     parser.add_argument("--modules", type=lambda value: Path(value).resolve())
     parser.add_argument("--plugin", choices=CASES, action="append")
-    parser.add_argument("--theme", choices=("light", "scrim"), action="append")
+    parser.add_argument("--theme", choices=("scrim",), action="append")
     args = parser.parse_args()
-    for theme in args.theme or ("scrim", "light"):
+    for theme in args.theme or ("scrim",):
         for plugin in args.plugin or CASES:
             with session(args, plugin, theme) as (sim, disk):
                 CASES[plugin](sim, disk)

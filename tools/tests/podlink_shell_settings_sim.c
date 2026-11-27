@@ -13,6 +13,7 @@
 #include "settings/shell_menu.h"
 #include "settings/shell_value.h"
 #include "system/activity.h"
+#include "ui/native_theme_runtime.h"
 
 static unsigned operation;
 static unsigned ordinal;
@@ -209,6 +210,20 @@ static void test_recording(void)
 
 void __wrap_root_menu(void)
 {
+    const char *test = getenv("PODBOX_SETTINGS_TEST");
+    if (test && !strcmp(test, "test-light-migration"))
+    {
+        struct ui_theme active, scrim;
+        assert(!strcmp(global_settings.native_theme, "scrim"));
+        ui_theme_snapshot(&active);
+        ui_theme_builtin(&scrim, UI_THEME_SCRIM);
+        assert(!memcmp(&active, &scrim, sizeof(active)));
+        assert(global_settings.scroll_delay == 777);
+        call_storage_idle_notifys(true);
+        puts("PASS boot migrates saved Light to Scrim");
+        exit(0);
+    }
+
     global_settings.settings_mode = SETTINGS_MODE_STANDARD;
     test_tree();
 
@@ -222,7 +237,7 @@ void __wrap_root_menu(void)
     value_case("text viewer text colour", "rgb", "ff0000", "ff0000", "zz0000", NULL);
     value_case("eq filter 1", "custom", "200, 10, 20, PEAK",
                "200, 10, 20, PEAK", "200, 0, 20, PEAK", NULL);
-    value_case("native theme", "text", "light", "light", "missing-theme", NULL);
+    value_case("native theme", "text", "classic", "classic", "missing-theme", NULL);
     value_case("lang", "file", "english", LANG_DIR "/english.lng",
                "missing-language", NULL);
     assert(!ui_working());

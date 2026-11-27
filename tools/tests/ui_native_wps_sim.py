@@ -109,8 +109,7 @@ def main():
             variants = (("old", args.baseline, False, "scrim"),)
             if not args.capture_only:
                 variants += (("off", args.candidate, False, "scrim"),
-                             ("native", args.candidate, True, "scrim"),
-                             ("light", args.candidate, True, "light"))
+                             ("native", args.candidate, True, "scrim"))
             for mode, binary, native, theme in variants:
                 root = fixture / mode
                 with zipfile.ZipFile(args.sim_codecs) as archive:
@@ -140,11 +139,6 @@ def main():
                 for label, old, new in zip(("playing", "paused"), captures["old"], captures[mode])
             }
         assert not any(count for state in result.values() for count in state.values()), result
-        result["light"] = {}
-        for label, image in zip(("playing", "paused"), captures["light"]):
-            background = image.getpixel((319, 239))
-            assert all(channel > 235 for channel in background), background
-            result["light"][label] = {"background_rgb": background}
         (args.output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
         print("PASS local Scrim native WPS parity, without the WPS skin file")
 

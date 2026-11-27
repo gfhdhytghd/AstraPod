@@ -452,7 +452,7 @@ Two upstream files reach the app layer by bare include name, through `api/` stub
 | `docs/CREDITS` | PodBox, RockPod, Spun, accessory protocol, car protocol, themes-and-fonts, speech and iPod Video display blocks above `For Rockbox:`, a heading this fork adds. Upstream's list below it is untouched, trailing newline included, so merges apply. |
 | `docs/LICENSES` | The CMU Pronouncing Dictionary's licence appended, for `cmudict.bin`. Upstream's text above it is untouched. |
 | `docs/podbox/` (new) | The fork's documents: user guides, `settings-help.txt`, the iAP source ledgers, this file and `upstream-commit-log.md`. |
-| `apps-ipod/default-config.cfg` | First-boot settings, including built-in Scrim and its default fonts. The firmware also provides Light. |
+| `apps-ipod/default-config.cfg` | First-boot settings, including built-in Scrim and its default fonts. |
 | `.gitignore` | `/build*` narrowed to the build directories; local drafts, `dist/`, editor state and `build-bootloader.sh`'s output added. |
 
 ---

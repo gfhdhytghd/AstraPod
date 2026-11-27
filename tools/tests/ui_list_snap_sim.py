@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check snapped list scrolling in SDL: under a custom theme that sets
 style.list_scroll=snap on Scrim's tokens, the rows jump a whole row and only
-the selection marker glides; Light ends where an older build does, but for
+the selection marker glides; Scrim ends where an older build does, but for
 the fast spin, which follows stock's wheel.
 
 Arguments: NEW_ROCKBOXUI NEW_ZIP OLD_ROCKBOXUI OLD_ZIP OUTPUT_DIRECTORY
@@ -247,7 +247,7 @@ def main():
                              args.output, env, SCENARIOS)
             result["snap"] = check_snap(snap)
             result["snap"]["perf"] = perf_captures(perf)
-            for theme in ("light",):
+            for theme in ("scrim",):
                 new, _ = run(args.new, args.new_zip, root / f"{theme}-after", theme,
                              args.output, env, SCENARIOS)
                 old, _ = run(args.old, args.old_zip, root / f"{theme}-before", theme,
@@ -271,7 +271,7 @@ def main():
                     }
                 result[theme] = compare
     (args.output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    print("PASS snapped list scrolling; Light end frames unchanged but the fast spin")
+    print("PASS snapped list scrolling; Scrim end frames unchanged but the fast spin")
 
 
 if __name__ == "__main__":

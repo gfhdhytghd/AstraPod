@@ -7,7 +7,7 @@ is played, and the status bar of the file list is cropped and zoomed 8x
 while it plays and again once it is paused.
 
     app_tray_sim.py SIMULATOR RESOURCES EVIDENCE [--store 1|2]
-                    [--mochi-frame N] [--themes scrim,light,classic,...]
+                    [--mochi-frame N] [--themes scrim,classic,...]
                     [--trays 0,1,2] [--check] [--demo]
 
 RESOURCES is the simulator build's rockbox.zip after the bundle steps.
@@ -16,7 +16,7 @@ build from before the 12 x 12 tray; --store 2 writes the current one.
 --check asserts, in Classic and Fruit Company, that each tray icon's ink
 lies within the playback icon's rows, that a 12-row icon spans the
 battery's, and that 7 clear columns separate the tray's drawn pixels. In
-Scrim and Light it asserts that the playback icon sits against the battery
+Scrim it asserts that the playback icon sits against the battery
 and the tray left of it, 9 clear columns between the pause icon's drawn
 pixels and each neighbour's and between tray icons, and that a 12-row icon
 is centred.
@@ -39,11 +39,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ui_menu_sim import FPS, Screen, process  # noqa: E402
 from ui_native_wps_sim import add_wave_fixture  # noqa: E402
 
-THEMES = ("scrim", "light", "classic", "fruit-company")
+THEMES = ("scrim", "classic", "fruit-company")
 ART_THEMES = ("classic", "fruit-company")
-FLAT_THEMES = ("scrim", "light")
+FLAT_THEMES = ("scrim",)
 FLAT_GAP = 9
-STATUS_HEIGHT = {"scrim": 35, "light": 35, "classic": 20, "fruit-company": 20}
+STATUS_HEIGHT = {"scrim": 35, "classic": 20, "fruit-company": 20}
 ZOOM = 8
 
 # MochiPod's frames: content, asleep, needs care, sick or dead.

@@ -201,6 +201,6 @@ DLL beside it.
 
 Either way, run `make zip`, then `../bundle-theme.sh`, `../bundle-rocks.sh`,
 `../bundle-help.sh`, `../bundle-trim.sh`, `../bundle-speech.sh` and
-`../bundle-font.sh`. Unzip the result into `simdisk/`. Scrim and Light are
-built into the simulator. `bundle-theme.sh` supplies the native fonts and
+`../bundle-font.sh`. Unzip the result into `simdisk/`. Scrim, Classic and
+Fruit Company are built into the simulator. `bundle-theme.sh` supplies the native fonts and
 the first-boot settings for a fresh `simdisk/`.

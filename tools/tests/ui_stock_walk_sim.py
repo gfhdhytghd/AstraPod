@@ -512,7 +512,7 @@ NATIVE_ORDER = ("root menu order: database,pictureflow,playlists,files,images,"
                 "videos,plugins,settings,system_menu,!wps\n"
                 "settings mode: everything\n")
 TREES = {"fruit-company": FRUIT_TREE, "classic": NATIVE_TREE,
-         "scrim": NATIVE_TREE, "light": NATIVE_TREE}
+         "scrim": NATIVE_TREE}
 
 
 

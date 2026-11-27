@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--kind", choices=("usb", "yesno"), default="usb")
     parser.add_argument("--retained", action="store_true",
                         help="compare the retained overlay with motion disabled")
-    parser.add_argument("--theme", choices=("scrim", "light"), default="scrim")
+    parser.add_argument("--theme", choices=("scrim",), default="scrim")
     parser.add_argument("--nested-usb", action="store_true",
                         help="inject simulated USB consent while yes/no is open")
     args = parser.parse_args()
@@ -73,8 +73,7 @@ def main():
                 ) as firmware:
                     time.sleep(120 / FPS)
                     screen = Screen(env, firmware)
-                    if args.theme == "scrim":
-                        screen.wait_full_charge()
+                    screen.wait_full_charge()
 
                     def capture(motion, edges):
                         output = args.out / f"{motion}.gif" if animations == "on" else None
@@ -90,8 +89,6 @@ def main():
                         for key in ("Down", "Down", "Right", "Up", "Right"):
                             screen.tap(key)
                             time.sleep(24 / FPS)
-                        if args.theme == "light":
-                            screen.wait_full_charge()
                         open_key, close_key = "Right", "space"
                     else:
                         open_key, close_key = "u", "Escape"
@@ -142,12 +139,6 @@ def main():
                     for state, image in states[mode].items()
                 }
     (args.out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    if args.retained and args.theme == "light":
-        assert not any(result["pixel_diff"]["off"].values()), result["pixel_diff"]
-        on = result["pixel_diff"]["on"]
-        assert on["confirmation"] and not (on["page"] or on["returned"]), on
-        print(f"PASS Light theme restyles retained {args.kind} confirmation")
-        return
     assert not any(pixels for mode in result["pixel_diff"].values()
                    for pixels in mode.values()), result["pixel_diff"]
     if args.retained:

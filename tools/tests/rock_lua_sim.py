@@ -121,6 +121,8 @@ def exercise(simulator, archive, case, theme):
                 capture("boomshine-move")
                 tap("menu")
                 capture("boomshine-exit", "press button to exit")
+                # Boomshine clears queued input 500 ms after drawing its prompt.
+                time.sleep(.5)
                 tap("back")
                 capture("boomshine-return", "boomshine", "picross", "pixel")
 
@@ -168,7 +170,7 @@ def main():
     parser.add_argument("archive", type=Path)
     parser.add_argument("evidence", type=Path)
     args = parser.parse_args()
-    for theme in ("scrim", "light"):
+    for theme in ("scrim",):
         exercise(args.simulator.resolve(), args.archive.resolve(),
                  args.evidence.resolve() / theme, theme)
 

@@ -1,10 +1,10 @@
 # Native PodBox theme format
 
-The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Light theme uses light surfaces, dark text and solid backgrounds with the same geometry. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica and with its own bitmaps. The built-in Fruit Company theme looks like Classic and replaces AstraPod's menus with the original firmware's: Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle Songs.
+The native interface uses design tokens for colour, font, geometry, backgrounds and motion. Screen code defines the layout. The built-in Scrim theme supplies the default tokens. The built-in Classic theme looks and moves like the original iPod Classic firmware, in that firmware's Helvetica and with its own bitmaps. The built-in Fruit Company theme looks like Classic and replaces AstraPod's menus with the original firmware's: Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle Songs.
 
 ## Installing and choosing a theme
 
-Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Settings → Theme Settings → Native theme**; under Fruit Company that is **Settings → Advanced Settings → Theme Settings → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim`, `light`, `classic` and `fruit-company`. A saved `plastic` selects Classic. The default is `scrim`.
+Store custom themes at `.rockbox/native-themes/NAME.podtheme`. Choose a theme in **Settings → Theme Settings → Native theme**; under Fruit Company that is **Settings → Advanced Settings → Theme Settings → Native theme**. The theme applies immediately. The saved setting is `native theme: NAME`. The built-in names are `scrim`, `classic` and `fruit-company`. A saved `plastic` selects Classic. The default is `scrim`.
 
 Place referenced font files in `.rockbox/fonts/`. Use PBF1 `.pbf` files for text and an RB12 `.fnt` file for icons. Firmware falls back to Scrim if a theme file is missing or malformed, or if it references an unsupported font. It records the failure in `.rockbox/native-theme.log`.
 
@@ -55,7 +55,7 @@ Scrim's album-driven defaults are `palette.background=dominant,0,15`, `palette.l
 
 Use `font.<role>=<basename>` to reference a font. The basename can contain 1–31 ASCII letters, digits, hyphens and underscores, and must start with a letter or digit. The firmware appends `.pbf` for text roles and `.fnt` for `font.icon`. `font.icon` uses the glyph mapping for the built-in status and navigation symbols. Use an icon font with the same glyph assignments to preserve their meaning.
 
-| Role | Scrim and Light | Classic |
+| Role | Scrim | Classic |
 | --- | --- | --- |
 | `list` | `18-noto-sans` | `16-helvetica-bold` |
 | `title` | `18-noto-sans-bold` | `17-helvetica-bold` |
@@ -133,7 +133,7 @@ edges without shadows.
 `background.list`, `background.wps` and `background.lyrics` accept `solid`,
 `blurred_cover` or `cover_scrim`. Scrim uses `blurred_cover` for lists and
 lyrics. Its Now Playing mode is `cover_scrim`, which draws the sharp cover
-over the blurred background. Light uses `solid` throughout.
+over the blurred background.
 
 Handoff inherits the Now Playing backdrop, its `wps_bg` fallback and its
 contrast tint. The parser still accepts `background.handoff`, `handoff_bg`
@@ -188,14 +188,13 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 | `list_rows` | `pitch`, `fill` | The rows fill the list's height: the pixels left below the last whole row go one each to the top rows, so nine 24-pixel rows in 220 pixels become four of 25 and five of 24. |
 | `menu_tree` | `astrapod`, `stock` | The main menu and everything under it are the original iPod Classic's: Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle Songs, with Menu going back one level. AstraPod's own settings are under **Settings → Advanced Settings**, its Games, Other Apps, Demos, Files and System menu under **Extras**, and its Playback Report is a main menu row that **Settings → Main Menu** starts with off. A row the original firmware has and AstraPod does not either does nothing, as an empty list does there, or says it is not available. Choosing a theme with `stock` asks first, and choosing a theme that changes this goes back to the main menu. |
 
-Light keeps Scrim's styles.
 Classic sets the second keyword of every style except `list_scroll` and
 `menu_tree`. Fruit Company is Classic with `style.menu_tree=stock`. To
 start a custom theme from Classic, copy its values from the table below.
 
 ### The Classic theme
 
-Classic uses Light's colours as its base, with these changes:
+Classic uses solid backgrounds and a fixed palette. Its main overrides are:
 
 ```ini
 color.background = ffffff

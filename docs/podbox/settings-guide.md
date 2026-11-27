@@ -37,6 +37,7 @@ Settings
 ├─ Recording Settings          inputs, formats, levels and automatic recording
 ├─ Library                     the browsers, the database, artwork, the viewers,
 │                              and Maintenance
+├─ Theme Settings              native theme and status bar cover tint
 ├─ Appearance                  themes, fonts, colours, scrolling and the menus
 ├─ Battery & Power             brightness, backlight, sleep, disk and charging
 ├─ System                      USB, accessories, language, time, settings
@@ -419,6 +420,13 @@ itself when ejected, to load the new database. **Update Art Cache** and
 **Rebuild Art Cache** have `artcache_pb.exe` beside it, run the same way;
 after new music, run it after `database_pb.exe`.
 
+### Theme Settings
+
+| Setting | What it does | Default | |
+|---|---|---|---|
+| Native theme | Chooses the built-in interface theme: Scrim, Classic or Fruit Company. Custom themes in .rockbox/native-themes also appear here. | Scrim | |
+| Status Bar Cover Tint | Uses colours from the playing track’s cover in the status bar. | On |  |
+
 ### Appearance
 
 | Setting | What it does | Default | |
@@ -465,7 +473,6 @@ Separator set above zero.
 | `database art row height` | Row height in the database browser when album or artist art is shown beside rows. A theme-author setting -- it has to match the artwork the theme draws. | 52 px | **Cfg** |
 | Show Icons | Draws an icon beside each row in lists and menus. Turning them off gives the text more room. | Yes |  |
 | Status Bar | Whether the clock and battery strip is drawn, and at which edge. | Top |  |
-| Status Bar Cover Tint | Uses colours from the playing track’s cover in the status bar. | On |  |
 | Animations | Enables animated transitions between screens and pages. | On |  |
 | Scroll Bar ▸ Scroll Bar | Whether a scroll bar is drawn beside lists, and on which side. | Left |  |
 | Scroll Bar ▸ Scroll Bar Width | How wide the scroll bar beside lists is, in pixels. | 6 px | **Adv** |
@@ -719,7 +726,7 @@ restart, which costs battery life: restart the player afterwards.
 |---|---|---|---|
 | Sync time from computer | Sets the player's clock from a connected computer running HerdRemote. On by default. Switch off to set the date and time manually. | On | |
 | Time Format | Whether times are shown on a 12- or 24-hour clock. | 12 Hour Clock |  |
-| Time in Title | Shows the time in the status bar in place of the screen's title. The title still shows for two seconds when a screen opens, and for a few seconds after the wheel turns. Changes nothing on a theme whose bar has a clock of its own, such as Scrim and Light. | Off |  |
+| Time in Title | Shows the time in the status bar in place of the screen's title. The title still shows for two seconds when a screen opens, and for a few seconds after the wheel turns. Changes nothing on a theme whose bar has a clock of its own, such as Scrim. | Off |  |
 
 ### System — Startup/Shutdown
 

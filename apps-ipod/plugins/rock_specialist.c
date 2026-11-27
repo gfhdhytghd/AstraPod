@@ -162,8 +162,7 @@ int rock_remove_theme_file(const char *path)
         return -1;
     size_t length = extension - name;
     const char *active = global_settings.native_theme;
-    if ((length == 5 && (!strncasecmp(name, "scrim", length) ||
-                         !strncasecmp(name, "light", length))) ||
+    if ((length == 5 && !strncasecmp(name, "scrim", length)) ||
         (length == 7 && (!strncasecmp(name, "classic", length) ||
                          !strncasecmp(name, "plastic", length))) ||
         (length == 13 && !strncasecmp(name, "fruit-company", length)) ||

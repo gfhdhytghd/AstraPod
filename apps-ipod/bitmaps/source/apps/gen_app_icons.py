@@ -30,7 +30,7 @@ APP_LIST = HERE.parents[2] / 'screens' / 'browse' / 'app_list.c'
 MAGIC = b'AICN'
 VERSION = 1
 ID_BYTES = 48
-# The list art sizes of the built-in themes: Classic 55, Scrim and Light 44.
+# The list art sizes of the built-in themes: Classic 55, Scrim 44.
 SIZES = (55, 44)
 PLACEHOLDER = '*'
 

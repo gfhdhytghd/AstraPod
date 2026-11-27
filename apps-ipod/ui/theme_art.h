@@ -9,8 +9,9 @@
  * (stock_art.h) in place of its own shapes. Plastic is Classic drawn so. */
 bool ui_theme_art(const struct ui_theme *theme);
 
-/* The stock status bar battery for `percent` charge, in 23 steps. */
-enum stock_art_id ui_art_battery(int percent);
+/* Shared frame for the white and black stock status bars. */
+unsigned ui_art_battery_index(int percent);
+enum stock_art_id ui_art_battery(unsigned frame);
 
 /* Repeat `id` across the `width` columns from screen x, its top at y, as
  * stock lays a bar's tile: from the left, and with `flush` the last whole

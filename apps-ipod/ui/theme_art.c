@@ -1,13 +1,39 @@
 #include "theme_art.h"
 #include "system.h"
 #include "plastic_columns.h"
+#include "kernel.h"
+#include "powermgmt.h"
+#include "system/battery_calibration.h"
 
 bool ui_theme_art(const struct ui_theme *theme)
 {
     return theme && theme->style[UI_STYLE_ART] == UI_ART_PLASTIC;
 }
 
-enum stock_art_id ui_art_battery(int percent)
+unsigned ui_art_battery_index(int percent)
+{
+    static unsigned frame;
+    static unsigned long last_drop;
+
+    percent = MIN(MAX(percent, 0), 100);
+#if defined(IPOD_6G) && !defined(SIMULATOR)
+    unsigned level = battery_calibration_icon_level(percent);
+#else
+    unsigned level = percent * 15 / 100;
+#endif
+    unsigned target = (level * 256 / 15) * 22 / 256;
+    unsigned long now = current_tick;
+    if (target >= frame)
+        frame = target;
+    else if (now - last_drop >= POWER_THREAD_STEP_TICKS)
+    {
+        frame--;
+        last_drop = now;
+    }
+    return frame;
+}
+
+enum stock_art_id ui_art_battery(unsigned frame)
 {
     static const enum stock_art_id level[] = {
         STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_0,
@@ -34,9 +60,7 @@ enum stock_art_id ui_art_battery(int percent)
         STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_21,
         STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_22,
     };
-    int last = ARRAYLEN(level) - 1;
-    percent = MIN(MAX(percent, 0), 100);
-    return level[(percent * last + 50) / 100];
+    return level[frame];
 }
 
 void ui_art_tile(enum stock_art_id id, int x, int y, int width, bool flush,

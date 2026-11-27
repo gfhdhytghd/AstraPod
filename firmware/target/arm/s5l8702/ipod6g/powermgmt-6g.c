@@ -24,6 +24,7 @@
 #include "power.h"
 #include "audiohw.h"
 #include "adc-target.h"
+#include "battery-curve-6g.h"
 
 unsigned short battery_level_disksafe = 3500;
 
@@ -32,14 +33,14 @@ unsigned short battery_level_shutoff = 3300;
 /* voltages (millivolt) of 0%, 10%, ... 100% when charging disabled */
 unsigned short percent_to_volt_discharge[11] =
 {
-    3500, 3670, 3720, 3750, 3770, 3800, 3860, 3920, 3980, 4070, 4170
+    BATTERY_STOCK_DECILES
 };
 
 #if CONFIG_CHARGING
 /* voltages (millivolt) of 0%, 10%, ... 100% when charging enabled */
 unsigned short percent_to_volt_charge[11] =
 {
-    3700, 3820, 3900, 3950, 3990, 4030, 4070, 4120, 4170, 4190, 4200
+    BATTERY_STOCK_DECILES
 };
 #endif /* CONFIG_CHARGING */
 

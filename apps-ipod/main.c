@@ -40,6 +40,7 @@
 #endif
 #include "wifi.h"
 #include "powermgmt.h"
+#include "system/battery_calibration.h"
 #include "adc.h"
 #include "i2c.h"
 #ifndef DEBUG
@@ -908,6 +909,9 @@ static void init(void)
 
     CHART(">init_battery_tables");
     init_battery_tables();
+#if defined(IPOD_6G) && !defined(SIMULATOR)
+    battery_calibration_init();
+#endif
     CHART("<init_battery_tables");
     logfile_init();
     init_library_files();

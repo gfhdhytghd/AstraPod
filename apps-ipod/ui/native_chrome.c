@@ -26,6 +26,7 @@
 #include "sound.h"
 #include "system.h"
 #include "system/activity.h"
+#include "system/battery_calibration.h"
 #include "timefuncs.h"
 
 #define BUSY_HIDDEN UINT8_MAX
@@ -82,6 +83,9 @@ bool native_chrome_poll(struct native_chrome *chrome)
     const struct tm *now = get_time();
     bool clock_valid = valid_time(now);
     int battery = battery_level();
+#if defined(IPOD_6G) && !defined(SIMULATOR)
+    battery = battery_calibration_display(battery);
+#endif
     struct native_chrome_state next = {
         .battery = MIN(MAX(battery, -1), 100),
         .hour = clock_valid ? now->tm_hour : -1,
@@ -93,6 +97,8 @@ bool native_chrome_poll(struct native_chrome *chrome)
         .busy = busy_state(),
         .volume_visible = native_chrome_volume_visible(),
     };
+    if (battery >= 0 && ui_theme_art(chrome->theme))
+        next.stock_battery_frame = ui_art_battery_index(battery);
     if (next.volume_visible)
     {
         int minimum = sound_min(SOUND_VOLUME);
@@ -539,7 +545,7 @@ static void draw_art_indicators(const struct native_chrome *chrome,
     const struct native_chrome_state *state = &chrome->state;
     struct ui_rect clip = { damage->x, damage->y, damage->width,
                             damage->height };
-    enum stock_art_id level = ui_art_battery(MAX(state->battery, 0));
+    enum stock_art_id level = ui_art_battery(state->stock_battery_frame);
     uint32_t pixels[26 * 13] = { 0 };
     struct stock_canvas canvas = {
         pixels, x + layout.battery_x, y + 3, stock_art[level].width,

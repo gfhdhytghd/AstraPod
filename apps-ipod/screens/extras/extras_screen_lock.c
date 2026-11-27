@@ -379,7 +379,9 @@ static void compose(struct stock_canvas *c)
 
 static void paint(void)
 {
-    uint32_t *band = extras_band[0];
+    uint32_t *band = extras_band(0);
+    if (!band)
+        return;
     const struct ui_rect all = { 0, 0, LCD_WIDTH, LCD_HEIGHT };
     for (int y = 0; y < LCD_HEIGHT; y += BAND_ROWS)
     {

@@ -4,6 +4,7 @@
  * The stock black status bar of the full-screen Extras pages.
  ****************************************************************************/
 #include "config.h"
+#include "core_alloc.h"
 #include "system.h"
 #include "font.h"
 #include "power.h"
@@ -13,7 +14,22 @@
 #include "ui/theme_art.h"
 #include "extras_bar.h"
 
-uint32_t extras_band[2][LCD_WIDTH * EXTRAS_BAND_ROWS];
+/* 20 KiB the pages hold only while one is open: .bss has no room for it */
+#define BAND_PIXELS (LCD_WIDTH * EXTRAS_BAND_ROWS)
+static int band_handle;
+static uint32_t *band_pixels;
+
+uint32_t *extras_band(int i)
+{
+    if (!band_pixels)
+    {
+        band_handle = core_alloc(2 * BAND_PIXELS * sizeof(uint32_t));
+        if (band_handle <= 0)
+            return NULL;
+        band_pixels = core_get_data_pinned(band_handle);
+    }
+    return band_pixels + i * BAND_PIXELS;
+}
 
 #define TITLE_FONT FONT_DIR "/13-helvetica-bold.pbf"
 #define TITLE_BASELINE 15
@@ -104,6 +120,12 @@ void extras_bar_draw(const char *title)
 
 void extras_bar_release(void)
 {
+    if (band_pixels)
+    {
+        core_put_data_pinned(band_pixels);
+        band_handle = core_free(band_handle);
+        band_pixels = NULL;
+    }
     if (title_font >= 0)
         font_unload(title_font);
     title_font = -1;

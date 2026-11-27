@@ -618,10 +618,12 @@ static void compose_editor(struct stock_canvas *band, const struct editor *e)
 
 static void paint_editor(const struct editor *e)
 {
+    uint32_t *pixels = extras_band(0);
+    if (!pixels)
+        return;
     for (int y = 0; y < LCD_HEIGHT; y += BAND_ROWS)
     {
-        struct stock_canvas band = { extras_band[0], 0, y, LCD_WIDTH,
-                                     BAND_ROWS };
+        struct stock_canvas band = { pixels, 0, y, LCD_WIDTH, BAND_ROWS };
         compose_editor(&band, e);
         stock_canvas_show(&band, (struct ui_rect){ 0, y, LCD_WIDTH,
                                                    BAND_ROWS });

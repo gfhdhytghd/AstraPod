@@ -278,7 +278,7 @@ static const uint8_t lap_alpha[LAPS_SHOWN] = { 120, 54, 30 };
  * its row's alpha. */
 static void put_lap(struct stock_canvas *c, const struct sw_log *log, int i)
 {
-    uint32_t *faded = extras_band[1];
+    uint32_t *faded = extras_band(1);
     int baseline = LAP_BASELINE + i * LAP_PITCH;
     if (c->y >= baseline + 6 || c->y + c->height <= baseline - 22)
         return;
@@ -331,7 +331,9 @@ static void compose_pane(struct stock_canvas *c)
 /* Compose `clip` a band at a time and write it to the framebuffer. */
 static void paint(struct ui_rect clip, void (*compose)(struct stock_canvas *))
 {
-    uint32_t *band = extras_band[0];
+    uint32_t *band = extras_band(0);
+    if (!band)
+        return;
     for (int y = clip.y; y < clip.y + clip.height; y += BAND_ROWS)
     {
         struct stock_canvas c = { band, clip.x, y, clip.width,

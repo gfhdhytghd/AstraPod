@@ -30,7 +30,7 @@ from fruit_tree_sim import press, settle
 # (row in Settings, or (Date & Time, row in it); cfg name; its default; the
 # values Select steps through from the default, in stock's order)
 ROWS = [
-    ("shuffle", 1, "shuffle", "off", ["on", "off"]),
+    ("shuffle", 1, "shuffle", "off", ["on", "albums", "off"]),
     ("repeat", 2, "repeat", "off", ["one", "all", "off"]),
     ("sound_check", 10, "replaygain type", "track shuffle",
      ["off", "track shuffle"]),

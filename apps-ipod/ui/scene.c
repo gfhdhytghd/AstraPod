@@ -17,6 +17,7 @@
 #include "retained.h"
 #include "scene.h"
 #include "statusbar.h"
+#include <stdlib.h>
 #include <string.h>
 
 #define PAGE_PIXELS (LCD_WIDTH * LCD_HEIGHT)
@@ -38,6 +39,7 @@ static struct ui_scene *owner;
 static unsigned int owner_thread;
 static const void *root_page, *restored_page;
 static bool (*parent_painter)(const void *page);
+static int (*backdrop_source)(void);
 
 size_t ui_scene_reserve_size(void)
 {
@@ -71,8 +73,124 @@ static int position(const struct ui_scene *scene, unsigned frame)
     return offset;
 }
 
+/* A pixel FORE_LEVELS or more 5-bit steps from the backdrop it was painted
+ * on keeps its colour as it moves. A nearer one is an antialiased edge, and
+ * takes the still backdrop in proportion. */
+#define FORE_LEVELS 8
+
+static inline int clamp_channel(int value, int max)
+{
+    return value < 0 ? 0 : value > max ? max : value;
+}
+
+/* `light` is in UI_FULL_OPACITY units. */
+static inline fb_data dim_pixel(fb_data c, unsigned light)
+{
+    const uint32_t mask = 0x07e0f81f;
+    uint32_t v = (c | ((uint32_t)c << 16)) & mask;
+    v = ((v * ((light + 4) >> 3)) >> 5) & mask;
+    return v | (v >> 16);
+}
+
+/* `weight` of a over b, in UI_FULL_OPACITY units. */
+static inline fb_data mix_pixel(fb_data a, fb_data b, unsigned weight)
+{
+    const uint32_t mask = 0x07e0f81f;
+    uint32_t fa = (a | ((uint32_t)a << 16)) & mask;
+    uint32_t fb = (b | ((uint32_t)b << 16)) & mask;
+    uint32_t c = (fb + (((fa - fb) * ((weight + 4) >> 3)) >> 5)) & mask;
+    return c | (c >> 16);
+}
+
+/* A page pixel p, painted on backdrop pixel s, moved over backdrop pixel d
+ * and dimmed to `light`. The backdrop itself does not dim. */
+static inline fb_data still_pixel(fb_data p, fb_data s, fb_data d,
+                                  unsigned light)
+{
+    if (p == s)
+        return d;
+    int pr = p >> 11, pg = (p >> 5) & 63, pb = p & 31;
+    int sr = s >> 11, sg = (s >> 5) & 63, sb = s & 31;
+    int far = MAX(MAX(abs(pr - sr), abs(pg - sg) >> 1), abs(pb - sb));
+    if (far < FORE_LEVELS)
+    {
+        int keep = FORE_LEVELS - far;
+        pr = clamp_channel(pr + ((d >> 11) - sr) * keep / FORE_LEVELS, 31);
+        pg = clamp_channel(pg + (((d >> 5) & 63) - sg) * keep / FORE_LEVELS,
+                           63);
+        pb = clamp_channel(pb + ((d & 31) - sb) * keep / FORE_LEVELS, 31);
+        p = pr << 11 | pg << 5 | pb;
+    }
+    return light >= UI_FULL_OPACITY ? p : dim_pixel(p, light);
+}
+
+typedef uint32_t __attribute__((may_alias)) pixel_pair;
+
+/* `n` pixels of a page whose backdrop lay under them at `under` and now lies
+ * at `still`. Where all four line up on a word, a pair at a time tests for
+ * backdrop. */
+static void still_span(fb_data *out, const fb_data *page, const fb_data *under,
+                       const fb_data *still, int n, unsigned light)
+{
+    int x = 0;
+    if (!(((uintptr_t)out | (uintptr_t)page | (uintptr_t)under |
+           (uintptr_t)still) & 3))
+    {
+        for (; x + 1 < n; x += 2)
+        {
+            if (*(const pixel_pair *)(page + x) ==
+                *(const pixel_pair *)(under + x))
+                *(pixel_pair *)(out + x) = *(const pixel_pair *)(still + x);
+            else
+            {
+                out[x] = still_pixel(page[x], under[x], still[x], light);
+                out[x + 1] = still_pixel(page[x + 1], under[x + 1],
+                                         still[x + 1], light);
+            }
+        }
+    }
+    for (; x < n; x++)
+        out[x] = still_pixel(page[x], under[x], still[x], light);
+}
+
+/* Whether an eighth of a page shows the backdrop exactly. A page on any
+ * other background matches it nowhere. */
+static bool on_backdrop(const fb_data *page, const fb_data *backdrop)
+{
+    int same = 0;
+    for (int i = 0; i < PAGE_PIXELS; i++)
+        same += page[i] == backdrop[i];
+    return 8 * same >= PAGE_PIXELS;
+}
+
+/* The backdrop pinned for a compose, or NULL to move the pages whole. */
+static const fb_data *pin_backdrop(const struct ui_scene *scene, int *handle)
+{
+    *handle = scene->still_backdrop && backdrop_source ? backdrop_source() : 0;
+    return *handle > 0 ? core_get_data_pinned(*handle) : NULL;
+}
+
+static void unpin_backdrop(int handle, const fb_data *backdrop)
+{
+    if (handle > 0)
+        core_put_data_pinned((void *)backdrop);
+}
+
+static bool pages_on_backdrop(const fb_data *back, const fb_data *front)
+{
+    int handle = backdrop_source ? backdrop_source() : 0;
+    if (handle <= 0)
+        return false;
+    const fb_data *backdrop = core_get_data_pinned(handle);
+    bool both = on_backdrop(back, backdrop) && on_backdrop(front, backdrop);
+    core_put_data_pinned((void *)backdrop);
+    return both;
+}
+
+/* `still`, when set, is the backdrop both pages are painted on, and here
+ * and below it stays in place while what is drawn over it moves. */
 static void compose(fb_data *out, const fb_data *back, const fb_data *front,
-                    int offset)
+                    int offset, const fb_data *still)
 {
     int covered = LCD_WIDTH - offset;
     int parallax = covered * PARALLAX_PERCENT / 100;
@@ -81,8 +199,18 @@ static void compose(fb_data *out, const fb_data *back, const fb_data *front,
     back += parallax;
     for (int row = 0; row < LCD_HEIGHT; row++)
     {
-        ui_blit_dim(out, back, offset, light);
-        memcpy(out + offset, front, covered * sizeof(*out));
+        if (still)
+        {
+            still_span(out, back, still + parallax, still, offset, light);
+            still_span(out + offset, front, still, still + offset, covered,
+                       UI_FULL_OPACITY);
+            still += LCD_WIDTH;
+        }
+        else
+        {
+            ui_blit_dim(out, back, offset, light);
+            memcpy(out + offset, front, covered * sizeof(*out));
+        }
         back += LCD_WIDTH;
         front += LCD_WIDTH;
         out += LCD_WIDTH;
@@ -181,11 +309,12 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
 }
 
 static void compose_pages(const struct ui_scene *scene, fb_data *out,
-                          const fb_data *back, const fb_data *front, int offset)
+                          const fb_data *back, const fb_data *front, int offset,
+                          const fb_data *still)
 {
     if (!scene->pan_top && !scene->slide)
     {
-        compose(out, back, front, offset);
+        compose(out, back, front, offset, still);
         return;
     }
     if (scene->slide && (scene->back_split || scene->front_split))
@@ -197,19 +326,67 @@ static void compose_pages(const struct ui_scene *scene, fb_data *out,
     int chrome = scene->pan_top * LCD_WIDTH;
     memcpy(out, lcd_framebuffer_default.fb_ptr, chrome * sizeof(*out));
     int left = offset < 0 ? LCD_WIDTH + offset : offset;
-    const fb_data *a = offset < 0 ? front - offset : back + LCD_WIDTH - offset;
+    /* The page on the left shows from column `shift` on. */
+    int shift = offset < 0 ? -offset : LCD_WIDTH - offset;
+    const fb_data *a = offset < 0 ? front : back;
     const fb_data *b = offset < 0 ? back : front;
     for (int row = scene->pan_top; row < LCD_HEIGHT; row++)
     {
         int i = row * LCD_WIDTH;
-        memcpy(out + i, a + i, left * sizeof(*out));
+        if (still)
+        {
+            still_span(out + i, a + i + shift, still + i + shift, still + i,
+                       left, UI_FULL_OPACITY);
+            still_span(out + i + left, b + i, still + i, still + i + left,
+                       LCD_WIDTH - left, UI_FULL_OPACITY);
+            continue;
+        }
+        memcpy(out + i, a + i + shift, left * sizeof(*out));
         memcpy(out + i + left, b + i, (LCD_WIDTH - left) * sizeof(*out));
     }
 }
 
+/* compose_push_band() over a still backdrop: the incoming row fades in over
+ * the outgoing one where they overlap, and over the backdrop beyond it. */
+static void compose_push_band_still(fb_data *out, const fb_data *back,
+                                    const fb_data *front, const fb_data *still,
+                                    int lines, int dx, unsigned ink,
+                                    int parallax, unsigned light)
+{
+    int visible_back = LCD_WIDTH - parallax;
+    for (int y = 0; y < lines; ++y)
+    {
+        if (!ink)
+        {
+            still_span(out, back + parallax, still + parallax, still,
+                       visible_back, light);
+            memcpy(out + visible_back, still + visible_back,
+                   parallax * sizeof(*out));
+        }
+        else
+        {
+            still_span(out, back + parallax, still + parallax, still, dx,
+                       light);
+            still_span(out + dx, front, still, still + dx, LCD_WIDTH - dx,
+                       UI_FULL_OPACITY);
+            for (int x = dx; ink < UI_FULL_OPACITY && x < LCD_WIDTH; x++)
+            {
+                fb_data under = x >= visible_back ? still[x] :
+                    still_pixel(back[x + parallax], still[x + parallax],
+                                still[x], light);
+                out[x] = mix_pixel(out[x], under, ink);
+            }
+        }
+        out += LCD_WIDTH;
+        back += LCD_WIDTH;
+        front += LCD_WIDTH;
+        still += LCD_WIDTH;
+    }
+}
+
 static void compose_push_band(fb_data *out, const fb_data *back, const fb_data *front,
-                              int lines, int age_half, int parallax, unsigned light,
-                              fb_data blank)
+                              const fb_data *still, int lines, int age_half,
+                              int parallax, unsigned light, fb_data blank)
 {
     if (age_half >= 2 * PUSH_ROW_FRAMES)
     {
@@ -221,6 +398,12 @@ static void compose_push_band(fb_data *out, const fb_data *back, const fb_data *
     unsigned age = MAX(0, age_half);
     int dx = MAX(2, ui_tween_sample(&row, age) & ~1);
     unsigned ink = age * UI_FULL_OPACITY / (2 * PUSH_ROW_FADE);
+    if (still)
+    {
+        compose_push_band_still(out, back, front, still, lines, dx,
+                                MIN(ink, UI_FULL_OPACITY), parallax, light);
+        return;
+    }
     unsigned under = (UI_FULL_OPACITY - MIN(ink, UI_FULL_OPACITY)) * light / UI_FULL_OPACITY;
     int visible_back = LCD_WIDTH - parallax;
     for (int y = 0; y < lines; ++y)
@@ -265,7 +448,7 @@ static void set_push_duration(struct ui_scene *scene)
 
 static void compose_push(const struct ui_scene *scene, fb_data *out,
                          const fb_data *back, const fb_data *front,
-                         unsigned frame, int offset)
+                         const fb_data *still, unsigned frame, int offset)
 {
     int covered = LCD_WIDTH - offset;
     int parallax = covered * PARALLAX_PERCENT / 100;
@@ -291,8 +474,9 @@ static void compose_push(const struct ui_scene *scene, fb_data *out,
         if (end > y)
         {
             int start = y * LCD_WIDTH;
-            compose_push_band(out + start, back + start, front + start, end - y,
-                              age, parallax, light, blank);
+            compose_push_band(out + start, back + start, front + start,
+                              still ? still + start : NULL, end - y, age,
+                              parallax, light, blank);
             y = end;
         }
     }
@@ -537,8 +721,11 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
             previous = surface(data, !scene->target_front);
             if (scene->last_offset != -1)
             {
+                int handle;
+                const fb_data *still = pin_backdrop(scene, &handle);
                 compose_pages(scene, data + 2 * PAGE_PIXELS, surface(data, false),
-                              surface(data, true), scene->last_offset);
+                              surface(data, true), scene->last_offset, still);
+                unpin_backdrop(handle, still);
                 previous = data + 2 * PAGE_PIXELS;
             }
         }
@@ -559,6 +746,8 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
     scene->pan_top = pan_top;
     scene->slide = slide;
     scene->full_screen = scene->back_still = false;
+    if (!reverse_pan)
+        scene->still_backdrop = false;
     scene->staggered = staggered;
     scene->reuse_target = reverse_pan;
     scene->row_y = scene->row_count = 0;
@@ -662,6 +851,7 @@ static bool capture_panel(struct ui_scene *scene, bool vertical)
     /* A panel page often hides the status bar, so the whole screen slides. */
     scene->pan_top = 0;
     scene->slide = slide;
+    scene->still_backdrop = false;
     scene->staggered = !vertical && !slide;
     scene->row_y = scene->row_count = 0;
     scene->back_page = parent;
@@ -790,6 +980,11 @@ bool ui_scene_restore_modal(struct ui_scene *scene)
 void ui_scene_set_parent_painter(bool (*paint)(const void *page))
 {
     parent_painter = paint;
+}
+
+void ui_scene_set_backdrop_source(int (*source)(void))
+{
+    backdrop_source = source;
 }
 
 static void swap_backdrop(struct ui_scene *scene)
@@ -993,15 +1188,22 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
             if (scene->slide && !scene->full_screen)
                 scene->tween.easing = scene->back_split != scene->front_split
                                       ? UI_EASE_LINEAR : ui_theme_easing();
+            scene->still_backdrop = pages_on_backdrop(back, front);
         }
         if (scene->vertical)
             compose_modal(out, back, front, offset,
                           scene->target_front ? 0 : scene->status_height,
                           scene->dim_color);
-        else if (scene->staggered)
-            compose_push(scene, out, back, front, frame, offset);
         else
-            compose_pages(scene, out, back, front, offset);
+        {
+            int handle;
+            const fb_data *still = pin_backdrop(scene, &handle);
+            if (scene->staggered)
+                compose_push(scene, out, back, front, still, frame, offset);
+            else
+                compose_pages(scene, out, back, front, offset, still);
+            unpin_backdrop(handle, still);
+        }
         if (panel)
             core_put_data_pinned(back);
         scene->composed_offset = pose;

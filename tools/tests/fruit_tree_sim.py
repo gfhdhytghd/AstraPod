@@ -28,14 +28,15 @@ from ui_menu_sim import FPS, Screen, process
 # (label, kind): "open" must change the screen, "empty" must not, "menu"
 # is walked as its own entry, "play" starts playback, after which the main
 # menu gains Now Playing and so is not the frame it was: it comes last.
-# "cycle:N" steps the row's value in place through N values.
+# "cycle:N" steps the row's value in place through N values. The fixture
+# contains ordinary songs with no composer tags, audiobooks, or podcasts.
 TREE = [
     ("music", [("Cover Flow", "open"), ("Genius Mixes", "open"),
                ("Playlists", "open"),
                ("Artists", "open"), ("Albums", "open"),
                ("Compilations", "empty"), ("Songs", "open"),
-               ("Genres", "open"), ("Composers", "open"),
-               ("Audiobooks", "open"), ("Search", "open")], [0]),
+               ("Genres", "open"), ("Composers", "empty"),
+               ("Audiobooks", "empty"), ("Search", "open")], [0]),
     ("videos", [("Movies", "open"), ("Rentals", "empty"),
                 ("TV Shows", "empty"), ("Music Videos", "empty"),
                 ("Video Playlists", "empty"), ("Settings", "open")], [1]),
@@ -60,7 +61,7 @@ TREE = [
                    ("24 Hour Clock", "cycle:2"), ("Time in Title", "cycle:2")],
      [5, 12]),
     ("main", [("Music", "menu"), ("Videos", "menu"), ("Photos", "menu"),
-              ("Podcasts", "open"), ("Extras", "menu"), ("Settings", "menu"),
+              ("Podcasts", "empty"), ("Extras", "menu"), ("Settings", "menu"),
               ("Shuffle Songs", "play")], []),
 ]
 

@@ -1106,6 +1106,7 @@ static void disk_worker(void)
             continue;
         }
         if (tagcache_is_busy()) continue;
+        bool defer_maintenance = ui_motion_active();
         bool active = storage_disk_is_active();
         char key[65], tier[3];
         bool lookup;
@@ -1117,8 +1118,10 @@ static void disk_worker(void)
         bool dirty = false;
         for (int i = 0; i < CIDER_SLOTS; i++)
             dirty |= cache.slot[i].length && cache.slot[i].dirty;
-        bool tracks = track_cache.state == TRACK_READ || track_cache.state == TRACK_WRITE;
-        bool wanted = lookup || nfills || load_requested || build_on || dirty || tracks;
+        bool tracks = track_cache.state == TRACK_READ ||
+                      (!defer_maintenance && track_cache.state == TRACK_WRITE);
+        bool wanted = lookup || nfills || load_requested || tracks ||
+                      (!defer_maintenance && (build_on || dirty));
         if (dirty && !active) diag.deferrals++;
         /* Foreground USB covers must eventually reach disk even when Cider
          * is the only source (no local music to keep the disk spinning). */
@@ -1128,7 +1131,8 @@ static void disk_worker(void)
         mutex_unlock(&cider_mutex);
         /* Load when the disk already spins, or when the user's browsing
          * needs it (that spin-up is theirs, not a background wake). */
-        bool load = !store.loaded && (active || wanted) &&
+        bool load = !store.loaded &&
+                    (wanted || (active && !defer_maintenance)) &&
                     !TIME_BEFORE(current_tick, load_at + HZ);
         if (load)
         {

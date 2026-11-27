@@ -10,6 +10,8 @@
 
 #include "animation.h"
 #include "audio/pcmbuf.h"
+#include "database/tagcache.h"
+#include "metadata/art_cache.h"
 #include "pace.h"
 #include "core_alloc.h"
 #include "file.h"
@@ -58,6 +60,7 @@ struct frame_capture {
     char route[32];
     struct pcmbuf_counters pcm;
     unsigned seen, render_misses, work_misses, interval_misses, half_frames;
+    unsigned database_frames, art_frames;
     uint32_t worst_render, worst_work, worst_interval, skipped;
     uint32_t render_pending, last_submission, period_q8;
     uint32_t last_start, last_phase, last_present;
@@ -421,6 +424,8 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
     capture->worst_work = MAX(work, capture->worst_work);
     capture->work_misses += work > period;
     capture->samples[capture->seen % PERF_CAPACITY] = sample;
+    capture->database_frames += tagcache_is_busy();
+    capture->art_frames += art_cache_is_busy();
     ++capture->seen;
     core_put_data_pinned(capture);
 }
@@ -568,6 +573,7 @@ void ui_perf_end(unsigned token)
         "period_us=%u te=%s async=%s rate=%s half_frames=%u "
         "phase_p50_us=%d phase_p99_us=%d te_gaps=%u te_repeats=%u "
         "present_gaps=%u present_repeats=%u "
+        "database_frames=%u art_frames=%u "
         "pcm_chunks=%u pcm_underruns=%u pcm_underruns_total=%u%s\n",
         capture->route, capture->seen, retained, first, rows ? retained : 0,
         FRAME_ARG(work_p99), FRAME_ARG(interval_p99),
@@ -578,6 +584,7 @@ void ui_perf_end(unsigned token)
         capture->async ? "on" : "off", rate, capture->half_frames,
         phase_p50, phase_p99, capture->te_gaps, capture->te_repeats,
         capture->present_gaps, capture->present_repeats,
+        capture->database_frames, capture->art_frames,
         pcm.chunks_played - capture->pcm.chunks_played,
         pcm.underruns - capture->pcm.underruns, pcm.underruns, readiness);
     core_put_data_pinned(capture);

@@ -11,7 +11,7 @@
 static struct semaphore work, resumed;
 static long worker_stack[DEFAULT_STACK_SIZE / sizeof(long)];
 
-static void background(void)
+static void probe_background(void)
 {
     for (int i = 0; i < 2; i++)
     {
@@ -30,7 +30,7 @@ void sim_motion_probe(void)
     assert(!ui_motion_active());
     semaphore_init(&work, 1, 0);
     semaphore_init(&resumed, 1, 0);
-    unsigned worker = create_thread(background, worker_stack,
+    unsigned worker = create_thread(probe_background, worker_stack,
                                     sizeof(worker_stack), 0, "probe bg"
                                     IF_PRIO(, PRIORITY_BACKGROUND)
                                     IF_COP(, CPU));

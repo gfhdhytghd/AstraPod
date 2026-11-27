@@ -16,7 +16,7 @@ static struct {
     unsigned token;
     long until;
 } scopes[MOTION_SLOTS];
-static unsigned serial, owner;
+static unsigned serial, ui_thread;
 static unsigned scope_count;
 static struct mutex lock;
 static struct semaphore wake;
@@ -28,13 +28,11 @@ static int idle_priority;
 static void drop_scope(unsigned slot)
 {
     scopes[slot].token = 0;
-    if (--scope_count == 0)
-    {
+    --scope_count;
 #ifdef HAVE_PRIORITY_SCHEDULING
-        thread_set_priority(owner, idle_priority);
+    if (!scope_count)
+        thread_set_priority(ui_thread, idle_priority);
 #endif
-        owner = 0;
-    }
 }
 
 static int expire_scopes(void)
@@ -70,6 +68,7 @@ static void watchdog(void)
 void ui_motion_schedule_init(void)
 {
     static long stack[DEFAULT_STACK_SIZE / sizeof(long)];
+    ui_thread = thread_self();
     mutex_init(&lock);
     semaphore_init(&wake, 1, 0);
     ready = create_thread(watchdog, stack, sizeof(stack), 0, "ui motion"
@@ -78,14 +77,13 @@ void ui_motion_schedule_init(void)
 
 static unsigned acquire_scope(unsigned previous)
 {
-    if (!ready)
+    if (!ready || thread_self() != ui_thread)
         return 0;
 
-    unsigned self = thread_self();
     unsigned token = 0;
     mutex_lock(&lock);
     expire_scopes();
-    if (previous && owner == self)
+    if (previous)
     {
         for (unsigned i = 0; i < MOTION_SLOTS; i++)
         {
@@ -97,7 +95,7 @@ static unsigned acquire_scope(unsigned previous)
             }
         }
     }
-    if ((!owner || self == owner) && scope_count < MOTION_SLOTS)
+    if (scope_count < MOTION_SLOTS)
     {
         unsigned slot = 0;
         while (scopes[slot].token)
@@ -109,11 +107,10 @@ static unsigned acquire_scope(unsigned previous)
         scopes[slot].until = (unsigned long)current_tick + MOTION_LIMIT;
         if (scope_count++ == 0)
         {
-            owner = self;
 #ifdef HAVE_PRIORITY_SCHEDULING
-            int priority = thread_get_priority(owner);
+            int priority = thread_get_priority(ui_thread);
             idle_priority =
-                thread_set_priority(owner, MIN(priority, PRIORITY_ANIMATION));
+                thread_set_priority(ui_thread, MIN(priority, PRIORITY_ANIMATION));
 #endif
             semaphore_release(&wake);
         }
@@ -124,19 +121,16 @@ static unsigned acquire_scope(unsigned previous)
 
 static void release_scope(unsigned token)
 {
-    if (!token)
+    if (!token || thread_self() != ui_thread)
         return;
 
     mutex_lock(&lock);
-    if (thread_self() == owner)
+    for (unsigned i = 0; i < MOTION_SLOTS; i++)
     {
-        for (unsigned i = 0; i < MOTION_SLOTS; i++)
+        if (token == scopes[i].token)
         {
-            if (token == scopes[i].token)
-            {
-                drop_scope(i);
-                break;
-            }
+            drop_scope(i);
+            break;
         }
     }
     mutex_unlock(&lock);

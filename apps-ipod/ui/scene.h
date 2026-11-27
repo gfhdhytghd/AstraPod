@@ -23,6 +23,10 @@ bool ui_scene_capture(struct ui_scene *scene, const void *from, const void *to,
 /* Move adjacent pages together below the fixed chrome. */
 bool ui_scene_capture_pan(struct ui_scene *scene, const void *from, const void *to,
                           int direction, int top);
+/* Slide a complete page as one surface for a screen-specific duration. For
+ * adjacent pages, direction is ±1 and status_height holds the chrome fixed. */
+bool ui_scene_capture_page(struct ui_scene *scene, const void *from, const void *to,
+                           bool push, int direction, int status_height, unsigned frames);
 /* The incoming list reports the already-painted visible row bands. */
 void ui_scene_push_rows(int y, int pitch, int count);
 void ui_scene_snap_push(void);

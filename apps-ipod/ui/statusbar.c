@@ -438,6 +438,10 @@ static void wake_statusbar(void)
 {
     static long next_check;
     static bool was_active;
+#ifdef HAVE_USB_PODLINK
+    if (lcd_active() && button_queue_empty() && agents_background_redraw_due())
+        button_queue_post(BUTTON_NONE, 0);
+#endif
     if (TIME_BEFORE(current_tick, next_check))
         return;
     if (viewportmanager_theme_enabled(SCREEN_MAIN) && lcd_active() &&
@@ -445,6 +449,10 @@ static void wake_statusbar(void)
     {
         bool active = indicators_moving || native_chrome_volume_visible() || sb_show_disk_activity() ||
                       sb_show_background_tasks() || sb_show_working();
+#ifdef HAVE_USB_PODLINK
+        struct agents_badge badge = agents_background_badge();
+        active |= badge.kind == AGENTS_BADGE_WAITING || badge.kind == AGENTS_BADGE_WORKING;
+#endif
         unsigned frames = active || was_active ? BUSY_REDRAW_FRAMES : IDLE_REDRAW_FRAMES;
         next_check = current_tick + frames * HZ / UI_ANIM_FPS;
         was_active = active;

@@ -48,6 +48,7 @@
 #include "ui/scene.h"
 #ifdef HAVE_WHEEL_WPS_CHORD
 #include "input/agents_shortcut.h"
+#include "screens/system/agents_screen.h"
 #include "system/activity.h"
 #include "thread.h"
 #include "kernel.h"
@@ -65,6 +66,7 @@ void agents_shortcut_commit_select(void)
 #include "screens/playback/cider.h"
 #include "screens/playback/handoff.h"
 #include "system/podlink_time.h"
+#include "screens/system/agents_background.h"
 #include "input/remote_menu.h"
 #include "root_menu.h"
 #ifdef IPOD_ACCESSORY_PROTOCOL
@@ -455,7 +457,8 @@ static void action_handle_backlight(bool backlight, bool ignore_next)
 #if defined(IPOD_ACCESSORY_PROTOCOL) && defined(HAVE_USB_PODLINK)
 static int remote_context(int context)
 {
-    if (context == CONTEXT_AGENTS) return REMOTE_AGENTS;
+    if (context == CONTEXT_AGENTS)
+        return agents_fruit_nav() ? REMOTE_AGENTS_FRUIT : REMOTE_AGENTS;
     if (context == CONTEXT_WPS) return REMOTE_WPS;
     if (context == CONTEXT_QUICKSCREEN) return REMOTE_QUICKSCREEN;
     if (get_current_activity() == ACTIVITY_ALBUMCOVERS) return REMOTE_COVERS;
@@ -522,6 +525,7 @@ int agents_shortcut_get_button(int timeout)
 #endif
     ui_polling = false;
     podlink_time_sync();
+    agents_background_play_tone();
     bool fire;
     button = agents_cover_chord_button(&cover_chord, button, button_status(),
         true, &fire);
@@ -629,6 +633,7 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
     ui_polling = false;
 #ifdef HAVE_USB_PODLINK
     podlink_time_sync();
+    agents_background_play_tone();
     bool fire;
     *button = agents_cover_chord_button(&cover_chord, *button, button_status(),
         true, &fire);
@@ -1320,6 +1325,8 @@ static int route_screen_shortcut(int action, int context)
                   action == ACTION_AGENTS_REMOTE_COVERS;
     bool agents = action == ACTION_AGENTS_SWITCH ||
                   action == ACTION_AGENTS_REMOTE_SWITCH;
+    if (agents && context != CONTEXT_AGENTS && !agents_nav_has(AGENTS_NAV_AGENTS))
+        agents_screen_shortcut_entry();
     if ((!covers && !agents && action != ACTION_REMOTE_WPS) ||
         shortcut_screen_context(context)) return action;
 #ifdef IPOD_ACCESSORY_PROTOCOL

@@ -31,6 +31,7 @@ pre='''#include <assert.h>
 #define BUTTON_REPEAT 0x04000000
 #define SYS_EVENT 0x80000000u
 #define BUTTON_MULTIMEDIA 0x10000000
+#define BUTTON_MULTIMEDIA_PLAYPAUSE (BUTTON_MULTIMEDIA|0x01)
 #define BUTTON_REDRAW 0x20000000
 #define HZ 100
 #include "apps-ipod/iap/remote_capture.h"
@@ -402,51 +403,73 @@ uipre+='\nstatic void iap_agents_volume_enable(bool b){(void)b;}\n'
 subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all','-fno-pie','-no-pie','-I'+str(O),'-I'+str(R),'-I'+str(R/'apps-ipod'),str(O/'screen.c'),'-o',str(O/'screen')],check=True)
 subprocess.run([str(O/'screen')],check=True)
 agents=(R/'apps-ipod/screens/system/agents_screen.c').read_text()
-a=agents.index('#ifdef IPOD_ACCESSORY_PROTOCOL', agents.index('action = get_action(CONTEXT_AGENTS, timeout);', agents.index('int timeout = ui_scene_timeout')))
-b=agents.index('            if (dir',a)
-translate_end=agents.index('#endif',a)+len('#endif')
-page=agents[a:translate_end]+'\n'+agents[agents.index('            if (action == ACTION_LISTTREE_PGUP ||',translate_end):b]
-pagepre='''
+a=agents.index('            int dir = action == ACTION_STD_PREV')
+b=agents.index('        }\n        else if (list_do_action',a)
+page=function(agents,'scroll_panel')+\
+    '\nstatic void page_move(int action) {\n' +\
+    '    struct vp vp={.height=100};struct gui_synclist list={.parent={&vp}};\n    do {\n' +\
+    agents[a:b]+'    } while (0);\n}\n'
+pagepre=r'''
+#include <string.h>
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define MIN(a,b) ((a)<(b)?(a):(b))
-#define ACTION_LISTTREE_PGUP 1
-#define ACTION_LISTTREE_PGDOWN 2
-#define ACTION_NONE 0
+#define TIME_BEFORE(a,b) ((a)<(b))
+#define WHEEL_FAST 5
 #define ACTION_STD_PREV 3
 #define ACTION_STD_NEXT 4
+#define ACTION_STD_PREVREPEAT 7
+#define ACTION_STD_NEXTREPEAT 8
 #define VIEW_USAGE 1
 #define VIEW_DETAIL 2
 #define VIEW_ALERT 3
+#define VIEW_ACTIONS 4
+#define VIEW_CONFIRM 5
 #define SCREEN_MAIN 0
 #define HR_USAGE_SVCS 4
 #define USE_BLOCK 50
 #define USE_LINE 21
-struct vp {int height;};struct gl {struct vp *parent[1];};
-static int view,usage_scroll,detail_scroll,detail_scroll_max,detail_page_lines,draws;
-
 #define IPOD_ACCESSORY_PROTOCOL
-static int raw_page;
+struct vp {int height;};
+struct gui_synclist {struct vp *parent[1];};
+struct hr_question;
+static int view,usage_scroll,detail_scroll,detail_scroll_max,detail_page_lines,draws;
+static int detail_wheel_at,current_tick=100,raw_page,wheel,nrows,alert_choice;
+static bool detail_follow,confirm_selected,fruit;
+static const char *detail_pane="t3t1";
 static void get_action_statuscode(int *button){*button=raw_page;}
-static void draw_usage(struct gl*l){(void)l;draws++;}
-static void draw_detail(struct gl*l){(void)l;draws++;}
-static void page_move(int action){struct vp vp={.height=100};struct gl list={.parent={&vp}};
+static void draw_usage(struct gui_synclist*l){(void)l;draws++;}
+static void draw_detail(struct gui_synclist*l){(void)l;draws++;}
+static void draw_question_overlay(struct gui_synclist*l,bool animate){(void)l;(void)animate;draws++;}
+static bool is_t3(const char *p){return !strncmp(p,"t3",2);}
+static bool usage_legacy_keys(void){return false;}
+static bool agents_fruit_nav(void){return fruit;}
+static int gui_synclist_get_sel_pos(struct gui_synclist *l){(void)l;return 0;}
+static void show(struct gui_synclist *l,int n){(void)l;(void)n;}
+static const struct hr_question *current_question(void){return NULL;}
+static int quick_choice(const struct hr_question *q,bool deny){(void)q;(void)deny;return 0;}
+static const char *hr_wheel_step(int *w,int tick,int dir,int threshold)
+{(void)w;(void)tick;(void)dir;(void)threshold;return NULL;}
+static void send_key(const char *k){(void)k;assert(false);}
 '''
-pagetest='''
-}
-int main(void){
- view=VIEW_USAGE;page_move(ACTION_LISTTREE_PGDOWN);assert(usage_scroll==100&&draws==1);
- page_move(ACTION_LISTTREE_PGDOWN);assert(usage_scroll==124);
- page_move(ACTION_LISTTREE_PGUP);assert(usage_scroll==24);
- page_move(ACTION_LISTTREE_PGUP);assert(usage_scroll==0);
- raw_page=BUTTON_RC_VOL_UP;page_move(ACTION_STD_NEXT);assert(usage_scroll==100);
- raw_page=BUTTON_RC_VOL_DOWN;page_move(ACTION_STD_PREV);assert(usage_scroll==0);
- raw_page=0;page_move(ACTION_STD_NEXT);assert(usage_scroll==0);
- view=VIEW_DETAIL;detail_scroll_max=23;detail_page_lines=7;
- page_move(ACTION_LISTTREE_PGDOWN);assert(detail_scroll==7);
- page_move(ACTION_LISTTREE_PGDOWN);assert(detail_scroll==14);
- page_move(ACTION_LISTTREE_PGUP);assert(detail_scroll==7);
- view=VIEW_ALERT;int n=draws;page_move(ACTION_LISTTREE_PGDOWN);assert(draws==n);
- puts("Agents production page blocks: Usage/detail/alert/page bounds PASS");
+pagetest=r'''
+int main(void) {
+    view=VIEW_USAGE;raw_page=BUTTON_RC_VOL_DOWN;
+    page_move(ACTION_STD_NEXT);assert(usage_scroll==100&&draws==1);
+    page_move(ACTION_STD_NEXT);assert(usage_scroll==124);
+    raw_page=BUTTON_RC_VOL_UP;
+    page_move(ACTION_STD_PREV);assert(usage_scroll==24);
+    page_move(ACTION_STD_PREV);assert(usage_scroll==0);
+    raw_page=0;page_move(ACTION_STD_NEXT);assert(usage_scroll==USE_LINE);
+    fruit=true;raw_page=BUTTON_RC_VOL_DOWN;
+    page_move(ACTION_STD_NEXT);assert(usage_scroll==USE_LINE*2);
+    view=VIEW_DETAIL;detail_scroll_max=23;detail_page_lines=7;
+    fruit=false;page_move(ACTION_STD_NEXT);assert(detail_scroll==7);
+    page_move(ACTION_STD_NEXT);assert(detail_scroll==14);
+    raw_page=BUTTON_RC_VOL_UP;page_move(ACTION_STD_PREV);assert(detail_scroll==7);
+    fruit=true;current_tick+=10;page_move(ACTION_STD_PREV);assert(detail_scroll==6);
+    view=VIEW_ALERT;fruit=false;int n=draws;
+    page_move(ACTION_STD_NEXT);assert(draws==n);
+    puts("Agents: body wheel and remote volume, theme-dependent page size and bounds PASS");
 }
 '''
 (O/'timing.c').write_text(pre+pagepre+page+pagetest)
@@ -559,6 +582,8 @@ subprocess.run([str(O/'navigation')],check=True)
 # raw-screen replay without replacing the production input decision.
 action_source=(R/'apps-ipod/input/action.c').read_text()
 hookpre='''
+static bool fruit_agents;
+static bool agents_fruit_nav(void){return fruit_agents;}
 static bool cider_active(void){return false;}
 #ifndef ACTION_WPS_VOLUP
 #define ACTION_WPS_VOLUP 901
@@ -596,6 +621,7 @@ static int iap_volume_filter(int b){return b;}
 static int raw_volume_button(int b){return b;}
 bool ui_polling;
 void podlink_time_sync(void) {}
+static void agents_background_play_tone(void) {}
 int cider_play_status(void) {return 0;}
 struct agents_shortcut_state shortcut;
 static struct agents_cover_chord_state cover_chord;
@@ -704,7 +730,26 @@ int main(void) {
     assert(last.button==(BUTTON_RC_VOL_UP|BUTTON_REL|BUTTON_REPEAT));
     last.data=77;queued_button=BUTTON_RC_VOL_DOWN|BUTTON_REL|BUTTON_REPEAT;
     assert(action_poll_button(&last,&cur)&&cur.action==ACTION_STD_NEXT&&last.data==0);
-    puts("input polling hook: native-only chord/remote PLAY isolation/native SELECT timing PASS");
+    fruit_agents=true;
+    int fruit_context=remote_context(CONTEXT_AGENTS);
+    assert(fruit_context==REMOTE_AGENTS_FRUIT);
+    struct agents_remote_state f={0};
+    const int play=BUTTON_RC_PLAY, up=BUTTON_RC_PLAY|BUTTON_REL;
+    assert(agents_remote_button(&f,fruit_context,play,play,1000)==BUTTON_NONE);
+    assert(agents_remote_button(&f,fruit_context,up,0,1013)==BUTTON_NONE);
+    assert(agents_remote_button(&f,fruit_context,0,0,1040)==BUTTON_MULTIMEDIA_PLAYPAUSE);
+    assert(agents_remote_button(&f,fruit_context,0,0,1041)==BUTTON_NONE);
+    assert(agents_remote_button(&f,fruit_context,play,play,1100)==BUTTON_NONE);
+    assert(agents_remote_button(&f,fruit_context,play|BUTTON_REPEAT,play,1135)==BUTTON_NONE);
+    assert(agents_remote_button(&f,fruit_context,up,0,1145)==BUTTON_MULTIMEDIA_PLAYPAUSE);
+    assert(agents_remote_button(&f,fruit_context,0,0,1150)==BUTTON_NONE);
+    assert(agents_remote_button(&f,fruit_context,play,play,1200)==BUTTON_NONE);
+    assert(agents_remote_button(&f,fruit_context,up,0,1213)==BUTTON_NONE);
+    assert(agents_remote_button(&f,fruit_context,play,play,1218)==BUTTON_NONE);
+    assert(agents_remote_button(&f,fruit_context,up,0,1231)==BUTTON_NONE);
+    assert(agents_remote_button(&f,fruit_context,0,0,1260)==REMOTE_SWITCH_BUTTON);
+    assert(agents_remote_button(&f,fruit_context,0,0,1261)==BUTTON_NONE);
+    puts("Input polling: native chord, SELECT timing, Fruit remote single/hold playback and double-tap switch PASS");
 }
 '''
 (O/'hook.c').write_text(pre+'\n#include "apps-ipod/input/agents_remote.h"\n'+hookpre+body('apps-ipod/input/remote_menu.h')+body('apps-ipod/input/agents_shortcut.c')+body('apps-ipod/input/agents_remote.c')+function(action_source,'remote_context')+function(action_source,'remote_volume_action')+function(action_source,'remote_poll')+function(action_source,'wheel_shortcut_button')+function(action_source,'agents_shortcut_get_button')+function(action_source,'action_poll_button')+hooktest)

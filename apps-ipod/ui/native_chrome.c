@@ -90,6 +90,9 @@ bool native_chrome_poll(struct native_chrome *chrome)
         .playmode = current_playmode(),
         .busy = busy_state(),
         .volume_visible = native_chrome_volume_visible(),
+#ifdef HAVE_USB_PODLINK
+        .agents = agents_background_badge(),
+#endif
     };
     if (next.volume_visible)
     {
@@ -146,7 +149,7 @@ bool native_chrome_volume_visible(void)
 }
 
 struct status_layout {
-    int battery_x, percent_x, percent_width, play_x, busy_x;
+    int battery_x, percent_x, percent_width, play_x, busy_x, agents_x;
     int clock_x, clock_width, title_width;
     bool right_clock;
 };
@@ -163,14 +166,18 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
     int battery_x = width - metric[UI_METRIC_STATUS_PAD_RIGHT] - icon_size;
     int play_x = battery_x - gap - icon_size;
     /* Keep the playback slot even when stopped so the busy icon stays put. */
-    int busy_x = play_x - gap - icon_size;
+    int agents_width = 0;
+#ifdef HAVE_USB_PODLINK
+    agents_width = agents_background_badge_width(chrome->state.agents);
+#endif
+    int busy_x = play_x - agents_width - gap - icon_size;
     int percent_limit = busy_x - gap - group_gap - left - clock_width;
     percent_width = MIN(percent_width, MAX(0, percent_limit));
     int percent_x = battery_x - gap - percent_width;
     if (percent_width)
     {
         play_x = percent_x - gap - icon_size;
-        busy_x = play_x - gap - icon_size;
+        busy_x = play_x - agents_width - gap - icon_size;
     }
 
     int clock_right = busy_x - group_gap;
@@ -184,7 +191,7 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
 
     return (struct status_layout) {
         .battery_x = battery_x, .percent_x = percent_x, .percent_width = percent_width,
-        .play_x = play_x, .busy_x = busy_x,
+        .play_x = play_x, .busy_x = busy_x, .agents_x = play_x - agents_width,
         .clock_x = clock_x, .clock_width = clock_width,
         .title_width = MAX(0, clock_x - title_gap - left),
         .right_clock = right_clock,
@@ -438,5 +445,10 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
               icon_size, false);
     draw_indicators(chrome, &damage, indicators, layout, bounds.x, icon_y,
                     icon_size, background, foreground);
+#ifdef HAVE_USB_PODLINK
+    agents_background_draw_badge(&damage, state->agents, bounds.x + layout.agents_x,
+                                 icon_y + (icon_size - 7) / 2, chrome->status_font,
+                                 background);
+#endif
     lcd_set_viewport(previous);
 }

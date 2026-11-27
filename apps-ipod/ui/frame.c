@@ -5,6 +5,9 @@
 #include "perf.h"
 #include "system.h"
 #include <stddef.h>
+#ifdef HAVE_USB_PODLINK
+#include "screens/system/agents_background.h"
+#endif
 
 static struct ui_dirty_rect damage[NB_SCREENS];
 static bool flush_inhibited;
@@ -92,7 +95,13 @@ void ui_flush_dirty(void)
         if (i == SCREEN_MAIN && (lcd_updates_held() || !lcd_active()))
             continue;
         struct ui_dirty_rect region;
-        if (ui_take_dirty_rects(i, &region))
+        if (!ui_take_dirty_rects(i, &region))
+            region = (struct ui_dirty_rect){0};
+#ifdef HAVE_USB_PODLINK
+        if (i == SCREEN_MAIN)
+            agents_background_overlay(&region, false);
+#endif
+        if (region.w > 0 && region.h > 0)
         {
             struct viewport *previous = screens[i].set_viewport(NULL);
             unsigned int start = USEC_TIMER;
@@ -100,5 +109,9 @@ void ui_flush_dirty(void)
             ui_note_flush(USEC_TIMER - start);
             screens[i].set_viewport(previous);
         }
+#ifdef HAVE_USB_PODLINK
+        if (i == SCREEN_MAIN)
+            agents_background_restore();
+#endif
     }
 }

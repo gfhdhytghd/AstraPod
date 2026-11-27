@@ -7,6 +7,7 @@ root = Path(__file__).resolve().parents[2]
 out = Path(sys.argv[1])
 out.mkdir(parents=True, exist_ok=True)
 source = (root / 'apps-ipod/screens/covers/carousel.c').read_text()
+submit = source[source.index('static void carousel_submit'):source.index('/** code */')].strip()
 frame = source.split('/* Copy offscreen buffer to LCD', 1)[1]
 frame = frame[frame.index('if (drew_art)'):frame.index('dirty_top = LCD_HEIGHT;')]
 program = """
@@ -44,6 +45,8 @@ static void lcd_update_rect(int x,int y,int w,int h) {
     ++calls;
     assert(!memcmp(panel,fb,sizeof fb));
 }
+struct ui_dirty_rect { int x, y, w, h; };
+""" + submit + """
 int main(void) {
     for (int mask=1; mask<32; ++mask) {
         bool drew_art=mask&1, drew_caption=mask&2, joined=mask&4;
@@ -52,7 +55,8 @@ int main(void) {
         int pf_text_y=190,pf_text_h=20;
         if(joined && !drew_art) continue;
         calls=0;
-        bool first_frame = true;
+        bool first_frame = true, flow_mix = false;
+        enum { pf_idle } pf_state = pf_idle;
         pf_scene.capturing = drew_art;
         unsigned token = mask & 1, *trace = &token;
         render_notes = submit_notes = 0;

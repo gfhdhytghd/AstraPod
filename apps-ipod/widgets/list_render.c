@@ -43,7 +43,7 @@
 #include "list_select.h"
 
 struct list_geometry {
-    struct ui_rect background, title, header, rows, notes;
+    struct ui_rect background, title, header, rows, notes, footer;
     int pitch;
 };
 
@@ -90,7 +90,7 @@ struct native_list {
     unsigned theme_generation, palette_generation;
     bool colors_current;
     int text_font, title_font, icon_font;
-    struct ui_view root, title, header, rows, notes, art, index_view;
+    struct ui_view root, title, header, rows, notes, footer, message, art, index_view;
     struct ui_page page;
     struct ui_layer backdrop;
     unsigned art_generation, artist_generation;
@@ -217,6 +217,12 @@ static struct list_geometry measure(const struct gui_synclist *list,
             rows.height += metric[UI_METRIC_LIST_HEADER_BOTTOM_GAP];
         g.header = take_top(&rows, MIN(metric[UI_METRIC_LIST_HEADER_HEIGHT],
                                      MAX(0, rows.height - g.pitch)));
+    }
+    if (list->footer)
+    {
+        int height = MIN(20, MAX(0, rows.height - g.pitch));
+        rows.height -= height;
+        g.footer = (struct ui_rect){rows.x, rows.y + rows.height, rows.width, height};
     }
     if (list->show_notes && list->callback_get_item_description)
     {
@@ -1139,6 +1145,47 @@ static void paint_album_header(const struct ui_view *view, const struct ui_view_
               render->colors[UI_COLOR_MUTED], header->detail, false, 0, false);
 }
 
+static void paint_footer(const struct ui_view *view, const struct ui_view_frame *frame)
+{
+    struct native_list *render = view->data;
+    struct ui_rect cell = frame->bounds;
+    unsigned bg = render->colors[UI_COLOR_LIST_TINT];
+    unsigned fg = color_fit_contrast(render->colors[UI_COLOR_FOREGROUND], bg, 450);
+    fill(frame->clip, cell, bg);
+    fill(frame->clip, (struct ui_rect){cell.x, cell.y, cell.width, 1},
+         render->colors[UI_COLOR_SEPARATOR]);
+    cell.x += 5;
+    cell.width -= 10;
+    draw_text(render, frame->clip, cell, render->text_font, fg,
+              render->owner->footer, false, 0, false);
+}
+
+static void paint_empty_message(const struct ui_view *view, const struct ui_view_frame *frame)
+{
+    struct native_list *render = view->data;
+    struct ui_rect cell = frame->bounds;
+    int height = font_get(render->text_font)->height;
+    int y = cell.y + cell.height / 2 - height;
+    const char *title = render->owner->empty_title;
+    const char *hint = render->owner->empty_hint;
+    if (!title)
+        return;
+    int width = MIN(cell.width, font_getstringnsize(title, strlen(title), NULL,
+                                                  NULL, render->title_font));
+    struct ui_rect line = {cell.x + (cell.width - width) / 2, y, width, height + 2};
+    draw_text(render, frame->clip, line, render->title_font,
+              render->colors[UI_COLOR_FOREGROUND], title, false, 0, false);
+    if (hint)
+    {
+        width = MIN(cell.width, font_getstringnsize(hint, strlen(hint), NULL,
+                                                   NULL, render->text_font));
+        line = (struct ui_rect){cell.x + (cell.width - width) / 2,
+                                y + height + 5, width, height + 2};
+        draw_text(render, frame->clip, line, render->text_font,
+                  render->colors[UI_COLOR_MUTED], hint, false, 0, false);
+    }
+}
+
 static void paint_notes(const struct ui_view *view, const struct ui_view_frame *frame)
 {
     struct native_list *render = view->data;
@@ -1540,6 +1587,8 @@ static const struct ui_view_ops layer_ops = { .paint = ui_layer_paint };
 static const struct ui_view_ops title_ops = { .paint = paint_title };
 static const struct ui_view_ops album_header_ops = { .paint = paint_album_header };
 static const struct ui_view_ops row_ops = { .paint = paint_rows };
+static const struct ui_view_ops footer_ops = { .paint = paint_footer };
+static const struct ui_view_ops empty_message_ops = { .paint = paint_empty_message };
 static const struct ui_view_ops note_ops = { .paint = paint_notes };
 static const struct ui_view_ops index_ops = { .paint = paint_index };
 
@@ -1721,6 +1770,9 @@ static void draw_list(struct gui_synclist *list, bool status_only)
         prefetch_list_page(render, &g);
     ui_view_append(&render->root, &render->rows);
     add_view(render, &render->notes, g.notes, &note_ops, render);
+    add_view(render, &render->footer, g.footer, &footer_ops, render);
+    if (list->empty_title)
+        add_view(render, &render->message, g.rows, &empty_message_ops, render);
     if (show_index)
         add_view(render, &render->index_view, g.background, &index_ops, render);
     ui_page_init(&render->page, &render->root);

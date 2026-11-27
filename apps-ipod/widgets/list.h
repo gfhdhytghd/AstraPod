@@ -246,6 +246,8 @@ struct gui_synclist
     bool show_notes;
     bool default_viewport;
     const struct list_header *header;
+    const char *footer;
+    const char *empty_title, *empty_hint;
 
     /* Changes whenever the items may have: init, the item count or the kind
      * callback. Unique across lists, so a reused struct gets a new one. */

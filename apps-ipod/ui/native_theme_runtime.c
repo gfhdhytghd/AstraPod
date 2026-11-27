@@ -22,6 +22,7 @@
 #define NATIVE_THEME_EXT ".podtheme"
 
 static int current_theme;
+static char current_name[UI_THEME_NAME_MAX] = "scrim";
 static unsigned generation;
 
 static bool valid_name(const char *name, size_t len)
@@ -119,6 +120,7 @@ static bool select_theme(const char *name, bool fallback)
     if (current_theme > 0)
         core_free(current_theme);
     current_theme = replacement > 0 ? replacement : 0;
+    snprintf(current_name, sizeof current_name, "%s", valid ? name : "scrim");
     ++generation;
 
     if (!valid)
@@ -153,6 +155,11 @@ bool ui_theme_set(const char *name, bool fallback)
         settings_save();
     }
     return applied;
+}
+
+const char *ui_theme_active_name(void)
+{
+    return current_name;
 }
 
 void ui_theme_snapshot(struct ui_theme *out)

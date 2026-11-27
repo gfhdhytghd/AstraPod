@@ -382,10 +382,11 @@ void ui_scene_fade_out(void)
 }
 
 static bool capture_scene(struct ui_scene *scene, const void *from, const void *to,
-                          bool push, const char *route, int pan_top, int pan_dir)
+                          bool push, const char *route, int pan_top, int pan_dir,
+                          unsigned duration)
 {
-    bool staggered = push && !pan_top;
-    unsigned frames = ui_theme_duration(pan_top ? PAN_FRAMES :
+    bool staggered = push && !pan_top && !duration;
+    unsigned frames = ui_theme_duration(duration ? duration : pan_top ? PAN_FRAMES :
                                         push ? PUSH_ROW_FRAMES : POP_FRAMES);
     ui_scene_snap_push();
     if (!frames || !lcd_active() || (owner && owner != scene))
@@ -467,18 +468,25 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
 bool ui_scene_capture(struct ui_scene *scene, const void *from, const void *to,
                       bool push)
 {
-    return capture_scene(scene, from, to, push, push ? "push" : "pop", 0, 0);
+    return capture_scene(scene, from, to, push, push ? "push" : "pop", 0, 0, 0);
 }
 
 bool ui_scene_capture_pan(struct ui_scene *scene, const void *from, const void *to,
                           int direction, int top)
 {
-    return capture_scene(scene, from, to, true, "pan", top, direction);
+    return capture_scene(scene, from, to, true, "pan", top, direction, 0);
+}
+
+bool ui_scene_capture_page(struct ui_scene *scene, const void *from, const void *to,
+                           bool push, int direction, int status_height, unsigned frames)
+{
+    return capture_scene(scene, from, to, push, direction ? "pan" :
+                         push ? "push" : "pop", status_height, direction, frames);
 }
 
 void ui_scene_boot(struct ui_scene *scene)
 {
-    if (capture_scene(scene, scene, NULL, true, "boot", 0, 0))
+    if (capture_scene(scene, scene, NULL, true, "boot", 0, 0, 0))
         scene->automatic = true;
 }
 

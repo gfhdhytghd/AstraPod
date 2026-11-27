@@ -86,6 +86,7 @@ static void button_remote_post(void) {}
 static void check_audio_peripheral_state(void) {}
 static void reset_poweroff_timer(void) {}
 static void podlink_time_sync(void) {}
+static void agents_background_play_tone(void) {}
 static bool has_flag(int value, int flag) { return (value & flag) == flag; }
 typedef struct { int button, action, context; bool wait_for_release; } action_last_t;
 typedef struct { int button, context, timeout; } action_cur_t;

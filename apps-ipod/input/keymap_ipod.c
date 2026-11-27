@@ -140,18 +140,23 @@ static const struct button_mapping button_context_music_quiz[]  = {
     LAST_ITEM_IN_LIST
 }; /* button_context_music_quiz */
 
-/* System > Agents is a list where Play is held to talk to the computer: the
- * press and the release each act, and the repeats in between are claimed so
- * nothing else sees them. A release is taken whatever came before it, so a
- * hold always ends. LEFT held repeats Backspace in the usage view. */
+/* Directions commit on release so a held button cannot approve or deny. */
 static const struct button_mapping button_context_agents[]  = {
-    { ACTION_AGENTS_TALK,       BUTTON_PLAY,                 BUTTON_NONE },
-    { ACTION_NONE,              BUTTON_PLAY|BUTTON_REPEAT,   BUTTON_NONE },
-    { ACTION_AGENTS_TALK_END,   BUTTON_PLAY|BUTTON_REL,      BUTTON_NONE },
-    { ACTION_AGENTS_LEFT_REPEAT, BUTTON_LEFT|BUTTON_REPEAT,  BUTTON_NONE },
+    { ACTION_AGENTS_TALK,         BUTTON_PLAY,                 BUTTON_NONE },
+    { ACTION_NONE,                BUTTON_PLAY|BUTTON_REPEAT,   BUTTON_NONE },
+    { ACTION_AGENTS_TALK_END,     BUTTON_PLAY|BUTTON_REL,      BUTTON_NONE },
+    { ACTION_AGENTS_LEFT_DOWN,    BUTTON_LEFT,                 BUTTON_NONE },
+    { ACTION_AGENTS_RIGHT_DOWN,   BUTTON_RIGHT,                BUTTON_NONE },
+    { ACTION_AGENTS_LEFT,         BUTTON_LEFT|BUTTON_REL,      BUTTON_NONE },
+    { ACTION_AGENTS_RIGHT,        BUTTON_RIGHT|BUTTON_REL,     BUTTON_NONE },
+    { ACTION_AGENTS_LEFT_REPEAT,  BUTTON_LEFT|BUTTON_REPEAT,   BUTTON_NONE },
+    { ACTION_AGENTS_RIGHT_REPEAT, BUTTON_RIGHT|BUTTON_REPEAT,  BUTTON_NONE },
+    { ACTION_AGENTS_SELECT_DOWN,  BUTTON_SELECT,               BUTTON_NONE },
+    { ACTION_AGENTS_SELECT_REPEAT, BUTTON_SELECT|BUTTON_REPEAT, BUTTON_NONE },
+    { ACTION_AGENTS_SELECT_UP,    BUTTON_SELECT|BUTTON_REL,     BUTTON_NONE },
 
     LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_LIST)
-}; /* button_context_agents */
+};
 
 static const struct button_mapping button_context_tree[]  = {
     { ACTION_TREE_WPS,          BUTTON_PLAY|BUTTON_REL,      BUTTON_PLAY },
@@ -404,7 +409,12 @@ static const struct button_mapping button_context_usb_hid_mode_mouse[] = {
  *****************************************************************************/
 
 static const struct button_mapping remote_button_context_agents[] = {
-    { ACTION_AGENTS_LEFT_REPEAT, BUTTON_RC_LEFT|BUTTON_REPEAT, BUTTON_NONE },
+    { ACTION_AGENTS_LEFT_DOWN,    BUTTON_RC_LEFT,                BUTTON_NONE },
+    { ACTION_AGENTS_RIGHT_DOWN,   BUTTON_RC_RIGHT,               BUTTON_NONE },
+    { ACTION_AGENTS_LEFT,         BUTTON_RC_LEFT|BUTTON_REL,     BUTTON_NONE },
+    { ACTION_AGENTS_RIGHT,        BUTTON_RC_RIGHT|BUTTON_REL,    BUTTON_NONE },
+    { ACTION_AGENTS_LEFT_REPEAT,  BUTTON_RC_LEFT|BUTTON_REPEAT,  BUTTON_NONE },
+    { ACTION_AGENTS_RIGHT_REPEAT, BUTTON_RC_RIGHT|BUTTON_REPEAT, BUTTON_NONE },
     { ACTION_AGENTS_REMOTE_TALK, BUTTON_RC_PLAY, BUTTON_NONE },
     { ACTION_AGENTS_DISCARD, BUTTON_RC_PLAY|BUTTON_REL|BUTTON_REPEAT,
       BUTTON_NONE },
@@ -414,15 +424,16 @@ static const struct button_mapping remote_button_context_agents[] = {
       BUTTON_NONE },
     { ACTION_STD_NEXT, BUTTON_RC_VOL_DOWN|BUTTON_REL|BUTTON_REPEAT,
       BUTTON_NONE },
-    { ACTION_LISTTREE_PGUP, BUTTON_RC_VOL_UP, BUTTON_NONE },
-    { ACTION_LISTTREE_PGUP, BUTTON_RC_VOL_UP|BUTTON_REPEAT, BUTTON_NONE },
-    { ACTION_LISTTREE_PGDOWN, BUTTON_RC_VOL_DOWN, BUTTON_NONE },
-    { ACTION_LISTTREE_PGDOWN, BUTTON_RC_VOL_DOWN|BUTTON_REPEAT, BUTTON_NONE },
+    { ACTION_STD_PREV, BUTTON_RC_VOL_UP, BUTTON_NONE },
+    { ACTION_STD_PREVREPEAT, BUTTON_RC_VOL_UP|BUTTON_REPEAT, BUTTON_NONE },
+    { ACTION_STD_NEXT, BUTTON_RC_VOL_DOWN, BUTTON_NONE },
+    { ACTION_STD_NEXTREPEAT, BUTTON_RC_VOL_DOWN|BUTTON_REPEAT, BUTTON_NONE },
     { ACTION_STD_MENU, BUTTON_RC_MENU|BUTTON_REL, BUTTON_RC_MENU },
     { ACTION_STD_QUICKSCREEN, BUTTON_RC_MENU|BUTTON_REPEAT, BUTTON_RC_MENU },
     /* EP0 supplies a complete host-classified Select gesture. */
-    { ACTION_NONE, BUTTON_RC_SELECT, BUTTON_NONE },
-    { ACTION_STD_OK, BUTTON_RC_SELECT|BUTTON_REL, BUTTON_NONE },
+    { ACTION_AGENTS_SELECT_DOWN, BUTTON_RC_SELECT, BUTTON_NONE },
+    { ACTION_AGENTS_SELECT_REPEAT, BUTTON_RC_SELECT|BUTTON_REPEAT, BUTTON_NONE },
+    { ACTION_AGENTS_SELECT_UP, BUTTON_RC_SELECT|BUTTON_REL, BUTTON_NONE },
     LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_STD)
 };
 

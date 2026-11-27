@@ -8,6 +8,7 @@
 
 void ui_theme_snapshot(struct ui_theme *out);
 unsigned ui_theme_generation(void);
+const char *ui_theme_active_name(void);
 unsigned ui_theme_metric(enum ui_metric_role role);
 unsigned ui_theme_rgb565(enum ui_color_role role);
 unsigned ui_theme_duration(unsigned frames);

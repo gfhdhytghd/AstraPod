@@ -2,8 +2,13 @@
 #ifndef PODBOX_NATIVE_CHROME_H
 #define PODBOX_NATIVE_CHROME_H
 
+#include "config.h"
 #include <stdbool.h>
 #include <stdint.h>
+
+#ifdef HAVE_USB_PODLINK
+#include "screens/system/agents_background.h"
+#endif
 
 struct ui_theme;
 struct ui_view_frame;
@@ -13,6 +18,9 @@ struct native_chrome_state {
     int8_t battery, hour, minute;
     uint8_t charging, numeric, clock_24h, busy, volume_visible, volume_percent;
     uint8_t playmode;
+#ifdef HAVE_USB_PODLINK
+    struct agents_badge agents;
+#endif
 };
 
 enum native_chrome_glyph {

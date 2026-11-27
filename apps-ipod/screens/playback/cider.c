@@ -11,6 +11,7 @@
 #include "powermgmt.h"
 #include "podlink.h"
 #include "screens/system/podlink_media.h"
+#include "screens/system/agents_background.h"
 #include "kernel.h"
 #include "thread.h"
 #include "system.h"
@@ -1173,7 +1174,8 @@ static bool resident_receive(const struct podlink_message *m)
         queue_post(&disk_queue, 1, 0);
         return true;
     }
-    return handoff_receive(m) || spectrum_receive(m) || receive(m);
+    return handoff_receive(m) || spectrum_receive(m) || receive(m) ||
+           agents_background_receive(m);
 }
 
 static unsigned int resident_next(char *record, unsigned int size)
@@ -1181,6 +1183,7 @@ static unsigned int resident_next(char *record, unsigned int size)
     bool refill = false;
     unsigned int n = podlink_media_next(record, size, &refill);
     if (refill) queue_post(&disk_queue, 1, 0);
+    if (!n) n = agents_background_next(record, size);
     if (!n) n = handoff_next(record, size);
     if (!n) n = next(record, size);
     return n ? n : spectrum_next(record, size);
@@ -1197,6 +1200,7 @@ static unsigned int resident_next_binary(unsigned char *out, unsigned int size,
 
 static void resident_reset(void)
 {
+    agents_background_reset();
     podlink_media_disconnect();
     if (disk_running) queue_post(&disk_queue, 1, 0);
     handoff_reset();

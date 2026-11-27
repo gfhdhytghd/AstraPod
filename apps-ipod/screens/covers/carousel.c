@@ -99,6 +99,9 @@
 #include "metadata/album_blur.h"
 #include "ui/frame.h"
 #include "ui/statusbar.h"
+#ifdef HAVE_USB_PODLINK
+#include "screens/system/agents_background.h"
+#endif
 #include "ui/native_theme_runtime.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
@@ -715,6 +718,20 @@ enum pf_states {
 };
 
 static int pf_state;
+static void carousel_submit(struct ui_dirty_rect dirty, bool still)
+{
+#ifdef HAVE_USB_PODLINK
+    agents_background_overlay(&dirty, still);
+#else
+    (void)still;
+#endif
+    if (dirty.w > 0 && dirty.h > 0)
+        lcd_update_rect(dirty.x, dirty.y, dirty.w, dirty.h);
+#ifdef HAVE_USB_PODLINK
+    agents_background_restore();
+#endif
+}
+
 
 /** code */
 static bool free_slide_prio(int prio);
@@ -6792,7 +6809,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             if (dirty_end > dirty_top)
             {
                 uint32_t submitting = *trace ? USEC_TIMER : 0;
-                lcd_update_rect(0, dirty_top, LCD_WIDTH, dirty_end - dirty_top);
+                carousel_submit((struct ui_dirty_rect) {0, dirty_top, LCD_WIDTH,
+                                dirty_end - dirty_top}, pf_state == pf_idle && !flow_mix);
                 if (*trace)
                 {
                     uint32_t submitted = USEC_TIMER;
@@ -6816,9 +6834,11 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
 
         else if (!art_owed && !caption_owed)
         {
-            if (!dark && dirty_end > dirty_top && !dispatch_first)
+            if (!dark && !dispatch_first)
             {
-                lcd_update_rect(dirty_left, dirty_top, dirty_right - dirty_left, dirty_end - dirty_top);
+                carousel_submit((struct ui_dirty_rect) {dirty_left, dirty_top,
+                                dirty_right - dirty_left, dirty_end - dirty_top},
+                                pf_state == pf_idle && !flow_mix);
                 dirty_left = LCD_WIDTH;
                 dirty_right = 0;
                 dirty_top = LCD_HEIGHT;

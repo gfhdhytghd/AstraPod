@@ -206,6 +206,9 @@ void gui_synclist_init(struct gui_synclist * gui_list,
     gui_list->unnumbered = false;
     gui_list->show_notes = false;
     gui_list->header = NULL;
+    gui_list->footer = NULL;
+    gui_list->empty_title = NULL;
+    gui_list->empty_hint = NULL;
     gui_list->generation = ++last_generation;
 }
 
@@ -898,16 +901,19 @@ bool list_do_action(int context, int timeout,
     bool handled = gui_synclist_do_button(lists, action);
     /* ACTION_NONE need not redraw the list. The status bar still rendered
      * during get_action, and its dirty rectangles must reach the LCD. */
-    if (!inhibited)
-        ui_flush_dirty();
     /* A settled list does not dirty the LCD. Submit the last frame so a
      * wait for input still refreshes the panel. */
     if (*action == ACTION_NONE)
     {
         if (list_render_motion_due(lists))
             gui_synclist_draw(lists);
-        lcd_update();
+        if (inhibited)
+            lcd_update();
+        else
+            ui_mark_dirty(SCREEN_MAIN);
     }
+    if (!inhibited)
+        ui_flush_dirty();
     return handled;
 }
 

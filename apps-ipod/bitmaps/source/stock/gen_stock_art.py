@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Write the stock art's tables, or pack its pixels, from the PNGs here.
 
-Each PNG is one bitmap from the stock iPod Classic 1.1.2 firmware's resource
-bank, decoded without change and named after its resource (AstraPod_* are
-ours, drawn in the same style). A greyscale PNG is a mask: its levels are
+Most PNGs are bitmaps from the iPod Classic 1.1.2 resource bank, named
+after their resource. SearchResult_* are icon tiles converted from the
+2.0.5 LCD output. AstraPod_* are ours, drawn in the same style.
+A greyscale PNG is a mask: its levels are
 the alpha of a colour the caller picks. Any other PNG is an image with its
 own alpha, kept as a palette and indices. A mask keeps only the rectangle
 that holds its ink: the table records where it lies, and outside it the mask

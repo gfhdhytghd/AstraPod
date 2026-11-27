@@ -947,6 +947,7 @@ bool folder_select_in_buffer(char *header_text, char *setting, int setting_len,
     push_current_activity(ACTIVITY_FOLDERSELECT);
     dialog_init(&d, CONTEXT_LIST, header_text, &style, &cb, &s);
     d.motion_route = "folders";
+    d.full_page = true;
     folder_speak(&s);
     res = dialog_run(&d, POLL_IDLE);
     pop_current_activity();

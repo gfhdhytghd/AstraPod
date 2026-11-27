@@ -32,13 +32,13 @@
 #include "ui/sheet.h"
 #include "ui/scene.h"
 #include "ui/statusbar.h"
-#include "ui/stock_art.h"
 #include <string.h>
 #ifdef HAVE_WHEEL_WPS_CHORD
 #include "input/agents_shortcut.h"
 #endif
 
 #define DIALOG_GLASS_RADIUS 10
+#define DIALOG_POPUP_RADIUS 8
 #define DIALOG_SHADOW_PAD_X 8
 #define DIALOG_SHADOW_PAD_TOP 6
 #define DIALOG_SHADOW_PAD_BOT 10
@@ -52,8 +52,14 @@ static const struct gloss_fill classic_glass_opaque = {
 static const struct gloss_fill classic_gloss_band = {
     0x40ffffff, 0x2affffff, 0x0affffff, 0x16ffffff
 };
-static const struct gloss_fill classic_silver_dock = {
-    0xffeeeeee, 0xfffcfcfc, 0xffd6d6d8, 0xffc2c2c4
+static const struct gloss_fill classic_popup_body = {
+    0xffffffff, 0xffffffff, 0xfff3f4f6, 0xffe6e8ec
+};
+static const struct gloss_fill classic_popup_header = {
+    0xfffcfcfc, 0xfff4f5f7, 0xffced1d6, 0xffa4a8ae
+};
+static const struct gloss_fill classic_popup_footer = {
+    0xffb6bac0, 0xfff1f2f4, 0xffd8dade, 0xffced1d6
 };
 static const struct gloss_fill classic_well_light = {
     0xff363638, 0xff46484a, 0xff767678, 0xff68686a
@@ -137,7 +143,7 @@ void dialog_style_default(struct dialog_style *s)
         .box_fg = classic ? LCD_RGBPACK(0, 0, 0) : fg,
         .box_bg = classic ? LCD_RGBPACK(255, 255, 255) : bg,
         .box_border_color = outline,
-        .box_border_width = classic ? 0 : m[UI_METRIC_MODAL_BORDER_WIDTH],
+        .box_border_width = classic ? 1 : m[UI_METRIC_MODAL_BORDER_WIDTH],
         .box_margin = m[UI_METRIC_MODAL_PADDING],
         .box_font = DIALOG_FONT_INHERIT,
         .edge_margin = m[UI_METRIC_MODAL_EDGE_MARGIN],
@@ -155,6 +161,7 @@ void dialog_style_default(struct dialog_style *s)
         .button_pad_x = m[UI_METRIC_MODAL_BUTTON_PAD_X],
         .button_pad_y = m[UI_METRIC_MODAL_BUTTON_PAD_Y],
         .glass = false,
+        .popup = classic,
     };
 }
 
@@ -173,6 +180,7 @@ void dialog_style_glass(struct dialog_style *s)
     s->button_fg_selected = LCD_RGBPACK(255, 255, 255);
     s->button_border_radius = 5;
     s->glass = true;
+    s->popup = false;
 }
 
 void dialog_draw_glass_panel(struct screen *screen, int x, int y,
@@ -192,15 +200,20 @@ void dialog_draw_glass_panel(struct screen *screen, int x, int y,
     gloss_outline(&s, gx, gy, w, h, r, 0x54ffffff);
 }
 
-void dialog_draw_silver_dock(struct screen *screen, int x, int y,
-                             int w, int h)
+void dialog_draw_popup_panel(struct screen *screen, int x, int y,
+                             int w, int h, bool opaque)
 {
     int ox, oy;
     struct gloss_surface s = vp_gloss_surface(screen, &ox, &oy);
     int gx = ox + x, gy = oy + y;
-    gloss_shadow(&s, gx, gy, w, h, 6, 5, 2, 105);
-    gloss_rect(&s, gx, gy, w, h, 6, 6, &classic_silver_dock);
-    gloss_outline(&s, gx, gy, w, h, 6, 0xff9a9a9c);
+    if (!opaque)
+        gloss_shadow(&s, gx, gy, w, h, DIALOG_POPUP_RADIUS, 7, 3, 140);
+    gloss_rect(&s, gx, gy, w, h, DIALOG_POPUP_RADIUS, DIALOG_POPUP_RADIUS,
+               &classic_popup_body);
+    gloss_outline(&s, gx, gy, w, h, DIALOG_POPUP_RADIUS, 0xff5e6268);
+    if (w > 4 && h > 4)
+        gloss_outline(&s, gx + 1, gy + 1, w - 2, h - 2,
+                      DIALOG_POPUP_RADIUS - 1, 0xd0ffffff);
 }
 
 void dialog_draw_shadow_text(struct screen *screen, int x, int y,
@@ -218,68 +231,330 @@ void dialog_draw_shadow_text(struct screen *screen, int x, int y,
     screen->set_drawmode(prev_mode);
 }
 
-void dialog_draw_segmented(struct screen *screen, int x, int y, int w, int h,
-                           const char *const *labels, int count, int selected,
-                           bool light_dock, int font)
+/* Crisp 4x7 left/right and 5x7 up/down Click Wheel hint triangles. */
+static void draw_hint_tri_left(struct screen *screen, int x, int cy, unsigned fg)
 {
-    if (count <= 0 || w <= 4 || h <= 4)
+    unsigned prev = screen->get_foreground();
+    int prev_mode = (*screen->current_viewport)->drawmode;
+    screen->set_drawmode(DRMODE_FG);
+    screen->set_foreground(fg);
+    screen->drawpixel(x, cy);
+    screen->vline(x + 1, cy - 1, cy + 1);
+    screen->vline(x + 2, cy - 2, cy + 2);
+    screen->vline(x + 3, cy - 3, cy + 3);
+    screen->set_foreground(prev);
+    screen->set_drawmode(prev_mode);
+}
+
+static void draw_hint_tri_right(struct screen *screen, int x, int cy, unsigned fg)
+{
+    unsigned prev = screen->get_foreground();
+    int prev_mode = (*screen->current_viewport)->drawmode;
+    screen->set_drawmode(DRMODE_FG);
+    screen->set_foreground(fg);
+    screen->vline(x, cy - 3, cy + 3);
+    screen->vline(x + 1, cy - 2, cy + 2);
+    screen->vline(x + 2, cy - 1, cy + 1);
+    screen->drawpixel(x + 3, cy);
+    screen->set_foreground(prev);
+    screen->set_drawmode(prev_mode);
+}
+
+static void draw_hint_tri_scroll(struct screen *screen, int x, int cy, unsigned fg)
+{
+    unsigned prev = screen->get_foreground();
+    int prev_mode = (*screen->current_viewport)->drawmode;
+    screen->set_drawmode(DRMODE_FG);
+    screen->set_foreground(fg);
+    /* Up arrow */
+    screen->drawpixel(x + 2, cy - 4);
+    screen->hline(x + 1, x + 3, cy - 3);
+    screen->hline(x, x + 4, cy - 2);
+    /* Down arrow */
+    screen->hline(x, x + 4, cy + 2);
+    screen->hline(x + 1, x + 3, cy + 3);
+    screen->drawpixel(x + 2, cy + 4);
+    screen->set_foreground(prev);
+    screen->set_drawmode(prev_mode);
+}
+
+void dialog_draw_popup_header(struct screen *screen, int x, int y,
+                              int w, int h, const char *title, int font)
+{
+    if (!title || w <= 4 || h <= 4)
         return;
-    struct ui_theme theme;
-    struct ui_album_palette palette;
-    ui_theme_snapshot(&theme);
-    album_palette_snapshot(&palette);
-    struct gloss_fill blue = theme_selection_fill(&theme, &palette);
     int ox, oy;
     struct gloss_surface s = vp_gloss_surface(screen, &ox, &oy);
-    int gx = ox + x, gy = oy + y;
-    const int r = 5;
-
-    gloss_rect(&s, gx, gy, w, h, r, r,
-               light_dock ? &classic_well_light : &classic_well_dark);
-    gloss_outline(&s, gx, gy, w, h, r, light_dock ? 0xdc2c2c2e : 0x38ffffff);
+    gloss_rect(&s, ox + x, oy + y, w, h, DIALOG_POPUP_RADIUS - 1, 0,
+               &classic_popup_header);
 
     int old_font = (*screen->current_viewport)->font;
     if (font >= 0)
         screen->setfont(font);
-
-    int seg_w = w / count;
-    for (int i = 0; i < count; i++)
-    {
-        int sx = x + i * seg_w;
-        int sw = (i == count - 1) ? (x + w - sx) : seg_w;
-        int gsx = ox + sx;
-        if (i == selected)
-        {
-            gloss_rect(&s, gsx + 1, gy + 1, sw - 2, h - 2, r - 1, r - 1, &blue);
-            if (sw > 4 && h > 6)
-                gloss_rect(&s, gsx + 2, gy + 2, sw - 4, (h - 4) / 2,
-                           r - 2, 0, &classic_pill_gloss);
-            gloss_outline(&s, gsx + 1, gy + 1, sw - 2, h - 2, r - 1, 0xff124c8e);
-        }
-        else if (i > 0 && i - 1 != selected)
-        {
-            struct gloss_fill div = { 0x60000000, 0x60000000, 0x60000000, 0x60000000 };
-            gloss_rect(&s, gsx, gy + 3, 1, h - 6, 0, 0, &div);
-        }
-        int lw = 0, lh = 0;
-        screen->getstringsize((const unsigned char *)labels[i], &lw, &lh);
-        struct viewport *cur = *screen->current_viewport;
-        struct viewport tvp = *cur;
-        tvp.x = cur->x + sx + 4;
-        tvp.y = cur->y + y + (h - lh) / 2;
-        tvp.width = MAX(1, sw - 8);
-        tvp.height = lh;
-        struct viewport *prev = screen->set_viewport(&tvp);
-        int tx = lw < tvp.width ? (tvp.width - lw) / 2 : 0;
-        unsigned sh = i == selected ? LCD_RGBPACK(16, 48, 106)
-                                    : LCD_RGBPACK(16, 16, 16);
-        dialog_draw_shadow_text(screen, tx, 0, labels[i],
-                                LCD_RGBPACK(255, 255, 255), sh, -1);
-        screen->set_viewport(prev);
-    }
-
+    int tw = 0, th = 0;
+    screen->getstringsize((const unsigned char *)title, &tw, &th);
+    struct viewport *cur = *screen->current_viewport;
+    struct viewport tvp = *cur;
+    tvp.x = cur->x + x + 8;
+    tvp.y = cur->y + y + (h - th) / 2;
+    tvp.width = MAX(1, w - 16);
+    tvp.height = th;
+    struct viewport *prev = screen->set_viewport(&tvp);
+    int tx = tw < tvp.width ? (tvp.width - tw) / 2 : 0;
+    dialog_draw_shadow_text(screen, tx, 0, title,
+                            LCD_RGBPACK(20, 22, 26),
+                            LCD_RGBPACK(244, 246, 248), 1);
+    screen->set_viewport(prev);
     if (font >= 0)
         screen->setfont(old_font);
+}
+
+void dialog_draw_popup_footer_bg(struct screen *screen, int x, int y,
+                                 int w, int h)
+{
+    if (w <= 4 || h <= 4)
+        return;
+    int ox, oy;
+    struct gloss_surface s = vp_gloss_surface(screen, &ox, &oy);
+    gloss_rect(&s, ox + x, oy + y, w, h, 0, DIALOG_POPUP_RADIUS - 1,
+               &classic_popup_footer);
+    unsigned prev_fg = screen->get_foreground();
+    int prev_mode = (*screen->current_viewport)->drawmode;
+    screen->set_drawmode(DRMODE_FG);
+    screen->set_foreground(LCD_RGBPACK(250, 251, 252));
+    screen->hline(x + 1, x + w - 2, y + 1);
+    screen->set_foreground(prev_fg);
+    screen->set_drawmode(prev_mode);
+}
+
+static void draw_popup_footer_half(struct screen *screen, int x, int y,
+                                   int w, int h, const char *label,
+                                   const char *hint, int arrow_dir,
+                                   unsigned label_fg,
+                                   int label_font, int hint_font)
+{
+    int old_font = (*screen->current_viewport)->font;
+    unsigned prev_fg = screen->get_foreground();
+    int prev_mode = (*screen->current_viewport)->drawmode;
+    unsigned hint_fg = LCD_RGBPACK(88, 93, 102);
+
+    if (label_font >= 0)
+        screen->setfont(label_font);
+    int lw = 0, lh = 0;
+    screen->getstringsize((const unsigned char *)label, &lw, &lh);
+
+    int hw = 0, hh = 0;
+    if (hint_font >= 0)
+        screen->setfont(hint_font);
+    if (hint && *hint)
+        screen->getstringsize((const unsigned char *)hint, &hw, &hh);
+    else
+        hh = font_get((*screen->current_viewport)->font)->height;
+
+    int gap = 2;
+    int total_h = lh + gap + hh;
+    int ly = y + MAX(2, (h - total_h) / 2);
+
+    /* Option label */
+    if (label_font >= 0)
+        screen->setfont(label_font);
+    struct viewport *cur = *screen->current_viewport;
+    struct viewport tvp = *cur;
+    tvp.x = cur->x + x + 4;
+    tvp.y = cur->y + ly;
+    tvp.width = MAX(1, w - 8);
+    tvp.height = lh;
+    struct viewport *prev = screen->set_viewport(&tvp);
+    int lx = lw < tvp.width ? (tvp.width - lw) / 2 : 0;
+    dialog_draw_shadow_text(screen, lx, 0, label, label_fg,
+                            LCD_RGBPACK(248, 250, 252), 1);
+    screen->set_viewport(prev);
+
+    /* Quiet Click Wheel key hint */
+    if (hint_font >= 0)
+        screen->setfont(hint_font);
+    int arrow_w = arrow_dir != 0 ? (hw > 0 ? 8 : 4) : 0;
+    int hint_total_w = hw + arrow_w;
+    int hx = x + MAX(4, (w - hint_total_w) / 2);
+    int hy = ly + lh + gap;
+    int cy = hy + hh / 2;
+    screen->set_drawmode(DRMODE_FG);
+    screen->set_foreground(hint_fg);
+    if (arrow_dir < 0)
+    {
+        draw_hint_tri_left(screen, hx, cy, hint_fg);
+        if (hint && *hint)
+            screen->putsxy(hx + 8, hy, (const unsigned char *)hint);
+    }
+    else if (arrow_dir > 0)
+    {
+        if (hint && *hint)
+            screen->putsxy(hx, hy, (const unsigned char *)hint);
+        draw_hint_tri_right(screen, hx + hw + (hw > 0 ? 4 : 0), cy, hint_fg);
+    }
+    else if (hint && *hint)
+    {
+        screen->putsxy(hx, hy, (const unsigned char *)hint);
+    }
+
+    screen->set_foreground(prev_fg);
+    screen->set_drawmode(prev_mode);
+    screen->setfont(old_font);
+}
+
+void dialog_draw_popup_pair_footer(struct screen *screen, int x, int y,
+                                   int w, int h,
+                                   const char *left_label,
+                                   const char *left_hint, bool left_arrow,
+                                   const char *right_label,
+                                   const char *right_hint, bool right_arrow,
+                                   int label_font, int hint_font)
+{
+    if (w <= 8 || h <= 8)
+        return;
+    int ox, oy;
+    struct gloss_surface s = vp_gloss_surface(screen, &ox, &oy);
+    gloss_rect(&s, ox + x, oy + y, w, h, 0, DIALOG_POPUP_RADIUS - 1,
+               &classic_popup_footer);
+
+    unsigned prev_fg = screen->get_foreground();
+    int prev_mode = (*screen->current_viewport)->drawmode;
+    screen->set_drawmode(DRMODE_FG);
+    /* Crisp top inner highlight + centre hairline divider */
+    screen->set_foreground(LCD_RGBPACK(250, 251, 252));
+    screen->hline(x + 1, x + w - 2, y + 1);
+    int mid = x + w / 2;
+    screen->set_foreground(LCD_RGBPACK(182, 186, 192));
+    screen->vline(mid, y + 1, y + h - 2);
+    screen->set_foreground(LCD_RGBPACK(246, 247, 249));
+    screen->vline(mid + 1, y + 1, y + h - 2);
+    screen->set_foreground(prev_fg);
+    screen->set_drawmode(prev_mode);
+
+    draw_popup_footer_half(screen, x, y + 1, mid - x, h - 1,
+                           left_label, left_hint, left_arrow ? -1 : 0,
+                           LCD_RGBPACK(32, 35, 40), label_font, hint_font);
+    draw_popup_footer_half(screen, mid + 1, y + 1, x + w - mid - 1, h - 1,
+                           right_label, right_hint, right_arrow ? 1 : 0,
+                           LCD_RGBPACK(0, 88, 176), label_font, hint_font);
+}
+
+void dialog_draw_popup_single_footer(struct screen *screen, int x, int y,
+                                     int w, int h, const char *label,
+                                     const char *hint, bool scrollable,
+                                     int label_font, int hint_font)
+{
+    if (w <= 8 || h <= 8)
+        return;
+    int ox, oy;
+    struct gloss_surface s = vp_gloss_surface(screen, &ox, &oy);
+    gloss_rect(&s, ox + x, oy + y, w, h, 0, DIALOG_POPUP_RADIUS - 1,
+               &classic_popup_footer);
+
+    int old_font = (*screen->current_viewport)->font;
+    unsigned prev_fg = screen->get_foreground();
+    int prev_mode = (*screen->current_viewport)->drawmode;
+    unsigned hint_fg = LCD_RGBPACK(88, 93, 102);
+
+    screen->set_drawmode(DRMODE_FG);
+    screen->set_foreground(LCD_RGBPACK(250, 251, 252));
+    screen->hline(x + 1, x + w - 2, y + 1);
+
+    if (hint_font >= 0)
+        screen->setfont(hint_font);
+    int hw = 0, hh = 0;
+    if (hint && *hint)
+        screen->getstringsize((const unsigned char *)hint, &hw, &hh);
+    else
+        hh = font_get((*screen->current_viewport)->font)->height;
+    int scroll_w = 0;
+    if (scrollable)
+    {
+        int sw = 0;
+        screen->getstringsize((const unsigned char *)"Scroll", &sw, NULL);
+        scroll_w = 9 + sw;
+        int sy = y + (h - hh) / 2;
+        draw_hint_tri_scroll(screen, x + 12, y + h / 2, hint_fg);
+        screen->set_foreground(hint_fg);
+        screen->putsxy(x + 21, sy, (const unsigned char *)"Scroll");
+    }
+
+    if (label_font >= 0)
+        screen->setfont(label_font);
+    int lw = 0, lh = 0;
+    screen->getstringsize((const unsigned char *)label, &lw, &lh);
+
+    int gap = (hw > 0 && lw > 0) ? 8 : 0;
+    int pair_w = hw + gap + lw;
+    int rx = scrollable ? (x + w - 12 - pair_w) : (x + (w - pair_w) / 2);
+    if (scrollable && rx < x + 18 + scroll_w)
+        rx = x + 18 + scroll_w;
+
+    if (hw > 0)
+    {
+        if (hint_font >= 0)
+            screen->setfont(hint_font);
+        screen->set_foreground(hint_fg);
+        screen->putsxy(rx, y + (h - hh) / 2, (const unsigned char *)hint);
+    }
+    if (label_font >= 0)
+        screen->setfont(label_font);
+    dialog_draw_shadow_text(screen, rx + hw + gap, y + (h - lh) / 2, label,
+                            LCD_RGBPACK(0, 88, 176),
+                            LCD_RGBPACK(248, 250, 252), 1);
+
+    screen->set_foreground(prev_fg);
+    screen->set_drawmode(prev_mode);
+    screen->setfont(old_font);
+}
+
+void dialog_draw_popup_action_row(struct screen *screen, int x, int y,
+                                  int w, int h, const char *key_text,
+                                  bool key_arrow_right,
+                                  const char *action_text, bool primary,
+                                  bool divider_top,
+                                  int key_font, int label_font)
+{
+    int old_font = (*screen->current_viewport)->font;
+    unsigned prev_fg = screen->get_foreground();
+    int prev_mode = (*screen->current_viewport)->drawmode;
+    unsigned key_fg = LCD_RGBPACK(88, 93, 102);
+
+    screen->set_drawmode(DRMODE_FG);
+    if (divider_top)
+    {
+        screen->set_foreground(LCD_RGBPACK(196, 200, 206));
+        screen->hline(x + 12, x + w - 13, y);
+        screen->set_foreground(LCD_RGBPACK(246, 247, 249));
+        screen->hline(x + 12, x + w - 13, y + 1);
+    }
+
+    if (key_font >= 0)
+        screen->setfont(key_font);
+    int kh = 0;
+    screen->getstringsize((const unsigned char *)key_text, NULL, &kh);
+    int kx = x + 14;
+    int ky = y + (h - kh) / 2;
+    screen->set_foreground(key_fg);
+    if (key_arrow_right)
+    {
+        draw_hint_tri_right(screen, kx, y + h / 2, key_fg);
+        kx += 8;
+    }
+    screen->putsxy(kx, ky, (const unsigned char *)key_text);
+
+    if (label_font >= 0)
+        screen->setfont(label_font);
+    int lh = 0;
+    screen->getstringsize((const unsigned char *)action_text, NULL, &lh);
+    unsigned act_fg = primary ? LCD_RGBPACK(0, 88, 176)
+                              : LCD_RGBPACK(32, 35, 40);
+    dialog_draw_shadow_text(screen, x + 88, y + (h - lh) / 2, action_text,
+                            act_fg, LCD_RGBPACK(248, 250, 252), 1);
+
+    screen->set_foreground(prev_fg);
+    screen->set_drawmode(prev_mode);
+    screen->setfont(old_font);
 }
 
 static void fill_selection_gradient(struct screen *screen, int x, int y,
@@ -302,69 +577,6 @@ static void fill_selection_gradient(struct screen *screen, int x, int y,
     }
     screen->set_foreground(prev_fg);
     screen->set_drawmode(prev_mode);
-}
-
-void dialog_draw_stock_row(struct screen *screen, int x, int y, int w, int h,
-                           const char *label, bool selected, bool chevron,
-                           int font)
-{
-    if (w <= 0 || h <= 0)
-        return;
-    int old_font = (*screen->current_viewport)->font;
-    unsigned prev_fg = screen->get_foreground();
-    int prev_mode = (*screen->current_viewport)->drawmode;
-    if (font >= 0)
-        screen->setfont(font);
-
-    if (selected)
-        fill_selection_gradient(screen, x, y, w, h);
-    else
-    {
-        screen->set_drawmode(DRMODE_FG);
-        screen->set_foreground(LCD_RGBPACK(255, 255, 255));
-        screen->fillrect(x, y, w, h);
-    }
-
-    int chev_w = 0;
-    if (selected && chevron && stock_art_ready())
-    {
-        const struct stock_art *art = &stock_art[STOCK_ART_SYSTEM_SUBMENU];
-        struct viewport *vp = *screen->current_viewport;
-        struct frame_buffer_t *fb = vp->buffer ? vp->buffer : &lcd_framebuffer_default;
-        int stride = fb->stride > 0 ? fb->stride : LCD_WIDTH;
-        int fb_h = stride > 0 ? (int)(fb->elems / (size_t)stride) : LCD_HEIGHT;
-        int cx = vp->x + x + w - art->width - 6;
-        int cy = vp->y + y + (h - art->height) / 2;
-        for (int sy = 0; sy < art->height; sy++)
-        {
-            int dy = cy + sy;
-            if (dy < 0 || dy >= fb_h || cx < 0 || cx + art->width > stride)
-                continue;
-            stock_art_row(STOCK_ART_SYSTEM_SUBMENU, 0, sy,
-                          fb->fb_ptr + dy * stride + cx, art->width);
-        }
-        chev_w = art->width + 10;
-    }
-
-    int lh = 0;
-    screen->getstringsize((const unsigned char *)label, NULL, &lh);
-    struct viewport *cur = *screen->current_viewport;
-    struct viewport tvp = *cur;
-    tvp.x = cur->x + x + 10;
-    tvp.y = cur->y + y + (h - lh) / 2;
-    tvp.width = MAX(1, w - 16 - chev_w);
-    tvp.height = lh;
-    struct viewport *prev = screen->set_viewport(&tvp);
-    screen->set_drawmode(DRMODE_FG);
-    screen->set_foreground(selected ? LCD_RGBPACK(255, 255, 255)
-                                    : LCD_RGBPACK(0, 0, 0));
-    screen->putsxy(0, 0, (const unsigned char *)label);
-    screen->set_viewport(prev);
-
-    screen->set_foreground(prev_fg);
-    screen->set_drawmode(prev_mode);
-    if (font >= 0)
-        screen->setfont(old_font);
 }
 
 void dialog_draw_progress(struct screen *screen, int x, int y, int w, int h,
@@ -462,6 +674,17 @@ void dialog_frame_box(struct screen *screen, struct viewport *box,
                           (fb->stride == box->width && box->width < LCD_WIDTH);
             dialog_draw_glass_panel(screen, 0, 0, box->width, box->height,
                                     DIALOG_GLASS_RADIUS, opaque);
+            screen->set_foreground(fg);
+            screen->set_drawmode(DRMODE_SOLID);
+        }
+        else if (dialog_is_classic() && style->popup)
+        {
+            struct frame_buffer_t *fb = box->buffer ? box->buffer
+                                                    : &lcd_framebuffer_default;
+            bool opaque = fb == &lcd_framebuffer_default ||
+                          (fb->stride == box->width && box->width < LCD_WIDTH);
+            dialog_draw_popup_panel(screen, 0, 0, box->width, box->height,
+                                    opaque);
             screen->set_foreground(fg);
             screen->set_drawmode(DRMODE_SOLID);
         }
@@ -827,8 +1050,9 @@ static struct viewport dialog_measure(struct dialog *d)
 enum dialog_view_mode
 {
     DIALOG_VIEW_FLAT = 0,
-    DIALOG_VIEW_PAGE,
+    DIALOG_VIEW_POPUP,
     DIALOG_VIEW_GLASS,
+    DIALOG_VIEW_PAGE,
 };
 
 struct dialog_view
@@ -910,7 +1134,7 @@ static struct dialog_view *dialog_view_open(struct dialog *d,
     };
     if (mode == DIALOG_VIEW_PAGE)
         view->sheet.slide = true;
-    else if (mode == DIALOG_VIEW_GLASS)
+    else if (mode == DIALOG_VIEW_GLASS || mode == DIALOG_VIEW_POPUP)
         view->sheet.zoom = true;
     dialog_capture(view);
     active_dialog = view;
@@ -1001,7 +1225,7 @@ static void dialog_view_draw(struct dialog_view *view, struct dialog *d, bool re
         ui_sheet_paint_slide(&view->sheet, view->pixels, body, view->status_h);
         return;
     }
-    if (view->mode == DIALOG_VIEW_GLASS)
+    if (view->mode == DIALOG_VIEW_GLASS || view->mode == DIALOG_VIEW_POPUP)
     {
         if (redraw)
         {
@@ -1088,28 +1312,6 @@ static void dialog_view_dismiss(struct dialog_view *view, struct dialog *d)
         dialog_view_restore(view);
 }
 
-static const struct button_mapping *dialog_fruit_yesno_keymap(int context)
-{
-#if BUTTON_REMOTE != 0
-    if (context & CONTEXT_REMOTE)
-        return get_context_mapping(CONTEXT_YESNOSCREEN | CONTEXT_REMOTE);
-#endif
-    (void)context;
-    static const struct button_mapping keys[] = {
-        { ACTION_STD_PREV,      BUTTON_SCROLL_BACK,                BUTTON_NONE },
-        { ACTION_STD_PREV,      BUTTON_SCROLL_BACK|BUTTON_REPEAT,  BUTTON_NONE },
-        { ACTION_STD_NEXT,      BUTTON_SCROLL_FWD,                 BUTTON_NONE },
-        { ACTION_STD_NEXT,      BUTTON_SCROLL_FWD|BUTTON_REPEAT,   BUTTON_NONE },
-        { ACTION_YESNO_ACCEPT,  BUTTON_SELECT|BUTTON_REL,          BUTTON_SELECT },
-        { ACTION_STD_CANCEL,    BUTTON_MENU|BUTTON_REL,            BUTTON_MENU },
-        { ACTION_WPS_PLAY,      BUTTON_PLAY|BUTTON_REL,            BUTTON_PLAY },
-        { ACTION_WPS_SKIPPREV,  BUTTON_LEFT|BUTTON_REL,            BUTTON_LEFT },
-        { ACTION_WPS_SKIPNEXT,  BUTTON_RIGHT|BUTTON_REL,           BUTTON_RIGHT },
-        LAST_ITEM_IN_LIST
-    };
-    return keys;
-}
-
 static const struct button_mapping *dialog_fruit_std_keymap(int context)
 {
 #if BUTTON_REMOTE != 0
@@ -1133,7 +1335,7 @@ static const struct button_mapping *dialog_fruit_std_keymap(int context)
     return keys;
 }
 
-static bool dialog_handle_fruit_playback(int action)
+bool dialog_handle_playback(int action)
 {
     switch (action)
     {
@@ -1169,10 +1371,22 @@ int dialog_run(struct dialog *d, int poll_ticks)
     bool fruit_keys = ui_theme_style(UI_STYLE_MENU_TREE) == UI_MENU_TREE_STOCK;
     enum dialog_view_mode mode = DIALOG_VIEW_FLAT;
     if (classic && !d->fb)
-        mode = d->glass ? DIALOG_VIEW_GLASS : DIALOG_VIEW_PAGE;
+    {
+        if (d->glass)
+            mode = DIALOG_VIEW_GLASS;
+        else if (d->full_page)
+            mode = DIALOG_VIEW_PAGE;
+        else
+            mode = DIALOG_VIEW_POPUP;
+    }
 
     if (classic && (d->glass || d->fb) && d->default_style)
         dialog_style_glass(&d->style);
+    else if (mode == DIALOG_VIEW_PAGE)
+    {
+        d->style.popup = false;
+        d->style.box_border_width = 0;
+    }
 
     ui_inhibit_flush(false);
     ui_scene_interrupt();
@@ -1192,6 +1406,8 @@ int dialog_run(struct dialog *d, int poll_ticks)
     enum themable_icons icon = Icon_NOICON;
     bool has_title = sb_get_persistent_title(SCREEN_MAIN, title, sizeof(title), &icon);
     bool was_split = menu_pane_split() != 0;
+    bool touch_chrome = !d->fb && mode != DIALOG_VIEW_POPUP &&
+                        (d->title != NULL || mode == DIALOG_VIEW_PAGE);
     struct dialog_view *view = NULL;
     if (mode != DIALOG_VIEW_FLAT)
     {
@@ -1200,11 +1416,11 @@ int dialog_run(struct dialog *d, int poll_ticks)
         view = dialog_view_open(d, mode);
         if (mode == DIALOG_VIEW_PAGE && !d->fb)
             menu_pane_page(false);
-        if (d->title && !d->fb)
+        if (touch_chrome && d->title)
             sb_set_persistent_title(d->title, Icon_NOICON, SCREEN_MAIN);
-        if (view)
+        if (view && touch_chrome)
             dialog_capture_chrome(view, d);
-        else if ((d->title || mode == DIALOG_VIEW_PAGE) && !d->fb)
+        else if (!view && touch_chrome)
         {
             if (mode == DIALOG_VIEW_PAGE)
                 sb_invalidate();
@@ -1235,13 +1451,9 @@ int dialog_run(struct dialog *d, int poll_ticks)
     }
 
     const struct button_mapping *(*active_keymap)(int) = d->keymap;
-    if (!active_keymap && fruit_keys)
-    {
-        if (d->context == CONTEXT_YESNOSCREEN)
-            active_keymap = dialog_fruit_yesno_keymap;
-        else if (d->context == CONTEXT_STD || d->context == CONTEXT_LIST)
-            active_keymap = dialog_fruit_std_keymap;
-    }
+    if (!active_keymap && fruit_keys &&
+        (d->context == CONTEXT_STD || d->context == CONTEXT_LIST))
+        active_keymap = dialog_fruit_std_keymap;
 
     bool redraw = true;
     int ticks = d->poll_ticks;
@@ -1255,7 +1467,14 @@ int dialog_run(struct dialog *d, int poll_ticks)
             if (classic && (d->glass || d->fb))
                 dialog_style_glass(&d->style);
             else
+            {
                 dialog_style_default(&d->style);
+                if (mode == DIALOG_VIEW_PAGE)
+                {
+                    d->style.popup = false;
+                    d->style.box_border_width = 0;
+                }
+            }
         }
         if (view)
             dialog_view_draw(view, d, redraw);
@@ -1290,7 +1509,7 @@ int dialog_run(struct dialog *d, int poll_ticks)
             redraw = false;
             continue;
         }
-        if (fruit_keys && !d->keymap && dialog_handle_fruit_playback(action))
+        if (fruit_keys && !d->keymap && dialog_handle_playback(action))
         {
             redraw = false;
             continue;
@@ -1326,7 +1545,7 @@ int dialog_run(struct dialog *d, int poll_ticks)
         menu_pane_page(true);
         sb_invalidate();
     }
-    if ((d->title || (mode == DIALOG_VIEW_PAGE && was_split)) && !d->fb)
+    if (touch_chrome && (d->title || (mode == DIALOG_VIEW_PAGE && was_split)))
     {
         if (d->title)
             sb_set_persistent_title(has_title ? title : NULL, icon, SCREEN_MAIN);

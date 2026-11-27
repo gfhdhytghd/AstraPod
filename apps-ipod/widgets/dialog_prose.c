@@ -31,7 +31,6 @@
 #include "settings/settings.h"
 #include "speech/talk.h"
 #include "ui/native_theme_runtime.h"
-#include "ui/statusbar.h"
 #include "lang.h"
 
 /* Wrapped lines held at once. Longer than any explanation worth reading on a
@@ -84,14 +83,23 @@ static void prose_measure(struct dialog *d, struct screen *s,
 
     if (dialog_is_classic() && !d->fb)
     {
-        int bar_h = sb_visible_height();
-        if (bar_h <= 0)
-            bar_h = (int)ui_theme_metric(UI_METRIC_STATUS_HEIGHT);
+        const int pad_x = 14;
+        const int pad_top = 10;
+        const int pad_bot = 10;
+        int hdr_h = p->title ? 24 : 0;
+        int foot_h = p->cancel ? 42 : 28;
+        int box_w = MIN(sw - 32, 282);
+        int text_w = box_w - 2 * pad_x - PROSE_BAR_W - PROSE_BAR_GAP;
         d->style.box_margin = 0;
-        box->x = 0;
-        box->y = bar_h;
-        box->width = sw;
-        box->height = MAX(1, sh - bar_h);
+        lines = prose_wrap(p->body, text_w, box->font);
+        fixed = 1 + hdr_h + pad_top + pad_bot + foot_h + 1;
+        max = sh * 84 / 100;
+        if (fixed + lines * fh > max)
+            lines = MAX((max - fixed) / fh, 1);
+        box->width = box_w;
+        box->height = fixed + MAX(lines, 1) * fh;
+        box->x = (sw - box->width) / 2;
+        box->y = (sh - box->height) / 2;
         return;
     }
 
@@ -145,11 +153,16 @@ static void prose_draw(struct dialog *d, struct screen *s,
     int fh = font_get(content->font)->height;
     if (dialog_is_classic() && !d->fb)
     {
-        const int pad_x = 16;
-        const int pad_top = 12;
-        const int dock_h = 48;
-        int dock_y = content->height - dock_h - 10;
-        int body_h = dock_y - pad_top - 8;
+        const int pad_x = 14;
+        const int pad_top = 10;
+        const int pad_bot = 10;
+        int hdr_h = p->title ? 24 : 0;
+        int foot_h = p->cancel ? 42 : 28;
+        int bfont = p->btn_font >= 0 ? p->btn_font : content->font;
+        int kfont = content->font;
+        int foot_y = content->height - foot_h - 1;
+        int body_top = 1 + hdr_h + pad_top;
+        int body_h = foot_y - body_top - pad_bot;
         if (body_h < fh)
             body_h = fh;
         int text_w = content->width - 2 * pad_x - PROSE_BAR_W - PROSE_BAR_GAP;
@@ -160,9 +173,13 @@ static void prose_draw(struct dialog *d, struct screen *s,
         if (p->scroll < 0)
             p->scroll = 0;
 
+        if (p->title)
+            dialog_draw_popup_header(s, 1, 1, content->width - 2, hdr_h,
+                                     p->title, bfont);
+
         s->set_drawmode(DRMODE_FG);
-        s->set_foreground(LCD_RGBPACK(0, 0, 0));
-        int y = pad_top;
+        s->set_foreground(LCD_RGBPACK(24, 26, 30));
+        int y = body_top;
         for (int i = 0; i < p->visible; i++)
         {
             int n = p->scroll + i;
@@ -173,31 +190,20 @@ static void prose_draw(struct dialog *d, struct screen *s,
         }
         s->set_drawmode(DRMODE_SOLID);
         if (p->lines > p->visible)
-            gui_scrollbar_draw(s, content->width - pad_x - PROSE_BAR_W, pad_top,
-                               PROSE_BAR_W, body_h, p->lines,
+            gui_scrollbar_draw(s, content->width - pad_x - PROSE_BAR_W + 4,
+                               body_top, PROSE_BAR_W, body_h, p->lines,
                                p->scroll, p->scroll + p->visible,
                                VERTICAL | FOREGROUND | INNER_BGFILL);
 
-        dialog_draw_silver_dock(s, 16, dock_y, content->width - 32, dock_h);
-        int bfont = p->btn_font >= 0 ? p->btn_font : content->font;
         if (!p->cancel)
-        {
-            const char *labels[1] = { p->accept };
-            int bar_w = 120;
-            dialog_draw_segmented(s, (content->width - bar_w) / 2, dock_y + 11,
-                                  bar_w, 27, labels, 1, 0, true, bfont);
-        }
+            dialog_draw_popup_single_footer(s, 1, foot_y, content->width - 2,
+                                            foot_h, p->accept, "SELECT / MENU",
+                                            p->lines > p->visible, bfont, kfont);
         else
-        {
-            const char *labels[2] = { p->cancel, p->accept };
-            int w0 = 0, w1 = 0;
-            font_getstringsize((const unsigned char *)p->cancel, &w0, NULL, bfont);
-            font_getstringsize((const unsigned char *)p->accept, &w1, NULL, bfont);
-            int bar_w = MAX(160, MIN(content->width - 56, MAX(w0, w1) * 2 + 48));
-            int sel = p->focus == PROSE_BUTTONS ? p->sel : -1;
-            dialog_draw_segmented(s, (content->width - bar_w) / 2, dock_y + 11,
-                                  bar_w, 27, labels, 2, sel, true, bfont);
-        }
+            dialog_draw_popup_pair_footer(s, 1, foot_y, content->width - 2,
+                                          foot_h, p->cancel, "/ MENU", true,
+                                          p->accept, "SELECT /", true,
+                                          bfont, kfont);
         return;
     }
 
@@ -282,11 +288,65 @@ static void prose_speak_button(const struct prose *p)
         talk_string(p->sel == 1 ? p->accept : p->cancel, false);
 }
 
+static const struct button_mapping *prose_classic_keymap(int context)
+{
+#if BUTTON_REMOTE != 0
+    if (context & CONTEXT_REMOTE)
+        return get_context_mapping(CONTEXT_STD | CONTEXT_REMOTE);
+#endif
+    (void)context;
+    static const struct button_mapping keys[] = {
+        { ACTION_STD_PREV,       BUTTON_SCROLL_BACK,                BUTTON_NONE   },
+        { ACTION_STD_PREVREPEAT, BUTTON_SCROLL_BACK|BUTTON_REPEAT,  BUTTON_NONE   },
+        { ACTION_STD_NEXT,       BUTTON_SCROLL_FWD,                 BUTTON_NONE   },
+        { ACTION_STD_NEXTREPEAT, BUTTON_SCROLL_FWD|BUTTON_REPEAT,   BUTTON_NONE   },
+        { ACTION_STD_OK,         BUTTON_SELECT | BUTTON_REL,        BUTTON_SELECT },
+        { ACTION_STD_OK,         BUTTON_RIGHT | BUTTON_REL,         BUTTON_RIGHT  },
+        { ACTION_STD_CANCEL,     BUTTON_LEFT | BUTTON_REL,          BUTTON_LEFT   },
+        { ACTION_STD_MENU,       BUTTON_MENU | BUTTON_REL,          BUTTON_MENU   },
+        { ACTION_WPS_PLAY,       BUTTON_PLAY | BUTTON_REL,          BUTTON_PLAY   },
+        { ACTION_NONE,           BUTTON_SELECT | BUTTON_REPEAT,     BUTTON_NONE   },
+        { ACTION_NONE,           BUTTON_RIGHT | BUTTON_REPEAT,      BUTTON_NONE   },
+        { ACTION_NONE,           BUTTON_LEFT | BUTTON_REPEAT,       BUTTON_NONE   },
+        { ACTION_NONE,           BUTTON_MENU | BUTTON_REPEAT,       BUTTON_NONE   },
+        { ACTION_NONE,           BUTTON_PLAY | BUTTON_REPEAT,       BUTTON_NONE   },
+        LAST_ITEM_IN_LIST
+    };
+    return keys;
+}
+
 static int prose_action(struct dialog *d, int action, void *data)
 {
     struct prose *p = data;
 
-    (void)d;
+    if (dialog_is_classic() && !d->fb)
+    {
+        switch (action)
+        {
+        case ACTION_STD_NEXT:
+        case ACTION_STD_NEXTREPEAT:
+            if (p->scroll + p->visible < p->lines)
+                p->scroll++;
+            return DIALOG_CONTINUE;
+        case ACTION_STD_PREV:
+        case ACTION_STD_PREVREPEAT:
+            if (p->scroll > 0)
+                p->scroll--;
+            return DIALOG_CONTINUE;
+        case ACTION_STD_OK:
+            return DIALOG_ACCEPT;
+        case ACTION_STD_CANCEL:
+        case ACTION_STD_MENU:
+            return DIALOG_CANCEL;
+        case ACTION_WPS_PLAY:
+            dialog_handle_playback(action);
+            return DIALOG_CONTINUE;
+        default:
+            if (default_event_handler(action) == SYS_USB_CONNECTED)
+                return DIALOG_ABORT;
+            return DIALOG_CONTINUE;
+        }
+    }
 
     switch (action)
     {
@@ -418,7 +478,8 @@ static int prose_run(const char *title, const char *body,
     d.fb_w = fb_w;
     d.fb_h = fb_h;
     d.present = present;
-    d.keymap = keymap;
+    d.keymap = keymap ? keymap
+             : (dialog_is_classic() && !fb ? prose_classic_keymap : NULL);
     if (global_settings.talk_menu)
     {
         if (title)

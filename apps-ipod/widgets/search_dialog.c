@@ -478,6 +478,7 @@ int search_dialog_run(const struct search_provider *p, void *ctx,
     push_current_activity(p->activity);
     dialog_init(&d, CONTEXT_KEYBOARD, p->title, &style, &cb, &s);
     d.motion_route = "search";
+    d.full_page = true;
 
     int res = dialog_run(&d, POLL_IDLE);
 

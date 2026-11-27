@@ -33707,3 +33707,17 @@
     *: "1 Game"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_APP_APP_TRAY_DEMO
+  desc: Extras: Demos list, the app reminder demo (demos/app_tray_demo)
+  user: core
+  <source>
+    *: "App Tray Demo"
+  </source>
+  <dest>
+    *: "App Tray Demo"
+  </dest>
+  <voice>
+    *: "App Tray Demo"
+  </voice>
+</phrase>

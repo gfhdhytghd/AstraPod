@@ -33363,3 +33363,18 @@
     *: "1 个游戏"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_APP_APP_TRAY_DEMO
+  desc: Extras: Demos list, the app reminder demo (demos/app_tray_demo)
+  user: core
+  <source>
+    *: "App Tray Demo"
+  </source>
+  <dest>
+    *: "应用托盘演示"
+  </dest>
+  <voice>
+    *: "应用托盘演示"
+  </voice>
+</phrase>

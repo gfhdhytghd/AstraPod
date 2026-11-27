@@ -201,6 +201,7 @@ static const struct app apps[] = {
     { "apps/text_viewer", LANG_APP_TEXT_VIEWER, APP_LIST_OTHER },
     { "apps/theme_remove", LANG_APP_THEME_REMOVE, APP_LIST_OTHER },
     { "apps/battery_bench", LANG_APP_BATTERY_BENCH, APP_LIST_DEMOS },
+    { "demos/app_tray_demo", LANG_APP_APP_TRAY_DEMO, APP_LIST_DEMOS },
     { "demos/bounce", LANG_APP_BOUNCE, APP_LIST_DEMOS },
     { "demos/credits", LANG_APP_CREDITS, APP_LIST_DEMOS },
     { "demos/cube", LANG_APP_CUBE, APP_LIST_DEMOS },

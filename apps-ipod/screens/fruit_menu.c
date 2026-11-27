@@ -518,11 +518,14 @@ MENUITEM_SETTING_W_LABEL(sound_check_row,
                          ID2P(LANG_FRUIT_SOUND_CHECK), NULL);
 MENUITEM_SETTING_W_LABEL(clock_24_row, &global_settings.timeformat,
                          ID2P(LANG_FRUIT_24_HOUR_CLOCK), NULL);
+MENUITEM_SETTING_W_LABEL(time_in_title_row, &global_settings.time_in_title,
+                         ID2P(LANG_FRUIT_TIME_IN_TITLE), NULL);
+MENUITEM_SETTING_W_LABEL(sort_by_row, &global_settings.contacts_sort,
+                         ID2P(LANG_FRUIT_SORT_BY), NULL);
 
 ROW(date_row, LANG_FRUIT_DATE, set_date_time, NULL);
 ROW(time_row, LANG_FRUIT_TIME, set_date_time, NULL);
 ROW(time_zone_row, LANG_FRUIT_TIME_ZONE, not_available, NULL);
-ROW(time_in_title_row, LANG_FRUIT_TIME_IN_TITLE, not_available, NULL);
 
 static const struct menu_item_ex *const date_time_rows[] = {
     &date_row, &time_row, &time_zone_row, &clock_24_row, &time_in_title_row,
@@ -538,7 +541,6 @@ ROW(backlight_row, LANG_BACKLIGHT, backlight, NULL);
 ROW(brightness_row, LANG_BRIGHTNESS, brightness, NULL);
 ROW(audiobooks_row, LANG_AUDIOBOOKS, audiobook_speed, NULL);
 ROW(eq_row, LANG_FRUIT_EQ, eq_presets, NULL);
-ROW(sort_by_row, LANG_FRUIT_SORT_BY, not_available, NULL);
 ROW(language_row, LANG_LANGUAGE, language, NULL);
 ROW(legal_row, LANG_FRUIT_LEGAL, legal, NULL);
 ROW(reset_row, LANG_RESET, reset, NULL);
@@ -629,6 +631,18 @@ static int in_place(const struct menu_item_ex *item, bool step)
         if (step)
             set_value(&g->timeformat, !g->timeformat);
         return g->timeformat == 0 ? LANG_ON : LANG_OFF;
+    }
+    if (item == &time_in_title_row)
+    {
+        if (step)
+            set_value(&g->time_in_title, !g->time_in_title);
+        return g->time_in_title ? LANG_ON : LANG_OFF;
+    }
+    if (item == &sort_by_row)
+    {
+        if (step)
+            set_value(&g->contacts_sort, !g->contacts_sort);
+        return g->contacts_sort ? LANG_CONTACTS_LAST : LANG_CONTACTS_FIRST;
     }
     return -1;
 }
@@ -821,7 +835,8 @@ static bool extras_pane(const struct menu_item_ex *item)
     {
         c.art = STOCK_ART_ADDRESSVIEWER_PREVIEW;
         c.x = 186, c.y = 47;
-        strlcpy(c.title, str(LANG_FRUIT_NO_CONTACTS), sizeof(c.title));
+        strlcpy(c.title, str(extras_contacts_any() ? LANG_FRUIT_CONTACTS :
+                             LANG_FRUIT_NO_CONTACTS), sizeof(c.title));
     }
     else if (item == &extras_alarms_row || item == &home_alarms)
         c.art = STOCK_ART_ALARMS_CLOCK_STATIC, c.x = 178, c.y = 56;

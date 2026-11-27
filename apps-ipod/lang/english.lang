@@ -29229,7 +29229,7 @@
 </phrase>
 <phrase>
   id: LANG_FRUIT_TIME_IN_TITLE
-  desc: Fruit Company: Settings > Date & Time > Time in Title
+  desc: Setting: the time in place of a screen's title in the status bar; Fruit Company's Settings > Date & Time > Time in Title
   user: core
   <source>
     *: "Time in Title"
@@ -33719,5 +33719,173 @@
   </dest>
   <voice>
     *: "App Tray Demo"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_SORT_BY
+  desc: Setting: Extras > Contacts in order of first or last name; Fruit Company's Settings > Sort By
+  user: core
+  <source>
+    *: "Sort Contacts By"
+  </source>
+  <dest>
+    *: "Sort Contacts By"
+  </dest>
+  <voice>
+    *: "Sort Contacts By"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_FIRST
+  desc: Fruit Company: Settings > Sort By, contacts by first name
+  user: core
+  <source>
+    *: "First"
+  </source>
+  <dest>
+    *: "First"
+  </dest>
+  <voice>
+    *: "First"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_LAST
+  desc: Fruit Company: Settings > Sort By, contacts by last name
+  user: core
+  <source>
+    *: "Last"
+  </source>
+  <dest>
+    *: "Last"
+  </dest>
+  <voice>
+    *: "Last"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_MOBILE
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a mobile number
+  user: core
+  <source>
+    *: "Mobile"
+  </source>
+  <dest>
+    *: "Mobile"
+  </dest>
+  <voice>
+    *: "Mobile"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_HOME
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a home number, email or address
+  user: core
+  <source>
+    *: "Home"
+  </source>
+  <dest>
+    *: "Home"
+  </dest>
+  <voice>
+    *: "Home"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_WORK
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a work number, email or address
+  user: core
+  <source>
+    *: "Work"
+  </source>
+  <dest>
+    *: "Work"
+  </dest>
+  <voice>
+    *: "Work"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_FAX
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a fax number
+  user: core
+  <source>
+    *: "Fax"
+  </source>
+  <dest>
+    *: "Fax"
+  </dest>
+  <voice>
+    *: "Fax"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_PAGER
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a pager number
+  user: core
+  <source>
+    *: "Pager"
+  </source>
+  <dest>
+    *: "Pager"
+  </dest>
+  <voice>
+    *: "Pager"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_MAIN
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a main number
+  user: core
+  <source>
+    *: "Main"
+  </source>
+  <dest>
+    *: "Main"
+  </dest>
+  <voice>
+    *: "Main"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_OTHER
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a number, email or address of no kind it names
+  user: core
+  <source>
+    *: "Other"
+  </source>
+  <dest>
+    *: "Other"
+  </dest>
+  <voice>
+    *: "Other"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_NOTES
+  desc: Fruit Company: Extras > Contacts, a contact's page, before the contact's note
+  user: core
+  <source>
+    *: "Notes"
+  </source>
+  <dest>
+    *: "Notes"
+  </dest>
+  <voice>
+    *: "Notes"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_NO_NAME
+  desc: Fruit Company: Extras > Contacts, a contact with no name or company
+  user: core
+  <source>
+    *: "No Name"
+  </source>
+  <dest>
+    *: "No Name"
+  </dest>
+  <voice>
+    *: "No Name"
   </voice>
 </phrase>

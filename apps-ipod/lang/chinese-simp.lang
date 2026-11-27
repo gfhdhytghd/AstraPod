@@ -28879,7 +28879,7 @@
 
 <phrase>
   id: LANG_FRUIT_TIME_IN_TITLE
-  desc: Fruit Company: Settings > Date & Time > Time in Title
+  desc: Setting: the time in place of a screen's title in the status bar; Fruit Company's Settings > Date & Time > Time in Title
   user: core
   <source>
     *: "Time in Title"
@@ -33376,5 +33376,173 @@
   </dest>
   <voice>
     *: "应用托盘演示"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_SORT_BY
+  desc: Setting: Extras > Contacts in order of first or last name; Fruit Company's Settings > Sort By
+  user: core
+  <source>
+    *: "Sort Contacts By"
+  </source>
+  <dest>
+    *: "联系人排序方式"
+  </dest>
+  <voice>
+    *: "联系人排序方式"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_FIRST
+  desc: Fruit Company: Settings > Sort By, contacts by first name
+  user: core
+  <source>
+    *: "First"
+  </source>
+  <dest>
+    *: "名"
+  </dest>
+  <voice>
+    *: "名"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_LAST
+  desc: Fruit Company: Settings > Sort By, contacts by last name
+  user: core
+  <source>
+    *: "Last"
+  </source>
+  <dest>
+    *: "姓"
+  </dest>
+  <voice>
+    *: "姓"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_MOBILE
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a mobile number
+  user: core
+  <source>
+    *: "Mobile"
+  </source>
+  <dest>
+    *: "手机"
+  </dest>
+  <voice>
+    *: "手机"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_HOME
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a home number, email or address
+  user: core
+  <source>
+    *: "Home"
+  </source>
+  <dest>
+    *: "住宅"
+  </dest>
+  <voice>
+    *: "住宅"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_WORK
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a work number, email or address
+  user: core
+  <source>
+    *: "Work"
+  </source>
+  <dest>
+    *: "工作"
+  </dest>
+  <voice>
+    *: "工作"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_FAX
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a fax number
+  user: core
+  <source>
+    *: "Fax"
+  </source>
+  <dest>
+    *: "传真"
+  </dest>
+  <voice>
+    *: "传真"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_PAGER
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a pager number
+  user: core
+  <source>
+    *: "Pager"
+  </source>
+  <dest>
+    *: "寻呼机"
+  </dest>
+  <voice>
+    *: "寻呼机"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_MAIN
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a main number
+  user: core
+  <source>
+    *: "Main"
+  </source>
+  <dest>
+    *: "主要"
+  </dest>
+  <voice>
+    *: "主要"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_OTHER
+  desc: Fruit Company: Extras > Contacts, a contact's page, before a number, email or address of no kind it names
+  user: core
+  <source>
+    *: "Other"
+  </source>
+  <dest>
+    *: "其他"
+  </dest>
+  <voice>
+    *: "其他"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_NOTES
+  desc: Fruit Company: Extras > Contacts, a contact's page, before the contact's note
+  user: core
+  <source>
+    *: "Notes"
+  </source>
+  <dest>
+    *: "备注"
+  </dest>
+  <voice>
+    *: "备注"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_CONTACTS_NO_NAME
+  desc: Fruit Company: Extras > Contacts, a contact with no name or company
+  user: core
+  <source>
+    *: "No Name"
+  </source>
+  <dest>
+    *: "无名称"
+  </dest>
+  <voice>
+    *: "无名称"
   </voice>
 </phrase>

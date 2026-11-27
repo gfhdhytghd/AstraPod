@@ -4,9 +4,10 @@
 Arguments: ROCKBOXUI SIMDISK OUTPUT_DIRECTORY
 SIMDISK is a simulator root with .rockbox in it, as build-sim.sh leaves.
 Xvfb is private to this process. Select on Shuffle, Repeat, Sound Check,
-Clicker and Date & Time > 24 Hour Clock must change the row's value and
-nothing else in the list, show a different value at every step, and come
-back to the first value after as many steps as stock has values. Each row
+Clicker, Date & Time > 24 Hour Clock and Time in Title, and Sort By must
+change the row's value and nothing else in the list, show a different value
+at every step, and come back to the first value after as many steps as
+stock has values. Each row
 is then left one step on and the simulator restarted: the rows must show
 the same values, and config.cfg must hold them. config.cfg is written when
 storage goes idle, at most every 30 seconds, so it is read only at the end.
@@ -36,6 +37,8 @@ ROWS = [
     ("clicker", 11, "hardware keyclick", "on", ["off", "on"]),
     ("24_hour_clock", (12, 3), "time format", "12hour",
      ["24hour", "12hour"]),
+    ("time_in_title", (12, 4), "time in title", "off", ["on", "off"]),
+    ("sort_by", 13, "contacts sort", "first", ["last", "first"]),
 ]
 
 LIST = (0, 22, 160, 240)

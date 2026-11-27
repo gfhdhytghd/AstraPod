@@ -719,6 +719,7 @@ restart, which costs battery life: restart the player afterwards.
 |---|---|---|---|
 | Sync time from computer | Sets the player's clock from a connected computer running HerdRemote. On by default. Switch off to set the date and time manually. | On | |
 | Time Format | Whether times are shown on a 12- or 24-hour clock. | 12 Hour Clock |  |
+| Time in Title | Shows the time in the status bar in place of the screen's title. The title still shows for two seconds when a screen opens, and for a few seconds after the wheel turns. Changes nothing on a theme whose bar has a clock of its own, such as Scrim and Light. | Off |  |
 
 ### System — Startup/Shutdown
 
@@ -778,6 +779,18 @@ off, and how much space their files take. A log file that reaches 256 KB is
 renamed with `.1` before its extension, replacing the last one, and a new file
 starts; send both when asked for a log. While any log is on, a message at
 startup says so, and how long is left.
+
+---
+
+## Fruit Company
+
+Under the Fruit Company theme, Settings shows the original iPod's rows. Most
+are settings listed above under AstraPod's names; this one is Fruit Company's
+own.
+
+| Setting | What it does | Default | |
+|---|---|---|---|
+| Sort By | Under Fruit Company, the order of Extras > Contacts. First lists a contact as "Anna Zimmer", by first name; Last lists "Zimmer, Anna", by last name. Contacts are the vCard (.vcf) files in the Contacts folder of the player's disk, as iTunes syncs them. | First |  |
 
 ---
 

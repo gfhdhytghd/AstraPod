@@ -955,6 +955,8 @@ const struct settings_list settings[] = {
     CHOICE_SETTING(0, timeformat, LANG_TIMEFORMAT, 1,
         "time format", "24hour,12hour", NULL, 2,
         ID2P(LANG_24_HOUR_CLOCK), ID2P(LANG_12_HOUR_CLOCK)),
+    OFFON_SETTING(0, time_in_title, LANG_FRUIT_TIME_IN_TITLE, false,
+                  "time in title", NULL),
     OFFON_SETTING(0,show_icons, LANG_SHOW_ICONS ,true,"show icons", NULL),
     OFFON_SETTING(0,show_debug_menu, LANG_SHOW_DEBUG_MENU, false,
                   "show debug menu", NULL),
@@ -2025,6 +2027,11 @@ const struct settings_list settings[] = {
     INT_SETTING(F_BANFROMQS, fruit_music_menu, LANG_FRUIT_MUSIC_MENU, 0x7ff,
                 "fruit music menu", UNIT_INT, 0, 0x7fffffff, 1,
                 NULL, NULL, NULL),
+    /* Fruit Company's Settings > Sort By: Extras > Contacts in order of
+     * first or last name */
+    CHOICE_SETTING(0, contacts_sort, LANG_CONTACTS_SORT_BY, 0,
+                   "contacts sort", "first,last", NULL, 2,
+                   ID2P(LANG_CONTACTS_FIRST), ID2P(LANG_CONTACTS_LAST)),
     /* Guest credits, mined out of the title and per-track artist tags. Off by
      * default: reading them is a guess at what a tag meant, and a library
      * whose owner did not ask for it should not grow rows out of one. Off,

@@ -30,8 +30,10 @@ enum quickscreen_return {
     QUICKSCREEN_IN_USB = 0x1,
     QUICKSCREEN_GOTO_SHORTCUTS_MENU = 0x2,
     QUICKSCREEN_CHANGED = 0x4,
+    QUICKSCREEN_RESTORED = 0x8, /* The HUD restored the caller's framebuffer. */
 };
 
+bool quick_screen_uses_hud(void);
 extern int quick_screen_quick(int button_enter);
 /* Local TOP/BOTTOM, Cider shuffle (left) and repeat (right). */
 extern int quick_screen_cider(int button_enter);

@@ -9278,9 +9278,10 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             }
         }
 
-        /* Whatever the button below is about to change, the frame showing it
-         * has not been drawn yet -- this one went out before the switch. */
-        if (button != ACTION_NONE)
+        /* A quick screen can restore the exact frame it covered. Its
+         * handler requests a repaint if the caller's pixels are stale. */
+        if (button != ACTION_NONE && button != ACTION_STD_QUICKSCREEN &&
+            button != ACTION_WPS_QUICKSCREEN)
         {
             art_owed = true;
             /* Only the wheel is on the hot path. Everything else can put
@@ -9424,6 +9425,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             end_pf_thread();
             ret = quick_screen_current(button, NULL);
             if (ret == QUICKSCREEN_IN_USB) return GO_TO_ROOT;
+            if (ret != QUICKSCREEN_RESTORED)
+                art_owed = full_repaint_owed = true;
             create_pf_thread();
             if (pf_show_statusbar)
                 sb_set_persistent_title(model_title(), Icon_NOICON, SCREEN_MAIN);

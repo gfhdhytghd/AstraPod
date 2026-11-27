@@ -58,6 +58,18 @@ static void restore_display(const struct rock_display_state *state)
     lcd_set_viewport(state->viewport);
 }
 
+/* The SDK also supplies this screen to resident modules. */
+void rock_display_init(void)
+{
+    if (rock_main_screen.update)
+        return;
+    rock_main_screen = screens[SCREEN_MAIN];
+    rock_main_screen.update = rock_raw_lcd_update;
+    rock_main_screen.update_rect = rock_raw_lcd_update_rect;
+    rock_main_screen.update_viewport = rock_screen_update_viewport;
+    rock_main_screen.update_viewport_rect = rock_screen_update_viewport_rect;
+}
+
 void rock_display_start(fb_data *caller_pixels, fb_data *widget_pixels)
 {
     ui_scene_interrupt();
@@ -65,11 +77,6 @@ void rock_display_start(fb_data *caller_pixels, fb_data *widget_pixels)
                       ui_scene_capture_page(&app_scene);
     lcd_scroll_stop();
     save_display(&caller);
-    rock_main_screen = screens[SCREEN_MAIN];
-    rock_main_screen.update = rock_raw_lcd_update;
-    rock_main_screen.update_rect = rock_raw_lcd_update_rect;
-    rock_main_screen.update_viewport = rock_screen_update_viewport;
-    rock_main_screen.update_viewport_rect = rock_screen_update_viewport_rect;
     saved_pixels = caller_pixels;
     plugin_pixels = widget_pixels;
     memcpy(saved_pixels, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);

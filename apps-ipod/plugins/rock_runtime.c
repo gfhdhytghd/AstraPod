@@ -1180,6 +1180,7 @@ static int run_rock(const char *path, const char *file,
         decoder_capacity = capacity - ROCK_IMAGE_DECODER_OFFSET;
         tail_size = decoder_base - tail;
     }
+    rock_display_init();
     *module->api = &api;
 
     struct rock_invocation call = {

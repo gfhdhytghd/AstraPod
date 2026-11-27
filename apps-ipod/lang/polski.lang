@@ -28017,3 +28017,31 @@
     *: "Poprzedni ekran"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_USB_STOCK_CONNECTED
+  desc: first line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Connected"
+  </source>
+  <dest>
+    *: "Podłączony"
+  </dest>
+  <voice>
+    *: "Podłączony"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_USB_STOCK_EJECT_BEFORE_DISCONNECT
+  desc: second line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Eject before disconnecting."
+  </source>
+  <dest>
+    *: "Wysuń przed rozłączeniem"
+  </dest>
+  <voice>
+    *: "Wysuń przed rozłączeniem"
+  </voice>
+</phrase>

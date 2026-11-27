@@ -33378,3 +33378,31 @@
     *: "应用托盘演示"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_USB_STOCK_CONNECTED
+  desc: first line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Connected"
+  </source>
+  <dest>
+    *: "已连接"
+  </dest>
+  <voice>
+    *: "已连接"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_USB_STOCK_EJECT_BEFORE_DISCONNECT
+  desc: second line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Eject before disconnecting."
+  </source>
+  <dest>
+    *: "断开连接前先推出"
+  </dest>
+  <voice>
+    *: "断开连接前先推出"
+  </voice>
+</phrase>

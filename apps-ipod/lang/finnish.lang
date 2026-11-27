@@ -12654,3 +12654,31 @@
     *: "Valitse tarkistettavat hakemistot"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_USB_STOCK_CONNECTED
+  desc: first line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Connected"
+  </source>
+  <dest>
+    *: "Liitetty"
+  </dest>
+  <voice>
+    *: "Liitetty"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_USB_STOCK_EJECT_BEFORE_DISCONNECT
+  desc: second line of the stock USB connection screen
+  user: core
+  <source>
+    *: "Eject before disconnecting."
+  </source>
+  <dest>
+    *: "Poista ennen irrottamista"
+  </dest>
+  <voice>
+    *: "Poista ennen irrottamista"
+  </voice>
+</phrase>

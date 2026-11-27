@@ -42,6 +42,9 @@
 #include "string-extra.h"
 #include "system/library_files.h"
 #include "config.h"
+#ifdef SIMULATOR
+#include "sim/shim-cider.h"
+#endif
 #include "system.h"          /* MIN/MAX/ALIGN_BUFFER/ALIGN_DOWN */
 #include "rbpaths.h"
 #include "input/action.h"           /* get_action/get_custom_action/button_mapping */
@@ -269,7 +272,6 @@ static void pf_update_dynamic_colors(void)
 
 #define MAX_SLIDES_COUNT 10
 /* Flat slots per side and the caption prefetch radius. */
-#define ALBUM_COVERS_NUM_SLIDES 6
 
 /* --- The flat view ---------------------------------------------------------
  * Covers lie face-on, all the same size and all on the same line: two piles
@@ -1569,12 +1571,12 @@ static void thread(void)
                 buf_ctx_lock();
                 if (model->art_version)
                 {
+                    const int radius = ALBUM_COVERS_NUM_SLIDES + CIDER_COVER_LEAD;
                     for (int slot = 0; slot < SLIDE_CACHE_SIZE; slot++)
                     {
                         int index = pf_sldcache.cache[slot].index;
                         if (pf_sldcache.cache[slot].hid <= 0 ||
-                            index < MAX(0,center_index - 4) ||
-                            index > center_index + 4)
+                            abs(index - center_index) > radius)
                             continue;
                         unsigned int version = model->art_version(index);
                         unsigned int previous = pf_sldcache.cache[slot].version;
@@ -2255,7 +2257,7 @@ static inline bool load_and_prepare_surface(const int slide_index,
         return false;
     unsigned int generation = slide_cache_generation;
     int center = center_index;
-    unsigned int version = model->art_version ? model->art_version(slide_index) : 0;
+    unsigned int version = 0;
     unsigned int hash = model->read_art ? 0 : model->art_key(slide_index);
 
     /* The new surface stays private until its pixels are ready.
@@ -2267,7 +2269,7 @@ static inline bool load_and_prepare_surface(const int slide_index,
     int fh = -1;
     if (model->read_art)
     {
-        if (model->read_art(slide_index, &bitmap))
+        if (model->read_art(slide_index, &bitmap, &version))
         {
             len = sizeof(pix_t) * bitmap.width * bitmap.height;
             allocation = sizeof(int) + sizeof(struct dim) + len +
@@ -3710,6 +3712,15 @@ static void flow_cover_columns(const struct flow_card *card, int slot, int sprea
     const struct dim *bmp = surface(slide);
     if (!bmp)
         return;
+#ifdef SIMULATOR
+    if (model->external)
+    {
+        int slot = slide->cached_slot;
+        unsigned quality = slot >= 0 ? pf_sldcache.cache[slot].version & 3 : 0;
+        sim_cider_visible(card->id, bmp != get_slide(empty_slide_hid) ? quality : 0,
+                          ((const pix_t *)(bmp + 1))[0]);
+    }
+#endif
     /* Interpolate in Q30: a rounded Q16 step accumulates enough error
      * across a face to exchange nearly coincident depth samples. */
     int offset = MAX(0, MIN(width, (first << 16) + 32768 - left));

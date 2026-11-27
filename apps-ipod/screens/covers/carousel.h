@@ -45,6 +45,8 @@ typedef fb_data pix_t;
 
 /* Number of slide slots the engine keeps decoded at once. */
 #define SLIDE_CACHE_SIZE 100
+#define ALBUM_COVERS_NUM_SLIDES 6
+#define CIDER_COVER_LEAD 4
 
 /* Caption geometry, owned by the engine because three things have to agree on
  * it: each model's draw_text() places the text, and init() reserves a band of
@@ -125,7 +127,8 @@ struct carousel_model {
     const char *stock_title;   /* its title under the stock look; NULL = title */
     const char *motion_trace;                          /* optional frame-log route */
     bool external;                                    /* independent library */
-    bool (*read_art)(int index, struct bitmap *bitmap); /* native columns */
+    /* Native columns and the version of the pixels actually copied. */
+    bool (*read_art)(int index, struct bitmap *bitmap, unsigned int *version);
     unsigned int (*art_version)(int index);
     void (*blur_source)(int index, struct album_blur_source *source);
     void (*tick)(void);                                /* nonblocking provider */

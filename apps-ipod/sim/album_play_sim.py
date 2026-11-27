@@ -143,6 +143,59 @@ def remote(binary, fixture, out):
             os.environ.pop("PODBOX_SIM_CIDER", None)
 
 
+def visible_covers(log):
+    return [tuple(map(int, line.split()[3:])) for line in log.splitlines()
+            if line.startswith("sim Cider visible ")]
+
+
+def remote_scroll(binary, fixture, out):
+    out.mkdir()
+    root = out / "disk"
+    shutil.copytree(fixture, root)
+    for phase, delay in (("cold", "700"), ("warm", "60000")):
+        session = out / phase
+        session.mkdir()
+        reset_config(root, "fruit-company")
+        os.environ["PODBOX_SIM_CIDER"] = "60000"
+        os.environ["PODBOX_SIM_CIDER_ART_MS"] = delay
+        sim = Sim(binary, root, session)
+        try:
+            sim.wait(150)
+            sim.tap("select", 45)
+            log = session / "firmware.log"
+            if not visible_covers(read(log)):
+                sim.tap("select", 210)
+            else:
+                sim.wait(165)
+            initial = visible_covers(read(log))
+            assert initial, "Cover Flow did not show any remote covers"
+            for _ in range(9):
+                sim.tap("down", 25)  # 2.2 albums per second
+            sim.wait(120)
+            trace = read(log)
+            scrolling = visible_covers(trace)[len(initial):]
+            first = {}
+            initial_ids = {index for index, _, _ in initial}
+            for index, quality, pixel in scrolling:
+                if index not in initial_ids:
+                    first.setdefault(index, (quality, pixel))
+            assert len(first) >= 6, first
+            if phase == "cold":
+                assert sum(quality >= 2 for quality, _ in first.values()) >= len(first) - 1, first
+                print("remote cold scroll:", first, "first visible quality and pixel", flush=True)
+            else:
+                assert all(quality >= 2 and pixel for quality, pixel in first.values()), first
+                assert all(quality >= 2 and pixel for _, quality, pixel in scrolling), scrolling
+                assert not any(line.startswith("sim Cider art ") and line.endswith(" host")
+                               for line in trace.splitlines()), trace
+                print("remote warm scroll:", len(first), "entering covers read from disk",
+                      flush=True)
+        finally:
+            sim.close()
+            os.environ.pop("PODBOX_SIM_CIDER", None)
+            os.environ.pop("PODBOX_SIM_CIDER_ART_MS", None)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("binary", "resource", "output"):
@@ -158,6 +211,7 @@ def main():
         cold_play(args.binary, fixture, args.output / theme, theme, args.baseline)
     if not args.baseline:
         remote(args.binary, fixture, args.output / "remote")
+        remote_scroll(args.binary, fixture, args.output / "remote-scroll")
 
 
 if __name__ == "__main__":

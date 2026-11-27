@@ -52,16 +52,29 @@ FT_USE_MODULE(ft_smooth_renderer_class)
 # ascent, CJK strike). Each size is the one whose glyphs match the stock
 # screens pixel for pixel: list rows 16.265625 px, Now Playing title
 # 16.984375 px, the side pane's title 17.40625 px, Now Playing's times
-# 13.796875 px and the 13.125 px small text. The 13 px faces keep the
+# 13.796875 px, the calendar's 14.25 px, the Alarms time panel's
+# 21.9375 px, the Stopwatch's 17.96875, 21.25 and 22.875 px, Screen Lock's
+# digits 29.4375 px and the 13.125 px small text. The 13 px faces keep the
 # firmware's own 11/4 line; the larger faces fit the Classic layout's cells.
 STOCK = {
     "13-helvetica": ("Helvetica.ttf", 840, 400, 15, 11, 11),
     "13-helvetica-bold": ("HelveticaBold.ttf", 840, 700, 15, 11, 11),
     "14-helvetica-bold": ("HelveticaBold.ttf", 883, 700, 16, 12, 11),
+    "14-helvetica-bold-calendar": ("HelveticaBold.ttf", 912, 700, 16, 12, 0),
     "16-helvetica-bold": ("HelveticaBold.ttf", 1041, 700, 20, 16, 16),
     "17-helvetica-bold": ("HelveticaBold.ttf", 1087, 700, 18, 14, 16),
     "17-helvetica-bold-pane": ("HelveticaBold.ttf", 1114, 700, 19, 14, 16),
+    "18-helvetica-bold": ("HelveticaBold.ttf", 1150, 700, 21, 17, 0),
+    "21-helvetica-bold": ("HelveticaBold.ttf", 1404, 700, 26, 21, 0),
+    "21-helvetica-bold-stopwatch": ("HelveticaBold.ttf", 1360, 700, 25, 20, 0),
+    "23-helvetica-bold": ("HelveticaBold.ttf", 1464, 700, 27, 22, 0),
+    "29-helvetica-bold": ("HelveticaBold.ttf", 1884, 700, 29, 23, 0),
 }
+# Faces that hold only the stock glyphs, with no CJK strike or fallback merged
+# in: the Extras draw these figures and fall back to a theme font for
+# anything else.
+LATIN_ONLY = {"14-helvetica-bold-calendar", "18-helvetica-bold", "21-helvetica-bold",
+              "21-helvetica-bold-stopwatch", "23-helvetica-bold", "29-helvetica-bold"}
 CJK_FILES = {11: "CJK11.ttf", 16: "CJK16.ttf"}
 
 

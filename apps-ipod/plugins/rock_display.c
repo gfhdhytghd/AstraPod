@@ -11,12 +11,15 @@
 #include "settings/settings.h"
 #include "lang.h"
 #include "system/appevents.h"
+#include "system/activity.h"
 #include "ui/frame.h"
 #include "ui/native_wps.h"
 #include "ui/retained.h"
 #include "ui/scene.h"
 
 static struct rock_display_state caller;
+static struct ui_scene app_scene;
+static bool app_first_frame;
 static fb_data *saved_pixels, *plugin_pixels;
 static bool raw, status_update, flush_inhibited;
 static unsigned theme_depth, theme_floor;
@@ -54,6 +57,8 @@ static void restore_display(const struct rock_display_state *state)
 void rock_display_start(fb_data *caller_pixels, fb_data *widget_pixels)
 {
     ui_scene_interrupt();
+    app_first_frame = get_current_activity() == ACTIVITY_PLUGINBROWSER &&
+                      ui_scene_capture_page(&app_scene);
     lcd_scroll_stop();
     save_display(&caller);
     saved_pixels = caller_pixels;
@@ -70,12 +75,17 @@ void rock_display_start(fb_data *caller_pixels, fb_data *widget_pixels)
     lcd_set_backdrop(NULL);
 }
 
-void rock_display_stop(void)
+void rock_display_stop(bool back_to_browser)
 {
     /* The plugin's current viewport may have lived on its entry stack. */
     *screens[SCREEN_MAIN].current_viewport = lcd_init_viewport(NULL);
-    ui_scene_interrupt();
     lcd_scroll_stop();
+    if (app_first_frame)
+        ui_scene_discard(&app_scene);
+    else
+        ui_scene_close_modal(&app_scene, back_to_browser, "app-pop");
+    app_first_frame = false;
+    ui_scene_interrupt();
     lcd_set_viewport(NULL);
     while (theme_depth)
         rock_theme_undo(SCREEN_MAIN, false);
@@ -190,6 +200,31 @@ void rock_send_event(unsigned short id, void *data)
         return;
     }
     send_event(id, data);
+}
+
+/* Some games render directly and never pump the native action loop.
+ * Start only when the game submits its first complete framebuffer. */
+static void rock_present_first_page(void)
+{
+    if (!app_first_frame)
+        return;
+    app_first_frame = false;
+    ui_scene_show_modal(&app_scene, "app-push");
+    ui_scene_finish_page(&app_scene);
+}
+
+void rock_raw_lcd_update(void)
+{
+    rock_list_release(false);
+    rock_present_first_page();
+    lcd_update();
+}
+
+void rock_raw_lcd_update_rect(int x, int y, int w, int h)
+{
+    rock_list_release(false);
+    rock_present_first_page();
+    lcd_update_rect(x, y, w, h);
 }
 
 /* A raw call reclaims the framebuffer before it writes any pixels. */

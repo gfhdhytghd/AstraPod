@@ -49,6 +49,7 @@
 #include "ui/stock_art_ids.h"
 #include "speech/language.h"
 #include "fruit_menu.h"
+#include "ui/scene.h"
 
 bool fruit_menu_active(void)
 {
@@ -144,7 +145,10 @@ static int playback_report(void) { return run(GO_TO_SPUN); }
 extern const struct menu_item_ex sleep_timer_menu;
 static int sleep_timer(void)
 {
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "sleep-menu-push");
     int ret = do_menu(&sleep_timer_menu, NULL, NULL, false);
+    ui_scene_close_modal(&scene, ret != MENU_ATTACHED_USB, "sleep-menu-pop");
     return ret == MENU_ATTACHED_USB ? ret : 0;
 }
 
@@ -182,7 +186,7 @@ static int shuffle_songs(void)
         return 0;
     playlist_shuffle(current_tick, -1);
     playlist_start(0, 0, 0);
-    return GO_TO_WPS;
+    return run(GO_TO_WPS);
 }
 
 /* A row of a menu: name, what it runs, and the callback that hides it. */
@@ -388,8 +392,8 @@ static int audiobook_speed(void)
  * here, as stock's Menu is. */
 static int set_date_time(void)
 {
-    time_screen(NULL);
-    return 0;
+    int ret = time_screen(NULL);
+    return ret == MENU_ATTACHED_USB ? ret : 0;
 }
 
 static int eq_presets(void)
@@ -417,7 +421,10 @@ static int reset(void)
 static int language(void)
 {
     static struct browse_folder_info langs = { LANG_DIR, SHOW_LNG };
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "language-push");
     browse_folder(&langs);
+    ui_scene_close_modal(&scene, true, "language-pop");
     return 0;
 }
 
@@ -489,7 +496,10 @@ static int checklist_show(int title, struct checklist *list)
     info.action_callback = checklist_action;
     /* Menu goes back to Settings, as everywhere in the stock tree */
     bool previous = action_set_menu_back(true);
-    simplelist_show_list(&info);
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "stock-checklist-push");
+    bool usb = simplelist_show_list(&info);
+    ui_scene_close_modal(&scene, !usb, "stock-checklist-pop");
     action_set_menu_back(previous);
     return 0;
 }

@@ -1069,9 +1069,14 @@ void ui_scene_open_modal(struct ui_scene *scene, const char *route)
         ui_scene_show_modal(scene, route);
 }
 
+bool ui_scene_capture_page(struct ui_scene *scene)
+{
+    return capture_panel(scene, false);
+}
+
 void ui_scene_open_page(struct ui_scene *scene, const char *route)
 {
-    if (capture_panel(scene, false))
+    if (ui_scene_capture_page(scene))
         ui_scene_show_modal(scene, route);
 }
 
@@ -1106,6 +1111,8 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     fb_data *front = core_get_data_pinned(scene->handle);
     fb_data *backdrop = core_get_data_pinned(scene->backdrop_handle);
     memcpy(front, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
+    if (!scene->vertical)
+        scene->still_backdrop = pages_on_backdrop(backdrop, front);
     memcpy(lcd_framebuffer_default.fb_ptr, backdrop, FRAMEBUFFER_SIZE);
     core_put_data_pinned(backdrop);
     core_put_data_pinned(front);
@@ -1135,6 +1142,17 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     if (scene->vertical)
         ui_scene_modal_restored(scene->back_page);
     return true;
+}
+
+void ui_scene_finish_page(struct ui_scene *scene)
+{
+    ui_scene_start(scene);
+    while (owner == scene)
+    {
+        ui_scene_update(scene, false);
+        if (owner == scene)
+            ui_clock_sleep(ui_scene_timeout(scene, TIMEOUT_BLOCK));
+    }
 }
 
 bool ui_scene_automatic(void)
@@ -1229,8 +1247,9 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
             if (scene->slide && !scene->full_screen)
                 scene->tween.easing = scene->back_split != scene->front_split
                                       ? UI_EASE_LINEAR : ui_theme_easing();
-            scene->still_backdrop = pages_on_backdrop(back, front);
         }
+        if (target_changed && !scene->vertical)
+            scene->still_backdrop = pages_on_backdrop(back, front);
         if (scene->vertical)
             compose_modal(out, back, front, offset,
                           scene->target_front ? 0 : scene->status_height,

@@ -19,6 +19,7 @@
 #include "input/action.h"
 #include "settings/settings.h"
 #include "widgets/menu.h"
+#include "ui/scene.h"
 #include "system/activity.h"
 #include "system/format_time.h"
 #include "widgets/keyboard.h"
@@ -179,6 +180,9 @@ int time_screen(void* ignored)
 {
     (void)ignored;
     int nb_lines, font_h, ret;
+    struct ui_scene scene = {0};
+    if (!ui_scene_automatic())
+        ui_scene_open_page(&scene, "time-menu-push");
     menu_was_pressed = false;
 
     push_current_activity(ACTIVITY_TIMEDATESCREEN);
@@ -207,6 +211,7 @@ int time_screen(void* ignored)
 
 
     ret = do_menu(&time_menu, NULL, menu, false);
+    ui_scene_close_modal(&scene, ret != MENU_ATTACHED_USB, "time-menu-pop");
     pop_current_activity();
     /* see comments above in the button callback */
     if (!menu_was_pressed && ret == GO_TO_PREVIOUS)

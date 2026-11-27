@@ -793,6 +793,8 @@ static int pick_city(int city)
 {
     struct simplelist_info info;
     int region = city >= 0 ? city_region(city) : 0;
+    struct ui_scene region_scene = {0};
+    ui_scene_open_page(&region_scene, "clock-region-push");
     while (1)
     {
         simplelist_info_init(&info, str(LANG_EXTRAS_CLOCK_REGION), REGIONS,
@@ -802,9 +804,12 @@ static int pick_city(int city)
         info.action_callback = region_action;
         info.selection = region;
         info.speak_onshow = false;
-        simplelist_show_list(&info);
+        bool usb = simplelist_show_list(&info);
         if (info.selection < 0)
+        {
+            ui_scene_close_modal(&region_scene, !usb, "clock-region-pop");
             return -1;
+        }
         region = info.selection;
 
         list_region = region;
@@ -817,9 +822,15 @@ static int pick_city(int city)
         info.selection = city >= first && city < region_first[region + 1] ?
                          city - first : 0;
         info.speak_onshow = false;
-        simplelist_show_list(&info);
-        if (info.selection >= 0)
-            return first + info.selection;
+        struct ui_scene city_scene = {0};
+        ui_scene_open_page(&city_scene, "clock-city-push");
+        usb = simplelist_show_list(&info);
+        ui_scene_close_modal(&city_scene, !usb, "clock-city-pop");
+        if (info.selection >= 0 || usb)
+        {
+            ui_scene_close_modal(&region_scene, !usb, "clock-region-pop");
+            return usb ? -1 : first + info.selection;
+        }
     }
 }
 

@@ -1086,7 +1086,7 @@ static int invoke_module(void *opaque)
     rock_quake_heap_release();
     rock_list_discard();
     button_clear_pressed();
-    rock_display_stop();
+    rock_display_stop(result == PLUGIN_OK);
     if (engine_heap)
     {
         core_unpin(engine_heap);

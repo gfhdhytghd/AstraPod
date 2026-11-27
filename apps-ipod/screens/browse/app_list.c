@@ -30,6 +30,7 @@
 #include "lang.h"
 #include "rbpaths.h"
 #include "root_menu.h"
+#include "screens/fruit_menu.h"
 #include "settings/settings.h"
 #include "draw/bmp.h"
 #include "speech/talk.h"
@@ -39,6 +40,7 @@
 #include "widgets/splash.h"
 #include "plugins/rock_compat.h"
 #include "app_list.h"
+#include "ui/scene.h"
 
 /***************************************************************************
  * the apps
@@ -474,6 +476,7 @@ int app_list_screen(enum app_list_kind kind)
         [APP_LIST_DEMOS] = LANG_PLUGIN_DEMOS,
     };
     struct simplelist_info info;
+    struct ui_scene scene = {0};
     int selection = 0, ret;
 
     collect(kind);
@@ -483,6 +486,8 @@ int app_list_screen(enum app_list_kind kind)
         return GO_TO_PREVIOUS;
     }
     icons.size = 0;
+    if (fruit_menu_active())
+        ui_scene_open_page(&scene, "apps-list-push");
     push_current_activity(ACTIVITY_PLUGINBROWSER);
     /* Menu goes back a level, as in the plugin folders. */
     bool menu_back = action_set_menu_back(true);
@@ -508,12 +513,19 @@ int app_list_screen(enum app_list_kind kind)
             selection = info.selection;
             icons_release();
             ret = launch(&apps[rows.app[selection]]);
+            if (ret == GO_TO_MUSIC_QUIZ && fruit_menu_active())
+            {
+                ret = root_menu_run_screen(ret);
+                if (ret == 0)
+                    ret = GO_TO_PREVIOUS;
+            }
             if (ret == GO_TO_PREVIOUS)
                 continue;
         }
         break;
     }
     icons_release();
+    ui_scene_close_modal(&scene, ret == GO_TO_PREVIOUS, "apps-list-pop");
     action_set_menu_back(menu_back);
     pop_current_activity();
     return ret;

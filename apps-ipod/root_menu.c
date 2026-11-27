@@ -324,8 +324,8 @@ static int browser(void* param)
     static int last_db_dirlevel = 0, last_db_selection = 0, last_ft_dirlevel = 0;
     /* A main-menu row's browse left for a screen one of its rows opens, kept
      * so BACK from that screen lands on the list it was opened from: a
-     * tagnavi row's slot, or ROW_SLOT_PODCASTS */
-    enum { ROW_SLOT_PODCASTS = -2 };
+     * tagnavi row's slot or one of the named shortcut slots */
+    enum { ROW_SLOT_LIBRARY = -3, ROW_SLOT_PODCASTS = -2 };
     static int row_slot = -1, row_dirlevel, row_selection, row_table;
     bool from_home = last_screen == GO_TO_ROOT && !came_back;
 
@@ -459,6 +459,16 @@ static int browser(void* param)
             last_ft_dirlevel = tc->dirlevel;
             tc->dirlevel = 0;
             tc->currtable = 0;
+            if (came_back && row_slot == ROW_SLOT_LIBRARY)
+            {
+                tc->dirlevel = row_dirlevel;
+                tc->selected_item = row_selection;
+                tc->currtable = row_table;
+                row_slot = -1;
+                push_current_activity(ACTIVITY_DATABASEBROWSER);
+                break;
+            }
+            row_slot = -1;
             browser_db_clear_shortcut_base();
             browser_db_enter_menu_row_on_next_load(library_menu_id,
                                                    library_label);
@@ -593,6 +603,13 @@ static int browser(void* param)
         break;
 
         case GO_TO_LIBRARY_ROW:
+            if (ret_val == GO_TO_WPS)
+            {
+                row_slot = ROW_SLOT_LIBRARY;
+                row_dirlevel = tc->dirlevel;
+                row_selection = tc->selected_item;
+                row_table = tc->currtable;
+            }
             tc->dirlevel = last_ft_dirlevel;
             tc->currtable = 0;
             last_db_dirlevel = 0;
@@ -832,6 +849,7 @@ static int wps_back_to(int screen)
     {
         case GO_TO_FILEBROWSER:
         case GO_TO_DBBROWSER:
+        case GO_TO_LIBRARY_ROW:
         case GO_TO_PODCASTS:
         case GO_TO_PLAYLISTS_SCREEN:
         case GO_TO_PLAYLIST_VIEWER:
@@ -2471,6 +2489,31 @@ int root_menu_run_screen(int screen)
     int ret = load_screen(screen);
     if (row_scene.capturing)
         ui_scene_cancel(&row_scene);
+
+    /* Keep a stock browser row's owning menu on the stack when a track
+     * opens Now Playing. The root dispatcher's history only contains Home. */
+    while (ret == GO_TO_WPS && wps_back_to(screen) == screen &&
+           !cover_nav_active())
+    {
+        scene_enter(&row_scene, screen, GO_TO_WPS, true, &row_menu);
+        ret = load_screen(GO_TO_WPS);
+        if (row_scene.capturing)
+            ui_scene_cancel(&row_scene);
+        if (ret != GO_TO_PREVIOUS)
+        {
+            screen = GO_TO_WPS;
+            break;
+        }
+        back_from_wps = false;
+        scene_enter(&row_scene, GO_TO_WPS, screen, false, &row_menu);
+        came_back = true;
+        ret = load_screen(screen);
+        came_back = false;
+        if (row_scene.capturing)
+            ui_scene_cancel(&row_scene);
+    }
+    if (screen == GO_TO_WPS && ret == GO_TO_PREVIOUS)
+        back_from_wps = false;
     if (ret == GO_TO_FILEBROWSER)
     {
         fruit_files_next = true;

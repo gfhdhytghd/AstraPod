@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Check Fruit Company's way into and out of Cover Flow against stock, in SDL.
 
-Stock 1.1.2 enters Cover Flow from a split menu (Music, or the main menu
+Stock 2.0.5 enters Cover Flow from a split menu (Music, or the main menu
 with Cover Flow turned on in Settings > Main Menu) like this, the time t
 counted from the first frame that changes:
 
-  - the pane shows Cover Flow at once, and the covers stand still;
-  - the rows and their status bar slide left as one, 320 * (t/270)^2 px,
-    so the column is gone 191 ms in;
+  - the covers stand still as the menu uncovers them;
+  - the rows and their status bar slide left, and the art pane slides right,
+    each by 320 * (t/270)^2 px, until both leave the screen at 191 ms;
   - Cover Flow's status bar drops in from above its own height,
     h * (1 - (1 - s/90)^2) rows showing s ms after it starts.
 
@@ -52,8 +52,8 @@ TOLERANCE = 12
 SCROLLBAR = 12
 # Offsets past this leave too narrow a strip to measure.
 WIDE = HALF - 40
-# Rows of the pane that show covers and neither bar nor caption.
-COVERS = slice(30, 180)
+# The covers before the caption and below the status bar.
+COVERS = slice(40, 180)
 # The caption, and the status bar, where the returning menu has not reached
 # on the first frame of the way out.
 CAPTION = (slice(190, 236), slice(60, 150))
@@ -146,14 +146,21 @@ def measure_entry(shots):
     before = shots[0][1]
     final = shots[-1][1]
     moving = [(ms, column_offset(image, before)) for ms, image in shots]
+    panes = [(ms, pane_return(image, before)) for ms, image in shots]
     first = next(ms for ms, dx in moving if dx > 0)
     track = [(ms - first, dx) for ms, dx in moving if 0 < dx < WIDE]
+    pane = [(ms - first, dx) for ms, dx in panes if 0 < dx < WIDE]
+    paired = [abs(rows - art) for (_, rows), (_, art) in zip(moving, panes)
+              if 0 < rows < WIDE]
     start, worst = fit(track, slide_out)
-    gone = next(ms for ms, dx in moving if dx >= HALF)
-    rest = next(image for ms, image in shots if ms >= gone)
+    # The trackers lose their reference when just a sliver of menu is left.
+    # Use the first frame whose whole cover area is clear.
+    gone, rest = next((ms, image) for ms, image in shots
+                      if numpy.abs(gray(image)[COVERS] -
+                                   gray(final)[COVERS]).mean() < 0.25)
     height = bar_height(final, rest)
     bars = [(ms - first, bar_rows(image, final, height))
-            for ms, image in shots]
+            for ms, image in shots if ms >= gone]
     arrived = [(ms, rows) for ms, rows in bars if 0 < rows < height]
     bar_start = None
     bar_worst = None
@@ -161,17 +168,13 @@ def measure_entry(shots):
         bar_start, bar_worst = fit(
             arrived, lambda s: 0 if s <= 0 else height if s >= BAR_MS else
             round(height * (1 - (1 - s / BAR_MS) ** 2)))
-    pane_at = next((ms for ms, image in shots[1:]
-                    if (numpy.abs(gray(image)[COVERS, HALF:] -
-                                  gray(final)[COVERS, HALF:]).mean() < 2)),
-                   None)
     caption_at = next(ms for ms, image in shots
                       if numpy.abs(gray(image)[CAPTION] -
                                    gray(final)[CAPTION]).mean() < 2)
     bar_first = next((ms for ms, rows in bars if rows), None)
     return {"track": track, "fit_start_ms": start, "worst_px": worst,
-            "gone_ms": round(gone - first), "pane_ms": None if pane_at is None
-            else round(pane_at - first), "bar_height": height,
+            "gone_ms": round(gone - first), "pane": pane,
+            "pane_gap_px": max(paired, default=HALF), "bar_height": height,
             "bar": arrived, "bar_start_ms": bar_start,
             "bar_worst_rows": bar_worst,
             "chrome_after_ms": None if bar_start is None
@@ -189,6 +192,8 @@ def measure_exit(shots):
     pane_track = [(ms - first, dx) for ms, dx in panes if 0 < dx < WIDE]
     row_start, row_worst = fit(row_track, slide_back)
     pane_start, pane_worst = fit(pane_track, slide_back)
+    paired = [abs(row - pane) for (_, row), (_, pane) in zip(rows, panes)
+              if 0 < row < WIDE and 0 < pane < WIDE]
     before, after = gray(shots[0][1]), gray(shots[1][1])
     chrome_gone = bool(after[TOP_BAR].std() < 2 and
                    numpy.abs(before[TOP_BAR] - after[TOP_BAR]).mean() >= 2 and
@@ -197,6 +202,7 @@ def measure_exit(shots):
     return {"rows": row_track, "rows_fit_start_ms": row_start,
             "rows_worst_px": row_worst, "pane": pane_track,
             "pane_fit_start_ms": pane_start, "pane_worst_px": pane_worst,
+            "pane_gap_px": max(paired, default=HALF),
             "chrome_gone_at_once": chrome_gone}
 
 
@@ -252,18 +258,21 @@ def main():
         if len(enter["track"]) < 3 or enter["worst_px"] > TOLERANCE:
             failed.append((name, "rows leave", enter["worst_px"],
                            enter["track"]))
-        if enter["pane_ms"] is None or enter["pane_ms"] > 40:
-            failed.append((name, "pane shows covers", enter["pane_ms"]))
+        if len(enter["pane"]) < 3 or enter["pane_gap_px"] > 3:
+            failed.append((name, "pane leaves with rows", enter["pane_gap_px"],
+                           enter["pane"]))
         if not enter["bar"] or enter["bar_worst_rows"] > 4:
             failed.append((name, "bar drops", enter["bar"]))
         elif abs(enter["chrome_after_ms"] - CHROME_MS) > FRAME_MS:
             failed.append((name, "bar starts", enter["chrome_after_ms"]))
-        if enter["bar_first_ms"] is None or \
-                abs(enter["caption_ms"] - enter["bar_first_ms"]) > FRAME_MS:
+        if enter["bar_start_ms"] is None or \
+                abs(enter["caption_ms"] - enter["bar_start_ms"]) > FRAME_MS:
             failed.append((name, "caption shows with the bar",
-                           enter["caption_ms"], enter["bar_first_ms"]))
+                           enter["caption_ms"], enter["bar_start_ms"]))
         if not leave["chrome_gone_at_once"]:
             failed.append((name, "bar and caption go at once"))
+        if leave["pane_gap_px"] > 3:
+            failed.append((name, "pane returns with rows", leave["pane_gap_px"]))
         for part in ("rows", "pane"):
             if len(leave[part]) < 3 or leave[part + "_worst_px"] > TOLERANCE:
                 failed.append((name, part + " return",
@@ -277,6 +286,7 @@ def main():
         sys.exit(1)
     print("PASS Fruit Company Cover Flow entry and exit follow stock: " +
           ", ".join(f"{name} rows {got['enter']['worst_px']} px, "
+                    f"pane gap {got['enter']['pane_gap_px']} px, "
                     f"bar {got['enter']['bar_worst_rows']} rows "
                     f"{got['enter']['chrome_after_ms']} ms in, "
                     f"return {got['exit']['rows_worst_px']}/"

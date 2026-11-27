@@ -60,6 +60,8 @@ void menu_pane_viewport_left(int depth);
 /* Whether the framebuffer shows a split page, for a transition taking it
  * as its outgoing page. The next page painted answers the next call. */
 bool menu_pane_take_screen(void);
+/* Changes when a list selects different pane content. */
+unsigned menu_pane_content_revision(void);
 /* The whole of the pane's backdrop in a screen-sized buffer, the first
  * frame of Now Playing entered from a split menu. */
 void menu_pane_backdrop(fb_data *buffer);

@@ -32,6 +32,8 @@
 #include "files/filetypes.h"
 #include "debug.h"
 #include "catalog.h"
+#include "fruit_otg.h"
+#include "ui/native_theme_runtime.h"
 #include "speech/talk.h"
 #include "viewer.h"
 #include "screens/system/playlist_search.h"
@@ -145,6 +147,8 @@ static const char catalog_page, viewer_page;
 static int display_playlists(char* playlist, enum catbrowse_status_flags status)
 {
     static bool reopen_last_playlist = false;
+    static bool reopen_otg = false;
+    static int otg_selection = 0;
     static int most_recent_selection = 0;
     int result = -1;
     char selected_playlist[MAX_PATH];
@@ -152,6 +156,11 @@ static int display_playlists(char* playlist, enum catbrowse_status_flags status)
 
     browser_status |= status;
     bool view = (status == CATBROWSE_CATVIEW);
+    bool fruit = view &&
+        ui_theme_style(UI_STYLE_MENU_TREE) == UI_MENU_TREE_STOCK;
+    int builtin_row = -1;
+    if (fruit)
+        fruit_otg_refresh();
 
     struct browse_context browse = {
         .dirfilter = SHOW_M3U,
@@ -160,7 +169,8 @@ static int display_playlists(char* playlist, enum catbrowse_status_flags status)
          * question is which of these to write to and a box that opens one for
          * reading answers something else. */
         .flags = BROWSE_SELECTONLY
-                 | (view ? BROWSE_SEARCH_ROW : BROWSE_NO_CONTEXT_MENU),
+                 | (fruit ? BROWSE_FRUIT_PLAYLISTS :
+                    view ? BROWSE_SEARCH_ROW : BROWSE_NO_CONTEXT_MENU),
         .title = str(LANG_PLAYLISTS),
         .icon = Icon_Playlist,
         .root = selected_playlist,
@@ -199,12 +209,35 @@ restart:
     }
     else /* browse playlist dir */
     {
-        int browse_ret = rockbox_browse(&browse);
+        if (builtin_row >= 0)
+            browse.selected = str(builtin_row);
+        int browse_ret = fruit && reopen_otg ? GO_TO_FRUIT_OTG :
+                                             rockbox_browse(&browse);
 
         /* The catalogue's Search row. Run here rather than handed up to
          * root_menu.c: leaving the box belongs back in the catalogue, which is
          * where the search started, and the restart below is already how this
          * screen returns from the playlist viewer. */
+        if (browse_ret == GO_TO_FRUIT_OTG ||
+            browse_ret == GO_TO_FRUIT_GENIUS)
+        {
+            bool otg = browse_ret == GO_TO_FRUIT_OTG;
+            builtin_row = otg ? LANG_FRUIT_OTG : LANG_FRUIT_GENIUS;
+            char saved_path[MAX_PATH] = "";
+            browse_ret = otg ?
+                fruit_otg_show(saved_path, sizeof(saved_path), &otg_selection) :
+                fruit_genius_show(false);
+            reopen_otg = otg && browse_ret == GO_TO_WPS;
+            if (saved_path[0])
+            {
+                strlcpy(selected_playlist, saved_path, sizeof(selected_playlist));
+                browse.flags |= BROWSE_SELECTED;
+                builtin_row = -1;
+                browse.selected = &most_recent_playlist[playlist_dir_length + 1];
+            }
+            else if (browse_ret == GO_TO_PREVIOUS)
+                goto restart;
+        }
         if (browse_ret == GO_TO_PLAYLIST_SEARCH)
         {
             browse_ret = playlist_search_run();
@@ -219,6 +252,8 @@ restart:
 
     if (browse.flags & BROWSE_SELECTED) /* User picked a playlist */
     {
+        builtin_row = -1;
+        browse.selected = &most_recent_playlist[playlist_dir_length + 1];
         if (strcmp(most_recent_playlist, selected_playlist)) /* isn't most recent one */
         {
             path_append(most_recent_playlist, selected_playlist,

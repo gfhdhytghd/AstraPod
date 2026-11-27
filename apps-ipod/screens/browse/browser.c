@@ -58,6 +58,7 @@
 #include "lang.h"
 #include "widgets/keyboard.h"
 #include "screens/context_menu.h"
+#include "playlist/fruit_otg.h"
 #include "core_alloc.h"
 #include "system/format_time.h"
 #include "metadata/art_cache.h"
@@ -91,7 +92,7 @@
 #include "screens/shortcuts.h"
 #include "system/appevents.h"
 #include "ui/scene.h"
-#include "ui/stock_art_ids.h"
+#include "ui/stock_art.h"
 
 #include "root_menu.h"
 
@@ -214,6 +215,8 @@ static enum themable_icons browser_get_fileicon(int selected_item, void * data)
         if (masked == FILE_ATTR_MOODS || masked == FILE_ATTR_JOURNEYS)
             return Icon_Playlist;
 
+        if (masked == FILE_ATTR_OTG || masked == FILE_ATTR_GENIUS)
+            return Icon_Playlist;
         return filetype_get_icon(entry->attr);
     }
 }
@@ -229,7 +232,9 @@ static enum list_row_kind browser_get_kind(int selected_item, void * data)
 
     entry = get_valid_entry(__func__, local_tc, selected_item);
     masked = entry->attr & FILE_ATTR_MASK;
-    if (entry->attr & ATTR_DIRECTORY)
+    if ((entry->attr & ATTR_DIRECTORY) || masked == FILE_ATTR_OTG ||
+        masked == FILE_ATTR_GENIUS || (masked == FILE_ATTR_M3U &&
+        local_tc->browse && (local_tc->browse->flags & BROWSE_FRUIT_PLAYLISTS)))
         return LIST_ROW_CONTAINER;
     if (file_attr_is_row(masked))
         return LIST_ROW_COMMAND;
@@ -301,6 +306,41 @@ static const char *browser_get_description(int selected_item, void *data,
         return browser_db_get_entry_description(&tc, selected_item, buf,
                                                 size);
     return NULL;
+}
+
+static bool fruit_playlist_icon(int item, void *data, struct screen *display,
+                                struct viewport *vp)
+{
+    (void)display;
+    struct browser_context *c = data;
+    struct entry *entry = get_valid_entry(__func__, c, item);
+    int attr = entry->attr & FILE_ATTR_MASK;
+    enum stock_art_id art = attr == FILE_ATTR_GENIUS ?
+        STOCK_ART_GENIUS_LIST_ICON : STOCK_ART_ONTHEGO_LIST_ICON;
+
+    struct ui_rect clip = {vp->x, vp->y, vp->width, vp->height};
+    stock_art_draw(art, vp->x + 2, vp->y, clip);
+    return true;
+}
+
+static const char *fruit_playlist_subtitle(int item, void *data,
+                                           char *buf, size_t size)
+{
+    struct browser_context *c = data;
+    struct entry *entry = get_valid_entry(__func__, c, item);
+    int attr = entry->attr & FILE_ATTR_MASK;
+    int songs;
+    if (attr == FILE_ATTR_OTG)
+        songs = fruit_otg_count();
+    else if (attr == FILE_ATTR_M3U)
+    {
+        char path[MAX_PATH];
+        browser_disk_assemble_path(path, sizeof(path), c->currdir, entry->name);
+        songs = fruit_playlist_count(path, entry->time_write);
+    }
+    else
+        return NULL;
+    return songs >= 0 ? fruit_otg_count_text(buf, size, songs, false) : NULL;
 }
 
 static const char *browser_get_index_key(int selected_item, void *data,
@@ -1009,7 +1049,13 @@ static int update_dir(struct browser_album_panel *panel,
     list->require_row_glyphs = album ||
         (id3db && browser_db_get_attr(&tc) == FILE_ATTR_AUDIO);
     {
-        bool tall_rows = false, artist_tiles = false;
+        bool fruit_catalog = !id3db && tc.browse &&
+                             (tc.browse->flags & BROWSE_FRUIT_PLAYLISTS);
+        list->callback_get_item_subtitle =
+            fruit_catalog ? fruit_playlist_subtitle : NULL;
+        gui_synclist_set_status_callback(list,
+            fruit_catalog ? fruit_playlist_icon : NULL);
+        bool tall_rows = fruit_catalog, artist_tiles = false;
         if (*tc.dirfilter == SHOW_ID3DB)
         {
             bool artist = !album && browser_db_is_artist_list(&tc);
@@ -1028,10 +1074,11 @@ static int update_dir(struct browser_album_panel *panel,
                                            browser_db_episodes_have_notes(&tc));
         gui_synclist_set_albumart_callback(list,
                                     artist_tiles ? browser_get_artist :
-                                    tall_rows ? browser_get_albumart : NULL);
+                                    tall_rows && !fruit_catalog ? browser_get_albumart : NULL);
         list->callback_prefetch_art = artist_tiles ? browser_prefetch_artist : NULL;
         /* Give every row enough room for a cover, including special rows. */
         gui_synclist_set_row_height(list,
+                                    fruit_catalog ? 55 :
                                     tall_rows ? global_settings.db_art_row_height : 0);
     }
     /* In the database the letter menus voice themselves through this callback,
@@ -1574,6 +1621,8 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
         button = get_action(list_select_context(CONTEXT_TREE)|ALLOW_SOFTLOCK,
                             ui_scene_timeout(scene, timeout));
         bool home_library = tc.browse->flags & BROWSE_HOME_LIBRARY;
+        if (tc.browse->flags & BROWSE_FRUIT_PLAYLISTS)
+            button = fruit_list_action(button, &browser_lists);
         oldbutton = button;
         bool redrew = gui_synclist_do_button(&browser_lists, &button);
         if (home_library && button == ACTION_STD_MENU)
@@ -1666,6 +1715,8 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
                     /* The file browser's and the catalogue's own Search rows
                      * (the FILE_ATTR_SEARCH case in browser_disk_enter()). */
                     case GO_TO_FILE_SEARCH:
+                    case GO_TO_FRUIT_GENIUS:
+                    case GO_TO_FRUIT_OTG:
                     case GO_TO_PLAYLIST_SEARCH:
                         return exit_to_new_screen(enter_rc);
                     case GO_TO_ROOT: exit_func = true; break;
@@ -1999,7 +2050,7 @@ int create_playlist(void)
 }
 
 #define NUM_TC_BACKUP   3
-static struct browser_context backups[NUM_TC_BACKUP];
+static struct browser_context backups[NUM_TC_BACKUP + 1];
 static int dirbrowse(void)
 {
     int handle = core_alloc_free_space(sizeof(struct browser_album_panel));
@@ -2023,6 +2074,7 @@ static int dirbrowse(void)
 static int backup_count = -1;
 int rockbox_browse(struct browse_context *browse)
 {
+    bool was_browsing = tc.is_browsing;
     tc.is_browsing = (browse != NULL);
     int ret_val = 0;
     int dirfilter = SHOW_ALL;
@@ -2038,8 +2090,16 @@ int rockbox_browse(struct browse_context *browse)
     /* A browse opened from a selecting list, such as Add to Playlist's
      * picker, is not selecting */
     struct gui_synclist *selecting = list_select_suspend();
+    bool context_root = browse && (browse->flags & BROWSE_CONTEXT_ROOT);
     if (backup_count >= 0)
         backups[backup_count] = tc;
+    else if (context_root)
+        backups[NUM_TC_BACKUP] = tc;
+    if (context_root)
+    {
+        tc.out_of_tree = 0;
+        tc.dirlevel = tc.currtable = 0;
+    }
     backup_count++;
     int *prev_dirfilter = tc.dirfilter;
     tc.dirfilter = &dirfilter;
@@ -2106,6 +2166,11 @@ int rockbox_browse(struct browse_context *browse)
     backup_count--;
     if (backup_count >= 0)
         tc = backups[backup_count];
+    else if (context_root)
+    {
+        tc = backups[NUM_TC_BACKUP];
+        tc.is_browsing = was_browsing;
+    }
     else if (plugin_picker)
         tc.browse = NULL;
     list_select_resume(selecting);

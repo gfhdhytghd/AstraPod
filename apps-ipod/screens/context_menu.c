@@ -68,6 +68,8 @@
 #include "playlist/viewer.h"
 #include "speech/talk.h"
 #include "context_menu.h"
+#include "playlist/fruit_otg.h"
+#include "ui/native_theme_runtime.h"
 #include "files/filetypes.h"
 #include "viewers/image_viewer/image_viewer_pub.h"
 #include "viewers/lyric_viewer/lyric_viewer.h"
@@ -3610,6 +3612,102 @@ int context_menu_wps_hotkey(char *file, int act)
     return execute_hotkey(act);
 }
 
+static const char *fruit_context_label(int item, void *data,
+                                         char *buf, size_t size)
+{
+    (void)buf;
+    (void)size;
+    return str(((const int *)data)[item]);
+}
+
+static int fruit_browse_track(const struct tagcache_album *album, bool artist)
+{
+    char name[MAX_PATH];
+    int tag = artist ? tag_albumartist : tag_album;
+    long seek = artist ? album->artist_seek : album->album_seek;
+    if (!tagcache_seek_string(tag, seek, name, sizeof(name)))
+        return ONPLAY_OK;
+    if (artist)
+        browser_db_enter_artist_albums_on_next_load(seek, name);
+    else
+        browser_db_enter_artist_album_tracks_on_next_load(seek,
+                                                          album->artist_seek,
+                                                          name);
+
+    bool back = action_set_menu_back(true);
+    push_current_activity(ACTIVITY_DATABASEBROWSER);
+    int result = browser_db_browse_from_context();
+    pop_current_activity();
+    action_set_menu_back(back);
+    if (result == GO_TO_ROOT)
+        return ONPLAY_MAINMENU;
+    if (result == GO_TO_WPS)
+        return ONPLAY_START_PLAY;
+    return ONPLAY_RELOAD_DIR;
+}
+
+static int fruit_music_context(const char *path, const char *title,
+                               bool group, bool wps)
+{
+    struct tagcache_album album;
+    char name[2];
+    bool browse = !group && selected_track_album(&album);
+    int rows[5];
+    int count = 0;
+
+    rows[count++] = LANG_FRUIT_OTG_ADD;
+    if (!group && !wps)
+        rows[count++] = LANG_FRUIT_GENIUS_START;
+    if (browse && tagcache_seek_string(tag_album, album.album_seek,
+                                       name, sizeof(name)))
+        rows[count++] = LANG_FRUIT_BROWSE_ALBUM;
+    if (browse && tagcache_seek_string(tag_albumartist, album.artist_seek,
+                                       name, sizeof(name)))
+        rows[count++] = LANG_FRUIT_BROWSE_ARTIST;
+    rows[count++] = LANG_CANCEL_0;
+
+    struct simplelist_info list;
+    simplelist_info_init(&list, (char *)title, count, rows);
+    list.get_name = fruit_context_label;
+    list.action_callback = fruit_list_action;
+    list.row_height = 24;
+
+    bool back = action_set_menu_back(true);
+    push_current_activity(ACTIVITY_CONTEXTMENU);
+    bool usb = simplelist_show_list(&list);
+    pop_current_activity();
+    action_set_menu_back(back);
+    if (usb)
+        return ONPLAY_MAINMENU;
+    if (list.selection < 0)
+        return ONPLAY_OK;
+
+    switch (rows[list.selection])
+    {
+        case LANG_FRUIT_OTG_ADD:
+            if (!fruit_otg_add(path, group && !path))
+                splash(HZ, ID2P(LANG_FAILED));
+            return group ? ONPLAY_RELOAD_DIR : ONPLAY_OK;
+        case LANG_FRUIT_BROWSE_ALBUM:
+        case LANG_FRUIT_BROWSE_ARTIST:
+            if (selected_track_album(&album))
+                return fruit_browse_track(&album,
+                    rows[list.selection] == LANG_FRUIT_BROWSE_ARTIST);
+            break;
+        case LANG_FRUIT_GENIUS_START:
+            if (fruit_genius_unavailable() == GO_TO_ROOT)
+                return ONPLAY_MAINMENU;
+            break;
+    }
+    return ONPLAY_OK;
+}
+
+int context_menu_show_fruit_track(const char *path, const char *title)
+{
+    context_menu_select((char *)path, FILE_ATTR_AUDIO, CONTEXT_TREE);
+    return fruit_music_context(path, title, false, false);
+}
+
 int context_menu_show(char* file, int attr, int from_context, bool hotkey, int customaction)
 {
     const struct menu_item_ex *menu;
@@ -3626,6 +3724,37 @@ int context_menu_show(char* file, int attr, int from_context, bool hotkey, int c
             /* User did not want to erase his current playlist, so let's show again the database main menu */
             return ONPLAY_RELOAD_DIR;
         return ONPLAY_START_PLAY;
+    }
+
+    if (ui_theme_style(UI_STYLE_MENU_TREE) == UI_MENU_TREE_STOCK && file)
+    {
+        if (from_context == CONTEXT_WPS)
+            return fruit_music_context(file, str(LANG_NOW_PLAYING), false, true);
+        if (from_context == CONTEXT_TREE &&
+            (attr & FILE_ATTR_MASK) == FILE_ATTR_M3U)
+        {
+            char title[MAX_PATH];
+            const char *base = strrchr(file, '/');
+            strip_extension(title, sizeof(title), base ? base + 1 : file);
+            return fruit_music_context(file, title, true, false);
+        }
+        if (from_context == CONTEXT_ID3DB &&
+            (attr == FILE_ATTR_AUDIO ||
+             browser_db_current_scope() != BROWSER_DB_SCOPE_NONE))
+        {
+            struct browser_context *c = browser_get_context();
+            char title[MAX_PATH];
+            char path[MAX_PATH];
+            bool group = attr != FILE_ATTR_AUDIO;
+            if (group)
+                strlcpy(title, browser_db_get_title(c), sizeof(title));
+            else if (!browser_db_get_entry_name(c, c->selected_item, title,
+                                                 sizeof(title)))
+                return ONPLAY_OK;
+            if (!group && browser_db_get_filename(c, path, sizeof(path)) < 0)
+                return ONPLAY_OK;
+            return fruit_music_context(group ? NULL : path, title, group, false);
+        }
     }
 
     push_current_activity(ACTIVITY_CONTEXTMENU);

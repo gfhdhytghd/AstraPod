@@ -2858,9 +2858,10 @@ int playlist_insert_directory(struct playlist_info* playlist,
  * instead provide a playlist insert context to use for adding each track
  * into a dynamic playlist.
  */
-bool playlist_entries_iterate(const char *filename,
-                              struct playlist_insert_context *pl_context,
-                              bool (*action_cb)(const char *file_name))
+static bool visit_playlist(const char *filename,
+                           struct playlist_insert_context *pl_context,
+                           bool (*action_cb)(const char *file_name),
+                           bool require_all)
 {
     int fd = -1, i = 0;
     bool ret = false;
@@ -2922,7 +2923,11 @@ bool playlist_entries_iterate(const char *filename,
                 if (!action_cb(trackname))
                     goto out;
                 else if (!show_search_progress(false, i, start, filesize))
+                {
+                    if (require_all)
+                        goto out;
                     break;
+                }
             }
             else if (playlist_insert_context_add(pl_context, trackname) < 0)
                 goto out;
@@ -2931,12 +2936,25 @@ bool playlist_entries_iterate(const char *filename,
         /* let the other threads work */
         yield();
     }
-    ret = true;
+    ret = !require_all || max == 0;
 
 out:
     close(fd);
     cpu_boost(false);
     return ret;
+}
+
+bool playlist_entries_iterate(const char *filename,
+                              struct playlist_insert_context *pl_context,
+                              bool (*action_cb)(const char *file_name))
+{
+    return visit_playlist(filename, pl_context, action_cb, false);
+}
+
+bool playlist_visit_all(const char *filename,
+                        bool (*action_cb)(const char *file_name))
+{
+    return visit_playlist(filename, NULL, action_cb, true);
 }
 
 /*

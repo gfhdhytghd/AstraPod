@@ -173,6 +173,8 @@ struct context_menu_row {
  * puts the item's tracks into the queue at the position given, and
  * 'add_to_pl_cb' writes them to a playlist file; either may be NULL to work
  * from the path. */
+int context_menu_show_fruit_track(const char *path, const char *title);
+
 int context_menu_show_item(const char *path, int attr, bool in_order,
                            bool go_to,
                            bool (*playlist_insert_cb)(int position, bool queue,

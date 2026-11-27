@@ -116,3 +116,9 @@
   both change in place on Select. Classic shows the time too, and the
   setting is also under Settings > System > Time & Date Settings. Update
   from the whole zip: a contact's page needs the new `stock-art.bin`.
+
+- **Select changes a short setting in place.** On an on/off row, or a row
+  with up to four values, Select now moves to the next value without
+  opening a list, as Shuffle and Repeat do on the original iPod. A row with
+  more values, or a number, still opens its list. Hold Select for the
+  row's menu and **Explain**, as before.

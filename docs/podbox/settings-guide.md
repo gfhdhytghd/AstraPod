@@ -17,6 +17,9 @@ how much you see.
 A row marked **Cfg** has no menu row in either mode: it is set by a line in a
 theme's `.cfg` file, or one you add to a `.cfg` by hand.
 
+Select on an on/off row, or a row with up to four values, moves it to the
+next value in place. A row with more values, or a number, opens its list.
+
 Two kinds of row are shown in both modes:
 
 - **the Maintenance actions**, so Update Database is always there for *my new

@@ -268,7 +268,7 @@ static enum list_row_kind menu_get_kind(int selected_item, void * data)
         case MT_SETTING:
         case MT_SETTING_W_TEXT:
             setting = menu_row_setting(selected_item, menu);
-            return setting && (setting->flags&F_T_MASK) == F_T_BOOL
+            return option_steps_in_place(setting)
                    ? LIST_ROW_TOGGLE : LIST_ROW_SETTING;
         default:
             return root_menu_item_kind(menu_row_item(selected_item, menu));
@@ -1071,6 +1071,8 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
 
     bool in_stringlist, done = false;
     bool redraw_lists;
+    /* A setting Select stepped in place, whose new value the redraw says */
+    const struct settings_list *stepped = NULL;
 
     int old_audio_status = audio_status();
 
@@ -1516,7 +1518,16 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
                 case MT_SETTING:
                 case MT_SETTING_W_TEXT:
                 {
-                    if (!fruit_menu_step(temp))
+                    const struct settings_list *setting =
+                        find_setting(temp->variable);
+                    if (fruit_menu_step(temp))
+                        ;
+                    else if (option_steps_in_place(setting))
+                    {
+                        option_step_in_place(setting);
+                        stepped = setting;
+                    }
+                    else
                         do_setting_from_menu(temp, vps);
                     init_menu_lists(menu, &lists, selected, false, vps, buf, sizeof buf);
                     redraw_lists = true;
@@ -1596,6 +1607,8 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
 
         if (redraw_lists && !done)
         {
+            const struct settings_list *spoken = stepped;
+            stepped = NULL;
             if (menu_callback(ACTION_REDRAW, menu, &lists) != ACTION_REDRAW)
             {
                 ui_scene_cancel(scene);
@@ -1610,7 +1623,10 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
             else
                 ui_scene_update(scene, true);
             ui_scene_update(&modal, true);
-            gui_synclist_speak_item(&lists);
+            if (spoken && global_settings.talk_menu)
+                option_talk_value(spoken, option_value_as_int(spoken), false);
+            else if (!spoken)
+                gui_synclist_speak_item(&lists);
         }
         else if (!scene_handoff)
         {

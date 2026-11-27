@@ -129,8 +129,8 @@ enum list_row_kind
 {
     LIST_ROW_PLAIN,             /* the list says nothing more */
     LIST_ROW_MENU,              /* opens another menu */
-    LIST_ROW_TOGGLE,            /* an on/off setting */
-    LIST_ROW_SETTING,           /* a setting with a choice or a number */
+    LIST_ROW_TOGGLE,            /* a setting Select changes in place */
+    LIST_ROW_SETTING,           /* a setting Select opens a picker for */
     LIST_ROW_ACTION,            /* does something, or goes somewhere */
     LIST_ROW_COMMAND,           /* a library list's own row: [Random] and kin */
     LIST_ROW_CONTAINER,         /* a library item that lists its contents */

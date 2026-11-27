@@ -2,10 +2,11 @@
  * GNU General Public License (version 2+)
  *
  * A cart's options and help on the player. The options are rows of the
- * pause menu, drawn as the player's own settings are: an on/off flips in
- * place, a choice or a number opens the player's picker. The owner's
- * values are a file under /.rockbox/games/options, named by the cart's
- * id, written when one changes. Help shows the cart's help text, then
+ * pause menu, drawn as the player's own settings are: an on/off or a
+ * choice of up to four steps in place, a longer choice or a number opens
+ * the player's picker. The owner's values are a file under
+ * /.rockbox/games/options, named by the cart's id, written when one
+ * changes. Help shows the cart's help text, then
  * each option's, in the box Explain uses.
  *
  * Parts, in order:
@@ -24,6 +25,7 @@
 #include "settings/settings.h"     /* set_option, set_int */
 #include "speech/talk.h"            /* UNIT_INT */
 #include "widgets/list.h"
+#include "widgets/option_select.h"   /* OPTION_IN_PLACE_MAX */
 #include "widgets/dialog_prose.h"
 #include "games/arcade/arcade.h"
 #include "games/arcade/shell_opts.h"
@@ -84,7 +86,9 @@ const char *shell_option_title(struct vm *vm, int i)
 
 enum list_row_kind shell_option_kind(struct vm *vm, int i)
 {
-    return arcade_options(vm)->o[i].type == ARCADE_OPT_ONOFF
+    const struct arcade_option *o = &arcade_options(vm)->o[i];
+    return o->type == ARCADE_OPT_ONOFF ||
+           (o->type == ARCADE_OPT_CHOICE && o->nchoices <= OPTION_IN_PLACE_MAX)
         ? LIST_ROW_TOGGLE : LIST_ROW_SETTING;
 }
 
@@ -117,6 +121,9 @@ bool shell_option_edit(struct vm *vm, int i)
     bool usb = false;
     if (o->type == ARCADE_OPT_ONOFF) {
         v = !v;
+    } else if (o->type == ARCADE_OPT_CHOICE &&
+               o->nchoices <= OPTION_IN_PLACE_MAX) {
+        v = v + 1 < o->nchoices ? v + 1 : 0;
     } else if (o->type == ARCADE_OPT_CHOICE) {
         struct opt_items items[ARCADE_CHOICES];
         for (int k = 0; k < o->nchoices; k++) {

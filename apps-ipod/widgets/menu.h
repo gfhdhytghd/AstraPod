@@ -203,8 +203,9 @@ void menu_link_scene(struct ui_scene *scene, const struct menu_item_ex *menu,
 /*  Use this to put a setting into a menu.
     The setting must appear in settings_list.c.
     If the setting is not configured properly, the menu will display "Not Done yet!"
-    When the user selects this item the setting select screen will load,
-    when that screen exits the user wll be back in the menu */
+    Selecting a bool, or a choice of up to OPTION_IN_PLACE_MAX values,
+    steps it to its next value in place; any other setting loads its select
+    screen, and when that screen exits the user is back in the menu */
 #define MENUITEM_SETTING(name,var,callback)                  \
     static const struct menu_item_ex name =                  \
         {MT_SETTING, {.variable = (void*)var},{callback}};

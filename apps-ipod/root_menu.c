@@ -2456,9 +2456,21 @@ static inline int load_screen(int screen)
     return ret_val;
 }
 
+static void scene_enter(struct ui_scene *scene, int from, int to, bool push,
+                        const void *home);
+
 int root_menu_run_screen(int screen)
 {
+    /* The screen slides over the menu that opened it and back, as one run
+     * from Home does. The menu has a key of its own: Home's would have the
+     * parent painter draw Home in its place. */
+    static struct ui_scene row_scene;
+    static const char row_menu;
+    ui_scene_cancel(&row_scene);
+    scene_enter(&row_scene, GO_TO_ROOT, screen, true, &row_menu);
     int ret = load_screen(screen);
+    if (row_scene.capturing)
+        ui_scene_cancel(&row_scene);
     if (ret == GO_TO_FILEBROWSER)
     {
         fruit_files_next = true;
@@ -2466,7 +2478,10 @@ int root_menu_run_screen(int screen)
     }
     /* A screen's own way out is GO_TO_ROOT, its parent being Home in
      * AstraPod's tree: here the menu that opened it is the parent. */
-    return ret == GO_TO_PREVIOUS || ret == GO_TO_ROOT ? 0 : ret;
+    if (ret != GO_TO_PREVIOUS && ret != GO_TO_ROOT)
+        return ret;
+    scene_enter(&row_scene, screen, GO_TO_ROOT, false, &row_menu);
+    return 0;
 }
 
 int root_menu_library_row(const char *menu_id, const char *label)
@@ -2640,7 +2655,9 @@ static int browser_default(void)
     }
 }
 
-static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push)
+/* `home`, when given, is the key of the page standing where Home does. */
+static void scene_enter(struct ui_scene *scene, int from, int to, bool push,
+                        const void *home)
 {
     if (from < GO_TO_ROOT || to < GO_TO_ROOT)
         return;
@@ -2657,9 +2674,19 @@ static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push
             from = to;
     }
     /* Identity keys are used only for comparing endpoints. */
-    ui_scene_enter(scene, (const void *)(intptr_t)(from + 16),
-                    (const void *)(intptr_t)(to + 16), push,
-                    from == GO_TO_WPS || to == GO_TO_WPS);
+    const void *from_key = (const void *)(intptr_t)(from + 16);
+    const void *to_key = (const void *)(intptr_t)(to + 16);
+    if (home && from == GO_TO_ROOT)
+        from_key = home;
+    if (home && to == GO_TO_ROOT)
+        to_key = home;
+    ui_scene_enter(scene, from_key, to_key, push,
+                   from == GO_TO_WPS || to == GO_TO_WPS);
+}
+
+static void root_scene_enter(struct ui_scene *scene, int from, int to, bool push)
+{
+    scene_enter(scene, from, to, push, NULL);
 }
 
 /* Where the stock tree's main menu was left */

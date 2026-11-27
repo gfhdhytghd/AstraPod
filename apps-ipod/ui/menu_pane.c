@@ -108,7 +108,7 @@ static struct {
     int dx, dy;             /* the window's step per pan tick */
     int drawn_x, drawn_y;
     bool fading;
-    uint32_t none_at;       /* when a load last found no cover */
+    uint32_t none_at;       /* when a load last ended without a cover */
 } show = { .album = -1 };
 
 static struct menu_pane_content shown, pending, under;
@@ -266,14 +266,15 @@ static void show_work(const struct queue_event *ev)
     show.state = SHOW_LOADING;
     probe.work++;
     int count = tagcache_album_count();
-    bool loaded = false, yielded = false;
+    bool loaded = false;
     fb_data *pixels = core_get_data_pinned(show.handle);
     for (int i = 0; i < SHOW_TRIES && count > 0 && !show.release; i++)
     {
-        /* Glyphs for the page being drawn come first. */
+        /* USB and other work can keep this stopped across queue passes.
+         * Let the pane retry on its timer so this worker can block. */
         if (bg_task_should_stop(&show_task))
         {
-            yielded = true;
+            probe.yielded++;
             break;
         }
         int album = rand() % count;
@@ -287,13 +288,6 @@ static void show_work(const struct queue_event *ev)
         }
     }
     core_put_data_pinned(pixels);
-    if (yielded && !show.release)
-    {
-        probe.yielded++;
-        show.state = SHOW_REQUESTED;
-        bg_task_post(&show_task, SHOW_EVENT);
-        return;
-    }
     if (show.release)
     {
         show.release = false;
@@ -820,8 +814,7 @@ void menu_pane_set_picture(const struct menu_pane_content *content)
 static void cover_step(uint32_t now, struct ui_rect *damage)
 {
     struct ui_rect pane = menu_pane_rect();
-    /* A load that found no cover is tried again a cover's life later: the
-     * art cache may still be filling. */
+    /* Retry an interrupted or unsuccessful load a cover's life later. */
     if (show.state == SHOW_NONE && now - show.none_at >= SHOW_LIFE_US)
     {
         show_request();

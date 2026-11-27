@@ -45,7 +45,7 @@ static bool reported_high_rate;
 #include "screens/playback/cider.h"
 #endif
 #include "system/library_files.h"
-#include "timefuncs.h" /* get_time, mktime */
+#include "timefuncs.h"
 #include "system.h"
 #include "version.h"
 #include "kernel.h"
@@ -81,6 +81,7 @@ static bool reported_high_rate;
 #include "iap-usb.h"
 #include "playback.h"
 #include "storage.h"
+#include "system/scrobble_log.h"
 #include "system/app_util.h"
 #include "system/bg_task.h"    /* the headroom a background pass needs */
 #include "system/debug_log.h"
@@ -423,8 +424,6 @@ static struct mutex playback_log_mutex SHAREDBSS_ATTR;
 #define PLAYBACK_LOG_GENERIC 1 /* playback.log: timestamp:elapsed:length:path   */
 #define PLAYBACK_LOG_LASTFM  2 /* /.scrobbler.log in Audioscrobbler .log format */
 
-#define SCROBBLER_LOG_PATH   "/.scrobbler.log"
-#define SCROBBLER_TIMELESS   ""
 #define SCROBBLER_LISTENED_PCT 50   /* played >= this % of a track => rating 'L' */
 #define SCROBBLER_UNTAGGED     "<UNTAGGED>"
 
@@ -436,19 +435,10 @@ static unsigned int playback_log_files(void)
     return mode ? 1u << mode : 0;
 }
 
-/* Open a mode's log for appending. An empty scrobbler log gets the
- * Audioscrobbler header first, however it came to be empty: uploaders that
- * check for it reject the file without it. */
 static int open_playbacklog(int mode)
 {
-    static const char header[] =
-        "#AUDIOSCROBBLER/1.1\n#TZ/UNKNOWN\n"
-        "#CLIENT/Rockbox " TARGET_NAME SCROBBLER_TIMELESS "\n"
-        "#ARTIST\t#ALBUM\t#TITLE\t#TRACKNUM\t#LENGTH\t#RATING\t"
-        "#TIMESTAMP\t#MUSICBRAINZ_TRACKID\n";
     return mode == PLAYBACK_LOG_LASTFM ?
-        logfile_open_header(SCROBBLER_LOG_PATH, header) :
-        logfile_open(PLAYBACK_LOG_PATH);
+        scrobble_log_open() : logfile_open(PLAYBACK_LOG_PATH);
 }
 
 /* Spaces for the tabs and line breaks in the 'n' bytes from 'at' of a line

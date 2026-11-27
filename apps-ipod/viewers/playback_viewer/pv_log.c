@@ -34,13 +34,13 @@
 #include <file.h>
 #include "config.h"
 #include "system/library_files.h"
+#include "system/scrobble_log.h"
 #include "rbpaths.h"
 #include "settings/settings.h"
 #include "pv_log.h"
 
 #define PV_LOG_PATH LIB_PLAYBACK_LOG
 #define PV_LOG_STEM LIB_PLAYBACK_STEM
-#define PV_SCROBBLER_PATH "/.scrobbler.log"
 #define PV_COVER_PATH LIB_REPORT_SOURCE_FILE
 
 /* global_settings.playback_log, as audio/playback.c defines it. Not exported
@@ -77,6 +77,7 @@
 static struct
 {
     int fd;
+    enum pv_source source;
     int pos, len;
     int next;   /* >0: numbered log to try next; 0: live log is next;
                    -1: the chain is finished */
@@ -87,6 +88,18 @@ static struct
 } rd = { .fd = -1, .next = -1 };
 
 static char rd_buf[PV_BUF_SZ];
+
+static const char *live_path(enum pv_source src)
+{
+    return src == PV_SRC_SCROBBLER ? SCROBBLER_LOG_PATH : PV_LOG_PATH;
+}
+
+static void numbered_path(enum pv_source src, int part, char *path)
+{
+    const char *stem = src == PV_SRC_SCROBBLER ?
+                       SCROBBLER_LEGACY_STEM : PV_LOG_STEM;
+    snprintf(path, MAX_PATH, "%s_%04d.log", stem, part);
+}
 
 /* Open the next file of the family, stepping off the numbered run onto the
  * live log when the numbers run out. */
@@ -100,7 +113,7 @@ static bool rd_advance(void)
     while (rd.next > 0)
     {
         char path[MAX_PATH];
-        snprintf(path, sizeof(path), "%s_%04d.log", PV_LOG_STEM, rd.next);
+        numbered_path(rd.source, rd.next, path);
         rd.next++;
         rd.fd = open(path, O_RDONLY);
         if (rd.fd >= 0)
@@ -111,7 +124,7 @@ static bool rd_advance(void)
     if (rd.next == 0)
     {
         rd.next = -1;   /* the live log is the last link */
-        rd.fd = open(PV_LOG_PATH, O_RDONLY);
+        rd.fd = open(live_path(rd.source), O_RDONLY);
     }
     return rd.fd >= 0;
 }
@@ -121,13 +134,7 @@ static bool rd_open(enum pv_source src)
     rd.pos = rd.len = 0;
     rd.consumed = 0;
 
-    if (src == PV_SRC_SCROBBLER)
-    {
-        rd.next = -1;       /* one file, never rotated */
-        rd.fd = open(PV_SCROBBLER_PATH, O_RDONLY);
-        return rd.fd >= 0;
-    }
-
+    rd.source = src;
     rd.next = 1;
     return rd_advance();
 }
@@ -142,15 +149,7 @@ static bool rd_open_at(enum pv_source src, unsigned long offset)
     rd.pos = rd.len = 0;
     rd.consumed = offset;
 
-    if (src == PV_SRC_SCROBBLER)
-    {
-        rd.next = -1;
-        rd.fd = open(PV_SCROBBLER_PATH, O_RDONLY);
-        if (rd.fd < 0)
-            return false;
-        lseek(rd.fd, (off_t)left, SEEK_SET);
-        return true;
-    }
+    rd.source = src;
 
     for (int n = 1; n <= PV_LOG_MAX_NUMBERED; n++)
     {
@@ -158,7 +157,7 @@ static bool rd_open_at(enum pv_source src, unsigned long offset)
         unsigned long sz;
         int fd;
 
-        snprintf(path, sizeof(path), "%s_%04d.log", PV_LOG_STEM, n);
+        numbered_path(src, n, path);
         fd = open(path, O_RDONLY);
         if (fd < 0)
             break;          /* numbered run ended; the live log is next */
@@ -176,7 +175,7 @@ static bool rd_open_at(enum pv_source src, unsigned long offset)
         close(fd);
     }
 
-    rd.fd = open(PV_LOG_PATH, O_RDONLY);
+    rd.fd = open(live_path(rd.source), O_RDONLY);
     rd.next = -1;
     if (rd.fd < 0)
         return false;
@@ -352,19 +351,9 @@ unsigned long pv_log_size(enum pv_source src)
     char path[MAX_PATH];
     int fd;
 
-    if (src == PV_SRC_SCROBBLER)
-    {
-        fd = open(PV_SCROBBLER_PATH, O_RDONLY);
-        if (fd < 0)
-            return 0;
-        total = (unsigned long)ffilesize(fd);
-        close(fd);
-        return total;
-    }
-
     for (int n = 1; n <= PV_LOG_MAX_NUMBERED; n++)
     {
-        snprintf(path, sizeof(path), "%s_%04d.log", PV_LOG_STEM, n);
+        numbered_path(src, n, path);
         fd = open(path, O_RDONLY);
         if (fd < 0)
             break;
@@ -372,7 +361,7 @@ unsigned long pv_log_size(enum pv_source src)
         close(fd);
     }
 
-    fd = open(PV_LOG_PATH, O_RDONLY);
+    fd = open(live_path(src), O_RDONLY);
     if (fd >= 0)
     {
         total += (unsigned long)ffilesize(fd);

@@ -140,11 +140,27 @@ time zone: America/New_York
                            SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software",
                            PODBOX_TEST_UTC_FILE=str(stamp), LD_PRELOAD=str(library),
                            PODBOX_UI_WALK_STATE=str(frames))
-                proc = subprocess.Popen(
-                    [str(binary), "--root", ".", "--nobackground",
-                     "--zoom", "1", "--keys", "-"], cwd=root, env=env,
-                    stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,
-                )
+                def start():
+                    memory.seek(0)
+                    memory.write(bytes(STATE_SIZE))
+                    memory.flush()
+                    return subprocess.Popen(
+                        [str(binary), "--root", ".", "--nobackground",
+                         "--zoom", "1", "--keys", "-"], cwd=root, env=env,
+                        stdin=subprocess.PIPE, stdout=log,
+                        stderr=subprocess.STDOUT,
+                    )
+
+                def stop(proc):
+                    if proc.poll() is None:
+                        proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
+
+                proc = start()
                 try:
                     time.sleep(7)
                     expect_clock(proc, state, out, "spring-before", 1, 59)
@@ -168,23 +184,26 @@ time zone: America/New_York
                     key(proc, "select")
                     cities = capture(state)
                     cities.save(out / "time-zone-cities.png")
-                    assert "Almaty" in ocr(cities, 6), "Asia city list did not open"
+                    assert "Asia" in ocr(cities.crop((0, 0, 60, 18)), 7), "Asia city list did not open"
                     key(proc, "select")
-                    for _ in range(60):
-                        if re.search(r"^time zone: Asia/Almaty$", cfg.read_text(), re.M):
+                    expect_clock(proc, state, out, "same-utc-new-city", 11, 0)
+                    pending = cfg.with_suffix(".cfg.new")
+                    for _ in range(120):
+                        paths = (cfg, pending)
+                        if any(p.exists() and re.search(r"^time zone: Asia/Almaty$",
+                                                       p.read_text(), re.M)
+                               for p in paths):
                             break
                         time.sleep(0.1)
                     else:
                         raise AssertionError("The picker did not save Asia/Almaty")
-                    expect_clock(proc, state, out, "same-utc-new-city", 11, 0)
+                    stop(proc)
+                    proc = start()
+                    time.sleep(7)
+                    expect_clock(proc, state, out, "restart-new-city", 11, 0)
+                    assert re.search(r"^time zone: Asia/Almaty$", cfg.read_text(), re.M)
                 finally:
-                    if proc.poll() is None:
-                        proc.terminate()
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait()
+                    stop(proc)
     print("SDL dummy: spring gap, fall fold, region/city selection and unchanged UTC PASS")
 
 

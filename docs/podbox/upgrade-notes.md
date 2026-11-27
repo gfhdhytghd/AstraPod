@@ -134,3 +134,5 @@
   manually, choose your city in Settings > Date & Time > Time Zone, then
   set the local date and time. Existing FAT file times and play logs
   retain their original fields.
+  The first Last.fm write archives the old scrobble files under
+  `/.scrobbler-local_*.log` and starts `/.scrobbler.log` with UTC timestamps.

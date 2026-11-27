@@ -21,8 +21,12 @@ When entering an ambiguous local time, the clock uses the first occurrence.
 A skipped time moves forward by the size of the gap. Alarms fire once in a
 repeated minute and skip nonexistent minutes. Snooze uses elapsed minutes.
 New play and scrobble timestamps use UTC. Existing play log timestamps and
-database serial numbers keep their stored values. Playback Report groups
-timestamps by UTC day. FAT continues to write and display the original
+database serial numbers keep their stored values. At the first scrobble
+write, the player archives any local-time logs as
+`/.scrobbler-local_0001.log` and subsequent numbered files. Upload those
+with the timezone they were recorded in. The new `/.scrobbler.log` has
+a `#TZ/UTC` header. Playback Report can still read the archived logs.
+For new timestamps, Playback Report groups events by UTC day. FAT continues to write and display the original
 local calendar fields. FAT dates carry no zone, so two writes within a
 repeated minute can have the same stored time.
 

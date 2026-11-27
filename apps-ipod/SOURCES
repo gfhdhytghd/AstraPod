@@ -521,6 +521,7 @@ system/podlink_shell_lcd.c
 #endif
 #endif
 system/format_time.c
+system/scrobble_log.c
 system/time_zone.c
 system/time_zone_catalog.c
 system/time_zone_rule.c

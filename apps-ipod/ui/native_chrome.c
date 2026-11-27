@@ -180,10 +180,13 @@ struct status_layout {
 
 /* Scrim and Light draw the battery glyph right-aligned in its slot, inked
  * from its second column, and end the pause icon 9 clear columns short of
- * that ink. The app tray packs right to left from the battery with the same
- * 9 between drawn pixels, and playback and busy move left past it. */
+ * that ink. The app tray packs right to left from the playback icon, or from
+ * the battery when stopped, with the same 9 between drawn pixels; the busy
+ * slot moves left past it. */
 #define STATUS_BATTERY_INK_LEFT 1
 #define STATUS_INK_GAP 9
+/* The pause glyph inks the middle 12 columns. */
+#define STATUS_PAUSE_INK 12
 
 #ifdef ASTRAPOD_ROCK_COMPAT
 static int tray_ink(const struct rock_tray_icon12 *icon, int *first)
@@ -266,7 +269,8 @@ static struct status_layout art_layout(const struct native_chrome *chrome,
 
 static struct status_layout status_layout(const struct native_chrome *chrome,
                                           int width, int clock_width,
-                                          int percent_width, int title_width)
+                                          int percent_width, int title_width,
+                                          bool play_shown)
 {
     const uint16_t *metric = chrome->theme->metric;
     int icon_size = metric[UI_METRIC_STATUS_ICON_SIZE];
@@ -311,6 +315,16 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
                        chrome->icon_font);
     int edge = percent_width ? percent_x :
                battery_x + icon_size - battery_width + STATUS_BATTERY_INK_LEFT;
+    if (play_shown)
+    {
+        /* Where draw_icon puts the glyph in its slot, then the ink in that. */
+        int pause_width, pause_height;
+        font_getstringsize((const unsigned char *)indicator_icons[CHROME_PAUSE],
+                           &pause_width, &pause_height, chrome->icon_font);
+        edge = play_x + (pause_width - STATUS_PAUSE_INK) / 2;
+        if (pause_width > icon_size || pause_height > icon_size)
+            edge += (icon_size - pause_width) / 2;
+    }
     for (int i = out.tray_count, first; i-- > 0; )
     {
         int last = tray_ink(&tray->icons[i], &first);
@@ -318,8 +332,9 @@ static struct status_layout status_layout(const struct native_chrome *chrome,
         out.tray_icon_x[i] = edge - 1 - last;
         edge -= last + 1 - first;
     }
-    play_x -= shift;
     busy_x -= shift;
+#else
+    (void)play_shown;
 #endif
     int clock_right = busy_x - group_gap;
     clock_width = MIN(clock_width, MAX(0, clock_right - left));
@@ -802,7 +817,7 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
         art_layout(chrome, bounds.width, clock_width, percent_width,
                    play_shown) :
         status_layout(chrome, bounds.width, clock_width, percent_width,
-                      center_title ? bounds.width : title_width);
+                      center_title ? bounds.width : title_width, play_shown);
     if (!show_clock)
         layout.title_width = MAX(0, layout.tray_x -
                                     metric[UI_METRIC_STATUS_GROUP_GAP] -

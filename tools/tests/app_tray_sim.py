@@ -16,9 +16,10 @@ build from before the 12 x 12 tray; --store 2 writes the current one.
 --check asserts, in Classic and Fruit Company, that each tray icon's ink
 lies within the playback icon's rows, that a 12-row icon spans the
 battery's, and that 7 clear columns separate the tray's drawn pixels. In
-Scrim and Light it asserts that the tray sits against the battery with the
-playback icon left of it, 9 clear columns between the drawn pixels of each
-(8 from the play icon's faint tip), and that a 12-row icon is centred.
+Scrim and Light it asserts that the playback icon sits against the battery
+and the tray left of it, 9 clear columns between the pause icon's drawn
+pixels and each neighbour's and between tray icons, and that a 12-row icon
+is centred.
 --demo leaves the second slot empty and runs app_tray_demo from the file
 list instead, then checks that it saved its 8 x 8 frames centred.
 """
@@ -280,17 +281,24 @@ def main():
                     if shot not in result:
                         continue
                     runs, gaps = result[shot]["ink"], result[shot]["gaps"]
-                    # ..., playback, tray icons, battery.
-                    assert len(runs) >= count + 2, (shot, runs)
-                    # The play icon's tip is a column of faint ink.
-                    tip = 8 if state == "play" else FLAT_GAP
-                    assert gaps[-count - 1:] == \
-                        [tip] + [FLAT_GAP] * count, (shot, gaps)
-                    playback = runs[-count - 2]
+                    # ..., tray icons, playback, battery. The pause icon is
+                    # two bars 4 columns apart; the play icon inks two
+                    # columns less on its left and a faint column more on
+                    # its right than the pause icon it is laid out by.
+                    if state == "pause":
+                        bars = 2
+                        tail = [FLAT_GAP] * count + [4, FLAT_GAP]
+                    else:
+                        bars = 1
+                        tail = [FLAT_GAP] * (count - 1) + \
+                            [FLAT_GAP + 2] * min(count, 1) + [FLAT_GAP - 1]
+                    assert len(runs) >= count + bars + 1, (shot, runs)
+                    assert gaps[-len(tail):] == tail, (shot, gaps)
+                    playback = runs[-2]
                     assert playback[3] - playback[2] + 1 == 14, \
                         (shot, playback)
                     if count:
-                        mochi = runs[-count - 1]
+                        mochi = runs[-count - bars - 1]
                         height = STATUS_HEIGHT[theme]
                         assert (mochi[2], mochi[3]) == \
                             ((height - 12) // 2, (height - 12) // 2 + 11), \
@@ -300,7 +308,7 @@ def main():
             print("PASS tray icons on the playback icon's rows, "
                   "7 clear columns")
         if set(themes) & set(FLAT_THEMES):
-            print("PASS tray against the battery, playback left of it, "
+            print("PASS tray left of playback, playback against the battery, "
                   f"{FLAT_GAP} clear columns")
 
 

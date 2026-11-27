@@ -21,7 +21,8 @@ struct ui_scene {
     /* Both pages are painted on the list backdrop, which stays still under
      * them. */
     bool still_backdrop;
-    /* The motion turned back part way, so keeps the geometry it began with. */
+    /* The motion runs against the direction it was captured in, and keeps
+     * the geometry that capture gave it. */
     bool reversed;
 };
 

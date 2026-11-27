@@ -265,6 +265,9 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
     bool left_split = front_right ? scene->back_split : scene->front_split;
     bool right_split = front_right ? scene->front_split : scene->back_split;
     bool target_right = front_right == scene->target_front;
+    /* A slide turned back keeps the layering it was captured with, so its
+     * pages retrace their way rather than trade places. */
+    bool captured_right = front_right == (scene->target_front != scene->reversed);
     /* The left edge of the page on the right. */
     int p = front_right ? offset : LCD_WIDTH + offset;
     bool both = left_split && right_split && !scene->full_screen;
@@ -295,13 +298,13 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
         {
             const fb_data *split = left_split ? l : r;
             const fb_data *full = left_split ? r : l;
-            bool full_over = left_split == target_right;
+            bool full_over = left_split == captured_right;
             int full_x = left_split ? p : p - LCD_WIDTH;
             int rows_x = left_split ? MIN(0, p - half) : MAX(0, p);
             /* The stock menu returning over a full page travels as a whole
              * page from off screen, so it shows only in the second half and
              * then pushes the full page aside. */
-            if (left_split && !full_over && !scene->reversed)
+            if (left_split && !full_over)
             {
                 rows_x = p - LCD_WIDTH;
                 full_x = MAX(0, p - half);
@@ -714,6 +717,10 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
          to == (push ? scene->front_page : scene->back_page)))
     {
         offset = scene->last_offset != -1 ? scene->last_offset : scene->tween.from;
+        /* A slide turned back retraces only the way it came, at its speed. */
+        if (reverse_pan)
+            frames = MAX(1, (frames * abs(end - offset) + LCD_WIDTH - 1) /
+                            LCD_WIDTH);
         /* The redirected destination is already painted. Start incremental
          * updates from that page's own pixels, including its status bar. */
         fb_data *data = core_get_data_pinned(scene->handle);
@@ -758,7 +765,7 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
         scene->still_backdrop = false;
     scene->staggered = staggered;
     scene->reuse_target = reverse_pan;
-    scene->reversed = reverse_pan;
+    scene->reversed = reverse_pan && !scene->reversed;
     scene->row_y = scene->row_count = 0;
     scene->tween = (struct ui_tween){
         .from = offset, .to = end, .frames = frames,

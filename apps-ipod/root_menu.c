@@ -22,6 +22,7 @@
 #include "system/appevents.h"
 #include "widgets/menu.h"
 #include "ui/scene.h"
+#include "ui/statusbar.h"
 #include "ui/stock_art_ids.h"
 #include "root_menu.h"
 #include "screens/playback/cider.h"
@@ -786,7 +787,12 @@ static int wpsscrn(void* param)
         pop_current_activity_without_refresh();
     }
     else
-        pop_current_activity();
+    {
+        /* Now Playing leaves with its own title: the next page draws the
+         * status bar once the transition has its picture of this one. */
+        pop_current_activity_without_refresh();
+        sb_invalidate();
+    }
 
     if ((ret_val == GO_TO_ALBUM_COVERS_TRACKS || ret_val == GO_TO_WPS) &&
         cover_nav_origin_is(GO_TO_WPS))

@@ -76,6 +76,7 @@
 
 /* gui api */
 #include "list.h"
+#include "row_glyphs.h"
 #include "ui/scene.h"
 #include "ui/stock_art_ids.h"
 #include "screens/fruit_menu.h"
@@ -511,6 +512,54 @@ static enum themable_icons  menu_get_icon(int selected_item, void * data)
     return menu_icon;
 }
 
+/* The glyph `item` draws as a row of a page menu: the one its definition
+ * names with ICON_GLYPH(), else the one row_glyphs.c gives its label, else
+ * 0. A string list's row is `index` of `item`. */
+int menu_item_glyph(const struct menu_item_ex *item, int index)
+{
+    int type = item->flags & MENU_TYPE_MASK;
+    int icon = Icon_NOICON;
+    int id = -1;
+
+    if (type == MT_RETURN_ID)
+        return (item->flags & MENU_DYNAMIC_DESC) ? 0 :
+               row_glyph(P2ID((unsigned char *)item->strings[index]));
+    if (item->flags & MENU_HAS_DESC)
+        icon = item->callback_and_desc->icon_id;
+    else if (item->flags & MENU_DYNAMIC_DESC)
+        icon = item->menu_get_name_and_icon->icon_id;
+    if (ICON_IS_GLYPH(icon))
+        return ICON_GLYPH_CODE(icon);
+
+    if (item->flags & MENU_SETTING_LABEL)
+        id = P2ID(item->callback_and_desc->desc);
+    else if (type == MT_SETTING || type == MT_SETTING_W_TEXT)
+    {
+        const struct settings_list *setting = find_setting(item->variable);
+        id = setting ? setting->lang_id : -1;
+    }
+    else if (item->flags & MENU_HAS_DESC)
+        id = P2ID(item->callback_and_desc->desc);
+    return id >= 0 ? row_glyph(id) : 0;
+}
+
+/* A page menu's row: its own glyph, else the icon for its type. */
+static enum themable_icons menu_get_page_icon(int selected_item, void *data)
+{
+    const struct menu_item_ex *menu = (const struct menu_item_ex *)data;
+    int index = get_menu_selection(selected_item, menu);
+    int glyph = (menu->flags & MENU_TYPE_MASK) == MT_MENU ?
+                menu_item_glyph(menu->submenus[index], 0) :
+                menu_item_glyph(menu, index);
+
+    return glyph ? ICON_GLYPH(glyph) : menu_get_icon(selected_item, data);
+}
+
+bool menu_page_list(const struct gui_synclist *list)
+{
+    return list->callback_get_item_icon == menu_get_page_icon;
+}
+
 static char* init_title(const struct menu_item_ex *menu, int *icon,
                         char* buf, size_t buf_sz)
 {
@@ -764,12 +813,14 @@ static int init_menu_lists(const struct menu_item_ex *menu,
     title = init_title(menu, &icon, buf, buf_sz);
     gui_synclist_init(lists,get_menu_item_name,(void*)menu,false,1, parent);
     gui_synclist_set_title(lists, title, icon);
-    gui_synclist_set_icon_callback(lists, global_settings.show_icons?menu_get_icon:NULL);
     gui_synclist_set_row_callbacks(lists, menu_get_kind, menu_get_value, NULL);
     gui_synclist_set_range_callback(lists, menu_get_range);
     /* A menu that is a page of its own, not a sheet or a plugin's. */
     enum current_activity activity = get_current_activity();
-    if (activity != ACTIVITY_CONTEXTMENU && activity != ACTIVITY_PLUGIN)
+    bool page = activity != ACTIVITY_CONTEXTMENU && activity != ACTIVITY_PLUGIN;
+    gui_synclist_set_icon_callback(lists, !global_settings.show_icons ? NULL :
+                                   page ? menu_get_page_icon : menu_get_icon);
+    if (page)
     {
         gui_synclist_set_pane_callback(lists, menu_get_pane);
         if (!parent)

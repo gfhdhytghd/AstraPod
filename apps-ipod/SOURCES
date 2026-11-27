@@ -118,6 +118,7 @@ widgets/list_quickscroll.c
 widgets/list_render.c
 widgets/list_select.c
 widgets/menu.c
+widgets/row_glyphs.c
 ui/animation.c
 ui/pace.c
 ui/hwscroll.c
@@ -556,4 +557,6 @@ sim/shim-fs.c
 sim/shim-glyphs.c
 sim/shim-hwscroll.c
 sim/shim-usb.c
+/* Not a shim: tools/tests/row_glyphs_test.py's menu-row dump. */
+sim/menu-dump.c
 #endif

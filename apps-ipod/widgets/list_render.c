@@ -44,6 +44,7 @@
 #include "ui/theme_art.h"
 #include "plugins/rock_compat.h"
 #include "list_render.h"
+#include "menu.h"
 #include "ui/scene.h"
 #include "list_hwscroll.h"
 #include "list_select.h"
@@ -878,9 +879,10 @@ static bool equals_lang(const char *text, int id)
     return text && !strcmp(text, str(id));
 }
 
+/* `generic` lets a row with no glyph of its own draw its type's mark. */
 static const char *row_icon(enum themable_icons icon, enum list_row_kind kind,
                             const char *label, bool file_view,
-                            enum current_activity activity)
+                            enum current_activity activity, bool generic)
 {
     if (file_view)
     {
@@ -913,7 +915,7 @@ static const char *row_icon(enum themable_icons icon, enum list_row_kind kind,
             case Icon_Menu_setting:
             case Icon_Menu_functioncall:
             case Icon_Submenu: return NULL;
-            default: return icon == Icon_NOICON ? NULL : "¨";
+            default: return icon == Icon_NOICON || !generic ? NULL : "¨";
         }
     }
 
@@ -994,8 +996,8 @@ static const char *row_icon(enum themable_icons icon, enum list_row_kind kind,
         case Icon_Bookmark: return "Ó";
         case Icon_Plugin: return "Ĥ";
         case Icon_file_view_menu:
-        case Icon_Submenu: return "Þ";
-        default: return icon == Icon_NOICON ? NULL : "¨";
+        case Icon_Submenu: return generic ? "Þ" : NULL;
+        default: return icon == Icon_NOICON || !generic ? NULL : "¨";
     }
 }
 
@@ -1117,6 +1119,13 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         list->callback_get_item_kind(item, list->data) : LIST_ROW_PLAIN;
     enum themable_icons icon = list->callback_get_item_icon ?
         list->callback_get_item_icon(item, list->data) : Icon_NOICON;
+    bool page_menu = menu_page_list(list);
+    char own_glyph[4] = "";
+    if (ICON_IS_GLYPH(icon))
+    {
+        *utf8encode(ICON_GLYPH_CODE(icon), (unsigned char *)own_glyph) = '\0';
+        icon = Icon_NOICON;
+    }
 
     /* Edit Main Menu shows each home row as home draws it, wherever it runs */
     bool menu_config = equals_lang(list->title, LANG_MAIN_MENU_SETTINGS);
@@ -1157,8 +1166,9 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
             list->callback_get_item_name(item, list->data, name, sizeof(render->scratch.row.name));
         const char *label = label_ptr && P2ID(label_ptr) <= VOICEONLY_DELIMITER
                             ? P2STR(label_ptr) : "";
-        icon_column = row_icon(icon, kind, label, true, activity) != NULL;
+        icon_column = row_icon(icon, kind, label, true, activity, true) != NULL;
     }
+    icon_column |= list->show_icons && page_menu;
     int marked = list_select_row_state(list, item);
     if (!icon_column && !art && list->show_icons &&
         (kind == LIST_ROW_CONTAINER || kind == LIST_ROW_CUSTOM_MENU))
@@ -1274,7 +1284,8 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
             fill(clip, tile, LCD_RGBPACK(45, 45, 45));
         if (!cover && !list->callback_prefetch_art && render->icon_font >= 0)
             draw_text(render, clip, icon_cell, render->icon_font, fg,
-                      row_icon(icon, kind, icon_label, files, activity), false, 0, false);
+                      row_icon(icon, kind, icon_label, files, activity, true),
+                      false, 0, false);
         text_x += cover_size + m[UI_METRIC_LIST_AUX_PADDING] + 1;
     }
     else if (icon_column || marked >= 0)
@@ -1283,7 +1294,9 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         if (render->icon_font >= 0)
         {
             const char *glyph = marked >= 0 ? (marked ? "×" : "Ö") :
-                                row_icon(icon, kind, icon_label, files, activity);
+                                *own_glyph ? own_glyph :
+                                row_icon(icon, kind, icon_label, files,
+                                         activity, !page_menu);
             if (now_playing_row && marked < 0)
                 glyph = audio_status() & AUDIO_STATUS_PAUSE ? "B" : "A";
             if (agents && value && value[1] && (value[0] == 'r' || value[0] == 'q'))

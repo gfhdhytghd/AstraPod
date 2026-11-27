@@ -62,6 +62,13 @@ enum themable_icons {
     Icon_Video,
 };
 
+/* A row that names its own glyph in the theme's icon font: ICON_GLYPH(cp)
+ * draws codepoint cp. */
+#define ICON_GLYPH_BASE 0x10000
+#define ICON_GLYPH(cp) ((enum themable_icons)(ICON_GLYPH_BASE + (cp)))
+#define ICON_IS_GLYPH(icon) ((int)(icon) >= ICON_GLYPH_BASE)
+#define ICON_GLYPH_CODE(icon) ((int)(icon) - ICON_GLYPH_BASE)
+
 /*
  * Draws a cursor at a given position, if th
  * - screen : the screen where we put the cursor

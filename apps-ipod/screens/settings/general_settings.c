@@ -350,7 +350,7 @@ MENUITEM_FUNCTION_DYNTEXT_W_PARAM(hotkey_tree_item, 0,
                                   tree_context_menu_do_setting, (void*)0,
                                   tree_hotkey_get_name,
                                   tree_hotkey_speak_item,
-                                  (void*)0, NULL, Icon_NOICON,
+                                  (void*)0, NULL, ICON_GLYPH(0x0169),
                   .settings = {.variable = &global_settings.hotkey_tree});
 static int clear_start_directory(void)
 {
@@ -525,7 +525,7 @@ static char *tv_out_toggle_name(int selected_item, void *data,
 
 MENUITEM_FUNCTION_DYNTEXT(tv_out_toggle_item, 0, tv_out_toggle,
                           tv_out_toggle_name, NULL, NULL, NULL,
-                          Icon_NOICON);
+                          ICON_GLYPH(0x00C2));
 MENUITEM_SETTING(tv_out_size, &global_settings.tv_out_size, NULL);
 #ifdef HAVE_VIDEOOUT_STANDARD
 MENUITEM_SETTING(tv_standard, &global_settings.tv_standard, NULL);
@@ -611,7 +611,7 @@ static int usb_dac_toggle_callback(int action,
 
 MENUITEM_FUNCTION_DYNTEXT(usb_dac_toggle_item, 0, usb_dac_toggle,
                           usb_dac_toggle_name, NULL, NULL,
-                          usb_dac_toggle_callback, Icon_NOICON);
+                          usb_dac_toggle_callback, ICON_GLYPH(0x00C2));
 MAKE_MENU(usb_dac_menu, ID2P(LANG_USB_DAC_OUTPUT), 0, Icon_NOICON,
           &usb_dac_output, &usb_dac_toggle_item);
 #endif
@@ -810,7 +810,7 @@ MENUITEM_SETTING(start_screen, &global_settings.start_in_screen, NULL);
 MENUITEM_SETTING(poweroff, &global_settings.poweroff, NULL);
 MENUITEM_FUNCTION_DYNTEXT(sleeptimer_toggle, 0, toggle_sleeptimer,
                           sleeptimer_getname, sleeptimer_voice, NULL,
-                          NULL, Icon_NOICON);
+                          NULL, ICON_GLYPH(0x01EA));
 MENUITEM_SETTING(sleeptimer_duration,
                  &global_settings.sleeptimer_duration,
                  sleeptimer_duration_cb);
@@ -1014,14 +1014,15 @@ MENUITEM_FUNCTION_DYNTEXT_W_PARAM(wps_select_action, 0,
                                   wps_button_get_name,
                                   wps_button_speak_item,
                                   (void*)LANG_WPS_SELECT_ACTION, NULL,
-                                  Icon_NOICON,
+                                  ICON_GLYPH(0x01EB),
                   .settings = {.variable = &global_settings.wps_select_action});
 
 MENUITEM_FUNCTION_DYNTEXT_W_PARAM(hotkey_wps_item, 0,
                                   wps_context_menu_do_setting, (void*)0,
                                   wps_button_get_name,
                                   wps_button_speak_item,
-                                  (void*)LANG_HOTKEY_WPS, NULL, Icon_NOICON,
+                                  (void*)LANG_HOTKEY_WPS, NULL,
+                                  ICON_GLYPH(0x0169),
                   .settings = {.variable = &global_settings.context_wps});
 
 

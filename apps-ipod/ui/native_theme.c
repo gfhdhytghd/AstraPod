@@ -177,6 +177,7 @@ static const struct {
 static const char *const builtin_names[UI_THEME_BUILTIN_COUNT] = {
     [UI_THEME_SCRIM] = "scrim", [UI_THEME_LIGHT] = "light",
     [UI_THEME_CLASSIC] = "classic", [UI_THEME_FRUIT_COMPANY] = "fruit-company",
+    [UI_THEME_FRUIT_COMPANY_ULTRA] = "fruit-company-ultra",
 };
 
 static const struct {
@@ -196,6 +197,7 @@ static const struct {
     [UI_STYLE_LIST_SCROLL]  = { "list_scroll",  (const char *const[]){ "glide", "snap", NULL } },
     [UI_STYLE_LIST_ROWS]    = { "list_rows",    (const char *const[]){ "pitch", "fill", NULL } },
     [UI_STYLE_MENU_TREE]    = { "menu_tree",    (const char *const[]){ "astrapod", "stock", NULL } },
+    [UI_STYLE_MOTION]       = { "motion",       (const char *const[]){ "standard", "ultra", NULL } },
 };
 
 static const char *const gradients[UI_GRADIENT_COUNT] = {
@@ -334,14 +336,19 @@ void ui_theme_builtin(struct ui_theme *theme, enum ui_theme_builtin_id id)
     theme->motion_scale = UI_THEME_MOTION_ONE;
     for (size_t i = 0; i < UI_MOTION_COUNT; i++)
         theme->motion[i] = UI_MOTION_DEFAULT;
-    if (id == UI_THEME_CLASSIC || id == UI_THEME_FRUIT_COMPANY)
+    bool fruit = id == UI_THEME_FRUIT_COMPANY ||
+                 id == UI_THEME_FRUIT_COMPANY_ULTRA;
+    if (id == UI_THEME_CLASSIC || fruit)
     {
         classic(theme);
         plastic(theme);
     }
     /* Classic's look, with the stock firmware's menus */
-    if (id == UI_THEME_FRUIT_COMPANY)
+    if (fruit)
         theme->style[UI_STYLE_MENU_TREE] = UI_MENU_TREE_STOCK;
+    /* Fruit Company's still frames, with richer motion between them */
+    if (id == UI_THEME_FRUIT_COMPANY_ULTRA)
+        theme->style[UI_STYLE_MOTION] = UI_MOTION_ULTRA;
 }
 
 const char *ui_theme_builtin_name(enum ui_theme_builtin_id id)

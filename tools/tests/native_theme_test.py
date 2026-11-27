@@ -223,7 +223,7 @@ static void check_plastic(void)
     struct ui_theme theme;
     ui_theme_builtin(&theme, UI_THEME_CLASSIC);
     assert(theme.style[UI_STYLE_ART] == UI_ART_PLASTIC);
-    assert(UI_THEME_BUILTIN_COUNT == 4);
+    assert(UI_THEME_BUILTIN_COUNT == 5);
     assert(!strcmp(ui_theme_builtin_name(UI_THEME_CLASSIC), "classic"));
     assert(theme.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_ASTRAPOD);
 
@@ -233,6 +233,17 @@ static void check_plastic(void)
     assert(!strcmp(ui_theme_builtin_name(UI_THEME_FRUIT_COMPANY),
                    "fruit-company"));
     assert(fruit.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_STOCK);
+    assert(fruit.style[UI_STYLE_MOTION] == UI_MOTION_STANDARD);
+
+    /* Fruit Company Ultra is Fruit Company with style.motion=ultra */
+    struct ui_theme ultra;
+    ui_theme_builtin(&ultra, UI_THEME_FRUIT_COMPANY_ULTRA);
+    assert(!strcmp(ui_theme_builtin_name(UI_THEME_FRUIT_COMPANY_ULTRA),
+                   "fruit-company-ultra"));
+    assert(ultra.style[UI_STYLE_MOTION] == UI_MOTION_ULTRA);
+    ultra.style[UI_STYLE_MOTION] = UI_MOTION_STANDARD;
+    assert(!memcmp(&ultra, &fruit, sizeof(fruit)));
+
     fruit.style[UI_STYLE_MENU_TREE] = UI_MENU_TREE_ASTRAPOD;
     assert(!memcmp(&fruit, &theme, sizeof(theme)));
     assert(!strcmp(theme.font[UI_FONT_WPS_TIME], "14-helvetica-bold"));
@@ -243,6 +254,12 @@ static void check_plastic(void)
     assert(ui_theme_gradient_at(bar, 1, 24, 0) == 0x09a4e1);
     assert(ui_theme_gradient_at(bar, 22, 24, 0) == 0x0065d3);
     assert(ui_theme_gradient_at(bar, 23, 24, 0) == 0x004386);
+
+    static const char motion[] = "podbox-theme=1\nstyle.motion=ultra\n";
+    assert(ui_theme_parse(&theme, motion, sizeof(motion) - 1));
+    assert(theme.style[UI_STYLE_MOTION] == UI_MOTION_ULTRA);
+    static const char bad_motion[] = "podbox-theme=1\nstyle.motion=fast\n";
+    assert(!ui_theme_parse(&theme, bad_motion, sizeof(bad_motion) - 1));
 
     static const char file[] =
         "podbox-theme=1\ngradient.selection=000000,ffffff\nstyle.art=plastic\n";

@@ -135,6 +135,7 @@ ui/perf.c
 ui/retained.c
 ui/scene.c
 ui/sheet.c
+ui/ultra.c
 widgets/option_select.c
 widgets/rating_dialog.c
 #ifdef HAVE_RECORDING

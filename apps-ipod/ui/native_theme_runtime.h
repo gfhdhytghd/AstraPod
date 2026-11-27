@@ -19,6 +19,10 @@ unsigned ui_theme_motion(enum ui_motion_role role, unsigned frames,
                          unsigned base);
 /* The current theme's keyword for `role`; 0 without a theme. */
 unsigned ui_theme_style(enum ui_style_role role);
+/* Whether the theme asks for style.motion=ultra and motion is on. Every
+ * Ultra-only motion is gated on this, so with motion off Ultra draws
+ * exactly as its base theme. */
+bool ui_theme_ultra(void);
 /* The current theme's UI_EASE_* curve. */
 unsigned ui_theme_easing(void);
 int ui_theme_font_load(const struct ui_theme *, enum ui_font_role, int glyphs);

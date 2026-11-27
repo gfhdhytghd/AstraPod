@@ -262,6 +262,12 @@ unsigned ui_theme_style(enum ui_style_role role)
     return style;
 }
 
+bool ui_theme_ultra(void)
+{
+    return ui_theme_style(UI_STYLE_MOTION) == UI_MOTION_ULTRA &&
+           ui_theme_duration(UI_THEME_MOTION_ONE) > 0;
+}
+
 unsigned ui_theme_easing(void)
 {
     unsigned easing = UI_EASE_CUBIC;
@@ -339,7 +345,7 @@ static const char *theme_name(int item, void *data, char *buf, size_t len)
     (void)len;
     char (*files)[UI_THEME_NAME_MAX] = data;
     static const char *const builtins[UI_THEME_BUILTIN_COUNT] = {
-        "Scrim", "Light", "Classic", "Fruit Company"
+        "Scrim", "Light", "Classic", "Fruit Company", "Fruit Company Ultra"
     };
     return item < UI_THEME_BUILTIN_COUNT ? builtins[item] :
            files[item - UI_THEME_BUILTIN_COUNT];

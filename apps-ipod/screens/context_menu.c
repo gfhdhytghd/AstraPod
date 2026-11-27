@@ -1549,12 +1549,16 @@ static long selected_track_idx(void)
     return selected_file.path ? tagcache_find_path(selected_file.path) : -1;
 }
 
-/* The album row of the selected track, from the RAM copy's album table */
+/* The track's album row in the RAM index. */
+static bool track_album(long index, struct tagcache_album *album)
+{
+    int row = tagcache_album_of(index);
+    return row >= 0 && tagcache_album_get(row, album);
+}
+
 static bool selected_track_album(struct tagcache_album *album)
 {
-    int row = tagcache_album_of(selected_track_idx());
-
-    return row >= 0 && tagcache_album_get(row, album);
+    return track_album(selected_track_idx(), album);
 }
 
 static int go_to_callback(int action,
@@ -3651,7 +3655,7 @@ static int fruit_music_context(const char *path, const char *title,
 {
     struct tagcache_album album;
     char name[2];
-    bool browse = !group && selected_track_album(&album);
+    bool browse = !group && path && track_album(tagcache_find_path(path), &album);
     int rows[5];
     int count = 0;
 
@@ -3692,7 +3696,7 @@ static int fruit_music_context(const char *path, const char *title,
             return group ? ONPLAY_RELOAD_DIR : ONPLAY_OK;
         case LANG_FRUIT_BROWSE_ALBUM:
         case LANG_FRUIT_BROWSE_ARTIST:
-            if (selected_track_album(&album))
+            if (path && track_album(tagcache_find_path(path), &album))
                 return fruit_browse_track(&album,
                     rows[list.selection] == LANG_FRUIT_BROWSE_ARTIST);
             break;

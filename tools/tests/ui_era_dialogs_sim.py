@@ -214,8 +214,12 @@ def run_theme(binary, simdisk, env, out, theme):
                 res["prose_right_dismisses"] = not differ(
                     before_prose, settle(s), (0, STATUS_H, 320, 240))
 
+                # Menu leaves the nested Advanced Settings screen. Re-enter
+                # it from the retained Advanced Settings row.
                 s.tap("Escape")
-                settle(s)  # back one level to Advanced Settings (on Sound Settings)
+                settle(s)
+                s.tap("Return")
+                settle(s)
 
                 # 4. Search Settings (index 0, one Up above Sound Settings)
                 s.tap("Up")

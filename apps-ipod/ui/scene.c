@@ -331,6 +331,7 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
         }
         else if (stock && left_split)
         {
+            /* The full page covers the fixed preview, then pushes the rows. */
             put_span(row, l, MIN(0, p - half), half, 0, half);
             put_span(row, l + half, half, LCD_WIDTH - half, half, p);
             put_span(row, r, p, LCD_WIDTH, 0, LCD_WIDTH);

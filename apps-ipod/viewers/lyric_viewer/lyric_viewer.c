@@ -46,6 +46,7 @@
 #include "screens/playback/cider_wps.h"
 #include "screens/playback/cider_library.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/native_wps.h"
 #include "ui/pace.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
@@ -153,6 +154,7 @@ struct lv_perf {
     bool seek_remote;
 };
 struct lv_state {
+    bool exit_progress_ready;
     enum lv_crumb_phase crumb_phase;
     struct viewport vp, mask_vp;
     struct frame_buffer_t mask_fb;
@@ -304,6 +306,15 @@ static void lv_phase_end(enum lv_phase phase, uint32_t start)
     lv.phase_mask |= 1u << phase;
 }
 
+static void lv_first_painted(uint32_t now)
+{
+    if (lv.first_pending)
+    {
+        perf.first = now - lv.entry_at;
+        lv.first_pending = false;
+    }
+}
+
 static void lv_record(uint32_t started, enum lv_type type, bool visible)
 {
     uint32_t now = lv_clock(), elapsed = now - started;
@@ -327,11 +338,8 @@ static void lv_record(uint32_t started, enum lv_type type, bool visible)
     perf.dropped += late;
     lv.last_type = type;
     lv.present_at = now;
-    if (lv.first_pending && visible)
-    {
-        perf.first = now - lv.entry_at;
-        lv.first_pending = false;
-    }
+    if (visible)
+        lv_first_painted(now);
 #if defined(HAVE_ADJUSTABLE_CPU_FREQ) && !defined(SIMULATOR)
     unsigned mhz = (FREQ + 500000) / 1000000;
     if (!perf.cpu_low || mhz < perf.cpu_low) perf.cpu_low = mhz;
@@ -1587,7 +1595,7 @@ static void lv_geometry(void)
         return;
     }
     lv.body_top = lv.chrome.status_height;
-    lv.body_bottom = LYRICS_CHROME_STRIP;
+    lv.body_bottom = WPS_CLASSIC_PROGRESS_TOP;
     int span = lv.body_bottom - lv.body_top;
     lv.anchor = !lyrics_loaded() ? lv.body_top + span / 2 :
                 lyrics_timed() ? lv.body_top + span * 42 / 100 :
@@ -1600,7 +1608,7 @@ static void lv_page_init(void)
                  &lv_backdrop_ops, NULL);
     ui_view_init(&lv.body, (struct ui_rect){0, LV_BODY_TOP, LCD_WIDTH, LV_BODY_BOTTOM - LV_BODY_TOP},
                  &lv_body_ops, NULL);
-    int strip = lv.classic ? LYRICS_CHROME_STRIP : LCD_HEIGHT - 2;
+    int strip = lv.classic ? WPS_CLASSIC_PROGRESS_TOP : LCD_HEIGHT - 2;
     ui_view_init(&lv.progress, (struct ui_rect){0, strip, lv.classic ? LCD_WIDTH : 0,
                                                 LCD_HEIGHT - strip},
                  &lv_progress_ops, NULL);
@@ -1692,7 +1700,7 @@ static bool lv_draw_pixels(bool force, enum lv_output output, fb_data *layer)
     if (layer && !full)
         memcpy(lv_frame(), layer, LV_FRAME);
     /* Full-width damage strips match the RGB565 background restore routine. */
-    int strip = lv.classic ? LYRICS_CHROME_STRIP : LCD_HEIGHT - 2;
+    int strip = lv.classic ? WPS_CLASSIC_PROGRESS_TOP : LCD_HEIGHT - 2;
     lv.progress.value[UI_WIDTH] = lv.classic ? LCD_WIDTH : progress;
     lv.fill = progress;
     if (full)
@@ -2396,6 +2404,29 @@ static bool lv_select_seek(uint32_t pressed)
     return true;
 }
 
+/* Prime the first visible glyphs before the zoom samples the page. */
+static void lv_warm_transform_text(void)
+{
+    if (!lv.pose_count && !lv.pending)
+        font_getstringsize((const unsigned char *)lv_status(), NULL, NULL,
+                           lv_font());
+    for (int i = lv.pose_first; i < lv.pose_first + lv.pose_count; ++i)
+    {
+        const unsigned char *main = (const unsigned char *)lyrics_text(i);
+        const unsigned char *bg =
+            (const unsigned char *)lyrics_vocal_at(i, true).text;
+        if (main)
+        {
+            int normal = lv_face(false, false), focus = lv_face(false, true);
+            font_getstringsize(main, NULL, NULL, normal);
+            if (focus != normal)
+                font_getstringsize(main, NULL, NULL, focus);
+        }
+        if (bg)
+            font_getstringsize(bg, NULL, NULL, lv_face(true, false));
+    }
+}
+
 /* The status bar and progress row are on the first frame, as Now Playing
  * left them. */
 static void __attribute__((noinline)) lv_first_chrome(void)
@@ -2419,13 +2450,88 @@ static void lv_first_frame(uint32_t started)
     lv_record(started, LV_ENTRY, true);
 }
 
+/* The same eased position is sampled in reverse when returning to WPS. */
+static void lv_compose_transform(fb_data *out, const fb_data *back,
+                                 const fb_data *front, const fb_data *live,
+                                 int phase)
+{
+    int top = lv.chrome.status_height;
+    int bottom = WPS_CLASSIC_PROGRESS_TOP;
+    int body = bottom - top;
+    const struct ui_tween ease = {
+        .to = 256, .frames = 256, .easing = UI_EASE_QUAD,
+    };
+    int progress = ui_tween_sample(&ease, phase);
+    int leave = MIN(256, progress * 4 / 3);
+    int arrive = MAX(0, progress - 32) * 256 / 224;
+    memcpy(out, back, top * LCD_WIDTH * sizeof(*out));
+    memcpy(out + bottom * LCD_WIDTH, live + bottom * LCD_WIDTH,
+           (LCD_HEIGHT - bottom) * LCD_WIDTH * sizeof(*out));
+    native_wps_lyrics_departure(out, back, top, leave);
+    if (!arrive)
+        return;
+
+    /* Keep the zoom centred within the body and never sample the chrome. */
+    int scale = 96 + arrive * 160 / 256;
+    int width = LCD_WIDTH * scale / 256;
+    int height = body * scale / 256;
+    int left = (LCD_WIDTH - width) / 2;
+    int first = top + (body - height) / 2;
+    unsigned step_x = (LCD_WIDTH << 16) / width;
+    unsigned step_y = (body << 16) / height;
+    unsigned sy = step_y / 2;
+    for (int y = 0; y < height; ++y, sy += step_y)
+    {
+        const fb_data *src = front + (top + (sy >> 16)) * LCD_WIDTH;
+        fb_data *dst = out + (first + y) * LCD_WIDTH + left;
+        unsigned sx = step_x / 2;
+        for (int x = 0; x < width; ++x, sx += step_x)
+            dst[x] = lv_mix(dst[x], src[sx >> 16], arrive);
+    }
+    lv_first_painted(lv_clock());
+}
+
+/* The input pump advances playback on entry. On exit the scene owns the
+ * pump, so sample playback here before painting another stationary strip. */
+static void lv_exit_progress(void)
+{
+    bool remote = cider_active();
+    struct wps_state *wps = get_wps_state();
+    if (remote)
+    {
+        cider_source_poll();
+        cider_wps_update(wps);
+    }
+    const struct mp3entry *id3 = remote ? wps->id3 :
+        audio_status() & AUDIO_STATUS_PLAY ? audio_current_track() : NULL;
+    long elapsed = lv_playback_clock(id3).elapsed;
+    long length = id3 ? id3->length : 0;
+    int fill = lyrics_chrome_fill(elapsed, length);
+    bool times = lyrics_chrome_times(&lv.chrome, elapsed, length);
+    if (fill == lv.fill && !times && lv.exit_progress_ready)
+        return;
+    lv.exit_progress_ready = true;
+    lv.fill = fill;
+    const struct ui_rect strip = {
+        0, WPS_CLASSIC_PROGRESS_TOP,
+        LCD_WIDTH, LCD_HEIGHT - WPS_CLASSIC_PROGRESS_TOP,
+    };
+    lv_restore(strip.y, LCD_HEIGHT);
+    lyrics_chrome_strip(&lv.chrome, fill, strip);
+}
+
+bool lyrics_classic_layout(void)
+{
+    return ui_theme_style(UI_STYLE_LYRICS) == UI_LYRICS_CLASSIC &&
+           global_settings.lyric_colour_mode == 0;
+}
+
 static void __attribute__((noinline)) lv_open_layout(void)
 {
     struct ui_theme theme;
     ui_theme_snapshot(&theme);
     /* A colour mode other than the theme's keeps the full layout. */
-    lv.classic = theme.style[UI_STYLE_LYRICS] == UI_LYRICS_CLASSIC &&
-                 global_settings.lyric_colour_mode == 0;
+    lv.classic = lyrics_classic_layout();
     if (lv.classic)
         lyrics_chrome_open(&lv.chrome, &theme);
     lv_geometry();
@@ -2464,7 +2570,7 @@ static void __attribute__((noinline)) lv_load_fonts(void)
     }
 }
 
-int lyric_viewer(void)
+static int lyric_viewer_run(struct ui_scene *transform)
 {
     static struct lv_state state;
     if (lv_state)
@@ -2480,6 +2586,11 @@ int lyric_viewer(void)
     lv.entry_at = entry_at;
     lv.entry_tick = current_tick;
     lv_open_layout();
+    if (transform)
+        ui_scene_open_transform(transform, "lyrics-up",
+                                ui_theme_duration(ANIM_F(20)),
+                                lv.chrome.status_height, lv_compose_transform,
+                                lv_exit_progress);
     lv_page_init();
     perf.seek_frame_us = -1;
     lv_boost(true);
@@ -2502,7 +2613,8 @@ int lyric_viewer(void)
     push_current_activity(ACTIVITY_LYRICS);
     viewportmanager_theme_enable(SCREEN_MAIN, false, &lv.vp);
     uint32_t frame_at = lv_clock();
-    lv_first_frame(frame_at);
+    if (!transform)
+        lv_first_frame(frame_at);
     uint32_t setup_resume_at = lv_clock();
     if (lv.snapshot) memcpy(lv.snapshot, lv_frame(), LV_FRAME);
 
@@ -2535,12 +2647,14 @@ int lyric_viewer(void)
                              status & AUDIO_STATUS_PLAY ? audio_current_track() : NULL;
     lv.paused = remote_wps ? remote_wps->paused : (status & AUDIO_STATUS_PAUSE) != 0;
     lv_reload(first, remote_wps != NULL);
+    if (transform)
+        lv_warm_transform_text();
     perf.entry_prep_us = (frame_at - entry_at) + (lv_clock() - setup_resume_at);
-    if (!lv_entry_begin())
+    if (transform || !lv_entry_begin())
     {
         uint32_t started = lv_clock();
         lv_draw(true, LV_UPDATE);
-        lv_record(started, LV_ENTRY, false);
+        lv_record(started, LV_ENTRY, transform && !lcd_updates_held());
     }
     lv.initial = false;
     int result = GO_TO_PREVIOUS, event = 0;
@@ -2776,6 +2890,9 @@ int lyric_viewer(void)
 done:
     /* The caller restores its viewport and submits the next complete page. */
     ui_perf_end(trace);
+    if (transform)
+        ui_scene_close_modal(transform, result != GO_TO_ROOT && !event,
+                             "lyrics-down");
     lv_entry_cancel();
     lv_boost(false);
     lv_perf_save();
@@ -2793,4 +2910,14 @@ done:
     lv_state = NULL;
     if (event && default_event_handler(event) == SYS_USB_CONNECTED) result = GO_TO_ROOT;
     return result;
+}
+
+int lyric_viewer(void)
+{
+    return lyric_viewer_run(NULL);
+}
+
+int lyric_viewer_from_wps(struct ui_scene *scene)
+{
+    return lyric_viewer_run(scene);
 }

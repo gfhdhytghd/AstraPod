@@ -13,13 +13,8 @@
 #include "ui/theme_art.h"
 #include "lyrics_chrome.h"
 
-#define BAR_X 54
-#define BAR_Y (LYRICS_CHROME_STRIP + 4)
-#define BAR_WIDTH 212
-#define BAR_HEIGHT 14
-#define TIME_Y (LYRICS_CHROME_STRIP + 5)
-#define ELAPSED_X 15
-#define REMAINING_RIGHT 310
+#define BAR_Y (WPS_CLASSIC_PROGRESS_TOP + WPS_CLASSIC_BAR_Y)
+#define TIME_Y (WPS_CLASSIC_PROGRESS_TOP + WPS_CLASSIC_TIME_Y)
 
 static fb_data pack(uint32_t rgb)
 {
@@ -39,17 +34,18 @@ void lyrics_chrome_open(struct lyrics_chrome *chrome,
     if (chrome->time_font >= 0)
     {
         font_prefetch_mark_hot(chrome->time_font);
-        font_prefetch_begin();
-        font_prefetch_text(chrome->time_font, "0123456789:-");
-        font_prefetch_end();
+        font_getstringsize((const unsigned char *)"0123456789:-",
+                           NULL, NULL, chrome->time_font);
     }
     chrome->time_fg = pack(t->color[UI_COLOR_WPS_FG]);
     chrome->band_fallback = pack(t->color[UI_COLOR_SELECTION]);
     chrome->elapsed[0] = chrome->remaining[0] = '\0';
-    /* The gradient spans the page below the status bar. */
+    /* The body owns its gradient. The playback strip shares WPS's paper. */
     int top = chrome->status_height, height = LCD_HEIGHT - top;
+    fb_data paper = ui_theme_rgb565(UI_COLOR_WPS_BG);
     for (int y = 0; y < LCD_HEIGHT; y++)
-        chrome->rows[y] = pack(ui_theme_gradient_at(
+        chrome->rows[y] = y >= WPS_CLASSIC_PROGRESS_TOP ? paper :
+            pack(ui_theme_gradient_at(
             &t->gradient[UI_GRADIENT_LYRICS], MAX(0, y - top), height,
             t->color[UI_COLOR_BACKGROUND]));
 }
@@ -105,7 +101,7 @@ int lyrics_chrome_fill(long elapsed, long length)
     if (length <= 0)
         return 0;
     elapsed = MAX(0, MIN(elapsed, length));
-    return (int)((int64_t)elapsed * BAR_WIDTH / length);
+    return (int)((int64_t)elapsed * WPS_CLASSIC_PROGRESS_WIDTH / length);
 }
 
 long lyrics_chrome_next_ms(long elapsed, long length)
@@ -114,48 +110,73 @@ long lyrics_chrome_next_ms(long elapsed, long length)
         return 500;
     elapsed = MAX(0, elapsed);
     long pixel = lyrics_chrome_fill(elapsed, length) + 1;
-    long bar = ((int64_t)pixel * length + BAR_WIDTH - 1) / BAR_WIDTH - elapsed;
+    long bar = ((int64_t)pixel * length + WPS_CLASSIC_PROGRESS_WIDTH - 1) /
+               WPS_CLASSIC_PROGRESS_WIDTH - elapsed;
     long second = 1000 - elapsed % 1000;
     long left = (length - elapsed) % 1000 + 1;
     return MAX(1, MIN(bar, MIN(second, left)));
 }
 
-/* A bar of `width` from x in one gradient, without stock's reflection. */
+/* The same fallback bar and reflection that Now Playing paints. */
 static void plain_bar(const struct ui_theme_gradient *gradient,
                       uint32_t fallback, int x, int width, struct ui_rect clip)
 {
     int left = MAX(x, clip.x), right = MIN(x + width, clip.x + clip.width);
     int top = MAX(BAR_Y, clip.y);
-    int bottom = MIN(BAR_Y + BAR_HEIGHT, clip.y + clip.height);
-    fb_data *frame = FBADDR(0, 0);
-    for (int y = top; y < bottom && left < right; y++)
+    const int rows = WPS_CLASSIC_BAR_REFLECTION;
+    const int height = WPS_CLASSIC_BAR_HEIGHT;
+    int bottom = MIN(BAR_Y + height + 1 + rows, clip.y + clip.height);
+    if (left >= right || top >= bottom)
+        return;
+    struct viewport vp = {
+        .x = left, .y = top, .width = right - left, .height = bottom - top,
+        .flags = VP_DEFAULT_FLAGS, .drawmode = DRMODE_SOLID,
+        .buffer = &lcd_framebuffer_default,
+    };
+    struct viewport *previous = lcd_set_viewport(&vp);
+    for (int y = top; y < bottom; ++y)
     {
-        uint32_t rgb = ui_theme_gradient_at(gradient, y - BAR_Y, BAR_HEIGHT,
-                                            fallback);
-        memset16(frame + y * LCD_WIDTH + left, pack(rgb), right - left);
+        int row = y - BAR_Y;
+        int reflect = row - height - 1;
+        if (row == height)
+            continue;
+        if (reflect >= 0)
+            row = height - 1 - reflect;
+        lcd_set_foreground(pack(ui_theme_gradient_at(gradient, row, height,
+                                                       fallback)));
+        if (reflect < 0)
+            lcd_hline(0, vp.width - 1, y - top);
+        else
+            lcd_blendrect(0, y - top, vp.width, 1,
+                          (5 * (rows - reflect) + rows - 1) / rows);
     }
+    lcd_set_viewport(previous);
 }
 
 void lyrics_chrome_strip(struct lyrics_chrome *chrome, int fill,
                          struct ui_rect clip)
 {
     const struct ui_theme *t = &chrome->theme;
-    fill = MAX(0, MIN(fill, BAR_WIDTH));
+    fill = MAX(0, MIN(fill, WPS_CLASSIC_PROGRESS_WIDTH));
     struct viewport *previous = lcd_set_viewport(NULL);
     if (ui_theme_art(t) && stock_art_ready())
     {
+        stock_art_over_layer(true);
         ui_art_tile(STOCK_ART_NOWPLAYING_PROGRESSBAR_ACTIVE_BACKGROUND,
-                    BAR_X + fill, BAR_Y, BAR_WIDTH - fill, true, clip);
+                    WPS_CLASSIC_PROGRESS_X + fill, BAR_Y,
+                    WPS_CLASSIC_PROGRESS_WIDTH - fill, true, clip);
         ui_art_tile(STOCK_ART_NOWPLAYING_PROGRESSBAR_ACTIVE_FILL,
-                    BAR_X, BAR_Y, fill, false, clip);
+                    WPS_CLASSIC_PROGRESS_X, BAR_Y, fill, false, clip);
+        stock_art_over_layer(false);
     }
     else
     {
         plain_bar(&t->gradient[UI_GRADIENT_PROGRESS_TRACK],
-                  t->color[UI_COLOR_WPS_MUTED], BAR_X + fill,
-                  BAR_WIDTH - fill, clip);
+                  t->color[UI_COLOR_WPS_MUTED], WPS_CLASSIC_PROGRESS_X,
+                  WPS_CLASSIC_PROGRESS_WIDTH, clip);
         plain_bar(&t->gradient[UI_GRADIENT_PROGRESS],
-                  t->color[UI_COLOR_WPS_ACCENT], BAR_X, fill, clip);
+                  t->color[UI_COLOR_WPS_ACCENT],
+                  WPS_CLASSIC_PROGRESS_X, fill, clip);
     }
     if (chrome->time_font >= 0)
     {
@@ -167,11 +188,14 @@ void lyrics_chrome_strip(struct lyrics_chrome *chrome, int fill,
             .fg_pattern = chrome->time_fg,
         };
         lcd_set_viewport(&text);
+        lcd_set_glyph_layer(true);
         const unsigned char *left = (const unsigned char *)chrome->remaining;
         int width = font_getstringsize(left, NULL, NULL, chrome->time_font);
-        lcd_putsxy(ELAPSED_X - clip.x, TIME_Y - clip.y,
+        lcd_putsxy(WPS_CLASSIC_ELAPSED_X - clip.x, TIME_Y - clip.y,
                    (const unsigned char *)chrome->elapsed);
-        lcd_putsxy(REMAINING_RIGHT - width - clip.x, TIME_Y - clip.y, left);
+        lcd_putsxy(WPS_CLASSIC_REMAINING_RIGHT - width - clip.x,
+                   TIME_Y - clip.y, left);
+        lcd_set_glyph_layer(false);
     }
     lcd_set_viewport(previous);
 }

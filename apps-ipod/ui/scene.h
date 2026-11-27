@@ -8,6 +8,12 @@
 #include "animation.h"
 #include "lcd.h"
 
+/* A transform draws two retained pages at one position on a reversible path.
+ * chrome is the live framebuffer. progress runs from 0 to 256. */
+typedef void (*ui_scene_transform)(fb_data *out, const fb_data *back,
+                                   const fb_data *front, const fb_data *chrome,
+                                   int progress);
+
 struct ui_scene {
     const void *back_page, *front_page;
     struct ui_tween tween;
@@ -26,6 +32,9 @@ struct ui_scene {
     /* The motion runs against the direction it was captured in, and keeps
      * the geometry that capture gave it. */
     bool reversed;
+    ui_scene_transform transform;
+    void (*refresh_chrome)(void);
+    unsigned transform_frames;
 };
 
 /* The UI thread owns a scene from capture through the end of its transition.
@@ -54,6 +63,10 @@ void ui_scene_boot(struct ui_scene *scene);
 /* A full-page picker retains its underlying page until dismissal. */
 void ui_scene_open_modal(struct ui_scene *scene, const char *route);
 bool ui_scene_capture_modal(struct ui_scene *scene);
+void ui_scene_open_transform(struct ui_scene *scene, const char *route,
+                             unsigned frames, int status_height,
+                             ui_scene_transform transform,
+                             void (*refresh_chrome)(void));
 /* Why the last capture failed: "motion-off", "lcd-off", "busy" or
  * "no-memory"; "-" after one that worked. */
 const char *ui_scene_capture_failure(void);

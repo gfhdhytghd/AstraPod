@@ -97,7 +97,7 @@ with a foreground client.
 `CLOCK: UnsafeCell<TimeMailbox>` is independent of Context and DELIVERY.
 Its unsafe Sync implementation is justified by a short IRQ critical section
 around every access. The safe TimeMailbox code validates and copies each TS
-record. UI take_time copies at most 64 bytes and a tick; it never takes the
+record. UI take_time copies at most 224 bytes and a tick; it never takes the
 service mutex. Invalidation clears the mailbox; inbox pressure preserves it.
 Publishing coalesces wakeups while keeping the newest record. Neither a
 reference nor a pointer into CLOCK escapes the IRQ guard. The C adapter only

@@ -1392,6 +1392,16 @@ Everything shows all of them.
 Reveals the debug screens under System. They read hardware and internal state;
 nothing there is needed in normal use.
 
+[time zone]
+Choose a region and city for the clock, alarms and calendar. The player
+adjusts for daylight saving automatically. Changing the city keeps the
+same instant on the clock.
+
+[follow computer time zone]
+Use the connected computer's time zone when syncing the clock with
+HerdRemote. Switch off to keep your chosen city while the clock still
+syncs.
+
 [sync time from computer]
 Sets the player's clock from a connected computer running HerdRemote. On by
 default. Switch off to set the date and time manually.

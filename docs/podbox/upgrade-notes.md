@@ -126,3 +126,11 @@
   the wheel to highlight a setting and press Select to change it. In
   Photos, turn the wheel to move between pictures. Games keep their
   own controls.
+
+
+- The clock uses UTC. On the first boot, the existing RTC fields are read
+  as UTC and remain unchanged. If you used local time before updating,
+  connect HerdRemote to correct the clock and set your city. To set it
+  manually, choose your city in Settings > Date & Time > Time Zone, then
+  set the local date and time. Existing FAT file times and play logs
+  retain their original fields.

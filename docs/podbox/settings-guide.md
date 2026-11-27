@@ -724,6 +724,8 @@ restart, which costs battery life: restart the player afterwards.
 
 | Setting | What it does | Default | |
 |---|---|---|---|
+| Time Zone | Choose a region and city for the clock, alarms and calendar. The player adjusts for daylight saving automatically. Changing the city keeps the same instant on the clock. | UTC | |
+| Follow computer time zone | Use the connected computer's time zone when syncing the clock with HerdRemote. Switch off to keep your chosen city while the clock still syncs. | On | |
 | Sync time from computer | Sets the player's clock from a connected computer running HerdRemote. On by default. Switch off to set the date and time manually. | On | |
 | Time Format | Whether times are shown on a 12- or 24-hour clock. | 12 Hour Clock |  |
 | Time in Title | Shows the time in the status bar in place of the screen's title. The title still shows for two seconds when a screen opens, and for a few seconds after the wheel turns. Changes nothing on a theme whose bar has a clock of its own, such as Scrim. | Off |  |

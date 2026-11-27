@@ -1574,7 +1574,11 @@ static void write_playbacklog(struct mp3entry *id3)
     /* Before core_get_data(): the RTC read can block, and a compaction then
      * moves the buffer */
     if (id3 && id3->elapsed > PLAYBACK_LOG_MIN_ELAPSED_MS)
-        timestamp = mktime(get_time());
+    {
+        time_t now = get_time_utc();
+        if (now >= 0)
+            timestamp = now;
+    }
     /* if the user just enabled playback logging rather than stopping playback
      * to allocate a buffer or if buffer too large just flush direct to disk
      * buffer will attempt to be allocated next start-up */

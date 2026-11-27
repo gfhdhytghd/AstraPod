@@ -120,7 +120,7 @@ static int *field_limits(struct tm *tm, int field, unsigned *min, unsigned *max)
         case IDX_HOURS:   *max = 23;                  return &tm->tm_hour;
         case IDX_MINUTES:                             return &tm->tm_min;
         case IDX_SECONDS:                             return &tm->tm_sec;
-        case IDX_YEAR:    *min = 1; *max = 200;       return &tm->tm_year;
+        case IDX_YEAR:    *min = 100; *max = 137;       return &tm->tm_year;
         case IDX_MONTH:   *max = 11;                  return &tm->tm_mon;
         case IDX_DAY:     *min = 1;
                           *max = days_in_month(tm);   return &tm->tm_mday;

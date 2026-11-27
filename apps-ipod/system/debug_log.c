@@ -158,7 +158,7 @@ int debug_log_minutes_left(void)
 
     if (!limit || !debug_log_any_on())
         return -1;
-    now = mktime(get_time());
+    now = get_time_utc();
     /* A clock moved back, or reset to 2000, ends the logs rather than
      * keeping them on */
     if (now < global_status.debug_log_since)
@@ -417,7 +417,7 @@ void debug_log_apply(void)
         if (on)
         {
             /* A log switched on late in another's time gets its own */
-            global_status.debug_log_since = mktime(get_time());
+            global_status.debug_log_since = get_time_utc();
             status_save(false);
             debug_log_header(id, "switched on");
             if (log_info[id].switched)
@@ -559,7 +559,7 @@ void debug_log_init(void)
     /* A log left on by a build that counted minutes instead */
     if (debug_log_any_on() && !global_status.debug_log_since)
     {
-        global_status.debug_log_since = mktime(get_time());
+        global_status.debug_log_since = get_time_utc();
         status_save(false);
     }
     /* The count runs while the player is off, so it may have ended there:

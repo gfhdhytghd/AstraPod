@@ -545,6 +545,7 @@ struct user_settings
     const struct settings_list *qs_items[QUICKSCREEN_ITEM_COUNT];
 
     bool sync_time_from_computer;
+    bool follow_computer_zone;
     int timeformat;    /* time format: 0=24 hour clock, 1=12 hour clock */
     bool time_in_title; /* the time in place of a screen's title, on a
                            status bar with no clock of its own */
@@ -1104,6 +1105,7 @@ struct user_settings
     int spike_caption;  /* 0 off, 1 title, 2 title and artist */
     bool spike_caption_scroll;  /* ...and whether it travels or is cropped */
     bool animations;
+    char time_zone[160];
     char native_theme[32];
     int shuffle_mode; /* SHUFFLE_* */
 };

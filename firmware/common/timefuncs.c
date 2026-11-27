@@ -27,6 +27,7 @@
 #include "rtc-target.h"
 #endif
 #include "timefuncs.h"
+#include "clock_utc.h"
 #include "debug.h"
 
 static struct tm rtc_tm;
@@ -119,18 +120,22 @@ static inline bool rtc_dirty(void)
 #endif /* HAVE_RTC_IRQ */
 #endif /* CONFIG_RTC */
 
-struct tm *get_time(void)
+struct tm *clock_read_raw(bool fresh)
 {
-    if (rtc_dirty())
+    if (rtc_dirty() || fresh)
     {
-        rtc_read_datetime(&rtc_tm);
-        rtc_tm.tm_isdst = -1; /* Not implemented for now */
+        struct tm raw;
+        if (rtc_read_datetime(&raw) >= 0)
+        {
+            raw.tm_isdst = -1;
+            rtc_tm = raw;
+        }
     }
 
     return &rtc_tm;
 }
 
-int set_time(const struct tm *tm)
+int clock_write_raw(const struct tm *tm)
 {
 #if CONFIG_RTC
     int rc;
@@ -155,6 +160,37 @@ int set_time(const struct tm *tm)
     (void)tm;
     return -1;
 #endif /* RTC */
+}
+
+bool clock_get_local(struct tm *local)
+{
+#if CONFIG_RTC
+    if (clock_uses_utc())
+    {
+        time_t utc = get_time_utc();
+        if (utc >= 0)
+        {
+            clock_localtime(utc, local);
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+
+struct tm *get_time(void)
+{
+    static struct tm local;
+    return clock_get_local(&local) ? &local : clock_read_raw(false);
+}
+
+int set_time(const struct tm *tm)
+{
+#if CONFIG_RTC
+    if (clock_uses_utc())
+        return valid_time(tm) ? set_time_utc(clock_utc_from_local(tm)) : -2;
+#endif
+    return clock_write_raw(tm);
 }
 
 #if CONFIG_RTC

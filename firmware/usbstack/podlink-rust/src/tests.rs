@@ -122,15 +122,15 @@ fn deterministic_wire_fuzz_never_exceeds_fixed_capacity() {
 
 #[test]
 fn clock_mailbox_coalesces_and_rejects_untrusted_records() {
-    use crate::service::TimeMailbox;
+    use crate::service::{TimeMailbox, TIME_RECORD};
     let mut mailbox = TimeMailbox::new();
-    let mut out = [0; 64];
+    let mut out = [0; TIME_RECORD];
     assert_eq!(mailbox.take(&mut out), None);
     assert!(mailbox.publish(b"TS\tfirst", 10));
     assert!(!mailbox.publish(b"TS\tnewest", 20));
     assert_eq!(mailbox.take(&mut out), Some(20));
     assert_eq!(&out[..10], b"TS\tnewest\0");
-    for invalid in [&[b'x'; 64][..], &b"TS\tbad\0value"[..]] {
+    for invalid in [&[b'x'; TIME_RECORD][..], &b"TS\tbad\0value"[..]] {
         assert!(mailbox.publish(invalid, 30));
         assert_eq!(mailbox.take(&mut out), Some(30));
         assert_eq!(out[0], 0);

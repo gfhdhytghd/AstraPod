@@ -29,8 +29,17 @@
 time_t dostime_mktime(uint16_t dosdate, uint16_t dostime);
 void dostime_localtime(time_t time, uint16_t* dosdate, uint16_t* dostime);
 struct tm *get_time(void);
+bool clock_get_local(struct tm *local);
 int set_time(const struct tm *tm);
 #if CONFIG_RTC
+/* The application can opt into UTC RTC storage and local calendar display. */
+void clock_use_utc(int (*offset)(time_t, int *),
+                   time_t (*from_local)(const struct tm *));
+int64_t clock_civil_seconds(const struct tm *civil);
+time_t get_time_utc(void);
+time_t get_time_utc_fresh(void);
+int set_time_utc(time_t utc);
+void clock_localtime(time_t utc, struct tm *local);
 bool valid_time(const struct tm *tm);
 void set_day_of_week(struct tm *tm);
 void set_day_of_year(struct tm *tm);

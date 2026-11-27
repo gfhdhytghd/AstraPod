@@ -39,6 +39,7 @@
 #include "widgets/list.h"
 #include "root_menu.h"
 #include "extras_calendars.h"
+#include "screens/extras/calendar_ics.h"
 #include "extras.h"
 #include "extras_font.h"
 
@@ -258,7 +259,7 @@ static bool has_memo(const struct cal_date *d)
     for (int i = 0; i < memo_count; i++)
         if (memo_on(&memos[i], d))
             return true;
-    return false;
+    return calendar_ics_on(d->year, d->month, d->day, NULL, NULL);
 }
 
 /* ---- the calendar page and the pane ---- */
@@ -556,6 +557,7 @@ static int month_page(void)
                                             global_settings.glyphs_to_cache);
     p.body_font = pane_font();
     memo_scan(NULL, NULL, NULL);
+    calendar_ics_load();
     month_title(&p.shown, title, sizeof(title));
     int ret = page_run(&p, title, sizeof(title), month_key);
     font_unload(p.font);
@@ -592,6 +594,7 @@ static void day_load(struct page *p, char *title, size_t size)
                 p->shown.day, p->shown.year);
     p->events = 0;
     memo_scan(&p->shown, day_event, p);
+    calendar_ics_on(p->shown.year, p->shown.month, p->shown.day, day_event, p);
 }
 
 static bool day_key(struct page *p, int action, char *title, size_t size)

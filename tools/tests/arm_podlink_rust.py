@@ -96,6 +96,9 @@ def messages():
     return out
 call('podlink_init');step();send(1,b'\1\0\0\x40\0\0',1)
 assert call('podlink_host_connected')==1
+assert not any(m[2]==b'tz\t1' for m in messages() if m[0]==2)
+send(2,b'tz\t?')
+assert sum(m[2]==b'tz\t1' for m in messages() if m[0]==2)==1
 registry=0x10020000
 u.mem_write(registry,struct.pack('<III',receive,next_record,reset));call('podlink_set_resident',registry)
 u.mem_write(registry,b'\0'*12) # caller table dies; Rust keeps a typed copy
@@ -104,7 +107,10 @@ send(2,b'HR\t1\thost');send(2,b'W\t1\nw1\t-\t1\t0\t0\t0\tCached')
 # Full-size art, binary credit data, TS mailbox and foreground overflow.
 send(3,b'CAR1'+bytes((i%251 for i in range(16380))))
 send(3,b'CXS1'+bytes(4092))
-send(2,b'TS\t1\t2026-11-16T10:00:00\t-18000');assert redraw==1
+stamp=b'TS\t1\t2026-11-16T10:00:00\t-18000\t2026-11-16T15:00:00Z\tAmerica/New_York\tEST5EDT,M3.2.0,M11.1.0'
+send(2,stamp);assert redraw==1
+assert call('podlink_take_time',0x10022000,0x10022100)==1
+assert bytes(u.mem_read(0x10022000,len(stamp)+1))==stamp+b'\0'
 out=0x10021000
 for _ in range(32):send(2,b'delta')
 assert call('podlink_poll',out)==1

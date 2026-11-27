@@ -754,3 +754,11 @@ Only absolute paths under `/Music/PodLink/` on the internal volume are
 deletable. This includes the Jellyfin subdirectory. After `MS3 DELETED`,
 send `MS1 REFRESH` to queue the database update. Disconnect also queues
 any pending update.
+
+
+## Computer clock sync
+
+The resident transport replies to `tz\t?` with `tz\t1` and routes `TS` TEXT records to
+the clock mailbox. See [Computer clock sync](podbox/herdremote-protocol.md#computer-clock-sync-follow-up-19)
+for the legacy and extended layouts, the UTC offset convention and the
+player settings.

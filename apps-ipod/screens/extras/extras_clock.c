@@ -6,10 +6,7 @@
  * time and its day. Select opens Add | Edit (| Delete), and Add and Edit
  * pick a city from the Region and City lists, whose pane shows a large clock.
  *
- * The player keeps no time zone, so the first clock is where the player is:
- * it shows the player's own time, and editing it names the player's zone,
- * from which every other clock's time follows. Daylight saving follows the
- * rule of the city's country, decided by date.
+ * Each city displays the same instant in its own time zone.
  *
  * Parts: the cities; the time arithmetic; the saved clocks; the painters,
  * which compose at 8 bits a channel as stock does; the Region and City
@@ -27,6 +24,7 @@
 #include "lcd.h"
 #include "rbpaths.h"
 #include "timefuncs.h"
+#include "system/time_zone.h"
 #include "input/action.h"
 #include "draw/viewport.h"
 #include "settings/settings.h"
@@ -45,132 +43,147 @@
 
 /* ---- the cities ---- */
 
-enum dst_rule { DST_NONE, DST_US, DST_EU, DST_EG, DST_AU, DST_NZ, DST_CL };
-
 struct city {
     const char *name;
-    int16_t offset;             /* standard time, minutes east of UTC */
-    uint8_t rule;
+    const char *zone;
 };
 
-#define C(n, h, m, r) { n, (h) * 60 + (m), DST_##r }
 /* In stock's order, region by region. */
 static const struct city cities[] = {
     /* Africa */
-    C("Accra", 0, 0, NONE), C("Addis Ababa", 3, 0, NONE),
-    C("Algiers", 1, 0, NONE), C("Asmera", 3, 0, NONE),
-    C("Bamako", 0, 0, NONE), C("Bangui", 1, 0, NONE),
-    C("Cairo", 2, 0, EG), C("Cape Town", 2, 0, NONE),
-    C("Conakry", 0, 0, NONE), C("Dakar", 0, 0, NONE),
-    C("Dar es Salaam", 3, 0, NONE), C("Djibouti", 3, 0, NONE),
-    C("Douala", 1, 0, NONE), C("Freetown", 0, 0, NONE),
-    C("Harare", 2, 0, NONE), C("Kampala", 3, 0, NONE),
-    C("Khartoum", 2, 0, NONE), C("Kinshasa", 1, 0, NONE),
-    C("Lagos", 1, 0, NONE), C("Luanda", 1, 0, NONE),
-    C("Lusaka", 2, 0, NONE), C("Maputo", 2, 0, NONE),
-    C("Mogadishu", 3, 0, NONE), C("Monrovia", 0, 0, NONE),
-    C("Nairobi", 3, 0, NONE), C("Ndjamena", 1, 0, NONE),
-    C("Nouakchott", 0, 0, NONE), C("Ouagadougou", 0, 0, NONE),
-    C("Rabat", 1, 0, NONE), C("Tripoli", 2, 0, NONE),
-    C("Tunis", 1, 0, NONE),
+    { "Accra", "Africa/Accra" }, { "Addis Ababa", "Africa/Addis_Ababa" },
+    { "Algiers", "Africa/Algiers" }, { "Asmera", "Africa/Asmera" },
+    { "Bamako", "Africa/Bamako" }, { "Bangui", "Africa/Bangui" },
+    { "Cairo", "Africa/Cairo" }, { "Cape Town", "Africa/Johannesburg" },
+    { "Conakry", "Africa/Conakry" }, { "Dakar", "Africa/Dakar" },
+    { "Dar es Salaam", "Africa/Dar_es_Salaam" },
+    { "Djibouti", "Africa/Djibouti" },
+    { "Douala", "Africa/Douala" }, { "Freetown", "Africa/Freetown" },
+    { "Harare", "Africa/Harare" }, { "Kampala", "Africa/Kampala" },
+    { "Khartoum", "Africa/Khartoum" }, { "Kinshasa", "Africa/Kinshasa" },
+    { "Lagos", "Africa/Lagos" }, { "Luanda", "Africa/Luanda" },
+    { "Lusaka", "Africa/Lusaka" }, { "Maputo", "Africa/Maputo" },
+    { "Mogadishu", "Africa/Mogadishu" }, { "Monrovia", "Africa/Monrovia" },
+    { "Nairobi", "Africa/Nairobi" }, { "Ndjamena", "Africa/Ndjamena" },
+    { "Nouakchott", "Africa/Nouakchott" },
+    { "Ouagadougou", "Africa/Ouagadougou" },
+    { "Rabat", "Africa/Casablanca" }, { "Tripoli", "Africa/Tripoli" },
+    { "Tunis", "Africa/Tunis" },
     /* Asia */
-    C("Abu Dhabi", 4, 0, NONE), C("Amman", 3, 0, NONE),
-    C("Anadyr", 12, 0, NONE), C("Ankara", 3, 0, NONE),
-    C("Antananarivo", 3, 0, NONE), C("Baghdad", 3, 0, NONE),
-    C("Bangkok", 7, 0, NONE), C("Beijing", 8, 0, NONE),
-    C("Beirut", 2, 0, EU), C("Canton", 8, 0, NONE),
-    C("Chennai (Madras)", 5, 30, NONE), C("Colombo", 5, 30, NONE),
-    C("Dhaka", 6, 0, NONE), C("Damascus", 3, 0, NONE),
-    C("Doha", 3, 0, NONE), C("Hanoi", 7, 0, NONE),
-    C("Hong Kong", 8, 0, NONE), C("Islamabad", 5, 0, NONE),
-    C("Jakarta", 7, 0, NONE), C("Jerusalem", 2, 0, EU),
-    C("Kabul", 4, 30, NONE), C("Katmandu", 5, 45, NONE),
-    C("Kolkata (Calcutta)", 5, 30, NONE), C("Krasnoyarsk", 7, 0, NONE),
-    C("Kuala Lumpur", 8, 0, NONE), C("Kuwait", 3, 0, NONE),
-    C("Magadan", 11, 0, NONE), C("Male", 5, 0, NONE),
-    C("Manama", 3, 0, NONE), C("Manila", 8, 0, NONE),
-    C("Mecca", 3, 0, NONE), C("Mumbai (Bombay)", 5, 30, NONE),
-    C("Muscat", 4, 0, NONE), C("New Delhi", 5, 30, NONE),
-    C("Novosibirsk", 7, 0, NONE), C("Omsk", 6, 0, NONE),
-    C("Osaka", 9, 0, NONE), C("Phnom Penh", 7, 0, NONE),
-    C("Port Louis", 4, 0, NONE), C("Pyongyang", 9, 0, NONE),
-    C("Rangoon", 6, 30, NONE), C("Riyadh", 3, 0, NONE),
-    C("Sanaa", 3, 0, NONE), C("Seoul", 9, 0, NONE),
-    C("Shanghai", 8, 0, NONE), C("Singapore", 8, 0, NONE),
-    C("Taipei", 8, 0, NONE), C("Tashkent", 5, 0, NONE),
-    C("Tehran", 3, 30, NONE), C("Thanh Pho Ho Chi Minh", 7, 0, NONE),
-    C("Tientsin", 8, 0, NONE), C("Tokyo", 9, 0, NONE),
-    C("Ulaanbaatar", 8, 0, NONE), C("Victoria", 4, 0, NONE),
-    C("Vladivostok", 10, 0, NONE), C("Yakutsk", 9, 0, NONE),
-    C("Yekaterinburg", 5, 0, NONE),
+    { "Abu Dhabi", "Asia/Dubai" }, { "Amman", "Asia/Amman" },
+    { "Anadyr", "Asia/Anadyr" }, { "Ankara", "Asia/Istanbul" },
+    { "Antananarivo", "Indian/Antananarivo" }, { "Baghdad", "Asia/Baghdad" },
+    { "Bangkok", "Asia/Bangkok" }, { "Beijing", "Asia/Shanghai" },
+    { "Beirut", "Asia/Beirut" }, { "Canton", "Asia/Shanghai" },
+    { "Chennai (Madras)", "Asia/Kolkata" }, { "Colombo", "Asia/Colombo" },
+    { "Dhaka", "Asia/Dhaka" }, { "Damascus", "Asia/Damascus" },
+    { "Doha", "Asia/Qatar" }, { "Hanoi", "Asia/Ho_Chi_Minh" },
+    { "Hong Kong", "Asia/Hong_Kong" }, { "Islamabad", "Asia/Karachi" },
+    { "Jakarta", "Asia/Jakarta" }, { "Jerusalem", "Asia/Jerusalem" },
+    { "Kabul", "Asia/Kabul" }, { "Katmandu", "Asia/Kathmandu" },
+    { "Kolkata (Calcutta)", "Asia/Kolkata" },
+    { "Krasnoyarsk", "Asia/Krasnoyarsk" },
+    { "Kuala Lumpur", "Asia/Kuala_Lumpur" }, { "Kuwait", "Asia/Kuwait" },
+    { "Magadan", "Asia/Magadan" }, { "Male", "Indian/Maldives" },
+    { "Manama", "Asia/Bahrain" }, { "Manila", "Asia/Manila" },
+    { "Mecca", "Asia/Riyadh" }, { "Mumbai (Bombay)", "Asia/Kolkata" },
+    { "Muscat", "Asia/Muscat" }, { "New Delhi", "Asia/Kolkata" },
+    { "Novosibirsk", "Asia/Novosibirsk" }, { "Omsk", "Asia/Omsk" },
+    { "Osaka", "Asia/Tokyo" }, { "Phnom Penh", "Asia/Phnom_Penh" },
+    { "Port Louis", "Indian/Mauritius" }, { "Pyongyang", "Asia/Pyongyang" },
+    { "Rangoon", "Asia/Yangon" }, { "Riyadh", "Asia/Riyadh" },
+    { "Sanaa", "Asia/Aden" }, { "Seoul", "Asia/Seoul" },
+    { "Shanghai", "Asia/Shanghai" }, { "Singapore", "Singapore" },
+    { "Taipei", "Asia/Taipei" }, { "Tashkent", "Asia/Tashkent" },
+    { "Tehran", "Asia/Tehran" },
+    { "Thanh Pho Ho Chi Minh", "Asia/Ho_Chi_Minh" },
+    { "Tientsin", "Asia/Shanghai" }, { "Tokyo", "Asia/Tokyo" },
+    { "Ulaanbaatar", "Asia/Ulaanbaatar" }, { "Victoria", "Indian/Mahe" },
+    { "Vladivostok", "Asia/Vladivostok" }, { "Yakutsk", "Asia/Yakutsk" },
+    { "Yekaterinburg", "Asia/Yekaterinburg" },
     /* Atlantic */
-    C("Grytviken", -2, 0, NONE), C("Ponta Delgada", -1, 0, EU),
-    C("Reykjav\xc3\xadk", 0, 0, NONE),
+    { "Grytviken", "Atlantic/South_Georgia" },
+    { "Ponta Delgada", "Atlantic/Azores" },
+    { "Reykjav\xc3\xadk", "Atlantic/Reykjavik" },
     /* Australia */
-    C("Adelaide", 9, 30, AU), C("Brisbane", 10, 0, NONE),
-    C("Canberra", 10, 0, AU), C("Darwin", 9, 30, NONE),
-    C("Hobart", 10, 0, AU), C("Melbourne", 10, 0, AU),
-    C("Perth", 8, 0, NONE), C("Sydney", 10, 0, AU),
+    { "Adelaide", "Australia/Adelaide" }, { "Brisbane", "Australia/Brisbane" },
+    { "Canberra", "Australia/Sydney" }, { "Darwin", "Australia/Darwin" },
+    { "Hobart", "Australia/Hobart" }, { "Melbourne", "Australia/Melbourne" },
+    { "Perth", "Australia/Perth" }, { "Sydney", "Australia/Sydney" },
     /* Europe */
-    C("Amsterdam", 1, 0, EU), C("Athens", 2, 0, EU),
-    C("Belgrade", 1, 0, EU), C("Berlin", 1, 0, EU),
-    C("Brussels", 1, 0, EU), C("Bucharest", 2, 0, EU),
-    C("Budapest", 1, 0, EU), C("Cardiff", 0, 0, EU),
-    C("Copenhagen", 1, 0, EU), C("Cork", 0, 0, EU),
-    C("Dublin", 0, 0, EU), C("Edinburgh", 0, 0, EU),
-    C("Geneva", 1, 0, EU), C("Helsinki", 2, 0, EU),
-    C("Istanbul", 3, 0, NONE), C("Kiev", 2, 0, EU),
-    C("Lisbon", 0, 0, EU), C("Ljubljana", 1, 0, EU),
-    C("London", 0, 0, EU), C("Madrid", 1, 0, EU),
-    C("Moscow", 3, 0, NONE), C("Munich", 1, 0, EU),
-    C("Oslo", 1, 0, EU), C("Paris", 1, 0, EU),
-    C("Prague", 1, 0, EU), C("Roma (Rome)", 1, 0, EU),
-    C("Sofia", 2, 0, EU), C("St. Petersburg", 3, 0, NONE),
-    C("Stockholm", 1, 0, EU), C("Vienna", 1, 0, EU),
-    C("Volgograd", 3, 0, NONE), C("Warsaw", 1, 0, EU),
-    C("Zagreb", 1, 0, EU), C("Zurich", 1, 0, EU),
+    { "Amsterdam", "Europe/Amsterdam" }, { "Athens", "Europe/Athens" },
+    { "Belgrade", "Europe/Belgrade" }, { "Berlin", "Europe/Berlin" },
+    { "Brussels", "Europe/Brussels" }, { "Bucharest", "Europe/Bucharest" },
+    { "Budapest", "Europe/Budapest" }, { "Cardiff", "Europe/London" },
+    { "Copenhagen", "Europe/Copenhagen" }, { "Cork", "Europe/Dublin" },
+    { "Dublin", "Europe/Dublin" }, { "Edinburgh", "Europe/London" },
+    { "Geneva", "Europe/Zurich" }, { "Helsinki", "Europe/Helsinki" },
+    { "Istanbul", "Asia/Istanbul" }, { "Kiev", "Europe/Kyiv" },
+    { "Lisbon", "Europe/Lisbon" }, { "Ljubljana", "Europe/Ljubljana" },
+    { "London", "Europe/London" }, { "Madrid", "Europe/Madrid" },
+    { "Moscow", "Europe/Moscow" }, { "Munich", "Europe/Berlin" },
+    { "Oslo", "Europe/Oslo" }, { "Paris", "Europe/Paris" },
+    { "Prague", "Europe/Prague" }, { "Roma (Rome)", "Europe/Rome" },
+    { "Sofia", "Europe/Sofia" }, { "St. Petersburg", "Europe/Moscow" },
+    { "Stockholm", "Europe/Stockholm" }, { "Vienna", "Europe/Vienna" },
+    { "Volgograd", "Europe/Volgograd" }, { "Warsaw", "Europe/Warsaw" },
+    { "Zagreb", "Europe/Zagreb" }, { "Zurich", "Europe/Zurich" },
     /* North America */
-    C("Adak", -10, 0, US), C("Anchorage", -9, 0, US),
-    C("Atlanta", -5, 0, US), C("Austin", -6, 0, US),
-    C("Boston", -5, 0, US), C("Calgary", -7, 0, US),
-    C("California", -8, 0, US), C("Chicago", -6, 0, US),
-    C("Columbus", -5, 0, US), C("Cupertino", -8, 0, US),
-    C("Dallas", -6, 0, US), C("Des Moines", -6, 0, US),
-    C("Denver", -7, 0, US), C("Detroit", -5, 0, US),
-    C("Halifax", -4, 0, US), C("Indianapolis", -5, 0, US),
-    C("Knoxville", -5, 0, US), C("Los Angeles", -8, 0, US),
-    C("Manchester", -5, 0, US), C("Memphis", -6, 0, US),
-    C("Miami", -5, 0, US), C("Minneapolis", -6, 0, US),
-    C("Montr\xc3\xa9" "al", -5, 0, US), C("New York", -5, 0, US),
-    C("Nuuk", -2, 0, EU), C("Ottawa", -5, 0, US),
-    C("Philadelphia", -5, 0, US), C("Phoenix", -7, 0, NONE),
-    C("Portland", -8, 0, US), C("Regina", -6, 0, NONE),
-    C("Salt Lake City", -7, 0, US), C("San Diego", -8, 0, US),
-    C("San Francisco", -8, 0, US), C("Seattle", -8, 0, US),
-    C("St. John's", -3, -30, US), C("St. Louis", -6, 0, US),
-    C("Toronto", -5, 0, US), C("Vancouver", -8, 0, US),
-    C("Washington, D.C.", -5, 0, US), C("Winnipeg", -6, 0, US),
+    { "Adak", "America/Adak" }, { "Anchorage", "America/Anchorage" },
+    { "Atlanta", "America/New_York" }, { "Austin", "America/Chicago" },
+    { "Boston", "America/New_York" }, { "Calgary", "America/Edmonton" },
+    { "California", "America/Los_Angeles" }, { "Chicago", "America/Chicago" },
+    { "Columbus", "America/New_York" }, { "Cupertino", "America/Los_Angeles" },
+    { "Dallas", "America/Chicago" }, { "Des Moines", "America/Chicago" },
+    { "Denver", "America/Denver" }, { "Detroit", "America/Detroit" },
+    { "Halifax", "America/Halifax" },
+    { "Indianapolis", "America/Indiana/Indianapolis" },
+    { "Knoxville", "America/New_York" },
+    { "Los Angeles", "America/Los_Angeles" },
+    { "Manchester", "America/New_York" }, { "Memphis", "America/Chicago" },
+    { "Miami", "America/New_York" }, { "Minneapolis", "America/Chicago" },
+    { "Montr\xc3\xa9" "al", "America/Toronto" },
+    { "New York", "America/New_York" },
+    { "Nuuk", "America/Nuuk" }, { "Ottawa", "America/Toronto" },
+    { "Philadelphia", "America/New_York" }, { "Phoenix", "America/Phoenix" },
+    { "Portland", "America/Los_Angeles" }, { "Regina", "America/Regina" },
+    { "Salt Lake City", "America/Denver" },
+    { "San Diego", "America/Los_Angeles" },
+    { "San Francisco", "America/Los_Angeles" },
+    { "Seattle", "America/Los_Angeles" },
+    { "St. John's", "America/St_Johns" }, { "St. Louis", "America/Chicago" },
+    { "Toronto", "America/Toronto" }, { "Vancouver", "America/Vancouver" },
+    { "Washington, D.C.", "America/New_York" },
+    { "Winnipeg", "America/Winnipeg" },
     /* Pacific */
-    C("Guam", 10, 0, NONE), C("Honolulu", -10, 0, NONE),
-    C("Noum\xc3\xa9" "a", 11, 0, NONE), C("Pago Pago", -11, 0, NONE),
-    C("Wellington", 12, 0, NZ),
+    { "Guam", "Pacific/Guam" }, { "Honolulu", "Pacific/Honolulu" },
+    { "Noum\xc3\xa9" "a", "Pacific/Noumea" },
+    { "Pago Pago", "Pacific/Pago_Pago" },
+    { "Wellington", "Pacific/Auckland" },
     /* South America */
-    C("Asunci\xc3\xb3n", -3, 0, NONE), C("Bogot\xc3\xa1", -5, 0, NONE),
-    C("Bras\xc3\xadlia", -3, 0, NONE), C("Buenos Aires", -3, 0, NONE),
-    C("Caracas", -4, 0, NONE), C("Cayenne", -3, 0, NONE),
-    C("Georgetown", -4, 0, NONE), C("Guatemala", -6, 0, NONE),
-    C("Havana", -5, 0, US), C("La Paz", -4, 0, NONE),
-    C("Lima", -5, 0, NONE), C("Managua", -6, 0, NONE),
-    C("Mexico City", -6, 0, NONE), C("Montevideo", -3, 0, NONE),
-    C("Panama", -5, 0, NONE), C("Paramaribo", -3, 0, NONE),
-    C("Port-au-Prince", -5, 0, US), C("Quito", -5, 0, NONE),
-    C("Recife", -3, 0, NONE), C("Rio de Janeiro", -3, 0, NONE),
-    C("San Jos\xc3\xa9", -6, 0, NONE), C("San Juan", -4, 0, NONE),
-    C("San Salvador", -6, 0, NONE), C("Santiago", -4, 0, CL),
-    C("Santo Domingo", -4, 0, NONE), C("S\xc3\xa3o Paulo", -3, 0, NONE),
-    C("Tegucigalpa", -6, 0, NONE),
+    { "Asunci\xc3\xb3n", "America/Asuncion" },
+    { "Bogot\xc3\xa1", "America/Bogota" },
+    { "Bras\xc3\xadlia", "America/Sao_Paulo" },
+    { "Buenos Aires", "America/Argentina/Buenos_Aires" },
+    { "Caracas", "America/Caracas" }, { "Cayenne", "America/Cayenne" },
+    { "Georgetown", "America/Guyana" }, { "Guatemala", "America/Guatemala" },
+    { "Havana", "America/Havana" }, { "La Paz", "America/La_Paz" },
+    { "Lima", "America/Lima" }, { "Managua", "America/Managua" },
+    { "Mexico City", "America/Mexico_City" },
+    { "Montevideo", "America/Montevideo" },
+    { "Panama", "America/Panama" }, { "Paramaribo", "America/Paramaribo" },
+    { "Port-au-Prince", "America/Port-au-Prince" },
+    { "Quito", "America/Guayaquil" },
+    { "Recife", "America/Recife" }, { "Rio de Janeiro", "America/Sao_Paulo" },
+    { "San Jos\xc3\xa9", "America/Costa_Rica" },
+    { "San Juan", "America/Puerto_Rico" },
+    { "San Salvador", "America/El_Salvador" },
+    { "Santiago", "America/Santiago" },
+    { "Santo Domingo", "America/Santo_Domingo" },
+    { "S\xc3\xa3o Paulo", "America/Sao_Paulo" },
+    { "Tegucigalpa", "America/Tegucigalpa" },
 };
-#undef C
+
 
 #define REGIONS 8
 /* Each region's first city, and the end of the table. */
@@ -194,107 +207,27 @@ static int city_region(int city)
     return r;
 }
 
-/* ---- the time arithmetic, in days and minutes since 1970 ---- */
-
-static long days_from_civil(int y, int m, int d)
-{
-    y -= m <= 2;
-    long era = (y >= 0 ? y : y - 399) / 400;
-    long yoe = y - era * 400;
-    long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-    long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + doe - 719468;
-}
-
-static int year_of_day(long z)
-{
-    z += 719468;
-    long era = (z >= 0 ? z : z - 146096) / 146097;
-    long doe = z - era * 146097;
-    long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    long mp = (5 * doy + 2) / 153;
-    return (int)(yoe + era * 400 + (mp >= 10));
-}
-
-/* The day of the `n`th `wday` (0 Sunday) of the month, or the last for 0. */
-static long nth_weekday(int y, int m, int wday, int n)
-{
-    if (n)
-    {
-        long first = days_from_civil(y, m, 1);
-        long wd = ((first + 4) % 7 + 7) % 7;
-        return first + (wday - wd + 7) % 7 + 7 * (n - 1);
-    }
-    long last = days_from_civil(y + (m == 12), m % 12 + 1, 1) - 1;
-    long wd = ((last + 4) % 7 + 7) % 7;
-    return last - (wd - wday + 7) % 7;
-}
-
-/* Whether daylight saving is in force on local standard day `day`. */
-static bool dst_on(int rule, long day)
-{
-    int y = year_of_day(day);
-    switch (rule)
-    {
-        case DST_US:
-            return day >= nth_weekday(y, 3, 0, 2) &&
-                   day < nth_weekday(y, 11, 0, 1);
-        case DST_EU:
-            return day >= nth_weekday(y, 3, 0, 0) &&
-                   day < nth_weekday(y, 10, 0, 0);
-        case DST_EG:
-            return day >= nth_weekday(y, 4, 5, 0) &&
-                   day <= nth_weekday(y, 10, 4, 0);
-        case DST_AU:
-            return day < nth_weekday(y, 4, 0, 1) ||
-                   day >= nth_weekday(y, 10, 0, 1);
-        case DST_NZ:
-            return day < nth_weekday(y, 4, 0, 1) ||
-                   day >= nth_weekday(y, 9, 0, 0);
-        case DST_CL:
-            return day < nth_weekday(y, 4, 0, 1) ||
-                   day >= nth_weekday(y, 9, 0, 1);
-    }
-    return false;
-}
-
-/* `city`'s offset from UTC at UTC minute `utc`. */
-static long city_offset(int city, long utc)
-{
-    const struct city *c = &cities[city];
-    long std = utc + c->offset;
-    long day = (std >= 0 ? std : std - 1439) / 1440;
-    return c->offset + (dst_on(c->rule, day) ? 60 : 0);
-}
-
 struct clock_time {
     int hour, minute;
     int day;                    /* -1 yesterday, 0 today, 1 tomorrow */
 };
 
-/* The player's time as UTC minutes, the player being in `home`, and its
- * local day. */
-static long player_utc(int home, long *local_day)
+static struct clock_time city_time(int city)
 {
-    struct tm *tm = get_time();
-    long day = days_from_civil(tm->tm_year + 1900, tm->tm_mon + 1,
-                               tm->tm_mday);
-    long local = day * 1440 + tm->tm_hour * 60 + tm->tm_min;
-    const struct city *c = &cities[home];
-    *local_day = day;
-    return local - c->offset - (dst_on(c->rule, day) ? 60 : 0);
-}
-
-static struct clock_time city_time(int city, int home)
-{
-    long today;
-    long local = player_utc(home, &today);
-    local += city_offset(city, local);
-    long day = (local >= 0 ? local : local - 1439) / 1440;
-    long m = local - day * 1440;
-    return (struct clock_time){ (int)(m / 60), (int)(m % 60),
-                                (int)MAX(-1, MIN(1, day - today)) };
+    time_t utc = get_time_utc();
+    if (utc < 0)
+        return (struct clock_time){0};
+    struct tm local;
+    clock_localtime(utc, &local);
+    long today = clock_civil_seconds(&local) / 86400;
+    struct time_zone zone;
+    int dst;
+    if (time_zone_lookup(cities[city].zone, &zone))
+        utc += time_zone_offset(&zone, utc, &dst);
+    long day = utc / 86400;
+    long minutes = utc / 60 % 1440;
+    return (struct clock_time){ minutes / 60, minutes % 60,
+                                MAX(-1, MIN(1, day - today)) };
 }
 
 static void format_time(char *buf, size_t size, int hour, int minute)
@@ -564,7 +497,7 @@ static const char *day_name(int day)
 static void put_row(struct stock_canvas *c, int i, int top)
 {
     bool selected = i == screen.selected;
-    struct clock_time t = city_time(clocks[i], clocks[0]);
+    struct clock_time t = city_time(clocks[i]);
     bool night = t.hour < 6 || t.hour >= 18;
     if (selected)
         put_selected_bar(c, top);
@@ -740,7 +673,7 @@ static enum list_row_kind region_get_kind(int item, void *data)
 static enum list_pane_kind region_get_pane(int item, void *data, int *art)
 {
     (void)item; (void)data; (void)art;
-    show_pane(city_time(0, clocks[0]), "");
+    show_pane(city_time(0), "");
     return LIST_PANE_PICTURE;
 }
 
@@ -754,8 +687,7 @@ static const char *city_get_name(int item, void *data, char *buf,
 static enum list_pane_kind city_get_pane(int item, void *data, int *art)
 {
     (void)data; (void)art;
-    struct clock_time t = city_time(region_first[list_region] + item,
-                                    clocks[0]);
+    struct clock_time t = city_time(region_first[list_region] + item);
     char caption[16];
     format_time(caption, sizeof(caption), t.hour, t.minute);
     show_pane(t, caption);

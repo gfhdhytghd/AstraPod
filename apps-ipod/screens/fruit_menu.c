@@ -532,10 +532,17 @@ MENUITEM_SETTING_W_LABEL(sort_by_row, &global_settings.contacts_sort,
 
 ROW(date_row, LANG_FRUIT_DATE, set_date_time, NULL);
 ROW(time_row, LANG_FRUIT_TIME, set_date_time, NULL);
-ROW(time_zone_row, LANG_FRUIT_TIME_ZONE, not_available, NULL);
+MENUITEM_SETTING(time_zone_row, &global_settings.time_zone, NULL);
+#ifdef HAVE_USB_PODLINK
+MENUITEM_SETTING(follow_zone_row, &global_settings.follow_computer_zone, NULL);
+#endif
 
 static const struct menu_item_ex *const date_time_rows[] = {
-    &date_row, &time_row, &time_zone_row, &clock_24_row, &time_in_title_row,
+    &date_row, &time_row, &time_zone_row,
+#ifdef HAVE_USB_PODLINK
+    &follow_zone_row,
+#endif
+    &clock_24_row, &time_in_title_row,
 };
 
 MENU(date_time_menu, LANG_FRUIT_DATE_TIME, NULL, date_time_rows);

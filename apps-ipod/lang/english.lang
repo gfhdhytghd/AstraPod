@@ -28113,6 +28113,21 @@
 </phrase>
 
 <phrase>
+  id: LANG_FOLLOW_COMPUTER_ZONE
+  desc: adopt the connected computer's time zone when syncing the clock
+  user: core
+  <source>
+    *: "Follow computer time zone"
+  </source>
+  <dest>
+    *: "Follow computer time zone"
+  </dest>
+  <voice>
+    *: "Follow computer time zone"
+  </voice>
+</phrase>
+
+<phrase>
   id: LANG_LYRICS_LEAD
   desc: milliseconds added to the playback time used by the lyrics viewer
   user: core

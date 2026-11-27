@@ -1567,7 +1567,11 @@ static void fat_open_internal(IF_MV(int volume,) long startcluster,
 #if CONFIG_RTC
 static void fat_time(uint16_t *date, uint16_t *time, int16_t *tenth)
 {
-    struct tm *tm = get_time();
+    /* FAT records the local calendar fields, including after UTC RTC setup. */
+    struct tm local;
+    if (!clock_get_local(&local))
+        local = *get_time();
+    const struct tm *tm = &local;
 
     if (date)
     {

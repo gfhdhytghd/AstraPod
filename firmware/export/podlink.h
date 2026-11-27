@@ -64,7 +64,7 @@ struct podlink_message
  * Background callback runs on the resident thread and must not call this API. */
 /* Resident worker retains only the newest time record; UI consumes it.
  * No RTC access on the transport thread. Disconnect invalidates the mailbox. */
-#define PODLINK_TIME_RECORD 64
+#define PODLINK_TIME_RECORD 224
 bool podlink_take_time(char *record, unsigned long *received_tick);
 void podlink_init(void);
 void podlink_shutdown(void);

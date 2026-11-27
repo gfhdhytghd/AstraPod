@@ -469,3 +469,15 @@ Two upstream files reach the app layer by bare include name, through `api/` stub
 | `usbstack/iap/libiap/` transport | Upstream's USB transport; RockPod's `usb_iap_hid.c` is absent. Only the changes in the rows above differ. |
 | RockPod's isochronous plumbing in `drivers/usb-designware.c` | Serves its source mode. |
 | `target/arm/s5l8702/pcm-s5l8702.c` | RockPod's I2S clock gating is **deferred**. Upstream's `pcm_sink` calls nest, so a naive port gates the clock on every buffer. |
+
+
+## UTC clock and PodLink time zones
+
+| Firmware file | Change |
+|---|---|
+| `SOURCES` | Build the UTC clock module. |
+| `common/clock_utc.c`, `common/clock_utc.h` (new) | Convert between the RTC's UTC instant and the application zone. Keep simulator clock writes local to its process. |
+| `common/timefuncs.c`, `include/timefuncs.h` | Register the UTC clock policy and keep local calendar fields available to existing callers. |
+| `common/fat.c` | Write local FAT calendar fields from a caller-owned buffer. |
+| `export/podlink.h`, `usbstack/podlink-rust/src/ffi.rs`, `usbstack/podlink-rust/src/service.rs` | Reply to `tz\t?` with `tz\t1` and extend the RTC inbox to 224 bytes. |
+| `usbstack/podlink-rust/src/tests.rs`, `usbstack/podlink-rust/AUDIT.md` | Verify and describe the mailbox size and lifetime. |

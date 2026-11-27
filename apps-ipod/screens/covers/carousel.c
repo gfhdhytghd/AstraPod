@@ -7419,7 +7419,7 @@ static void paint_return_landing(const struct ui_rect *clip)
     core_put_data_pinned((void *)src);
 }
 
-/* The WPS borrows the same texture as the last turn frame. */
+/* The WPS borrows the last turn frame's cover and reflection. */
 static void paint_playback_landing(const struct ui_rect *clip)
 {
     const struct playback_texture *cover = playback_cover(playback_scene.album);
@@ -7428,6 +7428,13 @@ static void paint_playback_landing(const struct ui_rect *clip)
         const pix_t *src = core_get_data_pinned(cover->handle);
         stock_draw_clipped_quad(LCD_BUF, playback_scene.playing, src,
                                 cover->width, cover->height, cover->height, clip);
+        if (cover->reflected)
+        {
+            int rows = reflection_rows(cover->width);
+            stock_draw_part(LCD_BUF, playback_scene.playing,
+                            src + cover->width * cover->height,
+                            cover->width, rows, rows, clip, true);
+        }
         core_put_data_pinned((void *)src);
     }
 }
@@ -7539,9 +7546,9 @@ static void chrome_restore_bar(void)
     core_put_data_pinned((void *)bar);
 }
 
-/* Now Playing's chrome over the turn's frame, `weight` 32nds of the way in
- * from the status bar the turn left. */
-static void chrome_fade_in(unsigned weight)
+/* Fade the controls over the turn, then blend the approaching cover and
+ * reflection into the retained page's projection. */
+static void chrome_fade_in(unsigned weight, unsigned cover_weight)
 {
     chrome_restore_bar();
     if (!weight)
@@ -7552,6 +7559,14 @@ static void chrome_fade_in(unsigned weight)
     for (int i = 0; i < CHROME_FRAME; i++)
         if (LCD_BUF[i] != under[i])
             LCD_BUF[i] = chrome_blend(LCD_BUF[i], under[i], weight);
+    if (cover_weight)
+    {
+        memcpy(under, LCD_BUF, CHROME_FRAME * sizeof(pix_t));
+        native_wps_paint_prepared();
+        for (int i = 0; i < CHROME_FRAME; i++)
+            if (LCD_BUF[i] != under[i])
+                LCD_BUF[i] = chrome_blend(LCD_BUF[i], under[i], cover_weight);
+    }
     core_put_data_pinned(under);
 }
 
@@ -7908,6 +7923,10 @@ void carousel_wps_present(struct wps_state *state)
         playback_scene.playing = playback_target(measured);
         reason = measured.width ? "page-slot" : "theme-no-art-slot";
     }
+    bool finish_stock_cover = stock_look() && playback_scene.from_panel &&
+                              native_wps_art_turned() && !cider_active();
+    const struct playback_texture *cover = playback_cover(playback_scene.album);
+    bool art_prepared = false;
     unsigned trace = ui_perf_begin(name);
     ui_perf_ready(trace, playback_scene.action_us);
     /* The playlist and the first WPS paint can both touch cold storage. The
@@ -7929,9 +7948,18 @@ void carousel_wps_present(struct wps_state *state)
         bool fading = fade && native_wps_active();
         unsigned weight = fading ? chrome_weight(now, fade_start, fade_us) : 0;
         landed &= !fading || weight == 32;
+        /* The last quarter blends between the two cover projections. */
+        unsigned cover_weight = finish_stock_cover && weight > 24 ?
+                                (weight - 24) * 4 : 0;
+        if (finish_stock_cover && !art_prepared && (cover_weight || landed))
+        {
+            native_wps_prepare_turn_art(cover ? cover->handle : 0,
+                                        cover ? cover->width : 0);
+            art_prepared = true;
+        }
         if (fading && landed)
         {
-            if (playback_cover(playback_scene.album))
+            if (cover && !finish_stock_cover)
                 native_wps_set_landing(paint_playback_landing);
             native_wps_paint_prepared();
         }
@@ -7940,7 +7968,7 @@ void carousel_wps_present(struct wps_state *state)
             paint_playback_row(&playback_scene.walls,
                                stock_flip_pose(&flip, now), now);
             if (fading)
-                chrome_fade_in(weight);
+                chrome_fade_in(weight, cover_weight);
         }
         uint32_t submitting = trace ? USEC_TIMER : 0;
         lcd_update();

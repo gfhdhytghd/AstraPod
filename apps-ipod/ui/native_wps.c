@@ -145,6 +145,7 @@ struct native_wps {
     bool current_art_only, cover_backdrop, wait_for_blur, labels_frozen;
     bool classic, chrome_ready;
     void (*landing)(const struct ui_rect *clip);
+    int turn_cover, turn_cover_side;
     unsigned reveal_base;
     char cover_remote_key[65];
 };
@@ -492,12 +493,14 @@ struct art_source {
     const fb_data *pixels;
     int stride, side;
     fb_data paper, ink;
+    bool column_major;
 };
 
 static fb_data art_pixel(const struct art_source *src, int u, int v)
 {
     if (src->pixels)
-        return src->pixels[v * src->stride + u];
+        return src->column_major ? src->pixels[u * src->stride + v] :
+                                   src->pixels[v * src->stride + u];
     static const struct { int8_t x, y; } heads[] = { { 37, 66 }, { 58, 60 } };
     for (size_t i = 0; i < ARRAYLEN(heads); i++)
     {
@@ -572,6 +575,7 @@ static bool paint_turned(const struct ui_view_frame *frame, fb_data under,
                                   UI_COLOR_HANDOFF_COVER_PLACEHOLDER, NULL);
     src.paper = LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
     struct bitmap *art = NULL;
+    const fb_data *thumbnail = NULL;
     bool pinned = wps->art_handle >= 0 && wps_art_pin(wps->art_handle, true);
     if (pinned && wps_art_bitmap(wps->art_handle, &art) && art->data &&
         art->width > 0 && art->height > 0)
@@ -582,6 +586,13 @@ static bool paint_turned(const struct ui_view_frame *frame, fb_data under,
         src.pixels = (const fb_data *)art->data +
             (art->height - src.side) / 2 * art->width +
             (art->width - src.side) / 2;
+    }
+    else if (wps->turn_cover > 0)
+    {
+        thumbnail = core_get_data_pinned(wps->turn_cover);
+        src.pixels = thumbnail;
+        src.stride = src.side = wps->turn_cover_side;
+        src.column_major = true;
     }
     else if (wps->landing)
     {
@@ -630,6 +641,8 @@ static bool paint_turned(const struct ui_view_frame *frame, fb_data under,
     }
     if (pinned)
         wps_art_pin(wps->art_handle, false);
+    if (thumbnail)
+        core_put_data_pinned((void *)thumbnail);
     lcd_set_viewport(previous);
     return src.pixels != NULL;
 }
@@ -1267,7 +1280,9 @@ static void refresh_art(void)
     unsigned palette_generation = album_palette_generation();
     unsigned art_generation = album_art_generation();
     int handle = album_art_current();
-    if (wps->current_art_only || (wps->landing && has_art_slot()))
+    if (wps->turn_cover > 0)
+        handle = -1;
+    else if (wps->current_art_only || (wps->landing && has_art_slot()))
     {
         /* An ordinary WPS retains the last cover during a track change.
          * A flip belongs to the newly selected track, including missing art. */
@@ -1321,13 +1336,26 @@ static void refresh_art(void)
 /* Picking up a texture must not change the moving controls or their ink. */
 void native_wps_pick_up_art(void)
 {
-    if (!active || rock_ui_raw())
+    if (!active || rock_ui_raw() || wps->turn_cover > 0)
         return;
     int art = handoff_art();
     if (art >= 0)
     {
         wps->art_handle = art;
         wps->art_generation = album_art_generation();
+    }
+}
+
+void native_wps_prepare_turn_art(int thumbnail, int side)
+{
+    native_wps_pick_up_art();
+    if (thumbnail > 0 && !native_wps_art_side())
+    {
+        /* Borrow the turn's texture for this track if its bitmap is late.
+         * One source supplies both the cover and its reflection. */
+        wps->turn_cover = thumbnail;
+        wps->turn_cover_side = side;
+        wps->art_handle = -1;
     }
 }
 
@@ -1596,7 +1624,8 @@ void native_wps_render(const struct wps_state *state, bool submit)
     struct cider_status source = {0};
     if (remote)
         cider_status(&source);
-    if (wps->cover_backdrop || wps->wait_for_blur || wps->landing)
+    if (wps->cover_backdrop || wps->wait_for_blur || wps->landing ||
+        wps->turn_cover > 0)
     {
         bool same = remote == wps->progress.remote;
         if (same && state->id3 && *state->id3->path && *wps->progress.path)
@@ -1613,6 +1642,11 @@ void native_wps_render(const struct wps_state *state, bool submit)
         if (!same)
         {
             wps->landing = NULL;
+            if (wps->turn_cover > 0)
+            {
+                wps->turn_cover = 0;
+                ui_page_invalidate(&wps->page, view_bounds(WPS_COVER));
+            }
             wps->current_art_only = wps->cover_backdrop = wps->wait_for_blur = false;
             wps->background = -1;
             wps->blur_generation = (unsigned)-1;

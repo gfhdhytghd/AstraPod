@@ -1,6 +1,7 @@
 /* PodBox USB consent popup. GNU General Public License, version 2+.
  * Uses the shared popup frame over the current screen; playback stays live. */
 #include "config.h"
+#include "ui/native_theme_runtime.h"
 #include "usb.h"
 #ifdef HAVE_USB_CONFIRM
 #include "widgets/usb_confirm.h"
@@ -32,6 +33,12 @@ static bool remote_choice(void)
            (audio_status() & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE)) == AUDIO_STATUS_PLAY;
 }
 
+static const char *remote_hint(void)
+{
+    return ui_wheel_navigation() ? "Hold SELECT   Remote control" :
+                                   (const char *)str(LANG_HANDOFF_USB);
+}
+
 static void confirm_measure(struct dialog *d, struct screen *s,
                             struct viewport *box, void *data)
 {
@@ -49,7 +56,7 @@ static void confirm_measure(struct dialog *d, struct screen *s,
     if (remote)
     {
         int w;
-        s->getstringsize(str(LANG_HANDOFF_USB), &w, NULL);
+        s->getstringsize(remote_hint(), &w, NULL);
         width = MAX(width, w);
     }
     box->width = MIN(width + in.left + in.right, s->lcdwidth - 2 * d->style.edge_margin);
@@ -69,7 +76,7 @@ static void confirm_draw(struct dialog *d, struct screen *s,
     for (unsigned i = 0; i < ARRAYLEN(lines); ++i)
         s->putsxy(0, i * s->getcharheight(), lines[i]);
     if (remote_choice())
-        s->putsxy(0, ARRAYLEN(lines) * s->getcharheight(), str(LANG_HANDOFF_USB));
+        s->putsxy(0, ARRAYLEN(lines) * s->getcharheight(), remote_hint());
 }
 
 
@@ -115,6 +122,15 @@ static int confirm_action(struct dialog *d, int action, void *data)
 static const struct button_mapping *confirm_keymap(int context)
 {
     (void)context;
+    static const struct button_mapping wheel_keys[] = {
+        { ACTION_STD_OK, BUTTON_SELECT | BUTTON_REL, BUTTON_SELECT },
+        { ACTION_STD_NEXT, BUTTON_SELECT | BUTTON_REPEAT, BUTTON_SELECT },
+        { ACTION_STD_CANCEL, BUTTON_MENU, BUTTON_NONE },
+        LAST_ITEM_IN_LIST
+    };
+    if (!(context & CONTEXT_REMOTE) && ui_wheel_navigation())
+        return wheel_keys;
+
     static const struct button_mapping keys[] = {
         { ACTION_STD_OK, BUTTON_SELECT, BUTTON_NONE },
         { ACTION_STD_CANCEL, BUTTON_MENU, BUTTON_NONE },

@@ -190,7 +190,10 @@ of the body, and a one-pixel bottom line. Rows between are blended evenly.
 | `quick_screen` | `tiles`, `hud` | The quick screen that holding Menu opens is a pane of dark glass over the dimmed screen instead of tiles on a solid background. Each setting sits in an etched well: an on/off setting as a switch, a range of numbers as a slider, and any other as a button showing its value. The switch and slider fill with the `selection` gradient. The pane fades in over 12 f while it grows from 88% of its size, and fades out over 9 f while it shrinks to 94%; `motion.sheet_in` and `motion.sheet_out` scale both as they scale the sheet. |
 
 Classic sets the second keyword of every style except `list_scroll` and
-`menu_tree`. Fruit Company is Classic with `style.menu_tree=stock`. To
+`menu_tree`. Fruit Company is Classic with `style.menu_tree=stock`. In a stock menu
+tree, Previous, Next and Play/Pause control playback. Use the wheel to
+move, Select to act, and Menu to go back. Games and plugins own their
+controls. To
 start a custom theme from Classic, copy its values from the table below.
 
 ### The Classic theme

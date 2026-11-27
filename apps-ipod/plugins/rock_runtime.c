@@ -30,6 +30,7 @@
 #include "widgets/folder_select.h"
 #include "widgets/splash.h"
 #include "system/core_map.h"
+#include "ui/native_theme_runtime.h"
 
 #ifdef ROCK_COMPAT_GENERATED
 #include "rock_compat_sync.h"
@@ -486,8 +487,13 @@ static long rock_button_get_w_tmo(int timeout)
 
 static int rock_get_action(int context, int timeout)
 {
-    return usb_taken ? SYS_USB_CONNECTED :
-                       rock_iram_button_event(get_action(context, timeout));
+    if (usb_taken)
+        return SYS_USB_CONNECTED;
+    bool video = context == CONTEXT_VIDEO_PLAYBACK;
+    int action = get_action(video ? CONTEXT_WPS : context, timeout);
+    if (video && action == ACTION_WPS_BROWSE && !ui_wheel_navigation())
+        return ACTION_NONE;
+    return rock_iram_button_event(action);
 }
 
 static int rock_get_custom_action(int context, int timeout,

@@ -12,6 +12,7 @@
  ****************************************************************************/
 #include <string.h>
 #include "config.h"
+#include "ui/native_theme_runtime.h"
 #include "kernel.h"
 #include "system.h"
 #include "file.h"
@@ -527,8 +528,10 @@ static enum sl_result sl_choice(char code[SL_DIGITS], bool *locked)
             return SL_USB;
         if (action == ACTION_STD_CANCEL)
             return SL_MENU;
-        if (action == ACTION_STD_NEXT || action == ACTION_STD_PREV)
-            sl.button = action == ACTION_STD_NEXT;
+        if (action == ACTION_STD_NEXT || action == ACTION_STD_PREV ||
+            (ui_wheel_navigation() && (action == ACTION_SETTINGS_INC ||
+                                      action == ACTION_SETTINGS_DEC)))
+            sl.button = action == ACTION_STD_NEXT || action == ACTION_SETTINGS_INC;
         else if (action == ACTION_STD_OK && sl.button == 0)
         {
             sl_locked(code);

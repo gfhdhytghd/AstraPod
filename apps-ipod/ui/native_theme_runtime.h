@@ -30,4 +30,10 @@ void ui_theme_apply_settings(void);
 bool ui_theme_set(const char *name, bool fallback);
 int ui_theme_choose(void);
 
+/* The stock menu tree uses the click wheel for navigation. */
+static inline bool ui_wheel_navigation(void)
+{
+    return ui_theme_style(UI_STYLE_MENU_TREE) == UI_MENU_TREE_STOCK;
+}
+
 #endif

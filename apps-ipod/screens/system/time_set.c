@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include "config.h"
+#include "ui/native_theme_runtime.h"
 #include "lang.h"
 #include "timefuncs.h"
 #include "font.h"
@@ -344,6 +345,34 @@ static int ts_on_action(struct dialog *d, int action, void *data)
     struct ts_edit *s = data;
     unsigned min, max;
     int *valptr;
+
+    if (ui_wheel_navigation())
+    {
+        if (action == ACTION_STD_OK && s->sel <= s->last_field)
+        {
+            s->sel = s->sel == s->last_field ? TS_CANCEL(s) + 1 :
+                                             s->sel + 1;
+            ts_say(s);
+            return DIALOG_CONTINUE;
+        }
+        if (action == ACTION_STD_CONTEXT)
+            action = ACTION_STD_OK;
+        if (action == ACTION_STD_PREV || action == ACTION_STD_NEXT ||
+            action == ACTION_STD_PREVREPEAT || action == ACTION_STD_NEXTREPEAT)
+        {
+            int delta = action == ACTION_STD_NEXT ||
+                        action == ACTION_STD_NEXTREPEAT ? 1 : -1;
+            if (s->sel <= s->last_field)
+                action = delta > 0 ? ACTION_SETTINGS_INC : ACTION_SETTINGS_DEC;
+            else
+            {
+                s->sel = s->sel == TS_CANCEL(s) ?
+                         TS_CANCEL(s) + 1 : TS_CANCEL(s);
+                ts_say(s);
+                return DIALOG_CONTINUE;
+            }
+        }
+    }
 
     switch (action)
     {

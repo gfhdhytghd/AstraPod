@@ -7,13 +7,14 @@
 #include "video_audio.h"
 #include "plugins/rock_h264.h"
 
-enum mode { FINISH, SEEK_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR };
+enum mode { FINISH, SEEK_MENU, SCRUB_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR };
 static enum mode mode;
 static volatile long current_tick;
 static unsigned int thread_id = 1;
 static unsigned int opens, closes, active, configured, decoded, drawn, seeks;
 static int open_files, boosted, backlight;
 static bool sent_menu, sent_seek;
+static unsigned scrub_actions;
 static uint8_t picture[16 * 16 * 3 / 2];
 
 static unsigned audio_opens, audio_closes, audio_seeks;
@@ -137,7 +138,7 @@ static off_t file_size(int fd)
 
 static int action(int context, int timeout)
 {
-    assert(context == CONTEXT_WPS && timeout == TIMEOUT_NOBLOCK);
+    assert(context == CONTEXT_VIDEO_PLAYBACK && timeout == TIMEOUT_NOBLOCK);
     if (decoded < 4)
         return ACTION_NONE;
     if ((mode == SEEK_MENU || mode == SEEK_INIT_ERROR) && !sent_seek)
@@ -146,7 +147,18 @@ static int action(int context, int timeout)
         sent_seek = true;
         return ACTION_WPS_SKIPNEXT;
     }
-    if (mode == SEEK_MENU && decoded >= 8 && !sent_menu)
+    if (mode == SCRUB_MENU && scrub_actions < 3)
+    {
+        /* The wheel must seek only after SELECT selects the progress bar. */
+        unsigned step = scrub_actions++;
+        if (step == 1)
+            return ACTION_WPS_BROWSE;
+        assert(opens == 1);
+        if (step == 2)
+            seeks++;
+        return ACTION_WPS_VOLUP;
+    }
+    if ((mode == SEEK_MENU || mode == SCRUB_MENU) && decoded >= 8 && !sent_menu)
     {
         sent_menu = true;
         return ACTION_WPS_MENU;
@@ -244,6 +256,10 @@ int main(int argc, char **argv)
     reset(SEEK_MENU);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 1);
     assert(opens == 2 && configured == 2 && closes == 2 && seeks == 1);
+
+    reset(SCRUB_MENU);
+    assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 1);
+    assert(opens == 2 && closes == 2 && seeks == 1);
 
     reset(USB_EXIT);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 2);

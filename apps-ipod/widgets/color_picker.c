@@ -21,6 +21,7 @@
  *   - the dialog: measure, draw, actions
  ****************************************************************************/
 #include "config.h"
+#include "ui/native_theme_runtime.h"
 #include "stdarg.h"
 #include "string.h"
 #include "stdio.h"
@@ -118,6 +119,7 @@ static inline void pack_rgb(struct rgb_pick *rgb)
 #define CD_OK       (CD_CANCEL + 1)
 
 struct colour_dlg {
+    bool wheel_edit;
     struct rgb_pick rgb;
     unsigned banned;        /* the one value OK refuses, or (unsigned)-1 */
     int  sel;
@@ -511,6 +513,34 @@ static int cd_on_action(struct dialog *d, int action, void *data)
     struct colour_dlg *s = data;
     (void)d;
 
+    if (ui_wheel_navigation())
+    {
+        if (action == ACTION_STD_OK && s->sel <= CD_CANCEL - 1)
+        {
+            s->wheel_edit = !s->wheel_edit;
+            return DIALOG_CONTINUE;
+        }
+        if (action == ACTION_STD_CONTEXT)
+        {
+            s->sel = CD_OK;
+            action = ACTION_STD_OK;
+        }
+        if (action == ACTION_STD_PREV || action == ACTION_STD_NEXT ||
+            action == ACTION_STD_PREVREPEAT || action == ACTION_STD_NEXTREPEAT)
+        {
+            int delta = action == ACTION_STD_NEXT ||
+                        action == ACTION_STD_NEXTREPEAT ? 1 : -1;
+            if (s->wheel_edit)
+                action = delta > 0 ? ACTION_SETTINGS_INC : ACTION_SETTINGS_DEC;
+            else
+            {
+                s->sel = clamp_value_wrap(s->sel + delta, CD_OK, 0);
+                cd_speak(s);
+                return DIALOG_CONTINUE;
+            }
+        }
+    }
+
     switch (action)
     {
         case ACTION_STD_PREV:
@@ -595,7 +625,7 @@ bool set_color(const char *title, unsigned *color, unsigned banned_color)
         .draw      = cd_draw,
         .on_action = cd_on_action,
     };
-    struct colour_dlg s;
+    struct colour_dlg s = {0};
     struct dialog d;
     struct dialog_style style;
 

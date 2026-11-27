@@ -515,11 +515,17 @@ static bool month_key(struct page *p, int action, char *title, size_t size)
     {
         case ACTION_SETTINGS_INC:
         case ACTION_SETTINGS_INCREPEAT:
-            step_days(&p->shown, 1);
+            if (ui_wheel_navigation() && (button_status() & BUTTON_SELECT))
+                step_month(&p->shown, 1);
+            else
+                step_days(&p->shown, 1);
             break;
         case ACTION_SETTINGS_DEC:
         case ACTION_SETTINGS_DECREPEAT:
-            step_days(&p->shown, -1);
+            if (ui_wheel_navigation() && (button_status() & BUTTON_SELECT))
+                step_month(&p->shown, -1);
+            else
+                step_days(&p->shown, -1);
             break;
         case ACTION_STD_NEXT:
         case ACTION_STD_NEXTREPEAT:
@@ -590,6 +596,13 @@ static void day_load(struct page *p, char *title, size_t size)
 
 static bool day_key(struct page *p, int action, char *title, size_t size)
 {
+    if (ui_wheel_navigation())
+    {
+        if (action == ACTION_SETTINGS_INC || action == ACTION_SETTINGS_INCREPEAT)
+            action = ACTION_STD_NEXT;
+        else if (action == ACTION_SETTINGS_DEC || action == ACTION_SETTINGS_DECREPEAT)
+            action = ACTION_STD_PREV;
+    }
     if (action != ACTION_STD_NEXT && action != ACTION_STD_PREV)
         return false;
     step_days(&p->shown, action == ACTION_STD_NEXT ? 1 : -1);

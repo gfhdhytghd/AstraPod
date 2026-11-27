@@ -14,6 +14,8 @@
 #include "action.h"
 #include "button.h"
 #include "settings/settings.h"
+#include "ui/native_theme_runtime.h"
+#include "plugins/rock_compat.h"
 
 /*
  * The format of the list is as follows
@@ -564,6 +566,61 @@ static const struct button_mapping* get_context_mapping_remote( int context )
 }
 #endif /* BUTTON_REMOTE != 0 */
 
+/* Wheel-navigation overrides keep SELECT and MENU available in editors. */
+#ifdef HAVE_RECORDING
+static const struct button_mapping wheel_recording[] = {
+    { ACTION_REC_PAUSE,    BUTTON_SELECT|BUTTON_REL,        BUTTON_SELECT },
+    { ACTION_REC_NEWFILE,  BUTTON_SELECT|BUTTON_REPEAT,     BUTTON_SELECT },
+    { ACTION_STD_CANCEL,   BUTTON_MENU|BUTTON_REL,          BUTTON_MENU },
+    { ACTION_STD_MENU,     BUTTON_MENU|BUTTON_REPEAT,       BUTTON_MENU },
+    LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_STD)
+};
+#endif
+
+static const struct button_mapping wheel_quickscreen[] = {
+    { ACTION_STD_CANCEL,  BUTTON_MENU|BUTTON_REL,        BUTTON_MENU },
+    { ACTION_STD_OK,      BUTTON_SELECT|BUTTON_REL,      BUTTON_SELECT },
+    LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_STD)
+};
+
+static const struct button_mapping wheel_list_select[] = {
+    { ACTION_LS_TOGGLE,   BUTTON_SELECT|BUTTON_REL,      BUTTON_SELECT },
+    { ACTION_NONE,        BUTTON_SELECT|BUTTON_REPEAT,   BUTTON_NONE },
+    { ACTION_LS_MENU,     BUTTON_MENU|BUTTON_REPEAT,     BUTTON_MENU },
+    { ACTION_STD_CANCEL,  BUTTON_MENU|BUTTON_REL,        BUTTON_MENU },
+    LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_STD)
+};
+
+static const struct button_mapping wheel_grid[] = {
+    { ACTION_STD_CANCEL,  BUTTON_MENU|BUTTON_REL,        BUTTON_MENU },
+    { ACTION_STD_CONTEXT, BUTTON_SELECT|BUTTON_REPEAT,   BUTTON_SELECT },
+    LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_STD)
+};
+
+static const struct button_mapping wheel_eq[] = {
+    { ACTION_SETTINGS_INC,       BUTTON_SCROLL_FWD,                BUTTON_NONE },
+    { ACTION_SETTINGS_INCREPEAT, BUTTON_SCROLL_FWD|BUTTON_REPEAT,   BUTTON_NONE },
+    { ACTION_SETTINGS_DEC,       BUTTON_SCROLL_BACK,               BUTTON_NONE },
+    { ACTION_SETTINGS_DECREPEAT, BUTTON_SCROLL_BACK|BUTTON_REPEAT,  BUTTON_NONE },
+    { ACTION_STD_OK,             BUTTON_SELECT|BUTTON_REL,         BUTTON_SELECT },
+    { ACTION_TIME_DOWN,          BUTTON_SELECT|BUTTON_REPEAT,      BUTTON_SELECT },
+    { ACTION_STD_CANCEL,         BUTTON_MENU|BUTTON_REL,           BUTTON_MENU },
+    { ACTION_STD_CONTEXT,        BUTTON_MENU|BUTTON_REPEAT,        BUTTON_MENU },
+    LAST_ITEM_IN_LIST
+};
+
+static const struct button_mapping wheel_keyboard[] = {
+    { ACTION_KBD_UP,        BUTTON_SCROLL_BACK,               BUTTON_NONE },
+    { ACTION_KBD_UP,        BUTTON_SCROLL_BACK|BUTTON_REPEAT, BUTTON_NONE },
+    { ACTION_KBD_DOWN,      BUTTON_SCROLL_FWD,                BUTTON_NONE },
+    { ACTION_KBD_DOWN,      BUTTON_SCROLL_FWD|BUTTON_REPEAT,  BUTTON_NONE },
+    { ACTION_KBD_SELECT,    BUTTON_SELECT|BUTTON_REL,         BUTTON_SELECT },
+    { ACTION_KBD_DONE,      BUTTON_SELECT|BUTTON_REPEAT,      BUTTON_SELECT },
+    { ACTION_KBD_ABORT,     BUTTON_MENU|BUTTON_REL,           BUTTON_MENU },
+    { ACTION_KBD_BACKSPACE, BUTTON_MENU|BUTTON_REPEAT,        BUTTON_NONE },
+    LAST_ITEM_IN_LIST
+};
+
 /* get_context_mapping returns a pointer to one of the above defined arrays depending on the context */
 const struct button_mapping* get_context_mapping(int context)
 {
@@ -597,17 +654,20 @@ const struct button_mapping* get_context_mapping(int context)
             return button_context_music_quiz;
 
         case CONTEXT_LIST_SELECT:
-            return button_context_list_select;
+            return !rock_ui_raw() && ui_wheel_navigation() ? wheel_list_select :
+                   button_context_list_select;
 
         case CONTEXT_AGENTS:
             return button_context_agents;
 
         case CONTEXT_SETTINGS_TIME:
         case CONTEXT_SETTINGS_COLOURCHOOSER:
-            return button_context_settings_grid;
+            return !rock_ui_raw() && ui_wheel_navigation() ? wheel_grid :
+                   button_context_settings_grid;
 
         case CONTEXT_SETTINGS_EQ:
-            return button_context_settings_eq;
+            return !rock_ui_raw() && ui_wheel_navigation() ? wheel_eq :
+                   button_context_settings_eq;
         case CONTEXT_SETTINGS:
         case CONTEXT_SETTINGS_RECTRIGGER:
             return button_context_settings;
@@ -616,14 +676,17 @@ const struct button_mapping* get_context_mapping(int context)
         case CONTEXT_BOOKMARKSCREEN:
             return button_context_bmark;
         case CONTEXT_QUICKSCREEN:
-            return button_context_quickscreen;
+            return !rock_ui_raw() && ui_wheel_navigation() ? wheel_quickscreen :
+                   button_context_quickscreen;
 #ifdef HAVE_RECORDING
         case CONTEXT_RECSCREEN:
-            return button_context_recscreen;
+            return !rock_ui_raw() && ui_wheel_navigation() ? wheel_recording :
+                   button_context_recscreen;
 #endif
         case CONTEXT_KEYBOARD:
         case CONTEXT_MORSE_INPUT:
-            return button_context_keyboard;
+            return !rock_ui_raw() && ui_wheel_navigation() ? wheel_keyboard :
+                   button_context_keyboard;
         case CONTEXT_USB_HID:
             return button_context_usb_hid;
         case CONTEXT_USB_HID_MODE_MULTIMEDIA:

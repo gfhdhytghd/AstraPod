@@ -830,7 +830,15 @@ static bool rock_app_tray_writable(void)
 static bool rock_app_tray_register(const struct rock_tray_bitmap *frames,
                                    unsigned count)
 {
-    return rock_app_tray_writable() && app_tray_register(filename, frames, count);
+    return rock_app_tray_writable() &&
+           app_tray_register8(filename, frames, count);
+}
+
+static bool rock_app_tray_register12(const struct rock_tray_icon12 *frames,
+                                     unsigned count)
+{
+    return rock_app_tray_writable() &&
+           app_tray_register(filename, frames, count);
 }
 
 static bool rock_app_tray_set(unsigned frame)

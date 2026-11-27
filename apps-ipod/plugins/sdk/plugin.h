@@ -120,7 +120,7 @@
 #else
 #define ROCK_IMAGE_MAGIC PLUGIN_MAGIC
 #endif
-#define PLUGIN_API_VERSION 2
+#define PLUGIN_API_VERSION 3
 #define ROCK_CLICK_TICK_HZ 500
 #define INTERNAL_PLUGIN_RETVAL_START 0x100
 enum plugin_status {

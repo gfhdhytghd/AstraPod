@@ -452,3 +452,5 @@ ROCK_SLOT(bool (*app_tray_set)(unsigned), app_tray_set, rock_app_tray_set)
 ROCK_SLOT(int (*app_tray_get)(void), app_tray_get, rock_app_tray_get)
 ROCK_SLOT(bool (*app_background_schedule)(const struct rock_tray_rule *, unsigned),
           app_background_schedule, rock_app_background_schedule)
+ROCK_SLOT(bool (*app_tray_register12)(const struct rock_tray_icon12 *, unsigned),
+          app_tray_register12, rock_app_tray_register12)

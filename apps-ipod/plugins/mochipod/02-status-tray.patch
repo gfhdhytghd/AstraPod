@@ -87,8 +87,8 @@ new file mode 100644
 index 0000000..bec1779
 --- /dev/null
 +++ b/src/platform/tray.inc
-@@ -0,0 +1,136 @@
-+/* AstraPod status-bar tray: the pet's condition as one of four 8x8 icons.
+@@ -0,0 +1,140 @@
++/* AstraPod status-bar tray: the pet's condition as one of four 12x12 icons.
 +   The schedule is predicted by running the game rules on a copy of the
 +   pet, so the icon keeps changing after MochiPod closes. All calls are
 +   best effort: a full tray or USB storage never disturbs the game. */
@@ -96,12 +96,16 @@ index 0000000..bec1779
 +#define TRAY_HORIZON (48u*60u)
 +#define TRAY_EVENTS 32
 +
-+/* One byte per column, bit 0 at the top. */
-+static const struct rock_tray_bitmap tray_art[TRAY_FRAMES]={
-+    {{0x38,0x7f,0xef,0xfc,0xfc,0xef,0x7f,0x38}}, /* content: Mochi */
-+    {{0x90,0xd0,0xb0,0x90,0x09,0x0d,0x0b,0x09}}, /* asleep: zZ */
-+    {{0x38,0x6e,0x78,0x6e,0x38,0x00,0x5f,0x00}}, /* needs care: Mochi! */
-+    {{0x1c,0x72,0x33,0x7f,0x7f,0x33,0x72,0x1c}}, /* sick or dead: skull */
++/* One halfword per column, bit 0 at the top. */
++static const struct rock_tray_icon12 tray_art[TRAY_FRAMES]={
++    /* content: smiling Mochi */
++    {{0x1f0,0x3ff,0x7ff,0xf9c,0xef8,0xdf8,0xdf8,0xef8,0xf9c,0x7ff,0x3ff,0x1f0}},
++    /* asleep: zZ */
++    {{0x880,0xc80,0xa80,0x980,0x003,0x0c3,0x0e3,0x0f3,0x0db,0x0cf,0x0c7,0x0c3}},
++    /* needs care: Mochi! */
++    {{0x1f8,0x3ff,0x7cf,0x77c,0x6fc,0x77c,0x7cf,0x3ff,0x1f8,0x000,0xcff,0xcff}},
++    /* sick or dead: skull */
++    {{0x0fc,0x1fe,0x7cf,0xfc7,0xdc7,0x77f,0x77f,0xdc7,0xfc7,0x7cf,0x1fe,0x0fc}},
 +};
 +
 +static uint8_t tray_frame(const Pet *p)
@@ -185,7 +189,7 @@ index 0000000..bec1779
 +    unsigned n=tray_predict(p,second,events);
 +    uint8_t frame=tray_frame(p);
 +    /* An identical registration or selection writes nothing. */
-+    if (!rb->app_tray_register(tray_art,TRAY_FRAMES) || !rb->app_tray_set(frame))
++    if (!rb->app_tray_register12(tray_art,TRAY_FRAMES) || !rb->app_tray_set(frame))
 +        return;
 +    tray_shown=frame;
 +    if (n) rb->app_background_schedule(events,n);

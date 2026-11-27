@@ -110,10 +110,11 @@ copied out of the foreground module. This lets reminders survive plugin
 unload and reboot, with no resident plugin code, scheduler thread, or disk
 write at a deadline.
 
-Use the following appended API slots in SDK image version 2. Build the
+Use the following appended API slots in SDK image version 3. Build the
 module and firmware from the same SDK.
 
 ```c
+bool (*app_tray_register12)(const struct rock_tray_icon12 *frames, unsigned count);
 bool (*app_tray_register)(const struct rock_tray_bitmap *frames, unsigned count);
 bool (*app_tray_set)(unsigned frame);
 int (*app_tray_get)(void);
@@ -126,7 +127,8 @@ and folding ASCII case. Choose a unique, stable name of up to 31 characters
 from `a-z`, `0-9`, `-` and `_`. Copies with the same basename share one
 slot. Renaming a module changes its ID.
 
-- **Register** copies 1–4 bitmaps. A new icon starts hidden. Re-registering
+- **Register** copies 1–4 bitmaps: 12×12 with `app_tray_register12`, or
+  8×8 with `app_tray_register`. A new icon starts hidden. Re-registering
   replaces the artwork and keeps the selection and schedule if all referenced
   frames still exist. Pass `NULL, 0` to remove the icon and release its slot.
 - **Set** selects a zero-based frame or `ROCK_TRAY_HIDDEN` and cancels the
@@ -139,12 +141,22 @@ slot. Renaming a module changes its ID.
   until the first deadline. The last due rule wins and its frame stays selected
   until another change. Pass `NULL, 0` to cancel and keep the current frame.
 
-Each frame is 8×8, with one byte per column and bit 0 at the top. A set bit
-uses the status foreground color. Other pixels are transparent. The firmware
-keeps four slots. It shows up to two visible icons by ascending slot
-index. A new registration uses the first free slot. Narrow bars can show
-fewer icons. The native volume overlay and plugins that own the LCD can cover
-the status bar. The tray has no input actions.
+Draw frames at 12×12, the height of the status bar's own icons: one
+`uint16_t` per column, bit 0 at the top, bits 12–15 ignored. An 8×8 frame,
+one byte per column, is drawn centred in the same 12×12 cell. Set bits are
+ink and other pixels are transparent.
+
+Classic and Fruit Company shade the ink like the playback icon beside it:
+blue, brightest on the middle rows, with a white highlight under each
+column. Ink with a clear pixel on any side takes the darker outline shade,
+so filled shapes with details cut out of them read best, and one- or
+two-pixel strokes come out dark. Scrim and Light draw the ink in the status
+foreground color.
+
+The firmware keeps four slots. It shows up to two visible icons by
+ascending slot index. A new registration uses the first free slot. Narrow
+bars can show fewer icons. The native volume overlay and plugins that own
+the LCD can cover the status bar. The tray has no input actions.
 
 Deadlines use the player's local RTC, including time spent powered off or in
 USB storage mode. A valid clock is required to install rules. If the clock is
@@ -167,7 +179,7 @@ rules on a copy of the pet. The full pet state stays in MochiPod's own save.
 
 ### Try the demo
 
-1. Open **Plugins > Demos > app_tray_demo**. The demo displays
+1. Open **Plugins > Demos > app_tray_demo**. It registers 8×8 frames. The demo displays
    **Tray demo started** and returns.
 2. In the status bar, look for the outlined circle. Start music and return
    to a menu to see the circle during playback. In Classic, the circle also

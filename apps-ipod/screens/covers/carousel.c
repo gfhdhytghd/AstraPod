@@ -4902,7 +4902,7 @@ static struct album_panel {
     unsigned painted_rows, painted_discs;
     bool open_logged;
     long next_read;
-    bool live, moving, dirty, missing, play_pending, play_failed, have_blur;
+    bool live, opening, moving, dirty, missing, play_pending, play_failed, have_blur;
     char fitted_title[CAROUSEL_TRACK_TEXT], fitted_artist[CAROUSEL_TRACK_TEXT];
     char count_label[80];
     int dot_x, count_x;
@@ -5008,10 +5008,10 @@ static bool request_panel(int index, struct panel_request *request)
     return model->panel_request(index, request);
 }
 
-static bool open_album_panel(int selected, int top)
+static void open_album_panel(int selected, int top)
 {
     if (!model->panel_request || !request_panel(center_index, &panel.request))
-        return false;
+        return;
     if (!flat_view())
         panel.back_handle = core_alloc_free_space(256 * 256 * sizeof(pix_t));
     panel.opened = USEC_TIMER;
@@ -5022,6 +5022,7 @@ static bool open_album_panel(int selected, int top)
     panel.solid = theme.background[UI_BG_LIST] == UI_BG_SOLID;
     panel_perf_record(PP_SELECT, 0, center_index, model->external);
     panel.live = true;
+    panel.opening = true;
     panel.count = -1;
     panel.cached_first = panel.adjacent_first = -1;
     panel.album_font = panel.title_font = panel.small_font = -1;
@@ -5038,7 +5039,6 @@ static bool open_album_panel(int selected, int top)
         panel_perf_record(PP_RAM, USEC_TIMER - panel.opened, center_index, model->external);
         panel_cache_release(hit);
     }
-    return true;
 }
 
 static int flip_position(unsigned frame)
@@ -5214,7 +5214,7 @@ static void panel_read_rows(void)
             if (playing != row->playing)
                 panel.dirty = true;
             row->playing = playing;
-            if (!row->glyphs_ready)
+            if (!row->glyphs_ready || panel.opening)
             {
                 panel_layout_track(row);
                 panel.dirty |= row->glyphs_ready;
@@ -5294,7 +5294,8 @@ static void panel_read_tracks(void)
         }
         panel.dirty = true;
     }
-    if (!panel.header_ready && panel.album_font >= 0 && panel.title_font >= 0)
+    if ((!panel.header_ready || panel.opening) &&
+        panel.album_font >= 0 && panel.title_font >= 0)
     {
         panel_layout_header();
         panel.dirty |= panel.header_ready;
@@ -5303,6 +5304,31 @@ static void panel_read_tracks(void)
     if (panel.title_font >= 0 && panel.small_font >= 0)
         panel_read_rows();
     panel.next_read = current_tick + MAX(1, HZ / 25);
+}
+
+/* The first back uses the same leased glyph packs as the live panel. */
+static bool panel_opening_ready(void)
+{
+    if (!panel.cached || !panel.header_ready)
+        return false;
+    int disc;
+    int track = panel_first_track(panel.scroll_y / PANEL_PITCH, &disc);
+    for (int i = 0; i < ALBUM_PANEL_ROWS && track < panel.count; i++)
+    {
+        if (disc < panel.disc_count && panel_disc_track(disc) == track)
+        {
+            char label[80];
+            panel_disc_label(disc++, label, sizeof(label));
+            if (!font_prefetch_text(panel.small_font, label))
+                return false;
+            continue;
+        }
+        const struct panel_track *row = &panel.rows[track % PANEL_CACHE];
+        if (row->index != track + 1 || !row->glyphs_ready)
+            return false;
+        track++;
+    }
+    return true;
 }
 
 /* Only snapshot RAM provider state here. Track lookups, disk reads and font
@@ -6135,6 +6161,31 @@ static void draw_album_flip(bool present)
  * deadlines; other changes draw when they come. */
 static void step_album_flip(void)
 {
+    if (panel.opening || panel.to == FLIP_OPEN)
+    {
+        panel.album_font = panel_cache_font(PANEL_ALBUM);
+        panel.title_font = panel_cache_font(PANEL_BODY);
+        panel.small_font = panel_cache_font(PANEL_SMALL);
+    }
+    if (panel.opening)
+    {
+        if (TIME_BEFORE(current_tick, panel.next_read))
+            return;
+        panel_read_tracks();
+        bool ready = panel_opening_ready();
+        if (!ready && (uint32_t)USEC_TIMER - panel.opened < 2000000u)
+            return;
+        panel.opening = false;
+        if (ready)
+            flip_to(true);
+        else
+        {
+            /* Unavailable metadata or fonts still get the live panel's
+             * loading state, without putting that state on a turning face. */
+            panel.position = panel.to = FLIP_OPEN;
+            panel.dirty = true;
+        }
+    }
     bool done = false;
     bool scrolling = panel.scroll_frames && panel.position == FLIP_OPEN &&
                      panel.to == FLIP_OPEN;
@@ -6177,9 +6228,6 @@ static void step_album_flip(void)
     }
     if (panel.to == FLIP_OPEN && (panel.position == FLIP_OPEN || !flat_view()))
     {
-        panel.album_font = panel_cache_font(PANEL_ALBUM);
-        panel.title_font = panel_cache_font(PANEL_BODY);
-        panel.small_font = panel_cache_font(PANEL_SMALL);
         if (panel.scroll_frames && due)
             panel_step_scroll();
         if (!panel.resuming && !TIME_BEFORE(current_tick, panel.next_read))
@@ -7091,8 +7139,10 @@ static void chrome_restore_bar(void)
  * from the status bar the turn left. */
 static void chrome_fade_in(unsigned weight)
 {
-    pix_t *under = core_get_data_pinned(playback_scene.chrome);
     chrome_restore_bar();
+    if (!weight)
+        return;
+    pix_t *under = core_get_data_pinned(playback_scene.chrome);
     memcpy(under, LCD_BUF, CHROME_FRAME * sizeof(pix_t));
     native_wps_paint_chrome();
     for (int i = 0; i < CHROME_FRAME; i++)
@@ -7208,6 +7258,7 @@ static struct stock_flip playback_turn(void)
 void carousel_wps_present(const struct wps_state *state)
 {
     playback_scene.pending = false;
+    cpu_boost(true);
     bool fade = stock_look() && pf_motion_scale && lcd_active() &&
                 chrome_fade_open();
     native_wps_paint_handoff(state, &playback_scene.source);
@@ -7216,15 +7267,22 @@ void carousel_wps_present(const struct wps_state *state)
     if (!lcd_active())
     {
         drop_playback_bitmap(&playback_scene.chrome);
+        cpu_boost(false);
         return;
     }
-    /* The stock look's turn resumes where it left Cover Flow: the time
-     * Now Playing took to set up passes with the turn held. */
-    if (playback_scene.resume_us && stock_look())
+    unsigned trace = ui_perf_begin(playback_scene.from_panel ?
+                                   "cover-panel-wps" : "cover-flow-wps");
+    if (stock_look())
     {
-        int32_t late = ui_clock_start() - playback_scene.resume_us;
-        if (late > 0)
-            playback_scene.walls.start_us += late;
+        if (playback_scene.resume_us)
+        {
+            ui_clock_sleep(ui_clock_wait_until(playback_scene.resume_us));
+            int32_t late = ui_clock_start() - playback_scene.resume_us;
+            if (late > 0)
+                playback_scene.walls.start_us += late;
+        }
+        else
+            stock_rebase(&playback_scene.walls.start_us);
     }
     playback_scene.resume_us = 0;
     struct stock_flip flip = playback_turn();
@@ -7237,9 +7295,9 @@ void carousel_wps_present(const struct wps_state *state)
     uint32_t fade_us = MAX(turn_us - MIN(now - start, turn_us),
                            CHROME_FADE_FRAMES * ui_frame_period());
     uint32_t fade_start = now;
-    cpu_boost(true);
     for (;;)
     {
+        uint32_t rendering = trace ? USEC_TIMER : 0;
         if (!playback_scene.layout_ready && native_wps_active())
         {
             struct ui_rect measured;
@@ -7262,37 +7320,47 @@ void carousel_wps_present(const struct wps_state *state)
         if (blend_us)
             flip.target = stock_pose_lerp(initial, playback_scene.playing,
                           stock_target_progress(now - blend_start, blend_us));
-        paint_playback_row(&playback_scene.walls, stock_flip_pose(&flip, now), now);
         bool landed = stock_flip_done(&flip, now) &&
                       (!blend_us || now - blend_start >= blend_us);
-        if (fade && native_wps_active())
+        bool fading = fade && native_wps_active();
+        unsigned weight = fading ? chrome_weight(now, fade_start, fade_us) : 0;
+        landed &= !fading || weight == 32;
+        if (fading && landed)
         {
-            unsigned weight = chrome_weight(now, fade_start, fade_us);
-            chrome_fade_in(weight);
-            landed = landed && weight == 32;
+            if (playback_cover(playback_scene.album))
+                native_wps_set_landing(paint_playback_landing);
+            native_wps_pick_up_art();
+            native_wps_render(state, false);
         }
+        else
+        {
+            paint_playback_row(&playback_scene.walls,
+                               stock_flip_pose(&flip, now), now);
+            if (fading)
+                chrome_fade_in(weight);
+        }
+        uint32_t submitting = trace ? USEC_TIMER : 0;
         lcd_update();
+        if (trace)
+        {
+            ui_perf_note_render(submitting - rendering);
+            ui_perf_note_submit((uint32_t)USEC_TIMER - submitting);
+        }
         if (landed || !lcd_active())
             break;
         ui_clock_sleep(ui_clock_wait_until(flow_pace_next(&flow_pace, start)));
         now = USEC_TIMER;
     }
-    if (native_wps_active() && lcd_active())
+    if (!fade && native_wps_active() && lcd_active())
     {
         uint32_t landed_at = USEC_TIMER;
         if (playback_cover(playback_scene.album))
             native_wps_set_landing(paint_playback_landing);
-        if (fade)
-        {
-            native_wps_pick_up_art();
-            native_wps_render(state, false);
-            lcd_update();
-        }
-        else
-            slide_playback_controls(state, landed_at);
+        slide_playback_controls(state, landed_at);
     }
     drop_playback_bitmap(&playback_scene.chrome);
     cpu_boost(false);
+    ui_perf_end(trace);
     ui_perf_wps_target(route, &playback_scene.slot, reason, bitmap_state);
 }
 
@@ -7433,13 +7501,17 @@ static int stock_to_wps(int album, bool from_panel, int destination, uint32_t ac
     release_playback_scene();
     playback_scene.from_panel = from_panel;
     bool animate = pf_motion_scale && lcd_active();
+    /* A local playlist needs the scratch arena before WPS can present.
+     * Keep the panel on screen until that handoff is complete, then run
+     * the stock turn on one clock. A remote request may already be in flight. */
+    bool preview = animate && (!stock_look() || destination == CAROUSEL_PLAY_PENDING);
     struct stock_flip flip;
     playback_scene.resume_us = 0;
     if (animate)
     {
         prepare_playback_turn(album, from_panel, action_us);
         /* Under the stock look the turn starts once it is ready to draw. */
-        if (stock_look())
+        if (preview && stock_look())
             playback_scene.walls.start_us += stock_rebase(&action_us);
         flip = playback_turn();
     }
@@ -7447,7 +7519,7 @@ static int stock_to_wps(int album, bool from_panel, int destination, uint32_t ac
     for (;;)
     {
         uint32_t now = USEC_TIMER;
-        if (animate && !landed && lcd_active())
+        if (preview && !landed && lcd_active())
         {
             paint_playback_row(&playback_scene.walls, stock_flip_pose(&flip, now), now);
             lcd_update();
@@ -7613,7 +7685,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             timeout = 1;
         else if (!dark && panel.live)
         {
-            if (panel.moving || (!flat_view() && stock_animating(&flow_row, USEC_TIMER)) ||
+            if (panel.opening)
+                timeout = MAX(0, panel.next_read - current_tick);
+            else if (panel.moving || (!flat_view() && stock_animating(&flow_row, USEC_TIMER)) ||
                 (panel.scroll_frames && panel.position == FLIP_OPEN))
                 timeout = frame_wait(panel.due);
             else
@@ -7847,10 +7921,29 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             }
         }
 
+        /* While the worker prepares the page, Menu cancels the request and
+         * the wheel can immediately move on to another album. */
+        if (panel.opening)
+        {
+            switch (button)
+            {
+            case PF_BACK:
+            case PF_QUIT:
+                button = ACTION_NONE;
+                /* Fall through. */
+            case PF_NEXT:
+            case PF_NEXT_REPEAT:
+            case PF_PREV:
+            case PF_PREV_REPEAT:
+                close_album_panel();
+                break;
+            }
+        }
         if (panel.live && agents_nav_pending() == AGENTS_NAV_NONE)
         {
             bar_drop_finish();
-            int result = album_panel_action(button);
+            int result = panel.opening ? CAROUSEL_MENU_STAY :
+                         album_panel_action(button);
             if (result != CAROUSEL_MENU_STAY)
             {
                 if (!flat_view())
@@ -8620,8 +8713,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                 ui_perf_end(*trace);
                 *trace = 0;
                 trace_attempted = false;
-                if (open_album_panel(0, 0))
-                    flip_to(true);
+                open_album_panel(0, 0);
                 break;
             }
             /* Settle the animation onto the slide the user is looking at, so

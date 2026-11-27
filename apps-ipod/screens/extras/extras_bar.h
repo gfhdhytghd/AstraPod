@@ -21,9 +21,11 @@ void extras_bar_draw(const char *title);
 /* Unload the title font; a page calls it when it leaves. */
 void extras_bar_release(void);
 
-/* The rows the full-screen Extras pages compose in, a band at a time: one
- * page runs at once, and Stopwatch lays one band over the other. */
+/* Band `i` (0 or 1) of the rows the full-screen Extras pages compose in, a
+ * band at a time: one page runs at once, and Stopwatch lays one band over
+ * the other. Taken from the buffer when first asked for and given back by
+ * extras_bar_release(); NULL when the buffer cannot spare them. */
 #define EXTRAS_BAND_ROWS 8
-extern uint32_t extras_band[2][LCD_WIDTH * EXTRAS_BAND_ROWS];
+uint32_t *extras_band(int i);
 
 #endif

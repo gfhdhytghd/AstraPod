@@ -3,6 +3,7 @@
 from pathlib import Path
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 
 root = Path(__file__).resolve().parents[2]
 out = Path(sys.argv[1]).resolve()
@@ -46,4 +47,5 @@ subprocess.run([
     fixture / "probe.c", staged, source / "mp4_demux.c",
     root / "apps-ipod/plugins/rock_h264.c", "-o", binary,
 ], check=True)
-subprocess.run([binary, video, broken, with_audio], check=True)
+with TemporaryDirectory(dir=out) as playback_dir:
+    subprocess.run([binary, video, broken, with_audio], cwd=playback_dir, check=True)

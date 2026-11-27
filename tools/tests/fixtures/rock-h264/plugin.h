@@ -16,6 +16,7 @@
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define TIME_BEFORE(a, b) ((a) < (b))
 #define MAX_PATH 260
+#define PLUGIN_APPS_DATA_DIR "resume"
 #define CACHEALIGN_SIZE 32
 #define HZ 100
 #define LCD_WIDTH 320
@@ -29,10 +30,10 @@
 enum {
     ACTION_NONE, ACTION_WPS_MENU, ACTION_STD_CANCEL, ACTION_WPS_STOP,
     ACTION_WPS_SKIPPREV, ACTION_WPS_SEEKBACK, ACTION_WPS_SKIPNEXT,
-    ACTION_WPS_SEEKFWD, ACTION_WPS_PLAY
+    ACTION_WPS_SEEKFWD, ACTION_WPS_PLAY, ACTION_WPS_BROWSE
 };
 struct font { unsigned int depth, height; };
-struct settings { int backlight_timeout; };
+struct settings { int backlight_timeout; bool video_fit; };
 struct status { int volume; };
 struct plugin_api {
     const struct hw_h264_api *hw_h264;
@@ -45,6 +46,10 @@ struct plugin_api {
     off_t (*ffilesize)(int);
     off_t (*lseek)(int, off_t, int);
     ssize_t (*read)(int, void *, size_t);
+    ssize_t (*write)(int, const void *, size_t);
+    int (*mkdir)(const char *);
+    int (*rename)(const char *, const char *);
+    int (*remove)(const char *);
     void *(*memset)(void *, int, size_t);
     void (*cpu_boost)(bool);
     int (*get_action)(int, int);

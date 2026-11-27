@@ -237,15 +237,21 @@ def walk(sim, playback, sim_binary):
 def probe_chord(sim, playback, theme):
     menu = playback.activities["ACTIVITY_MAINMENU"]
     wps = playback.activities["ACTIVITY_WPS"]
+    files = playback.activities["ACTIVITY_FILEBROWSER"]
+    wait_for(lambda: playback.activity() == files,
+             f"{theme}: Files did not start")
     press(sim, "select")  # Enter the highlighted /Playlists folder.
     press(sim, "select")  # Start the first playlist.
     wait_for(lambda: playback.get("status") == 1 and playback.activity() == wps,
              f"{theme}: could not start fixture playlist")
+    # WPS marks its activity before the initial artwork and fonts are ready.
+    sim.settle(quiet=.40, limit=1.20)
     press(sim, "menu")
-    wait_for(lambda: playback.activity() == playback.activities["ACTIVITY_FILEBROWSER"],
+    wait_for(lambda: playback.activity() == files,
              f"{theme}: could not return to Files")
     press(sim, "menu")
     wait_for(lambda: playback.activity() == menu, f"{theme}: could not open menu")
+    sim.settle(quiet=.40, limit=1.20)
 
     fruit = theme.startswith("fruit-company")
     expected = 1

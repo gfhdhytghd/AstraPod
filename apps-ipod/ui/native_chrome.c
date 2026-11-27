@@ -12,6 +12,7 @@
 
 #include "animation.h"
 #include "audio/play_status.h"
+#include "button.h"
 #include "database/tagcache.h"
 #include "draw/color.h"
 #include "files/file_index.h"
@@ -22,6 +23,7 @@
 #include "metadata/art_cache.h"
 #include "power.h"
 #include "powermgmt.h"
+#include "screens/fruit_menu.h"
 #include "settings/settings.h"
 #include "sound.h"
 #include "system.h"
@@ -96,6 +98,7 @@ bool native_chrome_poll(struct native_chrome *chrome)
         .playmode = current_playmode(),
         .busy = busy_state(),
         .volume_visible = native_chrome_volume_visible(),
+        .hold = fruit_menu_active() && button_hold(),
     };
     if (battery >= 0 && ui_theme_art(chrome->theme))
         next.stock_battery_frame = ui_art_battery_index(battery);
@@ -733,6 +736,39 @@ static void draw_indicators(const struct native_chrome *chrome, struct viewport 
                   x + layout.busy_x, y, size, false);
 }
 
+/* Stock Hold padlock drawn beside the title under style.menu_tree=stock. */
+static void draw_hold_padlock(struct viewport *damage, int x, int y,
+                              unsigned foreground)
+{
+    static const uint16_t rows[12] = {
+        0x078, /* ...####... */
+        0x0cc, /* ..##..##.. */
+        0x084, /* ..#....#.. */
+        0x084, /* ..#....#.. */
+        0x084, /* ..#....#.. */
+        0x3ff, /* ########## */
+        0x3ff, /* ########## */
+        0x3ff, /* ########## */
+        0x3ff, /* ########## */
+        0x3ff, /* ########## */
+        0x3ff, /* ########## */
+        0x1fe, /* .########. */
+    };
+    damage->fg_pattern = foreground;
+    for (int r = 0; r < 12; r++)
+    {
+        int py = y + r - damage->y;
+        if (py < 0 || py >= damage->height)
+            continue;
+        for (int c = 0; c < 10; c++)
+        {
+            int px = x + c - damage->x;
+            if ((rows[r] & (1u << (9 - c))) && px >= 0 && px < damage->width)
+                lcd_drawpixel(px, py);
+        }
+    }
+}
+
 void native_chrome_draw(const struct native_chrome *chrome, const char *left,
                         bool playback_modes,
                         const struct ui_view_frame *frame,
@@ -832,6 +868,12 @@ void native_chrome_draw(const struct native_chrome *chrome, const char *left,
                           layout.title_width - title_width);
         left_x = bounds.x + MAX(title_x, metric[UI_METRIC_STATUS_PAD_LEFT]);
         layout.title_width = title_width;
+    }
+    if (state->hold && !playback_modes)
+    {
+        draw_hold_padlock(&damage, left_x, icon_y + 2, foreground);
+        left_x += 14;
+        layout.title_width = MAX(0, layout.title_width - 14);
     }
     if (playback_modes)
         draw_text(&damage, left, chrome->icon_font, left_x, icon_y,

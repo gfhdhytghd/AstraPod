@@ -71,6 +71,7 @@ static int handle_usb_events(void)
                 reset_runtime();
                 break;
             case SYS_TIMEOUT:
+                usb_stock_tick();
                 break;
 #ifdef USB_ENABLE_AUDIO
             /* The player is the computer's sound card: the wheel sets the

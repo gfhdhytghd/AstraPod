@@ -52,6 +52,7 @@
 #include "audio/play_status.h"
 #include "screens/system/debug_menu.h"
 #include "screens/system/about.h"
+#include "screens/fruit_menu.h"
 #include "font.h"
 #ifdef HAVE_PODBOX_FONT
 #include "font_pbf.h"
@@ -356,6 +357,7 @@ static const unsigned char boot_weight[BOOT_STAGE_COUNT] =
 enum { BOOT_KEEP_CAPTION = -1 };
 static int boot_caption = BOOT_KEEP_CAPTION;
 static int boot_caption_font = FONT_SYSFIXED;
+static bool boot_theme_ready;
 
 /* The bundled caption font covers the Han glyphs in the boot messages. */
 static bool boot_font_covers(int id, const char *text) INIT_ATTR;
@@ -431,20 +433,23 @@ static void boot_viewport(struct viewport *vp)
 static void boot_paint(int step, int total) INIT_ATTR;
 static void boot_paint(int step, int total)
 {
+    bool stock_boot = boot_theme_ready && fruit_menu_active();
     const struct boot_palette *pal = boot_palette();
     struct screen *screen = &screens[SCREEN_MAIN];
     struct viewport vp;
     struct viewport *last_vp;
 
-    lcd_set_background(pal->bg);
-    lcd_set_foreground(pal->fg);
+    lcd_set_background(stock_boot ? LCD_BLACK : pal->bg);
+    lcd_set_foreground(stock_boot ? LCD_WHITE : pal->fg);
     lcd_clear_display();
 
     boot_viewport(&vp);
+    if (stock_boot)
+        vp.fg_pattern = LCD_WHITE;
     last_vp = screen->set_viewport(&vp);
     about_draw_boot_logo(screen, &vp, BOOT_BAR_Y - 12);
 
-    if (boot_caption != BOOT_KEEP_CAPTION)
+    if (!stock_boot && boot_caption != BOOT_KEEP_CAPTION)
     {
         const char *text = str(boot_caption);
         if (!boot_font_covers(FONT_SYSFIXED, text))
@@ -460,9 +465,13 @@ static void boot_paint(int step, int total)
         screen->putsxy((vp.width - tw) / 2, BOOT_CAPTION_Y, text);
     }
 
-    vp.fg_pattern = pal->accent;
-    progress_bar_draw(screen, BOOT_BAR_X, BOOT_BAR_Y, BOOT_BAR_W, BOOT_BAR_H,
-                      step, total, global_settings.progress_bar_radius);
+    if (!stock_boot || tagcache_get_max_commit_step() > 0)
+    {
+        vp.fg_pattern = stock_boot ? LCD_RGBPACK(200, 200, 200) : pal->accent;
+        progress_bar_draw(screen, BOOT_BAR_X, BOOT_BAR_Y, BOOT_BAR_W,
+                          BOOT_BAR_H, step, total,
+                          global_settings.progress_bar_radius);
+    }
 
     screen->set_viewport(last_vp);
     lcd_update();
@@ -478,12 +487,16 @@ static void boot_paint(int step, int total)
 static void boot_paint_bar(int step, int total) INIT_ATTR;
 static void boot_paint_bar(int step, int total)
 {
+    bool stock_boot = boot_theme_ready && fruit_menu_active();
+    if (stock_boot && tagcache_get_max_commit_step() <= 0)
+        return;
     struct screen *screen = &screens[SCREEN_MAIN];
     struct viewport vp;
     struct viewport *last_vp;
 
     boot_viewport(&vp);
-    vp.fg_pattern = boot_palette()->accent;
+    vp.fg_pattern = stock_boot ? LCD_RGBPACK(200, 200, 200) :
+                                 boot_palette()->accent;
     last_vp = screen->set_viewport(&vp);
 
     progress_bar_draw(screen, BOOT_BAR_X, BOOT_BAR_Y, BOOT_BAR_W, BOOT_BAR_H,
@@ -927,6 +940,7 @@ static void init(void)
     boot_progress(BOOT_THEME, 0, 0, BOOT_KEEP_CAPTION);
     CHART(">settings_apply(true)");
     settings_apply(true);
+    boot_theme_ready = true;
     album_palette_init();
     album_blur_init();
     panel_cache_watch_playback();

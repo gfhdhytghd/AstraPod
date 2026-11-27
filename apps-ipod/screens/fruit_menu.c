@@ -42,6 +42,7 @@
 #include "screens/settings/exported_settings.h"
 #include "screens/settings/sound_settings.h"
 #include "screens/system/fruit_about.h"
+#include "screens/system/power_stock.h"
 #include "widgets/option_select.h"
 #include "system/volume.h"
 #include "screens/settings/eq_editor.h"
@@ -160,15 +161,10 @@ static int demos(void)        { return app_list(APP_LIST_DEMOS); }
 static int files(void)        { return run(GO_TO_FILEBROWSER); }
 static int playback_report(void) { return run(GO_TO_SPUN); }
 
-/* AstraPod's sleep timer menu, the stock Sleep row */
-extern const struct menu_item_ex sleep_timer_menu;
-static int sleep_timer(void)
+/* Stock Home > Sleep: enters charging standby on power, or powers off */
+static int sleep_now(void)
 {
-    struct ui_scene scene = {0};
-    ui_scene_open_page(&scene, "sleep-menu-push");
-    int ret = do_menu(&sleep_timer_menu, NULL, NULL, false);
-    ui_scene_close_modal(&scene, ret != MENU_ATTACHED_USB, "sleep-menu-pop");
-    return ret == MENU_ATTACHED_USB ? ret : 0;
+    return power_stock_sleep_now();
 }
 
 /* Not static in their files */
@@ -673,9 +669,15 @@ static int in_place(const struct menu_item_ex *item, bool step)
     }
     if (item == &clicker_row)
     {
+        /* Stock 2.0.5 Clicker plays through both headphones and speaker. */
+        bool on = g->keyclick_hardware || g->keyclick != 0;
         if (step)
-            set_value(&g->keyclick_hardware, !g->keyclick_hardware);
-        return g->keyclick_hardware ? LANG_ON : LANG_OFF;
+        {
+            on = !on;
+            set_value(&g->keyclick_hardware, on);
+            set_value(&g->keyclick, on ? 2 : 0);
+        }
+        return on ? LANG_ON : LANG_OFF;
     }
     if (item == &clock_24_row)
     {
@@ -786,7 +788,7 @@ ROW(home_notes, LANG_FRUIT_NOTES, notes, home_callback);
 ROW(home_screen_lock, LANG_FRUIT_SCREEN_LOCK, screen_lock, home_callback);
 ROW(home_stopwatch, LANG_FRUIT_STOPWATCH, stopwatch, home_callback);
 ROW(home_shuffle, LANG_SHUFFLE_SONGS, shuffle_songs, home_callback);
-ROW(home_sleep, LANG_FRUIT_SLEEP, sleep_timer, home_callback);
+ROW(home_sleep, LANG_FRUIT_SLEEP, sleep_now, home_callback);
 ROW(home_playback_report, LANG_SPUN, playback_report, home_callback);
 ROW(home_now_playing, LANG_NOW_PLAYING, now_playing, home_callback);
 
@@ -922,6 +924,12 @@ static bool extras_pane(const struct menu_item_ex *item)
         c.x = 170, c.y = 83;
         snprintf(c.title, sizeof(c.title), str(games == 1 ?
                  LANG_FRUIT_ONE_GAME : LANG_FRUIT_GAMES_COUNT), games);
+    }
+    else if (item == &home_sleep)
+    {
+        c.paint = power_stock_sleep_pane_paint;
+        c.baseline = 205;
+        strlcpy(c.title, str(LANG_FRUIT_SLEEP), sizeof(c.title));
     }
     else
         return false;

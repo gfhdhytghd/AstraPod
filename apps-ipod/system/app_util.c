@@ -37,6 +37,9 @@
 #include "draw/bmp.h"
 #include "playlist/playlist.h"
 #include "metadata/book_resume.h"
+#include "screens/fruit_menu.h"
+#include "screens/system/power_stock.h"
+#include "system/shutdown.h"
 #include "app_util.h"
 
 /* units used with output_dyn_value */
@@ -325,6 +328,13 @@ void clear_screen_buffer(bool update)
 
 void charging_splash(void)
 {
+    if (fruit_menu_active())
+    {
+        long ev = power_stock_charging_screen();
+        if (ev)
+            default_event_handler(ev);
+        return;
+    }
     splash(2*HZ, str(LANG_BATTERY_CHARGE));
     button_clear_queue();
 }

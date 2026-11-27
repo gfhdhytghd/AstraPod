@@ -294,6 +294,21 @@ def draw_dismiss_glyph(draw: ImageDraw.ImageDraw, cx: int, cy: int, color: Tuple
     draw.line([(cx + 3, cy - 3), (cx - 3, cy + 3)], fill=color, width=2)
 
 
+def draw_mic_glyph(draw: ImageDraw.ImageDraw, cx: int, cy: int, color: Tuple[int, int, int]) -> None:
+    """Crisp compact vector microphone glyph for Voice reply row."""
+    draw.rounded_rectangle((cx - 2, cy - 6, cx + 2, cy + 1), radius=2, fill=color)
+    draw.arc((cx - 5, cy - 3, cx + 5, cy + 4), start=0, end=180, fill=color, width=1)
+    draw.line([(cx, cy + 4), (cx, cy + 6)], fill=color, width=1)
+    draw.line([(cx - 3, cy + 6), (cx + 3, cy + 6)], fill=color, width=1)
+
+
+def draw_usage_glyph(draw: ImageDraw.ImageDraw, cx: int, cy: int, color: Tuple[int, int, int]) -> None:
+    """Crisp 3-bar chart glyph for Fruit Company Usage list row."""
+    draw.rectangle((cx - 5, cy + 1, cx - 3, cy + 5), fill=color)
+    draw.rectangle((cx - 1, cy - 3, cx + 1, cy + 5), fill=color)
+    draw.rectangle((cx + 3, cy - 5, cx + 5, cy + 5), fill=color)
+
+
 def draw_play_icon(draw: ImageDraw.ImageDraw, x: int, y: int, color: Tuple[int, int, int], h: int = 10) -> None:
     draw.polygon([(x, y), (x, y + h), (x + int(h * 0.85), y + h // 2)], fill=color)
 
@@ -520,6 +535,8 @@ class Theme:
         badge_char: Optional[str] = None,
         alert_row: bool = False,
         reply_row: bool = False,
+        mic_row: bool = False,
+        usage_row: bool = False,
         x0: int = 0,
         width: int = W,
         sheet_mode: bool = False,
@@ -562,6 +579,12 @@ class Theme:
             elif reply_row:
                 draw_reply_glyph(draw, x0 + 11, y + h // 2, (255, 255, 255) if selected else self.accent)
                 tx = x0 + 25
+            elif mic_row:
+                draw_mic_glyph(draw, x0 + 16, y + h // 2, (255, 255, 255) if selected else self.accent)
+                tx = x0 + 28
+            elif usage_row:
+                draw_usage_glyph(draw, x0 + 17, y + h // 2, (255, 255, 255) if selected else self.muted)
+                tx = x0 + 30
 
             rx = x0 + width - 10
             if chevron:
@@ -641,20 +664,42 @@ def render_01_projects(t: Theme) -> Image.Image:
         ("audio-dsp-bench", "done", "d", False, True, None, False),
         ("homelab-infra", "", "i", False, True, None, False),
     ]
-    for label, right, dot, sel, chev, badge, alert in rows:
-        t.draw_list_row(img, y, t.row_h, label, right=right, dot=dot, selected=sel, chevron=chev, badge_char=badge, alert_row=alert)
-        y += t.row_h
+    rh = 27 if t.fruit else t.row_h
+    for idx, (label, right, dot, sel, chev, badge, alert) in enumerate(rows):
+        t.draw_list_row(
+            img,
+            y,
+            rh,
+            label,
+            right=right,
+            dot=dot,
+            selected=sel,
+            chevron=chev,
+            badge_char=badge,
+            alert_row=alert,
+            draw_divider=not (t.fruit and idx == len(rows) - 1),
+        )
+        y += rh
 
-    # Subtle bottom hint (LEFT -> Usage, Hold PLAY -> Voice)
     draw = ImageDraw.Draw(img)
+    if t.fruit:
+        # Dedicated Usage row (Wheel + SELECT navigation only; LEFT/RIGHT stay playback)
+        draw.line([(0, y), (W, y)], fill=t.notes_border)
+        y += 1
+        t.draw_list_row(img, y, 27, "Usage", right="7d stats", chevron=True, usage_row=True, draw_divider=False)
+
+    # Bottom hint strip
     hy = H - 20
     if t.fruit:
         draw.line([(0, hy), (W, hy)], fill=t.keybar_border)
         draw.rectangle((0, hy + 1, W, H), fill=t.keybar_bg)
-    x = 14
-    draw_tri_left(draw, x, hy + 10, t.accent, w=5, h=7)
-    draw.text((x + 9, hy + 3), "Usage", font=font_reg(11), fill=t.muted)
-    draw_key_pair(draw, W - 104, hy + 3, "Hold PLAY", "Voice", t.accent, t.muted, size=11, gap=4)
+        draw_key_pair(draw, 12, hy + 3, "SEL", "Open", t.accent, t.muted, size=11, gap=4)
+        draw_key_pair(draw, W - 102, hy + 3, "Hold SEL", "Voice", t.accent, t.muted, size=11, gap=4)
+    else:
+        x = 14
+        draw_tri_left(draw, x, hy + 10, t.accent, w=5, h=7)
+        draw.text((x + 9, hy + 3), "Usage", font=font_reg(11), fill=t.muted)
+        draw_key_pair(draw, W - 104, hy + 3, "Hold PLAY", "Voice", t.accent, t.muted, size=11, gap=4)
     return img
 
 
@@ -672,9 +717,8 @@ def render_02_threads(t: Theme) -> Image.Image:
         draw.rounded_rectangle((8, y + 2, 60, y + bar_h - 3), radius=3, fill=t.accent)
         draw_centered(draw, 34, y + bar_h // 2, "Active", font_bold(11), (255, 255, 255))
         draw_centered(draw, 78, y + bar_h // 2, "All", font_med(11), t.muted)
-        draw_tri_left(draw, W - 36, y + bar_h // 2, t.faint, w=5, h=6)
-        draw.text((W - 27, y + 3), "/", font=font_reg(11), fill=t.faint)
-        draw_tri_right(draw, W - 18, y + bar_h // 2, t.faint, w=5, h=6)
+        # Fruit Company: wheel up + SELECT switches filter (no LEFT/RIGHT arrows)
+        draw_key_pair(draw, W - 72, y + 3, "SEL", "Switch", t.accent, t.muted, size=10, gap=4)
         y += bar_h
 
     row_h = 27 if t.fruit else 28
@@ -744,11 +788,18 @@ def render_03_detail(t: Theme) -> Image.Image:
 
     # Summary-first wrapped assistant message
     body_f = font_reg(13)
-    msg = (
-        "Updated the pocket remote screens and button map. "
-        "SELECT opens Actions; hold PLAY triggers voice input on the computer.\n"
-        "Next: generating 320x240 Fruit Company and Scrim mockups."
-    )
+    if t.fruit:
+        msg = (
+            "Updated the pocket remote screens and button map. "
+            "Scroll with the wheel; SELECT opens Actions and Voice reply.\n"
+            "Next: generating 320x240 Fruit Company and Scrim mockups."
+        )
+    else:
+        msg = (
+            "Updated the pocket remote screens and button map. "
+            "SELECT opens Actions; hold PLAY triggers voice input on the computer.\n"
+            "Next: generating 320x240 Fruit Company and Scrim mockups."
+        )
     body_top = y
     for para_i, para in enumerate(msg.split("\n")):
         for ln in wrap_lines(draw, para, body_f, pw):
@@ -777,17 +828,22 @@ def render_03_detail(t: Theme) -> Image.Image:
     thumb_h = max(20, (track_bot - track_top) // 2)
     draw.rectangle((track_x, track_top, track_x + 2, track_top + thumb_h), fill=t.accent)
 
-    # Bottom bar: Actions, local Page, Hold PLAY Voice
+    # Bottom key bar (theme-specific button map)
     bar_y = H - 20
     draw.line([(0, bar_y), (W, bar_y)], fill=t.keybar_border)
     draw.rectangle((0, bar_y + 1, W, H), fill=t.keybar_bg)
-    x1 = draw_key_pair(draw, 10, bar_y + 3, "SEL", "Actions", t.accent, t.muted, size=11, gap=4)
-    px_lr = x1 + 14
-    draw_tri_left(draw, px_lr, bar_y + 10, t.accent, w=5, h=7)
-    draw.text((px_lr + 7, bar_y + 3), "/", font=font_reg(11), fill=t.faint)
-    draw_tri_right(draw, px_lr + 13, bar_y + 10, t.accent, w=5, h=7)
-    draw.text((px_lr + 22, bar_y + 3), "Page", font=font_reg(11), fill=t.muted)
-    draw_key_pair(draw, W - 102, bar_y + 3, "Hold PLAY", "Voice", t.accent, t.muted, size=11, gap=4)
+    if t.fruit:
+        x1 = draw_key_pair(draw, 10, bar_y + 3, "Wheel", "Scroll", t.accent, t.muted, size=11, gap=4)
+        draw_key_pair(draw, x1 + 18, bar_y + 3, "SEL", "Actions", t.accent, t.muted, size=11, gap=4)
+        draw_key_pair(draw, W - 98, bar_y + 3, "Hold SEL", "Voice", t.accent, t.muted, size=11, gap=4)
+    else:
+        x1 = draw_key_pair(draw, 10, bar_y + 3, "SEL", "Actions", t.accent, t.muted, size=11, gap=4)
+        px_lr = x1 + 14
+        draw_tri_left(draw, px_lr, bar_y + 10, t.accent, w=5, h=7)
+        draw.text((px_lr + 7, bar_y + 3), "/", font=font_reg(11), fill=t.faint)
+        draw_tri_right(draw, px_lr + 13, bar_y + 10, t.accent, w=5, h=7)
+        draw.text((px_lr + 22, bar_y + 3), "Page", font=font_reg(11), fill=t.muted)
+        draw_key_pair(draw, W - 102, bar_y + 3, "Hold PLAY", "Voice", t.accent, t.muted, size=11, gap=4)
     return img
 
 
@@ -796,7 +852,7 @@ def render_04_approval(t: Theme) -> Image.Image:
     img = dim_image(base, dim_alpha=120 if t.fruit else 145)
     draw = ImageDraw.Draw(img)
 
-    mx, my, mw, mh = 8, 12, W - 16, H - 24
+    mx, my, mw, mh = (8, 10, W - 16, H - 20) if t.fruit else (8, 12, W - 16, H - 24)
     radius = 6 if t.fruit else 0
     if radius:
         draw.rounded_rectangle((mx, my, mx + mw, my + mh), radius=radius, fill=t.sheet_bg, outline=t.sheet_border, width=1)
@@ -813,57 +869,79 @@ def render_04_approval(t: Theme) -> Image.Image:
         draw.rectangle((mx + 2, my + 2, mx + mw - 2, my + 5), fill=DOT_RED)
 
     # Header
-    hx, hy = mx + 12, my + 12
+    hx, hy = mx + 12, my + (10 if t.fruit else 12)
     draw_status_dot(img, hx + 4, hy + 8, "b", radius=4, halo=t.sheet_bg)
     draw = ImageDraw.Draw(img)
     draw.text((hx + 14, hy), "T3 · podbox", font=font_bold(13), fill=t.fg)
     th_txt = "Fix PodLink stall"
     tw, _ = text_size(draw, th_txt, font_reg(11))
     draw.text((mx + mw - 12 - tw, hy + 2), th_txt, font=font_reg(11), fill=t.muted)
-    draw.line([(hx, hy + 22), (mx + mw - 12, hy + 22)], fill=t.divider)
+    draw.line([(hx, hy + 21), (mx + mw - 12, hy + 21)], fill=t.divider)
 
     # Action category chip
-    cy = hy + 29
+    cy = hy + (26 if t.fruit else 29)
     chip = "RUN COMMAND"
     cw, _ = text_size(draw, chip, font_bold(10))
     draw.rounded_rectangle((hx, cy, hx + cw + 12, cy + 17), radius=3 if t.fruit else 0, fill=t.chip_bg)
     draw.text((hx + 6, cy + 2), chip, font=font_bold(10), fill=t.chip_fg)
 
     # Command preview box
-    cmd_y = cy + 23
-    cmd_h = 46
+    cmd_y = cy + (21 if t.fruit else 23)
+    cmd_h = 40 if t.fruit else 46
     draw.rounded_rectangle((hx, cmd_y, mx + mw - 12, cmd_y + cmd_h), radius=3 if t.fruit else 0, fill=t.code_bg, outline=t.divider, width=1)
     cmd_f = font_mono(11)
     cmd_txt = 'git commit -m "fix: guard USB EP0 stall on reconnect"'
     for i, ln in enumerate(wrap_lines(draw, cmd_txt, cmd_f, mw - 36, max_lines=2)):
-        draw.text((hx + 7, cmd_y + 7 + i * 16), ln, font=cmd_f, fill=t.fg)
+        draw.text((hx + 7, cmd_y + (5 if t.fruit else 7) + i * 15), ln, font=cmd_f, fill=t.fg)
 
-    # Two large Allow / Deny tactile buttons with crisp vector triangles
-    by = cmd_y + cmd_h + 12
-    bh = 40
-    bw = (mw - 24 - 10) // 2
-    btn_f = font_bold(14)
+    if t.fruit:
+        # Fruit Company: Wheel selects Allow / Deny / All options… (no LEFT/RIGHT arrows)
+        by = cmd_y + cmd_h + 9
+        bh = 34
+        bw = (mw - 24 - 10) // 2
+        btn_f = font_bold(13)
 
-    # Left: Allow
-    draw.rounded_rectangle((hx, by, hx + bw, by + bh), radius=4 if t.fruit else 0, fill=t.yes_bg, outline=t.yes_border, width=2)
-    aw, _ = text_size(draw, "Allow", btn_f)
-    total_w = 7 + 8 + aw
-    ax0 = hx + (bw - total_w) // 2
-    draw_tri_left(draw, ax0, by + bh // 2, t.yes_fg, w=7, h=10)
-    draw_centered(draw, ax0 + 7 + 8 + aw // 2, by + bh // 2, "Allow", btn_f, t.yes_fg)
+        draw.rounded_rectangle((hx, by, hx + bw, by + bh), radius=4, fill=t.yes_bg, outline=t.yes_border, width=1)
+        draw_centered(draw, hx + bw // 2, by + bh // 2, "Allow", btn_f, t.yes_fg)
 
-    # Right: Deny
-    rx = hx + bw + 10
-    draw.rounded_rectangle((rx, by, rx + bw, by + bh), radius=4 if t.fruit else 0, fill=t.no_bg, outline=t.no_border, width=2)
-    dw, _ = text_size(draw, "Deny", btn_f)
-    total_d = dw + 8 + 7
-    dx0 = rx + (bw - total_d) // 2
-    draw_centered(draw, dx0 + dw // 2, by + bh // 2, "Deny", btn_f, t.no_fg)
-    draw_tri_right(draw, dx0 + dw + 8, by + bh // 2, t.no_fg, w=7, h=10)
+        rx = hx + bw + 10
+        draw.rounded_rectangle((rx, by, rx + bw, by + bh), radius=4, fill=t.no_bg, outline=t.no_border, width=1)
+        draw_centered(draw, rx + bw // 2, by + bh // 2, "Deny", btn_f, t.no_fg)
 
-    # Bottom key bar labels
-    draw_key_pair(draw, mx + 14, ky + 4, "SELECT", "All options", t.accent, t.muted)
-    draw_key_pair(draw, mx + mw - 92, ky + 4, "MENU", "Later", t.accent, t.muted)
+        # Safe default focused row: All options… (prevents stray SELECT from approving)
+        oy = by + bh + 8
+        oh = 26
+        draw.rounded_rectangle((hx, oy, mx + mw - 12, oy + oh), radius=4, fill=t.accent, outline=t.sel_edge, width=1)
+        draw.text((hx + 10, oy + 5), "All options…", font=font_med(12), fill=(255, 255, 255))
+        draw_chevron(draw, mx + mw - 24, oy + oh // 2, (255, 255, 255), size=4)
+
+        x1 = draw_key_pair(draw, mx + 12, ky + 4, "Wheel", "Select", t.accent, t.muted, size=11, gap=4)
+        draw_key_pair(draw, x1 + 14, ky + 4, "SEL", "Choose", t.accent, t.muted, size=11, gap=4)
+        draw_key_pair(draw, mx + mw - 84, ky + 4, "MENU", "Later", t.accent, t.muted, size=11, gap=4)
+    else:
+        # Classic / Scrim: LEFT = Allow, RIGHT = Deny, SELECT = All options
+        by = cmd_y + cmd_h + 12
+        bh = 40
+        bw = (mw - 24 - 10) // 2
+        btn_f = font_bold(14)
+
+        draw.rectangle((hx, by, hx + bw, by + bh), fill=t.yes_bg, outline=t.yes_border, width=2)
+        aw, _ = text_size(draw, "Allow", btn_f)
+        total_w = 7 + 8 + aw
+        ax0 = hx + (bw - total_w) // 2
+        draw_tri_left(draw, ax0, by + bh // 2, t.yes_fg, w=7, h=10)
+        draw_centered(draw, ax0 + 7 + 8 + aw // 2, by + bh // 2, "Allow", btn_f, t.yes_fg)
+
+        rx = hx + bw + 10
+        draw.rectangle((rx, by, rx + bw, by + bh), fill=t.no_bg, outline=t.no_border, width=2)
+        dw, _ = text_size(draw, "Deny", btn_f)
+        total_d = dw + 8 + 7
+        dx0 = rx + (bw - total_d) // 2
+        draw_centered(draw, dx0 + dw // 2, by + bh // 2, "Deny", btn_f, t.no_fg)
+        draw_tri_right(draw, dx0 + dw + 8, by + bh // 2, t.no_fg, w=7, h=10)
+
+        draw_key_pair(draw, mx + 14, ky + 4, "SELECT", "All options", t.accent, t.muted)
+        draw_key_pair(draw, mx + mw - 92, ky + 4, "MENU", "Later", t.accent, t.muted)
     return img
 
 
@@ -926,24 +1004,42 @@ def render_06_actions(t: Theme) -> Image.Image:
 
     y = sy + 28
     rh = 24
-    controls = [
-        ("Interrupt turn", "confirm", False, True),
-        ("Open on computer", "", False, False),
-    ]
-    for label, right, sel, div in controls:
-        t.draw_list_row(img, y, rh, label, right=right, selected=sel, x0=mx + 2, width=mw - 4, sheet_mode=True, draw_divider=div)
-        y += rh
+    if t.fruit:
+        controls = [
+            ("Voice reply", "", False, True, True),
+            ("Interrupt turn", "confirm", False, True, False),
+            ("Open on computer", "", False, False, False),
+        ]
+        for label, right, sel, div, is_mic in controls:
+            t.draw_list_row(img, y, rh, label, right=right, selected=sel, mic_row=is_mic, x0=mx + 2, width=mw - 4, sheet_mode=True, draw_divider=div)
+            y += rh
 
-    sep_col = t.notes_border if t.fruit else t.divider
-    draw.line([(mx + 10, y + 3), (mx + mw - 10, y + 3)], fill=sep_col)
-    y += 7
+        draw.line([(mx + 10, y + 3), (mx + mw - 10, y + 3)], fill=t.notes_border)
+        y += 7
 
-    replies = [
-        ("Run unit tests", "", True, True),
-        ("Continue", "", False, True),
-        ("Fix the failing test", "", False, True),
-        ("Summarize changes", "", False, False),
-    ]
+        replies = [
+            ("Run unit tests", "", True, True),
+            ("Continue", "", False, True),
+            ("Summarize changes", "", False, False),
+        ]
+    else:
+        controls = [
+            ("Interrupt turn", "confirm", False, True),
+            ("Open on computer", "", False, False),
+        ]
+        for label, right, sel, div in controls:
+            t.draw_list_row(img, y, rh, label, right=right, selected=sel, x0=mx + 2, width=mw - 4, sheet_mode=True, draw_divider=div)
+            y += rh
+
+        draw.line([(mx + 10, y + 3), (mx + mw - 10, y + 3)], fill=t.divider)
+        y += 7
+
+        replies = [
+            ("Run unit tests", "", True, True),
+            ("Continue", "", False, True),
+            ("Fix the failing test", "", False, True),
+            ("Summarize changes", "", False, False),
+        ]
     for label, right, sel, div in replies:
         t.draw_list_row(img, y, rh, label, right=right, selected=sel, reply_row=True, x0=mx + 2, width=mw - 4, sheet_mode=True, draw_divider=div)
         y += rh
@@ -989,14 +1085,19 @@ def render_07_confirm(t: Theme) -> Image.Image:
     draw.rounded_rectangle((rx, by, rx + bw, by + bh), radius=4 if t.fruit else 0, fill=t.no_bg, outline=t.no_border, width=1)
     draw_centered(draw, rx + bw // 2, by + bh // 2, "Interrupt", font_med(13), t.no_fg)
 
-    # Card footer hint
-    hx = mx + 12
-    draw_tri_left(draw, hx, ky + 11, t.accent, w=4, h=6)
-    draw.text((hx + 6, ky + 4), "/", font=font_reg(10), fill=t.faint)
-    draw_tri_right(draw, hx + 11, ky + 11, t.accent, w=4, h=6)
-    draw.text((hx + 19, ky + 4), "Select", font=font_reg(10), fill=t.muted)
-    x2 = draw_key_pair(draw, mx + 88, ky + 4, "SEL", "Confirm", t.accent, t.muted, size=10, gap=4)
-    draw_key_pair(draw, x2 + 12, ky + 4, "MENU", "Cancel", t.accent, t.muted, size=10, gap=4)
+    # Card footer hint (Fruit: Wheel only; Scrim: L/R + Wheel)
+    if t.fruit:
+        x1 = draw_key_pair(draw, mx + 12, ky + 4, "Wheel", "Select", t.accent, t.muted, size=10, gap=4)
+        x2 = draw_key_pair(draw, x1 + 12, ky + 4, "SEL", "Confirm", t.accent, t.muted, size=10, gap=4)
+        draw_key_pair(draw, x2 + 12, ky + 4, "MENU", "Cancel", t.accent, t.muted, size=10, gap=4)
+    else:
+        hx = mx + 12
+        draw_tri_left(draw, hx, ky + 11, t.accent, w=4, h=6)
+        draw.text((hx + 6, ky + 4), "/", font=font_reg(10), fill=t.faint)
+        draw_tri_right(draw, hx + 11, ky + 11, t.accent, w=4, h=6)
+        draw.text((hx + 19, ky + 4), "Select", font=font_reg(10), fill=t.muted)
+        x2 = draw_key_pair(draw, mx + 88, ky + 4, "SEL", "Confirm", t.accent, t.muted, size=10, gap=4)
+        draw_key_pair(draw, x2 + 12, ky + 4, "MENU", "Cancel", t.accent, t.muted, size=10, gap=4)
     return img
 
 
@@ -1102,9 +1203,13 @@ def render_09_offline(t: Theme) -> Image.Image:
     ky = H - 22
     draw.line([(0, ky), (W, ky)], fill=t.keybar_border)
     draw.rectangle((0, ky + 1, W, H), fill=t.keybar_bg)
-    draw_key_pair(draw, 14, ky + 4, "SELECT", "Retry", t.accent, t.muted)
-    draw_key_pair(draw, 124, ky + 4, "LEFT", "Usage", t.accent, t.muted)
-    draw_key_pair(draw, W - 78, ky + 4, "MENU", "Exit", t.accent, t.muted)
+    if t.fruit:
+        draw_key_pair(draw, 14, ky + 4, "SELECT", "Retry", t.accent, t.muted)
+        draw_key_pair(draw, W - 78, ky + 4, "MENU", "Exit", t.accent, t.muted)
+    else:
+        draw_key_pair(draw, 14, ky + 4, "SELECT", "Retry", t.accent, t.muted)
+        draw_key_pair(draw, 124, ky + 4, "LEFT", "Usage", t.accent, t.muted)
+        draw_key_pair(draw, W - 78, ky + 4, "MENU", "Exit", t.accent, t.muted)
     return img
 
 

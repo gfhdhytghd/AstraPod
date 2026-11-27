@@ -41,7 +41,7 @@ def prepare_ultra(root):
     themes.mkdir(exist_ok=True)
     fallback = themes / "fruit-company-ultra.podtheme"
     if not fallback.exists():
-        fallback.write_text(ULTRA_FALLBACK_THEME)
+        fallback.write_text(ULTRA_FALLBACK_THEME + "palette.background=none\n")
 
 
 def walk(sim, has_music, visit_settings):
@@ -53,18 +53,22 @@ def walk(sim, has_music, visit_settings):
         assert pixels, f"{name}: no frame reached the panel"
         frames[name] = [(0, Image.frombytes("RGB", (W, H), pixels[-1]))]
 
+    def wheel(key, count):
+        for _ in range(count):
+            sim.send("down " + key)
+            sim.wait(5)
+            sim.send("up " + key)
+            sim.wait(18)
+
     if visit_settings:
-        for _ in range(5):
-            sim.tap("down", 12)
+        wheel("down", 5)
         tap("settings-in", "select")
-        for _ in range(17):
-            sim.tap("down", 12)
+        wheel("down", 17)
         sim.wait(45)
         tap("advanced", "select")
         tap("settings-out", "menu")
         tap("home-after-settings", "menu")
-        for _ in range(5):
-            sim.tap("up", 12)
+        wheel("up", 5)
         sim.wait(45)
     if has_music:
         tap("music-in", "select")
@@ -119,7 +123,9 @@ def check(frames, theme, has_music, visit_settings):
         if name == "advanced":
             row = read_text(image, (0, 20, 145, 44), 7)
             if "Sound Settings" not in row:
-                failures.append(f"{name}: expected Sound Settings, saw {row!r}")
+                pane = read_text(image, (165, 20, W, 44), 7)
+                if "Sound Settings" not in pane:
+                    failures.append(f"{name}: expected Sound Settings, saw {row!r} / {pane!r}")
         if name in ("album-in", "back-1-album"):
             tracks = read_text(image, (35, 96, 285, 145), 6)
             if "Track 02" not in tracks or "Track 03" not in tracks:

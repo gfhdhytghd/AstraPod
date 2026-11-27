@@ -1,5 +1,6 @@
 /* Check the actual MP4 playback loop with a synchronous decoder double. */
 #include <assert.h>
+#include <stdarg.h>
 #include <sys/stat.h>
 #include "plugin.h"
 #include "mp4_demux.h"
@@ -117,11 +118,21 @@ const struct hw_h264_api target_hw_h264_api = {
 
 static int open_file(const char *path, int flags, ...)
 {
-    int fd = open(path, flags);
+    int permissions = 0;
+    if (flags & O_CREAT)
+    {
+        va_list args;
+        va_start(args, flags);
+        permissions = va_arg(args, int);
+        va_end(args);
+    }
+    int fd = open(path, flags, permissions);
     if (fd >= 0)
         open_files++;
     return fd;
 }
+
+static int make_dir(const char *path) { return mkdir(path, 0700); }
 
 static int close_file(int fd)
 {
@@ -199,7 +210,9 @@ static void draw(unsigned char * const src[3], int sx, int sy, int stride,
     drawn++;
 }
 
-static const struct settings settings = { .backlight_timeout = 17 };
+static const struct settings settings = {
+    .backlight_timeout = 17, .video_fit = true,
+};
 static const struct status status;
 
 static const struct plugin_api api = {
@@ -213,6 +226,10 @@ static const struct plugin_api api = {
     .ffilesize = file_size,
     .lseek = lseek,
     .read = read,
+    .write = write,
+    .mkdir = make_dir,
+    .rename = rename,
+    .remove = remove,
     .memset = memset,
     .cpu_boost = boost,
     .get_action = action,
@@ -261,6 +278,14 @@ int main(int argc, char **argv)
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 1);
     assert(opens == 2 && closes == 2 && seeks == 1);
 
+    reset(FINISH);
+    assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 0);
+    assert(decoded == 96 && drawn == 93);
+
+    reset(FINISH);
+    assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 0);
+    assert(decoded == 336);
+
     reset(USB_EXIT);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 2);
     assert(opens == 1 && closes == 1 && !active);
@@ -294,5 +319,5 @@ int main(int argc, char **argv)
     assert(audio_opens == 2 && audio_closes == 2 && !audio_active);
 
     rock_h264_end();
-    puts("PASS H.264 demux, complete playback, seek, Menu, USB, errors, workspace");
+    puts("PASS H.264 demux, complete playback, seek, resume, Menu, USB, errors, workspace");
 }

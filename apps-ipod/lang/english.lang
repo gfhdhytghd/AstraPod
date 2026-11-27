@@ -33917,3 +33917,439 @@
     *: "No Name"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_PHOTO_TRANSITION
+  desc: Photo slideshow setting
+  user: core
+  <source>
+    *: "Transitions"
+  </source>
+  <dest>
+    *: "Transitions"
+  </dest>
+  <voice>
+    *: "Transitions"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_REPEAT
+  desc: Photo slideshow setting
+  user: core
+  <source>
+    *: "Repeat"
+  </source>
+  <dest>
+    *: "Repeat"
+  </dest>
+  <voice>
+    *: "Repeat"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_FADE
+  desc: Photo slideshow setting
+  user: core
+  <source>
+    *: "Cross Fade"
+  </source>
+  <dest>
+    *: "Cross Fade"
+  </dest>
+  <voice>
+    *: "Cross Fade"
+  </voice>
+</phrase>
+
+
+<phrase>
+  id: LANG_TIME_PER_SLIDE
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Time Per Slide"
+  </source>
+  <dest>
+    *: "Time Per Slide"
+  </dest>
+  <voice>
+    *: "Time Per Slide"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_MANUAL
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Manual"
+  </source>
+  <dest>
+    *: "Manual"
+  </dest>
+  <voice>
+    *: "Manual"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_NONE
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "None"
+  </source>
+  <dest>
+    *: "None"
+  </dest>
+  <voice>
+    *: "None"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_MUSIC
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Music"
+  </source>
+  <dest>
+    *: "Music"
+  </dest>
+  <voice>
+    *: "Music"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_SHUFFLE
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Shuffle Photos"
+  </source>
+  <dest>
+    *: "Shuffle Photos"
+  </dest>
+  <voice>
+    *: "Shuffle Photos"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_BLACK
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Fade To Black"
+  </source>
+  <dest>
+    *: "Fade To Black"
+  </dest>
+  <voice>
+    *: "Fade To Black"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_ZOOM
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Zoom Out"
+  </source>
+  <dest>
+    *: "Zoom Out"
+  </dest>
+  <voice>
+    *: "Zoom Out"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_WIPE
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Wipe Across"
+  </source>
+  <dest>
+    *: "Wipe Across"
+  </dest>
+  <voice>
+    *: "Wipe Across"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_PHOTO_CENTER
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Wipe Center"
+  </source>
+  <dest>
+    *: "Wipe Center"
+  </dest>
+  <voice>
+    *: "Wipe Center"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_MEDIA_TV_OUT
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "TV Out"
+  </source>
+  <dest>
+    *: "TV Out"
+  </dest>
+  <voice>
+    *: "TV Out"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_MEDIA_TV_SIGNAL
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "TV Signal"
+  </source>
+  <dest>
+    *: "TV Signal"
+  </dest>
+  <voice>
+    *: "TV Signal"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_MEDIA_ASK
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Ask"
+  </source>
+  <dest>
+    *: "Ask"
+  </dest>
+  <voice>
+    *: "Ask"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_MEDIA_NTSC
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "NTSC"
+  </source>
+  <dest>
+    *: "NTSC"
+  </dest>
+  <voice>
+    *: "NTSC"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_MEDIA_PAL
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "PAL"
+  </source>
+  <dest>
+    *: "PAL"
+  </dest>
+  <voice>
+    *: "PAL"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_VIDEO_TV_SCREEN
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "TV Screen"
+  </source>
+  <dest>
+    *: "TV Screen"
+  </dest>
+  <voice>
+    *: "TV Screen"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_VIDEO_STANDARD
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Standard"
+  </source>
+  <dest>
+    *: "Standard"
+  </dest>
+  <voice>
+    *: "Standard"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_VIDEO_WIDESCREEN
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Widescreen"
+  </source>
+  <dest>
+    *: "Widescreen"
+  </dest>
+  <voice>
+    *: "Widescreen"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_VIDEO_FIT
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Fit to Screen"
+  </source>
+  <dest>
+    *: "Fit to Screen"
+  </dest>
+  <voice>
+    *: "Fit to Screen"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_VIDEO_ALT_AUDIO
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Alternate Audio"
+  </source>
+  <dest>
+    *: "Alternate Audio"
+  </dest>
+  <voice>
+    *: "Alternate Audio"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_VIDEO_CAPTIONS
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Captions"
+  </source>
+  <dest>
+    *: "Captions"
+  </dest>
+  <voice>
+    *: "Captions"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_VIDEO_SUBTITLES
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Subtitles"
+  </source>
+  <dest>
+    *: "Subtitles"
+  </dest>
+  <voice>
+    *: "Subtitles"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_VIDEO_UNKNOWN_ARTIST
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Unknown Artist"
+  </source>
+  <dest>
+    *: "Unknown Artist"
+  </dest>
+  <voice>
+    *: "Unknown Artist"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_VIDEO_UNKNOWN_SHOW
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "Unknown Show"
+  </source>
+  <dest>
+    *: "Unknown Show"
+  </dest>
+  <voice>
+    *: "Unknown Show"
+  </voice>
+</phrase>
+
+
+
+<phrase>
+  id: LANG_PHOTO_OTG
+  desc: Stock media browser
+  user: core
+  <source>
+    *: "On-The-Go"
+  </source>
+  <dest>
+    *: "On-The-Go"
+  </dest>
+  <voice>
+    *: "On-The-Go"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTO_MUSIC_PICKER
+  desc: Stock photo slideshow music picker
+  user: core
+  <source>
+    *: "Slideshow Music"
+  </source>
+  <dest>
+    *: "Slideshow Music"
+  </dest>
+  <voice>
+    *: "Slideshow Music"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTO_SECONDS
+  desc: Slideshow interval unit
+  user: core
+  <source>
+    *: "Seconds"
+  </source>
+  <dest>
+    *: "Seconds"
+  </dest>
+  <voice>
+    *: "Seconds"
+  </voice>
+</phrase>

@@ -822,7 +822,8 @@ static const struct bitmap *header_cover(void *data, struct dim *size)
  * Called when a new dir is loaded (for example when returning from other apps ...)
  * also completely redraws the tree
  */
-static int update_dir(struct browser_album_panel *panel)
+static int update_dir(struct browser_album_panel *panel,
+                      struct ui_scene *entry_scene)
 {
     struct gui_synclist * const list = &browser_lists;
     int show_path_in_browser = global_settings.show_path_in_browser;
@@ -1004,11 +1005,13 @@ static int update_dir(struct browser_album_panel *panel)
      * Every level of an audiobook browse is a spoken one, the tracks under a
      * book included, which is the other reason the level test governs: a track
      * list carries no art in any menu. */
+    bool album = id3db && browser_db_is_album_list(&tc);
+    list->require_row_glyphs = album ||
+        (id3db && browser_db_get_attr(&tc) == FILE_ATTR_AUDIO);
     {
         bool tall_rows = false, artist_tiles = false;
         if (*tc.dirfilter == SHOW_ID3DB)
         {
-            bool album = browser_db_is_album_list(&tc);
             bool artist = !album && browser_db_is_artist_list(&tc);
 
             if (browser_db_list_spoken_kind(&tc) == 2)
@@ -1060,6 +1063,8 @@ static int update_dir(struct browser_album_panel *panel)
                  < top_item + gui_synclist_get_nb_lines(list, SCREEN_MAIN))
             gui_synclist_set_top_item(list, top_item);
     }
+    if (entry_scene && tc.filesindir > 0 && list->require_row_glyphs)
+        ui_scene_capture(entry_scene, tc.browse, list, true);
     gui_synclist_draw_settled(list);
     gui_synclist_speak_item(list);
     return tc.filesindir;
@@ -1544,7 +1549,8 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
     lastextra = -1;
 
     start_wps = false;
-    numentries = update_dir(panel);
+    numentries = update_dir(panel, tc.browse->flags & BROWSE_MUSIC_PUSH ?
+                                  scene : NULL);
     reload_dir = false;
     if (numentries == -1)
         return exit_to_new_screen(GO_TO_PREVIOUS);  /* currdir is not a directory */
@@ -1556,6 +1562,7 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
         return exit_to_new_screen(GO_TO_PREVIOUS);  /* No files found for rockbox_browse() */
     }
 
+    ui_scene_start(scene);
     while(tc.browse && tc.is_browsing) {
         bool restore = false;
         if (tc.dirlevel < 0)
@@ -1594,7 +1601,7 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
                 }
                 if (!reload_dir)
                 {
-                    numentries = update_dir(panel);
+                    numentries = update_dir(panel, NULL);
                     list_select_retitle();
                     continue;
                 }
@@ -1879,7 +1886,7 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
                         break;
 
                     case ONPLAY_SELECT:
-                        numentries = update_dir(panel);
+                        numentries = update_dir(panel, NULL);
                         list_select_begin(&browser_lists, tc.selected_item,
                                           row_selectable, &tc);
                         continue;
@@ -1962,7 +1969,7 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
             if (reload_dir)
                 list_select_end();
             /* restore display */
-            numentries = update_dir(panel);
+            numentries = update_dir(panel, NULL);
             list_select_retitle();
             reload_dir = false;
             if (currdir[1] && (numentries < 0))

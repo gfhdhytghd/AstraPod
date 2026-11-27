@@ -493,6 +493,10 @@ static int browser(void* param)
     };
     if ((intptr_t)param == GO_TO_FILEBROWSER || (intptr_t)param == GO_TO_DBBROWSER)
         browse.flags |= BROWSE_HOME_LIBRARY;
+    int screen = (intptr_t)param;
+    if (fruit_menu_active() && (screen == GO_TO_LIBRARY_ROW ||
+        (screen >= GO_TO_TAGNAVI_FIRST && screen <= GO_TO_TAGNAVI_LAST)))
+        browse.flags |= BROWSE_MUSIC_PUSH;
 
     /* The Search row at the top of the file browser's root. Offered only when
      * the directory cache can answer it: the names it searches are the cache's

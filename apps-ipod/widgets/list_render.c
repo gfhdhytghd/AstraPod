@@ -2624,17 +2624,13 @@ static bool batch_submit(struct native_list *render,
     return true;
 }
 
-static void prefetch_list_page(struct native_list *render, const struct list_geometry *g)
+static void prefetch_list_rows(struct native_list *render, int first, int end,
+                               int step, int dim)
 {
     struct gui_synclist *list = render->owner;
-    int start = MAX(0, render->rows.value[UI_SCROLL_OFFSET]);
-    int rows = g->rows.height / g->pitch + 1;
-    int dim = MIN(render->theme.metric[UI_METRIC_LIST_ART_SIZE], g->pitch);
-    int font = render->text_font >= 0 ? render->text_font : list->parent[SCREEN_MAIN]->font;
-    if (!list->callback_get_item_name || start == render->prefetched_top)
-        return;
-    render->prefetched_top = start;
-    for (int i = start; i < MIN(list->nb_items, start + 2 * rows); i++)
+    int font = render->text_font >= 0 ? render->text_font :
+               list->parent[SCREEN_MAIN]->font;
+    for (int i = first; step > 0 ? i < end : i > end; i += step)
     {
         if (list->callback_prefetch_art)
             list->callback_prefetch_art(i, list->data, dim);
@@ -2643,6 +2639,38 @@ static void prefetch_list_page(struct native_list *render, const struct list_geo
         if (label && P2ID(label) <= VOICEONLY_DELIMITER)
             font_prefetch_text(font, P2STR(label));
     }
+}
+
+static void prefetch_list_page(struct native_list *render,
+                               const struct list_geometry *g)
+{
+    struct gui_synclist *list = render->owner;
+    int start = MIN(list->nb_items,
+                    MAX(0, render->rows.value[UI_SCROLL_OFFSET]));
+    int previous = render->prefetched_top;
+    if (!list->callback_get_item_name || start == previous)
+        return;
+    render->prefetched_top = start;
+    int rows = g->rows.height / g->pitch;
+    int dim = MIN(render->theme.metric[UI_METRIC_LIST_ART_SIZE], g->pitch);
+    if (!list->require_row_glyphs)
+    {
+        prefetch_list_rows(render, start,
+                           MIN(list->nb_items, start + 2 * (rows + 1)), 1, dim);
+        return;
+    }
+
+    /* The current rows have drawn. Queue the nearest rows in the direction
+     * of travel, or both neighbours when opening the list. */
+    font_prefetch_begin();
+    if (previous < 0 || start < previous)
+        prefetch_list_rows(render, start - 1, MAX(-1, start - rows - 1), -1, dim);
+    if (previous < 0 || start > previous)
+    {
+        int next = MIN(list->nb_items, start + rows + (render->row_shift != 0));
+        prefetch_list_rows(render, next, MIN(list->nb_items, next + rows), 1, dim);
+    }
+    font_prefetch_end();
 }
 
 /* keep_pane leaves the pane as it is on screen: the list moved, not it.
@@ -2664,8 +2692,9 @@ static void draw_list(struct gui_synclist *list, bool status_only,
             status_only = false;
         render->artist_generation = generation;
     }
-    /* Present complete glyphs in plugin lists and native modals before input. */
-    bool prefetch = !rock_ui_native();
+    /* A scene snapshot and a scrolling library must both contain the text
+     * of the visible rows. Let the font renderer fill any misses directly. */
+    bool prefetch = !rock_ui_native() && !list->require_row_glyphs;
     if (prefetch)
         font_prefetch_begin();
     unsigned epoch = font_prefetch_epoch();
@@ -2695,7 +2724,8 @@ static void draw_list(struct gui_synclist *list, bool status_only,
     refresh_tokens(render);
     if (!same_owner || render->selection != list->selected_item)
     {
-        render->prefetched_top = -1;
+        if (!same_owner || !list->require_row_glyphs)
+            render->prefetched_top = -1;
         render->owner = list;
         render->generation = list->generation;
         render->selection = list->selected_item;
@@ -2898,6 +2928,8 @@ static void draw_list(struct gui_synclist *list, bool status_only,
 #endif
     if (prefetch)
         font_prefetch_end();
+    else if (list->require_row_glyphs && !rock_ui_native() && !status_only)
+        prefetch_list_page(render, &g);
 
 done:
     core_put_data_pinned(render);

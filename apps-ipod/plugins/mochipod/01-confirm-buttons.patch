@@ -1,0 +1,87 @@
+Answer every yes/no prompt with the buttons: Center is Yes, Menu is No.
+Save and exit, Start new game, Replace this pet, a donation, a claimed
+code and the matchmaker's offer show the keys on screen. The wheel no
+longer toggles the answer, so these prompts show no choice dots.
+
+diff --git a/src/core/ui.c b/src/core/ui.c
+index 603711a..2192256 100644
+--- a/src/core/ui.c
++++ b/src/core/ui.c
+@@ -54,15 +54,13 @@ int ui_count(const Ui *u,const Pet *p)
+     case NOTEBOOK: return 6;
+     case JOURNAL: return V3_COUNT-V3_TELETCHI_BOY;
+     case MEMORIAL:return p->memorial_count;
+-    case CLAIM: case DONATE_ASK:return 2;
+     case SOUVENIRS:return 32;
+     case SHOP_CODE:return 3;
+     case PASSWORD: case DONATION:return 10;
+     case LINEAGE: return p->family.count;
+-    case OFFER: return 2;
+     case HOME: return ICON_COUNT;
+     case STATUS: return p->character==V3_LEGACY ? 7 : 11;
+-    case FOOD: case TRAIN: case EXIT_ASK: case HATCH_ASK: case REPLACE_ASK: case INPUT_MODE: return 2;
++    case FOOD: case TRAIN: case INPUT_MODE: return 2;
+     case ACTIV_MENU:return 5;
+     case ITEMS:return owned_count(p,false,false);
+     case OPTIONS: return 5;
+@@ -250,8 +248,14 @@ void ui_command(Ui *u,Pet *p,enum Command cmd)
+         if (u->page!=EXIT_ASK) enter(u,EXIT_ASK);
+         return;
+     }
+-    if (u->page==OFFER && (cmd==CMD_BACK || cmd==CMD_CANCEL)) {
+-        family_answer(p,false);home(u);return;
++    if (u->page==EXIT_ASK || u->page==HATCH_ASK || u->page==REPLACE_ASK ||
++        u->page==DONATE_ASK || u->page==CLAIM || u->page==OFFER) {
++        /* Center answers yes and Menu no; the wheel does not answer. */
++        if (cmd==CMD_OK || cmd==CMD_BACK || cmd==CMD_CANCEL) {
++            u->choice=cmd==CMD_OK;
++            confirm(u,p);
++        }
++        return;
+     }
+     if (p->setup && u->page==HOME) {
+         if (cmd==CMD_OK) setup_key(p,KEY_B);
+diff --git a/src/render/lcd.c b/src/render/lcd.c
+index 44994ec..30827f2 100644
+--- a/src/render/lcd.c
++++ b/src/render/lcd.c
+@@ -511,7 +511,8 @@ void draw_frame(Display *d,const Pet *p,const Ui *u)
+             other=p->family.mate;
+             actor_as(d,p,other,HAPPY_POSE,u->frame,194,85,3);
+             centered(d,136,v3_characters[other].name,2);
+-            centered(d,157,u->choice?"Love?  YES":"Love?  NO",2);
++            centered(d,155,"Love?",2);
++            centered(d,175,"Center: Yes  MENU: No",2);
+         } else if (u->page==WEDDING && u->frames>24) {
+             centered(d,54,"Wedding",3);other=p->family.mate;
+             if (!sheet_pose(d,p->character,SP_KISSING,0,75+beat*5,101,4,60,false))
+@@ -570,7 +571,8 @@ void draw_frame(Display *d,const Pet *p,const Ui *u)
+         value_line(d,53,"Given",p->shop.donated);value_line(d,91,"Entry",u->amount);
+         value_line(d,130,"Digit",u->choice);break;
+     case DONATE_ASK:
+-        value_line(d,67,"Give",u->amount);centered(d,124,u->choice?"Yes":"Cancel",3);break;
++        value_line(d,67,"Give",u->amount);
++        centered(d,118,"Center: Yes",3);centered(d,152,"MENU: No",3);break;
+     case CLERK: {
+         unsigned item=shelf_item(p,0);
+         unsigned sale=shelf_price(p,item)<goods_prices[item]?2:0;
+@@ -591,7 +593,8 @@ void draw_frame(Display *d,const Pet *p,const Ui *u)
+     case CLAIM: {
+         unsigned id=code_reward(p,u->code);
+         centered(d,54,id<GOODS_COUNT?goods_names[id]:souvenir_names[id-GOODS_COUNT],2);
+-        value_line(d,91,"Price",code_price(p,u->code));centered(d,139,u->choice?"Accept":"Cancel",3);break;
++        value_line(d,84,"Price",code_price(p,u->code));
++        centered(d,128,"Center: Yes",3);centered(d,162,"MENU: No",3);break;
+     }
+     case SOUVENIRS: {
+         char receipt[11];
+@@ -650,7 +653,8 @@ void draw_frame(Display *d,const Pet *p,const Ui *u)
+         break;
+     case EXIT_ASK: case HATCH_ASK: case REPLACE_ASK:
+         centered(d,68,u->page==EXIT_ASK?"Save and exit?":u->page==HATCH_ASK?"Start new game?":"Replace this pet?",3);
+-        centered(d,127,u->choice?"Yes":"Cancel",4);
++        centered(d,118,"Center: Yes",3);
++        centered(d,152,"MENU: No",3);
+         break;
+     case DISPLAY_TEST: draw_display_test(d,u->choice,u->frame); return;
+     case TITLE:

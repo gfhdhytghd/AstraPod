@@ -89,8 +89,11 @@ access to GitHub. Saves are `mochipod-*` files in the games data folder. See
 the [MochiPod README](https://github.com/colliderkkz/mochipod) for its
 controls.
 
-AstraPod answers **Save and exit?** with the buttons instead of the wheel:
-press Select to save and quit, or Menu to keep playing.
+AstraPod answers MochiPod's yes/no prompts with the buttons instead of the
+wheel: press Select for Yes and Menu for No, as each prompt shows. They are
+**Save and exit?**, **Start new game?**, **Replace this pet?**, a donation,
+a claimed code and the matchmaker's offer. With Classic V3 controls, Right
+also answers No.
 
 The status-bar tray shows how the pet is doing: a smiling Mochi when it is
 content, zZ while it sleeps, Mochi with ! when it needs care (food, a treat,

@@ -144,6 +144,26 @@ void ui_perf_flow_path(const char *enter, const char *enter_why,
     }
 }
 
+void ui_perf_album_open(const char *path, bool remote, bool cached,
+                        const char *art, bool scene, const char *result,
+                        const char *reason, const char *back, unsigned frames,
+                        bool traced)
+{
+    if (!enabled)
+        return;
+    int fd = logfile_open(PERF_LOG);
+    if (fd >= 0)
+    {
+        logfile_printf(fd, "cover-album-open path=%s source=%s cache=%s "
+                       "art=%s scene=%s result=%s reason=%s back=%s "
+                       "frames=%u trace=%s\n",
+                       path, remote ? "remote" : "local",
+                       cached ? "hit" : "miss", art, scene ? "busy" : "idle",
+                       result, reason, back, frames, traced ? "yes" : "no");
+        logfile_close(fd);
+    }
+}
+
 static unsigned begin_capture(const char *route, bool passive)
 {
     if (!enabled)

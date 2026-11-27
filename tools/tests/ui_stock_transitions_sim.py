@@ -64,6 +64,7 @@ class Sim:
     """One simulator with no window, driven by key lines on stdin."""
 
     def __init__(self, binary, root, out):
+        self.root = root
         self.out = out
         self.handle = (out / "state.bin").open("w+b")
         self.handle.truncate(STATE)
@@ -157,7 +158,7 @@ def make_fixture(binary, resource, root):
     build_tagcache(binary, root, root.parent / "tagcache.log")
 
 
-def session(binary, fixture, out, theme, extra, script):
+def session(binary, fixture, out, theme, extra, script, prepare=None):
     out.mkdir(parents=True, exist_ok=True)
     root = out / "disk"
     shutil.rmtree(root, ignore_errors=True)
@@ -170,6 +171,8 @@ def session(binary, fixture, out, theme, extra, script):
     config.write_text("\n".join(lines) + "\nnative theme: " + theme +
                       "\nidle poweroff: off\nsleep timer on startup: off\n" +
                       extra)
+    if prepare:
+        prepare(root)
     sim = Sim(binary, root, out)
     try:
         sim.wait(150)

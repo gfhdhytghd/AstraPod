@@ -1030,7 +1030,7 @@ int album_covers_return(const char *selected_file, bool *remote_return)
         {
             uint32_t start = USEC_TIMER;
             int played = db_summary_play_pending();
-            carousel_wps_note_playlist((uint32_t)USEC_TIMER - start);
+            carousel_wps_note_playlist((uint32_t)USEC_TIMER - start, played > 0);
             if (played > 0)
                 ret = GO_TO_WPS;
             else if (played == DB_ALBUM_PLAY_USB)

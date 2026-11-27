@@ -169,6 +169,23 @@ void ui_perf_album_open(const char *path, bool remote, bool cached,
     }
 }
 
+void ui_perf_flow_wps_path(const char *path, const char *centre,
+                           const char *result, const char *reason,
+                           uint32_t start_us, uint32_t prepare_us)
+{
+    if (!enabled)
+        return;
+    int fd = logfile_open(PERF_LOG);
+    if (fd >= 0)
+    {
+        logfile_printf(fd, "cover-flow-wps-path path=%s centre=%s "
+                       "result=%s reason=%s start_us=%lu prepare_us=%lu\n",
+                       path, centre, result, reason,
+                       (unsigned long)start_us, (unsigned long)prepare_us);
+        logfile_close(fd);
+    }
+}
+
 static unsigned begin_capture(const char *route, bool passive)
 {
     if (!enabled)

@@ -759,7 +759,10 @@ int cider_browse(void)
         core_free(view_handle);
     }
     cider_unpin_art();
-    pop_current_activity();
+    if (result == GO_TO_WPS && carousel_wps_present_pending())
+        pop_current_activity_without_refresh();
+    else
+        pop_current_activity();
     agents_nav_leave(AGENTS_NAV_TRACKS);
     /* Only a carousel that opened WPS keeps a resumable browser parent. */
     if (!cover_suspended)

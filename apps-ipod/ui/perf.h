@@ -21,6 +21,9 @@ void ui_perf_album_open(const char *path, bool remote, bool cached,
                         const char *art, bool scene, const char *result,
                         const char *reason, const char *back, unsigned frames,
                         bool traced);
+void ui_perf_flow_wps_path(const char *path, const char *centre,
+                           const char *result, const char *reason,
+                           uint32_t start_us, uint32_t prepare_us);
 unsigned ui_perf_begin(const char *route);
 /* Ancillary animation. Foreground motion can claim the recorder immediately
  * and discard an overlapping passive trace without writing on its hot path. */

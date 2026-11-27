@@ -979,6 +979,10 @@ static void scratch_mem_init(void *mem)
 }
 
 static int audiobuf_handle;
+/* shrink_callback() holds the block buflib handed it: the audio thread must
+ * not lay out a new one (see audio_fill_file_buffer()) */
+static bool audiobuf_shrinking;
+static bool audiobuf_shrink_refused; /* ...and it turned a start away */
 #define AUDIO_BUFFER_RESERVE (256*1024)
 static size_t filebuflen;
 
@@ -1153,6 +1157,12 @@ static int shrink_callback(int handle, unsigned hints, void* start, size_t old_s
             resume.offset = offset;
     }
 
+    /* Stopping yields, and the audio thread first finishes the event it has
+     * in hand. Should that free or replace the block, handle and start below
+     * name memory buflib has since given to someone else. */
+    audiobuf_shrinking = true;
+    audiobuf_shrink_refused = false;
+
     /* don't call audio_hard_stop() as it frees this handle */
     if (thread_self() == audio_thread_id)
     {   /* inline case Q_AUDIO_STOP (the forced-stop response)
@@ -1165,9 +1175,17 @@ static int shrink_callback(int handle, unsigned hints, void* start, size_t old_s
     voice_stop();
     buffering_drop_damage();
 
+    /* Released while we waited: the space is free already */
+    if (audiobuf_handle != handle)
+    {
+        audiobuf_shrinking = false;
+        return BUFLIB_CB_OK;
+    }
+
     /* we should be free to change the buffer now */
     if (give_up)
     {
+        audiobuf_shrinking = false;
         buffer_state = AUDIOBUF_STATE_TRASHED;
         audiobuf_handle = core_free(audiobuf_handle);
         return BUFLIB_CB_OK;
@@ -1186,7 +1204,13 @@ static int shrink_callback(int handle, unsigned hints, void* start, size_t old_s
             audio_reset_buffer_noalloc(start + wanted_size);
             break;
     }
-    if (playing || play_queued)
+    audiobuf_shrinking = false;
+
+    /* A start audio_fill_file_buffer() turned away begins its track again */
+    if (audiobuf_shrink_refused && !playing && !play_queued)
+        resume = (struct audio_resume_info){ 0 };
+
+    if (playing || play_queued || audiobuf_shrink_refused)
     {
         /* post, to make subsequent calls not break the resume position */
         audio_queue_post(Q_AUDIO_PLAY, (intptr_t)&resume);
@@ -3008,6 +3032,13 @@ static int audio_fill_file_buffer(void)
     if (buffer_state != AUDIOBUF_STATE_INITIALIZED ||
         !pcmbuf_is_same_size())
     {
+        /* shrink_callback() is waiting for this thread to stop, and lays
+         * the buffer out and restarts playback itself afterwards */
+        if (audiobuf_shrinking)
+        {
+            audiobuf_shrink_refused = true;
+            return LOAD_TRACK_ERR_FAILED;
+        }
         audio_reset_buffer();
     }
 

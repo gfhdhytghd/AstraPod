@@ -107,6 +107,7 @@
 #include "carousel.h"
 #include "panel_perf.h"
 #include "stock_motion.h"
+#include "stock_color.h"
 #include "reflection.h"
 #include "database/path_key.h"     /* the shared engine: carousel_idx, the model */
 #include "screens/playback/cider.h"
@@ -3591,6 +3592,32 @@ static void flat_render(bool center)
 }
 
 /* stock_sample emits outer covers first and the front cover last. */
+struct flow_seams
+{
+    int first, last;
+    int top, top_step, bottom, bottom_step; /* Q16, biased by half a row */
+};
+
+/* The stock postpass follows the visible edge of each settled wall, from
+ * its first to its last screen column. The lower line is the artwork /
+ * reflection seam. Each line visits only one pixel per column. */
+#define FLOW_SEAM_Q16(y) ((y) * 65536 / 100)
+#define FLOW_SEAM(x0, x1, t0, t1, b0, b1) \
+    {x0, x1, FLOW_SEAM_Q16(t0) + 32768, \
+     (FLOW_SEAM_Q16(t1) - FLOW_SEAM_Q16(t0)) / ((x1) - (x0)), \
+     FLOW_SEAM_Q16(b0) + 32768, \
+     (FLOW_SEAM_Q16(b1) - FLOW_SEAM_Q16(b0)) / ((x1) - (x0))}
+static const struct flow_seams flow_stock_seams[] = {
+    FLOW_SEAM(  0,  27, 5135, 3745, 16005, 16830),
+    FLOW_SEAM( 28,  55, 3730, 5435, 16835, 15830),
+    FLOW_SEAM( 56,  95, 3730, 6830, 16845, 14995),
+    FLOW_SEAM(224, 263, 6830, 3730, 14995, 16845),
+    FLOW_SEAM(264, 291, 5435, 3730, 15830, 16835),
+    FLOW_SEAM(292, 319, 5135, 3745, 16005, 16830),
+};
+#undef FLOW_SEAM
+#undef FLOW_SEAM_Q16
+
 struct flow_face
 {
     const pix_t *pixels;
@@ -3600,7 +3627,8 @@ struct flow_face
     int rows;
     int stride, size, crop;
     int first, end, t0, dt, start_height;
-    bool linear;
+    bool linear, stock_side;
+    const struct flow_seams *seams;
     int top, top_delta, end_height; /* Q16 projected edge coordinates */
 };
 
@@ -3612,11 +3640,16 @@ struct flow_column
 
 static struct flow_column flow_columns[LCD_WIDTH];
 
-/* A column's rows from its top, the reflection's included: it is half the
- * cover's height, as its texture is half the cover's. */
+/* A column's rows from its top, including the reflection. For an odd-sized
+ * crop the reflection's texture drops the last half texel. */
 static inline int flow_extent(const struct flow_face *face, int height)
 {
-    return face->rows ? height + height / 2 : height;
+    if (!face->rows)
+        return height;
+    int extra = height / 2;
+    if (face->size & 1)
+        extra -= height / (2 * face->size);
+    return height + extra;
 }
 static int16_t flow_top[LCD_WIDTH], flow_end[LCD_WIDTH];
 static struct flow_face flow_faces[STOCK_MAX_VISIBLE];
@@ -3684,7 +3717,8 @@ static inline uint32_t flow_quotient(uint32_t low, uint32_t width, uint32_t q)
     return q;
 }
 
-static void flow_cover_columns(const struct flow_card *card, int slot, int spread)
+static void flow_cover_columns(const struct flow_card *card, int slot,
+                               int spread, bool stock)
 {
     struct flow_face *face = &flow_faces[slot];
     face->end = 0;
@@ -3726,12 +3760,21 @@ static void flow_cover_columns(const struct flow_card *card, int slot, int sprea
     int h0 = card->edge[0].bottom - card->edge[0].top;
     int h1 = card->edge[1].bottom - card->edge[1].top;
     int size = MIN(bmp->width, bmp->height);
-    const pix_t *refl = stock_look() ? slide_reflection(bmp) : NULL;
+    const pix_t *refl = stock ? slide_reflection(bmp) : NULL;
+    int rel = card->id - flow_row.selected;
+    bool stock_side = stock && (rel != 0 ||
+                                card->edge[0].depth != card->edge[1].depth);
+    const struct flow_seams *seams = NULL;
+    if (stock_side && rel && card->linear && !spread &&
+        (flow_row.phase == STOCK_REST || flow_row.phase == STOCK_SCROLL) &&
+        rel >= -3 && rel <= 3)
+        seams = &flow_stock_seams[rel < 0 ? rel + 3 : rel + 2];
     *face = (struct flow_face) {
         .pixels = (const pix_t *)(bmp+1) + (bmp->height-size)/2,
         .refl = refl, .rows = refl ? reflection_rows(size) : 0,
         .stride = bmp->height, .size = size, .crop = (bmp->width-size)/2,
-        .linear = card->linear, .top = card->edge[0].top,
+        .linear = card->linear,
+        .stock_side = stock_side, .seams = seams, .top = card->edge[0].top,
         .top_delta = card->edge[1].top - card->edge[0].top,
         .start_height = h0, .end_height = h1, .first = first, .end = end
     };
@@ -3775,6 +3818,18 @@ struct flow_sample
     int size, rows, y0, y1, first, last, dy, p, x_weight;
 };
 
+/* Side walls use pixel-centre inclusion. The line pass supplies their
+ * antialiasing once the walls have settled. */
+static inline int flow_first_row(const struct flow_face *face, int y)
+{
+    return (y + (face->stock_side ? 32767 : 65535)) >> 16;
+}
+
+static inline int flow_last_row(const struct flow_face *face, int y)
+{
+    return (y + (face->stock_side ? 32767 : 0)) >> 16;
+}
+
 static void flow_sample_column(const struct flow_column *col, int top, int end,
                                struct flow_sample *sample)
 {
@@ -3810,8 +3865,8 @@ static void flow_sample_column(const struct flow_column *col, int top, int end,
     const pix_t *src = face->pixels + (face->crop + u) * face->stride;
     const pix_t *refl = face->rows ? face->refl + u * face->rows : NULL;
     int y0 = col->y0, y1 = y0 + flow_extent(face, col->height);
-    int first = MAX(top, (y0 + 65535) >> 16);
-    int last = MIN(end, y1 >> 16);
+    int first = MAX(top, flow_first_row(face, y0));
+    int last = MIN(end, flow_last_row(face, y1));
     uint32_t d_num = (uint32_t)size << 20;
     int dy = ((uint64_t)d_num * rec.m) >> (62-rec.norm);
     int32_t d_rem = d_num - dy*rows;
@@ -3821,47 +3876,32 @@ static void flow_sample_column(const struct flow_column *col, int top, int end,
                                     last, dy, p, x_weight };
 }
 
-/* Separate RGB565 into lanes with five spare bits for interpolation. */
-#define FLOW_COLOR_LANES 0x07e0f81fu
-
-static inline uint32_t flow_lanes(uint32_t color)
-{
-    return (color | (color << 16)) & FLOW_COLOR_LANES;
-}
-
 static inline uint32_t flow_mix(uint32_t a, uint32_t b, unsigned weight)
 {
-    return (a + (((b - a) * weight) >> 5)) & FLOW_COLOR_LANES;
+    return (a + (((b - a) * weight) >> 5)) & STOCK_COLOR_LANES;
 }
 
-static __attribute__((noinline, optimize("O3"))) void flow_draw_linear(const struct flow_sample *sample, int src_stride,
-                             pix_t *dst, int dst_stride, const struct pf_fade *ink)
+static inline void flow_linear_texels(uint32_t *at, const pix_t *src,
+                                      int stride, int rows, int weight)
 {
-    /* Pad the endpoints to clamp the bilinear footprint to the square crop.
-     * A reflection's texels follow the cover's, as its quad follows. */
-    static uint32_t texels[DISPLAY_HEIGHT * 3 / 2 + 2];
-    uint32_t *at = texels + 1;
-    const pix_t *src = sample->src, *refl = sample->refl;
-    int size = sample->size, rows = sample->rows, weight = sample->x_weight;
     if (weight)
-    {
-        for (int j = 0; j < size; j++)
-            at[j] = flow_mix(flow_lanes(src[j]), flow_lanes(src[j + src_stride]), weight);
         for (int j = 0; j < rows; j++)
-            at[size + j] = flow_mix(flow_lanes(refl[j]), flow_lanes(refl[j + rows]), weight);
-    }
+            at[j] = flow_mix(stock_color_lanes(src[j]),
+                             stock_color_lanes(src[j + stride]), weight);
     else
-    {
-        for (int j = 0; j < size; j++)
-            at[j] = flow_lanes(src[j]);
         for (int j = 0; j < rows; j++)
-            at[size + j] = flow_lanes(refl[j]);
-    }
-    size += rows;
+            at[j] = stock_color_lanes(src[j]);
+}
+
+static inline void flow_linear_run(uint32_t *at, int rows, pix_t *dst,
+                                   int stride, int n, int p, int dy,
+                                   const struct pf_fade *ink)
+{
+    /* Clamp the bilinear footprint at both ends of this texture. */
     at[-1] = at[0];
-    at[size] = at[size - 1];
-    int p = sample->p - PFREAL_HALF;
-    for (int y = sample->first; y < sample->last; y++, dst += dst_stride, p += sample->dy)
+    at[rows] = at[rows - 1];
+    p -= PFREAL_HALF;
+    for (int i = 0; i < n; i++, dst += stride, p += dy)
     {
         int j = p >> PFREAL_SHIFT;
         unsigned v = (p >> (PFREAL_SHIFT - 5)) & 31;
@@ -3871,15 +3911,45 @@ static __attribute__((noinline, optimize("O3"))) void flow_draw_linear(const str
     }
 }
 
+static int flow_reflection_split(const struct flow_sample *sample, int n)
+{
+    int remaining = (sample->size << PFREAL_SHIFT) - sample->p;
+    return remaining <= 0 ? 0 :
+           MIN(n, (remaining + sample->dy - 1) / sample->dy);
+}
+
+static __attribute__((noinline, optimize("O3"))) void
+flow_draw_linear(const struct flow_sample *sample, int src_stride,
+                 pix_t *dst, int stride, const struct pf_fade *ink)
+{
+    static uint32_t texels[DISPLAY_HEIGHT + 2];
+    uint32_t *at = texels + 1;
+    int size = sample->size, rows = sample->rows;
+    int n = sample->last - sample->first;
+    int split = rows ? flow_reflection_split(sample, n) : n;
+    if (split)
+    {
+        flow_linear_texels(at, sample->src, src_stride, size, sample->x_weight);
+        flow_linear_run(at, size, dst, stride, split, sample->p, sample->dy, ink);
+    }
+    /* The cover and reflection are separate textures. Filtering clamps at
+     * their seam, where the edge pass mixes the resulting screen pixels. */
+    if (split < n)
+    {
+        int p = sample->p + split * sample->dy - (size << PFREAL_SHIFT);
+        flow_linear_texels(at, sample->refl, rows, rows, sample->x_weight);
+        flow_linear_run(at, rows, dst + split * stride, stride, n - split,
+                        p, sample->dy, ink);
+    }
+}
+
 /* Rows whose texel lies past the cover read on in its reflection. */
 static void flow_draw_nearest(const struct flow_sample *sample, pix_t *dst,
                               int stride, const struct pf_fade *ink)
 {
-    int n = sample->last - sample->first, split = n;
+    int n = sample->last - sample->first;
     int limit = sample->size << PFREAL_SHIFT;
-    if (sample->refl)
-        split = sample->p >= limit ? 0 :
-                MIN(n, (limit - sample->p + sample->dy - 1) / sample->dy);
+    int split = sample->refl ? flow_reflection_split(sample, n) : n;
     struct pf_col run = {sample->src, dst, sample->p, sample->dy, split};
     for (int part = 0; part < 2; part++)
     {
@@ -3911,6 +3981,8 @@ static void flow_draw_span(const struct flow_column *col, int top, int end,
         flow_draw_linear(&sample, col->face->stride, pixels + first * stride, stride, ink);
     else if (first < last)
         flow_draw_nearest(&sample, pixels + first * stride, stride, ink);
+    if (col->face->stock_side)
+        return;
     /* Only the outer row on each silhouette has fractional coverage. */
     for (int edge = 0; edge < 2; edge++)
     {
@@ -3929,6 +4001,35 @@ static void flow_draw_span(const struct flow_column *col, int top, int end,
     }
 }
 
+static void flow_smooth_seams(const struct flow_seams *seams, int x,
+                              int top, int end, pix_t *pixels, int stride)
+{
+    if (x < seams->first || x > seams->last)
+        return;
+    int offset = x - seams->first;
+    int upper = seams->top + offset * seams->top_step;
+    int lower = seams->bottom + offset * seams->bottom_step;
+    int y = upper >> 16;
+    if (y > top && y < end)
+    {
+        pix_t *pixel = pixels + y * stride;
+        unsigned phase = upper & 65535;
+        *pixel = stock_color_mix(*pixel, pixel[-stride],
+                                 (phase + (phase > 32768)) >> 11);
+    }
+    y = lower >> 16;
+    unsigned phase = lower & 65535;
+    int other = y + (phase > 32768 ? 1 : -1);
+    if (y >= top && y < end && other >= top && other < end)
+    {
+        pix_t *pixel = pixels + y * stride;
+        if (other > y)
+            *pixel = stock_color_mix(pixel[stride], *pixel, (phase + 1) >> 11);
+        else
+            *pixel = stock_color_mix(*pixel, pixel[-stride], phase >> 11);
+    }
+}
+
 /* Draw exposed strips of earlier faces above and below the front face's
  * opaque span. The order also composites fractional silhouette rows. */
 static void flow_draw_column(int x, int top, int end, pix_t *pixels,
@@ -3939,8 +4040,8 @@ static void flow_draw_column(int x, int top, int end, pix_t *pixels,
         return;
     const struct flow_face *face = front->face;
     int y0 = front->y0;
-    int first = (y0 + 65535) >> 16;
-    int last = (y0 + flow_extent(face, front->height)) >> 16;
+    int first = flow_first_row(face, y0);
+    int last = flow_last_row(face, y0 + flow_extent(face, front->height));
     if (flow_top[x] < first || flow_end[x] > last)
     {
         for (const struct flow_face *f = flow_faces; f < face; f++)
@@ -3958,6 +4059,8 @@ static void flow_draw_column(int x, int top, int end, pix_t *pixels,
         }
     }
     flow_draw_span(front, top, end, pixels, stride, ink);
+    if (face->seams)
+        flow_smooth_seams(face->seams, x, top, end, pixels, stride);
 }
 
 #define FLOW_STRIP_WIDTH 16
@@ -4048,9 +4151,10 @@ static void flow_paint(bool center, int spread, int clear_y, int clear_h)
         flow_top[x] = pf_height;
         flow_end[x] = 0;
     }
+    const bool stock = stock_look();
     for (int i = 0; i < flow_count; i++)
         if (center || flow_cards[i].id != center_index)
-            flow_cover_columns(&flow_cards[i], i, spread);
+            flow_cover_columns(&flow_cards[i], i, spread, stock);
         else
             flow_faces[i].end = 0;
     if (flow_stages)

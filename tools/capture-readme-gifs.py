@@ -235,7 +235,9 @@ class Capture:
             raise RuntimeError(f"Only {changes} SDL frame changes for {dest.name}")
 
 
-def build_library_cache(binary, root, work):
+def build_library_cache(binary, root, work, *, tracks=None, albums=None):
+    tracks = len(ALBUMS) * len(TRACKS) if tracks is None else tracks
+    albums = len(ALBUMS) if albums is None else albums
     config(root, "start in screen: db\n")
     try:
         with Capture(binary, root, work, "database") as sim:
@@ -244,8 +246,7 @@ def build_library_cache(binary, root, work):
                 sim.check()
                 covers = list((root / ART / "coverflow").glob("[0-9a-f]*.aat"))
                 covers = [path for path in covers if path.stem != "fallback"]
-                if (database_count(root) == len(ALBUMS) * len(TRACKS)
-                        and len(covers) == len(ALBUMS)
+                if (database_count(root) == tracks and len(covers) == albums
                         and (root / ART / "stamps.dat").is_file()):
                     return
                 time.sleep(0.1)

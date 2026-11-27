@@ -18,6 +18,9 @@ struct ui_scene {
     /* A split menu on each surface, a root page without menu chrome, and
      * an outgoing page that stays still under the incoming one. */
     bool back_split, front_split, full_screen, back_still;
+    /* Both pages are painted on the list backdrop, which stays still under
+     * them. */
+    bool still_backdrop;
 };
 
 /* The UI thread owns a scene from capture through the end of its transition.
@@ -55,6 +58,10 @@ bool ui_scene_restore_modal(struct ui_scene *scene);
  * parent's page key and returns false, having drawn nothing, for a page it
  * does not know. */
 void ui_scene_set_parent_painter(bool (*paint)(const void *page));
+/* The cover backdrop lists paint under their rows: the buflib handle of a
+ * screen-sized image, or 0 when there is none. A push or pop between two
+ * pages painted on it moves only what is drawn over it. */
+void ui_scene_set_backdrop_source(int (*source)(void));
 bool ui_scene_repaint_backdrop(struct ui_scene *scene);
 void ui_scene_open_page(struct ui_scene *scene, const char *route);
 const void *ui_scene_modal_parent(void);

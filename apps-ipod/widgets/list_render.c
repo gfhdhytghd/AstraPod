@@ -205,6 +205,17 @@ static void child_reset(struct native_list *render)
     render->child_glyphs = 0;
 }
 
+/* The cover backdrop of the last list drawn. */
+static int backdrop_handle(void)
+{
+    if (renderer_handle <= 0)
+        return 0;
+    struct native_list *render = core_get_data_pinned(renderer_handle);
+    int handle = render->backdrop.handle;
+    core_put_data_pinned(render);
+    return MAX(0, handle);
+}
+
 void list_render_init(void)
 {
     if (renderer_handle > 0)
@@ -220,6 +231,7 @@ void list_render_init(void)
         render->value_font = -1;
         render->theme_generation = (unsigned)-1;
         core_put_data_pinned(render);
+        ui_scene_set_backdrop_source(backdrop_handle);
     }
 }
 

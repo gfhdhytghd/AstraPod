@@ -17,6 +17,10 @@
 #include "ui/retained.h"
 #include "ui/scene.h"
 
+struct screen rock_main_screen;
+static void rock_screen_update_viewport(void);
+static void rock_screen_update_viewport_rect(int x, int y, int w, int h);
+
 static struct rock_display_state caller;
 static struct ui_scene app_scene;
 static bool app_first_frame;
@@ -61,6 +65,11 @@ void rock_display_start(fb_data *caller_pixels, fb_data *widget_pixels)
                       ui_scene_capture_page(&app_scene);
     lcd_scroll_stop();
     save_display(&caller);
+    rock_main_screen = screens[SCREEN_MAIN];
+    rock_main_screen.update = rock_raw_lcd_update;
+    rock_main_screen.update_rect = rock_raw_lcd_update_rect;
+    rock_main_screen.update_viewport = rock_screen_update_viewport;
+    rock_main_screen.update_viewport_rect = rock_screen_update_viewport_rect;
     saved_pixels = caller_pixels;
     plugin_pixels = widget_pixels;
     memcpy(saved_pixels, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
@@ -230,6 +239,20 @@ void rock_raw_lcd_update_rect(int x, int y, int w, int h)
     rock_list_release(false);
     rock_present_first_page();
     lcd_update_rect(x, y, w, h);
+}
+
+static void rock_screen_update_viewport(void)
+{
+    rock_list_release(false);
+    rock_present_first_page();
+    lcd_update_viewport();
+}
+
+static void rock_screen_update_viewport_rect(int x, int y, int w, int h)
+{
+    rock_list_release(false);
+    rock_present_first_page();
+    lcd_update_viewport_rect(x, y, w, h);
 }
 
 /* A raw call reclaims the framebuffer before it writes any pixels. */

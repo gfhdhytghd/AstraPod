@@ -21,6 +21,8 @@ struct rock_native_scope {
     unsigned previous_floor;
 };
 
+extern struct screen rock_main_screen;
+
 void rock_display_start(fb_data *caller_pixels, fb_data *widget_pixels);
 void rock_display_stop(bool back_to_browser);
 bool rock_display_first_page(void);

@@ -51,6 +51,7 @@
 #include "draw/screen_access.h"
 #include "audio/peak_meter.h"
 #include "widgets/menu.h"
+#include "ui/scene.h"
 #include "timefuncs.h"
 #include "debug.h"
 #include "system/app_util.h"
@@ -2046,7 +2047,11 @@ static int open_recording(void)
     }
 
 #endif
-    return recording_screen(false) ? MENU_ATTACHED_USB : 0;
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "recording-push");
+    bool usb = recording_screen(false);
+    ui_scene_close_modal(&scene, !usb, "recording-pop");
+    return usb ? MENU_ATTACHED_USB : 0;
 }
 
 MENUITEM_FUNCTION(recording_entry, MENU_FUNC_CHECK_RETVAL,

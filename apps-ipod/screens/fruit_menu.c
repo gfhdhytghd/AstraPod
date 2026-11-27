@@ -421,10 +421,7 @@ static int reset(void)
 static int language(void)
 {
     static struct browse_folder_info langs = { LANG_DIR, SHOW_LNG };
-    struct ui_scene scene = {0};
-    ui_scene_open_page(&scene, "language-push");
     browse_folder(&langs);
-    ui_scene_close_modal(&scene, true, "language-pop");
     return 0;
 }
 

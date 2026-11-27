@@ -47,18 +47,21 @@ def prepare_ultra(root):
 def walk(sim, has_music, visit_settings):
     frames = {}
 
+    def press(key, wait):
+        sim.send("down " + key)
+        sim.wait(5)
+        sim.send("up " + key)
+        sim.wait(wait)
+
     def tap(name, key, wait=100):
-        sim.tap(key, wait)
+        press(key, wait)
         _, pixels = sim.frames_since(0)
         assert pixels, f"{name}: no frame reached the panel"
         frames[name] = [(0, Image.frombytes("RGB", (W, H), pixels[-1]))]
 
     def wheel(key, count):
         for _ in range(count):
-            sim.send("down " + key)
-            sim.wait(5)
-            sim.send("up " + key)
-            sim.wait(18)
+            press(key, 18)
 
     if visit_settings:
         wheel("down", 5)
@@ -74,7 +77,7 @@ def walk(sim, has_music, visit_settings):
         tap("music-in", "select")
     tap("covers-in", "select", 240)
     tap("album-in", "select")
-    tap("playing", "select")
+    tap("playing", "select", 240)
     tap("back-1-album", "menu")
     tap("back-2-covers", "menu")
     if has_music:

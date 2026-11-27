@@ -149,6 +149,19 @@ python3 podlink_shell.py --serial USB_SERIAL settings-action "Update Database" -
 每个动作都必须加 `--yes`。播放器仍按原有流程显示界面和确认提示。
 如果播放器要求确认，请在机身选择。动作打开后，等待其结束或退出界面，再发送下一条命令。
 
+## 电池校准
+
+```sh
+python3 podlink_shell.py --serial USB_SERIAL --json settings-get battery-calibration
+python3 podlink_shell.py --serial USB_SERIAL settings-set battery-calibration reset
+```
+
+- `charge` 和 `discharge` 分别显示充电和放电校准。各项包含平滑后的参考电压
+  `mv`、当前满电阈值 `full_mv`、上次采样数量 `samples` 和记录时间
+  `recorded_at`。电压单位为 mV。时间以设备本地时钟计算，自 1970 年起按秒计。
+  参考电压为 0 表示尚未校准。时间为 0 表示设备时钟无效或尚未校准。
+- `reset` 清除两项校准，从原厂曲线重新开始。用户电压表继续优先。
+
 ## 插件测试与截图
 
 在启用 `--rock-compat` 的 iPod classic 固件上，Shell 可以启动内置安装清单中的插件。

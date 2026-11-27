@@ -499,6 +499,10 @@ system/bg_task.c
 system/library_files.c
 system/debug_log.c
 system/battery_log.c
+#if defined(IPOD_6G) && !defined(SIMULATOR)
+system/battery_calibration.c
+system/battery_calibration_model.c
+#endif
 #ifdef HAVE_USBSTACK
 system/usb_log_file.c
 #endif

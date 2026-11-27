@@ -1,3 +1,9 @@
+- **Battery percentage** on your iPod Classic now follows the original iPod
+  curve and starts out showing full at 4.01 V. After a long charge, the player
+  can learn your battery's full voltage. Leave it idle for three minutes
+  after unplugging so it can learn the voltage on battery power. The battery
+  stays full through the initial small voltage drop.
+
 - **Lyrics lead** now defaults to 500 ms instead of 200 ms. If you use
   the default, lyrics appear 300 ms earlier than with the old 200 ms
   lead. If you saved a custom value, your player keeps it.

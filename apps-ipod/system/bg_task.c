@@ -24,6 +24,7 @@
 #include "panic.h"
 #include "database/tagcache.h"
 #include "system/debug_log.h"
+#include "battery_calibration.h"
 #include "bg_task.h"
 #include "font.h"
 #ifdef HAVE_PODBOX_FONT
@@ -500,6 +501,9 @@ static void bg_thread(void)
 #endif
 
             case SYS_TIMEOUT:
+#if defined(IPOD_6G) && !defined(SIMULATOR)
+                battery_calibration_poll();
+#endif
                 for (i = 0; i < bg_tasks_count; i++)
                     bg_task_tick(bg_tasks[i]);
                 for (i = 0; i < bg_steps_count; i++)

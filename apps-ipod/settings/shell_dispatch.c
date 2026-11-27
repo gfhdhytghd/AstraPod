@@ -11,6 +11,7 @@
 #include "settings/settings_list.h"
 #include "settings/shell_menu.h"
 #include "settings/shell_value.h"
+#include "system/battery_calibration.h"
 #include "system/strutil.h"
 #include "ui/menu_pane.h"
 
@@ -153,6 +154,36 @@ static void publish(void)
     shell_settings_publish(json, used);
 }
 
+#if defined(IPOD_6G) && !defined(SIMULATOR)
+static void describe_calibration(void)
+{
+    struct battery_cal_status status;
+    char text[176];
+    battery_calibration_status(&status);
+    snprintf(text, sizeof(text),
+        "Charge %u mV (%u samples, time %u), full at %u mV. "
+        "Discharge %u mV (%u samples, time %u), full at %u mV.%s",
+        status.charge.mv, status.charge.samples, status.charge.recorded_at,
+        status.charge_full_mv, status.discharge.mv, status.discharge.samples,
+        status.discharge.recorded_at, status.discharge_full_mv,
+        status.user_override ? " User override." : "");
+    append("{\"kind\":\"setting\",\"cfg\":\"battery-calibration\","
+           "\"id\":\"battery-calibration\",\"label\":\"Battery calibration\","
+           "\"path\":[\"Battery calibration\"],\"type\":\"text\","
+           "\"writable\":true");
+    named_string("value", text);
+    append(",\"user_override\":%s,"
+           "\"charge\":{\"mv\":%u,\"samples\":%u,\"recorded_at\":%u,"
+           "\"full_mv\":%u},"
+           "\"discharge\":{\"mv\":%u,\"samples\":%u,\"recorded_at\":%u,"
+           "\"full_mv\":%u}}",
+           status.user_override ? "true" : "false",
+           status.charge.mv, status.charge.samples, status.charge.recorded_at,
+           status.charge_full_mv, status.discharge.mv, status.discharge.samples,
+           status.discharge.recorded_at, status.discharge_full_mv);
+}
+#endif
+
 long shell_settings_dispatch(void)
 {
     struct shell_menu_row row;
@@ -200,6 +231,17 @@ long shell_settings_dispatch(void)
     else if (operation == SHELL_SETTINGS_SET &&
              !settings_parseline(name, &name, &value))
         error_reply("Expected cfg-name: value");
+#if defined(IPOD_6G) && !defined(SIMULATOR)
+    else if (!strcmp(name, "battery-calibration"))
+    {
+        if (value && strcmp(value, "reset"))
+            error_reply("Battery calibration accepts only reset");
+        else if (value && !battery_calibration_reset())
+            error_reply("Could not save battery calibration reset");
+        else
+            describe_calibration();
+    }
+#endif
     else
     {
         const struct settings_list *setting = find_setting_by_cfgname(name);

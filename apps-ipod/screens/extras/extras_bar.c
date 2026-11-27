@@ -64,15 +64,14 @@ static void put_background(struct stock_canvas *canvas)
         }
 }
 
-/* The black twin of ui_art_battery()'s white image: both sets are
- * numbered alike, so their ids lie in the same order. */
+/* The black status bar uses the same battery frame as the white bar. */
 static void put_battery(struct stock_canvas *canvas)
 {
     int level = battery_level();
     if (level < 0)
         return;
     enum stock_art_id id = STOCK_ART_STATUSBARBLACK_BATTERY_IMAGE_0 +
-        (ui_art_battery(level) - STOCK_ART_STATUSBARWHITE_BATTERY_IMAGE_0);
+        ui_art_battery_index(level);
     stock_art_put(canvas, id, BATTERY_X, BATTERY_Y);
     if (charge_state == CHARGING || charge_state == TOPOFF)
         stock_art_put(canvas, STOCK_ART_STATUSBARBLACK_BATTERY_IMAGE_CHARGE,

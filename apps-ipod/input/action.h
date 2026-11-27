@@ -102,6 +102,7 @@ enum {
     CONTEXT_LIST_SELECT, /* a list in selecting mode: ACTION_LS_ */
     CONTEXT_AGENTS, /* System > Agents: a list with ACTION_AGENTS_TALK */
     CONTEXT_VIDEO_PLAYBACK, /* Native movie player, uses the WPS keymap. */
+    CONTEXT_DIALOG, /* A dialog with its own button map. */
     LAST_CONTEXT_PLACEHOLDER,
 };
 

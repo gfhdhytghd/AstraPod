@@ -36,7 +36,6 @@
 #include "edit_line.h"
 #include "speech/talk.h"
 #include "ui/native_theme_runtime.h"
-#include "ui/statusbar.h"
 
 struct kbd_edit {
     struct edit_line ed;
@@ -53,14 +52,16 @@ static void kbd_measure(struct dialog *d, struct screen *display,
     (void)data;
     if (dialog_is_classic())
     {
-        int sh = sb_visible_height();
-        if (sh <= 0)
-            sh = (int)ui_theme_metric(UI_METRIC_STATUS_HEIGHT);
+        int line_h = edit_line_height(display);
+        int field_h = line_h + 12;
+        int foot_h = 42;
+        int box_w = MIN(display->lcdwidth - 32, 284);
+        int box_h = 1 + 14 + field_h + 14 + foot_h + 1;
         d->style.box_margin = 0;
-        box->x = 0;
-        box->y = sh;
-        box->width = display->lcdwidth;
-        box->height = MAX(1, display->lcdheight - sh);
+        box->width = box_w;
+        box->height = MIN(display->lcdheight - 24, box_h);
+        box->x = (display->lcdwidth - box->width) / 2;
+        box->y = (display->lcdheight - box->height) / 2;
         return;
     }
 
@@ -91,7 +92,7 @@ static void kbd_draw(struct dialog *d, struct screen *display,
     if (dialog_is_classic())
     {
         int line_h = edit_line_height(display);
-        int fx = 16, fy = 44, fw = content->width - 32, fh = line_h + 12;
+        int fx = 14, fy = 15, fw = content->width - 28, fh = line_h + 12;
         struct frame_buffer_t *fb = content->buffer ? content->buffer : &lcd_framebuffer_default;
         int stride = fb->stride > 0 ? fb->stride : LCD_WIDTH;
         int fb_h = stride > 0 ? (int)(fb->elems / (size_t)stride) : LCD_HEIGHT;
@@ -114,15 +115,14 @@ static void kbd_draw(struct dialog *d, struct screen *display,
         edit_line_draw(display, &s->ed, tvp.width);
 
         display->set_viewport(content);
-        int dock_h = 48;
-        int dock_y = content->height - dock_h - 14;
-        dialog_draw_silver_dock(display, 16, dock_y, content->width - 32, dock_h);
-        const char *labels[2] = { str(LANG_DIAG_CANCEL), str(LANG_DIAG_OK) };
+        int foot_h = 42;
+        int foot_y = content->height - foot_h - 1;
         int bfont = s->btn_font >= 0 ? s->btn_font : content->font;
-        int bar_w = 176;
-        int sel = s->on_buttons ? (s->btn_ok ? 1 : 0) : -1;
-        dialog_draw_segmented(display, (content->width - bar_w) / 2, dock_y + 11,
-                              bar_w, 27, labels, 2, sel, true, bfont);
+        int kfont = content->font;
+        dialog_draw_popup_pair_footer(display, 1, foot_y, content->width - 2,
+                                      foot_h, str(LANG_DIAG_CANCEL), "MENU",
+                                      false, str(LANG_DIAG_OK), "SELECT",
+                                      false, bfont, kfont);
         display->set_drawmode(DRMODE_SOLID);
         return;
     }

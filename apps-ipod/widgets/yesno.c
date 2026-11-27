@@ -20,7 +20,6 @@
 #include "draw/viewport.h"
 #include "font.h"
 #include "ui/native_theme_runtime.h"
-#include "ui/statusbar.h"
 #include "splash.h"
 #include "dialog.h"
 
@@ -48,7 +47,7 @@ struct yesno_ctx
     /* message word-wrapped to the box width, rebuilt by yesno_measure() */
     struct dialog_text_line wrap[YN_MAX_LINES];
     int wrap_count;
-    /* Classic 2.0.5 full-page layout: bold heading (line 0) and button font */
+    /* Classic 2.0.5 modal pop-up layout: bold heading (line 0) and fonts */
     struct dialog_text_line head_wrap[6];
     int head_count;
     int head_font;
@@ -170,26 +169,29 @@ static void yesno_measure(struct dialog *d, struct screen *s,
 
     if (dialog_is_classic())
     {
-        int sh = sb_visible_height();
-        if (sh <= 0)
-            sh = (int)ui_theme_metric(UI_METRIC_STATUS_HEIGHT);
-        d->style.box_margin = 0;
-        box->x = 0;
-        box->y = sh;
-        box->width = sw;
-        box->height = MAX(1, area_h - sh);
-
-        int text_w = sw - 44;
+        const int pad_x = 16;
+        const int pad_top = 14;
+        const int pad_bot = 14;
+        const int hdr_h = d->title ? 24 : 0;
+        const int foot_h = 42;
+        int box_w = MIN(sw - 36, 268);
+        int text_w = box_w - 2 * pad_x;
         int hfont = c->head_font >= 0 ? c->head_font : box->font;
+        int hch = font_get(hfont)->height;
+        int bch = font_get(box->font)->height;
+
+        d->style.box_margin = 0;
         c->head_count = 0;
         c->wrap_count = 0;
-        if (c->message->nb_lines > 0)
+        int body_start = 0;
+        if (!d->title && c->message->nb_lines > 0)
         {
             const char *line = P2STR((unsigned char *)c->message->message_lines[0]);
             c->head_count = dialog_wrap_text(line, text_w, hfont,
                                              c->head_wrap, ARRAYLEN(c->head_wrap));
+            body_start = 1;
         }
-        for (int i = 1; i < c->message->nb_lines && c->wrap_count < YN_MAX_LINES; i++)
+        for (int i = body_start; i < c->message->nb_lines && c->wrap_count < YN_MAX_LINES; i++)
         {
             const char *line = P2STR((unsigned char *)c->message->message_lines[i]);
             int n = dialog_wrap_text(line, text_w, box->font,
@@ -203,6 +205,23 @@ static void yesno_measure(struct dialog *d, struct screen *s,
             }
             c->wrap_count += n;
         }
+
+        int text_h = 0;
+        if (c->head_count > 0)
+            text_h += c->head_count * (hch + 2) - 2;
+        if (c->wrap_count > 0)
+        {
+            if (text_h > 0)
+                text_h += 6;
+            text_h += c->wrap_count * (bch + 2) - 2;
+        }
+        int box_h = 1 + hdr_h + pad_top + text_h + pad_bot + foot_h + 1;
+        box_h = MIN(area_h - 32, MAX(108, box_h));
+
+        box->width = box_w;
+        box->height = box_h;
+        box->x = (sw - box_w) / 2;
+        box->y = (area_h - box_h) / 2;
         return;
     }
 
@@ -264,46 +283,47 @@ static void yesno_draw(struct dialog *d, struct screen *s,
     struct yesno_ctx *c = data;
     if (dialog_is_classic())
     {
-        int dock_h = 48;
-        int dock_y = content->height - dock_h - 14;
-        int y = 22;
+        const int pad_x = 16;
+        const int hdr_h = d->title ? 24 : 0;
+        const int foot_h = 42;
+        int foot_y = content->height - foot_h - 1;
+        int bfont = c->btn_font >= 0 ? c->btn_font : content->font;
         int hfont = c->head_font >= 0 ? c->head_font : content->font;
+        int kfont = content->font;
         int hch = font_get(hfont)->height;
         int bch = font_get(content->font)->height;
 
+        if (d->title)
+            dialog_draw_popup_header(s, 1, 1, content->width - 2, hdr_h,
+                                     d->title, bfont);
+
+        int y = 1 + hdr_h + 14;
         s->set_drawmode(DRMODE_FG);
-        s->set_foreground(LCD_RGBPACK(0, 0, 0));
         if (c->head_count > 0)
         {
             int old_font = content->font;
             s->setfont(hfont);
-            for (int i = 0; i < c->head_count && y + hch <= dock_y - 8; i++)
+            s->set_foreground(LCD_RGBPACK(0, 0, 0));
+            for (int i = 0; i < c->head_count && y + hch <= foot_y - 6; i++)
             {
-                s->putsxyf(22, y, "%.*s", c->head_wrap[i].len, c->head_wrap[i].str);
+                s->putsxyf(pad_x, y, "%.*s", c->head_wrap[i].len, c->head_wrap[i].str);
                 y += hch + 2;
             }
             s->setfont(old_font);
-            y += 8;
+            y += 4;
         }
-        for (int i = 0; i < c->wrap_count && y + bch <= dock_y - 8; i++)
+        s->set_foreground(LCD_RGBPACK(52, 56, 62));
+        for (int i = 0; i < c->wrap_count && y + bch <= foot_y - 6; i++)
         {
-            s->putsxyf(22, y, "%.*s", c->wrap[i].len, c->wrap[i].str);
+            s->putsxyf(pad_x, y, "%.*s", c->wrap[i].len, c->wrap[i].str);
             y += bch + 2;
         }
 
-        dialog_draw_silver_dock(s, 16, dock_y, content->width - 32, dock_h);
-
         char yes[24], no[24];
         yesno_button_labels(c, yesno_tmo_remaining(c), yes, no, sizeof(yes));
-        const char *labels[2] = { yes, no };
-        int bfont = c->btn_font >= 0 ? c->btn_font : content->font;
-        int w_yes = 0, w_no = 0;
-        font_getstringsize((const unsigned char *)yes, &w_yes, NULL, bfont);
-        font_getstringsize((const unsigned char *)no, &w_no, NULL, bfont);
-        int bar_w = MAX(144, MIN(content->width - 56, MAX(w_yes, w_no) * 2 + 48));
-        int bar_x = (content->width - bar_w) / 2;
-        dialog_draw_segmented(s, bar_x, dock_y + 11, bar_w, 27, labels, 2,
-                              c->selection == YESNO_YES ? 0 : 1, true, bfont);
+        dialog_draw_popup_pair_footer(s, 1, foot_y, content->width - 2, foot_h,
+                                      no, c->back_cancels ? "LEFT" : "/ MENU", true,
+                                      yes, "SELECT /", true, bfont, kfont);
         s->set_drawmode(DRMODE_SOLID);
         return;
     }
@@ -325,6 +345,29 @@ static void yesno_draw(struct dialog *d, struct screen *s,
     yesno_draw_buttons(c, d, s, content);
 }
 
+static const struct button_mapping *yesno_classic_keymap(int context)
+{
+#if BUTTON_REMOTE != 0
+    if (context & CONTEXT_REMOTE)
+        return get_context_mapping(CONTEXT_YESNOSCREEN | CONTEXT_REMOTE);
+#endif
+    (void)context;
+    static const struct button_mapping keys[] = {
+        { ACTION_YESNO_ACCEPT, BUTTON_SELECT | BUTTON_REL,    BUTTON_SELECT },
+        { ACTION_YESNO_ACCEPT, BUTTON_RIGHT | BUTTON_REL,     BUTTON_RIGHT  },
+        { ACTION_STD_CANCEL,   BUTTON_LEFT | BUTTON_REL,      BUTTON_LEFT   },
+        { ACTION_STD_MENU,     BUTTON_MENU | BUTTON_REL,      BUTTON_MENU   },
+        { ACTION_WPS_PLAY,     BUTTON_PLAY | BUTTON_REL,      BUTTON_PLAY   },
+        { ACTION_NONE,         BUTTON_SELECT | BUTTON_REPEAT, BUTTON_NONE   },
+        { ACTION_NONE,         BUTTON_RIGHT | BUTTON_REPEAT,  BUTTON_NONE   },
+        { ACTION_NONE,         BUTTON_LEFT | BUTTON_REPEAT,   BUTTON_NONE   },
+        { ACTION_NONE,         BUTTON_MENU | BUTTON_REPEAT,   BUTTON_NONE   },
+        { ACTION_NONE,         BUTTON_PLAY | BUTTON_REPEAT,   BUTTON_NONE   },
+        LAST_ITEM_IN_LIST
+    };
+    return keys;
+}
+
 static int yesno_on_action(struct dialog *d, int action, void *data)
 {
     struct yesno_ctx *c = data;
@@ -335,6 +378,33 @@ static int yesno_on_action(struct dialog *d, int action, void *data)
         c->talked = true;
         talk_text_message(c->message, false);
         talk_button(c, c->selection, true);
+    }
+
+    if (dialog_is_classic())
+    {
+        switch (action)
+        {
+            case ACTION_YESNO_ACCEPT:
+                if (!d->backlight_on)
+                    return DIALOG_CONTINUE;
+                c->result = YESNO_YES;
+                return DIALOG_ACCEPT;
+            case ACTION_STD_CANCEL:
+                if (!d->backlight_on)
+                    return DIALOG_CONTINUE;
+                c->result = YESNO_NO;
+                return DIALOG_CANCEL;
+            case ACTION_STD_MENU:
+                if (!d->backlight_on)
+                    return DIALOG_CONTINUE;
+                c->result = c->back_cancels ? YESNO_CANCEL : YESNO_NO;
+                return DIALOG_CANCEL;
+            case ACTION_WPS_PLAY:
+                dialog_handle_playback(action);
+                return DIALOG_CONTINUE;
+            default:
+                break;
+        }
     }
 
     switch (action)
@@ -481,6 +551,8 @@ static enum yesno_res yesno_run(int ticks, enum yesno_res tmo_default_res,
 
     dialog_init(&d, CONTEXT_YESNOSCREEN, title, NULL, &cb, &c);
     d.motion_route = "yesno";
+    if (dialog_is_classic())
+        d.keymap = yesno_classic_keymap;
     dialog_run(&d, HZ / 2); /* poll for statusbar and the timeout countdown */
     font_unload(c.head_font);
     font_unload(c.btn_font);

@@ -104,6 +104,7 @@
 #include "ui/native_theme_runtime.h"
 #include "ui/theme_art.h"
 #include "ui/native_wps.h"
+#include "screens/playback/wps.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
 #include "album_covers.h"
@@ -491,6 +492,9 @@ static struct {
     int index;
     bool panel_open, returning, restored_pixels;
 } wps_handover;
+/* The album centred when the screen last closed, which it opens on again. */
+static struct carousel_album_key pf_left_key;
+static bool pf_left_key_valid;
 
 static void close_album_panel(void);
 static void release_playback_scene(void);
@@ -1357,12 +1361,14 @@ void set_scroll_line(const char *str, enum pf_scroll_line_type type)
 /* Clip and shift drawing to the caption box for the duration of one caption.
  * Callers restore with carousel_text_end(). Enter this before setting the
  * font or colour: both are properties of the current viewport, so anything
- * set beforehand is lost on the switch. */
+ * set beforehand is lost on the switch. The glyphs blend into whatever is
+ * drawn under them; a band that wants clearing is cleared first. */
 struct viewport *carousel_text_begin(void)
 {
     static struct viewport text_vp;
 
     text_vp = pf_vp;
+    text_vp.drawmode = DRMODE_FG;
     if (pf_vp.width > 2 * PF_TEXT_MARGIN)
     {
         text_vp.x = pf_vp.x + PF_TEXT_MARGIN;
@@ -3696,17 +3702,6 @@ static int16_t flow_top[LCD_WIDTH], flow_end[LCD_WIDTH];
 static struct flow_face flow_faces[STOCK_MAX_VISIBLE];
 static struct slide_data flow_surfaces[STOCK_MAX_VISIBLE];
 
-static int flow_clip_top(void)
-{
-    return MAX(pf_chrome_h, pf_draw_y_shift && pf_text_h ? pf_text_y + pf_text_h : 0);
-}
-
-/* The stock look draws its caption over the reflections. */
-static int flow_clip_end(void)
-{
-    return !stock_look() && !pf_draw_y_shift && pf_text_h ? pf_text_y : pf_height;
-}
-
 /* For d normalized to [2^31,2^32), m approximates 2^62/d. Bin midpoints
  * seed two fixed-point Newton iterations. Callers correct the final quotient
  * against the original integer operands. */
@@ -4212,7 +4207,7 @@ static void flow_paint(bool center, int spread, int clear_y, int clear_h)
     struct pf_fade fade;
     fade_prepare(&fade, 256);
     const struct pf_fade *ink = pf_neighbor_light == 256 ? NULL : &fade;
-    int top = flow_clip_top(), end = flow_clip_end();
+    int top = pf_chrome_h, end = pf_height;
     pix_t *frame = buffer - pf_draw_y_shift * BUFFER_WIDTH;
     uint32_t clear_us = 0;
     if (clear_h > 0)
@@ -4295,8 +4290,8 @@ static void cover_rows(int *y0, int *y1)
             lo = MIN(lo, MIN(card->edge[0].top, card->edge[1].top) >> 16);
             hi = MAX(hi, (MAX(end[0], end[1]) + 65535) >> 16);
         }
-        lo = MAX(lo, flow_clip_top());
-        hi = MIN(hi, flow_clip_end());
+        lo = MAX(lo, pf_chrome_h);
+        hi = MIN(hi, pf_height);
     }
     *y0 = MIN(lo, pf_slides_y0);
     *y1 = MAX(hi, pf_slides_y1);
@@ -4634,7 +4629,7 @@ static bool init(void)
     pf_body_font = ui_theme_font_load(&theme, UI_FONT_BODY, 64);
 
     /* Flat piles fit in the drawable band. The 3D view uses the panel camera
-     * and clips to the caption's actual line boxes. */
+     * and lets the caption paint over the covers. */
     {
         bool text_at_top;
         int draw_height;
@@ -6895,7 +6890,7 @@ static bool flow_present_fade(struct ui_scene *source, unsigned opacity)
     if (opacity >= UI_FULL_OPACITY || !flow_count)
         return ui_scene_present_fade(source, opacity, NULL, NULL);
     static int16_t fade_top[LCD_WIDTH], fade_end[LCD_WIDTH];
-    const int top = flow_clip_top(), end = flow_clip_end();
+    const int top = pf_chrome_h, end = pf_height;
     for (int x = 0; x < LCD_WIDTH; x++)
     {
         const struct flow_column *c = &flow_columns[x];
@@ -7133,14 +7128,15 @@ static struct {
     int count, album;
     struct ui_rect slot;
     struct album_blur_source source;
-    uint32_t return_start;
     uint32_t action_us, playlist_us;
     /* Under the stock look, the frame Now Playing's chrome fades in over,
      * or that chrome and its mask as it fades out; and the status bar
      * Cover Flow showed, which the turn back fades to. */
     int chrome, bar;
+    /* The full page that was visible before the handoff. */
+    int sheet;
     pix_t bg;
-    bool pending, from_panel, returning;
+    bool pending, from_panel, returning, rising, sinking;
 } playback_scene;
 
 static void drop_playback_bitmap(int *handle)
@@ -7157,6 +7153,7 @@ static void release_playback_scene(void)
     drop_playback_bitmap(&playback_scene.art.handle);
     drop_playback_bitmap(&playback_scene.chrome);
     drop_playback_bitmap(&playback_scene.bar);
+    drop_playback_bitmap(&playback_scene.sheet);
     memset(&playback_scene, 0, sizeof(playback_scene));
 }
 
@@ -7320,17 +7317,18 @@ static void paint_playback_row(struct stock_flow *walls, struct stock_pose centr
         if (flow_visible[i].album != playback_scene.album)
             paint_playback_cover(flow_visible[i].pose, flow_visible[i].album);
     struct playback_texture back = {0, panel.back_handle, 256, 256, false};
+    /* The way back keeps the cover's own texture, reflection and all, when
+     * the turn left one; the page's art is the fallback. */
     if (stock_back_face(centre))
         paint_playback_texture(centre, &back);
-    else if (playback_scene.art.handle > 0)
+    else if (playback_scene.art.handle > 0 &&
+             !(playback_scene.returning && playback_cover(playback_scene.album)))
         paint_playback_texture(centre, &playback_scene.art);
     else
         paint_playback_cover(centre, playback_scene.album);
 }
 
-/* Under the stock look Now Playing's status bar, text and controls fade in
- * over the turn to it and out over the turn back, in no fewer refreshes
- * than this; the cover turns as it does without them. */
+/* Minimum fade length for the controls on the turn into Now Playing. */
 #define CHROME_FADE_FRAMES 10
 #define CHROME_FRAME (LCD_WIDTH * LCD_HEIGHT)
 
@@ -7350,22 +7348,32 @@ static unsigned chrome_weight(uint32_t now, uint32_t start, uint32_t length)
     return MIN(32u, (now - start) * 32 / MAX(length, 1u));
 }
 
+/* Keep the status bar on screen for the frames drawn under it. */
+static bool keep_status_bar(void)
+{
+    size_t rows = pf_chrome_h * LCD_WIDTH;
+    drop_playback_bitmap(&playback_scene.bar);
+    playback_scene.bar = core_alloc_free_space(rows * sizeof(pix_t));
+    if (playback_scene.bar <= 0)
+        return false;
+    pix_t *bar = core_get_data_pinned(playback_scene.bar);
+    memcpy(bar, LCD_BUF, rows * sizeof(pix_t));
+    core_put_data_pinned(bar);
+    return true;
+}
+
 /* Keep the status bar the turn to Now Playing leaves, for the turn back
  * too, and room for the frame the chrome is composed over. */
 static bool chrome_fade_open(void)
 {
-    size_t rows = pf_chrome_h * LCD_WIDTH;
-    playback_scene.bar = core_alloc_free_space(rows * sizeof(pix_t));
+    if (playback_scene.bar <= 0 && !keep_status_bar())
+        return false;
     playback_scene.chrome = core_alloc_free_space(CHROME_FRAME * sizeof(pix_t));
-    if (playback_scene.bar <= 0 || playback_scene.chrome <= 0)
+    if (playback_scene.chrome <= 0)
     {
         drop_playback_bitmap(&playback_scene.bar);
-        drop_playback_bitmap(&playback_scene.chrome);
         return false;
     }
-    pix_t *bar = core_get_data_pinned(playback_scene.bar);
-    memcpy(bar, LCD_BUF, rows * sizeof(pix_t));
-    core_put_data_pinned(bar);
     return true;
 }
 
@@ -7484,24 +7492,159 @@ static void slide_playback_controls(bool incoming, uint32_t start,
     }
 }
 
+/* Whether the track playing belongs to the album `key` names: by the names
+ * id3_get_index() matches, or for a remote album by its title and then its
+ * artwork or artist. */
+static bool album_key_playing(const struct carousel_album_key *key)
+{
+    if (key->remote)
+    {
+#ifdef HAVE_USB_PODLINK
+        static struct cider_state state;
+        if (!cider_active())
+            return false;
+        cider_snapshot(&state);
+        if (!state.have || strcasecmp(state.album, key->title))
+            return false;
+        return (*key->art && !strcmp(key->art, state.art)) ||
+               (*state.artist && !strcasecmp(key->artist, state.artist));
+#else
+        return false;
+#endif
+    }
+    const struct mp3entry *id3 = !cider_active() && audio_status() ?
+                                 audio_current_track() : NULL;
+    if (!id3)
+        return false;
+    const char *album = id3->album && *id3->album ? id3->album : UNTAGGED;
+    const char *artist = id3->albumartist && *id3->albumartist ?
+                         id3->albumartist :
+                         id3->artist && *id3->artist ? id3->artist : UNTAGGED;
+    return !strcasecmp(album, key->title) &&
+           (!key->shared_title || !strcasecmp(artist, key->artist));
+}
+
+/* Now Playing turns back into the centre cover only when that cover holds
+ * the track playing, or when the turn goes back to the album's tracks. */
+static bool return_turns(void)
+{
+    if (playback_scene.from_panel && wps_handover.model && wps_handover.panel_open)
+        return true;
+    return !wps_handover.model ||
+           (pf_left_key_valid && album_key_playing(&pf_left_key));
+}
+
+static int capture_page(void)
+{
+    int handle = core_alloc_free_space(CHROME_FRAME * sizeof(pix_t));
+    if (handle > 0)
+    {
+        pix_t *page = core_get_data_pinned(handle);
+        memcpy(page, lcd_framebuffer_default.fb_ptr, CHROME_FRAME * sizeof(pix_t));
+        core_put_data_pinned(page);
+    }
+    return handle;
+}
+
+/* Use the vertical entry and exit durations on the half-rate LCD clock. */
+#define WPS_RISE_FRAMES 6
+#define WPS_SINK_FRAMES 18
+
+static void play_wps_sheet(int front_handle, int back_handle, bool rising)
+{
+    const pix_t *front = core_get_data_pinned(front_handle);
+    const pix_t *back = core_get_data_pinned(back_handle);
+    wps_pace = (struct ui_pace){.half_rate = true};
+    unsigned frames = rising
+        ? ui_theme_motion(UI_MOTION_SHEET_IN, WPS_RISE_FRAMES, WPS_RISE_FRAMES)
+        : ui_theme_motion(UI_MOTION_SHEET_OUT, WPS_SINK_FRAMES, WPS_SINK_FRAMES);
+    struct ui_tween tween = {
+        .from = rising ? LCD_HEIGHT : 0,
+        .to = rising ? 0 : LCD_HEIGHT,
+        .frames = frames,
+        .easing = UI_EASE_QUAD,
+        .ease_in = !rising,
+    };
+    cpu_boost(true);
+    unsigned trace = ui_perf_begin(rising ? "cover-flow-wps-rise" :
+                                            "cover-flow-wps-sink");
+    uint32_t start = ui_clock_start();
+    unsigned frame = 0;
+    uint32_t due = ui_pace_next(&wps_pace, start);
+    for (;;)
+    {
+        uint32_t rendering = trace ? USEC_TIMER : 0;
+        ui_scene_compose_sheet(LCD_BUF, back, front,
+                               ui_tween_sample(&tween, frame));
+        uint32_t submitting = trace ? USEC_TIMER : 0;
+        lcd_update();
+        if (trace)
+        {
+            ui_perf_note_render(submitting - rendering);
+            ui_perf_note_submit((uint32_t)USEC_TIMER - submitting);
+        }
+        if (!lcd_active() || frame >= frames)
+            break;
+        ui_clock_sleep_until(due);
+        frame = ui_pace_frame(&wps_pace);
+        due = ui_pace_next(&wps_pace, start);
+    }
+    ui_perf_end(trace);
+    cpu_boost(false);
+    core_put_data_pinned((void *)back);
+    core_put_data_pinned((void *)front);
+}
+
+static void rise_to_playback(const struct wps_state *state)
+{
+    playback_scene.pending = playback_scene.rising = false;
+    if (lcd_active())
+    {
+        /* Scrim's blur is produced off-thread. Submit the first sheet
+         * with the same backdrop that the live page will use. */
+        long until = current_tick + HZ / 8;
+        native_wps_render(state, false);
+        while (!native_wps_sheet_ready() && TIME_BEFORE(current_tick, until))
+        {
+            sleep(1);
+            native_wps_render(state, false);
+        }
+        int page = capture_page();
+        if (page > 0)
+            play_wps_sheet(page, playback_scene.sheet, true);
+        else
+            lcd_update();
+        drop_playback_bitmap(&page);
+    }
+    drop_playback_bitmap(&playback_scene.sheet);
+}
+
 void carousel_wps_capture_return(uint32_t action_us)
 {
     if (flat_view())
         return;
     playback_scene.returning = true;
+    bool to_panel = playback_scene.from_panel && wps_handover.panel_open;
+    if (!to_panel && pf_motion_scale && lcd_active())
+    {
+        playback_scene.sinking = !return_turns();
+        drop_playback_bitmap(&playback_scene.sheet);
+        playback_scene.sheet = capture_page();
+        if (playback_scene.sinking)
+            return;
+    }
     native_wps_art_layout(&playback_scene.slot);
     playback_scene.playing = playback_target(playback_scene.slot);
     bool turned = playback_scene.slot.width && native_wps_art_turned();
     if (turned && pf_motion_scale && lcd_active())
         capture_turned_art();
     /* The uncovered cover is the return turn's first frame. */
-    if (turned && playback_scene.art.handle > 0)
+    if (to_panel && turned && playback_scene.art.handle > 0)
         native_wps_set_landing(paint_return_landing);
-    bool fade = stock_look() && pf_motion_scale && lcd_active() &&
-                native_wps_active() && chrome_fade_capture();
-    if (pf_motion_scale && !fade)
+    bool fade = to_panel && stock_look() && pf_motion_scale &&
+                lcd_active() && native_wps_active() && chrome_fade_capture();
+    if (to_panel && pf_motion_scale && !fade)
         slide_playback_controls(false, action_us, action_us, 0);
-    playback_scene.return_start = USEC_TIMER;
     if (!turned && pf_motion_scale && lcd_active())
         capture_return_art();
 }
@@ -7523,6 +7666,11 @@ void carousel_wps_note_playlist(uint32_t elapsed)
 
 void carousel_wps_present(const struct wps_state *state)
 {
+    if (playback_scene.rising)
+    {
+        rise_to_playback(state);
+        return;
+    }
     playback_scene.pending = false;
     if (!lcd_active())
         return;
@@ -7644,11 +7792,57 @@ static bool return_interrupted(void)
 #endif
 }
 
+/* Give the decoder a short head start while Now Playing is still visible. */
+static void wait_for_return_covers(void)
+{
+    long until = current_tick + HZ / 8;
+    while (!restored_covers_ready() && TIME_BEFORE(current_tick, until) &&
+           !return_interrupted())
+        sleep(1);
+}
+
+static void paint_resting_covers(uint32_t now)
+{
+    struct carousel_frame paint = {0};
+    carousel_frame_init(&paint);
+    buf_ctx_lock();
+    lcd_set_viewport(&pf_vp);
+    coverflow_place(now);
+    carousel_paint(&paint, true, true, true, 0, pf_height);
+    buf_ctx_unlock();
+}
+
+static void sink_to_covers(void)
+{
+    show_carousel_entry();
+    if (playback_scene.sheet <= 0 || !lcd_active())
+        return;
+    wait_for_return_covers();
+    uint32_t now = USEC_TIMER;
+    stock_init(&flow_row, number_of_slides, center_index, now, false);
+    paint_resting_covers(now);
+    if (pf_chrome_h > 0)
+        sb_update(SCREEN_MAIN, true);
+    int covers = capture_page();
+    if (covers > 0)
+        play_wps_sheet(playback_scene.sheet, covers, false);
+    else
+        lcd_update();
+    drop_playback_bitmap(&covers);
+}
+
 static void return_from_playback(void)
 {
     bool to_panel = playback_scene.from_panel && panel.live;
     playback_scene.album = center_index;
     playback_scene.bg = pf_bg_color;
+    if (playback_scene.sinking && !to_panel)
+    {
+        sink_to_covers();
+        set_current_slide(center_index);
+        release_playback_scene();
+        return;
+    }
     struct stock_flip flip;
     if (to_panel)
     {
@@ -7658,7 +7852,20 @@ static void return_from_playback(void)
         panel.back_ready = false;
         flow_row = playback_scene.walls;
     }
-    uint32_t start = playback_scene.return_start, now = USEC_TIMER;
+    show_carousel_entry();
+    if (!to_panel && pf_motion_scale && lcd_active())
+    {
+        wait_for_return_covers();
+        buf_ctx_lock();
+        keep_playback_cover(center_index);
+        buf_ctx_unlock();
+        if (pf_chrome_h > 0)
+        {
+            sb_update(SCREEN_MAIN, true);
+            keep_status_bar();
+        }
+    }
+    uint32_t start = ui_clock_start(), now = start;
     if (to_panel)
     {
         stock_reverse_walls(&flow_row, start);
@@ -7670,17 +7877,22 @@ static void return_from_playback(void)
         stock_flip_start(&flip, STOCK_FROM_PLAYING, playback_scene.playing, start);
         flip.start = playback_scene.playing;
     }
-    show_carousel_entry();
-    uint32_t fade_us = MAX(flip.delay + flip.duration,
-                           CHROME_FADE_FRAMES * ui_frame_period());
-    if (pf_motion_scale && lcd_active() && flow_row.count)
+    uint32_t fade_us = to_panel
+        ? MAX(flip.delay + flip.duration, CHROME_FADE_FRAMES * ui_frame_period())
+        : flip.delay;
+    if (pf_motion_scale && lcd_active() && flow_row.count &&
+        (to_panel || playback_scene.sheet > 0))
     {
+        cpu_boost(true);
+        unsigned trace = ui_perf_begin(to_panel ? "wps-cover-panel" :
+                                                  "wps-cover-flow-turn");
+        wps_pace = (struct ui_pace){.half_rate = true};
+        uint32_t due = ui_pace_next(&wps_pace, start);
         for (;;)
         {
+            uint32_t rendering = trace ? USEC_TIMER : 0;
             bool landed = stock_flip_done(&flip, now) && !stock_animating(&flow_row, now);
-            unsigned weight = playback_scene.chrome > 0 ?
-                              32 - chrome_weight(now, start, fade_us) : 0;
-            landed = landed && !weight;
+            unsigned weight = 32 - chrome_weight(now, start, fade_us);
             struct stock_pose current = stock_flip_pose(&flip, now);
             if (to_panel && stock_back_face(current) &&
                 (!panel.back_ready || (!panel.have_blur &&
@@ -7688,32 +7900,68 @@ static void return_from_playback(void)
                 refresh_return_panel();
             if (landed && to_panel)
             {
-                /* BACK has native panel scale. Use the live painter for
-                 * this endpoint, including the current playing marker. */
                 set_current_slide(center_index);
                 draw_album_flip(false);
+            }
+            else if (landed)
+            {
+                stock_init(&flow_row, number_of_slides, center_index, now, false);
+                paint_resting_covers(now);
             }
             else
             {
                 buf_ctx_lock();
                 paint_playback_row(&flow_row, current, now);
                 buf_ctx_unlock();
-                if (!to_panel)
-                    model->draw_text();
             }
-            if (playback_scene.chrome > 0)
+            if (to_panel && playback_scene.chrome > 0)
                 chrome_fade_out(weight);
-            if (landed)
+            if (!to_panel)
             {
-                lcd_update();
-                break;
+                if (pf_chrome_h > 0)
+                    chrome_restore_bar();
+                if (weight && playback_scene.sheet > 0)
+                {
+                    const pix_t *page = core_get_data_pinned(playback_scene.sheet);
+                    /* The title belongs to one page at a time. */
+                    size_t chrome = pf_chrome_h * LCD_WIDTH;
+                    if (chrome)
+                        memcpy(LCD_BUF, page, chrome * sizeof(*page));
+                    for (size_t i = chrome; i < CHROME_FRAME; i++)
+                        if (LCD_BUF[i] != page[i])
+                            LCD_BUF[i] = chrome_blend(page[i], LCD_BUF[i], weight);
+                    core_put_data_pinned((void *)page);
+                }
+                else if (!landed)
+                {
+                    uint32_t caption = trace ? USEC_TIMER : 0;
+                    model->draw_text();
+                    if (trace)
+                    {
+                        const uint32_t stages[UI_COVER_STAGE_COUNT] = {0};
+                        ui_perf_note_cover_work(0, 0, USEC_TIMER - caption, stages);
+                        ui_perf_note_rects(UI_PERF_ART | UI_PERF_CAPTION,
+                                           LCD_HEIGHT, pf_text_h);
+                    }
+                }
             }
+            uint32_t submitting = trace ? USEC_TIMER : 0;
             lcd_update();
-            ui_clock_sleep(ui_clock_wait_until(flow_pace_next(&flow_pace, start)));
-            now = USEC_TIMER;
-            if (!lcd_active() || return_interrupted())
+            if (trace)
+            {
+                ui_perf_note_render(submitting - rendering);
+                ui_perf_note_submit((uint32_t)USEC_TIMER - submitting);
+            }
+            if (landed || !lcd_active())
+                break;
+            ui_clock_sleep_until(due);
+            now = start + ui_frame_clock(ui_pace_frame(&wps_pace));
+            due = ui_pace_next(&wps_pace, start);
+            if (return_interrupted())
                 break;
         }
+        ui_perf_end(trace);
+        cpu_boost(false);
     }
     set_current_slide(center_index);
     if (to_panel)
@@ -7736,6 +7984,10 @@ static void prepare_playback_turn(int album, bool from_panel, uint32_t action_us
                                          stock_scroll_progress(&flow_row, action_us)).pose;
     playback_scene.walls = flow_row;
     stock_leave_to_playing(&playback_scene.walls, action_us);
+    /* The bar Cover Flow shows now: by the WPS's first frame the screen
+     * holds the one under it. */
+    if (pf_chrome_h > 0)
+        keep_status_bar();
     buf_ctx_lock();
     keep_playback_cover(album);
     for (int i = 0; i < playback_scene.walls.length; i++)
@@ -7745,7 +7997,7 @@ static void prepare_playback_turn(int album, bool from_panel, uint32_t action_us
     buf_ctx_unlock();
 }
 
-static int stock_to_wps(int album, bool from_panel, int destination, uint32_t action_us)
+static int album_to_wps(int album, bool from_panel, int destination, uint32_t action_us)
 {
     if (destination != CAROUSEL_PLAY_ALBUM && destination != GO_TO_WPS &&
         destination != CAROUSEL_PLAY_PENDING)
@@ -7774,10 +8026,15 @@ static int stock_to_wps(int album, bool from_panel, int destination, uint32_t ac
             return GO_TO_ROOT;
         }
     }
-    if (pf_motion_scale && lcd_active() && !flat_view())
-        prepare_playback_turn(album, from_panel, USEC_TIMER);
-    move_center(album);
-    playback_scene.pending = true;
+    if (from_panel)
+    {
+        if (pf_motion_scale && lcd_active() && !flat_view())
+            prepare_playback_turn(album, true, USEC_TIMER);
+        move_center(album);
+        playback_scene.pending = true;
+    }
+    else
+        playback_scene.rising = true;
     return destination;
 }
 
@@ -8185,7 +8442,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                          album_panel_action(button);
             if (result != CAROUSEL_MENU_STAY)
             {
-                result = stock_to_wps(center_index, true, result, action_us);
+                result = album_to_wps(center_index, true, result, action_us);
                 if (result != CAROUSEL_MENU_STAY)
                     return result;
             }
@@ -8193,7 +8450,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             {
                 int status = model->panel_play_status();
                 if (status > 0)
-                    return stock_to_wps(center_index, true, GO_TO_WPS, action_us);
+                    return album_to_wps(center_index, true, GO_TO_WPS, action_us);
                 if (status < 0)
                 {
                     panel.play_pending = false;
@@ -8512,10 +8769,12 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
              * the covers, or above them -- but how far down a cover reaches is
              * a property of the album, so where they do meet the clear has to
              * take both at once, or the second would wipe the first. */
-            joined = full_repaint_owed
-                  || (drew_art && pf_text_h > 0
-                      && pf_text_y < art_y + art_h
-                      && pf_text_y + pf_text_h > art_y);
+            int caption_end = pf_text_y + pf_text_h;
+            bool caption_over_art = drew_caption && !flat_view() &&
+                pf_text_y < pf_slides_y1 && caption_end > pf_slides_y0;
+            joined = full_repaint_owed || caption_over_art
+                  || (drew_art && pf_text_h > 0 && pf_text_y < art_y + art_h &&
+                      caption_end > art_y);
 
             /* Joined only by an overlap, the clear repaints the same ground
              * outside the covers' rows and the caption's, so only those rows
@@ -8523,11 +8782,14 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             int paint_y = art_y, paint_h = art_h;
             if (joined)
             {
-                paint_y = 0;
-                paint_h = pf_height;
+                /* A caption-only change needs the original pixels under
+                 * its glyphs, but leaves the rest of the cover untouched. */
+                bool caption_only = !drew_art && !full_repaint_owed;
+                paint_y = caption_only ? pf_text_y : 0;
+                paint_h = caption_only ? pf_text_h : pf_height;
                 drew_art = true;
                 drew_caption = (pf_text_h > 0);
-                if (full_repaint_owed)
+                if (full_repaint_owed || caption_only)
                 {
                     art_y = paint_y;
                     art_h = paint_h;
@@ -8799,13 +9061,18 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             button = PF_BACK;
         }
         else if (nav == AGENTS_NAV_AGENTS) return GO_TO_AGENTS;
-        else if (nav == AGENTS_NAV_WPS) return GO_TO_WPS;
+        else if (nav == AGENTS_NAV_WPS)
+        {
+            playback_scene.rising = !flat_view() && !panel.live;
+            return GO_TO_WPS;
+        }
         switch (button) {
 #ifdef HAVE_USB_PODLINK
         case ACTION_AGENTS_REMOTE_SWITCH:
         case ACTION_AGENTS_SWITCH:
             return GO_TO_AGENTS;
         case ACTION_REMOTE_WPS:
+            playback_scene.rising = !flat_view() && !panel.live;
             return GO_TO_WPS;
         case ACTION_AGENTS_REMOTE_COVERS:
         case ACTION_AGENTS_COVERS:
@@ -8813,16 +9080,38 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
             goto leave_covers;
 #endif
         case PF_WPS:
-            if (!flat_view() && !panel.live && model->play_album &&
-                !(audio_status() & AUDIO_STATUS_PLAY) && !cider_active())
+        {
+            if (flat_view() || panel.live || !model->play_album)
+                return GO_TO_WPS;
+            /* While playing, match stock's pause. A stopped or paused
+             * player starts the album under the centre cover. */
+            bool playing = (audio_status() & (AUDIO_STATUS_PLAY | AUDIO_STATUS_PAUSE))
+                           == AUDIO_STATUS_PLAY;
+#ifdef HAVE_USB_PODLINK
+            if (cider_active())
             {
-                int result = stock_to_wps(target, false, model->play_album(target), action_us);
-                if (result != CAROUSEL_MENU_STAY)
-                    return result;
-                art_owed = caption_owed = full_repaint_owed = true;
-                break;
+                struct cider_status source;
+                cider_status(&source);
+                playing = source.available && source.rate;
+                if (playing)
+                    cider_control("toggle", 0);
             }
-            return GO_TO_WPS;
+            else
+#endif
+            if (playing)
+                pause_action(false);
+            if (playing)
+            {
+                playback_scene.rising = true;
+                return GO_TO_WPS;
+            }
+            int result = album_to_wps(center_index, false,
+                                      model->play_album(center_index), action_us);
+            if (result != CAROUSEL_MENU_STAY)
+                return result;
+            art_owed = caption_owed = full_repaint_owed = true;
+            break;
+        }
         case PF_QUIT:
         case PF_BACK:
 #ifdef HAVE_USB_PODLINK
@@ -9068,6 +9357,13 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
             close_album_panel();
         if (flat_view())
             ui_scene_capture_modal(&wps_handover.sheet);
+        else if (playback_scene.rising && pf_motion_scale && lcd_active())
+        {
+            release_playback_scene();
+            playback_scene.sheet = capture_page();
+            playback_scene.rising = playback_scene.pending =
+                playback_scene.sheet > 0;
+        }
         /* The Cover Flow pixels are fullscreen. Its viewport stack has
          * already unwound to Home so that playback can take over. */
         wps_handover.sheet.status_height = 0;
@@ -9146,7 +9442,8 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
     model->set_initial(selected_file);
     if (wps_handover.returning)
     {
-        set_current_slide(MIN(wps_handover.index, number_of_slides - 1));
+        if (!m->external)
+            set_current_slide(MIN(wps_handover.index, number_of_slides - 1));
         if (wps_handover.panel_open)
         {
             static struct panel_request current;
@@ -9185,6 +9482,7 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
     button_set_sw_poweroff_state(true);
 
     remember_current_cover();
+    pf_left_key_valid = model->album_key && model->album_key(center_index, &pf_left_key);
     if (cover_resume_dirty)
         status_save(true);
     cleanup();

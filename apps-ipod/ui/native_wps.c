@@ -861,6 +861,12 @@ static const struct ui_rect turned_face = {
     CLASSIC_ART_X, CLASSIC_ART_Y, CLASSIC_ART_WIDTH, CLASSIC_ART_NEAR
 };
 
+bool native_wps_sheet_ready(void)
+{
+    return !active || wps->theme.background[UI_BG_WPS] != UI_BG_COVER_SCRIM ||
+           wps->background > 0;
+}
+
 bool native_wps_art_turned(void)
 {
     return active ? wps->classic :

@@ -160,9 +160,14 @@ static int wheel_shortcut_button(int button, bool talking, bool raw, int *action
 #ifdef HAVE_USB_PODLINK
     connected = podlink_host_connected();
 #endif
-    if (ui_wheel_navigation() && get_current_activity() != ACTIVITY_ARCADE &&
-        get_current_activity() != ACTIVITY_SPIKE &&
-        get_current_activity() != ACTIVITY_MUSICQUIZ)
+    enum current_activity activity = get_current_activity();
+    /* T3 keeps its explicit SELECT+PLAY chord between Agents and Now Playing.
+     * The ordinary transport buttons still belong to playback. */
+    bool agents_wps_chord = connected &&
+                           (activity == ACTIVITY_AGENTS || activity == ACTIVITY_WPS);
+    if (ui_wheel_navigation() && !agents_wps_chord &&
+        activity != ACTIVITY_ARCADE && activity != ACTIVITY_SPIKE &&
+        activity != ACTIVITY_MUSICQUIZ)
         return button;
     if (raw && connected && !shortcut.latched && !shortcut.ignored)
         return button;

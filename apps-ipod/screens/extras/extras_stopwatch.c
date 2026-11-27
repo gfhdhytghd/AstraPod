@@ -365,7 +365,8 @@ static enum sw_next sw_timer(void)
     {
         int action = get_action(CONTEXT_STD, sw_running() ? HZ / 25 :
                                 TIMEOUT_BLOCK);
-        if (action == ACTION_TREE_WPS || action == ACTION_STD_OK)
+        if (action == ACTION_TREE_WPS || action == ACTION_STD_OK ||
+            (ui_wheel_navigation() && action == ACTION_STD_CONTEXT))
         {
             if (!current)
                 sw_start();

@@ -29,6 +29,7 @@
 #include <string.h>
 #include "string-extra.h"    /* strmemccpy */
 #include "config.h"
+#include "ui/native_theme_runtime.h"
 #include "file.h"            /* off_t, open/close/rename/remove, fdprintf */
 #include "rbpaths.h"         /* ROCKBOX_DIR */
 #include "system/library_files.h"
@@ -3084,6 +3085,8 @@ static const struct button_mapping *tv_side_keymap(int context)
 {
     if (context & CONTEXT_REMOTE)
         return get_context_mapping(CONTEXT_STD | CONTEXT_REMOTE);
+    if (ui_wheel_navigation())
+        return get_context_mapping(CONTEXT_STD);
     return global_settings.text_viewer_orientation == TV_ORIENT_RIGHT
            ? tv_side_keys_right : tv_side_keys_left;
 }
@@ -3712,7 +3715,7 @@ int text_viewer(const char *file)
 
         if (tv_book_done)
             goto done;
-        if (tv_side)
+        if (tv_side && !ui_wheel_navigation())
         {
             long b = agents_shortcut_get_button(timeout);
 #ifdef HAVE_USB_PODLINK
@@ -3785,12 +3788,18 @@ int text_viewer(const char *file)
 
             case ACTION_STD_NEXT:
             case ACTION_STD_NEXTREPEAT:
-                tv_wheel(1);
+                if (ui_wheel_navigation() && !global_settings.text_viewer_wheel_scrub)
+                    tv_next_page();
+                else
+                    tv_wheel(1);
                 break;
 
             case ACTION_STD_PREV:
             case ACTION_STD_PREVREPEAT:
-                tv_wheel(-1);
+                if (ui_wheel_navigation() && !global_settings.text_viewer_wheel_scrub)
+                    tv_prev_page();
+                else
+                    tv_wheel(-1);
                 break;
 
             /* PLAY twice goes sideways, right hand; once, with Read Aloud

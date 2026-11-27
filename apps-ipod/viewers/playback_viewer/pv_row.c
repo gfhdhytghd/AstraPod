@@ -16,6 +16,7 @@
 #include <string.h>
 #include <file.h>
 #include "config.h"
+#include "ui/native_theme_runtime.h"
 #include "system.h"
 #include "kernel.h"
 #include "button.h"
@@ -963,6 +964,7 @@ static int row_session(bool *again)
     speak_card(sec_list[sec_at], row.focus, true);
     spoken_sec = sec_at;
     spoken_focus = row.focus;
+    bool select_held = false;
 
     /* One frame loop, not a wait followed by a run to rest.
      *
@@ -1038,8 +1040,35 @@ static int row_session(bool *again)
              * release of Select would toggle a second time. */
             code = btn & ~(BUTTON_REPEAT | BUTTON_REL);
 
-            if (code != BUTTON_MENU && (btn & BUTTON_REL))
+            bool wheel_nav = ui_wheel_navigation();
+            if (code != BUTTON_MENU && (btn & BUTTON_REL) &&
+                !(wheel_nav && code == BUTTON_SELECT))
                 continue;
+
+            if (wheel_nav)
+            {
+                if (code == BUTTON_SCROLL_FWD && row.focus == row.n - 1)
+                    code = BUTTON_RIGHT;
+                else if (code == BUTTON_SCROLL_BACK && row.focus == 0)
+                    code = BUTTON_LEFT;
+                else if (code == BUTTON_SELECT)
+                {
+                    if (btn & BUTTON_REPEAT)
+                    {
+                        if (select_held)
+                            continue;
+                        select_held = true;
+                        code = BUTTON_PLAY;
+                    }
+                    else if (!(btn & BUTTON_REL))
+                    {
+                        select_held = false;
+                        continue;
+                    }
+                    else if (select_held)
+                        continue;
+                }
+            }
 
             switch (code)
             {

@@ -18,6 +18,7 @@
 
 #include "draw/screen_access.h"
 #include "config.h"
+#include "ui/native_theme_runtime.h"
 #include "core_alloc.h"
 #include "kernel.h"
 #include "system.h"
@@ -168,7 +169,12 @@ static int kbd_on_action(struct dialog *d, int action, void *data)
         case ACTION_KBD_SPEAK:     /* SELECT held: read back the text */
             edit_line_speak(&s->ed);
             break;
-        case ACTION_KBD_SELECT:    /* accept, or confirm the chosen button */
+        case ACTION_KBD_SELECT:
+            if (ui_wheel_navigation() && !s->on_buttons)
+            {
+                edit_line_action(&s->ed, ACTION_KBD_RIGHT);
+                break;
+            }
             if (s->on_buttons && !s->btn_ok)
                 return kbd_confirm_cancel(s);   /* Cancel button */
             return DIALOG_ACCEPT;               /* OK / input shortcut */

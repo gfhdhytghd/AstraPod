@@ -22,6 +22,7 @@
  ****************************************************************************/
 
 #include "config.h"
+#include "ui/native_theme_runtime.h"
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -1294,6 +1295,14 @@ bool recording_screen(bool no_source)
             /* simulate a button press */
             button = ACTION_REC_PAUSE;
             recording_start_automatic = false;
+        }
+
+        if (ui_wheel_navigation() && (button_status() & BUTTON_SELECT))
+        {
+            if (button == ACTION_STD_NEXT || button == ACTION_STD_NEXTREPEAT)
+                button = ACTION_SETTINGS_INC;
+            else if (button == ACTION_STD_PREV || button == ACTION_STD_PREVREPEAT)
+                button = ACTION_SETTINGS_DEC;
         }
 
         /* let list handle the button */

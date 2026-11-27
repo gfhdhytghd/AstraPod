@@ -178,6 +178,7 @@ static bool task_at_end;        /* it rests at its end, to go back */
 static char question_id[12], question_saved_detail[16];
 static char question_agent[44], question_tab[44], question_line[124];
 static int question_choice;
+static bool wheel_answer_yes;
 static bool question_custom, question_closing;
 static char t3_input[T3_INPUT_BYTES + 1];
 static char question_pane[16];  /* the pane the question view answers */
@@ -1969,6 +1970,9 @@ static void q_buttons(struct screen *d, struct viewport *vp,
         d->fillrect(x, y, bw, h);
         d->set_foreground(c);
         d->drawrect(x, y, bw, h);
+        if (ui_wheel_navigation() && view == VIEW_QUESTION &&
+            wheel_answer_yes == (i == 0))
+            d->drawrect(x + 1, y + 1, bw - 2, h - 2);
         const char *arrow = i ? "▶" : "◀";
         int aw = text_w(d, arrow);
         fit(cut, sizeof cut, label, bw - aw - 22);
@@ -2066,7 +2070,7 @@ static void draw_question_overlay(void)
         {
             const struct hr_detail *det = &model.detail;
             d->set_viewport(&box);
-            if (!det->input[0])
+            if (!det->input[0] && !ui_wheel_navigation())
                 text_at(d, INPUT_PAD + 1, y + INPUT_PAD, Q_FAINT,
                         "Hold PLAY and speak");
             draw_input(d, &box, y, det->input,
@@ -2077,11 +2081,13 @@ static void draw_question_overlay(void)
         }
         int ky = bar - USE_LINE - 6;
         if (t3)
-            text_at(d, Q_MARGIN, ky, USE_DIM, "RIGHT: Edit text");
+            text_at(d, Q_MARGIN, ky, USE_DIM, ui_wheel_navigation() ?
+                    "Hold SELECT: Edit text" : "RIGHT: Edit text");
         else
         {
             draw_mic(d, Q_MARGIN, ky + 2, talk_held ? Q_AMBER : USE_DIM);
             text_at(d, Q_MARGIN + 18, ky, USE_DIM,
+                    ui_wheel_navigation() ? "Hold SELECT: Delete" :
                     "Hold PLAY: speak · LEFT: delete");
         }
         q_keys(d, &full, 2, keys);
@@ -2090,11 +2096,15 @@ static void draw_question_overlay(void)
     {
         static const char *const alert_keys[] = { "SELECT", "All options", "MENU", "Ignore" };
         static const char *const page_keys[] = { "MENU", "Back" };
+        static const char *const wheel_keys[] = { "SELECT", "Answer",
+                                                 "MENU", "Back" };
         int bh = 46, by = bar - bh - 10;
         q_body(d, &full, y, by - 6);
         q_buttons(d, &full, q, by, bh);
         if (view == VIEW_ALERT)
             q_keys(d, &full, 2, alert_keys);
+        else if (ui_wheel_navigation())
+            q_keys(d, &full, 2, wheel_keys);
         else
             q_keys(d, &full, 1, page_keys);
     }
@@ -2577,6 +2587,7 @@ static void open_question(struct gui_synclist *list,
     question_from_row = sel >= 0 && sel < nrows ? rows[sel] : (struct row){0};
     snprintf(question_saved_detail, sizeof question_saved_detail, "%s", detail_pane);
     question_choice = 0;
+    wheel_answer_yes = false;
     question_custom = question_closing = false;
     hr_popped_add(&popped, q->id);
     snprintf(question_pane, sizeof question_pane, "%s", q->pane);
@@ -2948,10 +2959,15 @@ static bool question_action(struct gui_synclist *list, int action)
                 else if (select && !talk_held && !talk_req[0]) close_input(true);
                 else if (is_t3(question_pane))
                 {
-                    if (right && !pending_req[0] && !question_closing)
+                    if ((right || (ui_wheel_navigation() &&
+                         action == ACTION_STD_CONTEXT && !(status & ACTION_REPEAT)))
+                        && !pending_req[0] && !question_closing)
                         edit_t3_input(list);
                 }
-                else if (left && detail_ready && !question_closing) send_key("bs");
+                else if ((left || (ui_wheel_navigation() &&
+                         action == ACTION_STD_CONTEXT && !(status & ACTION_REPEAT)))
+                         && detail_ready && !question_closing)
+                    send_key("bs");
                 else if (action == ACTION_AGENTS_TALK || action == ACTION_AGENTS_REMOTE_TALK)
                 {
                     if (detail_ready && !focus_req[0] && !question_closing)
@@ -2959,6 +2975,22 @@ static bool question_action(struct gui_synclist *list, int action)
                 }
                 else if (action == ACTION_AGENTS_DISCARD) finish_talk(true);
                 return true;
+            }
+            if (ui_wheel_navigation() && question_binary_page())
+            {
+                if (action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT ||
+                    action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
+                {
+                    wheel_answer_yes = action == ACTION_STD_PREV ||
+                                       action == ACTION_STD_PREVREPEAT;
+                    draw_question_overlay();
+                    return true;
+                }
+                if (select)
+                {
+                    answer_number(wheel_answer_yes ? q->yes : q->no);
+                    return true;
+                }
             }
             if (left || right)
             {
@@ -3321,7 +3353,8 @@ static int agents_run(void)
     push_current_activity(ACTIVITY_AGENTS);
     /* Play is held to talk here, and held long enough it would power off */
     bool poweroff = button_get_sw_poweroff_state();
-    button_set_sw_poweroff_state(false);
+    if (!ui_wheel_navigation())
+        button_set_sw_poweroff_state(false);
     gui_synclist_init(&list, row_name, &list, false, 1, NULL);
     gui_synclist_set_row_callbacks(&list, NULL, row_value, NULL);
     gui_synclist_set_description_callback(&list, row_description);
@@ -3765,6 +3798,19 @@ static int agents_run(void)
                 finish_native_play();
                 break;
             case ACTION_STD_CONTEXT:
+                if (ui_wheel_navigation() &&
+                    !(get_action_statuscode(NULL) & ACTION_REPEAT))
+                {
+                    if (view == VIEW_SPACES)
+                        open_usage(&list);
+                    else if (view == VIEW_AGENTS)
+                        switch_tab(&list, 1);
+                    else if (view == VIEW_DETAIL && is_t3(detail_pane))
+                        request_actions();
+                    else if (view == VIEW_USAGE || view == VIEW_DETAIL)
+                        send_key("bs");
+                    break;
+                }
                 /* SELECT held is still one Enter in usage and detail: the
                  * first repeat sends it, the rest and the release nothing */
                 if ((view == VIEW_USAGE || view == VIEW_DETAIL) &&

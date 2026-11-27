@@ -46,6 +46,8 @@ struct gui_synclist{int dummy;};
 static enum view view;
 static struct hr_question q;
 static bool have_question,detail_ready,question_closing,talk_held,native_play_pending,done,quick_usb;
+static bool wheel_navigation,wheel_answer_yes;
+static int answer_value;
 static int raw,status,question_choice,backspaces,usage,tabs,closed_usage,closed_detail,closed_space,left_question,closed_input,answers,enters,consents,finishes;
 static unsigned long native_play_at,current_tick;
 static char pending_req[8],focus_req[8],talk_req[8],question_pane[16],detail_pane[16];
@@ -61,7 +63,9 @@ static int get_action_statuscode(int*b){if(b)*b=raw;return status;}
 static const struct hr_question*current_question(void){return have_question?&q:NULL;}
 static void send_key(const char*k){if(!strcmp(k,"bs"))backspaces++;else assert(!strcmp(k,"enter"));}
 static void enter_answer(struct gui_synclist*l){(void)l;enters++;view=VIEW_QUESTION;}
-static void answer_number(int n){assert(n==q.yes);answers++;}
+static bool ui_wheel_navigation(void){return wheel_navigation;}
+static void draw_question_overlay(void){}
+static void answer_number(int n){assert(n==q.yes||n==q.no);answer_value=n;answers++;}
 static void close_input(bool submit){assert(!submit);closed_input++;}
 static void leave_question(struct gui_synclist*l){(void)l;left_question++;}
 static void start_talk(struct gui_synclist*l,bool remote){(void)l;(void)remote;assert(0);}
@@ -83,7 +87,7 @@ struct mapping{int action,button,previous;};
 static const struct mapping keys[]={ROWS};
 static int lookup(int key){for(unsigned i=0;i<sizeof(keys)/sizeof(keys[0]);i++)if(keys[i].button==key)return keys[i].action;return ACTION_NONE;}
 '''.replace('ACTIONS','enum {'+','.join(sorted(special))+'};').replace('VIEWS',views).replace('ROWS',','.join(rows))
-code=pre+fn(s,'is_t3')+fn(s,'question_action')+fn(s,'agents_menu_exit')+fn(s,'agents_usb_exit')
+code=pre+fn(s,'is_t3')+fn(s,'question_binary_page')+fn(s,'question_action')+fn(s,'agents_menu_exit')+fn(s,'agents_usb_exit')
 code+='\nstatic int dispatch(int input,int button){struct gui_synclist list;'+init+'action=input;raw=button;status=button&BUTTON_REPEAT?ACTION_REPEAT:0;done=false;do{\n'+dispatch+'\n}while(false);if(done)agents_usb_exit(ret);return ret;}\n'
 code+='static int failed_open(void){'+start+'assert(0);return -1;}\n'
 post=r'''
@@ -146,6 +150,13 @@ int main(void){
    else assert(got==want[a]&&done&&!consents);
   }
  }
+ reset(VIEW_QUESTION);wheel_navigation=true;q.noptions=2;
+ dispatch(ACTION_STD_NEXT,BUTTON_SCROLL_FWD);assert(!answers&&!wheel_answer_yes);
+ dispatch(ACTION_STD_PREV,BUTTON_SCROLL_BACK);assert(!answers&&wheel_answer_yes);
+ dispatch(ACTION_STD_OK,BUTTON_SELECT|BUTTON_REL);assert(answers==1&&answer_value==q.yes);
+ dispatch(ACTION_STD_NEXT,BUTTON_SCROLL_FWD);assert(answers==1&&!wheel_answer_yes);
+ dispatch(ACTION_STD_OK,BUTTON_SELECT|BUTTON_REL);assert(answers==2&&answer_value==q.no);
+ wheel_navigation=false;
  assert(failed_open()==AGENTS_EXIT_OTHER);
  for(int ret=AGENTS_EXIT_OTHER;ret<=AGENTS_EXIT_DEFERRED;ret++){consents=0;agents_usb_exit(ret);assert(!consents);}
  printf("FU45 Agents: %d views, %d LEFT/busy cases; body/remote press-repeat-release parity; MENU-only consent; failed open, CANCEL, USB, QuickScreen, switches/deferred safe PASS\n",views,cases);

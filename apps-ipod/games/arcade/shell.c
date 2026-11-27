@@ -1483,10 +1483,12 @@ int arcade_play(const char *path)
     if (size > ARENA_MAX)
         size = ARENA_MAX;
 
+    push_activity_without_refresh(ACTIVITY_ARCADE);
     int status;
     do
         status = run(path, mem, size);
     while (status == RESTART);
+    pop_current_activity_without_refresh();
 
     app_release_buffer("arcade");
     return status == USB ? GO_TO_ROOT : GO_TO_PREVIOUS;

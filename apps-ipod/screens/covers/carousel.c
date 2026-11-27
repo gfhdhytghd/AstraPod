@@ -119,6 +119,7 @@
 #include "lcd-te-s5l8702.h"
 #endif
 #include "ui/scene.h"
+#include "ui/menu_pane.h"
 
 /******************************* Globals ***********************************/
 static fb_data *lcd_fb;
@@ -465,7 +466,8 @@ static pix_t panel_bar[ALBUM_BLUR_ROW_PITCH];
 static struct ui_scene pf_scene;
 /* Home's album colours, artwork and theme when pf_scene was taken of it. */
 static unsigned pf_scene_palette, pf_scene_art, pf_scene_theme;
-static bool pf_scene_redrawn;
+/* pf_scene holds Home's split menu, which the stock look slides aside. */
+static bool pf_scene_redrawn, pf_scene_split;
 static bool pf_wps_entry;
 static bool flat_view(void);
 static bool pf_shown, pf_entry_prepared, cover_resume_dirty;
@@ -488,6 +490,7 @@ void carousel_prepare_transition(void)
     ui_scene_discard(&pf_scene);
     memset(&pf_scene, 0, sizeof(pf_scene));
     ui_scene_capture_modal(&pf_scene);
+    pf_scene_split = menu_pane_themed() && !cider_active();
     pf_scene_palette = album_palette_generation();
     pf_scene_art = album_art_generation();
     pf_scene_theme = ui_theme_generation();
@@ -6675,6 +6678,25 @@ static bool flow_present_fade(struct ui_scene *source, unsigned opacity)
     return ui_scene_present_fade(source, opacity, fade_top, fade_end);
 }
 
+/* The stock look slides the menu instead of fading it: on the way in its
+ * rows leave to the left with quadratic ease-in while the covers show at
+ * once in the pane's place; on the way out, after the first 50 ms, the rows
+ * return from the left and the pane from the right with quadratic ease-out
+ * in 200 ms. */
+#define FLOW_SPLIT_LEAVE_DELAY_US 50000u
+static bool flow_present_split(struct ui_scene *source, uint32_t age, bool leave)
+{
+    const int half = MENU_PANE_X;
+    uint32_t duration = leave ? FLOW_LEAVE_FADE_US - FLOW_SPLIT_LEAVE_DELAY_US
+                              : FLOW_MENU_FADE_US;
+    if (leave)
+        age = age > FLOW_SPLIT_LEAVE_DELAY_US ? age - FLOW_SPLIT_LEAVE_DELAY_US : 0;
+    int u = MIN(age, duration) * 256 / duration;
+    int away = leave ? half * (256 - u) * (256 - u) / 65536
+                     : half * u * u / 65536;
+    return ui_scene_present_split(source, -away, leave ? away : half);
+}
+
 /* The local playlist needs the carousel's scratch arena before WPS can read
  * its art. Retain just the visible textures and wall poses across that handoff. */
 struct playback_texture {
@@ -8150,7 +8172,10 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels)
                     unsigned duration = leaving ? FLOW_LEAVE_FADE_US : FLOW_MENU_FADE_US;
                     unsigned phase = MIN(age, duration) * 256 / duration;
                     unsigned alpha = leaving ? leave_from * (256 - phase) / 256 : phase;
-                    if (flow_present_fade(fade, alpha))
+                    bool shown = stock_look() && pf_scene_split
+                        ? flow_present_split(fade, age, leaving)
+                        : flow_present_fade(fade, alpha);
+                    if (shown)
                         opacity = alpha;
                     if (phase == 256 && !leaving)
                     {

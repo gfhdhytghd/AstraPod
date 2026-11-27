@@ -21,6 +21,8 @@ struct ui_scene {
     /* Both pages are painted on the list backdrop, which stays still under
      * them. */
     bool still_backdrop;
+    /* The motion turned back part way, so keeps the geometry it began with. */
+    bool reversed;
 };
 
 /* The UI thread owns a scene from capture through the end of its transition.
@@ -53,6 +55,9 @@ void ui_scene_show_modal(struct ui_scene *scene, const char *route);
  * screen-space column spans keep moving artwork opaque (end exclusive). */
 bool ui_scene_present_fade(struct ui_scene *scene, unsigned opacity,
                            const int16_t *art_top, const int16_t *art_end);
+/* Present the retained split menu over the page: its rows at list_x and its
+ * pane pane_x right of the pane's own place. Neither changes the page. */
+bool ui_scene_present_split(struct ui_scene *scene, int list_x, int pane_x);
 bool ui_scene_restore_modal(struct ui_scene *scene);
 /* Draw the retained parent page afresh, off screen. The painter is given the
  * parent's page key and returns false, having drawn nothing, for a page it

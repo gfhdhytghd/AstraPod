@@ -12,6 +12,22 @@ struct wps_state;
 struct stock_wps_controls;
 struct album_blur_source;
 
+/* Both stock playback pages share these progress-strip coordinates. */
+#define WPS_CLASSIC_PROGRESS_TOP 203
+#define WPS_CLASSIC_PROGRESS_X 54
+#define WPS_CLASSIC_PROGRESS_WIDTH 212
+#define WPS_CLASSIC_BAR_Y 4
+#define WPS_CLASSIC_BAR_HEIGHT 14
+#define WPS_CLASSIC_BAR_REFLECTION 11
+#define WPS_CLASSIC_TIME_Y 5
+#define WPS_CLASSIC_ELAPSED_X 15
+#define WPS_CLASSIC_REMAINING_RIGHT 310
+
+/* Paint the stock Now Playing body as its cover turns and its labels leave.
+ * The status and progress strips belong to the caller. */
+void native_wps_lyrics_departure(fb_data *out, const fb_data *back,
+                                 int top, int progress);
+
 void native_wps_alloc(void);
 int native_wps_art_slot(void);
 /* UI thread only. The cache belongs to Now Playing, even while it is closed. */

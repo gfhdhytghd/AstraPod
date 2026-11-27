@@ -9,10 +9,8 @@
 #include "lcd.h"
 #include "ui/native_theme.h"
 #include "ui/native_chrome.h"
+#include "ui/native_wps.h"
 #include "ui/retained.h"
-
-/* Now Playing's progress row: its top, and the bar and times inside it. */
-#define LYRICS_CHROME_STRIP 203
 
 struct lyrics_chrome {
     struct ui_theme theme;

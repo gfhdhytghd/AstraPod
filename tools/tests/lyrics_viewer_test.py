@@ -297,7 +297,30 @@ static void ui_theme_snapshot(struct ui_theme *theme)
     theme->color[UI_COLOR_FOREGROUND] = theme->color[UI_COLOR_ACCENT] = 0xffffff;
 }
 /* The snapshot above never selects style.lyrics=classic. */
-#define LYRICS_CHROME_STRIP 203
+static unsigned ui_theme_style(enum ui_style_role role)
+{
+    assert(role == UI_STYLE_LYRICS);
+    return 0;
+}
+#define WPS_CLASSIC_PROGRESS_TOP 203
+struct ui_scene;
+static void native_wps_lyrics_departure(fb_data *out, const fb_data *back,
+                                        int top, int progress)
+{ (void)out; (void)back; (void)top; (void)progress; abort(); }
+static void ui_scene_open_transform(struct ui_scene *scene, const char *route,
+                                    unsigned frames, int status_height,
+                                    void (*compose)(fb_data *, const fb_data *,
+                                                    const fb_data *, const fb_data *, int),
+                                    void (*refresh)(void))
+{
+    (void)scene; (void)route; (void)frames; (void)status_height;
+    (void)compose; (void)refresh; abort();
+}
+static bool ui_scene_close_modal(struct ui_scene *scene, bool animate,
+                                 const char *route)
+{ (void)scene; (void)animate; (void)route; abort(); }
+static void cider_source_poll(void) { abort(); }
+static void cider_wps_update(struct wps_state *state) { (void)state; abort(); }
 struct lyrics_chrome { fb_data rows[LCD_HEIGHT]; int status_height; };
 static void lyrics_chrome_open(struct lyrics_chrome *c, const struct ui_theme *t)
 {(void)c;(void)t;abort();}

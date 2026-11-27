@@ -894,13 +894,17 @@ const char *ui_scene_capture_failure(void)
     return capture_failure;
 }
 
-static bool capture_panel(struct ui_scene *scene, bool vertical)
+static bool capture_panel(struct ui_scene *scene, bool vertical,
+                          unsigned transform_frames)
 {
     scene->requested_at = USEC_TIMER;
     bool slide = !vertical && slide_motion();
-    unsigned frames = vertical
-        ? ui_theme_motion(UI_MOTION_SHEET_IN, MODAL_UP_FRAMES, MODAL_UP_FRAMES)
-        : page_frames(true);
+    unsigned frames = transform_frames;
+    if (!frames)
+        frames = vertical
+            ? ui_theme_motion(UI_MOTION_SHEET_IN, MODAL_UP_FRAMES,
+                              MODAL_UP_FRAMES)
+            : page_frames(true);
     capture_failure = !frames ? "motion-off" : !lcd_active() ? "lcd-off" : "-";
     if (!frames || !lcd_active())
         return false;
@@ -923,6 +927,7 @@ static bool capture_panel(struct ui_scene *scene, bool vertical)
     memcpy(backdrop, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
     core_put_data_pinned(backdrop);
     scene->vertical = vertical;
+    scene->transform = NULL;
     /* A panel page often hides the status bar, so the whole screen slides. */
     scene->pan_top = 0;
     scene->slide = slide;
@@ -1191,7 +1196,7 @@ bool ui_scene_repaint_backdrop(struct ui_scene *scene)
 
 bool ui_scene_capture_modal(struct ui_scene *scene)
 {
-    return capture_panel(scene, true);
+    return capture_panel(scene, true, 0);
 }
 
 void ui_scene_open_modal(struct ui_scene *scene, const char *route)
@@ -1200,9 +1205,25 @@ void ui_scene_open_modal(struct ui_scene *scene, const char *route)
         ui_scene_show_modal(scene, route);
 }
 
+void ui_scene_open_transform(struct ui_scene *scene, const char *route,
+                             unsigned frames, int status_height,
+                             ui_scene_transform transform,
+                             void (*refresh_chrome)(void))
+{
+    if (!frames || !capture_panel(scene, true, frames))
+        return;
+    scene->transform = transform;
+    scene->refresh_chrome = refresh_chrome;
+    scene->transform_frames = frames;
+    scene->status_height = status_height;
+    scene->tween.from = 0;
+    scene->tween.to = frames;
+    ui_scene_show_modal(scene, route);
+}
+
 bool ui_scene_capture_page(struct ui_scene *scene)
 {
-    return capture_panel(scene, false);
+    return capture_panel(scene, false, 0);
 }
 
 void ui_scene_open_page(struct ui_scene *scene, const char *route)
@@ -1216,10 +1237,12 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     if (scene->backdrop_handle <= 0)
         return false;
     uint32_t requested_at = USEC_TIMER;
-    unsigned frames = !animate ? 0 : scene->vertical
-        ? ui_theme_motion(UI_MOTION_SHEET_OUT, MODAL_DOWN_FRAMES,
-                          MODAL_DOWN_FRAMES)
-        : page_frames(false);
+    unsigned frames = 0;
+    if (animate)
+        frames = scene->transform ? scene->transform_frames : scene->vertical
+            ? ui_theme_motion(UI_MOTION_SHEET_OUT, MODAL_DOWN_FRAMES,
+                              MODAL_DOWN_FRAMES)
+            : page_frames(false);
     if (!frames || !lcd_active() || (owner && owner != scene))
     {
         release_scene(scene);
@@ -1230,6 +1253,12 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     bool was_opening = owner == scene;
     int offset = was_opening
         ? (scene->last_offset >= 0 ? scene->last_offset : scene->tween.from) : 0;
+    if (scene->transform)
+    {
+        if (!was_opening)
+            offset = scene->transform_frames;
+        frames = offset;
+    }
     if (scene->handle <= 0)
         scene->handle = scene_workspace(PANEL_WORKSPACE_BYTES);
     if (scene->handle <= 0)
@@ -1243,6 +1272,9 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     fb_data *front = core_get_data_pinned(scene->handle);
     fb_data *backdrop = core_get_data_pinned(scene->backdrop_handle);
     memcpy(front, lcd_framebuffer_default.fb_ptr, FRAMEBUFFER_SIZE);
+    if (scene->transform && !was_opening)
+        memcpy(backdrop, front,
+               scene->status_height * LCD_WIDTH * sizeof(*backdrop));
     if (!scene->vertical)
         scene->still_backdrop = pages_on_backdrop(backdrop, front);
     memcpy(lcd_framebuffer_default.fb_ptr, backdrop, FRAMEBUFFER_SIZE);
@@ -1253,7 +1285,8 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     ui_perf_ready(scene->trace, requested_at);
     scene->tween = (struct ui_tween){
         .start_clock = ui_clock_start(), .from = offset,
-        .to = scene->vertical ? LCD_HEIGHT : LCD_WIDTH, .frames = frames,
+        .to = scene->transform ? 0 : scene->vertical ? LCD_HEIGHT : LCD_WIDTH,
+        .frames = frames,
         .ease_in = !scene->slide,
         .easing = scene->slide ? UI_EASE_LINEAR : 0,
     };
@@ -1358,6 +1391,8 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
     unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER - scene->tween.start_clock);
     if (frame >= scene->tween.frames || scene->tween.from == scene->tween.to)
     {
+        if (scene->transform && !scene->target_front)
+            scene->refresh_chrome();
         if (present(lcd_framebuffer_default.fb_ptr))
         {
             ui_hwscroll_note_framebuffer();
@@ -1369,7 +1404,12 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
         return;
     }
 
-    int offset = position(scene, frame);
+    int offset;
+    if (scene->transform)
+        offset = scene->target_front ? (int)frame
+                                     : scene->tween.from - (int)frame;
+    else
+        offset = position(scene, frame);
     int pose = scene->staggered ? (int)frame : offset;
     if (pose == scene->last_offset && !target_changed)
         return;
@@ -1383,7 +1423,8 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
         fb_data *front = panel ? data : surface(data, true);
         fb_data *back = panel ? core_get_data_pinned(scene->backdrop_handle)
                               : surface(data, false);
-        if (target_changed && (!panel || scene->target_front))
+        if (target_changed && !scene->transform &&
+            (!panel || scene->target_front))
             memcpy(scene->target_front ? front : back, lcd_framebuffer_default.fb_ptr,
                    FRAMEBUFFER_SIZE);
         if (target_changed && !panel)
@@ -1404,7 +1445,15 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
         }
         if (target_changed && !scene->vertical)
             scene->still_backdrop = pages_on_backdrop(back, front);
-        if (scene->vertical)
+        if (scene->transform)
+        {
+            const fb_data *live = lcd_framebuffer_default.fb_ptr;
+            if (!scene->target_front)
+                scene->refresh_chrome();
+            scene->transform(out, back, scene->target_front ? live : front,
+                             live, offset * 256 / scene->transform_frames);
+        }
+        else if (scene->vertical)
             compose_modal(out, back, front, offset,
                           scene->target_front ? 0 : scene->status_height,
                           scene->dim_color);

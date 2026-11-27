@@ -15,6 +15,9 @@
 /* One animated page for local timed/plain text and remote now/lyrics.
  * SELECT or MENU returns; an empty playback source fades in a message. */
 int lyric_viewer(void);
+struct ui_scene;
+int lyric_viewer_from_wps(struct ui_scene *scene);
+bool lyrics_classic_layout(void);
 #define LYRICS_PERF_PATH ROCKBOX_DIR "/lyrics-perf.txt"
 #define LYRICS_PERF_ARCHIVE ROCKBOX_DIR "/lyrics-perf.1.txt"
 #define LYRICS_PERF_FILE_LIMIT (32 * 1024)

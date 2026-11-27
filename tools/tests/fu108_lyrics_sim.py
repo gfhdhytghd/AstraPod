@@ -57,6 +57,8 @@ def instrument(source):
     paint_end = "                align, vocal ? levels : NULL"
     paint_end += ", layout->ink_above);" if padded else ");"
     shutil.copyfile(fu111, viewer.with_name(fu111.name))
+    entry = ("static int lyric_viewer_run(" if "static int lyric_viewer_run(" in text
+             else "int lyric_viewer(void)")
     replacements = {
         "static uint32_t lv_clock(void)\n{":
             "static uint32_t fu108_clock;\nstatic uint32_t lv_clock(void)\n{"
@@ -89,11 +91,11 @@ def instrument(source):
             "#ifdef SIMULATOR\n    probe_kind = 1;\n#endif",
         "\n}\n\n/* Use the same moving neighbour poses":
             "\n#ifdef SIMULATOR\n    probe_kind = 0;\n#endif\n}\n\n/* Use the same moving neighbour poses",
-        "\nint lyric_viewer(void)":
+        "\n" + entry:
             ('\n#ifdef SIMULATOR\n'
              f'#define FU108_MANUAL_DISTANCE(from, to) {distance}\n'
              '#include "fu108_lyrics_probe.c"\n#include "fu111_lyrics_probe.c"\n'
-             '#endif\n\nint lyric_viewer(void)'),
+             '#endif\n\n' + entry),
         "    unsigned trace = 0;\n    for (;;)":
             '    unsigned trace = 0;\n#ifdef SIMULATOR\n    const char *probe = getenv("FU108_LYRICS_PROBE");\n'
             '    if (probe) {\n' + prefetch +

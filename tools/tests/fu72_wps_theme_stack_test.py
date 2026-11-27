@@ -69,7 +69,7 @@ struct ui_scene { bool open; };
 static struct screen screens[1] = {{ NULL }};
 static jmp_buf panic_jmp;
 static char panic_msg[64];
-static bool wps_fullscreen, playback_open;
+static bool wps_fullscreen, playback_open, classic;
 #define GUI_EVENT_THEME_CHANGED 2
 static void scroll_stop(void) {}
 static void panicf(const char *msg) { snprintf(panic_msg, sizeof panic_msg, "%s", msg); longjmp(panic_jmp, 1); }
@@ -82,6 +82,9 @@ static void remove_event(int e, void *h) { (void)e; (void)h; }
 static void wps_lcd_activation_hook(void) {}
 static void cider_spectrum_wps(bool visible) { (void)visible; }
 static bool native_wps_active(void) { return playback_open; }
+static bool native_wps_art_turned(void) { return classic; }
+static bool lyrics_classic_layout(void) { return classic; }
+static void menu_pane_viewport_left(int depth) { (void)depth; }
 static void native_wps_open(const struct wps_state *s)
 { (void)s; assert(!playback_open && wps_fullscreen); playback_open = true; }
 static void native_wps_close(void) { playback_open = false; }
@@ -102,10 +105,18 @@ static struct viewport page_vp;
 static int lyric_viewer(void)
 { viewportmanager_theme_enable(SCREEN_MAIN, false, &page_vp);
   viewportmanager_theme_undo(SCREEN_MAIN, false); return GO_TO_WPS; }
+static int lyric_viewer_from_wps(struct ui_scene *scene)
+{
+    assert(!playback_open);
+    ui_scene_open_modal(scene, "lyrics-up");
+    int result = lyric_viewer();
+    ui_scene_close_modal(scene, true, "lyrics-down");
+    return result;
+}
 static int global_settings_wps_select_action = HOTKEY_ALBUM_COVERS;
 #define HK_CTX_GET(a, b) (b)
-static bool show_album_covers(long *go_to, bool r)
-{ (void)go_to; (void)r; leave_playback(); viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
+static bool show_album_covers(long *go_to, bool r, uint32_t action_us)
+{ (void)go_to; (void)r; (void)action_us; leave_playback(); viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
   viewportmanager_theme_undo(SCREEN_MAIN, false); return false; }
 static bool return_agents;
 /* USB during playback: the consent dialog, then the USB screen, both over the WPS. */
@@ -118,6 +129,7 @@ static const int *script; static int pos;
 static int wps_loop(void)
 {
     long button = 0; bool restore = true;
+    uint32_t action_us = 0;
     struct ui_scene scene = {0}, *lyrics_scene = &scene;
     struct wps_state state = {0};
     while (1)
@@ -164,6 +176,8 @@ int main(void)
     bad += run("lyrics x40 then usb", lyr);
     bad += run("headset + lyrics x40 then usb", lyrh);
     bad += run("coverflow x40 then usb", cov);
+    classic = true;
+    bad += run("classic lyrics x40 then usb", lyr);
     return bad != 0;
 }
 '''

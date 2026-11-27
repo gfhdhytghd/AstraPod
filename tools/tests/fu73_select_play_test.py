@@ -108,7 +108,9 @@ tables.append(covers[start:covers.index('\n};', start) + 3])
 viewer = read('apps-ipod/viewers/lyric_viewer/lyric_viewer.c')
 lyrics_cases = ''
 if 'case ACTION_UNKNOWN:' in viewer:
-    start = viewer.index('switch (action)', viewer.index('int lyric_viewer(void)'))
+    entry = ('static int lyric_viewer_run(' if 'static int lyric_viewer_run(' in viewer
+             else 'int lyric_viewer(void)')
+    start = viewer.index('switch (action)', viewer.index(entry))
     lyrics_cases = viewer[start:viewer.index('case ACTION_WPS_VOLUP:', start)]
     lyrics_cases += 'default: break;\n}'
 lyrics_commit = (function(action, 'agents_shortcut_commit_select')

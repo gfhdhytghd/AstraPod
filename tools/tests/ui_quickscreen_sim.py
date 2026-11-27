@@ -9,12 +9,14 @@ Tests all four themes by default: classic, fruit-company, fruit-company-ultra,
 and scrim.
 
 For Classic, Fruit Company, and Fruit Company Ultra:
-- Full-screen four-tile skeuomorphic page under the 20 px white status bar
-  (Shuffle, vertical Brightness slider, Repeat, Enable EQ)
+- Full-screen page under the 20 px white status bar: Shuffle and Repeat in
+  the left column, one tall Brightness item with a vertical bar on the right
 - Horizontal 320 px push/pop slide matching stock timing (~270 ms, quadratic)
 - Click wheel adjusts Volume and shows only the status-bar volume overlay
-  without altering the four-tile page body
-- MENU, LEFT, RIGHT, and PLAY each operate only their own tile
+  without altering the page body; the normal status bar is back after the
+  overlay's hold
+- LEFT steps Shuffle and RIGHT Repeat, each changing only its own row; MENU
+  raises Brightness and PLAY lowers it, each stopping at its end
 - SELECT closes with pop slide and restores the caller menu with no flash
 
 For Scrim:
@@ -40,15 +42,23 @@ DEFAULT_THEMES = (*PAGE_THEMES, "scrim")
 STOCK_STATUS = 20
 SCRIM_STATUS = 35
 
-# Four 148x96 tile boxes on the 320x240 Control Centre page:
-# 0: Top-Left (LEFT -> Shuffle), 1: Top-Right (MENU -> Brightness),
-# 2: Bottom-Left (RIGHT -> Repeat), 3: Bottom-Right (PLAY -> Enable EQ).
-TILE_BOXES = (
-    (8, 30, 156, 126),
-    (164, 30, 312, 126),
-    (8, 134, 156, 230),
-    (164, 134, 312, 230),
-)
+# The page's three items, as screen boxes: the Shuffle row (LEFT), the
+# Repeat row (RIGHT) and the tall Brightness column (MENU up, PLAY down).
+ITEM_BOXES = {
+    "shuffle": (0, 20, 192, 130),
+    "repeat": (0, 130, 192, 240),
+    "brightness": (192, 20, 320, 240),
+}
+# A column of the Brightness knob outside its bar.
+KNOB_COLUMN = 247
+
+
+def knob_y(image):
+    """The Brightness knob's centre row: the bright rows of its rim."""
+    rows = [y for y in range(60, 220)
+            if min(image.getpixel((KNOB_COLUMN, y))) > 170]
+    return sum(rows) / len(rows) if rows else None
+
 
 # Fallback theme file used when running against a branch that does not yet
 # carry built-in Fruit Company Ultra; built-in names take precedence once
@@ -231,32 +241,32 @@ def run_theme(binary, simdisk, out, theme):
                 not differ(before_vol, after_vol2, body_box)
             )
 
-            # 2. Directional keys operate their four tiles.
+            # 2. Each key changes only its own item.
             if is_page:
                 steps = {}
-                key_tile = (
-                    ("back", 0),   # LEFT -> Shuffle (Top-Left)
-                    ("menu", 1),   # MENU -> Brightness vertical slider (Top-Right)
-                    ("right", 2),  # RIGHT -> Repeat (Bottom-Left)
-                    ("play", 3),   # PLAY -> Enable EQ (Bottom-Right)
-                )
-                for key, expected_tile in key_tile:
+                for key, expected in (("back", "shuffle"), ("right", "repeat"),
+                                      ("menu", "brightness"),
+                                      ("play", "brightness")):
                     before = frame(sim)
                     tap(key)
                     after = frame(sim)
-                    changed = tuple(
-                        i for i, box in enumerate(TILE_BOXES)
-                        if differ(before, after, box)
-                    )
-                    steps[key] = (changed == (expected_tile,))
+                    changed = tuple(name for name, box in ITEM_BOXES.items()
+                                    if differ(before, after, box))
+                    steps[key] = changed == (expected,)
+                    if key == "menu":
+                        steps["menu_raises"] = knob_y(after) < knob_y(before)
+                    if key == "play":
+                        steps["play_lowers"] = knob_y(after) > knob_y(before)
                 frame(sim).save(out / f"{theme}-stepped.png")
-                # Verify brightness wraps cleanly back around after stepping to max.
-                before_wrap = frame(sim)
-                for _ in range(5):
-                    tap("menu")
-                after_wrap = frame(sim)
-                steps["brightness_cycles"] = not differ(
-                    before_wrap, after_wrap, TILE_BOXES[1])
+                # Brightness stops at its ends instead of wrapping.
+                for key, name in (("menu", "top"), ("play", "bottom")):
+                    for _ in range(20):
+                        tap(key)
+                    end = frame(sim)
+                    end.save(out / f"{theme}-brightness-{name}.png")
+                    tap(key)
+                    steps[f"stops_at_{name}"] = not differ(
+                        end, frame(sim), ITEM_BOXES["brightness"])
                 result["steps_change"] = steps
             else:
                 steps = {}
@@ -271,7 +281,10 @@ def run_theme(binary, simdisk, out, theme):
             # Wait for the 3 s status-bar volume overlay to clear so the close
             # comparison against `menu` checks a settled status bar too.
             time.sleep(3.2)
-            settle(sim)
+            rested = settle(sim)
+            rested.save(out / f"{theme}-volume-rested.png")
+            result["volume_overlay_clears"] = not differ(
+                before_vol, rested, status_box)
 
             # 3. SELECT closes with pop slide and restores caller with no flash.
             frames, stamps = record(sim, out, f"{theme}-close", "select", 6)
@@ -320,6 +333,7 @@ def main():
             r["open_animated"],
             r["wheel_shows_status_volume"],
             r["wheel_leaves_body_unchanged"],
+            r["volume_overlay_clears"],
             r["closed_restores_menu"],
             r["close_animated"],
             r["close_no_flash"],

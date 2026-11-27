@@ -134,10 +134,16 @@
 
 - **Under Fruit Company, use the wheel, Select and Menu to navigate.**
   Previous and Next skip or seek in the current playback. Play/Pause
-  toggles playback without opening Now Playing. In Control Centre, Menu,
-  Previous, Next and Play/Pause operate their tiles. The wheel adjusts
-  volume and Select closes the page. In Photos, turn the wheel to move
-  between pictures. Games keep their own controls.
+  toggles playback without opening Now Playing. In Photos, turn the wheel
+  to move between pictures. Games keep their own controls.
+
+- **Control Centre** (hold Menu) under Classic, Fruit Company and Fruit
+  Company Ultra is a full page in the original iPod's style: Shuffle and
+  Repeat on the left, Brightness on the right. Previous steps Shuffle, Next
+  steps Repeat, Menu raises Brightness and Play/Pause lowers it. Turn the
+  wheel for volume. Select closes the page, and holding Select opens
+  Shortcuts. Enable EQ is no longer a Control Centre item: a slot that
+  held it shows Brightness.
 
 - **Select changes a short setting in place.** On an on/off row, a row
   with up to four values, or a number with up to three, such as **Playback

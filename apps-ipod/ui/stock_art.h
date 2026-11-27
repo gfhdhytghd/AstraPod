@@ -88,5 +88,8 @@ void stock_art_over_layer(bool on);
  * run of pixels in any framebuffer-format buffer. */
 void stock_art_row(enum stock_art_id id, int sx, int sy, fb_data *out,
                    int count);
+/* The same for the mask `id` in `rgb`. */
+void stock_art_mask_row(enum stock_art_id id, int sx, int sy, fb_data *out,
+                        int count, uint32_t rgb);
 
 #endif

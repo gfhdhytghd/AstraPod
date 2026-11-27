@@ -41,6 +41,7 @@
 #include "retained.h"
 #include "native_theme_runtime.h"
 #include "stock_art.h"
+#include "ultra_pane.h"
 
 #define PANE_W (LCD_WIDTH - MENU_PANE_X)
 #define PANE_MID (MENU_PANE_X + PANE_W / 2)
@@ -762,6 +763,7 @@ void menu_pane_paint(struct ui_rect clip)
 {
     load_fonts();
     paint_content(clip, USEC_TIMER);
+    ultra_pane_repaint(clip);
 }
 
 /* ---- the content shown ---- */
@@ -784,6 +786,7 @@ void menu_pane_select(const struct menu_pane_content *content,
     identity = list_identity;
     if (new_list)
     {
+        ultra_pane_cancel();
         shown = *content;
         has_pending = false;
         slide_dir = 0;
@@ -885,7 +888,10 @@ struct ui_rect menu_pane_step(void)
 {
     struct ui_rect damage = { 0 };
     if (!menu_pane_split())
+    {
+        ultra_pane_cancel();
         return damage;
+    }
     if (lcd_updates_held())
     {
         probe.held_steps++;
@@ -894,7 +900,7 @@ struct ui_rect menu_pane_step(void)
     probe.steps++;
     load_fonts();
     uint32_t now = USEC_TIMER;
-    bool repaint = false;
+    bool repaint = false, dissolve = false;
     if (has_pending && now - pending_at >= CHANGE_DELAY_US)
     {
         bool from_art = shown.kind == LIST_PANE_ART;
@@ -910,8 +916,12 @@ struct ui_rect menu_pane_step(void)
             slide_dir = from_art ? 1 : -1;
             slide_started = now;
         }
+        dissolve = !slide_dir && ui_theme_ultra() &&
+                   ultra_pane_hold(menu_pane_rect());
         repaint = true;
     }
+    else if (ultra_pane_active())
+        damage = ultra_pane_step();
     else if (slide_dir)
     {
         if (now - slide_started >= SLIDE_US)
@@ -926,6 +936,8 @@ struct ui_rect menu_pane_step(void)
     {
         damage = menu_pane_rect();
         paint_content(damage, now);
+        if (dissolve)
+            damage = ultra_pane_begin();
     }
     stepped_at = now;
     return damage;
@@ -965,6 +977,8 @@ int menu_pane_deadline(void)
 {
     if (!menu_pane_split())
         return TIMEOUT_BLOCK;
+    if (ultra_pane_active())
+        return ultra_pane_deadline();
     uint32_t now = USEC_TIMER;
     uint32_t wait = UINT32_MAX;
     if (has_pending)

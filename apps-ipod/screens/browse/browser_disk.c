@@ -48,8 +48,12 @@
 #include "metadata/cuesheet.h"
 #include "browser_disk.h"
 #include "system/app_util.h"
+#include "system/bg_task.h"
+#include "system/strutil.h"
+#include "widgets/list_render.h"
 #include "system/activity.h"   /* ui_set_working -- the status-bar busy indicator */
 #include "strnatcmp.h"
+#include "string-extra.h"
 #include "widgets/keyboard.h"
 
 #include "mv.h"
@@ -65,12 +69,14 @@
  * applied after the selection is set -- see browser.c. */
 static int pending_top_item = -1;
 
-static struct compare_data
+struct compare_data
 {
     int sort_dir; /* qsort key for sorting directories */
     int sort_file; /*       ...for sorting files       */
     int(*_compar)(const char*, const char*, size_t);
-} cmp_data;
+};
+
+static struct compare_data cmp_data;
 
 /* dummmy functions to allow compatibility with strncmp & strncasecmp */
 static int strnatcmp_n(const char *a, const char *b, size_t n)
@@ -229,20 +235,18 @@ static void check_file_thumbnails(struct browser_context* c)
     closedir(dir);
 }
 
-/* support function for qsort() */
-static int compare(const void* p1, const void* p2)
+static int compare_entry(const struct entry *e1, const struct entry *e2,
+                         const struct compare_data *sort)
 {
-    struct entry* e1 = (struct entry*)p1;
-    struct entry* e2 = (struct entry*)p2;
     int criteria;
 
-    if (cmp_data.sort_dir == SORT_AS_FILE)
+    if (sort->sort_dir == SORT_AS_FILE)
     {   /* treat as two files */
-        criteria = cmp_data.sort_file;
+        criteria = sort->sort_file;
     }
     else if (e1->attr & ATTR_DIRECTORY && e2->attr & ATTR_DIRECTORY)
     {   /* two directories */
-        criteria = cmp_data.sort_dir;
+        criteria = sort->sort_dir;
 
         if (e1->attr & ATTR_VOLUME || e2->attr & ATTR_VOLUME)
         {   /* a volume identifier is involved */
@@ -255,7 +259,7 @@ static int compare(const void* p1, const void* p2)
     }
     else if (!(e1->attr & ATTR_DIRECTORY) && !(e2->attr & ATTR_DIRECTORY))
     {   /* two files */
-        criteria = cmp_data.sort_file;
+        criteria = sort->sort_file;
     }
     else /* dir and file, dir goes first */
         return (e2->attr & ATTR_DIRECTORY) - (e1->attr & ATTR_DIRECTORY);
@@ -276,7 +280,7 @@ static int compare(const void* p1, const void* p2)
             if (t1 != t2) /* if different */
                 return (t1 - t2) * (criteria == SORT_TYPE_REVERSED ? -1 : 1);
             /* else alphabetical sorting */
-            return cmp_data._compar(e1->name, e2->name, MAX_PATH);
+            return sort->_compar(e1->name, e2->name, MAX_PATH);
         }
 
         case SORT_DATE:
@@ -290,12 +294,17 @@ static int compare(const void* p1, const void* p2)
         case SORT_ALPHA:
         case SORT_ALPHA_REVERSED:
         {
-            return cmp_data._compar(e1->name, e2->name, MAX_PATH) *
+            return sort->_compar(e1->name, e2->name, MAX_PATH) *
                 (criteria == SORT_ALPHA_REVERSED ? -1 : 1);
         }
 
     }
     return 0; /* never reached */
+}
+
+static int compare(const void *a, const void *b)
+{
+    return compare_entry(a, b, &cmp_data);
 }
 
 /* load and sort directory into the tree's cache. returns NULL on failure. */
@@ -517,9 +526,152 @@ int browser_disk_load(struct browser_context* c, const char* tempdir)
     return 0;
 }
 
-/* Returns the top row a freshly loaded directory wants shown, or -1 if it has
- * no preference. Clears the request, so a later redraw (or a list the user has
- * since scrolled) is not forced back to it. */
+#define CHILD_ROWS 16
+#define CHILD_SCAN 128
+#define CHILD_EVENT 0x1184
+
+/* One request. Only the worker writes the results, before publishing done. */
+static struct {
+    char path[MAX_PATH];
+    char names[CHILD_ROWS][MAX_PATH];
+    struct entry first[CHILD_ROWS];
+    struct compare_data sort;
+    int filter, rows, count;
+    unsigned token;
+    bool done;
+} child = { .done = true };
+
+static struct bg_task child_task;
+static struct mutex child_lock;
+
+static void set_child_done(bool done)
+{
+    mutex_lock(&child_lock);
+    child.done = done;
+    mutex_unlock(&child_lock);
+}
+
+static void scan_child(const struct queue_event *ev)
+{
+    (void)ev;
+    if (!list_render_child_current(child.token) ||
+        bg_task_should_stop(&child_task))
+        goto done;
+
+    DIR *dir = opendir(child.path);
+    if (!dir)
+        goto done;
+
+    for (int i = 0; i < CHILD_SCAN && list_render_child_current(child.token);
+         i++)
+    {
+        struct dirent *de = readdir(dir);
+        if (!de)
+            break;
+        struct dirinfo info = dir_get_info(dir, de);
+        const char *name = (const char *)de->d_name;
+        int attr = info.attribute;
+        bool isdir = attr & ATTR_DIRECTORY;
+        if ((i & 7) == 7)
+        {
+            yield();
+            if (bg_task_should_stop(&child_task))
+                break;
+        }
+        if ((attr & ATTR_VOLUME_ID) || (isdir && is_dotdir_name(name)) ||
+            (child.filter != SHOW_ALL && (name[0] == '.' ||
+                                          (attr & ATTR_HIDDEN))))
+            continue;
+        if (!isdir)
+        {
+            attr |= filetype_get_attr(name);
+            if ((child.filter == SHOW_SUPPORTED && !filetype_supported(attr)) ||
+                (child.filter == SHOW_MUSIC &&
+                 (attr & FILE_ATTR_MASK) != FILE_ATTR_AUDIO &&
+                 (attr & FILE_ATTR_MASK) != FILE_ATTR_M3U))
+                continue;
+        }
+
+        char label[MAX_PATH];
+        strlcpy(label, name, sizeof(label));
+        struct entry entry = {
+            .attr = attr, .time_write = info.mtime, .name = label,
+        };
+        int at = child.count;
+        while (at > 0 && compare_entry(&entry, &child.first[at - 1],
+                                       &child.sort) < 0)
+            at--;
+        if (at >= child.rows)
+            continue;
+
+        /* Move pointers in the ordered array and reuse the displaced slot. */
+        char *slot = child.count < child.rows ? child.names[child.count++] :
+                     child.first[child.rows - 1].name;
+        for (int j = child.count - 1; j > at; j--)
+            child.first[j] = child.first[j - 1];
+        strlcpy(slot, label, MAX_PATH);
+        entry.name = slot;
+        child.first[at] = entry;
+    }
+    closedir(dir);
+done:
+    set_child_done(true);
+}
+
+static struct bg_task child_task = {
+    .name = "Folder preview",
+    .handle_event = scan_child,
+};
+
+bool browser_disk_child_texts(struct browser_context *c, const char *name,
+                              int rows, unsigned token, list_child_text *text,
+                              void *context)
+{
+    static char label[MAX_PATH];
+    int filter = *c->dirfilter;
+    if (!rows || (filter != SHOW_ALL && filter != SHOW_SUPPORTED &&
+                  filter != SHOW_MUSIC) || c->browse->callback_show_item)
+        return true;
+    static bool mutex_ready;
+    if (!mutex_ready)
+    {
+        mutex_init(&child_lock);
+        mutex_ready = true;
+    }
+    mutex_lock(&child_lock);
+    bool done = child.done;
+    mutex_unlock(&child_lock);
+    if (!done)
+        return false;
+    if (child.token != token)
+    {
+        if (path_append(child.path, c->currdir, name,
+                        sizeof(child.path)) >= sizeof(child.path))
+            return true;
+        child.rows = MIN(rows, CHILD_ROWS);
+        child.sort = cmp_data;
+        child.filter = filter;
+        child.count = 0;
+        child.token = token;
+        set_child_done(false);
+        if (bg_task_post(&child_task, CHILD_EVENT))
+            return false;
+        set_child_done(true);
+        return true;
+    }
+    for (int i = 0; i < child.count; i++)
+    {
+        const struct entry *entry = &child.first[i];
+        const char *name = entry->name;
+        if (browser_disk_hide_extension(entry->attr & ATTR_DIRECTORY,
+                                        entry->attr, child.filter))
+            name = strip_extension(label, sizeof(label), name);
+        text(i, name, context);
+    }
+    return true;
+}
+
+/* Take the top row requested by the last directory load. */
 int browser_disk_take_pending_top_item(void)
 {
     int item = pending_top_item;

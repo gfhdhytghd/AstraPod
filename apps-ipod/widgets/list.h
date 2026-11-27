@@ -168,6 +168,13 @@ enum list_pane_kind
 typedef enum list_pane_kind list_get_pane(int selected_item, void * data,
                                           int *art);
 
+/* Emit a child's title (-1) and labels. A pending background scan returns
+ * false so the idle renderer polls it again with the same token. */
+typedef void list_child_text(int row, const char *text, void *context);
+typedef bool list_get_child_texts(int item, void *data, int rows,
+                                 unsigned token, list_child_text *text,
+                                 void *context);
+
 /* The icon-sized status cell is already clipped and active for this callback. */
 typedef bool list_draw_status(int selected_item, void *data,
                               struct screen *display, struct viewport *vp);
@@ -268,6 +275,8 @@ struct gui_synclist
     /* Changes whenever the items may have: init, the item count or the kind
      * callback. Unique across lists, so a reused struct gets a new one. */
     unsigned generation;
+    /* Lets an idle list load the glyphs of the pages its rows open. */
+    list_get_child_texts *callback_child_texts;
 };
 
 
@@ -315,6 +324,10 @@ extern void gui_synclist_set_index_key_callback(struct gui_synclist * lists,
 /* Optional content pane beside the rows. */
 extern void gui_synclist_set_pane_callback(struct gui_synclist * lists,
                                            list_get_pane callback);
+/* Optional texts of the page each row opens, so their glyphs load before
+ * the page does. */
+extern void gui_synclist_set_child_texts_callback(struct gui_synclist * lists,
+                                                  list_get_child_texts callback);
 /* Optional status cell for each visible row. */
 extern void gui_synclist_set_status_callback(struct gui_synclist * lists,
                                              list_draw_status callback);

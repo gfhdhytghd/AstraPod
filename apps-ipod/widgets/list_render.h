@@ -16,6 +16,8 @@ void list_render_draw_moved(struct gui_synclist *list);
 void list_render_settle(const struct gui_synclist *list);
 void list_render_retarget(const struct gui_synclist *list, int selection, int top,
                           int offset, bool wheel);
+void list_render_child_input(const struct gui_synclist *list);
+bool list_render_child_current(unsigned token);
 void list_render_forget(const struct gui_synclist *list);
 int list_render_row_height(const struct gui_synclist *list, enum screen_type screen);
 int list_render_visible_rows(const struct gui_synclist *list, enum screen_type screen);

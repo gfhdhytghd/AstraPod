@@ -97,6 +97,8 @@ char* browser_db_get_entry_name(struct browser_context *c, int id,
                                     char* buf, size_t bufsize);
 bool browser_db_current_playlist_insert(int position, bool queue);
 int browser_db_add_to_playlist(const char* playlist, bool new_playlist);
+bool browser_db_child_texts(struct browser_context *c, int item, int rows,
+                            list_child_text *text, void *context);
 char *browser_db_get_title(struct browser_context* c);
 int browser_db_get_attr(struct browser_context* c);
 bool browser_db_is_album_list(struct browser_context* c);

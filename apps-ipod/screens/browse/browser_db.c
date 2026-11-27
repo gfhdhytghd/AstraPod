@@ -6798,6 +6798,78 @@ static struct tagentry* browser_db_get_entry(struct browser_context *c, int id)
     return &entry[realid];
 }
 
+bool browser_db_child_texts(struct browser_context *c, int item, int rows,
+                            list_child_text *text, void *context)
+{
+    /* Browsing ahead must not replace the loaded window or run a search. */
+    int index = item - current_offset;
+    if (index < 0 || index >= current_entry_count)
+        return true;
+    const struct tagentry *entry = &get_entries(c)[index];
+    if (entry->newtable == TABLE_ROOT && c->currtable == TABLE_ROOT)
+    {
+        if (entry->extraseek < 0 || entry->extraseek >= menu_count ||
+            !menus[entry->extraseek])
+            return true;
+        const struct menu_root *sub = menus[entry->extraseek];
+        text(-1, P2STR(sub->title), context);
+        for (int i = 0; i < sub->itemcount; i++)
+        {
+            const struct menu_entry *row = sub->items[i];
+            const unsigned char *label = row->type == menu_builtin ?
+                ID2P(builtin_rows[row->link].lang_id) : row->name;
+            text(i, P2STR(label), context);
+        }
+    }
+    else if (entry->newtable == TABLE_NAVIBROWSE ||
+             entry->newtable == TABLE_ALLSUBENTRIES ||
+             entry->newtable == TABLE_ALLSUBENTRIES_SORTED_BY_ALBUMS)
+    {
+        text(-1, P2STR((unsigned char *)entry->name), context);
+        if (!rows || entry->newtable != TABLE_NAVIBROWSE ||
+            c->currtable != TABLE_NAVIBROWSE || !csi ||
+            c->currextra + 1 >= csi->tagorder_count ||
+            csi->tagorder[c->currextra] != tag_album ||
+            csi->tagorder[c->currextra + 1] != tag_title)
+            return true;
+        int album = table_album_row(c->currextra, entry->extraseek);
+        struct tagcache_album al;
+        if (!tagcache_album_get(album, &al) || al.last - al.first >= 64)
+            return true;
+
+        /* A short indexed album gives its titles without running the
+         * browser's shared tag search. Keep the first tracks in disc order. */
+        struct shuffle_track first[16];
+        int count = 0;
+        rows = MIN(rows, (int)ARRAYLEN(first));
+        for (int id = al.first; id <= al.last; id++)
+        {
+            long disc = 0, track = 0;
+            if (tagcache_album_of(id) != album)
+                continue;
+            tagcache_entry_numeric(id, tag_discnumber, &disc);
+            tagcache_entry_numeric(id, tag_tracknumber, &track);
+            int key = (MAX(0, disc) & 0x7fff) << 16 |
+                      (MAX(0, track) & 0xffff);
+            int at = count;
+            while (at > 0 && key < first[at - 1].key)
+                at--;
+            if (at >= rows)
+                continue;
+            count = MIN(count + 1, rows);
+            for (int i = count - 1; i > at; i--)
+                first[i] = first[i - 1];
+            first[at] = (struct shuffle_track){ id, key };
+        }
+        static char title[TAGCACHE_BUFSZ];
+        for (int i = 0; i < count; i++)
+            if (tagcache_entry_string(first[i].idx_id, tag_title,
+                                      title, sizeof(title)))
+                text(i, title, context);
+    }
+    return true;
+}
+
 bool browser_db_index_key(struct browser_context *c, int id, char *buf, size_t size)
 {
     int year_sort = album_order_loaded == DB_SORT_ALBUMS_YEAR ||

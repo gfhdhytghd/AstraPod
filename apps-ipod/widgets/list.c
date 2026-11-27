@@ -207,6 +207,7 @@ void gui_synclist_init(struct gui_synclist * gui_list,
     gui_list->unnumbered = false;
     gui_list->show_notes = false;
     gui_list->header = NULL;
+    gui_list->callback_child_texts = NULL;
     gui_list->generation = ++last_generation;
 }
 
@@ -604,6 +605,12 @@ void gui_synclist_set_pane_callback(struct gui_synclist * lists,
     lists->callback_get_item_pane = callback;
 }
 
+void gui_synclist_set_child_texts_callback(struct gui_synclist * lists,
+                                           list_get_child_texts callback)
+{
+    lists->callback_child_texts = callback;
+}
+
 void gui_synclist_set_index_key_callback(struct gui_synclist * lists,
                                          list_get_name callback)
 {
@@ -756,6 +763,8 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
 {
     int action = *actionptr;
     static bool pgleft_allow_cancel = false;
+    if (action != ACTION_NONE && action != ACTION_REDRAW && !IS_SYSEVENT(action))
+        list_render_child_input(lists);
 
     /* Repeat actions block list wraparound. */
     bool allow_wrap = lists->wraparound;

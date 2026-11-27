@@ -50,6 +50,7 @@ fork's USB work; the `tools/` changes are this fork's.
 | `powermgmt.c`, `export/powermgmt.h` | New `get_sleep_timer_duration()`, the length the running timer last started from | `%bsp` is a percentage of the timer's own length, which only the firmware still has after a keypress restart. |
 | `SOURCES` | `mikey-6g.c` wrapped in `#ifdef HAVE_MIKEY_REMOTE` | So the inline remote can be switched off with one line in `export/config.h`. |
 | `export/font.h` | `MAXUSERFONTS` 12 → 16 | Screens that load their own fonts share the slots with the theme. |
+| `font.c`, `font_pbf.c`, `export/font.h`, `include/font_pbf.h`, `font_pbf_speculative.h` (new) | Idle pages queue cancellable, lower-priority glyph batches. Speculative glyphs use a separate cache and enter the ordinary cache when drawn. | Child pages can show text when their push animation starts, while the visible page keeps its glyphs. |
 | `export/config.h` | `HAVE_MULTIMEDIA_KEYS` gated on `USB_ENABLE_IAP \|\| HAVE_MIKEY_REMOTE`, outside the `HAVE_USBSTACK` block | The 6G's inline remote produces the same key codes as USB iAP, without USB. |
 | `export/rbpaths.h` | New `DEFAULTCONFIGFILE`, `.rockbox/default-config.cfg` | The shipped first-boot config, read only when no `config.cfg` exists, so an install never resets the player's settings. |
 | `drivers/lcd-16bit-common.c`, `export/lcd.h` | New `lcd_blendrect()` and `LCD_BLEND_OPAQUE` | The skin engine's `%dr` opacity. Only useful drawn into the backdrop buffer. |
@@ -361,6 +362,7 @@ and produces the wrong firmware.
 | `bitperfect/bitperfect.c`, `bitperfect/run.sh`, `bitperfect/files.sh`, `bitperfect/wavtool.py` | Host DSP and decoded WAV/FLAC comparisons | Check bit-exact output and Auto dither transitions. |
 | `artcache_pb/stubs.c` | Stub the timer cancellation used by the artwork cache | The desktop utility runs artwork generation without the firmware timer thread. |
 | `tests/fu55_dock_rolo_test.py` | Follow the firmware restart helper and check USB detach and recovery ordering | Keep coverage of the post-eject ROLO path. |
+| `tests/ui_child_glyph_prefetch_sim.py` (new), `tests/ui_list_hwscroll_sim.py` | Compare the first CJK push frame after idle and keep a cold-folder row-repair fixture. | Verify the glyphs that reach the panel with delayed reads. |
 
 ### New tools
 

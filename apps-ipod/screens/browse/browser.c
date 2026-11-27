@@ -138,7 +138,7 @@ static struct entry *get_valid_entry(const char* funcname,
     return entry;
 }
 
-static bool ext_stripit(bool isdir, int attr, int dirfilter)
+bool browser_disk_hide_extension(bool isdir, int attr, int dirfilter)
 {
     if((dirfilter != SHOW_ID3DB) && !isdir)
     {
@@ -183,7 +183,7 @@ static const char* browser_get_filename(int selected_item, void *data,
         attr = entry->attr;
     }
 
-    if(ext_stripit((attr & ATTR_DIRECTORY), attr, *(local_tc->dirfilter)))
+    if(browser_disk_hide_extension((attr & ATTR_DIRECTORY), attr, *(local_tc->dirfilter)))
     {
         return(strip_extension(buffer, buffer_len, name));
     }
@@ -270,6 +270,26 @@ static int browser_get_range(int selected_item, void * data)
     if (*local_tc->dirfilter == SHOW_ID3DB)
         return browser_db_get_entry_range(&tc, selected_item);
     return -1;
+}
+
+static bool browser_child_texts(int item, void *data, int rows,
+                                unsigned token, list_child_text *text,
+                                void *context)
+{
+    struct browser_context *c = data;
+    if (*c->dirfilter == SHOW_ID3DB)
+        return browser_db_child_texts(c, item, rows, text, context);
+
+    struct entry *e = browser_get_entry_at(c, item);
+    if (!e || !(e->attr & ATTR_DIRECTORY))
+        return true;
+    if (!browser_disk_child_texts(c, e->name, rows, token, text, context))
+        return false;
+    if ((c->browse->flags & BROWSE_HOME_LIBRARY) ||
+        (!c->browse->title &&
+         global_settings.show_path_in_browser != SHOW_PATH_OFF))
+        text(-1, e->name, context);
+    return true;
 }
 
 static const char *browser_get_description(int selected_item, void *data,
@@ -679,7 +699,7 @@ static int browser_voice_cb(int selected_item, void * data)
 
     /* spell name AFTER voicing filetype */
     if (spell_name) {
-            bool stripit = ext_stripit(is_dir, attr, *(local_tc->dirfilter));
+            bool stripit = browser_disk_hide_extension(is_dir, attr, *(local_tc->dirfilter));
             char *ext = NULL;
 
             /* Don't spell the extension if it's not displayed */
@@ -959,6 +979,8 @@ static int update_dir(struct browser_album_panel *panel)
     gui_synclist_set_unnumbered(list, id3db && browser_db_unnumbered(&tc));
     gui_synclist_set_description_callback(list, browser_get_description);
     gui_synclist_set_index_key_callback(list, browser_get_index_key);
+    if (tc.browse && !(tc.browse->flags & BROWSE_SELECTONLY))
+        gui_synclist_set_child_texts_callback(list, browser_child_texts);
     /* Home's Music menu is a split-screen menu; every level under it is a
      * list of its own. */
     gui_synclist_set_pane_callback(list, id3db && tc.dirlevel == 0 && tc.browse &&

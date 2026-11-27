@@ -11,7 +11,7 @@ bool font_pbf_open(struct font *font);
 int font_pbf_run(struct font *font, struct font_run *run, ucschar_t cp,
                  struct font_glyph *out);
 bool font_pbf_prefetch(struct font *font, int id, const char *path,
-                       const ucschar_t *text);
+                       const ucschar_t *text, unsigned *budget);
 void font_pbf_forget(struct font *font, int id);
 void font_pbf_prefetch_suspend(bool suspend);
 /* The application queues one work item on its existing background thread. */

@@ -427,6 +427,16 @@ done:
     core_put_data_pinned(bar);
 }
 
+int sb_title_font(void)
+{
+    if (status_handle <= 0)
+        return -1;
+    struct statusbar *bar = core_get_data_pinned(status_handle);
+    int font = bar->fonts_ready ? bar->chrome.title_font : -1;
+    core_put_data_pinned(bar);
+    return font;
+}
+
 void sb_settle(enum screen_type screen) { sb_update(screen, true); }
 void sb_invalidate(void) { invalidated = true; }
 void sb_set_update_delay(int delay) { update_delay = delay; }

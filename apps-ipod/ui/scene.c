@@ -274,7 +274,7 @@ static void put_span(fb_data *out, const fb_data *src, int at, int width,
         memcpy(out + x0, src + (x0 - at), (x1 - x0) * sizeof(*out));
 }
 
-/* The stock tree slides changing panes with the rows in their own half.
+/* The rows slide within their own half, with the preview at its rest position.
  * A full list slides over the split pane and pushes the rows once its
  * leading edge reaches them. The same geometry runs in reverse on a pop. */
 static void compose_split(const struct ui_scene *scene, fb_data *out,
@@ -294,10 +294,13 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
     int p = front_right ? offset : LCD_WIDTH + offset;
     bool both = left_split && right_split && !scene->full_screen;
     bool stock = ui_theme_style(UI_STYLE_MENU_TREE) == UI_MENU_TREE_STOCK;
-    bool moving_pane = stock && both && scene->back_pane != scene->front_pane;
     int top = both ? scene->pan_top : 0;
     memcpy(out, lcd_framebuffer_default.fb_ptr, top * LCD_WIDTH * sizeof(*out));
-    for (int y = moving_pane ? 0 : top; y < LCD_HEIGHT; y++)
+    for (int y = 0; y < top; y++)
+        memcpy(out + y * LCD_WIDTH + half,
+               (target_right ? right : left) + y * LCD_WIDTH + half,
+               (LCD_WIDTH - half) * sizeof(*out));
+    for (int y = top; y < LCD_HEIGHT; y++)
     {
         int i = y * LCD_WIDTH;
         fb_data *row = out + i;
@@ -312,22 +315,11 @@ static void compose_split(const struct ui_scene *scene, fb_data *out,
         {
             /* The rows travel half as far as the pages. */
             int a = (p - LCD_WIDTH) / 2;
-            if (y >= top)
-            {
-                put_span(row, l, a, half, 0, half);
-                put_span(row, r, a + half, half, 0, half);
-                menu_pane_shadow(row, y, a + half, half);
-            }
-            if (moving_pane)
-            {
-                put_span(row, l + half, half + a, LCD_WIDTH - half,
-                         half, LCD_WIDTH);
-                put_span(row, r + half, LCD_WIDTH + a, LCD_WIDTH - half,
-                         half, LCD_WIDTH);
-            }
-            else
-                memcpy(row + half, (target_right ? r : l) + half,
-                       (LCD_WIDTH - half) * sizeof(*row));
+            put_span(row, l, a, half, 0, half);
+            put_span(row, r, a + half, half, 0, half);
+            menu_pane_shadow(row, y, a + half, half);
+            memcpy(row + half, (target_right ? r : l) + half,
+                   (LCD_WIDTH - half) * sizeof(*row));
         }
         else if (stock && left_split)
         {
@@ -793,12 +785,10 @@ static bool capture_scene(struct ui_scene *scene, const void *from, const void *
         if (push)
         {
             scene->back_split = split;
-            scene->back_pane = menu_pane_content_revision();
         }
         else
         {
             scene->front_split = split;
-            scene->front_pane = menu_pane_content_revision();
         }
         core_put_data_pinned(data);
         scene->back_page = push ? from : to;
@@ -1319,12 +1309,10 @@ void ui_scene_update(struct ui_scene *scene, bool target_changed)
             if (scene->target_front)
             {
                 scene->front_split = split;
-                scene->front_pane = menu_pane_content_revision();
             }
             else
             {
                 scene->back_split = split;
-                scene->back_pane = menu_pane_content_revision();
             }
             /* A full page passes a menu at constant speed. */
             if (scene->slide && !scene->full_screen)

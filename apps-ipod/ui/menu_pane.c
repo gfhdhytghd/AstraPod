@@ -112,7 +112,6 @@ static struct {
 } show = { .album = -1 };
 
 static struct menu_pane_content shown, pending, under;
-static unsigned content_revision;
 static struct menu_pane_content picture;
 static unsigned identity;
 static bool has_pending;
@@ -182,11 +181,6 @@ bool menu_pane_take_screen(void)
     bool split = page.on_screen;
     page.on_screen = false;
     return split;
-}
-
-unsigned menu_pane_content_revision(void)
-{
-    return content_revision;
 }
 
 struct ui_rect menu_pane_rect(void)
@@ -790,8 +784,6 @@ void menu_pane_select(const struct menu_pane_content *content,
     identity = list_identity;
     if (new_list)
     {
-        if (!same_content(content, &shown))
-            content_revision++;
         shown = *content;
         has_pending = false;
         slide_dir = 0;
@@ -909,7 +901,6 @@ struct ui_rect menu_pane_step(void)
         bool to_art = pending.kind == LIST_PANE_ART;
         under = from_art ? pending : shown;
         shown = pending;
-        content_revision++;
         has_pending = false;
         if (to_art && show.state == SHOW_EMPTY)
             show_request();

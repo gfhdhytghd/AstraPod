@@ -18,9 +18,11 @@
 #define PAGE_SLIDE_FRAMES ANIM_F(18)
 
 /* The HUD fades in over 180 ms while it grows from 88% of its size, and
- * out over 135 ms while it shrinks to 94%. */
+ * out over 135 ms while it shrinks to 94%. 2009-style modal alerts pop in
+ * over ~300 ms with a brief scale overshoot (0.62 -> 1.07 -> 0.97 -> 1.00). */
 #define ZOOM_OPEN_FRAMES ANIM_F(12)
 #define ZOOM_CLOSE_FRAMES ANIM_F(9)
+#define ALERT_OPEN_FRAMES ANIM_F(20)
 #define ZOOM_OPEN_FROM 901
 #define ZOOM_CLOSE_TO 963
 
@@ -53,8 +55,10 @@ void ui_sheet_begin(struct ui_sheet *sheet, bool open, const char *route)
                                             PAGE_SLIDE_FRAMES);
         else
             frames = open ? ui_theme_motion(UI_MOTION_SHEET_IN,
-                                            sheet->zoom ? ZOOM_OPEN_FRAMES
-                                                        : SHEET_OPEN_FRAMES,
+                                            sheet->zoom
+                                                ? (sheet->bounce ? ALERT_OPEN_FRAMES
+                                                                 : ZOOM_OPEN_FRAMES)
+                                                : SHEET_OPEN_FRAMES,
                                             SHEET_OPEN_FRAMES)
                           : ui_theme_motion(UI_MOTION_SHEET_OUT,
                                             sheet->zoom ? ZOOM_CLOSE_FRAMES
@@ -272,6 +276,37 @@ void ui_sheet_dim(fb_data *dst, const fb_data *src, int pixels)
                  ui_theme_rgb565(UI_COLOR_DIM));
 }
 
+/* Smoothstep on u in [0, 1024] -> [0, 1024]. */
+static int sheet_smoothstep(int u)
+{
+    int64_t x = u;
+    return (int)((x * x * (3 * SHEET_PROGRESS - 2 * x)) /
+                 ((int64_t)SHEET_PROGRESS * SHEET_PROGRESS));
+}
+
+/* 2009 UIAlertView pop-in bounce scale curve (1024 == 1.00x):
+ *   0..580  : ease-out  0.62 (635) -> 1.07 (1096) overshoot
+ *   580..820: smooth    1.07 (1096) -> 0.97 (993) rebound
+ *   820..1024: smooth   0.97 (993) -> 1.00 (1024) settle */
+static int alert_bounce_scale(int t)
+{
+    if (t <= 580)
+    {
+        int u = t * SHEET_PROGRESS / 580;
+        int inv = SHEET_PROGRESS - u;
+        int e = SHEET_PROGRESS - (int)(((int64_t)inv * inv * inv) /
+                                       ((int64_t)SHEET_PROGRESS * SHEET_PROGRESS));
+        return 635 + (1096 - 635) * e / SHEET_PROGRESS;
+    }
+    if (t <= 820)
+    {
+        int e = sheet_smoothstep((t - 580) * SHEET_PROGRESS / 240);
+        return 1096 + (993 - 1096) * e / SHEET_PROGRESS;
+    }
+    int e = sheet_smoothstep((t - 820) * SHEET_PROGRESS / 204);
+    return 993 + (SHEET_PROGRESS - 993) * e / SHEET_PROGRESS;
+}
+
 void ui_sheet_paint_zoom(struct ui_sheet *sheet, const fb_data *backdrop,
                          const fb_data *body, struct ui_rect bounds, int top)
 {
@@ -291,12 +326,30 @@ void ui_sheet_paint_zoom(struct ui_sheet *sheet, const fb_data *backdrop,
     uint32_t start = USEC_TIMER;
     unsigned frame = sheet->active
                    ? ui_clock_frame(start - sheet->tween.start_clock) : 0;
-    int progress = ui_tween_sample(&sheet->tween, frame);
-    int from = sheet->tween.to ? ZOOM_OPEN_FROM : ZOOM_CLOSE_TO;
-    int scale = from + (SHEET_PROGRESS - from) * progress / SHEET_PROGRESS;
-    unsigned ink = UI_FULL_OPACITY * progress / SHEET_PROGRESS;
-    unsigned light = UI_FULL_OPACITY - SHEET_DIM * progress / SHEET_PROGRESS;
-    if ((int)light == sheet->light)
+    bool bouncing = sheet->bounce && sheet->tween.to > 0;
+    int progress, scale;
+    unsigned ink, light;
+    if (bouncing)
+    {
+        int t = (!sheet->active || !sheet->tween.frames || frame >= sheet->tween.frames)
+              ? SHEET_PROGRESS
+              : (int)(frame * SHEET_PROGRESS / sheet->tween.frames);
+        progress = t;
+        scale = t >= SHEET_PROGRESS ? SHEET_PROGRESS : alert_bounce_scale(t);
+        ink = t >= 420 ? UI_FULL_OPACITY : UI_FULL_OPACITY * t / 420;
+        int dim_p = t >= 580 ? SHEET_PROGRESS : t * SHEET_PROGRESS / 580;
+        light = UI_FULL_OPACITY - SHEET_DIM * dim_p / SHEET_PROGRESS;
+    }
+    else
+    {
+        progress = ui_tween_sample(&sheet->tween, frame);
+        int from = sheet->tween.to ? ZOOM_OPEN_FROM : ZOOM_CLOSE_TO;
+        scale = from + (SHEET_PROGRESS - from) * progress / SHEET_PROGRESS;
+        ink = UI_FULL_OPACITY * progress / SHEET_PROGRESS;
+        light = UI_FULL_OPACITY - SHEET_DIM * progress / SHEET_PROGRESS;
+    }
+    int frame_key = bouncing ? ((scale << 9) | (int)light) : (int)light;
+    if (frame_key == sheet->light)
     {
         /* This frame is on screen already. */
         if (frame >= sheet->tween.frames)
@@ -312,7 +365,8 @@ void ui_sheet_paint_zoom(struct ui_sheet *sheet, const fb_data *backdrop,
     else
     {
         /* The panel at this scale about its centre, and the source column of
-         * each of its screen columns. */
+         * each of its screen columns. Clamped so bounce overshoot (> 1.0x)
+         * never samples outside bounds. */
         int width = bounds.width * scale / SHEET_PROGRESS;
         int height = bounds.height * scale / SHEET_PROGRESS;
         struct ui_rect panel = { bounds.x + (bounds.width - width) / 2,
@@ -321,9 +375,14 @@ void ui_sheet_paint_zoom(struct ui_sheet *sheet, const fb_data *backdrop,
         struct ui_rect visible = clip(panel, LCD_WIDTH, LCD_HEIGHT);
         static uint16_t column[LCD_WIDTH];
         static fb_data sampled[LCD_WIDTH];
+        int max_sx = bounds.x + MAX(0, bounds.width - 1);
+        int max_sy = bounds.y + MAX(0, bounds.height - 1);
         for (int x = 0; x < visible.width; x++)
-            column[x] = bounds.x +
+        {
+            int sx = bounds.x +
                 (visible.x - panel.x + x) * bounds.width / MAX(1, width);
+            column[x] = (uint16_t)MIN(max_sx, MAX(bounds.x, sx));
+        }
 
         for (int y = 0; y < LCD_HEIGHT; y++)
         {
@@ -339,6 +398,7 @@ void ui_sheet_paint_zoom(struct ui_sheet *sheet, const fb_data *backdrop,
             if (y < visible.y || y >= visible.y + visible.height || !ink)
                 continue;
             int source = bounds.y + (y - panel.y) * bounds.height / MAX(1, height);
+            source = MIN(max_sy, MAX(bounds.y, source));
             const fb_data *row = body + source * LCD_WIDTH;
             for (int x = 0; x < visible.width; x++)
                 sampled[x] = row[column[x]];
@@ -346,7 +406,7 @@ void ui_sheet_paint_zoom(struct ui_sheet *sheet, const fb_data *backdrop,
                         ink, UI_FULL_OPACITY - ink);
         }
     }
-    sheet->light = light;
+    sheet->light = frame_key;
     ui_note_render((uint32_t)USEC_TIMER - start);
     ui_mark_dirty(SCREEN_MAIN);
     ui_flush_dirty();

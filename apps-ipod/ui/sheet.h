@@ -16,8 +16,10 @@ struct ui_sheet {
     /* Set before ui_sheet_begin() for a full-screen horizontal page push/pop
      * instead of the vertical sheet slide. */
     /* Set before ui_sheet_begin() for the HUD/dialog fade and scale, or a
-     * full-screen horizontal stock page push/pop, instead of the slide up. */
+     * full-screen horizontal stock page push/pop, instead of the slide up.
+     * `bounce` adds the 2009 alert pop-in scale overshoot on open. */
     bool zoom;
+    bool bounce;
     bool slide;
 };
 

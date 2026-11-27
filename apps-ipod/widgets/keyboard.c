@@ -54,9 +54,9 @@ static void kbd_measure(struct dialog *d, struct screen *display,
     {
         int line_h = edit_line_height(display);
         int field_h = line_h + 12;
-        int foot_h = 42;
-        int box_w = MIN(display->lcdwidth - 32, 284);
-        int box_h = 1 + 14 + field_h + 14 + foot_h + 1;
+        int foot_h = 28 + 4 + font_get(box->font)->height + 8;
+        int box_w = MIN(display->lcdwidth - 32, 282);
+        int box_h = 16 + field_h + 14 + foot_h;
         d->style.box_margin = 0;
         box->width = box_w;
         box->height = MIN(display->lcdheight - 24, box_h);
@@ -92,7 +92,7 @@ static void kbd_draw(struct dialog *d, struct screen *display,
     if (dialog_is_classic())
     {
         int line_h = edit_line_height(display);
-        int fx = 14, fy = 15, fw = content->width - 28, fh = line_h + 12;
+        int fx = 12, fy = 16, fw = content->width - 24, fh = line_h + 12;
         struct frame_buffer_t *fb = content->buffer ? content->buffer : &lcd_framebuffer_default;
         int stride = fb->stride > 0 ? fb->stride : LCD_WIDTH;
         int fb_h = stride > 0 ? (int)(fb->elems / (size_t)stride) : LCD_HEIGHT;
@@ -101,25 +101,31 @@ static void kbd_draw(struct dialog *d, struct screen *display,
             .clip_x = 0, .clip_y = 0, .clip_w = stride, .clip_h = fb_h,
         };
         static const struct gloss_fill field_fill = {
-            0xfff4f5f7, 0xffffffff, 0xffffffff, 0xffffffff
+            0xfff2f4f8, 0xffffffff, 0xffffffff, 0xffffffff
         };
-        gloss_rect(&gs, content->x + fx, content->y + fy, fw, fh, 5, 5, &field_fill);
-        gloss_outline(&gs, content->x + fx, content->y + fy, fw, fh, 5, 0xffa4a8ae);
+        gloss_outline(&gs, content->x + fx, content->y + fy + 1,
+                      fw, fh, 5, 0x38d2e4ff);
+        gloss_rect(&gs, content->x + fx, content->y + fy,
+                   fw, fh, 5, 5, &field_fill);
+        gloss_outline(&gs, content->x + fx, content->y + fy,
+                      fw, fh, 5, 0xd2060f22);
 
         struct viewport tvp = *content;
         tvp.x = content->x + fx + 8;
         tvp.y = content->y + fy + 6;
         tvp.width = MAX(1, fw - 16);
         tvp.height = line_h;
+        tvp.fg_pattern = LCD_RGBPACK(0, 0, 0);
+        tvp.bg_pattern = LCD_RGBPACK(255, 255, 255);
         display->set_viewport(&tvp);
         edit_line_draw(display, &s->ed, tvp.width);
 
         display->set_viewport(content);
-        int foot_h = 42;
-        int foot_y = content->height - foot_h - 1;
+        int foot_h = 28 + 4 + font_get(content->font)->height + 8;
+        int foot_y = content->height - foot_h;
         int bfont = s->btn_font >= 0 ? s->btn_font : content->font;
         int kfont = content->font;
-        dialog_draw_popup_pair_footer(display, 1, foot_y, content->width - 2,
+        dialog_draw_popup_pair_footer(display, 0, foot_y, content->width,
                                       foot_h, str(LANG_DIAG_CANCEL), "MENU",
                                       false, str(LANG_DIAG_OK), "SELECT",
                                       false, bfont, kfont);

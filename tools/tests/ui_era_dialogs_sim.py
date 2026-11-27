@@ -48,14 +48,20 @@ def is_dimmed_popup(before, during):
     return d_mean < b_mean * 0.85 and d_mean > 20
 
 
-def settle(s, steps=35):
+def settle(s, steps=45):
+    time.sleep(3 / FPS)
     last = s.frame()
+    same = 0
     for _ in range(steps):
         time.sleep(5 / FPS)
         cur = s.frame()
         if not differ(last, cur):
-            return cur
-        last = cur
+            same += 1
+            if same >= 2:
+                return cur
+        else:
+            same = 0
+            last = cur
     return last
 
 

@@ -52,28 +52,24 @@ struct dialog_style
     int      button_font;
     int      button_gap, button_pad_x, button_pad_y; /* confirmation layout */
     bool     glass;                 /* Classic dark glossy panel            */
-    bool     popup;                 /* Classic light 2.0.5 modal pop-up     */
+    bool     popup;                 /* Classic 2009 navy glass modal alert  */
 };
 
-/* Whether the active native theme uses Classic / Fruit 2.0.5 dialogs. */
+/* Whether the active native theme uses Classic / Fruit dialogs. */
 bool dialog_is_classic(void);
 
-/* Resolve the active native modal tokens (light pop-up panel under Classic). */
+/* Resolve the active native modal tokens (2009 navy alert under Classic). */
 void dialog_style_default(struct dialog_style *s);
 
 /* Resolve modal tokens for a brief dark glossy glass overlay under Classic;
  * identical to dialog_style_default() under Scrim. */
 void dialog_style_glass(struct dialog_style *s);
 
-/* Classic 2.0.5 shared chrome helpers (no-op or fallback under Scrim). */
+/* Classic shared modal chrome helpers (no-op or fallback under Scrim). */
 void dialog_draw_glass_panel(struct screen *screen, int x, int y,
                              int w, int h, int r, bool opaque);
 void dialog_draw_popup_panel(struct screen *screen, int x, int y,
                              int w, int h, bool opaque);
-void dialog_draw_popup_header(struct screen *screen, int x, int y,
-                              int w, int h, const char *title, int font);
-void dialog_draw_popup_footer_bg(struct screen *screen, int x, int y,
-                                 int w, int h);
 void dialog_draw_popup_pair_footer(struct screen *screen, int x, int y,
                                    int w, int h,
                                    const char *left_label,
@@ -89,7 +85,6 @@ void dialog_draw_popup_action_row(struct screen *screen, int x, int y,
                                   int w, int h, const char *key_text,
                                   bool key_arrow_right,
                                   const char *action_text, bool primary,
-                                  bool divider_top,
                                   int key_font, int label_font);
 void dialog_draw_progress(struct screen *screen, int x, int y, int w, int h,
                           int current, int total);

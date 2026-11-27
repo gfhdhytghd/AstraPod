@@ -2,20 +2,24 @@
 """Capture the status-bar app tray in each built-in theme, headless.
 
 The tray store is written before boot: MochiPod's icon in the first slot and
-the 8 x 8 demo icon in the second. A WAV is played and paused so the
-playback icon sits beside them, and the status bar of the file list is
-cropped and zoomed 8x.
+the 8 x 8 demo icon in the second, or only as many as --trays names. A WAV
+is played, and the status bar of the file list is cropped and zoomed 8x
+while it plays and again once it is paused.
 
     app_tray_sim.py SIMULATOR RESOURCES EVIDENCE [--store 1|2]
                     [--mochi-frame N] [--themes scrim,light,classic,...]
-                    [--check] [--demo]
+                    [--trays 0,1,2] [--check] [--demo]
 
 RESOURCES is the simulator build's rockbox.zip after the bundle steps.
 --store 1 writes the old store layout with MochiPod's 8 x 8 icons, for a
 build from before the 12 x 12 tray; --store 2 writes the current one.
 --check asserts, in Classic and Fruit Company, that each tray icon's ink
 lies within the playback icon's rows, that a 12-row icon spans the
-battery's, and that 7 clear columns separate the tray's drawn pixels.
+battery's, and that 7 clear columns separate the tray's drawn pixels. In
+Scrim and Light it asserts that the playback icon sits against the battery
+and the tray left of it, 9 clear columns between the pause icon's drawn
+pixels and each neighbour's and between tray icons, and that a 12-row icon
+is centred.
 --demo leaves the second slot empty and runs app_tray_demo from the file
 list instead, then checks that it saved its 8 x 8 frames centred.
 """
@@ -37,6 +41,8 @@ from ui_native_wps_sim import add_wave_fixture  # noqa: E402
 
 THEMES = ("scrim", "light", "classic", "fruit-company")
 ART_THEMES = ("classic", "fruit-company")
+FLAT_THEMES = ("scrim", "light")
+FLAT_GAP = 9
 STATUS_HEIGHT = {"scrim": 35, "light": 35, "classic": 20, "fruit-company": 20}
 ZOOM = 8
 
@@ -126,7 +132,8 @@ def clear_gaps(runs):
     return [b[0] - a[1] - 1 for a, b in zip(runs, runs[1:])]
 
 
-def capture(simulator, resources, root, env, theme, tray, evidence, demo):
+def capture(simulator, resources, root, env, theme, tray, evidence, demo,
+            label):
     with zipfile.ZipFile(resources) as archive:
         for name in archive.namelist():
             if name.startswith((".rockbox/fonts/", ".rockbox/themes/",
@@ -145,7 +152,7 @@ def capture(simulator, resources, root, env, theme, tray, evidence, demo):
         f"native theme: {theme}\n")
     (rockbox / "app-tray.dat").write_bytes(tray)
     add_wave_fixture(root / "Test.wav")
-    log = evidence / f"{theme}.log"
+    log = evidence / f"{label}.log"
     with log.open("w") as out, process(
         [str(simulator), "--root", str(root), "--nobackground", "--zoom", "1",
          "--screenshot"], out, env=env, cwd=root,
@@ -153,14 +160,20 @@ def capture(simulator, resources, root, env, theme, tray, evidence, demo):
         time.sleep(120 / FPS)
         screen = Screen(env, firmware)
         time.sleep(60 / FPS)
-        # Below .rockbox, the demo registers and returns; then the WAV.
+        # Below .rockbox, the demo registers and returns; then the WAV is
+        # played and the list shown, then it is paused in Now Playing.
         keys = ("Down", "Return", "Down") if demo else ()
-        for step, key in enumerate(keys + ("Return", "space", "Escape")):
+        keys += ("Return", "Escape", "Return", "space", "Escape")
+        frames = {}
+        for step, key in enumerate(keys):
             screen.tap(key)
             time.sleep(150 / FPS)  # past a one-second splash
-            screen.frame().save(evidence / f"{theme}-step{step}-{key}.png")
+            screen.frame().save(evidence / f"{label}-step{step}-{key}.png")
+            if key == "Escape":
+                frames["pause" if "play" in frames else "play"] = \
+                    screen.frame()
         assert firmware.poll() is None
-        return screen.frame()
+        return frames
 
 
 def main():
@@ -171,6 +184,7 @@ def main():
     parser.add_argument("--store", type=int, choices=(1, 2), default=2)
     parser.add_argument("--mochi-frame", type=int, choices=range(4), default=0)
     parser.add_argument("--themes", default=",".join(THEMES))
+    parser.add_argument("--trays", default="2")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--demo", action="store_true")
     args = parser.parse_args()
@@ -182,9 +196,9 @@ def main():
     else:
         slots = [("mochipod", MOCHI12, args.mochi_frame),
                  ("app_tray_demo", [widen(f) for f in DEMO8], 1)]
-    if args.demo:
-        slots = slots[:1]
-    tray = store(args.store, slots)
+    # The demo registers itself in the second slot.
+    stored = slots[:1] if args.demo else slots
+    counts = [2] if args.demo else [int(n) for n in args.trays.split(",")]
 
     result = {}
     with tempfile.TemporaryDirectory(prefix="app-tray-") as folder, \
@@ -210,49 +224,92 @@ def main():
                        LIBGL_ALWAYS_SOFTWARE="1",
                        __GLX_VENDOR_LIBRARY_NAME="mesa")
             for theme in args.themes.split(","):
-                root = base / theme
-                root.mkdir()
-                frame = capture(args.simulator, args.resources, root, env,
-                                theme, tray, args.evidence, args.demo)
-                frame.save(args.evidence / f"{theme}.png")
-                if args.demo:
-                    # The demo's 8 x 8 frames, centred, in the second slot.
-                    saved = (root / ".rockbox/app-tray.dat").read_bytes()
-                    slot = saved[8 + 156:8 + 2 * 156]
-                    assert slot[:14] == b"app_tray_demo\0", slot[:14]
-                    frames = struct.unpack_from("<36H", slot, 52)
-                    assert list(frames) == sum(
-                        (widen(f) for f in DEMO8), []), frames
-                frame.save(args.evidence / f"{theme}.png")
-                bar = frame.crop((0, 0, 320, STATUS_HEIGHT[theme]))
-                bar.crop((160, 0, 320, bar.height)).resize(
-                    (160 * ZOOM, bar.height * ZOOM), Image.NEAREST).save(
-                    args.evidence / f"{theme}-bar-8x.png")
-                runs = segments(bar)
-                result[theme] = {"ink": runs, "gaps": clear_gaps(runs)}
+                for count in counts:
+                    name = f"{theme}-tray{count}"
+                    root = base / name
+                    root.mkdir()
+                    frames = capture(args.simulator, args.resources, root,
+                                     env, theme, store(args.store,
+                                                       stored[:count]),
+                                     args.evidence, args.demo, name)
+                    if args.demo:
+                        # The demo's 8 x 8 frames, centred, in the second
+                        # slot.
+                        saved = (root / ".rockbox/app-tray.dat").read_bytes()
+                        slot = saved[8 + 156:8 + 2 * 156]
+                        assert slot[:14] == b"app_tray_demo\0", slot[:14]
+                        frames_saved = struct.unpack_from("<36H", slot, 52)
+                        assert list(frames_saved) == sum(
+                            (widen(f) for f in DEMO8), []), frames_saved
+                    for state, frame in frames.items():
+                        shot = f"{name}-{state}"
+                        frame.save(args.evidence / f"{shot}.png")
+                        bar = frame.crop((0, 0, 320, STATUS_HEIGHT[theme]))
+                        bar.crop((160, 0, 320, bar.height)).resize(
+                            (160 * ZOOM, bar.height * ZOOM),
+                            Image.NEAREST).save(
+                            args.evidence / f"{shot}-bar-8x.png")
+                        runs = segments(bar)
+                        result[shot] = {"ink": runs, "gaps": clear_gaps(runs)}
 
     (args.evidence / "result.json").write_text(json.dumps(result, indent=2))
     print(json.dumps(result))
     if args.check:
         for theme in ART_THEMES:
-            if theme not in result:
+            shot = f"{theme}-tray2-pause"
+            if shot not in result:
                 continue
-            runs, gaps = result[theme]["ink"], result[theme]["gaps"]
+            runs, gaps = result[shot]["ink"], result[shot]["gaps"]
             # Tray, tray, playback, battery.
-            assert len(runs) == 4, (theme, runs)
+            assert len(runs) == 4, (shot, runs)
             # The playback slot is laid out by the play art, whose ink is a
             # column wider than the pause art's, so only the tray's gaps.
-            assert gaps[:2] == [7, 7], (theme, gaps)
+            assert gaps[:2] == [7, 7], (shot, gaps)
             pause = runs[2]
             for icon in runs[:2]:
                 assert icon[2] >= pause[2] and icon[3] <= pause[3], \
-                    (theme, icon, pause)
+                    (shot, icon, pause)
             # The battery's ink and highlight rows; the pause art adds a
             # faint second highlight row below them.
             mochi, battery = runs[0], runs[3]
             assert (mochi[2], mochi[3]) == (battery[2], battery[3]), \
-                (theme, mochi, battery)
-        print("PASS tray icons on the playback icon's rows, 7 clear columns")
+                (shot, mochi, battery)
+        for theme in FLAT_THEMES:
+            for count in counts:
+                for state in ("play", "pause"):
+                    shot = f"{theme}-tray{count}-{state}"
+                    if shot not in result:
+                        continue
+                    runs, gaps = result[shot]["ink"], result[shot]["gaps"]
+                    # ..., tray icons, playback, battery. The pause icon is
+                    # two bars 4 columns apart; the play icon inks two
+                    # columns less on its left and a faint column more on
+                    # its right than the pause icon it is laid out by.
+                    if state == "pause":
+                        bars = 2
+                        tail = [FLAT_GAP] * count + [4, FLAT_GAP]
+                    else:
+                        bars = 1
+                        tail = [FLAT_GAP] * (count - 1) + \
+                            [FLAT_GAP + 2] * min(count, 1) + [FLAT_GAP - 1]
+                    assert len(runs) >= count + bars + 1, (shot, runs)
+                    assert gaps[-len(tail):] == tail, (shot, gaps)
+                    playback = runs[-2]
+                    assert playback[3] - playback[2] + 1 == 14, \
+                        (shot, playback)
+                    if count:
+                        mochi = runs[-count - bars - 1]
+                        height = STATUS_HEIGHT[theme]
+                        assert (mochi[2], mochi[3]) == \
+                            ((height - 12) // 2, (height - 12) // 2 + 11), \
+                            (shot, mochi)
+        themes = args.themes.split(",")
+        if set(themes) & set(ART_THEMES):
+            print("PASS tray icons on the playback icon's rows, "
+                  "7 clear columns")
+        if set(themes) & set(FLAT_THEMES):
+            print("PASS tray left of playback, playback against the battery, "
+                  f"{FLAT_GAP} clear columns")
 
 
 if __name__ == "__main__":

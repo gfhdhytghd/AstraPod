@@ -28276,3 +28276,1963 @@
     *: "已转换 %d 首，已有 %d 首，不支持 %d 首，失败 %d 首"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES
+  desc: Extras > Notes: the screen's title
+  user: core
+  <source>
+    *: "Notes"
+  </source>
+  <dest>
+    *: "备忘录"
+  </dest>
+  <voice>
+    *: "备忘录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_INSTRUCTIONS
+  desc: Extras > Notes: the built-in note on how to add notes, its row and title
+  user: core
+  <source>
+    *: "Instructions"
+  </source>
+  <dest>
+    *: "说明"
+  </dest>
+  <voice>
+    *: "说明"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_HOWTO
+  desc: Extras > Notes > Instructions: the heading
+  user: core
+  <source>
+    *: "How to view and create notes:"
+  </source>
+  <dest>
+    *: "如何查看和创建备忘录："
+  </dest>
+  <voice>
+    *: "如何查看和创建备忘录："
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_HOWTO_TEXT
+  desc: Extras > Notes > Instructions: the first paragraph
+  user: core
+  <source>
+    *: "To view text files here, enable your iPod for disk use in iTunes, then simply drag text files to the Notes folder on your iPod."
+  </source>
+  <dest>
+    *: "要在此处查看文本文件，请在 iTunes 中启用 iPod 的磁盘使用功能，然后将文本文件拖到 iPod 上的 Notes 文件夹中。"
+  </dest>
+  <voice>
+    *: "要在此处查看文本文件，请在 iTunes 中启用 iPod 的磁盘使用功能，然后将文本文件拖到 iPod 上的 Notes 文件夹中。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_NOTES_HOWTO_MORE
+  desc: Extras > Notes > Instructions: the second paragraph
+  user: core
+  <source>
+    *: "See the iPod Features Guide or visit www.apple.com/support/ipod for additional information."
+  </source>
+  <dest>
+    *: "请参阅《iPod 功能指南》或访问 www.apple.com.cn/support/ipod 以获得更多信息。"
+  </dest>
+  <voice>
+    *: "请参阅《iPod 功能指南》或访问 www.apple.com.cn/support/ipod 以获得更多信息。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS
+  desc: Extras > Calendars: the menu's title
+  user: core
+  <source>
+    *: "Calendars"
+  </source>
+  <dest>
+    *: "日历"
+  </dest>
+  <voice>
+    *: "日历"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_ALL
+  desc: Extras > Calendars: the row that opens the month view
+  user: core
+  <source>
+    *: "All Calendars"
+  </source>
+  <dest>
+    *: "所有日历"
+  </dest>
+  <voice>
+    *: "所有日历"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TODOS
+  desc: Extras > Calendars: the row that opens the To Do items
+  user: core
+  <source>
+    *: "To Do's"
+  </source>
+  <dest>
+    *: "待办事项"
+  </dest>
+  <voice>
+    *: "待办事项"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_ALARMS
+  desc: Extras > Calendars: the row that sets how event alarms sound
+  user: core
+  <source>
+    *: "Alarms"
+  </source>
+  <dest>
+    *: "闹钟"
+  </dest>
+  <voice>
+    *: "闹钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_BEEP
+  desc: Extras > Calendars > Alarms: event alarms beep
+  user: core
+  <source>
+    *: "Beep"
+  </source>
+  <dest>
+    *: "嘟声"
+  </dest>
+  <voice>
+    *: "嘟声"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NONE
+  desc: Extras > Calendars > Alarms: event alarms show without a sound
+  user: core
+  <source>
+    *: "None"
+  </source>
+  <dest>
+    *: "无"
+  </dest>
+  <voice>
+    *: "无"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TODO_HOWTO
+  desc: Extras > Calendars > To Do's: the heading
+  user: core
+  <source>
+    *: "How to view To Do items:"
+  </source>
+  <dest>
+    *: "如何查看待办事项："
+  </dest>
+  <voice>
+    *: "如何查看待办事项："
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TODO_TEXT
+  desc: Extras > Calendars > To Do's: the first paragraph
+  user: core
+  <source>
+    *: "To view your To Do items here, enable syncing from iTunes under the Calendar section of the Contacts tab."
+  </source>
+  <dest>
+    *: "若要在此处查看待办事项，请在 iTunes 中“通讯录”标签的“日历”部分启用同步。"
+  </dest>
+  <voice>
+    *: "若要在此处查看待办事项，请在 iTunes 中“通讯录”标签的“日历”部分启用同步。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NO_EVENTS
+  desc: Extras > Calendars: a day without events
+  user: core
+  <source>
+    *: "No events for this day"
+  </source>
+  <dest>
+    *: "这一天没有事件"
+  </dest>
+  <voice>
+    *: "这一天没有事件"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MONTH_TITLE
+  desc: Extras > Calendars: the month view's title; M is replaced by the short month name, Y by the year
+  user: core
+  <source>
+    *: "M Y"
+  </source>
+  <dest>
+    *: "Y年M"
+  </dest>
+  <voice>
+    *: "Y年M"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_DAY_TITLE
+  desc: Extras > Calendars: a day's title; M is replaced by the full month name, D by the day, Y by the year
+  user: core
+  <source>
+    *: "M D, Y"
+  </source>
+  <dest>
+    *: "Y年M月D日"
+  </dest>
+  <voice>
+    *: "Y年M月D日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_JANUARY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "January"
+  </source>
+  <dest>
+    *: "1"
+  </dest>
+  <voice>
+    *: "1"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_FEBRUARY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "February"
+  </source>
+  <dest>
+    *: "2"
+  </dest>
+  <voice>
+    *: "2"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MARCH
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "March"
+  </source>
+  <dest>
+    *: "3"
+  </dest>
+  <voice>
+    *: "3"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_APRIL
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "April"
+  </source>
+  <dest>
+    *: "4"
+  </dest>
+  <voice>
+    *: "4"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MAY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "May"
+  </source>
+  <dest>
+    *: "5"
+  </dest>
+  <voice>
+    *: "5"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_JUNE
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "June"
+  </source>
+  <dest>
+    *: "6"
+  </dest>
+  <voice>
+    *: "6"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_JULY
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "July"
+  </source>
+  <dest>
+    *: "7"
+  </dest>
+  <voice>
+    *: "7"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_AUGUST
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "August"
+  </source>
+  <dest>
+    *: "8"
+  </dest>
+  <voice>
+    *: "8"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_SEPTEMBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "September"
+  </source>
+  <dest>
+    *: "9"
+  </dest>
+  <voice>
+    *: "9"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_OCTOBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "October"
+  </source>
+  <dest>
+    *: "10"
+  </dest>
+  <voice>
+    *: "10"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_NOVEMBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "November"
+  </source>
+  <dest>
+    *: "11"
+  </dest>
+  <voice>
+    *: "11"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_DECEMBER
+  desc: Extras > Calendars: full month name in a day's title
+  user: core
+  <source>
+    *: "December"
+  </source>
+  <dest>
+    *: "12"
+  </dest>
+  <voice>
+    *: "12"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_SUNDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Sunday"
+  </source>
+  <dest>
+    *: "星期日"
+  </dest>
+  <voice>
+    *: "星期日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_MONDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Monday"
+  </source>
+  <dest>
+    *: "星期一"
+  </dest>
+  <voice>
+    *: "星期一"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_TUESDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Tuesday"
+  </source>
+  <dest>
+    *: "星期二"
+  </dest>
+  <voice>
+    *: "星期二"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_WEDNESDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Wednesday"
+  </source>
+  <dest>
+    *: "星期三"
+  </dest>
+  <voice>
+    *: "星期三"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_THURSDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Thursday"
+  </source>
+  <dest>
+    *: "星期四"
+  </dest>
+  <voice>
+    *: "星期四"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_FRIDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Friday"
+  </source>
+  <dest>
+    *: "星期五"
+  </dest>
+  <voice>
+    *: "星期五"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CALENDARS_SATURDAY
+  desc: Extras > Calendars: full weekday name under the calendar page
+  user: core
+  <source>
+    *: "Saturday"
+  </source>
+  <dest>
+    *: "星期六"
+  </dest>
+  <voice>
+    *: "星期六"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK
+  desc: Extras > Screen Lock: the item and its screen title
+  user: core
+  <source>
+    *: "Screen Lock"
+  </source>
+  <dest>
+    *: "屏幕锁定"
+  </dest>
+  <voice>
+    *: "屏幕锁定"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_NEW
+  desc: Extras > Screen Lock: choosing a new four-digit combination
+  user: core
+  <source>
+    *: "New Combination"
+  </source>
+  <dest>
+    *: "新密码"
+  </dest>
+  <voice>
+    *: "新密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_CONFIRM
+  desc: Extras > Screen Lock: entering the new combination again
+  user: core
+  <source>
+    *: "Confirm Combination"
+  </source>
+  <dest>
+    *: "确认密码"
+  </dest>
+  <voice>
+    *: "确认密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_ENTER
+  desc: Extras > Screen Lock: entering the combination to unlock or reset
+  user: core
+  <source>
+    *: "Enter Combination"
+  </source>
+  <dest>
+    *: "输入密码"
+  </dest>
+  <voice>
+    *: "输入密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_INCORRECT
+  desc: Extras > Screen Lock: the combination entered was wrong
+  user: core
+  <source>
+    *: "Incorrect Combination"
+  </source>
+  <dest>
+    *: "密码不正确"
+  </dest>
+  <voice>
+    *: "密码不正确"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_LOCK
+  desc: Extras > Screen Lock: button that locks the screen
+  user: core
+  <source>
+    *: "Lock"
+  </source>
+  <dest>
+    *: "锁定"
+  </dest>
+  <voice>
+    *: "锁定"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_RESET
+  desc: Extras > Screen Lock: button that changes the combination
+  user: core
+  <source>
+    *: "Reset"
+  </source>
+  <dest>
+    *: "重设"
+  </dest>
+  <voice>
+    *: "重设"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_NONE
+  desc: Extras menu side pane: no screen lock combination is set
+  user: core
+  <source>
+    *: "No Combination"
+  </source>
+  <dest>
+    *: "未设定密码"
+  </dest>
+  <voice>
+    *: "未设定密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_SCREEN_LOCK_SET
+  desc: Extras menu side pane: a screen lock combination is set
+  user: core
+  <source>
+    *: "Combination Set"
+  </source>
+  <dest>
+    *: "已设定密码"
+  </dest>
+  <voice>
+    *: "已设定密码"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH
+  desc: Extras > Stopwatch: its title and menu row
+  user: core
+  <source>
+    *: "Stopwatch"
+  </source>
+  <dest>
+    *: "秒表"
+  </dest>
+  <voice>
+    *: "秒表"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_NEW_TIMER
+  desc: Stopwatch menu: start a fresh session
+  user: core
+  <source>
+    *: "New Timer"
+  </source>
+  <dest>
+    *: "新计时器"
+  </dest>
+  <voice>
+    *: "新计时器"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_CLEAR_LOGS
+  desc: Stopwatch menu: delete every session
+  user: core
+  <source>
+    *: "Clear Logs"
+  </source>
+  <dest>
+    *: "清除记录"
+  </dest>
+  <voice>
+    *: "清除记录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_CURRENT_LOG
+  desc: Stopwatch menu: the running session's log
+  user: core
+  <source>
+    *: "Current Log"
+  </source>
+  <dest>
+    *: "当前记录"
+  </dest>
+  <voice>
+    *: "当前记录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_LOG
+  desc: Stopwatch: title of a session's log
+  user: core
+  <source>
+    *: "Stopwatch Log"
+  </source>
+  <dest>
+    *: "秒表记录"
+  </dest>
+  <voice>
+    *: "秒表记录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_TOTAL
+  desc: Stopwatch log: the session's whole time
+  user: core
+  <source>
+    *: "Total"
+  </source>
+  <dest>
+    *: "总计"
+  </dest>
+  <voice>
+    *: "总计"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_SHORTEST
+  desc: Stopwatch log: the shortest lap
+  user: core
+  <source>
+    *: "Shortest"
+  </source>
+  <dest>
+    *: "最短"
+  </dest>
+  <voice>
+    *: "最短"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_LONGEST
+  desc: Stopwatch log: the longest lap
+  user: core
+  <source>
+    *: "Longest"
+  </source>
+  <dest>
+    *: "最长"
+  </dest>
+  <voice>
+    *: "最长"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_AVERAGE
+  desc: Stopwatch log: the mean lap
+  user: core
+  <source>
+    *: "Average"
+  </source>
+  <dest>
+    *: "平均"
+  </dest>
+  <voice>
+    *: "平均"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_LAP
+  desc: Stopwatch log: one lap's row, %d is its number
+  user: core
+  <source>
+    *: "Lap %d"
+  </source>
+  <dest>
+    *: "第 %d 圈"
+  </dest>
+  <voice>
+    *: "第 %d 圈"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_STOPWATCH_DELETE_LOG
+  desc: Stopwatch log: delete this session
+  user: core
+  <source>
+    *: "Delete Log"
+  </source>
+  <dest>
+    *: "删除记录"
+  </dest>
+  <voice>
+    *: "删除记录"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_ADD
+  desc: Clocks: button that adds a clock
+  user: core
+  <source>
+    *: "Add"
+  </source>
+  <dest>
+    *: "添加"
+  </dest>
+  <voice>
+    *: "添加"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_REGION
+  desc: Clocks: title of the region list
+  user: core
+  <source>
+    *: "Region"
+  </source>
+  <dest>
+    *: "地区"
+  </dest>
+  <voice>
+    *: "地区"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_CITY
+  desc: Clocks: title of the city list
+  user: core
+  <source>
+    *: "City"
+  </source>
+  <dest>
+    *: "城市"
+  </dest>
+  <voice>
+    *: "城市"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_TODAY
+  desc: Clocks: a clock's day is the player's day
+  user: core
+  <source>
+    *: "Today"
+  </source>
+  <dest>
+    *: "今天"
+  </dest>
+  <voice>
+    *: "今天"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_TOMORROW
+  desc: Clocks: a clock's day is the player's next day
+  user: core
+  <source>
+    *: "Tomorrow"
+  </source>
+  <dest>
+    *: "明天"
+  </dest>
+  <voice>
+    *: "明天"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_YESTERDAY
+  desc: Clocks: a clock's day is the player's previous day
+  user: core
+  <source>
+    *: "Yesterday"
+  </source>
+  <dest>
+    *: "昨天"
+  </dest>
+  <voice>
+    *: "昨天"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_AFRICA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Africa"
+  </source>
+  <dest>
+    *: "非洲"
+  </dest>
+  <voice>
+    *: "非洲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_ASIA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Asia"
+  </source>
+  <dest>
+    *: "亚洲"
+  </dest>
+  <voice>
+    *: "亚洲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_ATLANTIC
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Atlantic"
+  </source>
+  <dest>
+    *: "大西洋"
+  </dest>
+  <voice>
+    *: "大西洋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_AUSTRALIA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Australia"
+  </source>
+  <dest>
+    *: "澳大利亚"
+  </dest>
+  <voice>
+    *: "澳大利亚"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_EUROPE
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Europe"
+  </source>
+  <dest>
+    *: "欧洲"
+  </dest>
+  <voice>
+    *: "欧洲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_NORTH_AMERICA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "North America"
+  </source>
+  <dest>
+    *: "北美洲"
+  </dest>
+  <voice>
+    *: "北美洲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_PACIFIC
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "Pacific"
+  </source>
+  <dest>
+    *: "太平洋"
+  </dest>
+  <voice>
+    *: "太平洋"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_CLOCK_SOUTH_AMERICA
+  desc: Clocks: region
+  user: core
+  <source>
+    *: "South America"
+  </source>
+  <dest>
+    *: "南美洲"
+  </dest>
+  <voice>
+    *: "南美洲"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS
+  desc: Extras Alarms: the Alarms screen's title
+  user: core
+  <source>
+    *: "Alarms"
+  </source>
+  <dest>
+    *: "闹钟"
+  </dest>
+  <voice>
+    *: "闹钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_ALARM
+  desc: Extras Alarms: an alarm, its On/Off row and default label
+  user: core
+  <source>
+    *: "Alarm"
+  </source>
+  <dest>
+    *: "闹钟"
+  </dest>
+  <voice>
+    *: "闹钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_CREATE
+  desc: Extras Alarms: row that adds an alarm
+  user: core
+  <source>
+    *: "Create Alarm"
+  </source>
+  <dest>
+    *: "创建闹钟"
+  </dest>
+  <voice>
+    *: "创建闹钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_NEW
+  desc: Extras Alarms: under Create Alarm
+  user: core
+  <source>
+    *: "New Alarm"
+  </source>
+  <dest>
+    *: "新闹钟"
+  </dest>
+  <voice>
+    *: "新闹钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_INACTIVE
+  desc: Extras Alarms: sleep timer off
+  user: core
+  <source>
+    *: "Inactive"
+  </source>
+  <dest>
+    *: "未启用"
+  </dest>
+  <voice>
+    *: "未启用"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_MINUTES
+  desc: Extras Alarms: a sleep timer length, %d minutes
+  user: core
+  <source>
+    *: "%d Minutes"
+  </source>
+  <dest>
+    *: "%d 分钟"
+  </dest>
+  <voice>
+    *: "%d 分钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_REMAINING
+  desc: Extras Alarms: sleep timer running, %d minutes left
+  user: core
+  <source>
+    *: "%d Min Remaining"
+  </source>
+  <dest>
+    *: "剩余 %d 分钟"
+  </dest>
+  <voice>
+    *: "剩余 %d 分钟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TIME_AM
+  desc: Extras Alarms: a morning time, hour then minute
+  user: core
+  <source>
+    *: "%d:%02d AM"
+  </source>
+  <dest>
+    *: "上午%d:%02d"
+  </dest>
+  <voice>
+    *: "上午%d:%02d"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TIME_PM
+  desc: Extras Alarms: an afternoon time, hour then minute
+  user: core
+  <source>
+    *: "%d:%02d PM"
+  </source>
+  <dest>
+    *: "下午%d:%02d"
+  </dest>
+  <voice>
+    *: "下午%d:%02d"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_AM
+  desc: Extras Alarms: the time editor's morning slot
+  user: core
+  <source>
+    *: "AM"
+  </source>
+  <dest>
+    *: "上午"
+  </dest>
+  <voice>
+    *: "上午"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PM
+  desc: Extras Alarms: the time editor's afternoon slot
+  user: core
+  <source>
+    *: "PM"
+  </source>
+  <dest>
+    *: "下午"
+  </dest>
+  <voice>
+    *: "下午"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WHEN
+  desc: Extras Alarms: day, month abbreviation, time
+  user: core
+  <source>
+    *: "%d %s %s"
+  </source>
+  <dest>
+    *: "%d日 %s %s"
+  </dest>
+  <voice>
+    *: "%d日 %s %s"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_LABEL
+  desc: Extras Alarms: editor row
+  user: core
+  <source>
+    *: "Label"
+  </source>
+  <dest>
+    *: "标签"
+  </dest>
+  <voice>
+    *: "标签"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_SOUNDS
+  desc: Extras Alarms: alarm sound menu title
+  user: core
+  <source>
+    *: "Sounds"
+  </source>
+  <dest>
+    *: "声音"
+  </dest>
+  <voice>
+    *: "声音"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TONES
+  desc: Extras Alarms: built-in alarm tones
+  user: core
+  <source>
+    *: "Tones"
+  </source>
+  <dest>
+    *: "铃声"
+  </dest>
+  <voice>
+    *: "铃声"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_NONE
+  desc: Extras Alarms: no sound
+  user: core
+  <source>
+    *: "None"
+  </source>
+  <dest>
+    *: "无"
+  </dest>
+  <voice>
+    *: "无"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_BEEP
+  desc: Extras Alarms: beep tone
+  user: core
+  <source>
+    *: "Beep"
+  </source>
+  <dest>
+    *: "嘟声"
+  </dest>
+  <voice>
+    *: "嘟声"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_ONCE
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Once"
+  </source>
+  <dest>
+    *: "一次"
+  </dest>
+  <voice>
+    *: "一次"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_DAY
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Day"
+  </source>
+  <dest>
+    *: "每天"
+  </dest>
+  <voice>
+    *: "每天"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WEEKDAYS
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Weekdays"
+  </source>
+  <dest>
+    *: "工作日"
+  </dest>
+  <voice>
+    *: "工作日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WEEKENDS
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Weekends"
+  </source>
+  <dest>
+    *: "周末"
+  </dest>
+  <voice>
+    *: "周末"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_WEEK
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Week"
+  </source>
+  <dest>
+    *: "每周"
+  </dest>
+  <voice>
+    *: "每周"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_MONTH
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Month"
+  </source>
+  <dest>
+    *: "每月"
+  </dest>
+  <voice>
+    *: "每月"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_EVERY_YEAR
+  desc: Extras Alarms: repeat
+  user: core
+  <source>
+    *: "Every Year"
+  </source>
+  <dest>
+    *: "每年"
+  </dest>
+  <voice>
+    *: "每年"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WAKE_UP
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Wake up"
+  </source>
+  <dest>
+    *: "起床"
+  </dest>
+  <voice>
+    *: "起床"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_WORK
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Work"
+  </source>
+  <dest>
+    *: "工作"
+  </dest>
+  <voice>
+    *: "工作"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_CLASS
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Class"
+  </source>
+  <dest>
+    *: "上课"
+  </dest>
+  <voice>
+    *: "上课"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_APPOINTMENT
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Appointment"
+  </source>
+  <dest>
+    *: "预约"
+  </dest>
+  <voice>
+    *: "预约"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PHONE_CALL
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Phone Call"
+  </source>
+  <dest>
+    *: "电话"
+  </dest>
+  <voice>
+    *: "电话"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_BREAKFAST
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Breakfast"
+  </source>
+  <dest>
+    *: "早餐"
+  </dest>
+  <voice>
+    *: "早餐"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_LUNCH
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Lunch"
+  </source>
+  <dest>
+    *: "午餐"
+  </dest>
+  <voice>
+    *: "午餐"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DINNER
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Dinner"
+  </source>
+  <dest>
+    *: "晚餐"
+  </dest>
+  <voice>
+    *: "晚餐"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_IMPORTANT
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Important"
+  </source>
+  <dest>
+    *: "重要"
+  </dest>
+  <voice>
+    *: "重要"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PRESCRIPTION
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Prescription"
+  </source>
+  <dest>
+    *: "处方"
+  </dest>
+  <voice>
+    *: "处方"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_TAKE_MEDICINE
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Take Medicine"
+  </source>
+  <dest>
+    *: "吃药"
+  </dest>
+  <voice>
+    *: "吃药"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_RETURN_CALL
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Return Call"
+  </source>
+  <dest>
+    *: "回电话"
+  </dest>
+  <voice>
+    *: "回电话"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DELIVERY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Delivery"
+  </source>
+  <dest>
+    *: "送货"
+  </dest>
+  <voice>
+    *: "送货"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PICK_UP
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Pick-Up"
+  </source>
+  <dest>
+    *: "接人"
+  </dest>
+  <voice>
+    *: "接人"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_MEETING
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Meeting"
+  </source>
+  <dest>
+    *: "会议"
+  </dest>
+  <voice>
+    *: "会议"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_REMINDER
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Reminder"
+  </source>
+  <dest>
+    *: "提醒"
+  </dest>
+  <voice>
+    *: "提醒"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DATE
+  desc: Extras Alarms: label, a social date
+  user: core
+  <source>
+    *: "Date"
+  </source>
+  <dest>
+    *: "约会"
+  </dest>
+  <voice>
+    *: "约会"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_ANNIVERSARY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Anniversary"
+  </source>
+  <dest>
+    *: "纪念日"
+  </dest>
+  <voice>
+    *: "纪念日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_BIRTHDAY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Birthday"
+  </source>
+  <dest>
+    *: "生日"
+  </dest>
+  <voice>
+    *: "生日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_HOLIDAY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Holiday"
+  </source>
+  <dest>
+    *: "假日"
+  </dest>
+  <voice>
+    *: "假日"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_GO_HOME
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Go Home"
+  </source>
+  <dest>
+    *: "回家"
+  </dest>
+  <voice>
+    *: "回家"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_PARTY
+  desc: Extras Alarms: label
+  user: core
+  <source>
+    *: "Party"
+  </source>
+  <dest>
+    *: "聚会"
+  </dest>
+  <voice>
+    *: "聚会"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DISMISS
+  desc: Extras Alarms: alert option
+  user: core
+  <source>
+    *: "Dismiss"
+  </source>
+  <dest>
+    *: "关闭"
+  </dest>
+  <voice>
+    *: "关闭"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_SNOOZE
+  desc: Extras Alarms: alert option
+  user: core
+  <source>
+    *: "Snooze"
+  </source>
+  <dest>
+    *: "稍后提醒"
+  </dest>
+  <voice>
+    *: "稍后提醒"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_WAKE_UP
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time to wake up."
+  </source>
+  <dest>
+    *: "该起床了。"
+  </dest>
+  <voice>
+    *: "该起床了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_WORK
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have work to do."
+  </source>
+  <dest>
+    *: "你有工作要做。"
+  </dest>
+  <voice>
+    *: "你有工作要做。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_CLASS
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a class to attend."
+  </source>
+  <dest>
+    *: "你有一节课要上。"
+  </dest>
+  <voice>
+    *: "你有一节课要上。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_ALARM
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an alarm."
+  </source>
+  <dest>
+    *: "你有一个闹钟。"
+  </dest>
+  <voice>
+    *: "你有一个闹钟。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_APPOINTMENT
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming appointment."
+  </source>
+  <dest>
+    *: "你有一个预约即将开始。"
+  </dest>
+  <voice>
+    *: "你有一个预约即将开始。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PHONE_CALL
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a phone call to make."
+  </source>
+  <dest>
+    *: "你需要打一个电话。"
+  </dest>
+  <voice>
+    *: "你需要打一个电话。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_BREAKFAST
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time for breakfast."
+  </source>
+  <dest>
+    *: "该吃早餐了。"
+  </dest>
+  <voice>
+    *: "该吃早餐了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_LUNCH
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time for lunch."
+  </source>
+  <dest>
+    *: "该吃午餐了。"
+  </dest>
+  <voice>
+    *: "该吃午餐了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_DINNER
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time for dinner."
+  </source>
+  <dest>
+    *: "该吃晚餐了。"
+  </dest>
+  <voice>
+    *: "该吃晚餐了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_IMPORTANT
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "An important event is about to occur."
+  </source>
+  <dest>
+    *: "一件重要的事即将发生。"
+  </dest>
+  <voice>
+    *: "一件重要的事即将发生。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PRESCRIPTION
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a prescription to pick up or refill."
+  </source>
+  <dest>
+    *: "你需要取药或续药。"
+  </dest>
+  <voice>
+    *: "你需要取药或续药。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_TAKE_MEDICINE
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "It's time to take your medicine."
+  </source>
+  <dest>
+    *: "该吃药了。"
+  </dest>
+  <voice>
+    *: "该吃药了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_RETURN_CALL
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a phone call to return."
+  </source>
+  <dest>
+    *: "你需要回一个电话。"
+  </dest>
+  <voice>
+    *: "你需要回一个电话。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_DELIVERY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You need to make a delivery."
+  </source>
+  <dest>
+    *: "你需要送一件东西。"
+  </dest>
+  <voice>
+    *: "你需要送一件东西。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PICK_UP
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You need to pick up a delivery."
+  </source>
+  <dest>
+    *: "你需要取一件东西。"
+  </dest>
+  <voice>
+    *: "你需要取一件东西。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_MEETING
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a meeting to attend."
+  </source>
+  <dest>
+    *: "你有一个会议要参加。"
+  </dest>
+  <voice>
+    *: "你有一个会议要参加。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_REMINDER
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "There is something you should be doing right now."
+  </source>
+  <dest>
+    *: "现在有件事你该去做了。"
+  </dest>
+  <voice>
+    *: "现在有件事你该去做了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_DATE
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "An important date is about to occur."
+  </source>
+  <dest>
+    *: "一个重要的日子即将到来。"
+  </dest>
+  <voice>
+    *: "一个重要的日子即将到来。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_ANNIVERSARY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming anniversary to celebrate."
+  </source>
+  <dest>
+    *: "你有一个纪念日即将到来。"
+  </dest>
+  <voice>
+    *: "你有一个纪念日即将到来。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_BIRTHDAY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming birthday to celebrate."
+  </source>
+  <dest>
+    *: "你有一个生日即将到来。"
+  </dest>
+  <voice>
+    *: "你有一个生日即将到来。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_HOLIDAY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have an upcoming holiday to celebrate."
+  </source>
+  <dest>
+    *: "你有一个节日即将到来。"
+  </dest>
+  <voice>
+    *: "你有一个节日即将到来。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_GO_HOME
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You should be going home soon."
+  </source>
+  <dest>
+    *: "你该准备回家了。"
+  </dest>
+  <voice>
+    *: "你该准备回家了。"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_EXTRAS_ALARMS_DESC_PARTY
+  desc: Extras Alarms: alert text for a label
+  user: core
+  <source>
+    *: "You have a party to attend."
+  </source>
+  <dest>
+    *: "你有一个聚会要参加。"
+  </dest>
+  <voice>
+    *: "你有一个聚会要参加。"
+  </voice>
+</phrase>

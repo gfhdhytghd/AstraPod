@@ -7,10 +7,14 @@
 #include "video_playback.h"
 #include "video_audio.h"
 #include "plugins/rock_h264.h"
+#include "settings/video_picture.h"
 
 int video_h264_probe(const char *path, void *buffer, size_t size);
 
-enum mode { FINISH, SEEK_MENU, SCRUB_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR };
+enum mode {
+    FINISH, SEEK_MENU, SCRUB_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR,
+    PICTURE_CC
+};
 static enum mode mode;
 volatile long current_tick;
 static unsigned int thread_id = 1;
@@ -24,6 +28,8 @@ static int resume_choice;
 static long paused_at;
 static bool exercise_controls;
 static bool saw_timeout;
+static int scaling;
+static unsigned scaling_seen, centre_calls;
 
 static unsigned audio_opens, audio_closes, audio_seeks;
 static bool audio_active, audio_paused;
@@ -137,7 +143,7 @@ static void frame(const struct vpu_h264 *decoder, const uint8_t **y,
     *cb = &picture[256];
     *cr = &picture[320];
     *w = *stride = 16;
-    *h = 12;
+    *h = mode == PICTURE_CC ? 8 : 12;
 }
 
 static void close_video(struct vpu_h264 *v)
@@ -193,6 +199,25 @@ static int action(int context, int timeout)
     assert(context == CONTEXT_VIDEO_PLAYBACK && timeout == TIMEOUT_NOBLOCK);
     if (drawn < 4)
         return ACTION_NONE;
+    if (mode == PICTURE_CC)
+    {
+        switch (control_action++)
+        {
+        case 0: return ACTION_WPS_QUICKSCREEN;
+        case 1:
+            assert(centre_calls == 1 && boosted && !audio_paused);
+            return ACTION_WPS_BROWSE;
+        case 2:
+        case 3: return ACTION_WPS_BROWSE;
+        case 4:
+        case 5: return ACTION_WPS_VOLUP;
+        case 6: return ACTION_WPS_PLAY;
+        case 7: return ACTION_WPS_QUICKSCREEN;
+        default:
+            assert(centre_calls == 2 && !boosted && audio_paused);
+            return ACTION_WPS_MENU;
+        }
+    }
     if (exercise_controls)
     {
         switch (control_action)
@@ -266,6 +291,17 @@ static void draw(unsigned char * const src[3], int sx, int sy, int stride,
     assert(active && src[0] && src[1] && src[2]);
     assert(!x && !y && !sx && !sy &&
            stride == LCD_WIDTH && w == LCD_WIDTH && h == LCD_HEIGHT);
+    if (mode == PICTURE_CC)
+    {
+        const unsigned char *middle = src[0] + 120 * stride;
+        if (scaling == VIDEO_PICTURE_FIT)
+            assert(src[0][0] == 16 && middle[0] == 80 && middle[319] == 95);
+        else if (scaling == VIDEO_PICTURE_FILL)
+            assert(middle[0] == 82 && middle[319] == 91);
+        else
+            assert(middle[0] == 80 && middle[319] == 95);
+        scaling_seen |= 1u << scaling;
+    }
     if (exercise_controls)
     {
         /* The uniform source remains visible through the inset panels. */
@@ -303,6 +339,20 @@ static int resume_menu(void)
 }
 
 static void adjust_volume(int delta) { (void)delta; }
+
+static int picture_mode(int direction)
+{
+    scaling = (scaling + direction + VIDEO_PICTURE_COUNT) % VIDEO_PICTURE_COUNT;
+    return scaling;
+}
+
+static bool control_centre(void)
+{
+    assert(audio_active && audio_paused && !boosted);
+    centre_calls++;
+    current_tick += HZ;
+    return true;
+}
 
 static const struct settings settings = {
     .backlight_timeout = 17, .video_fit = true,
@@ -482,6 +532,20 @@ int main(int argc, char **argv)
            VIDEO_FINISHED);
     assert(resume_calls == 4 && drawn < 336);
 
+    reset(PICTURE_CC);
+    for (unsigned i = 0; i < 256; i++)
+        picture[i] = 80 + i % 16;
+    const struct video_play_options picture_options = {
+        .title = "Test clip",
+        .themed_controls = true,
+        .control_centre = control_centre,
+        .picture_mode = picture_mode,
+    };
+    assert(video_h264_play_named(argv[3], scratch, sizeof(scratch),
+                                 &picture_options) == VIDEO_EXIT);
+    assert(centre_calls == 2 && scaling_seen == (1u << VIDEO_PICTURE_COUNT) - 1);
+
     rock_h264_end();
     puts("PASS H.264 lifecycle, timed video controls, resume choices and USB");
+    puts("PASS H.264 Fit, Fill, Stretch and Control Centre audio state");
 }

@@ -299,12 +299,13 @@ static int thumbnail_file(const struct stock_db *db, off_t at,
         if (!stock_db_photo_text(db, &name, location, sizeof(location)))
             return -1;
         const char *leaf = strrchr(location, ':');
-        unsigned id, shard;
+        /* The firmware's sscanf has no %u. */
+        int id, shard;
         char basename[32];
-        if (!leaf || sscanf(leaf + 1, "F%u_%u", &id, &shard) != 2 ||
-            id != format_id || !shard)
+        if (!leaf || sscanf(leaf + 1, "F%d_%d", &id, &shard) != 2 ||
+            id < 0 || (unsigned)id != format_id || shard <= 0)
             return -1;
-        snprintf(basename, sizeof(basename), "F%u_%u.ithmb", id, shard);
+        snprintf(basename, sizeof(basename), "F%d_%d.ithmb", id, shard);
         if (strcasecmp(basename, leaf + 1))
             return -1;
         snprintf(path, sizeof(path), "%s/%s", dir, basename);

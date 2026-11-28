@@ -1721,6 +1721,9 @@ target/arm/s5l8702/ipod6g/videoout-6g.c
 #endif
 target/arm/s5l8702/ipod6g/backlight-6g.c
 target/arm/s5l8702/ipod6g/piezo-6g.c
+#ifndef BOOTLOADER
+target/arm/s5l8702/ipod6g/piezo-pcm.c
+#endif
 target/arm/s5l8702/ipod6g/pmu-6g.c
 target/arm/s5l8702/ipod6g/adc-6g.c
 target/arm/s5l8702/ipod6g/powermgmt-6g.c

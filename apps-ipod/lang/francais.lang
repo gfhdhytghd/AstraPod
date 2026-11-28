@@ -28034,3 +28034,20 @@
     *: "Éjectez avant de déconnecter"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_PIEZO_FALLBACK
+  desc: Playback via the Classic's click wheel beeper without headphones
+  user: core
+  <source>
+    *: none
+    ipod6g: "Piezo Without Headphones"
+  </source>
+  <dest>
+    *: none
+    ipod6g: "Buzzer sans écouteurs"
+  </dest>
+  <voice>
+    *: none
+    ipod6g: "Buzzer sans écouteurs"
+  </voice>
+</phrase>

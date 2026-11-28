@@ -128,6 +128,7 @@ Settings
 | Auto-Change Directory | At the end of a folder, move on rather than stopping: to the next folder, or to one picked at random. The In Start Directory choices never leave the folder set with Start Directory in the file browser. Random picks one level at a time: each artist folder has the same chance, then each album in it, so an artist with one album comes up as often as one with twenty. | No |  |
 | Cuesheet Support | Reads .cue files, so an album ripped as one long file still shows track names and can be skipped through. | No | **Adv** |
 | Chapter Marks | Reads the chapter list a file carries inside it, so one long file shows its chapter names, skips between them and marks them on the progress bar. Spoken Word reads them from audiobooks and podcasts only; All reads them from music too, such as a symphony marked by movement. It reads .m4b, .m4a, .mp3, Ogg and Opus files, and lists the first 99 chapters of a longer list. | Spoken Word | **Adv** |
+| Piezo Without Headphones | On, the Classic plays music, video sound and spoken menus through its click wheel beeper when the headphone jack is empty. Plugging in headphones switches the sound back to the jack. Unplugging switches to the beeper without pausing. The beeper is quiet and tinny. USB DAC and digital dock playback keep their own outputs. | Off |  |
 | Skip Length | Makes skip jump a fixed amount of time instead of a whole track. For long podcasts and mixes, where a track is an hour. | Skip Track | **Adv** |
 | Spoken Word Skip Length | Skip Length for audiobooks and podcasts alone, so a book can skip 30 seconds while music skips whole tracks. Same as Music uses Skip Length. | Same as Music | **Adv** |
 | Spoken Word Speed | Plays audiobooks and podcasts faster or slower without changing the voice's pitch; music always plays at its own speed. Also in Now Playing's menu while spoken word plays. The first change from 100% restarts the playing track once. | 100% |  |
@@ -170,7 +171,7 @@ Settings
 
 | Setting | What it does | Default | |
 |---|---|---|---|
-| Pause on Unplug | Pauses when whatever is playing is unplugged -- headphones, a USB DAC, a dock or a car -- so the music does not carry on without you or out of the iPod's socket. Pause and Resume carries on when the same one is plugged back in. | Pause and Resume |  |
+| Pause on Unplug | Pauses when whatever is playing is unplugged -- headphones, a USB DAC, a dock or a car -- so the music does not carry on without you or out of the iPod's socket. Pause and Resume carries on when the same one is plugged back in. Piezo Without Headphones takes priority when unplugging the headphone jack. | Pause and Resume |  |
 | Disable resume on startup if phones unplugged | Stops the player resuming at power-on when nothing is plugged in, which otherwise plays into a dock or an empty socket. | No | **Adv** |
 
 ### Playback — Playlists

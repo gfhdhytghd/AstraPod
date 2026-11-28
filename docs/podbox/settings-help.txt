@@ -438,10 +438,18 @@ finding a moment in a song, larger for crossing a long file.
 How quickly held seeking speeds up. Faster crosses an hour-long file in a
 moment but overshoots a three-minute song.
 
+[piezo without headphones]
+On, the Classic plays music, video sound and spoken menus through its click
+wheel beeper when the headphone jack is empty. Plugging in headphones switches
+the sound back to the jack. Unplugging switches to the beeper without pausing.
+The beeper is quiet and tinny. USB DAC and digital dock playback keep their
+own outputs.
+
 [pause on headphone unplug]
 Pauses when whatever is playing is unplugged -- headphones, a USB DAC, a dock
 or a car -- so the music does not carry on without you or out of the iPod's
 socket. Pause and Resume carries on when the same one is plugged back in.
+Piezo Without Headphones takes priority when unplugging the headphone jack.
 
 [disable autoresume if phones not present]
 Stops the player resuming at power-on when nothing is plugged in, which

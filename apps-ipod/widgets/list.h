@@ -419,6 +419,7 @@ struct simplelist_info {
                           the settings lists have no GO_TO_* to return, and
                           there PLAY is ignored rather than meaning "back". */
     int  timeout;
+    int  context_flags; /* optional action context flags */
     int  selection; /* the item to select when the list is first displayed */
     int  top_item;  /* the row shown first, or -1 for wherever the selection
                        puts it; a short list stays at its top */

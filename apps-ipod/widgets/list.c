@@ -1081,7 +1081,8 @@ bool simplelist_show_list(struct simplelist_info *info)
 
     while(1)
     {
-        list_do_action(CONTEXT_TREE, info->timeout, &lists, &action);
+        list_do_action(CONTEXT_TREE | info->context_flags, info->timeout,
+                       &lists, &action);
 
         /* We must yield in this case or no other thread can run */
         if (info->timeout == TIMEOUT_NOBLOCK)
@@ -1174,6 +1175,7 @@ void simplelist_info_init(struct simplelist_info *info, char* title,
     info->speak_onshow = true;
     info->wps_on_play = false;
     info->timeout = HZ/10;
+    info->context_flags = 0;
     info->selection = 0;
     info->top_item = -1;
     info->action_callback = NULL;

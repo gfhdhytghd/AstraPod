@@ -195,6 +195,20 @@ static const char *mix_name(int row, void *data, char *buf, size_t size)
     return catalog.mixes[row].name;
 }
 
+static int mix_list_action(int action, struct gui_synclist *list)
+{
+    int button;
+    get_action_statuscode(&button);
+    if ((action == ACTION_STD_CANCEL && (button & BUTTON_LEFT)) ||
+        (action == ACTION_STD_OK && (button & BUTTON_RIGHT)))
+    {
+        int next = list->selected_item + (button & BUTTON_LEFT ? -1 : 1);
+        gui_synclist_select_item(list, MAX(0, MIN(next, catalog.count - 1)));
+        return ACTION_REDRAW;
+    }
+    return action;
+}
+
 static int show_list(void)
 {
     struct simplelist_info list;
@@ -202,7 +216,12 @@ static int show_list(void)
                          catalog.count, NULL);
     list.get_name = mix_name;
     list.selection = page;
-    if (simplelist_show_list(&list))
+    list.context_flags = CONTEXT_LOCAL_LEFT_RIGHT;
+    list.action_callback = mix_list_action;
+    bool transport = action_set_wheel_transport(true);
+    bool leave = simplelist_show_list(&list);
+    action_set_wheel_transport(transport);
+    if (leave)
         return GO_TO_ROOT;
     if (list.selection < 0)
         return GO_TO_PREVIOUS;

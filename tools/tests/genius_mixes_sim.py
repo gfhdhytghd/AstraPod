@@ -17,7 +17,7 @@ from power_about_stock_sim import Sim, prepare_disk
 from ui_quickscreen_sim import ULTRA_FALLBACK_THEME
 
 
-THEMES = ("fruit-company", "fruit-company-ultra", "classic", "scrim")
+THEMES = ("fruit-company", "fruit-company-ultra", "classic", "scrim", "light")
 GROUPS = (
     ("Alternative Rock", "2007", ("Radiohead", "Muse", "Coldplay", "Metric")),
     ("Jazz", "1999", ("Esperanza", "Bill Evans", "Ahmad Jamal", "Nina Simone")),
@@ -133,11 +133,11 @@ def verify_theme(binary, root, theme, out):
         print(theme, [m[0] for m in mixes], flush=True)
         open_mixes(sim, theme, out)
 
-        tiles = theme != "scrim"
+        tiles = theme not in ("scrim", "light")
         if tiles:
             wait_for(lambda: mosaic_ready(sim), f"{theme}: first four covers")
         before = snap(sim, out, "mixes-page-1" if tiles else "mixes-list")
-        sim.tap("down")
+        sim.tap("right")
         if tiles:
             wait_for(lambda: mosaic_ready(sim), f"{theme}: second four covers")
         after = snap(sim, out, "mixes-page-2" if tiles else "mixes-selection")
@@ -158,12 +158,6 @@ def verify_theme(binary, root, theme, out):
                                          returned.crop((0, 24, 320, 234))
                                          ).getbbox() is None
             index = live.get("track")
-            sim.tap("right")
-            wait_for(lambda: live.get("track") != index,
-                     f"{theme}: RIGHT skips track", limit=5)
-            sim.tap("back")
-            wait_for(lambda: live.get("track") == index,
-                     f"{theme}: LEFT skips back", limit=5)
             sim.tap("play")
             wait_for(lambda: live.get("status") == 3,
                      f"{theme}: PLAY pauses queue", limit=5)
@@ -171,9 +165,10 @@ def verify_theme(binary, root, theme, out):
             assert ImageChops.difference(after.crop((0, 24, 320, 234)),
                                          transport.crop((0, 24, 320, 234))
                                          ).getbbox() is None
-            sim.tap("up")
-            wait_for(lambda: mosaic_ready(sim), f"{theme}: wheel pages back")
-            first = snap(sim, out, "wheel-returned-to-first")
+            sim.tap("back")
+            wait_for(lambda: mosaic_ready(sim), f"{theme}: LEFT pages back")
+            first = snap(sim, out, "left-returned-to-first")
+            assert live.get("track") == index, f"{theme}: LEFT changed track"
             assert ImageChops.difference(before.crop((0, 24, 320, 234)),
                                          first.crop((0, 24, 320, 234))
                                          ).getbbox() is None

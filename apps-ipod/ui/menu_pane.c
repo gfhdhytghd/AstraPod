@@ -3,14 +3,15 @@
  *
  * The right half of a menu under style.menu_pane=split, as the stock iPod
  * Classic draws it, from its own bitmaps: a slideshow of the library's
- * covers, or on the blue-grey backdrop the playing track, the player's free
- * space, or the selected row's name, picture and value. The rows cast a
- * shadow on its first columns.
+ * covers, a list's photos, or on the blue-grey backdrop the playing track,
+ * the player's free space, or the selected row's name, picture and value.
+ * The rows cast a shadow on its first columns.
  *
  * Parts: the page on screen and its depth; the fonts; the slideshow, whose
- * covers the background thread reads into one buffer; the painters, which
- * compose a still pane at 8 bits a channel as stock does; the content shown
- * and the pause before a new row's; and the motion.
+ * covers the background thread reads into one buffer; the photos, which the
+ * list supplies; the painters, which compose a still pane at 8 bits a
+ * channel as stock does; the content shown and the pause before a new
+ * row's; and the motion.
  ****************************************************************************/
 
 #include <stdio.h>
@@ -113,6 +114,19 @@ static struct {
     bool fading;
     uint32_t none_at;       /* when a load last ended without a cover */
 } show = { .album = -1 };
+
+/* The photos. A photo's window starts at one side and pans to the other at
+ * the covers' speed, and the next photo pans back. */
+#define PHOTO_RANGE (LCD_WIDTH - PANE_W)
+#define PHOTO_POLL_US 100000u
+static struct {
+    const struct menu_pane_photos *source;
+    bool ready;             /* source->pixels hold a photo */
+    int set;                /* the set it came from */
+    int dir;                /* 1 while the window moves right */
+    uint32_t started;
+    int drawn_x;
+} photo = { .dir = -1 };
 
 static struct menu_pane_content shown, pending, under;
 static struct menu_pane_content picture;
@@ -424,6 +438,25 @@ static int cover_left(uint32_t now, int x)
     int travel = LCD_WIDTH - rest;
     return rest + (int)((uint64_t)travel * q * q /
                         ((uint64_t)SLIDE_US * SLIDE_US));
+}
+
+static int photo_window(uint32_t now)
+{
+    int ticks = (int)MIN((now - photo.started) / PAN_US_PER_PX,
+                         (uint32_t)PHOTO_RANGE);
+    return photo.dir > 0 ? ticks : PHOTO_RANGE - ticks;
+}
+
+static bool photo_wanted(uint32_t now)
+{
+    return !photo.ready || photo.set != shown.art ||
+           now - photo.started >= SHOW_LIFE_US;
+}
+
+void menu_pane_set_photos(const struct menu_pane_photos *source)
+{
+    photo.source = source;
+    photo.ready = false;
 }
 
 /* ---- painters ---- */
@@ -780,11 +813,33 @@ static void paint_still(struct ui_rect clip, const struct menu_pane_content *c)
     }
 }
 
+/* The photo through its window, or black while there is none yet */
+static void paint_photo(struct ui_rect clip, uint32_t now)
+{
+    int x = photo_window(now);
+    for (int row = clip.y; row < clip.y + clip.height; row++)
+    {
+        fb_data *out = fb_at(clip.x, row);
+        if (photo.ready && photo.source)
+            memcpy(out, photo.source->pixels + row * LCD_WIDTH + x +
+                        clip.x - MENU_PANE_X, clip.width * sizeof(fb_data));
+        else
+            memset(out, 0, clip.width * sizeof(fb_data));
+    }
+    shade(clip);
+    photo.drawn_x = x;
+}
+
 static void paint_content(struct ui_rect clip, uint32_t now)
 {
     clip = clip_to(clip, menu_pane_rect());
     if (clip.width <= 0 || clip.height <= 0)
         return;
+    if (shown.kind == LIST_PANE_PHOTO && !slide_dir)
+    {
+        paint_photo(clip, now);
+        return;
+    }
     bool art = slide_dir || shown.kind == LIST_PANE_ART;
     if (art && show.state == SHOW_FRESH)
         show_begin(now);
@@ -928,6 +983,23 @@ static void cover_step(uint32_t now, struct ui_rect *damage)
         show_request();
 }
 
+static void photo_step(uint32_t now, struct ui_rect *damage)
+{
+    if (!photo.source)
+        return;
+    if (photo_wanted(now) && photo.source->next(shown.art))
+    {
+        photo.ready = true;
+        photo.set = shown.art;
+        photo.dir = -photo.dir;
+        photo.started = now;
+    }
+    else if (!photo.ready || photo_window(now) == photo.drawn_x)
+        return;
+    *damage = menu_pane_rect();
+    paint_photo(*damage, now);
+}
+
 static bool playing_changed(void)
 {
     if (shown.kind != LIST_PANE_PLAYING || TIME_BEFORE(current_tick,
@@ -974,7 +1046,8 @@ struct ui_rect menu_pane_step(void)
         if (to_art && show.state == SHOW_EMPTY)
             show_request();
         /* A cover leaves to the right, or arrives from there. */
-        if (from_art != to_art && show.state == SHOW_READY)
+        if (from_art != to_art && show.state == SHOW_READY &&
+            shown.kind != LIST_PANE_PHOTO && under.kind != LIST_PANE_PHOTO)
         {
             slide_dir = from_art ? 1 : -1;
             slide_started = now;
@@ -993,6 +1066,8 @@ struct ui_rect menu_pane_step(void)
     }
     else if (shown.kind == LIST_PANE_ART)
         cover_step(now, &damage);
+    else if (shown.kind == LIST_PANE_PHOTO)
+        photo_step(now, &damage);
     else
         repaint = playing_changed();
     if (repaint)
@@ -1083,6 +1158,16 @@ int menu_pane_deadline(void)
     }
     else if (shown.kind == LIST_PANE_PLAYING)
         wait = MIN(wait, (uint32_t)PLAYING_POLL * (1000000 / HZ));
+    else if (shown.kind == LIST_PANE_PHOTO && photo.source)
+    {
+        uint32_t age = now - photo.started;
+        uint32_t next = photo_wanted(now)
+            ? (since >= PHOTO_POLL_US ? 0 : PHOTO_POLL_US - since)
+            : photo_window(now) != photo.drawn_x ? 0
+            : MIN((age / PAN_US_PER_PX + 1) * PAN_US_PER_PX - age,
+                  SHOW_LIFE_US - age);
+        wait = MIN(wait, next);
+    }
     if (wait == UINT32_MAX)
         return TIMEOUT_BLOCK;
     return (wait + 1000000 / HZ - 1) / (1000000 / HZ);

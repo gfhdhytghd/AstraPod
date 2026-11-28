@@ -45,6 +45,7 @@
 #include "settings/settings.h"
 #include "system.h"
 #include "ui/menu_pane.h"
+#include "ui/native_theme_runtime.h"
 #include "ui/scene.h"
 #include "ui/stock_art.h"
 #include "widgets/list.h"
@@ -80,6 +81,7 @@
 #define GRID_GREY LCD_RGBPACK(32, 32, 32)
 #define FRAME_OUTER LCD_RGBPACK(248, 192, 24)
 #define FRAME_INNER LCD_RGBPACK(208, 160, 32)
+#define TITLE_ROWS 24
 #define LOADING_FILL LCD_RGBPACK(40, 44, 40)
 #define LOADING_EDGE LCD_RGBPACK(64, 68, 64)
 #define SUBTITLE_FONT FONT_DIR "/13-helvetica-bold.pbf"
@@ -117,6 +119,12 @@ struct albums {
     int loose_count;
     fb_data *view;              /* three screens */
     int *order;                 /* a slideshow's, room for every photo */
+    fb_data *pane;              /* the menu pane's photo */
+    fb_data *menu;              /* the menu as the grid opened over it */
+    bool menu_split;
+    int pane_set;               /* the set a loose pane photo is wanted for */
+    int pane_file;              /* that photo, or -1 */
+    int pane_last;              /* the photo shown last */
 };
 
 static int photo_total(const struct albums *a)
@@ -299,7 +307,7 @@ static void photo_date(const struct albums *a, int sel, char *buf, size_t size)
 /* The black title bar, then the album's photo count and the selected
  * photo's date on the grey band below it. */
 static void draw_grid_header(const struct albums *a, const char *title,
-                             int sel)
+                             int sel, bool battery)
 {
     enum { ROWS = 4 };
     uint32_t pixels[LCD_WIDTH * ROWS];
@@ -327,7 +335,7 @@ static void draw_grid_header(const struct albums *a, const char *title,
         for (int i = 0; i < LCD_WIDTH * band.height; i++)
             pixels[i] = 0x202020;
         stock_art_put(&band, STOCK_ART_PHOTOS_HEADER, 0, 0);
-        extras_bar_put_marks(&band, title, true, playing);
+        extras_bar_put_marks(&band, title, battery, playing);
         if (subtitle_font >= 0)
         {
             stock_canvas_text(&band, subtitle_font, count, SUBTITLE_LEFT, top,
@@ -378,13 +386,14 @@ static void focus_grid(const struct albums *a, int first)
     photo_thumbs_focus(lo, hi, vis_lo, MAX(vis_lo, vis_hi));
 }
 
+/* The grid with `sel` framed, or with no frame when `framed` is false */
 static void draw_grid(const struct albums *a, const char *title,
-                      int sel, int first)
+                      int sel, int first, bool framed)
 {
     static fb_data tile[THUMB_EDGE * THUMB_EDGE];
 
     focus_grid(a, first);
-    draw_grid_header(a, title, sel);
+    draw_grid_header(a, title, sel, true);
     lcd_set_foreground(GRID_GREY);
     lcd_fillrect(0, GRID_TOP, LCD_WIDTH, LCD_HEIGHT - GRID_TOP);
     for (int i = first; i < photo_total(a) && i < first + GRID_PAGE; i++)
@@ -404,7 +413,7 @@ static void draw_grid(const struct albums *a, const char *title,
             lcd_bitmap_part(pixels, 1, 0, THUMB_EDGE, x, y, CELL_W, CELL_H);
         else
             draw_placeholder(x, y, state);
-        if (i == sel)
+        if (i == sel && framed)
             draw_frame(x, y);
     }
 }
@@ -752,9 +761,12 @@ static void present_photo(const fb_data *pixels, bool brightness)
 }
 
 /* Stock pushes between the grid and a photo in 8 frames of 1/30 s, easing
- * out quadratically; forward moves the pages left. */
+ * out quadratically; forward moves the pages left. Its two directions run
+ * the curve at different phases: these are the distances it moves. */
 static void push_pages(const fb_data *from, const fb_data *to, bool forward)
 {
+    static const uint16_t out[] = { 54, 123, 181, 229, 267, 295, 312 };
+    static const uint16_t back[] = { 75, 141, 196, 241, 276, 301, 316 };
     if (global_settings.animations)
     {
         struct ui_motion motion = ui_motion_begin("photo-push");
@@ -764,8 +776,7 @@ static void push_pages(const fb_data *from, const fb_data *to, bool forward)
             long frame = start + k * HZ / 30;
             if (TIME_BEFORE(current_tick, frame))
                 sleep(frame - current_tick);
-            int rest = 8 - k;
-            int off = (LCD_WIDTH * (64 - rest * rest) + 63) / 64;
+            int off = forward ? out[k - 1] : back[k - 1];
             int keep = LCD_WIDTH - off;
             if (forward)
             {
@@ -829,10 +840,13 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
     int initial_brightness = global_settings.brightness;
 #endif
     enum photo_view_result result = PHOTO_VIEW_GRID;
+    /* Stock pushes the grid away to black, then cuts to the photo */
     memcpy(mix, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
+    memset(current, 0, PHOTO_PIXELS * sizeof(fb_data));
+    push_pages(mix, current, true);
     if (!draw_photo(a, *sel, current, SCREEN_WAIT))
         waiting = slide_file(a, *sel);
-    push_pages(mix, current, true);
+    present_photo(current, false);
     for (;;)
     {
         long now = current_tick;
@@ -1002,9 +1016,100 @@ static void return_to_grid(const struct albums *a, const char *title,
     fb_data *photo = a->view;
     fb_data *grid = photo + PHOTO_PIXELS;
     memcpy(photo, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
-    draw_grid(a, title, sel, first);
+    draw_grid(a, title, sel, first, true);
     memcpy(grid, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
     push_pages(photo, grid, false);
+}
+
+/* Stock cuts to the grid with its title bar away, then once the page's
+ * thumbnails are in slides the bar down from above, the battery last. */
+static void grid_entry(const struct albums *a, const char *title)
+{
+    static const uint8_t hidden[] = { 13, 4, 0 };   /* rows above the top */
+    fb_data *bar = a->view;
+    fb_data *bare = bar + TITLE_ROWS * LCD_WIDTH;
+    draw_grid_header(a, title, 0, false);
+    memcpy(bare, FBADDR(0, 0), TITLE_ROWS * LCD_WIDTH * sizeof(fb_data));
+    draw_grid(a, title, 0, 0, true);
+    memcpy(bar, FBADDR(0, 0), TITLE_ROWS * LCD_WIDTH * sizeof(fb_data));
+    lcd_set_foreground(GRID_GREY);
+    lcd_fillrect(0, 0, LCD_WIDTH, TITLE_ROWS);
+    lcd_update();
+    if (!global_settings.animations)
+    {
+        draw_grid(a, title, 0, 0, true);
+        lcd_update();
+        return;
+    }
+    long start = current_tick;
+    unsigned made = photo_thumbs_generation();
+    while (TIME_BEFORE(current_tick, start + HZ * 3 / 10) &&
+           (photo_thumbs_pending() ||
+            TIME_BEFORE(current_tick, start + HZ * 15 / 100)))
+    {
+        sleep(1);
+        if (made == photo_thumbs_generation())
+            continue;
+        made = photo_thumbs_generation();
+        draw_grid(a, title, 0, 0, true);
+        lcd_set_foreground(GRID_GREY);
+        lcd_fillrect(0, 0, LCD_WIDTH, TITLE_ROWS);
+        lcd_update();
+    }
+    struct ui_motion motion = ui_motion_begin("photo-title");
+    start = current_tick;
+    for (unsigned k = 0; k < ARRAYLEN(hidden); k++)
+    {
+        long frame = start + (k + 1) * HZ / 30;
+        if (TIME_BEFORE(current_tick, frame))
+            sleep(frame - current_tick);
+        int shown = TITLE_ROWS - hidden[k];
+        lcd_bitmap_part(bare, 0, hidden[k], LCD_WIDTH, 0, 0, LCD_WIDTH,
+                        shown);
+        lcd_set_foreground(GRID_GREY);
+        lcd_fillrect(0, shown, LCD_WIDTH, hidden[k]);
+        lcd_update_rect(0, 0, LCD_WIDTH, TITLE_ROWS);
+    }
+    sleep(HZ / 20);
+    lcd_bitmap(bar, 0, 0, LCD_WIDTH, TITLE_ROWS);
+    lcd_update_rect(0, 0, LCD_WIDTH, TITLE_ROWS);
+    ui_motion_end(&motion);
+}
+
+/* Stock takes the frame off the selection, then slides the menu's list in
+ * from the left over the grid, its shadow on the grid. The pane follows
+ * when the list draws itself. */
+static void grid_exit(const struct albums *a, const char *title, int sel,
+                      int first)
+{
+    static const uint16_t edges[] = { 36, 81, 116, 141, 155, 160 };
+    draw_grid(a, title, sel, first, false);
+    lcd_update();
+    if (!global_settings.animations)
+        return;
+    fb_data *grid = a->view;
+    memcpy(grid, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
+    int width = a->menu_split ? MENU_PANE_X : LCD_WIDTH;
+    struct ui_motion motion = ui_motion_begin("photo-grid-pop");
+    long start = current_tick;
+    for (unsigned k = 0; k < ARRAYLEN(edges); k++)
+    {
+        long frame = start + (k + 1) * HZ / 30;
+        if (TIME_BEFORE(current_tick, frame))
+            sleep(frame - current_tick);
+        int edge = edges[k] * width / MENU_PANE_X;
+        for (int y = 0; y < LCD_HEIGHT; y++)
+        {
+            fb_data *row = FBADDR(0, y);
+            memcpy(row, a->menu + y * LCD_WIDTH + width - edge,
+                   edge * sizeof(fb_data));
+            memcpy(row + edge, grid + y * LCD_WIDTH + edge,
+                   (LCD_WIDTH - edge) * sizeof(fb_data));
+            menu_pane_shadow(row, y, edge, LCD_WIDTH);
+        }
+        lcd_update();
+    }
+    ui_motion_end(&motion);
 }
 
 static bool photo_grid(const struct albums *a, const char *title)
@@ -1021,8 +1126,7 @@ static bool photo_grid(const struct albums *a, const char *title)
     viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
     lcd_set_viewport(NULL);
     bool usb = false;
-    draw_grid(a, title, sel, first);
-    lcd_update();
+    grid_entry(a, title);
     for (;;)
     {
         bool back = false;
@@ -1033,7 +1137,10 @@ static bool photo_grid(const struct albums *a, const char *title)
         int button;
         get_action_statuscode(&button);
         if (action == ACTION_STD_CANCEL)
+        {
+            grid_exit(a, title, sel, first);
             break;
+        }
         if (default_event_handler(action) == SYS_USB_CONNECTED)
         {
             usb = true;
@@ -1074,7 +1181,7 @@ static bool photo_grid(const struct albums *a, const char *title)
             return_to_grid(a, title, sel, first);
         else
         {
-            draw_grid(a, title, sel, first);
+            draw_grid(a, title, sel, first, true);
             lcd_update();
         }
     }
@@ -1087,20 +1194,24 @@ static bool photo_grid(const struct albums *a, const char *title)
     return usb;
 }
 
+/* Under the stock menu tree LEFT, RIGHT and PLAY neither open nor leave a
+ * row, as on stock; other trees leave them their usual meaning. */
 int stock_media_list_action(int action, struct gui_synclist *lists)
 {
     (void)lists;
     int button;
     get_action_statuscode(&button);
-    if ((button & (BUTTON_LEFT | BUTTON_RIGHT | BUTTON_PLAY)) &&
+    if (ui_wheel_navigation() &&
+        (button & (BUTTON_LEFT | BUTTON_RIGHT | BUTTON_PLAY)) &&
         (action == ACTION_STD_OK || action == ACTION_STD_CANCEL ||
          action == ACTION_TREE_WPS))
         return ACTION_NONE;
     return action;
 }
 
-/* The Photos menu's pane: the main menu's cover slideshow, as on stock, or
- * stock's No Photos picture when the library has no photos. */
+/* The Photos menu's pane: photos of the highlighted album, the library's
+ * for All Photos and Settings, or stock's No Photos picture when the
+ * library has no photos. */
 static void paint_no_photos(struct stock_canvas *band)
 {
     stock_art_mask(band, STOCK_ART_NO_CONTENT_PHOTO_PREVIEW, 178, 44,
@@ -1109,11 +1220,12 @@ static void paint_no_photos(struct stock_canvas *band)
 
 static enum list_pane_kind photos_pane(int row, void *data, int *art)
 {
-    (void)row;
-    (void)art;
     const struct albums *a = data;
     if (a->indexed || a->loose.file_count)
-        return LIST_PANE_ART;
+    {
+        *art = row > 1 ? row : 0;
+        return LIST_PANE_PHOTO;
+    }
     struct menu_pane_content c = {
         .kind = LIST_PANE_PICTURE, .art = -1, .baseline = 179,
         .paint = paint_no_photos,
@@ -1121,6 +1233,47 @@ static enum list_pane_kind photos_pane(int row, void *data, int *art)
     strlcpy(c.title, str(LANG_FRUIT_NO_PHOTOS), sizeof(c.title));
     menu_pane_set_picture(&c);
     return LIST_PANE_PICTURE;
+}
+
+static struct albums *pane_albums;
+
+/* menu_pane's next(): a photo of the menu row `set` other than the last,
+ * read at once from the Photo Database, or asked of photo_thumbs.c and
+ * collected on a later call. Only the menu is on screen, so the open album
+ * and the view are free to use. */
+static bool pane_next(int set)
+{
+    struct albums *a = pane_albums;
+    if (a->pane_file >= 0 && a->pane_set == set)
+    {
+        enum photo_thumb_state state =
+            photo_thumbs_screen_take(a->pane_file, a->pane);
+        if (state == PHOTO_THUMB_PENDING)
+            return false;
+        a->pane_file = -1;
+        return state == PHOTO_THUMB_READY;
+    }
+    read_album(a, set);
+    int total = photo_total(a);
+    if (!total)
+        return false;
+    int pick = rand() % total;
+    if (pick == a->pane_last && total > 1)
+        pick = (pick + 1) % total;
+    a->pane_last = pick;
+    int file = slide_file(a, pick);
+    if (file < 0)
+    {
+        if (!stock_photo_pixels(&a->db, a->slides[pick], LCD_WIDTH,
+                                LCD_HEIGHT, a->view))
+            return false;
+        memcpy(a->pane, a->view, PHOTO_PIXELS * sizeof(fb_data));
+        return true;
+    }
+    a->pane_set = set;
+    a->pane_file = file;
+    photo_thumbs_prefetch(file);
+    return false;
 }
 
 static int photos_list_action(int action, struct gui_synclist *lists)
@@ -1166,10 +1319,14 @@ int stock_photos_screen(void)
     unsigned char *end = arena + size;
     bool menu_back = action_set_menu_back(true);
 
-    /* Three screens, the thumbnail cache, the Photo Database's tables, the
-     * loose pictures, and a slideshow's order for every photo */
+    /* Three screens, the pane's and the menu's, the thumbnail cache, the
+     * Photo Database's tables, the loose pictures, and a slideshow's order
+     * for every photo */
     a.view = (fb_data *)ALIGN_UP((uintptr_t)arena, 8);
-    unsigned char *thumbs = (unsigned char *)(a.view + 3 * PHOTO_PIXELS);
+    a.pane = a.view + 3 * PHOTO_PIXELS;
+    a.menu = a.pane + PHOTO_PIXELS;
+    a.pane_file = a.pane_last = -1;
+    unsigned char *thumbs = (unsigned char *)(a.menu + PHOTO_PIXELS);
     unsigned char *p = read_database(&a, thumbs + photo_thumbs_bytes(), end);
     size_t left = end - p;
     size_t order = left / 6 + a.photo_count * sizeof(int) + 16;
@@ -1177,6 +1334,9 @@ int stock_photos_screen(void)
         p += photo_folders_scan(&a.loose, p, left - order, a.indexed);
     a.order = (int *)ALIGN_UP((uintptr_t)p, sizeof(int));
     photo_thumbs_open(&a.loose, thumbs, photo_thumbs_bytes());
+    struct menu_pane_photos pane = { a.pane, pane_next };
+    pane_albums = &a;
+    menu_pane_set_photos(&pane);
 
     struct ui_scene scene = {0};
     ui_scene_open_page(&scene, "photos-push");
@@ -1199,21 +1359,19 @@ int stock_photos_screen(void)
             rc = stock_photos_settings();
         else
         {
-            /* Stock leaves an empty library's menu up. It cuts to the grid
-             * and pushes the menu back in when the grid is left. */
+            /* Stock leaves an empty library's menu up */
             char title[96];
-            struct ui_scene grid_scene = {0};
             read_album(&a, info.selection);
-            if (photo_total(&a))
-                ui_scene_capture_page(&grid_scene);
+            a.menu_split = menu_pane_themed();
+            memcpy(a.menu, FBADDR(0, 0), PHOTO_PIXELS * sizeof(fb_data));
             if (photo_grid(&a, album_name(info.selection, &a, title, sizeof(title))))
                 rc = MENU_ATTACHED_USB;
-            ui_scene_close_modal(&grid_scene, !rc, "photos-grid-pop");
         }
         if (rc)
             break;
     }
     ui_scene_close_modal(&scene, !rc, "photos-pop");
+    menu_pane_set_photos(NULL);
     photo_thumbs_close();
     stock_db_close(&a.db);
     app_release_buffer(ARENA_OWNER);

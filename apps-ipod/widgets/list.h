@@ -164,6 +164,7 @@ enum list_pane_kind
     LIST_PANE_DEVICE,           /* the player's name and free space */
     LIST_PANE_SHUFFLE,          /* the player's name and song count */
     LIST_PANE_PICTURE,          /* what menu_pane_set_picture() last gave */
+    LIST_PANE_PHOTO,            /* photos from menu_pane_set_photos() */
 };
 typedef enum list_pane_kind list_get_pane(int selected_item, void * data,
                                           int *art);

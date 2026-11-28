@@ -175,3 +175,7 @@
 - **Lyrics shortcut:** On Now Playing, hold PLAY for one second and release
   to open Lyrics. Repeat to return. SELECT+PLAY switches between Agents and
   Now Playing. The two configurable Now Playing shortcut rows are gone.
+
+- **Photos slideshows** now start with the original iPod's settings: 3
+  seconds a picture, Random transitions, and PAL for TV Signal. If you
+  saved your own values, your player keeps them.

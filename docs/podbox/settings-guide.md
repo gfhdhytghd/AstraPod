@@ -279,13 +279,13 @@ Hold Select on the recorder to open its settings.
 
 | Setting | What it does | Default | |
 |---|---|---|---|
-| Time Per Slide | Sets the time between pictures. Choose Manual to advance with the wheel. | 5 Seconds | |
+| Time Per Slide | Sets the time between pictures. Choose Manual to advance with the wheel. | 3 Seconds | |
 | Music | Off pauses music during the slideshow. Now Playing uses the current queue. On-The-Go reads the queue saved by the stock firmware. | Off | |
 | Repeat | Starts the photo slideshow again after the final picture. | Off | |
 | Shuffle Photos | Shows pictures in random order during a slideshow. | Off | |
-| Transitions | Changes how the next picture appears. Choose None, Cross Fade, Fade To Black, Zoom Out, Wipe Across, or Wipe Center. | None | |
+| Transitions | Changes how the next picture appears. Choose None, Cross Fade, Fade To Black, Zoom Out, Wipe Across, Wipe Center, or Random. | Random | |
 | TV Out | Stores the TV Out preference. This firmware displays media on the iPod screen. | Off | |
-| TV Signal | Stores the preferred TV signal format. This firmware displays media on the iPod screen. | NTSC | |
+| TV Signal | Stores the preferred TV signal format. This firmware displays media on the iPod screen. | PAL | |
 
 ### Library — Videos
 

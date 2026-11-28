@@ -536,7 +536,7 @@ Starts the photo slideshow again after the final picture.
 
 [photo transition]
 Changes how the next picture appears. Choose None, Cross Fade, Fade To
-Black, Zoom Out, Wipe Across, or Wipe Center.
+Black, Zoom Out, Wipe Across, Wipe Center, or Random.
 
 [photo music]
 Off pauses music during the slideshow. Now Playing uses the

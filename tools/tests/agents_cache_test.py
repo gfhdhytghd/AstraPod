@@ -37,7 +37,7 @@ struct gui_synclist {int start_item[1];};
 static struct row cache_row;
 static int cache_top=4,frames,round_trips,resets;
 static uint32_t cache_generation=7,generation=7;
-static bool cache_valid=true,pending_answer,was_connected,detail_ready;
+static bool cache_valid=true,pending_answer,was_connected,link_seen,detail_ready;
 static bool agents_visited=true,agents_foreground,received_projects,select_held,select_down;
 static int page_scene;
 static bool talk_held,talk_shown,talk_discarded,talk_req_up,talk_failed,talk_t3,focus_for_detail;

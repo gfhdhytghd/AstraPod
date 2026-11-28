@@ -405,7 +405,6 @@ void hang_catch_fiq_show(void)
                  : (uint32_t)_irqstackend;
     uint32_t calls[8];
     unsigned int y = 1;
-    int n = stack_scan(freeze.sp, top, calls, 8);
     char name[8];
 
     panic_screen_enter();
@@ -423,6 +422,8 @@ void hang_catch_fiq_show(void)
         .lr = freeze.lr, .status = freeze.cpsr,
     });
 #endif
+    /* The durable record precedes any reads from the interrupted stack. */
+    int n = stack_scan(freeze.sp, top, calls, 8);
     lcd_set_viewport(NULL);
 #if LCD_DEPTH > 1
     lcd_set_backdrop(NULL);

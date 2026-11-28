@@ -157,6 +157,7 @@ class State:
     questions: int
     tab: str
     label: str
+    issue: str
 
     @classmethod
     def decode(cls, fields):
@@ -172,6 +173,7 @@ class Player:
         self.state = None
         self.tick = ""
         self.tick_at = 0
+        self.respond = True
 
     def __enter__(self):
         self.peer, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -223,6 +225,8 @@ class Player:
         if key in (":classic", ":scrim", ":fruit-company", ":fruit-company-ultra"):
             fields[0] = key[1:]
             self.state = State.decode(fields)
+        elif not self.respond:
+            return
         elif key == "hr":
             self.send("HR\t1\tFixture computer")
         elif key == "tc":
@@ -519,6 +523,47 @@ def run_theme(binary, output, resources, theme):
     return f"{theme}: Projects, Threads, Detail, Approval, All Options, Actions, Confirm, Usage, WPS chord PASS"
 
 
+def run_outage(binary, output, resources):
+    directory = output / "outage"
+    disk = prepare_disk(directory, binary.parent, resources, "fruit-company")
+    with Player(binary, directory, disk) as player:
+        player.expect(lambda: player.state and not player.state.issue and
+                      player.state.label == "Fixture project", "connected project list")
+        player.choose("Fixture project")
+        player.expect_view("threads")
+        player.choose("[Active]   All", direction="up")
+        player.expect(lambda: player.state.rows == 3, "two All thread rows")
+        player.respond = False
+        player.tick = ""
+        player.send("!b")
+        player.tap("down")
+        player.expect(lambda: player.state.label == "Older thread",
+                      "wheel while sends return BUSY")
+        player.tap("up")
+        player.wait(6.4)
+        player.expect(lambda: player.state.issue.startswith("No update for"),
+                      "stalled peer status")
+        player.tap("down")
+        player.expect(lambda: player.state.label == "Older thread",
+                      "wheel under sustained backpressure")
+        player.send("!d")
+        player.expect(lambda: player.state.issue == "Computer disconnected" and
+                      player.state.view == "threads", "disconnected T3 list")
+        player.tap("up")
+        player.expect(lambda: player.state.label == "Fixture thread",
+                      "wheel while disconnected")
+        mark = len(player.messages)
+        player.respond = True
+        player.send("!r")
+        player.expect_wire(mark, "sub", "t3p1", "all")
+        player.expect(lambda: not player.state.issue and
+                      player.state.label == "Fixture thread", "same view and row after reconnect")
+        player.tap("down")
+        player.expect(lambda: player.state.label == "Older thread",
+                      "wheel after reconnect")
+    return "T3 wheel, BUSY, heartbeat stall, session loss and resubscribe PASS"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
@@ -526,10 +571,14 @@ def main():
     parser.add_argument("--resources", required=True, type=Path, help="built .rockbox resource directory")
     parser.add_argument("--simulator", type=Path, help="reuse an instrumented binary from a previous run")
     parser.add_argument("--theme", choices=THEMES, action="append")
+    parser.add_argument("--outage", action="store_true")
     args = parser.parse_args()
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
     binary = args.simulator.resolve() if args.simulator else build_simulator(args.output, args.jobs)
+    if args.outage:
+        print(run_outage(binary, args.output, args.resources.resolve()), flush=True)
+        return
     for theme in args.theme or THEMES:
         print(run_theme(binary, args.output, args.resources.resolve(), theme), flush=True)
 

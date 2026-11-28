@@ -684,6 +684,7 @@ int hr_model_apply(struct hr_model *m, const char *data, unsigned int length)
                  (strcmp(f[2], "0") && strcmp(f[2], "1")) ||
                  (strcmp(f[3], "0") && strcmp(f[3], "1")))
             return 0;
+        m->tick_seen = true;
         m->herdr_age = age;
         m->herdr_ok = f[2][0] == '1';
         m->t3_health_known = n == 4;
@@ -768,6 +769,21 @@ const struct hr_question *hr_model_next_popup(const struct hr_model *m,
 void hr_model_reset(struct hr_model *m)
 {
     memset(m, 0, sizeof *m);
+}
+
+void hr_model_link_lost(struct hr_model *m)
+{
+    m->hello = false;
+    m->tick_seen = false;
+    m->herdr_ok = false;
+    m->t3_health_known = false;
+    m->t3_ok = false;
+    m->nquestions = 0;
+    m->actions_target[0] = '\0';
+    m->actions_valid = false;
+    m->nactions = 0;
+    m->result_new = false;
+    m->voice = 0;
 }
 
 const struct hr_question *hr_model_question_for(const struct hr_model *m,

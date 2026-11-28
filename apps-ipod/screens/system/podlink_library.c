@@ -100,6 +100,7 @@ static bool sample_path(const char *path)
 {
     return !strcmp(path, ROCK_VIDEO_LOG) ||
            !strcmp(path, ROCKBOX_DIR "/crumbs-last.txt") ||
+           !strcmp(path, ROCKBOX_DIR "/crash-native.txt") ||
            !strcmp(path, ROCKBOX_DIR "/lcd-te-diag.txt") ||
            !strcmp(path, ROCKBOX_DIR "/ui-perf.txt") ||
            !strcmp(path, ROCKBOX_DIR "/lyrics-perf.txt") ||

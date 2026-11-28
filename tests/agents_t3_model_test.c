@@ -86,10 +86,38 @@ static void test_actions(void)
     assert(apply("K\tw1:p2\t0") == 'K' && model.nactions == 0);
 }
 
+static void test_link_replacement(void)
+{
+    hr_model_reset(&model);
+    assert(apply("HR\t1\tComputer") == 'H');
+    assert(apply("W\t1\n#\tT3\nt3p1\t-\t0\t1\t0\t0\tProject") == 'W');
+    assert(apply("A\tt3p1\t1\nt3t1\tcodex\tw\t0\tThread\tModel\tSummary") == 'A');
+    assert(apply("T\t0\t0\t1") == 'T');
+    strcpy(model.actions_target, "t3t1");
+    assert(apply("K\tt3t1\t1\ninterrupt\tInterrupt\t1") == 'K');
+    assert(apply("V\ttalk") == 'V');
+    assert(apply("R\t1\tok") == 'R');
+    model.nquestions = 1;
+
+    hr_model_link_lost(&model);
+    assert(!model.hello && !model.tick_seen && !model.t3_health_known);
+    assert(!model.nquestions && !model.voice && !model.result_new);
+    assert(!model.actions_valid && !model.actions_target[0] && !model.nactions);
+    assert(model.nws == 1 && !strcmp(model.ws[0].id, "t3p1"));
+    assert(model.agents_valid && model.nagents == 1 &&
+           !strcmp(model.agents[0].pane, "t3t1"));
+
+    assert(apply("HR\t1\tComputer") == 'H');
+    assert(apply("T\t0\t0\t0") == 'T');
+    assert(model.hello && model.tick_seen && model.t3_health_known && !model.t3_ok);
+    assert(apply("T\t0\t0\t1") == 'T' && model.t3_ok);
+}
+
 int main(void)
 {
     test_workspaces();
     test_actions();
+    test_link_replacement();
     puts("agents_t3_model_test: all passed");
     return 0;
 }

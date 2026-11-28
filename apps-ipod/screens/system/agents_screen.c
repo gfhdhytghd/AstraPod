@@ -171,7 +171,7 @@ static char focus_req[8];       /* the fw, fp or ft awaiting its result */
 static long focus_until;
 static bool focus_for_detail;   /* that request is the detail view's fp */
 static long last_message;
-static bool was_connected;
+static bool was_connected, link_seen;
 _Static_assert(sizeof(struct hr_model) <= 32 * 1024, "Agents model cache budget");
 static bool cache_valid;
 static uint32_t cache_generation;
@@ -402,6 +402,17 @@ static void subscribe_detail(const char *pane)
     char *slot = outbox_slot();
     if (slot)
         snprintf(slot, sizeof outbox[0], "det\t%s", pane[0] ? pane : "-");
+}
+
+static void queue_handshake(void)
+{
+    if (nout > OUTBOX - 4 - (talk_held ? 1 : 0))
+        return;
+    strcpy(outbox_slot(), "hr\t1");
+    strcpy(outbox_slot(), "tc\t1");
+    strcpy(outbox_slot(), "tc\t2");
+    strcpy(outbox_slot(), "qx\t1");
+    agents_background_handshake_sent();
 }
 
 static void flush_outbox(void)
@@ -865,8 +876,10 @@ static const char *trouble(char *buf, size_t size)
 {
     switch (podlink_state())
     {
-        case PODLINK_WAIT_USB: return "Connect USB to computer";
-        case PODLINK_OPENING: return "Computer not connected";
+        case PODLINK_WAIT_USB:
+            return link_seen ? "Computer disconnected" : "Connect USB to computer";
+        case PODLINK_OPENING:
+            return link_seen ? "Computer disconnected" : "Computer not connected";
         case PODLINK_CONNECTED: break;
         default: return "Computer disconnected";
     }
@@ -880,7 +893,7 @@ static const char *trouble(char *buf, size_t size)
                  (current_tick - last_message) / HZ);
         return buf;
     }
-    if (!model.herdr_ok && !t3_mode())
+    if (model.tick_seen && !model.herdr_ok && !t3_mode())
         return "Computer service not running";
     return NULL;
 }
@@ -897,7 +910,7 @@ static const char *trouble_hint(void)
         return "Check the AstraPod app on your computer";
     if (t3_unavailable())
         return "Open T3 Code on your computer";
-    if (!model.herdr_ok && !t3_mode())
+    if (model.tick_seen && !model.herdr_ok && !t3_mode())
         return "Check the AstraPod app on your computer";
     return NULL;
 }
@@ -2016,7 +2029,8 @@ static void draw_detail(struct gui_synclist *list)
             text_at(d, 0, y, ink.warn, fit(line, sizeof line, message, vp->width));
             y += USE_LINE;
         }
-        if (hr_model_question_for(&model, detail_pane) || (have && det->input[0]))
+        if (!t_trouble && (hr_model_question_for(&model, detail_pane) ||
+                           (have && det->input[0])))
         {
             d->set_foreground(ui_theme_rgb565(UI_COLOR_LIST_TINT));
             d->fillrect(0, y, vp->width, 24);
@@ -2870,7 +2884,8 @@ static void reset_focus(void)
 static void send_wanted_focus(void)
 {
     if (!focus_want[0] || TIME_BEFORE(current_tick, focus_at) ||
-        focus_req[0] || question_id[0] ||
+        podlink_state() != PODLINK_CONNECTED || !model.hello ||
+        link_stale() || t3_unavailable() || focus_req[0] || question_id[0] ||
         talk_held || talk_req[0])
         return;
     if (strcmp(focus_want, focus_done))
@@ -3455,12 +3470,8 @@ static void activate(struct gui_synclist *list)
             open_detail(list, &model.agents[r->index]);
             return;
         case ROW_RETRY:
-        {
-            char *slot = outbox_slot();
-            if (slot)
-                strcpy(slot, "hr\t1");
+            queue_handshake();
             return;
-        }
         case ROW_USAGE:
             open_usage(list);
             return;
@@ -3516,56 +3527,37 @@ static bool poll_link(void)
     bool changed = false;
     bool connected = podlink_state() == PODLINK_CONNECTED;
     uint32_t generation = podlink_generation();
-    if (generation != cache_generation)
+    bool replaced = generation != cache_generation;
+    if (replaced)
     {
         cache_valid = false;
-        was_connected = false;
-        model.nquestions = 0;
-        memset(&popped, 0, sizeof popped);
         cache_generation = generation;
     }
-    if (connected != was_connected)
+    if (replaced || connected != was_connected)
     {
 #ifdef HAVE_CRUMBS
         crumb(CR_AGENTS_STEP, 0x10 | connected);
 #endif
         was_connected = connected;
-        model.hello = false;
-        model.t3_health_known = false;
-        if (!connected)
-        {
-            model.nquestions = 0;
-            memset(&popped, 0, sizeof popped);
-        }
-        model.voice = 0;
+        hr_model_link_lost(&model);
+        memset(&popped, 0, sizeof popped);
         nout = 0;
         pending_req[0] = '\0';
-        focus_req[0] = '\0';
-        model.actions_target[0] = '\0';
-        model.actions_valid = false;
-        action_req[0] = '\0';
+        pending_answer = question_custom = question_closing = false;
+        focus_req[0] = action_req[0] = '\0';
         reset_focus();
         /* The computer stops recording when the link goes */
         if (talk_held || talk_req[0])
             talk_result("Computer disconnected", true);
         talk_held = talk_toggle = talk_select = false;
-        if (!connected)
-            agents_background_disconnected();
+        agents_background_disconnected();
         agents_shortcut_talking(false);
         talk_req[0] = '\0';
         t3_talk_start[0] = '\0';
         forget_keys();
         if (connected)
         {
-            char *slot = outbox_slot();
-            if (slot) strcpy(slot, "hr\t1");
-            slot = outbox_slot();
-            if (slot) strcpy(slot, "tc\t1");
-            slot = outbox_slot();
-            if (slot) strcpy(slot, "tc\t2");
-            slot = outbox_slot();
-            if (slot) strcpy(slot, "qx\t1");
-            agents_background_handshake_sent();
+            queue_handshake();
             if (space_id[0])
                 subscribe(space_id, space_tab);
             if (detail_pane[0])
@@ -3598,6 +3590,8 @@ static bool poll_link(void)
         if (!type)
             continue;
         last_message = current_tick;
+        if (type == 'H')
+            link_seen = true;
         agents_background_update(&model, type, true);
         if (type == 'T' && (health_known != model.t3_health_known ||
                             health_ok != model.t3_ok))
@@ -3832,9 +3826,7 @@ static void activate_select(struct gui_synclist *list)
             if (t3_unavailable() &&
                 (sel < 0 || sel >= nrows || rows[sel].kind != ROW_USAGE))
             {
-                char *slot = outbox_slot();
-                if (slot)
-                    strcpy(slot, "hr\t1");
+                queue_handshake();
                 return;
             }
             activate(list);
@@ -4042,6 +4034,7 @@ static int agents_run(void)
     }
     bool preloaded = cache_valid && !agents_visited && model.hello &&
                      podlink_state() == PODLINK_CONNECTED;
+    link_seen = cache_valid && model.hello;
     bool resume = cache_valid && agents_visited &&
                   cache_generation == podlink_generation() &&
                   podlink_state() == PODLINK_CONNECTED;

@@ -13,10 +13,12 @@
                 [VIEW_INPUT] = "input", [VIEW_ACTIONS] = "actions",
                 [VIEW_CONFIRM] = "confirm",
             };
-            snprintf(state, sizeof state, "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s",
+            char status[48];
+            const char *issue = trouble(status, sizeof status);
+            snprintf(state, sizeof state, "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s",
                      global_settings.native_theme, view_names[view], selected, nrows,
                      detail_scroll, detail_scroll_max, talk_held, model.nquestions,
-                     space_tab, label ? label : "");
+                     space_tab, label ? label : "", issue ? issue : "");
             if (strcmp(prior, state))
             {
                 strcpy(prior, state);

@@ -318,6 +318,7 @@ int main(int argc, char **argv)
     check_sample(ROCKBOX_DIR "/video-probe.log");
     command("MS3 STREAM SAMPLE " ROCKBOX_DIR "/other.log");
     assert(!strcmp(reply, "MS3 ERR sample path"));
+    check_sample(ROCKBOX_DIR "/crash-native.txt");
     command("MS3 STREAM SAMPLE /outside.flac");
     assert(!strcmp(reply, "MS3 ERR sample path"));
     command("MS3 STREAM SAMPLE /Music/PodLink/../outside.flac");

@@ -174,6 +174,9 @@ struct plugin_api {
 #undef ROCK_DIRECT
 };
 
+/* rb->piezo_play is present. */
+#define ROCK_PIEZO_PLAY 1
+
 #define ROCK_IMAGE_LARGE_STACK (1u << 0)
 #define ROCK_IMAGE_IRAM        (1u << 1)
 

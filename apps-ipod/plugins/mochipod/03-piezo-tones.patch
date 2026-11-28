@@ -1,16 +1,35 @@
 Play the tones on the click-wheel piezo instead of mixing them into the
 headphone output. The piezo has no volume, so the sound level setting
-no longer changes how loud they are; mute still silences them.
+no longer changes how loud they are; mute still silences them. Stock
+Rockbox builds keep beep_play. Upstream: colliderkkz/mochipod piezo-tones.
 
 diff --git a/src/platform/rockbox.c b/src/platform/rockbox.c
 --- a/src/platform/rockbox.c
 +++ b/src/platform/rockbox.c
-@@ -331,7 +331,7 @@
+@@ -62,6 +62,17 @@
+ static bool persist(void) { return commit_pet(&pet); }
+ #include "tray.inc"
+ 
++/* AstraPod plays the tones on the click-wheel piezo, which has no volume.
++   Stock Rockbox mixes them into the headphone output. */
++static void play_tone(unsigned hz, unsigned ms)
++{
++#if defined(ASTRAPOD_PLUGIN_H) && defined(ROCK_PIEZO_PLAY)
++    rb->piezo_play(hz, ms);
++#else
++    rb->beep_play(hz, ms, 400u<<pet.sound_level);
++#endif
++}
++
+ static void on_system_exit(void *ignored)
+ {
+     (void)ignored;
+@@ -331,7 +342,7 @@
              if (pet.muted) sound=(Sound){0};
              if (sound.cue) {
                  unsigned hz=sound_note(&sound);
 -                if (hz) rb->beep_play(hz, sound_duration(sound.cue), 400u<<pet.sound_level);
-+                if (hz) rb->piezo_play(hz, sound_duration(sound.cue));
++                if (hz) play_tone(hz, sound_duration(sound.cue));
              }
              if (redraw || invalidate_lcd || last_minute!=pet.last || ui.page!=before_tick.page ||
                  ui.page==HOME || ui.page==PLAYING || ui.page==WEDDING || ui.page==NOTICE ||

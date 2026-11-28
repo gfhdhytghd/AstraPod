@@ -2880,7 +2880,9 @@ static bool repaint_waiting(struct native_list *render,
         struct ui_rect row = slot_row(render, g, slot);
         if (!render->shown.skipped[slot] || row.height <= 0)
             continue;
-        if (rows + row.height > REPAIR_ROWS)
+        /* A single tall row must make progress even if it exceeds the
+         * normal per-frame budget. */
+        if (rows && rows + row.height > REPAIR_ROWS)
             return true;
         render->page.damage = row;
         ui_page_paint(&render->page);
@@ -3694,7 +3696,13 @@ int list_render_timeout(const struct gui_synclist *list, int timeout)
 {
     int delay = motion_deadline(list, true);
     if (delay != TIMEOUT_BLOCK && (timeout == TIMEOUT_BLOCK || timeout > delay))
+    {
+        /* An overdue repaint can consume another frame before returning.
+         * Give the glyph worker and other threads a turn between paints. */
+        if (delay == TIMEOUT_NOBLOCK)
+            yield();
         return delay;
+    }
     return timeout;
 }
 

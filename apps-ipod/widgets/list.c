@@ -958,7 +958,7 @@ bool list_do_action(int context, int timeout,
         ui_flush_dirty();
     if (*action == ACTION_NONE)
     {
-        if (list_render_motion_due(lists))
+        if (!handled && list_render_motion_due(lists))
             draw_due(lists);
         if (!gui_synclist_moving(lists))
             ui_idle_list_present();

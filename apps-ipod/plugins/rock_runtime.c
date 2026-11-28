@@ -1,5 +1,6 @@
 /* AstraPod foreground plugin runtime. GNU GPL version 2 or later. */
 #include "plugins/rock_compat.h"
+#include "plugins/rock_video_log.h"
 #include "plugins/app_tray.h"
 #include "plugins/rock_iram.h"
 #include "plugins/rock_iram_layout.h"
@@ -55,6 +56,7 @@ bool rock_host_header_valid(const struct plugin_header *header);
 #define ROCK_BUFFER_ALIGNMENT 8
 #define ROCK_VIDEO_MODULE PLUGIN_APPS_DIR "/h264_player.rock"
 #define ROCK_HEAP_LIMIT (2 * 1024 * 1024)
+#define ROCK_VIDEO_HEAP_LIMIT (10u * 1024 * 1024)
 
 static const unsigned char fingerprint[] = ROCK_FINGERPRINT;
 static const char arena_owner[] = "Rockbox plugin";
@@ -64,6 +66,9 @@ static size_t tail_size;
 static int engine_heap;
 static unsigned int foreground_owner;
 static bool usb_taken;
+#ifdef HAVE_HW_H264
+static const struct rock_video_request *current_video;
+#endif
 static unsigned int mpeg_owner;
 static void (*mpeg_drain)(void);
 
@@ -537,7 +542,7 @@ static void *rock_claim_video_scratch(size_t bytes)
 {
     /* The module's VPU, AAC and PCM buffers share one pinned allocation. */
     if (foreground_owner != thread_self() || engine_heap ||
-        !bytes || bytes > 10 * 1024 * 1024)
+        !bytes || bytes > ROCK_VIDEO_HEAP_LIMIT)
         return NULL;
 
     int handle = core_alloc(bytes);
@@ -564,9 +569,29 @@ static void *rock_claim_scratch(size_t minimum, size_t preferred,
 #ifdef HAVE_HW_H264
     if (filename && !strcmp(filename, ROCK_VIDEO_MODULE))
     {
+        size_t free_bytes = core_available();
+        size_t largest = core_allocatable();
         void *scratch = rock_claim_video_scratch(minimum);
         if (scratch)
             *granted = minimum;
+        if (!scratch || (current_video && current_video->probe))
+        {
+            int fd = rock_open(ROCK_VIDEO_LOG, O_WRONLY | O_CREAT | O_APPEND);
+            if (fd >= 0)
+            {
+                const char *path = current_video && current_video->path ?
+                    current_video->path : "(file picker)";
+                rock_fdprintf(fd, "\n%s stage=core-alloc code=%d "
+                              "free=%lu largest=%lu limit=%lu "
+                              "requested=%lu granted=%lu\n",
+                              path, scratch ? 0 : -1,
+                              (unsigned long)free_bytes, (unsigned long)largest,
+                              (unsigned long)ROCK_VIDEO_HEAP_LIMIT,
+                              (unsigned long)minimum,
+                              (unsigned long)*granted);
+                rock_close(fd);
+            }
+        }
         return scratch;
     }
 #endif
@@ -1121,7 +1146,14 @@ static int invoke_module(void *opaque)
     const void *parameter = call->file;
     if (video)
         parameter = call->video ? call->video : &fallback;
+#ifdef HAVE_HW_H264
+    if (video)
+        current_video = parameter;
+#endif
     int result = call->module->entry_point(parameter);
+#ifdef HAVE_HW_H264
+    current_video = NULL;
+#endif
     if (get_current_activity() == ACTIVITY_PLUGIN)
         pop_current_activity_without_refresh();
 #ifdef HAVE_PODLINK_PLUGIN_TEST
@@ -1357,6 +1389,14 @@ int rock_run_from_shell(const char *path)
     return result;
 }
 
+#ifdef HAVE_HW_H264
+int rock_probe_video(const char *path)
+{
+    struct rock_video_request request = {.path = path, .probe = true};
+    return rock_open_foreground(ROCK_VIDEO_MODULE, path, false, true, &request);
+}
+#endif
+
 static size_t rock_video_chapters(const char *path, uint32_t *offsets)
 {
     int handle = core_alloc(sizeof(struct cuesheet));
@@ -1389,6 +1429,17 @@ int rock_open_video(const char *path, const char *title, bool has_previous)
                                       &request);
     if (result == PLUGIN_USB_CONNECTED || result == PLUGIN_GOTO_ROOT)
         return ROCK_VIDEO_USB;
+#ifdef HAVE_HW_H264
+    if (result == PLUGIN_ERROR && !usb_exclusive_storage())
+    {
+        int fd = rock_open(ROCK_VIDEO_LOG, O_WRONLY | O_CREAT | O_APPEND);
+        if (fd >= 0)
+        {
+            rock_fdprintf(fd, "%s stage=foreground-return code=%d\n", path, result);
+            rock_close(fd);
+        }
+    }
+#endif
     return request.result;
 }
 

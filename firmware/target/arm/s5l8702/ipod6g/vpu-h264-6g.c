@@ -40,6 +40,7 @@
 #define PHYS(x)     ((uint32_t)(uintptr_t)S5L8702_PHYSICAL_ADDR(x))
 #define UNCACHED(x) S5L8702_UNCACHED_ADDR(x)
 
+#define MAX_DPB_FRAMES  5  /* four short-term references and one output */
 #define BS_DMA_SIZE     262144
 #define SLICE_DESC_SIZE 320
 #define SLICE_DESC_WORDS 8
@@ -277,7 +278,8 @@ static bool pps_supported(const struct pps *pps)
     return !pps->entropy_coding_mode &&
         pps->num_slice_groups_minus1 == 0 &&
         !pps->weighted_pred_flag && pps->weighted_bipred_idc == 0 &&
-        pps->num_ref_idx_l0_default_active_minus1 == 0 &&
+        pps->num_ref_idx_l0_default_active_minus1 >= 0 &&
+        pps->num_ref_idx_l0_default_active_minus1 < MAX_DPB_FRAMES - 1 &&
         pps->pic_init_qp_minus26 >= -26 &&
         pps->pic_init_qp_minus26 <= 25 &&
         pps->chroma_qp_index_offset >= -12 &&
@@ -597,8 +599,6 @@ static int vpub_decode(uint32_t ctrl_phys, uint32_t desc_phys,
 
 /* ---- Internal context structure ---- */
 
-#define MAX_DPB_FRAMES 5  /* up to 4 reference frames + 1 output */
-
 struct vpu_h264 {
     int max_w, max_h;
     int pic_w, pic_h, pic_wmb, pic_hmb;
@@ -634,7 +634,7 @@ static int apply_sps_dimensions(struct vpu_h264 *v)
         v->sps.log2_max_pic_order_cnt_lsb_minus4 < 0 ||
         v->sps.log2_max_pic_order_cnt_lsb_minus4 > 12 ||
         v->sps.max_num_ref_frames < 0 ||
-        v->sps.max_num_ref_frames > 2 || v->sps.gaps_allowed ||
+        v->sps.max_num_ref_frames >= MAX_DPB_FRAMES || v->sps.gaps_allowed ||
         !v->sps.frame_mbs_only ||
         v->sps.pic_width_in_mbs_minus1 < 0 ||
         v->sps.pic_width_in_mbs_minus1 >= v->max_w / 16 ||
@@ -782,7 +782,7 @@ int vpu_h264_configure(struct vpu_h264 *v,
         parse_sps(&v->sps, &b);
 
         if (b.error || apply_sps_dimensions(v) < 0)
-            return -1;
+            return -2;
         v->have_sps = 1;
         offset += sps_len;
     }
@@ -805,7 +805,7 @@ int vpu_h264_configure(struct vpu_h264 *v,
         b.error = 0;
         parse_pps(&v->pps, &b);
         if (b.error || !pps_supported(&v->pps))
-            return -1;
+            return -3;
         v->have_pps = 1;
         offset += pps_len;
     }
@@ -843,7 +843,8 @@ static int parse_picture_slice(struct vpu_h264 *v, const uint8_t *nalu,
                        slice->nal_ref_idc, &slice->header);
     if (b.error ||
         (slice->header.slice_type != 0 && slice->header.slice_type != 2) ||
-        slice->header.num_ref_idx_l0_active_minus1 != 0 ||
+        slice->header.num_ref_idx_l0_active_minus1 < 0 ||
+        slice->header.num_ref_idx_l0_active_minus1 >= MAX_DPB_FRAMES - 1 ||
         slice->header.ref_list_modification ||
         slice->header.adaptive_ref_marking ||
         slice->header.disable_deblocking_filter_idc < 0 ||
@@ -938,7 +939,7 @@ static int decode_picture(struct vpu_h264 *v, struct picture_slice *slices,
         v->pic_wmb, v->pic_hmb, v->pic_w, slice_count);
     commit_discard_dcache();
     if (ret != 0)
-        return -1;
+        return ret - 1; /* -2 timeout, -3 STATUS1 error. */
 
     v->last_out = out_buf;
     if (slices[0].nal_ref_idc != 0 && v->sps.max_num_ref_frames > 0)
@@ -953,7 +954,14 @@ static int decode_picture(struct vpu_h264 *v, struct picture_slice *slices,
         }
         v->dpb_order[v->dpb_count++] = out_buf;
     }
-    v->cur_out = (out_buf + 1) % MAX_DPB_FRAMES;
+    /* Non-reference pictures can leave older references in the DPB when
+     * the output cursor wraps. Skip their buffers until they are evicted. */
+    do {
+        out_buf = (out_buf + 1) % MAX_DPB_FRAMES;
+        for (i = 0; i < v->dpb_count && v->dpb_order[i] != out_buf; i++)
+            ;
+    } while (i < v->dpb_count);
+    v->cur_out = out_buf;
     return 1;
 }
 

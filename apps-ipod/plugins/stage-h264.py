@@ -22,6 +22,13 @@ def cut(start, end, body=""):
 
 if src.name == "h264_player.c":
     replace('#include "plugin.h"', '#include "plugin.h"\n#include "plugins/rock_compat.h"')
+    replace('enum plugin_status plugin_start', """\
+#ifdef HAVE_HW_H264
+int video_h264_probe(const char *path, void *buffer, size_t size);
+void video_log_budget(const char *path, size_t needed);
+#endif
+
+enum plugin_status plugin_start""")
     replace('    const char *path = parameter;',
             """    struct rock_video_request fallback = {0};
     struct rock_video_request *request = parameter ?
@@ -45,17 +52,26 @@ if src.name == "h264_player.c":
     size_t needed = video_h264_scratch_size(path);
     if (!needed)
     {
-        rb->splash(2 * HZ, "Unsupported MP4/M4V");
-        return PLUGIN_OK;
+        if (!request->probe)
+            rb->splash(2 * HZ, "Unsupported MP4/M4V");
+        return request->probe ? PLUGIN_ERROR : PLUGIN_OK;
     }
     buffer = rb->plugin_claim_scratch(needed, needed, &buffer_size);
+    if (!buffer && !rb->plugin_usb_taken())
+        video_log_budget(path, needed);
 #else
     buffer = NULL;
 #endif
 """)
     replace("    rb->plugin_release_audio_buffer();\n", "")
+    replace('        rb->splash(HZ * 2, "Not enough video memory");',
+            '        if (!request->probe)\n'
+            '            rb->splash(HZ * 2, "Not enough video memory");')
     replace('    result = video_h264_play(path, buffer, buffer_size);',
             '''#ifdef HAVE_HW_H264
+    if (request->probe)
+        return video_h264_probe(path, buffer, buffer_size) < 0 ?
+            PLUGIN_ERROR : PLUGIN_OK;
     const struct video_play_options options = {
         .title = request->title,
         .battery_level = request->battery_level,
@@ -116,16 +132,23 @@ elif src.name == "video_playback.c":
         replace(line + "\n", "")
     cut("    if (demux.audio_format == MAKEFOURCC('m', 'p', '4', 'a') &&",
         "    rb->lcd_set_background", """\
-    if (rb->h264_audio && audio_codec_workspace && pcm_buffer &&
-        demux.audio_codecdata_len > 0 &&
-        video_audio_init(filepath, &demux, audio_codec_workspace,
-                         audio_codec_workspace_size, pcm_buffer,
-                         VIDEO_PCM_BUFFER) == 0)
+    if (demux.audio_format == MAKEFOURCC('m', 'p', '4', 'a'))
     {
-        have_audio = audio_master = true;
-        video_audio_play();
-        if (play_ms)
-            video_audio_seek(play_ms);
+        int audio_code = -1;
+        if (rb->h264_audio && audio_codec_workspace && pcm_buffer &&
+            demux.audio_codecdata_len > 0)
+            audio_code = video_audio_init(filepath, &demux, audio_codec_workspace,
+                                          audio_codec_workspace_size, pcm_buffer,
+                                          VIDEO_PCM_BUFFER);
+        if (audio_code == 0)
+        {
+            have_audio = audio_master = true;
+            video_audio_play();
+            if (play_ms)
+                video_audio_seek(play_ms);
+        }
+        else
+            video_log_event(filepath, "aac-init", audio_code, play_ms);
     }
 
 """)
@@ -134,6 +157,287 @@ elif src.name == "video_playback.c":
             "clock_ms = audio_master ? rb->h264_audio->clock_ms() :")
     replace("(!video_audio_is_active() && video_pcm_empty())",
             "(!video_audio_is_active() && rb->h264_audio->buffered() == 0)")
+    replace('#include "plugin.h"',
+            '#include "plugin.h"\n#include "plugins/rock_video_log.h"')
+    replace("size_t video_h264_scratch_size(const char *path)", r"""
+static int video_log_open(const char *path, const char *stage, int code)
+{
+    int fd = rb->open(ROCK_VIDEO_LOG, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    if (fd >= 0)
+        rb->fdprintf(fd, "\n%s stage=%s code=%d\n", path, stage, code);
+    return fd;
+}
+
+static void video_log_event(const char *path, const char *stage, int code,
+                            uint32_t position_ms)
+{
+    int fd = video_log_open(path, stage, code);
+    if (fd >= 0)
+    {
+        rb->fdprintf(fd, "position_ms=%u\n", (unsigned)position_ms);
+        rb->close(fd);
+    }
+}
+
+static void video_log_layout(int fd, size_t decoder_size, size_t audio_size)
+{
+    rb->fdprintf(fd, "avc=%ux%u coded=%ux%u profile=%u level=%u avcC=%u "
+                 "sps=%u pps=%u nal_length=%u mdat=%u+%u\n",
+                 demux.width, demux.height, (demux.width + 15) & ~15,
+                 (demux.height + 15) & ~15, demux.avc_profile, demux.avc_level,
+                 (unsigned)demux.codecdata_len, demux.num_sps, demux.num_pps,
+                 demux.nalu_len_size, (unsigned)demux.mdat_offset,
+                 (unsigned)demux.mdat_len);
+    rb->fdprintf(fd, "video samples=%u stsz_default=%u stts=%u stsc=%u "
+                 "chunks=%u chunk_words=%u stss=%u window_words=%u "
+                 "table_words(stsz/stsc/chunks/stss)=%u/%u/%u/%u\n",
+                 (unsigned)demux.num_samples, (unsigned)demux.default_sample_size,
+                 (unsigned)demux.num_stts, (unsigned)demux.num_stsc,
+                 (unsigned)demux.num_stco, (unsigned)demux.chunk_words,
+                 (unsigned)demux.num_stss, MP4V_WINDOW_WORDS,
+                 (unsigned)demux.sample_sizes.words, (unsigned)demux.stsc.words,
+                 (unsigned)demux.chunk_offsets.words,
+                 (unsigned)demux.sync_samples.words);
+    rb->fdprintf(fd, "audio samples=%u chunks=%u stsc=%u rate=%u trim=%u\n"
+                 "bytes decoder=%lu sample=%lu scale=%lu aac=%lu pcm=%lu\n",
+                 (unsigned)demux.audio_num_samples, (unsigned)demux.audio_num_stco,
+                 (unsigned)demux.audio_num_stsc, (unsigned)demux.audio_sample_rate,
+                 (unsigned)demux.audio_lead_trim, (unsigned long)decoder_size,
+                 (unsigned long)VIDEO_READ_BUFFER, (unsigned long)VIDEO_OUTPUT_BUFFER,
+                 (unsigned long)audio_size,
+                 audio_size ? (unsigned long)VIDEO_PCM_BUFFER : 0ul);
+}
+
+void video_log_budget(const char *path, size_t needed)
+{
+    int fd = video_log_open(path, "budget", -1);
+    if (fd < 0)
+        return;
+    rb->fdprintf(fd, "requested=%lu granted=0\n", (unsigned long)needed);
+    video_log_layout(fd, rb->hw_h264->buf_size((demux.width + 15) & ~15,
+                                               (demux.height + 15) & ~15),
+                     video_audio_workspace_size(&demux));
+    rb->close(fd);
+}
+
+static int video_sample_read(int fd, uint32_t sample, uint8_t *buffer,
+                             uint32_t *offset, uint32_t *size)
+{
+    if (mp4v_get_sample_offset(fd, &demux, sample, offset, size) < 0)
+        return -1;
+    if (!*size || *size > VIDEO_READ_BUFFER)
+        return -2;
+    if (rb->lseek(fd, *offset, SEEK_SET) < 0)
+        return -3;
+    return rb->read(fd, buffer, *size) == (ssize_t)*size ? 0 : -4;
+}
+
+static const char *video_read_header(int fd)
+{
+    if (fd < 0)
+        return "open";
+    rb->memset(&demux, 0, sizeof(demux));
+    if (mp4v_demux_read(fd, &demux) < 0)
+        return "demux";
+    if (!video_format_supported(&demux))
+        return "format";
+    if (!video_tables_sane(&demux))
+        return "table-counts";
+    return NULL;
+}
+
+size_t video_h264_scratch_size(const char *path)""")
+    replace("""    if (fd < 0)
+        return 0;
+    int result = mp4v_demux_read(fd, &demux);
+    rb->close(fd);
+    if (result < 0 || !video_format_supported(&demux) ||
+        !video_tables_sane(&demux))
+        return 0;""", """    const char *failure = video_read_header(fd);
+    if (fd >= 0)
+        rb->close(fd);
+    if (failure)
+    {
+        int log = video_log_open(path, failure, -1);
+        if (log >= 0)
+        {
+            if (fd >= 0)
+                video_log_layout(log, 0, 0);
+            rb->close(log);
+        }
+        return 0;
+    }""")
+    replace("""    if (!decoder)
+        return 0;""", """    if (!decoder)
+    {
+        int log = video_log_open(path, "decoder-size", -1);
+        if (log >= 0)
+        {
+            video_log_layout(log, 0, 0);
+            rb->close(log);
+        }
+        return 0;
+    }""")
+    replace("""int video_h264_play_named(const char *filepath, void *buffer,
+                          size_t buffer_size,
+                          const struct video_play_options *options)""",
+            """static int video_run(const char *filepath, void *buffer,
+                     size_t buffer_size, const struct video_play_options *options,
+                     bool probe)""")
+    replace("""    size_t decoder_size;
+    size_t audio_codec_workspace_size;""",
+            """    size_t decoder_size = 0;
+    size_t audio_codec_workspace_size = 0;
+    uint32_t offset = 0, size = 0;
+    int code = -1;
+    const char *failure = NULL;""")
+    replace('    if (!options)\n        rb->splash(0, "Loading video...");',
+            '    if (!options && !probe)\n        rb->splash(0, "Loading video...");')
+    cut("    if (video_fd < 0 || mp4v_demux_read", "    pool.cursor", """\
+    failure = video_read_header(video_fd);
+    if (failure)
+    {
+        if (!probe)
+            rb->splash(HZ * 2, "Unsupported MP4/M4V");
+        goto cleanup;
+    }
+
+""")
+    for text, stage in (("Not enough video memory", "pool-layout"),
+                        ("MP4 table parse failed", "index"),
+                        ("Unsupported movie duration", "duration")):
+        replace(f'        rb->splash(HZ * 2, "{text}");',
+                f'        failure = "{stage}";\n'
+                f'        if (!probe)\n            rb->splash(HZ * 2, "{text}");')
+    replace('    if (!options)\n        rb->splash(0, "Loading movie index...");',
+            '    if (!options && !probe)\n        rb->splash(0, "Loading movie index...");')
+    replace('    show_sample = video_resume_load(filepath, demux.num_samples);',
+            '    show_sample = probe ? 0 : video_resume_load(filepath, demux.num_samples);')
+    replace("""    if (!mp4v_find_keyframe(video_fd, &demux, sample, &sample))
+        goto cleanup;""", """    if (!mp4v_find_keyframe(video_fd, &demux, sample, &sample))
+    {
+        failure = "initial-keyframe";
+        goto cleanup;
+    }""")
+    replace('    if (!options)\n        rb->splash(0, "Starting video...");',
+            '    if (!options && !probe)\n        rb->splash(0, "Starting video...");')
+    cut("    if (decoder == NULL ||", "    start_tick =", r"""    code = decoder ? rb->hw_h264->configure(decoder, demux.codecdata,
+                                            demux.codecdata_len) : -1;
+    if (code < 0)
+    {
+        failure = decoder ? "decoder-configure" : "decoder-open";
+        if (!probe)
+            rb->splash(HZ * 2, "H.264 decoder init failed");
+        goto cleanup;
+    }
+    if (probe)
+    {
+        int log = video_log_open(filepath, "decoder-configure", code);
+        if (log < 0)
+            goto cleanup;
+        video_log_layout(log, decoder_size, audio_codec_workspace_size);
+        rb->fdprintf(log, "pool granted=%lu used=%lu\n",
+                     (unsigned long)buffer_size,
+                     (unsigned long)(pool.cursor - (uint8_t *)buffer));
+        uint32_t limit = MIN(demux.num_samples, sample + 8);
+        for (; sample < limit; sample++)
+        {
+            offset = size = 0;
+            code = video_sample_read(video_fd, sample, read_buffer, &offset, &size);
+            if (code < 0)
+            {
+                failure = "sample-read";
+                break;
+            }
+            code = rb->hw_h264->decode_sample(decoder, read_buffer, size,
+                                              demux.nalu_len_size);
+            rb->fdprintf(log, "sample=%u offset=%u bytes=%u decode=%d\n",
+                         (unsigned)sample, (unsigned)offset, (unsigned)size, code);
+            if (code < 0)
+            {
+                failure = "sample-decode";
+                break;
+            }
+        }
+        rb->close(log);
+        if (!failure)
+            result = VIDEO_FINISHED;
+        goto cleanup;
+    }
+
+""")
+    replace("""                if (!mp4v_find_keyframe(video_fd, &demux, show_sample, &sample))
+                    goto cleanup;""",
+            """                if (!mp4v_find_keyframe(video_fd, &demux, show_sample, &sample))
+                {
+                    failure = "seek-keyframe";
+                    code = -1;
+                    goto cleanup;
+                }""")
+    replace("""                if (decoder == NULL ||
+                    rb->hw_h264->configure(decoder, demux.codecdata,
+                                       demux.codecdata_len) < 0)
+                {""",
+            """                code = decoder ? rb->hw_h264->configure(
+                    decoder, demux.codecdata, demux.codecdata_len) : -1;
+                if (code < 0)
+                {
+                    failure = decoder ? "seek-configure" : "seek-open";""")
+    replace("""            {
+                video_audio_stop();
+                have_audio = false;""",
+            """            {
+                if (video_audio_failed())
+                    video_log_event(filepath, "aac-decode", -1, clock_ms);
+                video_audio_stop();
+                have_audio = false;""")
+    replace("        uint32_t offset;\n        uint32_t size;\n", "")
+    cut("        if (mp4v_get_sample_offset(video_fd", "            rb->splash(HZ * 2, \"Video sample",
+        """\
+        offset = size = 0;
+        code = video_sample_read(video_fd, sample, read_buffer, &offset, &size);
+        if (code < 0)
+        {
+            failure = "sample-read";
+""")
+    replace('            rb->splash(HZ * 2, "VPU sample decode failed");',
+            '''            failure = "sample-decode";
+            code = decoded;
+            rb->splash(HZ * 2, "VPU sample decode failed");''')
+    replace("cleanup:\n", r"""cleanup:
+    if (failure)
+    {
+        int log = video_log_open(filepath, failure, code);
+        if (log >= 0)
+        {
+            rb->fdprintf(log, "pool granted=%lu sample=%u offset=%u bytes=%u\n",
+                         (unsigned long)buffer_size, (unsigned)sample,
+                         (unsigned)offset, (unsigned)size);
+            if (decoder_size)
+                video_log_layout(log, decoder_size, audio_codec_workspace_size);
+            rb->close(log);
+        }
+    }
+""")
+    replace("""    rb->backlight_set_timeout(rb->global_settings->backlight_timeout);
+    if (!options)""",
+            """    if (!probe)
+        rb->backlight_set_timeout(rb->global_settings->backlight_timeout);
+    if (!options && !probe)""")
+    replace("int video_h264_play(const char *filepath,", """\
+int video_h264_probe(const char *path, void *buffer, size_t size)
+{
+    return video_run(path, buffer, size, NULL, true);
+}
+
+int video_h264_play_named(const char *path, void *buffer, size_t size,
+                          const struct video_play_options *options)
+{
+    return video_run(path, buffer, size, options, false);
+}
+
+int video_h264_play(const char *filepath,""")
+
     replace("    draw_width = LCD_WIDTH;",
             """    draw_width = rb->global_settings->video_fit ?
         LCD_WIDTH : MIN(width, LCD_WIDTH);""")

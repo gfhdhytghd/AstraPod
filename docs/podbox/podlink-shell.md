@@ -23,6 +23,33 @@ python3 podlink_shell.py --serial USB_SERIAL open-bench
 `record-stop` 直接交给录音器。录音器关闭文件并更新录音状态后确认完成。
 其他命令的计数表示界面处理进度。PCM 等测试结果由相应诊断功能提供。
 
+## 视频诊断
+
+在 AstraPod-Desktop 目录运行以下命令。把 `USB_SERIAL` 换成设备序列号。
+保持 HerdRemote 运行，以便 `log-fetch` 借用串口。
+
+```sh
+python3 podlink_shell.py --serial USB_SERIAL debug "Video probe"
+python3 podlink_shell.py --serial USB_SERIAL status
+python3 podlink_shell.py --serial USB_SERIAL log-fetch /.rockbox/video-probe.log ./video-probe.log
+```
+
+`debug` 提交命令。等 `status` 的 `submitted` 和 `completed` 相等后下载。
+也可以在机身的 Debug 菜单选择 **Video probe**。
+
+探针会停止当前音频，扫描 `/Videos` 中的 MP4 和 M4V 文件。
+支持扫描 7 层子目录。每个文件最多解码 8 个视频样本。
+报告记录内存预算、索引、VPU 初始化和逐样本返回码。
+探针不启动 AAC、不显示画面，也不改续播进度。
+正常播放的失败记录也会追加到同一文件。
+
+`decoder-configure` 的 `-1`、`-2`、`-3` 分别表示配置封装、SPS、PPS 错误。
+`sample-decode` 的 `-1`、`-2`、`-3` 分别表示码流错误、VPU 超时、VPU 状态错误。
+解码返回 `1` 表示输出一帧。返回 `0` 表示样本没有输出帧。
+
+`log-fetch` 用 MS3 的 `STREAM SAMPLE` 下载许可名单中的文件。
+`/.rockbox/video-probe.log` 在许可名单中。
+
 ## 播放诊断
 
 ```sh

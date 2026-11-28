@@ -53,6 +53,12 @@
 #include "settings/settings.h"
 #include "widgets/list.h"
 #include "dir.h"
+#if defined(ASTRAPOD_ROCK_COMPAT) && defined(HAVE_HW_H264)
+#include "plugins/rock_compat.h"
+#include "plugins/rock_video_log.h"
+#include "system/activity.h"
+#include "logfile.h"
+#endif
 #include "file.h"
 #include "panic.h"
 #include "crumbs.h"
@@ -1587,6 +1593,95 @@ static bool dbg_usb_info(void)
     return simplelist_show_list(&info);
 }
 
+#if defined(ASTRAPOD_ROCK_COMPAT) && defined(HAVE_HW_H264)
+static void video_probe_note(const char *path, const char *stage, int code)
+{
+    int fd = open(ROCK_VIDEO_LOG, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    if (fd >= 0)
+    {
+        logfile_printf(fd, "%s stage=%s code=%d\n", path, stage, code);
+        close(fd);
+    }
+}
+
+static bool video_probe_walk(char *path, unsigned depth)
+{
+    DIR *dir = depth < 8 ? opendir(path) : NULL;
+    if (!dir)
+    {
+        video_probe_note(path, "directory", -1);
+        return false;
+    }
+
+    size_t length = strlen(path);
+    struct dirent *entry;
+    bool usb = false;
+    while (!usb && (entry = readdir(dir)))
+    {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
+        int n = snprintf(path + length, MAX_PATH - length, "/%s", entry->d_name);
+        if (n >= MAX_PATH - (int)length)
+        {
+            path[length] = '\0';
+            video_probe_note(path, "path-too-long", -1);
+            continue;
+        }
+
+        if (dir_get_info(dir, entry).attribute & ATTR_DIRECTORY)
+            usb = video_probe_walk(path, depth + 1);
+        else
+        {
+            const char *ext = strrchr(entry->d_name, '.');
+            if (ext && (!strcasecmp(ext, ".mp4") || !strcasecmp(ext, ".m4v")))
+            {
+                int result = rock_probe_video(path);
+                usb = usb_exclusive_storage();
+                if (!usb)
+                    video_probe_note(path, "module-return", result);
+            }
+        }
+        path[length] = '\0';
+        if (!usb)
+            usb = default_event_handler(get_action(CONTEXT_STD, TIMEOUT_NOBLOCK))
+                == SYS_USB_CONNECTED;
+    }
+    closedir(dir);
+    return usb;
+}
+
+static bool dbg_video_probe(void)
+{
+    static bool running;
+    if (running || get_current_activity() == ACTIVITY_PLUGIN)
+        return false;
+    if (usb_exclusive_storage())
+        return true;
+
+    int fd = open(ROCK_VIDEO_LOG, O_WRONLY | O_CREAT | O_APPEND, 0666);
+    if (fd < 0)
+    {
+        splash(HZ, "Cannot open video-probe.log");
+        return false;
+    }
+    logfile_printf(fd, "\nVideo probe begin: /Videos\n");
+    close(fd);
+
+    running = true;
+    if (audio_status())
+        audio_stop();
+    char path[MAX_PATH] = "/Videos";
+    bool usb = video_probe_walk(path, 0);
+    running = false;
+    if (!usb)
+    {
+        video_probe_note(path, "probe-end", 0);
+        splash(HZ, "See video-probe.log");
+    }
+    return usb;
+}
+#endif
+
 /* The USB log (usb_log.h), newest first, appended to USB_LOG_FILE for as long
  * as this screen is open. Open it before plugging in, or switch on Write
  * Debug Log under the USB settings to have the file kept without it. */
@@ -2478,6 +2573,9 @@ static const struct {
 #ifdef HAVE_USBSTACK
         { "USB info", dbg_usb_info, false, NULL },
         { "USB log", dbg_usb_log, false, NULL },
+#if defined(ASTRAPOD_ROCK_COMPAT) && defined(HAVE_HW_H264)
+        { "Video probe", dbg_video_probe, false, NULL },
+#endif
         { "USB host probe", dbg_usb_host_probe, false, NULL },
 #endif
 #if defined(USB_ENABLE_AUDIO)

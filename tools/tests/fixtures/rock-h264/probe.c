@@ -8,6 +8,8 @@
 #include "video_audio.h"
 #include "plugins/rock_h264.h"
 
+int video_h264_probe(const char *path, void *buffer, size_t size);
+
 enum mode { FINISH, SEEK_MENU, SCRUB_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR };
 static enum mode mode;
 static volatile long current_tick;
@@ -225,6 +227,7 @@ static const struct plugin_api api = {
     .current_tick = &current_tick,
     .open = open_file,
     .close = close_file,
+    .fdprintf = dprintf,
     .ffilesize = file_size,
     .lseek = lseek,
     .read = read,
@@ -270,6 +273,19 @@ int main(int argc, char **argv)
 {
     assert(argc == 4);
     reset(FINISH);
+    assert(video_h264_probe(argv[3], scratch, sizeof(scratch)) == 0);
+    assert(opens == 1 && configured == 1 && closes == 1 && decoded == 8);
+    assert(!drawn && !audio_opens && access("resume", F_OK) < 0);
+    FILE *log = fopen("video-probe.log", "r");
+    char report[4096];
+    assert(log);
+    size_t bytes = fread(report, 1, sizeof(report) - 1, log);
+    report[bytes] = '\0';
+    fclose(log);
+    assert(strstr(report, "stage=decoder-configure code=0"));
+    assert(strstr(report, "sample=7") && strstr(report, "decode=1"));
+
+    reset(FINISH);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == 0);
     assert(opens == 1 && configured == 1 && closes == 1 && decoded == 336);
     assert(drawn >= decoded && backlight == settings.backlight_timeout);
@@ -297,6 +313,12 @@ int main(int argc, char **argv)
     reset(DECODE_ERROR);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) < 0);
     assert(opens == 1 && closes == 1 && decoded == 3);
+    log = fopen("video-probe.log", "r");
+    assert(log);
+    bytes = fread(report, 1, sizeof(report) - 1, log);
+    report[bytes] = '\0';
+    fclose(log);
+    assert(strstr(report, "stage=sample-decode code=-1"));
 
     reset(SEEK_INIT_ERROR);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) < 0);

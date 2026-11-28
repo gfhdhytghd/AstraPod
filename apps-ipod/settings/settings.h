@@ -823,6 +823,7 @@ struct user_settings
     bool fruit_home_itunes_u;
     int  fruit_music_menu;
     int  contacts_sort; /* Extras > Contacts by 0 first or 1 last name */
+    int  voice_memo_quality; /* Voice Memos at 0 Low or 1 High */
     /* Rows hidden from each kind of context menu: a bit per row of the kind's
      * list in screens/context_menu.c, saved by the rows' names. */
 #define CONTEXT_MENU_KINDS 8

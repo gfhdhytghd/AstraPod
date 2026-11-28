@@ -826,11 +826,13 @@ startup says so, and how long is left.
 ## Fruit Company
 
 Under the Fruit Company theme, Settings shows the original iPod's rows. Most
-are settings listed above under AstraPod's names; this one is Fruit Company's
-own.
+are settings listed above under AstraPod's names; these are Fruit Company's
+own. Quality is in Voice Memos, which the main menu shows while a headset with
+a microphone is plugged in.
 
 | Setting | What it does | Default | |
 |---|---|---|---|
+| Quality | Under Fruit Company, the sound of a new Voice Memo. Low records at 22 kHz, half the size; High records at 44.1 kHz. Either way a memo is mono, as the headset has one microphone. | Low |  |
 | Sort By | Under Fruit Company, the order of Extras > Contacts. First lists a contact as "Anna Zimmer", by first name; Last lists "Zimmer, Anna", by last name. Contacts are the vCard (.vcf) files in the Contacts folder of the player's disk, as iTunes syncs them. | First |  |
 
 ---

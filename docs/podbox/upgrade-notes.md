@@ -213,3 +213,7 @@
   Previous and Next do nothing. In the video player, the Picture page is
   the original iPod's Shuffle-style selector: turn the wheel a sixth of a
   turn to move between Fit, Fill and Stretch.
+
+- **Voice Memos** appears in the Fruit Company main menu, between Extras and
+  Settings, while a headset with a microphone is plugged in. Its memos are
+  WAV files in `/Recordings`.

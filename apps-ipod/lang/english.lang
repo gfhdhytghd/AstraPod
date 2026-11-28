@@ -35611,3 +35611,153 @@
     ipod6g: "Piezo Without Headphones"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_FRUIT_VOICE_MEMOS
+  desc: Stock main menu: Voice Memos, shown while a headset microphone is in
+  user: core
+  <source>
+    *: "Voice Memos"
+  </source>
+  <dest>
+    *: "Voice Memos"
+  </dest>
+  <voice>
+    *: "Voice Memos"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_START_RECORDING
+  desc: Stock Voice Memos menu
+  user: core
+  <source>
+    *: "Start Recording"
+  </source>
+  <dest>
+    *: "Start Recording"
+  </dest>
+  <voice>
+    *: "Start Recording"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_QUALITY
+  desc: Stock Voice Memos menu: recording quality
+  user: core
+  <source>
+    *: "Quality"
+  </source>
+  <dest>
+    *: "Quality"
+  </dest>
+  <voice>
+    *: "Quality"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_QUALITY_LOW
+  desc: Stock Voice Memos menu: Quality value
+  user: core
+  <source>
+    *: "Low"
+  </source>
+  <dest>
+    *: "Low"
+  </dest>
+  <voice>
+    *: "Low"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_QUALITY_HIGH
+  desc: Stock Voice Memos menu: Quality value
+  user: core
+  <source>
+    *: "High"
+  </source>
+  <dest>
+    *: "High"
+  </dest>
+  <voice>
+    *: "High"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RESUME
+  desc: Stock Voice Memos paused menu: resume recording
+  user: core
+  <source>
+    *: "Resume"
+  </source>
+  <dest>
+    *: "Resume"
+  </dest>
+  <voice>
+    *: "Resume"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_STOP_AND_SAVE
+  desc: Stock Voice Memos paused menu
+  user: core
+  <source>
+    *: "Stop and Save"
+  </source>
+  <dest>
+    *: "Stop and Save"
+  </dest>
+  <voice>
+    *: "Stop and Save"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_ONE_RECORDING
+  desc: Stock Voice Memos pane caption
+  user: core
+  <source>
+    *: "%d Recording"
+  </source>
+  <dest>
+    *: "%d Recording"
+  </dest>
+  <voice>
+    *: "%d Recording"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_RECORDING_COUNT
+  desc: Stock Voice Memos pane caption
+  user: core
+  <source>
+    *: "%d Recordings"
+  </source>
+  <dest>
+    *: "%d Recordings"
+  </dest>
+  <voice>
+    *: "%d Recordings"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_MEMO
+  desc: Stock Voice Memos recording screen: the memo's number
+  user: core
+  <source>
+    *: "Memo %d"
+  </source>
+  <dest>
+    *: "Memo %d"
+  </dest>
+  <voice>
+    *: "Memo %d"
+  </voice>
+</phrase>

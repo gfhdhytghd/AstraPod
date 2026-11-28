@@ -22,6 +22,9 @@ struct menu_pane_content {
     /* LIST_PANE_PICTURE: the art's top-left on screen and the title's
      * baseline; the caption's lies 21 rows lower. */
     int x, y, baseline;
+    /* LIST_PANE_PICTURE: the column the text centres on, or 0 for the
+     * pane's middle. */
+    int centre;
     /* LIST_PANE_PICTURE: drawn over the backdrop before the art, or NULL. */
     void (*paint)(struct stock_canvas *band);
     /* LIST_PANE_ART: 0 for a slideshow of the library's album covers, else

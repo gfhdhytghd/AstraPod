@@ -1480,6 +1480,11 @@ Under Fruit Company, the order of Extras > Contacts. First lists a contact as
 Contacts are the vCard (.vcf) files in the Contacts folder of the player's
 disk, as iTunes syncs them.
 
+[voice memo quality]
+Under Fruit Company, the sound of a new Voice Memo. Low records at 22 kHz,
+half the size; High records at 44.1 kHz. Either way a memo is mono, as the
+headset has one microphone.
+
 [lang]
 The language of the interface. Loading one replaces the built-in English.
 

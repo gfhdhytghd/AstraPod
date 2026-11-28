@@ -2071,6 +2071,13 @@ const struct settings_list settings[] = {
     CHOICE_SETTING(0, contacts_sort, LANG_CONTACTS_SORT_BY, 0,
                    "contacts sort", "first,last", NULL, 2,
                    ID2P(LANG_CONTACTS_FIRST), ID2P(LANG_CONTACTS_LAST)),
+#ifdef HAVE_RECORDING
+    /* Fruit Company's Voice Memos > Quality: 22.05 or 44.1 kHz, mono */
+    CHOICE_SETTING(0, voice_memo_quality, LANG_FRUIT_QUALITY, 0,
+                   "voice memo quality", "low,high", NULL, 2,
+                   ID2P(LANG_FRUIT_QUALITY_LOW),
+                   ID2P(LANG_FRUIT_QUALITY_HIGH)),
+#endif
     /* Guest credits, mined out of the title and per-track artist tags. Off by
      * default: reading them is a guess at what a tag meant, and a library
      * whose owner did not ask for it should not grow rows out of one. Off,

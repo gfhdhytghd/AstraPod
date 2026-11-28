@@ -12,6 +12,7 @@
 #include "config.h"
 #include "screens/playback/cider.h"
 #include "play_status.h"
+#include "screens/voice_memos.h"
 #include "audio.h"
 
 static enum playmode ff_mode = 0;
@@ -38,6 +39,8 @@ int current_playmode(void)
             return STATUS_STOP;
         return ff_mode ? ff_mode : source.rate ? STATUS_PLAY : STATUS_PAUSE;
     }
+    if (voice_memos_paused())
+        return STATUS_PAUSE;
     int audio_stat = audio_status();
 
     /* ff_mode can be either STATUS_FASTFORWARD or STATUS_FASTBACKWARD

@@ -84,6 +84,7 @@
 #include "ui/scene.h"
 #include "ui/stock_art_ids.h"
 #include "screens/fruit_menu.h"
+#include "screens/voice_memos.h"
 
 #define MAX_MENUS 8
 /* used to allow for dynamic menus */
@@ -1217,12 +1218,13 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         redraw_lists = query_audio_status(&old_audio_status);
 
 
-        if (menu == &root_menu_)
+        if (menu == &root_menu_ || menu == fruit_menu_root())
         {
             const struct menu_item_ex *row = current_subitems_count
                 ? menu->submenus[get_menu_selection(lists.selected_item, menu)]
                 : NULL;
-            if (root_menu_refresh())
+            if (menu == &root_menu_ ? root_menu_refresh() :
+                voice_memos_refresh())
             {
                 int selection = 0;
                 for (unsigned int i = 0; i < MENU_GET_COUNT(menu->flags); i++)

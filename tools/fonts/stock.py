@@ -73,6 +73,7 @@ STOCK = {
     "21-helvetica-bold": ("HelveticaBold.ttf", 1404, 700, 26, 21, 0),
     "21-helvetica-bold-stopwatch": ("HelveticaBold.ttf", 1360, 700, 25, 20, 0),
     "23-helvetica-bold": ("HelveticaBold.ttf", 1464, 700, 27, 22, 0),
+    "25-helvetica-bold": ("HelveticaBold.ttf", 1637, 700, 30, 25, 0),
     "29-helvetica-bold": ("HelveticaBold.ttf", 1884, 700, 29, 23, 0),
 }
 LETTERS_ONLY = {"46-helvetica-bold-index"}
@@ -80,7 +81,8 @@ LETTERS_ONLY = {"46-helvetica-bold-index"}
 # in: the Extras draw these figures and fall back to a theme font for
 # anything else.
 LATIN_ONLY = {"14-helvetica-bold-calendar", "18-helvetica-bold", "21-helvetica-bold",
-              "21-helvetica-bold-stopwatch", "23-helvetica-bold", "29-helvetica-bold"}
+              "21-helvetica-bold-stopwatch", "23-helvetica-bold", "25-helvetica-bold",
+              "29-helvetica-bold"}
 CJK_FILES = {11: "CJK11.ttf", 16: "CJK16.ttf"}
 
 

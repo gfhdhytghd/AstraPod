@@ -177,7 +177,7 @@ static void yesno_measure(struct dialog *d, struct screen *s,
         int hfont = c->head_font >= 0 ? c->head_font : box->font;
         int hch = font_get(hfont)->height;
         int bch = font_get(box->font)->height;
-        int foot_h = 28 + 4 + bch + 8;
+        int foot_h = DIALOG_POPUP_PAIR_FOOTER_H;
 
         d->style.box_margin = 0;
         c->head_count = 0;
@@ -296,7 +296,7 @@ static void yesno_draw(struct dialog *d, struct screen *s,
         int kfont = content->font;
         int hch = font_get(hfont)->height;
         int bch = font_get(content->font)->height;
-        int foot_h = 28 + 4 + bch + 8;
+        int foot_h = DIALOG_POPUP_PAIR_FOOTER_H;
         int foot_y = content->height - foot_h;
         unsigned shadow = LCD_RGBPACK(4, 10, 24);
 
@@ -349,7 +349,7 @@ static void yesno_draw(struct dialog *d, struct screen *s,
 
         char yes[24], no[24];
         yesno_button_labels(c, yesno_tmo_remaining(c), yes, no, sizeof(yes));
-        dialog_draw_popup_pair_footer(s, 0, foot_y, content->width, foot_h,
+        dialog_draw_popup_pair_footer(s, 0, foot_y, content->width,
                                       no, c->back_cancels ? "LEFT" : "/ MENU",
                                       true, yes, "SELECT /", true,
                                       bfont, kfont);

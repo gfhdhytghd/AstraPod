@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Headless simulator tests for Classic / Fruit Company / Scrim dialogs.
+"""Headless simulator tests for navy glass dialogs and Scrim.
 
-Arguments: ROCKBOXUI SIMDISK OUTPUT_DIRECTORY [--themes classic,fruit-company,scrim]
+Arguments: ROCKBOXUI SIMDISK OUTPUT_DIRECTORY [--themes THEME,THEME,...]
 
 For each theme, opens and screenshots:
   - USB Disk Mode consent (one-press MENU = Charge Only, SELECT = Connect; PLAY stays open)
@@ -13,22 +13,29 @@ For each theme, opens and screenshots:
   - Search dialog (full-screen stock page under Classic/Fruit)
 
 Verifies every dialog opens, answers with one key press per mapped key, and
-dismisses cleanly restoring the screen underneath.
+dismisses cleanly restoring the screen underneath. For navy glass capsules,
+measures the visible ink of each action and hardware legend against the button
+centre, and compares the fill across buttons in the same dialog.
 """
 
 import argparse
+from contextlib import contextmanager
 import json
 import os
 import tempfile
 import time
 from pathlib import Path
+from statistics import median
 
-from PIL import ImageChops, ImageStat
+from PIL import Image, ImageChops, ImageStat
 
 from ui_menu_sim import FPS, Screen, process
 from ui_quickscreen_sim import ULTRA_FALLBACK_THEME
 
 STATUS_H = 20
+CAPSULE_H = 28
+PAIR_H = 38
+PAIR_PAD = 8
 
 
 def differ(a, b, box=None):
@@ -48,6 +55,193 @@ def is_dimmed_popup(before, during):
     return d_mean < b_mean * 0.85 and d_mean > 20
 
 
+def capsule_tops(frame, left, right, height=CAPSULE_H):
+    """Find the rim, split gloss and catchlight."""
+    first_row = 70
+    mid = height // 2
+    green = [
+        median(frame.getpixel((x, y))[1] for x in range(left + 8, right - 8))
+        for y in range(first_row, 239)
+    ]
+    return [
+        y + first_row for y in range(len(green) - height)
+        if green[y + 1] - green[y] >= 20
+        and green[y + mid - 1] - green[y + mid] >= 8
+        and green[y + height - 2] - green[y + height - 1] >= 20
+        and green[y + height] - green[y + height - 1] >= 20
+    ]
+
+
+def capsule_pixels(frame, left, top, right, hint_left):
+    # The bevel occupies the outer rows. White cores identify the action's
+    # horizontal span, so its antialiased ink and the muted legend can be
+    # measured separately. The red threshold is above the gloss fill.
+    pixels = [
+        (x, y, frame.getpixel((x, y))[0])
+        for y in range(top + 2, top + CAPSULE_H - 2)
+        for x in range(left + 5, right - 5)
+    ]
+    cores = [x for x, _, red in pixels if red >= 224]
+    if not cores:
+        return {"action_dy": None, "hint_dy": None}
+    x0, x1 = min(cores), max(cores)
+    centre = top + (CAPSULE_H - 1) / 2
+
+    def offset(ys):
+        return (min(ys) + max(ys)) / 2 - centre if ys else None
+
+    hint = [(x, y) for x, y, red in pixels if red >= 112
+            and (x < x0 - 1 if hint_left else x > x1 + 1)]
+    return {
+        "action_width": x1 - x0 + 1,
+        "hint_width": max(x for x, _ in hint) - min(x for x, _ in hint) + 1 if hint else 0,
+        "action_dy": offset([y for x, y, red in pixels
+                             if x0 - 1 <= x <= x1 + 1 and red >= 112]),
+        "hint_dy": offset([y for _, y in hint]),
+    }
+
+
+def capsule_fill(frame, left, top, right):
+    # Sample near both side edges, away from the ink. RGB565 rounding and
+    # the backdrop visible through the tint can shift channels slightly.
+    xs = (left + 3, left + 4, right - 5, right - 4)
+    return [tuple(median(frame.getpixel((x, top + dy))[ch] for x in xs)
+                  for ch in range(3))
+            for dy in (4, 10, 14, 23)]
+
+
+def ink_bounds(frame, box, flat=False):
+    """Return visible text bounds, excluding the button's paint."""
+    left, top, right, bottom = box
+    points = []
+    for y in range(top + 2, bottom - 2):
+        row = [frame.getpixel((x, y))[0] for x in range(left + 2, right - 2)]
+        fill = median(row)
+        points.extend((x, y) for x, red in enumerate(row, left + 2)
+                      if (abs(red - fill) >= 32 if flat else red >= 112))
+    if points:
+        xs, ys = zip(*points)
+        return [min(xs), min(ys), max(xs) + 1, max(ys) + 1]
+    return None
+
+
+def has_ink_padding(box, ink, padding):
+    return ink is not None and ink[0] > box[0] + padding and ink[2] < box[2] - padding
+
+
+def flat_button_readings(frame, boxes):
+    readings = []
+    for left, top, right, bottom in boxes:
+        box = (left, top, right, bottom)
+        edge = frame.getpixel((left, top))
+        border = edge in ((99, 101, 99), (214, 211, 214)) and all(
+            frame.getpixel((x, y)) == edge
+            for x, y in ((right - 1, top), (left, bottom - 1), (right - 1, bottom - 1))
+        )
+        ink = ink_bounds(frame, box, flat=True)
+        readings.append({"button": box, "ink": ink,
+                         "padding_ok": border and has_ink_padding(box, ink, PAIR_PAD)})
+    return readings
+
+
+def pair_pixels(frame, columns, arrows):
+    """Read each line independently, including any hardware-key triangle."""
+    pairs = []
+    for (left, right), arrow in zip(columns, arrows):
+        tops = capsule_tops(frame, left, right, PAIR_H)
+        if not tops:
+            return []
+        top = tops[-1]
+        box = [left, top, right, top + PAIR_H]
+        ink = ink_bounds(frame, box)
+        action = ink_bounds(frame, [left, top, right, top + 21])
+        hint = ink_bounds(frame, [left, top + 18, right, top + PAIR_H])
+        arrow_pixels = None
+        if hint and arrow:
+            x = hint[0] if arrow < 0 else hint[2] - 4
+            arrow_pixels = [sum(frame.getpixel((col, y))[0] >= 112
+                                for y in range(top + 24, top + 31))
+                            for col in range(x, x + 4)]
+        pairs.append({
+            "button": box, "ink": ink, "action": action, "hint": hint,
+            "padding_ok": has_ink_padding(box, ink, PAIR_PAD),
+            "action_dy": (action[1] + action[3]) / 2 - (top + 11) if action else None,
+            "hint_dy": (hint[1] + hint[3]) / 2 - (top + 27) if hint else None,
+            "arrow_pixels": arrow_pixels, "fill": capsule_fill(frame, left, top, right),
+        })
+    return pairs
+
+
+def check_pair_pixels(frame, columns, arrows):
+    readings = pair_pixels(frame, columns, arrows)
+    valid = len(readings) == 2 and readings[0]["button"][1] == readings[1]["button"][1]
+    centered = valid and all(
+        p[key] is not None and abs(p[key]) <= 1
+        for p in readings for key in ("action_dy", "hint_dy")
+    )
+    padding = valid and all(p["padding_ok"] for p in readings)
+    full_arrows = valid and all(
+        not arrow or p["arrow_pixels"] == ([1, 3, 5, 7] if arrow < 0 else [7, 5, 3, 1])
+        for p, arrow in zip(readings, arrows)
+    )
+    same_fill = valid and all(
+        abs(a - b) <= 16
+        for row_left, row_right in zip(readings[0]["fill"], readings[1]["fill"])
+        for a, b in zip(row_left, row_right)
+    )
+    return readings, {
+        "button_ink_centered": centered, "button_ink_padding": padding,
+        "button_arrows_complete": full_arrows, "buttons_same_fill": same_fill,
+    }
+
+
+def check_button_pixels(out, theme):
+    measurements = {}
+    results = {}
+    for kind, suffix, columns, expected in (
+        ("usb", "01-usb", [(36, 284, True)], [2]),
+        ("prose", "04-prose", [(82, 238, False)], [1]),
+    ):
+        with Image.open(out / f"{theme}-{suffix}.png") as image:
+            frame = image.convert("RGB")
+        capsules = []
+        counts = []
+        for left, right, hint_left in columns:
+            tops = capsule_tops(frame, left, right)
+            counts.append(len(tops))
+            for top in tops:
+                reading = capsule_pixels(frame, left, top, right, hint_left)
+                reading["button"] = [left, top, right, top + CAPSULE_H]
+                reading["fill"] = capsule_fill(frame, left, top, right)
+                capsules.append(reading)
+        measurements[kind] = capsules
+        results[f"{kind}_button_ink_centered"] = counts == expected and all(
+            reading[key] is not None and abs(reading[key]) <= 1
+            for reading in capsules for key in ("action_dy", "hint_dy")
+        )
+        if kind == "usb":
+            # MENU is shorter than SELECT and Charge Only is longer than Connect.
+            results["usb_menu_above_select"] = counts == expected and (
+                capsules[0].get("hint_width", 0) > 0
+                and capsules[0].get("hint_width", 0) < capsules[1].get("hint_width", 0)
+                and capsules[0].get("action_width", 0) > capsules[1].get("action_width", 0)
+            )
+            results[f"{kind}_buttons_same_fill"] = counts == expected and all(
+                abs(a - b) <= 16
+                for reading in capsules[1:]
+                for ref, actual in zip(capsules[0]["fill"], reading["fill"])
+                for a, b in zip(ref, actual)
+            )
+    with Image.open(out / f"{theme}-02-yesno.png") as image:
+        readings, checked = check_pair_pixels(image.convert("RGB"),
+                                              [(36, 156), (164, 284)], [-1, 1])
+    measurements["yesno"] = readings
+    results.update({f"yesno_{test}": passed for test, passed in checked.items()})
+    (out / f"{theme}-button-pixels.json").write_text(
+        json.dumps(measurements, indent=2) + "\n")
+    return results
+
+
 def settle(s, steps=45):
     time.sleep(3 / FPS)
     last = s.frame()
@@ -63,6 +257,17 @@ def settle(s, steps=45):
             same = 0
             last = cur
     return last
+
+
+def open_usb(s, before):
+    s.tap("u")
+    # The USB event is posted by the simulator's USB thread. Give it time to
+    # reach the UI before deciding that a stable frame is the prompt.
+    for _ in range(10):
+        time.sleep(0.1)
+        if differ(before, s.frame(), (0, 36, 320, 240)):
+            break
+    return settle(s)
 
 
 def open_explain(s):
@@ -111,8 +316,7 @@ def run_theme(binary, simdisk, env, out, theme):
             home.save(out / f"{theme}-00-home.png")
 
             # 1. USB Disk Mode consent: MENU = Charge Only (leaves screen intact)
-            s.tap("u")
-            usb = settle(s)
+            usb = open_usb(s, home)
             usb.save(out / f"{theme}-01-usb.png")
             res["usb_opened"] = differ(home, usb)
             if classic:
@@ -389,8 +593,7 @@ def run_theme(binary, simdisk, env, out, theme):
 
             # Final check: USB SELECT = Connect (one press enters USB connected mode)
             before_usb_sel = settle(s)
-            s.tap("u")
-            usb2 = settle(s)
+            usb2 = open_usb(s, before_usb_sel)
             res["usb_reopened"] = differ(before_usb_sel, usb2)
             s.tap("Return")
             usb_conn = settle(s)
@@ -404,17 +607,11 @@ def run_theme(binary, simdisk, env, out, theme):
     return res
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("binary", "simdisk", "out"):
-        parser.add_argument(name, type=lambda p: Path(p).resolve())
-    parser.add_argument("--themes", default="classic,fruit-company,scrim")
-    args = parser.parse_args()
-    args.out.mkdir(parents=True, exist_ok=True)
-    result = {}
+@contextmanager
+def private_display(log_path):
     with tempfile.TemporaryDirectory(prefix="era-dlg-x-") as temp, \
             tempfile.TemporaryFile() as display, \
-            (args.out / "xvfb.log").open("w") as log:
+            log_path.open("w") as log:
         runtime = Path(temp) / "runtime"
         runtime.mkdir(mode=0o700)
         with process(
@@ -433,10 +630,31 @@ def main():
             env = dict(os.environ, DISPLAY=":" + num, XDG_RUNTIME_DIR=str(runtime),
                        SDL_VIDEODRIVER="x11", SDL_AUDIODRIVER="dummy",
                        SDL_RENDER_DRIVER="software")
-            for theme in args.themes.split(","):
-                print(f"Testing {theme}...", flush=True)
-                result[theme] = run_theme(args.binary, args.simdisk, env, args.out, theme)
-                (args.out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+            yield env
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    for name in ("binary", "simdisk", "out"):
+        parser.add_argument(name, type=lambda p: Path(p).resolve())
+    parser.add_argument("--themes", default="classic,fruit-company,fruit-company-ultra,scrim")
+    args = parser.parse_args()
+    args.out.mkdir(parents=True, exist_ok=True)
+    result = {}
+    with private_display(args.out / "xvfb.log") as env:
+        for theme in args.themes.split(","):
+            print(f"Testing {theme}...", flush=True)
+            result[theme] = run_theme(args.binary, args.simdisk, env, args.out, theme)
+            if theme != "scrim":
+                result[theme].update(check_button_pixels(args.out, theme))
+            else:
+                boxes = [(99, 128, 151, 157), (169, 128, 221, 157)]
+                for mode, suffix in (("yes", "02-yesno"), ("no", "02b-yesno-no")):
+                    with Image.open(args.out / f"scrim-{suffix}.png") as image:
+                        result[theme][f"yesno_{mode}_button_ink_padding"] = all(
+                            item["padding_ok"] for item in flat_button_readings(image, boxes)
+                        )
+            (args.out / "result.json").write_text(json.dumps(result, indent=2) + "\n")
 
     failed = [t for t, r in result.items() if not all(r.values())]
     print(json.dumps(result, indent=2))

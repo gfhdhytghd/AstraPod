@@ -14,24 +14,32 @@ All shapes, gradients, gloss domes, rims, and shadows are rendered procedurally 
 | **Top specular gloss** | Signature curved elliptical white gloss dome sweeping across the upper ~26–30 px | Procedural parabolic/elliptical specular dome clipped to the `r = 9` top corners (18 px edge depth dipping to 28 px at centre, fading ~43% → 12% white with 1 px antialiased edge) |
 | **Border & drop shadow** | Crisp ~2 px translucent light silver-blue rim + outer dark hairline over a deep drop shadow | `gloss_shadow(..., r=10, depth=8, drop=4, alpha=165)` + dark outer hairline + 2 px translucent silver-blue glass rim (`0xd8dce8f8` / `0x70c6d8f2`) |
 | **Typography** | Centred white Helvetica Bold title + regular message text with `0, -1 px` dark text shadow | Centred white `17-helvetica-bold` title + `#eaf0fa` `13-helvetica` message lines (left-aligned for scrollable prose), all with `dy = -1` `#040a18` shadow |
-| **Buttons (2 vs 3 choices)** | 2009 HIG: two choices sit side-by-side (**Cancel** darker navy on left, **Default** lighter steel-blue on right, ~43–44 px tall on 320×480); 3+ choices stack vertically full-width | Scaled to 320×240: `h = 28 px`, `r = 5`, two-half split-gloss capsules (darker navy on left, brighter steel-cerulean on right, 8 px gap). USB consent uses stacked full-width 28 px capsules (Connect primary on top, Charge Only & optional Remote Control below) |
+| **Buttons (2 vs 3 choices)** | 2009 HIG: two choices sit side-by-side (**Cancel** darker navy on left, **Default** lighter steel-blue on right, ~43–44 px tall on 320×480); 3+ choices stack vertically full-width | Matching navy split-gloss capsules with `r = 5`. Side-by-side capsules are 38 px tall with an 8 px gap. USB consent stacks 28 px rows for Charge Only, Connect and Remote Control when available |
 | **Pop-in & dismiss motion** | `CAKeyframeAnimation` on `transform.scale` (~0.3 s): rapid pop-in with elastic overshoot then settle (`~0.6 → 1.07 → 0.97 → 1.0`), quick fade-out on dismiss | `ui_sheet_paint_zoom()` with `sheet.bounce = true`: 20 frames (~300 ms at 67 Hz) scaling `0.62 → 1.07 → 0.97 → 1.00` with fast opacity ramp; 9-frame (~135 ms) fade-out + shrink (`1.00 → 0.94`) restoring exact underlying pixels with zero flash |
 
 ### Click Wheel Translation & Tactile Balance
 
-A 2009 `UIAlertView` is immediately recognizable by its translucent navy glass dome and glossy side-by-side capsules, yet an iPod Classic has no touchscreen. To keep the 2009 aesthetic authentic without inviting wheel-scrolling or misleading finger-tap cues:
+Direct-action buttons use the same navy fill, rim and gloss in every position.
+USB rows put the muted ice-blue key hint on the left and the white action
+name near the horizontal centre. Both sit on the centre line. MENU appears
+above SELECT, as on the Click Wheel. RIGHT follows SELECT when available.
 
-1. **No fake cursor or wheel focus ring:** neither button carries a movable highlight or selection bar, because the wheel never moves a selection on two- or three-choice prompts.
-2. **Quiet Click Wheel legends paired with each capsule:** on two-choice alerts (`yesno`, `dialog_prose_confirm`, `keyboard`), the glossy 28 px capsules keep the clean 2009 proportions (centred bold white label only), while a muted ice-blue (`#a4badc`) legend sits directly underneath each capsule (`◀ / MENU` under the left button, `SELECT / ▶` under the right button). On stacked USB consent capsules, the quiet key label (`SELECT`, `MENU`, `▶ RIGHT`) sits left-aligned inside each row opposite the centred action name.
-3. **One-press answers everywhere:** every 2- and 3-choice dialog responds to a single hardware button press; **LEFT** and **RIGHT** act directly on dialogs in Fruit Company and Fruit Company Ultra as well as Classic, while **PLAY** stays playback control.
+Side-by-side capsules centre the action above its key hint. Each capsule
+reserves 8 px of horizontal padding on both sides. Long action labels end
+with an ellipsis. The small arrows identify the left and right hardware
+keys.
+
+The Click Wheel scrolls the body of a prose dialog. Time, date and colour
+pickers show a brighter capsule when their grid focus reaches a button.
+The hardware keys in the table below activate direct actions in one press.
 
 ## Inventory, Forms & Keys
 
 | Dialog / Splash | Classic / Fruit form | Keys (Classic & Fruit) |
 |---|---|---|
-| Yes/No confirmations (`yesno.c`) | Centred 2009 navy glass alert pop-up over dimmed screen, bounce pop-in | **LEFT** / **MENU** = No (left, dark capsule); **RIGHT** / **SELECT** = Yes (right, lighter steel-blue capsule). Custom labels (`back_cancels`): **LEFT** = left option, **RIGHT** / **SELECT** = right option, **MENU** = cancel. **PLAY** = playback |
-| USB Disk Mode consent (`usb_confirm.c`) | Centred 2009 navy glass alert pop-up + stacked full-width capsules, bounce pop-in | **SELECT** = Connect (top steel-blue), **MENU** = Charge Only, **RIGHT** = Remote Control (when playing + handoff capable), **PLAY** = playback |
-| Prose show (`dialog_prose_show`) | Centred 2009 navy glass alert pop-up + centred steel-blue `OK` capsule + quiet key/scroll hints | Wheel scrolls text; **SELECT** / **MENU** / **LEFT** / **RIGHT** dismiss; **PLAY** = playback |
+| Yes/No confirmations (`yesno.c`) | Centred 2009 navy glass alert pop-up over dimmed screen, bounce pop-in | **LEFT** / **MENU** = No (left capsule); **RIGHT** / **SELECT** = Yes (right capsule). Custom labels (`back_cancels`): **LEFT** = left option, **RIGHT** / **SELECT** = right option, **MENU** = cancel. **PLAY** = playback |
+| USB Disk Mode consent (`usb_confirm.c`) | Centred 2009 navy glass alert pop-up + stacked full-width capsules, bounce pop-in | **MENU** = Charge Only (top row), **SELECT** = Connect (second row), **RIGHT** = Remote Control (third row, when playing + handoff capable), **PLAY** = playback |
+| Prose show (`dialog_prose_show`) | Centred 2009 navy glass alert pop-up + centred navy `OK` capsule with its key hint + a separate wheel hint when text scrolls | Wheel scrolls text; **SELECT** / **MENU** / **LEFT** / **RIGHT** dismiss; **PLAY** = playback |
 | Prose confirm (`dialog_prose_confirm`) | Centred 2009 navy glass alert pop-up + side-by-side capsules & quiet key legends | Wheel scrolls text; **LEFT** / **MENU** = left option (cancel); **RIGHT** / **SELECT** = right option (accept); **PLAY** = playback |
 | Single-line text input (`keyboard.c`) | Centred 2009 navy glass alert pop-up + white recessed text field + `Cancel` / `OK` capsules (`MENU` / `SELECT` legends) | Wheel cycles character; **LEFT** / **RIGHT** move caret (hold = backspace / delete); **SELECT** = OK; **MENU** = Cancel |
 | Time/date & colour pickers (`time_set.c`, `color_picker.c`) | Centred 2009 navy glass alert pop-up, bounce pop-in | Grid navigation (>3 choices): wheel edits value, **LEFT** / **RIGHT** / **MENU** / **PLAY** move cells, **SELECT** confirms, hold **MENU** cancels |
@@ -42,7 +50,7 @@ A 2009 `UIAlertView` is immediately recognizable by its translucent navy glass d
 | Extras Clocks action overlay (`extras_clock.c`) | Stock `System_Overlay` + `OptionBar_Black` bitmaps (unchanged) | Stock Clocks keys |
 | Control Centre / Quick Screen (`quick_screen.c`) | Leopard HUD (`style.quick_screen=hud`, unchanged) | Quick Screen keys |
 
-## 320×240 Design Mockups
+## 320×240 Design Previews
 
 ![Yes/No 2009 alert pop-up](01-yesno-popup.png)
 ![USB Disk Mode consent 2009 alert pop-up](02-usb-consent.png)

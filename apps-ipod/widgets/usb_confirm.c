@@ -158,7 +158,6 @@ struct usb_classic_ctx {
     int label_font;
 };
 
-#define USB_POPUP_ROW_H   28
 #define USB_POPUP_ROW_GAP 6
 
 static void confirm_classic_measure(struct dialog *d, struct screen *s,
@@ -169,7 +168,7 @@ static void confirm_classic_measure(struct dialog *d, struct screen *s,
     int hch = font_get(hfont)->height;
     int bch = font_get(box->font)->height;
     int count = remote_choice() ? 3 : 2;
-    int rows_h = count * USB_POPUP_ROW_H + (count - 1) * USB_POPUP_ROW_GAP;
+    int rows_h = count * DIALOG_POPUP_BUTTON_H + (count - 1) * USB_POPUP_ROW_GAP;
     int box_w = MIN(s->lcdwidth - 40, 272);
     int box_h = 14 + hch + 6 + 2 * bch + 2 + 12 + rows_h + 12;
     if (box_h > s->lcdheight - 20)
@@ -195,7 +194,7 @@ static void confirm_classic_draw(struct dialog *d, struct screen *s,
     int hch = font_get(hfont)->height;
     int bch = font_get(content->font)->height;
     int old_font = content->font;
-    int rows_h = count * USB_POPUP_ROW_H + (count - 1) * USB_POPUP_ROW_GAP;
+    int rows_h = count * DIALOG_POPUP_BUTTON_H + (count - 1) * USB_POPUP_ROW_GAP;
     int ry = content->height - 12 - rows_h;
     unsigned shadow = LCD_RGBPACK(4, 10, 24);
     unsigned body_fg = LCD_RGBPACK(234, 240, 250);
@@ -219,18 +218,18 @@ static void confirm_classic_draw(struct dialog *d, struct screen *s,
                             14 + hch + 6 + bch + 2, sub2, body_fg, shadow, -1);
 
     int row_w = content->width - 24;
-    dialog_draw_popup_action_row(s, 12, ry, row_w, USB_POPUP_ROW_H,
-                                 "SELECT", false, "Connect", true,
+    dialog_draw_popup_action_row(s, 12, ry, row_w, DIALOG_POPUP_BUTTON_H,
+                                 "MENU", false, "Charge Only",
                                  kfont, lfont);
-    ry += USB_POPUP_ROW_H + USB_POPUP_ROW_GAP;
-    dialog_draw_popup_action_row(s, 12, ry, row_w, USB_POPUP_ROW_H,
-                                 "MENU", false, "Charge Only", false,
+    ry += DIALOG_POPUP_BUTTON_H + USB_POPUP_ROW_GAP;
+    dialog_draw_popup_action_row(s, 12, ry, row_w, DIALOG_POPUP_BUTTON_H,
+                                 "SELECT", false, "Connect",
                                  kfont, lfont);
     if (remote)
     {
-        ry += USB_POPUP_ROW_H + USB_POPUP_ROW_GAP;
-        dialog_draw_popup_action_row(s, 12, ry, row_w, USB_POPUP_ROW_H,
-                                     "RIGHT", true, "Remote Control", false,
+        ry += DIALOG_POPUP_BUTTON_H + USB_POPUP_ROW_GAP;
+        dialog_draw_popup_action_row(s, 12, ry, row_w, DIALOG_POPUP_BUTTON_H,
+                                     "RIGHT", true, "Remote Control",
                                      kfont, lfont);
     }
     s->set_drawmode(DRMODE_SOLID);

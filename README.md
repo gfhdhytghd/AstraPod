@@ -7,14 +7,29 @@ Rockbox specifically and deeply optimized for iPod Classic.
 
 | 功能 | 当前实现 |
 | --- | --- |
-| 原生界面 | 原生列表、页面和动画。动画以每秒 60 帧为计时基准。状态栏显示居中的时钟、电池和播放状态。「正在播放」使用全屏界面。 [动画说明](docs/podbox/animation-engine.md) |
+| 原生界面 | 四款[内置原生主题](#原生主题)。Scrim 的「正在播放」是无状态栏的全屏界面。Classic 和 Fruit Company 系列采用原厂样式的播放布局，并保留状态栏。 |
 | Cover Flow | 支持立体和平面浏览。相册翻面显示曲目，后台优先预取居中相册。翻面板与「正在播放」共享模糊封面缓存。 [轮播导航](docs/podbox/covers-navigation.md) |
-| 歌词 | TTML、LRC、逐字时间、对唱和背景人声。可以手动浏览和按行定位。歌词性能记录采用 30 fps 预算。 [歌词说明](docs/podbox/lyrics.md) |
-| PBF1 字体 | 主机合并 HarmonyOS Sans 与同字号 Noto 补字。覆盖整套 CJK 字符集，支持字偶距、字形缓存和预取。点阵按原生尺寸绘制。 [字体说明](tools/fonts/README.md) |
+| 歌词 | 支持 TTML、LRC、逐字时间、对唱和背景人声。可以手动浏览和按行定位。Classic 和 Fruit Company 系列默认用蓝色选中条标出当前歌词行。 [歌词说明](docs/podbox/lyrics.md) |
+| 字体 | Scrim 使用 HarmonyOS Sans，并以 Noto 等字体补字。Classic 和 Fruit Company 系列优先使用原厂 Helvetica 和中日韩点阵字形。 |
 | 远程播放 | HerdRemote 提供 Cider 播放控制、远程资料库和带时间的歌词。支持播放交接。 [远程协议](docs/podbox/cider-remote-protocol.md) |
 | Agents 和 Usage | 用点击轮查看 herdr 工作区、代理和用量。可以回答问题，也支持经主机配置的录音和键盘操作。 [HerdRemote](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/README.md) |
 | PodLink 与稳定性 | PodLink 使用 USB CDC 串行链路。主线程栈和线程容量经过加固。字形与模糊任务共享后台线程。iAP 创建线程失败后可以重试。 |
 | SM1 DSP | 支持部分 FLAC 和 ALAC 的硬件解码。 |
+
+## 原生主题
+
+- **Scrim（默认）**采用 AstraPod 的菜单和全屏「正在播放」布局。
+- **Classic**保留 AstraPod 的菜单，使用 iPod classic 原厂字体、图标和播放布局。分栏菜单左侧显示选项，右侧显示图片预览。
+- **Fruit Company**沿用 Classic 的外观，主菜单采用原厂布局。默认项目为「音乐」「视频」「照片」「播客」「附加功能」「设置」「随机乐曲」。可以在「设置 → 主菜单」调整这些项目。
+- **Fruit Company Ultra**沿用 Fruit Company 的菜单和分栏布局。选中条带有回弹，页面叠放时投下阴影，Cover Flow 的封面滑入时带有反光。关闭「外观 → 动画」后，界面动效与 Fruit Company 一致。Agents 始终使用常规动效。
+
+Fruit Company 系列的「附加功能」提供时钟、日历、通讯录、闹钟、备忘录、屏幕锁和秒表。也可以从这里打开游戏、其他应用、文件和系统菜单。在「照片」中可以浏览同步的相册和缩略图，也可以播放幻灯片。「视频 → 影片」打开电影列表。播放 H.264 影片时，Fruit Company 使用原厂样式的控制浮层，Ultra 使用 AstraPod 的浮层。
+
+在 Fruit Company 系列的菜单和浏览列表中，转动滚轮选择项目，按 **Select** 打开，按 **Menu** 返回。**Previous** 和 **Next** 短按切歌，长按快退或快进。短按 **Play/Pause** 切换播放状态。应用内按键随当前界面而定，例如在照片查看器中转动滚轮换照片。
+
+在 Classic 和 Fruit Company 系列中，长按 **Menu** 打开全屏控制中心。默认用 **Previous** 和 **Next** 分别切换随机播放和重复播放。按 **Menu** 调高亮度，按 **Play/Pause** 调低亮度。转动滚轮调节音量，按 **Select** 关闭。
+
+在「设置 → 主题设置 → 原生主题」切换主题。使用 Fruit Company 系列时，路径为「设置 → 高级设置 → 主题设置 → 原生主题」。更新固件时请解压完整发行包，以安装主题字体和图片。
 
 ## 本地音频采样率
 
@@ -23,6 +38,16 @@ Rockbox specifically and deeply optimized for iPod Classic.
 在「设置 → 播放设置 → 将曲库高采样率曲目转换为 48 kHz FLAC」可扫描曲库并批量转换。转换保留原文件。生成转换件后，从原曲入口播放会自动使用转换件。
 
 ## 界面演示
+
+### Fruit Company 系列
+
+![Fruit Company 的分栏主菜单](docs/media/fruit-company-menu.png)
+![Fruit Company 的附加功能菜单和日历预览](docs/media/fruit-company-extras.png)
+
+![Fruit Company Ultra 的 Cover Flow 动效](docs/media/fruit-company-ultra-cover-flow.gif)
+![Fruit Company Ultra 从专辑曲目切换到正在播放](docs/media/fruit-company-ultra-now-playing.gif)
+
+### Scrim
 
 ![Cover Flow 翻面](docs/media/coverflow-flip.gif)\
 在 Cover Flow 中滚动封面，翻面查看曲目，再合上面板。
@@ -36,8 +61,8 @@ Rockbox specifically and deeply optimized for iPod Classic.
 ![快速索引](docs/media/index-mode.gif)\
 快速滚动打开字母索引，每拨一格跳到下一组，松开滚轮关闭索引。
 
-![正在播放](docs/media/now-playing.gif)\
-从 Cover Flow 选曲后过渡到全屏播放页，画面顶部没有状态栏。
+![Scrim 的正在播放](docs/media/now-playing.gif)\
+在 Scrim 中从 Cover Flow 选曲后，进入无状态栏的全屏播放页。
 
 ![Agents 与 Usage](docs/media/remote.gif)\
 用模拟的 HerdRemote 显示 Agents 工作区，并横向切换到 Usage 页面。
@@ -51,7 +76,8 @@ Rockbox specifically and deeply optimized for iPod Classic.
 | 场景 | 按键 | 动作 |
 | --- | --- | --- |
 | 全局 | `Select + Menu` | 开关 Cover Flow（远程来源可用时优先打开远程相册）。 |
-| 全局 | `Select + Play` | 有 PodLink 主机时切换 Agents 和「正在播放」；无主机时跳到「正在播放」。 |
+| 「正在播放」／歌词／Agents | `Select + Play` | 从「正在播放」或歌词进入 Agents，从 Agents 返回「正在播放」。 |
+| 菜单和浏览列表 | `Select + Play` | Fruit Company 系列跳到「正在播放」。Scrim 和 Classic 在连接 PodLink 主机时打开 Agents，否则跳到「正在播放」。 |
 | 硬件 | 长按 `Menu + Select` | 强制重启。 |
 | 引导程序 | 重启后按住 `Select + Play` | 进入 Apple 磁盘模式。 |
 | 引导程序 | 启动时按住 `Select + Left`／`Select + Right` | 分别进入 Apple 诊断模式和 Rockbox 引导程序 USB 模式。 |
@@ -63,14 +89,15 @@ Rockbox specifically and deeply optimized for iPod Classic.
 
 | 场景 | 按键 | 动作 |
 | --- | --- | --- |
-| 常规页面 | 长按 `Menu`／长按 `Select` | 分别打开 QuickScreen 和上下文菜单。 |
-| 多选列表 | 按住 `Select` + 转轮／短按 `Play` | 连续勾选（反转取消）／打开批量操作菜单。 |
-| 文本输入 | 长按 `Left`／`Right` | 向左或向右删除字符。 |
+| 常规页面 | 长按 `Menu`／长按 `Select` | 长按 `Menu` 打开快捷设置（Scrim）或控制中心（Classic 和 Fruit Company 系列）。长按 `Select` 打开上下文菜单。 |
+| 「正在播放」／歌词 | 按住 `Play` 一秒后松开 | 在「正在播放」和歌词之间切换。 |
+| 多选列表 | 按住 `Select` 并转动滚轮 | 连续勾选（反转取消）。Scrim 和 Classic 短按 `Play` 打开批量操作菜单。Fruit Company 系列长按 `Menu` 打开批量操作菜单。 |
+| 文本输入 | 长按 `Left`／`Right` 或 `Menu` | Scrim 和 Classic 用 `Left`／`Right` 向左或向右删除字符。Fruit Company 系列用 `Menu` 向左删除字符。 |
 | Cover Flow | 长按 `Play` | 随机转动封面。 |
 | Agents | 按住 `Play` | 按住录音，松手结束（需主机开启语音功能）。 |
-| Usage／代理详情 | 滚轮（快转按词跳）／`Left`（可长按） | 发送主机方向键／发送 Backspace。 |
+| Usage／代理详情（Scrim 或 Classic 连接 Herdr 工作区） | 滚轮（快转按词跳）／`Left`（可长按） | 发送主机方向键／发送 Backspace。 |
 | 底座遥控器 | `Play` 双击／三击 | 双击切换 Agents 和「正在播放」；三击开关 Cover Flow。 |
-| 底座遥控器 | 长按 `Play` | 播放页开关歌词；Agents 中按住说话。 |
+| 底座遥控器 | 长按 `Play` | 播放页开关歌词。在 Scrim 和 Classic 的 Agents 中按住说话。 |
 
 [底座和主机的按键归属](docs/podbox/covers-navigation.md) · [Agents 按键及语音](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/README.md)
 
@@ -94,7 +121,7 @@ PodLink 是 USB CDC 串行消息链路。打开「系统 → PodLink」，接线
 [PodLink 使用说明](docs/podlink.md)
 
 电脑端应用、PodLink 命令行、HerdRemote 和输入插件见 [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop)。
-运行 HerdRemote 后接线，在 iPod 打开「系统 → Agents」。
+运行 HerdRemote 后接线，在 iPod 打开「系统 → Agents」。使用 Fruit Company 系列时，从「附加功能 → 系统」进入。
 [远程协议](docs/podbox/cider-remote-protocol.md)
 
 ### 故障排查
@@ -113,9 +140,7 @@ PodLink 是 USB CDC 串行消息链路。打开「系统 → PodLink」，接线
 
 Rockbox, RockPod and additions by AstraPod are licensed under the [GNU General Public License v2.0](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html).
 
-Imported code governed by a previous licence is listed in
-[`docs/LICENSES`](docs/LICENSES); the fonts and themes this fork adds are
-credited below, each with a link to its full licence text.
+See [licences for imported code](docs/LICENSES) and the theme and font credits below.
 
 ## Development credits
 
@@ -140,6 +165,8 @@ Built on the work of:
 
 ### Themes
 
+- Classic, Fruit Company and Fruit Company Ultra use interface artwork and
+  Helvetica and CJK glyphs from Apple's iPod classic firmware.
 - Themify 2
   - Created by: Evan Kenny aka [Dook](https://d00k.net/)
   - License: CC BY-SA 3.0 (https://creativecommons.org/licenses/by-sa/3.0/deed.en)
@@ -158,8 +185,11 @@ Built on the work of:
 
 ### Fonts
 
-Font licences ship beside the fonts in `.rockbox/fonts/`.
+Font licence files and notices ship with the corresponding fonts.
 
+- HarmonyOS Sans and HarmonyOS Sans SC
+  - Copyright 2021–2024 Huawei Device Co., Ltd.
+  - [Font terms](https://github.com/openharmony/global_system_resources/blob/master/LICENSE_Fonts)
 - Material Design Icons
   - Created by Google (https://fonts.google.com/icons)
   - Licensed under the Apache License Version 2.0 —
@@ -265,3 +295,46 @@ layouts and behaviour to support the iAP2 development. Which fact came from wher
 ## English summary
 
 Rockbox specifically and deeply optimized for iPod Classic.
+
+### Built-in native themes
+
+- **Scrim (default)** gives you AstraPod's menus and full-screen Now Playing.
+- **Classic** keeps AstraPod's menus and uses the original iPod classic fonts,
+  artwork and Now Playing layout. Split menus show options on the left and a
+  preview on the right.
+- **Fruit Company** pairs that look with the original main menu layout. The
+  default rows are Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle
+  Songs. Choose which rows appear in **Settings → Main Menu**.
+- **Fruit Company Ultra** shares Fruit Company's menus and adds springy
+  selection, layered page transitions and animated Cover Flow. Turn off
+  **Appearance → Animations** to give Ultra the same motion as Fruit Company
+  with animations off.
+  Agents uses standard motion in either theme.
+
+In the Fruit Company family, **Extras** includes Clocks, Calendars, Contacts,
+Alarms, Notes, Screen Lock and Stopwatch. It also gives you access to files,
+games, other apps and system tools. Use **Photos** to browse synced albums
+and thumbnails or play a slideshow. Open **Videos → Movies** to watch films.
+For H.264 movies, Fruit Company uses the original-style overlay and Ultra
+uses AstraPod's overlay.
+
+In Fruit Company and Ultra menus and browsing lists, use the wheel, Select
+and Menu to navigate. Tap Previous or Next to skip tracks, or hold either
+button to seek. Tap Play/Pause to toggle playback. Each app has its own
+controls. In the photo viewer, for example, turn the wheel to move between
+photos.
+
+In Classic and the Fruit Company family, hold **Menu** to open Control Centre.
+With the default controls, Previous changes Shuffle and Next changes Repeat.
+Use Menu and Play/Pause to raise and lower brightness, turn the wheel to adjust
+volume, and press Select to close. On Now Playing, hold **Play** for one second
+and release to open Lyrics. Repeat to return.
+
+Press **Select + Play** on Now Playing, Lyrics or Agents to switch between
+playback and Agents. In Fruit Company and Ultra menus, the same shortcut
+opens Now Playing.
+
+Switch themes in **Settings → Theme Settings → Native theme**. In the Fruit
+Company family, use **Settings → Advanced Settings → Theme Settings → Native
+theme**. Extract the full release ZIP when updating to install the theme fonts
+and artwork.

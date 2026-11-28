@@ -381,6 +381,7 @@ def walk(sim, playback, sim_binary):
 def probe_chord(sim, playback, theme):
     menu = playback.activities["ACTIVITY_MAINMENU"]
     wps = playback.activities["ACTIVITY_WPS"]
+    lyrics = playback.activities["ACTIVITY_LYRICS"]
     files = playback.activities["ACTIVITY_FILEBROWSER"]
     wait_for(lambda: playback.activity() == files,
              f"{theme}: Files did not start")
@@ -420,6 +421,19 @@ def probe_chord(sim, playback, theme):
             sim.settle(quiet=.15, limit=.65)
             assert playback.get("status") == expected, (theme, first, key, "chord toggled playback")
             assert playback.activity() == wps, (theme, first, key, "chord left Now Playing")
+        # Exercise both ends of the lyrics gesture window and make sure
+        # neither the press nor the release changes transport state.
+        hold_s = 1.1 if first == "play" else 2.6
+        for source, target in ((wps, lyrics), (lyrics, wps)):
+            sim.process.stdin.write(b"down play\n")
+            time.sleep(hold_s)
+            assert playback.activity() == source, (theme, "PLAY acted before release")
+            assert playback.get("status") == expected, (theme, "PLAY hold changed playback")
+            sim.process.stdin.write(b"up play\n")
+            wait_for(lambda: playback.activity() == target,
+                     f"{theme}: PLAY release failed to toggle lyrics")
+            assert playback.get("status") == expected, (theme, "PLAY release changed playback")
+            sim.settle(quiet=.25, limit=1.25)
         press(sim, "menu")
         wait_for(lambda: playback.activity() == menu, f"{theme}: could not return to menu")
 
@@ -427,7 +441,7 @@ def probe_chord(sim, playback, theme):
         press(sim, "play")
         wait_for(lambda: playback.get("status") == 1, f"{theme}: PLAY did not resume")
         assert playback.activity() == menu, (theme, "PLAY left menu")
-    print(f"PASS {theme} Now Playing chord in both orders", flush=True)
+    print(f"PASS {theme} Now Playing chord and PLAY hold lyrics round trip", flush=True)
 
 
 def run_sim(binary, root, output, name, test):

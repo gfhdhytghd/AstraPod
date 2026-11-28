@@ -112,6 +112,19 @@ SECTIONS
     } > IRAM
     ASSERT(_intvectend + 8 <= 0x60, "vectors and literals beyond the copied 0x60")
 
+    /* The persistent breadcrumbs sit after the last loaded byte and before
+     * the application's zeroed BSS. The bootloader's BSS starts at 8 MiB. */
+    .persist (NOLOAD) :
+    {
+        . = ALIGN(32);
+        _persiststart = .;
+        *(.persist*)
+        . = ALIGN(32);
+        _persistend = .;
+    } > DRAM
+    ASSERT(_persistend <= DRAMORIG + 0x800000, ".persist overlaps the bootloader's .bss")
+    ASSERT(_persiststart >= LOADADDR(.iram) + SIZEOF(.iram), ".persist inside the loaded image")
+
     .bss (NOLOAD) :
     {
        _edata = .;
@@ -133,20 +146,6 @@ SECTIONS
        stackend = .;
        _stackend = .;
     } > DRAM
-
-    /* FU51 breadcrumbs: neither crt0 (clears .bss only) nor the bootloader
-     * (loads the image at DRAM start, keeps its .bss from DRAM + 8 MiB)
-     * writes here, so it survives a hard reset if the DRAM does. */
-    .persist (NOLOAD) :
-    {
-        . = ALIGN(32);
-        _persiststart = .;
-        *(.persist*)
-        . = ALIGN(32);
-        _persistend = .;
-    } > DRAM
-    ASSERT(_persistend <= DRAMORIG + 0x800000, ".persist overlaps the bootloader's .bss")
-    ASSERT(_persiststart >= _edata, ".persist inside the loaded image")
 
     .audiobuf (NOLOAD) :
     {

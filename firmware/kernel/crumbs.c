@@ -5,7 +5,7 @@
  * memory a stray write would turn into a RESTART (FU51).
  *
  * Two copies of the ring (crumb_ring.h):
- *  - DRAM, in the NOLOAD .persist section right after .bss (app.lds). crt0
+ *  - DRAM, in the NOLOAD .persist section before .bss (app.lds). crt0
  *    clears only .bss/.ibss; the bootloader loads rockbox.ipod at the start
  *    of DRAM (a few MiB) and keeps its own .bss from DRAM + 8 MiB on, and the
  *    linker script asserts .persist lies between the two.

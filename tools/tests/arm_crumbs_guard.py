@@ -77,7 +77,9 @@ res = {}
 
 # --- layout ---------------------------------------------------------------
 ps, pe = sym('_persiststart'), sym('_persistend')
-assert sym('_edata') <= ps and pe <= DRAM + 0x800000, (hex(ps), hex(pe))
+image_end = sym('_iramcopy') + sym('_iramend') - sym('_iramstart')
+assert image_end <= ps < pe <= sym('_edata'), (hex(image_end), hex(ps), hex(pe))
+assert pe <= DRAM + 0x800000, hex(pe)
 assert ps <= sym('dram_ring') and sym('dram_ring') + 2008 <= pe
 assert sym('audiobuffer') >= pe
 ro_end = sym('_icodeend') & ~0xfff

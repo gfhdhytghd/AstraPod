@@ -11,7 +11,8 @@ source = (root / "apps-ipod/ui/menu_pane.c").read_text()
 
 
 def function(name):
-    match = re.search(r"^static void " + name + r"\([^;]*?\)\n\{", source, re.M)
+    match = re.search(r"^static (?:void|bool) " + name + r"\([^;]*?\)\n\{",
+                      source, re.M)
     return source[match.start():source.index("\n}", match.end()) + 2]
 
 
@@ -23,6 +24,7 @@ stubs = r"""
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MENU_PANE_X 140
+#define VIDEO_ART_PANE 272
 typedef uint16_t fb_data;
 struct bg_task { int unused; };
 struct queue_event { int unused; };
@@ -34,6 +36,11 @@ static int posts, pins, loads;
 static fb_data buffer;
 static int core_free(int handle) { assert(handle == 1 && !pins); return 0; }
 static int tagcache_album_count(void) { return 1; }
+/* The album slideshow; a video one has its own source. */
+static struct { unsigned videos; } shown;
+static int stock_videos_pane_cover(unsigned kinds, int previous,
+                                   fb_data *pixels)
+{ (void)kinds; (void)previous; (void)pixels; abort(); }
 static fb_data *core_get_data_pinned(int handle)
 {
     assert(handle == 1 && !pins);
@@ -121,7 +128,7 @@ constants = "\n".join(
 state = (
     source[source.index("enum show_state"):source.index("static struct {", source.index("enum show_state"))]
     + source[source.index("static struct {", source.index("/* The slideshow.")):
-             source.index("static struct menu_pane_content shown")]
+             source.index("/* The photos.")]
     + source[source.index("static struct {\n    unsigned requests"):
              source.index("/* A still pane")]
 )
@@ -132,6 +139,7 @@ with tempfile.TemporaryDirectory() as directory:
     test_source.write_text(
         constants + "\n" + stubs + state
         + function("show_work") + "\n" + function("show_request")
+        + "\n" + function("show_stale")
         + "\n" + function("cover_step") + "\n" + test
     )
     subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",

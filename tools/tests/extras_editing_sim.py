@@ -264,9 +264,13 @@ def run_roundtrips(s, root, out, fruit):
     frame.save(out / "month.png")
     if fruit:
         before_transport = frame
-        for key in ("back", "right", "play"):
-            frame = tap(s, key)
-        checks["transport_stays_on_month"] = {"ok": same(before_transport, frame)}
+        unchanged = {
+            key: same(before_transport, tap(s, key))
+            for key in ("back", "right", "play")
+        }
+        checks["transport_stays_on_month"] = {
+            "ok": all(unchanged.values()), **unchanged
+        }
 
     # 2. Short SELECT -> Day View (Jan 1, 2024)
     frame = tap(s, "select", 0.6)
@@ -398,18 +402,21 @@ def run_roundtrips(s, root, out, fruit):
         and read_raw(ap_ics) == ap_txt
     }
 
-    # Long-press SELECT -> New To Do -> Priority High -> Save
-    tap(s, "select", 0.5)  # Empty list -> New To Do
+    # Wait for the deletion confirmation to return to the empty To Do list.
+    time.sleep(0.7)
+    tap_until_changed(s, "select").save(out / "todo-new-form.png")
     # Rows: Title(0), Completed(1), Due Date(2), Priority(3), Notes(4), Save(5)
     for _ in range(3):
-        tap(s, "down", 0.2)
-    tap(s, "select", 0.4)  # Priority choice: None(0), Low(1), Medium(2), High(3)
+        tap_until_changed(s, "down")
+    tap_until_changed(s, "select").save(out / "todo-priority.png")
+    # Priority list: None(0), Low(1), Medium(2), High(3).
     for _ in range(3):
-        tap(s, "down", 0.2)
-    tap(s, "select", 0.4)  # High
-    tap(s, "down", 0.2)    # Notes(4)
-    tap(s, "down", 0.2)    # Save(5)
-    tap(s, "select", 0.6)
+        tap_until_changed(s, "down")
+    tap_until_changed(s, "select")
+    tap_until_changed(s, "down")    # Notes(4)
+    tap_until_changed(s, "down")    # Save(5)
+    settle(s).save(out / "todo-new-before-save.png")
+    tap_until_changed(s, "select")
 
     ap_txt2 = wait_changed(ap_ics, ap_txt)
     checks["todo_create_astrapod_ics"] = {

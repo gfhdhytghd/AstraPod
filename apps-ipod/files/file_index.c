@@ -13,7 +13,8 @@
  * part. An .mp4 is the exception: it is a video only if it holds a track of
  * moving video, so each is opened to look. The same walk keeps the book index
  * (book_index.c) current, handing it each book with the size and time its
- * directory entry already gave.
+ * directory entry already gave, and the video index (video_index.c) each
+ * video.
  *
  * The lists are plain text, one path per line, written to a .tmp and renamed
  * only on a completed walk -- so an interrupted one leaves the previous list
@@ -54,7 +55,9 @@
 #include "files/filetypes.h"
 #include "files/path_list.h"
 #include "files/book_index.h"
+#include "files/video_index.h"
 #include "metadata/art_cache.h"     /* new covers want a pass */
+#include "metadata/video_art.h"
 #include "file_index.h"
 
 /* By enum flat_kind */
@@ -238,7 +241,10 @@ static void fi_walk(int depth)
                 case FILE_ATTR_AUDIO:
                 case FILE_ATTR_VIDEO:
                     if (filetype_is_video(fi_path, attr))
+                    {
                         fi_record(&fi_lists[FLAT_VIDEOS], info.mtime);
+                        video_index_found(fi_path, info.size, info.mtime);
+                    }
                     break;
             }
         }
@@ -279,6 +285,7 @@ static void fi_run_scan(void)
     debug_log(DEBUG_LOG_TASKS, "%s: walk started", file_index_task.name);
     started = current_tick;
     book_index_begin();
+    video_index_begin();
     strcpy(fi_path, "/");
     fi_walk(0);
 
@@ -289,6 +296,9 @@ static void fi_run_scan(void)
                   file_index_task.name);
         bg_task_update(&art_cache_task);
     }
+    video_index_end(completed);
+    if (completed)
+        bg_task_update(&video_art_task);
     debug_log(DEBUG_LOG_TASKS, "%s: walk %s after %ld s",
               file_index_task.name, completed ? "done" : "interrupted",
               (long)(current_tick - started) / HZ);
@@ -345,9 +355,10 @@ void file_index_init(void)
     bg_task_init(&file_index_task);
 
     /* Nothing to read on a first boot, or after the lists were deleted; no
-     * video list, which an older version did not write; or a book index an
-     * older version wrote, which only a walk replaces. */
+     * video list or video index, which an older version did not write; or
+     * a book index an older version wrote, which only a walk replaces. */
     if ((!file_exists(LIB_DOCUMENTS_FILE) && !file_exists(LIB_IMAGES_FILE))
-        || !file_exists(LIB_VIDEOS_FILE) || book_index_stale())
+        || !file_exists(LIB_VIDEOS_FILE) || book_index_stale()
+        || video_index_stale())
         fi_wants_scan = true;
 }

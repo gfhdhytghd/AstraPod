@@ -1,8 +1,11 @@
 /***************************************************************************
  * GNU General Public License (version 2+)
  *
- * iTunes video categories and playlists. Names and locations come from the
- * stock library and all playback uses the same viewer as loose video files.
+ * The Videos categories and iTunes' video playlists. The iTunes library's
+ * videos keep the category iTunes gave them; a video file copied to the
+ * player outside it joins the category its MP4 media kind names, by the
+ * video index (files/video_index.c), and a file with none is a movie. Both
+ * play in the same viewer.
  ****************************************************************************/
 #include <stdlib.h>
 #include <stdio.h>
@@ -19,19 +22,24 @@
 #include "speech/talk.h"
 #include "system/format_time.h"
 #include "files/filetypes.h"
+#include "files/video_index.h"
+#include "metadata/video_art.h"
 #include "plugins/rock_compat.h"
 #include "input/action.h"
 #include "ui/scene.h"
+#include "ui/stock_art.h"
 #include "widgets/list.h"
 #include "widgets/menu.h"
-#include "browser_flat.h"
 #include "stock_media.h"
 
 #define VIDEO_MASK (STOCK_MOVIE | STOCK_TV_SHOW | STOCK_MUSIC_VIDEO)
 #define MEDIA_LIMIT 32768
 #define MAX_PLAYLISTS 2048
-#define COVER_SIZE 56
+#define COVER_SIZE VIDEO_ART_DIM
 #define COVER_SOURCE 128
+#define VIDEO_PLACEHOLDER STOCK_ART_ALBUMLIST_PLACEHOLDER
+/* Covers kept drawn: a screen of rows and the ones scrolled in next */
+#define COVER_SLOTS 8
 
 struct video_track {
     uint32_t id;
@@ -46,15 +54,24 @@ struct video_track {
     uint32_t season;
     uint32_t episode;
     uint32_t duration_ms;
+    uint64_t art_key;           /* a loose video's cover thumbnail */
+    bool loose;                 /* strings are in loose_text, not the db */
+};
+
+struct cover_slot {
+    int track;                  /* -1 for none */
+    bool placeholder;           /* drawn while the cover is not there */
 };
 
 struct videos {
     struct stock_db db;
     struct stock_db art;
     int cover_handle;
-    fb_data *cover;
-    int cached_cover;
-    int source_edge;
+    fb_data *cover;             /* an iTunes thumbnail as read, then slots */
+    struct cover_slot slots[COVER_SLOTS];
+    int next_slot;
+    int slot_edge;
+    unsigned art_generation;
     struct bitmap bitmap;
     struct video_track *tracks;
     int count;
@@ -63,7 +80,9 @@ struct videos {
     int row_capacity;
     off_t *playlists;
     int playlist_count;
-    bool loose;
+    char *loose_text;
+    size_t loose_used, loose_size;
+    int capacity;
 };
 
 static bool text_at(const struct videos *v, off_t at, char *buf, size_t n)
@@ -71,6 +90,18 @@ static bool text_at(const struct videos *v, off_t at, char *buf, size_t n)
     struct stock_record r;
     return at && stock_record_read(&v->db, at, v->db.end, "mhod", &r) &&
            stock_db_music_text(&v->db, &r, buf, n);
+}
+
+/* A track's string at `at`, its title, path, artist or show */
+static bool track_text(const struct videos *v, const struct video_track *t,
+                       off_t at, char *buf, size_t n)
+{
+    if (!t->loose)
+        return text_at(v, at, buf, n);
+    if (!at)
+        return false;
+    strlcpy(buf, v->loose_text + at - 1, n);
+    return true;
 }
 
 static int compare_id(const void *left, const void *right)
@@ -104,12 +135,6 @@ static void read_artwork(struct videos *v)
     if (!v->count || !stock_artwork_open(&v->art) ||
         !stock_db_list(&v->art, 1, "mhli", &list))
         return;
-
-    v->cover_handle = core_alloc((COVER_SOURCE * COVER_SOURCE + COVER_SIZE * COVER_SIZE) *
-                                 sizeof(fb_data));
-    if (v->cover_handle <= 0)
-        return;
-    v->cover = core_get_data_pinned(v->cover_handle);
 
     qsort(v->tracks, v->count, sizeof(*v->tracks), compare_art_id);
     for (off_t at = list.body; at < list.end; at = image.end)
@@ -264,12 +289,10 @@ static void read_playlists(struct videos *v)
 static const char *video_title(int row, void *data, char *buf, size_t len)
 {
     const struct videos *v = data;
-    if (row == v->row_count)
-        return "Loose video files";
     const struct video_track *item = &v->tracks[v->rows[row]];
-    if (text_at(v, item->title, buf, len))
+    if (track_text(v, item, item->title, buf, len))
         return buf;
-    if (text_at(v, item->path, buf, len))
+    if (track_text(v, item, item->path, buf, len))
     {
         const char *leaf = strrchr(buf, ':');
         return leaf ? leaf + 1 : buf;
@@ -304,50 +327,126 @@ static const char *video_duration(int row, void *data, char *buf, size_t size)
                             UNIT_SEC | UNIT_TRIM_ZERO, false);
 }
 
+/* The stock placeholder, scaled to `edge` */
+static void paint_placeholder(fb_data *px, int edge)
+{
+    const struct stock_art *art = &stock_art[VIDEO_PLACEHOLDER];
+    fb_data line[COVER_SIZE];
+    for (int y = 0; y < edge; y++)
+    {
+        int sy = y * art->height / edge;
+        for (int x = 0; x < edge; x++)
+            line[x] = LCD_WHITE;
+        if (art->width == edge)
+            stock_art_row(VIDEO_PLACEHOLDER, 0, sy, line, edge);
+        else
+        {
+            fb_data source[COVER_SOURCE];
+            int width = MIN(art->width, COVER_SOURCE);
+            for (int x = 0; x < width; x++)
+                source[x] = LCD_WHITE;
+            stock_art_row(VIDEO_PLACEHOLDER, 0, sy, source, width);
+            for (int x = 0; x < edge; x++)
+                line[x] = source[x * width / edge];
+        }
+        memcpy(px + y * edge, line, edge * sizeof(fb_data));
+    }
+}
+
+/* The cover of `track`, or the placeholder, into `px` at `edge`. True for
+ * the cover. */
+static bool load_cover(struct videos *v, const struct video_track *track,
+                       fb_data *px, int edge)
+{
+    if (track->loose)
+    {
+        if (video_art_load(track->art_key, edge, px, LCD_BLACK))
+            return true;
+    }
+    else if (track->artwork)
+    {
+        int source = stock_artwork_pixels(&v->art, track->artwork, v->cover);
+        if (source)
+        {
+            for (int y = 0; y < edge; y++)
+                for (int x = 0; x < edge; x++)
+                    px[y * edge + x] = v->cover[(y * source / edge) * source +
+                                                x * source / edge];
+            return true;
+        }
+    }
+    paint_placeholder(px, edge);
+    return false;
+}
+
 static const struct bitmap *video_cover(int row, void *data, struct dim *size)
 {
     struct videos *v = data;
     if (row >= v->row_count || !v->cover)
         return NULL;
     int item = v->rows[row];
-    struct video_track *track = &v->tracks[item];
-    if (!track->artwork)
-        return NULL;
-    if (v->cached_cover != item)
-    {
-        v->source_edge = stock_artwork_pixels(&v->art, track->artwork, v->cover);
-        v->cached_cover = -1;
-        if (!v->source_edge)
-            return NULL;
-        v->cached_cover = item;
-        v->bitmap.width = 0;
-    }
     int edge = MIN(COVER_SIZE, MIN(size->width, size->height));
     if (edge <= 0)
         return NULL;
-    if (v->bitmap.width != edge)
+    if (edge != v->slot_edge)
     {
-        fb_data *scaled = v->cover + COVER_SOURCE * COVER_SOURCE;
-        for (int y = 0; y < edge; y++)
-            for (int x = 0; x < edge; x++)
-                scaled[y * edge + x] =
-                    v->cover[(y * v->source_edge / edge) * v->source_edge +
-                             x * v->source_edge / edge];
-        v->bitmap = (struct bitmap){.width = edge, .height = edge,
-                                   .format = FORMAT_NATIVE, .data = (void *)scaled};
+        for (int i = 0; i < COVER_SLOTS; i++)
+            v->slots[i].track = -1;
+        v->slot_edge = edge;
     }
+    int slot;
+    for (slot = 0; slot < COVER_SLOTS; slot++)
+        if (v->slots[slot].track == item)
+            break;
+    fb_data *slots = v->cover + COVER_SOURCE * COVER_SOURCE;
+    if (slot == COVER_SLOTS)
+    {
+        slot = v->next_slot;
+        v->next_slot = (slot + 1) % COVER_SLOTS;
+        v->slots[slot].track = item;
+        v->slots[slot].placeholder =
+            !load_cover(v, &v->tracks[item], slots + slot * COVER_SIZE * COVER_SIZE,
+                        edge);
+    }
+    v->bitmap = (struct bitmap){
+        .width = edge, .height = edge, .format = FORMAT_NATIVE,
+        .data = (void *)(slots + slot * COVER_SIZE * COVER_SIZE),
+    };
+    size->width = size->height = edge;
     return &v->bitmap;
+}
+
+/* A loose video's cover made since its row was drawn: drawn again */
+static int videos_list_action(int action, struct gui_synclist *lists)
+{
+    struct videos *v = lists->data;
+    unsigned generation = video_art_generation();
+    if (generation != v->art_generation)
+    {
+        v->art_generation = generation;
+        bool stale = false;
+        for (int i = 0; i < COVER_SLOTS; i++)
+            if (v->slots[i].track >= 0 && v->slots[i].placeholder &&
+                v->tracks[v->slots[i].track].loose)
+            {
+                v->slots[i].track = -1;
+                stale = true;
+            }
+        if (stale && action == ACTION_NONE)
+            action = ACTION_REDRAW;
+    }
+    return stock_media_list_action(action, lists);
 }
 
 static int show_tracks(struct videos *v, char *title)
 {
-    if (!v->row_count && !v->loose)
+    if (!v->row_count)
         return 0;
     struct simplelist_info info;
-    simplelist_info_init(&info, title, v->row_count + v->loose, v);
+    simplelist_info_init(&info, title, v->row_count, v);
     info.fruit_nav = true;
     info.get_name = video_title;
-    info.action_callback = stock_media_list_action;
+    info.action_callback = videos_list_action;
     info.get_icon = video_icon;
     info.get_albumart = video_cover;
     info.get_subtitle = video_duration;
@@ -360,25 +459,20 @@ static int show_tracks(struct videos *v, char *title)
         int sel = info.selection;
         if (sel < 0)
             return 0;
-        if (v->loose && sel == v->row_count)
-        {
-            if (browser_flat_loose_videos() == GO_TO_ROOT)
-                return MENU_ATTACHED_USB;
-            continue;
-        }
 #ifdef HAVE_VIDEO_PLAYER
         while (sel >= 0 && sel < v->row_count)
         {
             char path[MAX_PATH], label[MAX_PATH];
             const struct video_track *track = &v->tracks[v->rows[sel]];
-            if (!text_at(v, track->path, path, sizeof(path)) ||
-                !stock_video_path(path) || !file_exists(path))
+            if (!track_text(v, track, track->path, path, sizeof(path)) ||
+                (!track->loose && !stock_video_path(path)) ||
+                !file_exists(path))
             {
                 splash(HZ, ID2P(LANG_FILE_NOT_FOUND));
                 break;
             }
-            const char *name = text_at(v, track->title, label, sizeof(label)) ?
-                               label : NULL;
+            const char *name = track_text(v, track, track->title, label,
+                                          sizeof(label)) ? label : NULL;
             info.selection = sel;
             int result = rock_open_video(path, name, sel > 0);
             if (result == ROCK_VIDEO_USB)
@@ -505,8 +599,8 @@ static int show_groups(struct videos *v, char *title, bool television)
     {
         struct video_group_entry *entry = &groups.entries[i];
         const struct video_track *track = &v->tracks[v->rows[i]];
-        if (!text_at(v, television ? track->show : track->artist,
-                     entry->name, sizeof(entry->name)))
+        if (!track_text(v, track, television ? track->show : track->artist,
+                        entry->name, sizeof(entry->name)))
             snprintf(entry->name, sizeof(entry->name), "%s",
                      str(television ? LANG_VIDEO_UNKNOWN_SHOW :
                                       LANG_VIDEO_UNKNOWN_ARTIST));
@@ -553,29 +647,128 @@ static int show_groups(struct videos *v, char *title, bool television)
     return rc;
 }
 
+struct loose_count {
+    int count;
+    size_t bytes;
+};
+
+static bool count_loose(const struct video_entry *e, void *data)
+{
+    struct loose_count *c = data;
+    c->count++;
+    c->bytes += strlen(e->path) + strlen(e->title) + strlen(e->artist) +
+                strlen(e->show) + 4;
+    return c->count < MEDIA_LIMIT;
+}
+
+/* `text` into loose_text: where it starts plus one, or 0 for none */
+static off_t keep_text(struct videos *v, const char *text)
+{
+    size_t n = strlen(text) + 1;
+    if (n == 1 || v->loose_used + n > v->loose_size)
+        return 0;
+    off_t at = v->loose_used + 1;
+    memcpy(v->loose_text + v->loose_used, text, n);
+    v->loose_used += n;
+    return at;
+}
+
+static bool add_loose(const struct video_entry *e, void *data)
+{
+    struct videos *v = data;
+    if (v->count >= v->capacity)
+        return false;
+    struct video_track *t = &v->tracks[v->count];
+    /* Ids from the top, clear of the library's own */
+    *t = (struct video_track){
+        .id = UINT32_MAX - v->count, .media = e->kind,
+        .season = e->season, .episode = e->episode,
+        .duration_ms = e->duration_ms, .art_key = e->art_key, .loose = true,
+    };
+    t->path = keep_text(v, e->path);
+    t->title = keep_text(v, e->title);
+    t->artist = keep_text(v, e->artist);
+    t->show = keep_text(v, e->show);
+    if (t->path)
+        v->count++;
+    return true;
+}
+
+struct title_key {
+    char text[24];
+    int track;
+};
+
+static int compare_title(const void *left, const void *right)
+{
+    const struct title_key *a = left, *b = right;
+    int order = strcasecmp(a->text, b->text);
+    return order ? order : a->track - b->track;
+}
+
+/* The rows in title order */
+static void sort_rows(struct videos *v)
+{
+    int handle = core_alloc(v->row_count * sizeof(struct title_key));
+    if (handle <= 0)
+        return;
+    struct title_key *keys = core_get_data_pinned(handle);
+    for (int i = 0; i < v->row_count; i++)
+    {
+        keys[i].track = v->rows[i];
+        video_title(i, v, keys[i].text, sizeof(keys[i].text));
+        yield();
+    }
+    qsort(keys, v->row_count, sizeof(*keys), compare_title);
+    for (int i = 0; i < v->row_count; i++)
+        v->rows[i] = keys[i].track;
+    core_unpin(handle);
+    core_free(handle);
+}
+
 int stock_videos_screen(enum stock_video_kind kind, int title)
 {
-    struct videos v = {.art.fd = -1, .cached_cover = -1,
-                       .loose = kind == STOCK_MOVIE};
-    struct stock_record list;
+    static struct video_index_text text;
+    struct videos v = {.art.fd = -1, .db.fd = -1};
+    struct stock_record list = {0};
+    struct loose_count loose = {0};
     bool menu_back = action_set_menu_back(true);
     int rc = 0, handle = -1;
     struct ui_scene scene = {0};
     if (!stock_db_open(&v.db, false) ||
-        !stock_db_list(&v.db, 1, "mhlt", &list) || !list.count)
-        goto leave;
+        !stock_db_list(&v.db, 1, "mhlt", &list))
+        list.count = 0;
+    if (kind != STOCK_VIDEO_PLAYLISTS)
+        video_index_each(count_loose, &loose, &text);
 
-    unsigned count = MIN(list.count, MEDIA_LIMIT);
+    unsigned count = MIN(list.count + loose.count, MEDIA_LIMIT);
+    if (!count)
+        goto leave;
     handle = core_alloc(count * (sizeof(*v.tracks) + sizeof(*v.rows)) +
-                        MAX_PLAYLISTS * sizeof(*v.playlists));
+                        MAX_PLAYLISTS * sizeof(*v.playlists) + loose.bytes);
+    v.cover_handle = core_alloc((COVER_SOURCE * COVER_SOURCE +
+                                 COVER_SLOTS * COVER_SIZE * COVER_SIZE) *
+                                sizeof(fb_data));
     if (handle <= 0)
         goto leave;
+    if (v.cover_handle > 0)
+        v.cover = core_get_data_pinned(v.cover_handle);
+    for (int i = 0; i < COVER_SLOTS; i++)
+        v.slots[i].track = -1;
+    v.art_generation = video_art_generation();
     v.tracks = core_get_data_pinned(handle);
     v.playlists = (off_t *)(v.tracks + count);
     v.rows = (int *)(v.playlists + MAX_PLAYLISTS);
-    v.row_capacity = count;
-    read_tracks(&v, &list, count);
-    read_artwork(&v);
+    v.loose_text = (char *)(v.rows + count);
+    v.loose_size = loose.bytes;
+    v.row_capacity = v.capacity = count;
+    if (list.count)
+    {
+        read_tracks(&v, &list, count);
+        read_artwork(&v);
+    }
+    if (loose.count)
+        video_index_each(add_loose, &v, &text);
     qsort(v.tracks, v.count, sizeof(*v.tracks), compare_id);
     if (kind == STOCK_VIDEO_PLAYLISTS)
     {
@@ -601,15 +794,16 @@ int stock_videos_screen(enum stock_video_kind kind, int title)
         {
             ui_scene_open_page(&scene, "videos-push");
             if (kind == STOCK_MOVIE)
+            {
+                sort_rows(&v);
                 rc = show_tracks(&v, str(title));
+            }
             else
                 rc = show_groups(&v, str(title), kind == STOCK_TV_SHOW);
         }
     }
 
 leave:
-    if (v.loose && !v.row_count && browser_flat_loose_videos() == GO_TO_ROOT)
-        rc = MENU_ATTACHED_USB;
     if (handle > 0)
     {
         core_unpin(handle);

@@ -49,6 +49,35 @@ def media(disk):
            "-c:a", "aac", music / "song.mp4")
 
 
+def tagged(path, cover=None, **tags):
+    """A loose film carrying MP4 tags and, given 'cover', a 'covr' image"""
+    args = ["-f", "lavfi", "-i", "testsrc=s=320x240:r=25:d=3",
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=3"]
+    maps = ["-map", "0:v", "-map", "1:a"]
+    if cover:
+        args += ["-i", cover]
+        maps += ["-map", "2:v", "-c:v:1", "copy",
+                 "-disposition:v:1", "attached_pic"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    meta = [arg for key, value in tags.items()
+            for arg in ("-metadata", f"{key}={value}")]
+    ffmpeg(*args, *maps, "-c:v:0", "libx264", "-profile:v:0", "baseline",
+           "-pix_fmt:v:0", "yuv420p", "-c:a", "aac", *meta, path)
+
+
+def loose_media(disk):
+    """Loose films the MP4 media kind sorts into the Videos categories"""
+    poster = disk / "poster.jpg"
+    ffmpeg("-f", "lavfi", "-i", "testsrc2=s=200x300", "-frames:v", "1", poster)
+    tagged(disk / "Movies/covered.mp4", poster, title="Covered Film",
+           media_type=9)
+    tagged(disk / "TV/episode.mp4", poster, title="Pilot", media_type=10,
+           show="My Show", season_number=2, episode_sort=3)
+    tagged(disk / "Clips/band.mp4", title="Band Song", media_type=6,
+           artist="Some Band")
+    poster.unlink()
+
+
 def indexed_movie(disk):
     def record(kind, header, body, fields):
         data = bytearray(header)
@@ -120,18 +149,23 @@ class Sim:
                                self.state[offset + 4:offset + 4 + FRAME_BYTES])
 
     def read(self, image):
-        """The screen's text, and the middle's on its own: a splash over a
-        list reads poorly as part of the whole"""
+        """The screen's text, the middle's and the title's on their own --
+        a splash over a list reads poorly as part of the whole -- and the
+        screen inverted, for light text on the selection bar"""
         text = ""
-        for part in (image, image.crop((32, 92, 288, 146))):
+        for part, invert, psm, zoom in (
+                (image, False, "11", 3),
+                (image.crop((32, 92, 288, 146)), False, "11", 3),
+                (image, True, "11", 3),
+                (image.crop((0, 0, 240, 21)), False, "7", 4)):
             png = self.case / "ocr.png"
             gray = ImageOps.autocontrast(ImageOps.grayscale(part))
-            if gray.resize((1, 1)).getpixel((0, 0)) < 127:
+            if (gray.resize((1, 1)).getpixel((0, 0)) < 127) != invert:
                 gray = ImageOps.invert(gray)
-            gray.resize((part.width * 3, part.height * 3)).save(png)
+            gray.resize((part.width * zoom, part.height * zoom)).save(png)
             text += subprocess.check_output(
-                ["tesseract", png, "stdout", "--psm", "11"],
-                stderr=subprocess.DEVNULL, text=True).lower()
+                ["tesseract", png, "stdout", "--psm", psm],
+                stderr=subprocess.DEVNULL, text=True).lower() + "\n"
         return text
 
     def go(self, key, label, words, absent=()):
@@ -144,6 +178,34 @@ class Sim:
             except AssertionError:
                 if attempt == 2:
                     raise
+
+    def move(self, key, times=1):
+        """Press 'key' 'times' times, each once the screen has answered the
+        last: a press while a list is still settling can be lost"""
+        for _ in range(times):
+            for attempt in range(3):
+                before = self.image()
+                self.tap(key)
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    after = self.image()
+                    if after is not None and before is not None and \
+                            after.crop((0, 21, 320, 240)).tobytes() != \
+                            before.crop((0, 21, 320, 240)).tobytes():
+                        break
+                    time.sleep(0.1)
+                else:
+                    continue
+                break
+            else:
+                raise AssertionError(f"{key} changed nothing")
+            time.sleep(0.5)
+
+    def step(self, key, label, words, absent=()):
+        """Press 'key' once and wait for 'words': for a screen whose
+        selected row reads poorly, where pressing again would go on"""
+        self.tap(key)
+        return self.text(label, words, absent)
 
     def text(self, label, words, absent=(), timeout=15):
         """Wait for a screen showing every word and none of 'absent'"""
@@ -175,6 +237,7 @@ def session(build, case, theme="scrim"):
     media(disk)
     if theme != "scrim":
         indexed_movie(disk)
+        loose_media(disk)
     state_path = case / "state.bin"
     env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy",
                SDL_RENDER_DRIVER="software", PODBOX_UI_WALK_STATE=str(state_path))
@@ -199,9 +262,9 @@ def session(build, case, theme="scrim"):
 
 
 def empty_menu_rows(sim):
-    for name in ("rentals", "tv shows", "music videos", "video playlists"):
+    for name, steps in (("rentals", 1), ("video playlists", 3)):
         label = name.replace(" ", "-")
-        sim.tap("down")
+        sim.move("down", steps)
         sim.text(label, [name])
         before = Image.open(sim.case / f"{label}.png")
         sim.tap("select")
@@ -239,13 +302,26 @@ def stock_navigation(sim, theme):
         sim.tap("down")
     sim.go("select", "videos-menu", ["movies", "rentals", "tv shows",
                                    "music videos", "playlists", "settings"])
-    sim.go("select", "movies", ["indexed film", "loose"])
-    duration = line_text(sim.case, "movies.png", (56, 45, 145, 65),
-                         "movie-duration")
-    assert duration.replace(" ", "") == "3s", duration
-    sim.go("select", "movies-open", ["ipod video"])
-    sim.text("movies-back", ["indexed film", "loose"])
-    sim.go("menu", "videos-back", ["rentals", "tv shows", "music videos"])
+    # The walk that indexes the loose films starts at boot.
+    time.sleep(12)
+    sim.step("select", "movies", ["covered film", "indexed film"],
+             ["rentals"])
+    sim.move("down", 3)
+    sim.step("select", "movies-open", ["ipod video"])
+    sim.text("movies-back", ["covered film", "film"], ["ipod video"])
+    sim.step("menu", "videos-back", ["music videos", "video playlists"],
+             ["indexed film"])
+    sim.move("down", 2)
+    sim.step("select", "tv-shows", ["tv shows"], ["rentals", "pilot"])
+    sim.step("select", "tv-episodes", ["pilot"])
+    sim.step("menu", "tv-back", ["tv shows"], ["rentals", "pilot"])
+    sim.step("menu", "tv-shows-back", ["music videos", "video playlists"],
+             ["pilot"])
+    sim.move("down")
+    sim.step("select", "music-videos", ["some band"], ["rentals"])
+    sim.step("menu", "music-videos-back", ["music videos", "video playlists"],
+             ["some band"])
+    sim.move("up", 3)
     empty_menu_rows(sim)
     sim.tap("down")
     video_settings(sim)

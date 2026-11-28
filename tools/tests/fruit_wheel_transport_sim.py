@@ -159,6 +159,35 @@ def probe(sim, playing, name, hold_seek=False, region=(22, 240, 0, 320),
     print(f"PASS {name}", flush=True)
 
 
+def probe_about(sim, playback):
+    """The page owns LEFT/RIGHT and the running playlist owns PLAY."""
+    out = Path(sim.log.name).parent
+    press(sim, "select")
+    before = frame(sim)
+    page = np.s_[135:226, :]
+    track = playback.get("track")
+    elapsed = playback.get("elapsed", size=8)
+    assert playback.get("status") == 3, "About needs paused playback"
+    for key in ("right", "back"):
+        press(sim, key)
+        after = frame(sim)
+        assert np.any(before[page] != after[page]), f"About did not page on {key}"
+        assert playback.get("track") == track, f"About {key} skipped track"
+        assert playback.get("elapsed", size=8) == elapsed, f"About {key} sought"
+        assert playback.get("status") == 3, f"About {key} changed playback"
+        Image.fromarray(after).save(out / f"about-{key}.png")
+        before = after
+
+    press(sim, "play")
+    wait_for(lambda: playback.get("status") == 1, "About PLAY did not resume")
+    press(sim, "play")
+    wait_for(lambda: playback.get("status") == 3, "About PLAY did not pause")
+    assert playback.get("track") == track, "About PLAY changed the track"
+    assert np.array_equal(before[page], frame(sim)[page]), "PLAY changed page"
+    press(sim, "menu")
+    print("PASS About paging and playback", flush=True)
+
+
 def walk(sim, playback, sim_binary):
     # Main menu -> Shuffle Songs -> Now Playing, with a real queued playlist.
     out = Path(sim.log.name).parent
@@ -224,6 +253,7 @@ def walk(sim, playback, sim_binary):
     move(sim, 1)
     press(sim, "select")
     probe(sim, playback, "settings", region=(22, 240, 0, 142))
+    probe_about(sim, playback)
     press(sim, "menu")
     press(sim, "menu", hold=45)
     assert playback.activity() == playback.activities["ACTIVITY_QUICKSCREEN"]

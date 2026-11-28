@@ -23,9 +23,11 @@
 #include "ui/native_theme_runtime.h"
 #include "ui/retained.h"
 #include "ui/scene.h"
+#include "ui/stock_art.h"
 #include "widgets/menu.h"
 #include "about_art.h"
 #include "about.h"
+#include "fruit_about.h"
 
 #define AB_PAD     16                    /* from the screen's edges         */
 #define AB_GAP     12                    /* between the text and the code   */
@@ -142,6 +144,9 @@ static const struct ui_view_ops about_ops = { .paint = about_paint };
 
 int about_screen(void)
 {
+    if (stock_art_ready())
+        return fruit_about_screen();
+
     const struct ui_rect bounds = {0, 0, LCD_WIDTH, LCD_HEIGHT};
     struct about_page about = { .text = {ab_tagline, rbversion, ab_licence} };
     struct ui_view view;

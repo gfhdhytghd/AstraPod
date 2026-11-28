@@ -40,7 +40,7 @@
 #include "screens/browse/stock_media.h"
 #include "screens/settings/exported_settings.h"
 #include "screens/settings/sound_settings.h"
-#include "screens/system/fruit_about.h"
+#include "screens/system/about.h"
 #include "screens/system/power_stock.h"
 #include "widgets/option_select.h"
 #include "system/volume.h"
@@ -374,12 +374,6 @@ MENU(extras_menu, LANG_FRUIT_EXTRAS, home_callback, extras_rows);
 
 /** Settings **/
 
-static int show_about(void)
-{
-    int ret = fruit_about_screen();
-    return ret == GO_TO_ROOT ? MENU_ATTACHED_USB : ret;
-}
-
 static int volume_limit(void)
 {
     option_screen(volume_limit_setting(), NULL, false,
@@ -575,7 +569,7 @@ static const struct menu_item_ex *const date_time_rows[] = {
 
 MENU(date_time_menu, LANG_FRUIT_DATE_TIME, NULL, date_time_rows);
 
-ROW(about_row, LANG_ABOUT, show_about, NULL);
+ROW(about_row, LANG_ABOUT, about_screen, NULL);
 ROW(main_menu_row, LANG_MAIN_MENU, main_menu_rows, NULL);
 ROW(music_menu_row, LANG_FRUIT_MUSIC_MENU, music_menu_rows, NULL);
 ROW(volume_limit_row, LANG_FRUIT_VOLUME_LIMIT, volume_limit, NULL);

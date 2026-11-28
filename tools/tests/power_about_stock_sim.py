@@ -6,8 +6,9 @@ Arguments: ROCKBOXUI SIMDISK OUTPUT_DIRECTORY
 Runs one headless SDL dummy-video simulator at a time and verifies:
   1. Settings > About under Fruit Company:
      - black glossy status bar (not white) with centered title
-     - 3 pages cycled by SELECT (1 -> 2 -> 3 -> 1), MENU returns to Settings
-     - LEFT/RIGHT do not navigate pages (playback-only under Fruit)
+     - RIGHT/SELECT advance and LEFT retreats, with wrapping
+     - MENU returns to Settings and wheel input leaves the page alone
+     - Stock content motion and timing in Classic, Fruit Company and Ultra
      - Page 2 shows all 7 counts (Songs, Videos, Podcasts, iTunes U,
        Photos, Games, Contacts) with live Contacts and Games values
   2. Hold switch indicator:
@@ -39,7 +40,11 @@ import time
 import zipfile
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageChops
+
+from ui_quickscreen_sim import ULTRA_FALLBACK_THEME
+from ui_stock_walk_sim import Sim as WalkSim
 
 W, H, SLOTS = 320, 240, 8
 PIX = W * H * 3
@@ -257,22 +262,23 @@ def test_fruit_suite(rockboxui, simdisk, out):
             a1_bar = about1.getpixel((50, 10))
             a1_bar_dark = max(a1_bar) < 60
 
-            # Verify LEFT and RIGHT do NOT navigate pages on About
-            sim.tap("right", settle_frames=18)
-            about1_after_right = sim.frame()
-            sim.tap("back", settle_frames=18)
-            about1_after_left = sim.frame()
-            lr_ignored = (
-                diff_count(about1.crop((0, 120, 320, 235)),
-                           about1_after_right.crop((0, 120, 320, 235))) == 0
-                and diff_count(about1.crop((0, 120, 320, 235)),
-                               about1_after_left.crop((0, 120, 320, 235))) == 0
-            )
+            content = (0, 135, 320, 226)
+            wheel_ignored = True
+            for key in ("up", "down"):
+                sim.tap(key)
+                wheel_ignored &= not diff_count(about1.crop(content),
+                                                sim.frame().crop(content))
 
-            # SELECT -> Page 2 (counts)
-            sim.tap("select", settle_frames=24)
+            sim.tap("right", hold_frames=6, settle_frames=30)
             about2 = sim.frame()
             about2.save(out / "sim-about-2.png")
+            right_pages = diff_count(about1.crop(content), about2.crop(content))
+            sim.tap("back", hold_frames=6, settle_frames=30)
+            left_pages = not diff_count(about1.crop(content),
+                                         sim.frame().crop(content))
+            sim.tap("select", hold_frames=6, settle_frames=30)
+            select_pages = not diff_count(about2.crop(content),
+                                           sim.frame().crop(content))
             # Verify 4th row (iTunes U, y=191..201) has white text pixels
             row4_px = sum(
                 1 for y in range(189, 203) for x in range(18, 155)
@@ -287,22 +293,32 @@ def test_fruit_suite(rockboxui, simdisk, out):
                                          about2_hold.crop((0, 0, 25, 22)))
             sim.tap("hold", settle_frames=15)
 
-            # SELECT -> Page 3 (identity)
-            sim.tap("select", settle_frames=24)
+            # RIGHT -> Page 3 (identity)
+            sim.tap("right", hold_frames=6, settle_frames=30)
             about3 = sim.frame()
             about3.save(out / "sim-about-3.png")
 
-            # SELECT -> wraps back to Page 1
-            sim.tap("select", settle_frames=24)
+            # RIGHT wraps to Page 1. LEFT wraps back to Page 3.
+            sim.tap("right", hold_frames=6, settle_frames=30)
             about1_wrap = sim.frame()
             wrap_ok = diff_count(about1.crop((0, 120, 320, 235)),
                                  about1_wrap.crop((0, 120, 320, 235))) == 0
 
+            sim.tap("back", hold_frames=6, settle_frames=30)
+            about3_wrap = sim.frame()
+            about3_wrap.save(out / "sim-about-3-wrapped.png")
+            wrap_back_ok = not diff_count(about3.crop(content),
+                                           about3_wrap.crop(content))
             results["about"] = {
-                "ok": (a1_bar_dark and lr_ignored and row4_px > 60
-                       and wrap_ok and about_hold_diff > 15),
+                "ok": (a1_bar_dark and wheel_ignored and right_pages > 1000
+                       and left_pages and select_pages and row4_px > 60
+                       and wrap_ok and wrap_back_ok and about_hold_diff > 15),
                 "bar_rgb": a1_bar,
-                "lr_ignored": lr_ignored,
+                "wheel_ignored": wheel_ignored,
+                "right_diff_px": right_pages,
+                "left_pages": left_pages,
+                "select_pages": select_pages,
+                "wrap_back_ok": wrap_back_ok,
                 "row4_itunes_u_px": row4_px,
                 "wrap_ok": wrap_ok,
                 "about_hold_diff": about_hold_diff,
@@ -360,6 +376,124 @@ def test_fruit_suite(rockboxui, simdisk, out):
     return results
 
 
+def record_turn(sim, out, name, key):
+    """Save the distinct LCD frames with elapsed milliseconds in the names."""
+    sim.settle(quiet=.45, limit=1.8)
+    first = len(sim.seen)
+    sim.key(key, hold=10)
+    deadline = time.monotonic() + 1.5
+    while len(sim.seen) == first and time.monotonic() < deadline:
+        sim.alive()
+        time.sleep(.02)
+    sim.settle(quiet=.35)
+    frames = sim.seen[first:]
+    if not frames:
+        return [], []
+    timestamps = [round((t - frames[0][0]) * 1000) for t, _ in frames]
+    images = [np.frombuffer(p, np.uint8).reshape(H, W, 3) for _, p in frames]
+    for index, (ms, picture) in enumerate(zip(timestamps, images)):
+        Image.fromarray(picture).save(out / f"{name}-{index:02d}-{ms:03d}ms.png")
+    return timestamps, images
+
+
+def text_mask(picture):
+    # iTunes U is below the capacity legend. Its white glyphs are a
+    # convenient marker for horizontal translation without the background.
+    return np.min(picture[190:206], axis=2) > 210
+
+
+def match_offset(frames, mask, expected):
+    """Measure which of the stock offsets each visible glyph mask matches."""
+    matches = []
+    for picture in frames:
+        observed = text_mask(picture)
+        max_score, offset = 0, None
+        for shift in expected:
+            x0, x1 = max(0, shift), min(W, W + shift)
+            if x0 >= x1:
+                continue
+            moved = np.zeros_like(mask)
+            moved[:, x0:x1] = mask[:, x0 - shift:x1 - shift]
+            union = np.count_nonzero(observed | moved)
+            score = np.count_nonzero(observed & moved) / max(1, union)
+            if score > max_score:
+                max_score, offset = score, shift
+        if max_score > .88:
+            matches.append(offset)
+    return matches
+
+
+def test_about_motion(rockboxui, simdisk, out, theme):
+    work = out / f"about-{theme}"
+    work.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "disk"
+        prepare_disk(simdisk, root, theme, [
+            "animations: on",
+            "start in screen: root",
+            "root menu order: system_menu,settings,!wps",
+        ])
+        if theme == "fruit-company-ultra":
+            theme_dir = root / ".rockbox/native-themes"
+            theme_dir.mkdir(exist_ok=True)
+            fallback = theme_dir / "fruit-company-ultra.podtheme"
+            if not fallback.exists():
+                fallback.write_text(ULTRA_FALLBACK_THEME)
+        sim = WalkSim(rockboxui, root, work, "firmware", theme)
+        try:
+            time.sleep(4)
+            native = theme in ("classic", "scrim")
+            for _ in range(0 if native else 5):
+                sim.key("down", hold=4)
+                sim.settle(quiet=.1)
+            sim.key("select", hold=4)
+            sim.settle()
+            if native:
+                # System starts on Recording. About is its second row.
+                sim.key("down", hold=4)
+                sim.settle(quiet=.1)
+            sim.key("select", hold=4)
+            sim.settle(quiet=.65, limit=2.0)
+            original = np.frombuffer(sim.seen[-1][1], np.uint8).reshape(H, W, 3)
+            right_times, right = record_turn(sim, work, "right", "right")
+            left_times, left = record_turn(sim, work, "left", "back")
+            assert not (root / ".rockbox/native-theme.log").exists(), theme
+        finally:
+            sim.close()
+            sim.process.wait()
+
+    if not right or not left:
+        return {
+            "ok": False,
+            "right_frames_ms": right_times,
+            "left_frames_ms": left_times,
+        }
+
+    # 2.0.5 captures at ~34 ms steps: offsets 245, 179, 124, 79, 44,
+    # 19, 4, 0. The simulator's integer curve rounds these to 245, 180,
+    # 125, 80, 45, 20, 5, 0.
+    incoming = [245, 180, 125, 80, 45, 20, 5, 0]
+    mask = text_mask(right[-1])
+    right_offsets = match_offset(right, mask, incoming)
+    left_offsets = match_offset(left, mask, [-75, -140])
+    stationary = all(np.array_equal(original[:135], p[:135])
+                     for p in right + left)
+    # SDL can coalesce a frame while presenting, especially on a loaded
+    # host. Require the ordered curve with at most one missed step.
+    curve_ok = (len(right_offsets) >= 7 and right_offsets[-1] == 0
+                and right_offsets == [x for x in incoming if x in right_offsets])
+    duration_ok = all(210 <= t[-1] <= 330 for t in (right_times, left_times))
+    return {
+        "ok": (curve_ok and bool(left_offsets) and stationary and duration_ok
+               and np.array_equal(original, left[-1])),
+        "right_offsets_px": right_offsets,
+        "left_outgoing_offsets_px": left_offsets,
+        "stationary_top": stationary,
+        "right_frames_ms": right_times,
+        "left_frames_ms": left_times,
+    }
+
+
 def test_scrim_unchanged(rockboxui, simdisk, out):
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "disk"
@@ -392,6 +526,9 @@ def main():
 
     results = test_fruit_suite(rockboxui, simdisk, out)
     results["scrim_unchanged"] = test_scrim_unchanged(rockboxui, simdisk, out)
+    for theme in ("classic", "fruit-company", "fruit-company-ultra", "scrim"):
+        results[f"about_motion_{theme}"] = test_about_motion(
+            rockboxui, simdisk, out, theme)
     (out / "result.json").write_text(json.dumps(results, indent=2) + "\n")
     print(json.dumps(results, indent=2))
     ok = all(v["ok"] for v in results.values())

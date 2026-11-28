@@ -348,6 +348,7 @@ typedef struct
     const struct button_mapping   *items;
     const struct button_mapping* (*get_context_map)(int);
     bool                           is_prebutton;
+    bool                           local_left_right;
 } action_cur_t;
 
 /* act_last holds action state between get_action() calls */
@@ -740,6 +741,8 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
     ui_polling = false;
 #endif
     bool transport =
+        !(cur->local_left_right && (*button & (BUTTON_LEFT | BUTTON_RIGHT)) &&
+          !(*button & BUTTON_PLAY)) &&
         cur->context != CONTEXT_SPIKE && cur->context != CONTEXT_MUSIC_QUIZ &&
         cur->context != CONTEXT_QUICKSCREEN && cur->context != CONTEXT_WPS &&
         cur->context != CONTEXT_VIDEO_PLAYBACK && cur->context != CONTEXT_AGENTS &&
@@ -1226,7 +1229,8 @@ static void init_act_cur(action_cur_t *cur,
 {
     cur->action              = ACTION_UNKNOWN;
     cur->button              = BUTTON_NONE;
-    cur->context             = context;
+    cur->context             = context & ~CONTEXT_LOCAL_LEFT_RIGHT;
+    cur->local_left_right    = (context & CONTEXT_LOCAL_LEFT_RIGHT) != 0;
     cur->is_prebutton        = false;
     cur->items               = NULL;
 #ifdef HAVE_USB_PODLINK
@@ -1534,7 +1538,8 @@ int get_action(int context, int timeout)
     podlink_time_sync();
 #endif
 #ifdef HAVE_WHEEL_WPS_CHORD
-    if (agents_nav_pending() != AGENTS_NAV_NONE && !shortcut_screen_context(context))
+    if (agents_nav_pending() != AGENTS_NAV_NONE && !shortcut_screen_context(
+            context & ~CONTEXT_LOCAL_LEFT_RIGHT))
         return ACTION_STD_CANCEL;
 #endif
     if (extras_alarm_ring_poll(&timeout))
@@ -1555,7 +1560,7 @@ int get_action(int context, int timeout)
         return ACTION_REDRAW;
     }
 #endif
-    action = route_screen_shortcut(step_handoff(action), context);
+    action = route_screen_shortcut(step_handoff(action), current.context);
     return menu_back_action(action);
 }
 
@@ -1617,7 +1622,8 @@ int get_custom_action(int context,int timeout,
     podlink_time_sync();
 #endif
 #ifdef HAVE_WHEEL_WPS_CHORD
-    if (agents_nav_pending() != AGENTS_NAV_NONE && !shortcut_screen_context(context))
+    if (agents_nav_pending() != AGENTS_NAV_NONE && !shortcut_screen_context(
+            context & ~CONTEXT_LOCAL_LEFT_RIGHT))
         return ACTION_STD_CANCEL;
 #endif
     action_cur_t current;
@@ -1635,7 +1641,7 @@ int get_custom_action(int context,int timeout,
         return ACTION_REDRAW;
     }
 #endif
-    action = route_screen_shortcut(step_handoff(action), context);
+    action = route_screen_shortcut(step_handoff(action), current.context);
     return menu_back_action(action);
 }
 

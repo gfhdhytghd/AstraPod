@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Import the app icons, or pack them for the Games, Other Apps and Demos lists.
 
-Each PNG here is one app's icon, 55x55 RGBA with square corners, named
-after its module path
+Each PNG here is one app's icon, 55x55 and opaque to its square edges,
+named after its module path
 under .rockbox/rocks/ with '/' written as '__' (games__2048.png); the native
 Music Quiz is native__music_quiz.png. The ids are the ones
 apps-ipod/screens/browse/app_list.c lists.
@@ -15,7 +15,9 @@ apps-ipod/screens/browse/app_list.c lists.
 
 --import takes DIR/<id>.png, DIR/<id with '/' as '__'>.png and either with
 a size suffix (games__2048-96.png), keeps the largest copy of each icon,
-squares off rounded corners and needs Pillow. It overwrites the icons it finds and leaves the others.
+fills out a rounded tile to a full square (see full_bleed) and needs
+Pillow. It overwrites the icons it finds and leaves the others. A frame or
+plate drawn inside the art keeps its own corners: square those by hand.
 --pack is pure Python, so a build host needs nothing beyond python3. An app
 with no icon here draws the pack's placeholder tile.
 """
@@ -66,7 +68,7 @@ def import_icons(source):
             icon = image.convert('RGBA')
         if icon.size != (SIZES[0], SIZES[0]):
             icon = icon.resize((SIZES[0], SIZES[0]), Image.LANCZOS)
-        icon.putdata(square_corners(list(icon.getdata()), SIZES[0]))
+        icon.putdata(full_bleed(list(icon.getdata()), SIZES[0]))
         icon.save(HERE / file_name(app), optimize=True)
         print('%s <- %s' % (file_name(app), path))
     missing = sorted(ids - set(best))
@@ -124,73 +126,76 @@ def resample(px, src, dst):
     return out
 
 
-# The corner box: the icon's straight edges have begun by here.
-SQUARE_REACH = 16
-# Rows of an edge's outline and highlight, carried round a squared corner.
-SQUARE_RIM = 2
+# The corner box: the tile's straight edges have begun by here.
+BLEED_REACH = 13
+# Rows of the tile's outline and highlight; the row inside them runs on to
+# the edge in their place.
+BLEED_RIM = 2
 
 
-def square_corners(px, size):
-    """Fill the rounded-off corners of an icon tile, so it is square.
+def full_bleed(px, size):
+    """Make an icon an opaque square right to its edges.
 
-    The outer rows follow the straight edges, alpha and colour, so the
-    outline, highlight and shadow run on into the corner; the rest of the
-    corner settles from the pixels round it. Art inside the old curve is
-    left as it is."""
-    last = size - 1
-
-    def at(x, y):
-        return px[y * size + x]
-
-    def along(x, y, dx, dy, want):
-        """The edge's colour nearest the corner: the first pixel towards
-        the middle whose alpha is the straight edge's."""
-        while abs(at(x, y)[3] - want) > 8 and 0 < x < last and 0 < y < last:
-            x, y = x + dx, y + dy
-        return at(x, y)
-
-    def profile(get):
-        vals = sorted(get(k)[3]
-                      for k in range(SQUARE_REACH, last - SQUARE_REACH + 1))
+    The tile's rounded outline goes: past BLEED_RIM each row and column
+    repeats the one inside it out to the edge, with no rim, highlight or
+    shadow; the top and bottom edges run the full width, so each corner
+    pixel matches its row and its column. Inside the old curve the
+    background settles from the pixels round it; art there is kept."""
+    def median(vals):
+        vals = sorted(vals)
         return vals[len(vals) // 2]
 
-    row_alpha = [profile(lambda k: at(k, y)) for y in range(size)]
-    col_alpha = [profile(lambda k: at(x, k)) for x in range(size)]
-    out = list(px)
+    mid = range(16, size - 16)
+    rows = [median(px[y * size + k][3] for k in mid) for y in range(size)]
+    cols = [median(px[k * size + x][3] for k in mid) for x in range(size)]
+    y0 = min(y for y in range(size) if rows[y] >= 128)
+    y1 = max(y for y in range(size) if rows[y] >= 128)
+    x0 = min(x for x in range(size) if cols[x] >= 128)
+    x1 = max(x for x in range(size) if cols[x] >= 128)
+
+    def thin(x, y):
+        return (0 <= x < size and 0 <= y < size and
+                px[y * size + x][3] < 250)
+
     hole = []
-    for y in range(size):
-        for x in range(size):
-            left, top = x < SQUARE_REACH, y < SQUARE_REACH
-            if (not (left or x > last - SQUARE_REACH) or
-                    not (top or y > last - SQUARE_REACH) or
-                    at(x, y)[3] >= 248):
+    for y in range(y0 + BLEED_RIM, y1 - BLEED_RIM + 1):
+        for x in range(x0 + BLEED_RIM, x1 - BLEED_RIM + 1):
+            if (min(x - x0, x1 - x) >= BLEED_REACH or
+                    min(y - y0, y1 - y) >= BLEED_REACH):
                 continue
-            ex = x if left else last - x
-            ey = y if top else last - y
-            alpha = row_alpha[y] * col_alpha[x] / 255
-            if min(ex, ey) > SQUARE_RIM and alpha > 254:
+            if any(thin(x + dx, y + dy) for dy in range(-3, 4)
+                   for dx in range(-3, 4) if dx * dx + dy * dy <= 9):
                 hole.append(y * size + x)
-                continue
-            edge = along(x, y, 1 if left else -1, 0, row_alpha[y])
-            side = along(x, y, 0, 1 if top else -1, col_alpha[x])
-            if ey != ex:
-                rgb = edge[:3] if ey < ex else side[:3]
-            else:
-                rgb = [(p + q) / 2 for p, q in zip(edge[:3], side[:3])]
-            out[y * size + x] = tuple(rgb) + (alpha,)
+    out = [p[:3] for p in px]
     for i in hole:
         out[i] = None
-    for _ in range(200):
+    for _ in range(150):
         settled = {}
         for i in hole:
-            near = [out[j] for j in (i - 1, i + 1, i - size, i + size)
-                    if out[j] is not None and out[j][3] > 200]
+            x, y = i % size, i // size
+            near = [out[j] for j, nx, ny in ((i - 1, x - 1, y),
+                                              (i + 1, x + 1, y),
+                                              (i - size, x, y - 1),
+                                              (i + size, x, y + 1))
+                    if x0 + BLEED_RIM <= nx <= x1 - BLEED_RIM and
+                    y0 + BLEED_RIM <= ny <= y1 - BLEED_RIM and
+                    out[j] is not None]
             if near:
                 settled[i] = tuple(sum(c[k] for c in near) / len(near)
-                                   for k in range(3)) + (255,)
-        for i, value in settled.items():
-            out[i] = value
-    return [tuple(int(round(c)) for c in p) for p in out]
+                                   for k in range(3))
+        out = [settled.get(i, v) for i, v in enumerate(out)]
+    lo_x, hi_x = x0 + BLEED_RIM, x1 - BLEED_RIM
+    lo_y, hi_y = y0 + BLEED_RIM, y1 - BLEED_RIM
+    full = []
+    for y in range(size):
+        for x in range(size):
+            cx, cy = min(max(x, lo_x), hi_x), min(max(y, lo_y), hi_y)
+            if ((cx, cy) != (x, y) and cx in (lo_x, hi_x) and
+                    cy in (lo_y, hi_y)):
+                cx += 1 if cx == lo_x else -1
+            full.append(tuple(int(round(c)) for c in out[cy * size + cx]) +
+                        (255,))
+    return full
 
 
 def placeholder(size):

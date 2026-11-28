@@ -723,14 +723,16 @@ static bool rock_video_themed_controls(void)
            ui_wheel_navigation();
 }
 
-static unsigned rock_video_accent(void)
+/* Classic and Fruit Company draw the stock movie overlay. */
+static const struct video_stock_osd *rock_video_stock_osd(void)
 {
+#ifdef HAVE_HW_H264
     const char *theme = ui_theme_active_name();
-    unsigned accent = ui_theme_rgb565(UI_COLOR_WPS_ACCENT);
     if (!strcmp(theme, ui_theme_builtin_name(UI_THEME_CLASSIC)) ||
         !strcmp(theme, ui_theme_builtin_name(UI_THEME_FRUIT_COMPANY)))
-        accent |= ROCK_VIDEO_COMPACT_CONTROLS;
-    return accent;
+        return &video_stock_osd;
+#endif
+    return NULL;
 }
 
 static bool rock_set_int(const unsigned char *title, const char *unit, int voice_unit,
@@ -1196,10 +1198,11 @@ static int invoke_module(void *opaque)
         .battery_level = battery_level,
         .result = ROCK_VIDEO_FAILED,
         .themed_controls = themed_video,
-        .accent = themed_video ? rock_video_accent() : 0,
+        .accent = themed_video ? ui_theme_rgb565(UI_COLOR_WPS_ACCENT) : 0,
         .resume_menu = themed_video ? rock_video_resume_menu : NULL,
         .control_centre = rock_video_control_centre,
         .picture_mode = rock_video_picture_mode,
+        .stock_osd = themed_video ? rock_video_stock_osd() : NULL,
     };
     const void *parameter = call->file;
     if (video)
@@ -1211,6 +1214,8 @@ static int invoke_module(void *opaque)
     int result = call->module->entry_point(parameter);
 #ifdef HAVE_HW_H264
     current_video = NULL;
+    if (video)
+        video_stock_osd_release();
 #endif
     if (get_current_activity() == ACTIVITY_PLUGIN)
         pop_current_activity_without_refresh();
@@ -1484,10 +1489,11 @@ int rock_open_video(const char *path, const char *title, bool has_previous)
         .has_previous = has_previous,
         .result = ROCK_VIDEO_FAILED,
         .themed_controls = themed,
-        .accent = rock_video_accent(),
+        .accent = ui_theme_rgb565(UI_COLOR_WPS_ACCENT),
         .resume_menu = themed ? rock_video_resume_menu : NULL,
         .control_centre = rock_video_control_centre,
         .picture_mode = rock_video_picture_mode,
+        .stock_osd = rock_video_stock_osd(),
     };
     int result = rock_open_foreground(ROCK_VIDEO_MODULE, path, false, false,
                                       &request);

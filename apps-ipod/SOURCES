@@ -194,6 +194,7 @@ plugins/rock_execution.c
 plugins/rock_large_stack.c
 #ifdef HAVE_HW_H264
 plugins/rock_h264.c
+plugins/video_stock_osd.c
 #endif
 plugins/rock_stream.c
 plugins/rock_podlink.c

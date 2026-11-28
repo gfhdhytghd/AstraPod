@@ -74,6 +74,7 @@ struct plugin_api {
     const unsigned char *(*font_get_bits)(struct font *, unsigned int);
     int (*snprintf)(char *, size_t, const char *, ...);
     int (*sound_min)(int);
+    int (*sound_max)(int);
     int (*sound_val2phys)(int, int);
     const char *(*sound_unit)(int);
     void (*splash)(int, const char *);

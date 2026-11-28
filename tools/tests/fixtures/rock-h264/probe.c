@@ -7,14 +7,15 @@
 #include "video_playback.h"
 #include "video_audio.h"
 #include "plugins/rock_h264.h"
+#include "plugins/video_stock_osd.h"
 
 int video_h264_probe(const char *path, void *buffer, size_t size);
 
 enum mode {
     FINISH, SEEK_MENU, SCRUB_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR,
-    COMPACT_SCRUB_TIMED, COMPACT_SCRUB_SELECT,
+    STOCK_SCRUB_TIMED, STOCK_SCRUB_SELECT,
 };
-enum control_style { NO_CONTROLS, THEMED_CONTROLS, COMPACT_CONTROLS };
+enum control_style { NO_CONTROLS, THEMED_CONTROLS, STOCK_CONTROLS };
 static enum mode mode;
 static volatile long current_tick;
 static unsigned int thread_id = 1;
@@ -29,7 +30,7 @@ static int resume_choice;
 static long paused_at;
 static bool saw_timeout;
 static unsigned control_centre_calls, picture_changes;
-static unsigned volume_changes;
+static unsigned volume_changes, brightness_changes, stock_frames;
 static int picture_mode;
 static long scrub_at, seek_at;
 static bool scrub_cleared;
@@ -171,7 +172,7 @@ static int action(int context, int timeout)
     assert(context == CONTEXT_VIDEO_PLAYBACK && timeout == TIMEOUT_NOBLOCK);
     if (decoded < 4)
         return ACTION_NONE;
-    if (mode == COMPACT_SCRUB_TIMED || mode == COMPACT_SCRUB_SELECT)
+    if (mode == STOCK_SCRUB_TIMED || mode == STOCK_SCRUB_SELECT)
     {
         switch (control_action)
         {
@@ -185,11 +186,11 @@ static int action(int context, int timeout)
             return ACTION_WPS_VOLUP;
         case 3:
         {
-            long delay = mode == COMPACT_SCRUB_TIMED ? 30 : 10;
+            long delay = mode == STOCK_SCRUB_TIMED ? 30 : 10;
             if (current_tick < scrub_at + delay)
                 return ACTION_NONE;
             control_action++;
-            if (mode == COMPACT_SCRUB_SELECT)
+            if (mode == STOCK_SCRUB_SELECT)
                 return ACTION_WPS_BROWSE;
             scrub_at = current_tick;
             return ACTION_WPS_VOLUP;
@@ -198,30 +199,25 @@ static int action(int context, int timeout)
             return opens == 2 ? ACTION_WPS_MENU : ACTION_NONE;
         }
     }
-    if (controls == COMPACT_CONTROLS)
+    if (controls == STOCK_CONTROLS)
     {
-        switch (control_action)
+        static const int script[] = {
+            ACTION_WPS_BROWSE, ACTION_WPS_QUICKSCREEN, ACTION_WPS_BROWSE,
+            ACTION_WPS_BROWSE, ACTION_WPS_VOLUP, ACTION_WPS_BROWSE,
+            ACTION_WPS_VOLUP, ACTION_WPS_VOLUP, ACTION_WPS_VOLUP,
+            ACTION_WPS_BROWSE, ACTION_WPS_VOLUP, ACTION_WPS_BROWSE,
+            ACTION_WPS_VOLDOWN,
+        };
+        if (control_action < sizeof(script) / sizeof(script[0]))
+            return script[control_action++];
+        if (control_action == sizeof(script) / sizeof(script[0]))
         {
-        case 0: control_action++; return ACTION_WPS_BROWSE;
-        case 1: control_action++; return ACTION_WPS_QUICKSCREEN;
-        case 2: control_action++; return ACTION_WPS_BROWSE;
-        case 3: control_action++; return ACTION_WPS_BROWSE;
-        case 4:
-        case 5:
-        case 6: control_action++; return ACTION_WPS_VOLUP;
-        case 7: control_action++; return ACTION_WPS_BROWSE;
-        case 8: control_action++; return ACTION_WPS_VOLUP;
-        case 9: control_action++; return ACTION_WPS_BROWSE;
-        case 10: control_action++; return ACTION_WPS_VOLDOWN;
-        case 11:
             paused_at = current_tick;
             control_action++;
             return ACTION_WPS_PLAY;
-        case 12:
-            if (current_tick > paused_at + 4 * HZ)
-                return ACTION_WPS_MENU;
-            break;
         }
+        if (current_tick > paused_at + 4 * HZ)
+            return ACTION_WPS_MENU;
     }
     else if (controls == THEMED_CONTROLS)
     {
@@ -288,60 +284,69 @@ static void splash(int ticks, const char *label) { (void)ticks; (void)label; }
 static struct font *font(int id) { (void)id; return NULL; }
 static int val2phys(int setting, int value) { (void)setting; return value; }
 static int minimum(int setting) { (void)setting; return -80; }
+static int maximum(int setting) { (void)setting; return 6; }
 static const char *unit(int setting) { (void)setting; return "dB"; }
 static int battery_level(void) { return 62; }
 
-static void check_compact_controls(const unsigned char *plane, int stride)
+/* The overlay each step of the stock script leaves, after the step. */
+static bool stock_present(unsigned char *const planes[3],
+                          const struct video_stock_state *state)
 {
-    int footer_left = plane[213 * stride + 11];
-    int footer_right = plane[213 * stride + 309];
-    int middle = plane[213 * stride + 210];
-    int top = plane[10 * stride + 12];
-    int battery = plane[10 * stride + 290];
-    int handle_pixels = 0;
-    for (int col = 10; col < 310; col++)
-        handle_pixels += plane[217 * stride + col] > 225;
-
-    assert(plane[10 * stride + 244] == 112);
-    switch (control_action)
+    static const unsigned char expected[] = {
+        VIDEO_STOCK_HIDDEN, VIDEO_STOCK_PROGRESS, VIDEO_STOCK_PROGRESS,
+        VIDEO_STOCK_SCRUB, VIDEO_STOCK_BRIGHTNESS, VIDEO_STOCK_BRIGHTNESS,
+        VIDEO_STOCK_PICTURE, VIDEO_STOCK_PICTURE, VIDEO_STOCK_PICTURE,
+        VIDEO_STOCK_PICTURE, VIDEO_STOCK_HIDDEN, VIDEO_STOCK_VOLUME,
+        VIDEO_STOCK_HIDDEN, VIDEO_STOCK_VOLUME, VIDEO_STOCK_VOLUME,
+    };
+    assert(active && planes[0] && planes[1] && planes[2]);
+    assert(state->title && !strcmp(state->title, "Test clip"));
+    stock_frames++;
+    if (mode == STOCK_SCRUB_SELECT && control_action == 4)
     {
-    case 0:
-        assert(footer_left == 112 && footer_right == 112);
-        assert(top == 112 && battery == 112);
-        break;
-    case 1:
-    case 2:
-    case 8:
-    case 10:
-        assert(footer_left != 112 && footer_right != 112 && !handle_pixels);
-        assert(top != 112 && battery != 112);
-        break;
-    case 3:
-        assert(footer_left != 112 && footer_right != 112 && handle_pixels == 4);
-        break;
-    case 4:
-    case 5:
-    case 6:
-    case 7:
-        assert(footer_left == 112 && footer_right != 112 && middle == 112);
-        break;
-    case 9:
-    case 11:
-        assert(footer_left != 112 && footer_right == 112 && middle == 112);
-        assert(top != 112 && battery != 112);
-        break;
-    case 12:
-        assert(top != 112);
-        if (current_tick == paused_at + 4 * HZ)
+        assert(state->mode == VIDEO_STOCK_HIDDEN);
+        scrub_cleared = true;
+    }
+    if (controls != STOCK_CONTROLS)
+        return false;
+    assert(control_action < sizeof(expected));
+    unsigned char want = expected[control_action];
+    if (control_action == sizeof(expected) - 1)
+    {
+        assert(state->paused);
+        if (current_tick >= paused_at + 4 * HZ)
         {
-            assert(footer_left == 112 && footer_right == 112 && battery == 112);
+            want = VIDEO_STOCK_HIDDEN;
             saw_timeout = true;
         }
-        else
-            assert(footer_left != 112 && footer_right == 112 && battery != 112);
-        break;
     }
+    assert(state->mode == want);
+    if (want == VIDEO_STOCK_BRIGHTNESS)
+        assert(state->level == 31 + (control_action == 5) &&
+               state->level_max == 62);
+    if (want == VIDEO_STOCK_VOLUME)
+        assert(state->level_max == 86 && state->level >= 0);
+    if (want == VIDEO_STOCK_PICTURE)
+        assert(state->picture && *state->picture);
+    return false;
 }
+
+static int stock_brightness(int step)
+{
+    static int level = 31;
+    if (step)
+    {
+        brightness_changes++;
+        level += step;
+    }
+    return level;
+}
+
+static const struct video_stock_osd stock_osd = {
+    .present = stock_present,
+    .brightness = stock_brightness,
+    .brightness_max = 62,
+};
 
 static void draw(unsigned char * const src[3], int sx, int sy, int stride,
                  int x, int y, int w, int h)
@@ -349,15 +354,9 @@ static void draw(unsigned char * const src[3], int sx, int sy, int stride,
     assert(active && src[0] && src[1] && src[2]);
     assert(!x && !y && !sx && !sy &&
            stride == LCD_WIDTH && w == LCD_WIDTH && h == LCD_HEIGHT);
-    if (mode == COMPACT_SCRUB_SELECT && control_action == 4)
-    {
-        assert(src[0][213 * stride + 11] == 112);
-        assert(src[0][213 * stride + 309] == 112);
-        scrub_cleared = true;
-    }
-    if (controls == COMPACT_CONTROLS)
-        check_compact_controls(src[0], stride);
-    else if (controls == THEMED_CONTROLS)
+    assert(controls != STOCK_CONTROLS && mode != STOCK_SCRUB_TIMED &&
+           mode != STOCK_SCRUB_SELECT);
+    if (controls == THEMED_CONTROLS)
     {
         /* The uniform source remains visible through the inset panels. */
         int rail = src[0][208 * stride + 300];
@@ -449,6 +448,7 @@ static const struct plugin_api api = {
     .font_get = font,
     .snprintf = snprintf,
     .sound_min = minimum,
+    .sound_max = maximum,
     .sound_val2phys = val2phys,
     .sound_unit = unit,
     .splash = splash,
@@ -467,7 +467,7 @@ static void reset(enum mode next)
     controls = NO_CONTROLS;
     saw_timeout = false;
     control_centre_calls = picture_changes = 0;
-    volume_changes = 0;
+    volume_changes = brightness_changes = stock_frames = 0;
     picture_mode = 0;
     scrub_at = seek_at = 0;
     scrub_cleared = false;
@@ -596,25 +596,26 @@ int main(int argc, char **argv)
     assert(resume_calls == 4 && drawn < 336);
 
     reset(FINISH);
-    controls = COMPACT_CONTROLS;
-    struct video_play_options compact = options;
-    compact.compact_controls = true;
-    compact.control_centre = control_centre;
-    compact.picture_mode = scale_picture;
-    compact.battery_level = battery_level;
-    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &compact) ==
+    controls = STOCK_CONTROLS;
+    struct video_play_options stock = options;
+    stock.stock_osd = &stock_osd;
+    stock.control_centre = control_centre;
+    stock.picture_mode = scale_picture;
+    stock.battery_level = battery_level;
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &stock) ==
            VIDEO_EXIT);
-    assert(saw_timeout && control_centre_calls == 1);
+    assert(saw_timeout && control_centre_calls == 1 && !drawn);
     assert(picture_changes == 3 && picture_mode == 0 && volume_changes == 2);
+    assert(brightness_changes == 1 && stock_frames > 0);
 
-    compact.resume_menu = NULL;
-    reset(COMPACT_SCRUB_TIMED);
-    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &compact) ==
+    stock.resume_menu = NULL;
+    reset(STOCK_SCRUB_TIMED);
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &stock) ==
            VIDEO_EXIT);
     assert(seek_at == scrub_at + HZ / 2 && volume_changes == 0);
 
-    reset(COMPACT_SCRUB_SELECT);
-    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &compact) ==
+    reset(STOCK_SCRUB_SELECT);
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &stock) ==
            VIDEO_EXIT);
     assert(seek_at == scrub_at + 10 && scrub_cleared && picture_changes == 0);
 

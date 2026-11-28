@@ -1144,62 +1144,126 @@ void native_wps_copy_art(fb_data *dst, int side)
     wps_art_pin(wps->art_handle, false);
 }
 
-/* The page slides under Scrim's stationary artwork and its controls pass
- * over it. The turned cover stays where it is too; the page brings its
- * reflection, and the landing draws the part the page has not reached. */
-void native_wps_paint_slide(int hidden, fb_data base)
+/* Children of a moving view keep their own offsets and clipping. */
+static const uint8_t chrome_edge[WPS_VIEW_COUNT] = {
+    [WPS_HEADER] = WPS_CHROME_TOP,
+    [WPS_VOLUME] = WPS_CHROME_TOP,
+    [WPS_PANEL] = WPS_CHROME_LEFT,
+    [WPS_SPECTRUM] = WPS_CHROME_LEFT,
+    [WPS_TITLE] = WPS_CHROME_RIGHT,
+    [WPS_ARTIST] = WPS_CHROME_RIGHT,
+    [WPS_ALBUM] = WPS_CHROME_RIGHT,
+    [WPS_SHUFFLE] = WPS_CHROME_RIGHT,
+    [WPS_STOCK_REPEAT] = WPS_CHROME_RIGHT,
+    [WPS_ROW] = WPS_CHROME_BOTTOM,
+    [WPS_INDEX] = WPS_CHROME_BOTTOM,
+    [WPS_PROGRESS] = WPS_CHROME_BOTTOM,
+    [WPS_REMAINING] = WPS_CHROME_BOTTOM,
+};
+
+static enum wps_chrome_edge view_edge(enum wps_view id)
+{
+    return id == WPS_INDEX && wps->classic ? WPS_CHROME_RIGHT : chrome_edge[id];
+}
+
+void native_wps_chrome_bounds(struct ui_rect *bounds)
+{
+    memset(bounds, 0, WPS_CHROME_EDGES * sizeof(*bounds));
+    for (int i = WPS_COVER + 1; i < WPS_VIEW_COUNT; i++)
+    {
+        const struct ui_view *view = &wps->view[i];
+        if (view->parent != &wps->view[WPS_ROOT] || !view->value[UI_OPACITY])
+            continue;
+        struct ui_rect rect = view_bounds(i);
+        int x = MAX(0, rect.x + view->value[UI_OFFSET_X]);
+        int y = MAX(0, rect.y + view->value[UI_OFFSET_Y]);
+        int right = MIN(LCD_WIDTH, rect.x + view->value[UI_OFFSET_X] +
+                                  rect.width);
+        int bottom = MIN(LCD_HEIGHT, rect.y + view->value[UI_OFFSET_Y] +
+                                    rect.height);
+        if (right <= x || bottom <= y)
+            continue;
+        struct ui_rect *group = &bounds[view_edge(i)];
+        if (group->width)
+        {
+            right = MAX(right, group->x + group->width);
+            bottom = MAX(bottom, group->y + group->height);
+            x = MIN(x, group->x);
+            y = MIN(y, group->y);
+        }
+        *group = (struct ui_rect){x, y, right - x, bottom - y};
+    }
+}
+
+struct ui_rect native_wps_chrome_pose(struct ui_rect bounds,
+                                     enum wps_chrome_edge edge,
+                                     unsigned hidden)
+{
+    int travel;
+    switch (edge)
+    {
+    case WPS_CHROME_TOP:    travel = bounds.y + bounds.height; break;
+    case WPS_CHROME_BOTTOM: travel = LCD_HEIGHT - bounds.y; break;
+    case WPS_CHROME_LEFT:   travel = bounds.x + bounds.width; break;
+    case WPS_CHROME_RIGHT:  travel = LCD_WIDTH - bounds.x; break;
+    default: return bounds;
+    }
+    int offset = (travel * hidden + WPS_CHROME_HIDDEN / 2) / WPS_CHROME_HIDDEN;
+    if (edge == WPS_CHROME_TOP)
+        bounds.y -= offset;
+    else if (edge == WPS_CHROME_BOTTOM)
+        bounds.y += offset;
+    else if (edge == WPS_CHROME_LEFT)
+        bounds.x -= offset;
+    else
+        bounds.x += offset;
+    return bounds;
+}
+
+/* Paint the unshifted backdrop and cover for the end of the stock turn. */
+void native_wps_paint_backing(void)
+{
+    struct ui_rect screen = view_bounds(WPS_ROOT);
+    struct ui_view_frame frame = { .bounds = screen, .clip = screen };
+    paint_background(&wps->view[WPS_ROOT], &frame);
+    frame.bounds = frame.clip = view_bounds(WPS_COVER);
+    wps->view[WPS_COVER].ops->paint(&wps->view[WPS_COVER], &frame);
+}
+
+/* Slide the controls over the artwork, which is already at its landing. */
+void native_wps_paint_slide(unsigned hidden, fb_data base)
 {
     if (!active || rock_ui_raw())
         return;
-    struct ui_view *root = &wps->view[WPS_ROOT];
-    struct ui_view *cover = &wps->view[WPS_COVER];
-    const struct ui_view_ops *cover_paint = cover->ops;
-    struct ui_rect screen = view_bounds(WPS_ROOT);
-    hidden = MIN(MAX(hidden, 0), LCD_WIDTH);
     if (!hidden)
     {
         /* The turned cover keeps a return landing past the whole page. */
         void (*landing)(const struct ui_rect *clip) = wps->landing;
-        ui_page_invalidate(&wps->page, screen);
-        ui_page_paint(&wps->page);
+        native_wps_paint_prepared();
         if (wps->classic)
             wps->landing = landing;
         return;
     }
 
-    int width = LCD_WIDTH - hidden;
+    int width = (LCD_WIDTH * (WPS_CHROME_HIDDEN - hidden) +
+                 WPS_CHROME_HIDDEN / 2) / WPS_CHROME_HIDDEN;
+    const struct ui_rect exposed = {width, 0, LCD_WIDTH - width, LCD_HEIGHT};
+    struct ui_view *cover = &wps->view[WPS_COVER];
+    struct ui_rect slot = view_bounds(WPS_COVER);
+    struct ui_view_frame frame = { .bounds = slot, .clip = slot };
     struct viewport *previous = lcd_set_viewport(NULL);
     lcd_set_drawmode(DRMODE_SOLID);
-    lcd_set_foreground(base);
-    lcd_fillrect(width, 0, hidden, LCD_HEIGHT);
-    if (wps->landing && !has_art_slot())
-    {
-        const struct ui_rect exposed = {width, 0, hidden, LCD_HEIGHT};
-        wps->landing(&exposed);
-    }
-    if (width && wps->background > 0)
-    {
-        fb_data *src = core_get_data_pinned(wps->background);
-        lcd_bitmap_part(src, hidden, 0, LCD_WIDTH, 0, 0, width, LCD_HEIGHT);
-        core_put_data_pinned(src);
-        reveal_background(width, LCD_HEIGHT);
-    }
-    else if (width)
-    {
-        lcd_set_foreground(wps->bg);
-        lcd_fillrect(0, 0, width, LCD_HEIGHT);
-    }
-    lcd_set_viewport(previous);
-
     if (wps->classic)
     {
-        struct ui_rect slot = view_bounds(WPS_COVER);
+        /* Keep the stock reflection's reveal if the turn cannot retain it. */
+        lcd_set_foreground(base);
+        lcd_fillrect(width, 0, LCD_WIDTH - width, LCD_HEIGHT);
+        lcd_set_foreground(wps->bg);
+        lcd_fillrect(0, 0, width, LCD_HEIGHT);
         int edge = MIN(MAX(width, slot.x), slot.x + slot.width);
-        struct ui_view_frame frame = { .bounds = slot, .clip = slot };
         frame.clip.width = edge - slot.x;
         if (frame.clip.width)
             paint_turned(&frame, wps->bg, true);
-        const struct ui_rect exposed = {width, 0, hidden, LCD_HEIGHT};
         frame.clip.x = edge;
         frame.clip.width = slot.x + slot.width - edge;
         if (wps->landing)
@@ -1207,47 +1271,69 @@ void native_wps_paint_slide(int hidden, fb_data base)
         else if (frame.clip.width)
             paint_turned(&frame, base, false);
     }
-    else if (wps->theme.background[UI_BG_WPS] == UI_BG_COVER_SCRIM)
+    else
     {
-        struct ui_rect slot = view_bounds(WPS_COVER);
-        struct ui_view_frame frame = { .bounds = slot, .clip = slot };
-        if (!width && wps->landing)
-            paint_landing(&frame);
+        unsigned weight = hidden * 256 / WPS_CHROME_HIDDEN;
+        lcd_set_foreground(blend256(base, wps->bg, weight));
+        if (hidden == WPS_CHROME_HIDDEN || wps->background <= 0)
+            lcd_fillrect(0, 0, LCD_WIDTH, LCD_HEIGHT);
         else
-            paint_cover(cover, &frame);
+        {
+            native_wps_paint_background(lcd_current_viewport, wps->background,
+                                        wps->bg);
+            reveal_background(LCD_WIDTH, LCD_HEIGHT);
+            lcd_set_foreground(base);
+            lcd_blendrect(0, 0, LCD_WIDTH, LCD_HEIGHT, (weight * 15 + 128) / 256);
+        }
+        if (has_art_slot())
+        {
+            if (hidden == WPS_CHROME_HIDDEN && wps->landing)
+                paint_landing(&frame);
+            else
+                paint_cover(cover, &frame);
+        }
+        else if (wps->landing)
+            wps->landing(&exposed);
     }
-    if (!width)
-        return;
-
-    /* Views parked to the right of the page stay off the exposed scene. */
-    root->ops = NULL;
-    cover->ops = NULL;
-    root->value[UI_OFFSET_X] -= hidden;
-    root->value[UI_CLIP_X] = hidden;
-    root->value[UI_CLIP_WIDTH] = width;
-    ui_page_invalidate(&wps->page, screen);
-    ui_page_paint(&wps->page);
-    root->value[UI_CLIP_WIDTH] = -1;
-    root->value[UI_CLIP_X] = 0;
-    root->value[UI_OFFSET_X] += hidden;
-    cover->ops = cover_paint;
-    root->ops = &background_ops;
+    lcd_set_viewport(previous);
+    native_wps_paint_chrome(hidden);
 }
 
-void native_wps_paint_chrome(void)
+void native_wps_paint_chrome(unsigned hidden)
 {
-    if (!active || rock_ui_raw())
+    if (!active || rock_ui_raw() || hidden == WPS_CHROME_HIDDEN)
         return;
     struct ui_view *root = &wps->view[WPS_ROOT];
     struct ui_view *cover = &wps->view[WPS_COVER];
-    const struct ui_view_ops *root_paint = root->ops;
     const struct ui_view_ops *cover_paint = cover->ops;
+    struct ui_rect groups[WPS_CHROME_EDGES];
+    int dx[WPS_CHROME_EDGES], dy[WPS_CHROME_EDGES];
+    native_wps_chrome_bounds(groups);
+    for (int i = 0; i < WPS_CHROME_EDGES; i++)
+    {
+        struct ui_rect pose = native_wps_chrome_pose(groups[i], i, hidden);
+        dx[i] = pose.x - groups[i].x;
+        dy[i] = pose.y - groups[i].y;
+    }
+
     root->ops = NULL;
     cover->ops = NULL;
+    for (int i = WPS_COVER + 1; i < WPS_VIEW_COUNT; i++)
+        if (wps->view[i].parent == root)
+        {
+            wps->view[i].value[UI_OFFSET_X] += dx[view_edge(i)];
+            wps->view[i].value[UI_OFFSET_Y] += dy[view_edge(i)];
+        }
     ui_page_invalidate(&wps->page, view_bounds(WPS_ROOT));
     ui_page_paint(&wps->page);
+    for (int i = WPS_COVER + 1; i < WPS_VIEW_COUNT; i++)
+        if (wps->view[i].parent == root)
+        {
+            wps->view[i].value[UI_OFFSET_X] -= dx[view_edge(i)];
+            wps->view[i].value[UI_OFFSET_Y] -= dy[view_edge(i)];
+        }
     cover->ops = cover_paint;
-    root->ops = root_paint;
+    root->ops = &background_ops;
 }
 
 static void label_set(struct wps_label *label, int font, char *text, size_t capacity)

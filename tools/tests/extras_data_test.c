@@ -584,6 +584,82 @@ static void test_vcard_row_preservation(const char *dir)
     puts("PASS: test_vcard_row_preservation");
 }
 
+static void test_safe_creates_and_repeated_edits(const char *dir)
+{
+    char sub[MAX_PATH], path[MAX_PATH], custom[MAX_PATH];
+    assert(snprintf(sub, sizeof(sub), "%s/Recovery", dir) < (int)sizeof(sub));
+    assert(extras_ensure_dir(sub));
+    assert(snprintf(path, sizeof(path), "%s/%s", sub, ICAL_DEFAULT_FILE) <
+           (int)sizeof(path));
+    write_file_str(path, "BEGIN:VCALENDAR\r\nX-RECOVERABLE-DATA:keep\r\n");
+    struct ical_event ev;
+    ical_event_init_new(&ev, NULL);
+    assert(!ical_save_event(sub, &ev));
+    char *contents = read_file_str(path);
+    assert(!strcmp(contents, "BEGIN:VCALENDAR\r\nX-RECOVERABLE-DATA:keep\r\n"));
+    free(contents);
+    assert(remove(path) == 0);
+
+    extras_test_reset_uid_seq();
+    ical_event_init_new(&ev, NULL);
+    assert(ical_save_event(sub, &ev));
+    char uid[sizeof(ev.uid)];
+    strcpy(uid, ev.uid);
+    extras_test_reset_uid_seq();
+    struct ical_todo td;
+    ical_todo_init_new(&td);
+    assert(ical_save_todo(sub, &td));
+    assert(strcmp(uid, td.uid));
+    contents = read_file_str(path);
+    assert(strstr(contents, uid) && strstr(contents, td.uid));
+    free(contents);
+    assert(remove(path) == 0);
+
+    struct vcard_contact first, second;
+    extras_test_reset_uid_seq();
+    vcard_init_new(&first);
+    strcpy(first.first, "First");
+    assert(vcard_save(sub, &first));
+    extras_test_reset_uid_seq();
+    vcard_init_new(&second);
+    strcpy(second.first, "Second");
+    assert(vcard_save(sub, &second));
+    assert(strcmp(first.path, second.path));
+    contents = read_file_str(first.path);
+    assert(strstr(contents, "FN:First\r\n"));
+    free(contents);
+    assert(remove(first.path) == 0);
+    assert(remove(second.path) == 0);
+
+    assert(snprintf(custom, sizeof(custom), "%s/Multi.vcf", sub) <
+           (int)sizeof(custom));
+    const char sibling[] =
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Sibling\r\nEND:VCARD\r\n";
+    char original[256];
+    snprintf(original, sizeof(original),
+             "\xef\xbb\xbf" "BEGIN:VCARD\r\nVERSION:3.0\r\n"
+             "FN:First\r\nN:;First;;;\r\nEND:VCARD\r\n%s", sibling);
+    write_file_str(custom, original);
+    assert(vcard_load(custom, 0, &first));
+    assert(first.card_start == 3);
+    strcpy(first.first, "Length changes on first save");
+    assert(vcard_save(sub, &first));
+    strcpy(first.note, "Second save from the same detail screen");
+    assert(vcard_save(sub, &first));
+    contents = read_file_str(custom);
+    assert(strstr(contents, "FN:Length changes on first save\r\n"));
+    assert(strstr(contents, "NOTE:Second save from the same detail screen\r\n"));
+    assert(!strcmp(contents + first.card_end, sibling));
+    free(contents);
+    assert(vcard_delete(custom, first.card_start, first.card_end));
+    contents = read_file_str(custom);
+    assert(!memcmp(contents, "\xef\xbb\xbf", 3));
+    assert(!strcmp(contents + 3, sibling));
+    free(contents);
+    assert(remove(custom) == 0);
+    puts("PASS: test_safe_creates_and_repeated_edits");
+}
+
 static void test_vcard_windows_charset(const char *dir)
 {
     static const char legacy[] =
@@ -631,6 +707,7 @@ int main(void)
     test_detached_recurrence(cal_dir);
     test_vcard_row_preservation(con_dir);
     test_vcard_windows_charset(con_dir);
+    test_safe_creates_and_repeated_edits(con_dir);
 
     printf("ALL EXTRAS DATA TESTS PASSED\n");
     return 0;

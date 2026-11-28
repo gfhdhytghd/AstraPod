@@ -1298,6 +1298,7 @@ static int page_show(struct vcard_contact *vc, struct page *p)
             if (er == 1)
             {
                 ret = 1;
+                if (!vc->card_end) break;
                 page_build_from_vcard(vc, p);
                 p->scroll = 0;
                 p->scroll_max = MAX(page_lay_out(NULL, p, PG_HEAD_RULE) -
@@ -1328,6 +1329,7 @@ static int page_show(struct vcard_contact *vc, struct page *p)
                 if (er == 1)
                 {
                     ret = 1;
+                    if (!vc->card_end) break;
                     page_build_from_vcard(vc, p);
                     p->scroll = 0;
                     p->scroll_max = MAX(page_lay_out(NULL, p, PG_HEAD_RULE) -

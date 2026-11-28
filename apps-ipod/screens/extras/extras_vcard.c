@@ -4,6 +4,7 @@
  * vCard 2.1 / 3.0 / 4.0 scanner, loader, and lossless atomic editor for
  * /Contacts .vcf files and /Contacts/AstraPod/<UID>.vcf.
  ****************************************************************************/
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -386,12 +387,21 @@ bool vcard_load(const char *path, uint32_t card_start, struct vcard_contact *c)
     extras_reader_init(&r, fd, card_start);
     char line[VC_LINE_BUF];
     uint32_t rs = 0, re = 0;
-    bool got_end = false;
+    bool got_begin = false, got_end = false;
 
     while (extras_read_prop(&r, line, sizeof(line), &rs, &re, true))
     {
         char *prop, *val;
         int flags = split_vc_prop(line, &prop, &val);
+        if (!got_begin)
+        {
+            if (strcasecmp(prop, "BEGIN") ||
+                strcasecmp(extras_trim(val), "VCARD"))
+                break;
+            c->card_start = rs;
+            got_begin = true;
+            continue;
+        }
         if (flags & F_SKIP)
             continue;
         decode_vc_val(val, flags, (size_t)(line + sizeof(line) - val));
@@ -624,8 +634,22 @@ bool vcard_save(const char *contacts_dir, struct vcard_contact *c)
     if (!c->is_existing || c->card_end <= c->card_start)
     {
         const char *base = contacts_dir ? contacts_dir : VCARD_DIR;
-        snprintf(c->path, sizeof(c->path), "%s/%s/%s.vcf",
-                 base, VCARD_SUBDIR, c->uid);
+        for (;;)
+        {
+            int len = snprintf(c->path, sizeof(c->path), "%s/%s/%s.vcf",
+                               base, VCARD_SUBDIR, c->uid);
+            if (len < 0 || (size_t)len >= sizeof(c->path))
+                return false;
+            int existing = open(c->path, O_RDONLY);
+            if (existing < 0)
+            {
+                if (errno != ENOENT)
+                    return false;
+                break;
+            }
+            close(existing);
+            extras_gen_uid(c->uid, sizeof(c->uid));
+        }
 
         struct extras_atomic a;
         if (!extras_atomic_open(&a, c->path))
@@ -879,7 +903,11 @@ bool vcard_save(const char *contacts_dir, struct vcard_contact *c)
         extras_atomic_abort(&a);
         return false;
     }
-    return extras_atomic_commit(&a);
+    if (!extras_atomic_commit(&a))
+        return false;
+    if (!vcard_load(c->path, c->card_start, c))
+        c->card_end = 0;
+    return true;
 }
 
 bool vcard_delete(const char *path, uint32_t card_start, uint32_t card_end)

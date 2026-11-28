@@ -5,6 +5,7 @@
  * loader, and lossless atomic editor for /Calendars .ics files.
  ****************************************************************************/
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1508,13 +1509,15 @@ static bool write_new_todo_body(int fd, const struct ical_todo *td,
 }
 
 /* Find byte offset of the last END:VCALENDAR line in `fd`, or false. */
-static bool find_end_vcalendar(int fd, uint32_t *out_pos)
+static bool find_end_vcalendar(int fd, uint32_t *out_pos,
+                               const char *uid, bool *collision)
 {
     struct extras_reader r;
     extras_reader_init(&r, fd, 0);
     char line[256];
     uint32_t rs = 0, re = 0;
     bool found = false;
+    *collision = false;
     while (extras_read_prop(&r, line, sizeof(line), &rs, &re, false))
     {
         char *name, *params, *val;
@@ -1525,6 +1528,8 @@ static bool find_end_vcalendar(int fd, uint32_t *out_pos)
             *out_pos = rs;
             found = true;
         }
+        else if (!strcasecmp(name, "UID") && !strcmp(extras_trim(val), uid))
+            *collision = true;
     }
     return found;
 }
@@ -1532,15 +1537,34 @@ static bool find_end_vcalendar(int fd, uint32_t *out_pos)
 static bool append_to_default_ics(const char *cal_dir,
                                   bool (*write_comp)(int fd, const void *item,
                                                      const char *stamp),
-                                  const void *item, const char *now_stamp)
+                                  const void *item, const char *now_stamp,
+                                  char *uid, size_t uid_size)
 {
     char target[MAX_PATH];
-    snprintf(target, sizeof(target), "%s/%s",
-             cal_dir ? cal_dir : ICAL_DIR, ICAL_DEFAULT_FILE);
+    int len = snprintf(target, sizeof(target), "%s/%s",
+                       cal_dir ? cal_dir : ICAL_DIR, ICAL_DEFAULT_FILE);
+    if (len < 0 || (size_t)len >= sizeof(target))
+        return false;
 
     int src = open(target, O_RDONLY);
     uint32_t end_vcal = 0;
-    bool have_wrapper = (src >= 0 && find_end_vcalendar(src, &end_vcal));
+    if (src < 0 && errno != ENOENT)
+        return false;
+    if (src >= 0)
+    {
+        bool collision;
+        do
+        {
+            if (!find_end_vcalendar(src, &end_vcal, uid, &collision))
+            {
+                close(src);
+                return false;
+            }
+            if (collision)
+                extras_gen_uid(uid, uid_size);
+        }
+        while (collision);
+    }
 
     struct extras_atomic a;
     if (!extras_atomic_open(&a, target))
@@ -1550,7 +1574,7 @@ static bool append_to_default_ics(const char *cal_dir,
     }
 
     bool ok = true;
-    if (have_wrapper)
+    if (src >= 0)
     {
         ok = extras_copy_range(src, a.fd, 0, end_vcal) &&
              write_comp(a.fd, item, now_stamp) &&
@@ -1598,7 +1622,8 @@ bool ical_save_event(const char *cal_dir, struct ical_event *ev)
     {
         snprintf(ev->path, sizeof(ev->path), "%s/%s",
                  cal_dir ? cal_dir : ICAL_DIR, ICAL_DEFAULT_FILE);
-        return append_to_default_ics(cal_dir, write_event_cb, ev, now_stamp);
+        return append_to_default_ics(cal_dir, write_event_cb, ev, now_stamp,
+                                     ev->uid, sizeof(ev->uid));
     }
 
     int src = open(ev->path, O_RDONLY);
@@ -1909,7 +1934,8 @@ bool ical_save_todo(const char *cal_dir, struct ical_todo *td)
     {
         snprintf(td->path, sizeof(td->path), "%s/%s",
                  cal_dir ? cal_dir : ICAL_DIR, ICAL_DEFAULT_FILE);
-        return append_to_default_ics(cal_dir, write_todo_cb, td, now_stamp);
+        return append_to_default_ics(cal_dir, write_todo_cb, td, now_stamp,
+                                     td->uid, sizeof(td->uid));
     }
 
     int src = open(td->path, O_RDONLY);

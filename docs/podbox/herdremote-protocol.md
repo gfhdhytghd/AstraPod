@@ -1271,19 +1271,21 @@ sub<TAB>t3<TAB>all
 
 The daemon replies with the usual `A`, whose workspace field is `t3`, and
 sends no tab `T`. The rows span every project that is not archived, at
-most 16, in this order:
+most 16. Both views list only main threads. A thread with a parent thread
+ID or a subagent relationship is omitted. The views use this order:
 
 - `active`: threads that wait for an answer, oldest request first; then
   running threads; then the other unsettled threads that are not
   snoozed. Each group is most recent first.
-- `all`: every thread, most recent first, settled, snoozed and archived
+- `all`: every main thread, most recent first, settled, snoozed and archived
   included.
 
 In these rows the `title` field is the project's name. The other fields
 keep the meanings above. `W`, `S`, `Q`, `X` and `E` are unchanged and
 still name projects.
 
-A player that does not know `TL` ignores it and lists projects. A daemon
+A player that does not know `TL` ignores it and lists projects. The T3
+thread rows within each project also list only main threads. A daemon
 that does not send `TL` leaves the player on the project list. The
 player forgets `TL` at each `HR` and keeps it across `M`. A `sub t3`
 from a player without the T3 capability is ignored.

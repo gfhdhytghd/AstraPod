@@ -90,7 +90,7 @@ struct list_motion {
     int visible, count, span;
     struct ui_rect bounds;
     int pitch;
-    bool wheel, snap;
+    bool wheel, snap, edge;
 };
 
 /* A theme gradient as RGB565 rows, for a fill `height` rows tall. */
@@ -462,6 +462,14 @@ static int64_t ease_out(int64_t from, int64_t to, unsigned frame, unsigned durat
     return from + (to - from) * ui_tween_sample(&weight, frame) / weight.to;
 }
 
+/* Edge travel may cover fewer pixels than a full row's animation has
+ * refreshes. Spread those pixels over the shorter spring. */
+static unsigned edge_duration(int64_t from, int64_t to, int pitch, unsigned frames)
+{
+    unsigned pixels = (from > to ? from - to : to - from) * pitch / ROW_UNIT;
+    return MIN(frames, MAX(1u, pixels));
+}
+
 /* Keep the bar in view while viewport and selection catch up independently. */
 static int64_t limit_top(const struct list_motion *motion, struct list_pose pose)
 {
@@ -575,6 +583,12 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     bool wrapped = (offset < 0 && rest.cursor > fixed_row(selection)) ||
                    (offset > 0 && rest.cursor < fixed_row(selection));
     bool physical_end = wheel && !wrapped && (position < 0 || position > last);
+    /* Repeated outward detents must leave time for the edge spring to
+     * rebound. Restarting it at its peak can hold the same pixels while
+     * the wheel events keep the glide and its frame deadline active. */
+    if (physical_end && continuing && motion->edge &&
+        ((motion->live.top > motion->rest.top) == (offset > 0)))
+        goto done;
     bool fast = wheel && (offset < -1 || offset > 1 ||
                          (continuing && motion->wheel && frame < motion->glide_frames));
 
@@ -620,6 +634,13 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     /* A snapped jump costs a whole-list frame; the marker's own frames
      * that follow are cheap enough for every refresh again. */
     glide_pace.recover_full_rate = snap;
+    unsigned spring = ui_theme_motion(UI_MOTION_LIST, SPRING_F, GLIDE_F);
+    bool edge = physical_end && !snap;
+    if (edge)
+    {
+        glide = edge_duration(from.top, live.top, g.pitch, glide);
+        spring = edge_duration(live.top, rest.top, g.pitch, spring);
+    }
     struct ui_motion trace = motion->trace;
     if (!trace.lease && !trace.trace)
         trace = ui_motion_begin("list-glide");
@@ -630,9 +651,10 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
         .started = continuing ? now : ui_clock_start(),
         .painted = 0, .trace = trace,
         .glide_frames = glide,
-        .spring_frames = ui_theme_motion(UI_MOTION_LIST, SPRING_F, GLIDE_F),
+        .spring_frames = spring,
         .visible = visible, .count = list->nb_items, .span = span,
         .bounds = g.rows, .pitch = g.pitch, .wheel = wheel, .snap = snap,
+        .edge = edge,
     };
 
 done:

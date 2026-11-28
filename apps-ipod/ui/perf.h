@@ -41,6 +41,7 @@ void ui_perf_note_cover_work(unsigned changes, uint32_t cache_wait_us,
                              uint32_t caption_us, const uint32_t stages[UI_COVER_STAGE_COUNT]);
 void ui_perf_note_render(uint32_t elapsed_clock);
 void ui_perf_note_submit(uint32_t elapsed_clock);
+void ui_perf_note_button_wait(uint32_t elapsed);
 void ui_perf_note_action_wait(uint32_t elapsed, int timeout);
 
 /* For a frame with multiple driver calls, sample each immediately on return.

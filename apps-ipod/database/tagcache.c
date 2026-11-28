@@ -6615,10 +6615,25 @@ static bool check_dir(const char *dirname, int add_files, int depth)
     if (ignore != unignore)
         add_files = unignore;
 
+#ifndef DBTOOL
+    long last_yield = current_tick;
+#endif
     /* Recursively scan the dir. A full disk ends it: the walk is discarded
      * anyway, so parsing the rest of the library would buy nothing. */
     while (!cache_write_failed && !check_event_queue())
     {
+#ifndef DBTOOL
+        /* A tree of unchanged or unsupported files skips the metadata
+         * reader's yields. Release the CPU between directory entries. */
+        if (current_tick != last_yield)
+        {
+            tagcache_pause_for_motion();
+            yield();
+            last_yield = current_tick;
+            if (check_event_queue())
+                break;
+        }
+#endif
         /* A read error ends the folder as its end does, but sets errno */
         errno = 0;
         struct dirent *entry = readdir(dir);
@@ -6776,6 +6791,10 @@ void do_tagcache_build(const char *path[])
     unreadable_begin();
     debug_log(DEBUG_LOG_TASKS, "database: walk started");
     walk_started = current_tick;
+#ifdef PODBOX_MOTION_PROBE
+    extern void sim_motion_work_started(const char *task);
+    sim_motion_work_started("database");
+#endif
 
     ret = true;
 

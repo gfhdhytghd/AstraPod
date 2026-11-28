@@ -17,6 +17,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "config.h"
+#ifdef PODBOX_MOTION_PROBE
+#include <stdlib.h>
+#endif
 #include "ui/motion_schedule.h"
 #include "kernel.h"
 #include "thread.h"
@@ -472,18 +475,38 @@ static void bg_task_tick(struct bg_task *task)
  * The thread
  * ------------------------------------------------------------------------ */
 
+#ifdef PODBOX_MOTION_PROBE
+#define BG_EVENT_PROBE_WAKE 0x1186
+void bg_task_probe_wake(void)
+{
+    queue_post(&bg_queue, BG_EVENT_PROBE_WAKE, 0);
+}
+#endif
+
 static void bg_thread(void)
 {
     struct queue_event ev;
     int i;
     int timeout = BG_TICK_PERIOD;
+#ifdef PODBOX_MOTION_PROBE
+    unsigned quick_checks = 0;
+#endif
 
     while (1)
     {
         queue_wait_w_tmo(&bg_queue, &ev, timeout);
 
+#ifdef PODBOX_MOTION_PROBE
+        unsigned start = USEC_TIMER;
+#endif
         switch (ev.id)
         {
+#ifdef PODBOX_MOTION_PROBE
+            case BG_EVENT_PROBE_WAKE:
+                quick_checks = 2;
+                timeout = 1;
+                break;
+#endif
             case SYS_USB_CONNECTED:
                 usb_acknowledge(SYS_USB_CONNECTED_ACK, ev.data);
                 usb_wait_for_disconnect(&bg_queue);
@@ -516,13 +539,29 @@ static void bg_thread(void)
                     break;
                 }
                 timeout = BG_TICK_PERIOD;
+#ifdef PODBOX_MOTION_PROBE
+                if (quick_checks && --quick_checks)
+                    timeout = 1;
+#endif
 #if defined(IPOD_6G) && !defined(SIMULATOR)
                 battery_calibration_poll();
 #endif
                 for (i = 0; i < bg_tasks_count && !ui_motion_active(); i++)
+                {
+#ifdef PODBOX_MOTION_PROBE
+                    if (getenv("PODBOX_TRACE_LIST"))
+                        fprintf(stderr, "bg task tick=%ld %s\n", (long)current_tick, bg_tasks[i]->name);
+#endif
                     bg_task_tick(bg_tasks[i]);
+                }
                 for (i = 0; i < bg_steps_count && !ui_motion_active(); i++)
+                {
+#ifdef PODBOX_MOTION_PROBE
+                    if (getenv("PODBOX_TRACE_LIST"))
+                        fprintf(stderr, "bg step tick=%ld %s\n", (long)current_tick, bg_steps[i]->name);
+#endif
                     bg_steps[i]->tick();
+                }
                 if (ui_motion_active())
                     timeout = MAX(1, HZ / 10);
                 break;
@@ -533,10 +572,19 @@ static void bg_thread(void)
                 if (!(ev.id & SYS_EVENT))
                 {
                     struct bg_task *task = (struct bg_task *)ev.data;
+#ifdef PODBOX_MOTION_PROBE
+                    if (getenv("PODBOX_TRACE_LIST"))
+                        fprintf(stderr, "bg event tick=%ld %s %lx\n", (long)current_tick, task->name, ev.id);
+#endif
                     task->handle_event(&ev);
                 }
                 break;
         }
+#ifdef PODBOX_MOTION_PROBE
+        if ((unsigned)(USEC_TIMER - start) > 60000 && getenv("PODBOX_TRACE_LIST"))
+            fprintf(stderr, "bg event end tick=%ld id=%lx dur=%u\n", (long)current_tick,
+                    ev.id, (unsigned)(USEC_TIMER - start));
+#endif
     }
 }
 

@@ -1544,11 +1544,19 @@ static bool aa_check_abort(void)
     if (bg_task_should_stop(&art_cache_task))
         return true;
 #ifndef DBTOOL
-    /* Leave the shared worker free to serve glyphs for the foreground. */
-    if (art_cache_task.running && ui_motion_active())
-        aa_motion_deferred = true;
+    /* Keep the pass at its checkpoint while the UI moves. Unwind when
+     * the shared worker is needed for glyphs, a panel, or storage handover. */
+    while (art_cache_task.running && ui_motion_active())
+    {
+        if (tagcache_is_busy() || bg_task_should_stop(&art_cache_task))
+        {
+            aa_motion_deferred = true;
+            return true;
+        }
+        sleep(1);
+    }
 #endif
-    return art_cache_task.running && aa_motion_deferred;
+    return false;
 }
 
 /* Whether this pass looks up every folder's image. Off the directory cache
@@ -2825,9 +2833,14 @@ static void aa_tables_init(void *mem)
  * for scratch space would stop and restart the current track. */
 static int aa_pass_alloc(size_t size)
 {
-    if ((audio_status() & AUDIO_STATUS_PLAY) && core_allocatable() < size)
-        return -1;
-    return core_alloc(size);
+    bool playing = audio_status() & AUDIO_STATUS_PLAY;
+    int handle = playing ? core_alloc_free_space(size) : core_alloc(size);
+#ifdef PODBOX_MOTION_PROBE
+    if (handle <= 0 && getenv("PODBOX_MOTION_LOAD_PROBE"))
+        fprintf(stderr, "motion load: art needs %zu bytes, free=%zu at %ld\n",
+                size, core_allocatable(), (long)current_tick);
+#endif
+    return handle;
 }
 
 static enum bg_result aa_run_pass(void)
@@ -2868,6 +2881,10 @@ static enum bg_result aa_run_pass(void)
 
     /* Includes placeholders and migration before the library walk. */
     cache_busy = true;
+#ifdef PODBOX_MOTION_PROBE
+    extern void sim_motion_work_started(const char *task);
+    sim_motion_work_started("art cache");
+#endif
     aa_ensure_dirs();
     /* A purge cut short leaves no stamp file, which saving one would hide */
     if (!aa_check_format_version())
@@ -4134,7 +4151,8 @@ void art_cache_init(void)
      * peak declared to bg_task is both. A format bump needs nothing here: the
      * stamp file carries the format as its version, so aa_read_marks() finds
      * no marks, the task is stale, and the pass purges. */
-    art_cache_task.work_bytes = aa_work_bytes() + AA_TABLE_BYTES;
+    art_cache_task.work_bytes = aa_work_bytes() + AA_TABLE_BYTES +
+        2 * (BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t));
 
     bg_task_init(&art_cache_task);
 

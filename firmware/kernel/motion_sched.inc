@@ -79,11 +79,27 @@ static int motion_group_end(int highest)
     return LOWEST_PRIORITY;
 }
 
+#if defined(SIMULATOR) && defined(__linux__)
+#include <time.h>
+static uint32_t motion_cpu_time(void)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now);
+    return (uint32_t)now.tv_sec * 1000000u + now.tv_nsec / 1000u;
+}
+#else
+#define motion_cpu_time() 0u
+#endif
+
 /* Optional wait attribution for a single capture owner. */
 static unsigned watch_id;
-static uint32_t watch_start;
-static bool watch_pending;
-static unsigned watch_kind;
+static bool watch_pending, watch_woken, watch_inherited;
+static unsigned watch_state;
+static long watch_tick, watch_deadline, watch_wake_tick;
+static uintptr_t watch_site;
+static uint32_t watch_start, watch_wake, runner_start, runner_us;
+static uint32_t runner_cpu_start, runner_cpu_us;
+static const char *runner_current, *runner_name;
 static struct motion_sched_wait watch_wait;
 
 void motion_sched_watch(unsigned thread_id)
@@ -93,33 +109,94 @@ void motion_sched_watch(unsigned thread_id)
     watch_wait = (struct motion_sched_wait){0};
 }
 
-struct motion_sched_wait motion_sched_get_wait(void)
+struct motion_sched_wait motion_sched_take_wait(void)
 {
-    return watch_wait;
+    struct motion_sched_wait wait = watch_wait;
+    watch_wait = (struct motion_sched_wait){0};
+    return wait;
+}
+
+static void motion_watch_wake(const struct thread_entry *thread)
+{
+    if (watch_pending && !watch_woken && thread->id == watch_id)
+    {
+        watch_wake = MOTION_TIMER;
+        watch_wake_tick = current_tick;
+        watch_woken = true;
+    }
 }
 
 static void motion_watch_out(const struct thread_entry *thread)
 {
     if (!watch_id || !thread || thread->id != watch_id)
         return;
+
     watch_start = MOTION_TIMER;
+    runner_start = watch_start;
+    runner_us = runner_cpu_us = 0;
+    runner_cpu_start = motion_cpu_time();
+    runner_name = NULL;
+    runner_current = "scheduler";
+    watch_tick = current_tick;
+    watch_state = thread->state;
+    watch_deadline = watch_state >= TIMEOUT_STATE_FIRST ? thread->tmo_tick : watch_tick;
+    watch_site = watch_state == STATE_SLEEPING || watch_state == STATE_RUNNING
+        ? 0 : (uintptr_t)thread->blk_ra;
     watch_pending = true;
-    watch_kind = thread->state == STATE_RUNNING ? 0 : thread->blocker ? 1 : 2;
-    if (watch_kind == 1)
-        watch_wait.lock_site = (uintptr_t)thread->blk_ra;
+    watch_woken = false;
+    watch_inherited = thread->blocker != NULL;
+    if (watch_inherited)
+        watch_wait.lock_site = watch_site;
 }
 
 static void motion_watch_in(const struct thread_entry *thread)
 {
-    if (!watch_pending || thread->id != watch_id)
+    if (!watch_pending)
         return;
-    uint32_t elapsed = MOTION_TIMER - watch_start;
-    if (watch_kind == 0)
+    uint32_t now = MOTION_TIMER;
+    uint32_t cpu = motion_cpu_time();
+    uint32_t slice = now - runner_start;
+    if (slice > runner_us)
+    {
+        runner_us = slice;
+        runner_name = runner_current;
+        runner_cpu_us = cpu - runner_cpu_start;
+    }
+    runner_start = now;
+    runner_cpu_start = cpu;
+    runner_current = thread ? thread->name : "idle";
+    if (!thread || thread->id != watch_id)
+        return;
+
+    uint32_t elapsed = now - watch_start;
+    if (watch_state == STATE_RUNNING)
         watch_wait.runnable += elapsed;
-    else if (watch_kind == 1)
+    else if (watch_inherited)
         watch_wait.inherited += elapsed;
     else
+    {
         watch_wait.other += elapsed;
+        if (watch_state == STATE_SLEEPING)
+            watch_wait.sleep_us += elapsed;
+        else
+            watch_wait.queue_us += elapsed;
+    }
+    if (elapsed > watch_wait.longest_us)
+    {
+        watch_wait.longest_us = elapsed;
+        watch_wait.wait_site = watch_site;
+        watch_wait.wait_ticks = watch_state >= TIMEOUT_STATE_FIRST
+            ? watch_deadline - watch_tick : -1;
+        watch_wait.wake_late_ticks = watch_woken ? watch_wake_tick - watch_deadline : 0;
+        watch_wait.ready_us = watch_woken ? now - watch_wake : 0;
+        watch_wait.runner_us = runner_us;
+        watch_wait.runner_cpu_us = runner_cpu_us;
+        unsigned i = 0;
+        if (runner_name)
+            for (; i + 1 < sizeof(watch_wait.runner) && runner_name[i]; i++)
+                watch_wait.runner[i] = runner_name[i];
+        watch_wait.runner[i] = '\0';
+    }
     watch_pending = false;
 }
 

@@ -516,6 +516,16 @@ static void action_handle_backlight(bool backlight, bool ignore_next)
 }
 
 
+static long action_wait_button(int timeout)
+{
+    if (!ui_perf_enabled())
+        return button_get_w_tmo(timeout);
+    uint32_t start = USEC_TIMER;
+    long button = button_get_w_tmo(timeout);
+    ui_perf_note_button_wait((uint32_t)USEC_TIMER - start);
+    return button;
+}
+
 /******************************************************************
 * action_poll_button filters button presses for get_action_worker;
 * if button_get_w_tmo returns...
@@ -556,7 +566,7 @@ static int remote_poll(int timeout, int context)
     if (remote_input_active)
     {
         remote = (struct agents_remote_state){0};
-        return button_get_w_tmo(timeout);
+        return action_wait_button(timeout);
     }
     if (remote.queued) return BUTTON_NONE;
     if (agents_remote_pending(&remote) && (timeout < 0 || timeout > HZ / 10))
@@ -568,11 +578,11 @@ static int remote_poll(int timeout, int context)
                    REMOTE_TAP_WINDOW_TICKS - age + 1;
         if (timeout < 0 || timeout > left) timeout = left;
     }
-    int button = button_get_w_tmo(TIMEOUT_NOBLOCK);
+    int button = action_wait_button(TIMEOUT_NOBLOCK);
     if (button == BUTTON_NONE)
         button = iap_agents_volume_take();
     if (button == BUTTON_NONE && timeout != TIMEOUT_NOBLOCK)
-        button = button_get_w_tmo(timeout);
+        button = action_wait_button(timeout);
     if (button == BUTTON_NONE)
         button = iap_agents_volume_take();
     return button;
@@ -590,7 +600,7 @@ int agents_shortcut_get_button(int timeout)
     int context = remote_context(activity == ACTIVITY_AGENTS ? CONTEXT_AGENTS : CONTEXT_STD);
     int button = remote_poll(timeout, context);
 #else
-    int button = button_get_w_tmo(timeout);
+    int button = action_wait_button(timeout);
 #endif
     ui_polling = false;
     podlink_time_sync();
@@ -668,7 +678,7 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
 #ifdef ASTRAPOD_ROCK_COMPAT
     if (last == &rock_action_last)
     {
-        *button = button_get_w_tmo(cur->timeout);
+        *button = action_wait_button(cur->timeout);
         goto classify_button;
     }
 #endif
@@ -696,7 +706,7 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
         return true;
     }
 #else
-    *button = button_get_w_tmo(cur->timeout);
+    *button = action_wait_button(cur->timeout);
 #endif
 #ifdef HAVE_WHEEL_WPS_CHORD
     ui_polling = false;

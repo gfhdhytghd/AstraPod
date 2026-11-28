@@ -8422,7 +8422,8 @@ static int album_covers_loop(struct ui_motion *trace, bool restored_pixels,
          * the centre slide included: it is the one being looked at, and the
          * loader reloads it first. */
         unsigned art_generation = art_cache_generation();
-        if (art_seen_generation != art_generation && !art_cache_is_busy())
+        if (art_seen_generation != art_generation && pf_state == pf_idle &&
+            !fade && !art_cache_is_busy())
         {
             buf_ctx_lock();
             free_all_slide_prio(-1);
@@ -8831,6 +8832,13 @@ static int album_covers_loop(struct ui_motion *trace, bool restored_pixels,
         {
             if (trace_attempted)
                 ui_motion_renew(trace);
+            else if (!dark && !fade)
+            {
+                *trace = ui_motion_begin(model->motion_trace ?: "cover-flow");
+                trace_attempted = true;
+                transfers = (struct ui_perf_transfers){0};
+                deferred_rows = 0;
+            }
             if (profile_input)
                 target_changes++;
         }

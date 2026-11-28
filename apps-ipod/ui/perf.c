@@ -13,6 +13,7 @@
 #include "database/tagcache.h"
 #include "metadata/art_cache.h"
 #include "pace.h"
+#include "pcm_mixer.h"
 #include "core_alloc.h"
 #include "file.h"
 #include "lcd-vsync.h"
@@ -48,6 +49,12 @@ struct frame_sample {
     uint32_t run_wait, lock_wait, other_wait, action_wait;
     uintptr_t lock_site;
     int action_timeout;
+    uint32_t button_us, button_calls;
+#ifdef HAVE_MOTION_SCHED
+    struct motion_sched_wait wait;
+#endif
+    bool database_busy, art_busy, pcm_active, work_overlap_db, work_overlap_art;
+    uint16_t pcm_chunks;
     uint8_t divisor;
     uint8_t parts;
     /* TE rises since the last submission began, and refreshes since the
@@ -65,11 +72,10 @@ struct frame_capture {
     struct pcmbuf_counters pcm;
     unsigned seen, render_misses, work_misses, interval_misses, half_frames;
     unsigned database_frames, art_frames;
-    uint32_t action_wait;
+    uint32_t action_wait, button_us, button_calls;
     int action_timeout;
-#ifdef HAVE_MOTION_SCHED
-    struct motion_sched_wait previous_wait;
-#endif
+    unsigned previous_pcm_chunks;
+    bool previous_db_busy, previous_art_busy;
     uint32_t worst_render, worst_work, worst_interval, skipped;
     uint32_t render_pending, last_submission, period_q8;
     uint32_t last_start, last_phase, last_present;
@@ -218,6 +224,9 @@ static unsigned begin_capture(const char *route, bool passive)
     memset(capture, 0, sizeof(*capture));
     strlcpy(capture->route, route, sizeof(capture->route));
     capture->pcm = pcmbuf_get_counters();
+    capture->previous_pcm_chunks = capture->pcm.chunks_played;
+    capture->previous_db_busy = tagcache_is_busy();
+    capture->previous_art_busy = art_cache_is_busy();
     capture->hw_offset_pending = -1;
     core_put_data_pinned(capture);
     owner = thread_self();
@@ -330,6 +339,16 @@ void ui_perf_add_transfer(struct ui_perf_transfers *timing, uint32_t start, unsi
     add_transfer(timing, start, USEC_TIMER, part);
 }
 
+void ui_perf_note_button_wait(uint32_t elapsed)
+{
+    if (active_handle <= 0 || owner != thread_self())
+        return;
+    struct frame_capture *capture = core_get_data_pinned(active_handle);
+    capture->button_us += elapsed;
+    capture->button_calls++;
+    core_put_data_pinned(capture);
+}
+
 void ui_perf_note_action_wait(uint32_t elapsed, int timeout)
 {
     if (active_handle <= 0 || owner != thread_self())
@@ -380,14 +399,15 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
     sample.action_timeout = capture->action_timeout;
     capture->action_wait = 0;
     capture->action_timeout = 0;
+    sample.button_us = capture->button_us;
+    sample.button_calls = capture->button_calls;
+    capture->button_us = capture->button_calls = 0;
 #ifdef HAVE_MOTION_SCHED
-    struct motion_sched_wait wait = motion_sched_get_wait();
-    sample.run_wait = wait.runnable - capture->previous_wait.runnable;
-    sample.lock_wait = wait.inherited - capture->previous_wait.inherited;
-    sample.other_wait = wait.other - capture->previous_wait.other;
-    if (sample.lock_wait)
-        sample.lock_site = wait.lock_site;
-    capture->previous_wait = wait;
+    sample.wait = motion_sched_take_wait();
+    sample.run_wait = sample.wait.runnable;
+    sample.lock_wait = sample.wait.inherited;
+    sample.other_wait = sample.wait.other;
+    sample.lock_site = sample.wait.lock_site;
 #endif
     if (sample.parts == UI_PERF_CAPTION)
     {
@@ -417,6 +437,12 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
     if (capture->seen)
     {
         sample.interval = clock - capture->last_submission;
+#if defined(PODBOX_MOTION_PROBE) && defined(HAVE_MOTION_SCHED)
+        if (sample.interval > 60000 && getenv("PODBOX_TRACE_LIST"))
+            fprintf(stderr, "frame gap %s tick=%ld dur=%u runner=%s/%u\n",
+                    capture->route, (long)current_tick, sample.interval,
+                    sample.wait.runner[0] ? sample.wait.runner : "-", sample.wait.runner_us);
+#endif
         /* Slots are the divisor's presentation slots, in 1/256 microseconds.
          * An interval counts the nearest whole slots, so jitter either side
          * of a slot boundary is not a skip. */
@@ -461,9 +487,19 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
     capture->render_misses += sample.render > period;
     capture->worst_work = MAX(work, capture->worst_work);
     capture->work_misses += work > period;
+    sample.database_busy = tagcache_is_busy();
+    sample.art_busy = art_cache_is_busy();
+    sample.work_overlap_db = sample.database_busy || capture->previous_db_busy;
+    sample.work_overlap_art = sample.art_busy || capture->previous_art_busy;
+    capture->previous_db_busy = sample.database_busy;
+    capture->previous_art_busy = sample.art_busy;
+    sample.pcm_active = mixer_channel_status(PCM_MIXER_CHAN_PLAYBACK) == CHANNEL_PLAYING;
+    unsigned pcm_chunks = pcmbuf_get_counters().chunks_played;
+    sample.pcm_chunks = MIN(UINT16_MAX, pcm_chunks - capture->previous_pcm_chunks);
+    capture->previous_pcm_chunks = pcm_chunks;
+    capture->database_frames += sample.database_busy;
+    capture->art_frames += sample.art_busy;
     capture->samples[capture->seen % PERF_CAPACITY] = sample;
-    capture->database_frames += tagcache_is_busy();
-    capture->art_frames += art_cache_is_busy();
     ++capture->seen;
     core_put_data_pinned(capture);
 }
@@ -521,7 +557,12 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
         "art_copy_us,art_submit_overhead_us,caption_copy_us,caption_submit_overhead_us,"
         "te_slots,present_slots,hw_offset,band_rows,"
         "runnable_wait_us,lock_wait_us,other_wait_us,action_wait_us,"
-        "action_timeout_ticks,lock_site\n";
+        "action_timeout_ticks,lock_site,button_us,button_calls,db_busy,art_busy,pcm_chunks,pcm_active,db_overlap,art_overlap"
+#ifdef HAVE_MOTION_SCHED
+        ",sleep_us,queue_us,longest_wait_us,ready_us,wait_ticks,wake_late_ticks,"
+        "wait_site,runner_us,runner_cpu_us,runner"
+#endif
+        "\n";
     static const char *const parts[] = { "-", "a", "c", "ac" };
     uint32_t period_q8 = capture->period_q8;
     uint32_t period = (period_q8 + 128) >> 8;
@@ -541,7 +582,11 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
             "%u," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT
             ",%u,%u,%u,%u,%d,%s,%u,%u," FRAME_FORMAT ",%d,%u,%u,%u"
             ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%d,%d,%u"
-            ",%u,%u,%u,%u,%d,%lx\n",
+            ",%u,%u,%u,%u,%d,%lx,%u,%u,%u,%u,%u,%u,%u,%u"
+#ifdef HAVE_MOTION_SCHED
+            ",%u,%u,%u,%u,%d,%d,%lx,%u,%u,%s"
+#endif
+            "\n",
             i + 1, FRAME_ARG(render_f), FRAME_ARG(submit_f), FRAME_ARG(work_f),
             FRAME_ARG(interval_f), work > period, interval_miss,
             (unsigned)sample->skipped, sample->divisor,
@@ -564,7 +609,20 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
             sample->hw_offset, sample->band_rows,
             (unsigned)sample->run_wait, (unsigned)sample->lock_wait,
             (unsigned)sample->other_wait, (unsigned)sample->action_wait,
-            sample->action_timeout, (unsigned long)sample->lock_site);
+            sample->action_timeout, (unsigned long)sample->lock_site,
+            (unsigned)sample->button_us, (unsigned)sample->button_calls,
+            sample->database_busy, sample->art_busy, sample->pcm_chunks,
+            sample->pcm_active, sample->work_overlap_db, sample->work_overlap_art
+#ifdef HAVE_MOTION_SCHED
+            , (unsigned)sample->wait.sleep_us, (unsigned)sample->wait.queue_us,
+            (unsigned)sample->wait.longest_us, (unsigned)sample->wait.ready_us,
+            (int)sample->wait.wait_ticks, (int)sample->wait.wake_late_ticks,
+            sample->wait.wait_site ? (unsigned long)(sample->wait.wait_site -
+                (uintptr_t)motion_sched_watch) : 0ul, (unsigned)sample->wait.runner_us,
+            (unsigned)sample->wait.runner_cpu_us,
+            sample->wait.runner[0] ? sample->wait.runner : "-"
+#endif
+            );
         if (n < 0 || (size_t)n >= size - used)
             break;
         used += n;
@@ -593,7 +651,7 @@ void ui_perf_end(unsigned token)
     unsigned interval_worst = as_frames(capture->worst_interval, period_q8);
     int phase_p50 = phase_arg(percentile(capture, first, PHASE, 50));
     int phase_p99 = phase_arg(percentile(capture, first, PHASE, 99));
-    size_t rows_size = 650 + (size_t)retained * 380;
+    size_t rows_size = 825 + (size_t)retained * 464;
     int rows_handle = retained ? core_alloc_free_space(rows_size) : 0;
     char *rows = NULL;
     size_t rows_used = 0;

@@ -39,6 +39,10 @@
 #include "button.h"
 static bool reported_high_rate;
 #endif
+#ifdef PODBOX_MOTION_PROBE
+#include <stdlib.h>
+#include <stdio.h>
+#endif
 #include "ui/scene.h"
 #include "logfile.h"
 #ifdef HAVE_USB_PODLINK
@@ -1157,6 +1161,11 @@ static int shrink_callback(int handle, unsigned hints, void* start, size_t old_s
             resume.offset = offset;
     }
 
+#ifdef PODBOX_MOTION_PROBE
+    if (playing && getenv("PODBOX_TRACE_LIST"))
+        fprintf(stderr, "audio shrink tick=%ld wanted=%zu free=%zu\n",
+                (long)current_tick, wanted_size, core_allocatable());
+#endif
     /* Stopping yields, and the audio thread first finishes the event it has
      * in hand. Should that free or replace the block, handle and start below
      * name memory buflib has since given to someone else. */
@@ -1260,6 +1269,12 @@ static void audio_reset_buffer(void)
 #endif
         /* The menu releases its snapshots before a handoff takes the display. */
         reserve += display_reserve;
+#ifdef IPOD_6G
+        /* Cover Flow holds its own page and artwork staging in addition to
+         * the scene workspace. Leave those frames out of the art worker's
+         * scratch budget while the screen is open. */
+        reserve += 2 * (FRAMEBUFFER_SIZE + BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t));
+#endif
         extern void sm1_ahead_check_pool(size_t,size_t);
         sm1_ahead_check_pool(filebuflen,reserve+scratch_mem_size()+AUDIO_BUFFER_RESERVE);
         size_t layout = pcmbuf_size_reqd() + scratch_mem_size()

@@ -395,6 +395,9 @@ static inline void core_rtr_add(struct core_entry *corep,
 #ifdef HAVE_PRIORITY_SCHEDULING
     thread->skip_count = thread->base_priority;
 #endif
+#ifdef HAVE_MOTION_SCHED
+    motion_watch_wake(thread);
+#endif
     thread->state = STATE_RUNNING;
     RTR_UNLOCK(corep);
 }
@@ -1078,6 +1081,9 @@ void switch_thread(void)
 
         /* Enter sleep mode to reduce power usage */
         RTR_UNLOCK(corep);
+#ifdef HAVE_MOTION_SCHED
+        motion_watch_in(NULL);
+#endif
         core_sleep(IF_COP(core));
 
         /* Awakened by interrupt or other CPU */
@@ -1136,9 +1142,6 @@ void switch_thread(void)
 
     rtr_queue_make_first(&corep->rtr, thread);
     corep->running = thread;
-#ifdef HAVE_MOTION_SCHED
-    motion_watch_in(thread);
-#endif
 #ifdef HAVE_HANG_CATCH_FIQ
     if (thread == hang_ui_thread)
         hang_ui_ran = current_tick; /* the freeze watch's UI liveness */
@@ -1154,6 +1157,9 @@ void switch_thread(void)
 #endif
 
     /* And finally, give control to the next thread. */
+#ifdef HAVE_MOTION_SCHED
+    motion_watch_in(thread);
+#endif
     thread_load_context(thread);
 }
 

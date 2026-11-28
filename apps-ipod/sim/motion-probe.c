@@ -4,6 +4,14 @@
 #include <stdlib.h>
 
 #include "config.h"
+#include "audio/pcmbuf.h"
+#include "database/tagcache.h"
+#include "file.h"
+#include "metadata/art_cache.h"
+#include "playlist/playlist.h"
+#include "rbpaths.h"
+#include "system/activity.h"
+#include "system/bg_task.h"
 #include "kernel.h"
 #include "thread.h"
 #include "motion_sched.h"
@@ -77,8 +85,77 @@ static void probe_bands(void)
 }
 #endif
 
+void sim_motion_work_started(const char *task)
+{
+    if (getenv("PODBOX_MOTION_LOAD_PROBE"))
+        fprintf(stderr, "motion load: %s active at %ld\n", task, (long)current_tick);
+}
+
+static void probe_start_work(void)
+{
+    const char *database = ROCKBOX_DIR "/ui-motion-db.request";
+    const char *art = ROCKBOX_DIR "/ui-motion-art.request";
+    const char *play = ROCKBOX_DIR "/ui-motion-play.request";
+    const char *finish = ROCKBOX_DIR "/ui-motion-finish.request";
+    extern void bg_task_probe_wake(void);
+    int previous = -1;
+
+    for (;;)
+    {
+        sleep(0);
+        int activity = get_current_activity();
+        if (activity != previous)
+        {
+            previous = activity;
+            if (activity == ACTIVITY_MAINMENU)
+                fprintf(stderr, "motion probe: home\n");
+            else if (activity == ACTIVITY_ALBUMCOVERS)
+                fprintf(stderr, "motion probe: cover flow\n");
+        }
+        if (remove(finish) == 0)
+        {
+            struct pcmbuf_counters pcm = pcmbuf_get_counters();
+            fprintf(stderr, "motion probe: PCM chunks=%u underruns=%u\n",
+                    pcm.chunks_played, pcm.underruns);
+        }
+        if (remove(play) == 0)
+        {
+            int rc = playlist_create(NULL, NULL);
+            if (rc >= 0)
+                rc = playlist_insert_track(NULL, "/Play/00 Playback.flac",
+                                           PLAYLIST_INSERT_LAST, false, true);
+            assert(rc >= 0);
+            playlist_start(0, 0, 0);
+            fprintf(stderr, "motion probe: playback requested at %ld\n",
+                    (long)current_tick);
+        }
+        if (remove(database) == 0)
+        {
+            tagcache_update();
+            fprintf(stderr, "motion probe: database requested at %ld\n",
+                    (long)current_tick);
+        }
+        if (remove(art) == 0)
+        {
+            bg_task_update(&art_cache_task);
+            bg_task_probe_wake();
+            fprintf(stderr, "motion probe: art requested at %ld\n",
+                    (long)current_tick);
+        }
+    }
+}
+
 void sim_motion_probe(void)
 {
+    if (getenv("PODBOX_MOTION_LOAD_PROBE"))
+    {
+        static long load_stack[DEFAULT_STACK_SIZE / sizeof(long)];
+        unsigned load = create_thread(probe_start_work, load_stack,
+                                      sizeof(load_stack), 0, "motion load"
+                                      IF_PRIO(, PRIORITY_SYSTEM) IF_COP(, CPU));
+        assert(load);
+    }
+
     if (!getenv("PODBOX_TEST_MOTION"))
         return;
 

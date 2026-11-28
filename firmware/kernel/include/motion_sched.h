@@ -22,10 +22,14 @@ void motion_sched_set_disk_mutex(struct mutex *mutex);
 struct motion_sched_wait
 {
     uint32_t runnable, inherited, other;
-    uintptr_t lock_site;
+    uint32_t sleep_us, queue_us;
+    uint32_t longest_us, ready_us, runner_us, runner_cpu_us;
+    int32_t wait_ticks, wake_late_ticks;
+    char runner[20];
+    uintptr_t lock_site, wait_site;
 };
 void motion_sched_watch(unsigned thread_id);
-struct motion_sched_wait motion_sched_get_wait(void);
+struct motion_sched_wait motion_sched_take_wait(void);
 #endif
 
 #endif

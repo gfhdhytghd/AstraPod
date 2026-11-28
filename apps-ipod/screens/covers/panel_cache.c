@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "metadata/album_blur.h"
+#include "metadata/art_cache.h"
 #include "bidi.h"
 #include "audio.h"
 #include "audio/playback.h"
@@ -29,6 +30,7 @@
 #include "system/bg_task.h"
 #include "system/appevents.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/motion_schedule.h"
 #include "usb.h"
 
 #define PANEL_DIR ROCKBOX_DIR "/podbox/cache/panel"
@@ -263,7 +265,8 @@ void panel_cache_window(const struct panel_request *requests, unsigned count)
 
 bool panel_cache_pump(void)
 {
-    if (!scratch || usb_host_wants_storage())
+    if (!scratch || usb_host_wants_storage() ||
+        (!fonts_held && (art_cache_is_busy() || ui_motion_active())))
         return false;
     bool pending = false;
     mutex_lock(&lock);
@@ -279,7 +282,7 @@ bool panel_cache_pump(void)
 
 static bool cancelled(void)
 {
-    if (usb_host_wants_storage())
+    if (usb_host_wants_storage() || (!fonts_held && ui_motion_active()))
         return true;
     mutex_lock(&lock);
     bool stale = serial != working_serial;
@@ -310,6 +313,27 @@ void panel_cache_hold_fonts(bool hold)
 static unsigned face_height(unsigned face)
 {
     return fonts[face] >= 0 ? (unsigned)font_get(fonts[face])->height : 0;
+}
+
+/* Opening a private face must fit without asking the audio buffer to
+ * stop and rebuffer a playing track. */
+static int load_private_face(const char *path)
+{
+    const int glyphs = 96;
+    if (audio_status() & AUDIO_STATUS_PLAY)
+    {
+        int fd = open(path, O_RDONLY);
+        if (fd < 0)
+            return -1;
+        struct font font = {0};
+        off_t bytes = font_pbf_header(fd, &font)
+            ? (off_t)font_pbf_buffer_size(&font, 0, glyphs) : ffilesize(fd);
+        close(fd);
+        size_t background = fonts_held ? 0 : bg_task_reserve_bytes();
+        if (bytes < 0 || (size_t)bytes + 1024 + background > core_allocatable())
+            return -1;
+    }
+    return font_load_private(path, glyphs);
 }
 
 static bool fonts_ready(void)
@@ -345,12 +369,13 @@ static bool fonts_ready(void)
         if (fonts[i] < 0)
         {
             uint32_t start = USEC_TIMER;
-            fonts[i] = font_load_private(faces[i], 96);
+            fonts[i] = load_private_face(faces[i]);
             panel_perf_record(PP_FONT, USEC_TIMER - start, face_height(i), 0);
         }
         if (fonts[i] < 0)
             return false;
         revision = (revision << 5 | revision >> 27) ^ font_pbf_pack_revision(fonts[i]);
+        yield();
         if (cancelled())
             return false;
     }
@@ -704,6 +729,7 @@ static void build_packs(struct panel_cached *data)
         d->bytes += d->length[face];
         panel_perf_record(PP_FONT, USEC_TIMER - start, face_height(face),
                           d->length[face] ? n : 0);
+        yield();
     }
 }
 
@@ -810,7 +836,7 @@ static bool prepare_tracks(bool *disk, bool *fresh)
 static void prepare(const struct queue_event *event)
 {
     (void)event;
-    if (usb_host_wants_storage())
+    if (usb_host_wants_storage() || (!fonts_held && ui_motion_active()))
         return;
     unsigned index = 0;
     uint32_t start;
@@ -850,7 +876,16 @@ static void prepare(const struct queue_event *event)
     {
         close_remote_query();
         if (!fonts_ready())
+        {
+            if (!fonts_held)
+            {
+                mutex_lock(&lock);
+                if (serial == working_serial)
+                    retry_at = current_tick + HZ / 2;
+                mutex_unlock(&lock);
+            }
             return;
+        }
         if (!db_stamp || db_seen_generation != work.generation ||
             db_seen_revision != work.revision)
         {

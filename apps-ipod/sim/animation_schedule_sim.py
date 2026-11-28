@@ -3,10 +3,12 @@
 """Run matched headless playback, Cover Flow and list motion sessions."""
 
 import argparse
+import csv
 import json
 from pathlib import Path
 import shutil
-import statistics
+import math
+import re
 import subprocess
 import sys
 import time
@@ -66,48 +68,60 @@ def add_art_work(root):
         shutil.rmtree(art)
 
 
-def wait_for_art(sim, cache):
-    # A fallback thumbnail is the first output of the real build pass.
-    # Starting playback here leaves scratch allocated before audio fills RAM.
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        if any(cache.glob("*/fallback.aat")):
-            return
-        sim.wait(1)
-    raise AssertionError("art cache did not start")
-
-
 def read(path):
     return path.read_text(errors="replace") if path.exists() else ""
 
 
-def summarize(records):
-    by_route = {}
-    for record in records:
-        route = record["route"]
-        if int(record["pcm_chunks"]) and int(record["seen"]) >= 4:
-            by_route.setdefault(route, []).append(record)
-    return {
-        route: {
-            "captures": len(rows),
-            "frames": sum(int(row["seen"]) for row in rows),
-            "median_capture_p99_ms": round(statistics.median(
-                float(row["interval_p99_f"]) * int(row["period_us"]) / 1000
-                for row in rows), 3),
-            "worst_interval_ms": round(max(
-                float(row["interval_worst_f"]) * int(row["period_us"]) / 1000
-                for row in rows), 3),
-            "interval_misses": sum(int(row["interval_misses"]) for row in rows),
-            "database_frames": sum(int(row["database_frames"]) for row in rows),
-            "art_frames": sum(int(row["art_frames"]) for row in rows),
-            "pcm_chunks": sum(int(row["pcm_chunks"]) for row in rows),
-            "pcm_underruns": sum(int(row["pcm_underruns"]) for row in rows),
-        }
-        for route, rows in by_route.items()
-    }
+def wait_log(sim, path, marker, previous=0, seconds=8):
+    deadline = time.monotonic() + seconds
+    while read(path).count(marker) <= previous:
+        assert time.monotonic() < deadline, f"Missing {marker!r} in {path}"
+        sim.wait(0.25)
 
 
-def session(binary, source, out, phase):
+def workload(sim, phase):
+    marker = f"motion load: {'database' if phase == 'database' else 'art cache'} active"
+    log = sim.out / "firmware.log"
+    previous = read(log).count(marker)
+    suffix = "db" if phase == "database" else "art"
+    (sim.root / ".rockbox" / f"ui-motion-{suffix}.request").touch()
+    wait_log(sim, log, marker, previous)
+
+
+def summarize(perf_log, phase):
+    counts = {route: {"intervals": [], "loaded_frames": 0,
+                      "busy_at_submit": 0, "loaded_pcm_chunks": 0}
+              for route in ("list-glide", "cover-flow")}
+    worker = "db" if phase == "database" else "art"
+    for capture in read(perf_log).split("route=")[1:]:
+        summary, *rows = capture.splitlines()
+        route = summary.split()[0]
+        if route not in counts or not rows:
+            continue
+        fields = dict(item.split("=", 1) for item in summary.split()[1:])
+        stat = counts[route]
+        period = int(fields["period_us"]) / 1000
+        for row in csv.DictReader(rows):
+            if row["pcm_active"] != "1":
+                continue
+            value = float(row["interval_f"]) * period
+            if value:
+                stat["intervals"].append(value)
+            if row[f"{worker}_busy"] == "1":
+                stat["busy_at_submit"] += 1
+            if row[f"{worker}_overlap"] == "1":
+                stat["loaded_frames"] += 1
+                stat["loaded_pcm_chunks"] += int(row["pcm_chunks"])
+    for stat in counts.values():
+        intervals = sorted(stat.pop("intervals"))
+        stat["frames"] = len(intervals)
+        if intervals:
+            stat["p99_ms"] = round(intervals[math.ceil(len(intervals) * 0.99) - 1], 3)
+            stat["max_ms"] = round(intervals[-1], 3)
+    return counts
+
+
+def session(binary, source, out, phase, vsync_off):
     out.mkdir(parents=True)
     root = out / "disk"
     shutil.copytree(source, root)
@@ -121,12 +135,11 @@ def session(binary, source, out, phase):
     rb = root / ".rockbox"
     config = rb / "config.cfg"
     settings = {
-        "start in screen": "files",
-        "start directory": "/Play",
+        "start in screen": "root",
         "root menu order": "pictureflow,files,database,wps,settings,plugins",
         "native theme": "scrim",
         "list wraparound": "off",
-        "tagcache_scan_on_startup": "on" if phase == "database" else "off",
+        "tagcache_scan_on_startup": "off",
         "debug log tagcache": "on",
         "debug log tasks": "on",
         "debug log artcache": "on",
@@ -140,75 +153,94 @@ def session(binary, source, out, phase):
     (rb / ".resume.cfg").unlink(missing_ok=True)
     (rb / "ui-perf.enable").touch()
 
-    sim = Sim(binary, root, out)
+    env = {"PODBOX_MOTION_LOAD_PROBE": "1"}
+    if vsync_off:
+        env["SDL_RENDER_VSYNC"] = "0"
+    sim = Sim(binary, root, out, env)
+    log, perf = out / "firmware.log", rb / "ui-perf.txt"
+    failure = None
     try:
+        wait_log(sim, log, "motion probe: home")
+        (rb / "ui-motion-play.request").touch()
+        wait_log(sim, log, "Codec: entering run state")
         sim.wait(25)
-        sim.tap("select", 18)                # enter /Play
-        if phase == "art":
-            wait_for_art(sim, rb / "library" / "cache" / "art")
-        sim.tap("select", 26)                # start the local FLAC
-        sim.tap("menu", 40)                  # Now Playing -> Files
-        sim.tap("menu", 45)                  # Files -> Home
 
         def home_glides():
             for key in ("down", "down", "down", "up", "up", "up"):
                 sim.tap(key, 5)
-            # A concurrent worker can delay the arrival of the preceding
-            # press. Use the list boundary to restore the starting row.
+            # Include repeated detents at the physical list edge.
             for _ in range(10):
                 sim.tap("up", 3)
             sim.wait(26)
 
+        workload(sim, phase)
         home_glides()
-        if phase == "database":
-            sim.wait(120)
 
-        for _ in range(2):
-            flow = rb / "ui-perf.txt"
-            entries = read(flow).count("route=cover-flow-entry ")
-            sim.tap("select", 40)
-            deadline = time.monotonic() + 6
-            while read(flow).count("route=cover-flow-entry ") == entries:
-                assert time.monotonic() < deadline, "Cover Flow entry did not settle"
-                sim.wait(3)
-            for _ in range(18):
-                sim.tap("down", 5)
-            sim.wait(45)
-            sim.tap("menu", 60)              # Cover Flow -> Home
-            home_glides()
+        sim.tap("select", 36)
+        wait_log(sim, perf, "route=cover-flow-entry ")
+        workload(sim, phase)
+        for _ in range(3):
+            for direction in ("down", "up"):
+                for _ in range(8):
+                    sim.tap(direction, 5)
+        sim.wait(32)
+        previous = read(log).count("motion probe: home")
+        sim.tap("menu", 40)
+        wait_log(sim, log, "motion probe: home", previous)
+        home_glides()
 
-        sim.wait(780 if phase == "art" else 300)
+        (rb / "ui-motion-finish.request").touch()
+        wait_log(sim, log, "motion probe: PCM chunks")
+    except AssertionError as error:
+        failure = str(error)
     finally:
         sim.close()
+        sim.process.wait(timeout=5)
 
-    records = [
-        dict(field.split("=", 1) for field in line.split())
-        for line in read(rb / "ui-perf.txt").splitlines()
-        if line.startswith("route=")
-    ]
-    task_log = read(rb / "logs" / "tasks.log")
-    task_phase = phase if phase == "database" else "art cache"
-    counts = {
-        "worker_log": [line for line in task_log.splitlines()
-                       if f"] {task_phase}:" in line],
-        "routes": summarize(records),
-        "playback_frames_during_db": sum(int(row["database_frames"])
-                                         for row in records if int(row["pcm_chunks"])),
-        "playback_frames_during_art": sum(int(row["art_frames"])
-                                          for row in records if int(row["pcm_chunks"])),
-        "thumbnail_count": sum(1 for path in
-                               (rb / "library" / "cache" / "art").glob("*/*.aat")
-                               if path.name != "fallback.aat"),
+    counts = summarize(perf, phase)
+    firmware = read(log)
+    pcm = re.search(r"motion probe: PCM chunks=(\d+) underruns=(\d+)", firmware)
+    result = {
+        "routes": counts,
+        "codec_starts": firmware.count("Codec: entering run state"),
+        "pcm_chunks": int(pcm[1]) if pcm else None,
+        "pcm_underruns": int(pcm[2]) if pcm else None,
         "database_before": base_count,
         "database_after": database_count(root),
-        "pcm_underruns_total": int(records[-1]["pcm_underruns_total"]) if records else None,
+        "failure": failure,
     }
-    (out / "results.json").write_text(json.dumps(counts, indent=2) + "\n")
-    print(phase, json.dumps(counts), flush=True)
-    assert "cover-flow" in counts["routes"], (phase, "no Cover Flow under playback")
-    assert "list-glide" in counts["routes"], (phase, "no list glide under playback")
-    assert counts["database_after"] == base_count, counts
-    assert counts["worker_log"], (phase, "background pass not observed")
+    (out / "results.json").write_text(json.dumps(result, indent=2) + "\n")
+    print(f"{phase} {out.parent.name} {json.dumps(result)}", flush=True)
+    return result
+
+
+def compare(before, after):
+    failures = []
+    for role, result in (("baseline", before), ("candidate", after)):
+        if result["failure"]:
+            failures.append(f"{role}: {result['failure']}")
+        if result["database_before"] != result["database_after"]:
+            failures.append(f"{role}: database changed")
+        if not result["pcm_chunks"]:
+            failures.append(f"{role}: missing PCM playback")
+        if result["pcm_underruns"] != 0:
+            failures.append(f"{role}: PCM underruns={result['pcm_underruns']}")
+
+    if after["codec_starts"] != 1:
+        failures.append(f"candidate: codec started {after['codec_starts']} times")
+    for route, candidate in after["routes"].items():
+        baseline = before["routes"][route]
+        if any(stat["loaded_frames"] == 0 or not stat["frames"]
+               for stat in (baseline, candidate)):
+            failures.append(f"{route}: missing playback frames under load")
+            continue
+        if candidate["p99_ms"] > baseline["p99_ms"]:
+            failures.append(f"{route}: P99 {baseline['p99_ms']} -> {candidate['p99_ms']} ms")
+        if baseline["p99_ms"] <= 34 and candidate["p99_ms"] > 34:
+            failures.append(f"{route}: P99 {candidate['p99_ms']} exceeds 34 ms")
+        if candidate["max_ms"] >= 100:
+            failures.append(f"{route}: maximum {candidate['max_ms']} exceeds 100 ms")
+    return failures
 
 
 def main():
@@ -216,14 +248,21 @@ def main():
     for name in ("baseline", "candidate", "resource", "output"):
         parser.add_argument(name, type=lambda value: Path(value).resolve())
     parser.add_argument("--fixture", type=lambda value: Path(value).resolve())
+    parser.add_argument("--vsync-off", action="store_true")
     args = parser.parse_args()
     source = args.fixture or args.output / "fixture"
     args.output.mkdir(parents=True)
     if not args.fixture:
         fixture(args.baseline, args.resource, source)
+    failures = {}
     for phase in ("art", "database"):
-        for name in ("baseline", "candidate"):
-            session(getattr(args, name), source, args.output / name / phase, phase)
+        before, after = (session(getattr(args, name), source,
+                                 args.output / name / phase, phase, args.vsync_off)
+                         for name in ("baseline", "candidate"))
+        failures[phase] = compare(before, after)
+    (args.output / "acceptance.json").write_text(json.dumps(failures, indent=2) + "\n")
+    if any(failures.values()):
+        raise SystemExit(f"animation scheduling failed: {failures}")
 
 
 if __name__ == "__main__":

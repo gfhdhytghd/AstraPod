@@ -181,8 +181,7 @@ static long raw_ui_cancel(void)
     return BUTTON_MENU | (release ? 0 : BUTTON_REL);
 }
 
-/* Fruit opens Now Playing from the menu. With a live host, the chord
- * also switches between the T3 Agents and Now Playing screens. */
+/* Switch between the playback and Agents screens even without a host. */
 static int wheel_shortcut_button(int button, bool talking, bool raw, int *action)
 {
     *action = ACTION_NONE;
@@ -192,23 +191,23 @@ static int wheel_shortcut_button(int button, bool talking, bool raw, int *action
                           activity != ACTIVITY_MUSICQUIZ;
     if (fruit_playback && activity == ACTIVITY_USBSCREEN && !shortcut.latched)
         return button;
-    bool connected = false;
+    bool switch_agents = false;
 #ifdef HAVE_USB_PODLINK
-    connected = podlink_host_connected() &&
-                (!fruit_playback || activity == ACTIVITY_AGENTS ||
-                 activity == ACTIVITY_WPS);
+    switch_agents = activity == ACTIVITY_AGENTS ||
+                    activity == ACTIVITY_WPS || activity == ACTIVITY_LYRICS ||
+                    (!fruit_playback && podlink_host_connected());
 #endif
-    if (raw && connected && !shortcut.latched && !shortcut.ignored)
+    if (raw && switch_agents && !shortcut.latched && !shortcut.ignored)
         return button;
     bool fire;
     button = agents_shortcut_button(&shortcut, button, button_status(),
-                                    connected && talking, &fire);
+                                    switch_agents && talking, &fire);
     /* PLAY may have reached transport before SELECT joined the chord. */
     if (shortcut.latched && wheel_transport_pressed == BUTTON_PLAY)
         wheel_transport_pressed = BUTTON_NONE;
     if (fire)
     {
-        if (connected)
+        if (switch_agents)
             *action = ACTION_AGENTS_SWITCH;
         else
         {
@@ -1353,14 +1352,58 @@ static inline int do_backlight(action_last_t *last, action_cur_t *cur, int actio
 *                   TIMEOUT_BLOCK   to wait for a button press
 *                   Any number >0   to wait that many ticks for a press
 */
+static bool wps_play_pressed;
+
+static int wps_play_action(int button)
+{
+    static long down_at;
+
+    if (button == BUTTON_PLAY)
+    {
+        down_at = current_tick;
+#ifdef HAVE_WHEEL_WPS_CHORD
+        /* button_tick waits 60 ms before posting an unchorded PLAY down. */
+        down_at -= 6 * HZ / 100;
+#endif
+        wps_play_pressed = true;
+        return ACTION_NONE;
+    }
+    if (button == (BUTTON_PLAY | BUTTON_REPEAT))
+        return ACTION_NONE;
+    if (wps_play_pressed)
+    {
+        unsigned long held = (unsigned long)current_tick - down_at;
+        wps_play_pressed = false;
+        /* Both iPod targets shut down after the initial repeat at tick 31
+         * and 41 more repeats (16 through 6 ticks, then 30 at 5 ticks). */
+        if (held < HZ)
+            return ACTION_WPS_PLAY;
+        if (held < 302 * HZ / 100)
+            return ACTION_WPS_LYRICS;
+    }
+    return ACTION_NONE;
+}
+
 static int get_action_worker(action_last_t *last, action_cur_t *cur)
 {
     send_event(GUI_EVENT_ACTIONUPDATE, NULL);
     cur->timeout = sb_motion_timeout(cur->timeout);
 
+    bool playback = last == &action_last && cur->context == CONTEXT_WPS &&
+        (get_current_activity() == ACTIVITY_WPS ||
+         get_current_activity() == ACTIVITY_LYRICS);
+    if (!playback)
+        wps_play_pressed = false;
+
     /*if button = none/special; returns immediately*/
     if (action_poll_button(last, cur))
     {
+        if (cur->button == SYS_POWEROFF
+#ifdef HAVE_WHEEL_WPS_CHORD
+            || shortcut.latched
+#endif
+           )
+            wps_play_pressed = false;
         return cur->action != ACTION_UNKNOWN ? cur->action : cur->button;
     }
 
@@ -1374,7 +1417,15 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
 
     button_flip_horizontally(cur->context, &cur->button);
 
-    action_code_lookup(last, cur);
+    if (playback && (cur->button == BUTTON_PLAY ||
+                     cur->button == (BUTTON_PLAY | BUTTON_REPEAT) ||
+                     cur->button == (BUTTON_PLAY | BUTTON_REL)))
+    {
+        cur->is_prebutton = cur->button == BUTTON_PLAY;
+        cur->action = wps_play_action(cur->button);
+    }
+    else
+        action_code_lookup(last, cur);
 
     do_softlock(last, cur);
 

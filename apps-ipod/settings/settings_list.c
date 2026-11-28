@@ -526,11 +526,6 @@ struct eq_band_setting eq_defaults[EQ_NUM_BANDS] = {
     { EQ_FILTER_HIGH_SHELF, 16000, 7, 0 },
 };
 
-/* Item 0 is the hotkey button; 1..4 are the configurable rows at the bottom
-   of the WPS context menu. */
-static const int wps_context_menu_default = HK_CTX_SET(0, HOTKEY_LYRICS);
-static const int wps_select_default = HK_CTX_SET(0, HOTKEY_PREVIOUS_BROWSER);
-
 static const int tree_hotkey_default = HOTKEY_OFF;
 static const uint32_t context_hidden_default = 0;
 
@@ -1972,10 +1967,6 @@ const struct settings_list settings[] = {
                    ID2P(LANG_MUSIC_BROWSER),
                    ID2P(LANG_RESUME_PLAYBACK), ID2P(LANG_SETTINGS)
                   ),
-    CUSTOM_SETTING(0, wps_select_action, LANG_WPS_SELECT_ACTION,
-                   &wps_select_default, "wps select action",
-                   wps_context_menu_load_from_cfg, wps_context_menu_write_to_cfg,
-                   wps_context_menu_is_changed, wps_context_menu_set_default),
 
     /* Re-buffers the artwork on change, so the now-playing screen switches
      * picture without waiting for the next track. Dynamic colours need no
@@ -2311,11 +2302,6 @@ const struct settings_list settings[] = {
 
 
 
-    CUSTOM_SETTING(0, context_wps,
-                   LANG_HOTKEY_WPS, /* lang string here is never actually used */
-                   &wps_context_menu_default, "context_wps",
-                   wps_context_menu_load_from_cfg, wps_context_menu_write_to_cfg,
-                   wps_context_menu_is_changed, wps_context_menu_set_default),
     CUSTOM_SETTING(0, hotkey_tree,
                    LANG_HOTKEY_FILE_BROWSER, /* lang string here is never actually used */
                    &tree_hotkey_default, "hotkey tree",

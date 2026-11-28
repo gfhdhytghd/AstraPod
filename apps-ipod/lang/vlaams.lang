@@ -11741,23 +11741,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: hotkey menu
-  user: core
-  <source>
-    *: none
-    hotkey: "WPS Hotkey"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Speelschermsneltoets"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Speelschermsneltoets"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_HW_EQ_GAIN
   desc: in sound_menu, hardware equalizer tone controls filter gain
   user: core

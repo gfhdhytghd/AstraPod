@@ -10697,23 +10697,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: hotkey menu
-  user: core
-  <source>
-    *: none
-    hotkey: "WPS Hotkey"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Skratka pre Obrazovku teraz hrá"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Skratka pre Obrazovku teraz hrá"
-  </voice>
-</phrase>
-<phrase>
   id: VOICE_EXT_FMS
   desc: spoken only, for file extension
   user: core

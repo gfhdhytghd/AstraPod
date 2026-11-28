@@ -25,7 +25,7 @@
 | USB 连接确认 | 短按 SELECT 连接。MENU 仅充电。 | PLAY 切换播放。 |
 | Control Centre | `apps-ipod/input/keymap_ipod.c:279`、`apps-ipod/screens/playback/quick_screen.c`。非导航页的全屏控制页：左栏为随机播放和重复播放，右栏为一项通高的亮度。 | 滚轮直接调节音量，并通过状态栏音量覆盖层显示。LEFT 切换随机播放，RIGHT 切换重复播放，MENU 调高亮度，PLAY 调低亮度。短按 SELECT 关闭且无闪烁，长按 SELECT 打开 Shortcuts。 |
 | Cover Flow 和专辑面板 | `apps-ipod/screens/covers/carousel.c:158`、`:185`、`:188`、`:8687`、`:8727`、`:9333`、`:9477`。LEFT/RIGHT 跳页。长按 PLAY 随机转动。PLAY 可以从面板进入 Now Playing 或播放所选专辑。SELECT+PLAY 切换排序。 | 滚轮移动封面或歌曲焦点。SELECT 打开专辑或播放所选歌曲。MENU 返回。 |
-| Now Playing 及歌词 | `apps-ipod/input/keymap_ipod.c:181`、`apps-ipod/screens/playback/wps.c:896`、`:947`。LEFT/RIGHT 切歌和快进快退。PLAY 切换播放。长按 PLAY 打开菜单。SELECT+PLAY 触发快捷操作或 A/B 标记。歌词继承 WPS 播放动作。 | 播放动作保持可用。长按 SELECT 打开播放菜单。短按 SELECT 打开歌词或执行歌词操作。 |
+| Now Playing 及歌词 | `apps-ipod/input/keymap_ipod.c:181`、`apps-ipod/screens/playback/wps.c:896`、`:947`。LEFT/RIGHT 切歌和快进快退。短按 PLAY 松开时切换播放。按住 PLAY 一秒后松开，在歌词和 Now Playing 之间切换。SELECT+PLAY 切换到 Agents。 | 播放动作保持可用。长按 SELECT 打开播放菜单。Now Playing 的 SELECT 调节当前控件。歌词页的 SELECT 跳到所选歌词行或返回 Now Playing。 |
 | 全局按键组合 | `apps-ipod/input/agents_shortcut.c:65`、`apps-ipod/input/action.c:89`、`:535`、`:650`。SELECT+PLAY 进入 Agents 或 Now Playing。 | SELECT+MENU 的 Cover Flow 组合仍可使用。 |
 | Agents | `apps-ipod/input/keymap_ipod.c:147`、`apps-ipod/screens/system/agents_screen.c:2920`、`:3502`、`:3659`、`:3695`。LEFT/RIGHT 切换页面或标签，触发终端退格和问答。PLAY 控制终端语音。 | 滚轮移动焦点或阅读终端。长按 SELECT 打开 Usage、切换标签、打开 T3 操作或发出退格。二选一用滚轮选答案，SELECT 提交。配件仍可以发出语音动作。 |
 | Clocks | `apps-ipod/screens/extras/extras_clock.c:915`、`:974`。对话框继承 LEFT/RIGHT 选择和 PLAY 取消。时钟列表继承 PLAY 打开 Now Playing。 | 用滚轮选时钟和按钮。SELECT 确认。MENU 返回。地区、城市和时钟设置沿用滚轮选择。 |

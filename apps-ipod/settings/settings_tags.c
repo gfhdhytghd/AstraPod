@@ -453,7 +453,6 @@ static const struct tag_row tag_rows[] = {
 { "default codepage",    TAG_ADVANCED|TAG_SYSTEM,                "codepage character set encoding" },
 { "glyphs",              TAG_ADVANCED|TAG_SYSTEM|TAG_APPEARANCE, "glyph cache font limit" },
 { "default browser",     TAG_LIBRARY|TAG_APPEARANCE,             "browser default" },
-{ "wps select action",   TAG_ADVANCED|TAG_APPEARANCE,            "select action" },
 { "shortcuts instead of quickscreen", TAG_SYSTEM|TAG_APPEARANCE, "quickscreen shortcuts" },
 { "keyclick",            TAG_ADVANCED|TAG_SYSTEM,                "keyclick click" },
 { "hardware keyclick",   TAG_ADVANCED|TAG_SYSTEM,                "keyclick click speaker" },

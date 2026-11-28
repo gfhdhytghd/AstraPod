@@ -1,14 +1,13 @@
 # Animated Now Playing lyrics (FU57)
 
-SELECT opens the same lyrics page for local playback, Rufin and Cider.
-Holding the dock Apple Remote Play/Pause for 300 ms toggles the page in
-either direction. A dock tap pauses or resumes. The click-wheel
-Play hold still opens the WPS context menu. MENU returns
-to Now Playing too, including entry through a context menu. The previous local
-SELECT action, including the A/B marker key, is reachable with SELECT+PLAY.
-Cider A/B markers also use SELECT+PLAY. The local setting still stores its
-previous action under `wps select action` for configuration compatibility. The English settings
-label is `SELECT+PLAY Action`.
+On Now Playing, hold the click-wheel PLAY button for one second, then release
+it to open Lyrics. Use the same gesture in Lyrics to return to Now Playing.
+A shorter press pauses or resumes on release. Keep holding to power off.
+The gesture works in every theme with local playback, Rufin and Cider.
+
+SELECT+PLAY switches between Agents and Now Playing. MENU also returns from
+Lyrics to Now Playing. The dock Apple Remote keeps its own controls: hold
+Play/Pause for 300 ms to toggle Lyrics, or tap it to pause or resume.
 
 The wheel follows list direction (clockwise advances); remote + goes to the
 previous line and - to the next line. Remote reports always move one line;
@@ -39,7 +38,7 @@ to the same remote track. The local source releases the remote document.
 
 Local playback looks for timed sidecars (.lrc, .lrc8, .snc) beside the audio
 file and in its parent directories, then for .txt sidecars. With no sidecar,
-SELECT reads lyrics directly from the audio file. MP4 uses UTF-8 `©lyr`.
+The page reads lyrics directly from the audio file. MP4 uses UTF-8 `©lyr`.
 FLAC and Ogg Vorbis use `LYRICS` or `UNSYNCEDLYRICS`. MP3 prefers a
 millisecond-timed ID3v2 `SYLT` frame, with `USLT` as a fallback.
 Text tags accept LRC, enhanced LRC and plain text. Source files open read-only.

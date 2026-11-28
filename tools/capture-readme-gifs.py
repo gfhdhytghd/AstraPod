@@ -90,7 +90,6 @@ album covers statusbar: off
 album covers center margin: 20
 album covers sort albums by: name
 statusbar: off
-wps select action: lyrics
 lyrics lead: 0
 """
 

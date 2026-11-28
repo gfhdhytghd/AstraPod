@@ -994,39 +994,6 @@ MENUITEM_SETTING(browser_default,
 /* What Select, and Select and Play pressed together, do from the now-playing
    screen; selecting a row opens the list of actions. Named without its value,
    as the setting rows are: data is the row's lang id. */
-static char *wps_button_get_name(int selected_item, void *data,
-                                 char *buffer, size_t buffer_len)
-{
-    (void)selected_item;
-    (void)buffer;
-    (void)buffer_len;
-    return str((intptr_t)data);
-}
-
-static int wps_button_speak_item(int selected_item, void *data)
-{
-    (void)selected_item;
-    talk_id((intptr_t)data, false);
-    return 0;
-}
-
-MENUITEM_FUNCTION_DYNTEXT_W_PARAM(wps_select_action, 0,
-                                  wps_select_do_setting, (void*)0,
-                                  wps_button_get_name,
-                                  wps_button_speak_item,
-                                  (void*)LANG_WPS_SELECT_ACTION, NULL,
-                                  ICON_GLYPH(0x01EB),
-                  .settings = {.variable = &global_settings.wps_select_action});
-
-MENUITEM_FUNCTION_DYNTEXT_W_PARAM(hotkey_wps_item, 0,
-                                  wps_context_menu_do_setting, (void*)0,
-                                  wps_button_get_name,
-                                  wps_button_speak_item,
-                                  (void*)LANG_HOTKEY_WPS, NULL,
-                                  ICON_GLYPH(0x0169),
-                  .settings = {.variable = &global_settings.context_wps});
-
-
 /* Which picture the screen shows, and where its album cover is looked for
  * first. Properties of this screen rather than of the theme: no skin sets
  * either, and a theme that wanted to could not. */
@@ -1044,8 +1011,6 @@ MAKE_MENU(wps_appearance_link, ID2P(LANG_APPEARANCE), 0, Icon_NOICON,
 
 MAKE_MENU(wps_settings, ID2P(LANG_WPS), 0, Icon_Playback_menu
             ,&browser_default
-            ,&wps_select_action
-            ,&hotkey_wps_item
             ,&wps_appearance_link
             );
 

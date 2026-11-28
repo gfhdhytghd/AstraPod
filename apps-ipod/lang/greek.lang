@@ -12352,23 +12352,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: hotkey menu
-  user: core
-  <source>
-    *: none
-    hotkey: "WPS Hotkey"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Πλήκτρο WPS"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Πλήκτρο WPS"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_SURROUND_MIX
   desc: in sound settings
   user: core

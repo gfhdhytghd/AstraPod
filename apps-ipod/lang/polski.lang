@@ -10164,23 +10164,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: in Now Playing Screen settings, what Select and Play pressed together do
-  user: core
-  <source>
-    *: none
-    hotkey: "Select + Play Action"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Działanie Środek + Odtwarzaj"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Działanie Środek i Odtwarzaj"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_COMPRESSOR_THRESHOLD
   desc: in sound settings
   user: core
@@ -17294,20 +17277,6 @@
   </dest>
   <voice>
     *: none
-  </voice>
-</phrase>
-<phrase>
-  id: LANG_WPS_SELECT_ACTION
-  desc: in settings_menu
-  user: core
-  <source>
-    *: "Select Action"
-  </source>
-  <dest>
-    *: "Działanie przycisku środkowego"
-  </dest>
-  <voice>
-    *: "Działanie przycisku środkowego"
   </voice>
 </phrase>
 <phrase>

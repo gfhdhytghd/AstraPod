@@ -11790,23 +11790,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: hotkey menu
-  user: core
-  <source>
-    *: none
-    hotkey: "WPS Hotkey"
-  </source>
-  <dest>
-    *: none
-    hotkey: "DSE tipka prečaca"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "DSE tipka prečaca"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_HOTKEY_FILE_BROWSER
   desc: hotkey menu
   user: core

@@ -2991,8 +2991,6 @@ int hotkey_run_menu(intptr_t flag, bool execute, int current_action)
 
     if (flag & HOTKEY_FLAG_TREE)
         title_id = LANG_HOTKEY_FILE_BROWSER;
-    else if (!execute)
-        title_id = LANG_HOTKEY_WPS;
     return hotkey_list(flag, execute, current_action, title_id, !execute);
 }
 
@@ -3008,22 +3006,6 @@ static int hotkey_menu_do_setting(int *setting, int flag, int title_id,
     return sel;
 }
 
-/* Select is not offered Off, so the button always does something */
-int wps_select_do_setting(void *param)
-{
-    (void)param;
-    return hotkey_menu_do_setting(&global_settings.wps_select_action,
-                                  HOTKEY_FLAG_WPS, LANG_WPS_SELECT_ACTION,
-                                  false);
-}
-
-int wps_context_menu_do_setting(void *param)
-{
-    (void)param;
-    return hotkey_menu_do_setting(&global_settings.context_wps,
-                                  HOTKEY_FLAG_WPS, LANG_HOTKEY_WPS, true);
-}
-
 int tree_context_menu_do_setting(void *param)
 {
     (void)param;
@@ -3037,9 +3019,7 @@ int tree_context_menu_do_setting(void *param)
    and storing the translated name breaks on a language change. */
 
 /* Names actions were saved under before they were renamed, so a config.cfg
-   written then keeps its assignment. The last four are wps select action's
-   choice words, found in older config.cfg files; its "files" and "lyrics"
-   match the actions' own names. */
+   written then keeps its assignment. */
 static const struct
 {
     const char *name;
@@ -3047,10 +3027,6 @@ static const struct
 } hotkey_old_names[] = {
     { "Add to Queue",       HOTKEY_INSERT },
     { "Shuffle into Queue", HOTKEY_INSERT_SHUFFLED },
-    { "default",            HOTKEY_PREVIOUS_BROWSER },
-    { "database",           HOTKEY_MUSIC },
-    { "coverflow",          HOTKEY_ALBUM_COVERS },
-    { "queue",              HOTKEY_VIEW_PLAYLIST },
 };
 
 /* Whole names only: "Play Later" is also the start of "Play Later Shuffled" */
@@ -3061,9 +3037,6 @@ static bool cfg_name_is(const char *st, size_t len, const char *name)
 
 bool hotkey_setting_from_cfg(int *setting, char *value)
 {
-    bool select = setting == &global_settings.wps_select_action;
-    int flag = setting == &global_settings.hotkey_tree ?
-               HOTKEY_FLAG_TREE : HOTKEY_FLAG_WPS;
     char *comma = strchr(value, ',');
     size_t length = comma ? (size_t)(comma - value) : strlen(value);
 
@@ -3073,8 +3046,7 @@ bool hotkey_setting_from_cfg(int *setting, char *value)
     for (size_t i = 0; i < ARRAYLEN(hotkey_items); i++)
     {
         const struct hotkey_assignment *item = &hotkey_items[i];
-        if ((item->flags & flag) == flag &&
-            (!select || item->action != HOTKEY_OFF) &&
+        if ((item->flags & HOTKEY_FLAG_TREE) &&
             cfg_name_is(value, length, lang_id_to_english(item->lang_id)))
         {
             *setting = HK_CTX_SET(0, item->action);
@@ -3610,12 +3582,6 @@ static void context_menu_select(char *file, int attr, int from_context)
     }
 }
 
-int context_menu_wps_hotkey(char *file, int act)
-{
-    context_menu_select(file, FILE_ATTR_AUDIO, CONTEXT_WPS);
-    return execute_hotkey(act);
-}
-
 static const char *fruit_context_label(int item, void *data,
                                          char *buf, size_t size)
 {
@@ -3716,7 +3682,6 @@ int context_menu_show(char* file, int attr, int from_context, bool hotkey, int c
     int menu_selection;
 
     context_menu_select(file, attr, from_context);
-    /* Now Playing's buttons run through context_menu_wps_hotkey() */
     if (hotkey)
         return execute_hotkey(global_settings.hotkey_tree & HK_CTX_MASK);
     if (customaction == ONPLAY_CUSTOMACTION_SHUFFLE_SONGS)

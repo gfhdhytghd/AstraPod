@@ -6048,23 +6048,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: hotkey menu
-  user: core
-  <source>
-    *: none
-    hotkey: "WPS Hotkey"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Tecla rápida de WPS"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "tecla rápida da pantalla de reproducción"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_SELECTOR_START_COLOR
   desc: line selector color option
   user: core

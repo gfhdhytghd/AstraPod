@@ -36,7 +36,6 @@ enum {
 
 /* Runs Now Playing's button action 'act' on the playing 'file': the
    context_menu_show() result */
-int context_menu_wps_hotkey(char *file, int act);
 /* The screen an ONPLAY_LEAVE result is for, a GO_TO_ value */
 long context_menu_leave_for(void);
 
@@ -95,8 +94,7 @@ struct hotkey_assignment {
     uint8_t icon;           /* themable_icons value shown beside the entry */
 };                          /* (Pick ONPLAY_FUNC_RETURN to use function's return value) */
 
-/* The hotkey settings -- Now Playing's Select and Select + Play, and the
-   file browser's hotkey -- hold their action as item 0 of an int. */
+/* The file browser hotkey holds its action as item 0 of an int. */
 #define HK_CTX_MASK  (0x3F)
 #define HK_CTX_BITS  (6) /* 6 bits, enough for 62 hotkey actions */
 #define HK_CTX_SET(item, hotkey) ((hotkey & HK_CTX_MASK) << (item * HK_CTX_BITS))
@@ -141,8 +139,6 @@ bool context_hidden_is_changed(void *setting, void *defaultval);
 void context_hidden_set_default(void *setting, void *defaultval);
 
 /* Assign a hotkey's action, driven from the settings menu. */
-int wps_select_do_setting(void *param);
-int wps_context_menu_do_setting(void *param);
 int tree_context_menu_do_setting(void *param);
 
 /* config.cfg handlers -- every hotkey setting shares these */

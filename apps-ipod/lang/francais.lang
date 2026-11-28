@@ -10791,23 +10791,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: in Now Playing Screen settings, what Select and Play pressed together do
-  user: core
-  <source>
-    *: none
-    hotkey: "Select + Play Action"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Action de Centre + Lecture"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Action de Centre et Lecture"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_HOTKEY_FILE_BROWSER
   desc: hotkey menu
   user: core
@@ -17314,20 +17297,6 @@
   </dest>
   <voice>
     *: none
-  </voice>
-</phrase>
-<phrase>
-  id: LANG_WPS_SELECT_ACTION
-  desc: in settings_menu
-  user: core
-  <source>
-    *: "Select Action"
-  </source>
-  <dest>
-    *: "Action du bouton central"
-  </dest>
-  <voice>
-    *: "Action du bouton central"
   </voice>
 </phrase>
 <phrase>

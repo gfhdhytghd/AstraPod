@@ -11093,23 +11093,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: in Now Playing Screen settings, what Select and Play pressed together do
-  user: core
-  <source>
-    *: none
-    hotkey: "Select + Play Action"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Select + Play Action"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Select and Play Action"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_HOTKEY_FILE_BROWSER
   desc: hotkey menu
   user: core
@@ -17329,20 +17312,6 @@
   </dest>
   <voice>
     *: none
-  </voice>
-</phrase>
-<phrase>
-  id: LANG_WPS_SELECT_ACTION
-  desc: in settings_menu
-  user: core
-  <source>
-    *: "SELECT+PLAY Action"
-  </source>
-  <dest>
-    *: "SELECT+PLAY Action"
-  </dest>
-  <voice>
-    *: "SELECT+PLAY Action"
   </voice>
 </phrase>
 <phrase>

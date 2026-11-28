@@ -171,3 +171,7 @@
   Theme Settings > Native theme; under Fruit Company that is under
   Settings > Advanced Settings. With Animations off it looks and behaves
   like Fruit Company.
+
+- **Lyrics shortcut:** On Now Playing, hold PLAY for one second and release
+  to open Lyrics. Repeat to return. SELECT+PLAY switches between Agents and
+  Now Playing. The two configurable Now Playing shortcut rows are gone.

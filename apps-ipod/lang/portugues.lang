@@ -11744,23 +11744,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: hotkey menu
-  user: core
-  <source>
-    *: none
-    hotkey: "WPS Hotkey"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Atalho do WPS"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Atalho do WPS"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_REMOTE_RADIOSCREEN
   desc: in the theme menu
   user: core

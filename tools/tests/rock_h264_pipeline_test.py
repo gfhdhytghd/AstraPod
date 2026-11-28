@@ -33,7 +33,7 @@ staged.write_text(splice(staged.read_text(), marker, r"""
                                 pic->sample, pic->pts_ms, clock_ms);
 """ + marker))
 
-harness = (fixture / "probe.c").read_text().split("int main(int argc", 1)[0]
+harness = (fixture / "probe.c").read_text().split("static int picture_mode(", 1)[0]
 harness = "#include <ucontext.h>\n" + harness
 harness = splice(harness, "scratch[2 * 1024 * 1024]", "scratch[4 * 1024 * 1024]")
 harness = splice(harness, "static int configure(", """

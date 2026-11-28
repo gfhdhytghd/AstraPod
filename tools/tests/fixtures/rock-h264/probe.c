@@ -346,20 +346,6 @@ static int resume_menu(void)
 
 static void adjust_volume(int delta) { (void)delta; }
 
-static int picture_mode(int direction)
-{
-    scaling = (scaling + direction + VIDEO_PICTURE_COUNT) % VIDEO_PICTURE_COUNT;
-    return scaling;
-}
-
-static bool control_centre(void)
-{
-    assert(audio_active && audio_paused && !boosted);
-    centre_calls++;
-    current_tick += HZ;
-    return true;
-}
-
 static const struct settings settings = {
     .backlight_timeout = 17, .video_fit = true,
 };
@@ -417,6 +403,20 @@ static void reset(enum mode next)
     saw_timeout = false;
     mode = next;
     rock_h264_begin(scratch, sizeof(scratch));
+}
+
+static int picture_mode(int direction)
+{
+    scaling = (scaling + direction + VIDEO_PICTURE_COUNT) % VIDEO_PICTURE_COUNT;
+    return scaling;
+}
+
+static bool control_centre(void)
+{
+    assert(audio_active && audio_paused && !boosted);
+    centre_calls++;
+    current_tick += HZ;
+    return true;
 }
 
 int main(int argc, char **argv)

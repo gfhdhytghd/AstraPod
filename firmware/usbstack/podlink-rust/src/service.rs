@@ -103,6 +103,7 @@ pub struct Service {
     log_len: usize,
     log_epoch: u32,
     disk_hello: bool,
+    clock_hello_pending: bool,
     token: Option<[u8; 32]>,
     record: [u8; 512],
     record_len: usize,
@@ -124,6 +125,7 @@ impl Service {
             log_len: 0,
             log_epoch: 0,
             disk_hello: false,
+            clock_hello_pending: false,
             token: None,
             record: [0; 512],
             record_len: 0,
@@ -140,6 +142,7 @@ impl Service {
         self.generation = self.generation.wrapping_add(1);
         self.welcome_len = 0;
         self.disk_hello = false;
+        self.clock_hello_pending = false;
         self.token = None;
         if !preserve_time {
             p.clear_time();
@@ -203,6 +206,10 @@ impl Service {
                         self.welcome[..m.len].copy_from_slice(data);
                         self.welcome_len = m.len;
                     }
+                    if data == b"tz\t?" {
+                        self.clock_hello_pending = p.connected(&self.session);
+                        continue;
+                    }
                     if data.starts_with(b"TS\t") {
                         p.store_time(data, p.tick() as u32);
                         continue;
@@ -224,10 +231,12 @@ impl Service {
                 if self.inbox.full(m.len) {
                     let welcome = self.welcome_len;
                     let disk = self.disk_hello;
+                    let clock = self.clock_hello_pending;
                     let token = self.token;
                     self.invalidate_inner(p, true);
                     self.welcome_len = welcome;
                     self.disk_hello = disk;
+                    self.clock_hello_pending = clock;
                     self.token = token;
                     self.inbox.store(Meta::EMPTY, &[]);
                     if welcome != 0 {
@@ -258,6 +267,9 @@ impl Service {
                     == 1
             {
                 self.announced = self.client;
+            }
+            if self.clock_hello_pending && self.session.send(Kind::Text, b"tz\t1") != 0 {
+                self.clock_hello_pending = false;
             }
             if self.record_len == 0 {
                 self.record_len =
@@ -396,22 +408,23 @@ impl Default for Service {
 
 // Separate storage lets input/UI consume time without borrowing the worker's
 // state or waiting for its mutex. The FFI module supplies the IRQ guard.
+pub const TIME_RECORD: usize = 224;
 pub struct TimeMailbox {
-    data: [u8; 64],
+    data: [u8; TIME_RECORD],
     tick: u32,
     pending: bool,
 }
 impl TimeMailbox {
     pub const fn new() -> Self {
         Self {
-            data: [0; 64],
+            data: [0; TIME_RECORD],
             tick: 0,
             pending: false,
         }
     }
     pub fn publish(&mut self, data: &[u8], tick: u32) -> bool {
         self.data[0] = 0;
-        if data.len() < 64 && !data.contains(&0) {
+        if data.len() < TIME_RECORD && !data.contains(&0) {
             self.data[..data.len()].copy_from_slice(data);
             self.data[data.len()] = 0;
         }
@@ -420,7 +433,7 @@ impl TimeMailbox {
         self.pending = true;
         wake
     }
-    pub fn take(&mut self, out: &mut [u8; 64]) -> Option<u32> {
+    pub fn take(&mut self, out: &mut [u8; TIME_RECORD]) -> Option<u32> {
         if !self.pending {
             return None;
         }

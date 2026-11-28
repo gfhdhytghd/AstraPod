@@ -154,3 +154,12 @@
   Frequency**, Select now moves to the next value without opening a list,
   as Shuffle and Repeat do on the original iPod. Any other row still opens
   its list. Hold Select for the row's menu and **Explain**, as before.
+
+- The clock uses UTC. On the first boot, the existing RTC fields are read
+  as UTC and remain unchanged. If you used local time before updating,
+  connect HerdRemote to correct the clock and set your city. To set it
+  manually, choose your city in Settings > Date & Time > Time Zone, then
+  set the local date and time. Existing FAT file times and play logs
+  retain their original fields.
+  The first Last.fm write archives the old scrobble files under
+  `/.scrobbler-local_*.log` and starts `/.scrobbler.log` with UTC timestamps.

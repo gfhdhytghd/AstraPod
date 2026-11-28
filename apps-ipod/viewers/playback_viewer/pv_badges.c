@@ -539,7 +539,7 @@ int pv_badges_classify(void)
     memset(is_new, 0, sizeof(is_new));
     new_n = 0;
 
-    now = (unsigned long)mktime(get_time());
+    now = (unsigned long)get_time_utc();
 
     for (int i = 0; i < PV_N_BADGES; i++)
     {

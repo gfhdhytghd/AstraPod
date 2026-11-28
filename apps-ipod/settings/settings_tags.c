@@ -71,6 +71,10 @@ struct tag_row {
  * that actually happens, or the symptom someone would search for rather than
  * the setting that fixes it. */
 static const struct tag_row tag_rows[] = {
+{ "time zone", TAG_SYSTEM, "date clock city region daylight saving" },
+#ifdef HAVE_USB_PODLINK
+{ "follow computer time zone", TAG_SYSTEM|TAG_USB, "date clock sync" },
+#endif
 
 /* --- sound ------------------------------------------------------------- */
 { "volume",              TAG_SOUND,                              NULL },

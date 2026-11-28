@@ -415,7 +415,7 @@ pub unsafe extern "C" fn podlink_take_time(out: *mut u8, tick: *mut c_ulong) -> 
     if out.is_null() || tick.is_null() {
         return false;
     }
-    clock(|m| match m.take(&mut *out.cast::<[u8; 64]>()) {
+    clock(|m| match m.take(&mut *out.cast::<[u8; crate::service::TIME_RECORD]>()) {
         Some(t) => {
             tick.write(t as c_ulong);
             true

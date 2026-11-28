@@ -221,6 +221,7 @@ screens/extras/extras_alarm_ring.c
 screens/extras/extras_alarms.c
 screens/extras/extras_bar.c
 screens/extras/extras_calendars.c
+screens/extras/calendar_ics.c
 screens/extras/extras_clock.c
 screens/extras/extras_contacts.c
 screens/extras/extras_font.c
@@ -531,6 +532,11 @@ system/podlink_shell_lcd.c
 #endif
 #endif
 system/format_time.c
+system/scrobble_log.c
+system/time_zone.c
+system/time_zone_catalog.c
+system/time_zone_rule.c
+screens/settings/time_zone_picker.c
 system/shutdown.c
 system/output_pause.c
 system/strutil.c

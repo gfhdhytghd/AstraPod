@@ -69,7 +69,9 @@ static int timedate_set(void)
 
 MENUITEM_FUNCTION(time_set, 0, ID2P(LANG_SET_TIME),
                   timedate_set, NULL, Icon_NOICON);
+MENUITEM_SETTING(time_zone, &global_settings.time_zone, NULL);
 #ifdef HAVE_USB_PODLINK
+MENUITEM_SETTING(follow_zone, &global_settings.follow_computer_zone, NULL);
 MENUITEM_SETTING(sync_computer_time, &global_settings.sync_time_from_computer, NULL);
 #endif
 MENUITEM_SETTING(timeformat, &global_settings.timeformat, NULL);
@@ -166,9 +168,9 @@ static int time_menu_callback(int action,
 
 
 MAKE_MENU(time_menu, ID2P(LANG_TIME_MENU), time_menu_callback, Icon_NOICON,
-          &time_set,
+          &time_set, &time_zone,
 #ifdef HAVE_USB_PODLINK
-          &sync_computer_time,
+          &follow_zone, &sync_computer_time,
 #endif
           &timeformat, &time_in_title);
 

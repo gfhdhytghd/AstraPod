@@ -337,6 +337,7 @@ common/strlcat.c
 common/strlcpy.c
 common/strmemccpy.c
 common/timefuncs.c
+common/clock_utc.c
 common/unicode.c
 common/vuprintf.c
 common/zip.c

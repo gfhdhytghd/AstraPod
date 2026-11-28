@@ -306,9 +306,7 @@ static enum list_row_kind menu_get_kind(int selected_item, void * data)
     }
 }
 
-/* A setting row's value as the setting's own screen words it. Only the
- * types option_value_as_int() reads have one: a filename or a custom setting
- * says nothing here. */
+/* A setting row's value as the setting's own screen words it. */
 static const char* menu_get_value(int selected_item, void * data,
                                   char *buffer, size_t buffer_len)
 {
@@ -327,6 +325,7 @@ static const char* menu_get_value(int selected_item, void * data,
         case F_T_BOOL:
         case F_T_INT:
         case F_T_UINT:
+        case F_T_CUSTOM:
             break;
         default:
             return NULL;
@@ -335,8 +334,9 @@ static const char* menu_get_value(int selected_item, void * data,
     /* option_get_valuestring() leaves the buffer alone for a type it does
      * not format. */
     buffer[0] = '\0';
-    return option_get_valuestring(setting, buffer, buffer_len,
-                                  option_value_as_int(setting));
+    value = option_get_valuestring(setting, buffer, buffer_len,
+                                   option_value_as_int(setting));
+    return value && *value ? value : NULL;
 }
 
 /* The full settings tree, as the root Settings entry opens it. */

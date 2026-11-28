@@ -871,34 +871,51 @@ HerdRemote sends a standalone PodLink TEXT payload:
 TS\t1\t2026-11-13T19:02:03\t-18000
 ```
 
-The separators are literal TABs, with no terminal newline. Fields are `TS`,
-record version `1`, the host's local civil date/time (`YYYY-MM-DDTHH:MM:SS`),
-and signed UTC offset in seconds east of UTC. The offset is metadata; do not
-apply it to the civil fields again. The player's RTC stores local time.
-UTC offsets from -50400 to +50400 are accepted. Dates are restricted to
-2000..2037, including real calendar/leap-day checks, so the existing signed
-32-bit log/scrobble timestamps remain representable. Seconds are 0..59.
-Unknown versions and malformed records are ignored. Older firmware ignores
-`TS`; an older daemon sends none. No PodLink or HerdRemote version bump is
-required for this optional extension.
+The separators are literal TABs, with no terminal newline. The four
+legacy fields are `TS`, record version `1`, host local civil date/time
+(`YYYY-MM-DDTHH:MM:SS`), and signed seconds east of UTC. The player
+derives UTC by subtracting the offset. Legacy players use the civil
+fields directly.
+
+The host probes with standalone `tz\t?` after OPEN. A player that replies
+with the standalone capability `tz\t1` accepts three extra fields on the
+same `TS` record:
+
+```text
+TS\t1\t2026-11-13T19:02:03\t-18000\t2026-11-14T00:02:03Z\tAmerica/New_York\tEST5EDT,M3.2.0,M11.1.0
+```
+
+The new fields are the matching UTC date/time with a `Z` suffix, the
+host's IANA name (up to 63 ASCII bytes), and the TZif POSIX rule (up to
+95 ASCII bytes). Use `-` for an unavailable rule and `Local` when the
+host exposes no IANA name. The signed offset is always present. Send
+the four-field form until the player advertises support on this
+connection. No PodLink or HerdRemote version changes. Valid offsets
+are -50400 through +50400 seconds. Civil and UTC dates must both fall
+in 2000–2037. The player ignores unknown versions and malformed records.
 
 The resident host session sends on open, every 600 monotonic seconds, when
 wall time minus monotonic time differs by more than 2 seconds from the last
-send, or when the host UTC offset changes. This covers NTP steps, timezone/DST
+send, or when the host UTC offset or negotiated zone changes. This covers NTP steps, timezone/DST
 changes and suspend on systems whose monotonic clock excludes suspend.
 On systems where monotonic includes suspend, the periodic deadline covers
 long suspends. Gradual slew accumulates against the last sent sample.
 No new process, service or privilege is needed.
 
 The resident player worker intercepts `TS` independently of the foreground
-Agents client. It keeps the newest record in a 64-byte mailbox and posts one
+Agents client. It keeps the newest record in a 224-byte mailbox and posts one
 redraw wakeup while that mailbox is pending. Disconnect/session invalidation
 clears it. The worker never accesses RTC. The UI consumes it after input
 waits (including raw UI readers), rejects records older than 5 seconds, and
-adds whole elapsed seconds to fresh records. The UI compares a fresh RTC read, bypassing the display clock cache.
+adds whole elapsed seconds to fresh records. The UI compares UTC instants.
 Only drift strictly greater than 2 seconds causes an RTC write; an invalid current RTC is corrected.
 **Settings > Time & Date > Sync time from computer** defaults to On. Off
 consumes and ignores incoming records; it does not disconnect PodLink.
+**Follow computer time zone** defaults to On. When Off, the player updates
+UTC and keeps the selected city. When On, a legacy record with a different
+offset uses that fixed offset until the next sync or city selection. An
+extended record uses the player's IANA zone if it agrees with the host
+offset. Otherwise it uses a matching POSIX rule or the fixed offset.
 
 With Debug > Stream remote log over PodLink enabled, `LOG TIME` lines in
 `~/.local/state/podbox/remote-live.log` report `applied`, `ignored-off`,
@@ -907,10 +924,10 @@ With Debug > Stream remote log over PodLink enabled, `LOG TIME` lines in
 record. Ticks, remote gesture timing and sleep deadlines do not change.
 With a valid previous date, debug-log expiry retains its remaining duration
 across an applied step. An invalid previous RTC starts a fresh expiry interval.
-Existing historical log/play timestamps are not rewritten. New play/log
-entries use the corrected local time; database last-played ordering uses
-its existing serial numbers. A backward civil-time correction can therefore
-produce a lower wall timestamp, without changing elapsed playback duration.
+New play and scrobble entries use UTC. Historical timestamps keep their
+original fields. The database retains its last-played serial ordering.
+A manual or network correction changes the instant; a time zone change
+changes the local display without moving the UTC clock.
 
 Use a HerdRemote release that sends `TS` to enable clock sync.
 

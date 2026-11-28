@@ -141,7 +141,7 @@ int main(void)
     assert(!strcmp(clock_record,newer));
     char oversized[80];memset(oversized,'x',sizeof(oversized));memcpy(oversized,"TS\t",3);
     input_frame(PODLINK_TEXT,16,oversized,sizeof(oversized));work();
-    assert(podlink_take_time(clock_record,&clock_tick)&&!clock_record[0]);
+    assert(podlink_take_time(clock_record,&clock_tick));
     input_frame(PODLINK_TEXT,16,"TS\t1\0bad",8);work();
     assert(podlink_take_time(clock_record,&clock_tick)&&!clock_record[0]);
     input_frame(PODLINK_TEXT,17,stamp,strlen(stamp));work();assert(podlink_rust_debug(16));

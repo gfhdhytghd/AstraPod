@@ -22,6 +22,7 @@
 #include "file_internal.h"
 #include "lcd.h"
 #include "rtc.h"
+#include "system/time_zone.h"
 #include "general.h"
 #include "debug.h"
 #include "led.h"
@@ -924,6 +925,7 @@ static void init(void)
     CHART(">settings_load");
     settings_load();
     CHART("<settings_load");
+    time_zone_init();
 
     CHART(">init_battery_tables");
     init_battery_tables();

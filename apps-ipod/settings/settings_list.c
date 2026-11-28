@@ -45,6 +45,7 @@
 #include "settings.h"
 #include "rbpaths.h"
 #include "settings_list.h"
+#include "system/time_zone.h"
 #include "usb.h"
 #include "audio.h"
 #include "power.h"
@@ -943,7 +944,12 @@ const struct settings_list settings[] = {
                   "show background tasks", NULL),
     OFFON_SETTING(0, show_working, LANG_SHOW_WORKING, true,
                   "show working", NULL),
+    CUSTOM_SETTING(0, time_zone, LANG_FRUIT_TIME_ZONE, TIME_ZONE_DEFAULT, "time zone",
+                   time_zone_cfg_load, time_zone_cfg_write,
+                   time_zone_cfg_changed, time_zone_cfg_default),
 #ifdef HAVE_USB_PODLINK
+    OFFON_SETTING(0, follow_computer_zone, LANG_FOLLOW_COMPUTER_ZONE, true,
+                  "follow computer time zone", NULL),
     OFFON_SETTING(0, sync_time_from_computer, LANG_SYNC_COMPUTER_TIME, true,
                   "sync time from computer", NULL),
 #endif

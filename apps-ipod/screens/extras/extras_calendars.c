@@ -47,6 +47,7 @@
 #include "root_menu.h"
 #include "extras_bar.h"
 #include "extras_calendars.h"
+#include "screens/extras/calendar_ics.h"
 #include "extras.h"
 #include "extras_font.h"
 
@@ -423,7 +424,7 @@ static bool has_memo(const struct cal_date *d)
     for (int i = 0; i < memo_count; i++)
         if (memo_on(&memos[i], d))
             return true;
-    return false;
+    return calendar_ics_on(d->year, d->month, d->day, NULL, NULL);
 }
 
 /* ---- recurrence & date matching ---- */
@@ -1596,7 +1597,10 @@ static int day_page(struct cal_date *d, int cal_filter, int font)
         }
     }
     if (cal_filter < 0)
+    {
         memo_scan(d, day_add_memo, ctx);
+        calendar_ics_on(d->year, d->month, d->day, day_add_memo, ctx);
+    }
 
     if (ctx->count == 0)
     {
@@ -1755,6 +1759,7 @@ static int month_page(int cal_filter)
                                             global_settings.glyphs_to_cache);
     p.body_font = pane_font();
     memo_scan(NULL, NULL, NULL);
+    calendar_ics_load();
     month_title(&p.shown, title, sizeof(title));
     int ret = page_run(&p, title, sizeof(title), month_key);
     font_unload(p.font);

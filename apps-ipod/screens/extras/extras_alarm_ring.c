@@ -27,6 +27,7 @@
 #include "lang.h"
 #include "rbpaths.h"
 #include "timefuncs.h"
+#include "system/time_zone.h"
 #include "audio/beep.h"
 #include "input/action.h"
 #include "draw/viewport.h"
@@ -104,6 +105,8 @@ static const int label_sentences[ALARM_LABELS] = {
 };
 
 static bool loaded, ringing;
+static unsigned zone_generation;
+#define ALARM_EPOCH 946684800L
 static long pending;            /* the first minute not examined in full */
 static unsigned pending_alarm;  /* the first alarm of it not examined */
 static long last_minute, last_tick;     /* the previous clock reading */
@@ -123,18 +126,6 @@ static long days_from_civil(int y, int m, int d)
     return era * 146097 + (long)doe - 730425;
 }
 
-static void civil_from_days(long z, int *m, int *d)
-{
-    z += 730425;
-    long era = z / 146097;
-    unsigned doe = z - era * 146097;
-    unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    unsigned mp = (5 * doy + 2) / 153;
-    *d = doy - (153 * mp + 2) / 5 + 1;
-    *m = mp < 10 ? mp + 3 : mp - 9;
-}
-
 #ifdef SIMULATOR
 /* PODBOX_ALARM_CLOCK="<offset>[,<speed>]", in the simulator only: the
  * alarms' clock starts <offset> seconds from the real one at its first
@@ -144,10 +135,8 @@ static long fake_base = -1, fake_tick, fake_speed = 1;
 
 static long clock_now(void)
 {
-    struct tm *tm = get_time();
-    long s = days_from_civil(tm->tm_year + 1900, tm->tm_mon + 1,
-                             tm->tm_mday) * 86400L +
-             tm->tm_hour * 3600L + tm->tm_min * 60 + tm->tm_sec;
+    time_t utc = get_time_utc();
+    long s = utc < ALARM_EPOCH ? 0 : utc - ALARM_EPOCH;
 #ifdef SIMULATOR
     const char *fake = getenv("PODBOX_ALARM_CLOCK");
     if (fake)
@@ -199,6 +188,7 @@ static void write_table(void)
 static void look_from_now(void)
 {
     loaded = true;
+    zone_generation = time_zone_generation();
     last_minute = clock_now() / 60;
     last_tick = current_tick;
     pending = last_minute + 1;
@@ -275,17 +265,17 @@ void alarm_table_save(void)
 
 /* ---- what is due ---- */
 
-static bool rings_at(const struct alarm *a, long minute)
+static bool rings_at(const struct alarm *a, const struct tm *local)
 {
-    long day = minute / 1440;
-    if (minute % 1440 != a->hour * 60 + a->minute)
+    if (local->tm_hour != a->hour || local->tm_min != a->minute)
         return false;
+    long day = days_from_civil(local->tm_year + 1900, local->tm_mon + 1,
+                             local->tm_mday);
     long first = days_from_civil(a->year, a->month, a->day);
     if (day < first)
         return false;
-    int weekday = (day + 6) % 7;        /* 2000-01-01 was a Saturday */
-    int month, date;
-    civil_from_days(day, &month, &date);
+    int weekday = local->tm_wday;
+    int month = local->tm_mon + 1, date = local->tm_mday;
     switch (a->repeat)
     {
         case ALARM_ONCE:        return day == first;
@@ -335,10 +325,17 @@ static bool find_due(long minute, struct alarm *due)
         pending_alarm = 0;
     }
     for (; pending <= minute; pending++, pending_alarm = 0)
+    {
+        time_t utc = ALARM_EPOCH + pending * 60;
+        struct tm local;
+        clock_localtime(utc, &local);
+        /* A backward transition gives the repeated minute one occurrence. */
+        if (time_zone_current_to_utc(&local) != utc)
+            continue;
         for (unsigned i = pending_alarm; i < alarm_table.count; i++)
         {
             struct alarm *a = &alarm_table.list[i];
-            if (!a->on || !rings_at(a, pending))
+            if (!a->on || !rings_at(a, &local))
                 continue;
             *due = *a;
             if (a->repeat == ALARM_ONCE)
@@ -349,6 +346,7 @@ static bool find_due(long minute, struct alarm *due)
             pending_alarm = i + 1;
             return true;
         }
+    }
     return false;
 }
 
@@ -579,6 +577,8 @@ bool extras_alarm_ring_poll(int *timeout)
         return false;
     if (!loaded)
         alarm_table_load();
+    if (zone_generation != time_zone_generation())
+        look_from_now();
     if (!armed())
         return false;
     if (TIME_AFTER(next_look, current_tick))

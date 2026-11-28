@@ -19,6 +19,7 @@
 #include "lang.h"
 #include "speech/talk.h"
 #include "settings/settings_list.h"
+#include "system/time_zone.h"
 #include "ui/scene.h"
 #include "sound.h"
 #include "list.h"
@@ -62,6 +63,14 @@ const char *option_get_valuestring(const struct settings_list *setting,
                                    char *buffer, int buf_len,
                                    intptr_t temp_var)
 {
+    if (setting->setting == &global_settings.time_zone)
+    {
+        size_t len = strcspn(global_settings.time_zone, "|");
+        snprintf(buffer, buf_len, "%.*s", (int)len,
+                 global_settings.time_zone);
+        return buffer;
+    }
+
     const char* str = buffer;
     if (HASFLAG(setting, F_BOOL_SETTING))
     {
@@ -558,6 +567,9 @@ bool option_screen(const struct settings_list *setting,
                    struct viewport parent[NB_SCREENS],
                    bool use_temp_var, const unsigned char* option_title)
 {
+    if (setting->setting == &global_settings.time_zone)
+        return time_zone_picker() == MENU_ATTACHED_USB;
+
     int action;
     bool done = false, usb = false;
     struct gui_synclist lists;

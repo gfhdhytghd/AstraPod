@@ -49,6 +49,7 @@ int video_audio_init(const char *filepath,
 
 /* Start audio playback (begins decoding and filling PCM buffer). */
 void video_audio_play(void);
+void video_audio_output_pause(bool pause);
 
 /* Pause audio decode (PCM buffer drains, then silence). */
 void video_audio_pause(void);

@@ -103,6 +103,21 @@ static uint32_t stream_read_uint32(struct mp4_stream *s)
          | ((uint32_t)buf[2] << 8)  | (uint32_t)buf[3];
 }
 
+static uint64_t stream_read_uint64(struct mp4_stream *s)
+{
+    uint64_t hi = stream_read_uint32(s);
+    return (hi << 32) | stream_read_uint32(s);
+}
+
+uint32_t mp4v_ticks_to_ms(uint64_t ticks, uint32_t timescale)
+{
+    if (!timescale || ticks / timescale > UINT32_MAX / 1000)
+        return UINT32_MAX;
+    uint64_t ms = ticks / timescale * 1000 +
+                  ticks % timescale * 1000 / timescale;
+    return MIN(ms, UINT32_MAX);
+}
+
 static uint16_t stream_read_uint16(struct mp4_stream *s)
 {
     uint8_t buf[2];
@@ -162,7 +177,8 @@ struct mp4_parse_ctx {
     uint16_t tkhd_dh;    /* tkhd display height (pending video confirm) */
     /* Pending per-trak fields (committed at end of trak once type is known) */
     uint32_t pending_timescale;   /* from mdhd (parsed before hdlr) */
-    uint32_t pending_lead_trim;   /* from edts/elst (parsed before mdia) */
+    struct mp4v_edit pending_edit;
+    bool unsupported_edit;
 };
 
 /* Parse avcC box - H.264 decoder configuration record.
@@ -701,6 +717,26 @@ static bool read_chunk_stss(struct mp4_parse_ctx *ctx, size_t chunk_len)
 }
 
 /* stbl - sample table container */
+static bool read_chunk_ctts(struct mp4_parse_ctx *ctx, size_t len)
+{
+    if (len < 16)
+        return false;
+    unsigned int version = stream_read_uint32(&ctx->stream) >> 24;
+    uint32_t entries = stream_read_uint32(&ctx->stream);
+    if (version > 1 || !entries || entries > MP4V_MAX_STTS ||
+        len - 16 != entries * 8)
+        return false;
+    ctx->res->num_ctts = entries;
+    for (uint32_t i = 0; i < entries; i++)
+    {
+        struct mp4v_ctts_entry *entry = &ctx->res->ctts[i];
+        entry->sample_count = stream_read_uint32(&ctx->stream);
+        uint32_t offset = stream_read_uint32(&ctx->stream);
+        entry->offset = version ? (int64_t)(int32_t)offset : (int64_t)offset;
+    }
+    return !ctx->stream.eof;
+}
+
 static bool read_chunk_stbl(struct mp4_parse_ctx *ctx, size_t chunk_len)
 {
     size_t size_remaining = chunk_len - 8;
@@ -721,6 +757,10 @@ static bool read_chunk_stbl(struct mp4_parse_ctx *ctx, size_t chunk_len)
                 break;
             case MAKEFOURCC('s','t','t','s'):
                 if (!read_chunk_stts(ctx, sub_len))
+                    return false;
+                break;
+            case MAKEFOURCC('c','t','t','s'):
+                if (!read_chunk_ctts(ctx, sub_len))
                     return false;
                 break;
             case MAKEFOURCC('s','t','s','z'):
@@ -974,59 +1014,43 @@ static bool read_chunk_tkhd(struct mp4_parse_ctx *ctx, size_t chunk_len)
     return true;
 }
 
-/* edts/elst - edit list (extract media_time for encoder priming offset) */
+/* The linear player supports leading empty edits and one rate-1 media
+ * segment. Repeats, dwell edits and mid-track cuts require a new decoder
+ * timeline and are rejected on the selected tracks. */
 static bool read_chunk_elst(struct mp4_parse_ctx *ctx, size_t chunk_len)
 {
-    size_t size_remaining;
-    uint32_t version_flags;
-    uint32_t entry_count, i;
-
+    struct mp4_stream *stream = &ctx->stream;
     if (chunk_len < 16)
         return false;
-    size_remaining = chunk_len - 8;
-    version_flags = stream_read_uint32(&ctx->stream);
-    size_remaining -= 4;
+    unsigned int version = stream_read_uint32(stream) >> 24;
+    uint32_t entries = stream_read_uint32(stream);
+    size_t bytes = version ? 20 : 12;
+    if (version > 1 || entries > (chunk_len - 16) / bytes)
+        return false;
 
-    entry_count = stream_read_uint32(&ctx->stream);
-    size_remaining -= 4;
-
+    struct mp4v_edit *edit = &ctx->pending_edit;
+    for (uint32_t i = 0; i < entries; i++)
     {
-        size_t entry_size = ((version_flags >> 24) == 0) ? 12 : 20;
-
-        if ((version_flags >> 24) > 1 ||
-            entry_count > size_remaining / entry_size)
-            return false;
-        for (i = 0; i < entry_count; i++)
+        uint64_t duration = version ? stream_read_uint64(stream) :
+                                      stream_read_uint32(stream);
+        int64_t media_time = version ? (int64_t)stream_read_uint64(stream) :
+                                       (int32_t)stream_read_uint32(stream);
+        uint32_t rate = stream_read_uint32(stream);
+        if (rate != 0x10000 || !duration || edit->present)
+            ctx->unsupported_edit = true;
+        else if (media_time == -1 && UINT64_MAX - edit->leading >= duration)
+            edit->leading += duration;
+        else if (media_time >= 0 && media_time <= UINT32_MAX)
         {
-            int32_t media_time;
-
-            if ((version_flags >> 24) == 0)
-            {
-                stream_skip(&ctx->stream, 4); /* segment_duration */
-                media_time = (int32_t)stream_read_uint32(&ctx->stream);
-                stream_skip(&ctx->stream, 4); /* media_rate (16.16) */
-                size_remaining -= 12;
-            }
-            else
-            {
-                stream_skip(&ctx->stream, 8); /* segment_duration (64-bit) */
-                stream_skip(&ctx->stream, 4); /* media_time high */
-                media_time = (int32_t)stream_read_uint32(&ctx->stream);
-                stream_skip(&ctx->stream, 4); /* media_rate */
-                size_remaining -= 20;
-            }
-
-            /* First non-empty edit: media_time > 0 = priming offset.
-             * Save until the track type is known. */
-            if (i == 0 && media_time > 0)
-                ctx->pending_lead_trim = (uint32_t)media_time;
+            edit->media_start = media_time;
+            edit->duration = duration;
+            edit->present = true;
         }
+        else
+            ctx->unsupported_edit = true;
     }
-
-    if (size_remaining > 0)
-        stream_skip(&ctx->stream, size_remaining);
-
-    return true;
+    stream_skip(stream, chunk_len - 16 - entries * bytes);
+    return !stream->eof;
 }
 
 /* edts container: walk for elst */
@@ -1068,7 +1092,8 @@ static bool read_chunk_trak(struct mp4_parse_ctx *ctx, size_t chunk_len)
     ctx->in_video_trak = false;
     ctx->in_audio_trak = false;
     ctx->pending_timescale = 0;
-    ctx->pending_lead_trim = 0;
+    ctx->pending_edit = (struct mp4v_edit){0};
+    ctx->unsupported_edit = false;
     ctx->tkhd_dw = 0;
     ctx->tkhd_dh = 0;
 
@@ -1091,9 +1116,6 @@ static bool read_chunk_trak(struct mp4_parse_ctx *ctx, size_t chunk_len)
                     return false;
                 break;
             case MAKEFOURCC('e','d','t','s'):
-                /* edts comes before mdia, so the track type is unknown.
-                 * Parse unconditionally, save to pending_lead_trim.
-                 * Committed to audio_lead_trim at end of trak. */
                 if (!read_chunk_edts(ctx, sub_len))
                     return false;
                 break;
@@ -1114,15 +1136,43 @@ static bool read_chunk_trak(struct mp4_parse_ctx *ctx, size_t chunk_len)
         ctx->res->display_width = ctx->tkhd_dw;
         ctx->res->display_height = ctx->tkhd_dh;
         ctx->res->timescale = ctx->pending_timescale;
+        ctx->res->video_edit = ctx->pending_edit;
+        if (ctx->unsupported_edit ||
+            (ctx->pending_edit.leading && !ctx->pending_edit.present))
+            return false;
     }
 
     if (ctx->in_audio_trak && ctx->res->audio_format != 0)
     {
         ctx->found_audio = true;
-        ctx->res->audio_lead_trim = ctx->pending_lead_trim;
+        ctx->res->audio_timescale = ctx->pending_timescale;
+        ctx->res->audio_edit = ctx->pending_edit;
+        if (ctx->unsupported_edit || !ctx->pending_timescale ||
+            (ctx->pending_edit.leading && !ctx->pending_edit.present))
+            return false;
+        uint64_t trim = (uint64_t)ctx->pending_edit.media_start *
+                        ctx->res->audio_sample_rate / ctx->pending_timescale;
+        if (trim > INT32_MAX)
+            return false;
+        ctx->res->audio_lead_trim = trim;
     }
 
     return !ctx->stream.eof && size_remaining == 0;
+}
+
+static bool read_chunk_mvhd(struct mp4_parse_ctx *ctx, size_t len)
+{
+    struct mp4_stream *stream = &ctx->stream;
+    if (len < 24)
+        return false;
+    unsigned int version = stream_read_uint32(stream) >> 24;
+    size_t skip = version ? 16 : 8;
+    if (version > 1 || len < skip + 16)
+        return false;
+    stream_skip(stream, skip);
+    ctx->res->movie_timescale = stream_read_uint32(stream);
+    stream_skip(stream, len - skip - 16);
+    return !stream->eof && ctx->res->movie_timescale > 0;
 }
 
 /* moov - movie container */
@@ -1140,6 +1190,10 @@ static bool read_chunk_moov(struct mp4_parse_ctx *ctx, size_t chunk_len)
 
         switch (sub_id)
         {
+            case MAKEFOURCC('m','v','h','d'):
+                if (!read_chunk_mvhd(ctx, sub_len))
+                    return false;
+                break;
             case MAKEFOURCC('t','r','a','k'):
                 /* Parse until we have both video and audio (or all traks) */
                 if (!ctx->found_video || !ctx->found_audio)
@@ -1370,6 +1424,36 @@ int mp4v_get_sample_offset(int fd, struct mp4v_demux_res *res,
     *offset_out = (uint32_t)offset;
     res->next_offset = offset + *size_out;
     res->next_sample = sample_index + 1;
+    return 0;
+}
+
+/* Consecutive samples share one bounded mdat read, including small gaps
+ * occupied by interleaved AAC. Large samples can use the entire window. */
+int mp4v_read_sample(int fd, struct mp4v_demux_res *res, uint32_t sample,
+                      struct mp4v_read_window *window, const uint8_t **data,
+                      uint32_t *offset, uint32_t *size)
+{
+    if (mp4v_get_sample_offset(fd, res, sample, offset, size) < 0)
+        return -1;
+    if (!*size || *size > window->capacity)
+        return -2;
+
+    if (*offset < window->offset ||
+        (uint64_t)(*offset - window->offset) + *size > window->length)
+    {
+        size_t remaining = res->mdat_len - (*offset - res->mdat_offset);
+        size_t length = MAX(*size, MIN(window->capacity, 128u * 1024u));
+        length = MIN(length, remaining);
+
+        window->length = 0;
+        if (rb->lseek(fd, *offset, SEEK_SET) != (off_t)*offset)
+            return -3;
+        if (rb->read(fd, window->buffer, length) != (ssize_t)length)
+            return -4;
+        window->offset = *offset;
+        window->length = length;
+    }
+    *data = window->buffer + (*offset - window->offset);
     return 0;
 }
 

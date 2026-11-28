@@ -40,6 +40,18 @@
     ( (int32_t)(char)(ch3) ) )
 #endif
 
+struct mp4v_edit {
+    uint64_t leading;       /* empty edit duration in movie ticks */
+    uint64_t duration;      /* media edit duration in movie ticks */
+    int64_t media_start;    /* in track ticks */
+    bool present;
+};
+
+struct mp4v_ctts_entry {
+    uint32_t sample_count;
+    int64_t offset;
+};
+
 struct mp4v_stts_entry {
     uint32_t sample_count;
     uint32_t sample_delta;
@@ -64,6 +76,9 @@ struct mp4v_demux_res {
     uint16_t display_width;  /* display width from tkhd (PAR-adjusted) */
     uint16_t display_height; /* display height from tkhd */
     uint32_t timescale;      /* from mdhd */
+    uint32_t movie_timescale;
+    struct mp4v_edit video_edit, audio_edit;
+    uint32_t audio_timescale;
 
     /* avcC decoder config (SPS + PPS) */
     uint8_t  avc_profile;
@@ -82,6 +97,8 @@ struct mp4v_demux_res {
     /* Time-to-sample (stts) */
     uint32_t num_stts;
     struct mp4v_stts_entry stts[MP4V_MAX_STTS];
+    uint32_t num_ctts;
+    struct mp4v_ctts_entry ctts[MP4V_MAX_STTS];
 
     /* Sample-to-chunk (stsc) */
     uint32_t num_stsc;
@@ -112,7 +129,7 @@ struct mp4v_demux_res {
     uint32_t audio_sample_rate;     /* from mp4a sample entry */
     uint8_t  audio_codecdata[64];   /* AudioSpecificConfig from esds */
     uint32_t audio_codecdata_len;
-    uint32_t audio_lead_trim;       /* encoder priming from edts/elst */
+    uint32_t audio_lead_trim;       /* PCM frames of encoder priming */
 
     /* Audio table counts used to size aac.codec's workspace. The AAC codec
      * parses its own table data from the file. */
@@ -131,6 +148,18 @@ bool mp4v_validate_index(int fd, struct mp4v_demux_res *res);
 int mp4v_get_sample_offset(int fd, struct mp4v_demux_res *res,
                            uint32_t sample_index,
                            uint32_t *offset_out, uint32_t *size_out);
+
+struct mp4v_read_window {
+    uint8_t *buffer;
+    size_t capacity, length;
+    uint32_t offset;
+};
+
+int mp4v_read_sample(int fd, struct mp4v_demux_res *res, uint32_t sample,
+                      struct mp4v_read_window *window, const uint8_t **data,
+                      uint32_t *offset, uint32_t *size);
+
+uint32_t mp4v_ticks_to_ms(uint64_t ticks, uint32_t timescale);
 
 /* Find the last sync sample at or before sample. */
 bool mp4v_find_keyframe(int fd, struct mp4v_demux_res *res,

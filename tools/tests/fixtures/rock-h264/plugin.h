@@ -60,6 +60,10 @@ struct plugin_api {
     int (*get_action)(int, int);
     long (*default_event_handler)(long);
     void (*sleep)(long);
+    void (*yield)(void);
+    unsigned int (*rock_worker_start)(void (*)(void *), void *, void *, size_t);
+    bool (*rock_worker_stopping)(void);
+    bool (*rock_worker_join)(unsigned int);
     void (*backlight_on)(void);
     void (*backlight_set_timeout)(int);
     void (*lcd_clear_display)(void);

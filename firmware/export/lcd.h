@@ -531,6 +531,9 @@ bool lcd_present_scene(const fb_data *pixels);
     !defined(BOOTLOADER)
 /* In thread context, wait for staged updates and the active DMA. */
 void lcd_wait_idle(void);
+struct h264_lcd_timing;
+void lcd_blit_video_timed(unsigned char *const planes[3],
+                          struct h264_lcd_timing *timing);
 #endif
 
 #define FB_CURRENTVP_BUFFER (lcd_current_viewport->buffer)

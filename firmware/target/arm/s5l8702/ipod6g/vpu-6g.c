@@ -32,7 +32,7 @@
 #define VPU_IRQ_BIT (1u << 3)
 
 static struct semaphore vpu_complete;
-static volatile uint32_t vpu_last_status1;
+static volatile uint32_t vpu_last_status1, vpu_complete_usec;
 
 void vpu_irq_init(void)
 {
@@ -62,8 +62,14 @@ uint32_t vpu_irq_status1(void)
     return vpu_last_status1;
 }
 
+uint32_t vpu_irq_complete_usec(void)
+{
+    return vpu_complete_usec;
+}
+
 void ICODE_ATTR INT_IRQ35(void)
 {
+    vpu_complete_usec = USEC_TIMER;
     vpu_last_status1 = VPU_STATUS1;
     VIC1EDGE1 = VPU_IRQ_BIT;
     VIC1INTENCLEAR = VPU_IRQ_BIT;

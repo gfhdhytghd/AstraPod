@@ -134,7 +134,7 @@ elif src.name == "video_playback.c":
         bool resume = !*paused;
         long opened = *rb->current_tick;
         video_set_paused(true, paused, start_tick, pause_started,
-                         have_audio, cpu_boosted);
+                         have_audio, cpu_boosted, osd);
         if (!osd->options->control_centre())
             return VIDEO_INPUT_USB;
         long elapsed = *rb->current_tick - opened;
@@ -144,7 +144,7 @@ elif src.name == "video_playback.c":
             osd->seek_until += elapsed;
         if (resume)
             video_set_paused(false, paused, start_tick, pause_started,
-                             have_audio, cpu_boosted);
+                             have_audio, cpu_boosted, osd);
         *redraw = true;
         break;
     }""")
@@ -169,16 +169,18 @@ elif src.name == "video_playback.c":
         if (audio_code == 0)
         {
             have_audio = audio_master = true;
-            video_audio_play();
+            video_audio_output_pause(true);
             if (play_ms)
                 video_audio_seek(play_ms);
+            else
+                video_audio_play();
         }
         else
             video_log_event(filepath, "aac-init", audio_code, play_ms);
     }
 
 """)
-    cut("            if (action == VIDEO_INPUT_MENU)", "            if (redraw_requested")
+    cut("        if (action == VIDEO_INPUT_MENU)", "        if (redraw_requested")
     replace("return audio_master ? video_pcm_get_clock_ms() :",
             "return audio_master ? rb->h264_audio->clock_ms() :")
     replace("(!video_audio_is_active() && video_pcm_empty())",
@@ -186,7 +188,8 @@ elif src.name == "video_playback.c":
     replace('#include "plugin.h"',
             '#include "plugin.h"\n#include "plugins/rock_video_log.h"\n'
             '#include "settings/video_picture.h"\n'
-            '#define VIDEO_SYNC_LOG ROCK_VIDEO_SYNC_LOG')
+            '#define VIDEO_SYNC_LOG ROCK_VIDEO_SYNC_LOG\n'
+            '#define VIDEO_ROCK_WORKER')
     replace("size_t video_h264_scratch_size(const char *path)", r"""
 static int video_log_open(const char *path, const char *stage, int code)
 {
@@ -246,18 +249,6 @@ void video_log_budget(const char *path, size_t needed)
                                                (demux.height + 15) & ~15),
                      video_audio_workspace_size(&demux));
     rb->close(fd);
-}
-
-static int video_sample_read(int fd, uint32_t sample, uint8_t *buffer,
-                             uint32_t *offset, uint32_t *size)
-{
-    if (mp4v_get_sample_offset(fd, &demux, sample, offset, size) < 0)
-        return -1;
-    if (!*size || *size > VIDEO_READ_BUFFER)
-        return -2;
-    if (rb->lseek(fd, *offset, SEEK_SET) < 0)
-        return -3;
-    return rb->read(fd, buffer, *size) == (ssize_t)*size ? 0 : -4;
 }
 
 static const char *video_read_header(int fd)
@@ -367,17 +358,20 @@ size_t video_h264_scratch_size(const char *path)""")
         rb->fdprintf(log, "pool granted=%lu used=%lu\n",
                      (unsigned long)buffer_size,
                      (unsigned long)(pool.cursor - (uint8_t *)buffer));
+        struct mp4v_read_window read = {read_buffer, VIDEO_READ_BUFFER, 0, 0};
         uint32_t limit = MIN(demux.num_samples, sample + 8);
         for (; sample < limit; sample++)
         {
             offset = size = 0;
-            code = video_sample_read(video_fd, sample, read_buffer, &offset, &size);
+            const uint8_t *compressed;
+            code = mp4v_read_sample(video_fd, &demux, sample, &read,
+                                    &compressed, &offset, &size);
             if (code < 0)
             {
                 failure = "sample-read";
                 break;
             }
-            code = rb->hw_h264->decode_sample(decoder, read_buffer, size,
+            code = rb->hw_h264->decode_sample(decoder, compressed, size,
                                               demux.nalu_len_size);
             rb->fdprintf(log, "sample=%u offset=%u bytes=%u decode=%d\n",
                          (unsigned)sample, (unsigned)offset, (unsigned)size, code);
@@ -394,44 +388,35 @@ size_t video_h264_scratch_size(const char *path)""")
     }
 
 """)
-    replace("""                if (!mp4v_find_keyframe(video_fd, &demux, show_sample, &sample))
-                    goto cleanup;""",
-            """                if (!mp4v_find_keyframe(video_fd, &demux, show_sample, &sample))
-                {
-                    failure = "seek-keyframe";
-                    code = -1;
-                    goto cleanup;
-                }""")
-    replace("""                if (decoder == NULL ||
-                    rb->hw_h264->configure(decoder, demux.codecdata,
-                                       demux.codecdata_len) < 0)
-                {""",
-            """                code = decoder ? rb->hw_h264->configure(
-                    decoder, demux.codecdata, demux.codecdata_len) : -1;
-                if (code < 0)
-                {
-                    failure = decoder ? "seek-configure" : "seek-open";""")
-    replace("""            {
-                video_audio_stop();
-                have_audio = false;""",
-            """            {
-                if (video_audio_failed())
-                    video_log_event(filepath, "aac-decode", -1, clock_ms);
-                video_audio_stop();
-                have_audio = false;""")
-    replace("        uint32_t offset;\n        uint32_t size;\n", "")
-    cut('            if (mp4v_get_sample_offset(video_fd',
-        '                rb->splash(HZ * 2, "Video sample', """\
-            offset = size = 0;
-            code = video_sample_read(video_fd, sample, read_buffer, &offset, &size);
+    replace("""            if (!mp4v_find_keyframe(video_fd, &demux, show_sample, &sample))
+                goto cleanup;""",
+            """            if (!mp4v_find_keyframe(video_fd, &demux, show_sample, &sample))
+            {
+                failure = "seek-keyframe";
+                code = -1;
+                goto cleanup;
+            }""")
+    replace("""            if (decoder == NULL ||
+                rb->hw_h264->configure(decoder, demux.codecdata,
+                                   demux.codecdata_len) < 0)
+            {""",
+            """            code = decoder ? rb->hw_h264->configure(
+                decoder, demux.codecdata, demux.codecdata_len) : -1;
             if (code < 0)
             {
-                failure = "sample-read";
-""")
-    replace('                rb->splash(HZ * 2, "VPU sample decode failed");',
-            '''                failure = "sample-decode";
-                code = decoded;
-                rb->splash(HZ * 2, "VPU sample decode failed");''')
+                failure = decoder ? "seek-configure" : "seek-open";""")
+    replace("""            video_audio_stop();
+            have_audio = false;""", """            if (video_audio_failed())
+                video_log_event(filepath, "aac-decode", -1, clock_ms);
+            video_audio_stop();
+            have_audio = false;""")
+    replace("        if (pipe.error)\n        {", """        if (pipe.error)
+        {
+            failure = pipe.read_failed ? "sample-read" : "sample-decode";
+            code = pipe.error;
+            sample = pipe.sample;
+            offset = pipe.offset;
+            size = pipe.size;""")
     replace("cleanup:\n", r"""cleanup:
     if (failure)
     {
@@ -568,7 +553,14 @@ elif src.name == "video_audio.c":
     code = code.replace("    audio_is_ready = false;\n", "")
     replace("    audio_is_ready = true;\n    audio_is_playing = false;", "    audio_is_playing = false;")
     cut("        if (!audio_is_ready", "    }\n}")
-    cut("bool video_audio_ready(void)", "bool video_audio_is_active(void)")
+    replace("""bool video_audio_ready(void)
+{
+    return audio_is_ready || audio_has_error;
+}""", """bool video_audio_ready(void)
+{
+    return rb->h264_audio->buffered() >= audio_sample_rate / 8 ||
+           !audio_is_playing;
+}""")
     replace("            if (value > 0)\n                audio_sample_rate = (uint32_t)value;",
             """            if (value <= 0 || (uint32_t)value != audio_sample_rate)
                 audio_has_error = true;""")
@@ -585,7 +577,7 @@ elif src.name == "video_audio.c":
         return CODEC_ACTION_HALT;
     action = audio_action;""")
     for before, after in (
-        ("consumed < count && audio_action != CODEC_ACTION_HALT", "consumed < count && rb->h264_audio->running() && !audio_has_error"),
+        ("(audio_gap || consumed < count) && audio_action != CODEC_ACTION_HALT", "(audio_gap || consumed < count) && rb->h264_audio->running() && !audio_has_error"),
         ("written < frames && audio_action != CODEC_ACTION_HALT", "written < frames && rb->h264_audio->running() && !audio_has_error"),
     ):
         replace(before, after)
@@ -603,6 +595,7 @@ elif src.name == "video_audio.c":
         "    if (status < 0", "    status = rb->h264_audio->decode_aac(&video_ci);\n")
     replace("status < 0 && audio_action != CODEC_ACTION_HALT",
             "status < 0 && rb->h264_audio->running()")
+    replace("    video_pcm_pause(pause);", "    rb->h264_audio->pause(pause);")
     replace("if (!video_pcm_init(audio_sample_rate, pcm_buffer, pcm_buffer_size))",
             "if (!rb->h264_audio->open(pcm_buffer, pcm_buffer_size, audio_sample_rate))")
     cut("    audio_action = CODEC_ACTION_NULL;\n    audio_paused = false;\n    audio_is_playing = true;",
@@ -614,7 +607,10 @@ elif src.name == "video_audio.c":
         audio_has_error = true;
     }""")
     replace("    audio_paused = true;\n}", "    audio_paused = true;\n    rb->h264_audio->pause(true);\n}")
-    replace("    audio_paused = false;\n}", "    audio_paused = false;\n    rb->h264_audio->pause(false);\n}")
+    replace("    audio_paused = false;\n}", """    audio_paused = false;
+    if (!audio_hold_output)
+        rb->h264_audio->pause(false);
+}""")
     cut("    if (!audio_initialized || !audio_is_playing)", "\n}",
         """\
     if (!audio_initialized || !rb->h264_audio->seek(target_ms))
@@ -628,9 +624,11 @@ elif src.name == "video_audio.c":
     video_ci.filesize = audio_file_size;
     video_id3.offset = 0;
     video_id3.elapsed = 0;
-    audio_seek_target_ms = target_ms;
-    audio_action = CODEC_ACTION_SEEK_TIME;
-    rb->h264_audio->pause(audio_paused);
+    audio_seek_target_ms = audio_edit_seek(target_ms);
+    audio_action = audio_seek_target_ms ? CODEC_ACTION_SEEK_TIME :
+                                         CODEC_ACTION_NULL;
+    audio_paused = false;
+    video_audio_output_pause(true);
     video_audio_play();""")
     cut("    audio_action = CODEC_ACTION_HALT;\n", "    if (audio_fd >= 0)",
         "    rb->h264_audio->close();\n")

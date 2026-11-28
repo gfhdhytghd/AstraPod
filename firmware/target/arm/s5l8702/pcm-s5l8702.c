@@ -123,8 +123,26 @@ static void sink_unlock(void)
         dmac_ch_unlock_int(&dma_play_ch);
 }
 
+#ifdef HAVE_HW_H264
+static volatile uint32_t play_dma_queued;
+
+uint32_t pcm_builtin_dma_bytes(void)
+{
+    int flags = disable_irq_save();
+    size_t remaining = 0;
+    if (dmac_ch_running(&dma_play_ch))
+        dmac_ch_get_info(&dma_play_ch, NULL, &remaining);
+    uint32_t progress = play_dma_queued - remaining;
+    restore_irq(flags);
+    return progress;
+}
+#endif
+
 static inline void play_queue_dma(void *addr, size_t size, void *cb_data)
 {
+#ifdef HAVE_HW_H264
+    play_dma_queued += size;
+#endif
     commit_dcache_range(addr, size);
     dmac_ch_queue(&dma_play_ch, addr,
                 (void*)S5L8702_DADDR_PERI_IIS0_TX, size, cb_data);
@@ -173,8 +191,15 @@ static void dma_play_callback(void *cb_data)
 
 static void sink_dma_stop(void)
 {
+#ifdef HAVE_HW_H264
+    int flags = disable_irq_save();
+    play_dma_queued = pcm_builtin_dma_bytes();
+#endif
     dmac_ch_stop(&dma_play_ch);
     I2STXCOM = I2STXCOM_STOP;
+#ifdef HAVE_HW_H264
+    restore_irq(flags);
+#endif
 }
 
 static void sink_dma_start(const void* addr, size_t size)

@@ -465,9 +465,9 @@ void rock_usb_takeover(void)
 #endif
     rock_mpeg_end();
     rock_lua_track_event(false);
-    rock_h264_end();
     rock_media_shutdown();
     rock_execution_end();
+    rock_h264_end();
     rock_hid_close();
     rock_podlink_close();
     rock_flush_settings();
@@ -1210,9 +1210,9 @@ static int invoke_module(void *opaque)
 #endif
     rock_mpeg_end();
     rock_lua_track_event(false);
-    rock_h264_end();
     rock_media_shutdown();
     rock_execution_end();
+    rock_h264_end();
     rock_hid_close();
     rock_podlink_close();
     if (usb_taken)

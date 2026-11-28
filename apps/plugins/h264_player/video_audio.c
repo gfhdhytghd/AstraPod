@@ -61,11 +61,15 @@ static int16_t audio_pcm[AUDIO_PCM_FRAMES * 2];
 static void *audio_codec_workspace;
 static size_t audio_codec_workspace_size;
 static uint32_t audio_sample_rate;
+static uint32_t audio_edit_leading_ms, audio_priming, audio_gap;
+static uint32_t audio_limit, audio_remaining;
+static bool audio_limited;
 static int audio_sample_depth;
 static int audio_stereo_mode;
 static volatile long audio_action;
 static volatile uint32_t audio_seek_target_ms;
 static volatile bool audio_paused;
+static bool audio_hold_output;
 static volatile bool audio_is_ready;
 static volatile bool audio_is_playing;
 static volatile bool audio_has_error;
@@ -255,6 +259,8 @@ static long audio_get_command(intptr_t *parameter)
     while (audio_paused && audio_action == CODEC_ACTION_NULL)
         rb->sleep(1);
     rb->yield();
+    if (audio_limited && !audio_remaining && !audio_gap)
+        return CODEC_ACTION_HALT;
     action = audio_action;
     if (action == CODEC_ACTION_SEEK_TIME)
     {
@@ -295,8 +301,10 @@ static void audio_pcm_insert(const void *channel1, const void *channel2,
                              int count)
 {
     int consumed = 0;
+    if (audio_limited && (uint32_t)count > audio_remaining)
+        count = audio_remaining;
 
-    while (consumed < count && audio_action != CODEC_ACTION_HALT)
+    while ((audio_gap || consumed < count) && audio_action != CODEC_ACTION_HALT)
     {
         int frames;
         int written = 0;
@@ -307,10 +315,13 @@ static void audio_pcm_insert(const void *channel1, const void *channel2,
         if (audio_action == CODEC_ACTION_HALT)
             break;
 
-        frames = count - consumed;
+        bool gap = audio_gap != 0;
+        frames = gap ? MIN(audio_gap, AUDIO_PCM_FRAMES) : count - consumed;
         if (frames > AUDIO_PCM_FRAMES)
             frames = AUDIO_PCM_FRAMES;
-        for (i = 0; i < frames; i++)
+        if (gap)
+            rb->memset(audio_pcm, 0, frames * 4);
+        for (i = 0; !gap && i < frames; i++)
         {
             int source = consumed + i;
             int32_t left;
@@ -345,7 +356,14 @@ static void audio_pcm_insert(const void *channel1, const void *channel2,
             }
             written += amount;
         }
-        consumed += frames;
+        if (gap)
+            audio_gap -= written;
+        else
+        {
+            consumed += written;
+            if (audio_limited)
+                audio_remaining -= written;
+        }
         if (!audio_is_ready && audio_sample_rate > 0 &&
             video_pcm_buffered_samples() >=
                 audio_sample_rate * AUDIO_START_BUFFER_MS / 1000)
@@ -443,6 +461,22 @@ static void audio_codec_worker(void)
     audio_is_playing = false;
 }
 
+/* Translate the movie position to the AAC track's unedited timeline. */
+static uint32_t audio_edit_seek(uint32_t target_ms)
+{
+    uint32_t media_ms = target_ms > audio_edit_leading_ms ?
+                        target_ms - audio_edit_leading_ms : 0;
+    uint64_t skip = (uint64_t)media_ms * audio_sample_rate / 1000;
+    audio_gap = target_ms < audio_edit_leading_ms ?
+        (uint64_t)(audio_edit_leading_ms - target_ms) * audio_sample_rate / 1000 : 0;
+    audio_remaining = skip < audio_limit ? audio_limit - skip : 0;
+    /* The AAC codec applies priming when it starts at the first sample. */
+    video_id3.lead_trim = media_ms ? 0 : audio_priming;
+    if (!media_ms)
+        return 0;
+    return media_ms + (uint64_t)audio_priming * 1000 / audio_sample_rate;
+}
+
 int video_audio_init(const char *filepath,
                      const struct mp4v_demux_res *demux,
                      void *codec_workspace, size_t workspace_size,
@@ -479,6 +513,7 @@ int video_audio_init(const char *filepath,
     audio_action = CODEC_ACTION_NULL;
     audio_seek_target_ms = 0;
     audio_paused = false;
+    audio_hold_output = false;
     audio_is_ready = false;
     audio_is_playing = false;
     audio_has_error = false;
@@ -486,7 +521,31 @@ int video_audio_init(const char *filepath,
     rb->memset(&video_id3, 0, sizeof(video_id3));
     video_id3.codectype = AFMT_MP4_AAC;
     video_id3.frequency = demux->audio_sample_rate;
-    video_id3.lead_trim = demux->audio_lead_trim;
+    audio_priming = demux->audio_lead_trim;
+    audio_limited = demux->audio_edit.present;
+    audio_edit_leading_ms = audio_limited ?
+        mp4v_ticks_to_ms(demux->audio_edit.leading, demux->movie_timescale) : 0;
+    uint32_t duration_ms = mp4v_ticks_to_ms(demux->audio_edit.duration,
+                                            demux->movie_timescale);
+    if (audio_limited &&
+        ((uint64_t)audio_edit_leading_ms * audio_sample_rate / 1000 >
+             UINT32_MAX || duration_ms == UINT32_MAX))
+    {
+        rb->close(audio_fd);
+        audio_fd = -1;
+        return -1;
+    }
+    /* Convert directly to PCM frames. Avoid rounding off the final block. */
+    uint64_t frames = 0;
+    if (audio_limited)
+    {
+        uint64_t duration = demux->audio_edit.duration;
+        uint32_t scale = demux->movie_timescale;
+        frames = duration / scale * audio_sample_rate +
+                 duration % scale * audio_sample_rate / scale;
+    }
+    audio_limit = MIN(frames, UINT32_MAX);
+    audio_edit_seek(0);
 
     audio_codec_api_init();
     video_ci.filesize = audio_file_size;
@@ -515,6 +574,12 @@ void video_audio_play(void)
     rb->codec_thread_do_callback(audio_codec_worker, NULL);
 }
 
+void video_audio_output_pause(bool pause)
+{
+    audio_hold_output = pause;
+    video_pcm_pause(pause);
+}
+
 void video_audio_pause(void)
 {
     audio_paused = true;
@@ -531,7 +596,7 @@ void video_audio_seek(uint32_t target_ms)
         return;
 
     audio_is_ready = false;
-    audio_seek_target_ms = target_ms;
+    audio_seek_target_ms = audio_edit_seek(target_ms);
     video_pcm_flush(target_ms, audio_sample_rate);
     audio_action = CODEC_ACTION_SEEK_TIME;
 }

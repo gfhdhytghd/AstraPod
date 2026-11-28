@@ -6,6 +6,7 @@
 #include "config.h"
 #include "core_alloc.h"
 #include "action.h"
+#include "button.h"
 #include "database/genius_mixes.h"
 #include "database/tagcache.h"
 #include "draw/text_wrap.h"

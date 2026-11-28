@@ -1974,8 +1974,9 @@ void native_wps_open(const struct wps_state *state)
         wps->chrome.title_until = current_tick + 2 * HZ;
         setup_classic();
         wps->ultra.on = ui_theme_ultra();
-        wps->ultra.gloss_box = (struct ui_rect){ CLASSIC_PROGRESS_X,
-            CLASSIC_ROW_Y + CLASSIC_BAR_Y, CLASSIC_PROGRESS_WIDTH,
+        wps->ultra.gloss_box = (struct ui_rect){ WPS_CLASSIC_PROGRESS_X,
+            WPS_CLASSIC_PROGRESS_TOP + WPS_CLASSIC_BAR_Y,
+            WPS_CLASSIC_PROGRESS_WIDTH,
             CLASSIC_BAR_VIEW };
     }
     else
@@ -2013,9 +2014,9 @@ static void ultra_capture(const struct wps_state *state, bool submit)
     static const struct ui_rect cover = { CLASSIC_ART_X, CLASSIC_ART_Y,
         CLASSIC_ART_WIDTH, CLASSIC_ART_NEAR + 1 + CLASSIC_REFLECTION };
     /* The progress bar over the reflection keeps its own motion. */
-    static const struct ui_rect bar = { CLASSIC_PROGRESS_X, CLASSIC_ROW_Y,
-        CLASSIC_ART_X + CLASSIC_ART_WIDTH - CLASSIC_PROGRESS_X,
-        LCD_HEIGHT - CLASSIC_ROW_Y };
+    static const struct ui_rect bar = { WPS_CLASSIC_PROGRESS_X, WPS_CLASSIC_PROGRESS_TOP,
+        CLASSIC_ART_X + CLASSIC_ART_WIDTH - WPS_CLASSIC_PROGRESS_X,
+        LCD_HEIGHT - WPS_CLASSIC_PROGRESS_TOP };
     const struct mp3entry *track = state->id3;
     if (track && *track->path && *wps->progress.path &&
         strcmp(track->path, wps->progress.path))

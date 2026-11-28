@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "config.h"
+#include "system.h"
+#include "string-extra.h"
 #include "file.h"
 #include "timefuncs.h"
 #include "system/strutil.h"

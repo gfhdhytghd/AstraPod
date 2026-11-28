@@ -617,12 +617,6 @@ static void scan_alarm_file(const char *path)
                 if (params && strcasestr(params, "VALUE=DATE"))
                     ev.hour = 255;
             }
-            else if (strcasecmp(prop, "DTEND") == 0)
-            {
-                ics_parse_datetime(val, &ev.end_year, &ev.end_month,
-                                   &ev.end_day, &ev.end_hour, &ev.end_minute);
-                if (params && strcasestr(params, "VALUE=DATE"))
-                }
             else if (strcasecmp(prop, "SUMMARY") == 0)
                 ics_unescape(val, ev.summary, sizeof(ev.summary), false);
             else if (strcasecmp(prop, "RRULE") == 0)
@@ -1310,7 +1304,6 @@ static int run_event_editor(struct ical_event *ev, bool *changed)
 
 struct day_ctx {
     struct ical_index *idx;
-    int file_filter;
     struct extras_date shown;
     int events[ICAL_MAX_EVENTS];
     int count, legacy_count;
@@ -1494,7 +1487,7 @@ static int day_page(struct ical_index *idx, int filter, struct extras_date *d)
     if (ctx_handle <= 0)
         return 0;
     struct day_ctx *ctx = core_get_data_pinned(ctx_handle);
-    *ctx = (struct day_ctx){ .idx = idx, .file_filter = filter, .shown = *d };
+    *ctx = (struct day_ctx){ .idx = idx, .shown = *d };
     char title[48];
     int ret = 0, sel = 0;
     bool select_wheeled = false;

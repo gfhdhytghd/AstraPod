@@ -827,8 +827,8 @@ startup says so, and how long is left.
 
 Under the Fruit Company theme, Settings shows the original iPod's rows. Most
 are settings listed above under AstraPod's names; these are Fruit Company's
-own. Quality is in Voice Memos, which the main menu shows while a headset with
-a microphone is plugged in.
+own. Quality is in Voice Memos, and shows while a headset with a microphone is
+plugged in.
 
 | Setting | What it does | Default | |
 |---|---|---|---|

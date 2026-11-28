@@ -35761,3 +35761,63 @@
     *: "Memo %d"
   </voice>
 </phrase>
+
+<phrase>
+  id: LANG_FRUIT_DELETE_ALL
+  desc: Stock Voice Memos menu: the row that deletes every memo
+  user: core
+  <source>
+    *: "Delete All"
+  </source>
+  <dest>
+    *: "Delete All"
+  </dest>
+  <voice>
+    *: "Delete All"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_DELETE_ALL_MEMOS
+  desc: Stock Voice Memos: the title of Delete All's question
+  user: core
+  <source>
+    *: "Delete All Memos"
+  </source>
+  <dest>
+    *: "Delete All Memos"
+  </dest>
+  <voice>
+    *: "Delete All Memos"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_DELETE_ALL_MEMOS_ASK
+  desc: Stock Voice Memos: Delete All's question
+  user: core
+  <source>
+    *: "Do you want to delete all of your previously recorded memos?"
+  </source>
+  <dest>
+    *: "Do you want to delete all of your previously recorded memos?"
+  </dest>
+  <voice>
+    *: "Do you want to delete all of your previously recorded memos?"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_FRUIT_DELETE_ALL_MEMOS_DETAIL
+  desc: Stock Voice Memos: the line under Delete All's question
+  user: core
+  <source>
+    *: "This will permanently remove all recordings from your iPod."
+  </source>
+  <dest>
+    *: "This will permanently remove all recordings from your iPod."
+  </dest>
+  <voice>
+    *: "This will permanently remove all recordings from your iPod."
+  </voice>
+</phrase>

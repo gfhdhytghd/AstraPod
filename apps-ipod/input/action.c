@@ -54,9 +54,16 @@
 #include "screens/playback/wps.h"
 
 static int wheel_transport_pressed;
+static bool page_owns_play;
+void action_set_page_play(bool page_play)
+{
+    page_owns_play = page_play;
+}
+
 static int wheel_transport_keys(int button)
 {
-    const int transport = BUTTON_LEFT | BUTTON_RIGHT | BUTTON_PLAY;
+    const int transport = BUTTON_LEFT | BUTTON_RIGHT |
+                          (page_owns_play ? 0 : BUTTON_PLAY);
     if (!(button & transport) ||
         (button & (SYS_EVENT | BUTTON_MULTIMEDIA | BUTTON_REDRAW | BUTTON_REMOTE)))
         return BUTTON_NONE;

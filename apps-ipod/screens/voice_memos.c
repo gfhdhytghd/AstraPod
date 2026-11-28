@@ -3,17 +3,21 @@
  *
  * Fruit Company's Voice Memos, as the stock iPod Classic 2.0.5 has them.
  * The main menu shows the row, between Extras and Settings, while a headset
- * with a microphone is in the jack. Its menu starts a recording or sets its
- * Quality. The recording screen shows the memo's number, date and length;
- * Menu or Play/Pause pauses it into a menu of Resume, Stop and Save and
- * Delete, and a held Menu saves it and goes to the main menu. Memos are WAV
- * files in /Recordings named by the time they started.
+ * with a microphone is in the jack or a memo is on the disk. Its menu
+ * starts a recording and sets its Quality while the microphone is in, then
+ * lists Delete All and the memos, oldest first. The recording screen shows
+ * the memo's number, date and length; Menu or Play/Pause pauses it into a
+ * menu of Resume, Stop and Save and Delete, and a held Menu saves it and
+ * goes to the main menu. Select on a memo offers Play and Delete, and
+ * Play/Pause plays it. Memos are WAV files in /Recordings named by the time
+ * they started, as stock names them.
  *
  * Parts: the memos on disk, the pane, the recorder, the recording screen,
- * the paused menu, the menu.
+ * the paused menu, a memo's menu, Delete All's question, the menu.
  ****************************************************************************/
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "config.h"
 #include "kernel.h"
@@ -27,12 +31,15 @@
 #include "lang.h"
 #include "rbpaths.h"
 #include "timefuncs.h"
+#include "events.h"
 #include "audio/pcm_record.h"
 #include "draw/viewport.h"
 #include "input/action.h"
+#include "playlist/playlist.h"
 #include "settings/settings.h"
 #include "speech/talk.h"
 #include "system/shutdown.h"
+#include "ui/statusbar.h"
 #include "ui/menu_pane.h"
 #include "ui/scene.h"
 #include "ui/stock_art.h"
@@ -40,6 +47,7 @@
 #include "root_menu.h"
 #include "screens/recording.h"
 #include "screens/extras/extras_bar.h"
+#include "screens/fruit_menu.h"
 #include "voice_memos.h"
 
 #define MEMO_FONT       FONT_DIR "/25-helvetica-bold.pbf"
@@ -58,6 +66,11 @@
 
 /** The memos on disk **/
 
+/* The memos the menu lists, at most; more are counted but not listed */
+#define LISTED          250
+#define NAME_LEN        15      /* "YYYYMMDD HHMMSS" */
+#define FIXED_ROWS      3       /* Start Recording, Quality, Delete All */
+
 /* A memo's name: "YYYYMMDD HHMMSS.wav" */
 static bool memo_name(const char *name)
 {
@@ -69,22 +82,113 @@ static bool memo_name(const char *name)
     return true;
 }
 
-static int memos = -1;      /* how many, or -1 until counted */
+static volatile int memos = -1;     /* how many, or -1 until counted */
+static int listed;
+static char names[LISTED][NAME_LEN + 1];
+
+static int by_name(const void *a, const void *b)
+{
+    return strcmp(a, b);
+}
+
+/* Count again once the disk has been a computer's */
+static void forget(unsigned short id, void *data)
+{
+    (void)id;
+    (void)data;
+    memos = -1;
+}
 
 static int memo_count(void)
 {
+    static bool subscribed;
+    if (!subscribed)
+        subscribed = add_event(SYS_EVENT_USB_EXTRACTED, forget);
     if (memos >= 0)
         return memos;
-    memos = 0;
+    int count = 0;
+    listed = 0;
     DIR *dir = opendir(REC_BASE_DIR);
-    if (!dir)
-        return memos;
-    struct dirent *entry;
-    while ((entry = readdir(dir)))
-        if (memo_name((const char *)entry->d_name))
-            memos++;
-    closedir(dir);
-    return memos;
+    if (dir)
+    {
+        struct dirent *entry;
+        while ((entry = readdir(dir)))
+        {
+            if (!memo_name((const char *)entry->d_name))
+                continue;
+            if (listed < LISTED)
+            {
+                memcpy(names[listed], entry->d_name, NAME_LEN);
+                names[listed++][NAME_LEN] = '\0';
+            }
+            count++;
+        }
+        closedir(dir);
+    }
+    qsort(names, listed, sizeof(names[0]), by_name);
+    memos = count;
+    return count;
+}
+
+static void memo_path(int i, char *buf, size_t size)
+{
+    snprintf(buf, size, "%s/%s.wav", REC_BASE_DIR, names[i]);
+}
+
+/* Stop playback that reads `path`, or any memo for NULL, before it goes */
+static void release_playback(const char *path)
+{
+    struct mp3entry *id3 = audio_status() ? audio_current_track() : NULL;
+    if (!id3 || !id3->path[0])
+        return;
+    if (path ? !strcmp(id3->path, path) :
+        !strncmp(id3->path, REC_BASE_DIR "/", sizeof(REC_BASE_DIR)))
+        audio_stop();
+}
+
+static void delete_one(int i)
+{
+    char path[MAX_PATH];
+    memo_path(i, path, sizeof(path));
+    release_playback(path);
+    remove(path);
+    memos = -1;
+}
+
+static void delete_all(void)
+{
+    char path[MAX_PATH];
+    release_playback(NULL);
+    memo_count();
+    /* names[] holds LISTED at most: go round until none is left, or none
+     * of them goes */
+    bool removed = true;
+    while (listed > 0 && removed)
+    {
+        removed = false;
+        for (int i = 0; i < listed; i++)
+        {
+            memo_path(i, path, sizeof(path));
+            removed |= remove(path) == 0;
+        }
+        memos = -1;
+        memo_count();
+    }
+}
+
+/* "11/28 1:07 PM", from the memo's name */
+static void memo_label(int i, char *buf, size_t size)
+{
+    const char *n = names[i];
+    int month = (n[4] - '0') * 10 + n[5] - '0';
+    int day = (n[6] - '0') * 10 + n[7] - '0';
+    int hour = (n[9] - '0') * 10 + n[10] - '0';
+    int minute = (n[11] - '0') * 10 + n[12] - '0';
+    if (global_settings.timeformat == 0)
+        snprintf(buf, size, "%d/%d %d:%02d", month, day, hour, minute);
+    else
+        snprintf(buf, size, "%d/%d %d:%02d %s", month, day,
+                 (hour + 11) % 12 + 1, minute, hour < 12 ? "AM" : "PM");
 }
 
 /** The pane **/
@@ -98,13 +202,24 @@ static bool mic(void)
     return mikey_mic_present();
 }
 
-bool voice_memos_refresh(void)
+static bool shown(void)
+{
+    return mic() || memo_count() > 0;
+}
+
+/* The rows the menus show, as one number */
+static int rows_signature(void)
+{
+    return mic() | MIN(memo_count(), LISTED + 1) << 1;
+}
+
+bool voice_memos_refresh(const struct menu_item_ex *menu)
 {
     static int last = -1;
-    int now = mic();
+    if (menu != fruit_menu_root() && menu != &voice_memos_menu)
+        return false;
+    int now = rows_signature();
     bool changed = last >= 0 && last != now;
-    if (changed && now)
-        memos = -1;     /* the disk may have changed while it was out */
     last = now;
     return changed;
 }
@@ -127,10 +242,12 @@ static void format_length(char *buf, size_t size, unsigned long seconds)
 /** The menus, declared for the pane and the recorder **/
 
 static const struct menu_item_ex paused_menu;
+static const struct menu_item_ex memo_menu;
 
 bool voice_memos_owns(const struct menu_item_ex *menu)
 {
-    return menu == &voice_memos_menu || menu == &paused_menu;
+    return menu == &voice_memos_menu || menu == &paused_menu ||
+           menu == &memo_menu;
 }
 
 /* The microphone, and under it the number of memos or the paused memo's
@@ -476,6 +593,305 @@ static int record(void)
     return ret;
 }
 
+/** A memo's menu **/
+
+static int chosen;          /* the memo row last entered */
+static bool play_chosen;    /* Play/Pause entered it: play, not ask */
+static bool deleted;        /* its menu deleted it */
+
+/* Play the memo on its own, in Now Playing */
+static int play_row_func(void)
+{
+    char path[MAX_PATH];
+    memo_path(chosen, path, sizeof(path));
+    if (playlist_create(NULL, NULL) < 0 ||
+        playlist_insert_track(NULL, path, PLAYLIST_INSERT_LAST, false,
+                              true) < 0)
+        return 0;
+    playlist_start(0, 0, 0);
+    return GO_TO_WPS;
+}
+
+static int delete_row_func(void)
+{
+    delete_one(chosen);
+    deleted = true;
+    return 1;
+}
+
+ROW(memo_play_row, LANG_PLAY, play_row_func);
+ROW(memo_delete_row, LANG_DELETE, delete_row_func);
+
+/* Menu goes back to the memos */
+static int memo_menu_callback(int action, const struct menu_item_ex *this_item,
+                              struct gui_synclist *this_list)
+{
+    (void)this_list;
+    if (this_item == &memo_menu && action == ACTION_STD_MENU)
+        return ACTION_STD_CANCEL;
+    return action;
+}
+
+static const struct menu_item_ex *const memo_menu_rows[] = {
+    &memo_play_row, &memo_delete_row,
+};
+static const struct menu_callback_with_desc memo_menu_desc = {
+    memo_menu_callback, ID2P(LANG_FRUIT_VOICE_MEMOS), Icon_NOICON };
+static const struct menu_item_ex memo_menu = {
+    MT_MENU | MENU_HAS_DESC | MENU_ITEM_COUNT(ARRAYLEN(memo_menu_rows)),
+    { (void *)memo_menu_rows }, { .callback_and_desc = &memo_menu_desc } };
+
+/* Select on a memo: Play or Delete. Delete goes back to the memos, or to
+ * the main menu once Voice Memos has nothing left to show. */
+static int open_memo(void)
+{
+    if (chosen >= listed)
+        return 0;
+    if (play_chosen)
+    {
+        play_chosen = false;
+        return play_row_func();
+    }
+    deleted = false;
+    int selected = 0;
+    int ret = do_menu(&memo_menu, &selected, NULL, false);
+    if (deleted)
+        return shown() ? 0 : GO_TO_ROOT;
+    /* Menu, or a row that ends the menu, comes back to the memos */
+    return ret == GO_TO_PREVIOUS || ret == 1 ? 0 : ret;
+}
+
+/** Delete All's question **/
+
+#define ASK_X           22
+#define ASK_WIDTH       276
+#define ASK_BASELINE    56
+#define ASK_PITCH       18
+#define DETAIL_GAP      23
+#define DETAIL_PITCH    15
+#define PANEL_X         12
+#define PANEL_Y         175
+#define PANEL_RIGHT     295
+#define BUTTON_Y        188
+#define BUTTON_PAD      16
+#define LABEL_BASELINE  207
+#define ASK_LINES       4
+#define BAR_ROWS        20      /* the white status bar */
+
+struct ask {
+    int ask_font, detail_font, label_font;
+    const char *lines[2 * ASK_LINES];
+    int lens[2 * ASK_LINES];
+    int ask_lines, detail_lines;
+    int delete_width, cancel_width;
+    bool yes;
+};
+
+static int line_width(const char *text, int len, int font)
+{
+    char buf[128];
+    int w;
+    snprintf(buf, sizeof(buf), "%.*s", len, text);
+    font_getstringsize((const unsigned char *)buf, &w, NULL, font);
+    return w;
+}
+
+/* Break `text` into lines `width` wide at spaces */
+static int wrap(const char *text, int font, int width, const char **lines,
+                int *lens, int most)
+{
+    int n = 0;
+    while (*text && n < most)
+    {
+        int fit = strlen(text);
+        while (line_width(text, fit, font) > width)
+        {
+            int cut = fit - 1;
+            while (cut > 0 && text[cut] != ' ')
+                cut--;
+            if (cut <= 0)
+                break;      /* one word wider than the line */
+            fit = cut;
+        }
+        lines[n] = text;
+        lens[n++] = fit;
+        text += fit;
+        while (*text == ' ')
+            text++;
+    }
+    return n;
+}
+
+static int text_width(int font, const char *text)
+{
+    int w = 0;
+    if (font >= 0)
+        font_getstringsize((const unsigned char *)text, &w, NULL, font);
+    return w;
+}
+
+static void put_text_part(struct stock_canvas *c, int font, const char *text,
+                     int len, int x, int baseline, uint32_t rgb)
+{
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%.*s", len, text);
+    if (font >= 0)
+        stock_canvas_text(c, font, buf, x, baseline - font_get(font)->ascent,
+                          rgb);
+}
+
+static const int grey_button[3] = {
+    STOCK_ART_DIALOG_BUTTONLEFTCAP, STOCK_ART_DIALOG_BUTTONFILL,
+    STOCK_ART_DIALOG_BUTTONRIGHTCAP,
+};
+static const int blue_button[3] = {
+    STOCK_ART_DIALOG_ACTIVEBUTTONLEFTCAP, STOCK_ART_DIALOG_ACTIVEBUTTONFILL,
+    STOCK_ART_DIALOG_ACTIVEBUTTONRIGHTCAP,
+};
+
+/* A button from `x0` to `x1`: left cap, fill, right cap */
+static void put_button(struct stock_canvas *c, const int art[3], int x0,
+                       int x1)
+{
+    int cap = stock_art[art[2]].width;
+    stock_art_put(c, art[0], x0, BUTTON_Y);
+    for (int x = x0 + stock_art[art[0]].width; x < x1 - cap; x++)
+        stock_art_put(c, art[1], x, BUTTON_Y);
+    stock_art_put(c, art[2], x1 - cap, BUTTON_Y);
+}
+
+static void compose_ask(struct stock_canvas *c, const struct ask *a)
+{
+    for (int y = 0; y < c->height; y++)
+        for (int x = 0; x < c->width; x++)
+            c->pixels[y * c->width + x] = 0xffffff;
+
+    int baseline = ASK_BASELINE;
+    for (int i = 0; i < a->ask_lines; i++, baseline += ASK_PITCH)
+        put_text_part(c, a->ask_font, a->lines[i], a->lens[i], ASK_X, baseline,
+                 0x000000);
+    baseline += DETAIL_GAP - ASK_PITCH;
+    for (int i = 0; i < a->detail_lines; i++, baseline += DETAIL_PITCH)
+        put_text_part(c, a->detail_font, a->lines[ASK_LINES + i],
+                 a->lens[ASK_LINES + i], ASK_X, baseline, 0x000000);
+
+    stock_art_put(c, STOCK_ART_DIALOG_PANELLEFTCAP, PANEL_X, PANEL_Y);
+    int first = PANEL_X + stock_art[STOCK_ART_DIALOG_PANELLEFTCAP].width;
+    int tile = stock_art[STOCK_ART_DIALOG_PANELFILL].width;
+    for (int x = first; x < PANEL_RIGHT; x += tile)
+        stock_art_put_part(c, STOCK_ART_DIALOG_PANELFILL, 0, 0,
+                           MIN(tile, PANEL_RIGHT - x),
+                           stock_art[STOCK_ART_DIALOG_PANELFILL].height,
+                           x, PANEL_Y);
+    stock_art_put(c, STOCK_ART_DIALOG_PANELRIGHTCAP, PANEL_RIGHT, PANEL_Y);
+
+    /* Delete and Cancel side by side, centred; the chosen one is blue */
+    int wd = a->delete_width + 2 * BUTTON_PAD;
+    int wc = a->cancel_width + 2 * BUTTON_PAD;
+    int x0 = (LCD_WIDTH - wd - wc) / 2, mid = x0 + wd, x1 = mid + wc;
+    put_button(c, grey_button, x0, x1);
+    if (a->yes)
+        put_button(c, blue_button, x0, mid);
+    else
+        put_button(c, blue_button, mid, x1);
+    const char *del = str(LANG_DELETE), *cancel = str(LANG_CANCEL_0);
+    put_text_part(c, a->label_font, del, strlen(del), x0 + BUTTON_PAD,
+             LABEL_BASELINE, 0xffffff);
+    put_text_part(c, a->label_font, cancel, strlen(cancel), mid + BUTTON_PAD,
+             LABEL_BASELINE, 0xffffff);
+}
+
+/* Everything under the status bar */
+static void paint_ask(const struct ask *a)
+{
+    uint32_t *band = extras_band(0);
+    if (!band)
+        return;
+    const struct ui_rect body = { 0, BAR_ROWS, LCD_WIDTH,
+                                  LCD_HEIGHT - BAR_ROWS };
+    for (int y = BAR_ROWS; y < LCD_HEIGHT; y += BAND_ROWS)
+    {
+        struct stock_canvas c = { band, 0, y, LCD_WIDTH,
+                                  MIN(BAND_ROWS, LCD_HEIGHT - y) };
+        compose_ask(&c, a);
+        stock_canvas_show(&c, body);
+    }
+    lcd_update_rect(0, BAR_ROWS, LCD_WIDTH,
+                    LCD_HEIGHT - BAR_ROWS);
+}
+
+/* The wheel and the previous and next buttons move between the two */
+static const struct button_mapping ask_map[] = {
+    { ACTION_STD_PREV,       BUTTON_SCROLL_BACK,               BUTTON_NONE },
+    { ACTION_STD_PREV,       BUTTON_SCROLL_BACK|BUTTON_REPEAT, BUTTON_NONE },
+    { ACTION_STD_NEXT,       BUTTON_SCROLL_FWD,                BUTTON_NONE },
+    { ACTION_STD_NEXT,       BUTTON_SCROLL_FWD|BUTTON_REPEAT,  BUTTON_NONE },
+    { ACTION_STD_PREV,       BUTTON_LEFT|BUTTON_REL,           BUTTON_LEFT },
+    { ACTION_STD_NEXT,       BUTTON_RIGHT|BUTTON_REL,          BUTTON_RIGHT },
+    { ACTION_STD_OK,         BUTTON_SELECT|BUTTON_REL,         BUTTON_SELECT },
+    { ACTION_STD_CANCEL,     BUTTON_MENU|BUTTON_REL,           BUTTON_MENU },
+    LAST_ITEM_IN_LIST
+};
+
+static const struct button_mapping *get_ask_map(int context)
+{
+    (void)context;
+    return ask_map;
+}
+
+/* Stock's question page: true for Delete, false for Cancel or Menu */
+static int ask_delete_all(void)
+{
+    struct ask a = { .yes = false };
+    a.ask_font = font_load_ex(FONT_DIR "/17-helvetica-bold.pbf", 0, 64);
+    a.detail_font = font_load_ex(FONT_DIR "/13-helvetica.pbf", 0, 64);
+    a.label_font = font_load_ex(FONT_DIR "/13-helvetica-bold.pbf", 0, 16);
+    if (a.ask_font >= 0)
+        a.ask_lines = wrap(str(LANG_FRUIT_DELETE_ALL_MEMOS_ASK), a.ask_font,
+                           ASK_WIDTH, a.lines, a.lens, ASK_LINES);
+    if (a.detail_font >= 0)
+        a.detail_lines = wrap(str(LANG_FRUIT_DELETE_ALL_MEMOS_DETAIL),
+                              a.detail_font, ASK_WIDTH, a.lines + ASK_LINES,
+                              a.lens + ASK_LINES, ASK_LINES);
+    a.delete_width = text_width(a.label_font, str(LANG_DELETE));
+    a.cancel_width = text_width(a.label_font, str(LANG_CANCEL_0));
+
+    struct ui_scene scene = {0};
+    ui_scene_open_page(&scene, "voice-memos-ask-push");
+    sb_set_persistent_title(str(LANG_FRUIT_DELETE_ALL_MEMOS), Icon_NOICON,
+                            SCREEN_MAIN);
+    viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
+    int ret = 0;
+    while (true)
+    {
+        paint_ask(&a);
+        int action = get_custom_action(CONTEXT_PLUGIN | CONTEXT_CUSTOM, HZ / 2,
+                                       get_ask_map);
+        if (action == ACTION_STD_PREV || action == ACTION_STD_NEXT)
+            a.yes = !a.yes;
+        else if (action == ACTION_STD_OK)
+        {
+            ret = a.yes;
+            break;
+        }
+        else if (action == ACTION_STD_CANCEL)
+            break;
+        else if (default_event_handler(action) == SYS_USB_CONNECTED)
+        {
+            ret = MENU_ATTACHED_USB;
+            break;
+        }
+    }
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
+    ui_scene_close_modal(&scene, ret != MENU_ATTACHED_USB,
+                         "voice-memos-ask-pop");
+    font_unload(a.ask_font);
+    font_unload(a.detail_font);
+    font_unload(a.label_font);
+    extras_bar_release();
+    return ret;
+}
+
 /** The menu **/
 
 static int start_recording(void)
@@ -483,15 +899,61 @@ static int start_recording(void)
     return mic() ? record() : 0;
 }
 
+/* Delete All, after the question: back to the main menu when Voice Memos
+ * has nothing left to show */
+static int delete_all_func(void)
+{
+    int answer = ask_delete_all();
+    if (answer == MENU_ATTACHED_USB)
+        return MENU_ATTACHED_USB;
+    if (answer)
+        delete_all();
+    return shown() ? 0 : GO_TO_ROOT;
+}
+
+static int row_callback(int action, const struct menu_item_ex *this_item,
+                        struct gui_synclist *this_list);
+
 MENUITEM_FUNCTION(start_row, MENU_FUNC_CHECK_RETVAL,
-                  ID2P(LANG_FRUIT_START_RECORDING), start_recording, NULL,
-                  Icon_NOICON);
+                  ID2P(LANG_FRUIT_START_RECORDING), start_recording,
+                  row_callback, Icon_NOICON);
 MENUITEM_SETTING_W_LABEL(quality_row, &global_settings.voice_memo_quality,
-                         ID2P(LANG_FRUIT_QUALITY), NULL);
+                         ID2P(LANG_FRUIT_QUALITY), row_callback);
+MENUITEM_FUNCTION(delete_all_row, MENU_FUNC_CHECK_RETVAL,
+                  ID2P(LANG_FRUIT_DELETE_ALL), delete_all_func, row_callback,
+                  Icon_NOICON);
+
+/* A memo's row: its date and time, from its name */
+static char *memo_row_name(int index, void *data, char *buf, size_t size)
+{
+    (void)data;
+    int i = index - FIXED_ROWS;
+    if (i < 0 || i >= listed)
+        return "";
+    memo_label(i, buf, size);
+    return buf;
+}
+
+static const struct menu_func memo_func = { .function = open_memo };
+static const struct menu_get_name_and_icon memo_name_desc = {
+    row_callback, memo_row_name, NULL, NULL, Icon_NOICON };
+/* Every memo row is the same but for where it is */
+static const struct menu_item_ex memo_rows[LISTED] = {
+    [0 ... LISTED - 1] = {
+        MT_FUNCTION_CALL | MENU_DYNAMIC_DESC | MENU_FUNC_CHECK_RETVAL,
+        { .function = &memo_func },
+        { .menu_get_name_and_icon = &memo_name_desc } },
+};
 
 bool voice_memos_describe(const struct menu_item_ex *item,
                           enum list_row_kind *kind, const char **value)
 {
+    if (item >= memo_rows && item < memo_rows + LISTED)
+    {
+        *kind = LIST_ROW_PLAIN;
+        *value = NULL;
+        return true;
+    }
     if (item != &quality_row)
         return false;
     *kind = LIST_ROW_SETTING;
@@ -509,22 +971,60 @@ bool voice_memos_step(const struct menu_item_ex *item)
     return true;
 }
 
-/* The main menu shows the row while the microphone is in */
-static int menu_callback(int action, const struct menu_item_ex *this_item,
-                         struct gui_synclist *this_list)
+/* Which rows show: Start Recording and Quality while the microphone is in,
+ * Delete All and the memos while there are any. Play/Pause reaches the menu
+ * only on a memo's row (voice_memos_plays), and plays it. */
+static int row_callback(int action, const struct menu_item_ex *this_item,
+                        struct gui_synclist *this_list)
 {
     (void)this_list;
-    if (action == ACTION_REQUEST_MENUITEM && this_item == &voice_memos_menu &&
-        !mic())
-        return ACTION_EXIT_MENUITEM;
+    if (action == ACTION_REQUEST_MENUITEM)
+    {
+        bool show;
+        if (this_item == &voice_memos_menu)
+            show = shown();
+        else if (this_item == &start_row || this_item == &quality_row)
+            show = mic();
+        else if (this_item == &delete_all_row)
+        {
+            show = memo_count() > 0;
+        }
+        else
+            show = this_item - memo_rows < listed;
+        return show ? action : ACTION_EXIT_MENUITEM;
+    }
+    if (action == ACTION_ENTER_MENUITEM &&
+        this_item >= memo_rows && this_item < memo_rows + LISTED)
+        chosen = this_item - memo_rows;
+    if (action == ACTION_TREE_WPS && this_item == &voice_memos_menu)
+    {
+        play_chosen = true;
+        return ACTION_STD_OK;
+    }
     return action;
 }
 
-static const struct menu_item_ex *const memo_rows[] = {
-    &start_row, &quality_row,
+#define MEMO_ROW(i)     &memo_rows[i],
+#define MEMO_ROWS10(i)  MEMO_ROW(i) MEMO_ROW(i + 1) MEMO_ROW(i + 2) \
+    MEMO_ROW(i + 3) MEMO_ROW(i + 4) MEMO_ROW(i + 5) MEMO_ROW(i + 6) \
+    MEMO_ROW(i + 7) MEMO_ROW(i + 8) MEMO_ROW(i + 9)
+#define MEMO_ROWS50(i)  MEMO_ROWS10(i) MEMO_ROWS10(i + 10) \
+    MEMO_ROWS10(i + 20) MEMO_ROWS10(i + 30) MEMO_ROWS10(i + 40)
+
+static const struct menu_item_ex *const menu_rows[] = {
+    &start_row, &quality_row, &delete_all_row,
+    MEMO_ROWS50(0) MEMO_ROWS50(50) MEMO_ROWS50(100) MEMO_ROWS50(150)
+    MEMO_ROWS50(200)
 };
-static const struct menu_callback_with_desc memo_desc = {
-    menu_callback, ID2P(LANG_FRUIT_VOICE_MEMOS), Icon_NOICON };
+static const struct menu_callback_with_desc menu_desc = {
+    row_callback, ID2P(LANG_FRUIT_VOICE_MEMOS), Icon_NOICON };
 const struct menu_item_ex voice_memos_menu = {
-    MT_MENU | MENU_HAS_DESC | MENU_ITEM_COUNT(ARRAYLEN(memo_rows)),
-    { (void *)memo_rows }, { .callback_and_desc = &memo_desc } };
+    MT_MENU | MENU_HAS_DESC | MENU_ITEM_COUNT(ARRAYLEN(menu_rows)),
+    { (void *)menu_rows }, { .callback_and_desc = &menu_desc } };
+
+bool voice_memos_plays(const struct menu_item_ex *menu,
+                       const struct menu_item_ex *row)
+{
+    return menu == &voice_memos_menu &&
+           row >= memo_rows && row < memo_rows + LISTED;
+}

@@ -88,7 +88,7 @@
 
 #define MAX_MENUS 8
 /* used to allow for dynamic menus */
-#define MAX_MENU_SUBITEMS 64
+#define MAX_MENU_SUBITEMS 256  /* Voice Memos lists 250 memos */
 static struct menu_item_ex *current_submenus_menu;
 static int current_subitems[MAX_MENU_SUBITEMS];
 static int current_subitems_count = 0;
@@ -1195,9 +1195,14 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         }
         else
         {
+            action_set_page_play(voice_memos_plays(menu,
+                current_subitems_count ?
+                menu->submenus[get_menu_selection(lists.selected_item, menu)] :
+                NULL));
             /* HZ so the status bar redraws corectly */
             action = get_action(CONTEXT_MAINMENU | CONTEXT_FRUIT_NAV | ALLOW_SOFTLOCK,
                                 ui_scene_timeout(&modal, ui_scene_timeout(scene, list_do_action_timeout(&lists, HZ))));
+            action_set_page_play(false);
         }
         if (action == ACTION_NONE && !gui_synclist_moving(&lists))
             ui_idle_list_present();
@@ -1218,13 +1223,13 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         redraw_lists = query_audio_status(&old_audio_status);
 
 
-        if (menu == &root_menu_ || menu == fruit_menu_root())
+        bool memo_rows = voice_memos_refresh(menu);
+        if (menu == &root_menu_ || memo_rows)
         {
             const struct menu_item_ex *row = current_subitems_count
                 ? menu->submenus[get_menu_selection(lists.selected_item, menu)]
                 : NULL;
-            if (menu == &root_menu_ ? root_menu_refresh() :
-                voice_memos_refresh())
+            if (memo_rows || root_menu_refresh())
             {
                 int selection = 0;
                 for (unsigned int i = 0; i < MENU_GET_COUNT(menu->flags); i++)

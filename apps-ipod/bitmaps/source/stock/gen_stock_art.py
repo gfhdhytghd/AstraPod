@@ -2,9 +2,12 @@
 """Write the stock art's tables, or pack its pixels, from the PNGs here.
 
 Most PNGs are bitmaps from the iPod Classic 1.1.2 resource bank, named
-after their resource. Video_* are the 2.0.5 bank's movie overlay bitmaps.
-SearchResult_*, the Photos_Header_Image grid header and the
-VoiceMemos_Record_Status_Image red dot are derived from 2.0.5 LCD output. AstraPod_* are drawn in the same style.
+after their resource. Video_* are the 2.0.5 bank's movie overlay bitmaps,
+and Dialog_* its question page's panel and buttons (0dad0178-017a and
+0dad0181-0186, unnamed in the bank). SearchResult_*, the
+Photos_Header_Image grid header and the VoiceMemos_Record_Status_Image red
+dot are derived from 2.0.5 LCD output. AstraPod_* are drawn in the same
+style.
 A greyscale PNG is a mask: its levels are
 the alpha of a colour the caller picks. Any other PNG is an image with its
 own alpha, kept as a palette and indices. A mask keeps only the rectangle

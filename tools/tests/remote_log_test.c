@@ -82,6 +82,23 @@ int main(void)
         gesture(&s,c,BUTTON_RC_PLAY|BUTTON_REL,0,550);
         expect("PLAY tick=550 triple");
     }
+    struct agents_remote_state native = {.queued = 1, .tap_pending = true};
+    const int keys[] = { BUTTON_RC_SELECT, BUTTON_RC_PLAY, BUTTON_RC_MENU,
+                         BUTTON_RC_LEFT, BUTTON_RC_RIGHT };
+    for (unsigned int i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
+    {
+        int key = keys[i];
+        assert(agents_remote_button(&native, REMOTE_NATIVE, key, key, 600) ==
+               key);
+        assert(agents_remote_button(&native, REMOTE_NATIVE,
+                                    key | BUTTON_REPEAT, key, 750) ==
+               (key | BUTTON_REPEAT));
+        assert(agents_remote_button(&native, REMOTE_NATIVE,
+                                    key | BUTTON_REL, 0, 850) ==
+               (key | BUTTON_REL));
+    }
+    assert(!agents_remote_pending(&native));
+    assert(!remote_log_read(line, sizeof(line)));
     struct agents_remote_state s = {0};
     gesture(&s,REMOTE_AGENTS,BUTTON_RC_VOL_UP|BUTTON_REL|BUTTON_REPEAT,0,400);
     remote_log_event(REMOTE_LOG_PAGE,400,3,0,NULL,0);

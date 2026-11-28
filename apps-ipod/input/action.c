@@ -569,6 +569,8 @@ static int remote_context(int context)
         return agents_fruit_nav() ? REMOTE_AGENTS_FRUIT : REMOTE_AGENTS;
     if (context == CONTEXT_WPS) return REMOTE_WPS;
     if (context == CONTEXT_QUICKSCREEN) return REMOTE_QUICKSCREEN;
+    if (context == (CONTEXT_PLUGIN | CONTEXT_PHOTO_VIEW))
+        return REMOTE_NATIVE;
     if (get_current_activity() == ACTIVITY_ALBUMCOVERS) return REMOTE_COVERS;
     if (agents_nav_has(AGENTS_NAV_TRACKS) &&
         get_current_activity() == ACTIVITY_DATABASEBROWSER) return REMOTE_ALBUM_LIST;

@@ -987,7 +987,7 @@ static enum photo_view_result photo_view(const struct albums *a, int *sel)
                 photo_thumbs_prefetch(ahead);
         }
         int action = get_custom_action(
-            CONTEXT_PLUGIN | CONTEXT_WHEEL_DETENTS,
+            CONTEXT_PLUGIN | CONTEXT_PHOTO_VIEW | CONTEXT_WHEEL_DETENTS,
             timeout, photo_view_keys);
         if (action == ACTION_WPS_MENU || action == ACTION_STD_CANCEL)
         {

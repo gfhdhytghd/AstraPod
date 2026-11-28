@@ -195,6 +195,13 @@ static bool global_triple(struct agents_remote_state *s, int context,
 int agents_remote_button(struct agents_remote_state *s, int context,
                          int button, int held, unsigned long now)
 {
+    /* The photo viewer classifies holds itself. Do not replay a gesture
+     * from the previous screen or turn a held Select into Play. */
+    if (context == REMOTE_NATIVE)
+    {
+        *s = (struct agents_remote_state){0};
+        return button;
+    }
     if (s->queued) return take(s);
     if (global_triple(s, context, button, held, now)) return REMOTE_COVERS_BUTTON;
     /* Quick screen centre is Select, including a hold; no tap gesture may

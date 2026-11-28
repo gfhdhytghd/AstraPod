@@ -445,7 +445,7 @@ def run_theme(binary, simdisk, env, out, theme):
                 settle(s)
 
                 # 5. Library -> Maintenance -> Update Now -> LEFT cancel -> Cancelled splash
-                for _ in range(3 if theme == "fruit-company" else 4):
+                for _ in range(4):
                     s.tap("Down")
                     time.sleep(0.15)
                 settle(s)

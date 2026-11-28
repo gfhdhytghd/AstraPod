@@ -3586,7 +3586,8 @@ static bool poll_link(void)
      * its parse budget. Commands and snapshots still arrive in wire order. */
     uint32_t started = USEC_TIMER;
     int dashboard_type = 0;
-    for (int i = 0; i < 16 && (uint32_t)(USEC_TIMER - started) < 2000; i++)
+    int limit = button_queue_empty() ? 16 : 1;
+    for (int i = 0; i < limit && (uint32_t)(USEC_TIMER - started) < 2000; i++)
     {
         struct podlink_message m;
         if (!podlink_poll(&m))
@@ -3936,16 +3937,24 @@ static void scroll_panel(struct gui_synclist *list, int dir, bool page)
         bool fast = TIME_BEFORE(current_tick, detail_wheel_at + WHEEL_FAST);
         int step = page ? detail_page_lines : fast ? 3 : 1;
         detail_wheel_at = current_tick;
-        detail_scroll = MAX(0, MIN(detail_scroll_max, detail_scroll + dir * step));
-        detail_follow = detail_scroll == detail_scroll_max;
-        draw_detail(list);
+        int scroll = MAX(0, MIN(detail_scroll_max, detail_scroll + dir * step));
+        detail_follow = scroll == detail_scroll_max;
+        if (scroll != detail_scroll)
+        {
+            detail_scroll = scroll;
+            draw_detail(list);
+        }
     }
     else if (view == VIEW_USAGE && !usage_legacy_keys())
     {
         int height = list->parent[SCREEN_MAIN]->height;
         int maximum = MAX(0, HR_USAGE_SVCS * USE_BLOCK + USE_LINE + 3 - height);
-        usage_scroll = MAX(0, MIN(maximum, usage_scroll + dir * (page ? height : USE_LINE)));
-        draw_usage(list);
+        int scroll = MAX(0, MIN(maximum, usage_scroll + dir * (page ? height : USE_LINE)));
+        if (scroll != usage_scroll)
+        {
+            usage_scroll = scroll;
+            draw_usage(list);
+        }
     }
     else if (view == VIEW_USAGE || view == VIEW_DETAIL)
     {
@@ -4204,12 +4213,8 @@ static int agents_run(void)
         pump_keys();
         take_result(&list);
         advance_question(&list);
-        if (!received_projects && model.nws)
-        {
-            received_projects = true;
-            if (view == VIEW_SPACES)
-                show(&list, -1);
-        }
+        bool first_projects = !received_projects && model.nws;
+        received_projects |= first_projects;
         if (view == VIEW_AGENTS && filter_loading && model.agents_valid &&
             !strcmp(model.agents_ws, space_id))
         {
@@ -4274,6 +4279,11 @@ static int agents_run(void)
                 draw_usage(&list);
             }
         }
+        else if (first_projects && view == VIEW_SPACES)
+        {
+            shown_trouble = t;
+            show(&list, -1);
+        }
         else if (changed || t != shown_trouble ||
                  (t && TIME_AFTER(current_tick, redraw_at)) ||
                  (view == VIEW_DETAIL && detail_shown_age >= 0 &&
@@ -4296,7 +4306,7 @@ static int agents_run(void)
             frame_at = current_tick + ANIM_TICKS - 1;
             if (is_backlight_on(true) && view == VIEW_DETAIL)
                 tick_task(&list);
-            else if (is_backlight_on(true) && animating(&list))
+            else if (!wheel_busy && is_backlight_on(true) && animating(&list))
                 gui_synclist_draw_status(&list);
         }
 

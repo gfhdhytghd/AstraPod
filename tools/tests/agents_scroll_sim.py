@@ -135,6 +135,7 @@ def suite(binary, output, resources, theme, t3):
             result.append(measure(player, frames, "detail", True, 3))
             player.tap("menu")
             player.expect_view("threads")
+            player.wait(.5)
             player.tap("menu")
             player.expect_view("projects")
             if theme.startswith("fruit-company"):
@@ -147,6 +148,10 @@ def suite(binary, output, resources, theme, t3):
             else:
                 player.tap("back")
             player.expect_view("usage")
+            usage = ["U\t0\t1", "N\t1234000\t13000"]
+            for service in ("codex", "claude", "grok", "gemini"):
+                usage.append(f"P\t{service}\tok\t25\t1800\t51\t86400\t2000\t1234\t-")
+            player.send("\n".join(usage))
             player.wait(.35)
             result.append(measure(player, frames, "usage", True, 2))
     return result

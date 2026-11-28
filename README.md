@@ -1,138 +1,141 @@
 # AstraPod
-Rockbox specifically and deeply optimized for iPod Classic.
 
-本页适用于第六代 iPod classic（S5L8702，构建目标 `ipod6g`）。安装前必须确认型号，并备份音乐和 `.rockbox`。
+Rockbox optimized for iPod classic.
 
-## 已实现
+This guide covers the sixth-generation iPod classic (S5L8702, build target `ipod6g`). Confirm your model and back up your music and `.rockbox` before installing.
 
-| 功能 | 当前实现 |
+## Features
+
+| Feature | What you can do |
 | --- | --- |
-| 原生界面 | 四款[内置原生主题](#原生主题)。Scrim 的「正在播放」是无状态栏的全屏界面。Classic 和 Fruit Company 系列采用原厂样式的播放布局，并保留状态栏。 |
-| Cover Flow | 支持立体和平面浏览。相册翻面显示曲目，后台优先预取居中相册。翻面板与「正在播放」共享模糊封面缓存。 [轮播导航](docs/podbox/covers-navigation.md) |
-| 歌词 | 支持 TTML、LRC、逐字时间、对唱和背景人声。可以手动浏览和按行定位。Classic 和 Fruit Company 系列默认用蓝色选中条标出当前歌词行。 [歌词说明](docs/podbox/lyrics.md) |
-| 字体 | Scrim 使用 HarmonyOS Sans，并以 Noto 等字体补字。Classic 和 Fruit Company 系列优先使用原厂 Helvetica 和中日韩点阵字形。 |
-| 远程播放 | HerdRemote 提供 Cider 播放控制、远程资料库和带时间的歌词。支持播放交接。 [远程协议](docs/podbox/cider-remote-protocol.md) |
-| Agents 和 Usage | 用点击轮查看 herdr 工作区、代理和用量。可以回答问题，也支持经主机配置的录音和键盘操作。 [HerdRemote](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/README.md) |
-| PodLink 与稳定性 | PodLink 使用 USB CDC 串行链路。主线程栈和线程容量经过加固。字形与模糊任务共享后台线程。iAP 创建线程失败后可以重试。 |
-| SM1 DSP | 支持部分 FLAC 和 ALAC 的硬件解码。 |
+| Native interface | Choose from four [built-in native themes](#native-themes). Scrim fills the screen with Now Playing. Classic and the Fruit Company family use the original iPod playback layout with its status bar. |
+| Cover Flow | Browse albums in 3D or flat view. Flip an album to see its tracks. Cover Flow loads the highlighted album first and shares its blurred artwork with Now Playing. [Cover Flow navigation](docs/podbox/covers-navigation.md) |
+| Lyrics | Follow TTML or LRC lyrics with word-by-word timing, duets and backing vocals. Scroll through lyrics or seek to a line. Classic and the Fruit Company family highlight the current line in blue by default. [Lyrics guide](docs/podbox/lyrics.md) |
+| Fonts | Scrim uses HarmonyOS Sans with additional glyphs from Noto and other fonts. Classic and the Fruit Company family use the original Helvetica and CJK bitmap glyphs where available. |
+| Remote playback | Use HerdRemote to control Cider, browse its library and follow timed lyrics. You can also hand off playback. [Remote playback protocol](docs/podbox/cider-remote-protocol.md) |
+| Agents and Usage | Use the click wheel to browse herdr workspaces, agents and usage. Answer questions or use voice recording and keyboard controls when the host enables them. [HerdRemote](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/README.md) |
+| PodLink and reliability | PodLink connects over USB CDC serial. If an iAP accessory session fails to start, you can retry the connection. |
+| SM1 DSP | Hardware decoding supports some FLAC and ALAC files. |
 
-## 原生主题
+## Native themes
 
-- **Scrim（默认）**采用 AstraPod 的菜单和全屏「正在播放」布局。
-- **Classic**保留 AstraPod 的菜单，使用 iPod classic 原厂字体、图标和播放布局。分栏菜单左侧显示选项，右侧显示图片预览。
-- **Fruit Company**沿用 Classic 的外观，主菜单采用原厂布局。默认项目为「音乐」「视频」「照片」「播客」「附加功能」「设置」「随机乐曲」。可以在「设置 → 主菜单」调整这些项目。
-- **Fruit Company Ultra**沿用 Fruit Company 的菜单和分栏布局。选中条带有回弹，页面叠放时投下阴影，Cover Flow 的封面滑入时带有反光。关闭「外观 → 动画」后，界面动效与 Fruit Company 一致。Agents 始终使用常规动效。
+- **Scrim (default)** uses AstraPod's menus and a full-screen Now Playing layout.
+- **Classic** keeps AstraPod's menus and uses the original iPod classic fonts, icons and playback layout. Split menus show options on the left and an image preview on the right.
+- **Fruit Company** pairs Classic's look with the original main menu layout. The default rows are Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle Songs. Choose which rows appear in **Settings → Main Menu**.
+- **Fruit Company Ultra** shares Fruit Company's menus and split layout. The selection bar springs into place, overlapping pages cast shadows, and covers catch the light as they slide into Cover Flow. Turn off **Appearance → Animations** for the same motion as Fruit Company with animations off. Agents uses standard motion in either theme.
 
-Fruit Company 系列的「附加功能」提供时钟、日历、通讯录、闹钟、备忘录、屏幕锁和秒表。也可以从这里打开游戏、其他应用、文件和系统菜单。在「照片」中可以浏览同步的相册和缩略图，也可以播放幻灯片。「视频 → 影片」打开电影列表。播放 H.264 影片时，Fruit Company 使用原厂样式的控制浮层，Ultra 使用 AstraPod 的浮层。
+In the Fruit Company family, **Extras** includes Clocks, Calendars, Contacts, Alarms, Notes, Screen Lock and Stopwatch. It also gives you access to games, other apps, files and the System menu. Use **Photos** to browse synced albums and thumbnails or play a slideshow. Open **Videos → Movies** to find your films. For H.264 movies, Fruit Company uses the original-style playback overlay. Ultra uses AstraPod's overlay.
 
-在 Fruit Company 系列的菜单和浏览列表中，转动滚轮选择项目，按 **Select** 打开，按 **Menu** 返回。**Previous** 和 **Next** 短按切歌，长按快退或快进。短按 **Play/Pause** 切换播放状态。应用内按键随当前界面而定，例如在照片查看器中转动滚轮换照片。
+In Fruit Company and Ultra menus and browsing lists, turn the wheel to highlight an item, press **Select** to open it and press **Menu** to go back. Tap **Previous** or **Next** to skip tracks, or hold either button to seek. Tap **Play/Pause** to toggle playback. In apps, the controls follow the current screen. For example, turn the wheel to move between pictures in the photo viewer.
 
-在 Classic 和 Fruit Company 系列中，长按 **Menu** 打开全屏控制中心。默认用 **Previous** 和 **Next** 分别切换随机播放和重复播放。按 **Menu** 调高亮度，按 **Play/Pause** 调低亮度。转动滚轮调节音量，按 **Select** 关闭。
+In Classic and the Fruit Company family, hold **Menu** to open the full-screen Control Centre. With the default controls, **Previous** changes Shuffle and **Next** changes Repeat. Press **Menu** to raise brightness and **Play/Pause** to lower it. Turn the wheel to adjust volume and press **Select** to close.
 
-在「设置 → 主题设置 → 原生主题」切换主题。使用 Fruit Company 系列时，路径为「设置 → 高级设置 → 主题设置 → 原生主题」。更新固件时请解压完整发行包，以安装主题字体和图片。
+Switch themes in **Settings → Theme Settings → Native theme**. In the Fruit Company family, use **Settings → Advanced Settings → Theme Settings → Native theme**. Extract the full release ZIP when updating to install the theme fonts and artwork.
 
-## 本地音频采样率
+## Local audio sample rates
 
-受 iPod classic 音频输出硬件限制，AstraPod 的本地播放最高支持 **48 kHz**。固件已移除高于 48 kHz 曲目的直接播放解码路径。尝试播放时，设备会提示先转换为 **48 kHz 或 44.1 kHz FLAC**。
+The iPod classic's audio hardware limits local playback to **48 kHz**. If you try to play a track above 48 kHz, AstraPod prompts you to convert it to **48 kHz or 44.1 kHz FLAC** first.
 
-在「设置 → 播放设置 → 将曲库高采样率曲目转换为 48 kHz FLAC」可扫描曲库并批量转换。转换保留原文件。生成转换件后，从原曲入口播放会自动使用转换件。
+Open **Settings → Playback → Convert library to 48 kHz FLAC** to scan and convert your library in batches. The converter keeps your originals. After conversion, select a track as usual to play its converted copy automatically.
 
-## 界面演示
+## Screenshots
 
-### Fruit Company 系列
+### Fruit Company and Fruit Company Ultra
 
-![Fruit Company 的分栏主菜单](docs/media/fruit-company-menu.png)
-![Fruit Company 的附加功能菜单和日历预览](docs/media/fruit-company-extras.png)
+![Fruit Company split main menu](docs/media/fruit-company-menu.png)\
+Fruit Company's split main menu shows the highlighted Music row beside an album cover preview.
 
-![Fruit Company Ultra 的 Cover Flow 动效](docs/media/fruit-company-ultra-cover-flow.gif)
-![Fruit Company Ultra 从专辑曲目切换到正在播放](docs/media/fruit-company-ultra-now-playing.gif)
+![Fruit Company Extras](docs/media/fruit-company-extras.png)\
+Fruit Company's Extras menu shows a calendar preview beside the Calendars row.
+
+![Fruit Company Ultra Cover Flow](docs/media/fruit-company-ultra-cover-flow.gif)\
+In Fruit Company Ultra, covers slide into view and reflect below the carousel.
+
+![Fruit Company Ultra Now Playing](docs/media/fruit-company-ultra-now-playing.gif)\
+Select a track in Fruit Company Ultra to see the album cover turn into the Now Playing view.
 
 ### Scrim
 
-![Cover Flow 翻面](docs/media/coverflow-flip.gif)\
-在 Cover Flow 中滚动封面，翻面查看曲目，再合上面板。
+![Cover Flow album panel](docs/media/coverflow-flip.gif)\
+Scroll through covers, flip an album to see its tracks, then close the panel.
 
-![同步歌词](docs/media/lyrics.gif)\
-歌词随播放逐词点亮，左右分列对唱，显示和声与间奏圆点。
+![Synced lyrics](docs/media/lyrics.gif)\
+Words light up in time with playback. Duet parts appear on opposite sides, with backing vocals and dots for instrumental breaks.
 
-![列表进出](docs/media/list-push.gif)\
-从首页进入文件列表，列表行错峰滑入，按 MENU 返回首页。
+![List transitions](docs/media/list-push.gif)\
+Open the file list from the main menu to see the rows slide in. Press **Menu** to return.
 
-![快速索引](docs/media/index-mode.gif)\
-快速滚动打开字母索引，每拨一格跳到下一组，松开滚轮关闭索引。
+![Quick letter index](docs/media/index-mode.gif)\
+Spin the wheel to open the letter index. Each detent jumps to the next group. Lift your finger to close the index.
 
-![Scrim 的正在播放](docs/media/now-playing.gif)\
-在 Scrim 中从 Cover Flow 选曲后，进入无状态栏的全屏播放页。
+![Scrim Now Playing](docs/media/now-playing.gif)\
+Choose a track in Cover Flow to open Scrim's Now Playing screen with the status bar hidden.
 
-![Agents 与 Usage](docs/media/remote.gif)\
-用模拟的 HerdRemote 显示 Agents 工作区，并横向切换到 Usage 页面。
+![Agents and Usage](docs/media/remote.gif)\
+Browse an Agents workspace using a simulated HerdRemote connection and switch across to Usage.
 
-## 快捷键与组合键
+## Shortcuts and button combinations
 
-仅列出不说明很难自行发现的组合键与快捷手势；完整按键说明见 [默认按键表](apps-ipod/input/keymap_ipod.c) 和 [SDL 按键映射](uisimulator/buttonmap/ipod.c)。
+For the full mappings, see the [default button map](apps-ipod/input/keymap_ipod.c) and [SDL simulator button map](uisimulator/buttonmap/ipod.c).
 
-### 全局与恢复组合键
+### Global and recovery shortcuts
 
-| 场景 | 按键 | 动作 |
+| Where | Buttons | Action |
 | --- | --- | --- |
-| 全局 | `Select + Menu` | 开关 Cover Flow（远程来源可用时优先打开远程相册）。 |
-| 「正在播放」／歌词／Agents | `Select + Play` | 从「正在播放」或歌词进入 Agents，从 Agents 返回「正在播放」。 |
-| 菜单和浏览列表 | `Select + Play` | Fruit Company 系列跳到「正在播放」。Scrim 和 Classic 在连接 PodLink 主机时打开 Agents，否则跳到「正在播放」。 |
-| 硬件 | 长按 `Menu + Select` | 强制重启。 |
-| 引导程序 | 重启后按住 `Select + Play` | 进入 Apple 磁盘模式。 |
-| 引导程序 | 启动时按住 `Select + Left`／`Select + Right` | 分别进入 Apple 诊断模式和 Rockbox 引导程序 USB 模式。 |
-| 引导程序 | 启动时按住 `Menu` | 尝试启动 Apple 固件（大于 128 GB 的盘必须检查 LBA48 兼容性）。 |
+| Global | `Select + Menu` | Toggle Cover Flow. Opens the remote album browser when a remote source is available. |
+| Now Playing, Lyrics or Agents | `Select + Play` | Open Agents from Now Playing or Lyrics. Return to Now Playing from Agents. |
+| Menus and browsing lists | `Select + Play` | Open Now Playing in the Fruit Company family. In Scrim and Classic, open Agents when a PodLink host is connected. Otherwise, open Now Playing. |
+| Hardware | Hold `Menu + Select` | Force a restart. |
+| Bootloader | Hold `Select + Play` after restarting | Enter Apple Disk Mode. |
+| Bootloader | Hold `Select + Left` or `Select + Right` at startup | Enter Apple Diagnostics with `Left` or Rockbox bootloader USB mode with `Right`. |
+| Bootloader | Hold `Menu` at startup | Attempt to start the Apple firmware. Check LBA48 compatibility for drives larger than 128 GB. |
 
-[引导程序安装和 DFU](tools/bootloader-installer/README.txt) · [引导程序按键源码](bootloader/ipod-s5l87xx.c)
+[Bootloader installation and DFU](tools/bootloader-installer/README.txt) · [Bootloader button map](bootloader/ipod-s5l87xx.c)
 
-### 隐藏手势与底座遥控器
+### Press-and-hold and dock remote shortcuts
 
-| 场景 | 按键 | 动作 |
+| Where | Buttons | Action |
 | --- | --- | --- |
-| 常规页面 | 长按 `Menu`／长按 `Select` | 长按 `Menu` 打开快捷设置（Scrim）或控制中心（Classic 和 Fruit Company 系列）。长按 `Select` 打开上下文菜单。 |
-| 「正在播放」／歌词 | 按住 `Play` 一秒后松开 | 在「正在播放」和歌词之间切换。 |
-| 多选列表 | 按住 `Select` 并转动滚轮 | 连续勾选（反转取消）。Scrim 和 Classic 短按 `Play` 打开批量操作菜单。Fruit Company 系列长按 `Menu` 打开批量操作菜单。 |
-| 文本输入 | 长按 `Left`／`Right` 或 `Menu` | Scrim 和 Classic 用 `Left`／`Right` 向左或向右删除字符。Fruit Company 系列用 `Menu` 向左删除字符。 |
-| Cover Flow | 长按 `Play` | 随机转动封面。 |
-| Agents | 按住 `Play` | 按住录音，松手结束（需主机开启语音功能）。 |
-| Usage／代理详情（Scrim 或 Classic 连接 Herdr 工作区） | 滚轮（快转按词跳）／`Left`（可长按） | 发送主机方向键／发送 Backspace。 |
-| 底座遥控器 | `Play` 双击／三击 | 双击切换 Agents 和「正在播放」；三击开关 Cover Flow。 |
-| 底座遥控器 | 长按 `Play` | 播放页开关歌词。在 Scrim 和 Classic 的 Agents 中按住说话。 |
+| Standard screens | Hold `Menu` or `Select` | Hold `Menu` for Quick Settings in Scrim or Control Centre in Classic and the Fruit Company family. Hold `Select` for the context menu. |
+| Now Playing or Lyrics | Hold `Play` for one second and release | Switch between Now Playing and Lyrics. |
+| Lists with multiple selection | Hold `Select` and turn the wheel | Tick consecutive items. Turn back to untick them. To open the batch actions menu, tap `Play` in Scrim and Classic or hold `Menu` in the Fruit Company family. |
+| Text entry | Hold `Left`, `Right` or `Menu` | In Scrim and Classic, use `Left` or `Right` to delete in that direction. In the Fruit Company family, hold `Menu` to delete to the left. |
+| Cover Flow | Hold `Play` | Spin to a random album cover. |
+| Agents | Hold `Play` | Record while held and stop on release. Enable voice recording on the host first. |
+| Usage or agent details (Scrim or Classic connected to a herdr workspace) | Turn the wheel or press `Left` | The wheel sends arrow keys to the host. Spin faster to jump by words. Press or hold `Left` to send Backspace. |
+| Dock remote | Double- or triple-press `Play` | Double-press to switch between Agents and Now Playing. Triple-press to toggle Cover Flow. |
+| Dock remote | Hold `Play` | Toggle lyrics from the playback screen. In Scrim and Classic, hold to talk while in Agents. |
 
-[底座和主机的按键归属](docs/podbox/covers-navigation.md) · [Agents 按键及语音](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/README.md)
+[Dock and host button routing](docs/podbox/covers-navigation.md) · [Agents controls and voice recording](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/herdremote/README.md)
 
-## 连接电脑
+## Connecting to a computer
 
-### USB 磁盘模式、安装和更新
+### USB Disk Mode, installation and updates
 
-1. 运行 AstraPod 后接数据线。出现 USB 询问时，按 **Select** 授权磁盘访问，或按 **Menu** 保持非磁盘连接。纯充电 USB 模式不启动 PodLink。手动磁盘模式见上表。
-2. **FU114 之前的固件不得带着 USB 线启动。** 必须先启动，再接线。
-3. 初次安装按 Rockbox 安装手册安装对应型号的引导程序。正式发行包中，Classic 使用 `rockbox-ipod6g.zip`。选择本机型号对应的 ZIP；同时更新已启用的额外主题。 [Rockbox 安装手册](https://www.rockbox.org/manual.shtml) · [发布包](https://github.com/gfhdhytghd/AstraPod/releases)
-4. 备份 `.rockbox` 和重要文件。把 ZIP 解压到磁盘根目录，用包中同名文件更新 `/.rockbox/rockbox.ipod` 及其他 `/.rockbox/` 资源。保留包外的设置、资料库和音乐。电脑弹出磁盘后再断线。
+1. Start AstraPod, then connect the USB cable. When prompted, press **Select** to allow disk access or **Menu** to keep the connection without mounting the disk. Charge-only USB does not start PodLink. To enter Disk Mode manually, use the bootloader shortcut in the table above.
+2. **On firmware earlier than FU114, start the player before connecting USB.**
+3. For a first installation, follow the Rockbox manual to install the bootloader for your model. Choose the release ZIP for your model. For iPod classic, use `rockbox-ipod6g.zip`. Update any additional themes you have enabled as well. [Rockbox installation manual](https://www.rockbox.org/manual.shtml) · [AstraPod releases](https://github.com/gfhdhytghd/AstraPod/releases)
+4. Back up `.rockbox` and any important files. Extract the ZIP to the root of the player's disk and replace `/.rockbox/rockbox.ipod` and the other matching files in `/.rockbox/`. Keep existing settings, library data and music that the ZIP does not replace. Eject the disk from your computer before unplugging.
 
-开发包可以用报告中的 `fast_swap.py` 完整命令。参数依次为新 ZIP、ZIP SHA-256、基线 ZIP、旧固件 SHA-256 和新固件 SHA-256。工具核对基线，备份差异文件，写入并校验后弹出磁盘。有删除项的包用报告指定的 `fast_swap_rm.py`。
+For development packages, use the complete `fast_swap.py` command from the build report. Supply the new ZIP, its SHA-256, the baseline ZIP, the old firmware SHA-256 and the new firmware SHA-256 in that order. The tool checks the baseline, backs up changed files, writes and verifies the update, then ejects the disk. If the package removes files, use the `fast_swap_rm.py` command in the report.
 
-兼容的 HerdRemote 服务运行时，可以在 AstraPod-Desktop 仓库运行 `python3 herdremote/podlink_disk.py --timeout 20` 请求磁盘模式。磁盘模式下长按机身 Menu，可以请求主机先卸载磁盘，再恢复非磁盘连接。 [Disk Mode](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/docs/herdremote-usage.md#disk-mode-control-fu42)
+While a compatible HerdRemote service is running, run `python3 herdremote/podlink_disk.py --timeout 20` from the AstraPod-Desktop checkout to request Disk Mode. In Disk Mode, hold **Menu** on the iPod to ask the host to unmount the disk and restore the non-disk connection. [Disk Mode](https://github.com/gfhdhytghd/AstraPod-Desktop/blob/master/docs/herdremote-usage.md#disk-mode-control-fu42)
 
-### PodLink 和 HerdRemote
+### PodLink and HerdRemote
 
-PodLink 是 USB CDC 串行消息链路。打开「系统 → PodLink」，接线后选择非磁盘连接。Linux 通常显示 `/dev/ttyACM*`。诊断脚本与 HerdRemote 分时占用串口。
+PodLink carries messages over USB CDC serial. Open **System → PodLink** on the player, connect USB and choose the connection without disk access. On Linux, the serial device usually appears as `/dev/ttyACM*`. Use diagnostic scripts and HerdRemote one at a time so each can access the port. [PodLink guide](docs/podlink.md)
 
-[PodLink 使用说明](docs/podlink.md)
+AstraPod-Desktop includes the desktop app, the PodLink command-line tool, HerdRemote and input plugins. Start HerdRemote, connect the iPod and open **System → Agents**. In the Fruit Company family, open **Extras → System → Agents**. [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop) · [Remote playback protocol](docs/podbox/cider-remote-protocol.md)
 
-电脑端应用、PodLink 命令行、HerdRemote 和输入插件见 [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop)。
-运行 HerdRemote 后接线，在 iPod 打开「系统 → Agents」。使用 Fruit Company 系列时，从「附加功能 → 系统」进入。
-[远程协议](docs/podbox/cider-remote-protocol.md)
+### Troubleshooting
 
-### 故障排查
-
-| 现象 | 要记录的内容 |
+| Symptom | What to check or record |
 | --- | --- |
-| 崩溃屏 | 版本、原始报错、PC。重新启动后保留成功写出的 `/.rockbox/crash-native.txt`。 |
-| 翻面板等待 | 在 `/.rockbox/podbox/` 放置空文件 `perf.enable` 并重启。翻面数据写入同目录的 `perf.log`。移除开关并重启可以停止记录。 |
-| 主机找不到 iPod | 检查非磁盘 USB 连接、串口权限和 HerdRemote 服务日志。 |
+| Crash screen | Record the firmware version, exact error and program counter (PC). After restarting, save `/.rockbox/crash-native.txt` if the player wrote it. |
+| Slow album panel | Create an empty `perf.enable` file in `/.rockbox/podbox/` and restart. Album panel timings appear in `perf.log` in the same folder. Remove `perf.enable` and restart to stop logging. |
+| Host cannot find the iPod | Check that USB is connected without disk access. Check serial port permissions and the HerdRemote service log. |
 
-[设置指南](docs/podbox/settings-guide.md) · [音乐菜单](docs/podbox/music-menu-guide.md) · [封面设置](docs/podbox/artwork-guide.md) · [连接测试](docs/podbox/connectivity-testing-guide.md)
+[Settings guide](docs/podbox/settings-guide.md) · [Music menu](docs/podbox/music-menu-guide.md) · [Artwork settings](docs/podbox/artwork-guide.md) · [Connection tests](docs/podbox/connectivity-testing-guide.md)
 
 ## Credits and licence
 
@@ -290,51 +293,4 @@ layouts and behaviour to support the iAP2 development. Which fact came from wher
 - Spoon - Hot Thoughts - [Website](http://spoontheband.com/)
   - Artwork: Christine Messersmith
 - Vampire Weekend - Contra - [Website](http://vampireweekend.com/)
-  - Artwork: Complicated  
-
-## English summary
-
-Rockbox specifically and deeply optimized for iPod Classic.
-
-### Built-in native themes
-
-- **Scrim (default)** gives you AstraPod's menus and full-screen Now Playing.
-- **Classic** keeps AstraPod's menus and uses the original iPod classic fonts,
-  artwork and Now Playing layout. Split menus show options on the left and a
-  preview on the right.
-- **Fruit Company** pairs that look with the original main menu layout. The
-  default rows are Music, Videos, Photos, Podcasts, Extras, Settings and Shuffle
-  Songs. Choose which rows appear in **Settings → Main Menu**.
-- **Fruit Company Ultra** shares Fruit Company's menus and adds springy
-  selection, layered page transitions and animated Cover Flow. Turn off
-  **Appearance → Animations** to give Ultra the same motion as Fruit Company
-  with animations off.
-  Agents uses standard motion in either theme.
-
-In the Fruit Company family, **Extras** includes Clocks, Calendars, Contacts,
-Alarms, Notes, Screen Lock and Stopwatch. It also gives you access to files,
-games, other apps and system tools. Use **Photos** to browse synced albums
-and thumbnails or play a slideshow. Open **Videos → Movies** to watch films.
-For H.264 movies, Fruit Company uses the original-style overlay and Ultra
-uses AstraPod's overlay.
-
-In Fruit Company and Ultra menus and browsing lists, use the wheel, Select
-and Menu to navigate. Tap Previous or Next to skip tracks, or hold either
-button to seek. Tap Play/Pause to toggle playback. Each app has its own
-controls. In the photo viewer, for example, turn the wheel to move between
-photos.
-
-In Classic and the Fruit Company family, hold **Menu** to open Control Centre.
-With the default controls, Previous changes Shuffle and Next changes Repeat.
-Use Menu and Play/Pause to raise and lower brightness, turn the wheel to adjust
-volume, and press Select to close. On Now Playing, hold **Play** for one second
-and release to open Lyrics. Repeat to return.
-
-Press **Select + Play** on Now Playing, Lyrics or Agents to switch between
-playback and Agents. In Fruit Company and Ultra menus, the same shortcut
-opens Now Playing.
-
-Switch themes in **Settings → Theme Settings → Native theme**. In the Fruit
-Company family, use **Settings → Advanced Settings → Theme Settings → Native
-theme**. Extract the full release ZIP when updating to install the theme fonts
-and artwork.
+  - Artwork: Complicated

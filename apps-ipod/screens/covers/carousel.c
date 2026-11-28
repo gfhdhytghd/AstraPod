@@ -2786,6 +2786,7 @@ static void coverflow_place(uint32_t now)
 static void coverflow_idle(void)
 {
     flow_pace.recover_full_rate = true;
+    flow_pace.recover_sync = true;
     center_slide.slide_index = center_index;
     uint32_t now = USEC_TIMER;
     stock_init(&flow_row, number_of_slides, center_index, now, false);

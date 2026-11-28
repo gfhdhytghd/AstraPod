@@ -494,6 +494,8 @@ static struct { const char *enter, *enter_why, *leave, *leave_why; } flow_path;
 static const char *pf_scene_failure = "-";
 static bool flat_view(void);
 static bool pf_shown, pf_entry_prepared, cover_resume_dirty;
+/* The entry's first submission releases the loader under the cache lock. */
+static bool pf_hold_reflections;
 static uint32_t pf_entry_requested;
 static int pf_neighbor_light = 256;
 static struct {
@@ -841,6 +843,7 @@ static void carousel_submit(struct ui_dirty_rect dirty, bool still)
 /** code */
 static void pf_clear_band(int y, int h);
 static bool free_slide_prio(int prio);
+static bool load_ultra_reflection(void);
 static inline bool load_and_prepare_surface(int slide_index,int cache_index,int prio);
 bool load_new_slide(void);
 int load_surface(int);
@@ -1646,6 +1649,12 @@ static void thread(void)
                     break;
 
                 buf_ctx_lock();
+                if (load_ultra_reflection())
+                {
+                    buf_ctx_unlock();
+                    yield();
+                    continue;
+                }
                 if (model->art_version)
                 {
                     const int radius = ALBUM_COVERS_NUM_SLIDES + CIDER_COVER_LEAD;
@@ -2095,30 +2104,62 @@ static void free_all_slide_prio(int prio)
 }
 
 
-/* Bytes a slide of `pixels` pixels needs for its reflection, with two
- * texels of slack for the sampler's last rounded row. */
+struct reflection_state {
+    pix_t background;
+    uint16_t rows;
+};
+
+/* Up to half the bitmap's pixels, plus two texels for sampler rounding. */
+static size_t reflection_pixels(size_t pixels)
+{
+    return pixels / 2 + 2;
+}
+
 static size_t reflection_bytes(size_t pixels)
 {
-    return pf_stock ? (pixels / 2 + 2) * sizeof(pix_t) : 0;
+    return pf_stock ? reflection_pixels(pixels) * sizeof(pix_t) +
+                      sizeof(struct reflection_state) : 0;
 }
 
 /* The reflection follows the slide's pixels: reflection_rows() texels for
  * each column of its centred square. */
-static inline const pix_t *slide_reflection(const struct dim *bmp)
+static inline pix_t *reflection_storage(const struct dim *bmp)
 {
-    return pf_stock ? (const pix_t *)(bmp + 1) + bmp->width * bmp->height
-                    : NULL;
+    return (pix_t *)(bmp + 1) + bmp->width * bmp->height;
 }
 
-static void make_reflection(struct dim *bmp)
+static inline struct reflection_state *reflection_state(const struct dim *bmp)
+{
+    return (struct reflection_state *)(reflection_storage(bmp) +
+                                reflection_pixels(bmp->width * bmp->height));
+}
+
+static inline const pix_t *slide_reflection(const struct dim *bmp)
+{
+    if (!pf_stock || reflection_state(bmp)->rows !=
+                     reflection_rows(MIN(bmp->width, bmp->height)))
+        return NULL;
+    return reflection_storage(bmp);
+}
+
+static const pix_t *reflection_source(const struct dim *bmp, int size)
+{
+    return (const pix_t *)(bmp + 1) +
+        (bmp->width - size) / 2 * bmp->height + (bmp->height - size) / 2;
+}
+
+static void prepare_reflection(struct dim *bmp)
 {
     if (!pf_stock)
         return;
+    struct reflection_state *state = reflection_state(bmp);
+    *state = (struct reflection_state){ .background = pf_bg_color };
+    if (ultra_flow_on)
+        return;
     int size = MIN(bmp->width, bmp->height);
-    const pix_t *crop = (const pix_t *)(bmp + 1) +
-        (bmp->width - size) / 2 * bmp->height + (bmp->height - size) / 2;
-    (ultra_flow_on ? ultra_reflection_build : reflection_build)(
-        (pix_t *)slide_reflection(bmp), crop, size, bmp->height, pf_bg_color);
+    reflection_build(reflection_storage(bmp), reflection_source(bmp, size),
+                     size, bmp->height, state->background);
+    state->rows = reflection_rows(size);
 }
 
 /* Read a pfraw image into the slide cache; a buflib handle, or -1.
@@ -2185,7 +2226,7 @@ static int read_pfraw(char* filename, int prio)
     }
 
     close( fh );
-    make_reflection(bm);
+    prepare_reflection(bm);
     return hid;
 }
 
@@ -2402,7 +2443,7 @@ static inline bool load_and_prepare_surface(const int slide_index,
         {
             img_filter_apply_banded((pix_t *)(bm + 1), bm->height,
                                     bm->width, carousel_filter());
-            make_reflection(bm);
+            prepare_reflection(bm);
         }
     }
     if (fh >= 0)
@@ -2600,6 +2641,49 @@ static inline struct dim *get_slide(const int hid)
     char *block = buflib_get_data(&buf_ctx, hid);
 
     return (struct dim *)(block + *(int *)block);
+}
+
+/* Start at the centre and build only the nearby textures. The cache lock
+ * covers one small slice, so the renderer can use the bitmap between slices
+ * and the loader can service USB, exit and centre changes. */
+static bool load_ultra_reflection(void)
+{
+    if (!pf_stock || !ultra_flow_on || pf_hold_reflections || flat_view())
+        return false;
+
+    struct dim *bmp = get_slide(empty_slide_hid);
+    if (bmp && slide_reflection(bmp))
+        bmp = NULL;
+    int nearest = ALBUM_COVERS_NUM_SLIDES + 1;
+    for (int i = 0; i < SLIDE_CACHE_SIZE; i++)
+    {
+        struct slide_cache *slot = &pf_sldcache.cache[i];
+        if (slot->index < 0 || slot->hid <= 0)
+            continue;
+        int distance = abs(slot->index - center_index);
+        if (distance >= nearest)
+            continue;
+        struct dim *candidate = get_slide(slot->hid);
+        if (!slide_reflection(candidate))
+        {
+            nearest = distance;
+            bmp = candidate;
+        }
+    }
+    if (!bmp)
+        return false;
+
+    struct reflection_state *state = reflection_state(bmp);
+    int size = MIN(bmp->width, bmp->height);
+    int rows = reflection_rows(size);
+    int end = MIN(rows, state->rows + 8);
+    ultra_reflection_build_rows(reflection_storage(bmp),
+                                reflection_source(bmp, size), size, bmp->height,
+                                state->background, state->rows, end);
+    state->rows = end;
+    if (end == rows)
+        pf_slides_loaded++;
+    return true;
 }
 
 
@@ -4755,6 +4839,7 @@ static bool init(void)
 
     pf_stock = ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC;
     ultra_flow_sync();
+    pf_hold_reflections = pf_entry_prepared && ultra_flow_on && stock_look();
     flow_row.spring = ultra_flow_on;
     pf_show_statusbar = pf_stock;
     pf_chrome_h = pf_stock ? ui_theme_metric(UI_METRIC_STATUS_HEIGHT) : 0;
@@ -4967,7 +5052,7 @@ static bool init(void)
         struct dim *placeholder = get_slide(empty_slide_hid);
         memset16((pix_t *)(placeholder + 1), G_BRIGHT(56),
                  placeholder->width * placeholder->height);
-        make_reflection(placeholder);
+        prepare_reflection(placeholder);
     }
 
     buffer = LCD_BUF;
@@ -6428,6 +6513,8 @@ static void stock_draw_clipped_quad(pix_t *dst, struct stock_pose pose, const pi
 static void stock_draw_reflection(pix_t *dst, struct stock_pose pose,
                                   const pix_t *refl, int side)
 {
+    if (!refl)
+        return;
     const struct ui_rect screen = {0, pf_chrome_h, LCD_WIDTH, LCD_HEIGHT - pf_chrome_h};
     int rows = reflection_rows(side);
     stock_draw_part(dst, pose, refl, side, rows, rows, &screen, true);
@@ -7515,7 +7602,8 @@ static void keep_playback_cover(int album)
     int side = MIN(bmp->width, bmp->height);
     if (side <= 0)
         return;
-    bool reflected = stock_look();
+    const pix_t *reflection = stock_look() ? slide_reflection(bmp) : NULL;
+    bool reflected = reflection != NULL;
     int rows = reflected ? reflection_rows(side) : 0;
     int handle = core_alloc_free_space(side * (side + rows) * sizeof(pix_t));
     if (handle <= 0)
@@ -7526,8 +7614,7 @@ static void keep_playback_cover(int album)
     for (int x = 0; x < side; x++)
         memcpy(dst + x * side, src + x * bmp->height, side * sizeof(*dst));
     if (reflected)
-        memcpy(dst + side * side, slide_reflection(bmp),
-               side * rows * sizeof(*dst));
+        memcpy(dst + side * side, reflection, side * rows * sizeof(*dst));
     core_put_data_pinned(dst);
     playback_scene.wall[playback_scene.count++] =
         (struct playback_texture){album, handle, side, side, reflected};
@@ -8599,6 +8686,11 @@ static int album_covers_loop(struct ui_motion *trace, bool restored_pixels,
             /* Every reflection was built for the other look. */
             flow_row.spring = ultra_flow_on;
             art_seen_generation = ~art_generation;
+            buf_ctx_lock();
+            struct dim *placeholder = get_slide(empty_slide_hid);
+            if (placeholder)
+                prepare_reflection(placeholder);
+            buf_ctx_unlock();
         }
         if (art_seen_generation != art_generation && pf_state == pf_idle &&
             !fade && !art_cache_is_busy())
@@ -9527,6 +9619,13 @@ static int album_covers_loop(struct ui_motion *trace, bool restored_pixels,
             }
             if (pf_scene.capturing)
                 ui_scene_start(&pf_scene);
+            if (pf_hold_reflections)
+            {
+                buf_ctx_lock();
+                pf_hold_reflections = false;
+                buf_ctx_unlock();
+                wake_pf_thread();
+            }
             /* Land the scroll on its last submitted frame. The next input
              * can be a new scroll or a page exit after an idle wait. */
             if (trace_attempted && pf_state == pf_idle && !fade)

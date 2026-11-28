@@ -79,7 +79,7 @@ struct frame_capture {
     uint32_t worst_render, worst_work, worst_interval, skipped;
     uint32_t render_pending, last_submission, period_q8;
     uint32_t last_start, last_phase, last_present;
-    uint32_t ready_wait_us;
+    uint32_t requested_at, ready_wait_us, first_submit_wait_us;
     bool first_run, readiness_measured;
     unsigned te_gaps, te_repeats, present_gaps, present_repeats;
     bool presented;
@@ -255,6 +255,7 @@ void ui_perf_ready(unsigned trace, uint32_t requested_at)
     if (!capture->readiness_measured && i < ARRAYLEN(seen_routes))
     {
         capture->readiness_measured = true;
+        capture->requested_at = requested_at;
         capture->ready_wait_us = wait;
         capture->first_run = i == route_count;
         if (capture->first_run)
@@ -382,6 +383,8 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
     uint32_t period_q8 = ui_frame_period_q8();
     uint32_t period = (period_q8 + 128) >> 8;
     struct frame_capture *capture = core_get_data_pinned(active_handle);
+    if (!capture->seen && capture->readiness_measured)
+        capture->first_submit_wait_us = clock - capture->requested_at;
     struct frame_sample sample = { .render = capture->render_pending,
                                   .submit = timing->copy_us,
                                   .submit_overhead = timing->calls_us - timing->copy_us,
@@ -660,10 +663,12 @@ void ui_perf_end(unsigned token)
         rows = core_get_data_pinned(rows_handle);
         rows_used = format_rows(capture, first, rows, rows_size);
     }
-    char summary[832], readiness[64] = "";
+    char summary[872], readiness[104] = "";
     if (capture->readiness_measured)
-        snprintf(readiness, sizeof(readiness), " ready_wait_us=%lu first_run=%u",
-                 (unsigned long)capture->ready_wait_us, capture->first_run ? 1u : 0u);
+        snprintf(readiness, sizeof(readiness), " ready_wait_us=%lu first_run=%u"
+                 " first_submit_wait_us=%lu",
+                 (unsigned long)capture->ready_wait_us, capture->first_run ? 1u : 0u,
+                 (unsigned long)capture->first_submit_wait_us);
     unsigned render_worst = as_frames(capture->worst_render, period_q8);
     const char *te = !capture->enabled ? "off" :
                      capture->measured ? "measured" : "nominal";

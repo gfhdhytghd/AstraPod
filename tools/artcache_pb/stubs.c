@@ -331,9 +331,10 @@ int ts_io_core(bs_io *io, struct ts_core_file *f, const char *path)
     return BS_ERR_IO;
 }
 
-void bg_task_post(struct bg_task *task, long id)
+bool bg_task_post(struct bg_task *task, long id)
 {
     (void)task; (void)id;
+    return false;
 }
 
 /* art_cache_check(), which the tool never calls: nothing is ever queued */

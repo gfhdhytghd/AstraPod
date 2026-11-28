@@ -382,6 +382,9 @@ int get_custom_action(int context,int timeout,
 /* Scope MENU to one step back in Now Playing's control-menu subtree. */
 bool action_set_menu_back(bool enabled);
 bool action_menu_back(void);
+/* While set, PLAY on a Fruit navigation page reaches the page, as
+ * ACTION_TREE_WPS, instead of toggling playback. */
+void action_set_page_play(bool page_play);
 
 /* Raw UI polling with the same LEFT/RIGHT ownership and global PLAY. */
 

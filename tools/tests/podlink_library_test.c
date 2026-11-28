@@ -315,6 +315,7 @@ int main(int argc, char **argv)
     mkdir(REC_BASE_DIR);
     check_sample("/iPod_Control/Music/F00/profile sample.flac");
     check_sample(REC_BASE_DIR "/PodLink-0001.wav");
+    check_sample(ROCKBOX_DIR "/crash-native.txt");
     command("MS3 STREAM SAMPLE /outside.flac");
     assert(!strcmp(reply, "MS3 ERR sample path"));
     command("MS3 STREAM SAMPLE /Music/PodLink/../outside.flac");

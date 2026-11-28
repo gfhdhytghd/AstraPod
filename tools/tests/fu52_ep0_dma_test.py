@@ -28,6 +28,11 @@ def fn(text, name):
     return text[m.start():end]
 
 
+# Use the device init's exact DAINTMSK setup against the real register map.
+mask_end = dw.index("    usb_endpoints = DWC_DAINTMSK;")
+mask_start = dw.rindex("    /*", 0, mask_end)
+mask_setup = dw[mask_start:mask_end + len("    usb_endpoints = DWC_DAINTMSK;")]
+
 decls = dw[dw.index('#define USB_DW_NUM_DIRS'):dw.index('static uint32_t usb_endpoints;')]
 names = ['complete_transfer', 'usb_dw_get_ep', 'usb_dw_maxpktsize', 'usb_dw_maxxfersize',
          'usb_dw_calc_packets', 'usb_dw_check_dma', 'usb_dw_epstart', 'usb_dw_transfer',
@@ -261,8 +266,21 @@ static void guard(void)
     CHECK(panics == 0 && DWC_DOEPDMA(1) == (uint32_t)(uintptr_t)ok);
 }
 
+static void test_endpoint_irq_mask(void)
+{
+    uint32_t usb_endpoints;
+''' + mask_setup + r'''
+    /* S5L8702 has hardware status bits above its last serviced endpoint. */
+    DWC_DAINT = (1u << 8) | (1u << 23);
+    assert(!(DWC_DAINT & DWC_DAINTMSK));
+    DWC_DAINT = 1u | (1u << 22);
+    assert((DWC_DAINT & DWC_DAINTMSK) == DWC_DAINT);
+    assert(usb_endpoints == DWC_DAINTMSK);
+}
+
 int main(void)
 {
+    test_endpoint_irq_mask();
     ep0_buffer = &_ep0_buffer[0];
     usb_dw_get_ep(0, USB_DW_EPDIR_OUT)->active = true;
     usb_dw_ep0_recv();

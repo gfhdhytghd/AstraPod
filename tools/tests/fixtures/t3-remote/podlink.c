@@ -18,6 +18,9 @@
 
 static int wire = -1;
 static bool foreground;
+static bool connected = true;
+static bool busy;
+static uint32_t generation = 1;
 static void (*background_receive)(const struct podlink_message *);
 static const struct podlink_resident *resident;
 
@@ -31,10 +34,10 @@ int t3_test_start(void)
     return GO_TO_AGENTS;
 }
 
-bool podlink_host_connected(void) { return wire >= 0; }
-uint32_t podlink_generation(void) { return 1; }
+bool podlink_host_connected(void) { return wire >= 0 && connected; }
+uint32_t podlink_generation(void) { return generation; }
 enum podlink_connection podlink_state(void)
-{ return wire >= 0 ? PODLINK_CONNECTED : PODLINK_WAIT_USB; }
+{ return podlink_host_connected() ? PODLINK_CONNECTED : PODLINK_WAIT_USB; }
 bool podlink_open(void) { return wire >= 0; }
 bool podlink_open_agents(void (*cb)(const struct podlink_message *))
 {
@@ -52,6 +55,8 @@ int podlink_send(unsigned int type, const void *data, unsigned int length)
 {
     if (wire < 0 || type != PODLINK_TEXT)
         return PODLINK_INVALID;
+    if (!connected || busy)
+        return PODLINK_BUSY;
     return send(wire, data, length, MSG_DONTWAIT | MSG_NOSIGNAL) == (int)length ?
         PODLINK_SENT : PODLINK_BUSY;
 }
@@ -64,6 +69,16 @@ int podlink_poll(struct podlink_message *m)
     int size = recv(wire, text, sizeof text, MSG_DONTWAIT);
     if (size <= 0)
         return 0;
+    if (size == 2 && text[0] == '!')
+    {
+        switch (text[1])
+        {
+            case 'b': busy = true; break;
+            case 'd': connected = false; generation++; break;
+            case 'r': connected = true; busy = false; generation++; break;
+        }
+        return 0;
+    }
     *m = (struct podlink_message){.type = PODLINK_TEXT, .length = size, .data = text};
     return 1;
 }
@@ -108,7 +123,7 @@ void t3_test_observe(const char *state)
     char line[512];
     int size = snprintf(line, sizeof line, ":%s", state);
     assert(size > 0 && size < (int)sizeof line);
-    assert(podlink_send(PODLINK_TEXT, line, size) == PODLINK_SENT);
+    assert(send(wire, line, size, MSG_DONTWAIT | MSG_NOSIGNAL) == size);
 }
 
 void t3_test_media(long action)

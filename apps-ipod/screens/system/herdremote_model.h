@@ -133,6 +133,7 @@ struct hr_event {
 
 struct hr_model {
     bool hello;             /* the daemon has introduced itself */
+    bool tick_seen;         /* at least one heartbeat from this session */
     bool herdr_ok;
     bool t3_health_known;   /* the last tick carried T3 health */
     bool t3_ok;
@@ -181,6 +182,8 @@ int hr_detail_scroll(int position, int old_max, int new_max);
 int hr_model_apply(struct hr_model *m, const char *data, unsigned int length);
 
 void hr_model_reset(struct hr_model *m);
+/* Keep browsable rows and detail, but invalidate the old session's controls. */
+void hr_model_link_lost(struct hr_model *m);
 
 /* The question an agent pane is asking, or NULL */
 const struct hr_question *hr_model_question_for(const struct hr_model *m,

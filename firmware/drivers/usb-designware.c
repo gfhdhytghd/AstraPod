@@ -1581,8 +1581,10 @@ static void usb_dw_init(void)
     DWC_DOEPMSK = STUP|XFRC;
     DWC_DIEPMSK = TOC|XFRC;
 
-    /* Unmask all available endpoints */
-    DWC_DAINTMSK = 0xffffffff;
+    /* An unhandled endpoint can keep IEPINT/OEPINT asserted. Only unmask
+     * endpoints that usb_dw_irq() can acknowledge. */
+    const uint32_t ep_mask = (1u << USB_NUM_ENDPOINTS) - 1;
+    DWC_DAINTMSK = ep_mask | (ep_mask << 16);
     usb_endpoints = DWC_DAINTMSK;
 
     uint32_t gintmsk = USBRST|ENUMDNE|IEPINT|OEPINT;

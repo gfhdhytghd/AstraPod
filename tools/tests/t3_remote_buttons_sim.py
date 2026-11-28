@@ -7,6 +7,7 @@ by the fixture. SDL uses the dummy video and audio drivers throughout.
 """
 import argparse
 from dataclasses import dataclass
+import mmap
 import os
 from pathlib import Path
 import select
@@ -16,7 +17,9 @@ import subprocess
 import time
 import wave
 
+from PIL import Image
 from ui_quickscreen_sim import ULTRA_FALLBACK_THEME
+from ui_stock_transitions_sim import HEADER, RING, STATE, WORD, PIXELS
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parent / "fixtures/t3-remote"
@@ -99,7 +102,7 @@ def build_simulator(output, jobs):
     return build / "rockboxui"
 
 
-THEMES = ("classic", "scrim", "fruit-company", "fruit-company-ultra")
+THEMES = ("classic", "scrim", "light", "fruit-company", "fruit-company-ultra")
 PROJECTS = "W\t1\n#\tT3\nt3p1\tf\t1\t0\t0\t1\tFixture project"
 TABS = "T\tt3p1\t2\t0\tactive\tActive\tw\nT\tt3p1\t2\t1\tall\tAll\tw"
 THREAD = "t3t1\tcodex\tw\t0\tFixture thread\tgpt · main\tWorking on tests"
@@ -165,7 +168,7 @@ class State:
 
 
 class Player:
-    def __init__(self, binary, directory, disk):
+    def __init__(self, binary, directory, disk, frame_state=None):
         self.binary = binary
         self.directory = directory
         self.disk = disk
@@ -174,6 +177,7 @@ class Player:
         self.tick = ""
         self.tick_at = 0
         self.respond = True
+        self.frame_state = frame_state
 
     def __enter__(self):
         self.peer, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -181,6 +185,8 @@ class Player:
         self.trace = (self.directory / "wire.log").open("w", buffering=1)
         env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy",
                    SDL_RENDER_DRIVER="software", T3_TEST_FD=str(child.fileno()))
+        if self.frame_state is not None:
+            env["PODBOX_UI_WALK_STATE"] = str(self.frame_state)
         try:
             self.process = subprocess.Popen([
                 str(self.binary), "--root", str(self.disk), "--nobackground",
@@ -222,7 +228,7 @@ class Player:
         fields = message.split("\t")
         self.messages.append(fields)
         key = fields[0]
-        if key in (":classic", ":scrim", ":fruit-company", ":fruit-company-ultra"):
+        if key.startswith(":") and key[1:] in THEMES:
             fields[0] = key[1:]
             self.state = State.decode(fields)
         elif not self.respond:
@@ -564,6 +570,67 @@ def run_outage(binary, output, resources):
     return "T3 wheel, BUSY, heartbeat stall, session loss and resubscribe PASS"
 
 
+def working_badges(image):
+    """Find the uniform green 7x7 working dot in the header and pill area."""
+    pixels = image.load()
+    dots = []
+    widths = (3, 5, 7, 7, 7, 5, 3)
+    for y in range(29):
+        for x in range(314):
+            color = pixels[x + 2, y]
+            red, green, blue = color
+            if green < max(red, blue) + 24 or pixels[x, y] == color:
+                continue
+            if all(pixels[x + dx, y + dy] == color
+                   for dy, width in enumerate(widths)
+                   for dx in range((7 - width) // 2, (7 + width) // 2)):
+                dots.append((x, y))
+    return dots
+
+
+def run_wps_badge(binary, output, resources, theme):
+    directory = output / theme
+    directory.mkdir()
+    disk = prepare_disk(directory, binary.parent, resources, theme)
+    state_path = directory / "frames.bin"
+    with state_path.open("w+b") as file:
+        file.truncate(STATE)
+        with mmap.mmap(file.fileno(), STATE, access=mmap.ACCESS_READ) as state, \
+                Player(binary, directory, disk, state_path) as player:
+            player.expect_wire(0, "tc", "2")
+            player.expect(lambda: player.state and player.state.theme == theme and
+                          player.state.rows > 0 and not player.state.issue,
+                          "working project is visible")
+            player.chord("wps")
+            player.wait(2.0)
+            seen = 0
+            captures = 0
+            max_dots = []
+            image = None
+            for _ in range(20):
+                player.wait(.05)
+                _, seq, _ = HEADER.unpack_from(state)
+                if not seq or seq == seen:
+                    continue
+                start = HEADER.size + ((seq - 1) % RING) * (WORD.size + PIXELS)
+                raw = bytes(state[start + WORD.size:start + WORD.size + PIXELS])
+                if WORD.unpack_from(state, start)[0] != seq:
+                    continue
+                seen = seq
+                captures += 1
+                frame = Image.frombytes("RGB", (320, 240), raw)
+                dots = working_badges(frame)
+                if image is None or len(dots) > len(max_dots):
+                    image, max_dots = frame, dots
+    assert captures >= 2, (theme, "missing WPS frames", captures)
+    image.save(directory / "now-playing.png")
+    # Scrim and Light use a WPS layout without a status tray.
+    expected = int(theme not in ("scrim", "light"))
+    assert len(max_dots) == expected and all(x >= 160 for x, _ in max_dots), (
+        theme, "expected working dots in the WPS tray", expected, max_dots)
+    return f"{theme}: WPS working badge count {expected} PASS"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
@@ -572,6 +639,7 @@ def main():
     parser.add_argument("--simulator", type=Path, help="reuse an instrumented binary from a previous run")
     parser.add_argument("--theme", choices=THEMES, action="append")
     parser.add_argument("--outage", action="store_true")
+    parser.add_argument("--wps-badge", action="store_true")
     args = parser.parse_args()
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
@@ -579,8 +647,9 @@ def main():
     if args.outage:
         print(run_outage(binary, args.output, args.resources.resolve()), flush=True)
         return
+    run = run_wps_badge if args.wps_badge else run_theme
     for theme in args.theme or THEMES:
-        print(run_theme(binary, args.output, args.resources.resolve(), theme), flush=True)
+        print(run(binary, args.output, args.resources.resolve(), theme), flush=True)
 
 
 if __name__ == "__main__":

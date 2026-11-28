@@ -367,19 +367,12 @@ void agents_background_draw_badge(struct viewport *clip, struct agents_badge bad
 
 /* The LCD driver copies the updated rectangle before returning. Keep the
  * underlay intact for retained pages, transitions, and subsequent draws. */
-struct overlay_part {
-    struct ui_dirty_rect bounds;
-    fb_data *pixels;
-};
-
 static int overlay_handle;
 static fb_data *overlay_pixels;
-static struct overlay_part banner_pixels, badge_pixels;
-static struct ui_dirty_rect previous_banner, previous_badge;
+static struct ui_dirty_rect previous_banner;
 static int title_font = -1, body_font = -1;
 static unsigned font_generation, previous_palette;
 static uint32_t previous_serial;
-static struct agents_badge previous_status;
 
 static void union_damage(struct ui_dirty_rect *damage, struct ui_dirty_rect rect)
 {
@@ -398,16 +391,14 @@ static void union_damage(struct ui_dirty_rect *damage, struct ui_dirty_rect rect
     damage->h = bottom - damage->y;
 }
 
-static void copy_pixels(struct overlay_part *part, bool save)
+static void copy_banner_pixels(bool save)
 {
-    struct ui_dirty_rect b = part->bounds;
-    if (!part->pixels)
-        return;
+    struct ui_dirty_rect b = previous_banner;
     fb_data *base = lcd_framebuffer_default.fb_ptr;
     for (int i = 0; i < b.h; ++i)
     {
         fb_data *cell = base + (b.y + i) * LCD_WIDTH + b.x;
-        fb_data *copy = part->pixels + i * b.w;
+        fb_data *copy = overlay_pixels + i * b.w;
         memcpy(save ? copy : cell, save ? cell : copy, b.w * sizeof(fb_data));
     }
 }
@@ -524,29 +515,6 @@ static void paint_banner(struct ui_dirty_rect b, const struct toast *event,
     lcd_set_viewport(old);
 }
 
-static void paint_wps_badge(struct ui_dirty_rect b, const struct ui_theme *theme,
-                            const struct ui_album_palette *palette, struct agents_badge badge)
-{
-    struct viewport vp = {0};
-    viewport_set_fullscreen(&vp, SCREEN_MAIN);
-    vp.x = b.x;
-    vp.y = b.y;
-    vp.width = b.w;
-    vp.height = b.h;
-    vp.drawmode = DRMODE_FG;
-    unsigned bg = theme_color(theme, UI_COLOR_STATUS_BG, palette);
-    struct viewport *old = lcd_set_viewport(&vp);
-    vp.fg_pattern = bg;
-    struct screen *screen = &screens[SCREEN_MAIN];
-    fill_round_rect(screen, 0, 0, b.w, b.h, b.h / 2);
-    vp.fg_pattern = badge_color(badge.kind);
-    draw_round_rect(screen, 0, 0, b.w, b.h, b.h / 2, 1);
-    int width = agents_background_badge_width(badge) - 6;
-    agents_background_draw_badge(&vp, badge, b.x + (b.w - width) / 2, b.y + 5,
-                                overlay_font(body_font), bg);
-    lcd_set_viewport(old);
-}
-
 static void unload_overlay_fonts(void)
 {
     if (title_font >= 0)
@@ -566,20 +534,18 @@ void agents_background_overlay(struct ui_dirty_rect *damage, bool cover_ready)
 {
     bool wps = native_wps_active();
     bool can_draw = eligible(cover_ready, wps);
-    struct agents_badge badge = wps && can_draw ?
-                                agents_background_badge() : (struct agents_badge){0};
     int irq = disable_irq_save();
     bool has_event = can_draw && latest.kind &&
                      (!toast_started || TIME_BEFORE(current_tick, toast_ends));
     restore_irq(irq);
 
-    if ((has_event || badge.kind) && overlay_handle <= 0)
-        overlay_handle = core_alloc_free_space((TOAST_W * TOAST_H + 38 * 17) *
+    if (has_event && overlay_handle <= 0)
+        overlay_handle = core_alloc_free_space(TOAST_W * TOAST_H *
                                                 sizeof(fb_data));
     if (overlay_handle <= 0)
         return;
 
-    struct ui_dirty_rect banner = {0}, pill = {0};
+    struct ui_dirty_rect banner = {0};
     struct toast event = {0};
     bool up = false;
     irq = disable_irq_save();
@@ -605,45 +571,28 @@ void agents_background_overlay(struct ui_dirty_rect *damage, bool cover_ready)
             banner = (struct ui_dirty_rect){8, up ? 26 : LCD_HEIGHT - 6 - height,
                                             TOAST_W, height};
     }
-    if (badge.kind)
-        pill = (struct ui_dirty_rect){36, 5, 38, 17};
-
     unsigned generation = ui_theme_generation();
     unsigned palette_generation = album_palette_generation();
     bool colors_changed = font_generation != generation ||
                           previous_palette != palette_generation;
     bool banner_changed = memcmp(&banner, &previous_banner, sizeof banner) ||
                           (banner.h && (previous_serial != serial || colors_changed));
-    bool pill_changed = memcmp(&pill, &previous_badge, sizeof pill) ||
-                        (pill.h && (memcmp(&badge, &previous_status, sizeof badge) ||
-                                    colors_changed));
     if (banner_changed)
     {
         union_damage(damage, previous_banner);
         union_damage(damage, banner);
     }
-    if (pill_changed)
-    {
-        union_damage(damage, previous_badge);
-        union_damage(damage, pill);
-    }
     previous_banner = banner;
-    previous_badge = pill;
     previous_serial = serial;
-    previous_status = badge;
     previous_palette = palette_generation;
 
-    if (!has_event && !badge.kind)
+    if (!has_event)
     {
         overlay_handle = core_free(overlay_handle);
         unload_overlay_fonts();
         return;
     }
-    /* Dirty rectangles coalesce to one transfer, which can include an
-     * otherwise unchanged overlay between two changed regions. */
-    bool draw_banner = intersects(*damage, banner);
-    bool draw_badge = intersects(*damage, pill);
-    if (!draw_banner && !draw_badge)
+    if (!intersects(*damage, banner))
         return;
 
     struct ui_theme theme;
@@ -659,28 +608,16 @@ void agents_background_overlay(struct ui_dirty_rect *damage, bool cover_ready)
     }
 
     overlay_pixels = core_get_data_pinned(overlay_handle);
-    if (draw_banner)
-    {
-        banner_pixels = (struct overlay_part){banner, overlay_pixels};
-        copy_pixels(&banner_pixels, true);
-        paint_banner(banner, &event, &theme, &palette, up);
-        shown_serial = serial;
-    }
-    if (draw_badge)
-    {
-        badge_pixels = (struct overlay_part){pill, overlay_pixels + TOAST_W * TOAST_H};
-        copy_pixels(&badge_pixels, true);
-        paint_wps_badge(pill, &theme, &palette, badge);
-    }
+    copy_banner_pixels(true);
+    paint_banner(banner, &event, &theme, &palette, up);
+    shown_serial = serial;
 }
 
 void agents_background_restore(void)
 {
     if (!overlay_pixels)
         return;
-    copy_pixels(&badge_pixels, false);
-    copy_pixels(&banner_pixels, false);
-    badge_pixels.pixels = banner_pixels.pixels = NULL;
+    copy_banner_pixels(false);
     core_put_data_pinned(overlay_pixels);
     overlay_pixels = NULL;
 }

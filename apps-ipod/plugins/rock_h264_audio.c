@@ -5,6 +5,7 @@
 #include "audio/codec_thread.h"
 #include "codecs.h"
 #include "kernel.h"
+#include "pcm.h"
 #include "pcm_mixer.h"
 #include "pcm_sampr.h"
 #include "plugins/rock_h264_audio.h"
@@ -31,6 +32,7 @@ static unsigned int capacity, front, used;
 static uint32_t elapsed_frames, base_ms, rate, saved_rate;
 /* The mixer has one DMA block playing and one block prepared ahead of it. */
 static unsigned int pending, playing;
+static uint32_t underrun_frames, dma_base;
 
 static bool current_output(void)
 {
@@ -59,6 +61,7 @@ static void next_pcm(const void **start, size_t *size)
     elapsed_frames += playing;
     playing = pending;
     pending = frames;
+    underrun_frames += MIX_FRAME_SAMPLES - frames;
     *start = output;
     *size = sizeof(output);
 }
@@ -109,6 +112,8 @@ static bool video_open(void *buffer, size_t bytes, uint32_t frequency)
         capacity = bytes / 4;
         front = used = elapsed_frames = pending = playing = base_ms = 0;
         rate = frequency;
+        underrun_frames = 0;
+        dma_base = pcm_builtin_dma_bytes();
         play();
         pcm_play_unlock();
     }
@@ -241,6 +246,24 @@ static uint32_t video_clock(void)
     return ms;
 }
 
+static bool video_progress(struct rock_h264_audio_progress *progress)
+{
+    pcm_play_lock();
+    bool active = queue && current_output();
+    if (active)
+        *progress = (struct rock_h264_audio_progress){
+            .media_base_ms = base_ms,
+            .rate = rate,
+            .delivered = elapsed_frames + playing + pending,
+            .completed = elapsed_frames,
+            .dma_frames = (pcm_builtin_dma_bytes() - dma_base) / 4,
+            .underrun_frames = underrun_frames,
+            .queued = used,
+        };
+    pcm_play_unlock();
+    return active;
+}
+
 static bool video_pause(bool paused)
 {
     mutex_lock(&lease);
@@ -263,6 +286,8 @@ static bool video_seek(uint32_t ms)
         mixer_discard_plugin_prefetch();
         front = used = elapsed_frames = pending = playing = 0;
         base_ms = ms;
+        underrun_frames = 0;
+        dma_base = pcm_builtin_dma_bytes();
         play();
         pcm_play_unlock();
     }
@@ -334,4 +359,5 @@ const struct rock_h264_audio_api rock_h264_audio_api = {
     .pause = video_pause,
     .seek = video_seek,
     .close = video_close,
+    .progress = video_progress,
 };

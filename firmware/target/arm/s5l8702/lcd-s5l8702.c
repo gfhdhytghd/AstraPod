@@ -27,6 +27,7 @@
 #include "system.h"
 #include "cpu.h"
 #include "lcd.h"
+#include "hw_h264.h"
 #ifdef IPOD_6G
 #include "pmu-target.h"
 #ifndef BOOTLOADER
@@ -166,6 +167,7 @@ static struct dmac_lli volatile \
 static uint16_t lcd_second_stage[LCD_HEIGHT * LCD_WIDTH] CACHEALIGN_ATTR;
 static struct semaphore lcd_progress;
 static uint32_t lcd_dma_start_usec;
+static volatile uint32_t lcd_dma_complete_usec;
 static bool next_stage, lcd_async = true;
 static struct {
     uint16_t *pixels;
@@ -174,7 +176,9 @@ static struct {
 
 static void lcd_dma_done(void *data)
 {
-    uint32_t elapsed = USEC_TIMER - lcd_dma_start_usec;
+    uint32_t now = USEC_TIMER;
+    lcd_dma_complete_usec = now;
+    uint32_t elapsed = now - lcd_dma_start_usec;
     unsigned int size = (uintptr_t)data;
     if (size)
     {
@@ -893,13 +897,15 @@ extern void lcd_write_yuv420_lines(unsigned char const * const src[3],
                                    int width,
                                    int stride);
 
-/* Blit a YUV bitmap directly to the LCD */
-void lcd_blit_yuv(unsigned char * const src[3],
-                  int src_x, int src_y, int stride,
-                  int x, int y, int width, int height) ICODE_ATTR;
-void lcd_blit_yuv(unsigned char * const src[3],
-                  int src_x, int src_y, int stride,
-                  int x, int y, int width, int height)
+/* Blit a YUV bitmap directly to the LCD. */
+static void lcd_blit_yuv_internal(unsigned char *const src[3],
+                                  int src_x, int src_y, int stride,
+                                  int x, int y, int width, int height,
+                                  struct h264_lcd_timing *timing) ICODE_ATTR;
+static void lcd_blit_yuv_internal(unsigned char *const src[3],
+                                  int src_x, int src_y, int stride,
+                                  int x, int y, int width, int height,
+                                  struct h264_lcd_timing *timing)
 {
     unsigned int z;
     unsigned char const * yuv_src[3];
@@ -956,6 +962,8 @@ void lcd_blit_yuv(unsigned char * const src[3],
         if (lcd_te_supported())
         {
             commit_dcache_range(lcd_dblbuf[0], width * height * 2);
+            if (timing)
+                timing->submit_us = USEC_TIMER;
             displaylcd_submit(lcd_dblbuf[0], x, y, width, height, 0);
             displaylcd_wait_dma();
         }
@@ -963,12 +971,40 @@ void lcd_blit_yuv(unsigned char * const src[3],
 #endif
         {
             displaylcd_setup(x, y, width, height);
+            if (timing)
+                timing->submit_us = USEC_TIMER;
             displaylcd_dma(width, height);
+            if (timing)
+                displaylcd_wait_dma();
+        }
+        if (timing)
+        {
+#ifdef HAVE_LCD_TE_QUEUE
+            timing->complete_us = lcd_dma_complete_usec;
+#else
+            timing->complete_us = USEC_TIMER;
+#endif
+            timing->submitted = true;
         }
     }
     mutex_unlock(&lcd_mutex);
 }
 
+
+void lcd_blit_yuv(unsigned char *const src[3], int src_x, int src_y,
+                  int stride, int x, int y, int width, int height)
+{
+    lcd_blit_yuv_internal(src, src_x, src_y, stride, x, y, width, height, NULL);
+}
+
+#ifdef HAVE_LCD_TE_QUEUE
+void lcd_blit_video_timed(unsigned char *const planes[3],
+                          struct h264_lcd_timing *timing)
+{
+    lcd_blit_yuv_internal(planes, 0, 0, LCD_WIDTH, 0, 0,
+                          LCD_WIDTH, LCD_HEIGHT, timing);
+}
+#endif
 
 /*** hardware configuration ***/
 

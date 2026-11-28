@@ -9,6 +9,11 @@
 
 struct codec_api;
 
+struct rock_h264_audio_progress {
+    uint32_t media_base_ms, rate, delivered, completed, dma_frames;
+    uint32_t underrun_frames, queued;
+};
+
 struct rock_h264_audio_api {
     bool (*open)(void *pcm, size_t bytes, uint32_t rate);
     bool (*start)(void (*decode)(void));
@@ -20,6 +25,7 @@ struct rock_h264_audio_api {
     bool (*pause)(bool paused);
     bool (*seek)(uint32_t time_ms);
     void (*close)(void);
+    bool (*progress)(struct rock_h264_audio_progress *progress);
 };
 
 #ifdef HAVE_HW_H264

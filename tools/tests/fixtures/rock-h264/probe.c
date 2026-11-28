@@ -12,7 +12,7 @@ int video_h264_probe(const char *path, void *buffer, size_t size);
 
 enum mode { FINISH, SEEK_MENU, SCRUB_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR };
 static enum mode mode;
-static volatile long current_tick;
+volatile long current_tick;
 static unsigned int thread_id = 1;
 static unsigned int opens, closes, active, configured, decoded, drawn, seeks;
 static int open_files, boosted, backlight;
@@ -26,7 +26,7 @@ static bool exercise_controls;
 static bool saw_timeout;
 
 static unsigned audio_opens, audio_closes, audio_seeks;
-static bool audio_active;
+static bool audio_active, audio_paused;
 static uint32_t audio_ms;
 static long audio_tick;
 
@@ -43,16 +43,36 @@ int video_audio_init(const char *path, const struct mp4v_demux_res *demux,
     assert(buffer && bytes >= 65536);
     audio_opens++;
     audio_ms = 0;
+    audio_paused = false;
     return 0;
 }
 
 void video_audio_play(void) { audio_active = true; audio_tick = current_tick; }
-void video_audio_pause(void) { assert(audio_active); }
-void video_audio_resume(void) { assert(audio_active); }
+bool video_audio_ready(void) { return true; }
+void video_audio_output_pause(bool paused)
+{
+    if (paused)
+        audio_ms += (current_tick - audio_tick) * 1000 / HZ;
+    audio_paused = paused;
+    audio_tick = current_tick;
+}
+void video_audio_pause(void)
+{
+    video_audio_output_pause(true);
+}
+void video_audio_resume(void)
+{
+    assert(audio_active);
+    if (audio_paused)
+        audio_tick = current_tick;
+    audio_paused = false;
+}
 void video_audio_seek(uint32_t ms)
 {
-    assert(audio_active && ms > 0);
+    assert(ms > 0);
     audio_seeks++;
+    audio_active = true;
+    audio_paused = true;
     audio_ms = ms;
     audio_tick = current_tick;
 }
@@ -62,7 +82,7 @@ bool video_audio_failed(void) { return false; }
 static uint32_t audio_clock(void)
 {
     assert(audio_active);
-    return audio_ms + (current_tick - audio_tick) * 1000 / HZ;
+    return audio_ms + (audio_paused ? 0 : (current_tick - audio_tick) * 1000 / HZ);
 }
 static uint32_t audio_buffered(void) { return 0; }
 static const struct rock_h264_audio_api audio_api = {
@@ -71,6 +91,8 @@ static const struct rock_h264_audio_api audio_api = {
 };
 
 unsigned int thread_self(void) { return thread_id; }
+static unsigned int test_worker_id;
+bool rock_worker_owned(unsigned int id) { return id && id == test_worker_id; }
 
 static size_t size_for(int w, int h)
 {
@@ -84,6 +106,11 @@ static struct vpu_h264 *open_video(void *buffer, size_t size, int w, int h)
     opens++;
     active = 1;
     return buffer;
+}
+
+static uint32_t time_us(void)
+{
+    return current_tick * (1000000 / HZ);
 }
 
 static int configure(struct vpu_h264 *decoder, const uint8_t *avcc, int size)
@@ -121,7 +148,13 @@ static void close_video(struct vpu_h264 *v)
 }
 
 const struct hw_h264_api target_hw_h264_api = {
-    size_for, open_video, configure, decode, frame, close_video
+    .buf_size = size_for,
+    .open = open_video,
+    .configure = configure,
+    .decode_sample = decode,
+    .get_frame = frame,
+    .close = close_video,
+    .time_us = time_us,
 };
 
 static int open_file(const char *path, int flags, ...)
@@ -158,7 +191,7 @@ static off_t file_size(int fd)
 static int action(int context, int timeout)
 {
     assert(context == CONTEXT_VIDEO_PLAYBACK && timeout == TIMEOUT_NOBLOCK);
-    if (decoded < 4)
+    if (drawn < 4)
         return ACTION_NONE;
     if (exercise_controls)
     {
@@ -195,7 +228,7 @@ static int action(int context, int timeout)
             seeks++;
         return ACTION_WPS_VOLUP;
     }
-    if ((mode == SEEK_MENU || mode == SCRUB_MENU) && decoded >= 8 && !sent_menu)
+    if ((mode == SEEK_MENU || mode == SCRUB_MENU) && drawn >= 8 && !sent_menu)
     {
         sent_menu = true;
         return ACTION_WPS_MENU;

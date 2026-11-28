@@ -70,6 +70,8 @@ static void mixer_set_frequency(unsigned rate)
     assert(reserved && !mixer);
     mixer_rate = rate;
 }
+static uint32_t dma_bytes;
+static uint32_t pcm_builtin_dma_bytes(void) { return dma_bytes; }
 static void pcm_play_lock(void) { assert(!pcm_locked); pcm_locked = true; }
 static void pcm_play_unlock(void) { assert(pcm_locked); pcm_locked = false; }
 static void mixer_channel_stop(int channel)
@@ -195,7 +197,12 @@ int main(void)
     consume(129);
     /* Neither mixed block has left the PCM output pipeline. */
     assert(api->clock_ms() == 0 && api->buffered() == 160);
+    dma_bytes = 4 * 64;
     consume(257);
+    struct rock_h264_audio_progress progress;
+    assert(api->progress(&progress));
+    assert(progress.delivered == 160 && progress.completed == 64 &&
+           progress.dma_frames == 64 && progress.underrun_frames == 96);
     assert(api->clock_ms() == 1 && api->buffered() == 96);
     consume(0);
     assert(api->clock_ms() == 2 && api->buffered() == 32);

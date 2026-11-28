@@ -55,6 +55,10 @@ unsigned int pcm_sampr_type_rec_to_play(unsigned int samplerate);
 
 /* Reenterable locks for locking and unlocking the playback interrupt */
 void pcm_play_lock(void);
+#ifdef HAVE_HW_H264
+/* Monotonic built-in playback DMA byte cursor, modulo 2^32. */
+uint32_t pcm_builtin_dma_bytes(void);
+#endif
 void pcm_play_unlock(void);
 
 void pcm_init(void) INIT_ATTR;

@@ -44,5 +44,6 @@ int vpu_irq_wait(int timeout_ticks);
 
 /* Get STATUS1 value captured by ISR during last completion. */
 uint32_t vpu_irq_status1(void);
+uint32_t vpu_irq_complete_usec(void);
 
 #endif /* VPU_6G_H */

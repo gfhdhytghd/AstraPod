@@ -15,6 +15,7 @@ unsigned int rock_worker_start(void (*run)(void *), void *arg,
 unsigned int rock_mpeg_worker_start(void (*run)(void *), void *arg,
                                     void *stack, size_t bytes);
 bool rock_worker_stopping(void);
+bool rock_worker_owned(unsigned int id);
 bool rock_worker_join(unsigned int id);
 
 bool rock_timer_start(long cycles, void (*tick)(void *), void *arg);

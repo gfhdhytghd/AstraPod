@@ -23,7 +23,7 @@
  *
  * This is deliberately a narrow production contract: non-fragmented MP4/M4V,
  * the measured iTunes 9.2.1 Constrained Baseline syntax (Level 1.3 or 3.0,
- * one or two advertised reference pictures and ordered slices),
+ * up to four advertised reference pictures and ordered slices),
  * <= 640x480, <= 30 fps, with optional AAC-LC audio.
  *
  * Copyright (C) 2025-2026 David Cormier
@@ -63,11 +63,22 @@
 #define VIDEO_MAX_SAMPLES        400000u
 #define VIDEO_MAX_AUDIO_SAMPLES  600000u
 #define VIDEO_READ_BUFFER        (512u * 1024u)
-#define VIDEO_FRAME_BUFFER       (VIDEO_MAX_WIDTH * VIDEO_MAX_HEIGHT * 3u / 2u)
 #define VIDEO_OUTPUT_BUFFER      (LCD_WIDTH * LCD_HEIGHT * 3u / 2u)
 #define VIDEO_PCM_BUFFER         (256u * 1024u)
-#define VIDEO_SYNC_RECOVERY_MS   250
-#define VIDEO_DECODE_LEAD_MS     100
+#define VIDEO_QUEUE_DEPTH        3
+#define VIDEO_PRESENT_LATE_MS   33
+#define VIDEO_CATCH_UP_MS        160
+#define VIDEO_CATCH_UP_LEAD_MS   240
+#define VIDEO_CATCH_UP_RETRY_MS  50
+#ifdef VIDEO_ROCK_WORKER
+#ifdef DEFAULT_STACK_SIZE
+#define VIDEO_WORKER_STACK      MAX(12u * 1024u, DEFAULT_STACK_SIZE)
+#else
+#define VIDEO_WORKER_STACK      (12u * 1024u)
+#endif
+#else
+#define VIDEO_WORKER_STACK      0
+#endif
 #define VIDEO_OSD_SHOW_TICKS     (HZ * 4)
 #define VIDEO_RESUME_MAGIC       0x48323634u
 #define VIDEO_RESUME_FILE        PLUGIN_APPS_DATA_DIR \
@@ -98,6 +109,8 @@ struct video_osd
 {
     const struct video_play_options *options;
     const char *title;
+    volatile bool *decode_paused;
+    volatile bool *decode_busy;
     enum video_overlay mode;
     long until;
     long seek_until;
@@ -126,18 +139,67 @@ struct video_frame
     int height;
 };
 
+enum video_stage
+{
+    STAGE_READ, STAGE_DECODE, STAGE_VPU_PREP, STAGE_VPU_P, STAGE_VPU_I,
+    STAGE_SCALE, STAGE_SCALE_OSD, STAGE_LCD_PREP, STAGE_LCD_PREP_OSD,
+    STAGE_LCD, STAGE_LCD_OSD, STAGE_PRESENT,
+    STAGE_COUNT,
+};
+
+#define VIDEO_HIST_BINS 64
+
+struct video_latency
+{
+    uint32_t sum, max;
+    unsigned int count;
+    uint16_t bins[VIDEO_HIST_BINS];
+};
+
 struct video_sync_stats
 {
-    unsigned decoded, shown, dropped;
-    unsigned decode_ticks, max_ticks;
+    struct video_latency latency[STAGE_COUNT];
+    unsigned int decoded, shown, late_enqueue, late_present, skipped_to_idr;
+    unsigned int timeouts, status_failures, queue_peak, queue_empty;
+    uint32_t max_frame_age;
     long report_at;
     bool reported;
 };
+
+static struct video_sync_stats stats;
+
+static bool video_enqueue_late(bool grace, uint32_t pts, uint32_t clock)
+{
+    return !grace && pts < clock;
+}
+
+static uint32_t video_time_us(void)
+{
+    return rb->hw_h264->time_us ? rb->hw_h264->time_us() :
+           (uint32_t)*rb->current_tick * (1000000 / HZ);
+}
+
+static void video_measure(enum video_stage stage, uint32_t elapsed)
+{
+#ifdef VIDEO_SYNC_LOG
+    struct video_latency *latency = &stats.latency[stage];
+    /* 1 ms buckets. The overflow bucket reports the observed maximum. */
+    unsigned int bin = MIN(elapsed / 1000, VIDEO_HIST_BINS - 1);
+    latency->bins[bin]++;
+    latency->count++;
+    latency->sum += elapsed;
+    latency->max = MAX(latency->max, elapsed);
+#else
+    (void)stage;
+    (void)elapsed;
+#endif
+}
 
 struct video_timing
 {
     uint32_t run;
     uint32_t in_run;
+    uint32_t ctts_run, ctts_in_run;
     uint64_t ticks;
 };
 
@@ -195,15 +257,50 @@ static bool video_tables_sane(const struct mp4v_demux_res *demux)
         if (timed_samples > demux->num_samples)
             return false;
     }
-    return timed_samples == demux->num_samples;
+    if (timed_samples != demux->num_samples)
+        return false;
+
+    /* The Baseline decoder emits its pictures in decode order. Check that
+     * composition offsets preserve order at every CTTS run boundary. */
+    uint32_t samples = 0, run = 0, stts_end = demux->stts[0].sample_count;
+    int64_t previous = 0;
+    for (i = 0; i < demux->num_ctts; i++)
+    {
+        const struct mp4v_ctts_entry *entry = &demux->ctts[i];
+        if (!entry->sample_count ||
+            entry->sample_count > demux->num_samples - samples)
+            return false;
+        while (samples > stts_end)
+            stts_end += demux->stts[++run].sample_count;
+        if (samples && entry->offset - previous <
+            -(int64_t)demux->stts[run].sample_delta)
+            return false;
+        samples += entry->sample_count;
+        previous = entry->offset;
+    }
+    return !demux->num_ctts || samples == demux->num_samples;
+}
+
+static int64_t video_pts_ticks(const struct mp4v_demux_res *demux,
+                               const struct video_timing *timing)
+{
+    return (int64_t)timing->ticks + (timing->ctts_run < demux->num_ctts ?
+           demux->ctts[timing->ctts_run].offset : 0);
 }
 
 static uint32_t video_pts_ms(const struct mp4v_demux_res *demux,
                              const struct video_timing *timing)
 {
-    if (demux->timescale == 0)
-        return 0;
-    return (uint32_t)(timing->ticks * 1000u / demux->timescale);
+    int64_t ticks = video_pts_ticks(demux, timing);
+    uint32_t leading = 0;
+    if (demux->video_edit.present)
+    {
+        ticks -= demux->video_edit.media_start;
+        leading = mp4v_ticks_to_ms(demux->video_edit.leading,
+                                    demux->movie_timescale);
+    }
+    uint32_t ms = mp4v_ticks_to_ms(MAX(ticks, 0), demux->timescale);
+    return leading + MIN(ms, UINT32_MAX - leading);
 }
 
 static void video_timing_advance(const struct mp4v_demux_res *demux,
@@ -216,20 +313,17 @@ static void video_timing_advance(const struct mp4v_demux_res *demux,
     entry = &demux->stts[timing->run];
     timing->ticks += entry->sample_delta;
     timing->in_run++;
+    if (timing->ctts_run < demux->num_ctts &&
+        ++timing->ctts_in_run == demux->ctts[timing->ctts_run].sample_count)
+    {
+        timing->ctts_run++;
+        timing->ctts_in_run = 0;
+    }
     if (timing->in_run >= entry->sample_count)
     {
         timing->run++;
         timing->in_run = 0;
     }
-}
-
-/* Convert accumulated STTS ticks only at the comparison with the clock. */
-static uint32_t video_end_pts(const struct mp4v_demux_res *movie,
-                              const struct video_timing *timing)
-{
-    struct video_timing next = *timing;
-    video_timing_advance(movie, &next);
-    return video_pts_ms(movie, &next);
 }
 
 static uint32_t video_clock_ms(bool audio_master, long start_tick)
@@ -239,60 +333,86 @@ static uint32_t video_clock_ms(bool audio_master, long start_tick)
                    (*rb->current_tick - start_tick) * 1000 / HZ);
 }
 
-/* Leave parameter sets, IDRs and every referenced picture in the decoder's
- * input. A malformed sample still goes to the decoder's normal error path. */
-static bool video_disposable_sample(const uint8_t *data, size_t size,
-                                    unsigned length_bytes)
+#ifdef VIDEO_SYNC_LOG
+static unsigned int video_p95(const struct video_latency *latency)
 {
-    bool slice = false;
-    while (size > length_bytes)
+    unsigned int rank = (latency->count * 95 + 99) / 100;
+    unsigned int count = 0;
+
+    if (!rank)
+        return 0;
+    for (unsigned int i = 0; i < VIDEO_HIST_BINS - 1; i++)
     {
-        uint32_t length = 0;
-        for (unsigned i = 0; i < length_bytes; ++i)
-            length = (length << 8) | *data++;
-        size -= length_bytes;
-        if (!length || length > size)
-            return false;
-
-        unsigned nal = data[0];
-        unsigned type = nal & 31;
-        if (type == 1 && !(nal & 0xe0))
-            slice = true;
-        else if (type != 6 && type != 9 && type != 12)
-            return false;
-
-        size -= length;
-        data += length;
+        count += latency->bins[i];
+        if (count >= rank)
+            return MIN(latency->max, (i + 1) * 1000 - 1);
     }
-    return slice && !size;
+    return latency->max;
 }
 
-#ifdef VIDEO_SYNC_LOG
-static void video_sync_log(struct video_sync_stats *stats, uint32_t media,
-                           uint32_t audio, uint32_t shown)
+static void video_sync_log(uint32_t media, uint32_t audio, uint32_t shown,
+                           unsigned int fill, bool force)
 {
     long now = *rb->current_tick;
-    if (TIME_BEFORE(now, stats->report_at))
+    if (!force && TIME_BEFORE(now, stats.report_at))
         return;
 
+    /* Both video threads run on the foreground core. Copy the window
+     * before file I/O can let the decode worker run. */
+    static struct video_sync_stats window;
+    window = stats;
+    rb->memset(&stats, 0, sizeof(stats));
+    stats.report_at = now + 10 * HZ;
+    stats.reported = window.reported;
+#ifdef VIDEO_ROCK_WORKER
+    struct rock_h264_audio_progress pcm;
+    bool have_pcm = rb->h264_audio && rb->h264_audio->progress &&
+                    rb->h264_audio->progress(&pcm);
+#endif
     int fd = rb->open(VIDEO_SYNC_LOG, O_WRONLY | O_CREAT |
-                      (stats->reported ? O_APPEND : O_TRUNC), 0666);
-    if (fd >= 0)
+                      (stats.reported ? O_APPEND : O_TRUNC), 0666);
+    if (fd < 0)
+        return;
+
+    static const char *const names[] = {
+        "read", "decode", "vpu_prep", "vpu_p", "vpu_i", "scale",
+        "scale_osd", "lcd_prep", "lcd_prep_osd", "lcd", "lcd_osd",
+        "present_error",
+    };
+    rb->fdprintf(fd, "media_ms=%u audio_ms=%u shown_pts_ms=%u "
+                 "offset_ms=%d decoded=%u shown=%u dropped=%u "
+                 "late_enqueue=%u late_present=%u skipped_to_idr=%u "
+                 "vpu_timeouts=%u vpu_status_failures=%u "
+                 "queue=%u/%u peak=%u empty_polls=%u max_frame_age_ms=%u\n",
+                 (unsigned)media, (unsigned)audio, (unsigned)shown,
+                 (int)(audio - shown), window.decoded, window.shown,
+                 window.late_enqueue + window.late_present +
+                 window.skipped_to_idr, window.late_enqueue,
+                 window.late_present, window.skipped_to_idr,
+                 window.timeouts, window.status_failures,
+                 fill, VIDEO_QUEUE_DEPTH, window.queue_peak,
+                 window.queue_empty, (unsigned)window.max_frame_age);
+    for (unsigned int i = 0; i < STAGE_COUNT; i++)
     {
-        unsigned avg = stats->decoded ? (unsigned)
-            ((uint64_t)stats->decode_ticks * 1000 / HZ / stats->decoded) : 0;
-        rb->fdprintf(fd, "media_ms=%u audio_ms=%u shown_pts_ms=%u "
-                     "offset_ms=%d decoded=%u shown=%u dropped=%u "
-                     "decode_avg_ms=%u decode_max_ms=%u\n",
-                     (unsigned)media, (unsigned)audio, (unsigned)shown,
-                     (int)audio - (int)shown, stats->decoded, stats->shown,
-                     stats->dropped, avg, stats->max_ticks * 1000 / HZ);
-        rb->close(fd);
-        stats->reported = true;
+        const struct video_latency *stage = &window.latency[i];
+        if (stage->count)
+            rb->fdprintf(fd, "%s_us n=%u avg=%u p95=%u max=%u\n",
+                         names[i], stage->count,
+                         (unsigned)(stage->sum / stage->count),
+                         video_p95(stage), (unsigned)stage->max);
     }
-    stats->report_at = now + 10 * HZ;
-    stats->decoded = stats->shown = stats->dropped = 0;
-    stats->decode_ticks = stats->max_ticks = 0;
+#ifdef VIDEO_ROCK_WORKER
+    if (have_pcm)
+        rb->fdprintf(fd, "pcm_base_ms=%u rate=%u mix_content_frames=%u "
+                     "clock_content_frames=%u dma_total_frames=%u "
+                     "underrun_frames=%u pcm_queued_frames=%u\n",
+                     (unsigned)pcm.media_base_ms, (unsigned)pcm.rate,
+                     (unsigned)pcm.delivered, (unsigned)pcm.completed,
+                     (unsigned)pcm.dma_frames, (unsigned)pcm.underrun_frames,
+                     (unsigned)pcm.queued);
+#endif
+    rb->close(fd);
+    stats.reported = true;
 }
 #endif
 
@@ -301,12 +421,21 @@ static uint32_t video_duration_ms(const struct mp4v_demux_res *demux)
     uint64_t ticks = 0;
     uint32_t i;
 
-    if (demux->timescale == 0)
-        return 0;
+    if (demux->video_edit.present)
+    {
+        if (demux->video_edit.duration > UINT64_MAX - demux->video_edit.leading)
+            return 0;
+        return mp4v_ticks_to_ms(demux->video_edit.leading +
+                               demux->video_edit.duration,
+                               demux->movie_timescale);
+    }
     for (i = 0; i < demux->num_stts; i++)
         ticks += (uint64_t)demux->stts[i].sample_count *
                  demux->stts[i].sample_delta;
-    return (uint32_t)(ticks * 1000u / demux->timescale);
+    int64_t end = ticks;
+    if (demux->num_ctts)
+        end += demux->ctts[demux->num_ctts - 1].offset;
+    return mp4v_ticks_to_ms(MAX(end, 0), demux->timescale);
 }
 
 static void video_timing_for_sample(const struct mp4v_demux_res *demux,
@@ -316,6 +445,18 @@ static void video_timing_for_sample(const struct mp4v_demux_res *demux,
     uint32_t remaining = sample;
 
     rb->memset(timing, 0, sizeof(*timing));
+    while (timing->ctts_run < demux->num_ctts)
+    {
+        uint32_t count = demux->ctts[timing->ctts_run].sample_count;
+        if (remaining < count)
+        {
+            timing->ctts_in_run = remaining;
+            break;
+        }
+        remaining -= count;
+        timing->ctts_run++;
+    }
+    remaining = sample;
     while (timing->run < demux->num_stts)
     {
         const struct mp4v_stts_entry *entry =
@@ -338,40 +479,18 @@ static uint32_t video_sample_for_ms(const struct mp4v_demux_res *demux,
                                     uint32_t target_ms,
                                     struct video_timing *timing)
 {
-    uint64_t target_ticks;
-    uint64_t ticks = 0;
-    uint32_t sample = 0;
-    uint32_t run;
-
-    if (demux->timescale == 0)
+    uint32_t lo = 0, hi = demux->num_samples;
+    while (lo + 1 < hi)
     {
-        rb->memset(timing, 0, sizeof(*timing));
-        return 0;
+        uint32_t mid = lo + (hi - lo) / 2;
+        video_timing_for_sample(demux, mid, timing);
+        if (video_pts_ms(demux, timing) <= target_ms)
+            lo = mid;
+        else
+            hi = mid;
     }
-    target_ticks = (uint64_t)target_ms * demux->timescale / 1000u;
-    for (run = 0; run < demux->num_stts; run++)
-    {
-        const struct mp4v_stts_entry *entry = &demux->stts[run];
-        uint64_t run_ticks = (uint64_t)entry->sample_count *
-                             entry->sample_delta;
-
-        if (target_ticks < ticks + run_ticks)
-        {
-            uint32_t in_run = entry->sample_delta == 0 ? 0 :
-                (uint32_t)((target_ticks - ticks) / entry->sample_delta);
-
-            if (in_run >= entry->sample_count)
-                in_run = entry->sample_count - 1;
-            sample += in_run;
-            break;
-        }
-        ticks += run_ticks;
-        sample += entry->sample_count;
-    }
-    if (sample >= demux->num_samples)
-        sample = demux->num_samples - 1;
-    video_timing_for_sample(demux, sample, timing);
-    return sample;
+    video_timing_for_sample(demux, lo, timing);
+    return lo;
 }
 
 static void video_resume_filename(const char *path, char *filename,
@@ -458,19 +577,23 @@ static void video_volume_change(int delta)
 
 static void video_set_paused(bool pause, bool *paused, long *start_tick,
                              long *pause_started, bool have_audio,
-                             bool *cpu_boosted)
+                             bool *cpu_boosted, struct video_osd *osd)
 {
     if (pause == *paused)
         return;
     if (pause)
     {
         *paused = true;
+        if (osd->decode_paused)
+            *osd->decode_paused = true;
         *pause_started = (*rb->current_tick);
         if (have_audio)
         {
             video_audio_pause();
             video_pcm_pause(true);
         }
+        while (osd->decode_busy && *osd->decode_busy)
+            rb->sleep(1);
         if (*cpu_boosted)
         {
             rb->cpu_boost(false);
@@ -637,7 +760,7 @@ static enum video_input_action video_input(bool *paused, long *start_tick,
         break;
     case ACTION_WPS_PLAY:
         video_set_paused(!*paused, paused, start_tick, pause_started,
-                         have_audio, cpu_boosted);
+                         have_audio, cpu_boosted, osd);
         video_osd_show(osd, VIDEO_OVERLAY_PROGRESS);
         *redraw = true;
         break;
@@ -667,7 +790,7 @@ static enum video_input_action video_show_menu(
                         ID2P(LANG_MENU_QUIT));
 
     video_set_paused(true, paused, start_tick, pause_started, have_audio,
-                     cpu_boosted);
+                     cpu_boosted, osd);
     rb->button_clear_queue();
     selection = rb->do_menu(&menu, NULL, NULL, false);
     rb->button_clear_queue();
@@ -677,7 +800,7 @@ static enum video_input_action video_show_menu(
         return VIDEO_INPUT_EXIT;
     if (resume_after)
         video_set_paused(false, paused, start_tick, pause_started,
-                         have_audio, cpu_boosted);
+                         have_audio, cpu_boosted, osd);
     video_osd_show(osd, VIDEO_OVERLAY_PROGRESS);
     *redraw = true;
     return VIDEO_INPUT_NONE;
@@ -1039,6 +1162,7 @@ static void video_draw_frame(const uint8_t *y, const uint8_t *cb,
     x = ((LCD_WIDTH - draw_width) / 2) & ~1;
     y_pos = ((LCD_HEIGHT - draw_height) / 2) & ~1;
 
+    uint32_t started = video_time_us();
     planes[0] = scaled;
     planes[1] = scaled + LCD_WIDTH * LCD_HEIGHT;
     planes[2] = planes[1] + LCD_WIDTH * LCD_HEIGHT / 4;
@@ -1055,8 +1179,23 @@ static void video_draw_frame(const uint8_t *y, const uint8_t *cb,
                       cr, stride / 2, width / 2, height / 2);
     video_draw_overlay(planes, paused, position_ms, duration_ms,
                        osd);
-    rb->lcd_blit_yuv(planes, 0, 0, LCD_WIDTH, 0, 0,
-                 LCD_WIDTH, LCD_HEIGHT);
+    bool overlay = osd->mode != VIDEO_OVERLAY_HIDDEN || paused;
+    uint32_t submitted = video_time_us();
+    video_measure(overlay ? STAGE_SCALE_OSD : STAGE_SCALE, submitted - started);
+    if (rb->hw_h264->present)
+    {
+        struct h264_lcd_timing timing = {0};
+        rb->hw_h264->present(planes, &timing);
+        if (timing.submitted)
+        {
+            video_measure(overlay ? STAGE_LCD_PREP_OSD : STAGE_LCD_PREP,
+                          timing.submit_us - submitted);
+            video_measure(overlay ? STAGE_LCD_OSD : STAGE_LCD,
+                          timing.complete_us - timing.submit_us);
+        }
+    }
+    else
+        rb->lcd_blit_yuv(planes, 0, 0, LCD_WIDTH, 0, 0, LCD_WIDTH, LCD_HEIGHT);
 }
 
 static void video_redraw_frame(const struct video_frame *frame,
@@ -1074,16 +1213,17 @@ static void video_redraw_frame(const struct video_frame *frame,
 /* A decoded picture can be waiting for its PTS or can be dropped. Keep the
  * last presented picture separate so a paused redraw never shows either. */
 static bool video_cache_frame(struct vpu_h264 *decoder,
-                              struct video_frame *frame)
+                              struct video_frame *frame, size_t capacity)
 {
-    const uint8_t *planes[3];
-    int width, height, stride;
+    const uint8_t *planes[3] = {0};
+    int width = 0, height = 0, stride = 0;
 
     rb->hw_h264->get_frame(decoder, &planes[0], &planes[1], &planes[2],
                           &width, &height, &stride);
     if (width < 2 || height < 2 || width > VIDEO_MAX_WIDTH ||
         height > VIDEO_MAX_HEIGHT || (width | height | stride) % 2 != 0 ||
-        stride < width || !planes[0] || !planes[1] || !planes[2])
+        stride < width || (size_t)width * height * 3 / 2 > capacity ||
+        !planes[0] || !planes[1] || !planes[2])
         return false;
 
     frame->width = width;
@@ -1103,6 +1243,242 @@ static bool video_cache_frame(struct vpu_h264 *decoder,
 }
 
 static struct mp4v_demux_res demux;
+
+struct video_picture
+{
+    struct video_frame frame;
+    uint32_t pts_ms, sample;
+};
+
+struct video_pipeline
+{
+    struct video_picture queue[VIDEO_QUEUE_DEPTH];
+    volatile unsigned int head, tail;
+    volatile bool stop, paused, preview, finished, ready, priming, busy;
+    volatile bool audio_master;
+    volatile long start_tick;
+    bool first;
+    int fd, error;
+    bool read_failed;
+    uint32_t offset, size;
+    struct vpu_h264 *decoder;
+    struct video_timing timing;
+    uint32_t sample, show_sample, duration_ms, next_catch_up_ms;
+    size_t frame_bytes;
+    struct mp4v_read_window read;
+};
+
+static unsigned int video_queue_fill(const struct video_pipeline *pipe)
+{
+    return pipe->tail - pipe->head;
+}
+
+/* A sync-table entry must contain an IDR before playback can skip to it. */
+static bool video_sample_is_idr(const uint8_t *data, size_t size)
+{
+    unsigned int prefix = demux.nalu_len_size;
+    while (size > prefix)
+    {
+        uint32_t length = 0;
+        for (unsigned int i = 0; i < prefix; i++)
+            length = (length << 8) | *data++;
+        size -= prefix;
+        if (!length || length > size)
+            return false;
+        unsigned int type = *data & 31;
+        if (type == 5)
+            return true;
+        if (type == 1)
+            return false;
+        data += length;
+        size -= length;
+    }
+    return false;
+}
+
+static uint32_t video_catch_up(struct video_pipeline *pipe, uint32_t pts)
+{
+    if (pipe->priming || pipe->paused || !pipe->audio_master ||
+        !demux.num_stss || video_queue_fill(pipe))
+        return pipe->sample;
+    uint32_t clock = video_clock_ms(true, pipe->start_tick);
+    if (clock < pipe->next_catch_up_ms || clock <= pts ||
+        clock - pts < VIDEO_CATCH_UP_MS)
+        return pipe->sample;
+
+    pipe->next_catch_up_ms = clock + VIDEO_CATCH_UP_RETRY_MS;
+    struct video_timing timing;
+    uint32_t target = video_sample_for_ms(&demux,
+        clock + VIDEO_CATCH_UP_LEAD_MS, &timing);
+    uint32_t sync;
+    if (mp4v_find_keyframe(pipe->fd, &demux, target, &sync) &&
+        sync > pipe->sample)
+        return sync;
+    return pipe->sample;
+}
+
+/* Decode in file order. The queue owns copies of visible planes, so
+ * dropping or presenting a queued picture cannot evict a reference. */
+static void video_decode_step(struct video_pipeline *pipe)
+{
+    if (pipe->finished || (pipe->paused && !pipe->preview) ||
+        video_queue_fill(pipe) == VIDEO_QUEUE_DEPTH)
+        return;
+
+    uint32_t sample = pipe->sample;
+    if (sample == demux.num_samples)
+    {
+        pipe->finished = true;
+        return;
+    }
+
+    uint32_t pts_ms = video_pts_ms(&demux, &pipe->timing);
+    if (pts_ms >= pipe->duration_ms)
+    {
+        pipe->finished = true;
+        return;
+    }
+    uint32_t start = video_time_us();
+    uint32_t offset = 0, size = 0;
+    const uint8_t *compressed;
+    uint32_t candidate = video_catch_up(pipe, pts_ms);
+    int result = -1;
+    if (candidate > sample &&
+        mp4v_read_sample(pipe->fd, &demux, candidate, &pipe->read,
+                         &compressed, &offset, &size) == 0 &&
+        video_sample_is_idr(compressed, size))
+    {
+        stats.skipped_to_idr += candidate - sample;
+        pipe->sample = sample = candidate;
+        video_timing_for_sample(&demux, sample, &pipe->timing);
+        pts_ms = video_pts_ms(&demux, &pipe->timing);
+        result = 0;
+    }
+    if (result < 0)
+        result = mp4v_read_sample(pipe->fd, &demux, sample, &pipe->read,
+                                  &compressed, &offset, &size);
+    int64_t pts_ticks = video_pts_ticks(&demux, &pipe->timing);
+    bool visible = pts_ms < pipe->duration_ms &&
+                   pts_ticks + demux.stts[pipe->timing.run].sample_delta >
+                   demux.video_edit.media_start;
+    video_measure(STAGE_READ, video_time_us() - start);
+    if (result < 0)
+    {
+        pipe->read_failed = true;
+        goto failed;
+    }
+    if (pipe->stop || (pipe->paused && !pipe->preview))
+        return;
+
+    pipe->busy = true;
+    start = video_time_us();
+    result = rb->hw_h264->decode_sample(pipe->decoder, compressed,
+                                        size, demux.nalu_len_size);
+    pipe->busy = false;
+    video_measure(STAGE_DECODE, video_time_us() - start);
+    if (rb->hw_h264->decode_timing)
+    {
+        const struct h264_decode_timing *timing =
+            rb->hw_h264->decode_timing(pipe->decoder);
+        if (timing && (timing->submit_us || timing->complete_us))
+        {
+            video_measure(STAGE_VPU_PREP, timing->submit_us - start);
+            if (result != H264_DECODE_TIMEOUT)
+                video_measure(timing->picture_type == 2 ? STAGE_VPU_I :
+                              STAGE_VPU_P,
+                              timing->complete_us - timing->submit_us);
+        }
+    }
+    if (result < 0)
+    {
+        stats.timeouts += result == H264_DECODE_TIMEOUT;
+        stats.status_failures += result == H264_DECODE_STATUS_ERROR;
+        goto failed;
+    }
+    stats.decoded += result > 0;
+    if (result > 0 && visible && sample >= pipe->show_sample)
+    {
+        struct video_picture *pic = &pipe->queue[pipe->tail % VIDEO_QUEUE_DEPTH];
+        bool grace = pipe->first || pipe->paused || pipe->priming;
+        uint32_t clock = video_clock_ms(pipe->audio_master, pipe->start_tick);
+        if (video_enqueue_late(grace, pts_ms, clock))
+            stats.late_enqueue++;
+        else if (video_cache_frame(pipe->decoder, &pic->frame, pipe->frame_bytes))
+        {
+            clock = video_clock_ms(pipe->audio_master, pipe->start_tick);
+            if (video_enqueue_late(grace, pts_ms, clock))
+                stats.late_enqueue++;
+            else
+            {
+                pic->pts_ms = pts_ms;
+                pic->sample = sample;
+                pipe->first = false;
+                pipe->preview = false;
+                unsigned int fill = video_queue_fill(pipe) + 1;
+                stats.queue_peak = MAX(stats.queue_peak, fill);
+                pipe->tail++;
+            }
+        }
+    }
+    video_timing_advance(&demux, &pipe->timing);
+    pipe->sample++;
+    return;
+
+failed:
+    pipe->offset = offset;
+    pipe->size = size;
+    pipe->error = result;
+    pipe->finished = true;
+}
+
+#ifdef VIDEO_ROCK_WORKER
+static void video_decode_worker(void *arg)
+{
+    struct video_pipeline *pipe = arg;
+    while (!pipe->stop && !rb->rock_worker_stopping() && !pipe->finished)
+    {
+        if (pipe->ready && (!pipe->paused || pipe->preview) &&
+            video_queue_fill(pipe) < VIDEO_QUEUE_DEPTH)
+        {
+            video_decode_step(pipe);
+            rb->yield();
+        }
+        else
+            rb->sleep(1);
+    }
+}
+
+static bool video_worker_start(struct video_pipeline *pipe,
+                               void *stack, unsigned int *worker)
+{
+    if (!rb->rock_worker_start)
+        return true; /* The host fixture drives the same state machine. */
+    pipe->ready = false;
+    *worker = rb->rock_worker_start(video_decode_worker, pipe,
+                                    stack, VIDEO_WORKER_STACK);
+    if (!*worker || !rb->hw_h264->set_decode_worker(pipe->decoder, *worker))
+        return false;
+    pipe->ready = true;
+    return true;
+}
+
+static void video_worker_stop(struct video_pipeline *pipe, unsigned int *worker)
+{
+    pipe->stop = true;
+    if (*worker)
+    {
+        rb->rock_worker_join(*worker);
+        rb->hw_h264->set_decode_worker(pipe->decoder, 0);
+        *worker = 0;
+    }
+}
+#endif
+
+static size_t video_frame_bytes(const struct mp4v_demux_res *movie)
+{
+    return (size_t)((movie->width + 15) & ~15) *
+           ((movie->height + 15) & ~15) * 3 / 2;
+}
 
 static bool video_format_supported(const struct mp4v_demux_res *movie)
 {
@@ -1129,9 +1505,10 @@ size_t video_h264_scratch_size(const char *path)
                                           (demux.height + 15) & ~15);
     if (!decoder)
         return 0;
-    /* Worst-case alignment for the decoder and four following buffers. */
+    /* One redraw surface and one surface per queued picture. */
     size_t bytes = 4095 + decoder + VIDEO_READ_BUFFER + VIDEO_OUTPUT_BUFFER +
-                   VIDEO_FRAME_BUFFER + 3 * 31;
+                   (VIDEO_QUEUE_DEPTH + 1) * video_frame_bytes(&demux) +
+                   VIDEO_WORKER_STACK + 5 * 31;
     if (demux.audio_format == MAKEFOURCC('m', 'p', '4', 'a'))
         bytes += video_audio_workspace_size(&demux) + VIDEO_PCM_BUFFER +
                  2 * (CACHEALIGN_SIZE - 1);
@@ -1145,7 +1522,8 @@ int video_h264_play_named(const char *filepath, void *buffer,
     struct video_pool pool;
     struct video_timing timing;
     struct video_frame frame = {0};
-    struct video_sync_stats stats = {0};
+    struct video_pipeline pipe = {0};
+    unsigned int worker = 0;
     struct vpu_h264 *decoder = NULL;
     uint8_t *decoder_buffer;
     uint8_t *read_buffer;
@@ -1162,19 +1540,20 @@ int video_h264_play_named(const char *filepath, void *buffer,
     uint32_t play_ms;
     char title[42];
     struct video_osd osd = {.options = options, .title = title};
-    long start_tick;
+    long start_tick = 0;
     long pause_started = 0;
     bool paused = false;
     bool cpu_boosted = false;
     bool have_audio = false;
     bool have_frame = false;
-    bool frame_ready = false;
-    uint32_t next_recovery_ms = 0;
+    void *worker_stack;
     bool preview_frame = false;
     bool audio_master = false;
+
     enum video_input_action action = VIDEO_INPUT_NONE;
     int result = -1;
 
+    rb->memset(&stats, 0, sizeof(stats));
     if (filepath == NULL || filepath[0] == '\0' || buffer == NULL ||
         buffer_size == 0)
         return -1;
@@ -1225,7 +1604,10 @@ int video_h264_play_named(const char *filepath, void *buffer,
     decoder_buffer = video_pool_take(&pool, decoder_size, 4096);
     read_buffer = video_pool_take(&pool, VIDEO_READ_BUFFER, 32);
     scale_buffer = video_pool_take(&pool, VIDEO_OUTPUT_BUFFER, 32);
-    frame.pixels = video_pool_take(&pool, VIDEO_FRAME_BUFFER, 32);
+    pipe.frame_bytes = video_frame_bytes(&demux);
+    frame.pixels = video_pool_take(&pool,
+        (VIDEO_QUEUE_DEPTH + 1) * pipe.frame_bytes, 32);
+    worker_stack = video_pool_take(&pool, VIDEO_WORKER_STACK, 32);
     audio_codec_workspace_size = demux.audio_num_samples > 0 ?
         video_audio_workspace_size(&demux) : 0;
     audio_codec_workspace = audio_codec_workspace_size > 0 ?
@@ -1234,13 +1616,16 @@ int video_h264_play_named(const char *filepath, void *buffer,
     pcm_buffer = audio_codec_workspace_size > 0 ?
         video_pool_take(&pool, VIDEO_PCM_BUFFER, CACHEALIGN_SIZE) : NULL;
     if (decoder_buffer == NULL || read_buffer == NULL ||
-        scale_buffer == NULL || frame.pixels == NULL || decoder_size == 0 ||
+        scale_buffer == NULL || frame.pixels == NULL || !worker_stack ||
+        decoder_size == 0 ||
         (audio_codec_workspace_size > 0 &&
          (audio_codec_workspace == NULL || pcm_buffer == NULL)))
     {
         rb->splash(HZ * 2, "Not enough video memory");
         goto cleanup;
     }
+    for (unsigned int i = 0; i < VIDEO_QUEUE_DEPTH; i++)
+        pipe.queue[i].frame.pixels = frame.pixels + (i + 1) * pipe.frame_bytes;
     if (!options)
         rb->splash(0, "Loading movie index...");
     if (!mp4v_validate_index(video_fd, &demux))
@@ -1249,7 +1634,7 @@ int video_h264_play_named(const char *filepath, void *buffer,
         goto cleanup;
     }
     duration_ms = video_duration_ms(&demux);
-    if (!duration_ms)
+    if (!duration_ms || duration_ms == UINT32_MAX)
     {
         rb->splash(HZ * 2, "Unsupported movie duration");
         goto cleanup;
@@ -1268,7 +1653,7 @@ int video_h264_play_named(const char *filepath, void *buffer,
     }
     last_sample = show_sample;
     video_timing_for_sample(&demux, show_sample, &timing);
-    play_ms = video_pts_ms(&demux, &timing);
+    play_ms = show_sample ? video_pts_ms(&demux, &timing) : 0;
     displayed_ms = play_ms;
     sample = show_sample;
     if (!mp4v_find_keyframe(video_fd, &demux, sample, &sample))
@@ -1339,219 +1724,198 @@ int video_h264_play_named(const char *filepath, void *buffer,
     rb->backlight_on();
     rb->backlight_set_timeout(0);
     stats.report_at = *rb->current_tick + 10 * HZ;
-    while ((sample < demux.num_samples || paused) &&
-           action == VIDEO_INPUT_NONE)
+start_pipeline:
+    osd.decode_paused = &pipe.paused;
+    osd.decode_busy = &pipe.busy;
+    pipe.decoder = decoder;
+    pipe.fd = video_fd;
+    pipe.timing = timing;
+    pipe.sample = sample;
+    pipe.show_sample = show_sample;
+    pipe.read = (struct mp4v_read_window){read_buffer, VIDEO_READ_BUFFER, 0, 0};
+    pipe.duration_ms = duration_ms;
+    pipe.head = pipe.tail = 0;
+    pipe.stop = pipe.finished = pipe.read_failed = false;
+    pipe.error = 0;
+    pipe.next_catch_up_ms = 0;
+    pipe.first = true;
+    pipe.paused = paused;
+    pipe.preview = preview_frame;
+    pipe.priming = true;
+    pipe.audio_master = audio_master;
+    pipe.start_tick = start_tick;
+#ifdef VIDEO_ROCK_WORKER
+    if (!video_worker_start(&pipe, worker_stack, &worker))
     {
-        uint32_t offset;
-        uint32_t size;
-        uint32_t pts_ms = video_pts_ms(&demux, &timing);
-        uint32_t end_ms = video_end_pts(&demux, &timing);
-        uint32_t clock_ms = 0;
-        bool seek_requested = false;
-        int decoded;
-
-        while (action == VIDEO_INPUT_NONE)
+        rb->splash(HZ * 2, "Video worker failed");
+        goto cleanup;
+    }
+#endif
+    while (action == VIDEO_INPUT_NONE)
+    {
+        bool redraw_requested;
+        action = video_input(&paused, &start_tick, &pause_started,
+                             have_audio, &cpu_boosted,
+                             &osd, displayed_ms, duration_ms,
+                             &redraw_requested);
+        if (action == VIDEO_INPUT_MENU)
+            action = video_show_menu(
+                &paused, &start_tick, &pause_started, have_audio,
+                &cpu_boosted, &osd, &redraw_requested);
+        if (redraw_requested && have_frame)
+            video_redraw_frame(&frame, scale_buffer, paused,
+                               displayed_ms, duration_ms, &osd);
+        if (action == VIDEO_INPUT_SEEK ||
+            action == VIDEO_INPUT_SEEK_BACK ||
+            action == VIDEO_INPUT_SEEK_FORWARD)
         {
-            bool redraw_requested;
-
-            action = video_input(&paused, &start_tick,
-                                 &pause_started, have_audio, &cpu_boosted,
-                                 &osd, displayed_ms, duration_ms,
-                                 &redraw_requested);
-            if (action == VIDEO_INPUT_MENU)
-                action = video_show_menu(
-                    &paused, &start_tick, &pause_started, have_audio,
-                    &cpu_boosted, &osd, &redraw_requested);
-            if (redraw_requested && have_frame)
-                video_redraw_frame(&frame, scale_buffer, paused,
-                                   displayed_ms, duration_ms, &osd);
-            if (action == VIDEO_INPUT_SEEK ||
-                action == VIDEO_INPUT_SEEK_BACK ||
-                action == VIDEO_INPUT_SEEK_FORWARD)
+            if (have_audio)
+                video_audio_output_pause(true);
+#ifdef VIDEO_ROCK_WORKER
+            video_worker_stop(&pipe, &worker);
+#endif
+            int64_t target = osd.seek_ms;
+            if (action != VIDEO_INPUT_SEEK)
+                target = (int64_t)displayed_ms +
+                    (action == VIDEO_INPUT_SEEK_BACK ? -10000 : 10000);
+            target = MAX(0, MIN(target, (int64_t)duration_ms - 1));
+            osd.pending_seek = false;
+            show_sample = video_sample_for_ms(&demux, (uint32_t)target,
+                                              &timing);
+            play_ms = video_pts_ms(&demux, &timing);
+            if (!mp4v_find_keyframe(video_fd, &demux, show_sample, &sample))
+                goto cleanup;
+            if (!options)
             {
-                int64_t target = osd.seek_ms;
-                if (action != VIDEO_INPUT_SEEK)
-                    target = (int64_t)pts_ms +
-                        (action == VIDEO_INPUT_SEEK_BACK ? -10000 : 10000);
-                target = MAX(0, MIN(target, (int64_t)duration_ms - 1));
-                osd.pending_seek = false;
-                show_sample = video_sample_for_ms(&demux, (uint32_t)target,
-                                                  &timing);
-                play_ms = video_pts_ms(&demux, &timing);
-                if (!mp4v_find_keyframe(video_fd, &demux, show_sample, &sample))
-                    goto cleanup;
-                if (!options)
-                {
-                    show_sample = sample;
-                    video_timing_for_sample(&demux, sample, &timing);
-                    play_ms = video_pts_ms(&demux, &timing);
-                    video_osd_show(&osd, VIDEO_OVERLAY_PROGRESS);
-                }
+                show_sample = sample;
                 video_timing_for_sample(&demux, sample, &timing);
-                if (!cpu_boosted)
-                {
-                    rb->cpu_boost(true);
-                    cpu_boosted = true;
-                }
-                rb->hw_h264->close(decoder);
-                decoder = rb->hw_h264->open(
-                    decoder_buffer, decoder_size,
-                    (demux.width + 15) & ~15,
-                    (demux.height + 15) & ~15);
-                if (decoder == NULL ||
-                    rb->hw_h264->configure(decoder, demux.codecdata,
-                                       demux.codecdata_len) < 0)
-                {
-                    rb->splash(HZ * 2, "H.264 seek failed");
-                    goto cleanup;
-                }
-                if (have_audio)
-                    video_audio_seek(play_ms);
-                start_tick = *rb->current_tick -
-                    (long)((uint64_t)play_ms * HZ / 1000u);
-                pause_started = *rb->current_tick;
-                displayed_ms = play_ms;
-                preview_frame = paused;
-                have_frame = frame_ready = false;
-                next_recovery_ms = 0;
-                action = VIDEO_INPUT_NONE;
-                seek_requested = true;
-                break;
+                play_ms = video_pts_ms(&demux, &timing);
+                video_osd_show(&osd, VIDEO_OVERLAY_PROGRESS);
             }
-            if (action != VIDEO_INPUT_NONE)
-                break;
-            if (sample < show_sample || preview_frame)
-                break;
-            if (paused)
+            video_timing_for_sample(&demux, sample, &timing);
+            if (!cpu_boosted)
             {
-                rb->sleep(1);
-                continue;
+                rb->cpu_boost(true);
+                cpu_boosted = true;
             }
-            if (sample >= demux.num_samples)
-                break;
-            clock_ms = video_clock_ms(audio_master, start_tick);
-            if (audio_master &&
-                (video_audio_failed() ||
-                 (!video_audio_is_active() && video_pcm_empty())))
+            rb->hw_h264->close(decoder);
+            decoder = rb->hw_h264->open(
+                decoder_buffer, decoder_size,
+                (demux.width + 15) & ~15,
+                (demux.height + 15) & ~15);
+            if (decoder == NULL ||
+                rb->hw_h264->configure(decoder, demux.codecdata,
+                                   demux.codecdata_len) < 0)
             {
-                video_audio_stop();
-                have_audio = false;
-                audio_master = false;
-                start_tick = (*rb->current_tick) -
-                    (long)((uint64_t)clock_ms * HZ / 1000u);
+                rb->splash(HZ * 2, "H.264 seek failed");
+                goto cleanup;
             }
-            unsigned lead = !audio_master ? 2 :
-                            frame_ready ? 0 : VIDEO_DECODE_LEAD_MS;
-            if (clock_ms + lead >= pts_ms)
-                break;
-            rb->sleep(1);
+            if (have_audio)
+                video_audio_seek(play_ms);
+            start_tick = *rb->current_tick -
+                (long)((uint64_t)play_ms * HZ / 1000u);
+            pause_started = *rb->current_tick;
+            displayed_ms = play_ms;
+            preview_frame = paused;
+            have_frame = false;
+            action = VIDEO_INPUT_NONE;
+            goto start_pipeline;
         }
         if (action != VIDEO_INPUT_NONE)
             break;
-        if (seek_requested)
-            continue;
-        if (sample >= demux.num_samples)
-            break;
-        if (audio_master && !preview_frame && sample >= show_sample &&
-            clock_ms > pts_ms && clock_ms - pts_ms >= VIDEO_SYNC_RECOVERY_MS &&
-            clock_ms >= next_recovery_ms && demux.num_stss)
+
+        unsigned int fill = video_queue_fill(&pipe);
+        if (pipe.priming && !paused &&
+            (fill == VIDEO_QUEUE_DEPTH || pipe.finished) &&
+            (!have_audio || video_audio_ready()))
         {
-            /* Rejoin at a due sync picture. Never start a dependent picture
-             * with a reference chain that has been skipped. */
-            next_recovery_ms = clock_ms + VIDEO_DECODE_LEAD_MS;
-            struct video_timing target;
-            uint32_t target_sample = video_sample_for_ms(
-                &demux, clock_ms + VIDEO_DECODE_LEAD_MS, &target);
-            uint32_t sync;
-            if (mp4v_find_keyframe(video_fd, &demux, target_sample, &sync) &&
-                sync > sample)
+            start_tick = *rb->current_tick -
+                (long)((uint64_t)play_ms * HZ / 1000u);
+            if (have_audio)
+                video_audio_output_pause(false);
+            pipe.start_tick = start_tick;
+            pipe.priming = false;
+        }
+        uint32_t clock_ms = video_clock_ms(audio_master, start_tick);
+        if (audio_master && !pipe.priming &&
+            (video_audio_failed() ||
+             (!video_audio_is_active() && video_pcm_empty())))
+        {
+            video_audio_stop();
+            have_audio = false;
+            audio_master = false;
+            start_tick = *rb->current_tick -
+                (long)((uint64_t)clock_ms * HZ / 1000u);
+        }
+        pipe.start_tick = start_tick;
+        pipe.audio_master = audio_master;
+        pipe.paused = paused;
+
+        if (pipe.error)
+        {
+            rb->splash(HZ * 2, pipe.read_failed ? "Video sample read failed" :
+                                                   "VPU sample decode failed");
+            goto cleanup;
+        }
+
+        fill = video_queue_fill(&pipe);
+        if (have_frame && !paused && clock_ms >= displayed_ms)
+            stats.max_frame_age = MAX(stats.max_frame_age, clock_ms - displayed_ms);
+#ifdef VIDEO_SYNC_LOG
+        if (!paused)
+            video_sync_log(clock_ms, clock_ms, displayed_ms, fill, false);
+#endif
+        if (fill && ((!paused && !pipe.priming) || preview_frame))
+        {
+            struct video_picture *pic = &pipe.queue[pipe.head % VIDEO_QUEUE_DEPTH];
+            if (preview_frame || clock_ms >= pic->pts_ms)
             {
-                stats.dropped += sync - sample;
-                rb->hw_h264->close(decoder);
-                decoder = rb->hw_h264->open(
-                    decoder_buffer, decoder_size,
-                    (demux.width + 15) & ~15, (demux.height + 15) & ~15);
-                if (!decoder || rb->hw_h264->configure(
-                        decoder, demux.codecdata, demux.codecdata_len) < 0)
+                if (!preview_frame && clock_ms - pic->pts_ms > VIDEO_PRESENT_LATE_MS)
+                    stats.late_present++;
+                else
                 {
-                    rb->splash(HZ * 2, "H.264 recovery failed");
-                    goto cleanup;
+                    video_redraw_frame(&pic->frame, scale_buffer, paused,
+                                       pic->pts_ms, duration_ms, &osd);
+                    if (!preview_frame)
+                    {
+                        uint32_t complete = video_clock_ms(audio_master, start_tick);
+                        video_measure(STAGE_PRESENT,
+                                      (complete - pic->pts_ms) * 1000);
+                    }
+                    displayed_ms = pic->pts_ms;
+                    last_sample = pic->sample;
+                    struct video_frame old_frame = frame;
+                    frame = pic->frame;
+                    pic->frame = old_frame;
+                    have_frame = true;
+                    stats.shown++;
+                    if (preview_frame)
+                    {
+                        preview_frame = false;
+                        pause_started = *rb->current_tick;
+                        start_tick = pause_started -
+                            (long)((uint64_t)displayed_ms * HZ / 1000u);
+                        if (paused)
+                        {
+                            rb->cpu_boost(false);
+                            cpu_boosted = false;
+                        }
+                    }
                 }
-                sample = sync;
-                frame_ready = false;
-                video_timing_for_sample(&demux, sample, &timing);
+                pipe.head++;
                 continue;
             }
         }
-        if (!frame_ready)
-        {
-            if (mp4v_get_sample_offset(video_fd, &demux, sample, &offset,
-                                       &size) < 0 ||
-                size == 0 || size > VIDEO_READ_BUFFER ||
-                rb->lseek(video_fd, offset, SEEK_SET) < 0 ||
-                rb->read(video_fd, read_buffer, size) != (ssize_t)size)
-            {
-                rb->splash(HZ * 2, "Video sample read failed");
-                goto cleanup;
-            }
-            if (audio_master && !preview_frame && sample >= show_sample &&
-                end_ms <= clock_ms &&
-                video_disposable_sample(read_buffer, size, demux.nalu_len_size))
-            {
-                ++stats.dropped;
-                goto advance;
-            }
-            long decode_start = *rb->current_tick;
-            decoded = rb->hw_h264->decode_sample(
-                decoder, read_buffer, size, demux.nalu_len_size);
-            if (decoded < 0)
-            {
-                rb->splash(HZ * 2, "VPU sample decode failed");
-                goto cleanup;
-            }
-            unsigned ticks = *rb->current_tick - decode_start;
-            ++stats.decoded;
-            stats.decode_ticks += ticks;
-            stats.max_ticks = MAX(stats.max_ticks, ticks);
-            if (decoded <= 0 || sample < show_sample)
-                goto advance;
-
-            frame_ready = true;
-            if (audio_master && !preview_frame)
-                continue; /* Poll input and wait for this picture's PTS. */
-        }
-
-        if (audio_master && !preview_frame && clock_ms >= end_ms)
-            ++stats.dropped;
-        else if (video_cache_frame(decoder, &frame))
-        {
-            video_redraw_frame(&frame, scale_buffer, paused,
-                               pts_ms, duration_ms, &osd);
-            displayed_ms = pts_ms;
-            have_frame = true;
-            ++stats.shown;
-            if (preview_frame)
-            {
-                preview_frame = false;
-                pause_started = *rb->current_tick;
-                start_tick = pause_started -
-                    (long)((uint64_t)pts_ms * HZ / 1000u);
-                if (paused)
-                {
-                    rb->cpu_boost(false);
-                    cpu_boosted = false;
-                }
-            }
-            last_sample = sample;
-        }
-advance:
-#ifdef VIDEO_SYNC_LOG
-        if (audio_master && have_frame && !paused)
-            video_sync_log(&stats, pts_ms, clock_ms, displayed_ms);
-#endif
-        frame_ready = false;
-        video_timing_advance(&demux, &timing);
-        sample++;
+        if (!fill && pipe.finished && !paused && !pipe.priming &&
+            clock_ms >= duration_ms)
+            break;
+        if (!fill && !paused)
+            stats.queue_empty++;
+        if (!worker && (!paused || pipe.preview) &&
+            !pipe.finished && fill < VIDEO_QUEUE_DEPTH)
+            video_decode_step(&pipe);
+        else
+            rb->sleep(1);
     }
     switch (action)
     {
@@ -1578,6 +1942,14 @@ advance:
         video_resume_save(filepath, last_sample, demux.num_samples);
 
 cleanup:
+#ifdef VIDEO_ROCK_WORKER
+    video_worker_stop(&pipe, &worker);
+#endif
+#ifdef VIDEO_SYNC_LOG
+    if (pipe.error || stats.shown)
+        video_sync_log(displayed_ms, video_clock_ms(audio_master, start_tick),
+                       displayed_ms, video_queue_fill(&pipe), true);
+#endif
     if (have_audio)
         video_audio_stop();
     if (video_fd >= 0)

@@ -14,7 +14,7 @@ for name in ("system.h", "file.h", "backlight.h", "button.h", "crc32.h",
              "dir.h", "font.h", "lang.h", "lcd.h", "menu.h", "misc.h",
              "rbpaths.h", "settings.h", "sound.h", "splash.h", "config.h"):
     (stubs / name).write_text("")
-(stubs / "kernel.h").write_text("#include <stdbool.h>\nunsigned int thread_self(void);\n")
+(stubs / "kernel.h").write_text("#include <stdbool.h>\nunsigned int thread_self(void);\nextern volatile long current_tick;\n#define HZ 100\n")
 (stubs / "rbendian.h").write_text("#include <endian.h>\n#define betoh32 be32toh\n")
 source = root / "apps/plugins/h264_player"
 fixture = root / "tools/tests/fixtures/rock-h264"

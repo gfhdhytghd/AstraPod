@@ -87,6 +87,16 @@ bool rock_worker_stopping(void)
     return stopping;
 }
 
+bool rock_worker_owned(unsigned int id)
+{
+    if (!id || stopping || foreground != thread_self())
+        return false;
+    for (unsigned int i = 0; i < ROCK_MPEG_WORKERS; i++)
+        if (workers[i].id == id)
+            return true;
+    return false;
+}
+
 bool rock_worker_join(unsigned int id)
 {
     if (!id || foreground != thread_self())

@@ -493,7 +493,8 @@ static int vpub_decode(uint32_t ctrl_phys, uint32_t desc_phys,
                         const uint32_t *dpb_y, const uint32_t *dpb_cb,
                         const uint32_t *dpb_cr, int dpb_count,
                         int width_mbs, int height_mbs,
-                        int pic_w, int num_slices)
+                        int pic_w, int num_slices,
+                       struct h264_decode_timing *timing)
 {
     uint32_t val;
     int ret, old_irq;
@@ -570,6 +571,7 @@ static int vpub_decode(uint32_t ctrl_phys, uint32_t desc_phys,
 
     /* Arm IRQ, trigger, wait */
     vpu_irq_arm();
+    timing->submit_us = USEC_TIMER;
     VPU_CTRL = VPU_CTRL | VPU_TRIGGER_BITS;
 
     ret = vpu_irq_wait(HZ / 2);
@@ -581,6 +583,7 @@ static int vpub_decode(uint32_t ctrl_phys, uint32_t desc_phys,
         return -1;
     }
 
+    timing->complete_us = vpu_irq_complete_usec();
     val = vpu_irq_status1();
     ret = 0;
     if ((val << 3) >> 21)
@@ -600,6 +603,7 @@ static int vpub_decode(uint32_t ctrl_phys, uint32_t desc_phys,
 /* ---- Internal context structure ---- */
 
 struct vpu_h264 {
+    struct h264_decode_timing timing;
     int max_w, max_h;
     int pic_w, pic_h, pic_wmb, pic_hmb;
     int display_w, display_h;
@@ -932,11 +936,12 @@ static int decode_picture(struct vpu_h264 *v, struct picture_slice *slices,
         dma_used = dma_offset + dma_len;
     }
 
+    v->timing.picture_type = slices[0].header.slice_type;
     ret = vpub_decode(
         PHYS(v->ctrl_buf), PHYS(v->slice_desc),
         PHYS(v->frame_y[out_buf]), PHYS(v->frame_cb[out_buf]),
         PHYS(v->frame_cr[out_buf]), dpb_y, dpb_cb, dpb_cr, dpb_fill,
-        v->pic_wmb, v->pic_hmb, v->pic_w, slice_count);
+        v->pic_wmb, v->pic_hmb, v->pic_w, slice_count, &v->timing);
     commit_discard_dcache();
     if (ret != 0)
         return ret - 1; /* -2 timeout, -3 STATUS1 error. */
@@ -1017,6 +1022,7 @@ int vpu_h264_decode_sample(struct vpu_h264 *v, const uint8_t *sample,
     if (!v || !sample || sample_len <= 0 ||
         nalu_len_size < 1 || nalu_len_size > 4)
         return -1;
+    v->timing = (struct h264_decode_timing){0};
     while (position + nalu_len_size <= sample_len)
     {
         uint32_t nalu_len = 0;
@@ -1079,6 +1085,17 @@ void vpu_h264_close(struct vpu_h264 *v)
         vpub_power_off();
 }
 
+static uint32_t video_time_us(void)
+{
+    return USEC_TIMER;
+}
+
+static const struct h264_decode_timing *decode_timing(
+    const struct vpu_h264 *decoder)
+{
+    return &decoder->timing;
+}
+
 const struct hw_h264_api target_hw_h264_api = {
     .buf_size = vpu_h264_buf_size,
     .open = vpu_h264_open,
@@ -1086,4 +1103,6 @@ const struct hw_h264_api target_hw_h264_api = {
     .decode_sample = vpu_h264_decode_sample,
     .get_frame = vpu_h264_get_frame,
     .close = vpu_h264_close,
+    .time_us = video_time_us,
+    .decode_timing = decode_timing,
 };

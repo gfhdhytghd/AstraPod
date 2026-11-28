@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 
-from ultra_coverflow_sim import record
+from ultra_coverflow_sim import open_music, record
 from ultra_sim import FRUIT, ULTRA, compare, make_fixture, perf_routes
 
 
@@ -32,7 +32,7 @@ def first_change(shots, area):
 
 
 def script(sim, theme):
-    sim.tap("select", 50)  # Music > Cover Flow
+    open_music(sim)
     recordings = {}
     for phase in ("cold", "warm"):
         recordings[phase] = record(sim, 170, "select")

@@ -253,7 +253,7 @@ class Player:
         elif key == "ks":
             assert fields[1] == "t3t1", fields
             self.send(ACTIONS)
-        elif key in ("fp", "vd", "vu", "vc", "act", "a"):
+        elif key in ("fp", "vd", "vu", "vc", "act", "a", "k"):
             self.send(f"R\t{fields[1]}\tok\tAccepted")
             if key == "a":
                 self.send(f"X\t{fields[2]}")
@@ -275,7 +275,7 @@ class Player:
     def expect_wire(self, since, key, *arguments):
         def received():
             for fields in self.messages[since:]:
-                suffix = fields[2:] if key in ("vd", "vu", "vc", "a", "act", "fp") else fields[1:]
+                suffix = fields[2:] if key in ("vd", "vu", "vc", "a", "act", "fp", "k") else fields[1:]
                 if fields[0] == key and tuple(suffix) == arguments:
                     return True
             return False
@@ -350,17 +350,29 @@ def run_theme(binary, output, resources, theme):
         player.expect_view("projects")
         player.tap("back")
         player.expect_view("usage")
-        player.no_wire(mark, "fw", "k")
-        mark = len(player.messages)
-        player.tap("select")
         player.expect_wire(mark, "us")
-        player.tap("down")
-        player.no_wire(mark, "k")
+        player.expect_wire(mark, "vw", "1")
+        player.no_wire(mark, "fw", "k", ":transport")
+        for button, key in (("select", "enter"), ("up", "left"),
+                            ("down", "right"), ("back", "bs")):
+            mark = len(player.messages)
+            player.tap(button)
+            player.expect_wire(mark, "k", key)
+            player.no_wire(mark, "fw", ":transport")
+            player.expect_view("usage")
+        mark = len(player.messages)
+        player.tap("play")
+        player.expect_wire(mark, ":playback", "play")
+        player.no_wire(mark, ":transport")
+        player.expect_view("usage")
         player.voice_hold("play", "-", .23)
         if fruit:
             player.voice_hold("select", "-", .5)
+        mark = len(player.messages)
         player.tap("right")
         player.expect_view("projects")
+        player.expect_wire(mark, "vw", "0")
+        player.no_wire(mark, "k", ":transport")
         player.choose("Fixture project", direction="up")
         player.expect(lambda: player.state.view == "threads" and player.state.label.endswith("Fixture thread"),
                       "initial Active thread")
@@ -392,7 +404,7 @@ def run_theme(binary, output, resources, theme):
         assert player.state.rows == (4 if fruit else 3), player.state
         if fruit:
             mark = len(player.messages)
-            player.choose("Voice reply")
+            player.choose("Desktop voice")
             player.expect_wire(mark, "vd", "t3t1")
             player.expect_view("detail")
             player.tap("select")
@@ -400,7 +412,7 @@ def run_theme(binary, output, resources, theme):
             player.tap("select")
             player.expect_view("actions")
             mark = len(player.messages)
-            player.choose("Voice reply")
+            player.choose("Desktop voice")
             player.expect_wire(mark, "vd", "t3t1")
             player.tap("menu")
             player.expect_wire(mark, "vc")

@@ -505,6 +505,11 @@ plus a 15-byte workspace id). Control characters are rejected.
 
 ### Keyboard taps from Usage
 
+Usage shows all four providers and the total on one screen. LEFT from
+Agents pans to Usage. RIGHT or MENU from Usage pans back to Agents.
+A short native PLAY toggles playback and a hold opens desktop voice.
+Usage keeps the same desktop keyboard controls in T3 and herdr modes.
+
 In Usage, LEFT press/repeat sends `k <req> bs`, wheel counter-clockwise
 sends `k <req> left`, clockwise sends `k <req> right`, and SELECT sends
 `k <req> enter` once per press. Fast wheel movement uses `wleft` (Ctrl+Left)

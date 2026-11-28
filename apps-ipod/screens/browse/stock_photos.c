@@ -16,6 +16,7 @@
 #include "button.h"
 #include "core_alloc.h"
 #include "draw/color.h"
+#include "draw/viewport.h"
 #include "input/action.h"
 #include "font.h"
 #include "files/filetypes.h"
@@ -33,17 +34,24 @@
 #include "widgets/list.h"
 #include "widgets/menu.h"
 #include "widgets/option_select.h"
+#include "widgets/splash.h"
+#include "browser_flat.h"
 #include "stock_media.h"
 
 #define PHOTO_LIMIT 32768
 #define ALBUM_LIMIT 2048
 #define THUMB_EDGE 64
-#define GRID_COLS (LCD_WIDTH / 76)
-#define GRID_ROWS ((LCD_HEIGHT - 24) / 72)
+#define GRID_TILE 58
+#define GRID_TOP 42
+#define GRID_COLS (LCD_WIDTH / THUMB_EDGE)
+#define GRID_ROWS ((LCD_HEIGHT - GRID_TOP) / THUMB_EDGE)
 #define GRID_PAGE (GRID_COLS * GRID_ROWS)
 #define PHOTO_PIXELS (LCD_WIDTH * LCD_HEIGHT)
 
-enum { PHOTO_CUT, PHOTO_FADE, PHOTO_WIPE, PHOTO_BLACK, PHOTO_ZOOM, PHOTO_CENTER };
+enum {
+    PHOTO_CUT, PHOTO_FADE, PHOTO_WIPE, PHOTO_BLACK, PHOTO_ZOOM, PHOTO_CENTER,
+    PHOTO_RANDOM,
+};
 
 struct photo {
     uint32_t id;
@@ -179,31 +187,55 @@ static void read_album(struct albums *a, int row)
     }
 }
 
-static void draw_grid(const struct albums *a, const char *title, int sel)
+static void draw_grid(const struct albums *a, const char *title,
+                      int sel, int first)
 {
     static fb_data tile[THUMB_EDGE * THUMB_EDGE];
-    int first = sel / GRID_PAGE * GRID_PAGE;
-    int gap = LCD_WIDTH / GRID_COLS;
+    char position[24];
+    int width, height;
+
     lcd_set_foreground(LCD_RGBPACK(20, 28, 41));
     lcd_fillrect(0, 0, LCD_WIDTH, LCD_HEIGHT);
     lcd_set_foreground(LCD_WHITE);
     lcd_setfont(FONT_UI);
+    int drawmode = lcd_get_drawmode();
+    lcd_set_drawmode(DRMODE_FG);
     lcd_putsxy(12, 4, title);
+    snprintf(position, sizeof(position), "%d / %d", sel + 1, a->slide_count);
+    lcd_getstringsize(position, &width, &height);
+    lcd_putsxy(LCD_WIDTH - width - 12, GRID_TOP - height - 4, position);
+    lcd_set_drawmode(drawmode);
 
     for (int i = first; i < a->slide_count && i < first + GRID_PAGE; i++)
     {
         int cell = i - first;
-        int x = cell % GRID_COLS * gap + (gap - THUMB_EDGE) / 2;
-        int y = 24 + cell / GRID_COLS * 72;
+        int inset = (THUMB_EDGE - GRID_TILE) / 2;
+        int x = cell % GRID_COLS * THUMB_EDGE + inset;
+        int y = GRID_TOP + cell / GRID_COLS * THUMB_EDGE + inset;
         if (i == sel)
         {
             lcd_set_foreground(LCD_RGBPACK(77, 190, 237));
-            lcd_fillrect(x - 3, y - 3, THUMB_EDGE + 6, THUMB_EDGE + 6);
+            lcd_fillrect(x - 2, y - 2, GRID_TILE + 4, GRID_TILE + 4);
         }
-        lcd_set_foreground(LCD_BLACK);
-        lcd_fillrect(x, y, THUMB_EDGE, THUMB_EDGE);
-        if (stock_photo_pixels(&a->db, a->slides[i], THUMB_EDGE, THUMB_EDGE, tile))
-            lcd_bitmap(tile, x, y, THUMB_EDGE, THUMB_EDGE);
+        if (stock_photo_pixels(&a->db, a->slides[i], THUMB_EDGE, THUMB_EDGE,
+                               tile))
+        {
+            /* Each source pixel is at or after its destination. */
+            for (int row = 0; row < GRID_TILE; row++)
+            {
+                int src_y = row * THUMB_EDGE / GRID_TILE;
+                const fb_data *src = tile + src_y * THUMB_EDGE;
+                for (int col = 0; col < GRID_TILE; col++)
+                    tile[row * GRID_TILE + col] =
+                        src[col * THUMB_EDGE / GRID_TILE];
+            }
+            lcd_bitmap(tile, x, y, GRID_TILE, GRID_TILE);
+        }
+        else
+        {
+            lcd_set_foreground(LCD_BLACK);
+            lcd_fillrect(x, y, GRID_TILE, GRID_TILE);
+        }
     }
     lcd_update();
 }
@@ -214,33 +246,58 @@ static void draw_photo(const struct albums *a, int sel, fb_data *pixels)
         memset(pixels, 0, PHOTO_PIXELS * sizeof(*pixels));
 }
 
-static void transition(const fb_data *before, const fb_data *after, fb_data *mix)
+static void transition(const fb_data *before, const fb_data *after,
+                       fb_data *mix, int *previous)
 {
     int mode = global_settings.photo_transition;
+    if (mode == PHOTO_RANDOM)
+    {
+        static const int effects[] = {
+            PHOTO_FADE, PHOTO_BLACK, PHOTO_ZOOM, PHOTO_WIPE, PHOTO_CENTER
+        };
+        int pick = rand() % ARRAYLEN(effects);
+        if (effects[pick] == *previous)
+            pick = (pick + 1) % ARRAYLEN(effects);
+        mode = effects[pick];
+        *previous = mode;
+    }
+
     struct ui_motion motion = {0};
     if (mode != PHOTO_CUT)
         motion = ui_motion_begin("photo-slideshow");
+    long start = current_tick;
     for (int i = 1; mode != PHOTO_CUT && i < 16; i++)
     {
+        long frame = start + i * HZ / 32;
+        if (TIME_BEFORE(current_tick, frame))
+            sleep(frame - current_tick);
+        int elapsed = (current_tick - start) * 1000 / HZ;
+        if (elapsed >= 500)
+            break;
+
         if (mode == PHOTO_WIPE || mode == PHOTO_CENTER)
         {
-            int width = (LCD_WIDTH * i / 16) & ~1;
+            int width = (LCD_WIDTH * elapsed / 500) & ~1;
             int x = mode == PHOTO_CENTER ? (LCD_WIDTH - width) / 2 : 0;
             lcd_bitmap_part(after, x, 0, LCD_WIDTH, x, 0, width, LCD_HEIGHT);
         }
         else if (mode == PHOTO_ZOOM)
         {
-            int width = LCD_WIDTH * (16 - i) / 16;
-            int height = LCD_HEIGHT * (16 - i) / 16;
+            int scale = 500 - MIN(elapsed, 250);
+            int width = LCD_WIDTH * scale / 500;
+            int height = LCD_HEIGHT * scale / 500;
             int x = (LCD_WIDTH - width) / 2;
             int y = (LCD_HEIGHT - height) / 2;
-            memcpy(mix, after, PHOTO_PIXELS * sizeof(*mix));
+            int blend = MIN(elapsed, 375) * 256 / 375;
+            for (unsigned p = 0; p < PHOTO_PIXELS; p++)
+                mix[p] = color_blend(LCD_BLACK, after[p], blend);
             for (int row = 0; row < height; row++)
             {
                 const fb_data *src = before + (row * LCD_HEIGHT / height) * LCD_WIDTH;
                 fb_data *dest = mix + (row + y) * LCD_WIDTH + x;
                 for (int col = 0; col < width; col++)
-                    dest[col] = src[col * LCD_WIDTH / width];
+                    dest[col] = color_blend(dest[col], src[col * LCD_WIDTH / width],
+                                            256 - blend);
             }
             lcd_bitmap(mix, 0, 0, LCD_WIDTH, LCD_HEIGHT);
         }
@@ -248,20 +305,23 @@ static void transition(const fb_data *before, const fb_data *after, fb_data *mix
         {
             const fb_data *from = before;
             const fb_data *to = after;
-            int blend = i * 16;
+            int blend = elapsed * 256 / 500;
             if (mode == PHOTO_BLACK)
             {
-                from = i <= 8 ? before : after;
+                from = elapsed <= 250 ? before : after;
                 to = NULL;
-                blend = (i <= 8 ? i : 16 - i) * 32;
+                int fade = 200 - MIN(200, abs(elapsed - 250));
+                blend = fade * 256 / 200;
             }
             for (unsigned p = 0; p < PHOTO_PIXELS; p++)
                 mix[p] = color_blend(from[p], to ? to[p] : LCD_BLACK, blend);
             lcd_bitmap(mix, 0, 0, LCD_WIDTH, LCD_HEIGHT);
         }
         lcd_update();
-        sleep(MAX(1, HZ / 32));
     }
+    long end = start + HZ / 2;
+    if (mode != PHOTO_CUT && TIME_BEFORE(current_tick, end))
+        sleep(end - current_tick);
     lcd_bitmap(after, 0, 0, LCD_WIDTH, LCD_HEIGHT);
     lcd_update();
     ui_motion_end(&motion);
@@ -437,27 +497,77 @@ static enum slideshow_music slideshow_start(int *order, int count, int selected)
     return SLIDESHOW_UNCHANGED;
 }
 
+#define PHOTO_ARROW_KEYS(earlier, later) \
+    { ACTION_NONE, BUTTON_LEFT, BUTTON_NONE }, \
+    { ACTION_NONE, BUTTON_RIGHT, BUTTON_NONE }, \
+    { earlier, BUTTON_LEFT | BUTTON_REL, BUTTON_LEFT }, \
+    { later, BUTTON_RIGHT | BUTTON_REL, BUTTON_RIGHT }, \
+    { ACTION_NONE, BUTTON_LEFT | BUTTON_REL, BUTTON_NONE }, \
+    { ACTION_NONE, BUTTON_RIGHT | BUTTON_REL, BUTTON_NONE }, \
+    { ACTION_WPS_SEEKBACK, BUTTON_LEFT | BUTTON_REPEAT, BUTTON_LEFT }, \
+    { ACTION_WPS_SEEKFWD, BUTTON_RIGHT | BUTTON_REPEAT, BUTTON_RIGHT }, \
+    { ACTION_NONE, BUTTON_LEFT | BUTTON_REPEAT, BUTTON_NONE }, \
+    { ACTION_NONE, BUTTON_RIGHT | BUTTON_REPEAT, BUTTON_NONE }
+
 static const struct button_mapping *photo_view_keys(int context)
 {
     (void)context;
     static const struct button_mapping keys[] = {
-        { ACTION_WPS_SKIPPREV, BUTTON_LEFT, BUTTON_NONE },
-        { ACTION_WPS_SKIPNEXT, BUTTON_RIGHT, BUTTON_NONE },
-        { ACTION_NONE, BUTTON_LEFT | BUTTON_REL, BUTTON_NONE },
-        { ACTION_NONE, BUTTON_RIGHT | BUTTON_REL, BUTTON_NONE },
-        { ACTION_NONE, BUTTON_LEFT | BUTTON_REPEAT, BUTTON_NONE },
-        { ACTION_NONE, BUTTON_RIGHT | BUTTON_REPEAT, BUTTON_NONE },
+        PHOTO_ARROW_KEYS(ACTION_WPS_SKIPPREV, ACTION_WPS_SKIPNEXT),
         LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_WPS)
     };
     return keys;
 }
 
-static bool photo_view(const struct albums *a, int *sel)
+static const struct button_mapping *photo_grid_keys(int context)
+{
+    (void)context;
+    static const struct button_mapping keys[] = {
+        PHOTO_ARROW_KEYS(ACTION_LISTTREE_PGUP, ACTION_LISTTREE_PGDOWN),
+        LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_PAGED_LIST)
+    };
+    return keys;
+}
+
+#undef PHOTO_ARROW_KEYS
+
+static int photo_wheel_steps(void)
+{
+    unsigned data = get_action_data();
+    return (data >> 31) ? MAX(1u, (data >> 24) & 0x7f) : 1;
+}
+
+static void present_photo(const fb_data *pixels, bool brightness)
+{
+    lcd_bitmap(pixels, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+#ifdef HAVE_BACKLIGHT_BRIGHTNESS
+    if (brightness)
+    {
+        struct viewport area = { .flags = VP_DEFAULT_FLAGS };
+        viewport_set_fullscreen(&area, SCREEN_MAIN);
+        splash_progress_in(&area,
+                           global_settings.brightness - MIN_BRIGHTNESS_SETTING,
+                           MAX_BRIGHTNESS_SETTING - MIN_BRIGHTNESS_SETTING,
+                           "%s", str(LANG_BRIGHTNESS));
+    }
+#else
+    (void)brightness;
+#endif
+    lcd_update();
+}
+
+enum photo_view_result {
+    PHOTO_VIEW_GRID,
+    PHOTO_VIEW_ALBUMS,
+    PHOTO_VIEW_USB,
+};
+
+static enum photo_view_result photo_view(const struct albums *a, int *sel)
 {
     int handle = core_alloc(3 * PHOTO_PIXELS * sizeof(fb_data) +
                             a->slide_count * sizeof(int));
     if (handle <= 0)
-        return false;
+        return PHOTO_VIEW_GRID;
     fb_data *current = core_get_data_pinned(handle);
     fb_data *next = current + PHOTO_PIXELS;
     fb_data *mix = next + PHOTO_PIXELS;
@@ -465,108 +575,168 @@ static bool photo_view(const struct albums *a, int *sel)
     int position = *sel;
     enum slideshow_music music = SLIDESHOW_UNCHANGED;
     int interval = MIN(20, MAX(0, global_settings.photo_duration)) * HZ;
+    int last_transition = PHOTO_CUT;
     bool playing = false;
-    draw_photo(a, *sel, current);
-    lcd_bitmap(current, 0, 0, LCD_WIDTH, LCD_HEIGHT);
-    lcd_update();
-
     long due = current_tick + interval;
-    bool usb = false;
+    bool brightness = false;
+    long brightness_due = 0;
+#ifdef HAVE_BACKLIGHT_BRIGHTNESS
+    int initial_brightness = global_settings.brightness;
+#endif
+    enum photo_view_result result = PHOTO_VIEW_GRID;
+    draw_photo(a, *sel, current);
+    present_photo(current, false);
     for (;;)
     {
+        long now = current_tick;
+        int timeout = playing && interval ? MAX(1, due - now) : TIMEOUT_BLOCK;
+        if (brightness)
+        {
+            int remaining = MAX(1, brightness_due - now);
+            timeout = timeout == TIMEOUT_BLOCK ? remaining : MIN(timeout, remaining);
+        }
         int action = get_custom_action(
-            CONTEXT_PLUGIN | CONTEXT_LOCAL_LEFT_RIGHT,
-            playing && interval ? MAX(1, due - current_tick) : TIMEOUT_BLOCK,
-            photo_view_keys);
-        int step = 0;
+            CONTEXT_PLUGIN | CONTEXT_LOCAL_LEFT_RIGHT | CONTEXT_WHEEL_DETENTS,
+            timeout, photo_view_keys);
         if (action == ACTION_WPS_MENU || action == ACTION_STD_CANCEL)
+        {
+            result = playing ? PHOTO_VIEW_ALBUMS : PHOTO_VIEW_GRID;
             break;
+        }
         if (action == SYS_USB_CONNECTED)
         {
-            usb = true;
+            result = PHOTO_VIEW_USB;
             break;
         }
         default_event_handler(action);
-        if (action == ACTION_WPS_PLAY)
+        bool redraw = action == ACTION_REDRAW;
+        if (brightness && !TIME_BEFORE(current_tick, brightness_due))
         {
-            wps_wheel_transport(action);
-            continue;
+            brightness = false;
+            redraw = true;
         }
-        if (action == ACTION_WPS_BROWSE)
+
+        int pos = playing ? position : *sel;
+        int step = 0;
+        if (action == ACTION_WPS_PLAY)
+            wps_wheel_transport(action);
+        else if (action == ACTION_WPS_BROWSE)
         {
-            playing = !playing;
-            if (playing)
+            if (!playing)
             {
                 music = slideshow_start(order, a->slide_count, *sel);
-                position = global_settings.photo_shuffle ? 0 : *sel;
+                pos = position = global_settings.photo_shuffle ? 0 : *sel;
+                last_transition = PHOTO_CUT;
+                playing = true;
+                due = current_tick + interval;
             }
+#ifdef HAVE_BACKLIGHT_BRIGHTNESS
             else
             {
-                slideshow_stop(music, false);
-                music = SLIDESHOW_UNCHANGED;
+                brightness = !brightness;
+                brightness_due = current_tick + 5 * HZ;
+                redraw = true;
             }
-            due = current_tick + interval;
-            continue;
+#endif
         }
-        if (playing && (action == ACTION_WPS_VOLUP ||
-                        action == ACTION_WPS_VOLDOWN))
+        else if (action == ACTION_WPS_VOLUP || action == ACTION_WPS_VOLDOWN)
         {
-            adjust_volume(action == ACTION_WPS_VOLUP ? 1 : -1);
-            continue;
+            int wheel = photo_wheel_steps();
+            if (action == ACTION_WPS_VOLDOWN)
+                wheel = -wheel;
+#ifdef HAVE_BACKLIGHT_BRIGHTNESS
+            if (brightness)
+            {
+                int level = global_settings.brightness + wheel;
+                global_settings.brightness =
+                    MIN(MAX_BRIGHTNESS_SETTING, MAX(MIN_BRIGHTNESS_SETTING, level));
+                backlight_set_brightness(global_settings.brightness);
+                brightness_due = current_tick + 5 * HZ;
+                redraw = true;
+            }
+            else
+#endif
+            if (playing)
+                adjust_volume(wheel);
+            else
+                step = wheel;
         }
-        if (action == ACTION_WPS_SKIPPREV || action == ACTION_WPS_VOLDOWN)
+        else if (action == ACTION_WPS_SKIPPREV)
             step = -1;
-        else if (action == ACTION_WPS_SKIPNEXT || action == ACTION_WPS_VOLUP ||
-                 (playing && interval && TIME_AFTER(current_tick + 1, due)))
+        else if (action == ACTION_WPS_SKIPNEXT)
             step = 1;
-        if (!step)
-            continue;
+        else if (!playing && action == ACTION_WPS_SEEKBACK)
+            pos = 0;
+        else if (!playing && action == ACTION_WPS_SEEKFWD)
+            pos = a->slide_count - 1;
 
-        int pos = (playing ? position : *sel) + step;
-        if (pos < 0 || pos >= a->slide_count)
+        if (playing && !step && interval && !TIME_BEFORE(current_tick, due))
+            step = 1;
+        pos += step;
+        if (playing && (pos < 0 || pos >= a->slide_count))
         {
-            if (playing && global_settings.photo_repeat)
+            if (global_settings.photo_repeat)
                 pos = pos < 0 ? a->slide_count - 1 : 0;
-            else if (playing && step > 0)
+            else if (step > 0)
                 break;
             else
-                continue;
+                pos = position;
         }
-        position = pos;
-        *sel = playing ? order[pos] : pos;
-        draw_photo(a, *sel, next);
-        if (playing)
-            transition(current, next, mix);
         else
+            pos = MIN(a->slide_count - 1, MAX(0, pos));
+
+        if (playing ? (pos != position || (step && global_settings.photo_repeat))
+                    : pos != *sel)
         {
-            lcd_bitmap(next, 0, 0, LCD_WIDTH, LCD_HEIGHT);
-            lcd_update();
+            position = pos;
+            *sel = playing ? order[pos] : pos;
+            draw_photo(a, *sel, next);
+            if (playing)
+            {
+                if (brightness || redraw)
+                    lcd_bitmap(current, 0, 0, LCD_WIDTH, LCD_HEIGHT);
+                transition(current, next, mix, &last_transition);
+                brightness = brightness && TIME_BEFORE(current_tick, brightness_due);
+            }
+            fb_data *swap = current;
+            current = next;
+            next = swap;
+            due = current_tick + interval;
+            redraw = !playing || brightness;
         }
-        fb_data *swap = current;
-        current = next;
-        next = swap;
-        due = current_tick + interval;
+        if (redraw)
+            present_photo(current, brightness);
     }
-    slideshow_stop(music, usb);
+    slideshow_stop(music, result == PHOTO_VIEW_USB);
+#ifdef HAVE_BACKLIGHT_BRIGHTNESS
+    if (global_settings.brightness != initial_brightness)
+        settings_save();
+#endif
     core_unpin(handle);
     core_free(handle);
-    if (usb)
+    if (result == PHOTO_VIEW_USB)
         default_event_handler(SYS_USB_CONNECTED);
-    return usb;
+    return result;
 }
 
 static bool photo_grid(const struct albums *a, const char *title)
 {
-    int sel = 0;
+    if (!a->slide_count)
+        return false;
+
+    int sel = 0, first = 0;
+    int last_row = (a->slide_count - 1) / GRID_COLS;
+    int last_first = MAX(0, last_row - GRID_ROWS + 1) * GRID_COLS;
     unsigned foreground = lcd_get_foreground();
+    viewportmanager_theme_enable(SCREEN_MAIN, false, NULL);
     lcd_set_viewport(NULL);
     bool usb = false;
-    if (a->slide_count)
-        draw_grid(a, title, sel);
-    while (a->slide_count)
+    draw_grid(a, title, sel, first);
+    for (;;)
     {
-        int action = get_action(CONTEXT_PAGED_LIST | CONTEXT_LOCAL_LEFT_RIGHT,
-                                TIMEOUT_BLOCK);
+        int action = get_custom_action(CONTEXT_PLUGIN | CONTEXT_PAGED_LIST |
+                                       CONTEXT_LOCAL_LEFT_RIGHT,
+                                       TIMEOUT_BLOCK, photo_grid_keys);
         int button;
         get_action_statuscode(&button);
         if (action == ACTION_STD_CANCEL)
@@ -576,26 +746,39 @@ static bool photo_grid(const struct albums *a, const char *title)
             usb = true;
             break;
         }
-        if (action == ACTION_LISTTREE_PGUP && sel >= GRID_PAGE)
-            sel -= GRID_PAGE;
-        else if (action == ACTION_LISTTREE_PGDOWN &&
-                 (sel / GRID_PAGE + 1) * GRID_PAGE < a->slide_count)
+        if (action == ACTION_WPS_SEEKBACK)
+            sel = 0;
+        else if (action == ACTION_WPS_SEEKFWD)
+            sel = a->slide_count - 1;
+        else if (action == ACTION_LISTTREE_PGUP && first > 0)
+        {
+            sel = MAX(0, sel - GRID_PAGE);
+            first = MAX(0, first - GRID_PAGE);
+        }
+        else if (action == ACTION_LISTTREE_PGDOWN && first < last_first)
+        {
             sel = MIN(a->slide_count - 1, sel + GRID_PAGE);
+            first = MIN(last_first, first + GRID_PAGE);
+        }
         else if (action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT)
             sel = MAX(0, sel - 1);
         else if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
             sel = MIN(a->slide_count - 1, sel + 1);
         else if (action == ACTION_STD_OK && (button & BUTTON_SELECT))
         {
-            usb = photo_view(a, &sel);
-            if (usb)
+            enum photo_view_result result = photo_view(a, &sel);
+            usb = result == PHOTO_VIEW_USB;
+            if (result != PHOTO_VIEW_GRID)
                 break;
         }
         else
             continue;
-        draw_grid(a, title, sel);
+        int row_start = sel / GRID_COLS * GRID_COLS;
+        first = MIN(row_start, MAX(first, row_start - GRID_PAGE + GRID_COLS));
+        draw_grid(a, title, sel, first);
     }
     lcd_set_foreground(foreground);
+    viewportmanager_theme_undo(SCREEN_MAIN, false);
     return usb;
 }
 
@@ -643,6 +826,7 @@ int stock_photos_screen(void)
                          a.indexed ? a.album_count + 2 : 2, &a);
     info.get_name = album_name;
     info.action_callback = stock_media_list_action;
+    info.page_with_left_right = true;
     while (true)
     {
         if (simplelist_show_list(&info))
@@ -655,7 +839,15 @@ int stock_photos_screen(void)
         if (info.selection == 1)
             rc = stock_photos_settings();
         else if (!a.indexed || info.selection == a.album_count + 1)
-            rc = root_menu_run_screen(GO_TO_IMAGES);
+        {
+            struct ui_scene files = {0};
+            ui_scene_open_page(&files, "loose-photos-push");
+            rc = browser_flat(FLAT_IMAGES);
+            ui_scene_close_modal(&files, rc == GO_TO_PREVIOUS,
+                                 "loose-photos-pop");
+            if (rc == GO_TO_PREVIOUS)
+                rc = 0;
+        }
         else
         {
             char title[96];
@@ -745,13 +937,14 @@ static const struct media_choice music_choices[] = {
 };
 
 static const struct media_choice transition_choices[] = {
-    { PHOTO_CUT, LANG_PHOTO_NONE }, { PHOTO_FADE, LANG_PHOTO_FADE },
+    { PHOTO_CUT, LANG_PHOTO_NONE }, { PHOTO_RANDOM, LANG_RANDOM },
+    { PHOTO_FADE, LANG_PHOTO_FADE },
     { PHOTO_BLACK, LANG_PHOTO_BLACK }, { PHOTO_ZOOM, LANG_PHOTO_ZOOM },
     { PHOTO_WIPE, LANG_PHOTO_WIPE }, { PHOTO_CENTER, LANG_PHOTO_CENTER },
 };
 
 static const struct media_choice duration_choices[] = {
-    { 0, LANG_PHOTO_MANUAL }, { 2, 0 }, { 5, 0 }, { 10, 0 }, { 20, 0 },
+    { 0, LANG_PHOTO_MANUAL }, { 2, 0 }, { 3, 0 }, { 5, 0 }, { 10, 0 }, { 20, 0 },
 };
 
 static const char *choice_name(int row, void *data, char *buf, size_t size)

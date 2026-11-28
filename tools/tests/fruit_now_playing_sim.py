@@ -16,7 +16,9 @@ from ui_stock_transitions_sim import Sim, make_fixture
 ROW = (0, 198, 320, 234)
 TRANSPORT = (269, 1, 285, 19)
 TITLE = (159, 66, 320, 90)
-SHUFFLE_ICON = (292, 25, 310, 39)
+# This fixture starts with Repeat All, so shuffle sits to its left.
+SHUFFLE_ICON = (273, 25, 291, 39)
+REPEAT_ICON = (296, 25, 315, 40)
 SEGMENTS = ((74, 204, 115, 228), (126, 204, 184, 228),
             (196, 204, 267, 228))
 
@@ -133,6 +135,7 @@ def exercise(sim):
     sim.tap("select", 24)
     applied = capture(sim, "shuffle-applied")
     assert not same(options, applied, SHUFFLE_ICON)
+    assert same(options, applied, REPEAT_ICON), "shuffle must keep repeat in place"
     assert same(options, applied, TITLE), "shuffle must keep the current track"
 
     choose(sim, "select", 3)

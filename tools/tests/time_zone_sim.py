@@ -187,21 +187,12 @@ time zone: America/New_York
                     assert "Asia" in ocr(cities.crop((0, 0, 60, 18)), 7), "Asia city list did not open"
                     key(proc, "select")
                     expect_clock(proc, state, out, "same-utc-new-city", 11, 0)
-                    # The setting is saved by a storage-idle callback.
-                    # Confirm that the write finished before closing SDL.
-                    saved = r"^time zone: Asia/Almaty$"
-                    pending = cfg.with_suffix(".cfg.new")
-                    until = time.monotonic() + 15
-                    while not any(path.exists() and
-                                  re.search(saved, path.read_text(), re.M)
-                                  for path in (pending, cfg)):
-                        assert time.monotonic() < until, "Time Zone was not saved"
-                        time.sleep(0.1)
+                    # SDL's close path flushes the storage-idle settings save.
                     stop(proc)
                     proc = start()
                     time.sleep(7)
                     expect_clock(proc, state, out, "restart-new-city", 11, 0)
-                    assert re.search(saved, cfg.read_text(), re.M)
+                    assert re.search(r"^time zone: Asia/Almaty$", cfg.read_text(), re.M)
                 finally:
                     stop(proc)
     print("SDL dummy: spring gap, fall fold, region/city selection and unchanged UTC PASS")

@@ -164,6 +164,18 @@ bool stock_db_open(struct stock_db *db, bool photos)
     return true;
 }
 
+off_t stock_db_size(void)
+{
+    int fd = open(ITUNES_CDB, O_RDONLY);
+    if (fd < 0)
+        fd = open(ITUNES_DB, O_RDONLY);
+    if (fd < 0)
+        return 0;
+    off_t size = ffilesize(fd);
+    close(fd);
+    return size;
+}
+
 bool stock_artwork_open(struct stock_db *db)
 {
     *db = (struct stock_db){.fd = open("/iPod_Control/Artwork/ArtworkDB", O_RDONLY)};

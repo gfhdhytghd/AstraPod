@@ -34866,6 +34866,160 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_VIDEO_SECONDS
+  desc: Stock Videos lists: a video shorter than a minute
+  user: core
+  <source>
+    *: "%d Seconds"
+  </source>
+  <dest>
+    *: "%d Seconds"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_VIDEO_ONE_EPISODE
+  desc: Stock TV Shows list: a show with one episode
+  user: core
+  <source>
+    *: "1 Episode"
+  </source>
+  <dest>
+    *: "1 Episode"
+  </dest>
+  <voice>
+    *: "1 Episode"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_VIDEO_EPISODES
+  desc: Stock TV Shows list: a show's episode count
+  user: core
+  <source>
+    *: "%d Episodes"
+  </source>
+  <dest>
+    *: "%d Episodes"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_VIDEO_UNKNOWN_RELEASE
+  desc: Stock TV show episode list: an episode with no release date
+  user: core
+  <source>
+    *: "Unknown Release Date"
+  </source>
+  <dest>
+    *: "Unknown Release Date"
+  </dest>
+  <voice>
+    *: "Unknown Release Date"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_VIDEO_ONE_VIDEO
+  desc: Stock Videos menu side pane: the library holds one video
+  user: core
+  <source>
+    *: "1 Video"
+  </source>
+  <dest>
+    *: "1 Video"
+  </dest>
+  <voice>
+    *: "1 Video"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_VIDEO_COUNT
+  desc: Stock Videos menu side pane: the library's video count
+  user: core
+  <source>
+    *: "%d Videos"
+  </source>
+  <dest>
+    *: "%d Videos"
+  </dest>
+  <voice>
+    *: ""
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_VIDEOS
+  desc: Stock Videos menu side pane: the library holds no videos
+  user: core
+  <source>
+    *: "No Videos"
+  </source>
+  <dest>
+    *: "No Videos"
+  </dest>
+  <voice>
+    *: "No Videos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_MOVIES
+  desc: Stock Videos menu side pane: no movies
+  user: core
+  <source>
+    *: "No Movies"
+  </source>
+  <dest>
+    *: "No Movies"
+  </dest>
+  <voice>
+    *: "No Movies"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_RENTALS
+  desc: Stock Videos menu side pane: no rentals
+  user: core
+  <source>
+    *: "No Rentals"
+  </source>
+  <dest>
+    *: "No Rentals"
+  </dest>
+  <voice>
+    *: "No Rentals"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_TV_SHOWS
+  desc: Stock Videos menu side pane: no TV shows
+  user: core
+  <source>
+    *: "No TV Shows"
+  </source>
+  <dest>
+    *: "No TV Shows"
+  </dest>
+  <voice>
+    *: "No TV Shows"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_FRUIT_NO_MUSIC_VIDEOS
+  desc: Stock Videos menu side pane: no music videos
+  user: core
+  <source>
+    *: "No Music Videos"
+  </source>
+  <dest>
+    *: "No Music Videos"
+  </dest>
+  <voice>
+    *: "No Music Videos"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_PHOTO_OTG
   desc: Stock media browser
   user: core

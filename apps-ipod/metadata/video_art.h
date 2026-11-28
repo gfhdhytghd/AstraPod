@@ -13,7 +13,7 @@
 #include "system/bg_task.h"
 
 /* The edge of the square a thumbnail is fitted inside */
-#define VIDEO_ART_DIM 56
+#define VIDEO_ART_DIM 55
 
 /* Register the task. Call once at startup, before bg_task_start(). */
 void video_art_init(void);

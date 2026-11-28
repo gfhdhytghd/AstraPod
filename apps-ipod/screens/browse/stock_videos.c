@@ -5,7 +5,8 @@
  * videos keep the category iTunes gave them; a video file copied to the
  * player outside it joins the category its MP4 media kind names, by the
  * video index (files/video_index.c), and a file with none is a movie. Both
- * play in the same viewer.
+ * play in the same viewer. In these lists Previous and Next do nothing and
+ * Play/Pause plays the selected video: none of the three controls the music.
  ****************************************************************************/
 #include <stdlib.h>
 #include <stdio.h>
@@ -20,10 +21,10 @@
 #include "root_menu.h"
 #include "settings/settings.h"
 #include "speech/talk.h"
-#include "system/format_time.h"
-#include "files/filetypes.h"
+#include "files/filetypes.h"             /* HAVE_VIDEO_PLAYER */
 #include "files/video_index.h"
 #include "metadata/video_art.h"
+#include "system/library_files.h"
 #include "plugins/rock_compat.h"
 #include "input/action.h"
 #include "ui/scene.h"
@@ -37,9 +38,12 @@
 #define MAX_PLAYLISTS 2048
 #define COVER_SIZE VIDEO_ART_DIM
 #define COVER_SOURCE 128
-#define VIDEO_PLACEHOLDER STOCK_ART_ALBUMLIST_PLACEHOLDER
 /* Covers kept drawn: a screen of rows and the ones scrolled in next */
 #define COVER_SLOTS 8
+/* A list of videos' rows, as stock's: with a cover, or a TV episode's
+ * shorter one with none */
+#define COVER_ROW 55
+#define EPISODE_ROW 44
 
 struct video_track {
     uint32_t id;
@@ -83,6 +87,7 @@ struct videos {
     char *loose_text;
     size_t loose_used, loose_size;
     int capacity;
+    bool episodes;              /* the rows are one show's episodes */
 };
 
 static bool text_at(const struct videos *v, off_t at, char *buf, size_t n)
@@ -308,29 +313,55 @@ static const char *playlist_title(int row, void *data, char *buf, size_t len)
            text_at(v, r.body, buf, len) ? buf : "Video playlist";
 }
 
-static enum themable_icons video_icon(int row, void *data)
+/* A length as stock writes it under a movie's title */
+static const char *format_length(uint32_t ms, char *buf, size_t size)
 {
-    (void)row;
-    (void)data;
-    return filetype_get_icon(FILE_ATTR_VIDEO);
+    unsigned seconds = ms / 1000;
+    if (seconds < 60)
+        snprintf(buf, size, str(LANG_VIDEO_SECONDS), seconds);
+    else if (seconds < 3600)
+        snprintf(buf, size, "%u:%02u", seconds / 60, seconds % 60);
+    else
+        snprintf(buf, size, "%u:%02u:%02u", seconds / 3600,
+                 seconds / 60 % 60, seconds % 60);
+    return buf;
 }
 
-static const char *video_duration(int row, void *data, char *buf, size_t size)
+/* The line under a video's title: an episode's release date, a music
+ * video's artist, or a film's length */
+static const char *video_value(int row, void *data, char *buf, size_t size)
 {
     const struct videos *v = data;
     if (row >= v->row_count)
         return NULL;
-    uint32_t duration = v->tracks[v->rows[row]].duration_ms;
-    if (!duration)
-        return NULL;
-    return format_time_auto(buf, size, duration / 1000,
-                            UNIT_SEC | UNIT_TRIM_ZERO, false);
+    const struct video_track *t = &v->tracks[v->rows[row]];
+    if (v->episodes)
+        return str(LANG_VIDEO_UNKNOWN_RELEASE);
+    if (t->media & STOCK_MUSIC_VIDEO)
+        return track_text(v, t, t->artist, buf, size) ? buf :
+               (const char *)str(LANG_VIDEO_UNKNOWN_ARTIST);
+    return t->duration_ms ? format_length(t->duration_ms, buf, size) : NULL;
+}
+
+static enum list_row_kind video_kind(int row, void *data)
+{
+    (void)row;
+    (void)data;
+    return LIST_ROW_VIDEO;
+}
+
+/* The stock picture a video of `media` shows while it has no cover */
+static int placeholder_of(uint32_t media)
+{
+    return (media & STOCK_TV_SHOW) ? STOCK_ART_MEDIA_TVSHOWSPROXY :
+           (media & STOCK_MUSIC_VIDEO) ? STOCK_ART_MEDIA_MUSICVIDEOSPROXY :
+           STOCK_ART_MEDIA_VIDEOSPROXY;
 }
 
 /* The stock placeholder, scaled to `edge` */
-static void paint_placeholder(fb_data *px, int edge)
+static void paint_placeholder(int id, fb_data *px, int edge)
 {
-    const struct stock_art *art = &stock_art[VIDEO_PLACEHOLDER];
+    const struct stock_art *art = &stock_art[id];
     fb_data line[COVER_SIZE];
     for (int y = 0; y < edge; y++)
     {
@@ -338,14 +369,14 @@ static void paint_placeholder(fb_data *px, int edge)
         for (int x = 0; x < edge; x++)
             line[x] = LCD_WHITE;
         if (art->width == edge)
-            stock_art_row(VIDEO_PLACEHOLDER, 0, sy, line, edge);
+            stock_art_row(id, 0, sy, line, edge);
         else
         {
             fb_data source[COVER_SOURCE];
             int width = MIN(art->width, COVER_SOURCE);
             for (int x = 0; x < width; x++)
                 source[x] = LCD_WHITE;
-            stock_art_row(VIDEO_PLACEHOLDER, 0, sy, source, width);
+            stock_art_row(id, 0, sy, source, width);
             for (int x = 0; x < edge; x++)
                 line[x] = source[x * width / edge];
         }
@@ -375,16 +406,16 @@ static bool load_cover(struct videos *v, const struct video_track *track,
             return true;
         }
     }
-    paint_placeholder(px, edge);
+    paint_placeholder(placeholder_of(track->media), px, edge);
     return false;
 }
 
-static const struct bitmap *video_cover(int row, void *data, struct dim *size)
+/* The cover of track `item`, from the slots */
+static const struct bitmap *cover_of(struct videos *v, int item,
+                                     struct dim *size)
 {
-    struct videos *v = data;
-    if (row >= v->row_count || !v->cover)
+    if (!v->cover)
         return NULL;
-    int item = v->rows[row];
     int edge = MIN(COVER_SIZE, MIN(size->width, size->height));
     if (edge <= 0)
         return NULL;
@@ -416,10 +447,15 @@ static const struct bitmap *video_cover(int row, void *data, struct dim *size)
     return &v->bitmap;
 }
 
-/* A loose video's cover made since its row was drawn: drawn again */
-static int videos_list_action(int action, struct gui_synclist *lists)
+static const struct bitmap *video_cover(int row, void *data, struct dim *size)
 {
-    struct videos *v = lists->data;
+    struct videos *v = data;
+    return row < v->row_count ? cover_of(v, v->rows[row], size) : NULL;
+}
+
+/* A loose video's cover made since its row was drawn is drawn again */
+static int fresh_covers(struct videos *v, int action)
+{
     unsigned generation = video_art_generation();
     if (generation != v->art_generation)
     {
@@ -435,7 +471,15 @@ static int videos_list_action(int action, struct gui_synclist *lists)
         if (stale && action == ACTION_NONE)
             action = ACTION_REDRAW;
     }
-    return stock_media_list_action(action, lists);
+    return action;
+}
+
+/* PLAY plays the selected video */
+static int videos_list_action(int action, struct gui_synclist *lists)
+{
+    if (action == ACTION_TREE_WPS)
+        return ACTION_STD_OK;
+    return stock_media_list_action(fresh_covers(lists->data, action), lists);
 }
 
 static int show_tracks(struct videos *v, char *title)
@@ -444,13 +488,13 @@ static int show_tracks(struct videos *v, char *title)
         return 0;
     struct simplelist_info info;
     simplelist_info_init(&info, title, v->row_count, v);
-    info.fruit_nav = true;
     info.get_name = video_title;
+    info.get_value = video_value;
+    info.get_kind = video_kind;
     info.action_callback = videos_list_action;
-    info.get_icon = video_icon;
-    info.get_albumart = video_cover;
-    info.get_subtitle = video_duration;
-    info.row_height = 54;
+    info.get_albumart = v->episodes ? NULL : video_cover;
+    info.video_rows = true;
+    info.row_height = v->episodes ? EPISODE_ROW : COVER_ROW;
     info.selection = 0;
     while (true)
     {
@@ -499,7 +543,6 @@ static int show_playlists(struct videos *v, char *title)
 {
     struct simplelist_info info;
     simplelist_info_init(&info, title, v->playlist_count, v);
-    info.fruit_nav = true;
     info.get_name = playlist_title;
     info.get_kind = video_folder_kind;
     info.action_callback = stock_media_list_action;
@@ -556,6 +599,7 @@ struct video_group_entry {
 };
 
 struct video_groups {
+    struct videos *v;
     struct video_group_entry *entries;
     int *first;
     bool all;
@@ -585,6 +629,31 @@ static const char *group_title(int row, void *data, char *buf, size_t size)
     return groups->entries[groups->first[row - groups->all]].name;
 }
 
+/* A show's episode count */
+static const char *group_value(int row, void *data, char *buf, size_t size)
+{
+    const struct video_groups *groups = data;
+    int episodes = groups->first[row + 1] - groups->first[row];
+    if (episodes == 1)
+        return str(LANG_VIDEO_ONE_EPISODE);
+    snprintf(buf, size, str(LANG_VIDEO_EPISODES), episodes);
+    return buf;
+}
+
+/* A show's cover is its first episode's */
+static const struct bitmap *group_cover(int row, void *data, struct dim *size)
+{
+    struct video_groups *groups = data;
+    return cover_of(groups->v, groups->entries[groups->first[row]].track,
+                    size);
+}
+
+static int group_action(int action, struct gui_synclist *lists)
+{
+    struct video_groups *groups = lists->data;
+    return stock_media_list_action(fresh_covers(groups->v, action), lists);
+}
+
 static int show_groups(struct videos *v, char *title, bool television)
 {
     int count = v->row_count;
@@ -592,7 +661,8 @@ static int show_groups(struct videos *v, char *title, bool television)
                             (count + 1) * sizeof(int));
     if (handle <= 0)
         return show_tracks(v, title);
-    struct video_groups groups = {.entries = core_get_data_pinned(handle),
+    struct video_groups groups = {.v = v,
+                                  .entries = core_get_data_pinned(handle),
                                   .all = !television};
     groups.first = (int *)(groups.entries + count);
     for (int i = 0; i < count; i++)
@@ -617,10 +687,17 @@ static int show_groups(struct videos *v, char *title, bool television)
 
     struct simplelist_info info;
     simplelist_info_init(&info, title, ngroups + groups.all, &groups);
-    info.fruit_nav = true;
     info.get_name = group_title;
     info.get_kind = video_folder_kind;
     info.action_callback = stock_media_list_action;
+    if (television)
+    {
+        info.get_value = group_value;
+        info.get_albumart = group_cover;
+        info.action_callback = group_action;
+        info.video_rows = true;
+        info.row_height = COVER_ROW;
+    }
     int rc = 0;
     while (!rc)
     {
@@ -640,12 +717,17 @@ static int show_groups(struct videos *v, char *title, bool television)
         char name[96];
         snprintf(name, sizeof(name), "%s",
                  group_title(info.selection, &groups, NULL, 0));
+        v->episodes = television;
         rc = show_tracks(v, name);
+        v->episodes = false;
     }
     core_unpin(handle);
     core_free(handle);
     return rc;
 }
+
+/* Where the video index's strings are read to */
+static struct video_index_text index_text;
 
 struct loose_count {
     int count;
@@ -726,9 +808,85 @@ static void sort_rows(struct videos *v)
     core_free(handle);
 }
 
+/* A video's category: TV over music video over movie */
+static unsigned category_of(uint32_t media)
+{
+    return (media & STOCK_TV_SHOW) ? STOCK_TV_SHOW :
+           (media & STOCK_MUSIC_VIDEO) ? STOCK_MUSIC_VIDEO : STOCK_MOVIE;
+}
+
+static void census_add(struct stock_video_census *census, uint32_t media)
+{
+    unsigned category = category_of(media);
+    if (category == STOCK_TV_SHOW)
+        census->tv_shows++;
+    else if (category == STOCK_MUSIC_VIDEO)
+        census->music_videos++;
+    else
+        census->movies++;
+}
+
+static bool census_loose(const struct video_entry *e, void *data)
+{
+    census_add(data, e->kind);
+    return true;
+}
+
+static off_t index_size(void)
+{
+    int fd = open(LIB_VIDEO_INDEX_FILE, O_RDONLY);
+    if (fd < 0)
+        return 0;
+    off_t size = ffilesize(fd);
+    close(fd);
+    return size;
+}
+
+/* Counted again only when the iTunes library or the video index has been
+ * written since */
+void stock_videos_census(struct stock_video_census *census)
+{
+    static struct stock_video_census counted;
+    static off_t counted_db = -1, counted_index = -1;
+    off_t db_size = stock_db_size(), loose_size = index_size();
+    if (db_size == counted_db && loose_size == counted_index)
+    {
+        *census = counted;
+        return;
+    }
+    counted = (struct stock_video_census){0};
+    struct videos v = {.art.fd = -1, .db.fd = -1};
+    struct stock_record list;
+    if (db_size && stock_db_open(&v.db, false) &&
+        stock_db_list(&v.db, 1, "mhlt", &list) && list.count)
+    {
+        unsigned count = MIN(list.count, MEDIA_LIMIT);
+        int handle = core_alloc(count * sizeof(*v.tracks) +
+                                MAX_PLAYLISTS * sizeof(*v.playlists));
+        if (handle > 0)
+        {
+            v.tracks = core_get_data_pinned(handle);
+            v.playlists = (off_t *)(v.tracks + count);
+            v.row_capacity = count;     /* a playlist's first video only */
+            read_tracks(&v, &list, count);
+            qsort(v.tracks, v.count, sizeof(*v.tracks), compare_id);
+            for (int i = 0; i < v.count; i++)
+                census_add(&counted, v.tracks[i].media);
+            read_playlists(&v);
+            counted.playlists = v.playlist_count;
+            core_unpin(handle);
+            core_free(handle);
+        }
+    }
+    stock_db_close(&v.db);
+    video_index_each(census_loose, &counted, &index_text);
+    counted_db = db_size;
+    counted_index = loose_size;
+    *census = counted;
+}
+
 int stock_videos_screen(enum stock_video_kind kind, int title)
 {
-    static struct video_index_text text;
     struct videos v = {.art.fd = -1, .db.fd = -1};
     struct stock_record list = {0};
     struct loose_count loose = {0};
@@ -739,7 +897,7 @@ int stock_videos_screen(enum stock_video_kind kind, int title)
         !stock_db_list(&v.db, 1, "mhlt", &list))
         list.count = 0;
     if (kind != STOCK_VIDEO_PLAYLISTS)
-        video_index_each(count_loose, &loose, &text);
+        video_index_each(count_loose, &loose, &index_text);
 
     unsigned count = MIN(list.count + loose.count, MEDIA_LIMIT);
     if (!count)
@@ -768,7 +926,7 @@ int stock_videos_screen(enum stock_video_kind kind, int title)
         read_artwork(&v);
     }
     if (loose.count)
-        video_index_each(add_loose, &v, &text);
+        video_index_each(add_loose, &v, &index_text);
     qsort(v.tracks, v.count, sizeof(*v.tracks), compare_id);
     if (kind == STOCK_VIDEO_PLAYLISTS)
     {
@@ -782,14 +940,8 @@ int stock_videos_screen(enum stock_video_kind kind, int title)
     else
     {
         for (int i = 0; i < v.count; i++)
-        {
-            uint32_t media = v.tracks[i].media;
-            unsigned category = (media & STOCK_TV_SHOW) ? STOCK_TV_SHOW
-                              : (media & STOCK_MUSIC_VIDEO) ? STOCK_MUSIC_VIDEO
-                              : STOCK_MOVIE;
-            if (category == kind)
+            if (category_of(v.tracks[i].media) == kind)
                 v.rows[v.row_count++] = i;
-        }
         if (v.row_count)
         {
             ui_scene_open_page(&scene, "videos-push");

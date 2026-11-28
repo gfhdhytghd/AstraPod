@@ -988,11 +988,61 @@ static bool fruit_media_pane(const struct menu_item_ex *item)
     return false;
 }
 
+/* Beside a Videos category, stock's film picture and the number of videos
+ * while it holds any, else its own empty picture and caption */
+static bool videos_pane(const struct menu_item_ex *item)
+{
+    static const struct {
+        const struct menu_item_ex *videos, *home;
+        int art, empty;
+    } rows[] = {
+        { &movies_row, &home_movies, STOCK_ART_NO_CONTENT_MOVIES_PREVIEW,
+          LANG_FRUIT_NO_MOVIES },
+        { &rentals_row, &home_rentals, STOCK_ART_NO_CONTENT_MOVIES_PREVIEW,
+          LANG_FRUIT_NO_RENTALS },
+        { &tv_shows_row, &home_tv_shows, STOCK_ART_NO_CONTENT_TVSHOW_PREVIEW,
+          LANG_FRUIT_NO_TV_SHOWS },
+        { &music_videos_row, &home_music_videos,
+          STOCK_ART_NO_CONTENT_MUSIC_VIDEO_PREVIEW, LANG_FRUIT_NO_MUSIC_VIDEOS },
+        { &video_playlists_row, &home_video_playlists,
+          STOCK_ART_NO_CONTENT_PLAYLIST_PREVIEW, LANG_CATALOG_NO_PLAYLISTS },
+        { &video_settings_row, NULL, STOCK_ART_NO_CONTENT_MOVIES_PREVIEW,
+          LANG_FRUIT_NO_VIDEOS },
+    };
+    for (unsigned i = 0; i < ARRAYLEN(rows); i++)
+    {
+        if (item != rows[i].videos && item != rows[i].home)
+            continue;
+        struct stock_video_census census;
+        stock_videos_census(&census);
+        int total = census.movies + census.tv_shows + census.music_videos;
+        int held = (const int[]){ census.movies, 0, census.tv_shows,
+                                  census.music_videos, census.playlists,
+                                  total }[i];
+        struct menu_pane_content c = {
+            .kind = LIST_PANE_PICTURE, .art = rows[i].art,
+            .x = 178, .y = 44, .baseline = 179,
+        };
+        if (held)
+        {
+            c.art = STOCK_ART_NO_CONTENT_MOVIES_PREVIEW;
+            snprintf(c.title, sizeof(c.title),
+                     str(total == 1 ? LANG_VIDEO_ONE_VIDEO : LANG_VIDEO_COUNT),
+                     total);
+        }
+        else
+            strlcpy(c.title, str(rows[i].empty), sizeof(c.title));
+        menu_pane_set_picture(&c);
+        return true;
+    }
+    return false;
+}
+
 enum list_pane_kind fruit_menu_item_pane(const struct menu_item_ex *menu,
                                          const struct menu_item_ex *item,
                                          int *art)
 {
-    if (extras_pane(item) || fruit_media_pane(item))
+    if (extras_pane(item) || fruit_media_pane(item) || videos_pane(item))
         return LIST_PANE_PICTURE;
     int bit = bit_of(home_bits, ARRAYLEN(home_bits), item);
     if (bit < 0)

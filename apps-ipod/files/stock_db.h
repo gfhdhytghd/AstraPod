@@ -36,6 +36,9 @@ struct stock_record {
 
 bool stock_artwork_open(struct stock_db *db);
 bool stock_db_open(struct stock_db *db, bool photos);
+/* The size of the iTunes library's file, 0 for none: it changes when
+ * iTunes writes a different library */
+off_t stock_db_size(void);
 void stock_db_close(struct stock_db *db);
 bool stock_db_list(const struct stock_db *db, unsigned section,
                    const char *tag, struct stock_record *list);

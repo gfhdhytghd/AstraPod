@@ -676,8 +676,10 @@ static void compose_still(struct stock_canvas *band,
         case LIST_PANE_PICTURE:
             if (c->paint)
                 c->paint(band);
-            if (c->art >= 0)
+            if (c->art >= 0 && stock_art[c->art].colors)
                 stock_art_put(band, c->art, c->x, c->y);
+            else if (c->art >= 0)
+                stock_art_mask(band, c->art, c->x, c->y, WHITE);
             break;
         default:
             if (c->art >= 0)

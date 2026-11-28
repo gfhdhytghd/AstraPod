@@ -78,7 +78,9 @@ def loose_media(disk):
     poster.unlink()
 
 
-def indexed_movie(disk):
+def itunes_db(disk, films):
+    """An iTunesDB of 'films', (title, media kind, length in ms) each, all
+    playing a copy of Movies/clip.m4v"""
     def record(kind, header, body, fields):
         data = bytearray(header)
         struct.pack_into("<4sII", data, 0, kind, header, header + len(body))
@@ -93,17 +95,23 @@ def indexed_movie(disk):
                       {12: kind})
 
     control = disk / "iPod_Control"
-    film = control / "Music/F00/TEST.m4v"
-    film.parent.mkdir(parents=True)
-    shutil.copyfile(disk / "Movies/clip.m4v", film)
-    track = record(b"mhit", 212, text(1, "Indexed Film") +
-                   text(2, ":iPod_Control:Music:F00:TEST.m4v"),
-                   {16: 1, 40: 3000, 208: 2})
-    tracks = record(b"mhlt", 12, track, {8: 1})
+    (control / "Music/F00").mkdir(parents=True)
+    tracks = b""
+    for number, (title, kind, length) in enumerate(films, 1):
+        name = f"TEST{number}.m4v"
+        shutil.copyfile(disk / "Movies/clip.m4v", control / "Music/F00" / name)
+        tracks += record(b"mhit", 212, text(1, title) +
+                         text(2, f":iPod_Control:Music:F00:{name}"),
+                         {16: number, 40: length, 208: kind})
+    tracks = record(b"mhlt", 12, tracks, {8: len(films)})
     section = record(b"mhsd", 16, tracks, {12: 1})
     database = control / "iTunes/iTunesDB"
     database.parent.mkdir()
     database.write_bytes(record(b"mhbd", 12, section, {}))
+
+
+def indexed_movie(disk):
+    itunes_db(disk, [("Indexed Film", 2, 3000)])
 
 
 def player(build, disk, theme):
@@ -229,13 +237,22 @@ class Sim:
                              f"read {value!r}")
 
 
+# The library of the stock firmware's Movies captures: three films of one
+# title, none with artwork
+STOCK_FILMS = [("Test Pattern", 2, 3725000), ("Test Pattern", 2, 95000),
+               ("Test Pattern", 2, 12000)]
+
+
 @contextmanager
-def session(build, case, theme="scrim"):
+def session(build, case, theme="scrim", library=None):
     disk = case / "disk"
     disk.mkdir(parents=True)
     player(build, disk, theme)
     media(disk)
-    if theme != "scrim":
+    if library:
+        itunes_db(disk, library)
+        shutil.rmtree(disk / "Movies")
+    elif theme != "scrim":
         indexed_movie(disk)
         loose_media(disk)
     state_path = case / "state.bin"
@@ -294,7 +311,33 @@ def video_settings(sim):
     assert tv_out == "tv out", tv_out
 
 
-def stock_navigation(sim, theme):
+def keep(sim, states, name):
+    """The settled screen as state 'name', for comparing with stock's"""
+    if states:
+        time.sleep(1.5)
+        states.mkdir(parents=True, exist_ok=True)
+        sim.image().save(states / f"{name}.png")
+
+
+def stock_states(build, case, theme, states):
+    """The screens stock was captured on, from stock's own library"""
+    with session(build, case, theme, STOCK_FILMS) as sim:
+        if theme == "classic":
+            sim.text("home", ["videos", "files"])
+        else:
+            sim.text("home", ["music", "videos", "photos"])
+            sim.tap("down")
+        sim.go("select", "videos-menu", ["movies", "3 videos"])
+        keep(sim, states, "videos-menu")
+        sim.step("select", "movies", ["test pattern", "12 seconds"])
+        keep(sim, states, "movies-placeholder")
+        sim.step("menu", "videos-back", ["music videos", "3 videos"])
+        sim.move("down", 5)
+        sim.go("select", "settings", ["tv signal", "alternate audio"])
+        keep(sim, states, "settings")
+
+
+def stock_navigation(sim, theme, states=None):
     if theme == "classic":
         sim.text("home", ["videos", "files"])
     else:
@@ -306,7 +349,10 @@ def stock_navigation(sim, theme):
     time.sleep(12)
     sim.step("select", "movies", ["covered film", "indexed film"],
              ["rentals"])
-    sim.move("down", 3)
+    keep(sim, states, "loose-plain")
+    sim.move("down")
+    keep(sim, states, "loose-covr")
+    sim.move("down", 2)
     sim.step("select", "movies-open", ["ipod video"])
     sim.text("movies-back", ["covered film", "film"], ["ipod video"])
     sim.step("menu", "videos-back", ["music videos", "video playlists"],
@@ -357,17 +403,25 @@ def main():
     parser.add_argument("--theme", action="append",
                         choices=("scrim", "classic", "fruit-company",
                                  "fruit-company-ultra"))
+    parser.add_argument("--states", type=lambda p: Path(p).resolve(),
+                        help="also save the screens stock was captured on "
+                        "under STATES/<theme>/")
     args = parser.parse_args()
     for theme in args.theme or ["scrim"]:
         case = args.evidence / theme
         case.mkdir(parents=True)
+        states = args.states / theme if args.states and \
+            theme != "scrim" else None
         with session(args.build, case, theme) as sim:
             if theme != "scrim":
-                stock_navigation(sim, theme)
+                stock_navigation(sim, theme, states)
             else:
                 loose_navigation(sim)
         print(f"PASS {theme} video navigation, list and player dispatch",
               flush=True)
+        if states:
+            stock_states(args.build, case / "stock", theme, states)
+            print(f"PASS {theme} stock states in {states}", flush=True)
 
 
 if __name__ == "__main__":

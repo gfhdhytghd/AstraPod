@@ -9,6 +9,11 @@
 #include "files/stock_db.h"
 
 int stock_videos_screen(enum stock_video_kind kind, int title);
+/* How many videos each Videos category holds, and the video playlists */
+struct stock_video_census {
+    int movies, tv_shows, music_videos, playlists;
+};
+void stock_videos_census(struct stock_video_census *census);
 int stock_photos_screen(void);
 int stock_photos_settings(void);
 int stock_videos_settings(void);

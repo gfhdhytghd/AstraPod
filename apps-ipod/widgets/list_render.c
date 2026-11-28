@@ -282,7 +282,7 @@ static void refresh_tokens(struct native_list *render)
                          UI_ACCESSORY_SELECTED ?
         ui_theme_font_load(&render->theme, UI_FONT_LIST_VALUE, glyphs) : -1;
     render->subtitle_font = render->theme.style[UI_STYLE_MENU_TREE] ==
-                            UI_MENU_TREE_STOCK ?
+                            UI_MENU_TREE_STOCK || ui_theme_art(&render->theme) ?
         ui_theme_font_load(&render->theme, UI_FONT_BODY, glyphs) : -1;
     round_rect_build_mask(render->mark_mask, 1,
                           render->theme.metric[UI_METRIC_LIST_SELECTION_ALPHA]);
@@ -1439,6 +1439,10 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
         !equals_lang(label, LANG_SHUFFLE_SONGS) &&
         !equals_lang(label, LANG_RANDOM_ALBUM))
         aux = chevron;
+    /* Stock marks a video row with its own picture where a chevron goes */
+    bool video_mark = kind == LIST_ROW_VIDEO && ui_theme_art(&render->theme);
+    if (kind == LIST_ROW_VIDEO)
+        aux = NULL;
     /* With stock accessories a setting shows its value in words instead;
      * otherwise a row Select changes in place does, where no glyph shows
      * the value. */
@@ -1486,8 +1490,10 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     if (agents && value && value[0] == 'r' && value[1] && value[2])
         ready &= list_text_ready(text_font, value + 2);
     int value_font = render->value_font >= 0 ? render->value_font : text_font;
-    int subtitle_font = render->subtitle_font >= 0 ? render->subtitle_font :
-                                                     value_font;
+    bool body_value = list->video_rows ||
+        render->theme.style[UI_STYLE_MENU_TREE] == UI_MENU_TREE_STOCK;
+    int subtitle_font = render->subtitle_font >= 0 && body_value ?
+                        render->subtitle_font : value_font;
     if (value_text)
         ready &= list_text_ready(value_font, value);
     if (list->value_below && value)
@@ -1521,7 +1527,8 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
             draw_text(render, clip, icon_cell, render->icon_font, fg,
                       row_icon(icon, kind, icon_label, files, activity, true),
                       false, 0, false);
-        text_x += cover_size + m[UI_METRIC_LIST_AUX_PADDING] + 1;
+        text_x += cover_size + m[UI_METRIC_LIST_AUX_PADDING] + 1 +
+                  list->video_rows;
     }
     else if (icon_column || marked >= 0)
     {
@@ -1569,6 +1576,10 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     int text_y = MAX(0, (row.height - text_height - subheight) / 2);
     if (list->value_below)
         text_y = (row.height - 40) / 2 - 1;
+    /* Stock's video rows start their text 7 rows down, or 2 in an
+     * episode's shorter row, and the value a row lower than an album's */
+    if (list->video_rows)
+        text_y = row.height >= 55 ? 7 : 2;
     /* With stock accessories a row's text keeps the text padding clear at
      * its right end, or stops short of the chevron, which keeps 6 columns
      * clear of the list's right edge, the scroll indicator's included. */
@@ -1578,7 +1589,13 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     int chevron_x = right + render->row_inset - 6 - glyph->width;
     bool art_chevron = aux == chevron && !rtl && ui_theme_art(&render->theme);
     int text_right = right;
-    if (aux == chevron && chevron_selected)
+    const struct stock_art *mark =
+        &stock_art[lit ? STOCK_ART_MEDIA_VIDEOSTATUSICON_WHITE :
+                         STOCK_ART_MEDIA_VIDEOSTATUSICON];
+    int mark_x = right + render->row_inset - 6 - mark->width;
+    if (video_mark)
+        text_right = mark_x - m[UI_METRIC_LIST_ACCESSORY_GAP];
+    else if (aux == chevron && chevron_selected)
         text_right = chevron_x - m[UI_METRIC_LIST_ACCESSORY_GAP];
     else if (aux)
         text_right = arrow - m[UI_METRIC_LIST_ACCESSORY_GAP];
@@ -1620,13 +1637,21 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
               scroll, list->offset_position[SCREEN_MAIN], false);
     if (list->value_below)
     {
+        /* A video's rule stops at its picture, which fills the row */
+        int pictured = list->video_rows && art ?
+                       MIN(m[UI_METRIC_LIST_ART_SIZE], row.height) : 0;
         if (!lit)
-            fill(clip, (struct ui_rect){ row.x, row.y + row.height - 1,
-                 row.width, 1 }, LCD_RGBPACK(218, 218, 218));
+            fill(clip, (struct ui_rect){ row.x + (rtl ? 0 : pictured),
+                 row.y + row.height - 1, row.width - pictured, 1 },
+                 list->video_rows ? LCD_RGBPACK(222, 223, 222) :
+                                    LCD_RGBPACK(218, 218, 218));
         if (value)
-            draw_text(render, clip, row_cell(row, text_x, text_y + 21,
-                      text_right - text_x, 15, rtl), subtitle_font,
-                      lit ? fg : LCD_RGBPACK(96, 96, 96), value, false, 0, false);
+            draw_text(render, clip, row_cell(row, text_x,
+                      text_y + 21 + list->video_rows, text_right - text_x, 15,
+                      rtl), subtitle_font,
+                      lit ? fg : list->video_rows ? LCD_RGBPACK(107, 109, 107) :
+                                                    LCD_RGBPACK(96, 96, 96),
+                      value, false, 0, false);
     }
     if (subheight && list_text_ready(value_font, subtitle))
         draw_text(render, clip, row_cell(row, text_x, text_y + text_height - 1,
@@ -1636,6 +1661,15 @@ static void paint_row(struct native_list *render, struct ui_rect clip,
     if (list->callback_get_item_subtitle && !lit)
         fill(clip, (struct ui_rect){row.x, row.y + row.height - 1, row.width, 1},
              LCD_RGBPACK(217, 217, 217));
+    if (video_mark)
+    {
+        struct ui_rect cell = row_cell(row, mark_x,
+                                       (row.height - mark->height) / 2,
+                                       mark->width, mark->height, rtl);
+        stock_art_draw(lit ? STOCK_ART_MEDIA_VIDEOSTATUSICON_WHITE :
+                             STOCK_ART_MEDIA_VIDEOSTATUSICON,
+                       cell.x, cell.y, intersection(clip, cell));
+    }
     if (art_chevron)
     {
         struct ui_rect cell = row_cell(row, chevron_x,

@@ -35,6 +35,7 @@
 #include <stdlib.h>
 
 #include "config.h"
+#include "ui/perf.h"
 #include "plugins/rock_compat.h"
 #include "plugins/rock_keymap_format.h"
 #include "lang.h"
@@ -1493,8 +1494,12 @@ int get_action(int context, int timeout)
     action_cur_t current;
     init_act_cur(&current, context, ui_scene_poll(timeout), NULL);
 
+    bool measure = ui_perf_enabled();
+    uint32_t start = measure ? USEC_TIMER : 0;
+    int requested_timeout = current.timeout;
     int action = get_action_worker(&action_last, &current);
-
+    if (measure)
+        ui_perf_note_action_wait((uint32_t)USEC_TIMER - start, requested_timeout);
 
     action = do_backlight(&action_last, &current, action);
     scene_takeover(action);

@@ -438,6 +438,14 @@ static unsigned motion_duration(const struct list_motion *motion)
            (motion->live.top == motion->rest.top ? 0 : motion->spring_frames);
 }
 
+/* A snapped marker can present every second refresh. Bound how long it
+ * keeps the action pump alive when it cannot submit a frame. */
+static unsigned motion_frame_limit(const struct list_motion *motion)
+{
+    unsigned duration = motion_duration(motion);
+    return motion->snap ? 2 * (duration + 2) : duration;
+}
+
 static bool motion_matches(const struct list_motion *motion, const struct list_geometry *g,
                             const struct gui_synclist *list)
 {
@@ -536,7 +544,8 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     uint32_t elapsed = now - motion->started;
     unsigned frame = ui_clock_frame(elapsed);
     struct list_pose from = { fixed_row(top), fixed_row(selection) };
-    bool continuing = motion->visible == visible && motion->pitch == g.pitch &&
+    bool continuing = frame < motion_frame_limit(motion) &&
+                      motion->visible == visible && motion->pitch == g.pitch &&
                       motion->count == list->nb_items && motion->span == span &&
                       !memcmp(&motion->bounds, &g.rows, sizeof(g.rows)) &&
                       motion->rest.top == from.top && motion->rest.cursor == from.cursor;
@@ -548,6 +557,13 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
         /* Carry the frame phase through rapid wheel events. Restarting the
          * clock at each detent would stall a glide when detents arrive < 1 f apart. */
         now -= elapsed - ui_frame_clock(frame);
+    }
+    else if (motion->visible)
+    {
+        /* This input starts a new glide. An old sample can otherwise
+         * span idle button waits and retain the scheduling boost. */
+        motion_stop(motion);
+        glide_pace.running = false;
     }
 
     struct list_pose rest = { fixed_row(list->start_item[SCREEN_MAIN]),
@@ -2363,7 +2379,10 @@ static bool update_row_pose(struct native_list *render, const struct list_geomet
     bool finished = false;
     if (motion_enabled() && motion_matches(motion, g, list))
     {
-        if (motion->snap)
+        unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER - motion->started);
+        if (frame >= motion_frame_limit(motion))
+            motion->painted = motion_duration(motion);
+        else if (motion->snap)
         {
             /* A jump of the rows is a frame of its own and carries the
              * marker's next step. */
@@ -2379,8 +2398,7 @@ static bool update_row_pose(struct native_list *render, const struct list_geomet
         else if (render->batched)
             motion->painted = batch_frame(render);
         else
-            motion->painted =
-                ui_clock_frame((uint32_t)USEC_TIMER - motion->started);
+            motion->painted = frame;
         pose = motion_sample(motion, motion->painted);
         finished = motion->painted >= motion_duration(motion);
     }
@@ -3184,11 +3202,13 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
             uint32_t elapsed = now - motion->started;
             /* A new frame waits for its presentation slot, so a half-rate
              * glide keeps its frame parity. */
-            bool due = motion->snap ? snap_due(render, now) :
+            unsigned frame = ui_clock_frame(elapsed);
+            bool due = frame >= motion_frame_limit(motion) ||
+                       (motion->snap ? snap_due(render, now) :
                        render->batched ?
                        (int32_t)(now - batch_deadline(render)) >= 0 :
-                       ui_clock_frame(elapsed) > motion->painted &&
-                       (int32_t)(now - glide_pace.due) >= 0;
+                       frame > motion->painted &&
+                       (int32_t)(now - glide_pace.due) >= 0);
             if (!motion_enabled() || due)
                 delay = 0;
             else if (poll && (motion->snap || render->batched))

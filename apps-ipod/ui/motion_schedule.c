@@ -3,6 +3,7 @@
 #include "kernel.h"
 #include "system.h"
 #include "thread.h"
+#include "motion_sched.h"
 #include "ui/motion_schedule.h"
 #include "ui/perf.h"
 
@@ -35,10 +36,22 @@ static void drop_scope(unsigned slot)
 #endif
 }
 
+static void publish_scopes(void)
+{
+#ifdef HAVE_MOTION_SCHED
+    long latest = current_tick;
+    for (unsigned i = 0; i < MOTION_SLOTS; i++)
+        if (scopes[i].token && TIME_AFTER(scopes[i].until, latest))
+            latest = scopes[i].until;
+    motion_sched_publish(scope_count != 0, latest);
+#endif
+}
+
 static int expire_scopes(void)
 {
     long now = current_tick;
     int delay = TIMEOUT_BLOCK;
+    unsigned previous = scope_count;
     for (unsigned i = 0; i < MOTION_SLOTS; i++)
     {
         if (!scopes[i].token)
@@ -50,6 +63,8 @@ static int expire_scopes(void)
         else if (delay == TIMEOUT_BLOCK || left < delay)
             delay = left;
     }
+    if (scope_count != previous)
+        publish_scopes();
     return delay;
 }
 
@@ -90,6 +105,7 @@ static unsigned acquire_scope(unsigned previous)
             if (scopes[i].token == previous)
             {
                 scopes[i].until = (unsigned long)current_tick + MOTION_LIMIT;
+                publish_scopes();
                 mutex_unlock(&lock);
                 return previous;
             }
@@ -114,6 +130,7 @@ static unsigned acquire_scope(unsigned previous)
 #endif
             semaphore_release(&wake);
         }
+        publish_scopes();
     }
     mutex_unlock(&lock);
     return token;
@@ -130,6 +147,7 @@ static void release_scope(unsigned token)
         if (token == scopes[i].token)
         {
             drop_scope(i);
+            publish_scopes();
             break;
         }
     }

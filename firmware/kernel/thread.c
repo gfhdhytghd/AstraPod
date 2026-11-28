@@ -31,6 +31,8 @@
 #include "hang_catch.h"
 #include "crumbs.h"
 #include "kernel.h"
+#include "motion_sched.h"
+#include "motion_sched.inc"
 #include "cpu.h"
 #include "string.h"
 #ifdef RB_PROFILE
@@ -859,6 +861,10 @@ void *wake_dbg_ra, *wake_dbg_obj;
 unsigned int wakeup_thread_(struct thread_entry *thread
                             IF_PRIO(, enum wakeup_thread_protocol proto))
 {
+#ifdef HAVE_MOTION_SCHED
+    if (proto == WAKEUP_TRANSFER)
+        thread = motion_disk_waiter(thread);
+#endif
     LOCK_THREAD(thread);
 
     /* Determine thread's current state. */
@@ -1051,6 +1057,10 @@ void switch_thread(void)
             thread_stkov(thread);
     }
 
+#ifdef HAVE_MOTION_SCHED
+    motion_watch_out(thread);
+#endif
+
     /* TODO: make a real idle task */
     for (;;)
     {
@@ -1081,6 +1091,9 @@ void switch_thread(void)
      * process got CPU time relative to the highest priority runnable
      * task. If priority is not a feature, then FCFS is used (above). */
     int max = priobit_ffs(&corep->rtr_dist.mask);
+#ifdef HAVE_MOTION_SCHED
+    int group_end = motion_group_end(max);
+#endif
 
     for (;;)
     {
@@ -1101,6 +1114,13 @@ void switch_thread(void)
          * thus are not subject to switchout due to lower-priority
          * processes aging; they must give up the processor by going
          * off the run list. */
+#ifdef HAVE_MOTION_SCHED
+        if (priority > group_end)
+        {
+            thread = RTR_THREAD_NEXT(thread);
+            continue;
+        }
+#endif
         if (LIKELY(priority <= max) ||
             (priority > PRIORITY_REALTIME &&
              (diff = priority - max, ++thread->skip_count > diff*diff)))
@@ -1116,6 +1136,9 @@ void switch_thread(void)
 
     rtr_queue_make_first(&corep->rtr, thread);
     corep->running = thread;
+#ifdef HAVE_MOTION_SCHED
+    motion_watch_in(thread);
+#endif
 #ifdef HAVE_HANG_CATCH_FIQ
     if (thread == hang_ui_thread)
         hang_ui_ran = current_tick; /* the freeze watch's UI liveness */

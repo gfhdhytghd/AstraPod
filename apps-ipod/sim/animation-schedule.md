@@ -14,12 +14,18 @@
 9. 等待后台工作完成。用后台任务页面确认扫描和封面缓存恢复。
 10. 导出 `/.rockbox/ui-perf.txt`。移除 `ui-perf.enable`。重启 iPod。
 11. 重复第 3 至 9 步，确认关闭日志时的可见效果。
+12. 在同一台 HDD 机型上重复一次。等硬盘休眠后发起非紧急重扫。
+13. 在同一轮动画中换到文件缓冲尚未填满的曲目。核对 PCM 欠载增量。
+14. 动画结束后观察后台重扫和缓存是否继续。
 
 每条 `route=` 摘要提供 `period_us`、`interval_p99_f`、
 `interval_worst_f` 和 `interval_misses`。用帧间隔乘以 `period_us`
 换算微秒。按相同主题、路由和刷新倍率比较。`database_frames` 和
 `art_frames` 是对应后台任务处于忙状态时采到的帧数。
 `pcm_chunks` 大于零表示采样期间播放消耗了 PCM 数据。
+CSV 中 `runnable_wait_us` 是 UI 可运行时的排队时间。
+`lock_wait_us` 是支持优先级继承的等待。`lock_site` 是最后一个该类阻塞点。
+`other_wait_us` 包含按键和其他阻塞。`action_wait_us` 为最长一次按键等待。
 PCM 欠载计数覆盖曲中耗尽缓冲的事件。正常曲尾和主动淡出不计入。
 
 ## 无窗口模拟器

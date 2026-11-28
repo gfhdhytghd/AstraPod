@@ -96,6 +96,10 @@ static const bool ata_error_srst = true;
 
 static int ata_reset(void);
 
+#include "motion_sched.h"
+#ifdef HAVE_MOTION_SCHED
+#define ATA_CLASSIC_MOTION
+#endif
 #include "ata-common.c"
 
 static uint16_t ata_read_cbr(uint32_t volatile* reg)
@@ -1062,8 +1066,8 @@ int ata_read_sectors(IF_MD(int drive,) sector_t start, int incount,
     (void)drive; /* unused for now */
 #endif
 
-    mutex_lock(&ata_mutex);
-    int rc = ata_transfer_sectors(start, incount, inbuf, false);
+    ata_motion_lock();
+    int rc = ata_motion_bulk(start, incount, inbuf, false);
     mutex_unlock(&ata_mutex);
     return rc;
 }
@@ -1075,8 +1079,8 @@ int ata_write_sectors(IF_MD(int drive,) sector_t start, int count,
     (void)drive; /* unused for now */
 #endif
 
-    mutex_lock(&ata_mutex);
-    int rc = ata_transfer_sectors(start, count, (void*)((uint32_t)outbuf), true);
+    ata_motion_lock();
+    int rc = ata_motion_bulk(start, count, (void*)outbuf, true);
     mutex_unlock(&ata_mutex);
     return rc;
 }
@@ -1213,6 +1217,10 @@ standby_failed:
 
 void ata_spin(void)
 {
+#ifdef HAVE_MOTION_SCHED
+    if (motion_sched_defer_io())
+        return;
+#endif
     if (ata_ssd_mode && !ata_powered)
     {
         mutex_lock(&ata_mutex);
@@ -1247,6 +1255,9 @@ long ata_last_disk_activity(void)
 int ata_init(void)
 {
     mutex_init(&ata_mutex);
+#ifdef HAVE_MOTION_SCHED
+    motion_sched_set_disk_mutex(&ata_mutex);
+#endif
     semaphore_init(&ata_wakeup, 1, 0);
     semaphore_init(&mmc_wakeup, 1, 0);
     semaphore_init(&mmc_comp_wakeup, 1, 0);
@@ -1425,6 +1436,11 @@ int ata_event(long id, intptr_t data)
     }
     else if (id == Q_STORAGE_PRE_WAKE)
     {
+#ifdef HAVE_MOTION_SCHED
+        /* The pre-wake is speculative. Actual reads still wake the drive. */
+        if (motion_sched_active())
+            return 0;
+#endif
         if (ata_ssd_mode && !ata_powered)
         {
             mutex_lock(&ata_mutex);

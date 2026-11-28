@@ -6,6 +6,7 @@
 #include "config.h"
 #include "kernel.h"
 #include "thread.h"
+#include "motion_sched.h"
 #include "ui/motion_schedule.h"
 
 static struct semaphore work, resumed;
@@ -21,6 +22,60 @@ static void probe_background(void)
         semaphore_release(&resumed);
     }
 }
+
+#ifdef HAVE_MOTION_SCHED
+static long audio_stack[DEFAULT_STACK_SIZE / sizeof(long)];
+static struct mutex test_disk;
+static unsigned dispatch_count, normal_order, audio_order;
+
+static void normal_request(void)
+{
+    mutex_lock(&test_disk);
+    normal_order = ++dispatch_count;
+    mutex_unlock(&test_disk);
+}
+
+static void audio_request(void)
+{
+    mutex_lock(&test_disk);
+    audio_order = ++dispatch_count;
+    mutex_unlock(&test_disk);
+}
+
+static void probe_bands(void)
+{
+    mutex_init(&test_disk);
+    motion_sched_set_disk_mutex(&test_disk);
+    mutex_lock(&test_disk);
+
+    struct ui_motion motion = ui_motion_begin("probe-bands");
+    assert(motion_sched_active());
+    unsigned normal = create_thread(normal_request, worker_stack,
+        sizeof(worker_stack), 0, "probe normal", PRIORITY_BACKGROUND);
+    assert(normal);
+    for (int i = 0; i < 72; i++)
+        yield();
+    /* Sleeping lets normal enqueue first, behind the UI-owned object. */
+    assert(test_disk.blocker.priority == PRIORITY_IDLE);
+    sleep(2);
+    assert(test_disk.blocker.priority == PRIORITY_BACKGROUND);
+
+    unsigned audio = create_thread(audio_request, audio_stack,
+        sizeof(audio_stack), 0, "probe audio", PRIORITY_MOTION_AUDIO);
+    assert(audio);
+    yield();
+    /* PIP put the UI owner in the audio band. */
+    assert(test_disk.blocker.priority == PRIORITY_MOTION_AUDIO);
+    mutex_unlock(&test_disk);
+    assert(audio_order == 1 && normal_order == 0);
+    ui_motion_end(&motion);
+    thread_wait(audio);
+    thread_wait(normal);
+    assert(normal_order == 2);
+    motion_sched_set_disk_mutex(NULL);
+    fprintf(stderr, "PASS bands: normal excluded, priority inherited, audio first\n");
+}
+#endif
 
 void sim_motion_probe(void)
 {
@@ -70,5 +125,8 @@ void sim_motion_probe(void)
     ui_motion_end(&fresh);
     assert(!ui_motion_active());
     thread_wait(worker);
+#ifdef HAVE_MOTION_SCHED
+    probe_bands();
+#endif
     fprintf(stderr, "PASS motion: nesting, timeout, priority restoration and worker resume\n");
 }

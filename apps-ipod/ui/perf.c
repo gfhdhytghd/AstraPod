@@ -21,6 +21,7 @@
 #include "string-extra.h"
 #include "system.h"
 #include "thread.h"
+#include "motion_sched.h"
 
 #define PERF_MARKER ROCKBOX_DIR "/ui-perf.enable"
 #define PERF_LOG ROCKBOX_DIR "/ui-perf.txt"
@@ -44,6 +45,9 @@ struct frame_sample {
     struct cover_work cover;
     uint32_t render, submit, submit_overhead, interval, skipped, phase;
     uint32_t dma_phase, caption_copy_us, caption_overhead_us;
+    uint32_t run_wait, lock_wait, other_wait, action_wait;
+    uintptr_t lock_site;
+    int action_timeout;
     uint8_t divisor;
     uint8_t parts;
     /* TE rises since the last submission began, and refreshes since the
@@ -61,6 +65,11 @@ struct frame_capture {
     struct pcmbuf_counters pcm;
     unsigned seen, render_misses, work_misses, interval_misses, half_frames;
     unsigned database_frames, art_frames;
+    uint32_t action_wait;
+    int action_timeout;
+#ifdef HAVE_MOTION_SCHED
+    struct motion_sched_wait previous_wait;
+#endif
     uint32_t worst_render, worst_work, worst_interval, skipped;
     uint32_t render_pending, last_submission, period_q8;
     uint32_t last_start, last_phase, last_present;
@@ -212,6 +221,9 @@ static unsigned begin_capture(const char *route, bool passive)
     capture->hw_offset_pending = -1;
     core_put_data_pinned(capture);
     owner = thread_self();
+#ifdef HAVE_MOTION_SCHED
+    motion_sched_watch(owner);
+#endif
     if (++serial == 0)
         ++serial;
     active_passive = passive;
@@ -318,6 +330,19 @@ void ui_perf_add_transfer(struct ui_perf_transfers *timing, uint32_t start, unsi
     add_transfer(timing, start, USEC_TIMER, part);
 }
 
+void ui_perf_note_action_wait(uint32_t elapsed, int timeout)
+{
+    if (active_handle <= 0 || owner != thread_self())
+        return;
+    struct frame_capture *capture = core_get_data_pinned(active_handle);
+    if (elapsed >= capture->action_wait)
+    {
+        capture->action_wait = elapsed;
+        capture->action_timeout = timeout;
+    }
+    core_put_data_pinned(capture);
+}
+
 void ui_perf_note_submit(uint32_t elapsed_clock)
 {
     if (active_handle <= 0 || owner != thread_self())
@@ -351,6 +376,19 @@ void ui_perf_note_transfers(const struct ui_perf_transfers *timing)
                                   .caption_rows = capture->caption_pending,
                                   .hw_offset = capture->hw_offset_pending,
                                   .band_rows = capture->band_rows_pending };
+    sample.action_wait = capture->action_wait;
+    sample.action_timeout = capture->action_timeout;
+    capture->action_wait = 0;
+    capture->action_timeout = 0;
+#ifdef HAVE_MOTION_SCHED
+    struct motion_sched_wait wait = motion_sched_get_wait();
+    sample.run_wait = wait.runnable - capture->previous_wait.runnable;
+    sample.lock_wait = wait.inherited - capture->previous_wait.inherited;
+    sample.other_wait = wait.other - capture->previous_wait.other;
+    if (sample.lock_wait)
+        sample.lock_site = wait.lock_site;
+    capture->previous_wait = wait;
+#endif
     if (sample.parts == UI_PERF_CAPTION)
     {
         sample.caption_copy_us = sample.submit;
@@ -481,7 +519,9 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
         "last_dma_start_phase_us,target_changes,cache_wait_us,caption_us,"
         "motion_us,project_us,columns_us,blit_us,clear_us,render_other_us,"
         "art_copy_us,art_submit_overhead_us,caption_copy_us,caption_submit_overhead_us,"
-        "te_slots,present_slots,hw_offset,band_rows\n";
+        "te_slots,present_slots,hw_offset,band_rows,"
+        "runnable_wait_us,lock_wait_us,other_wait_us,action_wait_us,"
+        "action_timeout_ticks,lock_site\n";
     static const char *const parts[] = { "-", "a", "c", "ac" };
     uint32_t period_q8 = capture->period_q8;
     uint32_t period = (period_q8 + 128) >> 8;
@@ -500,7 +540,8 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
         int n = snprintf(output + used, size - used,
             "%u," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT "," FRAME_FORMAT
             ",%u,%u,%u,%u,%d,%s,%u,%u," FRAME_FORMAT ",%d,%u,%u,%u"
-            ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%d,%d,%u\n",
+            ",%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%d,%d,%d,%u"
+            ",%u,%u,%u,%u,%d,%lx\n",
             i + 1, FRAME_ARG(render_f), FRAME_ARG(submit_f), FRAME_ARG(work_f),
             FRAME_ARG(interval_f), work > period, interval_miss,
             (unsigned)sample->skipped, sample->divisor,
@@ -520,7 +561,10 @@ static size_t format_rows(const struct frame_capture *capture, unsigned first,
             sample->te_slots == UINT8_MAX ? -1 : (int)sample->te_slots,
             sample->present_slots == UINT8_MAX ? -1 :
                                                  (int)sample->present_slots,
-            sample->hw_offset, sample->band_rows);
+            sample->hw_offset, sample->band_rows,
+            (unsigned)sample->run_wait, (unsigned)sample->lock_wait,
+            (unsigned)sample->other_wait, (unsigned)sample->action_wait,
+            sample->action_timeout, (unsigned long)sample->lock_site);
         if (n < 0 || (size_t)n >= size - used)
             break;
         used += n;
@@ -535,6 +579,9 @@ void ui_perf_end(unsigned token)
     struct pcmbuf_counters pcm = pcmbuf_get_counters();
     int handle = active_handle;
     active_handle = 0;
+#ifdef HAVE_MOTION_SCHED
+    motion_sched_watch(0);
+#endif
     struct frame_capture *capture = core_get_data_pinned(handle);
     unsigned retained = MIN(capture->seen, PERF_CAPACITY);
     unsigned first = capture->seen - retained;
@@ -546,7 +593,7 @@ void ui_perf_end(unsigned token)
     unsigned interval_worst = as_frames(capture->worst_interval, period_q8);
     int phase_p50 = phase_arg(percentile(capture, first, PHASE, 50));
     int phase_p99 = phase_arg(percentile(capture, first, PHASE, 99));
-    size_t rows_size = 530 + (size_t)retained * 310;
+    size_t rows_size = 650 + (size_t)retained * 380;
     int rows_handle = retained ? core_alloc_free_space(rows_size) : 0;
     char *rows = NULL;
     size_t rows_used = 0;

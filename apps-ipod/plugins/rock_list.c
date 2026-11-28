@@ -40,7 +40,7 @@ static void activate(struct gui_synclist *list)
 
     rock_list_release(false);
     rock_flush_settings();
-    list_scope = rock_display_native_begin();
+    list_scope = rock_display_native_begin(false);
     active = list;
 }
 
@@ -52,7 +52,7 @@ void rock_list_init(struct gui_synclist *list, list_get_name get_name,
         rock_list_release(false);
 
     /* Resolve default geometry under native chrome without presenting a list. */
-    struct rock_native_scope scope = rock_display_native_begin();
+    struct rock_native_scope scope = rock_display_native_begin(false);
     gui_synclist_init(list, get_name, data, scroll_all, selected_size, parent);
     rock_display_native_end(&scope, ROCK_RESUME_SILENT);
 }

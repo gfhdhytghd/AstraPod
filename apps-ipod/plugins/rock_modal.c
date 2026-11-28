@@ -8,7 +8,7 @@ struct rock_native_scope rock_modal_begin(void)
 {
     rock_list_release(false);
     rock_flush_settings();
-    return rock_display_native_begin();
+    return rock_display_native_begin(false);
 }
 
 void rock_modal_end_with_resume(const struct rock_native_scope *scope,

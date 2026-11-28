@@ -82,6 +82,7 @@ enum plugin_status plugin_start""")
         .themed_controls = request->themed_controls,
         .accent = request->accent,
         .resume_menu = request->resume_menu,
+        .control_centre = request->control_centre,
     };
     result = video_h264_play_named(path, buffer, buffer_size, &options);
     switch (result)
@@ -124,7 +125,28 @@ elif src.name == "video_playback.c":
     replace("""    case ACTION_WPS_MENU:
         return VIDEO_INPUT_MENU;""", """    case ACTION_WPS_MENU:
     case ACTION_STD_CANCEL:
-        return VIDEO_INPUT_EXIT;""")
+        return VIDEO_INPUT_EXIT;
+    case ACTION_WPS_QUICKSCREEN:
+    {
+        if (!osd->options || !osd->options->control_centre)
+            break;
+        bool resume = !*paused;
+        long opened = *rb->current_tick;
+        video_set_paused(true, paused, start_tick, pause_started,
+                         have_audio, cpu_boosted);
+        if (!osd->options->control_centre())
+            return VIDEO_INPUT_USB;
+        long elapsed = *rb->current_tick - opened;
+        if (osd->mode != VIDEO_OVERLAY_HIDDEN)
+            osd->until += elapsed;
+        if (osd->pending_seek)
+            osd->seek_until += elapsed;
+        if (resume)
+            video_set_paused(false, paused, start_tick, pause_started,
+                             have_audio, cpu_boosted);
+        *redraw = true;
+        break;
+    }""")
     replace("int action = rb->get_action(CONTEXT_WPS, TIMEOUT_NOBLOCK);",
             "int action = rb->get_action(CONTEXT_VIDEO_PLAYBACK, TIMEOUT_NOBLOCK);")
 

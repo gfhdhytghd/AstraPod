@@ -50,6 +50,7 @@ struct video_play_options
     unsigned accent; /* RGB565 theme accent. */
     /* Standard menu result: 0 resumes, 1 restarts, MENU_ATTACHED_USB exits. */
     int (*resume_menu)(void);
+    bool (*control_centre)(void); /* False on USB takeover. */
 };
 
 int video_h264_play_named(const char *path, void *buffer, size_t size,

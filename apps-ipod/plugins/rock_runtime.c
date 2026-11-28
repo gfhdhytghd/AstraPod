@@ -24,6 +24,7 @@
 #include "metadata/cuesheet.h"
 #include "metadata/mp4_chapters.h"
 #include "root_menu.h"
+#include "screens/playback/quick_screen.h"
 #include "pcm_waveform.h"
 #include "sound.h"
 #include "timer.h"
@@ -688,6 +689,21 @@ static int rock_video_resume_menu(void)
     return rock_do_menu(&menu, NULL, NULL, false);
 }
 
+static bool rock_video_control_centre(void)
+{
+    if (usb_taken)
+        return false;
+
+    rock_flush_settings();
+    struct rock_native_scope scope = rock_display_native_begin(true);
+    if (quick_screen_quick(ACTION_WPS_QUICKSCREEN) == QUICKSCREEN_IN_USB)
+        rock_usb_takeover();
+    /* Direct YUV blits bypass the framebuffer. The player repaints its
+     * cached frame after it regains the display. */
+    rock_modal_end_with_resume(&scope, ROCK_RESUME_SILENT);
+    return !usb_taken;
+}
+
 static bool rock_video_themed_controls(void)
 {
     return ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC ||
@@ -855,7 +871,7 @@ static void rock_progress(int current, int total, const char *fmt, ...)
     va_end(args);
 
     rock_list_release(false);
-    struct rock_native_scope scope = rock_display_native_begin();
+    struct rock_native_scope scope = rock_display_native_begin(false);
     splash_progress(current, total, "%s", text);
     rock_display_native_end(&scope, ROCK_RESUME_SILENT);
 }
@@ -1159,6 +1175,7 @@ static int invoke_module(void *opaque)
         .themed_controls = themed_video,
         .accent = themed_video ? ui_theme_rgb565(UI_COLOR_WPS_ACCENT) : 0,
         .resume_menu = themed_video ? rock_video_resume_menu : NULL,
+        .control_centre = rock_video_control_centre,
     };
     const void *parameter = call->file;
     if (video)
@@ -1445,6 +1462,7 @@ int rock_open_video(const char *path, const char *title, bool has_previous)
         .themed_controls = themed,
         .accent = ui_theme_rgb565(UI_COLOR_WPS_ACCENT),
         .resume_menu = themed ? rock_video_resume_menu : NULL,
+        .control_centre = rock_video_control_centre,
     };
     int result = rock_open_foreground(ROCK_VIDEO_MODULE, path, false, false,
                                       &request);

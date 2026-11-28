@@ -9,11 +9,13 @@
  * Draws the stock 2.0.5 look in Classic / Fruit Company / Fruit Company
  * Ultra and uses Scrim's native theme palette in Scrim.
  ****************************************************************************/
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "string-extra.h"
 #include "config.h"
+#include "system.h"
 #include "kernel.h"
 #include "core_alloc.h"
 #include "file.h"
@@ -178,6 +180,8 @@ struct cal_rrule {
 struct cal_reminder {
     uint16_t year;
     uint8_t month, day, hour, minute;      /* hour == 255 -> all-day (00:00) */
+    bool utc, zoned;
+    struct time_zone zone;
     int16_t offset_min;                    /* VALARM TRIGGER in minutes */
     struct cal_rrule rrule;
     char summary[48];
@@ -555,13 +559,8 @@ static void scan_alarm_file(const char *path)
             continue;
         *colon = '\0';
         char *val = colon + 1;
-        char *semi = strchr(line, ';');
-        char *params = NULL;
-        if (semi)
-        {
-            *semi = '\0';
-            params = semi + 1;
-        }
+        size_t key = strcspn(line, ";");
+        const char *params = line + key;
         const char *prop = line;
 
         if (strcasecmp(prop, "BEGIN") == 0)
@@ -610,12 +609,14 @@ static void scan_alarm_file(const char *path)
 
         if (sec == SEC_VEVENT)
         {
-            if (strcasecmp(prop, "DTSTART") == 0)
+            if (key == 7 && !strncasecmp(prop, "DTSTART", key))
             {
                 ics_parse_datetime(val, &ev.year, &ev.month, &ev.day,
                                    &ev.hour, &ev.minute);
-                if (params && strcasestr(params, "VALUE=DATE"))
-                    ev.hour = 255;
+                size_t len = strlen(val);
+                ev.utc = len > 8 && val[len - 1] == 'Z';
+                if (!calendar_ics_zone(params, &ev.zone, &ev.zoned))
+                    ev.year = 0;
             }
             else if (strcasecmp(prop, "SUMMARY") == 0)
                 ics_unescape(val, ev.summary, sizeof(ev.summary), false);
@@ -627,7 +628,7 @@ static void scan_alarm_file(const char *path)
             if (strcasecmp(prop, "ACTION") == 0 &&
                 strcasecmp(val, "NONE") == 0)
                 ev_alarm_ignore = true;
-            else if (strcasecmp(prop, "TRIGGER") == 0)
+            else if (key == 7 && !strncasecmp(prop, "TRIGGER", key))
             {
                 int16_t off = 0;
                 if (ics_parse_trigger(val, &off))
@@ -704,8 +705,18 @@ bool extras_calendars_due_event(long minute, char *summary, size_t size,
             continue;
         const struct cal_reminder *r = &cal_reminders[i];
         time_t event_utc = (time_t)(minute - r->offset_min) * 60 + 946684800L;
+        time_t event_time = event_utc;
         struct tm event_local;
-        clock_localtime(event_utc, &event_local);
+        if (r->zoned)
+        {
+            int dst;
+            event_utc += time_zone_offset(&r->zone, event_utc, &dst);
+            gmtime_r(&event_utc, &event_local);
+        }
+        else if (r->utc)
+            gmtime_r(&event_utc, &event_local);
+        else
+            clock_localtime(event_utc, &event_local);
         int ev_tod = event_local.tm_hour * 60 + event_local.tm_min;
         int ev_h = ev_tod / 60;
         int ev_m = ev_tod % 60;
@@ -722,10 +733,11 @@ bool extras_calendars_due_event(long minute, char *summary, size_t size,
                 fired_mask |= (1u << i);
             if (summary && size)
                 strlcpy(summary, r->summary, size);
+            clock_localtime(event_time, &event_local);
             if (hour)
-                *hour = want_h;
+                *hour = event_local.tm_hour;
             if (min)
-                *min = want_m;
+                *min = event_local.tm_min;
             if (sound_mode)
                 *sound_mode = alarm_sound;
             return true;
@@ -1306,7 +1318,8 @@ struct day_ctx {
     struct ical_index *idx;
     struct extras_date shown;
     int events[ICAL_MAX_EVENTS];
-    int count, legacy_count;
+    int count;
+    unsigned legacy_count;
     char legacy[DAY_EVENTS_MAX][96];
     int sub_font;
 };

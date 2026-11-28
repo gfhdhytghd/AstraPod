@@ -17,9 +17,4 @@ void extras_clock_put_large(struct stock_canvas *band, int hour, int minute);
 void extras_clock_pane_paint(struct stock_canvas *band);
 
 /* Shared timezone/city table interface for Settings > Date & Time > Time Zone. */
-int extras_clock_city_count(void);
-const char *extras_clock_city_name(int city);
-int extras_clock_home_city(void);
-void extras_clock_set_home_city(int city, bool adjust_rtc);
-
 #endif

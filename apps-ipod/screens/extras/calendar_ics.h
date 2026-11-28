@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include <time.h>
 
+struct time_zone;
+
+bool calendar_ics_zone(const char *params, struct time_zone *zone, bool *found);
+
 struct calendar_stamp {
     time_t seconds;
     bool absolute, all_day;

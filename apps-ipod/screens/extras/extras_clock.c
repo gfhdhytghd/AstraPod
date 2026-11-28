@@ -292,67 +292,6 @@ static void clocks_save(void)
     close(fd);
 }
 
-static void civil_from_days(long z, int *y, int *m, int *d)
-{
-    z += 719468;
-    long era = (z >= 0 ? z : z - 146096) / 146097;
-    long doe = z - era * 146097;
-    long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    long mp = (5 * doy + 2) / 153;
-    *d = (int)(doy - (153 * mp + 2) / 5 + 1);
-    *m = (int)(mp < 10 ? mp + 3 : mp - 9);
-    *y = (int)(yoe + era * 400 + (*m <= 2));
-}
-
-int extras_clock_city_count(void)
-{
-    return (int)ARRAYLEN(cities);
-}
-
-const char *extras_clock_city_name(int city)
-{
-    if (city < 0 || city >= (int)ARRAYLEN(cities))
-        return "";
-    return cities[city].name;
-}
-
-int extras_clock_home_city(void)
-{
-    if (!clock_count)
-        clocks_load();
-    return clocks[0];
-}
-
-void extras_clock_set_home_city(int city, bool adjust_rtc)
-{
-    if (city < 0 || city >= (int)ARRAYLEN(cities))
-        return;
-    if (!clock_count)
-        clocks_load();
-    int prev = clocks[0];
-    if (adjust_rtc && city != prev)
-    {
-        struct tm tm = *get_time();
-        long local_day;
-        long utc = player_utc(prev, &local_day);
-        long local = utc + city_offset(city, utc);
-        long day = (local >= 0 ? local : local - 1439) / 1440;
-        long mins = local - day * 1440;
-        int y, m, d;
-        civil_from_days(day, &y, &m, &d);
-        tm.tm_year = y - 1900;
-        tm.tm_mon = m - 1;
-        tm.tm_mday = d;
-        tm.tm_hour = (int)(mins / 60);
-        tm.tm_min = (int)(mins % 60);
-        tm.tm_wday = (int)(((day + 4) % 7 + 7) % 7);
-        set_time(&tm);
-    }
-    clocks[0] = city;
-    clocks_save();
-}
-
 /* ---- the painters ---- */
 
 #define ROW_H 80

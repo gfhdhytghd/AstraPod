@@ -38,7 +38,7 @@ static int digits(const char *text, int n)
     return value;
 }
 
-static bool find_zone(const char *params, struct time_zone *zone, bool *found)
+bool calendar_ics_zone(const char *params, struct time_zone *zone, bool *found)
 {
     *found = false;
     while (*params == ';')
@@ -94,7 +94,7 @@ bool calendar_ics_stamp(const char *params, const char *value,
 
     struct time_zone zone;
     bool zoned;
-    if (!find_zone(params, &zone, &zoned) || (zoned && (date || utc)))
+    if (!calendar_ics_zone(params, &zone, &zoned) || (zoned && (date || utc)))
         return false;
     time_t instant = zoned ? time_zone_to_utc(&zone, &tm) : civil;
     if (instant < 0)

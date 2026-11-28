@@ -98,11 +98,22 @@ def split_push(shots, push=True):
         row_error, seam = min(candidates)
         if row_error > 3 or seam < 12:
             continue
-        right = now[:, HALF:]
-        track.append((ms, seam, error(right, before[:, HALF:]),
-                      error(right, after[:, HALF:])))
-    return {"different": error(before[:, HALF:], after[:, HALF:]),
-            "frames": track}
+        track.append((ms, seam, now[:, HALF:]))
+
+    # Compare with the preview as the rows finish sliding. The Home art
+    # can pan on its own later while the recording is still running.
+    settled = after
+    if track:
+        for ms, image in shots:
+            if ms > track[-1][0]:
+                now = gray(image)[24:170]
+                if error(now[:, :HALF], after[:, :HALF]) <= 3:
+                    settled = now
+                    break
+    return {"different": error(before[:, HALF:], settled[:, HALF:]),
+            "frames": [(ms, seam, error(pane, before[:, HALF:]),
+                        error(pane, settled[:, HALF:]))
+                       for ms, seam, pane in track]}
 
 
 def round_trip(home_row, menu_row):

@@ -55,6 +55,7 @@ class Playback:
             "cover": "&center_index",
             "cover_visible": "&'carousel.c'::pf_shown",
             "cover_state": "&'carousel.c'::pf_state",
+            "album_panel": "&'carousel.c'::panel.live",
         }
         activities = sorted(set(SCREEN_ACTIVITY.values()))
         args = ["gdb", "-nx", "-batch", str(binary)]

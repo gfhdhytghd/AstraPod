@@ -38,6 +38,7 @@ from ultra_sim import (FRUIT, HITCH_MS, REFRESH_MS, ULTRA,  # noqa: E402
                        compare, difference, motion_span,
                        perf_routes, write_review)
 from coverflow_back_stack_sim import prepare_fixture  # noqa: E402
+from fruit_wheel_transport_sim import Playback, wait_for  # noqa: E402
 from ui_stock_transitions_sim import FPS, H, W  # noqa: E402
 
 REVIEW = Path("/tmp/fruit-company-ultra-review/coverflow")
@@ -72,7 +73,7 @@ def record(sim, frames, key, second=None, at_ms=0):
     seen, got = sim.frames_since(0)
     shots = [(0.0, Image.frombytes("RGB", (W, H), got[-1]))]
     keys = key.split()
-    hold = (5 if len(keys) > 1 else 2) / FPS
+    hold = (2 if key in ("up", "down") else 6) / FPS
     pending = [(0, "down " + name) for name in keys]
     pending += [(hold, "up " + name) for name in keys]
     if second:
@@ -96,6 +97,13 @@ def record(sim, frames, key, second=None, at_ms=0):
     return shots
 
 
+def press(sim, key, settle):
+    sim.send("down " + key)
+    sim.wait(6)
+    sim.send("up " + key)
+    sim.wait(settle)
+
+
 def open_music(sim):
     # Boot can still consume the first SELECT. Wait for the title change
     # before sending the SELECT that is supposed to enter Cover Flow.
@@ -103,14 +111,35 @@ def open_music(sim):
     _, frames = sim.frames_since(0)
     home = Image.frombytes("RGB", (W, H), frames[-1]).crop(title).tobytes()
     for _ in range(2):
-        sim.send("down select")
-        sim.wait(6)
-        sim.send("up select")
-        sim.wait(80)
+        press(sim, "select", 80)
         _, frames = sim.frames_since(0)
         if Image.frombytes("RGB", (W, H), frames[-1]).crop(title).tobytes() != home:
             return
     raise AssertionError("Music did not open from Home")
+
+
+def prepare_paused_track(sim):
+    playback = Playback(Path(sim.process.args[0]), sim.process.pid)
+    try:
+        covers = playback.activities["ACTIVITY_ALBUMCOVERS"]
+        wps = playback.activities["ACTIVITY_WPS"]
+        assert playback.activity() == covers, "Album close left Cover Flow"
+        assert not playback.get("album_panel", size=1), "Album close stayed in the album"
+        press(sim, "select", 95)   # Reopen the centred album.
+        wait_for(lambda: playback.get("album_panel", size=1), "The album did not open")
+        press(sim, "select", 150)  # Start its first track.
+        wait_for(lambda: playback.activity() == wps and playback.get("status") == 1,
+                 "The album track did not start")
+        press(sim, "play", 30)
+        wait_for(lambda: playback.get("status") == 3, "Now Playing did not pause")
+        press(sim, "menu", 120)
+        wait_for(lambda: playback.activity() == covers, "MENU did not return to Cover Flow")
+        if playback.get("album_panel", size=1):
+            press(sim, "menu", 100)
+            assert playback.activity() == covers, "Album close left Cover Flow"
+            assert not playback.get("album_panel", size=1), "Album close stayed in the album"
+    finally:
+        playback.close()
 
 
 def script(sim, theme):
@@ -128,11 +157,7 @@ def script(sim, theme):
     sim.wait(30)
     out["album-close"] = record(sim, 100, "menu")
     sim.wait(40)
-    sim.tap("select", 95)                       # reopen the centred album
-    sim.tap("select", 205)                      # start its first track
-    sim.tap("play", 30)                         # keep the WPS end frame stable
-    sim.tap("menu", 120)                        # return to the track list
-    sim.tap("menu", 100)                        # close the album
+    prepare_paused_track(sim)
     sim.wait(45)
     for _ in range(4):
         sim.tap("down", 16)

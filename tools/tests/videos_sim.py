@@ -173,7 +173,7 @@ def session(build, case, theme="scrim"):
     disk.mkdir(parents=True)
     player(build, disk, theme)
     media(disk)
-    if theme != "scrim":
+    if theme not in ("scrim", "light"):
         indexed_movie(disk)
     state_path = case / "state.bin"
     env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy",
@@ -279,14 +279,14 @@ def main():
     parser.add_argument("build", type=lambda p: Path(p).resolve())
     parser.add_argument("evidence", type=lambda p: Path(p).resolve())
     parser.add_argument("--theme", action="append",
-                        choices=("scrim", "classic", "fruit-company",
+                        choices=("scrim", "light", "classic", "fruit-company",
                                  "fruit-company-ultra"))
     args = parser.parse_args()
     for theme in args.theme or ["scrim"]:
         case = args.evidence / theme
         case.mkdir(parents=True)
         with session(args.build, case, theme) as sim:
-            if theme != "scrim":
+            if theme not in ("scrim", "light"):
                 stock_navigation(sim, theme)
             else:
                 loose_navigation(sim)

@@ -10,8 +10,13 @@
 
 int video_h264_probe(const char *path, void *buffer, size_t size);
 
-enum mode { FINISH, SEEK_MENU, SCRUB_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR };
+enum mode {
+    FINISH, SEEK_MENU, SCRUB_MENU, USB_EXIT, DECODE_ERROR, SEEK_INIT_ERROR,
+    COMPACT_SCRUB_TIMED, COMPACT_SCRUB_SELECT,
+};
+enum control_style { NO_CONTROLS, THEMED_CONTROLS, COMPACT_CONTROLS };
 static enum mode mode;
+static enum control_style controls;
 static volatile long current_tick;
 static unsigned int thread_id = 1;
 static unsigned int opens, closes, active, configured, decoded, drawn, seeks;
@@ -22,8 +27,12 @@ static uint8_t picture[16 * 16 * 3 / 2];
 static unsigned control_action, resume_calls;
 static int resume_choice;
 static long paused_at;
-static bool exercise_controls;
 static bool saw_timeout;
+static unsigned control_centre_calls, picture_changes;
+static unsigned volume_changes;
+static int picture_mode;
+static long scrub_at, seek_at;
+static bool scrub_cleared;
 
 static unsigned audio_opens, audio_closes, audio_seeks;
 static bool audio_active;
@@ -82,6 +91,8 @@ static struct vpu_h264 *open_video(void *buffer, size_t size, int w, int h)
     assert(!active && buffer && size >= size_for(w, h));
     assert(w == 320 && h == 240);
     opens++;
+    if (opens == 2)
+        seek_at = current_tick;
     active = 1;
     return buffer;
 }
@@ -160,7 +171,59 @@ static int action(int context, int timeout)
     assert(context == CONTEXT_VIDEO_PLAYBACK && timeout == TIMEOUT_NOBLOCK);
     if (decoded < 4)
         return ACTION_NONE;
-    if (exercise_controls)
+    if (mode == COMPACT_SCRUB_TIMED || mode == COMPACT_SCRUB_SELECT)
+    {
+        switch (control_action)
+        {
+        case 0:
+        case 1:
+            control_action++;
+            return ACTION_WPS_BROWSE;
+        case 2:
+            scrub_at = current_tick;
+            control_action++;
+            return ACTION_WPS_VOLUP;
+        case 3:
+        {
+            long delay = mode == COMPACT_SCRUB_TIMED ? 30 : 10;
+            if (current_tick < scrub_at + delay)
+                return ACTION_NONE;
+            control_action++;
+            if (mode == COMPACT_SCRUB_SELECT)
+                return ACTION_WPS_BROWSE;
+            scrub_at = current_tick;
+            return ACTION_WPS_VOLUP;
+        }
+        default:
+            return opens == 2 ? ACTION_WPS_MENU : ACTION_NONE;
+        }
+    }
+    if (controls == COMPACT_CONTROLS)
+    {
+        switch (control_action)
+        {
+        case 0: control_action++; return ACTION_WPS_BROWSE;
+        case 1: control_action++; return ACTION_WPS_QUICKSCREEN;
+        case 2: control_action++; return ACTION_WPS_BROWSE;
+        case 3: control_action++; return ACTION_WPS_BROWSE;
+        case 4:
+        case 5:
+        case 6: control_action++; return ACTION_WPS_VOLUP;
+        case 7: control_action++; return ACTION_WPS_BROWSE;
+        case 8: control_action++; return ACTION_WPS_VOLUP;
+        case 9: control_action++; return ACTION_WPS_BROWSE;
+        case 10: control_action++; return ACTION_WPS_VOLDOWN;
+        case 11:
+            paused_at = current_tick;
+            control_action++;
+            return ACTION_WPS_PLAY;
+        case 12:
+            if (current_tick > paused_at + 4 * HZ)
+                return ACTION_WPS_MENU;
+            break;
+        }
+    }
+    else if (controls == THEMED_CONTROLS)
     {
         switch (control_action)
         {
@@ -226,6 +289,59 @@ static struct font *font(int id) { (void)id; return NULL; }
 static int val2phys(int setting, int value) { (void)setting; return value; }
 static int minimum(int setting) { (void)setting; return -80; }
 static const char *unit(int setting) { (void)setting; return "dB"; }
+static int battery_level(void) { return 62; }
+
+static void check_compact_controls(const unsigned char *plane, int stride)
+{
+    int footer_left = plane[213 * stride + 11];
+    int footer_right = plane[213 * stride + 309];
+    int middle = plane[213 * stride + 210];
+    int top = plane[10 * stride + 12];
+    int battery = plane[10 * stride + 290];
+    int handle_pixels = 0;
+    for (int col = 10; col < 310; col++)
+        handle_pixels += plane[217 * stride + col] > 225;
+
+    assert(plane[10 * stride + 244] == 112);
+    switch (control_action)
+    {
+    case 0:
+        assert(footer_left == 112 && footer_right == 112);
+        assert(top == 112 && battery == 112);
+        break;
+    case 1:
+    case 2:
+    case 8:
+    case 10:
+        assert(footer_left != 112 && footer_right != 112 && !handle_pixels);
+        assert(top != 112 && battery != 112);
+        break;
+    case 3:
+        assert(footer_left != 112 && footer_right != 112 && handle_pixels == 4);
+        break;
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+        assert(footer_left == 112 && footer_right != 112 && middle == 112);
+        break;
+    case 9:
+    case 11:
+        assert(footer_left != 112 && footer_right == 112 && middle == 112);
+        assert(top != 112 && battery != 112);
+        break;
+    case 12:
+        assert(top != 112);
+        if (current_tick == paused_at + 4 * HZ)
+        {
+            assert(footer_left == 112 && footer_right == 112 && battery == 112);
+            saw_timeout = true;
+        }
+        else
+            assert(footer_left != 112 && footer_right == 112 && battery != 112);
+        break;
+    }
+}
 
 static void draw(unsigned char * const src[3], int sx, int sy, int stride,
                  int x, int y, int w, int h)
@@ -233,7 +349,15 @@ static void draw(unsigned char * const src[3], int sx, int sy, int stride,
     assert(active && src[0] && src[1] && src[2]);
     assert(!x && !y && !sx && !sy &&
            stride == LCD_WIDTH && w == LCD_WIDTH && h == LCD_HEIGHT);
-    if (exercise_controls)
+    if (mode == COMPACT_SCRUB_SELECT && control_action == 4)
+    {
+        assert(src[0][213 * stride + 11] == 112);
+        assert(src[0][213 * stride + 309] == 112);
+        scrub_cleared = true;
+    }
+    if (controls == COMPACT_CONTROLS)
+        check_compact_controls(src[0], stride);
+    else if (controls == THEMED_CONTROLS)
     {
         /* The uniform source remains visible through the inset panels. */
         int rail = src[0][208 * stride + 300];
@@ -269,7 +393,24 @@ static int resume_menu(void)
     return resume_choice;
 }
 
-static void adjust_volume(int delta) { (void)delta; }
+static bool control_centre(void)
+{
+    control_centre_calls++;
+    current_tick += 42;
+    return true;
+}
+
+static int scale_picture(int step)
+{
+    if (step)
+    {
+        picture_changes++;
+        picture_mode = (picture_mode + step + 3) % 3;
+    }
+    return picture_mode;
+}
+
+static void adjust_volume(int delta) { if (delta) volume_changes++; }
 
 static const struct settings settings = {
     .backlight_timeout = 17, .video_fit = true,
@@ -323,8 +464,13 @@ static void reset(enum mode next)
     current_tick = 0;
     sent_menu = sent_seek = false;
     control_action = 0;
-    exercise_controls = false;
+    controls = NO_CONTROLS;
     saw_timeout = false;
+    control_centre_calls = picture_changes = 0;
+    volume_changes = 0;
+    picture_mode = 0;
+    scrub_at = seek_at = 0;
+    scrub_cleared = false;
     mode = next;
     rock_h264_begin(scratch, sizeof(scratch));
 }
@@ -415,7 +561,7 @@ int main(int argc, char **argv)
     reset(FINISH);
     assert(video_h264_play(argv[1], scratch, sizeof(scratch)) == VIDEO_FINISHED);
     reset(FINISH);
-    exercise_controls = true;
+    controls = THEMED_CONTROLS;
     assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
            VIDEO_EXIT);
     assert(!resume_calls && saw_timeout);
@@ -439,7 +585,7 @@ int main(int argc, char **argv)
     assert(resume_calls == 3 && decoded == 336);
 
     reset(FINISH);
-    exercise_controls = true;
+    controls = THEMED_CONTROLS;
     assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
            VIDEO_EXIT);
     assert(resume_calls == 3);
@@ -448,6 +594,29 @@ int main(int argc, char **argv)
     assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &options) ==
            VIDEO_FINISHED);
     assert(resume_calls == 4 && drawn < 336);
+
+    reset(FINISH);
+    controls = COMPACT_CONTROLS;
+    struct video_play_options compact = options;
+    compact.compact_controls = true;
+    compact.control_centre = control_centre;
+    compact.picture_mode = scale_picture;
+    compact.battery_level = battery_level;
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &compact) ==
+           VIDEO_EXIT);
+    assert(saw_timeout && control_centre_calls == 1);
+    assert(picture_changes == 3 && picture_mode == 0 && volume_changes == 2);
+
+    compact.resume_menu = NULL;
+    reset(COMPACT_SCRUB_TIMED);
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &compact) ==
+           VIDEO_EXIT);
+    assert(seek_at == scrub_at + HZ / 2 && volume_changes == 0);
+
+    reset(COMPACT_SCRUB_SELECT);
+    assert(video_h264_play_named(argv[1], scratch, sizeof(scratch), &compact) ==
+           VIDEO_EXIT);
+    assert(seek_at == scrub_at + 10 && scrub_cleared && picture_changes == 0);
 
     rock_h264_end();
     puts("PASS H.264 lifecycle, timed video controls, resume choices and USB");

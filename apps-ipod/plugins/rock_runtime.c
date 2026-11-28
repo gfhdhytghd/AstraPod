@@ -723,6 +723,16 @@ static bool rock_video_themed_controls(void)
            ui_wheel_navigation();
 }
 
+static unsigned rock_video_accent(void)
+{
+    const char *theme = ui_theme_active_name();
+    unsigned accent = ui_theme_rgb565(UI_COLOR_WPS_ACCENT);
+    if (!strcmp(theme, ui_theme_builtin_name(UI_THEME_CLASSIC)) ||
+        !strcmp(theme, ui_theme_builtin_name(UI_THEME_FRUIT_COMPANY)))
+        accent |= ROCK_VIDEO_COMPACT_CONTROLS;
+    return accent;
+}
+
 static bool rock_set_int(const unsigned char *title, const char *unit, int voice_unit,
                          const int *value, void (*changed)(int), int step, int min,
                          int max, const char *(*format)(char *, size_t, int, const char *))
@@ -1186,7 +1196,7 @@ static int invoke_module(void *opaque)
         .battery_level = battery_level,
         .result = ROCK_VIDEO_FAILED,
         .themed_controls = themed_video,
-        .accent = themed_video ? ui_theme_rgb565(UI_COLOR_WPS_ACCENT) : 0,
+        .accent = themed_video ? rock_video_accent() : 0,
         .resume_menu = themed_video ? rock_video_resume_menu : NULL,
         .control_centre = rock_video_control_centre,
         .picture_mode = rock_video_picture_mode,
@@ -1474,7 +1484,7 @@ int rock_open_video(const char *path, const char *title, bool has_previous)
         .has_previous = has_previous,
         .result = ROCK_VIDEO_FAILED,
         .themed_controls = themed,
-        .accent = ui_theme_rgb565(UI_COLOR_WPS_ACCENT),
+        .accent = rock_video_accent(),
         .resume_menu = themed ? rock_video_resume_menu : NULL,
         .control_centre = rock_video_control_centre,
         .picture_mode = rock_video_picture_mode,

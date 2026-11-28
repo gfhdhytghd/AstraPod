@@ -25,6 +25,9 @@ enum rock_video_result {
     ROCK_VIDEO_NEXT,
 };
 
+/* Appearance flags above the RGB565 accent. */
+#define ROCK_VIDEO_COMPACT_CONTROLS (1u << 16)
+
 /* Borrowed for one video invocation. */
 struct rock_video_request {
     const char *path;

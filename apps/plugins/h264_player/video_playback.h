@@ -47,6 +47,7 @@ struct video_play_options
     int max_volume;
     bool has_previous;
     bool themed_controls;
+    bool compact_controls;
     unsigned accent; /* RGB565 theme accent. */
     /* Standard menu result: 0 resumes, 1 restarts, MENU_ATTACHED_USB exits. */
     int (*resume_menu)(void);

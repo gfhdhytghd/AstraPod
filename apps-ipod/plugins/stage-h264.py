@@ -80,7 +80,8 @@ enum plugin_status plugin_start""")
         .has_previous = request->has_previous,
         .max_volume = rb->sound_max(SOUND_VOLUME),
         .themed_controls = request->themed_controls,
-        .accent = request->accent,
+        .compact_controls = (request->accent & ROCK_VIDEO_COMPACT_CONTROLS) != 0,
+        .accent = request->accent & 0xffff,
         .resume_menu = request->resume_menu,
         .control_centre = request->control_centre,
         .picture_mode = request->picture_mode,
@@ -470,6 +471,9 @@ int video_h264_play(const char *filepath,""")
             "    VIDEO_OVERLAY_VOLUME,\n    VIDEO_OVERLAY_PICTURE,")
     replace("    enum video_overlay mode;",
             "    enum video_overlay mode;\n    int picture_mode;")
+    replace("    bool stock = osd->options != NULL;",
+            "    bool stock = osd->options != NULL;\n"
+            "    bool compact = stock && osd->options->compact_controls;")
     replace("    struct video_osd osd = {.options = options, .title = title};",
             """    struct video_osd osd = {
         .options = options,
@@ -480,10 +484,12 @@ int video_h264_play(const char *filepath,""")
     replace("""        if (osd->mode == VIDEO_OVERLAY_SCRUB)
             mode = VIDEO_OVERLAY_HIDDEN;""",
             """        if (osd->mode == VIDEO_OVERLAY_SCRUB)
-            mode = stock && osd->options->picture_mode ?
+            mode = stock && osd->options->picture_mode &&
+                !(compact && osd->pending_seek) ?
                 VIDEO_OVERLAY_PICTURE : VIDEO_OVERLAY_HIDDEN;
         if (osd->mode == VIDEO_OVERLAY_PICTURE)
-            mode = VIDEO_OVERLAY_HIDDEN;""")
+            mode = compact ?
+                VIDEO_OVERLAY_PROGRESS : VIDEO_OVERLAY_HIDDEN;""")
     replace("""        *redraw = true;
         if (osd->mode == VIDEO_OVERLAY_SCRUB)
         {""",
@@ -495,6 +501,20 @@ int video_h264_play(const char *filepath,""")
         }
         else if (osd->mode == VIDEO_OVERLAY_SCRUB)
         {""")
+    replace("""            video_preview_seek(osd, position, duration, direction * step,
+                               HZ / 3);""",
+            """            long delay = compact ? HZ / 2 : HZ / 3;
+            video_preview_seek(osd, position, duration, direction * step,
+                               delay);""")
+    replace("""    case ACTION_WPS_PLAY:
+        video_set_paused(!*paused, paused, start_tick, pause_started,
+                         have_audio, cpu_boosted);
+        video_osd_show(osd, VIDEO_OVERLAY_PROGRESS);""",
+            """    case ACTION_WPS_PLAY:
+        video_set_paused(!*paused, paused, start_tick, pause_started,
+                         have_audio, cpu_boosted);
+        video_osd_show(osd, compact && osd->mode == VIDEO_OVERLAY_VOLUME ?
+                            VIDEO_OVERLAY_VOLUME : VIDEO_OVERLAY_PROGRESS);""")
     replace("static void video_draw_themed_controls(",
             """static const char *video_picture_label(const struct video_osd *osd)
 {
@@ -502,7 +522,18 @@ int video_h264_play(const char *filepath,""")
     return labels[osd->picture_mode];
 }
 
+#include "plugins/video_controls.h"
+
 static void video_draw_themed_controls(""")
+    replace("""    if (osd->options && osd->options->themed_controls)
+    {""", """    if (osd->options && osd->options->compact_controls)
+    {
+        video_draw_compact_controls(planes, paused, position_ms, duration_ms,
+                                    osd);
+        return;
+    }
+    if (osd->options && osd->options->themed_controls)
+    {""")
     replace("""        rb->snprintf(right_text, sizeof(right_text), "%d%%", percent);
     }
     else""",

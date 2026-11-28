@@ -205,10 +205,10 @@ static int codec_load_ram(struct codec_api *api)
         return CODEC_ERROR;
     }
 
-    /* Version 51 appends the optional ALAC functions after the entire v50 API. */
+    /* The Classic ALAC additions retain the earlier API layouts. */
     if ((hdr->api_version != CODEC_API_VERSION
 #ifdef HAVE_SM1_ALAC_API
-         && hdr->api_version != 50
+         && hdr->api_version != 51 && hdr->api_version != 50
 #endif
         ) ||
         c_hdr->api_size > sizeof(struct codec_api))

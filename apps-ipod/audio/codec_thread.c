@@ -40,6 +40,9 @@
 #include "buffering.h"
 #include "dsp_core.h"
 #include "metadata.h"
+#ifdef HAVE_SM1_ALAC_API
+#include "file.h"
+#endif
 #include "settings/settings.h"
 
 /* Define LOGF_ENABLE to enable logf output in this file */
@@ -456,6 +459,20 @@ void codec_strip_filesize_callback(off_t size)
 }
 
 #ifdef HAVE_SM1_ALAC_API
+/* Owned by the codec thread for the current run. */
+static int alac_table_fd = -1;
+
+static size_t codec_alac_read_at(off_t offset, void *buffer, size_t size)
+{
+    if (alac_table_fd < 0)
+        alac_table_fd = open(ci.id3->path, O_RDONLY);
+    if (alac_table_fd < 0 || lseek(alac_table_fd, offset, SEEK_SET) != offset)
+        return 0;
+
+    ssize_t bytes = read(alac_table_fd, buffer, size);
+    return bytes < 0 ? 0 : (size_t)bytes;
+}
+
 static bool codec_alac_begin(unsigned depth, unsigned channels, unsigned pb,
                              unsigned kb, unsigned mb)
 {
@@ -570,6 +587,13 @@ static void run_codec(void)
 #endif
         status = codec_run_proc();
 
+#ifdef HAVE_SM1_ALAC_API
+    if (alac_table_fd >= 0)
+    {
+        close(alac_table_fd);
+        alac_table_fd = -1;
+    }
+#endif
     if (!encoder)
     {
         crumb(CR_CODEC_DONE, status);
@@ -701,6 +725,7 @@ void INIT_ATTR codec_thread_init(void)
     ci.alac_begin = codec_alac_begin;
     ci.alac_frame = sm1_alac_frame;
     ci.alac_end = sm1_alac_end;
+    ci.alac_read_at = codec_alac_read_at;
 #endif
 
     /* Init threading */

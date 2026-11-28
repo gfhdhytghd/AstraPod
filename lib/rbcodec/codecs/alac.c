@@ -25,8 +25,7 @@
 #ifdef HAVE_SM1_ALAC_API
 #include "alac_packet.h"
 
-/* Fetch stsz in groups. Each refill restores the codec file position before
- * requesting any audio, including on failure. */
+/* Fetch stsz in groups without resetting the streaming audio handle. */
 struct alac_sizes {
     unsigned char bytes[128 * 4];
     uint32_t first, count;
@@ -37,16 +36,31 @@ static unsigned alac_size(struct alac_sizes *cache, const demux_res_t *demux,
 {
     if (index < cache->first || index - cache->first >= cache->count)
     {
-        off_t saved = ci->curpos;
-        uint64_t pos = (uint64_t)(uint32_t)demux->sample_byte_sizes_offset + 4ULL * index;
+        uint64_t pos = (uint64_t)(uint32_t)demux->sample_byte_sizes_offset
+                       + 4ULL * index;
         unsigned count = demux->num_sample_byte_sizes - index;
         if (count > 128)
             count = 128;
-        if (pos + 4 * count > (uint64_t)ci->filesize || !ci->seek_buffer(pos))
+        size_t size = count * 4;
+        if (ci->filesize < 0 || pos + size > (uint64_t)ci->filesize)
             return 0;
-        size_t got = ci->read_filebuf(cache->bytes, count * 4);
-        if (!ci->seek_buffer(saved) || got != count * 4)
-            return 0;
+
+        if (ci->audio_hid >= 0)
+        {
+            if (!ci->alac_read_at ||
+                ci->alac_read_at(pos, cache->bytes, size) != size)
+                return 0;
+        }
+        else
+        {
+            /* The offline converter owns its input stream. */
+            off_t saved = ci->curpos;
+            if (!ci->seek_buffer(pos))
+                return 0;
+            size_t got = ci->read_filebuf(cache->bytes, size);
+            if (!ci->seek_buffer(saved) || got != size)
+                return 0;
+        }
         cache->first = index;
         cache->count = count;
     }

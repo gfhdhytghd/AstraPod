@@ -49,6 +49,7 @@
 #include "core_alloc.h"
 #include "database/tagcache.h"
 #include "system/bg_task.h"
+#include "ui/motion_schedule.h"
 #include "system/debug_log.h"
 #include "files/filetypes.h"
 #include "files/path_list.h"
@@ -131,7 +132,7 @@ static bool fi_check_abort(void)
     if (fi_abort)
         return true;
 
-    if (bg_task_should_stop(&file_index_task))
+    if (ui_motion_active() || bg_task_should_stop(&file_index_task))
     {
         fi_abort = true;
         return true;

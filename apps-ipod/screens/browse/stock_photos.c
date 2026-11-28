@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "ui/motion_schedule.h"
 #include "config.h"
 #include "backlight.h"
 #include "audio.h"
@@ -216,6 +217,9 @@ static void draw_photo(const struct albums *a, int sel, fb_data *pixels)
 static void transition(const fb_data *before, const fb_data *after, fb_data *mix)
 {
     int mode = global_settings.photo_transition;
+    struct ui_motion motion = {0};
+    if (mode != PHOTO_CUT)
+        motion = ui_motion_begin("photo-slideshow");
     for (int i = 1; mode != PHOTO_CUT && i < 16; i++)
     {
         if (mode == PHOTO_WIPE || mode == PHOTO_CENTER)
@@ -260,6 +264,7 @@ static void transition(const fb_data *before, const fb_data *after, fb_data *mix
     }
     lcd_bitmap(after, 0, 0, LCD_WIDTH, LCD_HEIGHT);
     lcd_update();
+    ui_motion_end(&motion);
 }
 
 static void slideshow_light(bool on)

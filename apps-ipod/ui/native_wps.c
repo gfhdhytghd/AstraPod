@@ -42,6 +42,7 @@
 #include "frame.h"
 #include "native_theme_runtime.h"
 #include "native_wps.h"
+#include "motion_schedule.h"
 #include "perf.h"
 #include "retained.h"
 #include "theme_art.h"
@@ -148,7 +149,7 @@ struct native_wps {
     int progress_span, volume_span;
     int level[BANDS], peak[BANDS];
     long meter_due;
-    unsigned motion_trace;
+    struct ui_motion motion_trace;
     bool volume_visible, volume_muted, volume_known, remote_meter, motion_tried;
     bool current_art_only, cover_backdrop, wait_for_blur, labels_frozen;
     bool classic, chrome_ready, stock_controls;
@@ -2063,8 +2064,7 @@ void native_wps_render(const struct wps_state *state, bool submit)
     cider_spectrum_wps(visible && remote);
     if (!visible)
     {
-        ui_perf_end(wps->motion_trace);
-        wps->motion_trace = 0;
+        ui_motion_end(&wps->motion_trace);
         wps->motion_tried = false;
         return;
     }
@@ -2132,7 +2132,7 @@ void native_wps_render(const struct wps_state *state, bool submit)
                             "wps-seek-progress" :
                             wps->page.tracks == &wps->blur_reveal ?
                             "wps-blur-ready" : "wps-volume";
-        wps->motion_trace = ui_perf_begin(route);
+        wps->motion_trace = ui_motion_begin(route);
         wps->motion_tried = true;
     }
     ui_page_step(&wps->page, now);
@@ -2158,8 +2158,7 @@ void native_wps_render(const struct wps_state *state, bool submit)
     }
     if (!wps->page.tracks && wps->motion_tried)
     {
-        ui_perf_end(wps->motion_trace);
-        wps->motion_trace = 0;
+        ui_motion_end(&wps->motion_trace);
         wps->motion_tried = false;
     }
     if (remote)
@@ -2217,7 +2216,7 @@ void native_wps_close(void)
         return;
     active = false;
     wps->landing = NULL;
-    ui_perf_end(wps->motion_trace);
+    ui_motion_end(&wps->motion_trace);
     ui_page_cancel_tracks(&wps->page);
     ultra_wps_close(&wps->ultra);
     if (wps->title.font >= 0)

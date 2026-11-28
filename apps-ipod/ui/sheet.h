@@ -2,13 +2,14 @@
 #ifndef PODBOX_UI_SHEET_H
 #define PODBOX_UI_SHEET_H
 
+#include "motion_schedule.h"
 #include "lcd.h"
 #include "retained.h"
 
 struct ui_sheet {
     struct ui_tween tween;
     struct ui_rect previous;
-    unsigned trace;
+    struct ui_motion trace;
     uint32_t requested_at;
     int light;
     /* Fruit Company Ultra's position, which may pass its place. */

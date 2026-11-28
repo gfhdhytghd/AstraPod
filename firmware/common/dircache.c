@@ -32,6 +32,7 @@
 #include "dircache.h"
 #include "thread.h"
 #include "kernel.h"
+#include "motion_sched.h"
 #include "usb.h"
 #include "file.h"
 #include "core_alloc.h"
@@ -2013,6 +2014,8 @@ static void compact_cache(void)
     dircache.reserve_used = 0;
 }
 
+#include "dircache-motion.inc"
+
 /**
  * internal thread that controls cache building; exits when no more requests
  * are pending or the cache is suspended
@@ -2040,6 +2043,11 @@ static void dircache_thread(void)
            required first; test what needs to be done and if it checks out,
            do it for real below */
         int *rcp = (int *)ev.data;
+
+#ifdef HAVE_MOTION_SCHED
+        if (!rcp && dircache_defer_motion(&ev))
+            continue;
+#endif
 
         if (!rcp && prepare_build(NULL) > 0)
             continue;

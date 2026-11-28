@@ -548,8 +548,7 @@ static void complete_transition(struct ui_scene *scene)
     scene->rows_changed = false;
     scene->reuse_target = false;
     cpu_boost(false);
-    ui_perf_end(scene->trace);
-    scene->trace = 0;
+    ui_motion_end(&scene->trace);
 }
 
 static void settle_panel(struct ui_scene *scene)
@@ -571,7 +570,7 @@ static void own_transition(struct ui_scene *scene, const char *route)
 {
     owner_thread = thread_self();
     owner = scene;
-    scene->trace = ui_perf_begin(route);
+    scene->trace = ui_motion_begin(route);
     lcd_hold_updates(true);
     cpu_boost(true);
 }
@@ -667,7 +666,7 @@ void ui_scene_fade_out(void)
     memcpy(source, framebuffer, FRAMEBUFFER_SIZE);
     cpu_boost(true);
     lcd_hold_updates(true);
-    unsigned trace = ui_perf_begin("shutdown-fade");
+    struct ui_motion trace = ui_motion_begin("shutdown-fade");
     struct ui_tween fade = { .start_clock = ui_clock_start(), .frames = duration,
                             .from = UI_FULL_OPACITY, .to = 0 };
     int composed = -1, last = -1;
@@ -699,7 +698,7 @@ void ui_scene_fade_out(void)
     cpu_boost(false);
     core_put_data_pinned(source);
     core_free(handle);
-    ui_perf_end(trace);
+    ui_motion_end(&trace);
 }
 
 static bool slide_motion(void)
@@ -1299,7 +1298,7 @@ bool ui_scene_close_modal(struct ui_scene *scene, bool animate, const char *rout
     core_put_data_pinned(front);
     scene->target_front = false;
     scene->last_offset = scene->composed_offset = -1;
-    ui_perf_ready(scene->trace, requested_at);
+    ui_perf_ready(scene->trace.trace, requested_at);
     scene->tween = (struct ui_tween){
         .start_clock = ui_clock_start(), .from = offset,
         .to = scene->transform ? 0 : scene->vertical ? LCD_HEIGHT : LCD_WIDTH,
@@ -1386,7 +1385,7 @@ void ui_scene_start(struct ui_scene *scene)
         set_push_duration(scene);
     }
     scene->capturing = false;
-    ui_perf_ready(scene->trace, scene->requested_at);
+    ui_perf_ready(scene->trace.trace, scene->requested_at);
     scene->tween.start_clock = ui_clock_start();
     /* The first frame of a reversed pan is the pose already on screen. */
     ui_scene_update(scene, !scene->reuse_target);

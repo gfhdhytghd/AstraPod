@@ -95,6 +95,7 @@
 #include "screens/covers/panel_perf.h"
 #include "screens/covers/panel_cache.h"
 #include "ui/native_theme_runtime.h"
+#include "ui/motion_schedule.h"
 #include "ui/perf.h"
 #include "ui/scene.h"
 #include "ui/native_wps.h"
@@ -921,6 +922,11 @@ static void init(void)
 
     boot_progress(BOOT_SETTINGS, 0, 0, BOOT_KEEP_CAPTION);
     ui_perf_init();
+    ui_motion_schedule_init();
+#ifdef PODBOX_MOTION_PROBE
+    extern void sim_motion_probe(void);
+    sim_motion_probe();
+#endif
     panel_perf_init();
     CHART(">settings_load");
     settings_load();

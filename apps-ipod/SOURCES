@@ -137,6 +137,7 @@ ui/stock_art.c
 ui/stock_art_table.c
 ui/native_wps.c
 ui/perf.c
+ui/motion_schedule.c
 ui/retained.c
 ui/scene.c
 ui/sheet.c
@@ -598,4 +599,7 @@ sim/power-probe.c
 sim/shim-usb.c
 /* Not a shim: tools/tests/row_glyphs_test.py's menu-row dump. */
 sim/menu-dump.c
+#ifdef PODBOX_MOTION_PROBE
+sim/motion-probe.c
+#endif
 #endif

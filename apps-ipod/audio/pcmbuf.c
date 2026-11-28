@@ -28,6 +28,7 @@
  ****************************************************************************/
 #include <stdio.h>
 #include "config.h"
+#include "playback_priority.h"
 #include "system.h"
 #include "debug.h"
 #include <kernel.h>
@@ -199,7 +200,7 @@ static void write_to_crossfade(size_t size, unsigned long elapsed,
 static void pcmbuf_finish_crossfade_enable(void);
 
 /* Thread */
-static int codec_thread_priority = PRIORITY_PLAYBACK;
+static int codec_thread_priority = PRIORITY_PLAYBACK_READY;
 
 /* Callbacks into playback.c */
 extern void audio_pcmbuf_position_callback(unsigned long elapsed,
@@ -410,7 +411,7 @@ static void boost_codec_thread(int pcm_fill_state)
         PRIORITY_PLAYBACK,          /*      100% */
     };
 
-    int new_prio = prios[pcm_fill_state];
+    int new_prio = MIN(prios[pcm_fill_state], PRIORITY_PLAYBACK_READY);
 
     /* Keep voice and codec threads at the same priority or else voice
      * will starve if the codec thread's priority is boosted. */
@@ -826,6 +827,16 @@ void pcmbuf_start_track_change(enum pcm_track_change_type type)
 volatile bool sm1_monitor_pcm;
 volatile unsigned sm1_pcm_starts, sm1_pcm_empty, sm1_pcm_initial, sm1_pcm_low, sm1_pcm_peak;
 #endif
+static volatile struct pcmbuf_counters pcm_counters;
+
+struct pcmbuf_counters pcmbuf_get_counters(void)
+{
+    pcm_play_lock();
+    struct pcmbuf_counters counters = pcm_counters;
+    pcm_play_unlock();
+    return counters;
+}
+
 /* PCM driver callback */
 static void pcmbuf_pcm_callback(const void **start, size_t *size)
 {
@@ -836,6 +847,10 @@ static void pcmbuf_pcm_callback(const void **start, size_t *size)
     if (desc)
     {
         bool track_change = index == chunk_transidx;
+        pcm_counters.chunks_played++;
+        if (!track_change && !fade_out_complete &&
+            index_next(index) == chunk_widx && audio_pcmbuf_may_play())
+            pcm_counters.underruns++;
 
         /* If last chunk in the track, notify of track change */
         if (track_change)

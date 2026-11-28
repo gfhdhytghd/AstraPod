@@ -110,6 +110,7 @@
 #include "ui/theme_art.h"
 #include "ui/native_wps.h"
 #include "screens/playback/wps.h"
+#include "ui/motion_schedule.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
 #include "album_covers.h"
@@ -2827,6 +2828,7 @@ static void coverflow_place(uint32_t now)
 static void coverflow_idle(void)
 {
     flow_pace.recover_full_rate = true;
+    flow_pace.recover_sync = true;
     center_slide.slide_index = center_index;
     uint32_t now = USEC_TIMER;
     stock_init(&flow_row, number_of_slides, center_index, now, false);
@@ -5131,10 +5133,17 @@ static bool frame_due(uint32_t deadline)
  * down to whole ticks, and the last part is slept rather than spun through. */
 static int frame_wait(uint32_t deadline)
 {
+#if defined(HAVE_LCD_VSYNC) && defined(HAVE_BUTTON_FRAME_DEADLINE)
     if (frame_due(deadline))
         return TIMEOUT_NOBLOCK;
     int timeout = ui_clock_wait_until(deadline);
     return timeout == TIMEOUT_NOBLOCK && !frame_due(deadline) ? 1 : timeout;
+#else
+    uint32_t ahead = deadline - (uint32_t)USEC_TIMER;
+    if (!ahead || ahead > PF_DEADLINE_AHEAD_US)
+        return TIMEOUT_NOBLOCK;
+    return MAX(1, ahead / (1000000 / HZ));
+#endif
 }
 
 /* The entrance chrome waits longer than PF_DEADLINE_AHEAD_US. */
@@ -5209,7 +5218,8 @@ static struct album_panel {
     bool back_ready;
     /* The flip has yet to draw its first frame. */
     bool flip_first;
-    unsigned first, second, sampled, trace;
+    unsigned first, second, sampled;
+    struct ui_motion trace;
     /* due is the next flip or list scroll frame's deadline. */
     uint32_t clock, opened, due;
     unsigned painted_rows, painted_discs;
@@ -5316,7 +5326,7 @@ static void note_album_open(bool finished, const char *reason)
                        panel.back_handle > 0 ? "texture" : "solid";
     ui_perf_album_open(panel.open_path, model->external, panel.open_cached,
                        panel.open_art, panel.open_scene, result, reason,
-                       back, panel.open_frames, panel.trace != 0);
+                       back, panel.open_frames, panel.trace.trace != 0);
     panel.open_path = NULL;
 }
 
@@ -5324,7 +5334,7 @@ static void close_album_panel(void)
 {
     if (!panel.live)
         return;
-    ui_perf_end(panel.trace);
+    ui_motion_end(&panel.trace);
     note_album_open(false, "interrupted");
     if (panel.back_handle > 0)
         core_free(panel.back_handle);
@@ -5428,10 +5438,9 @@ static void flip_to(bool open)
         else
             current = stock_flip_pose(&panel.flip, now);
     }
-    ui_perf_end(panel.trace);
+    ui_motion_end(&panel.trace);
     if (!open)
         note_album_open(false, "interrupted");
-    panel.trace = 0;
     if (!flat)
     {
         /* Build the back before starting the clock. If RAM is tight, the
@@ -5457,9 +5466,9 @@ static void flip_to(bool open)
         }
         panel.moving = pf_motion_scale != 0;
         if (panel.moving)
-            panel.trace = ui_perf_begin(open ? "cover-flip-open" :
+            panel.trace = ui_motion_begin(open ? "cover-flip-open" :
                                                "cover-flip-close");
-        ui_perf_ready(panel.trace, requested_at);
+        ui_perf_ready(panel.trace.trace, requested_at);
         now = USEC_TIMER;
         stock_flip_start(&panel.flip, open ? STOCK_TO_BACK : STOCK_TO_FRONT, current, now);
         panel.clock = panel.due = now;
@@ -5490,8 +5499,9 @@ static void flip_to(bool open)
     panel.dirty = true;
     if (!panel.moving)
         panel.position = panel.to;
-    panel.trace = panel.moving ? ui_perf_begin(open ? "cover-flip-open" : "cover-flip-close") : 0;
-    ui_perf_ready(panel.trace, requested_at);
+    if (panel.moving)
+        panel.trace = ui_motion_begin(open ? "cover-flip-open" : "cover-flip-close");
+    ui_perf_ready(panel.trace.trace, requested_at);
     panel.clock = panel.due = ui_clock_start();
 }
 
@@ -6521,7 +6531,7 @@ static void NO_INLINE render_album_flip(int position, pix_t color)
 
 static void draw_album_flip(bool present)
 {
-    uint32_t render_start = panel.trace ? USEC_TIMER : 0;
+    uint32_t render_start = panel.trace.trace ? USEC_TIMER : 0;
     show_carousel_entry();
     lcd_set_viewport(&pf_vp);
     pf_update_dynamic_colors();
@@ -6551,7 +6561,7 @@ static void draw_album_flip(bool present)
         render_stock_flip(stock_flip_pose(&panel.flip, sample), center_index,
                           now, panel.to == 0);
     }
-    uint32_t render = panel.trace ? (uint32_t)USEC_TIMER - render_start : 0;
+    uint32_t render = panel.trace.trace ? (uint32_t)USEC_TIMER - render_start : 0;
     buf_ctx_unlock();
     bool opened = false;
     if (panel.position == FLIP_OPEN)
@@ -6570,7 +6580,7 @@ static void draw_album_flip(bool present)
         return;
     uint32_t submit = USEC_TIMER;
     lcd_update();
-    if (panel.trace)
+    if (panel.trace.trace)
     {
         uint32_t submitted = USEC_TIMER;
         ui_perf_note_render(render);
@@ -6702,9 +6712,8 @@ static void step_album_flip(void)
     {
         if (done)
         {
-            ui_perf_end(panel.trace);
+            ui_motion_end(&panel.trace);
             note_album_open(true, panel.open_reason);
-            panel.trace = 0;
             panel.moving = false;
         }
         else if (!panel.moving && panel.position == FLIP_OPEN)
@@ -7144,6 +7153,15 @@ static void remember_current_cover(void)
 {
     if (model->remember && model->remember(center_index))
         cover_resume_dirty = true;
+}
+
+static bool split_caption_transfer(void)
+{
+#ifdef HAVE_LCD_VSYNC
+    return lcd_te_async_enabled();
+#else
+    return false;
+#endif
 }
 
 /* The DMA producer has one pending staging slot. Leave it to the artwork
@@ -7900,22 +7918,22 @@ static bool play_wps_sheet(const pix_t *front, const pix_t *back, bool rising,
         .ease_in = !rising,
     };
     cpu_boost(true);
-    unsigned trace = ui_perf_begin(rising ? "cover-flow-wps-rise" :
+    struct ui_motion trace = ui_motion_begin(rising ? "cover-flow-wps-rise" :
                                             "cover-flow-wps-sink");
-    ui_perf_ready(trace, requested_at);
+    ui_perf_ready(trace.trace, requested_at);
     uint32_t start = ui_clock_start();
     unsigned frame = 0;
     uint32_t due = ui_pace_next(&wps_pace, start);
     bool landed = false;
     while (lcd_active())
     {
-        uint32_t rendering = (trace || rising) ? USEC_TIMER : 0;
+        uint32_t rendering = (trace.trace || rising) ? USEC_TIMER : 0;
         if (ultra_flow_on)
             ultra_sheet_compose(LCD_BUF, back, front, frame, frames, rising);
         else
             ui_scene_compose_sheet(LCD_BUF, back, front,
                                    ui_tween_sample(&tween, frame));
-        uint32_t submitting = (trace || held) ? USEC_TIMER : 0;
+        uint32_t submitting = (trace.trace || held) ? USEC_TIMER : 0;
         bool shown = true;
         if (held)
         {
@@ -7927,7 +7945,7 @@ static bool play_wps_sheet(const pix_t *front, const pix_t *back, bool rising,
         }
         else
             lcd_update();
-        if (trace)
+        if (trace.trace)
         {
             ui_perf_note_render(submitting - rendering);
             ui_perf_note_submit((uint32_t)USEC_TIMER - submitting);
@@ -7948,7 +7966,7 @@ static bool play_wps_sheet(const pix_t *front, const pix_t *back, bool rising,
         frame = rising ? frame + wps_pace.divisor : ui_pace_frame(&wps_pace);
         due = ui_pace_next(&wps_pace, start);
     }
-    ui_perf_end(trace);
+    ui_motion_end(&trace);
     cpu_boost(false);
     return landed;
 }
@@ -8082,9 +8100,9 @@ void carousel_wps_present(struct wps_state *state)
     cpu_boost(true);
     if (!animate)
     {
-        unsigned trace = ui_perf_begin(name);
+        struct ui_motion trace = ui_motion_begin(name);
         native_wps_render(state, true);
-        ui_perf_end(trace);
+        ui_motion_end(&trace);
         cpu_boost(false);
         return;
     }
@@ -8107,8 +8125,8 @@ void carousel_wps_present(struct wps_state *state)
                               native_wps_art_turned() && !cider_active();
     const struct playback_texture *cover = playback_cover(playback_scene.album);
     bool art_prepared = false;
-    unsigned trace = ui_perf_begin(name);
-    ui_perf_ready(trace, playback_scene.action_us);
+    struct ui_motion trace = ui_motion_begin(name);
+    ui_perf_ready(trace.trace, playback_scene.action_us);
     /* The playlist and the first WPS paint can both touch cold storage. The
      * complete turn starts after both, for all themes. */
     playback_scene.walls.start_us = ui_clock_start();
@@ -8123,7 +8141,7 @@ void carousel_wps_present(struct wps_state *state)
     uint32_t setup_us = now - setup;
     for (;;)
     {
-        uint32_t rendering = trace ? USEC_TIMER : 0;
+        uint32_t rendering = trace.trace ? USEC_TIMER : 0;
         bool landed = stock_flip_done(&flip, now);
         bool moving = turn && native_wps_active();
         unsigned weight = moving ? chrome_weight(now, fade_start, fade_us) : 0;
@@ -8151,9 +8169,9 @@ void carousel_wps_present(struct wps_state *state)
                 chrome_turn_in(chrome_hidden(now - fade_start, fade_us, true),
                                cover_weight);
         }
-        uint32_t submitting = trace ? USEC_TIMER : 0;
+        uint32_t submitting = trace.trace ? USEC_TIMER : 0;
         lcd_update();
-        if (trace)
+        if (trace.trace)
         {
             ui_perf_note_render(submitting - rendering);
             ui_perf_note_submit((uint32_t)USEC_TIMER - submitting);
@@ -8170,11 +8188,11 @@ void carousel_wps_present(struct wps_state *state)
             native_wps_set_landing(paint_playback_landing);
         /* Keep the slide on the turn's presentation clock. */
         ui_clock_sleep_until(flow_pace_next(&wps_pace, start));
-        slide_playback_controls(true, landed_at, start, trace);
+        slide_playback_controls(true, landed_at, start, trace.trace);
     }
     drop_playback_bitmap(&playback_scene.chrome);
     cpu_boost(false);
-    ui_perf_end(trace);
+    ui_motion_end(&trace);
     ui_perf_wps_target(route, &playback_scene.slot, reason, bitmap_state,
                        setup - playback_scene.action_us, playback_scene.playlist_us,
                        setup_us);
@@ -8306,13 +8324,13 @@ static void return_from_playback(void)
         (to_panel || playback_scene.sheet > 0))
     {
         cpu_boost(true);
-        unsigned trace = ui_perf_begin(to_panel ? "wps-cover-panel" :
+        struct ui_motion trace = ui_motion_begin(to_panel ? "wps-cover-panel" :
                                                   "wps-cover-flow-turn");
         wps_pace = (struct ui_pace){.half_rate = true};
         uint32_t due = ui_pace_next(&wps_pace, start);
         for (;;)
         {
-            uint32_t rendering = trace ? USEC_TIMER : 0;
+            uint32_t rendering = trace.trace ? USEC_TIMER : 0;
             bool landed = stock_flip_done(&flip, now) && !stock_animating(&flow_row, now);
             unsigned weight = 32 - chrome_weight(now, start, fade_us);
             struct stock_pose current = stock_flip_pose(&flip, now);
@@ -8356,9 +8374,9 @@ static void return_from_playback(void)
                 }
                 else if (!landed)
                 {
-                    uint32_t caption = trace ? USEC_TIMER : 0;
+                    uint32_t caption = trace.trace ? USEC_TIMER : 0;
                     model->draw_text();
-                    if (trace)
+                    if (trace.trace)
                     {
                         const uint32_t stages[UI_COVER_STAGE_COUNT] = {0};
                         ui_perf_note_cover_work(0, 0, USEC_TIMER - caption, stages);
@@ -8367,9 +8385,9 @@ static void return_from_playback(void)
                     }
                 }
             }
-            uint32_t submitting = trace ? USEC_TIMER : 0;
+            uint32_t submitting = trace.trace ? USEC_TIMER : 0;
             lcd_update();
-            if (trace)
+            if (trace.trace)
             {
                 ui_perf_note_render(submitting - rendering);
                 ui_perf_note_submit((uint32_t)USEC_TIMER - submitting);
@@ -8382,7 +8400,7 @@ static void return_from_playback(void)
             if (return_interrupted())
                 break;
         }
-        ui_perf_end(trace);
+        ui_motion_end(&trace);
         cpu_boost(false);
     }
     set_current_slide(center_index);
@@ -8479,7 +8497,7 @@ static void request_wps_rise(const char *path, bool play, uint32_t action_us)
     }
 }
 
-static int album_covers_loop(unsigned *trace, bool restored_pixels,
+static int album_covers_loop(struct ui_motion *trace, bool restored_pixels,
                             bool after_wps)
 {
     int ret;
@@ -8582,7 +8600,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             flow_row.spring = ultra_flow_on;
             art_seen_generation = ~art_generation;
         }
-        if (art_seen_generation != art_generation && !art_cache_is_busy())
+        if (art_seen_generation != art_generation && pf_state == pf_idle &&
+            !fade && !art_cache_is_busy())
         {
             buf_ctx_lock();
             free_all_slide_prio(-1);
@@ -8772,8 +8791,8 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             {
                 if (!pf_wps_entry)
                 {
-                    *trace = ui_perf_begin("cover-flow-entry");
-                    ui_perf_ready(*trace, pf_entry_requested);
+                    *trace = ui_motion_begin("cover-flow-entry");
+                    ui_perf_ready(trace->trace, pf_entry_requested);
                     trace_attempted = true;
                 }
                 fade_start = USEC_TIMER;
@@ -8999,8 +9018,20 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             break;
         }
 
-        if (profile_input && old_target != target && pf_state == pf_scrolling)
-            target_changes++;
+        if (old_target != target && pf_state == pf_scrolling)
+        {
+            if (trace_attempted)
+                ui_motion_renew(trace);
+            else if (!dark && !fade)
+            {
+                *trace = ui_motion_begin(model->motion_trace ?: "cover-flow");
+                trace_attempted = true;
+                transfers = (struct ui_perf_transfers){0};
+                deferred_rows = 0;
+            }
+            if (profile_input)
+                target_changes++;
+        }
 
         /* Said where the row comes to rest, not at every slide it passes:
          * once it has stayed there for TALK_SETTLE. */
@@ -9091,8 +9122,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
         bool motion = !dark && (pf_state == pf_scrolling || fade);
         if (!motion && trace_attempted)
         {
-            ui_perf_end(*trace);
-            *trace = 0;
+            ui_motion_end(trace);
             trace_attempted = false;
         }
         if (!dark && (pf_state == pf_scrolling || art_owed || caption_owed
@@ -9130,7 +9160,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
              * a sustained queue may defer it for one art frame. */
             deferred_rows += stage_caption(caption_left, caption_right, &caption_flush_top,
                                            caption_flush_end, caption_pixels,
-                                           *trace ? &transfers : NULL);
+                                           trace->trace ? &transfers : NULL);
             caption_flush_owed = caption_flush_top < caption_flush_end;
             caption_pixels = 0;
             caption_wake = false;
@@ -9142,13 +9172,13 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             /* The caption painted with the last covers, on its own deadline.
              * The covers wait for the next one. */
             int rows = caption_flush_end - caption_flush_top;
-            uint32_t submitting = *trace ? USEC_TIMER : 0;
+            uint32_t submitting = trace->trace ? USEC_TIMER : 0;
             lcd_update_rect(caption_left, caption_flush_top, caption_right - caption_left, rows);
             caption_flush_owed = false;
             caption_pixels = deferred_frames = deferred_rows = 0;
             caption_wake = false;
             transfers = (struct ui_perf_transfers){0};
-            if (*trace)
+            if (trace->trace)
             {
                 uint32_t submitted = USEC_TIMER;
                 ui_perf_note_rects(UI_PERF_CAPTION, 0, rows);
@@ -9170,7 +9200,9 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             {
                 transfers = (struct ui_perf_transfers){0};
                 deferred_rows = 0;
-                *trace = ui_perf_begin(model->motion_trace ?: "cover-flow");
+                const char *route = leaving ? "cover-flow-exit" :
+                                    model->motion_trace ?: "cover-flow";
+                *trace = ui_motion_begin(route);
                 trace_attempted = true;
             }
             bool motion_begins = motion && !flow_moving;
@@ -9189,11 +9221,11 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
              * has changed since it was last flushed. */
             int art_y = 0, art_h = 0;
             bool joined;
-            uint32_t lock_start = *trace ? USEC_TIMER : 0;
+            uint32_t lock_start = trace->trace ? USEC_TIMER : 0;
             buf_ctx_lock();
-            uint32_t frame_start = *trace ? USEC_TIMER : 0;
+            uint32_t frame_start = trace->trace ? USEC_TIMER : 0;
             uint32_t stages[UI_COVER_STAGE_COUNT];
-            if (*trace)
+            if (trace->trace)
             {
                 memset(stages, 0, sizeof(stages));
                 if (!flat_view())
@@ -9226,10 +9258,12 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                 if (pf_state == pf_scrolling)
                 {
                     update_scroll_animation();
-                    /* Publish the complete framebuffer once on the final pose. */
                     if (pf_state == pf_idle && !leaving)
                     {
-                        full_flush_owed = true;
+                        /* The 3D renderer tracks changed rows, including at
+                         * rest. Only a flat view or fade needs the full flush. */
+                        if (flat_view() || fade)
+                            full_flush_owed = true;
                         drew_caption |= caption_owed || captioned_index != carousel_caption_index();
                         caption_owed = false;
                         captioned_index = carousel_caption_index();
@@ -9274,7 +9308,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                 }
             }
 
-            paint.tracing = *trace != 0;
+            paint.tracing = trace->trace != 0;
             paint.caption_us = 0;
             int ink_left = 0, ink_right = LCD_WIDTH;
             struct flow_damage damage = { LCD_HEIGHT, 0 };
@@ -9307,7 +9341,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                 previous_ink.left = 0;
                 previous_ink.right = LCD_WIDTH;
             }
-            uint32_t render = *trace ? (uint32_t)USEC_TIMER - frame_start : 0;
+            uint32_t render = trace->trace ? (uint32_t)USEC_TIMER - frame_start : 0;
 #if PF_SHOW_STATS
             pf_stats_draw();
             t_flush = USEC_TIMER;
@@ -9315,7 +9349,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
 
             flow_stages = NULL;
             buf_ctx_unlock();
-            if (*trace)
+            if (trace->trace)
             {
                 uint32_t measured = paint.caption_us;
                 for (unsigned i = 0; i < UI_COVER_OTHER; i++)
@@ -9359,9 +9393,10 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             if (caption_flush_owed)
             {
                 int top = caption_flush_top, end = caption_flush_end;
-                /* The stock look sends the caption with the covers, so a
-                 * frame is one transfer in one refresh. */
-                if (stock_look() && dirty_end > dirty_top)
+                /* Synchronous output pays another presentation for a second
+                 * rectangle. Keep art and caption in one transfer. */
+                if ((stock_look() || !split_caption_transfer()) &&
+                    dirty_end > dirty_top)
                 {
                     dirty_top = MIN(dirty_top, top);
                     dirty_end = MAX(dirty_end, end);
@@ -9390,7 +9425,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             int rows = MAX(0, dirty_end - dirty_top);
             if (rows || (stock_slide && fade))
             {
-                uint32_t start = *trace ? USEC_TIMER : 0;
+                uint32_t start = trace->trace ? USEC_TIMER : 0;
                 if (stock_slide && fade)
                 {
                     uint32_t age = (uint32_t)USEC_TIMER - fade_start;
@@ -9426,7 +9461,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                 else
                     carousel_submit((struct ui_dirty_rect){0, dirty_top, LCD_WIDTH, rows},
                                     pf_state == pf_idle && !motion);
-                if (*trace)
+                if (trace->trace)
                     ui_perf_add_transfer(&transfers, start, parts & UI_PERF_ART ?
                                          UI_PERF_ART : UI_PERF_CAPTION);
             }
@@ -9469,7 +9504,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                 {
                     deferred_rows += stage_caption(caption_left, caption_right,
                                                    &caption_flush_top, caption_flush_end,
-                                                   caption_pixels, *trace ? &transfers : NULL);
+                                                   caption_pixels, trace->trace ? &transfers : NULL);
                     caption_flush_owed = caption_flush_top < caption_flush_end;
                     caption_pixels = 0;
                     deferred_frames = 0;
@@ -9483,7 +9518,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                 parts |= UI_PERF_CAPTION;
                 deferred_rows = 0;
             }
-            if (*trace && transfers.sampled)
+            if (trace->trace && transfers.sampled)
             {
                 ui_perf_note_rects(parts, parts & UI_PERF_ART ? rows : 0, caption_rows);
                 ui_perf_note_render(render);
@@ -9492,6 +9527,14 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
             }
             if (pf_scene.capturing)
                 ui_scene_start(&pf_scene);
+            /* Land the scroll on its last submitted frame. The next input
+             * can be a new scroll or a page exit after an idle wait. */
+            if (trace_attempted && pf_state == pf_idle && !fade)
+            {
+                ui_motion_end(trace);
+                trace_attempted = false;
+                flow_moving = false;
+            }
             first_frame = false;
             dirty_top = LCD_HEIGHT;
             dirty_end = 0;
@@ -9618,6 +9661,10 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
 #endif
             if (flat_view() || !pf_motion_scale || dark || leaving)
                 return leave_result;
+            ui_motion_end(trace);
+            trace_attempted = false;
+            flow_moving = false;
+            flow_due = USEC_TIMER;
             if (pf_scene.backdrop_handle > 0 && pf_scene_stale())
             {
                 /* Join before the theme changes, as for the modal screens. */
@@ -9661,8 +9708,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
         case ACTION_WPS_QUICKSCREEN:
             /* Leave the model, position and surfaces alive under the overlay.
              * Join before the theme changes, as for the other modal screens. */
-            ui_perf_end(*trace);
-            *trace = 0;
+            ui_motion_end(trace);
             trace_attempted = false;
             end_pf_thread();
             ret = quick_screen_current(button, NULL);
@@ -9684,8 +9730,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
              * a CAROUSEL_MENU_* sentinel to stay. */
             if (!model->on_menu)
                 break;
-            ui_perf_end(*trace);
-            *trace = 0;
+            ui_motion_end(trace);
             trace_attempted = false;
             end_pf_thread();
             ret = model->on_menu();
@@ -9773,8 +9818,7 @@ static int album_covers_loop(unsigned *trace, bool restored_pixels,
                     }
                     pf_state = pf_idle;
                 }
-                ui_perf_end(*trace);
-                *trace = 0;
+                ui_motion_end(trace);
                 trace_attempted = false;
                 open_album_panel(0, 0, path, scene);
                 after_wps = reopening = false;
@@ -9864,9 +9908,8 @@ int carousel_run(const struct carousel_model *m, const char *selected_file)
         wps_handover.panel_open = panel.live && panel.to != 0;
         if (wps_handover.panel_open)
         {
-            ui_perf_end(panel.trace);
+            ui_motion_end(&panel.trace);
             note_album_open(false, "playback");
-            panel.trace = 0;
             panel.moving = panel.play_pending = panel.play_failed = false;
             panel.scroll_frames = 0;
         }
@@ -10026,7 +10069,7 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
      * powers off, until Play is let go: see album_covers_loop(). */
     if (!ui_wheel_navigation())
         button_set_sw_poweroff_state(button_status() & BUTTON_PLAY);
-    unsigned trace = 0;
+    struct ui_motion trace = {0};
     cover_resume_dirty = false;
     ret = album_covers_loop(&trace, restored_pixels || pf_entry_prepared,
                             after_wps);
@@ -10038,7 +10081,7 @@ static int carousel_body(const struct carousel_model *m, const char *selected_fi
     if (cover_resume_dirty)
         status_save(true);
     cleanup();
-    ui_perf_end(trace);
+    ui_motion_end(&trace);
     ui_perf_flow_path(flow_path.enter, flow_path.enter_why,
                       flow_path.leave, flow_path.leave_why);
 

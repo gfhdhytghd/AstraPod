@@ -765,6 +765,7 @@ int fruit_about_screen(void)
     paint(0, LCD_HEIGHT, 0, 0);
     speak_page();
     unsigned last_bar = bar_stamp();
+    struct ui_motion turn = {0};
     unsigned frame = TURN_FRAMES;
     int from = 0;
     long start = 0;
@@ -786,7 +787,16 @@ int fruit_about_screen(void)
             int step = action == ACTION_STD_PREV ? -1 : 1;
             about.page = (from + step + PAGES) % PAGES;
             frame = global_settings.animations ? 0 : TURN_FRAMES;
+            if (frame == 0)
+            {
+                if (turn.lease || turn.trace)
+                    ui_motion_renew(&turn);
+                else
+                    turn = ui_motion_begin("fruit-about-slide");
+            }
             paint(BAR_Y, LCD_HEIGHT, from, turn_offset(frame));
+            if (frame == TURN_FRAMES)
+                ui_motion_end(&turn);
             /* The first paint also loads the incoming page's glyphs. */
             start = current_tick;
             speak_page();
@@ -807,6 +817,8 @@ int fruit_about_screen(void)
         {
             frame = next;
             paint(BAR_Y, LCD_HEIGHT, from, turn_offset(frame));
+            if (frame == TURN_FRAMES)
+                ui_motion_end(&turn);
         }
 
         unsigned now_bar = bar_stamp();
@@ -817,6 +829,7 @@ int fruit_about_screen(void)
         }
     }
 
+    ui_motion_end(&turn);
     talk_shutup();
     extras_bar_release();
     ui_scene_close_modal(&scene, ret == 0, "fruit-about-pop");

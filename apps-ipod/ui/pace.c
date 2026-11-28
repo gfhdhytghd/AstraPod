@@ -209,7 +209,7 @@ static void measure(struct ui_pace *pace, uint32_t cost, uint32_t period,
                 pace->divisor = 2;
                 pace->on_time = 0;
             }
-        } else if (pace->async && pace->recover_full_rate) {
+        } else if (pace->recover_full_rate && (pace->async || pace->recover_sync)) {
             /* A wheel gesture can slow down without starting a new animation.
              * Require spare time for four draws before resuming every TE. */
             pace->late = 0;

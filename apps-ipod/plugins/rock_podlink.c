@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 #include "config.h"
+#ifdef IPOD_6G
+#include "ui/motion_schedule.h"
+#endif
 #include "rock_podlink.h"
 
 #ifndef HAVE_USB_PODLINK
@@ -916,6 +919,9 @@ bool rock_podlink_has_deadline(void)
 
 bool rock_podlink_work(void)
 {
+#ifdef IPOD_6G
+    bool defer_storage = ui_motion_active();
+#endif
     int irq = apl_lock();
     check_link();
     bool control_pending = close_pending || cancel_pending;
@@ -937,6 +943,15 @@ bool rock_podlink_work(void)
         podlink_wake();
         return true;
     }
+#ifdef IPOD_6G
+    if (defer_storage)
+    {
+        apl_unlock(irq);
+        if (control_pending)
+            podlink_wake();
+        return false;
+    }
+#endif
     if (file.phase == PREPARE)
         return prepare(irq);
     if (file_count)

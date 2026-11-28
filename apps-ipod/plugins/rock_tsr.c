@@ -1,6 +1,9 @@
 /* Executable TSR leases for the AstraPod SDK. GPL version 2 or later. */
 #include <stddef.h>
 #include "plugins/sdk/plugin.h"
+#ifdef IPOD_6G
+#include "ui/motion_schedule.h"
+#endif
 
 #if CONFIG_BINFMT == BINFMT_ROCK
 /* Keep this address in the firmware ELF for the TSR image link. */
@@ -59,8 +62,19 @@ bool rock_tsr_register(rock_tsr_callback callback, int period)
 
 static void tsr_main(void)
 {
-    while (semaphore_wait(&tsr.stop, tsr.period) == OBJ_WAIT_TIMEDOUT)
+    int delay = tsr.period;
+    while (semaphore_wait(&tsr.stop, delay) == OBJ_WAIT_TIMEDOUT)
+    {
+#ifdef IPOD_6G
+        if (ui_motion_active())
+        {
+            delay = MIN(tsr.period, MAX(1, HZ / 10));
+            continue;
+        }
+        delay = tsr.period;
+#endif
         tsr.callback(ROCK_TSR_TICK);
+    }
 
     tsr.callback(tsr.reason);
     thread_exit();

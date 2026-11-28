@@ -38,6 +38,7 @@
 #include "ui/native_chrome.h"
 #include "ui/native_theme_runtime.h"
 #include "ui/pace.h"
+#include "ui/motion_schedule.h"
 #include "ui/perf.h"
 #include "ui/retained.h"
 #include "ui/statusbar.h"
@@ -88,12 +89,13 @@ struct list_motion {
     struct list_pose velocity;
     bool ultra, moved;
     uint32_t started;
-    unsigned painted, trace;
+    unsigned painted;
+    struct ui_motion trace;
     unsigned glide_frames, spring_frames;
     int visible, count, span;
     struct ui_rect bounds;
     int pitch;
-    bool wheel, snap;
+    bool wheel, snap, edge;
 };
 
 /* A theme gradient as RGB565 rows, for a fill `height` rows tall. */
@@ -461,8 +463,7 @@ static bool motion_owner(const struct native_list *render, const struct gui_sync
 
 static void motion_stop(struct list_motion *motion)
 {
-    ui_perf_end(motion->trace);
-    motion->trace = 0;
+    ui_motion_end(&motion->trace);
     motion->visible = 0;
 }
 
@@ -483,6 +484,14 @@ static unsigned motion_duration(const struct list_motion *motion)
            (motion->live.top == motion->rest.top ? 0 : motion->spring_frames);
 }
 
+/* A snapped marker can present every second refresh. Bound how long it
+ * keeps the action pump alive when it cannot submit a frame. */
+static unsigned motion_frame_limit(const struct list_motion *motion)
+{
+    unsigned duration = motion_duration(motion);
+    return motion->snap ? 2 * (duration + 2) : duration;
+}
+
 static bool motion_matches(const struct list_motion *motion, const struct list_geometry *g,
                             const struct gui_synclist *list)
 {
@@ -497,6 +506,14 @@ static int64_t ease_out(int64_t from, int64_t to, unsigned frame, unsigned durat
 {
     const struct ui_tween weight = { .to = 1024, .frames = duration };
     return from + (to - from) * ui_tween_sample(&weight, frame) / weight.to;
+}
+
+/* Edge travel may cover fewer pixels than a full row's animation has
+ * refreshes. Spread those pixels over the shorter spring. */
+static unsigned edge_duration(int64_t from, int64_t to, int pitch, unsigned frames)
+{
+    unsigned pixels = (from > to ? from - to : to - from) * pitch / ROW_UNIT;
+    return MIN(frames, MAX(1u, pixels));
 }
 
 /* Keep the bar in view while viewport and selection catch up independently. */
@@ -624,7 +641,8 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     uint32_t elapsed = now - motion->started;
     unsigned frame = ui_clock_frame(elapsed);
     struct list_pose from = { fixed_row(top), fixed_row(selection) };
-    bool continuing = motion->visible == visible && motion->pitch == g.pitch &&
+    bool continuing = frame < motion_frame_limit(motion) &&
+                      motion->visible == visible && motion->pitch == g.pitch &&
                       motion->count == list->nb_items && motion->span == span &&
                       !memcmp(&motion->bounds, &g.rows, sizeof(g.rows)) &&
                       motion->rest.top == from.top && motion->rest.cursor == from.cursor;
@@ -646,6 +664,13 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
          * clock at each detent would stall a glide when detents arrive < 1 f apart. */
         now -= elapsed - ui_frame_clock(frame);
     }
+    else if (motion->visible)
+    {
+        /* This input starts a new glide. An old sample can otherwise
+         * span idle button waits and retain the scheduling boost. */
+        motion_stop(motion);
+        glide_pace.running = false;
+    }
 
     struct list_pose rest = { fixed_row(list->start_item[SCREEN_MAIN]),
                               fixed_row(list->selected_item) };
@@ -656,6 +681,12 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     bool wrapped = (offset < 0 && rest.cursor > fixed_row(selection)) ||
                    (offset > 0 && rest.cursor < fixed_row(selection));
     bool physical_end = wheel && !wrapped && (position < 0 || position > last);
+    /* Repeated outward detents must leave time for the edge spring to
+     * rebound. Restarting it at its peak can hold the same pixels while
+     * the wheel events keep the glide and its frame deadline active. */
+    if (physical_end && continuing && motion->edge &&
+        ((motion->live.top > motion->rest.top) == (offset > 0)))
+        goto done;
     /* Ultra's longer settle still counts a spin by the standard glide. */
     unsigned window = ultra ? MIN(glide, GLIDE_F) : motion->glide_frames;
     bool fast = wheel && (offset < -1 || offset > 1 ||
@@ -723,19 +754,29 @@ void list_render_retarget(const struct gui_synclist *list, int selection, int to
     glint_stop(render);
     bool moved = rest.cursor != fixed_row(selection) ||
                  (continuing && motion->moved);
-    unsigned trace = motion->trace;
-    if (!trace)
-        trace = ui_perf_begin("list-glide");
+    unsigned spring = ultra ? list_ultra_return_frames() :
+        ui_theme_motion(UI_MOTION_LIST, SPRING_F, GLIDE_F);
+    bool edge = physical_end && !snap;
+    if (edge)
+    {
+        glide = edge_duration(from.top, live.top, g.pitch, glide);
+        spring = edge_duration(live.top, rest.top, g.pitch, spring);
+    }
+    struct ui_motion trace = motion->trace;
+    if (!trace.lease && !trace.trace)
+        trace = ui_motion_begin("list-glide");
+    else
+        ui_motion_renew(&trace);
     *motion = (struct list_motion) {
         .from = from, .live = live, .rest = rest,
         .velocity = velocity, .ultra = ultra, .moved = moved,
         .started = continuing ? now : ui_clock_start(),
         .painted = 0, .trace = trace,
         .glide_frames = glide,
-        .spring_frames = ultra ? list_ultra_return_frames() :
-            ui_theme_motion(UI_MOTION_LIST, SPRING_F, GLIDE_F),
+        .spring_frames = spring,
         .visible = visible, .count = list->nb_items, .span = span,
         .bounds = g.rows, .pitch = g.pitch, .wheel = wheel, .snap = snap,
+        .edge = edge,
     };
 
 done:
@@ -2610,7 +2651,10 @@ static bool update_row_pose(struct native_list *render, const struct list_geomet
     bool finished = false;
     if (motion_enabled() && motion_matches(motion, g, list))
     {
-        if (motion->snap)
+        unsigned frame = ui_clock_frame((uint32_t)USEC_TIMER - motion->started);
+        if (frame >= motion_frame_limit(motion))
+            motion->painted = motion_duration(motion);
+        else if (motion->snap)
         {
             /* A jump of the rows is a frame of its own and carries the
              * marker's next step. */
@@ -2626,8 +2670,7 @@ static bool update_row_pose(struct native_list *render, const struct list_geomet
         else if (render->batched)
             motion->painted = batch_frame(render);
         else
-            motion->painted =
-                ui_clock_frame((uint32_t)USEC_TIMER - motion->started);
+            motion->painted = frame;
         pose = motion_sample(motion, motion->painted);
         finished = motion->painted >= motion_duration(motion);
     }
@@ -3550,11 +3593,13 @@ static int list_deadline(const struct gui_synclist *list, bool poll)
             uint32_t elapsed = now - motion->started;
             /* A new frame waits for its presentation slot, so a half-rate
              * glide keeps its frame parity. */
-            bool due = motion->snap ? snap_due(render, now) :
+            unsigned frame = ui_clock_frame(elapsed);
+            bool due = frame >= motion_frame_limit(motion) ||
+                       (motion->snap ? snap_due(render, now) :
                        render->batched ?
                        (int32_t)(now - batch_deadline(render)) >= 0 :
-                       ui_clock_frame(elapsed) > motion->painted &&
-                       (int32_t)(now - glide_pace.due) >= 0;
+                       frame > motion->painted &&
+                       (int32_t)(now - glide_pace.due) >= 0);
             if (!motion_enabled() || due)
                 delay = 0;
             else if (poll && (motion->snap || render->batched))

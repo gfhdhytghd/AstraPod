@@ -52,6 +52,9 @@
 #include "system/debug_log.h"
 #include "database/tagcache.h"
 #include "database/db_spoken.h"   /* which albums are books */
+#ifndef DBTOOL
+#include "ui/motion_schedule.h"
+#endif
 #include "system/bg_task.h"         /* the caching pass runs as one */
 #include "files/book_index.h"       /* the books the pass visits */
 #include "files/zip_member.h"       /* a deflated cover, inflated */
@@ -1534,9 +1537,26 @@ static void aa_ensure_fallback(void *workbuf, size_t workbuf_sz)
  * pending, or a task that outranks this one is waiting to start. Standing
  * down costs nothing: the pass resumes from where the thumbnails on disk
  * leave it. */
+static bool aa_motion_deferred;
+
 static bool aa_check_abort(void)
 {
-    return bg_task_should_stop(&art_cache_task);
+    if (bg_task_should_stop(&art_cache_task))
+        return true;
+#ifndef DBTOOL
+    /* Keep the pass at its checkpoint while the UI moves. Unwind when
+     * the shared worker is needed for glyphs, a panel, or storage handover. */
+    while (art_cache_task.running && ui_motion_active())
+    {
+        if (tagcache_is_busy() || bg_task_should_stop(&art_cache_task))
+        {
+            aa_motion_deferred = true;
+            return true;
+        }
+        sleep(1);
+    }
+#endif
+    return false;
 }
 
 /* Whether this pass looks up every folder's image. Off the directory cache
@@ -2813,9 +2833,14 @@ static void aa_tables_init(void *mem)
  * for scratch space would stop and restart the current track. */
 static int aa_pass_alloc(size_t size)
 {
-    if ((audio_status() & AUDIO_STATUS_PLAY) && core_allocatable() < size)
-        return -1;
-    return core_alloc(size);
+    bool playing = audio_status() & AUDIO_STATUS_PLAY;
+    int handle = playing ? core_alloc_free_space(size) : core_alloc(size);
+#ifdef PODBOX_MOTION_PROBE
+    if (handle <= 0 && getenv("PODBOX_MOTION_LOAD_PROBE"))
+        fprintf(stderr, "motion load: art needs %zu bytes, free=%zu at %ld\n",
+                size, core_allocatable(), (long)current_tick);
+#endif
+    return handle;
 }
 
 static enum bg_result aa_run_pass(void)
@@ -2829,7 +2854,7 @@ static enum bg_result aa_run_pass(void)
     bool completed;
     int since_yield = 0;
 
-    aa_io_failed = false;
+    aa_io_failed = aa_motion_deferred = false;
     worksz = aa_work_bytes();
     wh = aa_pass_alloc(worksz);
     if (wh <= 0)
@@ -2856,6 +2881,10 @@ static enum bg_result aa_run_pass(void)
 
     /* Includes placeholders and migration before the library walk. */
     cache_busy = true;
+#ifdef PODBOX_MOTION_PROBE
+    extern void sim_motion_work_started(const char *task);
+    sim_motion_work_started("art cache");
+#endif
     aa_ensure_dirs();
     /* A purge cut short leaves no stamp file, which saving one would hide */
     if (!aa_check_format_version())
@@ -2867,7 +2896,7 @@ static enum bg_result aa_run_pass(void)
         core_free(sh);
         core_free(wh);
         cache_busy = false;
-        return BG_INTERRUPTED;
+        return aa_motion_deferred ? BG_DEFERRED : BG_INTERRUPTED;
     }
     aa_itunes_state = AA_ITUNES_UNTRIED;
     aa_unreached = aa_libdirs.full = aa_bookdirs.full = false;
@@ -3055,6 +3084,8 @@ out:
     cache_busy = false;
     if (failed || aa_io_failed)
         return BG_FAILED;
+    if (aborted && aa_motion_deferred)
+        return BG_DEFERRED;
     return aborted ? BG_INTERRUPTED : BG_DONE;
 }
 
@@ -3124,6 +3155,13 @@ static void aa_handle_offer(void)
         timeout_register(&aa_offer_tmo, aa_offer_poll, HZ, 0);
         return;
     }
+#ifndef DBTOOL
+    if (ui_motion_active())
+    {
+        timeout_register(&aa_offer_tmo, aa_offer_poll, MAX(1, HZ / 10), 0);
+        return;
+    }
+#endif
 
     /* Copy the path out before any yield so a newer offer can't move it. */
     strlcpy(path, aa_offer.path, sizeof(path));
@@ -3174,6 +3212,13 @@ static void aa_handle_offer(void)
 
     for (i = 0; i < ART_CACHE_NUM_SIZES; i++)
     {
+#ifndef DBTOOL
+        if (ui_motion_active())
+        {
+            timeout_register(&aa_offer_tmo, aa_offer_poll, MAX(1, HZ / 10), 0);
+            break;
+        }
+#endif
         if (aa_check_abort())
             break;
         s = order[i];
@@ -4147,7 +4192,8 @@ void art_cache_init(void)
      * peak declared to bg_task is both. A format bump needs nothing here: the
      * stamp file carries the format as its version, so aa_read_marks() finds
      * no marks, the task is stale, and the pass purges. */
-    art_cache_task.work_bytes = aa_work_bytes() + AA_TABLE_BYTES;
+    art_cache_task.work_bytes = aa_work_bytes() + AA_TABLE_BYTES +
+        2 * (BUFLIB_ALLOC_OVERHEAD + sizeof(intptr_t));
 
     bg_task_init(&art_cache_task);
 

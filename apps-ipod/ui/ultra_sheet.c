@@ -58,7 +58,7 @@ void ultra_sheet_begin(struct ui_sheet *sheet, bool open, const char *route)
         char trace_route[32];
         snprintf(trace_route, sizeof(trace_route), "%s-%s", route,
                  open ? "up" : "down");
-        sheet->trace = ui_perf_begin(trace_route);
+        sheet->trace = ui_motion_begin(trace_route);
     }
 }
 

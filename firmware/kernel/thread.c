@@ -31,6 +31,8 @@
 #include "hang_catch.h"
 #include "crumbs.h"
 #include "kernel.h"
+#include "motion_sched.h"
+#include "motion_sched.inc"
 #include "cpu.h"
 #include "string.h"
 #ifdef RB_PROFILE
@@ -392,6 +394,9 @@ static inline void core_rtr_add(struct core_entry *corep,
     rtr_add_entry(corep, thread->priority);
 #ifdef HAVE_PRIORITY_SCHEDULING
     thread->skip_count = thread->base_priority;
+#endif
+#ifdef HAVE_MOTION_SCHED
+    motion_watch_wake(thread);
 #endif
     thread->state = STATE_RUNNING;
     RTR_UNLOCK(corep);
@@ -859,6 +864,10 @@ void *wake_dbg_ra, *wake_dbg_obj;
 unsigned int wakeup_thread_(struct thread_entry *thread
                             IF_PRIO(, enum wakeup_thread_protocol proto))
 {
+#ifdef HAVE_MOTION_SCHED
+    if (proto == WAKEUP_TRANSFER)
+        thread = motion_disk_waiter(thread);
+#endif
     LOCK_THREAD(thread);
 
     /* Determine thread's current state. */
@@ -1051,6 +1060,10 @@ void switch_thread(void)
             thread_stkov(thread);
     }
 
+#ifdef HAVE_MOTION_SCHED
+    motion_watch_out(thread);
+#endif
+
     /* TODO: make a real idle task */
     for (;;)
     {
@@ -1068,6 +1081,9 @@ void switch_thread(void)
 
         /* Enter sleep mode to reduce power usage */
         RTR_UNLOCK(corep);
+#ifdef HAVE_MOTION_SCHED
+        motion_watch_in(NULL);
+#endif
         core_sleep(IF_COP(core));
 
         /* Awakened by interrupt or other CPU */
@@ -1081,6 +1097,9 @@ void switch_thread(void)
      * process got CPU time relative to the highest priority runnable
      * task. If priority is not a feature, then FCFS is used (above). */
     int max = priobit_ffs(&corep->rtr_dist.mask);
+#ifdef HAVE_MOTION_SCHED
+    int group_end = motion_group_end(max);
+#endif
 
     for (;;)
     {
@@ -1101,6 +1120,13 @@ void switch_thread(void)
          * thus are not subject to switchout due to lower-priority
          * processes aging; they must give up the processor by going
          * off the run list. */
+#ifdef HAVE_MOTION_SCHED
+        if (priority > group_end)
+        {
+            thread = RTR_THREAD_NEXT(thread);
+            continue;
+        }
+#endif
         if (LIKELY(priority <= max) ||
             (priority > PRIORITY_REALTIME &&
              (diff = priority - max, ++thread->skip_count > diff*diff)))
@@ -1131,6 +1157,9 @@ void switch_thread(void)
 #endif
 
     /* And finally, give control to the next thread. */
+#ifdef HAVE_MOTION_SCHED
+    motion_watch_in(thread);
+#endif
     thread_load_context(thread);
 }
 

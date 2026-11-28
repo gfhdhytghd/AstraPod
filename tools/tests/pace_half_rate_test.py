@@ -89,7 +89,23 @@ int main(void)
     run(false, 0.2, 0.3, steps, 40);
     for (int i = 1; i < 40; i++)
         assert(steps[i] == 1);
-    puts("PASS locked pacing presents every second refresh; unlocked stays at full rate");
+    /* Synchronous Cover Flow can return to full rate after a short stall. */
+    struct ui_pace recover = {.recover_full_rate = true, .recover_sync = true};
+    uint32_t start = now_us;
+    uint32_t due = ui_pace_next(&recover, start);
+    for (unsigned i = 0; i < LATE_LIMIT; i++)
+    {
+        now_us = due + PERIOD;
+        due = ui_pace_next(&recover, start);
+    }
+    assert(recover.divisor == 2);
+    for (unsigned i = 0; i < RECOVERY_FRAMES; i++)
+    {
+        now_us = due + PERIOD / 4;
+        due = ui_pace_next(&recover, start);
+        assert(recover.divisor == (i + 1 < RECOVERY_FRAMES ? 2 : 1));
+    }
+    puts("PASS fixed half rate, full rate, and synchronous recovery");
     return 0;
 }
 """

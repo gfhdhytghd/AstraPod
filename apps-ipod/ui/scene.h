@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "animation.h"
+#include "motion_schedule.h"
 #include "lcd.h"
 
 /* A transform draws two retained pages at one position on a reversible path.
@@ -19,7 +20,8 @@ struct ui_scene {
     struct ui_tween tween;
     int handle, backdrop_handle, composed_offset, last_offset, pan_top;
     int status_height, push_top, row_y, row_pitch, row_count;
-    unsigned trace, dim_color, push_half_frames;
+    struct ui_motion trace;
+    unsigned dim_color, push_half_frames;
     uint32_t requested_at;
     bool target_front, capturing, automatic, vertical, root_entry;
     bool staggered, rows_changed, reuse_target, slide;

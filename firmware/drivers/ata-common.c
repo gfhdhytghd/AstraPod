@@ -30,6 +30,13 @@ static bool canflush = true;
 static int spinup_time = 0;
 static struct mutex ata_mutex SHAREDBSS_ATTR;
 
+#ifdef ATA_CLASSIC_MOTION
+#include "ata-motion.inc"
+#else
+#define ata_motion_lock() mutex_lock(&ata_mutex)
+#define ata_motion_bulk ata_transfer_sectors
+#endif
+
 #ifdef MAX_PHYS_SECTOR_SIZE
 static uint16_t phys_sector_mult = 1;
 #endif
@@ -97,6 +104,15 @@ struct sector_cache_entry {
 /* buffer for reading and writing large physical sectors */
 static struct sector_cache_entry sector_cache STORAGE_ALIGN_ATTR;
 
+#ifdef ATA_CLASSIC_MOTION
+static void ata_motion_invalidate(uint64_t start, int count)
+{
+    if (sector_cache.inuse && sector_cache.sectornum >= start &&
+        sector_cache.sectornum - start < (unsigned)count)
+        sector_cache.inuse = false;
+}
+#endif
+
 static int ata_transfer_sectors(uint64_t start,
                                 int incount,
                                 void* inbuf,
@@ -141,7 +157,7 @@ int ata_read_sectors(IF_MD(int drive,)
 #ifdef HAVE_MULTIDRIVE
     (void)drive; /* unused for now */
 #endif
-    mutex_lock(&ata_mutex);
+    ata_motion_lock();
 
     offset = start & (phys_sector_mult - 1);
 
@@ -167,7 +183,7 @@ int ata_read_sectors(IF_MD(int drive,)
 
     if (incount) /* all complete physical sectors */
     {
-        rc = ata_transfer_sectors(start, incount, inbuf, false);
+        rc = ata_motion_bulk(start, incount, inbuf, false);
         if (rc)
         {
             rc = rc * 10 - 2;
@@ -205,7 +221,7 @@ int ata_write_sectors(IF_MD(int drive,)
 #ifdef HAVE_MULTIDRIVE
     (void)drive; /* unused for now */
 #endif
-    mutex_lock(&ata_mutex);
+    ata_motion_lock();
 
     offset = start & (phys_sector_mult - 1);
 
@@ -237,7 +253,7 @@ int ata_write_sectors(IF_MD(int drive,)
 
     if (count) /* all complete physical sectors */
     {
-        rc = ata_transfer_sectors(start, count, (void*)buf, true);
+        rc = ata_motion_bulk(start, count, (void*)buf, true);
         if (rc)
         {
             rc = rc * 10 - 3;

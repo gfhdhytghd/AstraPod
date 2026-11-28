@@ -140,12 +140,32 @@ static inline bool stock_entering(const struct stock_flow *f)
            f->phase == STOCK_ULTRA_ENTER;
 }
 
+static inline int stock_anchor(const struct stock_flow *f, int slot)
+{
+    return slot < 0 ? 0 : slot >= f->length ? f->length - 1 : slot;
+}
+
 static inline int stock_scroll_progress(const struct stock_flow *f, uint32_t now)
 {
     if (f->phase != STOCK_SCROLL)
         return STOCK_ONE;
-    return f->spring ? ultra_flow_scroll(now - f->start_us) :
-           stock_progress(now - f->start_us, STOCK_SCROLL_US, false);
+    if (!f->spring)
+        return stock_progress(now - f->start_us, STOCK_SCROLL_US, false);
+
+    int e = ultra_flow_scroll(now - f->start_us);
+    if (e > STOCK_ONE) {
+        int slot = f->selected - f->first;
+        int anchor = stock_anchor(f, slot);
+        int64_t x = f->start[anchor].x +
+                    (int64_t)(slot - anchor) * STOCK_SPACING * STOCK_ONE;
+        int64_t distance = x < 0 ? -x : x;
+        const int span = 2 * STOCK_BAND * STOCK_ONE;
+        /* Scale the overshoot of long flicks to one strip's travel so the
+         * row stays in view at either end of the library. */
+        if (distance > span)
+            e = STOCK_ONE + (e - STOCK_ONE) * (int64_t)span / distance;
+    }
+    return e;
 }
 
 static inline struct stock_visible stock_current(const struct stock_flow *f,
@@ -153,7 +173,7 @@ static inline struct stock_visible stock_current(const struct stock_flow *f,
 {
     int rel = album - f->selected;
     int i = album - f->first;
-    int anchor = i < 0 ? 0 : i >= f->length ? f->length - 1 : i;
+    int anchor = stock_anchor(f, i);
     struct stock_pose a = f->start[anchor], b = stock_slot_base(rel);
     int64_t from_slots = i - anchor, to_slots = rel;
     uint32_t elapsed = now - f->start_us;

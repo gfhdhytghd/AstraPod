@@ -220,12 +220,12 @@ static bool art(int index, struct bitmap *bitmap, unsigned int *version)
             quality = 1;
             if (global_settings.album_covers_view_mode != CAROUSEL_VIEW_FLAT)
                 dim = 32;
-            /* A page has no palette until its artwork arrives on some
-             * providers. Keep the card visible during the fetch. */
-            uint32_t rgb = row.bg ? row.bg : 0x383838;
+            /* Keep the loading card visible even when the provider's
+             * palette has a near-black background. */
+            uint32_t rgb = row.bg;
+            if ((rgb & 0xe0e0e0) == 0)
+                rgb = 0x383838;
             fb_data color = LCD_RGBPACK(rgb >> 16, (rgb >> 8) & 255, rgb & 255);
-            if (!color)
-                color = LCD_RGBPACK(56, 56, 56);
             for (int i = 0; i < dim * dim; i++)
                 surface[i] = color;
         }
@@ -338,16 +338,17 @@ static void tick(void)
         {
             bool started = !requested && cider_prefetch_art(key, "XS");
             requested |= started;
-            if (!started && offsets[i] != 0 && nbatch < ARRAYLEN(batch))
+            if (!started && (offsets[i] != 0 || flicking) &&
+                nbatch < ARRAYLEN(batch))
                 batch[nbatch++] = key;
         }
         if (!local && nwarm < ARRAYLEN(warm))
             warm[nwarm++] = key;
     }
-    /* Keep the centred preview on the ordinary request lane. Once it is
-     * visible, use the existing XS batch lane for upcoming covers as well.
-     * A slow neighbour cannot delay the first cover on entry. */
-    if (center_ready && nbatch)
+    /* Let the first cover load alone on entry. While flicking, the batch
+     * lane keeps up with the moving window even if the single lane is
+     * still serving an album that has already passed. */
+    if ((center_ready || flicking) && nbatch)
         cider_request_xs(batch, nbatch);
     if (!requested && !flicking)
         for (unsigned i = 0; i < full; i++)

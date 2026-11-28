@@ -4,19 +4,9 @@
  * Breadcrumbs that survive a hard reset, and tick-time guards on the
  * memory a stray write would turn into a RESTART (FU51).
  *
- * Two copies of the ring (crumb_ring.h):
- *  - DRAM, in the NOLOAD .persist section before .bss (app.lds). crt0
- *    clears only .bss/.ibss; the bootloader loads rockbox.ipod at the start
- *    of DRAM (a few MiB) and keeps its own .bss from DRAM + 8 MiB on, and the
- *    linker script asserts .persist lies between the two.
- *  - IRAM1, its top 2 KiB. The bootloader runs from IRAM1's start (about
- *    0x2203c600 at most today) and the ROM is not known to use the top. The
- *    firmware never used IRAM1 (its clock was gated off); it stays on now.
- * Crash text uses a separate .persist record and the adjacent 512 bytes of
- * IRAM1, below the ring. Both records include a checksum and a boot number.
- * The bootloader link script protects the reserved tail of IRAM1.
- * Both are written through the uncached alias (+0x40000000), so nothing
- * waits in the D-cache when the reset comes.
+ * The ring and crash records live in the NOLOAD .persist section between
+ * the loaded image and the application's .bss. The uncached alias keeps
+ * the records available if DRAM survives reset. SM1 owns IRAM1.
  *
  * Guards, from the tick: the vector page and its literals (0x00-0x5f, which
  * the null-call trap also occupies) word for word; the IRAM code a block at
@@ -60,24 +50,14 @@ static uint32_t hivec[1024] TABLES_ATTR(0) __attribute__((aligned(4096)));
 
 static struct crumb_ring dram_ring __attribute__((section(".persist"),
                                                    aligned(32)));
-#define IRAM1_RING_ADDR 0x2203f800
-_Static_assert(sizeof(struct crumb_ring) <= 2048, "crumb ring size");
-
 static struct crumb_crash dram_crash __attribute__((section(".persist"), aligned(32)));
-#define IRAM1_CRASH_ADDR (IRAM1_RING_ADDR - 512)
-_Static_assert(sizeof(struct crumb_crash) <= 512, "crash record size");
+static struct crumb_crash dram_early __attribute__((section(".persist"), aligned(32)));
 
 #define CRASH_A ((volatile struct crumb_crash *)UNCACHED(&dram_crash))
-#define CRASH_B ((volatile struct crumb_crash *)UNCACHED(IRAM1_CRASH_ADDR))
+#define CRASH_EARLY ((volatile struct crumb_crash *)UNCACHED(&dram_early))
 #define RING_A ((volatile struct crumb_ring *)UNCACHED(&dram_ring))
-#define RING_B ((volatile struct crumb_ring *)UNCACHED(IRAM1_RING_ADDR))
-volatile uint32_t *const crumb_status_a =
-    ((volatile struct crumb_ring *)UNCACHED(&dram_ring))->status;
-volatile uint32_t *const crumb_status_b =
-    ((volatile struct crumb_ring *)UNCACHED(&dram_ring))->status;
-
+volatile uint32_t *const crumb_status_a = RING_A->status;
 volatile uint32_t *const crumb_status_extra_a = RING_A->status_extra;
-volatile uint32_t *const crumb_status_extra_b = RING_B->status_extra;
 _Static_assert(CS_COUNT == CRUMB_STATUS, "crumb status count");
 
 #ifdef HAVE_IPOD_CRASH_RECOVERY
@@ -126,6 +106,8 @@ static const char *const crumb_names[CR_COUNT] =
     [CR_LYRICS_SEEK] = "lyrics-seek", [CR_LYRICS_REDRAW] = "lyrics-draw",
     [CR_MP4_MOOV] = "mp4-moov", [CR_MP4_MDAT] = "mp4-mdat",
     [CR_FREEZE_CONTEXT] = "freeze-ctx",
+    [CR_HANG_SAMPLE] = "hang-pc",
+    [CR_VIDEO_PHASE] = "video-phase",
 };
 
 static const char *const status_names[CRUMB_STATUS] =
@@ -150,31 +132,33 @@ void crumb(enum crumb_id id, uint32_t value)
 
 extern const char *thread_current_name(void);
 
-static uint32_t crash_save(const char *message,
+static uint32_t crash_save(volatile struct crumb_crash *slot,
+                           const char *message,
                            const struct crumb_crash_context *context)
 {
     uint32_t boot = crumb_ring_head_ok(RING_A) ? RING_A->boot : 0;
     struct crumb_crash_context saved = *context;
     if (!saved.thread[0])
         strlcpy(saved.thread, thread_current_name(), sizeof saved.thread);
-    crumb_crash_store(CRASH_A, boot, RBVERSION, message, &saved);
+    crumb_crash_store(slot, boot, RBVERSION, message, &saved);
+    asm volatile("mcr p15, 0, %0, c7, c10, 4" : : "r"(0) : "memory");
     return boot;
 }
 
 void crumbs_crash_save(const char *message, const struct crumb_crash_context *context)
 {
-    crash_save(message, context);
+    crash_save(CRASH_EARLY, message, context);
 }
 
 void crumbs_crash_record(const char *message, const struct crumb_crash_context *context)
 {
-    uint32_t boot = crash_save(message, context);
+    uint32_t boot = crash_save(CRASH_A, message, context);
 #ifdef HAVE_IPOD_CRASH_RECOVERY
     /* No disk, scheduler, I2C or LCD from a fatal context. A recovery
      * fault drops through to the original diagnostic screen and halt. */
     if (recovery_started && recovery_fault(REC_SAVED, boot, (uint32_t)current_tick < 30u * HZ)) {
-        uint32_t zero = 0;
-        asm volatile("mcr p15, 0, %0, c7, c10, 4" : : "r"(zero) : "memory");
+        /* The recovery state changed after crash_save drained the buffer. */
+        asm volatile("mcr p15, 0, %0, c7, c10, 4" : : "r"(0) : "memory");
         system_reboot();
     }
 #else
@@ -245,7 +229,7 @@ int crumbs_lines(char (**lines)[48])
 
 static void crash_report(void)
 {
-    const volatile struct crumb_crash *crash = crumb_crash_latest(CRASH_A, CRASH_A);
+    const volatile struct crumb_crash *crash = crumb_crash_latest(CRASH_A, CRASH_EARLY);
     if (!crash)
         return;
 
@@ -295,6 +279,7 @@ static void crash_report(void)
     if (ok && rename(temp, path) == 0)
     {
         CRASH_A->check = 0;
+        CRASH_EARLY->check = 0;
     }
     else
         remove(temp);
@@ -307,16 +292,20 @@ void crumbs_report(void)
         return;
     int n = report_n = format_lines(report, REPORT_LINES);
 
-    int fd = open(ROCKBOX_DIR "/crumbs-last.txt", O_WRONLY | O_CREAT | O_TRUNC,
-                  0666);
-    if (fd >= 0)
-    {
-        fdprintf(fd, "# AstraPod breadcrumbs of the boot before %s\n",
-                 RBVERSION);
-        for (int i = 0; i < n; i++)
-            fdprintf(fd, "%s\n", report[i]);
-        close(fd);
-    }
+    static const char path[] = ROCKBOX_DIR "/crumbs-last.txt";
+    static const char temp[] = ROCKBOX_DIR "/crumbs-last.tmp";
+    int fd = open(temp, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0)
+        return;
+    static const char header[] = "# AstraPod breadcrumbs of the boot before " RBVERSION "\n";
+    bool ok = write(fd, header, sizeof(header) - 1) == sizeof(header) - 1;
+    for (int i = 0; ok && i < n; i++)
+        ok = fdprintf(fd, "%s\n", report[i]) == (int)strlen(report[i]) + 1;
+    ok = ok && fsync(fd) == 0;
+    if (close(fd) < 0)
+        ok = false;
+    if (!ok || rename(temp, path) < 0)
+        remove(temp);
 }
 
 /* Once boot is done, so USB and the dock's iAP are already up and nothing

@@ -96,6 +96,10 @@ static int stack_scan(uint32_t sp, uint32_t top, uint32_t *found, int most)
 /* Where the stuck thread was, taken by the tick */
 static const struct thread_entry *hang_thread;
 static uint32_t hang_pc, hang_sp, hang_lr;
+#ifdef HAVE_CRUMBS
+static uint32_t hang_status;
+static long next_sample;
+#endif
 
 /* The UI thread, which starts the catcher; when it was first seen blocked
  * with keys unread, or 0; and whether that, not the core, is the report */
@@ -249,7 +253,7 @@ static void NORETURN_ATTR hang_show(void)
 #ifdef HAVE_CRUMBS
     struct crumb_crash_context context = {
         .kind = CRUMB_CRASH_HANG, .pc = hang_pc, .sp = hang_sp, .lr = hang_lr,
-        .status = get_processor_mode(),
+        .status = hang_status,
     };
     strlcpy(context.thread, t && t->name ? t->name : "?", sizeof context.thread);
     if (hang_stuck && ui_thread)
@@ -342,6 +346,16 @@ static void hang_tick(void)
     }
     else
         stuck_since = 0;
+#ifdef HAVE_CRUMBS
+    /* A single PC can be in a short helper called repeatedly by the hang. */
+    if (!TIME_AFTER(current_tick, since + HZ))
+        next_sample = current_tick;
+    else if (TIME_AFTER(current_tick, next_sample))
+    {
+        crumb(CR_HANG_SAMPLE, *ret);
+        next_sample = current_tick + HZ;
+    }
+#endif
     if (!hang_stuck &&
         !TIME_AFTER(current_tick, since + HANG_SECS * HZ))
         return;
@@ -351,6 +365,9 @@ static void hang_tick(void)
      * are banked away from IRQ mode's. */
     hang_thread = corep->running;
     hang_pc = *ret;
+#ifdef HAVE_CRUMBS
+    asm volatile ("mrs %0, spsr" : "=r" (hang_status));
+#endif
     asm volatile ("mrs r2, cpsr      \n"
                   "msr cpsr_c, #0xdf \n"
                   "mov %0, sp        \n"

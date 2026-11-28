@@ -17,6 +17,7 @@
 #include "plugins/sdk/plugin.h"
 #include "rock-compat/rock_fingerprint.h"
 #include "core_alloc.h"
+#include "crumbs.h"
 #include "draw/resize.h"
 #include "plugins/quake/quake_heap.h"
 #include "files/filetypes.h"
@@ -59,6 +60,13 @@ bool rock_host_header_valid(const struct plugin_header *header);
 #define ROCK_VIDEO_MODULE PLUGIN_APPS_DIR "/h264_player.rock"
 #define ROCK_HEAP_LIMIT (2 * 1024 * 1024)
 #define ROCK_VIDEO_HEAP_LIMIT (10u * 1024 * 1024)
+
+enum video_crumb_phase {
+    VIDEO_CRUMB_ENTER = 1,
+    VIDEO_CRUMB_RETURN,
+    VIDEO_CRUMB_DRAINED,
+    VIDEO_CRUMB_UI_RESTORED,
+};
 
 static const unsigned char fingerprint[] = ROCK_FINGERPRINT;
 static const char arena_owner[] = "Rockbox plugin";
@@ -1213,7 +1221,11 @@ static int invoke_module(void *opaque)
     if (video)
         current_video = parameter;
 #endif
+    if (video)
+        crumb(CR_VIDEO_PHASE, VIDEO_CRUMB_ENTER);
     int result = call->module->entry_point(parameter);
+    if (video)
+        crumb(CR_VIDEO_PHASE, VIDEO_CRUMB_RETURN);
 #ifdef HAVE_HW_H264
     current_video = NULL;
     if (video)
@@ -1230,6 +1242,8 @@ static int invoke_module(void *opaque)
     rock_media_shutdown();
     rock_execution_end();
     rock_h264_end();
+    if (video)
+        crumb(CR_VIDEO_PHASE, VIDEO_CRUMB_DRAINED);
     rock_hid_close();
     rock_podlink_close();
     if (usb_taken)
@@ -1243,6 +1257,8 @@ static int invoke_module(void *opaque)
     rock_list_discard();
     button_clear_pressed();
     rock_display_stop(result == PLUGIN_OK);
+    if (video)
+        crumb(CR_VIDEO_PHASE, VIDEO_CRUMB_UI_RESTORED);
     if (engine_heap)
     {
         core_unpin(engine_heap);

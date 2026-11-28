@@ -347,8 +347,10 @@ def run_theme(binary, simdisk, env, out, theme):
                     time.sleep(0.12)
                 s.tap("Return")
                 settle(s)
-                s.tap("Up")
-                time.sleep(0.15)
+                # Fruit Company stops at the first list row.
+                for _ in range(33):
+                    s.tap("Down")
+                    time.sleep(0.12)
                 before_yn = settle(s)
 
                 # Open Yes/No pop-up, verify pop-up form, PLAY/wheel inert, LEFT = No
@@ -389,8 +391,8 @@ def run_theme(binary, simdisk, env, out, theme):
                 # 3. Settings -> Advanced Settings -> Sound Settings -> Volume -> Explain
                 s.tap("Escape")
                 settle(s)
-                for _ in range(4):
-                    s.tap("Up")
+                for _ in range(14):
+                    s.tap("Down")  # Main Menu (3) -> Advanced Settings (17)
                     time.sleep(0.12)
                 s.tap("Return")
                 settle(s)  # Advanced Settings (starts on Sound Settings)

@@ -113,7 +113,10 @@ def run_case(binary, root, env, out, config, theme, long_labels=False):
         with sim_screen(binary, root, env, out / f"{theme}-prose.log", active) as screen:
             move(screen, "Down", 3)  # Settings -> Library
             move(screen, "Return")
-            move(screen, "Up")  # Library -> Maintenance
+            if theme == "fruit-company":
+                move(screen, "Down", 8)  # Library -> Maintenance without wraparound
+            else:
+                move(screen, "Up")
             move(screen, "Return")
             move(screen, "Down", 4)  # Maintenance -> Update Sound Analysis
             frames["prose-confirm"] = move(screen, "Return")

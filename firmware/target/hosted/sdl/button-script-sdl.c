@@ -18,7 +18,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef WIN32
+#include <windows.h>
+#else
 #include <sys/mman.h>
+#endif
 #include <unistd.h>
 
 #include "SDL.h"
@@ -142,6 +146,32 @@ void button_script_sdl_set_path(const char *path)
     keys_path = path;
 }
 
+static struct shared_state *map_walk_state(const char *path)
+{
+#ifdef WIN32
+    HANDLE file = CreateFileA(path, GENERIC_READ | GENERIC_WRITE,
+                             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+        die("cannot open walk state");
+    HANDLE mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, 0, NULL);
+    CloseHandle(file);
+    if (!mapping)
+        return NULL;
+    void *view = MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, sizeof(*shared));
+    CloseHandle(mapping);
+    return view;
+#else
+    int fd = open(path, O_RDWR);
+    if (fd < 0)
+        die("cannot open walk state");
+    void *view = mmap(NULL, sizeof(*shared), PROT_READ | PROT_WRITE,
+                      MAP_SHARED, fd, 0);
+    close(fd);
+    return view == MAP_FAILED ? NULL : view;
+#endif
+}
+
 void button_script_sdl_start(void)
 {
     const char *path = keys_path ? keys_path : getenv("PODBOX_UI_KEYS");
@@ -150,12 +180,8 @@ void button_script_sdl_start(void)
 
     if (state_path)
     {
-        int fd = open(state_path, O_RDWR);
-        if (fd < 0)
-            die("cannot open walk state");
-        shared = mmap(NULL, sizeof(*shared), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-        close(fd);
-        if (shared == MAP_FAILED)
+        shared = map_walk_state(state_path);
+        if (!shared)
             die("cannot map walk state");
     }
     if (delay && sscanf(delay, "%u:%u", &delay_after_events, &delay_frames) != 2)

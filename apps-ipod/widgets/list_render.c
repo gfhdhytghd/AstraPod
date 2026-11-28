@@ -20,6 +20,7 @@
 #include "scroll_engine.h"
 #include "settings/settings.h"
 #include "strcasecmp.h"
+#include "string-extra.h"
 #include "system.h"
 #include "audio.h"
 #include "metadata.h"

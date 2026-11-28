@@ -22,7 +22,9 @@ static const struct
 } glyphs[] = {
     /* Settings */
     { LANG_DB_SEARCH, 0x00AE },
+#ifdef HAVE_RECORDING
     { LANG_RECORDING_SETTINGS, 0x005A },
+#endif
     { LANG_THEME_SETTINGS_MENU, 0x0133 }, /* palette */
     /* Settings > Sound Settings */
     { LANG_VOLUME, 0x004F },
@@ -129,6 +131,7 @@ static const struct
     { LANG_WPS_ART_SOURCE, 0x00A7 },
     { LANG_ALBUM_ART, 0x0066 },
     { LANG_TRIM_TITLES, 0x01BD }, /* content_cut */
+#ifdef HAVE_RECORDING
     /* Settings > Recording Settings */
     { LANG_REC_FORMAT, 0x0183 }, /* audio_file */
     { LANG_ENCODER_SETTINGS, 0x01A4 }, /* compress */
@@ -164,6 +167,7 @@ static const struct
     { LANG_REC_INPUT_GAIN, 0x005A },
     { LANG_GAIN_LEFT, 0x01D3 }, /* west */
     { LANG_GAIN_RIGHT, 0x01D4 }, /* east */
+#endif
     /* Settings > Recording Settings > Peak Meter */
     { LANG_PM_RELEASE, 0x01D6 }, /* south */
     { LANG_PM_PEAK_HOLD, 0x0193 }, /* timer */
@@ -419,7 +423,9 @@ static const struct
     { LANG_ACCESSORY_BROWSING, 0x0176 }, /* view_list */
     { LANG_CAR_ARTWORK, 0x00A7 },
     { LANG_SERIAL_BITRATE, 0x0053 },
+#ifdef HAVE_MIKEY_REMOTE
     { LANG_REMOTE_TRACK_SKIP, 0x0177 }, /* settings_remote */
+#endif
     { LANG_IAP2_ACCESSORIES, 0x01E4 }, /* smartphone */
     { LANG_IAP_IDENTITY, 0x01E5 }, /* badge */
     /* Settings > System > Accessories > TV Out */
@@ -472,8 +478,10 @@ static const struct
     { LANG_DEBUG_LOG_EXPIRY, 0x0189 }, /* timer_off */
     { LANG_DEBUG_LOG_ALL_OFF, 0x00F7 },
     { LANG_DEBUG_LOG_USB, 0x016F }, /* usb */
+#ifdef HAVE_RECORDING
     /* System */
     { LANG_RECORDING, 0x005A },
+#endif
     /* Sound Library */
     { LANG_SOUND_LIB_OVERVIEW, 0x0178 }, /* dashboard */
     { LANG_SOUND_LIB_MOODS, 0x00ED },

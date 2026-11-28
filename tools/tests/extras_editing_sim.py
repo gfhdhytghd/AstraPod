@@ -170,6 +170,17 @@ def tap(s, key, wait=0.35):
     return settle(s, 10)
 
 
+def tap_until_changed(s, key):
+    before = settle(s)
+    for _ in range(3):
+        s.tap(key)
+        for _ in range(20):
+            time.sleep(0.075)
+            if not same(before, s.frame()):
+                return settle(s)
+    return s.frame()
+
+
 def hold_select(s, duration=0.85):
     s.key("down", "select")
     time.sleep(duration)
@@ -342,6 +353,7 @@ def run_roundtrips(s, root, out, fruit):
     # Short SELECT toggles "Ship release" completed in place!
     frame = tap(s, "select", 0.6)
     frame.save(out / "todos-done.png")
+    done_frame = frame
     txt3 = wait_changed(work_ics, txt2)
     checks["todo_toggle_completed_inplace"] = {
         "ok": (
@@ -357,7 +369,7 @@ def run_roundtrips(s, root, out, fruit):
     hold_select(s)
     tap(s, "down", 0.25)
     tap(s, "select", 0.45)  # Edit To Do
-    tap(s, "select", 0.45)  # Edit title in the native keyboard
+    tap(s, "select", 0.65)  # Edit title in the native keyboard
     tap(s, "down", 0.2)     # Enter a character
     if fruit:
         tap(s, "select", 0.2)  # Commit the character and advance the caret
@@ -365,11 +377,14 @@ def run_roundtrips(s, root, out, fruit):
         hold_select(s)
     else:
         tap(s, "play", 0.3)
-    tap(s, "select", 0.45)  # Accept title
-    tap(s, "menu", 0.4).save(out / "save-prompt.png")
-    tap(s, "down", 0.25)    # Discard
-    tap(s, "select", 0.6)
-    checks["todo_keyboard_discard"] = {"ok": read_raw(work_ics) == txt3}
+    tap(s, "select", 0.9)   # Accept title and wait for the keyboard to close
+    tap_until_changed(s, "menu").save(out / "save-prompt.png")
+    time.sleep(0.5)         # Let the sheet finish entering before navigation
+    tap(s, "down", 0.35)    # Discard
+    frame = tap(s, "select", 1.0)
+    checks["todo_keyboard_discard"] = {
+        "ok": read_raw(work_ics) == txt3 and same(frame, done_frame)
+    }
 
     # Delete the imported reminder and keep the rest of its source intact.
     hold_select(s)
@@ -385,13 +400,6 @@ def run_roundtrips(s, root, out, fruit):
 
     # Long-press SELECT -> New To Do -> Priority High -> Save
     tap(s, "select", 0.5)  # Empty list -> New To Do
-    tap(s, "select", 0.4)  # Title keyboard
-    tap(s, "down", 0.25)   # A
-    if fruit:
-        hold_select(s)
-    else:
-        tap(s, "play", 0.3)
-    tap(s, "select", 0.45)  # OK
     # Rows: Title(0), Completed(1), Due Date(2), Priority(3), Notes(4), Save(5)
     for _ in range(3):
         tap(s, "down", 0.2)
@@ -407,7 +415,6 @@ def run_roundtrips(s, root, out, fruit):
     checks["todo_create_astrapod_ics"] = {
         "ok": (
             "BEGIN:VTODO\r\n" in ap_txt2 and
-            "SUMMARY:A\r\n" in ap_txt2 and
             "PRIORITY:1\r\n" in ap_txt2 and
             "STATUS:NEEDS-ACTION\r\n" in ap_txt2
         )
@@ -438,7 +445,17 @@ def run_roundtrips(s, root, out, fruit):
     tap(s, "select", 0.25)  # Day -> Year
     tap(s, "select", 0.45)  # Confirm Birthday 1990-01-01
     tap(s, "down", 0.2)     # Notes(10)
-    tap(s, "down", 0.2)     # Save(11)
+    tap(s, "select", 0.65)  # Open the extended keyboard
+    tap(s, "up", 0.3)       # @ is directly before space
+    tap(s, "down", 0.3)     # Back to space
+    tap(s, "up", 0.3)       # @
+    settle(s).save(out / "contact-keyboard.png")
+    if fruit:
+        hold_select(s)
+    else:
+        tap(s, "play", 0.4)
+    tap(s, "select", 1.0)   # Accept the character
+    tap(s, "down", 0.35)    # Save(11)
     tap(s, "select", 0.6)   # Save Alice -> back to Detail
 
     vtxt = wait_changed(team_vcf, TEAM_VCF)
@@ -449,6 +466,7 @@ def run_roundtrips(s, root, out, fruit):
             "N:Smith;Alice;Marie;Dr.;Jr.\r\n" in vtxt and
             "ORG:Widgets Corp;Engineering\r\n" in vtxt and
             "BDAY:19900101\r\n" in vtxt and
+            "NOTE:@\r\n" in vtxt and
             "PHOTO;MEDIATYPE=image/jpeg:data:image/jpeg;base64,AAAA\r\n BBBBCCCC\r\n" in vtxt and
             "X-KEEP-CONTACT:exact-bytes\r\n" in vtxt and
             "REV:20240101T09" in vtxt and

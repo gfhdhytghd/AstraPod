@@ -490,7 +490,7 @@ static int run_event_editor(struct ical_event *ev, bool *changed)
             {
                 char tmp[sizeof(ev->summary)];
                 strlcpy(tmp, ev->summary, sizeof(tmp));
-                if (dialog_input(tmp, sizeof(tmp)) == 0)
+                if (dialog_input_extended(tmp, sizeof(tmp)) == 0)
                 {
                     strlcpy(ev->summary, tmp, sizeof(ev->summary));
                     ctx.dirty = true;
@@ -554,7 +554,7 @@ static int run_event_editor(struct ical_event *ev, bool *changed)
             {
                 char tmp[sizeof(ev->notes)];
                 strlcpy(tmp, ev->notes, sizeof(tmp));
-                if (dialog_input(tmp, sizeof(tmp)) == 0)
+                if (dialog_input_extended(tmp, sizeof(tmp)) == 0)
                 {
                     strlcpy(ev->notes, tmp, sizeof(ev->notes));
                     ctx.dirty = true;
@@ -1408,7 +1408,7 @@ static int run_todo_editor(struct ical_todo *td, bool *changed)
             {
                 char tmp[sizeof(td->summary)];
                 strlcpy(tmp, td->summary, sizeof(tmp));
-                if (dialog_input(tmp, sizeof(tmp)) == 0)
+                if (dialog_input_extended(tmp, sizeof(tmp)) == 0)
                 {
                     strlcpy(td->summary, tmp, sizeof(td->summary));
                     ctx.dirty = true;
@@ -1465,7 +1465,7 @@ static int run_todo_editor(struct ical_todo *td, bool *changed)
             {
                 char tmp[sizeof(td->notes)];
                 strlcpy(tmp, td->notes, sizeof(tmp));
-                if (dialog_input(tmp, sizeof(tmp)) == 0)
+                if (dialog_input_extended(tmp, sizeof(tmp)) == 0)
                 {
                     strlcpy(td->notes, tmp, sizeof(td->notes));
                     ctx.dirty = true;

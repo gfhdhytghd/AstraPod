@@ -465,15 +465,15 @@ static int run_addr_editor(struct vcard_addr *a, bool allow_delete)
                 if (r >= 0) a->type = (enum vcard_kind_type)r;
             }
             else if (sel == ADRF_STREET)
-                dialog_input(a->street, sizeof(a->street));
+                dialog_input_extended(a->street, sizeof(a->street));
             else if (sel == ADRF_CITY)
-                dialog_input(a->city, sizeof(a->city));
+                dialog_input_extended(a->city, sizeof(a->city));
             else if (sel == ADRF_REGION)
-                dialog_input(a->region, sizeof(a->region));
+                dialog_input_extended(a->region, sizeof(a->region));
             else if (sel == ADRF_POSTAL)
-                dialog_input(a->postal, sizeof(a->postal));
+                dialog_input_extended(a->postal, sizeof(a->postal));
             else if (sel == ADRF_COUNTRY)
-                dialog_input(a->country, sizeof(a->country));
+                dialog_input_extended(a->country, sizeof(a->country));
             else if (sel == ADRF_DONE)
             {
                 ret = 1;
@@ -686,7 +686,7 @@ static int run_contact_editor(struct vcard_contact *vc)
             {
                 if (ch == 0)
                 {
-                    if (dialog_input(vc->phones[r.index].value,
+                    if (dialog_input_extended(vc->phones[r.index].value,
                                      sizeof(vc->phones[0].value)) == 0)
                         ctx.dirty = true;
                 }
@@ -713,7 +713,7 @@ static int run_contact_editor(struct vcard_contact *vc)
             {
                 if (ch == 0)
                 {
-                    if (dialog_input(vc->emails[r.index].value,
+                    if (dialog_input_extended(vc->emails[r.index].value,
                                      sizeof(vc->emails[0].value)) == 0)
                         ctx.dirty = true;
                 }
@@ -749,24 +749,24 @@ static int run_contact_editor(struct vcard_contact *vc)
         {
             if (r.kind == CE_FIRST)
             {
-                if (dialog_input(vc->first, sizeof(vc->first)) == 0)
+                if (dialog_input_extended(vc->first, sizeof(vc->first)) == 0)
                     ctx.dirty = true;
             }
             else if (r.kind == CE_LAST)
             {
-                if (dialog_input(vc->last, sizeof(vc->last)) == 0)
+                if (dialog_input_extended(vc->last, sizeof(vc->last)) == 0)
                     ctx.dirty = true;
             }
             else if (r.kind == CE_ORG)
             {
-                if (dialog_input(vc->org, sizeof(vc->org)) == 0)
+                if (dialog_input_extended(vc->org, sizeof(vc->org)) == 0)
                     ctx.dirty = true;
             }
             else if (r.kind == CE_PHONE)
             {
                 char tmp[sizeof(vc->phones[0].value)];
                 strlcpy(tmp, vc->phones[r.index].value, sizeof(tmp));
-                if (dialog_input(tmp, sizeof(tmp)) == 0)
+                if (dialog_input_extended(tmp, sizeof(tmp)) == 0)
                 {
                     if (!tmp[0])
                     {
@@ -789,7 +789,7 @@ static int run_contact_editor(struct vcard_contact *vc)
                 if (t >= 0)
                 {
                     char tmp[sizeof(vc->phones[0].value)] = "";
-                    if (dialog_input(tmp, sizeof(tmp)) == 0 && tmp[0])
+                    if (dialog_input_extended(tmp, sizeof(tmp)) == 0 && tmp[0])
                     {
                         vc->phones[vc->phone_count].source_offset = 0;
                         vc->phones[vc->phone_count].type =
@@ -805,7 +805,7 @@ static int run_contact_editor(struct vcard_contact *vc)
             {
                 char tmp[sizeof(vc->emails[0].value)];
                 strlcpy(tmp, vc->emails[r.index].value, sizeof(tmp));
-                if (dialog_input(tmp, sizeof(tmp)) == 0)
+                if (dialog_input_extended(tmp, sizeof(tmp)) == 0)
                 {
                     if (!tmp[0])
                     {
@@ -828,7 +828,7 @@ static int run_contact_editor(struct vcard_contact *vc)
                 if (t >= 0)
                 {
                     char tmp[sizeof(vc->emails[0].value)] = "";
-                    if (dialog_input(tmp, sizeof(tmp)) == 0 && tmp[0])
+                    if (dialog_input_extended(tmp, sizeof(tmp)) == 0 && tmp[0])
                     {
                         vc->emails[vc->email_count].source_offset = 0;
                         vc->emails[vc->email_count].type =
@@ -900,7 +900,7 @@ static int run_contact_editor(struct vcard_contact *vc)
             }
             else if (r.kind == CE_NOTE)
             {
-                if (dialog_input(vc->note, sizeof(vc->note)) == 0)
+                if (dialog_input_extended(vc->note, sizeof(vc->note)) == 0)
                     ctx.dirty = true;
             }
             else if (r.kind == CE_SAVE)

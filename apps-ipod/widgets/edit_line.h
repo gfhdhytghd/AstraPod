@@ -50,6 +50,8 @@ struct edit_line {
  * The bar opens at the end of the existing text, composing nothing, so the
  * first wheel spin inserts a character there. */
 void edit_line_init(struct edit_line *s, const char *utf8, int max_len);
+/* Adds the Latin lowercase and punctuation used in contact fields. */
+void edit_line_init_extended(struct edit_line *s, const char *utf8, int max_len);
 
 /* Re-encode the line into `out` as UTF-8, optionally trimming leading and
  * trailing spaces. Returns the number of bytes written, excluding the NUL. */

@@ -430,7 +430,9 @@ def run(build, evidence, theme, fixture):
             sim.step("select", "leaf-grid", ["35 photos"])
             sim.step("menu", "leaf-return", ["100apple"])
             sim.step("menu", "browse-return", ["dcim", "pictures"])
-            sim.step("menu", "photos-return", ["all photos", "browse files", "settings"])
+            sim.step("menu", "photos-return", ["all photos", "browse files"])
+            assert_menu_order(sim, sim.image(),
+                              ("all photos", "browse files", "settings"))
             report["browse_verified"] = True
 
     with session(build, case, disk, theme) as sim:

@@ -146,6 +146,7 @@ static int apply_workspaces(struct hr_model *m, const char *count_text,
     m->ws_shown_changed = !same || n != m->nws;
     memcpy(m->ws, new_ws, n * sizeof new_ws[0]);
     m->nws = n;
+    m->workspaces_seen = true;
     return 'W';
 }
 
@@ -635,6 +636,21 @@ int hr_model_apply(struct hr_model *m, const char *data, unsigned int length)
             return 0;
         m->hello = true;
         return 'H';
+    }
+    if (!strcmp(type, "M") && n == 2 && (!cursor || !*cursor))
+    {
+        enum hr_mode mode = !strcmp(f[1], "t3") ? HR_MODE_T3 :
+                            !strcmp(f[1], "herdr") ? HR_MODE_HERDR : HR_MODE_UNKNOWN;
+        if (mode == HR_MODE_UNKNOWN)
+            return 0;
+        if (mode != m->mode)
+        {
+            bool hello = m->hello;
+            hr_model_reset(m);
+            m->hello = hello;
+            m->mode = mode;
+        }
+        return 'M';
     }
     if (!strcmp(type, "W") && n == 2)
         return apply_workspaces(m, f[1], &cursor);

@@ -102,7 +102,7 @@ static void clear_toast(void)
 
 void agents_background_update(const struct hr_model *model, int type, bool foreground)
 {
-    if (type != 'H' && type != 'W' && type != 'S' && type != 'Q' &&
+    if (type != 'H' && type != 'M' && type != 'W' && type != 'S' && type != 'Q' &&
         type != 'X' && type != 'T' && type != 'E')
         return;
 

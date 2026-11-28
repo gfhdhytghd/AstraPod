@@ -230,12 +230,7 @@ static bool is_t3(const char *id);
 
 static bool t3_mode(void)
 {
-    if (model.t3_health_known)
-        return true;
-    for (int i = 0; i < model.nws; i++)
-        if (!is_t3(model.ws[i].id))
-            return false;
-    return model.nws != 0 || is_t3(space_id);
+    return model.mode == HR_MODE_T3;
 }
 
 static bool is_t3(const char *id)
@@ -247,7 +242,7 @@ static bool usage_legacy_keys(void)
 {
     /* A legacy heartbeat can precede its W. Desktop keys are enabled only
      * when a legacy workspace actually identifies the current source. */
-    return !agents_fruit_nav() && model.nws > 0 && !t3_mode();
+    return !agents_fruit_nav() && model.mode == HR_MODE_HERDR;
 }
 
 
@@ -273,7 +268,10 @@ static void background_link(const struct podlink_message *m)
     if (!cache_valid || m->type != PODLINK_TEXT || !m->length ||
         m->data[0] == 'D')
         return;
+    enum hr_mode mode = model.mode;
     int type = hr_model_apply(&model, (const char *)m->data, m->length);
+    if (type == 'M' && mode != model.mode)
+        agents_visited = false;
     if (type)
     {
         last_message = current_tick;
@@ -326,7 +324,7 @@ void agents_background_reset_model(void)
 bool agents_background_receive(const struct podlink_message *m)
 {
     if (agents_foreground || m->type != PODLINK_TEXT || !m->length ||
-        !strchr("HWSTQXE", m->data[0]))
+        !strchr("HMWSTQXE", m->data[0]))
         return false;
     if (!cache_valid)
     {
@@ -883,7 +881,7 @@ static const char *trouble(char *buf, size_t size)
         case PODLINK_CONNECTED: break;
         default: return "Computer disconnected";
     }
-    if (!model.hello)
+    if (!model.hello || model.mode == HR_MODE_UNKNOWN)
         return "Waiting for computer…";
     if (t3_unavailable())
         return "T3 Code not running";
@@ -893,7 +891,9 @@ static const char *trouble(char *buf, size_t size)
                  (current_tick - last_message) / HZ);
         return buf;
     }
-    if (model.tick_seen && !model.herdr_ok && !t3_mode())
+    if (t3_mode() && !model.workspaces_seen)
+        return "Connecting to T3…";
+    if (model.tick_seen && !model.herdr_ok && model.mode == HR_MODE_HERDR)
         return "Computer service not running";
     return NULL;
 }
@@ -1425,7 +1425,7 @@ static const char *view_title(void)
     }
     if (view == VIEW_USAGE)
         return "Usage";
-    return "Agents";
+    return t3_mode() ? "T3 Projects" : "Agents";
 }
 
 /* Semantic colours used by Usage and activity indicators. */
@@ -3503,6 +3503,24 @@ static void activate(struct gui_synclist *list)
     }
 }
 
+static void reset_source_view(void)
+{
+    ui_scene_cancel(&page_scene);
+    view = VIEW_SPACES;
+    space_id[0] = space_tab[0] = detail_pane[0] = '\0';
+    question_id[0] = question_pane[0] = '\0';
+    pending_req[0] = focus_req[0] = action_req[0] = '\0';
+    pending_answer = question_resolving = question_custom = question_closing = false;
+    detail_ready = filter_loading = received_projects = modal_open = false;
+    select_down = native_play_pending = false;
+    talk_req[0] = talk_note[0] = t3_talk_start[0] = '\0';
+    talk_held = talk_toggle = talk_select = false;
+    agents_shortcut_talking(false);
+    reset_focus();
+    forget_keys();
+    memset(&popped, 0, sizeof popped);
+}
+
 /* Take whatever the link has. Returns true if anything on screen changed. */
 static bool poll_link(void)
 {
@@ -3539,6 +3557,11 @@ static bool poll_link(void)
         forget_keys();
         if (connected)
         {
+            if (model.mode != HR_MODE_T3)
+            {
+                hr_model_reset(&model);
+                reset_source_view();
+            }
             queue_handshake();
             if (space_id[0])
                 subscribe(space_id, space_tab);
@@ -3565,6 +3588,8 @@ static bool poll_link(void)
         int before = model.nquestions;
         bool had = question_pane[0] && current_question();
         bool health_known = model.t3_health_known, health_ok = model.t3_ok;
+        bool workspaces_seen = model.workspaces_seen;
+        enum hr_mode mode = model.mode;
         int type = hr_model_apply(&model, (const char *)m.data, m.length);
 #ifdef HAVE_CRUMBS
         crumb(CR_AGENTS_STEP, 0x100 | (uint32_t)(type & 0xff));
@@ -3574,13 +3599,15 @@ static bool poll_link(void)
         last_message = current_tick;
         if (type == 'H')
             link_seen = true;
+        if (type == 'M' && mode != model.mode)
+            reset_source_view();
         agents_background_update(&model, type, true);
         if (type == 'T' && (health_known != model.t3_health_known ||
                             health_ok != model.t3_ok))
             changed = true;
         /* Only what alters a row, the title or a drawn view is a change */
         if (type == 'W' || type == 'S')
-            changed |= model.ws_shown_changed;
+            changed |= model.ws_shown_changed || workspaces_seen != model.workspaces_seen;
         else if (type != 'T' && type != 'R' && type != 'V' && type != 'H')
             changed = true;
         if (type == 'Q' && model.nquestions > before && !had)
@@ -4007,9 +4034,10 @@ static int agents_run(void)
         return AGENTS_EXIT_OTHER;
     }
     bool preloaded = cache_valid && !agents_visited && model.hello &&
+                     model.mode == HR_MODE_T3 &&
                      podlink_state() == PODLINK_CONNECTED;
     link_seen = cache_valid && model.hello;
-    bool resume = cache_valid && agents_visited &&
+    bool resume = cache_valid && agents_visited && model.mode == HR_MODE_T3 &&
                   cache_generation == podlink_generation() &&
                   podlink_state() == PODLINK_CONNECTED;
     struct agents_background_target target;
@@ -4048,6 +4076,17 @@ static int agents_run(void)
         detail_page_lines = 1;
     }
     cache_generation = podlink_generation();
+    if (was_connected)
+    {
+        queue_handshake();
+        if (space_id[0])
+            subscribe(space_id, space_tab);
+        if (detail_pane[0])
+            subscribe_detail(detail_pane);
+        if (view == VIEW_USAGE)
+            ask_usage();
+        flush_outbox();
+    }
     agents_visited = true;
     received_projects = model.nws > 0;
     select_held = select_down = false;

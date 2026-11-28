@@ -6,6 +6,7 @@
 #include "screens/playback/cider_library.h"
 #include "screens/playback/cider_store.h"
 #include "audio.h"
+#include "input/action.h"
 #include "audio/spectrum_meter.h"
 #include "system/activity.h"
 #include "lcd.h"
@@ -91,6 +92,12 @@ static struct {
     enum { TRACK_IDLE, TRACK_READ, TRACK_HIT, TRACK_MISS, TRACK_WRITE } state;
     uint8_t key[32], data[CS_TRACK_BYTES];
 } track_cache;
+#define BULK_COVERS 6
+static bool host_bulk, store_writing;
+static uint32_t bulk_request;
+static unsigned int bulk_received, bulk_count, bulk_tier;
+static uint8_t bulk_key[32];
+static long bulk_at;
 static bool host_store, host_diag, ls_due, want_ready, list_req, list_ready, pin_on;
 static long hold_until, want_at, pin_at;
 static uint32_t list_cursor;
@@ -132,6 +139,9 @@ static void publish_status(void)
 static void pin_apply(void);
 static void store_text(const unsigned char *d, unsigned int n);
 static void background_start(void);
+static bool bulk_idle(void);
+static void bulk_cancel(void);
+static const char *tier_name(unsigned int t);
 static unsigned int store_record(char *record, unsigned int size);
 
 static void cider_log(const char *format, ...)
@@ -214,6 +224,7 @@ static void reset(void)
     xs_count = 0; cancel_all = false;
     warm_keys[0] = 0; warm_ready = false;
     host_store = host_diag = want_ready = list_req = list_ready = false;
+    host_bulk = false; bulk_request = 0;
     art_ack_request = 0; build_changed = build_on;
     diag.build_state = diag.build_done = diag.build_total = 0;
     diag_at = ls_at = current_tick - 5 * HZ;
@@ -223,10 +234,71 @@ static void reset(void)
     button_queue_post(BUTTON_REDRAW, 0);
 }
 
+/* The current burst borrows the ordinary receive buffer while it is idle.
+ * Each frame may finish several small covers or carry part of one M cover. */
+static bool receive_bulk(const unsigned char *d, unsigned int n)
+{
+    if (n < 12 || !bulk_request || u32(d + 8) != bulk_request)
+        return true;                         /* an interrupted burst */
+    if (n > 16364 || !bulk_idle() || transfer.active || xs_count)
+        return false;
+    if (n == 12)
+    {
+        if (bulk_received) return false;
+        want_at = current_tick + (bulk_count ? -HZ : HZ);
+        bulk_request = 0;
+        return true;
+    }
+    unsigned int pos = 12;
+    bool dirty = false, valid = true;
+    while (n - pos >= 39)
+    {
+        const unsigned char *item = d + pos;
+        unsigned int t = item[32], total = item[33] | item[34] << 8;
+        unsigned int offset = item[35] | item[36] << 8;
+        unsigned int count = item[37] | item[38] << 8;
+        pos += 39;
+        if (t < CS_M || t > CS_XS || total != cs_payload_size(t) ||
+            offset != bulk_received || offset >= total || !count ||
+            count > total - offset || count > n - pos || bulk_count >= BULK_COVERS)
+        { valid = false; break; }
+        if (!offset)
+        {
+            memcpy(bulk_key, item, sizeof bulk_key);
+            bulk_tier = t;
+        }
+        else if (t != bulk_tier || memcmp(bulk_key, item, sizeof bulk_key))
+        { valid = false; break; }
+        memcpy(transfer.data + offset, d + pos, count);
+        bulk_received += count;
+        pos += count;
+        if (bulk_received == total)
+        {
+            char key[65];
+            cs_key_to_hex(bulk_key, key);
+            const char *tier = tier_name(t);
+            bool cached = cider_cache_find(&cache, key, tier) >= 0;
+            if (cider_cache_put(&cache, key, tier, transfer.data, total, true))
+            {
+                int slot = cider_cache_find(&cache, key, tier);
+                cache.slot[slot].bg = !cached;
+                dirty = true;
+            }
+            bulk_received = 0;
+            bulk_count++;
+        }
+    }
+    if (dirty)
+        queue_post(&disk_queue, 1, 0);
+    bulk_at = current_tick;
+    return valid && pos == n;
+}
+
 static bool receive(const struct podlink_message *m)
 {
     bool binary = m->type == PODLINK_BINARY && m->length >= 4 &&
-        (!memcmp(m->data, "CAR1", 4) || !memcmp(m->data, "CXS1", 4));
+        (!memcmp(m->data, "CAR1", 4) || !memcmp(m->data, "CXS1", 4) ||
+         !memcmp(m->data, "CFS1", 4));
     bool text = m->type == PODLINK_TEXT && m->length >= 3 &&
         (!memcmp(m->data, "CA\t", 3) || !memcmp(m->data, "CN\t", 3) ||
          !memcmp(m->data, "CK\t", 3) || !memcmp(m->data, "CL\t", 3) ||
@@ -280,6 +352,11 @@ static bool receive(const struct podlink_message *m)
                     cider_log("page received tick=%ld bytes=%lu",current_tick,
                               (unsigned long)m->length);
                 }
+            }
+            else if (!memcmp(m->data, "CFS1", 4))
+            {
+                if (!receive_bulk(m->data, m->length))
+                    bulk_cancel();
             }
             else if (!memcmp(m->data, "CAR1", 4))
             {
@@ -716,6 +793,10 @@ static void store_text(const unsigned char *d, unsigned int n)
                        (unsigned long)state.generation);
         if (state.generation && n == (unsigned int)len && !memcmp(d, want, n))
             host_palette = true;
+        len = snprintf(want, sizeof want, "CF\t%lu\tartbulk1",
+                       (unsigned long)state.generation);
+        if (state.generation && n == (unsigned int)len && !memcmp(d, want, n))
+            host_bulk = true;
         unsigned char remote = cider_remote_parse((const char *)d, n, state.generation);
         if (remote && remote != state.remote)
         {
@@ -783,8 +864,33 @@ static bool begin_transfer(const char *key, const char *tier, bool fill)
  * fill, below any visible cover, which replaces the transfer), then fills the
  * host offered. Fills run only while the disk already spins and the UI idles;
  * nothing here wakes a sleeping disk. */
+/* Video playback is a plugin activity. Let local decoding, interaction,
+ * database work and existing foreground art use the device first. */
+static bool bulk_idle(void)
+{
+    enum current_activity activity = get_current_activity();
+    return state.remote == 3 && state.available && !ui_motion_active() &&
+           activity != ACTIVITY_PLUGIN && activity != ACTIVITY_VIDEOBROWSER &&
+           !(audio_status() & AUDIO_STATUS_PLAY) && !tagcache_is_busy() &&
+           !nfills && track_cache.state != TRACK_READ &&
+           TIME_AFTER(current_tick, get_action_tick() + 3 * HZ) &&
+           (build_on || storage_disk_is_active());
+}
+
+static void bulk_cancel(void)
+{
+    if (!bulk_request) return;
+    cancel_all |= cancel_request != 0;
+    cancel_request = bulk_request;
+    bulk_request = 0;
+    bulk_received = 0;
+}
+
 static void background_start(void)
 {
+    if (bulk_request && (!bulk_idle() || transfer.active || ncommands || xs_count ||
+                         TIME_AFTER(current_tick, bulk_at + 5 * HZ)))
+        bulk_cancel();
     if (!state.generation || transfer.active || ncommands || cancel_request ||
         cancel_all || xs_count) return;
     if (pin_on)
@@ -799,6 +905,8 @@ static void background_start(void)
         }
     }
     bool rufin_fill = state.remote == 3 && state.available && diag.build_state == 1;
+    if (host_bulk && state.remote == 3)
+        return;     /* negotiated bursts use store_record, below foreground */
     if (!host_store || !store.loaded || cs_busy(&store) ||
         (!storage_disk_is_active() && !build_on && !rufin_fill) ||
         (!build_on && TIME_BEFORE(current_tick, art_used_at + 3 * HZ)) ||
@@ -862,6 +970,22 @@ static unsigned int store_record(char *record, unsigned int size)
                                   (unsigned long)acks[0].crc);
         memmove(&acks[0], &acks[1], --nacks * sizeof acks[0]);
         return n;
+    }
+    if (host_bulk && host_store && !bulk_request && bulk_idle() &&
+        !transfer.active && !xs_count && !store_writing && store.loaded &&
+        !cs_busy(&store) && (build_on || diag.build_state == 1) &&
+        snap.total <= store.cap && store.cap - snap.total >= 2560 &&
+        TIME_AFTER(current_tick, want_at + HZ / 4))
+    {
+        for (unsigned int i = 0; i < CIDER_SLOTS; i++)
+            if (cache.slot[i].length && cache.slot[i].dirty)
+                return 0;                 /* persist or defer the preceding covers */
+        bulk_request = ++next_request;
+        bulk_at = want_at = current_tick;
+        bulk_received = bulk_count = 0;
+        if (!granted) grant = CIDER_CREDIT;
+        return snprintf(record, size, "lb\t%lu\t%lu\t%lu", gen,
+                        (unsigned long)bulk_request, (unsigned long)(store.cap - snap.total));
     }
     if (want_ready)
     {
@@ -980,8 +1104,9 @@ static bool store_write_batch(void)
         unsigned int length = 0;
         bool bg = false;
         mutex_lock(&cider_mutex);
-        for (int i = 0; i < CIDER_SLOTS; i++)
-            if (cache.slot[i].length && cache.slot[i].dirty)
+        for (int i = 0; i < CIDER_SLOTS && nacks < ARRAYLEN(acks); i++)
+            if (cache.slot[i].length && cache.slot[i].dirty &&
+                (!cache.slot[i].bg || !host_bulk || state.remote != 3 || bulk_idle()))
             {
                 struct cider_slot *s = &cache.slot[i];
                 length = s->length; bg = s->bg;
@@ -989,14 +1114,17 @@ static bool store_write_batch(void)
                 snprintf(key, sizeof key, "%s", s->key);
                 snprintf(tier, sizeof tier, "%s", s->tier);
                 s->dirty = false;
+                store_writing = true;
                 break;
             }
         mutex_unlock(&cider_mutex);
-        if (length && (tagcache_is_busy() || !queue_empty(&disk_queue)))
+        if (length && (tagcache_is_busy() || !queue_empty(&disk_queue) ||
+                       (bg && host_bulk && state.remote == 3 && !bulk_idle())))
         {   /* the UI or the database needs the disk: write it next time */
             mutex_lock(&cider_mutex);
             int i = cider_cache_find(&cache, key, tier);
             if (i >= 0) { cache.slot[i].dirty = true; cache.slot[i].bg = bg; }
+            store_writing = false;
             mutex_unlock(&cider_mutex);
             break;
         }
@@ -1007,8 +1135,14 @@ static bool store_write_batch(void)
         int r = t < 0 || !cs_key_from_hex(key, kb) ? CS_BAD :
                 cs_put(&store, kb, t, disk_data + CS_REC_HEAD, length,
                        disk_data, sizeof disk_data, &crc);
-        if (disk_usb_pending()) return false;
+        bool usb = disk_usb_pending();
         mutex_lock(&cider_mutex);
+        store_writing = false;
+        if (usb)
+        {
+            mutex_unlock(&cider_mutex);
+            return false;
+        }
         if (r == CS_OK || r == CS_DUP)
         {
             if (r == CS_OK) diag.writes++;
@@ -1118,9 +1252,13 @@ static void disk_worker(void)
         lookup = transfer.active && disk_lookup; req = transfer.request;
         snprintf(key, sizeof key, "%s", transfer.key);
         snprintf(tier, sizeof tier, "%s", transfer.tier);
-        bool dirty = false;
+        bool dirty = false, dirty_foreground = false;
         for (int i = 0; i < CIDER_SLOTS; i++)
-            dirty |= cache.slot[i].length && cache.slot[i].dirty;
+            if (cache.slot[i].length && cache.slot[i].dirty)
+            {
+                dirty = true;
+                dirty_foreground |= !cache.slot[i].bg;
+            }
         bool tracks = track_cache.state == TRACK_READ ||
                       (!defer_maintenance && track_cache.state == TRACK_WRITE);
         bool wanted = lookup || nfills || load_requested || tracks ||
@@ -1128,8 +1266,9 @@ static void disk_worker(void)
         if (dirty && !active) diag.deferrals++;
         /* Foreground USB covers must eventually reach disk even when Cider
          * is the only source (no local music to keep the disk spinning). */
-        bool flush = dirty && TIME_AFTER(current_tick, dirty_at + HZ);
-        bool build = build_on || (state.remote == 3 && state.available && diag.build_state == 1);
+        bool flush = dirty_foreground && TIME_AFTER(current_tick, dirty_at + HZ);
+        bool build = build_on || (!host_bulk && state.remote == 3 &&
+                                  state.available && diag.build_state == 1);
         load_requested = false;
         mutex_unlock(&cider_mutex);
         /* Load when the disk already spins, or when the user's browsing

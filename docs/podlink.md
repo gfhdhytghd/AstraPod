@@ -762,3 +762,11 @@ The resident transport replies to `tz\t?` with `tz\t1` and routes `TS` TEXT reco
 the clock mailbox. See [Computer clock sync](podbox/herdremote-protocol.md#computer-clock-sync-follow-up-19)
 for the legacy and extended layouts, the UTC offset convention and the
 player settings.
+
+## Resident Rufin artwork fill
+
+The `artbulk1` extension uses the negotiated PLNK BINARY payload size
+(up to 16364 bytes) and the ordinary `cg` artwork credit window. The daemon
+rechecks foreground work before each low-priority bulk frame. See
+[the Cider protocol](podbox/cider-remote-protocol.md#rufin-idle-bulk-fill-artbulk1) for
+the records and fallback.

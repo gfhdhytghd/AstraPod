@@ -1066,3 +1066,31 @@ embedded cover. Palette parity requires equivalent source pixels.
 From [AstraPod-Desktop](https://github.com/gfhdhytghd/AstraPod-Desktop), run
 `ASTRAPOD_FIRMWARE=/path/to/AstraPod python3 herdremote/build-cover-thumb.py OUTPUT_DIR`.
 Deploy the resulting executable `cover-thumb` alongside `hrcider.py`.
+
+### Rufin idle bulk fill (artbulk1)
+
+The daemon advertises `CF<TAB>generation<TAB>artbulk1` alongside
+`localstore`. A device that understands it may send
+`lb<TAB>generation<TAB>request<TAB>free-bytes` after inventory sync.
+Older peers still use `lw`, `CO` and individual `cr` requests.
+A burst contains up to six missing covers. The daemon chooses catalogue
+neighbours of the playing album first within each tier, using XS, M, S
+order. It prepares up to three covers concurrently.
+
+Each PodLink BINARY payload is at most 16364 bytes or the negotiated
+message limit, whichever is smaller. The 12-byte little-endian header
+contains ASCII `CFS1`, the generation and the request ID (u32 each).
+Each following record is a 32-byte binary art key, u8 store tier, u16
+total cover bytes, u16 fragment offset, u16 fragment length and the
+fragment bytes. A header-only payload terminates the burst. Fragments
+of each cover are contiguous and begin at offset zero. PodLink protects
+each frame with its wire CRC. The device validates complete art before
+placing it in RAM and acknowledges it with `la` only after store commit.
+
+The usual byte credits (`cg`) cover every payload, including the terminator.
+A rebased credit is not required for each cover. The daemon reserves
+credit for foreground payloads and rechecks foreground work between
+background frames. The device cancels interrupted bursts with `cx`;
+a stale frame returns its credit and is discarded. Idle filling respects
+disk/explicit-build permission, recent input, UI motion, local audio
+playback and plugin/video activity.

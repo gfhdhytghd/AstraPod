@@ -1287,3 +1287,9 @@ A player that does not know `TL` ignores it and lists projects. A daemon
 that does not send `TL` leaves the player on the project list. The
 player forgets `TL` at each `HR` and keeps it across `M`. A `sub t3`
 from a player without the T3 capability is ignored.
+
+### Rufin cover store
+
+The resident artwork consumer negotiates
+[`artbulk1`](cider-remote-protocol.md#rufin-idle-bulk-fill-artbulk1) independently
+of the Agents screen's capabilities.

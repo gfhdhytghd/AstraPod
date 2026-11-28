@@ -28041,9 +28041,9 @@
     *: "Eject before disconnecting."
   </source>
   <dest>
-    *: "Expulsar mediante iTunes"
+    *: "Expulsa el dispositivo antes de desconectarlo."
   </dest>
   <voice>
-    *: "Expulsar mediante iTunes"
+    *: "Expulsa el dispositivo antes de desconectarlo."
   </voice>
 </phrase>

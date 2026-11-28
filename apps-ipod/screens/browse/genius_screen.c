@@ -15,7 +15,7 @@
 #include "lang.h"
 #include "lcd.h"
 #include "metadata/art_cache.h"
-#include "playlist/fruit_otg.h"
+#include "screens/playback/wps.h"
 #include "playlist/playlist.h"
 #include "root_menu.h"
 #include "screens.h"
@@ -299,6 +299,19 @@ static void draw_page(const struct native_chrome *chrome, int font,
     lcd_set_viewport(old);
 }
 
+static const struct button_mapping *genius_keymap(int context)
+{
+    (void)context;
+    static const struct button_mapping keys[] = {
+        { ACTION_STD_PREV, BUTTON_LEFT | BUTTON_REL, BUTTON_LEFT },
+        { ACTION_STD_NEXT, BUTTON_RIGHT | BUTTON_REL, BUTTON_RIGHT },
+        { ACTION_WPS_PLAY, BUTTON_PLAY | BUTTON_REL, BUTTON_PLAY },
+        { ACTION_NONE, BUTTON_PLAY | BUTTON_REPEAT, BUTTON_NONE },
+        LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_STD)
+    };
+    return keys;
+}
+
 static int message_for(bool loaded)
 {
     if (!loaded)
@@ -378,7 +391,13 @@ int genius_screen(void *param)
             lcd_update();
 
         int timeout = ui_scene_timeout(&pan, HZ / 5);
-        int action = fruit_list_action(get_action(CONTEXT_STD, timeout), NULL);
+        int action = get_custom_action(CONTEXT_PLUGIN | CONTEXT_LOCAL_LEFT_RIGHT,
+                                       timeout, genius_keymap);
+        if (action == ACTION_WPS_PLAY)
+        {
+            wps_wheel_transport(action);
+            continue;
+        }
         if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
         {
             if (action == ACTION_STD_MENU)

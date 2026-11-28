@@ -199,8 +199,6 @@ Settings
 | Setting | What it does | Default | |
 |---|---|---|---|
 | Default Browser | Which browser the root and the now-playing screen return to: Music, Files or Playlists. | Music |  |
-| Select Action | What a press of Select does on the now-playing screen: go back to the previous screen as Menu does, or to the browser last used, to Music, Album Covers or Files, open the lyrics, the queue or Theme Options, or one of the now-playing menu's other actions. Theme Options says Unavailable when the theme has none. Holding Select always opens the now-playing menu. | Previous Browser | **Adv** |
-| Select + Play Action | What pressing Select and Play together does on the now-playing screen: any of the actions Select offers, or the whole now-playing menu, or nothing. | Lyrics |  |
 | Lyrics lead | Adjusts when the active lyric changes. Positive values show lyrics earlier. | 500 ms |  |
 
 **Appearance** opens `Settings > Appearance > Now Playing Screen`, below.

@@ -841,32 +841,6 @@ static bool context_go_to(int retval, long *go_to)
     return true;
 }
 
-static inline int action_wpsab_single(long button)
-{
-/* The iPods/X5/M5 use a single button for the A-B mode markers,
-   defined as ACTION_WPSAB_SINGLE in their config files. */
-#ifdef ACTION_WPSAB_SINGLE
-        static int wps_ab_state = 0;
-        if (button == ACTION_WPS_HOTKEY && ab_repeat_mode_enabled())
-        {
-            switch (wps_ab_state)
-            {
-                case 0: /* set the A spot */
-                    button = ACTION_WPS_ABSETA_PREVDIR;
-                    break;
-                case 1: /* set the B spot */
-                    button = ACTION_WPS_ABSETB_NEXTDIR;
-                    break;
-                case 2:
-                    button = ACTION_WPS_ABRESET;
-                    break;
-            }
-            wps_ab_state = (wps_ab_state+1) % 3;
-        }
-#endif /* def ACTION_WPSAB_SINGLE */
-    return button;
-}
-
 /* The WPS can be left in two ways:
  *      a)  call a function, which draws over the wps. In this case, the wps
  *          will be still active (i.e. the below function didn't return)
@@ -1004,9 +978,7 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
         {
             int raw;
             get_action_statuscode(&raw);
-            /* The generic WPS keymap also opens the context on held PLAY. */
-            if ((button == ACTION_WPS_CONTEXT && (raw & BUTTON_PLAY)) ||
-                button == ACTION_WPS_HOTKEY)
+            if (button == ACTION_WPS_CONTEXT && (raw & BUTTON_PLAY))
                 continue;
             stock_wps_update(&stock, state, wps_track_serial);
             if (stock_wps_action(&stock, state, button))
@@ -1046,8 +1018,6 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
         }
         button = do_party_mode(button); /* block select actions in party mode */
 
-        button = action_wpsab_single(button); /* iPods/X5/M5 */
-
         struct mp3entry *track = state->id3;
         switch(button)
         {
@@ -1057,28 +1027,6 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
                 leave_playback();
                 return GO_TO_AGENTS;
 #endif
-            case ACTION_WPS_HOTKEY:
-            {
-                /* The previous SELECT action is now SELECT+PLAY. */
-                int act = HK_CTX_GET(0, global_settings.wps_select_action);
-                long go_to;
-
-                if (act == HOTKEY_OFF)
-                    break;
-                if (act == HOTKEY_ALBUM_COVERS)
-                {
-                    if (show_album_covers(&go_to, return_agents, action_us)) return go_to;
-                    restore = true;
-                    break;
-                }
-                if (!track) break;
-                leave_playback();
-                if (context_go_to(context_menu_wps_hotkey(track->path, act), &go_to))
-                    return go_to;
-                restore = true;
-            }
-            break;
-
             case ACTION_WPS_CONTEXT:
             {
                 long go_to;

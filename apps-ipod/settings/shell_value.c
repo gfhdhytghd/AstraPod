@@ -109,9 +109,7 @@ static void recording_choice_mask(const void *variable,
 
 static bool is_hotkey(const void *variable)
 {
-    return variable == &global_settings.wps_select_action ||
-           variable == &global_settings.context_wps ||
-           variable == &global_settings.hotkey_tree;
+    return variable == &global_settings.hotkey_tree;
 }
 
 static bool is_context_visibility(const void *variable)

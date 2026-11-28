@@ -10665,23 +10665,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: in Now Playing Screen settings, what Select and Play pressed together do
-  user: core
-  <source>
-    *: none
-    hotkey: "Select + Play Action"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Azione Centro + Riproduci"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Azione Centro e Riproduci"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_HOTKEY_FILE_BROWSER
   desc: hotkey menu
   user: core
@@ -17288,20 +17271,6 @@
   </dest>
   <voice>
     *: none
-  </voice>
-</phrase>
-<phrase>
-  id: LANG_WPS_SELECT_ACTION
-  desc: in settings_menu
-  user: core
-  <source>
-    *: "Select Action"
-  </source>
-  <dest>
-    *: "Azione tasto centrale"
-  </dest>
-  <voice>
-    *: "Azione tasto centrale"
   </voice>
 </phrase>
 <phrase>

@@ -10163,23 +10163,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: hotkey menu
-  user: core
-  <source>
-    *: none
-    hotkey: "WPS Hotkey"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Гарячі клавіші WPS"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Гарячі клавіші WPS"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_REMOTE_RADIOSCREEN
   desc: in the theme menu
   user: core

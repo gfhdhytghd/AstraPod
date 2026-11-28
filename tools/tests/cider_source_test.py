@@ -47,6 +47,8 @@ static void album_blur_playing_changed(void) {}
 #define ALLOW_SOFTLOCK 0
 #define TIMEOUT_BLOCK -1
 #define SYS_USB_CONNECTED -100
+#define SYS_POWEROFF -101
+static void cover_cancelled(void) {}
 #define IS_SYSEVENT(x) ((x)<0)
 #define UNIT_TIME 1
 #define ARRAYLEN(x) (sizeof(x)/sizeof((x)[0]))
@@ -229,10 +231,8 @@ state.available=true;ncommands=12;cider_mode_set(CIDER_MODE_SHUFFLE,0);assert(ci
 assert(cider_mode_step(CIDER_MODE_SHUFFLE,1,false)==0&&cider_mode_step(CIDER_MODE_SHUFFLE,0,true)==1);
 for(int v=0;v<5;v++){assert(cider_mode_step(CIDER_MODE_REPEAT,v,false)==(v+1)%5&&cider_mode_step(CIDER_MODE_REPEAT,v,true)==(v+4)%5);}
 assert(cider_mode_step(CIDER_MODE_REPEAT,7,false)==1);
-/* A-B: SELECT marks only in A-B mode; elsewhere it stays swallowed */
-state.repeat=0;memset(&modes,0,sizeof modes);ncommands=0;assert(cider_wps_action(ACTION_WPS_HOTKEY)&&!ncommands);
-state.repeat=CIDER_REPEAT_AB;state.position=5000;state.received=state.position_tick=current_tick;state.rate=1000;cider_wps_update(&w);
-assert(cider_wps_action(ACTION_WPS_HOTKEY)&&ncommands==1&&strstr(commands[0],"\tab-mark\t5000"));
+/* Cider must leave system poweroff to the WPS event handler. */
+ncommands=0;assert(!cider_wps_action(SYS_POWEROFF)&&!ncommands);
 active=false;
 }
 /* FU26c: a song played from a list carries that list ahead of native-play, in order */

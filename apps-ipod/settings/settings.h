@@ -570,7 +570,6 @@ struct user_settings
     bool car_adapter_mode; /* 0=off 1=on */
     int car_adapter_mode_delay; /* delay before resume,  in seconds*/
     int start_in_screen;
-    int wps_select_action; /* a hotkey action, as item 0 -- see HK_CTX_SET */
     int ff_rewind_min_step; /* FF/Rewind minimum step size */
     int ff_rewind_accel; /* FF/Rewind acceleration (in seconds per doubling) */
 
@@ -1067,11 +1066,7 @@ struct user_settings
     bool show_shutdown_message; /* toggle whether display lights up and displays message
                                 when shutting down */
 
-    /* hotkey and WPS context menu assignments - several hotkey_action values
-       (see context_menu.h) packed into one int with the HK_CTX_* macros.
-       Item 0 is the hotkey button; for context_wps items 1..4 are the
-       configurable rows at the bottom of the WPS context menu. */
-    int context_wps;
+    /* File browser hotkey assignment (see context_menu.h). */
     int hotkey_tree;
 
     /* When resuming playback (after a stop), rewind this number of seconds */

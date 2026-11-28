@@ -10654,23 +10654,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: in Now Playing Screen settings, what Select and Play pressed together do
-  user: core
-  <source>
-    *: none
-    hotkey: "Select + Play Action"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Actie van Midden + Afspelen"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Actie van Midden en Afspelen"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_HW_EQ_GAIN
   desc: in sound_menu, hardware equalizer tone controls filter gain
   user: core
@@ -17296,20 +17279,6 @@
   </dest>
   <voice>
     *: none
-  </voice>
-</phrase>
-<phrase>
-  id: LANG_WPS_SELECT_ACTION
-  desc: in settings_menu
-  user: core
-  <source>
-    *: "Select Action"
-  </source>
-  <dest>
-    *: "Actie van selectieknop"
-  </dest>
-  <voice>
-    *: "Actie van selectieknop"
   </voice>
 </phrase>
 <phrase>

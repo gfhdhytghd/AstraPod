@@ -10665,23 +10665,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: in Now Playing Screen settings, what Select and Play pressed together do
-  user: core
-  <source>
-    *: none
-    hotkey: "Select + Play Action"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Aktion für Auswahl + Wiedergabe"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Aktion für Auswahl und Wiedergabe"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_REMOTE_RADIOSCREEN
   desc: in the theme menu
   user: core
@@ -17306,20 +17289,6 @@
   </dest>
   <voice>
     *: none
-  </voice>
-</phrase>
-<phrase>
-  id: LANG_WPS_SELECT_ACTION
-  desc: in settings_menu
-  user: core
-  <source>
-    *: "Select Action"
-  </source>
-  <dest>
-    *: "Aktion für Auswahltaste"
-  </dest>
-  <voice>
-    *: "Aktion für Auswahltaste"
   </voice>
 </phrase>
 <phrase>

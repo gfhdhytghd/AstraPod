@@ -11470,23 +11470,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: hotkey menu
-  user: core
-  <source>
-    *: none
-    hotkey: "WPS Hotkey"
-  </source>
-  <dest>
-    *: none
-    hotkey: "WPS gyorsgomb"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "WPS gyorsgomb"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_REMOTE_BASE_SKIN
   desc: browse for the base skin in theme settings
   user: core

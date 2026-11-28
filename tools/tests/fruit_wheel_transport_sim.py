@@ -33,6 +33,7 @@ SCREEN_ACTIVITY = {
     "main-menu": "ACTIVITY_MAINMENU",
     "files": "ACTIVITY_FILEBROWSER",
     "now-playing": "ACTIVITY_WPS",
+    "lyrics": "ACTIVITY_LYRICS",
     "cover-flow": "ACTIVITY_ALBUMCOVERS",
     "album-panel": "ACTIVITY_ALBUMCOVERS",
     "photo": "ACTIVITY_IMAGEVIEWER",
@@ -154,8 +155,17 @@ def probe(sim, playing, name, hold_seek=False, region=(22, 240, 0, 320),
         wait_for(lambda: playing.get("elapsed", size=8) < before - 500,
                  f"{name}: no backward seek")
         assert playing.get("track") == index, (name, "seek changed track")
-        key("play", hold=60)
-        assert playing.get("status") == 3, (name, "PLAY hold toggled playback")
+        if name == "now-playing":
+            lyrics = playing.activities["ACTIVITY_LYRICS"]
+            press(sim, "play", hold=66)
+            wait_for(lambda: playing.activity() == lyrics, "PLAY did not open Lyrics")
+            assert playing.get("status") == 3, "Opening Lyrics resumed playback"
+            press(sim, "play", hold=66)
+            wait_for(lambda: playing.activity() == activity, "PLAY did not return")
+            assert playing.get("status") == 3, "Closing Lyrics resumed playback"
+        else:
+            key("play", hold=60)
+            assert playing.get("status") == 3, (name, "PLAY hold toggled playback")
     key("play")
     wait_for(lambda: playing.get("status") == 1, f"{name}: did not resume")
     key("play")

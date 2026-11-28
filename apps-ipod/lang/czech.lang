@@ -11814,23 +11814,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: hotkey menu
-  user: core
-  <source>
-    *: none
-    hotkey: "WPS Hotkey"
-  </source>
-  <dest>
-    *: none
-    hotkey: "Zkratková klávesa přehrávací obrazovky"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "Zkratková klávesa přehrávací obrazovky"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_HOTKEY_FILE_BROWSER
   desc: hotkey menu
   user: core

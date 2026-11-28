@@ -11292,23 +11292,6 @@
   </voice>
 </phrase>
 <phrase>
-  id: LANG_HOTKEY_WPS
-  desc: hotkey menu
-  user: core
-  <source>
-    *: none
-    hotkey: "WPS Hotkey"
-  </source>
-  <dest>
-    *: none
-    hotkey: "WPS-pikanäppäin"
-  </dest>
-  <voice>
-    *: none
-    hotkey: "WPS pikanäppäin"
-  </voice>
-</phrase>
-<phrase>
   id: LANG_REMOTE_RADIOSCREEN
   desc: in the theme menu
   user: core

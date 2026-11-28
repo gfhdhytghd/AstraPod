@@ -163,11 +163,19 @@ def exercise(sim):
     assert timeline(capture(sim, "rating-timed-out")), "rating did not time out"
 
     sim.send("down play")
-    sim.wait(60)
+    sim.wait(66)
+    assert same(frame(sim), seeked, TITLE), "PLAY opened Lyrics before release"
     sim.send("up play")
-    sim.wait(24)
-    held = capture(sim, "play-held")
-    assert wps(held) and same(held, seeked, TITLE), "PLAY opened a menu"
+    sim.wait(42)
+    assert not same(capture(sim, "play-hold-lyrics"), seeked, TITLE), (
+        "PLAY did not open Lyrics")
+    sim.send("down play")
+    sim.wait(66)
+    sim.send("up play")
+    sim.wait(42)
+    returned = capture(sim, "play-hold-returned")
+    assert wps(returned) and same(returned, seeked, TITLE)
+    assert same(returned, seeked, TRANSPORT), "PLAY hold changed playback"
 
     sim.tap("right", 35)
     advanced = capture(sim, "next-track")

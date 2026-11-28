@@ -8697,7 +8697,7 @@ static int album_covers_loop(struct ui_motion *trace, bool restored_pixels,
         {
             int context = CONTEXT_PLUGIN;
             if (!panel.live && model->play_album)
-                context |= CONTEXT_CUSTOM | CONTEXT_LOCAL_LEFT_RIGHT;
+                context |= CONTEXT_CUSTOM;
             if (!flat_view() && !panel.live && !leaving)
                 context |= CONTEXT_WHEEL_DETENTS;
             button = get_custom_action(context, timeout, get_context_map);

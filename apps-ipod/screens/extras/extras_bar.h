@@ -34,15 +34,13 @@ void extras_bar_release(void);
 #define EXTRAS_BAND_ROWS 8
 uint32_t *extras_band(int i);
 
-/* Wheel-only navigation under Fruit themes: wheel returns STD_PREV/STD_NEXT,
- * SELECT returns STD_OK, MENU returns STD_CANCEL; LEFT/RIGHT control playback
- * and PLAY controls playback when `play_is_playback` is true (otherwise PLAY
- * returns ACTION_WPS_PLAY, for Stopwatch). */
-int extras_get_action(int timeout, bool play_is_playback);
+/* Common Extras controls. When local_play is set, return ACTION_WPS_PLAY
+ * for the caller to handle. */
+int extras_get_action(int timeout, bool local_play);
 /* Locked Screen Lock wait: swallows MENU/PLAY/LEFT/RIGHT; wheel or SELECT
  * returns ACTION_STD_OK to open the combination tumbler. */
 int extras_get_action_locked(int timeout);
-/* list_do_action() backed by extras_get_action(timeout, true). */
+/* list_do_action() backed by extras_get_action(timeout, false). */
 bool extras_list_do_action(int timeout, struct gui_synclist *lists,
                            int *action);
 

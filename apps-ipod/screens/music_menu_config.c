@@ -181,6 +181,7 @@ int music_menu_config(void)
     }
 
     simplelist_info_init(&info, str(LANG_MUSIC_BROWSER), row_count, NULL);
+    info.fruit_nav = true;
     info.get_name = row_get_name;
     info.get_icon = row_get_icon;
     info.action_callback = row_action_callback;

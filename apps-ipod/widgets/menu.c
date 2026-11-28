@@ -1172,7 +1172,7 @@ int do_menu(const struct menu_item_ex *start_menu, int *start_selected,
         else
         {
             /* HZ so the status bar redraws corectly */
-            action = get_action(CONTEXT_MAINMENU|ALLOW_SOFTLOCK,
+            action = get_action(CONTEXT_MAINMENU | CONTEXT_FRUIT_NAV | ALLOW_SOFTLOCK,
                                 ui_scene_timeout(&modal, ui_scene_timeout(scene, list_do_action_timeout(&lists, HZ))));
         }
         if (action == ACTION_NONE && !gui_synclist_moving(&lists))

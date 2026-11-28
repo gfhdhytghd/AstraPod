@@ -1540,7 +1540,7 @@ static int day_page(struct ical_index *idx, int filter, struct extras_date *d)
         {
             paint_empty_page(str(LANG_EXTRAS_CALENDARS_NO_EVENTS),
                              "SELECT: New Event", head_font, ctx->sub_font);
-            int action = get_action(CONTEXT_LIST | CONTEXT_LOCAL_LEFT_RIGHT, HZ);
+            int action = get_action(CONTEXT_LIST, HZ);
             int step = calendar_button_step(action);
             if (step)
             {
@@ -1626,7 +1626,7 @@ static int day_page(struct ical_index *idx, int filter, struct extras_date *d)
         while (!reload && !leave)
         {
             int action;
-            bool handled = list_do_action(CONTEXT_LIST | CONTEXT_LOCAL_LEFT_RIGHT, HZ, &list, &action);
+            bool handled = list_do_action(CONTEXT_LIST, HZ, &list, &action);
             int step = calendar_button_step(action);
             if (step)
             {
@@ -1968,7 +1968,7 @@ static int month_page(struct ical_index *idx, int filter)
             dirty = false;
         }
 
-        int action = get_action(CONTEXT_PAGED_LIST | CONTEXT_LOCAL_LEFT_RIGHT,
+        int action = get_action(CONTEXT_PAGED_LIST,
                                 HZ);
         if (action == ACTION_LISTTREE_PGUP || action == ACTION_LISTTREE_PGDOWN)
         {
@@ -2480,7 +2480,7 @@ static int todo_page(struct ical_index *idx)
         {
             paint_empty_page("No To Do's", "SELECT: New To Do",
                              head_font, ctx.sub_font);
-            int action = get_action(CONTEXT_LIST | CONTEXT_LOCAL_LEFT_RIGHT, HZ);
+            int action = get_action(CONTEXT_LIST, HZ);
             if (action == ACTION_STD_CANCEL || action == ACTION_STD_MENU)
                 break;
             if (default_event_handler(action) == SYS_USB_CONNECTED)

@@ -1648,7 +1648,7 @@ static int browse_loop(struct browser_album_panel *panel, struct ui_scene *scene
         int previous_depth = tc.dirlevel;
         keyclick_set_callback(gui_synclist_keyclick_callback, &browser_lists);
         int timeout = list_do_action_timeout(&browser_lists, HZ/2);
-        button = get_action(list_select_context(CONTEXT_TREE)|ALLOW_SOFTLOCK,
+        button = get_action(list_select_context(CONTEXT_TREE | CONTEXT_FRUIT_NAV) | ALLOW_SOFTLOCK,
                             ui_scene_timeout(scene, timeout));
         bool home_library = tc.browse->flags & BROWSE_HOME_LIBRARY;
         if (tc.browse->flags & BROWSE_FRUIT_PLAYLISTS)

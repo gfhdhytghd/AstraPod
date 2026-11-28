@@ -505,6 +505,7 @@ static int run_track_list(const char *title)
     struct simplelist_info info;
 
     simplelist_info_init(&info, (char *)title, ls_n + track_ct + 1, NULL);
+    info.fruit_nav = true;
     info.get_name = track_get_name;
     info.action_callback = track_action_cb;
 
@@ -521,6 +522,7 @@ static int run_album_list(const char *title)
     while (1)
     {
         simplelist_info_init(&info, (char *)title, album_ct + 1, NULL);
+        info.fruit_nav = true;
         info.get_name = artist_get_name;
         info.action_callback = artist_action_cb;
         info.selection = selection;
@@ -679,6 +681,7 @@ int listen_progress_show_all(void)
         }
     }
     simplelist_info_init(&info, str(LANG_LISTENING_STATS), ls_n, NULL);
+    info.fruit_nav = true;
     info.get_name = track_get_name;
     push_current_activity(ACTIVITY_LISTENPROGRESS);
     ret = simplelist_show_list(&info) ? GO_TO_ROOT : GO_TO_PREVIOUS;

@@ -414,6 +414,7 @@ struct simplelist_info {
     bool scroll_all;
     bool hide_theme;
     bool speak_onshow; /* list speaks first item or 'empty list' */
+    bool fruit_nav;
     bool page_with_left_right;
     bool wps_on_play;  /* PLAY exits with selection == -2, meaning "go to the
                           playing screen". Only for callers that can act on it:

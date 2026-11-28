@@ -369,6 +369,7 @@ static int eq_do_advanced_menu(void * param)
 
     simplelist_info_init(&info, str(LANG_EQUALIZER_ADVANCED),
             EQ_NUM_BANDS, &selected_band);
+    info.fruit_nav = true;
     info.get_name = (list_get_name*)advancedmenu_item_get_name;
     if(global_settings.talk_menu)
         info.get_talk = advancedmenu_speak_item;

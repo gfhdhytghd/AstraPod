@@ -200,6 +200,7 @@ static int show_list(void)
     struct simplelist_info list;
     simplelist_info_init(&list, str(LANG_FRUIT_GENIUS_MIXES),
                          catalog.count, NULL);
+    list.fruit_nav = true;
     list.get_name = mix_name;
     list.selection = page;
     list.page_with_left_right = true;
@@ -394,7 +395,7 @@ int genius_screen(void *param)
             lcd_update();
 
         int timeout = ui_scene_timeout(&pan, HZ / 5);
-        int action = get_custom_action(CONTEXT_PLUGIN | CONTEXT_LOCAL_LEFT_RIGHT,
+        int action = get_custom_action(CONTEXT_PLUGIN,
                                        timeout, genius_keymap);
         if (action == ACTION_WPS_PLAY)
         {

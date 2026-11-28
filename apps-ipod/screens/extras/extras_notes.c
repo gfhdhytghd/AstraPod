@@ -677,7 +677,7 @@ static int np_show(const char *title, struct notes_page *p)
             ui_page_draw(&page);
             dirty = false;
         }
-        int action = extras_get_action(TIMEOUT_BLOCK, true);
+        int action = extras_get_action(TIMEOUT_BLOCK, false);
         int to = p->scroll;
         int focus = p->link_focus;
         if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)

@@ -201,6 +201,7 @@ bool settings_changed_screen(void)
     format_title();
 
     simplelist_info_init(&info, title, row_count, NULL);
+    info.fruit_nav = true;
     info.get_name = changed_get_name;
     info.action_callback = changed_action;
 

@@ -54,37 +54,21 @@
 #include "screens/playback/wps.h"
 
 static int wheel_transport_pressed;
-static bool raw_local_left_right;
-
-static bool transport_owns_button(int button, bool local_left_right)
-{
-    return !local_left_right || (button & BUTTON_PLAY) ||
-           !(button & (BUTTON_LEFT | BUTTON_RIGHT));
-}
-
-static int wheel_transport_keys(int button, bool local_left_right)
+static int wheel_transport_keys(int button)
 {
     const int transport = BUTTON_LEFT | BUTTON_RIGHT | BUTTON_PLAY;
     if (!(button & transport) ||
-        (button & (SYS_EVENT | BUTTON_MULTIMEDIA | BUTTON_REDRAW | BUTTON_REMOTE)) ||
-        !transport_owns_button(button, local_left_right) ||
-        (!ui_wheel_navigation() && !local_left_right))
-        return BUTTON_NONE;
-
-    enum current_activity activity = get_current_activity();
-    if (activity == ACTIVITY_ARCADE || activity == ACTIVITY_SPIKE ||
-        activity == ACTIVITY_MUSICQUIZ || activity == ACTIVITY_USBSCREEN ||
-        activity == ACTIVITY_QUICKSCREEN)
+        (button & (SYS_EVENT | BUTTON_MULTIMEDIA | BUTTON_REDRAW | BUTTON_REMOTE)))
         return BUTTON_NONE;
 
     return button & BUTTON_MAIN;
 }
 
 /* Claim physical transport keys after the Now Playing chord. */
-static bool wheel_transport(int button, bool local_left_right)
+static bool wheel_transport(int button)
 {
     static bool repeated;
-    int keys = wheel_transport_keys(button, local_left_right);
+    int keys = wheel_transport_keys(button);
     if (keys == BUTTON_NONE)
         return false;
     if (keys != BUTTON_LEFT && keys != BUTTON_RIGHT && keys != BUTTON_PLAY)
@@ -157,11 +141,10 @@ void agents_shortcut_commit_select(void)
 #endif
 static struct agents_cover_chord_state cover_chord;
 
-static int wheel_cover_button(int button, bool transport,
-                              bool local_left_right, bool *fire)
+static int wheel_cover_button(int button, bool transport, bool *fire)
 {
     /* Keep transport combinations out of the Cover Flow chord. */
-    if (transport && wheel_transport_keys(button, local_left_right))
+    if (transport && wheel_transport_keys(button))
     {
         *fire = false;
         return button;
@@ -259,7 +242,7 @@ static long raw_ui_filter(long button)
 #endif
     if (button & SYS_EVENT) return button;
     bool fire;
-    button = wheel_cover_button(button, true, raw_local_left_right, &fire);
+    button = wheel_cover_button(button, false, &fire);
     if (fire && agents_nav_pending() == AGENTS_NAV_NONE)
     {
         agents_nav_request(agents_cover_toggle_target(), false);
@@ -269,7 +252,6 @@ static long raw_ui_filter(long button)
     int action;
     if (shortcut.latched || agents_nav_pending() == AGENTS_NAV_NONE)
         button = wheel_shortcut_button(button, false, true, &action);
-    if (wheel_transport(button, raw_local_left_right)) return BUTTON_REDRAW;
     if (agents_nav_pending() != AGENTS_NAV_NONE) return raw_ui_cancel();
 #ifdef IPOD_ACCESSORY_PROTOCOL
     button = raw_remote_filter(button);
@@ -349,7 +331,7 @@ typedef struct
     const struct button_mapping   *items;
     const struct button_mapping* (*get_context_map)(int);
     bool                           is_prebutton;
-    bool                           local_left_right;
+    bool                           fruit_nav;
 } action_cur_t;
 
 /* act_last holds action state between get_action() calls */
@@ -653,7 +635,7 @@ int agents_shortcut_get_button(int timeout)
     podlink_time_sync();
     agents_background_play_tone();
     bool fire;
-    button = wheel_cover_button(button, true, raw_local_left_right, &fire);
+    button = wheel_cover_button(button, false, &fire);
     if (fire || button == REMOTE_COVERS_BUTTON)
     {
         agents_nav_request(agents_cover_toggle_target(), !fire);
@@ -667,7 +649,6 @@ int agents_shortcut_get_button(int timeout)
                                     false, &action);
     if (action == ACTION_TREE_WPS) return raw_ui_cancel();
     if (action == ACTION_AGENTS_SWITCH) return AGENTS_SHORTCUT_BUTTON;
-    if (wheel_transport(button, raw_local_left_right)) return BUTTON_REDRAW;
 #ifdef IPOD_ACCESSORY_PROTOCOL
     if (!remote_input_active)
         button = agents_remote_button(&remote, context, button, button_status(),
@@ -682,18 +663,6 @@ int agents_shortcut_get_button(int timeout)
     return remote_menu_button(raw_volume_button(button));
 }
 #endif
-
-int action_get_raw_button(int context, int timeout)
-{
-    raw_local_left_right = (context & CONTEXT_LOCAL_LEFT_RIGHT) != 0;
-    int button = agents_shortcut_get_button(timeout);
-#ifndef HAVE_WHEEL_WPS_CHORD
-    if (raw_local_left_right && wheel_transport(button, raw_local_left_right))
-        button = BUTTON_REDRAW;
-#endif
-    raw_local_left_right = false;
-    return button;
-}
 
 #if defined(IPOD_ACCESSORY_PROTOCOL) && defined(HAVE_USB_PODLINK)
 static bool remote_volume_action(action_cur_t *cur)
@@ -770,23 +739,13 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
 #ifdef HAVE_WHEEL_WPS_CHORD
     ui_polling = false;
 #endif
-    bool transport =
-        transport_owns_button(*button, cur->local_left_right) &&
-        cur->context != CONTEXT_SPIKE && cur->context != CONTEXT_MUSIC_QUIZ &&
-        cur->context != CONTEXT_QUICKSCREEN && cur->context != CONTEXT_WPS &&
-        cur->context != CONTEXT_VIDEO_PLAYBACK && cur->context != CONTEXT_AGENTS &&
-        cur->context != (CONTEXT_PLUGIN | CONTEXT_DIALOG) &&
-        cur->context != (CONTEXT_PLUGIN | CONTEXT_CUSTOM2) &&
-        !(cur->context == (CONTEXT_PLUGIN | CONTEXT_CUSTOM) &&
-          get_current_activity() == ACTIVITY_STOPWATCH &&
-          (*button & BUTTON_MAIN) == BUTTON_PLAY);
+    bool transport = cur->fruit_nav && ui_wheel_navigation();
 #ifdef HAVE_WHEEL_WPS_CHORD
 #ifdef HAVE_USB_PODLINK
     podlink_time_sync();
     agents_background_play_tone();
     bool fire;
-    *button = wheel_cover_button(*button, transport, cur->local_left_right,
-                                 &fire);
+    *button = wheel_cover_button(*button, transport, &fire);
     if (fire)
     {
         last->button = BUTTON_REL;
@@ -818,7 +777,7 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
     }
 #endif
 
-    if (transport && wheel_transport(*button, cur->local_left_right))
+    if (transport && wheel_transport(*button))
     {
         cur->action = ACTION_NONE;
         return true;
@@ -1259,8 +1218,8 @@ static void init_act_cur(action_cur_t *cur,
 {
     cur->action              = ACTION_UNKNOWN;
     cur->button              = BUTTON_NONE;
-    cur->context             = context & ~CONTEXT_LOCAL_LEFT_RIGHT;
-    cur->local_left_right    = (context & CONTEXT_LOCAL_LEFT_RIGHT) != 0;
+    cur->context             = context & ~CONTEXT_FRUIT_NAV;
+    cur->fruit_nav           = (context & CONTEXT_FRUIT_NAV) != 0;
     cur->is_prebutton        = false;
     cur->items               = NULL;
 #ifdef HAVE_USB_PODLINK
@@ -1581,7 +1540,7 @@ int get_action(int context, int timeout)
 #endif
 #ifdef HAVE_WHEEL_WPS_CHORD
     if (agents_nav_pending() != AGENTS_NAV_NONE && !shortcut_screen_context(
-            context & ~CONTEXT_LOCAL_LEFT_RIGHT))
+            context & ~CONTEXT_FRUIT_NAV))
         return ACTION_STD_CANCEL;
 #endif
     if (extras_alarm_ring_poll(&timeout))
@@ -1664,7 +1623,7 @@ int get_custom_action(int context,int timeout,
 #endif
 #ifdef HAVE_WHEEL_WPS_CHORD
     if (agents_nav_pending() != AGENTS_NAV_NONE && !shortcut_screen_context(
-            context & ~CONTEXT_LOCAL_LEFT_RIGHT))
+            context & ~CONTEXT_FRUIT_NAV))
         return ACTION_STD_CANCEL;
 #endif
     action_cur_t current;

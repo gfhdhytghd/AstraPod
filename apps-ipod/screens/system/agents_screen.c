@@ -995,7 +995,7 @@ static void list_chrome(struct gui_synclist *list)
             list->footer = agents_fruit_nav() ? "SELECT Retry · MENU Exit" :
                            "SELECT Retry · LEFT Usage · MENU Exit";
         else
-            list->footer = agents_fruit_nav() ? "SEL Open · Hold SEL Voice" :
+            list->footer = agents_fruit_nav() ? "◀ Usage · Hold SEL / PLAY Voice" :
                            "◀ Usage · Hold PLAY Voice";
     }
     else if (view == VIEW_AGENTS && is_t3(space_id) && model.agents_valid &&
@@ -1004,7 +1004,7 @@ static void list_chrome(struct gui_synclist *list)
         bool all = !strcmp(space_tab, "all");
         list->empty_title = all ? "No threads" : "No active threads";
         if (!all)
-            list->empty_hint = agents_fruit_nav() ? "Select All above" : "Press RIGHT for All";
+            list->empty_hint = "Press RIGHT for All";
     }
     else if (view == VIEW_QUESTION)
         list->footer = "SEL Choose · Wheel Scroll · MENU Later";
@@ -2716,28 +2716,10 @@ static void agents_playback(int button)
         default_event_handler(button);
 }
 
-static void seek_playback(int dir)
-{
-    long step = dir * MAX(1, global_settings.ff_rewind_min_step) * 1000L;
-    if (cider_active())
-    {
-        struct cider_state source;
-        cider_snapshot(&source);
-        if (source.available && source.duration)
-            cider_control("seek", MAX(0, MIN((long)source.duration - 1,
-                (long)cider_position(&source, current_tick, HZ) + step)));
-        return;
-    }
-    const struct mp3entry *track = audio_current_track();
-    if ((audio_status() & AUDIO_STATUS_PLAY) && track && track->length)
-        audio_ff_rewind(MAX(0, MIN((long)track->length - 1,
-                                   (long)track->elapsed + step)));
-}
-
 static void finish_native_play(void)
 {
-    bool tap = native_play_pending && (agents_fruit_nav() ||
-               (unsigned long)current_tick - native_play_at < (3 * HZ + 19) / 20);
+    bool tap = native_play_pending &&
+               (unsigned long)current_tick - native_play_at < (3 * HZ + 19) / 20;
     native_play_pending = false;
     if (talk_held && !talk_select && !talk_toggle)
         finish_talk(talk_is_short());
@@ -3937,14 +3919,6 @@ static void scroll_panel(struct gui_synclist *list, int dir, bool page)
 
 static void horizontal_button(struct gui_synclist *list, int dir, bool held)
 {
-    if (agents_fruit_nav())
-    {
-        if (held)
-            seek_playback(dir);
-        else
-            agents_playback(dir < 0 ? BUTTON_MULTIMEDIA_PREV : BUTTON_MULTIMEDIA_NEXT);
-        return;
-    }
     switch (view)
     {
         case VIEW_SPACES:
@@ -4090,8 +4064,7 @@ static int agents_run(void)
     agents_body_font = body_font >= 0 ? body_font : FONT_UI;
     /* Play is held to talk here, and held long enough it would power off */
     bool poweroff = button_get_sw_poweroff_state();
-    if (!agents_fruit_nav())
-        button_set_sw_poweroff_state(false);
+    button_set_sw_poweroff_state(false);
     gui_synclist_init(&list, row_name, &list, false, 1, NULL);
     gui_synclist_set_row_callbacks(&list, NULL, row_value, NULL);
     gui_synclist_set_description_callback(&list, row_description);
@@ -4483,11 +4456,15 @@ static int agents_run(void)
             case ACTION_AGENTS_TALK:
                 native_play_pending = true;
                 native_play_at = get_action_tick();
-                if (!agents_fruit_nav() && (voice_view() || view == VIEW_INPUT))
+                if (voice_view() || view == VIEW_INPUT)
+                {
                     start_talk(&list, false);
+                    if (talk_held)
+                        agents_shortcut_talking(true);
+                }
                 break;
             case ACTION_AGENTS_REMOTE_TALK:
-                if (!agents_fruit_nav() && (voice_view() || view == VIEW_INPUT))
+                if (voice_view() || view == VIEW_INPUT)
                     start_talk(&list, true);
                 break;
             case ACTION_AGENTS_DISCARD:
@@ -4559,7 +4536,7 @@ static int agents_run(void)
     podlink_close();
     agents_foreground = false;
     /* Play still held would power off at once: wait for its release */
-    while (!agents_fruit_nav() && ret != AGENTS_SWITCH_WPS &&
+    while (ret != AGENTS_SWITCH_WPS &&
            ret != AGENTS_SWITCH_REMOTE_WPS && agents_play_down())
         sleep(HZ / 20);
     button_set_sw_poweroff_state(poweroff);

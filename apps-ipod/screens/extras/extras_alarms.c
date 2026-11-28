@@ -805,7 +805,7 @@ static int show_editor(bool date)
     paint_editor(&e);
     while (true)
     {
-        int action = extras_get_action(HZ, true);
+        int action = extras_get_action(HZ, false);
         if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT ||
             action == ACTION_STD_PREV || action == ACTION_STD_PREVREPEAT)
         {

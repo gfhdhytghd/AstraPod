@@ -437,7 +437,7 @@ static enum sw_next sw_timer(void)
     while (1)
     {
         int action = extras_get_action(sw_running() ? HZ / 25 :
-                                       TIMEOUT_BLOCK, false);
+                                       TIMEOUT_BLOCK, true);
         if (action == ACTION_WPS_PLAY || action == ACTION_STD_OK)
         {
             if (!current)
@@ -586,7 +586,7 @@ static enum sw_next sw_log_page(const struct sw_log *log)
     {
         log_paint(log, scroll);
         int action = extras_get_action(log->running ? HZ / 25 :
-                                       HZ / 2, true);
+                                       HZ / 2, false);
         if (action == ACTION_STD_NEXT || action == ACTION_STD_NEXTREPEAT)
             scroll = MIN(most, scroll + LOG_PITCH);
         else if (action == ACTION_STD_PREV ||

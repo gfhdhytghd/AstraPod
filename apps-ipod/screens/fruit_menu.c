@@ -521,6 +521,7 @@ static int checklist_show(int title, struct checklist *list)
 {
     struct simplelist_info info;
     simplelist_info_init(&info, str(title), list->count + 1, list);
+    info.fruit_nav = true;
     info.get_name = checklist_name;
     info.get_value = checklist_value;
     info.get_kind = checklist_kind;

@@ -396,7 +396,7 @@ static int config_screen(const struct menu_item_ex *carry)
          * showing as constant flicker under a heavy SBS (the failsafe SBS,
          * which barely draws, doesn't trigger it). HZ so the status bar still
          * redraws while idle, matching option_select.c's settings lists. */
-        if (list_do_action(CONTEXT_LIST, HZ, &list, &action))
+        if (list_do_action(CONTEXT_LIST | CONTEXT_FRUIT_NAV, HZ, &list, &action))
         {
             /* The list has already drawn itself with the new selection, and
              * the carried item is drawn from moving_item -- so it has to

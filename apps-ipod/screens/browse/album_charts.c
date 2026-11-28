@@ -348,6 +348,7 @@ int album_charts_show(enum album_chart kind)
     else
     {
         simplelist_info_init(&info, str(chart_title(kind)), chart_len, NULL);
+        info.fruit_nav = true;
         info.get_name = chart_get_name;
         info.wps_on_play = true;
 

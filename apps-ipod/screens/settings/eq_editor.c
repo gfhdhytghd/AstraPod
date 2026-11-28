@@ -248,6 +248,7 @@ int eq_presets_screen(void)
 
     simplelist_info_init(&info, str(LANG_EQUALIZER_PRESETS),
                          BUILTIN_COUNT + preset_file_count, NULL);
+    info.fruit_nav = true;
     info.get_name = preset_get_name;
     info.get_kind = preset_get_kind;
     info.action_callback = preset_action;
@@ -1097,6 +1098,7 @@ static bool select_menu(void)
 
     action_wait_for_release();
     simplelist_info_init(&info, str(LANG_EQUALIZER), SM_COUNT, NULL);
+    info.fruit_nav = true;
     info.get_name = sm_get_name;
     info.get_kind = sm_get_kind;
     info.get_value = sm_get_value;
@@ -1154,6 +1156,7 @@ static int confirm_exit(void)
         return 1;
     simplelist_info_init(&info, str(LANG_EQUALIZER_UNSAVED), ARRAYLEN(lang),
                          (void *)lang);
+    info.fruit_nav = true;
     info.get_name = confirm_get_name;
     info.action_callback = confirm_action;
     info.title_icon = Icon_EQ;

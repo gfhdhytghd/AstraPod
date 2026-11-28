@@ -340,6 +340,7 @@ static int types_run(void)
     {
         fill_types();
         simplelist_info_init(&info, str(LANG_SORT_TYPE), type_ct, NULL);
+        info.fruit_nav = true;
         info.get_name = type_name;
         info.get_icon = type_icon;
         info.get_kind = type_kind;
@@ -459,6 +460,7 @@ static int show_list(const char *type, char *title)
             break;
 
         simplelist_info_init(&info, title, heads + shown_ct, NULL);
+        info.fruit_nav = true;
         info.get_name = flat_get_name;
         info.get_icon = flat_get_icon;
         info.get_kind = flat_get_kind;

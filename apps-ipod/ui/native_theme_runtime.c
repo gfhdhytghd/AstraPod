@@ -390,6 +390,7 @@ int ui_theme_choose(void)
     struct simplelist_info info;
     simplelist_info_init(&info, str(LANG_NATIVE_THEME),
                          count + UI_THEME_BUILTIN_COUNT, files);
+    info.fruit_nav = true;
     info.get_name = theme_name;
     if (current_theme > 0)
     {

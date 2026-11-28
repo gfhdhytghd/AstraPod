@@ -82,6 +82,7 @@ int time_zone_picker(void)
     {
         simplelist_info_init(&info, str(LANG_FRUIT_TIME_ZONE),
                              sizeof(regions) / sizeof(*regions), NULL);
+        info.fruit_nav = true;
         info.get_name = region_name;
         info.selection = region;
         usb = simplelist_show_list(&info);
@@ -97,6 +98,7 @@ int time_zone_picker(void)
         cities.region = region;
         fill_cities(&cities);
         simplelist_info_init(&info, (char *)regions[region], cities.count, &cities);
+        info.fruit_nav = true;
         info.get_name = city_name;
         info.selection = cities.selected;
         struct ui_scene page = {0};

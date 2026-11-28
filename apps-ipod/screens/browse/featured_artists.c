@@ -423,6 +423,7 @@ static int run_track_list(const char *title)
 
         pending_row = -1;
         simplelist_info_init(&info, (char *)title, track_ct, NULL);
+        info.fruit_nav = true;
         info.get_name = track_get_name;
         info.get_kind = track_get_kind;
         info.action_callback = context_action_cb;
@@ -504,6 +505,7 @@ int featured_artists_show(void)
     {
         pending_row = -1;
         simplelist_info_init(&info, str(LANG_FEATURED_ARTISTS), order_ct, NULL);
+        info.fruit_nav = true;
         info.get_name = guest_get_name;
         info.get_kind = guest_get_kind;
         info.action_callback = context_action_cb;

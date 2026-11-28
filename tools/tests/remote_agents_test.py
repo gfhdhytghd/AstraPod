@@ -19,6 +19,8 @@ preamble='''#include <assert.h>
 #define BUTTON_REPEAT 0x04000000
 struct button_mapping { int action_code, button_code, pre_button_code; };
 struct { bool hold_lr_for_scroll_in_list; } global_settings;
+static bool rock_ui_raw(void) { return false; }
+static bool ui_wheel_navigation(void) { return false; }
 '''
 preamble+='\n'.join('#define %s %d'%(x,i+1) for i,x in enumerate(ids))
 preamble+='''
@@ -100,7 +102,7 @@ int main(void) {
     b=agents_shortcut_button(&cs,BUTTON_SELECT|BUTTON_REPEAT,BUTTON_SELECT,false,&fire);
     assert(!fire&&lookup(CONTEXT_AGENTS,b,BUTTON_SELECT)==ACTION_AGENTS_SELECT_REPEAT);
     b=agents_shortcut_button(&cs,BUTTON_SELECT|BUTTON_PLAY,BUTTON_SELECT|BUTTON_PLAY,false,&fire);
-    assert(!fire&&lookup(CONTEXT_WPS,b,BUTTON_SELECT|BUTTON_REPEAT)==ACTION_UNKNOWN);
+    assert(!fire&&lookup(CONTEXT_WPS,b,BUTTON_SELECT|BUTTON_REPEAT)==ACTION_NONE);
     puts("plain Left/Right press+repeat+release everywhere; host Menu/Select; Play scopes; native keys PASS");
 }
 '''

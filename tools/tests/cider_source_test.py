@@ -47,6 +47,8 @@ static void album_blur_playing_changed(void) {}
 #define ALLOW_SOFTLOCK 0
 #define TIMEOUT_BLOCK -1
 #define SYS_USB_CONNECTED -100
+#define SYS_POWEROFF -101
+static void cover_cancelled(void) {}
 #define IS_SYSEVENT(x) ((x)<0)
 #define UNIT_TIME 1
 #define ARRAYLEN(x) (sizeof(x)/sizeof((x)[0]))

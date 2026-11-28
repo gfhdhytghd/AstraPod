@@ -17,6 +17,7 @@
 #include "widgets/splash.h"
 #include "lang.h"
 #include "kernel.h"
+#include "storage.h"
 #include "system/shutdown.h"
 #include "system/hash.h"
 #include "string-extra.h"
@@ -217,6 +218,8 @@ static bool art(int index, struct bitmap *bitmap, unsigned int *version)
         else
         {
             quality = 1;
+            if (global_settings.album_covers_view_mode != CAROUSEL_VIEW_FLAT)
+                dim = 32;
             /* A page has no palette until its artwork arrives on some
              * providers. Keep the card visible during the fetch. */
             uint32_t rgb = row.bg ? row.bg : 0x383838;
@@ -303,7 +306,9 @@ static void tick(void)
      * Use the disk worker's budget for M and keep a small XS lead beyond it. */
     unsigned full = MIN(total, visible + cider_read_ahead_count(61, visible));
     cider_cover_read_ahead(ahead, total, full);
-    bool requested = false, preview_needed = false;
+    bool requested = false, center_ready = false;
+    const char *batch[3];
+    unsigned nbatch = 0;
     unsigned order[WINDOW], ordered = 0;
     for (unsigned i = 0; i < total; i++)
         if (offsets[i] >= 0)
@@ -315,22 +320,36 @@ static void tick(void)
     {
         unsigned i = order[pos];
         const char *key = ahead[i];
-        if (cider_has_art(key, "M"))
+        bool have_full = cider_has_art(key, "M");
+        bool have_preview = have_full || cider_has_art(key, "XS") ||
+                            cider_has_art(key, "S") || cider_has_art(key, "L");
+        if (offsets[i] == 0)
+            center_ready = have_preview;
+        if (have_full)
             continue;
         bool local = cider_art_local(key, "M");
         host_miss[i] = !local;
-        if (!local && !cider_cover_preview_local(key))
+        bool preview_local = cider_cover_preview_local(key);
+        /* A cold disk can take longer than a USB preview. Race it for the
+         * centred album only, and only while RAM has neither tier. */
+        bool cold_center = offsets[i] == 0 && !storage_disk_is_active() &&
+                           !have_preview;
+        if ((!local && !preview_local) || cold_center)
         {
-            preview_needed = true;
-            if (!requested)
-                requested = cider_prefetch_art(key, "XS");
+            bool started = !requested && cider_prefetch_art(key, "XS");
+            requested |= started;
+            if (!started && offsets[i] != 0 && nbatch < ARRAYLEN(batch))
+                batch[nbatch++] = key;
         }
         if (!local && nwarm < ARRAYLEN(warm))
             warm[nwarm++] = key;
     }
-    /* Keep one foreground request alive across wheel steps. Short XS
-     * transfers fill holes before any 32 KiB medium image uses the link. */
-    if (!requested && !preview_needed && !flicking)
+    /* Keep the centred preview on the ordinary request lane. Once it is
+     * visible, use the existing XS batch lane for upcoming covers as well.
+     * A slow neighbour cannot delay the first cover on entry. */
+    if (center_ready && nbatch)
+        cider_request_xs(batch, nbatch);
+    if (!requested && !flicking)
         for (unsigned i = 0; i < full; i++)
             if (host_miss[i] && cider_prefetch_art(ahead[i], "M"))
                 break;

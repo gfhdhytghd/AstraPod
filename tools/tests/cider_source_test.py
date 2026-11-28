@@ -100,6 +100,8 @@ static unsigned int ncommands,next_request,cancel_request,play_request,loading_r
 static int play_reply;static long play_at;
 static void cider_log(const char*f,...){(void)f;}
 static struct cider_transfer transfer;
+static unsigned int xs_count;
+static char xs_keys[5][65];
 static bool disk_lookup,request_ready,cancel_all;
 static void cider_warm_art(const char*const*k,unsigned int n,const char*t){(void)k;(void)n;(void)t;}
 static int request_calls;
@@ -194,6 +196,12 @@ blocked=true;assert(!cider_prefetch_art("near","M")&&!request_calls);blocked=fal
 assert(cider_prefetch_art("near","M")&&request_calls==1);
 transfer.fill=false;cider_retain_art(visible,1,"M");assert(!transfer.active&&cancel_request==77);
 assert(cider_prefetch_art("near","M")&&request_calls==2);
+/* A pending preview batch owns its XS keys, while M may still upgrade them. */
+strcpy(xs_keys[0],"near");xs_count=1;
+assert(!cider_prefetch_art("near","XS")&&request_calls==2);
+assert(cider_prefetch_art("near","M")&&request_calls==3);
+xs_count=0;
+assert(cider_prefetch_art("near","XS")&&request_calls==4);
 cider_local_play();ncommands=0;local_playing=1;int old_pauses=pauses;
 assert(cider_play("play/library-songs/fail"));play_reply=-1;assert(cider_play_status()==-1&&!active&&local_playing&&pauses==old_pauses);
 assert(cider_play("play/library-songs/timeout"));current_tick+=601;assert(cider_play_status()==-1&&!active);

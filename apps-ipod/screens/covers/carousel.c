@@ -400,9 +400,6 @@ struct pf_slide_cache
     struct slide_cache cache[SLIDE_CACHE_SIZE];
     int free;
     int used;
-    int left_idx;
-    int right_idx;
-    int center_idx;
 };
 
 struct pf_scroll_line_info {
@@ -496,6 +493,7 @@ static bool flat_view(void);
 static bool pf_shown, pf_entry_prepared, cover_resume_dirty;
 /* The entry's first submission releases the loader under the cache lock. */
 static bool pf_hold_reflections;
+static int prefetch_direction;
 static uint32_t pf_entry_requested;
 static int pf_neighbor_light = 256;
 static struct {
@@ -1620,6 +1618,8 @@ static void thread(void)
 
         if(ev.id != SYS_TIMEOUT) {
             bool usb_pending = false;
+            int exhausted_center = -1, exhausted_direction = 0;
+            unsigned exhausted_generation = 0;
             while (1) {
                 /* Drain the wakeups that piled up while we were loading, and
                  * keep going, rather than abandoning the run to fetch them.
@@ -1649,12 +1649,6 @@ static void thread(void)
                     break;
 
                 buf_ctx_lock();
-                if (load_ultra_reflection())
-                {
-                    buf_ctx_unlock();
-                    yield();
-                    continue;
-                }
                 if (model->art_version)
                 {
                     const int radius = ALBUM_COVERS_NUM_SLIDES + CIDER_COVER_LEAD;
@@ -1671,14 +1665,34 @@ static void thread(void)
                              (version & 3) <= (previous & 3)))
                             continue;
                         int old = pf_sldcache.cache[slot].hid;
-                        if (load_and_prepare_surface(index,slot,abs(center_index-index)) &&
-                            old != empty_slide_hid)
-                            buflib_free(&buf_ctx,old);
+                        if (load_and_prepare_surface(index,slot,abs(center_index-index)))
+                        {
+                            exhausted_center = -1;
+                            if (old != empty_slide_hid)
+                                buflib_free(&buf_ctx,old);
+                        }
                     }
                 }
-                bool slide_loaded = load_new_slide();
+                bool slide_loaded = false;
+                if (exhausted_center != center_index ||
+                    exhausted_direction != prefetch_direction ||
+                    exhausted_generation != slide_cache_generation)
+                {
+                    /* A full cache can finish its reflections without
+                     * reopening the same cover after every reflection slice. */
+                    exhausted_center = center_index;
+                    exhausted_direction = prefetch_direction;
+                    exhausted_generation = slide_cache_generation;
+                    slide_loaded = load_new_slide();
+                    if (slide_loaded)
+                        exhausted_center = -1;
+                }
+                /* A bitmap is useful immediately. Give reflections one
+                 * slice between loads, instead of finishing every nearby
+                 * reflection before fetching another cover. */
+                bool reflection_loaded = load_ultra_reflection();
                 buf_ctx_unlock();
-                if (!slide_loaded)
+                if (!slide_loaded && !reflection_loaded)
                     break;
                 yield();
             }
@@ -1890,46 +1904,8 @@ static void initialize_slide_cache(void)
 
     pf_sldcache.free = 0;
     pf_sldcache.used = -1;
-    pf_sldcache.left_idx = -1;
-    pf_sldcache.right_idx = -1;
-    pf_sldcache.center_idx = -1;
 }
 
-
-/*
- * The following functions implement the linked-list-in-array used to manage
- * the LRU cache of slides, and the list of free cache slots.
- */
-
-#define _SEEK_RIGHT_WHILE(start, cond) \
-({ \
-    int ind_, next_ = (start); \
-    int i_ = 0; \
-    do { \
-        ind_ = next_; \
-        next_ = pf_sldcache.cache[ind_].next; \
-        i_++; \
-    } while (next_ != pf_sldcache.used && (cond) && i_ <= SLIDE_CACHE_SIZE); \
-    if (i_ > SLIDE_CACHE_SIZE) \
-    /* TODO: Not supposed to happen */ \
-        ind_ = -1; \
-    ind_; \
-})
-
-#define _SEEK_LEFT_WHILE(start, cond) \
-({ \
-    int ind_, next_ = (start); \
-    int i_ = 0; \
-    do { \
-        ind_ = next_; \
-        next_ = pf_sldcache.cache[ind_].prev; \
-        i_++; \
-    } while (ind_ != pf_sldcache.used && (cond) && i_ <= SLIDE_CACHE_SIZE); \
-    if (i_ > SLIDE_CACHE_SIZE) \
-    /* TODO: Not supposed to happen */ \
-        ind_ = -1; \
-    ind_; \
-})
 
 /**
  Pop the given item from the linked list starting at *head, returning the next
@@ -1996,17 +1972,6 @@ static inline void lla_insert_tail (int *head, int i)
 }
 
 /**
- Insert the item at index i before the one at index p.
-*/
-static inline void lla_insert_after(int i, int p)
-{
-    if ((unsigned)i >= SLIDE_CACHE_SIZE || (unsigned)p >= SLIDE_CACHE_SIZE) return;
-    p = pf_sldcache.cache[p].next;
-    lla_insert(i, p);
-}
-
-
-/**
  Insert the item at index i before the one at index p in the list starting at
  *head
 */
@@ -2031,14 +1996,29 @@ static inline void free_slide(int i)
     pf_sldcache.cache[i].index = -1;
     lla_pop_item(&pf_sldcache.used, i);
     lla_insert_tail(&pf_sldcache.free, i);
-    if (pf_sldcache.used == -1)
-    {
-        pf_sldcache.right_idx = -1;
-        pf_sldcache.left_idx = -1;
-        pf_sldcache.center_idx = -1;
-    }
 }
 
+
+/* Keep the nearest two covers on either side equally important. Beyond
+ * those, give upcoming local covers four more slots of look-ahead. */
+static int slide_priority(int index)
+{
+    int offset = index - center_index;
+    int distance = abs(offset);
+    if (!model->external && offset * prefetch_direction < 0 && distance > 2)
+        distance += 4;
+    return distance;
+}
+
+static void note_prefetch_direction(int delta)
+{
+    int direction = delta < 0 ? -1 : 1;
+    if (prefetch_direction != direction)
+    {
+        prefetch_direction = direction;
+        wake_pf_thread();
+    }
+}
 
 /**
  Free one slide ranked above the given priority. If no such slide can be found,
@@ -2054,9 +2034,9 @@ static bool free_slide_prio(int prio)
     int r = pf_sldcache.cache[pf_sldcache.used].prev;
 
     int prio_l = pf_sldcache.cache[l].index < center_index ?
-           center_index - pf_sldcache.cache[l].index : 0;
+           slide_priority(pf_sldcache.cache[l].index) : 0;
     int prio_r = pf_sldcache.cache[r].index > center_index ?
-           pf_sldcache.cache[r].index - center_index : 0;
+           slide_priority(pf_sldcache.cache[r].index) : 0;
     if (prio_l > prio_r)
     {
         i = l;
@@ -2067,10 +2047,6 @@ static bool free_slide_prio(int prio)
     }
     if (prio_max > prio)
     {
-        if (i == pf_sldcache.left_idx)
-            pf_sldcache.left_idx = pf_sldcache.cache[i].next;
-        if (i == pf_sldcache.right_idx)
-            pf_sldcache.right_idx = pf_sldcache.cache[i].prev;
         free_slide(i);
         return true;
     } else
@@ -2369,12 +2345,11 @@ static struct dim *read_aat(int fh, ssize_t len, char *block)
  */
 static inline bool load_and_prepare_surface(const int slide_index,
                                             const int cache_index,
-                                            const int prio)
+                                            int prio)
 {
     if ((unsigned)cache_index >= SLIDE_CACHE_SIZE || slide_index < 0)
         return false;
     unsigned int generation = slide_cache_generation;
-    int center = center_index;
     unsigned int version = 0;
     unsigned int hash = model->read_art ? 0 : model->art_key(slide_index);
 
@@ -2413,7 +2388,11 @@ static inline bool load_and_prepare_surface(const int slide_index,
     }
 
     buf_ctx_lock();
-    bool current = generation == slide_cache_generation && center == center_index;
+    bool current = generation == slide_cache_generation;
+    /* The wheel may move while open() waits for storage. Keep useful reads
+     * and rank their allocation against the new centre. */
+    if (!model->external)
+        prio = slide_priority(slide_index);
     int hid = empty_slide_hid;
     char *block = NULL;
     if (current && allocation)
@@ -2478,148 +2457,76 @@ static inline bool load_and_prepare_surface(const int slide_index,
 }
 
 
-/**
- Load the "next" slide that we can load, freeing old slides if needed, provided
- that they are further from center_index than the current slide
-*/
+/* The used list is sorted. Find the first slide at or after the index. */
+static int slide_at_or_after(int index)
+{
+    int first = pf_sldcache.used;
+    if (first < 0)
+        return -1;
+
+    int slot = first;
+    do {
+        if (pf_sldcache.cache[slot].index >= index)
+            return slot;
+        slot = pf_sldcache.cache[slot].next;
+    } while (slot != first);
+    return -1;
+}
+
 bool load_new_slide(void)
 {
     if (wants_to_quit)
         return false;
 
-    int i = -1;
-
-    if (pf_sldcache.center_idx != -1)
+    int index = center_index;
+    int center_slot = slide_at_or_after(index);
+    if (center_slot >= 0 && pf_sldcache.cache[center_slot].index == index)
     {
-        int next, prev;
-        if (pf_sldcache.cache[pf_sldcache.center_idx].index != center_index)
+        int left = index, right = index;
+        int slot = center_slot;
+        while (slot != pf_sldcache.used)
         {
-            if (pf_sldcache.cache[pf_sldcache.center_idx].index < center_index)
-            {
-                pf_sldcache.center_idx = _SEEK_RIGHT_WHILE(pf_sldcache.center_idx,
-                                pf_sldcache.cache[next_].index <= center_index);
-                if (pf_sldcache.center_idx == -1)
-                    goto fatal_fail;
-
-                prev = pf_sldcache.center_idx;
-                next = pf_sldcache.cache[pf_sldcache.center_idx].next;
-            }
-            else
-            {
-                pf_sldcache.center_idx = _SEEK_LEFT_WHILE(pf_sldcache.center_idx,
-                                pf_sldcache.cache[next_].index >= center_index);
-                if (pf_sldcache.center_idx == -1)
-                    goto fatal_fail;
-
-                next = pf_sldcache.center_idx;
-                prev = pf_sldcache.cache[pf_sldcache.center_idx].prev;
-            }
-            if (pf_sldcache.cache[pf_sldcache.center_idx].index != center_index)
-            {
-                if (pf_sldcache.free == -1)
-                    free_slide_prio(0);
-
-                i = lla_pop_head(&pf_sldcache.free);
-                if (!load_and_prepare_surface(center_index, i, 0))
-                    goto fail_and_refree;
-
-                if (pf_sldcache.cache[next].index == -1)
-                {
-                    if (pf_sldcache.cache[prev].index == -1)
-                        goto insert_first_slide;
-                    else
-                        next = pf_sldcache.cache[prev].next;
-                }
-                lla_insert(i, next);
-                if (pf_sldcache.cache[i].index < pf_sldcache.cache[pf_sldcache.used].index)
-                    pf_sldcache.used = i;
-
-                pf_sldcache.center_idx = i;
-                pf_sldcache.left_idx = i;
-                pf_sldcache.right_idx = i;
-                return true;
-            }
+            slot = pf_sldcache.cache[slot].prev;
+            if (pf_sldcache.cache[slot].index != left - 1)
+                break;
+            left--;
         }
-        int left, center, right;
-        left = pf_sldcache.cache[pf_sldcache.left_idx].index;
-        center = pf_sldcache.cache[pf_sldcache.center_idx].index;
-        right = pf_sldcache.cache[pf_sldcache.right_idx].index;
-
-        if (left > center)
-            pf_sldcache.left_idx = pf_sldcache.center_idx;
-        if (right < center)
-            pf_sldcache.right_idx = pf_sldcache.center_idx;
-
-        pf_sldcache.left_idx = _SEEK_LEFT_WHILE(pf_sldcache.left_idx,
-            pf_sldcache.cache[ind_].index - 1 == pf_sldcache.cache[next_].index);
-
-        pf_sldcache.right_idx = _SEEK_RIGHT_WHILE(pf_sldcache.right_idx,
-            pf_sldcache.cache[ind_].index + 1 == pf_sldcache.cache[next_].index);
-        if (pf_sldcache.right_idx == -1 || pf_sldcache.left_idx == -1)
-            goto fatal_fail;
-
-
-        /* update indices */
-        left = pf_sldcache.cache[pf_sldcache.left_idx].index;
-        center = pf_sldcache.cache[pf_sldcache.center_idx].index;
-        right = pf_sldcache.cache[pf_sldcache.right_idx].index;
-
-        int prio_l = center - left + 1;
-        int prio_r = right - center + 1;
-        if ((prio_l < prio_r
-             || right >= number_of_slides - 1) && left > 0)
+        slot = pf_sldcache.cache[center_slot].next;
+        while (slot != pf_sldcache.used &&
+               pf_sldcache.cache[slot].index == right + 1)
         {
-            if (pf_sldcache.free == -1 && !free_slide_prio(prio_l))
-            {
-                return false;
-            }
-
-            i = lla_pop_head(&pf_sldcache.free);
-            if (load_and_prepare_surface(left - 1, i, prio_l))
-            {
-                lla_insert_before(&pf_sldcache.used, i, pf_sldcache.left_idx);
-                pf_sldcache.left_idx = i;
-                return true;
-            }
-        } else if(right < number_of_slides - 1)
-        {
-            if (pf_sldcache.free == -1 && !free_slide_prio(prio_r))
-            {
-                return false;
-            }
-
-            i = lla_pop_head(&pf_sldcache.free);
-            if (load_and_prepare_surface(right + 1, i, prio_r))
-            {
-                lla_insert_after(i, pf_sldcache.right_idx);
-                pf_sldcache.right_idx = i;
-                return true;
-            }
+            slot = pf_sldcache.cache[slot].next;
+            right++;
         }
-    } else {
-        i = lla_pop_head(&pf_sldcache.free);
-        if (load_and_prepare_surface(center_index, i, 0))
-        {
-insert_first_slide:
-            pf_sldcache.cache[i].next = i;
-            pf_sldcache.cache[i].prev = i;
-            pf_sldcache.center_idx = i;
-            pf_sldcache.left_idx = i;
-            pf_sldcache.right_idx = i;
-            pf_sldcache.used = i;
-            return true;
-        }
+
+        if (left > 0 && (right == number_of_slides - 1 ||
+                         slide_priority(left - 1) < slide_priority(right + 1)))
+            index = left - 1;
+        else if (right < number_of_slides - 1)
+            index = right + 1;
+        else
+            return false;
     }
-fail_and_refree:
-    if (i != -1)
+
+    int prio = slide_priority(index);
+    if (pf_sldcache.free == -1 && !free_slide_prio(prio))
+        return false;
+
+    int slot = lla_pop_head(&pf_sldcache.free);
+    if (!load_and_prepare_surface(index, slot, prio))
     {
-        lla_insert_tail(&pf_sldcache.free, i);
+        lla_insert_tail(&pf_sldcache.free, slot);
+        return false;
     }
-    return false;
-fatal_fail:
-    free_all_slide_prio(0);
-    initialize_slide_cache();
-    return false;
+
+    /* I/O can yield. Find the insertion point after allocation, which may
+     * have evicted neighbours based on the centre's new position. */
+    int next = slide_at_or_after(index);
+    if (next < 0)
+        lla_insert_tail(&pf_sldcache.used, slot);
+    else
+        lla_insert_before(&pf_sldcache.used, slot, next);
+    return true;
 }
 
 
@@ -3642,6 +3549,7 @@ static void flow_click(int direction)
     if (to == target || flow_row.phase == STOCK_LEAVE ||
         flow_row.phase == STOCK_ULTRA_LEAVE)
         return;
+    note_prefetch_direction(to - target);
     if (pf_state == pf_scrolling)
         stock_scroll(&flow_row, to - target, USEC_TIMER);
     target = to;
@@ -3662,6 +3570,7 @@ static void cover_key_step(int direction)
     int to = fbound(0, target + direction, number_of_slides - 1);
     if (to == target)
         return;
+    note_prefetch_direction(direction);
     target = to;
     if (!pf_motion_scale || slide_frame == (to << 16))
     {
@@ -3700,6 +3609,7 @@ static void show_previous_slide(void)
         flow_click(-flow_wheel_steps());
         return;
     }
+    note_prefetch_direction(-1);
     flat_note_scroll();
     if (step == 0) {
         if (center_index > 0) {
@@ -3720,6 +3630,7 @@ static void show_next_slide(void)
         flow_click(flow_wheel_steps());
         return;
     }
+    note_prefetch_direction(1);
     flat_note_scroll();
     if (step == 0) {
         if (center_index < number_of_slides - 1) {
@@ -4839,6 +4750,7 @@ static bool init(void)
 
     pf_stock = ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC;
     ultra_flow_sync();
+    prefetch_direction = 0;
     pf_hold_reflections = pf_entry_prepared && ultra_flow_on && stock_look();
     flow_row.spring = ultra_flow_on;
     pf_show_statusbar = pf_stock;

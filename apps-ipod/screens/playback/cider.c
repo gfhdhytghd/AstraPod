@@ -38,6 +38,7 @@
 #define CIDER_STORE_CAP CS_DEFAULT_CAP
 #endif
 /* How long a store hit holds back the USB request before racing it. */
+#define HOLD_PREVIEW (HZ / 25)
 #define HOLD_ACTIVE (HZ)
 #define HOLD_ASLEEP (5 * HZ / 2)
 static struct mutex cider_mutex;
@@ -528,7 +529,8 @@ static unsigned int next(char *record, unsigned int size)
         xs_at = current_tick;
     }
     else if (transfer.active &&
-             !(disk_lookup && (diag.build_state == 2 || TIME_BEFORE(current_tick, hold_until))) &&
+             !(disk_lookup && ((diag.build_state == 2 && strcmp(transfer.tier, "XS")) ||
+                              TIME_BEFORE(current_tick, hold_until))) &&
              (request_ready || (hold_until && disk_lookup) ||
               TIME_AFTER(current_tick, request_at + 3 * HZ)))
     {
@@ -770,8 +772,8 @@ static bool begin_transfer(const char *key, const char *tier, bool fill)
     if (!local) diag.misses++;
     disk_lookup = local;
     request_ready = !local; request_tries = 0; request_at = current_tick;
-    hold_until = local ? current_tick +
-        (storage_disk_is_active() ? HOLD_ACTIVE : HOLD_ASLEEP) : 0;
+    hold_until = local ? current_tick + (!strcmp(tier, "XS") ? HOLD_PREVIEW :
+        storage_disk_is_active() ? HOLD_ACTIVE : HOLD_ASLEEP) : 0;
     if (!granted) grant = CIDER_CREDIT;
     if (persist && disk_running) queue_post(&disk_queue, 1, 0);
     return true;
@@ -1165,6 +1167,7 @@ static void disk_worker(void)
         }
         if (disk_usb_pending()) continue;
         mutex_lock(&cider_mutex);
+        bool more_fills = nfills > 0;
         bool busy = transfer.active || TIME_BEFORE(current_tick, art_used_at + HZ);
         bool answer = list_req && !list_ready && (active || build || state.remote == 3);
         mutex_unlock(&cider_mutex);
@@ -1172,6 +1175,7 @@ static void disk_worker(void)
         if (answer && store.loaded) build_list();
         if (disk_usb_pending()) continue;
         more = tracks && ((!store.loaded && !load) || service_track_cache());
+        more |= more_fills;
         if ((active || flush || build || more) && !busy && store.loaded &&
             !ui_motion_active())
         {
@@ -1517,8 +1521,13 @@ static bool request_art(const char *key, const char *tier, bool prefetch)
     bool palette = !strcmp(tier, "P");
     bool cover_in_flight = transfer.active && !transfer.fill &&
                            strcmp(transfer.tier, "P");
+    bool in_batch = false;
+    if (!strcmp(tier, "XS"))
+        for (unsigned i = 0; i < xs_count; i++)
+            in_batch |= !strcmp(xs_keys[i], key);
     bool started = false;
-    if ((!prefetch || (state.generation && (!transfer.active || transfer.fill))) &&
+    if (!in_batch &&
+        (!prefetch || (state.generation && (!transfer.active || transfer.fill))) &&
         (!palette || (host_palette && !cover_in_flight)) &&
         cider_cache_find(&cache, key, tier) < 0 &&
         (!transfer.active || strcmp(transfer.key, key) ||
@@ -1586,13 +1595,19 @@ bool cider_copy_art(const char *key, const char *tier, void *pixels,
 void cider_request_xs(const char *const *keys, unsigned int count)
 {
     if (!count || count > ARRAYLEN(xs_keys)) return;
+    /* Resident receive/next acquire cider_mutex while holding PodLink's
+     * service mutex. Read the negotiated limit before taking cider_mutex. */
+    unsigned int max_message = podlink_max_message();
+    unsigned int capacity = max_message > 16 ? (max_message - 16) / (2060 + 40) : 0;
     mutex_lock(&cider_mutex);
     if (xs_count && xs_sent && TIME_AFTER(current_tick, xs_at + 3 * HZ))
         finish_xs();
     if (!state.generation || xs_count)
     { mutex_unlock(&cider_mutex); return; }
-    for (unsigned int i = 0; i < count; i++)
+    for (unsigned int i = 0; i < count && xs_count < capacity; i++)
         if (valid_key(keys[i]) && cider_cache_find(&cache, keys[i], "XS") < 0 &&
+            !(transfer.active && !strcmp(transfer.tier, "XS") &&
+              !strcmp(transfer.key, keys[i])) &&
             !cider_cache_backoff(&cache, keys[i], "XS", current_tick))
         {
             if (store_local(keys[i], "XS")) fill_add(keys[i], "XS");
@@ -1971,8 +1986,15 @@ void cider_cover_read_ahead(const char *const *keys, unsigned count, unsigned fu
                 break;
             }
         }
-        /* A disk M is useful past the M window if it is the only copy. */
-        if (!queued && (i < full || !ready) && store_local(key, "M"))
+        /* If only M exists, read it as the first visible image. */
+        if (!queued && !ready && store_local(key, "M"))
+            fill_add(key, "M");
+    }
+    /* Upgrade existing previews only after their neighbours can get art. */
+    for (unsigned i = 0; i < full; i++)
+    {
+        const char *key = keys[i];
+        if (valid_key(key) && store_local(key, "M"))
             fill_add(key, "M");
     }
     if (!store.loaded && disk_running)

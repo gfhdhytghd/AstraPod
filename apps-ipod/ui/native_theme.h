@@ -143,7 +143,7 @@ enum { UI_EASE_CUBIC, UI_EASE_QUAD, UI_EASE_QUINT, UI_EASE_SINE,
 
 enum ui_theme_builtin_id {
     UI_THEME_SCRIM, UI_THEME_CLASSIC, UI_THEME_FRUIT_COMPANY,
-    UI_THEME_LIGHT, UI_THEME_FRUIT_COMPANY_ULTRA, UI_THEME_BUILTIN_COUNT
+    UI_THEME_FRUIT_COMPANY_ULTRA, UI_THEME_BUILTIN_COUNT
 };
 
 /* stops is 0 (no gradient), 2 (top and bottom) or 4 (a one-pixel top line,

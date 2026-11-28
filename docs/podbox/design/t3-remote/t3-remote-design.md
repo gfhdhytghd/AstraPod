@@ -27,7 +27,7 @@ AstraPod enforces two distinct button profiles in Agents depending on the active
    - Navigation uses **only** the scroll wheel, `SELECT`, and `MENU`.
    - `LEFT`, `RIGHT`, and `PLAY/PAUSE` are **playback controls only** (previous/rewind, next/fast-forward, play/pause) and must **never** page, choose Allow/Deny, switch `Active`/`All`, open Usage, focus dialog buttons, or start voice input.
    - All actions are reachable through the wheel, `SELECT`, and `MENU`: `Usage` is a list row in S1, `Active`/`All` is toggled via a selectable filter bar in S2, Detail scrolls with the wheel, Approvals pick `Allow` / `Deny` / `All options…` with the wheel + `SELECT`, and voice input starts from **`Voice reply`** in the Actions sheet (or long-press `SELECT`).
-2. **Classic, Scrim & Light (Full Click-Wheel Remote):**
+2. **Classic & Scrim (Full Click-Wheel Remote):**
    - Adds `LEFT`/`RIGHT` horizontal shortcuts (Usage ◄──► Projects, `Active` ◄──► `All`, local Page Up/Down in Detail, `LEFT` Allow / `RIGHT` Deny on Approvals) and long-press `PLAY` (≥ 150 ms) for hold-to-talk voice input, while short `PLAY` (< 150 ms) remains music Play/Pause.
 
 ### Core Ergonomics (Both Profiles)
@@ -35,7 +35,7 @@ AstraPod enforces two distinct button profiles in Agents depending on the active
 1. **Glance first, choose second.** Status dots, thread previews, and the summary-first detail reader let the owner check progress in a glance, then act in one or two clicks.
 2. **`MENU` is always safe.** `MENU` steps back one level, closes the current sheet, or defers an approval/question locally — never submits, denies, or triggers a destructive action.
 3. **No accidental approvals or interrupts.** Auto-popped approvals apply a 250 ms grace window (and under Fruit Company start focus safely on `All options…`, never on `Allow` or `Deny`). Confirmation dialogs focus **`Cancel`** by default.
-4. **Theme-native surfaces.** Every surface — alerts, action sheets, confirmation cards, voice/status toasts, and detail readers — resolves colours and fonts from `ui_theme` (`apps-ipod/ui/native_theme.h`) so **Fruit Company**, **Fruit Company Ultra**, **Classic**, **Scrim**, and **Light** stay cohesive. Never hardcode `LCD_BLACK` or raw RGB fills for modal/band backgrounds.
+4. **Theme-native surfaces.** Every surface — alerts, action sheets, confirmation cards, voice/status toasts, and detail readers — resolves colours and fonts from `ui_theme` (`apps-ipod/ui/native_theme.h`) so **Fruit Company**, **Fruit Company Ultra**, **Classic** and **Scrim** stay cohesive. Never hardcode `LCD_BLACK` or raw RGB fills for modal/band backgrounds.
 
 ---
 
@@ -74,7 +74,7 @@ flowchart LR
 - **Depth axis (Push 18 f / Pop 15 f):**
   - Both profiles: `S1 Projects → S2 Project Threads → S3 Thread Detail`
   - Fruit Company / Ultra additionally pushes `S1 Projects → S7 Usage` from the bottom `Usage` row (`MENU` pops back).
-- **Horizontal axis (Classic / Scrim / Light only — Pan 14 f beneath fixed status bar):**
+- **Horizontal axis (Classic / Scrim only — Pan 14 f beneath fixed status bar):**
   - Top level: **S7 Usage (`VIEW_USAGE`)** ◄──► **S1 Projects (`VIEW_SPACES`)** (clamped at ends)
   - Project level: **Active** ◄──► **All** (`sub <project> active|all`, clamped at ends)
   - Detail level: local **Page Up (`LEFT`)** ◄──► **Page Down (`RIGHT`)**
@@ -85,14 +85,14 @@ flowchart LR
 
 ## 3. Visual Language Across Themes
 
-| Role / Surface | `ui_theme` Token(s) | Fruit Company / Ultra | Scrim (Default) | Light |
-|---|---|---|---|---|
-| **Status Bar** | `UI_COLOR_STATUS_BG`, `UI_COLOR_STATUS_FG`, `UI_METRIC_STATUS_HEIGHT` | 26 px silver-grey vertical gradient (`#F5F6F8 → #C8CDD4`), 1 px `#9AA1AA` divider, `#181C22` title, green battery pill | 35 px `UI_BG_COVER_TINT` (`#162430` album-tinted), `#E8F4FA` title, clock, 24 px icons | 35 px solid `#DDDCD7`, `#181818` text |
-| **List Canvas** | `UI_BG_LIST`, `UI_COLOR_BACKGROUND`, `UI_COLOR_FOREGROUND`, `UI_COLOR_SEPARATOR` | Solid `#FFFFFF`, `#E4E8EE` 1 px dividers, 27–29 px rows | Blurred album art (`UI_BG_BLURRED_COVER`) + dark scrim | Solid `#F6F5F2` |
-| **Selection Style** | `UI_COLOR_SELECTION`, `UI_COLOR_SELECTED_TEXT`, `UI_COLOR_SELECTED_SECONDARY` | Full-width blue gradient (`#4C9DF8 → #186AD8`), `#FFFFFF` text & chevron `›` | 3 px vertical rounded accent bar (`UI_COLOR_SELECTION`, album vivid) between icon and text; `#FFFFFF` selected text, muted unselected | 3 px vertical `#12588E` bar, `#181818` text |
-| **Preview / Notes Strip** | `UI_COLOR_LIST_TINT`, `UI_METRIC_LIST_NOTES_HEIGHT` | `#F1F4F8` surface, 1 px `#D2D8E2` top rule, `#181C22` body, `#667080` meta | Translucent dark album-tinted strip (`list_tint_alpha`), `#FFFFFF` body, accent meta | `#DDDCD7` solid strip |
-| **Modal / Bottom Sheet / Toast** | `UI_COLOR_MODAL_BG`, `UI_COLOR_MODAL_FG`, `UI_COLOR_MODAL_BORDER`, `UI_COLOR_MODAL_ACCENT`, `UI_COLOR_DIM` | `#F8F9FC` rounded card (6 px radius), 1 px `#B0B8C6` border, 35% dim, `#1C6CDA` accent | Square-edged `#12161A` card, 2 px `#626C76` border, 35% dim, album-vivid accent | `#FFFFFF` card, 2 px `#73706C` border, `#12588E` accent |
-| **Fonts** | `UI_FONT_LIST`, `UI_FONT_TITLE`, `UI_FONT_BODY`, `UI_FONT_STATUS` | 14–15 px list/body, 13–14 px bold title, 11–12 px metadata | Same (`18-noto-sans`, `18-noto-sans-bold`, `12-noto-sans`) | Same |
+| Role / Surface | `ui_theme` Token(s) | Fruit Company / Ultra | Scrim (Default) |
+|---|---|---|---|
+| **Status Bar** | `UI_COLOR_STATUS_BG`, `UI_COLOR_STATUS_FG`, `UI_METRIC_STATUS_HEIGHT` | 26 px silver-grey vertical gradient (`#F5F6F8 → #C8CDD4`), 1 px `#9AA1AA` divider, `#181C22` title, green battery pill | 35 px `UI_BG_COVER_TINT` (`#162430` album-tinted), `#E8F4FA` title, clock, 24 px icons |
+| **List Canvas** | `UI_BG_LIST`, `UI_COLOR_BACKGROUND`, `UI_COLOR_FOREGROUND`, `UI_COLOR_SEPARATOR` | Solid `#FFFFFF`, `#E4E8EE` 1 px dividers, 27–29 px rows | Blurred album art (`UI_BG_BLURRED_COVER`) + dark scrim |
+| **Selection Style** | `UI_COLOR_SELECTION`, `UI_COLOR_SELECTED_TEXT`, `UI_COLOR_SELECTED_SECONDARY` | Full-width blue gradient (`#4C9DF8 → #186AD8`), `#FFFFFF` text & chevron `›` | 3 px vertical rounded accent bar (`UI_COLOR_SELECTION`, album vivid) between icon and text; `#FFFFFF` selected text, muted unselected |
+| **Preview / Notes Strip** | `UI_COLOR_LIST_TINT`, `UI_METRIC_LIST_NOTES_HEIGHT` | `#F1F4F8` surface, 1 px `#D2D8E2` top rule, `#181C22` body, `#667080` meta | Translucent dark album-tinted strip (`list_tint_alpha`), `#FFFFFF` body, accent meta |
+| **Modal / Bottom Sheet / Toast** | `UI_COLOR_MODAL_BG`, `UI_COLOR_MODAL_FG`, `UI_COLOR_MODAL_BORDER`, `UI_COLOR_MODAL_ACCENT`, `UI_COLOR_DIM` | `#F8F9FC` rounded card (6 px radius), 1 px `#B0B8C6` border, 35% dim, `#1C6CDA` accent | Square-edged `#12161A` card, 2 px `#626C76` border, 35% dim, album-vivid accent |
+| **Fonts** | `UI_FONT_LIST`, `UI_FONT_TITLE`, `UI_FONT_BODY`, `UI_FONT_STATUS` | 14–15 px list/body, 13–14 px bold title, 11–12 px metadata | Same (`18-noto-sans`, `18-noto-sans-bold`, `12-noto-sans`) |
 
 ### Semantic Status Dots
 
@@ -131,7 +131,7 @@ In `VIEW_SPACES`, if a project's highest-priority state is only in non-active/ba
   - Right (`RIGHT_CELL = 86 px`): compact highest-priority count (`1 ask`, `1 err`, `2 run`, `done`, or blank when idle), plus chevron `›` in Fruit Company / Classic.
 - **Theme-specific Usage entry & footer:**
   - **Fruit Company / Ultra:** Appends a selectable **`Usage`** row (`ROW_USAGE`, right label `7d stats ›`) at the bottom of the list — pressing `SELECT` pushes to **S7 Usage**. Bottom hint bar: `SEL Open  ·  Hold SEL Voice`.
-  - **Classic / Scrim / Light:** `LEFT` pans horizontally to **S7 Usage**. Bottom hint bar: `◀ Usage  ·  Hold PLAY Voice`.
+  - **Classic / Scrim:** `LEFT` pans horizontally to **S7 Usage**. Bottom hint bar: `◀ Usage  ·  Hold PLAY Voice`.
 - **Selection persistence:** Tracked by `ws.id` (`t3p<n>`), never list index, so live priority reordering never jumps the cursor.
 - **Focus policy:** Moving the wheel in `VIEW_SPACES` does not send `fw` for T3 projects.
 
@@ -146,7 +146,7 @@ In `VIEW_SPACES`, if a project's highest-priority state is only in non-active/ba
 **Layout (320×240):**
 - **Status bar & `Active` / `All` switch:**
   - **Fruit Company / Ultra:** Status title **`<project>`** + selectable 22 px top filter row **`[Active]  All`** (right cue **`SEL Switch`**; no `◀/▶` arrows). Initial selection lands on thread 0; scrolling CCW one notch highlights the filter row and pressing `SELECT` toggles `Active` ↔ `All`. When `Active` is empty, the filter row is selected by default so one `SELECT` switches to `All`.
-  - **Classic / Scrim / Light:** Status title **`<project> · Active ›`** (or **`‹ All`**). `LEFT` pans to `Active`, `RIGHT` pans to `All` (clamped at ends).
+  - **Classic / Scrim:** Status title **`<project> · Active ›`** (or **`‹ All`**). `LEFT` pans to `Active`, `RIGHT` pans to `All` (clamped at ends).
 - **Scrollable thread list (top ~130 px, 4–5 rows visible):**
   - Left: status dot (`b`, `f`, `w`, `d`, `i`, `u`).
   - Middle: thread title (`hr_agent.name`).
@@ -183,18 +183,18 @@ In `VIEW_SPACES`, if a project's highest-priority state is only in non-active/ba
      - Streaming stability: tool rows never shift the reader's scroll offset while reading above the bottom (`detail_layout.c`).
    - **Scrolling:**
      - **Fruit Company / Ultra:** Scroll with the wheel only (1 line per tick; fast wheel spin accelerates to 3–5 lines per tick). `LEFT` and `RIGHT` remain track Previous/Next/Seek.
-     - **Classic / Scrim / Light:** Wheel scrolls 1 line (fast spin: 3 lines); `LEFT`/`RIGHT` tap performs local Page Up/Down (`detail_page_lines`), hold jumps to top/bottom.
+     - **Classic / Scrim:** Wheel scrolls 1 line (fast spin: 3 lines); `LEFT`/`RIGHT` tap performs local Page Up/Down (`detail_page_lines`), hold jumps to top/bottom.
    - **Right-edge scroll track (3 px):** Shown whenever wrapped content exceeds viewport height.
    - **Live-streaming anchor:** Auto-follows at bottom (`detail_scroll >= detail_scroll_max`); freezes when scrolled up and displays a compact bottom-right **`↓ New`** pill until the user scrolls to the bottom.
 4. **Bottom Key Bar (20 px):**
    - **Fruit Company / Ultra:** `Wheel Scroll  ·  SEL Actions  ·  Hold SEL Voice`
-   - **Classic / Scrim / Light:** `SEL Actions  ·  ◀/▶ Page  ·  Hold PLAY Voice`
+   - **Classic / Scrim:** `SEL Actions  ·  ◀/▶ Page  ·  Hold PLAY Voice`
 
 #### Voice Input (Existing `vd` / `vu` / `vc` Path)
 
 Both profiles use the same computer-side voice protocol (`vd <req> <target>`, `vu <req>`, `vc <req>`) and the same 30 px theme-native bottom band (`draw_talk()`, using `UI_COLOR_MODAL_BG`, 1 px `UI_COLOR_MODAL_BORDER`, `UI_COLOR_MODAL_FG`), differing only in how the user starts and ends recording:
 
-- **Classic / Scrim / Light — Hold-to-talk on `PLAY`:**
+- **Classic / Scrim — Hold-to-talk on `PLAY`:**
   - Short `PLAY` (< 150 ms native; < 300 ms remote): always toggles music Play/Pause (`BUTTON_MULTIMEDIA_PLAYPAUSE`) and discards any speculative `vd` before showing the band.
   - Long-press `PLAY` (≥ 150 ms) in S1, S2, S3, or S7: shows red mic + **`Talking… 3s`**; release sends `vu <req>` (`Sending…` → `Sent` 2 s); `MENU` while holding sends `vc <req>` (discard).
   - Keep `button_set_sw_poweroff_state(false)` active inside Agents and wait for `PLAY` release on exit so holding `PLAY` never powers off the player.
@@ -226,7 +226,7 @@ Both profiles use the same computer-side voice protocol (`vd <req> <target>`, `v
   - **Safe default focus:** Opens with focus on **`All options…`** so an in-flight `SELECT` tap when an alert auto-pops can never approve or deny accidentally (plus 250 ms pop-in grace window on `SELECT`).
   - Turning the wheel moves focus cleanly across **`Allow` ↔ `Deny` ↔ `All options…`**; pressing **`SELECT`** activates the focused item; `LEFT`, `RIGHT`, and `PLAY` remain playback controls.
   - Bottom key bar (24 px): `Wheel Select  ·  SEL Choose  ·  MENU Later`.
-- **Classic / Scrim / Light:**
+- **Classic / Scrim:**
   - Two large tactile buttons **`◀ Allow`** (`LEFT` tap) and **`Deny ▶`** (`RIGHT` tap), with 250 ms pop-in grace window and `ACTION_REPEAT` ignored.
   - Pressing `SELECT` opens **S5 All Options**; wheel is a no-op to prevent accidental slips.
   - Bottom key bar (24 px): `SELECT All options  ·  MENU Later`.
@@ -292,7 +292,7 @@ Both profiles use the same computer-side voice protocol (`vd <req> <target>`, `v
   - Right: **`Interrupt`** (crimson highlight when focused).
 - **Controls & footer:**
   - **Fruit Company / Ultra:** Wheel toggles `Cancel` ↔ `Confirm`; `SELECT` activates; `MENU` cancels (`LEFT`/`RIGHT` stay playback controls). Footer: `Wheel Select  ·  SEL Confirm  ·  MENU Cancel`.
-  - **Classic / Scrim / Light:** Wheel or `LEFT`/`RIGHT` toggles `Cancel` ↔ `Confirm`; `SELECT` activates; `MENU` cancels. Footer: `◀/▶ Select  ·  SEL Confirm  ·  MENU Cancel`.
+  - **Classic / Scrim:** Wheel or `LEFT`/`RIGHT` toggles `Cancel` ↔ `Confirm`; `SELECT` activates; `MENU` cancels. Footer: `◀/▶ Select  ·  SEL Confirm  ·  MENU Cancel`.
 
 ---
 
@@ -300,7 +300,7 @@ Both profiles use the same computer-side voice protocol (`vd <req> <target>`, `v
 
 - **Entry / exit:**
   - **Fruit Company / Ultra:** Pushed by selecting the **`Usage`** row at the bottom of **S1 Projects**; `MENU` pops back to **S1**. `LEFT`, `RIGHT`, and `PLAY` remain playback controls; long-press `SELECT` triggers voice input (target `-`).
-  - **Classic / Scrim / Light:** Panned via `LEFT` from **S1 Projects** (`-1`); `RIGHT` or `MENU` pans back (`+1`); long-press `PLAY` triggers voice input (target `-`).
+  - **Classic / Scrim:** Panned via `LEFT` from **S1 Projects** (`-1`); `RIGHT` or `MENU` pans back (`+1`); long-press `PLAY` triggers voice input (target `-`).
 - Keeps the existing 4-provider layout (`Codex`, `Claude`, `Grok`, `Gemini`) with 5h / week bars, pace warning (`USE_PACE`), full (`USE_FULL`), 7-day tokens + USD cost, and `Total` row.
 - **T3-mode input rule:** Never sends desktop keyboard taps (`k left/right/bs/enter`). Wheel scrolls vertically if content overflows; `SELECT` tap requests an immediate refresh (`us`).
 
@@ -331,7 +331,7 @@ struct agents_bg_summary {
 
 #### 2. Status-Bar Indicator (`native_chrome.c` / `native_wps.c`)
 
-- **Standard status bar (Fruit Company, Ultra, Classic, Light, and Scrim lists):** 14–22 px slot immediately left of the playback icon group, reserved only when `connected && (waiting || failed || working || unread_done)`.
+- **Standard status bar (Fruit Company, Ultra, Classic, and Scrim lists):** 14–22 px slot immediately left of the playback icon group, reserved only when `connected && (waiting || failed || working || unread_done)`.
   1. `waiting > 0`: blinking crimson dot (7 px) + bold count (`1`..`9`).
   2. `failed > 0`: solid coral-red `!` dot (7 px).
   3. `working > 0`: breathing emerald dot (7 px).
@@ -403,7 +403,7 @@ Every user-facing string uses **"computer"**, never `"HerdRemote"`, `"herdr"`, o
 
 ---
 
-### 5.2 Classic, Scrim & Light (Full Click-Wheel Remote)
+### 5.2 Classic & Scrim (Full Click-Wheel Remote)
 
 > **Global invariants:**
 > - **Short `PLAY` tap (< 150 ms native):** Music Play/Pause (`BUTTON_MULTIMEDIA_PLAYPAUSE`), never leaves Agents. *(Dock/IR remote single Play tap maps to `SELECT` in Agents per `agents_remote.c`; remote Play 2× switches Agents ↔ Now Playing; remote Play 3× toggles Cover Flow.)*

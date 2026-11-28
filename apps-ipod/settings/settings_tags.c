@@ -314,7 +314,7 @@ static const struct tag_row tag_rows[] = {
 { "album covers filter 3",        TAG_ADVANCED|TAG_APPEARANCE|TAG_ARTWORK, "carousel artwork filter image" },
 
 /* --- the theme ----------------------------------------------------------- */
-{ "native theme",        TAG_APPEARANCE,                        "scrim classic fruit company custom" },
+{ "native theme",        TAG_APPEARANCE,                        "scrim classic fruit company ultra custom" },
 { "wps",                 TAG_APPEARANCE,                         "theme while playing skin" },
 { "sbs",                 TAG_APPEARANCE,                         "theme base skin statusbar" },
 { "font",                TAG_APPEARANCE,                         "theme typeface" },

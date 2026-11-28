@@ -8,7 +8,7 @@ LANGUAGE is a bundled language name such as english or chinese-simp.
 
 The simulator runs with SDL's dummy video driver: no window opens. For each
 theme it plugs USB in, accepts Disk Mode and saves the screen as
-usb-<theme>.png. Classic and Fruit Company must show the stock disk-mode
+usb-<theme>.png. Classic and both Fruit Company themes must show the stock disk-mode
 screen: Background_LightBlue_Image behind it, the black status bar at the
 top, the orange sphere and white text. Scrim must not.
 
@@ -32,7 +32,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[2]
 BACKGROUND = (ROOT / "apps-ipod/bitmaps/source/stock" /
               "Background_LightBlue_Image.png")
-STOCK_THEMES = ("classic", "fruit-company")
+STOCK_THEMES = ("classic", "fruit-company", "fruit-company-ultra")
 W, H, SLOTS = 320, 240, 8
 PIX = W * H * 3
 HEADER = struct.Struct("=III")
@@ -174,7 +174,7 @@ def main():
     rockboxui = args.rockboxui.resolve()
     simdisk = args.simdisk.resolve()
     out = args.output_directory.resolve()
-    themes = args.themes or ["classic", "fruit-company", "scrim"]
+    themes = args.themes or (*STOCK_THEMES, "scrim")
     if args.language:
         languages = {p.stem for p in (simdisk / ".rockbox/langs").glob("*.lng")}
         if args.language not in languages:

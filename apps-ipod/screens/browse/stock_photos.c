@@ -30,6 +30,7 @@
 #include "root_menu.h"
 #include "screens/extras/extras_bar.h"
 #include "screens/playback/wps.h"
+#include "string-extra.h"
 #include "system/activity.h"
 #include "system/volume.h"
 #include "settings/settings.h"

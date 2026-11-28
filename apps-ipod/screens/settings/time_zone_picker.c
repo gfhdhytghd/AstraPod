@@ -4,6 +4,7 @@
 #include "config.h"
 #include "lang.h"
 #include "settings/settings.h"
+#include "string-extra.h"
 #include "system/time_zone.h"
 #include "system/time_zone_catalog.h"
 #include "ui/scene.h"

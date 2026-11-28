@@ -780,7 +780,7 @@ int extras_stopwatch(void)
     enum sw_next next = timer_first ? sw_timer() : SW_MENU;
 
     if (timer_first && next == SW_MENU)
-        ui_scene_enter(&route, &timer_page, &menu_page, false, true);
+        ui_scene_enter(&route, &timer_page, &menu_page, false, false);
     while (next == SW_MENU)
     {
         next = sw_menu();
@@ -790,20 +790,20 @@ int extras_stopwatch(void)
         {
             case ROW_RESUME:
                 sw_run(&logs[0]);
-                ui_scene_enter(&route, &menu_page, &timer_page, true, true);
+                ui_scene_enter(&route, &menu_page, &timer_page, true, false);
                 next = sw_timer();
                 if (next == SW_MENU)
-                    ui_scene_enter(&route, &timer_page, &menu_page, false, true);
+                    ui_scene_enter(&route, &timer_page, &menu_page, false, false);
                 break;
             case ROW_NEW:
                 if (current)
                     sw_stop(&logs[0]);
                 current = false;
                 sw_logs_save();
-                ui_scene_enter(&route, &menu_page, &timer_page, true, true);
+                ui_scene_enter(&route, &menu_page, &timer_page, true, false);
                 next = sw_timer();
                 if (next == SW_MENU)
-                    ui_scene_enter(&route, &timer_page, &menu_page, false, true);
+                    ui_scene_enter(&route, &timer_page, &menu_page, false, false);
                 break;
             case ROW_CLEAR:
                 log_count = 0;

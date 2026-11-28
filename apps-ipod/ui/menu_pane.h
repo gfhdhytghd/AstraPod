@@ -60,6 +60,8 @@ void menu_pane_viewport_left(int depth);
 /* Whether the framebuffer shows a split page, for a transition taking it
  * as its outgoing page. The next page painted answers the next call. */
 bool menu_pane_take_screen(void);
+/* A retained page has been copied back to the framebuffer. */
+void menu_pane_restore_screen(bool split);
 /* Retain the last slideshow pose during Cover Flow. Pin returns the entire
  * texture with its screen-space bounds, or NULL for a still preview or a
  * blend. The caller must put the returned pointer after compositing. */

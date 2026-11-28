@@ -85,14 +85,14 @@ flowchart LR
 
 ## 3. Visual Language Across Themes
 
-| Role / Surface | `ui_theme` Token(s) | Fruit Company / Ultra |
-|---|---|---|---|---| |
-| **Status Bar** | `UI_COLOR_STATUS_BG`, `UI_COLOR_STATUS_FG`, `UI_METRIC_STATUS_HEIGHT` | 26 px silver-grey vertical gradient (`#F5F6F8 → #C8CDD4`), 1 px `#9AA1AA` divider, `#181C22` title, green battery pill |
-| **List Canvas** | `UI_BG_LIST`, `UI_COLOR_BACKGROUND`, `UI_COLOR_FOREGROUND`, `UI_COLOR_SEPARATOR` | Solid `#FFFFFF`, `#E4E8EE` 1 px dividers, 27–29 px rows |
-| **Selection Style** | `UI_COLOR_SELECTION`, `UI_COLOR_SELECTED_TEXT`, `UI_COLOR_SELECTED_SECONDARY` | Full-width blue gradient (`#4C9DF8 → #186AD8`), `#FFFFFF` text & chevron `›` |
-| **Preview / Notes Strip** | `UI_COLOR_LIST_TINT`, `UI_METRIC_LIST_NOTES_HEIGHT` | `#F1F4F8` surface, 1 px `#D2D8E2` top rule, `#181C22` body, `#667080` meta |
-| **Modal / Bottom Sheet / Toast** | `UI_COLOR_MODAL_BG`, `UI_COLOR_MODAL_FG`, `UI_COLOR_MODAL_BORDER`, `UI_COLOR_MODAL_ACCENT`, `UI_COLOR_DIM` | `#F8F9FC` rounded card (6 px radius), 1 px `#B0B8C6` border, 35% dim, `#1C6CDA` accent |
-| **Fonts** | `UI_FONT_LIST`, `UI_FONT_TITLE`, `UI_FONT_BODY`, `UI_FONT_STATUS` | 14–15 px list/body, 13–14 px bold title, 11–12 px metadata |
+| Role / Surface | `ui_theme` Token(s) | Fruit Company / Ultra | Scrim (Default) |
+|---|---|---|---|
+| **Status Bar** | `UI_COLOR_STATUS_BG`, `UI_COLOR_STATUS_FG`, `UI_METRIC_STATUS_HEIGHT` | 26 px silver-grey vertical gradient (`#F5F6F8 → #C8CDD4`), 1 px `#9AA1AA` divider, `#181C22` title, green battery pill | 35 px `UI_BG_COVER_TINT` (`#162430` album-tinted), `#E8F4FA` title, clock, 24 px icons |
+| **List Canvas** | `UI_BG_LIST`, `UI_COLOR_BACKGROUND`, `UI_COLOR_FOREGROUND`, `UI_COLOR_SEPARATOR` | Solid `#FFFFFF`, `#E4E8EE` 1 px dividers, 27–29 px rows | Blurred album art (`UI_BG_BLURRED_COVER`) + dark scrim |
+| **Selection Style** | `UI_COLOR_SELECTION`, `UI_COLOR_SELECTED_TEXT`, `UI_COLOR_SELECTED_SECONDARY` | Full-width blue gradient (`#4C9DF8 → #186AD8`), `#FFFFFF` text & chevron `›` | 3 px vertical rounded accent bar (`UI_COLOR_SELECTION`, album vivid) between icon and text; `#FFFFFF` selected text, muted unselected |
+| **Preview / Notes Strip** | `UI_COLOR_LIST_TINT`, `UI_METRIC_LIST_NOTES_HEIGHT` | `#F1F4F8` surface, 1 px `#D2D8E2` top rule, `#181C22` body, `#667080` meta | Translucent dark album-tinted strip (`list_tint_alpha`), `#FFFFFF` body, accent meta |
+| **Modal / Bottom Sheet / Toast** | `UI_COLOR_MODAL_BG`, `UI_COLOR_MODAL_FG`, `UI_COLOR_MODAL_BORDER`, `UI_COLOR_MODAL_ACCENT`, `UI_COLOR_DIM` | `#F8F9FC` rounded card (6 px radius), 1 px `#B0B8C6` border, 35% dim, `#1C6CDA` accent | Square-edged `#12161A` card, 2 px `#626C76` border, 35% dim, album-vivid accent |
+| **Fonts** | `UI_FONT_LIST`, `UI_FONT_TITLE`, `UI_FONT_BODY`, `UI_FONT_STATUS` | 14–15 px list/body, 13–14 px bold title, 11–12 px metadata | Same (`18-noto-sans`, `18-noto-sans-bold`, `12-noto-sans`) |
 
 ### Semantic Status Dots
 

@@ -39,6 +39,7 @@ struct rock_video_request {
     unsigned accent;
     int (*resume_menu)(void);
     bool (*control_centre)(void); /* False on USB takeover. */
+    int (*picture_mode)(int step); /* Zero reads without changing the mode. */
 };
 #ifdef HAVE_HW_H264
 int rock_probe_video(const char *path);

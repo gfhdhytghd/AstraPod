@@ -847,7 +847,7 @@ struct user_settings
     int media_tv_out;
     int media_tv_signal;
     int video_tv_screen;
-    bool video_fit;
+    int video_picture_mode;
     bool video_alt_audio;
     bool video_captions;
     bool video_subtitles;

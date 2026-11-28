@@ -51,6 +51,7 @@ struct video_play_options
     /* Standard menu result: 0 resumes, 1 restarts, MENU_ATTACHED_USB exits. */
     int (*resume_menu)(void);
     bool (*control_centre)(void); /* False on USB takeover. */
+    int (*picture_mode)(int step); /* Zero reads without changing the mode. */
 };
 
 int video_h264_play_named(const char *path, void *buffer, size_t size,

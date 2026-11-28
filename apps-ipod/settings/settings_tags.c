@@ -222,7 +222,7 @@ static const struct tag_row tag_rows[] = {
 { "media tv out", TAG_LIBRARY, "media tv out" },
 { "media tv signal", TAG_LIBRARY, "media tv signal" },
 { "video tv screen", TAG_LIBRARY, "video tv screen" },
-{ "video fit", TAG_LIBRARY, "video fit" },
+{ "picture scaling", TAG_LIBRARY, "video fit fill stretch scaling aspect" },
 { "video alternate audio", TAG_LIBRARY, "video alternate audio" },
 { "video captions", TAG_LIBRARY, "video captions" },
 { "video subtitles", TAG_LIBRARY, "video subtitles" },

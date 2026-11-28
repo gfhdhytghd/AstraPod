@@ -110,9 +110,6 @@ def settings(root, rows):
             copy.append('#endif')
             flush.append('#endif')
         rows.append((name, f'{expr}; compare before write{guard}'))
-    # Append native, read-only fields after the upstream compatibility fields.
-    decl.append('    bool video_fit;')
-    copy.append('    view->video_fit = native->video_fit;')
     header = ['struct rock_compat_settings {', *decl, '};']
     args = ('struct rock_compat_settings *view, struct rock_compat_settings *baseline, '
             'struct user_settings *native')

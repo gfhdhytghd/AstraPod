@@ -225,7 +225,7 @@ def line_text(case, png, box, label):
 
 
 def video_settings(sim):
-    sim.go("select", "settings", ["tv signal", "tv screen", "fit to screen",
+    sim.go("select", "settings", ["tv signal", "tv screen", "picture scaling",
                                  "alternate audio", "captions", "subtitles"])
     tv_out = line_text(sim.case, "settings.png", (2, 22, 122, 44), "tv-out")
     assert tv_out == "tv out", tv_out

@@ -25,6 +25,7 @@
 #include "metadata/mp4_chapters.h"
 #include "root_menu.h"
 #include "screens/playback/quick_screen.h"
+#include "settings/video_picture.h"
 #include "pcm_waveform.h"
 #include "sound.h"
 #include "timer.h"
@@ -704,6 +705,18 @@ static bool rock_video_control_centre(void)
     return !usb_taken;
 }
 
+static int rock_video_picture_mode(int step)
+{
+    int mode = global_settings.video_picture_mode;
+    if (step && !usb_taken)
+    {
+        mode = (mode + step + VIDEO_PICTURE_COUNT) % VIDEO_PICTURE_COUNT;
+        global_settings.video_picture_mode = mode;
+        settings_save();
+    }
+    return mode;
+}
+
 static bool rock_video_themed_controls(void)
 {
     return ui_theme_style(UI_STYLE_WPS_LAYOUT) == UI_WPS_LAYOUT_CLASSIC ||
@@ -1176,6 +1189,7 @@ static int invoke_module(void *opaque)
         .accent = themed_video ? ui_theme_rgb565(UI_COLOR_WPS_ACCENT) : 0,
         .resume_menu = themed_video ? rock_video_resume_menu : NULL,
         .control_centre = rock_video_control_centre,
+        .picture_mode = rock_video_picture_mode,
     };
     const void *parameter = call->file;
     if (video)
@@ -1463,6 +1477,7 @@ int rock_open_video(const char *path, const char *title, bool has_previous)
         .accent = ui_theme_rgb565(UI_COLOR_WPS_ACCENT),
         .resume_menu = themed ? rock_video_resume_menu : NULL,
         .control_centre = rock_video_control_centre,
+        .picture_mode = rock_video_picture_mode,
     };
     int result = rock_open_foreground(ROCK_VIDEO_MODULE, path, false, false,
                                       &request);

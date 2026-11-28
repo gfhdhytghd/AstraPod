@@ -43,15 +43,15 @@ bool ultra_flow_sync(void)
 #define REFL_GLOSS 40
 #define REFL_GLOSS_ROWS 1
 
-void ultra_reflection_build(fb_data *out, const fb_data *cover, int size,
-                            int stride, fb_data bg)
+void ultra_reflection_build_rows(fb_data *out, const fb_data *cover, int size,
+                                 int stride, fb_data bg, int first, int end)
 {
     int rows = reflection_rows(size);
     int gloss_rows = MAX(1, rows * REFL_GLOSS_ROWS / 16);
     int br = bg >> 11, bgr = (bg >> 5) & 63, bb = bg & 31;
     /* Opposite the floor: black under a light floor, white under a dark. */
     int sheen = br + bgr / 2 + bb > 46 ? 0 : 1;
-    for (int y = 0; y < rows; y++)
+    for (int y = first; y < end; y++)
     {
         int left = 256 - y * 256 / rows;
         int lit = MAX(0, 256 - y * 256 / gloss_rows);

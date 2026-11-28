@@ -18,8 +18,8 @@ bool ultra_flow_sync(void);
 
 /* reflection_build() with a smooth falloff and a faint gloss on the floor
  * just below the cover. Same arguments and layout. */
-void ultra_reflection_build(fb_data *out, const fb_data *cover, int size,
-                            int stride, fb_data bg);
+void ultra_reflection_build_rows(fb_data *out, const fb_data *cover, int size,
+                                 int stride, fb_data bg, int first, int end);
 
 /* How much a cover at world x, or in flight, is taken toward the ground,
  * Q8. ultra_flow_light() adds the per-column depth to it. */

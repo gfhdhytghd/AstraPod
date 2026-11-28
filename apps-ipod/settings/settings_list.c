@@ -2301,7 +2301,6 @@ const struct settings_list settings[] = {
 #endif
 
 
-
     CUSTOM_SETTING(0, hotkey_tree,
                    LANG_HOTKEY_FILE_BROWSER, /* lang string here is never actually used */
                    &tree_hotkey_default, "hotkey tree",

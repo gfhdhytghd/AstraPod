@@ -6,7 +6,8 @@ A shorter press pauses or resumes on release. Keep holding to power off.
 The gesture works in every theme with local playback, Rufin and Cider.
 
 SELECT+PLAY switches between Agents and Now Playing. MENU also returns from
-Lyrics to Now Playing. The dock Apple Remote keeps its own controls: hold
+Lyrics to Now Playing. In Scrim and Classic, SELECT still opens Lyrics.
+The dock Apple Remote keeps its own controls: hold
 Play/Pause for 300 ms to toggle Lyrics, or tap it to pause or resume.
 
 The wheel follows list direction (clockwise advances); remote + goes to the

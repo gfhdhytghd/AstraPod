@@ -976,6 +976,10 @@ static long wps_run(bool return_agents, struct ui_scene *lyrics_scene)
             exit = true;
         if (fruit && !exit)
         {
+            int raw;
+            get_action_statuscode(&raw);
+            if (button == ACTION_WPS_CONTEXT && (raw & BUTTON_PLAY))
+                continue;
             stock_wps_update(&stock, state, wps_track_serial);
             if (stock_wps_action(&stock, state, button))
                 continue;

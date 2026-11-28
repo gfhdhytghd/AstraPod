@@ -349,6 +349,7 @@ typedef struct
     const struct button_mapping* (*get_context_map)(int);
     bool                           is_prebutton;
     bool                           local_left_right;
+    bool                           native_play;
 } action_cur_t;
 
 /* act_last holds action state between get_action() calls */
@@ -824,9 +825,12 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
     }
 
 #if defined(IPOD_ACCESSORY_PROTOCOL) && defined(HAVE_USB_PODLINK)
+    int physical_button = *button;
     if (!remote_input_active)
         *button = agents_remote_button(&remote, context, *button,
                                         button_status(), current_tick);
+    /* The dock can synthesize native Play events for its own shortcuts. */
+    cur->native_play = *button == physical_button;
     if (*button == REMOTE_LYRICS_BUTTON)
     {
         /* The gesture consumes the physical release across both views. */
@@ -1261,6 +1265,7 @@ static void init_act_cur(action_cur_t *cur,
     cur->context             = context & ~CONTEXT_LOCAL_LEFT_RIGHT;
     cur->local_left_right    = (context & CONTEXT_LOCAL_LEFT_RIGHT) != 0;
     cur->is_prebutton        = false;
+    cur->native_play         = true;
     cur->items               = NULL;
 #ifdef HAVE_USB_PODLINK
     if (handoff_pending() && (timeout < 0 || timeout > HZ / 10))
@@ -1352,9 +1357,9 @@ static inline int do_backlight(action_last_t *last, action_cur_t *cur, int actio
 *                   TIMEOUT_BLOCK   to wait for a button press
 *                   Any number >0   to wait that many ticks for a press
 */
-static bool wps_play_pressed;
+static enum current_activity wps_play_origin;
 
-static int wps_play_action(int button)
+static int wps_play_action(int button, enum current_activity activity)
 {
     static long down_at;
 
@@ -1365,15 +1370,16 @@ static int wps_play_action(int button)
         /* button_tick waits 60 ms before posting an unchorded PLAY down. */
         down_at -= 6 * HZ / 100;
 #endif
-        wps_play_pressed = true;
+        wps_play_origin = activity;
         return ACTION_NONE;
     }
     if (button == (BUTTON_PLAY | BUTTON_REPEAT))
         return ACTION_NONE;
-    if (wps_play_pressed)
+    bool pressed = wps_play_origin == activity;
+    wps_play_origin = ACTIVITY_UNKNOWN;
+    if (pressed)
     {
         unsigned long held = (unsigned long)current_tick - down_at;
-        wps_play_pressed = false;
         /* Both iPod targets shut down after the initial repeat at tick 31
          * and 41 more repeats (16 through 6 ticks, then 30 at 5 ticks). */
         if (held < HZ)
@@ -1389,11 +1395,11 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
     send_event(GUI_EVENT_ACTIONUPDATE, NULL);
     cur->timeout = sb_motion_timeout(cur->timeout);
 
+    enum current_activity activity = get_current_activity();
     bool playback = last == &action_last && cur->context == CONTEXT_WPS &&
-        (get_current_activity() == ACTIVITY_WPS ||
-         get_current_activity() == ACTIVITY_LYRICS);
+        (activity == ACTIVITY_WPS || activity == ACTIVITY_LYRICS);
     if (!playback)
-        wps_play_pressed = false;
+        wps_play_origin = ACTIVITY_UNKNOWN;
 
     /*if button = none/special; returns immediately*/
     if (action_poll_button(last, cur))
@@ -1403,7 +1409,7 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
             || shortcut.latched
 #endif
            )
-            wps_play_pressed = false;
+            wps_play_origin = ACTIVITY_UNKNOWN;
         return cur->action != ACTION_UNKNOWN ? cur->action : cur->button;
     }
 
@@ -1417,12 +1423,13 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
 
     button_flip_horizontally(cur->context, &cur->button);
 
-    if (playback && (cur->button == BUTTON_PLAY ||
+    if (playback && cur->native_play &&
+                    (cur->button == BUTTON_PLAY ||
                      cur->button == (BUTTON_PLAY | BUTTON_REPEAT) ||
                      cur->button == (BUTTON_PLAY | BUTTON_REL)))
     {
         cur->is_prebutton = cur->button == BUTTON_PLAY;
-        cur->action = wps_play_action(cur->button);
+        cur->action = wps_play_action(cur->button, activity);
     }
     else
         action_code_lookup(last, cur);

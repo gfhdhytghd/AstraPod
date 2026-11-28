@@ -3027,6 +3027,10 @@ static const struct
 } hotkey_old_names[] = {
     { "Add to Queue",       HOTKEY_INSERT },
     { "Shuffle into Queue", HOTKEY_INSERT_SHUFFLED },
+    { "default",            HOTKEY_PREVIOUS_BROWSER },
+    { "database",           HOTKEY_MUSIC },
+    { "coverflow",          HOTKEY_ALBUM_COVERS },
+    { "queue",              HOTKEY_VIEW_PLAYLIST },
 };
 
 /* Whole names only: "Play Later" is also the start of "Play Later Shuffled" */
